@@ -37,9 +37,12 @@ jobs:
         run: pnpm nx run @aws/nx-plugin-e2e:test
       - name: Coverage reporter
         uses: romeovs/lcov-reporter-action@v0.4.0
+        if: ${{ github.event_name == 'pull_request' }}
         with:
           delete-old-comments: true
           lcov-file: ./coverage/packages/nx-plugin/lcov.info
+      - name: Check for mutations
+        run: git diff --ignore-space-at-eol --exit-code
       - name: Check for new commits
         id: git_remote
         run: echo "latest_commit=$(git ls-remote origin -h ${{ github.ref }} | cut -f1)" >> $GITHUB_OUTPUT
@@ -47,16 +50,16 @@ jobs:
         id: should_skip_release
         run: echo "skip_release=$(git log --oneline -1 | grep -qE 'build\(?.*\)?:|docs\(?.*\)?:|chore\(?.*\)?:|refactor\(?.*\)?:|test\(?.*\)?:' && echo true || echo false)" >> $GITHUB_OUTPUT
       - name: Release
-        if: ${{ success() && steps.should_skip_release.outputs.skip_release != 'true' && github.event_name == 'push' && steps.git_remote.outputs.latest_commit == github.sha }}
+        if: ${{ steps.should_skip_release.outputs.skip_release != 'true' && github.event_name == 'push' && steps.git_remote.outputs.latest_commit == github.sha }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_CONFIG_PROVENANCE: true
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        #   NPM_CONFIG_PROVENANCE: true
           NPM_DIST_TAG: latest
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HUSKY: '0'
         run: |
-          pnpm nx release --skip-publish --first-release
-          pnpm nx release publish
+          pnpm nx release --first-release --yes
       - name: Upload artifact
         if: ${{ steps.git_remote.outputs.latest_commit == github.sha }}
         uses: actions/upload-artifact@v4.4.0

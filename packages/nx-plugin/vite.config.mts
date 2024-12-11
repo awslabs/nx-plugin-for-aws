@@ -26,15 +26,9 @@ export default defineConfig({
       reportsDirectory: '../../coverage/packages/nx-plugin',
       provider: 'v8',
       enabled: true,
-      reporter: ['lcov']
+      reporter: ['lcov'],
     },
     pool: 'threads',
-    poolOptions: {
-      threads: {
-        singleThread: true,
-        isolate: true,
-      },
-    },
     sequence: {
       hooks: 'list',
     },
