@@ -94,7 +94,7 @@ function getYarnMajorVersion(path: string): string | undefined {
 }
 
 export function tmpProjPath() {
-  return `/tmp/pace-plugin/e2e`;
+  return `/tmp/nx-plugin/e2e`;
 }
 
 function getPackageManagerCommand({
