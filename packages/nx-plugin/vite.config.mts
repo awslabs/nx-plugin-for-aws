@@ -34,7 +34,6 @@ export default defineConfig({
     },
     testTimeout: 60000,
     hookTimeout: 60000,
-    retry: 3,
-    dangerouslyIgnoreUnhandledErrors: true
+    retry: 3
   },
 });
