@@ -18,13 +18,12 @@ import {
   SHARED_CONSTRUCTS_DIR,
   sharedConstructsGenerator,
 } from '../../utils/shared-constructs';
-import { factory, SourceFile } from 'typescript';
-import { ast, tsquery } from '@phenomnomnominal/tsquery';
 import tsLibGenerator from '../../ts/lib/generator';
 import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
 import { withVersions } from '../../utils/versions';
 import { getRelativePathToRoot } from '../../utils/paths';
 import { formatFilesInSubtree } from '../../utils/format';
+import { writeExportDeclarations } from '../../utils/typescript-ast';
 
 const toClassName = (str: string): string => {
   const words = str.replace(/[^a-zA-Z0-9]/g, ' ').split(/\s+/);
@@ -118,32 +117,10 @@ export async function trpcBackendGenerator(
       'src',
       'index.ts'
     );
-    const sharedConstructsIndexContents = tree
-      .read(sharedConstructsIndexTsPath)
-      .toString();
 
-    const apiExportDeclaration = factory.createExportDeclaration(
-      undefined,
-      undefined,
-      undefined,
-      factory.createStringLiteral(`./${apiNameKebabCase}/index.js`)
-    );
-    const updatedIndex = tsquery
-      .map(
-        ast(sharedConstructsIndexContents),
-        'SourceFile',
-        (node: SourceFile) => {
-          return {
-            ...node,
-            statements: [apiExportDeclaration, ...node.statements],
-          };
-        }
-      )
-      .getFullText();
-
-    if (sharedConstructsIndexContents !== updatedIndex) {
-      tree.write(sharedConstructsIndexTsPath, updatedIndex);
-    }
+    writeExportDeclarations(tree, sharedConstructsIndexTsPath, [
+      `./${apiNameKebabCase}/index.js`,
+    ]);
   }
 
   updateJson(

@@ -2,17 +2,11 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import {
-  GeneratorCallback,
-  Tree,
-  generateFiles,
-  installPackagesTask,
-  joinPathFragments,
-} from '@nx/devkit';
-import { TsLibGeneratorSchema } from './schema';
-import { libraryGenerator } from '@nx/js';
-import { getNpmScopePrefix } from '../../utils/npm-scope';
-import { configureTsProject } from './ts-project-utils';
+import { GeneratorCallback, Tree, generateFiles, installPackagesTask, joinPathFragments } from "@nx/devkit";
+import { TsLibGeneratorSchema } from "./schema";
+import { libraryGenerator } from "@nx/js";
+import { getNpmScopePrefix } from "../../utils/npm-scope";
+import { configureTsProject } from "./ts-project-utils";
 
 export interface TsLibDetails {
   /**
@@ -28,16 +22,10 @@ export interface TsLibDetails {
 /**
  * Returns details about the TS library to be created
  */
-export const getTsLibDetails = (
-  tree: Tree,
-  schema: TsLibGeneratorSchema
-): TsLibDetails => {
+export const getTsLibDetails = (tree: Tree, schema: TsLibGeneratorSchema): TsLibDetails => {
   const scope = schema.scope ? `${schema.scope}/` : getNpmScopePrefix(tree);
   const fullyQualifiedName = `${scope}${schema.name}`;
-  const dir = joinPathFragments(
-    schema.directory ?? '.',
-    schema.subDirectory ?? schema.name
-  );
+  const dir = joinPathFragments(schema.directory ?? '.', schema.subDirectory ?? schema.name);
 
   return { dir, fullyQualifiedName };
 };
@@ -45,11 +33,17 @@ export const getTsLibDetails = (
 /**
  * Generates a typescript library
  */
-export const tsLibGenerator = async (
-  tree: Tree,
-  schema: TsLibGeneratorSchema
-): Promise<GeneratorCallback> => {
-  const { fullyQualifiedName, dir } = getTsLibDetails(tree, schema);
+export const tsLibGenerator = (tree: Tree, schema: TsLibGeneratorSchema): Promise<GeneratorCallback> => {
+  return _tsLibGenerator(tree, {
+    ...schema,
+    ...getTsLibDetails(tree, schema),
+  });
+};
+
+export type TsLibGeneratorOptions = Omit<TsLibGeneratorSchema, 'scope' | 'directory' | 'name' | 'subDirectory'> & TsLibDetails;
+
+export const _tsLibGenerator = async (tree: Tree, schema: TsLibGeneratorOptions): Promise<GeneratorCallback> => {
+  const { dir, fullyQualifiedName } = schema;
 
   await libraryGenerator(tree, {
     ...schema,

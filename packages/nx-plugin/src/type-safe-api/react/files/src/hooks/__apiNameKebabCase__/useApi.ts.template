@@ -1,0 +1,86 @@
+import {
+  DefaultApi,
+  Configuration,
+  BadRequestErrorResponseContent,
+  InternalFailureErrorResponseContent,
+  NotFoundErrorResponseContent,
+  NotAuthorizedErrorResponseContent,
+  Middleware,
+  ResponseContext,
+} from '<%= generatedHooksLibraryPackage %>';
+<%_ if(auth === 'IAM') { _%>
+import useSigV4Client from '@aws-northstar/ui/components/CognitoAuth/hooks/useSigv4Client';
+<%_ } _%>
+import { useContext, useMemo } from 'react';
+import { RuntimeConfigContext } from '../../components/RuntimeConfig';
+
+export interface ApiError {
+  readonly status: number;
+  readonly details:
+    | BadRequestErrorResponseContent
+    | InternalFailureErrorResponseContent
+    | NotFoundErrorResponseContent
+    | NotAuthorizedErrorResponseContent;
+}
+
+export const isApiError = (e: unknown): e is ApiError =>
+  !!(e && typeof e === "object" && "status" in e && "details" in e);
+
+export const errorTitle = (status: number): string => {
+  switch (status) {
+    case 400:
+      return "Bad Request";
+    case 403:
+      return "Not Authorized";
+    case 404:
+      return "Not Found";
+    case 500:
+      return "Server Error";
+    default:
+      return "Error";
+  }
+};
+
+/**
+ * Middleware for handling API errors
+ */
+const errorHandlingMiddleware: Middleware = {
+  post: async ({ response }: ResponseContext) => {
+    if (response && response.status >= 400 && response.status < 600) {
+      let details;
+      try {
+        details = await response.json();
+      } catch (e) {
+        // Unable to parse response body, so continue with default error handling
+        return response;
+      }
+      throw {
+        status: response.status,
+        details,
+      } as ApiError;
+    }
+    return response;
+  },
+};
+
+export const useApi = () => {
+  <%_ if (auth === 'IAM') { _%>
+  const client = useSigV4Client();
+  <%_ } else { _%>
+  const client = fetch;
+  <%_ } _%>
+  const runtimeContext = useContext(RuntimeConfigContext);
+  const apiUrl = runtimeContext?.typeSafeApis?.['<%= apiName %>'];
+
+  return useMemo(() => {
+    return apiUrl
+      ? new DefaultApi(
+          new Configuration({
+            basePath: apiUrl.endsWith("/") ? apiUrl.slice(0, -1) : apiUrl,
+            fetchApi: client,
+            middleware: [errorHandlingMiddleware],
+          }),
+        )
+      : undefined;
+  }, [client, apiUrl]);
+};

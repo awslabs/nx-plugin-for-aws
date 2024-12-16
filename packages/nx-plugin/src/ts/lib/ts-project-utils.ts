@@ -51,6 +51,8 @@ export const configureTsProject = (
         rootDir: undefined,
         outDir: distDir,
         tsBuildInfoFile: join(distDir, 'tsconfig.lib.tsbuildinfo'),
+        // Skip transitive type checking to avoid duplicating config across the monorepo
+        skipLibCheck: true,
       },
       include: undefined,
     }));

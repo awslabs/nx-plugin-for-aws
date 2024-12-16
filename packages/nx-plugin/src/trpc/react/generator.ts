@@ -22,6 +22,7 @@ import { runtimeConfigGenerator } from '../../cloudscape-website/runtime-config/
 import { toScopeAlias } from '../../utils/npm-scope';
 import { withVersions } from '../../utils/versions';
 import { formatFilesInSubtree } from '../../utils/format';
+import { addDefaultImportDeclarations, addJsxComponentWrapper } from '../../utils/typescript-ast';
 
 export async function reactGenerator(
   tree: Tree,
@@ -65,53 +66,13 @@ export async function reactGenerator(
 
   const mainTsxContents = tree.read(mainTsxPath).toString();
 
-  const trpcProviderImport = factory.createImportDeclaration(
-    undefined,
-    factory.createImportClause(
-      false,
-      factory.createIdentifier('TRPCClientProvider'),
-      undefined
-    ) as ImportClause,
-    factory.createStringLiteral('./components/TRPCClientProvider')
-  );
+  const updatedImports = addDefaultImportDeclarations(mainTsxContents, [
+    { import: 'TRPCClientProvider', from: './components/TRPCClientProvider' },
+  ]);
 
-  const updatedImports = tsquery
-    .map(ast(mainTsxContents), 'SourceFile', (node: SourceFile) => {
-      return {
-        ...node,
-        statements: [trpcProviderImport, ...node.statements],
-      };
-    })
-    .getFullText();
+  const mainTsxUpdatedContents = addJsxComponentWrapper(updatedImports, 'App', 'TRPCClientProvider');
 
-  let locatedNode = false;
-  const mainTsxUpdatedContents = tsquery
-    .map(
-      ast(updatedImports),
-      'JsxSelfClosingElement',
-      (node: JsxSelfClosingElement) => {
-        if (node.tagName.getText() !== 'App') {
-          return node;
-        } else {
-          locatedNode = true;
-        }
-
-        return factory.createJsxElement(
-          factory.createJsxOpeningElement(
-            factory.createIdentifier('TRPCClientProvider'),
-            undefined,
-            factory.createJsxAttributes([])
-          ),
-          [node],
-          factory.createJsxClosingElement(
-            factory.createIdentifier('TRPCClientProvider')
-          )
-        );
-      }
-    )
-    .getFullText();
-
-  if (!locatedNode) {
+  if (!mainTsxUpdatedContents) {
     throw new Error('Could not locate App component in main.tsx');
   }
 

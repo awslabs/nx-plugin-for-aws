@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { readProjectConfiguration, Tree } from '@nx/devkit';
+import { relative, join } from "path";
 
 export const getRelativePathToRoot = (
   tree: Tree,
@@ -20,4 +21,8 @@ export const getRelativePathToRootByDirectory = (directory: string): string => {
 
   // Create the relative path back to root
   return '../'.repeat(levels);
+};
+
+export const getRelativePathWithinTree = (tree: Tree, from: string, to: string): string => {
+  return relative(join(tree.root, from), join(tree.root, to));
 };

@@ -1,0 +1,230 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`type-safe-api react generator > should generate api hooks provider files > TestApiHooksProvider.tsx 1`] = `
+"import { DefaultApiClientProvider } from 'test-api-hooks';
+import { QueryClient, MutationCache } from '@tanstack/react-query';
+import React, { useMemo } from 'react';
+import { errorTitle, isApiError, useApi } from '../hooks/test-api/useApi';
+
+export const TestApiHooksProvider: React.FC<any> = ({ children }) => {
+  const client = useApi();
+
+  const queryClient = useMemo(
+    () =>
+      new QueryClient({
+        mutationCache: new MutationCache({
+          onError: (e: unknown, _variables, _context, mutation) => {
+            // When an error occurs for a mutation, extract its details
+            const apiError = isApiError(e) ? e : undefined;
+            const header = apiError ? errorTitle(apiError.status) : 'Error';
+            const content = apiError
+              ? apiError.details.message
+              : \`An unexpected error occurred\`;
+
+            // Implement your own error handling logic here if needed
+            // For example, you could add the error to a list of "notifications" to be displayed to the user
+            console.error(header, content);
+          },
+        }),
+      }),
+    []
+  );
+
+  return client ? (
+    <DefaultApiClientProvider apiClient={client} client={queryClient}>
+      {children}
+    </DefaultApiClientProvider>
+  ) : (
+    <>Hooks provider must be instantiated inside RuntimeConfigProvider</>
+  );
+};
+
+export default TestApiHooksProvider;
+"
+`;
+
+exports[`type-safe-api react generator > should generate api hooks provider files > useApi.ts 1`] = `
+"import {
+  DefaultApi,
+  Configuration,
+  BadRequestErrorResponseContent,
+  InternalFailureErrorResponseContent,
+  NotFoundErrorResponseContent,
+  NotAuthorizedErrorResponseContent,
+  Middleware,
+  ResponseContext,
+} from 'test-api-hooks';
+import { useContext, useMemo } from 'react';
+import { RuntimeConfigContext } from '../../components/RuntimeConfig';
+
+export interface ApiError {
+  readonly status: number;
+  readonly details:
+    | BadRequestErrorResponseContent
+    | InternalFailureErrorResponseContent
+    | NotFoundErrorResponseContent
+    | NotAuthorizedErrorResponseContent;
+}
+
+export const isApiError = (e: unknown): e is ApiError =>
+  !!(e && typeof e === 'object' && 'status' in e && 'details' in e);
+
+export const errorTitle = (status: number): string => {
+  switch (status) {
+    case 400:
+      return 'Bad Request';
+    case 403:
+      return 'Not Authorized';
+    case 404:
+      return 'Not Found';
+    case 500:
+      return 'Server Error';
+    default:
+      return 'Error';
+  }
+};
+
+/**
+ * Middleware for handling API errors
+ */
+const errorHandlingMiddleware: Middleware = {
+  post: async ({ response }: ResponseContext) => {
+    if (response && response.status >= 400 && response.status < 600) {
+      let details;
+      try {
+        details = await response.json();
+      } catch (e) {
+        // Unable to parse response body, so continue with default error handling
+        return response;
+      }
+      throw {
+        status: response.status,
+        details,
+      } as ApiError;
+    }
+    return response;
+  },
+};
+
+export const useApi = () => {
+  const client = fetch;
+  const runtimeContext = useContext(RuntimeConfigContext);
+  const apiUrl = runtimeContext?.typeSafeApis?.['TestApi'];
+
+  return useMemo(() => {
+    return apiUrl
+      ? new DefaultApi(
+          new Configuration({
+            basePath: apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl,
+            fetchApi: client,
+            middleware: [errorHandlingMiddleware],
+          })
+        )
+      : undefined;
+  }, [client, apiUrl]);
+};
+"
+`;
+
+exports[`type-safe-api react generator > should handle IAM auth option > useApi-IAM.ts 1`] = `
+"import {
+  DefaultApi,
+  Configuration,
+  BadRequestErrorResponseContent,
+  InternalFailureErrorResponseContent,
+  NotFoundErrorResponseContent,
+  NotAuthorizedErrorResponseContent,
+  Middleware,
+  ResponseContext,
+} from 'test-api-hooks';
+import useSigV4Client from '@aws-northstar/ui/components/CognitoAuth/hooks/useSigv4Client';
+import { useContext, useMemo } from 'react';
+import { RuntimeConfigContext } from '../../components/RuntimeConfig';
+
+export interface ApiError {
+  readonly status: number;
+  readonly details:
+    | BadRequestErrorResponseContent
+    | InternalFailureErrorResponseContent
+    | NotFoundErrorResponseContent
+    | NotAuthorizedErrorResponseContent;
+}
+
+export const isApiError = (e: unknown): e is ApiError =>
+  !!(e && typeof e === 'object' && 'status' in e && 'details' in e);
+
+export const errorTitle = (status: number): string => {
+  switch (status) {
+    case 400:
+      return 'Bad Request';
+    case 403:
+      return 'Not Authorized';
+    case 404:
+      return 'Not Found';
+    case 500:
+      return 'Server Error';
+    default:
+      return 'Error';
+  }
+};
+
+/**
+ * Middleware for handling API errors
+ */
+const errorHandlingMiddleware: Middleware = {
+  post: async ({ response }: ResponseContext) => {
+    if (response && response.status >= 400 && response.status < 600) {
+      let details;
+      try {
+        details = await response.json();
+      } catch (e) {
+        // Unable to parse response body, so continue with default error handling
+        return response;
+      }
+      throw {
+        status: response.status,
+        details,
+      } as ApiError;
+    }
+    return response;
+  },
+};
+
+export const useApi = () => {
+  const client = useSigV4Client();
+  const runtimeContext = useContext(RuntimeConfigContext);
+  const apiUrl = runtimeContext?.typeSafeApis?.['TestApi'];
+
+  return useMemo(() => {
+    return apiUrl
+      ? new DefaultApi(
+          new Configuration({
+            basePath: apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl,
+            fetchApi: client,
+            middleware: [errorHandlingMiddleware],
+          })
+        )
+      : undefined;
+  }, [client, apiUrl]);
+};
+"
+`;
+
+exports[`type-safe-api react generator > should modify main.tsx correctly > main.tsx 1`] = `
+"import TestApiHooksProvider from './components/TestApiHooksProvider';
+import RuntimeConfigProvider from './components/RuntimeConfig';
+import { App } from './app';
+import { BrowserRouter } from 'react-router-dom';
+export function Main() {
+  return (
+    <RuntimeConfigProvider>
+      <BrowserRouter>
+        <TestApiHooksProvider>
+          <App />
+        </TestApiHooksProvider>
+      </BrowserRouter>
+    </RuntimeConfigProvider>
+  );
+}
+"
+`;

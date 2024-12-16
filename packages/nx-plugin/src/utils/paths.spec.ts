@@ -2,27 +2,20 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
+import { Tree, addProjectConfiguration } from '@nx/devkit';
 import {
   getRelativePathToRoot,
   getRelativePathToRootByDirectory,
+  getRelativePathWithinTree,
 } from './paths';
-import * as devkit from '@nx/devkit';
-
-vi.mock('@nx/devkit', async () => {
-  const actual = await vi.importActual('@nx/devkit');
-  return {
-    ...actual,
-    readProjectConfiguration: vi.fn(),
-  };
-});
 
 describe('paths utils', () => {
   describe('getRelativePathToRoot', () => {
     it('should return correct relative path for project in root', () => {
       const tree = createTreeWithEmptyWorkspace();
-      vi.spyOn(devkit, 'readProjectConfiguration').mockReturnValue({
+      addProjectConfiguration(tree, 'test-project', {
         root: 'project',
         sourceRoot: 'project/src',
         projectType: 'application',
@@ -33,7 +26,7 @@ describe('paths utils', () => {
 
     it('should return correct relative path for nested project', () => {
       const tree = createTreeWithEmptyWorkspace();
-      vi.spyOn(devkit, 'readProjectConfiguration').mockReturnValue({
+      addProjectConfiguration(tree, 'test-project', {
         root: 'apps/nested/project',
         sourceRoot: 'apps/nested/project/src',
         projectType: 'application',
@@ -68,6 +61,26 @@ describe('paths utils', () => {
       expect(getRelativePathToRootByDirectory('/apps/nested/project')).toBe(
         '../../../'
       );
+    });
+  });
+
+  describe('getRelativePathWithinTree', () => {
+    it('should find the relative path within the tree', () => {
+      const tree = createTreeWithEmptyWorkspace();
+
+      expect(getRelativePathWithinTree(tree, 'foo/bar', 'foo/baz')).toBe(
+        '../baz'
+      );
+      expect(getRelativePathWithinTree(tree, 'foo/bar', 'baz/bat')).toBe(
+        '../../baz/bat'
+      );
+      expect(
+        getRelativePathWithinTree(
+          tree,
+          'packages/generated/typescript',
+          'dist/packages/foo/bar'
+        )
+      ).toBe('../../../dist/packages/foo/bar');
     });
   });
 });

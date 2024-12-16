@@ -14,4 +14,5 @@ export interface TsLibGeneratorSchema {
   scope?: string;
   subDirectory?: string;
   skipInstall?: boolean;
+  skipFormat?: boolean;
 }

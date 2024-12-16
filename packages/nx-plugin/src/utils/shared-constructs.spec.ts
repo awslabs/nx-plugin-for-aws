@@ -2,45 +2,23 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, beforeEach } from 'vitest';
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
-import { Tree, addDependenciesToPackageJson, generateFiles } from '@nx/devkit';
+import { Tree, joinPathFragments } from '@nx/devkit';
 import {
   sharedConstructsGenerator,
   PACKAGES_DIR,
   TYPE_DEFINITIONS_DIR,
   SHARED_CONSTRUCTS_DIR,
-  TYPE_DEFINITIONS_NAME,
-  SHARED_CONSTRUCTS_NAME,
 } from './shared-constructs';
 import * as npmScopeUtils from './npm-scope';
-import tsLibGenerator from '../ts/lib/generator';
-
-// Mock dependencies
-vi.mock('@nx/devkit', async () => {
-  const actual = await vi.importActual('@nx/devkit');
-  return {
-    ...actual,
-    generateFiles: vi.fn(),
-    addDependenciesToPackageJson: vi.fn(),
-  };
-});
-
-vi.mock('../ts/lib/generator', () => ({
-  default: vi.fn(),
-}));
-
-vi.mock('./npm-scope', () => ({
-  getNpmScopePrefix: vi.fn(),
-  toScopeAlias: vi.fn(),
-}));
+import { vi } from 'vitest';
 
 describe('shared-constructs utils', () => {
   let tree: Tree;
 
   beforeEach(() => {
     tree = createTreeWithEmptyWorkspace();
-    vi.clearAllMocks();
     vi.spyOn(npmScopeUtils, 'getNpmScopePrefix').mockReturnValue(
       '@test-scope/'
     );
@@ -49,85 +27,103 @@ describe('shared-constructs utils', () => {
 
   describe('sharedConstructsGenerator', () => {
     it('should generate type definitions when they do not exist', async () => {
-      vi.spyOn(tree, 'exists').mockImplementation(() => false);
-
       await sharedConstructsGenerator(tree);
 
-      expect(tsLibGenerator).toHaveBeenCalledWith(tree, {
-        name: TYPE_DEFINITIONS_NAME,
-        directory: PACKAGES_DIR,
-        subDirectory: TYPE_DEFINITIONS_DIR,
-        unitTestRunner: 'none',
-      });
-      expect(generateFiles).toHaveBeenCalledWith(
-        tree,
-        expect.stringContaining(TYPE_DEFINITIONS_DIR),
-        expect.stringContaining(TYPE_DEFINITIONS_DIR),
-        expect.any(Object)
+      // Verify project.json was created
+      const typeDefsProjectPath = joinPathFragments(
+        PACKAGES_DIR,
+        TYPE_DEFINITIONS_DIR,
+        'project.json'
+      );
+      expect(tree.exists(typeDefsProjectPath)).toBe(true);
+
+      // Verify src directory was deleted and recreated with template files
+      const typeDefsSrcPath = joinPathFragments(
+        PACKAGES_DIR,
+        TYPE_DEFINITIONS_DIR,
+        'src'
+      );
+      expect(tree.exists(typeDefsSrcPath)).toBe(true);
+      expect(tree.exists(joinPathFragments(typeDefsSrcPath, 'index.ts'))).toBe(
+        true
       );
     });
 
     it('should generate shared constructs when they do not exist', async () => {
-      vi.spyOn(tree, 'exists').mockImplementation(() => false);
-
       await sharedConstructsGenerator(tree);
 
-      expect(tsLibGenerator).toHaveBeenCalledWith(tree, {
-        name: SHARED_CONSTRUCTS_NAME,
-        directory: PACKAGES_DIR,
-        subDirectory: SHARED_CONSTRUCTS_DIR,
-        unitTestRunner: 'none',
-      });
-      expect(generateFiles).toHaveBeenCalledWith(
-        tree,
-        expect.stringContaining(SHARED_CONSTRUCTS_DIR),
-        expect.stringContaining(SHARED_CONSTRUCTS_DIR),
+      // Verify project.json was created
+      const constructsProjectPath = joinPathFragments(
+        PACKAGES_DIR,
+        SHARED_CONSTRUCTS_DIR,
+        'project.json'
+      );
+      expect(tree.exists(constructsProjectPath)).toBe(true);
+
+      // Verify src directory was deleted and recreated with template files
+      const constructsSrcPath = joinPathFragments(
+        PACKAGES_DIR,
+        SHARED_CONSTRUCTS_DIR,
+        'src'
+      );
+      expect(tree.exists(constructsSrcPath)).toBe(true);
+      expect(
+        tree.exists(joinPathFragments(constructsSrcPath, 'index.ts'))
+      ).toBe(true);
+    });
+
+    it('should add required dependencies when generating shared constructs', async () => {
+      await sharedConstructsGenerator(tree);
+
+      const packageJson = JSON.parse(
+        tree.read('package.json', 'utf-8') || '{}'
+      );
+      expect(packageJson.dependencies).toEqual(
         expect.objectContaining({
-          npmScopePrefix: '@test-scope/',
-          scopeAlias: ':test-scope',
+          constructs: expect.any(String),
+          'aws-cdk-lib': expect.any(String),
         })
       );
     });
 
-    it('should add required dependencies when generating shared constructs', async () => {
-      vi.spyOn(tree, 'exists').mockImplementation(() => false);
-
-      await sharedConstructsGenerator(tree);
-
-      expect(addDependenciesToPackageJson).toHaveBeenCalledWith(
-        tree,
-        expect.objectContaining({
-          constructs: expect.any(String),
-          'aws-cdk-lib': expect.any(String),
-        }),
-        {}
-      );
-    });
-
     it('should not generate type definitions when they already exist', async () => {
-      vi.spyOn(tree, 'exists').mockImplementation((path) =>
-        path.includes(TYPE_DEFINITIONS_DIR)
+      // Create existing type definitions project
+      const typeDefsProjectPath = joinPathFragments(
+        PACKAGES_DIR,
+        TYPE_DEFINITIONS_DIR,
+        'project.json'
       );
+      tree.write(typeDefsProjectPath, '{}');
 
       await sharedConstructsGenerator(tree);
 
-      expect(tsLibGenerator).not.toHaveBeenCalledWith(
-        tree,
-        expect.objectContaining({ name: TYPE_DEFINITIONS_NAME })
+      // Verify src directory was not recreated
+      const typeDefsSrcPath = joinPathFragments(
+        PACKAGES_DIR,
+        TYPE_DEFINITIONS_DIR,
+        'src'
       );
+      expect(tree.exists(typeDefsSrcPath)).toBe(false);
     });
 
     it('should not generate shared constructs when they already exist', async () => {
-      vi.spyOn(tree, 'exists').mockImplementation((path) =>
-        path.includes(SHARED_CONSTRUCTS_DIR)
+      // Create existing shared constructs project
+      const constructsProjectPath = joinPathFragments(
+        PACKAGES_DIR,
+        SHARED_CONSTRUCTS_DIR,
+        'project.json'
       );
+      tree.write(constructsProjectPath, '{}');
 
       await sharedConstructsGenerator(tree);
 
-      expect(tsLibGenerator).not.toHaveBeenCalledWith(
-        tree,
-        expect.objectContaining({ name: SHARED_CONSTRUCTS_NAME })
+      // Verify src directory was not recreated
+      const constructsSrcPath = joinPathFragments(
+        PACKAGES_DIR,
+        SHARED_CONSTRUCTS_DIR,
+        'src'
       );
+      expect(tree.exists(constructsSrcPath)).toBe(false);
     });
   });
 });
