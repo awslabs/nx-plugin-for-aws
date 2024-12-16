@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  formatFiles,
   joinPathFragments,
   generateFiles,
   Tree,
@@ -21,6 +20,7 @@ import {
   sharedConstructsGenerator,
 } from '../../utils/shared-constructs';
 import { withVersions } from '../../utils/versions';
+import { formatFilesInSubtree } from '../../utils/format';
 
 export async function cognitoAuthGenerator(
   tree: Tree,
@@ -91,7 +91,7 @@ export async function cognitoAuthGenerator(
       undefined,
       undefined,
       undefined,
-      factory.createStringLiteral('./identity/index.js')
+      factory.createStringLiteral('./identity/index.js', true)
     );
     const updatedIndex = tsquery
       .map(
@@ -128,7 +128,7 @@ export async function cognitoAuthGenerator(
       factory.createIdentifier('CognitoAuth'),
       undefined
     ) as ImportClause,
-    factory.createStringLiteral('./components/CognitoAuth')
+    factory.createStringLiteral('./components/CognitoAuth', true)
   );
 
   const updatedImports = tsquery
@@ -179,7 +179,7 @@ export async function cognitoAuthGenerator(
     tree.write(mainTsxPath, mainTsxUpdatedContents);
   }
 
-  await formatFiles(tree);
+  await formatFilesInSubtree(tree, srcRoot);
 
   return () => {
     installPackagesTask(tree);

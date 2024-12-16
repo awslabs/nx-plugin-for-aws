@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  formatFiles,
   joinPathFragments,
   readProjectConfiguration,
   addDependenciesToPackageJson,
@@ -16,6 +15,7 @@ import {
 import { InfraGeneratorSchema } from './schema';
 import tsLibGenerator, { getTsLibDetails } from '../../ts/lib/generator';
 import { withVersions } from '../../utils/versions';
+import { formatFilesInSubtree } from '../../utils/format';
 
 export async function infraGenerator(
   tree: Tree,
@@ -85,7 +85,7 @@ export async function infraGenerator(
     withVersions(['tsx'])
   );
 
-  await formatFiles(tree);
+  await formatFilesInSubtree(tree, libraryRoot);
 
   return tsLibGeneratorCallback;
 }

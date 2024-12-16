@@ -2,63 +2,88 @@ import { Construct } from 'constructs';
 import { Runtime, RuntimeFamily } from 'aws-cdk-lib/aws-lambda';
 import { CfnOutput, Duration } from 'aws-cdk-lib';
 import * as url from 'url';
-import { CorsHttpMethod, HttpApi, HttpMethod, IHttpRouteAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2';
+import {
+  CorsHttpMethod,
+  HttpApi,
+  HttpMethod,
+  IHttpRouteAuthorizer,
+} from 'aws-cdk-lib/aws-apigatewayv2';
 import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
 import { Effect, IRole, PolicyStatement } from 'aws-cdk-lib/aws-iam';
 import { RuntimeConfig } from '../runtime-config/index.js';
 
 export interface <%= apiNameClassName %>Props {
-    readonly defaultAuthorizer: IHttpRouteAuthorizer;
-    readonly allowedOrigins?: string[];
-};
-
+  readonly defaultAuthorizer: IHttpRouteAuthorizer;
+  readonly allowedOrigins?: string[];
+}
 
 export class <%= apiNameClassName %> extends Construct {
-    public readonly api: HttpApi;
+  public readonly api: HttpApi;
 
-    constructor(scope: Construct, id: string, props: <%= apiNameClassName %>Props) {
-        super(scope, id);
+  constructor(scope: Construct, id: string, props: <%= apiNameClassName %>Props) {
+    super(scope, id);
 
-        const routerFunction = new NodejsFunction(this, '<%= apiNameClassName %>Handler', {
-            timeout: Duration.seconds(30),
-            runtime: new Runtime('nodejs20.x', RuntimeFamily.NODEJS),
-            handler: 'handler',
-            entry: url.fileURLToPath(new URL('../../<%= relativePathToProjectRoot %>/backend/src/lambdas/router.ts', import.meta.url)),
-            environment: {
-                'AWS_CONNECTION_REUSE_ENABLED': '1'
-            }
-        });
+    const routerFunction = new NodejsFunction(this, '<%= apiNameClassName %>Handler', {
+      timeout: Duration.seconds(30),
+      runtime: new Runtime('nodejs20.x', RuntimeFamily.NODEJS),
+      handler: 'handler',
+      entry: url.fileURLToPath(
+        new URL(
+          '../../<%= relativePathToProjectRoot %>/backend/src/lambdas/router.ts',
+          import.meta.url
+        )
+      ),
+      environment: {
+        AWS_CONNECTION_REUSE_ENABLED: '1'
+      },
+    });
 
-        this.api = new HttpApi(this, '<%= apiNameClassName %>', {
-            corsPreflight: {
-                allowOrigins: props.allowedOrigins ?? ['*'],
-                allowMethods: [CorsHttpMethod.ANY],
-                allowHeaders: ['authorization', 'content-type', 'x-amz-content-sha256', 'x-amz-date', 'x-amz-security-token'],
-            },
-            defaultAuthorizer: props.defaultAuthorizer,
-        });
+    this.api = new HttpApi(this, '<%= apiNameClassName %>', {
+      corsPreflight: {
+        allowOrigins: props.allowedOrigins ?? ['*'],
+        allowMethods: [CorsHttpMethod.ANY],
+        allowHeaders: [
+          'authorization',
+          'content-type',
+          'x-amz-content-sha256',
+          'x-amz-date',
+          'x-amz-security-token',
+        ],
+      },
+      defaultAuthorizer: props.defaultAuthorizer,
+    });
 
-        this.api.addRoutes({
-            path: '/{proxy+}',
-            methods: [HttpMethod.GET, HttpMethod.DELETE, HttpMethod.POST, HttpMethod.PUT, HttpMethod.PATCH, HttpMethod.HEAD],
-            integration: new HttpLambdaIntegration('RouterIntegration', routerFunction),
-        });
+    this.api.addRoutes({
+      path: '/{proxy+}',
+      methods: [
+        HttpMethod.GET,
+        HttpMethod.DELETE,
+        HttpMethod.POST,
+        HttpMethod.PUT,
+        HttpMethod.PATCH,
+        HttpMethod.HEAD,
+      ],
+      integration: new HttpLambdaIntegration(
+        'RouterIntegration',
+        routerFunction
+      ),
+    });
 
-        new CfnOutput(this, '<%= apiNameClassName %>Url', { value: this.api.url! });
+    new CfnOutput(this, '<%= apiNameClassName %>Url', { value: this.api.url! });
 
-        RuntimeConfig.ensure(this).config.trpcApis = {
-            '<%= apiName %>': this.api.url!
-        };
-    }
+    RuntimeConfig.ensure(this).config.trpcApis = {
+      '<%= apiName %>': this.api.url!
+    };
+  }
 
-    public grantInvokeAccess(role: IRole) {
-      role.addToPrincipalPolicy(
-        new PolicyStatement({
-          effect: Effect.ALLOW,
-          actions: ['execute-api:Invoke'],
-          resources: [this.api.arnForExecuteApi('*', '/*', '*')],
-        })
-      );
+  public grantInvokeAccess(role: IRole) {
+    role.addToPrincipalPolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['execute-api:Invoke'],
+        resources: [this.api.arnForExecuteApi('*', '/*', '*')],
+      })
+    );
   }
 }

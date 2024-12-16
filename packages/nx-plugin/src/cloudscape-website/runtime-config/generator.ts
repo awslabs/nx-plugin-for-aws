@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  formatFiles,
   joinPathFragments,
   generateFiles,
   Tree,
@@ -14,6 +13,7 @@ import { tsquery, ast } from '@phenomnomnominal/tsquery';
 import { factory, JsxElement, SourceFile } from 'typescript';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
+import { formatFilesInSubtree } from '../../utils/format';
 
 export async function runtimeConfigGenerator(
   tree: Tree,
@@ -64,7 +64,7 @@ export async function runtimeConfigGenerator(
       factory.createIdentifier('RuntimeConfigProvider'),
       undefined
     ),
-    factory.createStringLiteral('./components/RuntimeConfig')
+    factory.createStringLiteral('./components/RuntimeConfig', true)
   );
 
   const updatedImports = tsquery
@@ -107,7 +107,7 @@ export async function runtimeConfigGenerator(
     tree.write(mainTsxPath, mainTsxUpdatedContents);
   }
 
-  await formatFiles(tree);
+  await formatFilesInSubtree(tree, mainTsxPath);
 }
 
 export default runtimeConfigGenerator;

@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  formatFiles,
   addDependenciesToPackageJson,
   Tree,
   readProjectConfiguration,
@@ -33,6 +32,7 @@ import kebabCase from 'lodash.kebabcase';
 import { configureTsProject } from '../../ts/lib/ts-project-utils';
 import { withVersions } from '../../utils/versions';
 import { getRelativePathToRoot } from '../../utils/paths';
+import { formatFilesInSubtree } from '../../utils/format';
 
 export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
   const npmScopePrefix = getNpmScopePrefix(tree);
@@ -300,7 +300,7 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
     {}
   );
 
-  await formatFiles(tree);
+  await formatFilesInSubtree(tree, websiteContentPath);
 
   return () => {
     if (!schema.skipInstall) {

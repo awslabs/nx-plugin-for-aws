@@ -4,7 +4,6 @@
  */
 import {
   addDependenciesToPackageJson,
-  formatFiles,
   generateFiles,
   installPackagesTask,
   joinPathFragments,
@@ -25,6 +24,7 @@ import tsLibGenerator from '../../ts/lib/generator';
 import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
 import { withVersions } from '../../utils/versions';
 import { getRelativePathToRoot } from '../../utils/paths';
+import { formatFilesInSubtree } from '../../utils/format';
 
 const toClassName = (str: string): string => {
   const words = str.replace(/[^a-zA-Z0-9]/g, ' ').split(/\s+/);
@@ -192,7 +192,7 @@ export async function trpcBackendGenerator(
   tree.delete(joinPathFragments(backendRoot, 'package.json'));
   tree.delete(joinPathFragments(schemaRoot, 'package.json'));
 
-  await formatFiles(tree);
+  await formatFilesInSubtree(tree, projectRoot);
 
   return () => {
     installPackagesTask(tree);

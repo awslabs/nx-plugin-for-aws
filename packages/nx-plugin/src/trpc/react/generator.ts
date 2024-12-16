@@ -4,7 +4,6 @@
  */
 import {
   addDependenciesToPackageJson,
-  formatFiles,
   generateFiles,
   installPackagesTask,
   joinPathFragments,
@@ -22,6 +21,7 @@ import { ast, tsquery } from '@phenomnomnominal/tsquery';
 import { runtimeConfigGenerator } from '../../cloudscape-website/runtime-config/generator';
 import { toScopeAlias } from '../../utils/npm-scope';
 import { withVersions } from '../../utils/versions';
+import { formatFilesInSubtree } from '../../utils/format';
 
 export async function reactGenerator(
   tree: Tree,
@@ -128,7 +128,8 @@ export async function reactGenerator(
     ]),
     {}
   );
-  await formatFiles(tree);
+
+  await formatFilesInSubtree(tree, frontendProjectConfig.root);
 
   return () => {
     installPackagesTask(tree);

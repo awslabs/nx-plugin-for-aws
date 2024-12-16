@@ -34,7 +34,7 @@ describe('cognito-auth generator', () => {
       `
       import { RuntimeConfigProvider } from './components/RuntimeConfig';
       import { BrowserRouter } from 'react-router-dom';
-      
+
       export function App() {
         return (
           <RuntimeConfigProvider>
@@ -93,7 +93,7 @@ describe('cognito-auth generator', () => {
       `
       import { RuntimeConfigProvider } from './components/RuntimeConfig';
       import { BrowserRouter } from 'react-router-dom';
-      
+
       export function App() {
         return (
           <RuntimeConfigProvider>
@@ -153,7 +153,7 @@ describe('cognito-auth generator', () => {
       `
         import { RuntimeConfigProvider } from './components/RuntimeConfig';
         import { BrowserRouter } from 'react-router-dom';
-        
+
         export function App() {
           return (
             <RuntimeConfigProvider>
@@ -190,7 +190,7 @@ describe('cognito-auth generator', () => {
       `
         import { RuntimeConfigProvider } from './components/RuntimeConfig';
         import { BrowserRouter } from 'react-router-dom';
-        
+
         export function App() {
           return (
             <RuntimeConfigProvider>
@@ -221,7 +221,7 @@ describe('cognito-auth generator', () => {
       `
         import { RuntimeConfigProvider } from './components/RuntimeConfig';
         import { BrowserRouter } from 'react-router-dom';
-        
+
         export function App() {
           return (
             <RuntimeConfigProvider>
