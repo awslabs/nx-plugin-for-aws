@@ -258,7 +258,7 @@ exports[`cloudscape-website generator > should generate shared constructs > stat
 SPDX-License-Identifier: Apache-2.0 */
 import * as url from 'url';
 import { PDKNag } from '@aws/pdk/pdk-nag';
-import { CfnOutput, RemovalPolicy, Stack } from 'aws-cdk-lib';
+import { CfnJson, CfnOutput, Lazy, RemovalPolicy, Stack, Token } from 'aws-cdk-lib';
 import { Distribution, ViewerProtocolPolicy } from 'aws-cdk-lib/aws-cloudfront';
 import { S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import {
@@ -371,7 +371,7 @@ export class StaticWebsite extends Construct {
           )
         ),
         ...(Object.keys(runtimeConfig).length > 0
-          ? [Source.jsonData(DEFAULT_RUNTIME_CONFIG_FILENAME, runtimeConfig)]
+          ? [Source.jsonData(DEFAULT_RUNTIME_CONFIG_FILENAME, this.lazilyRender(runtimeConfig))]
           : []),
       ],
       destinationBucket: this.websiteBucket,
@@ -384,6 +384,30 @@ export class StaticWebsite extends Construct {
     });
 
     this.suppressCDKNagViolations();
+  }
+
+  private lazilyRender = (payload: any) => Lazy.any({
+    produce: () => this.resolveTokens(payload),
+  });
+
+  private resolveTokens = (payload: any) => {
+    const _payload: Record<string, any> = {};
+
+    Object.entries(payload).forEach(([key, value]) => {
+      if (Token.isUnresolved(value) || (typeof value === "string" && value.endsWith("}}"))) {
+        _payload[key] = new CfnJson(this, \`ResolveToken-\${key}\`, {
+            value,
+        }).value;
+      } else if (typeof value === "object") {
+        _payload[key] = this.resolveTokens(value);
+      } else if (Array.isArray(value)) {
+        _payload[key] = value.map((v) => this.resolveTokens(v));
+      } else {
+        _payload[key] = value;
+      }
+    });
+
+    return _payload;
   }
 
   private suppressCDKNagViolations = () => {

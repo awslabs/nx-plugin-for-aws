@@ -3,12 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { startLocalRegistry } from '@nx/js/plugins/jest/local-registry';
-import { readJsonFile } from '@nx/devkit';
 import { join } from 'path';
 import { execSync } from 'child_process';
 import { existsSync, rmSync } from 'fs';
 
-export default async function ({ provide }) {
+export default async function () {
   try {
     const registryPath = join(__dirname, '../../tmp');
     if (existsSync(registryPath)) {
@@ -25,17 +24,10 @@ export default async function ({ provide }) {
     });
 
     console.info('Local registry started!');
-
-    const publishedVersion = readJsonFile(
-      join(__dirname, '../../dist/packages/nx-plugin/package.json')
-    ).version;
-    provide('publishedVersion', publishedVersion);
-    console.info(
-      `Publishing @aws/nx-plugin@${publishedVersion} to local registry\n`
-    );
+    console.info('Publishing @aws/nx-plugin to local registry');
 
     try {
-      execSync(`npm publish --force`, {
+      execSync(`npm publish`, {
         env: process.env,
         cwd: join(__dirname, '../../dist/packages/nx-plugin'),
       });

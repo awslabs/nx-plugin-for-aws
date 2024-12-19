@@ -6,7 +6,7 @@ import { runCLI, tmpProjPath } from '../utils';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { ensureDirSync } from 'fs-extra';
 import { join } from 'path';
-import { beforeEach, describe, inject, it } from 'vitest';
+import { beforeEach, describe, it } from 'vitest';
 
 export const smokeTest = (pkgMgr: string) => {
   describe(`smoke test - ${pkgMgr}`, () => {
@@ -20,8 +20,8 @@ export const smokeTest = (pkgMgr: string) => {
     });
 
     it(`Should generate and build - ${pkgMgr}`, async () => {
-      runCLI(
-        `npx create-nx-workspace e2e-test --ci=skip --skipGit --preset=ts --interactive=false --pm ${pkgMgr}`,
+      await runCLI(
+        `npx -y create-nx-workspace e2e-test --ci=skip --skipGit --preset=ts --interactive=false --pm ${pkgMgr}`,
         {
           cwd: `${tmpProjPath()}/${pkgMgr}`,
           prefixWithPackageManagerCmd: false,
@@ -30,29 +30,24 @@ export const smokeTest = (pkgMgr: string) => {
       );
 
       const opts = { cwd: `${tmpProjPath()}/${pkgMgr}/e2e-test` };
-      runCLI(
-        `add http://localhost:4873/@aws/nx-plugin/-/nx-plugin-${inject(
-          'publishedVersion'
-        )}.tgz`,
-        opts
-      );
-      runCLI(
+      await runCLI(`add @aws/nx-plugin`, { ...opts, retry: true }); // This can sometimes fail intermittently so add retries
+      await runCLI(
         `generate @aws/nx-plugin:infra#app --name=infra --no-interactive`,
         opts
       );
-      runCLI(
+      await runCLI(
         `generate @aws/nx-plugin:cloudscape-website#app --name=website --projectNameAndRootFormat=as-provided --no-interactive`,
         opts
       );
-      runCLI(
+      await runCLI(
         `generate @aws/nx-plugin:trpc#backend --apiName=my-api --apiNamespace=@e2e-test --no-interactive`,
         opts
       );
-      runCLI(
+      await runCLI(
         `generate @aws/nx-plugin:cloudscape-website#cognito-auth --project=@e2e-test/website --no-interactive`,
         opts
       );
-      runCLI(
+      await runCLI(
         `generate @aws/nx-plugin:trpc#react --frontendProjectName=@e2e-test/website --backendProjectName=@e2e-test/my-api-backend --no-interactive`,
         opts
       );
@@ -63,8 +58,8 @@ export const smokeTest = (pkgMgr: string) => {
         readFileSync(join(__dirname, '../files/application-stack.ts.template'))
       );
 
-      runCLI(`sync`, opts);
-      runCLI(
+      await runCLI(`sync`, opts);
+      await runCLI(
         `run-many --target build --all --parallel 12 --output-style=stream`,
         opts
       );

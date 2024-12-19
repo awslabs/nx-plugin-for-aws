@@ -6,10 +6,12 @@ import { execSync } from 'child_process';
 import { join } from 'path';
 import { output, PackageManager } from '@nx/devkit';
 import { existsSync } from 'fs';
+import { backOff } from 'exponential-backoff';
 
 export interface RunCmdOpts {
   silenceError?: boolean;
   prefixWithPackageManagerCmd?: boolean;
+  retry?: boolean;
   env?: Record<string, string | undefined>;
   cwd?: string;
   silent?: boolean;
@@ -17,7 +19,7 @@ export interface RunCmdOpts {
   redirectStderr?: boolean;
 }
 
-export function runCLI(
+export async function runCLI(
   command: string,
   opts: RunCmdOpts = {
     prefixWithPackageManagerCmd: true,
@@ -26,7 +28,7 @@ export function runCLI(
     verbose: undefined,
     redirectStderr: undefined,
   }
-): string {
+): Promise<string> {
   try {
     const pm = getPackageManagerCommand();
     const commandToRun = `${
@@ -34,16 +36,27 @@ export function runCLI(
     }${command} ${opts.verbose ? ' --verbose' : ''}${
       opts.redirectStderr ? ' 2>&1' : ''
     }`;
-    const logs = execSync(commandToRun, {
-      cwd: opts.cwd || tmpProjPath(),
-      env: {
-        PATH: process.env.PATH,
-        ...opts.env,
-      },
-      encoding: 'utf-8',
-      stdio: 'inherit',
-      maxBuffer: 50 * 1024 * 1024,
-    });
+
+    const execCmd = () =>
+      new Promise<string>((resolve, reject) => {
+        try {
+          const result = execSync(commandToRun, {
+            cwd: opts.cwd || tmpProjPath(),
+            env: {
+              PATH: process.env.PATH,
+              ...opts.env,
+              ...process.env,
+            },
+            encoding: 'utf-8',
+            stdio: 'inherit',
+            maxBuffer: 50 * 1024 * 1024,
+          });
+          resolve(result);
+        } catch (e) {
+          reject(e);
+        }
+      });
+    const logs = await (opts.retry ? backOff(execCmd) : execCmd());
 
     if (opts.verbose) {
       output.log({
