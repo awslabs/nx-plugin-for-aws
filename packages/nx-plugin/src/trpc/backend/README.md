@@ -1,42 +1,46 @@
 # tRPC Backend Generator
 
 ## Overview
-This generator creates a new tRPC backend application with AWS CDK infrastructure setup. The generated backend uses AWS Lambda for serverless deployment and includes schema validation using Zod. The codebase is structured using ES Modules (ESM) for modern JavaScript module system compatibility. It sets up a complete type-safe API using tRPC with AWS Lambda integration, AWS X-Ray tracing, and AWS Lambda Powertools for observability.
 
-## Usage
+This generator creates a new [tRPC](https://trpc.io/) backend application with AWS CDK infrastructure setup. The generated backend uses AWS Lambda for serverless deployment and includes schema validation using [Zod](https://zod.dev/). The codebase is structured using ES Modules (ESM) for modern JavaScript module system compatibility. It sets up a complete type-safe API using tRPC with AWS Lambda integration, AWS X-Ray tracing, and AWS Lambda Powertools for observability.
 
-You can generate a new tRPC backend in two ways:
+## How to generate a tRPC backend
 
-### 1. Using VSCode IDE
+You can generate a new tRPC backend in two ways.
 
-First, install the NX Console extension for VSCode:
-1. Open VSCode
-2. Go to Extensions (Ctrl+Shift+X / Cmd+Shift+X)
-3. Search for "Nx Console"
-4. Install [Nx Console](https://marketplace.visualstudio.com/items?itemName=nrwl.angular-console)
+### Using VSCode IDE
 
-Then generate your API:
-1. Open the NX Console in VSCode
-2. Click on "Generate"
+Install the NX Console extension for VSCode:
+
+1. Open VSCode.
+2. Go to Extensions (Ctrl+Shift+X / Cmd+Shift+X).
+3. Search for "Nx Console".
+4. Install [Nx Console](https://marketplace.visualstudio.com/items?itemName=nrwl.angular-console).
+
+To generate your API:
+
+1. Open the NX Console in VSCode.
+2. Choose **Generate**.
 3. Search for "trpc#backend"
-4. Fill in the required parameters in the form
-5. Click "Run"
+4. Fill in the required parameters in the form, and choose **Run**.
 
-### 2. Using CLI
+### Using the CLI
 
-Generate the API:
+To generate the API:
+
 ```bash
 nx g @aws/nx-plugin:trpc#backend my-api --apiNamespace=@myorg --directory=apps/api
 ```
 
-You can also perform a dry-run to see what files would be generated without actually creating them:
+To perform a dry-run to see what files would be generated without actually creating them:
+
 ```bash
 nx g @aws/nx-plugin:trpc#backend my-api --apiNamespace=@myorg --directory=apps/api --dry-run
 ```
 
 Both methods will create a new tRPC backend API in the specified directory with all the necessary configuration and infrastructure code.
 
-## Input Parameters
+## Input parameters
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -45,13 +49,14 @@ Both methods will create a new tRPC backend API in the specified directory with 
 | directory | string | "packages" | The directory to store the application in. |
 | unitTestRunner | string | "vitest" | Test runner for unit tests. Options: jest, vitest, none |
 
-*Required parameter
+*Required parameters
 
-## Expected Output
+## Expected output
 
-The generator creates three main components:
+The generator creates three main components.
 
-### 1. Backend API Code
+### Backend API code
+
 ```
 <directory>/<api-name>/backend/
 ├── src/
@@ -64,7 +69,8 @@ The generator creates three main components:
 └── project.json        # Project configuration and build targets
 ```
 
-### 2. Schema Code
+### Schema code
+
 ```
 <directory>/<api-name>/schema/
 ├── src/
@@ -73,7 +79,8 @@ The generator creates three main components:
 └── project.json        # Project configuration and build targets
 ```
 
-### 3. Infrastructure Code
+### 3. Infrastructure code
+
 ```
 common/constructs/
 ├── src/
@@ -84,9 +91,10 @@ common/constructs/
 └── project.json         # Project configuration and build targets
 ```
 
-Additionally, it:
-1. Configures build settings for production deployment
-2. Installs required dependencies:
+Additionally, the generator:
+
+1. Configures build settings for production deployment.
+2. Installs these required dependencies:
    - @trpc/server
    - zod
    - aws-xray-sdk-core
@@ -96,13 +104,13 @@ Additionally, it:
    - @aws-lambda-powertools/metrics
    - @aws-lambda-powertools/tracer
 
-## Router and Middleware Setup
+## Router and Middleware setup
 
-The generator creates a powerful tRPC router setup with integrated middleware for observability and error handling.
+The generator creates a tRPC router setup with integrated middleware for observability and error handling.
 
-### Router Configuration
+### Router configuration
 
-The router is configured in `router.ts` with AWS Lambda integration:
+The router is configured in `router.ts` with AWS Lambda integration.
 
 ```typescript
 import { initTRPC } from '@trpc/server';
@@ -146,33 +154,37 @@ export type AppRouter = typeof appRouter;
 
 ### Middleware and Context
 
-The generator includes four powerful middleware plugins whcih are automatically instrumented:
+The generator includes four powerful middleware plugins whcih are automatically instrumented.
 
-1. **Logger Plugin**
-   - Automatically logs procedure execution
-   - Captures errors with detailed context
-   - Uses structured logging format
+**Logger Plugin**
 
-2. **Metrics Plugin**
-   - Captures cold start metrics
-   - Tracks request counts
-   - Records success/error metrics
-   - Automatically publishes metrics to CloudWatch
+- Automatically logs procedure execution
+- Captures errors with detailed context
+- Uses structured logging format
 
-3. **Tracer Plugin**
-   - Integrates with AWS X-Ray
-   - Creates subsegments for each procedure
-   - Annotates cold starts
-   - Adds error metadata automatically
+**Metrics Plugin**
 
-4. **Error Plugin**
-   - Standardizes error handling
-   - Converts internal errors to tRPC errors
-   - Maintains error context for debugging
+- Captures cold start metrics
+- Tracks request counts
+- Records success/error metrics
+- Automatically publishes metrics to CloudWatch
 
-### Using Context in Procedures
+**Tracer Plugin**
 
-You can access the context in your procedures to utilize the observability tools:
+- Integrates with AWS X-Ray
+- Creates subsegments for each procedure
+- Annotates cold starts
+- Adds error metadata automatically
+
+**Error Plugin**
+
+- Standardizes error handling
+- Converts internal errors to tRPC errors
+- Maintains error context for debugging
+
+### Using the context in procedures
+
+You can access the context in your procedures to use the observability tools.
 
 ```typescript
 const appRouter = router({
@@ -196,7 +208,7 @@ const appRouter = router({
 });
 ```
 
-## Infrastructure Architecture
+## Infrastructure architecture
 
 ```mermaid
 graph TD
@@ -208,29 +220,32 @@ graph TD
     end
 ```
 
-The infrastructure stack deploys:
-1. **API Gateway**
-   - HTTP API endpoint
-   - Request validation
-   - CORS configuration
+The infrastructure stack deploys these components:
 
-2. **Lambda Functions**
-   - Serverless compute
-   - Auto-scaling
-   - Pay-per-use pricing
+**API Gateway**
 
-3. **Observability**
-   - X-Ray distributed tracing
-   - CloudWatch Logs integration
-   - CloudWatch Metrics via Lambda Powertools
-   - Structured logging with Lambda Powertools
+- HTTP API endpoint
+- Request validation
+- CORS configuration
 
+**Lambda Functions**
 
-## Using the Generated CDK Constructs
+- Serverless compute
+- Auto-scaling
+- Pay-per-use pricing
 
-After generating your tRPC backend, you'll find a CDK construct in the `common/constructs` directory. Here's how to use it in your infrastructure:
+**Observability**
 
-### Basic Usage
+- X-Ray distributed tracing
+- CloudWatch Logs integration
+- CloudWatch Metrics via Lambda Powertools
+- Structured logging with Lambda Powertools
+
+## Using the henerated CDK constructs
+
+After generating your tRPC backend, you'll find a CDK construct in the `common/constructs` directory. To use it in your infrastructure, see these sections.
+
+### Basic usage
 
 ```typescript
 import { Stack } from 'aws-cdk-lib';
@@ -250,7 +265,7 @@ export class MyStack extends Stack {
 }
 ```
 
-### With Cognito Authentication
+### With Cognito authentication
 
 ```typescript
 import * as cdk from 'aws-cdk-lib';
@@ -271,7 +286,7 @@ export class ApplicationStack extends cdk.Stack {
 }
 ```
 
-### Granting Access to Other Services
+### Granting access to other services
 
 ```typescript
 import { Stack } from 'aws-cdk-lib';
@@ -296,13 +311,13 @@ export class MyStack extends Stack {
 }
 ```
 
-The API URL will be automatically registered in the RuntimeConfig system and can be accessed in your frontend application.
+The API URL will be automatically registered in the `RuntimeConfig` system and can be accessed in your frontend application.
 
-## Schema Code and Zod
+## Schema code and Zod
 
 The generator creates a separate schema package that uses [Zod](https://zod.dev), a TypeScript-first schema declaration and validation library. This package can be shared between your backend and frontend code to ensure type safety across your entire application.
 
-### Introduction to Zod
+### Introduction to zod
 
 Zod is a schema declaration and validation library designed specifically for TypeScript. It allows you to:
 - Define schemas with a fluent API
@@ -313,9 +328,9 @@ Zod is a schema declaration and validation library designed specifically for Typ
 
 For complete documentation, visit the [Zod documentation](https://zod.dev).
 
-### Defining Schemas
+### Defining schemas
 
-The generator creates a basic schema structure that you can extend:
+The generator creates a basic schema structure that you can extend.
 
 ```typescript
 import { z } from 'zod';
@@ -341,9 +356,9 @@ export const UpdateUserSchema = CreateUserSchema.partial();
 export const UserListSchema = z.array(UserSchema);
 ```
 
-### Common Schema Patterns
+### Common schema patterns
 
-#### Nested Objects
+#### Nested objects
 
 ```typescript
 import { z } from 'zod';
@@ -387,7 +402,7 @@ export const OrderSchema = z.object({
 });
 ```
 
-#### Request/Response Schemas
+#### Request/Response schemas
 
 ```typescript
 import { z } from 'zod';
@@ -422,9 +437,9 @@ export const GetUsersResponseSchema = ApiResponseSchema(
 );
 ```
 
-### Using Schemas with tRPC
+### Using schemas with tRPC
 
-Your schemas can be used directly in your tRPC procedures for input validation and type safety:
+You can use your schemas directly in your tRPC procedures for input validation and type safety.
 
 ```typescript
 import { router, publicProcedure } from './router';
@@ -469,11 +484,12 @@ export const userRouter = router({
 });
 ```
 
-### Schema Best Practices
+### Schema best practices
 
-1. **Keep Schemas Centralized**: Store all schemas in the schema package to ensure they're easily shared between frontend and backend.
+- **Keep schemas centralized**: Store all schemas in the schema package to ensure they're easily shared between frontend and backend.
 
-2. **Use Type Inference**: Let TypeScript infer types from your schemas instead of maintaining separate type definitions:
+- **Use Type inference**: Let TypeScript infer types from your schemas instead of maintaining separate type definitions.
+
    ```typescript
    // Do this:
    export const UserSchema = z.object({ ... });
@@ -484,7 +500,8 @@ export const userRouter = router({
    export const UserSchema: z.ZodType<User> = z.object({ ... });
    ```
 
-3. **Compose Schemas**: Build complex schemas by composing simpler ones:
+- **Compose schemas**: Build complex schemas by composing simpler ones.
+
    ```typescript
    const BaseUserSchema = z.object({
      email: z.string().email(),
@@ -496,13 +513,15 @@ export const userRouter = router({
    });
    ```
 
-4. **Version Your Schemas**: When making breaking changes, consider versioning your schemas:
+- **Version your schemas**: When making breaking changes, consider versioning your schemas.
+
    ```typescript
    export const UserSchemaV1 = z.object({ ... });
    export const UserSchemaV2 = UserSchemaV1.extend({ ... });
    ```
 
-5. **Document Your Schemas**: Add JSDoc comments to explain complex validation rules:
+- **Document your schemas**: Add JSDoc comments to explain complex validation rules:
+
    ```typescript
    export const ConfigSchema = z.object({
      /** 
@@ -513,18 +532,21 @@ export const userRouter = router({
    });
    ```
 
-## Building the Application
+## Building the application
 
 To create a production build:
+
 ```bash
 nx build @my-org/my-api
 ```
 
 All built code is located in the `dist` folder at the root of your workspace. For example:
+
 - Backend code: `dist/apps/api/my-api/backend`
 - Schema code: `dist/apps/api/my-api/schema`
 
 The production build:
+
 - Bundles Lambda functions for optimal cold start performance
 - Generates TypeScript declaration files
 - Creates source maps for debugging
@@ -532,9 +554,9 @@ The production build:
 
 ## Troubleshooting
 
-### `SyntaxError: Named export 'ListInferenceProfilesCommand' not found` or `TypeError: import_client_bedrock2.ListInferenceProfilesCommand is not a constructor`
+`SyntaxError: Named export 'ListInferenceProfilesCommand' not found` or `TypeError: import_client_bedrock2.ListInferenceProfilesCommand is not a constructor`
 
-If you see this error in a Lambda function related to `@aws-sdk`, it usually means that you are trying to use an operation which does not exist at runtime. This usually occurs when you are using the `@aws-sdk` provided by the Node Runtime. To bundle the required `@aws-sdk`, you can simply specify it in your `NodeJsFunction` as follows:
+If you see this error in a Lambda function related to `@aws-sdk`, it usually means that you are trying to use an operation which does not exist at runtime. This usually occurs when you are using the `@aws-sdk` provided by the Node Runtime. To bundle the required `@aws-sdk`, specify it in your `NodeJsFunction` as follows:
 
 ```typescript
 new NodejsFunction(this, 'MyApiHandler', {
@@ -545,5 +567,4 @@ new NodejsFunction(this, 'MyApiHandler', {
 });
 ```
 
-This will ensure that whichever `@aws-sdk` version you have installed locally will be the one that is used in the Lambda.
-
+This will ensure that any `@aws-sdk` version you have installed locally is the one that is used in the Lambda.

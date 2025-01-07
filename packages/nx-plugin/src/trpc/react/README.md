@@ -1,17 +1,19 @@
 # tRPC React Generator
 
 ## Overview
-This generator adds tRPC client integration to your React application, enabling type-safe API calls to your tRPC backend. It sets up all necessary configuration for connecting to your tRPC backend, including AWS IAM authentication support and proper error handling. The integration provides full end-to-end type safety between your frontend and backend.
+
+This generator adds tRPC client integration to your React application, enabling type-safe API calls to your tRPC backend. It sets up all necessary configuration for connecting to your tRPC backend, including AWS IAM authentication support, and proper error handling. The integration provides full end-to-end type safety between your frontend and backend.
 
 ## Prerequisites
 
 Before using this generator, ensure your React application has:
 
-1. A `main.tsx` file that renders your application
-2. An `<App/>` JSX element where the tRPC provider will be automatically injected
-3. A working tRPC backend (generated using the tRPC backend generator)
+- A `main.tsx` file that renders your application.
+- An `<App/>` JSX element where the tRPC provider will be automatically injected.
+- A working tRPC backend (generated using the tRPC backend generator).
 
 Example of required `main.tsx` structure:
+
 ```tsx
 import { StrictMode } from 'react';
 import * as ReactDOM from 'react-dom/client';
@@ -27,40 +29,43 @@ root.render(
 );
 ```
 
-## Usage
+## How to generate the tRPC React intergration
 
-You can generate the tRPC React integration in two ways:
+You can generate the tRPC React integration in two ways.
 
-### 1. Using VSCode IDE
+### Using VSCode IDE
 
-First, install the NX Console extension for VSCode:
-1. Open VSCode
-2. Go to Extensions (Ctrl+Shift+X / Cmd+Shift+X)
-3. Search for "Nx Console"
-4. Install [Nx Console](https://marketplace.visualstudio.com/items?itemName=nrwl.angular-console)
+Install the NX Console extension for VSCode:
 
-Then add tRPC to your React application:
-1. Open the NX Console in VSCode
-2. Click on "Generate"
+1. Open VSCode.
+2. Go to Extensions (Ctrl+Shift+X / Cmd+Shift+X).
+3. Search for "Nx Console".
+4. Install [Nx Console](https://marketplace.visualstudio.com/items?itemName=nrwl.angular-console).
+
+To add tRPC to your React application:
+
+1. Open the NX Console in VSCode.
+2. Choose **Generate**.
 3. Search for "trpc#react"
-4. Fill in the required parameters in the form
-5. Click "Run"
+4. Fill in the required parameters in the form, and choose **Run**.
 
-### 2. Using CLI
+### Using the CLI
 
-Add tRPC to your React application:
+To add tRPC to your React application:
+
 ```bash
 nx g @aws/nx-plugin:trpc#react --frontendProjectName=my-app --backendProjectName=my-api --auth=IAM
 ```
 
-You can also perform a dry-run to see what files would be generated without actually creating them:
+To perform a dry-run to see what files would be generated without actually creating them:
+
 ```bash
 nx g @aws/nx-plugin:trpc#react --frontendProjectName=my-app --backendProjectName=my-api --auth=IAM --dry-run
 ```
 
-Both methods will add tRPC client integration to your React application with all the necessary configuration.
+Both methods add tRPC client integration to your React application with all the necessary configuration.
 
-## Input Parameters
+## Input parameters
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -68,11 +73,11 @@ Both methods will add tRPC client integration to your React application with all
 | backendProjectName* | string | - | The name of your tRPC backend project (required). |
 | auth* | string | "IAM" | Authentication strategy. Options: "IAM", "None" |
 
-*Required parameter
+*Required parameters
 
-## Expected Output
+## Expected output
 
-The generator creates the following structure in your React application:
+The generator creates the following structure in your React application.
 
 ```
 src/
@@ -83,18 +88,18 @@ src/
     └── useTrpc.tsx       # Custom hook for using tRPC client
 ```
 
-Additionally, it:
-1. Installs required dependencies:
-   - @trpc/client
-   - @trpc/react-query
-   - @tanstack/react-query
-   - aws4fetch (if using IAM auth)
+Additionally, the generator installs these required dependencies:
 
-## Using the Generated Code
+- @trpc/client
+- @trpc/react-query
+- @tanstack/react-query
+- aws4fetch (if using IAM auth)
 
-### Using the tRPC Hook
+## Using the generated code
 
-The generator provides a `useTrpc` hook that gives you access to the type-safe tRPC client:
+### Using the tRPC hook
+
+The generator provides a `useTrpc` hook that gives you access to the type-safe tRPC client.
 
 ```tsx
 import { useTrpc } from './hooks/useTrpc';
@@ -125,9 +130,9 @@ function MyComponent() {
 }
 ```
 
-### Error Handling
+### Error handling
 
-The integration includes built-in error handling that properly processes tRPC errors:
+The integration includes built-in error handling that properly processes tRPC errors.
 
 ```tsx
 function MyComponent() {
@@ -153,11 +158,11 @@ function MyComponent() {
 }
 ```
 
-## Best Practices
+## Best practices
 
-### 1. Handle Loading States
+### Handle loading states
 
-Always handle loading states for better user experience:
+Always handle loading states for a better user experience.
 
 ```tsx
 function UserList() {
@@ -181,9 +186,9 @@ function UserList() {
 }
 ```
 
-### 2. Optimistic Updates
+### Optimistic updates
 
-Use optimistic updates for better user experience:
+Use optimistic updates for a better user experience.
 
 ```tsx
 function UserList() {
@@ -226,9 +231,9 @@ function UserList() {
 }
 ```
 
-### 3. Prefetching Data
+### Prefetching data
 
-Prefetch data for better performance:
+Prefetch data for better performance.
 
 ```tsx
 function UserList() {
@@ -256,9 +261,9 @@ function UserList() {
 }
 ```
 
-### 4. Infinite Queries
+### Infinite queries
 
-Handle pagination with infinite queries:
+Handle pagination with infinite queries.
 
 ```tsx
 function UserList() {

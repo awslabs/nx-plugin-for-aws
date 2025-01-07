@@ -1,35 +1,42 @@
 # Cloudscape Website App Generator
 
 ## Overview
-This generator creates a new Cloudscape React application with AWS CDK infrastructure setup. The generated application uses Vite as the build tool and bundler, providing fast development and optimized production builds. The codebase is structured using ES Modules (ESM) for modern JavaScript module system compatibility. It sets up a complete web application using AWS Cloudscape Design System components and configures the necessary build tools and dependencies.
 
-## Usage
+This generator creates a new Cloudscape React application with an AWS CDK infrastructure setup.
+
+The generated application uses [Vite](https://vite.dev/) as the build tool and bundler, providing fast development and optimized production builds. The codebase is structured using ES Modules (ESM) for modern JavaScript module system compatibility. It sets up a complete web application using AWS Cloudscape Design System components and configures the necessary build tools and dependencies.
+
+## How to generate a new website application
 
 You can generate a new Cloudscape website application in two ways:
 
-### 1. Using VSCode IDE
+### Using VSCode IDE
 
-First, install the NX Console extension for VSCode:
-1. Open VSCode
-2. Go to Extensions (Ctrl+Shift+X / Cmd+Shift+X)
-3. Search for "Nx Console"
-4. Install [Nx Console](https://marketplace.visualstudio.com/items?itemName=nrwl.angular-console)
+Install the NX Console extension for VSCode:
 
-Then generate your application:
-1. Open the NX Console in VSCode
-2. Click on "Generate"
-3. Search for "cloudscape-website#app"
-4. Fill in the required parameters in the form
-5. Click "Run"
+1. Open VSCode.
+2. Go to Extensions (Ctrl+Shift+X / Cmd+Shift+X).
+3. Search for "Nx Console".
+4. Install [Nx Console](https://marketplace.visualstudio.com/items?itemName=nrwl.angular-console).
 
-### 2. Using CLI
+To generate your application:
 
-Generate the application:
+1. Open the NX Console in VSCode.
+2. Choose **Generate**.
+3. Search for "cloudscape-website#app".
+4. Fill in the required parameters in the form.
+5. Choose **Run**.
+
+### Using the CLI
+
+To generate the application, run:
+
 ```bash
 nx g @aws/nx-plugin:cloudscape-website#app my-website --directory=apps/web
 ```
 
-You can also perform a dry-run to see what files would be generated without actually creating them:
+To perform a dry-run, to see what files would be generated without actually creating them, run:
+
 ```bash
 nx g @aws/nx-plugin:cloudscape-website#app my-website --directory=apps/web --dry-run
 ```
@@ -40,7 +47,7 @@ Both methods will create a new Cloudscape website application in `apps/web/my-we
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| name* | string | - | The name of the application (required). Must start with a letter and not contain colons. |
+| name* | string | - | The name of the application (required). Must start with a letter and cannot contain colons. |
 | directory | string | "packages" | The directory to store the application in. |
 | style | string | "css" | The file extension for style files. Options: css, scss, less, tailwind, styled-components, @emotion/styled, styled-jsx, none |
 | unitTestRunner | string | "vitest" | Test runner for unit tests. Options: jest, vitest, none |
@@ -52,13 +59,14 @@ Both methods will create a new Cloudscape website application in `apps/web/my-we
 | js | boolean | false | Generate JavaScript files instead of TypeScript files |
 | minimal | boolean | false | Generate a React app with minimal setup, no separate test files |
 
-*Required parameter
+*Required parameters
 
 ## Expected Output
 
 The generator creates two main components:
 
-### 1. React Application Code
+### React application code
+
 ```
 <directory>/<name>/
 ├── src/
@@ -73,7 +81,8 @@ The generator creates two main components:
 └── index.html          # HTML entry point
 ```
 
-### 2. Infrastructure Code
+### Infrastructure code
+
 ```
 common/constructs/
 ├── src/
@@ -87,9 +96,10 @@ common/constructs/
 └── project.json         # Project configuration and build targets
 ```
 
-Additionally, it:
-1. Configures build settings for production deployment
-2. Installs required dependencies:
+Additionally, the generator:
+
+1. Configures build settings for production deployment, and
+2. Installs these required dependencies:
    - @aws-northstar/ui
    - @cloudscape-design/components
    - @cloudscape-design/board-components
@@ -98,7 +108,7 @@ Additionally, it:
    - constructs
    - cdk-nag
 
-## Infrastructure Architecture
+## Infrastructure architecture
 
 ```mermaid
 graph TD
@@ -110,12 +120,13 @@ graph TD
 ```
 
 The infrastructure stack deploys:
-1. **CloudFront Distribution**
+
+1. **CloudFront distribution**
    - Global content delivery network
    - Edge caching for static assets
    - HTTPS enabled by default
 
-2. **S3 Bucket**
+2. **S3 bucket**
    - Static website content hosting
    - Private access through CloudFront
    - Versioning enabled
@@ -125,13 +136,13 @@ The infrastructure stack deploys:
    - Rate limiting
    - IP-based filtering
 
-4. **Origin Access Control**
+4. **Origin access control**
    - Secure S3 bucket access
    - Restricted to CloudFront only
 
-## Using the StaticWebsite Construct
+## Using the Static website construct
 
-After generating the application, you can use the generated `StaticWebsite` construct in your CDK code:
+After generating the application, you can use the generated `StaticWebsite` construct in your CDK code.
 
 ```typescript
 import { App, Stack } from 'aws-cdk-lib';
@@ -147,30 +158,34 @@ export class MyWebsiteStack extends Stack {
 }
 ```
 
-The StaticWebsite construct is pre-configured with:
-- S3 bucket for hosting website content
-- CloudFront distribution with Origin Access Control
+The Static Website construct is pre-configured with:
+
+- An S3 bucket for hosting website content
+- A CloudFront distribution with Origin Access Control
 - WAF rules for security
 - Cross-region support for WAF configuration
 
-Since all the infrastructure code is generated in your project's `common/constructs` directory, you have full control to customize the implementation. You can modify:
-- `static-website.ts` to adjust the CloudFront distribution settings or S3 bucket configuration
-- `cloudfront-web-acl.ts` to customize WAF rules and rate limiting
-- `webacl_event_handler` to modify the cross-region WAF deployment behavior
+All the infrastructure code is generated in your project's `common/constructs` directory, and you have full control to customize the implementation.
+
+You can modify:
+
+- `static-website.ts` to adjust the CloudFront distribution settings or the S3 bucket configuration.
+- `cloudfront-web-acl.ts` to customize WAF rules and rate limits.
+- `webacl_event_handler` to modify the cross-region WAF deployment behavior.
 
 The generated code serves as a starting point that you can adapt to your specific requirements.
 
-## Runtime Configuration
+## Runtime configuration
 
-The generator includes a RuntimeConfig system that bridges your infrastructure and frontend application. This system allows you to:
+The generator includes a `RuntimeConfig` system that bridges your infrastructure and frontend application. This system allows you to:
 
-1. **Share Configuration**: Pass runtime configuration from your infrastructure to your React application
-2. **Type Safety**: Configuration is fully typed using TypeScript interfaces
-3. **Context-Based Access**: Access configuration anywhere in your React components using React Context
+1. **Share configuration**: Pass runtime configuration from your infrastructure to your React application.
+2. **Type Safety**: Configuration is fully typed using TypeScript interfaces.
+3. **Context-Based access**: Access configuration anywhere in your React components using React Context.
 
 ### Infrastructure Usage
 
-In your CDK code, you can set runtime configuration using the RuntimeConfig construct:
+In your CDK code, you can set runtime configuration using the `RuntimeConfig` construct:
 
 ```typescript
 import { RuntimeConfig } from ':my-org/common-constructs';
@@ -193,7 +208,7 @@ export class MyWebsiteStack extends Stack {
 
 ### Frontend Usage
 
-In your React components, you can access the runtime configuration using the RuntimeConfigContext:
+In your React components, you can access the runtime configuration using the `RuntimeConfigContext` construct:
 
 ```typescript
 import { useContext } from 'react';
@@ -211,7 +226,7 @@ const MyComponent = () => {
 };
 ```
 
-The RuntimeConfigProvider is automatically set up in your application's entry point:
+The `RuntimeConfigProvider` is automatically set up in your application's entry point.
 
 ```typescript
 import RuntimeConfigProvider from './components/RuntimeConfig';
@@ -225,20 +240,24 @@ const App = () => (
 );
 ```
 
-This configuration system is particularly useful when:
-- Integrating with AWS services that require runtime configuration (e.g., Cognito, API Gateway)
-- Managing environment-specific settings
-- Sharing infrastructure outputs with your frontend application
+This configuration system is useful for:
 
-## Building the Application
+- Integrating with AWS services that require runtime configuration (e.g., Cognito, API Gateway).
+- Managing environment-specific settings.
+- Sharing infrastructure outputs with your frontend application.
 
-### Development Build
+## Building the application
+
+### Development build
+
 To run the application in development mode with hot-reload:
+
 ```bash
 nx serve my-website
 ```
 
-### Production Build
+### Production build
+
 To create a production build:
 ```bash
 nx build my-website
@@ -247,6 +266,7 @@ nx build my-website
 All built code is located in the `dist` folder at the root of your workspace. For example, if your application is in `apps/web/my-website`, the built code will be in `dist/apps/web/my-website`.
 
 The production build:
+
 - Minifies JavaScript and CSS
 - Optimizes assets
 - Generates source maps

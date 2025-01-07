@@ -25,32 +25,31 @@ nx add @aws/nx-plugin
 
 ### IDE Setup
 
-For the best development experience, install the Nx Console extension for your IDE:
+For the best development experience, we recommend installing the Nx Console extension for your IDE:
 
 - VS Code: [Nx Console for VS Code](https://marketplace.visualstudio.com/items?itemName=nrwl.angular-console)
 - JetBrains IDEs: [Nx Console for JetBrains](https://plugins.jetbrains.com/plugin/21060-nx-console)
 
 The Nx Console provides:
+
 - Interactive generator configuration
 - Command autocompletion
 - Visual project graph
 - Integrated task runner
 
-### Using Generators
+## Using the Generators
 
-Refer to the individual generator README.md files below for detailed installation instructions.
+Refer to these generator README files for detailed installation instructions.
 
-## Available Generators
+### Cloudscape website
 
-### Cloudscape Website
-
-- [Cloudscape Website App](src/cloudscape-website/app/README.md) - Generate a new Cloudscape-based web application
-- [Cognito Authentication](src/cloudscape-website/cognito-auth/README.md) - Add AWS Cognito authentication to your Cloudscape website
-- [Runtime Configuration](src/cloudscape-website/runtime-config/README.md) - Add runtime configuration capabilities to your Cloudscape website
+- [Cloudscape website app](src/cloudscape-website/app/README.md) - Generate a new Cloudscape-based web application.
+- [Cognito authentication](src/cloudscape-website/cognito-auth/README.md) - Add AWS Cognito authentication to your Cloudscape website.
+- [Runtime configuration](src/cloudscape-website/runtime-config/README.md) - Add runtime configuration capabilities to your Cloudscape website.
 
 ### Infrastructure
 
-- [Infrastructure App](src/infra/app/README.md) - Generate AWS CDK infrastructure code for your application
+- [Infrastructure app](src/infra/app/README.md) - Generate AWS CDK infrastructure code for your application
 
 ### tRPC
 
@@ -59,5 +58,5 @@ Refer to the individual generator README.md files below for detailed installatio
 
 ### TypeScript
 
-- [TypeScript Library](src/ts/lib/README.md) - Generate a new TypeScript library with best practices and testing setup
+- [TypeScript library](src/ts/lib/README.md) - Generate a new TypeScript library with best practices and testing setup
 - [CJS to ESM](src/ts/cjs-to-esm/README.md) - Convert CommonJS modules to ECMAScript modules

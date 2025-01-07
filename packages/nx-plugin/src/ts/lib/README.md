@@ -1,42 +1,46 @@
 # TypeScript Library Generator
 
 ## Overview
+
 This generator creates a new TypeScript library with modern configuration and best practices. It sets up a complete TypeScript project with ESM modules, proper build configuration, and optional linting and testing support. The generator is designed to create reusable TypeScript packages that can be shared across your organization's projects.
 
-## Usage
+## How to generate a TypeScript library
 
-You can generate a new TypeScript library in two ways:
+You can generate a new TypeScript library in two ways.
 
-### 1. Using VSCode IDE
+### Using VSCode IDE
 
-First, install the NX Console extension for VSCode:
-1. Open VSCode
-2. Go to Extensions (Ctrl+Shift+X / Cmd+Shift+X)
-3. Search for "Nx Console"
-4. Install [Nx Console](https://marketplace.visualstudio.com/items?itemName=nrwl.angular-console)
+Install the NX Console extension for VSCode:
 
-Then generate your library:
-1. Open the NX Console in VSCode
-2. Click on "Generate"
+1. Open VSCode.
+2. Go to Extensions (Ctrl+Shift+X / Cmd+Shift+X).
+3. Search for "Nx Console".
+4. Install [Nx Console](https://marketplace.visualstudio.com/items?itemName=nrwl.angular-console).
+
+To generate your library:
+
+1. Open the NX Console in VSCode.
+2. Choose **Generate**.
 3. Search for "ts#lib"
-4. Fill in the required parameters in the form
-5. Click "Run"
+4. Fill in the required parameters in the form, and choose **Run**.
 
-### 2. Using CLI
+### Using the CLI
 
-Generate the library:
+To generate the library:
+
 ```bash
 nx g @aws/nx-plugin:ts#lib my-lib --directory=packages
 ```
 
-You can also perform a dry-run to see what files would be generated without actually creating them:
+To perform a dry-run to see what files would be generated without actually creating them:
+
 ```bash
 nx g @aws/nx-plugin:ts#lib my-lib --directory=packages --dry-run
 ```
 
-Both methods will create a new TypeScript library in the specified directory with all the necessary configuration.
+Both methods create a new TypeScript library in the specified directory with all the necessary configuration.
 
-## Input Parameters
+## Input parameters
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -47,11 +51,11 @@ Both methods will create a new TypeScript library in the specified directory wit
 | scope | string | - | Scope for your package (e.g., @my-company). If omitted, this will be inferred from your project configuration. Must be in format @scope or @scope/subscope. |
 | subDirectory | string | library name | The sub directory the lib is placed in. By default, this is the library name. |
 
-*Required parameter
+*Required parameters
 
-## Expected Output
+## Expected output
 
-The generator creates a TypeScript library with the following structure:
+The generator creates a TypeScript library with the following structure.
 
 ```
 <directory>/<sub-directory>/
@@ -63,19 +67,20 @@ The generator creates a TypeScript library with the following structure:
 └── .eslintrc.json     # ESLint configuration (if enabled)
 ```
 
-Additionally, it:
-1. Configures the project for ESM (ECMAScript Modules)
-2. Sets up proper TypeScript configuration for library development
-3. Configures build settings for production deployment
-4. Sets up linting with ESLint (if enabled)
-5. Configures test runner (if enabled)
-6. Installs required dependencies
+Additionally, the generator:
 
-## Best Practices
+1. Configures the project for ESM (ECMAScript Modules).
+2. Sets up proper TypeScript configuration for library development.
+3. Configures build settings for production deployment.
+4. Sets up linting with ESLint (if enabled).
+5. Configures test runner (if enabled).
+6. Installs any required dependencies.
 
-### 1. Export Patterns
+## Best practices
 
-Use explicit exports in your index.ts:
+### Export patterns
+
+Use explicit exports in your index.ts.
 
 ```typescript
 // Good
@@ -86,13 +91,13 @@ export type { MyType } from './types';
 export * from './everything';
 ```
 
-### 2. TypeScript Configuration
+### TypeScript configuration
 
-The generator sets up optimal TypeScript configuration, but you can customize it.
+While the generator sets up optimal TypeScript configuration, you can customize it.
 
-### 3. Testing Setup
+### Testing setup
 
-If you enable testing, follow these practices:
+If you enable testing, follow these practices.
 
 ```typescript
 // my-feature.test.ts
@@ -110,7 +115,7 @@ describe('MyFeature', () => {
 });
 ```
 
-### 4. Documentation
+### Documentation
 
 Add JSDoc comments to your public APIs:
 
@@ -133,15 +138,17 @@ export function processInput(input: string): string {
 }
 ```
 
-### 5. Build Process
+### Build process
 
 The generator configures a build process that:
+
 - Compiles TypeScript to JavaScript
 - Generates type definitions
 - Creates source maps
 - Handles ESM modules properly
 
 You can build your library using:
+
 ```bash
 nx build my-lib
 ```
