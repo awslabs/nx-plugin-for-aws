@@ -36,7 +36,7 @@ export const smokeTest = (pkgMgr: string) => {
         opts
       );
       await runCLI(
-        `generate @aws/nx-plugin:cloudscape-website#app --name=website --projectNameAndRootFormat=as-provided --no-interactive`,
+        `generate @aws/nx-plugin:cloudscape-website#app --name=website --no-interactive`,
         opts
       );
       await runCLI(

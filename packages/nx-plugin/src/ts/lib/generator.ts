@@ -55,7 +55,6 @@ export const tsLibGenerator = async (
     ...schema,
     name: fullyQualifiedName,
     directory: dir,
-    projectNameAndRootFormat: 'as-provided',
     skipPackageJson: true,
     bundler: 'tsc', // TODO: consider supporting others
   });

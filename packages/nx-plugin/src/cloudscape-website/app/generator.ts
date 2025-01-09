@@ -12,6 +12,7 @@ import {
   updateJson,
   ProjectConfiguration,
   installPackagesTask,
+  addProjectConfiguration,
 } from '@nx/devkit';
 import { tsquery, ast } from '@phenomnomnominal/tsquery';
 import {
@@ -42,9 +43,6 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
     schema.name
   );
 
-  // Nx 20 is still working on revamping the generator for the TS preset, but our generator applies
-  process.env.NX_IGNORE_UNSUPPORTED_TS_SETUP = 'true';
-
   // TODO: consider exposing and supporting e2e tests
   const e2eTestRunner = 'none';
 
@@ -56,6 +54,17 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
     addPlugin: true,
     e2eTestRunner,
   });
+
+  if (!tree.exists(`${websiteContentPath}/project.json`)) {
+    addProjectConfiguration(tree, fullyQualifiedName, {
+      root: websiteContentPath,
+      name: fullyQualifiedName,
+      sourceRoot: `${websiteContentPath}/src`,
+      projectType: 'application',
+      tags: [],
+      targets: {},
+    });
+  }
 
   configureTsProject(tree, {
     dir: websiteContentPath,

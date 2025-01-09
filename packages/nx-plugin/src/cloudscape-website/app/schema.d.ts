@@ -2,7 +2,6 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { ProjectNameAndRootFormat } from '@nx/devkit/src/generators/project-name-and-root-utils';
 import { SupportedStyles } from '@nx/react';
 import { Linter } from '@nx/eslint';
 
@@ -11,7 +10,6 @@ export interface AppGeneratorSchema {
   style: SupportedStyles;
   skipFormat?: boolean;
   directory?: string;
-  projectNameAndRootFormat?: ProjectNameAndRootFormat;
   tags?: string;
   unitTestRunner?: 'jest' | 'vitest' | 'none';
   inSourceTests?: boolean;
