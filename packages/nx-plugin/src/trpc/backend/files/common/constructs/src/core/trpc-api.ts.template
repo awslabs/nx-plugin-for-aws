@@ -1,7 +1,6 @@
 import { Construct } from 'constructs';
 import { Runtime, RuntimeFamily } from 'aws-cdk-lib/aws-lambda';
 import { CfnOutput, Duration } from 'aws-cdk-lib';
-import * as url from 'url';
 import {
   CorsHttpMethod,
   HttpApi,
@@ -11,35 +10,31 @@ import {
 import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
 import { Effect, IRole, PolicyStatement } from 'aws-cdk-lib/aws-iam';
-import { RuntimeConfig } from '../runtime-config/index.js';
+import { RuntimeConfig } from './runtime-config.js';
 
-export interface <%= apiNameClassName %>Props {
+export interface TrpcApiProps {
+  readonly handlerFilePath: string;
   readonly defaultAuthorizer: IHttpRouteAuthorizer;
   readonly allowedOrigins?: string[];
 }
 
-export class <%= apiNameClassName %> extends Construct {
+export class TrpcApi extends Construct {
   public readonly api: HttpApi;
 
-  constructor(scope: Construct, id: string, props: <%= apiNameClassName %>Props) {
+  constructor(scope: Construct, id: string, props: TrpcApiProps) {
     super(scope, id);
 
-    const routerFunction = new NodejsFunction(this, '<%= apiNameClassName %>Handler', {
+    const routerFunction = new NodejsFunction(this, `${id}Handler`, {
       timeout: Duration.seconds(30),
       runtime: new Runtime('nodejs20.x', RuntimeFamily.NODEJS),
       handler: 'handler',
-      entry: url.fileURLToPath(
-        new URL(
-          '../../<%= relativePathToProjectRoot %>/backend/src/lambdas/router.ts',
-          import.meta.url
-        )
-      ),
+      entry: props.handlerFilePath,
       environment: {
-        AWS_CONNECTION_REUSE_ENABLED: '1'
+        AWS_CONNECTION_REUSE_ENABLED: '1',
       },
     });
 
-    this.api = new HttpApi(this, '<%= apiNameClassName %>', {
+    this.api = new HttpApi(this, id, {
       corsPreflight: {
         allowOrigins: props.allowedOrigins ?? ['*'],
         allowMethods: [CorsHttpMethod.ANY],
@@ -70,10 +65,11 @@ export class <%= apiNameClassName %> extends Construct {
       ),
     });
 
-    new CfnOutput(this, '<%= apiNameClassName %>Url', { value: this.api.url! });
+    new CfnOutput(this, `${id}Url`, { value: this.api.url! });
 
     RuntimeConfig.ensure(this).config.trpcApis = {
-      '<%= apiName %>': this.api.url!
+      ...RuntimeConfig.ensure(this).config.trpcApis,
+      [id]: this.api.url!,
     };
   }
 

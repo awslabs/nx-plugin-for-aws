@@ -75,7 +75,7 @@ export async function infraGenerator(
   addDependenciesToPackageJson(
     tree,
     withVersions([
-      '@aws/pdk',
+      '@cdklabs/cdk-validator-cfnguard',
       'aws-cdk-lib',
       'aws-cdk',
       'esbuild',

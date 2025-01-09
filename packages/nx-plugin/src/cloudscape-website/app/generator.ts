@@ -18,7 +18,6 @@ import { tsquery, ast } from '@phenomnomnominal/tsquery';
 import {
   factory,
   ObjectLiteralExpression,
-  SourceFile,
   isPropertyAssignment,
 } from 'typescript';
 import { AppGeneratorSchema } from './schema';
@@ -29,18 +28,21 @@ import {
   sharedConstructsGenerator,
 } from '../../utils/shared-constructs';
 import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
-import kebabCase from 'lodash.kebabcase';
 import { configureTsProject } from '../../ts/lib/ts-project-utils';
 import { withVersions } from '../../utils/versions';
 import { getRelativePathToRoot } from '../../utils/paths';
 import { formatFilesInSubtree } from '../../utils/format';
+import { toClassName, toKebabCase } from '../../utils/names';
+import { addStarExport } from '../../utils/ast';
 
 export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
   const npmScopePrefix = getNpmScopePrefix(tree);
-  const fullyQualifiedName = `${npmScopePrefix}${schema.name}`;
+  const websiteNameClassName = toClassName(schema.name);
+  const websiteNameKebabCase = toKebabCase(schema.name);
+  const fullyQualifiedName = `${npmScopePrefix}${websiteNameKebabCase}`;
   const websiteContentPath = joinPathFragments(
     schema.directory ?? '.',
-    schema.name
+    websiteNameKebabCase
   );
 
   // TODO: consider exposing and supporting e2e tests
@@ -51,7 +53,7 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
     name: fullyQualifiedName,
     directory: websiteContentPath,
     routing: false,
-    addPlugin: true,
+    addPlugin: schema.addPlugin ?? true,
     e2eTestRunner,
   });
 
@@ -73,68 +75,100 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
 
   await sharedConstructsGenerator(tree);
 
-  const websiteNameKebabCase = kebabCase(schema.name);
-  const constructsPath = joinPathFragments(
-    PACKAGES_DIR,
-    SHARED_CONSTRUCTS_DIR,
-    'src',
-    websiteNameKebabCase,
-    'index.ts'
-  );
-
-  if (!tree.exists(constructsPath)) {
+  if (
+    !tree.exists(
+      joinPathFragments(
+        PACKAGES_DIR,
+        SHARED_CONSTRUCTS_DIR,
+        'src',
+        'app',
+        'static-websites',
+        `${websiteNameKebabCase}.ts`
+      )
+    )
+  ) {
     const npmScopePrefix = getNpmScopePrefix(tree);
+
     generateFiles(
       tree,
-      joinPathFragments(__dirname, 'files', SHARED_CONSTRUCTS_DIR),
-      joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR),
+      joinPathFragments(
+        __dirname,
+        'files',
+        SHARED_CONSTRUCTS_DIR,
+        'src',
+        'app'
+      ),
+      joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'src', 'app'),
       {
         ...schema,
         npmScopePrefix,
         scopeAlias: toScopeAlias(npmScopePrefix),
         websiteContentPath: joinPathFragments('dist', websiteContentPath),
         websiteNameKebabCase,
+        websiteNameClassName,
       }
     );
 
-    addDependenciesToPackageJson(
-      tree,
-      withVersions(['constructs', '@aws/pdk', 'cdk-nag', 'aws-cdk-lib']),
-      withVersions(['@aws-sdk/client-wafv2'])
-    );
-
-    const sharedConstructsIndexTsPath = joinPathFragments(
-      PACKAGES_DIR,
-      SHARED_CONSTRUCTS_DIR,
-      'src',
-      'index.ts'
-    );
-    const sharedConstructsIndexContents = tree
-      .read(sharedConstructsIndexTsPath)
-      .toString();
-
-    const staticWebsiteExportDeclaration = factory.createExportDeclaration(
-      undefined,
-      undefined,
-      undefined,
-      factory.createStringLiteral(`./${websiteNameKebabCase}/index.js`)
-    );
-
-    const updatedIndex = tsquery
-      .map(
-        ast(sharedConstructsIndexContents),
-        'SourceFile',
-        (node: SourceFile) => {
-          return {
-            ...node,
-            statements: [staticWebsiteExportDeclaration, ...node.statements],
-          };
-        }
+    const shouldGenerateCoreStaticWebsiteConstruct = !tree.exists(
+      joinPathFragments(
+        PACKAGES_DIR,
+        SHARED_CONSTRUCTS_DIR,
+        'src',
+        'core',
+        'static-website.ts'
       )
-      .getFullText();
+    );
+    if (shouldGenerateCoreStaticWebsiteConstruct) {
+      generateFiles(
+        tree,
+        joinPathFragments(
+          __dirname,
+          'files',
+          SHARED_CONSTRUCTS_DIR,
+          'src',
+          'core'
+        ),
+        joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'src', 'core'),
+        {
+          ...schema,
+          npmScopePrefix,
+          scopeAlias: toScopeAlias(npmScopePrefix),
+          websiteContentPath: joinPathFragments('dist', websiteContentPath),
+          websiteNameKebabCase,
+          websiteNameClassName,
+        }
+      );
+    }
 
-    if (sharedConstructsIndexContents !== updatedIndex) {
-      tree.write(sharedConstructsIndexTsPath, updatedIndex);
+    addStarExport(tree, joinPathFragments(
+        PACKAGES_DIR,
+        SHARED_CONSTRUCTS_DIR,
+        'src',
+        'app',
+        'index.ts'
+      ), './static-websites/index.js');
+
+    addStarExport(tree, joinPathFragments(
+        PACKAGES_DIR,
+        SHARED_CONSTRUCTS_DIR,
+        'src',
+        'app',
+        'static-websites',
+        'index.ts'
+      ), `./${websiteNameKebabCase}.js`);
+
+    if (shouldGenerateCoreStaticWebsiteConstruct) {
+      addStarExport(
+        tree,
+        joinPathFragments(
+          PACKAGES_DIR,
+          SHARED_CONSTRUCTS_DIR,
+          'src',
+          'core',
+          'index.ts'
+        ),
+        './static-website.js'
+      );
     }
   }
 
@@ -161,7 +195,7 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
   const projectConfig = readProjectConfiguration(tree, fullyQualifiedName);
   const libraryRoot = projectConfig.root;
 
-  tree.delete(joinPathFragments(libraryRoot, 'src/app'));
+  tree.delete(joinPathFragments(libraryRoot, 'src', 'app'));
 
   generateFiles(
     tree, // the virtual file system
@@ -301,9 +335,9 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
   addDependenciesToPackageJson(
     tree,
     withVersions([
-      '@aws-northstar/ui',
       '@cloudscape-design/components',
       '@cloudscape-design/board-components',
+      '@cloudscape-design/global-styles',
       'react-router-dom',
     ]),
     {}

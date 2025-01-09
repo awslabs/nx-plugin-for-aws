@@ -75,12 +75,7 @@ export default defineConfig({
 `;
 
 exports[`cloudscape-website generator > should generate base files and structure > app-layout.tsx 1`] = `
-"/*! Copyright [Amazon.com](http://amazon.com/), Inc. or its affiliates. All Rights Reserved.
-SPDX-License-Identifier: Apache-2.0 */
-import { useCognitoAuthContext } from '@aws-northstar/ui';
-import getBreadcrumbs from '@aws-northstar/ui/components/AppLayout/utils/getBreadcrumbs';
-import NavHeader from '@aws-northstar/ui/components/AppLayout/components/NavHeader';
-import * as React from 'react';
+"import * as React from 'react';
 import { createContext, useCallback, useEffect, useState } from 'react';
 import { NavItems } from './navitems';
 import Config from '../../config';
@@ -90,11 +85,42 @@ import {
   BreadcrumbGroup,
   BreadcrumbGroupProps,
   SideNavigation,
+  TopNavigation,
 } from '@cloudscape-design/components';
 import AppLayout, {
   AppLayoutProps,
 } from '@cloudscape-design/components/app-layout';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { matchPath, useLocation, useNavigate } from 'react-router-dom';
+
+const getBreadcrumbs = (
+  pathName: string,
+  search: string,
+  defaultBreadcrumb: string,
+  availableRoutes?: string[]
+) => {
+  const segments = [
+    defaultBreadcrumb,
+    ...pathName.split('/').filter((segment) => segment !== ''),
+  ];
+
+  return segments.map((segment, i) => {
+    const href =
+      i === 0
+        ? '/'
+        : \`/\${segments
+            .slice(1, i + 1)
+            .join('/')
+            .replace('//', '/')}\`;
+
+    const matched =
+      !availableRoutes || availableRoutes.find((r) => matchPath(r, href));
+
+    return {
+      href: matched ? \`\${href}\${search}\` : '#',
+      text: segment,
+    };
+  });
+};
 
 /**
  * Context for updating/retrieving the AppLayout.
@@ -109,10 +135,6 @@ export const AppLayoutContext = createContext({
  * Defines the App layout and contains logic for routing.
  */
 const App: React.FC = () => {
-  const [username, setUsername] = useState<string | undefined>();
-  const [email, setEmail] = useState<string | undefined>();
-  const { getAuthenticatedUser } = useCognitoAuthContext();
-
   const navigate = useNavigate();
   const [activeHref, setActiveHref] = useState('/');
   const [activeBreadcrumbs, setActiveBreadcrumbs] = useState<
@@ -120,17 +142,6 @@ const App: React.FC = () => {
   >([{ text: '/', href: '/' }]);
   const [appLayoutProps, setAppLayoutProps] = useState<AppLayoutProps>({});
   const location = useLocation();
-
-  useEffect(() => {
-    const authUser = getAuthenticatedUser();
-    setUsername(authUser?.getUsername());
-
-    authUser?.getSession(() => {
-      authUser.getUserAttributes((_, attributes) => {
-        setEmail(attributes?.find((a) => a.Name === 'email')?.Value);
-      });
-    });
-  }, [getAuthenticatedUser, setUsername, setEmail]);
 
   const setAppLayoutPropsSafe = useCallback(
     (props: AppLayoutProps) => {
@@ -166,23 +177,14 @@ const App: React.FC = () => {
     <AppLayoutContext.Provider
       value={{ appLayoutProps, setAppLayoutProps: setAppLayoutPropsSafe }}
     >
-      <NavHeader
-        title={Config.applicationName}
-        logo={Config.logo}
-        user={
-          username
-            ? {
-                username,
-                email,
-              }
-            : undefined
-        }
-        onSignout={() =>
-          new Promise(() => {
-            getAuthenticatedUser()?.signOut();
-            window.location.href = '/';
-          })
-        }
+      <TopNavigation
+        identity={{
+          href: '/',
+          title: Config.applicationName,
+          logo: {
+            src: Config.logo,
+          },
+        }}
       />
       <AppLayout
         breadcrumbs={
@@ -219,46 +221,38 @@ exports[`cloudscape-website generator > should generate base files and structure
 `;
 
 exports[`cloudscape-website generator > should generate base files and structure > main.tsx 1`] = `
-"/*! Copyright [Amazon.com](http://amazon.com/), Inc. or its affiliates. All Rights Reserved.
-SPDX-License-Identifier: Apache-2.0 */
-import { NorthStarThemeProvider } from '@aws-northstar/ui';
-import React from 'react';
+"import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { I18nProvider } from '@cloudscape-design/components/i18n';
 import messages from '@cloudscape-design/components/i18n/messages/all.en';
 import App from './layouts/App';
 
+import '@cloudscape-design/global-styles/index.css';
+
 const root = document.getElementById('root');
 root &&
   createRoot(root).render(
     <React.StrictMode>
-      <NorthStarThemeProvider>
-        <I18nProvider locale="en" messages={[messages]}>
-          <BrowserRouter>
-            <App />
-          </BrowserRouter>
-        </I18nProvider>
-      </NorthStarThemeProvider>
+      <I18nProvider locale="en" messages={[messages]}>
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
+      </I18nProvider>
     </React.StrictMode>
   );
 "
 `;
 
-exports[`cloudscape-website generator > should generate shared constructs > common/constructs-index.ts 1`] = `
-"/*! Copyright [Amazon.com](http://amazon.com/), Inc. or its affiliates. All Rights Reserved.
-SPDX-License-Identifier: Apache-2.0 */
-export * from './cloudfront-web-acl.js';
-export * from './static-website.js';
-"
+exports[`cloudscape-website generator > should generate shared constructs > common/constructs-app-index.ts 1`] = `"export * from "./test-app.js";"`;
+
+exports[`cloudscape-website generator > should generate shared constructs > common/constructs-core-index.ts 1`] = `
+"export * from "./static-website.js";
+export * from './runtime-config.js';"
 `;
 
-exports[`cloudscape-website generator > should generate shared constructs > static-website.ts 1`] = `
-"/*! Copyright [Amazon.com](http://amazon.com/), Inc. or its affiliates. All Rights Reserved.
-SPDX-License-Identifier: Apache-2.0 */
-import * as url from 'url';
-import { PDKNag } from '@aws/pdk/pdk-nag';
-import { CfnJson, CfnOutput, Lazy, RemovalPolicy, Stack, Token } from 'aws-cdk-lib';
+exports[`cloudscape-website generator > should generate shared constructs > common/constructs-core-static-website.ts 1`] = `
+"import { CfnJson, CfnOutput, RemovalPolicy, Stack, Token } from 'aws-cdk-lib';
 import { Distribution, ViewerProtocolPolicy } from 'aws-cdk-lib/aws-cloudfront';
 import { S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import {
@@ -269,12 +263,15 @@ import {
   ObjectOwnership,
 } from 'aws-cdk-lib/aws-s3';
 import { BucketDeployment, Source } from 'aws-cdk-lib/aws-s3-deployment';
-import { NagSuppressions } from 'cdk-nag';
 import { Construct } from 'constructs';
-import { CloudfrontWebAcl } from './cloudfront-web-acl.js';
-import { RuntimeConfig } from '../runtime-config/index.js';
-
+import { RuntimeConfig } from './runtime-config.js';
+import { Key } from 'aws-cdk-lib/aws-kms';
+import { CfnWebACL } from 'aws-cdk-lib/aws-wafv2';
 const DEFAULT_RUNTIME_CONFIG_FILENAME = 'runtime-config.json';
+
+export interface StaticWebsiteProps {
+  readonly websiteFilePath: string;
+}
 
 /**
  * Deploys a Static Website using by default a private S3 bucket as an origin and Cloudfront as the entrypoint.
@@ -289,61 +286,68 @@ export class StaticWebsite extends Construct {
   public readonly cloudFrontDistribution: Distribution;
   public readonly bucketDeployment: BucketDeployment;
 
-  constructor(scope: Construct, id: string) {
+  constructor(
+    scope: Construct,
+    id: string,
+    { websiteFilePath }: StaticWebsiteProps
+  ) {
     super(scope, id);
-
     this.node.setContext(
       '@aws-cdk/aws-s3:serverAccessLogsUseBucketPolicy',
       true
     );
+
+    const websiteKey = new Key(this, 'WebsiteKey', {
+      enableKeyRotation: true,
+    });
 
     const accessLogsBucket = new Bucket(this, 'AccessLogsBucket', {
       versioned: false,
       enforceSSL: true,
       autoDeleteObjects: true,
       removalPolicy: RemovalPolicy.DESTROY,
-      encryption: BucketEncryption.S3_MANAGED,
+      encryption: BucketEncryption.KMS,
+      encryptionKey: websiteKey,
       objectOwnership: ObjectOwnership.OBJECT_WRITER,
       publicReadAccess: false,
       blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
     });
-
     // S3 Bucket to hold website files
     this.websiteBucket = new Bucket(this, 'WebsiteBucket', {
       versioned: true,
       enforceSSL: true,
       autoDeleteObjects: true,
       removalPolicy: RemovalPolicy.DESTROY,
-      encryption: BucketEncryption.S3_MANAGED,
+      encryption: BucketEncryption.KMS,
+      encryptionKey: websiteKey,
       objectOwnership: ObjectOwnership.BUCKET_OWNER_ENFORCED,
       publicReadAccess: false,
       blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
       serverAccessLogsPrefix: 'website-access-logs',
       serverAccessLogsBucket: accessLogsBucket,
     });
-
     // Web ACL
-    const webAclArn = new CloudfrontWebAcl(this, 'WebsiteAcl').webAclArn;
+    const wafStack = new CloudfrontWebAcl(this, 'waf');
 
     // Cloudfront Distribution
     const logBucket = new Bucket(this, 'DistributionLogBucket', {
       enforceSSL: true,
       autoDeleteObjects: true,
       removalPolicy: RemovalPolicy.DESTROY,
-      encryption: BucketEncryption.S3_MANAGED,
+      encryption: BucketEncryption.KMS,
+      encryptionKey: websiteKey,
       objectOwnership: ObjectOwnership.BUCKET_OWNER_PREFERRED,
       publicReadAccess: false,
       blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
       serverAccessLogsPrefix: 'distribution-access-logs',
       serverAccessLogsBucket: accessLogsBucket,
     });
-
     const defaultRootObject = 'index.html';
     this.cloudFrontDistribution = new Distribution(
       this,
       'CloudfrontDistribution',
       {
-        webAclId: webAclArn,
+        webAclId: wafStack.wafArn,
         enableLogging: true,
         logBucket: logBucket,
         defaultBehavior: {
@@ -360,45 +364,34 @@ export class StaticWebsite extends Construct {
         ],
       }
     );
-
     // Deploy Website
-    const runtimeConfig = RuntimeConfig.ensure(this).config;
     this.bucketDeployment = new BucketDeployment(this, 'WebsiteDeployment', {
       sources: [
-        Source.asset(
-          url.fileURLToPath(
-            new URL('../../../../../dist/test-app', import.meta.url)
-          )
+        Source.asset(websiteFilePath),
+        Source.jsonData(
+          DEFAULT_RUNTIME_CONFIG_FILENAME,
+          this.resolveTokens(RuntimeConfig.ensure(this).config)
         ),
-        ...(Object.keys(runtimeConfig).length > 0
-          ? [Source.jsonData(DEFAULT_RUNTIME_CONFIG_FILENAME, this.lazilyRender(runtimeConfig))]
-          : []),
       ],
       destinationBucket: this.websiteBucket,
       // Files in the distribution's edge caches will be invalidated after files are uploaded to the destination bucket.
       distribution: this.cloudFrontDistribution,
     });
-
     new CfnOutput(this, 'DistributionDomainName', {
       value: this.cloudFrontDistribution.domainName,
     });
-
-    this.suppressCDKNagViolations();
   }
-
-  private lazilyRender = (payload: any) => Lazy.any({
-    produce: () => this.resolveTokens(payload),
-  });
-
   private resolveTokens = (payload: any) => {
     const _payload: Record<string, any> = {};
-
     Object.entries(payload).forEach(([key, value]) => {
-      if (Token.isUnresolved(value) || (typeof value === "string" && value.endsWith("}}"))) {
+      if (
+        Token.isUnresolved(value) ||
+        (typeof value === 'string' && value.endsWith('}}'))
+      ) {
         _payload[key] = new CfnJson(this, \`ResolveToken-\${key}\`, {
-            value,
+          value,
         }).value;
-      } else if (typeof value === "object") {
+      } else if (typeof value === 'object') {
         _payload[key] = this.resolveTokens(value);
       } else if (Array.isArray(value)) {
         _payload[key] = value.map((v) => this.resolveTokens(v));
@@ -406,142 +399,91 @@ export class StaticWebsite extends Construct {
         _payload[key] = value;
       }
     });
-
     return _payload;
-  }
+  };
+}
 
-  private suppressCDKNagViolations = () => {
-    const stack = Stack.of(this);
-
-    NagSuppressions.addResourceSuppressions(
-      this,
-      [
-        {
-          id: 'AwsPrototyping-CloudFrontDistributionGeoRestrictions',
-          reason:
-            'Suppressed to allow unrestricted access. Not recommended in production.',
-        },
-      ],
-      true
-    );
-
-    [
-      'AwsSolutions-CFR4',
-      'AwsPrototyping-CloudFrontDistributionHttpsViewerNoOutdatedSSL',
-    ].forEach((RuleId) => {
-      NagSuppressions.addResourceSuppressions(this.cloudFrontDistribution, [
-        {
-          id: RuleId,
-          reason:
-            'Certificate is not mandatory therefore the Cloudfront certificate will be used.',
-        },
-      ]);
+export class CloudfrontWebAcl extends Stack {
+  public readonly wafArn;
+  constructor(scope: Construct, id: string) {
+    super(scope, id, {
+      env: {
+        region: 'us-east-1',
+        account: Stack.of(scope).account,
+      },
+      crossRegionReferences: true,
     });
 
-    ['AwsSolutions-L1', 'AwsPrototyping-LambdaLatestVersion'].forEach(
-      (RuleId) => {
-        NagSuppressions.addResourceSuppressions(
-          this,
-          [
-            {
-              id: RuleId,
-              reason:
-                'Latest runtime cannot be configured. CDK will need to upgrade the BucketDeployment construct accordingly.',
+    this.wafArn = new CfnWebACL(this, 'WebAcl', {
+      defaultAction: { allow: {} },
+      scope: 'CLOUDFRONT',
+      visibilityConfig: {
+        cloudWatchMetricsEnabled: true,
+        metricName: id,
+        sampledRequestsEnabled: true,
+      },
+      rules: [
+        {
+          name: 'CRSRule',
+          priority: 0,
+          statement: {
+            managedRuleGroupStatement: {
+              name: 'AWSManagedRulesCommonRuleSet',
+              vendorName: 'AWS',
             },
-          ],
-          true
-        );
-      }
-    );
+          },
+          visibilityConfig: {
+            cloudWatchMetricsEnabled: true,
+            metricName: 'MetricForWebACLCDK-CRS',
+            sampledRequestsEnabled: true,
+          },
+          overrideAction: {
+            none: {},
+          },
+        },
+      ],
+    }).attrArn;
+  }
+}
+"
+`;
 
-    ['AwsSolutions-IAM5', 'AwsPrototyping-IAMNoWildcardPermissions'].forEach(
-      (RuleId) => {
-        NagSuppressions.addResourceSuppressions(
-          this,
-          [
-            {
-              id: RuleId,
-              reason:
-                'All Policies have been scoped to a Bucket. Given Buckets can contain arbitrary content, wildcard resources with bucket scope are required.',
-              appliesTo: [
-                {
-                  regex: '/^Action::s3:.*$/g',
-                },
-                {
-                  regex: \`/^Resource::.*$/g\`,
-                },
-              ],
-            },
-          ],
-          true
-        );
-      }
-    );
+exports[`cloudscape-website generator > should generate shared constructs > test-app.ts 1`] = `
+"import * as url from 'url';
+import { Construct } from 'constructs';
+import { StaticWebsite } from '../../core/index.js';
 
-    ['AwsSolutions-IAM4', 'AwsPrototyping-IAMNoManagedPolicies'].forEach(
-      (RuleId) => {
-        NagSuppressions.addResourceSuppressions(
-          this,
-          [
-            {
-              id: RuleId,
-              reason:
-                'Buckets can contain arbitrary content, therefore wildcard resources under a bucket are required.',
-              appliesTo: [
-                {
-                  regex: \`/^Policy::arn:\${PDKNag.getStackPartitionRegex(
-                    stack
-                  )}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole$/g\`,
-                },
-              ],
-            },
-          ],
-          true
-        );
-      }
-    );
-
-    ['AwsSolutions-S1', 'AwsPrototyping-S3BucketLoggingEnabled'].forEach(
-      (RuleId) => {
-        NagSuppressions.addResourceSuppressions(
-          this,
-          [
-            {
-              id: RuleId,
-              reason: 'Access Log buckets should not have s3 bucket logging',
-            },
-          ],
-          true
-        );
-      }
-    );
-  };
+export class TestApp extends StaticWebsite {
+  constructor(scope: Construct, id: string) {
+    super(scope, id, {
+      websiteFilePath: url.fileURLToPath(
+        new URL('../../../../../../dist/test-app', import.meta.url)
+      ),
+    });
+  }
 }
 "
 `;
 
 exports[`cloudscape-website generator > should handle custom directory option > custom-dir-main.tsx 1`] = `
-"/*! Copyright [Amazon.com](http://amazon.com/), Inc. or its affiliates. All Rights Reserved.
-SPDX-License-Identifier: Apache-2.0 */
-import { NorthStarThemeProvider } from '@aws-northstar/ui';
-import React from 'react';
+"import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { I18nProvider } from '@cloudscape-design/components/i18n';
 import messages from '@cloudscape-design/components/i18n/messages/all.en';
 import App from './layouts/App';
 
+import '@cloudscape-design/global-styles/index.css';
+
 const root = document.getElementById('root');
 root &&
   createRoot(root).render(
     <React.StrictMode>
-      <NorthStarThemeProvider>
-        <I18nProvider locale="en" messages={[messages]}>
-          <BrowserRouter>
-            <App />
-          </BrowserRouter>
-        </I18nProvider>
-      </NorthStarThemeProvider>
+      <I18nProvider locale="en" messages={[messages]}>
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
+      </I18nProvider>
     </React.StrictMode>
   );
 "
@@ -549,12 +491,10 @@ root &&
 
 exports[`cloudscape-website generator > should handle npm scope prefix correctly > scoped-dependencies 1`] = `
 {
-  "@aws-northstar/ui": "^1.1.13",
-  "@aws/pdk": "^0.25.7",
   "@cloudscape-design/board-components": "^3.0.84",
   "@cloudscape-design/components": "^3.0.823",
+  "@cloudscape-design/global-styles": "^1.0.34",
   "aws-cdk-lib": "^2.166.0",
-  "cdk-nag": "^2.32.2",
   "constructs": "^10.4.2",
   "react": "18.3.1",
   "react-dom": "18.3.1",

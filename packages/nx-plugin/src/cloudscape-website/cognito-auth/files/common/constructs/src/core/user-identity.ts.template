@@ -1,78 +1,4 @@
-// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
-
-exports[`cognito-auth generator > should generate files > cognito-auth-component 1`] = `
-"import React, { PropsWithChildren, useContext } from 'react';
-import { RuntimeConfigContext } from '../RuntimeConfig';
-import { AuthProvider, AuthProviderProps, useAuth } from 'react-oidc-context';
-import { Alert, Spinner } from '@cloudscape-design/components';
-
-/**
- * Sets up the Cognito auth.
- *
- * This assumes a runtime-config.json file is present at '/'. In order for Auth to be set up automatically,
- * the runtime-config.json must have the cognitoProps set.
- */
-const CognitoAuth: React.FC<PropsWithChildren> = ({ children }) => {
-  const { cognitoProps } = useContext(RuntimeConfigContext);
-
-  if (!cognitoProps) {
-    return (
-      <Alert type="error" header="Runtime config configuration error">
-        The cognitoProps have not been configured in the runtime-config.json.
-      </Alert>
-    );
-  }
-
-  const cognitoAuthConfig: AuthProviderProps = {
-    authority: \`https://cognito-idp.\${cognitoProps.region}.amazonaws.com/\${cognitoProps.userPoolId}\`,
-    client_id: cognitoProps.userPoolWebClientId,
-    redirect_uri: window.location.origin,
-    response_type: 'code',
-    scope: 'email openid profile',
-  };
-
-  return (
-    <AuthProvider {...cognitoAuthConfig}>
-      <CognitoAuth_>{children}</CognitoAuth_>
-    </AuthProvider>
-  );
-};
-
-const CognitoAuth_: React.FC<PropsWithChildren> = ({ children }) => {
-  const auth = useAuth();
-
-  if (auth.isLoading) {
-    return <Spinner />;
-  }
-
-  if (auth.error) {
-    return (
-      <Alert type="error" header="Configuration error">
-        Error contacting Cognito. Please check your runtime-config.json is
-        configured with the correct endpoints.
-      </Alert>
-    );
-  }
-
-  if (auth.isAuthenticated) {
-    return children;
-  } else {
-    auth.signinRedirect();
-    return <Spinner />;
-  }
-};
-
-export default CognitoAuth;
-"
-`;
-
-exports[`cognito-auth generator > should generate files > identity-index 1`] = `
-"export * from "./user-identity.js";
-export * from './runtime-config.js';"
-`;
-
-exports[`cognito-auth generator > should generate files > user-identity 1`] = `
-"import {
+import {
   IdentityPool,
   UserPoolAuthenticationProvider,
 } from '@aws-cdk/aws-cognito-identitypool-alpha';
@@ -126,11 +52,11 @@ export class UserIdentity extends Construct {
       userPoolWebClientId: this.userPoolClient?.userPoolClientId,
     };
 
-    new CfnOutput(this, \`\${id}-UserPoolId\`, {
+    new CfnOutput(this, `${id}-UserPoolId`, {
       value: this.userPool.userPoolId,
     });
 
-    new CfnOutput(this, \`\${id}-IdentityPoolId\`, {
+    new CfnOutput(this, `${id}-IdentityPoolId`, {
       value: this.identityPool.identityPoolId,
     });
   }
@@ -152,7 +78,7 @@ export class UserIdentity extends Construct {
       signInCaseSensitive: false,
       signInAliases: { username: true, email: true },
       accountRecovery: AccountRecovery.EMAIL_ONLY,
-      selfSignUpEnabled: true,
+      selfSignUpEnabled: <%= allowSignup %>,
       standardAttributes: {
         phoneNumber: { required: false },
         email: { required: true },
@@ -171,7 +97,7 @@ export class UserIdentity extends Construct {
 
   private createUserPoolDomain = (userPool: UserPool) =>
     new CfnUserPoolDomain(this, 'UserPoolDomain', {
-      domain: 'test',
+      domain: '<%= cognitoDomain %>',
       userPoolId: userPool.userPoolId,
       managedLoginVersion: 2,
     });
@@ -181,10 +107,10 @@ export class UserIdentity extends Construct {
       produce: () =>
         [
           'http://localhost:4200',
-          \`https://\${Stack.of(this).region}.console.aws.amazon.com\`,
+          `https://${Stack.of(this).region}.console.aws.amazon.com`,
         ].concat(
           this.findCloudFrontDistributions().map(
-            (d) => \`https://\${d.domainName}\`
+            (d) => `https://${d.domainName}`
           )
         ),
     });
@@ -240,31 +166,3 @@ export class UserIdentity extends Construct {
       .node.findAll()
       .filter((child) => child instanceof Distribution);
 }
-"
-`;
-
-exports[`cognito-auth generator > should not be able to run the generator multiple times 1`] = `[Error: This generator has already been run on test-project.]`;
-
-exports[`cognito-auth generator > should update main.tsx when RuntimeConfigProvider exists > main-tsx-with-runtime-config 1`] = `
-"import CognitoAuth from './components/CognitoAuth';
-import RuntimeConfigProvider from './components/RuntimeConfig';
-import { RuntimeConfigProvider } from './components/RuntimeConfig';
-import { BrowserRouter } from 'react-router-dom';
-export function App() {
-  return (
-    <RuntimeConfigProvider>
-      <CognitoAuth>
-        <RuntimeConfigProvider>
-          <BrowserRouter>Hello World</BrowserRouter>
-        </RuntimeConfigProvider>
-      </CognitoAuth>
-    </RuntimeConfigProvider>
-  );
-}
-"
-`;
-
-exports[`cognito-auth generator > should update shared constructs index.ts > common/constructs-index 1`] = `
-"export * from "./user-identity.js";
-export * from './runtime-config.js';"
-`;

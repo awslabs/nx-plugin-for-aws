@@ -107,7 +107,7 @@ describe('infra generator', () => {
 
     // Test specific dependency values
     expect(packageJson.dependencies).toMatchObject({
-      '@aws/pdk': expect.any(String),
+      '@cdklabs/cdk-validator-cfnguard': expect.any(String),
       'aws-cdk-lib': expect.any(String),
       'aws-cdk': expect.any(String),
       esbuild: expect.any(String),

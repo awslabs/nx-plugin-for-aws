@@ -14,6 +14,7 @@ describe('cloudscape-website generator', () => {
     name: 'test-app',
     style: 'css',
     linter: Linter.EsLint,
+    addPlugin: false,
     unitTestRunner: 'vitest',
     bundler: 'vite',
   };
@@ -57,26 +58,41 @@ describe('cloudscape-website generator', () => {
 
     // Check shared constructs files
     expect(
-      tree.exists('packages/common/constructs/src/test-app/index.ts')
+      tree.exists('packages/common/constructs/src/app/static-websites/index.ts')
     ).toBeTruthy();
     expect(
-      tree.exists('packages/common/constructs/src/test-app/static-website.ts')
+      tree.exists('packages/common/constructs/src/app/static-websites/test-app.ts')
     ).toBeTruthy();
     expect(
       tree.exists(
-        'packages/common/constructs/src/test-app/cloudfront-web-acl.ts'
+        'packages/common/constructs/src/core/index.ts'
       )
     ).toBeTruthy();
+    expect(
+        tree.exists(
+          'packages/common/constructs/src/core/static-website.ts'
+        )
+      ).toBeTruthy();
 
     // Snapshot the shared constructs files
     expect(
-      tree.read('packages/common/constructs/src/test-app/index.ts')?.toString()
-    ).toMatchSnapshot('common/constructs-index.ts');
+      tree.read('packages/common/constructs/src/app/static-websites/index.ts')?.toString()
+    ).toMatchSnapshot('common/constructs-app-index.ts');
     expect(
       tree
-        .read('packages/common/constructs/src/test-app/static-website.ts')
+        .read('packages/common/constructs/src/app/static-websites/test-app.ts')
         ?.toString()
-    ).toMatchSnapshot('static-website.ts');
+    ).toMatchSnapshot('test-app.ts');
+    expect(
+        tree
+          .read('packages/common/constructs/src/core/index.ts')
+          ?.toString()
+      ).toMatchSnapshot('common/constructs-core-index.ts');
+      expect(
+        tree
+          .read('packages/common/constructs/src/core/static-website.ts')
+          ?.toString()
+      ).toMatchSnapshot('common/constructs-core-static-website.ts');
   });
 
   it('should update package.json with required dependencies', async () => {
@@ -86,7 +102,6 @@ describe('cloudscape-website generator', () => {
 
     // Check for Cloudscape dependencies
     expect(packageJson.dependencies).toMatchObject({
-      '@aws-northstar/ui': expect.any(String),
       '@cloudscape-design/components': expect.any(String),
       '@cloudscape-design/board-components': expect.any(String),
       'react-router-dom': expect.any(String),
@@ -95,8 +110,6 @@ describe('cloudscape-website generator', () => {
     // Check for AWS CDK dependencies
     expect(packageJson.dependencies).toMatchObject({
       constructs: expect.any(String),
-      '@aws/pdk': expect.any(String),
-      'cdk-nag': expect.any(String),
       'aws-cdk-lib': expect.any(String),
     });
   });

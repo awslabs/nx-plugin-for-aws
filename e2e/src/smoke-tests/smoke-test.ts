@@ -40,11 +40,11 @@ export const smokeTest = (pkgMgr: string) => {
         opts
       );
       await runCLI(
-        `generate @aws/nx-plugin:trpc#backend --apiName=my-api --apiNamespace=@e2e-test --no-interactive`,
+        `generate @aws/nx-plugin:trpc#backend --apiName=my-api --no-interactive`,
         opts
       );
       await runCLI(
-        `generate @aws/nx-plugin:cloudscape-website#cognito-auth --project=@e2e-test/website --no-interactive`,
+        `generate @aws/nx-plugin:cloudscape-website#cognito-auth --project=@e2e-test/website --cognitoDomain=test --no-interactive`,
         opts
       );
       await runCLI(

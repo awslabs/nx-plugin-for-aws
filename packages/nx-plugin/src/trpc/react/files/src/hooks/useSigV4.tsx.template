@@ -1,0 +1,35 @@
+import { AwsClient } from 'aws4fetch';
+import { CognitoIdentityClient } from '@aws-sdk/client-cognito-identity';
+import { fromCognitoIdentityPool } from '@aws-sdk/credential-provider-cognito-identity';
+import { RuntimeConfigContext } from '../components/RuntimeConfig';
+import { useCallback, useContext } from 'react';
+import { useAuth } from 'react-oidc-context';
+
+export const useSigV4 = () => {
+  const { cognitoProps } = useContext(RuntimeConfigContext);
+  const { user } = useAuth();
+
+  return useCallback(
+    async (input: RequestInfo | URL, init?: RequestInit | undefined) => {
+      if (!cognitoProps) {
+        throw new Error('cognitoProps is undefined!');
+      }
+
+      const credentialsFromCognitoIdentityPool = fromCognitoIdentityPool({
+        client: new CognitoIdentityClient({ region: cognitoProps?.region }),
+        identityPoolId: cognitoProps?.identityPoolId!,
+        logins: {
+          [`cognito-idp.${cognitoProps?.region}.amazonaws.com/${cognitoProps?.userPoolId}`]:
+            user?.id_token!,
+        },
+      });
+      const cognitoidentity = new CognitoIdentityClient({
+        credentials: credentialsFromCognitoIdentityPool,
+      });
+      const credential = await cognitoidentity.config.credentials();
+      const awsClient = new AwsClient(credential);
+      return awsClient.fetch(input, init);
+    },
+    [cognitoProps, user?.id_token]
+  );
+};

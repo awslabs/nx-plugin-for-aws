@@ -157,23 +157,25 @@ describe('runtime-config generator', () => {
 
     // Check if shared constructs were generated
     expect(
-      tree.exists('packages/common/constructs/src/runtime-config/index.ts')
-    ).toBeTruthy();
+        tree.exists(
+          'packages/common/constructs/src/core/index.ts'
+        )
+      ).toBeTruthy();
     expect(
       tree.exists(
-        'packages/common/constructs/src/runtime-config/runtime-config.ts'
+        'packages/common/constructs/src/core/runtime-config.ts'
       )
     ).toBeTruthy();
 
     // Snapshot the shared constructs files
     expect(
       tree
-        .read('packages/common/constructs/src/runtime-config/index.ts')
+        .read('packages/common/constructs/src/core/index.ts')
         ?.toString()
     ).toMatchSnapshot('common/constructs-index.ts');
     expect(
       tree
-        .read('packages/common/constructs/src/runtime-config/runtime-config.ts')
+        .read('packages/common/constructs/src/core/runtime-config.ts')
         ?.toString()
     ).toMatchSnapshot('runtime-config.ts');
   });

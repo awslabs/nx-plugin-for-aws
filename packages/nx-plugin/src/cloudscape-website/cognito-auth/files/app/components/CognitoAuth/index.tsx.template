@@ -1,9 +1,7 @@
-/*! Copyright [Amazon.com](http://amazon.com/), Inc. or its affiliates. All Rights Reserved.
-SPDX-License-Identifier: Apache-2.0 */
-import { CognitoAuth as NorthstarCognitoAuth } from '@aws-northstar/ui';
-import React, { useContext } from 'react';
-import Config from '../../config';
+import React, { PropsWithChildren, useContext } from 'react';
 import { RuntimeConfigContext } from '../RuntimeConfig';
+import { AuthProvider, AuthProviderProps, useAuth } from 'react-oidc-context';
+import { Alert, Spinner } from '@cloudscape-design/components';
 
 /**
  * Sets up the Cognito auth.
@@ -11,40 +9,60 @@ import { RuntimeConfigContext } from '../RuntimeConfig';
  * This assumes a runtime-config.json file is present at '/'. In order for Auth to be set up automatically,
  * the runtime-config.json must have the cognitoProps set.
  */
-const CognitoAuth: React.FC<any> = ({ children }) => {
-  const runtimeConfig = useContext(RuntimeConfigContext);
+const CognitoAuth: React.FC<PropsWithChildren> = ({ children }) => {
+  const { cognitoProps } = useContext(RuntimeConfigContext);
 
-  return runtimeConfig?.cognitoProps ? (
-    <NorthstarCognitoAuth
-      header={Config.applicationName}
-      userPoolId={runtimeConfig.cognitoProps.userPoolId}
-      clientId={runtimeConfig.cognitoProps.userPoolWebClientId}
-      region={runtimeConfig.cognitoProps.region}
-      identityPoolId={runtimeConfig.cognitoProps.identityPoolId}
-      <%if (allowSignup) {%>allowSignup={true}<% } %>
-      signUpAttributes={[
-        {
-          displayName: 'Email',
-          name: 'email',
-          required: true,
-        },
-        {
-          displayName: 'Given name',
-          name: 'given_name',
-          required: true,
-        },
-        {
-          displayName: 'Last name',
-          name: 'family_name',
-          required: true,
-        },
-      ]}
-    >
-      {children}
-    </NorthstarCognitoAuth>
-  ) : (
-    <></>
+  if (!cognitoProps) {
+    return (
+      <Alert
+        type="error"
+        header="Runtime config configuration error"
+      >
+        The cognitoProps have not been configured in the runtime-config.json.
+      </Alert>
+    );
+  }
+
+  const cognitoAuthConfig: AuthProviderProps = {
+    authority: `https://cognito-idp.${cognitoProps.region}.amazonaws.com/${cognitoProps.userPoolId}`,
+    client_id: cognitoProps.userPoolWebClientId,
+    redirect_uri: window.location.origin,
+    response_type: 'code',
+    scope: 'email openid profile',
+  };
+
+  return (
+    <AuthProvider {...cognitoAuthConfig}>
+      <CognitoAuth_>{children}</CognitoAuth_>
+    </AuthProvider>
   );
+};
+
+const CognitoAuth_: React.FC<PropsWithChildren> = ({ children }) => {
+  const auth = useAuth();
+
+  if (auth.isLoading) {
+    return <Spinner />;
+  }
+
+  if (auth.error) {
+    return (
+      <Alert
+        type="error"
+        header="Configuration error"
+      >
+        Error contacting Cognito. Please check your runtime-config.json is
+        configured with the correct endpoints.
+      </Alert>
+    );
+  }
+
+  if (auth.isAuthenticated) {
+    return children;
+  } else {
+    auth.signinRedirect();
+    return <Spinner />;
+  }
 };
 
 export default CognitoAuth;

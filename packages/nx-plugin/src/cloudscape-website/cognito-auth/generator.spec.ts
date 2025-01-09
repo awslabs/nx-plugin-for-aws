@@ -12,6 +12,7 @@ describe('cognito-auth generator', () => {
   let tree: Tree;
   const options: CognitoAuthGeneratorSchema = {
     project: 'test-project',
+    cognitoDomain: 'test',
     allowSignup: true,
   };
 
@@ -54,15 +55,10 @@ describe('cognito-auth generator', () => {
 
     // Verify shared constructs files are generated
     expect(
-      tree.exists('packages/common/constructs/src/identity/index.ts')
+      tree.exists('packages/common/constructs/src/core/user-identity.ts')
     ).toBeTruthy();
     expect(
-      tree.exists('packages/common/constructs/src/identity/user-identity.ts')
-    ).toBeTruthy();
-    expect(
-      tree.exists(
-        'packages/common/constructs/src/identity/userpool-with-mfa.ts'
-      )
+      tree.exists('packages/common/constructs/src/core/index.ts')
     ).toBeTruthy();
 
     // Create snapshot of the generated files
@@ -72,18 +68,13 @@ describe('cognito-auth generator', () => {
         .toString()
     ).toMatchSnapshot('cognito-auth-component');
     expect(
-      tree.read('packages/common/constructs/src/identity/index.ts').toString()
+      tree.read('packages/common/constructs/src/core/index.ts').toString()
     ).toMatchSnapshot('identity-index');
     expect(
       tree
-        .read('packages/common/constructs/src/identity/user-identity.ts')
+        .read('packages/common/constructs/src/core/user-identity.ts')
         .toString()
     ).toMatchSnapshot('user-identity');
-    expect(
-      tree
-        .read('packages/common/constructs/src/identity/userpool-with-mfa.ts')
-        .toString()
-    ).toMatchSnapshot('userpool-with-mfa');
   });
 
   it('should update main.tsx when RuntimeConfigProvider exists', async () => {
@@ -173,11 +164,11 @@ describe('cognito-auth generator', () => {
     await cognitoAuthGenerator(tree, options);
 
     const indexContent = tree
-      .read('packages/common/constructs/src/index.ts')
+      .read('packages/common/constructs/src/core/index.ts')
       .toString();
 
     // Verify identity export is added
-    expect(indexContent).toContain("export * from './identity/index.js'");
+    expect(indexContent).toContain('export * from "./user-identity.js"');
 
     // Create snapshot of the modified index
     expect(indexContent).toMatchSnapshot('common/constructs-index');
@@ -209,8 +200,9 @@ describe('cognito-auth generator', () => {
     expect(packageJson.dependencies).toMatchObject({
       constructs: expect.any(String),
       'aws-cdk-lib': expect.any(String),
-      '@aws/pdk': expect.any(String),
       '@aws-cdk/aws-cognito-identitypool-alpha': expect.any(String),
+      'oidc-client-ts': expect.any(String),
+      'react-oidc-context': expect.any(String)
     });
   });
 

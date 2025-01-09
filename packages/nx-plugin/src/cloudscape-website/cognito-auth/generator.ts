@@ -13,7 +13,16 @@ import {
 import { CognitoAuthGeneratorSchema as CognitoAuthGeneratorSchema } from './schema';
 import { runtimeConfigGenerator } from '../runtime-config/generator';
 import { tsquery, ast } from '@phenomnomnominal/tsquery';
-import { factory, ImportClause, JsxElement, SourceFile } from 'typescript';
+import {
+  ArrowFunction,
+  Block,
+  factory,
+  JsxElement,
+  JsxSelfClosingElement,
+  NodeFlags,
+  SyntaxKind,
+  VariableDeclaration,
+} from 'typescript';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
@@ -21,6 +30,14 @@ import {
 } from '../../utils/shared-constructs';
 import { withVersions } from '../../utils/versions';
 import { formatFilesInSubtree } from '../../utils/format';
+import {
+  addStarExport,
+  createJsxElement,
+  createJsxElementFromIdentifier,
+  destructuredImport,
+  replace,
+  singleImport,
+} from '../../utils/ast';
 
 export async function cognitoAuthGenerator(
   tree: Tree,
@@ -45,8 +62,8 @@ export async function cognitoAuthGenerator(
     PACKAGES_DIR,
     SHARED_CONSTRUCTS_DIR,
     'src',
-    'identity',
-    'index.ts'
+    'core',
+    'user-identity.ts'
   );
 
   generateFiles(
@@ -63,121 +80,348 @@ export async function cognitoAuthGenerator(
       joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR),
       {
         allowSignup: options.allowSignup,
+        cognitoDomain: options.cognitoDomain,
       }
     );
 
     addDependenciesToPackageJson(
       tree,
       withVersions([
-        'constructs',
-        'aws-cdk-lib',
-        '@aws/pdk',
+        'oidc-client-ts',
+        'react-oidc-context',
         '@aws-cdk/aws-cognito-identitypool-alpha',
       ]),
       {}
     );
 
-    const sharedConstructsIndexTsPath = joinPathFragments(
-      PACKAGES_DIR,
-      SHARED_CONSTRUCTS_DIR,
-      'src',
-      'index.ts'
+    addStarExport(
+      tree,
+      joinPathFragments(
+        PACKAGES_DIR,
+        SHARED_CONSTRUCTS_DIR,
+        'src',
+        'core',
+        'index.ts'
+      ),
+      './user-identity.js'
     );
-    const sharedConstructsIndexContents = tree
-      .read(sharedConstructsIndexTsPath)
-      .toString();
+  }
 
-    const identityExportDeclaration = factory.createExportDeclaration(
-      undefined,
-      undefined,
-      undefined,
-      factory.createStringLiteral('./identity/index.js', true)
+  const mainTsxPath = joinPathFragments(srcRoot, 'main.tsx');
+  singleImport(tree, mainTsxPath, 'CognitoAuth', './components/CognitoAuth');
+
+  replace(
+    tree,
+    mainTsxPath,
+    'JsxElement[openingElement.tagName.name="RuntimeConfigProvider"]',
+    (node: JsxElement) =>
+      createJsxElement(
+        node.openingElement,
+        [createJsxElementFromIdentifier('CognitoAuth', node.children)],
+        node.closingElement
+      )
+  );
+
+  // Update App Layout
+  const appLayoutTsxPath = joinPathFragments(
+    srcRoot,
+    'layouts',
+    'App',
+    'index.tsx'
+  );
+
+  if (tree.exists(appLayoutTsxPath)) {
+    const contents = tree.read(appLayoutTsxPath).toString();
+    let updatedContents = destructuredImport(
+      tree,
+      appLayoutTsxPath,
+      ['useAuth'],
+      'react-oidc-context'
     );
-    const updatedIndex = tsquery
+    updatedContents = tsquery
       .map(
-        ast(sharedConstructsIndexContents),
-        'SourceFile',
-        (node: SourceFile) => {
-          return {
-            ...node,
-            statements: [identityExportDeclaration, ...node.statements],
-          };
+        ast(updatedContents),
+        'VariableDeclaration',
+        (node: VariableDeclaration) => {
+          // Only process if this is the App component
+          if (node.name.getText() !== 'App') {
+            return node;
+          }
+          const arrowFunction = node.initializer as ArrowFunction;
+          const functionBody = arrowFunction.body as Block;
+
+          // Create our new declaration
+          const authDeclaration = factory.createVariableStatement(
+            undefined,
+            factory.createVariableDeclarationList(
+              [
+                factory.createVariableDeclaration(
+                  factory.createObjectBindingPattern([
+                    factory.createBindingElement(
+                      undefined,
+                      undefined,
+                      factory.createIdentifier('user'),
+                      undefined
+                    ),
+                    factory.createBindingElement(
+                      undefined,
+                      undefined,
+                      factory.createIdentifier('removeUser'),
+                      undefined
+                    ),
+                    factory.createBindingElement(
+                      undefined,
+                      undefined,
+                      factory.createIdentifier('signoutRedirect'),
+                      undefined
+                    ),
+                    factory.createBindingElement(
+                      undefined,
+                      undefined,
+                      factory.createIdentifier('clearStaleState'),
+                      undefined
+                    ),
+                  ]),
+                  undefined,
+                  undefined,
+                  factory.createCallExpression(
+                    factory.createIdentifier('useAuth'),
+                    undefined,
+                    []
+                  )
+                ),
+              ],
+              NodeFlags.Const
+            )
+          );
+
+          // Add as first statement
+          const newStatements = [authDeclaration, ...functionBody.statements];
+
+          // Create new arrow function with updated body
+          const newArrowFunction = factory.updateArrowFunction(
+            arrowFunction,
+            arrowFunction.modifiers,
+            arrowFunction.typeParameters,
+            arrowFunction.parameters,
+            arrowFunction.type,
+            arrowFunction.equalsGreaterThanToken,
+            factory.createBlock(newStatements, true)
+          );
+
+          // Update the variable declaration
+          return factory.updateVariableDeclaration(
+            node,
+            node.name,
+            node.exclamationToken,
+            node.type,
+            newArrowFunction
+          );
         }
       )
       .getFullText();
 
-    if (sharedConstructsIndexContents !== updatedIndex) {
-      tree.write(sharedConstructsIndexTsPath, updatedIndex);
-    }
-  }
-
-  const mainTsxPath = joinPathFragments(srcRoot, 'main.tsx');
-
-  if (!tree.exists(mainTsxPath)) {
-    throw new Error(
-      `Can only run this generator on a project which contains ${mainTsxPath}`
-    );
-  }
-
-  const mainTsxContents = tree.read(mainTsxPath).toString();
-
-  const authImport = factory.createImportDeclaration(
-    undefined,
-    factory.createImportClause(
-      false,
-      factory.createIdentifier('CognitoAuth'),
-      undefined
-    ) as ImportClause,
-    factory.createStringLiteral('./components/CognitoAuth', true)
-  );
-
-  const updatedImports = tsquery
-    .map(ast(mainTsxContents), 'SourceFile', (node: SourceFile) => {
-      return {
-        ...node,
-        statements: [authImport, ...node.statements],
-      };
-    })
-    .getFullText();
-
-  let locatedTargetNode = false;
-  const mainTsxUpdatedContents = tsquery
-    .map(ast(updatedImports), 'JsxElement', (node: JsxElement) => {
-      if (node.openingElement.tagName.getText() !== 'RuntimeConfigProvider') {
-        return node;
-      } else {
-        locatedTargetNode = true;
-      }
-
-      return factory.createJsxElement(
-        node.openingElement,
-        [
-          factory.createJsxElement(
-            factory.createJsxOpeningElement(
-              factory.createIdentifier('CognitoAuth'),
+    // TODO: update utils if they exist by appending to the array
+    updatedContents = tsquery
+      .map(
+        ast(updatedContents),
+        'JsxSelfClosingElement[tagName.text="TopNavigation"]',
+        (node: JsxSelfClosingElement) => {
+          // Create the utilities attribute
+          const utilitiesAttribute = factory.createJsxAttribute(
+            factory.createIdentifier('utilities'),
+            factory.createJsxExpression(
               undefined,
-              factory.createJsxAttributes([])
-            ),
-            node.children,
-            factory.createJsxClosingElement(
-              factory.createIdentifier('CognitoAuth')
+              factory.createArrayLiteralExpression(
+                [
+                  factory.createObjectLiteralExpression([
+                    factory.createPropertyAssignment(
+                      'type',
+                      factory.createStringLiteral('menu-dropdown')
+                    ),
+                    factory.createPropertyAssignment(
+                      'text',
+                      factory.createTemplateExpression(
+                        factory.createTemplateHead(''),
+                        [
+                          factory.createTemplateSpan(
+                            factory.createElementAccessChain(
+                              factory.createPropertyAccessChain(
+                                factory.createIdentifier('user'),
+                                factory.createToken(
+                                  SyntaxKind.QuestionDotToken
+                                ),
+                                factory.createIdentifier('profile')
+                              ),
+                              factory.createToken(SyntaxKind.QuestionDotToken),
+                              factory.createStringLiteral('cognito:username')
+                            ),
+                            factory.createTemplateTail('')
+                          ),
+                        ]
+                      )
+                    ),
+                    factory.createPropertyAssignment(
+                      'iconName',
+                      factory.createStringLiteral('user-profile-active')
+                    ),
+                    factory.createPropertyAssignment(
+                      'onItemClick',
+                      factory.createArrowFunction(
+                        undefined,
+                        undefined,
+                        [
+                          factory.createParameterDeclaration(
+                            undefined,
+                            undefined,
+                            factory.createIdentifier('e'),
+                            undefined,
+                            undefined,
+                            undefined
+                          ),
+                        ],
+                        undefined,
+                        factory.createToken(SyntaxKind.EqualsGreaterThanToken),
+                        factory.createBlock(
+                          [
+                            factory.createIfStatement(
+                              factory.createBinaryExpression(
+                                factory.createPropertyAccessExpression(
+                                  factory.createPropertyAccessExpression(
+                                    factory.createIdentifier('e'),
+                                    factory.createIdentifier('detail')
+                                  ),
+                                  factory.createIdentifier('id')
+                                ),
+                                factory.createToken(
+                                  SyntaxKind.EqualsEqualsToken
+                                ),
+                                factory.createStringLiteral('signout')
+                              ),
+                              factory.createBlock(
+                                [
+                                  factory.createExpressionStatement(
+                                    factory.createCallExpression(
+                                      factory.createIdentifier('removeUser'),
+                                      undefined,
+                                      []
+                                    )
+                                  ),
+                                  factory.createExpressionStatement(
+                                    factory.createCallExpression(
+                                      factory.createIdentifier(
+                                        'signoutRedirect'
+                                      ),
+                                      undefined,
+                                      [
+                                        factory.createObjectLiteralExpression([
+                                          factory.createPropertyAssignment(
+                                            'post_logout_redirect_uri',
+                                            factory.createPropertyAccessExpression(
+                                              factory.createPropertyAccessExpression(
+                                                factory.createIdentifier(
+                                                  'window'
+                                                ),
+                                                factory.createIdentifier(
+                                                  'location'
+                                                )
+                                              ),
+                                              factory.createIdentifier('origin')
+                                            )
+                                          ),
+                                          factory.createPropertyAssignment(
+                                            'extraQueryParams',
+                                            factory.createObjectLiteralExpression(
+                                              [
+                                                factory.createPropertyAssignment(
+                                                  'redirect_uri',
+                                                  factory.createPropertyAccessExpression(
+                                                    factory.createPropertyAccessExpression(
+                                                      factory.createIdentifier(
+                                                        'window'
+                                                      ),
+                                                      factory.createIdentifier(
+                                                        'location'
+                                                      )
+                                                    ),
+                                                    factory.createIdentifier(
+                                                      'origin'
+                                                    )
+                                                  )
+                                                ),
+                                                factory.createPropertyAssignment(
+                                                  'response_type',
+                                                  factory.createStringLiteral(
+                                                    'code'
+                                                  )
+                                                ),
+                                              ]
+                                            )
+                                          ),
+                                        ]),
+                                      ]
+                                    )
+                                  ),
+                                  factory.createExpressionStatement(
+                                    factory.createCallExpression(
+                                      factory.createIdentifier(
+                                        'clearStaleState'
+                                      ),
+                                      undefined,
+                                      []
+                                    )
+                                  ),
+                                ],
+                                true
+                              )
+                            ),
+                          ],
+                          true
+                        )
+                      )
+                    ),
+                    factory.createPropertyAssignment(
+                      'items',
+                      factory.createArrayLiteralExpression([
+                        factory.createObjectLiteralExpression([
+                          factory.createPropertyAssignment(
+                            'id',
+                            factory.createStringLiteral('signout')
+                          ),
+                          factory.createPropertyAssignment(
+                            'text',
+                            factory.createStringLiteral('Sign out')
+                          ),
+                        ]),
+                      ])
+                    ),
+                  ]),
+                ],
+                true
+              )
             )
-          ),
-        ],
-        node.closingElement
-      );
-    })
-    .getFullText();
+          );
 
-  if (!locatedTargetNode) {
-    throw new Error(
-      'Could not locate the RuntimeConfigProvider element in main.tsx'
-    );
-  }
+          // Add the utilities attribute to existing attributes
+          return factory.createJsxSelfClosingElement(
+            node.tagName,
+            node.typeArguments,
+            factory.createJsxAttributes([
+              ...node.attributes.properties,
+              utilitiesAttribute,
+            ])
+          );
+        }
+      )
+      .getFullText();
 
-  if (locatedTargetNode && mainTsxContents !== mainTsxUpdatedContents) {
-    tree.write(mainTsxPath, mainTsxUpdatedContents);
+    if (contents !== updatedContents) {
+      tree.write(appLayoutTsxPath, updatedContents);
+    }
+  } else {
+    console.info(`Skipping update to ${appLayoutTsxPath} as it does not exist.`);
   }
+  // End update App Layout
 
   await formatFilesInSubtree(tree, srcRoot);
 

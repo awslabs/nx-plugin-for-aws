@@ -16,7 +16,6 @@ describe('trpc backend generator', () => {
   it('should generate backend and schema projects', async () => {
     await trpcBackendGenerator(tree, {
       apiName: 'TestApi',
-      apiNamespace: 'test',
       directory: 'apps',
       unitTestRunner: 'vitest',
       bundler: 'vite',
@@ -43,7 +42,6 @@ describe('trpc backend generator', () => {
   it('should set up project configuration correctly', async () => {
     await trpcBackendGenerator(tree, {
       apiName: 'TestApi',
-      apiNamespace: 'test',
       directory: 'apps',
       unitTestRunner: 'vitest',
       bundler: 'vite',
@@ -62,7 +60,6 @@ describe('trpc backend generator', () => {
   it('should add required dependencies', async () => {
     await trpcBackendGenerator(tree, {
       apiName: 'TestApi',
-      apiNamespace: 'test',
       directory: 'apps',
       unitTestRunner: 'vitest',
       bundler: 'vite',
@@ -91,7 +88,6 @@ describe('trpc backend generator', () => {
   it('should set up shared constructs', async () => {
     await trpcBackendGenerator(tree, {
       apiName: 'TestApi',
-      apiNamespace: 'test',
       directory: 'apps',
       unitTestRunner: 'vitest',
       bundler: 'vite',
@@ -99,19 +95,25 @@ describe('trpc backend generator', () => {
 
     // Verify shared constructs setup
     expect(
-      tree.exists('packages/common/constructs/src/test-api/index.ts')
+      tree.exists('packages/common/constructs/src/app/trpc-apis/index.ts')
+    ).toBeTruthy();
+    expect(
+      tree.exists('packages/common/constructs/src/app/trpc-apis/test-api.ts')
     ).toBeTruthy();
 
     // Create snapshot of shared constructs file
     expect(
-      tree.read('packages/common/constructs/src/test-api/index.ts', 'utf-8')
-    ).toMatchSnapshot('shared-constructs.ts');
+      tree.read('packages/common/constructs/src/app/trpc-apis/index.ts', 'utf-8')
+    ).toMatchSnapshot('index.ts');
+    expect(
+      tree.read('packages/common/constructs/src/app/trpc-apis/test-api.ts', 'utf-8')
+    ).toMatchSnapshot('test-api.ts');
+    expect(
+      tree.read('packages/common/constructs/src/core/trpc-api.ts', 'utf-8')
+    ).toMatchSnapshot('trpc-api.ts');
 
-    // Verify shared constructs index was updated
-    const sharedConstructsIndex = tree.read(
-      'packages/common/constructs/src/index.ts',
-      'utf-8'
-    );
-    expect(sharedConstructsIndex).toContain('./test-api/index.js');
+    expect(
+      tree.read('packages/common/constructs/src/core/index.ts', 'utf-8')
+    ).toContain('./trpc-api.js');
   });
 });

@@ -11,17 +11,12 @@ import {
   Tree,
 } from '@nx/devkit';
 import { ReactGeneratorSchema } from './schema';
-import {
-  factory,
-  ImportClause,
-  JsxSelfClosingElement,
-  SourceFile,
-} from 'typescript';
-import { ast, tsquery } from '@phenomnomnominal/tsquery';
+import { JsxSelfClosingElement } from 'typescript';
 import { runtimeConfigGenerator } from '../../cloudscape-website/runtime-config/generator';
 import { toScopeAlias } from '../../utils/npm-scope';
 import { withVersions } from '../../utils/versions';
 import { formatFilesInSubtree } from '../../utils/format';
+import { createJsxElementFromIdentifier, replace, singleImport } from '../../utils/ast';
 
 export async function reactGenerator(
   tree: Tree,
@@ -57,74 +52,33 @@ export async function reactGenerator(
     'main.tsx'
   );
 
-  if (!tree.exists(mainTsxPath)) {
-    throw new Error(
-      `Could not find main.tsx in ${frontendProjectConfig.sourceRoot}`
-    );
-  }
-
-  const mainTsxContents = tree.read(mainTsxPath).toString();
-
-  const trpcProviderImport = factory.createImportDeclaration(
-    undefined,
-    factory.createImportClause(
-      false,
-      factory.createIdentifier('TRPCClientProvider'),
-      undefined
-    ) as ImportClause,
-    factory.createStringLiteral('./components/TRPCClientProvider')
+  singleImport(
+    tree,
+    mainTsxPath,
+    'TRPCClientProvider',
+    './components/TRPCClientProvider'
   );
 
-  const updatedImports = tsquery
-    .map(ast(mainTsxContents), 'SourceFile', (node: SourceFile) => {
-      return {
-        ...node,
-        statements: [trpcProviderImport, ...node.statements],
-      };
-    })
-    .getFullText();
-
-  let locatedNode = false;
-  const mainTsxUpdatedContents = tsquery
-    .map(
-      ast(updatedImports),
-      'JsxSelfClosingElement',
-      (node: JsxSelfClosingElement) => {
-        if (node.tagName.getText() !== 'App') {
-          return node;
-        } else {
-          locatedNode = true;
-        }
-
-        return factory.createJsxElement(
-          factory.createJsxOpeningElement(
-            factory.createIdentifier('TRPCClientProvider'),
-            undefined,
-            factory.createJsxAttributes([])
-          ),
-          [node],
-          factory.createJsxClosingElement(
-            factory.createIdentifier('TRPCClientProvider')
-          )
-        );
-      }
-    )
-    .getFullText();
-
-  if (!locatedNode) {
-    throw new Error('Could not locate App component in main.tsx');
-  }
-
-  if (mainTsxContents !== mainTsxUpdatedContents) {
-    tree.write(mainTsxPath, mainTsxUpdatedContents);
-  }
+  replace(
+    tree,
+    mainTsxPath,
+    'JsxSelfClosingElement[tagName.name="App"]',
+    (node: JsxSelfClosingElement) =>
+      createJsxElementFromIdentifier('TRPCClientProvider', [node])
+  );
 
   addDependenciesToPackageJson(
     tree,
     withVersions([
+      '@aws-sdk/client-cognito-identity',
+      '@aws-sdk/credential-provider-cognito-identity',
       '@trpc/client',
       '@trpc/react-query',
       '@tanstack/react-query',
+      'aws4fetch',
+      ...((options.auth === 'IAM'
+        ? ['oidc-client-ts', 'react-oidc-context']
+        : []) as any),
     ]),
     {}
   );
