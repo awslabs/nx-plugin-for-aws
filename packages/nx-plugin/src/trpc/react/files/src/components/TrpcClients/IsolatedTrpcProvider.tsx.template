@@ -1,0 +1,75 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import {
+  createTRPCReact,
+  httpBatchLink,
+  httpLink,
+  HTTPBatchLinkOptions,
+  HTTPLinkOptions,
+  splitLink,
+} from '@trpc/react-query';
+import {
+  useState,
+  FC,
+  createContext,
+  useMemo,
+  PropsWithChildren,
+} from 'react';
+<% if(auth === 'IAM') { %> import { useSigV4 } from '../../hooks/useSigV4'; <% } %>
+import { AnyTRPCRouter } from '@trpc/server';
+
+export interface IsolatedTrpcClientProviderProps extends PropsWithChildren {
+  readonly apiUrl: string;
+}
+
+export const createIsolatedTrpcClientProvider = <
+  TAppRouter extends AnyTRPCRouter,
+  TContext
+>() => {
+  const isolatedTrpcContext = createContext(null as any);
+  const trpc = createTRPCReact<TAppRouter, TContext>({
+    context: isolatedTrpcContext,
+  });
+
+  const IsolatedTrpcClientProvider: FC<IsolatedTrpcClientProviderProps> = ({
+    apiUrl,
+    children,
+  }) => {
+    const [queryClient] = useState(() => new QueryClient());
+    <% if(auth === 'IAM') { %> const sigv4Client = useSigV4(); <% } %>
+
+    const trpcClient = useMemo(() => {
+      const linkOptions: HTTPLinkOptions<any> & HTTPBatchLinkOptions<any> = {
+        url: apiUrl,
+        <% if(auth === 'IAM') { %> fetch: sigv4Client <% } %>
+      };
+
+      // @ts-ignore
+      return trpc.createClient({
+        links: [
+          splitLink({
+            condition(op) {
+              return op.context.skipBatch === true;
+            },
+            true: httpLink(linkOptions),
+            false: httpBatchLink(linkOptions),
+          }),
+        ],
+      });
+    }, [apiUrl, sigv4Client]);
+
+    return (
+      // @ts-ignore
+      <trpc.Provider client={trpcClient} queryClient={queryClient}>
+        <QueryClientProvider client={queryClient}>
+          {children}
+        </QueryClientProvider>
+        {/* @ts-ignore */}
+      </trpc.Provider>
+    );
+  };
+
+  return {
+    trpc,
+    Provider: IsolatedTrpcClientProvider,
+  };
+};

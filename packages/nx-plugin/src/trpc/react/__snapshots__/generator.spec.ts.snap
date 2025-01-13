@@ -1,121 +1,124 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`trpc react generator > should generate trpc react files > TRPCClientProvider.tsx 1`] = `
+exports[`trpc react generator > should generate trpc react files > TrpcClients-IsolatedTrpcProvider.tsx 1`] = `
 "import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { httpBatchLink } from '@trpc/react-query';
-import { useContext, useState, FC } from 'react';
-import { useTrpc } from '../../hooks/useTrpc';
+import {
+  createTRPCReact,
+  httpBatchLink,
+  httpLink,
+  HTTPBatchLinkOptions,
+  HTTPLinkOptions,
+  splitLink,
+} from '@trpc/react-query';
+import { useState, FC, createContext, useMemo, PropsWithChildren } from 'react';
+
+import { AnyTRPCRouter } from '@trpc/server';
+
+export interface IsolatedTrpcClientProviderProps extends PropsWithChildren {
+  readonly apiUrl: string;
+}
+
+export const createIsolatedTrpcClientProvider = <
+  TAppRouter extends AnyTRPCRouter,
+  TContext
+>() => {
+  const isolatedTrpcContext = createContext(null as any);
+  const trpc = createTRPCReact<TAppRouter, TContext>({
+    context: isolatedTrpcContext,
+  });
+
+  const IsolatedTrpcClientProvider: FC<IsolatedTrpcClientProviderProps> = ({
+    apiUrl,
+    children,
+  }) => {
+    const [queryClient] = useState(() => new QueryClient());
+
+    const trpcClient = useMemo(() => {
+      const linkOptions: HTTPLinkOptions<any> & HTTPBatchLinkOptions<any> = {
+        url: apiUrl,
+      };
+
+      // @ts-ignore
+      return trpc.createClient({
+        links: [
+          splitLink({
+            condition(op) {
+              return op.context.skipBatch === true;
+            },
+            true: httpLink(linkOptions),
+            false: httpBatchLink(linkOptions),
+          }),
+        ],
+      });
+    }, [apiUrl, sigv4Client]);
+
+    return (
+      // @ts-ignore
+      <trpc.Provider client={trpcClient} queryClient={queryClient}>
+        <QueryClientProvider client={queryClient}>
+          {children}
+        </QueryClientProvider>
+        {/* @ts-ignore */}
+      </trpc.Provider>
+    );
+  };
+
+  return {
+    trpc,
+    Provider: IsolatedTrpcClientProvider,
+  };
+};
+"
+`;
+
+exports[`trpc react generator > should generate trpc react files > TrpcClients-TrpcApis.tsx 1`] = `
+"import {
+  AppRouter as TestApiAppRouter,
+  Context as TestApiContext,
+} from 'backend';
+import { createIsolatedTrpcClientProvider } from './IsolatedTrpcProvider';
+export default {
+  TestApi: createIsolatedTrpcClientProvider<TestApiAppRouter, TestApiContext>(),
+};
+"
+`;
+
+exports[`trpc react generator > should generate trpc react files > TrpcClients-TrpcClientProviders.tsx 1`] = `
+"import TrpcApis from './TrpcApis';
 import { RuntimeConfigContext } from '../RuntimeConfig';
-
-const TRPCClientProvider: FC<any> = ({ children }) => {
-  const trpc = useTrpc();
+import { useContext, FC, PropsWithChildren } from 'react';
+const TrpcClientProviders: FC<PropsWithChildren> = ({ children }) => {
   const runtimeContext = useContext(RuntimeConfigContext);
-  const [queryClient] = useState(() => new QueryClient());
-
-  const [trpcClient] = useState(() =>
-    trpc.createClient({
-      links: [
-        httpBatchLink({
-          url: runtimeContext?.trpcApis?.['TestApi']!,
-        }),
-      ],
-    })
-  );
-
   return (
-    <trpc.Provider client={trpcClient} queryClient={queryClient}>
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    </trpc.Provider>
+    <TrpcApis.TestApi.Provider apiUrl={runtimeContext?.trpcApis?.TestApi!}>
+      {children}
+    </TrpcApis.TestApi.Provider>
   );
 };
-
-export default TRPCClientProvider;
+export default TrpcClientProviders;
 "
 `;
 
-exports[`trpc react generator > should generate trpc react files > useTrpc.tsx 1`] = `
-"import type { AppRouter } from 'backend';
-import { createTRPCReact } from '@trpc/react-query';
+exports[`trpc react generator > should generate trpc react files > TrpcClients-index.tsx 1`] = `
+"import TrpcClientProviders from './TrpcClientProviders';
+import _TrpcApis from './TrpcApis';
 
-const trpc = createTRPCReact<AppRouter>();
-export const useTrpc = () => trpc;
+export const TrpcApis = _TrpcApis;
+export default TrpcClientProviders;
 "
 `;
 
-exports[`trpc react generator > should handle IAM auth option > TRPCClientProvider-IAM.tsx 1`] = `
-"import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { httpBatchLink } from '@trpc/react-query';
-import { useContext, useState, FC } from 'react';
-import { useTrpc } from '../../hooks/useTrpc';
-import { RuntimeConfigContext } from '../RuntimeConfig';
-import useSigV4Client from '@aws-northstar/ui/components/CognitoAuth/hooks/useSigv4Client';
+exports[`trpc react generator > should generate trpc react files > useTestApi.tsx 1`] = `
+"import { TrpcApis } from '../components/TrpcClients';
 
-const TRPCClientProvider: FC<any> = ({ children }) => {
-  const trpc = useTrpc();
-  const runtimeContext = useContext(RuntimeConfigContext);
-  const [queryClient] = useState(() => new QueryClient());
-  const sigv4Client = useSigV4Client();
-
-  const [trpcClient] = useState(() =>
-    trpc.createClient({
-      links: [
-        httpBatchLink({
-          url: runtimeContext?.trpcApis?.['TestApi']!,
-          fetch: sigv4Client,
-        }),
-      ],
-    })
-  );
-
-  return (
-    <trpc.Provider client={trpcClient} queryClient={queryClient}>
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    </trpc.Provider>
-  );
-};
-
-export default TRPCClientProvider;
+export const useTestApi = () => TrpcApis.TestApi.trpc;
 "
 `;
 
-exports[`trpc react generator > should handle IAM auth option > TRPCClientProvider-IAM.tsx 2`] = `
-"import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { httpBatchLink } from '@trpc/react-query';
-import { useContext, useState, FC } from 'react';
-import { useTrpc } from '../../hooks/useTrpc';
-import { RuntimeConfigContext } from '../RuntimeConfig';
-import { useSigV4 } from '../../hooks/useSigV4';
-
-const TRPCClientProvider: FC<any> = ({ children }) => {
-  const trpc = useTrpc();
-  const runtimeContext = useContext(RuntimeConfigContext);
-  const [queryClient] = useState(() => new QueryClient());
-  const sigv4Client = useSigV4();
-
-  const [trpcClient] = useState(() =>
-    trpc.createClient({
-      links: [
-        httpBatchLink({
-          url: runtimeContext?.trpcApis?.['TestApi']!,
-          fetch: sigv4Client,
-        }),
-      ],
-    })
-  );
-
-  return (
-    <trpc.Provider client={trpcClient} queryClient={queryClient}>
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    </trpc.Provider>
-  );
-};
-
-export default TRPCClientProvider;
-"
-`;
+exports[`trpc react generator > should handle IAM auth option > TRPCClientProvider-IAM.tsx 1`] = `null`;
 
 exports[`trpc react generator > should modify main.tsx correctly > main.tsx 1`] = `
-"import TRPCClientProvider from './components/TRPCClientProvider';
+"import TrpcClientProviders from './components/TrpcClients';
 import RuntimeConfigProvider from './components/RuntimeConfig';
 import { App } from './app';
 import { BrowserRouter } from 'react-router-dom';
@@ -123,9 +126,9 @@ export function Main() {
   return (
     <RuntimeConfigProvider>
       <BrowserRouter>
-        <TRPCClientProvider>
+        <TrpcClientProviders>
           <App />
-        </TRPCClientProvider>
+        </TrpcClientProviders>
       </BrowserRouter>
     </RuntimeConfigProvider>
   );

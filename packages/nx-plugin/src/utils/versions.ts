@@ -26,7 +26,7 @@ export const VERSIONS = {
   esbuild: '^0.24.0',
   'oidc-client-ts': '^3.1.0',
   'react-oidc-context': '^3.2.0',
-  'react-router-dom': '^6.28.0',
+  'react-router-dom': '^7.1.1',
   'source-map-support': '^0.5.21',
   tsx: '^4.19.2',
   zod: '^3.23.8',

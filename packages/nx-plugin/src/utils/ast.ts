@@ -12,6 +12,7 @@ import {
 import {
   factory,
   ImportClause,
+  ImportSpecifier,
   JsxChild,
   JsxClosingElement,
   JsxOpeningElement,
@@ -33,21 +34,49 @@ export const destructuredImport = (
   assertFilePath(tree, filePath);
 
   const contents = tree.read(filePath).toString();
+  const sourceAst = ast(contents);
+
+  // Check if any of the variables are already imported from the same module
+  const existingImports: ImportSpecifier[] = tsquery.query(
+    sourceAst,
+    `ImportDeclaration[moduleSpecifier.text="${from}"] ImportClause ImportSpecifier`
+  );
+
+  const existingVariables = new Set(
+    existingImports.map((node) => {
+      const importSpecifier = node as ImportSpecifier;
+      return importSpecifier.name.escapedText.toString();
+    })
+  );
+
+  // Filter out variables that are already imported
+  const newVariables = variableNames.filter(
+    (name) =>
+      !existingVariables.has(
+        name.includes(' as ') ? name.split(' as ')[1] : name
+      )
+  );
+
+  if (newVariables.length === 0) {
+    return contents;
+  }
 
   const destructuredImport = factory.createImportDeclaration(
     undefined,
     factory.createImportClause(
       false,
       undefined,
-      factory.createNamedImports(
-        variableNames.map((variableName) =>
-          factory.createImportSpecifier(
+      factory.createNamedImports([
+        ...existingImports,
+        ...newVariables.map((variableName) => {
+          const [name, alias] = variableName.split(' as ');
+          return factory.createImportSpecifier(
             false,
-            undefined,
-            factory.createIdentifier(variableName)
-          )
-        )
-      )
+            alias ? factory.createIdentifier(name) : undefined,
+            factory.createIdentifier(alias || name)
+          );
+        }),
+      ])
     ) as ImportClause,
     factory.createStringLiteral(from, true)
   );
@@ -76,6 +105,17 @@ export const singleImport = (
 ): string => {
   assertFilePath(tree, filePath);
   const contents = tree.read(filePath).toString();
+  const sourceAst = ast(contents);
+
+  // Check if the import already exists
+  const existingImports = tsquery.query(
+    sourceAst,
+    `ImportDeclaration[moduleSpecifier.text="${from}"] ImportClause > Identifier[text="${variableName}"]`
+  );
+
+  if (existingImports.length > 0) {
+    return contents;
+  }
 
   const importDeclaration = factory.createImportDeclaration(
     undefined,

@@ -58,20 +58,35 @@ export function Main() {
 
     // Verify generated files
     expect(
-      tree.exists('apps/frontend/src/components/TRPCClientProvider')
+      tree.exists('apps/frontend/src/components/TrpcClients/index.tsx')
     ).toBeTruthy();
-    expect(tree.exists('apps/frontend/src/hooks/useTrpc.tsx')).toBeTruthy();
+    expect(tree.exists('apps/frontend/src/hooks/useTestApi.tsx')).toBeTruthy();
 
     // Create snapshots of generated files
     expect(
-      tree.read('apps/frontend/src/hooks/useTrpc.tsx', 'utf-8')
-    ).toMatchSnapshot('useTrpc.tsx');
+      tree.read('apps/frontend/src/hooks/useTestApi.tsx', 'utf-8')
+    ).toMatchSnapshot('useTestApi.tsx');
+    expect(
+      tree.read('apps/frontend/src/components/TrpcClients/index.tsx', 'utf-8')
+    ).toMatchSnapshot('TrpcClients-index.tsx');
     expect(
       tree.read(
-        'apps/frontend/src/components/TRPCClientProvider/index.tsx',
+        'apps/frontend/src/components/TrpcClients/IsolatedTrpcProvider.tsx',
         'utf-8'
       )
-    ).toMatchSnapshot('TRPCClientProvider.tsx');
+    ).toMatchSnapshot('TrpcClients-IsolatedTrpcProvider.tsx');
+    expect(
+      tree.read(
+        'apps/frontend/src/components/TrpcClients/TrpcApis.tsx',
+        'utf-8'
+      )
+    ).toMatchSnapshot('TrpcClients-TrpcApis.tsx');
+    expect(
+      tree.read(
+        'apps/frontend/src/components/TrpcClients/TrpcClientProviders.tsx',
+        'utf-8'
+      )
+    ).toMatchSnapshot('TrpcClients-TrpcClientProviders.tsx');
   });
 
   it('should modify main.tsx correctly', async () => {
