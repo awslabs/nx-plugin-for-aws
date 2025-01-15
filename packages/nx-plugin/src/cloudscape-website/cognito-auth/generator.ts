@@ -10,6 +10,12 @@ import {
   addDependenciesToPackageJson,
   installPackagesTask,
 } from '@nx/devkit';
+import {
+  TYPE_DEFINITIONS_DIR,
+  PACKAGES_DIR,
+  SHARED_CONSTRUCTS_DIR,
+  sharedConstructsGenerator,
+} from '../../utils/shared-constructs';
 import { CognitoAuthGeneratorSchema as CognitoAuthGeneratorSchema } from './schema';
 import { runtimeConfigGenerator } from '../runtime-config/generator';
 import { tsquery, ast } from '@phenomnomnominal/tsquery';
@@ -22,12 +28,9 @@ import {
   NodeFlags,
   SyntaxKind,
   VariableDeclaration,
+  InterfaceDeclaration,
+  SourceFile,
 } from 'typescript';
-import {
-  PACKAGES_DIR,
-  SHARED_CONSTRUCTS_DIR,
-  sharedConstructsGenerator,
-} from '../../utils/shared-constructs';
 import { withVersions } from '../../utils/versions';
 import { formatFilesInSubtree } from '../../utils/format';
 import {
@@ -58,6 +61,109 @@ export async function cognitoAuthGenerator(
   });
 
   await sharedConstructsGenerator(tree);
+
+  // Add ICognitoProps interface and update IRuntimeConfig
+  const runtimeConfigPath = joinPathFragments(
+    PACKAGES_DIR,
+    TYPE_DEFINITIONS_DIR,
+    'src',
+    'runtime-config.ts'
+  );
+  const runtimeConfigContent = tree.read(runtimeConfigPath).toString();
+  const sourceFile = ast(runtimeConfigContent);
+
+  // Check if ICognitoProps interface exists
+  const existingCognitoProps = tsquery.query(
+    sourceFile,
+    'InterfaceDeclaration[name.text="ICognitoProps"]'
+  );
+
+  // Check if cognitoProps property exists in IRuntimeConfig
+  const existingCognitoPropsInConfig = tsquery.query(
+    sourceFile,
+    'InterfaceDeclaration[name.text="IRuntimeConfig"] PropertySignature[name.text="cognitoProps"]'
+  );
+
+  let updatedContent = sourceFile;
+
+  // Add ICognitoProps interface if it doesn't exist
+  if (existingCognitoProps.length === 0) {
+    const cognitoPropsInterface = factory.createInterfaceDeclaration(
+      [factory.createModifier(SyntaxKind.ExportKeyword)],
+      factory.createIdentifier('ICognitoProps'),
+      undefined,
+      undefined,
+      [
+        factory.createPropertySignature(
+          undefined,
+          factory.createIdentifier('region'),
+          undefined,
+          factory.createKeywordTypeNode(SyntaxKind.StringKeyword)
+        ),
+        factory.createPropertySignature(
+          undefined,
+          factory.createIdentifier('identityPoolId'),
+          undefined,
+          factory.createKeywordTypeNode(SyntaxKind.StringKeyword)
+        ),
+        factory.createPropertySignature(
+          undefined,
+          factory.createIdentifier('userPoolId'),
+          undefined,
+          factory.createKeywordTypeNode(SyntaxKind.StringKeyword)
+        ),
+        factory.createPropertySignature(
+          undefined,
+          factory.createIdentifier('userPoolWebClientId'),
+          undefined,
+          factory.createKeywordTypeNode(SyntaxKind.StringKeyword)
+        ),
+      ]
+    );
+
+    updatedContent = tsquery.map(
+      updatedContent,
+      'SourceFile',
+      (node: SourceFile) => {
+        return factory.updateSourceFile(node, [
+          cognitoPropsInterface,
+          ...node.statements,
+        ]);
+      }
+    );
+  }
+
+  // Add cognitoProps to IRuntimeConfig if it doesn't exist
+  if (existingCognitoPropsInConfig.length === 0) {
+    updatedContent = tsquery.map(
+      updatedContent,
+      'InterfaceDeclaration[name.text="IRuntimeConfig"]',
+      (node: InterfaceDeclaration) => {
+        return factory.updateInterfaceDeclaration(
+          node,
+          node.modifiers,
+          node.name,
+          node.typeParameters,
+          node.heritageClauses,
+          [
+            ...node.members,
+            factory.createPropertySignature(
+              undefined,
+              factory.createIdentifier('cognitoProps'),
+              undefined,
+              factory.createTypeReferenceNode('ICognitoProps', undefined)
+            ),
+          ]
+        );
+      }
+    );
+  }
+
+  // Only write if changes were made
+  if (updatedContent !== sourceFile) {
+    tree.write(runtimeConfigPath, updatedContent.getFullText());
+  }
+
   const identityPath = joinPathFragments(
     PACKAGES_DIR,
     SHARED_CONSTRUCTS_DIR,
@@ -294,7 +400,7 @@ export async function cognitoAuthGenerator(
                                   factory.createIdentifier('id')
                                 ),
                                 factory.createToken(
-                                  SyntaxKind.EqualsEqualsToken
+                                  SyntaxKind.EqualsEqualsEqualsToken
                                 ),
                                 factory.createStringLiteral('signout')
                               ),
@@ -419,7 +525,9 @@ export async function cognitoAuthGenerator(
       tree.write(appLayoutTsxPath, updatedContents);
     }
   } else {
-    console.info(`Skipping update to ${appLayoutTsxPath} as it does not exist.`);
+    console.info(
+      `Skipping update to ${appLayoutTsxPath} as it does not exist.`
+    );
   }
   // End update App Layout
 

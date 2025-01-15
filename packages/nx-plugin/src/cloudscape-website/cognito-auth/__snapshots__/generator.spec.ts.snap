@@ -1,10 +1,10 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
 exports[`cognito-auth generator > should generate files > cognito-auth-component 1`] = `
-"import React, { PropsWithChildren, useContext } from 'react';
-import { RuntimeConfigContext } from '../RuntimeConfig';
+"import React, { PropsWithChildren, useEffect } from 'react';
 import { AuthProvider, AuthProviderProps, useAuth } from 'react-oidc-context';
 import { Alert, Spinner } from '@cloudscape-design/components';
+import { useRuntimeConfig } from '../../hooks/useRuntimeConfig';
 
 /**
  * Sets up the Cognito auth.
@@ -13,7 +13,7 @@ import { Alert, Spinner } from '@cloudscape-design/components';
  * the runtime-config.json must have the cognitoProps set.
  */
 const CognitoAuth: React.FC<PropsWithChildren> = ({ children }) => {
-  const { cognitoProps } = useContext(RuntimeConfigContext);
+  const { cognitoProps } = useRuntimeConfig();
 
   if (!cognitoProps) {
     return (
@@ -33,97 +33,30 @@ const CognitoAuth: React.FC<PropsWithChildren> = ({ children }) => {
 
   return (
     <AuthProvider {...cognitoAuthConfig}>
-      <CognitoAuth_>{children}</CognitoAuth_>
+      <CognitoAuthInternal>{children}</CognitoAuthInternal>
     </AuthProvider>
   );
 };
 
-const CognitoAuth_: React.FC<PropsWithChildren> = ({ children }) => {
+const CognitoAuthInternal: React.FC<PropsWithChildren> = ({ children }) => {
   const auth = useAuth();
 
-  if (auth.isLoading) {
-    return <Spinner />;
-  }
+  useEffect(() => {
+    if (!auth.isAuthenticated && !auth.isLoading) {
+      auth.signinRedirect();
+    }
+  }, [auth]);
 
-  if (auth.error) {
+  if (auth.isAuthenticated) {
+    return children;
+  } else if (auth.error) {
     return (
       <Alert type="error" header="Configuration error">
         Error contacting Cognito. Please check your runtime-config.json is
         configured with the correct endpoints.
       </Alert>
     );
-  }
-
-  if (auth.isAuthenticated) {
-    return children;
   } else {
-    auth.signinRedirect();
-    return <Spinner />;
-  }
-};
-
-export default CognitoAuth;
-"
-`;
-
-exports[`cognito-auth generator > should generate files > cognito-auth-component 2`] = `
-"import React, { PropsWithChildren, useContext } from 'react';
-import { RuntimeConfigContext } from '../RuntimeConfig';
-import { AuthProvider, AuthProviderProps, useAuth } from 'react-oidc-context';
-import { Alert, Spinner } from '@cloudscape-design/components';
-
-/**
- * Sets up the Cognito auth.
- *
- * This assumes a runtime-config.json file is present at '/'. In order for Auth to be set up automatically,
- * the runtime-config.json must have the cognitoProps set.
- */
-const CognitoAuth: React.FC<PropsWithChildren> = ({ children }) => {
-  const { cognitoProps } = useContext(RuntimeConfigContext);
-
-  if (!cognitoProps) {
-    return (
-      <Alert type="error" header="Runtime config configuration error">
-        The cognitoProps have not been configured in the runtime-config.json.
-      </Alert>
-    );
-  }
-
-  const cognitoAuthConfig: AuthProviderProps = {
-    authority: \`https://cognito-idp.\${cognitoProps.region}.amazonaws.com/\${cognitoProps.userPoolId}\`,
-    client_id: cognitoProps.userPoolWebClientId,
-    redirect_uri: window.location.origin,
-    response_type: 'code',
-    scope: 'email openid profile',
-  };
-
-  return (
-    <AuthProvider {...cognitoAuthConfig}>
-      <CognitoAuth_>{children}</CognitoAuth_>
-    </AuthProvider>
-  );
-};
-
-const CognitoAuth_: React.FC<PropsWithChildren> = ({ children }) => {
-  const auth = useAuth();
-
-  if (auth.isLoading) {
-    return <Spinner />;
-  }
-
-  if (auth.error) {
-    return (
-      <Alert type="error" header="Configuration error">
-        Error contacting Cognito. Please check your runtime-config.json is
-        configured with the correct endpoints.
-      </Alert>
-    );
-  }
-
-  if (auth.isAuthenticated) {
-    return children;
-  } else {
-    auth.signinRedirect();
     return <Spinner />;
   }
 };
@@ -133,13 +66,8 @@ export default CognitoAuth;
 `;
 
 exports[`cognito-auth generator > should generate files > identity-index 1`] = `
-"export * from "./user-identity.js";
-export * from './runtime-config.js';"
-`;
-
-exports[`cognito-auth generator > should generate files > identity-index 2`] = `
-"export * from "./user-identity.js";
-export * from './runtime-config.js';"
+"export * from './runtime-config.js';
+"
 `;
 
 exports[`cognito-auth generator > should generate files > user-identity 1`] = `
@@ -193,180 +121,8 @@ export class UserIdentity extends Construct {
     RuntimeConfig.ensure(this).config.cognitoProps = {
       region: Stack.of(this).region,
       identityPoolId: this.identityPool.identityPoolId,
-      userPoolId: this.userPool?.userPoolId,
-      userPoolWebClientId: this.userPoolClient?.userPoolClientId,
-    };
-
-    new CfnOutput(this, \`\${id}-UserPoolId\`, {
-      value: this.userPool.userPoolId,
-    });
-
-    new CfnOutput(this, \`\${id}-IdentityPoolId\`, {
-      value: this.identityPool.identityPoolId,
-    });
-  }
-
-  private createUserPool = () =>
-    new UserPool(this, 'UserPool', {
-      deletionProtection: true,
-      passwordPolicy: {
-        minLength: 8,
-        requireLowercase: true,
-        requireUppercase: true,
-        requireDigits: true,
-        requireSymbols: true,
-        tempPasswordValidity: Duration.days(3),
-      },
-      mfa: Mfa.REQUIRED,
-      featurePlan: FeaturePlan.ESSENTIALS,
-      mfaSecondFactor: { sms: true, otp: true },
-      signInCaseSensitive: false,
-      signInAliases: { username: true, email: true },
-      accountRecovery: AccountRecovery.EMAIL_ONLY,
-      selfSignUpEnabled: true,
-      standardAttributes: {
-        phoneNumber: { required: false },
-        email: { required: true },
-        givenName: { required: true },
-        familyName: { required: true },
-      },
-      autoVerify: {
-        email: true,
-        phone: true,
-      },
-      keepOriginal: {
-        email: true,
-        phone: true,
-      },
-    });
-
-  private createUserPoolDomain = (userPool: UserPool) =>
-    new CfnUserPoolDomain(this, 'UserPoolDomain', {
-      domain: 'test',
-      userPoolId: userPool.userPoolId,
-      managedLoginVersion: 2,
-    });
-
-  private createUserPoolClient = (userPool: UserPool) => {
-    const lazilyComputedCallbackUrls = Lazy.list({
-      produce: () =>
-        [
-          'http://localhost:4200',
-          \`https://\${Stack.of(this).region}.console.aws.amazon.com\`,
-        ].concat(
-          this.findCloudFrontDistributions().map(
-            (d) => \`https://\${d.domainName}\`
-          )
-        ),
-    });
-
-    return userPool.addClient(WEB_CLIENT_ID, {
-      authFlows: {
-        userPassword: true,
-        userSrp: true,
-        user: true,
-      },
-      oAuth: {
-        flows: {
-          authorizationCodeGrant: true,
-        },
-        scopes: [OAuthScope.EMAIL, OAuthScope.OPENID, OAuthScope.PROFILE],
-        callbackUrls: lazilyComputedCallbackUrls,
-        logoutUrls: lazilyComputedCallbackUrls,
-      },
-      preventUserExistenceErrors: true,
-    });
-  };
-
-  private createIdentityPool = (
-    userPool: UserPool,
-    userPoolClient: UserPoolClient
-  ) => {
-    const identityPool = new IdentityPool(this, 'IdentityPool');
-
-    identityPool.addUserPoolAuthentication(
-      new UserPoolAuthenticationProvider({
-        userPool,
-        userPoolClient,
-      })
-    );
-
-    return identityPool;
-  };
-
-  private createManagedLoginBranding = (
-    userPool: UserPool,
-    userPoolClient: UserPoolClient,
-    userPoolDomain: CfnUserPoolDomain
-  ) => {
-    new CfnManagedLoginBranding(this, 'ManagedLoginBranding', {
-      userPoolId: userPool.userPoolId,
-      clientId: userPoolClient.userPoolClientId,
-      useCognitoProvidedValues: true,
-    }).node.addDependency(userPoolClient, userPool, userPoolDomain);
-  };
-
-  private findCloudFrontDistributions = (): Distribution[] =>
-    Stack.of(this)
-      .node.findAll()
-      .filter((child) => child instanceof Distribution);
-}
-"
-`;
-
-exports[`cognito-auth generator > should generate files > user-identity 2`] = `
-"import {
-  IdentityPool,
-  UserPoolAuthenticationProvider,
-} from '@aws-cdk/aws-cognito-identitypool-alpha';
-import { CfnOutput, Duration, Lazy, Stack } from 'aws-cdk-lib';
-import {
-  AccountRecovery,
-  CfnManagedLoginBranding,
-  CfnUserPoolDomain,
-  FeaturePlan,
-  Mfa,
-  OAuthScope,
-  UserPool,
-  UserPoolClient,
-} from 'aws-cdk-lib/aws-cognito';
-import { Construct } from 'constructs';
-import { RuntimeConfig } from './runtime-config.js';
-import { Distribution } from 'aws-cdk-lib/aws-cloudfront';
-
-const WEB_CLIENT_ID = 'WebClient';
-/**
- * Creates a UserPool and Identity Pool with sane defaults configured intended for usage from a web client.
- */
-export class UserIdentity extends Construct {
-  public readonly region: string;
-  public readonly identityPool: IdentityPool;
-  public readonly userPool: UserPool;
-  public readonly userPoolClient: UserPoolClient;
-  public readonly userPoolDomain: CfnUserPoolDomain;
-
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
-
-    this.region = Stack.of(this).region;
-    this.userPool = this.createUserPool();
-    this.userPoolDomain = this.createUserPoolDomain(this.userPool);
-    this.userPoolClient = this.createUserPoolClient(this.userPool);
-    this.identityPool = this.createIdentityPool(
-      this.userPool,
-      this.userPoolClient
-    );
-    this.createManagedLoginBranding(
-      this.userPool,
-      this.userPoolClient,
-      this.userPoolDomain
-    );
-
-    RuntimeConfig.ensure(this).config.cognitoProps = {
-      region: Stack.of(this).region,
-      identityPoolId: this.identityPool.identityPoolId,
-      userPoolId: this.userPool?.userPoolId,
-      userPoolWebClientId: this.userPoolClient?.userPoolClientId,
+      userPoolId: this.userPool.userPoolId,
+      userPoolWebClientId: this.userPoolClient.userPoolClientId,
     };
 
     new CfnOutput(this, \`\${id}-UserPoolId\`, {

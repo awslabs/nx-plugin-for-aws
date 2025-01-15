@@ -3,12 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { Tree } from '@nx/devkit';
-import {
-  ast,
-  NodeTransformer,
-  StringTransformer,
-  tsquery,
-} from '@phenomnomnominal/tsquery';
+import { ast, NodeTransformer, tsquery } from '@phenomnomnominal/tsquery';
 import {
   factory,
   ImportClause,

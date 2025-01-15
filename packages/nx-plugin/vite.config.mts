@@ -30,7 +30,8 @@ export default defineConfig({
     pool: 'threads',
     poolOptions: {
       threads: {
-        isolate: false,
+        isolate: true,
+        singleThread: true
       },
     },
     sequence: {
@@ -39,6 +40,6 @@ export default defineConfig({
     testTimeout: 60000,
     hookTimeout: 60000,
     retry: 3,
-    dangerouslyIgnoreUnhandledErrors: true,
+    dangerouslyIgnoreUnhandledErrors: false,
   },
 });

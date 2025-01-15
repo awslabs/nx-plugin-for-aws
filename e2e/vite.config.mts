@@ -22,7 +22,8 @@ export default defineConfig({
     pool: 'threads',
     poolOptions: {
       threads: {
-        isolate: false,
+        isolate: true,
+        singleThread: true
       },
     },
   },

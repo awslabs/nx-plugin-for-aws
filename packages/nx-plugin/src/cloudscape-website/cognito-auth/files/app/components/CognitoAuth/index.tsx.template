@@ -1,7 +1,7 @@
-import React, { PropsWithChildren, useContext } from 'react';
-import { RuntimeConfigContext } from '../RuntimeConfig';
+import React, { PropsWithChildren, useEffect } from 'react';
 import { AuthProvider, AuthProviderProps, useAuth } from 'react-oidc-context';
 import { Alert, Spinner } from '@cloudscape-design/components';
+import { useRuntimeConfig } from '../../hooks/useRuntimeConfig';
 
 /**
  * Sets up the Cognito auth.
@@ -10,7 +10,7 @@ import { Alert, Spinner } from '@cloudscape-design/components';
  * the runtime-config.json must have the cognitoProps set.
  */
 const CognitoAuth: React.FC<PropsWithChildren> = ({ children }) => {
-  const { cognitoProps } = useContext(RuntimeConfigContext);
+  const { cognitoProps } = useRuntimeConfig();
 
   if (!cognitoProps) {
     return (
@@ -33,34 +33,30 @@ const CognitoAuth: React.FC<PropsWithChildren> = ({ children }) => {
 
   return (
     <AuthProvider {...cognitoAuthConfig}>
-      <CognitoAuth_>{children}</CognitoAuth_>
+      <CognitoAuthInternal>{children}</CognitoAuthInternal>
     </AuthProvider>
   );
 };
 
-const CognitoAuth_: React.FC<PropsWithChildren> = ({ children }) => {
+const CognitoAuthInternal: React.FC<PropsWithChildren> = ({ children }) => {
   const auth = useAuth();
 
-  if (auth.isLoading) {
-    return <Spinner />;
-  }
+  useEffect(() => {
+    if (!auth.isAuthenticated && !auth.isLoading) {
+      auth.signinRedirect();
+    }
+  }, [auth])
 
-  if (auth.error) {
+  if (auth.isAuthenticated) {
+    return children;
+  } else if (auth.error) {
     return (
-      <Alert
-        type="error"
-        header="Configuration error"
-      >
+      <Alert type="error" header="Configuration error">
         Error contacting Cognito. Please check your runtime-config.json is
         configured with the correct endpoints.
       </Alert>
     );
-  }
-
-  if (auth.isAuthenticated) {
-    return children;
   } else {
-    auth.signinRedirect();
     return <Spinner />;
   }
 };

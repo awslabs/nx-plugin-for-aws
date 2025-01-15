@@ -64,7 +64,17 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
       sourceRoot: `${websiteContentPath}/src`,
       projectType: 'application',
       tags: [],
-      targets: {},
+      targets: {
+        'load:runtime-config': {
+          executor: 'nx:run-commands',
+          metadata: {
+            description: `Load runtime config from your deployed stack for dev purposes. You must set the AWS_REGION and CDK_APP_DIR env variables whilst calling i.e: AWS_REGION=ap-southeast-2 CDK_APP_DIR=./dist/packages/infra/cdk.out pnpm exec nx run ${fullyQualifiedName}:load:runtime-config`,
+          },
+          options: {
+            command: `cdk-app WebsiteBucket get --key runtime-config.json './${websiteContentPath}/public/runtime-config.json'`,
+          },
+        },
+      },
     });
   }
 
@@ -140,22 +150,30 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
       );
     }
 
-    addStarExport(tree, joinPathFragments(
+    addStarExport(
+      tree,
+      joinPathFragments(
         PACKAGES_DIR,
         SHARED_CONSTRUCTS_DIR,
         'src',
         'app',
         'index.ts'
-      ), './static-websites/index.js');
+      ),
+      './static-websites/index.js'
+    );
 
-    addStarExport(tree, joinPathFragments(
+    addStarExport(
+      tree,
+      joinPathFragments(
         PACKAGES_DIR,
         SHARED_CONSTRUCTS_DIR,
         'src',
         'app',
         'static-websites',
         'index.ts'
-      ), `./${websiteNameKebabCase}.js`);
+      ),
+      `./${websiteNameKebabCase}.js`
+    );
 
     if (shouldGenerateCoreStaticWebsiteConstruct) {
       addStarExport(
@@ -340,7 +358,7 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
       '@cloudscape-design/global-styles',
       'react-router-dom',
     ]),
-    {}
+    withVersions(['cdk-app-cli'])
   );
 
   await formatFilesInSubtree(tree, websiteContentPath);

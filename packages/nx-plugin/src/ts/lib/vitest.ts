@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
+import { readNxJson, Tree, updateNxJson } from '@nx/devkit';
 import { tsquery } from '@phenomnomnominal/tsquery';
 import { join } from 'path';
 import ts from 'typescript';
@@ -106,4 +106,19 @@ export const configureVitest = (
       printer.printNode(ts.EmitHint.Unspecified, sourceFile, originalSourceFile)
     );
   }
+
+  const nxJson = readNxJson(tree);
+  updateNxJson(tree, {
+    ...nxJson,
+    targetDefaults: {
+      ...(nxJson.targetDefaults ?? {}),
+      test: {
+        configurations: {
+          'update-snapshot': {
+            args: '--update',
+          },
+        },
+      },
+    },
+  });
 };

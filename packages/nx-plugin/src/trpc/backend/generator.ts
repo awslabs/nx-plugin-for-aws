@@ -18,8 +18,6 @@ import {
   SHARED_CONSTRUCTS_DIR,
   sharedConstructsGenerator,
 } from '../../utils/shared-constructs';
-import { factory, SourceFile } from 'typescript';
-import { ast, tsquery } from '@phenomnomnominal/tsquery';
 import tsLibGenerator from '../../ts/lib/generator';
 import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
 import { withVersions } from '../../utils/versions';

@@ -11,6 +11,7 @@ import {
 import { getNpmScopePrefix, toScopeAlias } from './npm-scope';
 import tsLibGenerator from '../ts/lib/generator';
 import { withVersions } from './versions';
+import { formatFilesInSubtree } from './format';
 
 export const PACKAGES_DIR = 'packages';
 export const TYPE_DEFINITIONS_NAME = 'common-types';
@@ -20,6 +21,8 @@ export const SHARED_CONSTRUCTS_DIR = 'common/constructs';
 
 export async function sharedConstructsGenerator(tree: Tree) {
   const npmScopePrefix = getNpmScopePrefix(tree);
+
+  updateGitignore(tree);
 
   if (
     !tree.exists(
@@ -40,6 +43,11 @@ export async function sharedConstructsGenerator(tree: Tree) {
       joinPathFragments(__dirname, 'files', TYPE_DEFINITIONS_DIR),
       joinPathFragments(PACKAGES_DIR, TYPE_DEFINITIONS_DIR),
       {}
+    );
+
+    formatFilesInSubtree(
+      tree,
+      joinPathFragments(PACKAGES_DIR, TYPE_DEFINITIONS_DIR)
     );
   }
 
@@ -67,6 +75,11 @@ export async function sharedConstructsGenerator(tree: Tree) {
       }
     );
 
+    formatFilesInSubtree(
+      tree,
+      joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR)
+    );
+
     addDependenciesToPackageJson(
       tree,
       withVersions(['constructs', 'aws-cdk-lib']),
@@ -74,3 +87,16 @@ export async function sharedConstructsGenerator(tree: Tree) {
     );
   }
 }
+
+const updateGitignore = (tree: Tree) => {
+  const gitignore = tree.exists('.gitignore')
+    ? tree.read('.gitignore', 'utf-8')
+    : '';
+
+  const regex = /runtime-config.json/gm;
+  const hasRuntimeConfig = regex.test(gitignore ?? '');
+  if (hasRuntimeConfig) {
+    return;
+  }
+  tree.write('.gitignore', `${gitignore}\n\nruntime-config.json`);
+};
