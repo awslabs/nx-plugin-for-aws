@@ -1,0 +1,1282 @@
+#
+#####################################
+##           Gherkin               ##
+#####################################
+#
+# Rule Identifier:
+#    AUTOSCALING_LAUNCH_CONFIG_PUBLIC_IP_DISABLED
+#
+# Description:
+#   Checks that Amazon EC2 Auto Scaling launch configurations are configured to not associate public IP addresses
+#
+# Reports on:
+#    AWS::AutoScaling::LaunchConfiguration
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# Scenarios:
+# a) SKIP: when there are no AutoScaling::LaunchConfiguration resource present
+# b) SKIP: when metada has rule suppression for AUTOSCALING_LAUNCH_CONFIG_PUBLIC_IP_DISABLED
+# c) FAIL: when all AutoScaling::LaunchConfiguration resources AssociatePublicIpAddress property does not exist
+# d) FAIL: when all AutoScaling::LaunchConfiguration resources have AssociatePublicIpAddress set to true
+# e) PASS: when all AutoScaling::LaunchConfiguration resources AssociatePublicIpAddress property is set to false
+
+#
+# Select all AutoScaling Launch Configuration resources from incoming template (payload)
+#
+let autoscaling_launch_config_public_ip_disabled = Resources.*[ Type == "AWS::AutoScaling::LaunchConfiguration"
+  Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "AUTOSCALING_LAUNCH_CONFIG_PUBLIC_IP_DISABLED"
+]
+
+rule AUTOSCALING_LAUNCH_CONFIG_PUBLIC_IP_DISABLED when %autoscaling_launch_config_public_ip_disabled !empty {
+    %autoscaling_launch_config_public_ip_disabled.Properties {
+        AssociatePublicIpAddress exists
+        AssociatePublicIpAddress == false
+        <<
+    Guard Rule Set: aws-prototyping
+    Controls: AutoScalingLaunchConfigPublicIpDisabled    
+            Violation: Amazon EC2 Auto Scaling launch configurations are configured to not associate public IP addresses
+            Fix: Explicitly set the AssociatePublicIpAddress attribute to false.
+        >>
+    }
+}
+
+#
+#####################################
+##           Gherkin               ##
+#####################################
+# Rule Identifier:
+#    CLOUDFRONT_ORIGIN_ACCESS_CONTROL_ENABLED
+#
+# Description:
+#  Checks if Amazon CloudFront distributions backed by S3 are configured with an Origin Access Control (OAC).
+#
+# Reports on:
+#    AWS::CloudFront::Distribution
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# Scenarios:
+# a) SKIP: when there are no CloudFront Distribution Resources
+# b) SKIP: when metadata has rule suppression for CLOUDFRONT_ORIGIN_ACCESS_IDENTITY_ENABLED
+# c) FAIL: when CloudFront Distribution Resources have a Legacy S3 Origin configuration present
+# d) FAIL: when CloudFront Distribution Resources have an S3 Origin configured without an Origin Access Identity (OAI)
+# e) PASS: when CloudFront Distribution Resources do not have an S3 Origin configured
+# f) PASS: when CloudFront Distribution Resources have an S3 Origin configured with an Origin Access Identity (OAI)
+
+#
+# Select all CloudFront Distribution Resources from incoming template (payload)
+#
+let cloudfront_origin_access_control_enabled_resources = Resources.*[ Type == 'AWS::CloudFront::Distribution'
+  Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "CLOUDFRONT_ORIGIN_ACCESS_CONTROL_ENABLED"
+]
+
+rule CLOUDFRONT_ORIGIN_ACCESS_CONTROL_ENABLED when %cloudfront_origin_access_control_enabled_resources !empty {
+  let doc = this  
+  %cloudfront_origin_access_control_enabled_resources.Properties.DistributionConfig {
+    S3Origin not exists
+
+    when Origins exists
+         Origins is_list
+         Origins not empty {
+
+      Origins [
+        DomainName == /(.*)\.s3(-external-\d|[-\.][a-z]*-[a-z]*-[0-9])?\.amazonaws\.com(\.cn)?$/ or
+        DomainName {
+          'Fn::GetAtt' {
+              this is_list
+              this[1] == "DomainName" or
+              this[1] == "RegionalDomainName"
+              
+              let resource_logical_name = this[0]
+              let referenced_resource = %doc.Resources[ keys == %resource_logical_name ]            
+              
+              %referenced_resource not empty
+              %referenced_resource {
+                  Type == "AWS::S3::Bucket"    
+              }
+          }
+        }
+      ] {
+        OriginAccessControlId exists
+        OriginAccessControlId is_struct
+        <<
+    Guard Rule Set: aws-prototyping
+    Controls: CloudFrontDistributionS3OriginAccessControl    
+          Violation: CloudFront Distributions backed by S3 must be configured with an Origin Access Control (OAC).
+          Fix: Set the OriginAccessControlId property for CloudFront Distribution Origins backed by S3.
+        >>
+      }
+    }
+  } 
+}
+
+#
+#####################################
+##           Gherkin               ##
+#####################################
+#
+# Rule Identifier:
+#    CODEBUILD_PROJECT_ENVVAR_AWSCRED_CHECK
+#
+# Description:
+#   Checks whether the project contains environment variables AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
+#
+# Reports on:
+#    AWS::CodeBuild::Project
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# Scenarios:
+# a) SKIP: when there are no AWS::CodeBuild::Project resources
+# b) SKIP: when metada has rule suppression for CODEBUILD_PROJECT_ENVVAR_AWSCRED_CHECK
+# c) FAIL: environment variables AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are present
+# d) PASS: when environment variables AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are not present
+
+#
+# Select all Code Build resources from incoming template (payload)
+#
+let codebuild_project_envvar_awscred_check = Resources.*[ Type == "AWS::CodeBuild::Project"
+  Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "CODEBUILD_PROJECT_ENVVAR_AWSCRED_CHECK"
+]
+let disallowed_names = ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]
+
+rule CODEBUILD_PROJECT_ENVVAR_AWSCRED_CHECK when %codebuild_project_envvar_awscred_check !empty {
+	%codebuild_project_envvar_awscred_check.Properties {
+		Environment !exists OR
+		Environment {
+			EnvironmentVariables !exists OR
+			EnvironmentVariables [
+				Type == "PLAINTEXT"
+			] { 
+				Name NOT IN %disallowed_names
+					<<
+    Guard Rule Set: aws-prototyping
+    Controls: CodeBuildProjectEnvVarAwsCred    
+						Violation: AWS CodeBuild Projects are not configured with environment variables that contain credentials in PLAINTEXT 
+						Fix: Remove environment variables that contain credentials in PLAINTEXT ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY")
+					>>
+			}
+		}
+	}
+}
+
+#
+#####################################
+##          AWS Solutions          ##
+#####################################
+#
+# Rule Identifier:
+#   COGNITO_ALLOW_UNAUTHENTICATED_IDENTITIES_RULE
+#
+# Description:
+#   AWS::Cognito::IdentityPool AllowUnauthenticatedIdentities property should be false. But CAN be true if proper restrictive IAM roles and permissions are established for unauthenticated users.
+#
+# Reports on:
+#   AWS::Cognito::IdentityPool
+#
+# Evaluates:
+#   AWS CloudFormation
+#
+# Rule Parameters:
+#   None
+#
+# CFN_NAG Rule Id:
+#   W57
+#
+# Scenarios:
+# a) SKIP: when there are no Cognito Identity Pool Resources.
+# b) SKIP: when metadata has rule suppression for COGNITO_ALLOW_UNAUTHENTICATED_IDENTITIES_RULE.
+# c) FAIL: when AllowUnauthenticatedIdentities in Cognito Identity Pool Resources is set to true.
+# d) PASS:  when AllowUnauthenticatedIdentities in Cognito Identity Pool Resources is set to false.
+
+#
+# Select all Cognito Identity Pool Resources from incoming template (payload)
+#
+let cognito_allow_unauthenticated_identities_rule = Resources.*[ Type == 'AWS::Cognito::IdentityPool'
+  Metadata.cfn_nag.rules_to_suppress not exists or
+  Metadata.cfn_nag.rules_to_suppress.*.id != "W57"
+  Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "COGNITO_ALLOW_UNAUTHENTICATED_IDENTITIES_RULE"
+]
+
+rule COGNITO_ALLOW_UNAUTHENTICATED_IDENTITIES_RULE when %cognito_allow_unauthenticated_identities_rule !empty {
+  let violations = %cognito_allow_unauthenticated_identities_rule[
+    Type == 'AWS::Cognito::IdentityPool'
+    Properties.AllowUnauthenticatedIdentities == /(?i)true/
+    OR
+    Properties.AllowUnauthenticatedIdentities == true
+    OR
+    Properties.AllowUnauthenticatedIdentities == True
+    OR
+    Properties.AllowUnauthenticatedIdentities == TRUE
+  ]
+
+  %violations empty
+  <<
+    Guard Rule Set: aws-prototyping
+    Controls: CognitoUserPoolNoUnauthenticatedLogins    
+   Violation: AllowUnauthenticatedIdentities in Cognito Identity Pool Resources is set to true.
+   Fix: set AllowUnauthenticatedIdentities to false in Cognito Identity Pool Resources.
+  >>
+}
+
+#
+#####################################
+##           Gherkin               ##
+#####################################
+# Rule Identifier:
+#    DMS_REPLICATION_NOT_PUBLIC
+#
+# Description:
+#   Checks whether AWS Database Migration Service replication instances are not set to allow public.
+#
+# Reports on:
+#    AWS::DMS::ReplicationInstance
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# Scenarios:
+# a) SKIP: when there is no DMS Replication Instance present
+# b) FAIL: When DMS Replication Instance is present and PubliclyAccessible property is set to true
+# c) PASS: When DMS Replication Instance is present and PubliclyAccessible property is set to false
+# c) FAIL: When DMS Replication Instance is present and PubliclyAccessible property is not set
+# d) SKIP: when metadata has rule suppression for DMS_REPLICATION_NOT_PUBLIC or cfn_nag W91
+
+#
+# Select all DMS ReplicationInstance resources from incoming template
+#
+
+let dms_replication_instances = Resources.*[ Type == 'AWS::DMS::ReplicationInstance'
+  Metadata.cfn_nag.rules_to_suppress not exists or
+  Metadata.cfn_nag.rules_to_suppress.*.id != "W91"
+  Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "DMS_REPLICATION_NOT_PUBLIC"
+]
+
+rule DMS_REPLICATION_NOT_PUBLIC when %dms_replication_instances !empty {
+  %dms_replication_instances.Properties.PubliclyAccessible exists
+  %dms_replication_instances.Properties.PubliclyAccessible == false
+  <<
+    Guard Rule Set: aws-prototyping
+    Controls: DMSReplicationNotPublic    
+    Violation: AWS Database Migration Service replication instances should not be public.
+    Fix: Set the DMS Replication Instance property PubliclyAccessible parameter to false.
+  >>
+}
+
+#
+#####################################
+##           Gherkin               ##
+#####################################
+# Rule Identifier:
+#    EC2_INSTANCES_IN_VPC
+#
+# Description:
+#    Checks if your EC2 instances belong to a virtual private cloud (VPC).
+#
+# Reports on:
+#    AWS::EC2::Instance
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# Scenarios:
+# a) SKIP: when there are no EC2 resource present
+# b) PASS: when all EC2 resources have the SubnetId property set
+# c) FAIL: when any EC2 resources do not have the SubnetId property set
+# d) SKIP: when metadata includes the suppression for rule EC2_INSTANCES_IN_VPC
+
+#
+# Select all ECS Instance resources from incoming template (payload)
+#
+let ec2_instances_in_vpc = Resources.*[ Type == 'AWS::EC2::Instance' 
+  Metadata.guard.SuppressedRules not exists or 
+  Metadata.guard.SuppressedRules.* != "EC2_INSTANCES_IN_VPC"
+]
+
+rule EC2_INSTANCES_IN_VPC when %ec2_instances_in_vpc !empty {
+  %ec2_instances_in_vpc.Properties.SubnetId !empty
+  <<
+    Guard Rule Set: aws-prototyping
+    Controls: EC2InstancesInVPC    
+  	Violation: EC2 Instances must belong to a VPC
+  	Fix: set the SubnetId property to a subnet ID
+  >>
+}
+#
+#####################################
+##           Gherkin               ##
+#####################################
+# Rule Identifier:
+#    RESTRICTED_INCOMING_TRAFFIC
+#
+# Description:
+#    Checks if the security groups in use do not allow unrestricted incoming TCP traffic to the specified ports. 
+#
+# Reports on:
+#    AWS::EC2::SecurityGroup
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# Scenarios:
+# a) SKIP: when there are no Security Groups resource present
+# b) SKIP when there are no TCP or UDP ingress rules
+# c) PASS: when all Security Groups do no allow any of the restricted common ports
+# d) FAIL: when a Security Group allows any of the restricted common ports
+# e) SKIP: when metadata includes the suppression for rule RESTRICTED_INCOMING_TRAFFIC
+
+#
+# Select all Security Group resources from incoming template (payload)
+#
+let aws_security_groups_restricted_incoming_traffic = Resources.*[ Type == 'AWS::EC2::SecurityGroup' 
+	some Properties.SecurityGroupIngress[*] {
+		IpProtocol in ['tcp', 'udp']
+	}
+  Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "RESTRICTED_INCOMING_TRAFFIC"
+]
+
+rule RESTRICTED_INCOMING_TRAFFIC when %aws_security_groups_restricted_incoming_traffic !empty {
+	let violations = %aws_security_groups_restricted_incoming_traffic[
+		Type == 'AWS::EC2::SecurityGroup'
+		some Properties.SecurityGroupIngress[*] {
+			FromPort in [ 20, 21, 3389, 3306, 4333 ]
+      ToPort in [ 20, 21, 3389, 3306, 4333 ]
+		}
+	]
+	%violations empty 
+	<<
+    Guard Rule Set: aws-prototyping
+    Controls: EC2RestrictedCommonPorts    
+		Violation: Security groups must not allow unrestricted incoming TCP/UDP traffic to the specified ports [20, 21, 3389, 3306, 4333].
+		Fix: change the FromPort and ToPort properties in the SecurityGroupIngress list 
+	>>
+}
+#
+#####################################
+##           Gherkin               ##
+#####################################
+# Rule Identifier:
+#    RESTRICTED_INCOMING_TRAFFIC
+#
+# Description:
+#    Checks if the security groups in use do not allow unrestricted incoming TCP traffic to the specified ports. 
+#
+# Reports on:
+#    AWS::EC2::SecurityGroup
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# Scenarios:
+# a) SKIP: when there are no Security Groups resource present
+# b) SKIP when there are no TCP or UDP ingress rules
+# c) PASS: when all Security Groups do no allow any of the restricted common ports
+# d) FAIL: when a Security Group allows any of the restricted common ports
+# e) SKIP: when metadata includes the suppression for rule RESTRICTED_INCOMING_TRAFFIC
+
+#
+# Select all Security Group resources from incoming template (payload)
+#
+let aws_security_groups_restricted_incoming_traffic = Resources.*[ Type == 'AWS::EC2::SecurityGroup' 
+	some Properties.SecurityGroupIngress[*] {
+		IpProtocol in ['tcp', 'udp']
+	}
+  Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "RESTRICTED_INCOMING_TRAFFIC"
+]
+
+rule RESTRICTED_INCOMING_TRAFFIC when %aws_security_groups_restricted_incoming_traffic !empty {
+	let violations = %aws_security_groups_restricted_incoming_traffic[
+		Type == 'AWS::EC2::SecurityGroup'
+		some Properties.SecurityGroupIngress[*] {
+			FromPort in [ 20, 21, 3389, 3306, 4333 ]
+      ToPort in [ 20, 21, 3389, 3306, 4333 ]
+		}
+	]
+	%violations empty 
+	<<
+    Guard Rule Set: aws-prototyping
+    Controls: EC2RestrictedCommonPorts    
+		Violation: Security groups must not allow unrestricted incoming TCP/UDP traffic to the specified ports [20, 21, 3389, 3306, 4333].
+		Fix: change the FromPort and ToPort properties in the SecurityGroupIngress list 
+	>>
+}
+#
+#####################################
+##          AWS Solutions          ##
+#####################################
+# Rule Identifier:
+#    EC2_SECURITY_GROUP_INGRESS_OPEN_TO_WORLD_RULE
+#
+# Description:
+#   Check if cidr FOR ipv4 and ipv6 on security group ingress is open or private.
+#
+# Reports on:
+#    [AWS::EC2::SecurityGroupIngress, AWS::EC2::SecurityGroup]
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# CFN_NAG Rule Id:
+#   W2
+#
+# Scenarios:
+# a) SKIP: when there are no Security Ingress Groups resource present
+# b) PASS: When all Security Ingress Groups do not use open to world cidr
+# c) FAIL: when any Security Ingress Groups uses open to world cidr
+# d) SKIP: when metadata has rule suppression for EC2_SECURITY_GROUP_INGRESS_OPEN_TO_WORLD_RULE
+
+#
+# Select all Security Group Ingress resources from incoming template (payload)
+#
+
+let ec2_security_group_ingress_open_to_world_rule_sg_ingress_resources = Resources.*[ Type == 'AWS::EC2::SecurityGroup'
+  Metadata.cfn_nag.rules_to_suppress not exists or
+  Metadata.cfn_nag.rules_to_suppress.*.id != "W2"
+  Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "EC2_SECURITY_GROUP_INGRESS_OPEN_TO_WORLD_RULE"
+]
+
+let ec2_security_group_ingress_open_to_world_rule_sgi_resources = Resources.*[ Type == 'AWS::EC2::SecurityGroupIngress'
+  Metadata.cfn_nag.rules_to_suppress not exists or
+  Metadata.cfn_nag.rules_to_suppress.*.id != "W2"
+  Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "EC2_SECURITY_GROUP_INGRESS_OPEN_TO_WORLD_RULE"
+]
+
+rule EC2_SECURITY_GROUP_INGRESS_OPEN_TO_WORLD_RULE when %ec2_security_group_ingress_open_to_world_rule_sgi_resources !empty OR %ec2_security_group_ingress_open_to_world_rule_sg_ingress_resources !empty {
+  let violations_sg = %ec2_security_group_ingress_open_to_world_rule_sg_ingress_resources[
+    Type == 'AWS::EC2::SecurityGroup'
+    Properties.SecurityGroupIngress exists
+    some Properties.SecurityGroupIngress[*].CidrIp == '0.0.0.0/0'
+    OR
+    some Properties.SecurityGroupIngress[*].CidrIpv6 == '::/0'
+  ]
+
+  let violations_sgi = %ec2_security_group_ingress_open_to_world_rule_sgi_resources[
+    Type == 'AWS::EC2::SecurityGroupIngress'
+    Properties.CidrIp == '0.0.0.0/0'
+    OR
+    Properties.CidrIpv6 == '::/0'
+  ]
+
+  %violations_sg empty
+  %violations_sgi empty
+  <<
+    Guard Rule Set: aws-prototyping
+    Controls: EC2RestrictedInbound    
+    Violation: Security Group Ingress has a range of ports instead of a single port
+    Fix: Use single port instead of range of ports for ingress rules
+  >>
+}
+
+#
+#####################################
+##           Gherkin               ##
+#####################################
+# Rule Identifier:
+#    INCOMING_SSH_DISABLED
+#
+# Description:
+#    Checks if the incoming SSH traffic for the security groups is accessible. 
+#
+# Reports on:
+#    AWS::EC2::SecurityGroup
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# Scenarios:
+# a) SKIP: when no Security Group resources are present
+# b) SKIP: when no SSH ingress is defined (port 22)
+# c) PASS: when all Security Groups resources restrict the IP address of the incoming SSH traffic
+# d) FAIL: when a Security Group allows SSH traffic from any IP address (0.0.0.0/0). 
+# e) SKIP: hen metadata includes the suppression for rule INCOMING_SSH_DISABLED
+
+#
+# Select all Security Group resources from incoming template (payload)
+#
+let aws_security_groups_restricted_ssh = Resources.*[ 
+	Type == 'AWS::EC2::SecurityGroup'
+	some Properties.SecurityGroupIngress[*] {
+		ToPort == 22
+		FromPort == 22
+		IpProtocol == "tcp"
+	}
+  Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "INCOMING_SSH_DISABLED"
+]
+
+rule INCOMING_SSH_DISABLED when %aws_security_groups_restricted_ssh !empty {
+	%aws_security_groups_restricted_ssh.Properties.SecurityGroupIngress[*] != {CidrIp:"0.0.0.0/0", ToPort:22, FromPort:22, IpProtocol:"tcp"}
+  <<
+    Guard Rule Set: aws-prototyping
+    Controls: EC2RestrictedSSH    
+    Violation: IP addresses of the incoming SSH traffic in the security groups are restricted (CIDR other than 0.0.0.0/0)
+    Fix: set SecurityGroupIngress.CidrIp property to a more restrictive CIDR than 0.0.0.0/0
+  >>
+}
+#
+#####################################
+##           Gherkin               ##
+#####################################
+# Rule Identifier:
+#    EKS_ENDPOINT_NO_PUBLIC_ACCESS
+#
+# Description:
+#   Checks whether Amazon Elastic Kubernetes Service (Amazon EKS) endpoint is not publicly accessible.
+#
+# Reports on:
+#    AWS::EKS::Cluster
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# Scenarios:
+# a) SKIP: when there are no EKS clusters present
+# b) PASS: when all EKS cluster endpoints are not publicly accessible
+# c) FAIL: when any EKS cluster endpoints are publicly accessible
+# d) SKIP: when metada has rule suppression for EKS_ENDPOINT_NO_PUBLIC_ACCESS
+
+#
+# Select all EKS cluster resources from incoming template (payload)
+#
+
+let amazon_eks_clusters_endpoint_no_public_access = Resources.*[ Type == 'AWS::EKS::Cluster'
+  Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "EKS_ENDPOINT_NO_PUBLIC_ACCESS"
+]
+
+rule EKS_ENDPOINT_NO_PUBLIC_ACCESS when %amazon_eks_clusters_endpoint_no_public_access !empty {
+    # ensure the optional parameter is specified in the template
+    %amazon_eks_clusters_endpoint_no_public_access.Properties.ResourcesVpcConfig.EndpointPublicAccess EXISTS
+    # ensure the parameter is set to false
+    %amazon_eks_clusters_endpoint_no_public_access.Properties.ResourcesVpcConfig.EndpointPublicAccess == false
+    <<
+    Guard Rule Set: aws-prototyping
+    Controls: EKSClusterNoEndpointPublicAccess    
+    Violation: EKS endpoint public access is not allowed.
+    Fix: Set the boolean parameter ResourcesVpcConfig.EndpointPublicAccess to false
+    >>
+}
+## Config Rule Name : elastic-beanstalk-managed-updates-enabled
+## Config Rule URL: https://docs.aws.amazon.com/config/latest/developerguide/elastic-beanstalk-managed-updates-enabled.html"
+
+#
+#####################################
+##           Gherkin               ##
+#####################################
+# Rule Identifier:
+#   IAM_POLICY_NO_STATEMENTS_WITH_ADMIN_ACCESS
+#
+# Description:
+#   Checks the IAM policies that you create for Allow statements that grant permissions to all actions on all resources. 
+#
+# Reports on:
+#   AWS::IAM::Policy
+#
+# Evaluates:
+#   AWS CloudFormation
+#
+# Rule Parameters:
+#   NA
+#
+# Scenarios:
+# a) SKIP: when there are no IAM Policies present
+# b) PASS: when all IAM Policies do not grant permissions to all actions on all resources
+# c) FAIL: when any IAM Policies grant permissions to all actions on all resources
+# d) SKIP: when metadata has rule suppression for IAM_POLICY_NO_STATEMENTS_WITH_ADMIN_ACCESS
+
+#
+# Select all IAM Policy resources from incoming template (payload)
+# 
+let aws_iam_policies_no_statements_with_admin_access = Resources.*[ Type == 'AWS::IAM::Policy' 
+  Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "IAM_POLICY_NO_STATEMENTS_WITH_ADMIN_ACCESS"
+]
+
+rule IAM_POLICY_NO_STATEMENTS_WITH_ADMIN_ACCESS when %aws_iam_policies_no_statements_with_admin_access !empty {
+  let violations = Resources.*[
+    Type == 'AWS::IAM::Policy' 
+    some Properties.PolicyDocument.Statement[*] {
+      some Action[*] == "*"
+      Effect == "Allow"
+      some Resource in ["*"]
+    }
+  ]
+  %violations empty
+	<<
+    Guard Rule Set: aws-prototyping
+    Controls: IAMPolicyNoStatementsWithAdminAccess    
+    Violation: One or more IAM policies contain allow statements that grant permissions to all actions on all resources
+    Fix: Remove policy statements that match {"Effect": "Allow", "Action": "*", "Resource": "*"}
+  >>
+} 
+
+
+
+#
+#####################################
+##           Gherkin               ##
+#####################################
+# Rule Identifier:
+#    LAMBDA_FUNCTION_PUBLIC_ACCESS_PROHIBITED
+#
+# Description:
+#    Checks if the AWS Lambda function policy attached to the Lambda resource prohibits public access.
+#
+# Reports on:
+#    AWS::Lambda::Permission
+#    AWS::Lambda::LayerVersionPermission
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# Scenarios:
+# a) SKIP: when no AWS Lambda permission policies are present
+# b) PASS: when all AWS Lambda permission policies prohibit public access
+# c) FAIL: when any AWS Lambda permission policies allow public access
+# d) SKIP: hen metadata includes the suppression for rule LAMBDA_FUNCTION_PUBLIC_ACCESS_PROHIBITED
+
+#
+# Select all AWS Lambda Permission resources from incoming template (payload)
+#
+let aws_lambda_permissions_public_access_prohibited = Resources.*[
+  Type in [ /AWS::Lambda::Permission/,
+    /AWS::Lambda::LayerVersionPermission/ ]
+  Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "LAMBDA_FUNCTION_PUBLIC_ACCESS_PROHIBITED"
+]
+
+rule LAMBDA_FUNCTION_PUBLIC_ACCESS_PROHIBITED when %aws_lambda_permissions_public_access_prohibited !empty {
+
+  # Lambda permission policy where principal is an account id
+  %aws_lambda_permissions_public_access_prohibited {
+    Type == 'AWS::Lambda::Permission'
+    Properties {
+      Principal in [ /^\d{12}$/, {"Ref":"AWS::AccountId"} ]
+      OR Principal > 0
+    }
+  }
+
+  # Lambda permission policy where principal is a service (not s3)
+  OR %aws_lambda_permissions_public_access_prohibited {
+    Type == 'AWS::Lambda::Permission'
+    Properties {
+      Principal != 's3.amazonaws.com'
+      PrincipalOrgID !empty
+      OR SourceAccount exists
+      OR SourceArn !empty
+      <<
+    Guard Rule Set: aws-prototyping
+    Controls: LambdaFunctionPublicAccessProhibited    
+        Violation: All Lambda permission policies attached to Lambda resources must prohibit public access.
+        Fix: Limit permission policies by setting the Principal property to an account ID,
+        or limiting a service principal by setting the SourceArn, SourceAccount, or PrincipalOrgID properties.
+      >>
+    }
+  }
+
+  # Lambda permission policy where principal is s3 service
+  OR %aws_lambda_permissions_public_access_prohibited {
+    Type == 'AWS::Lambda::Permission'
+    Properties {
+      Principal == 's3.amazonaws.com'
+      PrincipalOrgID !empty
+      OR SourceAccount exists
+      <<
+    Guard Rule Set: aws-prototyping
+    Controls: LambdaFunctionPublicAccessProhibited    
+        Violation: All Lambda permission policies attached to Lambda resources must prohibit public access.
+        Fix: Limit permission policies by setting the Principal property to an account ID,
+        or for S3 as the principal specify either a SourceAccount or PrincipalOrgID.
+        Note: It is possible for an S3 bucket to be deleted by its owner and recreated by another account.
+      >>
+    }
+  }
+
+  # Lambda layer version permission policies
+  OR %aws_lambda_permissions_public_access_prohibited {
+    Type == 'AWS::Lambda::LayerVersionPermission'
+    Properties {
+      OrganizationId !empty
+      OR Principal in [ /^\d{12}$/, {"Ref":"AWS::AccountId"} ]
+      OR Principal > 0
+      <<
+    Guard Rule Set: aws-prototyping
+    Controls: LambdaFunctionPublicAccessProhibited    
+        Violation: All Lambda permission policies attached to Lambda resources must prohibit public access.
+        Fix: For Lambda layer version permission policies, either limit permissions by the OrganizationId property
+        or set the Principal property to an account ID rather than using a wildcard (*).
+      >>
+    }
+  }
+}
+
+#
+#####################################
+##         AWS Solutions           ##
+#####################################
+# Rule Identifier:
+#    LAMBDA_PERMISSION_INVOKE_FUNCTION_ACTION
+#
+# Description:
+#    Checks if the AWS Lambda permission uses any other action apart from 'lambda:InvokeFunction'
+#
+# Reports on:
+#    AWS::Lambda::Permission
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# CFN_NAG Rule Id:
+#   W24
+#
+# Scenarios:
+# a) SKIP: when no AWS Lambda permission policies are present
+# b) PASS: when no AWS Lambda permission uses any other action apart from 'lambda:InvokeFunction'
+# c) FAIL: when any AWS Lambda permission allows action apart from 'lambda:InvokeFunction'
+# d) SKIP: When metadata includes the suppression for rule LAMBDA_PERMISSION_INVOKE_FUNCTION_ACTION
+
+let applicable_types = [
+  "AWS::Lambda::Permission"
+]
+
+let lambda_permission_invoke_function_action = Resources.*[ Type in %applicable_types
+  Metadata.cfn_nag.rules_to_suppress not exists or
+  Metadata.cfn_nag.rules_to_suppress.*.id != "W24"
+  Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "LAMBDA_PERMISSION_INVOKE_FUNCTION_ACTION"
+]
+
+rule LAMBDA_PERMISSION_INVOKE_FUNCTION_ACTION when %lambda_permission_invoke_function_action !empty {
+  let violations = %lambda_permission_invoke_function_action[
+    some Properties.Action != 'lambda:InvokeFunction'
+  ]
+  %violations empty
+  <<
+    Guard Rule Set: aws-prototyping
+    Controls: LambdaFunctionUrlAuth    
+    Violation: Lambda permission beside InvokeFunction might not be what you want.
+    Fix: Remove Actions beside 'lambda:InvokeFunction'.
+  >>
+}
+
+#
+#####################################
+##           Gherkin               ##
+#####################################
+# Rule Identifier:
+#   OPENSEARCH_IN_VPC_ONLY
+#
+# Description:
+#   OpenSearchService domains must be in a VPC
+#
+# Reports on:
+#   AWS::OpenSearchService::Domain
+#
+# Evaluates:
+#   AWS CloudFormation
+#
+# Rule Parameters:
+#   NA
+#
+# Scenarios:
+# a) SKIP: when there is no OpenSearchService domain present
+# b) SKIP: when metadata has rule suppression for OPENSEARCH_IN_VPC_ONLY
+# c) PASS: when OpenSearchService domain has VPCOptions or Endpoint properties
+# d) FAIL: when OpenSearchService domain does not have VPCOptions or Endpoint properties
+
+#
+# Select all elasticsearch domains from incoming template
+#
+let opensearch_in_vpc_only = Resources.*[ Type == "AWS::OpenSearchService::Domain"
+  Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "OPENSEARCH_IN_VPC_ONLY"
+]
+
+rule OPENSEARCH_IN_VPC_ONLY when %opensearch_in_vpc_only !empty {
+    %opensearch_in_vpc_only.Properties.VPCOptions exists
+        <<
+    Guard Rule Set: aws-prototyping
+    Controls: OpenSearchInVPCOnly    
+            Violation: OpenSearchService domains must be in a VPC.
+            Fix: Provide VPCOptions object to enable opensearch to function in a VPC.
+        >>
+}
+#
+#####################################
+##           Gherkin               ##
+#####################################
+# Rule Identifier:
+#   OPENSEARCH_ACCESS_CONTROL_ENABLED
+#
+# Description:
+#   OpenSearchService domains are are configured with fine-grained access control enabled
+#
+# Reports on:
+#   AWS::OpenSearchService::Domain
+#
+# Evaluates:
+#   AWS CloudFormation
+#
+# Rule Parameters:
+#   NA
+#
+# Scenarios:
+# a) SKIP: when there are no OpenSearchService Domain Resources 
+# b) SKIP: when metadata has rule suppression for OPENSEARCH_ACCESS_CONTROL_ENABLED
+# c) FAIL: when OpenSearchService Domain Resources are missing AdvancedSecurityOptions.Enabled
+# d) FAIL: when OpenSearchService Domain Resources have AdvancedSecurityOptions.Enabled set to a value other than true
+# e) PASS: when OpenSearchService Domain Resources have AdvancedSecurityOptions.Enabled set to true
+
+#
+# Select all OpenSearchService domains from incoming template
+#
+let opensearch_access_control_enabled = Resources.*[ Type == "AWS::OpenSearchService::Domain"
+  Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "OPENSEARCH_ACCESS_CONTROL_ENABLED"
+]
+
+rule OPENSEARCH_ACCESS_CONTROL_ENABLED when %opensearch_access_control_enabled !empty {
+    %opensearch_access_control_enabled.Properties { 
+        AdvancedSecurityOptions exists
+        AdvancedSecurityOptions is_struct
+
+        AdvancedSecurityOptions {
+            Enabled exists
+            Enabled == true
+                <<
+    Guard Rule Set: aws-prototyping
+    Controls: OpenSearchNoUnsignedOrAnonymousAccess    
+                    Violation: OpenSearchService domains are are configured with fine-grained access control enabled
+                    Fix: In AdvancedSecurityOptions, set the Enabled property to true
+                >>
+        }
+    }
+}
+
+#
+#####################################
+##           Gherkin               ##
+#####################################
+# Rule Identifier:
+#    RDS_AUTOMATIC_MINOR_VERSION_UPGRADE_ENABLED
+#
+# Description:
+#    Checks whether storage encryption is enabled for your RDS DB instances
+#
+# Reports on:
+#    AWS::RDS::DBInstance
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# Scenarios:
+# a) SKIP: when there are no RDS instances present
+# b) PASS: when all RDS instances have AutoMinorVersionUpgrade set to true
+# c) FAIL: when all RDS instances have AutoMinorVersionUpgrade set to false
+# d) FAIL: when there are RDS instances with AutoMinorVersionUpgrade property is not present
+# e) SKIP: when metadata includes the suppression for rule RDS_AUTOMATIC_MINOR_VERSION_UPGRADE_ENABLED
+
+#
+# Select all RDS instance resources from incoming template (payload)
+#
+
+let aws_rds_instances_minor_version_upgrade_enabled = Resources.*[ Type == 'AWS::RDS::DBInstance'
+  Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "RDS_AUTOMATIC_MINOR_VERSION_UPGRADE_ENABLED"
+]
+
+
+rule RDS_AUTOMATIC_MINOR_VERSION_UPGRADE_ENABLED when %aws_rds_instances_minor_version_upgrade_enabled !empty {
+  %aws_rds_instances_minor_version_upgrade_enabled.Properties.AutoMinorVersionUpgrade EXISTS
+  %aws_rds_instances_minor_version_upgrade_enabled.Properties.AutoMinorVersionUpgrade == true
+  <<
+    Guard Rule Set: aws-prototyping
+    Controls: RDSAutomaticMinorVersionUpgradeEnabled    
+    Violation: All RDS instances must have automatic minor version upgrade enabled.
+    Fix: Set the AutoMinorVersionUpgrade parameter to true.
+  >>
+}
+
+#
+#####################################
+##           Gherkin               ##
+#####################################
+# Rule Identifier:
+#    RDS_INSTANCE_PUBLIC_ACCESS_CHECK
+#
+# Description:
+#    Checks if an RDS instances has Publicly Accessible not set.
+#
+# Reports on:
+#    AWS::RDS::DBInstance
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# Scenarios:
+# a) SKIP: when there are no RDS instances present
+# b) PASS: when all RDS instances have PubliclyAccessible set to true
+# c) FAIL: when all RDS instances have PubliclyAccessible set to false
+# d) FAIL: when there are RDS instances with PubliclyAccessible property is not present
+# e) SKIP: when metadata includes the suppression for rule RDS_INSTANCE_PUBLIC_ACCESS_CHECK
+
+#
+# Select all RDS instance resources from incoming template (payload)
+#
+let aws_rds_instances_not_public = Resources.*[ Type == 'AWS::RDS::DBInstance'
+  Metadata.cfn_nag.rules_to_suppress not exists or 
+  Metadata.cfn_nag.rules_to_suppress.*.id != "F22"
+  Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "RDS_INSTANCE_PUBLIC_ACCESS_CHECK"
+]
+
+rule RDS_INSTANCE_PUBLIC_ACCESS_CHECK when %aws_rds_instances_not_public !empty {
+  # ALL RDS instances must have PubliclyAccessible set to false
+  %aws_rds_instances_not_public.Properties.PubliclyAccessible == false
+  <<
+    Guard Rule Set: aws-prototyping
+    Controls: RDSInstancePublicAccess    
+    Violation: All RDS instances must not be publicly accessible. 
+    Fix: The default depends on the VPC configuration, so it is recommended to eplicitly set PubliclyAccessible to false.
+  >>
+}
+
+#
+#####################################
+##           Gherkin               ##
+#####################################
+# Rule Identifier:
+#    REDSHIFT_CLUSTER_PUBLIC_ACCESS_CHECK
+#
+# Description:
+#   Redshift cluster should not be publicly accessible on the internet.
+#
+# Reports on:
+#    AWS::EKS::Cluster
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# Scenarios:
+# a) SKIP: when there is no Redshift cluster present
+# b) PASS: when Redshift Cluster resources do not have the publiclyAccessible property set (default false)
+# c) PASS: when Redshift Cluster resources have the PubliclyAccessible property set to false
+# d) FAIL: when any Redshift Cluster resources have the PubliclyAccessible property set to true
+# e) SKIP: when metada includes the suppression for rule REDSHIFT_CLUSTER_PUBLIC_ACCESS_CHECK
+
+#
+# Select all Redshift cluster resources from incoming template
+#
+
+let aws_redshift_clusters_resources_public_access_check = Resources.*[ Type == 'AWS::Redshift::Cluster'
+  Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "REDSHIFT_CLUSTER_PUBLIC_ACCESS_CHECK"
+]
+
+
+rule REDSHIFT_CLUSTER_PUBLIC_ACCESS_CHECK when %aws_redshift_clusters_resources_public_access_check !empty {
+    %aws_redshift_clusters_resources_public_access_check.Properties.PubliclyAccessible  not exists or
+    %aws_redshift_clusters_resources_public_access_check.Properties.PubliclyAccessible == false
+
+  <<
+    Guard Rule Set: aws-prototyping
+    Controls: RedshiftClusterPublicAccess    
+    Violation: Redshift cluster should not be available to public.
+    Fix: Set the Redshift property PubliclyAccessible parameter to false.
+  >>
+}
+
+####################################
+##           Gherkin               ##
+#####################################
+# Rule Identifier:
+#    REDSHIFT_CLUSTER_MAINTENANCESETTINGS_CHECK
+#
+# Description:
+#    Checks whether Amazon Redshift clusters have the specified maintenance settings (AllowVersionUpgrade, PreferredMaintenanceWindow, AutomatedSnapshotRetentionPeriod) 
+#
+# Reports on:
+#   AWS::Redshift::Cluster
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# Scenarios:
+# a) SKIP: when there are no Redshift Cluster resource present
+# b) PASS: when Redshift Cluster resources have properties PreferredMaintenanceWindow set, AllowVersionUpgrade either not set (default true) or set to true, and AutomatedSnapshotRetentionPeriod either not set (default 1 day) or set to greated than 0. 
+# c) FAIL: when any Redshift Cluster resources do not have PreferredMaintenanceWindow property set
+# d) FAIL: when any Redshift Cluster resources have AllowVersionUpgrade property set to false 
+# e) FAIL: when any Redshift Cluster resources have AutomatedSnapshotRetentionPeriod property set to 0
+# f) SKIP: when metadata includes the suppression for rule REDSHIFT_CLUSTER_MAINTENANCESETTINGS_CHECK
+
+#
+# Select all Redshift Cluster resources from incoming template (payload)
+#
+let redhshift_clusters_maintenancesettings_check = Resources.*[ Type == 'AWS::Redshift::Cluster' 
+	Metadata.guard.SuppressedRules not exists or
+    Metadata.guard.SuppressedRules.* != "REDSHIFT_CLUSTER_MAINTENANCESETTINGS_CHECK"
+]
+
+rule REDSHIFT_CLUSTER_MAINTENANCESETTINGS_CHECK when %redhshift_clusters_maintenancesettings_check !empty {
+    %redhshift_clusters_maintenancesettings_check.Properties.PreferredMaintenanceWindow exists
+    
+    %redhshift_clusters_maintenancesettings_check.Properties.AllowVersionUpgrade not exists or 
+    %redhshift_clusters_maintenancesettings_check.Properties.AllowVersionUpgrade == true
+
+
+    %redhshift_clusters_maintenancesettings_check.Properties.AutomatedSnapshotRetentionPeriod not exists or 
+    %redhshift_clusters_maintenancesettings_check.Properties.AutomatedSnapshotRetentionPeriod > 0
+
+    <<
+    Guard Rule Set: aws-prototyping
+    Controls: RedshiftClusterVersionUpgrade    
+			Violation: Amazon Redshift maintenance settings must be configured
+			Fix: set the PreferredMaintenanceWindow property, remove the AllowVersionUpgrade property (default true) or set it to true, and remove the AutomatedSnapshotRetentionPeriod property (default 1 day) or set it to greated than 0. 
+    >>
+}
+#
+#####################################
+##           Gherkin               ##
+#####################################
+# Rule Identifier:
+#    S3_BUCKET_LEVEL_PUBLIC_ACCESS_PROHIBITED
+#
+# Description:
+#   Checks if Amazon Simple Storage Service (Amazon S3) buckets are publicly accessible.
+#
+# Reports on:
+#    AWS::S3::Bucket
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# Scenarios:
+# a) SKIP: when there are no S3 resource present
+# b) PASS: when all S3 resources Public Access Block Configuration element is present and properties are set to true
+# c) FAIL: when all S3 resources do not have the Public Access Block Configuration element present or all properties set to true
+# d) SKIP: when metada has rule suppression for S3_BUCKET_LEVEL_PUBLIC_ACCESS_PROHIBITED
+
+#
+# Select all S3 resources from incoming template (payload)
+#
+let s3_buckets_level_public_access_prohibited = Resources.*[ Type == 'AWS::S3::Bucket'
+  Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "S3_BUCKET_LEVEL_PUBLIC_ACCESS_PROHIBITED"
+]
+
+rule S3_BUCKET_LEVEL_PUBLIC_ACCESS_PROHIBITED when %s3_buckets_level_public_access_prohibited !empty {
+  %s3_buckets_level_public_access_prohibited.Properties.PublicAccessBlockConfiguration exists
+  %s3_buckets_level_public_access_prohibited.Properties.PublicAccessBlockConfiguration.BlockPublicAcls == true
+  %s3_buckets_level_public_access_prohibited.Properties.PublicAccessBlockConfiguration.BlockPublicPolicy == true
+  %s3_buckets_level_public_access_prohibited.Properties.PublicAccessBlockConfiguration.IgnorePublicAcls == true
+  %s3_buckets_level_public_access_prohibited.Properties.PublicAccessBlockConfiguration.RestrictPublicBuckets == true
+  <<
+    Guard Rule Set: aws-prototyping
+    Controls: S3BucketLevelPublicAccessProhibited    
+    Violation: S3 Bucket Public Access controls need to be restricted.
+    Fix: Set S3 Bucket PublicAccessBlockConfiguration properties for BlockPublicAcls, BlockPublicPolicy, IgnorePublicAcls, RestrictPublicBuckets parameters to true.
+  >>
+}
+#
+#####################################
+##           Gherkin               ##
+#####################################
+# Rule Identifier:
+#    S3_BUCKET_PUBLIC_READ_PROHIBITED
+#
+# Description:
+#   Checks if your Amazon S3 buckets do not allow public read access. The rule checks the Block Public
+#   Access settings, the bucket policy, and the bucket access control list (ACL).
+#
+# Reports on:
+#    AWS::S3::Bucket
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# Scenarios:
+# a) SKIP: when there are no S3 resource present
+# b) PASS: when all S3 resources Public Access Block Configuration element is present and properties are set to true
+# c) FAIL: when all S3 resources do not have the Public Access Block Configuration element present or all properties set to true
+# d) SKIP: when metadata includes the suppression for rule S3_BUCKET_PUBLIC_READ_PROHIBITED
+
+#
+# Select all S3 resources from incoming template (payload)
+#
+let s3_bucket_public_read_prohibited = Resources.*[ Type == 'AWS::S3::Bucket'
+  Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "S3_BUCKET_PUBLIC_READ_PROHIBITED"
+]
+
+rule S3_BUCKET_PUBLIC_READ_PROHIBITED when %s3_bucket_public_read_prohibited !empty {
+  %s3_bucket_public_read_prohibited.Properties.PublicAccessBlockConfiguration exists
+  %s3_bucket_public_read_prohibited.Properties.PublicAccessBlockConfiguration.BlockPublicAcls == true
+  %s3_bucket_public_read_prohibited.Properties.PublicAccessBlockConfiguration.BlockPublicPolicy == true
+  %s3_bucket_public_read_prohibited.Properties.PublicAccessBlockConfiguration.IgnorePublicAcls == true
+  %s3_bucket_public_read_prohibited.Properties.PublicAccessBlockConfiguration.RestrictPublicBuckets == true
+  <<
+    Guard Rule Set: aws-prototyping
+    Controls: S3BucketPublicReadProhibited    
+    Violation: S3 Bucket Public Write Access controls need to be restricted.
+    Fix: Set S3 Bucket PublicAccessBlockConfiguration properties for BlockPublicAcls, BlockPublicPolicy, IgnorePublicAcls, RestrictPublicBuckets parameters to true.
+  >>
+}
+#
+#####################################
+##           Gherkin               ##
+#####################################
+# Rule Identifier:
+#    S3_BUCKET_PUBLIC_WRITE_PROHIBITED
+#
+# Description:
+#   Checks if your Amazon S3 buckets do not allow public write access. The rule checks the Block Public
+#   Access settings, the bucket policy, and the bucket access control list (ACL).
+#
+# Reports on:
+#    AWS::S3::Bucket
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# Scenarios:
+# a) SKIP: when there are no S3 resource present
+# b) PASS: when all S3 resources Public Access Block Configuration element is present and properties are set to true
+# c) FAIL: when all S3 resources do not have the Public Access Block Configuration element present or all properties set to true
+# d) SKIP: when metadata includes the suppression for rule S3_BUCKET_PUBLIC_WRITE_PROHIBITED
+
+#
+# Select all S3 resources from incoming template (payload)
+#
+let s3_buckets_public_write_prohibited = Resources.*[ Type == 'AWS::S3::Bucket'
+  Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "S3_BUCKET_PUBLIC_WRITE_PROHIBITED"
+]
+
+rule S3_BUCKET_PUBLIC_WRITE_PROHIBITED when %s3_buckets_public_write_prohibited !empty {
+  %s3_buckets_public_write_prohibited.Properties.PublicAccessBlockConfiguration exists
+  %s3_buckets_public_write_prohibited.Properties.PublicAccessBlockConfiguration.BlockPublicAcls == true
+  %s3_buckets_public_write_prohibited.Properties.PublicAccessBlockConfiguration.BlockPublicPolicy == true
+  %s3_buckets_public_write_prohibited.Properties.PublicAccessBlockConfiguration.IgnorePublicAcls == true
+  %s3_buckets_public_write_prohibited.Properties.PublicAccessBlockConfiguration.RestrictPublicBuckets == true
+  <<
+    Guard Rule Set: aws-prototyping
+    Controls: S3BucketPublicWriteProhibited    
+    Violation: S3 Bucket Public Write Access controls need to be restricted.
+    Fix: Set S3 Bucket PublicAccessBlockConfiguration properties for BlockPublicAcls, BlockPublicPolicy, IgnorePublicAcls, RestrictPublicBuckets parameters to true.
+  >>
+}
+#
+#####################################
+##           Gherkin               ##
+#####################################
+# Rule Identifier:
+#    SUBNET_AUTO_ASSIGN_PUBLIC_IP_DISABLED
+#
+# Description:
+#    Checks if Amazon Virtual Private Cloud (Amazon VPC) subnets are assigned a public IP address.  
+#
+# Reports on:
+#    AWS::EC2::Subnet
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# Scenarios:
+# a) SKIP: when there are no EC2 Subnet resource present
+# b) PASS: when all EC2 Subnet resources have the MapPublicIpOnLaunch property set to false or it is missing (default false)
+# c) FAIL: when any EC2 Subnet resources have the MapPublicIpOnLaunch property set to true
+# d) SKIP: hen metadata includes the suppression for rule SUBNET_AUTO_ASSIGN_PUBLIC_IP_DISABLED
+
+#
+# Select all EC2 Subnet resources from incoming template (payload)
+#
+let ec2_subnets_auto_assign_public_ip_disabled = Resources.*[ Type == 'AWS::EC2::Subnet' 
+  Metadata.cfn_nag.rules_to_suppress not exists or 
+  Metadata.cfn_nag.rules_to_suppress.*.id != "W33"
+  Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "SUBNET_AUTO_ASSIGN_PUBLIC_IP_DISABLED"
+]
+
+rule SUBNET_AUTO_ASSIGN_PUBLIC_IP_DISABLED when %ec2_subnets_auto_assign_public_ip_disabled !empty {
+	%ec2_subnets_auto_assign_public_ip_disabled.Properties.MapPublicIpOnLaunch !exists
+  OR %ec2_subnets_auto_assign_public_ip_disabled.Properties.MapPublicIpOnLaunch == false
+  <<
+    Guard Rule Set: aws-prototyping
+    Controls: VPCSubnetAutoAssignPublicIpDisabled    
+    Violation: VPCs should not have subnets that are assigned a public IP address.
+    Fix: remove the MapPublicIpOnLaucnh property or set it to false
+	>>
+}

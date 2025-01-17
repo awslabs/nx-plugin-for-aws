@@ -16,6 +16,12 @@ import { InfraGeneratorSchema } from './schema';
 import tsLibGenerator, { getTsLibDetails } from '../../ts/lib/generator';
 import { withVersions } from '../../utils/versions';
 import { formatFilesInSubtree } from '../../utils/format';
+import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
+import {
+  PACKAGES_DIR,
+  SHARED_CONSTRUCTS_DIR,
+} from '../../utils/shared-constructs';
+import { addStarExport } from '../../utils/ast';
 
 export async function infraGenerator(
   tree: Tree,
@@ -35,10 +41,23 @@ export async function infraGenerator(
   tree.delete(joinPathFragments(libraryRoot, 'src'));
   generateFiles(
     tree, // the virtual file system
-    joinPathFragments(__dirname, './files'), // path to the file templates
+    joinPathFragments(__dirname, './files/app'), // path to the file templates
     libraryRoot, // destination path of the files
     {
       synthDir: synthDirFromProject,
+      scopeAlias: toScopeAlias(getNpmScopePrefix(tree)),
+      ...schema,
+      ruleSet: schema.ruleSet.toUpperCase(),
+    }
+  );
+
+  generateFiles(
+    tree, // the virtual file system
+    joinPathFragments(__dirname, 'files', SHARED_CONSTRUCTS_DIR, 'src', 'core'),
+    joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'src', 'core'),
+    {
+      synthDir: synthDirFromProject,
+      scopeAlias: toScopeAlias(getNpmScopePrefix(tree)),
       ...schema,
     }
   );
@@ -70,6 +89,18 @@ export async function infraGenerator(
 
       return config;
     }
+  );
+
+  addStarExport(
+    tree,
+    joinPathFragments(
+      PACKAGES_DIR,
+      SHARED_CONSTRUCTS_DIR,
+      'src',
+      'core',
+      'index.ts'
+    ),
+    './cfn-guard.js'
   );
 
   addDependenciesToPackageJson(

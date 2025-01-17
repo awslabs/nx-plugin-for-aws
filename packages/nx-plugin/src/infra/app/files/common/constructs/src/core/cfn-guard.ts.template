@@ -1,0 +1,63 @@
+import * as url from 'url';
+import { CfnGuardValidator as _CfnGuardValidator } from '@cdklabs/cdk-validator-cfnguard';
+import { IConstruct } from 'constructs';
+import { CfnResource } from 'aws-cdk-lib';
+
+/**
+ * Suppresses a rule for a construct tree.
+ *
+ * @param construct The root construct to suppress the rule for.
+ * @param ruleName The name of the rule to suppress.
+ * @param predicate A predicate function that determines whether the rule should be suppressed for the given construct or any of its descendants.
+ *
+ * @example
+ * The following example suppresses the RULE_NAME for the given construct.
+ * suppressRule(construct, 'RULE_NAME')
+ *
+ * @example
+ * The following example suppresses the RULE_NAME for the construct or any of its descendants if it is an instance of Bucket:
+ * suppressRule(construct, 'RULE_NAME', (construct) => construct instanceof Bucket)
+ */
+export const suppressRule = (
+  construct: IConstruct,
+  ruleName: string,
+  predicate?: (construct: IConstruct) => boolean,
+) => {
+  const resources = (
+    predicate ? construct.node.findAll().filter(predicate) : [construct]
+  )
+    .map((resource) => resource.node.defaultChild)
+    .filter((resource) => CfnResource.isCfnResource(resource));
+
+  resources.forEach((resource) => {
+    let metadata = resource.getMetadata('guard') || {};
+    metadata['SuppressedRules'] = [
+      ...(metadata['SuppressedRules'] ?? []),
+      ruleName,
+    ];
+    resource.addMetadata('guard', metadata);
+  });
+};
+
+export enum RuleSet {
+  AWS_PROTOTYPING = 'aws-prototyping.guard',
+  CFN_NAG = 'cfn-nag.guard',
+  HIPAA = 'hipaa-security.guard',
+  NIST_CSF = 'nist-csf.guard',
+  PCI_DSS_3_2_1 = 'pci-dss-3-2-1.guard',
+  WELL_ARCHITECTED_RELIABILITY = 'wa-reliability-pillar.guard',
+  WELL_ARCHITECTED_SECURITY = 'wa-security-pillar.guard'
+}
+
+export class CfnGuardValidator extends _CfnGuardValidator {
+  constructor(guardRule: RuleSet) {
+    super({
+      controlTowerRulesEnabled: false,
+      rules: [
+        url.fileURLToPath(
+          new URL(`./cfn-guard-rules/${guardRule}`, import.meta.url),
+        ),
+      ],
+    });
+  }
+}

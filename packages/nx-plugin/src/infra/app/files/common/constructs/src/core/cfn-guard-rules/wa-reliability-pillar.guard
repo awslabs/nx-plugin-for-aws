@@ -1,0 +1,885 @@
+## Config Rule Name : dynamodb-throughput-limit-check
+## Config Rule URL: https://docs.aws.amazon.com/config/latest/developerguide/dynamodb-throughput-limit-check.html"
+
+#
+#####################################
+##           Gherkin               ##
+#####################################
+# Rule Identifier:
+#    LAMBDA_CONCURRENCY_CHECK
+#
+# Description:
+#    Checks whether the AWS Lambda function is configured with function-level concurrent execution limit.
+#
+# Reports on:
+#    AWS::Lambda::Function
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# Scenarios:
+# a) SKIP: when no AWS Lambda functions are present
+# b) PASS: when all AWS Lambda functions are configured with function-level concurrent execution limits
+# c) FAIL: when any AWS Lambda functions are not configured with function-level concurrent execution limits
+# d) SKIP: hen metadata includes the suppression for rule LAMBDA_CONCURRENCY_CHECK
+
+#
+# Select all AWS Lambda Function resources from incoming template (payload)
+#
+let aws_lambda_functions_concurrency = Resources.*[ Type == 'AWS::Lambda::Function' 
+  Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "LAMBDA_CONCURRENCY_CHECK"
+]
+
+rule LAMBDA_CONCURRENCY_CHECK when %aws_lambda_functions_concurrency !empty {
+  %aws_lambda_functions_concurrency.Properties.ReservedConcurrentExecutions >= 0
+  <<
+    Guard Rule Set: wa-Reliability-Pillar
+    Controls: REL-1    
+    Violation: All AWS Lambda Functions must have concurrent execution limits configured
+    Fix: Set the ReservedConcurrentExecutions property to an integer greater than or equal to 0
+  >>
+}
+#
+#####################################
+##           Gherkin               ##
+#####################################
+# Rule Identifier:
+#    LAMBDA_DLQ_CHECK
+#
+# Description:
+#    Checks whether an AWS Lambda function is configured with a dead-letter queue.
+#
+# Reports on:
+#    AWS::Lambda::Function
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# Scenarios:
+# a) SKIP: when no AWS Lambda functions are present
+# b) PASS: when all AWS Lambda functions are configured with a dead-letter queue
+# c) FAIL: when any AWS Lambda functions are not configured with a dead-letter queue
+# d) SKIP: hen metadata includes the suppression for rule LAMBDA_DLQ_CHECK
+
+#
+# Select all AWS Lambda Function resources from incoming template (payload)
+#
+let aws_lambda_functions_dlq = Resources.*[ Type == 'AWS::Lambda::Function' 
+  Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "LAMBDA_DLQ_CHECK"
+]
+
+rule LAMBDA_DLQ_CHECK when %aws_lambda_functions_dlq !empty {
+  %aws_lambda_functions_dlq.Properties.DeadLetterConfig.TargetArn !empty
+  <<
+    Guard Rule Set: wa-Reliability-Pillar
+    Controls: REL-1,REL-6    
+    Violation: All AWS Lambda Functions must have a dead-letter queue configured
+    Fix: Set the DeadLetterConfig.TargetAr Property to the Amazon Resource Name (ARN) of an Amazon SQS queue or Amazon SNS topic
+  >>
+}
+#
+#####################################
+##           Gherkin               ##
+#####################################
+# Rule Identifier:
+#    ELASTICSEARCH_IN_VPC_ONLY
+#
+# Description:
+#   Elasticsearch domains must be in a VPC
+#
+# Reports on:
+#    AWS::Elasticsearch::Domain
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# Scenarios:
+# a) SKIP: when there is no elasticsearch domain present
+# b) FAIL: when elasticsearch domain does not have VPCOptions or Endpoint properties
+# c) PASS: when elasticsearch domain has VPCOptions or Endpoint properties
+# d) SKIP: when metada has rule suppression for ELASTICSEARCH_IN_VPC_ONLY
+
+#
+# Select all elasticsearch domains from incoming template
+#
+let elasticsearch_domains_vpc_required = Resources.*[ Type == 'AWS::Elasticsearch::Domain'
+  Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "ELASTICSEARCH_IN_VPC_ONLY"
+]
+
+rule ELASTICSEARCH_IN_VPC_ONLY when %elasticsearch_domains_vpc_required !empty {
+  %elasticsearch_domains_vpc_required.Properties.VPCOptions EXISTS
+  <<
+    Guard Rule Set: wa-Reliability-Pillar
+    Controls: REL-2    
+    Violation: Elasticsearch domains must be in a VPC.
+    Fix: Provide VPCOptions object to enable opensearch to function in a VPC.
+  >>
+}
+#
+#####################################
+##           Gherkin               ##
+#####################################
+# Rule Identifier:
+#    EC2_INSTANCES_IN_VPC
+#
+# Description:
+#    Checks if your EC2 instances belong to a virtual private cloud (VPC).
+#
+# Reports on:
+#    AWS::EC2::Instance
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# Scenarios:
+# a) SKIP: when there are no EC2 resource present
+# b) PASS: when all EC2 resources have the SubnetId property set
+# c) FAIL: when any EC2 resources do not have the SubnetId property set
+# d) SKIP: when metadata includes the suppression for rule EC2_INSTANCES_IN_VPC
+
+#
+# Select all ECS Instance resources from incoming template (payload)
+#
+let ec2_instances_in_vpc = Resources.*[ Type == 'AWS::EC2::Instance' 
+  Metadata.guard.SuppressedRules not exists or 
+  Metadata.guard.SuppressedRules.* != "EC2_INSTANCES_IN_VPC"
+]
+
+rule EC2_INSTANCES_IN_VPC when %ec2_instances_in_vpc !empty {
+  %ec2_instances_in_vpc.Properties.SubnetId !empty
+  <<
+    Guard Rule Set: wa-Reliability-Pillar
+    Controls: REL-2    
+  	Violation: EC2 Instances must belong to a VPC
+  	Fix: set the SubnetId property to a subnet ID
+  >>
+}
+#
+#####################################
+##           Gherkin               ##
+#####################################
+# Rule Identifier:
+#    LAMBDA_INSIDE_VPC
+#
+# Description:
+#    Checks whether an AWS Lambda function is allowed access to an Amazon Virtual Private Cloud.
+#
+# Reports on:
+#    AWS::Lambda::Function
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# Scenarios:
+# a) SKIP: when no AWS Lambda functions are present
+# b) PASS: when all AWS Lambda functions are VPC enabled
+# c) FAIL: when any AWS Lambda functions are not VPC enabled
+# d) SKIP: hen metadata includes the suppression for rule LAMBDA_INSIDE_VPC
+
+#
+# Select all AWS Lambda Function resources from incoming template (payload)
+#
+let aws_lambda_functions_inside_vpc = Resources.*[ Type == 'AWS::Lambda::Function' 
+  Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "LAMBDA_INSIDE_VPC"
+]
+
+rule  LAMBDA_INSIDE_VPC when %aws_lambda_functions_inside_vpc !empty {
+  %aws_lambda_functions_inside_vpc.Properties.VpcConfig.SecurityGroupIds !empty
+  %aws_lambda_functions_inside_vpc.Properties.VpcConfig.SubnetIds !empty
+  <<
+    Guard Rule Set: wa-Reliability-Pillar
+    Controls: REL-2    
+    Violation:  All AWS Lambda Functions must be configured with access to a VPC
+    Fix: set the VpcConfig.SecurityGroupIds and VpcConfig.SubnetIds parameters with a list of security groups and subnets.
+    Lambda creates an elastic network interface for each combination of security group and subnet in the function's VPC configuration.
+  >>
+}
+    ## Config Rule Name : autoscaling-group-elb-healthcheck-required
+    ## Config Rule URL: https://docs.aws.amazon.com/config/latest/developerguide/autoscaling-group-elb-healthcheck-required.html"
+#
+#####################################
+##           Gherkin               ##
+#####################################
+# Rule Identifier:
+#    AUTOSCALING_GROUP_ELB_HEALTHCHECK_REQUIRED
+#
+# Description:
+#   Checks whether your Auto Scaling groups that are associated with a load balancer are using Elastic Load Balancing health checks.
+#
+# Reports on:
+#    AWS::AutoScaling::AutoScalingGroup
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# Scenarios:
+# a) SKIP: when there are no S3 resource present
+# b) PASS: when all S3 resources ObjectLockEnabled property is set to true
+# c) FAIL: when all S3 resources do not have the ObjectLockEnabled property is set to true or is missing
+# d) SKIP: when metada has rule suppression for S3_BUCKET_DEFAULT_LOCK_ENABLED
+
+#
+# Select all S3 resources from incoming template (payload)
+#
+## Config Rule Name : beanstalk-enhanced-health-reporting-enabled
+## Config Rule URL: https://docs.aws.amazon.com/config/latest/developerguide/beanstalk-enhanced-health-reporting-enabled.html"
+
+#
+#####################################
+##           Gherkin               ##
+#####################################
+# Rule Identifier:
+#    CLOUDWATCH_ALARM_ACTION_CHECK
+#
+# Description:
+#   Checks whether CloudWatch alarms have at least one alarm action,
+#   one Insufficient Data Actions action, or one OK action enabled.
+#
+# Reports on:
+#    AWS::Logs::LogGroup
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# Scenarios:
+# a) SKIP: when there are no cloudwatch alarm resources present
+# b) PASS: when resource Metadata is set with rule suppressed
+# c) PASS: when all cloudwatch alarm resources property Alarm Actions, Insufficient Data Actions, or OK Action set
+# d) FAIL: when all cloudwatch alarms resources property Alarm Actions, Insufficient Data Actions, or OK Action are not set with valid value
+# e) SKIP: when metada has rule suppression for CLOUDWATCH_ALARM_ACTION_CHECK
+
+#
+# Select all cloudwatch logs log group resources from incoming template (payload)
+#
+let cloudwatch_alarm_action_check = Resources.*[ Type == 'AWS::CloudWatch::Alarm'
+  Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "CLOUDWATCH_ALARM_ACTION_CHECK"
+]
+
+rule CLOUDWATCH_ALARM_ACTION_CHECK when %cloudwatch_alarm_action_check !empty {
+  %cloudwatch_alarm_action_check.Properties.AlarmActions exists or
+  %cloudwatch_alarm_action_check.Properties.OKActions exists or
+  %cloudwatch_alarm_action_check.Properties.InsufficientDataActions exists
+
+  <<
+    Guard Rule Set: wa-Reliability-Pillar
+    Controls: REL-6    
+    Violation: CloudWatch Alarms should have at least one Alarm Action, one Insufficient Data Actions action, or one OK Action enabled.
+    Fix: Set one Alarm Action, one Insufficient Data Actions action, or one OK Action on the CloudWatch Alarm resource.
+  >>
+}
+
+
+#
+#####################################
+##           Gherkin               ##
+#####################################
+# Rule Identifier:
+#    EC2_INSTANCE_DETAILED_MONITORING_ENABLED
+#
+# Description:
+#    Checks if detailed monitoring is enabled for EC2 instances. 
+#
+# Reports on:
+#    AWS::EC2::Instance
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# Scenarios:
+# a) SKIP: when there are no EC2 resource present
+# b) PASS: when all EC2 resources have the Monitoring property set to true
+# c) FAIL: when any EC2 resources do not have the Monitoring property set to true
+# d) SKIP: hen metadata includes the suppression for rule EC2_INSTANCE_DETAILED_MONITORING_ENABLED
+
+#
+# Select all EC2 Instance resources from incoming template (payload)
+#
+let ec2_instances_detailed_monitoring_enabled = Resources.*[ Type == 'AWS::EC2::Instance' 
+  Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "EC2_INSTANCE_DETAILED_MONITORING_ENABLED"
+]
+
+rule EC2_INSTANCE_DETAILED_MONITORING_ENABLED when %ec2_instances_detailed_monitoring_enabled !empty {
+    %ec2_instances_detailed_monitoring_enabled.Properties.Monitoring == true 
+    <<
+    Guard Rule Set: wa-Reliability-Pillar
+    Controls: REL-6    
+      Violation: EC2 Instance Monitoring must be enabled on all EC2 instances
+      Fix: set the Monitoring property to true
+    >>
+}
+#
+#####################################
+##           Gherkin               ##
+#####################################
+# Rule Identifier:
+#    RDS_ENHANCED_MONITORING_ENABLED
+#
+# Description:
+#    Checks whether enhanced monitoring is enabled for Amazon Relational Database Service (Amazon RDS) instances.
+#
+# Reports on:
+#    AWS::RDS::DBInstance
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# Scenarios:
+# a) SKIP: when there are no RDS instances present
+# b) PASS: when all RDS instances have MonitoringInterval set to a value of 1, 5, 10, 15, 30, or 60
+# c) FAIL: when all RDS instances have MonitoringInterval set to 0
+# d) FAIL: when there are RDS instances with MonitoringInterval property is not present
+# e) SKIP: when metadata includes the suppression for rule RDS_ENHANCED_MONITORING_ENABLED
+
+
+#
+# Select all RDS instance resources from incoming template (payload)
+#
+
+let aws_rds_instances_enhanced_monitoring_enabled = Resources.*[ Type == 'AWS::RDS::DBInstance'
+  Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "RDS_ENHANCED_MONITORING_ENABLED"
+]
+
+
+rule RDS_ENHANCED_MONITORING_ENABLED when %aws_rds_instances_enhanced_monitoring_enabled !empty {
+  %aws_rds_instances_enhanced_monitoring_enabled.Properties.MonitoringInterval EXISTS
+  %aws_rds_instances_enhanced_monitoring_enabled.Properties.MonitoringInterval IN [1, 5, 10, 15, 30, 60]
+  <<
+    Guard Rule Set: wa-Reliability-Pillar
+    Controls: REL-6    
+    Violation: RDS Instance enhanced monitoring required.
+    Fix: Specify a value of 1, 5, 10, 15, 30, or 60 for the parameter on the property MonitoringInterval.
+  >>
+}
+
+## Config Rule Name : dynamodb-autoscaling-enabled
+## Config Rule URL: https://docs.aws.amazon.com/config/latest/developerguide/dynamodb-autoscaling-enabled.html"
+
+    ## Config Rule Name : autoscaling-launch-config-public-ip-disabled
+    ## Config Rule URL: https://docs.aws.amazon.com/config/latest/developerguide/AUTOSCALING_LAUNCH_CONFIG_PUBLIC_IP_DISABLED.html"
+
+####################################
+##           Gherkin               ##
+#####################################
+# Rule Identifier:
+#    REDSHIFT_CLUSTER_MAINTENANCESETTINGS_CHECK
+#
+# Description:
+#    Checks whether Amazon Redshift clusters have the specified maintenance settings (AllowVersionUpgrade, PreferredMaintenanceWindow, AutomatedSnapshotRetentionPeriod) 
+#
+# Reports on:
+#   AWS::Redshift::Cluster
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# Scenarios:
+# a) SKIP: when there are no Redshift Cluster resource present
+# b) PASS: when Redshift Cluster resources have properties PreferredMaintenanceWindow set, AllowVersionUpgrade either not set (default true) or set to true, and AutomatedSnapshotRetentionPeriod either not set (default 1 day) or set to greated than 0. 
+# c) FAIL: when any Redshift Cluster resources do not have PreferredMaintenanceWindow property set
+# d) FAIL: when any Redshift Cluster resources have AllowVersionUpgrade property set to false 
+# e) FAIL: when any Redshift Cluster resources have AutomatedSnapshotRetentionPeriod property set to 0
+# f) SKIP: when metadata includes the suppression for rule REDSHIFT_CLUSTER_MAINTENANCESETTINGS_CHECK
+
+#
+# Select all Redshift Cluster resources from incoming template (payload)
+#
+let redhshift_clusters_maintenancesettings_check = Resources.*[ Type == 'AWS::Redshift::Cluster' 
+	Metadata.guard.SuppressedRules not exists or
+    Metadata.guard.SuppressedRules.* != "REDSHIFT_CLUSTER_MAINTENANCESETTINGS_CHECK"
+]
+
+rule REDSHIFT_CLUSTER_MAINTENANCESETTINGS_CHECK when %redhshift_clusters_maintenancesettings_check !empty {
+    %redhshift_clusters_maintenancesettings_check.Properties.PreferredMaintenanceWindow exists
+    
+    %redhshift_clusters_maintenancesettings_check.Properties.AllowVersionUpgrade not exists or 
+    %redhshift_clusters_maintenancesettings_check.Properties.AllowVersionUpgrade == true
+
+
+    %redhshift_clusters_maintenancesettings_check.Properties.AutomatedSnapshotRetentionPeriod not exists or 
+    %redhshift_clusters_maintenancesettings_check.Properties.AutomatedSnapshotRetentionPeriod > 0
+
+    <<
+    Guard Rule Set: wa-Reliability-Pillar
+    Controls: REL-8    
+			Violation: Amazon Redshift maintenance settings must be configured
+			Fix: set the PreferredMaintenanceWindow property, remove the AllowVersionUpgrade property (default true) or set it to true, and remove the AutomatedSnapshotRetentionPeriod property (default 1 day) or set it to greated than 0. 
+    >>
+}
+#
+#####################################
+##           Gherkin               ##
+#####################################
+# Rule Identifier:
+#    RDS_AUTOMATIC_MINOR_VERSION_UPGRADE_ENABLED
+#
+# Description:
+#    Checks whether storage encryption is enabled for your RDS DB instances
+#
+# Reports on:
+#    AWS::RDS::DBInstance
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# Scenarios:
+# a) SKIP: when there are no RDS instances present
+# b) PASS: when all RDS instances have AutoMinorVersionUpgrade set to true
+# c) FAIL: when all RDS instances have AutoMinorVersionUpgrade set to false
+# d) FAIL: when there are RDS instances with AutoMinorVersionUpgrade property is not present
+# e) SKIP: when metadata includes the suppression for rule RDS_AUTOMATIC_MINOR_VERSION_UPGRADE_ENABLED
+
+#
+# Select all RDS instance resources from incoming template (payload)
+#
+
+let aws_rds_instances_minor_version_upgrade_enabled = Resources.*[ Type == 'AWS::RDS::DBInstance'
+  Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "RDS_AUTOMATIC_MINOR_VERSION_UPGRADE_ENABLED"
+]
+
+
+rule RDS_AUTOMATIC_MINOR_VERSION_UPGRADE_ENABLED when %aws_rds_instances_minor_version_upgrade_enabled !empty {
+  %aws_rds_instances_minor_version_upgrade_enabled.Properties.AutoMinorVersionUpgrade EXISTS
+  %aws_rds_instances_minor_version_upgrade_enabled.Properties.AutoMinorVersionUpgrade == true
+  <<
+    Guard Rule Set: wa-Reliability-Pillar
+    Controls: REL-8    
+    Violation: All RDS instances must have automatic minor version upgrade enabled.
+    Fix: Set the AutoMinorVersionUpgrade parameter to true.
+  >>
+}
+
+#
+#####################################
+##           Gherkin               ##
+#####################################
+# Rule Identifier:
+#    DB_INSTANCE_BACKUP_ENABLED
+#
+# Description:
+#    Checks if RDS DB instances have backups enabled.
+#
+# Reports on:
+#    AWS::RDS::DBInstance
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# Scenarios:
+# a) SKIP: when there are no RDS instances present
+# b) PASS: when all RDS instances have BackupRetentionPeriod set to a positive number
+# c) FAIL: when all RDS instances have BackupRetentionPeriod set to 0
+# d) FAIL: when there are RDS instances with BackupRetentionPeriod property is not present
+# e) SKIP: when metadata includes the suppression for rule DB_INSTANCE_BACKUP_ENABLED
+
+#
+# Select all RDS instance resources from incoming template (payload)
+#
+
+let aws_rds_instances_db_instance_backup_enabled = Resources.*[ Type == 'AWS::RDS::DBInstance'
+  Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "DB_INSTANCE_BACKUP_ENABLED"
+]
+
+
+rule DB_INSTANCE_BACKUP_ENABLED when %aws_rds_instances_db_instance_backup_enabled !empty {
+  %aws_rds_instances_db_instance_backup_enabled.Properties.BackupRetentionPeriod EXISTS
+  %aws_rds_instances_db_instance_backup_enabled.Properties.BackupRetentionPeriod >= 1
+  <<
+    Guard Rule Set: wa-Reliability-Pillar
+    Controls: REL-9    
+    Violation: All RDS instances must have automated backup enabled.
+    Fix: Set the BackupRetentionPeriod to values of 1 to 35 to enable backups.
+  >>
+}
+
+## Config Rule Name : dynamodb-in-backup-plan
+## Config Rule URL: https://docs.aws.amazon.com/config/latest/developerguide/dynamodb-in-backup-plan.html"
+
+## Config Rule Name : dynamodb-pitr-enabled
+## Config Rule URL: https://docs.aws.amazon.com/config/latest/developerguide/dynamodb-pitr-enabled.html"
+
+# Rule Intent: All DynamoDB Tables must have Point-In-Time-Recovery enabled
+
+# Expectations:
+# a) SKIP: when there are no DynamoDB Tables present
+# b) PASS: when all DynamoDB Tables have PITR enabled
+# c) FAIL: when all DynamoDB Tables have PITR disabled
+
+#
+# Select all DynamoDB Table resources from incoming template (payload)
+#
+let aws_dynamodb_table_resources = Resources.*[ Type == 'AWS::DynamoDB::Table' ]
+
+
+rule DYNAMODB_PITR_ENABLED when %aws_dynamodb_table_resources !empty {
+    # Ensure ALL DynamoDB Tables have Point-In-Time-Recovery enabled
+    %aws_dynamodb_table_resources.Properties.PointInTimeRecoverySpecification.PointInTimeRecoveryEnabled == true
+  <<
+    Guard Rule Set: wa-Reliability-Pillar
+    Controls: REL-9    
+    Violation: All DynamoDB Tables must have Point-In-Time-Recovery enabled.
+    Fix: Set the dynamodb table property PointInTimeRecoverySpecification.PointInTimeRecoveryEnabled to true.
+  >>
+}
+
+## Config Rule Name : elasticache-redis-cluster-automatic-backup-check
+## Config Rule URL: https://docs.aws.amazon.com/config/latest/developerguide/elasticache-redis-cluster-automatic-backup-check.html"
+
+#
+#####################################
+##           Gherkin               ##
+#####################################
+# Rule Identifier:
+#    S3_BUCKET_REPLICATION_ENABLED
+#
+# Description:
+#   Checks whether the Amazon S3 buckets have cross-region replication enabled.
+#
+# Reports on:
+#    AWS::S3::Bucket
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# Scenarios:
+# a) SKIP: when there are no S3 resource present
+# b) PASS: when all S3 resources replication configuration set status is set to Enabled
+# c) FAIL: when all S3 resources have Versioning Configuration status property not set or set to Suspended
+# d) SKIP: when metadata includes the suppression for rule S3_BUCKET_REPLICATION_ENABLED
+
+#
+# Select all S3 resources from incoming template (payload)
+#
+
+let s3_buckets_replication_enabled = Resources.*[ Type == 'AWS::S3::Bucket'
+  Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "S3_BUCKET_REPLICATION_ENABLED"
+]
+
+rule S3_BUCKET_REPLICATION_ENABLED when %s3_buckets_replication_enabled !empty {
+  %s3_buckets_replication_enabled.Properties.ReplicationConfiguration exists
+  <<
+    Guard Rule Set: wa-Reliability-Pillar
+    Controls: REL-9    
+    Violation: S3 Bucket replication should be enabled.
+    Fix: Set S3 Bucket ReplicationConfiguration to another S3 Bucket.
+  >>
+    ## TODO regex to identify cross-region
+}
+#
+#####################################
+##           Gherkin               ##
+#####################################
+# Rule Identifier:
+#    EBS_OPTIMIZED_INSTANCE
+#
+# Description:
+#    Checks whether EBS optimization is enabled for your EC2 instances that can be EBS-optimized 
+#
+# Reports on:
+#    AWS::EC2::Instance
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# Scenarios:
+# a) SKIP: when there are no EC2 resource present
+# b) PASS: when all EC2 resources EbsOptimized property is set to true
+# c) FAIL: when any EC2 resources do not have the EbsOptimized property set to true
+# e) SKIP: hen metadata includes the suppression for rule EBS_OPTIMIZED_INSTANCE
+
+#
+# Select all AWS EC2 Instance resources from incoming template (payload)
+#
+let ec2_ebs_optimized_instances = Resources.*[ Type == 'AWS::EC2::Instance' 
+	Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "EBS_OPTIMIZED_INSTANCE"
+]
+
+rule EBS_OPTIMIZED_INSTANCE when %ec2_ebs_optimized_instances !empty {
+    %ec2_ebs_optimized_instances.Properties.EbsOptimized == true
+    <<
+    Guard Rule Set: wa-Reliability-Pillar
+    Controls: REL-9    
+			Violation: EBS optimization must be enabled for your EC2 instances
+			Fix: set the EbsOptimized property to true
+    >>
+}
+#
+#####################################
+##           Gherkin               ##
+#####################################
+# Rule Identifier:
+#    REDSHIFT_BACKUP_ENABLED
+#
+# Description:
+#    Checks that Amazon Redshift automated snapshots are enabled for clusters. 
+#
+# Reports on:
+#   AWS::Redshift::Cluster
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# Scenarios:
+# a) SKIP: when there are no Redshift Cluster resource present
+# b) PASS: when Redshift Cluster resources don't have the AutomatedSnapshotRetentionPeriod property set (default retention period is 1 day)
+# c) PASS: when Redshift Cluster resources have the AutomatedSnapshotRetentionPeriod property set to greater than 0 
+# d) FAIL: when any Redshift Cluster resources have the AutomatedSnapshotRetentionPeriod property set to 0 
+# e) SKIP: when metadata includes the suppression for rule REDSHIFT_BACKUP_ENABLED
+
+#
+# Select all Redshift Cluster resources from incoming template (payload)
+#
+let redhshift_backup_enabled_clusters = Resources.*[ Type == 'AWS::Redshift::Cluster' 
+	Metadata.guard.SuppressedRules not exists or
+    Metadata.guard.SuppressedRules.* != "REDSHIFT_BACKUP_ENABLED"
+]
+
+rule REDSHIFT_BACKUP_ENABLED when %redhshift_backup_enabled_clusters !empty {
+    %redhshift_backup_enabled_clusters.Properties.AutomatedSnapshotRetentionPeriod not exists
+    or %redhshift_backup_enabled_clusters.Properties.AutomatedSnapshotRetentionPeriod > 0
+    <<
+    Guard Rule Set: wa-Reliability-Pillar
+    Controls: REL-9    
+			Violation: Amazon Redshift automated snapshots must be enabled for clusters
+			Fix: Either remove the AutomatedSnapshotRetentionPeriod property (default retention period is 1 day)
+            Or set the AutomatedSnapshotRetentionPeriod property to an integer greater than 0 
+    >>
+}
+#
+#####################################
+##           Gherkin               ##
+#####################################
+# Rule Identifier:
+#    S3_BUCKET_VERSIONING_ENABLED
+#
+# Description:
+#   Checks if versioning is enabled for your S3 buckets.
+#
+# Reports on:
+#    AWS::S3::Bucket
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# Scenarios:
+# a) SKIP: when there are no S3 resource present
+# b) PASS: when all S3 resources Versioning Configuration status is set to Enabled
+# c) FAIL: when all S3 resources have Versioning Configuration status property not set or set to Suspended
+# d) SKIP: when metadata includes the suppression for rule S3_BUCKET_VERSIONING_ENABLED
+
+#
+# Select all S3 resources from incoming template (payload)
+#
+let s3_buckets_versioning_enabled = Resources.*[ Type == 'AWS::S3::Bucket'
+  Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "S3_BUCKET_VERSIONING_ENABLED"
+]
+
+rule S3_BUCKET_VERSIONING_ENABLED when %s3_buckets_versioning_enabled !empty {
+  %s3_buckets_versioning_enabled.Properties.VersioningConfiguration exists
+  %s3_buckets_versioning_enabled.Properties.VersioningConfiguration.Status == 'Enabled'
+  <<
+    Guard Rule Set: wa-Reliability-Pillar
+    Controls: REL-9    
+    Violation: S3 Bucket Versioning must be enabled.
+    Fix: Set the S3 Bucket property VersioningConfiguration.Status to 'Enabled' .
+  >>
+}
+## Config Rule Name : elb-cross-zone-load-balancing-enabled
+## Config Rule URL: https://docs.aws.amazon.com/config/latest/developerguide/elb-cross-zone-load-balancing-enabled.html"
+
+#
+#####################################
+##           Gherkin               ##
+#####################################
+# Rule Identifier:
+#    RDS_MULTI_AZ_SUPPORT
+#
+# Description:
+#    In a Multi-AZ deployment, Amazon RDS automatically provisions and maintains a synchronous
+#    standby replica in a different Availability Zone.
+#
+# Reports on:
+#    AWS::RDS::DBInstance
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# Scenarios:
+# a) SKIP: when there are no RDS instances present
+# b) PASS: when all RDS instances have MultiAZ set to true
+# c) FAIL: when all RDS instances have MultiAZ set to false
+# d) FAIL: when there are RDS instances with MultiAZ property is not present
+# e) SKIP: when metadata includes the suppression for rule RDS_MULTI_AZ_SUPPORT
+
+#
+# Select all RDS instance resources from incoming template (payload)
+#
+let aws_rds_instances_multi_az_support = Resources.*[ Type == 'AWS::RDS::DBInstance'
+  Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "RDS_MULTI_AZ_SUPPORT"
+]
+
+rule RDS_MULTI_AZ_SUPPORT when %aws_rds_instances_multi_az_support !empty {
+    %aws_rds_instances_multi_az_support.Properties.MultiAZ EXISTS
+    %aws_rds_instances_multi_az_support.Properties.MultiAZ == true
+  <<
+    Guard Rule Set: wa-Reliability-Pillar
+    Controls: REL-10    
+    Violation: All RDS instances must have MultiAZ support enabled.
+    Fix: Set the MultiAZ parameter to true.
+  >>
+}
+
+## Config Rule Name : elb-deletion-protection-enabled
+## Config Rule URL: https://docs.aws.amazon.com/config/latest/developerguide/elb-deletion-protection-enabled.html"
+
+#
+#####################################
+##           Gherkin               ##
+#####################################
+# Rule Identifier:
+#    RDS_INSTANCE_DELETION_PROTECTION_ENABLED
+#
+# Description:
+#    Checks if an Amazon Relational Database Service (Amazon RDS) instance has deletion protection enabled.
+#
+# Reports on:
+#    AWS::RDS::DBInstance
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# Scenarios:
+# a) SKIP: when there are no RDS instances present
+# b) PASS: when all RDS instances have DeletionProtection set to true
+# c) FAIL: when all RDS instances have DeletionProtection set to false
+# d) FAIL: when there are RDS instances with DeletionProtection property is not present
+# e) SKIP: when metadata includes the suppression for rule RDS_INSTANCE_DELETION_PROTECTION_ENABLED
+
+#
+# Select all RDS instance resources from incoming template (payload)
+#
+let aws_rds_instances_deletion_protection_enabled = Resources.*[ Type == 'AWS::RDS::DBInstance'
+  Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "RDS_INSTANCE_DELETION_PROTECTION_ENABLED"
+]
+
+rule RDS_INSTANCE_DELETION_PROTECTION_ENABLED when %aws_rds_instances_deletion_protection_enabled !empty {
+  %aws_rds_instances_deletion_protection_enabled.Properties.DeletionProtection EXISTS
+  %aws_rds_instances_deletion_protection_enabled.Properties.DeletionProtection == true
+  <<
+    Guard Rule Set: wa-Reliability-Pillar
+    Controls: REL-10    
+    Violation: All RDS instances must deletion protection enabled.
+    Fix: Set the parameter for DeletionProtection to true.
+  >>
+}
+
+#
+#####################################
+##           Gherkin               ##
+#####################################
+# Rule Identifier:
+#    S3_BUCKET_DEFAULT_LOCK_ENABLED
+#
+# Description:
+#   Checks whether Amazon S3 bucket has lock enabled, by default
+#
+# Reports on:
+#    AWS::S3::Bucket
+#
+# Evaluates:
+#    AWS CloudFormation
+#
+# Rule Parameters:
+#    NA
+#
+# Scenarios:
+# a) SKIP: when there are no S3 resource present
+# b) PASS: when all S3 resources ObjectLockEnabled property is set to true
+# c) FAIL: when all S3 resources do not have the ObjectLockEnabled property is set to true or is missing
+# d) SKIP: when metada has rule suppression for S3_BUCKET_DEFAULT_LOCK_ENABLED
+
+#
+# Select all S3 resources from incoming template (payload)
+#
+let s3_buckets_default_lock_enabled = Resources.*[ Type == 'AWS::S3::Bucket'
+  Metadata.guard.SuppressedRules not exists or
+  Metadata.guard.SuppressedRules.* != "S3_BUCKET_DEFAULT_LOCK_ENABLED"
+]
+
+rule S3_BUCKET_DEFAULT_LOCK_ENABLED when %s3_buckets_default_lock_enabled !empty {
+  %s3_buckets_default_lock_enabled.Properties.ObjectLockEnabled exists
+  %s3_buckets_default_lock_enabled.Properties.ObjectLockEnabled == true
+  <<
+    Guard Rule Set: wa-Reliability-Pillar
+    Controls: REL-10    
+    Violation: S3 Bucket ObjectLockEnabled must be set to true.
+    Fix: Set the S3 property ObjectLockEnabled parameter to true.
+  >>
+}

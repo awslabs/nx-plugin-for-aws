@@ -12,6 +12,7 @@ describe('infra generator', () => {
   let tree: Tree;
   const options: InfraGeneratorSchema = {
     name: 'test',
+    ruleSet: 'aws_prototyping',
     directory: 'packages',
     skipInstall: true,
   };
@@ -142,6 +143,7 @@ describe('infra generator', () => {
     const customOptions: InfraGeneratorSchema = {
       name: 'custom-infra',
       directory: 'packages',
+      ruleSet: 'aws_prototyping',
       skipInstall: true,
     };
 
