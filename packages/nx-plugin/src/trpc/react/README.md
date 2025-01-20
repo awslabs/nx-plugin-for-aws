@@ -1,7 +1,8 @@
 # tRPC React Generator
 
 ## Overview
-This generator adds tRPC client integration to your React application, enabling type-safe API calls to your tRPC backend. It sets up all necessary configuration for connecting to your tRPC backend, including AWS IAM authentication support and proper error handling. The integration provides full end-to-end type safety between your frontend and backend.
+
+This generator adds tRPC client integration to your React application, enabling type-safe API calls to your tRPC backend. It sets up all necessary configuration for connecting to your tRPC backends, including AWS IAM authentication support and proper error handling. The integration provides full end-to-end type safety between your frontend and tRPC backend(s).
 
 ## Prerequisites
 
@@ -12,14 +13,13 @@ Before using this generator, ensure your React application has:
 3. A working tRPC backend (generated using the tRPC backend generator)
 
 Example of required `main.tsx` structure:
+
 ```tsx
 import { StrictMode } from 'react';
 import * as ReactDOM from 'react-dom/client';
 import App from './app/app';
 
-const root = ReactDOM.createRoot(
-  document.getElementById('root') as HTMLElement
-);
+const root = ReactDOM.createRoot(document.getElementById('root') as HTMLElement);
 root.render(
   <StrictMode>
     <App />
@@ -34,12 +34,14 @@ You can generate the tRPC React integration in two ways:
 ### 1. Using VSCode IDE
 
 First, install the NX Console extension for VSCode:
+
 1. Open VSCode
 2. Go to Extensions (Ctrl+Shift+X / Cmd+Shift+X)
 3. Search for "Nx Console"
 4. Install [Nx Console](https://marketplace.visualstudio.com/items?itemName=nrwl.angular-console)
 
 Then add tRPC to your React application:
+
 1. Open the NX Console in VSCode
 2. Click on "Generate"
 3. Search for "trpc#react"
@@ -49,11 +51,13 @@ Then add tRPC to your React application:
 ### 2. Using CLI
 
 Add tRPC to your React application:
+
 ```bash
 nx g @aws/nx-plugin:trpc#react --frontendProjectName=my-app --backendProjectName=my-api --auth=IAM
 ```
 
 You can also perform a dry-run to see what files would be generated without actually creating them:
+
 ```bash
 nx g @aws/nx-plugin:trpc#react --frontendProjectName=my-app --backendProjectName=my-api --auth=IAM --dry-run
 ```
@@ -62,13 +66,13 @@ Both methods will add tRPC client integration to your React application with all
 
 ## Input Parameters
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| frontendProjectName* | string | - | The name of your React application project (required). |
-| backendProjectName* | string | - | The name of your tRPC backend project (required). |
-| auth* | string | "IAM" | Authentication strategy. Options: "IAM", "None" |
+| Parameter             | Type   | Default | Description                                            |
+| --------------------- | ------ | ------- | ------------------------------------------------------ |
+| frontendProjectName\* | string | -       | The name of your React application project (required). |
+| backendProjectName\*  | string | -       | The name of your tRPC backend project (required).      |
+| auth\*                | string | "IAM"   | Authentication strategy. Options: "IAM", "None"        |
 
-*Required parameter
+\*Required parameter
 
 ## Expected Output
 
@@ -77,13 +81,18 @@ The generator creates the following structure in your React application:
 ```
 src/
 ├── components/
-│   └── TRPCClientProvider/
-│       └── index.tsx      # tRPC client configuration and provider
+│   └── TrpcClients/
+│       └── index.tsx
+│       └── IsolatedTrpcProvider.tsx  # Supports add connections to multiple tRPC APIs
+│       └── TrpcApis.tsx              # Object containing all of your trpc API connections
+│       └── TrpcClientProviders.tsx   # Sets up the trpc clients and bindings to your backend schema(s)
 └── hooks/
-    └── useTrpc.tsx       # Custom hook for using tRPC client
+    └── useSigV4.tsx                  # Custom hook for signing HTTP(s) requests with SigV4 (IAM only)
+    └── use<ApiName>.tsx              # Adds a hook for the given backend API. ApiName will resolve to the name of the api.
 ```
 
 Additionally, it:
+
 1. Installs required dependencies:
    - @trpc/client
    - @trpc/react-query
@@ -94,13 +103,13 @@ Additionally, it:
 
 ### Using the tRPC Hook
 
-The generator provides a `useTrpc` hook that gives you access to the type-safe tRPC client:
+The generator provides a `use<ApiName>` hook that gives you access to the type-safe tRPC client:
 
 ```tsx
-import { useTrpc } from './hooks/useTrpc';
+import { useMyApi } from './hooks/useMyApi';
 
 function MyComponent() {
-  const trpc = useTrpc();
+  const trpc = useMyApi();
 
   // Example query
   const { data, isLoading } = trpc.users.list.useQuery();
@@ -111,17 +120,13 @@ function MyComponent() {
   const handleCreate = () => {
     mutation.mutate({
       name: 'John Doe',
-      email: 'john@example.com'
+      email: 'john@example.com',
     });
   };
 
   if (isLoading) return <div>Loading...</div>;
 
-  return (
-    <div>
-      {/* Your component JSX */}
-    </div>
-  );
+  return <div>{/* Your component JSX */}</div>;
 }
 ```
 
@@ -145,11 +150,7 @@ function MyComponent() {
     );
   }
 
-  return (
-    <div>
-      {/* Your component JSX */}
-    </div>
-  );
+  return <div>{/* Your component JSX */}</div>;
 }
 ```
 
@@ -173,7 +174,7 @@ function UserList() {
 
   return (
     <ul>
-      {users.data.map(user => (
+      {users.data.map((user) => (
         <li key={user.id}>{user.name}</li>
       ))}
     </ul>
@@ -187,7 +188,7 @@ Use optimistic updates for better user experience:
 
 ```tsx
 function UserList() {
-  const trpc = useTrpc();
+  const trpc = useUsers();
   const utils = trpc.useUtils();
 
   const deleteMutation = trpc.users.delete.useMutation({
@@ -199,26 +200,22 @@ function UserList() {
       const previousUsers = utils.users.list.getData();
 
       // Optimistically remove the user
-      utils.users.list.setData(undefined, (old) => 
-        old?.filter(user => user.id !== userId)
-      );
+      utils.users.list.setData(undefined, (old) => old?.filter((user) => user.id !== userId));
 
       return { previousUsers };
     },
     onError: (err, userId, context) => {
       // Restore previous data on error
       utils.users.list.setData(undefined, context?.previousUsers);
-    }
+    },
   });
 
   return (
     <ul>
-      {users.map(user => (
+      {users.map((user) => (
         <li key={user.id}>
           {user.name}
-          <button onClick={() => deleteMutation.mutate(user.id)}>
-            Delete
-          </button>
+          <button onClick={() => deleteMutation.mutate(user.id)}>Delete</button>
         </li>
       ))}
     </ul>
@@ -232,7 +229,7 @@ Prefetch data for better performance:
 
 ```tsx
 function UserList() {
-  const trpc = useTrpc();
+  const trpc = useUsers();
 
   // Prefetch user details on hover
   const prefetchUser = async (userId: string) => {
@@ -241,14 +238,9 @@ function UserList() {
 
   return (
     <ul>
-      {users.map(user => (
-        <li 
-          key={user.id}
-          onMouseEnter={() => prefetchUser(user.id)}
-        >
-          <Link to={`/users/${user.id}`}>
-            {user.name}
-          </Link>
+      {users.map((user) => (
+        <li key={user.id} onMouseEnter={() => prefetchUser(user.id)}>
+          <Link to={`/users/${user.id}`}>{user.name}</Link>
         </li>
       ))}
     </ul>
@@ -262,14 +254,9 @@ Handle pagination with infinite queries:
 
 ```tsx
 function UserList() {
-  const trpc = useTrpc();
+  const trpc = useUsers();
 
-  const {
-    data,
-    fetchNextPage,
-    hasNextPage,
-    isFetchingNextPage
-  } = trpc.users.list.useInfiniteQuery(
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage } = trpc.users.list.useInfiniteQuery(
     { limit: 10 },
     {
       getNextPageParam: (lastPage) => lastPage.nextCursor,
@@ -278,17 +265,10 @@ function UserList() {
 
   return (
     <div>
-      {data?.pages.map((page) => (
-        page.users.map(user => (
-          <UserCard key={user.id} user={user} />
-        ))
-      ))}
+      {data?.pages.map((page) => page.users.map((user) => <UserCard key={user.id} user={user} />))}
 
       {hasNextPage && (
-        <button
-          onClick={() => fetchNextPage()}
-          disabled={isFetchingNextPage}
-        >
+        <button onClick={() => fetchNextPage()} disabled={isFetchingNextPage}>
           {isFetchingNextPage ? 'Loading...' : 'Load More'}
         </button>
       )}
@@ -303,16 +283,16 @@ The integration provides complete end-to-end type safety. Your IDE will provide 
 
 ```tsx
 function UserForm() {
-  const trpc = useTrpc();
-  
+  const trpc = useUsers();
+
   // ✅ Input is fully typed
   const createUser = trpc.users.create.useMutation();
-  
+
   const handleSubmit = (data: CreateUserInput) => {
     // ✅ Type error if input doesn't match schema
     createUser.mutate(data);
   };
-  
+
   return <form onSubmit={handleSubmit}>{/* ... */}</form>;
 }
 ```
