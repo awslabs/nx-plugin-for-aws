@@ -4,6 +4,7 @@
  */
 import {
   GeneratorCallback,
+  OverwriteStrategy,
   Tree,
   generateFiles,
   installPackagesTask,
@@ -14,7 +15,6 @@ import { libraryGenerator } from '@nx/js';
 import { getNpmScopePrefix } from '../../utils/npm-scope';
 import { configureTsProject } from './ts-project-utils';
 import { toKebabCase } from '../../utils/names';
-
 export interface TsLibDetails {
   /**
    * Full package name including scope (eg @foo/bar)
@@ -25,7 +25,6 @@ export interface TsLibDetails {
    */
   readonly dir: string;
 }
-
 /**
  * Returns details about the TS library to be created
  */
@@ -40,10 +39,8 @@ export const getTsLibDetails = (
     toKebabCase(schema.directory) ?? '.',
     toKebabCase(schema.subDirectory) ?? normalizedName
   );
-
   return { dir, fullyQualifiedName };
 };
-
 /**
  * Generates a typescript library
  */
@@ -52,7 +49,6 @@ export const tsLibGenerator = async (
   schema: TsLibGeneratorSchema
 ): Promise<GeneratorCallback> => {
   const { fullyQualifiedName, dir } = getTsLibDetails(tree, schema);
-
   await libraryGenerator(tree, {
     ...schema,
     name: fullyQualifiedName,
@@ -60,26 +56,25 @@ export const tsLibGenerator = async (
     skipPackageJson: true,
     bundler: 'tsc', // TODO: consider supporting others
   });
-
   // Replace with simpler sample source code
   tree.delete(joinPathFragments(dir, 'src'));
   generateFiles(
     tree,
     joinPathFragments(__dirname, 'files', 'src'),
     joinPathFragments(dir, 'src'),
-    {}
+    {},
+    {
+      overwriteStrategy: OverwriteStrategy.KeepExisting,
+    }
   );
-
   configureTsProject(tree, {
     dir,
     fullyQualifiedName,
   });
-
   return () => {
     if (!schema.skipInstall) {
       installPackagesTask(tree);
     }
   };
 };
-
 export default tsLibGenerator;

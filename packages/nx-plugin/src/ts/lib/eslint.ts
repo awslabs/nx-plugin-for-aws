@@ -19,7 +19,6 @@ import {
   ArrayLiteralExpression,
   NodeFlags,
 } from 'typescript';
-
 export const configureEslint = async (
   tree: Tree,
   options: ConfigureProjectOptions
@@ -36,34 +35,28 @@ export const configureEslint = async (
         fix: true,
       },
     };
-
     updateProjectConfiguration(
       tree,
       options.fullyQualifiedName,
       projectConfiguration
     );
   }
-
   addDependenciesToPackageJson(
     tree,
     {},
     withVersions(['prettier', 'eslint-plugin-prettier'])
   );
-
   // Update or create eslint.config.cjs
   const eslintConfigPath = 'eslint.config.cjs';
   if (tree.exists(eslintConfigPath)) {
     const eslintConfigContent = tree.read(eslintConfigPath).toString();
     const sourceFile = ast(eslintConfigContent);
-
     // Check if import exists
     const existingImport = tsquery.query(
       sourceFile,
       'VariableDeclaration[name.text="eslintPluginPrettierRecommended"]'
     );
-
     let updatedContent = sourceFile;
-
     // Add import if it doesn't exist
     if (existingImport.length === 0) {
       const importDeclaration = factory.createVariableStatement(
@@ -88,7 +81,6 @@ export const configureEslint = async (
           NodeFlags.Const
         )
       );
-
       updatedContent = tsquery.map(
         updatedContent,
         'SourceFile',
@@ -100,13 +92,11 @@ export const configureEslint = async (
         }
       );
     }
-
     // Check if eslintPluginPrettierRecommended exists in module.exports array
     const existingPlugin = tsquery.query(
       updatedContent,
       'BinaryExpression:has(Identifier[name="module"]):has(Identifier[name="exports"]) > ArrayLiteralExpression Identifier[name="eslintPluginPrettierRecommended"]'
     );
-
     // Add eslintPluginPrettierRecommended to array if it doesn't exist
     if (existingPlugin.length === 0) {
       updatedContent = tsquery.map(
@@ -123,13 +113,11 @@ export const configureEslint = async (
         }
       );
     }
-
     // Only write if changes were made
     if (updatedContent !== sourceFile) {
       tree.write(eslintConfigPath, updatedContent.getFullText());
     }
   }
-
   const nxJson = readNxJson(tree);
   updateNxJson(tree, {
     ...nxJson,

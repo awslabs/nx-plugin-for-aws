@@ -13,6 +13,7 @@ import {
   ProjectConfiguration,
   installPackagesTask,
   addProjectConfiguration,
+  OverwriteStrategy,
 } from '@nx/devkit';
 import { tsquery, ast } from '@phenomnomnominal/tsquery';
 import {
@@ -34,7 +35,6 @@ import { getRelativePathToRoot } from '../../utils/paths';
 import { formatFilesInSubtree } from '../../utils/format';
 import { toClassName, toKebabCase } from '../../utils/names';
 import { addStarExport } from '../../utils/ast';
-
 export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
   const npmScopePrefix = getNpmScopePrefix(tree);
   const websiteNameClassName = toClassName(schema.name);
@@ -44,10 +44,8 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
     schema.directory ?? '.',
     websiteNameKebabCase
   );
-
   // TODO: consider exposing and supporting e2e tests
   const e2eTestRunner = 'none';
-
   await applicationGenerator(tree, {
     ...schema,
     name: fullyQualifiedName,
@@ -56,7 +54,6 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
     addPlugin: schema.addPlugin ?? true,
     e2eTestRunner,
   });
-
   if (!tree.exists(`${websiteContentPath}/project.json`)) {
     addProjectConfiguration(tree, fullyQualifiedName, {
       root: websiteContentPath,
@@ -77,14 +74,11 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
       },
     });
   }
-
   configureTsProject(tree, {
     dir: websiteContentPath,
     fullyQualifiedName,
   });
-
   await sharedConstructsGenerator(tree);
-
   if (
     !tree.exists(
       joinPathFragments(
@@ -98,7 +92,6 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
     )
   ) {
     const npmScopePrefix = getNpmScopePrefix(tree);
-
     generateFiles(
       tree,
       joinPathFragments(
@@ -116,9 +109,11 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
         websiteContentPath: joinPathFragments('dist', websiteContentPath),
         websiteNameKebabCase,
         websiteNameClassName,
+      },
+      {
+        overwriteStrategy: OverwriteStrategy.KeepExisting,
       }
     );
-
     const shouldGenerateCoreStaticWebsiteConstruct = !tree.exists(
       joinPathFragments(
         PACKAGES_DIR,
@@ -146,10 +141,12 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
           websiteContentPath: joinPathFragments('dist', websiteContentPath),
           websiteNameKebabCase,
           websiteNameClassName,
+        },
+        {
+          overwriteStrategy: OverwriteStrategy.KeepExisting,
         }
       );
     }
-
     addStarExport(
       tree,
       joinPathFragments(
@@ -161,7 +158,6 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
       ),
       './static-websites/index.js'
     );
-
     addStarExport(
       tree,
       joinPathFragments(
@@ -174,7 +170,6 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
       ),
       `./${websiteNameKebabCase}.js`
     );
-
     if (shouldGenerateCoreStaticWebsiteConstruct) {
       addStarExport(
         tree,
@@ -189,7 +184,6 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
       );
     }
   }
-
   updateJson(
     tree,
     joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'project.json'),
@@ -197,11 +191,9 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
       if (!config.targets) {
         config.targets = {};
       }
-
       if (!config.targets.build) {
         config.targets.build = {};
       }
-
       config.targets.build.dependsOn = [
         ...(config.targets.build.dependsOn ?? []),
         `${fullyQualifiedName}:build`,
@@ -209,19 +201,18 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
       return config;
     }
   );
-
   const projectConfig = readProjectConfiguration(tree, fullyQualifiedName);
   const libraryRoot = projectConfig.root;
-
   tree.delete(joinPathFragments(libraryRoot, 'src', 'app'));
-
   generateFiles(
     tree, // the virtual file system
     joinPathFragments(__dirname, './files/app'), // path to the file templates
     libraryRoot, // destination path of the files
-    schema // config object to replace variable in file templates
+    schema, // config object to replace variable in file templates
+    {
+      overwriteStrategy: OverwriteStrategy.Overwrite,
+    }
   );
-
   if (e2eTestRunner !== 'none') {
     const e2eFullyQualifiedName = `${fullyQualifiedName}-e2e`;
     const e2eRoot = readProjectConfiguration(tree, e2eFullyQualifiedName).root;
@@ -229,20 +220,20 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
       tree, // the virtual file system
       joinPathFragments(__dirname, `./files/e2e/${e2eTestRunner}`), // path to the file templates
       e2eRoot, // destination path of the files
-      { ...schema, ...names(fullyQualifiedName) }
+      { ...schema, ...names(fullyQualifiedName) },
+      {
+        overwriteStrategy: OverwriteStrategy.KeepExisting,
+      }
     );
     configureTsProject(tree, {
       fullyQualifiedName: e2eFullyQualifiedName,
       dir: e2eRoot,
     });
   }
-
   const viteConfigPath = joinPathFragments(libraryRoot, 'vite.config.ts');
   const viteConfigContents = tree.read(viteConfigPath)?.toString();
-
   if (viteConfigContents) {
     let viteConfigUpdatedContents = viteConfigContents;
-
     if (schema.unitTestRunner === 'vitest') {
       viteConfigUpdatedContents = tsquery
         .map(
@@ -271,7 +262,6 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
         )
         .getFullText();
     }
-
     if (schema.bundler === 'vite') {
       viteConfigUpdatedContents = tsquery
         .map(
@@ -319,12 +309,10 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
         )
         .getFullText();
     }
-
     if (viteConfigContents !== viteConfigUpdatedContents) {
       tree.write(viteConfigPath, viteConfigUpdatedContents);
     }
   }
-
   updateJson(
     tree,
     joinPathFragments(websiteContentPath, 'tsconfig.json'),
@@ -337,7 +325,6 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
       },
     })
   );
-
   updateJson(
     tree,
     joinPathFragments(websiteContentPath, 'tsconfig.app.json'),
@@ -349,7 +336,6 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
       },
     })
   );
-
   addDependenciesToPackageJson(
     tree,
     withVersions([
@@ -360,14 +346,11 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
     ]),
     withVersions(['cdk-app-cli'])
   );
-
   await formatFilesInSubtree(tree, websiteContentPath);
-
   return () => {
     if (!schema.skipInstall) {
       installPackagesTask(tree);
     }
   };
 }
-
 export default appGenerator;

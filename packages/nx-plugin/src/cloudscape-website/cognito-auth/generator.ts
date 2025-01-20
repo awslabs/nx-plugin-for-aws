@@ -9,6 +9,7 @@ import {
   readProjectConfiguration,
   addDependenciesToPackageJson,
   installPackagesTask,
+  OverwriteStrategy,
 } from '@nx/devkit';
 import {
   TYPE_DEFINITIONS_DIR,
@@ -41,13 +42,11 @@ import {
   replace,
   singleImport,
 } from '../../utils/ast';
-
 export async function cognitoAuthGenerator(
   tree: Tree,
   options: CognitoAuthGeneratorSchema
 ) {
   const srcRoot = readProjectConfiguration(tree, options.project).sourceRoot;
-
   if (
     tree.exists(joinPathFragments(srcRoot, 'components/CognitoAuth/index.tsx'))
   ) {
@@ -55,13 +54,10 @@ export async function cognitoAuthGenerator(
       `This generator has already been run on ${options.project}.`
     );
   }
-
   await runtimeConfigGenerator(tree, {
     project: options.project,
   });
-
   await sharedConstructsGenerator(tree);
-
   // Add ICognitoProps interface and update IRuntimeConfig
   const runtimeConfigPath = joinPathFragments(
     PACKAGES_DIR,
@@ -71,21 +67,17 @@ export async function cognitoAuthGenerator(
   );
   const runtimeConfigContent = tree.read(runtimeConfigPath).toString();
   const sourceFile = ast(runtimeConfigContent);
-
   // Check if ICognitoProps interface exists
   const existingCognitoProps = tsquery.query(
     sourceFile,
     'InterfaceDeclaration[name.text="ICognitoProps"]'
   );
-
   // Check if cognitoProps property exists in IRuntimeConfig
   const existingCognitoPropsInConfig = tsquery.query(
     sourceFile,
     'InterfaceDeclaration[name.text="IRuntimeConfig"] PropertySignature[name.text="cognitoProps"]'
   );
-
   let updatedContent = sourceFile;
-
   // Add ICognitoProps interface if it doesn't exist
   if (existingCognitoProps.length === 0) {
     const cognitoPropsInterface = factory.createInterfaceDeclaration(
@@ -120,7 +112,6 @@ export async function cognitoAuthGenerator(
         ),
       ]
     );
-
     updatedContent = tsquery.map(
       updatedContent,
       'SourceFile',
@@ -132,7 +123,6 @@ export async function cognitoAuthGenerator(
       }
     );
   }
-
   // Add cognitoProps to IRuntimeConfig if it doesn't exist
   if (existingCognitoPropsInConfig.length === 0) {
     updatedContent = tsquery.map(
@@ -158,12 +148,10 @@ export async function cognitoAuthGenerator(
       }
     );
   }
-
   // Only write if changes were made
   if (updatedContent !== sourceFile) {
     tree.write(runtimeConfigPath, updatedContent.getFullText());
   }
-
   const identityPath = joinPathFragments(
     PACKAGES_DIR,
     SHARED_CONSTRUCTS_DIR,
@@ -171,14 +159,15 @@ export async function cognitoAuthGenerator(
     'core',
     'user-identity.ts'
   );
-
   generateFiles(
     tree,
     joinPathFragments(__dirname, 'files', 'app'),
     srcRoot,
-    options
+    options,
+    {
+      overwriteStrategy: OverwriteStrategy.KeepExisting,
+    }
   );
-
   if (!tree.exists(identityPath)) {
     generateFiles(
       tree,
@@ -187,9 +176,11 @@ export async function cognitoAuthGenerator(
       {
         allowSignup: options.allowSignup,
         cognitoDomain: options.cognitoDomain,
+      },
+      {
+        overwriteStrategy: OverwriteStrategy.KeepExisting,
       }
     );
-
     addDependenciesToPackageJson(
       tree,
       withVersions([
@@ -199,7 +190,6 @@ export async function cognitoAuthGenerator(
       ]),
       {}
     );
-
     addStarExport(
       tree,
       joinPathFragments(
@@ -212,10 +202,8 @@ export async function cognitoAuthGenerator(
       './user-identity.js'
     );
   }
-
   const mainTsxPath = joinPathFragments(srcRoot, 'main.tsx');
   singleImport(tree, mainTsxPath, 'CognitoAuth', './components/CognitoAuth');
-
   replace(
     tree,
     mainTsxPath,
@@ -227,7 +215,6 @@ export async function cognitoAuthGenerator(
         node.closingElement
       )
   );
-
   // Update App Layout
   const appLayoutTsxPath = joinPathFragments(
     srcRoot,
@@ -235,7 +222,6 @@ export async function cognitoAuthGenerator(
     'App',
     'index.tsx'
   );
-
   if (tree.exists(appLayoutTsxPath)) {
     const contents = tree.read(appLayoutTsxPath).toString();
     let updatedContents = destructuredImport(
@@ -255,7 +241,6 @@ export async function cognitoAuthGenerator(
           }
           const arrowFunction = node.initializer as ArrowFunction;
           const functionBody = arrowFunction.body as Block;
-
           // Create our new declaration
           const authDeclaration = factory.createVariableStatement(
             undefined,
@@ -300,10 +285,8 @@ export async function cognitoAuthGenerator(
               NodeFlags.Const
             )
           );
-
           // Add as first statement
           const newStatements = [authDeclaration, ...functionBody.statements];
-
           // Create new arrow function with updated body
           const newArrowFunction = factory.updateArrowFunction(
             arrowFunction,
@@ -314,7 +297,6 @@ export async function cognitoAuthGenerator(
             arrowFunction.equalsGreaterThanToken,
             factory.createBlock(newStatements, true)
           );
-
           // Update the variable declaration
           return factory.updateVariableDeclaration(
             node,
@@ -326,7 +308,6 @@ export async function cognitoAuthGenerator(
         }
       )
       .getFullText();
-
     // TODO: update utils if they exist by appending to the array
     updatedContents = tsquery
       .map(
@@ -507,7 +488,6 @@ export async function cognitoAuthGenerator(
               )
             )
           );
-
           // Add the utilities attribute to existing attributes
           return factory.createJsxSelfClosingElement(
             node.tagName,
@@ -520,7 +500,6 @@ export async function cognitoAuthGenerator(
         }
       )
       .getFullText();
-
     if (contents !== updatedContents) {
       tree.write(appLayoutTsxPath, updatedContents);
     }
@@ -530,12 +509,9 @@ export async function cognitoAuthGenerator(
     );
   }
   // End update App Layout
-
   await formatFilesInSubtree(tree, srcRoot);
-
   return () => {
     installPackagesTask(tree);
   };
 }
-
 export default cognitoAuthGenerator;

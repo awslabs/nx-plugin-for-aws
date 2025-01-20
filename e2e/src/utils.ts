@@ -7,7 +7,6 @@ import { join } from 'path';
 import { output, PackageManager } from '@nx/devkit';
 import { existsSync } from 'fs';
 import { backOff } from 'exponential-backoff';
-
 export interface RunCmdOpts {
   silenceError?: boolean;
   prefixWithPackageManagerCmd?: boolean;
@@ -18,7 +17,6 @@ export interface RunCmdOpts {
   verbose?: boolean;
   redirectStderr?: boolean;
 }
-
 export async function runCLI(
   command: string,
   opts: RunCmdOpts = {
@@ -36,7 +34,6 @@ export async function runCLI(
     }${command} ${opts.verbose ? ' --verbose' : ''}${
       opts.redirectStderr ? ' 2>&1' : ''
     }`;
-
     const execCmd = () =>
       new Promise<string>((resolve, reject) => {
         try {
@@ -57,7 +54,6 @@ export async function runCLI(
         }
       });
     const logs = await (opts.retry ? backOff(execCmd) : execCmd());
-
     if (opts.verbose) {
       output.log({
         title: `Original command: ${command}`,
@@ -65,9 +61,7 @@ export async function runCLI(
         color: 'green',
       });
     }
-
     const r = stripConsoleColors(logs);
-
     return r;
   } catch (e) {
     if (opts.silenceError) {
@@ -78,7 +72,6 @@ export async function runCLI(
     }
   }
 }
-
 function detectPackageManager(dir = ''): PackageManager {
   return existsSync(join(dir, 'bun.lockb'))
     ? 'bun'
@@ -89,7 +82,6 @@ function detectPackageManager(dir = ''): PackageManager {
     ? 'pnpm'
     : 'npm';
 }
-
 function getYarnMajorVersion(path: string): string | undefined {
   try {
     // this fails if path is not yet created
@@ -109,11 +101,9 @@ function getYarnMajorVersion(path: string): string | undefined {
     }
   }
 }
-
 export function tmpProjPath() {
   return `/tmp/nx-plugin/e2e`;
 }
-
 function getPackageManagerCommand({
   path = tmpProjPath(),
   packageManager = detectPackageManager(path),
@@ -121,7 +111,6 @@ function getPackageManagerCommand({
   runNxSilent: string;
 } {
   const yarnMajorVersion = getYarnMajorVersion(path);
-
   return {
     npm: {
       runNxSilent: `npx nx`,
@@ -141,7 +130,6 @@ function getPackageManagerCommand({
     },
   }[packageManager.trim() as PackageManager];
 }
-
 /**
  * Remove log colors for fail proof string search
  * @param log
@@ -154,7 +142,6 @@ function stripConsoleColors(log: string): string {
     ''
   );
 }
-
 function logError(message: string, body?: string) {
   process.stdout.write('\n');
   process.stdout.write(`${message}\n`);

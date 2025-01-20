@@ -6,13 +6,11 @@ import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
 import { Tree } from '@nx/devkit';
 import { runtimeConfigGenerator } from './generator';
 import { RuntimeConfigGeneratorSchema } from './schema';
-
 describe('runtime-config generator', () => {
   let tree: Tree;
   const options: RuntimeConfigGeneratorSchema = {
     project: 'test-app',
   };
-
   beforeEach(() => {
     tree = createTreeWithEmptyWorkspace();
     tree.write(
@@ -23,7 +21,6 @@ describe('runtime-config generator', () => {
       })
     );
   });
-
   it('should generate runtime config files', async () => {
     // Set up a basic React app structure
     tree.write(
@@ -39,12 +36,10 @@ describe('runtime-config generator', () => {
         }`
     );
     await runtimeConfigGenerator(tree, options);
-
     // Check if RuntimeConfig component was generated
     expect(
       tree.exists('packages/test-app/src/components/RuntimeConfig/index.tsx')
     ).toBeTruthy();
-
     // Snapshot the generated RuntimeConfig component
     expect(
       tree
@@ -52,7 +47,6 @@ describe('runtime-config generator', () => {
         ?.toString()
     ).toMatchSnapshot('runtime-config-component.tsx');
   });
-
   it('should modify main.tsx correctly', async () => {
     // Set up a basic React app structure
     tree.write(
@@ -68,13 +62,11 @@ describe('runtime-config generator', () => {
         }`
     );
     await runtimeConfigGenerator(tree, options);
-
     const mainTsxContent = tree
       .read('packages/test-app/src/main.tsx')
       ?.toString();
     expect(mainTsxContent).toMatchSnapshot('modified-main.tsx');
   });
-
   it('should skip generation if RuntimeConfig already exists', async () => {
     // Set up a basic React app structure
     tree.write(
@@ -91,21 +83,17 @@ describe('runtime-config generator', () => {
     );
     // First run to generate files
     await runtimeConfigGenerator(tree, options);
-
     // Get file content after first run
     const firstRunContent = tree
       .read('packages/test-app/src/components/RuntimeConfig/index.tsx')
       ?.toString();
-
     // Modify the file to simulate manual changes
     tree.write(
       'packages/test-app/src/components/RuntimeConfig/index.tsx',
       'modified content'
     );
-
     // Run generator again
     await runtimeConfigGenerator(tree, options);
-
     // Verify file wasn't overwritten
     expect(
       tree
@@ -118,13 +106,11 @@ describe('runtime-config generator', () => {
         ?.toString()
     ).not.toBe(firstRunContent);
   });
-
   it('should throw error if main.tsx does not exist', async () => {
     await expect(runtimeConfigGenerator(tree, options)).rejects.toThrow(
       'Can only run this generator on a project which contains packages/test-app/src/main.tsx'
     );
   });
-
   it('should throw error if BrowserRouter is not found', async () => {
     // Set up main.tsx without BrowserRouter
     tree.write(
@@ -133,12 +119,10 @@ describe('runtime-config generator', () => {
         return <div>Test App</div>;
       }`
     );
-
     await expect(runtimeConfigGenerator(tree, options)).rejects.toThrow(
       'Could not locate the BrowserRouter element in main.tsx'
     );
   });
-
   it('should generate shared constructs', async () => {
     // Set up a basic React app structure
     tree.write(
@@ -154,24 +138,16 @@ describe('runtime-config generator', () => {
         }`
     );
     await runtimeConfigGenerator(tree, options);
-
     // Check if shared constructs were generated
     expect(
-        tree.exists(
-          'packages/common/constructs/src/core/index.ts'
-        )
-      ).toBeTruthy();
-    expect(
-      tree.exists(
-        'packages/common/constructs/src/core/runtime-config.ts'
-      )
+      tree.exists('packages/common/constructs/src/core/index.ts')
     ).toBeTruthy();
-
+    expect(
+      tree.exists('packages/common/constructs/src/core/runtime-config.ts')
+    ).toBeTruthy();
     // Snapshot the shared constructs files
     expect(
-      tree
-        .read('packages/common/constructs/src/core/index.ts')
-        ?.toString()
+      tree.read('packages/common/constructs/src/core/index.ts')?.toString()
     ).toMatchSnapshot('common/constructs-index.ts');
     expect(
       tree

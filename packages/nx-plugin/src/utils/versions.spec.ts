@@ -4,20 +4,17 @@
  */
 import { describe, expect, it } from 'vitest';
 import { withVersions, VERSIONS } from './versions';
-
 describe('versions utils', () => {
   describe('withVersions', () => {
     it('should return empty object for empty dependencies array', () => {
       expect(withVersions([])).toEqual({});
     });
-
     it('should map single dependency to its version', () => {
       const deps: (keyof typeof VERSIONS)[] = ['zod'];
       expect(withVersions(deps)).toEqual({
         zod: VERSIONS['zod'],
       });
     });
-
     it('should map multiple dependencies to their versions', () => {
       const deps: (keyof typeof VERSIONS)[] = [
         'aws-cdk-lib',
@@ -31,7 +28,6 @@ describe('versions utils', () => {
       };
       expect(withVersions(deps)).toEqual(expected);
     });
-
     it('should handle aws dependencies correctly', () => {
       const deps: (keyof typeof VERSIONS)[] = [
         '@aws-sdk/client-wafv2',
@@ -43,7 +39,6 @@ describe('versions utils', () => {
       };
       expect(withVersions(deps)).toEqual(expected);
     });
-
     it('should handle cloudscape dependencies correctly', () => {
       const deps: (keyof typeof VERSIONS)[] = [
         '@cloudscape-design/components',
@@ -57,7 +52,6 @@ describe('versions utils', () => {
       };
       expect(withVersions(deps)).toEqual(expected);
     });
-
     it('should preserve version strings exactly as defined', () => {
       const deps: (keyof typeof VERSIONS)[] = ['aws-cdk-lib'];
       const result = withVersions(deps);

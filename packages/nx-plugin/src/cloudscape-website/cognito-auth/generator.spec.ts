@@ -4,10 +4,8 @@
  */
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
 import { Tree } from '@nx/devkit';
-
 import { cognitoAuthGenerator } from './generator';
 import { CognitoAuthGeneratorSchema } from './schema';
-
 describe('cognito-auth generator', () => {
   let tree: Tree;
   const options: CognitoAuthGeneratorSchema = {
@@ -15,7 +13,6 @@ describe('cognito-auth generator', () => {
     cognitoDomain: 'test',
     allowSignup: true,
   };
-
   beforeEach(() => {
     tree = createTreeWithEmptyWorkspace();
     // Set up a mock project structure
@@ -27,7 +24,6 @@ describe('cognito-auth generator', () => {
       })
     );
   });
-
   it('should generate files', async () => {
     // Setup main.tsx with RuntimeConfigProvider
     tree.write(
@@ -45,14 +41,11 @@ describe('cognito-auth generator', () => {
       }
     `
     );
-
     await cognitoAuthGenerator(tree, options);
-
     // Verify component files are generated
     expect(
       tree.exists('packages/test-project/src/components/CognitoAuth/index.tsx')
     ).toBeTruthy();
-
     // Verify shared constructs files are generated
     expect(
       tree.exists('packages/common/constructs/src/core/user-identity.ts')
@@ -60,7 +53,6 @@ describe('cognito-auth generator', () => {
     expect(
       tree.exists('packages/common/constructs/src/core/index.ts')
     ).toBeTruthy();
-
     // Create snapshot of the generated files
     expect(
       tree
@@ -76,7 +68,6 @@ describe('cognito-auth generator', () => {
         .toString()
     ).toMatchSnapshot('user-identity');
   });
-
   it('should update main.tsx when RuntimeConfigProvider exists', async () => {
     // Setup main.tsx with RuntimeConfigProvider
     tree.write(
@@ -94,26 +85,20 @@ describe('cognito-auth generator', () => {
       }
     `
     );
-
     await cognitoAuthGenerator(tree, options);
-
     const mainTsxContent = tree
       .read('packages/test-project/src/main.tsx')
       .toString();
-
     // Verify CognitoAuth import is added
     expect(mainTsxContent).toContain(
       "import CognitoAuth from './components/CognitoAuth'"
     );
-
     // Verify CognitoAuth component is wrapped around children
     expect(mainTsxContent).toContain('<CognitoAuth>');
     expect(mainTsxContent).toContain('</CognitoAuth>');
-
     // Create snapshot of the modified main.tsx
     expect(mainTsxContent).toMatchSnapshot('main-tsx-with-runtime-config');
   });
-
   it('should handle main.tsx without RuntimeConfigProvider', async () => {
     // Setup main.tsx without RuntimeConfigProvider
     tree.write(
@@ -130,13 +115,11 @@ describe('cognito-auth generator', () => {
       async () => await cognitoAuthGenerator(tree, options)
     ).rejects.toThrowError();
   });
-
   it('should handle missing main.tsx', async () => {
     await expect(
       async () => await cognitoAuthGenerator(tree, options)
     ).rejects.toThrowError();
   });
-
   it('should update shared constructs index.ts', async () => {
     // Setup main.tsx with RuntimeConfigProvider
     tree.write(
@@ -154,26 +137,20 @@ describe('cognito-auth generator', () => {
         }
       `
     );
-
     // Setup initial shared constructs index
     tree.write(
       'packages/common/constructs/src/index.ts',
       'export const dummy = true;'
     );
-
     await cognitoAuthGenerator(tree, options);
-
     const indexContent = tree
       .read('packages/common/constructs/src/core/index.ts')
       .toString();
-
     // Verify identity export is added
     expect(indexContent).toContain('export * from "./user-identity.js"');
-
     // Create snapshot of the modified index
     expect(indexContent).toMatchSnapshot('common/constructs-index');
   });
-
   it('should add required dependencies', async () => {
     // Setup main.tsx with RuntimeConfigProvider
     tree.write(
@@ -192,20 +169,17 @@ describe('cognito-auth generator', () => {
       `
     );
     await cognitoAuthGenerator(tree, options);
-
     // Read package.json
     const packageJson = JSON.parse(tree.read('package.json').toString());
-
     // Verify dependencies are added
     expect(packageJson.dependencies).toMatchObject({
       constructs: expect.any(String),
       'aws-cdk-lib': expect.any(String),
       '@aws-cdk/aws-cognito-identitypool-alpha': expect.any(String),
       'oidc-client-ts': expect.any(String),
-      'react-oidc-context': expect.any(String)
+      'react-oidc-context': expect.any(String),
     });
   });
-
   it('should not be able to run the generator multiple times', async () => {
     // Setup main.tsx with RuntimeConfigProvider
     tree.write(
@@ -225,7 +199,6 @@ describe('cognito-auth generator', () => {
     );
     // First run to create files
     await cognitoAuthGenerator(tree, options);
-
     // Run generator again
     await expect(
       async () => await cognitoAuthGenerator(tree, options)

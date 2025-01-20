@@ -7,7 +7,6 @@ import { tsquery } from '@phenomnomnominal/tsquery';
 import { join } from 'path';
 import ts from 'typescript';
 import { ConfigureProjectOptions } from './types';
-
 const passWithNoTests = (sourceFile: ts.SourceFile): ts.SourceFile => {
   const transformer =
     <T extends ts.Node>(context: ts.TransformationContext) =>
@@ -27,7 +26,6 @@ const passWithNoTests = (sourceFile: ts.SourceFile): ts.SourceFile => {
                 ts.isIdentifier(p.name) &&
                 p.name.text === 'test'
             );
-
             if (testProperty && ts.isPropertyAssignment(testProperty)) {
               const testValue = testProperty.initializer;
               if (ts.isObjectLiteralExpression(testValue)) {
@@ -38,7 +36,6 @@ const passWithNoTests = (sourceFile: ts.SourceFile): ts.SourceFile => {
                     ts.isIdentifier(p.name) &&
                     p.name.text === 'passWithNoTests'
                 );
-
                 if (!hasPassWithNoTests) {
                   // Add passWithNoTests: true to the test object
                   const newTestValue =
@@ -49,7 +46,6 @@ const passWithNoTests = (sourceFile: ts.SourceFile): ts.SourceFile => {
                         context.factory.createTrue()
                       ),
                     ]);
-
                   // Update the test property with the new value
                   const newTestProperty =
                     context.factory.updatePropertyAssignment(
@@ -57,7 +53,6 @@ const passWithNoTests = (sourceFile: ts.SourceFile): ts.SourceFile => {
                       testProperty.name,
                       newTestValue
                     );
-
                   // Update the config object with the new test property
                   return context.factory.updateCallExpression(
                     node,
@@ -81,11 +76,9 @@ const passWithNoTests = (sourceFile: ts.SourceFile): ts.SourceFile => {
       }
       return ts.visitNode(rootNode, visit);
     };
-
   const result = ts.transform(sourceFile, [transformer]);
   return result.transformed[0] as ts.SourceFile;
 };
-
 export const configureVitest = (
   tree: Tree,
   options: ConfigureProjectOptions
@@ -94,9 +87,7 @@ export const configureVitest = (
   if (tree.exists(configPath)) {
     const originalSourceFile = tsquery.ast(tree.read(configPath, 'utf-8'));
     let sourceFile = originalSourceFile;
-
     sourceFile = passWithNoTests(sourceFile);
-
     const printer = ts.createPrinter({
       removeComments: false,
       newLine: ts.NewLineKind.LineFeed,
@@ -106,7 +97,6 @@ export const configureVitest = (
       printer.printNode(ts.EmitHint.Unspecified, sourceFile, originalSourceFile)
     );
   }
-
   const nxJson = readNxJson(tree);
   updateNxJson(tree, {
     ...nxJson,

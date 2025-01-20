@@ -4,7 +4,12 @@
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
-import { Tree, addDependenciesToPackageJson, generateFiles } from '@nx/devkit';
+import {
+  OverwriteStrategy,
+  Tree,
+  addDependenciesToPackageJson,
+  generateFiles,
+} from '@nx/devkit';
 import {
   sharedConstructsGenerator,
   PACKAGES_DIR,
@@ -15,7 +20,6 @@ import {
 } from './shared-constructs';
 import * as npmScopeUtils from './npm-scope';
 import tsLibGenerator from '../ts/lib/generator';
-
 // Mock dependencies
 vi.mock('@nx/devkit', async () => {
   const actual = await vi.importActual('@nx/devkit');
@@ -25,19 +29,15 @@ vi.mock('@nx/devkit', async () => {
     addDependenciesToPackageJson: vi.fn(),
   };
 });
-
 vi.mock('../ts/lib/generator', () => ({
   default: vi.fn(),
 }));
-
 vi.mock('./npm-scope', () => ({
   getNpmScopePrefix: vi.fn(),
   toScopeAlias: vi.fn(),
 }));
-
 describe('shared-constructs utils', () => {
   let tree: Tree;
-
   beforeEach(() => {
     tree = createTreeWithEmptyWorkspace();
     vi.clearAllMocks();
@@ -46,13 +46,10 @@ describe('shared-constructs utils', () => {
     );
     vi.spyOn(npmScopeUtils, 'toScopeAlias').mockReturnValue(':test-scope');
   });
-
   describe('sharedConstructsGenerator', () => {
     it('should generate type definitions when they do not exist', async () => {
       vi.spyOn(tree, 'exists').mockImplementation(() => false);
-
       await sharedConstructsGenerator(tree);
-
       expect(tsLibGenerator).toHaveBeenCalledWith(tree, {
         name: TYPE_DEFINITIONS_NAME,
         directory: PACKAGES_DIR,
@@ -63,15 +60,15 @@ describe('shared-constructs utils', () => {
         tree,
         expect.stringContaining(TYPE_DEFINITIONS_DIR),
         expect.stringContaining(TYPE_DEFINITIONS_DIR),
-        expect.any(Object)
+        expect.any(Object),
+        expect.objectContaining({
+          overwriteStrategy: OverwriteStrategy.KeepExisting,
+        })
       );
     });
-
     it('should generate shared constructs when they do not exist', async () => {
       vi.spyOn(tree, 'exists').mockImplementation(() => false);
-
       await sharedConstructsGenerator(tree);
-
       expect(tsLibGenerator).toHaveBeenCalledWith(tree, {
         name: SHARED_CONSTRUCTS_NAME,
         directory: PACKAGES_DIR,
@@ -85,15 +82,15 @@ describe('shared-constructs utils', () => {
         expect.objectContaining({
           npmScopePrefix: '@test-scope/',
           scopeAlias: ':test-scope',
+        }),
+        expect.objectContaining({
+          overwriteStrategy: OverwriteStrategy.KeepExisting,
         })
       );
     });
-
     it('should add required dependencies when generating shared constructs', async () => {
       vi.spyOn(tree, 'exists').mockImplementation(() => false);
-
       await sharedConstructsGenerator(tree);
-
       expect(addDependenciesToPackageJson).toHaveBeenCalledWith(
         tree,
         expect.objectContaining({
@@ -103,27 +100,21 @@ describe('shared-constructs utils', () => {
         {}
       );
     });
-
     it('should not generate type definitions when they already exist', async () => {
       vi.spyOn(tree, 'exists').mockImplementation((path) =>
         path.includes(TYPE_DEFINITIONS_DIR)
       );
-
       await sharedConstructsGenerator(tree);
-
       expect(tsLibGenerator).not.toHaveBeenCalledWith(
         tree,
         expect.objectContaining({ name: TYPE_DEFINITIONS_NAME })
       );
     });
-
     it('should not generate shared constructs when they already exist', async () => {
       vi.spyOn(tree, 'exists').mockImplementation((path) =>
         path.includes(SHARED_CONSTRUCTS_DIR)
       );
-
       await sharedConstructsGenerator(tree);
-
       expect(tsLibGenerator).not.toHaveBeenCalledWith(
         tree,
         expect.objectContaining({ name: SHARED_CONSTRUCTS_NAME })

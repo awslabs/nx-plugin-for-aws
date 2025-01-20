@@ -34,7 +34,6 @@ export const VERSIONS = {
   tsx: '^4.19.2',
   zod: '^3.23.8',
 } as const;
-
 /**
  * Add versions to the given dependencies
  */

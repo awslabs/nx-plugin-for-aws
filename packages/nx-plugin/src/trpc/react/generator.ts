@@ -47,7 +47,6 @@ import {
   destructuredImport,
 } from '../../utils/ast';
 import { toClassName } from '../../utils/names';
-
 export async function reactGenerator(
   tree: Tree,
   options: ReactGeneratorSchema
@@ -78,11 +77,9 @@ export async function reactGenerator(
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     }
   );
-
   await runtimeConfigGenerator(tree, {
     project: options.frontendProjectName,
   });
-
   // Update runtime-config.ts with ApiUrl type and trpcApis property
   const runtimeConfigPath = joinPathFragments(
     PACKAGES_DIR,
@@ -90,24 +87,19 @@ export async function reactGenerator(
     'src',
     'runtime-config.ts'
   );
-
   const runtimeConfigContent = tree.read(runtimeConfigPath).toString();
   const sourceFile = ast(runtimeConfigContent);
-
   // Check if ApiUrl type exists
   const existingApiUrl = tsquery.query(
     sourceFile,
     'TypeAliasDeclaration[name.text="ApiUrl"]'
   );
-
   // Check if trpcApis property exists in IRuntimeConfig
   const existingTrpcApis = tsquery.query(
     sourceFile,
     'InterfaceDeclaration[name.text="IRuntimeConfig"] PropertySignature[name.text="trpcApis"]'
   );
-
   let updatedContent = sourceFile;
-
   // Add ApiUrl type if it doesn't exist
   if (existingApiUrl.length === 0) {
     const apiUrlType = factory.createTypeAliasDeclaration(
@@ -116,7 +108,6 @@ export async function reactGenerator(
       undefined,
       factory.createKeywordTypeNode(SyntaxKind.StringKeyword)
     );
-
     updatedContent = tsquery.map(
       updatedContent,
       'SourceFile',
@@ -125,7 +116,6 @@ export async function reactGenerator(
       }
     );
   }
-
   // Add empty trpcApis to IRuntimeConfig if it doesn't exist
   if (existingTrpcApis.length === 0) {
     updatedContent = tsquery.map(
@@ -138,7 +128,6 @@ export async function reactGenerator(
           undefined,
           factory.createTypeLiteralNode([])
         );
-
         return factory.updateInterfaceDeclaration(
           node,
           node.modifiers,
@@ -150,13 +139,11 @@ export async function reactGenerator(
       }
     );
   }
-
   // Check if apiNameClassName property exists in trpcApis
   const existingApiNameProperty = tsquery.query(
     updatedContent,
     `InterfaceDeclaration[name.text="IRuntimeConfig"] PropertySignature[name.text="trpcApis"] TypeLiteral PropertySignature[name.text="${apiNameClassName}"]`
   );
-
   // Add apiNameClassName property to trpcApis if it doesn't exist
   if (existingApiNameProperty.length === 0) {
     updatedContent = tsquery.map(
@@ -175,12 +162,10 @@ export async function reactGenerator(
       }
     );
   }
-
   // Only write if changes were made
   if (updatedContent !== sourceFile) {
     tree.write(runtimeConfigPath, updatedContent.getFullText());
   }
-
   // update main.tsx
   const mainTsxPath = joinPathFragments(
     frontendProjectConfig.sourceRoot,
@@ -200,7 +185,6 @@ export async function reactGenerator(
       mainTsxAst,
       'JsxOpeningElement[tagName.name="TrpcClientProviders"]'
     ).length > 0;
-
   if (!hasProvider) {
     replace(
       tree,
@@ -210,13 +194,11 @@ export async function reactGenerator(
         createJsxElementFromIdentifier('TrpcClientProviders', [node])
     );
   }
-
   // update TrpcApis.tsx
   const trpcApisPath = joinPathFragments(
     frontendProjectConfig.sourceRoot,
     'components/TrpcClients/TrpcApis.tsx'
   );
-
   // Add imports if they don't exist
   destructuredImport(
     tree,
@@ -233,7 +215,6 @@ export async function reactGenerator(
     ],
     backendProjectAlias
   );
-
   // Update the export object only if API doesn't exist
   replace(
     tree,
@@ -241,13 +222,11 @@ export async function reactGenerator(
     'ExportAssignment > ObjectLiteralExpression',
     (node) => {
       const existingProperties = (node as ObjectLiteralExpression).properties;
-
       if (
         existingProperties.find((p) => p.name?.getText() === apiNameClassName)
       ) {
         return node;
       }
-
       const newProperty = factory.createPropertyAssignment(
         factory.createIdentifier(apiNameClassName),
         factory.createCallExpression(
@@ -263,20 +242,17 @@ export async function reactGenerator(
           []
         )
       );
-
       return factory.createObjectLiteralExpression(
         [...existingProperties, newProperty],
         true
       );
     }
   );
-
   // update TrpcClientProviders.tsx
   const trpcClientProvidersPath = joinPathFragments(
     frontendProjectConfig.sourceRoot,
     'components/TrpcClients/TrpcClientProviders.tsx'
   );
-
   // Add imports
   destructuredImport(
     tree,
@@ -285,7 +261,6 @@ export async function reactGenerator(
     '../../hooks/useRuntimeConfig'
   );
   singleImport(tree, trpcClientProvidersPath, 'TrpcApis', './TrpcApis');
-
   // Check if useContext hook exists and add if it doesn't add it
   const providersSource = tree.read(trpcClientProvidersPath).toString();
   const providersAst = ast(providersSource);
@@ -294,7 +269,6 @@ export async function reactGenerator(
       providersAst,
       'VariableDeclaration[name.name="runtimeConfig"] CallExpression[expression.name="useRuntimeConfig"]'
     ).length > 0;
-
   if (!hasRuntimeConfig) {
     replace(
       tree,
@@ -320,7 +294,6 @@ export async function reactGenerator(
             NodeFlags.Const
           )
         );
-
         // Insert the runtimeContext declaration before the return statement
         existingStatements.splice(
           existingStatements.length - 1,
@@ -331,17 +304,14 @@ export async function reactGenerator(
       }
     );
   }
-
   // Check if API provider already exists
   const trpcProviderSource = tree.read(trpcClientProvidersPath).toString();
   const trpcProviderAst = ast(trpcProviderSource);
-
   const hasTrpcProvider =
     tsquery.query(
       trpcProviderAst,
       `JsxOpeningElement PropertyAccessExpression:has(Identifier[name="Provider"]) PropertyAccessExpression:has(Identifier[name="${apiNameClassName}"]) Identifier[name="TrpcApis"]`
     ).length > 0;
-
   if (!hasTrpcProvider) {
     // Transform the return statement only if provider doesn't exist
     replace(
@@ -352,7 +322,6 @@ export async function reactGenerator(
         const existingExpression = isParenthesizedExpression(node.expression)
           ? node.expression?.expression
           : node.expression;
-
         return factory.createReturnStatement(
           factory.createJsxElement(
             factory.createJsxOpeningElement(
@@ -403,7 +372,6 @@ export async function reactGenerator(
       }
     );
   }
-
   addDependenciesToPackageJson(
     tree,
     withVersions([
@@ -419,12 +387,9 @@ export async function reactGenerator(
     ]),
     {}
   );
-
   await formatFilesInSubtree(tree, frontendProjectConfig.root);
-
   return () => {
     installPackagesTask(tree);
   };
 }
-
 export default reactGenerator;

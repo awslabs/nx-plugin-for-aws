@@ -4,7 +4,6 @@
  */
 import { SupportedStyles } from '@nx/react';
 import { Linter } from '@nx/eslint';
-
 export interface AppGeneratorSchema {
   name: string;
   style: SupportedStyles;

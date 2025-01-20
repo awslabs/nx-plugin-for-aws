@@ -7,6 +7,7 @@ import {
   generateFiles,
   Tree,
   readProjectConfiguration,
+  OverwriteStrategy,
 } from '@nx/devkit';
 import { RuntimeConfigGeneratorSchema } from './schema';
 import { tsquery, ast } from '@phenomnomnominal/tsquery';
@@ -14,20 +15,17 @@ import { factory, JsxElement, SourceFile } from 'typescript';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
 import { formatFilesInSubtree } from '../../utils/format';
-
 export async function runtimeConfigGenerator(
   tree: Tree,
   options: RuntimeConfigGeneratorSchema
 ) {
   const srcRoot = readProjectConfiguration(tree, options.project).sourceRoot;
   const mainTsxPath = joinPathFragments(srcRoot, 'main.tsx');
-
   if (!tree.exists(mainTsxPath)) {
     throw new Error(
       `Can only run this generator on a project which contains ${mainTsxPath}`
     );
   }
-
   const mainTsxContents = tree.read(mainTsxPath).toString();
   const mainTsxAst = ast(mainTsxContents);
   const runtimeConfigPath = joinPathFragments(
@@ -36,7 +34,6 @@ export async function runtimeConfigGenerator(
     'RuntimeConfig',
     'index.tsx'
   );
-
   if (
     tree.exists(runtimeConfigPath) ||
     tsquery.query(
@@ -47,16 +44,21 @@ export async function runtimeConfigGenerator(
     console.debug('Runtime config already exists, skipping generation');
     return;
   }
-
   await sharedConstructsGenerator(tree);
-
   const npmScopePrefix = getNpmScopePrefix(tree);
-  generateFiles(tree, joinPathFragments(__dirname, 'files', 'app'), srcRoot, {
-    ...options,
-    npmScopePrefix,
-    scopeAlias: toScopeAlias(npmScopePrefix),
-  });
-
+  generateFiles(
+    tree,
+    joinPathFragments(__dirname, 'files', 'app'),
+    srcRoot,
+    {
+      ...options,
+      npmScopePrefix,
+      scopeAlias: toScopeAlias(npmScopePrefix),
+    },
+    {
+      overwriteStrategy: OverwriteStrategy.KeepExisting,
+    }
+  );
   const runtimeContextImport = factory.createImportDeclaration(
     undefined,
     factory.createImportClause(
@@ -66,7 +68,6 @@ export async function runtimeConfigGenerator(
     ),
     factory.createStringLiteral('./components/RuntimeConfig', true)
   );
-
   const updatedImports = tsquery
     .map(mainTsxAst, 'SourceFile', (node: SourceFile) => {
       return {
@@ -75,7 +76,6 @@ export async function runtimeConfigGenerator(
       };
     })
     .getFullText();
-
   let locatedTargetNode = false;
   const mainTsxUpdatedContents = tsquery
     .map(ast(updatedImports), 'JsxElement', (node: JsxElement) => {
@@ -84,7 +84,6 @@ export async function runtimeConfigGenerator(
       } else {
         locatedTargetNode = true;
       }
-
       return factory.createJsxElement(
         factory.createJsxOpeningElement(
           factory.createIdentifier('RuntimeConfigProvider'),
@@ -98,16 +97,12 @@ export async function runtimeConfigGenerator(
       );
     })
     .getFullText();
-
   if (!locatedTargetNode) {
     throw new Error('Could not locate the BrowserRouter element in main.tsx');
   }
-
   if (locatedTargetNode && mainTsxContents !== mainTsxUpdatedContents) {
     tree.write(mainTsxPath, mainTsxUpdatedContents);
   }
-
   await formatFilesInSubtree(tree, mainTsxPath);
 }
-
 export default runtimeConfigGenerator;

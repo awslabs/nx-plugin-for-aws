@@ -7,6 +7,7 @@ import {
   generateFiles,
   installPackagesTask,
   joinPathFragments,
+  OverwriteStrategy,
   ProjectConfiguration,
   Tree,
   updateJson,
@@ -25,13 +26,11 @@ import { getRelativePathToRoot } from '../../utils/paths';
 import { formatFilesInSubtree } from '../../utils/format';
 import { toClassName } from '../../utils/names';
 import { addStarExport } from '../../utils/ast';
-
 export async function trpcBackendGenerator(
   tree: Tree,
   options: TrpcBackendGeneratorSchema
 ) {
   await sharedConstructsGenerator(tree);
-
   const apiNamespace = getNpmScopePrefix(tree);
   const apiNameKebabCase = kebabCase(options.apiName);
   const apiNameClassName = toClassName(options.apiName);
@@ -45,10 +44,8 @@ export async function trpcBackendGenerator(
   )}`;
   const schemaRoot = joinPathFragments(projectRoot, 'schema');
   const backendRoot = joinPathFragments(projectRoot, 'backend');
-
   const backendName = `${apiNameKebabCase}-backend`;
   const schemaName = `${apiNameKebabCase}-schema`;
-
   const backendProjectName = `${apiNamespace}${backendName}`;
   const schemaProjectName = `${apiNamespace}${schemaName}`;
   const enhancedOptions = {
@@ -61,21 +58,18 @@ export async function trpcBackendGenerator(
     relativePathToProjectRoot,
     ...options,
   };
-
   await tsLibGenerator(tree, {
     name: backendName,
     directory: projectRoot,
     subDirectory: 'backend',
     unitTestRunner: options.unitTestRunner,
   });
-
   await tsLibGenerator(tree, {
     name: schemaName,
     directory: projectRoot,
     subDirectory: 'schema',
     unitTestRunner: options.unitTestRunner,
   });
-
   if (
     !tree.exists(
       joinPathFragments(
@@ -98,9 +92,11 @@ export async function trpcBackendGenerator(
         'app'
       ),
       joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'src', 'app'),
-      enhancedOptions
+      enhancedOptions,
+      {
+        overwriteStrategy: OverwriteStrategy.KeepExisting,
+      }
     );
-
     const shouldGenerateCoreTrpcApiConstruct = !tree.exists(
       joinPathFragments(
         PACKAGES_DIR,
@@ -110,7 +106,6 @@ export async function trpcBackendGenerator(
         'trpc-api.ts'
       )
     );
-
     if (shouldGenerateCoreTrpcApiConstruct) {
       generateFiles(
         tree,
@@ -122,10 +117,12 @@ export async function trpcBackendGenerator(
           'core'
         ),
         joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'src', 'core'),
-        enhancedOptions
+        enhancedOptions,
+        {
+          overwriteStrategy: OverwriteStrategy.KeepExisting,
+        }
       );
     }
-
     addStarExport(
       tree,
       joinPathFragments(
@@ -137,7 +134,6 @@ export async function trpcBackendGenerator(
       ),
       './trpc-apis/index.js'
     );
-
     addStarExport(
       tree,
       joinPathFragments(
@@ -150,7 +146,6 @@ export async function trpcBackendGenerator(
       ),
       `./${apiNameKebabCase}.js`
     );
-
     if (shouldGenerateCoreTrpcApiConstruct) {
       addStarExport(
         tree,
@@ -165,7 +160,6 @@ export async function trpcBackendGenerator(
       );
     }
   }
-
   updateJson(
     tree,
     joinPathFragments(backendRoot, 'project.json'),
@@ -173,27 +167,29 @@ export async function trpcBackendGenerator(
       config.metadata = {
         apiName: options.apiName,
       } as unknown;
-
       return config;
     }
   );
-
   generateFiles(
     tree,
     joinPathFragments(__dirname, 'files', 'backend'),
     backendRoot,
-    enhancedOptions
+    enhancedOptions,
+    {
+      overwriteStrategy: OverwriteStrategy.Overwrite,
+    }
   );
   generateFiles(
     tree,
     joinPathFragments(__dirname, 'files', 'schema'),
     schemaRoot,
-    enhancedOptions
+    enhancedOptions,
+    {
+      overwriteStrategy: OverwriteStrategy.Overwrite,
+    }
   );
-
   tree.delete(joinPathFragments(backendRoot, 'src', 'lib'));
   tree.delete(joinPathFragments(schemaRoot, 'src', 'lib'));
-
   addDependenciesToPackageJson(
     tree,
     withVersions([
@@ -206,15 +202,11 @@ export async function trpcBackendGenerator(
     ]),
     withVersions(['@types/aws-lambda'])
   );
-
   tree.delete(joinPathFragments(backendRoot, 'package.json'));
   tree.delete(joinPathFragments(schemaRoot, 'package.json'));
-
   await formatFilesInSubtree(tree, projectRoot);
-
   return () => {
     installPackagesTask(tree);
   };
 }
-
 export default trpcBackendGenerator;

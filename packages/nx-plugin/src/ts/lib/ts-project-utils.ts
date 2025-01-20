@@ -15,7 +15,6 @@ import { toScopeAlias } from '../../utils/npm-scope';
 import { ConfigureProjectOptions } from './types';
 import { configureVitest } from './vitest';
 import { configureEslint } from './eslint';
-
 /**
  * Updates typescript projects
  */
@@ -34,13 +33,11 @@ export const configureTsProject = (
           : tsConfig.compilerOptions?.module,
     },
   }));
-
   const outDirToRootRelativePath = relative(
     join(tree.root, options.dir),
     tree.root
   );
   const distDir = join(outDirToRootRelativePath, 'dist', options.dir);
-
   // Remove baseUrl and rootDir from the tsconfig.lib.json
   if (tree.exists(join(options.dir, 'tsconfig.lib.json'))) {
     updateJson(tree, join(options.dir, 'tsconfig.lib.json'), (tsConfig) => ({
@@ -55,7 +52,6 @@ export const configureTsProject = (
       include: undefined,
     }));
   }
-
   // Update root project tsconfig
   updateJson(tree, 'tsconfig.base.json', (tsConfig) => ({
     ...tsConfig,
@@ -78,7 +74,6 @@ export const configureTsProject = (
       },
     },
   }));
-
   if (tree.exists('tsconfig.json')) {
     updateJson(tree, 'tsconfig.json', (tsConfig) => ({
       ...tsConfig,
@@ -93,23 +88,19 @@ export const configureTsProject = (
       ],
     }));
   }
-
   // Update the root package.json
   updateJson(tree, 'package.json', (packageJson) => ({
     ...packageJson,
     type: 'module',
   }));
-
   // Remove package.json if it exists
   if (tree.exists(join(options.dir, 'package.json'))) {
     tree.delete(join(options.dir, 'package.json'));
   }
-
   // Convert cjs files to esm for eslint configs and source code, including root monorepo config.
   cjsToEsm(tree, '.', {
     include: ['eslint.config.js', '**/eslint.config.js', '**/src/**/*.ts'],
   });
-
   // Build task should both test and lint, so move build to compile and compose build as compile + test + lint
   const projectConfiguration = readProjectConfiguration(
     tree,
@@ -123,14 +114,12 @@ export const configureTsProject = (
     projectConfiguration.targets.build = {
       dependsOn: ['compile', 'lint', 'test'],
     };
-
     updateProjectConfiguration(
       tree,
       options.fullyQualifiedName,
       projectConfiguration
     );
   }
-
   configureEslint(tree, options);
   configureVitest(tree, options);
 };

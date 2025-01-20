@@ -11,6 +11,7 @@ import {
   updateJson,
   ProjectConfiguration,
   GeneratorCallback,
+  OverwriteStrategy,
 } from '@nx/devkit';
 import { InfraGeneratorSchema } from './schema';
 import tsLibGenerator, { getTsLibDetails } from '../../ts/lib/generator';
@@ -20,16 +21,16 @@ import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
+  sharedConstructsGenerator,
 } from '../../utils/shared-constructs';
 import { addStarExport } from '../../utils/ast';
-
 export async function infraGenerator(
   tree: Tree,
   schema: InfraGeneratorSchema
 ): Promise<GeneratorCallback> {
   const lib = getTsLibDetails(tree, schema);
   const tsLibGeneratorCallback = await tsLibGenerator(tree, schema);
-
+  await sharedConstructsGenerator(tree);
   const synthDirFromRoot = `/dist/${lib.dir}/cdk.out`;
   const synthDirFromProject =
     lib.dir
@@ -48,9 +49,11 @@ export async function infraGenerator(
       scopeAlias: toScopeAlias(getNpmScopePrefix(tree)),
       ...schema,
       ruleSet: schema.ruleSet.toUpperCase(),
+    },
+    {
+      overwriteStrategy: OverwriteStrategy.KeepExisting,
     }
   );
-
   generateFiles(
     tree, // the virtual file system
     joinPathFragments(__dirname, 'files', SHARED_CONSTRUCTS_DIR, 'src', 'core'),
@@ -59,15 +62,16 @@ export async function infraGenerator(
       synthDir: synthDirFromProject,
       scopeAlias: toScopeAlias(getNpmScopePrefix(tree)),
       ...schema,
+    },
+    {
+      overwriteStrategy: OverwriteStrategy.KeepExisting,
     }
   );
-
   updateJson(
     tree,
     `${libraryRoot}/project.json`,
     (config: ProjectConfiguration) => {
       config.projectType = 'application';
-
       config.targets.build = {
         cache: true,
         executor: 'nx:run-commands',
@@ -78,7 +82,6 @@ export async function infraGenerator(
           command: 'cdk synth',
         },
       };
-
       config.targets.deploy = {
         executor: 'nx:run-commands',
         options: {
@@ -86,11 +89,9 @@ export async function infraGenerator(
           command: `cdk deploy --require-approval=never --app ${synthDirFromProject}`,
         },
       };
-
       return config;
     }
   );
-
   addStarExport(
     tree,
     joinPathFragments(
@@ -102,7 +103,6 @@ export async function infraGenerator(
     ),
     './cfn-guard.js'
   );
-
   addDependenciesToPackageJson(
     tree,
     withVersions([
@@ -115,10 +115,7 @@ export async function infraGenerator(
     ]),
     withVersions(['tsx'])
   );
-
   await formatFilesInSubtree(tree, libraryRoot);
-
   return tsLibGeneratorCallback;
 }
-
 export default infraGenerator;
