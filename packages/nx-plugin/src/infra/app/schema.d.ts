@@ -13,6 +13,7 @@ export interface InfraGeneratorSchema {
     | 'well_architected_reliability'
     | 'well_architected_security';
   directory?: string;
-  unitTestRunner?: 'jest' | 'vitest' | 'none';
+  //   unitTestRunner?: 'jest' | 'vitest' | 'none';
+  //   linter?: Linter;
   skipInstall?: boolean;
 }

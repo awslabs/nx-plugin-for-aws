@@ -14,6 +14,7 @@ import {
   installPackagesTask,
   addProjectConfiguration,
   OverwriteStrategy,
+  getPackageManagerCommand,
 } from '@nx/devkit';
 import { tsquery, ast } from '@phenomnomnominal/tsquery';
 import {
@@ -53,6 +54,9 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
     routing: false,
     addPlugin: schema.addPlugin ?? true,
     e2eTestRunner,
+    linter: 'eslint',
+    bundler: 'vite',
+    unitTestRunner: 'vitest',
   });
   if (!tree.exists(`${websiteContentPath}/project.json`)) {
     addProjectConfiguration(tree, fullyQualifiedName, {
@@ -208,7 +212,11 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
     tree, // the virtual file system
     joinPathFragments(__dirname, './files/app'), // path to the file templates
     libraryRoot, // destination path of the files
-    schema, // config object to replace variable in file templates
+    {
+      ...schema,
+      fullyQualifiedName,
+      pkgMgrCmd: getPackageManagerCommand().exec,
+    }, // config object to replace variable in file templates
     {
       overwriteStrategy: OverwriteStrategy.Overwrite,
     }
@@ -234,81 +242,74 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
   const viteConfigContents = tree.read(viteConfigPath)?.toString();
   if (viteConfigContents) {
     let viteConfigUpdatedContents = viteConfigContents;
-    if (schema.unitTestRunner === 'vitest') {
-      viteConfigUpdatedContents = tsquery
-        .map(
-          ast(viteConfigContents),
-          'ObjectLiteralExpression',
-          (node: ObjectLiteralExpression) => {
-            return factory.createObjectLiteralExpression(
-              [
-                factory.createPropertyAssignment(
-                  'define',
-                  factory.createObjectLiteralExpression(
-                    [
-                      factory.createPropertyAssignment(
-                        'global',
-                        factory.createObjectLiteralExpression()
-                      ),
-                    ],
-                    true
-                  )
-                ),
-                ...node.properties,
-              ],
-              true
-            );
-          }
-        )
-        .getFullText();
-    }
-    if (schema.bundler === 'vite') {
-      viteConfigUpdatedContents = tsquery
-        .map(
-          ast(viteConfigUpdatedContents),
-          'ObjectLiteralExpression',
-          (node: ObjectLiteralExpression) => {
-            const updatedProperties = node.properties.map((prop) => {
-              if (
-                isPropertyAssignment(prop) &&
-                prop.name.getText() === 'build'
-              ) {
-                const buildConfig = prop.initializer as ObjectLiteralExpression;
-                return factory.createPropertyAssignment(
-                  'build',
-                  factory.createObjectLiteralExpression(
-                    buildConfig.properties.map((buildProp) => {
-                      if (
-                        isPropertyAssignment(buildProp) &&
-                        buildProp.name.getText() === 'outDir'
-                      ) {
-                        return factory.createPropertyAssignment(
-                          'outDir',
-                          factory.createStringLiteral(
-                            joinPathFragments(
-                              getRelativePathToRoot(tree, fullyQualifiedName),
-                              'dist',
-                              websiteContentPath
-                            )
+
+    viteConfigUpdatedContents = tsquery
+      .map(
+        ast(viteConfigContents),
+        'ObjectLiteralExpression',
+        (node: ObjectLiteralExpression) => {
+          return factory.createObjectLiteralExpression(
+            [
+              factory.createPropertyAssignment(
+                'define',
+                factory.createObjectLiteralExpression(
+                  [
+                    factory.createPropertyAssignment(
+                      'global',
+                      factory.createObjectLiteralExpression()
+                    ),
+                  ],
+                  true
+                )
+              ),
+              ...node.properties,
+            ],
+            true
+          );
+        }
+      )
+      .getFullText();
+
+    viteConfigUpdatedContents = tsquery
+      .map(
+        ast(viteConfigUpdatedContents),
+        'ObjectLiteralExpression',
+        (node: ObjectLiteralExpression) => {
+          const updatedProperties = node.properties.map((prop) => {
+            if (isPropertyAssignment(prop) && prop.name.getText() === 'build') {
+              const buildConfig = prop.initializer as ObjectLiteralExpression;
+              return factory.createPropertyAssignment(
+                'build',
+                factory.createObjectLiteralExpression(
+                  buildConfig.properties.map((buildProp) => {
+                    if (
+                      isPropertyAssignment(buildProp) &&
+                      buildProp.name.getText() === 'outDir'
+                    ) {
+                      return factory.createPropertyAssignment(
+                        'outDir',
+                        factory.createStringLiteral(
+                          joinPathFragments(
+                            getRelativePathToRoot(tree, fullyQualifiedName),
+                            'dist',
+                            websiteContentPath
                           )
-                        );
-                      }
-                      return buildProp;
-                    }),
-                    true
-                  )
-                );
-              }
-              return prop;
-            });
-            return factory.createObjectLiteralExpression(
-              updatedProperties,
-              true
-            );
-          }
-        )
-        .getFullText();
-    }
+                        )
+                      );
+                    }
+                    return buildProp;
+                  }),
+                  true
+                )
+              );
+            }
+            return prop;
+          });
+          return factory.createObjectLiteralExpression(updatedProperties, true);
+        }
+      )
+      .getFullText();
+
     if (viteConfigContents !== viteConfigUpdatedContents) {
       tree.write(viteConfigPath, viteConfigUpdatedContents);
     }

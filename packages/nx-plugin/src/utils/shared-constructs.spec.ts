@@ -54,7 +54,6 @@ describe('shared-constructs utils', () => {
         name: TYPE_DEFINITIONS_NAME,
         directory: PACKAGES_DIR,
         subDirectory: TYPE_DEFINITIONS_DIR,
-        unitTestRunner: 'none',
       });
       expect(generateFiles).toHaveBeenCalledWith(
         tree,
@@ -73,7 +72,6 @@ describe('shared-constructs utils', () => {
         name: SHARED_CONSTRUCTS_NAME,
         directory: PACKAGES_DIR,
         subDirectory: SHARED_CONSTRUCTS_DIR,
-        unitTestRunner: 'none',
       });
       expect(generateFiles).toHaveBeenCalledWith(
         tree,

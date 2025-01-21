@@ -117,25 +117,26 @@ export const configureEslint = async (
     if (updatedContent !== sourceFile) {
       tree.write(eslintConfigPath, updatedContent.getFullText());
     }
-  }
-  const nxJson = readNxJson(tree);
-  updateNxJson(tree, {
-    ...nxJson,
-    targetDefaults: {
-      ...(nxJson.targetDefaults ?? {}),
-      lint: {
-        cache: true,
-        configurations: {
-          fix: {
-            fix: true,
+
+    const nxJson = readNxJson(tree);
+    updateNxJson(tree, {
+      ...nxJson,
+      targetDefaults: {
+        ...(nxJson.targetDefaults ?? {}),
+        lint: {
+          cache: true,
+          configurations: {
+            fix: {
+              fix: true,
+            },
           },
+          inputs: [
+            'default',
+            '{workspaceRoot}/eslint.config.js',
+            '{projectRoot}/eslint.config.js',
+          ],
         },
-        inputs: [
-          'default',
-          '{workspaceRoot}/eslint.config.js',
-          '{projectRoot}/eslint.config.js',
-        ],
       },
-    },
-  });
+    });
+  }
 };

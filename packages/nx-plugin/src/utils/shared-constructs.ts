@@ -5,6 +5,7 @@
 import {
   addDependenciesToPackageJson,
   generateFiles,
+  getPackageManagerCommand,
   joinPathFragments,
   OverwriteStrategy,
   Tree,
@@ -30,16 +31,30 @@ export async function sharedConstructsGenerator(tree: Tree) {
       name: TYPE_DEFINITIONS_NAME,
       directory: PACKAGES_DIR,
       subDirectory: TYPE_DEFINITIONS_DIR,
-      unitTestRunner: 'none',
     });
     tree.delete(joinPathFragments(PACKAGES_DIR, TYPE_DEFINITIONS_DIR, 'src'));
     generateFiles(
       tree,
-      joinPathFragments(__dirname, 'files', TYPE_DEFINITIONS_DIR),
-      joinPathFragments(PACKAGES_DIR, TYPE_DEFINITIONS_DIR),
-      {},
+      joinPathFragments(__dirname, 'files', TYPE_DEFINITIONS_DIR, 'src'),
+      joinPathFragments(PACKAGES_DIR, TYPE_DEFINITIONS_DIR, 'src'),
+      {
+        npmScopePrefix,
+      },
       {
         overwriteStrategy: OverwriteStrategy.KeepExisting,
+      }
+    );
+    generateFiles(
+      tree,
+      joinPathFragments(__dirname, 'files', 'common', 'readme'),
+      joinPathFragments(PACKAGES_DIR, TYPE_DEFINITIONS_DIR),
+      {
+        fullyQualifiedName: `${npmScopePrefix}${TYPE_DEFINITIONS_NAME}`,
+        name: TYPE_DEFINITIONS_NAME,
+        pkgMgrCmd: getPackageManagerCommand().exec,
+      },
+      {
+        overwriteStrategy: OverwriteStrategy.Overwrite,
       }
     );
     formatFilesInSubtree(
@@ -56,19 +71,31 @@ export async function sharedConstructsGenerator(tree: Tree) {
       name: SHARED_CONSTRUCTS_NAME,
       directory: PACKAGES_DIR,
       subDirectory: SHARED_CONSTRUCTS_DIR,
-      unitTestRunner: 'none',
     });
     tree.delete(joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'src'));
     generateFiles(
       tree,
-      joinPathFragments(__dirname, 'files', SHARED_CONSTRUCTS_DIR),
-      joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR),
+      joinPathFragments(__dirname, 'files', SHARED_CONSTRUCTS_DIR, 'src'),
+      joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'src'),
       {
         npmScopePrefix,
         scopeAlias: toScopeAlias(npmScopePrefix),
       },
       {
         overwriteStrategy: OverwriteStrategy.KeepExisting,
+      }
+    );
+    generateFiles(
+      tree,
+      joinPathFragments(__dirname, 'files', 'common', 'readme'),
+      joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR),
+      {
+        fullyQualifiedName: `${npmScopePrefix}${SHARED_CONSTRUCTS_NAME}`,
+        name: SHARED_CONSTRUCTS_NAME,
+        pkgMgrCmd: getPackageManagerCommand().exec,
+      },
+      {
+        overwriteStrategy: OverwriteStrategy.Overwrite,
       }
     );
     formatFilesInSubtree(

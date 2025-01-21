@@ -5,6 +5,7 @@
 import {
   addDependenciesToPackageJson,
   generateFiles,
+  getPackageManagerCommand,
   installPackagesTask,
   joinPathFragments,
   OverwriteStrategy,
@@ -56,19 +57,18 @@ export async function trpcBackendGenerator(
     apiNameKebabCase,
     apiNameClassName,
     relativePathToProjectRoot,
+    pkgMgrCmd: getPackageManagerCommand().exec,
     ...options,
   };
   await tsLibGenerator(tree, {
     name: backendName,
     directory: projectRoot,
     subDirectory: 'backend',
-    unitTestRunner: options.unitTestRunner,
   });
   await tsLibGenerator(tree, {
     name: schemaName,
     directory: projectRoot,
     subDirectory: 'schema',
-    unitTestRunner: options.unitTestRunner,
   });
   if (
     !tree.exists(

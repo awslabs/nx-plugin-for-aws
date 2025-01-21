@@ -12,6 +12,7 @@ import {
   ProjectConfiguration,
   GeneratorCallback,
   OverwriteStrategy,
+  getPackageManagerCommand,
 } from '@nx/devkit';
 import { InfraGeneratorSchema } from './schema';
 import tsLibGenerator, { getTsLibDetails } from '../../ts/lib/generator';
@@ -39,6 +40,9 @@ export async function infraGenerator(
       .join('/') + synthDirFromRoot;
   const projectConfig = readProjectConfiguration(tree, lib.fullyQualifiedName);
   const libraryRoot = projectConfig.root;
+  const npmScopePrefix = getNpmScopePrefix(tree);
+  const scopeAlias = toScopeAlias(npmScopePrefix);
+  const fullyQualifiedName = `${npmScopePrefix}${schema.name}`;
   tree.delete(joinPathFragments(libraryRoot, 'src'));
   generateFiles(
     tree, // the virtual file system
@@ -46,12 +50,14 @@ export async function infraGenerator(
     libraryRoot, // destination path of the files
     {
       synthDir: synthDirFromProject,
-      scopeAlias: toScopeAlias(getNpmScopePrefix(tree)),
+      scopeAlias: scopeAlias,
+      fullyQualifiedName,
+      pkgMgrCmd: getPackageManagerCommand().exec,
       ...schema,
       ruleSet: schema.ruleSet.toUpperCase(),
     },
     {
-      overwriteStrategy: OverwriteStrategy.KeepExisting,
+      overwriteStrategy: OverwriteStrategy.Overwrite,
     }
   );
   generateFiles(

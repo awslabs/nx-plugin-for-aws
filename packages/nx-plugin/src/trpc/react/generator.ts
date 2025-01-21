@@ -77,6 +77,9 @@ export async function reactGenerator(
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     }
   );
+  if (options.auth !== 'IAM') {
+    tree.delete(`${frontendProjectConfig.root}/src/hooks/useSigV4.tsx`);
+  }
   await runtimeConfigGenerator(tree, {
     project: options.frontendProjectName,
   });

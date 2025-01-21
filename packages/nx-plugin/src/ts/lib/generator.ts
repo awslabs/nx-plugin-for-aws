@@ -7,6 +7,7 @@ import {
   OverwriteStrategy,
   Tree,
   generateFiles,
+  getPackageManagerCommand,
   installPackagesTask,
   joinPathFragments,
 } from '@nx/devkit';
@@ -55,14 +56,19 @@ export const tsLibGenerator = async (
     directory: dir,
     skipPackageJson: true,
     bundler: 'tsc', // TODO: consider supporting others
+    linter: 'eslint',
+    unitTestRunner: 'vitest',
   });
   // Replace with simpler sample source code
   tree.delete(joinPathFragments(dir, 'src'));
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'src'),
-    joinPathFragments(dir, 'src'),
-    {},
+    joinPathFragments(__dirname, 'files'),
+    joinPathFragments(dir),
+    {
+      fullyQualifiedName,
+      pkgMgrCmd: getPackageManagerCommand().exec,
+    },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     }

@@ -96,19 +96,20 @@ export const configureVitest = (
       configPath,
       printer.printNode(ts.EmitHint.Unspecified, sourceFile, originalSourceFile)
     );
-  }
-  const nxJson = readNxJson(tree);
-  updateNxJson(tree, {
-    ...nxJson,
-    targetDefaults: {
-      ...(nxJson.targetDefaults ?? {}),
-      test: {
-        configurations: {
-          'update-snapshot': {
-            args: '--update',
+
+    const nxJson = readNxJson(tree);
+    updateNxJson(tree, {
+      ...nxJson,
+      targetDefaults: {
+        ...(nxJson.targetDefaults ?? {}),
+        test: {
+          configurations: {
+            'update-snapshot': {
+              args: '--update',
+            },
           },
         },
       },
-    },
-  });
+    });
+  }
 };
