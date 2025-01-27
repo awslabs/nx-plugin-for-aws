@@ -39,7 +39,6 @@ import {
 } from '../../utils/shared-constructs';
 import { toScopeAlias } from '../../utils/npm-scope';
 import { withVersions } from '../../utils/versions';
-import { formatFilesInSubtree } from '../../utils/format';
 import {
   createJsxElementFromIdentifier,
   replace,
@@ -47,17 +46,18 @@ import {
   destructuredImport,
 } from '../../utils/ast';
 import { toClassName } from '../../utils/names';
+import { formatFilesInSubtree } from '../../utils/format';
 export async function reactGenerator(
   tree: Tree,
-  options: ReactGeneratorSchema
+  options: ReactGeneratorSchema,
 ) {
   const frontendProjectConfig = readProjectConfiguration(
     tree,
-    options.frontendProjectName
+    options.frontendProjectName,
   );
   const backendProjectConfig = readProjectConfiguration(
     tree,
-    options.backendProjectName
+    options.backendProjectName,
   );
   /* eslint-disable @typescript-eslint/no-explicit-any */
   const apiName = (backendProjectConfig.metadata as any)?.apiName;
@@ -75,7 +75,7 @@ export async function reactGenerator(
     },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
-    }
+    },
   );
   if (options.auth !== 'IAM') {
     tree.delete(`${frontendProjectConfig.root}/src/hooks/useSigV4.tsx`);
@@ -88,19 +88,19 @@ export async function reactGenerator(
     PACKAGES_DIR,
     TYPE_DEFINITIONS_DIR,
     'src',
-    'runtime-config.ts'
+    'runtime-config.ts',
   );
   const runtimeConfigContent = tree.read(runtimeConfigPath).toString();
   const sourceFile = ast(runtimeConfigContent);
   // Check if ApiUrl type exists
   const existingApiUrl = tsquery.query(
     sourceFile,
-    'TypeAliasDeclaration[name.text="ApiUrl"]'
+    'TypeAliasDeclaration[name.text="ApiUrl"]',
   );
   // Check if trpcApis property exists in IRuntimeConfig
   const existingTrpcApis = tsquery.query(
     sourceFile,
-    'InterfaceDeclaration[name.text="IRuntimeConfig"] PropertySignature[name.text="trpcApis"]'
+    'InterfaceDeclaration[name.text="IRuntimeConfig"] PropertySignature[name.text="trpcApis"]',
   );
   let updatedContent = sourceFile;
   // Add ApiUrl type if it doesn't exist
@@ -109,14 +109,14 @@ export async function reactGenerator(
       [factory.createModifier(SyntaxKind.ExportKeyword)],
       factory.createIdentifier('ApiUrl'),
       undefined,
-      factory.createKeywordTypeNode(SyntaxKind.StringKeyword)
+      factory.createKeywordTypeNode(SyntaxKind.StringKeyword),
     );
     updatedContent = tsquery.map(
       updatedContent,
       'SourceFile',
       (node: SourceFile) => {
         return factory.updateSourceFile(node, [apiUrlType, ...node.statements]);
-      }
+      },
     );
   }
   // Add empty trpcApis to IRuntimeConfig if it doesn't exist
@@ -129,7 +129,7 @@ export async function reactGenerator(
           undefined,
           factory.createIdentifier('trpcApis'),
           undefined,
-          factory.createTypeLiteralNode([])
+          factory.createTypeLiteralNode([]),
         );
         return factory.updateInterfaceDeclaration(
           node,
@@ -137,15 +137,15 @@ export async function reactGenerator(
           node.name,
           node.typeParameters,
           node.heritageClauses,
-          [...node.members, trpcApisProperty]
+          [...node.members, trpcApisProperty],
         );
-      }
+      },
     );
   }
   // Check if apiNameClassName property exists in trpcApis
   const existingApiNameProperty = tsquery.query(
     updatedContent,
-    `InterfaceDeclaration[name.text="IRuntimeConfig"] PropertySignature[name.text="trpcApis"] TypeLiteral PropertySignature[name.text="${apiNameClassName}"]`
+    `InterfaceDeclaration[name.text="IRuntimeConfig"] PropertySignature[name.text="trpcApis"] TypeLiteral PropertySignature[name.text="${apiNameClassName}"]`,
   );
   // Add apiNameClassName property to trpcApis if it doesn't exist
   if (existingApiNameProperty.length === 0) {
@@ -159,10 +159,10 @@ export async function reactGenerator(
             undefined,
             factory.createIdentifier(apiNameClassName),
             undefined,
-            factory.createTypeReferenceNode('ApiUrl', undefined)
+            factory.createTypeReferenceNode('ApiUrl', undefined),
           ),
         ]);
-      }
+      },
     );
   }
   // Only write if changes were made
@@ -172,13 +172,13 @@ export async function reactGenerator(
   // update main.tsx
   const mainTsxPath = joinPathFragments(
     frontendProjectConfig.sourceRoot,
-    'main.tsx'
+    'main.tsx',
   );
   singleImport(
     tree,
     mainTsxPath,
     'TrpcClientProviders',
-    './components/TrpcClients'
+    './components/TrpcClients',
   );
   // Check if TrpcClientProviders already exists
   const mainTsxSource = tree.read(mainTsxPath).toString();
@@ -186,7 +186,7 @@ export async function reactGenerator(
   const hasProvider =
     tsquery.query(
       mainTsxAst,
-      'JsxOpeningElement[tagName.name="TrpcClientProviders"]'
+      'JsxOpeningElement[tagName.name="TrpcClientProviders"]',
     ).length > 0;
   if (!hasProvider) {
     replace(
@@ -194,20 +194,20 @@ export async function reactGenerator(
       mainTsxPath,
       'JsxSelfClosingElement[tagName.name="App"]',
       (node: JsxSelfClosingElement) =>
-        createJsxElementFromIdentifier('TrpcClientProviders', [node])
+        createJsxElementFromIdentifier('TrpcClientProviders', [node]),
     );
   }
   // update TrpcApis.tsx
   const trpcApisPath = joinPathFragments(
     frontendProjectConfig.sourceRoot,
-    'components/TrpcClients/TrpcApis.tsx'
+    'components/TrpcClients/TrpcApis.tsx',
   );
   // Add imports if they don't exist
   destructuredImport(
     tree,
     trpcApisPath,
     ['createIsolatedTrpcClientProvider'],
-    './IsolatedTrpcProvider'
+    './IsolatedTrpcProvider',
   );
   destructuredImport(
     tree,
@@ -216,7 +216,7 @@ export async function reactGenerator(
       `AppRouter as ${apiNameClassName}AppRouter`,
       `Context as ${apiNameClassName}Context`,
     ],
-    backendProjectAlias
+    backendProjectAlias,
   );
   // Update the export object only if API doesn't exist
   replace(
@@ -236,32 +236,32 @@ export async function reactGenerator(
           factory.createIdentifier('createIsolatedTrpcClientProvider'),
           [
             factory.createTypeReferenceNode(
-              factory.createIdentifier(`${apiNameClassName}AppRouter`)
+              factory.createIdentifier(`${apiNameClassName}AppRouter`),
             ),
             factory.createTypeReferenceNode(
-              factory.createIdentifier(`${apiNameClassName}Context`)
+              factory.createIdentifier(`${apiNameClassName}Context`),
             ),
           ],
-          []
-        )
+          [],
+        ),
       );
       return factory.createObjectLiteralExpression(
         [...existingProperties, newProperty],
-        true
+        true,
       );
-    }
+    },
   );
   // update TrpcClientProviders.tsx
   const trpcClientProvidersPath = joinPathFragments(
     frontendProjectConfig.sourceRoot,
-    'components/TrpcClients/TrpcClientProviders.tsx'
+    'components/TrpcClients/TrpcClientProviders.tsx',
   );
   // Add imports
   destructuredImport(
     tree,
     trpcClientProvidersPath,
     ['useRuntimeConfig'],
-    '../../hooks/useRuntimeConfig'
+    '../../hooks/useRuntimeConfig',
   );
   singleImport(tree, trpcClientProvidersPath, 'TrpcApis', './TrpcApis');
   // Check if useContext hook exists and add if it doesn't add it
@@ -270,7 +270,7 @@ export async function reactGenerator(
   const hasRuntimeConfig =
     tsquery.query(
       providersAst,
-      'VariableDeclaration[name.name="runtimeConfig"] CallExpression[expression.name="useRuntimeConfig"]'
+      'VariableDeclaration[name.name="runtimeConfig"] CallExpression[expression.name="useRuntimeConfig"]',
     ).length > 0;
   if (!hasRuntimeConfig) {
     replace(
@@ -290,21 +290,21 @@ export async function reactGenerator(
                 factory.createCallExpression(
                   factory.createIdentifier('useRuntimeConfig'),
                   undefined,
-                  []
-                )
+                  [],
+                ),
               ),
             ],
-            NodeFlags.Const
-          )
+            NodeFlags.Const,
+          ),
         );
         // Insert the runtimeContext declaration before the return statement
         existingStatements.splice(
           existingStatements.length - 1,
           0,
-          runtimeContextVar
+          runtimeContextVar,
         );
         return factory.createBlock(existingStatements, true);
-      }
+      },
     );
   }
   // Check if API provider already exists
@@ -313,7 +313,7 @@ export async function reactGenerator(
   const hasTrpcProvider =
     tsquery.query(
       trpcProviderAst,
-      `JsxOpeningElement PropertyAccessExpression:has(Identifier[name="Provider"]) PropertyAccessExpression:has(Identifier[name="${apiNameClassName}"]) Identifier[name="TrpcApis"]`
+      `JsxOpeningElement PropertyAccessExpression:has(Identifier[name="Provider"]) PropertyAccessExpression:has(Identifier[name="${apiNameClassName}"]) Identifier[name="TrpcApis"]`,
     ).length > 0;
   if (!hasTrpcProvider) {
     // Transform the return statement only if provider doesn't exist
@@ -331,9 +331,9 @@ export async function reactGenerator(
               factory.createPropertyAccessExpression(
                 factory.createPropertyAccessExpression(
                   factory.createIdentifier('TrpcApis'),
-                  factory.createIdentifier(apiNameClassName)
+                  factory.createIdentifier(apiNameClassName),
                 ),
-                factory.createIdentifier('Provider')
+                factory.createIdentifier('Provider'),
               ) as JsxTagNameExpression,
               undefined,
               factory.createJsxAttributes([
@@ -344,13 +344,13 @@ export async function reactGenerator(
                     factory.createPropertyAccessExpression(
                       factory.createPropertyAccessExpression(
                         factory.createIdentifier('runtimeConfig'),
-                        factory.createIdentifier('trpcApis')
+                        factory.createIdentifier('trpcApis'),
                       ),
-                      factory.createIdentifier(apiNameClassName)
-                    )
-                  )
+                      factory.createIdentifier(apiNameClassName),
+                    ),
+                  ),
                 ),
-              ])
+              ]),
             ),
             [
               isJsxChild(existingExpression) ||
@@ -365,14 +365,14 @@ export async function reactGenerator(
               factory.createPropertyAccessExpression(
                 factory.createPropertyAccessExpression(
                   factory.createIdentifier('TrpcApis'),
-                  factory.createIdentifier(apiNameClassName)
+                  factory.createIdentifier(apiNameClassName),
                 ),
-                factory.createIdentifier('Provider')
-              ) as JsxTagNameExpression
-            )
-          )
+                factory.createIdentifier('Provider'),
+              ) as JsxTagNameExpression,
+            ),
+          ),
         );
-      }
+      },
     );
   }
   addDependenciesToPackageJson(
@@ -388,9 +388,9 @@ export async function reactGenerator(
         ? ['oidc-client-ts', 'react-oidc-context']
         : []) as any),
     ]),
-    {}
+    {},
   );
-  await formatFilesInSubtree(tree, frontendProjectConfig.root);
+  await formatFilesInSubtree(tree);
   return () => {
     installPackagesTask(tree);
   };

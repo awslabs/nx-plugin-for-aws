@@ -12,9 +12,9 @@ import {
   updateJson,
   ProjectConfiguration,
   installPackagesTask,
-  addProjectConfiguration,
   OverwriteStrategy,
   getPackageManagerCommand,
+  updateProjectConfiguration,
 } from '@nx/devkit';
 import { tsquery, ast } from '@phenomnomnominal/tsquery';
 import {
@@ -33,9 +33,9 @@ import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
 import { configureTsProject } from '../../ts/lib/ts-project-utils';
 import { withVersions } from '../../utils/versions';
 import { getRelativePathToRoot } from '../../utils/paths';
-import { formatFilesInSubtree } from '../../utils/format';
 import { toClassName, toKebabCase } from '../../utils/names';
 import { addStarExport } from '../../utils/ast';
+import { formatFilesInSubtree } from '../../utils/format';
 export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
   const npmScopePrefix = getNpmScopePrefix(tree);
   const websiteNameClassName = toClassName(schema.name);
@@ -43,41 +43,59 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
   const fullyQualifiedName = `${npmScopePrefix}${websiteNameKebabCase}`;
   const websiteContentPath = joinPathFragments(
     schema.directory ?? '.',
-    websiteNameKebabCase
+    websiteNameKebabCase,
   );
   // TODO: consider exposing and supporting e2e tests
   const e2eTestRunner = 'none';
   await applicationGenerator(tree, {
     ...schema,
-    name: fullyQualifiedName,
+    name: websiteNameKebabCase,
     directory: websiteContentPath,
     routing: false,
-    addPlugin: schema.addPlugin ?? true,
     e2eTestRunner,
     linter: 'eslint',
     bundler: 'vite',
     unitTestRunner: 'vitest',
+    alwaysGenerateProjectJson: true,
   });
-  if (!tree.exists(`${websiteContentPath}/project.json`)) {
-    addProjectConfiguration(tree, fullyQualifiedName, {
-      root: websiteContentPath,
-      name: fullyQualifiedName,
-      sourceRoot: `${websiteContentPath}/src`,
-      projectType: 'application',
-      tags: [],
-      targets: {
-        'load:runtime-config': {
-          executor: 'nx:run-commands',
-          metadata: {
-            description: `Load runtime config from your deployed stack for dev purposes. You must set the AWS_REGION and CDK_APP_DIR env variables whilst calling i.e: AWS_REGION=ap-southeast-2 CDK_APP_DIR=./dist/packages/infra/cdk.out pnpm exec nx run ${fullyQualifiedName}:load:runtime-config`,
-          },
-          options: {
-            command: `cdk-app WebsiteBucket get --key runtime-config.json './${websiteContentPath}/public/runtime-config.json'`,
-          },
-        },
-      },
-    });
-  }
+
+  const projectConfiguration = readProjectConfiguration(
+    tree,
+    fullyQualifiedName,
+  );
+  const targets = projectConfiguration.targets;
+  targets['load:runtime-config'] = {
+    executor: 'nx:run-commands',
+    metadata: {
+      description: `Load runtime config from your deployed stack for dev purposes. You must set the AWS_REGION and CDK_APP_DIR env variables whilst calling i.e: AWS_REGION=ap-southeast-2 CDK_APP_DIR=./dist/packages/infra/cdk.out pnpm exec nx run ${fullyQualifiedName}:load:runtime-config`,
+    },
+    options: {
+      command: `cdk-app WebsiteBucket get --key runtime-config.json './${websiteContentPath}/public/runtime-config.json'`,
+    },
+  };
+  const buildTarget = targets['build'];
+  targets['compile'] = {
+    ...buildTarget,
+    options: {
+      ...buildTarget.options,
+      outputPath: joinPathFragments('dist', websiteContentPath),
+    },
+  };
+  targets['build'] = {
+    dependsOn: ['lint', 'compile', 'test', ...(buildTarget.dependsOn ?? [])],
+    options: {
+      outputPath: joinPathFragments('dist', websiteContentPath),
+    },
+  };
+  projectConfiguration.targets = Object.keys(targets)
+    .sort()
+    .reduce((obj, key) => {
+      obj[key] = targets[key];
+      return obj;
+    }, {});
+
+  updateProjectConfiguration(tree, fullyQualifiedName, projectConfiguration);
+
   configureTsProject(tree, {
     dir: websiteContentPath,
     fullyQualifiedName,
@@ -91,8 +109,8 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
         'src',
         'app',
         'static-websites',
-        `${websiteNameKebabCase}.ts`
-      )
+        `${websiteNameKebabCase}.ts`,
+      ),
     )
   ) {
     const npmScopePrefix = getNpmScopePrefix(tree);
@@ -103,7 +121,7 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
         'files',
         SHARED_CONSTRUCTS_DIR,
         'src',
-        'app'
+        'app',
       ),
       joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'src', 'app'),
       {
@@ -116,7 +134,7 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
       },
       {
         overwriteStrategy: OverwriteStrategy.KeepExisting,
-      }
+      },
     );
     const shouldGenerateCoreStaticWebsiteConstruct = !tree.exists(
       joinPathFragments(
@@ -124,8 +142,8 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
         SHARED_CONSTRUCTS_DIR,
         'src',
         'core',
-        'static-website.ts'
-      )
+        'static-website.ts',
+      ),
     );
     if (shouldGenerateCoreStaticWebsiteConstruct) {
       generateFiles(
@@ -135,7 +153,7 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
           'files',
           SHARED_CONSTRUCTS_DIR,
           'src',
-          'core'
+          'core',
         ),
         joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'src', 'core'),
         {
@@ -148,7 +166,7 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
         },
         {
           overwriteStrategy: OverwriteStrategy.KeepExisting,
-        }
+        },
       );
     }
     addStarExport(
@@ -158,9 +176,9 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
         SHARED_CONSTRUCTS_DIR,
         'src',
         'app',
-        'index.ts'
+        'index.ts',
       ),
-      './static-websites/index.js'
+      './static-websites/index.js',
     );
     addStarExport(
       tree,
@@ -170,9 +188,9 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
         'src',
         'app',
         'static-websites',
-        'index.ts'
+        'index.ts',
       ),
-      `./${websiteNameKebabCase}.js`
+      `./${websiteNameKebabCase}.js`,
     );
     if (shouldGenerateCoreStaticWebsiteConstruct) {
       addStarExport(
@@ -182,9 +200,9 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
           SHARED_CONSTRUCTS_DIR,
           'src',
           'core',
-          'index.ts'
+          'index.ts',
         ),
-        './static-website.js'
+        './static-website.js',
       );
     }
   }
@@ -203,7 +221,7 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
         `${fullyQualifiedName}:build`,
       ];
       return config;
-    }
+    },
   );
   const projectConfig = readProjectConfiguration(tree, fullyQualifiedName);
   const libraryRoot = projectConfig.root;
@@ -219,7 +237,7 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
     }, // config object to replace variable in file templates
     {
       overwriteStrategy: OverwriteStrategy.Overwrite,
-    }
+    },
   );
   if (e2eTestRunner !== 'none') {
     const e2eFullyQualifiedName = `${fullyQualifiedName}-e2e`;
@@ -231,7 +249,7 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
       { ...schema, ...names(fullyQualifiedName) },
       {
         overwriteStrategy: OverwriteStrategy.KeepExisting,
-      }
+      },
     );
     configureTsProject(tree, {
       fullyQualifiedName: e2eFullyQualifiedName,
@@ -256,17 +274,17 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
                   [
                     factory.createPropertyAssignment(
                       'global',
-                      factory.createObjectLiteralExpression()
+                      factory.createObjectLiteralExpression(),
                     ),
                   ],
-                  true
-                )
+                  true,
+                ),
               ),
               ...node.properties,
             ],
-            true
+            true,
           );
-        }
+        },
       )
       .getFullText();
 
@@ -292,21 +310,21 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
                           joinPathFragments(
                             getRelativePathToRoot(tree, fullyQualifiedName),
                             'dist',
-                            websiteContentPath
-                          )
-                        )
+                            websiteContentPath,
+                          ),
+                        ),
                       );
                     }
                     return buildProp;
                   }),
-                  true
-                )
+                  true,
+                ),
               );
             }
             return prop;
           });
           return factory.createObjectLiteralExpression(updatedProperties, true);
-        }
+        },
       )
       .getFullText();
 
@@ -324,7 +342,7 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
         moduleResolution: 'Bundler',
         module: 'Preserve',
       },
-    })
+    }),
   );
   updateJson(
     tree,
@@ -335,7 +353,7 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
         ...tsconfig.compilerOptions,
         lib: ['DOM'],
       },
-    })
+    }),
   );
   addDependenciesToPackageJson(
     tree,
@@ -345,9 +363,10 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
       '@cloudscape-design/global-styles',
       'react-router-dom',
     ]),
-    withVersions(['cdk-app-cli'])
+    withVersions(['cdk-app-cli']),
   );
-  await formatFilesInSubtree(tree, websiteContentPath);
+
+  await formatFilesInSubtree(tree);
   return () => {
     if (!schema.skipInstall) {
       installPackagesTask(tree);

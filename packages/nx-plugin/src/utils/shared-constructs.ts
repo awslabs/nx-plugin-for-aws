@@ -24,7 +24,7 @@ export async function sharedConstructsGenerator(tree: Tree) {
   updateGitignore(tree);
   if (
     !tree.exists(
-      joinPathFragments(PACKAGES_DIR, TYPE_DEFINITIONS_DIR, 'project.json')
+      joinPathFragments(PACKAGES_DIR, TYPE_DEFINITIONS_DIR, 'project.json'),
     )
   ) {
     await tsLibGenerator(tree, {
@@ -42,7 +42,7 @@ export async function sharedConstructsGenerator(tree: Tree) {
       },
       {
         overwriteStrategy: OverwriteStrategy.KeepExisting,
-      }
+      },
     );
     generateFiles(
       tree,
@@ -55,16 +55,13 @@ export async function sharedConstructsGenerator(tree: Tree) {
       },
       {
         overwriteStrategy: OverwriteStrategy.Overwrite,
-      }
+      },
     );
-    formatFilesInSubtree(
-      tree,
-      joinPathFragments(PACKAGES_DIR, TYPE_DEFINITIONS_DIR)
-    );
+    formatFilesInSubtree(tree);
   }
   if (
     !tree.exists(
-      joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'project.json')
+      joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'project.json'),
     )
   ) {
     await tsLibGenerator(tree, {
@@ -83,7 +80,7 @@ export async function sharedConstructsGenerator(tree: Tree) {
       },
       {
         overwriteStrategy: OverwriteStrategy.KeepExisting,
-      }
+      },
     );
     generateFiles(
       tree,
@@ -96,17 +93,14 @@ export async function sharedConstructsGenerator(tree: Tree) {
       },
       {
         overwriteStrategy: OverwriteStrategy.Overwrite,
-      }
-    );
-    formatFilesInSubtree(
-      tree,
-      joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR)
+      },
     );
     addDependenciesToPackageJson(
       tree,
       withVersions(['constructs', 'aws-cdk-lib']),
-      {}
+      {},
     );
+    formatFilesInSubtree(tree);
   }
 }
 const updateGitignore = (tree: Tree) => {

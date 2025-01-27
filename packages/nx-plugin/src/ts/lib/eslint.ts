@@ -3,51 +3,43 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  readProjectConfiguration,
   Tree,
-  updateProjectConfiguration,
   updateNxJson,
   readNxJson,
   addDependenciesToPackageJson,
 } from '@nx/devkit';
-import { ConfigureProjectOptions } from './types';
 import { withVersions } from '../../utils/versions';
 import { ast, tsquery } from '@phenomnomnominal/tsquery';
-import {
-  factory,
-  SourceFile,
-  ArrayLiteralExpression,
-  NodeFlags,
-} from 'typescript';
-export const configureEslint = async (
-  tree: Tree,
-  options: ConfigureProjectOptions
-) => {
+import { factory, ArrayLiteralExpression } from 'typescript';
+import { singleImport } from '../../utils/ast';
+export const configureEslint = async (tree: Tree) => {
   // Configure the lint task
-  const projectConfiguration = readProjectConfiguration(
-    tree,
-    options.fullyQualifiedName
-  );
-  if (!projectConfiguration.targets.lint) {
-    projectConfiguration.targets.lint = {
-      executor: '@nx/eslint:lint',
-      options: {
-        fix: true,
-      },
-    };
-    updateProjectConfiguration(
-      tree,
-      options.fullyQualifiedName,
-      projectConfiguration
-    );
+  let nxJson = readNxJson(tree);
+  if (
+    !nxJson.plugins
+      ?.filter((e) => typeof e !== 'string')
+      .some((e) => e.plugin === '@nx/eslint/plugin')
+  ) {
+    updateNxJson(tree, {
+      ...nxJson,
+      plugins: [
+        ...(nxJson.plugins ?? []),
+        {
+          plugin: '@nx/eslint/plugin',
+          options: {
+            targetName: 'lint',
+          },
+        },
+      ],
+    });
   }
   addDependenciesToPackageJson(
     tree,
     {},
     withVersions(['prettier', 'eslint-plugin-prettier'])
   );
-  // Update or create eslint.config.cjs
-  const eslintConfigPath = 'eslint.config.cjs';
+  // Update or create eslint.config.mjs
+  const eslintConfigPath = 'eslint.config.mjs';
   if (tree.exists(eslintConfigPath)) {
     const eslintConfigContent = tree.read(eslintConfigPath).toString();
     const sourceFile = ast(eslintConfigContent);
@@ -59,49 +51,25 @@ export const configureEslint = async (
     let updatedContent = sourceFile;
     // Add import if it doesn't exist
     if (existingImport.length === 0) {
-      const importDeclaration = factory.createVariableStatement(
-        undefined,
-        factory.createVariableDeclarationList(
-          [
-            factory.createVariableDeclaration(
-              factory.createIdentifier('eslintPluginPrettierRecommended'),
-              undefined,
-              undefined,
-              factory.createCallExpression(
-                factory.createIdentifier('require'),
-                undefined,
-                [
-                  factory.createStringLiteral(
-                    'eslint-plugin-prettier/recommended'
-                  ),
-                ]
-              )
-            ),
-          ],
-          NodeFlags.Const
+      updatedContent = ast(
+        singleImport(
+          tree,
+          eslintConfigPath,
+          'eslintPluginPrettierRecommended',
+          'eslint-plugin-prettier/recommended'
         )
       );
-      updatedContent = tsquery.map(
-        updatedContent,
-        'SourceFile',
-        (node: SourceFile) => {
-          return factory.updateSourceFile(node, [
-            importDeclaration,
-            ...node.statements,
-          ]);
-        }
-      );
     }
-    // Check if eslintPluginPrettierRecommended exists in module.exports array
+    // Check if eslintPluginPrettierRecommended exists in exports array
     const existingPlugin = tsquery.query(
       updatedContent,
-      'BinaryExpression:has(Identifier[name="module"]):has(Identifier[name="exports"]) > ArrayLiteralExpression Identifier[name="eslintPluginPrettierRecommended"]'
+      'ExportAssignment > ArrayLiteralExpression Identifier[name="eslintPluginPrettierRecommended"]'
     );
     // Add eslintPluginPrettierRecommended to array if it doesn't exist
     if (existingPlugin.length === 0) {
       updatedContent = tsquery.map(
         updatedContent,
-        'BinaryExpression:has(Identifier[name="module"]):has(Identifier[name="exports"]) > ArrayLiteralExpression',
+        'ExportAssignment > ArrayLiteralExpression',
         (node: ArrayLiteralExpression) => {
           return factory.createArrayLiteralExpression(
             [
@@ -118,7 +86,7 @@ export const configureEslint = async (
       tree.write(eslintConfigPath, updatedContent.getFullText());
     }
 
-    const nxJson = readNxJson(tree);
+    nxJson = readNxJson(tree);
     updateNxJson(tree, {
       ...nxJson,
       targetDefaults: {
@@ -132,8 +100,8 @@ export const configureEslint = async (
           },
           inputs: [
             'default',
-            '{workspaceRoot}/eslint.config.js',
-            '{projectRoot}/eslint.config.js',
+            '{workspaceRoot}/eslint.config.mjs',
+            '{projectRoot}/eslint.config.mjs',
           ],
         },
       },

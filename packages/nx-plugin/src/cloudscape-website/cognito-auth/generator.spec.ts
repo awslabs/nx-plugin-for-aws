@@ -2,10 +2,10 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
 import { Tree } from '@nx/devkit';
 import { cognitoAuthGenerator } from './generator';
 import { CognitoAuthGeneratorSchema } from './schema';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 describe('cognito-auth generator', () => {
   let tree: Tree;
   const options: CognitoAuthGeneratorSchema = {
@@ -14,14 +14,14 @@ describe('cognito-auth generator', () => {
     allowSignup: true,
   };
   beforeEach(() => {
-    tree = createTreeWithEmptyWorkspace();
+    tree = createTreeUsingTsSolutionSetup();
     // Set up a mock project structure
     tree.write(
       'packages/test-project/project.json',
       JSON.stringify({
         name: 'test-project',
         sourceRoot: 'packages/test-project/src',
-      })
+      }),
     );
   });
   it('should generate files', async () => {
@@ -39,33 +39,33 @@ describe('cognito-auth generator', () => {
           </RuntimeConfigProvider>
         );
       }
-    `
+    `,
     );
     await cognitoAuthGenerator(tree, options);
     // Verify component files are generated
     expect(
-      tree.exists('packages/test-project/src/components/CognitoAuth/index.tsx')
+      tree.exists('packages/test-project/src/components/CognitoAuth/index.tsx'),
     ).toBeTruthy();
     // Verify shared constructs files are generated
     expect(
-      tree.exists('packages/common/constructs/src/core/user-identity.ts')
+      tree.exists('packages/common/constructs/src/core/user-identity.ts'),
     ).toBeTruthy();
     expect(
-      tree.exists('packages/common/constructs/src/core/index.ts')
+      tree.exists('packages/common/constructs/src/core/index.ts'),
     ).toBeTruthy();
     // Create snapshot of the generated files
     expect(
       tree
         .read('packages/test-project/src/components/CognitoAuth/index.tsx')
-        .toString()
+        .toString(),
     ).toMatchSnapshot('cognito-auth-component');
     expect(
-      tree.read('packages/common/constructs/src/core/index.ts').toString()
+      tree.read('packages/common/constructs/src/core/index.ts').toString(),
     ).toMatchSnapshot('identity-index');
     expect(
       tree
         .read('packages/common/constructs/src/core/user-identity.ts')
-        .toString()
+        .toString(),
     ).toMatchSnapshot('user-identity');
   });
   it('should update main.tsx when RuntimeConfigProvider exists', async () => {
@@ -83,7 +83,7 @@ describe('cognito-auth generator', () => {
           </RuntimeConfigProvider>
         );
       }
-    `
+    `,
     );
     await cognitoAuthGenerator(tree, options);
     const mainTsxContent = tree
@@ -91,7 +91,7 @@ describe('cognito-auth generator', () => {
       .toString();
     // Verify CognitoAuth import is added
     expect(mainTsxContent).toContain(
-      "import CognitoAuth from './components/CognitoAuth'"
+      "import CognitoAuth from './components/CognitoAuth'",
     );
     // Verify CognitoAuth component is wrapped around children
     expect(mainTsxContent).toContain('<CognitoAuth>');
@@ -109,15 +109,15 @@ describe('cognito-auth generator', () => {
           <div>Hello World</div>
         );
       }
-    `
+    `,
     );
     await expect(
-      async () => await cognitoAuthGenerator(tree, options)
+      async () => await cognitoAuthGenerator(tree, options),
     ).rejects.toThrowError();
   });
   it('should handle missing main.tsx', async () => {
     await expect(
-      async () => await cognitoAuthGenerator(tree, options)
+      async () => await cognitoAuthGenerator(tree, options),
     ).rejects.toThrowError();
   });
   it('should update shared constructs index.ts', async () => {
@@ -135,19 +135,19 @@ describe('cognito-auth generator', () => {
             </RuntimeConfigProvider>
           );
         }
-      `
+      `,
     );
     // Setup initial shared constructs index
     tree.write(
       'packages/common/constructs/src/index.ts',
-      'export const dummy = true;'
+      'export const dummy = true;',
     );
     await cognitoAuthGenerator(tree, options);
     const indexContent = tree
       .read('packages/common/constructs/src/core/index.ts')
       .toString();
     // Verify identity export is added
-    expect(indexContent).toContain('export * from "./user-identity.js"');
+    expect(indexContent).toContain("export * from './user-identity.js'");
     // Create snapshot of the modified index
     expect(indexContent).toMatchSnapshot('common/constructs-index');
   });
@@ -166,7 +166,7 @@ describe('cognito-auth generator', () => {
             </RuntimeConfigProvider>
           );
         }
-      `
+      `,
     );
     await cognitoAuthGenerator(tree, options);
     // Read package.json
@@ -195,13 +195,13 @@ describe('cognito-auth generator', () => {
             </RuntimeConfigProvider>
           );
         }
-      `
+      `,
     );
     // First run to create files
     await cognitoAuthGenerator(tree, options);
     // Run generator again
     await expect(
-      async () => await cognitoAuthGenerator(tree, options)
+      async () => await cognitoAuthGenerator(tree, options),
     ).rejects.toThrowErrorMatchingSnapshot();
   });
 });

@@ -9,7 +9,6 @@ export interface TsLibGeneratorSchema {
   //   unitTestRunner?: LibraryGeneratorSchema['unitTestRunner'];
   // TODO: test and consider exposing alternate bundlers
   // bundler?: LibraryGeneratorSchema['bundler'];
-  scope?: string;
   subDirectory?: string;
   skipInstall?: boolean;
 }
