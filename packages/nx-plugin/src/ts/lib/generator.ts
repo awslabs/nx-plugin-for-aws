@@ -10,12 +10,16 @@ import {
   getPackageManagerCommand,
   installPackagesTask,
   joinPathFragments,
+  readProjectConfiguration,
+  updateProjectConfiguration,
 } from '@nx/devkit';
 import { TsLibGeneratorSchema } from './schema';
 import { libraryGenerator } from '@nx/js';
 import { getNpmScopePrefix } from '../../utils/npm-scope';
 import { configureTsProject } from './ts-project-utils';
 import { toKebabCase } from '../../utils/names';
+import { relative } from 'path';
+import { formatFilesInSubtree } from '../../utils/format';
 export interface TsLibDetails {
   /**
    * Full package name including scope (eg @foo/bar)
@@ -31,14 +35,14 @@ export interface TsLibDetails {
  */
 export const getTsLibDetails = (
   tree: Tree,
-  schema: TsLibGeneratorSchema
+  schema: TsLibGeneratorSchema,
 ): TsLibDetails => {
-  const scope = schema.scope ? `${schema.scope}/` : getNpmScopePrefix(tree);
+  const scope = getNpmScopePrefix(tree);
   const normalizedName = toKebabCase(schema.name);
   const fullyQualifiedName = `${scope}${normalizedName}`;
   const dir = joinPathFragments(
     toKebabCase(schema.directory) ?? '.',
-    toKebabCase(schema.subDirectory) ?? normalizedName
+    toKebabCase(schema.subDirectory) ?? normalizedName,
   );
   return { dir, fullyQualifiedName };
 };
@@ -47,12 +51,12 @@ export const getTsLibDetails = (
  */
 export const tsLibGenerator = async (
   tree: Tree,
-  schema: TsLibGeneratorSchema
+  schema: TsLibGeneratorSchema,
 ): Promise<GeneratorCallback> => {
   const { fullyQualifiedName, dir } = getTsLibDetails(tree, schema);
   await libraryGenerator(tree, {
     ...schema,
-    name: fullyQualifiedName,
+    name: toKebabCase(schema.name),
     directory: dir,
     skipPackageJson: true,
     bundler: 'tsc', // TODO: consider supporting others
@@ -71,12 +75,54 @@ export const tsLibGenerator = async (
     },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
-    }
+    },
   );
   configureTsProject(tree, {
     dir,
     fullyQualifiedName,
   });
+
+  const projectConfiguration = readProjectConfiguration(
+    tree,
+    fullyQualifiedName,
+  );
+  const targets = projectConfiguration.targets;
+
+  targets['compile'] = {
+    executor: '@nx/js:tsc',
+    outputs: ['{options.outputPath}'],
+    options: {
+      outputPath: joinPathFragments('dist', dir),
+      main: joinPathFragments(dir, 'src/index.ts'),
+      tsConfig: joinPathFragments(dir, 'tsconfig.json'),
+      assets: [joinPathFragments(dir, '*.md')],
+    },
+  };
+  targets['build'] = {
+    dependsOn: ['lint', 'compile', 'test'],
+  };
+  targets['test'] = {
+    executor: '@nx/vite:test',
+    outputs: ['{options.reportsDirectory}'],
+    options: {
+      reportsDirectory: joinPathFragments(
+        relative(joinPathFragments(tree.root, dir), tree.root),
+        'coverage',
+        dir,
+      ),
+    },
+  };
+  projectConfiguration.targets = Object.keys(targets)
+    .sort()
+    .reduce((obj, key) => {
+      obj[key] = targets[key];
+      return obj;
+    }, {});
+
+  updateProjectConfiguration(tree, fullyQualifiedName, projectConfiguration);
+
+  formatFilesInSubtree(tree);
+
   return () => {
     if (!schema.skipInstall) {
       installPackagesTask(tree);

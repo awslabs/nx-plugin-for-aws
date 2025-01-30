@@ -2,10 +2,11 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
 import { Tree, readProjectConfiguration } from '@nx/devkit';
 import { infraGenerator } from './generator';
 import { InfraGeneratorSchema } from './schema';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test';
+
 describe('infra generator', () => {
   let tree: Tree;
   const options: InfraGeneratorSchema = {
@@ -15,8 +16,9 @@ describe('infra generator', () => {
     skipInstall: true,
   };
   beforeEach(() => {
-    tree = createTreeWithEmptyWorkspace();
+    tree = createTreeUsingTsSolutionSetup();
   });
+
   it('should generate files with correct content', async () => {
     await infraGenerator(tree, options);
     const config = readProjectConfiguration(tree, '@proj/test');
@@ -25,17 +27,17 @@ describe('infra generator', () => {
     expect(tree.exists('packages/test/cdk.json')).toBeTruthy();
     expect(tree.exists('packages/test/src/main.ts')).toBeTruthy();
     expect(
-      tree.exists('packages/test/src/stacks/application-stack.ts')
+      tree.exists('packages/test/src/stacks/application-stack.ts'),
     ).toBeTruthy();
     // Create snapshots of generated files
     expect(tree.read('packages/test/cdk.json').toString()).toMatchSnapshot(
-      'cdk-json'
+      'cdk-json',
     );
     expect(tree.read('packages/test/src/main.ts').toString()).toMatchSnapshot(
-      'main-ts'
+      'main-ts',
     );
     expect(
-      tree.read('packages/test/src/stacks/application-stack.ts').toString()
+      tree.read('packages/test/src/stacks/application-stack.ts').toString(),
     ).toMatchSnapshot('application-stack-ts');
     // Snapshot the entire project structure
     const projectFiles = {
@@ -58,7 +60,7 @@ describe('infra generator', () => {
     // Verify and snapshot deploy target configuration
     expect(config.targets.deploy).toMatchSnapshot('deploy-target');
     // Test specific configuration values
-    expect(config.targets.build).toMatchObject({
+    expect(config.targets.synth).toMatchObject({
       cache: true,
       executor: 'nx:run-commands',
       outputs: ['{workspaceRoot}/dist/packages/test/cdk.out'],
@@ -128,7 +130,7 @@ describe('infra generator', () => {
     expect(tree.exists('packages/custom-infra/cdk.json')).toBeTruthy();
     expect(tree.exists('packages/custom-infra/src/main.ts')).toBeTruthy();
     expect(
-      tree.exists('packages/custom-infra/src/stacks/application-stack.ts')
+      tree.exists('packages/custom-infra/src/stacks/application-stack.ts'),
     ).toBeTruthy();
     // Snapshot files with custom name
     const customFiles = {
@@ -151,7 +153,7 @@ describe('infra generator', () => {
         .toString(),
     };
     // Reset tree and run again
-    tree = createTreeWithEmptyWorkspace();
+    tree = createTreeUsingTsSolutionSetup();
     await infraGenerator(tree, options);
     const secondRunFiles = {
       'cdk.json': tree.read('packages/test/cdk.json').toString(),

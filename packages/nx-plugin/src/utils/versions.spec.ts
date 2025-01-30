@@ -30,12 +30,12 @@ describe('versions utils', () => {
     });
     it('should handle aws dependencies correctly', () => {
       const deps: (keyof typeof VERSIONS)[] = [
-        '@aws-sdk/client-wafv2',
-        '@aws/pdk',
+        '@trpc/client',
+        '@tanstack/react-query',
       ];
       const expected = {
-        '@aws-sdk/client-wafv2': VERSIONS['@aws-sdk/client-wafv2'],
-        '@aws/pdk': VERSIONS['@aws/pdk'],
+        '@trpc/client': VERSIONS['@trpc/client'],
+        '@tanstack/react-query': VERSIONS['@tanstack/react-query'],
       };
       expect(withVersions(deps)).toEqual(expected);
     });

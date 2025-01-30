@@ -31,6 +31,5 @@ export interface AppGeneratorSchema {
   rootProject?: boolean;
   //   bundler?: 'webpack' | 'vite' | 'rspack';
   minimal?: boolean;
-  addPlugin?: boolean;
   skipInstall?: boolean;
 }

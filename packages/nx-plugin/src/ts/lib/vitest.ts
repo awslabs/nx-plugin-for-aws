@@ -102,12 +102,15 @@ export const configureVitest = (
       ...nxJson,
       targetDefaults: {
         ...(nxJson.targetDefaults ?? {}),
-        test: {
+        '@nx/vite:test': {
+          cache: true,
+          inputs: ['default', '^production'],
           configurations: {
             'update-snapshot': {
               args: '--update',
             },
           },
+          ...nxJson.targetDefaults['@nx/vite:test'],
         },
       },
     });

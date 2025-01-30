@@ -24,12 +24,12 @@ import tsLibGenerator from '../../ts/lib/generator';
 import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
 import { withVersions } from '../../utils/versions';
 import { getRelativePathToRoot } from '../../utils/paths';
-import { formatFilesInSubtree } from '../../utils/format';
 import { toClassName } from '../../utils/names';
 import { addStarExport } from '../../utils/ast';
+import { formatFilesInSubtree } from '../../utils/format';
 export async function trpcBackendGenerator(
   tree: Tree,
-  options: TrpcBackendGeneratorSchema
+  options: TrpcBackendGeneratorSchema,
 ) {
   await sharedConstructsGenerator(tree);
   const apiNamespace = getNpmScopePrefix(tree);
@@ -37,11 +37,11 @@ export async function trpcBackendGenerator(
   const apiNameClassName = toClassName(options.apiName);
   const projectRoot = joinPathFragments(
     options.directory ?? '.',
-    apiNameKebabCase
+    apiNameKebabCase,
   );
   const relativePathToProjectRoot = `${joinPathFragments(
     getRelativePathToRoot(tree, `${getNpmScopePrefix(tree)}common-constructs`),
-    projectRoot
+    projectRoot,
   )}`;
   const schemaRoot = joinPathFragments(projectRoot, 'schema');
   const backendRoot = joinPathFragments(projectRoot, 'backend');
@@ -78,8 +78,8 @@ export async function trpcBackendGenerator(
         'src',
         'app',
         'trpc-apis',
-        `${apiNameKebabCase}.ts`
-      )
+        `${apiNameKebabCase}.ts`,
+      ),
     )
   ) {
     generateFiles(
@@ -89,13 +89,13 @@ export async function trpcBackendGenerator(
         'files',
         SHARED_CONSTRUCTS_DIR,
         'src',
-        'app'
+        'app',
       ),
       joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'src', 'app'),
       enhancedOptions,
       {
         overwriteStrategy: OverwriteStrategy.KeepExisting,
-      }
+      },
     );
     const shouldGenerateCoreTrpcApiConstruct = !tree.exists(
       joinPathFragments(
@@ -103,8 +103,8 @@ export async function trpcBackendGenerator(
         SHARED_CONSTRUCTS_DIR,
         'src',
         'core',
-        'trpc-api.ts'
-      )
+        'trpc-api.ts',
+      ),
     );
     if (shouldGenerateCoreTrpcApiConstruct) {
       generateFiles(
@@ -114,13 +114,13 @@ export async function trpcBackendGenerator(
           'files',
           SHARED_CONSTRUCTS_DIR,
           'src',
-          'core'
+          'core',
         ),
         joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'src', 'core'),
         enhancedOptions,
         {
           overwriteStrategy: OverwriteStrategy.KeepExisting,
-        }
+        },
       );
     }
     addStarExport(
@@ -130,9 +130,9 @@ export async function trpcBackendGenerator(
         SHARED_CONSTRUCTS_DIR,
         'src',
         'app',
-        'index.ts'
+        'index.ts',
       ),
-      './trpc-apis/index.js'
+      './trpc-apis/index.js',
     );
     addStarExport(
       tree,
@@ -142,9 +142,9 @@ export async function trpcBackendGenerator(
         'src',
         'app',
         'trpc-apis',
-        'index.ts'
+        'index.ts',
       ),
-      `./${apiNameKebabCase}.js`
+      `./${apiNameKebabCase}.js`,
     );
     if (shouldGenerateCoreTrpcApiConstruct) {
       addStarExport(
@@ -154,9 +154,9 @@ export async function trpcBackendGenerator(
           SHARED_CONSTRUCTS_DIR,
           'src',
           'core',
-          'index.ts'
+          'index.ts',
         ),
-        './trpc-api.js'
+        './trpc-api.js',
       );
     }
   }
@@ -168,7 +168,7 @@ export async function trpcBackendGenerator(
         apiName: options.apiName,
       } as unknown;
       return config;
-    }
+    },
   );
   generateFiles(
     tree,
@@ -177,7 +177,7 @@ export async function trpcBackendGenerator(
     enhancedOptions,
     {
       overwriteStrategy: OverwriteStrategy.Overwrite,
-    }
+    },
   );
   generateFiles(
     tree,
@@ -186,7 +186,7 @@ export async function trpcBackendGenerator(
     enhancedOptions,
     {
       overwriteStrategy: OverwriteStrategy.Overwrite,
-    }
+    },
   );
   tree.delete(joinPathFragments(backendRoot, 'src', 'lib'));
   tree.delete(joinPathFragments(schemaRoot, 'src', 'lib'));
@@ -200,11 +200,11 @@ export async function trpcBackendGenerator(
       '@aws-lambda-powertools/tracer',
       '@trpc/server',
     ]),
-    withVersions(['@types/aws-lambda'])
+    withVersions(['@types/aws-lambda']),
   );
   tree.delete(joinPathFragments(backendRoot, 'package.json'));
   tree.delete(joinPathFragments(schemaRoot, 'package.json'));
-  await formatFilesInSubtree(tree, projectRoot);
+  await formatFilesInSubtree(tree);
   return () => {
     installPackagesTask(tree);
   };

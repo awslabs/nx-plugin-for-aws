@@ -3,16 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { Tree } from '@nx/devkit';
-import { createTreeWithEmptyWorkspace } from 'nx/src/devkit-testing-exports';
 import tsLibGenerator from './generator';
 import { configureVitest } from './vitest';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 describe('vitest utils', () => {
   let tree: Tree;
   beforeEach(async () => {
-    tree = createTreeWithEmptyWorkspace();
+    tree = createTreeUsingTsSolutionSetup();
     await tsLibGenerator(tree, {
       name: 'test',
-      unitTestRunner: 'vitest',
       skipInstall: true,
     });
   });

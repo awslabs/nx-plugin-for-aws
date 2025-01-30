@@ -3,12 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { Tree } from '@nx/devkit';
-import { createTreeWithEmptyWorkspace } from 'nx/src/devkit-testing-exports';
 import { trpcBackendGenerator } from './generator';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 describe('trpc backend generator', () => {
   let tree: Tree;
   beforeEach(() => {
-    tree = createTreeWithEmptyWorkspace();
+    tree = createTreeUsingTsSolutionSetup();
   });
   it('should generate backend and schema projects', async () => {
     await trpcBackendGenerator(tree, {

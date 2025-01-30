@@ -17,7 +17,10 @@ const config: Config = {
   //favicon: 'img/favicon.ico',
   organizationName: 'apj-pace', // Usually your GitHub org/user name.
   projectName: 'pace-nx-plugin', // Usually your repo name.
-
+  i18n: {
+    defaultLocale: 'en',
+    locales: ['en', 'ja', 'ko'],
+  },
   presets: [
     [
       'classic',
@@ -48,6 +51,10 @@ const config: Config = {
       //   src: 'img/logo.svg',
       // },
       items: [
+        {
+          type: 'localeDropdown',
+          position: 'right',
+        },
         {
           type: 'doc',
           docId: 'intro',
@@ -98,6 +105,7 @@ const config: Config = {
     prism: {
       theme: lightCodeTheme,
       darkTheme: darkCodeTheme,
+      additionalLanguages: ['typescript'],
     },
   },
 };

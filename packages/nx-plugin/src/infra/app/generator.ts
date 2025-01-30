@@ -13,11 +13,11 @@ import {
   GeneratorCallback,
   OverwriteStrategy,
   getPackageManagerCommand,
+  installPackagesTask,
 } from '@nx/devkit';
 import { InfraGeneratorSchema } from './schema';
 import tsLibGenerator, { getTsLibDetails } from '../../ts/lib/generator';
 import { withVersions } from '../../utils/versions';
-import { formatFilesInSubtree } from '../../utils/format';
 import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
 import {
   PACKAGES_DIR,
@@ -27,12 +27,14 @@ import {
 } from '../../utils/shared-constructs';
 import { addStarExport } from '../../utils/ast';
 import path from 'path';
+import { formatFilesInSubtree } from '../../utils/format';
+
 export async function infraGenerator(
   tree: Tree,
-  schema: InfraGeneratorSchema
+  schema: InfraGeneratorSchema,
 ): Promise<GeneratorCallback> {
   const lib = getTsLibDetails(tree, schema);
-  const tsLibGeneratorCallback = await tsLibGenerator(tree, schema);
+  await tsLibGenerator(tree, schema);
   await sharedConstructsGenerator(tree);
   const synthDirFromRoot = `/dist/${lib.dir}/cdk.out`;
   const synthDirFromProject =
@@ -60,7 +62,7 @@ export async function infraGenerator(
     },
     {
       overwriteStrategy: OverwriteStrategy.Overwrite,
-    }
+    },
   );
   generateFiles(
     tree, // the virtual file system
@@ -73,14 +75,23 @@ export async function infraGenerator(
     },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
-    }
+    },
   );
   updateJson(
     tree,
     `${libraryRoot}/project.json`,
     (config: ProjectConfiguration) => {
       config.projectType = 'application';
-      config.targets.build = {
+      config.targets.build.dependsOn = [
+        ...(config.targets.build.dependsOn ?? []),
+        'synth',
+      ];
+      config.targets.compile.options.main = joinPathFragments(
+        libraryRoot,
+        'src',
+        'main.ts',
+      );
+      config.targets.synth = {
         cache: true,
         executor: 'nx:run-commands',
         outputs: [`{workspaceRoot}${synthDirFromRoot}`],
@@ -98,7 +109,7 @@ export async function infraGenerator(
         },
       };
       return config;
-    }
+    },
   );
   addStarExport(
     tree,
@@ -107,9 +118,9 @@ export async function infraGenerator(
       SHARED_CONSTRUCTS_DIR,
       'src',
       'core',
-      'index.ts'
+      'index.ts',
     ),
-    './cfn-guard.js'
+    './cfn-guard.js',
   );
   addDependenciesToPackageJson(
     tree,
@@ -121,7 +132,7 @@ export async function infraGenerator(
       'constructs',
       'source-map-support',
     ]),
-    withVersions(['tsx'])
+    withVersions(['tsx']),
   );
 
   updateJson(tree, `${libraryRoot}/tsconfig.json`, (tsConfig) => ({
@@ -137,7 +148,9 @@ export async function infraGenerator(
     ],
   }));
 
-  await formatFilesInSubtree(tree, libraryRoot);
-  return tsLibGeneratorCallback;
+  await formatFilesInSubtree(tree);
+  return () => {
+    installPackagesTask(tree);
+  };
 }
 export default infraGenerator;

@@ -3,17 +3,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { Tree } from '@nx/devkit';
-import { createTreeWithEmptyWorkspace } from 'nx/src/devkit-testing-exports';
-import { tsLibGenerator, getTsLibDetails } from './generator';
+import { tsLibGenerator } from './generator';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 describe('ts lib generator', () => {
   let tree: Tree;
   beforeEach(() => {
-    tree = createTreeWithEmptyWorkspace();
+    tree = createTreeUsingTsSolutionSetup();
   });
   it('should generate library with default options', async () => {
     await tsLibGenerator(tree, {
       name: 'test-lib',
-      unitTestRunner: 'vitest',
       skipInstall: true,
     });
     // Verify directory structure
@@ -37,7 +36,6 @@ describe('ts lib generator', () => {
     await tsLibGenerator(tree, {
       name: 'test-lib',
       directory: 'libs',
-      unitTestRunner: 'vitest',
       skipInstall: true,
     });
     // Verify directory structure
@@ -55,29 +53,11 @@ describe('ts lib generator', () => {
       'custom-dir-project.json'
     );
   });
-  it('should generate library with custom scope', async () => {
-    await tsLibGenerator(tree, {
-      name: 'test-lib',
-      scope: '@custom',
-      unitTestRunner: 'vitest',
-      skipInstall: true,
-    });
-    const details = getTsLibDetails(tree, {
-      name: 'test-lib',
-      scope: '@custom',
-    });
-    expect(details.fullyQualifiedName).toBe('@custom/test-lib');
-    expect(tree.exists('test-lib/project.json')).toBeTruthy();
-    expect(tree.read('test-lib/project.json', 'utf-8')).toMatchSnapshot(
-      'scoped-project.json'
-    );
-  });
   it('should generate library with subdirectory', async () => {
     await tsLibGenerator(tree, {
       name: 'test-lib',
       subDirectory: 'test-lib',
       directory: 'feature',
-      unitTestRunner: 'vitest',
       skipInstall: true,
     });
     // Verify directory structure
