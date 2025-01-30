@@ -23,9 +23,12 @@ import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
   sharedConstructsGenerator,
+  TYPE_DEFINITIONS_DIR,
 } from '../../utils/shared-constructs';
 import { addStarExport } from '../../utils/ast';
+import path from 'path';
 import { formatFilesInSubtree } from '../../utils/format';
+
 export async function infraGenerator(
   tree: Tree,
   schema: InfraGeneratorSchema,
@@ -131,6 +134,20 @@ export async function infraGenerator(
     ]),
     withVersions(['tsx']),
   );
+
+  updateJson(tree, `${libraryRoot}/tsconfig.json`, (tsConfig) => ({
+    ...tsConfig,
+    references: [
+      ...(tsConfig.references || []),
+      {
+        path: `${path.relative(
+          libraryRoot,
+          `${tree.root}/${PACKAGES_DIR}`
+        )}/${SHARED_CONSTRUCTS_DIR}/tsconfig.json`,
+      },
+    ],
+  }));
+
   await formatFilesInSubtree(tree);
   return () => {
     installPackagesTask(tree);
