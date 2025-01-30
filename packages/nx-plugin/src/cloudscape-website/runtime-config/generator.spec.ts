@@ -2,17 +2,17 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
 import { Tree } from '@nx/devkit';
 import { runtimeConfigGenerator } from './generator';
 import { RuntimeConfigGeneratorSchema } from './schema';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 describe('runtime-config generator', () => {
   let tree: Tree;
   const options: RuntimeConfigGeneratorSchema = {
     project: 'test-app',
   };
   beforeEach(() => {
-    tree = createTreeWithEmptyWorkspace();
+    tree = createTreeUsingTsSolutionSetup();
     tree.write(
       'packages/test-app/project.json',
       JSON.stringify({

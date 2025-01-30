@@ -5,6 +5,7 @@
 import React from 'react';
 import clsx from 'clsx';
 import styles from './styles.module.css';
+import Translate, { translate } from '@docusaurus/Translate';
 
 type FeatureItem = {
   title: string;
@@ -14,34 +15,36 @@ type FeatureItem = {
 
 const FeatureList: FeatureItem[] = [
   {
-    title: 'No More Projen',
+    title: translate({ id: 'noMoreProjen', message: 'No More Projen' }),
     //Svg: require('@site/static/img/undraw_docusaurus_mountain.svg').default,
     description: (
-      <>
+      <Translate id="noMoreProjenDescription">
         While projects-as-code has its place, many customers and engineers found
         the layer of abstraction too cumbersome.
-      </>
+      </Translate>
     ),
   },
   {
-    title: 'All the Power of Nx',
+    title: translate({ id: 'allThePowerOfNx', message: 'All the Power of Nx' }),
     //Svg: require('@site/static/img/nx-logo.svg').default,
     description: (
-      <>
+      <Translate id="allThePowerOfNxDescription">
         Using Nx directly rather than via projen gives you full control over
         tasks and caching, allowing for faster dev cycles.
-      </>
+      </Translate>
     ),
   },
   {
-    title: 'Full Control',
+    title: translate({ id: 'fullControl', message: 'Full Control' }),
     //Svg: require('@site/static/img/undraw_docusaurus_tree.svg').default,
     description: (
       <>
-        Generators get you started quickly, but you can fully customise your
-        projects without relying on features being available in PDK/Projen. You
-        have control of all project files, like <code>package.json</code> or{' '}
-        <code>tsconfig.json</code>
+        <Translate id="fullControlDescription">
+          Generators get you started quickly, but you can fully customise your
+          projects without relying on features being available in PDK/Projen.
+          You have control of all project files, like
+        </Translate>
+        <code>package.json</code> or <code>tsconfig.json</code>
       </>
     ),
   },

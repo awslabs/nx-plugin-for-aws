@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
 import {
   OverwriteStrategy,
   Tree,
@@ -20,6 +19,7 @@ import {
 } from './shared-constructs';
 import * as npmScopeUtils from './npm-scope';
 import tsLibGenerator from '../ts/lib/generator';
+import { createTreeUsingTsSolutionSetup } from './test';
 // Mock dependencies
 vi.mock('@nx/devkit', async () => {
   const actual = await vi.importActual('@nx/devkit');
@@ -39,7 +39,7 @@ vi.mock('./npm-scope', () => ({
 describe('shared-constructs utils', () => {
   let tree: Tree;
   beforeEach(() => {
-    tree = createTreeWithEmptyWorkspace();
+    tree = createTreeUsingTsSolutionSetup();
     vi.clearAllMocks();
     vi.spyOn(npmScopeUtils, 'getNpmScopePrefix').mockReturnValue(
       '@test-scope/'
