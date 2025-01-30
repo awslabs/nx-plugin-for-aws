@@ -33,7 +33,6 @@ import {
   SourceFile,
 } from 'typescript';
 import { withVersions } from '../../utils/versions';
-import { formatFilesInSubtree } from '../../utils/format';
 import {
   addStarExport,
   createJsxElement,
@@ -42,16 +41,17 @@ import {
   replace,
   singleImport,
 } from '../../utils/ast';
+import { formatFilesInSubtree } from '../../utils/format';
 export async function cognitoAuthGenerator(
   tree: Tree,
-  options: CognitoAuthGeneratorSchema
+  options: CognitoAuthGeneratorSchema,
 ) {
   const srcRoot = readProjectConfiguration(tree, options.project).sourceRoot;
   if (
     tree.exists(joinPathFragments(srcRoot, 'components/CognitoAuth/index.tsx'))
   ) {
     throw new Error(
-      `This generator has already been run on ${options.project}.`
+      `This generator has already been run on ${options.project}.`,
     );
   }
   await runtimeConfigGenerator(tree, {
@@ -63,19 +63,19 @@ export async function cognitoAuthGenerator(
     PACKAGES_DIR,
     TYPE_DEFINITIONS_DIR,
     'src',
-    'runtime-config.ts'
+    'runtime-config.ts',
   );
   const runtimeConfigContent = tree.read(runtimeConfigPath).toString();
   const sourceFile = ast(runtimeConfigContent);
   // Check if ICognitoProps interface exists
   const existingCognitoProps = tsquery.query(
     sourceFile,
-    'InterfaceDeclaration[name.text="ICognitoProps"]'
+    'InterfaceDeclaration[name.text="ICognitoProps"]',
   );
   // Check if cognitoProps property exists in IRuntimeConfig
   const existingCognitoPropsInConfig = tsquery.query(
     sourceFile,
-    'InterfaceDeclaration[name.text="IRuntimeConfig"] PropertySignature[name.text="cognitoProps"]'
+    'InterfaceDeclaration[name.text="IRuntimeConfig"] PropertySignature[name.text="cognitoProps"]',
   );
   let updatedContent = sourceFile;
   // Add ICognitoProps interface if it doesn't exist
@@ -90,27 +90,27 @@ export async function cognitoAuthGenerator(
           undefined,
           factory.createIdentifier('region'),
           undefined,
-          factory.createKeywordTypeNode(SyntaxKind.StringKeyword)
+          factory.createKeywordTypeNode(SyntaxKind.StringKeyword),
         ),
         factory.createPropertySignature(
           undefined,
           factory.createIdentifier('identityPoolId'),
           undefined,
-          factory.createKeywordTypeNode(SyntaxKind.StringKeyword)
+          factory.createKeywordTypeNode(SyntaxKind.StringKeyword),
         ),
         factory.createPropertySignature(
           undefined,
           factory.createIdentifier('userPoolId'),
           undefined,
-          factory.createKeywordTypeNode(SyntaxKind.StringKeyword)
+          factory.createKeywordTypeNode(SyntaxKind.StringKeyword),
         ),
         factory.createPropertySignature(
           undefined,
           factory.createIdentifier('userPoolWebClientId'),
           undefined,
-          factory.createKeywordTypeNode(SyntaxKind.StringKeyword)
+          factory.createKeywordTypeNode(SyntaxKind.StringKeyword),
         ),
-      ]
+      ],
     );
     updatedContent = tsquery.map(
       updatedContent,
@@ -120,7 +120,7 @@ export async function cognitoAuthGenerator(
           cognitoPropsInterface,
           ...node.statements,
         ]);
-      }
+      },
     );
   }
   // Add cognitoProps to IRuntimeConfig if it doesn't exist
@@ -141,11 +141,11 @@ export async function cognitoAuthGenerator(
               undefined,
               factory.createIdentifier('cognitoProps'),
               undefined,
-              factory.createTypeReferenceNode('ICognitoProps', undefined)
+              factory.createTypeReferenceNode('ICognitoProps', undefined),
             ),
-          ]
+          ],
         );
-      }
+      },
     );
   }
   // Only write if changes were made
@@ -157,7 +157,7 @@ export async function cognitoAuthGenerator(
     SHARED_CONSTRUCTS_DIR,
     'src',
     'core',
-    'user-identity.ts'
+    'user-identity.ts',
   );
   generateFiles(
     tree,
@@ -166,7 +166,7 @@ export async function cognitoAuthGenerator(
     options,
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
-    }
+    },
   );
   if (!tree.exists(identityPath)) {
     generateFiles(
@@ -179,7 +179,7 @@ export async function cognitoAuthGenerator(
       },
       {
         overwriteStrategy: OverwriteStrategy.KeepExisting,
-      }
+      },
     );
     addDependenciesToPackageJson(
       tree,
@@ -188,7 +188,7 @@ export async function cognitoAuthGenerator(
         'react-oidc-context',
         '@aws-cdk/aws-cognito-identitypool-alpha',
       ]),
-      {}
+      {},
     );
     addStarExport(
       tree,
@@ -197,9 +197,9 @@ export async function cognitoAuthGenerator(
         SHARED_CONSTRUCTS_DIR,
         'src',
         'core',
-        'index.ts'
+        'index.ts',
       ),
-      './user-identity.js'
+      './user-identity.js',
     );
   }
   const mainTsxPath = joinPathFragments(srcRoot, 'main.tsx');
@@ -212,15 +212,15 @@ export async function cognitoAuthGenerator(
       createJsxElement(
         node.openingElement,
         [createJsxElementFromIdentifier('CognitoAuth', node.children)],
-        node.closingElement
-      )
+        node.closingElement,
+      ),
   );
   // Update App Layout
   const appLayoutTsxPath = joinPathFragments(
     srcRoot,
     'layouts',
     'App',
-    'index.tsx'
+    'index.tsx',
   );
   if (tree.exists(appLayoutTsxPath)) {
     const contents = tree.read(appLayoutTsxPath).toString();
@@ -228,7 +228,7 @@ export async function cognitoAuthGenerator(
       tree,
       appLayoutTsxPath,
       ['useAuth'],
-      'react-oidc-context'
+      'react-oidc-context',
     );
     updatedContents = tsquery
       .map(
@@ -252,25 +252,25 @@ export async function cognitoAuthGenerator(
                       undefined,
                       undefined,
                       factory.createIdentifier('user'),
-                      undefined
+                      undefined,
                     ),
                     factory.createBindingElement(
                       undefined,
                       undefined,
                       factory.createIdentifier('removeUser'),
-                      undefined
+                      undefined,
                     ),
                     factory.createBindingElement(
                       undefined,
                       undefined,
                       factory.createIdentifier('signoutRedirect'),
-                      undefined
+                      undefined,
                     ),
                     factory.createBindingElement(
                       undefined,
                       undefined,
                       factory.createIdentifier('clearStaleState'),
-                      undefined
+                      undefined,
                     ),
                   ]),
                   undefined,
@@ -278,12 +278,12 @@ export async function cognitoAuthGenerator(
                   factory.createCallExpression(
                     factory.createIdentifier('useAuth'),
                     undefined,
-                    []
-                  )
+                    [],
+                  ),
                 ),
               ],
-              NodeFlags.Const
-            )
+              NodeFlags.Const,
+            ),
           );
           // Add as first statement
           const newStatements = [authDeclaration, ...functionBody.statements];
@@ -295,7 +295,7 @@ export async function cognitoAuthGenerator(
             arrowFunction.parameters,
             arrowFunction.type,
             arrowFunction.equalsGreaterThanToken,
-            factory.createBlock(newStatements, true)
+            factory.createBlock(newStatements, true),
           );
           // Update the variable declaration
           return factory.updateVariableDeclaration(
@@ -303,9 +303,9 @@ export async function cognitoAuthGenerator(
             node.name,
             node.exclamationToken,
             node.type,
-            newArrowFunction
+            newArrowFunction,
           );
-        }
+        },
       )
       .getFullText();
     // TODO: update utils if they exist by appending to the array
@@ -324,7 +324,7 @@ export async function cognitoAuthGenerator(
                   factory.createObjectLiteralExpression([
                     factory.createPropertyAssignment(
                       'type',
-                      factory.createStringLiteral('menu-dropdown')
+                      factory.createStringLiteral('menu-dropdown'),
                     ),
                     factory.createPropertyAssignment(
                       'text',
@@ -336,21 +336,21 @@ export async function cognitoAuthGenerator(
                               factory.createPropertyAccessChain(
                                 factory.createIdentifier('user'),
                                 factory.createToken(
-                                  SyntaxKind.QuestionDotToken
+                                  SyntaxKind.QuestionDotToken,
                                 ),
-                                factory.createIdentifier('profile')
+                                factory.createIdentifier('profile'),
                               ),
                               factory.createToken(SyntaxKind.QuestionDotToken),
-                              factory.createStringLiteral('cognito:username')
+                              factory.createStringLiteral('cognito:username'),
                             ),
-                            factory.createTemplateTail('')
+                            factory.createTemplateTail(''),
                           ),
-                        ]
-                      )
+                        ],
+                      ),
                     ),
                     factory.createPropertyAssignment(
                       'iconName',
-                      factory.createStringLiteral('user-profile-active')
+                      factory.createStringLiteral('user-profile-active'),
                     ),
                     factory.createPropertyAssignment(
                       'onItemClick',
@@ -364,7 +364,7 @@ export async function cognitoAuthGenerator(
                             factory.createIdentifier('e'),
                             undefined,
                             undefined,
-                            undefined
+                            undefined,
                           ),
                         ],
                         undefined,
@@ -376,14 +376,14 @@ export async function cognitoAuthGenerator(
                                 factory.createPropertyAccessExpression(
                                   factory.createPropertyAccessExpression(
                                     factory.createIdentifier('e'),
-                                    factory.createIdentifier('detail')
+                                    factory.createIdentifier('detail'),
                                   ),
-                                  factory.createIdentifier('id')
+                                  factory.createIdentifier('id'),
                                 ),
                                 factory.createToken(
-                                  SyntaxKind.EqualsEqualsEqualsToken
+                                  SyntaxKind.EqualsEqualsEqualsToken,
                                 ),
-                                factory.createStringLiteral('signout')
+                                factory.createStringLiteral('signout'),
                               ),
                               factory.createBlock(
                                 [
@@ -391,13 +391,13 @@ export async function cognitoAuthGenerator(
                                     factory.createCallExpression(
                                       factory.createIdentifier('removeUser'),
                                       undefined,
-                                      []
-                                    )
+                                      [],
+                                    ),
                                   ),
                                   factory.createExpressionStatement(
                                     factory.createCallExpression(
                                       factory.createIdentifier(
-                                        'signoutRedirect'
+                                        'signoutRedirect',
                                       ),
                                       undefined,
                                       [
@@ -407,14 +407,16 @@ export async function cognitoAuthGenerator(
                                             factory.createPropertyAccessExpression(
                                               factory.createPropertyAccessExpression(
                                                 factory.createIdentifier(
-                                                  'window'
+                                                  'window',
                                                 ),
                                                 factory.createIdentifier(
-                                                  'location'
-                                                )
+                                                  'location',
+                                                ),
                                               ),
-                                              factory.createIdentifier('origin')
-                                            )
+                                              factory.createIdentifier(
+                                                'origin',
+                                              ),
+                                            ),
                                           ),
                                           factory.createPropertyAssignment(
                                             'extraQueryParams',
@@ -425,47 +427,47 @@ export async function cognitoAuthGenerator(
                                                   factory.createPropertyAccessExpression(
                                                     factory.createPropertyAccessExpression(
                                                       factory.createIdentifier(
-                                                        'window'
+                                                        'window',
                                                       ),
                                                       factory.createIdentifier(
-                                                        'location'
-                                                      )
+                                                        'location',
+                                                      ),
                                                     ),
                                                     factory.createIdentifier(
-                                                      'origin'
-                                                    )
-                                                  )
+                                                      'origin',
+                                                    ),
+                                                  ),
                                                 ),
                                                 factory.createPropertyAssignment(
                                                   'response_type',
                                                   factory.createStringLiteral(
-                                                    'code'
-                                                  )
+                                                    'code',
+                                                  ),
                                                 ),
-                                              ]
-                                            )
+                                              ],
+                                            ),
                                           ),
                                         ]),
-                                      ]
-                                    )
+                                      ],
+                                    ),
                                   ),
                                   factory.createExpressionStatement(
                                     factory.createCallExpression(
                                       factory.createIdentifier(
-                                        'clearStaleState'
+                                        'clearStaleState',
                                       ),
                                       undefined,
-                                      []
-                                    )
+                                      [],
+                                    ),
                                   ),
                                 ],
-                                true
-                              )
+                                true,
+                              ),
                             ),
                           ],
-                          true
-                        )
-                      )
+                          true,
+                        ),
+                      ),
                     ),
                     factory.createPropertyAssignment(
                       'items',
@@ -473,20 +475,20 @@ export async function cognitoAuthGenerator(
                         factory.createObjectLiteralExpression([
                           factory.createPropertyAssignment(
                             'id',
-                            factory.createStringLiteral('signout')
+                            factory.createStringLiteral('signout'),
                           ),
                           factory.createPropertyAssignment(
                             'text',
-                            factory.createStringLiteral('Sign out')
+                            factory.createStringLiteral('Sign out'),
                           ),
                         ]),
-                      ])
+                      ]),
                     ),
                   ]),
                 ],
-                true
-              )
-            )
+                true,
+              ),
+            ),
           );
           // Add the utilities attribute to existing attributes
           return factory.createJsxSelfClosingElement(
@@ -495,9 +497,9 @@ export async function cognitoAuthGenerator(
             factory.createJsxAttributes([
               ...node.attributes.properties,
               utilitiesAttribute,
-            ])
+            ]),
           );
-        }
+        },
       )
       .getFullText();
     if (contents !== updatedContents) {
@@ -505,11 +507,11 @@ export async function cognitoAuthGenerator(
     }
   } else {
     console.info(
-      `Skipping update to ${appLayoutTsxPath} as it does not exist.`
+      `Skipping update to ${appLayoutTsxPath} as it does not exist.`,
     );
   }
   // End update App Layout
-  await formatFilesInSubtree(tree, srcRoot);
+  await formatFilesInSubtree(tree);
   return () => {
     installPackagesTask(tree);
   };

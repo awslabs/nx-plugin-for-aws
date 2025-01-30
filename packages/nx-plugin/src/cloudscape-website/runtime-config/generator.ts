@@ -17,13 +17,13 @@ import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
 import { formatFilesInSubtree } from '../../utils/format';
 export async function runtimeConfigGenerator(
   tree: Tree,
-  options: RuntimeConfigGeneratorSchema
+  options: RuntimeConfigGeneratorSchema,
 ) {
   const srcRoot = readProjectConfiguration(tree, options.project).sourceRoot;
   const mainTsxPath = joinPathFragments(srcRoot, 'main.tsx');
   if (!tree.exists(mainTsxPath)) {
     throw new Error(
-      `Can only run this generator on a project which contains ${mainTsxPath}`
+      `Can only run this generator on a project which contains ${mainTsxPath}`,
     );
   }
   const mainTsxContents = tree.read(mainTsxPath).toString();
@@ -32,13 +32,13 @@ export async function runtimeConfigGenerator(
     srcRoot,
     'components',
     'RuntimeConfig',
-    'index.tsx'
+    'index.tsx',
   );
   if (
     tree.exists(runtimeConfigPath) ||
     tsquery.query(
       mainTsxAst,
-      'JsxElement > JsxOpeningElement[name.text="RuntimeConfigProvider"]'
+      'JsxElement > JsxOpeningElement[name.text="RuntimeConfigProvider"]',
     ).length > 0
   ) {
     console.debug('Runtime config already exists, skipping generation');
@@ -57,16 +57,16 @@ export async function runtimeConfigGenerator(
     },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
-    }
+    },
   );
   const runtimeContextImport = factory.createImportDeclaration(
     undefined,
     factory.createImportClause(
       false,
       factory.createIdentifier('RuntimeConfigProvider'),
-      undefined
+      undefined,
     ),
-    factory.createStringLiteral('./components/RuntimeConfig', true)
+    factory.createStringLiteral('./components/RuntimeConfig', true),
   );
   const updatedImports = tsquery
     .map(mainTsxAst, 'SourceFile', (node: SourceFile) => {
@@ -88,12 +88,12 @@ export async function runtimeConfigGenerator(
         factory.createJsxOpeningElement(
           factory.createIdentifier('RuntimeConfigProvider'),
           undefined,
-          factory.createJsxAttributes([])
+          factory.createJsxAttributes([]),
         ),
         [node],
         factory.createJsxClosingElement(
-          factory.createIdentifier('RuntimeConfigProvider')
-        )
+          factory.createIdentifier('RuntimeConfigProvider'),
+        ),
       );
     })
     .getFullText();
@@ -103,6 +103,6 @@ export async function runtimeConfigGenerator(
   if (locatedTargetNode && mainTsxContents !== mainTsxUpdatedContents) {
     tree.write(mainTsxPath, mainTsxUpdatedContents);
   }
-  await formatFilesInSubtree(tree, mainTsxPath);
+  await formatFilesInSubtree(tree);
 }
 export default runtimeConfigGenerator;

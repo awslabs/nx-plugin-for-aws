@@ -2,23 +2,18 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
 import { Tree } from '@nx/devkit';
-import { Linter } from '@nx/eslint';
 import { appGenerator } from './generator';
 import { AppGeneratorSchema } from './schema';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 describe('cloudscape-website generator', () => {
   let tree: Tree;
   const options: AppGeneratorSchema = {
     name: 'test-app',
     style: 'css',
-    linter: Linter.EsLint,
-    addPlugin: false,
-    unitTestRunner: 'vitest',
-    bundler: 'vite',
   };
   beforeEach(() => {
-    tree = createTreeWithEmptyWorkspace();
+    tree = createTreeUsingTsSolutionSetup();
   });
   it('should generate base files and structure', async () => {
     await appGenerator(tree, options);

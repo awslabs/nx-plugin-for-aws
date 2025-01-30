@@ -25,7 +25,7 @@ export async function runCLI(
     env: undefined,
     verbose: undefined,
     redirectStderr: undefined,
-  }
+  },
 ): Promise<string> {
   try {
     const pm = getPackageManagerCommand();
@@ -76,11 +76,11 @@ function detectPackageManager(dir = ''): PackageManager {
   return existsSync(join(dir, 'bun.lockb'))
     ? 'bun'
     : existsSync(join(dir, 'yarn.lock'))
-    ? 'yarn'
-    : existsSync(join(dir, 'pnpm-lock.yaml')) ||
-      existsSync(join(dir, 'pnpm-workspace.yaml'))
-    ? 'pnpm'
-    : 'npm';
+      ? 'yarn'
+      : existsSync(join(dir, 'pnpm-lock.yaml')) ||
+          existsSync(join(dir, 'pnpm-workspace.yaml'))
+        ? 'pnpm'
+        : 'npm';
 }
 function getYarnMajorVersion(path: string): string | undefined {
   try {
@@ -102,7 +102,7 @@ function getYarnMajorVersion(path: string): string | undefined {
   }
 }
 export function tmpProjPath() {
-  return `/tmp/nx-plugin/e2e`;
+  return `../dist/e2e`;
 }
 function getPackageManagerCommand({
   path = tmpProjPath(),
@@ -126,7 +126,7 @@ function getPackageManagerCommand({
       runNxSilent: `pnpm exec nx`,
     },
     bun: {
-      runNxSilent: `bunx nx`,
+      runNxSilent: `bun nx`,
     },
   }[packageManager.trim() as PackageManager];
 }
@@ -139,7 +139,7 @@ function stripConsoleColors(log: string): string {
   return log?.replace(
     // eslint-disable-next-line no-control-regex
     /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g,
-    ''
+    '',
   );
 }
 function logError(message: string, body?: string) {

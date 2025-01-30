@@ -3,12 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { Tree } from '@nx/devkit';
-import { createTreeWithEmptyWorkspace } from 'nx/src/devkit-testing-exports';
 import { reactGenerator } from './generator';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 describe('trpc react generator', () => {
   let tree: Tree;
   beforeEach(() => {
-    tree = createTreeWithEmptyWorkspace();
+    tree = createTreeUsingTsSolutionSetup();
     // Mock frontend project configuration
     tree.write(
       'apps/frontend/project.json',

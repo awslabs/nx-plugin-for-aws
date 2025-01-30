@@ -4,12 +4,12 @@
  */
 import { describe, expect, it, beforeEach } from 'vitest';
 import { Tree } from '@nx/devkit';
-import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
 import { formatFilesInSubtree } from './format';
+import { createTreeUsingTsSolutionSetup } from './test';
 describe('format utils', () => {
   let tree: Tree;
   beforeEach(() => {
-    tree = createTreeWithEmptyWorkspace();
+    tree = createTreeUsingTsSolutionSetup();
   });
   describe('formatFilesInSubtree', () => {
     it('should format files in the given directory', async () => {
