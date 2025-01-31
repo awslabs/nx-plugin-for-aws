@@ -12,6 +12,7 @@ import {
   replace,
   createJsxElementFromIdentifier,
   createJsxElement,
+  jsonToAst,
 } from './ast';
 
 describe('ast utils', () => {
@@ -35,16 +36,16 @@ describe('ast utils', () => {
         mockTree,
         'file.ts',
         ['newImport1', 'newImport2'],
-        '@scope/package'
+        '@scope/package',
       );
 
       expect(mockTree.write).toHaveBeenCalledWith(
         'file.ts',
-        expect.any(String)
+        expect.any(String),
       );
       const writtenContent = vi.mocked(mockTree.write).mock.calls[0][1];
       expect(writtenContent).toMatch(
-        /import\s*{\s*existingImport,\s*newImport1,\s*newImport2\s*}\s*from\s*["']@scope\/package["']/
+        /import\s*{\s*existingImport,\s*newImport1,\s*newImport2\s*}\s*from\s*["']@scope\/package["']/,
       );
     });
 
@@ -57,16 +58,16 @@ describe('ast utils', () => {
         mockTree,
         'file.ts',
         ['original as alias'],
-        '@scope/package'
+        '@scope/package',
       );
 
       expect(mockTree.write).toHaveBeenCalledWith(
         'file.ts',
-        expect.any(String)
+        expect.any(String),
       );
       const writtenContent = vi.mocked(mockTree.write).mock.calls[0][1];
       expect(writtenContent).toMatch(
-        /import\s*{\s*existing,\s*original\s+as\s+alias\s*}\s*from\s*["']@scope\/package["']/
+        /import\s*{\s*existing,\s*original\s+as\s+alias\s*}\s*from\s*["']@scope\/package["']/,
       );
     });
 
@@ -79,7 +80,7 @@ describe('ast utils', () => {
         mockTree,
         'file.ts',
         ['existingImport'],
-        '@scope/package'
+        '@scope/package',
       );
 
       expect(mockTree.write).not.toHaveBeenCalled();
@@ -93,8 +94,8 @@ describe('ast utils', () => {
           mockTree,
           'nonexistent.ts',
           ['import1'],
-          '@scope/package'
-        )
+          '@scope/package',
+        ),
       ).toThrow('No file located at nonexistent.ts');
     });
   });
@@ -109,11 +110,11 @@ describe('ast utils', () => {
 
       expect(mockTree.write).toHaveBeenCalledWith(
         'file.ts',
-        expect.any(String)
+        expect.any(String),
       );
       const writtenContent = vi.mocked(mockTree.write).mock.calls[0][1];
       expect(writtenContent).toMatch(
-        /import\s+DefaultImport\s+from\s*["']@scope\/package["']/
+        /import\s+DefaultImport\s+from\s*["']@scope\/package["']/,
       );
     });
 
@@ -138,7 +139,7 @@ describe('ast utils', () => {
 
       expect(mockTree.write).toHaveBeenCalledWith(
         'index.ts',
-        expect.stringContaining('export * from "./module"')
+        expect.stringContaining('export * from "./module"'),
       );
     });
 
@@ -160,7 +161,7 @@ describe('ast utils', () => {
 
       expect(mockTree.write).toHaveBeenCalledWith(
         'index.ts',
-        expect.stringContaining('export * from "./module"')
+        expect.stringContaining('export * from "./module"'),
       );
     });
   });
@@ -172,12 +173,12 @@ describe('ast utils', () => {
       vi.mocked(mockTree.read).mockReturnValue(initialContent);
 
       replace(mockTree, 'file.ts', 'NumericLiteral', () =>
-        factory.createNumericLiteral('10')
+        factory.createNumericLiteral('10'),
       );
 
       expect(mockTree.write).toHaveBeenCalledWith(
         'file.ts',
-        expect.stringContaining('const x = 10')
+        expect.stringContaining('const x = 10'),
       );
     });
 
@@ -188,8 +189,8 @@ describe('ast utils', () => {
 
       expect(() =>
         replace(mockTree, 'file.ts', 'NumericLiteral', () =>
-          factory.createNumericLiteral('10')
-        )
+          factory.createNumericLiteral('10'),
+        ),
       ).toThrow();
     });
 
@@ -204,8 +205,8 @@ describe('ast utils', () => {
           'file.ts',
           'NumericLiteral',
           () => factory.createNumericLiteral('10'),
-          false
-        )
+          false,
+        ),
       ).not.toThrow();
     });
   });
@@ -218,7 +219,7 @@ describe('ast utils', () => {
 
       expect((element.openingElement.tagName as any).text).toBe('div');
       expect(element.children[0].kind).toBe(
-        factory.createJsxText('Hello').kind
+        factory.createJsxText('Hello').kind,
       );
     });
   });
@@ -228,10 +229,10 @@ describe('ast utils', () => {
       const opening = factory.createJsxOpeningElement(
         factory.createIdentifier('div'),
         undefined,
-        factory.createJsxAttributes([])
+        factory.createJsxAttributes([]),
       );
       const closing = factory.createJsxClosingElement(
-        factory.createIdentifier('div')
+        factory.createIdentifier('div'),
       );
       const children = [factory.createJsxText('Hello')];
 
@@ -241,6 +242,98 @@ describe('ast utils', () => {
       expect(element.children[0].kind).toBe(children[0].kind);
       expect((element.children[0] as any).text).toBe('Hello');
       expect(element.closingElement.tagName).toEqual(closing.tagName);
+    });
+  });
+
+  describe('jsonToAst', () => {
+    it('should handle null', () => {
+      expect(jsonToAst(null)).toEqual(factory.createNull());
+    });
+
+    it('should handle undefined', () => {
+      expect(jsonToAst(undefined)).toEqual(
+        factory.createIdentifier('undefined'),
+      );
+    });
+
+    it('should handle strings', () => {
+      expect(jsonToAst('test')).toEqual(factory.createStringLiteral('test'));
+    });
+
+    it('should handle numbers', () => {
+      expect(jsonToAst(42)).toEqual(factory.createNumericLiteral(42));
+    });
+
+    it('should handle booleans', () => {
+      expect(jsonToAst(true)).toEqual(factory.createTrue());
+      expect(jsonToAst(false)).toEqual(factory.createFalse());
+    });
+
+    it('should handle arrays', () => {
+      const input = [1, 'test', true];
+      const expected = factory.createArrayLiteralExpression([
+        factory.createNumericLiteral(1),
+        factory.createStringLiteral('test'),
+        factory.createTrue(),
+      ]);
+      expect(jsonToAst(input)).toEqual(expected);
+    });
+
+    it('should handle objects', () => {
+      const input = {
+        number: 42,
+        string: 'test',
+        boolean: true,
+        nested: {
+          array: [1, 2, 3],
+        },
+      };
+      const expected = factory.createObjectLiteralExpression([
+        factory.createPropertyAssignment(
+          factory.createIdentifier('number'),
+          factory.createNumericLiteral(42),
+        ),
+        factory.createPropertyAssignment(
+          factory.createIdentifier('string'),
+          factory.createStringLiteral('test'),
+        ),
+        factory.createPropertyAssignment(
+          factory.createIdentifier('boolean'),
+          factory.createTrue(),
+        ),
+        factory.createPropertyAssignment(
+          factory.createIdentifier('nested'),
+          factory.createObjectLiteralExpression([
+            factory.createPropertyAssignment(
+              factory.createIdentifier('array'),
+              factory.createArrayLiteralExpression([
+                factory.createNumericLiteral(1),
+                factory.createNumericLiteral(2),
+                factory.createNumericLiteral(3),
+              ]),
+            ),
+          ]),
+        ),
+      ]);
+      expect(jsonToAst(input)).toEqual(expected);
+    });
+
+    it('should handle objects with string keys', () => {
+      const input = {
+        'some/unsupported/syntax': 'test',
+      };
+      const expected = factory.createObjectLiteralExpression([
+        factory.createPropertyAssignment(
+          factory.createStringLiteral('some/unsupported/syntax'),
+          factory.createStringLiteral('test'),
+        ),
+      ]);
+      expect(jsonToAst(input)).toEqual(expected);
+    });
+
+    it('should throw error for unsupported types', () => {
+      const fn = () => console.log('function!');
+      expect(() => jsonToAst(fn)).toThrow('Unsupported type: function');
     });
   });
 });

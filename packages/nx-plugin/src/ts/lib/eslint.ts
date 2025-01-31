@@ -36,7 +36,7 @@ export const configureEslint = async (tree: Tree) => {
   addDependenciesToPackageJson(
     tree,
     {},
-    withVersions(['prettier', 'eslint-plugin-prettier'])
+    withVersions(['prettier', 'eslint-plugin-prettier']),
   );
   // Update or create eslint.config.mjs
   const eslintConfigPath = 'eslint.config.mjs';
@@ -46,7 +46,7 @@ export const configureEslint = async (tree: Tree) => {
     // Check if import exists
     const existingImport = tsquery.query(
       sourceFile,
-      'VariableDeclaration[name.text="eslintPluginPrettierRecommended"]'
+      'VariableDeclaration[name.text="eslintPluginPrettierRecommended"]',
     );
     let updatedContent = sourceFile;
     // Add import if it doesn't exist
@@ -56,14 +56,14 @@ export const configureEslint = async (tree: Tree) => {
           tree,
           eslintConfigPath,
           'eslintPluginPrettierRecommended',
-          'eslint-plugin-prettier/recommended'
-        )
+          'eslint-plugin-prettier/recommended',
+        ),
       );
     }
     // Check if eslintPluginPrettierRecommended exists in exports array
     const existingPlugin = tsquery.query(
       updatedContent,
-      'ExportAssignment > ArrayLiteralExpression Identifier[name="eslintPluginPrettierRecommended"]'
+      'ExportAssignment > ArrayLiteralExpression Identifier[name="eslintPluginPrettierRecommended"]',
     );
     // Add eslintPluginPrettierRecommended to array if it doesn't exist
     if (existingPlugin.length === 0) {
@@ -76,9 +76,9 @@ export const configureEslint = async (tree: Tree) => {
               factory.createIdentifier('eslintPluginPrettierRecommended'),
               ...node.elements,
             ],
-            true
+            true,
           );
-        }
+        },
       );
     }
     // Only write if changes were made
@@ -92,6 +92,7 @@ export const configureEslint = async (tree: Tree) => {
       targetDefaults: {
         ...(nxJson.targetDefaults ?? {}),
         lint: {
+          ...nxJson.targetDefaults?.lint,
           cache: true,
           configurations: {
             fix: {
