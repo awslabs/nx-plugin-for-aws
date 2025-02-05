@@ -1,10 +1,9 @@
 ---
-sidebar_position: 1
+title: '@aws/nx-plugin'
+description: A, overview of the @aws/nx-plugin.
 ---
 
-# PACE Nx Plugin
-
-The PACE Nx Plugin includes several useful [Nx Generators](https://nx.dev/features/generate-code), which provides a way to quickly bootstrap and build AWS projects.
+The @aws/nx-plugin includes several useful [Nx Generators](https://nx.dev/features/generate-code), which provides a way to quickly bootstrap and build AWS projects.
 
 Benefits of using the PACE Nx Plugin:
 
