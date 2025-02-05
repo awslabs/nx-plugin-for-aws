@@ -36,7 +36,7 @@ export const configureEslint = async (tree: Tree) => {
   addDependenciesToPackageJson(
     tree,
     {},
-    withVersions(['prettier', 'eslint-plugin-prettier']),
+    withVersions(['prettier', 'eslint-plugin-prettier', 'jsonc-eslint-parser']),
   );
   // Update or create eslint.config.mjs
   const eslintConfigPath = 'eslint.config.mjs';
