@@ -138,7 +138,7 @@ export const defaultLicenseConfig = (
         header: {
           content: { lines },
           format: {
-            '**/*.{js,ts}': {
+            '**/*.{js,ts,jsx,tsx,mjs,mts}': {
               blockStart: `/***${'*'.repeat(maxLen)}**`,
               lineStart: ' *  ',
               lineEnd: ' *',
@@ -172,7 +172,7 @@ export const defaultLicenseConfig = (
             ],
           },
           format: {
-            '**/*.{js,ts}': {
+            '**/*.{js,ts,jsx,tsx,mjs,mts}': {
               blockStart: '/**',
               lineStart: ' * ',
               blockEnd: ' */',
