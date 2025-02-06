@@ -15,8 +15,18 @@ import { glob as fastGlob } from 'fast-glob';
 import { minimatch } from 'minimatch';
 import { getGitIncludedFiles } from '../../utils/git';
 import { AWS_NX_PLUGIN_CONFIG_FILE_NAME } from '../../utils/config/utils';
+import {
+  PROJECT_FILES_TO_SYNC,
+  ProjectFileToSync,
+  syncProjectFile,
+} from './project-file-sync';
 
 export const SYNC_GENERATOR_NAME = '@aws/nx-plugin:license#sync';
+
+interface ProjectFile {
+  name: ProjectFileToSync;
+  path: string;
+}
 
 export async function licenseSyncGenerator(
   tree: Tree,
@@ -60,46 +70,51 @@ export async function licenseSyncGenerator(
     }
   }
 
-  const licenseFilesAdded: string[] = [];
-  const licenseFilesUpdated: string[] = [];
+  const projectFilesUpdated: ProjectFile[] = [];
 
-  if (tree.exists('LICENSE')) {
-    const rootLicense = tree.read('LICENSE', 'utf-8');
+  // Helper to check whether a file should be included in the sync based on file exclude configuration
+  const isFileIncludedInSync = (path: string): boolean =>
+    !(config?.files?.exclude ?? []).some((excludePattern) =>
+      minimatch(path, excludePattern),
+    );
 
-    // Sync subproject license files
-    for (const project of getProjects(tree).values()) {
-      const projectLicensePath = joinPathFragments(project.root, 'LICENSE');
+  // Sync files in the root, and all projects
+  const projectRoots = [
+    '.',
+    ...[...getProjects(tree).values()].map((p) => p.root),
+  ];
 
-      // Check that this project is not excluded in config
-      if (
-        !(config?.files?.exclude ?? []).some(
-          (excludePattern) =>
-            minimatch(projectLicensePath, excludePattern) ||
-            minimatch(project.root, excludePattern),
-        )
-      ) {
-        // Write the license if it doesn't exist, or if it doesn't match the root license
-        let shouldWrite = false;
-        if (!tree.exists(projectLicensePath)) {
-          licenseFilesAdded.push(projectLicensePath);
-          shouldWrite = true;
-        } else if (tree.read(projectLicensePath, 'utf-8') !== rootLicense) {
-          licenseFilesUpdated.push(projectLicensePath);
-          shouldWrite = true;
+  // Sync subproject license files and project files
+  for (const projectRoot of projectRoots) {
+    // Check that this project should have files synced - allows users to specify a project path
+    // to exclude from all file syncs
+    if (isFileIncludedInSync(projectRoot)) {
+      PROJECT_FILES_TO_SYNC.forEach((projectFile) => {
+        const projectFilePath = joinPathFragments(projectRoot, projectFile);
+        // Check that the specific project file should be synced - allows users to be more granular to
+        // decide to eg omit LICENSE file sync but keep package.json sync
+        if (isFileIncludedInSync(projectFilePath)) {
+          const prevContent = tree.read(projectFilePath, 'utf-8');
+
+          syncProjectFile(tree, projectRoot, projectFile, config);
+
+          const newContent = tree.read(projectFilePath, 'utf-8');
+
+          if (prevContent !== newContent) {
+            projectFilesUpdated.push({
+              path: projectFilePath,
+              name: projectFile,
+            });
+          }
         }
-
-        if (shouldWrite) {
-          tree.write(projectLicensePath, rootLicense);
-        }
-      }
+      });
     }
   }
 
   return {
     outOfSyncMessage: buildOutOfSyncMessage({
       licenseHeadersUpdated,
-      licenseFilesAdded,
-      licenseFilesUpdated,
+      projectFilesUpdated,
     }),
   };
 }
@@ -108,18 +123,23 @@ export async function licenseSyncGenerator(
  * Build the message to display when the sync generator would make changes to the tree
  */
 const buildOutOfSyncMessage = (updates: {
-  licenseFilesAdded: string[];
-  licenseFilesUpdated: string[];
+  projectFilesUpdated: ProjectFile[];
   licenseHeadersUpdated: string[];
 }): string => {
   let outOfSyncMessage = '';
 
-  if (updates.licenseFilesAdded.length > 0) {
-    outOfSyncMessage += `Project license files are missing:\n${updates.licenseFilesAdded.map((p) => `- ${p}`).join('\n')}\n\n`;
-  }
-  if (updates.licenseFilesUpdated.length > 0) {
-    outOfSyncMessage += `Project license files are out of sync:\n${updates.licenseFilesUpdated.map((p) => `- ${p}`).join('\n')}\n\n`;
-  }
+  const pathsByName: { [key: string]: string[] } =
+    updates.projectFilesUpdated.reduce(
+      (prev, { name, path }) => ({
+        ...prev,
+        [name]: [...(prev[name] ?? []), path],
+      }),
+      {},
+    );
+  Object.entries(pathsByName).forEach(([name, files]) => {
+    outOfSyncMessage += `Project ${name} files are out of sync:\n${files.map((p) => `- ${p}`).join('\n')}\n\n`;
+  });
+
   if (updates.licenseHeadersUpdated.length > 0) {
     outOfSyncMessage += `License headers are out of sync in the following source files:\n${updates.licenseHeadersUpdated.map((p) => `- ${p}`).join('\n')}\n\n`;
   }

@@ -23,26 +23,35 @@ describe('licenseSyncGenerator', () => {
   });
 
   const addLicenseConfig = async (
-    licenseConfig?: LicenseConfig,
+    licenseConfig?: Partial<LicenseConfig> & Pick<LicenseConfig, 'header'>,
     _tree: Tree = tree,
   ) => {
     await ensureAwsNxPluginConfig(_tree);
     await updateAwsNxPluginConfig(_tree, {
-      license: licenseConfig ?? {
-        header: {
-          content: {
-            lines: ['Test Header'],
-          },
-          format: {
-            '**/*.ts': {
-              lineStart: '// ',
+      license: licenseConfig
+        ? {
+            spdx: 'MIT',
+            copyrightHolder: 'foo',
+            copyrightYear: 2025,
+            ...licenseConfig,
+          }
+        : {
+            spdx: 'Apache-2.0',
+            copyrightHolder: 'Test',
+            header: {
+              content: {
+                lines: ['Test Header'],
+              },
+              format: {
+                '**/*.ts': {
+                  lineStart: '// ',
+                },
+                '**/*.sh': {
+                  lineStart: '# ',
+                },
+              },
             },
-            '**/*.sh': {
-              lineStart: '# ',
-            },
           },
-        },
-      },
     });
   };
 
@@ -683,9 +692,10 @@ describe('licenseSyncGenerator', () => {
     expect(tree.read('excluded.ts', 'utf-8')).toBe(`const y = 2;`);
   });
 
-  it('should synchronise subproject LICENSE files when a root LICENSE file is present', async () => {
-    await addLicenseConfig();
-    tree.write('LICENSE', 'my test license');
+  it('should synchronise LICENSE files', async () => {
+    await addLicenseConfig({
+      spdx: 'MIT',
+    });
 
     addProjectConfiguration(tree, 'without-license', {
       root: 'packages/without-license',
@@ -698,44 +708,30 @@ describe('licenseSyncGenerator', () => {
 
     const res = await licenseSyncGenerator(tree);
 
+    expect(tree.exists('LICENSE')).toBeTruthy();
+    expect(tree.read('LICENSE', 'utf-8')).toContain('MIT');
     expect(tree.exists('packages/without-license/LICENSE')).toBeTruthy();
-    expect(tree.read('packages/without-license/LICENSE', 'utf-8')).toBe(
-      'my test license',
+    expect(tree.read('packages/without-license/LICENSE', 'utf-8')).toContain(
+      'MIT',
     );
 
     expect(tree.exists('packages/with-bad-license/LICENSE')).toBeTruthy();
-    expect(tree.read('packages/with-bad-license/LICENSE', 'utf-8')).toBe(
-      'my test license',
+    expect(tree.read('packages/with-bad-license/LICENSE', 'utf-8')).toContain(
+      'MIT',
     );
 
     expect(getOutOfSyncMessage(res)).toContain(
-      'Project license files are missing:\n- packages/without-license/LICENSE',
+      'Project LICENSE files are out of sync:\n- LICENSE\n- packages/without-license/LICENSE\n- packages/with-bad-license/LICENSE',
     );
-    expect(getOutOfSyncMessage(res)).toContain(
-      'Project license files are out of sync:\n- packages/with-bad-license/LICENSE',
-    );
-  });
-
-  it('should not write subproject LICENSE files when no root LICENSE file is found', async () => {
-    await addLicenseConfig();
-
-    addProjectConfiguration(tree, 'test-project', {
-      root: 'packages/test-project',
-    });
-
-    await licenseSyncGenerator(tree);
-
-    expect(tree.exists('packages/test-project/LICENSE')).toBeFalsy();
   });
 
   it('should allow subprojects to be excluded from LICENSE file sync', async () => {
     await addLicenseConfig({
+      spdx: 'MIT',
       files: {
         exclude: ['packages/excluded-project'],
       },
     });
-
-    tree.write('LICENSE', 'test license');
 
     addProjectConfiguration(tree, 'excluded-project', {
       root: 'packages/excluded-project',
@@ -744,6 +740,128 @@ describe('licenseSyncGenerator', () => {
     await licenseSyncGenerator(tree);
 
     expect(tree.exists('packages/excluded-project/LICENSE')).toBeFalsy();
+  });
+
+  it('should synchronise package.json files', async () => {
+    await addLicenseConfig({
+      spdx: 'MIT',
+    });
+
+    addProjectConfiguration(tree, 'with-package', {
+      root: 'packages/with-package',
+    });
+    tree.write(
+      'packages/with-package/package.json',
+      JSON.stringify({
+        name: 'test-package',
+        version: '1.0.0',
+        license: 'Apache-2.0',
+      }),
+    );
+
+    tree.write(
+      'package.json',
+      JSON.stringify({
+        name: 'root-package',
+        version: '1.0.0',
+        license: 'Apache-2.0',
+      }),
+    );
+
+    const res = await licenseSyncGenerator(tree);
+
+    expect(
+      JSON.parse(tree.read('packages/with-package/package.json', 'utf-8')),
+    ).toEqual({
+      name: 'test-package',
+      version: '1.0.0',
+      license: 'MIT',
+    });
+
+    expect(JSON.parse(tree.read('package.json', 'utf-8'))).toEqual({
+      name: 'root-package',
+      version: '1.0.0',
+      license: 'MIT',
+    });
+
+    expect(getOutOfSyncMessage(res)).toContain(
+      'Project package.json files are out of sync:\n- package.json\n- packages/with-package/package.json',
+    );
+  });
+
+  it('should synchronise pyproject.toml files', async () => {
+    await addLicenseConfig({
+      spdx: 'MIT',
+    });
+
+    addProjectConfiguration(tree, 'python-project', {
+      root: 'packages/python-project',
+    });
+    tree.write(
+      'packages/python-project/pyproject.toml',
+      '[project]\nname = "test-project"\nversion = "1.0.0"\nlicense = "Apache-2.0"',
+    );
+
+    const res = await licenseSyncGenerator(tree);
+
+    // Should update license field
+    expect(
+      tree.read('packages/python-project/pyproject.toml', 'utf-8'),
+    ).toContain('license = "MIT"');
+
+    // Create LICENSE file and verify license-files is added
+    tree.write('packages/python-project/LICENSE', 'MIT License');
+    await licenseSyncGenerator(tree);
+    expect(
+      tree.read('packages/python-project/pyproject.toml', 'utf-8'),
+    ).toContain('license-files = [ "LICENSE" ]');
+
+    expect(getOutOfSyncMessage(res)).toContain(
+      'Project pyproject.toml files are out of sync:\n- packages/python-project/pyproject.toml',
+    );
+  });
+
+  it('should allow skipping pyproject.toml files while still synchronising package.json files', async () => {
+    await addLicenseConfig({
+      spdx: 'MIT',
+      files: {
+        exclude: ['**/pyproject.toml'],
+      },
+    });
+
+    addProjectConfiguration(tree, 'mixed-project', {
+      root: 'packages/mixed-project',
+    });
+
+    // Set up both package.json and pyproject.toml with Apache-2.0 license
+    tree.write(
+      'packages/mixed-project/package.json',
+      JSON.stringify({
+        name: 'test-package',
+        version: '1.0.0',
+        license: 'Apache-2.0',
+      }),
+    );
+    tree.write(
+      'packages/mixed-project/pyproject.toml',
+      '[project]\nname = "test-project"\nversion = "1.0.0"\nlicense = "Apache-2.0"',
+    );
+
+    await licenseSyncGenerator(tree);
+
+    // package.json should be updated to MIT
+    expect(
+      JSON.parse(tree.read('packages/mixed-project/package.json', 'utf-8')),
+    ).toEqual({
+      name: 'test-package',
+      version: '1.0.0',
+      license: 'MIT',
+    });
+
+    // pyproject.toml should remain unchanged with Apache-2.0
+    expect(
+      tree.read('packages/mixed-project/pyproject.toml', 'utf-8'),
+    ).toContain('license = "Apache-2.0"');
   });
 
   it('should not update ignored files in git projects', async () => {

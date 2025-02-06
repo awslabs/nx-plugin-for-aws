@@ -3,11 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
-import { readJson, readNxJson, Tree } from '@nx/devkit';
+import { readNxJson, Tree } from '@nx/devkit';
 
 import { licenseGenerator } from './generator';
 import { LicenseGeneratorSchema } from './schema';
-import { AWS_NX_PLUGIN_CONFIG_FILE_NAME } from '../utils/config/utils';
+import {
+  AWS_NX_PLUGIN_CONFIG_FILE_NAME,
+  readAwsNxPluginConfig,
+} from '../utils/config/utils';
 import { SYNC_GENERATOR_NAME } from './sync/generator';
 
 describe('license generator', () => {
@@ -19,12 +22,6 @@ describe('license generator', () => {
 
   beforeEach(() => {
     tree = createTreeWithEmptyWorkspace();
-  });
-
-  it('should add a top level license file', async () => {
-    await licenseGenerator(tree, options);
-
-    expect(tree.exists('LICENSE')).toBeTruthy();
   });
 
   it('should write default license config', async () => {
@@ -50,23 +47,28 @@ describe('license generator', () => {
       copyrightHolder: 'Foo',
     });
 
-    expect(tree.read('LICENSE', 'utf-8')).toContain('Foo');
-    expect(readJson(tree, 'package.json').license).toBe('MIT');
+    expect((await readAwsNxPluginConfig(tree)).license!.spdx).toBe('MIT');
+    expect((await readAwsNxPluginConfig(tree)).license!.copyrightHolder).toBe(
+      'Foo',
+    );
 
     await licenseGenerator(tree, {
       license: 'MIT',
       copyrightHolder: 'Bar',
     });
 
-    expect(tree.read('LICENSE', 'utf-8')).toContain('Bar');
-    expect(readJson(tree, 'package.json').license).toBe('MIT');
+    expect((await readAwsNxPluginConfig(tree)).license!.copyrightHolder).toBe(
+      'Bar',
+    );
 
     await licenseGenerator(tree, {
       license: 'ASL',
       copyrightHolder: 'Baz',
     });
 
-    expect(tree.read('LICENSE', 'utf-8')).toContain('Amazon Software License');
-    expect(readJson(tree, 'package.json').license).toBe('ASL');
+    expect((await readAwsNxPluginConfig(tree)).license!.spdx).toBe('ASL');
+    expect((await readAwsNxPluginConfig(tree)).license!.copyrightHolder).toBe(
+      'Baz',
+    );
   });
 });

@@ -19,6 +19,8 @@ describe('license config', () => {
   let tree: Tree;
 
   const sampleConfig: LicenseConfig = {
+    spdx: 'ASL',
+    copyrightHolder: 'Test Inc.',
     header: {
       content: {
         lines: ['this is a test license header'],
@@ -62,15 +64,11 @@ describe('license config', () => {
   });
 
   describe('writeLicenseConfig', () => {
-    it('should write license configuration and update package.json spdx', async () => {
-      tree.write('package.json', `{ "name": "test-package" }`);
+    it('should write license configuration', async () => {
       tree.write(AWS_NX_PLUGIN_CONFIG_FILE_NAME, `export default {}`);
 
-      await writeLicenseConfig(tree, 'Apache-2.0', sampleConfig);
+      await writeLicenseConfig(tree, sampleConfig);
 
-      expect(JSON.parse(tree.read('package.json', 'utf-8')).license).toBe(
-        'Apache-2.0',
-      );
       expect(tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8')).toContain(
         'this is a test license header',
       );

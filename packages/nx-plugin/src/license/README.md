@@ -2,7 +2,7 @@
 
 ## Overview
 
-This generator configures `LICENSE` files and source file headers for your project. After you run this generator, a [sync generator](https://nx.dev/concepts/sync-generators) is registered to execute as part of your `lint` targets which will ensure that your source files conform to the desired license content and format, as well as ensuring that all projects in your workspace contain a copy of the root `LICENSE` file.
+This generator configures `LICENSE` files and source file headers for your project. After you run this generator, a [sync generator](https://nx.dev/concepts/sync-generators) is registered to execute as part of your `lint` targets which will ensure that your source files conform to the desired license content and format, as well as ensuring that your project's LICENSE files are correct, and licensing information is included in relevant project files.
 
 ## Usage
 
@@ -39,7 +39,7 @@ You can also perform a dry-run to see what files would be generated or updated w
 nx g @aws/nx-plugin:license my-api --copyrightHolder="My Company, Inc." --license=MIT --dry-run
 ```
 
-Both methods will create a root `LICENSE` file based on your selected license and copyright holder, as well as configuring the sync generator to ensure that source files specify the correct license header.
+Both methods will configure the license sync generator to ensure that your project contains the correct LICENSE files, and source files specify the correct license header.
 
 ## Input Parameters
 
@@ -53,8 +53,6 @@ Both methods will create a root `LICENSE` file based on your selected license an
 The generator will create or update the following files:
 
 ```
-└── LICENSE                    # The content is written based on the selected license
-└── package.json               # The "license" field is updated with the selected license
 └── nx.json                    # The "lint" target is configured to sync LICENSE files and source file headers
 └── aws-nx-plugin.config.mts   # Configuration for the license sync, such as customising the license header content and format for different languages
 ```
@@ -63,7 +61,7 @@ Some default configuration for license header content and format is added to `aw
 
 ## License Sync Behaviour
 
-The license sync generator performs two main tasks:
+The license sync generator performs three main tasks:
 
 ### 1. Synchronise Source File License Headers
 
@@ -73,7 +71,13 @@ You can update the configuration at any time to change which files should be inc
 
 ### 2. Synchronise LICENSE Files
 
-When the sync generator is run, it will ensure that all projects in your workspace contain the same `LICENSE` file as the `LICENSE` file in the root of your workspace. If your workspace does not have a root LICENSE file, this is skipped.
+When the sync generator is run, it will ensure that the root `LICENSE` file corresponds to your configured license, as well as ensuring that all subprojects in your workspace also contain the correct `LICENSE` file.
+
+You can exclude projects in the configuration if required. For more details, please see the [configuration section](#configuration) below.
+
+### 3. Synchronise licensing information in project files
+
+When the sync generator is run, it will ensure the `license` fields in `package.json` and `pyproject.toml` files are set to your configured license.
 
 You can exclude projects in the configuration if required. For more details, please see the [configuration section](#configuration) below.
 
@@ -81,7 +85,35 @@ You can exclude projects in the configuration if required. For more details, ple
 
 Configuration is defined in the `aws-nx-plugin.config.mts` file in the root of your workspace.
 
-### License header content
+### SPDX and Copyright Holder
+
+Your chosen license can be updated at any time via the `spdx` configuration property:
+
+```typescript
+{
+  license: {
+    spdx: 'MIT',
+  }
+}
+```
+
+When the sync generator runs, all `LICENSE` files, `package.json` and `pyproject.toml` files will be updated to reflect the configured license.
+
+You can additionally configure the copyright holder and copyright year, which are included in some `LICENSE` files:
+
+```typescript
+{
+  license: {
+    spdx: 'MIT',
+    copyrightHolder: 'Amazon.com, Inc. or its affiliates',
+    copyrightYear: 2025,
+  }
+}
+```
+
+### License Headers
+
+#### Content
 
 The license header content can be configured in two ways:
 
@@ -115,7 +147,7 @@ The license header content can be configured in two ways:
 }
 ```
 
-### Including files and specifying a format
+#### Including files and specifying header format
 
 You can specify how license headers should be formatted for different file types using glob patterns. The format configuration supports line comments, block comments, or a combination of both:
 
@@ -164,7 +196,7 @@ The format configuration supports:
 - `lineEnd`: Text appended to each line of the license content
 - `blockEnd`: Text written after the license content (e.g., to end a block comment)
 
-### Custom comment syntax
+#### Custom comment syntax
 
 For file types that aren't natively supported, you can specify custom comment syntax:
 
@@ -201,7 +233,7 @@ This tells the sync generator how to identify existing license headers in these 
 - `line`: Characters that start a line comment
 - `block`: Characters that start and end a block comment
 
-### Excluding files
+#### Excluding files
 
 By default, in a git repository, all `.gitignore` files are honored to ensure that only files managed by version control are synchronized. In non-git repositories, all files are considered unless explicitly excluded in configuration.
 
@@ -229,21 +261,24 @@ You can exclude additional files from license header synchronization using glob 
 }
 ```
 
-### Excluding projects from LICENSE file sync
+### Excluding project files from sync
 
-You can exclude specific projects from LICENSE file synchronization using glob patterns:
+All `LICENSE` files, `package.json` files and `pyproject.toml` files are synchronised with the configured license by default.
+
+You can exclude specific projects or files from synchronization using glob patterns:
 
 ```typescript
 {
   license: {
     files: {
-      exclude: ['packages/excluded-project', 'apps/internal-*'];
+      exclude: [
+        'packages/excluded-project', // do not sync LICENSE file, package.json or pyproject.toml
+        'apps/internal/LICENSE', // do not sync LICENSE file, but sync package.json and/or pyproject.toml
+      ];
     }
   }
 }
 ```
-
-When excluded, these projects will not receive a copy of the root LICENSE file during synchronization.
 
 ## Disabling license sync
 

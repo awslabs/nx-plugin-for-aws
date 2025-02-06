@@ -2,7 +2,22 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+import { SPDXLicenseIdentifier } from './schema';
+
 export interface LicenseConfig {
+  /**
+   * The SPDX license identifier for your chosen license.
+   * License files will be synchronised according to the chosen SPDX
+   */
+  spdx: SPDXLicenseIdentifier;
+  /**
+   * The copyright holder for the license
+   */
+  copyrightHolder: string;
+  /**
+   * The copyright year (if any)
+   */
+  copyrightYear?: number;
   /**
    * Configuration for source code license headers
    * Omit if you do not want any source code license headers to be synced

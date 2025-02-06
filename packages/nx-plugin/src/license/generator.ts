@@ -2,8 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { generateFiles, readNxJson, Tree, updateNxJson } from '@nx/devkit';
-import { join } from 'path';
+import { readNxJson, Tree, updateNxJson } from '@nx/devkit';
 import { LicenseGeneratorSchema } from './schema';
 import { defaultLicenseConfig, writeLicenseConfig } from './config';
 import { ensureAwsNxPluginConfig } from '../utils/config/utils';
@@ -15,17 +14,10 @@ export async function licenseGenerator(
 ) {
   const { license, copyrightHolder } = options;
 
-  // Add LICENSE file
-  generateFiles(tree, join(__dirname, 'files', 'licenses', license), '.', {
-    ...options,
-    year: new Date().getFullYear(),
-  });
-
   // Write default config for the license headers
   await ensureAwsNxPluginConfig(tree);
   await writeLicenseConfig(
     tree,
-    license,
     defaultLicenseConfig(license, copyrightHolder),
   );
 
