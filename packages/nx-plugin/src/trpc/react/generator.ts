@@ -192,7 +192,7 @@ export async function reactGenerator(
     replace(
       tree,
       mainTsxPath,
-      'JsxSelfClosingElement[tagName.name="App"]',
+      'JsxSelfClosingElement[tagName.name="RouterProvider"]',
       (node: JsxSelfClosingElement) =>
         createJsxElementFromIdentifier('TrpcClientProviders', [node]),
     );

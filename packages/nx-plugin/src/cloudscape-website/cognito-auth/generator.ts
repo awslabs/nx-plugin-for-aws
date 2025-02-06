@@ -218,8 +218,8 @@ export async function cognitoAuthGenerator(
   // Update App Layout
   const appLayoutTsxPath = joinPathFragments(
     srcRoot,
-    'layouts',
-    'App',
+    'components',
+    'AppLayout',
     'index.tsx',
   );
   if (tree.exists(appLayoutTsxPath)) {
@@ -236,7 +236,7 @@ export async function cognitoAuthGenerator(
         'VariableDeclaration',
         (node: VariableDeclaration) => {
           // Only process if this is the App component
-          if (node.name.getText() !== 'App') {
+          if (node.name.getText() !== 'AppLayout') {
             return node;
           }
           const arrowFunction = node.initializer as ArrowFunction;

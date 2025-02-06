@@ -16,7 +16,7 @@ describe('trpc react generator', () => {
         name: 'frontend',
         root: 'apps/frontend',
         sourceRoot: 'apps/frontend/src',
-      })
+      }),
     );
     // Mock backend project configuration
     tree.write(
@@ -28,19 +28,19 @@ describe('trpc react generator', () => {
         metadata: {
           apiName: 'TestApi',
         },
-      })
+      }),
     );
     // Mock main.tsx file
     tree.write(
       'apps/frontend/src/main.tsx',
       `
 import { App } from './app';
-import { BrowserRouter } from 'react-router-dom';
+import { RouterProvider } from '@tanstack/react-router';
 
 export function Main() {
-  return <BrowserRouter><App /></BrowserRouter>;
+  return <RouterProvider router={router} />;
 }
-`
+`,
     );
   });
   it('should generate trpc react files', async () => {
@@ -51,33 +51,33 @@ export function Main() {
     });
     // Verify generated files
     expect(
-      tree.exists('apps/frontend/src/components/TrpcClients/index.tsx')
+      tree.exists('apps/frontend/src/components/TrpcClients/index.tsx'),
     ).toBeTruthy();
     expect(tree.exists('apps/frontend/src/hooks/useTestApi.tsx')).toBeTruthy();
     // Create snapshots of generated files
     expect(
-      tree.read('apps/frontend/src/hooks/useTestApi.tsx', 'utf-8')
+      tree.read('apps/frontend/src/hooks/useTestApi.tsx', 'utf-8'),
     ).toMatchSnapshot('useTestApi.tsx');
     expect(
-      tree.read('apps/frontend/src/components/TrpcClients/index.tsx', 'utf-8')
+      tree.read('apps/frontend/src/components/TrpcClients/index.tsx', 'utf-8'),
     ).toMatchSnapshot('TrpcClients-index.tsx');
     expect(
       tree.read(
         'apps/frontend/src/components/TrpcClients/IsolatedTrpcProvider.tsx',
-        'utf-8'
-      )
+        'utf-8',
+      ),
     ).toMatchSnapshot('TrpcClients-IsolatedTrpcProvider.tsx');
     expect(
       tree.read(
         'apps/frontend/src/components/TrpcClients/TrpcApis.tsx',
-        'utf-8'
-      )
+        'utf-8',
+      ),
     ).toMatchSnapshot('TrpcClients-TrpcApis.tsx');
     expect(
       tree.read(
         'apps/frontend/src/components/TrpcClients/TrpcClientProviders.tsx',
-        'utf-8'
-      )
+        'utf-8',
+      ),
     ).toMatchSnapshot('TrpcClients-TrpcClientProviders.tsx');
   });
   it('should modify main.tsx correctly', async () => {
@@ -109,7 +109,7 @@ export function Main() {
     });
     const trpcProviderContent = tree.read(
       'apps/frontend/src/components/TRPCClientProvider/index.tsx',
-      'utf-8'
+      'utf-8',
     );
     expect(trpcProviderContent).toMatchSnapshot('TRPCClientProvider-IAM.tsx');
   });

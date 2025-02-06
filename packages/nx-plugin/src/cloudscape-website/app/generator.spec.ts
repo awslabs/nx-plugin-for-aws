@@ -20,19 +20,30 @@ describe('cloudscape-website generator', () => {
     // Check main application files
     expect(tree.exists('test-app/src/main.tsx')).toBeTruthy();
     expect(tree.exists('test-app/src/config.ts')).toBeTruthy();
-    expect(tree.exists('test-app/src/layouts/App/index.tsx')).toBeTruthy();
-    expect(tree.exists('test-app/src/layouts/Routes/index.tsx')).toBeTruthy();
-    expect(tree.exists('test-app/src/pages/Home/index.tsx')).toBeTruthy();
+    expect(tree.exists('test-app/src/routeTree.gen.ts')).toBeTruthy();
+    expect(tree.exists('test-app/src/styles.css')).toBeTruthy();
+    expect(tree.exists('test-app/src/routes/__root.tsx')).toBeTruthy();
+    expect(tree.exists('test-app/src/routes/index.tsx')).toBeTruthy();
+    expect(tree.exists('test-app/src/routes/welcome/index.tsx')).toBeTruthy();
+    expect(
+      tree.exists('test-app/src/components/AppLayout/index.tsx'),
+    ).toBeTruthy();
+    expect(
+      tree.exists('test-app/src/components/AppLayout/navitems.ts'),
+    ).toBeTruthy();
     // Snapshot the main application files
     expect(tree.read('test-app/src/main.tsx')?.toString()).toMatchSnapshot(
-      'main.tsx'
+      'main.tsx',
     );
     expect(tree.read('test-app/src/config.ts')?.toString()).toMatchSnapshot(
-      'config.ts'
+      'config.ts',
     );
     expect(
-      tree.read('test-app/src/layouts/App/index.tsx')?.toString()
+      tree.read('test-app/src/components/AppLayout/index.tsx')?.toString(),
     ).toMatchSnapshot('app-layout.tsx');
+    expect(
+      tree.read('test-app/src/routes/welcome/index.tsx')?.toString(),
+    ).toMatchSnapshot('welcome-index.tsx');
   });
   it('should configure vite correctly', async () => {
     await appGenerator(tree, options);
@@ -44,47 +55,49 @@ describe('cloudscape-website generator', () => {
     await appGenerator(tree, options);
     // Check shared constructs files
     expect(
-      tree.exists('packages/common/constructs/src/app/static-websites/index.ts')
+      tree.exists(
+        'packages/common/constructs/src/app/static-websites/index.ts',
+      ),
     ).toBeTruthy();
     expect(
       tree.exists(
-        'packages/common/constructs/src/app/static-websites/test-app.ts'
-      )
+        'packages/common/constructs/src/app/static-websites/test-app.ts',
+      ),
     ).toBeTruthy();
     expect(
-      tree.exists('packages/common/constructs/src/core/index.ts')
+      tree.exists('packages/common/constructs/src/core/index.ts'),
     ).toBeTruthy();
     expect(
-      tree.exists('packages/common/constructs/src/core/static-website.ts')
+      tree.exists('packages/common/constructs/src/core/static-website.ts'),
     ).toBeTruthy();
     // Snapshot the shared constructs files
     expect(
       tree
         .read('packages/common/constructs/src/app/static-websites/index.ts')
-        ?.toString()
+        ?.toString(),
     ).toMatchSnapshot('common/constructs-app-index.ts');
     expect(
       tree
         .read('packages/common/constructs/src/app/static-websites/test-app.ts')
-        ?.toString()
+        ?.toString(),
     ).toMatchSnapshot('test-app.ts');
     expect(
-      tree.read('packages/common/constructs/src/core/index.ts')?.toString()
+      tree.read('packages/common/constructs/src/core/index.ts')?.toString(),
     ).toMatchSnapshot('common/constructs-core-index.ts');
     expect(
       tree
         .read('packages/common/constructs/src/core/static-website.ts')
-        ?.toString()
+        ?.toString(),
     ).toMatchSnapshot('common/constructs-core-static-website.ts');
   });
   it('should update package.json with required dependencies', async () => {
     await appGenerator(tree, options);
     const packageJson = JSON.parse(tree.read('package.json').toString());
-    // Check for Cloudscape dependencies
+    // Check for website dependencies
     expect(packageJson.dependencies).toMatchObject({
       '@cloudscape-design/components': expect.any(String),
       '@cloudscape-design/board-components': expect.any(String),
-      'react-router-dom': expect.any(String),
+      '@tanstack/react-router': expect.any(String),
     });
     // Check for AWS CDK dependencies
     expect(packageJson.dependencies).toMatchObject({
@@ -105,7 +118,7 @@ describe('cloudscape-website generator', () => {
     });
     expect(tree.exists('custom-dir/test-app/src/main.tsx')).toBeTruthy();
     expect(
-      tree.read('custom-dir/test-app/src/main.tsx')?.toString()
+      tree.read('custom-dir/test-app/src/main.tsx')?.toString(),
     ).toMatchSnapshot('custom-dir-main.tsx');
   });
   it('should handle npm scope prefix correctly', async () => {
@@ -115,7 +128,7 @@ describe('cloudscape-website generator', () => {
       JSON.stringify({
         name: '@test-scope/root',
         version: '0.0.0',
-      })
+      }),
     );
     await appGenerator(tree, options);
     const packageJson = JSON.parse(tree.read('package.json').toString());

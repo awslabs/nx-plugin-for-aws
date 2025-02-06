@@ -21,6 +21,7 @@ import {
   factory,
   ObjectLiteralExpression,
   isPropertyAssignment,
+  ArrayLiteralExpression,
 } from 'typescript';
 import { AppGeneratorSchema } from './schema';
 import { applicationGenerator } from '@nx/react';
@@ -34,7 +35,7 @@ import { configureTsProject } from '../../ts/lib/ts-project-utils';
 import { withVersions } from '../../utils/versions';
 import { getRelativePathToRoot } from '../../utils/paths';
 import { toClassName, toKebabCase } from '../../utils/names';
-import { addStarExport } from '../../utils/ast';
+import { addStarExport, destructuredImport } from '../../utils/ast';
 import { formatFilesInSubtree } from '../../utils/format';
 export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
   const npmScopePrefix = getNpmScopePrefix(tree);
@@ -59,6 +60,9 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
     alwaysGenerateProjectJson: true,
   });
 
+  // Replace with simpler sample source code
+  tree.delete(joinPathFragments(websiteContentPath, 'src'));
+
   const projectConfiguration = readProjectConfiguration(
     tree,
     fullyQualifiedName,
@@ -70,7 +74,7 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
       description: `Load runtime config from your deployed stack for dev purposes. You must set the AWS_REGION and CDK_APP_DIR env variables whilst calling i.e: AWS_REGION=ap-southeast-2 CDK_APP_DIR=./dist/packages/infra/cdk.out pnpm exec nx run ${fullyQualifiedName}:load:runtime-config`,
     },
     options: {
-      command: `cdk-app WebsiteBucket get --key runtime-config.json './${websiteContentPath}/public/runtime-config.json'`,
+      command: `curl https://\`aws cloudformation describe-stacks --query "Stacks[?StackName=='infra-sandbox'][].Outputs[?contains(OutputKey, 'WebsiteDistributionDomainName')].OutputValue" --output text\`/runtime-config.json > './${websiteContentPath}/public/runtime-config.json'`,
     },
   };
   const buildTarget = targets['build'];
@@ -261,32 +265,12 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
   if (viteConfigContents) {
     let viteConfigUpdatedContents = viteConfigContents;
 
-    viteConfigUpdatedContents = tsquery
-      .map(
-        ast(viteConfigContents),
-        'ObjectLiteralExpression',
-        (node: ObjectLiteralExpression) => {
-          return factory.createObjectLiteralExpression(
-            [
-              factory.createPropertyAssignment(
-                'define',
-                factory.createObjectLiteralExpression(
-                  [
-                    factory.createPropertyAssignment(
-                      'global',
-                      factory.createObjectLiteralExpression(),
-                    ),
-                  ],
-                  true,
-                ),
-              ),
-              ...node.properties,
-            ],
-            true,
-          );
-        },
-      )
-      .getFullText();
+    viteConfigUpdatedContents = destructuredImport(
+      tree,
+      viteConfigPath,
+      ['TanStackRouterVite'],
+      '@tanstack/router-plugin/vite',
+    );
 
     viteConfigUpdatedContents = tsquery
       .map(
@@ -320,10 +304,56 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
                   true,
                 ),
               );
+            } else if (
+              isPropertyAssignment(prop) &&
+              prop.name.getText() === 'plugins'
+            ) {
+              const pluginsConfig = prop.initializer as ArrayLiteralExpression;
+              return factory.createPropertyAssignment(
+                'plugins',
+                factory.createArrayLiteralExpression(
+                  [
+                    ...pluginsConfig.elements,
+                    factory.createCallExpression(
+                      factory.createIdentifier('TanStackRouterVite'),
+                      undefined,
+                      [],
+                    ),
+                  ],
+                  true,
+                ),
+              );
             }
             return prop;
           });
           return factory.createObjectLiteralExpression(updatedProperties, true);
+        },
+      )
+      .getFullText();
+
+    viteConfigUpdatedContents = tsquery
+      .map(
+        ast(viteConfigUpdatedContents),
+        'ObjectLiteralExpression',
+        (node: ObjectLiteralExpression) => {
+          return factory.createObjectLiteralExpression(
+            [
+              factory.createPropertyAssignment(
+                'define',
+                factory.createObjectLiteralExpression(
+                  [
+                    factory.createPropertyAssignment(
+                      'global',
+                      factory.createObjectLiteralExpression(),
+                    ),
+                  ],
+                  true,
+                ),
+              ),
+              ...node.properties,
+            ],
+            true,
+          );
         },
       )
       .getFullText();
@@ -361,9 +391,9 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
       '@cloudscape-design/components',
       '@cloudscape-design/board-components',
       '@cloudscape-design/global-styles',
-      'react-router-dom',
+      '@tanstack/react-router',
     ]),
-    withVersions(['cdk-app-cli']),
+    withVersions(['@tanstack/router-plugin']),
   );
 
   await formatFilesInSubtree(tree);

@@ -11,7 +11,7 @@ import {
 } from '@nx/devkit';
 import { RuntimeConfigGeneratorSchema } from './schema';
 import { tsquery, ast } from '@phenomnomnominal/tsquery';
-import { factory, JsxElement, SourceFile } from 'typescript';
+import { factory, JsxSelfClosingElement, SourceFile } from 'typescript';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
 import { formatFilesInSubtree } from '../../utils/format';
@@ -78,27 +78,31 @@ export async function runtimeConfigGenerator(
     .getFullText();
   let locatedTargetNode = false;
   const mainTsxUpdatedContents = tsquery
-    .map(ast(updatedImports), 'JsxElement', (node: JsxElement) => {
-      if (node.openingElement.tagName.getText() !== 'BrowserRouter') {
-        return node;
-      } else {
-        locatedTargetNode = true;
-      }
-      return factory.createJsxElement(
-        factory.createJsxOpeningElement(
-          factory.createIdentifier('RuntimeConfigProvider'),
-          undefined,
-          factory.createJsxAttributes([]),
-        ),
-        [node],
-        factory.createJsxClosingElement(
-          factory.createIdentifier('RuntimeConfigProvider'),
-        ),
-      );
-    })
+    .map(
+      ast(updatedImports),
+      'JsxSelfClosingElement',
+      (node: JsxSelfClosingElement) => {
+        if (node.tagName.getText() !== 'RouterProvider') {
+          return node;
+        } else {
+          locatedTargetNode = true;
+        }
+        return factory.createJsxElement(
+          factory.createJsxOpeningElement(
+            factory.createIdentifier('RuntimeConfigProvider'),
+            undefined,
+            factory.createJsxAttributes([]),
+          ),
+          [node],
+          factory.createJsxClosingElement(
+            factory.createIdentifier('RuntimeConfigProvider'),
+          ),
+        );
+      },
+    )
     .getFullText();
   if (!locatedTargetNode) {
-    throw new Error('Could not locate the BrowserRouter element in main.tsx');
+    throw new Error('Could not locate the RouterProvider element in main.tsx');
   }
   if (locatedTargetNode && mainTsxContents !== mainTsxUpdatedContents) {
     tree.write(mainTsxPath, mainTsxUpdatedContents);

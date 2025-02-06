@@ -21,7 +21,8 @@ exports[`cloudscape-website generator > should configure TypeScript correctly > 
 `;
 
 exports[`cloudscape-website generator > should configure vite correctly > vite.config.ts 1`] = `
-"/// <reference types='vitest' />
+"import { TanStackRouterVite } from '@tanstack/router-plugin/vite';
+/// <reference types='vitest' />
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
@@ -40,7 +41,12 @@ export default defineConfig({
     port: 4300,
     host: 'localhost',
   },
-  plugins: [react(), nxViteTsPaths(), nxCopyAssetsPlugin(['*.md'])],
+  plugins: [
+    react(),
+    nxViteTsPaths(),
+    nxCopyAssetsPlugin(['*.md']),
+    TanStackRouterVite(),
+  ],
   build: {
     outDir: '../dist/test-app',
     emptyOutDir: true,
@@ -70,7 +76,6 @@ exports[`cloudscape-website generator > should generate base files and structure
 import { createContext, useCallback, useEffect, useState } from 'react';
 import { NavItems } from './navitems';
 import Config from '../../config';
-import Routes from '../Routes';
 
 import {
   BreadcrumbGroup,
@@ -78,10 +83,11 @@ import {
   SideNavigation,
   TopNavigation,
 } from '@cloudscape-design/components';
-import AppLayout, {
+import CloudscapeAppLayout, {
   AppLayoutProps,
 } from '@cloudscape-design/components/app-layout';
-import { matchPath, useLocation, useNavigate } from 'react-router-dom';
+import { matchByPath, useLocation, useNavigate } from '@tanstack/react-router';
+import { Outlet } from '@tanstack/react-router';
 
 const getBreadcrumbs = (
   pathName: string,
@@ -104,7 +110,7 @@ const getBreadcrumbs = (
             .replace('//', '/')}\`;
 
     const matched =
-      !availableRoutes || availableRoutes.find((r) => matchPath(r, href));
+      !availableRoutes || availableRoutes.find((r) => matchByPath(r, href, {}));
 
     return {
       href: matched ? \`\${href}\${search}\` : '#',
@@ -113,6 +119,12 @@ const getBreadcrumbs = (
   });
 };
 
+export interface AppLayoutContext {
+  appLayoutProps: AppLayoutProps;
+  setAppLayoutProps: (props: AppLayoutProps) => void;
+  displayHelpPanel: (helpContent: React.ReactNode) => void;
+}
+
 /**
  * Context for updating/retrieving the AppLayout.
  */
@@ -120,19 +132,21 @@ export const AppLayoutContext = createContext({
   appLayoutProps: {},
   // eslint-disable-next-line @typescript-eslint/no-empty-function
   setAppLayoutProps: (_: AppLayoutProps) => {},
+  // eslint-disable-next-line @typescript-eslint/no-empty-function
+  displayHelpPanel: (_: React.ReactNode) => {},
 });
 
 /**
  * Defines the App layout and contains logic for routing.
  */
-const App: React.FC = () => {
+const AppLayout: React.FC = () => {
   const navigate = useNavigate();
-  const [activeHref, setActiveHref] = useState('/');
+  const appLayout = React.useRef<AppLayoutProps.Ref>(null);
   const [activeBreadcrumbs, setActiveBreadcrumbs] = useState<
     BreadcrumbGroupProps.Item[]
   >([{ text: '/', href: '/' }]);
   const [appLayoutProps, setAppLayoutProps] = useState<AppLayoutProps>({});
-  const location = useLocation();
+  const { pathname, search } = useLocation();
 
   const setAppLayoutPropsSafe = useCallback(
     (props: AppLayoutProps) => {
@@ -143,10 +157,13 @@ const App: React.FC = () => {
   );
 
   useEffect(() => {
-    setActiveHref(location.pathname);
-    const breadcrumbs = getBreadcrumbs(location.pathname, location.search, '/');
+    const breadcrumbs = getBreadcrumbs(
+      pathname,
+      Object.entries(search).reduce((p, [k, v]) => p + \`\${k}=\${v}\`, ''),
+      '/',
+    );
     setActiveBreadcrumbs(breadcrumbs);
-  }, [location]);
+  }, [pathname, search]);
 
   const onNavigate = useCallback(
     (e: CustomEvent<{ href: string; external?: boolean }>) => {
@@ -155,7 +172,7 @@ const App: React.FC = () => {
         setAppLayoutPropsSafe({
           contentType: undefined,
         });
-        navigate(e.detail.href);
+        navigate({ to: e.detail.href });
       }
     },
     [navigate, setAppLayoutPropsSafe],
@@ -163,7 +180,14 @@ const App: React.FC = () => {
 
   return (
     <AppLayoutContext.Provider
-      value={{ appLayoutProps, setAppLayoutProps: setAppLayoutPropsSafe }}
+      value={{
+        appLayoutProps,
+        setAppLayoutProps: setAppLayoutPropsSafe,
+        displayHelpPanel: (helpContent: React.ReactNode) => {
+          setAppLayoutPropsSafe({ tools: helpContent, toolsHide: false });
+          appLayout.current?.openTools();
+        },
+      }}
     >
       <TopNavigation
         identity={{
@@ -174,7 +198,8 @@ const App: React.FC = () => {
           },
         }}
       />
-      <AppLayout
+      <CloudscapeAppLayout
+        ref={appLayout}
         breadcrumbs={
           <BreadcrumbGroup onFollow={onNavigate} items={activeBreadcrumbs} />
         }
@@ -182,19 +207,19 @@ const App: React.FC = () => {
         navigation={
           <SideNavigation
             header={{ text: Config.applicationName, href: '/' }}
-            activeHref={activeHref}
+            activeHref={pathname}
             onFollow={onNavigate}
             items={NavItems}
           />
         }
-        content={<Routes />}
+        content={<Outlet />}
         {...appLayoutProps}
       />
     </AppLayoutContext.Provider>
   );
 };
 
-export default App;
+export default AppLayout;
 "
 `;
 
@@ -209,24 +234,56 @@ exports[`cloudscape-website generator > should generate base files and structure
 exports[`cloudscape-website generator > should generate base files and structure > main.tsx 1`] = `
 "import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter } from 'react-router-dom';
 import { I18nProvider } from '@cloudscape-design/components/i18n';
 import messages from '@cloudscape-design/components/i18n/messages/all.en';
-import App from './layouts/App';
+import { RouterProvider, createRouter } from '@tanstack/react-router';
+import { routeTree } from './routeTree.gen';
 
 import '@cloudscape-design/global-styles/index.css';
+
+const router = createRouter({ routeTree });
+
+// Register the router instance for type safety
+declare module '@tanstack/react-router' {
+  interface Register {
+    router: typeof router;
+  }
+}
 
 const root = document.getElementById('root');
 root &&
   createRoot(root).render(
     <React.StrictMode>
       <I18nProvider locale="en" messages={[messages]}>
-        <BrowserRouter>
-          <App />
-        </BrowserRouter>
+        <RouterProvider router={router} />
       </I18nProvider>
     </React.StrictMode>,
   );
+"
+`;
+
+exports[`cloudscape-website generator > should generate base files and structure > welcome-index.tsx 1`] = `
+"import {
+  ContentLayout,
+  Header,
+  SpaceBetween,
+  Container,
+} from '@cloudscape-design/components';
+import { createFileRoute } from '@tanstack/react-router';
+
+export const Route = createFileRoute('/welcome/')({
+  component: RouteComponent,
+});
+
+function RouteComponent() {
+  return (
+    <ContentLayout header={<Header>Welcome</Header>}>
+      <SpaceBetween size="l">
+        <Container>Welcome to your new Cloudscape website!</Container>
+      </SpaceBetween>
+    </ContentLayout>
+  );
+}
 "
 `;
 
@@ -463,21 +520,28 @@ export class TestApp extends StaticWebsite {
 exports[`cloudscape-website generator > should handle custom directory option > custom-dir-main.tsx 1`] = `
 "import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter } from 'react-router-dom';
 import { I18nProvider } from '@cloudscape-design/components/i18n';
 import messages from '@cloudscape-design/components/i18n/messages/all.en';
-import App from './layouts/App';
+import { RouterProvider, createRouter } from '@tanstack/react-router';
+import { routeTree } from './routeTree.gen';
 
 import '@cloudscape-design/global-styles/index.css';
+
+const router = createRouter({ routeTree });
+
+// Register the router instance for type safety
+declare module '@tanstack/react-router' {
+  interface Register {
+    router: typeof router;
+  }
+}
 
 const root = document.getElementById('root');
 root &&
   createRoot(root).render(
     <React.StrictMode>
       <I18nProvider locale="en" messages={[messages]}>
-        <BrowserRouter>
-          <App />
-        </BrowserRouter>
+        <RouterProvider router={router} />
       </I18nProvider>
     </React.StrictMode>,
   );
@@ -489,10 +553,10 @@ exports[`cloudscape-website generator > should handle npm scope prefix correctly
   "@cloudscape-design/board-components": "^3.0.84",
   "@cloudscape-design/components": "^3.0.823",
   "@cloudscape-design/global-styles": "^1.0.34",
+  "@tanstack/react-router": "^1.99.7",
   "aws-cdk-lib": "^2.166.0",
   "constructs": "^10.4.2",
   "react": "18.3.1",
   "react-dom": "18.3.1",
-  "react-router-dom": "^7.1.1",
 }
 `;

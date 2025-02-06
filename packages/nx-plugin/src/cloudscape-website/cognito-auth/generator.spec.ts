@@ -30,12 +30,12 @@ describe('cognito-auth generator', () => {
       'packages/test-project/src/main.tsx',
       `
       import { RuntimeConfigProvider } from './components/RuntimeConfig';
-      import { BrowserRouter } from 'react-router-dom';
+      import { RouterProvider, createRouter } from '@tanstack/react-router';
 
       export function App() {
         return (
           <RuntimeConfigProvider>
-            <BrowserRouter>Hello World</BrowserRouter>
+            <RouterProvider router={router} />
           </RuntimeConfigProvider>
         );
       }
@@ -74,12 +74,12 @@ describe('cognito-auth generator', () => {
       'packages/test-project/src/main.tsx',
       `
       import { RuntimeConfigProvider } from './components/RuntimeConfig';
-      import { BrowserRouter } from 'react-router-dom';
+      import { RouterProvider, createRouter } from '@tanstack/react-router';
 
       export function App() {
         return (
           <RuntimeConfigProvider>
-            <BrowserRouter>Hello World</BrowserRouter>
+            <RouterProvider router={router} />
           </RuntimeConfigProvider>
         );
       }
@@ -125,17 +125,17 @@ describe('cognito-auth generator', () => {
     tree.write(
       'packages/test-project/src/main.tsx',
       `
-        import { RuntimeConfigProvider } from './components/RuntimeConfig';
-        import { BrowserRouter } from 'react-router-dom';
+      import { RuntimeConfigProvider } from './components/RuntimeConfig';
+      import { RouterProvider, createRouter } from '@tanstack/react-router';
 
-        export function App() {
-          return (
-            <RuntimeConfigProvider>
-              <BrowserRouter>Hello World</BrowserRouter>
-            </RuntimeConfigProvider>
-          );
-        }
-      `,
+      export function App() {
+        return (
+          <RuntimeConfigProvider>
+            <RouterProvider router={router} />
+          </RuntimeConfigProvider>
+        );
+      }
+    `,
     );
     // Setup initial shared constructs index
     tree.write(
@@ -156,17 +156,17 @@ describe('cognito-auth generator', () => {
     tree.write(
       'packages/test-project/src/main.tsx',
       `
-        import { RuntimeConfigProvider } from './components/RuntimeConfig';
-        import { BrowserRouter } from 'react-router-dom';
+      import { RuntimeConfigProvider } from './components/RuntimeConfig';
+      import { RouterProvider, createRouter } from '@tanstack/react-router';
 
-        export function App() {
-          return (
-            <RuntimeConfigProvider>
-              <BrowserRouter>Hello World</BrowserRouter>
-            </RuntimeConfigProvider>
-          );
-        }
-      `,
+      export function App() {
+        return (
+          <RuntimeConfigProvider>
+            <RouterProvider router={router} />
+          </RuntimeConfigProvider>
+        );
+      }
+    `,
     );
     await cognitoAuthGenerator(tree, options);
     // Read package.json
@@ -185,17 +185,17 @@ describe('cognito-auth generator', () => {
     tree.write(
       'packages/test-project/src/main.tsx',
       `
-        import { RuntimeConfigProvider } from './components/RuntimeConfig';
-        import { BrowserRouter } from 'react-router-dom';
+      import { RuntimeConfigProvider } from './components/RuntimeConfig';
+      import { RouterProvider, createRouter } from '@tanstack/react-router';
 
-        export function App() {
-          return (
-            <RuntimeConfigProvider>
-              <BrowserRouter>Hello World</BrowserRouter>
-            </RuntimeConfigProvider>
-          );
-        }
-      `,
+      export function App() {
+        return (
+          <RuntimeConfigProvider>
+            <RouterProvider router={router} />
+          </RuntimeConfigProvider>
+        );
+      }
+    `,
     );
     // First run to create files
     await cognitoAuthGenerator(tree, options);

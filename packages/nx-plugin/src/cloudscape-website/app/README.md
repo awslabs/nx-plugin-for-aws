@@ -233,7 +233,7 @@ import RuntimeConfigProvider from './components/RuntimeConfig';
 
 const App = () => (
   <RuntimeConfigProvider>
-    <BrowserRouter>{/* Your app components */}</BrowserRouter>
+    <RouterProvider router={router} />
   </RuntimeConfigProvider>
 );
 ```

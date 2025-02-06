@@ -2,7 +2,6 @@ import * as React from 'react';
 import { createContext, useCallback, useEffect, useState } from 'react';
 import { NavItems } from './navitems';
 import Config from '../../config';
-import Routes from '../Routes';
 
 import {
   BreadcrumbGroup,
@@ -10,16 +9,17 @@ import {
   SideNavigation,
   TopNavigation,
 } from '@cloudscape-design/components';
-import AppLayout, {
+import CloudscapeAppLayout, {
   AppLayoutProps,
 } from '@cloudscape-design/components/app-layout';
-import { matchPath, useLocation, useNavigate } from 'react-router-dom';
+import { matchByPath, useLocation, useNavigate } from '@tanstack/react-router';
+import { Outlet } from '@tanstack/react-router';
 
 const getBreadcrumbs = (
   pathName: string,
   search: string,
   defaultBreadcrumb: string,
-  availableRoutes?: string[]
+  availableRoutes?: string[],
 ) => {
   const segments = [
     defaultBreadcrumb,
@@ -36,7 +36,7 @@ const getBreadcrumbs = (
             .replace('//', '/')}`;
 
     const matched =
-      !availableRoutes || availableRoutes.find((r) => matchPath(r, href));
+      !availableRoutes || availableRoutes.find((r) => matchByPath(r, href, {}));
 
     return {
       href: matched ? `${href}${search}` : '#',
@@ -45,6 +45,12 @@ const getBreadcrumbs = (
   });
 };
 
+export interface AppLayoutContext {
+  appLayoutProps: AppLayoutProps;
+  setAppLayoutProps: (props: AppLayoutProps) => void;
+  displayHelpPanel: (helpContent: React.ReactNode) => void;
+}
+
 /**
  * Context for updating/retrieving the AppLayout.
  */
@@ -52,33 +58,38 @@ export const AppLayoutContext = createContext({
   appLayoutProps: {},
   // eslint-disable-next-line @typescript-eslint/no-empty-function
   setAppLayoutProps: (_: AppLayoutProps) => {},
+  // eslint-disable-next-line @typescript-eslint/no-empty-function
+  displayHelpPanel: (_: React.ReactNode) => {},
 });
 
 /**
  * Defines the App layout and contains logic for routing.
  */
-const App: React.FC = () => {
+const AppLayout: React.FC = () => {
   const navigate = useNavigate();
-  const [activeHref, setActiveHref] = useState('/');
+  const appLayout = React.useRef<AppLayoutProps.Ref>(null);
   const [activeBreadcrumbs, setActiveBreadcrumbs] = useState<
     BreadcrumbGroupProps.Item[]
   >([{ text: '/', href: '/' }]);
   const [appLayoutProps, setAppLayoutProps] = useState<AppLayoutProps>({});
-  const location = useLocation();
+  const { pathname, search } = useLocation();
 
   const setAppLayoutPropsSafe = useCallback(
     (props: AppLayoutProps) => {
       JSON.stringify(appLayoutProps) !== JSON.stringify(props) &&
         setAppLayoutProps(props);
     },
-    [appLayoutProps]
+    [appLayoutProps],
   );
 
   useEffect(() => {
-    setActiveHref(location.pathname);
-    const breadcrumbs = getBreadcrumbs(location.pathname, location.search, '/');
+    const breadcrumbs = getBreadcrumbs(
+      pathname,
+      Object.entries(search).reduce((p, [k, v]) => p + `${k}=${v}`, ''),
+      '/',
+    );
     setActiveBreadcrumbs(breadcrumbs);
-  }, [location]);
+  }, [pathname, search]);
 
   const onNavigate = useCallback(
     (e: CustomEvent<{ href: string; external?: boolean }>) => {
@@ -87,15 +98,22 @@ const App: React.FC = () => {
         setAppLayoutPropsSafe({
           contentType: undefined,
         });
-        navigate(e.detail.href);
+        navigate({ to: e.detail.href });
       }
     },
-    [navigate, setAppLayoutPropsSafe]
+    [navigate, setAppLayoutPropsSafe],
   );
 
   return (
     <AppLayoutContext.Provider
-      value={{ appLayoutProps, setAppLayoutProps: setAppLayoutPropsSafe }}
+      value={{
+        appLayoutProps,
+        setAppLayoutProps: setAppLayoutPropsSafe,
+        displayHelpPanel: (helpContent: React.ReactNode) => {
+          setAppLayoutPropsSafe({ tools: helpContent, toolsHide: false });
+          appLayout.current?.openTools();
+        },
+      }}
     >
       <TopNavigation
         identity={{
@@ -106,7 +124,8 @@ const App: React.FC = () => {
           },
         }}
       />
-      <AppLayout
+      <CloudscapeAppLayout
+        ref={appLayout}
         breadcrumbs={
           <BreadcrumbGroup onFollow={onNavigate} items={activeBreadcrumbs} />
         }
@@ -114,16 +133,16 @@ const App: React.FC = () => {
         navigation={
           <SideNavigation
             header={{ text: Config.applicationName, href: '/' }}
-            activeHref={activeHref}
+            activeHref={pathname}
             onFollow={onNavigate}
             items={NavItems}
           />
         }
-        content={<Routes />}
+        content={<Outlet />}
         {...appLayoutProps}
       />
     </AppLayoutContext.Provider>
   );
 };
 
-export default App;
+export default AppLayout;

@@ -18,48 +18,44 @@ describe('runtime-config generator', () => {
       JSON.stringify({
         name: 'test-app',
         sourceRoot: 'packages/test-app/src',
-      })
+      }),
     );
   });
   it('should generate runtime config files', async () => {
     // Set up a basic React app structure
     tree.write(
       'packages/test-app/src/main.tsx',
-      `import { BrowserRouter } from 'react-router-dom';
+      `import { RouterProvider } from '@tanstack/react-router';
         
         export function App() {
           return (
-            <BrowserRouter>
-              <div>Test App</div>
-            </BrowserRouter>
+            <RouterProvider router={router} />
           );
-        }`
+        }`,
     );
     await runtimeConfigGenerator(tree, options);
     // Check if RuntimeConfig component was generated
     expect(
-      tree.exists('packages/test-app/src/components/RuntimeConfig/index.tsx')
+      tree.exists('packages/test-app/src/components/RuntimeConfig/index.tsx'),
     ).toBeTruthy();
     // Snapshot the generated RuntimeConfig component
     expect(
       tree
         .read('packages/test-app/src/components/RuntimeConfig/index.tsx')
-        ?.toString()
+        ?.toString(),
     ).toMatchSnapshot('runtime-config-component.tsx');
   });
   it('should modify main.tsx correctly', async () => {
     // Set up a basic React app structure
     tree.write(
       'packages/test-app/src/main.tsx',
-      `import { BrowserRouter } from 'react-router-dom';
+      `import { RouterProvider } from '@tanstack/react-router';
         
         export function App() {
           return (
-            <BrowserRouter>
-              <div>Test App</div>
-            </BrowserRouter>
+            <RouterProvider router={router} />
           );
-        }`
+        }`,
     );
     await runtimeConfigGenerator(tree, options);
     const mainTsxContent = tree
@@ -71,15 +67,13 @@ describe('runtime-config generator', () => {
     // Set up a basic React app structure
     tree.write(
       'packages/test-app/src/main.tsx',
-      `import { BrowserRouter } from 'react-router-dom';
+      `import { RouterProvider } from '@tanstack/react-router';
         
         export function App() {
           return (
-            <BrowserRouter>
-              <div>Test App</div>
-            </BrowserRouter>
+            <RouterProvider router={router} />
           );
-        }`
+        }`,
     );
     // First run to generate files
     await runtimeConfigGenerator(tree, options);
@@ -90,7 +84,7 @@ describe('runtime-config generator', () => {
     // Modify the file to simulate manual changes
     tree.write(
       'packages/test-app/src/components/RuntimeConfig/index.tsx',
-      'modified content'
+      'modified content',
     );
     // Run generator again
     await runtimeConfigGenerator(tree, options);
@@ -98,61 +92,59 @@ describe('runtime-config generator', () => {
     expect(
       tree
         .read('packages/test-app/src/components/RuntimeConfig/index.tsx')
-        ?.toString()
+        ?.toString(),
     ).toBe('modified content');
     expect(
       tree
         .read('packages/test-app/src/components/RuntimeConfig/index.tsx')
-        ?.toString()
+        ?.toString(),
     ).not.toBe(firstRunContent);
   });
   it('should throw error if main.tsx does not exist', async () => {
     await expect(runtimeConfigGenerator(tree, options)).rejects.toThrow(
-      'Can only run this generator on a project which contains packages/test-app/src/main.tsx'
+      'Can only run this generator on a project which contains packages/test-app/src/main.tsx',
     );
   });
-  it('should throw error if BrowserRouter is not found', async () => {
-    // Set up main.tsx without BrowserRouter
+  it('should throw error if RouterProvider is not found', async () => {
+    // Set up main.tsx without RouterProvider
     tree.write(
       'packages/test-app/src/main.tsx',
       `export function App() {
         return <div>Test App</div>;
-      }`
+      }`,
     );
     await expect(runtimeConfigGenerator(tree, options)).rejects.toThrow(
-      'Could not locate the BrowserRouter element in main.tsx'
+      'Could not locate the RouterProvider element in main.tsx',
     );
   });
   it('should generate shared constructs', async () => {
     // Set up a basic React app structure
     tree.write(
       'packages/test-app/src/main.tsx',
-      `import { BrowserRouter } from 'react-router-dom';
+      `import { RouterProvider } from '@tanstack/react-router';
         
         export function App() {
           return (
-            <BrowserRouter>
-              <div>Test App</div>
-            </BrowserRouter>
+            <RouterProvider router={router} />
           );
-        }`
+        }`,
     );
     await runtimeConfigGenerator(tree, options);
     // Check if shared constructs were generated
     expect(
-      tree.exists('packages/common/constructs/src/core/index.ts')
+      tree.exists('packages/common/constructs/src/core/index.ts'),
     ).toBeTruthy();
     expect(
-      tree.exists('packages/common/constructs/src/core/runtime-config.ts')
+      tree.exists('packages/common/constructs/src/core/runtime-config.ts'),
     ).toBeTruthy();
     // Snapshot the shared constructs files
     expect(
-      tree.read('packages/common/constructs/src/core/index.ts')?.toString()
+      tree.read('packages/common/constructs/src/core/index.ts')?.toString(),
     ).toMatchSnapshot('common/constructs-index.ts');
     expect(
       tree
         .read('packages/common/constructs/src/core/runtime-config.ts')
-        ?.toString()
+        ?.toString(),
     ).toMatchSnapshot('runtime-config.ts');
   });
 });

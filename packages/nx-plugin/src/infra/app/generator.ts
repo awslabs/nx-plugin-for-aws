@@ -23,7 +23,6 @@ import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
   sharedConstructsGenerator,
-  TYPE_DEFINITIONS_DIR,
 } from '../../utils/shared-constructs';
 import { addStarExport } from '../../utils/ast';
 import path from 'path';
@@ -142,7 +141,7 @@ export async function infraGenerator(
       {
         path: `${path.relative(
           libraryRoot,
-          `${tree.root}/${PACKAGES_DIR}`
+          `${tree.root}/${PACKAGES_DIR}`,
         )}/${SHARED_CONSTRUCTS_DIR}/tsconfig.json`,
       },
     ],
