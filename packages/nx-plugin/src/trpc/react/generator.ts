@@ -388,7 +388,7 @@ export async function reactGenerator(
         ? ['oidc-client-ts', 'react-oidc-context']
         : []) as any),
     ]),
-    {},
+    withVersions(['@smithy/types']),
   );
   await formatFilesInSubtree(tree);
   return () => {

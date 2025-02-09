@@ -20,6 +20,7 @@ export const VERSIONS = {
   '@trpc/client': '11.0.0-rc.700',
   '@trpc/server': '11.0.0-rc.700',
   '@types/aws-lambda': '^8.10.145',
+  '@smithy/types': '^4.1.0',
   aws4fetch: '^1.0.20',
   'aws-cdk': '^2.166.0',
   'aws-cdk-lib': '^2.166.0',

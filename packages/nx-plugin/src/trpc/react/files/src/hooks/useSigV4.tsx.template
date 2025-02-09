@@ -1,13 +1,30 @@
 import { AwsClient } from 'aws4fetch';
 import { CognitoIdentityClient } from '@aws-sdk/client-cognito-identity';
 import { fromCognitoIdentityPool } from '@aws-sdk/credential-provider-cognito-identity';
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { useAuth } from 'react-oidc-context';
 import { useRuntimeConfig } from './useRuntimeConfig';
+import { AwsCredentialIdentity, AwsCredentialIdentityProvider } from '@smithy/types';
+
+// Credential expiration grace time before considering credentials as expired
+const CREDENTIAL_EXPIRY_OFFSET_MILLIS = 30 * 1000;
 
 export const useSigV4 = () => {
   const { cognitoProps } = useRuntimeConfig();
   const { user } = useAuth();
+
+  const [cachedCredentials, setCachedCredentials] = useState<{ [key: string]: AwsCredentialIdentity }>({});
+
+  const withCachedCredentials = useCallback(async (provider: AwsCredentialIdentityProvider, ...cacheKeys: string[]): Promise<AwsCredentialIdentity> => {
+    const key = `sigv4/${cacheKeys.join('/')}`;
+    const cachedCreds = cachedCredentials[key];
+    if (cachedCreds && cachedCreds.expiration && cachedCreds.expiration.getTime() > Date.now() + CREDENTIAL_EXPIRY_OFFSET_MILLIS) {
+      return cachedCreds;
+    }
+    const credentials = await provider();
+    setCachedCredentials((prev) => ({ ...prev, [key]: credentials }));
+    return credentials;
+  }, [cachedCredentials, setCachedCredentials]);
 
   return useCallback(
     async (input: RequestInfo | URL, init?: RequestInit | undefined) => {
@@ -29,7 +46,7 @@ export const useSigV4 = () => {
       const cognitoidentity = new CognitoIdentityClient({
         credentials: credentialsFromCognitoIdentityPool,
       });
-      const credential = await cognitoidentity.config.credentials();
+      const credential = await withCachedCredentials(cognitoidentity.config.credentials, cognitoProps.identityPoolId, user.profile.sub);
       const awsClient = new AwsClient(credential);
       return awsClient.fetch(input, init);
     },
