@@ -1,18 +1,257 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`trpc backend generator > should generate backend and schema projects > backend-index.ts 1`] = `
-"export * from './lambdas/index.js';
+exports[`trpc backend generator > should generate backend and schema projects 1`] = `
+"export type { AppRouter } from './router.js';
+export type { Context } from './init.js';
 "
 `;
 
-exports[`trpc backend generator > should generate backend and schema projects > schema-index.ts 1`] = `
+exports[`trpc backend generator > should generate backend and schema projects 2`] = `
+"import { initTRPC } from '@trpc/server';
+import {
+  createErrorPlugin,
+  createLoggerPlugin,
+  createMetricsPlugin,
+  createTracerPlugin,
+  IMiddlewareContext,
+} from './middleware/index.js';
+
+export type Context = IMiddlewareContext;
+
+export const t = initTRPC.context<Context>().create();
+
+export const publicProcedure = t.procedure
+  .unstable_concat(createLoggerPlugin())
+  .unstable_concat(createTracerPlugin())
+  .unstable_concat(createMetricsPlugin())
+  .unstable_concat(createErrorPlugin());
+"
+`;
+
+exports[`trpc backend generator > should generate backend and schema projects 3`] = `
+"import { initTRPC, TRPCError } from '@trpc/server';
+
+export const createErrorPlugin = () => {
+  const t = initTRPC.context().create();
+  return t.procedure.use(async (opts) => {
+    const response = await opts.next({
+      ctx: {
+        ...opts.ctx,
+      },
+    });
+
+    if (!response.ok) {
+      if (response.error instanceof TRPCError) {
+        throw response.error;
+      }
+
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'An unexpected error occurred, please try again later.',
+        cause: response.error,
+      });
+    }
+
+    return response;
+  });
+};
+"
+`;
+
+exports[`trpc backend generator > should generate backend and schema projects 4`] = `
+"import { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
+import type { APIGatewayProxyEventV2WithIAMAuthorizer } from 'aws-lambda';
+import { ILoggerContext } from './logger.js';
+import { IMetricsContext } from './metrics.js';
+import { ITracerContext } from './tracer.js';
+
+export * from './logger.js';
+export * from './metrics.js';
+export * from './tracer.js';
+export * from './error.js';
+
+export type IMiddlewareContext =
+  CreateAWSLambdaContextOptions<APIGatewayProxyEventV2WithIAMAuthorizer> &
+    ILoggerContext &
+    IMetricsContext &
+    ITracerContext;
+"
+`;
+
+exports[`trpc backend generator > should generate backend and schema projects 5`] = `
+"import { initTRPC } from '@trpc/server';
+import { Logger } from '@aws-lambda-powertools/logger';
+
+export interface ILoggerContext {
+  logger?: Logger;
+}
+
+export const createLoggerPlugin = () => {
+  const t = initTRPC.context<ILoggerContext>().create();
+  return t.procedure.use(async (opts) => {
+    const logger = new Logger();
+
+    const response = await opts.next({
+      ctx: {
+        ...opts.ctx,
+        logger,
+      },
+    });
+
+    if (!response.ok) {
+      logger.error('Unexpected error occured', response.error.cause ?? '');
+    }
+
+    return response;
+  });
+};
+"
+`;
+
+exports[`trpc backend generator > should generate backend and schema projects 6`] = `
+"import { initTRPC } from '@trpc/server';
+import { Metrics, MetricUnit } from '@aws-lambda-powertools/metrics';
+
+export interface IMetricsContext {
+  metrics?: Metrics;
+}
+
+export const createMetricsPlugin = () => {
+  const t = initTRPC.context<IMetricsContext>().create();
+
+  return t.procedure.use(async (opts) => {
+    const metrics = new Metrics();
+    metrics.captureColdStartMetric();
+
+    metrics.addMetric('requestCount', MetricUnit.Count, 1);
+
+    try {
+      const response = await opts.next({
+        ctx: {
+          ...opts.ctx,
+          metrics,
+        },
+      });
+
+      if (!response.ok) {
+        metrics.addMetric('errorCount', MetricUnit.Count, 1);
+      } else {
+        metrics.addMetric('successCount', MetricUnit.Count, 1);
+      }
+
+      return response;
+    } finally {
+      metrics.publishStoredMetrics();
+    }
+  });
+};
+"
+`;
+
+exports[`trpc backend generator > should generate backend and schema projects 7`] = `
+"import { initTRPC } from '@trpc/server';
+import { Tracer } from '@aws-lambda-powertools/tracer';
+import { Subsegment } from 'aws-xray-sdk-core';
+
+export interface ITracerContext {
+  tracer?: Tracer;
+}
+
+export const createTracerPlugin = () => {
+  const t = initTRPC.context<ITracerContext>().create();
+
+  return t.procedure.use(async (opts) => {
+    const tracer = new Tracer();
+    const segment = tracer.getSegment();
+    let handlerSegment: Subsegment | undefined;
+
+    if (segment) {
+      handlerSegment = segment.addNewSubsegment(\`## \${opts.path}\`);
+      tracer.setSegment(handlerSegment);
+    }
+
+    tracer.annotateColdStart();
+    tracer.addServiceNameAnnotation();
+
+    try {
+      const response = await opts.next({
+        ctx: {
+          ...opts.ctx,
+          tracer,
+        },
+      });
+
+      if (!response.ok && response.error.cause instanceof Error) {
+        tracer.addErrorAsMetadata(response.error.cause);
+      }
+      return response;
+    } finally {
+      if (segment && handlerSegment) {
+        handlerSegment.close();
+        tracer.setSegment(segment);
+      }
+    }
+  });
+};
+"
+`;
+
+exports[`trpc backend generator > should generate backend and schema projects 8`] = `
+"import { publicProcedure } from '../init.js';
+import { EchoInputSchema, EchoOutputSchema } from ':proj/test-api-schema';
+
+export const echo = publicProcedure
+  .input(EchoInputSchema)
+  .output(EchoOutputSchema)
+  .query((opts) => ({ result: opts.input.message }));
+"
+`;
+
+exports[`trpc backend generator > should generate backend and schema projects 9`] = `
+"import {
+  awsLambdaRequestHandler,
+  CreateAWSLambdaContextOptions,
+} from '@trpc/server/adapters/aws-lambda';
+import { echo } from './procedures/echo.js';
+import { t } from './init.js';
+import { APIGatewayProxyEventV2WithIAMAuthorizer } from 'aws-lambda';
+
+export const router = t.router;
+
+const appRouter = router({
+  echo,
+});
+
+export const handler = awsLambdaRequestHandler({
+  router: appRouter,
+  createContext: (
+    ctx: CreateAWSLambdaContextOptions<APIGatewayProxyEventV2WithIAMAuthorizer>,
+  ) => ctx,
+});
+
+export type AppRouter = typeof appRouter;
+"
+`;
+
+exports[`trpc backend generator > should generate backend and schema projects 10`] = `
+"export * from './procedures/echo.js';
+"
+`;
+
+exports[`trpc backend generator > should generate backend and schema projects 11`] = `
 "import { z } from 'zod';
 
-export const EchoSchema = z.object({
+export const EchoInputSchema = z.object({
+  message: z.string(),
+});
+
+export type IEchoInput = z.TypeOf<typeof EchoInputSchema>;
+
+export const EchoOutputSchema = z.object({
   result: z.string(),
 });
 
-export type IEcho = z.TypeOf<typeof EchoSchema>;
+export type IEchoOutput = z.TypeOf<typeof EchoOutputSchema>;
 "
 `;
 
@@ -33,7 +272,7 @@ export class TestApi extends TrpcApi {
       defaultAuthorizer: new HttpIamAuthorizer(),
       handlerFilePath: url.fileURLToPath(
         new URL(
-          '../../../../../../apps/test-api/backend/src/lambdas/router.ts',
+          '../../../../../../apps/test-api/backend/src/router.ts',
           import.meta.url,
         ),
       ),
