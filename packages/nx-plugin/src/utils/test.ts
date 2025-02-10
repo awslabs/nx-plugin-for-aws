@@ -18,12 +18,13 @@ export const createTreeUsingTsSolutionSetup = (): Tree => {
   return tree;
 };
 
+/**
+ * Snapshot all files within a directory in the given tree
+ */
 export const snapshotTreeDir = (tree: Tree, dir: string) => {
   if (tree.isFile(dir)) {
-    console.log('is file', dir);
-    expect(tree.read(dir, 'utf-8')).toMatchSnapshot();
+    expect(tree.read(dir, 'utf-8')).toMatchSnapshot(dir);
   } else {
-    console.log('is dir', dir);
     tree
       .children(dir)
       .forEach((subDir) =>

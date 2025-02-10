@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
+import { getProjects, readProjectConfiguration, Tree } from '@nx/devkit';
 import { trpcBackendGenerator } from './generator';
 import {
   createTreeUsingTsSolutionSetup,
@@ -113,5 +113,23 @@ describe('trpc backend generator', () => {
     expect(
       tree.read('packages/common/constructs/src/core/index.ts', 'utf-8'),
     ).toContain('./trpc-api.js');
+  });
+
+  it('should add a task for starting a local server', async () => {
+    await trpcBackendGenerator(tree, {
+      apiName: 'TestApi',
+      directory: 'apps',
+      unitTestRunner: 'vitest',
+      bundler: 'vite',
+    });
+    const projectConfig = readProjectConfiguration(
+      tree,
+      '@proj/test-api-backend',
+    );
+    expect(projectConfig.targets).toHaveProperty('serve');
+    expect(projectConfig.targets!.serve!.executor).toBe('nx:run-commands');
+    expect(projectConfig.targets!.serve!.options!.commands).toEqual([
+      'tsx src/local-server.ts',
+    ]);
   });
 });

@@ -160,6 +160,7 @@ export async function trpcBackendGenerator(
       );
     }
   }
+
   updateJson(
     tree,
     joinPathFragments(backendRoot, 'project.json'),
@@ -167,9 +168,20 @@ export async function trpcBackendGenerator(
       config.metadata = {
         apiName: options.apiName,
       } as unknown;
+      config.targets = {
+        ...config.targets,
+        serve: {
+          executor: 'nx:run-commands',
+          options: {
+            commands: ['tsx src/local-server.ts'],
+            cwd: backendRoot,
+          },
+        },
+      };
       return config;
     },
   );
+
   generateFiles(
     tree,
     joinPathFragments(__dirname, 'files', 'backend'),
@@ -200,7 +212,7 @@ export async function trpcBackendGenerator(
       '@aws-lambda-powertools/tracer',
       '@trpc/server',
     ]),
-    withVersions(['@types/aws-lambda']),
+    withVersions(['@types/aws-lambda', 'tsx']),
   );
   tree.delete(joinPathFragments(backendRoot, 'package.json'));
   tree.delete(joinPathFragments(schemaRoot, 'package.json'));
