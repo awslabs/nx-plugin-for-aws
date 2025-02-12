@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import kebabCase from 'lodash.kebabcase';
+import snakeCase from 'lodash.snakecase';
+
 export const toClassName = (str?: string): string => {
   if (!str) {
     return str;
@@ -17,5 +19,9 @@ export const toClassName = (str?: string): string => {
     })
     .join('');
 };
+
 export const toKebabCase = (str?: string): string =>
   str?.split('/').map(kebabCase).join('/');
+
+export const toSnakeCase = (str?: string): string =>
+    str?.split('/').map(snakeCase).join('/');

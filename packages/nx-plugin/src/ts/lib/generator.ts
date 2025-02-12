@@ -92,7 +92,7 @@ export const tsLibGenerator = async (
     executor: '@nx/js:tsc',
     outputs: ['{options.outputPath}'],
     options: {
-      outputPath: joinPathFragments('dist', dir),
+      outputPath: joinPathFragments('dist', dir, 'tsc'),
       main: joinPathFragments(dir, 'src/index.ts'),
       tsConfig: joinPathFragments(dir, 'tsconfig.json'),
       assets: [joinPathFragments(dir, '*.md')],

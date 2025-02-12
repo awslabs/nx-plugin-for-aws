@@ -8,6 +8,7 @@ import { toScopeAlias } from '../../utils/npm-scope';
 import { ConfigureProjectOptions } from './types';
 import { configureVitest } from './vitest';
 import { configureEslint } from './eslint';
+
 /**
  * Updates typescript projects
  */
@@ -30,7 +31,7 @@ export const configureTsProject = (
     join(tree.root, options.dir),
     tree.root
   );
-  const distDir = join(outDirToRootRelativePath, 'dist');
+  const distDir = join(outDirToRootRelativePath, 'dist', options.dir, 'tsc');
   // Remove baseUrl and rootDir from the tsconfig.lib.json
   if (tree.exists(join(options.dir, 'tsconfig.lib.json'))) {
     updateJson(tree, join(options.dir, 'tsconfig.lib.json'), (tsConfig) => ({
@@ -38,7 +39,7 @@ export const configureTsProject = (
       compilerOptions: {
         ...tsConfig.compilerOptions,
         baseUrl: undefined,
-        rootDir: undefined,
+        rootDir: '.',
         outDir: distDir,
         tsBuildInfoFile: join(distDir, options.dir, 'tsconfig.lib.tsbuildinfo'),
       },

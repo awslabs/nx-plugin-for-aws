@@ -82,7 +82,7 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
     ...buildTarget,
     options: {
       ...buildTarget.options,
-      outputPath: joinPathFragments('dist', websiteContentPath),
+      outputPath: joinPathFragments('dist', websiteContentPath, 'bundle'),
     },
   };
   targets['build'] = {

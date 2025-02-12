@@ -9,11 +9,11 @@ export function getNpmScope(tree: Tree): string | undefined {
         name?: string;
       }>(tree, 'package.json')
     : { name: null };
-  return name?.startsWith('@') ? name.split('/')[0].substring(1) : undefined;
+  return name?.startsWith('@') ? name.split('/')[0].substring(1) : 'monorepo';
 }
 export function getNpmScopePrefix(tree: Tree): string | undefined {
   const npmScope = getNpmScope(tree);
-  return npmScope ? `@${npmScope}/` : undefined;
+  return `@${npmScope}/`;
 }
 /**
  * Returns a safe import alias for local packages to avoid the potential for sniping attacks

@@ -42,7 +42,6 @@ export default defineConfig({
       hooks: 'list',
     },
     testTimeout: 60000,
-    hookTimeout: 60000,
-    retry: 3,
+    hookTimeout: 60000
   },
 });

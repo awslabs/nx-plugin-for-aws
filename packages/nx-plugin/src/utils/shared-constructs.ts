@@ -98,7 +98,7 @@ export async function sharedConstructsGenerator(tree: Tree) {
     addDependenciesToPackageJson(
       tree,
       withVersions(['constructs', 'aws-cdk-lib']),
-      {},
+      withVersions(['@types/node']),
     );
     formatFilesInSubtree(tree);
   }

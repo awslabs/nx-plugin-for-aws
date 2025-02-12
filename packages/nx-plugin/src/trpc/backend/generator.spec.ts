@@ -85,30 +85,30 @@ describe('trpc backend generator', () => {
     });
     // Verify shared constructs setup
     expect(
-      tree.exists('packages/common/constructs/src/app/trpc-apis/index.ts'),
+      tree.exists('packages/common/constructs/src/app/http-apis/index.ts'),
     ).toBeTruthy();
     expect(
-      tree.exists('packages/common/constructs/src/app/trpc-apis/test-api.ts'),
+      tree.exists('packages/common/constructs/src/app/http-apis/test-api.ts'),
     ).toBeTruthy();
     // Create snapshot of shared constructs file
     expect(
       tree.read(
-        'packages/common/constructs/src/app/trpc-apis/index.ts',
+        'packages/common/constructs/src/app/http-apis/index.ts',
         'utf-8',
       ),
     ).toMatchSnapshot('index.ts');
     expect(
       tree.read(
-        'packages/common/constructs/src/app/trpc-apis/test-api.ts',
+        'packages/common/constructs/src/app/http-apis/test-api.ts',
         'utf-8',
       ),
     ).toMatchSnapshot('test-api.ts');
     expect(
-      tree.read('packages/common/constructs/src/core/trpc-api.ts', 'utf-8'),
-    ).toMatchSnapshot('trpc-api.ts');
+      tree.read('packages/common/constructs/src/core/http-api.ts', 'utf-8'),
+    ).toMatchSnapshot('http-api.ts');
     expect(
       tree.read('packages/common/constructs/src/core/index.ts', 'utf-8'),
-    ).toContain('./trpc-api.js');
+    ).toContain('./http-api.js');
   });
 
   it('should add a task for starting a local server', async () => {

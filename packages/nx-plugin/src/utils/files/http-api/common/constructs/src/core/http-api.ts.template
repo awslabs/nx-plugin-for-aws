@@ -1,40 +1,41 @@
 import { Construct } from 'constructs';
-import { Runtime, RuntimeFamily } from 'aws-cdk-lib/aws-lambda';
 import { CfnOutput, Duration } from 'aws-cdk-lib';
 import {
   CorsHttpMethod,
-  HttpApi,
+  HttpApi as _HttpApi,
   HttpMethod,
   IHttpRouteAuthorizer,
 } from 'aws-cdk-lib/aws-apigatewayv2';
 import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
-import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
+import { Code, Function, Runtime } from 'aws-cdk-lib/aws-lambda';
 import { Effect, IRole, PolicyStatement } from 'aws-cdk-lib/aws-iam';
 import { RuntimeConfig } from './runtime-config.js';
 
-export interface TrpcApiProps {
+export interface HttpApiProps {
+  readonly handler: string;
   readonly handlerFilePath: string;
+  readonly runtime: Runtime;
   readonly defaultAuthorizer: IHttpRouteAuthorizer;
   readonly allowedOrigins?: string[];
 }
 
-export class TrpcApi extends Construct {
-  public readonly api: HttpApi;
+export class HttpApi extends Construct {
+  public readonly api: _HttpApi;
 
-  constructor(scope: Construct, id: string, props: TrpcApiProps) {
+  constructor(scope: Construct, id: string, props: HttpApiProps) {
     super(scope, id);
 
-    const routerFunction = new NodejsFunction(this, `${id}Handler`, {
+    const routerFunction = new Function(this, `${id}Handler`, {
       timeout: Duration.seconds(30),
-      runtime: new Runtime('nodejs20.x', RuntimeFamily.NODEJS),
-      handler: 'handler',
-      entry: props.handlerFilePath,
+      runtime: props.runtime,
+      handler: props.handler,
+      code: Code.fromAsset(props.handlerFilePath),
       environment: {
         AWS_CONNECTION_REUSE_ENABLED: '1',
       },
     });
 
-    this.api = new HttpApi(this, id, {
+    this.api = new _HttpApi(this, id, {
       corsPreflight: {
         allowOrigins: props.allowedOrigins ?? ['*'],
         allowMethods: [CorsHttpMethod.ANY],
@@ -61,14 +62,14 @@ export class TrpcApi extends Construct {
       ],
       integration: new HttpLambdaIntegration(
         'RouterIntegration',
-        routerFunction
+        routerFunction,
       ),
     });
 
     new CfnOutput(this, `${id}Url`, { value: this.api.url! });
 
-    RuntimeConfig.ensure(this).config.trpcApis = {
-      ...RuntimeConfig.ensure(this).config.trpcApis!,
+    RuntimeConfig.ensure(this).config.httpApis = {
+      ...RuntimeConfig.ensure(this).config.httpApis!,
       [id]: this.api.url!,
     };
   }
@@ -79,7 +80,7 @@ export class TrpcApi extends Construct {
         effect: Effect.ALLOW,
         actions: ['execute-api:Invoke'],
         resources: [this.api.arnForExecuteApi('*', '/*', '*')],
-      })
+      }),
     );
   }
 }

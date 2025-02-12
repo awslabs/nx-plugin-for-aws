@@ -23,10 +23,10 @@ import {
 import tsLibGenerator from '../../ts/lib/generator';
 import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
 import { withVersions } from '../../utils/versions';
-import { getRelativePathToRoot } from '../../utils/paths';
 import { toClassName } from '../../utils/names';
 import { addStarExport } from '../../utils/ast';
 import { formatFilesInSubtree } from '../../utils/format';
+import { addHttpApi } from '../../utils/http-api';
 export async function trpcBackendGenerator(
   tree: Tree,
   options: TrpcBackendGeneratorSchema,
@@ -39,10 +39,7 @@ export async function trpcBackendGenerator(
     options.directory ?? '.',
     apiNameKebabCase,
   );
-  const relativePathToProjectRoot = `${joinPathFragments(
-    getRelativePathToRoot(tree, `${getNpmScopePrefix(tree)}common-constructs`),
-    projectRoot,
-  )}`;
+
   const schemaRoot = joinPathFragments(projectRoot, 'schema');
   const backendRoot = joinPathFragments(projectRoot, 'backend');
   const backendName = `${apiNameKebabCase}-backend`;
@@ -56,7 +53,7 @@ export async function trpcBackendGenerator(
     schemaProjectAlias: toScopeAlias(schemaProjectName),
     apiNameKebabCase,
     apiNameClassName,
-    relativePathToProjectRoot,
+    backendRoot,
     pkgMgrCmd: getPackageManagerCommand().exec,
     ...options,
   };
@@ -70,6 +67,7 @@ export async function trpcBackendGenerator(
     directory: projectRoot,
     subDirectory: 'schema',
   });
+
   if (
     !tree.exists(
       joinPathFragments(
@@ -77,7 +75,7 @@ export async function trpcBackendGenerator(
         SHARED_CONSTRUCTS_DIR,
         'src',
         'app',
-        'trpc-apis',
+        'http-apis',
         `${apiNameKebabCase}.ts`,
       ),
     )
@@ -97,32 +95,7 @@ export async function trpcBackendGenerator(
         overwriteStrategy: OverwriteStrategy.KeepExisting,
       },
     );
-    const shouldGenerateCoreTrpcApiConstruct = !tree.exists(
-      joinPathFragments(
-        PACKAGES_DIR,
-        SHARED_CONSTRUCTS_DIR,
-        'src',
-        'core',
-        'trpc-api.ts',
-      ),
-    );
-    if (shouldGenerateCoreTrpcApiConstruct) {
-      generateFiles(
-        tree,
-        joinPathFragments(
-          __dirname,
-          'files',
-          SHARED_CONSTRUCTS_DIR,
-          'src',
-          'core',
-        ),
-        joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'src', 'core'),
-        enhancedOptions,
-        {
-          overwriteStrategy: OverwriteStrategy.KeepExisting,
-        },
-      );
-    }
+
     addStarExport(
       tree,
       joinPathFragments(
@@ -132,7 +105,7 @@ export async function trpcBackendGenerator(
         'app',
         'index.ts',
       ),
-      './trpc-apis/index.js',
+      './http-apis/index.js',
     );
     addStarExport(
       tree,
@@ -141,25 +114,13 @@ export async function trpcBackendGenerator(
         SHARED_CONSTRUCTS_DIR,
         'src',
         'app',
-        'trpc-apis',
+        'http-apis',
         'index.ts',
       ),
       `./${apiNameKebabCase}.js`,
     );
-    if (shouldGenerateCoreTrpcApiConstruct) {
-      addStarExport(
-        tree,
-        joinPathFragments(
-          PACKAGES_DIR,
-          SHARED_CONSTRUCTS_DIR,
-          'src',
-          'core',
-          'index.ts',
-        ),
-        './trpc-api.js',
-      );
-    }
   }
+  addHttpApi(tree, apiNameClassName);
 
   updateJson(
     tree,
@@ -168,16 +129,35 @@ export async function trpcBackendGenerator(
       config.metadata = {
         apiName: options.apiName,
       } as unknown;
-      config.targets = {
-        ...config.targets,
-        serve: {
-          executor: 'nx:run-commands',
-          options: {
-            commands: ['tsx src/local-server.ts'],
-            cwd: backendRoot,
-          },
+
+      config.targets.serve = {
+        executor: 'nx:run-commands',
+        options: {
+          commands: ['tsx src/local-server.ts'],
+          cwd: backendRoot,
         },
       };
+
+      config.targets.bundle = {
+        cache: true,
+        executor: 'nx:run-commands',
+        outputs: [`{workspaceRoot}/dist/${backendRoot}/bundle`],
+        options: {
+          command: `npx -y esbuild ${backendRoot}/src/index.ts --bundle --outfile=dist/${backendRoot}/bundle/index.js --platform=node --format=cjs`,
+        },
+        dependsOn: ['compile'],
+      };
+      config.targets.build.dependsOn = [
+        ...(config.targets.build.dependsOn ?? []),
+        'bundle',
+      ];
+
+      config.targets = Object.keys(config.targets)
+        .sort()
+        .reduce((obj, key) => {
+          obj[key] = config.targets[key];
+          return obj;
+        }, {});
       return config;
     },
   );

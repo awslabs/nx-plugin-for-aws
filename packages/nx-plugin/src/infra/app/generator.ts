@@ -107,6 +107,12 @@ export async function infraGenerator(
           command: `cdk deploy --require-approval=never --app ${synthDirFromProject}`,
         },
       };
+      config.targets = Object.keys(config.targets)
+        .sort()
+        .reduce((obj, key) => {
+          obj[key] = config.targets[key];
+          return obj;
+        }, {});
       return config;
     },
   );

@@ -95,7 +95,9 @@ describe('shared-constructs utils', () => {
           constructs: expect.any(String),
           'aws-cdk-lib': expect.any(String),
         }),
-        {}
+        {
+          '@types/node': expect.any(String),  
+        }
       );
     });
     it('should not generate type definitions when they already exist', async () => {

@@ -327,71 +327,45 @@ export type IEchoOutput = z.TypeOf<typeof EchoOutputSchema>;
 "
 `;
 
-exports[`trpc backend generator > should set up shared constructs > index.ts 1`] = `
-"export * from './test-api.js';
-"
-`;
-
-exports[`trpc backend generator > should set up shared constructs > test-api.ts 1`] = `
+exports[`trpc backend generator > should set up shared constructs > http-api.ts 1`] = `
 "import { Construct } from 'constructs';
-import * as url from 'url';
-import { TrpcApi } from '../../core/trpc-api.js';
-import { HttpIamAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
-
-export class TestApi extends TrpcApi {
-  constructor(scope: Construct, id: string) {
-    super(scope, id, {
-      defaultAuthorizer: new HttpIamAuthorizer(),
-      handlerFilePath: url.fileURLToPath(
-        new URL(
-          '../../../../../../apps/test-api/backend/src/router.ts',
-          import.meta.url,
-        ),
-      ),
-    });
-  }
-}
-"
-`;
-
-exports[`trpc backend generator > should set up shared constructs > trpc-api.ts 1`] = `
-"import { Construct } from 'constructs';
-import { Runtime, RuntimeFamily } from 'aws-cdk-lib/aws-lambda';
 import { CfnOutput, Duration } from 'aws-cdk-lib';
 import {
   CorsHttpMethod,
-  HttpApi,
+  HttpApi as _HttpApi,
   HttpMethod,
   IHttpRouteAuthorizer,
 } from 'aws-cdk-lib/aws-apigatewayv2';
 import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
-import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
+import { Code, Function, Runtime } from 'aws-cdk-lib/aws-lambda';
 import { Effect, IRole, PolicyStatement } from 'aws-cdk-lib/aws-iam';
 import { RuntimeConfig } from './runtime-config.js';
 
-export interface TrpcApiProps {
+export interface HttpApiProps {
+  readonly handler: string;
   readonly handlerFilePath: string;
+  readonly runtime: Runtime;
   readonly defaultAuthorizer: IHttpRouteAuthorizer;
   readonly allowedOrigins?: string[];
 }
 
-export class TrpcApi extends Construct {
-  public readonly api: HttpApi;
+export class HttpApi extends Construct {
+  public readonly api: _HttpApi;
 
-  constructor(scope: Construct, id: string, props: TrpcApiProps) {
+  constructor(scope: Construct, id: string, props: HttpApiProps) {
     super(scope, id);
 
-    const routerFunction = new NodejsFunction(this, \`\${id}Handler\`, {
+    const routerFunction = new Function(this, \`\${id}Handler\`, {
       timeout: Duration.seconds(30),
-      runtime: new Runtime('nodejs20.x', RuntimeFamily.NODEJS),
-      handler: 'handler',
-      entry: props.handlerFilePath,
+      runtime: props.runtime,
+      handler: props.handler,
+      code: Code.fromAsset(props.handlerFilePath),
       environment: {
         AWS_CONNECTION_REUSE_ENABLED: '1',
       },
     });
 
-    this.api = new HttpApi(this, id, {
+    this.api = new _HttpApi(this, id, {
       corsPreflight: {
         allowOrigins: props.allowedOrigins ?? ['*'],
         allowMethods: [CorsHttpMethod.ANY],
@@ -424,8 +398,8 @@ export class TrpcApi extends Construct {
 
     new CfnOutput(this, \`\${id}Url\`, { value: this.api.url! });
 
-    RuntimeConfig.ensure(this).config.trpcApis = {
-      ...RuntimeConfig.ensure(this).config.trpcApis!,
+    RuntimeConfig.ensure(this).config.httpApis = {
+      ...RuntimeConfig.ensure(this).config.httpApis!,
       [id]: this.api.url!,
     };
   }
@@ -438,6 +412,36 @@ export class TrpcApi extends Construct {
         resources: [this.api.arnForExecuteApi('*', '/*', '*')],
       }),
     );
+  }
+}
+"
+`;
+
+exports[`trpc backend generator > should set up shared constructs > index.ts 1`] = `
+"export * from './test-api.js';
+"
+`;
+
+exports[`trpc backend generator > should set up shared constructs > test-api.ts 1`] = `
+"import { Construct } from 'constructs';
+import * as url from 'url';
+import { HttpApi } from '../../core/http-api.js';
+import { HttpIamAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
+import { Runtime } from 'aws-cdk-lib/aws-lambda';
+
+export class TestApi extends HttpApi {
+  constructor(scope: Construct, id: string) {
+    super(scope, id, {
+      defaultAuthorizer: new HttpIamAuthorizer(),
+      runtime: Runtime.NODEJS_LATEST,
+      handler: 'index.handler',
+      handlerFilePath: url.fileURLToPath(
+        new URL(
+          '../../../../../../dist/apps/test-api/backend/bundle',
+          import.meta.url,
+        ),
+      ),
+    });
   }
 }
 "
