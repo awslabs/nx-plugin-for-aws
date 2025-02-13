@@ -42,7 +42,7 @@ describe('shared-constructs utils', () => {
     tree = createTreeUsingTsSolutionSetup();
     vi.clearAllMocks();
     vi.spyOn(npmScopeUtils, 'getNpmScopePrefix').mockReturnValue(
-      '@test-scope/'
+      '@test-scope/',
     );
     vi.spyOn(npmScopeUtils, 'toScopeAlias').mockReturnValue(':test-scope');
   });
@@ -62,7 +62,7 @@ describe('shared-constructs utils', () => {
         expect.any(Object),
         expect.objectContaining({
           overwriteStrategy: OverwriteStrategy.KeepExisting,
-        })
+        }),
       );
     });
     it('should generate shared constructs when they do not exist', async () => {
@@ -83,7 +83,7 @@ describe('shared-constructs utils', () => {
         }),
         expect.objectContaining({
           overwriteStrategy: OverwriteStrategy.KeepExisting,
-        })
+        }),
       );
     });
     it('should add required dependencies when generating shared constructs', async () => {
@@ -95,29 +95,29 @@ describe('shared-constructs utils', () => {
           constructs: expect.any(String),
           'aws-cdk-lib': expect.any(String),
         }),
-        {
-          '@types/node': expect.any(String),  
-        }
+        expect.objectContaining({
+          '@types/node': expect.any(String),
+        }),
       );
     });
     it('should not generate type definitions when they already exist', async () => {
       vi.spyOn(tree, 'exists').mockImplementation((path) =>
-        path.includes(TYPE_DEFINITIONS_DIR)
+        path.includes(TYPE_DEFINITIONS_DIR),
       );
       await sharedConstructsGenerator(tree);
       expect(tsLibGenerator).not.toHaveBeenCalledWith(
         tree,
-        expect.objectContaining({ name: TYPE_DEFINITIONS_NAME })
+        expect.objectContaining({ name: TYPE_DEFINITIONS_NAME }),
       );
     });
     it('should not generate shared constructs when they already exist', async () => {
       vi.spyOn(tree, 'exists').mockImplementation((path) =>
-        path.includes(SHARED_CONSTRUCTS_DIR)
+        path.includes(SHARED_CONSTRUCTS_DIR),
       );
       await sharedConstructsGenerator(tree);
       expect(tsLibGenerator).not.toHaveBeenCalledWith(
         tree,
-        expect.objectContaining({ name: SHARED_CONSTRUCTS_NAME })
+        expect.objectContaining({ name: SHARED_CONSTRUCTS_NAME }),
       );
     });
   });

@@ -251,7 +251,7 @@ export async function reactGenerator(
                     factory.createPropertyAccessExpression(
                       factory.createPropertyAccessExpression(
                         factory.createIdentifier('runtimeConfig'),
-                        factory.createIdentifier('trpcApis'),
+                        factory.createIdentifier('httpApis'),
                       ),
                       factory.createIdentifier(apiNameClassName),
                     ),

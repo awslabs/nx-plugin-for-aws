@@ -27,6 +27,7 @@ import {
 import { addStarExport } from '../../utils/ast';
 import path from 'path';
 import { formatFilesInSubtree } from '../../utils/format';
+import { sortProjectTargets } from '../../utils/nx';
 
 export async function infraGenerator(
   tree: Tree,
@@ -86,7 +87,7 @@ export async function infraGenerator(
         'synth',
       ];
       config.targets.synth = {
-        cache: false,
+        cache: true,
         executor: 'nx:run-commands',
         outputs: [`{workspaceRoot}${synthDirFromRoot}`],
         dependsOn: ['^build', 'compile'], // compile clobbers dist directory, so ensure synth runs afterwards
@@ -102,12 +103,7 @@ export async function infraGenerator(
           command: `cdk deploy --require-approval=never --app ${synthDirFromProject}`,
         },
       };
-      config.targets = Object.keys(config.targets)
-        .sort()
-        .reduce((obj, key) => {
-          obj[key] = config.targets[key];
-          return obj;
-        }, {});
+      config.targets = sortProjectTargets(config.targets)
       return config;
     },
   );

@@ -10,7 +10,7 @@ import { join } from 'path';
 import { beforeEach, describe, it } from 'vitest';
 export const smokeTest = (
   pkgMgr: PackageManager,
-  onProjectCreate?: (projectRoot: string) => void
+  onProjectCreate?: (projectRoot: string) => void,
 ) => {
   describe(`smoke test - ${pkgMgr}`, () => {
     beforeEach(() => {
@@ -28,7 +28,7 @@ export const smokeTest = (
           cwd: `${tmpProjPath()}/${pkgMgr}`,
           prefixWithPackageManagerCmd: false,
           redirectStderr: true,
-        }
+        },
       );
       const projectRoot = `${tmpProjPath()}/${pkgMgr}/e2e-test`;
       const opts = { cwd: projectRoot };
@@ -37,37 +37,46 @@ export const smokeTest = (
       }
       await runCLI(
         `${getPackageManagerCommand(pkgMgr).addDev} @aws/nx-plugin`,
-        { ...opts, prefixWithPackageManagerCmd: false, retry: true }
+        { ...opts, prefixWithPackageManagerCmd: false, retry: true },
       ); // This can sometimes fail intermittently so add retries
       await runCLI(
         `generate @aws/nx-plugin:infra#app --name=infra --no-interactive`,
-        opts
+        opts,
       );
       await runCLI(
         `generate @aws/nx-plugin:cloudscape-website#app --name=website --no-interactive`,
-        opts
+        opts,
       );
       await runCLI(
         `generate @aws/nx-plugin:trpc#backend --apiName=my-api --no-interactive`,
-        opts
+        opts,
       );
       await runCLI(
         `generate @aws/nx-plugin:cloudscape-website#cognito-auth --project=@e2e-test/website --cognitoDomain=test --no-interactive`,
-        opts
+        opts,
       );
       await runCLI(
         `generate @aws/nx-plugin:trpc#react --frontendProjectName=@e2e-test/website --backendProjectName=@e2e-test/my-api-backend --no-interactive`,
-        opts
+        opts,
       );
+      await runCLI(
+        `generate @aws/nx-plugin:py#fast-api --name=py-api --no-interactive`,
+        opts,
+      );
+      await runCLI(
+        `generate @aws/nx-plugin:license --no-interactive`,
+        opts,
+      );
+
       // Wire up website, cognito and trpc api
       writeFileSync(
         `${opts.cwd}/packages/infra/src/stacks/application-stack.ts`,
-        readFileSync(join(__dirname, '../files/application-stack.ts.template'))
+        readFileSync(join(__dirname, '../files/application-stack.ts.template')),
       );
       await runCLI(`sync`, opts);
       await runCLI(
         `run-many --target build --all --parallel 12 --output-style=stream`,
-        opts
+        opts,
       );
     });
   });

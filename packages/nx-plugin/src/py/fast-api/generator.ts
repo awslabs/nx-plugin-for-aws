@@ -29,6 +29,7 @@ import { toClassName, toKebabCase, toSnakeCase } from '../../utils/names';
 import { addStarExport } from '../../utils/ast';
 import { formatFilesInSubtree } from '../../utils/format';
 import { addHttpApi } from '../../utils/http-api';
+import { sortProjectTargets } from '../../utils/nx';
 
 /**
  * Generates a Python FastAPI project
@@ -39,7 +40,7 @@ export const fastApiProjectGenerator = async (
 ): Promise<GeneratorCallback> => {
   await sharedConstructsGenerator(tree);
 
-  const { dir, normalizedName, normalizedModuleName } = getPyProjectDetails(
+  const { dir, normalizedName, normalizedModuleName, fullyQualifiedName } = getPyProjectDetails(
     tree,
     {
       name: schema.name,
@@ -64,7 +65,7 @@ export const fastApiProjectGenerator = async (
     projectType: 'application',
   });
 
-  const projectConfig = readProjectConfiguration(tree, normalizedName);
+  const projectConfig = readProjectConfiguration(tree, fullyQualifiedName);
 
   projectConfig.targets.bundle = {
     cache: true,
@@ -73,7 +74,7 @@ export const fastApiProjectGenerator = async (
     options: {
       commands: [
         `uv export --frozen --no-dev --no-editable --project ${normalizedName} -o dist/${dir}/bundle/requirements.txt`,
-        `uv pip install --no-installer-metadata --no-compile-bytecode --python-platform x86_64-manylinux2014 --python 3.12 --target dist/${dir}/bundle -r dist/${dir}/bundle/requirements.txt`
+        `uv pip install --no-installer-metadata --no-compile-bytecode --python-platform x86_64-manylinux2014 --python \`uv python pin\` --target dist/${dir}/bundle -r dist/${dir}/bundle/requirements.txt`
       ],
       parallel: false,
     },
@@ -83,7 +84,7 @@ export const fastApiProjectGenerator = async (
     ...(projectConfig.targets.build.dependsOn ?? []),
     'bundle',
   ];
-  projectConfig.targets.start = {
+  projectConfig.targets.serve = {
     executor: '@nxlv/python:run-commands',
     options: {
       command: `uv run fastapi dev ${normalizedName}/main.py`,
@@ -91,12 +92,7 @@ export const fastApiProjectGenerator = async (
     },
   };
 
-  projectConfig.targets = Object.keys(projectConfig.targets)
-    .sort()
-    .reduce((obj, key) => {
-      obj[key] = projectConfig.targets[key];
-      return obj;
-    }, {});
+  projectConfig.targets = sortProjectTargets(projectConfig.targets);
   updateProjectConfiguration(tree, normalizedName, projectConfig);
 
   [
@@ -183,7 +179,7 @@ export const fastApiProjectGenerator = async (
         }
         config.targets.build.dependsOn = [
           ...(config.targets.build.dependsOn ?? []),
-          `${normalizedName}:build`,
+          `${fullyQualifiedName}:build`,
         ];
         return config;
       },

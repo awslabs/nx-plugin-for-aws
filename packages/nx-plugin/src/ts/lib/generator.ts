@@ -22,6 +22,7 @@ import { configureTsProject } from './ts-project-utils';
 import { toKebabCase } from '../../utils/names';
 import { relative } from 'path';
 import { formatFilesInSubtree } from '../../utils/format';
+import { sortProjectTargets } from '../../utils/nx';
 export interface TsLibDetails {
   /**
    * Full package name including scope (eg @foo/bar)
@@ -112,19 +113,19 @@ export const tsLibGenerator = async (
       ),
     },
   };
-  projectConfiguration.targets = Object.keys(targets)
-    .sort()
-    .reduce((obj, key) => {
-      obj[key] = targets[key];
-      return obj;
-    }, {});
+  delete targets['lint'];
+  projectConfiguration.targets = sortProjectTargets(targets);;
 
   updateProjectConfiguration(tree, fullyQualifiedName, projectConfiguration);
 
   updateJson(tree, 'nx.json', (nxJson: NxJsonConfiguration) => {
     nxJson.plugins = nxJson.plugins.map((p) => {
-      if (typeof p !== 'string' && p.plugin === '@nx/js/typescript' && p.options?.['build']) {
-         p.options['build'].targetName = 'compile';
+      if (
+        typeof p !== 'string' &&
+        p.plugin === '@nx/js/typescript' &&
+        p.options?.['build']
+      ) {
+        p.options['build'].targetName = 'compile';
       }
       return p;
     });

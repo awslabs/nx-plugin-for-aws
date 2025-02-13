@@ -27,6 +27,7 @@ import { toClassName } from '../../utils/names';
 import { addStarExport } from '../../utils/ast';
 import { formatFilesInSubtree } from '../../utils/format';
 import { addHttpApi } from '../../utils/http-api';
+import { sortProjectTargets } from '../../utils/nx';
 export async function trpcBackendGenerator(
   tree: Tree,
   options: TrpcBackendGeneratorSchema,
@@ -151,12 +152,7 @@ export async function trpcBackendGenerator(
         'bundle',
       ];
 
-      config.targets = Object.keys(config.targets)
-        .sort()
-        .reduce((obj, key) => {
-          obj[key] = config.targets[key];
-          return obj;
-        }, {});
+      config.targets = sortProjectTargets(config.targets);
       return config;
     },
   );

@@ -7,7 +7,7 @@ import { getNpmScope, getNpmScopePrefix, toScopeAlias } from './npm-scope';
 import { createTreeUsingTsSolutionSetup } from './test';
 describe('npm-scope utils', () => {
   describe('getNpmScope', () => {
-    it('should return undefined when package.json does not exist', () => {
+    it('should return monorepo when package.json does not exist', () => {
       const tree = createTreeUsingTsSolutionSetup();
       tree.delete('package.json');
       expect(getNpmScope(tree)).toEqual('monorepo');
@@ -26,7 +26,7 @@ describe('npm-scope utils', () => {
       const tree = createTreeUsingTsSolutionSetup();
       tree.write(
         'package.json',
-        JSON.stringify({ name: '@my-org/my-package' })
+        JSON.stringify({ name: '@my-org/my-package' }),
       );
       expect(getNpmScope(tree)).toBe('my-org');
     });
@@ -41,7 +41,7 @@ describe('npm-scope utils', () => {
       const tree = createTreeUsingTsSolutionSetup();
       tree.write(
         'package.json',
-        JSON.stringify({ name: '@my-org/my-package' })
+        JSON.stringify({ name: '@my-org/my-package' }),
       );
       expect(getNpmScopePrefix(tree)).toBe('@my-org/');
     });

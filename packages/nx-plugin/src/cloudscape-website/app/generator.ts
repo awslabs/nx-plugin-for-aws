@@ -42,6 +42,7 @@ import {
 } from '../../utils/ast';
 import { formatFilesInSubtree } from '../../utils/format';
 import { relative } from 'path';
+import { sortProjectTargets } from '../../utils/nx';
 export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
   const npmScopePrefix = getNpmScopePrefix(tree);
   const websiteNameClassName = toClassName(schema.name);
@@ -110,12 +111,7 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
       outputPath: joinPathFragments('dist', websiteContentPath),
     },
   };
-  projectConfiguration.targets = Object.keys(targets)
-    .sort()
-    .reduce((obj, key) => {
-      obj[key] = targets[key];
-      return obj;
-    }, {});
+  projectConfiguration.targets = sortProjectTargets(targets);
 
   updateProjectConfiguration(tree, fullyQualifiedName, projectConfiguration);
 

@@ -54,9 +54,9 @@ describe('fastapi project generator', () => {
     );
 
     // Verify start target for development
-    expect(projectConfig.targets.start).toBeDefined();
-    expect(projectConfig.targets.start.executor).toBe('@nxlv/python:run-commands');
-    expect(projectConfig.targets.start.options.command).toBe(
+    expect(projectConfig.targets.serve).toBeDefined();
+    expect(projectConfig.targets.serve.executor).toBe('@nxlv/python:run-commands');
+    expect(projectConfig.targets.serve.options.command).toBe(
       'uv run fastapi dev test_api/main.py'
     );
 
@@ -136,7 +136,7 @@ describe('fastapi project generator', () => {
     );
 
     expect(sharedConstructsConfig.targets.build.dependsOn).toContain(
-      'test_api:build'
+      'proj.test_api:build'
     );
   });
 

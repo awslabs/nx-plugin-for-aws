@@ -20,6 +20,7 @@ import { Logger } from '@nxlv/python/src/executors/utils/logger';
 import { withVersions } from '../../utils/versions';
 import { getNpmScope } from '../../utils/npm-scope';
 import { toSnakeCase } from '../../utils/names';
+import { sortProjectTargets } from '../../utils/nx';
 
 export interface PyProjectDetails {
   readonly normalizedName: string;
@@ -42,7 +43,7 @@ export const getPyProjectDetails = (
   tree: Tree,
   schema: { name: string; directory?: string, moduleName?: string },
 ): PyProjectDetails => {
-  const scope = getNpmScope(tree);
+  const scope = toSnakeCase(getNpmScope(tree));
   const normalizedName = toSnakeCase(schema.name);
   const normalizedModuleName = toSnakeCase(schema.moduleName);
   const fullyQualifiedName = `${scope}.${normalizedName}`;
@@ -60,7 +61,7 @@ export const pyProjectGenerator = async (
   tree: Tree,
   schema: PyProjectGeneratorSchema,
 ): Promise<GeneratorCallback> => {
-  const { dir, normalizedName, normalizedModuleName } =
+  const { dir, normalizedName, normalizedModuleName, fullyQualifiedName } =
     getPyProjectDetails(tree, schema);
   const pythonPlugin = withVersions(['@nxlv/python']);
   Object.entries(pythonPlugin).forEach(([name, version]) =>
@@ -125,6 +126,7 @@ export const pyProjectGenerator = async (
     tree,
     normalizedName,
   );
+  projectConfiguration.name = fullyQualifiedName;
   const buildTarget = projectConfiguration.targets.build;
   projectConfiguration.targets.compile = {
     ...buildTarget,
@@ -140,12 +142,7 @@ export const pyProjectGenerator = async (
       outputPath,
     },
   };
-  projectConfiguration.targets = Object.keys(projectConfiguration.targets)
-    .sort()
-    .reduce((obj, key) => {
-      obj[key] = projectConfiguration.targets[key];
-      return obj;
-    }, {});
+  projectConfiguration.targets = sortProjectTargets(projectConfiguration.targets);
   updateProjectConfiguration(tree, normalizedName, projectConfiguration);
 
   return async () => {
