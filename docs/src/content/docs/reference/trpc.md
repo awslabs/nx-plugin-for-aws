@@ -53,11 +53,10 @@ Both methods will create a new tRPC backend API in the specified directory with 
 
 #### Input Parameters
 
-| Parameter      | Type   | Default    | Description                                                                  |
-| -------------- | ------ | ---------- | ---------------------------------------------------------------------------- |
-| apiName\*      | string | -          | The name of the API (required). Used to generate class names and file paths. |
-| directory      | string | "packages" | The directory to store the application in.                                   |
-| unitTestRunner | string | "vitest"   | Test runner for unit tests. Options: jest, vitest, none                      |
+| Parameter | Type   | Default    | Description                                                                  |
+| --------- | ------ | ---------- | ---------------------------------------------------------------------------- |
+| apiName\* | string | -          | The name of the API (required). Used to generate class names and file paths. |
+| directory | string | "packages" | The directory to store the application in.                                   |
 
 \*Required parameter
 

@@ -20,7 +20,6 @@ describe('trpc backend generator', () => {
     await trpcBackendGenerator(tree, {
       apiName: 'TestApi',
       directory: 'apps',
-      unitTestRunner: 'vitest',
       bundler: 'vite',
     });
 
@@ -42,7 +41,6 @@ describe('trpc backend generator', () => {
     await trpcBackendGenerator(tree, {
       apiName: 'TestApi',
       directory: 'apps',
-      unitTestRunner: 'vitest',
       bundler: 'vite',
     });
     const backendProjectConfig = JSON.parse(
@@ -58,7 +56,6 @@ describe('trpc backend generator', () => {
     await trpcBackendGenerator(tree, {
       apiName: 'TestApi',
       directory: 'apps',
-      unitTestRunner: 'vitest',
       bundler: 'vite',
     });
     const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
@@ -84,7 +81,6 @@ describe('trpc backend generator', () => {
     await trpcBackendGenerator(tree, {
       apiName: 'TestApi',
       directory: 'apps',
-      unitTestRunner: 'vitest',
       bundler: 'vite',
     });
     // Verify shared constructs setup

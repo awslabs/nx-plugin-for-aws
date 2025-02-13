@@ -8,6 +8,4 @@ export interface TrpcBackendGeneratorSchema {
   apiName: string;
   bundler: TsLibGeneratorSchema['bundler'];
   directory?: TsLibGeneratorSchema['directory'];
-  unitTestRunner: TsLibGeneratorSchema['unitTestRunner'];
-  linter?: Linter;
 }
