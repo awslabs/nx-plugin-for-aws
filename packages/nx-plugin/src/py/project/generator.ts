@@ -70,7 +70,7 @@ export const pyProjectGenerator = async (
   const nxJson = readNxJson(tree);
 
   if (
-    !nxJson.plugins.find((p) =>
+    !nxJson.plugins?.find((p) =>
       typeof p === 'string'
         ? p === '@nxlv/python'
         : p.plugin === '@nxlv/python',
