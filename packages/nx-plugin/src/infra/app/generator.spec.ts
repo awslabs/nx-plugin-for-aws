@@ -64,7 +64,7 @@ describe('infra generator', () => {
       cache: true,
       executor: 'nx:run-commands',
       outputs: ['{workspaceRoot}/dist/packages/test/cdk.out'],
-      dependsOn: ['^build'],
+      dependsOn: ['^build', 'compile'],
       options: {
         cwd: 'packages/test',
         command: 'cdk synth',
