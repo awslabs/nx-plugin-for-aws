@@ -4,6 +4,7 @@
  */
 import {
   GeneratorCallback,
+  NxJsonConfiguration,
   OverwriteStrategy,
   Tree,
   generateFiles,
@@ -11,6 +12,7 @@ import {
   installPackagesTask,
   joinPathFragments,
   readProjectConfiguration,
+  updateJson,
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { TsLibGeneratorSchema } from './schema';
@@ -89,13 +91,11 @@ export const tsLibGenerator = async (
   const targets = projectConfiguration.targets;
 
   targets['compile'] = {
-    executor: '@nx/js:tsc',
-    outputs: ['{options.outputPath}'],
+    executor: 'nx:run-commands',
+    outputs: [`{workspaceRoot}/dist/${dir}/tsc`],
     options: {
-      outputPath: joinPathFragments('dist', dir, 'tsc'),
-      main: joinPathFragments(dir, 'src/index.ts'),
-      tsConfig: joinPathFragments(dir, 'tsconfig.json'),
-      assets: [joinPathFragments(dir, '*.md')],
+      command: 'tsc --build tsconfig.lib.json',
+      cwd: '{projectRoot}',
     },
   };
   targets['build'] = {
@@ -120,6 +120,16 @@ export const tsLibGenerator = async (
     }, {});
 
   updateProjectConfiguration(tree, fullyQualifiedName, projectConfiguration);
+
+  updateJson(tree, 'nx.json', (nxJson: NxJsonConfiguration) => {
+    nxJson.plugins = nxJson.plugins.map((p) => {
+      if (typeof p !== 'string' && p.plugin === '@nx/js/typescript' && p.options?.['build']) {
+         p.options['build'].targetName = 'compile';
+      }
+      return p;
+    });
+    return nxJson;
+  });
 
   formatFilesInSubtree(tree);
 

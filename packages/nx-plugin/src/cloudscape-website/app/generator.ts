@@ -37,6 +37,7 @@ import { getRelativePathToRoot } from '../../utils/paths';
 import { toClassName, toKebabCase } from '../../utils/names';
 import { addStarExport, destructuredImport } from '../../utils/ast';
 import { formatFilesInSubtree } from '../../utils/format';
+import { relative } from 'path';
 export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
   const npmScopePrefix = getNpmScopePrefix(tree);
   const websiteNameClassName = toClassName(schema.name);
@@ -79,6 +80,14 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
   };
   const buildTarget = targets['build'];
   targets['compile'] = {
+    executor: 'nx:run-commands',
+    outputs: ['{workspaceRoot}/dist/{projectRoot}/tsc'],
+    options: {
+      command: 'tsc --build tsconfig.app.json',
+      cwd: '{projectRoot}',
+    },
+  };
+  targets['bundle'] = {
     ...buildTarget,
     options: {
       ...buildTarget.options,
@@ -86,7 +95,13 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
     },
   };
   targets['build'] = {
-    dependsOn: ['lint', 'compile', 'test', ...(buildTarget.dependsOn ?? [])],
+    dependsOn: [
+      'lint',
+      'compile',
+      'bundle',
+      'test',
+      ...(buildTarget.dependsOn ?? []),
+    ],
     options: {
       outputPath: joinPathFragments('dist', websiteContentPath),
     },
@@ -374,6 +389,16 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
       },
     }),
   );
+  const outDirToRootRelativePath = relative(
+    joinPathFragments(tree.root, websiteContentPath),
+    tree.root,
+  );
+  const distDir = joinPathFragments(
+    outDirToRootRelativePath,
+    'dist',
+    websiteContentPath,
+    'tsc',
+  );
   updateJson(
     tree,
     joinPathFragments(websiteContentPath, 'tsconfig.app.json'),
@@ -381,6 +406,8 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
       ...tsconfig,
       compilerOptions: {
         ...tsconfig.compilerOptions,
+        outDir: distDir,
+        tsBuildInfoFile: joinPathFragments(distDir, 'tsconfig.lib.tsbuildinfo'),
         lib: ['DOM'],
       },
     }),

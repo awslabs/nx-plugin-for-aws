@@ -41,7 +41,7 @@ export const configureTsProject = (
         baseUrl: undefined,
         rootDir: '.',
         outDir: distDir,
-        tsBuildInfoFile: join(distDir, options.dir, 'tsconfig.lib.tsbuildinfo'),
+        tsBuildInfoFile: join(distDir, 'tsconfig.lib.tsbuildinfo'),
       },
     }));
   }

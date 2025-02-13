@@ -29,7 +29,7 @@ export const VERSIONS = {
   'aws-cdk-lib': '^2.166.0',
   'aws-xray-sdk-core': '^3.10.2',
   constructs: '^10.4.2',
-  esbuild: '^0.24.0',
+  esbuild: '^0.25.0',
   'eslint-plugin-prettier': '^5.2.2',
   'jsonc-eslint-parser': '^2.4.0',
   'oidc-client-ts': '^3.1.0',

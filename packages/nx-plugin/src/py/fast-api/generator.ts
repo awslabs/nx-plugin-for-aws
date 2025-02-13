@@ -8,8 +8,10 @@ import {
   installPackagesTask,
   joinPathFragments,
   OverwriteStrategy,
+  ProjectConfiguration,
   readProjectConfiguration,
   Tree,
+  updateJson,
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { FastApiProjectGeneratorSchema } from './schema';
@@ -71,14 +73,16 @@ export const fastApiProjectGenerator = async (
     options: {
       commands: [
         `uv export --frozen --no-dev --no-editable --project ${normalizedName} -o dist/${dir}/bundle/requirements.txt`,
-        `uv pip install --no-installer-metadata --no-compile-bytecode --python-platform x86_64-manylinux2014 --python 3.12 --target dist/${dir}/bundle/bundle -r dist/${dir}/bundle/requirements.txt`,
-        `npx -y --package=cross-zip-cli cross-zip dist/${dir}/bundle/bundle bundle.zip`,
+        `uv pip install --no-installer-metadata --no-compile-bytecode --python-platform x86_64-manylinux2014 --python 3.12 --target dist/${dir}/bundle -r dist/${dir}/bundle/requirements.txt`
       ],
-      parallel: false
+      parallel: false,
     },
     dependsOn: ['compile'],
   };
-  projectConfig.targets.build.dependsOn = [...(projectConfig.targets.build.dependsOn ?? []), 'bundle'];
+  projectConfig.targets.build.dependsOn = [
+    ...(projectConfig.targets.build.dependsOn ?? []),
+    'bundle',
+  ];
   projectConfig.targets.start = {
     executor: '@nxlv/python:run-commands',
     options: {
@@ -95,9 +99,10 @@ export const fastApiProjectGenerator = async (
     }, {});
   updateProjectConfiguration(tree, normalizedName, projectConfig);
 
-  tree.delete(
+  [
     joinPathFragments(dir, normalizedModuleName ?? normalizedName, 'hello.py'),
-  );
+    joinPathFragments(dir, 'tests', 'test_hello.py'),
+  ].forEach((f) => tree.delete(f));
 
   generateFiles(
     tree, // the virtual file system
@@ -165,6 +170,24 @@ export const fastApiProjectGenerator = async (
   }
 
   addHttpApi(tree, apiNameClassName);
+
+  updateJson(
+      tree,
+      joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'project.json'),
+      (config: ProjectConfiguration) => {
+        if (!config.targets) {
+          config.targets = {};
+        }
+        if (!config.targets.build) {
+          config.targets.build = {};
+        }
+        config.targets.build.dependsOn = [
+          ...(config.targets.build.dependsOn ?? []),
+          `${normalizedName}:build`,
+        ];
+        return config;
+      },
+    );
 
   const projectToml = parse(
     tree.read(joinPathFragments(dir, 'pyproject.toml'), 'utf8'),

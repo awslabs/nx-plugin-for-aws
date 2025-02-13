@@ -85,13 +85,8 @@ export async function infraGenerator(
         ...(config.targets.build.dependsOn ?? []),
         'synth',
       ];
-      config.targets.compile.options.main = joinPathFragments(
-        libraryRoot,
-        'src',
-        'main.ts',
-      );
       config.targets.synth = {
-        cache: true,
+        cache: false,
         executor: 'nx:run-commands',
         outputs: [`{workspaceRoot}${synthDirFromRoot}`],
         dependsOn: ['^build', 'compile'], // compile clobbers dist directory, so ensure synth runs afterwards

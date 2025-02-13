@@ -143,9 +143,8 @@ export async function trpcBackendGenerator(
         executor: 'nx:run-commands',
         outputs: [`{workspaceRoot}/dist/${backendRoot}/bundle`],
         options: {
-          command: `npx -y esbuild ${backendRoot}/src/index.ts --bundle --outfile=dist/${backendRoot}/bundle/index.js --platform=node --format=cjs`,
-        },
-        dependsOn: ['compile'],
+          command: `esbuild ${backendRoot}/src/index.ts --bundle --outfile=dist/${backendRoot}/bundle/index.js --platform=node --format=cjs`
+        }
       };
       config.targets.build.dependsOn = [
         ...(config.targets.build.dependsOn ?? []),
@@ -194,7 +193,7 @@ export async function trpcBackendGenerator(
       'aws4fetch',
       '@aws-sdk/credential-providers',
     ]),
-    withVersions(['@types/aws-lambda', 'tsx']),
+    withVersions(['@types/aws-lambda', 'esbuild', 'tsx']),
   );
   tree.delete(joinPathFragments(backendRoot, 'package.json'));
   tree.delete(joinPathFragments(schemaRoot, 'package.json'));
