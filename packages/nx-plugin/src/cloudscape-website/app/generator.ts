@@ -35,7 +35,11 @@ import { configureTsProject } from '../../ts/lib/ts-project-utils';
 import { withVersions } from '../../utils/versions';
 import { getRelativePathToRoot } from '../../utils/paths';
 import { toClassName, toKebabCase } from '../../utils/names';
-import { addStarExport, destructuredImport } from '../../utils/ast';
+import {
+  addStarExport,
+  destructuredImport,
+  singleImport,
+} from '../../utils/ast';
 import { formatFilesInSubtree } from '../../utils/format';
 import { relative } from 'path';
 export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
@@ -287,6 +291,13 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
       '@tanstack/router-plugin/vite',
     );
 
+    viteConfigUpdatedContents = singleImport(
+      tree,
+      viteConfigPath,
+      'tsconfigPaths',
+      'vite-tsconfig-paths',
+    );
+
     viteConfigUpdatedContents = tsquery
       .map(
         ast(viteConfigUpdatedContents),
@@ -331,6 +342,11 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
                     ...pluginsConfig.elements,
                     factory.createCallExpression(
                       factory.createIdentifier('TanStackRouterVite'),
+                      undefined,
+                      [],
+                    ),
+                    factory.createCallExpression(
+                      factory.createIdentifier('tsconfigPaths'),
                       undefined,
                       [],
                     ),
@@ -420,7 +436,7 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
       '@cloudscape-design/global-styles',
       '@tanstack/react-router',
     ]),
-    withVersions(['@tanstack/router-plugin']),
+    withVersions(['@tanstack/router-plugin', 'vite-tsconfig-paths']),
   );
 
   await formatFilesInSubtree(tree);

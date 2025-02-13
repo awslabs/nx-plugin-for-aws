@@ -37,6 +37,7 @@ export const VERSIONS = {
   'react-oidc-context': '^3.2.0',
   'source-map-support': '^0.5.21',
   tsx: '^4.19.2',
+  'vite-tsconfig-paths': '^5.1.4',
   zod: '^3.23.8',
 } as const;
 /**
