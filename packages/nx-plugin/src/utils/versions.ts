@@ -6,6 +6,7 @@ export const VERSIONS = {
   '@cdklabs/cdk-validator-cfnguard': '^0.0.60',
   '@aws-cdk/aws-cognito-identitypool-alpha': '^2.166.0-alpha.0',
   '@aws-sdk/client-cognito-identity': '^3.721.0',
+  '@aws-sdk/credential-providers': '^3.721.0',
   '@aws-sdk/credential-provider-cognito-identity': '^3.721.0',
   '@aws-lambda-powertools/logger': '^2.11.0',
   '@aws-lambda-powertools/metrics': '^2.11.0',

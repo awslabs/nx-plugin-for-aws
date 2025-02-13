@@ -211,6 +211,8 @@ export async function trpcBackendGenerator(
       '@aws-lambda-powertools/metrics',
       '@aws-lambda-powertools/tracer',
       '@trpc/server',
+      'aws4fetch',
+      '@aws-sdk/credential-providers',
     ]),
     withVersions(['@types/aws-lambda', 'tsx']),
   );

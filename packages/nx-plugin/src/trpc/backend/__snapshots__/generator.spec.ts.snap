@@ -1,8 +1,59 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`trpc backend generator > should generate backend and schema projects > apps/test-api/backend/src/client/index.ts 1`] = `
+"import {
+  createTRPCClient,
+  httpBatchLink,
+  httpLink,
+  HTTPBatchLinkOptions,
+  HTTPLinkOptions,
+  splitLink,
+} from '@trpc/client';
+
+import { AppRouter } from '../router.js';
+import { sigv4Fetch } from './sigv4.js';
+
+export interface TestApiClientConfig {
+  readonly url: string;
+}
+
+export const createTestApiClient = (config: TestApiClientConfig) => {
+  const linkOptions: HTTPLinkOptions<any> & HTTPBatchLinkOptions<any> = {
+    url: config.url,
+    fetch: sigv4Fetch,
+  };
+  return createTRPCClient<AppRouter>({
+    links: [
+      splitLink({
+        condition(op) {
+          return op.context.skipBatch === true;
+        },
+        true: httpLink(linkOptions),
+        false: httpBatchLink(linkOptions),
+      }),
+    ],
+  });
+};
+"
+`;
+
+exports[`trpc backend generator > should generate backend and schema projects > apps/test-api/backend/src/client/sigv4.ts 1`] = `
+"import { AwsClient } from 'aws4fetch';
+import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
+
+const credentialProvider = fromNodeProviderChain();
+
+export const sigv4Fetch = (async (...args) => {
+  const client = new AwsClient(await credentialProvider());
+  return client.fetch(...args);
+}) satisfies AwsClient['fetch'];
+"
+`;
+
 exports[`trpc backend generator > should generate backend and schema projects > apps/test-api/backend/src/index.ts 1`] = `
 "export type { AppRouter } from './router.js';
 export type { Context } from './init.js';
+export * from './client/index.js';
 "
 `;
 
