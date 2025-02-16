@@ -81,6 +81,68 @@ export const configureEslint = async (tree: Tree) => {
         },
       );
     }
+
+    // Check if ignores array exists in any object literal
+    const existingIgnores = tsquery.query(
+      updatedContent,
+      'ExportAssignment > ArrayLiteralExpression ObjectLiteralExpression > PropertyAssignment[name.text="ignores"]',
+    );
+
+    if (existingIgnores.length > 0) {
+      // Check if the entry already exists in the ignores array
+      const timestampIgnore = tsquery.query(
+        updatedContent,
+        'ExportAssignment > ArrayLiteralExpression ObjectLiteralExpression > PropertyAssignment[name.text="ignores"] > ArrayLiteralExpression StringLiteral[value="**/vite.config.ts.timestamp*"]',
+      );
+
+      if (timestampIgnore.length === 0) {
+        // Add to existing ignores array only if entry doesn't exist
+        updatedContent = tsquery.map(
+          updatedContent,
+          'ExportAssignment > ArrayLiteralExpression ObjectLiteralExpression > PropertyAssignment[name.text="ignores"] > ArrayLiteralExpression',
+          (node: ArrayLiteralExpression) => {
+            return factory.createArrayLiteralExpression(
+              [
+                ...node.elements,
+                factory.createStringLiteral('**/vite.config.ts.timestamp*'),
+              ],
+              true,
+            );
+          },
+        );
+      }
+    } else {
+      // Create new object with ignores array
+      updatedContent = tsquery.map(
+        updatedContent,
+        'ExportAssignment > ArrayLiteralExpression',
+        (node: ArrayLiteralExpression) => {
+          return factory.createArrayLiteralExpression(
+            [
+              ...node.elements,
+              factory.createObjectLiteralExpression(
+                [
+                  factory.createPropertyAssignment(
+                    factory.createIdentifier('ignores'),
+                    factory.createArrayLiteralExpression(
+                      [
+                        factory.createStringLiteral(
+                          '**/vite.config.ts.timestamp*',
+                        ),
+                      ],
+                      true,
+                    ),
+                  ),
+                ],
+                true,
+              ),
+            ],
+            true,
+          );
+        },
+      );
+    }
+
     // Only write if changes were made
     if (updatedContent !== sourceFile) {
       tree.write(eslintConfigPath, updatedContent.getFullText());
