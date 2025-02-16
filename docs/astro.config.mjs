@@ -4,6 +4,7 @@
  */
 // @ts-check
 import { defineConfig, passthroughImageService } from 'astro/config';
+
 import starlight from '@astrojs/starlight';
 import starlightBlog from 'starlight-blog';
 import starlightLinksValidator from 'starlight-links-validator';
@@ -31,6 +32,7 @@ export default defineConfig({
           items: [
             // Each item here is one entry in the navigation menu.
             { label: 'Overview', slug: 'guides/example' },
+            { label: 'Tutorial', slug: 'guides/tutorial' },
           ],
         },
         {
