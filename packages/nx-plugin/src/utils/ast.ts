@@ -239,3 +239,23 @@ export const jsonToAst = (obj: unknown): Node => {
 
   throw new Error(`Unsupported type: ${typeof obj}`);
 };
+
+/**
+ * Return whether or not the given identifier is exported in the source file
+ */
+export const hasExportDeclaration = (
+  source: string,
+  identifierName: string,
+): boolean => {
+  const sourceFile = ast(source);
+  return (
+    tsquery.query(
+      sourceFile,
+      `ExportDeclaration:has(ExportSpecifier:has(Identifier[name="${identifierName}"]))`,
+    ).length > 0 ||
+    tsquery.query(
+      sourceFile,
+      `TypeAliasDeclaration:has(ExportKeyword):has(Identifier[name="${identifierName}"])`,
+    ).length > 0
+  );
+};

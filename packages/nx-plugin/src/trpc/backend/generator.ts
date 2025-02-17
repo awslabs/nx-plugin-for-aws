@@ -129,6 +129,7 @@ export async function trpcBackendGenerator(
     (config: ProjectConfiguration) => {
       config.metadata = {
         apiName: options.apiName,
+        apiType: 'trpc',
       } as unknown;
 
       config.targets.serve = {

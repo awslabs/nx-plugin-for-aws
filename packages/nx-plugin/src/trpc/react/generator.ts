@@ -55,6 +55,7 @@ export async function reactGenerator(
   const apiName = (backendProjectConfig.metadata as any)?.apiName;
   const apiNameClassName = toClassName(apiName);
   const backendProjectAlias = toScopeAlias(options.backendProjectName);
+
   generateFiles(
     tree,
     joinPathFragments(__dirname, 'files'),

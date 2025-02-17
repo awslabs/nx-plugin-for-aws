@@ -13,6 +13,7 @@ import {
   createJsxElementFromIdentifier,
   createJsxElement,
   jsonToAst,
+  hasExportDeclaration,
 } from './ast';
 
 describe('ast utils', () => {
@@ -334,6 +335,31 @@ describe('ast utils', () => {
     it('should throw error for unsupported types', () => {
       const fn = () => console.log('function!');
       expect(() => jsonToAst(fn)).toThrow('Unsupported type: function');
+    });
+  });
+
+  describe('hasExportDeclaration', () => {
+    it('should return true for exported type alias declarations', () => {
+      const source = `export type MyType = string;`;
+      expect(hasExportDeclaration(source, 'MyType')).toBe(true);
+    });
+
+    it('should return false for non-exported type alias declarations', () => {
+      const source = `type MyType = string;`;
+      expect(hasExportDeclaration(source, 'MyType')).toBe(false);
+    });
+
+    it('should return true for export declarations', () => {
+      const source = `
+        type MyType = string;
+        export { MyType };
+      `;
+      expect(hasExportDeclaration(source, 'MyType')).toBe(true);
+    });
+
+    it('should return false when type alias does not exist', () => {
+      const source = `type OtherType = string;`;
+      expect(hasExportDeclaration(source, 'MyType')).toBe(false);
     });
   });
 });

@@ -49,6 +49,7 @@ describe('trpc backend generator', () => {
     // Verify project metadata
     expect(backendProjectConfig.metadata).toEqual({
       apiName: 'TestApi',
+      apiType: 'trpc',
     });
   });
 
