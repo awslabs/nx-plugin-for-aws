@@ -61,7 +61,7 @@ code .
 ## Step 3: Create the Backend REST API
 
 1. Open **Nx Console** in VS Code and select **Generate (UI)** under **Common NX Commands**.
-2. Choose `@aws/nx-plugin - trpc#backend`.
+2. Choose `@aws/nx-plugin - ts#trpc-api`.
 3. Set the `apiName` to `demo-api` and click **Generate**.
 
 This will create the API inside the `packages/demo-api` folder.
@@ -71,7 +71,7 @@ This will create the API inside the `packages/demo-api` folder.
 ### Generate the Website
 
 1. In **Nx Console**, select **Generate (UI)**.
-2. Choose `@aws/nx-plugin - cloudscape-website#app`.
+2. Choose `@aws/nx-plugin - ts#cloudscape-website`.
 3. Set the `name` to `demo-website` and click **Generate**.
 
 This scaffolds a new React package with CloudScape UI.
@@ -79,15 +79,15 @@ This scaffolds a new React package with CloudScape UI.
 ### Enable Cognito Authentication
 
 1. In **Nx Console**, select **Generate (UI)**.
-2. Choose `@aws-nx-plugin - cloudscape-website#cognito-auth`.
+2. Choose `@aws-nx-plugin - ts#cloudscape-website#cognito-auth`.
 3. Set a unique `cognitoDomain`, select `@demo/demo-website`, and check `allowSignup`.
 4. Click **Generate**.
 
 ### Connect Frontend to Backend
 
 1. In **Nx Console**, select **Generate (UI)**.
-2. Choose `@aws-nx-plugin - trpc#react`.
-3. Select `@demo/demo-website` for `frontendProjectName` and `@demo/demo-api-backend` for `backendProjectName`.
+2. Choose `@aws-nx-plugin - api#connection`.
+3. Select `@demo/demo-website` for `sourceProject` and `@demo/demo-api-backend` for `targetProject`.
 4. Click **Generate**.
 
 ## Step 5: Create CDK Infrastructure
@@ -95,7 +95,7 @@ This scaffolds a new React package with CloudScape UI.
 ### Generate the CDK App
 
 1. In **Nx Console**, select **Generate (UI)**.
-2. Choose `@aws/nx-plugin - infra#app`.
+2. Choose `@aws/nx-plugin - ts#infra`.
 3. Set `name` to `infra` and click **Generate**.
 
 ### Define Cloud Resources

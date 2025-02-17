@@ -23,7 +23,7 @@ pnpm nx serve docs
 ## Examples
 
 ```
-pnpm nx generate @aws/nx-plugin:cloudscape-website#app infra --name=infra --directory=lib --unitTestRunner=vitest
+pnpm nx generate @aws/nx-plugin:ts#infra infra --name=infra --directory=lib
 ```
 
 ## Security

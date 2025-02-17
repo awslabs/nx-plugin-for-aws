@@ -7,16 +7,16 @@ description: Reference documentation for tRPC
 
 The AWS Plugin for Nx makes building APIs with tRPC on AWS easy by providing two main generators:
 
-- [`trpc#backend`](#trpc-backend) - Generates the backend code to implement a tRPC API as well as infrastructure to deploy it with API Gateway
-- [`trpc#react`](#trpc-react) - Integrates a tRPC API with a React website
+- [`ts#trpc-api`](#trpc-api) - Generates the backend code to implement a tRPC API as well as infrastructure to deploy it with API Gateway
+- [`api-connection`](#api-connection-trpc-react) - Supports integrating a tRPC API with a React website
 
-## tRPC Backend
+## tRPC API
 
-The tRPC Backend generator creates a new tRPC API with AWS CDK infrastructure setup. The generated backend uses AWS Lambda for serverless deployment and includes schema validation using [Zod](https://zod.dev/). It sets up [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/) for observability, including logging, AWS X-Ray tracing and Cloudwatch Metrics.
+The tRPC API generator creates a new tRPC API with AWS CDK infrastructure setup. The generated backend uses AWS Lambda for serverless deployment and includes schema validation using [Zod](https://zod.dev/). It sets up [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/) for observability, including logging, AWS X-Ray tracing and Cloudwatch Metrics.
 
-### Generating a new tRPC Backend
+### Generating a new tRPC API
 
-You can generate a new tRPC backend in two ways:
+You can generate a new tRPC API in two ways:
 
 #### 1. Using VSCode IDE
 
@@ -31,7 +31,7 @@ Then generate your API:
 
 1. Open the NX Console in VSCode
 2. Click on "Generate"
-3. Search for "trpc#backend"
+3. Search for "ts#trpc-api"
 4. Fill in the required parameters in the form
 5. Click "Run"
 
@@ -40,13 +40,13 @@ Then generate your API:
 Generate the API:
 
 ```bash
-nx g @aws/nx-plugin:trpc#backend my-api --directory=apps/api
+nx g @aws/nx-plugin:ts#trpc-api my-api --directory=apps/api
 ```
 
 You can also perform a dry-run to see what files would be generated without actually creating them:
 
 ```bash
-nx g @aws/nx-plugin:trpc#backend my-api --directory=apps/api --dry-run
+nx g @aws/nx-plugin:ts#trpc-api my-api --directory=apps/api --dry-run
 ```
 
 Both methods will create a new tRPC backend API in the specified directory with all the necessary configuration and infrastructure code.
@@ -395,9 +395,9 @@ const client = createMyApiClient({ url: 'https://my-api-url.example.com/' });
 await client.echo.query({ message: 'Hello world!' });
 ```
 
-If you are calling your API from a React website, consider using the [tRPC React](#trpc-react) generator to configure the client.
+If you are calling your API from a React website, consider using the [API Connection](#api-connection-trpc-react) generator to configure the client.
 
-## tRPC React
+## API Connection: tRPC React
 
 AWS Plugin for Nx provides a generator to quickly integrate your tRPC API with a React website. It sets up all necessary configuration for connecting to your tRPC backends, including AWS IAM authentication support and proper error handling. The integration provides full end-to-end type safety between your frontend and tRPC backend(s).
 
@@ -441,7 +441,7 @@ Then add tRPC to your React application:
 
 1. Open the NX Console in VSCode
 2. Click on "Generate"
-3. Search for "trpc#react"
+3. Search for "api-connection"
 4. Fill in the required parameters in the form
 5. Click "Run"
 
@@ -450,24 +450,24 @@ Then add tRPC to your React application:
 Add tRPC to your React application:
 
 ```bash
-nx g @aws/nx-plugin:trpc#react --frontendProjectName=my-app --backendProjectName=my-api --auth=IAM
+nx g @aws/nx-plugin:api-connection --sourceProject=my-app --targetProject=my-api --auth=IAM
 ```
 
 You can also perform a dry-run to see what files would be generated without actually creating them:
 
 ```bash
-nx g @aws/nx-plugin:trpc#react --frontendProjectName=my-app --backendProjectName=my-api --auth=IAM --dry-run
+nx g @aws/nx-plugin:api-connection --sourceProject=my-app --targetProject=my-api --auth=IAM --dry-run
 ```
 
 Both methods will add tRPC client integration to your React application with all the necessary configuration.
 
 ### Input Parameters
 
-| Parameter             | Type   | Default | Description                                            |
-| --------------------- | ------ | ------- | ------------------------------------------------------ |
-| frontendProjectName\* | string | -       | The name of your React application project (required). |
-| backendProjectName\*  | string | -       | The name of your tRPC backend project (required).      |
-| auth\*                | string | "IAM"   | Authentication strategy. Options: "IAM", "None"        |
+| Parameter       | Type   | Default | Description                                            |
+| --------------- | ------ | ------- | ------------------------------------------------------ |
+| sourceProject\* | string | -       | The name of your React application project (required). |
+| targetProject\* | string | -       | The name of your tRPC backend project (required).      |
+| auth\*          | string | "IAM"   | Authentication strategy. Options: "IAM", "None"        |
 
 \*Required parameter
 

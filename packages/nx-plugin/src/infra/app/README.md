@@ -21,7 +21,7 @@ Then generate your application:
 
 1. Open the NX Console in VSCode
 2. Click on "Generate"
-3. Search for "infra#app"
+3. Search for "ts#infra"
 4. Fill in the required parameters in the form
 5. Click "Run"
 
@@ -30,13 +30,13 @@ Then generate your application:
 Generate the application:
 
 ```bash
-nx g @aws/nx-plugin:infra#app my-infra --directory=apps/infrastructure
+nx g @aws/nx-plugin:ts#infra my-infra --directory=apps/infrastructure
 ```
 
 You can also perform a dry-run to see what files would be generated without actually creating them:
 
 ```bash
-nx g @aws/nx-plugin:infra#app my-infra --directory=apps/infrastructure --dry-run
+nx g @aws/nx-plugin:ts#infra my-infra --directory=apps/infrastructure --dry-run
 ```
 
 ## Input Parameters

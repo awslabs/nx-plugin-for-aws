@@ -40,33 +40,30 @@ export const smokeTest = (
         { ...opts, prefixWithPackageManagerCmd: false, retry: true },
       ); // This can sometimes fail intermittently so add retries
       await runCLI(
-        `generate @aws/nx-plugin:infra#app --name=infra --no-interactive`,
+        `generate @aws/nx-plugin:ts#infra --name=infra --no-interactive`,
         opts,
       );
       await runCLI(
-        `generate @aws/nx-plugin:cloudscape-website#app --name=website --no-interactive`,
+        `generate @aws/nx-plugin:ts#cloudscape-website --name=website --no-interactive`,
         opts,
       );
       await runCLI(
-        `generate @aws/nx-plugin:trpc#backend --apiName=my-api --no-interactive`,
+        `generate @aws/nx-plugin:ts#trpc-api --apiName=my-api --no-interactive`,
         opts,
       );
       await runCLI(
-        `generate @aws/nx-plugin:cloudscape-website#cognito-auth --project=@e2e-test/website --cognitoDomain=test --no-interactive`,
+        `generate @aws/nx-plugin:ts#cloudscape-website#auth --project=@e2e-test/website --cognitoDomain=test --no-interactive`,
         opts,
       );
       await runCLI(
-        `generate @aws/nx-plugin:trpc#react --frontendProjectName=@e2e-test/website --backendProjectName=@e2e-test/my-api-backend --no-interactive`,
+        `generate @aws/nx-plugin:api-connection --sourceProject=@e2e-test/website --targetProject=@e2e-test/my-api-backend --no-interactive`,
         opts,
       );
       await runCLI(
         `generate @aws/nx-plugin:py#fast-api --name=py-api --no-interactive`,
         opts,
       );
-      await runCLI(
-        `generate @aws/nx-plugin:license --no-interactive`,
-        opts,
-      );
+      await runCLI(`generate @aws/nx-plugin:license --no-interactive`, opts);
 
       // Wire up website, cognito and trpc api
       writeFileSync(

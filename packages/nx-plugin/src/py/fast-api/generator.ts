@@ -92,6 +92,11 @@ export const fastApiProjectGenerator = async (
     },
   };
 
+  projectConfig.metadata = {
+    apiName: schema.name,
+    apiType: 'fast-api',
+  } as any;
+
   projectConfig.targets = sortProjectTargets(projectConfig.targets);
   updateProjectConfiguration(tree, normalizedName, projectConfig);
 

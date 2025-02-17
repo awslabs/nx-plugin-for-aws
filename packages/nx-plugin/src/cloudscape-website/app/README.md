@@ -21,7 +21,7 @@ Then generate your application:
 
 1. Open the NX Console in VSCode
 2. Click on "Generate"
-3. Search for "cloudscape-website#app"
+3. Search for "ts#cloudscape-website"
 4. Fill in the required parameters in the form
 5. Click "Run"
 
@@ -30,13 +30,13 @@ Then generate your application:
 Generate the application:
 
 ```bash
-nx g @aws/nx-plugin:cloudscape-website#app my-website --directory=apps/web
+nx g @aws/nx-plugin:ts#cloudscape-website my-website --directory=apps/web
 ```
 
 You can also perform a dry-run to see what files would be generated without actually creating them:
 
 ```bash
-nx g @aws/nx-plugin:cloudscape-website#app my-website --directory=apps/web --dry-run
+nx g @aws/nx-plugin:ts#cloudscape-website my-website --directory=apps/web --dry-run
 ```
 
 Both methods will create a new Cloudscape website application in `apps/web/my-website` with all the necessary configuration and infrastructure code.

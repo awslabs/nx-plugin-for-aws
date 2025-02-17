@@ -168,4 +168,20 @@ describe('fastapi project generator', () => {
 
     expect(httpApiContent).toContain('export class TestApi extends HttpApi');
   });
+
+  it('should set project metadata', async () => {
+    await fastApiProjectGenerator(tree, {
+      name: 'test-api',
+      directory: 'apps',
+    });
+
+    const config = JSON.parse(
+      tree.read('apps/test_api/project.json', 'utf-8'),
+    );
+    // Verify project metadata
+    expect(config.metadata).toEqual({
+      apiName: 'test-api',
+      apiType: 'fast-api',
+    });
+  });
 });

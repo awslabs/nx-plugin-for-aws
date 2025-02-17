@@ -39,7 +39,7 @@ Then add authentication:
 
 1. Open the NX Console in VSCode
 2. Click on "Generate"
-3. Search for "cloudscape-website#cognito-auth"
+3. Search for "ts#cloudscape-website#cognito-auth"
 4. Fill in the required parameters:
    - project: Your existing Cloudscape application name
    - allowSignup: Whether to enable self-signup (optional)
@@ -50,19 +50,19 @@ Then add authentication:
 Add authentication to your existing Cloudscape application:
 
 ```bash
-nx g @aws/nx-plugin:cloudscape-website#cognito-auth --project=my-cloudscape-app --cognito-domain=<your-domain-prefix>
+nx g @aws/nx-plugin:ts#cloudscape-website#cognito-auth --project=my-cloudscape-app --cognito-domain=<your-domain-prefix>
 ```
 
 Enable self-signup:
 
 ```bash
-nx g @aws/nx-plugin:cloudscape-website#cognito-auth --project=my-cloudscape-app --allowSignup=true --cognito-domain=<your-domain-prefix>
+nx g @aws/nx-plugin:ts#cloudscape-website#cognito-auth --project=my-cloudscape-app --allowSignup=true --cognito-domain=<your-domain-prefix>
 ```
 
 You can also perform a dry-run to see what files would be generated without actually creating them:
 
 ```bash
-nx g @aws/nx-plugin:cloudscape-website#cognito-auth --project=my-cloudscape-app --cognito-domain=<your-domain-prefix> --dry-run
+nx g @aws/nx-plugin:ts#cloudscape-website#cognito-auth --project=my-cloudscape-app --cognito-domain=<your-domain-prefix> --dry-run
 ```
 
 All methods will add Cognito authentication to your existing Cloudscape website application with all the necessary components and infrastructure code.

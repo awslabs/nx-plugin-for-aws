@@ -22,7 +22,7 @@ describe('api connection generator', () => {
   });
 
   describe('generator', () => {
-    it('should call trpcReactGenerator for react -> trpc#api connection', async () => {
+    it('should call trpcReactGenerator for react -> ts#trpc-api connection', async () => {
       // Setup a React project
       tree.write('apps/frontend/src/main.tsx', '');
       tree.write(
@@ -157,13 +157,13 @@ describe('api connection generator', () => {
           auth: 'IAM',
         }),
       ).rejects.toThrow(
-        'This generator does not support a connection from api1 (trpc#api) to api2 (trpc#api)',
+        'This generator does not support a connection from api1 (ts#trpc-api) to api2 (ts#trpc-api)',
       );
     });
   });
 
   describe('determineProjectType', () => {
-    it('should identify trpc#api project by metadata', () => {
+    it('should identify ts#trpc-api project by metadata', () => {
       tree.write(
         'apps/api/project.json',
         JSON.stringify({
@@ -175,10 +175,10 @@ describe('api connection generator', () => {
         }),
       );
 
-      expect(determineProjectType(tree, 'api')).toBe('trpc#api');
+      expect(determineProjectType(tree, 'api')).toBe('ts#trpc-api');
     });
 
-    it('should identify trpc#api project by AppRouter export in index.ts', () => {
+    it('should identify ts#trpc-api project by AppRouter export in index.ts', () => {
       tree.write(
         'apps/api/project.json',
         JSON.stringify({
@@ -192,10 +192,10 @@ describe('api connection generator', () => {
       );
       tree.write('apps/api/src/router.ts', 'export type AppRouter = any;');
 
-      expect(determineProjectType(tree, 'api')).toBe('trpc#api');
+      expect(determineProjectType(tree, 'api')).toBe('ts#trpc-api');
     });
 
-    it('should identify trpc#api project by AppRouter export in router.ts', () => {
+    it('should identify ts#trpc-api project by AppRouter export in router.ts', () => {
       tree.write(
         'apps/api/project.json',
         JSON.stringify({
@@ -206,10 +206,10 @@ describe('api connection generator', () => {
       tree.write('apps/api/src/index.ts', '');
       tree.write('apps/api/src/router.ts', 'export type AppRouter = any;');
 
-      expect(determineProjectType(tree, 'api')).toBe('trpc#api');
+      expect(determineProjectType(tree, 'api')).toBe('ts#trpc-api');
     });
 
-    it('should identify trpc#api project by AppRouter export in lambdas/router.ts', () => {
+    it('should identify ts#trpc-api project by AppRouter export in lambdas/router.ts', () => {
       tree.write(
         'apps/api/project.json',
         JSON.stringify({
@@ -223,7 +223,7 @@ describe('api connection generator', () => {
         'export type AppRouter = any;',
       );
 
-      expect(determineProjectType(tree, 'api')).toBe('trpc#api');
+      expect(determineProjectType(tree, 'api')).toBe('ts#trpc-api');
     });
 
     it('should identify react project by main.tsx file', () => {

@@ -15,7 +15,7 @@ import { hasExportDeclaration } from '../utils/ast';
 /**
  * List of supported source and target project types for api connections
  */
-const SUPPORTED_PROJECT_TYPES = ['trpc#api', 'react'] as const;
+const SUPPORTED_PROJECT_TYPES = ['ts#trpc-api', 'react'] as const;
 
 type ProjectType = (typeof SUPPORTED_PROJECT_TYPES)[number];
 
@@ -25,7 +25,7 @@ type Connection = { source: ProjectType; target: ProjectType };
  * Enumerates the supported project connections
  */
 const SUPPORTED_CONNECTIONS = [
-  { source: 'react', target: 'trpc#api' },
+  { source: 'react', target: 'ts#trpc-api' },
 ] satisfies Connection[];
 
 type ConnectionKey = (typeof SUPPORTED_CONNECTIONS)[number] extends infer C
@@ -38,7 +38,7 @@ type ConnectionKey = (typeof SUPPORTED_CONNECTIONS)[number] extends infer C
  * Generators for each connection type
  */
 const CONNECTION_GENERATORS = {
-  'react -> trpc#api': (tree, options) =>
+  'react -> ts#trpc-api': (tree, options) =>
     trpcReactGenerator(tree, {
       frontendProjectName: options.sourceProject,
       backendProjectName: options.targetProject,
@@ -98,7 +98,7 @@ export const determineProjectType = (
   // eg. react website is more specific than typescript project
 
   if (isTrpcApi(tree, projectConfiguration)) {
-    return 'trpc#api';
+    return 'ts#trpc-api';
   }
 
   if (isReact(tree, projectConfiguration)) {

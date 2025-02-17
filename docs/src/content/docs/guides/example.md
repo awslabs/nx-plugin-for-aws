@@ -74,7 +74,7 @@ To add components to your project, you can use either the UI in your IDE (Nx Con
 
 1. Select the **Nx** console plugin on the left, and click **Generate (UI)**. The component generator selection list is displayed.
    ![VSCode Generate UI](/img/nx-generate-ui.png)
-2. Choose the generator for the component you want to add. For example, `infra#app`.
+2. Choose the generator for the component you want to add. For example, `ts#infra`.
    ![Component generator](/img/nx-component-generator.png)
 3. Fill in the details. The terminal window in the bottom runs a dry run and shows you what files will be created.
 4. To proceed, click **Generate**.
@@ -97,7 +97,7 @@ To add components to your project, you can use either the UI in your IDE (Nx Con
    For example for infra:
 
    ```
-   pnpm exec nx generate @aws/nx-plugin:infra#app
+   pnpm exec nx generate @aws/nx-plugin:ts#infra
    ```
 
 2. Follow the prompts to generate the component and add it to your project.
