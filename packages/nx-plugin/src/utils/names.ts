@@ -2,6 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+import camelCase from 'lodash.camelcase';
 import kebabCase from 'lodash.kebabcase';
 import snakeCase from 'lodash.snakecase';
 
@@ -24,4 +25,9 @@ export const toKebabCase = (str?: string): string =>
   str?.split('/').map(kebabCase).join('/');
 
 export const toSnakeCase = (str?: string): string =>
-    str?.split('/').map(snakeCase).join('/');
+  str?.split('/').map(snakeCase).join('/');
+
+export const upperFirst = (str: string): string =>
+  str.charAt(0).toUpperCase() + str.slice(1);
+
+export const pascalCase = (str: string): string => upperFirst(camelCase(str));
