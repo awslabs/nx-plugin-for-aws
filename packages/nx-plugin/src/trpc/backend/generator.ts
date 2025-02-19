@@ -145,8 +145,8 @@ export async function trpcBackendGenerator(
         executor: 'nx:run-commands',
         outputs: [`{workspaceRoot}/dist/${backendRoot}/bundle`],
         options: {
-          command: `esbuild ${backendRoot}/src/index.ts --bundle --outfile=dist/${backendRoot}/bundle/index.js --platform=node --format=cjs`
-        }
+          command: `esbuild ${backendRoot}/src/router.ts --bundle --outfile=dist/${backendRoot}/bundle/index.js --platform=node --format=cjs`,
+        },
       };
       config.targets.build.dependsOn = [
         ...(config.targets.build.dependsOn ?? []),
@@ -154,6 +154,24 @@ export async function trpcBackendGenerator(
       ];
 
       config.targets = sortProjectTargets(config.targets);
+      return config;
+    },
+  );
+
+  updateJson(
+    tree,
+    joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'project.json'),
+    (config: ProjectConfiguration) => {
+      if (!config.targets) {
+        config.targets = {};
+      }
+      if (!config.targets.build) {
+        config.targets.build = {};
+      }
+      config.targets.build.dependsOn = [
+        ...(config.targets.build.dependsOn ?? []),
+        `${backendProjectName}:build`,
+      ];
       return config;
     },
   );
