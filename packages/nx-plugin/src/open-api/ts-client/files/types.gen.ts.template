@@ -1,0 +1,60 @@
+<%_
+const docString = (model, padding) => {
+  if (model.description || model.deprecated) {
+    return `${padding}/**${model.description ? `\n${padding} * ${model.description}` : ''}${model.deprecated ? `\n${padding} * @deprecated` : ''}\n${padding} */\n`;
+  }
+  return undefined;
+}
+const upperFirst = (str) => str.charAt(0).toUpperCase() + str.slice(1);
+const uniqStrings = (strings) => {
+  const set = new Set();
+  return strings.filter((str) => {
+    if (set.has(str)) {
+      return false;
+    }
+    set.add(str);
+    return true;
+  });
+};
+_%>
+<%_ models.forEach((model) => { _%>
+<%_ const isComposite = model.export === "one-of" || model.export === "any-of" || model.export === "all-of"; _%>
+<%_ if (model.export === "enum") { _%>
+<%- docString(model, '') %>export type <%= model.name %> =
+<%_ model.enum.forEach((enumMember, i) => { _%>
+  | '<%- enumMember.value %>'
+<%_ }); _%>
+<%_ } else if (isComposite) { _%>
+<%- docString(model, '') %>export type <%- model.name %> =<% model.properties.forEach((composedType, i) => { %><% if (i > 0) { %><% if (model.export === "all-of") { %> &<% } else { %> |<% } %><% } %> <%- composedType.typescriptType %><% }); %>;
+<%_ } else { _%>
+<%- docString(model, '') %>export type <%= model.name %> = <% if (model.isNullable) { %>null | <% } %>{
+<%_ if (model.export === "dictionary" && model.link) { _%>
+<%- docString(model.link, '  ') %>  [key: string]: <%- model.link.typescriptType %>;
+<%_ } _%>
+<%_ model.properties.forEach((property) => { _%>
+<%- docString(property, '  ') %>  <%= property.isReadOnly ? 'readonly ' : '' %><%= property.typescriptName %><%= property.isRequired ? '' : '?' %>: <%- property.typescriptType %><%= property.isNullable ? ' | null' : '' %>;
+<%_ }); _%>
+};
+<%_ } _%>
+<%_ }); _%>
+<%_ let allErrorResponseCodes = new Set(); _%>
+<%_ allOperations.forEach((op) => { _%>
+<%_ if (op.parameters && op.parameters.length > 0) { _%>
+<%_ const parameterComponents = uniqStrings(op.parameters.filter(p => p.in !== 'body').map(p => {
+    return `${op.operationIdPascalCase}Request${upperFirst(p.in)}Parameters`;
+})).concat(op.explicitRequestBodyParameter ? [`${op.operationIdPascalCase}RequestBodyParameters`] : (op.parametersBody ? [op.parametersBody.typescriptType] : [])); _%>
+
+export type <%- op.operationIdPascalCase %>Request = <%- parameterComponents.join(' & ') %><% if ((op.parameters.length === 1 && op.parametersBody && !op.parametersBody.isRequired) || op.parameters.length === 0) { %> | undefined<% } %>;
+<%_ } _%>
+<%_ const errorResponses = op.responses.filter(response => !op.result || op.result.code !== response.code); _%>
+<%_ errorResponses.forEach((response) => { allErrorResponseCodes.add(response.code) _%>
+export type <%- op.operationIdPascalCase %><%- response.code === 'default' ? 'Default' : response.code %>Error = {
+  status: <%- response.code === 'default' ? 'number' : (typeof response.code === "string" ? `_${response.code}` : response.code) %>;
+  error: <%- response.typescriptType %>;
+};
+<%_ }); _%>
+export type <%- op.operationIdPascalCase %>Error = <%- errorResponses.length === 0 ? 'never' : errorResponses.map(r => `${op.operationIdPascalCase}${r.code === 'default' ? 'Default' : r.code}Error`).join(' | ') %>;
+<%_ }); _%>
+<%_ ['1XX', '2XX', '3XX', '4XX', '5XX'].filter(code => allErrorResponseCodes.has(code)).forEach((code) => { _%>
+export type _<%- code %> = <%- new Array(100).fill(Number(code.charAt(0)) * 100).map((n, i) => `${n + i}`).join(' | ') %>;
+<%_ }); _%>

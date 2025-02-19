@@ -14,11 +14,12 @@ import uniqBy from 'lodash.uniqby';
 import snakeCase from 'lodash.snakecase';
 import trim from 'lodash.trim';
 import { resolveIfRef, isRef, splitRef } from './refs';
-import { pascalCase } from '../../utils/names';
+import { pascalCase, toClassName, upperFirst } from '../../utils/names';
 import {
   toPythonName,
   toTypeScriptType,
   toPythonType,
+  toTypeScriptName,
 } from './codegen-data/languages';
 import {
   CodeGenData,
@@ -28,6 +29,7 @@ import {
   COLLECTION_TYPES,
   COMPOSED_SCHEMA_TYPES,
   PRIMITIVE_TYPES,
+  Operation,
 } from './codegen-data/types';
 
 /**
@@ -42,11 +44,13 @@ export const buildOpenApiCodeGenData = async (
   // Build the initial data, which we will augment with additional information
   const data = await buildInitialCodeGenData(spec);
 
+  // Ensure the models have their links set when they are arrays/dictionaries
+  ensureModelLinks(spec, data);
+
   // Mutate the models with enough data to render composite models in the templates
   ensureCompositeModels(data);
 
-  // Ensure the models have their links set when they are arrays/dictionaries
-  ensureModelLinks(spec, data);
+  const modelsByName = Object.fromEntries(data.models.map((m) => [m.name, m]));
 
   // Augment operations with additional data
   data.services.forEach((service) => {
@@ -59,6 +63,12 @@ export const buildOpenApiCodeGenData = async (
       const specOp = (spec as any)?.paths?.[op.path]?.[
         op.method.toLowerCase()
       ] as OpenAPIV3.OperationObject | undefined;
+
+      op.name = op.id ?? op.name;
+      (op as any).uniqueName = op.name;
+      if (specOp['x-aws-nx-deduplicated-op-id']) {
+        (op as any).uniqueName = specOp['x-aws-nx-deduplicated-op-id'];
+      }
 
       // Add vendor extensions
       (op as any).vendorExtensions = (op as any).vendorExtensions ?? {};
@@ -73,10 +83,28 @@ export const buildOpenApiCodeGenData = async (
         );
 
         op.responses.forEach((response) => {
+          // Validate that the response is not a composite schema of primitives since we cannot determine what
+          // the type of the response is (it all comes back as text!)
+          if (
+            response.export === 'reference' &&
+            COMPOSED_SCHEMA_TYPES.has(modelsByName[response.type]?.export)
+          ) {
+            const composedPrimitives = (
+              modelsByName[response.type] as any
+            ).composedPrimitives.filter(
+              (p) => !['array', 'dictionary'].includes(p.export),
+            );
+            if (composedPrimitives.length > 0) {
+              throw new Error(
+                `Operation "${op.method} ${op.path}" returns a composite schema of primitives with ${camelCase(modelsByName[response.type].export)}, which cannot be distinguished at runtime`,
+              );
+            }
+          }
+
           const matchingSpecResponse = specOp.responses[`${response.code}`];
 
-          // parseOpenapi does not distinguish between returning an "any" or returning "void"
-          // We distinguish this by looking back each response in the spec, and checking whether it
+          // @hey-api/openapi-ts does not distinguish between returning an "any" or returning "void"
+          // We distinguish this by looking back at each response in the spec, and checking whether it
           // has content
           if (matchingSpecResponse) {
             // Resolve the ref if necessary
@@ -89,9 +117,10 @@ export const buildOpenApiCodeGenData = async (
               // Add the response media types
               (response as any).mediaTypes = Object.keys(specResponse.content);
 
-              const responseSchema =
+              const responseContent =
                 specResponse.content?.['application/json'] ??
                 Object.values(specResponse.content)[0];
+              const responseSchema = resolveIfRef(spec, responseContent.schema);
               if (responseSchema) {
                 mutateWithOpenapiSchemaProperties(
                   spec,
@@ -102,11 +131,6 @@ export const buildOpenApiCodeGenData = async (
             }
           }
         });
-
-        // If there's a user-specified operation id, prefer this over the generated name
-        if (op.id) {
-          op.name = camelCase(op.id);
-        }
       }
 
       const specParametersByName = Object.fromEntries(
@@ -135,11 +159,8 @@ export const buildOpenApiCodeGenData = async (
         }
 
         if (parameter.in === 'body') {
-          // Parameter name for the body is it's type in camelCase
-          parameter.name =
-            parameter.export === 'reference'
-              ? camelCase(parameter.type)
-              : 'body';
+          // Parameter name for the body is 'body'
+          parameter.name = 'body';
           parameter.prop = 'body';
 
           // The request body is not in the "parameters" section of the openapi spec so we won't have added the schema
@@ -190,14 +211,30 @@ export const buildOpenApiCodeGenData = async (
       // Add language types to response models
       (op.responses ?? []).forEach(mutateModelWithAdditionalTypes);
 
+      // Sort responses by code
+      op.responses = orderBy(op.responses, (r) => r.code);
+      // Result is the lowest successful response, otherwise is the 2XX or default response
+      const result = op.responses.find(
+        (r) => typeof r.code === 'number' && r.code >= 200 && r.code < 300,
+      );
+      (op as any).result =
+        result ??
+        op.responses.find((r) => r.code === '2XX' || r.code === 'default');
+
       // Add variants of operation name
-      (op as any).operationIdPascalCase = pascalCase(op.name);
-      (op as any).operationIdKebabCase = kebabCase(op.name);
-      (op as any).operationIdSnakeCase = toPythonName('operation', op.name);
+      (op as any).operationIdPascalCase = pascalCase((op as any).uniqueName);
+      (op as any).operationIdKebabCase = kebabCase((op as any).uniqueName);
+      (op as any).operationIdSnakeCase = toPythonName(
+        'operation',
+        (op as any).uniqueName,
+      );
     });
 
     // Lexicographical ordering of operations
-    service.operations = orderBy(service.operations, (op) => op.name);
+    service.operations = orderBy(
+      service.operations,
+      (op) => (op as any).uniqueName,
+    );
 
     // Add the models to import
     (service as any).modelImports = orderBy(
@@ -212,6 +249,98 @@ export const buildOpenApiCodeGenData = async (
     (service as any).classNameSnakeCase = snakeCase((service as any).className);
     (service as any).nameSnakeCase = snakeCase(service.name);
   });
+
+  // All operations across all services
+  const allOperations = uniqBy(
+    data.services.flatMap((s) => s.operations),
+    (o) => (o as any).uniqueName,
+  );
+
+  // Add additional models for operation parameters
+  data.models = [
+    ...data.models,
+    ...allOperations.flatMap((op: Operation): Model[] => {
+      if (op.parameters && op.parameters.length > 0) {
+        // Build a collection of request parameter models to create based on their position (ie 'in' in the openapi spec, eg body, query, path, header, etc)
+        const parametersByPosition: { [position: string]: Model[] } = {};
+
+        op.parameters
+          .filter(
+            // We filter out (return false for) request bodies which we "inline" - ie we don't create a property which points to the body, the request will only be the body itself
+            (p) => {
+              // Always create models for non-body parameters
+              if (p.in !== 'body') {
+                return true;
+              }
+
+              // If the body is the only parameter, we can inline it no matter the type
+              if (op.parameters.length === 1) {
+                return false;
+              }
+
+              // We inline object bodies, so long as they aren't dictionaries (as dictionary keys could clash with other parameters),
+              // and so long as they don't have a property name that clashes with another parameter
+              const hasClashingPropertyName = (
+                modelsByName?.[p.type]?.properties ?? []
+              ).some((prop) =>
+                op.parameters.some((param) => param.name === prop.name),
+              );
+              if (
+                p.export === 'reference' &&
+                modelsByName?.[p.type]?.export !== 'dictionary' &&
+                !hasClashingPropertyName
+              ) {
+                return false;
+              }
+
+              // Don't inline anything else
+              return true;
+            },
+          )
+          .forEach((parameter) => {
+            parametersByPosition[parameter.in] = [
+              ...(parametersByPosition[parameter.in] ?? []),
+              parameter,
+            ];
+          });
+
+        // Ensure that if we have an explicit body parameter, it's called "body"
+        const requestBodyParameter = parametersByPosition['body']?.[0];
+        if (requestBodyParameter) {
+          requestBodyParameter.name = 'body';
+          (requestBodyParameter as any).prop = 'body';
+        }
+
+        (op as any).explicitRequestBodyParameter = requestBodyParameter;
+
+        return Object.entries(parametersByPosition).map(
+          ([position, parameters]) => {
+            const name = `${(op as any).operationIdPascalCase}Request${upperFirst(position)}Parameters`;
+            return {
+              $refs: [],
+              base: name,
+              description: op.description,
+              enum: null,
+              enums: null,
+              export: 'interface',
+              imports: [],
+              in: '',
+              link: undefined,
+              name,
+              properties: parameters,
+              template: '',
+              type: name,
+              isDefinition: false,
+              isNullable: false,
+              isReadOnly: false,
+              isRequired: true,
+            };
+          },
+        );
+      }
+      return [] as Model[];
+    }),
+  ];
 
   // Augment models with additional data
   data.models.forEach((model) => {
@@ -257,26 +386,37 @@ export const buildOpenApiCodeGenData = async (
           const specProperty = resolveIfRef(spec, matchingSpecProperty);
           mutateWithOpenapiSchemaProperties(spec, property, specProperty);
         }
-
-        // Add language-specific names/types
-        mutateModelWithAdditionalTypes(property);
       });
     }
+
+    // Augment properties with additional data
+    model.properties.forEach((property) => {
+      // Add language-specific names/types
+      mutateModelWithAdditionalTypes(property);
+    });
   });
 
   // Order models lexicographically by name
-  data.models = orderBy(data.models, (d) => d.meta.name);
+  data.models = orderBy(data.models, (d) => d.name);
 
   // Order services so default appears first, then otherwise by name
   data.services = orderBy(data.services, (s) =>
     s.name === 'Default' ? '' : s.name,
   );
 
-  // All operations across all services
-  const allOperations = uniqBy(
-    data.services.flatMap((s) => s.operations),
-    (o) => o.name,
-  );
+  // All operations by tags
+  const operationsByTag: { [tag: string]: Operation[] } = {};
+  const untaggedOperations: Operation[] = [];
+  allOperations.forEach((op) => {
+    const tags = (op as any).tags;
+    if (tags && tags.length > 0) {
+      tags.map(camelCase).forEach((tag: string) => {
+        operationsByTag[tag] = [...(operationsByTag[tag] ?? []), op];
+      });
+    } else {
+      untaggedOperations.push(op);
+    }
+  });
 
   // Add top level vendor extensions
   const vendorExtensions: { [key: string]: any } = {};
@@ -284,9 +424,12 @@ export const buildOpenApiCodeGenData = async (
 
   return {
     ...data,
+    operationsByTag,
+    untaggedOperations,
     info: spec.info,
     allOperations,
     vendorExtensions,
+    className: toClassName(spec.info.title),
   };
 };
 
@@ -383,7 +526,7 @@ const mutateWithOpenapiSchemaProperties = (
   // Also apply to array items recursively
   if (
     model.export === 'array' &&
-    model.link &&
+    modelLink &&
     'items' in schema &&
     schema.items &&
     !visited.has(modelLink)
@@ -474,6 +617,23 @@ const ensureModelLinks = (spec: Spec, data: ClientData) => {
             specParameterSchema,
             visited,
           );
+        } else if (parameter.in === 'body') {
+          // Body is not in the "parameters" section of the OpenAPI spec so we handle it in an explicit case here
+          const specBody = resolveIfRef(spec, specOp?.requestBody);
+          const specBodySchema = resolveIfRef(
+            spec,
+            specBody?.content?.[parameter.mediaType]?.schema,
+          );
+
+          if (specBodySchema) {
+            _ensureModelLinks(
+              spec,
+              modelsByName,
+              parameter,
+              specBodySchema,
+              visited,
+            );
+          }
         }
       });
     });
@@ -583,13 +743,40 @@ const mutateModelWithCompositeProperties = (
     const modelsByName = Object.fromEntries(
       data.models.map((m) => [m.name, m]),
     );
-    const composedModels = composedModelReferences.flatMap((r) =>
+    let composedModels = composedModelReferences.flatMap((r) =>
       modelsByName[r.type] ? [modelsByName[r.type]] : [],
     );
     // Recursively resolve composed properties of properties, to ensure mixins for all-of include all recursive all-of properties
     composedModels.forEach((m) =>
       mutateModelWithCompositeProperties(data, m, visited),
     );
+
+    // Enums are models, however they are serialised as primitives and so should be moved to the primitives list
+    composedPrimitives.push(
+      ...composedModels.filter((m) => m.export === 'enum'),
+    );
+    composedModels = composedModels.filter((m) => m.export !== 'enum');
+
+    // When multiple arrays of non-primitives are composed using allOf/oneOf/anyOf, it's not possible to distinguish at runtime which
+    // type it is, and so we validate this away.
+    // TODO: consider honouring more advanced OpenAPI spec features like "discriminators" which can help for this case, but in practice
+    // users are unlikely to model their API this way
+    const isPrimitiveArray = (m: Model) => {
+      if (m.link && ['array', 'dictionary'].includes(m.export)) {
+        return isPrimitiveArray(flattenModelLink(m.link));
+      }
+      return (
+        PRIMITIVE_TYPES.has(m.type) && !['date', 'date-time'].includes(m.format)
+      );
+    };
+    const arrayComposedModels = composedPrimitives.filter(
+      (m) => m.export === 'array' && !isPrimitiveArray(m),
+    );
+    if (arrayComposedModels.length > 1) {
+      throw new Error(
+        `Schema "${model.name}" defines ${camelCase(model.export)} with multiple array types which cannot be distinguished at runtime.`,
+      );
+    }
 
     // For all-of models, we include all composed model properties.
     if (model.export === 'all-of') {
@@ -612,7 +799,7 @@ const mutateModelWithAdditionalTypes = (model: Model) => {
   // Trim any surrounding quotes from name
   model.name = trim(model.name, `"'`);
 
-  (model as any).typescriptName = model.name;
+  (model as any).typescriptName = toTypeScriptName(model.name);
   (model as any).typescriptType = toTypeScriptType(model);
   (model as any).pythonName = toPythonName('property', model.name);
   (model as any).pythonType = toPythonType(model);

@@ -4,6 +4,7 @@
  */
 import snakeCase from 'lodash.snakecase';
 import { PRIMITIVE_TYPES, flattenModelLink, Model } from './types';
+import camelCase from 'lodash.camelcase';
 
 const toTypescriptPrimitive = (property: Model): string => {
   if (
@@ -37,6 +38,10 @@ export const toTypeScriptType = (property: Model): string => {
     default:
       return property.type;
   }
+};
+
+export const toTypeScriptName = (name: string): string => {
+  return camelCase(name);
 };
 
 const toPythonPrimitive = (property: Model): string => {

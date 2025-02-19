@@ -7,6 +7,7 @@ import type { OpenAPIV3 } from 'openapi-types';
 import { isRef, resolveIfRef, resolveRef, splitRef } from './refs';
 import { Spec } from './types';
 import { pascalCase, upperFirst } from '../../utils/names';
+import camelCase from 'lodash.camelcase';
 
 interface SubSchema {
   readonly nameParts: string[];
@@ -185,11 +186,46 @@ export const normaliseOpenApiSpecForCodeGen = (inSpec: Spec): Spec => {
     };
   }
 
+  const seenOperationIds = new Set();
+  const seenOperationIdsByTag: { [tag: string]: Set<string> } = {};
+  const seenOperationIdCounters: { [opId: string]: number } = {};
+
   // "Hoist" inline request and response schemas
   Object.entries(spec.paths ?? {}).forEach(([path, pathOps]) =>
     Object.entries(pathOps ?? {}).forEach(([method, op]) => {
       const operation = resolveIfRef(spec, op);
       if (operation && typeof operation === 'object') {
+        // Allow operations to have the same id
+        const originalOperationId = camelCase(
+          (operation as any).operationId ?? `${method}-${path}`,
+        );
+        let deduplicatedOpId = originalOperationId;
+
+        if (seenOperationIds.has(originalOperationId)) {
+          const counter = seenOperationIdCounters[originalOperationId] ?? 0;
+          deduplicatedOpId = `${originalOperationId}_${counter}`;
+          seenOperationIdCounters[originalOperationId] = counter + 1;
+
+          (operation as any)['x-aws-nx-deduplicated-op-id'] = deduplicatedOpId;
+        }
+
+        seenOperationIds.add(deduplicatedOpId);
+        ((operation as any).tags ?? []).forEach((tag) => {
+          if (
+            seenOperationIdsByTag[tag] &&
+            seenOperationIdsByTag[tag].has(originalOperationId)
+          ) {
+            throw new Error(
+              `Operations with the same tag (${tag}) cannot have the same operationId (${originalOperationId})`,
+            );
+          }
+
+          seenOperationIdsByTag[tag] = new Set([
+            ...(seenOperationIdsByTag[tag] ?? []),
+            originalOperationId,
+          ]);
+        });
+
         if ('responses' in operation) {
           Object.entries(operation.responses ?? {}).forEach(([code, res]) => {
             const response = resolveIfRef(spec, res);
@@ -198,9 +234,12 @@ export const normaliseOpenApiSpecForCodeGen = (inSpec: Spec): Spec => {
             if (
               jsonResponseSchema &&
               !isRef(jsonResponseSchema) &&
-              ['object', 'array'].includes(jsonResponseSchema.type!)
+              (['object', 'array'].includes(jsonResponseSchema.type!) ||
+                isCompositeSchema(jsonResponseSchema) ||
+                (jsonResponseSchema?.type === 'string' &&
+                  jsonResponseSchema.enum))
             ) {
-              const schemaName = `${pascalCase(operation.operationId ?? `${method}-${path}`)}${code}Response`;
+              const schemaName = `${upperFirst(deduplicatedOpId)}${code}Response`;
               spec.components!.schemas![schemaName] = jsonResponseSchema;
               response!.content!['application/json'].schema = {
                 $ref: `#/components/schemas/${schemaName}`,
@@ -215,9 +254,11 @@ export const normaliseOpenApiSpecForCodeGen = (inSpec: Spec): Spec => {
           if (
             jsonRequestSchema &&
             !isRef(jsonRequestSchema) &&
-            ['object', 'array'].includes(jsonRequestSchema.type!)
+            (['object', 'array'].includes(jsonRequestSchema.type!) ||
+              isCompositeSchema(jsonRequestSchema) ||
+              (jsonRequestSchema?.type === 'string' && jsonRequestSchema.enum))
           ) {
-            const schemaName = `${pascalCase(operation.operationId ?? `${method}-${path}`)}RequestContent`;
+            const schemaName = `${upperFirst(deduplicatedOpId)}RequestContent`;
             spec.components!.schemas![schemaName] = jsonRequestSchema;
             requestBody!.content!['application/json'].schema = {
               $ref: `#/components/schemas/${schemaName}`,

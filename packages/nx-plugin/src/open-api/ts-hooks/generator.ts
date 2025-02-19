@@ -6,6 +6,7 @@ import { Tree } from '@nx/devkit';
 import { OpenApiHooksSchema } from './schema';
 import { parseOpenApiSpec } from '../utils/parse';
 import { buildOpenApiCodeGenData } from '../utils/codegen-data';
+import { generateOpenApiTsClient } from '../ts-client/generator';
 
 /**
  * Generates typescript hooks from an openapi spec
@@ -16,9 +17,11 @@ export const openApiTsHooksGenerator = async (
 ) => {
   const spec = await parseOpenApiSpec(tree, options.openApiSpecPath);
 
-  await buildOpenApiCodeGenData(spec);
+  const data = await buildOpenApiCodeGenData(spec);
 
-  // TODO: generate files!
+  generateOpenApiTsClient(tree, data, options.outputPath);
+
+  // TODO: generate hooks which wrap the client
 };
 
 export default openApiTsHooksGenerator;

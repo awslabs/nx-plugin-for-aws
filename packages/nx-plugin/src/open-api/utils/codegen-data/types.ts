@@ -10,8 +10,11 @@ export type Operation = ClientData['services'][number]['operations'][number];
 export type Model = ClientData['models'][number];
 
 export interface CodeGenData extends ClientData {
+  className: string;
   info: OpenAPIV3.InfoObject | OpenAPIV3_1.InfoObject;
   allOperations: Operation[];
+  operationsByTag: { [tag: string]: Operation[] };
+  untaggedOperations: Operation[];
   vendorExtensions: { [key: string]: any };
 }
 
