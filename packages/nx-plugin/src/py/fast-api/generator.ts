@@ -40,13 +40,11 @@ export const fastApiProjectGenerator = async (
 ): Promise<GeneratorCallback> => {
   await sharedConstructsGenerator(tree);
 
-  const { dir, normalizedName, normalizedModuleName, fullyQualifiedName } = getPyProjectDetails(
-    tree,
-    {
+  const { dir, normalizedName, normalizedModuleName, fullyQualifiedName } =
+    getPyProjectDetails(tree, {
       name: schema.name,
       directory: schema.directory,
-    },
-  );
+    });
   const apiNameSnakeCase = toSnakeCase(schema.name);
   const apiNameKebabCase = toKebabCase(schema.name);
   const apiNameClassName = toClassName(schema.name);
@@ -74,7 +72,7 @@ export const fastApiProjectGenerator = async (
     options: {
       commands: [
         `uv export --frozen --no-dev --no-editable --project ${normalizedName} -o dist/${dir}/bundle/requirements.txt`,
-        `uv pip install --no-installer-metadata --no-compile-bytecode --python-platform x86_64-manylinux2014 --python \`uv python pin\` --target dist/${dir}/bundle -r dist/${dir}/bundle/requirements.txt`
+        `uv pip install -n --no-installer-metadata --no-compile-bytecode --python-platform x86_64-manylinux2014 --python \`uv python pin\` --target dist/${dir}/bundle -r dist/${dir}/bundle/requirements.txt`,
       ],
       parallel: false,
     },
@@ -173,22 +171,22 @@ export const fastApiProjectGenerator = async (
   addHttpApi(tree, apiNameClassName);
 
   updateJson(
-      tree,
-      joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'project.json'),
-      (config: ProjectConfiguration) => {
-        if (!config.targets) {
-          config.targets = {};
-        }
-        if (!config.targets.build) {
-          config.targets.build = {};
-        }
-        config.targets.build.dependsOn = [
-          ...(config.targets.build.dependsOn ?? []),
-          `${fullyQualifiedName}:build`,
-        ];
-        return config;
-      },
-    );
+    tree,
+    joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'project.json'),
+    (config: ProjectConfiguration) => {
+      if (!config.targets) {
+        config.targets = {};
+      }
+      if (!config.targets.build) {
+        config.targets.build = {};
+      }
+      config.targets.build.dependsOn = [
+        ...(config.targets.build.dependsOn ?? []),
+        `${fullyQualifiedName}:build`,
+      ];
+      return config;
+    },
+  );
 
   const projectToml = parse(
     tree.read(joinPathFragments(dir, 'pyproject.toml'), 'utf8'),
