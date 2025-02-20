@@ -6,9 +6,13 @@ import { Tree } from '@nx/devkit';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import { fastApiProjectGenerator } from './generator';
 import { parse } from '@iarna/toml';
-import { PACKAGES_DIR, SHARED_CONSTRUCTS_DIR } from '../../utils/shared-constructs';
+import {
+  PACKAGES_DIR,
+  SHARED_CONSTRUCTS_DIR,
+} from '../../utils/shared-constructs';
 import { joinPathFragments } from '@nx/devkit';
 import { UVPyprojectToml } from '@nxlv/python/src/provider/uv/types';
+import { sortObjectKeys } from '../../utils/nx';
 
 describe('fastapi project generator', () => {
   let tree: Tree;
@@ -41,7 +45,7 @@ describe('fastapi project generator', () => {
     });
 
     const projectConfig = JSON.parse(
-      tree.read('apps/test_api/project.json', 'utf-8')
+      tree.read('apps/test_api/project.json', 'utf-8'),
     );
 
     // Verify FastAPI-specific targets
@@ -50,14 +54,16 @@ describe('fastapi project generator', () => {
       '{workspaceRoot}/dist/apps/test_api/bundle',
     ]);
     expect(projectConfig.targets.bundle.options.commands).toContain(
-      'uv export --frozen --no-dev --no-editable --project test_api -o dist/apps/test_api/bundle/requirements.txt'
+      'uv export --frozen --no-dev --no-editable --project test_api -o dist/apps/test_api/bundle/requirements.txt',
     );
 
     // Verify start target for development
     expect(projectConfig.targets.serve).toBeDefined();
-    expect(projectConfig.targets.serve.executor).toBe('@nxlv/python:run-commands');
+    expect(projectConfig.targets.serve.executor).toBe(
+      '@nxlv/python:run-commands',
+    );
     expect(projectConfig.targets.serve.options.command).toBe(
-      'uv run fastapi dev test_api/main.py'
+      'uv run fastapi dev test_api/main.py',
     );
 
     // Verify build dependencies
@@ -71,13 +77,15 @@ describe('fastapi project generator', () => {
     });
 
     const pyprojectToml = parse(
-      tree.read('apps/test_api/pyproject.toml', 'utf-8')
+      tree.read('apps/test_api/pyproject.toml', 'utf-8'),
     ) as UVPyprojectToml;
 
     // Verify FastAPI dependencies
     expect(pyprojectToml.project.dependencies).toContain('fastapi');
     expect(pyprojectToml.project.dependencies).toContain('mangum');
-    expect(pyprojectToml['dependency-groups'].dev).toContain('fastapi[standard]>=0.115');
+    expect(pyprojectToml['dependency-groups'].dev).toContain(
+      'fastapi[standard]>=0.115',
+    );
   });
 
   it('should set up shared constructs for HTTP API', async () => {
@@ -93,7 +101,7 @@ describe('fastapi project generator', () => {
       'src',
       'app',
       'http-apis',
-      'test-api.ts'
+      'test-api.ts',
     );
     expect(tree.exists(httpApiPath)).toBeTruthy();
 
@@ -104,22 +112,18 @@ describe('fastapi project generator', () => {
       'src',
       'app',
       'http-apis',
-      'index.ts'
+      'index.ts',
     );
-    expect(tree.read(httpApisIndexPath, 'utf-8')).toContain(
-      './test-api.js'
-    );
+    expect(tree.read(httpApisIndexPath, 'utf-8')).toContain('./test-api.js');
 
     const appIndexPath = joinPathFragments(
       PACKAGES_DIR,
       SHARED_CONSTRUCTS_DIR,
       'src',
       'app',
-      'index.ts'
+      'index.ts',
     );
-    expect(tree.read(appIndexPath, 'utf-8')).toContain(
-      './http-apis/index.js'
-    );
+    expect(tree.read(appIndexPath, 'utf-8')).toContain('./http-apis/index.js');
   });
 
   it('should update shared constructs build dependencies', async () => {
@@ -131,12 +135,12 @@ describe('fastapi project generator', () => {
     const sharedConstructsConfig = JSON.parse(
       tree.read(
         joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'project.json'),
-        'utf-8'
-      )
+        'utf-8',
+      ),
     );
 
     expect(sharedConstructsConfig.targets.build.dependsOn).toContain(
-      'proj.test_api:build'
+      'proj.test_api:build',
     );
   });
 
@@ -147,7 +151,9 @@ describe('fastapi project generator', () => {
     });
 
     expect(tree.exists('apps/nested/path/test_api')).toBeTruthy();
-    expect(tree.exists('apps/nested/path/test_api/test_api/main.py')).toBeTruthy();
+    expect(
+      tree.exists('apps/nested/path/test_api/test_api/main.py'),
+    ).toBeTruthy();
   });
 
   it('should generate HTTP API construct with correct class name', async () => {
@@ -162,7 +168,7 @@ describe('fastapi project generator', () => {
       'src',
       'app',
       'http-apis',
-      'test-api.ts'
+      'test-api.ts',
     );
     const httpApiContent = tree.read(httpApiPath, 'utf-8');
 
@@ -175,13 +181,30 @@ describe('fastapi project generator', () => {
       directory: 'apps',
     });
 
-    const config = JSON.parse(
-      tree.read('apps/test_api/project.json', 'utf-8'),
-    );
+    const config = JSON.parse(tree.read('apps/test_api/project.json', 'utf-8'));
     // Verify project metadata
     expect(config.metadata).toEqual({
       apiName: 'test-api',
       apiType: 'fast-api',
     });
+  });
+
+  it('should match snapshot', async () => {
+    await fastApiProjectGenerator(tree, {
+      name: 'test-api',
+      directory: 'apps',
+    });
+
+    const appChanges = sortObjectKeys(
+      tree
+        .listChanges()
+        .filter((f) => f.path.endsWith('.py'))
+        .reduce((acc, curr) => {
+          acc[curr.path] = tree.read(curr.path, 'utf-8');
+          return acc;
+        }, {}),
+    );
+    // Verify project metadata
+    expect(appChanges).toMatchSnapshot('main-snapshot');
   });
 });

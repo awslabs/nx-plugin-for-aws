@@ -29,7 +29,7 @@ import { toClassName, toKebabCase, toSnakeCase } from '../../utils/names';
 import { addStarExport } from '../../utils/ast';
 import { formatFilesInSubtree } from '../../utils/format';
 import { addHttpApi } from '../../utils/http-api';
-import { sortProjectTargets } from '../../utils/nx';
+import { sortObjectKeys } from '../../utils/nx';
 
 /**
  * Generates a Python FastAPI project
@@ -95,7 +95,7 @@ export const fastApiProjectGenerator = async (
     apiType: 'fast-api',
   } as any;
 
-  projectConfig.targets = sortProjectTargets(projectConfig.targets);
+  projectConfig.targets = sortObjectKeys(projectConfig.targets);
   updateProjectConfiguration(tree, normalizedName, projectConfig);
 
   [
@@ -109,6 +109,7 @@ export const fastApiProjectGenerator = async (
     dir, // destination path of the files
     {
       name: normalizedName,
+      apiNameClassName,
     },
     {
       overwriteStrategy: OverwriteStrategy.Overwrite,

@@ -22,7 +22,7 @@ import { configureTsProject } from './ts-project-utils';
 import { toKebabCase } from '../../utils/names';
 import { relative } from 'path';
 import { formatFilesInSubtree } from '../../utils/format';
-import { sortProjectTargets } from '../../utils/nx';
+import { sortObjectKeys } from '../../utils/nx';
 export interface TsLibDetails {
   /**
    * Full package name including scope (eg @foo/bar)
@@ -114,7 +114,7 @@ export const tsLibGenerator = async (
     },
   };
   delete targets['lint'];
-  projectConfiguration.targets = sortProjectTargets(targets);;
+  projectConfiguration.targets = sortObjectKeys(targets);
 
   updateProjectConfiguration(tree, fullyQualifiedName, projectConfiguration);
 

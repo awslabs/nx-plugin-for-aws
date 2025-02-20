@@ -27,7 +27,7 @@ import {
 import { addStarExport } from '../../utils/ast';
 import path from 'path';
 import { formatFilesInSubtree } from '../../utils/format';
-import { sortProjectTargets } from '../../utils/nx';
+import { sortObjectKeys } from '../../utils/nx';
 
 export async function infraGenerator(
   tree: Tree,
@@ -103,7 +103,7 @@ export async function infraGenerator(
           command: `cdk deploy --require-approval=never --app ${synthDirFromProject}`,
         },
       };
-      config.targets = sortProjectTargets(config.targets)
+      config.targets = sortObjectKeys(config.targets);
       return config;
     },
   );

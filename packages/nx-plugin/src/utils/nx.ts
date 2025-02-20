@@ -4,7 +4,7 @@
  */
 import { TargetConfiguration } from '@nx/devkit';
 
-export const sortProjectTargets = (targets: {
+export const sortObjectKeys = (targets: {
   [targetName: string]: TargetConfiguration;
 }) =>
   Object.keys(targets)
