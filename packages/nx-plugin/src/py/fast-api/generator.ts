@@ -192,9 +192,12 @@ export const fastApiProjectGenerator = async (
   const projectToml = parse(
     tree.read(joinPathFragments(dir, 'pyproject.toml'), 'utf8'),
   ) as UVPyprojectToml;
-  projectToml.project.dependencies = ['fastapi', 'mangum'].concat(
-    projectToml.project?.dependencies || [],
-  );
+  projectToml.project.dependencies = [
+    'fastapi',
+    'mangum',
+    'aws-lambda-powertools',
+    'aws-lambda-powertools[tracer]',
+  ].concat(projectToml.project?.dependencies || []);
   projectToml['dependency-groups'] = { dev: ['fastapi[standard]>=0.115'] };
   tree.write(joinPathFragments(dir, 'pyproject.toml'), stringify(projectToml));
 
