@@ -7,7 +7,7 @@ import {
   IHttpRouteAuthorizer,
 } from 'aws-cdk-lib/aws-apigatewayv2';
 import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
-import { Code, Function, Runtime } from 'aws-cdk-lib/aws-lambda';
+import { Code, Function, Runtime, Tracing } from 'aws-cdk-lib/aws-lambda';
 import { Effect, IRole, PolicyStatement } from 'aws-cdk-lib/aws-iam';
 import { RuntimeConfig } from './runtime-config.js';
 
@@ -22,15 +22,17 @@ export interface HttpApiProps {
 
 export class HttpApi extends Construct {
   public readonly api: _HttpApi;
+  public readonly routerFunction: Function;
 
   constructor(scope: Construct, id: string, props: HttpApiProps) {
     super(scope, id);
 
-    const routerFunction = new Function(this, `${id}Handler`, {
+    this.routerFunction = new Function(this, `${id}Handler`, {
       timeout: Duration.seconds(30),
       runtime: props.runtime,
       handler: props.handler,
       code: Code.fromAsset(props.handlerFilePath),
+      tracing: Tracing.ACTIVE,
       environment: {
         AWS_CONNECTION_REUSE_ENABLED: '1',
       },
@@ -63,7 +65,7 @@ export class HttpApi extends Construct {
       ],
       integration: new HttpLambdaIntegration(
         'RouterIntegration',
-        routerFunction,
+        this.routerFunction,
       ),
     });
 

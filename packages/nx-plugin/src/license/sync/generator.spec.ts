@@ -865,7 +865,7 @@ describe('licenseSyncGenerator', () => {
   });
 
   it('should not update ignored files in git projects', async () => {
-    const tmpDir = mkdtempSync('tmp-dir');
+    const tmpDir = mkdtempSync('tmp');
 
     try {
       const fsTree = new FsTree(tmpDir, false);
