@@ -11,11 +11,17 @@ import {
 import { ApiConnectionSchema } from './schema';
 import trpcReactGenerator from '../trpc/react/generator';
 import { hasExportDeclaration } from '../utils/ast';
+import { readToml } from '../utils/toml';
+import fastApiReactGenerator from '../py/fast-api/react/generator';
 
 /**
  * List of supported source and target project types for api connections
  */
-const SUPPORTED_PROJECT_TYPES = ['ts#trpc-api', 'react'] as const;
+const SUPPORTED_PROJECT_TYPES = [
+  'ts#trpc-api',
+  'py#fast-api',
+  'react',
+] as const;
 
 type ProjectType = (typeof SUPPORTED_PROJECT_TYPES)[number];
 
@@ -26,6 +32,7 @@ type Connection = { source: ProjectType; target: ProjectType };
  */
 const SUPPORTED_CONNECTIONS = [
   { source: 'react', target: 'ts#trpc-api' },
+  { source: 'react', target: 'py#fast-api' },
 ] satisfies Connection[];
 
 type ConnectionKey = (typeof SUPPORTED_CONNECTIONS)[number] extends infer C
@@ -42,6 +49,12 @@ const CONNECTION_GENERATORS = {
     trpcReactGenerator(tree, {
       frontendProjectName: options.sourceProject,
       backendProjectName: options.targetProject,
+      auth: options.auth,
+    }),
+  'react -> py#fast-api': (tree, options) =>
+    fastApiReactGenerator(tree, {
+      frontendProjectName: options.sourceProject,
+      fastApiProjectName: options.targetProject,
       auth: options.auth,
     }),
 } satisfies Record<
@@ -99,6 +112,10 @@ export const determineProjectType = (
 
   if (isTrpcApi(tree, projectConfiguration)) {
     return 'ts#trpc-api';
+  }
+
+  if (isFastApi(tree, projectConfiguration)) {
+    return 'py#fast-api';
   }
 
   if (isReact(tree, projectConfiguration)) {
@@ -169,6 +186,29 @@ const isReact = (
   return tree.exists(
     joinPathFragments(sourceRoot(projectConfiguration), 'main.tsx'),
   );
+};
+
+const isFastApi = (
+  tree: Tree,
+  projectConfiguration: ProjectConfiguration,
+): boolean => {
+  // If the project.json says it's a fast api, there's no need for introspection
+  if ((projectConfiguration.metadata as any)?.apiType === 'fast-api') {
+    return true;
+  }
+
+  const pyProjectPath = joinPathFragments(
+    projectConfiguration.root,
+    'pyproject.toml',
+  );
+  if (tree.exists(pyProjectPath)) {
+    const pyProject = readToml(tree, pyProjectPath);
+    if (((pyProject as any)?.project?.dependencies ?? []).includes('fastapi')) {
+      return true;
+    }
+  }
+
+  return false;
 };
 
 export default apiConnectionGenerator;

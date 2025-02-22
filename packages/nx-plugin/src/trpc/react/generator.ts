@@ -291,14 +291,17 @@ export async function reactGenerator(
   addDependenciesToPackageJson(
     tree,
     withVersions([
-      '@aws-sdk/client-cognito-identity',
-      '@aws-sdk/credential-provider-cognito-identity',
       '@trpc/client',
       '@trpc/react-query',
       '@tanstack/react-query',
-      'aws4fetch',
       ...((options.auth === 'IAM'
-        ? ['oidc-client-ts', 'react-oidc-context']
+        ? [
+            'oidc-client-ts',
+            'aws4fetch',
+            '@aws-sdk/client-cognito-identity',
+            '@aws-sdk/credential-provider-cognito-identity',
+            'react-oidc-context',
+          ]
         : []) as any),
     ]),
     withVersions(['@smithy/types']),

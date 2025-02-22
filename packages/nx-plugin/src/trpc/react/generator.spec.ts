@@ -112,5 +112,19 @@ export function Main() {
       'utf-8',
     );
     expect(trpcProviderContent).toMatchSnapshot('TRPCClientProvider-IAM.tsx');
+
+    const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+    // Verify dependencies were added
+    expect(packageJson.dependencies['@trpc/react-query']).toBeDefined();
+    expect(packageJson.dependencies['@tanstack/react-query']).toBeDefined();
+    expect(packageJson.dependencies['oidc-client-ts']).toBeDefined();
+    expect(packageJson.dependencies['react-oidc-context']).toBeDefined();
+    expect(
+      packageJson.dependencies['@aws-sdk/client-cognito-identity'],
+    ).toBeDefined();
+    expect(
+      packageJson.dependencies['@aws-sdk/credential-provider-cognito-identity'],
+    ).toBeDefined();
+    expect(packageJson.dependencies['aws4fetch']).toBeDefined();
   });
 });

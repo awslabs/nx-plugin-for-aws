@@ -13,9 +13,16 @@ export const updateToml = (
   filePath: string,
   updater: (prev: TOML.JsonMap) => TOML.JsonMap,
 ) => {
-  if (!tree.exists(filePath)) {
-    throw new Error(`Cannot update toml file ${filePath} as it does not exist`);
-  }
-  const prev = TOML.parse(tree.read(filePath, 'utf-8'));
+  const prev = readToml(tree, filePath);
   tree.write(filePath, TOML.stringify(updater(prev)));
+};
+
+/**
+ * Read a toml file
+ */
+export const readToml = (tree: Tree, filePath: string): TOML.JsonMap => {
+  if (!tree.exists(filePath)) {
+    throw new Error(`${filePath} does not exist`);
+  }
+  return TOML.parse(tree.read(filePath, 'utf-8'));
 };

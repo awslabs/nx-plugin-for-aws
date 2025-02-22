@@ -41,7 +41,7 @@ version = "1.0.0"
 
       expect(() => {
         updateToml(tree, filePath, () => ({}));
-      }).toThrow(`Cannot update toml file ${filePath} as it does not exist`);
+      }).toThrow(`${filePath} does not exist`);
     });
   });
 });

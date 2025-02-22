@@ -2,8 +2,9 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
+import { joinPathFragments, Tree } from '@nx/devkit';
 import { execSync } from 'child_process';
+import uniqBy from 'lodash.uniqby';
 
 /**
  * Returns all files from the tree root that are not gitignored (both tracked and untracked)
@@ -25,4 +26,18 @@ export const getGitIncludedFiles = (tree: Tree): string[] => {
       .split('\n')
       .filter((x) => x),
   ];
+};
+
+/**
+ * Update a .gitignore file. Will create a new .gitignore file if it does not exist
+ */
+export const updateGitIgnore = (
+  tree: Tree,
+  dir: string,
+  doUpdate: (patterns: string[]) => string[],
+) => {
+  const gitIgnorePath = joinPathFragments(dir, '.gitignore');
+  const existingPatterns = tree.read(gitIgnorePath, 'utf-8')?.split('\n') ?? [];
+  const newPatterns = doUpdate(existingPatterns);
+  tree.write(gitIgnorePath, uniqBy(newPatterns, (p) => p).join('\n'));
 };

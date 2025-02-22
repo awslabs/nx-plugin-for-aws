@@ -14,6 +14,8 @@ import { SyncGeneratorResult } from 'nx/src/utils/sync-generators';
 import { mkdtempSync, rmSync } from 'fs';
 import { flushChanges, FsTree } from 'nx/src/generators/tree';
 import { execSync } from 'child_process';
+import path from 'path';
+import os from 'os';
 
 describe('licenseSyncGenerator', () => {
   let tree: Tree;
@@ -865,7 +867,7 @@ describe('licenseSyncGenerator', () => {
   });
 
   it('should not update ignored files in git projects', async () => {
-    const tmpDir = mkdtempSync('tmp');
+    const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'test-dir'));
 
     try {
       const fsTree = new FsTree(tmpDir, false);

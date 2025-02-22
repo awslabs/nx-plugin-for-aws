@@ -7,9 +7,14 @@ import { apiConnectionGenerator, determineProjectType } from './generator';
 import { createTreeUsingTsSolutionSetup } from '../utils/test';
 import { vi, expect, describe, it, beforeEach } from 'vitest';
 import trpcReactGenerator from '../trpc/react/generator';
+import fastApiReactGenerator from '../py/fast-api/react/generator';
 
-// Mock the trpcReactGenerator
+// Mock the generators
 vi.mock('../trpc/react/generator', () => ({
+  default: vi.fn(),
+}));
+
+vi.mock('../py/fast-api/react/generator', () => ({
   default: vi.fn(),
 }));
 
@@ -22,6 +27,42 @@ describe('api connection generator', () => {
   });
 
   describe('generator', () => {
+    it('should call fastApiReactGenerator for react -> py#fast-api connection', async () => {
+      // Setup a React project
+      tree.write('apps/frontend/src/main.tsx', '');
+      tree.write(
+        'apps/frontend/project.json',
+        JSON.stringify({
+          name: 'frontend',
+          root: 'apps/frontend',
+        }),
+      );
+
+      // Setup a FastAPI project
+      tree.write(
+        'apps/api/project.json',
+        JSON.stringify({
+          name: 'api',
+          root: 'apps/api',
+          metadata: {
+            apiType: 'fast-api',
+          },
+        }),
+      );
+
+      await apiConnectionGenerator(tree, {
+        sourceProject: 'frontend',
+        targetProject: 'api',
+        auth: 'IAM',
+      });
+
+      expect(fastApiReactGenerator).toHaveBeenCalledWith(tree, {
+        frontendProjectName: 'frontend',
+        fastApiProjectName: 'api',
+        auth: 'IAM',
+      });
+    });
+
     it('should call trpcReactGenerator for react -> ts#trpc-api connection', async () => {
       // Setup a React project
       tree.write('apps/frontend/src/main.tsx', '');
@@ -163,6 +204,38 @@ describe('api connection generator', () => {
   });
 
   describe('determineProjectType', () => {
+    it('should identify py#fast-api project by metadata', () => {
+      tree.write(
+        'apps/api/project.json',
+        JSON.stringify({
+          name: 'api',
+          root: 'apps/api',
+          metadata: {
+            apiType: 'fast-api',
+          },
+        }),
+      );
+
+      expect(determineProjectType(tree, 'api')).toBe('py#fast-api');
+    });
+
+    it('should identify py#fast-api project by pyproject.toml dependencies', () => {
+      tree.write(
+        'apps/api/project.json',
+        JSON.stringify({
+          name: 'api',
+          root: 'apps/api',
+        }),
+      );
+      tree.write(
+        'apps/api/pyproject.toml',
+        `[project]
+dependencies = ["fastapi"]`,
+      );
+
+      expect(determineProjectType(tree, 'api')).toBe('py#fast-api');
+    });
+
     it('should identify ts#trpc-api project by metadata', () => {
       tree.write(
         'apps/api/project.json',
