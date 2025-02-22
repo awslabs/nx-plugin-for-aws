@@ -70,8 +70,13 @@ export async function reactGenerator(
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
   );
-  if (options.auth !== 'IAM') {
-    tree.delete(`${frontendProjectConfig.root}/src/hooks/useSigV4.tsx`);
+  if (options.auth === 'IAM') {
+    generateFiles(
+      tree,
+      joinPathFragments(__dirname, '../../utils/files/website/hooks/sigv4'),
+      joinPathFragments(frontendProjectConfig.sourceRoot, 'hooks'),
+      {},
+    );
   }
   await runtimeConfigGenerator(tree, {
     project: options.frontendProjectName,
