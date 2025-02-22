@@ -151,7 +151,7 @@ export const defaultLicenseConfig = (
               blockEnd: `###${'#'.repeat(maxLen)}##`,
             },
           },
-          exclude: [],
+          exclude: ['**/*.gen.*'],
         },
       };
     }
@@ -178,12 +178,12 @@ export const defaultLicenseConfig = (
               blockEnd: ' */',
             },
             '**/*.{py,sh}': {
-              blockStart: '# ',
+              blockStart: '#',
               lineStart: '# ',
-              blockEnd: '# ',
+              blockEnd: '#',
             },
           },
-          exclude: [],
+          exclude: ['**/*.gen.*'],
         },
       };
     }
