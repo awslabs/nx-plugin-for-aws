@@ -8,6 +8,7 @@ import { parseOpenApiSpec } from '../utils/parse';
 import { buildOpenApiCodeGenData } from '../utils/codegen-data';
 import * as path from 'path';
 import { CodeGenData } from '../utils/codegen-data/types';
+import { formatFilesInSubtree } from '../../utils/format';
 
 /**
  * Generates typescript client from an openapi spec
@@ -21,6 +22,8 @@ export const openApiTsClientGenerator = async (
   const data = await buildOpenApiCodeGenData(spec);
 
   generateOpenApiTsClient(tree, data, options.outputPath);
+
+  await formatFilesInSubtree(tree);
 };
 
 /**

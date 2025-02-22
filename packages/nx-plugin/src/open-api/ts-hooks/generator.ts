@@ -7,6 +7,7 @@ import { OpenApiHooksSchema } from './schema';
 import { parseOpenApiSpec } from '../utils/parse';
 import { buildOpenApiCodeGenData } from '../utils/codegen-data';
 import { generateOpenApiTsClient } from '../ts-client/generator';
+import { formatFilesInSubtree } from '../../utils/format';
 
 /**
  * Generates typescript hooks from an openapi spec
@@ -22,6 +23,8 @@ export const openApiTsHooksGenerator = async (
   generateOpenApiTsClient(tree, data, options.outputPath);
 
   // TODO: generate hooks which wrap the client
+
+  formatFilesInSubtree(tree);
 };
 
 export default openApiTsHooksGenerator;

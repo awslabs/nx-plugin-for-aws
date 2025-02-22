@@ -186,43 +186,70 @@ export const normaliseOpenApiSpecForCodeGen = (inSpec: Spec): Spec => {
     };
   }
 
-  const seenOperationIds = new Set();
-  const seenOperationIdsByTag: { [tag: string]: Set<string> } = {};
-  const seenOperationIdCounters: { [opId: string]: number } = {};
+  const seenOperationIds = new Set<string>();
+  const duplicatedOperationIds = new Set<string>();
+
+  // Make sure all operationIds are camelCase, and find which ones are duplicated
+  Object.entries(spec.paths ?? {}).forEach(([path, pathOps]) =>
+    Object.entries(pathOps ?? {}).forEach(([method, op]) => {
+      const operation = resolveIfRef(spec, op);
+      if (operation && typeof operation === 'object') {
+        const operationId = camelCase(
+          (operation as any).operationId ?? `${method}-${path}`,
+        );
+        (operation as any).operationId = operationId;
+        if (seenOperationIds.has(operationId)) {
+          duplicatedOperationIds.add(operationId);
+        }
+        seenOperationIds.add(operationId);
+      }
+    }),
+  );
+
+  // Reset seen operation ids
+  seenOperationIds.clear();
+
+  const untagged = Symbol('untagged');
+  const seenOperationIdsByTag: { [tag: string | symbol]: Set<string> } = {};
 
   // "Hoist" inline request and response schemas
   Object.entries(spec.paths ?? {}).forEach(([path, pathOps]) =>
     Object.entries(pathOps ?? {}).forEach(([method, op]) => {
       const operation = resolveIfRef(spec, op);
       if (operation && typeof operation === 'object') {
+        const tags: string[] = (operation as any).tags ?? [];
+        const operationId = (operation as any).operationId as string;
+
         // Allow operations to have the same id
-        const originalOperationId = camelCase(
-          (operation as any).operationId ?? `${method}-${path}`,
-        );
-        let deduplicatedOpId = originalOperationId;
+        let deduplicatedOpId = operationId;
 
-        if (seenOperationIds.has(originalOperationId)) {
-          const counter = seenOperationIdCounters[originalOperationId] ?? 0;
-          deduplicatedOpId = `${originalOperationId}_${counter}`;
-          seenOperationIdCounters[originalOperationId] = counter + 1;
-
-          (operation as any)['x-aws-nx-deduplicated-op-id'] = deduplicatedOpId;
+        // Attempt to deduplicate the operationId by its tags
+        if (duplicatedOperationIds.has(operationId)) {
+          deduplicatedOpId = camelCase(
+            tags.map((t) => `${t}-`).join('') + operationId,
+          );
         }
 
+        (operation as any)['x-aws-nx-deduplicated-op-id'] = deduplicatedOpId;
+
         seenOperationIds.add(deduplicatedOpId);
-        ((operation as any).tags ?? []).forEach((tag) => {
+
+        // Throw an error for any duplicated operation ids with the same tag, or untagged
+        [...(tags.length === 0 ? [untagged] : tags)].forEach((tag) => {
           if (
             seenOperationIdsByTag[tag] &&
-            seenOperationIdsByTag[tag].has(originalOperationId)
+            seenOperationIdsByTag[tag].has(operationId)
           ) {
             throw new Error(
-              `Operations with the same tag (${tag}) cannot have the same operationId (${originalOperationId})`,
+              tag === untagged
+                ? `Untagged operations cannot have the same operationId (${operationId})`
+                : `Operations with the same tag (${String(tag)}) cannot have the same operationId (${operationId})`,
             );
           }
 
           seenOperationIdsByTag[tag] = new Set([
             ...(seenOperationIdsByTag[tag] ?? []),
-            originalOperationId,
+            operationId,
           ]);
         });
 

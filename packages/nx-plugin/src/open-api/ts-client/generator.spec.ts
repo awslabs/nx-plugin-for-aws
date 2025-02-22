@@ -1241,7 +1241,7 @@ describe('openApiTsClientGenerator', () => {
 
     tree.write('openapi.json', JSON.stringify(spec));
 
-    expect(
+    await expect(
       openApiTsClientGenerator(tree, {
         openApiSpecPath: 'openapi.json',
         outputPath: 'src/generated',
@@ -2237,8 +2237,6 @@ describe('openApiTsClientGenerator', () => {
     const client = tree.read('src/generated/client.gen.ts', 'utf-8');
     expect(client).toMatchSnapshot();
 
-    console.log(client);
-
     const mockFetch = vi.fn();
 
     mockFetch.mockResolvedValue({
@@ -3000,8 +2998,6 @@ describe('openApiTsClientGenerator', () => {
       }),
     });
 
-    console.log(client);
-
     await callGeneratedClient(client, mockFetch, 'testNullable', {
       pathParam: null,
       queryString: null,
@@ -3250,8 +3246,6 @@ describe('openApiTsClientGenerator', () => {
         body: 'test',
       }),
     );
-
-    console.log(client);
 
     // Test number input
     mockFetch.mockClear();
@@ -3928,6 +3922,165 @@ describe('openApiTsClientGenerator', () => {
       'b',
       'c',
     ]);
+  });
+
+  it('should allow duplicate operation ids discriminated by multiple tags', async () => {
+    const spec: Spec = {
+      info: {
+        title,
+        version: '1.0.0',
+      },
+      openapi: '3.0.0',
+      paths: {
+        '/items': {
+          get: {
+            tags: ['items', 'stock'],
+            operationId: 'list',
+            responses: {
+              '200': {
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'array',
+                      items: {
+                        type: 'string',
+                      },
+                    },
+                  },
+                },
+                description: 'Success',
+              },
+            },
+          },
+        },
+        '/users': {
+          get: {
+            tags: ['users', 'people'],
+            operationId: 'list',
+            responses: {
+              '200': {
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'array',
+                      items: {
+                        type: 'string',
+                      },
+                    },
+                  },
+                },
+                description: 'Success',
+              },
+            },
+          },
+        },
+      },
+    };
+
+    tree.write('openapi.json', JSON.stringify(spec));
+
+    await openApiTsClientGenerator(tree, {
+      openApiSpecPath: 'openapi.json',
+      outputPath: 'src/generated',
+    });
+
+    validateTypeScript([
+      'src/generated/client.gen.ts',
+      'src/generated/types.gen.ts',
+    ]);
+
+    const types = tree.read('src/generated/types.gen.ts', 'utf-8');
+    expect(types).toMatchSnapshot();
+
+    const client = tree.read('src/generated/client.gen.ts', 'utf-8');
+    expect(client).toMatchSnapshot();
+
+    const mockFetch = vi.fn();
+
+    mockFetch.mockResolvedValue({
+      status: 200,
+      json: vi.fn().mockResolvedValue(['a', 'b', 'c']),
+    });
+
+    expect(await callGeneratedClient(client, mockFetch, 'users.list')).toEqual([
+      'a',
+      'b',
+      'c',
+    ]);
+    expect(await callGeneratedClient(client, mockFetch, 'people.list')).toEqual([
+      'a',
+      'b',
+      'c',
+    ]);
+    expect(await callGeneratedClient(client, mockFetch, 'items.list')).toEqual([
+      'a',
+      'b',
+      'c',
+    ]);
+    expect(await callGeneratedClient(client, mockFetch, 'stock.list')).toEqual([
+      'a',
+      'b',
+      'c',
+    ]);
+  });
+
+  it('should throw for operations with the same id and no tags', async () => {
+    const spec: Spec = {
+      info: {
+        title,
+        version: '1.0.0',
+      },
+      openapi: '3.0.0',
+      paths: {
+        '/items': {
+          get: {
+            operationId: 'myOp',
+            responses: {
+              '200': {
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'array',
+                      items: {
+                        type: 'string',
+                      },
+                    },
+                  },
+                },
+                description: 'Success',
+              },
+            },
+          },
+        },
+        '/users': {
+          get: {
+            operationId: 'myOp',
+            responses: {
+              '200': {
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'array',
+                      items: {
+                        type: 'string',
+                      },
+                    },
+                  },
+                },
+                description: 'Success',
+              },
+            },
+          },
+        },
+      },
+    };
+
+    tree.write('openapi.json', JSON.stringify(spec));
+
+    await expect(openApiTsClientGenerator(tree, {
+      openApiSpecPath: 'openapi.json',
+      outputPath: 'src/generated',
+    })).rejects.toThrow('Untagged operations cannot have the same operationId (myOp)');
   });
 
   it('should throw an error for duplicate operation ids within a tag', async () => {
