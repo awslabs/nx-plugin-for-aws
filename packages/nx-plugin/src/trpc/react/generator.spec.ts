@@ -63,10 +63,10 @@ export function Main() {
     ).toMatchSnapshot('TrpcClients-index.tsx');
     expect(
       tree.read(
-        'apps/frontend/src/components/TrpcClients/IsolatedTrpcProvider.tsx',
+        'apps/frontend/src/components/TrpcClients/TrpcProvider.tsx',
         'utf-8',
       ),
-    ).toMatchSnapshot('TrpcClients-IsolatedTrpcProvider.tsx');
+    ).toMatchSnapshot('TrpcClients-TrpcProvider.tsx');
     expect(
       tree.read(
         'apps/frontend/src/components/TrpcClients/TrpcApis.tsx',

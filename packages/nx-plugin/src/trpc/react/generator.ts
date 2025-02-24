@@ -70,6 +70,28 @@ export async function reactGenerator(
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
   );
+
+  // Generate the tanstack query provider if it does not exist already
+  if (
+    !tree.exists(
+      joinPathFragments(
+        frontendProjectConfig.sourceRoot,
+        'components',
+        'QueryClientProvider.tsx',
+      ),
+    )
+  ) {
+    generateFiles(
+      tree,
+      joinPathFragments(
+        __dirname,
+        '../../utils/files/website/components/tanstack-query',
+      ),
+      joinPathFragments(frontendProjectConfig.sourceRoot, 'components'),
+      {},
+    );
+  }
+
   if (options.auth === 'IAM') {
     generateFiles(
       tree,
@@ -90,12 +112,35 @@ export async function reactGenerator(
   singleImport(
     tree,
     mainTsxPath,
+    'QueryClientProvider',
+    './components/QueryClientProvider',
+  );
+  singleImport(
+    tree,
+    mainTsxPath,
     'TrpcClientProviders',
     './components/TrpcClients',
   );
-  // Check if TrpcClientProviders already exists
+  // Check if QueryClientProvider already exists
   const mainTsxSource = tree.read(mainTsxPath).toString();
   const mainTsxAst = ast(mainTsxSource);
+
+  const hasQueryClientProvider =
+    tsquery.query(
+      mainTsxAst,
+      'JsxOpeningElement[tagName.name="QueryClientProvider"]',
+    ).length > 0;
+  if (!hasQueryClientProvider) {
+    replace(
+      tree,
+      mainTsxPath,
+      'JsxSelfClosingElement[tagName.name="RouterProvider"]',
+      (node: JsxSelfClosingElement) =>
+        createJsxElementFromIdentifier('QueryClientProvider', [node]),
+    );
+  }
+
+  // Check if TrpcClientProviders already exists
   const hasProvider =
     tsquery.query(
       mainTsxAst,
@@ -119,8 +164,8 @@ export async function reactGenerator(
   destructuredImport(
     tree,
     trpcApisPath,
-    ['createIsolatedTrpcClientProvider'],
-    './IsolatedTrpcProvider',
+    ['createTrpcClientProvider'],
+    './TrpcProvider',
   );
   destructuredImport(
     tree,
@@ -146,7 +191,7 @@ export async function reactGenerator(
       const newProperty = factory.createPropertyAssignment(
         factory.createIdentifier(apiNameClassName),
         factory.createCallExpression(
-          factory.createIdentifier('createIsolatedTrpcClientProvider'),
+          factory.createIdentifier('createTrpcClientProvider'),
           [
             factory.createTypeReferenceNode(
               factory.createIdentifier(`${apiNameClassName}AppRouter`),

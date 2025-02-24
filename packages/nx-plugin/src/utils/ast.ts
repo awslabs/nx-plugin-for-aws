@@ -162,7 +162,7 @@ export const replace = (
     const queryNodes = tsquery.query(ast(source), selector);
     if (queryNodes.length === 0) {
       throw new Error(
-        `Could not locate a element im ${filePath} matching ${selector}`,
+        `Could not locate an element in ${filePath} matching ${selector}`,
       );
     }
   }
