@@ -23,7 +23,7 @@ const root = ReactDOM.createRoot(document.getElementById('root') as HTMLElement)
 root.render(
   <StrictMode>
     <App />
-  </StrictMode>
+  </StrictMode>,
 );
 ```
 
@@ -53,13 +53,13 @@ Then add tRPC to your React application:
 Add tRPC to your React application:
 
 ```bash
-nx g @aws/nx-plugin:trpc#react --frontendProjectName=my-app --backendProjectName=my-api --auth=IAM
+nx g @aws/nx-plugin:trpc#react-connection --frontendProjectName=my-app --backendProjectName=my-api --auth=IAM
 ```
 
 You can also perform a dry-run to see what files would be generated without actually creating them:
 
 ```bash
-nx g @aws/nx-plugin:trpc#react --frontendProjectName=my-app --backendProjectName=my-api --auth=IAM --dry-run
+nx g @aws/nx-plugin:trpc#react-connection --frontendProjectName=my-app --backendProjectName=my-api --auth=IAM --dry-run
 ```
 
 Both methods will add tRPC client integration to your React application with all the necessary configuration.
@@ -95,7 +95,7 @@ Additionally, it:
 
 1. Installs required dependencies:
    - @trpc/client
-   - @trpc/react-query
+   - @trpc/tanstack-react-query
    - @tanstack/react-query
    - aws4fetch (if using IAM auth)
 
@@ -106,13 +106,14 @@ Additionally, it:
 The generator provides a `use<ApiName>` hook that gives you access to the type-safe tRPC client:
 
 ```tsx
+import { useQuery } from '@tanstack/react-query';
 import { useMyApi } from './hooks/useMyApi';
 
 function MyComponent() {
   const trpc = useMyApi();
 
   // Example query
-  const { data, isLoading } = trpc.users.list.useQuery();
+  const { data, isLoading } = useQuery(trpc.users.list.queryOptions());
 
   // Example mutation
   const mutation = trpc.users.create.useMutation();
@@ -138,7 +139,7 @@ The integration includes built-in error handling that properly processes tRPC er
 function MyComponent() {
   const trpc = useTrpc();
 
-  const { data, error } = trpc.users.list.useQuery();
+  const { data, error } = useQuery(trpc.users.list.queryOptions());
 
   if (error) {
     return (
@@ -162,7 +163,8 @@ Always handle loading states for better user experience:
 
 ```tsx
 function UserList() {
-  const { users } = useUsers();
+  const trpc = useTrpc();
+  const users = useQuery(trpc.users.list.queryOptions());
 
   if (users.isLoading) {
     return <LoadingSpinner />;
@@ -187,28 +189,32 @@ function UserList() {
 Use optimistic updates for better user experience:
 
 ```tsx
+import { useQueryClient } from '@tanstack/react-query';
+
 function UserList() {
-  const trpc = useUsers();
-  const utils = trpc.useUtils();
+  const queryClient = useQueryClient();
+  const trpc = useTrpc();
 
-  const deleteMutation = trpc.users.delete.useMutation({
-    onMutate: async (userId) => {
-      // Cancel outgoing fetches
-      await utils.users.list.cancel();
+  const deleteMutation = useMutation(
+    trpc.users.delete.mutationOptions({
+      onMutate: async (userId) => {
+        // Cancel outgoing fetches
+        await queryClient.cancelQueries(trpc.users.list.queryFilter());
 
-      // Get snapshot of current data
-      const previousUsers = utils.users.list.getData();
+        // Get snapshot of current data
+        const previousUsers = queryClient.getQueryData(trpc.users.list.queryKey());
 
-      // Optimistically remove the user
-      utils.users.list.setData(undefined, (old) => old?.filter((user) => user.id !== userId));
+        // Optimistically remove the user
+        queryClient.setQueryData(trpc.users.list.queryKey(), (old) => old?.filter((user) => user.id !== userId));
 
-      return { previousUsers };
-    },
-    onError: (err, userId, context) => {
-      // Restore previous data on error
-      utils.users.list.setData(undefined, context?.previousUsers);
-    },
-  });
+        return { previousUsers };
+      },
+      onError: (err, userId, context) => {
+        // Restore previous data on error
+        queryClient.setQueryData(trpc.users.list.queryKey(), context?.previousUsers);
+      },
+    }),
+  );
 
   return (
     <ul>
@@ -229,11 +235,12 @@ Prefetch data for better performance:
 
 ```tsx
 function UserList() {
-  const trpc = useUsers();
+  const queryClient = useQueryClient();
+  const trpc = useTrpc();
 
   // Prefetch user details on hover
   const prefetchUser = async (userId: string) => {
-    await trpc.users.getById.usePrefetchQuery(userId);
+    await queryClient.prefetchQuery(trpc.users.getById.queryOptions(userId));
   };
 
   return (
@@ -254,13 +261,15 @@ Handle pagination with infinite queries:
 
 ```tsx
 function UserList() {
-  const trpc = useUsers();
+  const trpc = useTrpc();
 
-  const { data, fetchNextPage, hasNextPage, isFetchingNextPage } = trpc.users.list.useInfiniteQuery(
-    { limit: 10 },
-    {
-      getNextPageParam: (lastPage) => lastPage.nextCursor,
-    }
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage } = useInfiniteQuery(
+    trpc.users.list.infiniteQueryOptions(
+      { limit: 10 },
+      {
+        getNextPageParam: (lastPage) => lastPage.nextCursor,
+      },
+    ),
   );
 
   return (
@@ -283,10 +292,10 @@ The integration provides complete end-to-end type safety. Your IDE will provide 
 
 ```tsx
 function UserForm() {
-  const trpc = useUsers();
+  const trpc = useTrpc();
 
   // ✅ Input is fully typed
-  const createUser = trpc.users.create.useMutation();
+  const createUser = useMutation(trpc.users.create.mutationOptions());
 
   const handleSubmit = (data: CreateUserInput) => {
     // ✅ Type error if input doesn't match schema

@@ -292,7 +292,7 @@ export async function reactGenerator(
     tree,
     withVersions([
       '@trpc/client',
-      '@trpc/react-query',
+      '@trpc/tanstack-react-query',
       '@tanstack/react-query',
       ...((options.auth === 'IAM'
         ? [

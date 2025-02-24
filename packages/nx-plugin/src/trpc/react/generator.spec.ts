@@ -98,7 +98,9 @@ export function Main() {
     });
     const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
     // Verify dependencies were added
-    expect(packageJson.dependencies['@trpc/react-query']).toBeDefined();
+    expect(
+      packageJson.dependencies['@trpc/tanstack-react-query'],
+    ).toBeDefined();
     expect(packageJson.dependencies['@tanstack/react-query']).toBeDefined();
   });
   it('should handle IAM auth option', async () => {
@@ -115,7 +117,9 @@ export function Main() {
 
     const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
     // Verify dependencies were added
-    expect(packageJson.dependencies['@trpc/react-query']).toBeDefined();
+    expect(
+      packageJson.dependencies['@trpc/tanstack-react-query'],
+    ).toBeDefined();
     expect(packageJson.dependencies['@tanstack/react-query']).toBeDefined();
     expect(packageJson.dependencies['oidc-client-ts']).toBeDefined();
     expect(packageJson.dependencies['react-oidc-context']).toBeDefined();

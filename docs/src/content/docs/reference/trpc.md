@@ -492,7 +492,7 @@ Additionally, it:
 
 1. Installs required dependencies:
    - @trpc/client
-   - @trpc/react-query
+   - @trpc/tanstack-react-query
    - @tanstack/react-query
    - aws4fetch (if using IAM auth)
 
@@ -503,16 +503,17 @@ Additionally, it:
 The generator provides a `use<ApiName>` hook that gives you access to the type-safe tRPC client:
 
 ```tsx
+import { useQuery, useMutation } from '@tanstack/react-query';
 import { useMyApi } from './hooks/useMyApi';
 
 function MyComponent() {
   const trpc = useMyApi();
 
   // Example query
-  const { data, isLoading, error } = trpc.users.list.useQuery();
+  const { data, isLoading, error } = useQuery(trpc.users.list.queryOptions());
 
   // Example mutation
-  const mutation = trpc.users.create.useMutation();
+  const mutation = useMutation(trpc.users.create.mutationOptions());
 
   const handleCreate = () => {
     mutation.mutate({
@@ -541,7 +542,7 @@ The integration includes built-in error handling that properly processes tRPC er
 function MyComponent() {
   const trpc = useMyApi();
 
-  const { data, error } = trpc.users.list.useQuery();
+  const { data, error } = useQuery(trpc.users.list.queryOptions());
 
   if (error) {
     return (
@@ -573,7 +574,7 @@ Always handle loading and error states for a better user experience:
 function UserList() {
   const trpc = useMyApi();
 
-  const users = trpc.users.list.useQuery();
+  const users = useQuery(trpc.users.list.queryOptions());
 
   if (users.isLoading) {
     return <LoadingSpinner />;
@@ -598,29 +599,33 @@ function UserList() {
 Use optimistic updates for a better user experience:
 
 ```tsx
+import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query';
+
 function UserList() {
   const trpc = useMyApi();
-  const users = trpc.users.list.useQuery();
-  const utils = trpc.useUtils();
+  const users = useQuery(trpc.users.list.queryOptions());
+  const queryClient = useQueryClient();
 
-  const deleteMutation = trpc.users.delete.useMutation({
-    onMutate: async (userId) => {
-      // Cancel outgoing fetches
-      await utils.users.list.cancel();
+  const deleteMutation = useMutation(
+    trpc.users.delete.mutationOptions({
+      onMutate: async (userId) => {
+        // Cancel outgoing fetches
+        await queryClient.cancelQueries(trpc.users.list.queryFilter());
 
-      // Get snapshot of current data
-      const previousUsers = utils.users.list.getData();
+        // Get snapshot of current data
+        const previousUsers = queryClient.getQueryData(trpc.users.list.queryKey());
 
-      // Optimistically remove the user
-      utils.users.list.setData(undefined, (old) => old?.filter((user) => user.id !== userId));
+        // Optimistically remove the user
+        queryClient.setQueryData(trpc.users.list.queryKey(), (old) => old?.filter((user) => user.id !== userId));
 
-      return { previousUsers };
-    },
-    onError: (err, userId, context) => {
-      // Restore previous data on error
-      utils.users.list.setData(undefined, context?.previousUsers);
-    },
-  });
+        return { previousUsers };
+      },
+      onError: (err, userId, context) => {
+        // Restore previous data on error
+        queryClient.setQueryData(trpc.users.list.queryKey(), context?.previousUsers);
+      },
+    }),
+  );
 
   return (
     <ul>
@@ -642,11 +647,12 @@ Prefetch data for better performance:
 ```tsx
 function UserList() {
   const trpc = useMyApi();
-  const users = trpc.users.list.useQuery();
+  const users = useQuery(trpc.users.list.queryOptions());
+  const queryClient = useQueryClient();
 
   // Prefetch user details on hover
   const prefetchUser = async (userId: string) => {
-    await trpc.users.getById.usePrefetchQuery(userId);
+    await queryClient.prefetchQuery(trpc.users.getById.queryOptions(userId));
   };
 
   return (
@@ -669,11 +675,13 @@ Handle pagination with infinite queries:
 function UserList() {
   const trpc = useMyApi();
 
-  const { data, fetchNextPage, hasNextPage, isFetchingNextPage } = trpc.users.list.useInfiniteQuery(
-    { limit: 10 },
-    {
-      getNextPageParam: (lastPage) => lastPage.nextCursor,
-    },
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage } = useInfiniteQuery(
+    trpc.users.list.infiniteQueryOptions(
+      { limit: 10 },
+      {
+        getNextPageParam: (lastPage) => lastPage.nextCursor,
+      },
+    ),
   );
 
   return (
@@ -689,6 +697,8 @@ function UserList() {
   );
 }
 ```
+
+It is important to note that infinite queries can only be used for procedures with an input property named `cursor`.
 
 ### Type Safety
 
@@ -711,3 +721,7 @@ function UserForm() {
 ```
 
 The types are automatically inferred from your backend's router and schema definitions, ensuring that any changes to your API are immediately reflected in your frontend code without the need to build.
+
+### More Information
+
+For more information, please refer to the [tRPC TanStack React Query documentation](https://trpc.io/docs/client/tanstack-react-query/usage).
