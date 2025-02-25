@@ -4,12 +4,11 @@
  */
 import { Tree } from '@nx/devkit';
 import { openApiTsClientGenerator } from './generator';
-import { createProjectSync } from '@ts-morph/bootstrap';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import { Spec } from '../utils/types';
-import ts from 'typescript';
 import { importTypeScriptModule } from '../../utils/js';
 import { Mock } from 'vitest';
+import { expectTypeScriptToCompile } from './generator.utils.spec';
 
 describe('openApiTsClientGenerator', () => {
   let tree: Tree;
@@ -21,31 +20,7 @@ describe('openApiTsClientGenerator', () => {
   });
 
   const validateTypeScript = (paths: string[]) => {
-    const project = createProjectSync({
-      useInMemoryFileSystem: true,
-      compilerOptions: {
-        target: ts.ScriptTarget.ES2022,
-        module: ts.ModuleKind.NodeNext,
-        moduleResolution: ts.ModuleResolutionKind.NodeNext,
-        skipLibCheck: true,
-        strict: true,
-      },
-    });
-    paths.forEach((p) => {
-      project.createSourceFile(p, tree.read(p, 'utf-8'));
-    });
-
-    const program = project.createProgram();
-
-    const diagnostics = [
-      ...program.getSemanticDiagnostics(),
-      ...program.getSyntacticDiagnostics(),
-    ];
-
-    if (diagnostics.length > 0) {
-      console.log(project.formatDiagnosticsWithColorAndContext(diagnostics));
-    }
-    expect(diagnostics).toHaveLength(0);
+    expectTypeScriptToCompile(tree, paths);
   };
 
   const callGeneratedClient = async (
@@ -4007,11 +3982,9 @@ describe('openApiTsClientGenerator', () => {
       'b',
       'c',
     ]);
-    expect(await callGeneratedClient(client, mockFetch, 'people.list')).toEqual([
-      'a',
-      'b',
-      'c',
-    ]);
+    expect(await callGeneratedClient(client, mockFetch, 'people.list')).toEqual(
+      ['a', 'b', 'c'],
+    );
     expect(await callGeneratedClient(client, mockFetch, 'items.list')).toEqual([
       'a',
       'b',
@@ -4077,10 +4050,14 @@ describe('openApiTsClientGenerator', () => {
 
     tree.write('openapi.json', JSON.stringify(spec));
 
-    await expect(openApiTsClientGenerator(tree, {
-      openApiSpecPath: 'openapi.json',
-      outputPath: 'src/generated',
-    })).rejects.toThrow('Untagged operations cannot have the same operationId (myOp)');
+    await expect(
+      openApiTsClientGenerator(tree, {
+        openApiSpecPath: 'openapi.json',
+        outputPath: 'src/generated',
+      }),
+    ).rejects.toThrow(
+      'Untagged operations cannot have the same operationId (myOp)',
+    );
   });
 
   it('should throw an error for duplicate operation ids within a tag', async () => {
@@ -4145,6 +4122,209 @@ describe('openApiTsClientGenerator', () => {
       }),
     ).rejects.toThrow(
       'Operations with the same tag (users) cannot have the same operationId (list)',
+    );
+  });
+
+  it('should add the appropriate content type header by default', async () => {
+    const spec: Spec = {
+      info: {
+        title,
+        version: '1.0.0',
+      },
+      openapi: '3.0.0',
+      paths: {
+        '/json': {
+          post: {
+            requestBody: {
+              required: true,
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      message: {
+                        type: 'string',
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            responses: {
+              '200': {
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'array',
+                      items: {
+                        type: 'string',
+                      },
+                    },
+                  },
+                },
+                description: 'Success',
+              },
+            },
+          },
+        },
+        '/text': {
+          post: {
+            requestBody: {
+              required: true,
+              content: {
+                'text/plain': {
+                  schema: {
+                    type: 'string',
+                  },
+                },
+              },
+            },
+            responses: {
+              '200': {
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'array',
+                      items: {
+                        type: 'string',
+                      },
+                    },
+                  },
+                },
+                description: 'Success',
+              },
+            },
+          },
+        },
+      },
+    };
+
+    tree.write('openapi.json', JSON.stringify(spec));
+
+    await openApiTsClientGenerator(tree, {
+      openApiSpecPath: 'openapi.json',
+      outputPath: 'src/generated',
+    });
+
+    validateTypeScript([
+      'src/generated/client.gen.ts',
+      'src/generated/types.gen.ts',
+    ]);
+
+    const client = tree.read('src/generated/client.gen.ts', 'utf-8');
+
+    const mockFetch = vi.fn();
+
+    mockFetch.mockResolvedValue({
+      status: 200,
+      json: vi.fn().mockResolvedValue(['a', 'b', 'c']),
+    });
+
+    expect(
+      await callGeneratedClient(client, mockFetch, 'postJson', {
+        message: 'hi',
+      }),
+    ).toEqual(['a', 'b', 'c']);
+    expect(mockFetch).toHaveBeenCalledWith(
+      `${baseUrl}/json`,
+      expect.objectContaining({
+        method: 'POST',
+        headers: [['Content-Type', 'application/json']],
+      }),
+    );
+
+    expect(
+      await callGeneratedClient(client, mockFetch, 'postText', 'hello'),
+    ).toEqual(['a', 'b', 'c']);
+    expect(mockFetch).toHaveBeenCalledWith(
+      `${baseUrl}/text`,
+      expect.objectContaining({
+        method: 'POST',
+        headers: [['Content-Type', 'text/plain']],
+      }),
+    );
+  });
+
+  it('should allow omitting auto content type header', async () => {
+    const spec: Spec = {
+      info: {
+        title,
+        version: '1.0.0',
+      },
+      openapi: '3.0.0',
+      paths: {
+        '/json': {
+          post: {
+            requestBody: {
+              required: true,
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      message: {
+                        type: 'string',
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            responses: {
+              '200': {
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'array',
+                      items: {
+                        type: 'string',
+                      },
+                    },
+                  },
+                },
+                description: 'Success',
+              },
+            },
+          },
+        },
+      },
+    };
+
+    tree.write('openapi.json', JSON.stringify(spec));
+
+    await openApiTsClientGenerator(tree, {
+      openApiSpecPath: 'openapi.json',
+      outputPath: 'src/generated',
+    });
+
+    validateTypeScript([
+      'src/generated/client.gen.ts',
+      'src/generated/types.gen.ts',
+    ]);
+
+    const client = tree.read('src/generated/client.gen.ts', 'utf-8');
+
+    const mockFetch = vi.fn();
+
+    mockFetch.mockResolvedValue({
+      status: 200,
+      json: vi.fn().mockResolvedValue(['a', 'b', 'c']),
+    });
+
+    const { TestApi } = await importTypeScriptModule<any>(client);
+    const c = new TestApi({
+      url: baseUrl,
+      fetch: mockFetch,
+      options: { omitContentTypeHeader: true },
+    });
+
+    expect(await c.postJson({ message: 'hi' })).toEqual(['a', 'b', 'c']);
+    expect(mockFetch).toHaveBeenCalledWith(
+      `${baseUrl}/json`,
+      expect.objectContaining({
+        method: 'POST',
+        headers: [], // No content-type header added
+      }),
     );
   });
 });

@@ -40,7 +40,7 @@ const canShortCircuitConversion = (property) => {
 const renderToJsonDateValue = (identifier, format) => {
   return `${identifier}.toISOString()${format === 'date' ? '.slice(0,10)' : ''}`;
 };
-// Renders the appropriate nested function for .map() or mapValues() for arrays and dictionaries for the given type
+// Renders the appropriate nested function for .map() or $mapValues() for arrays and dictionaries for the given type
 const renderNestedToJsonValue = (type, depth = 0) => {
   const itemIdentifier = `item${depth}`;
   if (type.isPrimitive || type.typescriptType === 'unknown' || type.export === 'enum' || type.isEnum) {
@@ -48,7 +48,7 @@ const renderNestedToJsonValue = (type, depth = 0) => {
   } else if (type.export === "array") {
     return `(${itemIdentifier}) => ${itemIdentifier}.map(${renderNestedToJsonValue(type.link, depth + 1)})`;
   } else if (type.export === "dictionary") {
-    return `(${itemIdentifier}) => $IO.mapValues(${itemIdentifier}, ${renderNestedToJsonValue(type.link, depth + 1)})`;
+    return `(${itemIdentifier}) => $IO.$mapValues(${itemIdentifier}, ${renderNestedToJsonValue(type.link, depth + 1)})`;
   }
   return `$IO.${type.name || type.type}.toJson`;
 };
@@ -64,7 +64,7 @@ const renderToJsonValue = (property, value) => {
     const prefix = property.uniqueItems ? `Array.from(${value})` : `${value}`;
     rendered = `(${prefix}.map(${renderNestedToJsonValue(property.link)}))`;
   } else if (property.export === "dictionary") {
-    rendered = `($IO.mapValues(${value}, ${renderNestedToJsonValue(property.link)}))`;
+    rendered = `($IO.$mapValues(${value}, ${renderNestedToJsonValue(property.link)}))`;
   } else if (property.type !== "any") {
     rendered = `$IO.${property.type}.toJson(${value})`;
   } else {
@@ -76,7 +76,7 @@ const renderToJsonValue = (property, value) => {
   }
   return rendered;
 };
-// Renders the appropriate nested function for .map() or mapValues() for arrays and dictionaries for the given type
+// Renders the appropriate nested function for .map() or $mapValues() for arrays and dictionaries for the given type
 const renderNestedFromJsonValue = (type, depth = 0) => {
     const itemIdentifier = `item${depth}`;
     if (type.isPrimitive || type.typescriptType === 'unknown' || type.export === 'enum' || type.isEnum) {
@@ -84,7 +84,7 @@ const renderNestedFromJsonValue = (type, depth = 0) => {
     } else if (type.export === "array") {
         return `(${itemIdentifier}) => ${itemIdentifier}.map(${renderNestedFromJsonValue(type.link, depth + 1)})`;
     } else if (type.export === "dictionary") {
-        return `(${itemIdentifier}) => $IO.mapValues(${itemIdentifier}, ${renderNestedFromJsonValue(type.link, depth + 1)})`;
+        return `(${itemIdentifier}) => $IO.$mapValues(${itemIdentifier}, ${renderNestedFromJsonValue(type.link, depth + 1)})`;
     }
     return `$IO.${type.name || type.type}.fromJson`;
 };
@@ -99,7 +99,7 @@ const renderFromJsonValue = (property, value) => {
         rendered = `((${value} as Array<any>).map(${renderNestedFromJsonValue(property.link)}))`;
         rendered = property.uniqueItems ? `new Set(${rendered})` : rendered;
     } else if (property.export === "dictionary") {
-        rendered = `($IO.mapValues(${value}, ${renderNestedFromJsonValue(property.link)}))`;
+        rendered = `($IO.$mapValues(${value}, ${renderNestedFromJsonValue(property.link)}))`;
     } else {
         rendered = `$IO.${property.type}.fromJson(${value})`;
     }
@@ -116,34 +116,36 @@ const renderResponseCondition = (code) => {
   return `response.status === ${code}`;
 };
 // Renders the code which handles deserialising the response from a fetch call
-const renderResponse = (response) => {
-  if (response.export === 'array') {
-    if (response.isPrimitive || (response.link && response.link.isPrimitive)) {
-      return `(await response.json()) as ${response.typescriptType}`;
-    }
-    return `(await response.json()).map($IO.${response.type}.fromJson)`;
+const renderResponse = (response, options) => {
+  let opts = options || {
+    asText: 'await response.text()',
+    asJson: 'await response.json()',
+    asBlob: 'await response.blob()',
+  };
+  if (response.type === 'binary') {
+    return opts.asBlob;
   }
-  if (response.isPrimitive && ['date', 'date-time'].includes(response.format)) {
-    return `new Date(await response.text())`;
-  }
-  if (response.isPrimitive || ['unknown', 'any'].includes(response.type)) {
+  if ((response.isPrimitive || ['unknown', 'any'].includes(response.type)) && !['array', 'dictionary'].includes(response.export)) {
     if (response.type === 'number') {
-      return `Number(await response.text())`;
+      return `Number(${opts.asText})`;
     } else if (response.type === 'boolean') {
-      return `Boolean(await response.text())`;
-    } else if (response.type === 'binary') {
-      return `await response.blob()`;
+      return `(${opts.asText}) === 'true' ? true : false`;
+    } else if (['date', 'date-time'].includes(response.format)) {
+      return `new Date(${opts.asText})`;
     }
-    return `await response.text()${['unknown', 'any'].includes(response.type) ? ' as any' : ''}`;
+    return `${opts.asText}${['unknown', 'any'].includes(response.type) ? ' as any' : ''}`;
   }
   if (response.isEnum || response.export === 'enum') {
-    return `(await response.text()) as ${response.typescriptType}`;
+    return `(${opts.asText}) as ${response.typescriptType}`;
   }
-  // Non primitive
-  if (response.export === 'array') {
-    return `(await response.json()).map($IO.${response.type}.fromJson)`;
-  }
-  return `$IO.${response.typescriptType}.fromJson(await response.json())`;
+  return renderFromJsonValue(response, `(${opts.asJson})`);
+};
+const renderStreamingResponseChunk = (response) => {
+  return renderResponse(response, {
+    asJson: 'JSON.parse(value)',
+    asText: 'value',
+    asBlob: 'new Blob([value])',
+  });
 };
 _%>
 
@@ -151,7 +153,7 @@ _%>
  * Utility for serialisation and deserialisation of API types.
  */
 class $IO {
-  private static mapValues = (data: any, fn: (item: any) => any) =>
+  protected static $mapValues = (data: any, fn: (item: any) => any) =>
     Object.fromEntries(Object.entries(data).map(([k, v]) => [k, fn(v)]));
 <%_ models.filter(m => m.export !== 'enum').forEach((model) => { _%>
 <%_ const isComposite = model.export === "one-of" || model.export === "any-of" || model.export === "all-of"; _%>
@@ -258,8 +260,26 @@ class $IO {
  * Client configuration for <%- className %>
  */
 export interface <%- className %>Config {
+  /**
+   * Base URL for the API
+   */
   url: string;
+  /**
+   * Custom instance of fetch. By default the global 'fetch' is used.
+   * You can override this to add custom middleware for use cases such as adding authentication headers.
+   */
   fetch?: typeof fetch;
+  /**
+   * Additional configuration
+   */
+  options?: {
+    /**
+     * By default, the client will add a Content-Type header, set to the media type defined for
+     * the request in the OpenAPI specification.
+     * Set this to false to omit this header.
+     */
+    omitContentTypeHeader?: boolean;
+  };
 }
 
 /**
@@ -270,6 +290,11 @@ export class <%- className %> {
 
   constructor(config: <%- className %>Config) {
     this.$config = config;
+
+    <%_ allOperations.forEach((op) => { _%>
+    <%_ const hasTag = op.tags && op.tags.length > 0; _%>
+    this.<% if (hasTag) { %>_<% } %><%- op.uniqueName %> = this.<% if (hasTag) { %>_<% } %><%- op.uniqueName %>.bind(this);
+    <%_ }); _%>
   }
 
   private $url = (path: string, pathParameters: { [key: string]: any }, queryParameters: { [key: string]: any }, collectionFormats?: { [key: string]: 'multi' | 'csv' }): string => {
@@ -298,16 +323,22 @@ export class <%- className %> {
   private $fetch: typeof fetch = (...args) => (this.$config.fetch ?? fetch)(...args);
   <%_ allOperations.forEach((op) => { _%>
   <%_ const hasTag = op.tags && op.tags.length > 0; _%>
-
+  <%_ const isStreaming = (op.vendorExtensions ?? {})['x-streaming']; _%>
   <%_ const isInputOptional = (op.parameters.length === 1 && op.parametersBody && !op.parametersBody.isRequired) || op.parameters.length === 0; _%>
-<%- docString(op, '  ') %>  <%- hasTag ? 'private _' : 'public ' %><%- op.uniqueName %> = async (<% if (op.parameters.length > 0) { %>input<%- isInputOptional ? '?' : '' %>: <%- op.operationIdPascalCase %>Request<% } %>): Promise<<%- op.result ? op.result.typescriptType : 'void' %>> => {
+
+<%- docString(op, '  ') %>  <%- hasTag ? 'private' : 'public' %> async <% if (isStreaming) { %>*<% } %><%- hasTag ? '_' : '' %><%- op.uniqueName %>(<% if (op.parameters.length > 0) { %>input<%- isInputOptional ? '?' : '' %>: <%- op.operationIdPascalCase %>Request<% } %>): <%- isStreaming ? 'AsyncIterableIterator' : 'Promise' %><<%- op.result ? op.result.typescriptType : 'void' %>> {
     <%_ ['path', 'query', 'header'].forEach((position) => { _%>
     <%_ if (op.parameters.map(p => p.in).includes(position)) { _%>
-    const <%- position %>Parameters = $IO.<%- op.operationIdPascalCase %>Request<%- upperFirst(position) %>Parameters.toJson(input);
+    const <%- position %>Parameters: {[key: string]: any} = $IO.<%- op.operationIdPascalCase %>Request<%- upperFirst(position) %>Parameters.toJson(input);
     <%_ } else { _%>
-    const <%- position %>Parameters = {};
+    const <%- position %>Parameters: {[key: string]: any} = {};
     <%_ } _%>
     <%_ }); _%>
+    <%_ if (op.parametersBody && op.parametersBody.mediaTypes) { _%>
+    if (!this.$config.options?.omitContentTypeHeader) {
+      headerParameters['Content-Type'] = '<%- op.parametersBody.mediaTypes %>';
+    }
+    <%_ } _%>
     <%_ if (op.parameters.filter(p => p.collectionFormat).length > 0) { _%>
     const collectionFormats = {
       <%_ op.parameters.filter(p => p.collectionFormat).forEach((parameter) => { _%>
@@ -342,12 +373,28 @@ export class <%- className %> {
     <%_ if (response.code !== 'default') { _%>
     if (<%- renderResponseCondition(response.code) %>) {
     <%_ } _%>
-    <% if (response.code !== 'default') { %>  <% } %><% if (isResultResponse) { %>return <%- response.type === 'void' ? 'undefined' : renderResponse(response) %><% } else { %>throw {
-    <% if (response.code !== 'default') { %>  <% } %>  status: response.status,
+    <%_ if (isResultResponse) { _%>
+    <%_ if (isStreaming) { _%>
+    <%_ if (response.type === 'void') { _%>
+    return;
+    <%_ } else { _%>
+    const reader = response.body?<% if (response.type !== 'binary') { %>.pipeThrough(new TextDecoderStream())<% } %>.getReader();
+    while (reader) {
+      const { value, done } = await reader.read();
+      if (done) return;
+      yield <%- renderStreamingResponseChunk(response) %>;
+    }
+    return;
+    <%_ } _%>
+    <%_ } else { _%>
+    return <%- response.type === 'void' ? 'undefined' : renderResponse(response) _%>
+    <%_ } _%>
+<% } else { %>throw {
+      status: response.status,
       <%_ if (response.type !== 'void') { _%>
-    <% if (response.code !== 'default') { %>  <% } %>  error: <%- renderResponse(response) %>,
+      error: <%- renderResponse(response) %>,
       <%_ } _%>
-    <% if (response.code !== 'default') { %>  <% } %>}<% } %>;
+    }<% } %>;
     <%_ if (response.code !== 'default') { _%>
     }
     <%_ } _%>
@@ -355,13 +402,13 @@ export class <%- className %> {
     <%_ if (!op.responses.find(response => response.code === 'default')) { _%>
     throw new Error(`Unknown response status ${response.status} returned by API`);
     <%_ } _%>
-  };
+  }
   <%_ }); _%>
   <%_ Object.entries(operationsByTag).forEach(([tag, operations]) => { _%>
 
 <%- docString({ description: `${tag} operations` }, '  ') %>  public <%- tag %> = {
     <%_ operations.forEach((op) => { _%>
-<%- docString(op, '    ') %>    <%- op.name %>: this._<%- op.uniqueName %>,
+<%- docString(op, '    ') %>    <%- op.name %>: this._<%- op.uniqueName %>.bind(this),
     <%_ }); _%>
   };
   <%_ }); _%>

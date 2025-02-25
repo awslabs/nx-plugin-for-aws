@@ -115,19 +115,25 @@ export const buildOpenApiCodeGenData = async (
               response.type = 'void';
             } else {
               // Add the response media types
-              (response as any).mediaTypes = Object.keys(specResponse.content);
+              const mediaTypes = Object.keys(specResponse.content);
+              (response as any).mediaTypes = mediaTypes;
 
-              const responseContent =
-                specResponse.content?.['application/json'] ??
-                Object.values(specResponse.content)[0];
-              const responseSchema = resolveIfRef(spec, responseContent.schema);
-              if (responseSchema) {
-                mutateWithOpenapiSchemaProperties(
+              mediaTypes.forEach((mediaType) => {
+                const responseContent =
+                  specResponse.content?.[mediaType] ??
+                  Object.values(specResponse.content)[0];
+                const responseSchema = resolveIfRef(
                   spec,
-                  response,
-                  responseSchema,
+                  responseContent.schema,
                 );
-              }
+                if (responseSchema) {
+                  mutateWithOpenapiSchemaProperties(
+                    spec,
+                    response,
+                    responseSchema,
+                  );
+                }
+              });
             }
           }
         });
@@ -591,7 +597,7 @@ const ensureModelLinks = (spec: Spec, data: ClientData) => {
     }
   });
 
-  // Ensure set for all parameters
+  // Ensure set for all parameters and responses
   data.services.forEach((service) => {
     service.operations.forEach((op) => {
       const specOp = (spec as any)?.paths?.[op.path]?.[
@@ -635,6 +641,29 @@ const ensureModelLinks = (spec: Spec, data: ClientData) => {
             );
           }
         }
+      });
+
+      op.responses.forEach((response) => {
+        const specResponse = resolveIfRef(
+          spec,
+          specOp?.responses?.[response.code],
+        );
+        const mediaTypes = Object.keys(specResponse?.content ?? {});
+        mediaTypes.forEach((mediaType) => {
+          const responseSchema = resolveIfRef(
+            spec,
+            specResponse?.content?.[mediaType]?.schema,
+          );
+          if (responseSchema) {
+            _ensureModelLinks(
+              spec,
+              modelsByName,
+              response,
+              responseSchema,
+              visited,
+            );
+          }
+        });
       });
     });
   });
