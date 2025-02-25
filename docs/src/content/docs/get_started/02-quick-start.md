@@ -1,6 +1,6 @@
 ---
-title: '@aws/nx-plugin tutorial'
-description: Step by step instructions on how to use @aws/nx-plugin.
+title: Quick start
+description: A quick start on how to use @aws/nx-plugin.
 ---
 
 In this tutorial, you'll build a complete React website and REST API using `@aws/nx-plugin`. You'll learn how to:

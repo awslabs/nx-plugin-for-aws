@@ -23,16 +23,16 @@ export default defineConfig({
         github: 'https://github.com/withastro/starlight',
       },
       logo: {
-        src: './src/assets/houston.webp',
+        src: './src/content/docs/assets/houston.webp',
       },
       customCss: ['./src/styles/custom.css'],
       sidebar: [
         {
-          label: 'Guides',
+          label: 'Getting Started',
           items: [
             // Each item here is one entry in the navigation menu.
-            { label: 'Overview', slug: 'guides/example' },
-            { label: 'Tutorial', slug: 'guides/tutorial' },
+            { label: 'Concepts', slug: 'get_started/01-concepts' },
+            { label: 'Quick Start', slug: 'get_started/02-quick-start' },
           ],
         },
         {
