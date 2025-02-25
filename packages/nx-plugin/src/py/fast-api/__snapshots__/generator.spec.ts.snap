@@ -11,6 +11,7 @@ from collections.abc import Callable
 from aws_lambda_powertools import Logger, Metrics, Tracer
 from aws_lambda_powertools.metrics import MetricUnit
 from fastapi import FastAPI, Request, Response
+from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from mangum import Mangum
@@ -53,7 +54,7 @@ async def metrics_handler(request: Request, call_next):
     metrics.add_metric(name="RequestCount", unit=MetricUnit.Count, value=1)
 
     response = await call_next(request)
-    
+
     if response.status_code == 200:
         metrics.add_metric(name="Success", unit=MetricUnit.Count, value=1)
 
@@ -98,7 +99,26 @@ class LoggerRouteHandler(APIRoute):
 
         return route_handler
 
-app.router.route_class = LoggerRouteHandler",
+app.router.route_class = LoggerRouteHandler
+
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    for route in app.routes:
+        if isinstance(route, APIRoute):
+            route.operation_id = route.name
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        openapi_version=app.openapi_version,
+        description=app.description,
+        routes=app.routes,
+    )
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+app.openapi = custom_openapi
+",
   "apps/test_api/test_api/main.py": "from .init import app, lambda_handler, tracer
 
 handler = lambda_handler
