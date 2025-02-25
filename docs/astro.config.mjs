@@ -30,14 +30,31 @@ export default defineConfig({
         {
           label: 'Getting Started',
           items: [
-            // Each item here is one entry in the navigation menu.
-            { label: 'Concepts', slug: 'get_started/01-concepts' },
-            { label: 'Quick Start', slug: 'get_started/02-quick-start' },
+            { label: 'Concepts', link: '/get_started/concepts' },
+            { label: 'Quick start', link: '/get_started/quick-start' },
+            {
+              label: 'AI Dungeon Game',
+              link: '/get_started/tutorial-ai-dungeon-game',
+              badge: {
+                text: 'Tutorial',
+                variant: 'default',
+                class: 'navitem-badge',
+              },
+            },
+            {
+              label: 'Existing project',
+              link: '/get_started/tutorial-existing-project',
+              badge: {
+                text: 'Tutorial',
+                variant: 'default',
+                class: 'navitem-badge',
+              },
+            },
           ],
         },
         {
-          label: 'Reference',
-          autogenerate: { directory: 'reference' },
+          label: 'Guides',
+          autogenerate: { directory: 'guides' },
         },
       ],
       plugins: [

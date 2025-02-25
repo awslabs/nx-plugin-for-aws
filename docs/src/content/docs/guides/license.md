@@ -1,8 +1,11 @@
-# License Generator
+---
+title: License
+description: Reference documentation for the License generator
+---
 
-## Overview
+Automatically manage `LICENSE` files and source code headers in your workspace.
 
-This generator configures `LICENSE` files and source file headers for your project. After you run this generator, a [sync generator](https://nx.dev/concepts/sync-generators) is registered to execute as part of your `lint` targets which will ensure that your source files conform to the desired license content and format, as well as ensuring that your project's LICENSE files are correct, and licensing information is included in relevant project files.
+This generator registers a [sync generator](https://nx.dev/concepts/sync-generators) to execute as part of your `lint` targets which will ensure that your source files conform to the desired license content and format, as well as ensuring that your project's `LICENSE` files are correct, and licensing information is included in relevant project files (`package.json`, `pyproject.toml`).
 
 ## Usage
 
@@ -147,7 +150,7 @@ The license header content can be configured in two ways:
 }
 ```
 
-#### Including files and specifying header format
+#### Format
 
 You can specify how license headers should be formatted for different file types using glob patterns. The format configuration supports line comments, block comments, or a combination of both:
 
@@ -196,9 +199,9 @@ The format configuration supports:
 - `lineEnd`: Text appended to each line of the license content
 - `blockEnd`: Text written after the license content (e.g., to end a block comment)
 
-#### Custom comment syntax
+#### Custom Comment Syntax
 
-For file types that aren't natively supported, you can specify custom comment syntax:
+For file types that aren't natively supported, you can specify custom comment syntax to tell the sync generator how to identify existing license headers in these file types.
 
 ```typescript
 {
@@ -227,11 +230,6 @@ For file types that aren't natively supported, you can specify custom comment sy
   }
 }
 ```
-
-This tells the sync generator how to identify existing license headers in these file types. The `commentSyntax` configuration supports:
-
-- `line`: Characters that start a line comment
-- `block`: Characters that start and end a block comment
 
 #### Excluding files
 
