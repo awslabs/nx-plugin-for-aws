@@ -54,6 +54,10 @@ Both methods will add the necessary code and configuration to integrate the sour
 
 ## Supported Connections
 
-### tRPC
+### React to tRPC
 
 You can connect a React website to a tRPC API. For details, please refer to the [API connection section of the tRPC reference documentation](/reference/trpc/#api-connection-trpc-react).
+
+### React to FastAPI
+
+You can connect a React website to a FastAPI. For details, please refer to the [API connection section of the FastAPI reference documentation](/reference/fastapi/#api-connection-fastapi-react)
