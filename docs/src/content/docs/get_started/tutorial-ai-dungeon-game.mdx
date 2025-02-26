@@ -3,9 +3,10 @@ title: AI Dungeon Game
 description: A walkthrough of how to build an AI powered dungeon adventure game using the @aws/nx-plugin.
 ---
 
-import { Aside, Steps } from '@astrojs/starlight/components';
+import { Aside, Code, FileTree, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
 import { Image } from 'astro:assets';
-import dungeonAdventureArchitecturPng from '../assets/dungeon_game_architecture.png'
+import RunGenerator from '../../../components/run-generator.astro';
+import dungeonAdventureArchitecturePng from '../assets/dungeon-game-architecture.png'
 
 You will build an AI powered dungeon adventure game during this tutorial. This tutorial does not assume any existing knowledge of the `@aws/nx-plugin` or related technologies. The techniques you'll learn in this tutorial are fundamental to building any `@aws/nx-plugin` based application, and fully understanding it will give you a deep understanding of the `@aws/nx-plugin` and a basic understanding of how to use [NX](https://nx.dev/).
 
@@ -33,7 +34,7 @@ You can see what it will look like when you're finished here:
 
 The AI powered dungeon adventure game will be built using the following component architecture:
 
-<Image src={dungeonAdventureArchitecturPng} alt="dungeon_game_architecture.png" width="800" height="600" />
+<Image src={dungeonAdventureArchitecturePng} alt="dungeon-game-architecture.png" width="800" height="600" />
 
 - tRPC API which uses ElectroDB/DynamoDB from managing the game state
 - Python/FastAPI Lambda function with streaming responses for story generation (powered by Bedrock)
@@ -45,19 +46,233 @@ The AI powered dungeon adventure game will be built using the following componen
 
 ## Prerequisites
 
+The following global dependencies are needed before proceeding:
+
 - [Git](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git)
 - [Node >= 22](https://nodejs.org/en/download) (We recommend using something like [NVM](https://github.com/nvm-sh/nvm) to manage your node versions)
+  - verify by running `node --version`
 - [PNPM >= 10](https://pnpm.io/installation#using-npm) (you can also just use npm/yarn/bun if you prefer, however this tutorial will use `pnpm`)
+  - verify by running `pnpm --version`
 - [UV >= 0.5.29](https://docs.astral.sh/uv/getting-started/installation/)
+  1. install Python 3.12 by running: `uv python install 3.12.0`
+  2. verify with `uv python list --only-installed`
+- [AWS SDK with credentials](https://docs.aws.amazon.com/sdkref/latest/guide/access.html) configured to your target AWS account (where your application will be deployed)
 - If you are using VSCode, install the [Nx Console VSCode Plugin](https://marketplace.visualstudio.com/items?itemName=nrwl.angular-console) if you haven't already.
 
-## Bootstrapping our application
+## Module 1: Monorepo setup
 
-## Game API: implementation
+We are going to start by creating a new monorepo. From within your desired directory, run the following command:
 
-## Story API: implementation
+```bash
+npx create-nx-workspace@20.4.6 dungeon-adventure --preset=ts --ci=skip --pm=pnpm --formatter=prettier
+```
 
-## Final cleanup
+This will set up a NX monorepo within the `dungeon-adventure` directory which you can then open in vscode. It should look like the following:
+
+<FileTree>
+- .nx/
+- .vscode/
+- node_modules/
+- packages/ this is where your sub-projects will reside
+- .gitignore
+- .npmrc
+- .prettierignore
+- .prettierrc
+- nx.json configures the Nx CLI and monorepo defaults
+- package.json all node dependencies are defined here
+- pnpm-lock.yaml
+- pnpm-workspace.yaml
+- README.md
+- tsconfig.base.json all node based sub-projects extend this
+- tsconfig.json
+</FileTree>
+
+<Aside>
+The `package.json` defines a `type` of `module` which means ESM is the default module type for all node based sub-projects vended by the `@aws/nx-plugin`.
+</Aside>
+
+In order to start adding components from the `@aws/nx-plugin` into the monorepo, we need to install it as a dev dependency by running the following command:
+
+```bash
+pnpm add -Dw @aws/nx-plugin
+```
+
+Now we are ready to start creating our different sub-projects using the `@aws/nx-plugin`.
+
+<Aside type="tip">It is a best practice to ensure all your unstaged files are commited in Git before running any generators. This allows you to see what has changed after running your generator via `git diff`</Aside>
+
+### Game API
+
+First let's create our Game API. To do this, let's create a tRPC API called `GameApi` by following the below steps:
+
+<RunGenerator generator="ts#trpc-api" requiredParameters={{apiName:"GameApi"}} />
+
+<details>
+<summary>You will notice that some new files have appeared in your file tree.</summary>
+
+<FileTree>
+- packages/
+  - common/
+    - constructs/
+      - src/
+        - app/ app specific cdk constructs
+          - http-apis/
+            - **game-api.ts** cdk construct to create your tRPC API
+            - index.ts
+            - ...
+          - index.ts
+        - core/ generic cdk constructs
+          - http-api.ts base cdk construct for a Http based API
+          - index.ts
+          - runtime-config.ts
+        - index.ts
+      - project.json
+      - ...
+    - types/ shared types
+      - src/
+        - index.ts
+        - runtime-config.ts interface definition used by both CDK and website
+      - project.json
+      - ...
+  - game-api/
+    - backend/ tRPC impelementation code
+      - src/
+        - client/ vanilla client typically used for ts machine to machine calls
+          - index.ts
+          - sigv4.ts
+        - middleware/ powertools instrumentation
+          - error.ts
+          - index.ts
+          - logger.ts
+          - metrics.ts
+          - tracer.ts
+        - procedures/ specific implementations for your API procedures/routes
+          - **echo.ts**
+        - index.ts
+        - init.ts sets up context and middleware
+        - local-server.ts used when running the tRPC server locally
+        - **router.ts** entrypoint for your lambda handler which defines all procedures
+      - project.json
+      - ...
+    - schema/
+      - src/
+        - procedures/
+          - **echo.ts**
+        - index.ts
+      - project.json
+      - ...
+- eslint.config.mjs
+- vitest.workspace.ts
+</FileTree>
+</details>
+
+Taking a look at a few of the key files:
+
+<Tabs>
+    <TabItem label="router.ts">
+```ts {6,13}
+// packages/game-api/backend/src/router.ts
+import {
+  awsLambdaRequestHandler,
+  CreateAWSLambdaContextOptions,
+} from '@trpc/server/adapters/aws-lambda';
+import { echo } from './procedures/echo.js';
+import { t } from './init.js';
+import { APIGatewayProxyEventV2WithIAMAuthorizer } from 'aws-lambda';
+
+export const router = t.router;
+
+export const appRouter = router({
+  echo,
+});
+
+export const handler = awsLambdaRequestHandler({
+  router: appRouter,
+  createContext: (
+    ctx: CreateAWSLambdaContextOptions<APIGatewayProxyEventV2WithIAMAuthorizer>,
+  ) => ctx,
+});
+
+export type AppRouter = typeof appRouter;
+```
+The router defines the entrypoint for your tRPC API and is the place where you will declare all of your API methods. As you can see above, we have a method called `echo` with it's implementation living in the `./procedures/echo.ts` file.
+    </TabItem>
+    <TabItem label="echo.ts (backend)">
+```ts {3-6}
+// packages/game-api/backend/src/procedures/echo.ts
+import { publicProcedure } from '../init.js';
+import {
+  EchoInputSchema,
+  EchoOutputSchema,
+} from ':dungeon-adventure/game-api-schema';
+
+export const echo = publicProcedure
+  .input(EchoInputSchema)
+  .output(EchoOutputSchema)
+  .query((opts) => ({ result: opts.input.message }));
+```
+
+This file is the implementation of the `echo` method and as you can see is strongly typed by declaring its input and output data structures. It is importing these definitions from the `:dungeon-adventure/game-api-schema` project which is an [alias](https://www.typescriptlang.org/tsconfig/paths.html) for the schema project.
+
+<Aside type="tip">If you are seeing an import error within your IDE, this is because our backend does not have a typescript reference set up yet in it's tsconfig.json. Nx has been [configured](https://nx.dev/nx-api/js/generators/typescript-sync) to create these references *dynamically* whenever a build/compile is run or if you run the `pnpm nx sync` command manually.</Aside>
+    </TabItem>
+    <TabItem label="echo.ts (schema)">
+```ts
+// packages/game-api/schema/src/procedures/echo.ts
+import { z } from 'zod';
+
+export const EchoInputSchema = z.object({
+  message: z.string(),
+});
+
+export type IEchoInput = z.TypeOf<typeof EchoInputSchema>;
+
+export const EchoOutputSchema = z.object({
+  result: z.string(),
+});
+
+export type IEchoOutput = z.TypeOf<typeof EchoOutputSchema>;
+```
+
+All tRPC schema definitions are defined using [Zod](https://zod.dev/) and are exported as typescript types via the `z.TypeOf` syntax.
+    </TabItem>
+    <TabItem label="game-api.ts">
+```ts
+
+// packages/common/constructs/src/app/http-apis/game-api.ts
+import { Construct } from 'constructs';
+import * as url from 'url';
+import { HttpApi } from '../../core/http-api.js';
+import { HttpIamAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
+import { Runtime } from 'aws-cdk-lib/aws-lambda';
+
+export class GameApi extends HttpApi {
+  constructor(scope: Construct, id: string) {
+    super(scope, id, {
+      defaultAuthorizer: new HttpIamAuthorizer(),
+      apiName: 'GameApi',
+      runtime: Runtime.NODEJS_LATEST,
+      handler: 'index.handler',
+      handlerFilePath: url.fileURLToPath(
+        new URL(
+          '../../../../../../dist/packages/game-api/backend/bundle',
+          import.meta.url,
+        ),
+      ),
+    });
+  }
+}
+```
+
+This is the CDK construct that defines our GameApi. As you can see, it has already configured the handler file path to the generated bundle for our tRPC backend implementation. This means that at `cdk synth` time, bundling does not occur as we have already bundled it as part of the backend project as part of the build target.
+    </TabItem>
+</Tabs>
+
+## Module 2: Game API: implementation
+
+## Module 3: Story API: implementation
+
+## Module 4: Final cleanup
 
 <Aside type="caution">TODO: CDK destroy</Aside>
 
