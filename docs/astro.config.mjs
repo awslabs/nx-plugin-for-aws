@@ -33,22 +33,12 @@ export default defineConfig({
             { label: 'Concepts', link: '/get_started/concepts' },
             { label: 'Quick start', link: '/get_started/quick-start' },
             {
-              label: 'AI Dungeon Game',
+              label: 'Tutorial: AI Dungeon Game',
               link: '/get_started/tutorial-ai-dungeon-game',
-              badge: {
-                text: 'Tutorial',
-                variant: 'default',
-                class: 'navitem-badge',
-              },
             },
             {
-              label: 'Existing project',
+              label: 'Tutorial: Usage in a existing project',
               link: '/get_started/tutorial-existing-project',
-              badge: {
-                text: 'Tutorial',
-                variant: 'default',
-                class: 'navitem-badge',
-              },
             },
           ],
         },
