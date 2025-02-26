@@ -54,7 +54,25 @@ export default defineConfig({
         },
         {
           label: 'Guides',
-          autogenerate: { directory: 'guides' },
+          items: [
+            { label: 'tRPC', link: '/guides/trpc' },
+            { label: 'FastAPI', link: '/guides/fastapi' },
+            {
+              label: 'API Connection',
+              items: [
+                { label: 'Connecting APIs', link: '/guides/api-connection' },
+                {
+                  label: 'React → FastAPI',
+                  link: '/guides/api-connection/react-fastapi',
+                },
+                {
+                  label: 'React → tRPC',
+                  link: '/guides/api-connection/react-trpc',
+                },
+              ],
+            },
+            { label: 'License', link: '/guides/license' },
+          ],
         },
       ],
       plugins: [
