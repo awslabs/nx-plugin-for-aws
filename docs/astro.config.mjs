@@ -10,12 +10,18 @@ import starlightBlog from 'starlight-blog';
 import starlightLinksValidator from 'starlight-links-validator';
 import starlightVideos from 'starlight-videos';
 
+import tailwindcss from '@tailwindcss/vite';
+
+import react from '@astrojs/react';
+
 // https://astro.build/config
 export default defineConfig({
   image: {
     service: passthroughImageService(),
   },
+
   outDir: '../dist/docs',
+
   integrations: [
     starlight({
       title: '@aws/nx-plugin',
@@ -25,7 +31,7 @@ export default defineConfig({
       logo: {
         src: './src/content/docs/assets/houston.webp',
       },
-      customCss: ['./src/styles/custom.css'],
+      customCss: ['./src/styles/custom.css', './src/styles/tailwind.css'],
       sidebar: [
         {
           label: 'Getting Started',
@@ -82,5 +88,9 @@ export default defineConfig({
         }),
       ],
     }),
+    react(),
   ],
+  vite: {
+    plugins: [tailwindcss()],
+  },
 });
