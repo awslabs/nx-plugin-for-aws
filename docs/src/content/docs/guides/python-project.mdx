@@ -1,0 +1,168 @@
+---
+title: Python Projects
+description: Reference documentation for Python Projects
+---
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '../../../components/run-generator.astro';
+import GeneratorParameters from '../../../components/generator-parameters.astro';
+import NxCommands from '../../../components/nx-commands.astro';
+import schema from '../../../../../packages/nx-plugin/src/py/project/schema.json';
+
+The Python project generator can be used to create a modern [Python](https://www.python.org/) library or application configured with best practices, managed with [UV](https://docs.astral.sh/uv/), a single lockfile and virtual environment in an [UV workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/), [pytest](https://docs.pytest.org/en/stable/) for running tests, and [Ruff](https://docs.astral.sh/ruff/) for static analysis.
+
+## Usage
+
+### Generate a Python Project
+
+You can generate a new Python project in two ways:
+
+<RunGenerator generator="py#project" />
+
+### Options
+
+<GeneratorParameters schema={schema} />
+
+## Generator Output
+
+The generator will create the following project structure in the `<directory>/<name>` directory:
+
+<FileTree>
+
+  - \<module-name>
+    - \_\_init\_\_.py Module initialisation
+    - hello.py Example Python source file
+  - tests
+    - \_\_init\_\_.py Module initialisation
+    - conftest.py Test configuration
+    - test_hello.py Example tests
+  - project.json Project configuration and build targets
+  - pyproject.toml Packaging configuration file used by UV
+  - .python-version Contains the project's Python version
+
+</FileTree>
+
+You may also notice the following files created/updated in the root of your workspace:
+
+<FileTree>
+
+  - pyproject.toml Workspace level packaging configuration for UV
+  - .python-version Contains the workspace Python version
+  - uv.lock Lockfile for Python dependencies
+
+</FileTree>
+
+## Writing Python Source Code
+
+Add your Python source code in the `<module-name>` directory.
+
+### Importing your Library Code in Other Projects
+
+Since [UV workspaces](https://docs.astral.sh/uv/concepts/projects/workspaces/) are set up for you, you can reference your Python project from any other Python project in your workspace:
+
+```python title="packages/my_other_project/my_other_project/main.py"
+from "my_library.hello" import say_hello
+```
+
+Above, `my_library` is the module name, `hello` corresponds to the Python source file `hello.py`, and `say_hello` is a method defined in `hello.py`
+
+### Dependencies
+
+To add dependencies to your project, you can run the `add` target in your Python project, for example:
+
+<NxCommands commands={['run my_scope.my_library:add some-pip-package']} />
+
+This will add the dependency to your project's `pyproject.toml` file, and update the root `uv.lock`.
+
+#### Runtime Code
+
+When you use your Python project as runtime code (for example as the handler for an AWS lambda function), you will need to create a bundle of the source code and all its dependencies. You can achieve this by adding a target such as the following to your `project.json` file:
+
+```json title="project.json"
+{
+  ...
+  "targets": {
+    ...
+    "bundle": {
+      "cache": true,
+      "executor": "nx:run-commands",
+      "outputs": ["{workspaceRoot}/dist/packages/my_library/bundle"],
+      "options": {
+        "commands": [
+          "uv export --frozen --no-dev --no-editable --project my_library -o dist/packages/my_library/bundle/requirements.txt",
+          "uv pip install -n --no-installer-metadata --no-compile-bytecode --python-platform x86_64-manylinux2014 --python `uv python pin` --target dist/packages/my_library/bundle -r dist/packages/my_library/bundle/requirements.txt"
+        ],
+        "parallel": false
+      },
+      "dependsOn": ["compile"]
+    },
+  },
+}
+```
+
+### Building
+
+Your Python project is configured with a `build` target (defined in `project.json`), which you can run via:
+
+<NxCommands commands={['run <project-name>:build']} />
+
+Where `<project-name>` is the fully qualified name of your project.
+
+The `build` target will compile, lint and test your project.
+
+Build output can be found in the root `dist` folder in your workspace, inside a directory for your package and target, for example `dist/packages/<my-library>/build`
+
+## Testing
+
+[pytest](https://docs.pytest.org/en/stable/) is configured for testing your project.
+
+### Writing Tests
+
+Tests should be written in the `test` directory within your project, in python files prefixed with `test_`, for example:
+
+<FileTree>
+  - my_library
+    - hello.py
+  - test
+    - test_hello.py Tests for hello.py
+</FileTree>
+
+Tests are methods which begin with `test_` and make assertions to verify expectations, for example:
+
+```python title="test/test_hello.py"
+from my_library.hello import say_hello
+
+def test_say_hello():
+  assert say_hello("Darth Vader") == "Hello, Darth Vader!"
+```
+
+For more details about how to write tests, please refer to the [pytest documentation](https://docs.pytest.org/en/stable/how-to/assert.html#).
+
+### Running Tests
+
+Tests will run as part of the `build` target for your project, but you can also run them separately by running the `test` target:
+
+<NxCommands commands={['run <project-name>:test']} />
+
+You can run an individual test or suite of tests using the `-k` flag, specifying either the name of the test file or method:
+
+<NxCommands commands={["run <project-name>:test -k 'test_say_hello'"]} />
+
+## Linting
+
+Python projects use [Ruff](https://docs.astral.sh/ruff/) for linting.
+
+### Running the Linter
+
+To invoke the linter to check your project, you can run the `lint` target.
+
+<NxCommands commands={["run <project-name>:lint"]} />
+
+### Fixing Lint Issues
+
+The majority of linting or formatting issues can be fixed automatically. You can tell Ruff to fix lint issues by running with the `--configuration=fix` argument.
+
+<NxCommands commands={["run <project-name>:lint --configuration=fix"]} />
+
+Similarly if you would like to fix all lint issues in all packages in your workspace, you can run:
+
+<NxCommands commands={["run-many --target lint --all --configuration=fix"]} />
