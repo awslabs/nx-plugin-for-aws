@@ -96,9 +96,9 @@ export const fastApiReactGenerator = async (
       ...frontendProjectConfig.targets,
       // Generate should run before compile as the client is created as part of the website src
       compile: {
-        ...frontendProjectConfig.targets?.build,
+        ...frontendProjectConfig.targets?.compile,
         dependsOn: [
-          ...(frontendProjectConfig.targets?.build?.dependsOn ?? []).filter(
+          ...(frontendProjectConfig.targets?.compile?.dependsOn ?? []).filter(
             (t) => t !== clientGenTarget,
           ),
           clientGenTarget,
