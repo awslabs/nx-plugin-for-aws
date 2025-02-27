@@ -20,7 +20,7 @@ export const SheetWrapper = (props: SheetWrapperProps) => {
       <SheetContent side='right' className="w-[35%] sm:w-[35%] !max-w-none">
         <SheetHeader>
           <SheetTitle>{props.title}</SheetTitle>
-          <SheetDescription>
+          <SheetDescription className="sl-markdown-content">
             {props.children}
           </SheetDescription>
         </SheetHeader>
