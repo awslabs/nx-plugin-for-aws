@@ -51,12 +51,15 @@ export default defineConfig({
         {
           label: 'Guides',
           items: [
-            { label: 'TypeScript', link: '/guides/typescript-project' },
-            { label: 'Python', link: '/guides/python-project' },
-            { label: 'tRPC', link: '/guides/trpc' },
-            { label: 'FastAPI', link: '/guides/fastapi' },
+            { label: 'ts#project', link: '/guides/typescript-project' },
+            { label: 'ts#infra', link: '/guides/typescript-infrastructure' },
+            { label: 'ts#trpc-api', link: '/guides/trpc' },
+            { label: 'ts#cloudscape-website', link: '/guides/cloudscape-website' },
+            { label: 'ts#cloudscape-website#auth', link: '/guides/cloudscape-website-auth' },
+            { label: 'py#project', link: '/guides/python-project' },
+            { label: 'py#fast-api', link: '/guides/fastapi' },
             {
-              label: 'API Connection',
+              label: 'api-connection',
               items: [
                 { label: 'Connecting APIs', link: '/guides/api-connection' },
                 {
@@ -69,7 +72,7 @@ export default defineConfig({
                 },
               ],
             },
-            { label: 'License', link: '/guides/license' },
+            { label: 'license', link: '/guides/license' },
           ],
         },
       ],
