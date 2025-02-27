@@ -45,6 +45,7 @@ export default defineConfig({
         {
           label: 'Guides',
           items: [
+            { label: 'TypeScript', link: '/guides/typescript-project' },
             { label: 'tRPC', link: '/guides/trpc' },
             { label: 'FastAPI', link: '/guides/fastapi' },
             {
