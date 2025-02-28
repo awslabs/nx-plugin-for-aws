@@ -119,6 +119,13 @@ export const tsLibGenerator = async (
   updateProjectConfiguration(tree, fullyQualifiedName, projectConfiguration);
 
   updateJson(tree, 'nx.json', (nxJson: NxJsonConfiguration) => {
+    nxJson.targetDefaults = {
+      ...nxJson.targetDefaults,
+      compile: {
+        cache: true,
+        ...nxJson.targetDefaults?.compile,
+      },
+    };
     nxJson.plugins = nxJson.plugins.map((p) => {
       if (
         typeof p !== 'string' &&
