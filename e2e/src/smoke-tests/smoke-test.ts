@@ -74,9 +74,9 @@ export const smokeTest = (
         `${opts.cwd}/packages/infra/src/stacks/application-stack.ts`,
         readFileSync(join(__dirname, '../files/application-stack.ts.template')),
       );
-      await runCLI(`sync`, opts);
+      await runCLI(`sync --verbose`, opts);
       await runCLI(
-        `run-many --target build --all --parallel 12 --output-style=stream`,
+        `run-many --target build --all --parallel 12 --output-style=stream --verbose`,
         opts,
       );
     });
