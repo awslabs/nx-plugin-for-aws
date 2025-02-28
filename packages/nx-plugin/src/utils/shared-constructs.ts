@@ -57,7 +57,7 @@ export async function sharedConstructsGenerator(tree: Tree) {
         overwriteStrategy: OverwriteStrategy.Overwrite,
       },
     );
-    formatFilesInSubtree(tree);
+    await formatFilesInSubtree(tree);
   }
   if (
     !tree.exists(
@@ -100,7 +100,7 @@ export async function sharedConstructsGenerator(tree: Tree) {
       withVersions(['constructs', 'aws-cdk-lib']),
       withVersions(['@types/node']),
     );
-    formatFilesInSubtree(tree);
+    await formatFilesInSubtree(tree);
   }
 }
 const updateGitignore = (tree: Tree) => {

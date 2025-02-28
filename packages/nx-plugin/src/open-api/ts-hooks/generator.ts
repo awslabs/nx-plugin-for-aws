@@ -24,7 +24,7 @@ export const openApiTsHooksGenerator = async (
 
   // TODO: generate hooks which wrap the client
 
-  formatFilesInSubtree(tree);
+  await formatFilesInSubtree(tree);
 };
 
 export default openApiTsHooksGenerator;

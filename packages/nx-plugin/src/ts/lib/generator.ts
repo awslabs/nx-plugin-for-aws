@@ -132,7 +132,7 @@ export const tsLibGenerator = async (
     return nxJson;
   });
 
-  formatFilesInSubtree(tree);
+  await formatFilesInSubtree(tree);
 
   return () => {
     if (!schema.skipInstall) {

@@ -12,7 +12,7 @@ import { withVersions } from '../../utils/versions';
 import { ast, tsquery } from '@phenomnomnominal/tsquery';
 import { factory, ArrayLiteralExpression } from 'typescript';
 import { singleImport } from '../../utils/ast';
-export const configureEslint = async (tree: Tree) => {
+export const configureEslint = (tree: Tree) => {
   // Configure the lint task
   let nxJson = readNxJson(tree);
   if (
