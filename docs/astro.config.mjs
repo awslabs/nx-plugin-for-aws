@@ -29,7 +29,8 @@ export default defineConfig({
         github: 'https://github.com/withastro/starlight',
       },
       logo: {
-        src: './src/content/docs/assets/houston.webp',
+        dark: './src/content/docs/assets/bulb-white.svg',
+        light: './src/content/docs/assets/bulb-black.svg',
       },
       customCss: ['./src/styles/custom.css', './src/styles/tailwind.css'],
       sidebar: [
