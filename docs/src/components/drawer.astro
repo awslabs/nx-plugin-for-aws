@@ -1,0 +1,221 @@
+---
+interface Props {
+  title: string;
+  trigger: string;
+  class?: string;
+}
+
+const { title, trigger, class: className } = Astro.props;
+---
+
+<div class:list={["drawer-container", className]}>
+  <slot name="trigger"><span data-drawer-trigger class="information">{trigger}<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 11a1 1 0 0 0-1 1v4a1 1 0 0 0 2 0v-4a1 1 0 0 0-1-1Zm.38-3.92a1 1 0 0 0-.76 0 1 1 0 0 0-.33.21 1.15 1.15 0 0 0-.21.33 1 1 0 0 0 .21 1.09c.097.088.209.16.33.21A1 1 0 0 0 13 8a1.05 1.05 0 0 0-.29-.71 1 1 0 0 0-.33-.21ZM12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 18a8 8 0 1 1 0-16.001A8 8 0 0 1 12 20Z"></path></svg></span></slot>
+</div>
+
+<template id="drawer-template">
+  <div class="drawer-portal">
+    <div class="drawer-backdrop" data-drawer-backdrop></div>
+    <div class="drawer" role="dialog" aria-labelledby="drawer-title">
+      <header class="drawer-header">
+        <h2 id="drawer-title" class="drawer-title" data-drawer-title="{title}">{title}</h2>
+        <button class="drawer-close" aria-label="Close drawer" data-drawer-close>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </header>
+      <div class="drawer-content sl-markdown-content"><slot/></div>
+    </div>
+  </div>
+</template>
+
+<style>
+  .drawer-container {
+    position: relative;
+    display: inline-block;
+  }
+
+  .drawer-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    border: none;
+    border-radius: 0.25rem;
+    cursor: pointer;
+    transition: background-color 150ms ease;
+  }
+
+  .drawer-trigger:hover {
+    cursor: pointer;
+  }
+
+  /* Portal styles */
+  :global(.drawer-portal) {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 999999;
+  }
+
+  :global(.drawer-backdrop) {
+    position: fixed;
+    inset: 0;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 300ms ease;
+  }
+
+  :global(.drawer-backdrop.active) {
+    opacity: 0.4;
+    background-color: grey;
+    pointer-events: auto;
+  }
+
+  :global(.drawer) {
+    position: fixed;
+    background-color: var(--background);
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 50%;
+    min-width: 300px;
+    transform: translateX(100%);
+    transition: transform 300ms ease;
+    pointer-events: auto;
+    display: flex;
+    flex-direction: column;
+  }
+
+  :global(.drawer.active) {
+    transform: translateX(0);
+    box-shadow: 0 4px 80px 0 rgba(0, 0, 0, 0.2), 0 6px 20px 0 rgba(0, 0, 0, 0.19);
+  }
+
+  :global(.drawer-header) {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem;
+    border-bottom: 1px solid var(--sl-color-gray-5, #2c2c2c);
+  }
+
+  :global(.drawer-title) {
+    margin: 0;
+    font-size: 1.25rem;
+    font-weight: 600;
+  }
+
+  :global(.drawer-close) {
+    padding: 0.5rem;
+    border: none;
+    background: none;
+    cursor: pointer;
+    opacity: 0.7;
+    transition: opacity 150ms ease;
+  }
+
+  :global(.drawer-close:hover) {
+    opacity: 1;
+  }
+
+  :global(.drawer-content) {
+    flex: 1;
+    padding: 1rem;
+    overflow-y: auto;
+  }
+
+  :global(.information) {
+    display: flex;
+    border-block-end: 1px dashed;
+    color: var(--sl-color-text-accent);
+    cursor: pointer;
+  }
+
+  :global(.information > svg) {
+    margin-left: 0.5rem;
+    margin-top: -0.5rem
+  }
+</style>
+
+<script>
+  class DrawerController {
+    private container: HTMLElement;
+    private trigger: HTMLElement;
+    private portal: HTMLElement | null = null;
+    private drawer: HTMLElement | null = null;
+    private backdrop: HTMLElement | null = null;
+    private closeButton: HTMLElement | null = null;
+    private title: string;
+    private content: HTMLElement;
+
+    constructor(container: HTMLElement) {
+      this.container = container;
+      this.trigger = container.querySelector('[data-drawer-trigger]') as HTMLElement;
+      this.content = container.querySelector('[data-drawer-content]') as HTMLElement;
+      
+      this.createPortal();
+      this.setupEventListeners();
+    }
+
+    private createPortal() {
+      const template = document.getElementById('drawer-template') as HTMLTemplateElement;
+      const portal = template.content.cloneNode(true) as HTMLElement;
+      
+      // Store references
+      this.portal = portal.querySelector('.drawer-portal') as HTMLElement;
+      this.drawer = portal.querySelector('.drawer') as HTMLElement;
+      this.backdrop = portal.querySelector('.drawer-backdrop') as HTMLElement;
+      this.closeButton = portal.querySelector('.drawer-close') as HTMLElement;
+      
+      // Set content
+      const contentElement = portal.querySelector('.drawer-content') as HTMLElement;
+      
+      // Clone the slot content
+      const slotContent = this.container.querySelector('slot:not([name])');
+      if (slotContent) {
+        contentElement.appendChild(slotContent.cloneNode(true));
+      }
+      
+      // Append to body
+      document.body.appendChild(this.portal);
+    }
+
+    private setupEventListeners() {
+      this.trigger.addEventListener('click', () => this.open());
+      this.closeButton?.addEventListener('click', () => this.close());
+      this.backdrop?.addEventListener('click', () => this.close());
+      
+      // Close on escape key
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && this.isOpen()) {
+          this.close();
+        }
+      });
+    }
+
+    private open() {
+      this.drawer?.classList.add('active');
+      this.backdrop?.classList.add('active');
+      this.trigger.setAttribute('aria-expanded', 'true');
+      document.body.style.overflow = 'hidden';
+    }
+
+    private close() {
+      this.drawer?.classList.remove('active');
+      this.backdrop?.classList.remove('active');
+      this.trigger.setAttribute('aria-expanded', 'false');
+      document.body.style.overflow = '';
+    }
+
+    private isOpen() {
+      return this.drawer?.classList.contains('active');
+    }
+  }
+
+  // Initialize all drawers on the page
+  document.querySelectorAll('.drawer-container').forEach((container) => {
+    new DrawerController(container as HTMLElement);
+  });
+</script>
