@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
+import { readNxJson, Tree } from '@nx/devkit';
 import { tsLibGenerator } from './generator';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 describe('ts lib generator', () => {
@@ -23,13 +23,13 @@ describe('ts lib generator', () => {
     expect(tree.exists('test-lib/project.json')).toBeTruthy();
     // Create snapshots of generated files
     expect(tree.read('test-lib/src/index.ts', 'utf-8')).toMatchSnapshot(
-      'index.ts'
+      'index.ts',
     );
     expect(tree.read('test-lib/tsconfig.json', 'utf-8')).toMatchSnapshot(
-      'tsconfig.json'
+      'tsconfig.json',
     );
     expect(tree.read('test-lib/project.json', 'utf-8')).toMatchSnapshot(
-      'project.json'
+      'project.json',
     );
   });
   it('should generate library with custom directory', async () => {
@@ -44,13 +44,13 @@ describe('ts lib generator', () => {
     expect(tree.exists('libs/test-lib/src/index.ts')).toBeTruthy();
     // Create snapshots of generated files
     expect(tree.read('libs/test-lib/src/index.ts', 'utf-8')).toMatchSnapshot(
-      'custom-dir-index.ts'
+      'custom-dir-index.ts',
     );
     expect(tree.read('libs/test-lib/tsconfig.json', 'utf-8')).toMatchSnapshot(
-      'custom-dir-tsconfig.json'
+      'custom-dir-tsconfig.json',
     );
     expect(tree.read('libs/test-lib/project.json', 'utf-8')).toMatchSnapshot(
-      'custom-dir-project.json'
+      'custom-dir-project.json',
     );
   });
   it('should generate library with subdirectory', async () => {
@@ -66,13 +66,29 @@ describe('ts lib generator', () => {
     expect(tree.exists('feature/test-lib/src/index.ts')).toBeTruthy();
     // Create snapshots of generated files
     expect(tree.read('feature/test-lib/src/index.ts', 'utf-8')).toMatchSnapshot(
-      'subdir-index.ts'
+      'subdir-index.ts',
     );
     expect(
-      tree.read('feature/test-lib/tsconfig.json', 'utf-8')
+      tree.read('feature/test-lib/tsconfig.json', 'utf-8'),
     ).toMatchSnapshot('subdir-tsconfig.json');
     expect(tree.read('feature/test-lib/project.json', 'utf-8')).toMatchSnapshot(
-      'subdir-project.json'
+      'subdir-project.json',
     );
+  });
+
+  it('should not configure duplicate @nx/js/typescript plugin entries', async () => {
+    await tsLibGenerator(tree, {
+      name: 'test-1',
+      skipInstall: true,
+    });
+    await tsLibGenerator(tree, {
+      name: 'test-2',
+      skipInstall: true,
+    });
+
+    const jsPlugins = readNxJson(tree).plugins.filter(
+      (p) => typeof p !== 'string' && p.plugin === '@nx/js/typescript',
+    );
+    expect(jsPlugins).toHaveLength(1);
   });
 });

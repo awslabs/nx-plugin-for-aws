@@ -126,16 +126,28 @@ export const tsLibGenerator = async (
         ...nxJson.targetDefaults?.compile,
       },
     };
-    nxJson.plugins = nxJson.plugins.map((p) => {
-      if (
-        typeof p !== 'string' &&
-        p.plugin === '@nx/js/typescript' &&
-        p.options?.['build']
-      ) {
-        p.options['build'].targetName = 'compile';
-      }
-      return p;
-    });
+
+    // Ensure we only declare a single typescript plugin with the correct settings
+    nxJson.plugins = [
+      {
+        plugin: '@nx/js/typescript',
+        options: {
+          typecheck: {
+            targetName: 'typecheck',
+          },
+          build: {
+            targetName: 'compile',
+            configName: 'tsconfig.lib.json',
+            buildDepsName: 'build-deps',
+            watchDepsName: 'watch-deps',
+          },
+        },
+      },
+      ...nxJson.plugins.filter(
+        (p) => typeof p === 'string' || p.plugin !== '@nx/js/typescript',
+      ),
+    ];
+
     return nxJson;
   });
 
