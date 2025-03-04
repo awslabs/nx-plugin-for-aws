@@ -1166,7 +1166,7 @@ We are using the `unstable_concat` api here which is safe to use. The only reaso
 
 ### Defining our procedures
 
-The final step is to implement our API methods. To do this, make the following changes within `packages/game-api/backend/src`:
+Now it's time to implement the API methods. To do this, make the following changes within `packages/game-api/backend/src`:
 
 <Tabs>
   <TabItem label="procedures/queryActions.ts">
@@ -1305,6 +1305,140 @@ export type AppRouter = typeof appRouter;
 You can also delete the `./procedures/echo.ts` file given we will not be using it in this project.
   </TabItem>
 </Tabs>
+
+### Infrastructure
+
+The final step is to update our infrastructure to create the DynamoDB table and grant permissions to perform operations from the Game API. To do so, update the `packages/infra/src` as follows:
+
+<Tabs>
+  <TabItem label="constructs/electrodb-table.ts">
+```typescript
+import { CfnOutput } from 'aws-cdk-lib';
+import {
+  AttributeType,
+  BillingMode,
+  ProjectionType,
+  Table,
+  TableProps,
+} from 'aws-cdk-lib/aws-dynamodb';
+import { Construct } from 'constructs';
+
+export type ElectrodbDynamoTableProps = Omit<
+  TableProps,
+  'partitionKey' | 'sortKey' | 'billingMode'
+>;
+
+export class ElectrodbDynamoTable extends Table {
+  constructor(scope: Construct, id: string, props?: ElectrodbDynamoTableProps) {
+    super(scope, id, {
+      partitionKey: {
+        name: 'pk',
+        type: AttributeType.STRING,
+      },
+      sortKey: {
+        name: 'sk',
+        type: AttributeType.STRING,
+      },
+      billingMode: BillingMode.PAY_PER_REQUEST,
+      ...props,
+    });
+
+    this.addGlobalSecondaryIndex({
+      indexName: 'gsi1pk-gsi1sk-index',
+      partitionKey: {
+        name: 'gsi1pk',
+        type: AttributeType.STRING,
+      },
+      sortKey: {
+        name: 'gsi1sk',
+        type: AttributeType.STRING,
+      },
+      projectionType: ProjectionType.ALL,
+    });
+
+    new CfnOutput(this, 'TableName', { value: this.tableName });
+  }
+}
+```
+  </TabItem>
+  <TabItem label="stacks/application-stack.ts">
+```diff lang="typescript"
+import {
+  GameApi,
+  GameUI,
+  StoryApi,
+  UserIdentity,
+} from ':dungeon-adventure/common-constructs';
+import * as cdk from 'aws-cdk-lib';
+import { Construct } from 'constructs';
++import { ElectrodbDynamoTable } from '../constructs/electrodb-table.js';
+
+export class ApplicationStack extends cdk.Stack {
+  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+    super(scope, id, props);
+
+    // The code that defines your stack goes here
+    const userIdentity = new UserIdentity(this, 'UserIdentity');
++
++    const electroDbTable = new ElectrodbDynamoTable(this, 'ElectroDbTable');
+
+    const gameApi = new GameApi(this, 'GameApi');
+    const storyApi = new StoryApi(this, 'StoryApi');
++
++    gameApi.routerFunction.addEnvironment(
++      'TABLE_NAME',
++      electroDbTable.tableName,
++    );
++    // grant the gameAPI rw access to DynamoDB 
++    electroDbTable.grantReadWriteData(gameApi.routerFunction);
+
+    // grant our authenticated role access to invoke our APIs
+    [storyApi, gameApi].forEach((api) =>
+      api.grantInvokeAccess(userIdentity.identityPool.authenticatedRole),
+    );
+
+    // Ensure this is instantiated last so our runtime-config.json can be automatically configured
+    new GameUI(this, 'GameUI');
+  }
+}
+```
+  </TabItem>
+</Tabs>
+
+### Deployment and testing
+
+<Drawer title="Deployment command" trigger="Your application can now be deployed by running the following command:">
+
+You can also deploy all stacks contained in the CDK application by running:
+
+<NxCommands commands={['nx run @dungeon-adventure/infra:deploy --all']} />
+
+This is however not recommended given that you may choose to seperate out your deployment stages as seperate stacks `i.e. infra-prod`. In this case the `--all` flag will attempt to deploy all stacks which would not be what you want.
+
+</Drawer>
+
+<NxCommands commands={['nx run @dungeon-adventure/infra:deploy infra-sandbox']} />
+
+Once the deployment completes, we can test our API by either calling the deployed API directly with something like [`awscurl`](https://docs.aws.amazon.com/prometheus/latest/userguide/AMP-compatible-APIs.html) or we can start a local instance of the tRPC backend and invoke the API's using `curl`.
+
+<Tabs>
+  <TabItem label="Local">
+You can get the `TABLE_NAME` from the CDK deploy outputs.
+<NxCommands env={{TABLE_NAME:"{TABLE_NAME}"}} commands={["run @dungeon-adventure/game-api-backend:serve"]} postCommands={['curl -X GET http://localhost:2022/games.query\?input="\\{\\}"']} />
+  </TabItem>
+  <TabItem label="Deployed">
+You can get the `GameApiUrl` from the CDK deploy outputs.
+```bash
+awscurl --service execute-api --region ap-southeast-2 -X GET https://{GameApiUrl}/games.query\?input\={} 
+```
+  </TabItem>
+</Tabs>
+
+If the command executes successfully, you should see a response as follows:
+
+```json
+{"result":{"data":{"items":[],"cursor":null}}}
+```
 
 ## Module 3: Story API implementation
 
