@@ -4,16 +4,25 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import { Tree } from '@nx/devkit';
-import { factory } from 'typescript';
 import {
-  destructuredImport,
-  singleImport,
+  ArrowFunction,
+  Block,
+  factory,
+  FunctionDeclaration,
+  NumericLiteral,
+  ObjectLiteralExpression,
+  VariableDeclaration,
+} from 'typescript';
+import {
+  addDestructuredImport,
+  addSingleImport,
   addStarExport,
   replace,
   createJsxElementFromIdentifier,
   createJsxElement,
   jsonToAst,
   hasExportDeclaration,
+  replaceIfExists,
 } from './ast';
 
 describe('ast utils', () => {
@@ -33,7 +42,7 @@ describe('ast utils', () => {
       vi.mocked(mockTree.exists).mockReturnValue(true);
       vi.mocked(mockTree.read).mockReturnValue(initialContent);
 
-      destructuredImport(
+      addDestructuredImport(
         mockTree,
         'file.ts',
         ['newImport1', 'newImport2'],
@@ -55,7 +64,7 @@ describe('ast utils', () => {
       vi.mocked(mockTree.exists).mockReturnValue(true);
       vi.mocked(mockTree.read).mockReturnValue(initialContent);
 
-      destructuredImport(
+      addDestructuredImport(
         mockTree,
         'file.ts',
         ['original as alias'],
@@ -77,7 +86,7 @@ describe('ast utils', () => {
       vi.mocked(mockTree.exists).mockReturnValue(true);
       vi.mocked(mockTree.read).mockReturnValue(initialContent);
 
-      destructuredImport(
+      addDestructuredImport(
         mockTree,
         'file.ts',
         ['existingImport'],
@@ -91,7 +100,7 @@ describe('ast utils', () => {
       vi.mocked(mockTree.exists).mockReturnValue(false);
 
       expect(() =>
-        destructuredImport(
+        addDestructuredImport(
           mockTree,
           'nonexistent.ts',
           ['import1'],
@@ -107,7 +116,7 @@ describe('ast utils', () => {
       vi.mocked(mockTree.exists).mockReturnValue(true);
       vi.mocked(mockTree.read).mockReturnValue(initialContent);
 
-      singleImport(mockTree, 'file.ts', 'DefaultImport', '@scope/package');
+      addSingleImport(mockTree, 'file.ts', 'DefaultImport', '@scope/package');
 
       expect(mockTree.write).toHaveBeenCalledWith(
         'file.ts',
@@ -124,7 +133,7 @@ describe('ast utils', () => {
       vi.mocked(mockTree.exists).mockReturnValue(true);
       vi.mocked(mockTree.read).mockReturnValue(initialContent);
 
-      singleImport(mockTree, 'file.ts', 'DefaultImport', '@scope/package');
+      addSingleImport(mockTree, 'file.ts', 'DefaultImport', '@scope/package');
 
       expect(mockTree.write).not.toHaveBeenCalled();
     });
@@ -183,6 +192,280 @@ describe('ast utils', () => {
       );
     });
 
+    it('should replace multiple matching nodes', () => {
+      const initialContent = `const a = 1;
+const b = 10000000;
+const c = 99999;
+const d = 0;
+const e = 1;
+const f = 9999;
+`;
+      vi.mocked(mockTree.exists).mockReturnValue(true);
+      vi.mocked(mockTree.read).mockReturnValue(initialContent);
+
+      replace(mockTree, 'file.ts', 'NumericLiteral', () =>
+        factory.createNumericLiteral('100'),
+      );
+
+      expect(mockTree.write).toHaveBeenCalledWith(
+        'file.ts',
+        expect.stringContaining(`const a = 100;
+const b = 100;
+const c = 100;
+const d = 100;
+const e = 100;
+const f = 100;
+`),
+      );
+    });
+
+    it('should preserve new lines', () => {
+      const initialContent = `const a = 1;
+const b = 10000000;
+
+const c = 99999;
+
+
+
+const d = 0;
+const e = 1;
+
+const f = 9999;
+`;
+      vi.mocked(mockTree.exists).mockReturnValue(true);
+      vi.mocked(mockTree.read).mockReturnValue(initialContent);
+
+      replace(mockTree, 'file.ts', 'NumericLiteral', () =>
+        factory.createNumericLiteral('100'),
+      );
+
+      expect(mockTree.write).toHaveBeenCalledWith(
+        'file.ts',
+        `const a = 100;
+const b = 100;
+
+const c = 100;
+
+
+
+const d = 100;
+const e = 100;
+
+const f = 100;
+`,
+      );
+    });
+
+    it('should handle transformers which mutate the given node', () => {
+      const initialContent = `const x = () => {};
+const y = () => {};`;
+      vi.mocked(mockTree.exists).mockReturnValue(true);
+      vi.mocked(mockTree.read).mockReturnValue(initialContent);
+
+      replace(
+        mockTree,
+        'file.ts',
+        'VariableDeclaration',
+        (node: VariableDeclaration) => {
+          const arrowFunction = node.initializer as ArrowFunction;
+          const functionBody = arrowFunction.body as Block;
+
+          // Create new arrow function with updated body
+          const newArrowFunction = factory.updateArrowFunction(
+            arrowFunction,
+            arrowFunction.modifiers,
+            arrowFunction.typeParameters,
+            arrowFunction.parameters,
+            arrowFunction.type,
+            arrowFunction.equalsGreaterThanToken,
+            factory.createBlock(
+              [
+                ...functionBody.statements,
+                factory.createVariableStatement(undefined, [
+                  factory.createVariableDeclaration(
+                    'hello',
+                    undefined,
+                    undefined,
+                    factory.createTrue(),
+                  ),
+                ]),
+              ],
+              true,
+            ),
+          );
+
+          // Update the variable declaration
+          return factory.updateVariableDeclaration(
+            node,
+            node.name,
+            node.exclamationToken,
+            node.type,
+            newArrowFunction,
+          );
+        },
+      );
+
+      expect(mockTree.write).toHaveBeenCalledWith(
+        'file.ts',
+        `const x = () => {
+    var hello = true;
+};
+const y = () => {
+    var hello = true;
+};`,
+      );
+    });
+
+    it('should replace only the parent node where nested updates are applied', () => {
+      const initialContent = `const x = () => {
+  const y = () => {};
+};
+`;
+      vi.mocked(mockTree.exists).mockReturnValue(true);
+      vi.mocked(mockTree.read).mockReturnValue(initialContent);
+
+      replace(
+        mockTree,
+        'file.ts',
+        'VariableDeclaration',
+        (node: VariableDeclaration) => {
+          const arrowFunction = node.initializer as ArrowFunction;
+          const functionBody = arrowFunction.body as Block;
+
+          // Create new arrow function with updated body
+          const newArrowFunction = factory.updateArrowFunction(
+            arrowFunction,
+            arrowFunction.modifiers,
+            arrowFunction.typeParameters,
+            arrowFunction.parameters,
+            arrowFunction.type,
+            arrowFunction.equalsGreaterThanToken,
+            factory.createBlock(
+              [
+                ...functionBody.statements,
+                factory.createVariableStatement(undefined, [
+                  factory.createVariableDeclaration(
+                    'hello',
+                    undefined,
+                    undefined,
+                    factory.createTrue(),
+                  ),
+                ]),
+              ],
+              true,
+            ),
+          );
+
+          // Update the variable declaration
+          return factory.updateVariableDeclaration(
+            node,
+            node.name,
+            node.exclamationToken,
+            node.type,
+            newArrowFunction,
+          );
+        },
+      );
+
+      expect(mockTree.write).toHaveBeenCalledWith(
+        'file.ts',
+        `const x = () => {
+    const y = () => { };
+    var hello = true;
+};
+`,
+      );
+    });
+
+    it('should handle nested replacements that return the node unchanged', () => {
+      const initialContent = `const x = () => {
+  const y = () => {};
+};
+`;
+      vi.mocked(mockTree.exists).mockReturnValue(true);
+      vi.mocked(mockTree.read).mockReturnValue(initialContent);
+
+      replace(mockTree, 'file.ts', 'VariableDeclaration', (node) => node);
+
+      // No changes should have been made
+      expect(mockTree.write).not.toHaveBeenCalled();
+    });
+
+    it('should handle nested replacements where a child node is changed', () => {
+      const initialContent = `const x = () => {
+  const y = () => {
+      const z = () => {
+          const a = () => {
+
+          };
+      };
+  };
+};
+`;
+      vi.mocked(mockTree.exists).mockReturnValue(true);
+      vi.mocked(mockTree.read).mockReturnValue(initialContent);
+
+      replace(
+        mockTree,
+        'file.ts',
+        'VariableDeclaration',
+        (node: VariableDeclaration) => {
+          if (node.name.getText() !== 'z') {
+            return node;
+          }
+          const arrowFunction = node.initializer as ArrowFunction;
+          const functionBody = arrowFunction.body as Block;
+
+          // Create new arrow function with updated body
+          const newArrowFunction = factory.updateArrowFunction(
+            arrowFunction,
+            arrowFunction.modifiers,
+            arrowFunction.typeParameters,
+            arrowFunction.parameters,
+            arrowFunction.type,
+            arrowFunction.equalsGreaterThanToken,
+            factory.createBlock(
+              [
+                ...functionBody.statements,
+                factory.createVariableStatement(undefined, [
+                  factory.createVariableDeclaration(
+                    'hello',
+                    undefined,
+                    undefined,
+                    factory.createTrue(),
+                  ),
+                ]),
+              ],
+              true,
+            ),
+          );
+
+          // Update the variable declaration
+          return factory.updateVariableDeclaration(
+            node,
+            node.name,
+            node.exclamationToken,
+            node.type,
+            newArrowFunction,
+          );
+        },
+      );
+
+      expect(mockTree.write).toHaveBeenCalledWith(
+        'file.ts',
+        `const x = () => {
+  const y = () => {
+      const z = () => {
+    const a = () => {
+    };
+    var hello = true;
+};
+  };
+};
+`,
+      );
+    });
+
     it('should throw if no matches found and errorIfNoMatches is true', () => {
       const initialContent = `const x = "string";`;
       vi.mocked(mockTree.exists).mockReturnValue(true);
@@ -209,6 +492,81 @@ describe('ast utils', () => {
           false,
         ),
       ).not.toThrow();
+
+      expect(() =>
+        replaceIfExists(mockTree, 'file.ts', 'NumericLiteral', () =>
+          factory.createNumericLiteral('10'),
+        ),
+      ).not.toThrow();
+    });
+
+    it('should not mess up existing formatting', () => {
+      const initialContent = `import {
+  awsLambdaRequestHandler,
+  CreateAWSLambdaContextOptions,
+} from '@trpc/server/adapters/aws-lambda';
+import { echo } from './procedures/echo.js';
+import { t } from './init.js';
+import { APIGatewayProxyEventV2WithIAMAuthorizer } from 'aws-lambda';
+
+export const router = t.router;
+
+export const appRouter = router({
+  echo,
+});
+
+export const handler = awsLambdaRequestHandler({
+  router: appRouter,
+  createContext: (
+    ctx: CreateAWSLambdaContextOptions<APIGatewayProxyEventV2WithIAMAuthorizer>,
+  ) => ctx,
+});
+
+export type AppRouter = typeof appRouter;
+`;
+      vi.mocked(mockTree.exists).mockReturnValue(true);
+      vi.mocked(mockTree.read).mockReturnValue(initialContent);
+
+      replace(
+        mockTree,
+        'file.ts',
+        'CallExpression[expression.name="router"] > ObjectLiteralExpression',
+        (node) =>
+          factory.createObjectLiteralExpression([
+            ...(node as ObjectLiteralExpression).properties,
+            factory.createShorthandPropertyAssignment('foo'),
+          ]),
+      );
+
+      expect(mockTree.write).toHaveBeenCalledWith(
+        'file.ts',
+        expect.stringContaining(`import {
+  awsLambdaRequestHandler,
+  CreateAWSLambdaContextOptions,
+} from '@trpc/server/adapters/aws-lambda';
+import { echo } from './procedures/echo.js';
+import { t } from './init.js';
+import { APIGatewayProxyEventV2WithIAMAuthorizer } from 'aws-lambda';
+
+export const router = t.router;
+
+export const appRouter = router({ echo, foo });
+
+export const handler = awsLambdaRequestHandler({
+  router: appRouter,
+  createContext: (
+    ctx: CreateAWSLambdaContextOptions<APIGatewayProxyEventV2WithIAMAuthorizer>,
+  ) => ctx,
+});
+
+export type AppRouter = typeof appRouter;
+`),
+      );
+
+      expect(mockTree.write).toHaveBeenCalledWith(
+        'file.ts',
+        expect.stringContaining(`foo`),
+      );
     });
   });
 

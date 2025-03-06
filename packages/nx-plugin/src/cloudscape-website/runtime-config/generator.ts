@@ -10,11 +10,12 @@ import {
   OverwriteStrategy,
 } from '@nx/devkit';
 import { RuntimeConfigGeneratorSchema } from './schema';
-import { tsquery, ast } from '@phenomnomnominal/tsquery';
-import { factory, JsxSelfClosingElement, SourceFile } from 'typescript';
+import { factory, JsxSelfClosingElement } from 'typescript';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
 import { formatFilesInSubtree } from '../../utils/format';
+import { prependStatements, query, replaceIfExists } from '../../utils/ast';
+
 export async function runtimeConfigGenerator(
   tree: Tree,
   options: RuntimeConfigGeneratorSchema,
@@ -26,8 +27,7 @@ export async function runtimeConfigGenerator(
       `Can only run this generator on a project which contains ${mainTsxPath}`,
     );
   }
-  const mainTsxContents = tree.read(mainTsxPath).toString();
-  const mainTsxAst = ast(mainTsxContents);
+
   const runtimeConfigPath = joinPathFragments(
     srcRoot,
     'components',
@@ -36,8 +36,9 @@ export async function runtimeConfigGenerator(
   );
   if (
     tree.exists(runtimeConfigPath) ||
-    tsquery.query(
-      mainTsxAst,
+    query(
+      tree,
+      mainTsxPath,
       'JsxElement > JsxOpeningElement[name.text="RuntimeConfigProvider"]',
     ).length > 0
   ) {
@@ -68,45 +69,38 @@ export async function runtimeConfigGenerator(
     ),
     factory.createStringLiteral('./components/RuntimeConfig', true),
   );
-  const updatedImports = tsquery
-    .map(mainTsxAst, 'SourceFile', (node: SourceFile) => {
-      return {
-        ...node,
-        statements: [runtimeContextImport, ...node.statements],
-      };
-    })
-    .getFullText();
+
+  prependStatements(tree, mainTsxPath, [runtimeContextImport]);
+
   let locatedTargetNode = false;
-  const mainTsxUpdatedContents = tsquery
-    .map(
-      ast(updatedImports),
-      'JsxSelfClosingElement',
-      (node: JsxSelfClosingElement) => {
-        if (node.tagName.getText() !== 'RouterProvider') {
-          return node;
-        } else {
-          locatedTargetNode = true;
-        }
-        return factory.createJsxElement(
-          factory.createJsxOpeningElement(
-            factory.createIdentifier('RuntimeConfigProvider'),
-            undefined,
-            factory.createJsxAttributes([]),
-          ),
-          [node],
-          factory.createJsxClosingElement(
-            factory.createIdentifier('RuntimeConfigProvider'),
-          ),
-        );
-      },
-    )
-    .getFullText();
+  replaceIfExists(
+    tree,
+    mainTsxPath,
+    'JsxSelfClosingElement',
+    (node: JsxSelfClosingElement) => {
+      if (node.tagName.getText() !== 'RouterProvider') {
+        return node;
+      } else {
+        locatedTargetNode = true;
+      }
+      return factory.createJsxElement(
+        factory.createJsxOpeningElement(
+          factory.createIdentifier('RuntimeConfigProvider'),
+          undefined,
+          factory.createJsxAttributes([]),
+        ),
+        [node],
+        factory.createJsxClosingElement(
+          factory.createIdentifier('RuntimeConfigProvider'),
+        ),
+      );
+    },
+  );
+
   if (!locatedTargetNode) {
     throw new Error('Could not locate the RouterProvider element in main.tsx');
   }
-  if (locatedTargetNode && mainTsxContents !== mainTsxUpdatedContents) {
-    tree.write(mainTsxPath, mainTsxUpdatedContents);
-  }
+
   await formatFilesInSubtree(tree);
 }
 export default runtimeConfigGenerator;

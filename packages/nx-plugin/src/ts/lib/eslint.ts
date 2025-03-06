@@ -9,9 +9,9 @@ import {
   addDependenciesToPackageJson,
 } from '@nx/devkit';
 import { withVersions } from '../../utils/versions';
-import { ast, tsquery } from '@phenomnomnominal/tsquery';
 import { factory, ArrayLiteralExpression } from 'typescript';
-import { singleImport } from '../../utils/ast';
+import { addSingleImport, query, replace } from '../../utils/ast';
+
 export const configureEslint = (tree: Tree) => {
   // Configure the lint task
   let nxJson = readNxJson(tree);
@@ -33,42 +33,37 @@ export const configureEslint = (tree: Tree) => {
       ],
     });
   }
+
   addDependenciesToPackageJson(
     tree,
     {},
     withVersions(['prettier', 'eslint-plugin-prettier', 'jsonc-eslint-parser']),
   );
+
   // Update or create eslint.config.mjs
   const eslintConfigPath = 'eslint.config.mjs';
+
   if (tree.exists(eslintConfigPath)) {
-    const eslintConfigContent = tree.read(eslintConfigPath).toString();
-    const sourceFile = ast(eslintConfigContent);
-    // Check if import exists
-    const existingImport = tsquery.query(
-      sourceFile,
-      'VariableDeclaration[name.text="eslintPluginPrettierRecommended"]',
-    );
-    let updatedContent = sourceFile;
     // Add import if it doesn't exist
-    if (existingImport.length === 0) {
-      updatedContent = ast(
-        singleImport(
-          tree,
-          eslintConfigPath,
-          'eslintPluginPrettierRecommended',
-          'eslint-plugin-prettier/recommended',
-        ),
-      );
-    }
+    addSingleImport(
+      tree,
+      eslintConfigPath,
+      'eslintPluginPrettierRecommended',
+      'eslint-plugin-prettier/recommended',
+    );
+
     // Check if eslintPluginPrettierRecommended exists in exports array
-    const existingPlugin = tsquery.query(
-      updatedContent,
+    const existingPlugin = query(
+      tree,
+      eslintConfigPath,
       'ExportAssignment > ArrayLiteralExpression Identifier[name="eslintPluginPrettierRecommended"]',
     );
+
     // Add eslintPluginPrettierRecommended to array if it doesn't exist
     if (existingPlugin.length === 0) {
-      updatedContent = tsquery.map(
-        updatedContent,
+      replace(
+        tree,
+        eslintConfigPath,
         'ExportAssignment > ArrayLiteralExpression',
         (node: ArrayLiteralExpression) => {
           return factory.createArrayLiteralExpression(
@@ -83,22 +78,25 @@ export const configureEslint = (tree: Tree) => {
     }
 
     // Check if ignores array exists in any object literal
-    const existingIgnores = tsquery.query(
-      updatedContent,
+    const existingIgnores = query(
+      tree,
+      eslintConfigPath,
       'ExportAssignment > ArrayLiteralExpression ObjectLiteralExpression > PropertyAssignment[name.text="ignores"]',
     );
 
     if (existingIgnores.length > 0) {
       // Check if the entry already exists in the ignores array
-      const timestampIgnore = tsquery.query(
-        updatedContent,
+      const timestampIgnore = query(
+        tree,
+        eslintConfigPath,
         'ExportAssignment > ArrayLiteralExpression ObjectLiteralExpression > PropertyAssignment[name.text="ignores"] > ArrayLiteralExpression StringLiteral[value="**/vite.config.ts.timestamp*"]',
       );
 
       if (timestampIgnore.length === 0) {
         // Add to existing ignores array only if entry doesn't exist
-        updatedContent = tsquery.map(
-          updatedContent,
+        replace(
+          tree,
+          eslintConfigPath,
           'ExportAssignment > ArrayLiteralExpression ObjectLiteralExpression > PropertyAssignment[name.text="ignores"] > ArrayLiteralExpression',
           (node: ArrayLiteralExpression) => {
             return factory.createArrayLiteralExpression(
@@ -113,8 +111,9 @@ export const configureEslint = (tree: Tree) => {
       }
     } else {
       // Create new object with ignores array
-      updatedContent = tsquery.map(
-        updatedContent,
+      replace(
+        tree,
+        eslintConfigPath,
         'ExportAssignment > ArrayLiteralExpression',
         (node: ArrayLiteralExpression) => {
           return factory.createArrayLiteralExpression(
@@ -141,11 +140,6 @@ export const configureEslint = (tree: Tree) => {
           );
         },
       );
-    }
-
-    // Only write if changes were made
-    if (updatedContent !== sourceFile) {
-      tree.write(eslintConfigPath, updatedContent.getFullText());
     }
 
     nxJson = readNxJson(tree);

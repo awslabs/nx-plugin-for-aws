@@ -19,7 +19,6 @@ import {
 } from '../../utils/shared-constructs';
 import { CognitoAuthGeneratorSchema as CognitoAuthGeneratorSchema } from './schema';
 import { runtimeConfigGenerator } from '../runtime-config/generator';
-import { tsquery, ast } from '@phenomnomnominal/tsquery';
 import {
   ArrowFunction,
   Block,
@@ -37,9 +36,11 @@ import {
   addStarExport,
   createJsxElement,
   createJsxElementFromIdentifier,
-  destructuredImport,
+  addDestructuredImport,
   replace,
-  singleImport,
+  addSingleImport,
+  prependStatements,
+  query,
 } from '../../utils/ast';
 import { formatFilesInSubtree } from '../../utils/format';
 export async function cognitoAuthGenerator(
@@ -65,19 +66,19 @@ export async function cognitoAuthGenerator(
     'src',
     'runtime-config.ts',
   );
-  const runtimeConfigContent = tree.read(runtimeConfigPath).toString();
-  const sourceFile = ast(runtimeConfigContent);
   // Check if ICognitoProps interface exists
-  const existingCognitoProps = tsquery.query(
-    sourceFile,
+  const existingCognitoProps = query(
+    tree,
+    runtimeConfigPath,
     'InterfaceDeclaration[name.text="ICognitoProps"]',
   );
   // Check if cognitoProps property exists in IRuntimeConfig
-  const existingCognitoPropsInConfig = tsquery.query(
-    sourceFile,
+  const existingCognitoPropsInConfig = query(
+    tree,
+    runtimeConfigPath,
     'InterfaceDeclaration[name.text="IRuntimeConfig"] PropertySignature[name.text="cognitoProps"]',
   );
-  let updatedContent = sourceFile;
+
   // Add ICognitoProps interface if it doesn't exist
   if (existingCognitoProps.length === 0) {
     const cognitoPropsInterface = factory.createInterfaceDeclaration(
@@ -112,21 +113,15 @@ export async function cognitoAuthGenerator(
         ),
       ],
     );
-    updatedContent = tsquery.map(
-      updatedContent,
-      'SourceFile',
-      (node: SourceFile) => {
-        return factory.updateSourceFile(node, [
-          cognitoPropsInterface,
-          ...node.statements,
-        ]);
-      },
-    );
+
+    prependStatements(tree, runtimeConfigPath, [cognitoPropsInterface]);
   }
+
   // Add cognitoProps to IRuntimeConfig if it doesn't exist
   if (existingCognitoPropsInConfig.length === 0) {
-    updatedContent = tsquery.map(
-      updatedContent,
+    replace(
+      tree,
+      runtimeConfigPath,
       'InterfaceDeclaration[name.text="IRuntimeConfig"]',
       (node: InterfaceDeclaration) => {
         return factory.updateInterfaceDeclaration(
@@ -148,10 +143,7 @@ export async function cognitoAuthGenerator(
       },
     );
   }
-  // Only write if changes were made
-  if (updatedContent !== sourceFile) {
-    tree.write(runtimeConfigPath, updatedContent.getFullText());
-  }
+
   const identityPath = joinPathFragments(
     PACKAGES_DIR,
     SHARED_CONSTRUCTS_DIR,
@@ -203,7 +195,7 @@ export async function cognitoAuthGenerator(
     );
   }
   const mainTsxPath = joinPathFragments(srcRoot, 'main.tsx');
-  singleImport(tree, mainTsxPath, 'CognitoAuth', './components/CognitoAuth');
+  addSingleImport(tree, mainTsxPath, 'CognitoAuth', './components/CognitoAuth');
   replace(
     tree,
     mainTsxPath,
@@ -223,288 +215,274 @@ export async function cognitoAuthGenerator(
     'index.tsx',
   );
   if (tree.exists(appLayoutTsxPath)) {
-    const contents = tree.read(appLayoutTsxPath).toString();
-    let updatedContents = destructuredImport(
+    addDestructuredImport(
       tree,
       appLayoutTsxPath,
       ['useAuth'],
       'react-oidc-context',
     );
-    updatedContents = tsquery
-      .map(
-        ast(updatedContents),
-        'VariableDeclaration',
-        (node: VariableDeclaration) => {
-          // Only process if this is the App component
-          if (node.name.getText() !== 'AppLayout') {
-            return node;
-          }
-          const arrowFunction = node.initializer as ArrowFunction;
-          const functionBody = arrowFunction.body as Block;
-          // Create our new declaration
-          const authDeclaration = factory.createVariableStatement(
-            undefined,
-            factory.createVariableDeclarationList(
-              [
-                factory.createVariableDeclaration(
-                  factory.createObjectBindingPattern([
-                    factory.createBindingElement(
-                      undefined,
-                      undefined,
-                      factory.createIdentifier('user'),
-                      undefined,
-                    ),
-                    factory.createBindingElement(
-                      undefined,
-                      undefined,
-                      factory.createIdentifier('removeUser'),
-                      undefined,
-                    ),
-                    factory.createBindingElement(
-                      undefined,
-                      undefined,
-                      factory.createIdentifier('signoutRedirect'),
-                      undefined,
-                    ),
-                    factory.createBindingElement(
-                      undefined,
-                      undefined,
-                      factory.createIdentifier('clearStaleState'),
-                      undefined,
-                    ),
-                  ]),
-                  undefined,
-                  undefined,
-                  factory.createCallExpression(
-                    factory.createIdentifier('useAuth'),
+    replace(
+      tree,
+      appLayoutTsxPath,
+      'VariableDeclaration',
+      (node: VariableDeclaration) => {
+        // Only process if this is the App component
+        if (node.name.getText() !== 'AppLayout') {
+          return node;
+        }
+        const arrowFunction = node.initializer as ArrowFunction;
+        const functionBody = arrowFunction.body as Block;
+        // Create our new declaration
+        const authDeclaration = factory.createVariableStatement(
+          undefined,
+          factory.createVariableDeclarationList(
+            [
+              factory.createVariableDeclaration(
+                factory.createObjectBindingPattern([
+                  factory.createBindingElement(
                     undefined,
-                    [],
+                    undefined,
+                    factory.createIdentifier('user'),
+                    undefined,
                   ),
+                  factory.createBindingElement(
+                    undefined,
+                    undefined,
+                    factory.createIdentifier('removeUser'),
+                    undefined,
+                  ),
+                  factory.createBindingElement(
+                    undefined,
+                    undefined,
+                    factory.createIdentifier('signoutRedirect'),
+                    undefined,
+                  ),
+                  factory.createBindingElement(
+                    undefined,
+                    undefined,
+                    factory.createIdentifier('clearStaleState'),
+                    undefined,
+                  ),
+                ]),
+                undefined,
+                undefined,
+                factory.createCallExpression(
+                  factory.createIdentifier('useAuth'),
+                  undefined,
+                  [],
                 ),
-              ],
-              NodeFlags.Const,
-            ),
-          );
-          // Add as first statement
-          const newStatements = [authDeclaration, ...functionBody.statements];
-          // Create new arrow function with updated body
-          const newArrowFunction = factory.updateArrowFunction(
-            arrowFunction,
-            arrowFunction.modifiers,
-            arrowFunction.typeParameters,
-            arrowFunction.parameters,
-            arrowFunction.type,
-            arrowFunction.equalsGreaterThanToken,
-            factory.createBlock(newStatements, true),
-          );
-          // Update the variable declaration
-          return factory.updateVariableDeclaration(
-            node,
-            node.name,
-            node.exclamationToken,
-            node.type,
-            newArrowFunction,
-          );
-        },
-      )
-      .getFullText();
+              ),
+            ],
+            NodeFlags.Const,
+          ),
+        );
+        // Add as first statement
+        const newStatements = [authDeclaration, ...functionBody.statements];
+        // Create new arrow function with updated body
+        const newArrowFunction = factory.updateArrowFunction(
+          arrowFunction,
+          arrowFunction.modifiers,
+          arrowFunction.typeParameters,
+          arrowFunction.parameters,
+          arrowFunction.type,
+          arrowFunction.equalsGreaterThanToken,
+          factory.createBlock(newStatements, true),
+        );
+        // Update the variable declaration
+        return factory.updateVariableDeclaration(
+          node,
+          node.name,
+          node.exclamationToken,
+          node.type,
+          newArrowFunction,
+        );
+      },
+    );
     // TODO: update utils if they exist by appending to the array
-    updatedContents = tsquery
-      .map(
-        ast(updatedContents),
-        'JsxSelfClosingElement[tagName.text="TopNavigation"]',
-        (node: JsxSelfClosingElement) => {
-          // Create the utilities attribute
-          const utilitiesAttribute = factory.createJsxAttribute(
-            factory.createIdentifier('utilities'),
-            factory.createJsxExpression(
-              undefined,
-              factory.createArrayLiteralExpression(
-                [
-                  factory.createObjectLiteralExpression([
-                    factory.createPropertyAssignment(
-                      'type',
-                      factory.createStringLiteral('menu-dropdown'),
-                    ),
-                    factory.createPropertyAssignment(
-                      'text',
-                      factory.createTemplateExpression(
-                        factory.createTemplateHead(''),
-                        [
-                          factory.createTemplateSpan(
-                            factory.createElementAccessChain(
-                              factory.createPropertyAccessChain(
-                                factory.createIdentifier('user'),
-                                factory.createToken(
-                                  SyntaxKind.QuestionDotToken,
-                                ),
-                                factory.createIdentifier('profile'),
-                              ),
+    replace(
+      tree,
+      appLayoutTsxPath,
+      'JsxSelfClosingElement[tagName.text="TopNavigation"]',
+      (node: JsxSelfClosingElement) => {
+        // Create the utilities attribute
+        const utilitiesAttribute = factory.createJsxAttribute(
+          factory.createIdentifier('utilities'),
+          factory.createJsxExpression(
+            undefined,
+            factory.createArrayLiteralExpression(
+              [
+                factory.createObjectLiteralExpression([
+                  factory.createPropertyAssignment(
+                    'type',
+                    factory.createStringLiteral('menu-dropdown'),
+                  ),
+                  factory.createPropertyAssignment(
+                    'text',
+                    factory.createTemplateExpression(
+                      factory.createTemplateHead(''),
+                      [
+                        factory.createTemplateSpan(
+                          factory.createElementAccessChain(
+                            factory.createPropertyAccessChain(
+                              factory.createIdentifier('user'),
                               factory.createToken(SyntaxKind.QuestionDotToken),
-                              factory.createStringLiteral('cognito:username'),
+                              factory.createIdentifier('profile'),
                             ),
-                            factory.createTemplateTail(''),
+                            factory.createToken(SyntaxKind.QuestionDotToken),
+                            factory.createStringLiteral('cognito:username'),
                           ),
-                        ],
-                      ),
+                          factory.createTemplateTail(''),
+                        ),
+                      ],
                     ),
-                    factory.createPropertyAssignment(
-                      'iconName',
-                      factory.createStringLiteral('user-profile-active'),
-                    ),
-                    factory.createPropertyAssignment(
-                      'onItemClick',
-                      factory.createArrowFunction(
-                        undefined,
-                        undefined,
+                  ),
+                  factory.createPropertyAssignment(
+                    'iconName',
+                    factory.createStringLiteral('user-profile-active'),
+                  ),
+                  factory.createPropertyAssignment(
+                    'onItemClick',
+                    factory.createArrowFunction(
+                      undefined,
+                      undefined,
+                      [
+                        factory.createParameterDeclaration(
+                          undefined,
+                          undefined,
+                          factory.createIdentifier('e'),
+                          undefined,
+                          undefined,
+                          undefined,
+                        ),
+                      ],
+                      undefined,
+                      factory.createToken(SyntaxKind.EqualsGreaterThanToken),
+                      factory.createBlock(
                         [
-                          factory.createParameterDeclaration(
-                            undefined,
-                            undefined,
-                            factory.createIdentifier('e'),
-                            undefined,
-                            undefined,
-                            undefined,
-                          ),
-                        ],
-                        undefined,
-                        factory.createToken(SyntaxKind.EqualsGreaterThanToken),
-                        factory.createBlock(
-                          [
-                            factory.createIfStatement(
-                              factory.createBinaryExpression(
+                          factory.createIfStatement(
+                            factory.createBinaryExpression(
+                              factory.createPropertyAccessExpression(
                                 factory.createPropertyAccessExpression(
-                                  factory.createPropertyAccessExpression(
-                                    factory.createIdentifier('e'),
-                                    factory.createIdentifier('detail'),
-                                  ),
-                                  factory.createIdentifier('id'),
+                                  factory.createIdentifier('e'),
+                                  factory.createIdentifier('detail'),
                                 ),
-                                factory.createToken(
-                                  SyntaxKind.EqualsEqualsEqualsToken,
-                                ),
-                                factory.createStringLiteral('signout'),
+                                factory.createIdentifier('id'),
                               ),
-                              factory.createBlock(
-                                [
-                                  factory.createExpressionStatement(
-                                    factory.createCallExpression(
-                                      factory.createIdentifier('removeUser'),
-                                      undefined,
-                                      [],
-                                    ),
+                              factory.createToken(
+                                SyntaxKind.EqualsEqualsEqualsToken,
+                              ),
+                              factory.createStringLiteral('signout'),
+                            ),
+                            factory.createBlock(
+                              [
+                                factory.createExpressionStatement(
+                                  factory.createCallExpression(
+                                    factory.createIdentifier('removeUser'),
+                                    undefined,
+                                    [],
                                   ),
-                                  factory.createExpressionStatement(
-                                    factory.createCallExpression(
-                                      factory.createIdentifier(
-                                        'signoutRedirect',
-                                      ),
-                                      undefined,
-                                      [
-                                        factory.createObjectLiteralExpression([
-                                          factory.createPropertyAssignment(
-                                            'post_logout_redirect_uri',
+                                ),
+                                factory.createExpressionStatement(
+                                  factory.createCallExpression(
+                                    factory.createIdentifier('signoutRedirect'),
+                                    undefined,
+                                    [
+                                      factory.createObjectLiteralExpression([
+                                        factory.createPropertyAssignment(
+                                          'post_logout_redirect_uri',
+                                          factory.createPropertyAccessExpression(
                                             factory.createPropertyAccessExpression(
-                                              factory.createPropertyAccessExpression(
-                                                factory.createIdentifier(
-                                                  'window',
-                                                ),
-                                                factory.createIdentifier(
-                                                  'location',
-                                                ),
+                                              factory.createIdentifier(
+                                                'window',
                                               ),
                                               factory.createIdentifier(
-                                                'origin',
+                                                'location',
                                               ),
                                             ),
+                                            factory.createIdentifier('origin'),
                                           ),
-                                          factory.createPropertyAssignment(
-                                            'extraQueryParams',
-                                            factory.createObjectLiteralExpression(
-                                              [
-                                                factory.createPropertyAssignment(
-                                                  'redirect_uri',
+                                        ),
+                                        factory.createPropertyAssignment(
+                                          'extraQueryParams',
+                                          factory.createObjectLiteralExpression(
+                                            [
+                                              factory.createPropertyAssignment(
+                                                'redirect_uri',
+                                                factory.createPropertyAccessExpression(
                                                   factory.createPropertyAccessExpression(
-                                                    factory.createPropertyAccessExpression(
-                                                      factory.createIdentifier(
-                                                        'window',
-                                                      ),
-                                                      factory.createIdentifier(
-                                                        'location',
-                                                      ),
+                                                    factory.createIdentifier(
+                                                      'window',
                                                     ),
                                                     factory.createIdentifier(
-                                                      'origin',
+                                                      'location',
                                                     ),
                                                   ),
-                                                ),
-                                                factory.createPropertyAssignment(
-                                                  'response_type',
-                                                  factory.createStringLiteral(
-                                                    'code',
+                                                  factory.createIdentifier(
+                                                    'origin',
                                                   ),
                                                 ),
-                                              ],
-                                            ),
+                                              ),
+                                              factory.createPropertyAssignment(
+                                                'response_type',
+                                                factory.createStringLiteral(
+                                                  'code',
+                                                ),
+                                              ),
+                                            ],
                                           ),
-                                        ]),
-                                      ],
-                                    ),
+                                        ),
+                                      ]),
+                                    ],
                                   ),
-                                  factory.createExpressionStatement(
-                                    factory.createCallExpression(
-                                      factory.createIdentifier(
-                                        'clearStaleState',
-                                      ),
-                                      undefined,
-                                      [],
-                                    ),
+                                ),
+                                factory.createExpressionStatement(
+                                  factory.createCallExpression(
+                                    factory.createIdentifier('clearStaleState'),
+                                    undefined,
+                                    [],
                                   ),
-                                ],
-                                true,
-                              ),
+                                ),
+                              ],
+                              true,
                             ),
-                          ],
-                          true,
-                        ),
+                          ),
+                        ],
+                        true,
                       ),
                     ),
-                    factory.createPropertyAssignment(
-                      'items',
-                      factory.createArrayLiteralExpression([
-                        factory.createObjectLiteralExpression([
-                          factory.createPropertyAssignment(
-                            'id',
-                            factory.createStringLiteral('signout'),
-                          ),
-                          factory.createPropertyAssignment(
-                            'text',
-                            factory.createStringLiteral('Sign out'),
-                          ),
-                        ]),
+                  ),
+                  factory.createPropertyAssignment(
+                    'items',
+                    factory.createArrayLiteralExpression([
+                      factory.createObjectLiteralExpression([
+                        factory.createPropertyAssignment(
+                          'id',
+                          factory.createStringLiteral('signout'),
+                        ),
+                        factory.createPropertyAssignment(
+                          'text',
+                          factory.createStringLiteral('Sign out'),
+                        ),
                       ]),
-                    ),
-                  ]),
-                ],
-                true,
-              ),
+                    ]),
+                  ),
+                ]),
+              ],
+              true,
             ),
-          );
-          // Add the utilities attribute to existing attributes
-          return factory.createJsxSelfClosingElement(
-            node.tagName,
-            node.typeArguments,
-            factory.createJsxAttributes([
-              ...node.attributes.properties,
-              utilitiesAttribute,
-            ]),
-          );
-        },
-      )
-      .getFullText();
-    if (contents !== updatedContents) {
-      tree.write(appLayoutTsxPath, updatedContents);
-    }
+          ),
+        );
+        // Add the utilities attribute to existing attributes
+        return factory.createJsxSelfClosingElement(
+          node.tagName,
+          node.typeArguments,
+          factory.createJsxAttributes([
+            ...node.attributes.properties,
+            utilitiesAttribute,
+          ]),
+        );
+      },
+    );
   } else {
     console.info(
       `Skipping update to ${appLayoutTsxPath} as it does not exist.`,

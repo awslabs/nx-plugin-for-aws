@@ -8,11 +8,9 @@ import {
   OverwriteStrategy,
   Tree,
 } from '@nx/devkit';
-import { ast, tsquery } from '@phenomnomnominal/tsquery';
 import {
   factory,
   SyntaxKind,
-  SourceFile,
   InterfaceDeclaration,
   TypeLiteralNode,
 } from 'typescript';
@@ -21,7 +19,7 @@ import {
   SHARED_CONSTRUCTS_DIR,
   TYPE_DEFINITIONS_DIR,
 } from './shared-constructs';
-import { addStarExport } from './ast';
+import { addStarExport, prependStatements, query, replace } from './ast';
 
 export const addHttpApi = (tree: Tree, apiNameClassName: string) => {
   const shouldGenerateCoreFastApiConstruct = !tree.exists(
@@ -70,19 +68,20 @@ export const addHttpApi = (tree: Tree, apiNameClassName: string) => {
     'src',
     'runtime-config.ts',
   );
-  const runtimeConfigContent = tree.read(runtimeConfigPath).toString();
-  const sourceFile = ast(runtimeConfigContent);
+
   // Check if ApiUrl type exists
-  const existingApiUrl = tsquery.query(
-    sourceFile,
+  const existingApiUrl = query(
+    tree,
+    runtimeConfigPath,
     'TypeAliasDeclaration[name.text="ApiUrl"]',
   );
   // Check if httpApis property exists in IRuntimeConfig
-  const existinghttpApis = tsquery.query(
-    sourceFile,
+  const existinghttpApis = query(
+    tree,
+    runtimeConfigPath,
     'InterfaceDeclaration[name.text="IRuntimeConfig"] PropertySignature[name.text="httpApis"]',
   );
-  let updatedContent = sourceFile;
+
   // Add ApiUrl type if it doesn't exist
   if (existingApiUrl.length === 0) {
     const apiUrlType = factory.createTypeAliasDeclaration(
@@ -91,18 +90,13 @@ export const addHttpApi = (tree: Tree, apiNameClassName: string) => {
       undefined,
       factory.createKeywordTypeNode(SyntaxKind.StringKeyword),
     );
-    updatedContent = tsquery.map(
-      updatedContent,
-      'SourceFile',
-      (node: SourceFile) => {
-        return factory.updateSourceFile(node, [apiUrlType, ...node.statements]);
-      },
-    );
+    prependStatements(tree, runtimeConfigPath, [apiUrlType]);
   }
   // Add empty httpApis to IRuntimeConfig if it doesn't exist
   if (existinghttpApis.length === 0) {
-    updatedContent = tsquery.map(
-      updatedContent,
+    replace(
+      tree,
+      runtimeConfigPath,
       'InterfaceDeclaration[name.text="IRuntimeConfig"]',
       (node: InterfaceDeclaration) => {
         const httpApisProperty = factory.createPropertySignature(
@@ -123,14 +117,16 @@ export const addHttpApi = (tree: Tree, apiNameClassName: string) => {
     );
   }
   // Check if apiNameClassName property exists in httpApis
-  const existingApiNameProperty = tsquery.query(
-    updatedContent,
+  const existingApiNameProperty = query(
+    tree,
+    runtimeConfigPath,
     `InterfaceDeclaration[name.text="IRuntimeConfig"] PropertySignature[name.text="httpApis"] TypeLiteral PropertySignature[name.text="${apiNameClassName}"]`,
   );
   // Add apiNameClassName property to httpApis if it doesn't exist
   if (existingApiNameProperty.length === 0) {
-    updatedContent = tsquery.map(
-      updatedContent,
+    replace(
+      tree,
+      runtimeConfigPath,
       'InterfaceDeclaration[name.text="IRuntimeConfig"] PropertySignature[name.text="httpApis"] TypeLiteral',
       (node: TypeLiteralNode) => {
         return factory.createTypeLiteralNode([
@@ -144,9 +140,5 @@ export const addHttpApi = (tree: Tree, apiNameClassName: string) => {
         ]);
       },
     );
-  }
-  // Only write if changes were made
-  if (updatedContent !== sourceFile) {
-    tree.write(runtimeConfigPath, updatedContent.getFullText());
   }
 };

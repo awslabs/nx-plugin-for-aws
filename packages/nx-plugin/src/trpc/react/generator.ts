@@ -27,15 +27,15 @@ import {
   isJsxExpression,
   isParenthesizedExpression,
 } from 'typescript';
-import { ast, tsquery } from '@phenomnomnominal/tsquery';
 import { runtimeConfigGenerator } from '../../cloudscape-website/runtime-config/generator';
 import { toScopeAlias } from '../../utils/npm-scope';
 import { withVersions } from '../../utils/versions';
 import {
   createJsxElementFromIdentifier,
   replace,
-  singleImport,
-  destructuredImport,
+  addSingleImport,
+  addDestructuredImport,
+  query,
 } from '../../utils/ast';
 import { toClassName } from '../../utils/names';
 import { formatFilesInSubtree } from '../../utils/format';
@@ -109,27 +109,27 @@ export async function reactGenerator(
     frontendProjectConfig.sourceRoot,
     'main.tsx',
   );
-  singleImport(
+  addSingleImport(
     tree,
     mainTsxPath,
     'QueryClientProvider',
     './components/QueryClientProvider',
   );
-  singleImport(
+  addSingleImport(
     tree,
     mainTsxPath,
     'TrpcClientProviders',
     './components/TrpcClients',
   );
-  // Check if QueryClientProvider already exists
-  const mainTsxSource = tree.read(mainTsxPath).toString();
-  const mainTsxAst = ast(mainTsxSource);
 
+  // Check if QueryClientProvider already exists
   const hasQueryClientProvider =
-    tsquery.query(
-      mainTsxAst,
+    query(
+      tree,
+      mainTsxPath,
       'JsxOpeningElement[tagName.name="QueryClientProvider"]',
     ).length > 0;
+
   if (!hasQueryClientProvider) {
     replace(
       tree,
@@ -142,8 +142,9 @@ export async function reactGenerator(
 
   // Check if TrpcClientProviders already exists
   const hasProvider =
-    tsquery.query(
-      mainTsxAst,
+    query(
+      tree,
+      mainTsxPath,
       'JsxOpeningElement[tagName.name="TrpcClientProviders"]',
     ).length > 0;
   if (!hasProvider) {
@@ -161,13 +162,13 @@ export async function reactGenerator(
     'components/TrpcClients/TrpcApis.tsx',
   );
   // Add imports if they don't exist
-  destructuredImport(
+  addDestructuredImport(
     tree,
     trpcApisPath,
     ['createTrpcClientProvider'],
     './TrpcProvider',
   );
-  destructuredImport(
+  addDestructuredImport(
     tree,
     trpcApisPath,
     [
@@ -215,19 +216,18 @@ export async function reactGenerator(
     'components/TrpcClients/TrpcClientProviders.tsx',
   );
   // Add imports
-  destructuredImport(
+  addDestructuredImport(
     tree,
     trpcClientProvidersPath,
     ['useRuntimeConfig'],
     '../../hooks/useRuntimeConfig',
   );
-  singleImport(tree, trpcClientProvidersPath, 'TrpcApis', './TrpcApis');
+  addSingleImport(tree, trpcClientProvidersPath, 'TrpcApis', './TrpcApis');
   // Check if useContext hook exists and add if it doesn't add it
-  const providersSource = tree.read(trpcClientProvidersPath).toString();
-  const providersAst = ast(providersSource);
   const hasRuntimeConfig =
-    tsquery.query(
-      providersAst,
+    query(
+      tree,
+      trpcClientProvidersPath,
       'VariableDeclaration[name.name="runtimeConfig"] CallExpression[expression.name="useRuntimeConfig"]',
     ).length > 0;
   if (!hasRuntimeConfig) {
@@ -266,11 +266,10 @@ export async function reactGenerator(
     );
   }
   // Check if API provider already exists
-  const trpcProviderSource = tree.read(trpcClientProvidersPath).toString();
-  const trpcProviderAst = ast(trpcProviderSource);
   const hasTrpcProvider =
-    tsquery.query(
-      trpcProviderAst,
+    query(
+      tree,
+      trpcClientProvidersPath,
       `JsxOpeningElement PropertyAccessExpression:has(Identifier[name="Provider"]) PropertyAccessExpression:has(Identifier[name="${apiNameClassName}"]) Identifier[name="TrpcApis"]`,
     ).length > 0;
   if (!hasTrpcProvider) {

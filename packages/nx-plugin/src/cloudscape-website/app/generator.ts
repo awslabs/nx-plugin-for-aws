@@ -16,7 +16,6 @@ import {
   getPackageManagerCommand,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { tsquery, ast } from '@phenomnomnominal/tsquery';
 import {
   factory,
   ObjectLiteralExpression,
@@ -37,12 +36,14 @@ import { getRelativePathToRoot } from '../../utils/paths';
 import { toClassName, toKebabCase } from '../../utils/names';
 import {
   addStarExport,
-  destructuredImport,
-  singleImport,
+  addDestructuredImport,
+  replaceIfExists,
+  addSingleImport,
 } from '../../utils/ast';
 import { formatFilesInSubtree } from '../../utils/format';
 import { relative } from 'path';
 import { sortObjectKeys } from '../../utils/nx';
+
 export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
   const npmScopePrefix = getNpmScopePrefix(tree);
   const websiteNameClassName = toClassName(schema.name);
@@ -276,119 +277,112 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
     });
   }
   const viteConfigPath = joinPathFragments(libraryRoot, 'vite.config.ts');
-  const viteConfigContents = tree.read(viteConfigPath)?.toString();
-  if (viteConfigContents) {
-    let viteConfigUpdatedContents = viteConfigContents;
 
-    viteConfigUpdatedContents = destructuredImport(
+  if (tree.exists(viteConfigPath)) {
+    addDestructuredImport(
       tree,
       viteConfigPath,
       ['TanStackRouterVite'],
       '@tanstack/router-plugin/vite',
     );
 
-    viteConfigUpdatedContents = singleImport(
+    addSingleImport(
       tree,
       viteConfigPath,
       'tsconfigPaths',
       'vite-tsconfig-paths',
     );
 
-    viteConfigUpdatedContents = tsquery
-      .map(
-        ast(viteConfigUpdatedContents),
-        'ObjectLiteralExpression',
-        (node: ObjectLiteralExpression) => {
-          const updatedProperties = node.properties.map((prop) => {
-            if (isPropertyAssignment(prop) && prop.name.getText() === 'build') {
-              const buildConfig = prop.initializer as ObjectLiteralExpression;
-              return factory.createPropertyAssignment(
-                'build',
-                factory.createObjectLiteralExpression(
-                  buildConfig.properties.map((buildProp) => {
-                    if (
-                      isPropertyAssignment(buildProp) &&
-                      buildProp.name.getText() === 'outDir'
-                    ) {
-                      return factory.createPropertyAssignment(
-                        'outDir',
-                        factory.createStringLiteral(
-                          joinPathFragments(
-                            getRelativePathToRoot(tree, fullyQualifiedName),
-                            'dist',
-                            websiteContentPath,
-                          ),
+    replaceIfExists(
+      tree,
+      viteConfigPath,
+      'ObjectLiteralExpression',
+      (node: ObjectLiteralExpression) => {
+        const updatedProperties = node.properties.map((prop) => {
+          if (isPropertyAssignment(prop) && prop.name.getText() === 'build') {
+            const buildConfig = prop.initializer as ObjectLiteralExpression;
+            return factory.createPropertyAssignment(
+              'build',
+              factory.createObjectLiteralExpression(
+                buildConfig.properties.map((buildProp) => {
+                  if (
+                    isPropertyAssignment(buildProp) &&
+                    buildProp.name.getText() === 'outDir'
+                  ) {
+                    return factory.createPropertyAssignment(
+                      'outDir',
+                      factory.createStringLiteral(
+                        joinPathFragments(
+                          getRelativePathToRoot(tree, fullyQualifiedName),
+                          'dist',
+                          websiteContentPath,
                         ),
-                      );
-                    }
-                    return buildProp;
-                  }),
-                  true,
-                ),
-              );
-            } else if (
-              isPropertyAssignment(prop) &&
-              prop.name.getText() === 'plugins'
-            ) {
-              const pluginsConfig = prop.initializer as ArrayLiteralExpression;
-              return factory.createPropertyAssignment(
-                'plugins',
-                factory.createArrayLiteralExpression(
-                  [
-                    ...pluginsConfig.elements,
-                    factory.createCallExpression(
-                      factory.createIdentifier('TanStackRouterVite'),
-                      undefined,
-                      [],
-                    ),
-                    factory.createCallExpression(
-                      factory.createIdentifier('tsconfigPaths'),
-                      undefined,
-                      [],
-                    ),
-                  ],
-                  true,
-                ),
-              );
-            }
-            return prop;
-          });
-          return factory.createObjectLiteralExpression(updatedProperties, true);
-        },
-      )
-      .getFullText();
-
-    viteConfigUpdatedContents = tsquery
-      .map(
-        ast(viteConfigUpdatedContents),
-        'ObjectLiteralExpression',
-        (node: ObjectLiteralExpression) => {
-          return factory.createObjectLiteralExpression(
-            [
-              factory.createPropertyAssignment(
-                'define',
-                factory.createObjectLiteralExpression(
-                  [
-                    factory.createPropertyAssignment(
-                      'global',
-                      factory.createObjectLiteralExpression(),
-                    ),
-                  ],
-                  true,
-                ),
+                      ),
+                    );
+                  }
+                  return buildProp;
+                }),
+                true,
               ),
-              ...node.properties,
-            ],
-            true,
-          );
-        },
-      )
-      .getFullText();
+            );
+          } else if (
+            isPropertyAssignment(prop) &&
+            prop.name.getText() === 'plugins'
+          ) {
+            const pluginsConfig = prop.initializer as ArrayLiteralExpression;
+            return factory.createPropertyAssignment(
+              'plugins',
+              factory.createArrayLiteralExpression(
+                [
+                  ...pluginsConfig.elements,
+                  factory.createCallExpression(
+                    factory.createIdentifier('TanStackRouterVite'),
+                    undefined,
+                    [],
+                  ),
+                  factory.createCallExpression(
+                    factory.createIdentifier('tsconfigPaths'),
+                    undefined,
+                    [],
+                  ),
+                ],
+                true,
+              ),
+            );
+          }
+          return prop;
+        });
+        return factory.createObjectLiteralExpression(updatedProperties, true);
+      },
+    );
 
-    if (viteConfigContents !== viteConfigUpdatedContents) {
-      tree.write(viteConfigPath, viteConfigUpdatedContents);
-    }
+    replaceIfExists(
+      tree,
+      viteConfigPath,
+      'ObjectLiteralExpression',
+      (node: ObjectLiteralExpression) => {
+        return factory.createObjectLiteralExpression(
+          [
+            factory.createPropertyAssignment(
+              'define',
+              factory.createObjectLiteralExpression(
+                [
+                  factory.createPropertyAssignment(
+                    'global',
+                    factory.createObjectLiteralExpression(),
+                  ),
+                ],
+                true,
+              ),
+            ),
+            ...node.properties,
+          ],
+          true,
+        );
+      },
+    );
   }
+
   updateJson(
     tree,
     joinPathFragments(websiteContentPath, 'tsconfig.json'),
