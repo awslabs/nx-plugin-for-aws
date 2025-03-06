@@ -5,11 +5,15 @@
 import { readNxJson, Tree } from '@nx/devkit';
 import { tsLibGenerator } from './generator';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
+import uniqBy from 'lodash.uniqby';
+
 describe('ts lib generator', () => {
   let tree: Tree;
+
   beforeEach(() => {
     tree = createTreeUsingTsSolutionSetup();
   });
+
   it('should generate library with default options', async () => {
     await tsLibGenerator(tree, {
       name: 'test-lib',
@@ -32,6 +36,7 @@ describe('ts lib generator', () => {
       'project.json',
     );
   });
+
   it('should generate library with custom directory', async () => {
     await tsLibGenerator(tree, {
       name: 'test-lib',
@@ -53,6 +58,7 @@ describe('ts lib generator', () => {
       'custom-dir-project.json',
     );
   });
+
   it('should generate library with subdirectory', async () => {
     await tsLibGenerator(tree, {
       name: 'test-lib',
@@ -90,5 +96,84 @@ describe('ts lib generator', () => {
       (p) => typeof p !== 'string' && p.plugin === '@nx/js/typescript',
     );
     expect(jsPlugins).toHaveLength(1);
+  });
+
+  it('should configure named inputs in nx.json', async () => {
+    await tsLibGenerator(tree, {
+      name: 'test-1',
+      skipInstall: true,
+    });
+
+    const namedInputs = readNxJson(tree).namedInputs;
+    expect(namedInputs?.default).toBeDefined();
+
+    expect(namedInputs.default).toContainEqual({
+      dependentTasksOutputFiles: '**/*',
+      transitive: true,
+    });
+
+    expect(tree.read('nx.json', 'utf-8')).toMatchSnapshot();
+  });
+
+  it('should not duplicate named inputs in nx.json', async () => {
+    await tsLibGenerator(tree, {
+      name: 'test-1',
+      skipInstall: true,
+    });
+
+    await tsLibGenerator(tree, {
+      name: 'test-2',
+      skipInstall: true,
+    });
+
+    const namedInputs = readNxJson(tree).namedInputs;
+    expect(namedInputs?.default).toBeDefined();
+
+    expect(namedInputs.default).toHaveLength(
+      uniqBy(namedInputs.default, (x) => x).length,
+    );
+  });
+
+  it('should configure target defaults in nx.json', async () => {
+    await tsLibGenerator(tree, {
+      name: 'test-1',
+      skipInstall: true,
+    });
+
+    const targetDefaults = readNxJson(tree).targetDefaults;
+    expect(targetDefaults?.build).toBeDefined();
+    expect(targetDefaults?.compile).toBeDefined();
+    expect(targetDefaults?.test).toBeDefined();
+
+    expect(targetDefaults.build.cache).toBe(true);
+    expect(targetDefaults.compile.cache).toBe(true);
+
+    expect(targetDefaults.build.inputs).toContain('default');
+    expect(targetDefaults.compile.inputs).toContain('default');
+    expect(targetDefaults.test.inputs).toContain('default');
+  });
+
+  it('should not configure duplicate inputs in nx.json target defaults', async () => {
+    await tsLibGenerator(tree, {
+      name: 'test-1',
+      skipInstall: true,
+    });
+
+    await tsLibGenerator(tree, {
+      name: 'test-2',
+      skipInstall: true,
+    });
+
+    const targetDefaults = readNxJson(tree).targetDefaults;
+
+    expect(targetDefaults.build.inputs).toHaveLength(
+      uniqBy(targetDefaults.build.inputs, (x) => x).length,
+    );
+    expect(targetDefaults.compile.inputs).toHaveLength(
+      uniqBy(targetDefaults.compile.inputs, (x) => x).length,
+    );
+    expect(targetDefaults.test.inputs).toHaveLength(
+      uniqBy(targetDefaults.test.inputs, (x) => x).length,
+    );
   });
 });

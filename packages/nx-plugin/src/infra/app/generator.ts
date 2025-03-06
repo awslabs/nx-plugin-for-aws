@@ -89,6 +89,7 @@ export async function infraGenerator(
       config.targets.synth = {
         cache: true,
         executor: 'nx:run-commands',
+        inputs: ['default'],
         outputs: [`{workspaceRoot}${synthDirFromRoot}`],
         dependsOn: ['^build', 'compile'], // compile clobbers dist directory, so ensure synth runs afterwards
         options: {

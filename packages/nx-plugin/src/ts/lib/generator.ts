@@ -119,11 +119,52 @@ export const tsLibGenerator = async (
   updateProjectConfiguration(tree, fullyQualifiedName, projectConfiguration);
 
   updateJson(tree, 'nx.json', (nxJson: NxJsonConfiguration) => {
+    nxJson.namedInputs = {
+      ...nxJson.namedInputs,
+      default: [
+        ...(nxJson.namedInputs?.default ?? []).filter(
+          (input) =>
+            typeof input !== 'object' ||
+            !('dependentTasksOutputFiles' in input) ||
+            !(input.dependentTasksOutputFiles === '**/*' && input.transitive),
+        ),
+        {
+          dependentTasksOutputFiles: '**/*',
+          transitive: true,
+        },
+      ],
+    };
+
     nxJson.targetDefaults = {
       ...nxJson.targetDefaults,
       compile: {
         cache: true,
         ...nxJson.targetDefaults?.compile,
+        inputs: [
+          ...(nxJson.targetDefaults?.compile?.inputs ?? []).filter(
+            (i) => i !== 'default',
+          ),
+          'default',
+        ],
+      },
+      build: {
+        cache: true,
+        ...nxJson.targetDefaults?.build,
+        inputs: [
+          ...(nxJson.targetDefaults?.build?.inputs ?? []).filter(
+            (i) => i !== 'default',
+          ),
+          'default',
+        ],
+      },
+      test: {
+        ...nxJson.targetDefaults?.test,
+        inputs: [
+          ...(nxJson.targetDefaults?.test?.inputs ?? []).filter(
+            (i) => i !== 'default',
+          ),
+          'default',
+        ],
       },
     };
 
