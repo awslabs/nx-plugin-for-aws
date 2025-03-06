@@ -40,12 +40,47 @@ export default defineConfig({
             { label: 'Concepts', link: '/get_started/concepts' },
             { label: 'Quick start', link: '/get_started/quick-start' },
             {
-              label: 'Tutorial: AI Dungeon Game',
-              link: '/get_started/tutorial-ai-dungeon-game',
-            },
-            {
-              label: 'Tutorial: Usage in a existing project',
-              link: '/get_started/tutorial-existing-project',
+              label: 'Tutorials',
+              items: [
+                {
+                  label: 'AI Dungeon Game',
+                  collapsed: true,
+                  items: [
+                    {
+                      label: 'Overview',
+                      link: '/get_started/tutorials/dungeon-game/overview',
+                    },
+                    {
+                        label: '1. Monorepo setup',
+                        link: '/get_started/tutorials/dungeon-game/1',
+                      },
+                      {
+                        label: '2. Game API',
+                        link: '/get_started/tutorials/dungeon-game/2',
+                      },
+                      {
+                        label: '3. Story API',
+                        link: '/get_started/tutorials/dungeon-game/3',
+                      },
+                      {
+                        label: '4. UI',
+                        link: '/get_started/tutorials/dungeon-game/4',
+                      },
+                      {
+                        label: 'Wrap up',
+                        link: '/get_started/tutorials/dungeon-game/wrap-up',
+                      },
+                  ],
+                },
+                // {
+                //   label: 'Usage in an existing project',
+                //   link: '/get_started/tutorials/existing-project',
+                // },
+                {
+                  label: 'Create a generator',
+                  link: '/get_started/tutorials/create-generator',
+                },
+              ],
             },
           ],
         },
@@ -55,8 +90,14 @@ export default defineConfig({
             { label: 'ts#project', link: '/guides/typescript-project' },
             { label: 'ts#infra', link: '/guides/typescript-infrastructure' },
             { label: 'ts#trpc-api', link: '/guides/trpc' },
-            { label: 'ts#cloudscape-website', link: '/guides/cloudscape-website' },
-            { label: 'ts#cloudscape-website#auth', link: '/guides/cloudscape-website-auth' },
+            {
+              label: 'ts#cloudscape-website',
+              link: '/guides/cloudscape-website',
+            },
+            {
+              label: 'ts#cloudscape-website#auth',
+              link: '/guides/cloudscape-website-auth',
+            },
             { label: 'py#project', link: '/guides/python-project' },
             { label: 'py#fast-api', link: '/guides/fastapi' },
             {
