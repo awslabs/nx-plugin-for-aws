@@ -65,6 +65,7 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
     bundler: 'vite',
     unitTestRunner: 'vitest',
     alwaysGenerateProjectJson: true,
+    style: 'css',
   });
 
   // Replace with simpler sample source code
