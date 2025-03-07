@@ -26,6 +26,75 @@ We are going to start by implementing our Game API. To do this, we need to creat
 3. `saveAction` - this will save an action for a given game.
 4. `queryActions` - this will return a paginated list of all actions related to a game.
 
+### API Schema
+
+To define our API inputs and outputs, let's create our schema using [Zod](https://zod.dev/) within the `packages/game-api/schema/src` project as follows:
+
+<Tabs>
+  <TabItem label="types/action.ts">
+```typescript
+import { z } from 'zod';
+
+export const ActionSchema = z.object({
+  playerName: z.string(),
+  timestamp: z.string().datetime(),
+  role: z.enum(['assistant', 'user']),
+  content: z.string(),
+});
+
+export type IAction = z.TypeOf<typeof ActionSchema>;
+```
+  </TabItem>
+  <TabItem label="types/common.ts">
+```typescript
+import { z } from 'zod';
+
+export const QueryInputSchema = z.object({
+  cursor: z.string().optional(),
+  limit: z.number().optional().default(100),
+});
+
+export const createPaginatedQueryOutput = <ItemType extends z.ZodTypeAny>(
+  itemSchema: ItemType,
+) => {
+  return z.object({
+    items: z.array(itemSchema),
+    cursor: z.string().nullable(),
+  });
+};
+
+export type IQueryInput = z.TypeOf<typeof QueryInputSchema>;
+```
+  </TabItem>
+  <TabItem label="types/game.ts">
+```typescript
+import { z } from 'zod';
+
+export const GameSchema = z.object({
+  playerName: z.string(),
+  genre: z.enum(['zombie', 'superhero', 'medieval']),
+  lastUpdated: z.string().datetime(),
+});
+
+export type IGame = z.TypeOf<typeof GameSchema>;
+```
+  </TabItem>
+  <TabItem label="index.ts">
+```diff lang="typescript"
+-export * from './procedures/echo.js';
++export * from './types/action.js';
++export * from './types/common.js';
++export * from './types/game.js';
+```
+  </TabItem>
+</Tabs>
+
+You can also delete the `./procedures/echo.ts` file given we will not be using it in this project.
+
+<Aside type="tip">
+As you can see above, for each of the schemas we define in Zod, we also export an interface using the `z.TypeOf` syntax. This converts our zod definition into a Typescript interface without having to duplicate effort!
+</Aside>
+
 ### Entity modelling
 
 The ER diagram for our application is as follows:
@@ -35,6 +104,10 @@ The ER diagram for our application is as follows:
 We are going to implement our Database in DynamoDB and will be using the [ElectroDB](https://electrodb.dev/en/core-concepts/introduction/) DynamoDB client library to simplify things. To get started we need to first install `electrodb` by running the following command:
 
 <InstallCommand pkg="electrodb @aws-sdk/client-dynamodb" />
+
+<Aside>
+All dependencies are added to the root `package.json` as the `@aws/nx-plugin` follows the [single version policy](https://nx.dev/concepts/decisions/dependency-management#single-version-policy) principle. For more information, please refer to the [ts#project guide](/guides/typescript-project#dependencies).
+</Aside>
 
 Now let's create the following files within our `packages/game-api/backend/src/entities` folder to define our ElectroDB entities as per the above ER Diagram:
 
@@ -113,78 +186,10 @@ export const createGameEntity = (client?: DynamoDBClient) =>
   </TabItem>
 </Tabs>
 
-ElectroDB is very powerful and allows us to not only define our types, but can also provide defaults for certain values like the timestamps above. In addition, ElectroDB follows [single-table design](https://electrodb.dev/en/core-concepts/single-table-relationships/) which is the best practive when using DynamoDB.
+ElectroDB is very powerful and allows us to not only define our types, but can also provide defaults for certain values like the timestamps above. In addition, ElectroDB follows [single-table design](https://electrodb.dev/en/core-concepts/single-table-relationships/) which is the best practice when using DynamoDB.
 
 <Aside>
 Whilst ElectroDB does support [collections](https://electrodb.dev/en/modeling/collections/), we have chosen not to use them in this tutorial for simplicity.
-</Aside>
-
-### API Schema
-
-To define our API inputs and outputs, let's create our schema using [Zod](https://zod.dev/) within the `packages/game-api/schema/schema/src` project as follows:
-
-<Tabs>
-  <TabItem label="types/action.ts">
-```typescript
-import { z } from 'zod';
-
-export const ActionSchema = z.object({
-  playerName: z.string(),
-  timestamp: z.string().datetime(),
-  role: z.enum(['assistant', 'user']),
-  content: z.string(),
-});
-
-export type IAction = z.TypeOf<typeof ActionSchema>;
-```
-  </TabItem>
-  <TabItem label="types/common.ts">
-```typescript
-import { z } from 'zod';
-
-export const QueryInputSchema = z.object({
-  cursor: z.string().optional(),
-  limit: z.number().optional().default(100),
-});
-
-export const createPaginatedQueryOutput = <ItemType extends z.ZodTypeAny>(
-  itemSchema: ItemType,
-) => {
-  return z.object({
-    items: z.array(itemSchema),
-    cursor: z.string().nullable(),
-  });
-};
-
-export type IQueryInput = z.TypeOf<typeof QueryInputSchema>;
-```
-  </TabItem>
-  <TabItem label="types/game.ts">
-```typescript
-import { z } from 'zod';
-
-export const GameSchema = z.object({
-  playerName: z.string(),
-  genre: z.enum(['zombie', 'superhero', 'medieval']),
-  lastUpdated: z.string().datetime(),
-});
-
-export type IGame = z.TypeOf<typeof GameSchema>;
-```
-  </TabItem>
-  <TabItem label="index.ts">
-```diff lang="typescript"
--export * from './procedures/echo.js';
-+export * from './types/action.js';
-+export * from './types/common.js';
-+export * from './types/game.js';
-```
-You can also delete the `./procedures/echo.ts` file given we will not be using it in this project.
-  </TabItem>
-</Tabs>
-
-<Aside type="tip">
-As you can see above, for each of the schemas we define in Zod, we also export an interface using the `z.TypeOf` syntax. This converts our zod definition into a Typescript interface without having to duplicate effort!
 </Aside>
 
 ### Adding the dynamoDB client to our tRPC context
@@ -194,6 +199,7 @@ Given we need access to the DynamoDB client in each of our procedures, we want t
 <Tabs>
   <TabItem label="middleware/dynamodb.ts">
 ```typescript
+// middleware/dynamodb.ts
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { initTRPC } from '@trpc/server';
 
@@ -222,6 +228,7 @@ This is a plugin that we instrument to create the `DynamoDBClient` and inject it
   </TabItem>
   <TabItem label="middleware/index.ts">
 ```diff lang="ts"
+// middleware/index.ts
 import { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
 import type { APIGatewayProxyEventV2WithIAMAuthorizer } from 'aws-lambda';
 import { ILoggerContext } from './logger.js';
@@ -247,6 +254,7 @@ Augment our `IMiddlewareContext` to add the `IDynamoDBContext`.
   </TabItem>
   <TabItem label="init.ts">
 ```diff lang="ts"
+// init.ts
 import { initTRPC } from '@trpc/server';
 import {
 +  createDynamoDBPlugin,
@@ -282,10 +290,10 @@ We are using the `unstable_concat` api here which is safe to use. The only reaso
 
 ### Defining our procedures
 
-Now it's time to implement the API methods. To do this, make the following changes within `packages/game-api/backend/src`:
+Now it's time to implement the API methods. To do this, make the following changes within `packages/game-api/backend/src/procedures`:
 
 <Tabs>
-  <TabItem label="procedures/query-actions.ts">
+  <TabItem label="query-actions.ts">
 ```typescript
 import { createActionEntity } from '../entities/action.js';
 import {
@@ -313,7 +321,7 @@ export const queryActions = publicProcedure
   });
 ```
   </TabItem>
-  <TabItem label="procedures/query-games.ts">
+  <TabItem label="query-games.ts">
 ```typescript
 import { createGameEntity } from '../entities/game.js';
 import {
@@ -341,7 +349,7 @@ export const queryGames = publicProcedure
   });
 ```
   </TabItem>
-  <TabItem label="procedures/save-action.ts">
+  <TabItem label="save-action.ts">
 ```typescript
 import { ActionSchema, IAction } from ':dungeon-adventure/game-api-schema';
 import { publicProcedure } from '../init.js';
@@ -364,7 +372,7 @@ export const saveAction = publicProcedure
   });
 ```
   </TabItem>
-  <TabItem label="procedures/save-game.ts">
+  <TabItem label="save-game.ts">
 ```typescript
 import { createGameEntity } from '../entities/game.js';
 import { GameSchema, IGame } from ':dungeon-adventure/game-api-schema';
@@ -381,15 +389,23 @@ export const saveGame = publicProcedure
   });
 ```
   </TabItem>
-  <TabItem label="router.ts">
+</Tabs>
+
+You can also delete the `echo.ts` file (from `packages/game-api/backend/src/procedures`) given we will not be using it in this project.
+
+### Router setup
+
+Now that we have defined our procedures, let's wire them into our API. To do this, update the following file as follows: 
+
 ```diff lang="ts"
+// packages/game-api/backend/src/router.ts
 import {
   awsLambdaRequestHandler,
   CreateAWSLambdaContextOptions,
 } from '@trpc/server/adapters/aws-lambda';
+-import { echo } from './procedures/echo.js';
 import { t } from './init.js';
 import { APIGatewayProxyEventV2WithIAMAuthorizer } from 'aws-lambda';
--import { echo } from './procedures/echo.js';
 +import { queryActions } from './procedures/query-actions.js';
 +import { saveAction } from './procedures/save-action.js';
 +import { queryGames } from './procedures/query-games.js';
@@ -418,9 +434,6 @@ export const handler = awsLambdaRequestHandler({
 
 export type AppRouter = typeof appRouter;
 ```
-You can also delete the `./procedures/echo.ts` file given we will not be using it in this project.
-  </TabItem>
-</Tabs>
 
 ### Infrastructure
 
@@ -429,6 +442,7 @@ The final step is to update our infrastructure to create the DynamoDB table and 
 <Tabs>
   <TabItem label="constructs/electrodb-table.ts">
 ```typescript
+// constructs/electrodb-table.ts
 import { CfnOutput } from 'aws-cdk-lib';
 import {
   AttributeType,
@@ -479,6 +493,7 @@ export class ElectrodbDynamoTable extends Table {
   </TabItem>
   <TabItem label="stacks/application-stack.ts">
 ```diff lang="ts"
+// stacks/application-stack.ts
 import {
   GameApi,
   GameUI,
@@ -527,17 +542,25 @@ First, lets build the codebase:
 
 <NxCommands commands={['run-many --target build --all']} />
 
-<Drawer title="Deployment command" trigger="Your application can now be deployed by running the following command:">
+<Aside type="tip">
+If you encounter any lint errors, you can run the following command to automatically fix them.
+
+<NxCommands commands={['run-many --target lint --configuration=fix --all']} />
+</Aside>
+
+Your application can now be deployed by running the following command:
+
+<NxCommands commands={['run @dungeon-adventure/infra:deploy infra-sandbox']} />
+
+<Drawer title="Deployment command" trigger="You can also deploy all stacks at once. Click here for more details.">
 
 You can also deploy all stacks contained in the CDK application by running:
 
-<NxCommands commands={['nx run @dungeon-adventure/infra:deploy --all']} />
+<NxCommands commands={['run @dungeon-adventure/infra:deploy --all']} />
 
 This is **not recommended** given that you may choose to seperate out your deployment stages as seperate stacks `i.e. infra-prod`. In this case the `--all` flag will attempt to deploy all stacks which can result in unwanted deployments!
 
 </Drawer>
-
-<NxCommands commands={['nx run @dungeon-adventure/infra:deploy infra-sandbox']} />
 
 Once the deployment completes, you should see some outputs similar to the following _(some values have been redacted)_:
 
@@ -545,7 +568,7 @@ Once the deployment completes, you should see some outputs similar to the follow
 infra-sandbox
 infra-sandbox: deploying... [2/2]
 
- ✅  infra-sandbox (no changes)
+ ✅  infra-sandbox
 
 ✨  Deployment time: 354s
 
@@ -592,15 +615,24 @@ acurl ap-southeast-2 lambda -N -X POST https://xxx
 
 <Tabs>
   <TabItem label="Local">
-    <NxCommands highlights={['infra-sandbox-ElectroDbTableXXX-YYY']} env={{TABLE_NAME:"infra-sandbox-ElectroDbTableXXX-YYY"}} commands={["run @dungeon-adventure/game-api-backend:serve"]} postCommands={['curl -X GET http://localhost:2022/games.query\?input="\\{\\}"']} />
+    Start your local `game-api` server by running the following command:
+
+    <NxCommands highlights={['infra-sandbox-ElectroDbTableXXX-YYY']} env={{TABLE_NAME:"infra-sandbox-ElectroDbTableXXX-YYY"}} commands={["run @dungeon-adventure/game-api-backend:serve"]} />
+    
     <Aside type="caution">
     Use the CDK deploy output value of `infra-sandbox.ElectroDbTableTableNameXXX` to replace the highlighted placeholder.
     </Aside>
+
+    Once your server is up and running, you can call it by running the following command:
+
+    ```bash
+    curl -X GET http://localhost:2022/games.query\?input="\\{\\}"
+    ```
   </TabItem>
   <TabItem label="Deployed">
 ```bash "https://xxx.region.amazonaws.com/" "ap-southeast-2"
 acurl ap-southeast-2 execute-api -X GET \
-  https://xxx.region.amazonaws.com/games.query\?input\={}
+  https://xxx.region.amazonaws.com/games.query\?input\="\{\}"
 ```
     <Aside type="caution">
     Use the CDK deploy output value of `infra-sandbox.GameApiGameApiUrlXXX` to replace the highlighted placeholder and set the region accordingly..
