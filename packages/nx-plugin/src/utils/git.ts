@@ -25,7 +25,7 @@ export const getGitIncludedFiles = (tree: Tree): string[] => {
     })
       .split('\n')
       .filter((x) => x),
-  ];
+  ].filter((f) => tree.exists(f));
 };
 
 /**

@@ -30,6 +30,7 @@ describe('git utils', () => {
     it('should get all git included files', () => {
       tree.write('.gitignore', `*.txt`);
       tree.write('committed.ts', "const foo = 'bar';");
+      tree.write('committed-but-will-be-deleted.ts', 'const x = 1;');
 
       flushChanges(tree.root, tree.listChanges());
 
@@ -38,6 +39,7 @@ describe('git utils', () => {
 
       tree.write('new-and-not-committed.ts', "const bar = 'baz';");
       tree.write('ignored.txt', 'should not be included');
+      tree.delete('committed-but-will-be-deleted.ts');
 
       flushChanges(tree.root, tree.listChanges());
 
@@ -46,6 +48,7 @@ describe('git utils', () => {
       expect(includedFiles).toContain('committed.ts');
       expect(includedFiles).toContain('new-and-not-committed.ts');
       expect(includedFiles).not.toContain('ignored.txt');
+      expect(includedFiles).not.toContain('committed-but-will-be-deleted.ts');
     });
   });
 
