@@ -51,25 +51,25 @@ export default defineConfig({
                       link: '/get_started/tutorials/dungeon-game/overview',
                     },
                     {
-                        label: '1. Monorepo setup',
-                        link: '/get_started/tutorials/dungeon-game/1',
-                      },
-                      {
-                        label: '2. Game API',
-                        link: '/get_started/tutorials/dungeon-game/2',
-                      },
-                      {
-                        label: '3. Story API',
-                        link: '/get_started/tutorials/dungeon-game/3',
-                      },
-                      {
-                        label: '4. UI',
-                        link: '/get_started/tutorials/dungeon-game/4',
-                      },
-                      {
-                        label: 'Wrap up',
-                        link: '/get_started/tutorials/dungeon-game/wrap-up',
-                      },
+                      label: '1. Monorepo setup',
+                      link: '/get_started/tutorials/dungeon-game/1',
+                    },
+                    {
+                      label: '2. Game API',
+                      link: '/get_started/tutorials/dungeon-game/2',
+                    },
+                    {
+                      label: '3. Story API',
+                      link: '/get_started/tutorials/dungeon-game/3',
+                    },
+                    {
+                      label: '4. UI',
+                      link: '/get_started/tutorials/dungeon-game/4',
+                    },
+                    {
+                      label: 'Wrap up',
+                      link: '/get_started/tutorials/dungeon-game/wrap-up',
+                    },
                   ],
                 },
                 // {
@@ -119,7 +119,9 @@ export default defineConfig({
         },
       ],
       plugins: [
-        starlightLinksValidator(),
+        starlightLinksValidator({
+          errorOnLocalLinks: false,
+        }),
         starlightVideos(),
         starlightBlog({
           authors: {
