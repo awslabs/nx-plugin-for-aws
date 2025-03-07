@@ -104,6 +104,13 @@ export async function infraGenerator(
           command: `cdk deploy --require-approval=never --app ${synthDirFromProject}`,
         },
       };
+      config.targets.destroy = {
+        executor: 'nx:run-commands',
+        options: {
+          cwd: libraryRoot,
+          command: `cdk destroy --require-approval=never --app ${synthDirFromProject}`,
+        },
+      };
       config.targets = sortObjectKeys(config.targets);
       return config;
     },

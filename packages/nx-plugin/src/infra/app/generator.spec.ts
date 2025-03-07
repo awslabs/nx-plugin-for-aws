@@ -59,6 +59,8 @@ describe('infra generator', () => {
     expect(config.targets.build).toMatchSnapshot('build-target');
     // Verify and snapshot deploy target configuration
     expect(config.targets.deploy).toMatchSnapshot('deploy-target');
+    // Verify and snapshot destroy target configuration
+    expect(config.targets.destroy).toMatchSnapshot('destroy-target');
     // Test specific configuration values
     expect(config.targets.synth).toMatchObject({
       cache: true,
@@ -76,6 +78,14 @@ describe('infra generator', () => {
         cwd: 'packages/test',
         command:
           'cdk deploy --require-approval=never --app ../../dist/packages/test/cdk.out',
+      },
+    });
+    expect(config.targets.destroy).toMatchObject({
+      executor: 'nx:run-commands',
+      options: {
+        cwd: 'packages/test',
+        command:
+          'cdk destroy --require-approval=never --app ../../dist/packages/test/cdk.out',
       },
     });
   });
