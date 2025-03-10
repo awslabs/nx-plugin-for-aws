@@ -28,7 +28,7 @@ export default defineConfig({
     starlight({
       title: '@aws/nx-plugin',
       social: {
-        github: 'https://github.com/withastro/starlight',
+        github: 'https://github.com/awslabs/nx-plugin-for-aws',
       },
       logo: {
         dark: './src/content/docs/assets/bulb-white.svg',
