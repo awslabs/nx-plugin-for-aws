@@ -16,6 +16,8 @@ import react from '@astrojs/react';
 
 // https://astro.build/config
 export default defineConfig({
+  site: 'https://awslabs.github.io',
+  base: 'nx-plugin-for-aws',
   image: {
     service: passthroughImageService(),
   },
