@@ -4327,4 +4327,113 @@ describe('openApiTsClientGenerator', () => {
       }),
     );
   });
+
+  it('should generate valid typescript for openapi v3.1 specifications with null types', async () => {
+    const spec: Spec = {
+      info: {
+        title,
+        version: '1.0.0',
+      },
+      openapi: '3.1.0',
+      paths: {
+        '/test': {
+          post: {
+            requestBody: {
+              required: true,
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      requiredNull: {
+                        type: 'null',
+                      },
+                      optionalNull: {
+                        type: 'null',
+                      },
+                      requiredCompositeNull: {
+                        anyOf: [
+                          {
+                            type: 'string',
+                          },
+                          {
+                            type: 'null',
+                          },
+                        ],
+                      },
+                      optionalCompositeNull: {
+                        anyOf: [
+                          {
+                            type: 'string',
+                          },
+                          {
+                            type: 'null',
+                          },
+                        ],
+                      },
+                    },
+                    required: ['requiredNull', 'requiredCompositeNull'],
+                  } as any,
+                },
+              },
+            },
+            responses: {
+              '200': {
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'object',
+                      properties: {},
+                    },
+                  },
+                },
+                description: 'Success',
+              },
+            },
+          },
+        },
+      },
+    };
+
+    tree.write('openapi.json', JSON.stringify(spec));
+
+    await openApiTsClientGenerator(tree, {
+      openApiSpecPath: 'openapi.json',
+      outputPath: 'src/generated',
+    });
+
+    validateTypeScript([
+      'src/generated/client.gen.ts',
+      'src/generated/types.gen.ts',
+    ]);
+
+    const types = tree.read('src/generated/types.gen.ts', 'utf-8');
+    expect(types).toMatchSnapshot();
+
+    const client = tree.read('src/generated/client.gen.ts', 'utf-8');
+    expect(client).toMatchSnapshot();
+
+    const mockFetch = vi.fn();
+
+    mockFetch.mockResolvedValue({
+      status: 200,
+      json: vi.fn().mockResolvedValue({}),
+    });
+
+    const { TestApi } = await importTypeScriptModule<any>(client);
+    const c = new TestApi({
+      url: baseUrl,
+      fetch: mockFetch,
+    });
+
+    expect(
+      await c.postTest({ requiredNull: null, requiredCompositeNull: 'string' }),
+    ).toEqual({});
+    expect(mockFetch).toHaveBeenCalledWith(
+      `${baseUrl}/test`,
+      expect.objectContaining({
+        method: 'POST',
+      }),
+    );
+  });
 });
