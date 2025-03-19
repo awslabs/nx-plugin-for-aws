@@ -529,9 +529,14 @@ Below is a list of all files which have been generated/updated by the `api-conne
     - src/
       - hooks/
         - useSigV4.tsx used by StoryApi to sign requests
-        - useStoryApi.tsx hooks to call the StoryApi
+        - useStoryApiClient.tsx hook to construct a StoryApi client
+        - useStoryApi.tsx hook for interacting with the StoryApi using TanStack Query
+      - components/
+        - QueryClientProvider.tsx TanStack Query client provider
+        - StoryApiProvider.tsx Provider for the StoryApi TanStack Query hook
+      - main.tsx Instrument the QueryClientProvider and StoryApiProvider
     - .gitignore ignore generated client files
-    - project.json updated to add targets for generating openapi client
+    - project.json updated to add targets for generating openapi hooks
     - ...
   - story_api/
     - scripts/
@@ -541,7 +546,7 @@ Below is a list of all files which have been generated/updated by the `api-conne
 </FileTree>
 
 ```tsx {1,12-15}
-// packages/game-ui/src/hooks/useStoryApi.tsx
+// packages/game-ui/src/hooks/useStoryApiClient.tsx
 import { StoryApi } from '../generated/story-api/client.gen';
 import { useSigV4 } from './useSigV4';
 import { useRuntimeConfig } from './useRuntimeConfig';
@@ -562,10 +567,39 @@ export const useStoryApi = (): StoryApi => {
 };
 ```
 
-This hook is what will be used to make authenticated API requests to the `StoryApi`. As you can see in the implementation, it uses the `StoryApi` which is generated at build time and as such you will see an error in your IDE until we build our code. For more details on how the client is generated or how to consume the API, refer to the [React to FastAPI guide](/nx-plugin-for-aws/guides/api-connection/react-fastapi).
+This hook can be used to make authenticated API requests to the `StoryApi`. As you can see in the implementation, it uses the `StoryApi` which is generated at build time and as such you will see an error in your IDE until we build our code. For more details on how the client is generated or how to consume the API, refer to the [React to FastAPI guide](/nx-plugin-for-aws/guides/api-connection/react-fastapi).
+
+```tsx
+// packages/game-ui/src/components/StoryApiProvider.tsx
+import { createContext, FC, PropsWithChildren, useMemo } from 'react';
+import { useStoryApiClient } from '../hooks/useStoryApiClient';
+import { StoryApiOptionsProxy } from '../generated/story-api/options-proxy.gen';
+
+export const StoryApiContext = createContext<StoryApiOptionsProxy | undefined>(
+  undefined,
+);
+
+export const StoryApiProvider: FC<PropsWithChildren> = ({ children }) => {
+  const client = useStoryApiClient();
+  const optionsProxy = useMemo(
+    () => new StoryApiOptionsProxy({ client }),
+    [client],
+  );
+
+  return (
+    <StoryApiContext.Provider value={optionsProxy}>
+      {children}
+    </StoryApiContext.Provider>
+  );
+};
+
+export default StoryApiProvider;
+```
+
+The above provider component uses the `useStoryApiClient` hook, and instantiates the `StoryApiOptionsProxy`, which is used to build options for TanStack Query hooks. We will use the corresponding hook `useStoryApi` to provide us with this options proxy so that we can let TanStack Query manage the state for our streaming API.
 
 <Aside type="caution">
-The `client.gen.ts` file that is generated should never be modified manually as this will be re-generated any time a change to the backend API is detected.
+The `src/generated/story-api/*.gen.ts` files should never be modified manually as they will be re-generated any time a change to the backend API is detected.
 </Aside>
 
 </Drawer>
@@ -590,7 +624,6 @@ Below is a list of all files which have been generated/updated by the `api-conne
           - TrpcApis.tsx all configured tRPC APIs
           - TrpcClientProviders.tsx creates a client provider per tRPC API
           - TrpcProvider.tsx
-        - QueryClientProvider.tsx sets up the query client
       - hooks/
         - **useGameApi.tsx** hooks to call the GameApi
       - **main.tsx** injects the trpc client providers

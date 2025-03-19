@@ -578,10 +578,11 @@ function RouteComponent() {
 import { PromptInput, Spinner } from '@cloudscape-design/components';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useGameApi } from '../../hooks/useGameApi';
 import { useStoryApi } from '../../hooks/useStoryApi';
 import type { IAction, IGame } from ':dungeon-adventure/game-api-schema';
+import { GenerateStoryRequest } from '../../generated/story-api/types.gen';
 
 type IGameState = Omit<IGame, 'lastUpdated'> & { actions: IAction[] };
 
@@ -599,7 +600,9 @@ function RouteComponent() {
   const { genre } = Route.useSearch();
 
   const [currentInput, setCurrentInput] = useState('');
-  const [streamingContent, setStreamingContent] = useState('');
+  const [generateStoryInput, setGenerateStoryInput] = useState<
+    GenerateStoryRequest | undefined
+  >();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -612,6 +615,36 @@ function RouteComponent() {
     gameApi.actions.query.queryOptions({ playerName, limit: 100 }),
   );
 
+  // Query for managing the streaming state from the story api
+  const streamingContentQuery = useQuery(
+    storyApi.generateStory.queryOptions(generateStoryInput!, {
+      enabled: !!generateStoryInput,
+    }),
+  );
+
+  // We join each chunk from the generate story api together to form our streaming content
+  const streamingContent = useMemo(
+    () => (streamingContentQuery.data ?? []).join(''),
+    [streamingContentQuery.data],
+  );
+
+  // Track whether the current story generation has completed
+  const isCurrentStreamComplete = useMemo(
+    () =>
+      streamingContentQuery.fetchStatus === 'idle' && streamingContent !== '',
+    [streamingContentQuery.fetchStatus, streamingContent],
+  );
+
+  // Track whether we've saved the current story actions
+  const isStreamingContentSaved = useMemo(
+    () =>
+      gameActionsQuery.data &&
+      (gameActionsQuery.data.items.length > 0 &&
+        gameActionsQuery.data.items[gameActionsQuery.data.items.length - 1]
+          .content) === streamingContent,
+    [gameActionsQuery.data, streamingContent],
+  );
+
   // no actions - therefore must be a new game - generate initial story
   useEffect(() => {
     if (
@@ -619,30 +652,42 @@ function RouteComponent() {
       gameActionsQuery.data?.items &&
       gameActionsQuery.data?.items.length === 0
     ) {
-      generateStory({
+      setGenerateStoryInput({
         playerName,
         genre,
         actions: [],
       });
     }
-  }, [gameActionsQuery.data?.items, gameActionsQuery.isLoading]);
+  }, [
+    gameActionsQuery.data?.items,
+    gameActionsQuery.isLoading,
+    setGenerateStoryInput,
+  ]);
 
-  const generateStoryMutation = useMutation({
-    mutationFn: async ({ playerName, genre, actions }: IGameState) => {
-      let content = '';
-      for await (const chunk of storyApi.generateStory({
-        playerName,
-        genre,
-        actions,
-      })) {
-        content += chunk;
-        // make chunks available to render in a streaming fashion
-        setStreamingContent(content);
-      }
+  useEffect(() => {
+    if (
+      !gameActionsQuery.isLoading &&
+      isCurrentStreamComplete &&
+      !isStreamingContentSaved
+    ) {
+      void (async () => {
+        // Save assistant's response whenever streaming stops
+        await saveActionMutation.mutateAsync({
+          playerName,
+          role: 'assistant',
+          content: streamingContent,
+        });
 
-      return content;
-    },
-  });
+        await gameActionsQuery.refetch();
+      })();
+    }
+  }, [
+    gameActionsQuery.data?.items,
+    gameActionsQuery.isLoading,
+    isCurrentStreamComplete,
+    streamingContent,
+    isStreamingContentSaved,
+  ]);
 
   // scroll to the last message
   const scrollToBottom = () => {
@@ -653,30 +698,6 @@ function RouteComponent() {
   useEffect(() => {
     scrollToBottom();
   }, [streamingContent, gameActionsQuery]);
-
-  // progress the story
-  const generateStory = async ({ playerName, genre, actions }: IGameState) => {
-    try {
-      const content = await generateStoryMutation.mutateAsync({
-        playerName,
-        genre,
-        actions,
-      });
-
-      // Save assistant's response
-      await saveActionMutation.mutateAsync({
-        playerName,
-        role: 'assistant',
-        content,
-      });
-
-      await gameActionsQuery.refetch();
-
-      setStreamingContent('');
-    } catch (error) {
-      console.error('Failed to generate story:', error);
-    }
-  };
 
   // progress the story when the user submits input
   const handleSubmitAction = async () => {
@@ -696,7 +717,7 @@ function RouteComponent() {
     setCurrentInput('');
 
     // Generate response
-    await generateStory({
+    setGenerateStoryInput({
       genre,
       playerName,
       actions: [...(gameActionsQuery.data?.items ?? []), userAction],
@@ -707,9 +728,9 @@ function RouteComponent() {
     <div className="game-interface">
       <div className="messages-area">
         <div className="messages-container">
-          {gameActionsQuery.data?.items
+          {(gameActionsQuery.data?.items ?? [])
             .concat(
-              streamingContent.length > 0
+              !isStreamingContentSaved && streamingContentQuery.isSuccess
                 ? [
                     {
                       playerName,
@@ -730,7 +751,7 @@ function RouteComponent() {
                 {action.content}
               </div>
             ))}
-          {generateStoryMutation.isPending && streamingContent.length === 0 && (
+          {(streamingContentQuery.isLoading || gameActionsQuery.isLoading) && (
             <Spinner data-style="generating" size="big" />
           )}
           <div ref={messagesEndRef} />
@@ -739,6 +760,7 @@ function RouteComponent() {
       <div className="input-area">
         <PromptInput
           onChange={({ detail }) => setCurrentInput(detail.value)}
+          disabled={saveActionMutation.isPending || gameActionsQuery.isLoading || streamingContentQuery.isFetching}
           value={currentInput}
           actionButtonAriaLabel="Send message"
           actionButtonIconName="send"
@@ -750,6 +772,7 @@ function RouteComponent() {
     </div>
   );
 }
+
 ```
 
 <Aside type="tip">

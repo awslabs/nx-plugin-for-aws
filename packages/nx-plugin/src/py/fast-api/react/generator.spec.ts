@@ -5,6 +5,7 @@
 import { Tree } from '@nx/devkit';
 import { fastApiReactGenerator } from './generator';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
+import { query } from '../../../utils/ast';
 
 describe('fastapi react generator', () => {
   let tree: Tree;
@@ -106,7 +107,7 @@ export function Main() {
     expect(
       projectConfig.targets['generate:test-api-client'].options.commands,
     ).toEqual([
-      'nx g @aws/nx-plugin:open-api#ts-client --openApiSpecPath="dist/apps/backend/openapi/openapi.json" --outputPath="apps/frontend/src/generated/test-api" --no-interactive',
+      'nx g @aws/nx-plugin:open-api#ts-hooks --openApiSpecPath="dist/apps/backend/openapi/openapi.json" --outputPath="apps/frontend/src/generated/test-api" --no-interactive',
     ]);
 
     expect(
@@ -125,7 +126,25 @@ export function Main() {
     );
   });
 
-  it('should generate client hook', async () => {
+  it('should generate vanilla client hook', async () => {
+    await fastApiReactGenerator(tree, {
+      frontendProjectName: 'frontend',
+      fastApiProjectName: 'backend',
+      auth: 'None',
+    });
+
+    // Verify hook file was created
+    expect(
+      tree.exists('apps/frontend/src/hooks/useTestApiClient.tsx'),
+    ).toBeTruthy();
+
+    // Create snapshot of generated hook
+    expect(
+      tree.read('apps/frontend/src/hooks/useTestApiClient.tsx', 'utf-8'),
+    ).toMatchSnapshot('useTestApiClient.tsx');
+  });
+
+  it('should generate tanstack query options proxy hook', async () => {
     await fastApiReactGenerator(tree, {
       frontendProjectName: 'frontend',
       fastApiProjectName: 'backend',
@@ -139,6 +158,88 @@ export function Main() {
     expect(
       tree.read('apps/frontend/src/hooks/useTestApi.tsx', 'utf-8'),
     ).toMatchSnapshot('useTestApi.tsx');
+  });
+
+  it('should generate tanstack query options proxy provider', async () => {
+    await fastApiReactGenerator(tree, {
+      frontendProjectName: 'frontend',
+      fastApiProjectName: 'backend',
+      auth: 'None',
+    });
+
+    // Verify providers were created
+    expect(
+      tree.exists('apps/frontend/src/components/QueryClientProvider.tsx'),
+    ).toBeTruthy();
+    expect(
+      tree.exists('apps/frontend/src/components/TestApiProvider.tsx'),
+    ).toBeTruthy();
+
+    // Create snapshot of generated provider
+    expect(
+      tree.read('apps/frontend/src/components/TestApiProvider.tsx', 'utf-8'),
+    ).toMatchSnapshot('TestApiProvider.tsx');
+  });
+
+  it('should instrument providers in main.tsx', async () => {
+    await fastApiReactGenerator(tree, {
+      frontendProjectName: 'frontend',
+      fastApiProjectName: 'backend',
+      auth: 'None',
+    });
+
+    expect(
+      query(
+        tree,
+        'apps/frontend/src/main.tsx',
+        'JsxOpeningElement[tagName.name="QueryClientProvider"]',
+      ),
+    ).toHaveLength(1);
+
+    expect(
+      query(
+        tree,
+        'apps/frontend/src/main.tsx',
+        'JsxOpeningElement[tagName.name="TestApiProvider"]',
+      ),
+    ).toHaveLength(1);
+
+    expect(tree.read('apps/frontend/src/main.tsx', 'utf-8')).toMatchSnapshot(
+      'main.tsx',
+    );
+  });
+
+  it('should not duplicate providers in main.tsx', async () => {
+    // Generate twice
+    await fastApiReactGenerator(tree, {
+      frontendProjectName: 'frontend',
+      fastApiProjectName: 'backend',
+      auth: 'None',
+    });
+
+    await fastApiReactGenerator(tree, {
+      frontendProjectName: 'frontend',
+      fastApiProjectName: 'backend',
+      auth: 'None',
+    });
+
+    // Check that there is still only a single QueryClientProvider
+    expect(
+      query(
+        tree,
+        'apps/frontend/src/main.tsx',
+        'JsxOpeningElement[tagName.name="QueryClientProvider"]',
+      ),
+    ).toHaveLength(1);
+
+    // Check that there is still only a single TestApiProvider
+    expect(
+      query(
+        tree,
+        'apps/frontend/src/main.tsx',
+        'JsxOpeningElement[tagName.name="TestApiProvider"]',
+      ),
+    ).toHaveLength(1);
   });
 
   it('should handle IAM auth option', async () => {
@@ -165,7 +266,7 @@ export function Main() {
 
     // Create snapshot of generated hook with IAM auth
     expect(
-      tree.read('apps/frontend/src/hooks/useTestApi.tsx', 'utf-8'),
+      tree.read('apps/frontend/src/hooks/useTestApiClient.tsx', 'utf-8'),
     ).toMatchSnapshot('useTestApi-IAM.tsx');
   });
 });
