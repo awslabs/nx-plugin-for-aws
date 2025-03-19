@@ -53,12 +53,12 @@ export const buildOpenApiCodeGenData = async (
   const modelsByName = Object.fromEntries(data.models.map((m) => [m.name, m]));
 
   // Augment operations with additional data
-  data.services.forEach((service) => {
+  for (const service of data.services) {
     // Keep track of the request and response models we need the service (ie api client) to import
     const requestModelImports: string[] = [];
     const responseModelImports: string[] = [];
 
-    service.operations.forEach((op) => {
+    for (const op of service.operations) {
       // Extract the operation back from the openapi spec
       const specOp = (spec as any)?.paths?.[op.path]?.[
         op.method.toLowerCase()
@@ -82,7 +82,7 @@ export const buildOpenApiCodeGenData = async (
             .map((r) => r.type),
         );
 
-        op.responses.forEach((response) => {
+        for (const response of op.responses) {
           // Validate that the response is not a composite schema of primitives since we cannot determine what
           // the type of the response is (it all comes back as text!)
           if (
@@ -118,7 +118,7 @@ export const buildOpenApiCodeGenData = async (
               const mediaTypes = Object.keys(specResponse.content);
               (response as any).mediaTypes = mediaTypes;
 
-              mediaTypes.forEach((mediaType) => {
+              for (const mediaType of mediaTypes) {
                 const responseContent =
                   specResponse.content?.[mediaType] ??
                   Object.values(specResponse.content)[0];
@@ -127,16 +127,17 @@ export const buildOpenApiCodeGenData = async (
                   responseContent.schema,
                 );
                 if (responseSchema) {
-                  mutateWithOpenapiSchemaProperties(
+                  await mutateWithOpenapiSchemaProperties(
                     spec,
                     response,
                     responseSchema,
+                    modelsByName,
                   );
                 }
-              });
+              }
             }
           }
-        });
+        }
       }
 
       const specParametersByName = Object.fromEntries(
@@ -147,7 +148,7 @@ export const buildOpenApiCodeGenData = async (
       );
 
       // Loop through the parameters
-      op.parameters.forEach((parameter) => {
+      for (const parameter of op.parameters) {
         // Add the request model import
         if (parameter.export === 'reference') {
           requestModelImports.push(parameter.type);
@@ -157,10 +158,11 @@ export const buildOpenApiCodeGenData = async (
         const specParameterSchema = resolveIfRef(spec, specParameter?.schema);
 
         if (specParameterSchema) {
-          mutateWithOpenapiSchemaProperties(
+          await mutateWithOpenapiSchemaProperties(
             spec,
             parameter,
             specParameterSchema,
+            modelsByName,
           );
         }
 
@@ -179,7 +181,12 @@ export const buildOpenApiCodeGenData = async (
                 specBody.content?.[parameter.mediaType]?.schema,
               );
               if (bodySchema) {
-                mutateWithOpenapiSchemaProperties(spec, parameter, bodySchema);
+                await mutateWithOpenapiSchemaProperties(
+                  spec,
+                  parameter,
+                  bodySchema,
+                  modelsByName,
+                );
               }
             }
             // Track all the media types that can be accepted in the request body
@@ -212,7 +219,7 @@ export const buildOpenApiCodeGenData = async (
         }
 
         mutateModelWithAdditionalTypes(parameter);
-      });
+      }
 
       // Add language types to response models
       (op.responses ?? []).forEach(mutateModelWithAdditionalTypes);
@@ -234,7 +241,7 @@ export const buildOpenApiCodeGenData = async (
         'operation',
         (op as any).uniqueName,
       );
-    });
+    }
 
     // Lexicographical ordering of operations
     service.operations = orderBy(
@@ -254,7 +261,7 @@ export const buildOpenApiCodeGenData = async (
     (service as any).className = `${service.name}Api`;
     (service as any).classNameSnakeCase = snakeCase((service as any).className);
     (service as any).nameSnakeCase = snakeCase(service.name);
-  });
+  }
 
   // All operations across all services
   const allOperations = uniqBy(
@@ -349,7 +356,7 @@ export const buildOpenApiCodeGenData = async (
   ];
 
   // Augment models with additional data
-  data.models.forEach((model) => {
+  for (const model of data.models) {
     // Add a snake_case name
     (model as any).nameSnakeCase = toPythonName('model', model.name);
 
@@ -358,7 +365,12 @@ export const buildOpenApiCodeGenData = async (
     if (matchingSpecModel) {
       const specModel = resolveIfRef(spec, matchingSpecModel);
 
-      mutateWithOpenapiSchemaProperties(spec, model, specModel);
+      await mutateWithOpenapiSchemaProperties(
+        spec,
+        model,
+        specModel,
+        modelsByName,
+      );
 
       // Add unique imports
       (model as any).uniqueImports = orderBy(
@@ -377,22 +389,20 @@ export const buildOpenApiCodeGenData = async (
       // Add deprecated flag if present
       (model as any).deprecated = specModel.deprecated || false;
 
-      // If the model has "additionalProperties" there should be a "dictionary" property
-      if (specModel.additionalProperties) {
-        (model as any).additionalPropertiesProperty = model.properties.find(
-          (p) => !p.name && p.export === 'dictionary',
-        );
-      }
-
       // Augment properties with additional data
-      model.properties.forEach((property) => {
+      for (const property of model.properties) {
         const matchingSpecProperty = specModel.properties?.[property.name];
 
         if (matchingSpecProperty) {
           const specProperty = resolveIfRef(spec, matchingSpecProperty);
-          mutateWithOpenapiSchemaProperties(spec, property, specProperty);
+          await mutateWithOpenapiSchemaProperties(
+            spec,
+            property,
+            specProperty,
+            modelsByName,
+          );
         }
-      });
+      }
     }
 
     // Augment properties with additional data
@@ -400,7 +410,7 @@ export const buildOpenApiCodeGenData = async (
       // Add language-specific names/types
       mutateModelWithAdditionalTypes(property);
     });
-  });
+  }
 
   // Order models lexicographically by name
   data.models = orderBy(data.models, (d) => d.name);
@@ -473,6 +483,65 @@ const buildInitialCodeGenData = async (spec: Spec): Promise<ClientData> => {
 };
 
 /**
+ * Build a model for a particular primitive schema.
+ * Only primitives are supported since we only return one model.
+ * For non-primitives, it assumes all referenced subschemas are already models
+ */
+const buildModelForPrimitive = async (
+  originalSpec: Spec,
+  schema: OpenAPIV3.SchemaObject | OpenAPIV3_1.SchemaObject,
+): Promise<Model> => {
+  const targetSchemaName = '___aws_nx_plugin_openapi_tmp_schema___';
+
+  const spec: Spec = {
+    openapi: '3.1.0',
+    info: { title: 'tmp', version: '1.0.0' },
+    paths: {},
+    components: {
+      schemas: {
+        ...originalSpec.components?.schemas,
+        [targetSchemaName]: schema,
+      },
+    },
+  };
+  const data = await buildInitialCodeGenData(spec);
+
+  const model = data.models.find((m) => m.name === targetSchemaName);
+  if (!model) {
+    throw new Error(
+      `Failed to construct model for schema ${JSON.stringify(schema)}`,
+    );
+  }
+
+  ensureModelLinks(spec, data);
+  await mutateWithOpenapiSchemaProperties(
+    spec,
+    model,
+    schema,
+    Object.fromEntries(data.models.map((m) => [m.name, m])),
+  );
+
+  return model;
+};
+
+const buildOrReferenceModel = async (
+  spec: Spec,
+  modelsByName: { [name: string]: Model },
+  schema:
+    | OpenAPIV3.SchemaObject
+    | OpenAPIV3_1.SchemaObject
+    | OpenAPIV3.ReferenceObject,
+): Promise<Model> => {
+  if (isRef(schema)) {
+    const name = splitRef(schema.$ref)[2];
+    return modelsByName[name];
+  }
+  // Non referenced schemas won't have a model created as they are primitives and aren't covered by @heyapi
+  // So we build the model here
+  return await buildModelForPrimitive(spec, schema);
+};
+
+/**
  * Copy vendor extensions from the first parameter to the second
  */
 const copyVendorExtensions = (
@@ -486,10 +555,11 @@ const copyVendorExtensions = (
   });
 };
 
-const mutateWithOpenapiSchemaProperties = (
+const mutateWithOpenapiSchemaProperties = async (
   spec: Spec,
   model: Model,
   schema: OpenAPIV3.SchemaObject | OpenAPIV3_1.SchemaObject,
+  modelsByName: { [name: string]: Model },
   visited: Set<Model> = new Set(),
 ) => {
   (model as any).format = schema.format;
@@ -510,6 +580,84 @@ const mutateWithOpenapiSchemaProperties = (
     'x-aws-nx-hoisted'
   ];
 
+  // Ensure models with additional properties are handled correctly
+  if (schema.additionalProperties) {
+    const additionalPropertiesModel = await buildOrReferenceModel(
+      spec,
+      modelsByName,
+      schema.additionalProperties === true ? {} : schema.additionalProperties,
+    );
+
+    // The original models treat _some_ objects with additional properties as a "dictionary", and others as an "interface"
+    // For the purposes of our code generation, we define a "dictionary" to be a model with no explicit properties, only
+    // additional properties. Interfaces can have a mixture of explicit properties and additional properties.
+    if (model.export === 'dictionary') {
+      // Dictionaries contain a special property which is the model itself. Other properties are explicit properties.
+      const explicitProperties = model.properties.filter(
+        (p) => !(p.export === 'dictionary' && p.name === model.name),
+      );
+
+      if (explicitProperties.length > 0 || (schema as any).patternProperties) {
+        // Treat this model as an interface instead of a dictionary, since this has
+        // explicit properties
+        model.export = 'interface';
+        (model as any).hasAdditionalProperties = true;
+        (model as any).additionalPropertiesModel = additionalPropertiesModel;
+        model.properties = explicitProperties;
+      }
+    } else {
+      (model as any).hasAdditionalProperties = true;
+      (model as any).additionalPropertiesModel = additionalPropertiesModel;
+      // There's a special property named [key: string] which is the definition of the additional properties
+      // We remove this so we don't render it as a regular property.
+      model.properties = (model.properties ?? []).filter(
+        (p) => p.name !== '[key: string]',
+      );
+    }
+  }
+
+  // Ensure models with pattern properties are handled correctly
+  if ((schema as any).patternProperties) {
+    const patternProperties = resolveIfRef(
+      spec,
+      (schema as any).patternProperties as
+        | OpenAPIV3.ReferenceObject
+        | {
+            [pattern: string]:
+              | OpenAPIV3.ReferenceObject
+              | OpenAPIV3.SchemaObject
+              | OpenAPIV3_1.SchemaObject;
+          },
+    );
+
+    const patternPropertiesModels: { pattern: string; model: Model }[] = [];
+
+    // When there are pattern properties, we don't want to treat models as dictionaries since there can be more than one type of "value"
+    // depending on what pattern the key matches
+    if (model.export === 'dictionary') {
+      model.export = 'interface';
+    }
+
+    for (const [pattern, patternProperty] of Object.entries(
+      patternProperties,
+    )) {
+      const patternPropertyModel = await buildOrReferenceModel(
+        spec,
+        modelsByName,
+        patternProperty,
+      );
+      if (patternPropertyModel) {
+        patternPropertiesModels.push({
+          pattern,
+          model: patternPropertyModel,
+        });
+      }
+    }
+
+    (model as any).hasPatternProperties = true;
+    (model as any).patternPropertiesModels = patternPropertiesModels;
+  }
+
   mutateModelWithAdditionalTypes(model);
 
   visited.add(model);
@@ -525,7 +673,13 @@ const mutateWithOpenapiSchemaProperties = (
     !visited.has(modelLink)
   ) {
     const subSchema = resolveIfRef(spec, schema.items);
-    mutateWithOpenapiSchemaProperties(spec, modelLink, subSchema, visited);
+    await mutateWithOpenapiSchemaProperties(
+      spec,
+      modelLink,
+      subSchema,
+      modelsByName,
+      visited,
+    );
   }
 
   // Also apply to object properties recursively
@@ -539,29 +693,48 @@ const mutateWithOpenapiSchemaProperties = (
     const subSchema = resolveIfRef(spec, schema.additionalProperties);
     // Additional properties can be "true" rather than a type
     if (subSchema !== true) {
-      mutateWithOpenapiSchemaProperties(spec, modelLink, subSchema, visited);
+      await mutateWithOpenapiSchemaProperties(
+        spec,
+        modelLink,
+        subSchema,
+        modelsByName,
+        visited,
+      );
     }
   }
-  model.properties
-    .filter((p) => !visited.has(p) && schema.properties?.[trim(p.name, `"'`)])
-    .forEach((property) => {
-      const subSchema = resolveIfRef(
-        spec,
-        schema.properties![trim(property.name, `"'`)],
-      );
-      mutateWithOpenapiSchemaProperties(spec, property, subSchema, visited);
-    });
+
+  for (const property of model.properties.filter(
+    (p) => !visited.has(p) && schema.properties?.[trim(p.name, `"'`)],
+  )) {
+    const subSchema = resolveIfRef(
+      spec,
+      schema.properties![trim(property.name, `"'`)],
+    );
+    await mutateWithOpenapiSchemaProperties(
+      spec,
+      property,
+      subSchema,
+      modelsByName,
+      visited,
+    );
+  }
 
   if (COMPOSED_SCHEMA_TYPES.has(model.export)) {
-    model.properties.forEach((property, i) => {
+    for (let i = 0; i < model.properties.length; i++) {
       const subSchema = resolveIfRef(
         spec,
         (schema as any)[camelCase(model.export)]?.[i],
       );
       if (subSchema) {
-        mutateWithOpenapiSchemaProperties(spec, property, subSchema, visited);
+        await mutateWithOpenapiSchemaProperties(
+          spec,
+          model.properties[i],
+          subSchema,
+          modelsByName,
+          visited,
+        );
       }
-    });
+    }
   }
 };
 
@@ -577,7 +750,10 @@ const ensureModelLinks = (spec: Spec, data: ClientData) => {
     const schema = resolveIfRef(spec, spec?.components?.schemas?.[model.name]);
     if (schema) {
       // Object schemas should be typed as the model we will create
-      if (schema.type === 'object' && schema.properties) {
+      if (
+        schema.type === 'object' &&
+        (schema.properties || (schema as any).patternProperties)
+      ) {
         model.type = model.name;
       }
       _ensureModelLinks(spec, modelsByName, model, schema, visited);

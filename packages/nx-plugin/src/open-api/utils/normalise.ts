@@ -124,6 +124,15 @@ const hoistInlineObjectSubSchemas = (
           },
         ]
       : []),
+    ...Object.entries((schema as any).patternProperties ?? {})
+      .filter(([, s]) => hasSubSchemasToVisit(s))
+      .map(([pattern, s], i) => ({
+        nameParts: (s as OpenAPIV3.SchemaObject).title
+          ? [pascalCase((s as OpenAPIV3.SchemaObject).title)]
+          : [...nameParts, pascalCase(pattern), `${i}`],
+        schema: s as OpenAPIV3.SchemaObject,
+        propPath: ['patternProperties', pattern],
+      })),
   ];
 
   // Hoist these recursively first (ie depth first search) so that we don't miss refs
@@ -137,6 +146,7 @@ const hoistInlineObjectSubSchemas = (
       (s) =>
         (s.schema.type === 'object' && s.schema.properties) ||
         isCompositeSchema(s.schema) ||
+        (s.schema.type === 'object' && (s.schema as any).patternProperties) ||
         (s.schema.type === 'string' && s.schema.enum),
     )
     .map((s) => {
