@@ -22,6 +22,13 @@ import { toClassName } from '../../../utils/names';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { withVersions } from '../../../utils/versions';
 import { updateGitIgnore } from '../../../utils/git';
+import {
+  addSingleImport,
+  createJsxElementFromIdentifier,
+  query,
+  replace,
+} from '../../../utils/ast';
+import { JsxSelfClosingElement } from 'typescript';
 
 export const fastApiReactGenerator = async (
   tree: Tree,
@@ -117,7 +124,7 @@ export const fastApiReactGenerator = async (
         ],
         options: {
           commands: [
-            `nx g @aws/nx-plugin:open-api#ts-client --openApiSpecPath="${specPath}" --outputPath="${generatedClientDirFromRoot}" --no-interactive`,
+            `nx g @aws/nx-plugin:open-api#ts-hooks --openApiSpecPath="${specPath}" --outputPath="${generatedClientDirFromRoot}" --no-interactive`,
           ],
         },
         dependsOn: [`${options.fastApiProjectName}:openapi`],
@@ -151,6 +158,29 @@ export const fastApiReactGenerator = async (
     );
   }
 
+  // Generate the tanstack query provider if it does not exist already
+  if (
+    !tree.exists(
+      joinPathFragments(
+        frontendProjectConfig.sourceRoot,
+        'components',
+        'QueryClientProvider.tsx',
+      ),
+    )
+  ) {
+    generateFiles(
+      tree,
+      joinPathFragments(
+        __dirname,
+        '../../../utils/files/website/components/tanstack-query',
+      ),
+      joinPathFragments(frontendProjectConfig.sourceRoot, 'components'),
+      {},
+    );
+  }
+
+  const apiNameClassName = toClassName(apiName);
+
   // Add a hook to instantiate the client
   generateFiles(
     tree,
@@ -159,10 +189,64 @@ export const fastApiReactGenerator = async (
     {
       auth: options.auth,
       apiName,
-      apiNameClassName: toClassName(apiName),
+      apiNameClassName,
       generatedClientDir,
     },
   );
+
+  // Update main.tsx to add required providers
+  const mainTsxPath = joinPathFragments(
+    frontendProjectConfig.sourceRoot,
+    'main.tsx',
+  );
+
+  // Add the query client provider if it doesn't exist already
+  const hasQueryClientProvider =
+    query(
+      tree,
+      mainTsxPath,
+      'JsxOpeningElement[tagName.name="QueryClientProvider"]',
+    ).length > 0;
+
+  if (!hasQueryClientProvider) {
+    addSingleImport(
+      tree,
+      mainTsxPath,
+      'QueryClientProvider',
+      './components/QueryClientProvider',
+    );
+    replace(
+      tree,
+      mainTsxPath,
+      'JsxSelfClosingElement[tagName.name="RouterProvider"]',
+      (node: JsxSelfClosingElement) =>
+        createJsxElementFromIdentifier('QueryClientProvider', [node]),
+    );
+  }
+
+  // Add the api provider if it does not exist
+  const providerName = `${apiNameClassName}Provider`;
+  const hasProvider =
+    query(
+      tree,
+      mainTsxPath,
+      `JsxOpeningElement[tagName.name="${providerName}"]`,
+    ).length > 0;
+  if (!hasProvider) {
+    addSingleImport(
+      tree,
+      mainTsxPath,
+      providerName,
+      `./components/${providerName}`,
+    );
+    replace(
+      tree,
+      mainTsxPath,
+      'JsxSelfClosingElement[tagName.name="RouterProvider"]',
+      (node: JsxSelfClosingElement) =>
+        createJsxElementFromIdentifier(providerName, [node]),
+    );
+  }
 
   addDependenciesToPackageJson(
     tree,
@@ -176,6 +260,7 @@ export const fastApiReactGenerator = async (
             'aws4fetch',
           ]
         : []) as any),
+      '@tanstack/react-query',
     ]),
     withVersions(['@smithy/types']),
   );

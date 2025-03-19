@@ -34,3 +34,29 @@ export const PRIMITIVE_TYPES = new Set([
   'binary',
   'void',
 ]);
+
+/**
+ * Vendor extensions which are used to customise generated code
+ */
+export const VENDOR_EXTENSIONS = {
+  /**
+   * Set to 'true' to indicate this is a streaming API
+   */
+  STREAMING: 'x-streaming',
+  /**
+   * Set to true to indicate this is a mutation, regardless of its HTTP method
+   */
+  MUTATION: 'x-mutation',
+  /**
+   * Set to true to indicate this is a query, regardless of its HTTP method
+   */
+  QUERY: 'x-query',
+  /**
+   * Set to the name of the input property used as the cursor for pagination if
+   * the API accepts a cursor that is not named 'cursor'.
+   * This can also be set to false to override behaviour and indicate this is not
+   * a paginated API.
+   * Used for tanstack infinite query hooks.
+   */
+  CURSOR: 'x-cursor',
+} as const;

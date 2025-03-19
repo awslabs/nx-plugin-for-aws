@@ -29,6 +29,7 @@ import {
   COLLECTION_TYPES,
   COMPOSED_SCHEMA_TYPES,
   PRIMITIVE_TYPES,
+  VENDOR_EXTENSIONS,
   Operation,
 } from './codegen-data/types';
 
@@ -241,6 +242,8 @@ export const buildOpenApiCodeGenData = async (
         'operation',
         (op as any).uniqueName,
       );
+
+      mutateOperationWithAdditionalData(op);
     }
 
     // Lexicographical ordering of operations
@@ -999,4 +1002,62 @@ const mutateModelWithAdditionalTypes = (model: Model) => {
     PRIMITIVE_TYPES.has(model.type) &&
     !COMPOSED_SCHEMA_TYPES.has(model.export) &&
     !COLLECTION_TYPES.has(model.export);
+};
+
+/**
+ * Determine whether or not an operation is a mutation
+ */
+const isOperationMutation = (op: Operation): boolean => {
+  // Let the user override whether an operation is a query or mutation using x-mutation/x-query
+  const { vendorExtensions } = op as any;
+  if (vendorExtensions?.[VENDOR_EXTENSIONS.MUTATION]) {
+    return true;
+  } else if (vendorExtensions?.[VENDOR_EXTENSIONS.QUERY]) {
+    return false;
+  }
+  // Assume a restful API and treat mutative HTTP methods as mutations
+  return ['PATCH', 'POST', 'PUT', 'DELETE'].includes(op.method);
+};
+
+/**
+ * Add infinite query details to the operation
+ */
+const mutateOperationWithInfiniteQueryDetails = (op: Operation) => {
+  const { vendorExtensions } = op as any;
+
+  // Allow users to customise the "cursor" property used for paginated requests
+  const cursorPropertyName =
+    vendorExtensions?.[VENDOR_EXTENSIONS.CURSOR] ?? 'cursor';
+  const cursorProperty = op.parameters.find(
+    (p) => p.name === cursorPropertyName,
+  );
+
+  // The operation is an infinite query if:
+  // - x-cursor is not set to 'false' (this allows users to disable infinite queries for operations that accept a 'cursor')
+  // - the operation accepts a parameter named 'cursor', or a parameter named as the user specified with x-cursor
+  (op as any).isInfiniteQuery =
+    vendorExtensions?.[VENDOR_EXTENSIONS.CURSOR] !== false && !!cursorProperty;
+  if ((op as any).isInfiniteQuery) {
+    (op as any).infiniteQueryCursorProperty = cursorProperty;
+  }
+};
+
+/**
+ * Add additional data to an operation for code generation decisions
+ */
+const mutateOperationWithAdditionalData = (op: Operation) => {
+  // Add mutation/query details
+  const isMutation = isOperationMutation(op);
+  (op as any).isMutation = isMutation;
+  (op as any).isQuery = !isMutation;
+
+  // Streaming responses
+  (op as any).isStreaming = !!(op as any).vendorExtensions?.[
+    VENDOR_EXTENSIONS.STREAMING
+  ];
+
+  // Add infinite query details if applicable
+  if (!isMutation) {
+    mutateOperationWithInfiniteQueryDetails(op);
+  }
 };

@@ -3,17 +3,77 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { Tree } from '@nx/devkit';
-import { createProjectSync } from '@ts-morph/bootstrap';
-import ts from 'typescript';
+import { createProjectSync, Project, ts } from '@ts-morph/bootstrap';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import { Mock } from 'vitest';
 import { importTypeScriptModule } from '../../utils/js';
 
 export const baseUrl = 'https://example.com';
+import * as fs from 'fs';
+import * as path from 'path';
+
+const copyIntoProjectRecursive = (
+  dependencyRootPath: string,
+  dependencyDir: string,
+  project: Project,
+) => {
+  const dir = path.join(dependencyRootPath, dependencyDir);
+
+  if (fs.lstatSync(dir).isDirectory()) {
+    fs.readdirSync(dir).map((f) =>
+      copyIntoProjectRecursive(
+        dependencyRootPath,
+        path.join(dependencyDir, f),
+        project,
+      ),
+    );
+  } else {
+    if (!project.getSourceFile(dependencyDir)) {
+      project.createSourceFile(dependencyDir, fs.readFileSync(dir, 'utf-8'), {
+        scriptKind: ts.ScriptKind.External,
+      });
+    }
+  }
+};
+
+const resolveDependencyPath = (dependency: string): string => {
+  // NB: this won't work for @types/xxx type dependencies but it's good enough for our test use cases
+  return require.resolve(dependency);
+};
+
+const initialiseDependencyInProject = (
+  dependency: string,
+  project: Project,
+) => {
+  // Resolve the dependency in this workspace
+  const dependencyPath = resolveDependencyPath(dependency);
+  const dependencyDir = `node_modules/${dependency}/`;
+  const dependencyRootPath = dependencyPath.split(`/${dependencyDir}`)[0];
+
+  // Recursively write all files from the dependency into the memory filesystem project
+  copyIntoProjectRecursive(dependencyRootPath, dependencyDir, project);
+
+  // Initialise transitive dependencies
+  const packageJsonPath = path.join(
+    dependencyRootPath,
+    dependencyDir,
+    'package.json',
+  );
+
+  if (fs.existsSync(packageJsonPath)) {
+    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
+    [...Object.keys(packageJson?.dependencies ?? {})].forEach(
+      (transitiveDependency) => {
+        initialiseDependencyInProject(transitiveDependency, project);
+      },
+    );
+  }
+};
 
 export const expectTypeScriptToCompile = (
   tree: Tree,
   paths: string[],
+  dependencies: string[] = [],
   silent = false,
 ) => {
   const project = createProjectSync({
@@ -22,19 +82,26 @@ export const expectTypeScriptToCompile = (
       target: ts.ScriptTarget.ES2022,
       module: ts.ModuleKind.NodeNext,
       moduleResolution: ts.ModuleResolutionKind.NodeNext,
-      skipLibCheck: true,
       strict: true,
     },
   });
-  paths.forEach((p) => {
-    project.createSourceFile(p, tree.read(p, 'utf-8'));
+
+  // Add dependencies (and their transitive dependencies) to the memory filesystem
+  dependencies.forEach((dependency) => {
+    initialiseDependencyInProject(dependency, project);
   });
+
+  const sourceFilesToTypeCheck = paths.map((p) =>
+    project.createSourceFile(p, tree.read(p, 'utf-8')),
+  );
 
   const program = project.createProgram();
 
   const diagnostics = [
-    ...program.getSemanticDiagnostics(),
-    ...program.getSyntacticDiagnostics(),
+    ...sourceFilesToTypeCheck.flatMap((s) => program.getSemanticDiagnostics(s)),
+    ...sourceFilesToTypeCheck.flatMap((s) =>
+      program.getSyntacticDiagnostics(s),
+    ),
   ];
 
   if (diagnostics.length > 0 && !silent) {
@@ -116,6 +183,31 @@ describe('expectTypeScriptToCompile', () => {
 
   it('should throw for invalid TypeScript', () => {
     tree.write('test.ts', 'const myNumber: number = "string";');
-    expect(() => expectTypeScriptToCompile(tree, ['test.ts'], true)).toThrow();
+    expect(() =>
+      expectTypeScriptToCompile(tree, ['test.ts'], [], true),
+    ).toThrow();
+  });
+
+  it('should not throw for valid typescript with a dependency', () => {
+    tree.write(
+      'test.ts',
+      'import { createProjectSync } from "@ts-morph/bootstrap"; const project = createProjectSync()',
+    );
+    expectTypeScriptToCompile(tree, ['test.ts'], ['@ts-morph/bootstrap']);
+  });
+
+  it('should throw for invalid typescript with a dependency', () => {
+    tree.write(
+      'test.ts',
+      'import { createProjectSync } from "@ts-morph/bootstrap"; const project = createProjectSync(42)',
+    );
+    expect(() =>
+      expectTypeScriptToCompile(
+        tree,
+        ['test.ts'],
+        ['@ts-morph/bootstrap'],
+        true,
+      ),
+    ).toThrow();
   });
 });

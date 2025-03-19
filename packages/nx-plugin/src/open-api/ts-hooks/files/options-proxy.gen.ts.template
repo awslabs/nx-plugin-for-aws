@@ -1,0 +1,210 @@
+import type {
+<%_ if (allOperations.some(op => op.isQuery)) { _%>
+  QueryFilters,
+  UseQueryOptions,
+<%_ } _%>
+<%_ if (allOperations.some(op => op.isInfiniteQuery)) { _%>
+  UseInfiniteQueryOptions,
+  InfiniteData,
+<%_ } _%>
+<%_ if (allOperations.some(op => op.isMutation)) { _%>
+  UseMutationOptions,
+<%_ } _%>
+<%_ if (allOperations.some(op => op.isStreaming)) { _%>
+  QueryFunctionContext,
+<%_ } _%>
+} from '@tanstack/react-query';
+<%_ if ((models.length + allOperations.length) > 0) { _%>
+import type {
+<%_ allOperations.filter(p => p.parameters.length > 0).forEach((op) => { _%>
+  <%- op.operationIdPascalCase %>Request,
+<%_ }); _%>
+<%_ allOperations.forEach((op) => { _%>
+  <%- op.operationIdPascalCase %>Error,
+<%_ }); _%>
+<%_ const uniq = (arr) => {
+  const set = new Set();
+  return arr.filter((item) => {
+    if (set.has(item)) {
+      return false;
+    }
+    set.add(item);
+    return true;
+  });
+} _%>
+<%_ const modelsByName = Object.fromEntries(models.map(m => [m.name, m])); _%>
+<%_ uniq(allOperations.flatMap((op) => op.result && modelsByName[op.result.type] ? [op.result.typescriptType] : [])).forEach((returnTypeModel) => { _%>
+  <%- returnTypeModel %>,
+<%_ }); _%>
+} from './types.gen.js';
+<%_ } _%>
+import { <%- className %> } from './client.gen.js';
+
+export interface <%- className %>OptionsProxyConfig {
+  client: <%- className %>;
+}
+
+export class <%- className %>OptionsProxy {
+  private $client: <%- className %>;
+
+  constructor({ client }: <%- className %>OptionsProxyConfig) {
+    this.$client = client;
+
+    <%_ allOperations.forEach((op) => { _%>
+    <%_ if (op.isQuery) { _%>
+    this._<%- op.uniqueName %>QueryKey = this._<%- op.uniqueName %>QueryKey.bind(this);
+    this._<%- op.uniqueName %>QueryOptions = this._<%- op.uniqueName %>QueryOptions.bind(this);
+    this._<%- op.uniqueName %>QueryFilter = this._<%- op.uniqueName %>QueryFilter.bind(this);
+    <%_ } _%>
+    <%_ if (op.isInfiniteQuery) { _%>
+    this._<%- op.uniqueName %>InfiniteQueryOptions = this._<%- op.uniqueName %>InfiniteQueryOptions.bind(this);
+    <%_ } _%>
+    <%_ if (op.isMutation) { _%>
+    this._<%- op.uniqueName %>MutationKey = this._<%- op.uniqueName %>MutationKey.bind(this);
+    this._<%- op.uniqueName %>MutationOptions = this._<%- op.uniqueName %>MutationOptions.bind(this);
+    <%_ } _%>
+    <%_ }); _%>
+  }
+
+<%_ if (allOperations.some(op => op.isStreaming)) { _%>
+  protected async $queryStream<T>(context: QueryFunctionContext<any>, stream: AsyncIterable<T>): Promise<T[]> {
+    const query = context.client
+      .getQueryCache()
+      .find({ queryKey: context.queryKey, exact: true });
+
+    if (query && query.state.data !== undefined) {
+      query.setState({
+        status: 'pending',
+        data: undefined,
+        error: null,
+        fetchStatus: 'fetching',
+      });
+    }
+
+    const chunks: T[] = [];
+    for await (const chunk of stream) {
+      if (context.signal.aborted) {
+        break;
+      }
+      chunks.push(chunk);
+      query?.setState({
+        status: 'success',
+        fetchStatus: 'fetching',
+      });
+      context.client.setQueryData<T[]>(context.queryKey, (prev = []) =>
+        prev.concat(chunk),
+      );
+    }
+    query?.setState({
+      fetchStatus: 'idle',
+    });
+    return chunks;
+  }
+
+  protected async $waitForStream<T>(iterable: AsyncIterable<T>) {
+    const chunks: T[] = [];
+    for await (const chunk of iterable) {
+      chunks.push(chunk);
+    }
+    return chunks;
+  }
+<%_ } _%>
+
+  public queryKey = () => ['<%- className %>'];
+
+  <%_ allOperations.forEach((op) => { _%>
+  <%_ const hasTag = op.tags && op.tags.length > 0; _%>
+  <%_ const isInputOptional = (op.parameters.length === 1 && op.parametersBody && !op.parametersBody.isRequired) || op.parameters.length === 0; _%>
+  <%_ const input = op.parameters.length > 0 ? `input${isInputOptional ? '?' : ''}: ${op.operationIdPascalCase}Request` : ''; _%>
+  <%_ const isStreaming = op.isStreaming; _%>
+  <%_ const resultType = op.result ? op.result.typescriptType : 'void'; _%>
+  <%_ const queryResultType = `${resultType}${isStreaming ? '[]' : ''}`; _%>
+  <%_ const mutationResultType = isStreaming ? `AsyncIterableIterator<${resultType}>` : resultType; _%>
+  <%_ const errorType = `${op.operationIdPascalCase}Error`; _%>
+  <%_ if (op.isQuery) { _%>
+  <%_ const queryOptionsType = `UseQueryOptions<${queryResultType}, ${errorType}>`; _%>
+  private _<%- op.uniqueName %>QueryKey(<%- input %>) {
+    return [...this.queryKey(), '<%- op.uniqueName %>'<% if (op.parameters.length > 0) { %>, input<% } %>];
+  }
+  private _<%- op.uniqueName %>QueryOptions(<%- input %><% if (op.parameters.length > 0) { %>, <% } %>options?: Omit<<%- queryOptionsType %>, 'queryFn' | 'queryKey'> & Partial<Pick<<%- queryOptionsType %>, 'queryFn' | 'queryKey'>>): <%- queryOptionsType %> {
+    return {
+      queryFn: (<% if (isStreaming) { %>context<% } %>) => <% if (isStreaming) { %>this.$queryStream(context, <% } %><% if (hasTag) { %>(this.$client as any)._<% } else { %>this.$client.<% } %><%- op.uniqueName %>(<% if (op.parameters.length > 0) { %>input<% } %>)<% if (isStreaming) { %>)<% } %>,
+      queryKey: this._<%- op.uniqueName %>QueryKey(<% if (op.parameters.length > 0) { %>input<% } %>),
+      ...options,
+    };
+  }
+  private _<%- op.uniqueName %>QueryFilter(<%- input %><% if (op.parameters.length > 0) { %>, <% } %>filter?: QueryFilters<<%- queryResultType %>, <%- errorType %>>): QueryFilters<<%- queryResultType %>, <%- errorType %>> {
+    return {
+      queryKey: this._<%- op.uniqueName %>QueryKey(<% if (op.parameters.length > 0) { %>input<% } %>),
+      ...filter,
+    };
+  }
+  <%_ } _%>
+  <%_ if (op.isInfiniteQuery) { _%>
+  <%_ const cursorType = `${op.infiniteQueryCursorProperty.typescriptType}${op.infiniteQueryCursorProperty.isRequired ? '' : ' | undefined'}${op.infiniteQueryCursorProperty.isNullable && op.infiniteQueryCursorProperty.type !== 'null' ? '' : ' | null'}`; _%>
+  <%_ const infiniteQueryOptionsType = `UseInfiniteQueryOptions<${queryResultType}, ${errorType}, InfiniteData<${queryResultType}>, ${queryResultType}, unknown[], ${cursorType}>`; _%>
+  <%_ emptyInitialPageParam = !op.infiniteQueryCursorProperty.isRequired ? 'undefined' : (op.infiniteQueryCursorProperty.isNullable ? 'null' : undefined); _%>
+  private _<%- op.uniqueName %>InfiniteQueryOptions(<%- input %><% if (op.parameters.length > 0) { %>, <% } %>options: Omit<<%- infiniteQueryOptionsType %>, 'queryFn' | 'queryKey'<%- emptyInitialPageParam ? ` | 'initialPageParam'` : '' %>> & Partial<Pick<<%- infiniteQueryOptionsType %>, 'queryFn' | 'queryKey'<%- emptyInitialPageParam ? ` | 'initialPageParam'` : '' %>>>): <%- infiniteQueryOptionsType %> {
+    return {
+      queryKey: this._<%- op.uniqueName %>QueryKey(<% if (op.parameters.length > 0) { %>input<% } %>),
+      queryFn: ({ pageParam }) => <% if (isStreaming) { %>this.$waitForStream(<% } %><% if (hasTag) { %>(this.$client as any)._<% } else { %>this.$client.<% } %><%- op.uniqueName %>({ ...input, <%- op.infiniteQueryCursorProperty.typescriptName %>: pageParam as any })<% if (isStreaming) { %>)<% } %>,
+      <%_ if (emptyInitialPageParam) { _%>
+      initialPageParam: <%- emptyInitialPageParam %>,
+      <%_ } _%>
+      ...options,
+    };
+  }
+  <%_ } _%>
+  <%_ if (op.isMutation) { _%>
+  private _<%- op.uniqueName %>MutationKey() {
+    return [...this.queryKey(), '<%- op.uniqueName %>'];
+  }
+  <%_ const mutationOptionsType = `UseMutationOptions<${mutationResultType}, ${errorType}, ${op.parameters.length > 0 ? `${op.operationIdPascalCase}Request` : 'void'}>` _%>
+  private _<%- op.uniqueName %>MutationOptions(options?: <%- mutationOptionsType %>): <%- mutationOptionsType %> {
+    return {
+      mutationFn: <% if (isStreaming) { %>async <% } %>(<% if (op.parameters.length > 0) { %>input<% } %>) => <% if (hasTag) { %>(this.$client as any)._<% } else { %>this.$client.<% } %><%- op.uniqueName %>(<% if (op.parameters.length > 0) { %>input<% } %>),
+      mutationKey: this._<%- op.uniqueName %>MutationKey(),
+      ...options,
+    };
+  }
+  <%_ } _%>
+  <%_ }); _%>
+
+  <%_ Object.entries(operationsByTag).forEach(([tag, operations]) => { _%>
+  public <%- tag %> = {
+    <%_ operations.forEach((op) => { _%>
+    <%- op.name %>: {
+      <%_ if (op.isQuery) { _%>
+      queryKey: this._<%- op.uniqueName %>QueryKey.bind(this),
+      queryOptions: this._<%- op.uniqueName %>QueryOptions.bind(this),
+      queryFilter: this._<%- op.uniqueName %>QueryFilter.bind(this),
+      <%_ } _%>
+      <%_ if (op.isInfiniteQuery) { _%>
+      infiniteQueryOptions: this._<%- op.uniqueName %>InfiniteQueryOptions.bind(this),
+      <%_ } _%>
+      <%_ if (op.isMutation) { _%>
+      mutationKey: this._<%- op.uniqueName %>MutationKey.bind(this),
+      mutationOptions: this._<%- op.uniqueName %>MutationOptions.bind(this),
+      <%_ } _%>
+    },
+    <%_ }); _%>
+  };
+  <%_ }); _%>
+
+  <%_ untaggedOperations.forEach((op) => { _%>
+  public <%- op.name %> = {
+    <%_ if (op.isQuery) { _%>
+    queryKey: this._<%- op.uniqueName %>QueryKey.bind(this),
+    queryOptions: this._<%- op.uniqueName %>QueryOptions.bind(this),
+    queryFilter: this._<%- op.uniqueName %>QueryFilter.bind(this),
+    <%_ } _%>
+    <%_ if (op.isInfiniteQuery) { _%>
+    infiniteQueryOptions: this._<%- op.uniqueName %>InfiniteQueryOptions.bind(this),
+    <%_ } _%>
+    <%_ if (op.isMutation) { _%>
+    mutationKey: this._<%- op.uniqueName %>MutationKey.bind(this),
+    mutationOptions: this._<%- op.uniqueName %>MutationOptions.bind(this),
+    <%_ } _%>
+  };
+  <%_ }); _%>
+}
