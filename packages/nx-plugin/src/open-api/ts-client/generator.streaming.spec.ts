@@ -4,16 +4,17 @@
  */
 import { Tree } from '@nx/devkit';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { expectTypeScriptToCompile } from './generator.utils.spec';
-import { Mock } from 'vitest';
-import { importTypeScriptModule } from '../../utils/js';
+import {
+  callGeneratedClientStreaming,
+  expectTypeScriptToCompile,
+  mockStreamingFetch,
+} from './generator.utils.spec';
 import { Spec } from '../utils/types';
 import openApiTsClientGenerator from './generator';
 
 describe('openApiTsClientGenerator - streaming', () => {
   let tree: Tree;
   const title = 'TestApi';
-  const baseUrl = 'https://example.com';
 
   beforeEach(() => {
     tree = createTreeUsingTsSolutionSetup();
@@ -21,52 +22,6 @@ describe('openApiTsClientGenerator - streaming', () => {
 
   const validateTypeScript = (paths: string[]) => {
     expectTypeScriptToCompile(tree, paths);
-  };
-
-  const callGeneratedClientStreaming = async (
-    clientModule: string,
-    mockFetch: Mock<any, any>,
-    op: string,
-    parameters?: any,
-  ): Promise<AsyncIterableIterator<any>> => {
-    const { TestApi } = await importTypeScriptModule<any>(clientModule);
-    const client = new TestApi({ url: baseUrl, fetch: mockFetch });
-    const clientMethod = op.split('.').reduce((m, opPart) => m[opPart], client);
-    return clientMethod(parameters);
-  };
-
-  const mockStreamingFetch = (
-    status: number,
-    chunks: any[],
-  ): Mock<any, any> => {
-    const mockFetch = vi.fn();
-
-    let i = 0;
-
-    const mockReader = vi.fn();
-    mockReader.mockReturnValue({
-      read: vi.fn().mockImplementation(() => {
-        const value = chunks[i];
-        const done = i >= chunks.length;
-        i++;
-        return {
-          done,
-          value,
-        };
-      }),
-    });
-
-    mockFetch.mockResolvedValue({
-      status,
-      body: {
-        pipeThrough: () => ({
-          getReader: mockReader,
-        }),
-        getReader: () => mockReader,
-      },
-    });
-
-    return mockFetch;
   };
 
   it('should return an iterator over a stream of strings', async () => {
