@@ -101,16 +101,21 @@ export const fastApiReactGenerator = async (
     ...frontendProjectConfig,
     targets: sortObjectKeys({
       ...frontendProjectConfig.targets,
-      // Generate should run before compile as the client is created as part of the website src
-      compile: {
-        ...frontendProjectConfig.targets?.compile,
-        dependsOn: [
-          ...(frontendProjectConfig.targets?.compile?.dependsOn ?? []).filter(
-            (t) => t !== clientGenTarget,
-          ),
-          clientGenTarget,
-        ],
-      },
+      // Generate should run before compile and bundle as the client is created as part of the website src
+      ...Object.fromEntries(
+        ['compile', 'bundle'].map((target) => [
+          target,
+          {
+            ...frontendProjectConfig.targets?.[target],
+            dependsOn: [
+              ...(
+                frontendProjectConfig.targets?.[target]?.dependsOn ?? []
+              ).filter((t) => t !== clientGenTarget),
+              clientGenTarget,
+            ],
+          },
+        ]),
+      ),
       [clientGenTarget]: {
         cache: true,
         executor: 'nx:run-commands',
