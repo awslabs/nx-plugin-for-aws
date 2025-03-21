@@ -31,13 +31,10 @@ export default defineConfig({
       enabled: true,
       reporter: ['lcov'],
     },
-    pool: 'threads',
-    poolOptions: {
-      threads: {
-        isolate: true,
-        singleThread: true,
-      },
+    env: {
+      NX_DAEMON: 'true',
     },
+    pool: 'threads',
     sequence: {
       hooks: 'list',
     },
