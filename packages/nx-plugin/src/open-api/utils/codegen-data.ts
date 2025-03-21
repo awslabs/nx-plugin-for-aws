@@ -452,30 +452,17 @@ const buildInitialCodeGenData = async (spec: Spec): Promise<ClientData> => {
     },
   });
 
-  // These are not likely to be set but we save them just in case
-  const prevGlobalWindow = global.window;
-  const prevGlobalLocation = global.location;
-
-  try {
-    // See https://github.com/hey-api/openapi-ts/issues/1730
-    global.window = {} as any;
-    global.location = { href: 'https://localhost/' } as any;
-
-    // Use @hey-api/openapi-ts to build the initial data structure that we'll generate clients from
-    await gen.createClient({
-      experimentalParser: false,
-      input: {
-        path: spec,
-      },
-      output: 'unused',
-      plugins: [plugin()],
-      dryRun: true,
-      logs: { level: 'silent' },
-    });
-  } finally {
-    global.window = prevGlobalWindow;
-    global.location = prevGlobalLocation;
-  }
+  // Use @hey-api/openapi-ts to build the initial data structure that we'll generate clients from
+  await gen.createClient({
+    experimentalParser: false,
+    input: {
+      path: spec,
+    },
+    output: 'unused',
+    plugins: [plugin()],
+    dryRun: true,
+    logs: { level: 'silent' },
+  });
 
   if (!data) {
     // If this happens it indicates an update to @hey-api/openapi-ts which has removed the legacy parser
