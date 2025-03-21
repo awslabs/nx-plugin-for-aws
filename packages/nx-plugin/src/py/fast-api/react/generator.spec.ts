@@ -124,6 +124,11 @@ export function Main() {
     expect(projectConfig.targets.compile.dependsOn).toContain(
       'generate:test-api-client',
     );
+
+    // Verify bundle target depends on client generation
+    expect(projectConfig.targets.bundle.dependsOn).toContain(
+      'generate:test-api-client',
+    );
   });
 
   it('should generate vanilla client hook', async () => {
