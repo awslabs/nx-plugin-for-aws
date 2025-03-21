@@ -36,7 +36,7 @@ describe('python project generator', () => {
     });
 
     const projectConfig = JSON.parse(
-      tree.read('apps/test_project/project.json', 'utf-8')
+      tree.read('apps/test_project/project.json', 'utf-8'),
     );
 
     // Verify project targets
@@ -59,7 +59,7 @@ describe('python project generator', () => {
     });
 
     const pyprojectToml = parse(
-      tree.read('apps/test_project/pyproject.toml', 'utf-8')
+      tree.read('apps/test_project/pyproject.toml', 'utf-8'),
     );
 
     // Verify python version
@@ -77,10 +77,10 @@ describe('python project generator', () => {
     });
 
     const nxJson = JSON.parse(tree.read('nx.json', 'utf-8'));
-    
+
     // Verify python plugin is configured
     const pythonPlugin = nxJson.plugins.find(
-      (p) => typeof p === 'object' && p.plugin === '@nxlv/python'
+      (p) => typeof p === 'object' && p.plugin === '@nxlv/python',
     );
     expect(pythonPlugin).toBeDefined();
     expect(pythonPlugin.options.packageManager).toBe('uv');
@@ -96,5 +96,20 @@ describe('python project generator', () => {
 
     expect(tree.exists('apps/test_project/custom_module')).toBeTruthy();
     expect(tree.exists('apps/test_project/tests')).toBeTruthy();
+  });
+
+  it('should ignore additional build artifacts', async () => {
+    await pyProjectGenerator(tree, {
+      name: 'test-project',
+      directory: 'apps',
+      projectType: 'application',
+    });
+    const rootGitIgnorePatterns =
+      tree.read('.gitignore', 'utf-8')?.split('\n') ?? [];
+    expect(rootGitIgnorePatterns).toContain('/reports');
+
+    const projectGitIgnorePatterns =
+      tree.read('apps/test_project/.gitignore', 'utf-8')?.split('\n') ?? [];
+    expect(projectGitIgnorePatterns).toContain('**/__pycache__');
   });
 });

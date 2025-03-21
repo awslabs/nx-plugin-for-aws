@@ -21,6 +21,7 @@ import { withVersions } from '../../utils/versions';
 import { getNpmScope } from '../../utils/npm-scope';
 import { toSnakeCase } from '../../utils/names';
 import { sortObjectKeys } from '../../utils/nx';
+import { updateGitIgnore } from '../../utils/git';
 
 export interface PyProjectDetails {
   readonly normalizedName: string;
@@ -141,6 +142,12 @@ export const pyProjectGenerator = async (
   };
   projectConfiguration.targets = sortObjectKeys(projectConfiguration.targets);
   updateProjectConfiguration(tree, normalizedName, projectConfiguration);
+
+  // Update root .gitignore to ignore reports directory
+  updateGitIgnore(tree, '.', (patterns) => [...patterns, '/reports']);
+
+  // Update project level .gitignore to ignore __pycache__ directories
+  updateGitIgnore(tree, dir, (patterns) => [...patterns, '**/__pycache__']);
 
   return async () => {
     await new UVProvider(tree.root, new Logger(), tree).install();
