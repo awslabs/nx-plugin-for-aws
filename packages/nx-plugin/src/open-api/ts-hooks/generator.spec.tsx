@@ -6,7 +6,10 @@ import { Tree } from '@nx/devkit';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import { Spec } from '../utils/types';
 import { openApiTsHooksGenerator } from './generator';
-import { expectTypeScriptToCompile } from '../ts-client/generator.utils.spec';
+import {
+  expectTypeScriptToCompile,
+  TypeScriptVerifier,
+} from '../ts-client/generator.utils.spec';
 import { importTypeScriptModule } from '../../utils/js';
 import { waitFor, render, fireEvent } from '@testing-library/react';
 import {
@@ -26,13 +29,14 @@ describe('openApiTsHooksGenerator', () => {
   let tree: Tree;
   const title = 'TestApi';
   const baseUrl = 'https://example.com';
+  const verifier = new TypeScriptVerifier(['@tanstack/react-query']);
 
   beforeEach(() => {
     tree = createTreeUsingTsSolutionSetup();
   });
 
   const validateTypeScript = (paths: string[]) => {
-    expectTypeScriptToCompile(tree, paths, ['@tanstack/react-query']);
+    verifier.expectTypeScriptToCompile(tree, paths);
   };
 
   // Helper function to create a wrapper component with QueryClientProvider

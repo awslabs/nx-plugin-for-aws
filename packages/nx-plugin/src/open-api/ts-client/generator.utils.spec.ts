@@ -12,102 +12,137 @@ export const baseUrl = 'https://example.com';
 import * as fs from 'fs';
 import * as path from 'path';
 
-const copyIntoProjectRecursive = (
-  dependencyRootPath: string,
-  dependencyDir: string,
-  project: Project,
-) => {
-  const dir = path.join(dependencyRootPath, dependencyDir);
+/**
+ * Utility for verifying typescript files compile
+ * This allows the reuse of a single @ts-morph/bootstrap Project for multiple tests.
+ * It's recommended to reuse over multiple tests when there are dependencies, since
+ * loading dependencies into the project adds quite a lot of overhead.
+ */
+export class TypeScriptVerifier {
+  private project: Project;
 
-  if (fs.lstatSync(dir).isDirectory()) {
-    fs.readdirSync(dir).map((f) =>
-      copyIntoProjectRecursive(
-        dependencyRootPath,
-        path.join(dependencyDir, f),
-        project,
-      ),
+  constructor(dependencies: string[] = []) {
+    this.project = createProjectSync({
+      useInMemoryFileSystem: true,
+      compilerOptions: {
+        target: ts.ScriptTarget.ES2022,
+        module: ts.ModuleKind.NodeNext,
+        moduleResolution: ts.ModuleResolutionKind.NodeNext,
+        skipLibCheck: true,
+        strict: true,
+      },
+    });
+
+    // Add dependencies (and their transitive dependencies) to the memory filesystem
+    dependencies.forEach((dependency) => {
+      this.initialiseDependencyInProject(dependency, this.project);
+    });
+  }
+
+  private copyIntoProjectRecursive = (
+    dependencyRootPath: string,
+    dependencyDir: string,
+    project: Project,
+  ) => {
+    const dir = path.join(dependencyRootPath, dependencyDir);
+
+    if (fs.lstatSync(dir).isDirectory()) {
+      fs.readdirSync(dir).map((f) =>
+        this.copyIntoProjectRecursive(
+          dependencyRootPath,
+          path.join(dependencyDir, f),
+          project,
+        ),
+      );
+    } else {
+      if (!project.getSourceFile(dependencyDir)) {
+        project.createSourceFile(dependencyDir, fs.readFileSync(dir, 'utf-8'), {
+          scriptKind: ts.ScriptKind.External,
+        });
+      }
+    }
+  };
+
+  private resolveDependencyPath = (dependency: string): string => {
+    // NB: this won't work for @types/xxx type dependencies but it's good enough for our test use cases
+    return require.resolve(dependency);
+  };
+
+  private initialiseDependencyInProject = (
+    dependency: string,
+    project: Project,
+  ) => {
+    // Resolve the dependency in this workspace
+    const dependencyPath = this.resolveDependencyPath(dependency);
+    const dependencyDir = `node_modules/${dependency}/`;
+    const dependencyRootPath = dependencyPath.split(`/${dependencyDir}`)[0];
+
+    // Recursively write all files from the dependency into the memory filesystem project
+    this.copyIntoProjectRecursive(dependencyRootPath, dependencyDir, project);
+
+    // Initialise transitive dependencies
+    const packageJsonPath = path.join(
+      dependencyRootPath,
+      dependencyDir,
+      'package.json',
     );
-  } else {
-    if (!project.getSourceFile(dependencyDir)) {
-      project.createSourceFile(dependencyDir, fs.readFileSync(dir, 'utf-8'), {
-        scriptKind: ts.ScriptKind.External,
+
+    if (fs.existsSync(packageJsonPath)) {
+      const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
+      [...Object.keys(packageJson?.dependencies ?? {})].forEach(
+        (transitiveDependency) => {
+          this.initialiseDependencyInProject(transitiveDependency, project);
+        },
+      );
+    }
+  };
+
+  /**
+   * Verify that the given typescript files in the tree compile
+   */
+  public expectTypeScriptToCompile = (
+    tree: Tree,
+    paths: string[],
+    silent = false,
+  ) => {
+    try {
+      const sourceFilesToTypeCheck = paths.map((p) =>
+        this.project.createSourceFile(p, tree.read(p, 'utf-8')),
+      );
+
+      const program = this.project.createProgram();
+
+      const diagnostics = [
+        ...sourceFilesToTypeCheck.flatMap((s) =>
+          program.getSemanticDiagnostics(s),
+        ),
+        ...sourceFilesToTypeCheck.flatMap((s) =>
+          program.getSyntacticDiagnostics(s),
+        ),
+      ];
+
+      if (diagnostics.length > 0 && !silent) {
+        console.log(
+          this.project.formatDiagnosticsWithColorAndContext(diagnostics),
+        );
+      }
+      expect(diagnostics).toHaveLength(0);
+    } finally {
+      // Always unload the source files to reset our project
+      paths.forEach((p) => {
+        this.project.removeSourceFile(p);
       });
     }
-  }
-};
-
-const resolveDependencyPath = (dependency: string): string => {
-  // NB: this won't work for @types/xxx type dependencies but it's good enough for our test use cases
-  return require.resolve(dependency);
-};
-
-const initialiseDependencyInProject = (
-  dependency: string,
-  project: Project,
-) => {
-  // Resolve the dependency in this workspace
-  const dependencyPath = resolveDependencyPath(dependency);
-  const dependencyDir = `node_modules/${dependency}/`;
-  const dependencyRootPath = dependencyPath.split(`/${dependencyDir}`)[0];
-
-  // Recursively write all files from the dependency into the memory filesystem project
-  copyIntoProjectRecursive(dependencyRootPath, dependencyDir, project);
-
-  // Initialise transitive dependencies
-  const packageJsonPath = path.join(
-    dependencyRootPath,
-    dependencyDir,
-    'package.json',
-  );
-
-  if (fs.existsSync(packageJsonPath)) {
-    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
-    [...Object.keys(packageJson?.dependencies ?? {})].forEach(
-      (transitiveDependency) => {
-        initialiseDependencyInProject(transitiveDependency, project);
-      },
-    );
-  }
-};
+  };
+}
 
 export const expectTypeScriptToCompile = (
   tree: Tree,
   paths: string[],
-  dependencies: string[] = [],
   silent = false,
 ) => {
-  const project = createProjectSync({
-    useInMemoryFileSystem: true,
-    compilerOptions: {
-      target: ts.ScriptTarget.ES2022,
-      module: ts.ModuleKind.NodeNext,
-      moduleResolution: ts.ModuleResolutionKind.NodeNext,
-      strict: true,
-    },
-  });
-
-  // Add dependencies (and their transitive dependencies) to the memory filesystem
-  dependencies.forEach((dependency) => {
-    initialiseDependencyInProject(dependency, project);
-  });
-
-  const sourceFilesToTypeCheck = paths.map((p) =>
-    project.createSourceFile(p, tree.read(p, 'utf-8')),
-  );
-
-  const program = project.createProgram();
-
-  const diagnostics = [
-    ...sourceFilesToTypeCheck.flatMap((s) => program.getSemanticDiagnostics(s)),
-    ...sourceFilesToTypeCheck.flatMap((s) =>
-      program.getSyntacticDiagnostics(s),
-    ),
-  ];
-
-  if (diagnostics.length > 0 && !silent) {
-    console.log(project.formatDiagnosticsWithColorAndContext(diagnostics));
-  }
-  expect(diagnostics).toHaveLength(0);
+  const verifier = new TypeScriptVerifier();
+  verifier.expectTypeScriptToCompile(tree, paths, silent);
 };
 
 export const callGeneratedClient = async (
@@ -183,17 +218,17 @@ describe('expectTypeScriptToCompile', () => {
 
   it('should throw for invalid TypeScript', () => {
     tree.write('test.ts', 'const myNumber: number = "string";');
-    expect(() =>
-      expectTypeScriptToCompile(tree, ['test.ts'], [], true),
-    ).toThrow();
+    expect(() => expectTypeScriptToCompile(tree, ['test.ts'], true)).toThrow();
   });
+
+  const verifierWithDeps = new TypeScriptVerifier(['@ts-morph/bootstrap']);
 
   it('should not throw for valid typescript with a dependency', () => {
     tree.write(
       'test.ts',
       'import { createProjectSync } from "@ts-morph/bootstrap"; const project = createProjectSync()',
     );
-    expectTypeScriptToCompile(tree, ['test.ts'], ['@ts-morph/bootstrap']);
+    verifierWithDeps.expectTypeScriptToCompile(tree, ['test.ts']);
   });
 
   it('should throw for invalid typescript with a dependency', () => {
@@ -202,12 +237,7 @@ describe('expectTypeScriptToCompile', () => {
       'import { createProjectSync } from "@ts-morph/bootstrap"; const project = createProjectSync(42)',
     );
     expect(() =>
-      expectTypeScriptToCompile(
-        tree,
-        ['test.ts'],
-        ['@ts-morph/bootstrap'],
-        true,
-      ),
+      verifierWithDeps.expectTypeScriptToCompile(tree, ['test.ts'], true),
     ).toThrow();
   });
 });
