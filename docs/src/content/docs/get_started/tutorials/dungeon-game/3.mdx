@@ -137,7 +137,7 @@ import {
   Runtime,
   Tracing,
 } from 'aws-cdk-lib/aws-lambda';
-import { Effect, IRole, PolicyStatement } from 'aws-cdk-lib/aws-iam';
+import { Grant, IGrantable } from 'aws-cdk-lib/aws-iam';
 import { RuntimeConfig } from './runtime-config.js';
 
 export interface HttpApiProps {
@@ -245,28 +245,24 @@ export class HttpApi extends Construct {
     };
   }
 
-  public grantInvokeAccess(role: IRole) {
+  public grantInvokeAccess(grantee: IGrantable) {
     if (this.api) {
-      role.addToPrincipalPolicy(
-        new PolicyStatement({
-          effect: Effect.ALLOW,
-          actions: ['execute-api:Invoke'],
-          resources: [this.api.arnForExecuteApi('*', '/*', '*')],
-        }),
-      );
+      Grant.addToPrincipal({
+        grantee,
+        actions: ['execute-api:Invoke'],
+        resourceArns: [this.api.arnForExecuteApi('*', '/*', '*')],
+      });
     } else if (this.routerFunction) {
-      role.addToPrincipalPolicy(
-        new PolicyStatement({
-          effect: Effect.ALLOW,
-          actions: ['lambda:InvokeFunctionUrl'],
-          resources: [this.routerFunction.functionArn],
-          conditions: {
-            StringEquals: {
-              'lambda:FunctionUrlAuthType': 'AWS_IAM',
-            },
+      Grant.addToPrincipal({
+        grantee,
+        actions: ['lambda:InvokeFunctionUrl'],
+        resourceArns: [this.routerFunction.functionArn],
+        conditions: {
+          StringEquals: {
+            'lambda:FunctionUrlAuthType': 'AWS_IAM',
           },
-        }),
-      );
+        },
+      });
     }
   }
 }
