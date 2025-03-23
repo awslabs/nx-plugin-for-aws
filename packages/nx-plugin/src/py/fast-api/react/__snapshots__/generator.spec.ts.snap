@@ -29,37 +29,20 @@ export const useTestApi = (): TestApiOptionsProxy => {
 
 exports[`fastapi react generator > should generate tanstack query options proxy provider > TestApiProvider.tsx 1`] = `
 "import { createContext, FC, PropsWithChildren, useMemo } from 'react';
-import { useTestApiClient } from '../hooks/useTestApiClient';
+import { TestApi } from '../generated/test-api/client.gen';
 import { TestApiOptionsProxy } from '../generated/test-api/options-proxy.gen';
+import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
+import { useSigV4 } from '../hooks/useSigV4';
 
 export const TestApiContext = createContext<TestApiOptionsProxy | undefined>(
   undefined,
 );
 
-export const TestApiProvider: FC<PropsWithChildren> = ({ children }) => {
-  const client = useTestApiClient();
-  const optionsProxy = useMemo(
-    () => new TestApiOptionsProxy({ client }),
-    [client],
-  );
+export const TestApiClientContext = createContext<TestApi | undefined>(
+  undefined,
+);
 
-  return (
-    <TestApiContext.Provider value={optionsProxy}>
-      {children}
-    </TestApiContext.Provider>
-  );
-};
-
-export default TestApiProvider;
-"
-`;
-
-exports[`fastapi react generator > should generate vanilla client hook > useTestApiClient.tsx 1`] = `
-"import { TestApi } from '../generated/test-api/client.gen';
-import { useRuntimeConfig } from './useRuntimeConfig';
-import { useMemo } from 'react';
-
-export const useTestApiClient = (): TestApi => {
+const useCreateTestApiClient = (): TestApi => {
   const runtimeConfig = useRuntimeConfig();
   const apiUrl = runtimeConfig.httpApis.TestApi;
   return useMemo(
@@ -70,16 +53,60 @@ export const useTestApiClient = (): TestApi => {
     [apiUrl],
   );
 };
+
+export const TestApiProvider: FC<PropsWithChildren> = ({ children }) => {
+  const client = useCreateTestApiClient();
+  const optionsProxy = useMemo(
+    () => new TestApiOptionsProxy({ client }),
+    [client],
+  );
+
+  return (
+    <TestApiClientContext.Provider value={client}>
+      <TestApiContext.Provider value={optionsProxy}>
+        {children}
+      </TestApiContext.Provider>
+    </TestApiClientContext.Provider>
+  );
+};
+
+export default TestApiProvider;
 "
 `;
 
-exports[`fastapi react generator > should handle IAM auth option > useTestApi-IAM.tsx 1`] = `
+exports[`fastapi react generator > should generate vanilla client hook > useTestApiClient.tsx 1`] = `
 "import { TestApi } from '../generated/test-api/client.gen';
-import { useSigV4 } from './useSigV4';
-import { useRuntimeConfig } from './useRuntimeConfig';
-import { useMemo } from 'react';
+import { TestApiClientContext } from '../components/TestApiProvider';
+import { useContext } from 'react';
 
 export const useTestApiClient = (): TestApi => {
+  const client = useContext(TestApiClientContext);
+
+  if (!client) {
+    throw new Error('useTestApiClient must be used within a TestApiProvider');
+  }
+
+  return client;
+};
+"
+`;
+
+exports[`fastapi react generator > should handle IAM auth option > TestApiProvider-IAM.tsx 1`] = `
+"import { createContext, FC, PropsWithChildren, useMemo } from 'react';
+import { TestApi } from '../generated/test-api/client.gen';
+import { TestApiOptionsProxy } from '../generated/test-api/options-proxy.gen';
+import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
+import { useSigV4 } from '../hooks/useSigV4';
+
+export const TestApiContext = createContext<TestApiOptionsProxy | undefined>(
+  undefined,
+);
+
+export const TestApiClientContext = createContext<TestApi | undefined>(
+  undefined,
+);
+
+const useCreateTestApiClient = (): TestApi => {
   const runtimeConfig = useRuntimeConfig();
   const apiUrl = runtimeConfig.httpApis.TestApi;
   const sigv4Client = useSigV4();
@@ -92,6 +119,24 @@ export const useTestApiClient = (): TestApi => {
     [apiUrl, sigv4Client],
   );
 };
+
+export const TestApiProvider: FC<PropsWithChildren> = ({ children }) => {
+  const client = useCreateTestApiClient();
+  const optionsProxy = useMemo(
+    () => new TestApiOptionsProxy({ client }),
+    [client],
+  );
+
+  return (
+    <TestApiClientContext.Provider value={client}>
+      <TestApiContext.Provider value={optionsProxy}>
+        {children}
+      </TestApiContext.Provider>
+    </TestApiClientContext.Provider>
+  );
+};
+
+export default TestApiProvider;
 "
 `;
 

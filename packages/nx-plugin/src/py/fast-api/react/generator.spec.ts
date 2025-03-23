@@ -269,9 +269,9 @@ export function Main() {
     ).toBeDefined();
     expect(packageJson.dependencies['aws4fetch']).toBeDefined();
 
-    // Create snapshot of generated hook with IAM auth
+    // Create snapshot of generated provider with IAM auth
     expect(
-      tree.read('apps/frontend/src/hooks/useTestApiClient.tsx', 'utf-8'),
-    ).toMatchSnapshot('useTestApi-IAM.tsx');
+      tree.read('apps/frontend/src/components/TestApiProvider.tsx', 'utf-8'),
+    ).toMatchSnapshot('TestApiProvider-IAM.tsx');
   });
 });

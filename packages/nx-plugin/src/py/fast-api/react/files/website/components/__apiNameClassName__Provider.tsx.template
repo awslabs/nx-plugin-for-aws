@@ -1,19 +1,39 @@
 import { createContext, FC, PropsWithChildren, useMemo } from 'react';
-import { use<%- apiNameClassName %>Client } from '../hooks/use<%- apiNameClassName %>Client';
+import { <%- apiNameClassName %> } from '../<%- generatedClientDir %>/client.gen';
 import { <%- apiNameClassName %>OptionsProxy } from '../<%- generatedClientDir %>/options-proxy.gen';
+import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
+import { useSigV4 } from '../hooks/useSigV4';
 
 export const <%- apiNameClassName %>Context = createContext<<%- apiNameClassName %>OptionsProxy | undefined>(undefined);
 
+export const <%- apiNameClassName %>ClientContext = createContext<<%- apiNameClassName %> | undefined>(undefined);
+
+const useCreate<%- apiNameClassName %>Client = (): <%- apiNameClassName %> => {
+  const runtimeConfig = useRuntimeConfig();
+  const apiUrl = runtimeConfig.httpApis.<%- apiNameClassName %>;
+  <%_ if(auth === 'IAM') { _%>
+  const sigv4Client = useSigV4();
+  <%_ } _%>
+  return useMemo(() => new <%- apiNameClassName %>({
+    url: apiUrl,
+    <%_ if(auth === 'IAM') { _%>
+    fetch: sigv4Client,
+    <%_ } _%>
+  }), [apiUrl<% if(auth === 'IAM') { %>, sigv4Client<% } %>])
+};
+
 export const <%- apiNameClassName %>Provider: FC<PropsWithChildren> = ({ children }) => {
-  const client = use<%- apiNameClassName %>Client();
+  const client = useCreate<%- apiNameClassName %>Client();
   const optionsProxy = useMemo(() =>
     new <%- apiNameClassName %>OptionsProxy({ client })
   , [client]);
 
   return (
-    <<%- apiNameClassName %>Context.Provider value={optionsProxy}>
-      {children}
-    </<%- apiNameClassName %>Context.Provider>
+    <<%- apiNameClassName %>ClientContext.Provider value={client}>
+      <<%- apiNameClassName %>Context.Provider value={optionsProxy}>
+        {children}
+      </<%- apiNameClassName %>Context.Provider>
+    </<%- apiNameClassName %>ClientContext.Provider>
   );
 };
 
