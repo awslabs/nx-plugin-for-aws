@@ -9,6 +9,7 @@ from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from mangum import Mangum
+from pydantic import BaseModel
 from starlette.middleware.exceptions import ExceptionMiddleware
 
 os.environ["POWERTOOLS_METRICS_NAMESPACE"] = "<%= apiNameClassName %>"
@@ -18,8 +19,14 @@ logger: Logger = Logger()
 metrics: Metrics = Metrics()
 tracer: Tracer = Tracer()
 
+class InternalServerErrorDetails(BaseModel):
+    detail: str
+
 app = FastAPI(
-    title="<%= apiNameClassName %>"
+    title="<%= apiNameClassName %>",
+    responses={
+        500: {"model": InternalServerErrorDetails}
+    }
 )
 lambda_handler = Mangum(app)
 
@@ -40,7 +47,9 @@ async def unhandled_exception_handler(request, err):
 
     metrics.add_metric(name="Failure", unit=MetricUnit.Count, value=1)
 
-    return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
+    return JSONResponse(status_code=500,
+                        content=InternalServerErrorDetails(
+                            detail="Internal Server Error").model_dump())
 
 @app.middleware("http")
 async def metrics_handler(request: Request, call_next):
