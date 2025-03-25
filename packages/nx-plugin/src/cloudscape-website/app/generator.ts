@@ -57,14 +57,14 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
   const e2eTestRunner = 'none';
   await applicationGenerator(tree, {
     ...schema,
-    name: websiteNameKebabCase,
+    name: fullyQualifiedName,
     directory: websiteContentPath,
     routing: false,
     e2eTestRunner,
     linter: 'eslint',
     bundler: 'vite',
     unitTestRunner: 'vitest',
-    alwaysGenerateProjectJson: true,
+    useProjectJson: true,
     style: 'css',
   });
 

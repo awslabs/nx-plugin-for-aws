@@ -59,7 +59,7 @@ export const tsLibGenerator = async (
   const { fullyQualifiedName, dir } = getTsLibDetails(tree, schema);
   await libraryGenerator(tree, {
     ...schema,
-    name: toKebabCase(schema.name),
+    name: fullyQualifiedName,
     directory: dir,
     skipPackageJson: true,
     bundler: 'tsc', // TODO: consider supporting others

@@ -14,6 +14,8 @@ export const createTreeUsingTsSolutionSetup = (): Tree => {
 
   const tree = createTreeWithEmptyWorkspace();
 
+  tree.write('pnpm-workspace.yaml', `packages:\n  - packages/*`);
+
   tree.write('tsconfig.json', '{}');
   return tree;
 };
