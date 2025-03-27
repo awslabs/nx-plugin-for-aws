@@ -20,16 +20,21 @@ import { Logger } from '@nxlv/python/src/executors/utils/logger';
 import pyProjectGenerator, { getPyProjectDetails } from '../project/generator';
 import { parse, stringify } from '@iarna/toml';
 import { UVPyprojectToml } from '@nxlv/python/src/provider/uv/types';
+import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
-  sharedConstructsGenerator,
-} from '../../utils/shared-constructs';
+} from '../../utils/shared-constructs-constants';
 import { toClassName, toKebabCase, toSnakeCase } from '../../utils/names';
 import { addStarExport } from '../../utils/ast';
 import { formatFilesInSubtree } from '../../utils/format';
 import { addHttpApi } from '../../utils/http-api';
-import { sortObjectKeys } from '../../utils/nx';
+import { sortObjectKeys } from '../../utils/object';
+import { NxGeneratorInfo, getGeneratorInfo } from '../../utils/nx';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+
+export const FAST_API_GENERATOR_INFO: NxGeneratorInfo =
+  getGeneratorInfo(__filename);
 
 /**
  * Generates a Python FastAPI project
@@ -200,6 +205,8 @@ export const fastApiProjectGenerator = async (
   ].concat(projectToml.project?.dependencies || []);
   projectToml['dependency-groups'] = { dev: ['fastapi[standard]>=0.115'] };
   tree.write(joinPathFragments(dir, 'pyproject.toml'), stringify(projectToml));
+
+  await addGeneratorMetricsIfApplicable(tree, [FAST_API_GENERATOR_INFO]);
 
   await formatFilesInSubtree(tree);
 

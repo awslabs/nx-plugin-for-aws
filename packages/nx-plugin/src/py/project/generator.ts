@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
+  addDependenciesToPackageJson,
   ensurePackage,
   GeneratorCallback,
   joinPathFragments,
@@ -20,8 +21,13 @@ import { Logger } from '@nxlv/python/src/executors/utils/logger';
 import { withVersions } from '../../utils/versions';
 import { getNpmScope } from '../../utils/npm-scope';
 import { toSnakeCase } from '../../utils/names';
-import { sortObjectKeys } from '../../utils/nx';
+import { sortObjectKeys } from '../../utils/object';
 import { updateGitIgnore } from '../../utils/git';
+import { NxGeneratorInfo, getGeneratorInfo } from '../../utils/nx';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+
+export const PY_PROJECT_GENERATOR_INFO: NxGeneratorInfo =
+  getGeneratorInfo(__filename);
 
 export interface PyProjectDetails {
   readonly normalizedName: string;
@@ -64,7 +70,10 @@ export const pyProjectGenerator = async (
 ): Promise<GeneratorCallback> => {
   const { dir, normalizedName, normalizedModuleName, fullyQualifiedName } =
     getPyProjectDetails(tree, schema);
+
   const pythonPlugin = withVersions(['@nxlv/python']);
+  addDependenciesToPackageJson(tree, {}, pythonPlugin);
+
   Object.entries(pythonPlugin).forEach(([name, version]) =>
     ensurePackage(name, version),
   );
@@ -148,6 +157,8 @@ export const pyProjectGenerator = async (
 
   // Update project level .gitignore to ignore __pycache__ directories
   updateGitIgnore(tree, dir, (patterns) => [...patterns, '**/__pycache__']);
+
+  await addGeneratorMetricsIfApplicable(tree, [PY_PROJECT_GENERATOR_INFO]);
 
   return async () => {
     await new UVProvider(tree.root, new Logger(), tree).install();

@@ -14,14 +14,18 @@ import { getNpmScopePrefix, toScopeAlias } from './npm-scope';
 import tsLibGenerator from '../ts/lib/generator';
 import { withVersions } from './versions';
 import { formatFilesInSubtree } from './format';
-export const PACKAGES_DIR = 'packages';
-export const TYPE_DEFINITIONS_NAME = 'common-types';
-export const SHARED_CONSTRUCTS_NAME = 'common-constructs';
-export const TYPE_DEFINITIONS_DIR = 'common/types';
-export const SHARED_CONSTRUCTS_DIR = 'common/constructs';
+import {
+  PACKAGES_DIR,
+  TYPE_DEFINITIONS_DIR,
+  TYPE_DEFINITIONS_NAME,
+  SHARED_CONSTRUCTS_DIR,
+  SHARED_CONSTRUCTS_NAME,
+} from './shared-constructs-constants';
+
 export async function sharedConstructsGenerator(tree: Tree) {
   const npmScopePrefix = getNpmScopePrefix(tree);
   updateGitignore(tree);
+
   if (
     !tree.exists(
       joinPathFragments(PACKAGES_DIR, TYPE_DEFINITIONS_DIR, 'project.json'),
@@ -103,6 +107,7 @@ export async function sharedConstructsGenerator(tree: Tree) {
     await formatFilesInSubtree(tree);
   }
 }
+
 const updateGitignore = (tree: Tree) => {
   const gitignore = tree.exists('.gitignore')
     ? tree.read('.gitignore', 'utf-8')

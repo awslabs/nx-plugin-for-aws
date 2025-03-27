@@ -17,7 +17,7 @@ import { runtimeConfigGenerator } from '../../../cloudscape-website/runtime-conf
 import snakeCase from 'lodash.snakecase';
 import * as path from 'path';
 import kebabCase from 'lodash.kebabcase';
-import { sortObjectKeys } from '../../../utils/nx';
+import { sortObjectKeys } from '../../../utils/object';
 import { toClassName } from '../../../utils/names';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { withVersions } from '../../../utils/versions';
@@ -29,6 +29,11 @@ import {
   replace,
 } from '../../../utils/ast';
 import { JsxSelfClosingElement } from 'typescript';
+import { NxGeneratorInfo, getGeneratorInfo } from '../../../utils/nx';
+import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
+
+export const FAST_API_REACT_GENERATOR_INFO: NxGeneratorInfo =
+  getGeneratorInfo(__filename);
 
 export const fastApiReactGenerator = async (
   tree: Tree,
@@ -269,6 +274,8 @@ export const fastApiReactGenerator = async (
     ]),
     withVersions(['@smithy/types']),
   );
+
+  await addGeneratorMetricsIfApplicable(tree, [FAST_API_REACT_GENERATOR_INFO]);
 
   await formatFilesInSubtree(tree);
   return () => {

@@ -4,15 +4,16 @@
  */
 import { Tree } from '@nx/devkit';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { fastApiProjectGenerator } from './generator';
+import { FAST_API_GENERATOR_INFO, fastApiProjectGenerator } from './generator';
 import { parse } from '@iarna/toml';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
-} from '../../utils/shared-constructs';
+} from '../../utils/shared-constructs-constants';
 import { joinPathFragments } from '@nx/devkit';
 import { UVPyprojectToml } from '@nxlv/python/src/provider/uv/types';
-import { sortObjectKeys } from '../../utils/nx';
+import { sortObjectKeys } from '../../utils/object';
+import { expectHasMetricTags } from '../../utils/metrics.spec';
 
 describe('fastapi project generator', () => {
   let tree: Tree;
@@ -206,5 +207,16 @@ describe('fastapi project generator', () => {
     );
     // Verify project metadata
     expect(appChanges).toMatchSnapshot('main-snapshot');
+  });
+
+  it('should add generator metric to app.ts', async () => {
+    // Call the generator function
+    await fastApiProjectGenerator(tree, {
+      name: 'test-api',
+      directory: 'apps',
+    });
+
+    // Verify the metric was added to app.ts
+    expectHasMetricTags(tree, FAST_API_GENERATOR_INFO.metric);
   });
 });

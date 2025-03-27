@@ -18,7 +18,7 @@ import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
   TYPE_DEFINITIONS_DIR,
-} from './shared-constructs';
+} from './shared-constructs-constants';
 import { addStarExport, prependStatements, query, replace } from './ast';
 
 export const addHttpApi = (tree: Tree, apiNameClassName: string) => {

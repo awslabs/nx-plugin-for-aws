@@ -3,11 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { readProjectConfiguration, Tree } from '@nx/devkit';
-import { trpcBackendGenerator } from './generator';
+import { TRPC_BACKEND_GENERATOR_INFO, trpcBackendGenerator } from './generator';
 import {
   createTreeUsingTsSolutionSetup,
   snapshotTreeDir,
 } from '../../utils/test';
+import { expectHasMetricTags } from '../../utils/metrics.spec';
 
 describe('trpc backend generator', () => {
   let tree: Tree;
@@ -116,7 +117,6 @@ describe('trpc backend generator', () => {
     await trpcBackendGenerator(tree, {
       apiName: 'TestApi',
       directory: 'apps',
-      unitTestRunner: 'vitest',
       bundler: 'vite',
     });
     const projectConfig = readProjectConfiguration(
@@ -128,5 +128,17 @@ describe('trpc backend generator', () => {
     expect(projectConfig.targets!.serve!.options!.commands).toEqual([
       'tsx src/local-server.ts',
     ]);
+  });
+
+  it('should add generator metric to app.ts', async () => {
+    // Call the generator function
+    await trpcBackendGenerator(tree, {
+      apiName: 'TestApi',
+      directory: 'apps',
+      bundler: 'vite',
+    });
+
+    // Verify the metric was added to app.ts
+    expectHasMetricTags(tree, TRPC_BACKEND_GENERATOR_INFO.metric);
   });
 });

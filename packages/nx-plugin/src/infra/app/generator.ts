@@ -19,16 +19,21 @@ import { InfraGeneratorSchema } from './schema';
 import tsLibGenerator, { getTsLibDetails } from '../../ts/lib/generator';
 import { withVersions } from '../../utils/versions';
 import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
+import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
-  sharedConstructsGenerator,
-} from '../../utils/shared-constructs';
+} from '../../utils/shared-constructs-constants';
 import { addStarExport } from '../../utils/ast';
 import path from 'path';
 import { formatFilesInSubtree } from '../../utils/format';
-import { sortObjectKeys } from '../../utils/nx';
 import kebabCase from 'lodash.kebabcase';
+import { sortObjectKeys } from '../../utils/object';
+import { NxGeneratorInfo, getGeneratorInfo } from '../../utils/nx';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+
+export const INFRA_APP_GENERATOR_INFO: NxGeneratorInfo =
+  getGeneratorInfo(__filename);
 
 export async function infraGenerator(
   tree: Tree,
@@ -36,7 +41,9 @@ export async function infraGenerator(
 ): Promise<GeneratorCallback> {
   const lib = getTsLibDetails(tree, schema);
   await tsLibGenerator(tree, schema);
+
   await sharedConstructsGenerator(tree);
+
   const synthDirFromRoot = `/dist/${lib.dir}/cdk.out`;
   const synthDirFromProject =
     lib.dir
@@ -153,6 +160,8 @@ export async function infraGenerator(
       },
     ],
   }));
+
+  await addGeneratorMetricsIfApplicable(tree, [INFRA_APP_GENERATOR_INFO]);
 
   await formatFilesInSubtree(tree);
   return () => {

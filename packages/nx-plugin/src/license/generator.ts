@@ -7,6 +7,11 @@ import { LicenseGeneratorSchema } from './schema';
 import { defaultLicenseConfig, writeLicenseConfig } from './config';
 import { ensureAwsNxPluginConfig } from '../utils/config/utils';
 import { SYNC_GENERATOR_NAME } from './sync/generator';
+import { NxGeneratorInfo, getGeneratorInfo } from '../utils/nx';
+import { addGeneratorMetricsIfApplicable } from '../utils/metrics';
+
+export const LICENSE_GENERATOR_INFO: NxGeneratorInfo =
+  getGeneratorInfo(__filename);
 
 export async function licenseGenerator(
   tree: Tree,
@@ -38,6 +43,8 @@ export async function licenseGenerator(
       },
     },
   });
+
+  await addGeneratorMetricsIfApplicable(tree, [LICENSE_GENERATOR_INFO]);
 }
 
 export default licenseGenerator;

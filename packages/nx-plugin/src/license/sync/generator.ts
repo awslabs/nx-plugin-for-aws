@@ -20,8 +20,10 @@ import {
   ProjectFileToSync,
   syncProjectFile,
 } from './project-file-sync';
+import { getGeneratorInfo } from '../../utils/nx';
+import PackageJson from '../../../package.json';
 
-export const SYNC_GENERATOR_NAME = '@aws/nx-plugin:license#sync';
+export const SYNC_GENERATOR_NAME = `${PackageJson.name}:${getGeneratorInfo(__filename).id}`;
 
 interface ProjectFile {
   name: ProjectFileToSync;

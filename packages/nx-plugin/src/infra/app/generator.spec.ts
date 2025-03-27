@@ -3,18 +3,21 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { Tree, readProjectConfiguration } from '@nx/devkit';
-import { infraGenerator } from './generator';
+import { INFRA_APP_GENERATOR_INFO, infraGenerator } from './generator';
 import { InfraGeneratorSchema } from './schema';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
+import { expectHasMetricTags } from '../../utils/metrics.spec';
 
 describe('infra generator', () => {
   let tree: Tree;
+
   const options: InfraGeneratorSchema = {
     name: 'test',
     ruleSet: 'aws_prototyping',
     directory: 'packages',
     skipInstall: true,
   };
+
   beforeEach(() => {
     tree = createTreeUsingTsSolutionSetup();
   });
@@ -50,6 +53,7 @@ describe('infra generator', () => {
     };
     expect(projectFiles).toMatchSnapshot('project-structure');
   });
+
   it('should configure project.json with correct targets', async () => {
     await infraGenerator(tree, options);
     const config = readProjectConfiguration(tree, '@proj/test');
@@ -89,6 +93,7 @@ describe('infra generator', () => {
       },
     });
   });
+
   it('should add required dependencies to package.json', async () => {
     await infraGenerator(tree, options);
     const packageJson = JSON.parse(tree.read('package.json').toString());
@@ -111,6 +116,7 @@ describe('infra generator', () => {
       tsx: expect.any(String),
     });
   });
+
   it('should generate valid CDK application code', async () => {
     await infraGenerator(tree, options);
     // Test main.ts content
@@ -125,6 +131,7 @@ describe('infra generator', () => {
     const cdkJson = JSON.parse(tree.read('packages/test/cdk.json').toString());
     expect(cdkJson).toMatchSnapshot('cdk-json-content');
   });
+
   it('should handle custom project names correctly', async () => {
     const customOptions: InfraGeneratorSchema = {
       name: 'custom-infra',
@@ -152,6 +159,7 @@ describe('infra generator', () => {
     };
     expect(customFiles).toMatchSnapshot('custom-name-files');
   });
+
   it('should generate consistent file content across runs', async () => {
     // First run
     await infraGenerator(tree, options);
@@ -175,5 +183,13 @@ describe('infra generator', () => {
     // Compare runs
     expect(firstRunFiles).toEqual(secondRunFiles);
     expect(secondRunFiles).toMatchSnapshot('consistent-files');
+  });
+
+  it('should add generator metric to app.ts', async () => {
+    // Call the generator function
+    await infraGenerator(tree, options);
+
+    // Verify the metric was added to app.ts
+    expectHasMetricTags(tree, INFRA_APP_GENERATOR_INFO.metric);
   });
 });

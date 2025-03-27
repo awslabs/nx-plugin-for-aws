@@ -3,9 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { readNxJson, Tree } from '@nx/devkit';
-import { tsLibGenerator } from './generator';
+import { TS_LIB_GENERATOR_INFO, tsLibGenerator } from './generator';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import uniqBy from 'lodash.uniqby';
+import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import { expectHasMetricTags } from '../../utils/metrics.spec';
 
 describe('ts lib generator', () => {
   let tree: Tree;
@@ -175,5 +177,19 @@ describe('ts lib generator', () => {
     expect(targetDefaults.test.inputs).toHaveLength(
       uniqBy(targetDefaults.test.inputs, (x) => x).length,
     );
+  });
+
+  it('should add generator metric to app.ts', async () => {
+    // Set up test tree with shared constructs
+    await sharedConstructsGenerator(tree);
+
+    // Call the generator function
+    await tsLibGenerator(tree, {
+      name: 'test-lib',
+      skipInstall: true,
+    });
+
+    // Verify the metric was added to app.ts
+    expectHasMetricTags(tree, TS_LIB_GENERATOR_INFO.metric);
   });
 });

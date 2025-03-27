@@ -119,6 +119,16 @@ export default defineConfig({
             { label: 'license', link: '/guides/license' },
           ],
         },
+        {
+          label: 'About',
+          items: [
+            {
+              label: 'Usage Metrics',
+              link: '/about/metrics',
+            },
+          ],
+          collapsed: true,
+        },
       ],
       plugins: [
         starlightLinksValidator({

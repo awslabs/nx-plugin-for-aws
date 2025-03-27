@@ -5,16 +5,20 @@
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
 import { readNxJson, Tree } from '@nx/devkit';
 
-import { licenseGenerator } from './generator';
+import { LICENSE_GENERATOR_INFO, licenseGenerator } from './generator';
 import { LicenseGeneratorSchema } from './schema';
 import {
   AWS_NX_PLUGIN_CONFIG_FILE_NAME,
   readAwsNxPluginConfig,
 } from '../utils/config/utils';
 import { SYNC_GENERATOR_NAME } from './sync/generator';
+import { sharedConstructsGenerator } from '../utils/shared-constructs';
+import { expectHasMetricTags } from '../utils/metrics.spec';
+import { createTreeUsingTsSolutionSetup } from '../utils/test';
 
 describe('license generator', () => {
   let tree: Tree;
+
   const options: LicenseGeneratorSchema = {
     license: 'Apache-2.0',
     copyrightHolder: 'Test Inc. or its affiliates',
@@ -70,5 +74,18 @@ describe('license generator', () => {
     expect((await readAwsNxPluginConfig(tree)).license!.copyrightHolder).toBe(
       'Baz',
     );
+  });
+
+  it('should add generator metric to app.ts', async () => {
+    tree = createTreeUsingTsSolutionSetup();
+
+    // Set up test tree with shared constructs
+    await sharedConstructsGenerator(tree);
+
+    // Call the generator function
+    await licenseGenerator(tree, options);
+
+    // Verify the metric was added to app.ts
+    expectHasMetricTags(tree, LICENSE_GENERATOR_INFO.metric);
   });
 });

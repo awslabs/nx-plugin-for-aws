@@ -2,10 +2,12 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
+import { readJson, Tree } from '@nx/devkit';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { pyProjectGenerator } from './generator';
+import { PY_PROJECT_GENERATOR_INFO, pyProjectGenerator } from './generator';
 import { parse } from '@iarna/toml';
+import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import { expectHasMetricTags } from '../../utils/metrics.spec';
 
 describe('python project generator', () => {
   let tree: Tree;
@@ -111,5 +113,30 @@ describe('python project generator', () => {
     const projectGitIgnorePatterns =
       tree.read('apps/test_project/.gitignore', 'utf-8')?.split('\n') ?? [];
     expect(projectGitIgnorePatterns).toContain('**/__pycache__');
+  });
+
+  it('should add a dependency on the python plugin', async () => {
+    await pyProjectGenerator(tree, {
+      name: 'test-project',
+      directory: 'apps',
+      projectType: 'application',
+    });
+    const packageJson = readJson(tree, 'package.json');
+    expect(packageJson.devDependencies).toHaveProperty('@nxlv/python');
+  });
+
+  it('should add generator metric to app.ts', async () => {
+    // Set up test tree with shared constructs
+    await sharedConstructsGenerator(tree);
+
+    // Call the generator function
+    await pyProjectGenerator(tree, {
+      name: 'test-project',
+      directory: 'apps',
+      projectType: 'application',
+    });
+
+    // Verify the metric was added to app.ts
+    expectHasMetricTags(tree, PY_PROJECT_GENERATOR_INFO.metric);
   });
 });

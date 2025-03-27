@@ -39,6 +39,12 @@ import {
 } from '../../utils/ast';
 import { toClassName } from '../../utils/names';
 import { formatFilesInSubtree } from '../../utils/format';
+import { NxGeneratorInfo, getGeneratorInfo } from '../../utils/nx';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+
+export const TRPC_REACT_GENERATOR_INFO: NxGeneratorInfo =
+  getGeneratorInfo(__filename);
+
 export async function reactGenerator(
   tree: Tree,
   options: ReactGeneratorSchema,
@@ -100,6 +106,7 @@ export async function reactGenerator(
       {},
     );
   }
+
   await runtimeConfigGenerator(tree, {
     project: options.frontendProjectName,
   });
@@ -350,6 +357,9 @@ export async function reactGenerator(
     ]),
     withVersions(['@smithy/types']),
   );
+
+  await addGeneratorMetricsIfApplicable(tree, [TRPC_REACT_GENERATOR_INFO]);
+
   await formatFilesInSubtree(tree);
   return () => {
     installPackagesTask(tree);

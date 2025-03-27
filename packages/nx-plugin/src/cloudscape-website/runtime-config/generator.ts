@@ -15,6 +15,11 @@ import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
 import { formatFilesInSubtree } from '../../utils/format';
 import { prependStatements, query, replaceIfExists } from '../../utils/ast';
+import { NxGeneratorInfo, getGeneratorInfo } from '../../utils/nx';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+
+export const RUNTIME_CONFIG_GENERATOR_INFO: NxGeneratorInfo =
+  getGeneratorInfo(__filename);
 
 export async function runtimeConfigGenerator(
   tree: Tree,
@@ -45,7 +50,9 @@ export async function runtimeConfigGenerator(
     console.debug('Runtime config already exists, skipping generation');
     return;
   }
+
   await sharedConstructsGenerator(tree);
+
   const npmScopePrefix = getNpmScopePrefix(tree);
   generateFiles(
     tree,
@@ -100,6 +107,8 @@ export async function runtimeConfigGenerator(
   if (!locatedTargetNode) {
     throw new Error('Could not locate the RouterProvider element in main.tsx');
   }
+
+  await addGeneratorMetricsIfApplicable(tree, [RUNTIME_CONFIG_GENERATOR_INFO]);
 
   await formatFilesInSubtree(tree);
 }

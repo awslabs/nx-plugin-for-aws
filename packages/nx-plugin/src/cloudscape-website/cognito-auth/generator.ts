@@ -11,12 +11,12 @@ import {
   installPackagesTask,
   OverwriteStrategy,
 } from '@nx/devkit';
+import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import {
   TYPE_DEFINITIONS_DIR,
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
-  sharedConstructsGenerator,
-} from '../../utils/shared-constructs';
+} from '../../utils/shared-constructs-constants';
 import { CognitoAuthGeneratorSchema as CognitoAuthGeneratorSchema } from './schema';
 import { runtimeConfigGenerator } from '../runtime-config/generator';
 import {
@@ -43,6 +43,12 @@ import {
   query,
 } from '../../utils/ast';
 import { formatFilesInSubtree } from '../../utils/format';
+import { NxGeneratorInfo, getGeneratorInfo } from '../../utils/nx';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+
+export const COGNITO_AUTH_GENERATOR_INFO: NxGeneratorInfo =
+  getGeneratorInfo(__filename);
+
 export async function cognitoAuthGenerator(
   tree: Tree,
   options: CognitoAuthGeneratorSchema,
@@ -55,9 +61,11 @@ export async function cognitoAuthGenerator(
       `This generator has already been run on ${options.project}.`,
     );
   }
+
   await runtimeConfigGenerator(tree, {
     project: options.project,
   });
+
   await sharedConstructsGenerator(tree);
   // Add ICognitoProps interface and update IRuntimeConfig
   const runtimeConfigPath = joinPathFragments(
@@ -489,6 +497,9 @@ export async function cognitoAuthGenerator(
     );
   }
   // End update App Layout
+
+  await addGeneratorMetricsIfApplicable(tree, [COGNITO_AUTH_GENERATOR_INFO]);
+
   await formatFilesInSubtree(tree);
   return () => {
     installPackagesTask(tree);

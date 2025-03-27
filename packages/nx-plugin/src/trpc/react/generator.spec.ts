@@ -3,10 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { Tree } from '@nx/devkit';
-import { reactGenerator } from './generator';
+import { TRPC_REACT_GENERATOR_INFO, reactGenerator } from './generator';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
+import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import { expectHasMetricTags } from '../../utils/metrics.spec';
+
 describe('trpc react generator', () => {
   let tree: Tree;
+
   beforeEach(() => {
     tree = createTreeUsingTsSolutionSetup();
     // Mock frontend project configuration
@@ -43,6 +47,7 @@ export function Main() {
 `,
     );
   });
+
   it('should generate trpc react files', async () => {
     await reactGenerator(tree, {
       frontendProjectName: 'frontend',
@@ -80,6 +85,7 @@ export function Main() {
       ),
     ).toMatchSnapshot('TrpcClients-TrpcClientProviders.tsx');
   });
+
   it('should modify main.tsx correctly', async () => {
     await reactGenerator(tree, {
       frontendProjectName: 'frontend',
@@ -90,6 +96,7 @@ export function Main() {
     // Create snapshot of modified main.tsx
     expect(mainTsxContent).toMatchSnapshot('main.tsx');
   });
+
   it('should add required dependencies', async () => {
     await reactGenerator(tree, {
       frontendProjectName: 'frontend',
@@ -103,6 +110,7 @@ export function Main() {
     ).toBeDefined();
     expect(packageJson.dependencies['@tanstack/react-query']).toBeDefined();
   });
+
   it('should handle IAM auth option', async () => {
     await reactGenerator(tree, {
       frontendProjectName: 'frontend',
@@ -130,5 +138,19 @@ export function Main() {
       packageJson.dependencies['@aws-sdk/credential-provider-cognito-identity'],
     ).toBeDefined();
     expect(packageJson.dependencies['aws4fetch']).toBeDefined();
+  });
+
+  it('should add generator metric to app.ts', async () => {
+    await sharedConstructsGenerator(tree);
+
+    // Call the generator function
+    await reactGenerator(tree, {
+      frontendProjectName: 'frontend',
+      backendProjectName: 'backend',
+      auth: 'None',
+    });
+
+    // Verify the metric was added to app.ts
+    expectHasMetricTags(tree, TRPC_REACT_GENERATOR_INFO.metric);
   });
 });

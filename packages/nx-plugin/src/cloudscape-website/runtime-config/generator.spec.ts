@@ -3,14 +3,22 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { Tree } from '@nx/devkit';
-import { runtimeConfigGenerator } from './generator';
+import {
+  RUNTIME_CONFIG_GENERATOR_INFO,
+  runtimeConfigGenerator,
+} from './generator';
 import { RuntimeConfigGeneratorSchema } from './schema';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
+import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import { expectHasMetricTags } from '../../utils/metrics.spec';
+
 describe('runtime-config generator', () => {
   let tree: Tree;
+
   const options: RuntimeConfigGeneratorSchema = {
     project: 'test-app',
   };
+
   beforeEach(() => {
     tree = createTreeUsingTsSolutionSetup();
     tree.write(
@@ -21,12 +29,13 @@ describe('runtime-config generator', () => {
       }),
     );
   });
+
   it('should generate runtime config files', async () => {
     // Set up a basic React app structure
     tree.write(
       'packages/test-app/src/main.tsx',
       `import { RouterProvider } from '@tanstack/react-router';
-        
+
         export function App() {
           return (
             <RouterProvider router={router} />
@@ -45,12 +54,13 @@ describe('runtime-config generator', () => {
         ?.toString(),
     ).toMatchSnapshot('runtime-config-component.tsx');
   });
+
   it('should modify main.tsx correctly', async () => {
     // Set up a basic React app structure
     tree.write(
       'packages/test-app/src/main.tsx',
       `import { RouterProvider } from '@tanstack/react-router';
-        
+
         export function App() {
           return (
             <RouterProvider router={router} />
@@ -63,12 +73,13 @@ describe('runtime-config generator', () => {
       ?.toString();
     expect(mainTsxContent).toMatchSnapshot('modified-main.tsx');
   });
+
   it('should skip generation if RuntimeConfig already exists', async () => {
     // Set up a basic React app structure
     tree.write(
       'packages/test-app/src/main.tsx',
       `import { RouterProvider } from '@tanstack/react-router';
-        
+
         export function App() {
           return (
             <RouterProvider router={router} />
@@ -100,11 +111,13 @@ describe('runtime-config generator', () => {
         ?.toString(),
     ).not.toBe(firstRunContent);
   });
+
   it('should throw error if main.tsx does not exist', async () => {
     await expect(runtimeConfigGenerator(tree, options)).rejects.toThrow(
       'Can only run this generator on a project which contains packages/test-app/src/main.tsx',
     );
   });
+
   it('should throw error if RouterProvider is not found', async () => {
     // Set up main.tsx without RouterProvider
     tree.write(
@@ -117,12 +130,13 @@ describe('runtime-config generator', () => {
       'Could not locate the RouterProvider element in main.tsx',
     );
   });
+
   it('should generate shared constructs', async () => {
     // Set up a basic React app structure
     tree.write(
       'packages/test-app/src/main.tsx',
       `import { RouterProvider } from '@tanstack/react-router';
-        
+
         export function App() {
           return (
             <RouterProvider router={router} />
@@ -146,5 +160,28 @@ describe('runtime-config generator', () => {
         .read('packages/common/constructs/src/core/runtime-config.ts')
         ?.toString(),
     ).toMatchSnapshot('runtime-config.ts');
+  });
+
+  it('should add generator metric to app.ts', async () => {
+    // Set up test tree with shared constructs
+    await sharedConstructsGenerator(tree);
+
+    // Set up a basic React app structure
+    tree.write(
+      'packages/test-app/src/main.tsx',
+      `import { RouterProvider } from '@tanstack/react-router';
+
+        export function App() {
+          return (
+            <RouterProvider router={router} />
+          );
+        }`,
+    );
+
+    // Call the generator function
+    await runtimeConfigGenerator(tree, options);
+
+    // Verify the metric was added to app.ts
+    expectHasMetricTags(tree, RUNTIME_CONFIG_GENERATOR_INFO.metric);
   });
 });

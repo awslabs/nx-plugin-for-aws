@@ -3,18 +3,25 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { Tree } from '@nx/devkit';
-import { appGenerator } from './generator';
+import {
+  CLOUDSCAPE_WEBSITE_APP_GENERATOR_INFO,
+  appGenerator,
+} from './generator';
 import { AppGeneratorSchema } from './schema';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
+import { expectHasMetricTags } from '../../utils/metrics.spec';
+
 describe('cloudscape-website generator', () => {
   let tree: Tree;
+
   const options: AppGeneratorSchema = {
     name: 'test-app',
-    style: 'css',
   };
+
   beforeEach(() => {
     tree = createTreeUsingTsSolutionSetup();
   });
+
   it('should generate base files and structure', async () => {
     await appGenerator(tree, options);
     // Check main application files
@@ -45,12 +52,14 @@ describe('cloudscape-website generator', () => {
       tree.read('test-app/src/routes/welcome/index.tsx')?.toString(),
     ).toMatchSnapshot('welcome-index.tsx');
   });
+
   it('should configure vite correctly', async () => {
     await appGenerator(tree, options);
     const viteConfig = tree.read('test-app/vite.config.ts')?.toString();
     expect(viteConfig).toBeDefined();
     expect(viteConfig).toMatchSnapshot('vite.config.ts');
   });
+
   it('should generate shared constructs', async () => {
     await appGenerator(tree, options);
     // Check shared constructs files
@@ -90,6 +99,7 @@ describe('cloudscape-website generator', () => {
         ?.toString(),
     ).toMatchSnapshot('common/constructs-core-static-website.ts');
   });
+
   it('should update package.json with required dependencies', async () => {
     await appGenerator(tree, options);
     const packageJson = JSON.parse(tree.read('package.json').toString());
@@ -105,12 +115,14 @@ describe('cloudscape-website generator', () => {
       'aws-cdk-lib': expect.any(String),
     });
   });
+
   it('should configure TypeScript correctly', async () => {
     await appGenerator(tree, options);
     const tsConfig = JSON.parse(tree.read('test-app/tsconfig.json').toString());
     expect(tsConfig.compilerOptions.moduleResolution).toBe('Bundler');
     expect(tsConfig).toMatchSnapshot('tsconfig.json');
   });
+
   it('should handle custom directory option', async () => {
     await appGenerator(tree, {
       ...options,
@@ -121,6 +133,7 @@ describe('cloudscape-website generator', () => {
       tree.read('custom-dir/test-app/src/main.tsx')?.toString(),
     ).toMatchSnapshot('custom-dir-main.tsx');
   });
+
   it('should handle npm scope prefix correctly', async () => {
     // Set up package.json with a scope
     tree.write(
@@ -133,5 +146,13 @@ describe('cloudscape-website generator', () => {
     await appGenerator(tree, options);
     const packageJson = JSON.parse(tree.read('package.json').toString());
     expect(packageJson.dependencies).toMatchSnapshot('scoped-dependencies');
+  });
+
+  it('should add generator metric to app.ts', async () => {
+    // Call the generator function
+    await appGenerator(tree, options);
+
+    // Verify the metric was added to app.ts
+    expectHasMetricTags(tree, CLOUDSCAPE_WEBSITE_APP_GENERATOR_INFO.metric);
   });
 });

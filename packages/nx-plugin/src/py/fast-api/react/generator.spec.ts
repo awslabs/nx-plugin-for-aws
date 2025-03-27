@@ -3,15 +3,21 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { Tree } from '@nx/devkit';
-import { fastApiReactGenerator } from './generator';
+import {
+  FAST_API_REACT_GENERATOR_INFO,
+  fastApiReactGenerator,
+} from './generator';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
 import { query } from '../../../utils/ast';
+import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
+import { expectHasMetricTags } from '../../../utils/metrics.spec';
 
 describe('fastapi react generator', () => {
   let tree: Tree;
 
   beforeEach(() => {
     tree = createTreeUsingTsSolutionSetup();
+
     // Mock frontend project configuration
     tree.write(
       'apps/frontend/project.json',
@@ -273,5 +279,20 @@ export function Main() {
     expect(
       tree.read('apps/frontend/src/components/TestApiProvider.tsx', 'utf-8'),
     ).toMatchSnapshot('TestApiProvider-IAM.tsx');
+  });
+
+  it('should add generator metric to app.ts', async () => {
+    // Set up test tree with shared constructs
+    await sharedConstructsGenerator(tree);
+
+    // Call the generator function
+    await fastApiReactGenerator(tree, {
+      frontendProjectName: 'frontend',
+      fastApiProjectName: 'backend',
+      auth: 'None',
+    });
+
+    // Verify the metric was added to app.ts
+    expectHasMetricTags(tree, FAST_API_REACT_GENERATOR_INFO.metric);
   });
 });

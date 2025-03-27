@@ -3,16 +3,21 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { Tree } from '@nx/devkit';
-import { cognitoAuthGenerator } from './generator';
+import { COGNITO_AUTH_GENERATOR_INFO, cognitoAuthGenerator } from './generator';
 import { CognitoAuthGeneratorSchema } from './schema';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
+import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import { expectHasMetricTags } from '../../utils/metrics.spec';
+
 describe('cognito-auth generator', () => {
   let tree: Tree;
+
   const options: CognitoAuthGeneratorSchema = {
     project: 'test-project',
     cognitoDomain: 'test',
     allowSignup: true,
   };
+
   beforeEach(() => {
     tree = createTreeUsingTsSolutionSetup();
     // Set up a mock project structure
@@ -24,6 +29,7 @@ describe('cognito-auth generator', () => {
       }),
     );
   });
+
   it('should generate files', async () => {
     // Setup main.tsx with RuntimeConfigProvider
     tree.write(
@@ -41,11 +47,14 @@ describe('cognito-auth generator', () => {
       }
     `,
     );
+
     await cognitoAuthGenerator(tree, options);
+
     // Verify component files are generated
     expect(
       tree.exists('packages/test-project/src/components/CognitoAuth/index.tsx'),
     ).toBeTruthy();
+
     // Verify shared constructs files are generated
     expect(
       tree.exists('packages/common/constructs/src/core/user-identity.ts'),
@@ -53,6 +62,7 @@ describe('cognito-auth generator', () => {
     expect(
       tree.exists('packages/common/constructs/src/core/index.ts'),
     ).toBeTruthy();
+
     // Create snapshot of the generated files
     expect(
       tree
@@ -68,6 +78,7 @@ describe('cognito-auth generator', () => {
         .toString(),
     ).toMatchSnapshot('user-identity');
   });
+
   it('should update main.tsx when RuntimeConfigProvider exists', async () => {
     // Setup main.tsx with RuntimeConfigProvider
     tree.write(
@@ -85,7 +96,9 @@ describe('cognito-auth generator', () => {
       }
     `,
     );
+
     await cognitoAuthGenerator(tree, options);
+
     const mainTsxContent = tree
       .read('packages/test-project/src/main.tsx')
       .toString();
@@ -99,6 +112,7 @@ describe('cognito-auth generator', () => {
     // Create snapshot of the modified main.tsx
     expect(mainTsxContent).toMatchSnapshot('main-tsx-with-runtime-config');
   });
+
   it('should handle main.tsx without RuntimeConfigProvider', async () => {
     // Setup main.tsx without RuntimeConfigProvider
     tree.write(
@@ -115,11 +129,13 @@ describe('cognito-auth generator', () => {
       async () => await cognitoAuthGenerator(tree, options),
     ).rejects.toThrowError();
   });
+
   it('should handle missing main.tsx', async () => {
     await expect(
       async () => await cognitoAuthGenerator(tree, options),
     ).rejects.toThrowError();
   });
+
   it('should update shared constructs index.ts', async () => {
     // Setup main.tsx with RuntimeConfigProvider
     tree.write(
@@ -151,6 +167,7 @@ describe('cognito-auth generator', () => {
     // Create snapshot of the modified index
     expect(indexContent).toMatchSnapshot('common/constructs-index');
   });
+
   it('should add required dependencies', async () => {
     // Setup main.tsx with RuntimeConfigProvider
     tree.write(
@@ -180,6 +197,7 @@ describe('cognito-auth generator', () => {
       'react-oidc-context': expect.any(String),
     });
   });
+
   it('should not be able to run the generator multiple times', async () => {
     // Setup main.tsx with RuntimeConfigProvider
     tree.write(
@@ -414,5 +432,33 @@ export default AppLayout;
 
     // Create snapshot of the modified AppLayout.tsx
     expect(appLayoutContent).toMatchSnapshot('app-layout-with-auth');
+  });
+
+  it('should add generator metric to app.ts', async () => {
+    // Set up test tree with shared constructs
+    await sharedConstructsGenerator(tree);
+
+    // Setup main.tsx with RuntimeConfigProvider
+    tree.write(
+      'packages/test-project/src/main.tsx',
+      `
+      import { RuntimeConfigProvider } from './components/RuntimeConfig';
+      import { RouterProvider, createRouter } from '@tanstack/react-router';
+
+      export function App() {
+        return (
+          <RuntimeConfigProvider>
+            <RouterProvider router={router} />
+          </RuntimeConfigProvider>
+        );
+      }
+    `,
+    );
+
+    // Call the generator function
+    await cognitoAuthGenerator(tree, options);
+
+    // Verify the metric was added to app.ts
+    expectHasMetricTags(tree, COGNITO_AUTH_GENERATOR_INFO.metric);
   });
 });

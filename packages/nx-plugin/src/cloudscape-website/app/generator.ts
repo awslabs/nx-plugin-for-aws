@@ -24,11 +24,11 @@ import {
 } from 'typescript';
 import { AppGeneratorSchema } from './schema';
 import { applicationGenerator } from '@nx/react';
+import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
-  sharedConstructsGenerator,
-} from '../../utils/shared-constructs';
+} from '../../utils/shared-constructs-constants';
 import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
 import { configureTsProject } from '../../ts/lib/ts-project-utils';
 import { withVersions } from '../../utils/versions';
@@ -42,8 +42,13 @@ import {
 } from '../../utils/ast';
 import { formatFilesInSubtree } from '../../utils/format';
 import { relative } from 'path';
-import { sortObjectKeys } from '../../utils/nx';
 import kebabCase from 'lodash.kebabcase';
+import { sortObjectKeys } from '../../utils/object';
+import { NxGeneratorInfo, getGeneratorInfo } from '../../utils/nx';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+
+export const CLOUDSCAPE_WEBSITE_APP_GENERATOR_INFO: NxGeneratorInfo =
+  getGeneratorInfo(__filename);
 
 export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
   const npmScopePrefix = getNpmScopePrefix(tree);
@@ -430,6 +435,10 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
     ]),
     withVersions(['@tanstack/router-plugin', 'vite-tsconfig-paths']),
   );
+
+  await addGeneratorMetricsIfApplicable(tree, [
+    CLOUDSCAPE_WEBSITE_APP_GENERATOR_INFO,
+  ]);
 
   await formatFilesInSubtree(tree);
   return () => {

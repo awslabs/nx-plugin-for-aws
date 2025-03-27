@@ -15,11 +15,11 @@ import {
 } from '@nx/devkit';
 import { TrpcBackendGeneratorSchema } from './schema';
 import kebabCase from 'lodash.kebabcase';
+import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
-  sharedConstructsGenerator,
-} from '../../utils/shared-constructs';
+} from '../../utils/shared-constructs-constants';
 import tsLibGenerator from '../../ts/lib/generator';
 import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
 import { withVersions } from '../../utils/versions';
@@ -27,12 +27,19 @@ import { toClassName } from '../../utils/names';
 import { addStarExport } from '../../utils/ast';
 import { formatFilesInSubtree } from '../../utils/format';
 import { addHttpApi } from '../../utils/http-api';
-import { sortObjectKeys } from '../../utils/nx';
+import { sortObjectKeys } from '../../utils/object';
+import { NxGeneratorInfo, getGeneratorInfo } from '../../utils/nx';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+
+export const TRPC_BACKEND_GENERATOR_INFO: NxGeneratorInfo =
+  getGeneratorInfo(__filename);
+
 export async function trpcBackendGenerator(
   tree: Tree,
   options: TrpcBackendGeneratorSchema,
 ) {
   await sharedConstructsGenerator(tree);
+
   const apiNamespace = getNpmScopePrefix(tree);
   const apiNameKebabCase = kebabCase(options.apiName);
   const apiNameClassName = toClassName(options.apiName);
@@ -212,6 +219,9 @@ export async function trpcBackendGenerator(
   );
   tree.delete(joinPathFragments(backendRoot, 'package.json'));
   tree.delete(joinPathFragments(schemaRoot, 'package.json'));
+
+  await addGeneratorMetricsIfApplicable(tree, [TRPC_BACKEND_GENERATOR_INFO]);
+
   await formatFilesInSubtree(tree);
   return () => {
     installPackagesTask(tree);

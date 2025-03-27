@@ -22,7 +22,13 @@ import { configureTsProject } from './ts-project-utils';
 import { toKebabCase } from '../../utils/names';
 import { relative } from 'path';
 import { formatFilesInSubtree } from '../../utils/format';
-import { sortObjectKeys } from '../../utils/nx';
+import { sortObjectKeys } from '../../utils/object';
+import { NxGeneratorInfo, getGeneratorInfo } from '../../utils/nx';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+
+export const TS_LIB_GENERATOR_INFO: NxGeneratorInfo =
+  getGeneratorInfo(__filename);
+
 export interface TsLibDetails {
   /**
    * Full package name including scope (eg @foo/bar)
@@ -33,6 +39,7 @@ export interface TsLibDetails {
    */
   readonly dir: string;
 }
+
 /**
  * Returns details about the TS library to be created
  */
@@ -49,6 +56,7 @@ export const getTsLibDetails = (
   );
   return { dir, fullyQualifiedName };
 };
+
 /**
  * Generates a typescript library
  */
@@ -191,6 +199,8 @@ export const tsLibGenerator = async (
 
     return nxJson;
   });
+
+  await addGeneratorMetricsIfApplicable(tree, [TS_LIB_GENERATOR_INFO]);
 
   await formatFilesInSubtree(tree);
 
