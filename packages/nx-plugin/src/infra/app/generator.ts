@@ -28,6 +28,7 @@ import { addStarExport } from '../../utils/ast';
 import path from 'path';
 import { formatFilesInSubtree } from '../../utils/format';
 import { sortObjectKeys } from '../../utils/nx';
+import kebabCase from 'lodash.kebabcase';
 
 export async function infraGenerator(
   tree: Tree,
@@ -55,6 +56,7 @@ export async function infraGenerator(
     {
       synthDir: synthDirFromProject,
       scopeAlias: scopeAlias,
+      namespace: kebabCase(npmScopePrefix),
       fullyQualifiedName,
       pkgMgrCmd: getPackageManagerCommand().exec,
       ...schema,
