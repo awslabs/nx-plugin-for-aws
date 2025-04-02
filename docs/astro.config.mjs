@@ -79,8 +79,8 @@ export default defineConfig({
                 //   link: '/get_started/tutorials/existing-project',
                 // },
                 {
-                  label: 'Create a generator',
-                  link: '/get_started/tutorials/create-generator',
+                  label: 'Contribute a Generator',
+                  link: '/get_started/tutorials/contribute-generator',
                 },
               ],
             },
@@ -100,6 +100,7 @@ export default defineConfig({
               label: 'ts#cloudscape-website#auth',
               link: '/guides/cloudscape-website-auth',
             },
+            { label: 'ts#nx-generator', link: '/guides/nx-generator' },
             { label: 'py#project', link: '/guides/python-project' },
             { label: 'py#fast-api', link: '/guides/fastapi' },
             {
