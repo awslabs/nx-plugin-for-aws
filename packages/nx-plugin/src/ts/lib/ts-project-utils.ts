@@ -14,7 +14,7 @@ import { configureEslint } from './eslint';
  */
 export const configureTsProject = (
   tree: Tree,
-  options: ConfigureProjectOptions
+  options: ConfigureProjectOptions,
 ) => {
   // Remove conflicting commonjs module from tsconfig
   updateJson(tree, join(options.dir, 'tsconfig.json'), (tsConfig) => ({
@@ -29,7 +29,7 @@ export const configureTsProject = (
   }));
   const outDirToRootRelativePath = relative(
     join(tree.root, options.dir),
-    tree.root
+    tree.root,
   );
   const distDir = join(outDirToRootRelativePath, 'dist', options.dir, 'tsc');
   // Remove baseUrl and rootDir from the tsconfig.lib.json
@@ -56,13 +56,12 @@ export const configureTsProject = (
         // Remove any path aliases for this project with the npm scope prefix (eg remove @foo/bar)
         ...Object.fromEntries(
           Object.entries(tsConfig.compilerOptions?.paths ?? {}).filter(
-            ([k]) => k !== options.fullyQualifiedName
-          )
+            ([k]) => k !== options.fullyQualifiedName,
+          ),
         ),
         // Add aliases which begin with colon (eg :foo/bar) to avoid sniping attacks
         [toScopeAlias(options.fullyQualifiedName)]: [
           joinPathFragments(options.dir, 'src', 'index.ts'),
-          joinPathFragments('dist', options.dir, 'src', 'index.d.ts'),
         ],
       },
     },
@@ -73,7 +72,7 @@ export const configureTsProject = (
       references: [
         // Add project references, ensuring no duplication
         ...(tsConfig.references ?? []).filter(
-          (ref) => ref.path !== `./${options.dir}`
+          (ref) => ref.path !== `./${options.dir}`,
         ),
         {
           path: `./${options.dir}`,

@@ -77,6 +77,19 @@ export const smokeTest = (
       );
       await runCLI(`generate @aws/nx-plugin:license --no-interactive`, opts);
 
+      await runCLI(
+        `generate @aws/nx-plugin:ts#project --name=plugin --directory=tools --no-interactive`,
+        opts,
+      );
+      await runCLI(
+        `generate @aws/nx-plugin:ts#nx-generator --pluginProject=@e2e-test/plugin --name=my#generator --no-interactive`,
+        opts,
+      );
+      await runCLI(
+        `generate @e2e-test/plugin:my#generator --exampleOption=test --no-interactive`,
+        opts,
+      );
+
       // Wire up website, cognito and trpc api
       writeFileSync(
         `${opts.cwd}/packages/infra/src/stacks/application-stack.ts`,

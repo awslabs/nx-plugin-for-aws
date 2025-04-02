@@ -12,6 +12,7 @@ export const VERSIONS = {
   '@aws-lambda-powertools/metrics': '^2.17.0',
   '@aws-lambda-powertools/tracer': '^2.17.0',
   '@nxlv/python': '^20.12.0',
+  '@nx/devkit': '~20.6.4',
   '@tanstack/react-router': '^1.114.27',
   '@tanstack/router-plugin': '^1.114.27',
   '@cloudscape-design/board-components': '^3.0.94',
