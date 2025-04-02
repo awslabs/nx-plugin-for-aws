@@ -103,6 +103,10 @@ export default defineConfig({
             { label: 'py#project', link: '/guides/python-project' },
             { label: 'py#fast-api', link: '/guides/fastapi' },
             {
+              label: 'py#lambda-function',
+              link: '/guides/python-lambda-function',
+            },
+            {
               label: 'api-connection',
               items: [
                 { label: 'Connecting APIs', link: '/guides/api-connection' },

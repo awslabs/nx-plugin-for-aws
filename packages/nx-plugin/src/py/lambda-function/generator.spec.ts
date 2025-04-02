@@ -47,7 +47,7 @@ describe('lambda-handler project generator', () => {
     await lambdaFunctionProjectGenerator(tree, {
       project: 'test-project',
       functionName: 'test-function',
-      eventType: 'Any',
+      eventSource: 'Any',
     });
 
     expect(
@@ -86,7 +86,7 @@ describe('lambda-handler project generator', () => {
     await lambdaFunctionProjectGenerator(tree, {
       project: 'test-project',
       functionName: 'test-function',
-      eventType: 'Any',
+      eventSource: 'Any',
     });
 
     const projectConfig = JSON.parse(
@@ -146,7 +146,7 @@ describe('lambda-handler project generator', () => {
     await lambdaFunctionProjectGenerator(tree, {
       project: 'test-project',
       functionName: 'test-function',
-      eventType: 'Any',
+      eventSource: 'Any',
     });
 
     // Verify shared constructs files
@@ -214,7 +214,7 @@ describe('lambda-handler project generator', () => {
     await lambdaFunctionProjectGenerator(tree, {
       project: 'test-project',
       functionName: 'test-function',
-      eventType: 'Any',
+      eventSource: 'Any',
     });
 
     const sharedConstructsConfig = JSON.parse(
@@ -258,7 +258,7 @@ describe('lambda-handler project generator', () => {
       project: 'test-project',
       functionName: 'test-function',
       functionPath: 'nested/path',
-      eventType: 'Any',
+      eventSource: 'Any',
     });
 
     expect(
@@ -296,7 +296,7 @@ describe('lambda-handler project generator', () => {
     await lambdaFunctionProjectGenerator(tree, {
       project: 'test-project',
       functionName: 'test-function',
-      eventType: 'Any',
+      eventSource: 'Any',
     });
 
     const lambdaFunctionPath = joinPathFragments(
@@ -342,7 +342,7 @@ describe('lambda-handler project generator', () => {
     await lambdaFunctionProjectGenerator(tree, {
       project: 'test-project',
       functionName: 'test-function',
-      eventType: 'APIGatewayProxyEvent',
+      eventSource: 'APIGatewayProxyEvent',
     });
 
     const lambdaFunctionContent = tree.read(
@@ -389,7 +389,7 @@ describe('lambda-handler project generator', () => {
     await lambdaFunctionProjectGenerator(tree, {
       project: 'test-project',
       functionName: 'test-function',
-      eventType: 'Any',
+      eventSource: 'Any',
     });
 
     const appChanges = sortObjectKeys(
@@ -434,7 +434,7 @@ describe('lambda-handler project generator', () => {
     await lambdaFunctionProjectGenerator(tree, {
       project: 'test-project',
       functionName: 'test-function',
-      eventType: 'Any',
+      eventSource: 'Any',
     });
 
     // Verify the metric was added to app.ts

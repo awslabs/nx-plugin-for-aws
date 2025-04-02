@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-type EventType =
+type EventSource =
   | 'Any'
   | 'APIGatewayProxyEvent'
   | 'APIGatewayProxyEventV2'
@@ -39,5 +39,5 @@ export interface LambdaFunctionProjectGeneratorSchema {
   readonly project: string;
   readonly functionName: string;
   readonly functionPath?: string;
-  readonly eventType?: EventType;
+  readonly eventSource?: EventSource;
 }
