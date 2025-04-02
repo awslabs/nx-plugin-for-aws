@@ -21,14 +21,21 @@ export default defineConfig({
   image: {
     service: passthroughImageService(),
   },
-
   outDir: '../dist/docs',
-
   integrations: [
     starlight({
       title: '@aws/nx-plugin',
       social: {
         github: 'https://github.com/awslabs/nx-plugin-for-aws',
+      },
+      defaultLocale: 'en',
+      locales: {
+        en: {
+          label: 'English',
+        },
+        jp: {
+          label: '日本語',
+        },
       },
       logo: {
         dark: './src/content/docs/assets/bulb-white.svg',
