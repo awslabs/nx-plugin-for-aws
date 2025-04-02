@@ -85,5 +85,23 @@ describe('names utils', () => {
         'lambda_handler.my_handler',
       );
     });
+
+    it('should handle any file extensions', () => {
+      expect(toDotNotation('lambda_handler/my_handler.ts')).toBe(
+        'lambda_handler.my_handler',
+      );
+
+      expect(toDotNotation('lambda_handler/my_handler.toml')).toBe(
+        'lambda_handler.my_handler',
+      );
+
+      expect(toDotNotation('lambda_handler/my_handler.json')).toBe(
+        'lambda_handler.my_handler',
+      );
+
+      expect(toDotNotation('lambda_handler/my_handler.yaml')).toBe(
+        'lambda_handler.my_handler',
+      );
+    });
   });
 });

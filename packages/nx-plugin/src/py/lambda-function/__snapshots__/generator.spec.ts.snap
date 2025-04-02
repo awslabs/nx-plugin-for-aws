@@ -21,7 +21,7 @@ tracer: Tracer = Tracer()
 @metrics.log_metrics
 
 def lambda_handler(event: dict, context: LambdaContext):
-    logger.info("Received event", extra={"event": event})
+    logger.info("Received event", extra={"event": event })
     metrics.add_metric(name="InvocationCount", unit=MetricUnit.Count, value=1)
 
     try:
@@ -35,6 +35,158 @@ def lambda_handler(event: dict, context: LambdaContext):
         ",
   "apps/test_project/tests/test_test_function.py": "def test_handler():
     pass
+",
+  "packages/common/constructs/src/app/index.ts": "export * from './lambda-functions/index.js';
+",
+  "packages/common/constructs/src/app/lambda-functions/index.ts": "export * from './test-function.js';
+",
+  "packages/common/constructs/src/app/lambda-functions/test-function.ts": "import { Construct } from 'constructs';
+import * as url from 'url';
+import { Code, Function, Runtime, Tracing } from 'aws-cdk-lib/aws-lambda';
+
+export class TestFunction extends Function {
+  constructor(scope: Construct, id: string) {
+    super(scope, id, {
+      timeout: Duration.seconds(30),
+      runtime: Runtime.PYTHON_3_12,
+      handler: 'test_function.lambda_handler',
+      code: Code.fromAsset(
+        url.fileURLToPath(
+          new URL(
+            '../../../../../../dist/apps/test_project/bundle',
+            import.meta.url,
+          ),
+        ),
+      ),
+      tracing: Tracing.ACTIVE,
+      environment: {
+        AWS_CONNECTION_REUSE_ENABLED: '1',
+      },
+    });
+  }
+}
+",
+  "packages/common/constructs/src/core/app.ts": "import { App as _App, AppProps, Aspects, IAspect, Stack } from 'aws-cdk-lib';
+import { IConstruct } from 'constructs';
+
+export class App extends _App {
+  constructor(props?: AppProps) {
+    super(props);
+
+    Aspects.of(this).add(new MetricsAspect());
+  }
+}
+
+/**
+ * Adds information to CloudFormation stack descriptions to provide usage metrics for @aws/nx-plugin
+ */
+class MetricsAspect implements IAspect {
+  visit(node: IConstruct): void {
+    if (node instanceof Stack) {
+      const id = 'uksb-4wk0bqpg5s';
+      const version = '0.0.0';
+      const tags: string[] = ['g16'];
+      node.templateOptions.description =
+        \`\${node.templateOptions.description ?? ''} (\${id}) (version:\${version}) (tags:\${tags.join(',')})\`.trim();
+    }
+  }
+}
+",
+  "packages/common/constructs/src/core/index.ts": "export * from './app.js';
+export * from './runtime-config.js';
+",
+  "packages/common/constructs/src/core/runtime-config.ts": "import type { IRuntimeConfig } from ':proj/common-types';
+import { Stack } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+
+const RuntimeConfigKey = '__RuntimeConfig__';
+
+export class RuntimeConfig extends Construct {
+  private readonly _runtimeConfig: Partial<IRuntimeConfig> = {};
+
+  static ensure(scope: Construct): RuntimeConfig {
+    const stack = Stack.of(scope);
+    return (
+      RuntimeConfig.of(scope) ?? new RuntimeConfig(stack, RuntimeConfigKey)
+    );
+  }
+
+  static of(scope: Construct): RuntimeConfig | undefined {
+    const stack = Stack.of(scope);
+    return stack.node.tryFindChild(RuntimeConfigKey) as
+      | RuntimeConfig
+      | undefined;
+  }
+
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+  }
+
+  get config(): Partial<IRuntimeConfig> {
+    return this._runtimeConfig;
+  }
+}
+",
+  "packages/common/constructs/src/index.ts": "export * from './app/index.js';
+export * from './core/index.js';
+",
+  "packages/common/constructs/vite.config.ts": "import { defineConfig } from 'vite';
+
+export default defineConfig(() => ({
+  root: __dirname,
+  cacheDir: '../../../node_modules/.vite/packages/common/constructs',
+  plugins: [],
+  // Uncomment this if you are using workers.
+  // worker: {
+  //  plugins: [ nxViteTsPaths() ],
+  // },
+  test: {
+    watch: false,
+    globals: true,
+    environment: 'jsdom',
+    include: ['src/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'],
+    reporters: ['default'],
+    coverage: {
+      reportsDirectory: './test-output/vitest/coverage',
+      provider: 'v8' as const,
+    },
+    passWithNoTests: true,
+  },
+}));
+",
+  "packages/common/types/src/index.ts": "export * from './runtime-config.js';
+",
+  "packages/common/types/src/runtime-config.ts": "// eslint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/no-empty-interface
+export interface IRuntimeConfig {}
+",
+  "packages/common/types/vite.config.ts": "import { defineConfig } from 'vite';
+
+export default defineConfig(() => ({
+  root: __dirname,
+  cacheDir: '../../../node_modules/.vite/packages/common/types',
+  plugins: [],
+  // Uncomment this if you are using workers.
+  // worker: {
+  //  plugins: [ nxViteTsPaths() ],
+  // },
+  test: {
+    watch: false,
+    globals: true,
+    environment: 'jsdom',
+    include: ['src/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'],
+    reporters: ['default'],
+    coverage: {
+      reportsDirectory: './test-output/vitest/coverage',
+      provider: 'v8' as const,
+    },
+    passWithNoTests: true,
+  },
+}));
+",
+  "vitest.workspace.ts": "export default [
+  '**/vite.config.{mjs,js,ts,mts}',
+  '**/vitest.config.{mjs,js,ts,mts}',
+];
 ",
 }
 `;

@@ -32,11 +32,11 @@ export const upperFirst = (str: string): string =>
 
 export const pascalCase = (str: string): string => upperFirst(camelCase(str));
 
-// Convert a string to a dot notation string (eg. lambda_handler/my_handler -> lambda_handler.my_handler)
+// Convert a string to a dot notation string (eg. lambda_handler/my_handler.py -> lambda_handler.my_handler)
 export const toDotNotation = (str: string): string =>
   str
     ?.replace(/^\/|\/$/g, '') // Remove leading/trailing slashes
-    .replace(/\.py$/, '') // Remove .py extension if present
+    .replace(/\.[^/.]+$/g, '') // Remove any file extensions
     .split('/')
     .filter(Boolean) // Remove empty segments (in case of double slashes)
     .join('.');

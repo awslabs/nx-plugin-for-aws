@@ -395,7 +395,7 @@ describe('lambda-handler project generator', () => {
     const appChanges = sortObjectKeys(
       tree
         .listChanges()
-        .filter((f) => f.path.endsWith('.py'))
+        .filter((f) => f.path.endsWith('.py') || f.path.endsWith('.ts'))
         .reduce((acc, curr) => {
           acc[curr.path] = tree.read(curr.path, 'utf-8');
           return acc;
