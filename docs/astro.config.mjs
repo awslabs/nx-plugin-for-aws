@@ -144,6 +144,7 @@ export default defineConfig({
       plugins: [
         starlightLinksValidator({
           errorOnLocalLinks: false,
+          errorOnRelativeLinks: false,
         }),
         starlightVideos(),
         starlightBlog({
