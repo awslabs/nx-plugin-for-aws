@@ -64,11 +64,11 @@ export const smokeTest = (
         opts,
       );
       await runCLI(
-        `generate @aws/nx-plugin:py#project --name=@e2e-test/py-project --projectType=application --no-interactive`,
+        `generate @aws/nx-plugin:py#project --name=py-project --projectType=application --no-interactive`,
         opts,
       );
       await runCLI(
-        `generate @aws/nx-plugin:py#lambda-function --project=@e2e-test/py-api --functionName=my-function --eventType=Any --no-interactive`,
+        `generate @aws/nx-plugin:py#lambda-function --project=e_2_e_test.py_project--functionName=my-function --eventSource=Any --no-interactive`,
         opts,
       );
       await runCLI(
