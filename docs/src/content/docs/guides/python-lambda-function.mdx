@@ -35,6 +35,8 @@ The generator will add the following files to your project:
 
 </FileTree>
 
+The generator will also create CDK constructs which can be used to deploy your API, which reside in the packages/common/constructs directory.
+
 If the `functionPath` option is provided, the generater will add the necessary files to the specified path:
 
 <FileTree>
@@ -45,13 +47,12 @@ If the `functionPath` option is provided, the generater will add the necessary f
 
 </FileTree>
 
-The generator will also create CDK constructs which can be used to deploy your Function, which reside in the packages/common/constructs directory.
-
 ## Implementing your Function
 
 The main function implementation is in `<function-name>.py`. Here's an example:
 
 ```python
+from aws_lambda_powertools.utilities.data_classes import EventBridgeEvent, event_source
 from aws_lambda_powertools.utilities.typing import LambdaContext
 from aws_lambda_powertools import Logger, Metrics, Tracer
 from aws_lambda_powertools.metrics import MetricUnit
@@ -66,8 +67,9 @@ tracer: Tracer = Tracer()
 
 @tracer.capture_lambda_handler
 @metrics.log_metrics
-def lambda_handler(event: dict, context: LambdaContext):
-    logger.info("Received event", extra={"event": event})
+@event_source(data_class=EventBridgeEvent)
+def lambda_handler(event: EventBridgeEvent, context: LambdaContext):
+    logger.info("Received event", extra={"event": event.model_dump()})
     metrics.add_metric(name="InvocationCount", unit=MetricUnit.Count, value=1)
 
     try:
@@ -91,15 +93,8 @@ The generator sets up several features automatically:
 The generator configures structured logging using AWS Lambda Powertools.
 
 ```python
-from aws_lambda_powertools import Logger
-
-
-os.environ["POWERTOOLS_SERVICE_NAME"] = "MyFunction"
-
-logger: Logger = Logger()
-
-def lambda_handler(event: dict, context: LambdaContext):
-    logger.info("Received event", extra={"event": event})
+def lambda_handler(event: EventBridgeEvent, context: LambdaContext):
+    logger.info("Received event", extra={"event": event.model_dump()})
 ```
 
 :::tip
@@ -117,17 +112,9 @@ The logger automatically includes:
 AWS X-Ray tracing is configured automatically. You can add custom subsegments to your traces:
 
 ```python
-from aws_lambda_powertools import Tracer
-
-
-os.environ["POWERTOOLS_SERVICE_NAME"] = "MyFunction"
-
-tracer: Tracer = Tracer()
-
-@tracer.capture_method
-def lambda_handler(event: dict, context: LambdaContext):
+def lambda_handler(event: EventBridgeEvent, context: LambdaContext):
     # Creates a new subsegment
-    with tracer.provider.in_subsegment("function-subset"):
+    with tracer.provider.in_subsegment("function-subsegment"):
         # Your logic here
         return ....
 ```
@@ -137,16 +124,7 @@ def lambda_handler(event: dict, context: LambdaContext):
 CloudWatch metrics are collected automatically for each request. You can add custom metrics:
 
 ```python
-from aws_lambda_powertools import Metrics
-
-
-os.environ["POWERTOOLS_METRICS_NAMESPACE"] = "MyFunction"
-os.environ["POWERTOOLS_SERVICE_NAME"] = "MyFunction"
-
-metrics: Metrics = Metrics()
-
-@metrics.log_metrics
-def lambda_handler(event: dict, context: LambdaContext):
+def lambda_handler(event: EventBridgeEvent, context: LambdaContext):
     metrics.add_metric(name="NewMetric", unit=MetricUnit.Count, value=1)
     return ...
 ```
@@ -174,7 +152,7 @@ export class ExampleStack extends Stack {
 
 This sets up:
 
-1. AWS Lambda function running your FastAPI application
+1. AWS Lambda function
 2. CloudWatch log group
 3. X-Ray tracing configuration
 4. CloudWatch metrics namespace

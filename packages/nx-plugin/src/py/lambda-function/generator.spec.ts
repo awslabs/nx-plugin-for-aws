@@ -156,7 +156,7 @@ describe('lambda-handler project generator', () => {
       'src',
       'app',
       'lambda-functions',
-      'test-function.ts',
+      'test-project-test-function.ts',
     );
 
     expect(tree.exists(lambdaHandlerPath)).toBeTruthy();
@@ -171,7 +171,7 @@ describe('lambda-handler project generator', () => {
       'index.ts',
     );
     expect(tree.read(lambdaHandlersIndexPath, 'utf-8')).toContain(
-      './test-function.js',
+      './test-project-test-function.js',
     );
 
     const appIndexPath = joinPathFragments(
@@ -305,12 +305,12 @@ describe('lambda-handler project generator', () => {
       'src',
       'app',
       'lambda-functions',
-      'test-function.ts',
+      'test-project-test-function.ts',
     );
     const lambdaFunctionContent = tree.read(lambdaFunctionPath, 'utf-8');
 
     expect(lambdaFunctionContent).toContain(
-      'export class TestFunction extends Function',
+      'export class TestProjectTestFunction extends Function',
     );
   });
 

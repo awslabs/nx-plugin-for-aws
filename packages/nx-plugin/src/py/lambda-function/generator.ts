@@ -66,8 +66,8 @@ const getLambdaFunctionDetails = (
 
   return {
     fullyQualifiedFunctionName,
-    normalizedFunctionPath,
     normalizedFunctionName,
+    normalizedFunctionPath,
   };
 };
 
@@ -96,43 +96,47 @@ export const lambdaFunctionProjectGenerator = async (
   }
 
   const dir = projectConfig.root;
+  const projectNameWithOutScope = schema.project.split('/').pop();
+  const normalizedProjectName = toSnakeCase(projectNameWithOutScope);
 
-  const { fullyQualifiedFunctionName, normalizedFunctionPath } =
-    getLambdaFunctionDetails(tree, {
-      project: schema.project,
-      functionName: schema.functionName,
-      functionPath: schema.functionPath,
-    });
+  const {
+    fullyQualifiedFunctionName,
+    normalizedFunctionName,
+    normalizedFunctionPath,
+  } = getLambdaFunctionDetails(tree, {
+    project: schema.project,
+    functionName: schema.functionName,
+    functionPath: schema.functionPath,
+  });
 
+  const constructFunctionName = `${normalizedProjectName}_${normalizedFunctionName}`;
+  const constructFunctionClassName = toClassName(constructFunctionName);
+  const constructFunctionKebabCase = toKebabCase(constructFunctionName);
   const lambdaFunctionClassName = toClassName(schema.functionName);
-  const lambdaFunctionKebabCase = toKebabCase(schema.functionName);
-  const lambdaFunctionSnakeCase = toSnakeCase(schema.functionName);
 
   const functionPath = joinPathFragments(
     projectConfig.sourceRoot,
     schema.functionPath ?? '',
-    `${lambdaFunctionSnakeCase}.py`,
+    `${normalizedFunctionName}.py`,
   );
 
   // Check that the project does not already have a lambda handler
   if (tree.exists(functionPath)) {
     throw new Error(
-      `This project already has a a lambda function with the name ${lambdaFunctionSnakeCase}. Please remove the lambda function before running this generator or use a different name.`,
+      `This project already has a a lambda function with the name ${normalizedFunctionName}. Please remove the lambda function before running this generator or use a different name.`,
     );
   }
 
   await sharedConstructsGenerator(tree);
 
-  const normalizedProjectName = toSnakeCase(schema.project);
-
   const enhancedOptions = {
     ...schema,
     dir,
-    name: normalizedProjectName,
+    constructFunctionClassName,
+    constructFunctionKebabCase,
+    constructHandlerFilePath: normalizedFunctionPath,
     lambdaFunctionClassName,
-    lambdaFunctionKebabCase,
-    lambdaFunctionSnakeCase,
-    lambdaFunctionFilePath: normalizedFunctionPath,
+    lambdaFunctionSnakeCase: normalizedFunctionName,
   };
 
   // Check if the project has a bundle target and if not add it
@@ -190,7 +194,7 @@ export const lambdaFunctionProjectGenerator = async (
         'src',
         'app',
         'lambda-functions',
-        `${lambdaFunctionKebabCase}.ts`,
+        `${constructFunctionKebabCase}.ts`,
       ),
     )
   ) {
@@ -229,7 +233,7 @@ export const lambdaFunctionProjectGenerator = async (
         'lambda-functions',
         'index.ts',
       ),
-      `./${lambdaFunctionKebabCase}.js`,
+      `./${constructFunctionKebabCase}.js`,
     );
   }
 
