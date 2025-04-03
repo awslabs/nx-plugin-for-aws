@@ -1,0 +1,476 @@
+---
+title: AIダンジョンゲーム
+description: '@aws/nx-pluginを使用してAI駆動のダンジョンアドベンチャーゲームを構築する方法のチュートリアル。'
+---
+
+import { Aside, Code, FileTree, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import Drawer from '@components/drawer.astro';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import InstallCommand from '@components/install-command.astro';
+import dungeonAdventureArchitecturePng from '@assets/dungeon-game-architecture.png'
+import dungeonAdventureErPng from '@assets/dungeon-adventure-er.png'
+import baselineWebsitePng from '@assets/baseline-website.png'
+import baselineGamePng from '@assets/baseline-game.png'
+import nxGraphPng from '@assets/nx-graph.png'
+import gameSelectPng from '@assets/game-select.png'
+import gameConversationPng from '@assets/game-conversation.png'
+
+## モジュール3：ストーリーAPIの実装
+
+<Aside type="caution">
+[このガイド](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html)に記載されている手順に従って、**Anthropic Claude 3.5 Sonnet v2**モデルへのアクセスを許可していることを確認してください。
+</Aside>
+
+StoryApiは、`Game`と文脈のための`Action`のリストを与えられると、ストーリーを進行させる単一のAPI `generate_story`で構成されています。このAPIはPython/FastAPIでストリーミングAPIとして実装され、さらに生成されたコードに目的に合わせた変更を加える方法も示します。
+
+### API実装
+
+APIを作成するには、まず追加の依存関係をいくつかインストールする必要があります。
+
+- `boto3`はAmazon Bedrockを呼び出すために使用されます。
+- `uvicorn`は[Lambda Web Adapter (LWA)](https://github.com/awslabs/aws-lambda-web-adapter)と組み合わせて使用する際にAPIを起動するために使用されます。
+- `copyfiles`は`bundle`タスクを更新する際にクロスプラットフォームでファイルをコピーするために必要なnpm依存関係です。
+
+これらの依存関係をインストールするには、次のコマンドを実行します：
+
+<NxCommands commands={["run dungeon_adventure.story_api:add --args boto3 uvicorn"]} />
+<InstallCommand pkg="copyfiles" dev />
+
+次に、`packages/story_api/story_api/main.py`の内容を以下のように置き換えましょう：
+
+```python
+// packages/story_api/story_api/main.py
+import json
+
+from boto3 import client
+from fastapi.responses import PlainTextResponse, StreamingResponse
+from pydantic import BaseModel
+
+from .init import app, lambda_handler
+
+handler = lambda_handler
+
+bedrock = client('bedrock-runtime')
+
+class Action(BaseModel):
+    role: str
+    content: str
+
+class StoryRequest(BaseModel):
+    genre: str
+    playerName: str
+    actions: list[Action]
+
+async def bedrock_stream(request: StoryRequest):
+    messages = [
+        {"role": "user", "content": "Continue or create a new story..."}
+    ]
+
+    for action in request.actions:
+        messages.append({"role": action.role, "content": action.content})
+
+    response = bedrock.invoke_model_with_response_stream(
+        modelId='anthropic.claude-3-sonnet-20240229-v1:0',
+        body=json.dumps({
+            "system":f"""
+            You are running an AI text adventure game in the {request.genre} genre.
+            Player: {request.playerName}. Return less than 200 characters of text.
+            """,
+            "messages": messages,
+            "max_tokens": 1000,
+            "temperature": 0.7,
+            "anthropic_version": "bedrock-2023-05-31"
+        })
+    )
+
+    stream = response.get('body')
+    if stream:
+        for event in stream:
+            chunk = event.get('chunk')
+            if chunk:
+                message = json.loads(chunk.get("bytes").decode())
+                if message['type'] == "content_block_delta":
+                    yield message['delta']['text'] or ""
+                elif message['type'] == "message_stop":
+                    yield "\n"
+
+@app.post("/story/generate",
+          openapi_extra={'x-streaming': True, 'x-query': True},
+          response_class=PlainTextResponse)
+def generate_story(request: StoryRequest) -> str:
+    return StreamingResponse(bedrock_stream(request), media_type="text/plain")
+```
+
+上記のコードを分析すると：
+
+- クライアントSDKを最終的に生成する際に、これがストリーミングAPIであることを示すために`x-streaming`設定を使用しています。これにより、型安全性を維持しながらストリーミング方式でこのAPIを利用できます！
+- これはPOSTリクエストですが、TanStack Queryがストリーミング状態を管理する利点を最大限に活用できるように、`mutation`ではなく`query`として扱うことを示す`x-query`設定を使用しています。
+- APIは単に`media_type="text/plain"`と`response_class=PlainTextResponse`の両方で定義されているテキストのストリームを返します。
+
+:::note
+FastAPIに変更を加えるたびに、プロジェクトを再ビルドして、ウェブサイトの生成されたクライアントにそれらの変更が反映されるようにする必要があります。
+
+再ビルドする前に、以下でさらにいくつかの変更を加えます。
+:::
+
+### インフラストラクチャ
+
+<Link path="get_started/tutorials/dungeon-game/1#game-ui-infrastructure">以前に設定したインフラストラクチャ</Link>では、すべてのAPIがLambdaと統合するAPI Gatewayを持つことを前提としています。私たちの`story_api`では、ストリーミングレスポンスをサポートしていないため、実際にはAPI Gatewayを使用したくありません。代わりに、[レスポンスストリーミングで構成されたLambda Function URL](https://docs.aws.amazon.com/lambda/latest/dg/configuration-response-streaming.html)を使用します。
+
+これをサポートするために、まず次のようにCDKコンストラクトを更新します：
+
+<Tabs>
+<TabItem label="http-api.ts">
+```typescript
+// packages/common/constructs/src/core/http-api.ts
+import { Construct } from 'constructs';
+import { CfnOutput, Duration, Stack } from 'aws-cdk-lib';
+import {
+  CorsHttpMethod,
+  HttpApi as _HttpApi,
+  HttpMethod,
+  IHttpRouteAuthorizer,
+} from 'aws-cdk-lib/aws-apigatewayv2';
+import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
+import {
+  Code,
+  Function,
+  FunctionUrl,
+  FunctionUrlAuthType,
+  InvokeMode,
+  LayerVersion,
+  Runtime,
+  Tracing,
+} from 'aws-cdk-lib/aws-lambda';
+import { Grant, IGrantable } from 'aws-cdk-lib/aws-iam';
+import { RuntimeConfig } from './runtime-config.js';
+
+export interface HttpApiProps {
+  readonly apiName: string;
+  readonly handler: string;
+  readonly handlerFilePath: string;
+  readonly runtime: Runtime;
+  readonly defaultAuthorizer: IHttpRouteAuthorizer;
+  readonly apiType?: 'api-gateway' | 'function-url-streaming';
+  readonly allowedOrigins?: string[];
+}
+
+export class HttpApi extends Construct {
+  public readonly api?: _HttpApi;
+  public readonly routerFunctionUrl?: FunctionUrl;
+  public readonly routerFunction: Function;
+
+  constructor(scope: Construct, id: string, props: HttpApiProps) {
+    super(scope, id);
+
+    this.routerFunction = new Function(this, `${id}Handler`, {
+      timeout: Duration.seconds(30),
+      runtime: props.runtime,
+      handler: props.handler,
+      code: Code.fromAsset(props.handlerFilePath),
+      tracing: Tracing.ACTIVE,
+      environment: {
+        AWS_CONNECTION_REUSE_ENABLED: '1',
+      },
+    });
+
+    let apiUrl;
+    if (props.apiType === 'function-url-streaming') {
+      const stack = Stack.of(this);
+      this.routerFunction.addLayers(
+        LayerVersion.fromLayerVersionArn(
+          this,
+          'LWALayer',
+          `arn:aws:lambda:${stack.region}:753240598075:layer:LambdaAdapterLayerX86:24`,
+        ),
+      );
+      this.routerFunction.addEnvironment('PORT', '8000');
+      this.routerFunction.addEnvironment(
+        'AWS_LWA_INVOKE_MODE',
+        'response_stream',
+      );
+      this.routerFunction.addEnvironment(
+        'AWS_LAMBDA_EXEC_WRAPPER',
+        '/opt/bootstrap',
+      );
+      this.routerFunctionUrl = this.routerFunction.addFunctionUrl({
+        authType: FunctionUrlAuthType.AWS_IAM,
+        invokeMode: InvokeMode.RESPONSE_STREAM,
+        cors: {
+          allowedOrigins: props.allowedOrigins ?? ['*'],
+          allowedHeaders: [
+            'authorization',
+            'content-type',
+            'x-amz-content-sha256',
+            'x-amz-date',
+            'x-amz-security-token',
+          ],
+        },
+      });
+      apiUrl = this.routerFunctionUrl.url;
+    } else {
+      this.api = new _HttpApi(this, id, {
+        corsPreflight: {
+          allowOrigins: props.allowedOrigins ?? ['*'],
+          allowMethods: [CorsHttpMethod.ANY],
+          allowHeaders: [
+            'authorization',
+            'content-type',
+            'x-amz-content-sha256',
+            'x-amz-date',
+            'x-amz-security-token',
+          ],
+        },
+        defaultAuthorizer: props.defaultAuthorizer,
+      });
+
+      this.api.addRoutes({
+        path: '/{proxy+}',
+        methods: [
+          HttpMethod.GET,
+          HttpMethod.DELETE,
+          HttpMethod.POST,
+          HttpMethod.PUT,
+          HttpMethod.PATCH,
+          HttpMethod.HEAD,
+        ],
+        integration: new HttpLambdaIntegration(
+          'RouterIntegration',
+          this.routerFunction,
+        ),
+      });
+      apiUrl = this.api.url;
+    }
+
+    new CfnOutput(this, `${props.apiName}Url`, { value: apiUrl! });
+
+    RuntimeConfig.ensure(this).config.httpApis = {
+      ...RuntimeConfig.ensure(this).config.httpApis!,
+      [props.apiName]: apiUrl,
+    };
+  }
+
+  public grantInvokeAccess(grantee: IGrantable) {
+    if (this.api) {
+      Grant.addToPrincipal({
+        grantee,
+        actions: ['execute-api:Invoke'],
+        resourceArns: [this.api.arnForExecuteApi('*', '/*', '*')],
+      });
+    } else if (this.routerFunction) {
+      Grant.addToPrincipal({
+        grantee,
+        actions: ['lambda:InvokeFunctionUrl'],
+        resourceArns: [this.routerFunction.functionArn],
+        conditions: {
+          StringEquals: {
+            'lambda:FunctionUrlAuthType': 'AWS_IAM',
+          },
+        },
+      });
+    }
+  }
+}
+```
+</TabItem>
+<TabItem label="story-api.ts">
+```diff lang="typescript"
+// packages/common/constructs/src/app/http-apis/story-api.ts
+import { Construct } from 'constructs';
+import * as url from 'url';
+import { HttpApi } from '../../core/http-api.js';
+import { HttpIamAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
+import { Runtime } from 'aws-cdk-lib/aws-lambda';
++import { Effect, PolicyStatement } from 'aws-cdk-lib/aws-iam';
+
+export class StoryApi extends HttpApi {
+  constructor(scope: Construct, id: string) {
+    super(scope, id, {
+      defaultAuthorizer: new HttpIamAuthorizer(),
+      apiName: 'StoryApi',
+      runtime: Runtime.PYTHON_3_12,
+-      handler: 'story_api.main.handler',
++      apiType: 'function-url-streaming',
++      handler: 'run.sh',
+      handlerFilePath: url.fileURLToPath(
+        new URL(
+          '../../../../../../dist/packages/story_api/bundle',
+          import.meta.url,
+        ),
+      ),
+    });
++
++    this.routerFunction.addToRolePolicy(
++      new PolicyStatement({
++        effect: Effect.ALLOW,
++        actions: ['bedrock:InvokeModelWithResponseStream'],
++        resources: [
++          'arn:aws:bedrock:*::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0',
++        ],
++      }),
++    );
+  }
+}
+```
+</TabItem>
+</Tabs>
+
+次に、[Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter)デプロイメントをサポートするように`story_api`を更新します。
+
+<Tabs>
+<TabItem label="run.sh">
+```bash
+// packages/story_api/run.sh
+#!/bin/bash
+
+PATH=$PATH:$LAMBDA_TASK_ROOT/bin \
+    PYTHONPATH=$PYTHONPATH:/opt/python:$LAMBDA_RUNTIME_DIR \
+    exec python -m uvicorn --port=$PORT story_api.main:app
+```
+</TabItem>
+<TabItem label="project.json">
+```diff lang="json"
+// packages/story_api/project.json
+{
+  "name": "dungeon_adventure.story_api",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "sourceRoot": "packages/story_api/story_api",
+  "targets": {
+    ...
+    "bundle": {
+      "cache": true,
+      "executor": "nx:run-commands",
+      "outputs": ["{workspaceRoot}/dist/packages/story_api/bundle"],
+      "options": {
+        "commands": [
+          "uv export --frozen --no-dev --no-editable --project story_api -o dist/packages/story_api/bundle/requirements.txt",
+          "uv pip install -n --no-installer-metadata --no-compile-bytecode --python-platform x86_64-manylinux2014 --python `uv python pin` --target dist/packages/story_api/bundle -r dist/packages/story_api/bundle/requirements.txt",
++          "copyfiles -f packages/story_api/run.sh dist/packages/story_api/bundle"
+        ],
+        "parallel": false
+      },
+      "dependsOn": ["compile"]
+    },
+    ...
+  }
+}
+```
+</TabItem>
+</Tabs>
+
+### デプロイとテスト
+
+まず、コードベースをビルドしましょう：
+
+<NxCommands commands={['run-many --target build --all']} />
+
+<Aside type="tip">
+リントエラーが発生した場合は、以下のコマンドを実行して自動的に修正できます。
+
+<NxCommands commands={['run-many --target lint --configuration=fix --all']} />
+</Aside>
+
+これでアプリケーションを以下のコマンドを実行してデプロイできます：
+
+<NxCommands commands={['run @dungeon-adventure/infra:deploy dungeon-adventure-infra-sandbox']} />
+
+このデプロイには約2分かかります。
+
+<Drawer title="デプロイコマンド" trigger="すべてのスタックを一度にデプロイすることもできます。詳細はこちらをクリックしてください。">
+
+CDKアプリケーションに含まれるすべてのスタックを以下のコマンドを実行してデプロイすることもできます：
+
+<NxCommands commands={['run @dungeon-adventure/infra:deploy --all']} />
+
+これは**推奨されません**。デプロイステージを別々のスタックとして分離することを選択する場合があるためです（例：`infra-prod`）。この場合、`--all`フラグはすべてのスタックをデプロイしようとし、望ましくないデプロイが発生する可能性があります！
+
+</Drawer>
+
+
+デプロイが完了すると、以下のような出力が表示されるはずです（_一部の値は編集されています_）：
+
+```bash
+dungeon-adventure-infra-sandbox
+dungeon-adventure-infra-sandbox: deploying... [2/2]
+
+ ✅  dungeon-adventure-infra-sandbox
+
+✨  Deployment time: 354s
+
+Outputs:
+dungeon-adventure-infra-sandbox.ElectroDbTableTableNameXXX = dungeon-adventure-infra-sandbox-ElectroDbTableXXX-YYY
+dungeon-adventure-infra-sandbox.GameApiGameApiUrlXXX = https://xxx.region.amazonaws.com/
+dungeon-adventure-infra-sandbox.GameUIDistributionDomainNameXXX = xxx.cloudfront.net
+dungeon-adventure-infra-sandbox.StoryApiStoryApiUrlXXX = https://xxx.lambda-url.ap-southeast-2.on.aws/
+dungeon-adventure-infra-sandbox.UserIdentityUserIdentityIdentityPoolIdXXX = region:xxx
+dungeon-adventure-infra-sandbox.UserIdentityUserIdentityUserPoolIdXXX = region_xxx
+```
+
+APIをテストする方法は以下の2つがあります：
+<ul>
+<li>FastApiサーバーのローカルインスタンスを起動し、`curl`を使用してAPIを呼び出す。</li>
+<li>
+<Drawer title="Sigv4対応curl" trigger="sigv4対応curlを使用してデプロイされたAPIを直接呼び出す">
+以下のスクリプトを`.bashrc`ファイルに追加して（`source`する）か、コマンドを実行したい同じターミナルに以下を貼り付けることができます。
+```bash
+// ~/.bashrc
+acurl () {
+    REGION=$1
+    SERVICE=$2
+    shift; shift;
+    curl --aws-sigv4 "aws:amz:$REGION:$SERVICE" --user "$(aws configure get aws_access_key_id):$(aws configure get aws_secret_access_key)" -H "X-Amz-Security-Token: $(aws configure get aws_session_token)" "$@"
+}
+```
+
+sigv4認証されたcurlリクエストを行うには、以下の例のように`acurl`を呼び出すだけです：
+
+###### API Gateway
+```bash
+acurl ap-southeast-2 execute-api -X GET https://xxx
+```
+
+###### ストリーミングLambda関数URL
+```bash
+acurl ap-southeast-2 lambda -N -X POST https://xxx
+```
+</Drawer>
+</li>
+</ul>
+
+<Tabs>
+  <TabItem label="ローカル">
+  以下のコマンドを実行して、ローカルのFastAPIサーバーを起動します：
+    <NxCommands commands={["run dungeon_adventure.story_api:serve"]} />
+
+    FastAPIサーバーが起動したら、以下のコマンドを実行して呼び出します：
+
+    ```bash
+    curl -N -X POST http://127.0.0.1:8000/story/generate \
+      -d '{"genre":"superhero", "actions":[], "playerName":"UnnamedHero"}' \
+      -H "Content-Type: application/json"
+    ```
+  </TabItem>
+  <TabItem label="デプロイ済み">
+```bash "https://xxx.lambda-url.ap-southeast-2.on.aws/" "ap-southeast-2"
+acurl ap-southeast-2 lambda -N -X POST \
+  https://xxx.lambda-url.ap-southeast-2.on.aws/story/generate \
+  -d '{"genre":"superhero", "actions":[], "playerName":"UnnamedHero"}' \
+  -H "Content-Type: application/json"
+```
+    <Aside type="caution">
+    CDKデプロイ出力値の`dungeon-adventure-infra-sandbox.StoryApiStoryApiUrlXXX`を使用して、ハイライトされたURLプレースホルダーを置き換え、リージョンを適切に設定してください。
+    </Aside>
+  </TabItem>
+</Tabs>
+
+コマンドが正常に実行されると、以下のようなレスポンスがストリーミングされるはずです：
+
+```
+UnnamedHero stood tall, his cape billowing in the wind....
+```
+
+おめでとうございます。FastAPIを使用して最初のAPIを構築してデプロイしました！ 🎉🎉🎉
