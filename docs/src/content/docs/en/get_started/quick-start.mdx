@@ -1,0 +1,129 @@
+---
+title: Quick Start Guide
+description: A quick start on how to use @aws/nx-plugin.
+---
+import { Steps } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import { Content as Prerequisites } from '@snippets/prerequisites.mdx';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
+import InstallCommand from '@components/install-command.astro';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+
+This guide walks you through the basics of installing and using `@aws/nx-plugin` to rapidly build projects on AWS.
+
+:::tip
+For a more in-depth tutorial for building a full-stack application, check out the <Link path="get_started/tutorials/dungeon-game/overview">Dungeon Adventure Tutorial</Link>.
+:::
+
+## Prerequisites
+
+The following global dependencies are needed before proceeding:
+
+<Prerequisites />
+
+## Step 1: Initialize a New Nx Workspace
+
+Run the following command to create an Nx workspace with the package manager of your choice:
+
+<CreateNxWorkspaceCommand workspace="my-project" />
+
+Once complete, navigate to the project directory:
+
+```sh
+cd my-project
+```
+
+## Step 2: Add the Nx Plugin for AWS
+
+Install the plugin with:
+
+<InstallCommand dev pkg="@aws/nx-plugin" />
+
+## Step 3: Use Generators to Scaffold your Project
+
+We'll add a tRPC API, React Website, Cognito Authentication, and CDK Infrastructure in this quick-start guide. Depending on the type of project you're building, you can choose any combination of generators to quickly bootstrap your project. Check out the __Guides__ in the navigation bar to the left to see the full list of options.
+
+### Add a tRPC API
+
+<RunGenerator generator="ts#trpc-api" requiredParameters={{ apiName: 'demo-api' }} />
+
+This will create the API inside the `packages/demo-api` folder.
+
+### Add a React Website
+
+<RunGenerator generator="ts#cloudscape-website" requiredParameters={{ name: 'demo-website' }} />
+
+This scaffolds a new React website in `packages/demo-website`.
+
+### Add Cognito Authentication
+
+<RunGenerator generator="ts#cloudscape-website#auth" requiredParameters={{ project: '@my-project/demo-website', cognitoDomain: 'my-demo' }} />
+
+This sets up the necessary infrastructure and React code to add Cognito Authentication to your website.
+
+### Connect Frontend to Backend
+
+<RunGenerator generator="api-connection" requiredParameters={{ sourceProject: '@my-project/demo-website', targetProject: '@my-project/demo-api-backend' }} />
+
+This configures the necessary providers to ensure your website can call your tRPC API.
+
+### Add CDK Infrastructure
+
+<RunGenerator generator="ts#infra" requiredParameters={{ name: 'infra' }} />
+
+This configures a CDK App which you can use to deploy your infrastructure on AWS.
+
+## Step 4: Define Cloud Resources and Deploy to AWS
+
+Open `packages/infra/src/stacks/application-stack.ts` and add the following code:
+
+```typescript
+import * as cdk from 'aws-cdk-lib';
+import { DemoApi, DemoWebsite, UserIdentity } from ':my-project/common-constructs';
+import { Construct } from 'constructs';
+
+export class ApplicationStack extends cdk.Stack {
+  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+    super(scope, id, props);
+
+    const identity = new UserIdentity(this, 'identity');
+    const api = new DemoApi(this, 'api');
+    api.grantInvokeAccess(identity.identityPool.authenticatedRole);
+
+    new DemoWebsite(this, 'website');
+  }
+}
+```
+
+This is all the CDK we need to write to deploy our full stack application.
+
+### Build and Deploy the Infrastructure
+
+Next, run the following command to build your project:
+
+<NxCommands commands={['run-many --target build --all']} />
+
+:::tip
+If you encounter any lint errors, you can run the following command to automatically fix them.
+
+<NxCommands commands={['run-many --target lint --configuration=fix --all']} />
+:::
+
+## Step 5: Run the Frontend Locally
+
+<Steps>
+1. Fetch the `runtime-config.json` file:
+
+    <NxCommands commands={['run @demo/demo-website:load:runtime-config']} />
+
+2. Start the local website server
+
+    <NxCommands commands={['run @demo/demo-website:serve']} />
+</Steps>
+
+Your website will be available at `http://localhost:4200`.
+
+---
+
+Congratulations! 🎉 You have successfully built and deployed a full-stack application using `@aws/nx-plugin`!
