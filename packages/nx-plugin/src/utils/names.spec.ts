@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { describe, expect, it } from 'vitest';
-import { toClassName, toKebabCase } from './names';
+import { toClassName, toKebabCase, toDotNotation } from './names';
 
 describe('names utils', () => {
   describe('toClassName', () => {
@@ -39,7 +39,7 @@ describe('names utils', () => {
 
     it('should preserve path separators', () => {
       expect(toKebabCase('src/components/UserProfile')).toBe(
-        'src/components/user-profile'
+        'src/components/user-profile',
       );
       expect(toKebabCase('pages/HomePage/index')).toBe('pages/home-page/index');
     });
@@ -53,6 +53,55 @@ describe('names utils', () => {
       expect(toKebabCase('hello__world')).toBe('hello-world');
       expect(toKebabCase('hello--world')).toBe('hello-world');
       expect(toKebabCase('hello  world')).toBe('hello-world');
+    });
+  });
+
+  describe('toDotNotation', () => {
+    it('should convert a string to a dot notation string', () => {
+      expect(toDotNotation('lambda_handler/my_handler')).toBe(
+        'lambda_handler.my_handler',
+      );
+    });
+
+    it('should handle empty or undefined input', () => {
+      expect(toDotNotation('')).toBe('');
+      expect(toDotNotation(undefined)).toBe(undefined);
+    });
+
+    it('should handle multiple consecutive separators', () => {
+      expect(toDotNotation('lambda_handler//my_handler')).toBe(
+        'lambda_handler.my_handler',
+      );
+    });
+
+    it('should handle .py extension', () => {
+      expect(toDotNotation('lambda_handler/my_handler.py')).toBe(
+        'lambda_handler.my_handler',
+      );
+    });
+
+    it('should handle leading and trailing slashes', () => {
+      expect(toDotNotation('/lambda_handler/my_handler/')).toBe(
+        'lambda_handler.my_handler',
+      );
+    });
+
+    it('should handle any file extensions', () => {
+      expect(toDotNotation('lambda_handler/my_handler.ts')).toBe(
+        'lambda_handler.my_handler',
+      );
+
+      expect(toDotNotation('lambda_handler/my_handler.toml')).toBe(
+        'lambda_handler.my_handler',
+      );
+
+      expect(toDotNotation('lambda_handler/my_handler.json')).toBe(
+        'lambda_handler.my_handler',
+      );
+
+      expect(toDotNotation('lambda_handler/my_handler.yaml')).toBe(
+        'lambda_handler.my_handler',
+      );
     });
   });
 });
