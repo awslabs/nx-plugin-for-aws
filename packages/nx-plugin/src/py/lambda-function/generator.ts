@@ -57,12 +57,12 @@ export interface LambdaFunctionDetails {
 
 const getLambdaFunctionDetails = (
   tree: Tree,
-  schema: { project: string; functionName: string; functionPath?: string },
+  schema: { moduleName: string; functionName: string; functionPath?: string },
 ): LambdaFunctionDetails => {
   const scope = toSnakeCase(getNpmScope(tree));
   const normalizedFunctionName = toSnakeCase(schema.functionName);
   const fullyQualifiedFunctionName = `${scope}.${normalizedFunctionName}`;
-  const normalizedFunctionPath = `${schema.functionPath ? `${toDotNotation(schema.functionPath)}.` : ''}${normalizedFunctionName}.lambda_handler`;
+  const normalizedFunctionPath = `${schema.moduleName}.${schema.functionPath ? `${toDotNotation(schema.functionPath)}.` : ''}${normalizedFunctionName}.lambda_handler`;
 
   return {
     fullyQualifiedFunctionName,
@@ -96,15 +96,19 @@ export const lambdaFunctionProjectGenerator = async (
   }
 
   const dir = projectConfig.root;
-  const projectNameWithOutScope = schema.project.split('/').pop();
+  const projectNameWithOutScope = schema.project.split('.').pop();
   const normalizedProjectName = toSnakeCase(projectNameWithOutScope);
+
+  // Module name is the last part of the source root,
+  const sourceParts = projectConfig.sourceRoot.split('/');
+  const moduleName = sourceParts[sourceParts.length - 1];
 
   const {
     fullyQualifiedFunctionName,
     normalizedFunctionName,
     normalizedFunctionPath,
   } = getLambdaFunctionDetails(tree, {
-    project: schema.project,
+    moduleName,
     functionName: schema.functionName,
     functionPath: schema.functionPath,
   });
@@ -270,6 +274,10 @@ export const lambdaFunctionProjectGenerator = async (
 
   if (!dependencies.includes('aws-lambda-powertools[tracer]')) {
     dependencies.push('aws-lambda-powertools[tracer]');
+  }
+
+  if (!dependencies.includes('aws-lambda-powertools[parser]')) {
+    dependencies.push('aws-lambda-powertools[parser]');
   }
 
   tree.write(joinPathFragments(dir, 'pyproject.toml'), stringify(projectToml));

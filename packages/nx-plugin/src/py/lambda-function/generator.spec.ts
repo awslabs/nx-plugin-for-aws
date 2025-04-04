@@ -116,6 +116,9 @@ describe('lambda-handler project generator', () => {
     expect(pyprojectToml.project.dependencies).toContain(
       'aws-lambda-powertools[tracer]',
     );
+    expect(pyprojectToml.project.dependencies).toContain(
+      'aws-lambda-powertools[parser]',
+    );
   });
 
   it('should set up shared constructs for Lambda Handler', async () => {
@@ -342,7 +345,7 @@ describe('lambda-handler project generator', () => {
     await lambdaFunctionProjectGenerator(tree, {
       project: 'test-project',
       functionName: 'test-function',
-      eventSource: 'APIGatewayProxyEvent',
+      eventSource: 'APIGatewayProxyEventModel',
     });
 
     const lambdaFunctionContent = tree.read(
@@ -351,13 +354,16 @@ describe('lambda-handler project generator', () => {
     );
 
     expect(lambdaFunctionContent).toContain(
-      'from aws_lambda_powertools.utilities.data_classes import APIGatewayProxyEvent, event_source',
+      'from aws_lambda_powertools.utilities.parser import event_parser',
     );
     expect(lambdaFunctionContent).toContain(
-      '@event_source(data_class=APIGatewayProxyEvent)',
+      'from aws_lambda_powertools.utilities.parser.models import APIGatewayProxyEventModel',
     );
     expect(lambdaFunctionContent).toContain(
-      'def lambda_handler(event: APIGatewayProxyEvent, context: LambdaContext)',
+      '@event_parser(model=APIGatewayProxyEventModel)',
+    );
+    expect(lambdaFunctionContent).toContain(
+      'def lambda_handler(event: APIGatewayProxyEventModel, context: LambdaContext)',
     );
   });
 
@@ -395,7 +401,13 @@ describe('lambda-handler project generator', () => {
     const appChanges = sortObjectKeys(
       tree
         .listChanges()
-        .filter((f) => f.path.endsWith('.py') || f.path.endsWith('.ts'))
+        .filter(
+          (f) =>
+            f.path.endsWith('.py') ||
+            f.path.startsWith(
+              'packages/common/constructs/src/app/lambda-functions',
+            ),
+        )
         .reduce((acc, curr) => {
           acc[curr.path] = tree.read(curr.path, 'utf-8');
           return acc;
