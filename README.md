@@ -58,6 +58,7 @@
 - `ts#trpc-api` - Generate a tRPC backend service with Amazon API Gateway/AWS Lambda integration and [AWS Powertools](https://github.com/aws-powertools/powertools-lambda-typescript) pre-configured.
 - `py#project` - Generate a uv based Python project.
 - `py#fast-api` - Generate a FastAPI backend service with [AWS Powertools](https://github.com/aws-powertools/powertools-lambda-python) pre-configured.
+- `py#lambda-function` - Add a lambda function to an existing python project with optional type-safe event sources.
 - `api-connection` - Connect frontend applications to backend APIs.
 - `license` - Automatically manage LICENSE files and source code headers in your workspace.
 
@@ -107,12 +108,12 @@ pnpm nx g @aws/nx-plugin:ts#infra
 
 The main purpose of this repository is to continue evolving @aws/nx-plugin, making it faster and easier to use. Development happens in the open on GitHub, and we are grateful to the community for contributing bugfixes and improvements.
 
-Read our [Contributing Guide](CONTRIBUTING.md) to learn about our development process, how to propose bugfixes and improvements, and how to build and test your changes to @aws/nx-plugin.
+Read our [Contributing Guide](/CONTRIBUTING.md) to learn about our development process, how to propose bugfixes and improvements, and how to build and test your changes to @aws/nx-plugin.
 
 ## Code of Conduct
 
-This project has adopted a Code of Conduct that we expect project participants to adhere to. Please read the [Code of Conduct](CODE_OF_CONDUCT.md) so that you can understand what actions will and will not be tolerated.
+This project has adopted a Code of Conduct that we expect project participants to adhere to. Please read the [Code of Conduct](/CODE_OF_CONDUCT.md) so that you can understand what actions will and will not be tolerated.
 
 ## License
 
-@aws/nx-plugin is [Apache 2.0 licensed](LICENSE).
+@aws/nx-plugin is [Apache 2.0 licensed](/LICENSE).
