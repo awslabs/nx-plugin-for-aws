@@ -104,6 +104,37 @@ pnpm nx g @aws/nx-plugin:ts#infra
 - [Build a Dungeon Adventure Game](https://awslabs.github.io/nx-plugin-for-aws/get_started/tutorials/dungeon-game/overview/) to get an in-depth guided tutorial on how to use the @aws/nx-plugin.
 - [Add @aws/nx-plugin to your existing project](https://awslabs.github.io/nx-plugin-for-aws/get_started/tutorials/existing-project/)
 
+## Documentation Translation
+
+The project supports automatic translation of documentation using AWS Bedrock's Haiku 3.5 model. Documentation is translated from English to multiple languages (currently Japanese, with support for French, Spanish, German, Chinese, and Korean).
+
+### Running Translations Locally
+
+To translate documentation locally:
+
+```bash
+# Translate only changed files
+pnpm tsx ./scripts/translate.ts
+
+# Translate all files
+pnpm tsx ./scripts/translate.ts --all
+
+# Translate to specific languages
+pnpm tsx ./scripts/translate.ts --languages jp,fr,es
+
+# Show what would be translated without actually translating
+pnpm tsx ./scripts/translate.ts --dry-run
+```
+
+### GitHub Workflow
+
+A GitHub workflow automatically translates documentation when changes are made to English documentation files in pull requests. The workflow:
+
+1. Detects changes to English documentation files
+2. Translates the changed files using AWS Bedrock
+3. Commits the translations back to the source branch
+4. Updates the PR with translation status
+
 ## Contributing
 
 The main purpose of this repository is to continue evolving @aws/nx-plugin, making it faster and easier to use. Development happens in the open on GitHub, and we are grateful to the community for contributing bugfixes and improvements.

@@ -36,6 +36,9 @@ export default defineConfig({
         jp: {
           label: '日本語',
         },
+        ko: {
+          label: '한국인',
+        },
       },
       logo: {
         dark: './src/content/docs/assets/bulb-white.svg',
@@ -136,6 +139,10 @@ export default defineConfig({
             {
               label: 'Usage Metrics',
               link: '/about/metrics',
+            },
+            {
+              label: 'Documentation Translation',
+              link: '/about/translation',
             },
           ],
           collapsed: true,
