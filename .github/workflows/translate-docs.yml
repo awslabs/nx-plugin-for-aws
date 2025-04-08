@@ -14,7 +14,7 @@ on:
       languages:
         description: 'Target languages (comma-separated)'
         type: string
-        default: 'jp'
+        default: 'ko,jp'
         required: true
 
 permissions:
@@ -30,6 +30,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.head_ref }} # Explicitly checkout the PR branch
           fetch-depth: 0 # Required to detect changed files
       - uses: ./.github/actions/init-monorepo
       - name: Configure AWS credentials
@@ -70,28 +71,10 @@ jobs:
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-
+          
+          # Add and commit changes
           git add docs/src/content/docs/
           git commit -m "docs: update translations" --no-verify
-
-          # Push to the current branch
+          
+          # Push directly to the PR branch
           git push origin HEAD:${{ github.head_ref }}
-
-      - name: Update PR
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const hasChanges = '${{ steps.translate.outputs.has_changes }}' === 'true';
-
-            const comment = hasChanges
-              ? '📚 Documentation translations have been updated and committed to this PR.'
-              : '📚 No documentation translation changes were needed for this PR.';
-
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: comment
-            });
