@@ -1,0 +1,130 @@
+---
+title: "빠른 시작 가이드"
+description: "@aws/nx-plugin 사용 방법에 대한 빠른 시작."
+---
+
+import { Steps } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import { Content as Prerequisites } from '@snippets/prerequisites.mdx';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
+import InstallCommand from '@components/install-command.astro';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+
+이 가이드는 AWS에서 프로젝트를 신속하게 구축하기 위해 `@aws/nx-plugin`을 설치하고 사용하는 기본 사항을 안내합니다.
+
+:::tip
+전체 스택 애플리케이션을 구축하는 더 심층적인 튜토리얼은 <Link path="get_started/tutorials/dungeon-game/overview">던전 어드벤처 튜토리얼</Link>을 확인해보세요.
+:::
+
+## 사전 요구 사항
+
+다음의 전역 종속성이 진행하기 전에 필요합니다:
+
+<Prerequisites />
+
+## 1단계: 새 Nx 워크스페이스 초기화
+
+다음 명령을 실행하여 선택한 패키지 관리자로 Nx 워크스페이스를 생성합니다:
+
+<CreateNxWorkspaceCommand workspace="my-project" />
+
+완료되면 프로젝트 디렉터리로 이동합니다:
+
+```sh
+cd my-project
+```
+
+## 2단계: AWS용 Nx 플러그인 추가
+
+다음과 같이 플러그인을 설치합니다:
+
+<InstallCommand dev pkg="@aws/nx-plugin" />
+
+## 3단계: 생성기를 사용하여 프로젝트 스캐폴딩하기
+
+tRPC API, React 웹사이트, Cognito 인증 및 CDK 인프라를 이 빠른 시작 가이드에 추가할 것입니다. 구축 중인 프로젝트 유형에 따라 프로젝트를 빠르게 부트스트랩하기 위해 생성기의 조합을 선택할 수 있습니다. 전체 옵션 목록을 보려면 왼쪽 탐색 바의 __가이드__ 를 확인하세요.
+
+### tRPC API 추가
+
+<RunGenerator generator="ts#trpc-api" requiredParameters={{ apiName: 'demo-api' }} />
+
+이렇게 하면 `packages/demo-api` 폴더 내부에 API가 생성됩니다.
+
+### React 웹사이트 추가
+
+<RunGenerator generator="ts#cloudscape-website" requiredParameters={{ name: 'demo-website' }} />
+
+이는 `packages/demo-website`에 새로운 React 웹사이트를 스캐폴딩합니다.
+
+### Cognito 인증 추가
+
+<RunGenerator generator="ts#cloudscape-website#auth" requiredParameters={{ project: '@my-project/demo-website', cognitoDomain: 'my-demo' }} />
+
+이는 웹사이트에 Cognito 인증을 추가하는 데 필요한 인프라 및 React 코드를 설정합니다.
+
+### 프론트엔드와 백엔드 연결
+
+<RunGenerator generator="api-connection" requiredParameters={{ sourceProject: '@my-project/demo-website', targetProject: '@my-project/demo-api-backend' }} />
+
+이는 웹사이트가 tRPC API를 호출할 수 있도록 필요한 프로바이더를 구성합니다.
+
+### CDK 인프라 추가
+
+<RunGenerator generator="ts#infra" requiredParameters={{ name: 'infra' }} />
+
+이는 AWS에 인프라를 배포하는 데 사용할 수 있는 CDK 앱을 구성합니다.
+
+## 4단계: 클라우드 리소스 정의 및 AWS에 배포
+
+`packages/infra/src/stacks/application-stack.ts`를 열고 다음 코드를 추가하세요:
+
+```typescript
+import * as cdk from 'aws-cdk-lib';
+import { DemoApi, DemoWebsite, UserIdentity } from ':my-project/common-constructs';
+import { Construct } from 'constructs';
+
+export class ApplicationStack extends cdk.Stack {
+  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+    super(scope, id, props);
+
+    const identity = new UserIdentity(this, 'identity');
+    const api = new DemoApi(this, 'api');
+    api.grantInvokeAccess(identity.identityPool.authenticatedRole);
+
+    new DemoWebsite(this, 'website');
+  }
+}
+```
+
+이것이 전체 스택 애플리케이션을 배포하는 데 필요한 모든 CDK 코드입니다.
+
+### 인프라 빌드 및 배포
+
+다음으로, 프로젝트를 빌드하려면 다음 명령을 실행하세요:
+
+<NxCommands commands={['run-many --target build --all']} />
+
+:::tip
+린트 오류가 발생하면 다음 명령을 실행하여 자동으로 수정할 수 있습니다.
+
+<NxCommands commands={['run-many --target lint --configuration=fix --all']} />
+:::
+
+## Step 5: 로컬에서 프론트엔드 실행하기
+
+<Steps>
+1. `runtime-config.json` 파일 가져오기:
+
+    <NxCommands commands={['run @demo/demo-website:load:runtime-config']} />
+
+2. 로컬 웹사이트 서버 시작
+
+    <NxCommands commands={['run @demo/demo-website:serve']} />
+</Steps>
+
+웹사이트는 `http://localhost:4200`에서 사용 가능합니다.
+
+---
+
+축하합니다! 🎉 `@aws/nx-plugin`을 사용하여 풀스택 애플리케이션을 성공적으로 빌드하고 배포했습니다!

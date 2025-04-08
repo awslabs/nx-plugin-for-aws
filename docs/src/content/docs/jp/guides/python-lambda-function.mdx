@@ -1,0 +1,207 @@
+---
+title: "Pythonラムダ関数"
+description: "Pythonラムダ関数のリファレンスドキュメント"
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import schema from '../../../../../packages/nx-plugin/src/py/lambda-function/schema.json';
+
+Pythonラムダ関数ジェネレーターは、既存のPythonプロジェクトにラムダ関数を追加する機能を提供します。
+
+このジェネレーターは、AWS CDKインフラストラクチャのセットアップを使用して、新しいPythonラムダハンドラーを作成します。生成されたバックエンドは、サーバーレスデプロイメントにAWS Lambdaを使用し、[AWS Lambda Powertoolsのパーサー](https://docs.powertools.aws.dev/lambda/python/latest/utilities/parser/)を使用してオプションの型安全性を提供します。[AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/)をログ、AWS X-Rayトレース、Cloudwatchメトリクスを含む観測性のために設定します。
+
+## 使用方法
+
+### Lambda関数の生成
+
+Lambda関数は2つの方法で生成できます：
+
+<RunGenerator generator="py#lambda-function" />
+
+### オプション
+
+<GeneratorParameters schema={schema} />
+
+## ジェネレーターの出力
+
+ジェネレーターは、プロジェクトに以下のファイルを追加します：
+
+<FileTree>
+
+- <module-name>
+  - <lambda-function>.py 関数の実装
+
+</FileTree>
+
+ジェネレーターは、`packages/common/constructs`ディレクトリに配置される、関数をデプロイするために使用できるCDKコンストラクトも作成します。
+
+`functionPath`オプションが提供される場合、ジェネレーターは指定されたパスに必要なファイルを追加します：
+
+<FileTree>
+
+- <module-name>
+  - <custom-path>
+    - <function-name>.py 関数の実装
+
+</FileTree>
+
+## 関数の実装
+
+メインの関数実装は `<function-name>.py` にあります。以下は例です：
+
+```python
+import os
+
+from aws_lambda_powertools import Logger, Metrics, Tracer
+from aws_lambda_powertools.metrics import MetricUnit
+from aws_lambda_powertools.utilities.parser import event_parser
+from aws_lambda_powertools.utilities.parser.models import EventBridgeModel
+from aws_lambda_powertools.utilities.typing import LambdaContext
+
+os.environ["POWERTOOLS_METRICS_NAMESPACE"] = "Foo"
+os.environ["POWERTOOLS_SERVICE_NAME"] = "Foo"
+
+logger: Logger = Logger()
+metrics: Metrics = Metrics()
+tracer: Tracer = Tracer()
+
+@tracer.capture_lambda_handler
+@metrics.log_metrics
+@event_parser(model=EventBridgeModel)
+def lambda_handler(event: EventBridgeModel, context: LambdaContext):
+    logger.info("Received event", extra={"event": event.model_dump() })
+    metrics.add_metric(name="InvocationCount", unit=MetricUnit.Count, value=1)
+
+    try:
+        # TODO: 実装
+        metrics.add_metric(name="SuccessCount", unit=MetricUnit.Count, value=1)
+        # TODO: 必要に応じて成功レスポンスを実装
+    except Exception as e:
+        logger.exception(e)
+        metrics.add_metric(name="ErrorCount", unit=MetricUnit.Count, value=1)
+        # TODO: 必要に応じてエラーレスポンスを実装
+```
+
+ジェネレーターは自動的にいくつかの機能を設定します：
+
+1. 可観測性のためのAWS Lambda Powertoolsの統合
+2. メトリクスの収集
+3. `@event_parser` を使用した型安全性
+
+### AWS Lambda Powertoolsによる可観測性
+
+#### ログ記録
+
+ジェネレーターは、AWS Lambda Powertoolsを使用して構造化ログを設定します。
+
+```python
+def lambda_handler(event: EventBridgeModel, context: LambdaContext):
+    logger.info("Received event", extra={"event": event.model_dump()})
+```
+
+:::tip
+デバッグと監視を容易にするために、すべての一意のリクエストに相関IDを設定することをお勧めします。相関IDのベストプラクティスについては、[aws powertools logger](https://docs.powertools.aws.dev/lambda/python/2.22.0/core/logger/#setting-a-correlation-id)のドキュメントを参照してください。
+:::
+
+ロガーは自動的に以下を含めます：
+
+- イベントリクエスト
+- Lambdaコンテキスト情報
+- コールドスタートインジケーター
+
+#### トレース
+
+AWS X-Rayトレースは自動的に設定されます。トレースにカスタムサブセグメントを追加できます：
+
+```python
+def lambda_handler(event: EventBridgeModel, context: LambdaContext):
+    # 新しいサブセグメントを作成
+    with tracer.provider.in_subsegment("function-subsegment"):
+        # ここにロジックを記述
+        return ....
+```
+
+#### メトリクス
+
+CloudWatchメトリクスは各リクエストに対して自動的に収集されます。カスタムメトリクスを追加できます：
+
+```python
+def lambda_handler(event: EventBridgeModel, context: LambdaContext):
+    metrics.add_metric(name="NewMetric", unit=MetricUnit.Count, value=1)
+    return ...
+```
+
+デフォルトのメトリクスには以下が含まれます：
+
+- 呼び出し回数
+- 成功/失敗回数
+- コールドスタートメトリクス
+
+#### 型安全性
+
+Lambdaファンクション生成時に `eventSource` を選択した場合、関数は [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/utilities/parser/) の `@event_parser` で計装されます。例：
+
+```python {3}
+@event_parser(model=EventBridgeModel)
+def lambda_handler(event: EventBridgeModel, context: LambdaContext):
+    event.detail_type # <- IDEの自動補完で型安全
+```
+
+これにより、[FastAPI](/nx-plugin-for-aws/guides/fastapi)で作業するのと同様に、[Pydantic](https://docs.pydantic.dev/latest/)を使用してデータモデルを定義できます。
+
+:::tip
+DynamoDBストリームやEventBridgeイベントなど、イベント内にカスタムデータがネストされている場合、そのカスタムデータの型安全性を提供するために[エンベロープ](https://docs.powertools.aws.dev/lambda/python/latest/utilities/parser/#envelopes)の使用が有効かもしれません。
+:::
+
+イベントを型付けしたくない場合は、`eventSource` に `Any` を選択するだけです。
+
+## 関数のデプロイ
+
+Pythonのラムダ関数ジェネレーターは、`common/constructs`フォルダーに関数をデプロイするためのCDKコンストラクトを作成します。これをCDKアプリケーションで使用できます：
+
+```ts
+import { MyProjectMyFunction } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    // スタックに関数を追加
+    const fn = new MyProjectMyFunction(this, 'MyFunction');
+  }
+}
+```
+
+これにより以下が設定されます：
+
+1. AWS Lambda関数
+2. CloudWatchロググループ
+3. X-Rayトレース設定
+4. CloudWatchメトリクス名前空間
+
+この関数は、任意のラムダ[イベントソース](https://docs.powertools.aws.dev/lambda/python/latest/utilities/parser/)のターゲットとして使用できます：
+
+:::note
+ハンドラー関数内でイベントを適切に処理するために、イベントソースが選択された`eventSource`オプションと一致することを確認してください。
+:::
+
+以下の例は、Event Bridgeを使用してスケジュールに従ってラムダ関数を呼び出すためのCDKコードを示しています：
+
+```ts
+import { EventPattern, Rule, Schedule } from 'aws-cdk-lib/aws-events';
+import { LambdaFunction } from 'aws-cdk-lib/aws-events-targets';
+import { MyProjectMyFunction } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    // スタックに関数を追加
+    const fn = new MyProjectMyFunction(this, 'MyFunction');
+
+    // 関数をEventBridgeタスクに追加
+    const eventRule = new Rule(this, 'MyFunctionScheduleRule', {
+      schedule: Schedule.cron({ minute: '15' }),
+      targets: [new LambdaFunction(fn)],
+    });
+  }
+}
+```

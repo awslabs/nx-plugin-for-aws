@@ -1,0 +1,119 @@
+---
+title: "AIダンジョンゲーム"
+description: "@aws/nx-pluginを使用してAIパワードのダンジョン冒険ゲームを構築する方法のチュートリアル。"
+---
+
+import { Aside, Code, FileTree, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import Drawer from '@components/drawer.astro';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import InstallCommand from '@components/install-command.astro';
+import dungeonAdventureArchitecturePng from '@assets/dungeon-game-architecture.png'
+import dungeonAdventureErPng from '@assets/dungeon-adventure-er.png'
+import baselineWebsitePng from '@assets/baseline-website.png'
+import baselineGamePng from '@assets/baseline-game.png'
+import nxGraphPng from '@assets/nx-graph.png'
+import gameSelectPng from '@assets/game-select.png'
+import gameConversationPng from '@assets/game-conversation.png'
+
+## モジュール3: Story API の実装
+
+<Aside type="caution">
+[このガイド](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html)に記載された手順に従って、**Anthropic Claude 3.5 Sonnet v2** モデルへのアクセス権を付与していることを確認してください。
+</Aside>
+
+StoryApiは、`Game`と`Action`のリストをコンテキストとして受け取り、ストーリーを進行させる単一のAPI `generate_story`で構成されています。このAPIは、Python/FastAPIでストリーミングAPIとして実装され、生成されたコードを目的に合わせて変更する方法も示します。
+
+### API の実装
+
+APIを作成するために、まず追加の依存関係をいくつかインストールする必要があります。
+
+- `boto3`はAmazon Bedrockを呼び出すために使用されます。
+- `uvicorn`は[Lambda Web Adapter (LWA)](https://github.com/awslabs/aws-lambda-web-adapter)と組み合わせて使用し、APIを起動します。
+- `copyfiles`は、`bundle`タスクを更新する際にファイルをクロスプラットフォームでコピーするために必要なnpm依存関係です。
+
+これらの依存関係をインストールするには、以下のコマンドを実行します：
+
+<NxCommands commands={["run dungeon_adventure.story_api:add --args boto3 uvicorn"]} />
+<InstallCommand pkg="copyfiles" dev />
+
+次に、`packages/story_api/story_api/main.py`の内容を以下のように置き換えます：
+
+```python
+// packages/story_api/story_api/main.py
+import json
+
+from boto3 import client
+from fastapi.responses import PlainTextResponse, StreamingResponse
+from pydantic import BaseModel
+
+from .init import app, lambda_handler
+
+handler = lambda_handler
+
+bedrock = client('bedrock-runtime')
+
+class Action(BaseModel):
+    role: str
+    content: str
+
+class StoryRequest(BaseModel):
+    genre: str
+    playerName: str
+    actions: list[Action]
+
+async def bedrock_stream(request: StoryRequest):
+    messages = [
+        {"role": "user", "content": "Continue or create a new story..."}
+    ]
+
+    for action in request.actions:
+        messages.append({"role": action.role, "content": action.content})
+
+    response = bedrock.invoke_model_with_response_stream(
+        modelId='anthropic.claude-3-sonnet-20240229-v1:0',
+        body=json.dumps({
+            "system":f"""
+            You are running an AI text adventure game in the {request.genre} genre.
+            Player: {request.playerName}. Return less than 200 characters of text.
+            """,
+            "messages": messages,
+            "max_tokens": 1000,
+            "temperature": 0.7,
+            "anthropic_version": "bedrock-2023-05-31"
+        })
+    )
+
+    stream = response.get('body')
+    if stream:
+        for event in stream:
+            chunk = event.get('chunk')
+            if chunk:
+                message = json.loads(chunk.get("bytes").decode())
+                if message['type'] == "content_block_delta":
+                    yield message['delta']['text'] or ""
+                elif message['type'] == "message_stop":
+                    yield "\n"
+
+@app.post("/story/generate",
+          openapi_extra={'x-streaming': True, 'x-query': True},
+          response_class=PlainTextResponse)
+def generate_story(request: StoryRequest) -> str:
+    return StreamingResponse(bedrock_stream(request), media_type="text/plain")
+```
+
+上記のコードを分析すると：
+
+- クライアントSDKを最終的に生成する際に、`x-streaming`設定を使用してこれがストリーミングAPIであることを示します。これにより、型安全を維持しながらAPIをストリーミング方式で消費できます！
+- `x-query`設定を使用して、これがPOSTリクエストであるにもかかわらず、`query`として扱われることを示し、TanStack Queryがストリーミング状態を完全に管理できるようにします。
+- APIは、`media_type="text/plain"`と`response_class=PlainTextResponse`で定義されたテキストのストリームを単純に返します。
+
+:::note
+FastAPIに変更を加えるたびに、Webサイトで生成されたクライアントにその変更を反映させるには、プロジェクトを再構築する必要があります。
+
+再構築する前に、以下でさらにいくつかの変更を加えます。
+:::
+
+（以下、同様に翻訳を続けます）

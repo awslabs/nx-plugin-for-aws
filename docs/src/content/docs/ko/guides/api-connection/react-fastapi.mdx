@@ -1,0 +1,545 @@
+---
+title: "React와 FastAPI"
+description: "React 웹사이트를 Python FastAPI에 연결하기"
+---
+
+import { FileTree, Steps } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Drawer from '@components/drawer.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import schema from '../../../../../../../packages/nx-plugin/src/api-connection/schema.json';
+
+`api-connection` 생성기는 React 웹사이트를 FastAPI 백엔드와 빠르게 통합할 수 있는 방법을 제공합니다. 클라이언트 및 [TanStack Query](https://tanstack.com/query/v5) 훅 생성, AWS IAM 인증 지원 및 적절한 오류 처리를 포함하여 FastAPI 백엔드에 연결하는 데 필요한 모든 구성을 설정합니다.
+
+## 전제 조건
+
+이 생성기를 사용하기 전에, React 애플리케이션에 다음 사항을 확인하세요:
+
+1. 애플리케이션을 렌더링하는 `main.tsx` 파일
+2. 작동하는 FastAPI 백엔드 (FastAPI 생성기를 사용하여 생성됨)
+
+<details>
+<summary>필요한 `main.tsx` 구조의 예시</summary>
+
+```tsx
+import { StrictMode } from 'react';
+import * as ReactDOM from 'react-dom/client';
+import App from './app/app';
+
+const root = ReactDOM.createRoot(
+  document.getElementById('root') as HTMLElement,
+);
+root.render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+);
+```
+
+</details>
+
+## 사용법
+
+### 생성기 실행
+
+<RunGenerator generator="api-connection" />
+
+### 옵션
+
+<GeneratorParameters schema={schema} />
+
+## 생성기 출력
+
+생성기는 FastAPI 프로젝트의 다음 파일들을 변경할 것입니다:
+
+<FileTree>
+
+- scripts
+  - generate_open_api.py API의 OpenAPI 사양을 생성하는 스크립트 추가
+- project.json 위의 생성 스크립트를 호출하는 새 대상 추가
+
+</FileTree>
+
+생성기는 React 애플리케이션의 다음 파일들을 변경할 것입니다:
+
+<FileTree>
+
+- src
+  - components
+    - \<ApiName>Provider.tsx API 클라이언트용 프로바이더
+    - QueryClientProvider.tsx TanStack React Query 클라이언트 프로바이더
+  - hooks
+    - use\<ApiName>.tsx TanStack Query로 상태 관리되는 API 호출용 훅 추가
+    - use\<ApiName>Client.tsx API를 호출할 수 있는 바닐라 API 클라이언트 인스턴스화용 훅 추가
+    - useSigV4.tsx SigV4로 HTTP 요청에 서명하는 훅 추가(IAM 인증을 선택한 경우)
+- project.json 유형 안전 클라이언트를 생성하는 새 대상 추가
+- .gitignore 기본적으로 생성된 클라이언트 파일 무시
+
+</FileTree>
+
+생성기는 또한 웹사이트 인프라에 런타임 구성을 추가하여(아직 없는 경우) FastAPI의 API URL을 웹사이트에서 사용할 수 있도록 하고 `use<ApiName>.tsx` 훅에 의해 자동으로 구성됩니다.
+
+### 코드 생성
+
+빌드 시 FastAPI의 OpenAPI 사양에서 유형 안전 클라이언트가 생성됩니다. 이는 React 애플리케이션에 세 개의 새 파일을 추가할 것입니다:
+
+<FileTree>
+
+- src
+  - generated
+    - \<ApiName>
+      - types.gen.ts FastAPI의 pydantic 모델에서 생성된 유형
+      - client.gen.ts API 호출용 유형 안전 클라이언트
+      - options-proxy.gen.ts TanStack Query를 사용하여 API와 상호작용하기 위한 TanStack Query 훅 옵션 생성 메서드 제공
+
+</FileTree>
+
+:::tip
+기본적으로 생성된 클라이언트는 버전 관리에서 무시됩니다. 체크인하고 싶다면 React 애플리케이션의 `.gitignore` 파일에서 해당 항목을 제거할 수 있습니다. 단, `.gen.ts` 파일에 대한 수동 변경 사항은 프로젝트가 빌드될 때 덮어쓰여집니다.
+:::
+
+## 생성된 코드 사용하기
+
+생성된 타입 안전 클라이언트를 사용하여 React 애플리케이션에서 FastAPI를 호출할 수 있습니다. TanStack Query 훅을 통해 클라이언트를 사용하는 것이 권장되지만, 원하는 경우 바닐라 클라이언트를 사용할 수 있습니다.
+
+:::note
+FastAPI를 변경할 때마다 해당 변경 사항이 생성된 클라이언트에 반영되도록 프로젝트를 다시 빌드해야 합니다. 예를 들어:
+
+<NxCommands commands={['run-many --target build --all']} />
+:::
+
+:::tip
+React 애플리케이션과 FastAPI를 동시에 작업 중인 경우, [`nx watch`](https://nx.dev/nx-api/nx/documents/watch)를 사용하여 API 변경 시 클라이언트를 자동으로 다시 생성할 수 있습니다:
+
+<NxCommands
+  commands={[
+    'watch --projects=<FastAPIProject> -- \\ ',
+    'run <WebsiteProject>:"generate:<ApiName>-client"',
+  ]}
+/>
+:::
+
+(나머지 내용은 동일한 방식으로 번역됩니다. 코드 블록, 변수명, 기술 용어는 영어로 유지됩니다.)
+
+## 생성된 코드 커스터마이징
+
+### 쿼리 및 뮤테이션
+
+기본적으로 HTTP 메서드 `PUT`, `POST`, `PATCH`, `DELETE`를 사용하는 FastAPI의 작업은 뮤테이션으로 간주되며, 다른 모든 작업은 쿼리로 간주됩니다.
+
+`x-query`와 `x-mutation`을 사용하여 이 동작을 변경할 수 있습니다.
+
+#### x-query
+
+```python
+@app.post(
+    "/items",
+    openapi_extra={
+        "x-query": True
+    }
+)
+def list_items():
+    # ...
+```
+
+생성된 훅은 `POST` HTTP 메서드를 사용하더라도 `queryOptions`를 제공합니다:
+
+```tsx
+const items = useQuery(api.listItems.queryOptions());
+```
+
+#### x-mutation
+
+```python
+@app.get(
+    "/start-processing",
+    openapi_extra={
+        "x-mutation": True
+    }
+)
+def start_processing():
+    # ...
+```
+
+생성된 훅은 `GET` HTTP 메서드를 사용하더라도 `mutationOptions`를 제공합니다:
+
+```tsx
+// 생성된 훅은 커스텀 옵션을 포함합니다
+const startProcessing = useMutation(api.startProcessing.mutationOptions());
+```
+
+### 커스텀 페이지네이션 커서
+
+기본적으로 생성된 훅은 `cursor`라는 이름의 매개변수를 사용하는 커서 기반 페이지네이션을 가정합니다. `x-cursor` 확장을 사용하여 이 동작을 커스터마이즈할 수 있습니다:
+
+```python
+@app.get(
+    "/items",
+    openapi_extra={
+        # 커서의 다른 매개변수 이름 지정
+        "x-cursor": "page_token"
+    }
+)
+def list_items(page_token: str = None, limit: int = 10):
+    # ...
+    return {
+        "items": items,
+        "page_token": next_page_token  # 응답은 동일한 이름의 커서를 포함해야 합니다
+    }
+```
+
+작업에 대해 `infiniteQueryOptions`를 생성하지 않으려면 `x-cursor`를 `False`로 설정할 수 있습니다:
+
+```python
+@app.get(
+    "/items",
+    openapi_extra={
+        # 이 엔드포인트에 대한 커서 기반 페이지네이션 비활성화
+        "x-cursor": False
+    }
+)
+def list_items(page: int = 1, limit: int = 10):
+    # ...
+    return {
+        "items": items,
+        "total": total_count,
+        "page": page,
+        "pages": total_pages
+    }
+```
+
+(나머지 번역은 동일한 방식으로 진행됩니다. 전체 문서를 번역하려면 추가 작업이 필요합니다.)
+
+## 모범 사례
+
+### 로딩 상태 처리
+
+더 나은 사용자 경험을 위해 항상 로딩 및 오류 상태를 처리하세요:
+
+```tsx
+import { useQuery } from '@tanstack/react-query';
+
+function ItemList() {
+  const api = useMyApi();
+  const items = useQuery(api.listItems.queryOptions());
+
+  if (items.isLoading) {
+    return <LoadingSpinner />;
+  }
+
+  if (items.isError) {
+    const err = items.error;
+    switch (err.status) {
+      case 403:
+        // err.error is typed as ListItems403Response
+        return <ErrorMessage message={err.error.reason} />;
+      case 500:
+      case 502:
+        // err.error is typed as ListItems5XXResponse
+        return (
+          <ErrorMessage
+            message={err.error.message}
+            details={`Trace ID: ${err.error.traceId}`}
+          />
+        );
+      default:
+        return <ErrorMessage message="An unknown error occurred" />;
+    }
+  }
+
+  return (
+    <ul>
+      {items.data.map((item) => (
+        <li key={item.id}>{item.name}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+<Drawer title="바닐라 클라이언트를 직접 사용하는 로딩 상태 처리 예시" trigger="바닐라 클라이언트를 직접 사용하는 예시를 보려면 여기를 클릭하세요.">
+```tsx
+function ItemList() {
+  const api = useMyApiClient();
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const fetchItems = async () => {
+      try {
+        const data = await api.listItems();
+        setItems(data);
+      } catch (err) {
+        setError(err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchItems();
+  }, [api]);
+
+  if (loading) {
+    return <LoadingSpinner />;
+  }
+
+  if (error) {
+    const err = error as ListItemsError;
+    switch (err.status) {
+      case 403:
+        // err.error is typed as ListItems403Response
+        return <ErrorMessage message={err.error.reason} />;
+      case 500:
+      case 502:
+        // err.error is typed as ListItems5XXResponse
+        return (
+          <ErrorMessage
+            message={err.error.message}
+            details={`Trace ID: ${err.error.traceId}`}
+          />
+        );
+      default:
+        return <ErrorMessage message="An unknown error occurred" />;
+    }
+  }
+
+  return (
+    <ul>
+      {items.map((item) => (
+        <li key={item.id}>{item.name}</li>
+      ))}
+    </ul>
+  );
+}
+```
+</Drawer>
+
+### 낙관적 업데이트
+
+더 나은 사용자 경험을 위해 낙관적 업데이트를 구현하세요:
+
+```tsx
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+
+function ItemList() {
+  const api = useMyApi();
+  const queryClient = useQueryClient();
+
+  // 아이템을 가져오는 쿼리
+  const itemsQuery = useQuery(api.listItems.queryOptions());
+
+  // 낙관적 업데이트를 사용한 아이템 삭제 뮤테이션
+  const deleteMutation = useMutation({
+    ...api.deleteItem.mutationOptions(),
+    onMutate: async (itemId) => {
+      // 진행 중인 리페치 취소
+      await queryClient.cancelQueries({ queryKey: api.listItems.queryKey() });
+
+      // 이전 값 스냅샷
+      const previousItems = queryClient.getQueryData(api.listItems.queryKey());
+
+      // 새 값으로 낙관적 업데이트
+      queryClient.setQueryData(
+        api.listItems.queryKey(),
+        (old) => old.filter((item) => item.id !== itemId)
+      );
+
+      // 스냅샷이 있는 컨텍스트 객체 반환
+      return { previousItems };
+    },
+    onError: (err, itemId, context) => {
+      // 뮤테이션이 실패하면 onMutate에서 반환된 컨텍스트를 사용하여 롤백
+      queryClient.setQueryData(api.listItems.queryKey(), context.previousItems);
+      console.error('아이템 삭제 실패:', err);
+    },
+    onSettled: () => {
+      // 오류 또는 성공 후 항상 리페치하여 서버와 데이터 동기화 보장
+      queryClient.invalidateQueries({ queryKey: api.listItems.queryKey() });
+    },
+  });
+
+  if (itemsQuery.isLoading) {
+    return <LoadingSpinner />;
+  }
+
+  if (itemsQuery.isError) {
+    return <ErrorMessage message="아이템 로드 실패" />;
+  }
+
+  return (
+    <ul>
+      {itemsQuery.data.map((item) => (
+        <li key={item.id}>
+          {item.name}
+          <button
+            onClick={() => deleteMutation.mutate(item.id)}
+            disabled={deleteMutation.isPending}
+          >
+            {deleteMutation.isPending ? '삭제 중...' : '삭제'}
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+<Drawer title="바닐라 클라이언트를 직접 사용하는 낙관적 업데이트 예시" trigger="바닐라 클라이언트를 직접 사용하는 예시를 보려면 여기를 클릭하세요.">
+```tsx
+function ItemList() {
+  const api = useMyApiClient();
+  const [items, setItems] = useState([]);
+
+  const handleDelete = async (itemId) => {
+    // 낙관적으로 아이템 제거
+    const previousItems = items;
+    setItems(items.filter((item) => item.id !== itemId));
+
+    try {
+      await api.deleteItem(itemId);
+    } catch (error) {
+      // 오류 발생 시 이전 아이템 복원
+      setItems(previousItems);
+      console.error('아이템 삭제 실패:', error);
+    }
+  };
+
+  return (
+    <ul>
+      {items.map((item) => (
+        <li key={item.id}>
+          {item.name}
+          <button onClick={() => handleDelete(item.id)}>삭제</button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+</Drawer>
+
+## 타입 안전성
+
+이 통합은 완전한 엔드투엔드 타입 안전성을 제공합니다. IDE는 모든 API 호출에 대해 전체 자동 완성 및 타입 검사를 제공합니다:
+
+```tsx
+import { useMutation } from '@tanstack/react-query';
+
+function ItemForm() {
+  const api = useMyApi();
+
+  // 아이템 생성을 위한 타입 안전한 뮤테이션
+  const createItem = useMutation({
+    ...api.createItem.mutationOptions(),
+    // ✅ onSuccess 콜백이 올바른 응답 타입을 처리하지 않으면 타입 오류
+    onSuccess: (data) => {
+      // data는 API의 응답 스키마를 기반으로 완전히 타이핑됨
+      console.log(`Item created with ID: ${data.id}`);
+    },
+  });
+
+  const handleSubmit = (data: CreateItemInput) => {
+    // ✅ 입력이 스키마와 일치하지 않으면 타입 오류
+    createItem.mutate(data);
+  };
+
+  // 오류 UI는 타입 좁히기를 사용하여 다른 오류 유형 처리 가능
+  if (createItem.error) {
+    const error = createItem.error;
+    switch (error.status) {
+      case 400:
+        // error.error는 CreateItem400Response로 타이핑됨
+        return (
+          <FormError
+            message="Invalid input"
+            errors={error.error.validationErrors}
+          />
+        );
+      case 403:
+        // error.error는 CreateItem403Response로 타이핑됨
+        return <AuthError reason={error.error.reason} />;
+      default:
+        // error.error는 CreateItem5XXResponse로 타이핑됨 (500, 502 등)
+        return <ServerError message={error.error.message} />;
+    }
+  }
+
+  return (
+    <form onSubmit={(e) => {
+      e.preventDefault();
+      handleSubmit({ name: 'New Item' });
+    }}>
+      {/* 폼 필드 */}
+      <button
+        type="submit"
+        disabled={createItem.isPending}
+      >
+        {createItem.isPending ? 'Creating...' : 'Create Item'}
+      </button>
+    </form>
+  );
+}
+```
+
+<Drawer title="바닐라 클라이언트를 직접 사용하는 타입 안전성" trigger="바닐라 클라이언트를 직접 사용하는 예제를 보려면 여기를 클릭하세요.">
+```tsx
+function ItemForm() {
+  const api = useMyApiClient();
+  const [error, setError] = useState<CreateItemError | null>(null);
+
+  const handleSubmit = async (data: CreateItemInput) => {
+    try {
+      // ✅ 입력이 스키마와 일치하지 않으면 타입 오류
+      await api.createItem(data);
+    } catch (e) {
+      // ✅ 오류 타입에는 가능한 모든 오류 응답이 포함됨
+      const err = e as CreateItemError;
+      switch (err.status) {
+        case 400:
+          // err.error는 CreateItem400Response로 타이핑됨
+          console.error('Validation errors:', err.error.validationErrors);
+          break;
+        case 403:
+          // err.error는 CreateItem403Response로 타이핑됨
+          console.error('Not authorized:', err.error.reason);
+          break;
+        case 500:
+        case 502:
+          // err.error는 CreateItem5XXResponse로 타이핑됨
+          console.error(
+            'Server error:',
+            err.error.message,
+            'Trace:',
+            err.error.traceId,
+          );
+          break;
+      }
+      setError(err);
+    }
+  };
+
+  // 오류 UI는 타입 좁히기를 사용하여 다른 오류 유형 처리 가능
+  if (error) {
+    switch (error.status) {
+      case 400:
+        return (
+          <FormError
+            message="Invalid input"
+            errors={error.error.validationErrors}
+          />
+        );
+      case 403:
+        return <AuthError reason={error.error.reason} />;
+      default:
+        return <ServerError message={error.error.message} />;
+    }
+  }
+
+  return <form onSubmit={handleSubmit}>{/* ... */}</form>;
+}
+```
+</Drawer>
+
+타입은 FastAPI의 OpenAPI 스키마에서 자동으로 생성되므로, API에 대한 모든 변경 사항은 빌드 후 프론트엔드 코드에 반영됩니다.

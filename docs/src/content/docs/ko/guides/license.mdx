@@ -1,0 +1,294 @@
+---
+title: "라이선스"
+description: "라이선스 생성기에 대한 참조 문서"
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import schema from '../../../../../../packages/nx-plugin/src/license/schema.json';
+
+작업 공간의 `LICENSE` 파일과 소스 코드 헤더를 자동으로 관리합니다.
+
+이 생성기는 [동기화 생성기](https://nx.dev/concepts/sync-generators)를 등록하여 `lint` 대상의 일부로 실행되며, 소스 파일이 원하는 라이선스 내용 및 형식을 준수하도록 하고, 프로젝트의 `LICENSE` 파일이 올바른지 확인하며, 관련 프로젝트 파일(`package.json`, `pyproject.toml`)에 라이선스 정보가 포함되도록 합니다.
+
+## 사용법
+
+### 생성기 실행
+
+<RunGenerator generator="license" />
+
+### 옵션
+
+<GeneratorParameters schema={schema} />
+
+## 생성기 출력
+
+생성기는 다음 파일들을 생성하거나 업데이트할 것입니다:
+
+<FileTree>
+  - nx.json 린트 대상이 라이선스 동기화 생성기를 실행하도록 구성됨
+  - aws-nx-plugin.config.mts 라이선스 동기화 생성기의 구성
+</FileTree>
+
+일부 기본 구성이 라이선스 헤더 내용 및 형식에 대해 `aws-nx-plugin.config.mts`에 추가되어 여러 파일 유형에 적절한 헤더를 작성합니다. 필요에 따라 이를 추가로 사용자 지정할 수 있으며, 아래 [구성 섹션](#configuration)을 참조하세요.
+
+## 워크플로우
+
+프로젝트를 빌드할 때마다 (그리고 `lint` 대상이 실행될 때) 라이선스 동기화 생성기는 프로젝트의 라이선싱이 구성과 일치하는지 확인합니다 (아래 [라이선스 동기화 동작 참조](#license-sync-behaviour)). 동기화되지 않은 항목을 감지하면 다음과 같은 메시지를 받게 됩니다:
+
+```bash
+  NX   워크스페이스가 동기화되지 않았습니다
+
+[@aws/nx-plugin:license#sync]: 프로젝트 LICENSE 파일이 동기화되지 않았습니다:
+- LICENSE
+- packages/<my-project>LICENSE
+
+프로젝트 package.json 파일이 동기화되지 않았습니다:
+- package.json
+
+프로젝트 pyproject.toml 파일이 동기화되지 않았습니다:
+- pyproject.toml
+- packages/<my-python-project>/pyproject.toml
+
+다음 소스 파일의 라이선스 헤더가 동기화되지 않았습니다:
+- packages/<my-project>/src/index.ts
+- packages/<my-python-project>/main.py
+
+이로 인해 CI에서 오류가 발생합니다.
+
+? 워크스페이스를 최신 상태로 만들기 위해 식별된 변경 사항을 동기화하시겠습니까?
+예, 변경 사항을 동기화하고 작업 실행
+아니오, 변경 사항을 동기화하지 않고 작업 실행
+```
+
+`예`를 선택하여 변경 사항을 동기화하세요.
+
+:::note
+라이선스가 동기화되지 않아 지속적 통합 빌드 작업이 실패하지 않도록 라이선스 동기화 생성기가 만든 변경 사항을 버전 관리에 반드시 확인하세요.
+:::
+
+## 라이선스 동기화 동작
+
+라이선스 동기화 생성기는 세 가지 주요 작업을 수행합니다:
+
+### 1. 소스 파일 라이선스 헤더 동기화
+
+동기화 생성기가 실행되면, 구성에 따라 작업 공간의 모든 소스 코드 파일에 적절한 라이선스 헤더가 포함되어 있는지 확인합니다. 헤더는 파일의 첫 번째 블록 주석 또는 연속된 줄 주석으로 작성됩니다(파일에 shebang/hashbang이 있는 경우 제외).
+
+언제든지 구성을 업데이트하여 포함 또는 제외할 파일과 다른 파일 유형의 라이선스 헤더 내용 또는 형식을 변경할 수 있습니다. 자세한 내용은 아래 [구성 섹션](#configuration)을 참조하세요.
+
+### 2. LICENSE 파일 동기화
+
+동기화 생성기가 실행되면, 루트 `LICENSE` 파일이 구성된 라이선스와 일치하는지 확인하고, 작업 공간의 모든 하위 프로젝트에 올바른 `LICENSE` 파일이 포함되어 있는지 확인합니다.
+
+필요한 경우 구성에서 프로젝트를 제외할 수 있습니다. 자세한 내용은 아래 [구성 섹션](#configuration)을 참조하세요.
+
+### 3. 프로젝트 파일의 라이선스 정보 동기화
+
+동기화 생성기가 실행되면, `package.json` 및 `pyproject.toml` 파일의 `license` 필드가 구성된 라이선스로 설정되어 있는지 확인합니다.
+
+필요한 경우 구성에서 프로젝트를 제외할 수 있습니다. 자세한 내용은 아래 [구성 섹션](#configuration)을 참조하세요.
+
+## 구성
+
+구성은 작업 공간 루트의 `aws-nx-plugin.config.mts` 파일에 정의됩니다.
+
+### SPDX 및 저작권 소유자
+
+선택한 라이선스는 `spdx` 구성 속성을 통해 언제든지 업데이트할 수 있습니다:
+
+```typescript title="aws-nx-plugin.config.mts" {3}
+export default {
+  license: {
+    spdx: 'MIT',
+  },
+} satisfies AwsNxPluginConfig;
+```
+
+동기화 생성기가 실행되면 모든 `LICENSE` 파일, `package.json` 및 `pyproject.toml` 파일이 구성된 라이선스를 반영하도록 업데이트됩니다.
+
+저작권 소유자와 저작권 연도를 추가로 구성할 수 있으며, 이는 일부 `LICENSE` 파일에 포함됩니다:
+
+```typescript title="aws-nx-plugin.config.mts" {4,5}
+export default {
+  license: {
+    spdx: 'MIT',
+    copyrightHolder: 'Amazon.com, Inc. or its affiliates',
+    copyrightYear: 2025,
+  },
+} satisfies AwsNxPluginConfig;
+```
+
+### 라이선스 헤더
+
+#### 내용
+
+라이선스 헤더 내용은 두 가지 방법으로 구성할 수 있습니다:
+
+1. 인라인 내용 사용:
+
+```typescript title="aws-nx-plugin.config.mts" {5-9}
+export default {
+  license: {
+    header: {
+      content: {
+        lines: [
+          'Copyright: My Company, Incorporated.',
+          'Licensed under the MIT License',
+          'All rights reserved',
+        ];
+      }
+      // ... 형식 구성
+    }
+  }
+} satisfies AwsNxPluginConfig;
+```
+
+2. 파일에서 로드:
+
+```typescript title="aws-nx-plugin.config.mts" {5}
+export default {
+  license: {
+    header: {
+      content: {
+        filePath: 'license-header.txt'; // 작업 공간 루트에 상대적
+      }
+      // ... 형식 구성
+    }
+  }
+} satisfies AwsNxPluginConfig;
+```
+
+#### 형식
+
+글로브 패턴을 사용하여 다른 파일 유형에 대한 라이선스 헤더 형식을 지정할 수 있습니다. 형식 구성은 줄 주석, 블록 주석 또는 둘의 조합을 지원합니다:
+
+```typescript title="aws-nx-plugin.config.mts" {7-29}
+export default {
+  license: {
+    header: {
+      content: {
+        lines: ['저작권 고지 여기'],
+      },
+      format: {
+        // 줄 주석
+        '**/*.ts': {
+          lineStart: '// ',
+        },
+        // 블록 주석
+        '**/*.css': {
+          blockStart: '/*',
+          blockEnd: '*/',
+        },
+        // 줄 접두사가 있는 블록 주석
+        '**/*.java': {
+          blockStart: '/*',
+          lineStart: ' * ',
+          blockEnd: ' */',
+        },
+        // 머리말/꼬리말이 있는 줄 주석
+        '**/*.py': {
+          blockStart: '# ------------',
+          lineStart: '# ',
+          blockEnd: '# ------------',
+        },
+      },
+    },
+  },
+} satisfies AwsNxPluginConfig;
+```
+
+형식 구성은 다음을 지원합니다:
+
+- `blockStart`: 라이선스 내용 앞에 쓰여지는 텍스트 (예: 블록 주석 시작)
+- `lineStart`: 라이선스 내용의 각 줄 앞에 추가되는 텍스트
+- `lineEnd`: 라이선스 내용의 각 줄 끝에 추가되는 텍스트
+- `blockEnd`: 라이선스 내용 뒤에 쓰여지는 텍스트 (예: 블록 주석 종료)
+
+#### 사용자 정의 주석 구문
+
+기본적으로 지원되지 않는 파일 유형의 경우, 동기화 생성기에 이러한 파일 유형의 기존 라이선스 헤더를 식별하는 방법을 알려주는 사용자 정의 주석 구문을 지정할 수 있습니다.
+
+```typescript title="aws-nx-plugin.config.mts" {12-22}
+export default {
+  license: {
+    header: {
+      content: {
+        lines: ['My license header'],
+      },
+      format: {
+        '**/*.xyz': {
+          lineStart: '## ',
+        },
+      },
+      commentSyntax: {
+        xyz: {
+          line: '##', // 줄 주석 구문 정의
+        },
+        abc: {
+          block: {
+            // 블록 주석 구문 정의
+            start: '<!--',
+            end: '-->',
+          },
+        },
+      },
+    },
+  },
+} satisfies AwsNxPluginConfig;
+```
+
+#### 파일 제외
+
+기본적으로 git 저장소에서는 모든 `.gitignore` 파일이 준수되어 버전 관리되는 파일만 동기화됩니다. git이 아닌 저장소에서는 명시적으로 구성에서 제외되지 않은 한 모든 파일이 고려됩니다.
+
+글로브 패턴을 사용하여 라이선스 헤더 동기화에서 추가 파일을 제외할 수 있습니다:
+
+```typescript title="aws-nx-plugin.config.mts" {12-16}
+export default {
+  license: {
+    header: {
+      content: {
+        lines: ['My license header'],
+      },
+      format: {
+        '**/*.ts': {
+          lineStart: '// ',
+        },
+      },
+      exclude: ['**/generated/**', '**/dist/**', 'some-specific-file.ts'],
+    },
+  },
+} satisfies AwsNxPluginConfig;
+```
+
+### 프로젝트 파일 동기화 제외
+
+모든 `LICENSE` 파일, `package.json` 파일 및 `pyproject.toml` 파일은 기본적으로 구성된 라이선스와 동기화됩니다.
+
+글로브 패턴을 사용하여 특정 프로젝트 또는 파일의 동기화를 제외할 수 있습니다:
+
+```typescript title="aws-nx-plugin.config.mts" {3-10}
+export default {
+  license: {
+    files: {
+      exclude: [
+        // LICENSE 파일, package.json 또는 pyproject.toml 동기화 안 함
+        'packages/excluded-project',
+        // LICENSE 파일은 동기화하지 않고 package.json 및/또는 pyproject.toml 동기화
+        'apps/internal/LICENSE',
+      ];
+    }
+  }
+} satisfies AwsNxPluginConfig;
+```
+
+## 라이선스 동기화 비활성화
+
+라이선스 동기화 생성기를 비활성화하려면:
+
+1. `aws-nx-plugin.config.mts`의 구성에서 `license` 섹션을 제거하거나 `aws-nx-plugin.config.mts` 파일을 삭제하세요
+2. `targetDefaults.lint.syncGenerators`에서 `@aws/nx-plugin:license#sync` 생성기를 제거하세요
+
+라이선스 동기화를 다시 활성화하려면 `license` 생성기를 다시 실행하세요.

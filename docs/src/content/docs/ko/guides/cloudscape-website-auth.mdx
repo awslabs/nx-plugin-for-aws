@@ -1,0 +1,92 @@
+---
+title: "CloudScape 웹사이트 인증"
+description: "CloudScape 웹사이트 인증에 대한 참조 문서"
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import schema from '../../../../../../packages/nx-plugin/src/cloudscape-website/cognito-auth/schema.json';
+
+CloudScape 웹사이트 인증 생성기는 [Amazon Cognito](https://aws.amazon.com/cognito/)를 사용하여 CloudScape 웹사이트에 인증을 추가합니다.
+
+이 생성기는 Cognito 사용자 풀과 관련 ID 풀을 생성하기 위한 CDK 인프라를 구성하고, 사용자 로그인 흐름을 처리하는 호스팅된 UI, 그리고 CloudScape 웹사이트와의 통합을 구성합니다.
+
+## 사용법
+
+### CloudScape 웹사이트에 인증 추가
+
+CloudScape 웹사이트에 인증을 추가하는 방법은 두 가지입니다:
+
+<RunGenerator generator="ts#cloudscape-website#auth" />
+
+### 옵션
+
+<GeneratorParameters schema={schema} />
+
+## 생성기 출력
+
+React 웹사이트에서 다음과 같은 변경 사항을 찾을 수 있습니다:
+
+<FileTree>
+  - src
+    - components
+      - CognitoAuth
+        - index.tsx 주요 인증 컴포넌트
+    - main.tsx CognitoAuth 컴포넌트를 계측하도록 업데이트됨
+</FileTree>
+
+또한 `packages/common/constructs`에서 다음과 같은 인프라 코드를 생성했습니다:
+
+<FileTree>
+  - src
+    - core
+      - user-identity.ts 사용자 풀과 ID 풀을 정의하는 구조체
+</FileTree>
+
+## 인프라 사용
+
+웹사이트 구성 요소 _이전에_ `UserIdentity` 구성 요소를 스택에 추가해야 합니다:
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {3,9}
+import { Stack } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { MyWebsite, UserIdentity } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    new UserIdentity(this, 'Identity');
+
+    new MyWebsite(this, 'MyWebsite');
+  }
+}
+```
+
+`UserIdentity` 구성 요소는 웹사이트가 인증을 위해 올바른 Cognito 사용자 풀을 가리킬 수 있도록 필요한 <Link path="guides/cloudscape-website#runtime-configuration">런타임 구성</Link>을 자동으로 추가합니다.
+
+### 인증된 사용자에게 액세스 권한 부여
+
+API 호출과 같은 특정 작업을 수행할 수 있는 권한을 인증된 사용자에게 부여하려면 ID 풀의 인증된 역할에 IAM 정책 문을 추가할 수 있습니다:
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {12}
+import { Stack } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { MyWebsite, UserIdentity, MyApi } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    const identity = new UserIdentity(this, 'Identity');
+    const api = new MyApi(this, 'MyApi');
+
+    api.grantInvokeAccess(identity.identityPool.authenticatedRole);
+
+    new MyWebsite(this, 'MyWebsite');
+  }
+}
+```

@@ -1,0 +1,293 @@
+---
+title: License
+description: Reference documentation for the License generator
+---
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import schema from '../../../../../../packages/nx-plugin/src/license/schema.json';
+
+Automatically manage `LICENSE` files and source code headers in your workspace.
+
+This generator registers a [sync generator](https://nx.dev/concepts/sync-generators) to execute as part of your `lint` targets which will ensure that your source files conform to the desired license content and format, as well as ensuring that your project's `LICENSE` files are correct, and licensing information is included in relevant project files (`package.json`, `pyproject.toml`).
+
+## Usage
+
+### Run the Generator
+
+<RunGenerator generator="license" />
+
+### Options
+
+<GeneratorParameters schema={schema} />
+
+## Generator Output
+
+The generator will create or update the following files:
+
+<FileTree>
+  - nx.json The lint target is configured to run the license sync generator
+  - aws-nx-plugin.config.mts Configuration for the license sync generator
+</FileTree>
+
+Some default configuration for license header content and format is added to `aws-nx-plugin.config.mts` to write appropriate headers for a handful of file types. You may wish to customise this further; please see the [configuration section](#configuration) below.
+
+## Workflow
+
+Whenever you build your projects (and a `lint` target runs), the license sync generator will make sure that the licensing in your project matches your configuration (see [license sync behaviour below](#license-sync-behaviour)). If it detects that anything is out of sync, you will receive a message such as:
+
+```bash
+  NX   The workspace is out of sync
+
+[@aws/nx-plugin:license#sync]: Project LICENSE files are out of sync:
+- LICENSE
+- packages/<my-project>LICENSE
+
+Project package.json files are out of sync:
+- package.json
+
+Project pyproject.toml files are out of sync:
+- pyproject.toml
+- packages/<my-python-project>/pyproject.toml
+
+License headers are out of sync in the following source files:
+- packages/<my-project>/src/index.ts
+- packages/<my-python-project>/main.py
+
+This will result in an error in CI.
+
+? Would you like to sync the identified changes to get your workspace up to date?
+Yes, sync the changes and run the tasks
+No, run the tasks without syncing the changes
+```
+
+Select `Yes` to sync the changes.
+
+:::note
+Make sure you check the changes the license sync generator makes in to version control to ensure that any continuous integration build tasks don't fail due to licenses being out of sync.
+:::
+
+## License Sync Behaviour
+
+The license sync generator performs three main tasks:
+
+### 1. Synchronise Source File License Headers
+
+When the sync generator is run, it will ensure that all source code files in your workspace (based on your configuration) contain the appropriate license header. The header is written as the first block comment or consecutive series of line comments in the file (besides the shebang/hashbang if present in a file).
+
+You can update the configuration at any time to change which files should be included or excluded, as well as the content or format of license headers for different file types. For more details, please see the [configuration section](#configuration) below.
+
+### 2. Synchronise LICENSE Files
+
+When the sync generator is run, it will ensure that the root `LICENSE` file corresponds to your configured license, as well as ensuring that all subprojects in your workspace also contain the correct `LICENSE` file.
+
+You can exclude projects in the configuration if required. For more details, please see the [configuration section](#configuration) below.
+
+### 3. Synchronise licensing information in project files
+
+When the sync generator is run, it will ensure the `license` fields in `package.json` and `pyproject.toml` files are set to your configured license.
+
+You can exclude projects in the configuration if required. For more details, please see the [configuration section](#configuration) below.
+
+## Configuration
+
+Configuration is defined in the `aws-nx-plugin.config.mts` file in the root of your workspace.
+
+### SPDX and Copyright Holder
+
+Your chosen license can be updated at any time via the `spdx` configuration property:
+
+```typescript title="aws-nx-plugin.config.mts" {3}
+export default {
+  license: {
+    spdx: 'MIT',
+  },
+} satisfies AwsNxPluginConfig;
+```
+
+When the sync generator runs, all `LICENSE` files, `package.json` and `pyproject.toml` files will be updated to reflect the configured license.
+
+You can additionally configure the copyright holder and copyright year, which are included in some `LICENSE` files:
+
+```typescript title="aws-nx-plugin.config.mts" {4,5}
+export default {
+  license: {
+    spdx: 'MIT',
+    copyrightHolder: 'Amazon.com, Inc. or its affiliates',
+    copyrightYear: 2025,
+  },
+} satisfies AwsNxPluginConfig;
+```
+
+### License Headers
+
+#### Content
+
+The license header content can be configured in two ways:
+
+1. Using inline content:
+
+```typescript title="aws-nx-plugin.config.mts" {5-9}
+export default {
+  license: {
+    header: {
+      content: {
+        lines: [
+          'Copyright: My Company, Incorporated.',
+          'Licensed under the MIT License',
+          'All rights reserved',
+        ];
+      }
+      // ... format configuration
+    }
+  }
+} satisfies AwsNxPluginConfig;
+```
+
+2. Loading from a file:
+
+```typescript title="aws-nx-plugin.config.mts" {5}
+export default {
+  license: {
+    header: {
+      content: {
+        filePath: 'license-header.txt'; // relative to workspace root
+      }
+      // ... format configuration
+    }
+  }
+} satisfies AwsNxPluginConfig;
+```
+
+#### Format
+
+You can specify how license headers should be formatted for different file types using glob patterns. The format configuration supports line comments, block comments, or a combination of both:
+
+```typescript title="aws-nx-plugin.config.mts" {7-29}
+export default {
+  license: {
+    header: {
+      content: {
+        lines: ['Copyright notice here'],
+      },
+      format: {
+        // Line comments
+        '**/*.ts': {
+          lineStart: '// ',
+        },
+        // Block comments
+        '**/*.css': {
+          blockStart: '/*',
+          blockEnd: '*/',
+        },
+        // Block comments with line prefixes
+        '**/*.java': {
+          blockStart: '/*',
+          lineStart: ' * ',
+          blockEnd: ' */',
+        },
+        // Line comments with header/footer
+        '**/*.py': {
+          blockStart: '# ------------',
+          lineStart: '# ',
+          blockEnd: '# ------------',
+        },
+      },
+    },
+  },
+} satisfies AwsNxPluginConfig;
+```
+
+The format configuration supports:
+
+- `blockStart`: Text written before the license content (e.g. to start a block comment)
+- `lineStart`: Text prepended to each line of the license content
+- `lineEnd`: Text appended to each line of the license content
+- `blockEnd`: Text written after the license content (e.g. to end a block comment)
+
+#### Custom Comment Syntax
+
+For file types that aren't natively supported, you can specify custom comment syntax to tell the sync generator how to identify existing license headers in these file types.
+
+```typescript title="aws-nx-plugin.config.mts" {12-22}
+export default {
+  license: {
+    header: {
+      content: {
+        lines: ['My license header'],
+      },
+      format: {
+        '**/*.xyz': {
+          lineStart: '## ',
+        },
+      },
+      commentSyntax: {
+        xyz: {
+          line: '##', // Define line comment syntax
+        },
+        abc: {
+          block: {
+            // Define block comment syntax
+            start: '<!--',
+            end: '-->',
+          },
+        },
+      },
+    },
+  },
+} satisfies AwsNxPluginConfig;
+```
+
+#### Excluding files
+
+By default, in a git repository, all `.gitignore` files are honored to ensure that only files managed by version control are synchronized. In non-git repositories, all files are considered unless explicitly excluded in configuration.
+
+You can exclude additional files from license header synchronization using glob patterns:
+
+```typescript title="aws-nx-plugin.config.mts" {12-16}
+export default {
+  license: {
+    header: {
+      content: {
+        lines: ['My license header'],
+      },
+      format: {
+        '**/*.ts': {
+          lineStart: '// ',
+        },
+      },
+      exclude: ['**/generated/**', '**/dist/**', 'some-specific-file.ts'],
+    },
+  },
+} satisfies AwsNxPluginConfig;
+```
+
+### Excluding project files from sync
+
+All `LICENSE` files, `package.json` files and `pyproject.toml` files are synchronised with the configured license by default.
+
+You can exclude specific projects or files from synchronization using glob patterns:
+
+```typescript title="aws-nx-plugin.config.mts" {3-10}
+export default {
+  license: {
+    files: {
+      exclude: [
+        // do not sync LICENSE file, package.json or pyproject.toml
+        'packages/excluded-project',
+        // do not sync LICENSE file, but sync package.json and/or pyproject.toml
+        'apps/internal/LICENSE',
+      ];
+    }
+  }
+} satisfies AwsNxPluginConfig;
+```
+
+## Disabling license sync
+
+To disable the license sync generator:
+
+1. Remove the `license` section from your configuration in `aws-nx-plugin.config.mts` (or remove the `aws-nx-plugin.config.mts` file)
+2. Remove the `@aws/nx-plugin:license#sync` generator from `targetDefaults.lint.syncGenerators`
+
+To re-enable license sync, simply run the `license` generator again.

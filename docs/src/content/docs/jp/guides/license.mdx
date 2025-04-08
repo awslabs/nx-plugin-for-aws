@@ -1,0 +1,294 @@
+---
+title: "ライセンス"
+description: "ライセンスジェネレーターのリファレンスドキュメント"
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import schema from '../../../../../../packages/nx-plugin/src/license/schema.json';
+
+ワークスペース内の `LICENSE` ファイルとソースコードのヘッダーを自動的に管理します。
+
+この生成器は、[同期生成器](https://nx.dev/concepts/sync-generators)を登録し、`lint` ターゲットの一部として実行され、ソースファイルが目的のライセンスコンテンツと形式に準拠していることを確認し、プロジェクトの `LICENSE` ファイルが正確であること、および関連するプロジェクトファイル（`package.json`、`pyproject.toml`）にライセンス情報が含まれていることを保証します。
+
+## 使用方法
+
+### ジェネレーターの実行
+
+<RunGenerator generator="license" />
+
+### オプション
+
+<GeneratorParameters schema={schema} />
+
+## ジェネレーターの出力
+
+ジェネレーターは、以下のファイルを作成または更新します：
+
+<FileTree>
+  - nx.json ライセンス同期ジェネレーターを実行するように構成されたリントターゲット
+  - aws-nx-plugin.config.mts ライセンス同期ジェネレーターの設定
+</FileTree>
+
+ライセンスヘッダーのコンテンツと形式のデフォルト設定が `aws-nx-plugin.config.mts` に追加され、いくつかのファイルタイプに適切なヘッダーを書き込みます。さらにカスタマイズしたい場合は、以下の[設定セクション](#configuration)を参照してください。
+
+## ワークフロー
+
+プロジェクトをビルドする際（`lint`ターゲットが実行される）、ライセンス同期ジェネレーターは、プロジェクトのライセンスが設定と一致することを確認します（以下の[ライセンス同期の動作](#license-sync-behaviour)を参照）。何かが同期されていないことを検出した場合、次のようなメッセージを受け取ります：
+
+```bash
+  NX   ワークスペースが同期されていません
+
+[@aws/nx-plugin:license#sync]: プロジェクトのLICENSEファイルが同期されていません：
+- LICENSE
+- packages/<my-project>LICENSE
+
+プロジェクトのpackage.jsonファイルが同期されていません：
+- package.json
+
+プロジェクトのpyproject.tomlファイルが同期されていません：
+- pyproject.toml
+- packages/<my-python-project>/pyproject.toml
+
+以下のソースファイルでライセンスヘッダーが同期されていません：
+- packages/<my-project>/src/index.ts
+- packages/<my-python-project>/main.py
+
+これによりCIでエラーが発生します。
+
+? ワークスペースを最新の状態にするために、特定された変更を同期しますか？
+はい、変更を同期してタスクを実行
+いいえ、変更を同期せずにタスクを実行
+```
+
+`はい`を選択して変更を同期します。
+
+:::note
+継続的インテグレーションのビルドタスクが、ライセンスの同期が取れていないために失敗しないよう、ライセンス同期ジェネレーターが行う変更をバージョン管理にチェックインすることを確認してください。
+:::
+
+## ライセンス同期の動作
+
+ライセンス同期ジェネレータは、主に3つのタスクを実行します：
+
+### 1. ソースファイルのライセンスヘッダーの同期
+
+同期ジェネレータが実行されると、設定に基づいてワークスペース内のすべてのソースコードファイルに適切なライセンスヘッダーが含まれていることを確認します。ヘッダーは、ファイル内の最初のブロックコメントまたは連続した行コメント（ファイル内にシェバン/ハッシュバンが存在する場合はそれを除く）として記述されます。
+
+いつでも設定を更新して、含めるまたは除外するファイル、異なるファイルタイプのライセンスヘッダーの内容や形式を変更できます。詳細については、以下の[設定セクション](#configuration)を参照してください。
+
+### 2. LICENSEファイルの同期
+
+同期ジェネレータが実行されると、ルートの`LICENSE`ファイルが設定されたライセンスに対応していることと、ワークスペース内のすべてのサブプロジェクトに正しい`LICENSE`ファイルが含まれていることを確認します。
+
+必要に応じて、設定でプロジェクトを除外できます。詳細については、以下の[設定セクション](#configuration)を参照してください。
+
+### 3. プロジェクトファイルのライセンス情報の同期
+
+同期ジェネレータが実行されると、`package.json`と`pyproject.toml`ファイルの`license`フィールドが設定されたライセンスに設定されていることを確認します。
+
+必要に応じて、設定でプロジェクトを除外できます。詳細については、以下の[設定セクション](#configuration)を参照してください。
+
+## 設定
+
+設定は、ワークスペースのルートにある `aws-nx-plugin.config.mts` ファイルで定義されます。
+
+### SPDXとコピーライト保持者
+
+選択したライセンスは、`spdx` 設定プロパティを介していつでも更新できます：
+
+```typescript title="aws-nx-plugin.config.mts" {3}
+export default {
+  license: {
+    spdx: 'MIT',
+  },
+} satisfies AwsNxPluginConfig;
+```
+
+同期ジェネレーターが実行されると、すべての `LICENSE`、`package.json`、`pyproject.toml` ファイルが設定されたライセンスを反映して更新されます。
+
+さらに、一部の `LICENSE` ファイルに含まれるコピーライト保持者とコピーライト年を設定できます：
+
+```typescript title="aws-nx-plugin.config.mts" {4,5}
+export default {
+  license: {
+    spdx: 'MIT',
+    copyrightHolder: 'Amazon.com, Inc. or its affiliates',
+    copyrightYear: 2025,
+  },
+} satisfies AwsNxPluginConfig;
+```
+
+### ライセンスヘッダー
+
+#### コンテンツ
+
+ライセンスヘッダーのコンテンツは、2つの方法で設定できます：
+
+1. インラインコンテンツを使用：
+
+```typescript title="aws-nx-plugin.config.mts" {5-9}
+export default {
+  license: {
+    header: {
+      content: {
+        lines: [
+          'Copyright: My Company, Incorporated.',
+          'Licensed under the MIT License',
+          'All rights reserved',
+        ];
+      }
+      // ... 書式設定
+    }
+  }
+} satisfies AwsNxPluginConfig;
+```
+
+2. ファイルから読み込み：
+
+```typescript title="aws-nx-plugin.config.mts" {5}
+export default {
+  license: {
+    header: {
+      content: {
+        filePath: 'license-header.txt'; // ワークスペースルートからの相対パス
+      }
+      // ... 書式設定
+    }
+  }
+} satisfies AwsNxPluginConfig;
+```
+
+#### 書式
+
+グロブパターンを使用して、異なるファイルタイプのライセンスヘッダーの書式を指定できます。書式設定は、行コメント、ブロックコメント、またはその組み合わせをサポートしています：
+
+```typescript title="aws-nx-plugin.config.mts" {7-29}
+export default {
+  license: {
+    header: {
+      content: {
+        lines: ['Copyright notice here'],
+      },
+      format: {
+        // 行コメント
+        '**/*.ts': {
+          lineStart: '// ',
+        },
+        // ブロックコメント
+        '**/*.css': {
+          blockStart: '/*',
+          blockEnd: '*/',
+        },
+        // 行プレフィックス付きブロックコメント
+        '**/*.java': {
+          blockStart: '/*',
+          lineStart: ' * ',
+          blockEnd: ' */',
+        },
+        // ヘッダー/フッター付き行コメント
+        '**/*.py': {
+          blockStart: '# ------------',
+          lineStart: '# ',
+          blockEnd: '# ------------',
+        },
+      },
+    },
+  },
+} satisfies AwsNxPluginConfig;
+```
+
+書式設定は以下をサポートしています：
+
+- `blockStart`: ライセンスコンテンツの前に書かれるテキスト（ブロックコメントを開始するなど）
+- `lineStart`: ライセンスコンテンツの各行に付加されるテキスト
+- `lineEnd`: ライセンスコンテンツの各行に追加されるテキスト
+- `blockEnd`: ライセンスコンテンツの後に書かれるテキスト（ブロックコメントを終了するなど）
+
+#### カスタムコメント構文
+
+ネイティブでサポートされていないファイルタイプの場合、カスタムコメント構文を指定して、同期ジェネレーターがこれらのファイルタイプの既存のライセンスヘッダーを識別する方法を指定できます。
+
+```typescript title="aws-nx-plugin.config.mts" {12-22}
+export default {
+  license: {
+    header: {
+      content: {
+        lines: ['My license header'],
+      },
+      format: {
+        '**/*.xyz': {
+          lineStart: '## ',
+        },
+      },
+      commentSyntax: {
+        xyz: {
+          line: '##', // 行コメント構文を定義
+        },
+        abc: {
+          block: {
+            // ブロックコメント構文を定義
+            start: '<!--',
+            end: '-->',
+          },
+        },
+      },
+    },
+  },
+} satisfies AwsNxPluginConfig;
+```
+
+#### ファイルの除外
+
+デフォルトでは、gitリポジトリでは、バージョン管理されているファイルのみが同期されるように、すべての `.gitignore` ファイルが尊重されます。非gitリポジトリでは、設定で明示的に除外されない限り、すべてのファイルが対象となります。
+
+グロブパターンを使用して、ライセンスヘッダー同期から追加のファイルを除外できます：
+
+```typescript title="aws-nx-plugin.config.mts" {12-16}
+export default {
+  license: {
+    header: {
+      content: {
+        lines: ['My license header'],
+      },
+      format: {
+        '**/*.ts': {
+          lineStart: '// ',
+        },
+      },
+      exclude: ['**/generated/**', '**/dist/**', 'some-specific-file.ts'],
+    },
+  },
+} satisfies AwsNxPluginConfig;
+```
+
+### プロジェクトファイルの同期除外
+
+デフォルトでは、すべての `LICENSE`、`package.json`、`pyproject.toml` ファイルが設定されたライセンスと同期されます。
+
+グロブパターンを使用して、特定のプロジェクトやファイルを同期から除外できます：
+
+```typescript title="aws-nx-plugin.config.mts" {3-10}
+export default {
+  license: {
+    files: {
+      exclude: [
+        // LICENSEファイル、package.json、pyproject.tomlを同期しない
+        'packages/excluded-project',
+        // LICENSEファイルは同期しないが、package.jsonおよび/またはpyproject.tomlは同期する
+        'apps/internal/LICENSE',
+      ];
+    }
+  }
+} satisfies AwsNxPluginConfig;
+```
+
+## ライセンス同期の無効化
+
+ライセンス同期ジェネレーターを無効にするには：
+
+1. `aws-nx-plugin.config.mts` の設定から `license` セクションを削除する（または `aws-nx-plugin.config.mts` ファイルを削除）
+2. `targetDefaults.lint.syncGenerators` から `@aws/nx-plugin:license#sync` ジェネレーターを削除する
+
+ライセンス同期を再度有効にするには、単に `license` ジェネレーターを再実行してください。
