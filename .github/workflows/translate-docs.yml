@@ -81,23 +81,17 @@ jobs:
           
           # Push directly to the PR branch
           git push origin HEAD:${{ github.head_ref }}
-
-          FILES_CHANGED=`git diff HEAD^1 --name-only`;
-          LATEST_COMMIT=`git log --pretty=format:"%h" -n 1`;
-          echo "files_changed=$FILES_CHANGED" >> $GITHUB_OUTPUT;
-          echo "latest_commit=$LATEST_COMMIT" >> $GITHUB_OUTPUT
-
       - name: Update PR
         if: github.event_name == 'pull_request' && steps.translate.outputs.has_changes == 'true'
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const comment = `📚 Documentation translations have been updated and committed (${{ steps.commit_translations.outputs.latest_commit }}) to this PR.\n\n\`\`\`${{ steps.commit_translations.outputs.files_changed }}\`\`\``;
+        env:
+          URL: ${{ github.event.issue.comments_url }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          FILES_CHANGED=`git diff HEAD^1 --name-only`;
+          LATEST_COMMIT=`git log --pretty=format:"%h" -n 1`;
+          COMMENT="📚 Documentation translations have been updated and committed ($LATEST_COMMIT) to this PR.\n\n\`\`\`$FILES_CHANGED\`\`\`"";
 
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: comment
-            });
+          curl -X POST $URL \
+            -H "Content-Type: application/json" \
+            -H "Authorization: token $GITHUB_TOKEN" \
+            --data "{ \"body\": \"$COMMENT\" }"
