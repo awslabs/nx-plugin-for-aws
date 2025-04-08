@@ -224,7 +224,7 @@ export default defineConfig({
         starlightLinksValidator({
           errorOnLocalLinks: false,
           errorOnRelativeLinks: false,
-          errorOnLocalLinks: false,
+          errorOnInvalidHashes: false, // non en locales
         }),
         starlightVideos(),
         starlightBlog({

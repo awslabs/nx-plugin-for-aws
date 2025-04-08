@@ -24,15 +24,15 @@ import gameConversationPng from '@assets/game-conversation.png'
 [このガイド](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html)に記載された手順に従って、**Anthropic Claude 3.5 Sonnet v2** モデルへのアクセス権を付与していることを確認してください。
 </Aside>
 
-StoryApiは、`Game`と`Action`のリストをコンテキストとして受け取り、ストーリーを進行させる単一のAPI `generate_story`で構成されています。このAPIは、Python/FastAPIでストリーミングAPIとして実装され、生成されたコードを目的に合わせて変更する方法も示します。
+StoryApiは、`Game`と`Action`のリストをコンテキストとして受け取り、ストーリーを進行させる単一のAPI `generate_story` で構成されています。このAPIは、Python/FastAPIでストリーミングAPIとして実装され、生成されたコードを目的に合わせて変更する方法も示します。
 
 ### API の実装
 
 APIを作成するために、まず追加の依存関係をいくつかインストールする必要があります。
 
 - `boto3`はAmazon Bedrockを呼び出すために使用されます。
-- `uvicorn`は[Lambda Web Adapter (LWA)](https://github.com/awslabs/aws-lambda-web-adapter)と組み合わせて使用し、APIを起動します。
-- `copyfiles`は、`bundle`タスクを更新する際にファイルをクロスプラットフォームでコピーするために必要なnpm依存関係です。
+- `uvicorn`は[Lambda Web Adapter (LWA)](https://github.com/awslabs/aws-lambda-web-adapter)と組み合わせて使用する際にAPIを起動するために使用されます。
+- `copyfiles`は、`bundle`タスクを更新する際にファイルのクロスプラットフォームコピーをサポートするために必要なnpm依存関係です。
 
 これらの依存関係をインストールするには、以下のコマンドを実行します：
 
@@ -106,8 +106,8 @@ def generate_story(request: StoryRequest) -> str:
 
 上記のコードを分析すると：
 
-- クライアントSDKを最終的に生成する際に、`x-streaming`設定を使用してこれがストリーミングAPIであることを示します。これにより、型安全を維持しながらAPIをストリーミング方式で消費できます！
-- `x-query`設定を使用して、これがPOSTリクエストであるにもかかわらず、`query`として扱われることを示し、TanStack Queryがストリーミング状態を完全に管理できるようにします。
+- クライアントSDKを最終的に生成する際に、`x-streaming`設定を使用してこれがストリーミングAPIであることを示します。これにより、型安全性を維持しながらAPIをストリーミング方式で消費できます！
+- `x-query`設定を使用して、これがPOSTリクエストであるにもかかわらず、`query`として扱い、TanStack Queryのストリーミング状態管理を最大限に活用します。
 - APIは、`media_type="text/plain"`と`response_class=PlainTextResponse`で定義されたテキストのストリームを単純に返します。
 
 :::note
@@ -116,4 +116,156 @@ FastAPIに変更を加えるたびに、Webサイトで生成されたクライ�
 再構築する前に、以下でさらにいくつかの変更を加えます。
 :::
 
-（以下、同様に翻訳を続けます）
+### インフラストラクチャ
+
+以前に設定した<Link path="get_started/tutorials/dungeon-game/1#game-ui-infrastructure">インフラストラクチャ</Link>は、すべてのAPIがAPI GatewayとLambda統合を前提としています。`story_api`の場合、ストリーミングレスポンスをサポートしていないため、API Gatewayは使用しません。代わりに、[レスポンスストリーミングが設定されたLambda関数URL](https://docs.aws.amazon.com/lambda/latest/dg/configuration-response-streaming.html)を使用します。
+
+これをサポートするために、まずCDKコンストラクトを以下のように更新します：
+
+<Tabs>
+<TabItem label="http-api.ts">
+```typescript
+// packages/common/constructs/src/core/http-api.ts
+（前回と同じコード）
+```
+</TabItem>
+<TabItem label="story-api.ts">
+```diff lang="typescript"
+// packages/common/constructs/src/app/http-apis/story-api.ts
+（前回と同じコード）
+```
+</TabItem>
+</Tabs>
+
+次に、[Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter)デプロイメントをサポートするように`story_api`を更新します。
+
+<Tabs>
+<TabItem label="run.sh">
+```bash
+// packages/story_api/run.sh
+#!/bin/bash
+
+PATH=$PATH:$LAMBDA_TASK_ROOT/bin \
+    PYTHONPATH=$PYTHONPATH:/opt/python:$LAMBDA_RUNTIME_DIR \
+    exec python -m uvicorn --port=$PORT story_api.main:app
+```
+</TabItem>
+<TabItem label="project.json">
+```diff lang="json"
+// packages/story_api/project.json
+（前回と同じコード）
+```
+</TabItem>
+</Tabs>
+
+### デプロイとテスト
+
+まず、コードベースをビルドします：
+
+<NxCommands commands={['run-many --target build --all']} />
+
+<Aside type="tip">
+リント エラーが発生した場合は、次のコマンドを実行して自動的に修正できます。
+
+<NxCommands commands={['run-many --target lint --configuration=fix --all']} />
+</Aside>
+
+次のコマンドを実行して、アプリケーションをデプロイできます：
+
+<NxCommands commands={['run @dungeon-adventure/infra:deploy dungeon-adventure-infra-sandbox']} />
+
+このデプロイメントは完了まで約2分かかります。
+
+<Drawer title="デプロイメントコマンド" trigger="一度にすべてのスタックをデプロイすることもできます。詳細はここをクリック。">
+
+CDKアプリケーションに含まれるすべてのスタックを一度にデプロイするには、次のコマンドを実行します：
+
+<NxCommands commands={['run @dungeon-adventure/infra:deploy --all']} />
+
+これは、デプロイメントステージを別々のスタック（例：`infra-prod`）に分けることを考えている場合は**推奨されません**。この場合、`--all`フラグはすべてのスタックをデプロイしようとし、望ましくないデプロイが発生する可能性があります！
+
+</Drawer>
+
+デプロイが完了したら、以下のような出力が表示されます（一部の値は難読化されています）：
+
+```bash
+dungeon-adventure-infra-sandbox
+dungeon-adventure-infra-sandbox: deploying... [2/2]
+
+ ✅  dungeon-adventure-infra-sandbox
+
+✨  Deployment time: 354s
+
+Outputs:
+dungeon-adventure-infra-sandbox.ElectroDbTableTableNameXXX = dungeon-adventure-infra-sandbox-ElectroDbTableXXX-YYY
+dungeon-adventure-infra-sandbox.GameApiGameApiUrlXXX = https://xxx.region.amazonaws.com/
+dungeon-adventure-infra-sandbox.GameUIDistributionDomainNameXXX = xxx.cloudfront.net
+dungeon-adventure-infra-sandbox.StoryApiStoryApiUrlXXX = https://xxx.lambda-url.ap-southeast-2.on.aws/
+dungeon-adventure-infra-sandbox.UserIdentityUserIdentityIdentityPoolIdXXX = region:xxx
+dungeon-adventure-infra-sandbox.UserIdentityUserIdentityUserPoolIdXXX = region_xxx
+```
+
+APIは以下のいずれかの方法でテストできます：
+<ul>
+<li>FastApiサーバーのローカルインスタンスを起動し、`curl`を使用してAPIを呼び出す。</li>
+<li>
+<Drawer title="Sigv4対応のcurl" trigger="sigv4対応のcurlを使用してデプロイされたAPIを直接呼び出す">
+`.bashrc`ファイルに次のスクリプトを追加（`source`で読み込む）するか、呼び出したい同じターミナルに貼り付けます。
+```bash
+// ~/.bashrc
+acurl () {
+    REGION=$1
+    SERVICE=$2
+    shift; shift;
+    curl --aws-sigv4 "aws:amz:$REGION:$SERVICE" --user "$(aws configure get aws_access_key_id):$(aws configure get aws_secret_access_key)" -H "X-Amz-Security-Token: $(aws configure get aws_session_token)" "$@"
+}
+```
+
+sigv4認証されたcurlリクエストを行うには、次の例のように`acurl`を呼び出します：
+
+###### API Gateway
+```bash
+acurl ap-southeast-2 execute-api -X GET https://xxx
+```
+
+###### ストリーミングLambda関数URL
+```bash
+acurl ap-southeast-2 lambda -N -X POST https://xxx
+```
+</Drawer>
+</li>
+</ul>
+
+<Tabs>
+  <TabItem label="ローカル">
+  次のコマンドを実行してローカルのFastAPIサーバーを起動します：
+    <NxCommands commands={["run dungeon_adventure.story_api:serve"]} />
+
+    FastAPIサーバーが起動したら、次のコマンドを実行して呼び出します：
+
+    ```bash
+    curl -N -X POST http://127.0.0.1:8000/story/generate \
+      -d '{"genre":"superhero", "actions":[], "playerName":"UnnamedHero"}' \
+      -H "Content-Type: application/json"
+    ```
+  </TabItem>
+  <TabItem label="デプロイ済み">
+```bash "https://xxx.lambda-url.ap-southeast-2.on.aws/" "ap-southeast-2"
+acurl ap-southeast-2 lambda -N -X POST \
+  https://xxx.lambda-url.ap-southeast-2.on.aws/story/generate \
+  -d '{"genre":"superhero", "actions":[], "playerName":"UnnamedHero"}' \
+  -H "Content-Type: application/json"
+```
+    <Aside type="caution">
+    CDKデプロイ出力の`dungeon-adventure-infra-sandbox.StoryApiStoryApiUrlXXX`の値を使用して、強調表示されているURLプレースホルダーを置き換え、リージョンを適切に設定してください。
+    </Aside>
+  </TabItem>
+</Tabs>
+
+コマンドが正常に実行されると、以下のようなレスポンスがストリーミングされます：
+
+```
+UnnamedHero stood tall, his cape billowing in the wind....
+```
+
+おめでとうございます。FastAPIを使用して最初のAPIを構築およびデプロイしました！  🎉🎉🎉
