@@ -125,6 +125,15 @@ pnpm tsx ./scripts/translate.ts --languages jp,fr,es
 # Show what would be translated without actually translating
 pnpm tsx ./scripts/translate.ts --dry-run
 
+### GitHub Workflow
+
+A GitHub workflow automatically translates documentation when changes are made to English documentation files in pull requests. The workflow:
+
+1. Detects changes to English documentation files
+2. Translates the changed files using AWS Bedrock
+3. Commits the translations back to the source branch
+4. Updates the PR with translations
+
 ## Contributing
 
 The main purpose of this repository is to continue evolving @aws/nx-plugin, making it faster and easier to use. Development happens in the open on GitHub, and we are grateful to the community for contributing bugfixes and improvements.
@@ -138,3 +147,4 @@ This project has adopted a Code of Conduct that we expect project participants t
 ## License
 
 @aws/nx-plugin is [Apache 2.0 licensed](/LICENSE).
+```

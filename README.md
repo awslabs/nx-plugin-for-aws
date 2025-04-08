@@ -124,7 +124,6 @@ pnpm tsx ./scripts/translate.ts --languages jp,fr,es
 
 # Show what would be translated without actually translating
 pnpm tsx ./scripts/translate.ts --dry-run
-```
 
 ### GitHub Workflow
 
@@ -133,7 +132,7 @@ A GitHub workflow automatically translates documentation when changes are made t
 1. Detects changes to English documentation files
 2. Translates the changed files using AWS Bedrock
 3. Commits the translations back to the source branch
-4. Updates the PR with translation status
+4. Updates the PR with translations
 
 ## Contributing
 
@@ -148,3 +147,4 @@ This project has adopted a Code of Conduct that we expect project participants t
 ## License
 
 @aws/nx-plugin is [Apache 2.0 licensed](/LICENSE).
+```

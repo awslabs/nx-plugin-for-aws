@@ -162,7 +162,7 @@ async function getFilesToTranslate(): Promise<string[]> {
     } else {
       // Translate only changed files since the last translation commit
       const git = simpleGit();
-      
+
       // Get current branch name
       let currentBranch: string;
       let mainBranch: string;
@@ -172,51 +172,74 @@ async function getFilesToTranslate(): Promise<string[]> {
       } else {
         currentBranch = (await git.branch()).current;
         mainBranch = 'main';
-      
       }
       log.verbose(`Current branch: ${currentBranch}`);
       log.verbose(`Using ${mainBranch} as the base branch`);
-      
+
       await git.raw(['rev-parse', '--verify', mainBranch]);
-      
+
       // Find the merge base (where this branch branched off from main/master)
-      const mergeBase = (await git.raw(['merge-base', mainBranch, currentBranch])).trim();
+      const mergeBase = (
+        await git.raw(['merge-base', mainBranch, currentBranch])
+      ).trim();
       log.verbose(`Branch created at commit: ${mergeBase}`);
-      
+
       // Find the last translation commit since the branch was created
-      const translationCommits = (await git.log({
-        from: mergeBase,
-        to: 'HEAD',
-      })).all.filter(commit => 
-        commit.message.includes('docs: update translations')
+      const translationCommits = (
+        await git.log({
+          from: mergeBase,
+          to: 'HEAD',
+        })
+      ).all.filter((commit) =>
+        commit.message.includes('docs: update translations'),
       );
-      
+
       let changedFiles: string[] = [];
       let baseCommit: string;
-      
+
       if (translationCommits.length > 0) {
         // Get the most recent translation commit
         const lastTranslationCommit = translationCommits[0].hash;
-        log.info(`Detecting changed files since last translation commit: ${lastTranslationCommit.substring(0, 7)}`);
-        
+        log.info(
+          `Detecting changed files since last translation commit: ${lastTranslationCommit.substring(0, 7)}`,
+        );
+
         // Get files changed since the last translation commit
         baseCommit = lastTranslationCommit;
       } else {
         // If no translation commit found, get files changed since branch creation
-        log.info(`No translation commits found. Detecting changed files since branch creation at ${mergeBase.substring(0, 7)}`);
+        log.info(
+          `No translation commits found. Detecting changed files since branch creation at ${mergeBase.substring(0, 7)}`,
+        );
 
         // Get files changed since the branch was created
         baseCommit = mergeBase;
       }
-      
+
       const diffResult = await git.diff([`${baseCommit}..HEAD`, '--name-only']);
-        changedFiles = diffResult
-          .split('\n')
-          .filter(file => 
+      changedFiles = diffResult
+        .split('\n')
+        .filter(
+          (file) =>
             file.startsWith(`docs/src/content/docs/${SOURCE_LANGUAGE}/`) &&
-            (file.endsWith('.md') || file.endsWith('.mdx'))
-          )
-          .map(file => path.resolve(process.cwd(), file));
+            (file.endsWith('.md') || file.endsWith('.mdx')),
+        )
+        .map((file) => path.resolve(process.cwd(), file));
+      
+      // Also include any uncommitted changes
+      const { files: uncommittedFiles } = await git.status();
+      const uncommittedChanges = uncommittedFiles
+        .filter(
+          (file: { path: string }) =>
+            file.path.startsWith(`docs/src/content/docs/${SOURCE_LANGUAGE}/`) &&
+            (file.path.endsWith('.md') || file.path.endsWith('.mdx')),
+        )
+        .map((file: { path: string }) =>
+          path.resolve(process.cwd(), file.path),
+        );
+      
+      // Combine and deduplicate the files
+      changedFiles = [...new Set([...changedFiles, ...uncommittedChanges])];
 
       if (changedFiles.length === 0) {
         log.warn('No changed documentation files detected');
@@ -346,8 +369,7 @@ async function translateSection(
   }
 
   // Check if this is a frontmatter section (between --- markers)
-  const isFrontmatter =
-    section.startsWith('---') && section.includes('\n---');
+  const isFrontmatter = section.startsWith('---') && section.includes('\n---');
 
   if (isFrontmatter) {
     // Handle frontmatter translation differently to preserve structure
@@ -460,7 +482,7 @@ ${content}
 function createTranslationPrompt(content: string, targetLang: string): string {
   return `
 You are a technical documentation translator. Translate the following from English to ${getLanguageName(targetLang)}.
-Preserve all formatting, including headers, links, code blocks, and special characters.
+Preserve all formatting, escape characters, including headers, links, code blocks, and special characters.
 Do not translate code blocks, variable names, or technical terms that should remain in English.
 Preserve all HTML tags and their attributes.
 Preserve all import statements and component usage.
