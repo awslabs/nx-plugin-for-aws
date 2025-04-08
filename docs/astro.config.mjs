@@ -21,14 +21,24 @@ export default defineConfig({
   image: {
     service: passthroughImageService(),
   },
-
   outDir: '../dist/docs',
-
   integrations: [
     starlight({
       title: '@aws/nx-plugin',
       social: {
         github: 'https://github.com/awslabs/nx-plugin-for-aws',
+      },
+      defaultLocale: 'en',
+      locales: {
+        en: {
+          label: 'English',
+        },
+        jp: {
+          label: '日本語',
+        },
+        ko: {
+          label: '한국인',
+        },
       },
       logo: {
         dark: './src/content/docs/assets/bulb-white.svg',
@@ -130,6 +140,10 @@ export default defineConfig({
               label: 'Usage Metrics',
               link: '/about/metrics',
             },
+            {
+              label: 'Documentation Translation',
+              link: '/about/translation',
+            },
           ],
           collapsed: true,
         },
@@ -137,6 +151,7 @@ export default defineConfig({
       plugins: [
         starlightLinksValidator({
           errorOnLocalLinks: false,
+          errorOnRelativeLinks: false,
         }),
         starlightVideos(),
         starlightBlog({

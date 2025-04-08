@@ -1,0 +1,97 @@
+name: Translate Documentation
+
+on:
+  pull_request:
+    paths:
+      - 'docs/src/content/docs/en/**/*.md'
+      - 'docs/src/content/docs/en/**/*.mdx'
+  workflow_dispatch:
+    inputs:
+      full_translation:
+        description: 'Run full translation of all docs'
+        type: boolean
+        default: false
+      languages:
+        description: 'Target languages (comma-separated)'
+        type: string
+        default: 'jp'
+        required: true
+
+permissions:
+  id-token: write # Required for OIDC
+  contents: write # Required for committing changes
+  pull-requests: write # Required for updating PR
+
+jobs:
+  translate:
+    name: Translate Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Required to detect changed files
+      - uses: ./.github/actions/init-monorepo
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_TRANSLATE_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_TRANSLATE_AWS_REGION || 'us-west-2' }}
+      - name: Run translation
+        id: translate
+        run: |
+          TRANSLATION_ARGS=""
+
+          # Check if this is a workflow dispatch with full translation
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ github.event.inputs.full_translation }}" == "true" ]]; then
+            TRANSLATION_ARGS="--all"
+            echo "Running full translation"
+          else
+            echo "Running translation for changed files only"
+          fi
+
+          # Set target languages
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ github.event.inputs.languages }}" != "" ]]; then
+            TRANSLATION_ARGS="$TRANSLATION_ARGS --languages ${{ github.event.inputs.languages }}"
+          fi
+
+          # Run the translation script
+          pnpm tsx ./scripts/translate.ts $TRANSLATION_ARGS --verbose
+
+          # Check if any files were changed
+          if [[ -n "$(git status --porcelain)" ]]; then
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit translations
+        if: steps.translate.outputs.has_changes == 'true'
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+          git add docs/src/content/docs/
+          git commit -m "docs: update translations" --no-verify
+
+          # Push to the current branch
+          git push origin HEAD:${{ github.head_ref }}
+
+      - name: Update PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const hasChanges = '${{ steps.translate.outputs.has_changes }}' === 'true';
+
+            const comment = hasChanges
+              ? '📚 Documentation translations have been updated and committed to this PR.'
+              : '📚 No documentation translation changes were needed for this PR.';
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
