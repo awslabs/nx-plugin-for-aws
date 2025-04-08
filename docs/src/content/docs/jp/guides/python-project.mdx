@@ -1,0 +1,169 @@
+---
+title: "Pythonプロジェクト"
+description: "Pythonプロジェクトのリファレンスドキュメント"
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import schema from '../../../../../../packages/nx-plugin/src/py/project/schema.json';
+
+Pythonプロジェクトジェネレーターは、[Python](https://www.python.org/)のベストプラクティスに従って構成された最新のライブラリまたはアプリケーションを作成するために使用できます。[UV](https://docs.astral.sh/uv/)で管理され、単一のロックファイルと仮想環境を[UVワークスペース](https://docs.astral.sh/uv/concepts/projects/workspaces/)に持ち、テスト実行には[pytest](https://docs.pytest.org/en/stable/)、静的解析には[Ruff](https://docs.astral.sh/ruff/)を使用します。
+
+## 使用方法
+
+### Pythonプロジェクトの生成
+
+Pythonプロジェクトは2つの方法で生成できます：
+
+<RunGenerator generator="py#project" />
+
+### オプション
+
+<GeneratorParameters schema={schema} />
+
+## ジェネレータの出力
+
+ジェネレータは、`<directory>/<name>` ディレクトリに次のプロジェクト構造を作成します：
+
+<FileTree>
+
+  - \<module-name>
+    - \_\_init\_\_.py モジュールの初期化
+    - hello.py サンプルのPythonソースファイル
+  - tests
+    - \_\_init\_\_.py モジュールの初期化
+    - conftest.py テスト設定
+    - test_hello.py サンプルテスト
+  - project.json プロジェクト設定とビルドターゲット
+  - pyproject.toml UVで使用されるパッケージング設定ファイル
+  - .python-version プロジェクトのPythonバージョンを含むファイル
+
+</FileTree>
+
+ワークスペースのルートに次のファイルが作成/更新されていることにも気づくでしょう：
+
+<FileTree>
+
+  - pyproject.toml UVのワークスペースレベルのパッケージング設定
+  - .python-version ワークスペースのPythonバージョンを含むファイル
+  - uv.lock Pythonの依存関係のロックファイル
+
+</FileTree>
+
+## Pythonソースコードの記述
+
+`<モジュール名>`ディレクトリにPythonソースコードを追加します。
+
+### 他のプロジェクトでのライブラリコードのインポート
+
+[UVワークスペース](https://docs.astral.sh/uv/concepts/projects/workspaces/)が設定されているため、ワークスペース内の任意のPythonプロジェクトから、Pythonプロジェクトを参照できます：
+
+```python title="packages/my_other_project/my_other_project/main.py"
+from "my_library.hello" import say_hello
+```
+
+上記の例で、`my_library`はモジュール名、`hello`は`hello.py`のPythonソースファイル、`say_hello`は`hello.py`で定義されたメソッドです。
+
+### 依存関係
+
+プロジェクトに依存関係を追加するには、Pythonプロジェクトで`add`ターゲットを実行できます。例：
+
+<NxCommands commands={['run my_scope.my_library:add some-pip-package']} />
+
+これにより、依存関係がプロジェクトの`pyproject.toml`ファイルに追加され、ルートの`uv.lock`が更新されます。
+
+#### ランタイムコード
+
+Pythonプロジェクトをランタイムコード（例：AWS Lambdaファンクションのハンドラー）として使用する場合、ソースコードとその依存関係のバンドルを作成する必要があります。これは、`project.json`ファイルに次のようなターゲットを追加することで実現できます：
+
+```json title="project.json"
+{
+  ...
+  "targets": {
+    ...
+    "bundle": {
+      "cache": true,
+      "executor": "nx:run-commands",
+      "outputs": ["{workspaceRoot}/dist/packages/my_library/bundle"],
+      "options": {
+        "commands": [
+          "uv export --frozen --no-dev --no-editable --project my_library -o dist/packages/my_library/bundle/requirements.txt",
+          "uv pip install -n --no-installer-metadata --no-compile-bytecode --python-platform x86_64-manylinux2014 --python `uv python pin` --target dist/packages/my_library/bundle -r dist/packages/my_library/bundle/requirements.txt"
+        ],
+        "parallel": false
+      },
+      "dependsOn": ["compile"]
+    },
+  },
+}
+```
+
+### ビルド
+
+Pythonプロジェクトは`build`ターゲット（`project.json`で定義）で構成されており、次のように実行できます：
+
+<NxCommands commands={['run <project-name>:build']} />
+
+`<project-name>`はプロジェクトの完全修飾名です。
+
+`build`ターゲットは、プロジェクトのコンパイル、リント、テストを行います。
+
+ビルド出力は、ワークスペースのルートの`dist`フォルダ内にあり、パッケージとターゲットのディレクトリ内に配置されます。例：`dist/packages/<my-library>/build`
+
+## テスト
+
+[pytest](https://docs.pytest.org/en/stable/) はプロジェクトのテストのために設定されています。
+
+### テストの作成
+
+テストは、プロジェクト内の `test` ディレクトリに、`test_` プレフィックスの付いたPythonファイルで作成する必要があります。例えば：
+
+<FileTree>
+  - my_library
+    - hello.py
+  - test
+    - test_hello.py hello.pyのテスト
+</FileTree>
+
+テストは `test_` で始まるメソッドで、期待値を検証するアサーションを行います。例：
+
+```python title="test/test_hello.py"
+from my_library.hello import say_hello
+
+def test_say_hello():
+  assert say_hello("Darth Vader") == "Hello, Darth Vader!"
+```
+
+テストの作成方法の詳細については、[pytestドキュメント](https://docs.pytest.org/en/stable/how-to/assert.html#)を参照してください。
+
+### テストの実行
+
+テストはプロジェクトの `build` ターゲットの一部として実行されますが、`test` ターゲットを実行することで個別に実行することもできます：
+
+<NxCommands commands={['run <project-name>:test']} />
+
+`-k` フラグを使用して、テストファイルまたはメソッドの名前を指定することで、個別のテストまたはテストスイートを実行できます：
+
+<NxCommands commands={["run <project-name>:test -k 'test_say_hello'"]} />
+
+## リンティング
+
+Pythonプロジェクトは[Ruff](https://docs.astral.sh/ruff/)をリンティングに使用します。
+
+### リンターの実行
+
+プロジェクトをチェックするリンターを呼び出すには、`lint`ターゲットを実行できます。
+
+<NxCommands commands={["run <project-name>:lint"]} />
+
+### リント問題の修正
+
+リンティングまたはフォーマットの問題のほとんどは自動的に修正できます。`--configuration=fix`引数を使用して実行することで、Ruffにリント問題を修正するよう指示できます。
+
+<NxCommands commands={["run <project-name>:lint --configuration=fix"]} />
+
+同様に、ワークスペース内のすべてのパッケージのリント問題をすべて修正する場合は、次を実行できます：
+
+<NxCommands commands={["run-many --target lint --all --configuration=fix"]} />

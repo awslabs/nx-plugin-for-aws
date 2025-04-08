@@ -1,0 +1,319 @@
+---
+title: "React에서 tRPC로"
+description: "tRPC API에 React 웹사이트 연결"
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import schema from '../../../../../../../packages/nx-plugin/src/api-connection/schema.json';
+
+AWS 플러그인은 Nx용 생성기를 제공하여 <Link path="guides/trpc">tRPC API</Link>를 React 웹사이트와 빠르게 통합할 수 있습니다. AWS IAM 인증 지원 및 적절한 오류 처리를 포함하여 백엔드에 연결하는 데 필요한 모든 구성을 설정합니다. 이 통합은 프론트엔드와 tRPC 백엔드 간의 완전한 엔드투엔드 타입 안전성을 제공합니다.
+
+## 전제 조건
+
+이 생성기를 사용하기 전에 React 애플리케이션에 다음 사항이 있는지 확인하세요:
+
+1. 애플리케이션을 렌더링하는 `main.tsx` 파일
+2. tRPC 공급자가 자동으로 주입될 `<App/>` JSX 요소
+3. 작동하는 tRPC 백엔드 (tRPC 백엔드 생성기를 사용하여 생성됨)
+
+<details>
+<summary>필요한 `main.tsx` 구조의 예시</summary>
+
+```tsx
+import { StrictMode } from 'react';
+import * as ReactDOM from 'react-dom/client';
+import App from './app/app';
+
+const root = ReactDOM.createRoot(
+  document.getElementById('root') as HTMLElement,
+);
+root.render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+);
+```
+
+</details>
+
+## 사용법
+
+### 생성기 실행
+
+<RunGenerator generator="api-connection" />
+
+### 옵션
+
+<GeneratorParameters schema={schema} />
+
+## 제너레이터 출력
+
+제너레이터는 React 애플리케이션에 다음과 같은 구조를 생성합니다:
+
+<FileTree>
+
+- src
+  - components
+    - TrpcClients
+      - index.tsx
+      - TrpcProvider.tsx 여러 tRPC API에 재사용되는 프로바이더
+      - TrpcApis.tsx 모든 tRPC API 연결을 포함하는 객체
+      - TrpcClientProviders.tsx tRPC 클라이언트 설정 및 백엔드 스키마에 바인딩
+    - QueryClientProvider.tsx TanStack React Query 클라이언트 프로바이더
+  - hooks
+    - useSigV4.tsx SigV4로 HTTP 요청에 서명하는 훅 (IAM 전용)
+    - use\<ApiName>.tsx 주어진 백엔드 API를 위한 훅. ApiName은 API 이름으로 해석됨
+
+</FileTree>
+
+추가로 다음 종속성을 설치합니다:
+
+  - `@trpc/client`
+  - `@trpc/tanstack-react-query`
+  - `@tanstack/react-query`
+  - `aws4fetch` (IAM 인증 사용 시)
+
+## 생성된 코드 사용하기
+
+### tRPC 훅 사용하기
+
+제너레이터는 타입 안전한 tRPC 클라이언트에 접근할 수 있는 `use<ApiName>` 훅을 제공합니다:
+
+```tsx {5,8,11}
+import { useQuery, useMutation } from '@tanstack/react-query';
+import { useMyApi } from './hooks/useMyApi';
+
+function MyComponent() {
+  const trpc = useMyApi();
+
+  // 예시 쿼리
+  const { data, isLoading, error } = useQuery(trpc.users.list.queryOptions());
+
+  // 예시 뮤테이션
+  const mutation = useMutation(trpc.users.create.mutationOptions());
+
+  const handleCreate = () => {
+    mutation.mutate({
+      name: 'John Doe',
+      email: 'john@example.com',
+    });
+  };
+
+  if (isLoading) return <div>로딩 중...</div>;
+
+  return (
+    <ul>
+      {data.map((user) => (
+        <li key={user.id}>{user.name}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+### 에러 처리
+
+이 통합에는 tRPC 에러를 적절히 처리하는 내장 에러 처리 기능이 포함되어 있습니다:
+
+```tsx {4, 6}
+function MyComponent() {
+  const trpc = useMyApi();
+
+  const { data, error } = useQuery(trpc.users.list.queryOptions());
+
+  if (error) {
+    return (
+      <div>
+        <h2>에러 발생:</h2>
+        <p>{error.message}</p>
+        {error.data?.code && <p>코드: {error.data.code}</p>}
+      </div>
+    );
+  }
+
+  return (
+    <ul>
+      {data.map((user) => (
+        <li key={user.id}>{user.name}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+## 모범 사례
+
+### 로딩 상태 처리
+
+더 나은 사용자 경험을 위해 항상 로딩 및 오류 상태를 처리하세요:
+
+```tsx {6}
+function UserList() {
+  const trpc = useMyApi();
+
+  const users = useQuery(trpc.users.list.queryOptions());
+
+  if (users.isLoading) {
+    return <LoadingSpinner />;
+  }
+
+  if (users.error) {
+    return <ErrorMessage error={users.error} />;
+  }
+
+  return (
+    <ul>
+      {users.data.map((user) => (
+        <li key={user.id}>{user.name}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+### 낙관적 업데이트
+
+더 나은 사용자 경험을 위해 낙관적 업데이트를 사용하세요:
+
+```tsx {15-17,20-22,28-31}
+import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query';
+
+function UserList() {
+  const trpc = useMyApi();
+  const users = useQuery(trpc.users.list.queryOptions());
+  const queryClient = useQueryClient();
+
+  const deleteMutation = useMutation(
+    trpc.users.delete.mutationOptions({
+      onMutate: async (userId) => {
+        // 진행 중인 가져오기 취소
+        await queryClient.cancelQueries(trpc.users.list.queryFilter());
+
+        // 현재 데이터의 스냅샷 가져오기
+        const previousUsers = queryClient.getQueryData(
+          trpc.users.list.queryKey(),
+        );
+
+        // 사용자를 낙관적으로 제거
+        queryClient.setQueryData(trpc.users.list.queryKey(), (old) =>
+          old?.filter((user) => user.id !== userId),
+        );
+
+        return { previousUsers };
+      },
+      onError: (err, userId, context) => {
+        // 오류 발생 시 이전 데이터 복원
+        queryClient.setQueryData(
+          trpc.users.list.queryKey(),
+          context?.previousUsers,
+        );
+      },
+    }),
+  );
+
+  return (
+    <ul>
+      {users.map((user) => (
+        <li key={user.id}>
+          {user.name}
+          <button onClick={() => deleteMutation.mutate(user.id)}>삭제</button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+### 데이터 미리 가져오기
+
+더 나은 성능을 위해 데이터를 미리 가져오세요:
+
+```tsx {8}
+function UserList() {
+  const trpc = useMyApi();
+  const users = useQuery(trpc.users.list.queryOptions());
+  const queryClient = useQueryClient();
+
+  // 호버 시 사용자 세부 정보 미리 가져오기
+  const prefetchUser = async (userId: string) => {
+    await queryClient.prefetchQuery(trpc.users.getById.queryOptions(userId));
+  };
+
+  return (
+    <ul>
+      {users.map((user) => (
+        <li key={user.id} onMouseEnter={() => prefetchUser(user.id)}>
+          <Link to={`/users/${user.id}`}>{user.name}</Link>
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+### 무한 쿼리
+
+무한 쿼리로 페이지네이션 처리:
+
+```tsx {5-12}
+function UserList() {
+  const trpc = useMyApi();
+
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage } =
+    useInfiniteQuery(
+      trpc.users.list.infiniteQueryOptions(
+        { limit: 10 },
+        {
+          getNextPageParam: (lastPage) => lastPage.nextCursor,
+        },
+      ),
+    );
+
+  return (
+    <div>
+      {data?.pages.map((page) =>
+        page.users.map((user) => <UserCard key={user.id} user={user} />),
+      )}
+
+      {hasNextPage && (
+        <button onClick={() => fetchNextPage()} disabled={isFetchingNextPage}>
+          {isFetchingNextPage ? '로딩 중...' : '더 불러오기'}
+        </button>
+      )}
+    </div>
+  );
+}
+```
+
+`cursor`라는 이름의 입력 속성이 있는 프로시저에 대해서만 무한 쿼리를 사용할 수 있다는 점에 유의하는 것이 중요합니다.
+
+## 타입 안전성
+
+통합은 완전한 엔드투엔드 타입 안전성을 제공합니다. IDE는 모든 API 호출에 대해 전체 자동 완성 및 타입 검사를 제공합니다:
+
+```tsx
+function UserForm() {
+  const trpc = useMyApi();
+
+  // ✅ Input is fully typed
+  const createUser = trpc.users.create.useMutation();
+
+  const handleSubmit = (data: CreateUserInput) => {
+    // ✅ Type error if input doesn't match schema
+    createUser.mutate(data);
+  };
+
+  return <form onSubmit={handleSubmit}>{/* ... */}</form>;
+}
+```
+
+타입은 백엔드의 라우터 및 스키마 정의에서 자동으로 추론되어, API에 대한 모든 변경 사항이 즉시 프론트엔드 코드에 반영되며 빌드할 필요가 없습니다.
+
+## 추가 정보
+
+더 자세한 내용은 [tRPC TanStack React Query 문서](https://trpc.io/docs/client/tanstack-react-query/usage)를 참조하세요.
+
+또한 [TanStack Query 문서](https://tanstack.com/query/v5)를 직접 참조할 수 있습니다.

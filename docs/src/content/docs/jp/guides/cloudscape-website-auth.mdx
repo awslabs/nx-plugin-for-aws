@@ -1,0 +1,92 @@
+---
+title: "CloudScapeウェブサイト認証"
+description: "CloudScapeウェブサイト認証のリファレンスドキュメント"
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import schema from '../../../../../../packages/nx-plugin/src/cloudscape-website/cognito-auth/schema.json';
+
+CloudScapeウェブサイト認証ジェネレーターは、[Amazon Cognito](https://aws.amazon.com/cognito/)を使用してCloudScapeウェブサイトに認証を追加します。
+
+このジェネレーターは、Cognito User Poolと関連するIdentity Poolを作成するためのCDKインフラストラクチャを設定し、ユーザーログインフローを処理するホステッドUIと、CloudScapeウェブサイトとの統合を構成します。
+
+## 使用方法
+
+### CloudScapeウェブサイトに認証を追加する
+
+CloudScapeウェブサイトに認証を追加する方法は2つあります：
+
+<RunGenerator generator="ts#cloudscape-website#auth" />
+
+### オプション
+
+<GeneratorParameters schema={schema} />
+
+## ジェネレーターの出力
+
+React ウェブサイトで以下の変更が見つかります：
+
+<FileTree>
+  - src
+    - components
+      - CognitoAuth
+        - index.tsx メイン認証コンポーネント
+    - main.tsx CognitoAuthコンポーネントを計装するように更新
+</FileTree>
+
+また、`packages/common/constructs`に以下のインフラストラクチャコードが生成されます：
+
+<FileTree>
+  - src
+    - core
+      - user-identity.ts ユーザープールとアイデンティティプールを定義するコンストラクト
+</FileTree>
+
+## インフラストラクチャの使用
+
+`UserIdentity` コンストラクトをスタックに追加する必要があり、ウェブサイトコンストラクトの _前に_ 宣言します：
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {3,9}
+import { Stack } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { MyWebsite, UserIdentity } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    new UserIdentity(this, 'Identity');
+
+    new MyWebsite(this, 'MyWebsite');
+  }
+}
+```
+
+`UserIdentity` コンストラクトは、ウェブサイトが正しい Cognito ユーザープールに対して認証できるようにするために必要な<Link path="guides/cloudscape-website#runtime-configuration">ランタイム構成</Link>を自動的に追加します。
+
+### 認証済みユーザーへのアクセス許可
+
+API の呼び出しなど、特定のアクションを実行するために認証済みユーザーにアクセス権を付与するには、ID プールの認証済みロールに IAM ポリシーステートメントを追加できます：
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {12}
+import { Stack } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { MyWebsite, UserIdentity, MyApi } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    const identity = new UserIdentity(this, 'Identity');
+    const api = new MyApi(this, 'MyApi');
+
+    api.grantInvokeAccess(identity.identityPool.authenticatedRole);
+
+    new MyWebsite(this, 'MyWebsite');
+  }
+}
+```
