@@ -1,0 +1,214 @@
+---
+title: "CloudScape 网站"
+description: "CloudScape 网站的参考文档"
+---
+
+
+
+import { FileTree, Steps } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import schema from '../../../../../../packages/nx-plugin/src/cloudscape-website/app/schema.json';
+
+该生成器会创建一个配置了[CloudScape](http://cloudscape.design/)的[React](https://react.dev/)网站，并包含用于将网站部署到云端的AWS CDK基础设施，网站将作为静态站点托管在[S3](https://aws.amazon.com/s3/)上，通过[CloudFront](https://aws.amazon.com/cloudfront/)提供服务，并由[WAF](https://aws.amazon.com/waf/)提供防护。
+
+生成的应用程序使用[Vite](https://vite.dev/)作为构建工具和打包器，并采用[TanStack Router](https://tanstack.com/router/v1)实现类型安全的路由功能。
+
+:::note
+虽然此生成器已为您配置好CloudScape，但本质上这是一个React项目生成器，您可以根据需要修改代码以迁移到其他设计系统或组件库。
+:::
+
+## 使用方式
+
+### 生成CloudScape网站
+
+您可以通过两种方式生成新的CloudScape网站：
+
+<RunGenerator generator="ts#cloudscape-website" />
+
+### 参数选项
+
+<GeneratorParameters schema={schema} />
+
+## 生成器输出
+
+生成器将在`<directory>/<name>`目录下创建以下项目结构：
+
+<FileTree>
+  - index.html HTML入口文件
+  - public 静态资源目录
+  - src
+    - main.tsx 应用入口点，包含React设置
+    - config.ts 应用配置（如logo）
+    - components
+      - AppLayout 用于整体CloudScape布局和导航栏的组件
+    - hooks
+      - useAppLayout.tsx 用于从嵌套组件调整AppLayout的钩子
+    - routes
+      - welcome
+        - index.tsx @tanstack/react-router的示例路由（或页面）
+    - styles.css 全局样式文件
+  - vite.config.ts Vite和Vitest配置
+  - tsconfig.json 源文件和测试的基础TypeScript配置
+  - tsconfig.app.json 源代码的TypeScript配置
+  - tsconfig.spec.json 测试的TypeScript配置
+</FileTree>
+
+生成器还会在`packages/common/constructs`目录中创建用于部署网站的CDK基础设施代码：
+
+<FileTree>
+  - src
+    - app
+      - static-websites
+        - \<name>.ts 专属于您网站的基础设施代码
+    - core
+      - static-website.ts 通用的StaticWebsite构造
+</FileTree>
+
+## 实现您的CloudScape网站
+
+[React文档](https://react.dev/learn)是学习React开发基础的良好起点。您可以参考[CloudScape文档](https://cloudscape.design/components/)了解可用组件及其使用方法。
+
+### 路由管理
+
+#### 创建路由/页面
+
+您的CloudScape网站已预配置[TanStack Router](https://tanstack.com/router/v1)，可轻松添加新路由：
+
+<Steps>
+  1. [运行本地开发服务器](#local-development-server)
+  2. 在`src/routes`中创建新的`<page-name>.tsx`文件，文件树中的位置将反映路径结构
+  3. 系统会自动生成`Route`和`RouteComponent`，您可以在此开始构建页面！
+</Steps>
+
+#### 页面间导航
+
+您可以使用`Link`组件或`useNavigate`钩子实现页面间导航：
+
+```tsx {1, 4, 8-9, 14}
+import { Link, useNavigate } from '@tanstack/react-router';
+
+export const MyComponent = () => {
+  const navigate = useNavigate();
+
+  const submit = async () => {
+    const id = await ...
+    // 使用`navigate`在异步操作后重定向
+    navigate({ to: '/products/$id', { params: { id }} });
+  };
+
+  return (
+    <>
+      <Link to="/products">取消</Link>
+      <Button onClick={submit}>提交</Button>
+    </>
+  )
+};
+```
+
+更多细节请参考[TanStack Router](https://tanstack.com/router/latest/docs/framework/react/overview)文档。
+
+## 运行时配置
+
+来自AWS CDK基础设施的配置通过运行时配置提供给您的网站。这使得网站可以访问部署时才能确定的配置信息，例如API URL。
+
+### 基础设施
+
+`RuntimeConfig` CDK构造可用于在CDK基础设施中添加和检索配置。由`@aws/nx-plugin`生成的CDK构造（如<Link path="guides/trpc">tRPC API</Link>和<Link path="guides/fastapi">FastAPI</Link>）会自动向`RuntimeConfig`添加适当的值。
+
+您的网站CDK构造会将运行时配置作为`runtime-config.json`文件部署到S3存储桶的根目录。
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {9-10,12-13}
+import { Stack } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { MyWebsite } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    // 自动向RuntimeConfig添加值
+    new MyApi(this, 'MyApi');
+
+    // 自动将运行时配置部署到runtime-config.json
+    new MyWebsite(this, 'MyWebsite');
+  }
+}
+```
+
+:::warning
+必须确保在声明网站构造之前声明所有会向`RuntimeConfig`添加值的构造，否则这些值将不会出现在`runtime-config.json`文件中。
+:::
+
+### 网站代码
+
+在网站代码中，可以使用`useRuntimeConfig`钩子获取运行时配置中的值：
+
+```tsx {1,4}
+import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
+
+const MyComponent = () => {
+  const runtimeConfig = useRuntimeConfig();
+
+  // 在此访问运行时配置中的值
+  const apiUrl = runtimeConfig.httpApis.MyApi;
+};
+```
+
+### 本地运行时配置
+
+运行[本地开发服务器](#local-development-server)时，需要在`public`目录中放置`runtime-config.json`文件，以便本地网站获取后端URL、身份配置等信息。
+
+您的网站项目配置了`load:runtime-config`目标，可用于从已部署的应用程序拉取`runtime-config.json`文件：
+
+<NxCommands commands={['run <my-website>:"load:runtime-config"']} />
+
+:::warning
+如果在基础设施项目的`src/main.ts`中修改了堆栈名称，需要同步更新网站项目`project.json`文件中`load:runtime-config`目标指定的堆栈名称。
+:::
+
+## 本地开发服务器
+
+在运行本地开发服务器之前，请确保已部署基础设施并[加载本地运行时配置](#local-runtime-config)。
+
+然后可以运行`serve`目标：
+
+<NxCommands commands={['run <my-website>:serve']} />
+
+## 构建项目
+
+使用`build`目标可以构建网站。该命令将使用Vite在根目录`dist/packages/<my-website>/bundle`下创建生产包，同时执行类型检查、编译和代码校验。
+
+<NxCommands commands={['run <my-website>:build']} />
+
+## 测试
+
+网站测试方式与标准TypeScript项目相似，具体细节请参考<Link path="guides/typescript-project#testing">TypeScript项目指南</Link>。
+
+针对React的专项测试，已预装React Testing Library。使用说明请参考[React Testing Library文档](https://testing-library.com/docs/react-testing-library/example-intro)。
+
+可以使用`test`目标运行测试：
+
+<NxCommands commands={['run <my-website>:test']} />
+
+## 部署网站
+
+我们推荐使用<Link path="guides/typescript-infrastructure">TypeScript基础设施生成器</Link>创建CDK应用来部署网站。
+
+您可以使用`packages/common/constructs`中生成的CDK构造来部署网站：
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {3, 9}
+import { Stack } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { MyWebsite } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    new MyWebsite(this, 'MyWebsite');
+  }
+}
+```

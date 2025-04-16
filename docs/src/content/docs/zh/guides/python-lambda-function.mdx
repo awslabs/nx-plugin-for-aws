@@ -1,0 +1,210 @@
+---
+title: "Python Lambda 函数"
+description: "Python Lambda 函数的参考文档"
+---
+
+
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import schema from '../../../../../../packages/nx-plugin/src/py/lambda-function/schema.json';
+
+Python Lambda Function 生成器可用于在现有 Python 项目中添加 Lambda 函数。
+
+该生成器会创建一个新的 Python Lambda 处理器，并配置 AWS CDK 基础设施。生成的后端使用 AWS Lambda 进行无服务器部署，可选使用 [AWS Lambda Powertools 的 Parser](https://docs.powertools.aws.dev/lambda/python/latest/utilities/parser/) 实现类型安全。同时会配置 [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/) 用于可观测性，包括日志记录、AWS X-Ray 追踪和 CloudWatch 指标。
+
+## 使用方法
+
+### 生成 Lambda 函数
+
+可通过两种方式生成新 Lambda 函数：
+
+<RunGenerator generator="py#lambda-function" />
+
+### 选项参数
+
+<GeneratorParameters schema={schema} />
+
+## 生成器输出
+
+生成器将在项目中添加以下文件：
+
+<FileTree>
+
+- \<module-name>
+  - \<lambda-function>.py 函数实现
+
+</FileTree>
+
+生成器还会在 `packages/common/constructs` 目录中创建用于部署函数的 CDK 构造。
+
+若指定了 `functionPath` 选项，生成器会在指定路径添加必要文件：
+
+<FileTree>
+
+- \<module-name>
+  - \<custom-path>
+    - \<function-name>.py 函数实现
+
+</FileTree>
+
+## 实现函数
+
+主函数实现位于 `<function-name>.py`。示例如下：
+
+```python
+import os
+
+from aws_lambda_powertools import Logger, Metrics, Tracer
+from aws_lambda_powertools.metrics import MetricUnit
+from aws_lambda_powertools.utilities.parser import event_parser
+from aws_lambda_powertools.utilities.parser.models import EventBridgeModel
+from aws_lambda_powertools.utilities.typing import LambdaContext
+
+os.environ["POWERTOOLS_METRICS_NAMESPACE"] = "Foo"
+os.environ["POWERTOOLS_SERVICE_NAME"] = "Foo"
+
+logger: Logger = Logger()
+metrics: Metrics = Metrics()
+tracer: Tracer = Tracer()
+
+@tracer.capture_lambda_handler
+@metrics.log_metrics
+@event_parser(model=EventBridgeModel)
+def lambda_handler(event: EventBridgeModel, context: LambdaContext):
+    logger.info("Received event", extra={"event": event.model_dump() })
+    metrics.add_metric(name="InvocationCount", unit=MetricUnit.Count, value=1)
+
+    try:
+        # TODO: 实现业务逻辑
+        metrics.add_metric(name="SuccessCount", unit=MetricUnit.Count, value=1)
+        # TODO: 按需实现成功响应
+    except Exception as e:
+        logger.exception(e)
+        metrics.add_metric(name="ErrorCount", unit=MetricUnit.Count, value=1)
+        # TODO: 按需实现错误响应
+```
+
+生成器自动配置了以下功能：
+
+1. 集成 AWS Lambda Powertools 实现可观测性
+2. 指标收集
+3. 使用 `@event_parser` 实现类型安全
+
+### 使用 AWS Lambda Powertools 实现可观测性
+
+#### 日志记录
+
+生成器使用 AWS Lambda Powertools 配置结构化日志：
+
+```python
+def lambda_handler(event: EventBridgeModel, context: LambdaContext):
+    logger.info("Received event", extra={"event": event.model_dump()})
+```
+
+:::tip
+建议为所有唯一请求设置关联 ID 以便调试和监控。关于关联 ID 最佳实践，请参考 [AWS Powertools Logger](https://docs.powertools.aws.dev/lambda/python/2.22.0/core/logger/#setting-a-correlation-id) 文档。
+:::
+
+日志器自动包含：
+
+- 事件请求
+- Lambda 上下文信息
+- 冷启动标识
+
+#### 追踪
+
+自动配置 AWS X-Ray 追踪。可添加自定义子分段：
+
+```python
+def lambda_handler(event: EventBridgeModel, context: LambdaContext):
+    # 创建新子分段
+    with tracer.provider.in_subsegment("function-subsegment"):
+        # 业务逻辑
+        return ....
+```
+
+#### 指标
+
+自动收集 CloudWatch 指标。可添加自定义指标：
+
+```python
+def lambda_handler(event: EventBridgeModel, context: LambdaContext):
+    metrics.add_metric(name="NewMetric", unit=MetricUnit.Count, value=1)
+    return ...
+```
+
+默认指标包括：
+
+- 调用次数
+- 成功/失败次数
+- 冷启动指标
+
+#### 类型安全
+
+若生成 Lambda 函数时选择了 `eventSource`，函数会通过 AWS Lambda Powertools 的 [`@event_parser`](https://docs.powertools.aws.dev/lambda/python/latest/utilities/parser/) 实现类型校验：
+
+```python {3}
+@event_parser(model=EventBridgeModel)
+def lambda_handler(event: EventBridgeModel, context: LambdaContext):
+    event.detail_type # <- 类型安全，支持 IDE 自动补全
+```
+
+此功能允许使用 [Pydantic](https://docs.pydantic.dev/latest/) 定义数据模型，与 <Link path="guides/fastapi">Fast API</Link> 的工作方式类似。
+
+:::tip
+若事件中包含自定义数据（如 DynamoDB 流或 EventBridge 事件），可使用 [Envelopes](https://docs.powertools.aws.dev/lambda/python/latest/utilities/parser/#envelopes) 为此类数据实现类型安全。
+:::
+
+若不需要事件类型校验，可为 `eventSource` 选择 `Any` 选项。
+
+## 部署函数
+
+Python Lambda Function 生成器会在 `common/constructs` 目录创建 CDK 构造。可在 CDK 应用中使用：
+
+```ts
+import { MyProjectMyFunction } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    // 将函数添加到堆栈
+    const fn = new MyProjectMyFunction(this, 'MyFunction');
+  }
+}
+```
+
+此构造会配置：
+
+1. AWS Lambda 函数
+2. CloudWatch 日志组
+3. X-Ray 追踪配置
+4. CloudWatch 指标命名空间
+
+该函数可作为任何 Lambda [事件源](https://docs.powertools.aws.dev/lambda/python/latest/utilities/parser/) 的目标：
+
+:::note
+请确保事件源与所选 `eventSource` 选项匹配，以保证事件在处理器函数中正确处理。
+:::
+
+以下示例展示通过 Event Bridge 定时触发 Lambda 函数的 CDK 代码：
+
+```ts
+import { EventPattern, Rule, Schedule } from 'aws-cdk-lib/aws-events';
+import { LambdaFunction } from 'aws-cdk-lib/aws-events-targets';
+import { MyProjectMyFunction } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    // 将函数添加到堆栈
+    const fn = new MyProjectMyFunction(this, 'MyFunction');
+
+    // 将函数添加至 EventBridge 定时任务
+    const eventRule = new Rule(this, 'MyFunctionScheduleRule', {
+      schedule: Schedule.cron({ minute: '15' }),
+      targets: [new LambdaFunction(fn)],
+    });
+  }
+}
+```

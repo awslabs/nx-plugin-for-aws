@@ -1,0 +1,246 @@
+---
+title: "Projetos TypeScript"
+description: "Documentação de referência para projetos TypeScript"
+---
+
+
+
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import InstallCommand from '@components/install-command.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import schema from '../../../../../../packages/nx-plugin/src/ts/lib/schema.json';
+
+O gerador de projetos TypeScript pode ser usado para criar bibliotecas ou aplicações modernas em [TypeScript](https://www.typescriptlang.org/) configuradas com melhores práticas como [ECMAScript Modules (ESM)](https://www.typescriptlang.org/docs/handbook/modules/reference.html), [project references](https://www.typescriptlang.org/docs/handbook/project-references.html) do TypeScript, [Vitest](https://vitest.dev/) para execução de testes e [ESLint](https://eslint.org/) para análise estática.
+
+## Uso
+
+### Gerar um Projeto TypeScript
+
+Você pode gerar um novo projeto TypeScript de duas formas:
+
+<RunGenerator generator="ts#project" />
+
+### Opções
+
+<GeneratorParameters schema={schema} />
+
+## Saída do Gerador
+
+O gerador criará a seguinte estrutura de projeto no diretório `<directory>/<name>`:
+
+<FileTree>
+
+  - src Código-fonte TypeScript
+    - index.ts
+  - project.json Configuração do projeto e targets de build
+  - tsconfig.json Configuração base do TypeScript para este projeto (estende o tsconfig.base.json da raiz do workspace)
+  - tsconfig.lib.json Configuração do TypeScript para sua biblioteca (código de runtime ou empacotado)
+  - tsconfig.spec.json Configuração do TypeScript para seus testes
+  - vite.config.ts Configuração do Vitest
+  - eslint.config.mjs Configuração do ESLint
+
+</FileTree>
+
+:::tip
+Observe que nenhum arquivo `package.json` é criado para este projeto! Você pode entender o motivo [abaixo](#dependencies).
+:::
+
+Você também notará alterações nos seguintes arquivos na raiz do workspace:
+
+<FileTree>
+
+  - nx.json A configuração do Nx é atualizada para configurar o plugin @nx/js/typescript para seu projeto
+  - tsconfig.base.json Um alias TypeScript é configurado para seu projeto permitindo importação por outros projetos
+  - tsconfig.json Uma referência de projeto TypeScript é adicionada para seu projeto
+
+</FileTree>
+
+## Escrevendo Código TypeScript
+
+Adicione seu código TypeScript no diretório `src`.
+
+### Sintaxe de Importação ESM
+
+Como seu projeto TypeScript é um ES Module, use a sintaxe ESM correta em suas instruções de importação, referenciando explicitamente a extensão do arquivo:
+
+```ts title="index.ts" ".js"
+import { sayHello } from './hello.js';
+```
+
+:::note
+Apesar de usarmos TypeScript e `sayHello` estar definido em `hello.ts`, usamos a extensão `.js` na importação. Leia mais sobre isso [aqui](https://www.typescriptlang.org/docs/handbook/modules/reference.html).
+:::
+
+### Exportando para Outros Projetos TypeScript
+
+O ponto de entrada do projeto é `src/index.ts`. Adicione exports aqui para quaisquer elementos que outros projetos precisem importar:
+
+```ts title="src/index.ts"
+export { sayHello } from './hello.js';
+export * from './algorithms/index.js';
+```
+
+### Importando seu Código em Outros Projetos
+
+[Aliases TypeScript](https://www.typescriptlang.org/docs/handbook/modules/reference.html#paths) para seu projeto são configurados no `tsconfig.base.json` do workspace, permitindo referenciar seu projeto de outros projetos TypeScript:
+
+```ts title="packages/my-other-project/src/index.ts"
+import { sayHello } from ':my-scope/my-library';
+```
+
+:::note
+Aliases para projetos TypeScript começam com `:` em vez do tradicional `@`, evitando conflitos entre pacotes locais e remotos no [NPM](https://www.npmjs.com/).
+:::
+
+Ao adicionar uma importação para um novo projeto pela primeira vez, você pode ver um erro no IDE similar a:
+
+<details>
+<summary>Erro de importação</summary>
+
+```bash wrap
+File '/path/to/my/workspace/packages/my-library/src/index.ts' is not under 'rootDir' '/path/to/my/workspace/packages/my-consumer'. 'rootDir' is expected to contain all source files.
+  File is ECMAScript module because '/path/to/my/workspace/package.json' has field "type" with value "module" ts(6059)
+File '/path/to/my/workspace/packages/my-library/src/index.ts' is not listed within the file list of project '/path/to/my/workspace/packages/my-consumer/tsconfig.lib.json'. Projects must list all files or use an 'include' pattern.
+  File is ECMAScript module because '/path/to/my/workspace/package.json' has field "type" with value "module" ts(6307)
+```
+
+</details>
+
+Isso ocorre porque uma [project reference](https://www.typescriptlang.org/docs/handbook/project-references.html) ainda não foi configurada.
+
+Projetos TypeScript são pré-configurados com o gerador Nx TypeScript Sync. Basta executar o comando abaixo para adicionar a configuração necessária:
+
+<NxCommands commands={['sync']} />
+
+Após isso, o erro no IDE deve desaparecer e você poderá usar sua biblioteca.
+
+:::tip
+Ao construir seu projeto, você pode ser alertado com:
+
+```bash wrap
+[@nx/js:typescript-sync]: Some TypeScript configuration files are missing project references to the projects they depend on or contain outdated project references.
+
+This will result in an error in CI.
+
+? Would you like to sync the identified changes to get your workspace up to date?
+Yes, sync the changes and run the tasks
+No, run the tasks without syncing the changes
+```
+
+Selecione `Yes` para permitir que o Nx atualize as referências.
+:::
+
+### Dependências
+
+Seu projeto TypeScript não tem `package.json`, o que pode ser incomum em monorepos tradicionais.
+
+Para adicionar dependências, inclua-as no `package.json` da raiz do workspace. Use o gerenciador de pacotes:
+
+<InstallCommand pkg="some-npm-package" />
+
+A dependência ficará disponível para todos os projetos.
+
+#### Código de Runtime
+
+Ao usar seu projeto como código de runtime (ex: AWS Lambda), recomenda-se usar ferramentas como [`esbuild`](https://esbuild.github.io/) para empacotar com [tree-shaking](https://esbuild.github.io/api/#tree-shaking).
+
+Adicione um target no `project.json`:
+
+```json
+{
+  ...
+  "targets": {
+    ...
+    "bundle": {
+      "cache": true,
+      "executor": "nx:run-commands",
+      "outputs": ["{workspaceRoot}/dist/packages/my-library/bundle"],
+      "options": {
+        "command": "esbuild packages/my-library/src/index.ts --bundle --outfile=dist/packages/my-library/bundle/index.js --platform=node --format=cjs"
+      }
+    },
+  },
+}
+```
+
+:::note
+No exemplo usamos `src/index.ts` como entrypoint, incluindo todas dependências deste arquivo no bundle.
+:::
+
+#### Publicação no NPM
+
+Para publicar no NPM, crie um `package.json` declarando todas dependências. Use o [Nx Dependency Checks ESLint Plugin](https://nx.dev/nx-api/eslint-plugin/documents/dependency-checks) para validar as dependências.
+
+### Build
+
+Seu projeto possui um target `build` definido em `project.json`. Execute via:
+
+<NxCommands commands={['run <project-name>:build']} />
+
+O output será gerado em `dist/packages/<my-library>/tsc`.
+
+## Testes
+
+[Vitest](https://vitest.dev/) é usado para testes.
+
+### Escrevendo Testes
+
+Crie arquivos `.spec.ts` ou `.test.ts` junto ao código testado:
+
+<FileTree>
+  - src
+    - hello.ts Código-fonte
+    - hello.spec.ts Testes para hello.ts
+</FileTree>
+
+Use sintaxe estilo Jest com `describe`, `it` e `expect`:
+
+```ts title="hello.spec.ts"
+import { sayHello } from './hello.js';
+
+describe('sayHello', () => {
+
+  it('should greet the caller', () => {
+    expect(sayHello('Darth Vader')).toBe('Hello, Darth Vader!');
+  });
+
+});
+```
+
+Consulte a [documentação do Vitest](https://vitest.dev/guide/#writing-tests) para detalhes.
+
+### Executando Testes
+
+Execute todos testes com:
+
+<NxCommands commands={['run <project-name>:test']} />
+
+Ou testes específicos com `-t`:
+
+<NxCommands commands={["run <project-name>:test -t 'sayHello'"]} />
+
+:::tip
+Usuários de VSCode podem instalar a extensão [Vitest Runner for VSCode that actually works](https://marketplace.visualstudio.com/items?itemName=rluvaton.vscode-vitest) para executar testes diretamente do IDE.
+:::
+
+## Linting
+
+Projetos usam [ESLint](https://eslint.org/) e [Prettier](https://prettier.io/). Configure o ESLint no `eslint.config.mjs` da raiz e o Prettier no `.prettierrc`.
+
+### Executando o Linter
+
+Verifique problemas com:
+
+<NxCommands commands={["run <project-name>:lint"]} />
+
+### Corrigindo Problemas
+
+Corrija automaticamente com `--configuration=fix`:
+
+<NxCommands commands={["run <project-name>:lint --configuration=fix"]} />
+
+Para todo o workspace:
+
+<NxCommands commands={["run-many --target lint --all --configuration=fix"]} />

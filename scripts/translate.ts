@@ -20,7 +20,7 @@ import {
 } from '@aws-sdk/credential-providers';
 
 // Define supported languages
-const SUPPORTED_LANGUAGES = ['en', 'jp', 'ko'];
+const SUPPORTED_LANGUAGES = ['en', 'jp', 'ko', 'es', 'pt', 'fr', 'it', 'zh'];
 const SOURCE_LANGUAGE = 'en';
 const DOCS_DIR = path.resolve(process.cwd(), 'docs/src/content/docs');
 
@@ -34,12 +34,7 @@ program
   .option(
     '-l, --languages <languages>',
     'Comma-separated list of target languages',
-    'jp,ko',
-  )
-  .option(
-    '-m, --model <model>',
-    'AWS Bedrock model ID',
-    'anthropic.claude-3-5-haiku-20241022-v1:0',
+    'jp,ko,es,pt,fr,it,zh',
   )
   .option(
     '-d, --dry-run',
@@ -107,7 +102,7 @@ async function main() {
         const sourceContent = await fs.readFile(file, 'utf-8');
 
         // Split the content by h2 headers
-        const sections = splitByH2Headers(sourceContent);
+        const sections = splitByHeaders(sourceContent);
 
         log.verbose(`Split file into ${sections.length} sections`);
 
@@ -225,7 +220,7 @@ async function getFilesToTranslate(): Promise<string[]> {
             (file.endsWith('.md') || file.endsWith('.mdx')),
         )
         .map((file) => path.resolve(process.cwd(), file));
-      
+
       // Also include any uncommitted changes
       const { files: uncommittedFiles } = await git.status();
       const uncommittedChanges = uncommittedFiles
@@ -237,7 +232,7 @@ async function getFilesToTranslate(): Promise<string[]> {
         .map((file: { path: string }) =>
           path.resolve(process.cwd(), file.path),
         );
-      
+
       // Combine and deduplicate the files
       changedFiles = [...new Set([...changedFiles, ...uncommittedChanges])];
 
@@ -259,9 +254,28 @@ async function getFilesToTranslate(): Promise<string[]> {
 /**
  * Split content by h2 headers for more efficient translation
  */
-function splitByH2Headers(content: string): string[] {
-  // Split by h2 headers (## Header)
-  const h2Regex = /^## .+$/gm;
+function splitByHeaders(content: string, depth: number = 1): string[] {
+  let headerRegex;
+
+  switch (depth) {
+    case 1:
+      headerRegex = /^## .+$/gm;
+      break;
+    case 2:
+      headerRegex = /^### .+$/gm;
+      break;
+    case 3:
+      headerRegex = /^#### .+$/gm;
+      break;
+    case 4:
+      headerRegex = /^##### .+$/gm;
+      break;
+    default:
+      throw new Error(
+        `Invalid depth: ${depth}. Depth must be between 1 and 4.`,
+      );
+  }
+
   const sections: string[] = [];
 
   // Handle frontmatter separately (content between --- markers)
@@ -273,35 +287,38 @@ function splitByH2Headers(content: string): string[] {
     remainingContent = content.substring(frontmatterMatch[0].length);
   }
 
-  // Find all h2 header positions
-  const matches = [...remainingContent.matchAll(h2Regex)];
+  if (depth > 1) {
+    const matches = [...remainingContent.matchAll(headerRegex)];
 
-  if (matches.length === 0) {
-    // No h2 headers, treat the whole content as one section
-    if (remainingContent.trim()) {
-      sections.push(remainingContent);
+    if (matches.length === 0) {
+      // No h2 headers, treat the whole content as one section
+      if (remainingContent.trim()) {
+        sections.push(remainingContent);
+      }
+      return sections;
     }
-    return sections;
-  }
 
-  // Add content before the first h2 header
-  if (matches[0].index! > 0) {
-    sections.push(remainingContent.substring(0, matches[0].index));
-  }
-
-  // Add sections between h2 headers
-  for (let i = 0; i < matches.length; i++) {
-    const currentMatch = matches[i];
-    const nextMatch = matches[i + 1];
-
-    if (nextMatch) {
-      sections.push(
-        remainingContent.substring(currentMatch.index!, nextMatch.index),
-      );
-    } else {
-      // Last section
-      sections.push(remainingContent.substring(currentMatch.index!));
+    // Add content before the first h2 header
+    if (matches[0].index! > 0) {
+      sections.push(remainingContent.substring(0, matches[0].index));
     }
+
+    // Add sections between h2 headers
+    for (let i = 0; i < matches.length; i++) {
+      const currentMatch = matches[i];
+      const nextMatch = matches[i + 1];
+
+      if (nextMatch) {
+        sections.push(
+          remainingContent.substring(currentMatch.index!, nextMatch.index),
+        );
+      } else {
+        // Last section
+        sections.push(remainingContent.substring(currentMatch.index!));
+      }
+    }
+  } else {
+    sections.push(remainingContent);
   }
 
   return sections.map((s) => s.trim());
@@ -362,6 +379,7 @@ async function translateSection(
   section: string,
   targetLang: string,
   bedrockClient: BedrockRuntimeClient,
+  depth: number = 1,
 ): Promise<string> {
   // Skip empty sections
   if (!section.trim()) {
@@ -376,23 +394,35 @@ async function translateSection(
     return await translateFrontmatter(section, targetLang, bedrockClient);
   }
 
-  // For regular content, translate the whole section
-  const prompt = createTranslationPrompt(section, targetLang);
+  const prompt = `
+You are a technical documentation translator. Translate the following text into ${getLanguageName(targetLang)}.
+
+CRITICAL REQUIREMENTS:
+1. DO NOT translate:
+  - Personal names (leave them exactly as is)
+  - URLS and links
+  - Code blocks and commands
+  - Technical terms in backticks
+2. Keep ALL mdx formatting exactly as is
+3. Keep the exact same structure and layout
+4. Translate naturally while maintaining technical accuracy
+5. Only return translated text and never add commentary about the rest of the document.
+6. Preserve all import statements and component usage (never wrap things in backticks if they aren't already).
+
+Here is the mdx content to translate:
+
+${section}
+`;
 
   const params: InvokeModelCommandInput = {
-    modelId: options.model,
+    modelId: 'us.deepseek.r1-v1:0',
     contentType: 'application/json',
     accept: 'application/json',
     body: JSON.stringify({
-      anthropic_version: 'bedrock-2023-05-31',
-      max_tokens: 4096,
-      temperature: 0.1,
-      messages: [
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ],
+      max_tokens: 32768,
+      temperature: 0.7,
+      top_p: 0.9,
+      prompt: `<｜User｜>${prompt}<｜Assistant｜>`,
     }),
   };
 
@@ -400,9 +430,29 @@ async function translateSection(
   const response = await bedrockClient.send(command);
 
   // Parse the response
-  const responseBody = JSON.parse(new TextDecoder().decode(response.body));
-  const translatedText = responseBody.content[0].text;
+  const responseBody = JSON.parse(new TextDecoder().decode(response.body))
+    .choices[0];
 
+  // Check if we hit the token limit
+  if (responseBody.stop_reason === 'max_tokens') {
+    log.warn('Translation hit token limit. Splitting into smaller chunks.');
+
+    const sections = splitByHeaders(section, depth);
+
+    const translatedSections = await Promise.all(
+      sections.map((section) =>
+        translateSection(section, targetLang, bedrockClient, depth + 1),
+      ),
+    );
+
+    return translatedSections.join('\n\n');
+  }
+
+  // strip think tags
+  const translatedText = responseBody.text.replace(
+    /^<think>(.|\n)*<\/think>/gm,
+    '',
+  );
   return translatedText;
 }
 
@@ -425,21 +475,31 @@ async function translateFrontmatter(
     const content = match[1];
 
     // Create a prompt specifically for frontmatter
-    const prompt = `
-You are a technical documentation translator. Translate the following YAML frontmatter from English to ${getLanguageName(targetLang)}.
-Only translate the values, not the keys. The files are mdx files and as such you must preserve all formatting, including indentation, spaces, newlines and special characters. Add quotes around title and description field in any encountered frontmatter blocks. Do not change translate date, authors or template field in frontmatter.
-Do not translate code blocks, variable names, or technical terms that should remain in English. if any localized links are present in frontmatter, translate to appropriate route i.e: en/foo -> jp/bar
-Respond with ONLY the translated YAML content, nothing else. If there is nothing to translate, just return the passed in input. Never respond with a question.
+    const prompt = (content: string) => `
+You are a technical documentation translator. Your task is to translate the following YAML frontmatter from English to ${getLanguageName(targetLang)}.
+
+Rules:©
+1. Only translate the values, not the keys.
+2. Preserve all formatting, including indentation, spaces, newlines and special characters.
+3. Add quotes around title and description fields.
+4. Do not translate date, authors or template fields.
+5. Do not translate code blocks, variable names, or technical terms that should remain in English.
+6. If any localized links are present, translate the path appropriately (e.g., en/foo -> ${targetLang}/foo).
+7. NEVER include any explanatory text, notes, or phrases like "The following content remains unchanged".
+8. NEVER explain your translation choices or add any commentary.
+9. If you cannot translate something, simply return it as is without explanation.
 
 Here is the frontmatter to translate:
 
 \`\`\`yaml
 ${content}
 \`\`\`
+
+CRITICAL: Your response must contain ONLY the translated YAML content with no additional text whatsoever. Do not include \`\`\`yaml or \`\`\` markers in your response.
 `;
 
     const params: InvokeModelCommandInput = {
-      modelId: options.model,
+      modelId: 'anthropic.claude-3-5-haiku-20241022-v1:0',
       contentType: 'application/json',
       accept: 'application/json',
       body: JSON.stringify({
@@ -449,7 +509,7 @@ ${content}
         messages: [
           {
             role: 'user',
-            content: prompt,
+            content: prompt(content),
           },
         ],
       }),
@@ -460,6 +520,14 @@ ${content}
 
     // Parse the response
     const responseBody = JSON.parse(new TextDecoder().decode(response.body));
+
+    // Check if we hit the token limit
+    if (responseBody.stop_reason === 'max_tokens') {
+      throw Error(
+        'Unable to translate frontmatter due to translation token limit being hit.',
+      );
+    }
+
     let translatedContent = responseBody.content[0].text;
 
     // Clean up the response (remove any code block markers)
@@ -477,26 +545,6 @@ ${content}
 }
 
 /**
- * Create a prompt for the translation model
- */
-function createTranslationPrompt(content: string, targetLang: string): string {
-  return `
-You are a technical documentation translator. Translate the following from English to ${getLanguageName(targetLang)}.
-Preserve all formatting, escape characters, including headers, links, code blocks, and special characters.
-Do not translate code blocks, variable names, or technical terms that should remain in English.
-Preserve all HTML tags and their attributes.
-Preserve all import statements and component usage.
-Always return translated content and if nothing is to be translated simply return the input.
-
-Here is the content to translate:
-
-${content}
-
-Respond with ONLY the translated content, nothing else.
-`;
-}
-
-/**
  * Get the full language name from the language code
  */
 function getLanguageName(langCode: string): string {
@@ -504,8 +552,9 @@ function getLanguageName(langCode: string): string {
     en: 'English',
     jp: 'Japanese',
     fr: 'French',
+    it: 'Italian',
     es: 'Spanish',
-    de: 'German',
+    pt: 'Portugese',
     zh: 'Chinese',
     ko: 'Korean',
   };

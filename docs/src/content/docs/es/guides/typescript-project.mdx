@@ -1,0 +1,242 @@
+---
+title: "Proyectos de TypeScript"
+description: "Documentación de referencia para proyectos de TypeScript"
+---
+
+
+
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import InstallCommand from '@components/install-command.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import schema from '../../../../../../packages/nx-plugin/src/ts/lib/schema.json';
+
+El generador de proyectos TypeScript permite crear bibliotecas o aplicaciones modernas configuradas con mejores prácticas como [Módulos ECMAScript (ESM)](https://www.typescriptlang.org/docs/handbook/modules/reference.html), [referencias de proyecto](https://www.typescriptlang.org/docs/handbook/project-references.html) de TypeScript, [Vitest](https://vitest.dev/) para ejecutar pruebas y [ESLint](https://eslint.org/) para análisis estático.
+
+## Uso
+
+### Generar un proyecto TypeScript
+
+Puedes crear un nuevo proyecto TypeScript de dos formas:
+
+<RunGenerator generator="ts#project" />
+
+### Opciones
+
+<GeneratorParameters schema={schema} />
+
+## Resultado del generador
+
+El generador creará la siguiente estructura de proyecto en el directorio `<directory>/<name>`:
+
+<FileTree>
+
+  - src Código fuente TypeScript
+    - index.ts
+  - project.json Configuración del proyecto y objetivos de construcción
+  - tsconfig.json Configuración base de TypeScript para este proyecto (extiende tsconfig.base.json del workspace)
+  - tsconfig.lib.json Configuración TypeScript para tu biblioteca (código en tiempo de ejecución o empaquetado)
+  - tsconfig.spec.json Configuración TypeScript para tus pruebas
+  - vite.config.ts Configuración para Vitest
+  - eslint.config.mjs Configuración para ESLint
+
+</FileTree>
+
+:::tip
+¡Observa que no se crea ningún archivo `package.json` para este proyecto! Puedes descubrir el porqué [a continuación](#dependencies).
+:::
+
+También notarás cambios en los siguientes archivos del workspace:
+
+<FileTree>
+
+  - nx.json La configuración de Nx se actualiza para configurar el plugin @nx/js/typescript
+  - tsconfig.base.json Se define un alias TypeScript para importar el proyecto desde otros
+  - tsconfig.json Se añade una referencia de proyecto TypeScript
+
+</FileTree>
+
+## Escribir código TypeScript
+
+Añade tu código TypeScript en el directorio `src`.
+
+### Sintaxis de importación ESM
+
+Como tu proyecto usa módulos ES, asegúrate de escribir las sentencias `import` con la sintaxis correcta, incluyendo la extensión del archivo:
+
+```ts title="index.ts" ".js"
+import { sayHello } from './hello.js';
+```
+
+:::note
+Aunque usemos TypeScript y `sayHello` esté definido en `hello.ts`, especificamos la extensión `.js` en la importación. Más detalles [aquí](https://www.typescriptlang.org/docs/handbook/modules/reference.html).
+:::
+
+### Exportar para otros proyectos
+
+El punto de entrada es `src/index.ts`. Añade aquí las exportaciones que quieras usar en otros proyectos:
+
+```ts title="src/index.ts"
+export { sayHello } from './hello.js';
+export * from './algorithms/index.js';
+```
+
+### Importar tu biblioteca en otros proyectos
+
+Los [alias TypeScript](https://www.typescriptlang.org/docs/handbook/modules/reference.html#paths) configurados en `tsconfig.base.json` permiten importar tu proyecto desde otros:
+
+```ts title="packages/my-other-project/src/index.ts"
+import { sayHello } from ':my-scope/my-library';
+```
+
+:::note
+Los alias comienzan con `:` para evitar conflictos con paquetes de [NPM](https://www.npmjs.com/).
+:::
+
+Al añadir una importación a un nuevo proyecto por primera vez, es probable que veas un error en tu IDE:
+
+<details>
+<summary>Error de importación</summary>
+
+```bash wrap
+File '/path/to/my/workspace/packages/my-library/src/index.ts' is not under 'rootDir' '/path/to/my/workspace/packages/my-consumer'. 'rootDir' is expected to contain all source files.
+  File is ECMAScript module because '/path/to/my/workspace/package.json' has field "type" with value "module" ts(6059)
+File '/path/to/my/workspace/packages/my-library/src/index.ts' is not listed within the file list of project '/path/to/my/workspace/packages/my-consumer/tsconfig.lib.json'. Projects must list all files or use an 'include' pattern.
+  File is ECMAScript module because '/path/to/my/workspace/package.json' has field "type" with value "module" ts(6307)
+```
+
+</details>
+
+Esto ocurre porque falta una [referencia de proyecto](https://www.typescriptlang.org/docs/handbook/project-references.html).
+
+Los proyectos TypeScript incluyen el generador de sincronización de Nx, que configura estas referencias automáticamente. Ejecuta:
+
+<NxCommands commands={['sync']} />
+
+Tras esto, el error debería desaparecer.
+
+:::tip
+Al construir tu proyecto, verás un mensaje como:
+
+```bash wrap
+[@nx/js:typescript-sync]: Some TypeScript configuration files are missing project references to the projects they depend on or contain outdated project references.
+
+This will result in an error in CI.
+
+? Would you like to sync the identified changes to get your workspace up to date?
+Yes, sync the changes and run the tasks
+No, run the tasks without syncing the changes
+```
+
+Selecciona `Yes` para que Nx actualice las referencias.
+:::
+
+### Dependencias
+
+Tu proyecto TypeScript no tiene `package.json`. Para añadir dependencias, modifica el `package.json` raíz:
+
+<InstallCommand pkg="some-npm-package" />
+
+#### Código en tiempo de ejecución
+
+Para usar tu proyecto como código ejecutable (ej. en AWS Lambda), se recomienda usar [`esbuild`](https://esbuild.github.io/) para crear un [paquete optimizado](https://esbuild.github.io/api/#tree-shaking).
+
+Añade un objetivo en `project.json`:
+
+```json
+{
+  ...
+  "targets": {
+    ...
+    "bundle": {
+      "cache": true,
+      "executor": "nx:run-commands",
+      "outputs": ["{workspaceRoot}/dist/packages/my-library/bundle"],
+      "options": {
+        "command": "esbuild packages/my-library/src/index.ts --bundle --outfile=dist/packages/my-library/bundle/index.js --platform=node --format=cjs"
+      }
+    },
+  },
+}
+```
+
+:::note
+El objetivo usa `src/index.ts` como punto de entrada, incluyendo todas sus dependencias en el paquete.
+:::
+
+#### Publicar en NPM
+
+Para publicar en NPM, debes crear un `package.json`. Usa el [plugin ESLint de NX](https://nx.dev/nx-api/eslint-plugin/documents/dependency-checks) para validar las dependencias.
+
+### Construcción
+
+Ejecuta el objetivo `build` para compilar, lintear y probar tu proyecto:
+
+<NxCommands commands={['run <project-name>:build']} />
+
+La salida se genera en `dist/packages/<my-library>/tsc`.
+
+## Pruebas
+
+[Vitest](https://vitest.dev/) está configurado para pruebas.
+
+### Escribir pruebas
+
+Crea archivos `.spec.ts` o `.test.ts` junto a tu código:
+
+<FileTree>
+  - src
+    - hello.ts Código fuente
+    - hello.spec.ts Pruebas para hello.ts
+</FileTree>
+
+Ejemplo usando sintaxis tipo Jest:
+
+```ts title="hello.spec.ts"
+import { sayHello } from './hello.js';
+
+describe('sayHello', () => {
+
+  it('should greet the caller', () => {
+    expect(sayHello('Darth Vader')).toBe('Hello, Darth Vader!');
+  });
+
+});
+```
+
+Consulta la [documentación de Vitest](https://vitest.dev/guide/#writing-tests) para más detalles.
+
+### Ejecutar pruebas
+
+Ejecuta todas las pruebas:
+
+<NxCommands commands={['run <project-name>:test']} />
+
+O pruebas específicas con `-t`:
+
+<NxCommands commands={["run <project-name>:test -t 'sayHello'"]} />
+
+:::tip
+Usuarios de VSCode pueden instalar la extensión [Vitest Runner](https://marketplace.visualstudio.com/items?itemName=rluvaton.vscode-vitest) para ejecutar pruebas desde el IDE.
+:::
+
+## Linting
+
+Los proyectos usan [ESLint](https://eslint.org/) y [Prettier](https://prettier.io/). Configúralos en los archivos raíz para aplicar cambios globales.
+
+### Ejecutar el linter
+
+Verifica tu proyecto:
+
+<NxCommands commands={["run <project-name>:lint"]} />
+
+### Corregir errores
+
+Usa `--configuration=fix` para corregir automáticamente:
+
+<NxCommands commands={["run <project-name>:lint --configuration=fix"]} />
+
+O corrige todo el workspace:
+
+<NxCommands commands={["run-many --target lint --all --configuration=fix"]} />

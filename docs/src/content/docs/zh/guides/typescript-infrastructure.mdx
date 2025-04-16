@@ -1,0 +1,153 @@
+---
+title: "CDK基础设施"
+description: "CDK基础设施参考文档"
+---
+
+
+
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import Link from '@components/link.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import schema from '../../../../../../packages/nx-plugin/src/infra/app/schema.json';
+
+[AWS CDK](https://docs.aws.amazon.com/cdk/v2/guide/home.html) 是一个通过代码定义云基础设施并通过 AWS CloudFormation 进行部署的框架。
+
+TypeScript基础设施生成器用于创建一个基于TypeScript编写的AWS CDK基础设施应用。生成的应用程序通过[CFN Guard](https://docs.aws.amazon.com/cfn-guard/latest/ug/what-is-guard.html)检查集成了安全最佳实践。
+
+## 使用方式
+
+### 生成基础设施项目
+
+您可以通过两种方式生成新的基础设施项目：
+
+<RunGenerator generator="ts#infra" />
+
+### 选项参数
+
+<GeneratorParameters schema={schema} />
+
+## 生成器输出
+
+生成器将在`<directory>/<name>`目录下创建以下项目结构：
+
+<FileTree>
+
+  - src
+    - main.ts 实例化CDK部署栈的应用程序入口
+    - stacks CDK栈定义
+      - application-stack.ts 主应用栈
+  - cdk.json CDK配置文件
+  - project.json 项目配置和构建目标
+
+</FileTree>
+
+:::tip
+您的基础设施是一个TypeScript项目，具体使用细节可参考<Link path="guides/typescript-project">TypeScript项目文档</Link>。
+:::
+
+## 实现CDK基础设施
+
+您可以在`src/stacks/application-stack.ts`中开始编写CDK基础设施，例如：
+
+```ts title="src/stacks/application-stack.ts" {9-10}
+import * as cdk from 'aws-cdk-lib';
+import { Bucket } from 'aws-cdk-lib/aws-s3'
+import { Construct } from 'constructs';
+
+export class ApplicationStack extends cdk.Stack {
+  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+    super(scope, id, props);
+
+    // 在此声明基础设施
+    new Bucket(this, 'MyBucket');
+  }
+}
+```
+
+### API基础设施
+
+如果您已使用<Link path="guides/trpc">tRPC API</Link>或<Link path="guides/fastapi">FastAPI</Link>生成器创建API，您会注意到`packages/common/constructs`中已存在用于部署它们的构造体。
+
+例如，如果您创建了名为`my-api`的tRPC API，只需导入并实例化构造体即可添加所有必要的部署基础设施：
+
+```ts title="src/stacks/application-stack.ts" {3, 9-10}
+import * as cdk from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { MyApi } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends cdk.Stack {
+  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+    super(scope, id, props);
+
+    // 添加API基础设施
+    new MyApi(this, 'MyApi');
+  }
+}
+```
+
+### 网站基础设施
+
+如果您已使用<Link path="guides/cloudscape-website">CloudScape网站</Link>生成器，您会注意到`packages/common/constructs`中已存在部署构造体。例如：
+
+```ts title="src/stacks/application-stack.ts" {3, 9-10}
+import * as cdk from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { MyWebsite } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends cdk.Stack {
+  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+    super(scope, id, props);
+
+    // 添加网站基础设施
+    new MyWebsite(this, 'MyWebsite');
+  }
+}
+```
+
+:::warning
+为确保网站<Link path="guides/cloudscape-website#runtime-configuration">运行时配置</Link>包含所有API配置，网站构造体必须在API构造体_之后_声明。
+:::
+
+## 合成基础设施
+
+作为`build`目标的一部分，除了执行<Link path="guides/typescript-project#building">默认的编译、校验和测试目标</Link>外，您的基础设施项目将被_合成_为CloudFormation模板。也可通过单独执行`synth`目标来完成：
+
+<NxCommands commands={['run <my-infra>:synth']} />
+
+合成后的云装配文件将位于根`dist`目录下的`dist/packages/<my-infra-project>/cdk.out`路径。
+
+## 初始化AWS账户
+
+如果是首次向AWS账户部署CDK应用，需要先进行初始化。
+
+首先确保已[配置AWS账户凭证](https://docs.aws.amazon.com/sdkref/latest/guide/access.html)。
+
+然后使用`cdk bootstrap`命令：
+
+```bash
+npx cdk bootstrap aws://<account-id>/<region>
+```
+
+更多细节请参考[CDK文档](https://docs.aws.amazon.com/cdk/v2/guide/bootstrapping-env.html)。
+
+## 部署到AWS
+
+构建完成后，可通过`deploy`目标将基础设施部署至AWS。
+
+首先确保已[配置AWS账户凭证](https://docs.aws.amazon.com/sdkref/latest/guide/access.html)。
+
+然后执行部署命令：
+
+<NxCommands commands={['run <my-infra>:deploy --all']} />
+
+:::tip
+上述命令将部署`main.ts`中定义的所有栈。若需部署特定栈（例如配置了多阶段应用时），可指定目标栈：
+
+<NxCommands commands={['run <my-infra>:deploy my-sandbox-stack']} />
+:::
+
+## 更多信息
+
+关于CDK的更多信息，请参考[CDK开发者指南](https://docs.aws.amazon.com/cdk/v2/guide/core_concepts.html)和[API参考文档](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-construct-library.html)。

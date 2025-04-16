@@ -1,0 +1,153 @@
+---
+title: "Infrastructure CDK"
+description: "Documentation de référence pour l'infrastructure CDK"
+---
+
+
+
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import Link from '@components/link.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import schema from '../../../../../../packages/nx-plugin/src/infra/app/schema.json';
+
+[AWS CDK](https://docs.aws.amazon.com/cdk/v2/guide/home.html) est un framework permettant de définir une infrastructure cloud via du code et de la provisionner via AWS CloudFormation.
+
+Le générateur d'infrastructure TypeScript crée une application d'infrastructure AWS CDK écrite en TypeScript. L'application générée inclut des bonnes pratiques de sécurité grâce à des vérifications [CFN Guard](https://docs.aws.amazon.com/cfn-guard/latest/ug/what-is-guard.html).
+
+## Utilisation
+
+### Générer un projet d'infrastructure
+
+Vous pouvez générer un nouveau projet d'infrastructure de deux manières :
+
+<RunGenerator generator="ts#infra" />
+
+### Options
+
+<GeneratorParameters schema={schema} />
+
+## Résultat du générateur
+
+Le générateur créera la structure de projet suivante dans le répertoire `<directory>/<name>` :
+
+<FileTree>
+
+  - src
+    - main.ts Point d'entrée de l'application instanciant les piles CDK à déployer
+    - stacks Définitions des piles CDK
+      - application-stack.ts Pile applicative principale
+  - cdk.json Configuration CDK
+  - project.json Configuration du projet et cibles de build
+
+</FileTree>
+
+:::tip
+Votre infrastructure étant un projet TypeScript, vous pouvez consulter la <Link path="guides/typescript-project">documentation des projets TypeScript</Link> pour plus de détails sur leur utilisation générale.
+:::
+
+## Implémentation de votre infrastructure CDK
+
+Vous pouvez commencer à écrire votre infrastructure CDK dans `src/stacks/application-stack.ts`, par exemple :
+
+```ts title="src/stacks/application-stack.ts" {9-10}
+import * as cdk from 'aws-cdk-lib';
+import { Bucket } from 'aws-cdk-lib/aws-s3'
+import { Construct } from 'constructs';
+
+export class ApplicationStack extends cdk.Stack {
+  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+    super(scope, id, props);
+
+    // Déclarez votre infrastructure ici
+    new Bucket(this, 'MyBucket');
+  }
+}
+```
+
+### Infrastructure d'API
+
+Si vous avez utilisé les générateurs <Link path="guides/trpc">tRPC API</Link> ou <Link path="guides/fastapi">FastAPI</Link> pour créer des APIs, vous remarquerez que des constructs sont déjà disponibles dans `packages/common/constructs` pour les déployer.
+
+Par exemple, si vous avez créé une API tRPC appelée `my-api`, vous pouvez simplement importer et instancier le construct pour ajouter toute l'infrastructure nécessaire à son déploiement :
+
+```ts title="src/stacks/application-stack.ts" {3, 9-10}
+import * as cdk from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { MyApi } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends cdk.Stack {
+  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+    super(scope, id, props);
+
+    // Ajoutez l'infrastructure pour votre API
+    new MyApi(this, 'MyApi');
+  }
+}
+```
+
+### Infrastructure de site web
+
+Si vous avez utilisé le générateur <Link path="guides/cloudscape-website">CloudScape website</Link>, vous remarquerez qu'un construct est déjà disponible dans `packages/common/constructs` pour le déployer. Par exemple :
+
+```ts title="src/stacks/application-stack.ts" {3, 9-10}
+import * as cdk from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { MyWebsite } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends cdk.Stack {
+  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+    super(scope, id, props);
+
+    // Ajoutez l'infrastructure pour votre site web
+    new MyWebsite(this, 'MyWebsite');
+  }
+}
+```
+
+:::warning
+Il est important de s'assurer que le site web est déclaré _après_ tous les constructs d'API afin que la <Link path="guides/cloudscape-website#runtime-configuration">configuration runtime</Link> du site inclue toutes les configurations des APIs.
+:::
+
+## Synthèse de votre infrastructure
+
+Dans le cadre de votre cible `build`, en plus des <Link path="guides/typescript-project#building">cibles par défaut de compilation, lint et tests</Link>, votre projet d'infrastructure est _synthétisé_ en CloudFormation. Ceci peut également être exécuté indépendamment via la cible `synth` :
+
+<NxCommands commands={['run <my-infra>:synth']} />
+
+Vous trouverez votre assembly cloud synthétisé dans le dossier racine `dist`, sous `dist/packages/<my-infra-project>/cdk.out`.
+
+## Bootstrap de votre/vos compte(s) AWS
+
+Si vous déployez une application CDK sur un compte AWS pour la première fois, celui-ci doit d'abord être bootstrappé.
+
+Premièrement, assurez-vous d'avoir [configuré des credentials pour votre compte AWS](https://docs.aws.amazon.com/sdkref/latest/guide/access.html).
+
+Ensuite, utilisez la commande `cdk bootstrap` :
+
+```bash
+npx cdk bootstrap aws://<account-id>/<region>
+```
+
+Pour plus de détails, consultez la [documentation CDK](https://docs.aws.amazon.com/cdk/v2/guide/bootstrapping-env.html).
+
+## Déploiement sur AWS
+
+Après un build, vous pouvez déployer votre infrastructure sur AWS via la cible `deploy`.
+
+Premièrement, assurez-vous d'avoir [configuré des credentials pour votre compte AWS](https://docs.aws.amazon.com/sdkref/latest/guide/access.html).
+
+Ensuite, exécutez la cible deploy :
+
+<NxCommands commands={['run <my-infra>:deploy --all']} />
+
+:::tip
+La commande ci-dessus déploie _toutes_ les piles définies dans `main.ts`. Vous pouvez cibler une pile spécifique, notamment si vous avez configuré plusieurs environnements d'application :
+
+<NxCommands commands={['run <my-infra>:deploy my-sandbox-stack']} />
+:::
+
+## Informations complémentaires
+
+Pour plus d'informations sur CDK, consultez le [Guide développeur CDK](https://docs.aws.amazon.com/cdk/v2/guide/core_concepts.html) et la [Référence d'API](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-construct-library.html).

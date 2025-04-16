@@ -1,0 +1,658 @@
+---
+title: "AI地牢游戏"
+description: "使用 @aws/nx-plugin 构建人工智能驱动的地牢冒险游戏的演练。"
+---
+
+
+
+import { Aside, Code, FileTree, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import Link from '@components/link.astro';
+import Drawer from '@components/drawer.astro';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import InstallCommand from '@components/install-command.astro';
+import dungeonAdventureArchitecturePng from '@assets/dungeon-game-architecture.png'
+import dungeonAdventureErPng from '@assets/dungeon-adventure-er.png'
+import baselineWebsitePng from '@assets/baseline-website.png'
+import baselineGamePng from '@assets/baseline-game.png'
+import nxGraphPng from '@assets/nx-graph.png'
+import gameSelectPng from '@assets/game-select.png'
+import gameConversationPng from '@assets/game-conversation.png'
+
+## 模块二：游戏API实现
+
+我们将从实现游戏API开始。为此，我们需要总共创建4个API：
+
+1. `createGame` - 用于创建新的游戏实例。
+2. `queryGames` - 返回分页的历史保存游戏列表。
+3. `saveAction` - 为指定游戏保存动作。
+4. `queryActions` - 返回与游戏相关的所有动作的分页列表。
+
+### API模式定义
+
+使用[Zod](https://zod.dev/)在`packages/game-api/schema/src`项目中定义API输入输出模式：
+
+<Tabs>
+  <TabItem label="types/action.ts">
+```typescript
+import { z } from 'zod';
+
+export const ActionSchema = z.object({
+  playerName: z.string(),
+  timestamp: z.string().datetime(),
+  role: z.enum(['assistant', 'user']),
+  content: z.string(),
+});
+
+export type IAction = z.TypeOf<typeof ActionSchema>;
+```
+  </TabItem>
+  <TabItem label="types/common.ts">
+```typescript
+import { z } from 'zod';
+
+export const QueryInputSchema = z.object({
+  cursor: z.string().optional(),
+  limit: z.number().optional().default(100),
+});
+
+export const createPaginatedQueryOutput = <ItemType extends z.ZodTypeAny>(
+  itemSchema: ItemType,
+) => {
+  return z.object({
+    items: z.array(itemSchema),
+    cursor: z.string().nullable(),
+  });
+};
+
+export type IQueryInput = z.TypeOf<typeof QueryInputSchema>;
+```
+  </TabItem>
+  <TabItem label="types/game.ts">
+```typescript
+import { z } from 'zod';
+
+export const GameSchema = z.object({
+  playerName: z.string(),
+  genre: z.enum(['zombie', 'superhero', 'medieval']),
+  lastUpdated: z.string().datetime(),
+});
+
+export type IGame = z.TypeOf<typeof GameSchema>;
+```
+  </TabItem>
+  <TabItem label="index.ts">
+```diff lang="typescript"
+-export * from './procedures/echo.js';
++export * from './types/action.js';
++export * from './types/common.js';
++export * from './types/game.js';
+```
+  </TabItem>
+</Tabs>
+
+可以删除`./procedures/echo.ts`文件，因为本项目不会使用它。
+
+<Aside type="tip">
+如上所示，我们为每个Zod模式定义都使用`z.TypeOf`语法导出了接口类型。这实现了Zod定义到TypeScript接口的自动转换，无需重复编码！
+</Aside>
+
+### 实体建模
+
+应用程序的ER图如下：
+
+<Image class="centered-image white-bg" src={dungeonAdventureErPng} alt="dungeon-adventure-er.png" width="400" height="300" />
+
+我们将使用DynamoDB实现数据库，并通过[ElectroDB](https://electrodb.dev/en/core-concepts/introduction/)客户端库简化操作。首先运行以下命令安装`electrodb`：
+
+<InstallCommand pkg="electrodb @aws-sdk/client-dynamodb" />
+
+<Aside>
+所有依赖项都添加到根目录的`package.json`，因为`@aws/nx-plugin`遵循[单一版本策略](https://nx.dev/concepts/decisions/dependency-management#single-version-policy)原则。更多信息请参考<Link path="guides/typescript-project#dependencies">TypeScript项目指南</Link>。
+</Aside>
+
+在`packages/game-api/backend/src/entities`目录下创建以下文件定义ElectroDB实体：
+
+<Tabs>
+  <TabItem label="action.ts">
+```typescript
+import { Entity } from 'electrodb';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+
+export const createActionEntity = (client?: DynamoDBClient) =>
+  new Entity(
+    {
+      model: {
+        entity: 'Action',
+        version: '1',
+        service: 'game',
+      },
+      attributes: {
+        playerName: { type: 'string', required: true, readOnly: true },
+        timestamp: {
+          type: 'string',
+          required: true,
+          readOnly: true,
+          set: () => new Date().toISOString(),
+          default: () => new Date().toISOString(),
+        },
+        role: { type: 'string', required: true, readOnly: true },
+        content: { type: 'string', required: true, readOnly: true },
+      },
+      indexes: {
+        primary: {
+          pk: { field: 'pk', composite: ['playerName'] },
+          sk: { field: 'sk', composite: ['timestamp'] },
+        },
+      },
+    },
+    { client, table: process.env.TABLE_NAME },
+  );
+```
+  </TabItem>
+  <TabItem label="game.ts">
+```typescript
+import { Entity } from 'electrodb';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+
+export const createGameEntity = (client?: DynamoDBClient) =>
+  new Entity(
+    {
+      model: {
+        entity: 'Game',
+        version: '1',
+        service: 'game',
+      },
+      attributes: {
+        playerName: { type: 'string', required: true, readOnly: true },
+        genre: { type: 'string', required: true, readOnly: true },
+        lastUpdated: {
+          type: 'string',
+          required: true,
+          default: () => new Date().toISOString(),
+        },
+      },
+      indexes: {
+        primary: {
+          pk: { field: 'pk', composite: ['playerName'] },
+          sk: {
+            field: 'sk',
+            composite: [],
+          },
+        },
+      },
+    },
+    { client, table: process.env.TABLE_NAME },
+  );
+```
+  </TabItem>
+</Tabs>
+
+ElectroDB功能强大，不仅支持类型定义，还能为时间戳等字段提供默认值。同时它采用DynamoDB最佳实践——[单表设计](https://electrodb.dev/en/core-concepts/single-table-relationships/)。
+
+<Aside>
+虽然ElectroDB支持[集合](https://electrodb.dev/en/modeling/collections/)，但本教程为简化起见暂不使用。
+</Aside>
+
+### 将DynamoDB客户端加入tRPC上下文
+
+为在各个流程中使用DynamoDB客户端，我们需要通过上下文传递客户端实例。在`packages/game-api/backend/src`中进行以下修改：
+
+<Tabs>
+  <TabItem label="middleware/dynamodb.ts">
+```typescript
+// middleware/dynamodb.ts
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { initTRPC } from '@trpc/server';
+
+export interface IDynamoDBContext {
+  dynamoDb?: DynamoDBClient;
+}
+
+export const createDynamoDBPlugin = () => {
+  const t = initTRPC.context<IDynamoDBContext>().create();
+  return t.procedure.use(async (opts) => {
+    const dynamoDb = new DynamoDBClient();
+
+    const response = await opts.next({
+      ctx: {
+        ...opts.ctx,
+        dynamoDb,
+      },
+    });
+
+    return response;
+  });
+};
+```
+
+这个插件用于创建`DynamoDBClient`并注入到上下文中。
+  </TabItem>
+  <TabItem label="middleware/index.ts">
+```diff lang="ts"
+// middleware/index.ts
+import { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
+import type { APIGatewayProxyEventV2WithIAMAuthorizer } from 'aws-lambda';
+import { ILoggerContext } from './logger.js';
+import { IMetricsContext } from './metrics.js';
+import { ITracerContext } from './tracer.js';
++import { IDynamoDBContext } from './dynamodb.js';
+
++export * from './dynamodb.js';
+export * from './logger.js';
+export * from './metrics.js';
+export * from './tracer.js';
+export * from './error.js';
+
+export type IMiddlewareContext =
+  CreateAWSLambdaContextOptions<APIGatewayProxyEventV2WithIAMAuthorizer> &
++    IDynamoDBContext &
+    ILoggerContext &
+    IMetricsContext &
+    ITracerContext;
+```
+
+扩展`IMiddlewareContext`以添加`IDynamoDBContext`。
+  </TabItem>
+  <TabItem label="init.ts">
+```diff lang="ts"
+// init.ts
+import { initTRPC } from '@trpc/server';
+import {
++  createDynamoDBPlugin,
+  createErrorPlugin,
+  createLoggerPlugin,
+  createMetricsPlugin,
+  createTracerPlugin,
+  IMiddlewareContext,
+} from './middleware/index.js';
+
+process.env.POWERTOOLS_SERVICE_NAME = 'GameApi';
+process.env.POWERTOOLS_METRICS_NAMESPACE = 'GameApi';
+
+export type Context = IMiddlewareContext;
+
+export const t = initTRPC.context<Context>().create();
+
+export const publicProcedure = t.procedure
++  .unstable_concat(createDynamoDBPlugin())
+  .unstable_concat(createLoggerPlugin())
+  .unstable_concat(createTracerPlugin())
+  .unstable_concat(createMetricsPlugin())
+  .unstable_concat(createErrorPlugin());
+```
+
+DynamoDB插件已集成。
+
+<Aside>
+此处使用`unstable_concat`API是安全的，前缀`unstable_`仅因该API较新。更多信息请参考[concat指南](https://trpc.io/docs/server/middlewares#concat)。
+</Aside>
+  </TabItem>
+</Tabs>
+
+### 定义流程处理
+
+现在实现API方法。在`packages/game-api/backend/src/procedures`中进行以下修改：
+
+<Tabs>
+  <TabItem label="query-actions.ts">
+```typescript
+import { createActionEntity } from '../entities/action.js';
+import {
+  ActionSchema,
+  IAction,
+  QueryInputSchema,
+  createPaginatedQueryOutput,
+} from ':dungeon-adventure/game-api-schema';
+import { publicProcedure } from '../init.js';
+import { z } from 'zod';
+
+export const queryActions = publicProcedure
+  .input(QueryInputSchema.extend({ playerName: z.string() }))
+  .output(createPaginatedQueryOutput(ActionSchema))
+  .query(async ({ input, ctx }) => {
+    const actionEntity = createActionEntity(ctx.dynamoDb);
+    const result = await actionEntity.query
+      .primary({ playerName: input.playerName })
+      .go({ cursor: input.cursor, count: input.limit });
+
+    return {
+      items: result.data as IAction[],
+      cursor: result.cursor,
+    };
+  });
+```
+  </TabItem>
+  <TabItem label="query-games.ts">
+```typescript
+import { createGameEntity } from '../entities/game.js';
+import {
+  GameSchema,
+  IGame,
+  QueryInputSchema,
+  createPaginatedQueryOutput,
+} from ':dungeon-adventure/game-api-schema';
+import { publicProcedure } from '../init.js';
+
+export const queryGames = publicProcedure
+  .input(QueryInputSchema)
+  .output(createPaginatedQueryOutput(GameSchema))
+  .query(async ({ input, ctx }) => {
+    const gameEntity = createGameEntity(ctx.dynamoDb);
+    const result = await gameEntity.scan.go({
+      cursor: input.cursor,
+      count: input.limit,
+    });
+
+    return {
+      items: result.data as IGame[],
+      cursor: result.cursor,
+    };
+  });
+```
+  </TabItem>
+  <TabItem label="save-action.ts">
+```typescript
+import { ActionSchema, IAction } from ':dungeon-adventure/game-api-schema';
+import { publicProcedure } from '../init.js';
+import { createActionEntity } from '../entities/action.js';
+import { createGameEntity } from '../entities/game.js';
+
+export const saveAction = publicProcedure
+  .input(ActionSchema.omit({ timestamp: true }))
+  .output(ActionSchema)
+  .mutation(async ({ input, ctx }) => {
+    const actionEntity = createActionEntity(ctx.dynamoDb);
+    const gameEntity = createGameEntity(ctx.dynamoDb);
+
+    const action = await actionEntity.put(input).go();
+    await gameEntity
+      .update({ playerName: input.playerName })
+      .set({ lastUpdated: action.data.timestamp })
+      .go();
+    return action.data as IAction;
+  });
+```
+  </TabItem>
+  <TabItem label="save-game.ts">
+```typescript
+import { createGameEntity } from '../entities/game.js';
+import { GameSchema, IGame } from ':dungeon-adventure/game-api-schema';
+import { publicProcedure } from '../init.js';
+
+export const saveGame = publicProcedure
+  .input(GameSchema.omit({ lastUpdated: true }))
+  .output(GameSchema)
+  .mutation(async ({ input, ctx }) => {
+    const gameEntity = createGameEntity(ctx.dynamoDb);
+
+    const result = await gameEntity.put(input).go();
+    return result.data as IGame;
+  });
+```
+  </TabItem>
+</Tabs>
+
+可以删除`echo.ts`文件（位于`packages/game-api/backend/src/procedures`），因为本项目不会使用它。
+
+### 路由配置
+
+现在将定义好的流程接入API。更新以下文件：
+
+```diff lang="ts"
+// packages/game-api/backend/src/router.ts
+import {
+  awsLambdaRequestHandler,
+  CreateAWSLambdaContextOptions,
+} from '@trpc/server/adapters/aws-lambda';
+-import { echo } from './procedures/echo.js';
+import { t } from './init.js';
+import { APIGatewayProxyEventV2WithIAMAuthorizer } from 'aws-lambda';
++import { queryActions } from './procedures/query-actions.js';
++import { saveAction } from './procedures/save-action.js';
++import { queryGames } from './procedures/query-games.js';
++import { saveGame } from './procedures/save-game.js';
+
+export const router = t.router;
+
+export const appRouter = router({
+-  echo,
++  actions: router({
++    query: queryActions,
++    save: saveAction,
++  }),
++  games: router({
++    query: queryGames,
++    save: saveGame,
++  }),
+});
+
+export const handler = awsLambdaRequestHandler({
+  router: appRouter,
+  createContext: (
+    ctx: CreateAWSLambdaContextOptions<APIGatewayProxyEventV2WithIAMAuthorizer>,
+  ) => ctx,
+});
+
+export type AppRouter = typeof appRouter;
+```
+
+### 基础设施
+
+最后更新基础设施以创建DynamoDB表并授权GameAPI操作权限。修改`packages/infra/src`如下：
+
+<Tabs>
+  <TabItem label="constructs/electrodb-table.ts">
+```typescript
+// constructs/electrodb-table.ts
+import { CfnOutput } from 'aws-cdk-lib';
+import {
+  AttributeType,
+  BillingMode,
+  ProjectionType,
+  Table,
+  TableProps,
+} from 'aws-cdk-lib/aws-dynamodb';
+import { Construct } from 'constructs';
+
+export type ElectrodbDynamoTableProps = Omit<
+  TableProps,
+  'partitionKey' | 'sortKey' | 'billingMode'
+>;
+
+export class ElectrodbDynamoTable extends Table {
+  constructor(scope: Construct, id: string, props?: ElectrodbDynamoTableProps) {
+    super(scope, id, {
+      partitionKey: {
+        name: 'pk',
+        type: AttributeType.STRING,
+      },
+      sortKey: {
+        name: 'sk',
+        type: AttributeType.STRING,
+      },
+      billingMode: BillingMode.PAY_PER_REQUEST,
+      ...props,
+    });
+
+    this.addGlobalSecondaryIndex({
+      indexName: 'gsi1pk-gsi1sk-index',
+      partitionKey: {
+        name: 'gsi1pk',
+        type: AttributeType.STRING,
+      },
+      sortKey: {
+        name: 'gsi1sk',
+        type: AttributeType.STRING,
+      },
+      projectionType: ProjectionType.ALL,
+    });
+
+    new CfnOutput(this, 'TableName', { value: this.tableName });
+  }
+}
+```
+  </TabItem>
+  <TabItem label="stacks/application-stack.ts">
+```diff lang="ts"
+// stacks/application-stack.ts
+import {
+  GameApi,
+  GameUI,
+  StoryApi,
+  UserIdentity,
+} from ':dungeon-adventure/common-constructs';
+import * as cdk from 'aws-cdk-lib';
+import { Construct } from 'constructs';
++import { ElectrodbDynamoTable } from '../constructs/electrodb-table.js';
+
+export class ApplicationStack extends cdk.Stack {
+  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+    super(scope, id, props);
+
+    // 此处定义堆栈内容
+    const userIdentity = new UserIdentity(this, 'UserIdentity');
++
++    const electroDbTable = new ElectrodbDynamoTable(this, 'ElectroDbTable');
+
+    const gameApi = new GameApi(this, 'GameApi');
+    const storyApi = new StoryApi(this, 'StoryApi');
++
++    gameApi.routerFunction.addEnvironment(
++      'TABLE_NAME',
++      electroDbTable.tableName,
++    );
++    // 授予gameAPI对DynamoDB的读写权限
++    electroDbTable.grantReadWriteData(gameApi.routerFunction);
+
+    // 授予认证角色调用API的权限
+    [storyApi, gameApi].forEach((api) =>
+      api.grantInvokeAccess(userIdentity.identityPool.authenticatedRole),
+    );
+
+    // 最后实例化GameUI以自动配置运行时参数
+    new GameUI(this, 'GameUI');
+  }
+}
+```
+  </TabItem>
+</Tabs>
+
+### 部署与测试
+
+首先构建代码库：
+
+<NxCommands commands={['run-many --target build --all']} />
+
+<Aside type="tip">
+如果遇到lint错误，可运行以下命令自动修复：
+
+<NxCommands commands={['run-many --target lint --configuration=fix --all']} />
+</Aside>
+
+运行以下命令部署应用：
+
+<NxCommands commands={['run @dungeon-adventure/infra:deploy dungeon-adventure-infra-sandbox']} />
+
+首次部署约需8分钟，后续部署约需2分钟。
+
+:::tip
+迭代修改lambda函数代码时，构建后可使用`--hotswap`标志进行热部署（约2-3秒）：
+
+<NxCommands commands={['run @dungeon-adventure/infra:deploy dungeon-adventure-infra-sandbox --hotswap']} />
+:::
+
+<Drawer title="部署命令" trigger="点击查看一键部署所有堆栈的详细信息">
+
+可通过以下命令部署CDK应用中的所有堆栈：
+
+<NxCommands commands={['run @dungeon-adventure/infra:deploy --all']} />
+
+**不建议**此操作，因为若将不同环境（如生产环境）部署为独立堆栈，使用`--all`标志可能导致意外部署！
+
+</Drawer>
+
+部署完成后，输出信息类似如下（部分值已脱敏）：
+
+```bash
+dungeon-adventure-infra-sandbox
+dungeon-adventure-infra-sandbox: deploying... [2/2]
+
+ ✅  dungeon-adventure-infra-sandbox
+
+✨  部署时间: 354s
+
+输出:
+dungeon-adventure-infra-sandbox.ElectroDbTableTableNameXXX = dungeon-adventure-infra-sandbox-ElectroDbTableXXX-YYY
+dungeon-adventure-infra-sandbox.GameApiGameApiUrlXXX = https://xxx.region.amazonaws.com/
+dungeon-adventure-infra-sandbox.GameUIDistributionDomainNameXXX = xxx.cloudfront.net
+dungeon-adventure-infra-sandbox.StoryApiStoryApiUrlXXX = https://xxx.execute-api.region.amazonaws.com/
+dungeon-adventure-infra-sandbox.UserIdentityUserIdentityIdentityPoolIdXXX = region:xxx
+dungeon-adventure-infra-sandbox.UserIdentityUserIdentityUserPoolIdXXX = region_xxx
+```
+
+可通过以下方式测试API：
+<ul>
+<li>启动本地tRPC后端实例，使用`curl`调用API</li>
+<li>
+<Drawer title="支持Sigv4签名的curl" trigger="调用已部署的API（需Sigv4签名）">
+可将以下脚本添加到`.bashrc`文件（并`source`），或在当前终端直接粘贴：
+```bash
+// ~/.bashrc
+acurl () {
+    REGION=$1
+    SERVICE=$2
+    shift; shift;
+    curl --aws-sigv4 "aws:amz:$REGION:$SERVICE" --user "$(aws configure get aws_access_key_id):$(aws configure get aws_secret_access_key)" -H "X-Amz-Security-Token: $(aws configure get aws_session_token)" "$@"
+}
+```
+
+示例调用：
+
+###### API Gateway
+```bash
+acurl ap-southeast-2 execute-api -X GET https://xxx
+```
+
+###### Lambda函数URL
+```bash
+acurl ap-southeast-2 lambda -N -X POST https://xxx
+```
+</Drawer>
+</li>
+</ul>
+
+
+<Tabs>
+  <TabItem label="本地测试">
+    运行以下命令启动本地`game-api`服务：
+
+    <NxCommands highlights={['dungeon-adventure-infra-sandbox-ElectroDbTableXXX-YYY']} env={{TABLE_NAME:"dungeon-adventure-infra-sandbox-ElectroDbTableXXX-YYY"}} commands={["run @dungeon-adventure/game-api-backend:serve"]} />
+
+    <Aside type="caution">
+    请使用CDK部署输出中的`dungeon-adventure-infra-sandbox.ElectroDbTableTableNameXXX`值替换高亮占位符。
+    </Aside>
+
+    服务启动后执行：
+    ```bash
+    curl -X GET http://localhost:2022/games.query\?input="\\{\\}"
+    ```
+  </TabItem>
+  <TabItem label="云端测试">
+```bash "https://xxx.execute-api.region.amazonaws.com/" "ap-southeast-2"
+acurl ap-southeast-2 execute-api -X GET \
+  https://xxx.execute-api.region.amazonaws.com/games.query\?input\="\{\}"
+```
+    <Aside type="caution">
+    使用CDK输出中的`dungeon-adventure-infra-sandbox.GameApiGameApiUrlXXX`替换高亮占位符，并根据实际区域调整参数。
+    </Aside>
+  </TabItem>
+</Tabs>
+
+若成功执行，将收到如下响应：
+```json
+{"result":{"data":{"items":[],"cursor":null}}}
+```
+
+恭喜！您已成功使用tRPC构建并部署了第一个API！🎉🎉🎉

@@ -1,0 +1,881 @@
+---
+title: "Réagir à FastAPI"
+description: "Connecter un site web React à un Python FastAPI"
+---
+
+
+
+import { FileTree, Steps } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Drawer from '@components/drawer.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import schema from '../../../../../../../packages/nx-plugin/src/api-connection/schema.json';
+
+Le générateur `api-connection` permet d'intégrer rapidement votre application React avec un backend FastAPI. Il configure tous les éléments nécessaires pour une connexion type-safe à vos backends FastAPI, incluant la génération de client et de hooks [TanStack Query](https://tanstack.com/query/v5), la prise en charge de l'authentification AWS IAM et une gestion d'erreurs appropriée.
+
+## Prérequis
+
+Avant d'utiliser ce générateur, assurez-vous que votre application React dispose de :
+
+1. Un fichier `main.tsx` qui rend votre application
+2. Un backend FastAPI fonctionnel (généré via le générateur FastAPI)
+
+<details>
+<summary>Exemple de structure requise pour `main.tsx`</summary>
+
+```tsx
+import { StrictMode } from 'react';
+import * as ReactDOM from 'react-dom/client';
+import App from './app/app';
+
+const root = ReactDOM.createRoot(
+  document.getElementById('root') as HTMLElement,
+);
+root.render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+);
+```
+
+</details>
+
+## Utilisation
+
+### Exécuter le générateur
+
+<RunGenerator generator="api-connection" />
+
+### Options
+
+<GeneratorParameters schema={schema} />
+
+## Résultat du générateur
+
+Le générateur modifiera les fichiers suivants dans votre projet FastAPI :
+
+<FileTree>
+
+- scripts
+  - generate_open_api.py Ajoute un script pour générer la spécification OpenAPI de votre API
+- project.json Ajoute une nouvelle cible de build qui exécute le script de génération
+
+</FileTree>
+
+Le générateur modifiera les fichiers suivants dans votre application React :
+
+<FileTree>
+
+- src
+  - components
+    - \<ApiName>Provider.tsx Provider pour le client de votre API
+    - QueryClientProvider.tsx Provider du client TanStack React Query
+  - hooks
+    - use\<ApiName>.tsx Ajoute un hook pour appeler votre API avec état géré par TanStack Query
+    - use\<ApiName>Client.tsx Ajoute un hook pour instancier le client vanilla pouvant appeler votre API
+    - useSigV4.tsx Ajoute un hook pour signer les requêtes HTTP avec SigV4 (si l'authentification IAM est sélectionnée)
+- project.json Ajoute une nouvelle cible de build pour générer un client type-safe
+- .gitignore Les fichiers clients générés sont ignorés par défaut
+
+</FileTree>
+
+Le générateur ajoutera également une configuration runtime à votre infrastructure de site web si elle n'est pas déjà présente, garantissant que l'URL de l'API FastAPI est disponible dans le site et configurée automatiquement par le hook `use<ApiName>.tsx`.
+
+### Génération de code
+
+À la compilation, un client type-safe est généré à partir de la spécification OpenAPI de votre FastAPI. Cela ajoutera trois nouveaux fichiers à votre application React :
+
+<FileTree>
+
+- src
+  - generated
+    - \<ApiName>
+      - types.gen.ts Types générés depuis les modèles pydantic de votre FastAPI
+      - client.gen.ts Client type-safe pour appeler votre API
+      - options-proxy.gen.ts Fournit des méthodes pour créer des options de hooks TanStack Query interagissant avec votre API
+
+</FileTree>
+
+:::astuce
+Par défaut, le client généré est ignoré du contrôle de version. Pour l'inclure, supprimez l'entrée du fichier `.gitignore` de votre application React. Notez que les modifications manuelles des fichiers `.gen.ts` seront écrasées à la compilation.
+:::
+
+## Utiliser le code généré
+
+Le client type-safe généré permet d'appeler votre FastAPI depuis votre application React. Il est recommandé d'utiliser les hooks TanStack Query, mais le client vanilla peut aussi être utilisé directement.
+
+:::note
+Après toute modification de votre FastAPI, recompilez votre projet pour mettre à jour le client généré. Exemple :
+
+<NxCommands commands={['run-many --target build --all']} />
+:::
+
+:::astuce
+Pour régénérer automatiquement le client lors des modifications de l'API, utilisez [`nx watch`](https://nx.dev/nx-api/nx/documents/watch) :
+
+<NxCommands
+  commands={[
+    'watch --projects=<FastAPIProject> -- \\ ',
+    'run <WebsiteProject>:"generate:<ApiName>-client"',
+  ]}
+/>
+:::
+
+### Utiliser le hook d'API
+
+Le générateur fournit un hook `use<ApiName>` pour appeler votre API avec TanStack Query.
+
+### Requêtes
+
+Utilisez `queryOptions` pour récupérer les options nécessaires à `useQuery` :
+
+```tsx {7}
+import { useQuery } from '@tanstack/react-query';
+import { useState, useEffect } from 'react';
+import { useMyApi } from './hooks/useMyApi';
+
+function MyComponent() {
+  const api = useMyApi();
+  const item = useQuery(api.getItem.queryOptions({ itemId: 'some-id' }));
+
+  if (item.isLoading) return <div>Chargement...</div>;
+  if (item.isError) return <div>Erreur : {item.error.message}</div>;
+
+  return <div>Élément : {item.data.name}</div>;
+}
+```
+
+<Drawer title="Utilisation directe du client API" trigger="Cliquez ici pour un exemple utilisant le client vanilla directement.">
+```tsx {5,13}
+import { useState, useEffect } from 'react';
+import { useMyApiClient } from './hooks/useMyApiClient';
+
+function MyComponent() {
+  const api = useMyApiClient();
+  const [item, setItem] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const fetchItem = async () => {
+      try {
+        const data = await api.getItem({ itemId: 'some-id' });
+        setItem(data);
+      } catch (err) {
+        setError(err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchItem();
+  }, [api]);
+
+  if (loading) return <div>Chargement...</div>;
+  if (error) return <div>Erreur : {error.message}</div>;
+
+  return <div>Élément : {item.name}</div>;
+}
+```
+</Drawer>
+
+### Mutations
+
+Les hooks générés gèrent les mutations via `useMutation`, offrant une gestion des opérations CRUD avec états de chargement, erreurs et mises à jour optimistes.
+
+```tsx {5-7,11}
+import { useMutation } from '@tanstack/react-query';
+import { useMyApi } from './hooks/useMyApi';
+
+function CreateItemForm() {
+  const api = useMyApi();
+  // Crée une mutation avec les options générées
+  const createItem = useMutation(api.createItem.mutationOptions());
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    createItem.mutate({ name: 'Nouvel élément', description: 'Un nouvel élément' });
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      {/* Champs du formulaire */}
+      <button
+        type="submit"
+        disabled={createItem.isPending}
+      >
+        {createItem.isPending ? 'Création...' : 'Créer l\'élément'}
+      </button>
+
+      {createItem.isSuccess && (
+        <div className="success">
+          Élément créé avec l'ID : {createItem.data.id}
+        </div>
+      )}
+
+      {createItem.isError && (
+        <div className="error">
+          Erreur : {createItem.error.message}
+        </div>
+      )}
+    </form>
+  );
+}
+```
+
+Ajoutez des callbacks pour différents états de mutation :
+
+```tsx
+const createItem = useMutation({
+  ...api.createItem.mutationOptions(),
+  onSuccess: (data) => {
+    console.log('Élément créé :', data);
+    navigate(`/items/${data.id}`);
+  },
+  onError: (error) => {
+    console.error('Échec de la création :', error);
+  },
+  onSettled: () => {
+    queryClient.invalidateQueries({ queryKey: api.listItems.queryKey() });
+  }
+});
+```
+
+<Drawer title="Mutations avec le client API directement" trigger="Cliquez ici pour un exemple utilisant le client directement.">
+```tsx
+import { useState } from 'react';
+import { useMyApiClient } from './hooks/useMyApiClient';
+
+function CreateItemForm() {
+  const api = useMyApiClient();
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [createdItem, setCreatedItem] = useState(null);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const newItem = await api.createItem({
+        name: 'Nouvel élément',
+        description: 'Un nouvel élément'
+      });
+      setCreatedItem(newItem);
+    } catch (err) {
+      setError(err);
+      console.error('Échec de la création :', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      {/* Champs du formulaire */}
+      <button
+        type="submit"
+        disabled={isLoading}
+      >
+        {isLoading ? 'Création...' : 'Créer l\'élément'}
+      </button>
+
+      {createdItem && (
+        <div className="success">
+          Élément créé avec l'ID : {createdItem.id}
+        </div>
+      )}
+
+      {error && (
+        <div className="error">
+          Erreur : {error.message}
+        </div>
+      )}
+    </form>
+  );
+}
+```
+</Drawer>
+
+### Pagination avec requêtes infinies
+
+Pour les endpoints utilisant un paramètre `cursor`, les hooks générés prennent en charge les requêtes infinies via `useInfiniteQuery`, facilitant le défilement infini.
+
+```tsx {5-14,24-26}
+import { useInfiniteQuery } from '@tanstack/react-query';
+import { useMyApi } from './hooks/useMyApi';
+
+function ItemList() {
+  const api = useMyApi();
+  const items = useInfiniteQuery({
+    ...api.listItems.infiniteQueryOptions({
+      limit: 10,
+    }, {
+      getNextPageParam: (lastPage) =>
+        lastPage.nextCursor || undefined
+      }),
+  });
+
+  if (items.isLoading) {
+    return <LoadingSpinner />;
+  }
+
+  if (items.isError) {
+    return <ErrorMessage message={items.error.message} />;
+  }
+
+  return (
+    <div>
+      <ul>
+        {items.data.pages.flatMap(page =>
+          page.items.map(item => (
+            <li key={item.id}>{item.name}</li>
+          ))
+        )}
+      </ul>
+
+      <button
+        onClick={() => items.fetchNextPage()}
+        disabled={!items.hasNextPage || items.isFetchingNextPage}
+      >
+        {items.isFetchingNextPage
+          ? 'Chargement supplémentaire...'
+          : items.hasNextPage
+          ? 'Charger plus'
+          : 'Aucun élément supplémentaire'}
+      </button>
+    </div>
+  );
+}
+```
+
+Le hook gère automatiquement la pagination basée sur le cursor si l'API le supporte. La valeur `nextCursor` est extraite pour récupérer la page suivante.
+
+:::astuce
+Si votre API utilise un paramètre de pagination autre que `cursor`, personnalisez-le via l'extension OpenAPI `x-cursor`.
+:::
+
+<Drawer title="Pagination avec le client API directement" trigger="Cliquez ici pour un exemple utilisant le client directement.">
+```tsx
+import { useState, useEffect } from 'react';
+import { useMyApiClient } from './hooks/useMyApiClient';
+
+function ItemList() {
+  const api = useMyApiClient();
+  const [items, setItems] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [nextCursor, setNextCursor] = useState(null);
+  const [isFetchingMore, setIsFetchingMore] = useState(false);
+
+  useEffect(() => {
+    const fetchItems = async () => {
+      try {
+        setIsLoading(true);
+        const response = await api.listItems({ limit: 10 });
+        setItems(response.items);
+        setNextCursor(response.nextCursor);
+      } catch (err) {
+        setError(err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchItems();
+  }, [api]);
+
+  const loadMore = async () => {
+    if (!nextCursor) return;
+
+    try {
+      setIsFetchingMore(true);
+      const response = await api.listItems({
+        limit: 10,
+        cursor: nextCursor
+      });
+
+      setItems(prevItems => [...prevItems, ...response.items]);
+      setNextCursor(response.nextCursor);
+    } catch (err) {
+      setError(err);
+    } finally {
+      setIsFetchingMore(false);
+    }
+  };
+
+  if (isLoading) {
+    return <LoadingSpinner />;
+  }
+
+  if (error) {
+    return <ErrorMessage message={error.message} />;
+  }
+
+  return (
+    <div>
+      <ul>
+        {items.map(item => (
+          <li key={item.id}>{item.name}</li>
+        ))}
+      </ul>
+
+      <button
+        onClick={loadMore}
+        disabled={!nextCursor || isFetchingMore}
+      >
+        {isFetchingMore
+          ? 'Chargement...'
+          : nextCursor
+          ? 'Charger plus'
+          : 'Aucun élément supplémentaire'}
+      </button>
+    </div>
+  );
+}
+```
+</Drawer>
+
+### Gestion des erreurs
+
+L'intégration inclut une gestion d'erreurs typées. Le type `<operation-name>Error` encapsule les réponses d'erreur possibles définies dans la spécification OpenAPI.
+
+```tsx {12}
+import { useMutation } from '@tanstack/react-query';
+
+function MyComponent() {
+  const api = useMyApi();
+  const createItem = useMutation(api.createItem.mutationOptions());
+
+  const handleClick = () => {
+    createItem.mutate({ name: 'Nouvel élément' });
+  };
+
+  if (createItem.error) {
+    switch (createItem.error.status) {
+      case 400:
+        return (
+          <div>
+            <h2>Entrée invalide :</h2>
+            <p>{createItem.error.error.message}</p>
+            <ul>
+              {createItem.error.error.validationErrors.map((err) => (
+                <li key={err.field}>{err.message}</li>
+              ))}
+            </ul>
+          </div>
+        );
+      case 403:
+        return (
+          <div>
+            <h2>Non autorisé :</h2>
+            <p>{createItem.error.error.reason}</p>
+          </div>
+        );
+      case 500:
+      case 502:
+        return (
+          <div>
+            <h2>Erreur serveur :</h2>
+            <p>{createItem.error.error.message}</p>
+            <p>Trace ID : {createItem.error.error.traceId}</p>
+          </div>
+        );
+    }
+  }
+
+  return <button onClick={handleClick}>Créer l'élément</button>;
+}
+```
+
+<Drawer title="Gestion des erreurs avec le client directement" trigger="Cliquez ici pour un exemple utilisant le client vanilla directement.">
+```tsx {9,15}
+function MyComponent() {
+  const api = useMyApiClient();
+  const [error, setError] = useState<CreateItemError | null>(null);
+
+  const handleClick = async () => {
+    try {
+      await api.createItem({ name: 'Nouvel élément' });
+    } catch (e) {
+      const err = e as CreateItemError;
+      setError(err);
+    }
+  };
+
+  if (error) {
+    switch (error.status) {
+      case 400:
+        return (
+          <div>
+            <h2>Entrée invalide :</h2>
+            <p>{error.error.message}</p>
+            <ul>
+              {error.error.validationErrors.map((err) => (
+                <li key={err.field}>{err.message}</li>
+              ))}
+            </ul>
+          </div>
+        );
+      case 403:
+        return (
+          <div>
+            <h2>Non autorisé :</h2>
+            <p>{error.error.reason}</p>
+          </div>
+        );
+      case 500:
+      case 502:
+        return (
+          <div>
+            <h2>Erreur serveur :</h2>
+            <p>{error.error.message}</p>
+            <p>Trace ID : {error.error.traceId}</p>
+          </div>
+        );
+    }
+  }
+
+  return <button onClick={handleClick}>Créer l'élément</button>;
+}
+```
+</Drawer>
+
+### Consommer un flux
+
+Si vous avez <Link path="guides/fastapi#streaming">configuré le streaming dans votre FastAPI</Link>, le hook `useQuery` mettra automatiquement à jour les données à chaque réception de chunk.
+
+Exemple :
+
+```tsx {3}
+function MyStreamingComponent() {
+  const api = useMyApi();
+  const stream = useQuery(api.myStream.queryOptions());
+
+  return (
+    <ul>
+      {(stream.data ?? []).map((chunk) => (
+        <li>
+          {chunk.timestamp.toISOString()} : {chunk.message}
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+Le cycle de vie d'un flux :
+
+<Steps>
+  1. Envoi de la requête HTTP
+
+      - `isLoading` : `true`
+      - `fetchStatus` : `'fetching'`
+      - `data` : `undefined`
+
+  2. Réception du premier chunk
+
+      - `isLoading` : `false`
+      - `fetchStatus` : `'fetching'`
+      - `data` : tableau avec le premier chunk
+
+  3. Réception des chunks suivants
+
+      - `isLoading` : `false`
+      - `fetchStatus` : `'fetching'`
+      - `data` : mis à jour à chaque chunk
+
+  4. Fin du flux
+
+      - `isLoading` : `false`
+      - `fetchStatus` : `'idle'`
+      - `data` : tableau complet
+</Steps>
+
+<Drawer title="Streaming avec le client directement" trigger="Cliquez ici pour un exemple utilisant le client vanilla directement.">
+
+Le client généré permet d'itérer sur les chunks avec `for await` :
+
+```tsx {8}
+function MyStreamingComponent() {
+  const api = useMyApiClient();
+  const [chunks, setChunks] = useState<Chunk[]>([]);
+
+  useEffect(() => {
+    const streamChunks = async () => {
+      for await (const chunk of api.myStream()) {
+        setChunks((prev) => [...prev, chunk]);
+      }
+    };
+    streamChunks();
+  }, [api]);
+
+  return (
+    <ul>
+      {chunks.map((chunk) => (
+        <li>
+          {chunk.timestamp.toISOString()} : {chunk.message}
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+</Drawer>
+
+:::note
+Pour les API de streaming avec paramètre `cursor`, chaque page attend la fin du flux avant d'être chargée avec `useInfiniteQuery`.
+:::
+
+## Personnalisation du code généré
+
+### Requêtes et mutations
+
+Par défaut, les méthodes HTTP `PUT`, `POST`, `PATCH` et `DELETE` sont considérées comme des mutations. Personnalisez ce comportement avec `x-query` et `x-mutation`.
+
+#### x-query
+
+```python
+@app.post(
+    "/items",
+    openapi_extra={
+        "x-query": True
+    }
+)
+def list_items():
+    # ...
+```
+
+Génère `queryOptions` pour une méthode POST :
+
+```tsx
+const items = useQuery(api.listItems.queryOptions());
+```
+
+#### x-mutation
+
+```python
+@app.get(
+    "/start-processing",
+    openapi_extra={
+        "x-mutation": True
+    }
+)
+def start_processing():
+    # ...
+```
+
+Génère `mutationOptions` pour une méthode GET :
+
+```tsx
+const startProcessing = useMutation(api.startProcessing.mutationOptions());
+```
+
+### Cursor de pagination personnalisé
+
+Personnalisez le paramètre de cursor avec `x-cursor` :
+
+```python
+@app.get(
+    "/items",
+    openapi_extra={
+        "x-cursor": "page_token"
+    }
+)
+def list_items(page_token: str = None, limit: int = 10):
+    # ...
+    return {
+        "items": items,
+        "page_token": next_page_token
+    }
+```
+
+Désactivez la pagination infinie avec `x-cursor: False`.
+
+### Regroupement d'opérations
+
+Les hooks et méthodes client sont organisés selon les tags OpenAPI de vos endpoints FastAPI.
+
+Exemple :
+
+```python title="items.py"
+@app.get("/items", tags=["items"])
+def list():
+    # ...
+
+@app.post("/items", tags=["items"])
+def create(item: Item):
+    # ...
+```
+
+```python title="users.py"
+@app.get("/users", tags=["users"])
+def list():
+    # ...
+```
+
+Utilisation groupée :
+
+```tsx
+function ItemsAndUsers() {
+  const api = useMyApi();
+
+  const items = useQuery(api.items.list.queryOptions());
+  const createItem = useMutation(api.items.create.mutationOptions());
+  const users = useQuery(api.users.list.queryOptions());
+
+  // ...
+}
+```
+
+<Drawer title="Regroupement avec le client directement" trigger="Cliquez ici pour un exemple utilisant le client directement.">
+```tsx
+function ItemsAndUsers() {
+  const api = useMyApiClient();
+  const [items, setItems] = useState([]);
+  const [users, setUsers] = useState([]);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      const itemsData = await api.items.list();
+      const usersData = await api.users.list();
+      setItems(itemsData);
+      setUsers(usersData);
+    };
+    fetchData();
+  }, [api]);
+
+  // ...
+}
+```
+</Drawer>
+
+:::astuce
+Utilisez des `routers` pour diviser votre API. Voir la [documentation FastAPI](https://fastapi.tiangolo.com/tutorial/bigger-applications/).
+:::
+
+### Erreurs
+
+Personnalisez les réponses d'erreur avec des modèles Pydantic et des gestionnaires d'exceptions.
+
+#### Modèles d'erreur
+
+```python title="models.py"
+class ErrorDetails(BaseModel):
+    message: str
+
+class ValidationError(BaseModel):
+    message: str
+    field_errors: list[str]
+```
+
+#### Exceptions personnalisées
+
+```python title="exceptions.py"
+class NotFoundException(Exception):
+    def __init__(self, message: str):
+        self.message = message
+```
+
+#### Gestionnaires d'exceptions
+
+```python title="main.py"
+@app.exception_handler(NotFoundException)
+async def not_found_handler(request: Request, exc: NotFoundException):
+    return JSONResponse(
+        status_code=404,
+        content=exc.message,
+    )
+```
+
+#### Modèles de réponse
+
+```python title="main.py"
+@app.get(
+    "/items/{item_id}",
+    responses={
+        404: {"model": str},
+        500: {"model": ErrorDetails}
+    }
+)
+def get_item(item_id: str) -> Item:
+    # ...
+```
+
+Gestion typée dans React :
+
+```tsx
+switch (error.status) {
+  case 404:
+    console.error('Non trouvé :', error.error);
+    break;
+  case 500:
+    console.error('Erreur serveur :', error.error.message);
+    break;
+}
+```
+
+## Bonnes pratiques
+
+### Gérer les états de chargement
+
+Toujours gérer les états de chargement et d'erreur :
+
+```tsx
+function ItemList() {
+  const api = useMyApi();
+  const items = useQuery(api.listItems.queryOptions());
+
+  if (items.isLoading) return <LoadingSpinner />;
+  
+  if (items.isError) {
+    switch (items.error.status) {
+      case 403: return <ErrorMessage message={items.error.error.reason} />;
+      case 500: return <ServerError message={items.error.error.message} />;
+    }
+  }
+
+  return <ul>{items.data.map(item => <li>{item.name}</li>)}</ul>;
+}
+```
+
+### Mises à jour optimistes
+
+Implémentez des mises à jour optimistes pour une meilleure expérience utilisateur :
+
+```tsx
+const deleteMutation = useMutation({
+  ...api.deleteItem.mutationOptions(),
+  onMutate: async (itemId) => {
+    await queryClient.cancelQueries(api.listItems.queryKey());
+    const previousItems = queryClient.getQueryData(api.listItems.queryKey());
+    queryClient.setQueryData(api.listItems.queryKey(), old => old.filter(item => item.id !== itemId));
+    return { previousItems };
+  },
+  onError: (err, _, context) => {
+    queryClient.setQueryData(api.listItems.queryKey(), context.previousItems);
+  }
+});
+```
+
+## Sécurité des types
+
+L'intégration assure une sécurité de type complète. Votre IDE fournira l'autocomplétion et la vérification de types pour tous les appels API.
+
+```tsx
+const createItem = useMutation({
+  ...api.createItem.mutationOptions(),
+  onSuccess: (data) => {
+    // data est typé selon le schéma de réponse
+    console.log(`ID : ${data.id}`);
+  },
+});
+
+const handleSubmit = (data: CreateItemInput) => {
+  createItem.mutate(data); // Erreur de type si data non conforme
+};
+```
+
+Les types sont générés depuis le schéma OpenAPI, garantissant la synchronisation entre le frontend et le backend après compilation.

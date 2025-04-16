@@ -1,7 +1,9 @@
 ---
 title: "AIダンジョンゲーム"
-description: "@aws/nx-pluginを使用してAIパワードのダンジョン冒険ゲームを構築する方法のチュートリアル。"
+description: "@aws/nx-pluginを使用してAIを活用したダンジョン冒険ゲームを構築する方法のチュートリアル"
 ---
+
+
 
 import { Aside, Code, FileTree, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
 import { Image } from 'astro:assets';
@@ -17,29 +19,29 @@ import nxGraphPng from '@assets/nx-graph.png'
 import gameSelectPng from '@assets/game-select.png'
 import gameConversationPng from '@assets/game-conversation.png'
 
-## モジュール4: UIの実装
+## モジュール4: UI実装
 
-UIの構築を開始するために、デプロイされたサンドボックスを指すようにローカル開発サーバーを設定します。これを行うには、次のコマンドを実行します：
+UIの構築を開始するには、ローカル開発サーバーをデプロイされたサンドボックスに接続する必要があります。次のコマンドを実行してください:
 
 <NxCommands commands={["run @dungeon-adventure/game-ui:load:runtime-config"]} />
 
-このコマンドは、デプロイされた `runtime-config.json` をダウンロードし、`packages/game-ui/public` フォルダ内にローカルに保存します。
+このコマンドはデプロイ済みの`runtime-config.json`を取得し、`packages/game-ui/public`フォルダ内に保存します。
 
-次に、以下のコマンドで開発サーバーを起動できます：
+開発サーバーを起動するには次のコマンドを実行します:
 
 <NxCommands commands={["run @dungeon-adventure/game-ui:serve"]} />
 
-その後、ブラウザでローカルウェブサイトを開くと、ログインを求められ、新しいユーザーを作成するプロンプトに従います。完了すると、ベースラインのウェブサイトが表示されます：
+ブラウザでローカルサイト（http://localhost:4200）を開くと、ログインを求められ、新規ユーザー作成のプロンプトが表示されます。完了するとベースラインサイトが表示されます:
 
 <Image src={baselineWebsitePng} alt="baseline-website.png" width="800" height="600" />
 
 <Aside type="caution">
-_このモジュールの残りの部分を通して、開発サーバーを実行したままにします。これにより、行う変更が自動的にホットリロードされます。_
+_本モジュールの残りの作業中は開発サーバーを起動したままにしてください。変更を加えると自動的にホットリロードされます。_
 </Aside>
 
-### 新しい '/game' ルートの作成
+### 新しい'/game'ルートの作成
 
-`@tanstack/react-router` の機能を紹介するために、新しい型安全なルートを作成します。これを行うには、`packages/game-ui/src/routes/game/index.tsx` に空のファイルを作成するだけです。開発サーバーのログに注意深く従ってください：
+`@tanstack/react-router`の機能を活用して型安全な新しいルートを作成します。次の場所に空ファイルを作成してください: `packages/game-ui/src/routes/game/index.tsx`。開発サーバーのログを確認します:
 
 ```bash
 ♻️  Regenerating routes...
@@ -48,7 +50,7 @@ _このモジュールの残りの部分を通して、開発サーバーを実�
 ✅ Processed routes in 27ms
 ```
 
-`@tanstack/react-router` は自動的に新しいルートを設定し、作成したファイルにルートパスが既に設定されていることに気づくでしょう：
+`@tanstack/react-router`が自動的に新しいルートを設定し、作成したファイルにルートパスが生成されます:
 
 ```tsx
 import { createFileRoute } from '@tanstack/react-router'
@@ -62,11 +64,11 @@ function RouteComponent() {
 }
 ```
 
-`http://localhost:4200/game` に移動すると、新しいページがレンダリングされます！
+http://localhost:4200/game にアクセスすると、新しいページが表示されます!
 
 <Image src={baselineGamePng} alt="baseline-game.png" width="800" height="600" />
 
-`index.tsx` ファイルを更新して、デフォルトで新しい `/game` ルートを読み込むようにします。`to` フィールドを更新すると、型安全なルートのリストから選択できることに注意してください。
+`index.tsx`ファイルを更新してデフォルトで`/game`ルートを読み込むように変更します。`to`フィールドを更新する際、型安全なルートのリストから選択できることに注目してください。
 
 ```diff lang="tsx"
 // packages/game-ui/src/routes/index.tsx
@@ -78,6 +80,699 @@ export const Route = createFileRoute('/')({
 
 ```
 
-最後に、`packages/game-ui/src/routes/welcome/` フォルダを削除できます。これはもう必要ありません。
+不要になった`packages/game-ui/src/routes/welcome/`フォルダを削除します。
 
-（以下、同様に翻訳を続けます。文字数制限のため、全文を一度に表示できませんが、同じ方法で翻訳します。）
+### レイアウト更新
+
+デフォルトのレイアウトはSaaS型ビジネスアプリケーション向けです。ダンジョンスタイルのゲームに適したテーマに再構成します。
+
+`packages/game-ui/src`に以下の変更を加えます:
+
+<Tabs>
+<TabItem label="config.ts">
+```diff lang="typescript"
+// packages/game-ui/src/config.ts
+export default {
++  applicationName: 'Dungeon Adventure',
+};
+```
+</TabItem>
+<TabItem label="components/AppLayout/index.tsx">
+```tsx
+// packages/game-ui/src/components/AppLayout/index.tsx
+import { useAuth } from 'react-oidc-context';
+import * as React from 'react';
+import Config from '../../config';
+import { TopNavigation } from '@cloudscape-design/components';
+import { Outlet } from '@tanstack/react-router';
+
+/**
+ * アプリレイアウトを定義し、ルーティングロジックを含みます
+ */
+const AppLayout: React.FC = () => {
+  const { user, removeUser, signoutRedirect, clearStaleState } = useAuth();
+
+  return (
+    <>
+      <TopNavigation
+        identity={{
+          href: '/',
+          title: Config.applicationName,
+        }}
+        utilities={[
+          {
+            type: 'menu-dropdown',
+            text: `${user?.profile?.['cognito:username']}`,
+            iconName: 'user-profile-active',
+            onItemClick: (e) => {
+              if (e.detail.id === 'signout') {
+                removeUser();
+                signoutRedirect({
+                  post_logout_redirect_uri: window.location.origin,
+                  extraQueryParams: {
+                    redirect_uri: window.location.origin,
+                    response_type: 'code',
+                  },
+                });
+                clearStaleState();
+              }
+            },
+            items: [{ id: 'signout', text: 'Sign out' }],
+          },
+        ]}
+      />
+      <Outlet />
+    </>
+  );
+};
+export default AppLayout;
+```
+</TabItem>
+<TabItem label="styles.css">
+```css
+// packages/game-ui/src/styles.css
+
+/* ゲームスタイル */
+:root {
+  --primary-color: rgba(252, 214, 112, 1);
+  --secondary-color: rgba(252, 214, 112, 0.8);
+  --background-dark: #161d26;
+  --background-light: #2a2c3c;
+  --text-light: #e1e1e6;
+  --text-dark: #1f2937;
+}
+
+div#root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  width: 100%;
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue',
+    Arial, sans-serif;
+  background: var(--background-dark);
+  color: var(--text-dark);
+}
+
+/* ゲームインターフェースコンテナ */
+.game-interface {
+  margin: 2rem;
+  min-height: 100%;
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ヘッダースタイル */
+.game-header {
+  text-align: center;
+  margin-bottom: 2rem;
+  padding: 1rem;
+}
+
+.game-header h1 {
+  font-size: 2.5rem;
+  font-weight: bold;
+  background: linear-gradient(45deg, #ffd700, #ff6b6b);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+  margin: 0;
+}
+
+/* セーブ済みゲームセクション */
+.saved-games {
+  margin-bottom: 2rem;
+}
+
+.saved-games h2,
+.new-game h2 {
+  font-size: 1.5rem;
+  margin-bottom: 1rem;
+  color: var(--text-light);
+}
+
+.game-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.game-session {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  padding: 1rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  width: 100%;
+  text-align: left;
+}
+
+.game-session:hover {
+  transform: translateY(-2px);
+  background: rgba(255, 255, 255, 0.15);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.player-name {
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+  color: var(--text-light);
+}
+
+.genre-name {
+  font-size: 0.875rem;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* 新規ゲームセクション */
+.new-game {
+  margin-top: 2rem;
+}
+
+.game-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+span[data-style='generating'] {
+  color: rgba(252, 214, 112, 1) !important;
+}
+
+.name-input,
+.action-input {
+  width: 100%;
+  padding: 0.75rem;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  font-size: 1rem;
+}
+
+.name-input:focus,
+.action-input:focus {
+  outline: none;
+  border-color: var(--primary-color);
+}
+
+.genre-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+}
+
+.genre-button {
+  background: rgba(255, 255, 255, 0.1);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  padding: 1rem;
+  color: var(--text-light);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.genre-button:hover {
+  background: rgba(252, 214, 112, 1);
+  color: var(--text-dark);
+  border-color: var(--primary-color);
+  transform: translateY(-2px);
+}
+
+/* メッセージエリア */
+.messages-area {
+  flex: 1;
+  overflow-y: auto;
+  margin-bottom: 1rem;
+  align-content: flex-end;
+}
+
+.messages-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1rem;
+}
+
+.message {
+  padding: 1rem;
+  border-radius: 8px;
+  max-width: 80%;
+  line-height: 1.5;
+}
+
+.message.assistant {
+  background: var(--secondary-color);
+  border-left: 4px solid var(--primary-color);
+  margin-right: auto;
+  word-wrap: break-word;
+  white-space: pre-wrap;
+  margin: 0 !important;
+}
+
+.message.user {
+  background: rgba(220, 220, 220, 0.7);
+  border-right: 4px solid rgba(220, 220, 220, 0.7);
+  margin-left: auto;
+}
+
+/* 入力エリア */
+.input-area {
+  padding: 1rem;
+  position: sticky;
+  bottom: 0;
+}
+
+/* スクロールバースタイル */
+.messages-area::-webkit-scrollbar {
+  width: 6px;
+}
+
+.messages-area::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.messages-area::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.3);
+  border-radius: 3px;
+}
+
+/* Firefox用 */
+.messages-area {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.3) transparent;
+}
+```
+</TabItem>
+</Tabs>
+
+不要になった`packages/game-ui/src/components/AppLayout/navitems.ts`と`packages/game-ui/src/hooks/useAppLayout.tsx`ファイルを削除します。
+
+### ゲームページ
+
+APIを呼び出すゲームページを作成して実装を完成させます:
+
+<Tabs>
+<TabItem label="index.tsx">
+```tsx
+// packages/game-ui/src/routes/game/index.tsx
+import { FormField, Spinner } from '@cloudscape-design/components';
+import { useInfiniteQuery, useMutation } from '@tanstack/react-query';
+import { createFileRoute, useNavigate } from '@tanstack/react-router';
+import {
+  createRef,
+  LegacyRef,
+  MutableRefObject,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
+import { useGameApi } from '../../hooks/useGameApi';
+import { IAction, IGame } from ':dungeon-adventure/game-api-schema';
+
+type IGameState = Omit<IGame, 'lastUpdated'> & { actions: IAction[] };
+
+export const Route = createFileRoute('/game/')({
+  component: RouteComponent,
+});
+
+// 画面内での要素の可視性をチェックするフック
+export function useIsVisible(ref: MutableRefObject<any>) {
+  const [isIntersecting, setIntersecting] = useState(false);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(([entry]) =>
+      setIntersecting(entry.isIntersecting),
+    );
+
+    ref.current && observer.observe(ref.current);
+    return () => {
+      observer.disconnect();
+    };
+  }, [ref]);
+
+  return isIntersecting;
+}
+
+function RouteComponent() {
+  const [playerName, setPlayerName] = useState('');
+  const navigate = useNavigate();
+  const ref = createRef();
+  const isLastGameVisible = useIsVisible(ref);
+
+  const gameApi = useGameApi();
+  const saveGameMutation = useMutation(gameApi.games.save.mutationOptions());
+
+  const {
+    data: gamesPages,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery(
+    gameApi.games.query.infiniteQueryOptions(
+      { limit: 10 },
+      { getNextPageParam: ({ cursor }) => cursor },
+    ),
+  );
+  const games = useMemo(() => {
+    return gamesPages?.pages.flatMap((page) => page.items) || [];
+  }, [gamesPages]);
+
+  // 最後のゲームが可視状態で次のページがある場合、追加データ取得
+  useEffect(() => {
+    if (isLastGameVisible && hasNextPage && !isFetchingNextPage) {
+      fetchNextPage();
+    }
+  }, [isFetchingNextPage, hasNextPage, fetchNextPage, isLastGameVisible]);
+
+  const playerAlreadyExists = (playerName?: string) => {
+    return !!games?.find((s) => s.playerName === playerName);
+  };
+
+  // 新規ゲーム作成
+  const handleStartGame = async (
+    playerName: string,
+    genre: IGameState['genre'],
+  ) => {
+    if (playerAlreadyExists(playerName)) {
+      return;
+    }
+    try {
+      await saveGameMutation.mutateAsync({
+        playerName,
+        genre,
+      });
+
+      await handleLoadGame(playerName, genre);
+    } catch (error) {
+      console.error('Failed to start game:', error);
+    }
+  };
+
+  // 既存ゲーム読み込み
+  const handleLoadGame = async (
+    playerName: string,
+    genre: IGameState['genre'],
+  ) => {
+    await navigate({
+      to: '/game/$playerName',
+      params: { playerName },
+      search: { genre },
+    });
+  };
+
+  return (
+    <div className="game-interface">
+      <header className="game-header">
+        <h1>AI Dungeon Adventure</h1>
+      </header>
+
+      {/* 新規ゲームセクション */}
+      <div className="new-game">
+        <h2>新規ゲーム開始</h2>
+        <div className="game-setup">
+          <FormField
+            errorText={
+              playerAlreadyExists(playerName)
+                ? `${playerName} は既に存在します`
+                : undefined
+            }
+          >
+            <input
+              type="text"
+              placeholder="プレイヤー名を入力"
+              className="name-input"
+              onChange={(e) => setPlayerName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  const input = e.currentTarget;
+                  handleStartGame(input.value, 'medieval');
+                }
+              }}
+            />
+          </FormField>
+          <div className="genre-grid">
+            {(['zombie', 'superhero', 'medieval'] as const).map((genre) => (
+              <button
+                key={genre}
+                className="genre-button"
+                onClick={() => {
+                  const playerName = document.querySelector('input')?.value;
+                  if (playerName) {
+                    handleStartGame(playerName, genre);
+                  }
+                }}
+              >
+                {genre.charAt(0).toUpperCase() + genre.slice(1)}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* セーブ済みゲームセクション */}
+      {games && games.length > 0 && (
+        <div className="saved-games">
+          <h2>ゲームを続ける</h2>
+          <div className="game-list">
+            {games.map((game, idx) => (
+              <button
+                key={game.playerName}
+                ref={
+                  idx === games.length - 1
+                    ? (ref as LegacyRef<HTMLButtonElement>)
+                    : undefined
+                }
+                onClick={() => handleLoadGame(game.playerName, game.genre)}
+                className="game-session"
+              >
+                <div className="player-name">{game.playerName}</div>
+                <div className="genre-name">
+                  {game.genre.charAt(0).toUpperCase() + game.genre.slice(1)}
+                </div>
+              </button>
+            ))}
+            {isFetchingNextPage && <Spinner data-style="generating" size="big" />}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+```
+</TabItem>
+<TabItem label="$playerName.tsx">
+
+```tsx title="packages/game-ui/src/routes/game/$playerName.tsx"
+import { PromptInput, Spinner } from '@cloudscape-design/components';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { createFileRoute } from '@tanstack/react-router';
+import { useEffect, useRef, useState } from 'react';
+import { useGameApi } from '../../hooks/useGameApi';
+import { useStoryApiClient } from '../../hooks/useStoryApiClient';
+import type { IAction, IGame } from ':dungeon-adventure/game-api-schema';
+
+type IGameState = Omit<IGame, 'lastUpdated'> & { actions: IAction[] };
+
+export const Route = createFileRoute('/game/$playerName')({
+  component: RouteComponent,
+  validateSearch: (search: Record<string, unknown>) => {
+    return {
+      genre: search.genre as IGameState['genre'],
+    };
+  },
+});
+
+function RouteComponent() {
+  const { playerName } = Route.useParams();
+  const { genre } = Route.useSearch();
+
+  const [currentInput, setCurrentInput] = useState('');
+  const [streamingContent, setStreamingContent] = useState('');
+
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const gameApi = useGameApi();
+  const storyApi = useStoryApiClient();
+  const saveActionMutation = useMutation(
+    gameApi.actions.save.mutationOptions(),
+  );
+  const gameActionsQuery = useQuery(
+    gameApi.actions.query.queryOptions({ playerName, limit: 100 }),
+  );
+
+  // アクションがない場合（新規ゲーム）の初期ストーリー生成
+  useEffect(() => {
+    if (
+      !gameActionsQuery.isLoading &&
+      gameActionsQuery.data?.items &&
+      gameActionsQuery.data?.items.length === 0
+    ) {
+      generateStory({
+        playerName,
+        genre,
+        actions: [],
+      });
+    }
+  }, [gameActionsQuery.data?.items, gameActionsQuery.isLoading]);
+
+  const generateStoryMutation = useMutation({
+    mutationFn: async ({ playerName, genre, actions }: IGameState) => {
+      let content = '';
+      for await (const chunk of storyApi.generateStory({
+        playerName,
+        genre,
+        actions,
+      })) {
+        content += chunk;
+        setStreamingContent(content);
+      }
+
+      return content;
+    },
+  });
+
+  // 最新メッセージまでスクロール
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [streamingContent, gameActionsQuery]);
+
+  // ストーリー進行処理
+  const generateStory = async ({ playerName, genre, actions }: IGameState) => {
+    try {
+      const content = await generateStoryMutation.mutateAsync({
+        playerName,
+        genre,
+        actions,
+      });
+
+      // アシスタントのレスポンス保存
+      await saveActionMutation.mutateAsync({
+        playerName,
+        role: 'assistant',
+        content,
+      });
+
+      await gameActionsQuery.refetch();
+
+      setStreamingContent('');
+    } catch (error) {
+      console.error('Failed to generate story:', error);
+    }
+  };
+
+  // ユーザー入力処理
+  const handleSubmitAction = async () => {
+    if (!currentInput.trim()) return;
+
+    const userAction: IAction = {
+      playerName,
+      role: 'user' as const,
+      content: currentInput,
+      timestamp: new Date().toISOString(),
+    };
+
+    // ユーザーアクション保存
+    await saveActionMutation.mutateAsync(userAction);
+    await gameActionsQuery.refetch();
+
+    setCurrentInput('');
+
+    // レスポンス生成
+    await generateStory({
+      genre,
+      playerName,
+      actions: [...(gameActionsQuery.data?.items ?? []), userAction],
+    });
+  };
+
+  return (
+    <div className="game-interface">
+      <div className="messages-area">
+        <div className="messages-container">
+          {gameActionsQuery.data?.items
+            .concat(
+              streamingContent.length > 0
+                ? [
+                    {
+                      playerName,
+                      role: 'assistant',
+                      content: streamingContent,
+                      timestamp: new Date().toISOString(),
+                    },
+                  ]
+                : [],
+            )
+            .map((action, i) => (
+              <div
+                key={i}
+                className={`message ${
+                  action.role === 'assistant' ? 'assistant' : 'user'
+                }`}
+              >
+                {action.content}
+              </div>
+            ))}
+          {generateStoryMutation.isPending && streamingContent.length === 0 && (
+            <Spinner data-style="generating" size="big" />
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+      </div>
+      <div className="input-area">
+        <PromptInput
+          onChange={({ detail }) => setCurrentInput(detail.value)}
+          value={currentInput}
+          actionButtonAriaLabel="メッセージ送信"
+          actionButtonIconName="send"
+          ariaLabel="デフォルトプロンプト入力"
+          placeholder="アクションを入力"
+          onAction={handleSubmitAction}
+        />
+      </div>
+    </div>
+  );
+}
+```
+
+<Aside type="tip">
+`$playerName`構文は`@tanstack/react-router`に`playerName`を[パスパラメータ](https://tanstack.com/router/v1/docs/framework/react/guide/path-params)として扱うよう指示します。また`validateSearch`メソッドで`genre`クエリパラメータを厳密に型チェックします。
+</Aside>
+</TabItem>
+</Tabs>
+
+変更を加えると、ローカル開発サーバー（http://localhost:4200/）でゲームをプレイできるようになります!
+
+<Drawer title="ビルド＆デプロイ" trigger="Cloudfrontへのビルド＆デプロイも可能です">
+
+アプリケーションをビルド:
+
+<NxCommands commands={['run-many --target build --all']} />
+
+デプロイ実行:
+
+<NxCommands commands={['run @dungeon-adventure/infra:deploy dungeon-adventure-infra-sandbox']} />
+
+デプロイ後、cdk deployの出力からCloudfront URLを確認できます。
+
+</Drawer>
+
+<Image src={gameSelectPng} alt="game-select.png" width="500" height="400" />
+<div style="margin-top: -100px; margin-left: 100px;">
+<Image src={gameConversationPng} alt="game-conversation.png" width="500" height="400" />
+</div>
+
+おめでとうございます。ダンジョンアドベンチャーゲームの構築とデプロイが完了しました! 🎉🎉🎉

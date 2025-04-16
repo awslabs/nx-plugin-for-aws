@@ -1,0 +1,585 @@
+---
+title: "React 连接到 FastAPI"
+description: "将 React 网站连接到 Python FastAPI"
+---
+
+<think>
+
+import { FileTree, Steps } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Drawer from '@components/drawer.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import schema from '../../../../../../../packages/nx-plugin/src/api-connection/schema.json';
+
+`api-connection` 生成器提供了一种快速将 React 网站与 FastAPI 后端集成的方式。它会以类型安全的方式设置所有必要的配置，包括客户端和 [TanStack Query](https://tanstack.com/query/v5) 钩子的生成、AWS IAM 身份验证支持以及正确的错误处理。
+
+## 前提条件
+
+在使用此生成器之前，请确保您的 React 应用程序具备：
+
+1. 渲染应用程序的 `main.tsx` 文件
+2. 可正常运行的 FastAPI 后端（使用 FastAPI 生成器生成）
+
+<details>
+<summary>所需 `main.tsx` 结构示例</summary>
+
+```tsx
+import { StrictMode } from 'react';
+import * as ReactDOM from 'react-dom/client';
+import App from './app/app';
+
+const root = ReactDOM.createRoot(
+  document.getElementById('root') as HTMLElement,
+);
+root.render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+);
+```
+
+</details>
+
+## 使用方式
+
+### 运行生成器
+
+<RunGenerator generator="api-connection" />
+
+### 选项配置
+
+<GeneratorParameters schema={schema} />
+
+## 生成器输出
+
+生成器将对 FastAPI 项目中的以下文件进行修改：
+
+<FileTree>
+
+- scripts
+  - generate_open_api.py 添加生成 OpenAPI 规范的脚本
+- project.json 在构建目标中添加调用生成脚本的任务
+
+</FileTree>
+
+生成器将对 React 应用程序中的以下文件进行修改：
+
+<FileTree>
+
+- src
+  - components
+    - \<ApiName>Provider.tsx API 客户端提供者
+    - QueryClientProvider.tsx TanStack React Query 客户端提供者
+  - hooks
+    - use\<ApiName>.tsx 添加通过 TanStack Query 管理状态的 API 调用钩子
+    - use\<ApiName>Client.tsx 添加实例化原生 API 客户端的钩子
+    - useSigV4.tsx 添加使用 SigV4 签名 HTTP 请求的钩子（如果选择 IAM 身份验证）
+- project.json 在构建目标中添加生成类型安全客户端的任务
+- .gitignore 默认忽略生成的客户端文件
+
+</FileTree>
+
+生成器还会在网站基础设施中添加运行时配置（如尚未存在），确保 FastAPI 的 API URL 在网站中可用，并由 `use<ApiName>.tsx` 钩子自动配置。
+
+### 代码生成
+
+在构建时，会根据 FastAPI 的 OpenAPI 规范生成类型安全客户端。这将在 React 应用程序中添加三个新文件：
+
+<FileTree>
+
+- src
+  - generated
+    - \<ApiName>
+      - types.gen.ts 从 FastAPI 的 pydantic 模型生成的类型
+      - client.gen.ts 调用 API 的类型安全客户端
+      - options-proxy.gen.ts 提供创建 TanStack Query 钩子选项的方法
+
+</FileTree>
+
+:::tip
+默认情况下，生成的客户端会被版本控制系统忽略。如需提交，可从 React 应用的 `.gitignore` 中移除相关条目，但注意构建时手动修改的 `.gen.ts` 文件会被覆盖。
+:::
+
+## 使用生成代码
+
+建议通过 TanStack Query 钩子使用生成的客户端，但也可直接使用原生客户端。
+
+:::note
+修改 FastAPI 后需重新构建项目以使变更生效，例如：
+
+<NxCommands commands={['run-many --target build --all']} />
+:::
+
+:::tip
+同时开发 React 应用和 FastAPI 时，可使用 [`nx watch`](https://nx.dev/nx-api/nx/documents/watch) 实时生成客户端：
+
+<NxCommands
+  commands={[
+    'watch --projects=<FastAPIProject> -- \\ ',
+    'run <WebsiteProject>:"generate:<ApiName>-client"',
+  ]}
+/>
+:::
+
+### 使用 API 钩子
+
+通过 `use<ApiName>` 钩子调用 API：
+
+### 查询操作
+
+使用 `queryOptions` 方法获取调用 API 所需的选项：
+
+```tsx {7}
+import { useQuery } from '@tanstack/react-query';
+import { useState, useEffect } from 'react';
+import { useMyApi } from './hooks/useMyApi';
+
+function MyComponent() {
+  const api = useMyApi();
+  const item = useQuery(api.getItem.queryOptions({ itemId: 'some-id' }));
+
+  if (item.isLoading) return <div>Loading...</div>;
+  if (item.isError) return <div>Error: {item.error.message}</div>;
+
+  return <div>Item: {item.data.name}</div>;
+}
+```
+
+<Drawer title="直接使用 API 客户端" trigger="点击查看原生客户端使用示例。">
+```tsx {5,13}
+import { useState, useEffect } from 'react';
+import { useMyApiClient } from './hooks/useMyApiClient';
+
+function MyComponent() {
+  const api = useMyApiClient();
+  const [item, setItem] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const fetchItem = async () => {
+      try {
+        const data = await api.getItem({ itemId: 'some-id' });
+        setItem(data);
+      } catch (err) {
+        setError(err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchItem();
+  }, [api]);
+
+  if (loading) return <div>Loading...</div>;
+  if (error) return <div>Error: {error.message}</div>;
+
+  return <div>Item: {item.name}</div>;
+}
+```
+</Drawer>
+
+### 变更操作
+
+使用 `useMutation` 处理创建、更新、删除操作：
+
+```tsx {5-7,11}
+import { useMutation } from '@tanstack/react-query';
+import { useMyApi } from './hooks/useMyApi';
+
+function CreateItemForm() {
+  const api = useMyApi();
+  const createItem = useMutation(api.createItem.mutationOptions());
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    createItem.mutate({ name: 'New Item', description: 'A new item' });
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <button
+        type="submit"
+        disabled={createItem.isPending}
+      >
+        {createItem.isPending ? 'Creating...' : 'Create Item'}
+      </button>
+
+      {createItem.isSuccess && (
+        <div className="success">
+          Item created with ID: {createItem.data.id}
+        </div>
+      )}
+
+      {createItem.isError && (
+        <div className="error">
+          Error: {createItem.error.message}
+        </div>
+      )}
+    </form>
+  );
+}
+```
+
+可添加不同状态的回调：
+
+```tsx
+const createItem = useMutation({
+  ...api.createItem.mutationOptions(),
+  onSuccess: (data) => {
+    console.log('Item created:', data);
+    navigate(`/items/${data.id}`);
+  },
+  onError: (error) => {
+    console.error('Failed to create item:', error);
+  },
+  onSettled: () => {
+    queryClient.invalidateQueries({ queryKey: api.listItems.queryKey() });
+  }
+});
+```
+
+<Drawer title="直接使用客户端进行变更" trigger="点击查看原生客户端示例。">
+```tsx
+import { useState } from 'react';
+import { useMyApiClient } from './hooks/useMyApiClient';
+
+function CreateItemForm() {
+  const api = useMyApiClient();
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [createdItem, setCreatedItem] = useState(null);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const newItem = await api.createItem({
+        name: 'New Item',
+        description: 'A new item'
+      });
+      setCreatedItem(newItem);
+    } catch (err) {
+      setError(err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <button
+        type="submit"
+        disabled={isLoading}
+      >
+        {isLoading ? 'Creating...' : 'Create Item'}
+      </button>
+
+      {createdItem && (
+        <div className="success">
+          Item created with ID: {createdItem.id}
+        </div>
+      )}
+
+      {error && (
+        <div className="error">
+          Error: {error.message}
+        </div>
+      )}
+    </form>
+  );
+}
+```
+</Drawer>
+
+### 分页与无限查询
+
+使用 `useInfiniteQuery` 实现无限滚动：
+
+```tsx {5-14,24-26}
+import { useInfiniteQuery } from '@tanstack/react-query';
+import { useMyApi } from './hooks/useMyApi';
+
+function ItemList() {
+  const api = useMyApi();
+  const items = useInfiniteQuery({
+    ...api.listItems.infiniteQueryOptions({
+      limit: 10,
+    }, {
+      getNextPageParam: (lastPage) =>
+        lastPage.nextCursor || undefined
+      }),
+  });
+
+  return (
+    <div>
+      <ul>
+        {items.data.pages.flatMap(page =>
+          page.items.map(item => (
+            <li key={item.id}>{item.name}</li>
+          ))
+        )}
+      </ul>
+
+      <button
+        onClick={() => items.fetchNextPage()}
+        disabled={!items.hasNextPage || items.isFetchingNextPage}
+      >
+        {items.isFetchingNextPage
+          ? 'Loading more...'
+          : items.hasNextPage
+          ? 'Load More'
+          : 'No more items'}
+      </button>
+    </div>
+  );
+}
+```
+
+<Drawer title="直接使用客户端分页" trigger="点击查看原生客户端示例。">
+```tsx
+import { useState, useEffect } from 'react';
+import { useMyApiClient } from './hooks/useMyApiClient';
+
+function ItemList() {
+  const api = useMyApiClient();
+  const [items, setItems] = useState([]);
+  const [nextCursor, setNextCursor] = useState(null);
+  const [isFetchingMore, setIsFetchingMore] = useState(false);
+
+  const loadMore = async () => {
+    if (!nextCursor) return;
+    setIsFetchingMore(true);
+    try {
+      const response = await api.listItems({ limit: 10, cursor: nextCursor });
+      setItems(prev => [...prev, ...response.items]);
+      setNextCursor(response.nextCursor);
+    } finally {
+      setIsFetchingMore(false);
+    }
+  };
+
+  return (
+    <div>
+      <ul>
+        {items.map(item => (
+          <li key={item.id}>{item.name}</li>
+        ))}
+      </ul>
+      <button
+        onClick={loadMore}
+        disabled={!nextCursor || isFetchingMore}
+      >
+        {isFetchingMore ? 'Loading...' : nextCursor ? 'Load More' : 'No More'}
+      </button>
+    </div>
+  );
+}
+```
+</Drawer>
+
+### 错误处理
+
+根据错误状态进行类型化处理：
+
+```tsx {12}
+function MyComponent() {
+  const api = useMyApi();
+  const createItem = useMutation(api.createItem.mutationOptions());
+
+  if (createItem.error) {
+    switch (createItem.error.status) {
+      case 400:
+        return <div>{createItem.error.error.message}</div>;
+      case 403:
+        return <div>{createItem.error.error.reason}</div>;
+      case 500:
+        return <div>{createItem.error.error.message}</div>;
+    }
+  }
+  return <button onClick={() => createItem.mutate()}>Create</button>;
+}
+```
+
+<Drawer title="直接处理客户端错误" trigger="点击查看原生客户端示例。">
+```tsx {9,15}
+function MyComponent() {
+  const api = useMyApiClient();
+  const [error, setError] = useState<CreateItemError | null>(null);
+
+  const handleClick = async () => {
+    try {
+      await api.createItem({ name: 'New Item' });
+    } catch (err) {
+      const error = err as CreateItemError;
+      setError(error);
+    }
+  };
+
+  if (error) {
+    switch (error.status) {
+      case 400:
+        return <div>{error.error.message}</div>;
+      case 403:
+        return <div>{error.error.reason}</div>;
+      case 500:
+        return <div>{error.error.message}</div>;
+    }
+  }
+  return <button onClick={handleClick}>Create</button>;
+}
+```
+</Drawer>
+
+### 流式响应处理
+
+流式响应自动更新数据：
+
+```tsx {3}
+function MyStreamingComponent() {
+  const api = useMyApi();
+  const stream = useQuery(api.myStream.queryOptions());
+
+  return (
+    <ul>
+      {(stream.data ?? []).map((chunk) => (
+        <li>
+          {chunk.timestamp.toISOString()}: {chunk.message}
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+<Drawer title="直接处理流式响应" trigger="点击查看原生客户端示例。">
+```tsx {8}
+function MyStreamingComponent() {
+  const api = useMyApiClient();
+  const [chunks, setChunks] = useState<Chunk[]>([]);
+
+  useEffect(() => {
+    const streamChunks = async () => {
+      for await (const chunk of api.myStream()) {
+        setChunks(prev => [...prev, chunk]);
+      }
+    };
+    streamChunks();
+  }, [api]);
+
+  return (
+    <ul>
+      {chunks.map((chunk) => (
+        <li>
+          {chunk.timestamp.toISOString()}: {chunk.message}
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+</Drawer>
+
+## 自定义生成代码
+
+### 操作分类
+
+通过 OpenAPI 标签组织操作：
+
+```python title="items.py"
+@app.get("/items", tags=["items"])
+def list(): ...
+@app.post("/items", tags=["items"])
+def create(item: Item): ...
+```
+
+生成的钩子将按标签分组：
+
+```tsx
+const api = useMyApi();
+const items = useQuery(api.items.list.queryOptions());
+const createItem = useMutation(api.items.create.mutationOptions());
+```
+
+<Drawer title="直接使用分组客户端" trigger="点击查看原生客户端示例。">
+```tsx
+const api = useMyApiClient();
+const itemsData = await api.items.list();
+const newItem = await api.items.create({ name: 'New Item' });
+```
+</Drawer>
+
+### 错误模型定制
+
+定义自定义错误模型和处理器：
+
+```python title="models.py"
+class ErrorDetails(BaseModel):
+    message: str
+
+@app.exception_handler(CustomException)
+async def handler(request: Request, exc: CustomException):
+    return JSONResponse(status_code=400, content=exc.details.model_dump())
+
+@app.get("/items", responses={400: {"model": ErrorDetails}})
+def get_item(): ...
+```
+
+生成的客户端将包含类型化错误处理：
+
+```tsx
+switch (error.status) {
+  case 400:
+    console.error(error.error.message);
+    break;
+}
+```
+
+## 最佳实践
+
+### 处理加载状态
+
+```tsx
+function ItemList() {
+  const api = useMyApi();
+  const items = useQuery(api.listItems.queryOptions());
+
+  if (items.isLoading) return <LoadingSpinner />;
+  if (items.isError) return <ErrorMessage message={items.error.message} />;
+  return <ul>{items.data.map(item => <li>{item.name}</li>)}</ul>;
+}
+```
+
+### 乐观更新
+
+```tsx
+const deleteMutation = useMutation({
+  ...api.deleteItem.mutationOptions(),
+  onMutate: async (itemId) => {
+    const previousItems = queryClient.getQueryData(api.listItems.queryKey());
+    queryClient.setQueryData(api.listItems.queryKey(), old => old.filter(item => item.id !== itemId));
+    return { previousItems };
+  },
+  onError: (err, itemId, context) => {
+    queryClient.setQueryData(api.listItems.queryKey(), context.previousItems);
+  }
+});
+```
+
+## 类型安全
+
+端到端类型安全确保代码自动补全和类型检查：
+
+```tsx
+const createItem = useMutation({
+  ...api.createItem.mutationOptions(),
+  onSuccess: (data) => {
+    console.log(`Created item ID: ${data.id}`); // data 类型自动推断
+  }
+});
+```
+
+所有类型均从 FastAPI 的 OpenAPI 规范生成，确保前后端类型同步。

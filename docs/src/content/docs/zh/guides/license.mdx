@@ -1,0 +1,296 @@
+---
+title: "许可证"
+description: "许可证生成器的参考文档"
+---
+
+
+
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import schema from '../../../../../../packages/nx-plugin/src/license/schema.json';
+
+自动管理工作区中的 `LICENSE` 文件和源代码头部。
+
+该生成器注册了一个[同步生成器](https://nx.dev/concepts/sync-generators)，作为 `lint` 目标的一部分执行，确保源文件符合预期的许可证内容和格式，同时确保项目的 `LICENSE` 文件正确无误，并将许可证信息包含在相关项目文件（`package.json`、`pyproject.toml`）中。
+
+## 使用方式
+
+### 运行生成器
+
+<RunGenerator generator="license" />
+
+### 配置选项
+
+<GeneratorParameters schema={schema} />
+
+## 生成器输出
+
+生成器将创建或更新以下文件：
+
+<FileTree>
+  - nx.json 配置了运行许可证同步生成器的 lint 目标
+  - aws-nx-plugin.config.mts 许可证同步生成器的配置文件
+</FileTree>
+
+`aws-nx-plugin.config.mts` 中添加了许可证头部内容和格式的默认配置，用于为部分文件类型写入适当的头部。您可能需要进一步自定义这些配置，请参考下方的[配置章节](#configuration)。
+
+## 工作流程
+
+每当构建项目时（运行 `lint` 目标），许可证同步生成器将确保项目中的许可证与配置一致（参见[下方许可证同步行为](#license-sync-behaviour)）。如果检测到不同步，您将收到如下提示：
+
+```bash
+  NX   工作区不同步
+
+[@aws/nx-plugin:license#sync]: 项目 LICENSE 文件不同步：
+- LICENSE
+- packages/<my-project>LICENSE
+
+项目 package.json 文件不同步：
+- package.json
+
+项目 pyproject.toml 文件不同步：
+- pyproject.toml
+- packages/<my-python-project>/pyproject.toml
+
+以下源文件中的许可证头部不同步：
+- packages/<my-project>/src/index.ts
+- packages/<my-python-project>/main.py
+
+这将在 CI 中导致错误。
+
+? 是否要同步已识别的变更以使工作区保持最新？
+是，同步变更并运行任务
+否，不同步变更直接运行任务
+```
+
+选择`是`以同步变更。
+
+:::note
+请确保将许可证同步生成器所做的变更提交至版本控制，以避免持续集成构建任务因许可证不同步而失败。
+:::
+
+## 许可证同步行为
+
+许可证同步生成器执行三项主要任务：
+
+### 1. 同步源文件许可证头部
+
+运行同步生成器时，将确保工作区中所有源文件（基于配置）包含适当的许可证头部。该头部将被写入文件的首个块注释或连续行注释区域（若文件中存在 shebang/hashbang 则紧随其后）。
+
+您可随时更新配置以修改需包含/排除的文件，或调整不同文件类型的许可证头部内容/格式。详见[配置章节](#configuration)。
+
+### 2. 同步 LICENSE 文件
+
+运行同步生成器时，将确保根目录 `LICENSE` 文件与配置的许可证一致，并确保工作区中所有子项目均包含正确的 `LICENSE` 文件。
+
+可通过配置排除特定项目。详见[配置章节](#configuration)。
+
+### 3. 同步项目文件中的许可证信息
+
+运行同步生成器时，将确保 `package.json` 和 `pyproject.toml` 文件中的 `license` 字段设置为配置的许可证。
+
+可通过配置排除特定项目。详见[配置章节](#configuration)。
+
+## 配置
+
+配置定义于工作区根目录的 `aws-nx-plugin.config.mts` 文件。
+
+### SPDX 与版权持有者
+
+可通过 `spdx` 配置属性随时更新许可证：
+
+```typescript title="aws-nx-plugin.config.mts" {3}
+export default {
+  license: {
+    spdx: 'MIT',
+  },
+} satisfies AwsNxPluginConfig;
+```
+
+同步生成器运行时，所有 `LICENSE` 文件、`package.json` 和 `pyproject.toml` 文件将更新以反映配置的许可证。
+
+可额外配置版权持有者与版权年份（包含在某些 `LICENSE` 文件中）：
+
+```typescript title="aws-nx-plugin.config.mts" {4,5}
+export default {
+  license: {
+    spdx: 'MIT',
+    copyrightHolder: 'Amazon.com, Inc. or its affiliates',
+    copyrightYear: 2025,
+  },
+} satisfies AwsNxPluginConfig;
+```
+
+### 许可证头部
+
+#### 内容
+
+许可证头部内容可通过两种方式配置：
+
+1. 内联内容：
+
+```typescript title="aws-nx-plugin.config.mts" {5-9}
+export default {
+  license: {
+    header: {
+      content: {
+        lines: [
+          'Copyright: My Company, Incorporated.',
+          'Licensed under the MIT License',
+          'All rights reserved',
+        ];
+      }
+      // ... 格式配置
+    }
+  }
+} satisfies AwsNxPluginConfig;
+```
+
+2. 从文件加载：
+
+```typescript title="aws-nx-plugin.config.mts" {5}
+export default {
+  license: {
+    header: {
+      content: {
+        filePath: 'license-header.txt'; // 相对于工作区根目录
+      }
+      // ... 格式配置
+    }
+  }
+} satisfies AwsNxPluginConfig;
+```
+
+#### 格式
+
+可通过 glob 模式指定不同文件类型的许可证头部格式。支持行注释、块注释或组合形式：
+
+```typescript title="aws-nx-plugin.config.mts" {7-29}
+export default {
+  license: {
+    header: {
+      content: {
+        lines: ['Copyright notice here'],
+      },
+      format: {
+        // 行注释
+        '**/*.ts': {
+          lineStart: '// ',
+        },
+        // 块注释
+        '**/*.css': {
+          blockStart: '/*',
+          blockEnd: '*/',
+        },
+        // 带行前缀的块注释
+        '**/*.java': {
+          blockStart: '/*',
+          lineStart: ' * ',
+          blockEnd: ' */',
+        },
+        // 带头尾的行注释
+        '**/*.py': {
+          blockStart: '# ------------',
+          lineStart: '# ',
+          blockEnd: '# ------------',
+        },
+      },
+    },
+  },
+} satisfies AwsNxPluginConfig;
+```
+
+格式配置支持：
+
+- `blockStart`: 许可证内容前的文本（如块注释起始符）
+- `lineStart`: 每行许可证内容的前缀
+- `lineEnd`: 每行许可证内容的后缀
+- `blockEnd`: 许可证内容后的文本（如块注释结束符）
+
+#### 自定义注释语法
+
+对于原生不支持的文件类型，可指定自定义注释语法以帮助同步生成器识别现有许可证头部：
+
+```typescript title="aws-nx-plugin.config.mts" {12-22}
+export default {
+  license: {
+    header: {
+      content: {
+        lines: ['My license header'],
+      },
+      format: {
+        '**/*.xyz': {
+          lineStart: '## ',
+        },
+      },
+      commentSyntax: {
+        xyz: {
+          line: '##', // 定义行注释语法
+        },
+        abc: {
+          block: {
+            // 定义块注释语法
+            start: '<!--',
+            end: '-->',
+          },
+        },
+      },
+    },
+  },
+} satisfies AwsNxPluginConfig;
+```
+
+#### 排除文件
+
+在 git 仓库中，默认遵循所有 `.gitignore` 文件，确保仅同步受版本控制的文件。非 git 仓库中，默认考虑所有文件（除非在配置中显式排除）。
+
+可通过 glob 模式排除文件：
+
+```typescript title="aws-nx-plugin.config.mts" {12-16}
+export default {
+  license: {
+    header: {
+      content: {
+        lines: ['My license header'],
+      },
+      format: {
+        '**/*.ts': {
+          lineStart: '// ',
+        },
+      },
+      exclude: ['**/generated/**', '**/dist/**', 'some-specific-file.ts'],
+    },
+  },
+} satisfies AwsNxPluginConfig;
+```
+
+### 排除项目文件同步
+
+默认同步所有 `LICENSE`、`package.json` 和 `pyproject.toml` 文件。
+
+可通过 glob 模式排除特定项目或文件：
+
+```typescript title="aws-nx-plugin.config.mts" {3-10}
+export default {
+  license: {
+    files: {
+      exclude: [
+        // 不同步 LICENSE、package.json 和 pyproject.toml
+        'packages/excluded-project',
+        // 不同步 LICENSE，但同步 package.json 和/或 pyproject.toml
+        'apps/internal/LICENSE',
+      ];
+    }
+  }
+} satisfies AwsNxPluginConfig;
+```
+
+## 禁用许可证同步
+
+禁用许可证同步生成器：
+
+1. 从 `aws-nx-plugin.config.mts` 配置中移除 `license` 部分（或删除该文件）
+2. 从 `targetDefaults.lint.syncGenerators` 中移除 `@aws/nx-plugin:license#sync` 生成器
+
+重新启用时，只需再次运行 `license` 生成器。

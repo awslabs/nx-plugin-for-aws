@@ -1,0 +1,407 @@
+---
+title: "FastAPI"
+description: "Documentación de referencia para FastAPI"
+---
+
+
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import schema from '../../../../../../packages/nx-plugin/src/py/fast-api/schema.json';
+
+[FastAPI](https://fastapi.tiangolo.com/) es un framework para construir APIs en Python.
+
+El generador de FastAPI crea una nueva aplicación FastAPI con configuración de infraestructura AWS CDK. El backend generado utiliza AWS Lambda para despliegue serverless, expuesto a través de un AWS API Gateway HTTP API. Configura [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/) para observabilidad, incluyendo registro, trazado con AWS X-Ray y métricas de CloudWatch.
+
+## Uso
+
+### Generar un FastAPI
+
+Puedes generar un nuevo FastAPI de dos maneras:
+
+<RunGenerator generator="py#fast-api" />
+
+### Opciones
+
+<GeneratorParameters schema={schema} />
+
+## Salida del Generador
+
+El generador creará la siguiente estructura de proyecto en el directorio `<directory>/<api-name>`:
+
+<FileTree>
+
+- project.json Configuración del proyecto y objetivos de build
+- pyproject.toml Configuración del proyecto Python y dependencias
+- \<module_name>
+  - \_\_init\_\_.py Inicialización del módulo
+  - init.py Configura la aplicación FastAPI y el middleware de powertools
+  - main.py Implementación de la API
+
+</FileTree>
+
+El generador también crea constructs CDK para desplegar tu API, que residen en el directorio `packages/common/constructs`.
+
+## Implementando tu FastAPI
+
+La implementación principal de la API está en `main.py`. Aquí es donde defines las rutas y sus implementaciones. Ejemplo:
+
+```python
+from .init import app, tracer
+from pydantic import BaseModel
+
+class Item(BaseModel):
+  name: str
+
+@app.get("/items/{item_id}")
+def get_item(item_id: int) -> Item:
+    return Item(name=...)
+
+@app.post("/items")
+def create_item(item: Item):
+    return ...
+```
+
+El generador configura automáticamente varias características:
+
+1. Integración con AWS Lambda Powertools para observabilidad
+2. Middleware de manejo de errores
+3. Correlación de solicitudes/respuestas
+4. Recolección de métricas
+5. Manejador AWS Lambda usando Mangum
+
+### Observabilidad con AWS Lambda Powertools
+
+#### Registros
+
+El generador configura registro estructurado usando AWS Lambda Powertools. Puedes acceder al logger en tus handlers:
+
+```python
+from .init import app, logger
+
+@app.get("/items/{item_id}")
+def read_item(item_id: int):
+    logger.info("Fetching item", extra={"item_id": item_id})
+    return {"item_id": item_id}
+```
+
+El logger incluye automáticamente:
+
+- IDs de correlación para trazas
+- Ruta y método de la solicitud
+- Información del contexto Lambda
+- Indicadores de cold start
+
+#### Trazado
+
+El trazado con AWS X-Ray se configura automáticamente. Puedes añadir subsegmentos personalizados:
+
+```python
+from .init import app, tracer
+
+@app.get("/items/{item_id}")
+@tracer.capture_method
+def read_item(item_id: int):
+    # Crea un nuevo subsegmento
+    with tracer.provider.in_subsegment("fetch-item-details"):
+        # Tu lógica aquí
+        return {"item_id": item_id}
+```
+
+#### Métricas
+
+Se recopilan métricas de CloudWatch automáticamente. Puedes añadir métricas personalizadas:
+
+```python
+from .init import app, metrics
+from aws_lambda_powertools.metrics import MetricUnit
+
+@app.get("/items/{item_id}")
+def read_item(item_id: int):
+    metrics.add_metric(name="ItemViewed", unit=MetricUnit.Count, value=1)
+    return {"item_id": item_id}
+```
+
+Las métricas por defecto incluyen:
+
+- Conteo de solicitudes
+- Conteos de éxito/fallo
+- Métricas de cold start
+- Métricas por ruta
+
+### Manejo de Errores
+
+El generador incluye manejo de errores completo:
+
+```python
+from fastapi import HTTPException
+
+@app.get("/items/{item_id}")
+def read_item(item_id: int):
+    if item_id < 0:
+        raise HTTPException(status_code=400, detail="Item ID must be positive")
+    return {"item_id": item_id}
+```
+
+Las excepciones no manejadas son capturadas por el middleware y:
+
+1. Registran la excepción completa con stack trace
+2. Registran una métrica de fallo
+3. Devuelven una respuesta 500 segura al cliente
+4. Preservan el ID de correlación
+
+:::tip
+Se recomienda especificar modelos de respuesta para las operaciones de la API si planeas usar el generador `api-connection`. <Link path="guides/api-connection/react-fastapi#errors">Más detalles aquí</Link>.
+:::
+
+### Streaming
+
+Con FastAPI, puedes transmitir respuestas usando el tipo [`StreamingResponse`](https://fastapi.tiangolo.com/reference/responses/?h=streaming#fastapi.responses.StreamingResponse).
+
+#### Cambios en Infraestructura
+
+Como AWS API Gateway no soporta respuestas en streaming, necesitarás desplegar tu FastAPI en una plataforma que lo soporte. La opción más simple es usar una URL de función AWS Lambda. Para esto, puedes modificar el construct `HttpApi` generado para añadir soporte de streaming:
+
+<details>
+<summary>Ejemplo de Cambios</summary>
+
+```diff lang="ts"
+ import { Construct } from 'constructs';
+-import { CfnOutput, Duration } from 'aws-cdk-lib';
++import { CfnOutput, Duration, Stack } from 'aws-cdk-lib';
+ import {
+   CorsHttpMethod,
+   HttpApi as _HttpApi,
+@@ -7,7 +7,16 @@ import {
+   IHttpRouteAuthorizer,
+ } from 'aws-cdk-lib/aws-apigatewayv2';
+
+       },
+     });
+
+-    this.api = new _HttpApi(this, id, {
+-      corsPreflight: {
+-        allowOrigins: props.allowedOrigins ?? ['*'],
+-        allowMethods: [CorsHttpMethod.ANY],
+-        allowHeaders: [
+-          'authorization',
+-          'content-type',
+-          'x-amz-content-sha256',
+-          'x-amz-date',
+-          'x-amz-security-token',
+-        ],
+-      },
+-        defaultAuthorizer: props.defaultAuthorizer,
+-    });
++    let apiUrl;
++    if (props.apiType === 'api-gateway') {
++      this.api = new _HttpApi(this, id, {
++        corsPreflight: {
++          allowOrigins: props.allowedOrigins ?? ['*'],
++          allowMethods: [CorsHttpMethod.ANY],
++          allowHeaders: [
++            'authorization',
++            'content-type',
++            'x-amz-content-sha256',
++            'x-amz-date',
++            'x-amz-security-token',
++          ],
++        },
++        defaultAuthorizer: props.defaultAuthorizer,
++      });
+
+-    this.api.addRoutes({
+-      path: '/{proxy+}',
+-      methods: [
+-        HttpMethod.GET,
+-        HttpMethod.DELETE,
+-        HttpMethod.POST,
+-        HttpMethod.PUT,
+-        HttpMethod.PATCH,
+-        HttpMethod.HEAD,
+-      ],
+-      integration: new HttpLambdaIntegration(
+-        'RouterIntegration',
+-        this.routerFunction,
+-      ),
+-    });
++      this.api.addRoutes({
++        path: '/{proxy+}',
++        methods: [
++          HttpMethod.GET,
++          HttpMethod.DELETE,
++          HttpMethod.POST,
++          HttpMethod.PUT,
++          HttpMethod.PATCH,
++          HttpMethod.HEAD,
++        ],
++        integration: new HttpLambdaIntegration(
++          'RouterIntegration',
++          this.routerFunction,
++        ),
++      });
++      apiUrl = this.api.url;
++    } else {
++      const stack = Stack.of(this);
++      this.routerFunction.addLayers(
++        LayerVersion.fromLayerVersionArn(
++          this,
++          'LWALayer',
++          `arn:aws:lambda:${stack.region}:753240598075:layer:LambdaAdapterLayerX86:24`,
++        ),
++      );
++      this.routerFunction.addEnvironment('PORT', '8000');
++      this.routerFunction.addEnvironment(
++        'AWS_LWA_INVOKE_MODE',
++        'response_stream',
++      );
++      this.routerFunction.addEnvironment(
++        'AWS_LAMBDA_EXEC_WRAPPER',
++        '/opt/bootstrap',
++      );
++      this.routerFunctionUrl = this.routerFunction.addFunctionUrl({
++        authType: FunctionUrlAuthType.AWS_IAM,
++        invokeMode: InvokeMode.RESPONSE_STREAM,
++        cors: {
++          allowedOrigins: props.allowedOrigins ?? ['*'],
++          allowedHeaders: [
++            'authorization',
++            'content-type',
++            'x-amz-content-sha256',
++            'x-amz-date',
++            'x-amz-security-token',
++          ],
++        },
++      });
++      apiUrl = this.routerFunctionUrl.url;
++    }
+
+-    new CfnOutput(this, `${props.apiName}Url`, { value: this.api.url! });
++    new CfnOutput(this, `${props.apiName}Url`, { value: apiUrl! });
+
+     RuntimeConfig.ensure(this).config.httpApis = {
+       ...RuntimeConfig.ensure(this).config.httpApis!,
+-      [props.apiName]: this.api.url!,
++      [props.apiName]: apiUrl,
+     };
+   }
+
+   public grantInvokeAccess(role: IRole) {
+-    role.addToPrincipalPolicy(
+-      new PolicyStatement({
+-        effect: Effect.ALLOW,
+-        actions: ['execute-api:Invoke'],
+-        resources: [this.api.arnForExecuteApi('*', '/*', '*')],
+-      }),
+-    );
++    if (this.api) {
++      role.addToPrincipalPolicy(
++        new PolicyStatement({
++          effect: Effect.ALLOW,
++          actions: ['execute-api:Invoke'],
++          resources: [this.api.arnForExecuteApi('*', '/*', '*')],
++        }),
++      );
++    } else if (this.routerFunction) {
++      role.addToPrincipalPolicy(
++        new PolicyStatement({
++          effect: Effect.ALLOW,
++          actions: ['lambda:InvokeFunctionUrl'],
++          resources: [this.routerFunction.functionArn],
++          conditions: {
++            StringEquals: {
++              'lambda:FunctionUrlAuthType': 'AWS_IAM',
++            },
++          },
++        }),
++      );
++    }
+   }
+ }
+```
+
+</details>
+
+Después de estos cambios, actualiza `packages/common/constructs/src/app/http-apis/<my-api>.ts` para usar la nueva opción de función URL.
+
+#### Implementación
+
+Una vez actualizada la infraestructura, puedes implementar streaming en FastAPI. La API debe:
+
+- Devolver un [`StreamingResponse`](https://fastapi.tiangolo.com/reference/responses/?h=streaming#fastapi.responses.StreamingResponse)
+- Declarar el tipo de cada chunk de respuesta
+- Añadir la extensión OpenAPI `x-streaming: true` si planeas usar <Link path="guides/api-connection/react-fastapi">API Connection</Link>.
+
+Ejemplo para transmitir objetos JSON:
+
+```py /return (StreamingResponse)/ /openapi_extra[^)]*/ /-> (Chunk)/
+from pydantic import BaseModel
+from fastapi.responses import StreamingResponse
+
+class Chunk(BaseModel):
+  message: str
+  timestamp: datetime
+
+async def stream_chunks():
+  for i in range(0, 100):
+    yield Chunk(message=f"This is chunk {i}", timestamp=datetime.now())
+
+@app.get("/stream", openapi_extra={'x-streaming': True})
+def my_stream() -> Chunk:
+    return StreamingResponse(stream_chunks(), media_type="application/json")
+```
+
+#### Consumo
+
+Para consumir streams, puedes usar el <Link path="guides/api-connection/react-fastapi#consuming-a-stream">generador API Connection</Link> que provee métodos tipados para iterar chunks.
+
+## Despliegue de tu FastAPI
+
+El generador crea un construct CDK en `common/constructs`. Úsalo en una aplicación CDK:
+
+```ts
+import { MyApi } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    // Añade la API al stack
+    const api = new MyApi(this, 'MyApi');
+  }
+}
+```
+
+Esto configura:
+
+1. Función AWS Lambda ejecutando tu FastAPI
+2. API Gateway HTTP API como trigger
+3. Roles IAM y permisos
+4. Grupo de logs CloudWatch
+5. Configuración de trazado X-Ray
+6. Namespace de métricas CloudWatch
+
+### Otorgando Acceso
+
+Usa `grantInvokeAccess` para dar acceso:
+
+```ts
+api.grantInvokeAccess(myIdentityPool.authenticatedRole);
+```
+
+## Desarrollo Local
+
+El generador configura un servidor local que puedes ejecutar con:
+
+<NxCommands commands={['run my-api:serve']} />
+
+Esto inicia un servidor de desarrollo FastAPI con:
+
+- Auto-recarga ante cambios
+- Documentación interactiva en `/docs` o `/redoc`
+- Esquema OpenAPI en `/openapi.json`
+
+## Invocación de tu FastAPI
+
+Para invocar la API desde un sitio React, usa el generador <Link path="guides/api-connection/react-fastapi">`api-connection`</Link>.

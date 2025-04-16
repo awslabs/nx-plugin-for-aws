@@ -1,0 +1,214 @@
+---
+title: "Site CloudScape"
+description: "Documentation de référence pour un site CloudScape"
+---
+
+
+
+import { FileTree, Steps } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import schema from '../../../../../../packages/nx-plugin/src/cloudscape-website/app/schema.json';
+
+Ce générateur crée un nouveau site [React](https://react.dev/) avec [CloudScape](http://cloudscape.design/) configuré, ainsi que l'infrastructure AWS CDK pour déployer votre site dans le cloud en tant que site statique hébergé dans [S3](https://aws.amazon.com/s3/), servi par [CloudFront](https://aws.amazon.com/cloudfront/) et protégé par [WAF](https://aws.amazon.com/waf/).
+
+L'application générée utilise [Vite](https://vite.dev/) comme outil de build et bundler. Elle utilise [TanStack Router](https://tanstack.com/router/v1) pour le routage type-safe.
+
+:::note
+Bien que ce générateur vous configure avec CloudScape, il s'agit fondamentalement d'un générateur de projet React. Vous pouvez modifier votre code pour passer à un autre système de design ou bibliothèque de composants si vous le souhaitez.
+:::
+
+## Utilisation
+
+### Générer un site CloudScape
+
+Vous pouvez générer un nouveau site CloudScape de deux manières :
+
+<RunGenerator generator="ts#cloudscape-website" />
+
+### Options
+
+<GeneratorParameters schema={schema} />
+
+## Sortie du générateur
+
+Le générateur créera la structure de projet suivante dans le répertoire `<directory>/<name>` :
+
+<FileTree>
+  - index.html Point d'entrée HTML
+  - public Assets statiques
+  - src
+    - main.tsx Point d'entrée de l'application avec la configuration React
+    - config.ts Configuration de l'application (ex: logo)
+    - components
+      - AppLayout Composants pour le layout global CloudScape et la barre de navigation
+    - hooks
+      - useAppLayout.tsx Hook pour ajuster l'AppLayout depuis des composants imbriqués
+    - routes
+      - welcome
+        - index.tsx Exemple de route (ou page) pour @tanstack/react-router
+    - styles.css Styles globaux
+  - vite.config.ts Configuration Vite et Vitest
+  - tsconfig.json Configuration TypeScript de base pour le code source et les tests
+  - tsconfig.app.json Configuration TypeScript pour le code source
+  - tsconfig.spec.json Configuration TypeScript pour les tests
+</FileTree>
+
+Le générateur créera également le code d'infrastructure CDK pour déployer votre site dans le répertoire `packages/common/constructs` :
+
+<FileTree>
+  - src
+    - app
+      - static-websites
+        - \<name>.ts Infrastructure spécifique à votre site
+    - core
+      - static-website.ts Construct StaticWebsite générique
+</FileTree>
+
+## Implémentation de votre site CloudScape
+
+La [documentation React](https://react.dev/learn) est un bon point de départ pour apprendre les bases du développement avec React. Vous pouvez consulter la [documentation CloudScape](https://cloudscape.design/components/) pour les détails sur les composants disponibles et leur utilisation.
+
+### Routes
+
+#### Création d'une route/page
+
+Votre site CloudScape est préconfiguré avec [TanStack Router](https://tanstack.com/router/v1), ce qui facilite l'ajout de nouvelles routes :
+
+<Steps>
+  1. [Lancer le serveur de développement local](#local-development-server)
+  2. Créer un nouveau fichier `<page-name>.tsx` dans `src/routes`, où la position dans l'arborescence représente le chemin
+  3. Une `Route` et un `RouteComponent` sont générés automatiquement. Vous pouvez commencer à développer votre page ici !
+</Steps>
+
+#### Navigation entre les pages
+
+Vous pouvez utiliser le composant `Link` ou le hook `useNavigate` pour naviguer entre les pages :
+
+```tsx {1, 4, 8-9, 14}
+import { Link, useNavigate } from '@tanstack/react-router';
+
+export const MyComponent = () => {
+  const navigate = useNavigate();
+
+  const submit = async () => {
+    const id = await ...
+    // Utiliser `navigate` pour rediriger après une action asynchrone
+    navigate({ to: '/products/$id', { params: { id }} });
+  };
+
+  return (
+    <>
+      <Link to="/products">Annuler</Link>
+      <Button onClick={submit}>Soumettre</Button>
+    </>
+  )
+};
+```
+
+Pour plus de détails, consultez la [documentation TanStack Router](https://tanstack.com/router/latest/docs/framework/react/overview).
+
+## Configuration runtime
+
+La configuration de votre infrastructure AWS CDK est fournie à votre site via la Configuration Runtime. Cela permet à votre site d'accéder à des détails comme les URLs d'API qui ne sont connus qu'après le déploiement.
+
+### Infrastructure
+
+Le construct CDK `RuntimeConfig` peut être utilisé pour ajouter et récupérer des valeurs de configuration dans votre infrastructure CDK. Les constructs CDK générés par `@aws/nx-plugin` (comme les <Link path="guides/trpc">APIs tRPC</Link> et les <Link path="guides/fastapi">FastAPIs</Link>) ajoutent automatiquement les valeurs appropriées au `RuntimeConfig`.
+
+Votre construct CDK de site web déploiera la configuration runtime dans un fichier `runtime-config.json` à la racine de votre bucket S3.
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {9-10,12-13}
+import { Stack } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { MyWebsite } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    // Ajoute automatiquement des valeurs au RuntimeConfig
+    new MyApi(this, 'MyApi');
+
+    // Déploie automatiquement la config runtime dans runtime-config.json
+    new MyWebsite(this, 'MyWebsite');
+  }
+}
+```
+
+:::warning
+Vous devez vous assurer de déclarer votre site web _après_ tout construct qui ajoute des valeurs au `RuntimeConfig`, sans quoi elles seront absentes du fichier `runtime-config.json`.
+:::
+
+### Code du site
+
+Dans votre site, vous pouvez utiliser le hook `useRuntimeConfig` pour récupérer les valeurs de la configuration runtime :
+
+```tsx {1,4}
+import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
+
+const MyComponent = () => {
+  const runtimeConfig = useRuntimeConfig();
+
+  // Accédez aux valeurs de la config runtime ici
+  const apiUrl = runtimeConfig.httpApis.MyApi;
+};
+```
+
+### Configuration runtime locale
+
+Pour exécuter le [serveur de développement local](#local-development-server), vous aurez besoin d'un fichier `runtime-config.json` dans votre répertoire `public` afin que votre site local connaisse les URLs backend, la configuration d'identité, etc.
+
+Votre projet de site est configuré avec une cible `load:runtime-config` que vous pouvez utiliser pour récupérer le fichier `runtime-config.json` d'une application déployée :
+
+<NxCommands commands={['run <my-website>:"load:runtime-config"']} />
+
+:::warning
+Si vous modifiez le nom de votre stack dans le `src/main.ts` de votre projet d'infrastructure, vous devrez mettre à jour la cible `load:runtime-config` dans le fichier `project.json` de votre site avec le nom de la stack à utiliser.
+:::
+
+## Serveur de développement local
+
+Avant de lancer le serveur de développement local, assurez-vous d'avoir déployé votre infrastructure et [chargé la configuration runtime locale](#local-runtime-config).
+
+Vous pouvez ensuite exécuter la cible `serve` :
+
+<NxCommands commands={['run <my-website>:serve']} />
+
+## Build
+
+Vous pouvez builder votre site avec la cible `build`. Cela utilise Vite pour créer un bundle de production dans le répertoire `dist/packages/<my-website>/bundle`, ainsi que le type-checking, la compilation et le linting de votre site.
+
+<NxCommands commands={['run <my-website>:build']} />
+
+## Tests
+
+Tester votre site fonctionne comme pour un projet TypeScript standard. Reportez-vous au <Link path="guides/typescript-project#testing">guide de projet TypeScript</Link> pour plus de détails.
+
+Pour les tests spécifiques à React, React Testing Library est déjà installé et disponible pour écrire vos tests. Consultez la [documentation React Testing Library](https://testing-library.com/docs/react-testing-library/example-intro) pour son utilisation.
+
+Exécutez vos tests avec la cible `test` :
+
+<NxCommands commands={['run <my-website>:test']} />
+
+## Déploiement de votre site
+
+Pour déployer votre site, nous recommandons d'utiliser le <Link path="guides/typescript-infrastructure">Générateur d'Infrastructure TypeScript</Link> pour créer une application CDK.
+
+Vous pouvez utiliser le construct CDK généré dans `packages/common/constructs` pour déployer votre site.
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {3, 9}
+import { Stack } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { MyWebsite } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    new MyWebsite(this, 'MyWebsite');
+  }
+}
+```

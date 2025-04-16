@@ -106,9 +106,13 @@ pnpm nx g @aws/nx-plugin:ts#infra
 
 ## Documentation Translation
 
-The project supports automatic translation of documentation using AWS Bedrock's Haiku 3.5 model. Documentation is translated from English to multiple languages (currently Japanese, with support for French, Spanish, German, Chinese, and Korean).
+The project supports automatic translation of documentation using AWS Bedrock's Deepseek & Haiku 3.5 models. Documentation is translated from English to multiple languages (currently Japanese, with support for French, Spanish, German, Chinese, and Korean).
+
+> **_NOTE:_** It is important that only files in english (en folder) are modified directly as the translated files are generating using english as a base.
 
 ### Running Translations Locally
+
+> **_NOTE:_** Ensure you have your aws cli configured to an AWS account with DeepSeek/Haiku 3.5 Bedrock model access before continuing.
 
 To translate documentation locally:
 
@@ -124,15 +128,16 @@ pnpm tsx ./scripts/translate.ts --languages jp,fr,es
 
 # Show what would be translated without actually translating
 pnpm tsx ./scripts/translate.ts --dry-run
+```
 
 ### GitHub Workflow
 
 A GitHub workflow automatically translates documentation when changes are made to English documentation files in pull requests. The workflow:
 
 1. Detects changes to English documentation files
-2. Translates the changed files using AWS Bedrock
+2. Translates the changed files using DeepSeek and Haiku 3.5 on AWS Bedrock
 3. Commits the translations back to the source branch
-4. Updates the PR with translations
+4. Updates the PR with files translated
 
 ## Contributing
 
@@ -147,4 +152,3 @@ This project has adopted a Code of Conduct that we expect project participants t
 ## License
 
 @aws/nx-plugin is [Apache 2.0 licensed](/LICENSE).
-```
