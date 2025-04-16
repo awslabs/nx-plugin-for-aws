@@ -17,7 +17,7 @@ export const VERSIONS = {
   '@cloudscape-design/board-components': '^3.0.94',
   '@cloudscape-design/components': '^3.0.928',
   '@cloudscape-design/global-styles': '^1.0.38',
-  '@tanstack/react-query': '^5.69.0',
+  '@tanstack/react-query': '5.74.2', // TODO: https://github.com/awslabs/nx-plugin-for-aws/issues/147
   '@trpc/tanstack-react-query': '11.0.0',
   '@trpc/client': '11.0.0',
   '@trpc/server': '11.0.0',
