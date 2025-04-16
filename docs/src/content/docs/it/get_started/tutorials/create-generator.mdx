@@ -20,19 +20,19 @@ import nxGraphPng from '@assets/nx-graph.png'
 import gameSelectPng from '@assets/game-select.png'
 import gameConversationPng from '@assets/game-conversation.png'
 
-## Crea un Generatore
+## Creare un Generatore
 
 Creiamo un nuovo generatore. Il nostro obiettivo sarà generare una nuova procedura per la nostra API tRPC.
 
-### Clona il Plugin
+### Clonare il Plugin
 
-Per prima cosa, cloniamo il plugin:
+Innanzitutto, cloniamo il plugin:
 
 ```bash
 git clone git@github.com:awslabs/nx-plugin-for-aws.git
 ```
 
-Poi installiamo e compiliamo:
+Quindi installiamo e compiliamo:
 
 ```bash
 cd nx-plugin-for-aws
@@ -40,18 +40,18 @@ pnpm i
 pnpm nx run-many --target build --all
 ```
 
-### Crea un Generatore Vuoto
+### Creare un Generatore Vuoto
 
 Creiamo il nuovo generatore in `packages/nx-plugin/src/trpc/procedure`. Iniziamo creando lo schema e un punto di ingresso per il nostro generatore:
 
 <FileTree>
   - packages/nx-plugin/src/trpc/procedure
     - schema.json Definisce l'input per il nostro generatore
-    - schema.d.ts Interfaccia TypeScript corrispondente allo schema
+    - schema.d.ts Interfaccia TypeScript che corrisponde allo schema
     - generator.ts Funzione eseguita da Nx come generatore
 </FileTree>
 
-Aggiungi il contenuto seguente a ciascun file.
+Aggiungiamo il contenuto seguente a ciascun file.
 
 <Tabs>
   <TabItem label="schema.json">
@@ -113,7 +113,7 @@ Aggiungi il contenuto seguente a ciascun file.
 </Tabs>
 
 :::note
-Nota che al nostro generatore viene fornito un `Tree` come input, insieme alle opzioni definite nello schema. Il `Tree` è essenzialmente un file system virtuale da cui possiamo leggere e scrivere per creare o aggiornare i file del progetto. Non vogliamo modificare direttamente il file system, poiché non vogliamo apportare modifiche se gli utenti eseguono il generatore in modalità "dry-run".
+Nota che al nostro generatore viene fornito un `Tree` come input, insieme alle opzioni definite nello schema. Il `Tree` è essenzialmente un filesystem virtuale da cui possiamo leggere e scrivere per creare o aggiornare i file del progetto. Non vogliamo accedere direttamente al filesystem, per evitare modifiche indesiderate se l'utente esegue il generatore in modalità "dry-run".
 :::
 
 Ora colleghiamo il nostro generatore aggiornando `packages/nx-plugin/generators.json`:
@@ -131,16 +131,16 @@ Ora colleghiamo il nostro generatore aggiornando `packages/nx-plugin/generators.
 ...
 ```
 
-### Implementa il Generatore
+### Implementare il Generatore
 
 Per aggiungere una procedura a un'API tRPC, dobbiamo fare due cose:
 
 1. Creare un file TypeScript per la nuova procedura
 2. Aggiungere la procedura al router
 
-#### Crea la nuova Procedura
+#### Creare la nuova Procedura
 
-Per creare il file TypeScript per la nuova procedura, useremo un'utility chiamata `generateFiles`. Utilizzando questa funzione, possiamo definire un template [EJS](https://ejs.co/) che verrà renderizzato nel generatore con variabili basate sulle opzioni selezionate dall'utente.
+Per creare il file TypeScript della nuova procedura, useremo un'utility chiamata `generateFiles`. Possiamo definire un template [EJS](https://ejs.co/) da renderizzare nel generatore con variabili basate sulle opzioni selezionate dall'utente.
 
 Definiamo il template in `packages/nx-plugin/src/trpc/procedure/files/procedures/__procedureNameKebabCase__.ts.template`:
 
@@ -150,21 +150,21 @@ import { z } from 'zod';
 
 export const <%- procedureNameCamelCase %> = publicProcedure
   .input(z.object({
-    // TODO: define input
+    // TODO: definire l'input
   }))
   .output(z.object({
-    // TODO: define output
+    // TODO: definire l'output
   }))
   .<%- procedureType %>(async ({ input, ctx }) => {
-    // TODO: implement!
+    // TODO: implementare!
     return {};
   });
 ```
 
 :::tip
-Quando `generateFiles` elabora il template, sostituirà i riferimenti a `__<variabile>__` nei nomi di file/directory con i valori forniti, rimuovendo anche l'estensione `.template` dal nome del file.
+Quando `generateFiles` processa il template, sostituirà i riferimenti a `__<variabile>__` nei nomi di file/directory con i valori forniti, rimuovendo anche l'estensione `.template`.
 
-Il contenuto del template utilizza la sintassi [EJS](https://ejs.co/), dove le variabili sono referenziate usando `<% ... %>`.
+Il contenuto del template utilizza la sintassi [EJS](https://ejs.co/), dove le variabili vengono referenziate con `<% ... %>`.
 :::
 
 Nel template abbiamo referenziato tre variabili:
@@ -173,7 +173,7 @@ Nel template abbiamo referenziato tre variabili:
 * `procedureNameKebabCase`
 * `procedureType`
 
-Dobbiamo assicurarci di passare queste variabili a `generateFiles`, insieme alla directory di destinazione per i file generati, ovvero la posizione dei file sorgente (es. `sourceRoot`) per il progetto tRPC selezionato dall'utente, che possiamo estrarre dalla configurazione del progetto.
+Dobbiamo assicurarci di passare queste variabili a `generateFiles`, insieme alla directory di destinazione (il `sourceRoot` del progetto tRPC selezionato), che possiamo ottenere dalla configurazione del progetto.
 
 Aggiorniamo il generatore:
 
@@ -203,14 +203,14 @@ export default trpcProcedureGenerator;
 ```
 
 :::tip
-Alla fine del generatore chiamiamo `formatFilesInSubtree` per formattare i file creati/modificati secondo le impostazioni [prettier](https://prettier.io/) dell'utente.
+Chiamando `formatFilesInSubtree` alla fine del generatore, ci assicuriamo che i file creati o modificati vengano formattati secondo le impostazioni [prettier](https://prettier.io/) dell'utente.
 :::
 
-#### Aggiungi la Procedura al Router
+#### Aggiungere la Procedura al Router
 
-Ora vogliamo collegare la nuova procedura al router. Questo richiede la lettura e modifica del codice sorgente!
+Ora vogliamo che il generatore colleghi la nuova procedura al router. Questo implica leggere e modificare il codice sorgente!
 
-Utilizziamo la manipolazione dell'AST di TypeScript per aggiornare le parti rilevanti del file sorgente. Alcuni helper come `replace` e `destructuredImport` semplificano questo processo.
+Utilizziamo la manipolazione dell'AST TypeScript per aggiornare le parti rilevanti. Alcuni helper come `replace` e `destructuredImport` semplificano questa operazione.
 
 ```ts title="procedure/generator.ts" {6, 23-33}
 import { generateFiles, joinPathFragments, readProjectConfiguration, Tree } from '@nx/devkit';
@@ -254,26 +254,26 @@ export default trpcProcedureGenerator;
 ```
 
 :::tip
-Nel frammento sopra, `replace` usa un selettore [tsquery](https://github.com/phenomnomnominal/tsquery) per trovare l'argomento della funzione `router`.
+Nel snippet sopra, `replace` utilizza un selettore [tsquery](https://github.com/phenomnomnominal/tsquery) per trovare l'argomento della funzione `router`.
 
-Puoi usare il [tsquery playground](https://tsquery-playground.firebaseapp.com/) per testare diversi selettori.
+Puoi utilizzare il [tsquery playground](https://tsquery-playground.firebaseapp.com/) per testare diversi selettori.
 :::
 
-Ora compiliamo il generatore per testarlo nel progetto dungeon-adventure:
+Compiliamo il generatore per renderlo disponibile al test nel progetto dungeon-adventure.
 
 ```bash
 pnpm nx run @aws/nx-plugin:compile
 ```
 
-### Test del nostro Generatore
+### Testare il Generatore
 
-Per testare il generatore, colleghiamo il plugin locale al progetto <Link path="get_started/tutorials/dungeon-game/overview">dungeon-adventure</Link>.
+Per testare il generatore, colleghiamo il plugin locale al codice di <Link path="get_started/tutorials/dungeon-game/overview">dungeon-adventure</Link>.
 
 ::::note
-Non preoccuparti se non hai completato il tutorial di dungeon adventure, questo funzionerà anche in qualsiasi codebase abilitato a Nx.
+Non preoccuparti se non hai completato il tutorial di dungeon-adventure, funzionerà con qualsiasi codebase abilitata a Nx.
 ::::
 
-Nel tuo codebase, colleghiamo `@aws/nx-plugin` locale:
+Nel tuo codebase, colleghiamo il plugin locale `@aws/nx-plugin`:
 
 ```bash
 cd path/to/dungeon-adventure
@@ -281,7 +281,7 @@ pnpm link path/to/nx-plugin-for-aws/dist/packages/nx-plugin
 ```
 
 :::note
-Nota che abbiamo collegato il plugin compilato in `dist/packages/nx-plugin` invece del codice sorgente.
+Nota che colleghiamo il plugin compilato in `dist/packages/nx-plugin` anziché il codice sorgente.
 :::
 
 Proviamo il nuovo generatore:
@@ -289,7 +289,7 @@ Proviamo il nuovo generatore:
 <RunGenerator generator="ts#trpc-api#procedure" />
 
 :::note
-Se non vedi il nuovo generatore nella lista di VSCode, potrebbe essere necessario aggiornare lo workspace Nx:
+Se non vedi il nuovo generatore nella lista di VSCode, potresti dover aggiornare la workspace Nx:
 
 <NxCommands commands={['reset']} />
 :::
@@ -298,33 +298,33 @@ Se tutto funziona, dovremmo aver generato una nuova procedura e aggiunto la proc
 
 ### Esercizi
 
-Se sei arrivato fin qui e hai ancora tempo per sperimentare con i generatori Nx, ecco alcuni suggerimenti per migliorare il generatore di procedure:
+Se sei arrivato fin qui e hai ancora tempo per sperimentare, ecco alcuni suggerimenti per migliorare il generatore:
 
 #### 1. Operazioni Annidate
 
-Nel nostro gioco dungeon adventure abbiamo usato router annidati per raggruppare operazioni correlate. Prova ad aggiornare il generatore per supportare questo:
+Nel nostro gioco dungeon adventure, abbiamo utilizzato router annidati per raggruppare operazioni correlate. Prova ad aggiornare il generatore per supportare:
 
-* Accetta la notazione a punti per l'input `procedure` (es. `games.query`)
-* Genera una procedura con nome basato sulla notazione inversa (es. `queryGames`)
-* Aggiungi il router annidato appropriato (o aggiornalo se esiste già!)
+* Input `procedure` in notazione puntata (es. `games.query`)
+* Generazione di una procedura con nome basato sulla notazione invertita (es. `queryGames`)
+* Aggiunta del router annidato appropriato (o aggiornamento se esiste già)
 
 #### 2. Validazione
 
-Il generatore dovrebbe prevenire potenziali problemi, come la selezione di un `project` che non è un'API tRPC. Guarda il generatore `api-connection` per un esempio.
+Il generatore dovrebbe prevenire problemi come la selezione di un `project` che non è un'API tRPC. Guarda il generatore `api-connection` per un esempio.
 
 #### 3. Test Unitari
 
-Scrivi dei test unitari per il generatore. Seguono generalmente questo flusso:
+Scrivi test unitari per il generatore. Seguono generalmente questo flusso:
 
 1. Crea un workspace vuoto con `createTreeUsingTsSolutionSetup()`
-2. Aggiungi i file esistenti necessari (es. `project.json` e `src/router.ts` per un backend tRPC)
+2. Aggiungi file esistenti necessari (es. `project.json` e `src/router.ts`)
 3. Esegui il generatore
-4. Verifica le modifiche attese nell'albero
+4. Verifica le modifiche attese nel tree
 
 #### 4. Test End-to-End
 
-Attualmente abbiamo un singolo "smoke test" che esegue tutti i generatori e verifica la build. Aggiornalo per includere il nuovo generatore.
+Attualmente abbiamo un singolo "smoke test" che verifica la build. Aggiornalo per includere il nuovo generatore.
 
 #### 5. Contribuisci!
 
-Se nessuno ha contribuito questo generatore a `@aws/nx-plugin`, inviaci una pull request! Se esiste già, pensa a un altro generatore da contribuire.
+Se nessuno ha ancora contribuito questo generatore a `@aws/nx-plugin`, inviaci una pull request! Se esiste già, pensa a un altro generatore da contribuire.

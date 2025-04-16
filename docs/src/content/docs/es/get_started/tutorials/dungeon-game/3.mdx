@@ -20,21 +20,21 @@ import nxGraphPng from '@assets/nx-graph.png'
 import gameSelectPng from '@assets/game-select.png'
 import gameConversationPng from '@assets/game-conversation.png'
 
-## Módulo 3: Implementación de la API de historia
+## Módulo 3: Implementación de la API de Story
 
 <Aside type="caution">
 Asegúrate de haber otorgado acceso al modelo **Anthropic Claude 3.5 Sonnet v2** siguiendo los pasos descritos en [esta guía](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html).
 </Aside>
 
-El StoryApi consta de una única API `generate_story` que, dado un `Game` y una lista de `Action` como contexto, progresará una historia. Esta API se implementará como una API de streaming en Python/FastAPI y demostrará cómo se pueden modificar los códigos generados para adaptarse al propósito requerido.
+El StoryApi consiste en una única API `generate_story` que, dado un `Game` y una lista de `Action`s como contexto, progresará una historia. Esta API se implementará como una API de streaming en Python/FastAPI y demostrará cómo se pueden modificar los códigos generados para adaptarlos a su propósito.
 
 ### Implementación de la API
 
 Para crear nuestra API, primero necesitamos instalar algunas dependencias adicionales:
 
-- `boto3` se usará para llamar a Amazon Bedrock
-- `uvicorn` se usará para iniciar nuestra API en conjunto con el [Lambda Web Adapter (LWA)](https://github.com/awslabs/aws-lambda-web-adapter)
-- `copyfiles` es una dependencia npm necesaria para soportar la copia multiplataforma de archivos al actualizar nuestra tarea `bundle`
+- `boto3` se usará para llamar a Amazon Bedrock;
+- `uvicorn` se usará para iniciar nuestra API en conjunto con el [Lambda Web Adapter (LWA)](https://github.com/awslabs/aws-lambda-web-adapter).
+- `copyfiles` es una dependencia de npm necesaria para soportar la copia multiplataforma de archivos al actualizar nuestra tarea `bundle`.
 
 Para instalar estas dependencias, ejecuta los siguientes comandos:
 
@@ -108,21 +108,21 @@ def generate_story(request: StoryRequest) -> str:
 
 Analizando el código anterior:
 
-- Usamos la configuración `x-streaming` para indicar que esta es una API de streaming al generar nuestro SDK cliente
-- Usamos `x-query` para tratar esta solicitud POST como una `query` en lugar de una `mutation`
-- Nuestra API simplemente devuelve un flujo de texto definido por `media_type="text/plain"` y `response_class=PlainTextResponse`
+- Usamos la configuración `x-streaming` para indicar que esta es una API de streaming cuando generemos nuestro SDK cliente. ¡Esto nos permitirá consumir esta API en modo streaming manteniendo la seguridad de tipos!
+- Usamos la configuración `x-query` para indicar que, aunque es una solicitud POST, la trataremos como `query` en lugar de `mutation`, permitiéndonos aprovechar al máximo la gestión de estado de streaming de TanStack Query.
+- Nuestra API simplemente devuelve un flujo de texto como lo definen `media_type="text/plain"` y `response_class=PlainTextResponse`
 
 :::note
-Cada vez que modifiques tu FastAPI, deberás reconstruir el proyecto para ver los cambios reflejados en el cliente generado.
+Cada vez que hagas cambios en tu FastAPI, necesitarás reconstruir tu proyecto para ver esos cambios reflejados en el cliente generado en tu sitio web.
 
-Haremos algunas modificaciones más antes de reconstruir.
+Haremos algunos cambios más a continuación antes de reconstruir.
 :::
 
 ### Infraestructura
 
-La <Link path="get_started/tutorials/dungeon-game/1#game-ui-infrastructure">infraestructura configurada previamente</Link> asume que todas las APIs usan API Gateway integrado con Lambda. Para `story_api` usaremos una [URL de función Lambda con streaming de respuesta](https://docs.aws.amazon.com/lambda/latest/dg/configuration-response-streaming.html).
+La <Link path="get_started/tutorials/dungeon-game/1#game-ui-infrastructure">infraestructura que configuramos previamente</Link> asume que todas las APIs tienen un API Gateway integrado con Lambda. Para nuestro `story_api` no queremos usar API Gateway ya que no soporta respuestas en streaming. En su lugar, usaremos una [URL de función Lambda configurada con transmisión de respuestas](https://docs.aws.amazon.com/lambda/latest/dg/configuration-response-streaming.html).
 
-Actualizamos los constructos de CDK:
+Para soportar esto, primero actualizaremos nuestros constructos CDK:
 
 <Tabs>
 <TabItem label="http-api.ts">
@@ -307,20 +307,20 @@ export class StoryApi extends HttpApi {
 +
 +    this.routerFunction.addToRolePolicy(
 +      new PolicyStatement({
-+        effect: Effect.ALLOW,
-+        actions: ['bedrock:InvokeModelWithResponseStream'],
-+        resources: [
-+          'arn:aws:bedrock:*::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0',
-+        ],
-+      }),
-+    );
+        effect: Effect.ALLOW,
+        actions: ['bedrock:InvokeModelWithResponseStream'],
+        resources: [
+          'arn:aws:bedrock:*::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0',
+        ],
+      }),
+    );
   }
 }
 ```
 </TabItem>
 </Tabs>
 
-Actualizamos el `story_api` para soportar [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter):
+Ahora actualizaremos el `story_api` para soportar el despliegue con [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter).
 
 <Tabs>
 <TabItem label="run.sh">
@@ -366,33 +366,33 @@ PATH=$PATH:$LAMBDA_TASK_ROOT/bin \
 
 ### Despliegue y pruebas
 
-Primero construimos el código base:
+Primero, construyamos el código base:
 
 <NxCommands commands={['run-many --target build --all']} />
 
 <Aside type="tip">
-Si encuentras errores de linting, ejecuta:
+Si encuentras errores de linting, puedes ejecutar el siguiente comando para corregirlos automáticamente.
 
 <NxCommands commands={['run-many --target lint --configuration=fix --all']} />
 </Aside>
 
-Despliega la aplicación con:
+Ahora puedes desplegar tu aplicación ejecutando:
 
 <NxCommands commands={['run @dungeon-adventure/infra:deploy dungeon-adventure-infra-sandbox']} />
 
-Este despliegue tomará aproximadamente 2 minutos.
+Este despliegue tomará aproximadamente 2 minutos en completarse.
 
-<Drawer title="Comando de despliegue" trigger="Puedes desplegar todos los stacks a la vez. Haz clic para más detalles.">
+<Drawer title="Comando de despliegue" trigger="También puedes desplegar todos los stacks a la vez. Haz clic aquí para más detalles.">
 
-También puedes desplegar todos los stacks con:
+También puedes desplegar todos los stacks contenidos en la aplicación CDK ejecutando:
 
 <NxCommands commands={['run @dungeon-adventure/infra:deploy --all']} />
 
-**No recomendado** si tienes stacks separados para diferentes etapas (ej. infra-prod).
+Esto **no se recomienda** ya que podrías querer separar tus etapas de despliegue como stacks diferentes `ej. infra-prod`. En este caso, el flag `--all` intentará desplegar todos los stacks, lo que puede resultar en despliegues no deseados!
 
 </Drawer>
 
-Al completar el despliegue, verás salidas similares a:
+Una vez completado el despliegue, deberías ver salidas similares a las siguientes _(algunos valores han sido omitidos)_:
 
 ```bash
 dungeon-adventure-infra-sandbox
@@ -411,12 +411,12 @@ dungeon-adventure-infra-sandbox.UserIdentityUserIdentityIdentityPoolIdXXX = regi
 dungeon-adventure-infra-sandbox.UserIdentityUserIdentityUserPoolIdXXX = region_xxx
 ```
 
-Para probar la API:
+Podemos probar nuestra API de dos formas:
 <ul>
-<li>Iniciar una instancia local del servidor FastAPI y usar `curl`</li>
+<li>Iniciando una instancia local del servidor FastApi e invocando las APIs usando `curl`.</li>
 <li>
-<Drawer title="curl con Sigv4" trigger="Llamar a la API desplegada usando curl con Sigv4">
-Agrega este script a tu `.bashrc`:
+<Drawer title="curl habilitado con Sigv4" trigger="Llamar a la API desplegada usando curl con Sigv4 directamente">
+Puedes agregar el siguiente script a tu archivo `.bashrc` (y hacer `source`) o simplemente pegarlo en la misma terminal donde quieras ejecutar el comando.
 ```bash
 // ~/.bashrc
 acurl () {
@@ -427,14 +427,14 @@ acurl () {
 }
 ```
 
-Ejemplos de uso:
+Luego para hacer una solicitud curl autenticada con sigv4, puedes invocar `acurl` como en los siguientes ejemplos:
 
 ###### API Gateway
 ```bash
 acurl ap-southeast-2 execute-api -X GET https://xxx
 ```
 
-###### URL Lambda con streaming
+###### URL de función Lambda con streaming
 ```bash
 acurl ap-southeast-2 lambda -N -X POST https://xxx
 ```
@@ -444,10 +444,11 @@ acurl ap-southeast-2 lambda -N -X POST https://xxx
 
 <Tabs>
   <TabItem label="Local">
-  Inicia el servidor FastAPI local:
+  Inicia tu servidor FastAPI local ejecutando:
     <NxCommands commands={["run dungeon_adventure.story_api:serve"]} />
 
-    Ejecuta:
+    Una vez en funcionamiento, llama a la API con:
+    
     ```bash
     curl -N -X POST http://127.0.0.1:8000/story/generate \
       -d '{"genre":"superhero", "actions":[], "playerName":"UnnamedHero"}' \
@@ -462,15 +463,15 @@ acurl ap-southeast-2 lambda -N -X POST \
   -H "Content-Type: application/json"
 ```
     <Aside type="caution">
-    Usa el valor `dungeon-adventure-infra-sandbox.StoryApiStoryApiUrlXXX` del output de CDK y ajusta la región.
+    Usa el valor de salida `dungeon-adventure-infra-sandbox.StoryApiStoryApiUrlXXX` del despliegue CDK para reemplazar el marcador de posición de la url y configura la región correspondientemente.
     </Aside>
   </TabItem>
 </Tabs>
 
-Si es exitoso, verás una respuesta en stream como:
+Si el comando se ejecuta correctamente, deberías ver una respuesta en streaming similar a:
 
 ```
 UnnamedHero stood tall, his cape billowing in the wind....
 ```
 
-¡Felicidades! Has implementado tu primera API con FastAPI. 🎉🎉🎉
+¡Felicidades! Has construido y desplegado tu primera API usando FastAPI. 🎉🎉🎉

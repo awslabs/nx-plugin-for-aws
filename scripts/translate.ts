@@ -14,10 +14,9 @@ import {
   InvokeModelCommand,
   InvokeModelCommandInput,
 } from '@aws-sdk/client-bedrock-runtime';
-import {
-  fromNodeProviderChain,
-  fromTemporaryCredentials,
-} from '@aws-sdk/credential-providers';
+import { NodeHttpHandler } from '@smithy/node-http-handler';
+import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
+import { Agent } from 'https';
 
 // Define supported languages
 const SUPPORTED_LANGUAGES = ['en', 'jp', 'ko', 'es', 'pt', 'fr', 'it', 'zh'];
@@ -134,6 +133,11 @@ async function initializeBedrockClient(): Promise<BedrockRuntimeClient> {
     return new BedrockRuntimeClient({
       region: process.env.AWS_REGION || 'us-west-2',
       credentials: fromNodeProviderChain(),
+      requestHandler: new NodeHttpHandler({
+        httpsAgent: new Agent({
+          maxSockets: 500,
+        }),
+      }),
     });
   } catch (error) {
     throw new Error(
@@ -287,17 +291,18 @@ function splitByHeaders(content: string, depth: number = 1): string[] {
     remainingContent = content.substring(frontmatterMatch[0].length);
   }
 
-  if (depth > 1) {
-    const matches = [...remainingContent.matchAll(headerRegex)];
+  const matches = [...remainingContent.matchAll(headerRegex)];
 
-    if (matches.length === 0) {
-      // No h2 headers, treat the whole content as one section
-      if (remainingContent.trim()) {
-        sections.push(remainingContent);
-      }
-      return sections;
+  if (matches.length === 0) {
+    // No h2 headers, treat the whole content as one section
+    if (remainingContent.trim()) {
+      sections.push(remainingContent);
     }
+    return sections;
+  }
 
+  if (depth > 1) {
+    // only do this for h3 or finer
     // Add content before the first h2 header
     if (matches[0].index! > 0) {
       sections.push(remainingContent.substring(0, matches[0].index));
@@ -434,7 +439,7 @@ ${section}
     .choices[0];
 
   // Check if we hit the token limit
-  if (responseBody.stop_reason === 'max_tokens') {
+  if (responseBody.stop_reason === 'length') {
     log.warn('Translation hit token limit. Splitting into smaller chunks.');
 
     const sections = splitByHeaders(section, depth);
@@ -450,7 +455,7 @@ ${section}
 
   // strip think tags
   const translatedText = responseBody.text.replace(
-    /^<think>(.|\n)*<\/think>/gm,
+    /<think>(.|\n)*<\/think>/gm,
     '',
   );
   return translatedText;

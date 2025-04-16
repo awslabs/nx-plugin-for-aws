@@ -26,14 +26,14 @@ import gameConversationPng from '@assets/game-conversation.png'
 Assurez-vous d'avoir accordé l'accès au modèle **Anthropic Claude 3.5 Sonnet v2** en suivant les étapes décrites dans [ce guide](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html).
 </Aside>
 
-La StoryApi comprend une unique API `generate_story` qui, étant donné un `Game` et une liste d'`Action` comme contexte, fait progresser une histoire. Cette API sera implémentée comme une API de streaming en Python/FastAPI et démontrera comment adapter le code généré pour répondre aux besoins spécifiques.
+La StoryApi comprend une unique API `generate_story` qui, étant donné un `Game` et une liste d'`Action` comme contexte, fera progresser une histoire. Cette API sera implémentée comme une API de streaming en Python/FastAPI et démontrera également comment modifier le code généré pour l'adapter à son usage.
 
 ### Implémentation de l'API
 
 Pour créer notre API, nous devons d'abord installer quelques dépendances supplémentaires :
 
 - `boto3` sera utilisé pour appeler Amazon Bedrock ;
-- `uvicorn` sera utilisé pour démarrer notre API en conjonction avec le [Lambda Web Adapter (LWA)](https://github.com/awslabs/aws-lambda-web-adapter).
+- `uvicorn` sera utilisé pour démarrer notre API avec l'[Adaptateur Web Lambda (LWA)](https://github.com/awslabs/aws-lambda-web-adapter) ;
 - `copyfiles` est une dépendance npm nécessaire pour la copie multiplateforme de fichiers lors de la mise à jour de notre tâche `bundle`.
 
 Pour installer ces dépendances, exécutez les commandes suivantes :
@@ -108,21 +108,21 @@ def generate_story(request: StoryRequest) -> str:
 
 Analyse du code ci-dessus :
 
-- Nous utilisons le paramètre `x-streaming` pour indiquer qu'il s'agit d'une API de streaming lors de la génération de notre SDK client. Cela permet de consommer cette API en streaming tout en conservant le typage fort !
-- Le paramètre `x-query` indique que bien qu'il s'agisse d'une requête POST, nous la traitons comme une `query` plutôt qu'une `mutation`, permettant à TanStack Query de gérer efficacement l'état du streaming.
+- Nous utilisons le paramètre `x-streaming` pour indiquer qu'il s'agit d'une API de streaming lors de la génération du client SDK. Cela permet de consommer cette API en streaming tout en conservant le typage fort !
+- Le paramètre `x-query` indique que bien qu'il s'agisse d'une requête POST, nous la traitons comme une `query` plutôt qu'une `mutation`, exploitant ainsi pleinement la gestion des flux par TanStack Query.
 - Notre API retourne simplement un flux texte brut, comme défini par `media_type="text/plain"` et `response_class=PlainTextResponse`
 
 :::note
-À chaque modification de votre FastAPI, vous devez reconstruire votre projet pour voir les changements reflétés dans le client généré de votre site web.
+À chaque modification de votre FastAPI, vous devez reconstruire le projet pour voir les changements reflétés dans le client généré pour votre site.
 
 Nous apporterons quelques modifications supplémentaires ci-dessous avant de reconstruire.
 :::
 
 ### Infrastructure
 
-L'<Link path="get_started/tutorials/dungeon-game/1#game-ui-infrastructure">infrastructure configurée précédemment</Link> suppose que toutes les APIs utilisent API Gateway avec intégration Lambda. Pour notre `story_api`, nous voulons plutôt utiliser une [URL de fonction Lambda avec streaming de réponse](https://docs.aws.amazon.com/lambda/latest/dg/configuration-response-streaming.html).
+L'<Link path="get_started/tutorials/dungeon-game/1#game-ui-infrastructure">infrastructure configurée précédemment</Link> suppose que toutes les APIs utilisent API Gateway avec Lambda. Pour notre `story_api`, nous utilisons plutôt une [URL de fonction Lambda avec streaming de réponse](https://docs.aws.amazon.com/lambda/latest/dg/configuration-response-streaming.html).
 
-Mettons à jour nos constructions CDK comme suit :
+Mettons à jour nos constructs CDK comme suit :
 
 <Tabs>
 <TabItem label="http-api.ts">
@@ -320,7 +320,7 @@ export class StoryApi extends HttpApi {
 </TabItem>
 </Tabs>
 
-Mettons maintenant à jour la `story_api` pour supporter le [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter).
+Maintenant adaptons le déploiement de la `story_api` pour supporter le [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter) :
 
 <Tabs>
 <TabItem label="run.sh">
@@ -364,14 +364,14 @@ PATH=$PATH:$LAMBDA_TASK_ROOT/bin \
 </TabItem>
 </Tabs>
 
-### Déploiement et test
+### Déploiement et tests
 
 D'abord, compilons le codebase :
 
 <NxCommands commands={['run-many --target build --all']} />
 
 <Aside type="tip">
-Si vous rencontrez des erreurs de linting, vous pouvez exécuter cette commande pour les corriger automatiquement :
+Si vous rencontrez des erreurs de linting, exécutez cette commande pour les corriger automatiquement :
 
 <NxCommands commands={['run-many --target lint --configuration=fix --all']} />
 </Aside>
@@ -382,17 +382,17 @@ Déployez maintenant l'application avec :
 
 Ce déploiement prendra environ 2 minutes.
 
-<Drawer title="Commande de déploiement" trigger="Vous pouvez également déployer toutes les piles en une fois. Cliquez ici pour plus de détails.">
+<Drawer title="Commande de déploiement" trigger="Vous pouvez aussi déployer toutes les stacks en une fois. Cliquez pour plus de détails.">
 
-Vous pouvez déployer toutes les piles de l'application CDK avec :
+Vous pouvez déployer toutes les stacks de l'application CDK avec :
 
 <NxCommands commands={['run @dungeon-adventure/infra:deploy --all']} />
 
-Cette approche est **déconseillée** car vous pourriez souhaiter déployer des étapes séparées (comme `infra-prod`). Le flag `--all` tenterait alors de tout déployer, ce qui peut entraîner des déploiements indésirables !
+Ceci n'est **pas recommandé** car vous pourriez vouloir séparer vos environnements de déploiement (ex: `infra-prod`). Le flag `--all` tenterait alors de tout déployer, ce qui peut causer des déploiements indésirables !
 
 </Drawer>
 
-Une fois le déploiement terminé, vous devriez voir des sorties similaires à celles-ci _(certaines valeurs ont été masquées)_ :
+Une fois le déploiement terminé, vous devriez voir des sorties similaires (valeurs masquées) :
 
 ```bash
 dungeon-adventure-infra-sandbox
@@ -411,12 +411,13 @@ dungeon-adventure-infra-sandbox.UserIdentityUserIdentityIdentityPoolIdXXX = regi
 dungeon-adventure-infra-sandbox.UserIdentityUserIdentityUserPoolIdXXX = region_xxx
 ```
 
-Pour tester notre API, nous pouvons :
+Pour tester notre API :
 <ul>
-<li>Démarrer une instance locale du serveur FastAPI et appeler les APIs avec `curl`</li>
+<li>Démarrer une instance locale du serveur FastAPI et l'invoquer avec `curl`</li>
 <li>
-<Drawer title="curl avec Sigv4" trigger="Appeler l'API déployée directement avec curl signé Sigv4">
-Ajoutez ce script à votre fichier `.bashrc` (puis `source`-le) ou collez-le directement dans le terminal :
+<Drawer title="curl avec Sigv4" trigger="Appeler l'API déployée directement avec curl signé">
+Ajoutez ce script à votre `.bashrc` (puis `source`) ou collez-le dans le terminal :
+
 ```bash
 // ~/.bashrc
 acurl () {
@@ -444,10 +445,10 @@ acurl ap-southeast-2 lambda -N -X POST https://xxx
 
 <Tabs>
   <TabItem label="Local">
-  Démarrez le serveur FastAPI localement avec :
+  Démarrez le serveur FastAPI local avec :
     <NxCommands commands={["run dungeon_adventure.story_api:serve"]} />
 
-    Puis appelez l'API avec :
+    Puis invoquez-le avec :
 
     ```bash
     curl -N -X POST http://127.0.0.1:8000/story/generate \
@@ -463,7 +464,7 @@ acurl ap-southeast-2 lambda -N -X POST \
   -H "Content-Type: application/json"
 ```
     <Aside type="caution">
-    Utilisez la valeur de sortie `dungeon-adventure-infra-sandbox.StoryApiStoryApiUrlXXX` du déploiement CDK pour remplacer l'url et ajustez la région.
+    Utilisez la valeur `dungeon-adventure-infra-sandbox.StoryApiStoryApiUrlXXX` des sorties CDK pour remplacer l'URL et ajustez la région.
     </Aside>
   </TabItem>
 </Tabs>
@@ -474,4 +475,4 @@ Si la commande réussit, vous devriez voir une réponse en streaming similaire �
 UnnamedHero stood tall, his cape billowing in the wind....
 ```
 
-Félicitations. Vous avez créé et déployé votre première API avec FastAPI ! 🎉🎉🎉
+Félicitations. Vous avez déployé votre première API avec FastAPI ! 🎉🎉🎉
