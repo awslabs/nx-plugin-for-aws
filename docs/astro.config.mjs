@@ -40,7 +40,7 @@ export default defineConfig({
           label: '日本語',
         },
         ko: {
-          label: '한국인',
+          label: '한국어',
         },
         fr: {
           label: 'Français',
