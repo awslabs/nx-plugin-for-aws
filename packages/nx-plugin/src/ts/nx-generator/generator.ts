@@ -109,7 +109,7 @@ export const nxGeneratorGenerator = async (
     generateFiles(
       tree,
       joinPathFragments(__dirname, 'files', 'nx-plugin-for-aws', 'docs'),
-      joinPathFragments('docs', 'src', 'content', 'docs', 'guides'),
+      joinPathFragments('docs', 'src', 'content', 'docs', 'en', 'guides'),
       {
         ...enhancedOptions,
       },

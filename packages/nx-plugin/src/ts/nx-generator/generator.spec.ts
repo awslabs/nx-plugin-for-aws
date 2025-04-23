@@ -110,7 +110,7 @@ describe('nx-generator generator', () => {
       });
 
       // Check that the guide page exists
-      const guidePath = 'docs/src/content/docs/guides/foo-bar.mdx';
+      const guidePath = 'docs/src/content/docs/en/guides/foo-bar.mdx';
       expect(tree.exists(guidePath)).toBeTruthy();
 
       // Snapshot the guide page
