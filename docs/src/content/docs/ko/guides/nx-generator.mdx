@@ -1,0 +1,486 @@
+---
+title: "Nx 생성기 생성기"
+description: "Nx 생성기를 생성합니다"
+---
+
+
+
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Drawer from '@components/drawer.astro';
+import Link from '@components/link.astro';
+import schema from '../../../../../packages/nx-plugin/src/ts/nx-generator/schema.json';
+
+[Nx Generator](https://nx.dev/extending-nx/recipes/local-generators)를 TypeScript 프로젝트에 추가하여 컴포넌트 스캐폴딩이나 특정 프로젝트 구조 강제화와 같은 반복 작업을 자동화할 수 있습니다.
+
+## 사용법
+
+### Generator 생성하기
+
+다음 두 가지 방법으로 생성기를 만들 수 있습니다:
+
+<RunGenerator generator="ts#nx-generator" />
+
+### 옵션
+
+<GeneratorParameters schema={schema} />
+
+## 생성기 출력 결과
+
+생성기는 주어진 `pluginProject` 내에 다음 프로젝트 파일들을 생성합니다:
+
+<FileTree>
+  - src/\<name>/
+    - schema.json 생성기에 대한 입력 스키마
+    - schema.d.ts 스키마에 대한 TypeScript 타입
+    - generator.ts 생성기 구현 스텁
+    - generator.spec.ts 생성기 테스트
+  - generators.json 생성기 정의를 위한 Nx 구성
+</FileTree>
+
+## 로컬 생성기
+
+:::tip
+먼저 `ts#project` 생성기를 사용해 모든 생성기를 위한 전용 TypeScript 프로젝트를 생성하는 것을 권장합니다. 예시:
+
+<RunGenerator generator="ts#project" requiredParameters={{ name: 'nx-plugin', directory: 'tools' }} />
+:::
+
+`ts#nx-generator` 생성기를 실행할 때 로컬 `nx-plugin` 프로젝트를 선택하고 이름, 선택적 디렉토리 및 설명을 지정하세요.
+
+### 스키마 정의
+
+`schema.json` 파일은 생성기가 허용하는 옵션을 정의합니다. 이 파일은 Nx 확장 기능이 포함된 [JSON Schema](https://json-schema.org/) 형식을 따릅니다.
+
+#### 기본 구조
+
+schema.json 파일의 기본 구조는 다음과 같습니다:
+
+```json
+{
+  "$schema": "https://json-schema.org/schema",
+  "$id": "YourGeneratorName",
+  "title": "Your Generator Title",
+  "description": "Description of what your generator does",
+  "type": "object",
+  "properties": {
+    // 생성기 옵션 작성 영역
+  },
+  "required": ["requiredOption1", "requiredOption2"]
+}
+```
+
+#### 간단한 예제
+
+기본 옵션이 포함된 간단한 예제:
+
+```json
+{
+  "$schema": "https://json-schema.org/schema",
+  "$id": "ComponentGenerator",
+  "title": "Create a Component",
+  "description": "Creates a new React component",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Component name",
+      "x-priority": "important"
+    },
+    "directory": {
+      "type": "string",
+      "description": "Directory where the component will be created",
+      "default": "src/components"
+    },
+    "withTests": {
+      "type": "boolean",
+      "description": "Whether to generate test files",
+      "default": true
+    }
+  },
+  "required": ["name"]
+}
+```
+
+#### 대화형 프롬프트 (CLI)
+
+`x-prompt` 속성을 추가하여 CLI에서 생성기 실행 시 표시되는 프롬프트를 커스터마이즈할 수 있습니다:
+
+```json
+"name": {
+  "type": "string",
+  "description": "Component name",
+  "x-prompt": "What is the name of your component?"
+}
+```
+
+부울 옵션의 경우 yes/no 프롬프트 사용 가능:
+
+```json
+"withTests": {
+  "type": "boolean",
+  "description": "Whether to generate test files",
+  "x-prompt": "Would you like to generate test files?"
+}
+```
+
+#### 드롭다운 선택
+
+고정된 선택지가 있는 옵션의 경우 `enum`을 사용하여 사용자가 옵션 중 하나를 선택할 수 있게 합니다:
+
+```json
+"style": {
+  "type": "string",
+  "description": "The styling approach to use",
+  "enum": ["css", "scss", "styled-components", "none"],
+  "default": "css"
+}
+```
+
+#### 프로젝트 선택 드롭다운
+
+작업 공간의 기존 프로젝트 목록에서 선택할 수 있도록 하는 일반적인 패턴:
+
+```json
+"project": {
+  "type": "string",
+  "description": "The project to add the component to",
+  "x-prompt": "Which project would you like to add the component to?",
+  "x-dropdown": "projects"
+}
+```
+
+`x-dropdown: "projects"` 속성은 Nx에게 드롭다운을 작업 공간의 모든 프로젝트로 채우도록 지시합니다.
+
+#### 위치 인수
+
+명령줄에서 생성기를 실행할 때 위치 인수로 전달되도록 옵션을 구성할 수 있습니다:
+
+```json
+"name": {
+  "type": "string",
+  "description": "Component name",
+  "x-priority": "important",
+  "$default": {
+    "$source": "argv",
+    "index": 0
+  }
+}
+```
+
+이를 통해 사용자는 `nx g your-generator --name=my-component` 대신 `nx g your-generator my-component`로 생성기를 실행할 수 있습니다.
+
+#### 우선순위 설정
+
+`x-priority` 속성을 사용하여 가장 중요한 옵션을 표시합니다:
+
+```json
+"name": {
+  "type": "string",
+  "description": "Component name",
+  "x-priority": "important"
+}
+```
+
+옵션은 `"important"` 또는 `"internal"` 우선순위를 가질 수 있습니다. 이는 Nx VSCode 확장에서 속성 순서를 지정하는 데 도움이 됩니다.
+
+#### 기본값
+
+옵션에 기본값을 제공할 수 있습니다:
+
+```json
+"directory": {
+  "type": "string",
+  "description": "Directory where the component will be created",
+  "default": "src/components"
+}
+```
+
+#### 추가 정보
+
+스키마에 대한 자세한 내용은 [Nx Generator Options 문서](https://nx.dev/extending-nx/recipes/generator-options)를 참조하세요.
+
+#### schema.d.ts를 통한 TypeScript 타입
+
+`schema.json`과 함께 생성기는 생성기 옵션에 대한 TypeScript 타입을 제공하는 `schema.d.ts` 파일을 생성합니다:
+
+```typescript
+export interface YourGeneratorSchema {
+  name: string;
+  directory?: string;
+  withTests?: boolean;
+}
+```
+
+이 인터페이스는 타입 안전성과 코드 완성을 위해 생성기 구현에서 사용됩니다:
+
+```typescript
+import { YourGeneratorSchema } from './schema';
+
+export default async function (tree: Tree, options: YourGeneratorSchema) {
+  // TypeScript는 모든 옵션의 타입을 알고 있음
+  const { name, directory = 'src/components', withTests = true } = options;
+  // ...
+}
+```
+
+:::caution
+`schema.json`을 수정할 때마다 `schema.d.ts`를 일치하도록 업데이트해야 합니다. 다음 사항이 포함됩니다:
+
+- 속성 추가/제거
+- 속성 타입 변경
+- 속성 필수/선택 설정 (선택 속성에는 `?` 접미사 사용)
+
+TypeScript 인터페이스는 JSON 스키마에 정의된 구조를 정확히 반영해야 합니다.
+:::
+
+### 생성기 구현
+
+위에서 새 생성기를 생성한 후 `generator.ts`에서 구현을 작성할 수 있습니다.
+
+생성기는 가상 파일 시스템(`Tree`)을 변형하여 원하는 변경 사항을 만들기 위해 파일을 읽고 쓰는 함수입니다.
+
+생성기에서 수행할 수 있는 일반적인 작업 예시:
+
+#### 파일 읽기 및 쓰기
+
+```typescript
+// 파일 읽기
+const content = tree.read('path/to/file.ts', 'utf-8');
+
+// 파일 쓰기
+tree.write('path/to/new-file.ts', 'export const hello = "world";');
+
+// 파일 존재 여부 확인
+if (tree.exists('path/to/file.ts')) {
+  // 작업 수행
+}
+```
+
+#### 템플릿에서 파일 생성
+
+```typescript
+import { generateFiles, joinPathFragments } from '@nx/devkit';
+
+// 템플릿에서 파일 생성
+generateFiles(
+  tree,
+  joinPathFragments(__dirname, 'files'), // 템플릿 디렉토리
+  'path/to/output', // 출력 디렉토리
+  {
+    // 템플릿에서 치환할 변수
+    name: options.name,
+    nameCamelCase: camelCase(options.name),
+    nameKebabCase: kebabCase(options.name),
+    // 필요에 따라 변수 추가
+  },
+);
+```
+
+#### TypeScript AST(추상 구문 트리) 조작
+
+AST 조작을 위해 [TSQuery](https://github.com/phenomnomnominal/tsquery) 설치를 권장합니다.
+
+```typescript
+import { tsquery } from '@phenomnomnominal/tsquery';
+import * as ts from 'typescript';
+
+// 예제: 파일 내 버전 번호 증가
+
+// 파일 내용을 TypeScript AST로 파싱
+const sourceFile = tsquery.ast(tree.read('path/to/version.ts', 'utf-8'));
+
+// 셀렉터와 일치하는 노드 찾기
+const nodes = tsquery.query(
+  sourceFile,
+  'VariableDeclaration:has(Identifier[name="VERSION"]) NumericLiteral',
+);
+
+if (nodes.length > 0) {
+  // 숫자 리터럴 노드 가져오기
+  const numericNode = nodes[0] as ts.NumericLiteral;
+
+  // 현재 버전 번호 가져와 증가
+  const currentVersion = Number(numericNode.text);
+  const newVersion = currentVersion + 1;
+
+  // AST에서 노드 교체
+  const result = tsquery.replace(
+    sourceFile,
+    'VariableDeclaration:has(Identifier[name="VERSION"]) NumericLiteral',
+    () => ts.factory.createNumericLiteral(newVersion),
+  );
+
+  // 업데이트된 내용을 트리에 다시 쓰기
+  tree.write(
+    'path/to/version.ts',
+    ts
+      .createPrinter({
+        newLine: ts.NewLineKind.LineFeed,
+      })
+      .printNode(ts.EmitHint.Unspecified, result, sourceFile),
+  );
+}
+```
+
+:::tip
+[TSQuery Playground](https://tsquery-playground.firebaseapp.com/)에서 셀렉터를 온라인으로 테스트할 수 있습니다.
+:::
+
+#### 의존성 추가
+
+```typescript
+import { addDependenciesToPackageJson } from '@nx/devkit';
+
+// package.json에 의존성 추가
+addDependenciesToPackageJson(
+  tree,
+  {
+    'new-dependency': '^1.0.0',
+  },
+  {
+    'new-dev-dependency': '^2.0.0',
+  },
+);
+```
+
+#### 생성된 파일 포맷팅
+
+```typescript
+import { formatFiles } from '@nx/devkit';
+
+// 수정된 모든 파일 포맷팅
+await formatFiles(tree);
+```
+
+#### JSON 파일 읽기 및 업데이트
+
+```typescript
+import { readJson, updateJson } from '@nx/devkit';
+
+// JSON 파일 읽기
+const packageJson = readJson(tree, 'package.json');
+
+// JSON 파일 업데이트
+updateJson(tree, 'tsconfig.json', (json) => {
+  json.compilerOptions = {
+    ...json.compilerOptions,
+    strict: true,
+  };
+  return json;
+});
+```
+
+### 생성기 실행
+
+다음 두 가지 방법으로 생성기를 실행할 수 있습니다:
+
+<RunGenerator namespace="@my-project/nx-plugin" generator="my-generator" />
+
+:::note
+VSCode 플러그인 UI에서 생성기가 보이지 않으면 다음 명령으로 Nx 작업 공간을 새로 고침하세요:
+
+<NxCommands commands={['reset']} />
+:::
+
+### 생성기 테스트
+
+생성기에 대한 단위 테스트는 간단하게 구현할 수 있습니다. 일반적인 패턴 예시:
+
+```typescript
+import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
+import { yourGenerator } from './generator';
+
+describe('your generator', () => {
+  let tree;
+
+  beforeEach(() => {
+    // 빈 작업 공간 트리 생성
+    tree = createTreeWithEmptyWorkspace();
+
+    // 트리에 이미 존재해야 하는 파일 추가
+    tree.write(
+      'project.json',
+      JSON.stringify({
+        name: 'test-project',
+        sourceRoot: 'src',
+      }),
+    );
+
+    tree.write('src/existing-file.ts', 'export const existing = true;');
+  });
+
+  it('should generate expected files', async () => {
+    // 생성기 실행
+    await yourGenerator(tree, {
+      name: 'test',
+      // 기타 필수 옵션 추가
+    });
+
+    // 파일 생성 확인
+    expect(tree.exists('src/test/file.ts')).toBeTruthy();
+
+    // 파일 내용 확인
+    const content = tree.read('src/test/file.ts', 'utf-8');
+    expect(content).toContain('export const test');
+
+    // 스냅샷 사용 가능
+    expect(tree.read('src/test/file.ts', 'utf-8')).toMatchSnapshot();
+  });
+
+  it('should update existing files', async () => {
+    // 생성기 실행
+    await yourGenerator(tree, {
+      name: 'test',
+      // 기타 필수 옵션 추가
+    });
+
+    // 기존 파일 업데이트 확인
+    const content = tree.read('src/existing-file.ts', 'utf-8');
+    expect(content).toContain('import { test } from');
+  });
+
+  it('should handle errors', async () => {
+    // 특정 조건에서 에러 발생 예상
+    await expect(
+      yourGenerator(tree, {
+        name: 'invalid',
+        // 에러를 유발하는 옵션 추가
+      }),
+    ).rejects.toThrow('Expected error message');
+  });
+});
+```
+
+생성기 테스트 핵심 포인트:
+
+- 가상 파일 시스템 생성에 `createTreeWithEmptyWorkspace()` 사용
+- 생성기 실행 전 필수 파일 설정
+- 새 파일 생성과 기존 파일 업데이트 모두 테스트
+- 복잡한 파일 내용에 스냅샷 사용
+- 생성기가 정상적으로 실패하는지 확인하기 위한 에러 조건 테스트
+
+## @aws/nx-plugin에 생성기 기여하기
+
+`ts#nx-generator`를 사용하여 `@aws/nx-plugin` 내부에 생성기 스캐폴딩을 할 수 있습니다.
+
+이 생성기를 저장소에서 실행하면 다음 파일들이 생성됩니다:
+
+<FileTree>
+  - packages/nx-plugin/src/\<name>/
+    - schema.json 생성기에 대한 입력 스키마
+    - schema.d.ts 스키마에 대한 TypeScript 타입
+    - generator.ts 생성기 구현
+    - generator.spec.ts 생성기 테스트
+  - docs/src/content/docs/guides/
+    - \<name>.mdx 생성기 문서 페이지
+  - packages/nx-plugin/generators.json 생성기 포함하도록 업데이트됨
+</FileTree>
+
+이제 생성기 구현을 시작할 수 있습니다.
+
+:::tip
+AWS용 Nx 플러그인에 기여하는 방법에 대한 자세한 가이드는 <Link path="get_started/tutorials/contribute-generator">여기 튜토리얼</Link>을 참조하세요.
+:::

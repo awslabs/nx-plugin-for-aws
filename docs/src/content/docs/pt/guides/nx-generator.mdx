@@ -1,0 +1,486 @@
+---
+title: "Gerador de Gerador do Nx"
+description: "Gera um Gerador do Nx"
+---
+
+
+
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Drawer from '@components/drawer.astro';
+import Link from '@components/link.astro';
+import schema from '../../../../../packages/nx-plugin/src/ts/nx-generator/schema.json';
+
+Adiciona um [Nx Generator](https://nx.dev/extending-nx/recipes/local-generators) a um projeto TypeScript, para ajudar a automatizar tarefas repetitivas como a criação de componentes ou a imposição de estruturas de projeto específicas.
+
+## Utilização
+
+### Gerar um Generator
+
+Você pode gerar um generator de duas formas:
+
+<RunGenerator generator="ts#nx-generator" />
+
+### Opções
+
+<GeneratorParameters schema={schema} />
+
+## Saída do Generator
+
+O generator criará os seguintes arquivos no projeto especificado em `pluginProject`:
+
+<FileTree>
+  - src/\<name>/
+    - schema.json Esquema para entrada do generator
+    - schema.d.ts Tipos TypeScript para o esquema
+    - generator.ts Implementação inicial do generator
+    - generator.spec.ts Testes para o generator
+  - generators.json Configuração Nx para definir seus generators
+</FileTree>
+
+## Generators Locais
+
+:::tip
+Recomendamos gerar um projeto TypeScript dedicado para todos os seus generators usando o generator `ts#project` primeiro. Por exemplo:
+
+<RunGenerator generator="ts#project" requiredParameters={{ name: 'nx-plugin', directory: 'tools' }} />
+:::
+
+Selecione seu projeto local `nx-plugin` ao executar o generator `ts#nx-generator`, e especifique um nome, diretório opcional e descrição.
+
+### Definindo o Esquema
+
+O arquivo `schema.json` define as opções que seu generator aceita. Ele segue o formato [JSON Schema](https://json-schema.org/) com extensões específicas do Nx.
+
+#### Estrutura Básica
+
+Um arquivo schema.json possui a seguinte estrutura básica:
+
+```json
+{
+  "$schema": "https://json-schema.org/schema",
+  "$id": "YourGeneratorName",
+  "title": "Your Generator Title",
+  "description": "Description of what your generator does",
+  "type": "object",
+  "properties": {
+    // Suas opções do generator aqui
+  },
+  "required": ["requiredOption1", "requiredOption2"]
+}
+```
+
+#### Exemplo Simples
+
+Aqui está um exemplo simples com algumas opções básicas:
+
+```json
+{
+  "$schema": "https://json-schema.org/schema",
+  "$id": "ComponentGenerator",
+  "title": "Create a Component",
+  "description": "Creates a new React component",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Component name",
+      "x-priority": "important"
+    },
+    "directory": {
+      "type": "string",
+      "description": "Directory where the component will be created",
+      "default": "src/components"
+    },
+    "withTests": {
+      "type": "boolean",
+      "description": "Whether to generate test files",
+      "default": true
+    }
+  },
+  "required": ["name"]
+}
+```
+
+#### Prompts Interativos (CLI)
+
+Você pode personalizar os prompts exibidos ao executar seu generator via CLI adicionando a propriedade `x-prompt`:
+
+```json
+"name": {
+  "type": "string",
+  "description": "Component name",
+  "x-prompt": "What is the name of your component?"
+}
+```
+
+Para opções booleanas, você pode usar um prompt sim/não:
+
+```json
+"withTests": {
+  "type": "boolean",
+  "description": "Whether to generate test files",
+  "x-prompt": "Would you like to generate test files?"
+}
+```
+
+#### Seleções em Dropdown
+
+Para opções com um conjunto fixo de escolhas, use `enum` para que os usuários possam selecionar uma das opções.
+
+```json
+"style": {
+  "type": "string",
+  "description": "The styling approach to use",
+  "enum": ["css", "scss", "styled-components", "none"],
+  "default": "css"
+}
+```
+
+#### Dropdown de Seleção de Projeto
+
+Um padrão comum é permitir que os usuários selecionem entre projetos existentes no workspace:
+
+```json
+"project": {
+  "type": "string",
+  "description": "The project to add the component to",
+  "x-prompt": "Which project would you like to add the component to?",
+  "x-dropdown": "projects"
+}
+```
+
+A propriedade `x-dropdown: "projects"` instrui o Nx a preencher o dropdown com todos os projetos do workspace.
+
+#### Argumentos Posicionais
+
+Você pode configurar opções para serem passadas como argumentos posicionais ao executar o generator pela linha de comando:
+
+```json
+"name": {
+  "type": "string",
+  "description": "Component name",
+  "x-priority": "important",
+  "$default": {
+    "$source": "argv",
+    "index": 0
+  }
+}
+```
+
+Isso permite que os usuários executem seu generator como `nx g your-generator my-component` em vez de `nx g your-generator --name=my-component`.
+
+#### Definindo Prioridades
+
+Use a propriedade `x-priority` para indicar quais opções são mais importantes:
+
+```json
+"name": {
+  "type": "string",
+  "description": "Component name",
+  "x-priority": "important"
+}
+```
+
+As opções podem ter prioridades `"important"` ou `"internal"`. Isso ajuda o Nx a ordenar as propriedades na extensão VSCode do Nx.
+
+#### Valores Padrão
+
+Você pode fornecer valores padrão para as opções:
+
+```json
+"directory": {
+  "type": "string",
+  "description": "Directory where the component will be created",
+  "default": "src/components"
+}
+```
+
+#### Mais Informações
+
+Para mais detalhes sobre esquemas, consulte a [documentação de Opções do Generator Nx](https://nx.dev/extending-nx/recipes/generator-options).
+
+#### Tipos TypeScript com schema.d.ts
+
+Junto com `schema.json`, o generator cria um arquivo `schema.d.ts` que fornece tipos TypeScript para as opções do generator:
+
+```typescript
+export interface YourGeneratorSchema {
+  name: string;
+  directory?: string;
+  withTests?: boolean;
+}
+```
+
+Esta interface é usada na implementação do generator para fornecer segurança de tipos e autocompletar:
+
+```typescript
+import { YourGeneratorSchema } from './schema';
+
+export default async function (tree: Tree, options: YourGeneratorSchema) {
+  // O TypeScript conhece os tipos de todas as opções
+  const { name, directory = 'src/components', withTests = true } = options;
+  // ...
+}
+```
+
+:::caution
+Sempre que modificar o `schema.json`, você deve atualizar o `schema.d.ts` para corresponder. Isso inclui:
+
+- Adicionar ou remover propriedades
+- Alterar tipos de propriedades
+- Tornar propriedades obrigatórias ou opcionais (use o sufixo `?` para propriedades opcionais)
+
+A interface TypeScript deve refletir com precisão a estrutura definida em seu schema JSON.
+:::
+
+### Implementando um Generator
+
+Após criar o novo generator como acima, você pode escrever sua implementação em `generator.ts`.
+
+Um generator é uma função que modifica um sistema de arquivos virtual (a `Tree`), lendo e escrevendo arquivos para realizar as alterações desejadas.
+
+Aqui estão algumas operações comuns que você pode querer realizar em seu generator:
+
+#### Lendo e Escrevendo Arquivos
+
+```typescript
+// Ler um arquivo
+const content = tree.read('path/to/file.ts', 'utf-8');
+
+// Escrever um arquivo
+tree.write('path/to/new-file.ts', 'export const hello = "world";');
+
+// Verificar se um arquivo existe
+if (tree.exists('path/to/file.ts')) {
+  // Fazer algo
+}
+```
+
+#### Gerando Arquivos a partir de Templates
+
+```typescript
+import { generateFiles, joinPathFragments } from '@nx/devkit';
+
+// Gerar arquivos a partir de templates
+generateFiles(
+  tree,
+  joinPathFragments(__dirname, 'files'), // Diretório do template
+  'path/to/output', // Diretório de saída
+  {
+    // Variáveis para substituir nos templates
+    name: options.name,
+    nameCamelCase: camelCase(options.name),
+    nameKebabCase: kebabCase(options.name),
+    // Adicione mais variáveis conforme necessário
+  },
+);
+```
+
+#### Manipulação de AST (Abstract Syntax Tree) TypeScript
+
+Recomendamos instalar o [TSQuery](https://github.com/phenomnomnominal/tsquery) para ajudar na manipulação de AST.
+
+```typescript
+import { tsquery } from '@phenomnomnominal/tsquery';
+import * as ts from 'typescript';
+
+// Exemplo: Incrementar número de versão em um arquivo
+
+// Parsear o conteúdo do arquivo em uma AST TypeScript
+const sourceFile = tsquery.ast(tree.read('path/to/version.ts', 'utf-8'));
+
+// Encontrar nós correspondentes ao seletor
+const nodes = tsquery.query(
+  sourceFile,
+  'VariableDeclaration:has(Identifier[name="VERSION"]) NumericLiteral',
+);
+
+if (nodes.length > 0) {
+  // Obter o nó do literal numérico
+  const numericNode = nodes[0] as ts.NumericLiteral;
+
+  // Obter o número da versão atual e incrementá-lo
+  const currentVersion = Number(numericNode.text);
+  const newVersion = currentVersion + 1;
+
+  // Substituir o nó na AST
+  const result = tsquery.replace(
+    sourceFile,
+    'VariableDeclaration:has(Identifier[name="VERSION"]) NumericLiteral',
+    () => ts.factory.createNumericLiteral(newVersion),
+  );
+
+  // Escrever o conteúdo atualizado de volta na tree
+  tree.write(
+    'path/to/version.ts',
+    ts
+      .createPrinter({
+        newLine: ts.NewLineKind.LineFeed,
+      })
+      .printNode(ts.EmitHint.Unspecified, result, sourceFile),
+  );
+}
+```
+
+:::tip
+Você pode testar seletores online no [TSQuery Playground](https://tsquery-playground.firebaseapp.com/).
+:::
+
+#### Adicionando Dependências
+
+```typescript
+import { addDependenciesToPackageJson } from '@nx/devkit';
+
+// Adicionar dependências ao package.json
+addDependenciesToPackageJson(
+  tree,
+  {
+    'new-dependency': '^1.0.0',
+  },
+  {
+    'new-dev-dependency': '^2.0.0',
+  },
+);
+```
+
+#### Formatando Arquivos Gerados
+
+```typescript
+import { formatFiles } from '@nx/devkit';
+
+// Formatartodos os arquivos modificados
+await formatFiles(tree);
+```
+
+#### Lendo e Atualizando Arquivos JSON
+
+```typescript
+import { readJson, updateJson } from '@nx/devkit';
+
+// Ler um arquivo JSON
+const packageJson = readJson(tree, 'package.json');
+
+// Atualizar um arquivo JSON
+updateJson(tree, 'tsconfig.json', (json) => {
+  json.compilerOptions = {
+    ...json.compilerOptions,
+    strict: true,
+  };
+  return json;
+});
+```
+
+### Executando Seu Generator
+
+Você pode executar seu generator de duas formas:
+
+<RunGenerator namespace="@my-project/nx-plugin" generator="my-generator" />
+
+:::note
+Se você não vir seu generator na interface do plugin VSCode, pode atualizar seu Nx Workspace com:
+
+<NxCommands commands={['reset']} />
+:::
+
+### Testando Seu Generator
+
+Testes unitários para generators são simples de implementar. Aqui está um padrão típico:
+
+```typescript
+import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
+import { yourGenerator } from './generator';
+
+describe('your generator', () => {
+  let tree;
+
+  beforeEach(() => {
+    // Criar uma tree de workspace vazia
+    tree = createTreeWithEmptyWorkspace();
+
+    // Adicionar arquivos que devem existir previamente
+    tree.write(
+      'project.json',
+      JSON.stringify({
+        name: 'test-project',
+        sourceRoot: 'src',
+      }),
+    );
+
+    tree.write('src/existing-file.ts', 'export const existing = true;');
+  });
+
+  it('should generate expected files', async () => {
+    // Executar o generator
+    await yourGenerator(tree, {
+      name: 'test',
+      // Adicionar outras opções necessárias
+    });
+
+    // Verificar criação de arquivos
+    expect(tree.exists('src/test/file.ts')).toBeTruthy();
+
+    // Verificar conteúdo do arquivo
+    const content = tree.read('src/test/file.ts', 'utf-8');
+    expect(content).toContain('export const test');
+
+    // Você também pode usar snapshots
+    expect(tree.read('src/test/file.ts', 'utf-8')).toMatchSnapshot();
+  });
+
+  it('should update existing files', async () => {
+    // Executar o generator
+    await yourGenerator(tree, {
+      name: 'test',
+      // Adicionar outras opções necessárias
+    });
+
+    // Verificar atualização de arquivos existentes
+    const content = tree.read('src/existing-file.ts', 'utf-8');
+    expect(content).toContain('import { test } from');
+  });
+
+  it('should handle errors', async () => {
+    // Esperar que o generator lance um erro em certas condições
+    await expect(
+      yourGenerator(tree, {
+        name: 'invalid',
+        // Adicionar opções que devem causar erro
+      }),
+    ).rejects.toThrow('Expected error message');
+  });
+});
+```
+
+Pontos-chave para testar generators:
+
+- Use `createTreeWithEmptyWorkspace()` para criar um sistema de arquivos virtual
+- Configure arquivos pré-existentes antes de executar o generator
+- Teste a criação de novos arquivos e atualizações de arquivos existentes
+- Use snapshots para conteúdos complexos
+- Teste condições de erro para garantir falhas controladas
+
+## Contribuindo com Generators para @aws/nx-plugin
+
+Você também pode usar `ts#nx-generator` para criar a estrutura de um generator dentro de `@aws/nx-plugin`.
+
+Quando este generator é executado em nosso repositório, ele gerará os seguintes arquivos:
+
+<FileTree>
+  - packages/nx-plugin/src/\<name>/
+    - schema.json Esquema para entrada do generator
+    - schema.d.ts Tipos TypeScript para o esquema
+    - generator.ts Implementação do generator
+    - generator.spec.ts Testes para o generator
+  - docs/src/content/docs/guides/
+    - \<name>.mdx Página de documentação para seu generator
+  - packages/nx-plugin/generators.json Atualizado para incluir seu generator
+</FileTree>
+
+Você pode então começar a implementar seu generator.
+
+:::tip
+Para um guia mais detalhado sobre como contribuir para o Nx Plugin para AWS, consulte o <Link path="get_started/tutorials/contribute-generator">tutorial aqui</Link>.
+:::
