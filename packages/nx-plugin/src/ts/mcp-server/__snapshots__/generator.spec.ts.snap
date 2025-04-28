@@ -1,0 +1,330 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ts#mcp-server generator > should match snapshot > mcp-server-files 1`] = `
+{
+  "test-server/README.md": "# test-server
+
+This package defines a Model Context Protocol (MCP) Server in TypeScript.
+
+## What is MCP?
+
+The Model Context Protocol (MCP) is a standardized protocol for providing context to Large Language Models (LLMs). It allows AI assistants to access external tools and resources through a consistent interface.
+
+## Documentation
+
+- [Model Context Protocol Documentation](https://modelcontextprotocol.io/)
+- [MCP TypeScript SDK Documentation](https://github.com/modelcontextprotocol/sdk-typescript)
+
+## Developer Guide
+
+### Getting Started
+
+This MCP server is built using the MCP TypeScript SDK. Here's how to work with it:
+
+1. **Server Structure**: The main server code is in \`src/server.ts\`. This file defines the server, its tools, and resources.
+
+2. **Adding Tools**: Tools are functions that the LLM can call to perform actions. Add new tools using the \`server.tool()\` method:
+
+\`\`\`typescript
+server.tool(
+  'toolName',
+  { param1: z.string(), param2: z.number() }, // Input schema using Zod
+  async ({ param1, param2 }) => {
+    // Tool implementation
+    return {
+      content: [{ type: 'text', text: 'Result' }],
+    };
+  },
+);
+\`\`\`
+
+3. **Adding Resources**: Resources provide context to the LLM. You can add static resources from files or dynamic resources:
+
+\`\`\`typescript
+// Static resource from a file
+import resourceContent from './resources/my-resource.md';
+
+server.resource('resource-name', 'example://resource', async (uri) => ({
+  contents: [{ uri: uri.href, text: resourceContent }],
+}));
+
+// Dynamic resource
+server.resource('dynamic-resource', 'dynamic://resource', async (uri) => {
+  const data = await fetchSomeData();
+  return {
+    contents: [{ uri: uri.href, text: data }],
+  };
+});
+\`\`\`
+
+### Building the Server
+
+To build the server for use with AI assistants:
+
+\`\`\`bash
+nx run <project-name>:bundle
+\`\`\`
+
+This creates a bundled version of your server in \`dist/<project-path>/bundle/index.js\`.
+
+## Using with AI Assistants
+
+To use your MCP server with AI assistants, you need to build it first to create the bundle:
+
+\`\`\`bash
+nx run <project-name>:bundle
+\`\`\`
+
+### Configuration
+
+Most AI assistants (Amazon Q Developer CLI, Cline, Cursor, Claude Code, etc.) use a similar configuration approach. You'll need to create or update a configuration file with your MCP server details:
+
+\`\`\`json
+{
+  "mcpServers": {
+    "test-server": {
+      "command": "node",
+      "args": ["/path/to/workspace/dist/test-server/bundle/index.js"],
+      "transportType": "stdio"
+    }
+  }
+}
+\`\`\`
+
+Replace \`/path/to/workspace/dist/test-server/bundle/index.js\` with the actual path to your bundled MCP server.
+
+Note that if you receive an error due to \`node\` missing (eg \`ENOENT node\`), you might need to specify the full path to \`node\` which you can obtain by running \`which node\`.
+
+### Development Mode
+
+During development, you can use the \`dev\` target to continuously rebuild the bundle whenever you make changes:
+
+\`\`\`bash
+nx run <project-name>:dev
+\`\`\`
+
+This will watch for changes in your project files and automatically rebuild the bundle.
+
+Whenever you've made changes, you'll need to restart the MCP server in your AI assistant to test it out. The exact process depends on the assistant, but generally:
+
+1. Find your MCP server in the assistant's settings or configuration
+2. Look for a "Restart" or "Reload" option
+",
+  "test-server/eslint.config.mjs": "import baseConfig from '../eslint.config.mjs';
+
+export default [
+  ...baseConfig,
+  {
+    files: ['**/*.json'],
+    rules: {
+      '@nx/dependency-checks': [
+        'error',
+        {
+          ignoredFiles: [
+            '{projectRoot}/eslint.config.{js,cjs,mjs}',
+            '{projectRoot}/vite.config.{js,ts,mjs,mts}',
+          ],
+        },
+      ],
+    },
+    languageOptions: {
+      parser: await import('jsonc-eslint-parser'),
+    },
+  },
+];
+",
+  "test-server/project.json": "{
+  "name": "@proj/test-server",
+  "$schema": "../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "test-server/src",
+  "projectType": "library",
+  "tags": [],
+  "targets": {
+    "build": {
+      "dependsOn": ["lint", "compile", "test", "bundle"]
+    },
+    "compile": {
+      "executor": "nx:run-commands",
+      "outputs": ["{workspaceRoot}/dist/test-server/tsc"],
+      "options": {
+        "command": "tsc --build tsconfig.lib.json",
+        "cwd": "{projectRoot}"
+      }
+    },
+    "test": {
+      "executor": "@nx/vite:test",
+      "outputs": ["{options.reportsDirectory}"],
+      "options": {
+        "reportsDirectory": "../coverage/test-server"
+      }
+    },
+    "bundle": {
+      "executor": "nx:run-commands",
+      "options": {
+        "commands": [
+          "esbuild \\"test-server/src/index.ts\\" --bundle --platform=node --format=esm --loader:.md=text --outfile=dist/test-server/bundle/index.js"
+        ]
+      }
+    },
+    "dev": {
+      "executor": "nx:run-commands",
+      "options": {
+        "commands": [
+          "nx watch --projects=@proj/test-server --includeDependentProjects -- nx run @proj/test-server:bundle"
+        ]
+      }
+    }
+  }
+}
+",
+  "test-server/src/global.d.ts": "declare module '*.md' {
+  const content: string;
+  export default content;
+}
+",
+  "test-server/src/index.ts": "import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { createServer } from './server.js';
+
+// Start receiving messages on stdin and sending messages on stdout
+const transport = new StdioServerTransport();
+await createServer().connect(transport);
+",
+  "test-server/src/resources/example-context.md": "## Example Context
+
+This is some example context in a markdown file!
+",
+  "test-server/src/server.ts": "import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { z } from 'zod';
+import exampleContext from './resources/example-context.md';
+
+/**
+ * Create the MCP Server
+ */
+export const createServer = () => {
+  const server = new McpServer({
+    name: 'test-server',
+    version: '1.0.0',
+  });
+
+  // Add an addition tool
+  server.tool('add', { a: z.number(), b: z.number() }, async ({ a, b }) => ({
+    content: [{ type: 'text', text: String(a + b) }],
+  }));
+
+  // Add a resource which provides context from a markdown file
+  server.resource('example-context', 'example://context', async (uri) => ({
+    contents: [{ uri: uri.href, text: exampleContext }],
+  }));
+
+  return server;
+};
+",
+  "test-server/tsconfig.json": "{
+  "extends": "../tsconfig.base.json",
+  "files": [],
+  "include": [],
+  "references": [
+    {
+      "path": "./tsconfig.lib.json"
+    },
+    {
+      "path": "./tsconfig.spec.json"
+    }
+  ],
+  "nx": {
+    "addTypecheckTarget": false
+  },
+  "compilerOptions": {}
+}
+",
+  "test-server/tsconfig.lib.json": "{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "../dist/test-server/tsc",
+    "tsBuildInfoFile": "../dist/test-server/tsc/tsconfig.lib.tsbuildinfo",
+    "emitDeclarationOnly": false,
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts"],
+  "references": [],
+  "exclude": [
+    "vite.config.ts",
+    "vite.config.mts",
+    "vitest.config.ts",
+    "vitest.config.mts",
+    "src/**/*.test.ts",
+    "src/**/*.spec.ts",
+    "src/**/*.test.tsx",
+    "src/**/*.spec.tsx",
+    "src/**/*.test.js",
+    "src/**/*.spec.js",
+    "src/**/*.test.jsx",
+    "src/**/*.spec.jsx"
+  ]
+}
+",
+  "test-server/tsconfig.spec.json": "{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./out-tsc/vitest",
+    "types": [
+      "vitest/globals",
+      "vitest/importMeta",
+      "vite/client",
+      "node",
+      "vitest"
+    ],
+    "module": "nodenext",
+    "moduleResolution": "nodenext"
+  },
+  "include": [
+    "vite.config.ts",
+    "vite.config.mts",
+    "vitest.config.ts",
+    "vitest.config.mts",
+    "src/**/*.test.ts",
+    "src/**/*.spec.ts",
+    "src/**/*.test.tsx",
+    "src/**/*.spec.tsx",
+    "src/**/*.test.js",
+    "src/**/*.spec.js",
+    "src/**/*.test.jsx",
+    "src/**/*.spec.jsx",
+    "src/**/*.d.ts"
+  ],
+  "references": [
+    {
+      "path": "./tsconfig.lib.json"
+    }
+  ]
+}
+",
+  "test-server/vite.config.ts": "import { defineConfig } from 'vite';
+
+export default defineConfig(() => ({
+  root: __dirname,
+  cacheDir: '../node_modules/.vite/test-server',
+  plugins: [],
+  // Uncomment this if you are using workers.
+  // worker: {
+  //  plugins: [ nxViteTsPaths() ],
+  // },
+  test: {
+    watch: false,
+    globals: true,
+    environment: 'jsdom',
+    include: ['src/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'],
+    reporters: ['default'],
+    coverage: {
+      reportsDirectory: './test-output/vitest/coverage',
+      provider: 'v8' as const,
+    },
+    passWithNoTests: true,
+  },
+}));
+",
+}
+`;

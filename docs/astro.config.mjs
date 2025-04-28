@@ -243,6 +243,7 @@ export default defineConfig({
               link: '/guides/cloudscape-website-auth',
             },
             { label: 'ts#nx-generator', link: '/guides/nx-generator' },
+            { label: 'ts#mcp-server', link: '/guides/ts-mcp-server' },
             { label: 'py#project', link: '/guides/python-project' },
             { label: 'py#fast-api', link: '/guides/fastapi' },
             {

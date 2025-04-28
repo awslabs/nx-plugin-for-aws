@@ -75,6 +75,9 @@ export const smokeTest = (
         `generate @aws/nx-plugin:api-connection --sourceProject=@e2e-test/website --targetProject=e_2_e_test.py_api --no-interactive`,
         opts,
       );
+      await runCLI(
+        `generate @aws/nx-plugin:ts#mcp-server --name=my-mcp-server --no-interactive`,
+      );
       await runCLI(`generate @aws/nx-plugin:license --no-interactive`, opts);
 
       await runCLI(
