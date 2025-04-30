@@ -1,0 +1,166 @@
+---
+title: "ts#mcp-서버"
+description: "대규모 언어 모델에 컨텍스트를 제공하기 위한 TypeScript 모델 컨텍스트 프로토콜(MCP) 서버 생성"
+---
+
+
+
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Link from '@components/link.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import schema from '../../../../../../packages/nx-plugin/src/ts/mcp-server/schema.json';
+
+# TypeScript MCP 서버 생성기
+
+대규모 언어 모델(LLM)에 컨텍스트를 제공하기 위한 TypeScript [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) 서버를 생성합니다.
+
+## MCP란?
+
+[Model Context Protocol (MCP)](https://modelcontextprotocol.io/)는 AI 어시스턴트가 외부 도구 및 리소스와 상호 작용할 수 있도록 하는 오픈 표준입니다. LLM이 다음을 수행할 수 있는 일관된 방법을 제공합니다:
+
+- 작업 수행 또는 정보 검색을 위한 도구(함수) 실행
+- 컨텍스트 또는 데이터를 제공하는 리소스 접근
+
+## 사용 방법
+
+### MCP 서버 생성
+
+TypeScript MCP 서버를 두 가지 방법으로 생성할 수 있습니다:
+
+<RunGenerator generator="ts#mcp-server" />
+
+### 옵션
+
+<GeneratorParameters schema={schema} />
+
+## 생성기 출력 결과
+
+생성기는 다음 프로젝트 파일들을 생성합니다:
+
+<FileTree>
+  - packages/\<name>/
+    - README.md 사용 방법 설명이 포함된 MCP 서버 문서
+    - project.json 빌드, 번들링, 개발 타겟을 포함한 Nx 프로젝트 설정
+    - src/
+      - index.ts MCP 서버 진입점
+      - server.ts 도구와 리소스를 정의하는 메인 서버 파일
+      - global.d.ts 마크다운 파일 임포트를 위한 TypeScript 타입 선언
+      - resources/
+        - example-context.md MCP 서버 리소스로 사용되는 예시 마크다운 파일
+</FileTree>
+
+:::note
+생성기 출력에 대한 자세한 내용은 <Link path="/guides/typescript-project">TypeScript 프로젝트 생성기 문서</Link>를 참조하세요.
+:::
+
+## MCP 서버 작업하기
+
+### 도구 추가하기
+
+도구는 AI 어시스턴트가 호출할 수 있는 동작 수행 함수입니다. `server.ts` 파일에 새 도구를 추가할 수 있습니다:
+
+```typescript
+server.tool("toolName",
+  { param1: z.string(), param2: z.number() }, // Zod를 사용한 입력 스키마
+  async ({ param1, param2 }) => {
+    // 도구 구현부
+    return {
+      content: [{ type: "text", text: "Result" }]
+    };
+  }
+);
+```
+
+### 리소스 추가하기
+
+리소스는 AI 어시스턴트에 컨텍스트를 제공합니다. 파일에서 정적 리소스나 동적 리소스를 추가할 수 있습니다:
+
+```typescript
+// 파일에서 가져온 정적 리소스
+import resourceContent from './resources/my-resource.md';
+
+server.resource('resource-name', 'example://resource', async (uri) => ({
+  contents: [{ uri: uri.href, text: resourceContent }],
+}));
+
+// 동적 리소스
+server.resource('dynamic-resource', 'dynamic://resource', async (uri) => {
+  const data = await fetchSomeData();
+  return {
+    contents: [{ uri: uri.href, text: data }],
+  };
+});
+```
+
+## AI 어시스턴트와 연동 설정
+
+MCP 서버를 AI 어시스턴트와 사용하려면 먼저 번들링해야 합니다:
+
+<NxCommands commands={['run your-mcp-server:bundle']} />
+
+이 명령은 `dist/packages/your-mcp-server/bundle/index.js` 경로에 번들 버전을 생성합니다 (디렉토리 설정에 따라 경로가 다를 수 있음).
+
+### 설정 파일
+
+MCP를 지원하는 대부분의 AI 어시스턴트는 유사한 설정 방식을 사용합니다. MCP 서버 정보가 포함된 설정 파일을 생성하거나 업데이트해야 합니다:
+
+```json
+{
+  "mcpServers": {
+    "your-mcp-server": {
+      "command": "node",
+      "args": [
+        "/path/to/workspace/dist/packages/your-mcp-server/bundle/index.js"
+      ],
+      "transportType": "stdio"
+    }
+  }
+}
+```
+
+`/path/to/workspace/dist/packages/your-mcp-server/bundle/index.js`를 실제 번들링된 MCP 서버 경로로 변경하세요.
+
+:::caution
+서버 연결 시 `ENOENT node` 오류가 발생하면 터미널에서 `which node` 명령으로 확인한 전체 node 경로를 지정해야 할 수 있습니다.
+:::
+
+### 어시스턴트별 설정
+
+특정 AI 어시스턴트와의 MCP 연동 설정은 다음 문서를 참조하세요:
+
+- [Amazon Q Developer](https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/command-line-mcp-configuration.html)
+- [Cline](https://docs.cline.bot/mcp-servers/configuring-mcp-servers)
+- [Cursor](https://docs.cursor.com/context/model-context-protocol)
+- [Claude Code](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/tutorials#set-up-model-context-protocol-mcp)
+
+:::tip
+Amazon Q Developer와 같은 일부 AI 어시스턴트는 워크스페이스 수준 MCP 서버 설정을 지원하여 특정 프로젝트와 관련된 MCP 서버를 정의하는 데 유용합니다.
+:::
+
+## 개발 워크플로우
+
+### 빌드 타겟
+
+이 생성기는 <Link path="/guides/typescript-project">TypeScript 프로젝트 생성기</Link>를 기반으로 하며 해당 타겟을 상속받고 다음과 같은 추가 타겟을 제공합니다:
+
+#### 번들
+
+`bundle` 타겟은 [esbuild](https://esbuild.github.io/)를 사용하여 AI 어시스턴트와 함께 사용할 수 있는 단일 JavaScript 번들 파일을 생성합니다:
+
+<NxCommands commands={['run your-mcp-server:bundle']} />
+
+이 명령은 `dist/packages/your-mcp-server/bundle/index.js` 경로에 번들 버전을 생성합니다 (디렉토리 설정에 따라 경로가 다를 수 있음).
+
+#### 개발
+
+`dev` 타겟은 프로젝트 변경 사항을 감지하고 자동으로 번들을 재빌드합니다:
+
+<NxCommands commands={['run your-mcp-server:dev']} />
+
+이 기능은 개발 중에 AI 어시스턴트가 최신 버전의 MCP 서버를 사용하도록 보장해주므로 특히 유용합니다.
+
+:::note
+일부 AI 어시스턴트는 변경 사항 적용을 위해 MCP 서버 재시작이 필요할 수 있습니다.
+:::

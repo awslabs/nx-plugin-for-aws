@@ -1,0 +1,166 @@
+---
+title: "ts#mcp-server"
+description: "Generar un servidor de Protocolo de Contexto de Modelo (MCP) de TypeScript para proporcionar contexto a Modelos de Lenguaje de Gran Escala"
+---
+
+
+
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Link from '@components/link.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import schema from '../../../../../../packages/nx-plugin/src/ts/mcp-server/schema.json';
+
+# Generador de Servidor MCP en TypeScript
+
+Genera un servidor [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) en TypeScript para proveer contexto a Modelos de Lenguaje Grandes (LLMs).
+
+## ¿Qué es MCP?
+
+El [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) es un estándar abierto que permite a asistentes de IA interactuar con herramientas y recursos externos. Proporciona una forma consistente para que los LLMs puedan:
+
+- Ejecutar herramientas (funciones) que realizan acciones o recuperan información
+- Acceder a recursos que proveen contexto o datos
+
+## Uso
+
+### Generar un servidor MCP
+
+Puedes generar un servidor MCP en TypeScript de dos formas:
+
+<RunGenerator generator="ts#mcp-server" />
+
+### Opciones
+
+<GeneratorParameters schema={schema} />
+
+## Salida del Generador
+
+El generador creará los siguientes archivos de proyecto:
+
+<FileTree>
+  - packages/\<name>/
+    - README.md Documentación para el servidor MCP con instrucciones de uso
+    - project.json Configuración de proyecto Nx con objetivos de build, bundle y dev
+    - src/
+      - index.ts Punto de entrada del servidor MCP
+      - server.ts Definición principal del servidor, incluyendo herramientas y recursos
+      - global.d.ts Declaraciones de tipos TypeScript para importar archivos markdown
+      - resources/
+        - example-context.md Archivo markdown de ejemplo usado como recurso para el servidor MCP
+</FileTree>
+
+:::note
+Consulta la <Link path="/guides/typescript-project">documentación del generador de proyectos TypeScript</Link> para más detalles sobre la salida del generador.
+:::
+
+## Trabajando con tu Servidor MCP
+
+### Añadiendo Herramientas
+
+Las herramientas son funciones que el asistente de IA puede ejecutar para realizar acciones. Puedes añadir nuevas herramientas en el archivo `server.ts`:
+
+```typescript
+server.tool("toolName",
+  { param1: z.string(), param2: z.number() }, // Esquema de entrada usando Zod
+  async ({ param1, param2 }) => {
+    // Implementación de la herramienta
+    return {
+      content: [{ type: "text", text: "Resultado" }]
+    };
+  }
+);
+```
+
+### Añadiendo Recursos
+
+Los recursos proveen contexto al asistente de IA. Puedes añadir recursos estáticos desde archivos o recursos dinámicos:
+
+```typescript
+// Recurso estático desde archivo
+import resourceContent from './resources/my-resource.md';
+
+server.resource('nombre-recurso', 'example://recurso', async (uri) => ({
+  contents: [{ uri: uri.href, text: resourceContent }],
+}));
+
+// Recurso dinámico
+server.resource('recurso-dinamico', 'dynamic://recurso', async (uri) => {
+  const data = await obtenerDatos();
+  return {
+    contents: [{ uri: uri.href, text: data }],
+  };
+});
+```
+
+## Configuración con Asistentes de IA
+
+Para usar tu servidor MCP con asistentes de IA, primero debes crear un bundle:
+
+<NxCommands commands={['run your-mcp-server:bundle']} />
+
+Esto crea una versión empaquetada en `dist/packages/your-mcp-server/bundle/index.js` (la ruta puede variar según tu configuración de directorios).
+
+### Archivos de Configuración
+
+La mayoría de asistentes de IA que soportan MCP usan un enfoque similar de configuración. Necesitarás crear o actualizar un archivo de configuración con los detalles de tu servidor MCP:
+
+```json
+{
+  "mcpServers": {
+    "your-mcp-server": {
+      "command": "node",
+      "args": [
+        "/ruta/al/workspace/dist/packages/your-mcp-server/bundle/index.js"
+      ],
+      "transportType": "stdio"
+    }
+  }
+}
+```
+
+Reemplaza `/ruta/al/workspace/dist/packages/your-mcp-server/bundle/index.js` con la ruta real a tu servidor MCP empaquetado.
+
+:::caution
+Si recibes un error como `ENOENT node` al conectar con tu servidor, quizás necesites especificar la ruta completa a `node`, que puedes obtener ejecutando `which node` en tu terminal.
+:::
+
+### Configuración Específica por Asistente
+
+Consulta la siguiente documentación para configurar MCP con asistentes específicos:
+
+- [Amazon Q Developer](https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/command-line-mcp-configuration.html)
+- [Cline](https://docs.cline.bot/mcp-servers/configuring-mcp-servers)
+- [Cursor](https://docs.cursor.com/context/model-context-protocol)
+- [Claude Code](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/tutorials#set-up-model-context-protocol-mcp)
+
+:::tip
+Algunos asistentes como Amazon Q Developer permiten especificar configuraciones MCP a nivel de workspace, lo cual es particularmente útil para definir servidores MCP relevantes para un proyecto específico.
+:::
+
+## Flujo de Desarrollo
+
+### Objetivos de Build
+
+El generador está construido sobre el <Link path="/guides/typescript-project">generador de proyectos TypeScript</Link> y hereda sus objetivos, además de añadir los siguientes:
+
+#### Bundle
+
+La tarea `bundle` usa [esbuild](https://esbuild.github.io/) para crear un único archivo JavaScript empaquetado que puede usarse con asistentes de IA:
+
+<NxCommands commands={['run your-mcp-server:bundle']} />
+
+Esto crea una versión empaquetada en `dist/packages/your-mcp-server/bundle/index.js` (la ruta puede variar según tu configuración de directorios).
+
+#### Dev
+
+La tarea `dev` monitorea cambios en tu proyecto y reconstruye automáticamente el bundle:
+
+<NxCommands commands={['run your-mcp-server:dev']} />
+
+Es especialmente útil durante el desarrollo, asegurando que tu asistente de IA utilice la última versión de tu servidor MCP.
+
+:::note
+Algunos asistentes de IA requerirán reiniciar el servidor MCP para que los cambios surtan efecto.
+:::
