@@ -17,6 +17,7 @@ import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import NxCommands from '@components/nx-commands.astro';
 import LinkCommand from '@components/link-command.astro';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
 import InstallCommand from '@components/install-command.astro';
 import dungeonAdventureArchitecturePng from '@assets/dungeon-game-architecture.png';
 import dungeonAdventureErPng from '@assets/dungeon-adventure-er.png';
@@ -26,7 +27,7 @@ import nxGraphPng from '@assets/nx-graph.png';
 import gameSelectPng from '@assets/game-select.png';
 import gameConversationPng from '@assets/game-conversation.png';
 
-Let's create a new generator to contribute to `@aws/nx-plugin`. Our objective will be to generate a new procedure for our tRPC API.
+Let's create a new generator to contribute to `@aws/nx-plugin`. Our objective will be to generate a new procedure for a tRPC API.
 
 ### Check Out the Plugin
 
@@ -48,21 +49,24 @@ pnpm nx run-many --target build --all
 
 Let's create the new generator in `packages/nx-plugin/src/trpc/procedure`.
 
-We provide a generator generator so you can quickly scaffold your new generator! You can run this generator as follows:
+We provide a generator for creating new generators so you can quickly scaffold your new generator! You can run this generator as follows:
 
-<RunGenerator generator="ts#nx-generator" requiredParameters={{ pluginProject: '@aws/nx-plugin', name: 'ts#trpc-api#procecure', directory: 'trpc/procedure', description: 'Adds a procedure to a tRPC API' }} />
+<RunGenerator generator="ts#nx-generator" requiredParameters={{ pluginProject: '@aws/nx-plugin', name: 'ts#trpc-api#procedure', directory: 'trpc/procedure', description: 'Adds a procedure to a tRPC API' }} />
 
 You will notice the following files have been generated for you:
 
 <FileTree>
   - packages/nx-plugin/src/trpc/procedure
-    - schema.json Defines the input for our generator
+    - schema.json Defines the input for the generator
     - schema.d.ts A typescript interface which matches the schema
-    - generator.ts Function which Nx runs as our generator
-    - generator.spec.ts Tests for our generator
+    - generator.ts Function which Nx runs as the generator
+    - generator.spec.ts Tests for the generator
+  - docs/src/content/docs/guides/
+    - trpc-procedure.mdx Documentation for the generator
+  - packages/nx-plugin/generators.json Updated to include the generator
 </FileTree>
 
-Let's update the schema to add the properties we'll need for our generator:
+Let's update the schema to add the properties we'll need for the generator:
 
 <Tabs>
   <TabItem label="schema.json">
@@ -111,10 +115,10 @@ Let's update the schema to add the properties we'll need for our generator:
 </Tabs>
 
 :::note
-Notice our generator is given a `Tree` as input, as well as the options we defined in our schema. The `Tree` is essentially a virtual file system which we can read from and write to in order to create or update project files. We don't want to touch the filesystem directly, as we don't want to make any changes if users run our generator in "dry-run" mode.
+Notice the generator is given a `Tree` as input, as well as the options we defined in our schema. The `Tree` is essentially a virtual file system which we can read from and write to in order to create or update project files. We don't want to touch the filesystem directly, as we don't want to make any changes if users run the generator in "dry-run" mode.
 :::
 
-You will notice our generator has already been hooked up in `packages/nx-plugin/generators.json`:
+You will notice the generator has already been hooked up in `packages/nx-plugin/generators.json`:
 
 ```json
  ...
@@ -138,9 +142,9 @@ To add a procedure to a tRPC API, we need to do two things:
 
 #### Create the new Procedure
 
-To create the TypeScript file for our new procedure, we'll use a utility called `generateFiles`. Using this, we can define an [EJS](https://ejs.co/) template which we can render in our generator with variables based on the options selected by the user.
+To create the TypeScript file for the new procedure, we'll use a utility called `generateFiles`. Using this, we can define an [EJS](https://ejs.co/) template which we can render in our generator with variables based on the options selected by the user.
 
-First, we'll define our template in `packages/nx-plugin/src/trpc/procedure/files/procedures/__procedureNameKebabCase__.ts.template`:
+First, we'll define the template in `packages/nx-plugin/src/trpc/procedure/files/procedures/__procedureNameKebabCase__.ts.template`:
 
 ```ts title="files/procedures/__procedureNameKebabCase__.ts.template"
 import { publicProcedure } from '../init.js';
@@ -160,7 +164,7 @@ export const <%- procedureNameCamelCase %> = publicProcedure
 ```
 
 :::tip
-When `generateFiles` consumes our template, it will replace references to `__<variable>__` in file/directory names with the values it's provided, as well as stripping the `.template` from the file name.
+When `generateFiles` consumes the template, it will replace references to `__<variable>__` in file/directory names with the values it's provided, as well as stripping the `.template` from the file name.
 
 The template content is [EJS](https://ejs.co/), where variables are referenced using the `<% ... %>` syntax.
 :::
@@ -171,9 +175,9 @@ In the template, we referenced three variables:
 - `procedureNameKebabCase`
 - `procedureType`
 
-So we'll need to make sure we pass those to `generateFiles`, as well as the directory to generate files into, namely the location of source files (i.e. `sourceRoot`) for the tRPC project the user selected as input for our generator, which we can extract from the project configuration.
+So we'll need to make sure we pass those to `generateFiles`, as well as the directory to generate files into, namely the location of source files (i.e. `sourceRoot`) for the tRPC project the user selected as input for the generator, which we can extract from the project configuration.
 
-Let's update our generator to do that:
+Let's update the generator to do that:
 
 ```ts title="procedure/generator.ts" {8-19}
 import {
@@ -219,7 +223,7 @@ We also called `formatFilesInSubtree` at the end of the generator, which ensures
 
 #### Add the Procedure to the Router
 
-Next, we want our generator to hook up our new procedure to the router. This means reading and updating the user's source code!
+Next, we want the generator to hook up the new procedure to the router. This means reading and updating the user's source code!
 
 We use TypeScript AST manipulation to update the relevant parts of the TypeScript source file. There are some helpers called `replace` and `destructuredImport` to make this a little easier.
 
@@ -289,33 +293,47 @@ In the above code snippet, `replace` uses a [tsquery](https://github.com/phenomn
 You can use the [tsquery playground](https://tsquery-playground.firebaseapp.com/) as a useful tool to test out different selectors.
 :::
 
-Now that we've implemented our generator, let's compile it to make sure it's available for us to test it out in our dungeon adventure project.
+Now that we've implemented the generator, let's compile it to make sure it's available for us to test it out in our dungeon adventure project.
 
 ```bash
 pnpm nx run @aws/nx-plugin:compile
 ```
 
-### Testing our Generator
+### Testing the Generator
 
-To test our generator, we'll link our local plugin to our <Link path="get_started/tutorials/dungeon-game/overview">dungeon-adventure</Link> codebase.
+To test the generator, we'll link our local Nx Plugin for AWS to an existing codebase.
+
+#### Create a Test Project with a tRPC API
 
 :::note
-Don't worry if you haven't completed the dungeon adventure tutorial, this will also work on any nx enabled codebase.
+If you have completed the <Link path="get_started/tutorials/dungeon_game/overview">dungeon adventure tutorial</Link>, or already have another existing Nx workspace which uses a tRPC API, you can skip this step.
 :::
+
+In a separate directory, create a new test workspace:
+
+<CreateNxWorkspaceCommand workspace="trpc-generator-test" />
+
+Next, let's generate a tRPC API to add the procedure to:
+
+<RunGenerator generator="ts#trpc-api" requiredParameters={{apiName:"test-api"}} noInteractive />
+
+#### Link our local Nx Plugin for AWS
 
 In your codebase, let's link our local `@aws/nx-plugin`:
 
 <LinkCommand
   dependency="@aws/nx-plugin"
   dependencyPath="path/to/nx-plugin-for-aws/dist/packages/nx-plugin"
-  projectPath="path/to/dungeon-adventure"
+  projectPath="path/to/trpc-generator-test"
 />
 
 :::note
 Notice above we linked to the compiled plugin in `dist/packages/nx-plugin` rather than the source code.
 :::
 
-Let's try our new generator:
+#### Run the new Generator
+
+Let's try the new generator:
 
 <RunGenerator generator="ts#trpc-api#procedure" />
 
@@ -333,7 +351,7 @@ If you've got this far and still have some time to experiment with Nx generators
 
 #### 1. Nested Operations
 
-In our dungeon adventure game, we made use of nested routers to group related operations. Try updating the generator to support this by:
+Try updating the generator to support nested routers by:
 
 - Accepting dot notation for the `procedure` input (e.g. `games.query`)
 - Generating a procedure with a name based on reversed dot notation (e.g. `queryGames`)
@@ -355,7 +373,3 @@ Write some unit tests for the generator. These are quite straightforward to impl
 #### 4. End to End Tests
 
 At present, we have a single "smoke test" which runs all the generators and makes sure that the build succeeds. This should be updated to include the new generator.
-
-#### 5. Contribute Back!
-
-If nobody has contributed this generator back to `@aws/nx-plugin`, send us a pull request! If there's already one there, perhaps think of another generator you can contribute.

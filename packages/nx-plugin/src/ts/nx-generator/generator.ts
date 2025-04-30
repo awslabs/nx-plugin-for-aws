@@ -70,7 +70,7 @@ export const nxGeneratorGenerator = async (
     nameCamelCase: camelCase(name),
     nameKebabCase: kebabCase(name),
     nameUpperSnakeCase: snakeCase(name).toUpperCase(),
-    isNxPluginForAws: rootPackageJson?.name === '@aws/nx-plugin-source',
+    isNxPluginForAws,
     pathToProjectSourceRoot: getRelativePathToRootByDirectory(generatorSubDir),
     generatorDir,
     generatorSubDir,
