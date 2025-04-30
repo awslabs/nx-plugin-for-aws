@@ -19,6 +19,7 @@ import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import NxCommands from '@components/nx-commands.astro';
 import LinkCommand from '@components/link-command.astro';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
 import InstallCommand from '@components/install-command.astro';
 import dungeonAdventureArchitecturePng from '@assets/dungeon-game-architecture.png';
 import dungeonAdventureErPng from '@assets/dungeon-adventure-er.png';
@@ -28,9 +29,9 @@ import nxGraphPng from '@assets/nx-graph.png';
 import gameSelectPng from '@assets/game-select.png';
 import gameConversationPng from '@assets/game-conversation.png';
 
-`@aws/nx-plugin`에 새로운 제너레이터를 생성하여 tRPC API에 새 프로시저를 추가하는 방법을 알아보겠습니다.
+`@aws/nx-plugin`에 기여할 새로운 tRPC API 프로시저 생성 제너레이터를 만들어 보겠습니다.
 
-### 플러그인 확인
+### 플러그인 체크아웃
 
 먼저 플러그인을 클론합니다:
 
@@ -38,7 +39,7 @@ import gameConversationPng from '@assets/game-conversation.png';
 git clone git@github.com:awslabs/nx-plugin-for-aws.git
 ```
 
-의존성을 설치하고 빌드합니다:
+의존성 설치 및 빌드:
 
 ```bash
 cd nx-plugin-for-aws
@@ -48,9 +49,11 @@ pnpm nx run-many --target build --all
 
 ### 빈 제너레이터 생성
 
-`packages/nx-plugin/src/trpc/procedure` 경로에 새 제너레이터를 생성합니다. 제너레이터 생성기를 사용하면 빠르게 스캐폴딩할 수 있습니다:
+새 제너레이터를 `packages/nx-plugin/src/trpc/procedure`에 생성합니다.
 
-<RunGenerator generator="ts#nx-generator" requiredParameters={{ pluginProject: '@aws/nx-plugin', name: 'ts#trpc-api#procecure', directory: 'trpc/procedure', description: 'Adds a procedure to a tRPC API' }} />
+새 제너레이터 스캐폴딩을 위해 제공되는 제너레이터를 사용할 수 있습니다:
+
+<RunGenerator generator="ts#nx-generator" requiredParameters={{ pluginProject: '@aws/nx-plugin', name: 'ts#trpc-api#procedure', directory: 'trpc/procedure', description: 'Adds a procedure to a tRPC API' }} />
 
 다음 파일들이 자동 생성됩니다:
 
@@ -59,7 +62,10 @@ pnpm nx run-many --target build --all
     - schema.json 제너레이터 입력 스키마 정의
     - schema.d.ts 스키마에 대응하는 타입스크립트 인터페이스
     - generator.ts Nx가 실행할 제너레이터 함수
-    - generator.spec.ts 제너레이터 테스트 코드
+    - generator.spec.ts 제너레이터 테스트
+  - docs/src/content/docs/guides/
+    - trpc-procedure.mdx 제너레이터 문서
+  - packages/nx-plugin/generators.json 제너레이터 등록 정보 업데이트
 </FileTree>
 
 제너레이터에 필요한 속성을 스키마에 추가합니다:
@@ -111,7 +117,7 @@ pnpm nx run-many --target build --all
 </Tabs>
 
 :::note
-제너레이터는 `Tree` 객체와 스키마에서 정의한 옵션들을 입력으로 받습니다. `Tree`는 가상 파일 시스템으로, 사용자가 "dry-run" 모드로 실행할 때 실제 파일 시스템을 변경하지 않고 작업할 수 있게 해줍니다.
+제너레이터는 `Tree`와 스키마에 정의된 옵션을 입력으로 받습니다. `Tree`는 가상 파일 시스템으로, 프로젝트 파일 생성/수정 시 실제 파일 시스템 대신 사용됩니다. "dry-run" 모드에서 변경 사항이 실제 반영되지 않도록 하기 위함입니다.
 :::
 
 `packages/nx-plugin/generators.json`에 제너레이터가 등록된 것을 확인할 수 있습니다:
@@ -131,14 +137,16 @@ pnpm nx run-many --target build --all
 
 ### 제너레이터 구현
 
-tRPC API에 프로시저를 추가하려면 두 가지 작업이 필요합니다:
+tRPC API에 프로시저 추가 시 다음 두 가지가 필요합니다:
 
 1. 새 프로시저용 TypeScript 파일 생성
 2. 라우터에 프로시저 추가
 
 #### 새 프로시저 생성
 
-`generateFiles` 유틸리티를 사용하여 [EJS](https://ejs.co/) 템플릿을 기반으로 파일을 생성합니다. 템플릿은 `packages/nx-plugin/src/trpc/procedure/files/procedures/__procedureNameKebabCase__.ts.template`에 정의합니다:
+`generateFiles` 유틸리티와 EJS 템플릿을 사용하여 TypeScript 파일을 생성합니다. 템플릿은 사용자 선택 옵션 기반 변수로 렌더링됩니다.
+
+템플릿 파일 `packages/nx-plugin/src/trpc/procedure/files/procedures/__procedureNameKebabCase__.ts.template` 생성:
 
 ```ts title="files/procedures/__procedureNameKebabCase__.ts.template"
 import { publicProcedure } from '../init.js';
@@ -158,10 +166,12 @@ export const <%- procedureNameCamelCase %> = publicProcedure
 ```
 
 :::tip
-`generateFiles`는 파일/디렉토리 이름의 `__<변수>__` 패턴을 실제 값으로 치환하며 `.template` 확장자를 제거합니다. 템플릿 내용은 [EJS](https://ejs.co/) 문법을 사용합니다.
+`generateFiles`는 파일/디렉토리 이름의 `__<변수>__` 패턴을 실제 값으로 치환하며 `.template` 확장자를 제거합니다. 템플릿 내용은 EJS 문법(`<% ... %>`)을 사용합니다.
 :::
 
-템플릿에서 사용한 세 가지 변수를 처리하기 위해 제너레이터 코드를 업데이트합니다:
+템플릿에서 사용된 세 변수(`procedureNameCamelCase`, `procedureNameKebabCase`, `procedureType`)를 `generateFiles`에 전달해야 합니다. 사용자가 선택한 프로젝트의 소스 루트 경로는 프로젝트 설정에서 추출합니다.
+
+제너레이터 코드 업데이트:
 
 ```ts title="procedure/generator.ts" {8-19}
 import {
@@ -202,12 +212,12 @@ export default trpcProcedureGenerator;
 ```
 
 :::tip
-`formatFilesInSubtree` 호출로 생성/수정된 파일들을 사용자의 [prettier](https://prettier.io/) 설정에 맞게 포맷팅합니다.
+`formatFilesInSubtree` 호출로 생성/수정된 파일들이 사용자의 Prettier 설정에 따라 포맷팅됩니다.
 :::
 
 #### 라우터에 프로시저 추가
 
-TypeScript AST 조작을 통해 라우터 파일을 업데이트합니다:
+TypeScript AST 조작을 통해 라우터 소스 파일을 업데이트합니다. `replace`와 `destructuredImport` 헬퍼를 사용합니다.
 
 ```ts title="procedure/generator.ts" {6, 23-33}
 import {
@@ -270,7 +280,7 @@ export default trpcProcedureGenerator;
 ```
 
 :::tip
-`replace` 함수는 [tsquery](https://github.com/phenomnomnominal/tsquery) 셀렉터를 사용하여 `router` 함수 인자를 찾습니다. [tsquery 플레이그라운드](https://tsquery-playground.firebaseapp.com/)에서 셀렉터 테스트가 가능합니다.
+`replace` 함수는 [tsquery](https://github.com/phenomnomnominal/tsquery) 셀렉터를 사용하여 `router` 함수 인자를 찾습니다. [tsquery 플레이그라운드](https://tsquery-playground.firebaseapp.com/)에서 셀렉터 테스트 가능합니다.
 :::
 
 제너레이터 컴파일:
@@ -281,54 +291,73 @@ pnpm nx run @aws/nx-plugin:compile
 
 ### 제너레이터 테스트
 
-<Link path="get_started/tutorials/dungeon-game/overview">던전 어드벤처</Link> 코드베이스에 로컬 플러그인을 연결하여 테스트합니다:
+로컬 Nx Plugin for AWS를 기존 코드베이스에 연결하여 테스트합니다.
+
+#### tRPC API 테스트 프로젝트 생성
+
+:::note
+<Link path="get_started/tutorials/dungeon_game/overview">던전 어드벤처 튜토리얼</Link>을 완료했거나 tRPC API를 사용하는 기존 Nx 워크스페이스가 있다면 이 단계를 건너뛸 수 있습니다.
+:::
+
+새 테스트 워크스페이스 생성:
+
+<CreateNxWorkspaceCommand workspace="trpc-generator-test" />
+
+tRPC API 생성:
+
+<RunGenerator generator="ts#trpc-api" requiredParameters={{apiName:"test-api"}} noInteractive />
+
+#### 로컬 Nx Plugin 연결
+
+로컬 `@aws/nx-plugin` 연결:
 
 <LinkCommand
   dependency="@aws/nx-plugin"
   dependencyPath="path/to/nx-plugin-for-aws/dist/packages/nx-plugin"
-  projectPath="path/to/dungeon-adventure"
+  projectPath="path/to/trpc-generator-test"
 />
 
 :::note
-소스 코드 대신 `dist/packages/nx-plugin`의 컴파일된 플러그인을 연결합니다.
+소스 코드 대신 컴파일된 `dist/packages/nx-plugin` 경로를 사용합니다.
 :::
 
-새 제너레이터 실행:
+#### 새 제너레이터 실행
+
+새 제너레이터 실행 시도:
 
 <RunGenerator generator="ts#trpc-api#procedure" />
 
 :::note
-VSCode에서 새 제너레이터가 보이지 않으면 Nx 워크스페이스를 새로고침합니다:
+VSCode에서 새 제너레이터가 보이지 않으면 Nx 워크스페이스 새로고침 필요:
 
 <NxCommands commands={['reset']} />
 :::
 
-성공하면 `router.ts`에 새 프로시저가 추가됩니다.
+성공 시 새 프로시저가 생성되고 `router.ts`에 추가됩니다.
 
 ### 연습 문제
 
-#### 1. 중첩된 작업
+Nx 제너레이터 실험을 위한 추가 기능 제안:
 
-- `procedure` 입력에 점 표기법 지원 (예: `games.query`)
-- 역방향 점 표기법으로 프로시저 이름 생성 (예: `queryGames`)
+#### 1. 중첩 작업 지원
+
+- `procedure` 입력에 닷 노테이션 지원 (예: `games.query`)
+- 역방향 닷 노테이션 기반 프로시저 이름 생성 (예: `queryGames`)
 - 중첩 라우터 생성/업데이트
 
 #### 2. 유효성 검사
 
-- tRPC API가 아닌 프로젝트 선택 방지
-- `api-connection` 제너레이터 참고
+tRPC API가 아닌 프로젝트 선택 방지. `api-connection` 제너레이터 예제 참조.
 
-#### 3. 단위 테스트
+#### 3. 단위 테스트 작성
 
-1. `createTreeUsingTsSolutionSetup()`로 빈 워크스페이스 생성
-2. 기존 파일 추가 (`project.json`, `src/router.ts`)
+제너레이터 단위 테스트 작성:
+
+1. `createTreeUsingTsSolutionSetup()`로 빈 워크스페이스 트리 생성
+2. 기존 파일 추가 (예: `project.json`, `src/router.ts`)
 3. 제너레이터 실행
 4. 트리 변경 사항 검증
 
 #### 4. E2E 테스트
 
-기존 "smoke test"에 새 제너레이터 포함
-
-#### 5. 기여하기
-
-아직 `@aws/nx-plugin`에 반영되지 않았다면 풀 리퀘스트를 보내보세요! 이미 있다면 다른 제너레이터를 생각해보세요.
+현재 "smoke test"에 새 제너레이터 포함하도록 업데이트.
