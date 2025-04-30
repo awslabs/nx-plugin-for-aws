@@ -33,8 +33,6 @@ export const VERSIONS = {
   constructs: '^10.4.2',
   esbuild: '^0.25.1',
   'eslint-plugin-prettier': '^5.2.5',
-  express: '^5.1.0',
-  '@types/express': '^5.0.1',
   'jsonc-eslint-parser': '^2.4.0',
   'oidc-client-ts': '^3.2.0',
   prettier: '^3.5.3',

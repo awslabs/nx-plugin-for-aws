@@ -11,7 +11,6 @@ import {
   installPackagesTask,
   joinPathFragments,
   readProjectConfiguration,
-  updateJson,
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { TsMcpServerGeneratorSchema } from './schema';
@@ -36,7 +35,7 @@ export const tsMcpServerGenerator = async (
 
   // Add dependencies
   const deps = withVersions(['@modelcontextprotocol/sdk', 'zod']);
-  const devDeps = withVersions(['tsx', 'esbuild', 'express', '@types/express']);
+  const devDeps = withVersions(['tsx', 'esbuild']);
   addDependenciesToPackageJson(tree, deps, devDeps);
 
   // Generate example server

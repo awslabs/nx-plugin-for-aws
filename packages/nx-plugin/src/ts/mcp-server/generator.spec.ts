@@ -51,8 +51,6 @@ describe('ts#mcp-server generator', () => {
     // Check for required dev dependencies
     expect(packageJson.devDependencies['tsx']).toBeDefined();
     expect(packageJson.devDependencies['esbuild']).toBeDefined();
-    expect(packageJson.devDependencies['express']).toBeDefined();
-    expect(packageJson.devDependencies['@types/express']).toBeDefined();
   });
 
   it('should add correct build targets to project configuration', async () => {

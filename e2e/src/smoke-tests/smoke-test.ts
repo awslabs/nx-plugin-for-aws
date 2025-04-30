@@ -77,6 +77,7 @@ export const smokeTest = (
       );
       await runCLI(
         `generate @aws/nx-plugin:ts#mcp-server --name=my-mcp-server --no-interactive`,
+        opts,
       );
       await runCLI(`generate @aws/nx-plugin:license --no-interactive`, opts);
 
