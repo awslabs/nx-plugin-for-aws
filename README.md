@@ -56,6 +56,7 @@
 - `ts#cloudscape-website` - Generate a new Cloudscape/React/Vite based web application.
 - `ts#cloudscape-website#auth` - Add AWS Cognito authentication to your Cloudscape website.
 - `ts#trpc-api` - Generate a tRPC backend service with Amazon API Gateway/AWS Lambda integration and [AWS Powertools](https://github.com/aws-powertools/powertools-lambda-typescript) pre-configured.
+- `ts#nx-generator` - Add an [Nx Generator](https://nx.dev/features/generate-code) to a TypeScript project.
 - `py#project` - Generate a uv based Python project.
 - `py#fast-api` - Generate a FastAPI backend service with [AWS Powertools](https://github.com/aws-powertools/powertools-lambda-python) pre-configured.
 - `py#lambda-function` - Add a lambda function to an existing python project with optional type-safe event sources.
