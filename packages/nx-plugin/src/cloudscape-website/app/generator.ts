@@ -85,10 +85,10 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
   targets['load:runtime-config'] = {
     executor: 'nx:run-commands',
     metadata: {
-      description: `Load runtime config from your deployed stack for dev purposes. You must set the AWS_REGION and CDK_APP_DIR env variables whilst calling i.e: AWS_REGION=ap-southeast-2 CDK_APP_DIR=./dist/packages/infra/cdk.out pnpm exec nx run ${fullyQualifiedName}:load:runtime-config`,
+      description: `Load runtime config from your deployed stack for dev purposes. You must set your AWS CLI credentials whilst calling 'pnpm exec nx run ${fullyQualifiedName}:load:runtime-config'`,
     },
     options: {
-      command: `curl https://\`aws cloudformation describe-stacks --query "Stacks[?StackName=='${kebabCase(npmScopePrefix)}-infra-sandbox'][].Outputs[?contains(OutputKey, 'DistributionDomainName')].OutputValue" --output text\`/runtime-config.json > './${websiteContentPath}/public/runtime-config.json'`,
+      command: `aws s3 cp s3://\`aws cloudformation describe-stacks --query "Stacks[?StackName=='${kebabCase(npmScopePrefix)}-infra-sandbox'][].Outputs[?contains(OutputKey, 'WebsiteBucketName')].OutputValue" --output text\`/runtime-config.json './${websiteContentPath}/public/runtime-config.json'`,
     },
   };
   const buildTarget = targets['build'];
