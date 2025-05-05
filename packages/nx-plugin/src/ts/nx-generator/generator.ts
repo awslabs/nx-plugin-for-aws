@@ -180,7 +180,7 @@ export const nxGeneratorGenerator = async (
               metric:
                 existingGenerators.length > 0
                   ? incrementMetric(
-                      existingGenerators[existingGenerators.length - 1].metric,
+                      Object.values(existingGenerators).map((g) => g.metric),
                     )
                   : 'g1',
             }
@@ -219,8 +219,9 @@ export const nxGeneratorGenerator = async (
   };
 };
 
-const incrementMetric = (metric: string): string => {
-  return `g${Number(metric.slice(1)) + 1}`;
+const incrementMetric = (metrics: string[]): string => {
+  const maxMetric = Math.max(...metrics.map((m) => Number(m.slice(1))));
+  return `g${maxMetric + 1}`;
 };
 
 export default nxGeneratorGenerator;

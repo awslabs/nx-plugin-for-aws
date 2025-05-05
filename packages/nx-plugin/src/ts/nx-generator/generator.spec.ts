@@ -154,6 +154,37 @@ describe('nx-generator generator', () => {
       expect(packageJson.generators).toBe('./generators.json');
     });
 
+    it('should update generators.json with out of order metric', async () => {
+      writeJson(tree, 'packages/nx-plugin/generators.json', {
+        generators: {
+          existing: {
+            factory: './some/generator',
+            schema: './some/schema.json',
+            description: 'existing generator',
+            metric: 'g51',
+          },
+          another: {
+            factory: './some/other/generator',
+            schema: './some/other/schema.json',
+            description: 'other existing generator',
+            metric: 'g3',
+          },
+        },
+      });
+
+      await nxGeneratorGenerator(tree, {
+        pluginProject: NxPluginForAwsProjectJson.name,
+        name: 'foo#bar',
+        description: 'Some description',
+      });
+
+      // Check generators.json was updated
+      const generatorsJson = JSON.parse(
+        tree.read('packages/nx-plugin/generators.json', 'utf-8'),
+      );
+      expect(generatorsJson.generators['foo#bar'].metric).toBe('g52');
+    });
+
     it('should handle an empty list of existing generators', async () => {
       // Reset generators.json to have an empty generators object
       writeJson(tree, 'packages/nx-plugin/generators.json', {

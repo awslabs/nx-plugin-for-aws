@@ -232,15 +232,21 @@ export const normaliseOpenApiSpecForCodeGen = (inSpec: Spec): Spec => {
 
         // Allow operations to have the same id
         let deduplicatedOpId = operationId;
+        let deduplicatedDotNotationOpId = operationId;
 
         // Attempt to deduplicate the operationId by its tags
         if (duplicatedOperationIds.has(operationId)) {
           deduplicatedOpId = camelCase(
             tags.map((t) => `${t}-`).join('') + operationId,
           );
+          deduplicatedDotNotationOpId =
+            tags.map((t) => `${camelCase(t)}.`).join('') +
+            camelCase(operationId);
         }
 
         (operation as any)['x-aws-nx-deduplicated-op-id'] = deduplicatedOpId;
+        (operation as any)['x-aws-nx-deduplicated-dot-op-id'] =
+          deduplicatedDotNotationOpId;
 
         seenOperationIds.add(deduplicatedOpId);
 

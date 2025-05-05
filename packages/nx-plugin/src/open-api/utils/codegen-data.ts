@@ -70,6 +70,9 @@ export const buildOpenApiCodeGenData = async (
       if (specOp['x-aws-nx-deduplicated-op-id']) {
         (op as any).uniqueName = specOp['x-aws-nx-deduplicated-op-id'];
       }
+      if (specOp['x-aws-nx-deduplicated-dot-op-id']) {
+        (op as any).dotNotationName = specOp['x-aws-nx-deduplicated-dot-op-id'];
+      }
 
       // Add vendor extensions
       (op as any).vendorExtensions = (op as any).vendorExtensions ?? {};
