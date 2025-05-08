@@ -116,7 +116,7 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
       ...(buildTarget.dependsOn ?? []),
     ],
     options: {
-      outputPath: joinPathFragments('dist', websiteContentPath),
+      outputPath: joinPathFragments('dist', websiteContentPath, 'bundle'),
     },
   };
   projectConfiguration.targets = sortObjectKeys(targets);
