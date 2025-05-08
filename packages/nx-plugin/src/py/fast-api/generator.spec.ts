@@ -26,6 +26,7 @@ describe('fastapi project generator', () => {
     await fastApiProjectGenerator(tree, {
       name: 'test-api',
       directory: 'apps',
+      computeType: 'ServerlessApiGatewayHttpApi',
     });
 
     // Verify project structure
@@ -43,6 +44,7 @@ describe('fastapi project generator', () => {
     await fastApiProjectGenerator(tree, {
       name: 'test-api',
       directory: 'apps',
+      computeType: 'ServerlessApiGatewayHttpApi',
     });
 
     const projectConfig = JSON.parse(
@@ -58,6 +60,12 @@ describe('fastapi project generator', () => {
       'uv export --frozen --no-dev --no-editable --project test_api -o dist/apps/test_api/bundle/requirements.txt',
     );
 
+    // Verify openapi spec is generated
+    expect(projectConfig.targets.openapi).toBeDefined();
+    expect(projectConfig.targets.openapi.options.commands).toContain(
+      'uv run python apps/test_api/scripts/generate_open_api.py "dist/apps/test_api/openapi/openapi.json"',
+    );
+
     // Verify start target for development
     expect(projectConfig.targets.serve).toBeDefined();
     expect(projectConfig.targets.serve.executor).toBe(
@@ -69,12 +77,14 @@ describe('fastapi project generator', () => {
 
     // Verify build dependencies
     expect(projectConfig.targets.build.dependsOn).toContain('bundle');
+    expect(projectConfig.targets.build.dependsOn).toContain('openapi');
   });
 
   it('should configure FastAPI dependencies', async () => {
     await fastApiProjectGenerator(tree, {
       name: 'test-api',
       directory: 'apps',
+      computeType: 'ServerlessApiGatewayHttpApi',
     });
 
     const pyprojectToml = parse(
@@ -89,48 +99,89 @@ describe('fastapi project generator', () => {
     );
   });
 
-  it('should set up shared constructs for HTTP API', async () => {
+  it('should set up shared constructs for http', async () => {
     await fastApiProjectGenerator(tree, {
       name: 'test-api',
-      directory: 'apps',
+      directory: 'apps/nested/path',
+      computeType: 'ServerlessApiGatewayHttpApi',
     });
 
-    // Verify shared constructs files
-    const httpApiPath = joinPathFragments(
-      PACKAGES_DIR,
-      SHARED_CONSTRUCTS_DIR,
-      'src',
-      'app',
-      'http-apis',
-      'test-api.ts',
-    );
-    expect(tree.exists(httpApiPath)).toBeTruthy();
+    // Verify shared constructs setup
+    expect(
+      tree.exists('packages/common/constructs/src/app/apis/index.ts'),
+    ).toBeTruthy();
+    expect(
+      tree.exists('packages/common/constructs/src/app/apis/test-api.ts'),
+    ).toBeTruthy();
 
-    // Verify exports in index files
-    const httpApisIndexPath = joinPathFragments(
-      PACKAGES_DIR,
-      SHARED_CONSTRUCTS_DIR,
-      'src',
-      'app',
-      'http-apis',
-      'index.ts',
-    );
-    expect(tree.read(httpApisIndexPath, 'utf-8')).toContain('./test-api.js');
+    expect(
+      tree.read('packages/common/constructs/src/app/apis/index.ts', 'utf-8'),
+    ).toContain("export * from './test-api.js'");
+    expect(
+      tree.read('packages/common/constructs/src/app/index.ts', 'utf-8'),
+    ).toContain("export * from './apis/index.js'");
+    expect(
+      tree.read('packages/common/constructs/src/app/apis/test-api.ts', 'utf-8'),
+    ).toMatchSnapshot('test-api.ts');
+    expect(
+      tree.read('packages/common/constructs/src/core/api/http-api.ts', 'utf-8'),
+    ).toMatchSnapshot('http-api.ts');
+    expect(
+      tree.read('packages/common/constructs/src/core/api/utils.ts', 'utf-8'),
+    ).toMatchSnapshot('utils.ts');
+    expect(
+      tree.exists('packages/common/constructs/src/core/api/trpc-utils.ts'),
+    ).toBeFalsy();
 
-    const appIndexPath = joinPathFragments(
-      PACKAGES_DIR,
-      SHARED_CONSTRUCTS_DIR,
-      'src',
-      'app',
-      'index.ts',
-    );
-    expect(tree.read(appIndexPath, 'utf-8')).toContain('./http-apis/index.js');
+    expect(
+      tree.exists('packages/common/constructs/src/core/api/rest-api.ts'),
+    ).toBeFalsy();
+  });
+
+  it('should set up shared constructs for rest', async () => {
+    await fastApiProjectGenerator(tree, {
+      name: 'test-api',
+      directory: 'apps/nested/path',
+      computeType: 'ServerlessApiGatewayRestApi',
+    });
+
+    // Verify shared constructs setup
+    expect(
+      tree.exists('packages/common/constructs/src/app/apis/index.ts'),
+    ).toBeTruthy();
+    expect(
+      tree.exists('packages/common/constructs/src/app/apis/test-api.ts'),
+    ).toBeTruthy();
+
+    expect(
+      tree.read('packages/common/constructs/src/app/apis/index.ts', 'utf-8'),
+    ).toContain("export * from './test-api.js'");
+    expect(
+      tree.read('packages/common/constructs/src/app/index.ts', 'utf-8'),
+    ).toContain("export * from './apis/index.js'");
+    expect(
+      tree.read('packages/common/constructs/src/app/apis/test-api.ts', 'utf-8'),
+    ).toMatchSnapshot('test-api.ts');
+    expect(
+      tree.read('packages/common/constructs/src/core/api/rest-api.ts', 'utf-8'),
+    ).toMatchSnapshot('rest-api.ts');
+    expect(
+      tree.read('packages/common/constructs/src/core/api/utils.ts', 'utf-8'),
+    ).toMatchSnapshot('utils.ts');
+    expect(
+      tree.exists('packages/common/constructs/src/core/api/trpc-utils.ts'),
+    ).toBeFalsy();
+
+    expect(
+      tree.exists('packages/common/constructs/src/core/api/http-api.ts'),
+    ).toBeFalsy();
   });
 
   it('should update shared constructs build dependencies', async () => {
     await fastApiProjectGenerator(tree, {
       name: 'test-api',
       directory: 'apps',
+      computeType: 'ServerlessApiGatewayHttpApi',
     });
 
     const sharedConstructsConfig = JSON.parse(
@@ -143,12 +194,16 @@ describe('fastapi project generator', () => {
     expect(sharedConstructsConfig.targets.build.dependsOn).toContain(
       'proj.test_api:build',
     );
+    expect(sharedConstructsConfig.targets.compile.dependsOn).toContain(
+      'generate:test-api-metadata',
+    );
   });
 
   it('should handle custom directory path', async () => {
     await fastApiProjectGenerator(tree, {
       name: 'test-api',
       directory: 'apps/nested/path',
+      computeType: 'ServerlessApiGatewayHttpApi',
     });
 
     expect(tree.exists('apps/nested/path/test_api')).toBeTruthy();
@@ -157,29 +212,11 @@ describe('fastapi project generator', () => {
     ).toBeTruthy();
   });
 
-  it('should generate HTTP API construct with correct class name', async () => {
-    await fastApiProjectGenerator(tree, {
-      name: 'test-api',
-      directory: 'apps',
-    });
-
-    const httpApiPath = joinPathFragments(
-      PACKAGES_DIR,
-      SHARED_CONSTRUCTS_DIR,
-      'src',
-      'app',
-      'http-apis',
-      'test-api.ts',
-    );
-    const httpApiContent = tree.read(httpApiPath, 'utf-8');
-
-    expect(httpApiContent).toContain('export class TestApi extends HttpApi');
-  });
-
   it('should set project metadata', async () => {
     await fastApiProjectGenerator(tree, {
       name: 'test-api',
       directory: 'apps',
+      computeType: 'ServerlessApiGatewayHttpApi',
     });
 
     const config = JSON.parse(tree.read('apps/test_api/project.json', 'utf-8'));
@@ -194,6 +231,7 @@ describe('fastapi project generator', () => {
     await fastApiProjectGenerator(tree, {
       name: 'test-api',
       directory: 'apps',
+      computeType: 'ServerlessApiGatewayHttpApi',
     });
 
     const appChanges = sortObjectKeys(
@@ -214,9 +252,31 @@ describe('fastapi project generator', () => {
     await fastApiProjectGenerator(tree, {
       name: 'test-api',
       directory: 'apps',
+      computeType: 'ServerlessApiGatewayHttpApi',
     });
 
     // Verify the metric was added to app.ts
     expectHasMetricTags(tree, FAST_API_GENERATOR_INFO.metric);
+  });
+
+  it('should include CORS middleware in init.py when using REST API', async () => {
+    await fastApiProjectGenerator(tree, {
+      name: 'test-api',
+      directory: 'apps',
+      computeType: 'ServerlessApiGatewayRestApi',
+    });
+
+    // Read the generated init.py file
+    const initPyContent = tree.read('apps/test_api/test_api/init.py', 'utf-8');
+
+    // Verify CORS middleware import is included
+    expect(initPyContent).toContain(
+      'from fastapi.middleware.cors import CORSMiddleware',
+    );
+
+    // Verify CORS middleware is added with correct configuration
+    expect(initPyContent).toContain(
+      "app.add_middleware(CORSMiddleware, allow_origins=['*'], allow_methods=['*'])",
+    );
   });
 });

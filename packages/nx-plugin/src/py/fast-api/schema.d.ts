@@ -5,5 +5,8 @@
 
 export interface FastApiProjectGeneratorSchema {
   readonly name: string;
+  readonly computeType:
+    | 'ServerlessApiGatewayRestApi'
+    | 'ServerlessApiGatewayHttpApi';
   readonly directory?: string;
 }

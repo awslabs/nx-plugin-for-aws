@@ -31,6 +31,7 @@ import {
 import { JsxSelfClosingElement } from 'typescript';
 import { NxGeneratorInfo, getGeneratorInfo } from '../../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
+import { addOpenApiGeneration } from './open-api';
 
 export const FAST_API_REACT_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -47,49 +48,10 @@ export const fastApiReactGenerator = async (
     tree,
     options.fastApiProjectName,
   );
-  const moduleName = getFastApiModuleName(fastApiProjectConfig);
 
-  // Add OpenAPI spec generation script to FastAPI spec (if it does not exist already)
-  generateFiles(
-    tree,
-    path.join(__dirname, 'files/fast-api'),
-    fastApiProjectConfig.root,
-    {
-      moduleName,
-    },
-  );
-
-  // Instrument the script as part of the fastapi project build
-  const fastApiOpenApiDist = joinPathFragments(
-    'dist',
-    fastApiProjectConfig.root,
-    'openapi',
-  );
-  const specPath = joinPathFragments(fastApiOpenApiDist, 'openapi.json');
-  updateProjectConfiguration(tree, options.fastApiProjectName, {
-    ...fastApiProjectConfig,
-    targets: sortObjectKeys({
-      ...fastApiProjectConfig.targets,
-      build: {
-        ...fastApiProjectConfig.targets?.build,
-        dependsOn: [
-          ...(fastApiProjectConfig.targets?.build?.dependsOn ?? []).filter(
-            (t) => t !== 'openapi',
-          ),
-          'openapi',
-        ],
-      },
-      openapi: {
-        cache: true,
-        executor: 'nx:run-commands',
-        outputs: [joinPathFragments('{workspaceRoot}', fastApiOpenApiDist)],
-        options: {
-          commands: [
-            `uv run python ${joinPathFragments(fastApiProjectConfig.root, 'scripts', 'generate_open_api.py')} "${specPath}"`,
-          ],
-        },
-      },
-    }),
+  // Add OpenAPI spec generation to the project, run as part of build
+  const { specPath } = addOpenApiGeneration(tree, {
+    project: fastApiProjectConfig,
   });
 
   const apiName = (fastApiProjectConfig.metadata as any)?.apiName;

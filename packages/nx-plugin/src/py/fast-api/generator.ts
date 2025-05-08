@@ -26,12 +26,13 @@ import {
   SHARED_CONSTRUCTS_DIR,
 } from '../../utils/shared-constructs-constants';
 import { toClassName, toKebabCase, toSnakeCase } from '../../utils/names';
-import { addStarExport } from '../../utils/ast';
 import { formatFilesInSubtree } from '../../utils/format';
-import { addHttpApi } from '../../utils/http-api';
 import { sortObjectKeys } from '../../utils/object';
 import { NxGeneratorInfo, getGeneratorInfo } from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+import { addApiGatewayConstruct } from '../../utils/api-constructs/api-constructs';
+import { addOpenApiGeneration } from './react/open-api';
+import { updateGitIgnore } from '../../utils/git';
 
 export const FAST_API_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -53,13 +54,6 @@ export const fastApiProjectGenerator = async (
   const apiNameSnakeCase = toSnakeCase(schema.name);
   const apiNameKebabCase = toKebabCase(schema.name);
   const apiNameClassName = toClassName(schema.name);
-  const enhancedOptions = {
-    ...schema,
-    dir,
-    apiNameClassName,
-    apiNameKebabCase,
-    apiNameSnakeCase,
-  };
 
   await pyProjectGenerator(tree, {
     name: normalizedName,
@@ -103,6 +97,9 @@ export const fastApiProjectGenerator = async (
   projectConfig.targets = sortObjectKeys(projectConfig.targets);
   updateProjectConfiguration(tree, normalizedName, projectConfig);
 
+  // Add OpenAPI spec generation to the project, run as part of build
+  const { specPath } = addOpenApiGeneration(tree, { project: projectConfig });
+
   [
     joinPathFragments(dir, normalizedModuleName ?? normalizedName, 'hello.py'),
     joinPathFragments(dir, 'tests', 'test_hello.py'),
@@ -115,66 +112,32 @@ export const fastApiProjectGenerator = async (
     {
       name: normalizedName,
       apiNameClassName,
+      computeType: schema.computeType,
     },
     {
       overwriteStrategy: OverwriteStrategy.Overwrite,
     },
   );
 
-  if (
-    !tree.exists(
-      joinPathFragments(
-        PACKAGES_DIR,
-        SHARED_CONSTRUCTS_DIR,
-        'src',
-        'app',
-        'http-apis',
-        `${apiNameKebabCase}.ts`,
-      ),
-    )
-  ) {
-    generateFiles(
-      tree,
-      joinPathFragments(
-        __dirname,
-        'files',
-        SHARED_CONSTRUCTS_DIR,
-        'src',
-        'app',
-      ),
-      joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'src', 'app'),
-      enhancedOptions,
-      {
-        overwriteStrategy: OverwriteStrategy.KeepExisting,
-      },
-    );
+  // Add the CDK construct to deploy the FastAPI to shared constructs
+  addApiGatewayConstruct(tree, {
+    apiNameClassName,
+    apiNameKebabCase,
+    constructType:
+      schema.computeType === 'ServerlessApiGatewayHttpApi' ? 'http' : 'rest',
+    backend: {
+      type: 'fastapi',
+      dir,
+      apiNameSnakeCase,
+    },
+  });
 
-    addStarExport(
-      tree,
-      joinPathFragments(
-        PACKAGES_DIR,
-        SHARED_CONSTRUCTS_DIR,
-        'src',
-        'app',
-        'index.ts',
-      ),
-      './http-apis/index.js',
-    );
-    addStarExport(
-      tree,
-      joinPathFragments(
-        PACKAGES_DIR,
-        SHARED_CONSTRUCTS_DIR,
-        'src',
-        'app',
-        'http-apis',
-        'index.ts',
-      ),
-      `./${apiNameKebabCase}.js`,
-    );
-  }
-
-  addHttpApi(tree, apiNameClassName);
+  const generatedMetadataDir = joinPathFragments('generated', apiNameKebabCase);
+  const generatedMetadataDirFromRoot = joinPathFragments(
+    joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR),
+    'src',
+    generatedMetadataDir,
+  );
 
   updateJson(
     tree,
@@ -186,12 +149,50 @@ export const fastApiProjectGenerator = async (
       if (!config.targets.build) {
         config.targets.build = {};
       }
+      // If not already defined, add a target to generate metadata from the OpenAPI spec, used
+      // for providing a type-safe CDK construct
+      const metadataTargetName = `generate:${apiNameKebabCase}-metadata`;
+      if (!config.targets[metadataTargetName]) {
+        config.targets[metadataTargetName] = {
+          cache: true,
+          executor: 'nx:run-commands',
+          inputs: [
+            {
+              dependentTasksOutputFiles: '**/*.json',
+            },
+          ],
+          outputs: [
+            joinPathFragments('{workspaceRoot}', generatedMetadataDirFromRoot),
+          ],
+          options: {
+            commands: [
+              `nx g @aws/nx-plugin:open-api#ts-metadata --openApiSpecPath="${specPath}" --outputPath="${generatedMetadataDirFromRoot}" --no-interactive`,
+            ],
+          },
+          dependsOn: [`${projectConfig.name}:openapi`],
+        };
+      }
       config.targets.build.dependsOn = [
         ...(config.targets.build.dependsOn ?? []),
         `${fullyQualifiedName}:build`,
       ];
+      if (!config.targets.compile) {
+        config.targets.compile = {};
+      }
+      config.targets.compile.dependsOn = [
+        ...(config.targets.compile.dependsOn ?? []),
+        metadataTargetName,
+      ];
       return config;
     },
+  );
+
+  // Ignore the generated metadata by default
+  // Users can safely remove the entry from the .gitignore if they prefer to check it in
+  updateGitIgnore(
+    tree,
+    joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR),
+    (patterns) => [...patterns, joinPathFragments('src', generatedMetadataDir)],
   );
 
   const projectToml = parse(

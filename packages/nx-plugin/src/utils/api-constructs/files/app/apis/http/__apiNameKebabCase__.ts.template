@@ -1,0 +1,135 @@
+import { Construct } from 'constructs';
+import * as url from 'url';
+import {
+  Code,
+  Runtime,
+  Function,
+  FunctionProps,
+  Tracing,
+} from 'aws-cdk-lib/aws-lambda';
+import { Duration } from 'aws-cdk-lib';
+import { CorsHttpMethod } from 'aws-cdk-lib/aws-apigatewayv2';
+import { HttpIamAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
+import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
+import {
+  HttpApiIntegration,
+  IntegrationBuilder,
+} from '../../core/api/utils.js';
+import { HttpApi } from '../../core/api/http-api.js';
+<%_ if (backend.type === 'trpc') { _%>
+import { Procedures, routerToOperations } from '../../core/api/trpc-utils.js';
+import { AppRouter, appRouter } from '<%= backend.projectAlias %>';
+
+// String union type for all API operation names
+type Operations = Procedures<AppRouter>;
+<%_ } else if (backend.type === 'fastapi') { _%>
+import {
+  OPERATION_DETAILS,
+  Operations,
+} from '../../generated/<%- apiNameKebabCase %>/metadata.gen.js';
+<%_ } _%>
+
+/**
+ * Properties for creating a <%= apiNameClassName %> construct
+ *
+ * @template TIntegrations - Map of operation names to their integrations
+ */
+export interface <%= apiNameClassName %>Props<
+  TIntegrations extends Record<Operations, HttpApiIntegration>,
+> {
+  /**
+   * Map of operation names to their API Gateway integrations
+   */
+  integrations: TIntegrations;
+}
+
+/**
+ * A CDK construct that creates and configures an AWS API Gateway HTTP API
+ * specifically for <%= apiNameClassName %>.
+ * @template TIntegrations - Map of operation names to their integrations
+ */
+export class <%= apiNameClassName %><
+  TIntegrations extends Record<Operations, HttpApiIntegration>,
+> extends HttpApi<Operations, TIntegrations> {
+  /**
+   * Creates default integrations for all operations, which implement each operation as
+   * its own individual lambda function.
+   *
+   * @param scope - The CDK construct scope
+   * @returns An IntegrationBuilder with default lambda integrations
+   */
+  public static defaultIntegrations = (scope: Construct) => {
+    return IntegrationBuilder.http({
+      <%_ if (backend.type === 'trpc') { _%>
+      operations: routerToOperations(appRouter),
+      <%_ } else if (backend.type === 'fastapi') { _%>
+      operations: OPERATION_DETAILS,
+      <%_ } _%>
+      defaultIntegrationOptions: {
+        <%_ if (backend.type === 'trpc') { _%>
+        runtime: Runtime.NODEJS_LATEST,
+        handler: 'index.handler',
+        code: Code.fromAsset(
+          url.fileURLToPath(
+            new URL(
+              '../../../../../../dist/<%- backend.dir %>/bundle',
+              import.meta.url,
+            ),
+          ),
+        ),
+        <%_ } else if (backend.type === 'fastapi') { _%>
+        runtime: Runtime.PYTHON_3_12,
+        handler: '<%= backend.apiNameSnakeCase %>.main.handler',
+        code: Code.fromAsset(
+          url.fileURLToPath(
+            new URL(
+              '../../../../../../dist/<%- backend.dir %>/bundle',
+              import.meta.url,
+            ),
+          ),
+        ),
+        <%_ } _%>
+        timeout: Duration.seconds(30),
+        tracing: Tracing.ACTIVE,
+        environment: {
+          AWS_CONNECTION_REUSE_ENABLED: '1',
+        },
+      } satisfies FunctionProps,
+      buildDefaultIntegration: (op, props: FunctionProps) => {
+        const handler = new Function(scope, `<%= apiNameClassName %>${op}Handler`, props);
+        return {
+          handler,
+          integration: new HttpLambdaIntegration(`<%= apiNameClassName %>${op}Integration`, handler),
+        };
+      },
+    });
+  };
+
+  constructor(
+    scope: Construct,
+    id: string,
+    props: <%= apiNameClassName %>Props<TIntegrations>,
+  ) {
+    super(scope, id, {
+      apiName: '<%= apiNameClassName %>',
+      corsPreflight: {
+        allowOrigins: ['*'],
+        allowMethods: [CorsHttpMethod.ANY],
+        allowHeaders: [
+          'authorization',
+          'content-type',
+          'x-amz-content-sha256',
+          'x-amz-date',
+          'x-amz-security-token',
+        ],
+      },
+      defaultAuthorizer: new HttpIamAuthorizer(),
+      <%_ if (backend.type === 'trpc') { _%>
+      operations: routerToOperations(appRouter),
+      <%_ } else if (backend.type === 'fastapi') { _%>
+      operations: OPERATION_DETAILS,
+      <%_ } _%>
+      ...props,
+    });
+  }
+}

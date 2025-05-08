@@ -2,11 +2,12 @@
 title: tRPC
 description: Reference documentation for tRPC
 ---
-import { FileTree } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
+import Snippet from '@components/snippet.astro';
 import schema from '../../../../../../packages/nx-plugin/src/trpc/backend/schema.json';
 
 [tRPC](https://trpc.io/) is a framework for building APIs in TypeScript with end-to-end type safety. Using tRPC, updates to API operation inputs and outputs are immediately reflected in client code and are visible in your IDE without the need to rebuild your project.
@@ -24,6 +25,8 @@ You can generate a new tRPC API in two ways:
 ### Options
 
 <GeneratorParameters schema={schema} />
+
+<Snippet name="api/api-choice-note" />
 
 ## Generator Output
 
@@ -252,7 +255,7 @@ Next, we'll implement the middlware itself. This has the following structure:
 
 ```ts
 export const createIdentityPlugin = () => {
-   const t = initTRPC.context<IIdentityContext>().create();
+   const t = initTRPC.context<...>().create();
    return t.procedure.use(async (opts) => {
       // Add logic here to run before the procedure
 
@@ -265,13 +268,88 @@ export const createIdentityPlugin = () => {
 };
 ```
 
-In our case, we want to extract details about the calling Cognito user. We'll do that by extracting the user's subject ID (or "sub") from the API gateway event, and retrieving user details from Cognito:
+In our case, we want to extract details about the calling Cognito user. We'll do that by extracting the user's subject ID (or "sub") from the API Gateway event, and retrieving user details from Cognito. The implementation varies slightly depending on whether the event was provided to our function by a REST API or an HTTP API:
 
+<Tabs>
+<TabItem label="REST">
 ```ts
 import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
+import { initTRPC, TRPCError } from '@trpc/server';
+import { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
+import { APIGatewayProxyEvent } from 'aws-lambda';
+
+export interface IIdentityContext {
+  identity?: {
+    sub: string;
+    username: string;
+  };
+}
 
 export const createIdentityPlugin = () => {
-  const t = initTRPC.context<IIdentityContext>().create();
+  const t = initTRPC.context<IIdentityContext & CreateAWSLambdaContextOptions<APIGatewayProxyEvent>>().create();
+
+  const cognito = new CognitoIdentityProvider();
+
+  return t.procedure.use(async (opts) => {
+    const cognitoAuthenticationProvider = opts.ctx.event.requestContext?.identity?.cognitoAuthenticationProvider;
+
+    let sub: string | undefined = undefined;
+    if (cognitoAuthenticationProvider) {
+      const providerParts = cognitoAuthenticationProvider.split(':');
+      sub = providerParts[providerParts.length - 1];
+    }
+
+    if (!sub) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: `Unable to determine calling user`,
+      });
+    }
+
+    const { Users } = await cognito.listUsers({
+      // Assumes user pool id is configured in lambda environment
+      UserPoolId: process.env.USER_POOL_ID!,
+      Limit: 1,
+      Filter: `sub="${sub}"`,
+    });
+
+    if (!Users || Users.length !== 1) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: `No user found with subjectId ${sub}`,
+      });
+    }
+
+    // Provide the identity to other procedures in the context
+    return await opts.next({
+      ctx: {
+        ...opts.ctx,
+        identity: {
+          sub,
+          username: Users[0].Username!,
+        },
+      },
+    });
+  });
+};
+```
+</TabItem>
+<TabItem label="HTTP">
+```ts
+import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
+import { initTRPC, TRPCError } from '@trpc/server';
+import { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
+import { APIGatewayProxyEventV2WithIAMAuthorizer } from 'aws-lambda';
+
+export interface IIdentityContext {
+  identity?: {
+    sub: string;
+    username: string;
+  };
+}
+
+export const createIdentityPlugin = () => {
+  const t = initTRPC.context<IIdentityContext & CreateAWSLambdaContextOptions<APIGatewayProxyEventV2WithIAMAuthorizer>>().create();
 
   const cognito = new CognitoIdentityProvider();
 
@@ -324,23 +402,35 @@ export const createIdentityPlugin = () => {
   });
 };
 ```
+</TabItem>
+</Tabs>
 
 ## Deploying your tRPC API
 
 The tRPC backend generator generates a CDK construct for deploying your API in the `common/constructs` folder. You can consume this in a CDK application, for example:
 
-```ts {6}
+```ts {6-8}
 import { MyApi } from ':my-scope/common-constructs`;
 
 export class ExampleStack extends Stack {
    constructor(scope: Construct, id: string) {
       // Add the api to your stack
-      const api = new MyApi(this, 'MyApi');
+      const api = new MyApi(this, 'MyApi', {
+        integrations: MyApi.defaultIntegrations(this).build(),
+      });
    }
 }
 ```
 
-This sets up your API infrastructure, including an AWS API Gateway HTTP API, AWS Lambda function for business logic, and IAM authentication.
+This sets up your API infrastructure, including an AWS API Gateway REST or HTTP API, AWS Lambda functions for business logic, and IAM authentication.
+
+### Type-Safe Integrations
+
+<Snippet name="api/type-safe-api-integrations" />
+
+:::tip
+When you add or remove a procedure in your tRPC API, these changes will be reflected immediately in the CDK construct without the need to rebuild.
+:::
 
 ### Granting Access
 

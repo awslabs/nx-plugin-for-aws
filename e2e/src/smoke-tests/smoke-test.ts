@@ -48,7 +48,11 @@ export const smokeTest = (
         opts,
       );
       await runCLI(
-        `generate @aws/nx-plugin:ts#trpc-api --apiName=my-api --no-interactive`,
+        `generate @aws/nx-plugin:ts#trpc-api --apiName=my-api --computeType=ServerlessApiGatewayRestApi --no-interactive`,
+        opts,
+      );
+      await runCLI(
+        `generate @aws/nx-plugin:ts#trpc-api --apiName=my-api-http --computeType=ServerlessApiGatewayHttpApi --no-interactive`,
         opts,
       );
       await runCLI(
@@ -60,7 +64,11 @@ export const smokeTest = (
         opts,
       );
       await runCLI(
-        `generate @aws/nx-plugin:py#fast-api --name=py-api --no-interactive`,
+        `generate @aws/nx-plugin:py#fast-api --name=py-api --computeType=ServerlessApiGatewayRestApi --no-interactive`,
+        opts,
+      );
+      await runCLI(
+        `generate @aws/nx-plugin:py#fast-api --name=py-api-http --computeType=ServerlessApiGatewayHttpApi --no-interactive`,
         opts,
       );
       await runCLI(

@@ -231,7 +231,7 @@ This is a plugin that we instrument to create the `DynamoDBClient` and inject it
 ```diff lang="ts"
 // middleware/index.ts
 import { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
-import type { APIGatewayProxyEventV2WithIAMAuthorizer } from 'aws-lambda';
+import type { APIGatewayProxyEvent } from 'aws-lambda';
 import { ILoggerContext } from './logger.js';
 import { IMetricsContext } from './metrics.js';
 import { ITracerContext } from './tracer.js';
@@ -244,7 +244,7 @@ export * from './tracer.js';
 export * from './error.js';
 
 export type IMiddlewareContext =
-  CreateAWSLambdaContextOptions<APIGatewayProxyEventV2WithIAMAuthorizer> &
+  CreateAWSLambdaContextOptions<APIGatewayProxyEvent> &
 +    IDynamoDBContext &
     ILoggerContext &
     IMetricsContext &
@@ -274,17 +274,17 @@ export type Context = IMiddlewareContext;
 export const t = initTRPC.context<Context>().create();
 
 export const publicProcedure = t.procedure
-+  .unstable_concat(createDynamoDBPlugin())
-  .unstable_concat(createLoggerPlugin())
-  .unstable_concat(createTracerPlugin())
-  .unstable_concat(createMetricsPlugin())
-  .unstable_concat(createErrorPlugin());
++  .concat(createDynamoDBPlugin())
+  .concat(createLoggerPlugin())
+  .concat(createTracerPlugin())
+  .concat(createMetricsPlugin())
+  .concat(createErrorPlugin());
 ```
 
 The DynamoDB plugin is instrumented.
 
 <Aside>
-We are using the `unstable_concat` api here which is safe to use. The only reason it has the `unstable_` prefixed is because it is a new API. For more information refer to the [concat guide](https://trpc.io/docs/server/middlewares#concat).
+The `concat` api binds our middleware to the procedures we define. For more details please refer to the [concat guide](https://trpc.io/docs/server/middlewares#concat).
 </Aside>
   </TabItem>
 </Tabs>
@@ -406,7 +406,7 @@ import {
 } from '@trpc/server/adapters/aws-lambda';
 -import { echo } from './procedures/echo.js';
 import { t } from './init.js';
-import { APIGatewayProxyEventV2WithIAMAuthorizer } from 'aws-lambda';
+import { APIGatewayProxyEvent } from 'aws-lambda';
 +import { queryActions } from './procedures/query-actions.js';
 +import { saveAction } from './procedures/save-action.js';
 +import { queryGames } from './procedures/query-games.js';
@@ -429,8 +429,14 @@ export const appRouter = router({
 export const handler = awsLambdaRequestHandler({
   router: appRouter,
   createContext: (
-    ctx: CreateAWSLambdaContextOptions<APIGatewayProxyEventV2WithIAMAuthorizer>,
+    ctx: CreateAWSLambdaContextOptions<APIGatewayProxyEvent>,
   ) => ctx,
+  responseMeta: () => ({
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': '*',
+    },
+  }),
 });
 
 export type AppRouter = typeof appRouter;
@@ -513,16 +519,31 @@ export class ApplicationStack extends cdk.Stack {
     const userIdentity = new UserIdentity(this, 'UserIdentity');
 +
 +    const electroDbTable = new ElectrodbDynamoTable(this, 'ElectroDbTable');
-
-    const gameApi = new GameApi(this, 'GameApi');
-    const storyApi = new StoryApi(this, 'StoryApi');
 +
-+    gameApi.routerFunction.addEnvironment(
-+      'TABLE_NAME',
-+      electroDbTable.tableName,
+     const gameApi = new GameApi(this, 'GameApi', {
+-      integrations: GameApi.defaultIntegrations(this).build(),
++      integrations: GameApi.defaultIntegrations(this)
++        .withDefaultOptions({
++          environment: {
++            TABLE_NAME: electroDbTable.tableName,
++          },
++        })
++        .build(),
+     });
++
++    // Grant read/write access to each procedure's lambda handler according to the permissions it requires
++    electroDbTable.grantReadData(gameApi.integrations['actions.query'].handler);
++    electroDbTable.grantReadData(gameApi.integrations['games.query'].handler);
++    electroDbTable.grantReadWriteData(
++      gameApi.integrations['actions.save'].handler,
 +    );
-+    // grant the gameAPI rw access to DynamoDB
-+    electroDbTable.grantReadWriteData(gameApi.routerFunction);
++    electroDbTable.grantReadWriteData(
++      gameApi.integrations['games.save'].handler,
++    );
++
+     const storyApi = new StoryApi(this, 'StoryApi', {
+       integrations: StoryApi.defaultIntegrations(this).build(),
+     });
 
     // grant our authenticated role access to invoke our APIs
     [storyApi, gameApi].forEach((api) =>
@@ -534,6 +555,10 @@ export class ApplicationStack extends cdk.Stack {
   }
 }
 ```
+
+:::note
+Notice here that since each procedure is served by an individual lambda function, we can follow the principle of least privilege and assign only the required read/write permissions based on the procedure's implementation.
+:::
   </TabItem>
 </Tabs>
 
@@ -583,9 +608,9 @@ dungeon-adventure-infra-sandbox: deploying... [2/2]
 
 Outputs:
 dungeon-adventure-infra-sandbox.ElectroDbTableTableNameXXX = dungeon-adventure-infra-sandbox-ElectroDbTableXXX-YYY
-dungeon-adventure-infra-sandbox.GameApiGameApiUrlXXX = https://xxx.region.amazonaws.com/
+dungeon-adventure-infra-sandbox.GameApiEndpointXXX = https://xxx.execute-api.region.amazonaws.com/prod/
 dungeon-adventure-infra-sandbox.GameUIDistributionDomainNameXXX = xxx.cloudfront.net
-dungeon-adventure-infra-sandbox.StoryApiStoryApiUrlXXX = https://xxx.execute-api.region.amazonaws.com/
+dungeon-adventure-infra-sandbox.StoryApiEndpointXXX = https://xxx.execute-api.region.amazonaws.com/prod/
 dungeon-adventure-infra-sandbox.UserIdentityUserIdentityIdentityPoolIdXXX = region:xxx
 dungeon-adventure-infra-sandbox.UserIdentityUserIdentityUserPoolIdXXX = region_xxx
 ```
@@ -635,19 +660,22 @@ acurl ap-southeast-2 lambda -N -X POST https://xxx
     Once your server is up and running, you can call it by running the following command:
 
     ```bash
-    curl -X GET http://localhost:2022/games.query\?input="\\{\\}"
+    curl -X GET 'http://localhost:2022/games.query?input=%7B%7D'
     ```
   </TabItem>
   <TabItem label="Deployed">
-```bash "https://xxx.execute-api.region.amazonaws.com/" "ap-southeast-2"
-acurl ap-southeast-2 execute-api -X GET \
-  https://xxx.execute-api.region.amazonaws.com/games.query\?input\="\{\}"
+```bash "https://xxx.execute-api.ap-southeast-2.amazonaws.com/prod/" "ap-southeast-2"
+acurl ap-southeast-2 execute-api -X GET 'https://xxx.execute-api.ap-southeast-2.amazonaws.com/prod/games.query?input=%7B%7D'
 ```
     <Aside type="caution">
-    Use the CDK deploy output value of `dungeon-adventure-infra-sandbox.GameApiGameApiUrlXXX` to replace the highlighted placeholder and set the region accordingly..
+    Use the CDK deploy output value of `dungeon-adventure-infra-sandbox.GameApiGameApiEndpointXXX` to replace the highlighted placeholder and set the region accordingly.
     </Aside>
   </TabItem>
 </Tabs>
+
+:::note
+The `%7B%7D` we pass to test the API is a URI encoded empty JSON object (`{}`).
+:::
 
 If the command executes successfully, you should see a response as follows:
 
@@ -655,4 +683,4 @@ If the command executes successfully, you should see a response as follows:
 {"result":{"data":{"items":[],"cursor":null}}}
 ```
 
-Congratulations. You have built and deployed your first API using tRPC!  🎉🎉🎉
+Congratulations, you have built and deployed your first API using tRPC!  🎉🎉🎉

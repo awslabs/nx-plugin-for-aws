@@ -1,14 +1,7 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
 exports[`trpc backend generator > should generate backend and schema projects > apps/test-api/backend/src/client/index.ts 1`] = `
-"import {
-  createTRPCClient,
-  httpBatchLink,
-  httpLink,
-  HTTPBatchLinkOptions,
-  HTTPLinkOptions,
-  splitLink,
-} from '@trpc/client';
+"import { createTRPCClient, httpLink, HTTPLinkOptions } from '@trpc/client';
 
 import { AppRouter } from '../router.js';
 import { sigv4Fetch } from './sigv4.js';
@@ -18,20 +11,12 @@ export interface TestApiClientConfig {
 }
 
 export const createTestApiClient = (config: TestApiClientConfig) => {
-  const linkOptions: HTTPLinkOptions<any> & HTTPBatchLinkOptions<any> = {
+  const linkOptions: HTTPLinkOptions<any> = {
     url: config.url,
     fetch: sigv4Fetch,
   };
   return createTRPCClient<AppRouter>({
-    links: [
-      splitLink({
-        condition(op) {
-          return op.context.skipBatch === true;
-        },
-        true: httpLink(linkOptions),
-        false: httpBatchLink(linkOptions),
-      }),
-    ],
+    links: [httpLink(linkOptions)],
   });
 };
 "
@@ -52,6 +37,7 @@ export const sigv4Fetch = (async (...args) => {
 
 exports[`trpc backend generator > should generate backend and schema projects > apps/test-api/backend/src/index.ts 1`] = `
 "export type { AppRouter } from './router.js';
+export { appRouter } from './router.js';
 export type { Context } from './init.js';
 export * from './client/index.js';
 "
@@ -75,10 +61,10 @@ export type Context = IMiddlewareContext;
 export const t = initTRPC.context<Context>().create();
 
 export const publicProcedure = t.procedure
-  .unstable_concat(createLoggerPlugin())
-  .unstable_concat(createTracerPlugin())
-  .unstable_concat(createMetricsPlugin())
-  .unstable_concat(createErrorPlugin());
+  .concat(createLoggerPlugin())
+  .concat(createTracerPlugin())
+  .concat(createMetricsPlugin())
+  .concat(createErrorPlugin());
 "
 `;
 
@@ -292,7 +278,7 @@ exports[`trpc backend generator > should generate backend and schema projects > 
 } from '@trpc/server/adapters/aws-lambda';
 import { echo } from './procedures/echo.js';
 import { t } from './init.js';
-import { APIGatewayProxyEventV2WithIAMAuthorizer } from 'aws-lambda';
+import type { APIGatewayProxyEventV2WithIAMAuthorizer } from 'aws-lambda';
 
 export const router = t.router;
 
@@ -333,86 +319,111 @@ export type IEchoOutput = z.TypeOf<typeof EchoOutputSchema>;
 "
 `;
 
-exports[`trpc backend generator > should set up shared constructs > http-api.ts 1`] = `
+exports[`trpc backend generator > should set up shared constructs for http > http-api.ts 1`] = `
 "import { Construct } from 'constructs';
-import { CfnOutput, Duration } from 'aws-cdk-lib';
-import {
-  CorsHttpMethod,
-  HttpApi as _HttpApi,
-  HttpMethod,
-  IHttpRouteAuthorizer,
-} from 'aws-cdk-lib/aws-apigatewayv2';
-import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
-import { Code, Function, Runtime, Tracing } from 'aws-cdk-lib/aws-lambda';
+import { RuntimeConfig } from '../runtime-config.js';
 import { Grant, IGrantable } from 'aws-cdk-lib/aws-iam';
-import { RuntimeConfig } from './runtime-config.js';
+import { HttpApiIntegration, OperationDetails } from './utils.js';
+import { CfnOutput } from 'aws-cdk-lib';
+import {
+  HttpApi as _HttpApi,
+  HttpApiProps as _HttpApiProps,
+  HttpMethod,
+} from 'aws-cdk-lib/aws-apigatewayv2';
 
-export interface HttpApiProps {
+/**
+ * Properties for creating an HttpApi construct.
+ *
+ * @template TIntegrations - Record mapping operation names to their integrations
+ * @template TOperation - String literal type representing operation names
+ */
+export interface HttpApiProps<
+  TIntegrations extends Record<TOperation, HttpApiIntegration>,
+  TOperation extends string,
+> extends _HttpApiProps {
+  /**
+   * Unique name for the API, used in runtime configuration
+   */
   readonly apiName: string;
-  readonly handler: string;
-  readonly handlerFilePath: string;
-  readonly runtime: Runtime;
-  readonly defaultAuthorizer: IHttpRouteAuthorizer;
-  readonly allowedOrigins?: string[];
+  /**
+   * Map of operation names to their API path and HTTP method details
+   */
+  readonly operations: Record<TOperation, OperationDetails>;
+  /**
+   * Map of operation names to their API Gateway integrations
+   */
+  readonly integrations: TIntegrations;
 }
 
-export class HttpApi extends Construct {
+/**
+ * A CDK construct that creates and configures an AWS API Gateway HTTP API.
+ *
+ * This class extends the base CDK HttpApi with additional functionality:
+ * - Type-safe operation and integration management
+ * - Automatic resource creation based on path patterns
+ * - Integration with runtime configuration for client discovery
+ *
+ * @template TOperation - String literal type representing operation names
+ * @template TIntegrations - Record mapping operation names to their integrations
+ */
+export class HttpApi<
+  TOperation extends string,
+  TIntegrations extends Record<TOperation, HttpApiIntegration>,
+> extends Construct {
+  /** The underlying CDK HttpApi instance */
   public readonly api: _HttpApi;
-  public readonly routerFunction: Function;
 
-  constructor(scope: Construct, id: string, props: HttpApiProps) {
+  /** Map of operation names to their API Gateway integrations */
+  public readonly integrations: TIntegrations;
+
+  constructor(
+    scope: Construct,
+    id: string,
+    {
+      apiName,
+      operations,
+      integrations,
+      ...props
+    }: HttpApiProps<TIntegrations, TOperation>,
+  ) {
     super(scope, id);
+    this.integrations = integrations;
 
-    this.routerFunction = new Function(this, \`\${id}Handler\`, {
-      timeout: Duration.seconds(30),
-      runtime: props.runtime,
-      handler: props.handler,
-      code: Code.fromAsset(props.handlerFilePath),
-      tracing: Tracing.ACTIVE,
-      environment: {
-        AWS_CONNECTION_REUSE_ENABLED: '1',
+    // Create the API Gateway REST API with logging enabled
+    this.api = new _HttpApi(this, 'Api', {
+      ...props,
+    });
+
+    // Create API resources and methods for each operation
+    (Object.entries(operations) as [TOperation, OperationDetails][]).map(
+      ([op, details]) => {
+        this.api.addRoutes({
+          path: details.path.startsWith('/')
+            ? details.path
+            : \`/\${details.path}\`,
+          methods: [details.method as HttpMethod],
+          integration: integrations[op].integration,
+          ...integrations[op].options,
+        });
       },
+    );
+
+    new CfnOutput(this, \`\${apiName}Url\`, {
+      value: this.api.url!,
     });
 
-    this.api = new _HttpApi(this, id, {
-      corsPreflight: {
-        allowOrigins: props.allowedOrigins ?? ['*'],
-        allowMethods: [CorsHttpMethod.ANY],
-        allowHeaders: [
-          'authorization',
-          'content-type',
-          'x-amz-content-sha256',
-          'x-amz-date',
-          'x-amz-security-token',
-        ],
-      },
-      defaultAuthorizer: props.defaultAuthorizer,
-    });
-
-    this.api.addRoutes({
-      path: '/{proxy+}',
-      methods: [
-        HttpMethod.GET,
-        HttpMethod.DELETE,
-        HttpMethod.POST,
-        HttpMethod.PUT,
-        HttpMethod.PATCH,
-        HttpMethod.HEAD,
-      ],
-      integration: new HttpLambdaIntegration(
-        'RouterIntegration',
-        this.routerFunction,
-      ),
-    });
-
-    new CfnOutput(this, \`\${props.apiName}Url\`, { value: this.api.url! });
-
-    RuntimeConfig.ensure(this).config.httpApis = {
-      ...RuntimeConfig.ensure(this).config.httpApis!,
-      [props.apiName]: this.api.url!,
+    // Register the API URL in runtime configuration for client discovery
+    RuntimeConfig.ensure(this).config.apis = {
+      ...RuntimeConfig.ensure(this).config.apis!,
+      [apiName]: this.api.url!,
     };
   }
 
+  /**
+   * Grants IAM permissions to invoke any method on this API.
+   *
+   * @param grantee - The IAM principal to grant permissions to
+   */
   public grantInvokeAccess(grantee: IGrantable) {
     Grant.addToPrincipal({
       grantee,
@@ -424,32 +435,994 @@ export class HttpApi extends Construct {
 "
 `;
 
-exports[`trpc backend generator > should set up shared constructs > index.ts 1`] = `
-"export * from './test-api.js';
+exports[`trpc backend generator > should set up shared constructs for http > test-api.ts 1`] = `
+"import { Construct } from 'constructs';
+import * as url from 'url';
+import {
+  Code,
+  Runtime,
+  Function,
+  FunctionProps,
+  Tracing,
+} from 'aws-cdk-lib/aws-lambda';
+import { Duration } from 'aws-cdk-lib';
+import { CorsHttpMethod } from 'aws-cdk-lib/aws-apigatewayv2';
+import { HttpIamAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
+import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
+import {
+  HttpApiIntegration,
+  IntegrationBuilder,
+} from '../../core/api/utils.js';
+import { HttpApi } from '../../core/api/http-api.js';
+import { Procedures, routerToOperations } from '../../core/api/trpc-utils.js';
+import { AppRouter, appRouter } from ':proj/test-api-backend';
+
+// String union type for all API operation names
+type Operations = Procedures<AppRouter>;
+
+/**
+ * Properties for creating a TestApi construct
+ *
+ * @template TIntegrations - Map of operation names to their integrations
+ */
+export interface TestApiProps<
+  TIntegrations extends Record<Operations, HttpApiIntegration>,
+> {
+  /**
+   * Map of operation names to their API Gateway integrations
+   */
+  integrations: TIntegrations;
+}
+
+/**
+ * A CDK construct that creates and configures an AWS API Gateway HTTP API
+ * specifically for TestApi.
+ * @template TIntegrations - Map of operation names to their integrations
+ */
+export class TestApi<
+  TIntegrations extends Record<Operations, HttpApiIntegration>,
+> extends HttpApi<Operations, TIntegrations> {
+  /**
+   * Creates default integrations for all operations, which implement each operation as
+   * its own individual lambda function.
+   *
+   * @param scope - The CDK construct scope
+   * @returns An IntegrationBuilder with default lambda integrations
+   */
+  public static defaultIntegrations = (scope: Construct) => {
+    return IntegrationBuilder.http({
+      operations: routerToOperations(appRouter),
+      defaultIntegrationOptions: {
+        runtime: Runtime.NODEJS_LATEST,
+        handler: 'index.handler',
+        code: Code.fromAsset(
+          url.fileURLToPath(
+            new URL(
+              '../../../../../../dist/apps/test-api/backend/bundle',
+              import.meta.url,
+            ),
+          ),
+        ),
+        timeout: Duration.seconds(30),
+        tracing: Tracing.ACTIVE,
+        environment: {
+          AWS_CONNECTION_REUSE_ENABLED: '1',
+        },
+      } satisfies FunctionProps,
+      buildDefaultIntegration: (op, props: FunctionProps) => {
+        const handler = new Function(scope, \`TestApi\${op}Handler\`, props);
+        return {
+          handler,
+          integration: new HttpLambdaIntegration(
+            \`TestApi\${op}Integration\`,
+            handler,
+          ),
+        };
+      },
+    });
+  };
+
+  constructor(
+    scope: Construct,
+    id: string,
+    props: TestApiProps<TIntegrations>,
+  ) {
+    super(scope, id, {
+      apiName: 'TestApi',
+      corsPreflight: {
+        allowOrigins: ['*'],
+        allowMethods: [CorsHttpMethod.ANY],
+        allowHeaders: [
+          'authorization',
+          'content-type',
+          'x-amz-content-sha256',
+          'x-amz-date',
+          'x-amz-security-token',
+        ],
+      },
+      defaultAuthorizer: new HttpIamAuthorizer(),
+      operations: routerToOperations(appRouter),
+      ...props,
+    });
+  }
+}
 "
 `;
 
-exports[`trpc backend generator > should set up shared constructs > test-api.ts 1`] = `
+exports[`trpc backend generator > should set up shared constructs for http > trpc-utils.ts 1`] = `
+"import { TRPCRouterRecord, AnyTRPCRouter } from '@trpc/server';
+import { OperationDetails } from './utils.js';
+import { HttpMethod } from 'aws-cdk-lib/aws-apigatewayv2';
+
+/**
+ * Helper type that recursively extracts procedure names from a tRPC router.
+ * This type traverses the router structure and builds fully qualified procedure names
+ * with dot notation for nested routers.
+ *
+ * @template T - The tRPC router record type
+ * @template Prefix - The current path prefix for nested procedures
+ */
+type _Procedures<T extends TRPCRouterRecord, Prefix extends string = ''> = {
+  [K in keyof T]: K extends string
+    ? T[K] extends TRPCRouterRecord
+      ? _Procedures<T[K], \`\${Prefix}\${K}.\`>
+      : \`\${Prefix}\${K}\`
+    : never;
+}[keyof T];
+
+/**
+ * Extracts all procedure names from a tRPC router as a union of string literals.
+ * This type is used to provide type-safe access to procedure names throughout the API.
+ *
+ * @template TRouter - The tRPC router type
+ */
+export type Procedures<TRouter extends AnyTRPCRouter> = _Procedures<
+  TRouter['_def']['record']
+>;
+
+/**
+ * Converts a tRPC router to a map of API operations.
+ * This method recursively traverses the router structure and creates operation details
+ * for each procedure, mapping queries to GET methods and mutations to POST methods.
+ *
+ * @param router - The tRPC router to convert
+ * @param prefix - The current path prefix for nested procedures
+ * @returns A map of procedure names to their API operation details
+ */
+export const routerToOperations = <TRouter extends AnyTRPCRouter>(
+  router: TRouter,
+  prefix = '',
+): Record<Procedures<TRouter>, OperationDetails> => {
+  return Object.fromEntries(
+    Object.entries(router._def.procedures).flatMap(
+      ([op, procedureOrRouter]: [string, any]) => {
+        const fullPath = prefix ? \`\${prefix}.\${op}\` : op;
+        return procedureOrRouter._def?.router
+          ? Object.entries(
+              routerToOperations<TRouter>(procedureOrRouter, fullPath),
+            )
+          : [
+              [
+                fullPath,
+                {
+                  path: fullPath,
+                  method:
+                    procedureOrRouter._def.type === 'query'
+                      ? HttpMethod.GET
+                      : HttpMethod.POST,
+                },
+              ],
+            ];
+      },
+    ),
+  ) as Record<Procedures<TRouter>, OperationDetails>;
+};
+"
+`;
+
+exports[`trpc backend generator > should set up shared constructs for http > utils.ts 1`] = `
+"import { Integration, MethodOptions } from 'aws-cdk-lib/aws-apigateway';
+import {
+  HttpRouteIntegration,
+  AddRoutesOptions,
+} from 'aws-cdk-lib/aws-apigatewayv2';
+
+/**
+ * Type representing applicable HTTP Methods in API Gateway
+ */
+export type HttpMethod =
+  | 'ANY'
+  | 'DELETE'
+  | 'GET'
+  | 'HEAD'
+  | 'OPTIONS'
+  | 'PATCH'
+  | 'POST'
+  | 'PUT';
+
+/**
+ * Defines the details of an API operation.
+ */
+export interface OperationDetails {
+  /**
+   * The URL path for the operation
+   */
+  path: string;
+
+  /**
+   * The HTTP method for the operation
+   */
+  method: HttpMethod;
+}
+
+/**
+ * Represents an API Gateway REST API integration that can be attached to API methods.
+ */
+export interface RestApiIntegration {
+  integration: Integration;
+  options?: MethodOptions;
+}
+
+/**
+ * Represents an API Gateway HTTP API that can be attached to API methods.
+ */
+export interface HttpApiIntegration {
+  integration: HttpRouteIntegration;
+  options?: Omit<AddRoutesOptions, 'path' | 'methods' | 'integration'>;
+}
+
+/**
+ * Options for constructing an IntegrationBuilder
+ */
+export interface IntegrationBuilderProps<
+  TOperation extends string,
+  TBaseIntegration,
+  TDefaultIntegrationProps extends object,
+  TDefaultIntegration extends TBaseIntegration,
+> {
+  /** Map of operation names to their API path and HTTP method details */
+  operations: Record<TOperation, OperationDetails>;
+
+  /** Default configuration options for integrations */
+  defaultIntegrationOptions: TDefaultIntegrationProps;
+
+  /** Function to create a default integration for an operation */
+  buildDefaultIntegration: (
+    op: TOperation,
+    props: TDefaultIntegrationProps,
+  ) => TDefaultIntegration;
+}
+
+/**
+ * A builder class for creating API integrations with flexible configuration options.
+ *
+ * This class implements the builder pattern to create a set of API integrations
+ * with support for default configurations and selective overrides.
+ *
+ * @template TOperation - String literal type representing operation names
+ * @template TBaseIntegration - Base type for all integrations
+ * @template TIntegrations - Record mapping operation names to their integrations
+ * @template TDefaultIntegrationProps - Type for default integration properties
+ * @template TDefaultIntegration - Type for default integration implementation
+ */
+export class IntegrationBuilder<
+  TOperation extends string,
+  TBaseIntegration,
+  TIntegrations extends Record<TOperation, TBaseIntegration>,
+  TDefaultIntegrationProps extends object,
+  TDefaultIntegration extends TBaseIntegration,
+> {
+  /** Options for the integration builder */
+  private options: IntegrationBuilderProps<
+    TOperation,
+    TBaseIntegration,
+    TDefaultIntegrationProps,
+    TDefaultIntegration
+  >;
+
+  /** Map of operation names to their custom integrations */
+  private integrations: Partial<TIntegrations> = {};
+
+  /**
+   * Create an Integration Builder for an HTTP API
+   */
+  public static http = <
+    TOperation extends string,
+    TIntegrations extends Record<TOperation, TDefaultIntegration>,
+    TDefaultIntegrationProps extends object,
+    TDefaultIntegration extends HttpApiIntegration,
+  >(
+    options: IntegrationBuilderProps<
+      TOperation,
+      HttpApiIntegration,
+      TDefaultIntegrationProps,
+      TDefaultIntegration
+    >,
+  ) => {
+    return new IntegrationBuilder<
+      TOperation,
+      HttpApiIntegration,
+      TIntegrations,
+      TDefaultIntegrationProps,
+      TDefaultIntegration
+    >(options);
+  };
+
+  /**
+   * Create an Integration Builder for a REST API
+   */
+  public static rest = <
+    TOperation extends string,
+    TIntegrations extends Record<TOperation, TDefaultIntegration>,
+    TDefaultIntegrationProps extends object,
+    TDefaultIntegration extends RestApiIntegration,
+  >(
+    options: IntegrationBuilderProps<
+      TOperation,
+      RestApiIntegration,
+      TDefaultIntegrationProps,
+      TDefaultIntegration
+    >,
+  ) => {
+    return new IntegrationBuilder<
+      TOperation,
+      RestApiIntegration,
+      TIntegrations,
+      TDefaultIntegrationProps,
+      TDefaultIntegration
+    >(options);
+  };
+
+  private constructor(
+    options: IntegrationBuilderProps<
+      TOperation,
+      TBaseIntegration,
+      TDefaultIntegrationProps,
+      TDefaultIntegration
+    >,
+  ) {
+    this.options = options;
+  }
+
+  /**
+   * Overrides default integrations with custom implementations for specific operations.
+   *
+   * @param overrides - Map of operation names to their custom integration implementations
+   * @returns The builder instance with updated type information reflecting the overrides
+   */
+  public withOverrides<
+    TOverrideIntegrations extends Partial<Record<TOperation, TBaseIntegration>>,
+  >(overrides: TOverrideIntegrations) {
+    this.integrations = { ...this.integrations, ...overrides };
+    // Re-type to include the overridden integration types
+    return this as unknown as IntegrationBuilder<
+      TOperation,
+      TBaseIntegration,
+      Omit<TIntegrations, keyof TOverrideIntegrations> & TOverrideIntegrations,
+      TDefaultIntegrationProps,
+      TDefaultIntegration
+    >;
+  }
+
+  /**
+   * Updates the default integration options that will be used for operations
+   * without custom overrides.
+   *
+   * @param options - Partial default integration options to merge with existing defaults
+   * @returns The builder instance
+   */
+  public withDefaultOptions(options: Partial<TDefaultIntegrationProps>) {
+    this.options.defaultIntegrationOptions = {
+      ...this.options.defaultIntegrationOptions,
+      ...options,
+    };
+    return this;
+  }
+
+  /**
+   * Builds and returns the complete set of integrations.
+   *
+   * This method creates the final integration map by:
+   * 1. Including all custom overrides provided via withOverrides()
+   * 2. Creating default integrations for any operations without custom overrides
+   *
+   * @returns A complete map of operation names to their integrations
+   */
+  public build(): TIntegrations {
+    return {
+      ...this.integrations,
+      ...Object.fromEntries(
+        (Object.keys(this.options.operations) as TOperation[])
+          .filter(
+            (op) => !this.integrations[op as keyof typeof this.integrations],
+          )
+          .map((op) => [
+            op,
+            this.options.buildDefaultIntegration(
+              op,
+              this.options.defaultIntegrationOptions,
+            ),
+          ]),
+      ),
+    } as unknown as TIntegrations;
+  }
+}
+"
+`;
+
+exports[`trpc backend generator > should set up shared constructs for rest > rest-api.ts 1`] = `
+"import { Construct } from 'constructs';
+import {
+  RestApi as _RestApi,
+  RestApiProps as _RestApiProps,
+  AccessLogFormat,
+  IResource,
+  LogGroupLogDestination,
+  MethodLoggingLevel,
+} from 'aws-cdk-lib/aws-apigateway';
+import { LogGroup } from 'aws-cdk-lib/aws-logs';
+import { RuntimeConfig } from '../runtime-config.js';
+import { Grant, IGrantable } from 'aws-cdk-lib/aws-iam';
+import { OperationDetails, RestApiIntegration } from './utils.js';
+
+/**
+ * Properties for creating a RestApi construct.
+ *
+ * @template TIntegrations - Record mapping operation names to their integrations
+ * @template TOperation - String literal type representing operation names
+ */
+export interface RestApiProps<
+  TIntegrations extends Record<TOperation, RestApiIntegration>,
+  TOperation extends string,
+> extends _RestApiProps {
+  /**
+   * Unique name for the API, used in runtime configuration
+   */
+  readonly apiName: string;
+  /**
+   * Map of operation names to their API path and HTTP method details
+   */
+  readonly operations: Record<TOperation, OperationDetails>;
+  /**
+   * Map of operation names to their API Gateway integrations
+   */
+  readonly integrations: TIntegrations;
+}
+
+/**
+ * A CDK construct that creates and configures an AWS API Gateway REST API.
+ *
+ * This class extends the base CDK RestApi with additional functionality:
+ * - Type-safe operation and integration management
+ * - Automatic resource creation based on path patterns
+ * - Integration with runtime configuration for client discovery
+ *
+ * @template TOperation - String literal type representing operation names
+ * @template TIntegrations - Record mapping operation names to their integrations
+ */
+export class RestApi<
+  TOperation extends string,
+  TIntegrations extends Record<TOperation, RestApiIntegration>,
+> extends Construct {
+  /** The underlying CDK RestApi instance */
+  public readonly api: _RestApi;
+
+  /** Map of operation names to their API Gateway integrations */
+  public readonly integrations: TIntegrations;
+
+  constructor(
+    scope: Construct,
+    id: string,
+    {
+      apiName,
+      operations,
+      integrations,
+      ...props
+    }: RestApiProps<TIntegrations, TOperation>,
+  ) {
+    super(scope, id);
+    this.integrations = integrations;
+
+    // Create the API Gateway REST API with logging enabled
+    this.api = new _RestApi(this, 'Api', {
+      deployOptions: {
+        accessLogDestination: new LogGroupLogDestination(
+          new LogGroup(this, 'AccessLogs'),
+        ),
+        accessLogFormat: AccessLogFormat.clf(),
+        loggingLevel: MethodLoggingLevel.INFO,
+      },
+      ...props,
+    });
+
+    // Create API resources and methods for each operation
+    (Object.entries(operations) as [TOperation, OperationDetails][]).map(
+      ([op, details]) => {
+        const resource = this.getOrCreateResource(
+          this.api.root,
+          (details.path.startsWith('/')
+            ? details.path.slice(1)
+            : details.path
+          ).split('/'),
+        );
+        resource.addMethod(
+          details.method,
+          integrations[op].integration,
+          integrations[op].options,
+        );
+      },
+    );
+
+    // Register the API URL in runtime configuration for client discovery
+    RuntimeConfig.ensure(this).config.apis = {
+      ...RuntimeConfig.ensure(this).config.apis!,
+      [apiName]: this.api.url!,
+    };
+  }
+
+  /**
+   * Recursively creates or retrieves API Gateway resources based on a path pattern.
+   *
+   * @param resource - The parent API Gateway resource
+   * @param pathParts - Array of path segments to create or retrieve
+   * @returns The API Gateway resource at the end of the path
+   */
+  private getOrCreateResource(
+    resource: IResource,
+    [nextPathPart, ...pathParts]: string[],
+  ): IResource {
+    if (!nextPathPart) {
+      return resource;
+    }
+    const childResource =
+      resource.getResource(nextPathPart) ?? resource.addResource(nextPathPart);
+    return this.getOrCreateResource(childResource, pathParts);
+  }
+
+  /**
+   * Grants IAM permissions to invoke any method on this API.
+   *
+   * @param grantee - The IAM principal to grant permissions to
+   */
+  public grantInvokeAccess(grantee: IGrantable) {
+    Grant.addToPrincipal({
+      grantee,
+      actions: ['execute-api:Invoke'],
+      resourceArns: [this.api.arnForExecuteApi('*', '/*', '*')],
+    });
+  }
+}
+"
+`;
+
+exports[`trpc backend generator > should set up shared constructs for rest > test-api.ts 1`] = `
 "import { Construct } from 'constructs';
 import * as url from 'url';
-import { HttpApi } from '../../core/http-api.js';
-import { HttpIamAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
-import { Runtime } from 'aws-cdk-lib/aws-lambda';
+import {
+  Code,
+  Runtime,
+  Function,
+  FunctionProps,
+  Tracing,
+} from 'aws-cdk-lib/aws-lambda';
+import {
+  AuthorizationType,
+  Cors,
+  LambdaIntegration,
+} from 'aws-cdk-lib/aws-apigateway';
+import { Duration, Stack } from 'aws-cdk-lib';
+import {
+  PolicyDocument,
+  PolicyStatement,
+  Effect,
+  AccountPrincipal,
+  AnyPrincipal,
+} from 'aws-cdk-lib/aws-iam';
+import {
+  IntegrationBuilder,
+  RestApiIntegration,
+} from '../../core/api/utils.js';
+import { RestApi } from '../../core/api/rest-api.js';
+import { Procedures, routerToOperations } from '../../core/api/trpc-utils.js';
+import { AppRouter, appRouter } from ':proj/test-api-backend';
 
-export class TestApi extends HttpApi {
-  constructor(scope: Construct, id: string) {
-    super(scope, id, {
-      defaultAuthorizer: new HttpIamAuthorizer(),
-      apiName: 'TestApi',
-      runtime: Runtime.NODEJS_LATEST,
-      handler: 'index.handler',
-      handlerFilePath: url.fileURLToPath(
-        new URL(
-          '../../../../../../dist/apps/test-api/backend/bundle',
-          import.meta.url,
+// String union type for all API operation names
+type Operations = Procedures<AppRouter>;
+
+/**
+ * Properties for creating a TestApi construct
+ *
+ * @template TIntegrations - Map of operation names to their integrations
+ */
+export interface TestApiProps<
+  TIntegrations extends Record<Operations, RestApiIntegration>,
+> {
+  /**
+   * Map of operation names to their API Gateway integrations
+   */
+  integrations: TIntegrations;
+}
+
+/**
+ * A CDK construct that creates and configures an AWS API Gateway REST API
+ * specifically for TestApi.
+ * @template TIntegrations - Map of operation names to their integrations
+ */
+export class TestApi<
+  TIntegrations extends Record<Operations, RestApiIntegration>,
+> extends RestApi<Operations, TIntegrations> {
+  /**
+   * Creates default integrations for all operations, which implement each operation as
+   * its own individual lambda function.
+   *
+   * @param scope - The CDK construct scope
+   * @returns An IntegrationBuilder with default lambda integrations
+   */
+  public static defaultIntegrations = (scope: Construct) => {
+    return IntegrationBuilder.rest({
+      operations: routerToOperations(appRouter),
+      defaultIntegrationOptions: {
+        runtime: Runtime.NODEJS_LATEST,
+        handler: 'index.handler',
+        code: Code.fromAsset(
+          url.fileURLToPath(
+            new URL(
+              '../../../../../../dist/apps/test-api/backend/bundle',
+              import.meta.url,
+            ),
+          ),
         ),
-      ),
+        timeout: Duration.seconds(30),
+        tracing: Tracing.ACTIVE,
+        environment: {
+          AWS_CONNECTION_REUSE_ENABLED: '1',
+        },
+      } satisfies FunctionProps,
+      buildDefaultIntegration: (op, props: FunctionProps) => {
+        const handler = new Function(scope, \`TestApi\${op}Handler\`, props);
+        return { handler, integration: new LambdaIntegration(handler) };
+      },
     });
+  };
+
+  constructor(
+    scope: Construct,
+    id: string,
+    props: TestApiProps<TIntegrations>,
+  ) {
+    super(scope, id, {
+      apiName: 'TestApi',
+      defaultMethodOptions: {
+        authorizationType: AuthorizationType.IAM,
+      },
+      defaultCorsPreflightOptions: {
+        allowOrigins: Cors.ALL_ORIGINS,
+        allowMethods: Cors.ALL_METHODS,
+      },
+      policy: new PolicyDocument({
+        statements: [
+          // Here we grant any AWS credentials from the account that the project is deployed in to call the api.
+          // Machine to machine fine-grained access can be defined here using more specific principals (eg roles or
+          // users) and resources (eg which api paths may be invoked by which principal) if required.
+          new PolicyStatement({
+            effect: Effect.ALLOW,
+            principals: [new AccountPrincipal(Stack.of(scope).account)],
+            actions: ['execute-api:Invoke'],
+            resources: ['execute-api:/*'],
+          }),
+          // Open up OPTIONS to allow browsers to make unauthenticated preflight requests
+          new PolicyStatement({
+            effect: Effect.ALLOW,
+            principals: [new AnyPrincipal()],
+            actions: ['execute-api:Invoke'],
+            resources: ['execute-api:/*/OPTIONS/*'],
+          }),
+        ],
+      }),
+      operations: routerToOperations(appRouter),
+      ...props,
+    });
+  }
+}
+"
+`;
+
+exports[`trpc backend generator > should set up shared constructs for rest > trpc-utils.ts 1`] = `
+"import { TRPCRouterRecord, AnyTRPCRouter } from '@trpc/server';
+import { OperationDetails } from './utils.js';
+import { HttpMethod } from 'aws-cdk-lib/aws-apigatewayv2';
+
+/**
+ * Helper type that recursively extracts procedure names from a tRPC router.
+ * This type traverses the router structure and builds fully qualified procedure names
+ * with dot notation for nested routers.
+ *
+ * @template T - The tRPC router record type
+ * @template Prefix - The current path prefix for nested procedures
+ */
+type _Procedures<T extends TRPCRouterRecord, Prefix extends string = ''> = {
+  [K in keyof T]: K extends string
+    ? T[K] extends TRPCRouterRecord
+      ? _Procedures<T[K], \`\${Prefix}\${K}.\`>
+      : \`\${Prefix}\${K}\`
+    : never;
+}[keyof T];
+
+/**
+ * Extracts all procedure names from a tRPC router as a union of string literals.
+ * This type is used to provide type-safe access to procedure names throughout the API.
+ *
+ * @template TRouter - The tRPC router type
+ */
+export type Procedures<TRouter extends AnyTRPCRouter> = _Procedures<
+  TRouter['_def']['record']
+>;
+
+/**
+ * Converts a tRPC router to a map of API operations.
+ * This method recursively traverses the router structure and creates operation details
+ * for each procedure, mapping queries to GET methods and mutations to POST methods.
+ *
+ * @param router - The tRPC router to convert
+ * @param prefix - The current path prefix for nested procedures
+ * @returns A map of procedure names to their API operation details
+ */
+export const routerToOperations = <TRouter extends AnyTRPCRouter>(
+  router: TRouter,
+  prefix = '',
+): Record<Procedures<TRouter>, OperationDetails> => {
+  return Object.fromEntries(
+    Object.entries(router._def.procedures).flatMap(
+      ([op, procedureOrRouter]: [string, any]) => {
+        const fullPath = prefix ? \`\${prefix}.\${op}\` : op;
+        return procedureOrRouter._def?.router
+          ? Object.entries(
+              routerToOperations<TRouter>(procedureOrRouter, fullPath),
+            )
+          : [
+              [
+                fullPath,
+                {
+                  path: fullPath,
+                  method:
+                    procedureOrRouter._def.type === 'query'
+                      ? HttpMethod.GET
+                      : HttpMethod.POST,
+                },
+              ],
+            ];
+      },
+    ),
+  ) as Record<Procedures<TRouter>, OperationDetails>;
+};
+"
+`;
+
+exports[`trpc backend generator > should set up shared constructs for rest > utils.ts 1`] = `
+"import { Integration, MethodOptions } from 'aws-cdk-lib/aws-apigateway';
+import {
+  HttpRouteIntegration,
+  AddRoutesOptions,
+} from 'aws-cdk-lib/aws-apigatewayv2';
+
+/**
+ * Type representing applicable HTTP Methods in API Gateway
+ */
+export type HttpMethod =
+  | 'ANY'
+  | 'DELETE'
+  | 'GET'
+  | 'HEAD'
+  | 'OPTIONS'
+  | 'PATCH'
+  | 'POST'
+  | 'PUT';
+
+/**
+ * Defines the details of an API operation.
+ */
+export interface OperationDetails {
+  /**
+   * The URL path for the operation
+   */
+  path: string;
+
+  /**
+   * The HTTP method for the operation
+   */
+  method: HttpMethod;
+}
+
+/**
+ * Represents an API Gateway REST API integration that can be attached to API methods.
+ */
+export interface RestApiIntegration {
+  integration: Integration;
+  options?: MethodOptions;
+}
+
+/**
+ * Represents an API Gateway HTTP API that can be attached to API methods.
+ */
+export interface HttpApiIntegration {
+  integration: HttpRouteIntegration;
+  options?: Omit<AddRoutesOptions, 'path' | 'methods' | 'integration'>;
+}
+
+/**
+ * Options for constructing an IntegrationBuilder
+ */
+export interface IntegrationBuilderProps<
+  TOperation extends string,
+  TBaseIntegration,
+  TDefaultIntegrationProps extends object,
+  TDefaultIntegration extends TBaseIntegration,
+> {
+  /** Map of operation names to their API path and HTTP method details */
+  operations: Record<TOperation, OperationDetails>;
+
+  /** Default configuration options for integrations */
+  defaultIntegrationOptions: TDefaultIntegrationProps;
+
+  /** Function to create a default integration for an operation */
+  buildDefaultIntegration: (
+    op: TOperation,
+    props: TDefaultIntegrationProps,
+  ) => TDefaultIntegration;
+}
+
+/**
+ * A builder class for creating API integrations with flexible configuration options.
+ *
+ * This class implements the builder pattern to create a set of API integrations
+ * with support for default configurations and selective overrides.
+ *
+ * @template TOperation - String literal type representing operation names
+ * @template TBaseIntegration - Base type for all integrations
+ * @template TIntegrations - Record mapping operation names to their integrations
+ * @template TDefaultIntegrationProps - Type for default integration properties
+ * @template TDefaultIntegration - Type for default integration implementation
+ */
+export class IntegrationBuilder<
+  TOperation extends string,
+  TBaseIntegration,
+  TIntegrations extends Record<TOperation, TBaseIntegration>,
+  TDefaultIntegrationProps extends object,
+  TDefaultIntegration extends TBaseIntegration,
+> {
+  /** Options for the integration builder */
+  private options: IntegrationBuilderProps<
+    TOperation,
+    TBaseIntegration,
+    TDefaultIntegrationProps,
+    TDefaultIntegration
+  >;
+
+  /** Map of operation names to their custom integrations */
+  private integrations: Partial<TIntegrations> = {};
+
+  /**
+   * Create an Integration Builder for an HTTP API
+   */
+  public static http = <
+    TOperation extends string,
+    TIntegrations extends Record<TOperation, TDefaultIntegration>,
+    TDefaultIntegrationProps extends object,
+    TDefaultIntegration extends HttpApiIntegration,
+  >(
+    options: IntegrationBuilderProps<
+      TOperation,
+      HttpApiIntegration,
+      TDefaultIntegrationProps,
+      TDefaultIntegration
+    >,
+  ) => {
+    return new IntegrationBuilder<
+      TOperation,
+      HttpApiIntegration,
+      TIntegrations,
+      TDefaultIntegrationProps,
+      TDefaultIntegration
+    >(options);
+  };
+
+  /**
+   * Create an Integration Builder for a REST API
+   */
+  public static rest = <
+    TOperation extends string,
+    TIntegrations extends Record<TOperation, TDefaultIntegration>,
+    TDefaultIntegrationProps extends object,
+    TDefaultIntegration extends RestApiIntegration,
+  >(
+    options: IntegrationBuilderProps<
+      TOperation,
+      RestApiIntegration,
+      TDefaultIntegrationProps,
+      TDefaultIntegration
+    >,
+  ) => {
+    return new IntegrationBuilder<
+      TOperation,
+      RestApiIntegration,
+      TIntegrations,
+      TDefaultIntegrationProps,
+      TDefaultIntegration
+    >(options);
+  };
+
+  private constructor(
+    options: IntegrationBuilderProps<
+      TOperation,
+      TBaseIntegration,
+      TDefaultIntegrationProps,
+      TDefaultIntegration
+    >,
+  ) {
+    this.options = options;
+  }
+
+  /**
+   * Overrides default integrations with custom implementations for specific operations.
+   *
+   * @param overrides - Map of operation names to their custom integration implementations
+   * @returns The builder instance with updated type information reflecting the overrides
+   */
+  public withOverrides<
+    TOverrideIntegrations extends Partial<Record<TOperation, TBaseIntegration>>,
+  >(overrides: TOverrideIntegrations) {
+    this.integrations = { ...this.integrations, ...overrides };
+    // Re-type to include the overridden integration types
+    return this as unknown as IntegrationBuilder<
+      TOperation,
+      TBaseIntegration,
+      Omit<TIntegrations, keyof TOverrideIntegrations> & TOverrideIntegrations,
+      TDefaultIntegrationProps,
+      TDefaultIntegration
+    >;
+  }
+
+  /**
+   * Updates the default integration options that will be used for operations
+   * without custom overrides.
+   *
+   * @param options - Partial default integration options to merge with existing defaults
+   * @returns The builder instance
+   */
+  public withDefaultOptions(options: Partial<TDefaultIntegrationProps>) {
+    this.options.defaultIntegrationOptions = {
+      ...this.options.defaultIntegrationOptions,
+      ...options,
+    };
+    return this;
+  }
+
+  /**
+   * Builds and returns the complete set of integrations.
+   *
+   * This method creates the final integration map by:
+   * 1. Including all custom overrides provided via withOverrides()
+   * 2. Creating default integrations for any operations without custom overrides
+   *
+   * @returns A complete map of operation names to their integrations
+   */
+  public build(): TIntegrations {
+    return {
+      ...this.integrations,
+      ...Object.fromEntries(
+        (Object.keys(this.options.operations) as TOperation[])
+          .filter(
+            (op) => !this.integrations[op as keyof typeof this.integrations],
+          )
+          .map((op) => [
+            op,
+            this.options.buildDefaultIntegration(
+              op,
+              this.options.defaultIntegrationOptions,
+            ),
+          ]),
+      ),
+    } as unknown as TIntegrations;
   }
 }
 "

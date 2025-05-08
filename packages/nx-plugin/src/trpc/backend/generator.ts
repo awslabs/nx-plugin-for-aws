@@ -24,12 +24,11 @@ import tsLibGenerator from '../../ts/lib/generator';
 import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
 import { withVersions } from '../../utils/versions';
 import { toClassName } from '../../utils/names';
-import { addStarExport } from '../../utils/ast';
 import { formatFilesInSubtree } from '../../utils/format';
-import { addHttpApi } from '../../utils/http-api';
 import { sortObjectKeys } from '../../utils/object';
 import { NxGeneratorInfo, getGeneratorInfo } from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+import { addApiGatewayConstruct } from '../../utils/api-constructs/api-constructs';
 
 export const TRPC_BACKEND_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -76,59 +75,17 @@ export async function trpcBackendGenerator(
     subDirectory: 'schema',
   });
 
-  if (
-    !tree.exists(
-      joinPathFragments(
-        PACKAGES_DIR,
-        SHARED_CONSTRUCTS_DIR,
-        'src',
-        'app',
-        'http-apis',
-        `${apiNameKebabCase}.ts`,
-      ),
-    )
-  ) {
-    generateFiles(
-      tree,
-      joinPathFragments(
-        __dirname,
-        'files',
-        SHARED_CONSTRUCTS_DIR,
-        'src',
-        'app',
-      ),
-      joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'src', 'app'),
-      enhancedOptions,
-      {
-        overwriteStrategy: OverwriteStrategy.KeepExisting,
-      },
-    );
-
-    addStarExport(
-      tree,
-      joinPathFragments(
-        PACKAGES_DIR,
-        SHARED_CONSTRUCTS_DIR,
-        'src',
-        'app',
-        'index.ts',
-      ),
-      './http-apis/index.js',
-    );
-    addStarExport(
-      tree,
-      joinPathFragments(
-        PACKAGES_DIR,
-        SHARED_CONSTRUCTS_DIR,
-        'src',
-        'app',
-        'http-apis',
-        'index.ts',
-      ),
-      `./${apiNameKebabCase}.js`,
-    );
-  }
-  addHttpApi(tree, apiNameClassName);
+  addApiGatewayConstruct(tree, {
+    apiNameClassName,
+    apiNameKebabCase,
+    constructType:
+      options.computeType === 'ServerlessApiGatewayHttpApi' ? 'http' : 'rest',
+    backend: {
+      type: 'trpc',
+      projectAlias: enhancedOptions.backendProjectAlias,
+      dir: backendRoot,
+    },
+  });
 
   updateJson(
     tree,
@@ -212,6 +169,7 @@ export async function trpcBackendGenerator(
       '@aws-lambda-powertools/metrics',
       '@aws-lambda-powertools/tracer',
       '@trpc/server',
+      '@trpc/client',
       'aws4fetch',
       '@aws-sdk/credential-providers',
     ]),

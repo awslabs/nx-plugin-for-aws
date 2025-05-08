@@ -1,0 +1,112 @@
+import { Construct } from 'constructs';
+import { RuntimeConfig } from '../runtime-config.js';
+import { Grant, IGrantable } from 'aws-cdk-lib/aws-iam';
+import { HttpApiIntegration, OperationDetails } from './utils.js';
+import { CfnOutput } from 'aws-cdk-lib';
+import {
+  HttpApi as _HttpApi,
+  HttpApiProps as _HttpApiProps,
+  HttpMethod,
+} from 'aws-cdk-lib/aws-apigatewayv2';
+
+/**
+ * Properties for creating an HttpApi construct.
+ *
+ * @template TIntegrations - Record mapping operation names to their integrations
+ * @template TOperation - String literal type representing operation names
+ */
+export interface HttpApiProps<
+  TIntegrations extends Record<TOperation, HttpApiIntegration>,
+  TOperation extends string,
+> extends _HttpApiProps {
+  /**
+   * Unique name for the API, used in runtime configuration
+   */
+  readonly apiName: string;
+  /**
+   * Map of operation names to their API path and HTTP method details
+   */
+  readonly operations: Record<TOperation, OperationDetails>;
+  /**
+   * Map of operation names to their API Gateway integrations
+   */
+  readonly integrations: TIntegrations;
+}
+
+/**
+ * A CDK construct that creates and configures an AWS API Gateway HTTP API.
+ *
+ * This class extends the base CDK HttpApi with additional functionality:
+ * - Type-safe operation and integration management
+ * - Automatic resource creation based on path patterns
+ * - Integration with runtime configuration for client discovery
+ *
+ * @template TOperation - String literal type representing operation names
+ * @template TIntegrations - Record mapping operation names to their integrations
+ */
+export class HttpApi<
+  TOperation extends string,
+  TIntegrations extends Record<TOperation, HttpApiIntegration>,
+> extends Construct {
+  /** The underlying CDK HttpApi instance */
+  public readonly api: _HttpApi;
+
+  /** Map of operation names to their API Gateway integrations */
+  public readonly integrations: TIntegrations;
+
+  constructor(
+    scope: Construct,
+    id: string,
+    {
+      apiName,
+      operations,
+      integrations,
+      ...props
+    }: HttpApiProps<TIntegrations, TOperation>,
+  ) {
+    super(scope, id);
+    this.integrations = integrations;
+
+    // Create the API Gateway REST API with logging enabled
+    this.api = new _HttpApi(this, 'Api', {
+      ...props,
+    });
+
+    // Create API resources and methods for each operation
+    (Object.entries(operations) as [TOperation, OperationDetails][]).map(
+      ([op, details]) => {
+        this.api.addRoutes({
+          path: details.path.startsWith('/')
+            ? details.path
+            : `/${details.path}`,
+          methods: [details.method as HttpMethod],
+          integration: integrations[op].integration,
+          ...integrations[op].options,
+        });
+      },
+    );
+
+    new CfnOutput(this, `${apiName}Url`, {
+      value: this.api.url!,
+    });
+
+    // Register the API URL in runtime configuration for client discovery
+    RuntimeConfig.ensure(this).config.apis = {
+      ...RuntimeConfig.ensure(this).config.apis!,
+      [apiName]: this.api.url!,
+    };
+  }
+
+  /**
+   * Grants IAM permissions to invoke any method on this API.
+   *
+   * @param grantee - The IAM principal to grant permissions to
+   */
+  public grantInvokeAccess(grantee: IGrantable) {
+    Grant.addToPrincipal({
+      grantee,
+      actions: ['execute-api:Invoke'],
+      resourceArns: [this.api.arnForExecuteApi('*', '/*', '*')],
+    });
+  }
+}

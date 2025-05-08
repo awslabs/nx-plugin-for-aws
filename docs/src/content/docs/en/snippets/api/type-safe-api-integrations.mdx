@@ -1,0 +1,174 @@
+---
+title: Type-Safe API Integrations
+---
+
+The REST/HTTP API CDK constructs are configured to provide a type-safe interface for defining integrations for each of your operations.
+
+#### Default Integrations
+
+You can use the static `defaultIntegrations` to make use of the default pattern, which defines an individual AWS Lambda function for each operation:
+
+```ts {2}
+new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this).build(),
+});
+```
+
+#### Accessing Integrations
+
+You can access the underlying AWS Lambda functions via the API construct's `integrations` property, in a type-safe manner. For example, if your API defines an operation named `sayHello` and you need to add some permissions to this function, you can do so as follows:
+
+```ts {6}
+const api = new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this).build(),
+});
+
+// sayHello is typed to the operations defined in your API
+api.integrations.sayHello.handler.addToRolePolicy(new PolicyStatement({
+  effect: Effect.ALLOW,
+  actions: [...],
+  resources: [...],
+}));
+```
+
+#### Customising Default Options
+
+If you would like to customise the options used when creating the Lambda function for each default integration, you can use the `withDefaultOptions` method. For example, if you would like all of your Lambda functions to reside in a Vpc:
+
+```ts {5-7}
+const vpc = new Vpc(this, 'Vpc', ...);
+
+new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this)
+    .withDefaultOptions({
+      vpc,
+    })
+    .build(),
+});
+```
+
+#### Overriding Integrations
+
+You can also override integrations for specific operations using the `withOverrides` method. Each override must specify an `integration` property which is typed to the appropriate CDK integration construct for the HTTP or REST API. The `withOverrides` method is also type-safe. For example, if you would like to override a `getDocumentation` API to point to documentation hosted by some external website you could achieve this as follows:
+
+```ts
+new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this)
+    .withOverrides({
+      getDocumentation: {
+        integration: new HttpIntegration('https://example.com/documentation'),
+      },
+    })
+    .build(),
+});
+```
+
+You will also notice that the overridden integration no longer has a `handler` property when accessing it via `api.integrations.getDocumentation`.
+
+You can add additional properties to an integration which will also be typed accordingly, allowing for other types of integration to be abstracted but remain type-safe, for example if you have created an S3 integration for a REST API and later wish to reference the bucket for a particular operation, you can do so as follows:
+
+```ts {13, 41}
+const storageBucket = new Bucket(this, 'Bucket', { ... });
+
+const apiGatewayRole = new Role(this, 'ApiGatewayS3Role', {
+  assumedBy: new ServicePrincipal('apigateway.amazonaws.com'),
+});
+
+storageBucket.grantRead(apiGatewayRole);
+
+const api = new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this)
+    .withOverrides({
+      getFile: {
+        bucket: storageBucket,
+        integration: new AwsIntegration({
+          service: 's3',
+          integrationHttpMethod: 'GET',
+          path: `${storageBucket.bucketName}/{fileName}`,
+          options: {
+            credentialsRole: apiGatewayRole,
+            requestParameters: {
+              'integration.request.path.fileName': 'method.request.querystring.fileName',
+            },
+            integrationResponses: [{ statusCode: '200' }],
+          },
+        }),
+        options: {
+          requestParameters: {
+            'method.request.querystring.fileName': true,
+          },
+          methodResponses: [{
+            statusCode: '200',
+          }],
+        }
+      },
+    })
+    .build(),
+});
+
+// Later, perhaps in another file, you can access the bucket property we defined
+// in a type-safe manner
+api.integrations.getFile.bucket.grantRead(...);
+```
+
+#### Overriding Authorizers
+
+You can also supply `options` in your integration to override particular method options such as authorizers, for example if you wished to use Cognito authentication for your `getDocumentation` operation:
+
+```ts
+new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this)
+    .withOverrides({
+      getDocumentation: {
+        integration: new HttpIntegration('https://example.com/documentation'),
+        options: {
+          authorizer: new CognitoUserPoolsAuthorizer(...) // for REST, or HttpUserPoolAuthorizer for an HTTP API
+        }
+      },
+    })
+    .build(),
+});
+```
+
+#### Explicit Integrations
+
+If you prefer, you can choose not to use the default integrations and instead directly supply one for each operation. This is useful if, for example, each operation needs to use a different type of integration or you would like to receive a type error when adding new operations:
+
+```ts
+new MyApi(this, 'MyApi', {
+  integrations: {
+    sayHello: {
+      integration: new LambdaIntegration(...),
+    },
+    getDocumentation: {
+      integration: new HttpIntegration(...),
+    },
+  },
+});
+```
+
+#### Router Pattern
+
+If you prefer to deploy a single Lambda function to service all API requests, you can freely edit the `defaultIntegrations` method for your API to create a single function instead of one per integration:
+
+```ts {5,11-12}
+// packages/common/constructs/src/app/apis/my-api.ts
+export class MyApi<...> extends ... {
+
+  public static defaultIntegrations = (scope: Construct) => {
+    const router = new Function(scope, 'RouterHandler', { ... });
+    return IntegrationBuilder.rest({
+      ...
+      defaultIntegrationOptions: {},
+      buildDefaultIntegration: (op) => {
+        return {
+          // Reference the same router lambda handler in every integration
+          integration: new LambdaIntegration(router),
+        };
+      },
+    });
+  };
+}
+```
+
+You can modify the code in other ways if you prefer, for example you may prefer to define the `router` function as a parameter to `defaultIntegrations` instead of constructing it within the method.
