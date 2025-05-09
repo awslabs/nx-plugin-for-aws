@@ -55,7 +55,7 @@
 - `ts#infra` - Generate a Typescript AWS CDK infrastructure project for your application.
 - `ts#cloudscape-website` - Generate a new Cloudscape/React/Vite based web application.
 - `ts#cloudscape-website#auth` - Add AWS Cognito authentication to your Cloudscape website.
-- `ts#trpc-api` - Generate a tRPC backend service with Amazon API Gateway/AWS Lambda integration and [AWS Powertools](https://github.com/aws-powertools/powertools-lambda-typescript) pre-configured.
+- `ts#trpc-api` - Generate a tRPC backend service with Amazon API Gateway/AWS Lambda integrations and [AWS Powertools](https://github.com/aws-powertools/powertools-lambda-typescript) pre-configured.
 - `ts#nx-generator` - Add an [Nx Generator](https://nx.dev/features/generate-code) to a TypeScript project.
 - `ts#mcp-server` - Generate a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server in TypeScript.
 - `py#project` - Generate a uv based Python project.
