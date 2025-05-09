@@ -1,0 +1,87 @@
+import { Duration, Stack, CfnOutput } from 'aws-cdk-lib';
+import { IGrantable, Grant } from 'aws-cdk-lib/aws-iam';
+import {
+  Runtime,
+  Code,
+  Tracing,
+  LayerVersion,
+  FunctionUrlAuthType,
+  InvokeMode,
+  Function,
+} from 'aws-cdk-lib/aws-lambda';
+import { Construct } from 'constructs';
+import url from 'url';
+import { RuntimeConfig } from '../../core/runtime-config.js';
+
+export class StoryApi extends Construct {
+  public readonly handler: Function;
+
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    this.handler = new Function(this, 'Handler', {
+      runtime: Runtime.PYTHON_3_12,
+      handler: 'run.sh',
+      code: Code.fromAsset(
+        url.fileURLToPath(
+          new URL(
+            '../../../../../../dist/packages/story_api/bundle',
+            import.meta.url,
+          ),
+        ),
+      ),
+      timeout: Duration.seconds(30),
+      tracing: Tracing.ACTIVE,
+      environment: {
+        AWS_CONNECTION_REUSE_ENABLED: '1',
+      },
+    });
+
+    const stack = Stack.of(this);
+    this.handler.addLayers(
+      LayerVersion.fromLayerVersionArn(
+        this,
+        'LWALayer',
+        `arn:aws:lambda:${stack.region}:753240598075:layer:LambdaAdapterLayerX86:24`,
+      ),
+    );
+    this.handler.addEnvironment('PORT', '8000');
+    this.handler.addEnvironment('AWS_LWA_INVOKE_MODE', 'response_stream');
+    this.handler.addEnvironment('AWS_LAMBDA_EXEC_WRAPPER', '/opt/bootstrap');
+    const functionUrl = this.handler.addFunctionUrl({
+      authType: FunctionUrlAuthType.AWS_IAM,
+      invokeMode: InvokeMode.RESPONSE_STREAM,
+      cors: {
+        allowedOrigins: ['*'],
+        allowedHeaders: [
+          'authorization',
+          'content-type',
+          'x-amz-content-sha256',
+          'x-amz-date',
+          'x-amz-security-token',
+        ],
+      },
+    });
+
+    new CfnOutput(this, 'StoryApiUrl', { value: functionUrl.url });
+
+    // Register the API URL in runtime configuration for client discovery
+    RuntimeConfig.ensure(this).config.apis = {
+      ...RuntimeConfig.ensure(this).config.apis!,
+      StoryApi: functionUrl.url,
+    };
+  }
+
+  public grantInvokeAccess(grantee: IGrantable) {
+    Grant.addToPrincipal({
+      grantee,
+      actions: ['lambda:InvokeFunctionUrl'],
+      resourceArns: [this.handler.functionArn],
+      conditions: {
+        StringEquals: {
+          'lambda:FunctionUrlAuthType': 'AWS_IAM',
+        },
+      },
+    });
+  }
+}

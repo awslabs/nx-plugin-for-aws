@@ -3,11 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { getPackageManagerCommand, PackageManager } from '@nx/devkit';
-import { runCLI, tmpProjPath } from '../utils';
+import { buildCreateNxWorkspaceCommand, runCLI, tmpProjPath } from '../utils';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { ensureDirSync } from 'fs-extra';
 import { join } from 'path';
 import { beforeEach, describe, it } from 'vitest';
+
 export const smokeTest = (
   pkgMgr: PackageManager,
   onProjectCreate?: (projectRoot: string) => void,
@@ -21,9 +22,10 @@ export const smokeTest = (
       }
       ensureDirSync(targetDir);
     });
+
     it(`Should generate and build - ${pkgMgr}`, async () => {
       await runCLI(
-        `npx -y create-nx-workspace@~21.0.3 e2e-test --ci=skip --skipGit --preset=@aws/nx-plugin --interactive=false --pm ${pkgMgr}`,
+        `${buildCreateNxWorkspaceCommand(pkgMgr, 'e2e-test')} --interactive=false --skipGit`,
         {
           cwd: `${tmpProjPath()}/${pkgMgr}`,
           prefixWithPackageManagerCmd: false,

@@ -1,0 +1,52 @@
+// stacks/application-stack.ts
+import {
+  GameApi,
+  GameUI,
+  StoryApi,
+  UserIdentity,
+} from ':dungeon-adventure/common-constructs';
+import * as cdk from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { ElectrodbDynamoTable } from '../constructs/electrodb-table.js';
+
+export class ApplicationStack extends cdk.Stack {
+  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+    super(scope, id, props);
+
+    const userIdentity = new UserIdentity(this, 'UserIdentity');
+
+    const electroDbTable = new ElectrodbDynamoTable(this, 'ElectroDbTable');
+
+    const gameApi = new GameApi(this, 'GameApi', {
+      integrations: GameApi.defaultIntegrations(this)
+        .withDefaultOptions({
+          environment: {
+            TABLE_NAME: electroDbTable.tableName,
+          },
+        })
+        .build(),
+    });
+
+    // Grant read/write access to each procedure's lambda handler according to the permissions it requires
+    electroDbTable.grantReadData(gameApi.integrations['actions.query'].handler);
+    electroDbTable.grantReadData(gameApi.integrations['games.query'].handler);
+    electroDbTable.grantReadWriteData(
+      gameApi.integrations['actions.save'].handler,
+    );
+    electroDbTable.grantReadWriteData(
+      gameApi.integrations['games.save'].handler,
+    );
+
+    const storyApi = new StoryApi(this, 'StoryApi', {
+      integrations: StoryApi.defaultIntegrations(this).build(),
+    });
+
+    // grant our authenticated role access to invoke our APIs
+    [storyApi, gameApi].forEach((api) =>
+      api.grantInvokeAccess(userIdentity.identityPool.authenticatedRole),
+    );
+
+    // Ensure this is instantiated last so our runtime-config.json can be automatically configured
+    new GameUI(this, 'GameUI');
+  }
+}

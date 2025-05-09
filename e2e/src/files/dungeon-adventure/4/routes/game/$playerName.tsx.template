@@ -1,0 +1,175 @@
+import { PromptInput, Spinner } from '@cloudscape-design/components';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { createFileRoute } from '@tanstack/react-router';
+import { useEffect, useRef, useState } from 'react';
+import { useGameApi } from '../../hooks/useGameApi';
+import { useStoryApiClient } from '../../hooks/useStoryApiClient';
+import type { IAction, IGame } from ':dungeon-adventure/game-api-schema';
+
+type IGameState = Omit<IGame, 'lastUpdated'> & { actions: IAction[] };
+
+export const Route = createFileRoute('/game/$playerName')({
+  component: RouteComponent,
+  validateSearch: (search: Record<string, unknown>) => {
+    return {
+      genre: search.genre as IGameState['genre'],
+    };
+  },
+});
+
+function RouteComponent() {
+  const { playerName } = Route.useParams();
+  const { genre } = Route.useSearch();
+
+  const [currentInput, setCurrentInput] = useState('');
+  const [streamingContent, setStreamingContent] = useState('');
+
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const gameApi = useGameApi();
+  const storyApi = useStoryApiClient();
+  const saveActionMutation = useMutation(
+    gameApi.actions.save.mutationOptions(),
+  );
+  const gameActionsQuery = useQuery(
+    gameApi.actions.query.queryOptions({ playerName, limit: 100 }),
+  );
+
+  // no actions - therefore must be a new game - generate initial story
+  useEffect(() => {
+    if (
+      !gameActionsQuery.isLoading &&
+      gameActionsQuery.data?.items &&
+      gameActionsQuery.data?.items.length === 0
+    ) {
+      generateStory({
+        playerName,
+        genre,
+        actions: [],
+      });
+    }
+  }, [gameActionsQuery.data?.items, gameActionsQuery.isLoading]);
+
+  const generateStoryMutation = useMutation({
+    mutationFn: async ({ playerName, genre, actions }: IGameState) => {
+      let content = '';
+      for await (const chunk of storyApi.generateStory({
+        playerName,
+        genre,
+        actions,
+      })) {
+        content += chunk;
+        // make chunks available to render in a streaming fashion
+        setStreamingContent(content);
+      }
+
+      return content;
+    },
+  });
+
+  // scroll to the last message
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  // scroll to the bottom whenever gameActionsQuery is fetched or whenever streaming content changes
+  useEffect(() => {
+    scrollToBottom();
+  }, [streamingContent, gameActionsQuery]);
+
+  // progress the story
+  const generateStory = async ({ playerName, genre, actions }: IGameState) => {
+    try {
+      const content = await generateStoryMutation.mutateAsync({
+        playerName,
+        genre,
+        actions,
+      });
+
+      // Save assistant's response
+      await saveActionMutation.mutateAsync({
+        playerName,
+        role: 'assistant',
+        content,
+      });
+
+      await gameActionsQuery.refetch();
+
+      setStreamingContent('');
+    } catch (error) {
+      console.error('Failed to generate story:', error);
+    }
+  };
+
+  // progress the story when the user submits input
+  const handleSubmitAction = async () => {
+    if (!currentInput.trim()) return;
+
+    const userAction: IAction = {
+      playerName,
+      role: 'user' as const,
+      content: currentInput,
+      timestamp: new Date().toISOString(),
+    };
+
+    // Save user action
+    await saveActionMutation.mutateAsync(userAction);
+    await gameActionsQuery.refetch();
+
+    setCurrentInput('');
+
+    // Generate response
+    await generateStory({
+      genre,
+      playerName,
+      actions: [...(gameActionsQuery.data?.items ?? []), userAction],
+    });
+  };
+
+  return (
+    <div className="game-interface">
+      <div className="messages-area">
+        <div className="messages-container">
+          {gameActionsQuery.data?.items
+            .concat(
+              streamingContent.length > 0
+                ? [
+                    {
+                      playerName,
+                      role: 'assistant',
+                      content: streamingContent,
+                      timestamp: new Date().toISOString(),
+                    },
+                  ]
+                : [],
+            )
+            .map((action, i) => (
+              <div
+                key={i}
+                className={`message ${
+                  action.role === 'assistant' ? 'assistant' : 'user'
+                }`}
+              >
+                {action.content}
+              </div>
+            ))}
+          {generateStoryMutation.isPending && streamingContent.length === 0 && (
+            <Spinner data-style="generating" size="big" />
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+      </div>
+      <div className="input-area">
+        <PromptInput
+          onChange={({ detail }) => setCurrentInput(detail.value)}
+          value={currentInput}
+          actionButtonAriaLabel="Send message"
+          actionButtonIconName="send"
+          ariaLabel="Default prompt input"
+          placeholder="What do you do?"
+          onAction={handleSubmitAction}
+        />
+      </div>
+    </div>
+  );
+}

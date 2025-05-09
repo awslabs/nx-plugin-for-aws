@@ -1,0 +1,60 @@
+import {
+  GameApi,
+  GameUI,
+  StoryApi,
+  UserIdentity,
+} from ':dungeon-adventure/common-constructs';
+import * as cdk from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { ElectrodbDynamoTable } from '../constructs/electrodb-table.js';
+import { PolicyStatement, Effect } from 'aws-cdk-lib/aws-iam';
+
+export class ApplicationStack extends cdk.Stack {
+  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+    super(scope, id, props);
+
+    // The code that defines your stack goes here
+    const userIdentity = new UserIdentity(this, 'UserIdentity');
+
+    const electroDbTable = new ElectrodbDynamoTable(this, 'ElectroDbTable');
+
+    const gameApi = new GameApi(this, 'GameApi', {
+      integrations: GameApi.defaultIntegrations(this)
+        .withDefaultOptions({
+          environment: {
+            TABLE_NAME: electroDbTable.tableName,
+          },
+        })
+        .build(),
+    });
+
+    // Grant read/write access to each handler depending on the permissions it requires
+    electroDbTable.grantReadData(gameApi.integrations['actions.query'].handler);
+    electroDbTable.grantReadData(gameApi.integrations['games.query'].handler);
+    electroDbTable.grantReadWriteData(
+      gameApi.integrations['actions.save'].handler,
+    );
+    electroDbTable.grantReadWriteData(
+      gameApi.integrations['games.save'].handler,
+    );
+
+    const storyApi = new StoryApi(this, 'StoryApi');
+    storyApi.handler.addToRolePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['bedrock:InvokeModelWithResponseStream'],
+        resources: [
+          'arn:aws:bedrock:*::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0',
+        ],
+      }),
+    );
+
+    // grant our authenticated role access to invoke our APIs
+    [storyApi, gameApi].forEach((api) =>
+      api.grantInvokeAccess(userIdentity.identityPool.authenticatedRole),
+    );
+
+    // Ensure this is instantiated last so our runtime-config.json can be automatically configured
+    new GameUI(this, 'GameUI');
+  }
+}

@@ -1,0 +1,183 @@
+import { FormField, Spinner } from '@cloudscape-design/components';
+import { useInfiniteQuery, useMutation } from '@tanstack/react-query';
+import { createFileRoute, useNavigate } from '@tanstack/react-router';
+import {
+  createRef,
+  LegacyRef,
+  MutableRefObject,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
+import { useGameApi } from '../../hooks/useGameApi';
+import { IAction, IGame } from ':dungeon-adventure/game-api-schema';
+
+type IGameState = Omit<IGame, 'lastUpdated'> & { actions: IAction[] };
+
+export const Route = createFileRoute('/game/')({
+  component: RouteComponent,
+});
+
+// hook to check if a ref is visible on the screen
+export function useIsVisible(ref: MutableRefObject<any>) {
+  const [isIntersecting, setIntersecting] = useState(false);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(([entry]) =>
+      setIntersecting(entry.isIntersecting),
+    );
+
+    ref.current && observer.observe(ref.current);
+    return () => {
+      observer.disconnect();
+    };
+  }, [ref]);
+
+  return isIntersecting;
+}
+
+function RouteComponent() {
+  const [playerName, setPlayerName] = useState('');
+  const navigate = useNavigate();
+  const ref = createRef();
+  const isLastGameVisible = useIsVisible(ref);
+
+  const gameApi = useGameApi();
+  const saveGameMutation = useMutation(gameApi.games.save.mutationOptions());
+
+  const {
+    data: gamesPages,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery(
+    gameApi.games.query.infiniteQueryOptions(
+      { limit: 10 },
+      { getNextPageParam: ({ cursor }) => cursor },
+    ),
+  );
+  const games = useMemo(() => {
+    return gamesPages?.pages.flatMap((page) => page.items) || [];
+  }, [gamesPages]);
+
+  // Fetch more games if the last game is visible and there are more games
+  useEffect(() => {
+    if (isLastGameVisible && hasNextPage && !isFetchingNextPage) {
+      fetchNextPage();
+    }
+  }, [isFetchingNextPage, hasNextPage, fetchNextPage, isLastGameVisible]);
+
+  const playerAlreadyExists = (playerName?: string) => {
+    return !!games?.find((s) => s.playerName === playerName);
+  };
+
+  // create a new game
+  const handleStartGame = async (
+    playerName: string,
+    genre: IGameState['genre'],
+  ) => {
+    if (playerAlreadyExists(playerName)) {
+      return;
+    }
+    try {
+      await saveGameMutation.mutateAsync({
+        playerName,
+        genre,
+      });
+
+      await handleLoadGame(playerName, genre);
+    } catch (error) {
+      console.error('Failed to start game:', error);
+    }
+  };
+
+  // load an existing game
+  const handleLoadGame = async (
+    playerName: string,
+    genre: IGameState['genre'],
+  ) => {
+    await navigate({
+      to: '/game/$playerName',
+      params: { playerName },
+      search: { genre },
+    });
+  };
+
+  return (
+    <div className="game-interface">
+      <header className="game-header">
+        <h1>AI Dungeon Adventure</h1>
+      </header>
+
+      {/* New Game Section */}
+      <div className="new-game">
+        <h2>Start New Game</h2>
+        <div className="game-setup">
+          <FormField
+            errorText={
+              playerAlreadyExists(playerName)
+                ? `${playerName} already exists`
+                : undefined
+            }
+          >
+            <input
+              type="text"
+              placeholder="Enter your name"
+              className="name-input"
+              onChange={(e) => setPlayerName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  const input = e.currentTarget;
+                  handleStartGame(input.value, 'medieval');
+                }
+              }}
+            />
+          </FormField>
+          <div className="genre-grid">
+            {(['zombie', 'superhero', 'medieval'] as const).map((genre) => (
+              <button
+                key={genre}
+                className="genre-button"
+                onClick={() => {
+                  const playerName = document.querySelector('input')?.value;
+                  if (playerName) {
+                    handleStartGame(playerName, genre);
+                  }
+                }}
+              >
+                {genre.charAt(0).toUpperCase() + genre.slice(1)}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Saved Games Section */}
+      {games && games.length > 0 && (
+        <div className="saved-games">
+          <h2>Continue Game</h2>
+          <div className="game-list">
+            {games.map((game, idx) => (
+              <button
+                key={game.playerName}
+                ref={
+                  idx === games.length - 1
+                    ? (ref as LegacyRef<HTMLButtonElement>)
+                    : undefined
+                }
+                onClick={() => handleLoadGame(game.playerName, game.genre)}
+                className="game-session"
+              >
+                <div className="player-name">{game.playerName}</div>
+                <div className="genre-name">
+                  {game.genre.charAt(0).toUpperCase() + game.genre.slice(1)}
+                </div>
+              </button>
+            ))}
+            {isFetchingNextPage && <Spinner data-style="generating" size="big" />}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

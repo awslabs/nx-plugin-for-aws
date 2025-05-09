@@ -11,6 +11,8 @@ import RunGenerator from '@components/run-generator.astro';
 import NxCommands from '@components/nx-commands.astro';
 import InstallCommand from '@components/install-command.astro';
 import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
+import E2EDiff from '@components/e2e-diff.astro';
+
 import dungeonAdventureArchitecturePng from '@assets/dungeon-game-architecture.png'
 import dungeonAdventureErPng from '@assets/dungeon-adventure-er.png'
 import baselineWebsitePng from '@assets/baseline-website.png'
@@ -133,7 +135,7 @@ import {
 } from '@trpc/server/adapters/aws-lambda';
 import { echo } from './procedures/echo.js';
 import { t } from './init.js';
-import { APIGatewayProxyEventV2WithIAMAuthorizer } from 'aws-lambda';
+import { APIGatewayProxyEvent } from 'aws-lambda';
 
 export const router = t.router;
 
@@ -144,8 +146,14 @@ export const appRouter = router({
 export const handler = awsLambdaRequestHandler({
   router: appRouter,
   createContext: (
-    ctx: CreateAWSLambdaContextOptions<APIGatewayProxyEventV2WithIAMAuthorizer>,
+    ctx: CreateAWSLambdaContextOptions<APIGatewayProxyEvent>,
   ) => ctx,
+  responseMeta: () => ({
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': '*',
+    },
+  }),
 });
 
 export type AppRouter = typeof appRouter;
@@ -1011,41 +1019,8 @@ This is where we will instantiate our CDK constructs to build our dungeon advent
 
 Let's make an update to our `packages/infra/src/stacks/application-stack.ts` to instantiate some of our already generated constructs:
 
-```diff lang="ts"
-+import {
-+  GameApi,
-+  GameUI,
-+  StoryApi,
-+  UserIdentity,
-+} from ':dungeon-adventure/common-constructs';
-import * as cdk from 'aws-cdk-lib';
-import { Construct } from 'constructs';
 
-export class ApplicationStack extends cdk.Stack {
-  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
-    super(scope, id, props);
-
--    // The code that defines your stack goes here
-+    const userIdentity = new UserIdentity(this, 'UserIdentity');
-+
-+    const gameApi = new GameApi(this, 'GameApi', {
-+      integrations: GameApi.defaultIntegrations(this).build(),
-+    });
-+    const storyApi = new StoryApi(this, 'StoryApi', {
-+      integrations: StoryApi.defaultIntegrations(this).build(),
-+    });
-+
-+    // grant our authenticated role access to invoke our APIs
-+    [storyApi, gameApi].forEach((api) =>
-+      api.grantInvokeAccess(userIdentity.identityPool.authenticatedRole),
-+    );
-+
-+    // Ensure this is instantiated last so our runtime-config.json can be automatically configured
-+    new GameUI(this, 'GameUI');
-  }
-}
-
-```
+<E2EDiff before="dungeon-adventure/1/application-stack.ts.original.template" after="dungeon-adventure/1/application-stack.ts.template" lang="ts" />
 
 Notice here that we supply default integrations for our two APIs. By default, each operation in our API is mapped to an individual lambda function to handle that operation.
 

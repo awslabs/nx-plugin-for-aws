@@ -7,6 +7,7 @@ import { join } from 'path';
 import { output, PackageManager } from '@nx/devkit';
 import { existsSync } from 'fs';
 import { backOff } from 'exponential-backoff';
+
 export interface RunCmdOpts {
   silenceError?: boolean;
   prefixWithPackageManagerCmd?: boolean;
@@ -17,6 +18,7 @@ export interface RunCmdOpts {
   verbose?: boolean;
   redirectStderr?: boolean;
 }
+
 export async function runCLI(
   command: string,
   opts: RunCmdOpts = {
@@ -72,6 +74,7 @@ export async function runCLI(
     }
   }
 }
+
 function detectPackageManager(dir = ''): PackageManager {
   return existsSync(join(dir, 'bun.lockb'))
     ? 'bun'
@@ -82,6 +85,7 @@ function detectPackageManager(dir = ''): PackageManager {
         ? 'pnpm'
         : 'npm';
 }
+
 function getYarnMajorVersion(path: string): string | undefined {
   try {
     // this fails if path is not yet created
@@ -101,9 +105,11 @@ function getYarnMajorVersion(path: string): string | undefined {
     }
   }
 }
+
 export function tmpProjPath() {
   return '/tmp/nx-plugin-for-aws/e2e';
 }
+
 function getPackageManagerCommand({
   path = tmpProjPath(),
   packageManager = detectPackageManager(path),
@@ -130,6 +136,7 @@ function getPackageManagerCommand({
     },
   }[packageManager.trim() as PackageManager];
 }
+
 /**
  * Remove log colors for fail proof string search
  * @param log
@@ -150,3 +157,6 @@ function logError(message: string, body?: string) {
   }
   process.stdout.write('\n');
 }
+
+export const buildCreateNxWorkspaceCommand = (pm: string, workspace: string) =>
+  `npx create-nx-workspace@~21.0.3 ${workspace} --pm=${pm} --preset=@aws/nx-plugin --ci=skip`;
