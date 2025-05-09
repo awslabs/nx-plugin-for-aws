@@ -1,0 +1,175 @@
+---
+title: "类型安全的API集成"
+---
+
+
+
+REST/HTTP API CDK 构造被配置为为每个操作定义集成提供类型安全接口。
+
+#### 默认集成
+
+您可以使用静态方法 `defaultIntegrations` 来应用默认模式，该模式会为每个操作定义单独的 AWS Lambda 函数：
+
+```ts {2}
+new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this).build(),
+});
+```
+
+#### 访问集成
+
+您可以通过 API 构造的 `integrations` 属性以类型安全的方式访问底层 AWS Lambda 函数。例如，如果您的 API 定义了名为 `sayHello` 的操作，并且需要为该函数添加权限，可以按如下方式操作：
+
+```ts {6}
+const api = new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this).build(),
+});
+
+// sayHello 的类型会对应 API 中定义的操作
+api.integrations.sayHello.handler.addToRolePolicy(new PolicyStatement({
+  effect: Effect.ALLOW,
+  actions: [...],
+  resources: [...],
+}));
+```
+
+#### 自定义默认选项
+
+如果要调整为每个默认集成创建 Lambda 函数时使用的选项，可以使用 `withDefaultOptions` 方法。例如，若希望所有 Lambda 函数都部署在 VPC 中：
+
+```ts {5-7}
+const vpc = new Vpc(this, 'Vpc', ...);
+
+new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this)
+    .withDefaultOptions({
+      vpc,
+    })
+    .build(),
+});
+```
+
+#### 覆盖集成
+
+您还可以通过 `withOverrides` 方法覆盖特定操作的集成。每个覆盖必须指定类型正确的 `integration` 属性（对应 HTTP 或 REST API 的 CDK 集成构造）。该方法同样具有类型安全性。例如，若要将 `getDocumentation` API 指向外部托管的文档网站：
+
+```ts
+new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this)
+    .withOverrides({
+      getDocumentation: {
+        integration: new HttpIntegration('https://example.com/documentation'),
+      },
+    })
+    .build(),
+});
+```
+
+此时通过 `api.integrations.getDocumentation` 访问时，该集成将不再包含 `handler` 属性。
+
+您还可以为集成添加其他类型化的属性。例如，如果为 REST API 创建了 S3 集成并需要后续引用特定操作的存储桶：
+
+```ts {13, 41}
+const storageBucket = new Bucket(this, 'Bucket', { ... });
+
+const apiGatewayRole = new Role(this, 'ApiGatewayS3Role', {
+  assumedBy: new ServicePrincipal('apigateway.amazonaws.com'),
+});
+
+storageBucket.grantRead(apiGatewayRole);
+
+const api = new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this)
+    .withOverrides({
+      getFile: {
+        bucket: storageBucket,
+        integration: new AwsIntegration({
+          service: 's3',
+          integrationHttpMethod: 'GET',
+          path: `${storageBucket.bucketName}/{fileName}`,
+          options: {
+            credentialsRole: apiGatewayRole,
+            requestParameters: {
+              'integration.request.path.fileName': 'method.request.querystring.fileName',
+            },
+            integrationResponses: [{ statusCode: '200' }],
+          },
+        }),
+        options: {
+          requestParameters: {
+            'method.request.querystring.fileName': true,
+          },
+          methodResponses: [{
+            statusCode: '200',
+          }],
+        }
+      },
+    })
+    .build(),
+});
+
+// 后续可以在其他文件中类型安全地访问我们定义的 bucket 属性
+api.integrations.getFile.bucket.grantRead(...);
+```
+
+#### 覆盖授权器
+
+您还可以在集成中提供 `options` 来覆盖特定方法的选项，例如为 `getDocumentation` 操作使用 Cognito 认证：
+
+```ts
+new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this)
+    .withOverrides({
+      getDocumentation: {
+        integration: new HttpIntegration('https://example.com/documentation'),
+        options: {
+          authorizer: new CognitoUserPoolsAuthorizer(...) // REST API 使用该授权器，HTTP API 使用 HttpUserPoolAuthorizer
+        }
+      },
+    })
+    .build(),
+});
+```
+
+#### 显式集成
+
+如果不需要默认集成，可以直接为每个操作提供集成。这在需要为不同操作使用不同类型集成时非常有用：
+
+```ts
+new MyApi(this, 'MyApi', {
+  integrations: {
+    sayHello: {
+      integration: new LambdaIntegration(...),
+    },
+    getDocumentation: {
+      integration: new HttpIntegration(...),
+    },
+  },
+});
+```
+
+#### 路由模式
+
+如果希望部署单个 Lambda 函数处理所有 API 请求，可以修改 API 的 `defaultIntegrations` 方法创建共享函数：
+
+```ts {5,11-12}
+// packages/common/constructs/src/app/apis/my-api.ts
+export class MyApi<...> extends ... {
+
+  public static defaultIntegrations = (scope: Construct) => {
+    const router = new Function(scope, 'RouterHandler', { ... });
+    return IntegrationBuilder.rest({
+      ...
+      defaultIntegrationOptions: {},
+      buildDefaultIntegration: (op) => {
+        return {
+          // 所有集成引用同一个路由函数
+          integration: new LambdaIntegration(router),
+        };
+      },
+    });
+  };
+}
+```
+
+您也可以采用其他自定义方式，例如将 `router` 函数作为 `defaultIntegrations` 的参数而非在方法内构造。

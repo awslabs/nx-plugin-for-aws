@@ -1,0 +1,168 @@
+---
+title: "型安全なAPIの統合"
+---
+
+
+
+REST/HTTP API CDKコンストラクトは、各操作の統合を定義するための型安全なインターフェースを提供するように設定されています。
+
+#### デフォルト統合
+静的メソッド`defaultIntegrations`を使用して、各操作ごとに個別のAWS Lambda関数を定義するデフォルトパターンを利用できます：
+
+```ts {2}
+new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this).build(),
+});
+```
+
+#### 統合へのアクセス
+APIコンストラクトの`integrations`プロパティを通じて、型安全な方法で基盤となるAWS Lambda関数にアクセスできます。例えば、APIが`sayHello`という操作を定義している場合、この関数にパーミッションを追加するには次のようにします：
+
+```ts {6}
+const api = new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this).build(),
+});
+
+// sayHelloはAPIで定義された操作に型付けされる
+api.integrations.sayHello.handler.addToRolePolicy(new PolicyStatement({
+  effect: Effect.ALLOW,
+  actions: [...],
+  resources: [...],
+}));
+```
+
+#### デフォルトオプションのカスタマイズ
+各デフォルト統合用に作成されるLambda関数のオプションをカスタマイズするには、`withDefaultOptions`メソッドを使用します。例えば、すべてのLambda関数をVPC内に配置する場合：
+
+```ts {5-7}
+const vpc = new Vpc(this, 'Vpc', ...);
+
+new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this)
+    .withDefaultOptions({
+      vpc,
+    })
+    .build(),
+});
+```
+
+#### 統合のオーバーライド
+`withOverrides`メソッドを使用して特定の操作の統合をオーバーライドできます。各オーバーライドは、HTTPまたはREST APIに適したCDK統合コンストラクトに型付けされた`integration`プロパティを指定する必要があります。例えば、外部サイトでホストされているドキュメントを指すように`getDocumentation` APIをオーバーライドする場合：
+
+```ts
+new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this)
+    .withOverrides({
+      getDocumentation: {
+        integration: new HttpIntegration('https://example.com/documentation'),
+      },
+    })
+    .build(),
+});
+```
+
+オーバーライドされた統合には、`api.integrations.getDocumentation`経由でアクセスした際に`handler`プロパティが存在しなくなります。
+
+追加プロパティを統合に定義することで、他のタイプの統合を抽象化しながら型安全性を維持できます。例えばREST API用のS3統合を作成し、後で特定の操作用にバケットを参照する場合：
+
+```ts {13, 41}
+const storageBucket = new Bucket(this, 'Bucket', { ... });
+
+const apiGatewayRole = new Role(this, 'ApiGatewayS3Role', {
+  assumedBy: new ServicePrincipal('apigateway.amazonaws.com'),
+});
+
+storageBucket.grantRead(apiGatewayRole);
+
+const api = new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this)
+    .withOverrides({
+      getFile: {
+        bucket: storageBucket,
+        integration: new AwsIntegration({
+          service: 's3',
+          integrationHttpMethod: 'GET',
+          path: `${storageBucket.bucketName}/{fileName}`,
+          options: {
+            credentialsRole: apiGatewayRole,
+            requestParameters: {
+              'integration.request.path.fileName': 'method.request.querystring.fileName',
+            },
+            integrationResponses: [{ statusCode: '200' }],
+          },
+        }),
+        options: {
+          requestParameters: {
+            'method.request.querystring.fileName': true,
+          },
+          methodResponses: [{
+            statusCode: '200',
+          }],
+        }
+      },
+    })
+    .build(),
+});
+
+// 後ほど別ファイルで、定義したバケットプロパティに型安全にアクセス可能
+api.integrations.getFile.bucket.grantRead(...);
+```
+
+#### オーソライザーのオーバーライド
+統合に`options`を指定して、特定のメソッドオプション（オーソライザーなど）をオーバーライドできます。例えば`getDocumentation`操作にCognito認証を使用する場合：
+
+```ts
+new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this)
+    .withOverrides({
+      getDocumentation: {
+        integration: new HttpIntegration('https://example.com/documentation'),
+        options: {
+          authorizer: new CognitoUserPoolsAuthorizer(...) // REST APIの場合はCognitoUserPoolsAuthorizer、HTTP APIの場合はHttpUserPoolAuthorizer
+        }
+      },
+    })
+    .build(),
+});
+```
+
+#### 明示的な統合
+デフォルト統合を使用せず、各操作に直接統合を指定することも可能です。これは例えば、操作ごとに異なるタイプの統合を使用する必要がある場合や、新しい操作を追加した際に型エラーを受け取りたい場合に有用です：
+
+```ts
+new MyApi(this, 'MyApi', {
+  integrations: {
+    sayHello: {
+      integration: new LambdaIntegration(...),
+    },
+    getDocumentation: {
+      integration: new HttpIntegration(...),
+    },
+  },
+});
+```
+
+#### ルーターパターン
+すべてのAPIリクエストを処理する単一のLambda関数をデプロイする場合は、`defaultIntegrations`メソッドを編集して統合ごとではなく単一の関数を作成できます：
+
+```ts {5,11-12}
+// packages/common/constructs/src/app/apis/my-api.ts
+export class MyApi<...> extends ... {
+
+  public static defaultIntegrations = (scope: Construct) => {
+    const router = new Function(scope, 'RouterHandler', { ... });
+    return IntegrationBuilder.rest({
+      ...
+      defaultIntegrationOptions: {},
+      buildDefaultIntegration: (op) => {
+        return {
+          // すべての統合で同じルーターLambdaハンドラーを参照
+          integration: new LambdaIntegration(router),
+        };
+      },
+    });
+  };
+}
+```
+
+必要に応じて、`router`関数をメソッド内で構築する代わりに`defaultIntegrations`のパラメータとして定義するなど、コードを変更することも可能です。

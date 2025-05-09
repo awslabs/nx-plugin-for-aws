@@ -10,23 +10,26 @@ import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
+import Snippet from '@components/snippet.astro';
 import schema from '../../../../../../packages/nx-plugin/src/py/fast-api/schema.json';
 
-[FastAPI](https://fastapi.tiangolo.com/) 是一个用于构建 Python API 的框架。
+[FastAPI](https://fastapi.tiangolo.com/) 是用于构建 Python API 的框架。
 
-该 FastAPI 生成器会创建一个新的 FastAPI 项目并配置 AWS CDK 基础设施。生成的后端使用 AWS Lambda 进行无服务器部署，通过 AWS API Gateway HTTP API 暴露接口。它集成了 [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/) 用于可观测性，包括日志记录、AWS X-Ray 追踪和 Cloudwatch 指标。
+FastAPI 生成器可创建带有 AWS CDK 基础设施配置的新 FastAPI 项目。生成的后端使用 AWS Lambda 实现无服务器部署，并通过 AWS API Gateway API 对外暴露。项目内置了 [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/) 用于可观测性，包含日志记录、AWS X-Ray 追踪和 CloudWatch 指标。
 
-## 使用方法
+## 使用方式
 
-### 生成 FastAPI 项目
+### 生成 FastAPI
 
-可以通过两种方式生成新的 FastAPI 项目：
+可通过两种方式生成新 FastAPI：
 
 <RunGenerator generator="py#fast-api" />
 
 ### 选项配置
 
 <GeneratorParameters schema={schema} />
+
+<Snippet name="api/api-choice-note" />
 
 ## 生成器输出
 
@@ -38,16 +41,18 @@ import schema from '../../../../../../packages/nx-plugin/src/py/fast-api/schema.
 - pyproject.toml Python 项目配置和依赖项
 - \<module_name>
   - \_\_init\_\_.py 模块初始化
-  - init.py 设置 FastAPI 应用并配置 Powertools 中间件
+  - init.py 设置 FastAPI 应用并配置 powertools 中间件
   - main.py API 实现
+- scripts
+  - generate_open_api.py 从 FastAPI 应用生成 OpenAPI 模式的脚本
 
 </FileTree>
 
-生成器还会在 `packages/common/constructs` 目录中创建用于部署 API 的 CDK 构造。
+生成器还会在 `packages/common/constructs` 目录下创建用于部署 API 的 CDK 构造。
 
-## 实现 FastAPI 功能
+## 实现 FastAPI
 
-主要的 API 实现位于 `main.py` 文件中。您可以在此定义 API 路由及其实现：
+API 主实现位于 `main.py` 文件，在此定义 API 路由及其实现。示例如下：
 
 ```python
 from .init import app, tracer
@@ -67,17 +72,17 @@ def create_item(item: Item):
 
 生成器自动配置了以下功能：
 
-1. AWS Lambda Powertools 集成（用于可观测性）
+1. 用于可观测性的 AWS Lambda Powertools 集成
 2. 错误处理中间件
 3. 请求/响应关联
 4. 指标收集
-5. 使用 Mangum 的 AWS Lambda 处理程序
+5. 使用 Mangum 的 AWS Lambda 处理器
 
-### 使用 AWS Lambda Powertools 进行可观测性
+### 通过 AWS Lambda Powertools 实现可观测性
 
 #### 日志记录
 
-生成器使用 AWS Lambda Powertools 配置结构化日志：
+生成器配置了使用 AWS Lambda Powertools 的结构化日志记录。可在路由处理器中访问日志记录器：
 
 ```python
 from .init import app, logger
@@ -88,15 +93,16 @@ def read_item(item_id: int):
     return {"item_id": item_id}
 ```
 
-日志自动包含：
+日志记录器自动包含：
+
 - 用于请求追踪的关联 ID
 - 请求路径和方法
 - Lambda 上下文信息
-- 冷启动指示器
+- 冷启动标识
 
 #### 追踪
 
-自动配置 AWS X-Ray 追踪：
+自动配置 AWS X-Ray 追踪。可为追踪添加自定义子分段：
 
 ```python
 from .init import app, tracer
@@ -104,13 +110,15 @@ from .init import app, tracer
 @app.get("/items/{item_id}")
 @tracer.capture_method
 def read_item(item_id: int):
+    # 创建新子分段
     with tracer.provider.in_subsegment("fetch-item-details"):
+        # 业务逻辑
         return {"item_id": item_id}
 ```
 
 #### 指标
 
-自动收集 CloudWatch 指标：
+自动收集每个请求的 CloudWatch 指标。可添加自定义指标：
 
 ```python
 from .init import app, metrics
@@ -122,7 +130,8 @@ def read_item(item_id: int):
     return {"item_id": item_id}
 ```
 
-默认指标包括：
+默认指标包含：
+
 - 请求计数
 - 成功/失败计数
 - 冷启动指标
@@ -143,35 +152,133 @@ def read_item(item_id: int):
 ```
 
 未处理异常会被中间件捕获并：
-1. 记录完整异常堆栈
+
+1. 记录完整异常及堆栈跟踪
 2. 记录失败指标
-3. 返回安全的 500 响应
+3. 返回安全的 500 响应给客户端
 4. 保留关联 ID
 
 :::tip
-建议为 API 操作指定响应模型，以便在使用 `api-connection` 生成器时获得更好的代码生成。<Link path="guides/api-connection/react-fastapi#errors">查看详细信息</Link>。
+若计划使用 `api-connection` 生成器，建议为 API 操作指定响应模型以获得更好的代码生成效果。<Link path="guides/api-connection/react-fastapi#errors">详见此处</Link>。
 :::
 
 ### 流式传输
 
-使用 FastAPI 的 [`StreamingResponse`](https://fastapi.tiangolo.com/reference/responses/?h=streaming#fastapi.responses.StreamingResponse) 实现流式响应。
+使用 FastAPI 可以通过 [`StreamingResponse`](https://fastapi.tiangolo.com/reference/responses/?h=streaming#fastapi.responses.StreamingResponse) 响应类型实现流式响应。
 
 #### 基础设施变更
 
-由于 AWS API Gateway 不支持流式响应，需调整 CDK 构造以支持 AWS Lambda 函数 URL：
+由于 AWS API Gateway 不支持流式响应，需要将 FastAPI 部署到支持此功能的平台。最简单的选择是使用 AWS Lambda 函数 URL。为此可替换生成的 `common/constructs/src/app/apis/<name>-api.ts` 构造，改用支持函数 URL 的部署方式。
 
 <details>
-<summary>变更示例</summary>
+<summary>流式 FunctionURL 构造示例</summary>
 
-（代码差异部分保持原样，此处略去具体实现）
+```ts
+import { Duration, Stack, CfnOutput } from 'aws-cdk-lib';
+import { IGrantable, Grant } from 'aws-cdk-lib/aws-iam';
+import {
+  Runtime,
+  Code,
+  Tracing,
+  LayerVersion,
+  FunctionUrlAuthType,
+  InvokeMode,
+  Function,
+} from 'aws-cdk-lib/aws-lambda';
+import { Construct } from 'constructs';
+import url from 'url';
+import { RuntimeConfig } from '../../core/runtime-config.js';
+
+export class MyApi extends Construct {
+  public readonly handler: Function;
+
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    this.handler = new Function(this, 'Handler', {
+      runtime: Runtime.PYTHON_3_12,
+      handler: 'run.sh',
+      code: Code.fromAsset(
+        url.fileURLToPath(
+          new URL(
+            '../../../../../../dist/packages/my_api/bundle',
+            import.meta.url,
+          ),
+        ),
+      ),
+      timeout: Duration.seconds(30),
+      tracing: Tracing.ACTIVE,
+      environment: {
+        AWS_CONNECTION_REUSE_ENABLED: '1',
+      },
+    });
+
+    const stack = Stack.of(this);
+    this.handler.addLayers(
+      LayerVersion.fromLayerVersionArn(
+        this,
+        'LWALayer',
+        `arn:aws:lambda:${stack.region}:753240598075:layer:LambdaAdapterLayerX86:24`,
+      ),
+    );
+    this.handler.addEnvironment('PORT', '8000');
+    this.handler.addEnvironment('AWS_LWA_INVOKE_MODE', 'response_stream');
+    this.handler.addEnvironment('AWS_LAMBDA_EXEC_WRAPPER', '/opt/bootstrap');
+    const functionUrl = this.handler.addFunctionUrl({
+      authType: FunctionUrlAuthType.AWS_IAM,
+      invokeMode: InvokeMode.RESPONSE_STREAM,
+      cors: {
+        allowedOrigins: ['*'],
+        allowedHeaders: [
+          'authorization',
+          'content-type',
+          'x-amz-content-sha256',
+          'x-amz-date',
+          'x-amz-security-token',
+        ],
+      },
+    });
+
+    new CfnOutput(this, 'MyApiUrl', { value: functionUrl.url });
+
+    // 将 API URL 注册到运行时配置以供客户端发现
+    RuntimeConfig.ensure(this).config.apis = {
+      ...RuntimeConfig.ensure(this).config.apis!,
+      MyApi: functionUrl.url,
+    };
+  }
+
+  public grantInvokeAccess(grantee: IGrantable) {
+    Grant.addToPrincipal({
+      grantee,
+      actions: ['lambda:InvokeFunctionUrl'],
+      resourceArns: [this.handler.functionArn],
+      conditions: {
+        StringEquals: {
+          'lambda:FunctionUrlAuthType': 'AWS_IAM',
+        },
+      },
+    });
+  }
+}
+
+```
 
 </details>
 
-变更后需更新 `packages/common/constructs/src/app/http-apis/<my-api>.ts` 文件。
+:::note
+完整端到端示例请参考 <Link path="/get_started/tutorials/dungeon-game/overview">地下城冒险教程</Link>
+:::
 
-#### 实现流式 API
+#### 实现
 
-示例实现：
+更新基础设施支持流式传输后，可在 FastAPI 中实现流式 API。API 应：
+
+- 返回 [`StreamingResponse`](https://fastapi.tiangolo.com/reference/responses/?h=streaming#fastapi.responses.StreamingResponse)
+- 声明每个响应块的返回类型
+- 若计划使用 <Link path="guides/api-connection/react-fastapi">API 连接</Link>，需添加 OpenAPI 扩展 `x-streaming: true`
+
+例如，若需从 API 流式传输 JSON 对象序列，可如下实现：
 
 ```py /return (StreamingResponse)/ /openapi_extra[^)]*/ /-> (Chunk)/
 from pydantic import BaseModel
@@ -190,35 +297,66 @@ def my_stream() -> Chunk:
     return StreamingResponse(stream_chunks(), media_type="application/json")
 ```
 
-#### 消费流
+#### 消费
 
-使用 <Link path="guides/api-connection/react-fastapi#consuming-a-stream">API 连接生成器</Link> 进行类型安全的流式消费。
+要消费流式响应，可使用 <Link path="guides/api-connection/react-fastapi#consuming-a-stream">API 连接生成器</Link>，其提供类型安全的方法来迭代流式块。
 
 ## 部署 FastAPI
 
-在 CDK 应用中使用构造：
+FastAPI 生成器在 `common/constructs` 目录中创建用于部署 API 的 CDK 构造。可在 CDK 应用中使用：
 
-```ts
+```ts {6-8}
 import { MyApi } from ':my-scope/common-constructs';
 
 export class ExampleStack extends Stack {
   constructor(scope: Construct, id: string) {
-    const api = new MyApi(this, 'MyApi');
+    // 将 API 添加到堆栈
+    const api = new MyApi(this, 'MyApi', {
+      integrations: MyApi.defaultIntegrations(this).build(),
+    });
   }
 }
 ```
 
-配置包括：
-1. 运行 FastAPI 的 Lambda 函数
-2. API Gateway HTTP API 触发器
+此配置包含：
+
+1. 为 FastAPI 应用中的每个操作创建 AWS Lambda 函数
+2. 使用 API Gateway HTTP/REST API 作为函数触发器
 3. IAM 角色和权限
 4. CloudWatch 日志组
 5. X-Ray 追踪配置
 6. CloudWatch 指标命名空间
 
-### 授权访问
+### 类型安全集成
 
-使用 `grantInvokeAccess` 方法授权：
+<Snippet name="api/type-safe-api-integrations" />
+
+#### 代码生成
+
+由于 FastAPI 操作在 Python 中定义而基础设施在 TypeScript 中定义，我们通过代码生成向 CDK 构造提供元数据，以实现类型安全的集成接口。
+
+在公共构造的 `project.json` 中添加了 `generate:<ApiName>-metadata` 目标来促进此代码生成，该目标生成如 `packages/common/constructs/src/generated/my-api/metadata.gen.ts` 的文件。由于这是在构建时生成的，版本控制中会忽略该文件。
+
+:::note
+更改 API 后需要执行构建以确保 CDK 构造使用的类型保持最新。
+
+<NxCommands commands={["run-many --target build --all"]} />
+:::
+
+:::tip
+若同时进行 CDK 基础设施和 FastAPI 开发，可使用 [`nx watch`](https://nx.dev/nx-api/nx/documents/watch) 在每次 API 变更时重新生成类型：
+
+<NxCommands
+  commands={[
+    'watch --projects=<FastAPIProject> -- \\ ',
+    'run <InfraProject>:"generate:<ApiName>-metadata"',
+  ]}
+/>
+:::
+
+### 权限授予
+
+可通过 `grantInvokeAccess` 方法授予 API 访问权限：
 
 ```ts
 api.grantInvokeAccess(myIdentityPool.authenticatedRole);
@@ -226,15 +364,16 @@ api.grantInvokeAccess(myIdentityPool.authenticatedRole);
 
 ## 本地开发
 
-使用以下命令启动开发服务器：
+生成器配置了可通过以下命令运行的本地开发服务器：
 
 <NxCommands commands={['run my-api:serve']} />
 
-功能包括：
+该命令启动本地 FastAPI 开发服务器，包含：
+
 - 代码变更自动重载
-- 交互式 API 文档（`/docs` 或 `/redoc`）
-- OpenAPI 模式（`/openapi.json`）
+- 交互式 API 文档（位于 `/docs` 或 `/redoc`）
+- OpenAPI 模式（位于 `/openapi.json`）
 
 ## 调用 FastAPI
 
-使用 <Link path="guides/api-connection/react-fastapi">`api-connection`</Link> 生成器从 React 网站调用 API。
+要从 React 网站调用 API，可使用 <Link path="guides/api-connection/react-fastapi">`api-connection`</Link> 生成器。

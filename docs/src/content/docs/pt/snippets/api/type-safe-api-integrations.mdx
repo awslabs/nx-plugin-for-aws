@@ -1,0 +1,176 @@
+---
+title: "Integrações de API com Segurança de Tipo"
+---
+
+
+
+Os construtores CDK da API REST/HTTP são configurados para fornecer uma interface tipada para definir integrações para cada uma de suas operações.
+
+#### Integrações Padrão
+
+Você pode usar o método estático `defaultIntegrations` para utilizar o padrão padrão, que define uma função AWS Lambda individual para cada operação:
+
+```ts {2}
+new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this).build(),
+});
+```
+
+#### Acessando Integrações
+
+Você pode acessar as funções AWS Lambda subjacentes através da propriedade `integrations` do construto da API, de maneira tipada. Por exemplo, se sua API define uma operação chamada `sayHello` e você precisa adicionar algumas permissões a esta função, você pode fazer isso da seguinte forma:
+
+```ts {6}
+const api = new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this).build(),
+});
+
+// sayHello é tipado para as operações definidas em sua API
+api.integrations.sayHello.handler.addToRolePolicy(new PolicyStatement({
+  effect: Effect.ALLOW,
+  actions: [...],
+  resources: [...],
+}));
+```
+
+#### Personalizando Opções Padrão
+
+Se você deseja personalizar as opções usadas ao criar a função Lambda para cada integração padrão, pode usar o método `withDefaultOptions`. Por exemplo, se deseja que todas suas funções Lambda residam em uma Vpc:
+
+```ts {5-7}
+const vpc = new Vpc(this, 'Vpc', ...);
+
+new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this)
+    .withDefaultOptions({
+      vpc,
+    })
+    .build(),
+});
+```
+
+#### Substituindo Integrações
+
+Você também pode substituir integrações para operações específicas usando o método `withOverrides`. Cada substituição deve especificar uma propriedade `integration` tipada para o construto de integração CDK apropriado para a API HTTP ou REST. O método `withOverrides` também é tipado. Por exemplo, se você deseja substituir uma API `getDocumentation` para apontar para documentação hospedada em um site externo:
+
+```ts
+new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this)
+    .withOverrides({
+      getDocumentation: {
+        integration: new HttpIntegration('https://example.com/documentation'),
+      },
+    })
+    .build(),
+});
+```
+
+Você notará que a integração substituída não terá mais uma propriedade `handler` quando acessada via `api.integrations.getDocumentation`.
+
+Você pode adicionar propriedades extras a uma integração que também serão tipadas adequadamente, permitindo que outros tipos de integração sejam abstraídos mas mantenham a tipagem. Por exemplo, se você criou uma integração S3 para uma API REST e posteriormente deseja referenciar o bucket para uma operação específica:
+
+```ts {13, 41}
+const storageBucket = new Bucket(this, 'Bucket', { ... });
+
+const apiGatewayRole = new Role(this, 'ApiGatewayS3Role', {
+  assumedBy: new ServicePrincipal('apigateway.amazonaws.com'),
+});
+
+storageBucket.grantRead(apiGatewayRole);
+
+const api = new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this)
+    .withOverrides({
+      getFile: {
+        bucket: storageBucket,
+        integration: new AwsIntegration({
+          service: 's3',
+          integrationHttpMethod: 'GET',
+          path: `${storageBucket.bucketName}/{fileName}`,
+          options: {
+            credentialsRole: apiGatewayRole,
+            requestParameters: {
+              'integration.request.path.fileName': 'method.request.querystring.fileName',
+            },
+            integrationResponses: [{ statusCode: '200' }],
+          },
+        }),
+        options: {
+          requestParameters: {
+            'method.request.querystring.fileName': true,
+          },
+          methodResponses: [{
+            statusCode: '200',
+          }],
+        }
+      },
+    })
+    .build(),
+});
+
+// Posteriormente, talvez em outro arquivo, você pode acessar a propriedade bucket
+// que definimos de maneira tipada
+api.integrations.getFile.bucket.grantRead(...);
+```
+
+#### Substituindo Autorizadores
+
+Você também pode fornecer `options` em sua integração para substituir opções específicas de método, como autorizadores. Por exemplo, para usar autenticação Cognito na operação `getDocumentation`:
+
+```ts
+new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this)
+    .withOverrides({
+      getDocumentation: {
+        integration: new HttpIntegration('https://example.com/documentation'),
+        options: {
+          authorizer: new CognitoUserPoolsAuthorizer(...) // para REST, ou HttpUserPoolAuthorizer para HTTP API
+        }
+      },
+    })
+    .build(),
+});
+```
+
+#### Integrações Explícitas
+
+Se preferir, você pode optar por não usar as integrações padrão e fornecer uma integração explicitamente para cada operação. Isso é útil se, por exemplo, cada operação precisar usar um tipo diferente de integração:
+
+```ts
+new MyApi(this, 'MyApi', {
+  integrations: {
+    sayHello: {
+      integration: new LambdaIntegration(...),
+    },
+    getDocumentation: {
+      integration: new HttpIntegration(...),
+    },
+  },
+});
+```
+
+#### Padrão de Roteador
+
+Se preferir implantar uma única função Lambda para atender todas as requisições da API, você pode editar livremente o método `defaultIntegrations` para criar uma única função em vez de uma por integração:
+
+```ts {5,11-12}
+// packages/common/constructs/src/app/apis/my-api.ts
+export class MyApi<...> extends ... {
+
+  public static defaultIntegrations = (scope: Construct) => {
+    const router = new Function(scope, 'RouterHandler', { ... });
+    return IntegrationBuilder.rest({
+      ...
+      defaultIntegrationOptions: {},
+      buildDefaultIntegration: (op) => {
+        return {
+          // Referencia o mesmo handler Lambda do roteador em todas as integrações
+          integration: new LambdaIntegration(router),
+        };
+      },
+    });
+  };
+}
+```
+
+Você pode modificar o código de outras formas se preferir, como definir a função `router` como parâmetro do `defaultIntegrations` em vez de construí-la dentro do método.

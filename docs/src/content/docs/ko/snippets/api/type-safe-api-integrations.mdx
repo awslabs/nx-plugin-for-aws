@@ -1,0 +1,175 @@
+---
+title: "타입 안전한 API 통합"
+---
+
+
+
+REST/HTTP API CDK 구성체는 각 작업에 대한 통합을 정의하기 위한 타입 안전 인터페이스를 제공하도록 구성됩니다.
+
+#### 기본 통합
+
+정적 `defaultIntegrations`를 사용하여 각 작업별로 개별 AWS Lambda 함수를 정의하는 기본 패턴을 활용할 수 있습니다:
+
+```ts {2}
+new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this).build(),
+});
+```
+
+#### 통합 접근
+
+API 구성체의 `integrations` 속성을 통해 타입 안전 방식으로 기본 AWS Lambda 함수에 접근할 수 있습니다. 예를 들어 API가 `sayHello` 작업을 정의하고 이 함수에 일부 권한을 추가해야 하는 경우 다음과 같이 할 수 있습니다:
+
+```ts {6}
+const api = new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this).build(),
+});
+
+// sayHello는 API에 정의된 작업에 맞게 타입이 지정됩니다
+api.integrations.sayHello.handler.addToRolePolicy(new PolicyStatement({
+  effect: Effect.ALLOW,
+  actions: [...],
+  resources: [...],
+}));
+```
+
+#### 기본 옵션 커스터마이징
+
+기본 통합 생성 시 사용되는 옵션을 커스터마이징하려면 `withDefaultOptions` 메서드를 사용할 수 있습니다. 예를 들어 모든 Lambda 함수를 VPC에 배치하려는 경우:
+
+```ts {5-7}
+const vpc = new Vpc(this, 'Vpc', ...);
+
+new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this)
+    .withDefaultOptions({
+      vpc,
+    })
+    .build(),
+});
+```
+
+#### 통합 재정의
+
+`withOverrides` 메서드를 사용하여 특정 작업에 대한 통합을 재정의할 수 있습니다. 각 재정의는 HTTP 또는 REST API에 적합한 CDK 통합 구성체를 타입 안전 방식으로 지정해야 합니다. 예를 들어 `getDocumentation` API를 외부 웹사이트 호스팅 문서로 재정의하려는 경우:
+
+```ts
+new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this)
+    .withOverrides({
+      getDocumentation: {
+        integration: new HttpIntegration('https://example.com/documentation'),
+      },
+    })
+    .build(),
+});
+```
+
+재정된 통합은 `api.integrations.getDocumentation`을 통해 접근할 때 더 이상 `handler` 속성을 갖지 않습니다.
+
+추가 속성을 통합에 포함시켜 타입 안전성을 유지하면서 다른 유형의 통합을 추상화할 수 있습니다. 예를 들어 REST API용 S3 통합을 생성한 후 특정 작업에 대한 버킷을 참조하려는 경우:
+
+```ts {13, 41}
+const storageBucket = new Bucket(this, 'Bucket', { ... });
+
+const apiGatewayRole = new Role(this, 'ApiGatewayS3Role', {
+  assumedBy: new ServicePrincipal('apigateway.amazonaws.com'),
+});
+
+storageBucket.grantRead(apiGatewayRole);
+
+const api = new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this)
+    .withOverrides({
+      getFile: {
+        bucket: storageBucket,
+        integration: new AwsIntegration({
+          service: 's3',
+          integrationHttpMethod: 'GET',
+          path: `${storageBucket.bucketName}/{fileName}`,
+          options: {
+            credentialsRole: apiGatewayRole,
+            requestParameters: {
+              'integration.request.path.fileName': 'method.request.querystring.fileName',
+            },
+            integrationResponses: [{ statusCode: '200' }],
+          },
+        }),
+        options: {
+          requestParameters: {
+            'method.request.querystring.fileName': true,
+          },
+          methodResponses: [{
+            statusCode: '200',
+          }],
+        }
+      },
+    })
+    .build(),
+});
+
+// 다른 파일에서 타입 안전 방식으로 정의한 버킷 속성에 접근 가능
+api.integrations.getFile.bucket.grantRead(...);
+```
+
+#### 인증자 재정의
+
+통합에서 `options`를 제공하여 특정 메서드 옵션(예: Cognito 인증 사용)을 재정의할 수 있습니다:
+
+```ts
+new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this)
+    .withOverrides({
+      getDocumentation: {
+        integration: new HttpIntegration('https://example.com/documentation'),
+        options: {
+          authorizer: new CognitoUserPoolsAuthorizer(...) // REST용 또는 HTTP API용 HttpUserPoolAuthorizer
+        }
+      },
+    })
+    .build(),
+});
+```
+
+#### 명시적 통합
+
+기본 통합 대신 각 작업에 직접 통합을 제공할 수 있습니다. 이는 각 작업이 다른 유형의 통합을 사용해야 하거나 새 작업 추가 시 타입 오류를 받고자 할 때 유용합니다:
+
+```ts
+new MyApi(this, 'MyApi', {
+  integrations: {
+    sayHello: {
+      integration: new LambdaIntegration(...),
+    },
+    getDocumentation: {
+      integration: new HttpIntegration(...),
+    },
+  },
+});
+```
+
+#### 라우터 패턴
+
+단일 Lambda 함수를 사용하여 모든 API 요청을 처리하려는 경우 API의 `defaultIntegrations` 메서드를 수정하여 통합별이 아닌 단일 함수를 생성할 수 있습니다:
+
+```ts {5,11-12}
+// packages/common/constructs/src/app/apis/my-api.ts
+export class MyApi<...> extends ... {
+
+  public static defaultIntegrations = (scope: Construct) => {
+    const router = new Function(scope, 'RouterHandler', { ... });
+    return IntegrationBuilder.rest({
+      ...
+      defaultIntegrationOptions: {},
+      buildDefaultIntegration: (op) => {
+        return {
+          // 모든 통합에서 동일한 라우터 Lambda 핸들러 참조
+          integration: new LambdaIntegration(router),
+        };
+      },
+    });
+  };
+}
+```
+
+`router` 함수를 메서드 내부에서 생성하는 대신 `defaultIntegrations`의 매개변수로 정의하는 등 다른 방식으로 코드를 수정할 수도 있습니다.

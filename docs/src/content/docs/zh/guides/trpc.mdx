@@ -5,16 +5,17 @@ description: "tRPC 的参考文档"
 
 
 
-import { FileTree } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
+import Snippet from '@components/snippet.astro';
 import schema from '../../../../../../packages/nx-plugin/src/trpc/backend/schema.json';
 
-[tRPC](https://trpc.io/) 是一个用于构建具有端到端类型安全的 TypeScript API 框架。使用 tRPC 时，API 操作输入输出的变更会立即反映在客户端代码中，并可在 IDE 中直接查看而无需重新构建项目。
+[tRPC](https://trpc.io/) 是一个用于构建具备端到端类型安全的 TypeScript API 框架。使用 tRPC 时，API 操作输入输出的更新会立即反映在客户端代码中，并能在 IDE 中直接查看，无需重新构建项目。
 
-该 tRPC API 生成器可创建带有 AWS CDK 基础设施配置的全新 tRPC API。生成的后端使用 AWS Lambda 进行无服务器部署，并通过 [Zod](https://zod.dev/) 实现模式验证。它还配置了 [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/) 用于可观测性，包括日志记录、AWS X-Ray 追踪和 Cloudwatch 指标。
+该 tRPC API 生成器可创建带有 AWS CDK 基础设施配置的全新 tRPC API。生成的后端使用 AWS Lambda 进行无服务器部署，并通过 [Zod](https://zod.dev/) 实现模式验证。同时配置了 [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/) 以实现可观测性，包括日志记录、AWS X-Ray 追踪和 CloudWatch 指标。
 
 ## 使用方式
 
@@ -28,49 +29,51 @@ import schema from '../../../../../../packages/nx-plugin/src/trpc/backend/schema
 
 <GeneratorParameters schema={schema} />
 
+<Snippet name="api/api-choice-note" />
+
 ## 生成器输出
 
-生成器将在 `<directory>/<api-name>` 目录下创建如下项目结构：
+生成器将在 `<directory>/<api-name>` 目录下创建以下项目结构：
 
 <FileTree>
   - schema
     - src
-      - index.ts 模式入口点
+      - index.ts Schema 入口点
       - procedures
-        - echo.ts "echo" 过程的共享模式定义（使用 Zod）
+        - echo.ts 使用 Zod 定义的 "echo" 过程共享模式定义
     - tsconfig.json TypeScript 配置
     - project.json 项目配置与构建目标
   - backend
     - src
       - init.ts 后端 tRPC 初始化
-      - router.ts tRPC 路由定义（Lambda 处理程序 API 入口点）
-      - procedures 暴露的 API 过程（操作）
+      - router.ts tRPC 路由定义（Lambda 处理器 API 入口点）
+      - procedures API 暴露的过程（操作）
         - echo.ts 示例过程
       - middleware
         - error.ts 错误处理中间件
-        - logger.ts 配置 AWS Powertools Lambda 日志记录的中间件
-        - tracer.ts 配置 AWS Powertools Lambda 追踪的中间件
-        - metrics.ts 配置 AWS Powertools Lambda 指标的中间件
-      - local-server.ts 本地开发服务器的 tRPC 独立适配器入口点
+        - logger.ts 配置 AWS Lambda Powertools 日志记录的中间件
+        - tracer.ts 配置 AWS Lambda Powertools 追踪的中间件
+        - metrics.ts 配置 AWS Lambda Powertools 指标的中间件
+      - local-server.ts 本地开发服务器使用的 tRPC 独立适配器入口点
       - client
         - index.ts 机器间 API 调用的类型安全客户端
     - tsconfig.json TypeScript 配置
     - project.json 项目配置与构建目标
 </FileTree>
 
-生成器还会在 `packages/common/constructs` 目录下创建用于部署 API 的 CDK 构造。
+生成器还会在 `packages/common/constructs` 目录下创建用于部署 API 的 CDK 构造体。
 
 ## 实现 tRPC API
 
-如上所示，tRPC API 包含两个主要组件：[`schema`](#schema)（模式）和 [`backend`](#backend)（后端），它们在工作区中作为独立包存在。
+如上所示，tRPC API 主要由两个组件构成：工作区中定义为独立包的 [`schema`](#schema) 和 [`backend`](#backend)。
 
 :::tip
-`schema` 和 `backend` 均为 TypeScript 项目，具体通用用法可参考 <Link path="guides/typescript-project">TypeScript 项目文档</Link>。
+`schema` 和 `backend` 均为 TypeScript 项目，更多通用使用细节可参考 <Link path="guides/typescript-project">TypeScript 项目文档</Link>。
 :::
 
 ### 模式定义
 
-schema 包定义了客户端与服务端代码共享的类型。这些类型通过 [Zod](https://zod.dev/)（TypeScript 优先的模式声明与验证库）进行定义。
+模式包定义了客户端与服务端代码共享的类型。这些类型使用 TypeScript 优先的模式声明与验证库 [Zod](https://zod.dev/) 进行定义。
 
 示例模式如下所示：
 
@@ -84,11 +87,11 @@ export const UserSchema = z.object({
   dateOfBirth: z.string().datetime(),
 });
 
-// 对应 TypeScript 类型
+// 对应的 TypeScript 类型
 export type User = z.TypeOf<typeof UserSchema>;
 ```
 
-根据上述模式，`User` 类型等效于以下 TypeScript 接口：
+根据以上模式，`User` 类型等效于以下 TypeScript 接口：
 
 ```ts
 interface User {
@@ -98,19 +101,19 @@ interface User {
 }
 ```
 
-模式通过服务端和客户端代码共享，在修改 API 使用的数据结构时只需单点更新。
+模式在服务端和客户端代码间共享，为 API 使用的数据结构变更提供了单一修改点。
 
-tRPC API 在运行时会自动验证模式，省去在后端手工编写验证逻辑的麻烦。
+tRPC API 在运行时自动验证模式，省去了手动编写后端验证逻辑的工作。
 
-Zod 提供强大的模式组合与派生工具，如 `.merge`、`.pick`、`.omit` 等。更多信息请参阅 [Zod 官方文档](https://zod.dev/?id=basic-usage)。
+Zod 提供了强大的模式组合与派生工具，如 `.merge`、`.pick`、`.omit` 等。更多信息请参阅 [Zod 官方文档](https://zod.dev/?id=basic-usage)。
 
 ### 后端实现
 
-`backend` 文件夹包含 API 实现，用于定义 API 操作及其输入、输出与具体实现。
+嵌套的 `backend` 文件夹包含 API 实现，您需要在此定义 API 操作及其输入、输出与实现。
 
-API 入口点位于 `src/router.ts`，该文件包含 Lambda 处理程序，根据调用的操作将请求路由至对应"过程"。每个过程定义预期的输入、输出和实现逻辑。
+API 入口点位于 `src/router.ts`，该文件包含将请求路由到具体过程的 Lambda 处理器。每个过程定义了预期的输入、输出和实现。
 
-生成的示例路由包含名为 `echo` 的单个操作：
+生成的示例路由包含名为 `echo` 的单一操作：
 
 ```ts
 import { echo } from './procedures/echo.js';
@@ -129,31 +132,31 @@ export const echo = publicProcedure
   .query((opts) => ({ result: opts.input.message }));
 ```
 
-分解说明：
+代码解析：
 
-- `publicProcedure` 定义 API 的公共方法，包含 `src/middleware` 中配置的中间件（含 AWS Lambda Powertools 的日志、追踪和指标集成）
-- `input` 接受 Zod 模式定义操作预期输入，发送至该操作的请求会自动根据模式验证
-- `output` 接受 Zod 模式定义操作预期输出，若实现返回不符合模式的输出将产生类型错误
-- `query` 接受定义 API 实现的函数，接收包含操作输入的 `opts` 参数及中间件设置的上下文 `opts.ctx`，返回必须符合 `output` 模式的输出
+- `publicProcedure` 定义 API 的公共方法，包含 `src/middleware` 中配置的中间件（含 AWS Lambda Powertools 集成）
+- `input` 接受 Zod 模式定义操作的预期输入，请求将自动根据此模式进行验证
+- `output` 接受 Zod 模式定义操作的预期输出，若返回不符合模式将触发类型错误
+- `query` 接受定义操作实现的函数，通过 `opts` 参数获取输入和中间件设置的上下文 (`opts.ctx`)，返回值必须符合 `output` 模式
 
-使用 `query` 定义实现表示该操作非变更性，适用于数据检索方法。定义变更性操作时请改用 `mutation` 方法。
+使用 `query` 定义非变更操作，用于数据检索。实现变更操作时请使用 `mutation` 方法。
 
-添加新操作后，需在 `src/router.ts` 的路由中注册该操作。
+新增操作时，请确保在 `src/router.ts` 中注册。
 
-## 自定义 tRPC API
+## 定制 tRPC API
 
 ### 错误处理
 
-在实现中可通过抛出 `TRPCError` 向客户端返回错误响应，其中 `code` 表示错误类型：
+在实现中可通过抛出 `TRPCError` 返回错误响应，例如：
 
 ```ts
 throw new TRPCError({
   code: 'NOT_FOUND',
-  message: '找不到请求的资源',
+  message: '未找到请求的资源',
 });
 ```
 
-### 操作分组
+### 操作组织
 
 随着 API 扩展，可通过嵌套路由对相关操作进行分组：
 
@@ -170,7 +173,7 @@ const appRouter = router({
 })
 ```
 
-客户端调用时将体现分组结构，例如调用 `listUsers` 操作：
+客户端将按分组调用操作，例如：
 
 ```ts
 client.users.list.query();
@@ -178,14 +181,14 @@ client.users.list.query();
 
 ### 日志记录
 
-AWS Lambda Powertools 日志记录器配置于 `src/middleware/logger.ts`，可通过 `opts.ctx.logger` 访问。可用于记录至 CloudWatch 日志，或控制结构化日志消息中的附加字段：
+AWS Lambda Powertools 日志记录器配置于 `src/middleware/logger.ts`，可通过 `opts.ctx.logger` 访问，例如：
 
 ```ts {5}
 export const echo = publicProcedure
    .input(...)
    .output(...)
    .query(async (opts) => {
-      opts.ctx.logger.info('操作调用输入', opts.input);
+      opts.ctx.logger.info('操作调用参数', opts.input);
 
       return ...;
    });
@@ -195,7 +198,7 @@ export const echo = publicProcedure
 
 ### 指标记录
 
-AWS Lambda Powertools 指标配置于 `src/middleware/metrics.ts`，可通过 `opts.ctx.metrics` 访问。无需导入 AWS SDK 即可记录 CloudWatch 指标：
+AWS Lambda Powertools 指标配置于 `src/middleware/metrics.ts`，可通过 `opts.ctx.metrics` 访问，例如：
 
 ```ts {5}
 export const echo = publicProcedure
@@ -210,9 +213,9 @@ export const echo = publicProcedure
 
 更多信息请参阅 [AWS Lambda Powertools 指标文档](https://docs.powertools.aws.dev/lambda/typescript/latest/core/metrics/)。
 
-### 精细化 X-Ray 追踪
+### X-Ray 追踪调优
 
-AWS Lambda Powertools 追踪器配置于 `src/middleware/tracer.ts`，可通过 `opts.ctx.tracer` 访问。用于通过 AWS X-Ray 添加追踪以洞察 API 请求的性能和流程：
+AWS Lambda Powertools 追踪器配置于 `src/middleware/tracer.ts`，可通过 `opts.ctx.tracer` 访问，例如：
 
 ```ts {5-7}
 export const echo = publicProcedure
@@ -220,7 +223,7 @@ export const echo = publicProcedure
    .output(...)
    .query(async (opts) => {
       const subSegment = opts.ctx.tracer.getSegment()!.addNewSubsegment('我的算法');
-      // ... 需要捕获的算法逻辑
+      // ... 需捕获的算法逻辑
       subSegment.close();
 
       return ...;
@@ -229,9 +232,9 @@ export const echo = publicProcedure
 
 更多信息请参阅 [AWS Lambda Powertools 追踪文档](https://docs.powertools.aws.dev/lambda/typescript/latest/core/tracer/)。
 
-### 自定义中间件实现
+### 自定义中间件
 
-通过实现中间件可为过程上下文添加自定义值。以下示例演示如何从 API 中提取调用用户信息，创建 `src/middleware/identity.ts`：
+通过实现中间件可向过程上下文添加自定义值。以下示例在 `src/middleware/identity.ts` 中实现身份中间件：
 
 首先定义上下文扩展：
 
@@ -248,26 +251,99 @@ export interface IIdentityContext {
 
 ```ts
 export const createIdentityPlugin = () => {
-   const t = initTRPC.context<IIdentityContext>().create();
+   const t = initTRPC.context<...>().create();
    return t.procedure.use(async (opts) => {
-      // 前置处理逻辑
+      // 前置逻辑
 
       const response = await opts.next(...);
 
-      // 后置处理逻辑
+      // 后置逻辑
 
       return response;
    });
 };
 ```
 
-具体实现 Cognito 用户信息提取：
+具体实现根据 API 类型有所不同：
 
+<Tabs>
+<TabItem label="REST">
 ```ts
 import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
+import { initTRPC, TRPCError } from '@trpc/server';
+import { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
+import { APIGatewayProxyEvent } from 'aws-lambda';
+
+export interface IIdentityContext {
+  identity?: {
+    sub: string;
+    username: string;
+  };
+}
 
 export const createIdentityPlugin = () => {
-  const t = initTRPC.context<IIdentityContext>().create();
+  const t = initTRPC.context<IIdentityContext & CreateAWSLambdaContextOptions<APIGatewayProxyEvent>>().create();
+
+  const cognito = new CognitoIdentityProvider();
+
+  return t.procedure.use(async (opts) => {
+    const cognitoAuthenticationProvider = opts.ctx.event.requestContext?.identity?.cognitoAuthenticationProvider;
+
+    let sub: string | undefined = undefined;
+    if (cognitoAuthenticationProvider) {
+      const providerParts = cognitoAuthenticationProvider.split(':');
+      sub = providerParts[providerParts.length - 1];
+    }
+
+    if (!sub) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: `无法确定调用用户`,
+      });
+    }
+
+    const { Users } = await cognito.listUsers({
+      UserPoolId: process.env.USER_POOL_ID!,
+      Limit: 1,
+      Filter: `sub="${sub}"`,
+    });
+
+    if (!Users || Users.length !== 1) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: `未找到 subjectId 为 ${sub} 的用户`,
+      });
+    }
+
+    return await opts.next({
+      ctx: {
+        ...opts.ctx,
+        identity: {
+          sub,
+          username: Users[0].Username!,
+        },
+      },
+    });
+  });
+};
+```
+</TabItem>
+<TabItem label="HTTP">
+```ts
+import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
+import { initTRPC, TRPCError } from '@trpc/server';
+import { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
+import { APIGatewayProxyEventV2WithIAMAuthorizer } from 'aws-lambda';
+
+export interface IIdentityContext {
+  identity?: {
+    sub: string;
+    username: string;
+  };
+}
+
+export const createIdentityPlugin = () => {
+  const t = initTRPC.context<IIdentityContext & CreateAWSLambdaContextOptions<APIGatewayProxyEventV2WithIAMAuthorizer>>().create();
 
   const cognito = new CognitoIdentityProvider();
 
@@ -302,7 +378,7 @@ export const createIdentityPlugin = () => {
     if (!Users || Users.length !== 1) {
       throw new TRPCError({
         code: 'FORBIDDEN',
-        message: `找不到 subjectId 为 ${sub} 的用户`,
+        message: `未找到 subjectId 为 ${sub} 的用户`,
       });
     }
 
@@ -318,26 +394,38 @@ export const createIdentityPlugin = () => {
   });
 };
 ```
+</TabItem>
+</Tabs>
 
 ## 部署 tRPC API
 
-tRPC 后端生成器在 `common/constructs` 目录生成 CDK 构造。可在 CDK 应用程序中使用：
+生成器在 `common/constructs` 文件夹中创建了部署 API 的 CDK 构造体。在 CDK 应用中使用示例：
 
-```ts {6}
+```ts {6-8}
 import { MyApi } from ':my-scope/common-constructs`;
 
 export class ExampleStack extends Stack {
    constructor(scope: Construct, id: string) {
-      const api = new MyApi(this, 'MyApi');
+      const api = new MyApi(this, 'MyApi', {
+        integrations: MyApi.defaultIntegrations(this).build(),
+      });
    }
 }
 ```
 
-该配置将部署 API 基础设施，包含 AWS API Gateway HTTP API、业务逻辑的 AWS Lambda 函数和 IAM 认证。
+该配置包含 AWS API Gateway REST/HTTP API、业务逻辑的 AWS Lambda 函数和 IAM 认证。
+
+### 类型安全集成
+
+<Snippet name="api/type-safe-api-integrations" />
+
+:::tip
+tRPC API 的过程变更将立即反映在 CDK 构造体中，无需重新构建。
+:::
 
 ### 权限授予
 
-通过 `grantInvokeAccess` 方法授予 API 访问权限，例如授权已认证的 Cognito 用户：
+使用 `grantInvokeAccess` 方法授予 API 访问权限，例如授权认证的 Cognito 用户：
 
 ```ts
 api.grantInvokeAccess(myIdentityPool.authenticatedRole);
@@ -349,11 +437,11 @@ api.grantInvokeAccess(myIdentityPool.authenticatedRole);
 
 <NxCommands commands={['run @my-scope/my-api-backend:serve']} />
 
-本地服务器入口点位于 `src/local-server.ts`。
+本地服务器入口点为 `src/local-server.ts`。
 
 ## 调用 tRPC API
 
-可创建类型安全客户端调用 API。后端间调用可使用 `src/client/index.ts` 的客户端：
+创建类型安全的 tRPC 客户端进行调用。后端间调用示例：
 
 ```ts
 import { createMyApiClient } from ':my-scope/my-api-backend';
@@ -363,8 +451,8 @@ const client = createMyApiClient({ url: 'https://my-api-url.example.com/' });
 await client.echo.query({ message: 'Hello world!' });
 ```
 
-若从 React 网站调用 API，建议使用 <Link path="guides/api-connection/react-trpc">API 连接</Link> 生成器配置客户端。
+React 网站调用建议使用 <Link path="guides/api-connection/react-trpc">API 连接</Link> 生成器配置客户端。
 
 ## 更多信息
 
-关于 tRPC 的更多信息，请参阅 [tRPC 官方文档](https://trpc.io/docs)。
+更多 tRPC 细节请参阅 [tRPC 官方文档](https://trpc.io/docs)。

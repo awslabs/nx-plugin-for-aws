@@ -20,28 +20,28 @@ import nxGraphPng from '@assets/nx-graph.png'
 import gameSelectPng from '@assets/game-select.png'
 import gameConversationPng from '@assets/game-conversation.png'
 
-## Modulo 3: Implementazione dell'API per la storia
+## Modulo 3: Implementazione dell'API Story
 
 <Aside type="caution">
-Assicurati di aver concesso l'accesso al modello **Anthropic Claude 3.5 Sonnet v2** seguendo i passaggi descritti in [this guide](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html).
+Assicurati di aver concesso l'accesso al modello **Anthropic Claude 3.5 Sonnet v2** seguendo i passaggi descritti in [questa guida](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html).
 </Aside>
 
-Lo StoryApi è composto da una singola API `generate_story` che, dati un `Game` e una lista di `Action` come contesto, farà progredire una storia. Questa API sarà implementata come API streaming in Python/FastAPI e dimostrerà inoltre come modificare il codice generato per adattarlo allo scopo.
+La StoryApi consiste in un'unica API `generate_story` che, dato un `Game` e una lista di `Action` come contesto, farà progredire una storia. Questa API sarà implementata come API streaming in Python/FastAPI e dimostrerà inoltre come modificare il codice generato per adattarlo allo scopo.
 
 ### Implementazione dell'API
 
-Per creare la nostra API, dobbiamo prima installare alcune dipendenze aggiuntive:
+Per creare la nostra API, dobbiamo prima installare alcune dipendenze aggiuntive.
 
-- `boto3` verrà utilizzato per chiamare Amazon Bedrock
-- `uvicorn` verrà usato per avviare la nostra API in combinazione con [Lambda Web Adapter (LWA)](https://github.com/awslabs/aws-lambda-web-adapter)
-- `copyfiles` è una dipendenza npm necessaria per supportare la copia cross-platform dei file durante l'aggiornamento del task `bundle`
+- `boto3` verrà utilizzato per chiamare Amazon Bedrock;
+- `uvicorn` verrà utilizzato per avviare la nostra API in combinazione con [Lambda Web Adapter (LWA)](https://github.com/awslabs/aws-lambda-web-adapter).
+- `copyfiles` è una dipendenza npm necessaria per supportare la copia cross-platform dei file durante l'aggiornamento del task `bundle`.
 
 Per installare queste dipendenze, esegui i seguenti comandi:
 
 <NxCommands commands={["run dungeon_adventure.story_api:add --args boto3 uvicorn"]} />
 <InstallCommand pkg="copyfiles" dev />
 
-Sostituiamo ora il contenuto di `packages/story_api/story_api/main.py` con quanto segue:
+Ora sostituiamo il contenuto di `packages/story_api/story_api/main.py` con quanto segue:
 
 ```python
 // packages/story_api/story_api/main.py
@@ -100,7 +100,7 @@ async def bedrock_stream(request: StoryRequest):
                     yield "\n"
 
 @app.post("/story/generate",
-          openapi_extra={'x-streaming': True, 'x-query': True},
+          openapi_extra={'x-streaming': True},
           response_class=PlainTextResponse)
 def generate_story(request: StoryRequest) -> str:
     return StreamingResponse(bedrock_stream(request), media_type="text/plain")
@@ -108,204 +108,163 @@ def generate_story(request: StoryRequest) -> str:
 
 Analizzando il codice sopra:
 
-- Usiamo l'impostazione `x-streaming` per indicare che si tratta di un'API streaming quando genereremo il client SDK. Questo ci permetterà di consumare l'API in modalità streaming mantenendo la type-safety!
-- Usiamo l'impostazione `x-query` per indicare che, nonostante sia una richiesta POST, la tratteremo come una `query` invece che una `mutation`, sfruttando al meglio la gestione dello stato streaming di TanStack Query
-- La nostra API restituisce semplicemente un flusso di testo come definito da `media_type="text/plain"` e `response_class=PlainTextResponse`
+- Utilizziamo l'impostazione `x-streaming` per indicare che questa è un'API streaming quando genereremo il nostro client SDK. Questo ci permetterà di consumare questa API in modalità streaming mantenendo la type-safety!
+- La nostra API restituisce semplicemente un flusso di testo come definito sia da `media_type="text/plain"` che da `response_class=PlainTextResponse`
 
 :::note
-Ogni volta che modifichi la tua FastAPI, dovrai ricostruire il progetto per vedere le modifiche riflesse nel client generato nel sito web.
+Ogni volta che modifichi la tua FastAPI, dovrai ricostruire il progetto per vedere le modifiche riflesse nel client generato nel tuo sito web.
 
-Apporteremo alcune modifiche aggiuntive prima di ricostruire.
+Faremo altre modifiche di seguito prima di ricostruire.
 :::
 
 ### Infrastruttura
 
-L'<Link path="get_started/tutorials/dungeon-game/1#game-ui-infrastructure">infrastruttura configurata precedentemente</Link> presuppone che tutte le API abbiano un API Gateway integrato con Lambda. Per la nostra `story_api` non vogliamo usare API Gateway perché non supporta risposte streaming. Utilizzeremo invece un [Lambda Function URL configurato con response streaming](https://docs.aws.amazon.com/lambda/latest/dg/configuration-response-streaming.html).
+L'<Link path="get_started/tutorials/dungeon-game/1#game-ui-infrastructure">infrastruttura configurata precedentemente</Link> presuppone che tutte le API abbiano un API Gateway che si integra con funzioni Lambda. Per la nostra `story_api` non vogliamo utilizzare API Gateway poiché non supporta risposte streaming. Utilizzeremo invece un [Lambda Function URL configurato con response streaming](https://docs.aws.amazon.com/lambda/latest/dg/configuration-response-streaming.html).
 
-Per supportare questo, aggiorniamo prima i costrutti CDK come segue:
+Per supportare questo, aggiorneremo prima i nostri costrutti CDK come segue:
 
 <Tabs>
-<TabItem label="http-api.ts">
-```typescript
-// packages/common/constructs/src/core/http-api.ts
-import { Construct } from 'constructs';
-import { CfnOutput, Duration, Stack } from 'aws-cdk-lib';
+<TabItem label="story-api.ts">
+```ts
+// packages/common/constructs/src/app/apis/story-api.ts
+import { Duration, Stack, CfnOutput } from 'aws-cdk-lib';
+import { IGrantable, Grant } from 'aws-cdk-lib/aws-iam';
 import {
-  CorsHttpMethod,
-  HttpApi as _HttpApi,
-  HttpMethod,
-  IHttpRouteAuthorizer,
-} from 'aws-cdk-lib/aws-apigatewayv2';
-import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
-import {
+  Runtime,
   Code,
-  Function,
-  FunctionUrl,
+  Tracing,
+  LayerVersion,
   FunctionUrlAuthType,
   InvokeMode,
-  LayerVersion,
-  Runtime,
-  Tracing,
+  Function,
 } from 'aws-cdk-lib/aws-lambda';
-import { Grant, IGrantable } from 'aws-cdk-lib/aws-iam';
-import { RuntimeConfig } from './runtime-config.js';
+import { Construct } from 'constructs';
+import url from 'url';
+import { RuntimeConfig } from '../../core/runtime-config.js';
 
-export interface HttpApiProps {
-  readonly apiName: string;
-  readonly handler: string;
-  readonly handlerFilePath: string;
-  readonly runtime: Runtime;
-  readonly defaultAuthorizer: IHttpRouteAuthorizer;
-  readonly apiType?: 'api-gateway' | 'function-url-streaming';
-  readonly allowedOrigins?: string[];
-}
+export class StoryApi extends Construct {
+  public readonly handler: Function;
 
-export class HttpApi extends Construct {
-  public readonly api?: _HttpApi;
-  public readonly routerFunctionUrl?: FunctionUrl;
-  public readonly routerFunction: Function;
-
-  constructor(scope: Construct, id: string, props: HttpApiProps) {
+  constructor(scope: Construct, id: string) {
     super(scope, id);
 
-    this.routerFunction = new Function(this, `${id}Handler`, {
+    this.handler = new Function(this, 'Handler', {
+      runtime: Runtime.PYTHON_3_12,
+      handler: 'run.sh',
+      code: Code.fromAsset(
+        url.fileURLToPath(
+          new URL(
+            '../../../../../../dist/packages/story_api/bundle',
+            import.meta.url,
+          ),
+        ),
+      ),
       timeout: Duration.seconds(30),
-      runtime: props.runtime,
-      handler: props.handler,
-      code: Code.fromAsset(props.handlerFilePath),
       tracing: Tracing.ACTIVE,
       environment: {
         AWS_CONNECTION_REUSE_ENABLED: '1',
       },
     });
 
-    let apiUrl;
-    if (props.apiType === 'function-url-streaming') {
-      const stack = Stack.of(this);
-      this.routerFunction.addLayers(
-        LayerVersion.fromLayerVersionArn(
-          this,
-          'LWALayer',
-          `arn:aws:lambda:${stack.region}:753240598075:layer:LambdaAdapterLayerX86:24`,
-        ),
-      );
-      this.routerFunction.addEnvironment('PORT', '8000');
-      this.routerFunction.addEnvironment(
-        'AWS_LWA_INVOKE_MODE',
-        'response_stream',
-      );
-      this.routerFunction.addEnvironment(
-        'AWS_LAMBDA_EXEC_WRAPPER',
-        '/opt/bootstrap',
-      );
-      this.routerFunctionUrl = this.routerFunction.addFunctionUrl({
-        authType: FunctionUrlAuthType.AWS_IAM,
-        invokeMode: InvokeMode.RESPONSE_STREAM,
-        cors: {
-          allowedOrigins: props.allowedOrigins ?? ['*'],
-          allowedHeaders: [
-            'authorization',
-            'content-type',
-            'x-amz-content-sha256',
-            'x-amz-date',
-            'x-amz-security-token',
-          ],
-        },
-      });
-      apiUrl = this.routerFunctionUrl.url;
-    } else {
-      this.api = new _HttpApi(this, id, {
-        corsPreflight: {
-          allowOrigins: props.allowedOrigins ?? ['*'],
-          allowMethods: [CorsHttpMethod.ANY],
-          allowHeaders: [
-            'authorization',
-            'content-type',
-            'x-amz-content-sha256',
-            'x-amz-date',
-            'x-amz-security-token',
-          ],
-        },
-        defaultAuthorizer: props.defaultAuthorizer,
-      });
-
-      this.api.addRoutes({
-        path: '/{proxy+}',
-        methods: [
-          HttpMethod.GET,
-          HttpMethod.DELETE,
-          HttpMethod.POST,
-          HttpMethod.PUT,
-          HttpMethod.PATCH,
-          HttpMethod.HEAD,
+    const stack = Stack.of(this);
+    this.handler.addLayers(
+      LayerVersion.fromLayerVersionArn(
+        this,
+        'LWALayer',
+        `arn:aws:lambda:${stack.region}:753240598075:layer:LambdaAdapterLayerX86:24`,
+      ),
+    );
+    this.handler.addEnvironment('PORT', '8000');
+    this.handler.addEnvironment('AWS_LWA_INVOKE_MODE', 'response_stream');
+    this.handler.addEnvironment('AWS_LAMBDA_EXEC_WRAPPER', '/opt/bootstrap');
+    const functionUrl = this.handler.addFunctionUrl({
+      authType: FunctionUrlAuthType.AWS_IAM,
+      invokeMode: InvokeMode.RESPONSE_STREAM,
+      cors: {
+        allowedOrigins: ['*'],
+        allowedHeaders: [
+          'authorization',
+          'content-type',
+          'x-amz-content-sha256',
+          'x-amz-date',
+          'x-amz-security-token',
         ],
-        integration: new HttpLambdaIntegration(
-          'RouterIntegration',
-          this.routerFunction,
-        ),
-      });
-      apiUrl = this.api.url;
-    }
+      },
+    });
 
-    new CfnOutput(this, `${props.apiName}Url`, { value: apiUrl! });
+    new CfnOutput(this, 'StoryApiUrl', { value: functionUrl.url });
 
-    RuntimeConfig.ensure(this).config.httpApis = {
-      ...RuntimeConfig.ensure(this).config.httpApis!,
-      [props.apiName]: apiUrl,
+    // Registra l'URL API nella configurazione runtime per la scoperta client
+    RuntimeConfig.ensure(this).config.apis = {
+      ...RuntimeConfig.ensure(this).config.apis!,
+      StoryApi: functionUrl.url,
     };
   }
 
   public grantInvokeAccess(grantee: IGrantable) {
-    if (this.api) {
-      Grant.addToPrincipal({
-        grantee,
-        actions: ['execute-api:Invoke'],
-        resourceArns: [this.api.arnForExecuteApi('*', '/*', '*')],
-      });
-    } else if (this.routerFunction) {
-      Grant.addToPrincipal({
-        grantee,
-        actions: ['lambda:InvokeFunctionUrl'],
-        resourceArns: [this.routerFunction.functionArn],
-        conditions: {
-          StringEquals: {
-            'lambda:FunctionUrlAuthType': 'AWS_IAM',
-          },
+    Grant.addToPrincipal({
+      grantee,
+      actions: ['lambda:InvokeFunctionUrl'],
+      resourceArns: [this.handler.functionArn],
+      conditions: {
+        StringEquals: {
+          'lambda:FunctionUrlAuthType': 'AWS_IAM',
         },
-      });
-    }
+      },
+    });
   }
 }
+
 ```
 </TabItem>
-<TabItem label="story-api.ts">
+<TabItem label="application-stack.ts">
 ```diff lang="typescript"
-// packages/common/constructs/src/app/http-apis/story-api.ts
+// packages/infra/src/stacks/application-stack.ts
+import {
+  GameApi,
+  GameUI,
+  StoryApi,
+  UserIdentity,
+} from ':dungeon-adventure/common-constructs';
+import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
-import * as url from 'url';
-import { HttpApi } from '../../core/http-api.js';
-import { HttpIamAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
-import { Runtime } from 'aws-cdk-lib/aws-lambda';
-+import { Effect, PolicyStatement } from 'aws-cdk-lib/aws-iam';
+import { ElectrodbDynamoTable } from '../constructs/electrodb-table.js';
++import { PolicyStatement, Effect } from 'aws-cdk-lib/aws-iam';
 
-export class StoryApi extends HttpApi {
-  constructor(scope: Construct, id: string) {
-    super(scope, id, {
-      defaultAuthorizer: new HttpIamAuthorizer(),
-      apiName: 'StoryApi',
-      runtime: Runtime.PYTHON_3_12,
--      handler: 'story_api.main.handler',
-+      apiType: 'function-url-streaming',
-+      handler: 'run.sh',
-      handlerFilePath: url.fileURLToPath(
-        new URL(
-          '../../../../../../dist/packages/story_api/bundle',
-          import.meta.url,
-        ),
-      ),
+export class ApplicationStack extends cdk.Stack {
+  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+    super(scope, id, props);
+
+    // Il codice che definisce lo stack va qui
+    const userIdentity = new UserIdentity(this, 'UserIdentity');
+
+    const electroDbTable = new ElectrodbDynamoTable(this, 'ElectroDbTable');
+
+    const gameApi = new GameApi(this, 'GameApi', {
+      integrations: GameApi.defaultIntegrations(this)
+        .withDefaultOptions({
+          environment: {
+            TABLE_NAME: electroDbTable.tableName,
+          },
+        })
+        .build(),
     });
-+
-+    this.routerFunction.addToRolePolicy(
+
+    // Concede permessi di lettura/scrittura a ciascun handler in base ai requisiti
+    electroDbTable.grantReadData(gameApi.integrations['actions.query'].handler);
+    electroDbTable.grantReadData(gameApi.integrations['games.query'].handler);
+    electroDbTable.grantReadWriteData(
+      gameApi.integrations['actions.save'].handler,
+    );
+    electroDbTable.grantReadWriteData(
+      gameApi.integrations['games.save'].handler,
+    );
+
+-    const storyApi = new StoryApi(this, 'StoryApi', {
+-      integrations: StoryApi.defaultIntegrations(this).build(),
+-    });
++    const storyApi = new StoryApi(this, 'StoryApi');
++    storyApi.handler.addToRolePolicy(
 +      new PolicyStatement({
 +        effect: Effect.ALLOW,
 +        actions: ['bedrock:InvokeModelWithResponseStream'],
@@ -314,13 +273,22 @@ export class StoryApi extends HttpApi {
 +        ],
 +      }),
 +    );
+
+    // concede al ruolo autenticato l'accesso per invocare le API
+    [storyApi, gameApi].forEach((api) =>
+      api.grantInvokeAccess(userIdentity.identityPool.authenticatedRole),
+    );
+
+    // Istanzia per ultimo per garantire la corretta configurazione automatica di runtime-config.json
+    new GameUI(this, 'GameUI');
   }
 }
+
 ```
 </TabItem>
 </Tabs>
 
-Aggiorneremo ora lo `story_api` per supportare il deployment con [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter).
+Ora aggiorneremo lo `story_api` per supportare il deployment con [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter).
 
 <Tabs>
 <TabItem label="run.sh">
@@ -364,14 +332,14 @@ PATH=$PATH:$LAMBDA_TASK_ROOT/bin \
 </TabItem>
 </Tabs>
 
-### Deployment e testing
+### Deployment e test
 
-Prima di tutto, compiliamo il codice base:
+Prima di tutto, compiliamo il codice:
 
 <NxCommands commands={['run-many --target build --all']} />
 
 <Aside type="tip">
-Se incontri errori di linting, puoi eseguire questo comando per correggerli automaticamente:
+Se incontri errori di linting, puoi eseguire questo comando per correggerli automaticamente.
 
 <NxCommands commands={['run-many --target lint --configuration=fix --all']} />
 </Aside>
@@ -382,17 +350,17 @@ Ora puoi deployare l'applicazione eseguendo:
 
 Il deployment richiederà circa 2 minuti.
 
-<Drawer title="Comando di distribuzione" trigger="Puoi anche distribuire tutti gli stack insieme. Clicca qui per i dettagli.">
+<Drawer title="Comando di deployment" trigger="Puoi anche deployare tutti gli stack insieme. Clicca per maggiori dettagli.">
 
-Puoi distribuire tutti gli stack dell'applicazione CDK eseguendo:
+Puoi deployare tutti gli stack dell'applicazione CDK eseguendo:
 
 <NxCommands commands={['run @dungeon-adventure/infra:deploy --all']} />
 
-**Non è raccomandato** in quanto potresti voler separare le fasi di deployment in stack diversi (es. `infra-prod`). In questo caso il flag `--all` tenterà di distribuire tutti gli stack, con il rischio di deployment indesiderati!
+**Non raccomandato** poiché potresti voler separare gli stage di deployment in stack diversi (es. `infra-prod`). In questo caso il flag `--all` tenterà di deployare tutto, rischiando deployment indesiderati!
 
 </Drawer>
 
-Al termine del deployment, dovresti vedere output simili a questi (alcuni valori sono oscurati):
+Al termine del deployment, vedrai output simili a questi _(alcuni valori sono oscurati)_:
 
 ```bash
 dungeon-adventure-infra-sandbox
@@ -400,11 +368,11 @@ dungeon-adventure-infra-sandbox: deploying... [2/2]
 
  ✅  dungeon-adventure-infra-sandbox
 
-✨  Deployment time: 354s
+✨  Tempo di deployment: 354s
 
 Outputs:
 dungeon-adventure-infra-sandbox.ElectroDbTableTableNameXXX = dungeon-adventure-infra-sandbox-ElectroDbTableXXX-YYY
-dungeon-adventure-infra-sandbox.GameApiGameApiUrlXXX = https://xxx.region.amazonaws.com/
+dungeon-adventure-infra-sandbox.GameApiEndpointXXX = https://xxx.execute-api.region.amazonaws.com/prod/
 dungeon-adventure-infra-sandbox.GameUIDistributionDomainNameXXX = xxx.cloudfront.net
 dungeon-adventure-infra-sandbox.StoryApiStoryApiUrlXXX = https://xxx.lambda-url.ap-southeast-2.on.aws/
 dungeon-adventure-infra-sandbox.UserIdentityUserIdentityIdentityPoolIdXXX = region:xxx
@@ -415,8 +383,8 @@ Possiamo testare l'API in due modi:
 <ul>
 <li>Avviare un'istanza locale del server FastAPI e invocare le API con `curl`</li>
 <li>
-<Drawer title="Curl con Sigv4 abilitato" trigger="Chiamare l'API deployata usando curl con Sigv4">
-Puoi aggiungere questo script al tuo file `.bashrc` (e fare `source`) oppure incollare direttamente nel terminale:
+<Drawer title="Curl con Sigv4 abilitato" trigger="Chiamare l'API deployata direttamente con curl abilitato per sigv4">
+Puoi aggiungere questo script al tuo file `.bashrc` (e fare `source`) o incollarlo direttamente nel terminale.
 ```bash
 // ~/.bashrc
 acurl () {
@@ -427,14 +395,14 @@ acurl () {
 }
 ```
 
-Esempi di richieste autenticate con Sigv4:
+Esempi di chiamata autenticata con sigv4:
 
 ###### API Gateway
 ```bash
 acurl ap-southeast-2 execute-api -X GET https://xxx
 ```
 
-###### Streaming Lambda function url
+###### Lambda function url streaming
 ```bash
 acurl ap-southeast-2 lambda -N -X POST https://xxx
 ```
@@ -447,7 +415,7 @@ acurl ap-southeast-2 lambda -N -X POST https://xxx
   Avvia il server FastAPI locale con:
     <NxCommands commands={["run dungeon_adventure.story_api:serve"]} />
 
-    Esegui poi la chiamata con:
+    Una volta avviato, invocalo con:
 
     ```bash
     curl -N -X POST http://127.0.0.1:8000/story/generate \
@@ -455,7 +423,7 @@ acurl ap-southeast-2 lambda -N -X POST https://xxx
       -H "Content-Type: application/json"
     ```
   </TabItem>
-  <TabItem label="Deployata">
+  <TabItem label="Deployato">
 ```bash "https://xxx.lambda-url.ap-southeast-2.on.aws/" "ap-southeast-2"
 acurl ap-southeast-2 lambda -N -X POST \
   https://xxx.lambda-url.ap-southeast-2.on.aws/story/generate \
@@ -463,15 +431,15 @@ acurl ap-southeast-2 lambda -N -X POST \
   -H "Content-Type: application/json"
 ```
     <Aside type="caution">
-    Usa il valore `dungeon-adventure-infra-sandbox.StoryApiStoryApiUrlXXX` dall'output del deploy CDK per sostituire l'URL e imposta la regione corretta.
+    Utilizza il valore `dungeon-adventure-infra-sandbox.StoryApiStoryApiUrlXXX` dall'output del CDK per sostituire il placeholder dell'URL e imposta la regione corretta.
     </Aside>
   </TabItem>
 </Tabs>
 
-Se il comando va a buon fine, dovresti vedere una risposta in streaming simile a:
+Se il comando ha successo, vedrai una risposta in streaming simile a:
 
 ```
-UnnamedHero si erge maestoso, il mantello che sventola nel vento....
+UnnamedHero si ergeva maestoso, il mantello sventolava nel vento....
 ```
 
-Congratulazioni. Hai creato e distribuito la tua prima API utilizzando FastAPI! 🎉🎉🎉
+Congratulazioni. Hai creato e deployato la tua prima API con FastAPI! 🎉🎉🎉

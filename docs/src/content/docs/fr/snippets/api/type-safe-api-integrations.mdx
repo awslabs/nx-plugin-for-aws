@@ -1,0 +1,176 @@
+---
+title: "Intégrations d'API sécurisées en termes de type"
+---
+
+
+
+Les constructeurs CDK d'API REST/HTTP sont configurés pour fournir une interface typée permettant de définir des intégrations pour chacune de vos opérations.
+
+#### Intégrations par défaut
+
+Vous pouvez utiliser la méthode statique `defaultIntegrations` pour exploiter le modèle par défaut, qui définit une fonction AWS Lambda distincte pour chaque opération :
+
+```ts {2}
+new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this).build(),
+});
+```
+
+#### Accès aux intégrations
+
+Vous pouvez accéder aux fonctions AWS Lambda sous-jacentes via la propriété `integrations` du construct d'API, de manière typée. Par exemple, si votre API définit une opération nommée `sayHello` et que vous devez ajouter des permissions à cette fonction, vous pouvez le faire comme suit :
+
+```ts {6}
+const api = new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this).build(),
+});
+
+// sayHello est typé en fonction des opérations définies dans votre API
+api.integrations.sayHello.handler.addToRolePolicy(new PolicyStatement({
+  effect: Effect.ALLOW,
+  actions: [...],
+  resources: [...],
+}));
+```
+
+#### Personnalisation des options par défaut
+
+Si vous souhaitez personnaliser les options utilisées lors de la création de la fonction Lambda pour chaque intégration par défaut, vous pouvez utiliser la méthode `withDefaultOptions`. Par exemple, si vous voulez que toutes vos fonctions Lambda résident dans un VPC :
+
+```ts {5-7}
+const vpc = new Vpc(this, 'Vpc', ...);
+
+new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this)
+    .withDefaultOptions({
+      vpc,
+    })
+    .build(),
+});
+```
+
+#### Surcharge des intégrations
+
+Vous pouvez également surcharger les intégrations pour des opérations spécifiques en utilisant la méthode `withOverrides`. Chaque surcharge doit spécifier une propriété `integration` typée selon le construct d'intégration CDK approprié pour l'API HTTP ou REST. La méthode `withOverrides` est également typée. Par exemple, pour rediriger une API `getDocumentation` vers une documentation hébergée sur un site externe :
+
+```ts
+new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this)
+    .withOverrides({
+      getDocumentation: {
+        integration: new HttpIntegration('https://example.com/documentation'),
+      },
+    })
+    .build(),
+});
+```
+
+Vous remarquerez que l'intégration surchargée n'a plus de propriété `handler` lors de son accès via `api.integrations.getDocumentation`.
+
+Vous pouvez ajouter des propriétés supplémentaires à une intégration qui seront également typées, permettant d'abstraire d'autres types d'intégration tout en conservant le typage. Par exemple, si vous avez créé une intégration S3 pour une API REST et que vous souhaitez référencer le bucket pour une opération particulière :
+
+```ts {13, 41}
+const storageBucket = new Bucket(this, 'Bucket', { ... });
+
+const apiGatewayRole = new Role(this, 'ApiGatewayS3Role', {
+  assumedBy: new ServicePrincipal('apigateway.amazonaws.com'),
+});
+
+storageBucket.grantRead(apiGatewayRole);
+
+const api = new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this)
+    .withOverrides({
+      getFile: {
+        bucket: storageBucket,
+        integration: new AwsIntegration({
+          service: 's3',
+          integrationHttpMethod: 'GET',
+          path: `${storageBucket.bucketName}/{fileName}`,
+          options: {
+            credentialsRole: apiGatewayRole,
+            requestParameters: {
+              'integration.request.path.fileName': 'method.request.querystring.fileName',
+            },
+            integrationResponses: [{ statusCode: '200' }],
+          },
+        }),
+        options: {
+          requestParameters: {
+            'method.request.querystring.fileName': true,
+          },
+          methodResponses: [{
+            statusCode: '200',
+          }],
+        }
+      },
+    })
+    .build(),
+});
+
+// Plus tard, peut-être dans un autre fichier, vous pouvez accéder à la propriété bucket
+// de manière typée
+api.integrations.getFile.bucket.grantRead(...);
+```
+
+#### Surcharge des autorisations
+
+Vous pouvez également fournir des `options` dans votre intégration pour surcharger des options de méthode spécifiques comme les autorisations. Par exemple, pour utiliser l'authentification Cognito pour l'opération `getDocumentation` :
+
+```ts
+new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this)
+    .withOverrides({
+      getDocumentation: {
+        integration: new HttpIntegration('https://example.com/documentation'),
+        options: {
+          authorizer: new CognitoUserPoolsAuthorizer(...) // pour REST, ou HttpUserPoolAuthorizer pour une API HTTP
+        }
+      },
+    })
+    .build(),
+});
+```
+
+#### Intégrations explicites
+
+Si vous préférez, vous pouvez choisir de ne pas utiliser les intégrations par défaut et fournir directement une intégration pour chaque opération. Ceci est utile si chaque opération nécessite un type d'intégration différent, ou si vous souhaitez obtenir une erreur de type lors de l'ajout de nouvelles opérations :
+
+```ts
+new MyApi(this, 'MyApi', {
+  integrations: {
+    sayHello: {
+      integration: new LambdaIntegration(...),
+    },
+    getDocumentation: {
+      integration: new HttpIntegration(...),
+    },
+  },
+});
+```
+
+#### Modèle Router
+
+Si vous préférez déployer une seule fonction Lambda pour traiter toutes les requêtes de l'API, vous pouvez modifier librement la méthode `defaultIntegrations` de votre API pour créer une seule fonction au lieu d'une par intégration :
+
+```ts {5,11-12}
+// packages/common/constructs/src/app/apis/my-api.ts
+export class MyApi<...> extends ... {
+
+  public static defaultIntegrations = (scope: Construct) => {
+    const router = new Function(scope, 'RouterHandler', { ... });
+    return IntegrationBuilder.rest({
+      ...
+      defaultIntegrationOptions: {},
+      buildDefaultIntegration: (op) => {
+        return {
+          // Référencer le même gestionnaire Lambda de routeur dans chaque intégration
+          integration: new LambdaIntegration(router),
+        };
+      },
+    });
+  };
+}
+```
+
+Vous pouvez modifier le code selon vos préférences, par exemple définir la fonction `router` comme paramètre de `defaultIntegrations` au lieu de la construire dans la méthode.
