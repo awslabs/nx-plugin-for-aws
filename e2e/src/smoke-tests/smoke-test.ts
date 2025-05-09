@@ -23,7 +23,7 @@ export const smokeTest = (
     });
     it(`Should generate and build - ${pkgMgr}`, async () => {
       await runCLI(
-        `npx -y create-nx-workspace@~20.6.3 e2e-test --ci=skip --skipGit --preset=ts --interactive=false --pm ${pkgMgr}`,
+        `npx -y create-nx-workspace@~21.0.3 e2e-test --ci=skip --skipGit --preset=ts --interactive=false --pm ${pkgMgr}`,
         {
           cwd: `${tmpProjPath()}/${pkgMgr}`,
           prefixWithPackageManagerCmd: false,
