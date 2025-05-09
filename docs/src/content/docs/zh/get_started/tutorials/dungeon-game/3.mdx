@@ -20,29 +20,31 @@ import nxGraphPng from '@assets/nx-graph.png'
 import gameSelectPng from '@assets/game-select.png'
 import gameConversationPng from '@assets/game-conversation.png'
 
-## 模块三：故事API实现
+## 模块3：故事API实现
 
 <Aside type="caution">
-请确保已按照[本指南](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html)中的步骤授权访问**Anthropic Claude 3.5 Sonnet v2**模型。
+请确保已按照[本指南](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html)的步骤授予对**Anthropic Claude 3.5 Sonnet v2**模型的访问权限。
 </Aside>
 
-StoryApi包含一个单独的`generate_story` API，它根据给定的`Game`和上下文中的`Action`列表推进故事情节。该API将使用Python/FastAPI实现为流式API，并演示如何对生成的代码进行修改以适应实际需求。
+StoryApi包含一个`generate_story` API接口，该接口根据给定的`Game`游戏对象和上下文`Action`动作列表推进故事情节。本API将使用Python/FastAPI实现为流式API，并展示如何对生成的代码进行调整以满足实际需求。
 
 ### API实现
 
-要创建API，首先需要安装几个额外依赖：
+要创建我们的API，首先需要安装几个额外依赖项：
 
-- `boto3` 用于调用Amazon Bedrock；
-- `uvicorn` 与[Lambda Web Adapter (LWA)](https://github.com/awslabs/aws-lambda-web-adapter)配合使用来启动API；
-- `copyfiles` 是npm依赖项，用于在更新`bundle`任务时支持跨平台文件复制。
+- `boto3` 用于调用Amazon Bedrock服务
+- `uvicorn` 配合[Lambda Web Adapter (LWA)](https://github.com/awslabs/aws-lambda-web-adapter)启动API服务
+- `copyfiles` 是npm依赖项，用于在更新`bundle`任务时支持跨平台文件复制
 
-执行以下命令安装依赖：
+执行以下命令安装这些依赖：
 
 <NxCommands commands={["run dungeon_adventure.story_api:add --args boto3 uvicorn"]} />
 <InstallCommand pkg="copyfiles" dev />
 
-现在替换`packages/story_api/story_api/main.py`内容如下：
+现在替换`packages/story_api/story_api`目录下的文件内容：
 
+<Tabs>
+<TabItem label="main.py">
 ```python
 // packages/story_api/story_api/main.py
 import json
@@ -105,18 +107,155 @@ async def bedrock_stream(request: StoryRequest):
 def generate_story(request: StoryRequest) -> str:
     return StreamingResponse(bedrock_stream(request), media_type="text/plain")
 ```
+</TabItem>
+<TabItem label="init.py">
+```python
+// packages/story_api/story_api/init.py
+import os
+import uuid
+from collections.abc import Callable
 
-代码分析：
-- 使用`x-streaming`设置标记流式API，确保生成客户端SDK时保持类型安全
-- API通过`media_type="text/plain"`和`response_class=PlainTextResponse`返回纯文本流
+from aws_lambda_powertools import Logger, Metrics, Tracer
+from aws_lambda_powertools.metrics import MetricUnit
+from fastapi import FastAPI, Request, Response
+from fastapi.openapi.utils import get_openapi
+from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
+from mangum import Mangum
+from pydantic import BaseModel
+from starlette.middleware.exceptions import ExceptionMiddleware
+
+os.environ["POWERTOOLS_METRICS_NAMESPACE"] = "StoryApi"
+os.environ["POWERTOOLS_SERVICE_NAME"] = "StoryApi"
+
+logger: Logger = Logger()
+metrics: Metrics = Metrics()
+tracer: Tracer = Tracer()
+
+class InternalServerErrorDetails(BaseModel):
+    detail: str
+
+app = FastAPI(
+    title="StoryApi",
+    responses={
+        500: {"model": InternalServerErrorDetails}
+    }
+)
+lambda_handler = Mangum(app)
+
+# 添加追踪功能
+lambda_handler.__name__ = "handler"  # tracer要求设置__name__
+lambda_handler = tracer.capture_lambda_handler(lambda_handler)
+# 添加日志记录
+lambda_handler = logger.inject_lambda_context(lambda_handler, clear_state=True)
+# 最后添加指标收集以确保正确刷新
+lambda_handler = metrics.log_metrics(lambda_handler, capture_cold_start_metric=True)
+
+# 添加异常中间件
+app.add_middleware(ExceptionMiddleware, handlers=app.exception_handlers)
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request, err):
+    logger.exception("Unhandled exception")
+
+    metrics.add_metric(name="Failure", unit=MetricUnit.Count, value=1)
+
+    return JSONResponse(status_code=500,
+                        content=InternalServerErrorDetails(
+                            detail="Internal Server Error").model_dump())
+
+@app.middleware("http")
+async def metrics_handler(request: Request, call_next):
+    metrics.add_dimension("route", f"{request.method} {request.url.path}")
+    metrics.add_metric(name="RequestCount", unit=MetricUnit.Count, value=1)
+
+    response = await call_next(request)
+
+    if response.status_code == 200:
+        metrics.add_metric(name="Success", unit=MetricUnit.Count, value=1)
+
+    return response
+
+# 添加关联ID中间件
+@app.middleware("http")
+async def add_correlation_id(request: Request, call_next):
+    # 从X-Correlation-Id头获取关联ID
+    corr_id = request.headers.get("x-correlation-id")
+    if not corr_id and "aws.context" in request.scope:
+        # 如果为空则使用AWS上下文的请求ID
+        corr_id = request.scope["aws.context"].aws_request_id
+    elif not corr_id:
+        # 仍然为空则生成UUID
+        corr_id = uuid.uuid4().hex
+
+    # 将关联ID添加到日志
+    logger.set_correlation_id(corr_id)
+
+    response = await call_next(request)
+
+    # 在响应头中返回关联ID
+    response.headers["X-Correlation-Id"] = corr_id
+    return response
+
+class LoggerRouteHandler(APIRoute):
+    def get_route_handler(self) -> Callable:
+        original_route_handler = super().get_route_handler()
+
+        async def route_handler(request: Request) -> Response:
+            # 将fastapi上下文添加到日志
+            ctx = {
+                "path": request.url.path,
+                "route": self.path,
+                "method": request.method,
+            }
+            logger.append_keys(fastapi=ctx)
+            logger.info("Received request")
+
+            return await original_route_handler(request)
+
+        return route_handler
+
+app.router.route_class = LoggerRouteHandler
+
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    for route in app.routes:
+        if isinstance(route, APIRoute):
+            route.operation_id = route.name
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        openapi_version=app.openapi_version,
+        description=app.description,
+        routes=app.routes,
+    )
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+app.openapi = custom_openapi
+
+```
 
 :::note
-每次修改FastAPI后都需要重新构建项目才能在网站生成的客户端中看到变更。我们将在下文继续修改后统一构建。
+上述对`init.py`的修改主要是移除CORS中间件，以避免与Lambda函数URL自带的CORS头处理产生冲突。
+:::
+
+</TabItem>
+</Tabs>
+
+代码分析：
+
+- 使用`x-streaming`设置标记流式API，便于生成客户端SDK时保持类型安全
+- API通过`media_type="text/plain"`和`response_class=PlainTextResponse`定义返回纯文本流
+
+:::note
+每次修改FastAPI代码后，都需要重新构建项目才能在网站中看到生成的客户端更新。后续我们还会进行更多修改后再进行构建。
 :::
 
 ### 基础设施
 
-先前设置的<Link path="get_started/tutorials/dungeon-game/1#game-ui-infrastructure">基础设施</Link>假设所有API都通过API Gateway与Lambda集成。由于API Gateway不支持流式响应，`story_api`将改用[支持响应流传输的Lambda Function URL](https://docs.aws.amazon.com/lambda/latest/dg/configuration-response-streaming.html)。
+<Link path="get_started/tutorials/dungeon-game/1#game-ui-infrastructure">之前设置的基础设施</Link>假设所有API都通过API Gateway与Lambda函数集成。对于`story_api`，由于API Gateway不支持流式响应，我们将改用[配置了响应流式传输的Lambda函数URL](https://docs.aws.amazon.com/lambda/latest/dg/configuration-response-streaming.html)。
 
 更新CDK构造如下：
 
@@ -191,7 +330,7 @@ export class StoryApi extends Construct {
 
     new CfnOutput(this, 'StoryApiUrl', { value: functionUrl.url });
 
-    // Register the API URL in runtime configuration for client discovery
+    // 将API URL注册到运行时配置中以供客户端发现
     RuntimeConfig.ensure(this).config.apis = {
       ...RuntimeConfig.ensure(this).config.apis!,
       StoryApi: functionUrl.url,
@@ -232,7 +371,7 @@ export class ApplicationStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
-    // The code that defines your stack goes here
+    // 此处定义堆栈内容
     const userIdentity = new UserIdentity(this, 'UserIdentity');
 
     const electroDbTable = new ElectrodbDynamoTable(this, 'ElectroDbTable');
@@ -247,7 +386,7 @@ export class ApplicationStack extends cdk.Stack {
         .build(),
     });
 
-    // Grant read/write access to each handler depending on the permissions it requires
+    // 根据权限需求为每个处理器授予读写权限
     electroDbTable.grantReadData(gameApi.integrations['actions.query'].handler);
     electroDbTable.grantReadData(gameApi.integrations['games.query'].handler);
     electroDbTable.grantReadWriteData(
@@ -271,12 +410,12 @@ export class ApplicationStack extends cdk.Stack {
 +      }),
 +    );
 
-    // grant our authenticated role access to invoke our APIs
+    // 授予认证角色调用API的权限
     [storyApi, gameApi].forEach((api) =>
       api.grantInvokeAccess(userIdentity.identityPool.authenticatedRole),
     );
 
-    // Ensure this is instantiated last so our runtime-config.json can be automatically configured
+    // 最后实例化以确保自动配置runtime-config.json
     new GameUI(this, 'GameUI');
   }
 }
@@ -285,7 +424,7 @@ export class ApplicationStack extends cdk.Stack {
 </TabItem>
 </Tabs>
 
-更新`story_api`以支持[Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter)部署：
+现在更新`story_api`以支持[Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter)部署：
 
 <Tabs>
 <TabItem label="run.sh">
@@ -336,28 +475,28 @@ PATH=$PATH:$LAMBDA_TASK_ROOT/bin \
 <NxCommands commands={['run-many --target build --all']} />
 
 <Aside type="tip">
-若遇到lint错误，可运行以下命令自动修复：
+如果遇到lint错误，可以运行以下命令自动修复：
 
 <NxCommands commands={['run-many --target lint --configuration=fix --all']} />
 </Aside>
 
-通过以下命令部署应用：
+现在可以通过以下命令部署应用：
 
 <NxCommands commands={['run @dungeon-adventure/infra:deploy dungeon-adventure-infra-sandbox']} />
 
-部署约需2分钟完成。
+部署过程约需2分钟。
 
-<Drawer title="部署命令" trigger="点击查看多栈同时部署详情">
+<Drawer title="部署命令" trigger="您也可以一次性部署所有堆栈。点击查看详细信息。">
 
-可通过以下命令部署CDK应用中的所有栈：
+也可以运行以下命令部署CDK应用包含的所有堆栈：
 
 <NxCommands commands={['run @dungeon-adventure/infra:deploy --all']} />
 
-由于可能涉及多环境部署（如`infra-prod`），**不建议**使用`--all`参数，以免触发意外部署。
+但**不建议**这样做，因为您可能选择将部署阶段拆分为独立堆栈（如`infra-prod`）。此时`--all`标志会尝试部署所有堆栈，可能导致意外部署！
 
 </Drawer>
 
-部署完成后将看到类似输出（部分值已脱敏）：
+部署完成后，您将看到类似以下输出（部分值已脱敏）：
 
 ```bash
 dungeon-adventure-infra-sandbox
@@ -365,9 +504,9 @@ dungeon-adventure-infra-sandbox: deploying... [2/2]
 
  ✅  dungeon-adventure-infra-sandbox
 
-✨  Deployment time: 354s
+✨  部署时间：354秒
 
-Outputs:
+输出：
 dungeon-adventure-infra-sandbox.ElectroDbTableTableNameXXX = dungeon-adventure-infra-sandbox-ElectroDbTableXXX-YYY
 dungeon-adventure-infra-sandbox.GameApiEndpointXXX = https://xxx.execute-api.region.amazonaws.com/prod/
 dungeon-adventure-infra-sandbox.GameUIDistributionDomainNameXXX = xxx.cloudfront.net
@@ -378,10 +517,11 @@ dungeon-adventure-infra-sandbox.UserIdentityUserIdentityUserPoolIdXXX = region_x
 
 可通过以下方式测试API：
 <ul>
-<li>启动本地FastAPI服务器使用`curl`调用</li>
+<li>启动FastAPI本地实例并使用`curl`调用API</li>
 <li>
-<Drawer title="Sigv4签名curl调用" trigger="直接调用已部署API">
-在`.bashrc`中添加脚本（执行`source`）或在终端直接粘贴：
+<Drawer title="启用Sigv4签名的curl" trigger="直接调用已部署API（使用Sigv4签名curl）">
+可将以下脚本添加到`.bashrc`文件（并`source`），或直接在要运行命令的终端中粘贴：
+
 ```bash
 // ~/.bashrc
 acurl () {
@@ -392,14 +532,14 @@ acurl () {
 }
 ```
 
-调用示例：
+启用Sigv4认证的curl请求示例：
 
 ###### API Gateway
 ```bash
 acurl ap-southeast-2 execute-api -X GET https://xxx
 ```
 
-###### Lambda流式URL
+###### 流式Lambda函数URL
 ```bash
 acurl ap-southeast-2 lambda -N -X POST https://xxx
 ```
@@ -408,11 +548,11 @@ acurl ap-southeast-2 lambda -N -X POST https://xxx
 </ul>
 
 <Tabs>
-  <TabItem label="本地测试">
-  运行以下命令启动FastAPI服务器：
+  <TabItem label="本地">
+  运行以下命令启动本地FastAPI服务：
     <NxCommands commands={["run dungeon_adventure.story_api:serve"]} />
 
-    执行调用命令：
+    服务启动后执行测试命令：
 
     ```bash
     curl -N -X POST http://127.0.0.1:8000/story/generate \
@@ -420,7 +560,7 @@ acurl ap-southeast-2 lambda -N -X POST https://xxx
       -H "Content-Type: application/json"
     ```
   </TabItem>
-  <TabItem label="云端测试">
+  <TabItem label="已部署">
 ```bash "https://xxx.lambda-url.ap-southeast-2.on.aws/" "ap-southeast-2"
 acurl ap-southeast-2 lambda -N -X POST \
   https://xxx.lambda-url.ap-southeast-2.on.aws/story/generate \
@@ -428,15 +568,15 @@ acurl ap-southeast-2 lambda -N -X POST \
   -H "Content-Type: application/json"
 ```
     <Aside type="caution">
-    使用CDK部署输出的`dungeon-adventure-infra-sandbox.StoryApiStoryApiUrlXXX`值替换URL占位符，并设置正确区域。
+    使用CDK部署输出中的`dungeon-adventure-infra-sandbox.StoryApiStoryApiUrlXXX`值替换高亮URL占位符，并正确设置区域。
     </Aside>
   </TabItem>
 </Tabs>
 
-成功执行后将看到流式响应：
+如果命令执行成功，您将看到类似如下的流式响应：
 
 ```
-UnnamedHero stood tall, his cape billowing in the wind....
+UnnamedHero巍然屹立，披风在风中猎猎作响...
 ```
 
-恭喜！您已成功使用FastAPI构建并部署首个流式API！🎉🎉🎉
+恭喜！您已成功使用FastAPI构建并部署了第一个API！🎉🎉🎉

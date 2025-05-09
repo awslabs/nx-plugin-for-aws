@@ -20,29 +20,31 @@ import nxGraphPng from '@assets/nx-graph.png'
 import gameSelectPng from '@assets/game-select.png'
 import gameConversationPng from '@assets/game-conversation.png'
 
-## Módulo 3: Implementación de la API de historia
+## Módulo 3: Implementación de la API Story
 
 <Aside type="caution">
 Asegúrate de haber otorgado acceso al modelo **Anthropic Claude 3.5 Sonnet v2** siguiendo los pasos descritos en [esta guía](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html).
 </Aside>
 
-La StoryApi consta de una única API `generate_story` que, dado un `Game` y una lista de `Action`s como contexto, progresará una historia. Esta API se implementará como una API de streaming en Python/FastAPI y demostrará cómo se pueden modificar los códigos generados para adaptarse al propósito requerido.
+La StoryApi consta de una única API `generate_story` que, dado un `Game` y una lista de `Action` como contexto, avanzará una historia. Esta API se implementará como una API de streaming en Python/FastAPI y demostrará cómo se pueden modificar los códigos generados para adaptarse al propósito.
 
 ### Implementación de la API
 
 Para crear nuestra API, primero necesitamos instalar algunas dependencias adicionales:
 
 - `boto3` se usará para llamar a Amazon Bedrock
-- `uvicorn` se usará para iniciar nuestra API en conjunto con el [Lambda Web Adapter (LWA)](https://github.com/awslabs/aws-lambda-web-adapter)
-- `copyfiles` es una dependencia de npm necesaria para soportar la copia multiplataforma de archivos al actualizar nuestra tarea `bundle`
+- `uvicorn` se usará para iniciar nuestra API junto con el [Lambda Web Adapter (LWA)](https://github.com/awslabs/aws-lambda-web-adapter)
+- `copyfiles` es una dependencia npm necesaria para soportar la copia multiplataforma de archivos al actualizar nuestra tarea `bundle`
 
 Para instalar estas dependencias, ejecuta los siguientes comandos:
 
 <NxCommands commands={["run dungeon_adventure.story_api:add --args boto3 uvicorn"]} />
 <InstallCommand pkg="copyfiles" dev />
 
-Ahora reemplazaremos el contenido de `packages/story_api/story_api/main.py` con lo siguiente:
+Ahora reemplazaremos el contenido de los siguientes archivos en `packages/story_api/story_api`:
 
+<Tabs>
+<TabItem label="main.py">
 ```python
 // packages/story_api/story_api/main.py
 import json
@@ -105,23 +107,159 @@ async def bedrock_stream(request: StoryRequest):
 def generate_story(request: StoryRequest) -> str:
     return StreamingResponse(bedrock_stream(request), media_type="text/plain")
 ```
+</TabItem>
+<TabItem label="init.py">
+```python
+// packages/story_api/story_api/init.py
+import os
+import uuid
+from collections.abc import Callable
+
+from aws_lambda_powertools import Logger, Metrics, Tracer
+from aws_lambda_powertools.metrics import MetricUnit
+from fastapi import FastAPI, Request, Response
+from fastapi.openapi.utils import get_openapi
+from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
+from mangum import Mangum
+from pydantic import BaseModel
+from starlette.middleware.exceptions import ExceptionMiddleware
+
+os.environ["POWERTOOLS_METRICS_NAMESPACE"] = "StoryApi"
+os.environ["POWERTOOLS_SERVICE_NAME"] = "StoryApi"
+
+logger: Logger = Logger()
+metrics: Metrics = Metrics()
+tracer: Tracer = Tracer()
+
+class InternalServerErrorDetails(BaseModel):
+    detail: str
+
+app = FastAPI(
+    title="StoryApi",
+    responses={
+        500: {"model": InternalServerErrorDetails}
+    }
+)
+lambda_handler = Mangum(app)
+
+# Add tracing
+lambda_handler.__name__ = "handler"  # tracer requires __name__ to be set
+lambda_handler = tracer.capture_lambda_handler(lambda_handler)
+# Add logging
+lambda_handler = logger.inject_lambda_context(lambda_handler, clear_state=True)
+# Add metrics last to properly flush metrics.
+lambda_handler = metrics.log_metrics(lambda_handler, capture_cold_start_metric=True)
+
+# Add exception middleware(s)
+app.add_middleware(ExceptionMiddleware, handlers=app.exception_handlers)
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request, err):
+    logger.exception("Unhandled exception")
+
+    metrics.add_metric(name="Failure", unit=MetricUnit.Count, value=1)
+
+    return JSONResponse(status_code=500,
+                        content=InternalServerErrorDetails(
+                            detail="Internal Server Error").model_dump())
+
+@app.middleware("http")
+async def metrics_handler(request: Request, call_next):
+    metrics.add_dimension("route", f"{request.method} {request.url.path}")
+    metrics.add_metric(name="RequestCount", unit=MetricUnit.Count, value=1)
+
+    response = await call_next(request)
+
+    if response.status_code == 200:
+        metrics.add_metric(name="Success", unit=MetricUnit.Count, value=1)
+
+    return response
+
+# Add correlation id middleware
+@app.middleware("http")
+async def add_correlation_id(request: Request, call_next):
+    # Get correlation id from X-Correlation-Id header
+    corr_id = request.headers.get("x-correlation-id")
+    if not corr_id and "aws.context" in request.scope:
+        # If empty, use request id from aws context
+        corr_id = request.scope["aws.context"].aws_request_id
+    elif not corr_id:
+        # If still empty, use uuid
+        corr_id = uuid.uuid4().hex
+
+    # Add correlation id to logs
+    logger.set_correlation_id(corr_id)
+
+    response = await call_next(request)
+
+    # Return correlation header in response
+    response.headers["X-Correlation-Id"] = corr_id
+    return response
+
+class LoggerRouteHandler(APIRoute):
+    def get_route_handler(self) -> Callable:
+        original_route_handler = super().get_route_handler()
+
+        async def route_handler(request: Request) -> Response:
+            # Add fastapi context to logs
+            ctx = {
+                "path": request.url.path,
+                "route": self.path,
+                "method": request.method,
+            }
+            logger.append_keys(fastapi=ctx)
+            logger.info("Received request")
+
+            return await original_route_handler(request)
+
+        return route_handler
+
+app.router.route_class = LoggerRouteHandler
+
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    for route in app.routes:
+        if isinstance(route, APIRoute):
+            route.operation_id = route.name
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        openapi_version=app.openapi_version,
+        description=app.description,
+        routes=app.routes,
+    )
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+app.openapi = custom_openapi
+
+```
+
+:::note
+El cambio anterior en `init.py` simplemente elimina el middleware CORS para evitar conflictos con el manejo propio de cabeceras CORS de Lambda Function URL.
+:::
+
+</TabItem>
+</Tabs>
 
 Analizando el código anterior:
 
-- Usamos la configuración `x-streaming` para indicar que esta es una API de streaming al generar nuestro SDK cliente. ¡Esto nos permitirá consumir esta API en modo streaming manteniendo la seguridad de tipos!
-- Nuestra API simplemente retorna un flujo de texto como definen `media_type="text/plain"` y `response_class=PlainTextResponse`
+- Usamos la configuración `x-streaming` para indicar que es una API de streaming al generar nuestro SDK cliente
+- Nuestra API simplemente devuelve un flujo de texto definido por `media_type="text/plain"` y `response_class=PlainTextResponse`
 
 :::note
-Cada vez que hagas cambios en tu FastAPI, necesitarás reconstruir el proyecto para ver esos cambios reflejados en el cliente generado en tu sitio web.
+Cada vez que modifiques tu FastAPI, necesitarás reconstruir el proyecto para ver los cambios reflejados en el cliente generado en tu sitio web.
 
 Haremos algunos cambios más antes de reconstruir.
 :::
 
 ### Infraestructura
 
-La <Link path="get_started/tutorials/dungeon-game/1#game-ui-infrastructure">infraestructura configurada previamente</Link> asume que todas las APIs tienen un API Gateway integrado con funciones Lambda. Para nuestro `story_api` no queremos usar API Gateway ya que no soporta respuestas streaming. En su lugar, usaremos una [URL de función Lambda configurada con streaming de respuestas](https://docs.aws.amazon.com/lambda/latest/dg/configuration-response-streaming.html).
+La <Link path="get_started/tutorials/dungeon-game/1#game-ui-infrastructure">infraestructura configurada previamente</Link> asume que todas las APIs usan API Gateway integrado con funciones Lambda. Para `story_api` no queremos usar API Gateway ya que no soporta respuestas en streaming. En su lugar, usaremos una [Lambda Function URL configurada con response streaming](https://docs.aws.amazon.com/lambda/latest/dg/configuration-response-streaming.html).
 
-Para soportar esto, primero actualizaremos nuestros constructos CDK:
+Para implementar esto, actualizaremos nuestros constructos CDK:
 
 <Tabs>
 <TabItem label="story-api.ts">
@@ -194,7 +332,7 @@ export class StoryApi extends Construct {
 
     new CfnOutput(this, 'StoryApiUrl', { value: functionUrl.url });
 
-    // Registrar la URL de la API en la configuración runtime para descubrimiento del cliente
+    // Registrar la URL de la API en configuración para descubrimiento del cliente
     RuntimeConfig.ensure(this).config.apis = {
       ...RuntimeConfig.ensure(this).config.apis!,
       StoryApi: functionUrl.url,
@@ -235,7 +373,7 @@ export class ApplicationStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
-    // El código que define tu stack va aquí
+    // Código que define tu stack
     const userIdentity = new UserIdentity(this, 'UserIdentity');
 
     const electroDbTable = new ElectrodbDynamoTable(this, 'ElectroDbTable');
@@ -250,7 +388,7 @@ export class ApplicationStack extends cdk.Stack {
         .build(),
     });
 
-    // Otorgar acceso de lectura/escritura a cada handler según los permisos requeridos
+    // Otorgar permisos de lectura/escritura
     electroDbTable.grantReadData(gameApi.integrations['actions.query'].handler);
     electroDbTable.grantReadData(gameApi.integrations['games.query'].handler);
     electroDbTable.grantReadWriteData(
@@ -274,12 +412,11 @@ export class ApplicationStack extends cdk.Stack {
 +      }),
 +    );
 
-    // otorga a nuestro rol autenticado acceso para invocar nuestras APIs
+    // Otorgar acceso al rol autenticado
     [storyApi, gameApi].forEach((api) =>
       api.grantInvokeAccess(userIdentity.identityPool.authenticatedRole),
     );
 
-    // Instanciar al final para que runtime-config.json se configure automáticamente
     new GameUI(this, 'GameUI');
   }
 }
@@ -288,7 +425,7 @@ export class ApplicationStack extends cdk.Stack {
 </TabItem>
 </Tabs>
 
-Ahora actualizaremos el `story_api` para soportar el despliegue con [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter).
+Ahora actualizaremos `story_api` para soportar [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter):
 
 <Tabs>
 <TabItem label="run.sh">
@@ -339,28 +476,28 @@ Primero, construyamos el código base:
 <NxCommands commands={['run-many --target build --all']} />
 
 <Aside type="tip">
-Si encuentras errores de linting, puedes ejecutar este comando para corregirlos automáticamente:
+Si encuentras errores de linting, puedes ejecutar:
 
 <NxCommands commands={['run-many --target lint --configuration=fix --all']} />
 </Aside>
 
-Ahora puedes desplegar tu aplicación ejecutando:
+Puedes desplegar la aplicación ejecutando:
 
 <NxCommands commands={['run @dungeon-adventure/infra:deploy dungeon-adventure-infra-sandbox']} />
 
-Este despliegue tomará aproximadamente 2 minutos en completarse.
+Este despliegue tomará aproximadamente 2 minutos.
 
 <Drawer title="Comando de despliegue" trigger="También puedes desplegar todos los stacks a la vez. Haz clic para más detalles.">
 
-También puedes desplegar todos los stacks de la aplicación CDK ejecutando:
+Puedes desplegar todos los stacks con:
 
 <NxCommands commands={['run @dungeon-adventure/infra:deploy --all']} />
 
-Esto **no se recomienda** ya que podrías tener stacks separados para diferentes etapas de despliegue (ej. infra-prod). En ese caso, el flag `--all` intentaría desplegar todo, pudiendo resultar en despliegues no deseados.
+**No recomendado** si tienes stacks separados para diferentes etapas (ej. infra-prod). La bandera `--all` intentará desplegar todo lo que pueda resultar en despliegues no deseados.
 
 </Drawer>
 
-Una vez completado el despliegue, verás salidas similares a estas _(algunos valores fueron enmascarados)_:
+Al completar el despliegue, verás salidas similares a:
 
 ```bash
 dungeon-adventure-infra-sandbox
@@ -379,12 +516,12 @@ dungeon-adventure-infra-sandbox.UserIdentityUserIdentityIdentityPoolIdXXX = regi
 dungeon-adventure-infra-sandbox.UserIdentityUserIdentityUserPoolIdXXX = region_xxx
 ```
 
-Podemos probar nuestra API de dos maneras:
+Podemos probar la API:
 <ul>
-<li>Iniciando una instancia local del servidor FastAPI e invocar las APIs con `curl`</li>
+<li>Iniciando una instancia local del servidor FastAPI y llamando a la API con `curl`</li>
 <li>
-<Drawer title="curl con Sigv4 habilitado" trigger="Llamar a la API desplegada usando curl con Sigv4 directamente">
-Puedes agregar este script a tu archivo `.bashrc` (y hacer `source`) o pegarlo directamente en la terminal donde ejecutarás el comando.
+<Drawer title="Curl con Sigv4" trigger="Llamar a la API desplegada usando curl con Sigv4">
+Agrega este script a tu `.bashrc`:
 ```bash
 // ~/.bashrc
 acurl () {
@@ -402,7 +539,7 @@ Ejemplos de uso:
 acurl ap-southeast-2 execute-api -X GET https://xxx
 ```
 
-###### URL Lambda con streaming
+###### Lambda function url streaming
 ```bash
 acurl ap-southeast-2 lambda -N -X POST https://xxx
 ```
@@ -412,11 +549,10 @@ acurl ap-southeast-2 lambda -N -X POST https://xxx
 
 <Tabs>
   <TabItem label="Local">
-  Inicia el servidor FastAPI local ejecutando:
+  Inicia el servidor FastAPI local:
     <NxCommands commands={["run dungeon_adventure.story_api:serve"]} />
 
-    Una vez iniciado, llama a la API con:
-    
+    Llama a la API con:
     ```bash
     curl -N -X POST http://127.0.0.1:8000/story/generate \
       -d '{"genre":"superhero", "actions":[], "playerName":"UnnamedHero"}' \
@@ -431,15 +567,15 @@ acurl ap-southeast-2 lambda -N -X POST \
   -H "Content-Type: application/json"
 ```
     <Aside type="caution">
-    Usa el valor de salida `dungeon-adventure-infra-sandbox.StoryApiStoryApiUrlXXX` del despliegue CDK para reemplazar el marcador de posición de la URL y ajusta la región según corresponda.
+    Usa el valor `dungeon-adventure-infra-sandbox.StoryApiStoryApiUrlXXX` del output de CDK y ajusta la región según corresponda.
     </Aside>
   </TabItem>
 </Tabs>
 
-Si el comando se ejecuta correctamente, verás una respuesta en streaming similar a:
+Si es exitoso, verás una respuesta en streaming como:
 
 ```
 UnnamedHero stood tall, his cape billowing in the wind....
 ```
 
-¡Felicidades! Has construido y desplegado tu primera API usando FastAPI. 🎉🎉🎉
+¡Felicidades! Has construido y desplegado tu primera API con FastAPI. 🎉🎉🎉

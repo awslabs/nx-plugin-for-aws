@@ -1,6 +1,6 @@
 ---
 title: "AI 던전 게임"
-description: "@aws/nx-plugin을 사용하여 AI 기반 던전 모험 게임을 구축하는 방법에 대한 안내"
+description: "@aws/nx-plugin을 사용하여 AI 기반 던전 모험 게임을 구축하는 방법에 대한 안내서"
 ---
 
 
@@ -20,29 +20,31 @@ import nxGraphPng from '@assets/nx-graph.png'
 import gameSelectPng from '@assets/game-select.png'
 import gameConversationPng from '@assets/game-conversation.png'
 
-## 모듈 3: Story API 구현
+## 모듈 3: 스토리 API 구현
 
 <Aside type="caution">
-다음 가이드에 설명된 단계에 따라 **Anthropic Claude 3.5 Sonnet v2** 모델에 대한 접근 권한을 부여했는지 확인하세요: [AWS Bedrock 모델 접근 관리 가이드](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html).
+[이 가이드](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html)에 설명된 단계에 따라 **Anthropic Claude 3.5 Sonnet v2** 모델에 대한 액세스 권한을 부여했는지 확인하세요.
 </Aside>
 
-StoryApi는 `Game` 객체와 컨텍스트용 `Action` 목록을 입력받아 스토리를 진행시키는 단일 API `generate_story`로 구성됩니다. 이 API는 Python/FastAPI 기반의 스트리밍 API로 구현되며, 생성된 코드를 목적에 맞게 수정하는 방법도 함께 설명합니다.
+StoryApi는 `Game`과 컨텍스트용 `Action` 목록을 입력받아 스토리를 진행시키는 단일 API `generate_story`로 구성됩니다. 이 API는 Python/FastAPI로 스트리밍 API로 구현되며, 생성된 코드를 목적에 맞게 수정하는 방법을 추가로 시연합니다.
 
 ### API 구현
 
-API를 생성하기 전에 먼저 추가 종속성을 설치해야 합니다.
+API를 생성하려면 먼저 몇 가지 추가 종속성을 설치해야 합니다.
 
-- `boto3`: Amazon Bedrock 호출에 사용
-- `uvicorn`: [Lambda Web Adapter (LWA)](https://github.com/awslabs/aws-lambda-web-adapter)와 함께 사용할 API 시작용
-- `copyfiles`: 크로스 플랫폼 파일 복사를 지원하기 위한 npm 개발 종속성
+- `boto3`는 Amazon Bedrock 호출에 사용됩니다.
+- `uvicorn`은 [Lambda Web Adapter (LWA)](https://github.com/awslabs/aws-lambda-web-adapter)와 함께 사용 시 API 시작에 사용됩니다.
+- `copyfiles`는 `bundle` 작업 업데이트 시 크로스 플랫폼 파일 복사를 지원하기 위한 npm 종속성입니다.
 
-다음 명령어로 종속성을 설치합니다:
+이 종속성들을 설치하려면 다음 명령어를 실행하세요:
 
 <NxCommands commands={["run dungeon_adventure.story_api:add --args boto3 uvicorn"]} />
 <InstallCommand pkg="copyfiles" dev />
 
-이제 `packages/story_api/story_api/main.py` 파일 내용을 다음 코드로 교체합니다:
+이제 `packages/story_api/story_api`의 다음 파일 내용을 교체합니다:
 
+<Tabs>
+<TabItem label="main.py">
 ```python
 // packages/story_api/story_api/main.py
 import json
@@ -105,23 +107,159 @@ async def bedrock_stream(request: StoryRequest):
 def generate_story(request: StoryRequest) -> str:
     return StreamingResponse(bedrock_stream(request), media_type="text/plain")
 ```
+</TabItem>
+<TabItem label="init.py">
+```python
+// packages/story_api/story_api/init.py
+import os
+import uuid
+from collections.abc import Callable
 
-위 코드 분석:
+from aws_lambda_powertools import Logger, Metrics, Tracer
+from aws_lambda_powertools.metrics import MetricUnit
+from fastapi import FastAPI, Request, Response
+from fastapi.openapi.utils import get_openapi
+from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
+from mangum import Mangum
+from pydantic import BaseModel
+from starlette.middleware.exceptions import ExceptionMiddleware
 
-- 클라이언트 SDK 생성 시 스트리밍 API임을 표시하기 위해 `x-streaming` 설정 사용
-- `media_type="text/plain"`과 `response_class=PlainTextResponse`로 텍스트 스트림 반환
+os.environ["POWERTOOLS_METRICS_NAMESPACE"] = "StoryApi"
+os.environ["POWERTOOLS_SERVICE_NAME"] = "StoryApi"
+
+logger: Logger = Logger()
+metrics: Metrics = Metrics()
+tracer: Tracer = Tracer()
+
+class InternalServerErrorDetails(BaseModel):
+    detail: str
+
+app = FastAPI(
+    title="StoryApi",
+    responses={
+        500: {"model": InternalServerErrorDetails}
+    }
+)
+lambda_handler = Mangum(app)
+
+# Add tracing
+lambda_handler.__name__ = "handler"  # tracer requires __name__ to be set
+lambda_handler = tracer.capture_lambda_handler(lambda_handler)
+# Add logging
+lambda_handler = logger.inject_lambda_context(lambda_handler, clear_state=True)
+# Add metrics last to properly flush metrics.
+lambda_handler = metrics.log_metrics(lambda_handler, capture_cold_start_metric=True)
+
+# Add exception middleware(s)
+app.add_middleware(ExceptionMiddleware, handlers=app.exception_handlers)
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request, err):
+    logger.exception("Unhandled exception")
+
+    metrics.add_metric(name="Failure", unit=MetricUnit.Count, value=1)
+
+    return JSONResponse(status_code=500,
+                        content=InternalServerErrorDetails(
+                            detail="Internal Server Error").model_dump())
+
+@app.middleware("http")
+async def metrics_handler(request: Request, call_next):
+    metrics.add_dimension("route", f"{request.method} {request.url.path}")
+    metrics.add_metric(name="RequestCount", unit=MetricUnit.Count, value=1)
+
+    response = await call_next(request)
+
+    if response.status_code == 200:
+        metrics.add_metric(name="Success", unit=MetricUnit.Count, value=1)
+
+    return response
+
+# Add correlation id middleware
+@app.middleware("http")
+async def add_correlation_id(request: Request, call_next):
+    # Get correlation id from X-Correlation-Id header
+    corr_id = request.headers.get("x-correlation-id")
+    if not corr_id and "aws.context" in request.scope:
+        # If empty, use request id from aws context
+        corr_id = request.scope["aws.context"].aws_request_id
+    elif not corr_id:
+        # If still empty, use uuid
+        corr_id = uuid.uuid4().hex
+
+    # Add correlation id to logs
+    logger.set_correlation_id(corr_id)
+
+    response = await call_next(request)
+
+    # Return correlation header in response
+    response.headers["X-Correlation-Id"] = corr_id
+    return response
+
+class LoggerRouteHandler(APIRoute):
+    def get_route_handler(self) -> Callable:
+        original_route_handler = super().get_route_handler()
+
+        async def route_handler(request: Request) -> Response:
+            # Add fastapi context to logs
+            ctx = {
+                "path": request.url.path,
+                "route": self.path,
+                "method": request.method,
+            }
+            logger.append_keys(fastapi=ctx)
+            logger.info("Received request")
+
+            return await original_route_handler(request)
+
+        return route_handler
+
+app.router.route_class = LoggerRouteHandler
+
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    for route in app.routes:
+        if isinstance(route, APIRoute):
+            route.operation_id = route.name
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        openapi_version=app.openapi_version,
+        description=app.description,
+        routes=app.routes,
+    )
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+app.openapi = custom_openapi
+
+```
 
 :::note
-FastAPI를 변경할 때마다 웹사이트의 생성된 클라이언트에 반영하려면 프로젝트를 재빌드해야 합니다.
-
-아래에서 몇 가지 추가 변경 후 재빌드할 예정입니다.
+위의 `init.py` 변경 사항은 CORS 헤더 처리와의 충돌을 피하기 위해 CORS 미들웨어를 제거한 것입니다.
 :::
 
-### 인프라 구성
+</TabItem>
+</Tabs>
 
-이전에 설정한 <Link path="get_started/tutorials/dungeon-game/1#game-ui-infrastructure">인프라</Link>는 모든 API가 API Gateway와 Lambda 함수 통합을 사용한다고 가정합니다. 하지만 `story_api`의 경우 스트리밍 응답을 지원하지 않는 API Gateway 대신 [응답 스트리밍이 구성된 Lambda Function URL](https://docs.aws.amazon.com/lambda/latest/dg/configuration-response-streaming.html)을 사용합니다.
+코드 분석:
 
-CDK 구성을 다음과 같이 업데이트합니다:
+- 클라이언트 SDK 생성 시 스트리밍 API임을 나타내기 위해 `x-streaming` 설정 사용. 이로써 타입 안전성을 유지하며 스트리밍 방식의 API 사용 가능!
+- API는 `media_type="text/plain"`과 `response_class=PlainTextResponse`로 정의된 텍스트 스트림 반환
+
+:::note
+FastAPI를 변경할 때마다 웹사이트의 생성된 클라이언트에 변경 사항을 반영하려면 프로젝트를 재빌드해야 합니다.
+
+추가 변경 사항 적용 후 재빌드하겠습니다.
+:::
+
+### 인프라구조
+
+이전에 설정한 <Link path="get_started/tutorials/dungeon-game/1#game-ui-infrastructure">인프라</Link>는 모든 API가 Lambda 함수와 통합하는 API Gateway를 사용한다고 가정합니다. `story_api`의 경우 API Gateway를 사용하지 않고 [응답 스트리밍이 구성된 Lambda Function URL](https://docs.aws.amazon.com/lambda/latest/dg/configuration-response-streaming.html)을 사용합니다.
+
+이를 지원하기 위해 CDK 구성을 다음과 같이 업데이트합니다:
 
 <Tabs>
 <TabItem label="story-api.ts">
@@ -194,7 +332,7 @@ export class StoryApi extends Construct {
 
     new CfnOutput(this, 'StoryApiUrl', { value: functionUrl.url });
 
-    // 클라이언트 디스커버리를 위해 런타임 구성에 API URL 등록
+    // 클라이언트 탐색을 위해 런타임 구성에 API URL 등록
     RuntimeConfig.ensure(this).config.apis = {
       ...RuntimeConfig.ensure(this).config.apis!,
       StoryApi: functionUrl.url,
@@ -235,7 +373,7 @@ export class ApplicationStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
-    // 스택 구성 코드
+    // 스택 정의 코드
     const userIdentity = new UserIdentity(this, 'UserIdentity');
 
     const electroDbTable = new ElectrodbDynamoTable(this, 'ElectroDbTable');
@@ -250,7 +388,7 @@ export class ApplicationStack extends cdk.Stack {
         .build(),
     });
 
-    // 핸들러별 권한 부여
+    // 필요한 권한에 따라 각 핸들러에 읽기/쓰기 권한 부여
     electroDbTable.grantReadData(gameApi.integrations['actions.query'].handler);
     electroDbTable.grantReadData(gameApi.integrations['games.query'].handler);
     electroDbTable.grantReadWriteData(
@@ -279,7 +417,7 @@ export class ApplicationStack extends cdk.Stack {
       api.grantInvokeAccess(userIdentity.identityPool.authenticatedRole),
     );
 
-    // 런타임 구성 자동 설정을 위해 마지막에 인스턴스화
+    // runtime-config.json 자동 구성 위해 마지막에 인스턴스화
     new GameUI(this, 'GameUI');
   }
 }
@@ -288,7 +426,7 @@ export class ApplicationStack extends cdk.Stack {
 </TabItem>
 </Tabs>
 
-[Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter) 배포를 지원하도록 `story_api`를 업데이트합니다:
+이제 [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter) 배포를 지원하도록 `story_api`를 업데이트합니다.
 
 <Tabs>
 <TabItem label="run.sh">
@@ -339,28 +477,28 @@ PATH=$PATH:$LAMBDA_TASK_ROOT/bin \
 <NxCommands commands={['run-many --target build --all']} />
 
 <Aside type="tip">
-린트 오류가 발생하면 다음 명령어로 자동 수정할 수 있습니다:
+린트 오류 발생 시 다음 명령어로 자동 수정 가능:
 
 <NxCommands commands={['run-many --target lint --configuration=fix --all']} />
 </Aside>
 
-다음 명령어로 애플리케이션을 배포합니다:
+이제 다음 명령어로 애플리케이션을 배포할 수 있습니다:
 
 <NxCommands commands={['run @dungeon-adventure/infra:deploy dungeon-adventure-infra-sandbox']} />
 
-배포는 약 2분 정도 소요됩니다.
+배포 완료까지 약 2분 소요됩니다.
 
 <Drawer title="배포 명령어" trigger="모든 스택을 한 번에 배포할 수도 있습니다. 자세한 내용을 보려면 클릭하세요.">
 
-다음 명령어로 CDK 애플리케이션의 모든 스택을 배포할 수 있습니다:
+다음 명령어로 CDK 애플리케이션의 모든 스택 배포 가능:
 
 <NxCommands commands={['run @dungeon-adventure/infra:deploy --all']} />
 
-다만 `infra-prod`와 같이 배포 단계를 별도의 스택으로 분리한 경우 `--all` 플래그 사용을 권장하지 않습니다. 이는 원치 않는 배포를 초래할 수 있습니다!
+이 방법은 `infra-prod`와 같이 배포 단계를 별도 스택으로 분리할 경우 원치 않는 배포가 발생할 수 있으므로 **권장하지 않습니다**!
 
 </Drawer>
 
-배포 완료 시 다음과 유사한 출력이 표시됩니다 (일부 값 생략):
+배포 완료 후 다음과 유사한 출력 확인 가능 (일부 값 마스킹됨):
 
 ```bash
 dungeon-adventure-infra-sandbox
@@ -379,12 +517,12 @@ dungeon-adventure-infra-sandbox.UserIdentityUserIdentityIdentityPoolIdXXX = regi
 dungeon-adventure-infra-sandbox.UserIdentityUserIdentityUserPoolIdXXX = region_xxx
 ```
 
-다음 방법으로 API를 테스트할 수 있습니다:
+다음 방법으로 API 테스트 가능:
 <ul>
-<li>FastApi 서버를 로컬에서 실행하고 `curl`로 API 호출</li>
+<li>FastApi 서버 로컬 실행 후 `curl`로 API 호출</li>
 <li>
-<Drawer title="Sigv4 활성화 curl" trigger="배포된 API를 Sigv4 인증 curl로 직접 호출">
-`.bashrc` 파일에 다음 스크립트를 추가하거나 실행할 터미널에 직접 붙여넣습니다:
+<Drawer title="Sigv4 활성화 curl" trigger="배포된 API 직접 호출 (Sigv4 사용)">
+`.bashrc` 파일에 다음 스크립트 추가 후 `source` 실행하거나 명령 실행 터미널에 직접 붙여넣기:
 ```bash
 // ~/.bashrc
 acurl () {
@@ -415,7 +553,7 @@ acurl ap-southeast-2 lambda -N -X POST https://xxx
   다음 명령어로 로컬 FastAPI 서버 시작:
     <NxCommands commands={["run dungeon_adventure.story_api:serve"]} />
 
-    서버 실행 후 다음 curl 명령어로 테스트:
+    서버 실행 후 다음 명령어로 호출:
 
     ```bash
     curl -N -X POST http://127.0.0.1:8000/story/generate \
@@ -423,7 +561,7 @@ acurl ap-southeast-2 lambda -N -X POST https://xxx
       -H "Content-Type: application/json"
     ```
   </TabItem>
-  <TabItem label="배포 환경">
+  <TabItem label="배포 버전">
 ```bash "https://xxx.lambda-url.ap-southeast-2.on.aws/" "ap-southeast-2"
 acurl ap-southeast-2 lambda -N -X POST \
   https://xxx.lambda-url.ap-southeast-2.on.aws/story/generate \
@@ -431,15 +569,15 @@ acurl ap-southeast-2 lambda -N -X POST \
   -H "Content-Type: application/json"
 ```
     <Aside type="caution">
-    CDK 배포 출력에서 `dungeon-adventure-infra-sandbox.StoryApiStoryApiUrlXXX` 값을 사용해 URL 플레이스홀더를 교체하고 리전을 적절히 설정하세요.
+    CDK 배포 출력값 `dungeon-adventure-infra-sandbox.StoryApiStoryApiUrlXXX`로 URL 플레이스홀더 교체 및 리전 적절히 설정
     </Aside>
   </TabItem>
 </Tabs>
 
-명령어가 성공적으로 실행되면 다음과 같은 스트리밍 응답을 확인할 수 있습니다:
+명령 실행 성공 시 다음과 유사한 스트리밍 응답 확인:
 
 ```
 UnnamedHero stood tall, his cape billowing in the wind....
 ```
 
-축하합니다. FastAPI를 사용하여 첫 번째 API를 구축하고 배포했습니다! 🎉🎉🎉
+축하합니다. FastAPI를 사용한 첫 번째 API를 성공적으로 구축하고 배포했습니다! 🎉🎉🎉
