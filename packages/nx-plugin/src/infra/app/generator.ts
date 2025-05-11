@@ -120,6 +120,20 @@ export async function infraGenerator(
           command: `cdk destroy --require-approval=never --app ${synthDirFromProject}`,
         },
       };
+      config.targets.cdk = {
+        executor: 'nx:run-commands',
+        options: {
+          cwd: libraryRoot,
+          command: 'cdk',
+        },
+      };
+      config.targets.bootstrap = {
+        executor: 'nx:run-commands',
+        options: {
+          cwd: libraryRoot,
+          command: 'cdk bootstrap',
+        },
+      };
       config.targets = sortObjectKeys(config.targets);
       return config;
     },

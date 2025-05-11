@@ -92,6 +92,20 @@ describe('infra generator', () => {
           'cdk destroy --require-approval=never --app ../../dist/packages/test/cdk.out',
       },
     });
+    expect(config.targets.cdk).toMatchObject({
+      executor: 'nx:run-commands',
+      options: {
+        cwd: 'packages/test',
+        command: 'cdk',
+      },
+    });
+    expect(config.targets.bootstrap).toMatchObject({
+      executor: 'nx:run-commands',
+      options: {
+        cwd: 'packages/test',
+        command: 'cdk bootstrap',
+      },
+    });
   });
 
   it('should add required dependencies to package.json', async () => {
