@@ -7,6 +7,7 @@ import {
   OverwriteStrategy,
   Tree,
   addDependenciesToPackageJson,
+  detectPackageManager,
   generateFiles,
   getPackageManagerCommand,
   installPackagesTask,
@@ -22,8 +23,26 @@ import { getNpmScope } from '../utils/npm-scope';
 import GeneratorsJson from '../../generators.json';
 import { PresetGeneratorSchema } from './schema';
 
+const WORKSPACES = ['packages/*'];
+
 export const PRESET_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
+
+const setUpWorkspaces = (tree: Tree) => {
+  if (detectPackageManager() === 'pnpm') {
+    tree.write(
+      'pnpm-workspace.yaml',
+      `packages:
+  ${WORKSPACES.map((workspace) => `- "${workspace}"`).join('\n  ')}
+`,
+    );
+  } else {
+    updateJson(tree, 'package.json', (json) => {
+      json.workspaces = WORKSPACES;
+      return json;
+    });
+  }
+};
 
 export const presetGenerator = async (
   tree: Tree,
@@ -37,7 +56,8 @@ export const presetGenerator = async (
   tree.delete('apps/.gitkeep');
   tree.delete('libs/.gitkeep');
   tree.write('packages/.gitkeep', '');
-  tree.write('README.md', 'TODO');
+
+  setUpWorkspaces(tree);
 
   updateJson(tree, 'package.json', (packageJson) => ({
     ...packageJson,
