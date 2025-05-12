@@ -102,7 +102,7 @@ function getYarnMajorVersion(path: string): string | undefined {
   }
 }
 export function tmpProjPath() {
-  return `../dist/e2e`;
+  return '/tmp/nx-plugin-for-aws/e2e';
 }
 function getPackageManagerCommand({
   path = tmpProjPath(),
