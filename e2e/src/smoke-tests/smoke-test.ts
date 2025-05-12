@@ -23,7 +23,7 @@ export const smokeTest = (
     });
     it(`Should generate and build - ${pkgMgr}`, async () => {
       await runCLI(
-        `npx -y create-nx-workspace@~21.0.3 e2e-test --ci=skip --skipGit --preset=ts --interactive=false --pm ${pkgMgr}`,
+        `npx -y create-nx-workspace@~21.0.3 e2e-test --ci=skip --skipGit --preset=@aws/nx-plugin --interactive=false --pm ${pkgMgr}`,
         {
           cwd: `${tmpProjPath()}/${pkgMgr}`,
           prefixWithPackageManagerCmd: false,
@@ -35,10 +35,6 @@ export const smokeTest = (
       if (onProjectCreate) {
         onProjectCreate(projectRoot);
       }
-      await runCLI(
-        `${getPackageManagerCommand(pkgMgr).addDev} @aws/nx-plugin`,
-        { ...opts, prefixWithPackageManagerCmd: false, retry: true },
-      ); // This can sometimes fail intermittently so add retries
       await runCLI(
         `generate @aws/nx-plugin:ts#infra --name=infra --no-interactive`,
         opts,

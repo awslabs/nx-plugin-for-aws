@@ -71,17 +71,11 @@
 1. Create a new NX workspace
 
 ```bash
-npx create-nx-workspace@~20.6.3 demo --pm=pnpm --preset=ts --ci=skip --formatter=prettier
+npx create-nx-workspace@~20.6.3 demo --pm=pnpm --preset=@aws/nx-plugin --ci=skip
 cd demo
 ```
 
-2. Install the `@aws/nx-plugin`
-
-```bash
-pnpm add -Dw @aws/nx-plugin
-```
-
-3. Add components:
+2. Add components:
 
 ```bash
 # Generate a tRPC API backend
