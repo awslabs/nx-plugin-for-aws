@@ -1,6 +1,6 @@
 ---
 title: "Juego de Mazmorra con IA"
-description: "Un tutorial de cómo construir un juego de aventuras de mazmorra con IA utilizando el @aws/nx-plugin."
+description: "Un tutorial de cómo construir un juego de aventuras de mazmorra con IA usando el @aws/nx-plugin."
 ---
 
 
@@ -12,6 +12,9 @@ import Drawer from '@components/drawer.astro';
 import RunGenerator from '@components/run-generator.astro';
 import NxCommands from '@components/nx-commands.astro';
 import InstallCommand from '@components/install-command.astro';
+import E2EDiff from '@components/e2e-diff.astro';
+import E2ECode from '@components/e2e-code.astro';
+
 import dungeonAdventureArchitecturePng from '@assets/dungeon-game-architecture.png'
 import dungeonAdventureErPng from '@assets/dungeon-adventure-er.png'
 import baselineWebsitePng from '@assets/baseline-website.png'
@@ -35,589 +38,241 @@ Para definir las entradas y salidas de nuestra API, crearemos nuestro esquema us
 
 <Tabs>
   <TabItem label="types/action.ts">
-```typescript
-import { z } from 'zod';
-
-export const ActionSchema = z.object({
-  playerName: z.string(),
-  timestamp: z.string().datetime(),
-  role: z.enum(['assistant', 'user']),
-  content: z.string(),
-});
-
-export type IAction = z.TypeOf<typeof ActionSchema>;
-```
+<E2ECode lang="typescript" path="dungeon-adventure/2/schema/types/action.ts.template" />
   </TabItem>
   <TabItem label="types/common.ts">
-```typescript
-import { z } from 'zod';
-
-export const QueryInputSchema = z.object({
-  cursor: z.string().optional(),
-  limit: z.number().optional().default(100),
-});
-
-export const createPaginatedQueryOutput = <ItemType extends z.ZodTypeAny>(
-  itemSchema: ItemType,
-) => {
-  return z.object({
-    items: z.array(itemSchema),
-    cursor: z.string().nullable(),
-  });
-};
-
-export type IQueryInput = z.TypeOf<typeof QueryInputSchema>;
-```
+<E2ECode lang="typescript" path="dungeon-adventure/2/schema/types/common.ts.template" />
   </TabItem>
   <TabItem label="types/game.ts">
-```typescript
-import { z } from 'zod';
-
-export const GameSchema = z.object({
-  playerName: z.string(),
-  genre: z.enum(['zombie', 'superhero', 'medieval']),
-  lastUpdated: z.string().datetime(),
-});
-
-export type IGame = z.TypeOf<typeof GameSchema>;
-```
+<E2ECode lang="typescript" path="dungeon-adventure/2/schema/types/game.ts.template" />
   </TabItem>
   <TabItem label="index.ts">
-```diff lang="typescript"
--export * from './procedures/echo.js';
-+export * from './types/action.js';
-+export * from './types/common.js';
-+export * from './types/game.js';
-```
+<E2EDiff lang="typescript" before="dungeon-adventure/2/schema/index.ts.old.template" after="dungeon-adventure/2/schema/index.ts.template" />
   </TabItem>
 </Tabs>
 
 También puedes eliminar el archivo `./procedures/echo.ts` ya que no lo usaremos en este proyecto.
 
 <Aside type="tip">
-Como puedes ver arriba, para cada esquema definido en Zod, también exportamos una interfaz usando la sintaxis `z.TypeOf`. Esto convierte nuestra definición de Zod en una interfaz de Typescript sin duplicar esfuerzos.
+Como se muestra arriba, para cada esquema definido en Zod, también exportamos una interfaz usando la sintaxis `z.TypeOf`. ¡Esto convierte nuestra definición de Zod en una interfaz de Typescript sin duplicar esfuerzos!
 </Aside>
 
 ### Modelado de entidades
 
 El diagrama ER de nuestra aplicación es el siguiente:
 
-<Image class="centered-image white-bg" src={dungeonAdventureErPng} alt="dungeon-adventure-er.png" width="400" height="300" />
+<Image class="centered-image white-bg" src={dungeonAdventureErPng} alt="diagrama-er-aventura-mazmorra" width="400" height="300" />
 
-Implementaremos nuestra base de datos en DynamoDB usando la biblioteca cliente [ElectroDB](https://electrodb.dev/en/core-concepts/introduction/). Para comenzar, primero instalamos `electrodb` ejecutando:
+Implementaremos nuestra base de datos en DynamoDB usando la biblioteca cliente [ElectroDB](https://electrodb.dev/en/core-concepts/introduction/) para simplificar el proceso. Para comenzar, primero necesitamos instalar `electrodb` ejecutando el siguiente comando:
 
 <InstallCommand pkg="electrodb @aws-sdk/client-dynamodb" />
 
 <Aside>
-Todas las dependencias se añaden al `package.json` raíz ya que el `@aws/nx-plugin` sigue el principio de [política de versión única](https://nx.dev/concepts/decisions/dependency-management#single-version-policy). Para más detalles, consulta la <Link path="guides/typescript-project#dependencies">guía de proyectos TypeScript</Link>.
+Todas las dependencias se agregan al `package.json` raíz ya que `@aws/nx-plugin` sigue el principio de [política de versión única](https://nx.dev/concepts/decisions/dependency-management#single-version-policy). Para más información, consulta la <Link path="guides/typescript-project#dependencies">guía de proyectos TypeScript</Link>.
 </Aside>
 
-Ahora creamos los siguientes archivos en `packages/game-api/backend/src/entities` para definir nuestras entidades ElectroDB según el diagrama ER:
+Ahora creemos los siguientes archivos en nuestra carpeta `packages/game-api/backend/src/entities` para definir nuestras entidades ElectroDB según el diagrama ER anterior:
 
 <Tabs>
   <TabItem label="action.ts">
-```typescript
-import { Entity } from 'electrodb';
-import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-
-export const createActionEntity = (client?: DynamoDBClient) =>
-  new Entity(
-    {
-      model: {
-        entity: 'Action',
-        version: '1',
-        service: 'game',
-      },
-      attributes: {
-        playerName: { type: 'string', required: true, readOnly: true },
-        timestamp: {
-          type: 'string',
-          required: true,
-          readOnly: true,
-          set: () => new Date().toISOString(),
-          default: () => new Date().toISOString(),
-        },
-        role: { type: 'string', required: true, readOnly: true },
-        content: { type: 'string', required: true, readOnly: true },
-      },
-      indexes: {
-        primary: {
-          pk: { field: 'pk', composite: ['playerName'] },
-          sk: { field: 'sk', composite: ['timestamp'] },
-        },
-      },
-    },
-    { client, table: process.env.TABLE_NAME },
-  );
-```
+<E2ECode lang="typescript" path="dungeon-adventure/2/entities/action.ts.template" />
   </TabItem>
   <TabItem label="game.ts">
-```typescript
-import { Entity } from 'electrodb';
-import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-
-export const createGameEntity = (client?: DynamoDBClient) =>
-  new Entity(
-    {
-      model: {
-        entity: 'Game',
-        version: '1',
-        service: 'game',
-      },
-      attributes: {
-        playerName: { type: 'string', required: true, readOnly: true },
-        genre: { type: 'string', required: true, readOnly: true },
-        lastUpdated: {
-          type: 'string',
-          required: true,
-          default: () => new Date().toISOString(),
-        },
-      },
-      indexes: {
-        primary: {
-          pk: { field: 'pk', composite: ['playerName'] },
-          sk: {
-            field: 'sk',
-            composite: [],
-          },
-        },
-      },
-    },
-    { client, table: process.env.TABLE_NAME },
-  );
-```
+<E2ECode lang="typescript" path="dungeon-adventure/2/entities/game.ts.template" />
   </TabItem>
 </Tabs>
 
-ElectroDB es muy potente y nos permite definir tipos, establecer valores por defecto como los timestamps, y sigue el [diseño de tabla única](https://electrodb.dev/en/core-concepts/single-table-relationships/), considerada buena práctica en DynamoDB.
+ElectroDB es muy potente y nos permite no solo definir tipos, sino también proporcionar valores predeterminados como los timestamps anteriores. Además, ElectroDB sigue el [diseño de tabla única](https://electrodb.dev/en/core-concepts/single-table-relationships/), que es la mejor práctica con DynamoDB.
 
 <Aside>
 Aunque ElectroDB soporta [colecciones](https://electrodb.dev/en/modeling/collections/), no las usaremos en este tutorial por simplicidad.
 </Aside>
 
-### Añadiendo el cliente DynamoDB al contexto de tRPC
+### Agregar el cliente DynamoDB al contexto de tRPC
 
-Para acceder al cliente DynamoDB en nuestros procedimientos, creamos una instancia única que pasamos mediante el contexto. Realiza estos cambios en `packages/game-api/backend/src`:
+Como necesitamos acceso al cliente DynamoDB en cada procedimiento, queremos crear una instancia única del cliente que podamos pasar mediante el contexto. Para esto, realiza los siguientes cambios en `packages/game-api/backend/src`:
 
 <Tabs>
   <TabItem label="middleware/dynamodb.ts">
-```typescript
-// middleware/dynamodb.ts
-import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { initTRPC } from '@trpc/server';
+<E2ECode lang="typescript" path="dungeon-adventure/2/middleware/dynamodb.ts.template" />
 
-export interface IDynamoDBContext {
-  dynamoDb?: DynamoDBClient;
-}
-
-export const createDynamoDBPlugin = () => {
-  const t = initTRPC.context<IDynamoDBContext>().create();
-  return t.procedure.use(async (opts) => {
-    const dynamoDb = new DynamoDBClient();
-
-    const response = await opts.next({
-      ctx: {
-        ...opts.ctx,
-        dynamoDb,
-      },
-    });
-
-    return response;
-  });
-};
-```
-
-Este plugin crea el `DynamoDBClient` y lo inyecta en el contexto.
+Este es un complemento que instrumentamos para crear el `DynamoDBClient` e inyectarlo en el contexto.
   </TabItem>
   <TabItem label="middleware/index.ts">
-```diff lang="ts"
-// middleware/index.ts
-import { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
-import type { APIGatewayProxyEvent } from 'aws-lambda';
-import { ILoggerContext } from './logger.js';
-import { IMetricsContext } from './metrics.js';
-import { ITracerContext } from './tracer.js';
-+import { IDynamoDBContext } from './dynamodb.js';
+<E2EDiff lang="typescript" before="dungeon-adventure/2/middleware/index.ts.old.template" after="dungeon-adventure/2/middleware/index.ts.template" />
 
-+export * from './dynamodb.js';
-export * from './logger.js';
-export * from './metrics.js';
-export * from './tracer.js';
-export * from './error.js';
-
-export type IMiddlewareContext =
-  CreateAWSLambdaContextOptions<APIGatewayProxyEvent> &
-+    IDynamoDBContext &
-    ILoggerContext &
-    IMetricsContext &
-    ITracerContext;
-```
-
-Aumentamos `IMiddlewareContext` para incluir `IDynamoDBContext`.
+Ampliamos nuestro `IMiddlewareContext` para agregar `IDynamoDBContext`.
   </TabItem>
   <TabItem label="init.ts">
-```diff lang="ts"
-// init.ts
-import { initTRPC } from '@trpc/server';
-import {
-+  createDynamoDBPlugin,
-  createErrorPlugin,
-  createLoggerPlugin,
-  createMetricsPlugin,
-  createTracerPlugin,
-  IMiddlewareContext,
-} from './middleware/index.js';
+<E2EDiff lang="typescript" before="dungeon-adventure/2/init.ts.old.template" after="dungeon-adventure/2/init.ts.template" />
 
-process.env.POWERTOOLS_SERVICE_NAME = 'GameApi';
-process.env.POWERTOOLS_METRICS_NAMESPACE = 'GameApi';
-
-export type Context = IMiddlewareContext;
-
-export const t = initTRPC.context<Context>().create();
-
-export const publicProcedure = t.procedure
-+  .concat(createDynamoDBPlugin())
-  .concat(createLoggerPlugin())
-  .concat(createTracerPlugin())
-  .concat(createMetricsPlugin())
-  .concat(createErrorPlugin());
-```
-
-El plugin de DynamoDB queda integrado.
+El complemento de DynamoDB se instrumenta.
 
 <Aside>
-El método `concat` vincula los middlewares a los procedimientos. Para más detalles, consulta la [guía de concat](https://trpc.io/docs/server/middlewares#concat).
+La API `concat` vincula nuestro middleware a los procedimientos. Para más detalles, consulta la [guía de concat](https://trpc.io/docs/server/middlewares#concat).
 </Aside>
   </TabItem>
 </Tabs>
 
-### Definiendo los procedimientos
+### Definición de procedimientos
 
-Implementamos los métodos de la API modificando estos archivos en `packages/game-api/backend/src/procedures`:
+Ahora implementemos los métodos de la API. Para esto, realiza los siguientes cambios en `packages/game-api/backend/src/procedures`:
 
 <Tabs>
   <TabItem label="query-actions.ts">
-```typescript
-import { createActionEntity } from '../entities/action.js';
-import {
-  ActionSchema,
-  IAction,
-  QueryInputSchema,
-  createPaginatedQueryOutput,
-} from ':dungeon-adventure/game-api-schema';
-import { publicProcedure } from '../init.js';
-import { z } from 'zod';
-
-export const queryActions = publicProcedure
-  .input(QueryInputSchema.extend({ playerName: z.string() }))
-  .output(createPaginatedQueryOutput(ActionSchema))
-  .query(async ({ input, ctx }) => {
-    const actionEntity = createActionEntity(ctx.dynamoDb);
-    const result = await actionEntity.query
-      .primary({ playerName: input.playerName })
-      .go({ cursor: input.cursor, count: input.limit });
-
-    return {
-      items: result.data as IAction[],
-      cursor: result.cursor,
-    };
-  });
-```
+<E2ECode lang="typescript" path="dungeon-adventure/2/procedures/query-actions.ts.template" />
   </TabItem>
   <TabItem label="query-games.ts">
-```typescript
-import { createGameEntity } from '../entities/game.js';
-import {
-  GameSchema,
-  IGame,
-  QueryInputSchema,
-  createPaginatedQueryOutput,
-} from ':dungeon-adventure/game-api-schema';
-import { publicProcedure } from '../init.js';
-
-export const queryGames = publicProcedure
-  .input(QueryInputSchema)
-  .output(createPaginatedQueryOutput(GameSchema))
-  .query(async ({ input, ctx }) => {
-    const gameEntity = createGameEntity(ctx.dynamoDb);
-    const result = await gameEntity.scan.go({
-      cursor: input.cursor,
-      count: input.limit,
-    });
-
-    return {
-      items: result.data as IGame[],
-      cursor: result.cursor,
-    };
-  });
-```
+<E2ECode lang="typescript" path="dungeon-adventure/2/procedures/query-games.ts.template" />
   </TabItem>
   <TabItem label="save-action.ts">
-```typescript
-import { ActionSchema, IAction } from ':dungeon-adventure/game-api-schema';
-import { publicProcedure } from '../init.js';
-import { createActionEntity } from '../entities/action.js';
-import { createGameEntity } from '../entities/game.js';
-
-export const saveAction = publicProcedure
-  .input(ActionSchema.omit({ timestamp: true }))
-  .output(ActionSchema)
-  .mutation(async ({ input, ctx }) => {
-    const actionEntity = createActionEntity(ctx.dynamoDb);
-    const gameEntity = createGameEntity(ctx.dynamoDb);
-
-    const action = await actionEntity.put(input).go();
-    await gameEntity
-      .update({ playerName: input.playerName })
-      .set({ lastUpdated: action.data.timestamp })
-      .go();
-    return action.data as IAction;
-  });
-```
+<E2ECode lang="typescript" path="dungeon-adventure/2/procedures/save-action.ts.template" />
   </TabItem>
   <TabItem label="save-game.ts">
-```typescript
-import { createGameEntity } from '../entities/game.js';
-import { GameSchema, IGame } from ':dungeon-adventure/game-api-schema';
-import { publicProcedure } from '../init.js';
-
-export const saveGame = publicProcedure
-  .input(GameSchema.omit({ lastUpdated: true }))
-  .output(GameSchema)
-  .mutation(async ({ input, ctx }) => {
-    const gameEntity = createGameEntity(ctx.dynamoDb);
-
-    const result = await gameEntity.put(input).go();
-    return result.data as IGame;
-  });
-```
+<E2ECode lang="typescript" path="dungeon-adventure/2/procedures/save-game.ts.template" />
   </TabItem>
 </Tabs>
 
-Elimina el archivo `echo.ts` de `packages/game-api/backend/src/procedures`.
+También puedes eliminar el archivo `echo.ts` (de `packages/game-api/backend/src/procedures`) ya que no lo usaremos.
 
 ### Configuración del router
 
-Actualizamos el router para incluir los nuevos procedimientos:
+Con los procedimientos definidos, conectémoslos a nuestra API actualizando el siguiente archivo:
 
-```diff lang="ts"
-// packages/game-api/backend/src/router.ts
-import {
-  awsLambdaRequestHandler,
-  CreateAWSLambdaContextOptions,
-} from '@trpc/server/adapters/aws-lambda';
--import { echo } from './procedures/echo.js';
-import { t } from './init.js';
-import { APIGatewayProxyEvent } from 'aws-lambda';
-+import { queryActions } from './procedures/query-actions.js';
-+import { saveAction } from './procedures/save-action.js';
-+import { queryGames } from './procedures/query-games.js';
-+import { saveGame } from './procedures/save-game.js';
-
-export const router = t.router;
-
-export const appRouter = router({
--  echo,
-+  actions: router({
-+    query: queryActions,
-+    save: saveAction,
-+  }),
-+  games: router({
-+    query: queryGames,
-+    save: saveGame,
-+  }),
-});
-
-export const handler = awsLambdaRequestHandler({
-  router: appRouter,
-  createContext: (
-    ctx: CreateAWSLambdaContextOptions<APIGatewayProxyEvent>,
-  ) => ctx,
-  responseMeta: () => ({
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': '*',
-    },
-  }),
-});
-
-export type AppRouter = typeof appRouter;
-```
+<E2EDiff lang="typescript" before="dungeon-adventure/2/router.ts.old.template" after="dungeon-adventure/2/router.ts.template" />
 
 ### Infraestructura
 
-Actualizamos la infraestructura para crear la tabla DynamoDB y otorgar permisos:
+El paso final es actualizar nuestra infraestructura para crear la tabla DynamoDB y otorgar permisos a la Game API. Actualiza `packages/infra/src` como sigue:
 
 <Tabs>
   <TabItem label="constructs/electrodb-table.ts">
-```typescript
-// constructs/electrodb-table.ts
-import { CfnOutput } from 'aws-cdk-lib';
-import {
-  AttributeType,
-  BillingMode,
-  ProjectionType,
-  Table,
-  TableProps,
-} from 'aws-cdk-lib/aws-dynamodb';
-import { Construct } from 'constructs';
-
-export type ElectrodbDynamoTableProps = Omit<
-  TableProps,
-  'partitionKey' | 'sortKey' | 'billingMode'
->;
-
-export class ElectrodbDynamoTable extends Table {
-  constructor(scope: Construct, id: string, props?: ElectrodbDynamoTableProps) {
-    super(scope, id, {
-      partitionKey: {
-        name: 'pk',
-        type: AttributeType.STRING,
-      },
-      sortKey: {
-        name: 'sk',
-        type: AttributeType.STRING,
-      },
-      billingMode: BillingMode.PAY_PER_REQUEST,
-      ...props,
-    });
-
-    this.addGlobalSecondaryIndex({
-      indexName: 'gsi1pk-gsi1sk-index',
-      partitionKey: {
-        name: 'gsi1pk',
-        type: AttributeType.STRING,
-      },
-      sortKey: {
-        name: 'gsi1sk',
-        type: AttributeType.STRING,
-      },
-      projectionType: ProjectionType.ALL,
-    });
-
-    new CfnOutput(this, 'TableName', { value: this.tableName });
-  }
-}
-```
+<E2ECode lang="typescript" path="dungeon-adventure/2/constructs/electrodb-table.ts.template" />
   </TabItem>
   <TabItem label="stacks/application-stack.ts">
-```diff lang="ts"
-// stacks/application-stack.ts
-import {
-  GameApi,
-  GameUI,
-  StoryApi,
-  UserIdentity,
-} from ':dungeon-adventure/common-constructs';
-import * as cdk from 'aws-cdk-lib';
-import { Construct } from 'constructs';
-+import { ElectrodbDynamoTable } from '../constructs/electrodb-table.js';
-
-export class ApplicationStack extends cdk.Stack {
-  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
-    super(scope, id, props);
-
-    const userIdentity = new UserIdentity(this, 'UserIdentity');
-+
-+    const electroDbTable = new ElectrodbDynamoTable(this, 'ElectroDbTable');
-+
-     const gameApi = new GameApi(this, 'GameApi', {
--      integrations: GameApi.defaultIntegrations(this).build(),
-+      integrations: GameApi.defaultIntegrations(this)
-+        .withDefaultOptions({
-+          environment: {
-+            TABLE_NAME: electroDbTable.tableName,
-          },
-        })
-+        .build(),
-     });
-+
-+    electroDbTable.grantReadData(gameApi.integrations['actions.query'].handler);
-+    electroDbTable.grantReadData(gameApi.integrations['games.query'].handler);
-+    electroDbTable.grantReadWriteData(
-+      gameApi.integrations['actions.save'].handler,
-    );
-+    electroDbTable.grantReadWriteData(
-+      gameApi.integrations['games.save'].handler,
-    );
-+
-     const storyApi = new StoryApi(this, 'StoryApi', {
-       integrations: StoryApi.defaultIntegrations(this).build(),
-    });
-
-    [storyApi, gameApi].forEach((api) =>
-      api.grantInvokeAccess(userIdentity.identityPool.authenticatedRole),
-    );
-
-    new GameUI(this, 'GameUI');
-  }
-}
-```
+<E2EDiff lang="typescript" before="dungeon-adventure/1/application-stack.ts.template" after="dungeon-adventure/2/stacks/application-stack.ts.template" />
 
 :::note
-Cada procedimiento tiene permisos mínimos necesarios según su implementación.
+Cada procedimiento se sirve mediante una función lambda individual, permitiendo aplicar el principio de mínimo privilegio en los permisos.
 :::
   </TabItem>
 </Tabs>
 
 ### Despliegue y pruebas
 
-Primero, construimos el código:
+Primero, construyamos el código base:
 
 <NxCommands commands={['run-many --target build --all']} />
 
 <Aside type="tip">
-Si encuentras errores de lint, ejecuta:
+Si encuentras errores de lint, ejecuta este comando para corregirlos automáticamente:
+
 <NxCommands commands={['run-many --target lint --configuration=fix --all']} />
 </Aside>
 
-Despliega la aplicación con:
+Ahora puedes desplegar la aplicación con:
 
 <NxCommands commands={['run @dungeon-adventure/infra:deploy dungeon-adventure-infra-sandbox']} />
 
-El primer despliegue tarda ~8 minutos. Los siguientes ~2 minutos.
+El primer despliegue tomará unos 8 minutos. Los siguientes tomarán alrededor de 2 minutos.
 
 :::tip
-Para cambios en lambdas, usa `--hotswap`:
+Para cambios en código lambda, usa el flag `--hotswap` tras construir el código para despliegues rápidos (2-3 segundos):
+
 <NxCommands commands={['run @dungeon-adventure/infra:deploy dungeon-adventure-infra-sandbox --hotswap']} />
 :::
 
-<Drawer title="Comando de despliegue" trigger="Haz clic para más detalles">
-Despliega todos los stacks con:
+<Drawer title="Comando de despliegue" trigger="También puedes desplegar todos los stacks. Haz clic para más detalles.">
+
+Puedes desplegar todos los stacks de la aplicación CDK con:
+
 <NxCommands commands={['run @dungeon-adventure/infra:deploy --all']} />
+
+**No recomendado** si tienes stacks separados para diferentes etapas (ej. infra-prod), ya que `--all` intentará desplegar todo.
+
 </Drawer>
 
-Tras el despliegue, verás salidas similares a:
+Tras el despliegue, verás salidas similares a estas _(valores modificados)_:
+
 ```bash
-dungeon-adventure-infra-sandbox.ElectroDbTableTableNameXXX = nombre-tabla
+dungeon-adventure-infra-sandbox
+dungeon-adventure-infra-sandbox: deploying... [2/2]
+
+ ✅  dungeon-adventure-infra-sandbox
+
+✨  Tiempo de despliegue: 354s
+
+Outputs:
+dungeon-adventure-infra-sandbox.ElectroDbTableTableNameXXX = dungeon-adventure-infra-sandbox-ElectroDbTableXXX-YYY
 dungeon-adventure-infra-sandbox.GameApiEndpointXXX = https://xxx.execute-api.region.amazonaws.com/prod/
+dungeon-adventure-infra-sandbox.GameUIDistributionDomainNameXXX = xxx.cloudfront.net
+dungeon-adventure-infra-sandbox.StoryApiEndpointXXX = https://xxx.execute-api.region.amazonaws.com/prod/
+dungeon-adventure-infra-sandbox.UserIdentityUserIdentityIdentityPoolIdXXX = region:xxx
+dungeon-adventure-infra-sandbox.UserIdentityUserIdentityUserPoolIdXXX = region_xxx
 ```
 
-Pruebas:
+Podemos probar la API mediante:
 <ul>
+<li>Iniciar una instancia local del backend tRPC y usar `curl`.</li>
 <li>
+<Drawer title="curl con Sigv4" trigger="Llamar a la API implementada usando curl con Sigv4">
+Agrega este script a tu `.bashrc` o pégalo en la terminal:
+```bash
+// ~/.bashrc
+acurl () {
+    REGION=$1
+    SERVICE=$2
+    shift; shift;
+    curl --aws-sigv4 "aws:amz:$REGION:$SERVICE" --user "$(aws configure get aws_access_key_id):$(aws configure get aws_secret_access_key)" -H "X-Amz-Security-Token: $(aws configure get aws_session_token)" "$@"
+}
+```
+
+Ejemplos de uso:
+
+###### API Gateway
+```bash
+acurl ap-southeast-2 execute-api -X GET https://xxx
+```
+
+###### URL de función Lambda
+```bash
+acurl ap-southeast-2 lambda -N -X POST https://xxx
+```
+</Drawer>
+</li>
+</ul>
+
+
 <Tabs>
   <TabItem label="Local">
-    Ejecuta:
-    <NxCommands highlights={['dungeon-adventure-infra-sandbox-ElectroDbTableXXX-YYY']} env={{TABLE_NAME:"nombre-tabla"}} commands={["run @dungeon-adventure/game-api-backend:serve"]} />
+    Inicia el servidor local `game-api` con:
+
+    <NxCommands highlights={['dungeon-adventure-infra-sandbox-ElectroDbTableXXX-YYY']} env={{TABLE_NAME:"dungeon-adventure-infra-sandbox-ElectroDbTableXXX-YYY"}} commands={["run @dungeon-adventure/game-api-backend:serve"]} />
+
     <Aside type="caution">
-    Usa el nombre de tabla del output de CDK.
+    Usa el valor `dungeon-adventure-infra-sandbox.ElectroDbTableTableNameXXX` de la salida de CDK para reemplazar el marcador.
     </Aside>
-    Prueba con:
+
+    Una vez iniciado, prueba con:
     ```bash
     curl -X GET 'http://localhost:2022/games.query?input=%7B%7D'
     ```
   </TabItem>
-  <TabItem label="Desplegado">
+  <TabItem label="Implementado">
 ```bash "https://xxx.execute-api.ap-southeast-2.amazonaws.com/prod/" "ap-southeast-2"
 acurl ap-southeast-2 execute-api -X GET 'https://xxx.execute-api.ap-southeast-2.amazonaws.com/prod/games.query?input=%7B%7D'
 ```
+    <Aside type="caution">
+    Usa el valor `dungeon-adventure-infra-sandbox.GameApiGameApiEndpointXXX` de CDK y ajusta la región.
+    </Aside>
   </TabItem>
 </Tabs>
-</li>
-</ul>
 
-Respuesta exitosa:
+:::note
+El `%7B%7D` es un objeto JSON vacío codificado (`{}`).
+:::
+
+Si la ejecución es exitosa, verás:
 ```json
 {"result":{"data":{"items":[],"cursor":null}}}
 ```

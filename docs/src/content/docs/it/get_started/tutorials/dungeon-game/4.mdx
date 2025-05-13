@@ -11,6 +11,9 @@ import Drawer from '@components/drawer.astro';
 import RunGenerator from '@components/run-generator.astro';
 import NxCommands from '@components/nx-commands.astro';
 import InstallCommand from '@components/install-command.astro';
+import E2ECode from '@components/e2e-code.astro';
+import E2EDiff from '@components/e2e-diff.astro';
+
 import dungeonAdventureArchitecturePng from '@assets/dungeon-game-architecture.png'
 import dungeonAdventureErPng from '@assets/dungeon-adventure-er.png'
 import baselineWebsitePng from '@assets/baseline-website.png'
@@ -21,36 +24,36 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 ## Modulo 4: Implementazione dell'interfaccia utente
 
-Per iniziare a costruire l'interfaccia utente, configuriamo il server di sviluppo locale per puntare alla sandbox distribuita. Esegui il seguente comando:
+Per iniziare a costruire l'interfaccia utente, vogliamo configurare il nostro server di sviluppo locale per puntare alla sandbox distribuita. Esegui il seguente comando:
 
 <NxCommands commands={["run @dungeon-adventure/game-ui:load:runtime-config"]} />
 
-Questo comando scaricherà il file `runtime-config.json` distribuito e lo salverà localmente nella cartella `packages/game-ui/public`.
+Questo comando scaricherà il file `runtime-config.json` distribuito e lo memorizzerà localmente nella cartella `packages/game-ui/public`.
 
-Ora avvia il server di sviluppo con:
+Ora possiamo avviare il server di sviluppo con il seguente comando:
 
 <NxCommands commands={["run @dungeon-adventure/game-ui:serve"]} />
 
-Apri il sito locale nel browser e segui le istruzioni per accedere e creare un nuovo utente. Al termine vedrai il sito base:
+Potrai quindi aprire il sito locale nel browser, dove ti verrà chiesto di effettuare il login e seguire le procedure per creare un nuovo utente. Al termine, dovresti vedere il sito web di base:
 
 <Image src={baselineWebsitePng} alt="baseline-website.png" width="800" height="600" />
 
 <Aside type="caution">
-_Manteniamo il server di sviluppo attivo per tutto il modulo: ricaricherà automaticamente le modifiche._
+_Manteniamo il server di sviluppo in esecuzione per tutto il resto del modulo, poiché ricaricherà automaticamente tutte le modifiche apportate._
 </Aside>
 
-### Crea una nuova route '/game'
+### Creare una nuova route '/game'
 
-Mostriamo le capacità di `@tanstack/react-router` creando una route tipizzata. Crea un file vuoto in `packages/game-ui/src/routes/game/index.tsx`. Monitora i log del server:
+Mostriamo le capacità di `@tanstack/react-router` creando una nuova route type-safe. Crea semplicemente un file vuoto in questa posizione: `packages/game-ui/src/routes/game/index.tsx`. Monitora attentamente i log del server di sviluppo:
 
 ```bash
 ♻️  Regenerating routes...
 🟡 Updating /Users/dimecha/dungeon-adventure/packages/game-ui/src/routes/game/index.tsx
 🟡 Updating /Users/dimecha/dungeon-adventure/packages/game-ui/src/routeTree.gen.ts
 ✅ Processed routes in 27ms
- ```
+```
 
-Il router ha configurato automaticamente la nuova route. Nota che il file viene popolato con il percorso:
+Il router ha già configurato automaticamente la nuova route. Noterai che il file appena creato è già popolato con il percorso della route:
 
 ```tsx
 import { createFileRoute } from '@tanstack/react-router'
@@ -64,709 +67,67 @@ function RouteComponent() {
 }
 ```
 
-Navigando su `http://localhost:4200/game` vedrai la nuova pagina!
+Ora, navigando su `http://localhost:4200/game`, vedrai renderizzata la nuova pagina!
 
 <Image src={baselineGamePng} alt="baseline-game.png" width="800" height="600" />
 
-Aggiorniamo `index.tsx` per caricare la route `/game` di default. Nota come il campo `to` offra route tipizzate:
+Aggiorniamo anche il file `index.tsx` per caricare la nuova route `/game` di default. Nota come, aggiornando il campo `to`, avrai una lista di route type-safe tra cui scegliere.
 
-```diff lang="tsx"
-// packages/game-ui/src/routes/index.tsx
-import { createFileRoute, Navigate } from '@tanstack/react-router';
+<E2EDiff before="dungeon-adventure/4/routes/index.tsx.old.template" after="dungeon-adventure/4/routes/index.tsx.template" lang="tsx" />
 
-export const Route = createFileRoute('/')({
-+  component: () => <Navigate to="/game" />,
-});
-
-```
-
-Elimina la cartella `packages/game-ui/src/routes/welcome/` non più necessaria.
+Infine possiamo eliminare la cartella `packages/game-ui/src/routes/welcome/` poiché non è più necessaria.
 
 ### Aggiornamenti al layout
 
-Il layout predefinito è più adatto ad applicazioni SaaS che a un gioco. Riconfiguriamolo con un tema dungeon.
+Il layout predefinito è più adatto a un'applicazione business in stile SaaS che a un gioco. Riconfigureremo il layout e applicheremo un tema più consono a un gioco in stile dungeon.
 
-Apporta queste modifiche in `packages/game-ui/src`:
+Apportiamo queste modifiche a `packages/game-ui/src`:
 
 <Tabs>
 <TabItem label="config.ts">
-```diff lang="typescript"
-// packages/game-ui/src/config.ts
-export default {
-+  applicationName: 'Dungeon Adventure',
-};
-```
+<E2EDiff before="dungeon-adventure/4/config.ts.old.template" after="dungeon-adventure/4/config.ts.template" lang="typescript" />
 </TabItem>
 <TabItem label="components/AppLayout/index.tsx">
-```tsx
-// packages/game-ui/src/components/AppLayout/index.tsx
-import { useAuth } from 'react-oidc-context';
-import * as React from 'react';
-import Config from '../../config';
-import { TopNavigation } from '@cloudscape-design/components';
-import { Outlet } from '@tanstack/react-router';
-
-/**
- * Definisce il layout e contiene la logica di routing
- */
-const AppLayout: React.FC = () => {
-  const { user, removeUser, signoutRedirect, clearStaleState } = useAuth();
-
-  return (
-    <>
-      <TopNavigation
-        identity={{
-          href: '/',
-          title: Config.applicationName,
-        }}
-        utilities={[
-          {
-            type: 'menu-dropdown',
-            text: `${user?.profile?.['cognito:username']}`,
-            iconName: 'user-profile-active',
-            onItemClick: (e) => {
-              if (e.detail.id === 'signout') {
-                removeUser();
-                signoutRedirect({
-                  post_logout_redirect_uri: window.location.origin,
-                  extraQueryParams: {
-                    redirect_uri: window.location.origin,
-                    response_type: 'code',
-                  },
-                });
-                clearStaleState();
-              }
-            },
-            items: [{ id: 'signout', text: 'Esci' }],
-          },
-        ]}
-      />
-      <Outlet />
-    </>
-  );
-};
-export default AppLayout;
-```
+<E2ECode path="dungeon-adventure/4/AppLayout/index.tsx.template" lang="tsx" />
 </TabItem>
 <TabItem label="styles.css">
-```css
-// packages/game-ui/src/styles.css
-
-/* Stili gioco */
-:root {
-  --primary-color: rgba(252, 214, 112, 1);
-  --secondary-color: rgba(252, 214, 112, 0.8);
-  --background-dark: #161d26;
-  --background-light: #2a2c3c;
-  --text-light: #e1e1e6;
-  --text-dark: #1f2937;
-}
-
-div#root {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-}
-
-html,
-body {
-  margin: 0;
-  padding: 0;
-  min-height: 100vh;
-  width: 100%;
-  font-family:
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue',
-    Arial, sans-serif;
-  background: var(--background-dark);
-  color: var(--text-dark);
-}
-
-/* Container e interfaccia gioco */
-.game-interface {
-  margin: 2rem;
-  min-height: 100%;
-  flex-grow: 1;
-  display: flex;
-  flex-direction: column;
-}
-
-/* Intestazione */
-.game-header {
-  text-align: center;
-  margin-bottom: 2rem;
-  padding: 1rem;
-}
-
-.game-header h1 {
-  font-size: 2.5rem;
-  font-weight: bold;
-  background: linear-gradient(45deg, #ffd700, #ff6b6b);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
-  margin: 0;
-}
-
-/* Sezione partite salvate */
-.saved-games {
-  margin-bottom: 2rem;
-}
-
-.saved-games h2,
-.new-game h2 {
-  font-size: 1.5rem;
-  margin-bottom: 1rem;
-  color: var(--text-light);
-}
-
-.game-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.game-session {
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 8px;
-  padding: 1rem;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  width: 100%;
-  text-align: left;
-}
-
-.game-session:hover {
-  transform: translateY(-2px);
-  background: rgba(255, 255, 255, 0.15);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-}
-
-.player-name {
-  font-weight: 600;
-  margin-bottom: 0.25rem;
-  color: var(--text-light);
-}
-
-.genre-name {
-  font-size: 0.875rem;
-  color: rgba(255, 255, 255, 0.7);
-}
-
-/* Sezione nuova partita */
-.new-game {
-  margin-top: 2rem;
-}
-
-.game-setup {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-span[data-style='generating'] {
-  color: rgba(252, 214, 112, 1) !important;
-}
-
-.name-input,
-.action-input {
-  width: 100%;
-  padding: 0.75rem;
-  border: 2px solid rgba(255, 255, 255, 0.2);
-  border-radius: 8px;
-  font-size: 1rem;
-}
-
-.name-input:focus,
-.action-input:focus {
-  outline: none;
-  border-color: var(--primary-color);
-}
-
-.genre-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1rem;
-}
-
-.genre-button {
-  background: rgba(255, 255, 255, 0.1);
-  border: 2px solid rgba(255, 255, 255, 0.2);
-  border-radius: 8px;
-  padding: 1rem;
-  color: var(--text-light);
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.3s ease;
-}
-
-.genre-button:hover {
-  background: rgba(252, 214, 112, 1);
-  color: var(--text-dark);
-  border-color: var(--primary-color);
-  transform: translateY(-2px);
-}
-
-/* Area messaggi */
-.messages-area {
-  flex: 1;
-  overflow-y: auto;
-  margin-bottom: 1rem;
-  align-content: flex-end;
-}
-
-.messages-container {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  padding: 1rem;
-}
-
-.message {
-  padding: 1rem;
-  border-radius: 8px;
-  max-width: 80%;
-  line-height: 1.5;
-}
-
-.message.assistant {
-  background: var(--secondary-color);
-  border-left: 4px solid var(--primary-color);
-  margin-right: auto;
-  word-wrap: break-word;
-  white-space: pre-wrap;
-  margin: 0 !important;
-}
-
-.message.user {
-  background: rgba(220, 220, 220, 0.7);
-  border-right: 4px solid rgba(220, 220, 220, 0.7);
-  margin-left: auto;
-}
-
-/* Area input */
-.input-area {
-  padding: 1rem;
-  position: sticky;
-  bottom: 0;
-}
-
-/* Stile scrollbar */
-.messages-area::-webkit-scrollbar {
-  width: 6px;
-}
-
-.messages-area::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.messages-area::-webkit-scrollbar-thumb {
-  background-color: rgba(255, 255, 255, 0.3);
-  border-radius: 3px;
-}
-
-/* Per Firefox */
-.messages-area {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.3) transparent;
-}
-```
+<E2ECode path="dungeon-adventure/4/styles.css.template" lang="css" />
 </TabItem>
 </Tabs>
 
-Elimina i file `packages/game-ui/src/components/AppLayout/navitems.ts` e `packages/game-ui/src/hooks/useAppLayout.tsx` non più utilizzati.
+Ora eliminiamo i file `packages/game-ui/src/components/AppLayout/navitems.ts` e `packages/game-ui/src/hooks/useAppLayout.tsx` poiché non sono utilizzati.
 
-### Pagine di gioco
+### Pagine del gioco
 
-Creiamo le pagine che richiameranno le API e completeranno il gioco:
+Creiamo le pagine del gioco che chiameranno le nostre API e completeranno l'implementazione:
 
 <Tabs>
 <TabItem label="index.tsx">
-```tsx
-// packages/game-ui/src/routes/game/index.tsx
-import { FormField, Spinner } from '@cloudscape-design/components';
-import { useInfiniteQuery, useMutation } from '@tanstack/react-query';
-import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import {
-  createRef,
-  LegacyRef,
-  MutableRefObject,
-  useEffect,
-  useMemo,
-  useState,
-} from 'react';
-import { useGameApi } from '../../hooks/useGameApi';
-import { IAction, IGame } from ':dungeon-adventure/game-api-schema';
-
-type IGameState = Omit<IGame, 'lastUpdated'> & { actions: IAction[] };
-
-export const Route = createFileRoute('/game/')({
-  component: RouteComponent,
-});
-
-// Hook per verificare la visibilità di un elemento
-export function useIsVisible(ref: MutableRefObject<any>) {
-  const [isIntersecting, setIntersecting] = useState(false);
-
-  useEffect(() => {
-    const observer = new IntersectionObserver(([entry]) =>
-      setIntersecting(entry.isIntersecting),
-    );
-
-    ref.current && observer.observe(ref.current);
-    return () => {
-      observer.disconnect();
-    };
-  }, [ref]);
-
-  return isIntersecting;
-}
-
-function RouteComponent() {
-  const [playerName, setPlayerName] = useState('');
-  const navigate = useNavigate();
-  const ref = createRef();
-  const isLastGameVisible = useIsVisible(ref);
-
-  const gameApi = useGameApi();
-  const saveGameMutation = useMutation(gameApi.games.save.mutationOptions());
-
-  const {
-    data: gamesPages,
-    fetchNextPage,
-    hasNextPage,
-    isFetchingNextPage,
-  } = useInfiniteQuery(
-    gameApi.games.query.infiniteQueryOptions(
-      { limit: 10 },
-      { getNextPageParam: ({ cursor }) => cursor },
-    ),
-  );
-  const games = useMemo(() => {
-    return gamesPages?.pages.flatMap((page) => page.items) || [];
-  }, [gamesPages]);
-
-  // Carica più partite se visibili
-  useEffect(() => {
-    if (isLastGameVisible && hasNextPage && !isFetchingNextPage) {
-      fetchNextPage();
-    }
-  }, [isFetchingNextPage, hasNextPage, fetchNextPage, isLastGameVisible]);
-
-  const playerAlreadyExists = (playerName?: string) => {
-    return !!games?.find((s) => s.playerName === playerName);
-  };
-
-  // Crea nuova partita
-  const handleStartGame = async (
-    playerName: string,
-    genre: IGameState['genre'],
-  ) => {
-    if (playerAlreadyExists(playerName)) {
-      return;
-    }
-    try {
-      await saveGameMutation.mutateAsync({
-        playerName,
-        genre,
-      });
-
-      await handleLoadGame(playerName, genre);
-    } catch (error) {
-      console.error('Errore creazione partita:', error);
-    }
-  };
-
-  // Carica partita esistente
-  const handleLoadGame = async (
-    playerName: string,
-    genre: IGameState['genre'],
-  ) => {
-    await navigate({
-      to: '/game/$playerName',
-      params: { playerName },
-      search: { genre },
-    });
-  };
-
-  return (
-    <div className="game-interface">
-      <header className="game-header">
-        <h1>AI Dungeon Adventure</h1>
-      </header>
-
-      {/* Sezione nuova partita */}
-      <div className="new-game">
-        <h2>Nuova Partita</h2>
-        <div className="game-setup">
-          <FormField
-            errorText={
-              playerAlreadyExists(playerName)
-                ? `${playerName} già esistente`
-                : undefined
-            }
-          >
-            <input
-              type="text"
-              placeholder="Inserisci nome"
-              className="name-input"
-              onChange={(e) => setPlayerName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  const input = e.currentTarget;
-                  handleStartGame(input.value, 'medieval');
-                }
-              }}
-            />
-          </FormField>
-          <div className="genre-grid">
-            {(['zombie', 'superhero', 'medieval'] as const).map((genre) => (
-              <button
-                key={genre}
-                className="genre-button"
-                onClick={() => {
-                  const playerName = document.querySelector('input')?.value;
-                  if (playerName) {
-                    handleStartGame(playerName, genre);
-                  }
-                }}
-              >
-                {genre.charAt(0).toUpperCase() + genre.slice(1)}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Partite salvate */}
-      {games && games.length > 0 && (
-        <div className="saved-games">
-          <h2>Continua Partita</h2>
-          <div className="game-list">
-            {games.map((game, idx) => (
-              <button
-                key={game.playerName}
-                ref={
-                  idx === games.length - 1
-                    ? (ref as LegacyRef<HTMLButtonElement>)
-                    : undefined
-                }
-                onClick={() => handleLoadGame(game.playerName, game.genre)}
-                className="game-session"
-              >
-                <div className="player-name">{game.playerName}</div>
-                <div className="genre-name">
-                  {game.genre.charAt(0).toUpperCase() + game.genre.slice(1)}
-                </div>
-              </button>
-            ))}
-            {isFetchingNextPage && <Spinner data-style="generating" size="big" />}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-```
+<E2ECode path="dungeon-adventure/4/routes/game/index.tsx.template" lang="tsx" />
 </TabItem>
 <TabItem label="$playerName.tsx">
 
-```tsx title="packages/game-ui/src/routes/game/$playerName.tsx"
-import { PromptInput, Spinner } from '@cloudscape-design/components';
-import { useMutation, useQuery } from '@tanstack/react-query';
-import { createFileRoute } from '@tanstack/react-router';
-import { useEffect, useRef, useState } from 'react';
-import { useGameApi } from '../../hooks/useGameApi';
-import { useStoryApiClient } from '../../hooks/useStoryApiClient';
-import type { IAction, IGame } from ':dungeon-adventure/game-api-schema';
-
-type IGameState = Omit<IGame, 'lastUpdated'> & { actions: IAction[] };
-
-export const Route = createFileRoute('/game/$playerName')({
-  component: RouteComponent,
-  validateSearch: (search: Record<string, unknown>) => {
-    return {
-      genre: search.genre as IGameState['genre'],
-    };
-  },
-});
-
-function RouteComponent() {
-  const { playerName } = Route.useParams();
-  const { genre } = Route.useSearch();
-
-  const [currentInput, setCurrentInput] = useState('');
-  const [streamingContent, setStreamingContent] = useState('');
-
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  const gameApi = useGameApi();
-  const storyApi = useStoryApiClient();
-  const saveActionMutation = useMutation(
-    gameApi.actions.save.mutationOptions(),
-  );
-  const gameActionsQuery = useQuery(
-    gameApi.actions.query.queryOptions({ playerName, limit: 100 }),
-  );
-
-  // Genera storia iniziale se nuova partita
-  useEffect(() => {
-    if (
-      !gameActionsQuery.isLoading &&
-      gameActionsQuery.data?.items &&
-      gameActionsQuery.data?.items.length === 0
-    ) {
-      generateStory({
-        playerName,
-        genre,
-        actions: [],
-      });
-    }
-  }, [gameActionsQuery.data?.items, gameActionsQuery.isLoading]);
-
-  const generateStoryMutation = useMutation({
-    mutationFn: async ({ playerName, genre, actions }: IGameState) => {
-      let content = '';
-      for await (const chunk of storyApi.generateStory({
-        playerName,
-        genre,
-        actions,
-      })) {
-        content += chunk;
-        setStreamingContent(content);
-      }
-
-      return content;
-    },
-  });
-
-  // Scorrimento automatico
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [streamingContent, gameActionsQuery]);
-
-  // Avanzamento storia
-  const generateStory = async ({ playerName, genre, actions }: IGameState) => {
-    try {
-      const content = await generateStoryMutation.mutateAsync({
-        playerName,
-        genre,
-        actions,
-      });
-
-      // Salva risposta assistente
-      await saveActionMutation.mutateAsync({
-        playerName,
-        role: 'assistant',
-        content,
-      });
-
-      await gameActionsQuery.refetch();
-
-      setStreamingContent('');
-    } catch (error) {
-      console.error('Errore generazione storia:', error);
-    }
-  };
-
-  // Gestione input utente
-  const handleSubmitAction = async () => {
-    if (!currentInput.trim()) return;
-
-    const userAction: IAction = {
-      playerName,
-      role: 'user' as const,
-      content: currentInput,
-      timestamp: new Date().toISOString(),
-    };
-
-    // Salva azione utente
-    await saveActionMutation.mutateAsync(userAction);
-    await gameActionsQuery.refetch();
-
-    setCurrentInput('');
-
-    // Genera risposta
-    await generateStory({
-      genre,
-      playerName,
-      actions: [...(gameActionsQuery.data?.items ?? []), userAction],
-    });
-  };
-
-  return (
-    <div className="game-interface">
-      <div className="messages-area">
-        <div className="messages-container">
-          {gameActionsQuery.data?.items
-            .concat(
-              streamingContent.length > 0
-                ? [
-                    {
-                      playerName,
-                      role: 'assistant',
-                      content: streamingContent,
-                      timestamp: new Date().toISOString(),
-                    },
-                  ]
-                : [],
-            )
-            .map((action, i) => (
-              <div
-                key={i}
-                className={`message ${
-                  action.role === 'assistant' ? 'assistant' : 'user'
-                }`}
-              >
-                {action.content}
-              </div>
-            ))}
-          {generateStoryMutation.isPending && streamingContent.length === 0 && (
-            <Spinner data-style="generating" size="big" />
-          )}
-          <div ref={messagesEndRef} />
-        </div>
-      </div>
-      <div className="input-area">
-        <PromptInput
-          onChange={({ detail }) => setCurrentInput(detail.value)}
-          value={currentInput}
-          actionButtonAriaLabel="Invia messaggio"
-          actionButtonIconName="send"
-          ariaLabel="Prompt di input"
-          placeholder="Cosa vuoi fare?"
-          onAction={handleSubmitAction}
-        />
-      </div>
-    </div>
-  );
-}
-```
+<E2ECode path="dungeon-adventure/4/routes/game/$playerName.tsx.template" lang="tsx" />
 
 <Aside type="tip">
-La sintassi `$playerName` indica a `@tanstack/react-router` di trattare `playerName` come [path param](https://tanstack.com/router/v1/docs/framework/react/guide/path-params). Il metodo `validateSearch` garantisce che il parametro `genre` sia tipizzato correttamente.
+La sintassi `$playerName` indica a `@tanstack/react-router` di trattare `playerName` come [parametro di percorso](https://tanstack.com/router/v1/docs/framework/react/guide/path-params). Inoltre, il metodo `validateSearch` garantisce che il parametro query `genre` sia tipizzato correttamente secondo il nostro enum dei generi.
 </Aside>
 </TabItem>
 </Tabs>
 
-Ora il server locale (http://localhost:4200/) è pronto per giocare!
+Dopo queste modifiche, il server di sviluppo locale (http://localhost:4200/) dovrebbe mostrare il gioco pronto per essere giocato!
 
-<Drawer title="Compila e Distribuisci" trigger="Puoi anche compilare e distribuire su Cloudfront">
+<Drawer title="Compila e Distribuisci" trigger="Puoi anche compilare e distribuire il codice su Cloudfront se preferisci.">
 
-Per compilare:
+Per compilare il codice, esegui:
 
 <NxCommands commands={['run-many --target build --all']} />
 
-Distribuisci l'applicazione:
+Ora distribuisci l'applicazione:
 
 <NxCommands commands={['run @dungeon-adventure/infra:deploy dungeon-adventure-infra-sandbox']} />
 
-L'URL Cloudfront è disponibile negli output del deploy CDK.
+Dopo la distribuzione, naviga sull'URL di Cloudfront che trovi negli output del deploy CDK.
 
 </Drawer>
 
@@ -775,4 +136,4 @@ L'URL Cloudfront è disponibile negli output del deploy CDK.
 <Image src={gameConversationPng} alt="game-conversation.png" width="500" height="400" />
 </div>
 
-Complimenti. Hai creato e distribuito il tuo Dungeon Adventure Game! 🎉🎉🎉
+Congratulazioni. Hai costruito e distribuito il tuo Dungeon Adventure Game! 🎉🎉🎉
