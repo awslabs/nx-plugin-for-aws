@@ -215,7 +215,7 @@ async function getFilesToTranslate(): Promise<string[]> {
         baseCommit = mergeBase;
       }
 
-      const diffResult = await git.diff([`${baseCommit}..HEAD`, '--name-only']);
+      const diffResult = await git.diff([`${baseCommit}..HEAD`, '--name-only', '--diff-filter=d']);
       changedFiles = diffResult
         .split('\n')
         .filter(

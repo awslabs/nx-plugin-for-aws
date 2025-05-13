@@ -25,6 +25,8 @@ import { formatFilesInSubtree } from '../../utils/format';
 import { sortObjectKeys } from '../../utils/object';
 import { NxGeneratorInfo, getGeneratorInfo } from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+import { replace } from '../../utils/ast';
+import { ArrayLiteralExpression, factory } from 'typescript';
 
 export const TS_LIB_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -199,6 +201,19 @@ export const tsLibGenerator = async (
 
     return nxJson;
   });
+
+  // change error to warn for the @nx/dependency-checks rule
+  replace(
+    tree,
+    joinPathFragments(dir, 'eslint.config.mjs'),
+    'PropertyAssignment:has(Identifier[name="rules"]) ObjectLiteralExpression PropertyAssignment:has(StringLiteral[value="@nx/dependency-checks"]) ArrayLiteralExpression:has(StringLiteral[value="error"])',
+    (node: ArrayLiteralExpression) => {
+      return factory.createArrayLiteralExpression([
+        factory.createStringLiteral('warn'),
+        ...node.elements.slice(1),
+      ]);
+    },
+  );
 
   await addGeneratorMetricsIfApplicable(tree, [TS_LIB_GENERATOR_INFO]);
 

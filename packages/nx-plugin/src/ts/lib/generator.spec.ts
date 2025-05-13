@@ -37,6 +37,9 @@ describe('ts lib generator', () => {
     expect(tree.read('test-lib/project.json', 'utf-8')).toMatchSnapshot(
       'project.json',
     );
+    expect(tree.read('test-lib/eslint.config.mjs', 'utf-8')).toMatchSnapshot(
+      'eslint.config.mjs',
+    );
   });
 
   it('should generate library with custom directory', async () => {
