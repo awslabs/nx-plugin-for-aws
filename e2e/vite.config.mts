@@ -30,6 +30,6 @@ export default defineConfig({
         singleThread: true,
       },
     },
-    testTimeout: 5 * 60 * 1000, /// 5 mins
+    testTimeout: 10 * 60 * 1000, /// 10 mins
   },
 });

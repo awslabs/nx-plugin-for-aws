@@ -37,12 +37,6 @@ describe('smoke test - dungeon-adventure', () => {
     const projectRoot = `${targetDir}/dungeon-adventure`;
     const opts = { cwd: projectRoot };
 
-    await runCLI(`${getPackageManagerCommand(pkgMgr).addDev} @aws/nx-plugin`, {
-      ...opts,
-      prefixWithPackageManagerCmd: false,
-      retry: true,
-    }); // This can sometimes fail intermittently so add retries
-
     await runCLI(
       `generate @aws/nx-plugin:ts#trpc-api --apiName=GameApi --no-interactive`,
       opts,
