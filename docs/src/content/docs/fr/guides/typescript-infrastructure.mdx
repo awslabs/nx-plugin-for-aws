@@ -12,9 +12,9 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import schema from '../../../../../../packages/nx-plugin/src/infra/app/schema.json';
 
-L'[AWS CDK](https://docs.aws.amazon.com/cdk/v2/guide/home.html) est un framework permettant de définir l'infrastructure cloud via du code et de la provisionner via AWS CloudFormation.
+[AWS CDK](https://docs.aws.amazon.com/cdk/v2/guide/home.html) est un framework permettant de définir une infrastructure cloud via du code et de la déployer via AWS CloudFormation.
 
-Le générateur d'infrastructure TypeScript crée une application d'infrastructure AWS CDK écrite en TypeScript. L'application générée intègre des bonnes pratiques de sécurité grâce à des vérifications [CFN Guard](https://docs.aws.amazon.com/cfn-guard/latest/ug/what-is-guard.html).
+Le générateur d'infrastructure TypeScript crée une application d'infrastructure AWS CDK écrite en TypeScript. L'application générée intègre des bonnes pratiques de sécurité via des contrôles [CFN Guard](https://docs.aws.amazon.com/cfn-guard/latest/ug/what-is-guard.html).
 
 ## Utilisation
 
@@ -35,9 +35,9 @@ Le générateur créera la structure de projet suivante dans le répertoire `<di
 <FileTree>
 
   - src
-    - main.ts Point d'entrée de l'application instanciant les piles CDK à déployer
-    - stacks Définitions des piles CDK
-      - application-stack.ts Pile d'application principale
+    - main.ts Point d'entrée de l'application instanciant les stacks CDK à déployer
+    - stacks Définitions des stacks CDK
+      - application-stack.ts Stack applicative principale
   - cdk.json Configuration CDK
   - project.json Configuration du projet et cibles de build
 
@@ -70,7 +70,7 @@ export class ApplicationStack extends cdk.Stack {
 
 Si vous avez utilisé les générateurs <Link path="guides/trpc">tRPC API</Link> ou <Link path="guides/fastapi">FastAPI</Link>, vous remarquerez que des constructs sont déjà disponibles dans `packages/common/constructs` pour les déployer.
 
-Si vous avez par exemple créé une API tRPC appelée `my-api`, vous pouvez simplement l'importer et l'instancier pour ajouter toute l'infrastructure nécessaire à son déploiement :
+Si vous avez par exemple créé une API tRPC appelée `my-api`, vous pouvez simplement importer et instancier le construct pour ajouter toute l'infrastructure nécessaire à son déploiement :
 
 ```ts title="src/stacks/application-stack.ts" {3, 9-10}
 import * as cdk from 'aws-cdk-lib';
@@ -89,7 +89,7 @@ export class ApplicationStack extends cdk.Stack {
 
 ### Infrastructure de site web
 
-Si vous avez utilisé le générateur <Link path="guides/cloudscape-website">CloudScape website</Link>, vous remarquerez qu'un construct est déjà disponible dans `packages/common/constructs` pour le déployer. Exemple :
+Si vous avez utilisé le générateur <Link path="guides/cloudscape-website">CloudScape website</Link>, vous remarquerez qu'un construct est déjà disponible dans `packages/common/constructs` pour le déployer. Par exemple :
 
 ```ts title="src/stacks/application-stack.ts" {3, 9-10}
 import * as cdk from 'aws-cdk-lib';
@@ -107,23 +107,24 @@ export class ApplicationStack extends cdk.Stack {
 ```
 
 :::warning
-Il est important de déclarer le site web _après_ les constructs d'API afin que la <Link path="guides/cloudscape-website#runtime-configuration">Configuration d'exécution</Link> du site inclue toutes les configurations des API.
+Il est important de s'assurer que le site web est déclaré _après_ tout construct d'API afin que la <Link path="guides/cloudscape-website#runtime-configuration">configuration runtime</Link> du site inclue tous les paramètres des API.
 :::
 
 ## Synthèse de votre infrastructure
 
-Dans le cadre de votre cible `build`, en plus des <Link path="guides/typescript-project#building">cibles par défaut de compilation, lint et tests</Link>, votre projet d'infrastructure est _synthétisé_ en CloudFormation. Cette opération peut aussi être exécutée indépendamment via la cible `synth` :
+Dans le cadre de votre cible `build`, en plus des <Link path="guides/typescript-project#building">tâches de compilation, lint et test par défaut</Link>, votre projet d'infrastructure est _synthétisé_ en CloudFormation. Cela peut aussi être exécuté séparément via la cible `synth` :
 
 <NxCommands commands={['run <my-infra>:synth']} />
 
-Vous trouverez votre assembly cloud synthétisé dans le dossier racine `dist`, sous `dist/packages/<my-infra-project>/cdk.out`.
+Vous trouverez votre assembly cloud synthétisée dans le dossier racine `dist`, sous `dist/packages/<my-infra-project>/cdk.out`.
 
-## Bootstrap de votre/vos compte(s) AWS
+## Initialisation de votre/vos compte(s) AWS
 
-Si vous déployez une application CDK dans un compte AWS pour la première fois, celui-ci doit d'abord être bootstrappé.
+Si vous déployez une application CDK sur un compte AWS pour la première fois, celui-ci doit être initialisé.
 
-1. Vérifiez que vous avez [configuré les credentials pour votre compte AWS](https://docs.aws.amazon.com/sdkref/latest/guide/access.html).
-2. Utilisez la commande `cdk bootstrap` :
+D'abord, assurez-vous d'avoir [configuré les credentials pour votre compte AWS](https://docs.aws.amazon.com/sdkref/latest/guide/access.html).
+
+Ensuite, utilisez la commande `cdk bootstrap` :
 
 ```bash
 npx cdk bootstrap aws://<account-id>/<region>
@@ -135,17 +136,30 @@ Pour plus de détails, consultez la [documentation CDK](https://docs.aws.amazon.
 
 Après un build, vous pouvez déployer votre infrastructure sur AWS via la cible `deploy`.
 
-1. Vérifiez que vous avez [configuré les credentials pour votre compte AWS](https://docs.aws.amazon.com/sdkref/latest/guide/access.html).
-2. Exécutez la cible deploy :
+:::caution
+Utilisez la cible `deploy-ci` pour les déploiements en pipeline CI/CD. Voir ci-dessous pour plus de détails.
+:::
+
+D'abord, assurez-vous d'avoir [configuré les credentials pour votre compte AWS](https://docs.aws.amazon.com/sdkref/latest/guide/access.html).
+
+Ensuite, exécutez la cible deploy :
 
 <NxCommands commands={['run <my-infra>:deploy --all']} />
 
 :::tip
-La commande ci-dessus déploie _toutes_ les piles définies dans `main.ts`. Vous pouvez cibler une pile spécifique, notamment si vous avez configuré plusieurs environnements d'application :
+La commande ci-dessus déploie _toutes_ les stacks définies dans `main.ts`. Vous pouvez cibler une stack spécifique, notamment si vous avez configuré plusieurs environnements d'application :
 
 <NxCommands commands={['run <my-infra>:deploy my-sandbox-stack']} />
 :::
 
-## Informations complémentaires
+## Déploiement sur AWS dans un pipeline CI/CD
 
-Pour en savoir plus sur CDK, consultez le [Guide du développeur CDK](https://docs.aws.amazon.com/cdk/v2/guide/core_concepts.html) et la [Référence d'API](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-construct-library.html).
+Utilisez la cible `deploy-ci` pour déployer sur AWS via un pipeline CI/CD.
+
+<NxCommands commands={['run <my-infra>:deploy-ci my-stack']} />
+
+Cette cible diffère légèrement de `deploy` en ce qu'elle déploie une cloud-assembly pré-synthétisée plutôt que de synthétiser à la volée. Cela évite les problèmes potentiels de non-déterminisme dus aux changements de versions de packages, garantissant que chaque étape du pipeline déploie la même cloud-assembly.
+
+## Plus d'informations
+
+Pour en savoir plus sur CDK, consultez le [Guide développeur CDK](https://docs.aws.amazon.com/cdk/v2/guide/core_concepts.html) et la [Référence d'API](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-construct-library.html).
