@@ -110,10 +110,24 @@ export async function infraGenerator(
         executor: 'nx:run-commands',
         options: {
           cwd: libraryRoot,
+          command: `cdk deploy --require-approval=never`,
+        },
+      };
+      config.targets['deploy-ci'] = {
+        executor: 'nx:run-commands',
+        options: {
+          cwd: libraryRoot,
           command: `cdk deploy --require-approval=never --app ${synthDirFromProject}`,
         },
       };
       config.targets.destroy = {
+        executor: 'nx:run-commands',
+        options: {
+          cwd: libraryRoot,
+          command: `cdk destroy --require-approval=never`,
+        },
+      };
+      config.targets['destroy-ci'] = {
         executor: 'nx:run-commands',
         options: {
           cwd: libraryRoot,

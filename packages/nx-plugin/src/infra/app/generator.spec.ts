@@ -80,11 +80,25 @@ describe('infra generator', () => {
       executor: 'nx:run-commands',
       options: {
         cwd: 'packages/test',
+        command: 'cdk deploy --require-approval=never',
+      },
+    });
+    expect(config.targets['deploy-ci']).toMatchObject({
+      executor: 'nx:run-commands',
+      options: {
+        cwd: 'packages/test',
         command:
           'cdk deploy --require-approval=never --app ../../dist/packages/test/cdk.out',
       },
     });
     expect(config.targets.destroy).toMatchObject({
+      executor: 'nx:run-commands',
+      options: {
+        cwd: 'packages/test',
+        command: 'cdk destroy --require-approval=never',
+      },
+    });
+    expect(config.targets['destroy-ci']).toMatchObject({
       executor: 'nx:run-commands',
       options: {
         cwd: 'packages/test',
