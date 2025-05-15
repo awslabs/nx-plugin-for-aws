@@ -33,7 +33,7 @@ export const smokeTest = (
         },
       );
       const projectRoot = `${tmpProjPath()}/${pkgMgr}/e2e-test`;
-      const opts = { cwd: projectRoot };
+      const opts = { cwd: projectRoot, env: { NX_DAEMON: 'false' } };
       if (onProjectCreate) {
         onProjectCreate(projectRoot);
       }
