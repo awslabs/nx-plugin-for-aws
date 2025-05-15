@@ -14,6 +14,7 @@ import { SyncGeneratorResult } from 'nx/src/utils/sync-generators';
 import { mkdtempSync, rmSync } from 'fs';
 import { flushChanges, FsTree } from 'nx/src/generators/tree';
 import { execSync } from 'child_process';
+import mock from 'mock-require';
 import path from 'path';
 import os from 'os';
 
@@ -21,6 +22,7 @@ describe('licenseSyncGenerator', () => {
   let tree: Tree;
 
   beforeEach(() => {
+    mock.stop('@nx/devkit');
     tree = createTreeUsingTsSolutionSetup();
   });
 
