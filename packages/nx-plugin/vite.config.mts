@@ -31,24 +31,7 @@ export default defineConfig({
       enabled: true,
       reporter: ['lcov'],
     },
-    env: {
-      NX_DAEMON: 'true',
-    },
     pool: 'threads',
-    // Tests that use the ts library generator end up with Nx computing a project
-    // graph on the daemon (the eslint generator calls createProjectGraphAsync).
-    // Too much parallelism spams the daemon too hard causing it to deadlock on
-    // less powerful machines, ie our CI worker, so we reduce it in CI mode.
-    ...(process.env.CI
-      ? {
-          poolOptions: {
-            threads: {
-              minThreads: 1,
-              maxThreads: 4,
-            },
-          },
-        }
-      : {}),
     sequence: {
       hooks: 'list',
     },

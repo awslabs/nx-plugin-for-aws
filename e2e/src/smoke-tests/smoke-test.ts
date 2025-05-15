@@ -33,7 +33,7 @@ export const smokeTest = (
         },
       );
       const projectRoot = `${tmpProjPath()}/${pkgMgr}/e2e-test`;
-      const opts = { cwd: projectRoot };
+      const opts = { cwd: projectRoot, env: { NX_DAEMON: 'false' } };
       if (onProjectCreate) {
         onProjectCreate(projectRoot);
       }
@@ -108,7 +108,7 @@ export const smokeTest = (
       );
       await runCLI(`sync --verbose`, opts);
       await runCLI(
-        `run-many --target build --all --parallel 12 --output-style=stream --skip-nx-cache --verbose`,
+        `run-many --target build --all --parallel 1 --output-style=stream --skip-nx-cache --verbose`,
         opts,
       );
     });

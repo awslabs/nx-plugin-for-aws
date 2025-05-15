@@ -43,8 +43,8 @@ export async function runCLI(
             cwd: opts.cwd || tmpProjPath(),
             env: {
               PATH: process.env.PATH,
-              ...opts.env,
               ...process.env,
+              ...opts.env,
             },
             encoding: 'utf-8',
             stdio: 'inherit',
