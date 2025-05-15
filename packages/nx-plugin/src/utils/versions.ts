@@ -11,7 +11,7 @@ export const VERSIONS = {
   '@aws-lambda-powertools/logger': '^2.17.0',
   '@aws-lambda-powertools/metrics': '^2.17.0',
   '@aws-lambda-powertools/tracer': '^2.17.0',
-  '@nxlv/python': '^20.15.0',
+  '@nxlv/python': '^21.0.0',
   '@nx/devkit': '~21.0.3',
   '@modelcontextprotocol/sdk': '^1.10.2',
   '@tanstack/react-router': '^1.114.27',
