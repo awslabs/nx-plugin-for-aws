@@ -152,11 +152,15 @@ export const pyProjectGenerator = async (
   projectConfiguration.targets = sortObjectKeys(projectConfiguration.targets);
   updateProjectConfiguration(tree, normalizedName, projectConfiguration);
 
-  // Update root .gitignore to ignore reports directory
+  // Update root .gitignore
   updateGitIgnore(tree, '.', (patterns) => [...patterns, '/reports']);
 
-  // Update project level .gitignore to ignore __pycache__ directories
-  updateGitIgnore(tree, dir, (patterns) => [...patterns, '**/__pycache__']);
+  // Update project level .gitignore
+  updateGitIgnore(tree, dir, (patterns) => [
+    ...patterns,
+    '**/__pycache__',
+    '.coverage',
+  ]);
 
   await addGeneratorMetricsIfApplicable(tree, [PY_PROJECT_GENERATOR_INFO]);
 

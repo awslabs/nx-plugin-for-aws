@@ -113,6 +113,7 @@ describe('python project generator', () => {
     const projectGitIgnorePatterns =
       tree.read('apps/test_project/.gitignore', 'utf-8')?.split('\n') ?? [];
     expect(projectGitIgnorePatterns).toContain('**/__pycache__');
+    expect(projectGitIgnorePatterns).toContain('.coverage');
   });
 
   it('should add a dependency on the python plugin', async () => {
