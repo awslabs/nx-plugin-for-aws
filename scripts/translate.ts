@@ -424,7 +424,7 @@ ${section}
     contentType: 'application/json',
     accept: 'application/json',
     body: JSON.stringify({
-      max_tokens: 32768,
+      max_tokens: 32000,
       temperature: 0.7,
       top_p: 0.9,
       prompt: `<｜User｜>${prompt}<｜Assistant｜>`,
