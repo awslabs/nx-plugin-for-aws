@@ -6,7 +6,6 @@ import {
   joinPathFragments,
   generateFiles,
   Tree,
-  readProjectConfiguration,
   addDependenciesToPackageJson,
   installPackagesTask,
   OverwriteStrategy,
@@ -29,7 +28,6 @@ import {
   SyntaxKind,
   VariableDeclaration,
   InterfaceDeclaration,
-  SourceFile,
 } from 'typescript';
 import { withVersions } from '../../utils/versions';
 import {
@@ -43,7 +41,11 @@ import {
   query,
 } from '../../utils/ast';
 import { formatFilesInSubtree } from '../../utils/format';
-import { NxGeneratorInfo, getGeneratorInfo } from '../../utils/nx';
+import {
+  NxGeneratorInfo,
+  getGeneratorInfo,
+  readProjectConfigurationUnqualified,
+} from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 
 export const COGNITO_AUTH_GENERATOR_INFO: NxGeneratorInfo =
@@ -53,7 +55,10 @@ export async function cognitoAuthGenerator(
   tree: Tree,
   options: CognitoAuthGeneratorSchema,
 ) {
-  const srcRoot = readProjectConfiguration(tree, options.project).sourceRoot;
+  const srcRoot = readProjectConfigurationUnqualified(
+    tree,
+    options.project,
+  ).sourceRoot;
   if (
     tree.exists(joinPathFragments(srcRoot, 'components/CognitoAuth/index.tsx'))
   ) {

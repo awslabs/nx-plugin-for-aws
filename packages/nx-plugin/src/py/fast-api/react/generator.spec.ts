@@ -296,3 +296,122 @@ export function Main() {
     expectHasMetricTags(tree, FAST_API_REACT_GENERATOR_INFO.metric);
   });
 });
+
+describe('fastapi react generator with unqualified names', () => {
+  let tree: Tree;
+
+  beforeEach(() => {
+    tree = createTreeUsingTsSolutionSetup();
+
+    // Setup package.json with a scope
+    tree.write(
+      'package.json',
+      JSON.stringify({
+        name: '@my-scope/monorepo',
+        version: '1.0.0',
+      }),
+    );
+
+    // Mock frontend project configuration with TypeScript fully qualified name
+    tree.write(
+      'apps/frontend/project.json',
+      JSON.stringify({
+        name: '@my-scope/frontend',
+        root: 'apps/frontend',
+        sourceRoot: 'apps/frontend/src',
+      }),
+    );
+
+    // Mock FastAPI project configuration with Python fully qualified name
+    tree.write(
+      'apps/backend/project.json',
+      JSON.stringify({
+        name: 'my_scope.backend',
+        root: 'apps/backend',
+        sourceRoot: 'apps/backend/src',
+        metadata: {
+          apiName: 'TestApi',
+        },
+      }),
+    );
+
+    // Mock main.tsx file
+    tree.write(
+      'apps/frontend/src/main.tsx',
+      `
+import { App } from './app';
+import { RouterProvider } from '@tanstack/react-router';
+
+export function Main() {
+  return <RouterProvider router={router} />;
+}
+`,
+    );
+  });
+
+  it('should work with unqualified frontend project name', async () => {
+    await fastApiReactGenerator(tree, {
+      frontendProjectName: 'frontend', // Unqualified name (without @my-scope/)
+      fastApiProjectName: 'my_scope.backend', // Fully qualified name
+      auth: 'None',
+    });
+
+    // Verify OpenAPI spec generation script was created
+    expect(
+      tree.exists('apps/backend/scripts/generate_open_api.py'),
+    ).toBeTruthy();
+
+    // Verify frontend project configuration was updated
+    const projectConfig = JSON.parse(
+      tree.read('apps/frontend/project.json', 'utf-8'),
+    );
+    expect(projectConfig.targets['generate:test-api-client']).toBeDefined();
+    expect(
+      projectConfig.targets['generate:test-api-client'].dependsOn,
+    ).toContain('my_scope.backend:openapi');
+  });
+
+  it('should work with unqualified FastAPI project name', async () => {
+    await fastApiReactGenerator(tree, {
+      frontendProjectName: '@my-scope/frontend', // Fully qualified name
+      fastApiProjectName: 'backend', // Unqualified name (without my_scope.)
+      auth: 'None',
+    });
+
+    // Verify OpenAPI spec generation script was created
+    expect(
+      tree.exists('apps/backend/scripts/generate_open_api.py'),
+    ).toBeTruthy();
+
+    // Verify frontend project configuration was updated
+    const projectConfig = JSON.parse(
+      tree.read('apps/frontend/project.json', 'utf-8'),
+    );
+    expect(projectConfig.targets['generate:test-api-client']).toBeDefined();
+    expect(
+      projectConfig.targets['generate:test-api-client'].dependsOn,
+    ).toContain('my_scope.backend:openapi');
+  });
+
+  it('should work with both unqualified project names', async () => {
+    await fastApiReactGenerator(tree, {
+      frontendProjectName: 'frontend', // Unqualified name (without @my-scope/)
+      fastApiProjectName: 'backend', // Unqualified name (without my_scope.)
+      auth: 'None',
+    });
+
+    // Verify OpenAPI spec generation script was created
+    expect(
+      tree.exists('apps/backend/scripts/generate_open_api.py'),
+    ).toBeTruthy();
+
+    // Verify frontend project configuration was updated
+    const projectConfig = JSON.parse(
+      tree.read('apps/frontend/project.json', 'utf-8'),
+    );
+    expect(projectConfig.targets['generate:test-api-client']).toBeDefined();
+    expect(
+      projectConfig.targets['generate:test-api-client'].dependsOn,
+    ).toContain('my_scope.backend:openapi');
+  });
+});

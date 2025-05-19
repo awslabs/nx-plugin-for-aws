@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
+import { Tree, updateJson } from '@nx/devkit';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import {
   LAMBDA_FUNCTION_GENERATOR_INFO,
@@ -415,6 +415,44 @@ describe('lambda-handler project generator', () => {
     );
     // Verify project metadata
     expect(appChanges).toMatchSnapshot('main-snapshot');
+  });
+
+  it('should generate a lambda function when an unqualified name is specified', async () => {
+    updateJson(tree, 'package.json', (packageJson) => ({
+      ...packageJson,
+      name: '@my-scope/source',
+    }));
+    // Setup a Python project with a fully qualified name
+    tree.write(
+      'apps/test_project/project.json',
+      JSON.stringify({
+        name: 'my_scope.test_project',
+        root: 'apps/test_project',
+        sourceRoot: 'apps/test_project/test_project',
+        targets: {},
+      }),
+    );
+
+    tree.write(
+      'apps/test_project/pyproject.toml',
+      `[project]
+          dependencies = []
+      `,
+    );
+
+    await lambdaFunctionProjectGenerator(tree, {
+      project: 'test_project',
+      functionName: 'test-function',
+      eventSource: 'Any',
+    });
+
+    const projectConfig = JSON.parse(
+      tree.read('apps/test_project/project.json', 'utf-8'),
+    );
+    expect(projectConfig.targets.bundle).toBeDefined();
+    expect(projectConfig.targets.bundle.options.commands[0]).toContain(
+      `--project test_project`,
+    );
   });
 
   it('should add generator metric to app.ts', async () => {

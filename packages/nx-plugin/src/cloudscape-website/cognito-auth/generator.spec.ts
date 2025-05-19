@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
+import { Tree, updateJson } from '@nx/devkit';
 import { COGNITO_AUTH_GENERATOR_INFO, cognitoAuthGenerator } from './generator';
 import { CognitoAuthGeneratorSchema } from './schema';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
@@ -432,6 +432,43 @@ export default AppLayout;
 
     // Create snapshot of the modified AppLayout.tsx
     expect(appLayoutContent).toMatchSnapshot('app-layout-with-auth');
+  });
+
+  it('should allow an unqualified name to be specified', async () => {
+    // Setup main.tsx with RuntimeConfigProvider
+    tree.write(
+      'packages/test-project/src/main.tsx',
+      `
+      import { RuntimeConfigProvider } from './components/RuntimeConfig';
+      import { RouterProvider, createRouter } from '@tanstack/react-router';
+
+      export function App() {
+        return (
+          <RuntimeConfigProvider>
+            <RouterProvider router={router} />
+          </RuntimeConfigProvider>
+        );
+      }
+    `,
+    );
+
+    // Use a fully-qualified name
+    updateJson(tree, 'package.json', (packageJson) => ({
+      ...packageJson,
+      name: '@scope/source',
+    }));
+    tree.write(
+      'packages/test-project/project.json',
+      JSON.stringify({
+        name: '@scope/test-project',
+        sourceRoot: 'packages/test-project/src',
+      }),
+    );
+
+    await cognitoAuthGenerator(tree, {
+      ...options,
+      project: 'test-project', // unqualified
+    });
   });
 
   it('should add generator metric to app.ts', async () => {

@@ -78,7 +78,7 @@ export const smokeTest = (
         opts,
       );
       await runCLI(
-        `generate @aws/nx-plugin:api-connection --sourceProject=@e2e-test/website --targetProject=e_2_e_test.py_api --no-interactive`,
+        `generate @aws/nx-plugin:api-connection --sourceProject=website --targetProject=py_api --no-interactive`,
         opts,
       );
       await runCLI(

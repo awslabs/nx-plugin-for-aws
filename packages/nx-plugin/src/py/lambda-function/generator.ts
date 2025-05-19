@@ -9,7 +9,6 @@ import {
   joinPathFragments,
   OverwriteStrategy,
   ProjectConfiguration,
-  readProjectConfiguration,
   Tree,
   updateJson,
   updateProjectConfiguration,
@@ -34,7 +33,11 @@ import { addStarExport } from '../../utils/ast';
 import { formatFilesInSubtree } from '../../utils/format';
 import { getNpmScope } from '../../utils/npm-scope';
 import { sortObjectKeys } from '../../utils/object';
-import { NxGeneratorInfo, getGeneratorInfo } from '../../utils/nx';
+import {
+  NxGeneratorInfo,
+  getGeneratorInfo,
+  readProjectConfigurationUnqualified,
+} from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 
 export const LAMBDA_FUNCTION_GENERATOR_INFO: NxGeneratorInfo =
@@ -78,7 +81,10 @@ export const lambdaFunctionProjectGenerator = async (
   tree: Tree,
   schema: LambdaFunctionProjectGeneratorSchema,
 ): Promise<GeneratorCallback> => {
-  const projectConfig = readProjectConfiguration(tree, schema.project);
+  const projectConfig = readProjectConfigurationUnqualified(
+    tree,
+    schema.project,
+  );
 
   const pyProjectPath = joinPathFragments(projectConfig.root, 'pyproject.toml');
 
@@ -96,7 +102,7 @@ export const lambdaFunctionProjectGenerator = async (
   }
 
   const dir = projectConfig.root;
-  const projectNameWithOutScope = schema.project.split('.').pop();
+  const projectNameWithOutScope = projectConfig.name.split('.').pop();
   const normalizedProjectName = toSnakeCase(projectNameWithOutScope);
 
   // Module name is the last part of the source root,

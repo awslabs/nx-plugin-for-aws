@@ -154,3 +154,98 @@ export function Main() {
     expectHasMetricTags(tree, TRPC_REACT_GENERATOR_INFO.metric);
   });
 });
+
+describe('trpc react generator with unqualified names', () => {
+  let tree: Tree;
+
+  beforeEach(() => {
+    tree = createTreeUsingTsSolutionSetup();
+
+    // Setup package.json with a scope
+    tree.write(
+      'package.json',
+      JSON.stringify({
+        name: '@my-scope/monorepo',
+        version: '1.0.0',
+      }),
+    );
+
+    // Mock frontend project configuration with TypeScript fully qualified name
+    tree.write(
+      'apps/frontend/project.json',
+      JSON.stringify({
+        name: '@my-scope/frontend',
+        root: 'apps/frontend',
+        sourceRoot: 'apps/frontend/src',
+      }),
+    );
+
+    // Mock backend project configuration with TypeScript fully qualified name
+    tree.write(
+      'apps/backend/project.json',
+      JSON.stringify({
+        name: '@my-scope/backend',
+        root: 'apps/backend',
+        sourceRoot: 'apps/backend/src',
+        metadata: {
+          apiName: 'TestApi',
+        },
+      }),
+    );
+
+    // Mock main.tsx file
+    tree.write(
+      'apps/frontend/src/main.tsx',
+      `
+import { App } from './app';
+import { RouterProvider } from '@tanstack/react-router';
+
+export function Main() {
+  return <RouterProvider router={router} />;
+}
+`,
+    );
+  });
+
+  it('should work with unqualified frontend project name', async () => {
+    await reactGenerator(tree, {
+      frontendProjectName: 'frontend', // Unqualified name (without @my-scope/)
+      backendProjectName: '@my-scope/backend', // Fully qualified name
+      auth: 'None',
+    });
+
+    // Verify files were generated
+    expect(
+      tree.exists('apps/frontend/src/components/TrpcClients/index.tsx'),
+    ).toBeTruthy();
+    expect(tree.exists('apps/frontend/src/hooks/useTestApi.tsx')).toBeTruthy();
+  });
+
+  it('should work with unqualified backend project name', async () => {
+    await reactGenerator(tree, {
+      frontendProjectName: '@my-scope/frontend', // Fully qualified name
+      backendProjectName: 'backend', // Unqualified name (without @my-scope/)
+      auth: 'None',
+    });
+
+    // Verify files were generated
+    expect(
+      tree.exists('apps/frontend/src/components/TrpcClients/index.tsx'),
+    ).toBeTruthy();
+    expect(tree.exists('apps/frontend/src/hooks/useTestApi.tsx')).toBeTruthy();
+  });
+
+  it('should work with both unqualified project names', async () => {
+    await reactGenerator(tree, {
+      frontendProjectName: 'frontend', // Unqualified name (without @my-scope/)
+      backendProjectName: 'backend', // Unqualified name (without @my-scope/)
+      auth: 'None',
+    });
+
+    // Verify files were generated
+    expect(
+      tree.exists('apps/frontend/src/components/TrpcClients/index.tsx'),
+    ).toBeTruthy();
+    expect(tree.exists('apps/frontend/src/hooks/useTestApi.tsx')).toBeTruthy();
+  });
+});

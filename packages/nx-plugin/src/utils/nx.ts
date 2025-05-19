@@ -2,9 +2,12 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+import { getProjects, readProjectConfiguration, Tree } from '@nx/devkit';
 import GeneratorsJson from '../../generators.json';
 import PackageJson from '../../package.json';
 import * as path from 'path';
+import { getNpmScope, getNpmScopePrefix } from './npm-scope';
+import { toSnakeCase } from './names';
 
 export interface NxGeneratorInfo {
   readonly id: string;
@@ -59,4 +62,28 @@ export const getGeneratorInfo = (
 
 export const getPackageVersion = () => {
   return PackageJson.version;
+};
+
+/**
+ * Read a project configuration where the project name may not be fully qualified (ie may omit the scope prefix)
+ */
+export const readProjectConfigurationUnqualified = (
+  tree: Tree,
+  projectName: string,
+) => {
+  try {
+    return readProjectConfiguration(tree, projectName);
+  } catch (e) {
+    // Attempt to find the project without the scope
+    const project = [...getProjects(tree).values()].find(
+      (p) =>
+        p.name &&
+        (p.name === `${getNpmScopePrefix(tree)}${projectName}` || // TypeScript fully-qualified name
+          p.name === `${toSnakeCase(getNpmScope(tree))}.${projectName}`), // Python fully-qualified name
+    );
+    if (project) {
+      return project;
+    }
+    throw e;
+  }
 };

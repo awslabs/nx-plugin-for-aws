@@ -2,17 +2,13 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import {
-  joinPathFragments,
-  ProjectConfiguration,
-  readProjectConfiguration,
-  Tree,
-} from '@nx/devkit';
+import { joinPathFragments, ProjectConfiguration, Tree } from '@nx/devkit';
 import { ApiConnectionSchema } from './schema';
 import trpcReactGenerator from '../trpc/react/generator';
 import { hasExportDeclaration } from '../utils/ast';
 import { readToml } from '../utils/toml';
 import fastApiReactGenerator from '../py/fast-api/react/generator';
+import { readProjectConfigurationUnqualified } from '../utils/nx';
 
 /**
  * List of supported source and target project types for api connections
@@ -105,7 +101,10 @@ export const determineProjectType = (
   tree: Tree,
   projectName: string,
 ): ProjectType | undefined => {
-  const projectConfiguration = readProjectConfiguration(tree, projectName);
+  const projectConfiguration = readProjectConfigurationUnqualified(
+    tree,
+    projectName,
+  );
 
   // NB: if adding new checks, ensure these go from most to least specific
   // eg. react website is more specific than typescript project

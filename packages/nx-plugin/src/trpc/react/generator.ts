@@ -8,7 +8,6 @@ import {
   installPackagesTask,
   joinPathFragments,
   OverwriteStrategy,
-  readProjectConfiguration,
   Tree,
 } from '@nx/devkit';
 import { ReactGeneratorSchema } from './schema';
@@ -39,7 +38,11 @@ import {
 } from '../../utils/ast';
 import { toClassName } from '../../utils/names';
 import { formatFilesInSubtree } from '../../utils/format';
-import { NxGeneratorInfo, getGeneratorInfo } from '../../utils/nx';
+import {
+  NxGeneratorInfo,
+  getGeneratorInfo,
+  readProjectConfigurationUnqualified,
+} from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 
 export const TRPC_REACT_GENERATOR_INFO: NxGeneratorInfo =
@@ -49,18 +52,18 @@ export async function reactGenerator(
   tree: Tree,
   options: ReactGeneratorSchema,
 ) {
-  const frontendProjectConfig = readProjectConfiguration(
+  const frontendProjectConfig = readProjectConfigurationUnqualified(
     tree,
     options.frontendProjectName,
   );
-  const backendProjectConfig = readProjectConfiguration(
+  const backendProjectConfig = readProjectConfigurationUnqualified(
     tree,
     options.backendProjectName,
   );
   /* eslint-disable @typescript-eslint/no-explicit-any */
   const apiName = (backendProjectConfig.metadata as any)?.apiName;
   const apiNameClassName = toClassName(apiName);
-  const backendProjectAlias = toScopeAlias(options.backendProjectName);
+  const backendProjectAlias = toScopeAlias(backendProjectConfig.name);
 
   generateFiles(
     tree,
@@ -70,7 +73,7 @@ export async function reactGenerator(
       apiName,
       apiNameClassName: toClassName(apiName),
       ...options,
-      backendProjectAlias: toScopeAlias(options.backendProjectName),
+      backendProjectAlias,
     },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
@@ -108,7 +111,7 @@ export async function reactGenerator(
   }
 
   await runtimeConfigGenerator(tree, {
-    project: options.frontendProjectName,
+    project: frontendProjectConfig.name,
   });
 
   // update main.tsx

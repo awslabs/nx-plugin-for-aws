@@ -8,14 +8,12 @@ import {
   installPackagesTask,
   joinPathFragments,
   ProjectConfiguration,
-  readProjectConfiguration,
   Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { FastApiReactGeneratorSchema } from './schema';
 import { runtimeConfigGenerator } from '../../../cloudscape-website/runtime-config/generator';
 import snakeCase from 'lodash.snakecase';
-import * as path from 'path';
 import kebabCase from 'lodash.kebabcase';
 import { sortObjectKeys } from '../../../utils/object';
 import { toClassName } from '../../../utils/names';
@@ -29,7 +27,11 @@ import {
   replace,
 } from '../../../utils/ast';
 import { JsxSelfClosingElement } from 'typescript';
-import { NxGeneratorInfo, getGeneratorInfo } from '../../../utils/nx';
+import {
+  NxGeneratorInfo,
+  getGeneratorInfo,
+  readProjectConfigurationUnqualified,
+} from '../../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { addOpenApiGeneration } from './open-api';
 
@@ -40,11 +42,11 @@ export const fastApiReactGenerator = async (
   tree: Tree,
   options: FastApiReactGeneratorSchema,
 ) => {
-  const frontendProjectConfig = readProjectConfiguration(
+  const frontendProjectConfig = readProjectConfigurationUnqualified(
     tree,
     options.frontendProjectName,
   );
-  const fastApiProjectConfig = readProjectConfiguration(
+  const fastApiProjectConfig = readProjectConfigurationUnqualified(
     tree,
     options.fastApiProjectName,
   );
@@ -64,7 +66,7 @@ export const fastApiReactGenerator = async (
   );
 
   // Add TypeScript client generation to Frontend project.json
-  updateProjectConfiguration(tree, options.frontendProjectName, {
+  updateProjectConfiguration(tree, frontendProjectConfig.name, {
     ...frontendProjectConfig,
     targets: sortObjectKeys({
       ...frontendProjectConfig.targets,
@@ -99,7 +101,7 @@ export const fastApiReactGenerator = async (
             `nx g @aws/nx-plugin:open-api#ts-hooks --openApiSpecPath="${specPath}" --outputPath="${generatedClientDirFromRoot}" --no-interactive`,
           ],
         },
-        dependsOn: [`${options.fastApiProjectName}:openapi`],
+        dependsOn: [`${fastApiProjectConfig.name}:openapi`],
       },
     }),
   });
@@ -117,7 +119,7 @@ export const fastApiReactGenerator = async (
 
   // Ensure that the frontend has runtime config as we'll use the url for creating the client
   await runtimeConfigGenerator(tree, {
-    project: options.frontendProjectName,
+    project: frontendProjectConfig.name,
   });
 
   // Add sigv4 fetch

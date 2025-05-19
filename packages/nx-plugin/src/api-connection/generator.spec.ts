@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
+import { Tree, updateJson } from '@nx/devkit';
 import { apiConnectionGenerator, determineProjectType } from './generator';
 import { createTreeUsingTsSolutionSetup } from '../utils/test';
 import { vi, expect, describe, it, beforeEach } from 'vitest';
@@ -241,6 +241,25 @@ dependencies = ["fastapi"]`,
         'apps/api/project.json',
         JSON.stringify({
           name: 'api',
+          root: 'apps/api',
+          metadata: {
+            apiType: 'trpc',
+          },
+        }),
+      );
+
+      expect(determineProjectType(tree, 'api')).toBe('ts#trpc-api');
+    });
+
+    it('should allow an unqualified project name to be specified', () => {
+      updateJson(tree, 'package.json', (packageJson) => ({
+        ...packageJson,
+        name: '@my-qualified-name/source',
+      }));
+      tree.write(
+        'apps/api/project.json',
+        JSON.stringify({
+          name: '@my-qualified-name/api',
           root: 'apps/api',
           metadata: {
             apiType: 'trpc',

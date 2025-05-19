@@ -9,7 +9,6 @@ import {
   installPackagesTask,
   joinPathFragments,
   readJson,
-  readProjectConfiguration,
   Tree,
   updateJson,
   writeJson,
@@ -23,7 +22,10 @@ import snakeCase from 'lodash.snakecase';
 import { addStarExport, replace } from '../../utils/ast';
 import { ArrayLiteralExpression, factory } from 'typescript';
 import NxPluginForAwsPackageJson from '../../../package.json';
-import { getGeneratorInfo } from '../../utils/nx';
+import {
+  getGeneratorInfo,
+  readProjectConfigurationUnqualified,
+} from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { withVersions } from '../../utils/versions';
 import { formatFilesInSubtree } from '../../utils/format';
@@ -36,7 +38,7 @@ export const nxGeneratorGenerator = async (
 ): Promise<GeneratorCallback | void> => {
   const { name, directory, pluginProject, description } = options;
 
-  const plugin = readProjectConfiguration(tree, pluginProject);
+  const plugin = readProjectConfigurationUnqualified(tree, pluginProject);
   const sourceRoot = plugin.sourceRoot ?? joinPathFragments(plugin.root, 'src');
   const sourceRootParts = sourceRoot.split('/');
   const srcDir = sourceRootParts[sourceRootParts.length - 1];

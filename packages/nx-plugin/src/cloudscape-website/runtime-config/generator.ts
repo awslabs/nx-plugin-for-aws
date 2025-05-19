@@ -6,7 +6,6 @@ import {
   joinPathFragments,
   generateFiles,
   Tree,
-  readProjectConfiguration,
   OverwriteStrategy,
 } from '@nx/devkit';
 import { RuntimeConfigGeneratorSchema } from './schema';
@@ -15,7 +14,11 @@ import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
 import { formatFilesInSubtree } from '../../utils/format';
 import { prependStatements, query, replaceIfExists } from '../../utils/ast';
-import { NxGeneratorInfo, getGeneratorInfo } from '../../utils/nx';
+import {
+  NxGeneratorInfo,
+  getGeneratorInfo,
+  readProjectConfigurationUnqualified,
+} from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 
 export const RUNTIME_CONFIG_GENERATOR_INFO: NxGeneratorInfo =
@@ -25,7 +28,10 @@ export async function runtimeConfigGenerator(
   tree: Tree,
   options: RuntimeConfigGeneratorSchema,
 ) {
-  const srcRoot = readProjectConfiguration(tree, options.project).sourceRoot;
+  const srcRoot = readProjectConfigurationUnqualified(
+    tree,
+    options.project,
+  ).sourceRoot;
   const mainTsxPath = joinPathFragments(srcRoot, 'main.tsx');
   if (!tree.exists(mainTsxPath)) {
     throw new Error(
