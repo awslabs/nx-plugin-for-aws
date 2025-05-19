@@ -9,11 +9,10 @@ import { FileTree } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
-import schema from '../../../../../../packages/nx-plugin/src/py/lambda-function/schema.json';
 
 Le générateur de fonction Lambda Python permet d'ajouter une fonction lambda à un projet Python existant.
 
-Ce générateur crée un nouveau gestionnaire de fonction Lambda Python avec une configuration d'infrastructure AWS CDK. Le backend généré utilise AWS Lambda pour un déploiement serverless, avec une option de sécurité des types via le [Parser d'AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/utilities/parser/). Il configure [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/) pour l'observabilité, incluant la journalisation, le traçage AWS X-Ray et les métriques CloudWatch.
+Ce générateur crée un nouveau gestionnaire de fonction lambda Python avec une configuration d'infrastructure AWS CDK. Le backend généré utilise AWS Lambda pour un déploiement serverless, avec une validation de types optionnelle via le [Parser d'AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/utilities/parser/). Il configure [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/) pour l'observabilité, incluant la journalisation, le tracing AWS X-Ray et les métriques CloudWatch.
 
 ## Utilisation
 
@@ -25,7 +24,7 @@ Vous pouvez générer une nouvelle fonction Lambda de deux manières :
 
 ### Options
 
-<GeneratorParameters schema={schema} />
+<GeneratorParameters generator="py#lambda-function" />
 
 ## Résultat du générateur
 
@@ -38,7 +37,7 @@ Le générateur ajoutera les fichiers suivants à votre projet :
 
 </FileTree>
 
-Le générateur créera également des constructs CDK utilisables pour déployer votre fonction, situés dans le répertoire `packages/common/constructs`.
+Le générateur crée également des constructs CDK pour déployer votre fonction, situés dans le répertoire `packages/common/constructs`.
 
 Si l'option `functionPath` est spécifiée, le générateur ajoutera les fichiers nécessaires au chemin indiqué :
 
@@ -78,20 +77,20 @@ def lambda_handler(event: EventBridgeModel, context: LambdaContext):
     metrics.add_metric(name="InvocationCount", unit=MetricUnit.Count, value=1)
 
     try:
-        # TODO: Implement
+        # TODO: Implémenter
         metrics.add_metric(name="SuccessCount", unit=MetricUnit.Count, value=1)
-        # TODO: Implement success response if required
+        # TODO: Implémenter la réponse en cas de succès si nécessaire
     except Exception as e:
         logger.exception(e)
         metrics.add_metric(name="ErrorCount", unit=MetricUnit.Count, value=1)
-        # TODO: Implement error response if required
+        # TODO: Implémenter la réponse en cas d'erreur si nécessaire
 ```
 
 Le générateur configure automatiquement plusieurs fonctionnalités :
 
 1. Intégration d'AWS Lambda Powertools pour l'observabilité
 2. Collecte de métriques  
-3. Sécurité des types via `@event_parser`
+3. Validation de types avec `@event_parser`
 
 ### Observabilité avec AWS Lambda Powertools
 
@@ -104,19 +103,19 @@ def lambda_handler(event: EventBridgeModel, context: LambdaContext):
     logger.info("Received event", extra={"event": event.model_dump()})
 ```
 
-:::tip
-Il est recommandé de définir un identifiant de corrélation pour chaque requête unique afin de faciliter le débogage et la surveillance. Consultez la documentation du [logger AWS Powertools](https://docs.powertools.aws.dev/lambda/python/2.22.0/core/logger/#setting-a-correlation-id) pour les bonnes pratiques.
+:::astuce
+Il est recommandé de définir un identifiant de corrélation pour chaque requête unique afin de faciliter le débogage et le monitoring. Consultez la documentation [aws powertools logger](https://docs.powertools.aws.dev/lambda/python/2.22.0/core/logger/#setting-a-correlation-id) pour les bonnes pratiques.
 :::
 
 Le logger inclut automatiquement :
 
 - Les requêtes d'événements
 - Les informations de contexte Lambda  
-- Les indicateurs de démarrage à froid
+- Les indicateurs de cold start
 
-#### Traçage
+#### Tracing
 
-Le traçage AWS X-Ray est configuré automatiquement. Vous pouvez ajouter des sous-segments personnalisés :
+Le tracing AWS X-Ray est configuré automatiquement. Vous pouvez ajouter des sous-segments personnalisés :
 
 ```python
 def lambda_handler(event: EventBridgeModel, context: LambdaContext):
@@ -138,27 +137,27 @@ def lambda_handler(event: EventBridgeModel, context: LambdaContext):
 
 Les métriques par défaut incluent :
 
-- Nombre d'invocations
-- Métriques de succès/échec  
-- Métriques de démarrage à froid
+- Nombre d'invocations  
+- Taux de succès/échec  
+- Métriques de cold start
 
-#### Sécurité des types
+#### Validation de types
 
-Si vous avez choisi une `eventSource` lors de la génération, votre fonction est instrumentée avec [`@event_parser` d'AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/utilities/parser/). Exemple :
+Si vous avez choisi une `eventSource` lors de la génération, votre fonction utilise [`@event_parser` d'AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/utilities/parser/). Exemple :
 
 ```python {3}
 @event_parser(model=EventBridgeModel)
 def lambda_handler(event: EventBridgeModel, context: LambdaContext):
-    event.detail_type # <- sécurité des types avec autocomplétion de l'IDE
+    event.detail_type # <- typage fort avec autocomplétion IDE
 ```
 
-Cela permet de définir des modèles de données avec [Pydantic](https://docs.pydantic.dev/latest/), similaire à <Link path="guides/fastapi">FastAPI</Link>.
+Ceci permet de définir des modèles de données avec [Pydantic](https://docs.pydantic.dev/latest/), similaire à <Link path="guides/fastapi">Fast API</Link>.
 
-:::tip
-Pour des données personnalisées imbriquées (ex: flux DynamoDB ou événement EventBridge), utilisez [Envelopes](https://docs.powertools.aws.dev/lambda/python/latest/utilities/parser/#envelopes) pour assurer la sécurité des types.
+:::astuce
+Pour des données personnalisées dans un événement (ex: flux DynamoDB ou événement EventBridge), utilisez [Envelopes](https://docs.powertools.aws.dev/lambda/python/latest/utilities/parser/#envelopes) pour assurer le typage.
 :::
 
-Pour ignorer le typage, sélectionnez `Any` comme `eventSource`.
+Si vous ne souhaitez pas typer votre événement, sélectionnez `Any` comme `eventSource`.
 
 ## Déploiement de votre fonction
 
@@ -177,18 +176,18 @@ export class ExampleStack extends Stack {
 
 Ceci configure :
 
-1. Fonction AWS Lambda
-2. Groupe de logs CloudWatch  
-3. Configuration du traçage X-Ray
-4. Namespace de métriques CloudWatch
+1. La fonction AWS Lambda  
+2. Le groupe de logs CloudWatch  
+3. La configuration du tracing X-Ray  
+4. L'espace de noms des métriques CloudWatch
 
-La fonction peut ensuite être utilisée comme cible pour toute [source d'événement Lambda](https://docs.powertools.aws.dev/lambda/python/latest/utilities/parser/) :
+La fonction peut ensuite être utilisée comme cible pour n'importe quelle [source d'événement lambda](https://docs.powertools.aws.dev/lambda/python/latest/utilities/parser/).
 
-:::note
+:::remarque
 Assurez-vous que la source d'événement correspond à l'option `eventSource` sélectionnée pour un traitement correct.
 :::
 
-L'exemple suivant montre comment invoquer votre fonction selon un planning avec EventBridge :
+L'exemple suivant montre comment invoquer votre fonction selon un planning avec Event Bridge :
 
 ```ts
 import { EventPattern, Rule, Schedule } from 'aws-cdk-lib/aws-events';
@@ -200,7 +199,7 @@ export class ExampleStack extends Stack {
     // Ajoute la fonction à votre stack
     const fn = new MyProjectMyFunction(this, 'MyFunction');
 
-    // Ajoute la fonction à une règle EventBridge
+    // Configure une règle EventBridge
     const eventRule = new Rule(this, 'MyFunctionScheduleRule', {
       schedule: Schedule.cron({ minute: '15' }),
       targets: [new LambdaFunction(fn)],
