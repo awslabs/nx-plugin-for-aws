@@ -100,6 +100,28 @@ pnpm nx g @aws/nx-plugin:ts#infra
 - [Build a Dungeon Adventure Game](https://awslabs.github.io/nx-plugin-for-aws/get_started/tutorials/dungeon-game/overview/) to get an in-depth guided tutorial on how to use the @aws/nx-plugin.
 - [Add @aws/nx-plugin to your existing project](https://awslabs.github.io/nx-plugin-for-aws/get_started/tutorials/existing-project/)
 
+## MCP Server Installation and Setup
+
+This package additionally provides an MCP server to help AI assistants use the Nx Plugin for AWS.
+
+1. Ensure you have `node` and `npm` installed ([see here](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm))
+2. Add the server to your MCP client configuration
+
+Example configuration for Amazon Q CLI MCP (`~/.aws/amazonq/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "aws-nx-mcp": {
+      "command": "npx",
+      "args": ["-p", "@aws/nx-plugin", "aws-nx-mcp"]
+    }
+  }
+}
+```
+
+If you have issues such as `ENOENT npx`, replace the command with `/full/path/to/npx` (use `which npx` to find this).
+
 ## Documentation Translation
 
 The project supports automatic translation of documentation using AWS Bedrock's Deepseek & Haiku 3.5 models. Documentation is translated from English to multiple languages (currently Japanese, with support for French, Spanish, German, Chinese, and Korean).
