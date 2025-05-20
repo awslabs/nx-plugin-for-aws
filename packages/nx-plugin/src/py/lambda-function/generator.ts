@@ -259,9 +259,9 @@ export const lambdaFunctionProjectGenerator = async (
       }
       config.targets.build.dependsOn = [
         ...(config.targets.build.dependsOn ?? []).filter(
-          (t) => t !== `${fullyQualifiedFunctionName}:build`,
+          (t) => t !== `${projectConfig.name}:build`,
         ),
-        `${fullyQualifiedFunctionName}:build`,
+        `${projectConfig.name}:build`,
       ];
       return config;
     },
