@@ -41,7 +41,7 @@ ${TOOL_SELECTION_GUIDE}
 ${PACKAGE_MANAGERS.map((pm) => buildNxCommand('<options>', pm)).join(' - \n')}
 - Each project in your workspace has a file named \`project.json\` which contains important project information such as its name, and defines the "targets" which can be run for that project, for example building or testing the project
 - Use the command \`nx reset\` to reset the Nx daemon when unexpected issues arise
-- After adding dependencies between projects, use \`nx sync\` to ensure project references are set up correctly
+- After adding dependencies between TypeScript projects, use \`nx sync\` to ensure project references are set up correctly
 
 ## General Instructions
 
@@ -62,8 +62,11 @@ ${PACKAGE_MANAGERS.map((pm) => buildNxCommand('<options>', pm)).join(' - \n')}
 
 ## Best Practices
 
+- After running a generator, use the \`nx show projects\` command to check which projects have been added (if any)
+- Carefully examine the files that have been generated and always refer back to the generator guide when working in a generated project
 - Generate all projects into the \`packages/\` directory
 - After making changes to your projects, fix linting issues, then run a full build
+- When it's time to start testing a project, suggest to the user that infrastructure is deployed to AWS. For websites, if a runtime-config.json is needed, use the load:runtime-config target after a deployment to point a local website at a sandbox stack.
 
 ## Language Specific Guidance
 

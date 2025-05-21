@@ -11,6 +11,7 @@ import {
   addGeneralGuidanceTool,
   TOOL_SELECTION_GUIDE,
 } from './tools/general-guidance';
+import PackageJson from '../../package.json';
 
 /**
  * Create the MCP Server
@@ -21,7 +22,7 @@ export const createServer = () => {
   const server = new McpServer(
     {
       name: 'nx-plugin-for-aws',
-      version: '1.0.0',
+      version: PackageJson.version,
     },
     {
       instructions: `# Nx Plugin for AWS MCP Server
