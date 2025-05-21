@@ -228,7 +228,7 @@ describe('lambda-handler project generator', () => {
     );
 
     expect(sharedConstructsConfig.targets.build.dependsOn).toContain(
-      'proj.test_function:build',
+      'test-project:build',
     );
   });
 
