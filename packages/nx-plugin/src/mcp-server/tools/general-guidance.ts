@@ -21,11 +21,14 @@ export const addGeneralGuidanceTool = (
   server: McpServer,
   generators: NxGeneratorInfo[],
 ) => {
-  server.tool('general-guidance', async () => ({
-    content: [
-      {
-        type: 'text',
-        text: `# Nx Plugin for AWS Guidance
+  server.tool(
+    'general-guidance',
+    'Tool for guidance and best practices for working with Nx and the Nx Plugin for AWS',
+    async () => ({
+      content: [
+        {
+          type: 'text',
+          text: `# Nx Plugin for AWS Guidance
 
 ${TOOL_SELECTION_GUIDE}
 
@@ -75,7 +78,8 @@ Please refer to the below documentation for important details regarding working 
 ${await fetchGuidePages(['typescript-project', 'python-project'], generators)}
 
     `,
-      },
-    ],
-  }));
+        },
+      ],
+    }),
+  );
 };

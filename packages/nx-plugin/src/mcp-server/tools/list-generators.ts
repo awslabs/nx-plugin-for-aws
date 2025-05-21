@@ -16,6 +16,7 @@ export const addListGeneratorsTool = (
 ) => {
   server.tool(
     'list-generators',
+    'Tool to discover the available generators and how to run them.',
     { packageManager: PackageManagerSchema },
     ({ packageManager }) => ({
       content: [

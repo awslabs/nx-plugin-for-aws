@@ -20,6 +20,7 @@ export const addGeneratorGuideTool = (
 ) => {
   server.tool(
     'generator-guide',
+    'Tool to retrieve detailed information about a specific generator.',
     {
       packageManager: PackageManagerSchema,
       generator: z.custom<string>((v) =>

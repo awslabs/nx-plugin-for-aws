@@ -12,6 +12,7 @@ import { PackageManagerSchema } from '../schema';
 export const addCreateWorkspaceCommandTool = (server: McpServer) => {
   server.tool(
     'create-workspace-command',
+    'Tool to discover how to create a workspace to start a new project.',
     { workspaceName: z.string(), packageManager: PackageManagerSchema },
     ({ workspaceName, packageManager }) => ({
       content: [

@@ -57,6 +57,13 @@ describe('MCP Server', () => {
     expect(toolNames).toContain('generator-guide');
   });
 
+  it('should have a description for every tool', async () => {
+    // Amazon Q CLI fails to load tools unless each one has a description
+    for (const tool of (await client.listTools()).tools ?? []) {
+      expect(tool.description).toBeDefined();
+    }
+  });
+
   it('should execute create-workspace-command tool', async () => {
     // Call the tool using client
     const result = await client.callTool({
