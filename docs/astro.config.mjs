@@ -217,6 +217,19 @@ export default defineConfig({
                 },
               ],
             },
+            {
+              label: 'Building with AI',
+              link: '/get_started/building-with-ai',
+              translations: {
+                jp: 'AIでの構築',
+                ko: 'AI로 구축하기',
+                fr: "Construire avec l'IA",
+                it: "Costruire con l'IA",
+                es: 'Construyendo con IA',
+                pt: 'Construindo com IA',
+                zh: '使用 AI 构建',
+              },
+            },
           ],
         },
         {

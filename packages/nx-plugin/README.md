@@ -96,9 +96,9 @@ pnpm nx g @aws/nx-plugin:ts#infra
 
 ### Additional resources
 
-- Use [Quick Start](https://awslabs.github.io/nx-plugin-for-aws/get_started/quick-start/) to get a taste of @aws/nx-plugin.
-- [Build a Dungeon Adventure Game](https://awslabs.github.io/nx-plugin-for-aws/get_started/tutorials/dungeon-game/overview/) to get an in-depth guided tutorial on how to use the @aws/nx-plugin.
-- [Add @aws/nx-plugin to your existing project](https://awslabs.github.io/nx-plugin-for-aws/get_started/tutorials/existing-project/)
+- Use [Quick Start](https://awslabs.github.io/nx-plugin-for-aws/en/get_started/quick-start/) to get a taste of @aws/nx-plugin.
+- [Build a Dungeon Adventure Game](https://awslabs.github.io/nx-plugin-for-aws/en/get_started/tutorials/dungeon-game/overview/) to get an in-depth guided tutorial on how to use the @aws/nx-plugin.
+- [Add @aws/nx-plugin to your existing project](https://awslabs.github.io/nx-plugin-for-aws/en/get_started/tutorials/existing-project/)
 
 ## MCP Server Installation and Setup
 
@@ -114,13 +114,15 @@ Example configuration for Amazon Q CLI MCP (`~/.aws/amazonq/mcp.json`):
   "mcpServers": {
     "aws-nx-mcp": {
       "command": "npx",
-      "args": ["-p", "@aws/nx-plugin", "aws-nx-mcp"]
+      "args": ["-y", "-p", "@aws/nx-plugin", "aws-nx-mcp"]
     }
   }
 }
 ```
 
 If you have issues such as `ENOENT npx`, replace the command with `/full/path/to/npx` (use `which npx` to find this).
+
+For more details, [take a look at the guide here](https://awslabs.github.io/nx-plugin-for-aws/en/get_started/building-with-ai/)
 
 ## Documentation Translation
 
