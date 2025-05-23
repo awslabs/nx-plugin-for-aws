@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export interface OpenApiMetadataSchema {
+export interface OpenApiTsMetadataGeneratorSchema {
   openApiSpecPath: string;
   outputPath: string;
 }

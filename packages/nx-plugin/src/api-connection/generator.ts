@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { joinPathFragments, ProjectConfiguration, Tree } from '@nx/devkit';
-import { ApiConnectionSchema } from './schema';
+import { ApiConnectionGeneratorSchema } from './schema';
 import trpcReactGenerator from '../trpc/react/generator';
 import { hasExportDeclaration } from '../utils/ast';
 import { readToml } from '../utils/toml';
@@ -55,7 +55,7 @@ const CONNECTION_GENERATORS = {
     }),
 } satisfies Record<
   ConnectionKey,
-  (tree: Tree, options: ApiConnectionSchema) => Promise<any>
+  (tree: Tree, options: ApiConnectionGeneratorSchema) => Promise<any>
 >;
 
 /**
@@ -63,7 +63,7 @@ const CONNECTION_GENERATORS = {
  */
 export const apiConnectionGenerator = async (
   tree: Tree,
-  options: ApiConnectionSchema,
+  options: ApiConnectionGeneratorSchema,
 ) => {
   const sourceType = determineProjectType(tree, options.sourceProject);
   const targetType = determineProjectType(tree, options.targetProject);

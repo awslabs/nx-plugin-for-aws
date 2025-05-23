@@ -3,15 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { Tree, readProjectConfiguration } from '@nx/devkit';
-import { INFRA_APP_GENERATOR_INFO, infraGenerator } from './generator';
-import { InfraGeneratorSchema } from './schema';
+import { INFRA_APP_GENERATOR_INFO, tsInfraGenerator } from './generator';
+import { TsInfraGeneratorSchema } from './schema';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
 
 describe('infra generator', () => {
   let tree: Tree;
 
-  const options: InfraGeneratorSchema = {
+  const options: TsInfraGeneratorSchema = {
     name: 'test',
     ruleSet: 'aws_prototyping',
     directory: 'packages',
@@ -23,7 +23,7 @@ describe('infra generator', () => {
   });
 
   it('should generate files with correct content', async () => {
-    await infraGenerator(tree, options);
+    await tsInfraGenerator(tree, options);
     const config = readProjectConfiguration(tree, '@proj/test');
     expect(config.projectType).toEqual('application');
     // Verify files are generated
@@ -55,7 +55,7 @@ describe('infra generator', () => {
   });
 
   it('should configure project.json with correct targets', async () => {
-    await infraGenerator(tree, options);
+    await tsInfraGenerator(tree, options);
     const config = readProjectConfiguration(tree, '@proj/test');
     // Snapshot entire project configuration
     expect(config).toMatchSnapshot('project-configuration');
@@ -123,7 +123,7 @@ describe('infra generator', () => {
   });
 
   it('should add required dependencies to package.json', async () => {
-    await infraGenerator(tree, options);
+    await tsInfraGenerator(tree, options);
     const packageJson = JSON.parse(tree.read('package.json').toString());
     // Snapshot entire package.json
     expect(packageJson).toMatchSnapshot('package-json');
@@ -146,7 +146,7 @@ describe('infra generator', () => {
   });
 
   it('should generate valid CDK application code', async () => {
-    await infraGenerator(tree, options);
+    await tsInfraGenerator(tree, options);
     // Test main.ts content
     const mainTs = tree.read('packages/test/src/main.ts').toString();
     expect(mainTs).toMatchSnapshot('main-ts-content');
@@ -161,13 +161,13 @@ describe('infra generator', () => {
   });
 
   it('should handle custom project names correctly', async () => {
-    const customOptions: InfraGeneratorSchema = {
+    const customOptions: TsInfraGeneratorSchema = {
       name: 'custom-infra',
       directory: 'packages',
       ruleSet: 'aws_prototyping',
       skipInstall: true,
     };
-    await infraGenerator(tree, customOptions);
+    await tsInfraGenerator(tree, customOptions);
     // Snapshot project configuration with custom name
     const config = readProjectConfiguration(tree, '@proj/custom-infra');
     expect(config).toMatchSnapshot('custom-name-project-config');
@@ -190,7 +190,7 @@ describe('infra generator', () => {
 
   it('should generate consistent file content across runs', async () => {
     // First run
-    await infraGenerator(tree, options);
+    await tsInfraGenerator(tree, options);
     const firstRunFiles = {
       'cdk.json': tree.read('packages/test/cdk.json').toString(),
       'src/main.ts': tree.read('packages/test/src/main.ts').toString(),
@@ -200,7 +200,7 @@ describe('infra generator', () => {
     };
     // Reset tree and run again
     tree = createTreeUsingTsSolutionSetup();
-    await infraGenerator(tree, options);
+    await tsInfraGenerator(tree, options);
     const secondRunFiles = {
       'cdk.json': tree.read('packages/test/cdk.json').toString(),
       'src/main.ts': tree.read('packages/test/src/main.ts').toString(),
@@ -215,7 +215,7 @@ describe('infra generator', () => {
 
   it('should add generator metric to app.ts', async () => {
     // Call the generator function
-    await infraGenerator(tree, options);
+    await tsInfraGenerator(tree, options);
 
     // Verify the metric was added to app.ts
     expectHasMetricTags(tree, INFRA_APP_GENERATOR_INFO.metric);

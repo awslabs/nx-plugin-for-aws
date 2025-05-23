@@ -264,6 +264,8 @@ if (tree.exists('path/to/file.ts')) {
 
 #### Generating Files from Templates
 
+You can generate files with the `generateFiles` utility from `@nx/devkit`. This allows you to define templates in [EJS](https://ejs.co/) syntax, and substitute variables.
+
 ```typescript
 import { generateFiles, joinPathFragments } from '@nx/devkit';
 
@@ -284,48 +286,19 @@ generateFiles(
 
 #### TypeScript AST (Abstract Syntax Tree) Manipulation
 
-We recommend installing [TSQuery](https://github.com/phenomnomnominal/tsquery) to help with AST manipulation.
+You can use the `tsAstReplace` method exposed by the Nx Plugin for AWS to replace parts of a TypeScript abstract syntax tree.
 
 ```typescript
-import { tsquery } from '@phenomnomnominal/tsquery';
+import { tsAstReplace } from '@aws/nx-plugin/sdk/utils/ast';
 import * as ts from 'typescript';
 
 // Example: Increment version number in a file
-
-// Parse the file content into a TypeScript AST
-const sourceFile = tsquery.ast(tree.read('path/to/version.ts', 'utf-8'));
-
-// Find nodes matching the selector
-const nodes = tsquery.query(
-  sourceFile,
+tsAstReplace(
+  tree,
+  'path/to/version.ts',
   'VariableDeclaration:has(Identifier[name="VERSION"]) NumericLiteral',
-);
-
-if (nodes.length > 0) {
-  // Get the numeric literal node
-  const numericNode = nodes[0] as ts.NumericLiteral;
-
-  // Get the current version number and increment it
-  const currentVersion = Number(numericNode.text);
-  const newVersion = currentVersion + 1;
-
-  // Replace the node in the AST
-  const result = tsquery.replace(
-    sourceFile,
-    'VariableDeclaration:has(Identifier[name="VERSION"]) NumericLiteral',
-    () => ts.factory.createNumericLiteral(newVersion),
-  );
-
-  // Write the updated content back to the tree
-  tree.write(
-    'path/to/version.ts',
-    ts
-      .createPrinter({
-        newLine: ts.NewLineKind.LineFeed,
-      })
-      .printNode(ts.EmitHint.Unspecified, result, sourceFile),
-  );
-}
+  (node: ts.NumericLiteral) =>
+    ts.factory.createNumericLiteral(Number(node.text) + 1));
 ```
 
 :::tip
@@ -365,10 +338,10 @@ return () => {
 #### Formatting Generated Files
 
 ```typescript
-import { formatFiles } from '@nx/devkit';
+import { formatFilesInSubtree } from '@aws/nx-plugin/sdk/utils/format';
 
 // Format all files that were modified
-await formatFiles(tree);
+await formatFilesInSubtree(tree, 'optional/path/to/format');
 ```
 
 #### Reading and Updating JSON Files
@@ -388,6 +361,68 @@ updateJson(tree, 'tsconfig.json', (json) => {
   return json;
 });
 ```
+
+#### Extending a Generator from the Nx Plugin for AWS
+
+You can import generators from the Nx Plugin for AWS, and extend or compose them as you wish, for example you might wish to create a generator which builds on top of a TypeScript project:
+
+```ts
+import { tsProjectGenerator } from '@aws/nx-plugin/sdk/ts';
+
+export const myGenerator = async (tree: Tree, schema: MyGeneratorSchema) => {
+  const callback = await tsProjectGenerator(tree, { ... });
+
+  // Extend the TypeScript project generator here
+
+  // Return the callback to ensure dependencies are installed.
+  // You can wrap the callback if you wish to perform additional operations in the generator callback.
+  return callback;
+};
+```
+
+#### OpenAPI Generators
+
+You can use and extend the generators we use for TypeScript clients and hooks in a similar way to the above:
+
+```ts
+import { openApiTsClientGenerator } from '@aws/nx-plugin/sdk/open-api';
+
+export const myGenerator = async (tree: Tree, schema: MyGeneratorSchema) => {
+  await openApiTsClientGenerator(tree, { ... });
+
+  // Add additional files here
+};
+```
+
+We also expose a method which allows you to build a data structure that can be used to iterate over operations in an OpenAPI specification and therefore instrument your own code generation, for example:
+
+```ts
+import { buildOpenApiCodeGenerationData } from '@aws/nx-plugin/sdk/open-api.js';
+
+export const myGenerator = async (tree: Tree, schema: MyGeneratorSchema) => {
+  const data = await buildOpenApiCodeGenerationData(tree, 'path/to/spec.json');
+
+  generateFiles(
+    tree,
+    joinPathFragments(__dirname, 'files'), // Template directory
+    'path/to/output', // Output directory
+    data,
+  );
+};
+```
+
+Which then allows you to write templates such as:
+
+```ejs
+// files/my-operations.ts.template
+export const myOperationNames = [
+<%_ allOperations.forEach((op) => { _%>
+  '<%- op.name %>',
+<%_ }); _%>
+];
+```
+
+Refer to the [codebase on GitHub](https://github.com/awslabs/nx-plugin-for-aws/) for more complex example templates.
 
 ### Running Your Generator
 

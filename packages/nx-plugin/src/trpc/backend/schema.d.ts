@@ -4,7 +4,7 @@
  */
 import { Linter } from '@nx/eslint';
 
-export interface TrpcBackendGeneratorSchema {
+export interface TsTrpcApiGeneratorSchema {
   apiName: string;
   computeType: 'ServerlessApiGatewayRestApi' | 'ServerlessApiGatewayHttpApi';
   directory?: TsLibGeneratorSchema['directory'];

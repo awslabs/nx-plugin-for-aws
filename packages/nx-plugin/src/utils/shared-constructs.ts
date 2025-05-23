@@ -11,7 +11,7 @@ import {
   Tree,
 } from '@nx/devkit';
 import { getNpmScopePrefix, toScopeAlias } from './npm-scope';
-import tsLibGenerator from '../ts/lib/generator';
+import tsProjectGenerator from '../ts/lib/generator';
 import { withVersions } from './versions';
 import { formatFilesInSubtree } from './format';
 import {
@@ -31,7 +31,7 @@ export async function sharedConstructsGenerator(tree: Tree) {
       joinPathFragments(PACKAGES_DIR, TYPE_DEFINITIONS_DIR, 'project.json'),
     )
   ) {
-    await tsLibGenerator(tree, {
+    await tsProjectGenerator(tree, {
       name: TYPE_DEFINITIONS_NAME,
       directory: PACKAGES_DIR,
       subDirectory: TYPE_DEFINITIONS_DIR,
@@ -68,7 +68,7 @@ export async function sharedConstructsGenerator(tree: Tree) {
       joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'project.json'),
     )
   ) {
-    await tsLibGenerator(tree, {
+    await tsProjectGenerator(tree, {
       name: SHARED_CONSTRUCTS_NAME,
       directory: PACKAGES_DIR,
       subDirectory: SHARED_CONSTRUCTS_DIR,

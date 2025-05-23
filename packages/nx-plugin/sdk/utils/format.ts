@@ -3,7 +3,4 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export interface OpenApiTsClientGeneratorSchema {
-  openApiSpecPath: string;
-  outputPath: string;
-}
+export { formatFilesInSubtree } from '../../src/utils/format';

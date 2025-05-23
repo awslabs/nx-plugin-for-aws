@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { readProjectConfiguration, Tree } from '@nx/devkit';
-import { TRPC_BACKEND_GENERATOR_INFO, trpcBackendGenerator } from './generator';
+import { TRPC_BACKEND_GENERATOR_INFO, tsTrpcApiGenerator } from './generator';
 import {
   createTreeUsingTsSolutionSetup,
   snapshotTreeDir,
@@ -18,7 +18,7 @@ describe('trpc backend generator', () => {
   });
 
   it('should generate backend and schema projects', async () => {
-    await trpcBackendGenerator(tree, {
+    await tsTrpcApiGenerator(tree, {
       apiName: 'TestApi',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
@@ -39,7 +39,7 @@ describe('trpc backend generator', () => {
   });
 
   it('should set up project configuration correctly', async () => {
-    await trpcBackendGenerator(tree, {
+    await tsTrpcApiGenerator(tree, {
       apiName: 'TestApi',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
@@ -55,7 +55,7 @@ describe('trpc backend generator', () => {
   });
 
   it('should add required dependencies', async () => {
-    await trpcBackendGenerator(tree, {
+    await tsTrpcApiGenerator(tree, {
       apiName: 'TestApi',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
@@ -80,7 +80,7 @@ describe('trpc backend generator', () => {
   });
 
   it('should set up shared constructs for http', async () => {
-    await trpcBackendGenerator(tree, {
+    await tsTrpcApiGenerator(tree, {
       apiName: 'TestApi',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
@@ -121,7 +121,7 @@ describe('trpc backend generator', () => {
   });
 
   it('should set up shared constructs for rest', async () => {
-    await trpcBackendGenerator(tree, {
+    await tsTrpcApiGenerator(tree, {
       apiName: 'TestApi',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayRestApi',
@@ -162,7 +162,7 @@ describe('trpc backend generator', () => {
   });
 
   it('should add a task for starting a local server', async () => {
-    await trpcBackendGenerator(tree, {
+    await tsTrpcApiGenerator(tree, {
       apiName: 'TestApi',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
@@ -180,7 +180,7 @@ describe('trpc backend generator', () => {
 
   it('should add generator metric to app.ts', async () => {
     // Call the generator function
-    await trpcBackendGenerator(tree, {
+    await tsTrpcApiGenerator(tree, {
       apiName: 'TestApi',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
@@ -191,7 +191,7 @@ describe('trpc backend generator', () => {
   });
 
   it('should include CORS headers in router.ts when using REST API', async () => {
-    await trpcBackendGenerator(tree, {
+    await tsTrpcApiGenerator(tree, {
       apiName: 'TestApi',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayRestApi',

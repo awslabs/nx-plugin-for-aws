@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { generateFiles, Tree } from '@nx/devkit';
-import { OpenApiClientSchema } from './schema';
+import { OpenApiTsClientGeneratorSchema } from './schema';
 import { parseOpenApiSpec } from '../utils/parse';
 import { buildOpenApiCodeGenData } from '../utils/codegen-data';
 import * as path from 'path';
@@ -15,15 +15,27 @@ import { formatFilesInSubtree } from '../../utils/format';
  */
 export const openApiTsClientGenerator = async (
   tree: Tree,
-  options: OpenApiClientSchema,
+  options: OpenApiTsClientGeneratorSchema,
 ) => {
-  const spec = await parseOpenApiSpec(tree, options.openApiSpecPath);
-
-  const data = await buildOpenApiCodeGenData(spec);
+  const data = await buildOpenApiCodeGenerationData(
+    tree,
+    options.openApiSpecPath,
+  );
 
   generateOpenApiTsClient(tree, data, options.outputPath);
 
   await formatFilesInSubtree(tree);
+};
+
+/**
+ * Build a data structure which can be used to generate code from OpenAPI
+ */
+export const buildOpenApiCodeGenerationData = async (
+  tree: Tree,
+  specPath: string,
+) => {
+  const spec = await parseOpenApiSpec(tree, specPath);
+  return await buildOpenApiCodeGenData(spec);
 };
 
 /**

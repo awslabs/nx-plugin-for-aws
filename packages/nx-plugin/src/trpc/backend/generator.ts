@@ -13,14 +13,14 @@ import {
   Tree,
   updateJson,
 } from '@nx/devkit';
-import { TrpcBackendGeneratorSchema } from './schema';
+import { TsTrpcApiGeneratorSchema } from './schema';
 import kebabCase from 'lodash.kebabcase';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
 } from '../../utils/shared-constructs-constants';
-import tsLibGenerator from '../../ts/lib/generator';
+import tsProjectGenerator from '../../ts/lib/generator';
 import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
 import { withVersions } from '../../utils/versions';
 import { toClassName } from '../../utils/names';
@@ -33,9 +33,9 @@ import { addApiGatewayConstruct } from '../../utils/api-constructs/api-construct
 export const TRPC_BACKEND_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
 
-export async function trpcBackendGenerator(
+export async function tsTrpcApiGenerator(
   tree: Tree,
-  options: TrpcBackendGeneratorSchema,
+  options: TsTrpcApiGeneratorSchema,
 ) {
   await sharedConstructsGenerator(tree);
 
@@ -64,12 +64,12 @@ export async function trpcBackendGenerator(
     pkgMgrCmd: getPackageManagerCommand().exec,
     ...options,
   };
-  await tsLibGenerator(tree, {
+  await tsProjectGenerator(tree, {
     name: backendName,
     directory: projectRoot,
     subDirectory: 'backend',
   });
-  await tsLibGenerator(tree, {
+  await tsProjectGenerator(tree, {
     name: schemaName,
     directory: projectRoot,
     subDirectory: 'schema',
@@ -185,4 +185,4 @@ export async function trpcBackendGenerator(
     installPackagesTask(tree);
   };
 }
-export default trpcBackendGenerator;
+export default tsTrpcApiGenerator;

@@ -15,8 +15,8 @@ import {
   getPackageManagerCommand,
   installPackagesTask,
 } from '@nx/devkit';
-import { InfraGeneratorSchema } from './schema';
-import tsLibGenerator, { getTsLibDetails } from '../../ts/lib/generator';
+import { TsInfraGeneratorSchema } from './schema';
+import tsProjectGenerator, { getTsLibDetails } from '../../ts/lib/generator';
 import { withVersions } from '../../utils/versions';
 import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
@@ -35,12 +35,12 @@ import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 export const INFRA_APP_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
 
-export async function infraGenerator(
+export async function tsInfraGenerator(
   tree: Tree,
-  schema: InfraGeneratorSchema,
+  schema: TsInfraGeneratorSchema,
 ): Promise<GeneratorCallback> {
   const lib = getTsLibDetails(tree, schema);
-  await tsLibGenerator(tree, schema);
+  await tsProjectGenerator(tree, schema);
 
   await sharedConstructsGenerator(tree);
 
@@ -196,4 +196,4 @@ export async function infraGenerator(
     installPackagesTask(tree);
   };
 }
-export default infraGenerator;
+export default tsInfraGenerator;

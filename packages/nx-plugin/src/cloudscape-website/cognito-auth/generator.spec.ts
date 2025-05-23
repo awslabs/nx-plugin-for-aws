@@ -3,8 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { Tree, updateJson } from '@nx/devkit';
-import { COGNITO_AUTH_GENERATOR_INFO, cognitoAuthGenerator } from './generator';
-import { CognitoAuthGeneratorSchema } from './schema';
+import {
+  COGNITO_AUTH_GENERATOR_INFO,
+  tsCloudScapeWebsiteAuthGenerator,
+} from './generator';
+import { TsCloudScapeWebsiteAuthGeneratorSchema } from './schema';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
@@ -12,7 +15,7 @@ import { expectHasMetricTags } from '../../utils/metrics.spec';
 describe('cognito-auth generator', () => {
   let tree: Tree;
 
-  const options: CognitoAuthGeneratorSchema = {
+  const options: TsCloudScapeWebsiteAuthGeneratorSchema = {
     project: 'test-project',
     cognitoDomain: 'test',
     allowSignup: true,
@@ -48,7 +51,7 @@ describe('cognito-auth generator', () => {
     `,
     );
 
-    await cognitoAuthGenerator(tree, options);
+    await tsCloudScapeWebsiteAuthGenerator(tree, options);
 
     // Verify component files are generated
     expect(
@@ -97,7 +100,7 @@ describe('cognito-auth generator', () => {
     `,
     );
 
-    await cognitoAuthGenerator(tree, options);
+    await tsCloudScapeWebsiteAuthGenerator(tree, options);
 
     const mainTsxContent = tree
       .read('packages/test-project/src/main.tsx')
@@ -126,13 +129,13 @@ describe('cognito-auth generator', () => {
     `,
     );
     await expect(
-      async () => await cognitoAuthGenerator(tree, options),
+      async () => await tsCloudScapeWebsiteAuthGenerator(tree, options),
     ).rejects.toThrowError();
   });
 
   it('should handle missing main.tsx', async () => {
     await expect(
-      async () => await cognitoAuthGenerator(tree, options),
+      async () => await tsCloudScapeWebsiteAuthGenerator(tree, options),
     ).rejects.toThrowError();
   });
 
@@ -158,7 +161,7 @@ describe('cognito-auth generator', () => {
       'packages/common/constructs/src/index.ts',
       'export const dummy = true;',
     );
-    await cognitoAuthGenerator(tree, options);
+    await tsCloudScapeWebsiteAuthGenerator(tree, options);
     const indexContent = tree
       .read('packages/common/constructs/src/core/index.ts')
       .toString();
@@ -185,7 +188,7 @@ describe('cognito-auth generator', () => {
       }
     `,
     );
-    await cognitoAuthGenerator(tree, options);
+    await tsCloudScapeWebsiteAuthGenerator(tree, options);
     // Read package.json
     const packageJson = JSON.parse(tree.read('package.json').toString());
     // Verify dependencies are added
@@ -216,10 +219,10 @@ describe('cognito-auth generator', () => {
     `,
     );
     // First run to create files
-    await cognitoAuthGenerator(tree, options);
+    await tsCloudScapeWebsiteAuthGenerator(tree, options);
     // Run generator again
     await expect(
-      async () => await cognitoAuthGenerator(tree, options),
+      async () => await tsCloudScapeWebsiteAuthGenerator(tree, options),
     ).rejects.toThrowErrorMatchingSnapshot();
   });
 
@@ -399,7 +402,7 @@ export default AppLayout;
     `,
     );
 
-    await cognitoAuthGenerator(tree, options);
+    await tsCloudScapeWebsiteAuthGenerator(tree, options);
 
     const appLayoutContent = tree
       .read('packages/test-project/src/components/AppLayout/index.tsx')
@@ -465,7 +468,7 @@ export default AppLayout;
       }),
     );
 
-    await cognitoAuthGenerator(tree, {
+    await tsCloudScapeWebsiteAuthGenerator(tree, {
       ...options,
       project: 'test-project', // unqualified
     });
@@ -493,7 +496,7 @@ export default AppLayout;
     );
 
     // Call the generator function
-    await cognitoAuthGenerator(tree, options);
+    await tsCloudScapeWebsiteAuthGenerator(tree, options);
 
     // Verify the metric was added to app.ts
     expectHasMetricTags(tree, COGNITO_AUTH_GENERATOR_INFO.metric);

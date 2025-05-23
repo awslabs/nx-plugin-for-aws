@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export interface ApiConnectionSchema {
+export interface ApiConnectionGeneratorSchema {
   sourceProject: string;
   targetProject: string;
   auth: 'IAM' | 'None';

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export interface NxGeneratorGeneratorSchema {
+export interface TsNxGeneratorGeneratorSchema {
   pluginProject: string;
   name: string;
   directory?: string;

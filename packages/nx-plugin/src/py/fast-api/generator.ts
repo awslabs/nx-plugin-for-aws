@@ -14,7 +14,7 @@ import {
   updateJson,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { FastApiProjectGeneratorSchema } from './schema';
+import { PyFastApiProjectGeneratorSchema } from './schema';
 import { UVProvider } from '@nxlv/python/src/provider/uv/provider';
 import { Logger } from '@nxlv/python/src/executors/utils/logger';
 import pyProjectGenerator, { getPyProjectDetails } from '../project/generator';
@@ -40,9 +40,9 @@ export const FAST_API_GENERATOR_INFO: NxGeneratorInfo =
 /**
  * Generates a Python FastAPI project
  */
-export const fastApiProjectGenerator = async (
+export const pyFastApiProjectGenerator = async (
   tree: Tree,
-  schema: FastApiProjectGeneratorSchema,
+  schema: PyFastApiProjectGeneratorSchema,
 ): Promise<GeneratorCallback> => {
   await sharedConstructsGenerator(tree);
 
@@ -216,4 +216,4 @@ export const fastApiProjectGenerator = async (
     installPackagesTask(tree);
   };
 };
-export default fastApiProjectGenerator;
+export default pyFastApiProjectGenerator;

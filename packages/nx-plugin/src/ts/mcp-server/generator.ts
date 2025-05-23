@@ -17,7 +17,7 @@ import { TsMcpServerGeneratorSchema } from './schema';
 import { NxGeneratorInfo, getGeneratorInfo } from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { formatFilesInSubtree } from '../../utils/format';
-import tsLibGenerator, { getTsLibDetails } from '../lib/generator';
+import tsProjectGenerator, { getTsLibDetails } from '../lib/generator';
 import { withVersions } from '../../utils/versions';
 
 export const TS_MCP_SERVER_GENERATOR_INFO: NxGeneratorInfo =
@@ -28,7 +28,7 @@ export const tsMcpServerGenerator = async (
   options: TsMcpServerGeneratorSchema,
 ): Promise<GeneratorCallback> => {
   // Generate a TypeScript library
-  await tsLibGenerator(tree, options);
+  await tsProjectGenerator(tree, options);
 
   const { fullyQualifiedName } = getTsLibDetails(tree, options);
   const project = readProjectConfiguration(tree, fullyQualifiedName);

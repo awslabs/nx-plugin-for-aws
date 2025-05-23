@@ -16,7 +16,7 @@ import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
 } from '../../utils/shared-constructs-constants';
-import { CognitoAuthGeneratorSchema as CognitoAuthGeneratorSchema } from './schema';
+import { TsCloudScapeWebsiteAuthGeneratorSchema as TsCloudScapeWebsiteAuthGeneratorSchema } from './schema';
 import { runtimeConfigGenerator } from '../runtime-config/generator';
 import {
   ArrowFunction,
@@ -51,9 +51,9 @@ import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 export const COGNITO_AUTH_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
 
-export async function cognitoAuthGenerator(
+export async function tsCloudScapeWebsiteAuthGenerator(
   tree: Tree,
-  options: CognitoAuthGeneratorSchema,
+  options: TsCloudScapeWebsiteAuthGeneratorSchema,
 ) {
   const srcRoot = readProjectConfigurationUnqualified(
     tree,
@@ -510,4 +510,4 @@ export async function cognitoAuthGenerator(
     installPackagesTask(tree);
   };
 }
-export default cognitoAuthGenerator;
+export default tsCloudScapeWebsiteAuthGenerator;

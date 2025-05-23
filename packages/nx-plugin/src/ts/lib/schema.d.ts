@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { LibraryGeneratorSchema } from '@nx/js/src/utils/schema';
-export interface TsLibGeneratorSchema {
+export interface TsProjectGeneratorSchema {
   name: LibraryGeneratorSchema['name'];
   directory?: string;
   //   unitTestRunner?: LibraryGeneratorSchema['unitTestRunner'];

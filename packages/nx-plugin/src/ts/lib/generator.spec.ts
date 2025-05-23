@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { readNxJson, Tree } from '@nx/devkit';
-import { TS_LIB_GENERATOR_INFO, tsLibGenerator } from './generator';
+import { TS_LIB_GENERATOR_INFO, tsProjectGenerator } from './generator';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import uniqBy from 'lodash.uniqby';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
@@ -17,7 +17,7 @@ describe('ts lib generator', () => {
   });
 
   it('should generate library with default options', async () => {
-    await tsLibGenerator(tree, {
+    await tsProjectGenerator(tree, {
       name: 'test-lib',
       skipInstall: true,
     });
@@ -43,7 +43,7 @@ describe('ts lib generator', () => {
   });
 
   it('should generate library with custom directory', async () => {
-    await tsLibGenerator(tree, {
+    await tsProjectGenerator(tree, {
       name: 'test-lib',
       directory: 'libs',
       skipInstall: true,
@@ -65,7 +65,7 @@ describe('ts lib generator', () => {
   });
 
   it('should generate library with subdirectory', async () => {
-    await tsLibGenerator(tree, {
+    await tsProjectGenerator(tree, {
       name: 'test-lib',
       subDirectory: 'test-lib',
       directory: 'feature',
@@ -88,11 +88,11 @@ describe('ts lib generator', () => {
   });
 
   it('should not configure duplicate @nx/js/typescript plugin entries', async () => {
-    await tsLibGenerator(tree, {
+    await tsProjectGenerator(tree, {
       name: 'test-1',
       skipInstall: true,
     });
-    await tsLibGenerator(tree, {
+    await tsProjectGenerator(tree, {
       name: 'test-2',
       skipInstall: true,
     });
@@ -104,7 +104,7 @@ describe('ts lib generator', () => {
   });
 
   it('should configure named inputs in nx.json', async () => {
-    await tsLibGenerator(tree, {
+    await tsProjectGenerator(tree, {
       name: 'test-1',
       skipInstall: true,
     });
@@ -121,12 +121,12 @@ describe('ts lib generator', () => {
   });
 
   it('should not duplicate named inputs in nx.json', async () => {
-    await tsLibGenerator(tree, {
+    await tsProjectGenerator(tree, {
       name: 'test-1',
       skipInstall: true,
     });
 
-    await tsLibGenerator(tree, {
+    await tsProjectGenerator(tree, {
       name: 'test-2',
       skipInstall: true,
     });
@@ -140,7 +140,7 @@ describe('ts lib generator', () => {
   });
 
   it('should configure target defaults in nx.json', async () => {
-    await tsLibGenerator(tree, {
+    await tsProjectGenerator(tree, {
       name: 'test-1',
       skipInstall: true,
     });
@@ -159,12 +159,12 @@ describe('ts lib generator', () => {
   });
 
   it('should not configure duplicate inputs in nx.json target defaults', async () => {
-    await tsLibGenerator(tree, {
+    await tsProjectGenerator(tree, {
       name: 'test-1',
       skipInstall: true,
     });
 
-    await tsLibGenerator(tree, {
+    await tsProjectGenerator(tree, {
       name: 'test-2',
       skipInstall: true,
     });
@@ -187,7 +187,7 @@ describe('ts lib generator', () => {
     await sharedConstructsGenerator(tree);
 
     // Call the generator function
-    await tsLibGenerator(tree, {
+    await tsProjectGenerator(tree, {
       name: 'test-lib',
       skipInstall: true,
     });

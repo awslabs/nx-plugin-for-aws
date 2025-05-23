@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export interface FastApiProjectGeneratorSchema {
+export interface PyFastApiProjectGeneratorSchema {
   readonly name: string;
   readonly computeType:
     | 'ServerlessApiGatewayRestApi'

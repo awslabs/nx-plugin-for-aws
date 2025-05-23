@@ -6,7 +6,7 @@ import { Tree, updateJson } from '@nx/devkit';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import {
   LAMBDA_FUNCTION_GENERATOR_INFO,
-  lambdaFunctionProjectGenerator,
+  pyLambdaFunctionGenerator,
 } from './generator';
 import { parse } from '@iarna/toml';
 import {
@@ -44,7 +44,7 @@ describe('lambda-handler project generator', () => {
       `,
     );
 
-    await lambdaFunctionProjectGenerator(tree, {
+    await pyLambdaFunctionGenerator(tree, {
       project: 'test-project',
       functionName: 'test-function',
       eventSource: 'Any',
@@ -83,7 +83,7 @@ describe('lambda-handler project generator', () => {
       `,
     );
 
-    await lambdaFunctionProjectGenerator(tree, {
+    await pyLambdaFunctionGenerator(tree, {
       project: 'test-project',
       functionName: 'test-function',
       eventSource: 'Any',
@@ -146,7 +146,7 @@ describe('lambda-handler project generator', () => {
       `,
     );
 
-    await lambdaFunctionProjectGenerator(tree, {
+    await pyLambdaFunctionGenerator(tree, {
       project: 'test-project',
       functionName: 'test-function',
       eventSource: 'Any',
@@ -214,7 +214,7 @@ describe('lambda-handler project generator', () => {
       `,
     );
 
-    await lambdaFunctionProjectGenerator(tree, {
+    await pyLambdaFunctionGenerator(tree, {
       project: 'test-project',
       functionName: 'test-function',
       eventSource: 'Any',
@@ -257,7 +257,7 @@ describe('lambda-handler project generator', () => {
       `,
     );
 
-    await lambdaFunctionProjectGenerator(tree, {
+    await pyLambdaFunctionGenerator(tree, {
       project: 'test-project',
       functionName: 'test-function',
       functionPath: 'nested/path',
@@ -296,7 +296,7 @@ describe('lambda-handler project generator', () => {
       `,
     );
 
-    await lambdaFunctionProjectGenerator(tree, {
+    await pyLambdaFunctionGenerator(tree, {
       project: 'test-project',
       functionName: 'test-function',
       eventSource: 'Any',
@@ -342,7 +342,7 @@ describe('lambda-handler project generator', () => {
       `,
     );
 
-    await lambdaFunctionProjectGenerator(tree, {
+    await pyLambdaFunctionGenerator(tree, {
       project: 'test-project',
       functionName: 'test-function',
       eventSource: 'APIGatewayProxyEventModel',
@@ -392,7 +392,7 @@ describe('lambda-handler project generator', () => {
       `,
     );
 
-    await lambdaFunctionProjectGenerator(tree, {
+    await pyLambdaFunctionGenerator(tree, {
       project: 'test-project',
       functionName: 'test-function',
       eventSource: 'Any',
@@ -440,7 +440,7 @@ describe('lambda-handler project generator', () => {
       `,
     );
 
-    await lambdaFunctionProjectGenerator(tree, {
+    await pyLambdaFunctionGenerator(tree, {
       project: 'test_project',
       functionName: 'test-function',
       eventSource: 'Any',
@@ -481,7 +481,7 @@ describe('lambda-handler project generator', () => {
       `,
     );
 
-    await lambdaFunctionProjectGenerator(tree, {
+    await pyLambdaFunctionGenerator(tree, {
       project: 'test-project',
       functionName: 'test-function',
       eventSource: 'Any',

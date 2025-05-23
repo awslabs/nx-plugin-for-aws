@@ -4,7 +4,7 @@
  */
 import { SupportedStyles } from '@nx/react';
 
-export interface AppGeneratorSchema {
+export interface TsCloudScapeWebsiteGeneratorSchema {
   name: string;
   directory?: string;
   skipInstall?: boolean;

@@ -13,7 +13,7 @@ import {
   updateJson,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { LambdaFunctionProjectGeneratorSchema } from './schema';
+import { PyLambdaFunctionGeneratorSchema } from './schema';
 import { UVProvider } from '@nxlv/python/src/provider/uv/provider';
 import { Logger } from '@nxlv/python/src/executors/utils/logger';
 import { parse, stringify } from '@iarna/toml';
@@ -77,9 +77,9 @@ const getLambdaFunctionDetails = (
 /**
  * Generates a Python Lambda Function to add to a python project
  */
-export const lambdaFunctionProjectGenerator = async (
+export const pyLambdaFunctionGenerator = async (
   tree: Tree,
-  schema: LambdaFunctionProjectGeneratorSchema,
+  schema: PyLambdaFunctionGeneratorSchema,
 ): Promise<GeneratorCallback> => {
   const projectConfig = readProjectConfigurationUnqualified(
     tree,
@@ -297,4 +297,4 @@ export const lambdaFunctionProjectGenerator = async (
     installPackagesTask(tree);
   };
 };
-export default lambdaFunctionProjectGenerator;
+export default pyLambdaFunctionGenerator;

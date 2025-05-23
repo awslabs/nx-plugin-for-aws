@@ -3,14 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { Tree } from '@nx/devkit';
-import tsLibGenerator from './generator';
+import tsProjectGenerator from './generator';
 import { configureVitest } from './vitest';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 describe('vitest utils', () => {
   let tree: Tree;
   beforeEach(async () => {
     tree = createTreeUsingTsSolutionSetup();
-    await tsLibGenerator(tree, {
+    await tsProjectGenerator(tree, {
       name: 'test',
       skipInstall: true,
     });

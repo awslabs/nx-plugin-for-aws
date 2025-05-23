@@ -4,7 +4,10 @@
  */
 import { Tree } from '@nx/devkit';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { FAST_API_GENERATOR_INFO, fastApiProjectGenerator } from './generator';
+import {
+  FAST_API_GENERATOR_INFO,
+  pyFastApiProjectGenerator,
+} from './generator';
 import { parse } from '@iarna/toml';
 import {
   PACKAGES_DIR,
@@ -23,7 +26,7 @@ describe('fastapi project generator', () => {
   });
 
   it('should generate a FastAPI project with correct structure', async () => {
-    await fastApiProjectGenerator(tree, {
+    await pyFastApiProjectGenerator(tree, {
       name: 'test-api',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
@@ -41,7 +44,7 @@ describe('fastapi project generator', () => {
   });
 
   it('should set up project configuration with FastAPI targets', async () => {
-    await fastApiProjectGenerator(tree, {
+    await pyFastApiProjectGenerator(tree, {
       name: 'test-api',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
@@ -81,7 +84,7 @@ describe('fastapi project generator', () => {
   });
 
   it('should configure FastAPI dependencies', async () => {
-    await fastApiProjectGenerator(tree, {
+    await pyFastApiProjectGenerator(tree, {
       name: 'test-api',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
@@ -100,7 +103,7 @@ describe('fastapi project generator', () => {
   });
 
   it('should set up shared constructs for http', async () => {
-    await fastApiProjectGenerator(tree, {
+    await pyFastApiProjectGenerator(tree, {
       name: 'test-api',
       directory: 'apps/nested/path',
       computeType: 'ServerlessApiGatewayHttpApi',
@@ -139,7 +142,7 @@ describe('fastapi project generator', () => {
   });
 
   it('should set up shared constructs for rest', async () => {
-    await fastApiProjectGenerator(tree, {
+    await pyFastApiProjectGenerator(tree, {
       name: 'test-api',
       directory: 'apps/nested/path',
       computeType: 'ServerlessApiGatewayRestApi',
@@ -178,7 +181,7 @@ describe('fastapi project generator', () => {
   });
 
   it('should update shared constructs build dependencies', async () => {
-    await fastApiProjectGenerator(tree, {
+    await pyFastApiProjectGenerator(tree, {
       name: 'test-api',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
@@ -200,7 +203,7 @@ describe('fastapi project generator', () => {
   });
 
   it('should handle custom directory path', async () => {
-    await fastApiProjectGenerator(tree, {
+    await pyFastApiProjectGenerator(tree, {
       name: 'test-api',
       directory: 'apps/nested/path',
       computeType: 'ServerlessApiGatewayHttpApi',
@@ -213,7 +216,7 @@ describe('fastapi project generator', () => {
   });
 
   it('should set project metadata', async () => {
-    await fastApiProjectGenerator(tree, {
+    await pyFastApiProjectGenerator(tree, {
       name: 'test-api',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
@@ -228,7 +231,7 @@ describe('fastapi project generator', () => {
   });
 
   it('should match snapshot', async () => {
-    await fastApiProjectGenerator(tree, {
+    await pyFastApiProjectGenerator(tree, {
       name: 'test-api',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
@@ -249,7 +252,7 @@ describe('fastapi project generator', () => {
 
   it('should add generator metric to app.ts', async () => {
     // Call the generator function
-    await fastApiProjectGenerator(tree, {
+    await pyFastApiProjectGenerator(tree, {
       name: 'test-api',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
@@ -260,7 +263,7 @@ describe('fastapi project generator', () => {
   });
 
   it('should include CORS middleware in init.py when using REST API', async () => {
-    await fastApiProjectGenerator(tree, {
+    await pyFastApiProjectGenerator(tree, {
       name: 'test-api',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayRestApi',

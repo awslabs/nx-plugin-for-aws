@@ -3,10 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { generateFiles, Tree } from '@nx/devkit';
-import { OpenApiHooksSchema } from './schema';
-import { parseOpenApiSpec } from '../utils/parse';
-import { buildOpenApiCodeGenData } from '../utils/codegen-data';
-import { generateOpenApiTsClient } from '../ts-client/generator';
+import { OpenApiTsHooksGeneratorSchema } from './schema';
+import {
+  buildOpenApiCodeGenerationData,
+  generateOpenApiTsClient,
+} from '../ts-client/generator';
 import { formatFilesInSubtree } from '../../utils/format';
 import path from 'path';
 import { CodeGenData } from '../utils/codegen-data/types';
@@ -16,11 +17,12 @@ import { CodeGenData } from '../utils/codegen-data/types';
  */
 export const openApiTsHooksGenerator = async (
   tree: Tree,
-  options: OpenApiHooksSchema,
+  options: OpenApiTsHooksGeneratorSchema,
 ) => {
-  const spec = await parseOpenApiSpec(tree, options.openApiSpecPath);
-
-  const data = await buildOpenApiCodeGenData(spec);
+  const data = await buildOpenApiCodeGenerationData(
+    tree,
+    options.openApiSpecPath,
+  );
 
   generateOpenApiTsClient(tree, data, options.outputPath);
   generateOpenApiTsHooks(tree, data, options.outputPath);

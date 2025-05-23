@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export interface OpenApiHooksSchema {
+export interface OpenApiTsHooksGeneratorSchema {
   openApiSpecPath: string;
   outputPath: string;
 }

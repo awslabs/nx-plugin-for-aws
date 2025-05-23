@@ -22,7 +22,7 @@ import {
   isPropertyAssignment,
   ArrayLiteralExpression,
 } from 'typescript';
-import { AppGeneratorSchema } from './schema';
+import { TsCloudScapeWebsiteGeneratorSchema } from './schema';
 import { applicationGenerator } from '@nx/react';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import {
@@ -50,7 +50,10 @@ import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 export const CLOUDSCAPE_WEBSITE_APP_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
 
-export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
+export async function tsCloudScapeWebsiteGenerator(
+  tree: Tree,
+  schema: TsCloudScapeWebsiteGeneratorSchema,
+) {
   const npmScopePrefix = getNpmScopePrefix(tree);
   const websiteNameClassName = toClassName(schema.name);
   const websiteNameKebabCase = toKebabCase(schema.name);
@@ -447,4 +450,4 @@ export async function appGenerator(tree: Tree, schema: AppGeneratorSchema) {
     }
   };
 }
-export default appGenerator;
+export default tsCloudScapeWebsiteGenerator;

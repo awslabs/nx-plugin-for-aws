@@ -13,7 +13,7 @@ import {
   updateJson,
   writeJson,
 } from '@nx/devkit';
-import { NxGeneratorGeneratorSchema } from './schema';
+import { TsNxGeneratorGeneratorSchema } from './schema';
 import kebabCase from 'lodash.kebabcase';
 import { pascalCase } from '../../utils/names';
 import camelCase from 'lodash.camelcase';
@@ -29,12 +29,13 @@ import {
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { withVersions } from '../../utils/versions';
 import { formatFilesInSubtree } from '../../utils/format';
+import PackageJson from '../../../package.json';
 
 export const NX_GENERATOR_GENERATOR_INFO = getGeneratorInfo(__filename);
 
-export const nxGeneratorGenerator = async (
+export const tsNxGeneratorGenerator = async (
   tree: Tree,
-  options: NxGeneratorGeneratorSchema,
+  options: TsNxGeneratorGeneratorSchema,
 ): Promise<GeneratorCallback | void> => {
   const { name, directory, pluginProject, description } = options;
 
@@ -156,6 +157,15 @@ export const nxGeneratorGenerator = async (
     if (tree.exists(indexPath)) {
       addStarExport(tree, indexPath, `./${generatorSubDir}/generator`);
     }
+
+    // Add a dependency on the nx plugin for aws
+    addDependenciesToPackageJson(
+      tree,
+      {},
+      {
+        [PackageJson.name]: `^${PackageJson.version}`,
+      },
+    );
   }
 
   const factoryBasePath = `./${srcDir}/${generatorSubDir}`;
@@ -226,4 +236,4 @@ const incrementMetric = (metrics: string[]): string => {
   return `g${maxMetric + 1}`;
 };
 
-export default nxGeneratorGenerator;
+export default tsNxGeneratorGenerator;

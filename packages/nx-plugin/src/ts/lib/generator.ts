@@ -15,7 +15,7 @@ import {
   updateJson,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { TsLibGeneratorSchema } from './schema';
+import { TsProjectGeneratorSchema } from './schema';
 import { libraryGenerator } from '@nx/js';
 import { getNpmScopePrefix } from '../../utils/npm-scope';
 import { configureTsProject } from './ts-project-utils';
@@ -47,7 +47,7 @@ export interface TsLibDetails {
  */
 export const getTsLibDetails = (
   tree: Tree,
-  schema: TsLibGeneratorSchema,
+  schema: TsProjectGeneratorSchema,
 ): TsLibDetails => {
   const scope = getNpmScopePrefix(tree);
   const normalizedName = toKebabCase(schema.name);
@@ -60,11 +60,11 @@ export const getTsLibDetails = (
 };
 
 /**
- * Generates a typescript library
+ * Generates a typescript project
  */
-export const tsLibGenerator = async (
+export const tsProjectGenerator = async (
   tree: Tree,
-  schema: TsLibGeneratorSchema,
+  schema: TsProjectGeneratorSchema,
 ): Promise<GeneratorCallback> => {
   const { fullyQualifiedName, dir } = getTsLibDetails(tree, schema);
   await libraryGenerator(tree, {
@@ -225,4 +225,4 @@ export const tsLibGenerator = async (
     }
   };
 };
-export default tsLibGenerator;
+export default tsProjectGenerator;
