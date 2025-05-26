@@ -227,6 +227,7 @@ describe('fastapi project generator', () => {
     expect(config.metadata).toEqual({
       apiName: 'test-api',
       apiType: 'fast-api',
+      generator: FAST_API_GENERATOR_INFO.id,
     });
   });
 

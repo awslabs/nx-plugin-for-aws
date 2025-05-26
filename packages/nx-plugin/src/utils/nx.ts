@@ -2,7 +2,12 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { getProjects, readProjectConfiguration, Tree } from '@nx/devkit';
+import {
+  getProjects,
+  readProjectConfiguration,
+  Tree,
+  updateProjectConfiguration,
+} from '@nx/devkit';
 import GeneratorsJson from '../../generators.json';
 import PackageJson from '../../package.json';
 import * as path from 'path';
@@ -86,4 +91,22 @@ export const readProjectConfigurationUnqualified = (
     }
     throw e;
   }
+};
+
+/**
+ * Add metadata about the generator to the project.json
+ */
+export const addGeneratorMetadata = (
+  tree: Tree,
+  projectName: string,
+  info: NxGeneratorInfo,
+) => {
+  const config = readProjectConfigurationUnqualified(tree, projectName);
+  updateProjectConfiguration(tree, config.name, {
+    ...config,
+    metadata: {
+      ...config?.metadata,
+      generator: info.id,
+    } as any,
+  });
 };

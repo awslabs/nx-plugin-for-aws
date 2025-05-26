@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
+import { readJson, Tree } from '@nx/devkit';
 import {
   CLOUDSCAPE_WEBSITE_APP_GENERATOR_INFO,
   tsCloudScapeWebsiteGenerator,
@@ -146,6 +146,16 @@ describe('cloudscape-website generator', () => {
     await tsCloudScapeWebsiteGenerator(tree, options);
     const packageJson = JSON.parse(tree.read('package.json').toString());
     expect(packageJson.dependencies).toMatchSnapshot('scoped-dependencies');
+  });
+
+  it('should add generator to project metadata', async () => {
+    // Call the generator function
+    await tsCloudScapeWebsiteGenerator(tree, options);
+
+    expect(readJson(tree, 'test-app/project.json').metadata).toHaveProperty(
+      'generator',
+      CLOUDSCAPE_WEBSITE_APP_GENERATOR_INFO.id,
+    );
   });
 
   it('should add generator metric to app.ts', async () => {

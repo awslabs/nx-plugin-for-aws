@@ -14,7 +14,11 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { TsMcpServerGeneratorSchema } from './schema';
-import { NxGeneratorInfo, getGeneratorInfo } from '../../utils/nx';
+import {
+  NxGeneratorInfo,
+  addGeneratorMetadata,
+  getGeneratorInfo,
+} from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { formatFilesInSubtree } from '../../utils/format';
 import tsProjectGenerator, { getTsLibDetails } from '../lib/generator';
@@ -80,6 +84,8 @@ export const tsMcpServerGenerator = async (
       },
     },
   });
+
+  addGeneratorMetadata(tree, fullyQualifiedName, TS_MCP_SERVER_GENERATOR_INFO);
 
   await addGeneratorMetricsIfApplicable(tree, [TS_MCP_SERVER_GENERATOR_INFO]);
 

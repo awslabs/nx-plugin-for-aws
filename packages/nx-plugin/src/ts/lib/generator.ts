@@ -23,7 +23,11 @@ import { toKebabCase } from '../../utils/names';
 import { relative } from 'path';
 import { formatFilesInSubtree } from '../../utils/format';
 import { sortObjectKeys } from '../../utils/object';
-import { NxGeneratorInfo, getGeneratorInfo } from '../../utils/nx';
+import {
+  NxGeneratorInfo,
+  addGeneratorMetadata,
+  getGeneratorInfo,
+} from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { replace } from '../../utils/ast';
 import { ArrayLiteralExpression, factory } from 'typescript';
@@ -127,6 +131,8 @@ export const tsProjectGenerator = async (
   projectConfiguration.targets = sortObjectKeys(targets);
 
   updateProjectConfiguration(tree, fullyQualifiedName, projectConfiguration);
+
+  addGeneratorMetadata(tree, fullyQualifiedName, TS_LIB_GENERATOR_INFO);
 
   updateJson(tree, 'nx.json', (nxJson: NxJsonConfiguration) => {
     nxJson.namedInputs = {

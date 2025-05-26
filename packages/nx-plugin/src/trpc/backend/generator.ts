@@ -26,7 +26,11 @@ import { withVersions } from '../../utils/versions';
 import { toClassName } from '../../utils/names';
 import { formatFilesInSubtree } from '../../utils/format';
 import { sortObjectKeys } from '../../utils/object';
-import { NxGeneratorInfo, getGeneratorInfo } from '../../utils/nx';
+import {
+  NxGeneratorInfo,
+  addGeneratorMetadata,
+  getGeneratorInfo,
+} from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { addApiGatewayConstruct } from '../../utils/api-constructs/api-constructs';
 
@@ -177,6 +181,9 @@ export async function tsTrpcApiGenerator(
   );
   tree.delete(joinPathFragments(backendRoot, 'package.json'));
   tree.delete(joinPathFragments(schemaRoot, 'package.json'));
+
+  addGeneratorMetadata(tree, backendName, TRPC_BACKEND_GENERATOR_INFO);
+  addGeneratorMetadata(tree, schemaName, TRPC_BACKEND_GENERATOR_INFO);
 
   await addGeneratorMetricsIfApplicable(tree, [TRPC_BACKEND_GENERATOR_INFO]);
 

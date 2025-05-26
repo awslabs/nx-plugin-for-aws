@@ -44,7 +44,11 @@ import { formatFilesInSubtree } from '../../utils/format';
 import { relative } from 'path';
 import kebabCase from 'lodash.kebabcase';
 import { sortObjectKeys } from '../../utils/object';
-import { NxGeneratorInfo, getGeneratorInfo } from '../../utils/nx';
+import {
+  NxGeneratorInfo,
+  addGeneratorMetadata,
+  getGeneratorInfo,
+} from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 
 export const CLOUDSCAPE_WEBSITE_APP_GENERATOR_INFO: NxGeneratorInfo =
@@ -125,6 +129,11 @@ export async function tsCloudScapeWebsiteGenerator(
   projectConfiguration.targets = sortObjectKeys(targets);
 
   updateProjectConfiguration(tree, fullyQualifiedName, projectConfiguration);
+  addGeneratorMetadata(
+    tree,
+    projectConfiguration.name,
+    CLOUDSCAPE_WEBSITE_APP_GENERATOR_INFO,
+  );
 
   configureTsProject(tree, {
     dir: websiteContentPath,

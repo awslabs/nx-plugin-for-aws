@@ -126,6 +126,19 @@ describe('python project generator', () => {
     expect(packageJson.devDependencies).toHaveProperty('@nxlv/python');
   });
 
+  it('should add generator to project metadata', async () => {
+    // Call the generator function
+    await pyProjectGenerator(tree, {
+      name: 'test-project',
+      directory: 'apps',
+      projectType: 'application',
+    });
+
+    expect(
+      readJson(tree, 'apps/test_project/project.json').metadata,
+    ).toHaveProperty('generator', PY_PROJECT_GENERATOR_INFO.id);
+  });
+
   it('should add generator metric to app.ts', async () => {
     // Set up test tree with shared constructs
     await sharedConstructsGenerator(tree);

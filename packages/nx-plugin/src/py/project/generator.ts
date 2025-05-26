@@ -23,7 +23,11 @@ import { getNpmScope } from '../../utils/npm-scope';
 import { toSnakeCase } from '../../utils/names';
 import { sortObjectKeys } from '../../utils/object';
 import { updateGitIgnore } from '../../utils/git';
-import { NxGeneratorInfo, getGeneratorInfo } from '../../utils/nx';
+import {
+  NxGeneratorInfo,
+  addGeneratorMetadata,
+  getGeneratorInfo,
+} from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 
 export const PY_PROJECT_GENERATOR_INFO: NxGeneratorInfo =
@@ -151,6 +155,8 @@ export const pyProjectGenerator = async (
   };
   projectConfiguration.targets = sortObjectKeys(projectConfiguration.targets);
   updateProjectConfiguration(tree, normalizedName, projectConfiguration);
+
+  addGeneratorMetadata(tree, normalizedName, PY_PROJECT_GENERATOR_INFO);
 
   // Update root .gitignore
   updateGitIgnore(tree, '.', (patterns) => [...patterns, '/reports']);

@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree, readProjectConfiguration } from '@nx/devkit';
+import { Tree, readJson, readProjectConfiguration } from '@nx/devkit';
 import { INFRA_APP_GENERATOR_INFO, tsInfraGenerator } from './generator';
 import { TsInfraGeneratorSchema } from './schema';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
@@ -211,6 +211,15 @@ describe('infra generator', () => {
     // Compare runs
     expect(firstRunFiles).toEqual(secondRunFiles);
     expect(secondRunFiles).toMatchSnapshot('consistent-files');
+  });
+
+  it('should add generator to project metadata', async () => {
+    // Call the generator function
+    await tsInfraGenerator(tree, options);
+
+    expect(
+      readJson(tree, 'packages/test/project.json').metadata,
+    ).toHaveProperty('generator', INFRA_APP_GENERATOR_INFO.id);
   });
 
   it('should add generator metric to app.ts', async () => {

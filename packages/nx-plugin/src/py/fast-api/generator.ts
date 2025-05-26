@@ -28,7 +28,11 @@ import {
 import { toClassName, toKebabCase, toSnakeCase } from '../../utils/names';
 import { formatFilesInSubtree } from '../../utils/format';
 import { sortObjectKeys } from '../../utils/object';
-import { NxGeneratorInfo, getGeneratorInfo } from '../../utils/nx';
+import {
+  NxGeneratorInfo,
+  addGeneratorMetadata,
+  getGeneratorInfo,
+} from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { addApiGatewayConstruct } from '../../utils/api-constructs/api-constructs';
 import { addOpenApiGeneration } from './react/open-api';
@@ -206,6 +210,8 @@ export const pyFastApiProjectGenerator = async (
   ].concat(projectToml.project?.dependencies || []);
   projectToml['dependency-groups'] = { dev: ['fastapi[standard]>=0.115'] };
   tree.write(joinPathFragments(dir, 'pyproject.toml'), stringify(projectToml));
+
+  addGeneratorMetadata(tree, normalizedName, FAST_API_GENERATOR_INFO);
 
   await addGeneratorMetricsIfApplicable(tree, [FAST_API_GENERATOR_INFO]);
 

@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree, readProjectConfiguration } from '@nx/devkit';
+import { Tree, readJson, readProjectConfiguration } from '@nx/devkit';
 import {
   tsMcpServerGenerator,
   TS_MCP_SERVER_GENERATOR_INFO,
@@ -99,6 +99,16 @@ describe('ts#mcp-server generator', () => {
     // Check that the source files were generated in the custom directory
     expect(tree.exists('custom-dir/test-server/src/index.ts')).toBeTruthy();
     expect(tree.exists('custom-dir/test-server/src/server.ts')).toBeTruthy();
+  });
+
+  it('should add generator to project metadata', async () => {
+    // Call the generator function
+    await tsMcpServerGenerator(tree, { name: 'test-server' });
+
+    expect(readJson(tree, 'test-server/project.json').metadata).toHaveProperty(
+      'generator',
+      TS_MCP_SERVER_GENERATOR_INFO.id,
+    );
   });
 
   it('should match snapshot', async () => {

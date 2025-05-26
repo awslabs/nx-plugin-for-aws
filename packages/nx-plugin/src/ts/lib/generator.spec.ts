@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { readNxJson, Tree } from '@nx/devkit';
+import { readJson, readNxJson, Tree } from '@nx/devkit';
 import { TS_LIB_GENERATOR_INFO, tsProjectGenerator } from './generator';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import uniqBy from 'lodash.uniqby';
@@ -179,6 +179,19 @@ describe('ts lib generator', () => {
     );
     expect(targetDefaults.test.inputs).toHaveLength(
       uniqBy(targetDefaults.test.inputs, (x) => x).length,
+    );
+  });
+
+  it('should add generator to project metadata', async () => {
+    // Call the generator function
+    await tsProjectGenerator(tree, {
+      name: 'test-lib',
+      skipInstall: true,
+    });
+
+    expect(readJson(tree, 'test-lib/project.json').metadata).toHaveProperty(
+      'generator',
+      TS_LIB_GENERATOR_INFO.id,
     );
   });
 

@@ -29,7 +29,11 @@ import path from 'path';
 import { formatFilesInSubtree } from '../../utils/format';
 import kebabCase from 'lodash.kebabcase';
 import { sortObjectKeys } from '../../utils/object';
-import { NxGeneratorInfo, getGeneratorInfo } from '../../utils/nx';
+import {
+  NxGeneratorInfo,
+  addGeneratorMetadata,
+  getGeneratorInfo,
+} from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 
 export const INFRA_APP_GENERATOR_INFO: NxGeneratorInfo =
@@ -41,6 +45,8 @@ export async function tsInfraGenerator(
 ): Promise<GeneratorCallback> {
   const lib = getTsLibDetails(tree, schema);
   await tsProjectGenerator(tree, schema);
+
+  addGeneratorMetadata(tree, lib.fullyQualifiedName, INFRA_APP_GENERATOR_INFO);
 
   await sharedConstructsGenerator(tree);
 
