@@ -19,7 +19,7 @@ describe('trpc backend generator', () => {
 
   it('should generate backend and schema projects', async () => {
     await tsTrpcApiGenerator(tree, {
-      apiName: 'TestApi',
+      name: 'TestApi',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
     });
@@ -40,7 +40,7 @@ describe('trpc backend generator', () => {
 
   it('should set up project configuration correctly', async () => {
     await tsTrpcApiGenerator(tree, {
-      apiName: 'TestApi',
+      name: 'TestApi',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
     });
@@ -56,7 +56,7 @@ describe('trpc backend generator', () => {
 
   it('should add required dependencies', async () => {
     await tsTrpcApiGenerator(tree, {
-      apiName: 'TestApi',
+      name: 'TestApi',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
     });
@@ -81,7 +81,7 @@ describe('trpc backend generator', () => {
 
   it('should set up shared constructs for http', async () => {
     await tsTrpcApiGenerator(tree, {
-      apiName: 'TestApi',
+      name: 'TestApi',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
     });
@@ -122,7 +122,7 @@ describe('trpc backend generator', () => {
 
   it('should set up shared constructs for rest', async () => {
     await tsTrpcApiGenerator(tree, {
-      apiName: 'TestApi',
+      name: 'TestApi',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayRestApi',
     });
@@ -163,14 +163,11 @@ describe('trpc backend generator', () => {
 
   it('should add a task for starting a local server', async () => {
     await tsTrpcApiGenerator(tree, {
-      apiName: 'TestApi',
+      name: 'TestApi',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
     });
-    const projectConfig = readProjectConfiguration(
-      tree,
-      '@proj/test-api-backend',
-    );
+    const projectConfig = readProjectConfiguration(tree, '@proj/test-api');
     expect(projectConfig.targets).toHaveProperty('serve');
     expect(projectConfig.targets!.serve!.executor).toBe('nx:run-commands');
     expect(projectConfig.targets!.serve!.options!.commands).toEqual([
@@ -181,7 +178,7 @@ describe('trpc backend generator', () => {
   it('should add generator metric to app.ts', async () => {
     // Call the generator function
     await tsTrpcApiGenerator(tree, {
-      apiName: 'TestApi',
+      name: 'TestApi',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
     });
@@ -192,7 +189,7 @@ describe('trpc backend generator', () => {
 
   it('should include CORS headers in router.ts when using REST API', async () => {
     await tsTrpcApiGenerator(tree, {
-      apiName: 'TestApi',
+      name: 'TestApi',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayRestApi',
     });

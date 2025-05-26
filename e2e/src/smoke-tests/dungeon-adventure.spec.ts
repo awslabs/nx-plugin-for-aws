@@ -38,7 +38,7 @@ describe('smoke test - dungeon-adventure', () => {
     const opts = { cwd: projectRoot, env: { NX_DAEMON: 'false' } };
 
     await runCLI(
-      `generate @aws/nx-plugin:ts#trpc-api --apiName=GameApi --no-interactive`,
+      `generate @aws/nx-plugin:ts#trpc-api --name=GameApi --no-interactive`,
       opts,
     );
     await runCLI(
@@ -59,7 +59,7 @@ describe('smoke test - dungeon-adventure', () => {
       opts,
     );
     await runCLI(
-      `generate @aws/nx-plugin:api-connection --sourceProject=@dungeon-adventure/game-ui --targetProject=@dungeon-adventure/game-api-backend --no-interactive`,
+      `generate @aws/nx-plugin:api-connection --sourceProject=@dungeon-adventure/game-ui --targetProject=@dungeon-adventure/game-api --no-interactive`,
       opts,
     );
     await runCLI(

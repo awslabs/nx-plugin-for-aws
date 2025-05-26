@@ -40,8 +40,8 @@ export async function tsTrpcApiGenerator(
   await sharedConstructsGenerator(tree);
 
   const apiNamespace = getNpmScopePrefix(tree);
-  const apiNameKebabCase = kebabCase(options.apiName);
-  const apiNameClassName = toClassName(options.apiName);
+  const apiNameKebabCase = kebabCase(options.name);
+  const apiNameClassName = toClassName(options.name);
   const projectRoot = joinPathFragments(
     options.directory ?? '.',
     apiNameKebabCase,
@@ -49,7 +49,7 @@ export async function tsTrpcApiGenerator(
 
   const schemaRoot = joinPathFragments(projectRoot, 'schema');
   const backendRoot = joinPathFragments(projectRoot, 'backend');
-  const backendName = `${apiNameKebabCase}-backend`;
+  const backendName = apiNameKebabCase;
   const schemaName = `${apiNameKebabCase}-schema`;
   const backendProjectName = `${apiNamespace}${backendName}`;
   const schemaProjectName = `${apiNamespace}${schemaName}`;
@@ -92,7 +92,7 @@ export async function tsTrpcApiGenerator(
     joinPathFragments(backendRoot, 'project.json'),
     (config: ProjectConfiguration) => {
       config.metadata = {
-        apiName: options.apiName,
+        apiName: options.name,
         apiType: 'trpc',
       } as unknown;
 

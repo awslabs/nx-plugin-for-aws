@@ -46,11 +46,11 @@ export const smokeTest = (
         opts,
       );
       await runCLI(
-        `generate @aws/nx-plugin:ts#trpc-api --apiName=my-api --computeType=ServerlessApiGatewayRestApi --no-interactive`,
+        `generate @aws/nx-plugin:ts#trpc-api --name=my-api --computeType=ServerlessApiGatewayRestApi --no-interactive`,
         opts,
       );
       await runCLI(
-        `generate @aws/nx-plugin:ts#trpc-api --apiName=my-api-http --computeType=ServerlessApiGatewayHttpApi --no-interactive`,
+        `generate @aws/nx-plugin:ts#trpc-api --name=my-api-http --computeType=ServerlessApiGatewayHttpApi --no-interactive`,
         opts,
       );
       await runCLI(
@@ -58,7 +58,7 @@ export const smokeTest = (
         opts,
       );
       await runCLI(
-        `generate @aws/nx-plugin:api-connection --sourceProject=@e2e-test/website --targetProject=@e2e-test/my-api-backend --no-interactive`,
+        `generate @aws/nx-plugin:api-connection --sourceProject=@e2e-test/website --targetProject=@e2e-test/my-api --no-interactive`,
         opts,
       );
       await runCLI(
