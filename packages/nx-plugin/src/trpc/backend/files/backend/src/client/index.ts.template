@@ -3,18 +3,38 @@ import {
   httpLink,
   HTTPLinkOptions,
 } from '@trpc/client';
-
+<%_ if (auth === 'IAM') { _%>
+import { AwsClient } from 'aws4fetch';
+import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
+<%_ } _%>
 import { AppRouter } from "../router.js";
-import { sigv4Fetch } from './sigv4.js';
 
+<%_ if (auth === 'IAM') { %>
+const credentialProvider = fromNodeProviderChain();
+
+const sigv4Fetch = (async (...args) => {
+  const client = new AwsClient(await credentialProvider());
+  return client.fetch(...args);
+}) satisfies AwsClient['fetch'];
+
+<%_ } _%>
 export interface <%= apiNameClassName %>ClientConfig {
   readonly url: string;
+  <%_ if (auth === 'Cognito') { _%>
+  readonly token: string;
+  <%_ } _%>
 }
 
 export const create<%= apiNameClassName %>Client = (config: <%= apiNameClassName %>ClientConfig) => {
   const linkOptions: HTTPLinkOptions<any> = {
     url: config.url,
+    <%_ if (auth === 'IAM') { _%>
     fetch: sigv4Fetch,
+    <%_ } else if (auth === 'Cognito') { _%>
+    headers: {
+      Authorization: `Bearer ${config.token}`,
+    },
+    <%_ } _%>
   };
   return createTRPCClient<AppRouter>({
     links: [httpLink(linkOptions)],

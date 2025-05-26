@@ -45,13 +45,11 @@ const CONNECTION_GENERATORS = {
     trpcReactGenerator(tree, {
       frontendProjectName: options.sourceProject,
       backendProjectName: options.targetProject,
-      auth: options.auth,
     }),
   'react -> py#fast-api': (tree, options) =>
     fastApiReactGenerator(tree, {
       frontendProjectName: options.sourceProject,
       fastApiProjectName: options.targetProject,
-      auth: options.auth,
     }),
 } satisfies Record<
   ConnectionKey,

@@ -2,7 +2,11 @@ import { createContext, FC, PropsWithChildren, useMemo } from 'react';
 import { <%- apiNameClassName %> } from '../<%- generatedClientDir %>/client.gen';
 import { <%- apiNameClassName %>OptionsProxy } from '../<%- generatedClientDir %>/options-proxy.gen';
 import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
+<%_ if (auth === 'IAM') { _%>
 import { useSigV4 } from '../hooks/useSigV4';
+<%_ } else if (auth === 'Cognito') { _%>
+import { useAuth } from 'react-oidc-context';
+<%_ } _%>
 
 export const <%- apiNameClassName %>Context = createContext<<%- apiNameClassName %>OptionsProxy | undefined>(undefined);
 
@@ -13,13 +17,35 @@ const useCreate<%- apiNameClassName %>Client = (): <%- apiNameClassName %> => {
   const apiUrl = runtimeConfig.apis.<%- apiNameClassName %>;
   <%_ if(auth === 'IAM') { _%>
   const sigv4Client = useSigV4();
+  <%_ } else if (auth === 'Cognito') { _%>
+  const { user } = useAuth();
+  const cognitoClient: typeof fetch = (url, init) => {
+    const headers = { Authorization: `Bearer ${user?.id_token}` };
+    const existingHeaders = init?.headers;
+
+    return fetch(url, {
+      ...init,
+      headers: !existingHeaders ? headers :
+               existingHeaders instanceof Headers ?
+                 (() => {
+                   const h = new Headers(existingHeaders);
+                   Object.entries(headers).forEach(([k, v]) => h.append(k, v));
+                   return h;
+                 })() :
+               Array.isArray(existingHeaders) ?
+                 [...existingHeaders, ...Object.entries(headers)] :
+                 { ...existingHeaders, ...headers }
+    });
+  };
   <%_ } _%>
   return useMemo(() => new <%- apiNameClassName %>({
     url: apiUrl,
     <%_ if(auth === 'IAM') { _%>
     fetch: sigv4Client,
+    <%_ } else if(auth === 'Cognito') { _%>
+    fetch: cognitoClient,
     <%_ } _%>
-  }), [apiUrl<% if(auth === 'IAM') { %>, sigv4Client<% } %>])
+  }), [apiUrl<% if(auth === 'IAM') { %>, sigv4Client<% } else if(auth === 'Cognito') { %>, cognitoClient<% } %>])
 };
 
 export const <%- apiNameClassName %>Provider: FC<PropsWithChildren> = ({ children }) => {

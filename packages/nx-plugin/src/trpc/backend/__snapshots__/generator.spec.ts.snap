@@ -2,9 +2,16 @@
 
 exports[`trpc backend generator > should generate backend and schema projects > apps/test-api/backend/src/client/index.ts 1`] = `
 "import { createTRPCClient, httpLink, HTTPLinkOptions } from '@trpc/client';
-
+import { AwsClient } from 'aws4fetch';
+import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
 import { AppRouter } from '../router.js';
-import { sigv4Fetch } from './sigv4.js';
+
+const credentialProvider = fromNodeProviderChain();
+
+const sigv4Fetch = (async (...args) => {
+  const client = new AwsClient(await credentialProvider());
+  return client.fetch(...args);
+}) satisfies AwsClient['fetch'];
 
 export interface TestApiClientConfig {
   readonly url: string;
@@ -19,19 +26,6 @@ export const createTestApiClient = (config: TestApiClientConfig) => {
     links: [httpLink(linkOptions)],
   });
 };
-"
-`;
-
-exports[`trpc backend generator > should generate backend and schema projects > apps/test-api/backend/src/client/sigv4.ts 1`] = `
-"import { AwsClient } from 'aws4fetch';
-import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
-
-const credentialProvider = fromNodeProviderChain();
-
-export const sigv4Fetch = (async (...args) => {
-  const client = new AwsClient(await credentialProvider());
-  return client.fetch(...args);
-}) satisfies AwsClient['fetch'];
 "
 `;
 
@@ -319,10 +313,610 @@ export type IEchoOutput = z.TypeOf<typeof EchoOutputSchema>;
 "
 `;
 
+exports[`trpc backend generator > should generate with cognito auth for a REST API > apps/test-api/backend/src/client/index.ts 1`] = `
+"import { createTRPCClient, httpLink, HTTPLinkOptions } from '@trpc/client';
+import { AppRouter } from '../router.js';
+
+export interface TestApiClientConfig {
+  readonly url: string;
+  readonly token: string;
+}
+
+export const createTestApiClient = (config: TestApiClientConfig) => {
+  const linkOptions: HTTPLinkOptions<any> = {
+    url: config.url,
+    headers: {
+      Authorization: \`Bearer \${config.token}\`,
+    },
+  };
+  return createTRPCClient<AppRouter>({
+    links: [httpLink(linkOptions)],
+  });
+};
+"
+`;
+
+exports[`trpc backend generator > should generate with cognito auth for a REST API > packages/common/constructs/src/app/apis/index.ts 1`] = `
+"export * from './test-api.js';
+"
+`;
+
+exports[`trpc backend generator > should generate with cognito auth for a REST API > packages/common/constructs/src/app/apis/test-api.ts 1`] = `
+"import { Construct } from 'constructs';
+import * as url from 'url';
+import {
+  Code,
+  Runtime,
+  Function,
+  FunctionProps,
+  Tracing,
+} from 'aws-cdk-lib/aws-lambda';
+import {
+  AuthorizationType,
+  Cors,
+  LambdaIntegration,
+  CognitoUserPoolsAuthorizer,
+} from 'aws-cdk-lib/aws-apigateway';
+import { Duration } from 'aws-cdk-lib';
+import {
+  PolicyDocument,
+  PolicyStatement,
+  Effect,
+  AnyPrincipal,
+} from 'aws-cdk-lib/aws-iam';
+import { IUserPool } from 'aws-cdk-lib/aws-cognito';
+import {
+  IntegrationBuilder,
+  RestApiIntegration,
+} from '../../core/api/utils.js';
+import { RestApi } from '../../core/api/rest-api.js';
+import { Procedures, routerToOperations } from '../../core/api/trpc-utils.js';
+import { AppRouter, appRouter } from ':proj/test-api';
+
+// String union type for all API operation names
+type Operations = Procedures<AppRouter>;
+
+/**
+ * Properties for creating a TestApi construct
+ *
+ * @template TIntegrations - Map of operation names to their integrations
+ */
+export interface TestApiProps<
+  TIntegrations extends Record<Operations, RestApiIntegration>,
+> {
+  /**
+   * Map of operation names to their API Gateway integrations
+   */
+  integrations: TIntegrations;
+  /**
+   * User pool for Cognito authentication
+   */
+  userPool: IUserPool;
+}
+
+/**
+ * A CDK construct that creates and configures an AWS API Gateway REST API
+ * specifically for TestApi.
+ * @template TIntegrations - Map of operation names to their integrations
+ */
+export class TestApi<
+  TIntegrations extends Record<Operations, RestApiIntegration>,
+> extends RestApi<Operations, TIntegrations> {
+  /**
+   * Creates default integrations for all operations, which implement each operation as
+   * its own individual lambda function.
+   *
+   * @param scope - The CDK construct scope
+   * @returns An IntegrationBuilder with default lambda integrations
+   */
+  public static defaultIntegrations = (scope: Construct) => {
+    return IntegrationBuilder.rest({
+      operations: routerToOperations(appRouter),
+      defaultIntegrationOptions: {
+        runtime: Runtime.NODEJS_LATEST,
+        handler: 'index.handler',
+        code: Code.fromAsset(
+          url.fileURLToPath(
+            new URL(
+              '../../../../../../dist/apps/test-api/backend/bundle',
+              import.meta.url,
+            ),
+          ),
+        ),
+        timeout: Duration.seconds(30),
+        tracing: Tracing.ACTIVE,
+        environment: {
+          AWS_CONNECTION_REUSE_ENABLED: '1',
+        },
+      } satisfies FunctionProps,
+      buildDefaultIntegration: (op, props: FunctionProps) => {
+        const handler = new Function(scope, \`TestApi\${op}Handler\`, props);
+        return { handler, integration: new LambdaIntegration(handler) };
+      },
+    });
+  };
+
+  constructor(
+    scope: Construct,
+    id: string,
+    props: TestApiProps<TIntegrations>,
+  ) {
+    super(scope, id, {
+      apiName: 'TestApi',
+      defaultMethodOptions: {
+        authorizationType: AuthorizationType.COGNITO,
+        authorizer: new CognitoUserPoolsAuthorizer(scope, 'TestApiAuthorizer', {
+          cognitoUserPools: [props.userPool],
+        }),
+      },
+      defaultCorsPreflightOptions: {
+        allowOrigins: Cors.ALL_ORIGINS,
+        allowMethods: Cors.ALL_METHODS,
+      },
+      policy: new PolicyDocument({
+        statements: [
+          // Allow all callers to invoke the API in the resource policy, since auth is handled by Cognito
+          new PolicyStatement({
+            effect: Effect.ALLOW,
+            principals: [new AnyPrincipal()],
+            actions: ['execute-api:Invoke'],
+            resources: ['execute-api:/*'],
+          }),
+        ],
+      }),
+      operations: routerToOperations(appRouter),
+      ...props,
+    });
+  }
+}
+"
+`;
+
+exports[`trpc backend generator > should generate with cognito auth for an HTTP API > apps/test-api/backend/src/client/index.ts 1`] = `
+"import { createTRPCClient, httpLink, HTTPLinkOptions } from '@trpc/client';
+import { AppRouter } from '../router.js';
+
+export interface TestApiClientConfig {
+  readonly url: string;
+  readonly token: string;
+}
+
+export const createTestApiClient = (config: TestApiClientConfig) => {
+  const linkOptions: HTTPLinkOptions<any> = {
+    url: config.url,
+    headers: {
+      Authorization: \`Bearer \${config.token}\`,
+    },
+  };
+  return createTRPCClient<AppRouter>({
+    links: [httpLink(linkOptions)],
+  });
+};
+"
+`;
+
+exports[`trpc backend generator > should generate with cognito auth for an HTTP API > packages/common/constructs/src/app/apis/index.ts 1`] = `
+"export * from './test-api.js';
+"
+`;
+
+exports[`trpc backend generator > should generate with cognito auth for an HTTP API > packages/common/constructs/src/app/apis/test-api.ts 1`] = `
+"import { Construct } from 'constructs';
+import * as url from 'url';
+import {
+  Code,
+  Runtime,
+  Function,
+  FunctionProps,
+  Tracing,
+} from 'aws-cdk-lib/aws-lambda';
+import { Duration } from 'aws-cdk-lib';
+import { CorsHttpMethod } from 'aws-cdk-lib/aws-apigatewayv2';
+import { HttpUserPoolAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
+import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
+import { IUserPool, IUserPoolClient } from 'aws-cdk-lib/aws-cognito';
+import {
+  HttpApiIntegration,
+  IntegrationBuilder,
+} from '../../core/api/utils.js';
+import { HttpApi } from '../../core/api/http-api.js';
+import { Procedures, routerToOperations } from '../../core/api/trpc-utils.js';
+import { AppRouter, appRouter } from ':proj/test-api';
+
+// String union type for all API operation names
+type Operations = Procedures<AppRouter>;
+
+/**
+ * Properties for creating a TestApi construct
+ *
+ * @template TIntegrations - Map of operation names to their integrations
+ */
+export interface TestApiProps<
+  TIntegrations extends Record<Operations, HttpApiIntegration>,
+> {
+  /**
+   * Map of operation names to their API Gateway integrations
+   */
+  integrations: TIntegrations;
+  /**
+   * Identity details for Cognito Authentication
+   */
+  identity: {
+    userPool: IUserPool;
+    userPoolClient: IUserPoolClient;
+  };
+}
+
+/**
+ * A CDK construct that creates and configures an AWS API Gateway HTTP API
+ * specifically for TestApi.
+ * @template TIntegrations - Map of operation names to their integrations
+ */
+export class TestApi<
+  TIntegrations extends Record<Operations, HttpApiIntegration>,
+> extends HttpApi<Operations, TIntegrations> {
+  /**
+   * Creates default integrations for all operations, which implement each operation as
+   * its own individual lambda function.
+   *
+   * @param scope - The CDK construct scope
+   * @returns An IntegrationBuilder with default lambda integrations
+   */
+  public static defaultIntegrations = (scope: Construct) => {
+    return IntegrationBuilder.http({
+      operations: routerToOperations(appRouter),
+      defaultIntegrationOptions: {
+        runtime: Runtime.NODEJS_LATEST,
+        handler: 'index.handler',
+        code: Code.fromAsset(
+          url.fileURLToPath(
+            new URL(
+              '../../../../../../dist/apps/test-api/backend/bundle',
+              import.meta.url,
+            ),
+          ),
+        ),
+        timeout: Duration.seconds(30),
+        tracing: Tracing.ACTIVE,
+        environment: {
+          AWS_CONNECTION_REUSE_ENABLED: '1',
+        },
+      } satisfies FunctionProps,
+      buildDefaultIntegration: (op, props: FunctionProps) => {
+        const handler = new Function(scope, \`TestApi\${op}Handler\`, props);
+        return {
+          handler,
+          integration: new HttpLambdaIntegration(
+            \`TestApi\${op}Integration\`,
+            handler,
+          ),
+        };
+      },
+    });
+  };
+
+  constructor(
+    scope: Construct,
+    id: string,
+    props: TestApiProps<TIntegrations>,
+  ) {
+    super(scope, id, {
+      apiName: 'TestApi',
+      corsPreflight: {
+        allowOrigins: ['*'],
+        allowMethods: [CorsHttpMethod.ANY],
+        allowHeaders: [
+          'authorization',
+          'content-type',
+          'x-amz-content-sha256',
+          'x-amz-date',
+          'x-amz-security-token',
+        ],
+      },
+      defaultAuthorizer: new HttpUserPoolAuthorizer(
+        'TestApiAuthorizer',
+        props.identity.userPool,
+        {
+          userPoolClients: [props.identity.userPoolClient],
+        },
+      ),
+      operations: routerToOperations(appRouter),
+      ...props,
+    });
+  }
+}
+"
+`;
+
+exports[`trpc backend generator > should generate with no auth for a REST API > apps/test-api/backend/src/client/index.ts 1`] = `
+"import { createTRPCClient, httpLink, HTTPLinkOptions } from '@trpc/client';
+import { AppRouter } from '../router.js';
+
+export interface TestApiClientConfig {
+  readonly url: string;
+}
+
+export const createTestApiClient = (config: TestApiClientConfig) => {
+  const linkOptions: HTTPLinkOptions<any> = {
+    url: config.url,
+  };
+  return createTRPCClient<AppRouter>({
+    links: [httpLink(linkOptions)],
+  });
+};
+"
+`;
+
+exports[`trpc backend generator > should generate with no auth for a REST API > packages/common/constructs/src/app/apis/index.ts 1`] = `
+"export * from './test-api.js';
+"
+`;
+
+exports[`trpc backend generator > should generate with no auth for a REST API > packages/common/constructs/src/app/apis/test-api.ts 1`] = `
+"import { Construct } from 'constructs';
+import * as url from 'url';
+import {
+  Code,
+  Runtime,
+  Function,
+  FunctionProps,
+  Tracing,
+} from 'aws-cdk-lib/aws-lambda';
+import {
+  AuthorizationType,
+  Cors,
+  LambdaIntegration,
+} from 'aws-cdk-lib/aws-apigateway';
+import { Duration } from 'aws-cdk-lib';
+import {
+  PolicyDocument,
+  PolicyStatement,
+  Effect,
+  AnyPrincipal,
+} from 'aws-cdk-lib/aws-iam';
+import {
+  IntegrationBuilder,
+  RestApiIntegration,
+} from '../../core/api/utils.js';
+import { RestApi } from '../../core/api/rest-api.js';
+import { Procedures, routerToOperations } from '../../core/api/trpc-utils.js';
+import { AppRouter, appRouter } from ':proj/test-api';
+
+// String union type for all API operation names
+type Operations = Procedures<AppRouter>;
+
+/**
+ * Properties for creating a TestApi construct
+ *
+ * @template TIntegrations - Map of operation names to their integrations
+ */
+export interface TestApiProps<
+  TIntegrations extends Record<Operations, RestApiIntegration>,
+> {
+  /**
+   * Map of operation names to their API Gateway integrations
+   */
+  integrations: TIntegrations;
+}
+
+/**
+ * A CDK construct that creates and configures an AWS API Gateway REST API
+ * specifically for TestApi.
+ * @template TIntegrations - Map of operation names to their integrations
+ */
+export class TestApi<
+  TIntegrations extends Record<Operations, RestApiIntegration>,
+> extends RestApi<Operations, TIntegrations> {
+  /**
+   * Creates default integrations for all operations, which implement each operation as
+   * its own individual lambda function.
+   *
+   * @param scope - The CDK construct scope
+   * @returns An IntegrationBuilder with default lambda integrations
+   */
+  public static defaultIntegrations = (scope: Construct) => {
+    return IntegrationBuilder.rest({
+      operations: routerToOperations(appRouter),
+      defaultIntegrationOptions: {
+        runtime: Runtime.NODEJS_LATEST,
+        handler: 'index.handler',
+        code: Code.fromAsset(
+          url.fileURLToPath(
+            new URL(
+              '../../../../../../dist/apps/test-api/backend/bundle',
+              import.meta.url,
+            ),
+          ),
+        ),
+        timeout: Duration.seconds(30),
+        tracing: Tracing.ACTIVE,
+        environment: {
+          AWS_CONNECTION_REUSE_ENABLED: '1',
+        },
+      } satisfies FunctionProps,
+      buildDefaultIntegration: (op, props: FunctionProps) => {
+        const handler = new Function(scope, \`TestApi\${op}Handler\`, props);
+        return { handler, integration: new LambdaIntegration(handler) };
+      },
+    });
+  };
+
+  constructor(
+    scope: Construct,
+    id: string,
+    props: TestApiProps<TIntegrations>,
+  ) {
+    super(scope, id, {
+      apiName: 'TestApi',
+      defaultMethodOptions: {
+        authorizationType: AuthorizationType.NONE,
+      },
+      defaultCorsPreflightOptions: {
+        allowOrigins: Cors.ALL_ORIGINS,
+        allowMethods: Cors.ALL_METHODS,
+      },
+      policy: new PolicyDocument({
+        statements: [
+          // Allow all callers to invoke the API in the resource policy
+          new PolicyStatement({
+            effect: Effect.ALLOW,
+            principals: [new AnyPrincipal()],
+            actions: ['execute-api:Invoke'],
+            resources: ['execute-api:/*'],
+          }),
+        ],
+      }),
+      operations: routerToOperations(appRouter),
+      ...props,
+    });
+  }
+}
+"
+`;
+
+exports[`trpc backend generator > should generate with no auth for an HTTP API > apps/test-api/backend/src/client/index.ts 1`] = `
+"import { createTRPCClient, httpLink, HTTPLinkOptions } from '@trpc/client';
+import { AppRouter } from '../router.js';
+
+export interface TestApiClientConfig {
+  readonly url: string;
+}
+
+export const createTestApiClient = (config: TestApiClientConfig) => {
+  const linkOptions: HTTPLinkOptions<any> = {
+    url: config.url,
+  };
+  return createTRPCClient<AppRouter>({
+    links: [httpLink(linkOptions)],
+  });
+};
+"
+`;
+
+exports[`trpc backend generator > should generate with no auth for an HTTP API > packages/common/constructs/src/app/apis/index.ts 1`] = `
+"export * from './test-api.js';
+"
+`;
+
+exports[`trpc backend generator > should generate with no auth for an HTTP API > packages/common/constructs/src/app/apis/test-api.ts 1`] = `
+"import { Construct } from 'constructs';
+import * as url from 'url';
+import {
+  Code,
+  Runtime,
+  Function,
+  FunctionProps,
+  Tracing,
+} from 'aws-cdk-lib/aws-lambda';
+import { Duration } from 'aws-cdk-lib';
+import {
+  CorsHttpMethod,
+  HttpNoneAuthorizer,
+} from 'aws-cdk-lib/aws-apigatewayv2';
+import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
+import {
+  HttpApiIntegration,
+  IntegrationBuilder,
+} from '../../core/api/utils.js';
+import { HttpApi } from '../../core/api/http-api.js';
+import { Procedures, routerToOperations } from '../../core/api/trpc-utils.js';
+import { AppRouter, appRouter } from ':proj/test-api';
+
+// String union type for all API operation names
+type Operations = Procedures<AppRouter>;
+
+/**
+ * Properties for creating a TestApi construct
+ *
+ * @template TIntegrations - Map of operation names to their integrations
+ */
+export interface TestApiProps<
+  TIntegrations extends Record<Operations, HttpApiIntegration>,
+> {
+  /**
+   * Map of operation names to their API Gateway integrations
+   */
+  integrations: TIntegrations;
+}
+
+/**
+ * A CDK construct that creates and configures an AWS API Gateway HTTP API
+ * specifically for TestApi.
+ * @template TIntegrations - Map of operation names to their integrations
+ */
+export class TestApi<
+  TIntegrations extends Record<Operations, HttpApiIntegration>,
+> extends HttpApi<Operations, TIntegrations> {
+  /**
+   * Creates default integrations for all operations, which implement each operation as
+   * its own individual lambda function.
+   *
+   * @param scope - The CDK construct scope
+   * @returns An IntegrationBuilder with default lambda integrations
+   */
+  public static defaultIntegrations = (scope: Construct) => {
+    return IntegrationBuilder.http({
+      operations: routerToOperations(appRouter),
+      defaultIntegrationOptions: {
+        runtime: Runtime.NODEJS_LATEST,
+        handler: 'index.handler',
+        code: Code.fromAsset(
+          url.fileURLToPath(
+            new URL(
+              '../../../../../../dist/apps/test-api/backend/bundle',
+              import.meta.url,
+            ),
+          ),
+        ),
+        timeout: Duration.seconds(30),
+        tracing: Tracing.ACTIVE,
+        environment: {
+          AWS_CONNECTION_REUSE_ENABLED: '1',
+        },
+      } satisfies FunctionProps,
+      buildDefaultIntegration: (op, props: FunctionProps) => {
+        const handler = new Function(scope, \`TestApi\${op}Handler\`, props);
+        return {
+          handler,
+          integration: new HttpLambdaIntegration(
+            \`TestApi\${op}Integration\`,
+            handler,
+          ),
+        };
+      },
+    });
+  };
+
+  constructor(
+    scope: Construct,
+    id: string,
+    props: TestApiProps<TIntegrations>,
+  ) {
+    super(scope, id, {
+      apiName: 'TestApi',
+      corsPreflight: {
+        allowOrigins: ['*'],
+        allowMethods: [CorsHttpMethod.ANY],
+        allowHeaders: [
+          'authorization',
+          'content-type',
+          'x-amz-content-sha256',
+          'x-amz-date',
+          'x-amz-security-token',
+        ],
+      },
+      defaultAuthorizer: new HttpNoneAuthorizer(),
+      operations: routerToOperations(appRouter),
+      ...props,
+    });
+  }
+}
+"
+`;
+
 exports[`trpc backend generator > should set up shared constructs for http > http-api.ts 1`] = `
 "import { Construct } from 'constructs';
 import { RuntimeConfig } from '../runtime-config.js';
-import { Grant, IGrantable } from 'aws-cdk-lib/aws-iam';
 import { HttpApiIntegration, OperationDetails } from './utils.js';
 import { CfnOutput } from 'aws-cdk-lib';
 import {
@@ -389,7 +983,7 @@ export class HttpApi<
     super(scope, id);
     this.integrations = integrations;
 
-    // Create the API Gateway REST API with logging enabled
+    // Create the API Gateway REST API
     this.api = new _HttpApi(this, 'Api', {
       ...props,
     });
@@ -418,19 +1012,6 @@ export class HttpApi<
       [apiName]: this.api.url!,
     };
   }
-
-  /**
-   * Grants IAM permissions to invoke any method on this API.
-   *
-   * @param grantee - The IAM principal to grant permissions to
-   */
-  public grantInvokeAccess(grantee: IGrantable) {
-    Grant.addToPrincipal({
-      grantee,
-      actions: ['execute-api:Invoke'],
-      resourceArns: [this.api.arnForExecuteApi('*', '/*', '*')],
-    });
-  }
 }
 "
 `;
@@ -449,6 +1030,7 @@ import { Duration } from 'aws-cdk-lib';
 import { CorsHttpMethod } from 'aws-cdk-lib/aws-apigatewayv2';
 import { HttpIamAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
 import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
+import { Grant, IGrantable } from 'aws-cdk-lib/aws-iam';
 import {
   HttpApiIntegration,
   IntegrationBuilder,
@@ -543,6 +1125,19 @@ export class TestApi<
       defaultAuthorizer: new HttpIamAuthorizer(),
       operations: routerToOperations(appRouter),
       ...props,
+    });
+  }
+
+  /**
+   * Grants IAM permissions to invoke any method on this API.
+   *
+   * @param grantee - The IAM principal to grant permissions to
+   */
+  public grantInvokeAccess(grantee: IGrantable) {
+    Grant.addToPrincipal({
+      grantee,
+      actions: ['execute-api:Invoke'],
+      resourceArns: [this.api.arnForExecuteApi('*', '/*', '*')],
     });
   }
 }
@@ -858,7 +1453,6 @@ import {
   IResource,
 } from 'aws-cdk-lib/aws-apigateway';
 import { RuntimeConfig } from '../runtime-config.js';
-import { Grant, IGrantable } from 'aws-cdk-lib/aws-iam';
 import { OperationDetails, RestApiIntegration } from './utils.js';
 
 /**
@@ -965,19 +1559,6 @@ export class RestApi<
       resource.getResource(nextPathPart) ?? resource.addResource(nextPathPart);
     return this.getOrCreateResource(childResource, pathParts);
   }
-
-  /**
-   * Grants IAM permissions to invoke any method on this API.
-   *
-   * @param grantee - The IAM principal to grant permissions to
-   */
-  public grantInvokeAccess(grantee: IGrantable) {
-    Grant.addToPrincipal({
-      grantee,
-      actions: ['execute-api:Invoke'],
-      resourceArns: [this.api.arnForExecuteApi('*', '/*', '*')],
-    });
-  }
 }
 "
 `;
@@ -1002,8 +1583,10 @@ import {
   PolicyDocument,
   PolicyStatement,
   Effect,
-  AccountPrincipal,
   AnyPrincipal,
+  AccountPrincipal,
+  IGrantable,
+  Grant,
 } from 'aws-cdk-lib/aws-iam';
 import {
   IntegrationBuilder,
@@ -1108,6 +1691,19 @@ export class TestApi<
       }),
       operations: routerToOperations(appRouter),
       ...props,
+    });
+  }
+
+  /**
+   * Grants IAM permissions to invoke any method on this API.
+   *
+   * @param grantee - The IAM principal to grant permissions to
+   */
+  public grantInvokeAccess(grantee: IGrantable) {
+    Grant.addToPrincipal({
+      grantee,
+      actions: ['execute-api:Invoke'],
+      resourceArns: [this.api.arnForExecuteApi('*', '/*', '*')],
     });
   }
 }

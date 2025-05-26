@@ -11,15 +11,30 @@ import {
   AuthorizationType,
   Cors,
   LambdaIntegration,
+  <%_ if (auth === 'Cognito') { _%>
+  CognitoUserPoolsAuthorizer,
+  <%_ } _%>
 } from 'aws-cdk-lib/aws-apigateway';
-import { Duration, Stack } from 'aws-cdk-lib';
+import {
+  Duration,
+  <%_ if (auth === 'IAM') { _%>
+  Stack,
+  <%_ } _%>
+} from 'aws-cdk-lib';
 import {
   PolicyDocument,
   PolicyStatement,
   Effect,
-  AccountPrincipal,
   AnyPrincipal,
+  <%_ if (auth === 'IAM') { _%>
+  AccountPrincipal,
+  IGrantable,
+  Grant,
+  <%_ } _%>
 } from 'aws-cdk-lib/aws-iam';
+<%_ if (auth === 'Cognito') { _%>
+import { IUserPool } from 'aws-cdk-lib/aws-cognito';
+<%_ } _%>
 import {
   IntegrationBuilder,
   RestApiIntegration,
@@ -50,6 +65,12 @@ export interface <%= apiNameClassName %>Props<
    * Map of operation names to their API Gateway integrations
    */
   integrations: TIntegrations;
+  <%_ if (auth === 'Cognito') { _%>
+  /**
+   * User pool for Cognito authentication
+   */
+  userPool: IUserPool;
+  <%_ } _%>
 }
 
 /**
@@ -119,7 +140,16 @@ export class <%= apiNameClassName %><
     super(scope, id, {
       apiName: '<%= apiNameClassName %>',
       defaultMethodOptions: {
+        <%_ if (auth === 'IAM') { _%>
         authorizationType: AuthorizationType.IAM,
+        <%_ } else if (auth === 'Cognito') { _%>
+        authorizationType: AuthorizationType.COGNITO,
+        authorizer: new CognitoUserPoolsAuthorizer(scope, '<%= apiNameClassName %>Authorizer', {
+          cognitoUserPools: [props.userPool],
+        }),
+        <%_ } else if (auth === 'None') { _%>
+        authorizationType: AuthorizationType.NONE,
+        <%_ } _%>
       },
       defaultCorsPreflightOptions: {
         allowOrigins: Cors.ALL_ORIGINS,
@@ -127,6 +157,7 @@ export class <%= apiNameClassName %><
       },
       policy: new PolicyDocument({
         statements: [
+          <%_ if (auth === 'IAM') { _%>
           // Here we grant any AWS credentials from the account that the project is deployed in to call the api.
           // Machine to machine fine-grained access can be defined here using more specific principals (eg roles or
           // users) and resources (eg which api paths may be invoked by which principal) if required.
@@ -143,6 +174,15 @@ export class <%= apiNameClassName %><
             actions: ['execute-api:Invoke'],
             resources: ['execute-api:/*/OPTIONS/*'],
           }),
+          <%_ } else { _%>
+          // Allow all callers to invoke the API in the resource policy<% if (auth === 'Cognito') { %>, since auth is handled by Cognito<% } %>
+          new PolicyStatement({
+            effect: Effect.ALLOW,
+            principals: [new AnyPrincipal()],
+            actions: ['execute-api:Invoke'],
+            resources: ['execute-api:/*'],
+          }),
+          <%_ } _%>
         ],
       }),
       <%_ if (backend.type === 'trpc') { _%>
@@ -153,4 +193,19 @@ export class <%= apiNameClassName %><
       ...props,
     });
   }
+  <%_ if (auth === 'IAM') { _%>
+
+  /**
+   * Grants IAM permissions to invoke any method on this API.
+   *
+   * @param grantee - The IAM principal to grant permissions to
+   */
+  public grantInvokeAccess(grantee: IGrantable) {
+    Grant.addToPrincipal({
+      grantee,
+      actions: ['execute-api:Invoke'],
+      resourceArns: [this.api.arnForExecuteApi('*', '/*', '*')],
+    });
+  }
+  <%_ } _%>
 }

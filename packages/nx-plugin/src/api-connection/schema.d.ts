@@ -6,5 +6,4 @@
 export interface ApiConnectionGeneratorSchema {
   sourceProject: string;
   targetProject: string;
-  auth: 'IAM' | 'None';
 }

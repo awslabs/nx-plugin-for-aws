@@ -53,13 +53,11 @@ describe('api connection generator', () => {
       await apiConnectionGenerator(tree, {
         sourceProject: 'frontend',
         targetProject: 'api',
-        auth: 'IAM',
       });
 
       expect(fastApiReactGenerator).toHaveBeenCalledWith(tree, {
         frontendProjectName: 'frontend',
         fastApiProjectName: 'api',
-        auth: 'IAM',
       });
     });
 
@@ -94,13 +92,11 @@ describe('api connection generator', () => {
       await apiConnectionGenerator(tree, {
         sourceProject: 'frontend',
         targetProject: 'api',
-        auth: 'IAM',
       });
 
       expect(trpcReactGenerator).toHaveBeenCalledWith(tree, {
         frontendProjectName: 'frontend',
         backendProjectName: 'api',
-        auth: 'IAM',
       });
     });
 
@@ -130,7 +126,6 @@ describe('api connection generator', () => {
         apiConnectionGenerator(tree, {
           sourceProject: 'unknown',
           targetProject: 'api',
-          auth: 'IAM',
         }),
       ).rejects.toThrow(
         'This generator does not support selected source project unknown',
@@ -161,7 +156,6 @@ describe('api connection generator', () => {
         apiConnectionGenerator(tree, {
           sourceProject: 'frontend',
           targetProject: 'unknown',
-          auth: 'IAM',
         }),
       ).rejects.toThrow(
         'This generator does not support selected target project unknown',
@@ -195,7 +189,6 @@ describe('api connection generator', () => {
         apiConnectionGenerator(tree, {
           sourceProject: 'api1',
           targetProject: 'api2',
-          auth: 'IAM',
         }),
       ).rejects.toThrow(
         'This generator does not support a connection from api1 (ts#trpc-api) to api2 (ts#trpc-api)',

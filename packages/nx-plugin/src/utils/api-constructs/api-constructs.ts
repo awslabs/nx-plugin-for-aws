@@ -42,6 +42,7 @@ export interface AddApiGatewayConstructOptions {
   apiNameKebabCase: string;
   constructType: 'http' | 'rest';
   backend: TrpcBackendOptions | FastApiBackendOptions;
+  auth: 'IAM' | 'Cognito' | 'None';
 }
 
 /**

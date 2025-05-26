@@ -56,7 +56,9 @@ export const fastApiReactGenerator = async (
     project: fastApiProjectConfig,
   });
 
-  const apiName = (fastApiProjectConfig.metadata as any)?.apiName;
+  const metadata = fastApiProjectConfig.metadata as any;
+  const apiName = metadata?.apiName;
+  const auth = metadata?.auth ?? 'IAM';
   const clientGenTarget = `generate:${kebabCase(apiName)}-client`;
 
   const generatedClientDir = joinPathFragments('generated', kebabCase(apiName));
@@ -123,7 +125,7 @@ export const fastApiReactGenerator = async (
   });
 
   // Add sigv4 fetch
-  if (options.auth === 'IAM') {
+  if (auth === 'IAM') {
     generateFiles(
       tree,
       joinPathFragments(__dirname, '../../../utils/files/website/hooks/sigv4'),
@@ -161,7 +163,7 @@ export const fastApiReactGenerator = async (
     joinPathFragments(__dirname, 'files', 'website'),
     frontendProjectConfig.sourceRoot,
     {
-      auth: options.auth,
+      auth,
       apiName,
       apiNameClassName,
       generatedClientDir,
@@ -225,7 +227,7 @@ export const fastApiReactGenerator = async (
   addDependenciesToPackageJson(
     tree,
     withVersions([
-      ...((options.auth === 'IAM'
+      ...((auth === 'IAM'
         ? [
             'oidc-client-ts',
             'react-oidc-context',
@@ -234,6 +236,7 @@ export const fastApiReactGenerator = async (
             'aws4fetch',
           ]
         : []) as any),
+      ...((auth === 'Cognito' ? ['react-oidc-context'] : []) as any),
       '@tanstack/react-query',
     ]),
     withVersions(['@smithy/types']),
@@ -245,18 +248,6 @@ export const fastApiReactGenerator = async (
   return () => {
     installPackagesTask(tree);
   };
-};
-
-const getFastApiModuleName = (projectConfig: ProjectConfiguration): string => {
-  if (projectConfig.sourceRoot) {
-    const sourceRootParts = projectConfig.sourceRoot.split('/');
-    return sourceRootParts[sourceRootParts.length - 1];
-  }
-  const apiName = (projectConfig.metadata as any)?.apiName;
-  if (apiName) {
-    return snakeCase(apiName);
-  }
-  new Error(`Could not determine sourceRoot for project ${projectConfig.name}`);
 };
 
 export default fastApiReactGenerator;

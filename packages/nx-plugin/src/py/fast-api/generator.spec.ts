@@ -30,6 +30,7 @@ describe('fastapi project generator', () => {
       name: 'test-api',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
     });
 
     // Verify project structure
@@ -48,6 +49,7 @@ describe('fastapi project generator', () => {
       name: 'test-api',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
     });
 
     const projectConfig = JSON.parse(
@@ -88,6 +90,7 @@ describe('fastapi project generator', () => {
       name: 'test-api',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
     });
 
     const pyprojectToml = parse(
@@ -107,6 +110,7 @@ describe('fastapi project generator', () => {
       name: 'test-api',
       directory: 'apps/nested/path',
       computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
     });
 
     // Verify shared constructs setup
@@ -146,6 +150,7 @@ describe('fastapi project generator', () => {
       name: 'test-api',
       directory: 'apps/nested/path',
       computeType: 'ServerlessApiGatewayRestApi',
+      auth: 'IAM',
     });
 
     // Verify shared constructs setup
@@ -185,6 +190,7 @@ describe('fastapi project generator', () => {
       name: 'test-api',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
     });
 
     const sharedConstructsConfig = JSON.parse(
@@ -207,6 +213,7 @@ describe('fastapi project generator', () => {
       name: 'test-api',
       directory: 'apps/nested/path',
       computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
     });
 
     expect(tree.exists('apps/nested/path/test_api')).toBeTruthy();
@@ -220,6 +227,7 @@ describe('fastapi project generator', () => {
       name: 'test-api',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
     });
 
     const config = JSON.parse(tree.read('apps/test_api/project.json', 'utf-8'));
@@ -227,6 +235,7 @@ describe('fastapi project generator', () => {
     expect(config.metadata).toEqual({
       apiName: 'test-api',
       apiType: 'fast-api',
+      auth: 'IAM',
       generator: FAST_API_GENERATOR_INFO.id,
     });
   });
@@ -236,6 +245,7 @@ describe('fastapi project generator', () => {
       name: 'test-api',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
     });
 
     const appChanges = sortObjectKeys(
@@ -257,6 +267,7 @@ describe('fastapi project generator', () => {
       name: 'test-api',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
     });
 
     // Verify the metric was added to app.ts
@@ -268,6 +279,7 @@ describe('fastapi project generator', () => {
       name: 'test-api',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayRestApi',
+      auth: 'IAM',
     });
 
     // Read the generated init.py file

@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
+import { Tree, updateJson } from '@nx/devkit';
 import {
   FAST_API_REACT_GENERATOR_INFO,
   fastApiReactGenerator,
@@ -36,6 +36,7 @@ describe('fastapi react generator', () => {
         sourceRoot: 'apps/backend/src',
         metadata: {
           apiName: 'TestApi',
+          auth: 'None',
         },
       }),
     );
@@ -57,7 +58,6 @@ export function Main() {
     await fastApiReactGenerator(tree, {
       frontendProjectName: 'frontend',
       fastApiProjectName: 'backend',
-      auth: 'None',
     });
 
     // Verify OpenAPI spec generation script was created
@@ -75,7 +75,6 @@ export function Main() {
     await fastApiReactGenerator(tree, {
       frontendProjectName: 'frontend',
       fastApiProjectName: 'backend',
-      auth: 'None',
     });
 
     const projectConfig = JSON.parse(
@@ -97,7 +96,6 @@ export function Main() {
     await fastApiReactGenerator(tree, {
       frontendProjectName: 'frontend',
       fastApiProjectName: 'backend',
-      auth: 'None',
     });
 
     const projectConfig = JSON.parse(
@@ -141,7 +139,6 @@ export function Main() {
     await fastApiReactGenerator(tree, {
       frontendProjectName: 'frontend',
       fastApiProjectName: 'backend',
-      auth: 'None',
     });
 
     // Verify hook file was created
@@ -159,7 +156,6 @@ export function Main() {
     await fastApiReactGenerator(tree, {
       frontendProjectName: 'frontend',
       fastApiProjectName: 'backend',
-      auth: 'None',
     });
 
     // Verify hook file was created
@@ -175,7 +171,6 @@ export function Main() {
     await fastApiReactGenerator(tree, {
       frontendProjectName: 'frontend',
       fastApiProjectName: 'backend',
-      auth: 'None',
     });
 
     // Verify providers were created
@@ -196,7 +191,6 @@ export function Main() {
     await fastApiReactGenerator(tree, {
       frontendProjectName: 'frontend',
       fastApiProjectName: 'backend',
-      auth: 'None',
     });
 
     expect(
@@ -225,13 +219,11 @@ export function Main() {
     await fastApiReactGenerator(tree, {
       frontendProjectName: 'frontend',
       fastApiProjectName: 'backend',
-      auth: 'None',
     });
 
     await fastApiReactGenerator(tree, {
       frontendProjectName: 'frontend',
       fastApiProjectName: 'backend',
-      auth: 'None',
     });
 
     // Check that there is still only a single QueryClientProvider
@@ -254,10 +246,16 @@ export function Main() {
   });
 
   it('should handle IAM auth option', async () => {
+    updateJson(tree, 'apps/backend/project.json', (config) => ({
+      ...config,
+      metadata: {
+        ...config.metadata,
+        auth: 'IAM',
+      },
+    }));
     await fastApiReactGenerator(tree, {
       frontendProjectName: 'frontend',
       fastApiProjectName: 'backend',
-      auth: 'IAM',
     });
 
     // Verify sigv4 hook was added
@@ -281,6 +279,32 @@ export function Main() {
     ).toMatchSnapshot('TestApiProvider-IAM.tsx');
   });
 
+  it('should handle Cognito auth option', async () => {
+    updateJson(tree, 'apps/backend/project.json', (config) => ({
+      ...config,
+      metadata: {
+        ...config.metadata,
+        auth: 'Cognito',
+      },
+    }));
+    await fastApiReactGenerator(tree, {
+      frontendProjectName: 'frontend',
+      fastApiProjectName: 'backend',
+    });
+
+    // Verify sigv4 hook was added
+    expect(tree.exists('apps/frontend/src/hooks/useSigV4.tsx')).toBeFalsy();
+
+    // Verify Cognito-specific dependencies were added
+    const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+    expect(packageJson.dependencies['react-oidc-context']).toBeDefined();
+
+    // Create snapshot of generated provider with Cognito auth
+    expect(
+      tree.read('apps/frontend/src/components/TestApiProvider.tsx', 'utf-8'),
+    ).toMatchSnapshot('TestApiProvider-Cognito.tsx');
+  });
+
   it('should add generator metric to app.ts', async () => {
     // Set up test tree with shared constructs
     await sharedConstructsGenerator(tree);
@@ -289,7 +313,6 @@ export function Main() {
     await fastApiReactGenerator(tree, {
       frontendProjectName: 'frontend',
       fastApiProjectName: 'backend',
-      auth: 'None',
     });
 
     // Verify the metric was added to app.ts
@@ -331,6 +354,7 @@ describe('fastapi react generator with unqualified names', () => {
         sourceRoot: 'apps/backend/src',
         metadata: {
           apiName: 'TestApi',
+          auth: 'None',
         },
       }),
     );
@@ -353,7 +377,6 @@ export function Main() {
     await fastApiReactGenerator(tree, {
       frontendProjectName: 'frontend', // Unqualified name (without @my-scope/)
       fastApiProjectName: 'my_scope.backend', // Fully qualified name
-      auth: 'None',
     });
 
     // Verify OpenAPI spec generation script was created
@@ -375,7 +398,6 @@ export function Main() {
     await fastApiReactGenerator(tree, {
       frontendProjectName: '@my-scope/frontend', // Fully qualified name
       fastApiProjectName: 'backend', // Unqualified name (without my_scope.)
-      auth: 'None',
     });
 
     // Verify OpenAPI spec generation script was created
@@ -397,7 +419,6 @@ export function Main() {
     await fastApiReactGenerator(tree, {
       frontendProjectName: 'frontend', // Unqualified name (without @my-scope/)
       fastApiProjectName: 'backend', // Unqualified name (without my_scope.)
-      auth: 'None',
     });
 
     // Verify OpenAPI spec generation script was created

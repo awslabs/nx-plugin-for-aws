@@ -96,6 +96,7 @@ export const pyFastApiProjectGenerator = async (
   projectConfig.metadata = {
     apiName: schema.name,
     apiType: 'fast-api',
+    auth: schema.auth,
   } as any;
 
   projectConfig.targets = sortObjectKeys(projectConfig.targets);
@@ -134,6 +135,7 @@ export const pyFastApiProjectGenerator = async (
       dir,
       apiNameSnakeCase,
     },
+    auth: schema.auth,
   });
 
   const generatedMetadataDir = joinPathFragments('generated', apiNameKebabCase);

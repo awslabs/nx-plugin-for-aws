@@ -57,6 +57,7 @@ export async function tsTrpcApiGenerator(
   const schemaName = `${apiNameKebabCase}-schema`;
   const backendProjectName = `${apiNamespace}${backendName}`;
   const schemaProjectName = `${apiNamespace}${schemaName}`;
+
   const enhancedOptions = {
     backendProjectName,
     backendProjectAlias: toScopeAlias(backendProjectName),
@@ -66,6 +67,7 @@ export async function tsTrpcApiGenerator(
     apiNameClassName,
     backendRoot,
     pkgMgrCmd: getPackageManagerCommand().exec,
+    apiGatewayEventType: getApiGatewayEventType(options),
     ...options,
   };
   await tsProjectGenerator(tree, {
@@ -89,6 +91,7 @@ export async function tsTrpcApiGenerator(
       projectAlias: enhancedOptions.backendProjectAlias,
       dir: backendRoot,
     },
+    auth: options.auth,
   });
 
   updateJson(
@@ -98,6 +101,7 @@ export async function tsTrpcApiGenerator(
       config.metadata = {
         apiName: options.name,
         apiType: 'trpc',
+        auth: options.auth,
       } as unknown;
 
       config.targets.serve = {
@@ -192,4 +196,17 @@ export async function tsTrpcApiGenerator(
     installPackagesTask(tree);
   };
 }
+
+const getApiGatewayEventType = (options: TsTrpcApiGeneratorSchema): string => {
+  if (options.computeType === 'ServerlessApiGatewayRestApi') {
+    return 'APIGatewayProxyEvent';
+  }
+  if (options.auth === 'IAM') {
+    return 'APIGatewayProxyEventV2WithIAMAuthorizer';
+  } else if (options.auth === 'Cognito') {
+    return 'APIGatewayProxyEventV2WithJWTAuthorizer';
+  }
+  return 'APIGatewayProxyEventV2';
+};
+
 export default tsTrpcApiGenerator;

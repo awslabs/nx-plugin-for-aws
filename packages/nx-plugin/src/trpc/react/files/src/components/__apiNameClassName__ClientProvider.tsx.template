@@ -1,0 +1,54 @@
+import { AppRouter } from "<%- backendProjectAlias %>";
+import { useQueryClient } from "@tanstack/react-query";
+import { createTRPCContext } from "@trpc/tanstack-react-query";
+import { FC, PropsWithChildren, useMemo } from "react";
+import { useRuntimeConfig } from "../hooks/useRuntimeConfig";
+import { HTTPLinkOptions, createTRPCClient, httpLink } from "@trpc/client";
+<%_ if (auth === 'IAM') { _%>
+import { useSigV4 } from "../hooks/useSigV4";
+<%_ } else if (auth === 'Cognito') { _%>
+import { useAuth } from "react-oidc-context";
+<%_ } _%>
+
+const { TRPCProvider, useTRPC } = createTRPCContext<AppRouter>();
+
+export const use<%= apiNameClassName %> = useTRPC;
+
+export const <%= apiNameClassName %>ClientProvider: FC<PropsWithChildren> = ({
+  children,
+}) => {
+  const queryClient = useQueryClient();
+  const runtimeConfig = useRuntimeConfig();
+  const apiUrl = runtimeConfig.apis.<%= apiNameClassName %>;
+
+  <%_ if (auth === 'IAM') { _%>
+  const sigv4Client = useSigV4();
+  <%_ } else if (auth === 'Cognito') { _%>
+  const { user } = useAuth();
+  <%_ } _%>
+
+  const trpcClient = useMemo(() => {
+    const linkOptions: HTTPLinkOptions<any> = {
+      url: apiUrl,
+      <%_ if (auth === 'IAM') { _%>
+      fetch: sigv4Client,
+      <%_ } else if (auth === 'Cognito') { _%>
+      headers: {
+        Authorization: `Bearer ${user?.id_token}`,
+      },
+      <%_ } _%>
+    };
+
+    return createTRPCClient<AppRouter>({
+      links: [httpLink(linkOptions)],
+    });
+  }, [apiUrl<% if (auth === 'IAM') { %>, sigv4Client<% } else if (auth === 'Cognito') { %>, user<% } %>]);
+
+  return (
+    <TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
+      {children}
+    </TRPCProvider>
+  );
+};
+
+export default <%= apiNameClassName %>ClientProvider;

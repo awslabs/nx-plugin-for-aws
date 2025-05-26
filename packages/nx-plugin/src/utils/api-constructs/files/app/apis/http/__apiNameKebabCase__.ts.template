@@ -8,9 +8,28 @@ import {
   Tracing,
 } from 'aws-cdk-lib/aws-lambda';
 import { Duration } from 'aws-cdk-lib';
-import { CorsHttpMethod } from 'aws-cdk-lib/aws-apigatewayv2';
-import { HttpIamAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
+import {
+  CorsHttpMethod,
+  <%_ if (auth === 'None') { _%>
+  HttpNoneAuthorizer,
+  <%_ } _%>
+} from 'aws-cdk-lib/aws-apigatewayv2';
+<%_ if (['IAM', 'Cognito'].includes(auth)) { _%>
+import {
+  <%_ if (auth === 'IAM') { _%>
+  HttpIamAuthorizer,
+  <%_ } else if (auth === 'Cognito') { _%>
+  HttpUserPoolAuthorizer,
+  <%_ } _%>
+} from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
+<%_ } _%>
 import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
+<%_ if (auth === 'Cognito') { _%>
+import { IUserPool, IUserPoolClient } from 'aws-cdk-lib/aws-cognito';
+<%_ } _%>
+<%_ if (auth === 'IAM') { _%>
+import { Grant, IGrantable } from 'aws-cdk-lib/aws-iam';
+<%_ } _%>
 import {
   HttpApiIntegration,
   IntegrationBuilder,
@@ -41,6 +60,15 @@ export interface <%= apiNameClassName %>Props<
    * Map of operation names to their API Gateway integrations
    */
   integrations: TIntegrations;
+  <%_ if (auth === 'Cognito') { _%>
+  /**
+   * Identity details for Cognito Authentication
+   */
+  identity: {
+    userPool: IUserPool;
+    userPoolClient: IUserPoolClient;
+  };
+  <%_ } _%>
 }
 
 /**
@@ -123,7 +151,15 @@ export class <%= apiNameClassName %><
           'x-amz-security-token',
         ],
       },
+      <%_ if (auth === 'IAM') { _%>
       defaultAuthorizer: new HttpIamAuthorizer(),
+      <%_ } else if (auth === 'Cognito') { _%>
+      defaultAuthorizer: new HttpUserPoolAuthorizer('<%= apiNameClassName %>Authorizer', props.identity.userPool, {
+        userPoolClients: [props.identity.userPoolClient]
+      }),
+      <%_ } else if (auth === 'None') { _%>
+      defaultAuthorizer: new HttpNoneAuthorizer(),
+      <%_ } _%>
       <%_ if (backend.type === 'trpc') { _%>
       operations: routerToOperations(appRouter),
       <%_ } else if (backend.type === 'fastapi') { _%>
@@ -132,4 +168,19 @@ export class <%= apiNameClassName %><
       ...props,
     });
   }
+  <%_ if (auth === 'IAM') { _%>
+
+  /**
+   * Grants IAM permissions to invoke any method on this API.
+   *
+   * @param grantee - The IAM principal to grant permissions to
+   */
+  public grantInvokeAccess(grantee: IGrantable) {
+    Grant.addToPrincipal({
+      grantee,
+      actions: ['execute-api:Invoke'],
+      resourceArns: [this.api.arnForExecuteApi('*', '/*', '*')],
+    });
+  }
+  <%_ } _%>
 }

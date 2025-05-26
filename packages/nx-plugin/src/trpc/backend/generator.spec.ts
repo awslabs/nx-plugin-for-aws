@@ -22,6 +22,7 @@ describe('trpc backend generator', () => {
       name: 'TestApi',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
     });
 
     // Verify project structure
@@ -43,6 +44,7 @@ describe('trpc backend generator', () => {
       name: 'TestApi',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
     });
     const backendProjectConfig = JSON.parse(
       tree.read('apps/test-api/backend/project.json', 'utf-8'),
@@ -51,6 +53,7 @@ describe('trpc backend generator', () => {
     expect(backendProjectConfig.metadata).toEqual({
       apiName: 'TestApi',
       apiType: 'trpc',
+      auth: 'IAM',
       generator: TRPC_BACKEND_GENERATOR_INFO.id,
     });
   });
@@ -60,6 +63,7 @@ describe('trpc backend generator', () => {
       name: 'TestApi',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
     });
     const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
     // Verify dependencies were added
@@ -85,6 +89,7 @@ describe('trpc backend generator', () => {
       name: 'TestApi',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
     });
     // Verify shared constructs setup
     expect(
@@ -126,6 +131,7 @@ describe('trpc backend generator', () => {
       name: 'TestApi',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayRestApi',
+      auth: 'IAM',
     });
     // Verify shared constructs setup
     expect(
@@ -167,6 +173,7 @@ describe('trpc backend generator', () => {
       name: 'TestApi',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
     });
     const projectConfig = readProjectConfiguration(tree, '@proj/test-api');
     expect(projectConfig.targets).toHaveProperty('serve');
@@ -182,6 +189,7 @@ describe('trpc backend generator', () => {
       name: 'TestApi',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
     });
 
     // Verify the metric was added to app.ts
@@ -193,6 +201,7 @@ describe('trpc backend generator', () => {
       name: 'TestApi',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayRestApi',
+      auth: 'IAM',
     });
 
     // Read the generated router.ts file
@@ -205,5 +214,65 @@ describe('trpc backend generator', () => {
     expect(routerTsContent).toContain('responseMeta: () => ({');
     expect(routerTsContent).toContain("'Access-Control-Allow-Origin': '*'");
     expect(routerTsContent).toContain("'Access-Control-Allow-Methods': '*'");
+  });
+
+  it('should generate with cognito auth for a REST API', async () => {
+    await tsTrpcApiGenerator(tree, {
+      name: 'TestApi',
+      directory: 'apps',
+      computeType: 'ServerlessApiGatewayRestApi',
+      auth: 'Cognito',
+    });
+    snapshotTreeDir(tree, 'apps/test-api/backend/src/client');
+    snapshotTreeDir(tree, 'packages/common/constructs/src/app/apis');
+
+    expect(
+      tree.read('packages/common/constructs/src/app/apis/test-api.ts', 'utf-8'),
+    ).toContain('CognitoUserPoolsAuthorizer');
+  });
+
+  it('should generate with cognito auth for an HTTP API', async () => {
+    await tsTrpcApiGenerator(tree, {
+      name: 'TestApi',
+      directory: 'apps',
+      computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'Cognito',
+    });
+    snapshotTreeDir(tree, 'apps/test-api/backend/src/client');
+    snapshotTreeDir(tree, 'packages/common/constructs/src/app/apis');
+
+    expect(
+      tree.read('packages/common/constructs/src/app/apis/test-api.ts', 'utf-8'),
+    ).toContain('HttpUserPoolAuthorizer');
+  });
+
+  it('should generate with no auth for a REST API', async () => {
+    await tsTrpcApiGenerator(tree, {
+      name: 'TestApi',
+      directory: 'apps',
+      computeType: 'ServerlessApiGatewayRestApi',
+      auth: 'None',
+    });
+    snapshotTreeDir(tree, 'apps/test-api/backend/src/client');
+    snapshotTreeDir(tree, 'packages/common/constructs/src/app/apis');
+
+    expect(
+      tree.read('packages/common/constructs/src/app/apis/test-api.ts', 'utf-8'),
+    ).toContain('AuthorizationType.NONE');
+  });
+
+  it('should generate with no auth for an HTTP API', async () => {
+    await tsTrpcApiGenerator(tree, {
+      name: 'TestApi',
+      directory: 'apps',
+      computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'None',
+    });
+    snapshotTreeDir(tree, 'apps/test-api/backend/src/client');
+    snapshotTreeDir(tree, 'packages/common/constructs/src/app/apis');
+
+    expect(
+      tree.read('packages/common/constructs/src/app/apis/test-api.ts', 'utf-8'),
+    ).toContain('HttpNoneAuthorizer');
   });
 });

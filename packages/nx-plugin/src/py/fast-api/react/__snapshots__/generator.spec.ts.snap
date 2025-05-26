@@ -32,7 +32,6 @@ exports[`fastapi react generator > should generate tanstack query options proxy 
 import { TestApi } from '../generated/test-api/client.gen';
 import { TestApiOptionsProxy } from '../generated/test-api/options-proxy.gen';
 import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
-import { useSigV4 } from '../hooks/useSigV4';
 
 export const TestApiContext = createContext<TestApiOptionsProxy | undefined>(
   undefined,
@@ -88,6 +87,74 @@ export const useTestApiClient = (): TestApi => {
 
   return client;
 };
+"
+`;
+
+exports[`fastapi react generator > should handle Cognito auth option > TestApiProvider-Cognito.tsx 1`] = `
+"import { createContext, FC, PropsWithChildren, useMemo } from 'react';
+import { TestApi } from '../generated/test-api/client.gen';
+import { TestApiOptionsProxy } from '../generated/test-api/options-proxy.gen';
+import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
+import { useAuth } from 'react-oidc-context';
+
+export const TestApiContext = createContext<TestApiOptionsProxy | undefined>(
+  undefined,
+);
+
+export const TestApiClientContext = createContext<TestApi | undefined>(
+  undefined,
+);
+
+const useCreateTestApiClient = (): TestApi => {
+  const runtimeConfig = useRuntimeConfig();
+  const apiUrl = runtimeConfig.apis.TestApi;
+  const { user } = useAuth();
+  const cognitoClient: typeof fetch = (url, init) => {
+    const headers = { Authorization: \`Bearer \${user?.id_token}\` };
+    const existingHeaders = init?.headers;
+
+    return fetch(url, {
+      ...init,
+      headers: !existingHeaders
+        ? headers
+        : existingHeaders instanceof Headers
+          ? (() => {
+              const h = new Headers(existingHeaders);
+              Object.entries(headers).forEach(([k, v]) => h.append(k, v));
+              return h;
+            })()
+          : Array.isArray(existingHeaders)
+            ? [...existingHeaders, ...Object.entries(headers)]
+            : { ...existingHeaders, ...headers },
+    });
+  };
+  return useMemo(
+    () =>
+      new TestApi({
+        url: apiUrl,
+        fetch: cognitoClient,
+      }),
+    [apiUrl, cognitoClient],
+  );
+};
+
+export const TestApiProvider: FC<PropsWithChildren> = ({ children }) => {
+  const client = useCreateTestApiClient();
+  const optionsProxy = useMemo(
+    () => new TestApiOptionsProxy({ client }),
+    [client],
+  );
+
+  return (
+    <TestApiClientContext.Provider value={client}>
+      <TestApiContext.Provider value={optionsProxy}>
+        {children}
+      </TestApiContext.Provider>
+    </TestApiClientContext.Provider>
+  );
+};
+
+export default TestApiProvider;
 "
 `;
 

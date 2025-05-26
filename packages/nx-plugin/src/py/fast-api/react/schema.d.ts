@@ -5,5 +5,4 @@
 export interface FastApiReactGeneratorSchema {
   frontendProjectName: string;
   fastApiProjectName: string;
-  auth: 'IAM' | 'None';
 }
