@@ -31,6 +31,15 @@ export default defineConfig({
       social: {
         github: 'https://github.com/awslabs/nx-plugin-for-aws',
       },
+      head: [
+        {
+          tag: 'meta',
+          attrs: {
+            property: 'og:image',
+            content: '/nx-plugin-for-aws/favicon.svg'
+          },
+        },
+      ],
       defaultLocale: 'en',
       locales: {
         en: {
