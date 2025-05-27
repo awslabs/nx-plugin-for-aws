@@ -10,7 +10,7 @@ import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 
-Le plugin AWS pour Nx fournit un générateur pour intégrer rapidement votre <Link path="guides/trpc">API tRPC</Link> avec un site React. Il configure tous les éléments nécessaires pour connecter vos backends tRPC, incluant le support d'authentification AWS IAM et une gestion d'erreurs appropriée. Cette intégration offre une sécurité de type de bout en bout entre votre frontend et vos backends tRPC.
+Le plugin AWS pour Nx fournit un générateur pour intégrer rapidement votre <Link path="guides/trpc">API tRPC</Link> avec un site React. Il configure tous les éléments nécessaires pour connecter vos backends tRPC, incluant le support d'authentification AWS IAM et Cognito ainsi qu'une gestion d'erreurs appropriée. Cette intégration offre une sécurité de type end-to-end complète entre votre frontend et vos backends tRPC.
 
 ## Prérequis
 
@@ -19,6 +19,7 @@ Avant d'utiliser ce générateur, assurez-vous que votre application React poss�
 1. Un fichier `main.tsx` qui rend votre application
 2. Un élément JSX `<App/>` où le provider tRPC sera injecté automatiquement
 3. Un backend tRPC fonctionnel (généré via le générateur de backend tRPC)
+4. Une authentification Cognito ajoutée via le <Link path="/guides/cloudscape-website-auth">générateur `ts#cloudscape-website-auth`</Link> si vous connectez une API utilisant l'authentification Cognito ou IAM
 
 <details>
 <summary>Exemple de structure requise pour `main.tsx`</summary>
@@ -70,7 +71,7 @@ Le générateur crée la structure suivante dans votre application React :
 
 </FileTree>
 
-Le générateur installe également les dépendances requises :
+De plus, il installe les dépendances requises :
 
   - `@trpc/client`
   - `@trpc/tanstack-react-query`
@@ -79,7 +80,7 @@ Le générateur installe également les dépendances requises :
 
 ## Utilisation du code généré
 
-### Utilisation du hook tRPC
+### Utiliser le hook tRPC
 
 Le générateur fournit un hook `use<ApiName>` donnant accès au client tRPC typé :
 
@@ -103,7 +104,7 @@ function MyComponent() {
     });
   };
 
-  if (isLoading) return <div>Loading...</div>;
+  if (isLoading) return <div>Chargement...</div>;
 
   return (
     <ul>
@@ -117,7 +118,7 @@ function MyComponent() {
 
 ### Gestion des erreurs
 
-L'intégration inclut une gestion d'erreurs prête à l'emploi :
+L'intégration inclut une gestion d'erreurs qui traite correctement les erreurs tRPC :
 
 ```tsx {4, 6}
 function MyComponent() {
@@ -128,7 +129,7 @@ function MyComponent() {
   if (error) {
     return (
       <div>
-        <h2>Erreur :</h2>
+        <h2>Erreur survenue :</h2>
         <p>{error.message}</p>
         {error.data?.code && <p>Code : {error.data.code}</p>}
       </div>
@@ -147,7 +148,7 @@ function MyComponent() {
 
 ## Bonnes pratiques
 
-### Gestion des états de chargement
+### Gérer les états de chargement
 
 Toujours gérer les états de chargement et d'erreur pour une meilleure expérience utilisateur :
 
@@ -190,15 +191,15 @@ function UserList() {
   const deleteMutation = useMutation(
     trpc.users.delete.mutationOptions({
       onMutate: async (userId) => {
-        // Annule les requêtes en cours
+        // Annuler les requêtes en cours
         await queryClient.cancelQueries(trpc.users.list.queryFilter());
 
-        // Capture l'état actuel
+        // Capturer l'état actuel des données
         const previousUsers = queryClient.getQueryData(
           trpc.users.list.queryKey(),
         );
 
-        // Suppression optimiste
+        // Suppression optimiste de l'utilisateur
         queryClient.setQueryData(trpc.users.list.queryKey(), (old) =>
           old?.filter((user) => user.id !== userId),
         );
@@ -206,7 +207,7 @@ function UserList() {
         return { previousUsers };
       },
       onError: (err, userId, context) => {
-        // Restaure les données précédentes en cas d'erreur
+        // Restaurer les données précédentes en cas d'erreur
         queryClient.setQueryData(
           trpc.users.list.queryKey(),
           context?.previousUsers,
@@ -230,7 +231,7 @@ function UserList() {
 
 ### Préchargement des données
 
-Préchargez les données pour améliorer les performances :
+Préchargez les données pour de meilleures performances :
 
 ```tsx {8}
 function UserList() {
@@ -238,7 +239,7 @@ function UserList() {
   const users = useQuery(trpc.users.list.queryOptions());
   const queryClient = useQueryClient();
 
-  // Précharge les détails au survol
+  // Précharger les détails utilisateur au survol
   const prefetchUser = async (userId: string) => {
     await queryClient.prefetchQuery(trpc.users.getById.queryOptions(userId));
   };
@@ -257,7 +258,7 @@ function UserList() {
 
 ### Requêtes infinies
 
-Gérez la pagination avec les requêtes infinies :
+Gérez la pagination avec des requêtes infinies :
 
 ```tsx {5-12}
 function UserList() {
@@ -289,7 +290,7 @@ function UserList() {
 }
 ```
 
-Notez que les requêtes infinies ne peuvent être utilisées qu'avec des procédures possédant une propriété d'entrée nommée `cursor`.
+Il est important de noter que les requêtes infinies ne peuvent être utilisées que pour les procédures possédant une propriété d'entrée nommée `cursor`.
 
 ## Sécurité de type
 
@@ -299,7 +300,7 @@ L'intégration fournit une sécurité de type complète de bout en bout. Votre I
 function UserForm() {
   const trpc = useMyApi();
 
-  // ✅ L'entrée est parfaitement typée
+  // ✅ L'entrée est entièrement typée
   const createUser = trpc.users.create.useMutation();
 
   const handleSubmit = (data: CreateUserInput) => {
@@ -311,7 +312,7 @@ function UserForm() {
 }
 ```
 
-Les types sont automatiquement inférés depuis les définitions de votre routeur backend, garantissant que tout changement d'API est immédiatement reflété dans votre frontend sans nécessiter de build.
+Les types sont automatiquement inférés depuis les définitions de votre routeur et schémas backend, garantissant que toute modification de votre API est immédiatement reflétée dans votre code frontend sans nécessiter de build.
 
 ## Informations complémentaires
 

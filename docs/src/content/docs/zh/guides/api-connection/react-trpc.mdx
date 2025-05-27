@@ -3,22 +3,23 @@ title: "React 连接到 tRPC"
 description: "将 React 网站连接到 tRPC API"
 ---
 
-
+<think>
 
 import { FileTree } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 
-Nx 的 AWS 插件提供了一个生成器，可快速将您的 <Link path="guides/trpc">tRPC API</Link> 与 React 网站集成。它会自动配置所有必要的后端连接配置，包括 AWS IAM 身份验证支持和正确的错误处理。该集成提供前端与 tRPC 后端之间的完整端到端类型安全。
+Nx 的 AWS 插件提供了一个生成器，可快速将您的 <Link path="guides/trpc">tRPC API</Link> 与 React 网站集成。它会设置所有必要的配置以连接到 tRPC 后端，包括 AWS IAM 和 Cognito 身份验证支持以及适当的错误处理。该集成在您的前端和 tRPC 后端之间提供完整的端到端类型安全。
 
 ## 前提条件
 
-使用此生成器前，请确保您的 React 应用具备：
+在使用此生成器之前，请确保您的 React 应用具备：
 
 1. 渲染应用的 `main.tsx` 文件
-2. 用于自动注入 tRPC provider 的 `<App/>` JSX 元素
-3. 可运行的 tRPC 后端（使用 tRPC 后端生成器生成）
+2. 自动注入 tRPC provider 的 `<App/>` JSX 元素
+3. 使用 tRPC 后端生成器创建的可运行 tRPC 后端
+4. 如果连接使用 Cognito 或 IAM 认证的 API，需通过 <Link path="/guides/cloudscape-website-auth">`ts#cloudscape-website-auth` 生成器</Link> 添加 Cognito 认证
 
 <details>
 <summary>所需 `main.tsx` 结构示例</summary>
@@ -52,7 +53,7 @@ root.render(
 
 ## 生成器输出
 
-生成器会在 React 应用中创建以下结构：
+生成器会在您的 React 应用中创建以下结构：
 
 <FileTree>
 
@@ -60,17 +61,17 @@ root.render(
   - components
     - TrpcClients
       - index.tsx
-      - TrpcProvider.tsx 用于多个 tRPC API 的复用 Provider
+      - TrpcProvider.tsx 可复用多个 tRPC API 的 Provider
       - TrpcApis.tsx 包含所有 tRPC API 连接的对象
       - TrpcClientProviders.tsx 设置 tRPC 客户端并绑定到后端 schema
     - QueryClientProvider.tsx TanStack React Query 客户端 Provider
   - hooks
-    - useSigV4.tsx 用于 SigV4 签名 HTTP 请求的钩子（仅限 IAM）
+    - useSigV4.tsx 用于使用 SigV4 签名 HTTP 请求的钩子（仅限 IAM）
     - use\<ApiName>.tsx 对应后端 API 的钩子。ApiName 将解析为 API 名称
 
 </FileTree>
 
-同时会安装以下依赖：
+同时会安装所需依赖：
 
   - `@trpc/client`
   - `@trpc/tanstack-react-query`
@@ -81,7 +82,7 @@ root.render(
 
 ### 使用 tRPC 钩子
 
-生成器提供 `use<ApiName>` 钩子来访问类型安全的 tRPC 客户端：
+生成器提供 `use<ApiName>` 钩子，让您可以访问类型安全的 tRPC 客户端：
 
 ```tsx {5,8,11}
 import { useQuery, useMutation } from '@tanstack/react-query';
@@ -103,7 +104,7 @@ function MyComponent() {
     });
   };
 
-  if (isLoading) return <div>Loading...</div>;
+  if (isLoading) return <div>加载中...</div>;
 
   return (
     <ul>
@@ -117,7 +118,7 @@ function MyComponent() {
 
 ### 错误处理
 
-集成包含内置的错误处理机制：
+集成包含内置错误处理，可正确处理 tRPC 错误：
 
 ```tsx {4, 6}
 function MyComponent() {
@@ -130,7 +131,7 @@ function MyComponent() {
       <div>
         <h2>发生错误：</h2>
         <p>{error.message}</p>
-        {error.data?.code && <p>错误代码: {error.data.code}</p>}
+        {error.data?.code && <p>错误码：{error.data.code}</p>}
       </div>
     );
   }
@@ -190,7 +191,7 @@ function UserList() {
   const deleteMutation = useMutation(
     trpc.users.delete.mutationOptions({
       onMutate: async (userId) => {
-        // 取消进行中的请求
+        // 取消正在进行的请求
         await queryClient.cancelQueries(trpc.users.list.queryFilter());
 
         // 获取当前数据快照
@@ -230,7 +231,7 @@ function UserList() {
 
 ### 数据预取
 
-通过预取提升性能：
+预取数据以提升性能：
 
 ```tsx {8}
 function UserList() {
@@ -257,7 +258,7 @@ function UserList() {
 
 ### 无限查询
 
-处理分页数据：
+使用无限查询处理分页：
 
 ```tsx {5-12}
 function UserList() {
@@ -289,7 +290,7 @@ function UserList() {
 }
 ```
 
-注意：无限查询仅适用于输入参数包含 `cursor` 属性的流程。
+需要注意的是，无限查询仅适用于输入属性包含 `cursor` 的 procedures。
 
 ## 类型安全
 
@@ -299,11 +300,11 @@ function UserList() {
 function UserForm() {
   const trpc = useMyApi();
 
-  // ✅ 输入类型完全匹配
+  // ✅ 输入完全类型化
   const createUser = trpc.users.create.useMutation();
 
   const handleSubmit = (data: CreateUserInput) => {
-    // ✅ 输入不符合 schema 时会产生类型错误
+    // ✅ 输入不匹配 schema 时会出现类型错误
     createUser.mutate(data);
   };
 
@@ -311,10 +312,10 @@ function UserForm() {
 }
 ```
 
-类型会自动从后端路由器和 schema 定义中推断，确保 API 的任何变更都能立即反映在前端代码中，无需重新构建。
+类型会自动从后端路由器和 schema 定义中推断，确保 API 的任何变更都能立即反映到前端代码中，无需重新构建。
 
 ## 更多信息
 
 更多信息请参考 [tRPC TanStack React Query 文档](https://trpc.io/docs/client/tanstack-react-query/usage)。
 
-也可直接查阅 [TanStack Query 文档](https://tanstack.com/query/v5)。
+您也可以直接查阅 [TanStack Query 文档](https://tanstack.com/query/v5)。

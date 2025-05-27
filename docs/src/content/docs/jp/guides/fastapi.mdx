@@ -14,13 +14,13 @@ import Snippet from '@components/snippet.astro';
 
 [FastAPI](https://fastapi.tiangolo.com/) はPythonでAPIを構築するためのフレームワークです。
 
-FastAPIジェネレータは、AWS CDKインフラストラクチャがセットアップされた新しいFastAPIプロジェクトを作成します。生成されるバックエンドはサーバーレスデプロイのためAWS Lambdaを使用し、AWS API Gateway API経由で公開されます。[AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/) を設定し、ロギング、AWS X-Rayトレーシング、Cloudwatchメトリクスを含むオブザーバビリティを実現します。
+FastAPIジェネレータは、AWS CDKインフラストラクチャがセットアップされた新しいFastAPIプロジェクトを作成します。生成されるバックエンドはサーバーレスデプロイのためAWS Lambdaを使用し、AWS API Gateway APIを介して公開されます。[AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/) を設定し、ロギング、AWS X-Rayトレーシング、CloudWatchメトリクスを含むオブザーバビリティを実現します。
 
 ## 使用方法
 
 ### FastAPIの生成
 
-新しいFastAPIプロジェクトは2つの方法で生成できます:
+新しいFastAPIプロジェクトを2つの方法で生成できます:
 
 <RunGenerator generator="py#fast-api" />
 
@@ -47,7 +47,7 @@ FastAPIジェネレータは、AWS CDKインフラストラクチャがセット
 
 </FileTree>
 
-また、`packages/common/constructs`ディレクトリにAPIのデプロイに使用できるCDKコンストラクトも作成します。
+また、`packages/common/constructs`ディレクトリにAPIをデプロイするためのCDKコンストラクトも作成します。
 
 ## FastAPIの実装
 
@@ -94,10 +94,10 @@ def read_item(item_id: int):
 
 ロガーには自動的に以下が含まれます:
 
-- リクエストトレースのための相関ID
+- リクエストトレース用相関ID
 - リクエストパスとメソッド
 - Lambdaコンテキスト情報
-- コールドスタートインジケータ
+- コールドスタート指標
 
 #### トレーシング
 
@@ -138,7 +138,7 @@ def read_item(item_id: int):
 
 ### エラーハンドリング
 
-包括的なエラーハンドリングが含まれます:
+包括的なエラーハンドリングを実装:
 
 ```python
 from fastapi import HTTPException
@@ -152,22 +152,22 @@ def read_item(item_id: int):
 
 未処理例外はミドルウェアで捕捉され:
 
-1. スタックトレース付きで例外をログ記録
+1. スタックトレース付きで例外を記録
 2. 失敗メトリクスを記録
 3. クライアントに安全な500レスポンスを返却
 4. 相関IDを保持
 
 :::tip
-`api-connection`ジェネレータを使用する場合、より良いコード生成のためAPI操作にレスポンスモデルを指定することを推奨します。<Link path="guides/api-connection/react-fastapi#errors">詳細はこちら</Link>
+`api-connection`ジェネレータを使用する場合、API操作のレスポンスモデルを明示的に指定することを推奨します。<Link path="guides/api-connection/react-fastapi#errors">詳細はこちら</Link>
 :::
 
 ### ストリーミング
 
-FastAPIでは[`StreamingResponse`](https://fastapi.tiangolo.com/reference/responses/?h=streaming#fastapi.responses.StreamingResponse)レスポンスタイプを使用してストリームレスポンスを実装できます。
+FastAPIでは[`StreamingResponse`](https://fastapi.tiangolo.com/reference/responses/?h=streaming#fastapi.responses.StreamingResponse)レスポンスタイプを使用してストリーミング応答を実装できます。
 
 #### インフラストラクチャ変更
 
-AWS API Gatewayはストリーミングレスポンスをサポートしていないため、ストリーミングをサポートするプラットフォームへのデプロイが必要です。最も簡単な方法はAWS Lambda Function URLを使用することです。生成された`common/constructs/src/app/apis/<name>-api.ts`コンストラクトをFunction URLをデプロイするものに置き換えることで実現できます。
+AWS API Gatewayはストリーミングレスポンスをサポートしていないため、AWS Lambda Function URLを使用する必要があります。生成された`common/constructs/src/app/apis/<name>-api.ts`コンストラクトをFunction URLをデプロイするものに置き換えます。
 
 <details>
 <summary>ストリーミングFunctionURLコンストラクトの例</summary>
@@ -240,7 +240,7 @@ export class MyApi extends Construct {
 
     new CfnOutput(this, 'MyApiUrl', { value: functionUrl.url });
 
-    // クライアントディスカバリのためランタイム設定にAPI URLを登録
+    // クライアントディスカバリのため実行時設定にAPI URLを登録
     RuntimeConfig.ensure(this).config.apis = {
       ...RuntimeConfig.ensure(this).config.apis!,
       MyApi: functionUrl.url,
@@ -266,18 +266,18 @@ export class MyApi extends Construct {
 </details>
 
 :::note
-エンドツーエンドの例については<Link path="/get_started/tutorials/dungeon-game/overview">ダンジョンアドベンチャーチュートリアル</Link>を参照してください
+エンドツーエンドの例については<Link path="/get_started/tutorials/dungeon-game/overview">ダンジョンアドベンチャーチュートリアル</Link>を参照
 :::
 
 #### 実装方法
 
-ストリーミングをサポートするようインフラストラクチャを更新したら、FastAPIでストリーミングAPIを実装できます。APIは以下を行う必要があります:
+インフラストラクチャを更新後、FastAPIでストリーミングAPIを実装できます。APIは以下を行う必要があります:
 
 - [`StreamingResponse`](https://fastapi.tiangolo.com/reference/responses/?h=streaming#fastapi.responses.StreamingResponse)を返す
-- 各レスポンスチャンクの戻り値型を宣言する
-- <Link path="guides/api-connection/react-fastapi">API接続</Link>を使用する場合はOpenAPIベンダー拡張`x-streaming: true`を追加
+- 各レスポンスチャンクの戻り型を宣言
+- <Link path="guides/api-connection/react-fastapi">API接続</Link>を使用する場合、OpenAPIベンダー拡張`x-streaming: true`を追加
 
-例: APIからJSONオブジェクトのストリームを送信する場合:
+JSONオブジェクトのストリームを返す例:
 
 ```py /return (StreamingResponse)/ /openapi_extra[^)]*/ /-> (Chunk)/
 from pydantic import BaseModel
@@ -298,7 +298,7 @@ def my_stream() -> Chunk:
 
 #### 消費方法
 
-ストリームレスポンスを消費するには、<Link path="guides/api-connection/react-fastapi#consuming-a-stream">API接続ジェネレータ</Link>を使用してタイプセーフなストリーム処理メソッドを利用できます。
+ストリームレスポンスを消費するには、<Link path="guides/api-connection/react-fastapi#consuming-a-stream">API接続ジェネレータ</Link>を使用して型安全な反復処理を実装できます。
 
 ## FastAPIのデプロイ
 
@@ -320,30 +320,51 @@ export class ExampleStack extends Stack {
 これにより以下が設定されます:
 
 1. FastAPIアプリの各操作用AWS Lambda関数
-2. 関数トリガーとしてのAPI Gateway HTTP/REST API
+2. API Gateway HTTP/REST APIトリガー
 3. IAMロールと権限
 4. CloudWatchロググループ
 5. X-Rayトレーシング設定
 6. CloudWatchメトリクスネームスペース
 
-### タイプセーフな統合
+:::note
+Cognito認証を選択した場合、APIコンストラクトに`identity`プロパティを指定する必要があります:
+
+```ts {9}
+import { MyApi, UserIdentity } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const identity = new UserIdentity(this, 'Identity');
+
+    const api = new MyApi(this, 'MyApi', {
+      integrations: MyApi.defaultIntegrations(this).build(),
+      identity,
+    });
+  }
+}
+```
+
+`UserIdentity`コンストラクトは<Link path="/guides/cloudscape-website-auth">`ts#cloudscape-website-auth`ジェネレータ</Link>で生成可能
+:::
+
+### 型安全な統合
 
 <Snippet name="api/type-safe-api-integrations" />
 
 #### コード生成
 
-FastAPIの操作はPythonで、インフラはTypeScriptで定義されるため、タイプセーフな統合インターフェースを提供するためメタデータをCDKコンストラクトに供給するコード生成を実施します。
+FastAPIの操作はPythonで定義され、インフラはTypeScriptで定義されるため、型安全な統合インターフェースを提供するためメタデータをCDKコンストラクトに供給するコード生成を実装します。
 
-共通コンストラクトの`project.json`に`generate:<ApiName>-metadata`ターゲットが追加され、`packages/common/constructs/src/generated/my-api/metadata.gen.ts`のようなファイルを生成します。ビルド時に生成されるためバージョン管理対象外です。
+`common/constructs`の`project.json`に`generate:<ApiName>-metadata`ターゲットを追加し、`packages/common/constructs/src/generated/my-api/metadata.gen.ts`のようなファイルを生成します。ビルド時に生成されるため、バージョン管理から除外されます。
 
 :::note
-APIを変更する際は、CDKコンストラクトが最新のタイプを消費できるようビルドを実行する必要があります。
+APIを変更する際は、CDKコンストラクトが消費する型を最新化するためビルドを実行する必要があります。
 
 <NxCommands commands={["run-many --target build --all"]} />
 :::
 
 :::tip
-CDKインフラとFastAPIを同時に開発する場合、[`nx watch`](https://nx.dev/nx-api/nx/documents/watch)を使用してAPI変更のたびにタイプを再生成できます:
+CDKインフラとFastAPIを同時に開発する場合、[`nx watch`](https://nx.dev/nx-api/nx/documents/watch)を使用してAPI変更の度に型を再生成できます:
 
 <NxCommands
   commands={[
@@ -353,9 +374,9 @@ CDKインフラとFastAPIを同時に開発する場合、[`nx watch`](https://n
 />
 :::
 
-### アクセス権限付与
+### アクセス権限付与（IAMのみ）
 
-`grantInvokeAccess`メソッドでAPIへのアクセス権限を付与できます:
+`IAM`認証を選択した場合、`grantInvokeAccess`メソッドでAPIアクセスを許可可能:
 
 ```ts
 api.grantInvokeAccess(myIdentityPool.authenticatedRole);
@@ -367,7 +388,7 @@ api.grantInvokeAccess(myIdentityPool.authenticatedRole);
 
 <NxCommands commands={['run my-api:serve']} />
 
-これにより以下を含むローカルFastAPI開発サーバーが起動:
+以下を含むローカルFastAPI開発サーバーが起動します:
 
 - コード変更時の自動リロード
 - `/docs`または`/redoc`のインタラクティブAPIドキュメント
@@ -375,4 +396,4 @@ api.grantInvokeAccess(myIdentityPool.authenticatedRole);
 
 ## FastAPIの呼び出し
 
-ReactウェブサイトからAPIを呼び出すには<Link path="guides/api-connection/react-fastapi">`api-connection`ジェネレータ</Link>を使用できます。
+ReactウェブサイトからAPIを呼び出すには<Link path="guides/api-connection/react-fastapi">`api-connection`</Link>ジェネレータを使用します。

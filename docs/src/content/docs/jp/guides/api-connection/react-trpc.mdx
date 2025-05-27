@@ -1,5 +1,5 @@
 ---
-title: "ReactからtRPC"
+title: "ReactからtRPCへ"
 description: "ReactウェブサイトをtRPCのAPIに接続する"
 ---
 
@@ -10,15 +10,16 @@ import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 
-Nx向けAWSプラグインは、<Link path="guides/trpc">tRPC API</Link>をReactウェブサイトに迅速に統合するジェネレータを提供します。AWS IAM認証サポートと適切なエラーハンドリングを含む、tRPCバックエンド接続に必要なすべての設定を行います。この統合により、フロントエンドとtRPCバックエンド間の完全なエンドツーエンド型安全性が保証されます。
+Nx向けAWSプラグインは、<Link path="guides/trpc">tRPC API</Link>とReactウェブサイトを迅速に統合するためのジェネレータを提供します。AWS IAMおよびCognito認証サポート、適切なエラーハンドリングを含む、tRPCバックエンド接続に必要なすべての設定を構成します。この統合により、フロントエンドとtRPCバックエンド間の完全なエンドツーエンド型安全性が保証されます。
 
 ## 前提条件
 
 このジェネレータを使用する前に、Reactアプリケーションが以下を満たしていることを確認してください:
 
 1. アプリケーションをレンダリングする`main.tsx`ファイルが存在すること
-2. tRPCプロバイダが自動注入される`<App/>` JSX要素が存在すること
-3. 動作するtRPCバックエンド（tRPCバックエンドジェネレータで生成されたもの）
+2. tRPCプロバイダが自動注入される`<App/>` JSX要素が含まれていること
+3. tRPCバックエンドジェネレータで生成された動作可能なtRPCバックエンドが存在すること
+4. CognitoまたはIAM認証を使用するAPIに接続する場合、<Link path="/guides/cloudscape-website-auth">`ts#cloudscape-website-auth`ジェネレータ</Link>経由でCognito Authが追加されていること
 
 <details>
 <summary>必要な`main.tsx`構造の例</summary>
@@ -62,15 +63,15 @@ root.render(
       - index.tsx
       - TrpcProvider.tsx 複数のtRPC APIで再利用されるプロバイダ
       - TrpcApis.tsx すべてのtRPC API接続を含むオブジェクト
-      - TrpcClientProviders.tsx tRPCクライアントとバックエンドスキーマへのバインディングを設定
+      - TrpcClientProviders.tsx tRPCクライアントとバックエンドスキーマのバインディングを設定
     - QueryClientProvider.tsx TanStack React Queryクライアントプロバイダ
   - hooks
     - useSigV4.tsx SigV4によるHTTPリクエスト署名用フック（IAM専用）
-    - use\<ApiName>.tsx 特定のバックエンドAPI用フック（ApiNameはAPI名に解決）
+    - use\<ApiName>.tsx 特定のバックエンドAPI用フック。ApiNameはAPI名に解決
 
 </FileTree>
 
-さらに、必要な依存関係をインストールします:
+さらに、以下の依存関係をインストールします:
 
   - `@trpc/client`
   - `@trpc/tanstack-react-query`
@@ -149,7 +150,7 @@ function MyComponent() {
 
 ### ローディング状態の処理
 
-ユーザーエクスペリエンス向上のため、常にローディングとエラー状態を処理してください:
+ユーザーエクスペリエンス向上のため、常にローディング状態とエラー状態を処理してください:
 
 ```tsx {6}
 function UserList() {
@@ -175,9 +176,9 @@ function UserList() {
 }
 ```
 
-### オプティミスティック更新
+### 楽観的更新
 
-ユーザーエクスペリエンス向上のためオプティミスティック更新を使用:
+ユーザーエクスペリエンス向上のため楽観的更新を使用します:
 
 ```tsx {15-17,20-22,28-31}
 import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query';
@@ -198,7 +199,7 @@ function UserList() {
           trpc.users.list.queryKey(),
         );
 
-        // ユーザーをオプティミスティックに削除
+        // 楽観的にユーザーを削除
         queryClient.setQueryData(trpc.users.list.queryKey(), (old) =>
           old?.filter((user) => user.id !== userId),
         );
@@ -303,7 +304,7 @@ function UserForm() {
   const createUser = trpc.users.create.useMutation();
 
   const handleSubmit = (data: CreateUserInput) => {
-    // ✅ 入力がスキーマと一致しない場合に型エラー
+    // ✅ スキーマと一致しない場合は型エラー
     createUser.mutate(data);
   };
 
@@ -311,7 +312,7 @@ function UserForm() {
 }
 ```
 
-型はバックエンドのルーターとスキーマ定義から自動的に推論されるため、APIに変更があった場合でもフロントエンドコードをビルドすることなく即座に反映されます。
+型はバックエンドのルーターとスキーマ定義から自動的に推論されるため、APIに変更があった場合でもフロントエンドコードをビルドせずに即座に反映されます。
 
 ## 詳細情報
 

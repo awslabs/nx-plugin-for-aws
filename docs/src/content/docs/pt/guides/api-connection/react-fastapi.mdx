@@ -12,7 +12,7 @@ import NxCommands from '@components/nx-commands.astro';
 import Drawer from '@components/drawer.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 
-O gerador `api-connection` fornece uma maneira rápida de integrar seu site React com seu backend FastAPI. Ele configura todas as configurações necessárias para conectar-se aos backends FastAPI de forma type-safe, incluindo geração de clientes e hooks do [TanStack Query](https://tanstack.com/query/v5), suporte a autenticação AWS IAM e tratamento adequado de erros.
+O gerador `api-connection` fornece uma formas rápida de integrar seu site React com um backend FastAPI. Ele configura toda a configuração necessária para conectar-se a backends FastAPI de maneira tipada, incluindo geração de clientes e hooks do [TanStack Query](https://tanstack.com/query/v5), suporte a autenticação AWS IAM e Cognito, e tratamento adequado de erros.
 
 ## Pré-requisitos
 
@@ -20,6 +20,7 @@ Antes de usar este gerador, certifique-se que sua aplicação React possui:
 
 1. Um arquivo `main.tsx` que renderiza sua aplicação
 2. Um backend FastAPI funcional (gerado usando o gerador FastAPI)
+3. Autenticação Cognito adicionada via <Link path="/guides/cloudscape-website-auth">gerador `ts#cloudscape-website-auth`</Link> se conectando a uma API que usa autenticação Cognito ou IAM
 
 <details>
 <summary>Exemplo da estrutura necessária do `main.tsx`</summary>
@@ -58,8 +59,8 @@ O gerador fará alterações nos seguintes arquivos do seu projeto FastAPI:
 <FileTree>
 
 - scripts
-  - generate_open_api.py Adiciona um script que gera uma especificação OpenAPI para sua API
-- project.json Um novo target é adicionado ao build que invoca o script de geração acima
+  - generate_open_api.py Adiciona um script que gera a especificação OpenAPI para sua API
+- project.json Um novo target é adicionado ao build para invocar o script de geração
 
 </FileTree>
 
@@ -75,44 +76,44 @@ O gerador fará alterações nos seguintes arquivos da sua aplicação React:
     - use\<ApiName>.tsx Adiciona um hook para chamar sua API com estado gerenciado pelo TanStack Query
     - use\<ApiName>Client.tsx Adiciona um hook para instanciar o cliente vanilla que pode chamar sua API
     - useSigV4.tsx Adiciona um hook para assinar requisições HTTP com SigV4 (se selecionou autenticação IAM)
-- project.json Um novo target é adicionado ao build que gera um cliente type-safe
+- project.json Um novo target é adicionado ao build para gerar um cliente tipado
 - .gitignore Os arquivos do cliente gerado são ignorados por padrão
 
 </FileTree>
 
-O gerador também adicionará Runtime Config à infraestrutura do seu site se ainda não estiver presente, garantindo que a URL da API para seu FastAPI esteja disponível no site e configurada automaticamente pelo hook `use<ApiName>.tsx`.
+O gerador também adicionará Runtime Config à infraestrutura do seu site se ainda não estiver presente, garantindo que a URL da API do FastAPI esteja disponível no site e configurada automaticamente pelo hook `use<ApiName>.tsx`.
 
 ### Geração de Código
 
-No momento do build, um cliente type-safe é gerado a partir da especificação OpenAPI do seu FastAPI. Isso adicionará três novos arquivos à sua aplicação React:
+Durante o build, um cliente tipado é gerado a partir da especificação OpenAPI do FastAPI. Isso adicionará três novos arquivos à aplicação React:
 
 <FileTree>
 
 - src
   - generated
     - \<ApiName>
-      - types.gen.ts Tipos gerados dos modelos pydantic definidos no seu FastAPI
-      - client.gen.ts Cliente type-safe para chamar sua API
-      - options-proxy.gen.ts Fornece métodos para criar opções de hooks do TanStack Query para interagir com sua API usando TanStack Query
+      - types.gen.ts Tipos gerados dos modelos pydantic definidos no FastAPI
+      - client.gen.ts Cliente tipado para chamar sua API
+      - options-proxy.gen.ts Fornece métodos para criar opções de hooks TanStack Query para interagir com sua API
 
 </FileTree>
 
-:::tip
-Por padrão, o cliente gerado é ignorado do controle de versão. Se preferir incluí-lo, você pode remover a entrada do arquivo `.gitignore` da sua aplicação React, mas note que quaisquer alterações manuais nos arquivos `.gen.ts` serão sobrescritas quando o projeto for buildado.
+:::tip[Nota]
+Por padrão, o cliente gerado é ignorado do controle de versão. Se preferir incluí-lo, você pode remover a entrada do arquivo `.gitignore` da aplicação React, mas note que alterações manuais nos arquivos `.gen.ts` serão sobrescritas ao construir o projeto.
 :::
 
 ## Usando o Código Gerado
 
-O cliente type-safe gerado pode ser usado para chamar seu FastAPI a partir da aplicação React. Recomenda-se usar o cliente através dos hooks do TanStack Query, mas você pode usar o cliente vanilla se preferir.
+O cliente tipado gerado pode ser usado para chamar seu FastAPI a partir da aplicação React. Recomenda-se usar o cliente via hooks TanStack Query, mas você pode usar o cliente vanilla se preferir.
 
-:::note
-Sempre que fizer alterações no seu FastAPI, você precisa rebuildar seu projeto para que essas mudanças sejam refletidas no cliente gerado. Por exemplo:
+:::note[Nota]
+Sempre que fizer alterações no FastAPI, você precisa reconstruir o projeto para que as mudanças sejam refletidas no cliente gerado. Por exemplo:
 
 <NxCommands commands={['run-many --target build --all']} />
 :::
 
-:::tip
-Se estiver trabalhando ativamente tanto na aplicação React quanto no FastAPI, você pode usar [`nx watch`](https://nx.dev/nx-api/nx/documents/watch) para regenerar o cliente sempre que fizer mudanças na API:
+:::tip[Dica]
+Se estiver desenvolvendo ativamente tanto a aplicação React quanto o FastAPI, você pode usar [`nx watch`](https://nx.dev/nx-api/nx/documents/watch) para regenerar o cliente a cada alteração na API:
 
 <NxCommands
   commands={[
@@ -128,7 +129,7 @@ O gerador fornece um hook `use<ApiName>` que você pode usar para chamar sua API
 
 ### Consultas (Queries)
 
-Você pode usar o método `queryOptions` para obter as opções necessárias para chamar sua API usando o hook `useQuery` do TanStack Query:
+Você pode usar o método `queryOptions` para obter as opções necessárias para chamar a API usando o hook `useQuery` do TanStack Query:
 
 ```tsx {7}
 import { useQuery } from '@tanstack/react-query';
@@ -146,7 +147,7 @@ function MyComponent() {
 }
 ```
 
-<Drawer title="Usar o cliente da API diretamente" trigger="Clique aqui para ver um exemplo usando o cliente vanilla diretamente.">
+<Drawer title="Usando o cliente da API diretamente" trigger="Clique aqui para um exemplo usando o cliente vanilla diretamente.">
 ```tsx {5,13}
 import { useState, useEffect } from 'react';
 import { useMyApiClient } from './hooks/useMyApiClient';
@@ -181,7 +182,7 @@ function MyComponent() {
 
 ### Mutations
 
-Os hooks gerados incluem suporte para mutations usando o hook `useMutation` do TanStack Query. Isso fornece uma maneira limpa de lidar com operações de criação, atualização e exclusão com estados de loading, tratamento de erros e atualizações otimistas.
+Os hooks gerados incluem suporte a mutations usando o hook `useMutation` do TanStack Query. Isso fornece uma forma limpa de lidar com operações de criação, atualização e exclusão com estados de carregamento, tratamento de erros e atualizações otimistas.
 
 ```tsx {5-7,11}
 import { useMutation } from '@tanstack/react-query';
@@ -189,7 +190,7 @@ import { useMyApi } from './hooks/useMyApi';
 
 function CreateItemForm() {
   const api = useMyApi();
-  // Cria uma mutation usando as opções de mutation geradas
+  // Cria uma mutation usando as opções geradas
   const createItem = useMutation(api.createItem.mutationOptions());
 
   const handleSubmit = (e) => {
@@ -246,7 +247,7 @@ const createItem = useMutation({
 });
 ```
 
-<Drawer title="Mutations usando o cliente da API diretamente" trigger="Clique aqui para ver um exemplo usando o cliente diretamente.">
+<Drawer title="Mutations usando o cliente da API diretamente" trigger="Clique aqui para um exemplo usando o cliente diretamente.">
 ```tsx
 import { useState } from 'react';
 import { useMyApiClient } from './hooks/useMyApiClient';
@@ -307,7 +308,7 @@ function CreateItemForm() {
 
 ### Paginação com Infinite Queries
 
-Para endpoints que aceitam um parâmetro `cursor` como entrada, os hooks gerados fornecem suporte para infinite queries usando o hook `useInfiniteQuery` do TanStack Query. Isso facilita a implementação de funcionalidades "load more" ou scroll infinito.
+Para endpoints que aceitam um parâmetro `cursor` como entrada, os hooks gerados fornecem suporte a infinite queries usando o hook `useInfiniteQuery` do TanStack Query. Isso facilita a implementação de funcionalidades "load more" ou scroll infinito.
 
 ```tsx {5-14,24-26}
 import { useInfiniteQuery } from '@tanstack/react-query';
@@ -336,7 +337,7 @@ function ItemList() {
 
   return (
     <div>
-      {/* Achata o array de páginas para renderizar todos os itens */}
+      {/* Achatando o array de páginas para renderizar todos os itens */}
       <ul>
         {items.data.pages.flatMap(page =>
           page.items.map(item => (
@@ -360,13 +361,13 @@ function ItemList() {
 }
 ```
 
-Os hooks gerados lidam automaticamente com a paginação baseada em cursor se sua API suportar isso. O valor `nextCursor` é extraído da resposta e usado para buscar a próxima página.
+Os hooks gerados lidam automaticamente com paginação baseada em cursor se sua API suportar. O valor `nextCursor` é extraído da resposta e usado para buscar a próxima página.
 
-:::tip
-Se você tiver uma API paginada cujo parâmetro de paginação tem um nome diferente de `cursor`, você pode [personalizá-lo usando a extensão OpenAPI `x-cursor`](#custom-pagination-cursor).
+:::tip[Dica]
+Se você tem uma API paginada com parâmetro de paginação com nome diferente de `cursor`, pode [personalizar usando a extensão OpenAPI `x-cursor`](#custom-pagination-cursor).
 :::
 
-<Drawer title="Paginação usando o cliente da API diretamente" trigger="Clique aqui para ver um exemplo usando o cliente diretamente.">
+<Drawer title="Paginação usando o cliente da API diretamente" trigger="Clique aqui para um exemplo usando o cliente diretamente.">
 ```tsx
 import { useState, useEffect } from 'react';
 import { useMyApiClient } from './hooks/useMyApiClient';
@@ -451,7 +452,7 @@ function ItemList() {
 
 ### Tratamento de Erros
 
-A integração inclui tratamento de erros embutido com respostas de erro tipadas. Um tipo `<operation-name>Error` é gerado, encapsulando as possíveis respostas de erro definidas na especificação OpenAPI. Cada erro possui uma propriedade `status` e `error`, e ao verificar o valor de `status` você pode identificar um tipo específico de erro.
+A integração inclui tratamento de erros embutido com respostas de erro tipadas. Um tipo `<operation-name>Error` é gerado, encapsulando as possíveis respostas de erro definidas na especificação OpenAPI. Cada erro possui propriedades `status` e `error`, e ao verificar o valor de `status` você pode identificar um tipo específico de erro.
 
 ```tsx {12}
 import { useMutation } from '@tanstack/react-query';
@@ -504,7 +505,7 @@ function MyComponent() {
 }
 ```
 
-<Drawer title="Tratamento de erros usando o cliente da API diretamente" trigger="Clique aqui para ver um exemplo usando o cliente vanilla diretamente.">
+<Drawer title="Tratamento de erros usando o cliente da API diretamente" trigger="Clique aqui para um exemplo usando o cliente vanilla diretamente.">
 ```tsx {9,15}
 function MyComponent() {
   const api = useMyApiClient();
@@ -562,7 +563,7 @@ function MyComponent() {
 
 ### Consumindo um Stream
 
-Se você <Link path="guides/fastapi#streaming">configurou seu FastAPI para stream de respostas</Link>, seu hook `useQuery` atualizará automaticamente seus dados conforme novos chunks do stream chegam.
+Se você <Link path="guides/fastapi#streaming">configurou seu FastAPI para stream de respostas</Link>, seu hook `useQuery` atualizará automaticamente os dados conforme novos chunks do stream chegam.
 
 Por exemplo:
 
@@ -583,7 +584,7 @@ function MyStreamingComponent() {
 }
 ```
 
-Você pode usar as propriedades `isLoading` e `fetchStatus` para determinar o estado atual do stream, se necessário. Um stream segue este ciclo de vida:
+Você pode usar as propriedades `isLoading` e `fetchStatus` para determinar o estado atual do stream se necessário. Um stream segue este ciclo de vida:
 
 <Steps>
   1. A requisição HTTP para iniciar o streaming é enviada
@@ -594,26 +595,26 @@ Você pode usar as propriedades `isLoading` e `fetchStatus` para determinar o es
 
   2. O primeiro chunk do stream é recebido
 
-      - `isLoading` se torna `false`
+      - `isLoading` torna-se `false`
       - `fetchStatus` permanece `'fetching'`
-      - `data` se torna um array contendo o primeiro chunk
+      - `data` torna-se um array contendo o primeiro chunk
 
   3. Chunks subsequentes são recebidos
 
       - `isLoading` permanece `false`
       - `fetchStatus` permanece `'fetching'`
-      - `data` é atualizado com cada chunk subsequente assim que é recebido
+      - `data` é atualizado com cada novo chunk assim que recebido
 
   4. O stream é concluído
 
       - `isLoading` permanece `false`
-      - `fetchStatus` se torna `'idle'`
-      - `data` é um array de todos os chunks recebidos
+      - `fetchStatus` torna-se `'idle'`
+      - `data` é um array com todos os chunks recebidos
 </Steps>
 
-<Drawer title="Stream usando o cliente da API diretamente" trigger="Clique aqui para ver um exemplo usando o cliente vanilla diretamente.">
+<Drawer title="Stream usando o cliente da API diretamente" trigger="Clique aqui para um exemplo usando o cliente vanilla diretamente.">
 
-Se você <Link path="guides/fastapi#streaming">configurou seu FastAPI para stream de respostas</Link>, o cliente gerado incluirá métodos type-safe para iterar assincronamente sobre chunks do stream usando sintaxe `for await`.
+Se você <Link path="guides/fastapi#streaming">configurou seu FastAPI para stream de respostas</Link>, o cliente gerado incluirá métodos tipados para iterar assincronamente sobre chunks do stream usando sintaxe `for await`.
 
 Por exemplo:
 
@@ -645,15 +646,15 @@ function MyStreamingComponent() {
 ```
 </Drawer>
 
-:::note
-Se você tem uma API de streaming que aceita um parâmetro `cursor`, ao usar o hook `useInfiniteQuery`, cada página aguardará o stream terminar antes de ser carregada.
+:::note[Nota]
+Se você tem uma API de streaming que aceita parâmetro `cursor`, ao usar o hook `useInfiniteQuery`, cada página aguardará o stream terminar antes de ser carregada.
 :::
 
 ## Personalizando o Código Gerado
 
 ### Consultas e Mutations
 
-Por padrão, operações no seu FastAPI que usam os métodos HTTP `PUT`, `POST`, `PATCH` e `DELETE` são consideradas mutations, e todas as outras são consideradas queries.
+Por padrão, operações no FastAPI que usam métodos HTTP `PUT`, `POST`, `PATCH` e `DELETE` são consideradas mutations, e outras são consideradas queries.
 
 Você pode alterar este comportamento usando `x-query` e `x-mutation`.
 
@@ -698,13 +699,13 @@ const startProcessing = useMutation(api.startProcessing.mutationOptions());
 
 ### Cursor de Paginação Personalizado
 
-Por padrão, os hooks gerados assumem paginação baseada em cursor com um parâmetro chamado `cursor`. Você pode personalizar este comportamento usando a extensão `x-cursor`:
+Por padrão, os hooks gerados assumem paginação por cursor com parâmetro chamado `cursor`. Você pode personalizar usando a extensão `x-cursor`:
 
 ```python
 @app.get(
     "/items",
     openapi_extra={
-        # Especifica um nome diferente para o parâmetro do cursor
+        # Especifica um nome diferente para o parâmetro de cursor
         "x-cursor": "page_token"
     }
 )
@@ -716,13 +717,13 @@ def list_items(page_token: str = None, limit: int = 10):
     }
 ```
 
-Se você não deseja gerar `infiniteQueryOptions` para uma operação, pode definir `x-cursor` como `False`:
+Se não quiser gerar `infiniteQueryOptions` para uma operação, defina `x-cursor` como `False`:
 
 ```python
 @app.get(
     "/items",
     openapi_extra={
-        # Desativa paginação baseada em cursor para este endpoint
+        # Desativa paginação por cursor para este endpoint
         "x-cursor": False
     }
 )
@@ -738,7 +739,7 @@ def list_items(page: int = 1, limit: int = 10):
 
 ### Agrupando Operações
 
-Os hooks e métodos do cliente gerados são organizados automaticamente com base nas tags OpenAPI dos endpoints do seu FastAPI. Isso ajuda a manter suas chamadas de API organizadas e facilita encontrar operações relacionadas.
+Os hooks e métodos do cliente gerados são organizados automaticamente com base nas tags OpenAPI dos endpoints do FastAPI. Isso ajuda a manter suas chamadas de API organizadas e facilita encontrar operações relacionadas.
 
 Por exemplo:
 
@@ -776,11 +777,11 @@ import { useMyApi } from './hooks/useMyApi';
 function ItemsAndUsers() {
   const api = useMyApi();
 
-  // Operações de items são agrupadas sob api.items
+  // Operações de Items agrupadas em api.items
   const items = useQuery(api.items.list.queryOptions());
   const createItem = useMutation(api.items.create.mutationOptions());
 
-  // Operações de users são agrupadas sob api.users
+  // Operações de Users agrupadas em api.users
   const users = useQuery(api.users.list.queryOptions());
 
   // Exemplo de uso
@@ -811,7 +812,7 @@ function ItemsAndUsers() {
 
 Este agrupamento facilita a organização das chamadas de API e fornece melhor autocompletar na sua IDE.
 
-<Drawer title="Operações agrupadas usando o cliente da API diretamente" trigger="Clique aqui para ver um exemplo usando o cliente diretamente.">
+<Drawer title="Operações agrupadas usando o cliente diretamente" trigger="Clique aqui para um exemplo usando o cliente diretamente.">
 ```tsx
 import { useState, useEffect } from 'react';
 import { useMyApiClient } from './hooks/useMyApiClient';
@@ -828,11 +829,11 @@ function ItemsAndUsers() {
       try {
         setIsLoading(true);
 
-        // Operações de items são agrupadas sob api.items
+        // Operações de Items agrupadas em api.items
         const itemsData = await api.items.list();
         setItems(itemsData);
 
-        // Operações de users são agrupadas sob api.users
+        // Operações de Users agrupadas em api.users
         const usersData = await api.users.list();
         setUsers(usersData);
       } catch (error) {
@@ -881,15 +882,15 @@ function ItemsAndUsers() {
 ```
 </Drawer>
 
-:::tip
-Você também pode dividir sua API usando múltiplos `routers`. Consulte a [Documentação do FastAPI](https://fastapi.tiangolo.com/tutorial/bigger-applications/) para mais detalhes.
+:::tip[Dica]
+Você também pode dividir sua API usando múltiplos `routers`. Veja a [Documentação do FastAPI](https://fastapi.tiangolo.com/tutorial/bigger-applications/) para mais detalhes.
 :::
 
 ### Erros
 
-Você pode personalizar respostas de erro no seu FastAPI definindo classes de exceção customizadas, handlers de exceção e especificando modelos de resposta para diferentes códigos de status. O cliente gerado lidará automaticamente com esses tipos de erro personalizados.
+Você pode personalizar respostas de erro no FastAPI definindo classes de exceção customizadas, handlers de exceção e especificando modelos de resposta para códigos de status diferentes. O cliente gerado lidará automaticamente com esses tipos de erro personalizados.
 
-#### Definindo Modelos de Erro Personalizados
+#### Definindo Modelos de Erro Customizados
 
 Primeiro, defina seus modelos de erro usando Pydantic:
 
@@ -904,9 +905,9 @@ class ValidationError(BaseModel):
     field_errors: list[str]
 ```
 
-#### Criando Exceções Personalizadas
+#### Criando Exceções Customizadas
 
-Em seguida, crie classes de exceção para diferentes cenários de erro:
+Crie classes de exceção para diferentes cenários de erro:
 
 ```python title="exceptions.py"
 class NotFoundException(Exception):
@@ -941,13 +942,13 @@ async def validation_error_handler(request: Request, exc: ValidationException):
     )
 ```
 
-:::tip
-O `JSONResponse` aceita um dicionário, então usamos o método `model_dump` do nosso modelo Pydantic.
+:::tip[Dica]
+O `JSONResponse` aceita um dicionário, então usamos o método `model_dump` do modelo Pydantic.
 :::
 
 #### Especificando Modelos de Resposta
 
-Finalmente, especifique os modelos de resposta para diferentes códigos de status nas definições dos endpoints:
+Finalmente, especifique os modelos de resposta para códigos de status de erro nas definições dos endpoints:
 
 ```python title="main.py"
 @app.get(
@@ -981,9 +982,9 @@ def create_item(item: Item) -> Item:
     return save_item(item)
 ```
 
-#### Usando Tipos de Erro Personalizados no React
+#### Usando Tipos de Erro Customizados no React
 
-O cliente gerado lidará automaticamente com esses tipos de erro personalizados, permitindo que você verifique tipos e trate diferentes respostas de erro:
+O cliente gerado lidará automaticamente com esses tipos de erro, permitindo verificação de tipos e tratamento de diferentes respostas de erro:
 
 ```tsx
 import { useMutation, useQuery } from '@tanstack/react-query';
@@ -995,10 +996,10 @@ function ItemComponent() {
   const getItem = useQuery({
     ...api.getItem.queryOptions({ itemId: '123' }),
     onError: (error) => {
-      // Error é tipado com base nas respostas do seu FastAPI
+      // Error é tipado com base nas respostas do FastAPI
       switch (error.status) {
         case 404:
-          // error.error é uma string conforme especificado nas respostas
+          // error.error é uma string conforme especificado
           console.error('Not found:', error.error);
           break;
         case 500:
@@ -1020,7 +1021,7 @@ function ItemComponent() {
           console.error('Field errors:', error.error.field_errors);
           break;
         case 403:
-          // error.error é uma string conforme especificado nas respostas
+          // error.error é uma string conforme especificado
           console.error('Forbidden:', error.error);
           break;
       }
@@ -1044,7 +1045,7 @@ function ItemComponent() {
 }
 ```
 
-<Drawer title="Tratando erros personalizados com o cliente diretamente" trigger="Clique aqui para ver um exemplo usando o cliente diretamente.">
+<Drawer title="Tratando erros customizados com o cliente diretamente" trigger="Clique aqui para um exemplo usando o cliente diretamente.">
 ```tsx
 import { useState, useEffect } from 'react';
 
@@ -1062,13 +1063,13 @@ function ItemComponent() {
         const data = await api.getItem({ itemId: '123' });
         setItem(data);
       } catch (e) {
-        // Error é tipado com base nas respostas do seu FastAPI
+        // Error é tipado com base nas respostas do FastAPI
         const err = e as GetItemError;
         setError(err);
 
         switch (err.status) {
           case 404:
-            // err.error é uma string conforme especificado nas respostas
+            // err.error é uma string conforme especificado
             console.error('Not found:', err.error);
             break;
           case 500:
@@ -1098,7 +1099,7 @@ function ItemComponent() {
           console.error('Field errors:', err.error.field_errors);
           break;
         case 403:
-          // err.error é uma string conforme especificado nas respostas
+          // err.error é uma string conforme especificado
           console.error('Forbidden:', err.error);
           break;
       }
@@ -1127,15 +1128,15 @@ function ItemComponent() {
 ```
 </Drawer>
 
-:::tip
+:::tip[Dica]
 Ao definir respostas de erro no FastAPI, sempre use o parâmetro `responses` para especificar o modelo para cada código de status. Isso garante que o cliente gerado terá informações de tipo adequadas para tratamento de erros.
 :::
 
 ## Melhores Práticas
 
-### Lidar com Estados de Loading
+### Lidando com Estados de Carregamento
 
-Sempre trate estados de loading e erro para uma melhor experiência do usuário:
+Sempre trate estados de carregamento e erro para melhor experiência do usuário:
 
 ```tsx
 import { useQuery } from '@tanstack/react-query';
@@ -1178,7 +1179,7 @@ function ItemList() {
 }
 ```
 
-<Drawer title="Lidar com estados de loading usando o cliente da API diretamente" trigger="Clique aqui para ver um exemplo usando o cliente vanilla diretamente.">
+<Drawer title="Lidando com estados de carregamento usando o cliente diretamente" trigger="Clique aqui para um exemplo usando o cliente vanilla diretamente.">
 ```tsx
 function ItemList() {
   const api = useMyApiClient();
@@ -1237,7 +1238,7 @@ function ItemList() {
 
 ### Atualizações Otimistas
 
-Implemente atualizações otimistas para uma melhor experiência do usuário:
+Implemente atualizações otimistas para melhor experiência do usuário:
 
 ```tsx
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -1253,28 +1254,28 @@ function ItemList() {
   const deleteMutation = useMutation({
     ...api.deleteItem.mutationOptions(),
     onMutate: async (itemId) => {
-      // Cancela quaisquer refetches em andamento
+      // Cancela refetches em andamento
       await queryClient.cancelQueries({ queryKey: api.listItems.queryKey() });
 
-      // Captura o valor anterior
+      // Snapshot do valor anterior
       const previousItems = queryClient.getQueryData(api.listItems.queryKey());
 
-      // Atualiza otimistamente para o novo valor
+      // Atualização otimista
       queryClient.setQueryData(
         api.listItems.queryKey(),
         (old) => old.filter((item) => item.id !== itemId)
       );
 
-      // Retorna um objeto de contexto com o snapshot
+      // Retorna contexto com o snapshot
       return { previousItems };
     },
     onError: (err, itemId, context) => {
-      // Se a mutation falhar, usa o contexto retornado de onMutate para reverter
+      // Se a mutation falhar, usa o contexto para rollback
       queryClient.setQueryData(api.listItems.queryKey(), context.previousItems);
       console.error('Failed to delete item:', err);
     },
     onSettled: () => {
-      // Sempre refetch após erro ou sucesso para garantir sincronização com o servidor
+      // Sempre refetch após erro ou sucesso para sincronizar dados
       queryClient.invalidateQueries({ queryKey: api.listItems.queryKey() });
     },
   });
@@ -1305,21 +1306,21 @@ function ItemList() {
 }
 ```
 
-<Drawer title="Atualizações otimistas usando o cliente da API diretamente" trigger="Clique aqui para ver um exemplo usando o cliente vanilla diretamente.">
+<Drawer title="Atualizações otimistas usando o cliente diretamente" trigger="Clique aqui para um exemplo usando o cliente vanilla diretamente.">
 ```tsx
 function ItemList() {
   const api = useMyApiClient();
   const [items, setItems] = useState([]);
 
   const handleDelete = async (itemId) => {
-    // Remove o item otimistamente
+    // Remove otimistamente o item
     const previousItems = items;
     setItems(items.filter((item) => item.id !== itemId));
 
     try {
       await api.deleteItem(itemId);
     } catch (error) {
-      // Restaura os items anteriores em caso de erro
+      // Restaura items anteriores em caso de erro
       setItems(previousItems);
       console.error('Failed to delete item:', error);
     }
@@ -1339,9 +1340,9 @@ function ItemList() {
 ```
 </Drawer>
 
-## Type Safety
+## Segurança de Tipos
 
-A integração fornece type safety completo de ponta a ponta. Sua IDE fornecerá autocompletar e verificação de tipos para todas as chamadas de API:
+A integração fornece segurança de tipos completa de ponta a ponta. Sua IDE fornecerá autocompletar e verificação de tipos para todas as chamadas de API:
 
 ```tsx
 import { useMutation } from '@tanstack/react-query';
@@ -1349,22 +1350,22 @@ import { useMutation } from '@tanstack/react-query';
 function ItemForm() {
   const api = useMyApi();
 
-  // Mutation type-safe para criar items
+  // Mutation tipada para criar items
   const createItem = useMutation({
     ...api.createItem.mutationOptions(),
-    // ✅ Erro de tipo se o callback onSuccess não lidar com o tipo de resposta correto
+    // ✅ Erro de tipo se o callback onSuccess não lidar com o tipo correto
     onSuccess: (data) => {
-      // data é totalmente tipado com base no schema de resposta da sua API
+      // data é totalmente tipado com base no schema de resposta da API
       console.log(`Item created with ID: ${data.id}`);
     },
   });
 
   const handleSubmit = (data: CreateItemInput) => {
-    // ✅ Erro de tipo se o input não corresponder ao schema
+    // ✅ Erro de tipo se input não corresponder ao schema
     createItem.mutate(data);
   };
 
-  // UI de erro pode usar type narrowing para lidar com diferentes tipos de erro
+  // UI de erro pode usar narrowing de tipos para lidar com diferentes erros
   if (createItem.error) {
     const error = createItem.error;
     switch (error.status) {
@@ -1402,7 +1403,7 @@ function ItemForm() {
 }
 ```
 
-<Drawer title="Type safety usando o cliente da API diretamente" trigger="Clique aqui para ver um exemplo usando o cliente vanilla diretamente.">
+<Drawer title="Segurança de tipos usando o cliente diretamente" trigger="Clique aqui para um exemplo usando o cliente vanilla diretamente.">
 ```tsx
 function ItemForm() {
   const api = useMyApiClient();
@@ -1410,10 +1411,10 @@ function ItemForm() {
 
   const handleSubmit = async (data: CreateItemInput) => {
     try {
-      // ✅ Erro de tipo se o input não corresponder ao schema
+      // ✅ Erro de tipo se input não corresponder ao schema
       await api.createItem(data);
     } catch (e) {
-      // ✅ Tipo de erro inclui todas as possíveis respostas de erro
+      // ✅ Tipo de erro inclui todas respostas de erro possíveis
       const err = e as CreateItemError;
       switch (err.status) {
         case 400:
@@ -1439,7 +1440,7 @@ function ItemForm() {
     }
   };
 
-  // UI de erro pode usar type narrowing para lidar com diferentes tipos de erro
+  // UI de erro pode usar narrowing de tipos para lidar com diferentes erros
   if (error) {
     switch (error.status) {
       case 400:
@@ -1461,4 +1462,4 @@ function ItemForm() {
 ```
 </Drawer>
 
-Os tipos são gerados automaticamente a partir do schema OpenAPI do seu FastAPI, garantindo que quaisquer alterações na sua API sejam refletidas no código do frontend após um build.
+Os tipos são gerados automaticamente a partir do schema OpenAPI do FastAPI, garantindo que quaisquer alterações na API sejam refletidas no código frontend após um build.

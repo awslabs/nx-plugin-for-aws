@@ -10,7 +10,7 @@ import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 
-El plugin de AWS para Nx proporciona un generador para integrar rápidamente tu <Link path="guides/trpc">API tRPC</Link> con un sitio web en React. Configura toda la infraestructura necesaria para conectar con tus backends tRPC, incluyendo soporte para autenticación IAM de AWS y manejo adecuado de errores. La integración provee seguridad de tipos de extremo a extremo entre tu frontend y los backends tRPC.
+El plugin de AWS para Nx proporciona un generador para integrar rápidamente tu <Link path="guides/trpc">API tRPC</Link> con un sitio web en React. Configura toda la infraestructura necesaria para conectar con tus backends tRPC, incluyendo soporte para autenticación con AWS IAM y Cognito, además de manejo adecuado de errores. Esta integración ofrece seguridad de tipos de extremo a extremo entre tu frontend y los backends tRPC.
 
 ## Requisitos previos
 
@@ -19,6 +19,7 @@ Antes de usar este generador, asegúrate que tu aplicación React tenga:
 1. Un archivo `main.tsx` que renderice tu aplicación
 2. Un elemento JSX `<App/>` donde se inyectará automáticamente el proveedor tRPC
 3. Un backend tRPC funcional (generado usando el generador de backends tRPC)
+4. Autenticación Cognito añadida mediante el <Link path="/guides/cloudscape-website-auth">generador `ts#cloudscape-website-auth`</Link> si conectas una API que use autenticación Cognito o IAM
 
 <details>
 <summary>Ejemplo de estructura requerida en `main.tsx`</summary>
@@ -60,17 +61,17 @@ El generador crea la siguiente estructura en tu aplicación React:
   - components
     - TrpcClients
       - index.tsx
-      - TrpcProvider.tsx Proveedor que se reutiliza para múltiples APIs tRPC
-      - TrpcApis.tsx Objeto que contiene todas tus conexiones a APIs tRPC
+      - TrpcProvider.tsx Proveedor reutilizable para múltiples APIs tRPC
+      - TrpcApis.tsx Objeto con todas tus conexiones a APIs tRPC
       - TrpcClientProviders.tsx Configura los clientes tRPC y su vinculación con los esquemas del backend
     - QueryClientProvider.tsx Proveedor del cliente TanStack React Query
   - hooks
     - useSigV4.tsx Hook para firmar peticiones HTTP con SigV4 (solo IAM)
-    - use\<ApiName>.tsx Hook para la API backend específica. ApiName corresponderá al nombre de la API
+    - use\<ApiName>.tsx Hook específico para cada API backend. ApiName corresponde al nombre de la API
 
 </FileTree>
 
-Adicionalmente, instala las dependencias requeridas:
+Además, instala las dependencias necesarias:
 
   - `@trpc/client`
   - `@trpc/tanstack-react-query`
@@ -81,7 +82,7 @@ Adicionalmente, instala las dependencias requeridas:
 
 ### Usando el hook tRPC
 
-El generador provee un hook `use<ApiName>` que te da acceso al cliente tRPC con seguridad de tipos:
+El generador provee un hook `use<ApiName>` que da acceso al cliente tRPC con seguridad de tipos:
 
 ```tsx {5,8,11}
 import { useQuery, useMutation } from '@tanstack/react-query';
@@ -128,7 +129,7 @@ function MyComponent() {
   if (error) {
     return (
       <div>
-        <h2>Error ocurrido:</h2>
+        <h2>Se produjo un error:</h2>
         <p>{error.message}</p>
         {error.data?.code && <p>Código: {error.data.code}</p>}
       </div>
@@ -149,7 +150,7 @@ function MyComponent() {
 
 ### Manejar estados de carga
 
-Siempre maneja los estados de carga y error para una mejor experiencia de usuario:
+Siempre gestiona los estados de carga y error para una mejor experiencia de usuario:
 
 ```tsx {6}
 function UserList() {
@@ -177,7 +178,7 @@ function UserList() {
 
 ### Actualizaciones optimistas
 
-Usa actualizaciones optimistas para una mejor experiencia de usuario:
+Usa actualizaciones optimistas para mejorar la experiencia de usuario:
 
 ```tsx {15-17,20-22,28-31}
 import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query';
@@ -190,7 +191,7 @@ function UserList() {
   const deleteMutation = useMutation(
     trpc.users.delete.mutationOptions({
       onMutate: async (userId) => {
-        // Cancelar fetches pendientes
+        // Cancelar peticiones pendientes
         await queryClient.cancelQueries(trpc.users.list.queryFilter());
 
         // Obtener snapshot de datos actuales
@@ -206,7 +207,7 @@ function UserList() {
         return { previousUsers };
       },
       onError: (err, userId, context) => {
-        // Restaurar datos anteriores en error
+        // Restaurar datos anteriores en caso de error
         queryClient.setQueryData(
           trpc.users.list.queryKey(),
           context?.previousUsers,
@@ -228,9 +229,9 @@ function UserList() {
 }
 ```
 
-### Pre-carga de datos
+### Precarga de datos
 
-Pre-carga datos para mejor rendimiento:
+Precarga datos para mejor rendimiento:
 
 ```tsx {8}
 function UserList() {
@@ -238,7 +239,7 @@ function UserList() {
   const users = useQuery(trpc.users.list.queryOptions());
   const queryClient = useQueryClient();
 
-  // Pre-cargar detalles de usuario al hacer hover
+  // Precargar detalles al hacer hover
   const prefetchUser = async (userId: string) => {
     await queryClient.prefetchQuery(trpc.users.getById.queryOptions(userId));
   };
@@ -289,11 +290,11 @@ function UserList() {
 }
 ```
 
-Es importante notar que las consultas infinitas solo pueden usarse para procedimientos con una propiedad de entrada llamada `cursor`.
+Es importante notar que las consultas infinitas solo pueden usarse con procedimientos que tengan una propiedad de entrada llamada `cursor`.
 
 ## Seguridad de tipos
 
-La integración provee seguridad de tipos completa de extremo a extremo. Tu IDE proveerá autocompletado y validación de tipos para todas las llamadas API:
+La integración provee seguridad de tipos completa de extremo a extremo. Tu IDE ofrecerá autocompletado y verificación de tipos para todas las llamadas API:
 
 ```tsx
 function UserForm() {
@@ -311,10 +312,10 @@ function UserForm() {
 }
 ```
 
-Los tipos se infieren automáticamente desde el router y definiciones de esquema de tu backend, asegurando que cualquier cambio en tu API se refleje inmediatamente en tu código frontend sin necesidad de compilar.
+Los tipos se infieren automáticamente de las definiciones del router y esquemas de tu backend, garantizando que cualquier cambio en tu API se refleje inmediatamente en el frontend sin necesidad de compilar.
 
 ## Más información
 
-Para más información, consulta la [documentación de tRPC TanStack React Query](https://trpc.io/docs/client/tanstack-react-query/usage).
+Para más detalles, consulta la [documentación de tRPC TanStack React Query](https://trpc.io/docs/client/tanstack-react-query/usage).
 
 También puedes consultar directamente la [documentación de TanStack Query](https://tanstack.com/query/v5).
