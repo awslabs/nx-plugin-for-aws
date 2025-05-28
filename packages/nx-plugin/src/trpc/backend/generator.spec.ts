@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { readProjectConfiguration, Tree } from '@nx/devkit';
+import { readJson, readProjectConfiguration, Tree } from '@nx/devkit';
 import { TRPC_BACKEND_GENERATOR_INFO, tsTrpcApiGenerator } from './generator';
 import {
   createTreeUsingTsSolutionSetup,
@@ -190,12 +190,17 @@ describe('trpc backend generator', () => {
       computeType: 'ServerlessApiGatewayHttpApi',
       auth: 'IAM',
     });
+
+    const devDeps = readJson(tree, 'package.json').devDependencies;
+    expect(devDeps).toHaveProperty('cors');
+    expect(devDeps).toHaveProperty('@types/cors');
+
     expect(
       tree.exists('apps/test-api/backend/src/local-server.ts'),
     ).toBeTruthy();
     expect(
       tree.read('apps/test-api/backend/src/local-server.ts', 'utf-8'),
-    ).toContain('Access-Control-Allow-Origin');
+    ).toContain('middleware: cors()');
   });
 
   it('should add generator metric to app.ts', async () => {

@@ -181,7 +181,13 @@ export async function tsTrpcApiGenerator(
       'aws4fetch',
       '@aws-sdk/credential-providers',
     ]),
-    withVersions(['@types/aws-lambda', 'esbuild', 'tsx']),
+    withVersions([
+      '@types/aws-lambda',
+      'esbuild',
+      'tsx',
+      'cors',
+      '@types/cors',
+    ]),
   );
   tree.delete(joinPathFragments(backendRoot, 'package.json'));
   tree.delete(joinPathFragments(schemaRoot, 'package.json'));
