@@ -183,6 +183,21 @@ describe('trpc backend generator', () => {
     ]);
   });
 
+  it('should add cors headers to the local server', async () => {
+    await tsTrpcApiGenerator(tree, {
+      name: 'TestApi',
+      directory: 'apps',
+      computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
+    });
+    expect(
+      tree.exists('apps/test-api/backend/src/local-server.ts'),
+    ).toBeTruthy();
+    expect(
+      tree.read('apps/test-api/backend/src/local-server.ts', 'utf-8'),
+    ).toContain('Access-Control-Allow-Origin');
+  });
+
   it('should add generator metric to app.ts', async () => {
     // Call the generator function
     await tsTrpcApiGenerator(tree, {
