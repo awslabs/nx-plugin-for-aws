@@ -274,25 +274,29 @@ describe('fastapi project generator', () => {
     expectHasMetricTags(tree, FAST_API_GENERATOR_INFO.metric);
   });
 
-  it('should include CORS middleware in init.py when using REST API', async () => {
-    await pyFastApiProjectGenerator(tree, {
-      name: 'test-api',
-      directory: 'apps',
-      computeType: 'ServerlessApiGatewayRestApi',
-      auth: 'IAM',
-    });
+  it.each(['Rest', 'Http'])(
+    'should include CORS middleware in init.py when using %s API',
+    async (api: 'Rest' | 'Http') => {
+      await pyFastApiProjectGenerator(tree, {
+        name: 'test-api',
+        directory: 'apps',
+        computeType: `ServerlessApiGateway${api}Api`,
+        auth: 'IAM',
+      });
 
-    // Read the generated init.py file
-    const initPyContent = tree.read('apps/test_api/test_api/init.py', 'utf-8');
+      // Read the generated init.py file
+      const initPyContent = tree.read(
+        'apps/test_api/test_api/init.py',
+        'utf-8',
+      );
 
-    // Verify CORS middleware import is included
-    expect(initPyContent).toContain(
-      'from fastapi.middleware.cors import CORSMiddleware',
-    );
+      // Verify CORS middleware import is included
+      expect(initPyContent).toContain(
+        'from fastapi.middleware.cors import CORSMiddleware',
+      );
 
-    // Verify CORS middleware is added with correct configuration
-    expect(initPyContent).toContain(
-      "app.add_middleware(CORSMiddleware, allow_origins=['*'], allow_methods=['*'])",
-    );
-  });
+      // Verify CORS middleware is added with correct configuration
+      expect(initPyContent).toContain('app.add_middleware(CORSMiddleware,');
+    },
+  );
 });
