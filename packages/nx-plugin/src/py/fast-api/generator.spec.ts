@@ -77,7 +77,7 @@ describe('fastapi project generator', () => {
       '@nxlv/python:run-commands',
     );
     expect(projectConfig.targets.serve.options.command).toBe(
-      'uv run fastapi dev test_api/main.py',
+      'uv run fastapi dev test_api/main.py --port 8000',
     );
 
     // Verify build dependencies
@@ -237,6 +237,7 @@ describe('fastapi project generator', () => {
       apiType: 'fast-api',
       auth: 'IAM',
       generator: FAST_API_GENERATOR_INFO.id,
+      port: 8000,
     });
   });
 
@@ -299,4 +300,56 @@ describe('fastapi project generator', () => {
       expect(initPyContent).toContain('app.add_middleware(CORSMiddleware,');
     },
   );
+
+  it('should increment ports when running generator multiple times', async () => {
+    // Generate first API
+    await pyFastApiProjectGenerator(tree, {
+      name: 'first-api',
+      directory: 'apps',
+      computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
+    });
+
+    // Generate second API
+    await pyFastApiProjectGenerator(tree, {
+      name: 'second-api',
+      directory: 'apps',
+      computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
+    });
+
+    // Generate third API
+    await pyFastApiProjectGenerator(tree, {
+      name: 'third-api',
+      directory: 'apps',
+      computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
+    });
+
+    // Check metadata ports
+    const firstApiConfig = JSON.parse(
+      tree.read('apps/first_api/project.json', 'utf-8'),
+    );
+    const secondApiConfig = JSON.parse(
+      tree.read('apps/second_api/project.json', 'utf-8'),
+    );
+    const thirdApiConfig = JSON.parse(
+      tree.read('apps/third_api/project.json', 'utf-8'),
+    );
+
+    expect(firstApiConfig.metadata.port).toBe(8000);
+    expect(secondApiConfig.metadata.port).toBe(8001);
+    expect(thirdApiConfig.metadata.port).toBe(8002);
+
+    // Check serve target --port arguments
+    expect(firstApiConfig.targets.serve.options.command).toContain(
+      '--port 8000',
+    );
+    expect(secondApiConfig.targets.serve.options.command).toContain(
+      '--port 8001',
+    );
+    expect(thirdApiConfig.targets.serve.options.command).toContain(
+      '--port 8002',
+    );
+  });
 });

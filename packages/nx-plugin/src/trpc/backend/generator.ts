@@ -33,6 +33,7 @@ import {
 } from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { addApiGatewayConstruct } from '../../utils/api-constructs/api-constructs';
+import { getLocalServerPortNumber } from '../../utils/port';
 
 export const TRPC_BACKEND_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -58,6 +59,12 @@ export async function tsTrpcApiGenerator(
   const backendProjectName = `${apiNamespace}${backendName}`;
   const schemaProjectName = `${apiNamespace}${schemaName}`;
 
+  const port = getLocalServerPortNumber(
+    tree,
+    TRPC_BACKEND_GENERATOR_INFO,
+    2022,
+  );
+
   const enhancedOptions = {
     backendProjectName,
     backendProjectAlias: toScopeAlias(backendProjectName),
@@ -68,8 +75,10 @@ export async function tsTrpcApiGenerator(
     backendRoot,
     pkgMgrCmd: getPackageManagerCommand().exec,
     apiGatewayEventType: getApiGatewayEventType(options),
+    port,
     ...options,
   };
+
   await tsProjectGenerator(tree, {
     name: backendName,
     directory: projectRoot,
@@ -102,6 +111,7 @@ export async function tsTrpcApiGenerator(
         apiName: options.name,
         apiType: 'trpc',
         auth: options.auth,
+        port,
       } as unknown;
 
       config.targets.serve = {
@@ -110,6 +120,7 @@ export async function tsTrpcApiGenerator(
           commands: ['tsx src/local-server.ts'],
           cwd: backendRoot,
         },
+        continuous: true,
       };
 
       config.targets.bundle = {

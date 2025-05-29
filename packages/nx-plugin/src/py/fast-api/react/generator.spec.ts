@@ -11,6 +11,8 @@ import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
 import { query } from '../../../utils/ast';
 import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
 import { expectHasMetricTags } from '../../../utils/metrics.spec';
+import { tsCloudScapeWebsiteGenerator } from '../../../cloudscape-website/app/generator';
+import { pyFastApiProjectGenerator } from '../generator';
 
 describe('fastapi react generator', () => {
   let tree: Tree;
@@ -117,6 +119,22 @@ export function Main() {
     expect(
       projectConfig.targets['generate:test-api-client'].dependsOn,
     ).toContain('backend:openapi');
+
+    // Verify watch generate target was added
+    expect(
+      projectConfig.targets['watch-generate:test-api-client'],
+    ).toBeDefined();
+    expect(
+      projectConfig.targets['watch-generate:test-api-client'].executor,
+    ).toBe('nx:run-commands');
+    expect(
+      projectConfig.targets['watch-generate:test-api-client'].continuous,
+    ).toBe(true);
+    expect(
+      projectConfig.targets['watch-generate:test-api-client'].options.commands,
+    ).toEqual([
+      `nx watch --projects=backend --includeDependentProjects -- nx run frontend:"generate:test-api-client"`,
+    ]);
 
     // Verify generated client is ignored by default
     expect(tree.exists('apps/frontend/.gitignore'));
@@ -434,5 +452,101 @@ export function Main() {
     expect(
       projectConfig.targets['generate:test-api-client'].dependsOn,
     ).toContain('my_scope.backend:openapi');
+  });
+});
+
+describe('fastapi react generator with real react and trpc projects', () => {
+  let tree: Tree;
+
+  beforeEach(async () => {
+    tree = createTreeUsingTsSolutionSetup();
+
+    // Generate a cloudscape website
+    await tsCloudScapeWebsiteGenerator(tree, {
+      name: 'frontend',
+      skipInstall: true,
+    });
+  });
+
+  it('should configure serve-local integration with generated projects', async () => {
+    // Generate a fastapi
+    await pyFastApiProjectGenerator(tree, {
+      name: 'TestApi',
+      auth: 'None',
+      computeType: 'ServerlessApiGatewayHttpApi',
+    });
+
+    await fastApiReactGenerator(tree, {
+      frontendProjectName: 'frontend',
+      fastApiProjectName: 'test_api',
+    });
+
+    // Read the frontend project configuration
+    const frontendProject = JSON.parse(
+      tree.read('frontend/project.json', 'utf-8'),
+    );
+
+    // Verify that serve-local target now depends on backend serve target
+    expect(frontendProject.targets['serve-local'].dependsOn).toContainEqual({
+      projects: ['proj.test_api'],
+      target: 'serve',
+    });
+    // Should also depend on the generate watch target
+    expect(frontendProject.targets['serve-local'].dependsOn).toContain(
+      'watch-generate:test-api-client',
+    );
+
+    // Verify that the runtime config was created and modified
+    expect(
+      tree.exists('frontend/src/components/RuntimeConfig/index.tsx'),
+    ).toBeTruthy();
+
+    const runtimeConfigContent = tree.read(
+      'frontend/src/components/RuntimeConfig/index.tsx',
+      'utf-8',
+    );
+
+    // Verify that the runtime config includes the API override
+    expect(runtimeConfigContent).toContain('runtimeConfig.apis.TestApi');
+    expect(runtimeConfigContent).toContain('http://localhost:8000/');
+  });
+
+  it('should use correct port numbers in runtime config overrides', async () => {
+    // Generate first API
+    await pyFastApiProjectGenerator(tree, {
+      name: 'FirstApi',
+      auth: 'None',
+      computeType: 'ServerlessApiGatewayHttpApi',
+    });
+
+    // Generate second API
+    await pyFastApiProjectGenerator(tree, {
+      name: 'SecondApi',
+      auth: 'None',
+      computeType: 'ServerlessApiGatewayHttpApi',
+    });
+
+    // Connect first API to frontend
+    await fastApiReactGenerator(tree, {
+      frontendProjectName: 'frontend',
+      fastApiProjectName: 'first_api',
+    });
+
+    // Connect second API to frontend
+    await fastApiReactGenerator(tree, {
+      frontendProjectName: 'frontend',
+      fastApiProjectName: 'second_api',
+    });
+
+    // Verify that the runtime config includes the correct port overrides
+    const runtimeConfigContent = tree.read(
+      'frontend/src/components/RuntimeConfig/index.tsx',
+      'utf-8',
+    );
+
+    expect(runtimeConfigContent).toContain('runtimeConfig.apis.FirstApi');
+    expect(runtimeConfigContent).toContain('http://localhost:8000/');
+    expect(runtimeConfigContent).toContain('runtimeConfig.apis.SecondApi');
+    expect(runtimeConfigContent).toContain('http://localhost:8001/');
   });
 });

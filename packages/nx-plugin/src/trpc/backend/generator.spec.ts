@@ -55,6 +55,7 @@ describe('trpc backend generator', () => {
       apiType: 'trpc',
       auth: 'IAM',
       generator: TRPC_BACKEND_GENERATOR_INFO.id,
+      port: 2022,
     });
   });
 
@@ -294,5 +295,64 @@ describe('trpc backend generator', () => {
     expect(
       tree.read('packages/common/constructs/src/app/apis/test-api.ts', 'utf-8'),
     ).toContain('HttpNoneAuthorizer');
+  });
+
+  it('should increment ports when running generator multiple times', async () => {
+    // Generate first API
+    await tsTrpcApiGenerator(tree, {
+      name: 'FirstApi',
+      directory: 'apps',
+      computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
+    });
+
+    // Generate second API
+    await tsTrpcApiGenerator(tree, {
+      name: 'SecondApi',
+      directory: 'apps',
+      computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
+    });
+
+    // Generate third API
+    await tsTrpcApiGenerator(tree, {
+      name: 'ThirdApi',
+      directory: 'apps',
+      computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
+    });
+
+    // Check metadata ports
+    const firstApiConfig = JSON.parse(
+      tree.read('apps/first-api/backend/project.json', 'utf-8'),
+    );
+    const secondApiConfig = JSON.parse(
+      tree.read('apps/second-api/backend/project.json', 'utf-8'),
+    );
+    const thirdApiConfig = JSON.parse(
+      tree.read('apps/third-api/backend/project.json', 'utf-8'),
+    );
+
+    expect(firstApiConfig.metadata.port).toBe(2022);
+    expect(secondApiConfig.metadata.port).toBe(2023);
+    expect(thirdApiConfig.metadata.port).toBe(2024);
+
+    // Check local-server.ts files contain correct ports
+    const firstLocalServer = tree.read(
+      'apps/first-api/backend/src/local-server.ts',
+      'utf-8',
+    );
+    const secondLocalServer = tree.read(
+      'apps/second-api/backend/src/local-server.ts',
+      'utf-8',
+    );
+    const thirdLocalServer = tree.read(
+      'apps/third-api/backend/src/local-server.ts',
+      'utf-8',
+    );
+
+    expect(firstLocalServer).toContain('const PORT = 2022;');
+    expect(secondLocalServer).toContain('const PORT = 2023;');
+    expect(thirdLocalServer).toContain('const PORT = 2024;');
   });
 });

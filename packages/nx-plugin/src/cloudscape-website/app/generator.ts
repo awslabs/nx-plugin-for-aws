@@ -126,6 +126,18 @@ export async function tsCloudScapeWebsiteGenerator(
       outputPath: joinPathFragments('dist', websiteContentPath, 'bundle'),
     },
   };
+
+  // Add a serve-local target for running the website and its dependencies locally
+  targets['serve-local'] = {
+    executor: '@nx/vite:dev-server',
+    options: {
+      buildTarget: `${fullyQualifiedName}:build:development`,
+      hmr: true,
+      mode: 'serve-local',
+    },
+    continuous: true,
+  };
+
   projectConfiguration.targets = sortObjectKeys(targets);
 
   updateProjectConfiguration(tree, fullyQualifiedName, projectConfiguration);

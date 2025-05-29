@@ -1,7 +1,7 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
 exports[`runtime-config generator > should generate runtime config files > runtime-config-component.tsx 1`] = `
-"import { Alert, Spinner } from '@cloudscape-design/components';
+"import { Spinner } from '@cloudscape-design/components';
 import React, {
   createContext,
   PropsWithChildren,
@@ -18,6 +18,17 @@ export const RuntimeConfigContext = createContext<IRuntimeConfig | undefined>(
 );
 
 /**
+ * Apply any overrides to point to local servers/resources here
+ * for the serve-local target
+ */
+const applyOverrides = (runtimeConfig: IRuntimeConfig) => {
+  if (import.meta.env.MODE === 'serve-local') {
+    // Add local server urls here
+  }
+  return runtimeConfig;
+};
+
+/**
  * Sets up the runtimeConfig.
  *
  * This assumes a runtime-config.json file is present at '/'.
@@ -26,26 +37,19 @@ const RuntimeConfigProvider: React.FC<PropsWithChildren> = ({ children }) => {
   const [runtimeConfig, setRuntimeConfig] = useState<
     IRuntimeConfig | undefined
   >();
-  const [error, setError] = useState<string | undefined>();
-
   useEffect(() => {
-    fetch('/runtime-config.json')
-      .then((response) => {
-        return response.json();
-      })
-      .then((_runtimeConfig) => {
-        setRuntimeConfig(_runtimeConfig as IRuntimeConfig);
-      })
-      .catch(() => {
-        setError('No runtime-config.json detected');
-      });
+    (async () => {
+      try {
+        setRuntimeConfig(
+          applyOverrides(await (await fetch('/runtime-config.json')).json()),
+        );
+      } catch {
+        setRuntimeConfig(applyOverrides({ apis: {} } as any));
+      }
+    })();
   }, [setRuntimeConfig]);
 
-  return error ? (
-    <Alert type="error" header="Validation error">
-      {error}
-    </Alert>
-  ) : runtimeConfig ? (
+  return runtimeConfig ? (
     <RuntimeConfigContext.Provider value={runtimeConfig}>
       {children}
     </RuntimeConfigContext.Provider>

@@ -7,6 +7,8 @@ import { TRPC_REACT_GENERATOR_INFO, reactGenerator } from './generator';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
+import { tsCloudScapeWebsiteGenerator } from '../../cloudscape-website/app/generator';
+import { tsTrpcApiGenerator } from '../backend/generator';
 
 describe('trpc react generator', () => {
   let tree: Tree;
@@ -274,5 +276,97 @@ export function Main() {
       tree.exists('apps/frontend/src/components/TestApiClientProvider.tsx'),
     ).toBeTruthy();
     expect(tree.exists('apps/frontend/src/hooks/useTestApi.tsx')).toBeTruthy();
+  });
+});
+
+describe('trpc react generator with real react and trpc projects', () => {
+  let tree: Tree;
+
+  beforeEach(async () => {
+    tree = createTreeUsingTsSolutionSetup();
+
+    // Generate a cloudscape website
+    await tsCloudScapeWebsiteGenerator(tree, {
+      name: 'frontend',
+      skipInstall: true,
+    });
+  });
+
+  it('should configure serve-local integration with generated projects', async () => {
+    // Generate a trpc backend
+    await tsTrpcApiGenerator(tree, {
+      name: 'TestApi',
+      auth: 'None',
+      computeType: 'ServerlessApiGatewayHttpApi',
+    });
+
+    await reactGenerator(tree, {
+      frontendProjectName: 'frontend',
+      backendProjectName: 'test-api',
+    });
+
+    // Read the frontend project configuration
+    const frontendProject = JSON.parse(
+      tree.read('frontend/project.json', 'utf-8'),
+    );
+
+    // Verify that serve-local target now depends on backend serve target
+    expect(frontendProject.targets['serve-local'].dependsOn).toContainEqual({
+      projects: ['@proj/test-api'],
+      target: 'serve',
+    });
+
+    // Verify that the runtime config was created and modified
+    expect(
+      tree.exists('frontend/src/components/RuntimeConfig/index.tsx'),
+    ).toBeTruthy();
+
+    const runtimeConfigContent = tree.read(
+      'frontend/src/components/RuntimeConfig/index.tsx',
+      'utf-8',
+    );
+
+    // Verify that the runtime config includes the API override
+    expect(runtimeConfigContent).toContain('runtimeConfig.apis.TestApi');
+    expect(runtimeConfigContent).toContain('http://localhost:2022/');
+  });
+
+  it('should use correct port numbers in runtime config overrides', async () => {
+    // Generate first API
+    await tsTrpcApiGenerator(tree, {
+      name: 'FirstApi',
+      auth: 'None',
+      computeType: 'ServerlessApiGatewayHttpApi',
+    });
+
+    // Generate second API
+    await tsTrpcApiGenerator(tree, {
+      name: 'SecondApi',
+      auth: 'None',
+      computeType: 'ServerlessApiGatewayHttpApi',
+    });
+
+    // Connect first API to frontend
+    await reactGenerator(tree, {
+      frontendProjectName: 'frontend',
+      backendProjectName: 'first-api',
+    });
+
+    // Connect second API to frontend
+    await reactGenerator(tree, {
+      frontendProjectName: 'frontend',
+      backendProjectName: 'second-api',
+    });
+
+    // Verify that the runtime config includes the correct port overrides
+    const runtimeConfigContent = tree.read(
+      'frontend/src/components/RuntimeConfig/index.tsx',
+      'utf-8',
+    );
+
+    expect(runtimeConfigContent).toContain('runtimeConfig.apis.FirstApi');
+    expect(runtimeConfigContent).toContain('http://localhost:2022/');
+    expect(runtimeConfigContent).toContain('runtimeConfig.apis.SecondApi');
+    expect(runtimeConfigContent).toContain('http://localhost:2023/');
   });
 });

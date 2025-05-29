@@ -158,6 +158,19 @@ describe('cloudscape-website generator', () => {
     );
   });
 
+  it('should add a serve-local target with mode serve-local', async () => {
+    // Call the generator function
+    await tsCloudScapeWebsiteGenerator(tree, options);
+
+    const projectConfig = readJson(tree, 'test-app/project.json');
+    expect(projectConfig.targets).toHaveProperty('serve-local');
+    expect(projectConfig.targets['serve-local'].options).toHaveProperty(
+      'mode',
+      'serve-local',
+    );
+    expect(projectConfig.targets['serve-local'].continuous).toBeTruthy();
+  });
+
   it('should add generator metric to app.ts', async () => {
     // Call the generator function
     await tsCloudScapeWebsiteGenerator(tree, options);

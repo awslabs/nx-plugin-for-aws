@@ -37,6 +37,7 @@ import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { addApiGatewayConstruct } from '../../utils/api-constructs/api-constructs';
 import { addOpenApiGeneration } from './react/open-api';
 import { updateGitIgnore } from '../../utils/git';
+import { getLocalServerPortNumber } from '../../utils/port';
 
 export const FAST_API_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -58,6 +59,8 @@ export const pyFastApiProjectGenerator = async (
   const apiNameSnakeCase = toSnakeCase(schema.name);
   const apiNameKebabCase = toKebabCase(schema.name);
   const apiNameClassName = toClassName(schema.name);
+
+  const port = getLocalServerPortNumber(tree, FAST_API_GENERATOR_INFO, 8000);
 
   await pyProjectGenerator(tree, {
     name: normalizedName,
@@ -88,15 +91,17 @@ export const pyFastApiProjectGenerator = async (
   projectConfig.targets.serve = {
     executor: '@nxlv/python:run-commands',
     options: {
-      command: `uv run fastapi dev ${normalizedName}/main.py`,
+      command: `uv run fastapi dev ${normalizedName}/main.py --port ${port}`,
       cwd: dir,
     },
+    continuous: true,
   };
 
   projectConfig.metadata = {
     apiName: schema.name,
     apiType: 'fast-api',
     auth: schema.auth,
+    port,
   } as any;
 
   projectConfig.targets = sortObjectKeys(projectConfig.targets);

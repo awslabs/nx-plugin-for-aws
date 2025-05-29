@@ -7,13 +7,11 @@ import {
   generateFiles,
   installPackagesTask,
   joinPathFragments,
-  ProjectConfiguration,
   Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { FastApiReactGeneratorSchema } from './schema';
 import { runtimeConfigGenerator } from '../../../cloudscape-website/runtime-config/generator';
-import snakeCase from 'lodash.snakecase';
 import kebabCase from 'lodash.kebabcase';
 import { sortObjectKeys } from '../../../utils/object';
 import { toClassName } from '../../../utils/names';
@@ -34,6 +32,7 @@ import {
 } from '../../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { addOpenApiGeneration } from './open-api';
+import { addTargetToServeLocal } from '../../../api-connection/serve-local';
 
 export const FAST_API_REACT_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -59,7 +58,9 @@ export const fastApiReactGenerator = async (
   const metadata = fastApiProjectConfig.metadata as any;
   const apiName = metadata?.apiName;
   const auth = metadata?.auth ?? 'IAM';
+  const port = metadata?.port ?? 8000;
   const clientGenTarget = `generate:${kebabCase(apiName)}-client`;
+  const clientGenWatchTarget = `watch-${clientGenTarget}`;
 
   const generatedClientDir = joinPathFragments('generated', kebabCase(apiName));
   const generatedClientDirFromRoot = joinPathFragments(
@@ -104,6 +105,16 @@ export const fastApiReactGenerator = async (
           ],
         },
         dependsOn: [`${fastApiProjectConfig.name}:openapi`],
+      },
+      // Watch target for regenerating the client
+      [clientGenWatchTarget]: {
+        executor: 'nx:run-commands',
+        options: {
+          commands: [
+            `nx watch --projects=${fastApiProjectConfig.name} --includeDependentProjects -- nx run ${frontendProjectConfig.name}:"${clientGenTarget}"`,
+          ],
+        },
+        continuous: true,
       },
     }),
   });
@@ -223,6 +234,20 @@ export const fastApiReactGenerator = async (
         createJsxElementFromIdentifier(providerName, [node]),
     );
   }
+
+  // Update serve-local on the website to use our local FastAPI server
+  addTargetToServeLocal(
+    tree,
+    frontendProjectConfig.name,
+    fastApiProjectConfig.name,
+    {
+      url: `http://localhost:${port}/`,
+      apiName,
+      // Additionally add a dependency on the generate watch command to ensure that local
+      // FastAPI changes that affect the client are also reloaded
+      additionalDependencyTargets: [clientGenWatchTarget],
+    },
+  );
 
   addDependenciesToPackageJson(
     tree,

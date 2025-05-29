@@ -29,6 +29,7 @@ import {
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+import { addTargetToServeLocal } from '../../api-connection/serve-local';
 
 export const TRPC_REACT_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -49,6 +50,7 @@ export async function reactGenerator(
   const metadata = backendProjectConfig.metadata as any;
   const apiName = metadata.apiName;
   const auth = metadata.auth ?? 'IAM';
+  const port = metadata.port ?? 2022;
   const apiNameClassName = toClassName(apiName);
   const backendProjectAlias = toScopeAlias(backendProjectConfig.name);
 
@@ -156,6 +158,16 @@ export async function reactGenerator(
         createJsxElementFromIdentifier(clientProviderName, [node]),
     );
   }
+
+  addTargetToServeLocal(
+    tree,
+    frontendProjectConfig.name,
+    backendProjectConfig.name,
+    {
+      url: `http://localhost:${port}/`,
+      apiName,
+    },
+  );
 
   addDependenciesToPackageJson(
     tree,
