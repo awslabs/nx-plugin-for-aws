@@ -332,7 +332,8 @@ const parseFile = (
     if (
       syntax.block &&
       trimmedLine.endsWith(syntax.block.end) &&
-      !withinLineCommentSeries
+      !withinLineCommentSeries &&
+      (withinBlockComment || trimmedLine.startsWith(syntax.block.start))
     ) {
       // Comment ends with the block end, so we've completed the header and therefore break out of the loop
       headerLines.push(lines[i]);
@@ -425,7 +426,7 @@ export default {
   );
   if (hashbang !== newHashbang || body !== newBody) {
     throw new Error(
-      `The license header content, or format for ${fileExtension} files would produce a header that cannot be safely replaced. Please revise license content and format in ${AWS_NX_PLUGIN_CONFIG_FILE_NAME}`,
+      `The license header content, or format for ${fileExtension} files would produce a header that cannot be safely replaced in ${file}. Please revise license content and format in ${AWS_NX_PLUGIN_CONFIG_FILE_NAME}`,
     );
   }
 

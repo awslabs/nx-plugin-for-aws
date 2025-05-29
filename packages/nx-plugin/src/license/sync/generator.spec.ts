@@ -514,6 +514,38 @@ describe('licenseSyncGenerator', () => {
     );
   });
 
+  it('should work for code lines that end with a block end but are not part of block comments', async () => {
+    await addLicenseConfig({
+      header: {
+        content: {
+          lines: ['Test Header Line 1', 'Test Header Line 2'],
+        },
+        format: {
+          '**/*.{py,sh}': {
+            blockStart: '## ',
+            lineStart: '#  ',
+            blockEnd: '## ',
+          },
+        },
+      },
+    });
+
+    tree.write(
+      'test.py',
+      `test_content = """
+# Some content
+"""`,
+    );
+
+    await licenseSyncGenerator(tree);
+
+    expect(tree.read('test.py', 'utf-8')).toBe(
+      `## \n#  Test Header Line 1\n#  Test Header Line 2\n## \ntest_content = """
+# Some content
+"""`,
+    );
+  });
+
   it("should error when multiple block comments would be rendered and we couldn't therefore replace the header again", async () => {
     await addLicenseConfig({
       header: {
@@ -534,7 +566,7 @@ describe('licenseSyncGenerator', () => {
     tree.write('test.ts', `const x = 1;`);
 
     await expect(licenseSyncGenerator(tree)).rejects.toThrow(
-      'The license header content, or format for ts files would produce a header that cannot be safely replaced',
+      'The license header content, or format for ts files would produce a header that cannot be safely replaced in test.ts',
     );
   });
 
