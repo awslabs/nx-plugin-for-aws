@@ -13,7 +13,7 @@ import { SyncGeneratorResult } from 'nx/src/utils/sync-generators';
 import { basename } from 'path';
 import { glob as fastGlob } from 'fast-glob';
 import { minimatch } from 'minimatch';
-import { getGitIncludedFiles } from '../../utils/git';
+import { getGitIncludedFiles, isWithinGitRepo } from '../../utils/git';
 import { AWS_NX_PLUGIN_CONFIG_FILE_NAME } from '../../utils/config/utils';
 import {
   PROJECT_FILES_TO_SYNC,
@@ -180,9 +180,9 @@ const getAllFilesInTree = async (tree: Tree): Promise<string[]> => {
   return [
     ...new Set([
       // Get all files in memory in the tree
-      ...(await globAsync(tree, ['*'])),
+      ...(await globAsync(tree, ['*', '**/*'])),
       // Find all files on the filesystem that may not be in memory in the tree
-      ...(await fastGlob(['*'], { cwd: tree.root, dot: true })),
+      ...(await fastGlob(['*', '**/*'], { cwd: tree.root, dot: true })),
     ]),
   ].filter((f) => tree.exists(f));
 };
@@ -196,7 +196,7 @@ const getCandidateProjectFilesForHeader = async (
 ): Promise<string[]> => {
   // Prefer, if possible, to treat all non gitignored files as our candidate set such that we honour users .gitignore files
   // If we're not in a git repo, fall back to everything and rely on the user configuring exclusions below
-  const projectFiles = tree.exists('.git')
+  const projectFiles = isWithinGitRepo(tree)
     ? getGitIncludedFiles(tree)
     : await getAllFilesInTree(tree);
 

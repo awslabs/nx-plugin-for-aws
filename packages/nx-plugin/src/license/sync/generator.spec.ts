@@ -11,7 +11,7 @@ import {
 } from '../../utils/config/utils';
 import { LicenseConfig } from '../config-types';
 import { SyncGeneratorResult } from 'nx/src/utils/sync-generators';
-import { mkdtempSync, rmSync } from 'fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'fs';
 import { flushChanges, FsTree } from 'nx/src/generators/tree';
 import { execSync } from 'child_process';
 import path from 'path';
@@ -45,7 +45,7 @@ describe('licenseSyncGenerator', () => {
                 lines: ['Test Header'],
               },
               format: {
-                '**/*.ts': {
+                '**/*.{ts,js}': {
                   lineStart: '// ',
                 },
                 '**/*.sh': {
@@ -86,6 +86,40 @@ describe('licenseSyncGenerator', () => {
     expect(getOutOfSyncMessage(res)).toContain(
       `License headers are out of sync in the following source files:\n- foo.ts`,
     );
+  });
+
+  it('should add headers to nested files', async () => {
+    await addLicenseConfig();
+
+    tree.write('nested/foo.ts', `const foo = 'bar';`);
+
+    await licenseSyncGenerator(tree);
+
+    expect(tree.read('nested/foo.ts', 'utf-8')).toBe(
+      `// Test Header\nconst foo = 'bar';`,
+    );
+  });
+
+  it('should add headers to nested on the filesystem but not in the tree', async () => {
+    const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'test-dir'));
+
+    try {
+      const fsTree = new FsTree(tmpDir, false);
+
+      // Write file to the filesystem that's not tracked by the tree
+      mkdirSync(path.join(tmpDir, 'nested'));
+      execSync("echo 'const foo = 3;' > nested/foo.ts", { cwd: tmpDir });
+
+      await addLicenseConfig(undefined, fsTree);
+
+      await licenseSyncGenerator(fsTree);
+
+      expect(fsTree.read('nested/foo.ts', 'utf-8')).toContain(
+        `// Test Header\nconst foo = 3;`,
+      );
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 
   it('should add multi-line headers', async () => {
@@ -874,6 +908,40 @@ describe('licenseSyncGenerator', () => {
       execSync('git init', { cwd: tmpDir });
       execSync('git config user.email test@example.com', { cwd: tmpDir });
       execSync('git config user.name test', { cwd: tmpDir });
+
+      // Add default config
+      await addLicenseConfig(undefined, fsTree);
+
+      fsTree.write('.gitignore', '*.js');
+      fsTree.write('test.ts', "const x = 'foo';");
+      fsTree.write('ignored.js', "const y = 'bar';");
+
+      // Flush to ensure git is aware of the files
+      flushChanges(fsTree.root, fsTree.listChanges());
+
+      await licenseSyncGenerator(fsTree);
+
+      expect(fsTree.read('test.ts', 'utf-8')).toBe(
+        `// Test Header\nconst x = 'foo';`,
+      );
+      expect(fsTree.read('ignored.js', 'utf-8')).toBe(`const y = 'bar';`);
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('should not update ignored files in git projects when monorepo is not in root', async () => {
+    const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'test-dir'));
+
+    try {
+      execSync('git init', { cwd: tmpDir });
+      execSync('git config user.email test@example.com', { cwd: tmpDir });
+      execSync('git config user.name test', { cwd: tmpDir });
+
+      const subDir = path.join(tmpDir, 'sub-dir');
+      mkdirSync(subDir);
+
+      const fsTree = new FsTree(subDir, false);
 
       // Add default config
       await addLicenseConfig(undefined, fsTree);

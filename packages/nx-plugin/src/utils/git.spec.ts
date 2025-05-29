@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { flushChanges, FsTree, Tree } from 'nx/src/generators/tree';
-import { getGitIncludedFiles, updateGitIgnore } from './git';
+import { getGitIncludedFiles, isWithinGitRepo, updateGitIgnore } from './git';
 import { mkdtempSync, rmSync } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -100,6 +100,57 @@ describe('git utils', () => {
 
       const content = tree.read('nested/dir/.gitignore', 'utf-8');
       expect(content).toBe('*.log');
+    });
+  });
+
+  describe('isWithinGitRepo', () => {
+    let tmpDir: string;
+    let tree: FsTree;
+
+    beforeEach(() => {
+      tmpDir = mkdtempSync(path.join(os.tmpdir(), 'test-git-repo'));
+      tree = new FsTree(tmpDir, false);
+    });
+
+    afterEach(() => {
+      rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    it('should return true when .git directory exists in tree root', () => {
+      // Create a .git directory
+      tree.write('.git/config', '[core]\n\trepositoryformatversion = 0');
+      flushChanges(tree.root, tree.listChanges());
+
+      const result = isWithinGitRepo(tree);
+
+      expect(result).toBe(true);
+    });
+
+    it('should return true when inside a git repository (without .git in root)', () => {
+      // Initialize git repo
+      execSync('git init', { cwd: tmpDir });
+      execSync('git config user.email test@example.com', { cwd: tmpDir });
+      execSync('git config user.name test', { cwd: tmpDir });
+
+      // Create a subdirectory tree that doesn't have .git but is within the repo
+      const subDir = path.join(tmpDir, 'subdir');
+      const subTree = new FsTree(subDir, false);
+      subTree.write('test.txt', 'test content');
+      flushChanges(subTree.root, subTree.listChanges());
+
+      const result = isWithinGitRepo(subTree);
+
+      expect(result).toBe(true);
+    });
+
+    it('should return false when not in a git repository', () => {
+      // Create a tree in a directory that's not a git repo
+      tree.write('test.txt', 'test content');
+      flushChanges(tree.root, tree.listChanges());
+
+      const result = isWithinGitRepo(tree);
+
+      expect(result).toBe(false);
     });
   });
 });

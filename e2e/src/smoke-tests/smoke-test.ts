@@ -106,6 +106,15 @@ export const smokeTest = (
         `${opts.cwd}/packages/infra/src/stacks/application-stack.ts`,
         readFileSync(join(__dirname, '../files/application-stack.ts.template')),
       );
+
+      // Since the smoke tests don't run in a git repo, we need to exclude some patterns for the license sync
+      writeFileSync(
+        `${opts.cwd}/aws-nx-plugin.config.mts`,
+        readFileSync(
+          join(__dirname, '../files/aws-nx-plugin.config.mts.template'),
+        ),
+      );
+
       await runCLI(`sync --verbose`, opts);
       await runCLI(
         `run-many --target build --all --parallel 1 --output-style=stream --skip-nx-cache --verbose`,

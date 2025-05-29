@@ -29,6 +29,23 @@ export const getGitIncludedFiles = (tree: Tree): string[] => {
 };
 
 /**
+ * Return whether or not a tree is within a git repo
+ */
+export const isWithinGitRepo = (tree: Tree): boolean => {
+  if (tree.exists('.git')) {
+    return true;
+  }
+  try {
+    return execSync('git rev-parse --is-inside-work-tree', {
+      encoding: 'utf-8',
+      cwd: tree.root,
+    }).startsWith('true');
+  } catch {
+    return false;
+  }
+};
+
+/**
  * Update a .gitignore file. Will create a new .gitignore file if it does not exist
  */
 export const updateGitIgnore = (
