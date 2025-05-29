@@ -24,6 +24,7 @@ import {
 } from '@tanstack/react-query';
 import React from 'react';
 import { Mock } from 'vitest';
+import { PET_STORE_SPEC } from '../ts-client/generator.petstore.spec';
 
 describe('openApiTsHooksGenerator', () => {
   let tree: Tree;
@@ -1783,5 +1784,20 @@ describe('openApiTsHooksGenerator', () => {
         method: 'GET',
       }),
     );
+  });
+
+  it('should generate valid code for the petstore example ', async () => {
+    tree.write('openapi.json', JSON.stringify(PET_STORE_SPEC));
+
+    await openApiTsHooksGenerator(tree, {
+      openApiSpecPath: 'openapi.json',
+      outputPath: 'src/generated',
+    });
+
+    validateTypeScript([
+      'src/generated/client.gen.ts',
+      'src/generated/types.gen.ts',
+      'src/generated/options-proxy.gen.ts',
+    ]);
   });
 });
