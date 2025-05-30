@@ -180,7 +180,7 @@ describe('trpc backend generator', () => {
     expect(projectConfig.targets).toHaveProperty('serve');
     expect(projectConfig.targets!.serve!.executor).toBe('nx:run-commands');
     expect(projectConfig.targets!.serve!.options!.commands).toEqual([
-      'tsx src/local-server.ts',
+      'tsx --watch src/local-server.ts',
     ]);
   });
 
