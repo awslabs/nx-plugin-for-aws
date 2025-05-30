@@ -1,0 +1,140 @@
+---
+title: TypeScript Lambda Function
+description: How to add a TypeScript Lambda function to your project
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import Prerequisites from '@snippets/prerequisites.mdx';
+
+<Prerequisites />
+
+This generator adds a TypeScript Lambda function to an existing TypeScript project in your workspace. It creates a strongly-typed Lambda handler with proper bundling configuration and CDK constructs for infrastructure deployment.
+
+## Usage
+
+<RunGenerator generator="ts#lambda-function" requiredParameters={{
+  project: "my-project",
+  functionName: "MyFunction"
+}} />
+
+### Options
+
+#### project (required)
+The target TypeScript project to add the Lambda function to.
+
+#### functionName (required)
+The name of the Lambda function. This will be used to generate the function file name and CDK construct name.
+
+#### functionPath (optional)
+Directory path within the project's source directory for the function. Defaults to `lambda-functions`.
+
+#### handlerType (required)
+The AWS Lambda handler type to use. This provides strong typing for the event parameter. Available options:
+
+- **APIGatewayProxyHandler** - API Gateway REST API events
+- **APIGatewayProxyHandlerV2** - API Gateway HTTP API events  
+- **S3Handler** - S3 bucket events
+- **SQSHandler** - SQS queue messages
+- **EventBridgeHandler** - EventBridge events
+- **DynamoDBStreamHandler** - DynamoDB stream events
+- **ScheduledHandler** - CloudWatch Events/EventBridge scheduled events
+- **SNSHandler** - SNS topic notifications
+- **ALBHandler** - Application Load Balancer events
+- **CognitoUserPoolTriggerHandler** - Cognito User Pool triggers
+- **CloudFormationCustomResourceHandler** - CloudFormation custom resources
+- **KinesisStreamHandler** - Kinesis Data Streams
+- **Handler** - Generic handler
+- **any** - No specific typing (uses `any` for event parameter)
+
+## What it generates
+
+### Lambda Handler
+Creates a TypeScript Lambda handler file with:
+- Strongly-typed event parameter based on selected handler type
+- Appropriate response structure for the handler type
+- Error handling with proper response formatting
+- Console logging for debugging
+
+### Test File
+Generates a Vitest test file with:
+- Basic test setup with mocked Lambda context
+- Handler-specific test cases based on the selected handler type
+- Error handling test scenarios
+
+### CDK Construct
+Creates a CDK construct in the shared constructs package with:
+- Pre-configured Lambda function settings
+- Node.js 20.x runtime
+- X-Ray tracing enabled
+- Configurable timeout, memory, and environment variables
+- Code asset pointing to bundled output
+
+### Build Configuration
+Updates the project configuration to:
+- Add an esbuild bundle target for packaging the Lambda function
+- Configure the bundle target to output to `dist/{project}/bundle`
+- Update the build target to depend on the bundle target
+
+### Dependencies
+Adds the following dependencies to the project's package.json:
+- `@types/aws-lambda` - TypeScript types for AWS Lambda
+- `vitest` - Testing framework (if not already present)
+
+## Example
+
+After running the generator with `functionName: "UserProcessor"` and `handlerType: "SQSHandler"`, you'll get:
+
+```typescript
+// src/lambda-functions/user-processor.ts
+import { SQSHandler } from 'aws-lambda';
+
+export const handler: SQSHandler = async (event, context) => {
+  console.log('Event:', JSON.stringify(event, null, 2));
+  console.log('Context:', JSON.stringify(context, null, 2));
+
+  try {
+    // Process SQS messages
+    for (const record of event.Records) {
+      console.log('SQS Message:', record.body);
+      // TODO: Process SQS message
+    }
+    
+    return { processed: event.Records.length };
+  } catch (error) {
+    console.error('Error processing event:', error);
+    throw error;
+  }
+};
+```
+
+The corresponding CDK construct will be available as:
+
+```typescript
+import { UserProcessorLambda } from '@my-org/shared-constructs';
+
+// In your CDK stack:
+new UserProcessorLambda(this, 'UserProcessor', {
+  functionName: 'my-user-processor',
+  timeout: Duration.minutes(5),
+  environment: {
+    TABLE_NAME: myTable.tableName,
+  },
+});
+```
+
+<Aside type="tip">
+The generated Lambda function includes detailed TODO comments to guide you through implementing your specific business logic. The handler type ensures you get proper IntelliSense and type checking for the event structure.
+</Aside>
+
+## Best Practices
+
+1. **Choose the right handler type** - Select the handler type that matches your Lambda's trigger source for optimal type safety.
+
+2. **Implement proper error handling** - The generated template includes basic error handling, but you should customize it for your specific use case.
+
+3. **Use environment variables** - Pass configuration through environment variables rather than hardcoding values.
+
+4. **Keep functions focused** - Each Lambda function should have a single, well-defined responsibility.
+
+5. **Monitor and log** - The generated handler includes basic logging. Consider adding structured logging and monitoring for production use.

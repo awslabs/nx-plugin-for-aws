@@ -1,0 +1,165 @@
+import { describe, it, expect, vi } from 'vitest';
+import { handler } from '../<%= functionPath %>/<%= functionNameKebabCase %>';
+<% if (handlerType !== 'any') { %>import { Context } from 'aws-lambda';<% } %>
+
+describe('<%= functionNamePascalCase %> Lambda Handler', () => {
+  const mockContext<% if (handlerType !== 'any') { %>: Context<% } %> = {
+    callbackWaitsForEmptyEventLoop: true,
+    functionName: '<%= functionNameKebabCase %>',
+    functionVersion: '$LATEST',
+    invokedFunctionArn: 'arn:aws:lambda:us-east-1:123456789012:function:<%= functionNameKebabCase %>',
+    memoryLimitInMB: '128',
+    awsRequestId: 'test-request-id',
+    logGroupName: '/aws/lambda/<%= functionNameKebabCase %>',
+    logStreamName: '2024/01/01/[$LATEST]test-stream',
+    getRemainingTimeInMillis: vi.fn(() => 30000),
+    done: vi.fn(),
+    fail: vi.fn(),
+    succeed: vi.fn(),
+  };
+
+<% if (handlerType === 'APIGatewayProxyHandler') { %>  it('should handle API Gateway proxy event', async () => {
+    const event = {
+      httpMethod: 'GET',
+      path: '/test',
+      pathParameters: null,
+      queryStringParameters: null,
+      headers: {},
+      body: null,
+      isBase64Encoded: false,
+      requestContext: {
+        accountId: '123456789012',
+        apiId: 'test-api-id',
+        httpMethod: 'GET',
+        path: '/test',
+        stage: 'test',
+        requestId: 'test-request-id',
+        resourceId: 'test-resource-id',
+        resourcePath: '/test',
+        identity: {
+          sourceIp: '127.0.0.1',
+          userAgent: 'test-agent',
+        },
+      },
+      resource: '/test',
+      stageVariables: null,
+      multiValueHeaders: {},
+      multiValueQueryStringParameters: null,
+    };
+
+    const result = await handler(event, mockContext);
+
+    expect(result.statusCode).toBe(200);
+    expect(result.headers?.['Content-Type']).toBe('application/json');
+    expect(JSON.parse(result.body)).toMatchObject({
+      message: 'Hello from <%= functionNamePascalCase %>!',
+    });
+  });
+
+  it('should handle errors gracefully', async () => {
+    // Mock an error scenario
+    const originalConsoleError = console.error;
+    console.error = vi.fn();
+
+    try {
+      const invalidEvent = null as any;
+      const result = await handler(invalidEvent, mockContext);
+
+      expect(result.statusCode).toBe(500);
+      expect(JSON.parse(result.body)).toMatchObject({
+        error: 'Internal Server Error',
+      });
+    } finally {
+      console.error = originalConsoleError;
+    }
+  });<% } else if (handlerType === 'APIGatewayProxyHandlerV2') { %>  it('should handle API Gateway HTTP API event', async () => {
+    const event = {
+      version: '2.0',
+      routeKey: 'GET /test',
+      rawPath: '/test',
+      rawQueryString: '',
+      headers: {},
+      requestContext: {
+        accountId: '123456789012',
+        apiId: 'test-api-id',
+        domainName: 'test-domain.com',
+        http: {
+          method: 'GET',
+          path: '/test',
+          protocol: 'HTTP/1.1',
+          sourceIp: '127.0.0.1',
+          userAgent: 'test-agent',
+        },
+        requestId: 'test-request-id',
+        routeKey: 'GET /test',
+        stage: 'test',
+        time: '01/Jan/2024:00:00:00 +0000',
+        timeEpoch: 1640995200000,
+      },
+      isBase64Encoded: false,
+    };
+
+    const result = await handler(event, mockContext);
+
+    expect(result.statusCode).toBe(200);
+    expect(result.headers?.['Content-Type']).toBe('application/json');
+    expect(JSON.parse(result.body)).toMatchObject({
+      message: 'Hello from <%= functionNamePascalCase %>!',
+    });
+  });<% } else if (handlerType === 'S3Handler') { %>  it('should handle S3 event', async () => {
+    const event = {
+      Records: [{
+        eventVersion: '2.0',
+        eventSource: 'aws:s3',
+        awsRegion: 'us-east-1',
+        eventTime: '2024-01-01T00:00:00.000Z',
+        eventName: 's3:ObjectCreated:Put',
+        s3: {
+          s3SchemaVersion: '1.0',
+          configurationId: 'test-config',
+          bucket: {
+            name: 'test-bucket',
+            ownerIdentity: {
+              principalId: 'test-principal',
+            },
+            arn: 'arn:aws:s3:::test-bucket',
+          },
+          object: {
+            key: 'test-object.txt',
+            size: 1024,
+            eTag: 'test-etag',
+            sequencer: 'test-sequencer',
+          },
+        },
+      }],
+    };
+
+    const result = await handler(event, mockContext);
+
+    expect(result.processed).toBe(1);
+  });<% } else if (handlerType === 'SQSHandler') { %>  it('should handle SQS event', async () => {
+    const event = {
+      Records: [{
+        messageId: 'test-message-id',
+        receiptHandle: 'test-receipt-handle',
+        body: JSON.stringify({ message: 'test message' }),
+        attributes: {},
+        messageAttributes: {},
+        md5OfBody: 'test-md5',
+        eventSource: 'aws:sqs',
+        eventSourceARN: 'arn:aws:sqs:us-east-1:123456789012:test-queue',
+        awsRegion: 'us-east-1',
+      }],
+    };
+
+    const result = await handler(event, mockContext);
+
+    expect(result.processed).toBe(1);
+  });<% } else { %>  it('should handle event successfully', async () => {
+    const event = { test: 'data' };
+
+    const result = await handler(event, mockContext);
+
+    expect(result).toBeDefined();
+  });<% } %>
+});
