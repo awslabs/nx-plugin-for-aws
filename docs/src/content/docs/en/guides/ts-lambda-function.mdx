@@ -1,0 +1,309 @@
+---
+title: TypeScript Lambda Functions
+description: Reference documentation for TypeScript Lambda Functions
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+
+The TypeScript Lambda Function generator provides the ability to add a lambda function to an existing TypeScript project.
+
+This generator creates a new TypeScript lambda handler with AWS CDK infrastructure setup. The generated backend uses AWS Lambda for serverless deployment, with full type-safety using [@types/aws-lambda](https://www.npmjs.com/package/@types/aws-lambda). It includes comprehensive handler type support for various AWS event sources, test files using Vitest, and automated bundling with esbuild.
+
+## Usage
+
+### Generate a Lambda Function
+
+You can generate a new Lambda Function in two ways:
+
+<RunGenerator generator="ts#lambda-function" />
+
+### Options
+
+<GeneratorParameters generator="ts#lambda-function" />
+
+## Generator Output
+
+The generator will add the following files to your project:
+
+<FileTree>
+
+- src/
+  - \<function-name>.ts Function implementation
+- tests/
+  - \<function-name>.test.ts Test file
+
+</FileTree>
+
+The generator will also create CDK constructs which can be used to deploy your function, which reside in the `packages/common/constructs` directory.
+
+If the `functionPath` option is provided, the generator will add the necessary files to the specified path:
+
+<FileTree>
+
+- src/
+  - \<custom-path>/
+    - \<function-name>.ts Function implementation
+- tests/
+  - \<function-name>.test.ts Test file
+
+</FileTree>
+
+## Handler Types
+
+The generator supports multiple AWS Lambda handler types with full TypeScript type safety:
+
+- **APIGatewayProxyHandler** - Standard API Gateway proxy integration
+- **APIGatewayProxyHandlerV2** - API Gateway HTTP API (v2.0)  
+- **S3Handler** - S3 bucket event notifications
+- **SQSHandler** - SQS queue message processing
+- **SNSHandler** - SNS topic notifications
+- **DynamoDBStreamHandler** - DynamoDB stream events
+- **KinesisStreamHandler** - Kinesis data stream events
+- **CloudWatchLogsHandler** - CloudWatch log events
+- **ALBHandler** - Application Load Balancer target
+- **LambdaFunctionURLHandler** - Lambda Function URL
+- **APIGatewayAuthorizerHandler** - API Gateway custom authorizer
+- **S3BatchHandler** - S3 Batch Operations
+- **SESHandler** - Simple Email Service
+- **ScheduledHandler** - CloudWatch Events/EventBridge scheduled events
+- **EventBridgeHandler** - EventBridge custom events
+- **Handler** - Generic handler for any event type
+
+## Implementing your Function
+
+The main function implementation is in `<function-name>.ts`. Here's an example for an API Gateway handler:
+
+```typescript
+import { APIGatewayProxyHandler, APIGatewayProxyEvent, APIGatewayProxyResult, Context } from 'aws-lambda';
+
+export const handler: APIGatewayProxyHandler = async (event: APIGatewayProxyEvent, context: Context): Promise<APIGatewayProxyResult> => {
+  console.log('Event:', JSON.stringify(event, null, 2));
+  console.log('Context:', JSON.stringify(context, null, 2));
+
+  try {
+    // TODO: Implement your logic here
+    const response = {
+      message: 'Hello from MyFunction Lambda function!',
+      requestId: context.awsRequestId,
+    };
+
+    return {
+      statusCode: 200,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(response),
+    };
+  } catch (error) {
+    console.error('Error:', error);
+    return {
+      statusCode: 500,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        message: 'Internal Server Error',
+        requestId: context.awsRequestId,
+      }),
+    };
+  }
+};
+```
+
+### Type Safety Benefits
+
+The generator provides full TypeScript type safety:
+
+1. **Event Type Safety** - Each handler type includes proper event typing
+2. **Response Type Safety** - Return types are enforced based on the handler type
+3. **IntelliSense Support** - Full IDE autocompletion for event properties
+4. **Compile-time Validation** - TypeScript compiler catches type errors
+
+For example, with an S3 handler:
+
+```typescript
+export const handler: S3Handler = async (event: S3Event, context: Context): Promise<void> => {
+  for (const record of event.Records) {
+    const bucket = record.s3.bucket.name; // <- Type-safe access
+    const key = decodeURIComponent(record.s3.object.key.replace(/\+/g, ' '));
+    
+    console.log(`Processing S3 object: ${key} from bucket: ${bucket}`);
+    // Your S3 processing logic here
+  }
+};
+```
+
+### Testing
+
+The generator creates comprehensive test files using Vitest with proper mocks:
+
+```typescript
+import { describe, it, expect, vi } from 'vitest';
+import { Context } from 'aws-lambda';
+import { handler } from '../my-function';
+
+const mockContext: Context = {
+  awsRequestId: 'test-request-id',
+  functionName: 'MyFunction',
+  functionVersion: '$LATEST',
+  // ... other context properties
+};
+
+describe('MyFunction Lambda Function', () => {
+  it('should return success response for API Gateway event', async () => {
+    const mockEvent: APIGatewayProxyEvent = {
+      // ... mock event data
+    };
+
+    const result = await handler(mockEvent, mockContext);
+
+    expect(result.statusCode).toBe(200);
+    expect(result.headers?.['Content-Type']).toBe('application/json');
+  });
+});
+```
+
+## Bundling Configuration
+
+The generator automatically configures esbuild for optimized Lambda packaging:
+
+### Function-Specific Bundle Target
+
+Each function gets its own bundle target:
+
+```json
+"bundle-my-function": {
+  "executor": "nx:run-commands",
+  "outputs": ["{workspaceRoot}/dist/my-project/bundle/my-function"],
+  "options": {
+    "commands": [
+      "esbuild src/my-function.ts --bundle --outdir=dist/my-project/bundle/my-function --platform=node --format=cjs --target=node20 --sourcemap"
+    ]
+  }
+}
+```
+
+### Main Bundle Target
+
+The main bundle target orchestrates all function bundles:
+
+```json
+"bundle": {
+  "executor": "nx:run-commands",
+  "dependsOn": ["bundle-my-function"]
+}
+```
+
+### Benefits of This Approach
+
+1. **Parallel Bundling** - Multiple functions can be bundled simultaneously
+2. **Optimized Output** - Each function is bundled separately for minimal size
+3. **Source Maps** - Development debugging support
+4. **Tree Shaking** - Unused code is eliminated
+5. **Node.js 20 Target** - Optimized for AWS Lambda runtime
+
+## Deploying your Function
+
+The TypeScript Lambda Function generator creates a CDK construct for deploying your function in the `common/constructs` folder. You can use this in a CDK application:
+
+```typescript
+import { MyProjectMyFunction } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    // Add the function to your stack
+    const fn = new MyProjectMyFunction(this, 'MyFunction');
+  }
+}
+```
+
+This sets up:
+
+1. AWS Lambda function with Node.js 20.x runtime
+2. CloudWatch log group
+3. X-Ray tracing configuration
+4. Environment variables for connection reuse and source maps
+5. Proper bundling configuration
+
+### Event Source Integration
+
+This function can then be used as a target for any lambda event source. Ensure the event source matches the selected `handlerType` option:
+
+#### API Gateway Integration
+
+```typescript
+import { RestApi, LambdaIntegration } from 'aws-cdk-lib/aws-apigateway';
+import { MyProjectMyFunction } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const fn = new MyProjectMyFunction(this, 'MyFunction');
+    
+    // Create API Gateway
+    const api = new RestApi(this, 'MyApi');
+    api.root.addMethod('GET', new LambdaIntegration(fn));
+  }
+}
+```
+
+#### S3 Event Integration
+
+```typescript
+import { Bucket, EventType } from 'aws-cdk-lib/aws-s3';
+import { LambdaDestination } from 'aws-cdk-lib/aws-s3-notifications';
+import { MyProjectMyFunction } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const fn = new MyProjectMyFunction(this, 'MyFunction');
+    const bucket = new Bucket(this, 'MyBucket');
+    
+    // Trigger on object creation
+    bucket.addEventNotification(
+      EventType.OBJECT_CREATED,
+      new LambdaDestination(fn)
+    );
+  }
+}
+```
+
+#### Scheduled Event Integration
+
+```typescript
+import { Rule, Schedule } from 'aws-cdk-lib/aws-events';
+import { LambdaFunction } from 'aws-cdk-lib/aws-events-targets';
+import { MyProjectMyFunction } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const fn = new MyProjectMyFunction(this, 'MyFunction');
+    
+    // Schedule function to run every 15 minutes
+    const eventRule = new Rule(this, 'MyFunctionScheduleRule', {
+      schedule: Schedule.cron({ minute: '15' }),
+      targets: [new LambdaFunction(fn)],
+    });
+  }
+}
+```
+
+## Dependencies
+
+The generator automatically adds required dependencies:
+
+- **@types/aws-lambda** - TypeScript definitions for AWS Lambda
+- **vitest** - Modern testing framework for TypeScript
+
+These are added as dev dependencies and will be installed automatically when you run the generator.
+
+## Best Practices
+
+1. **Use Appropriate Handler Types** - Choose the most specific handler type for your use case
+2. **Error Handling** - Always include proper error handling and logging
+3. **Testing** - Write comprehensive tests for your lambda functions
+4. **Environment Variables** - Use environment variables for configuration
+5. **Performance** - Take advantage of connection reuse and source maps
+6. **Security** - Follow AWS Lambda security best practices

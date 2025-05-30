@@ -1,0 +1,199 @@
+<%_ const handlerImports = {
+  'APIGatewayProxyHandler': { event: 'APIGatewayProxyEvent' },
+  'APIGatewayProxyHandlerV2': { event: 'APIGatewayProxyEventV2' },
+  'S3Handler': { event: 'S3Event' },
+  'SQSHandler': { event: 'SQSEvent' },
+  'SNSHandler': { event: 'SNSEvent' },
+  'DynamoDBStreamHandler': { event: 'DynamoDBStreamEvent' },
+  'KinesisStreamHandler': { event: 'KinesisStreamEvent' },
+  'CloudWatchLogsHandler': { event: 'CloudWatchLogsEvent' },
+  'ALBHandler': { event: 'ALBEvent' },
+  'LambdaFunctionURLHandler': { event: 'LambdaFunctionURLEvent' },
+  'APIGatewayAuthorizerHandler': { event: 'APIGatewayAuthorizerEvent' },
+  'S3BatchHandler': { event: 'S3BatchEvent' },
+  'SESHandler': { event: 'SESEvent' },
+  'ScheduledHandler': { event: 'ScheduledEvent' },
+  'EventBridgeHandler': { event: 'EventBridgeEvent' },
+  'Handler': { event: 'any' }
+}; _%>
+<%_ const handlerConfig = handlerImports[handlerType] || handlerImports['Handler']; _%>
+import { describe, it, expect, vi } from 'vitest';
+import { Context } from 'aws-lambda';
+import { handler } from '../<%= functionPath ? functionPath + '/' : '' %><%= functionNameKebabCase %>';
+
+const mockContext: Context = {
+  awsRequestId: 'test-request-id',
+  functionName: '<%= functionNamePascalCase %>',
+  functionVersion: '$LATEST',
+  invokedFunctionArn: 'arn:aws:lambda:us-east-1:123456789012:function:<%= functionNamePascalCase %>',
+  memoryLimitInMB: '128',
+  logGroupName: '/aws/lambda/<%= functionNamePascalCase %>',
+  logStreamName: '2023/01/01/[$LATEST]abcdef123456789',
+  callbackWaitsForEmptyEventLoop: false,
+  getRemainingTimeInMillis: () => 300000,
+  done: vi.fn(),
+  fail: vi.fn(),
+  succeed: vi.fn(),
+};
+
+describe('<%= functionNamePascalCase %> Lambda Function', () => {
+<%_ if (handlerType === 'APIGatewayProxyHandler') { _%>
+  it('should return success response for API Gateway event', async () => {
+    const mockEvent: APIGatewayProxyEvent = {
+      httpMethod: 'GET',
+      path: '/test',
+      pathParameters: null,
+      queryStringParameters: null,
+      headers: {},
+      body: null,
+      isBase64Encoded: false,
+      resource: '/test',
+      requestContext: {
+        accountId: '123456789012',
+        apiId: 'test-api',
+        protocol: 'HTTP/1.1',
+        httpMethod: 'GET',
+        path: '/test',
+        stage: 'test',
+        requestId: 'test-request',
+        requestTime: '01/Jan/2023:00:00:00 +0000',
+        requestTimeEpoch: 1672531200000,
+        resourceId: 'test-resource',
+        resourcePath: '/test',
+        identity: {
+          accessKey: null,
+          accountId: null,
+          apiKey: null,
+          apiKeyId: null,
+          caller: null,
+          clientCert: null,
+          cognitoAuthenticationProvider: null,
+          cognitoAuthenticationType: null,
+          cognitoIdentityId: null,
+          cognitoIdentityPoolId: null,
+          principalOrgId: null,
+          sourceIp: '127.0.0.1',
+          user: null,
+          userAgent: 'test-user-agent',
+          userArn: null,
+        },
+      },
+      stageVariables: null,
+      multiValueHeaders: {},
+      multiValueQueryStringParameters: null,
+    };
+
+    const result = await handler(mockEvent, mockContext);
+
+    expect(result.statusCode).toBe(200);
+    expect(result.headers?.['Content-Type']).toBe('application/json');
+    const body = JSON.parse(result.body);
+    expect(body.message).toContain('<%= functionNamePascalCase %>');
+    expect(body.requestId).toBe('test-request-id');
+  });
+
+  it('should handle errors gracefully', async () => {
+    const mockEvent = {} as APIGatewayProxyEvent;
+    
+    const result = await handler(mockEvent, mockContext);
+    
+    expect(result.statusCode).toBe(500);
+    const body = JSON.parse(result.body);
+    expect(body.message).toBe('Internal Server Error');
+  });
+<%_ } else if (handlerType === 'S3Handler') { _%>
+  it('should process S3 event successfully', async () => {
+    const mockEvent: S3Event = {
+      Records: [
+        {
+          eventVersion: '2.1',
+          eventSource: 'aws:s3',
+          eventTime: '2023-01-01T00:00:00.000Z',
+          eventName: 's3:ObjectCreated:Put',
+          userIdentity: {
+            principalId: 'test-principal',
+          },
+          requestParameters: {
+            sourceIPAddress: '127.0.0.1',
+          },
+          responseElements: {
+            'x-amz-request-id': 'test-request-id',
+            'x-amz-id-2': 'test-id-2',
+          },
+          s3: {
+            s3SchemaVersion: '1.0',
+            configurationId: 'test-config',
+            bucket: {
+              name: 'test-bucket',
+              ownerIdentity: {
+                principalId: 'test-principal',
+              },
+              arn: 'arn:aws:s3:::test-bucket',
+            },
+            object: {
+              key: 'test-object.txt',
+              size: 1024,
+              eTag: 'test-etag',
+              sequencer: 'test-sequencer',
+            },
+          },
+        },
+      ],
+    };
+
+    await expect(handler(mockEvent, mockContext)).resolves.toBeUndefined();
+  });
+<%_ } else if (handlerType === 'SQSHandler') { _%>
+  it('should process SQS event successfully', async () => {
+    const mockEvent: SQSEvent = {
+      Records: [
+        {
+          messageId: 'test-message-id',
+          receiptHandle: 'test-receipt-handle',
+          body: JSON.stringify({ test: 'message' }),
+          attributes: {
+            ApproximateReceiveCount: '1',
+            SentTimestamp: '1672531200000',
+            SenderId: 'test-sender',
+            ApproximateFirstReceiveTimestamp: '1672531200000',
+          },
+          messageAttributes: {},
+          md5OfBody: 'test-md5',
+          eventSource: 'aws:sqs',
+          eventSourceARN: 'arn:aws:sqs:us-east-1:123456789012:test-queue',
+          awsRegion: 'us-east-1',
+        },
+      ],
+    };
+
+    await expect(handler(mockEvent, mockContext)).resolves.toBeUndefined();
+  });
+<%_ } else if (handlerType === 'EventBridgeHandler') { _%>
+  it('should process EventBridge event successfully', async () => {
+    const mockEvent: EventBridgeEvent<string, any> = {
+      version: '0',
+      id: 'test-event-id',
+      'detail-type': 'Test Event',
+      source: 'test.application',
+      account: '123456789012',
+      time: '2023-01-01T00:00:00Z',
+      region: 'us-east-1',
+      resources: [],
+      detail: {
+        key: 'value',
+        message: 'test event',
+      },
+    };
+
+    await expect(handler(mockEvent, mockContext)).resolves.toBeUndefined();
+  });
+<%_ } else { _%>
+  it('should process event successfully', async () => {
+    const mockEvent <%_ if (handlerConfig.event !== 'any') { _%>: <%= handlerConfig.event %><%_ } _%> = <%_ if (handlerConfig.event === 'any') { _%>{ test: 'data' }<%_ } else { _%>{} as <%= handlerConfig.event %><%_ } _%>;
+
+    const result = await handler(mockEvent, mockContext);
+    
+    expect(result).toBeDefined();
+  });
+<%_ } _%>
+});
