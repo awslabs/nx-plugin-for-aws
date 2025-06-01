@@ -7,6 +7,7 @@ import { join } from 'path';
 import { output, PackageManager } from '@nx/devkit';
 import { existsSync } from 'fs';
 import { backOff } from 'exponential-backoff';
+import * as os from 'os';
 
 export interface RunCmdOpts {
   silenceError?: boolean;
@@ -107,7 +108,7 @@ function getYarnMajorVersion(path: string): string | undefined {
 }
 
 export function tmpProjPath() {
-  return '/tmp/nx-plugin-for-aws/e2e';
+  return join(os.tmpdir(), 'nx-plugin-for-aws', 'e2e');
 }
 
 function getPackageManagerCommand({
