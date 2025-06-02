@@ -121,7 +121,7 @@ export const smokeTest = (
       await runCLI(`sync --verbose`, opts);
       // Run lint with fix to handle line ending issues before build
       await runCLI(
-        `run-many --target lint --all --parallel 1 --fix`,
+        `run-many --target lint --all --parallel 1 --configuration=fix`,
         opts,
       ).catch(() => {
         // Continue even if lint fix fails - some issues may not be auto-fixable
@@ -130,7 +130,7 @@ export const smokeTest = (
       
       // Debug: Log vite config contents for website before build
       try {
-        const viteConfigPath = `${opts.cwd}/packages/website/vite.config.mts`;
+        const viteConfigPath = `${opts.cwd}/packages/website/vite.config.ts`;
         if (existsSync(viteConfigPath)) {
           console.log('=== VITE CONFIG CONTENTS ===');
           console.log(readFileSync(viteConfigPath, 'utf8'));

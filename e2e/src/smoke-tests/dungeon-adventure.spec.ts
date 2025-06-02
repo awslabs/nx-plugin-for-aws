@@ -291,7 +291,7 @@ describe('smoke test - dungeon-adventure', () => {
 
     await runCLI(`sync --verbose`, opts);
     await runCLI(
-      `run-many --target lint --all --parallel 1 --fix`,
+      `run-many --target lint --all --parallel 1 --configuration=fix`,
       opts,
     ).catch(() => {
       console.log('Lint fix completed with some issues');
@@ -299,7 +299,7 @@ describe('smoke test - dungeon-adventure', () => {
     
     // Debug: Log vite config contents for game-ui before build
     try {
-      const viteConfigPath = `${opts.cwd}/packages/game-ui/vite.config.mts`;
+      const viteConfigPath = `${opts.cwd}/packages/game-ui/vite.config.ts`;
       if (existsSync(viteConfigPath)) {
         console.log('=== GAME-UI VITE CONFIG CONTENTS ===');
         console.log(readFileSync(viteConfigPath, 'utf8'));
@@ -394,7 +394,7 @@ describe('smoke test - dungeon-adventure', () => {
 
     await runCLI(`sync --verbose`, opts);
     await runCLI(
-      `run-many --target lint --all --parallel 1 --fix`,
+      `run-many --target lint --all --parallel 1 --configuration=fix`,
       opts,
     ).catch(() => {
       console.log('Lint fix completed with some issues');
@@ -496,7 +496,7 @@ describe('smoke test - dungeon-adventure', () => {
 
     await runCLI(`sync --verbose`, opts);
     await runCLI(
-      `run-many --target lint --all --parallel 1 --fix`,
+      `run-many --target lint --all --parallel 1 --configuration=fix`,
       opts,
     ).catch(() => {
       console.log('Lint fix completed with some issues');
