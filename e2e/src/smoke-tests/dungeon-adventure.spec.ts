@@ -74,7 +74,9 @@ describe('smoke test - dungeon-adventure', () => {
           __dirname,
           '../files/dungeon-adventure/1/application-stack.ts.template',
         ),
-      ),
+        'utf8',
+      ).replace(/\r\n/g, '\n'),
+      'utf8',
     );
     await runCLI(`sync --verbose`, opts);
     await runCLI(
@@ -102,7 +104,9 @@ describe('smoke test - dungeon-adventure', () => {
           __dirname,
           '../files/dungeon-adventure/2/schema/types/action.ts.template',
         ),
-      ),
+        'utf8',
+      ).replace(/\r\n/g, '\n'),
+      'utf8',
     );
 
     writeFileSync(
@@ -112,7 +116,9 @@ describe('smoke test - dungeon-adventure', () => {
           __dirname,
           '../files/dungeon-adventure/2/schema/types/common.ts.template',
         ),
-      ),
+        'utf8',
+      ).replace(/\r\n/g, '\n'),
+      'utf8',
     );
 
     writeFileSync(
@@ -122,7 +128,9 @@ describe('smoke test - dungeon-adventure', () => {
           __dirname,
           '../files/dungeon-adventure/2/schema/types/game.ts.template',
         ),
-      ),
+        'utf8',
+      ).replace(/\r\n/g, '\n'),
+      'utf8',
     );
 
     writeFileSync(
@@ -132,7 +140,9 @@ describe('smoke test - dungeon-adventure', () => {
           __dirname,
           '../files/dungeon-adventure/2/schema/index.ts.template',
         ),
-      ),
+        'utf8',
+      ).replace(/\r\n/g, '\n'),
+      'utf8',
     );
 
     ensureDirSync(`${opts.cwd}/packages/game-api/backend/src/entities`);
@@ -144,7 +154,9 @@ describe('smoke test - dungeon-adventure', () => {
           __dirname,
           '../files/dungeon-adventure/2/entities/action.ts.template',
         ),
-      ),
+        'utf8',
+      ).replace(/\r\n/g, '\n'),
+      'utf8',
     );
 
     writeFileSync(
@@ -154,7 +166,9 @@ describe('smoke test - dungeon-adventure', () => {
           __dirname,
           '../files/dungeon-adventure/2/entities/game.ts.template',
         ),
-      ),
+        'utf8',
+      ).replace(/\r\n/g, '\n'),
+      'utf8',
     );
 
     writeFileSync(
@@ -164,7 +178,9 @@ describe('smoke test - dungeon-adventure', () => {
           __dirname,
           '../files/dungeon-adventure/2/middleware/dynamodb.ts.template',
         ),
-      ),
+        'utf8',
+      ).replace(/\r\n/g, '\n'),
+      'utf8',
     );
 
     writeFileSync(
@@ -174,14 +190,18 @@ describe('smoke test - dungeon-adventure', () => {
           __dirname,
           '../files/dungeon-adventure/2/middleware/index.ts.template',
         ),
-      ),
+        'utf8',
+      ).replace(/\r\n/g, '\n'),
+      'utf8',
     );
 
     writeFileSync(
       `${opts.cwd}/packages/game-api/backend/src/init.ts`,
       readFileSync(
         join(__dirname, '../files/dungeon-adventure/2/init.ts.template'),
-      ),
+        'utf8',
+      ).replace(/\r\n/g, '\n'),
+      'utf8',
     );
 
     writeFileSync(
@@ -191,7 +211,9 @@ describe('smoke test - dungeon-adventure', () => {
           __dirname,
           '../files/dungeon-adventure/2/procedures/query-actions.ts.template',
         ),
-      ),
+        'utf8',
+      ).replace(/\r\n/g, '\n'),
+      'utf8',
     );
 
     writeFileSync(
@@ -201,7 +223,9 @@ describe('smoke test - dungeon-adventure', () => {
           __dirname,
           '../files/dungeon-adventure/2/procedures/query-games.ts.template',
         ),
-      ),
+        'utf8',
+      ).replace(/\r\n/g, '\n'),
+      'utf8',
     );
 
     writeFileSync(
@@ -211,7 +235,9 @@ describe('smoke test - dungeon-adventure', () => {
           __dirname,
           '../files/dungeon-adventure/2/procedures/save-action.ts.template',
         ),
-      ),
+        'utf8',
+      ).replace(/\r\n/g, '\n'),
+      'utf8',
     );
 
     writeFileSync(
@@ -221,7 +247,9 @@ describe('smoke test - dungeon-adventure', () => {
           __dirname,
           '../files/dungeon-adventure/2/procedures/save-game.ts.template',
         ),
-      ),
+        'utf8',
+      ).replace(/\r\n/g, '\n'),
+      'utf8',
     );
 
     rmSync(`${opts.cwd}/packages/game-api/backend/src/procedures/echo.ts`);
@@ -230,7 +258,9 @@ describe('smoke test - dungeon-adventure', () => {
       `${opts.cwd}/packages/game-api/backend/src/router.ts`,
       readFileSync(
         join(__dirname, '../files/dungeon-adventure/2/router.ts.template'),
-      ),
+        'utf8',
+      ).replace(/\r\n/g, '\n'),
+      'utf8',
     );
 
     ensureDirSync(`${opts.cwd}/packages/infra/src/constructs`);
@@ -242,7 +272,9 @@ describe('smoke test - dungeon-adventure', () => {
           __dirname,
           '../files/dungeon-adventure/2/constructs/electrodb-table.ts.template',
         ),
-      ),
+        'utf8',
+      ).replace(/\r\n/g, '\n'),
+      'utf8',
     );
 
     writeFileSync(
@@ -252,7 +284,9 @@ describe('smoke test - dungeon-adventure', () => {
           __dirname,
           '../files/dungeon-adventure/2/stacks/application-stack.ts.template',
         ),
-      ),
+        'utf8',
+      ).replace(/\r\n/g, '\n'),
+      'utf8',
     );
 
     await runCLI(`sync --verbose`, opts);
@@ -281,21 +315,27 @@ describe('smoke test - dungeon-adventure', () => {
       `${opts.cwd}/packages/story_api/story_api/main.py`,
       readFileSync(
         join(__dirname, '../files/dungeon-adventure/3/main.py.template'),
-      ),
+        'utf8',
+      ).replace(/\r\n/g, '\n'),
+      'utf8',
     );
 
     writeFileSync(
       `${opts.cwd}/packages/story_api/story_api/init.py`,
       readFileSync(
         join(__dirname, '../files/dungeon-adventure/3/init.py.template'),
-      ),
+        'utf8',
+      ).replace(/\r\n/g, '\n'),
+      'utf8',
     );
 
     writeFileSync(
       `${opts.cwd}/packages/story_api/run.sh`,
       readFileSync(
         join(__dirname, '../files/dungeon-adventure/3/run.sh.template'),
-      ),
+        'utf8',
+      ).replace(/\r\n/g, '\n'),
+      'utf8',
     );
 
     // Update project.json
@@ -315,7 +355,9 @@ describe('smoke test - dungeon-adventure', () => {
       `${opts.cwd}/packages/common/constructs/src/app/apis/story-api.ts`,
       readFileSync(
         join(__dirname, '../files/dungeon-adventure/3/story-api.ts.template'),
-      ),
+        'utf8',
+      ).replace(/\r\n/g, '\n'),
+      'utf8',
     );
 
     writeFileSync(
@@ -325,7 +367,9 @@ describe('smoke test - dungeon-adventure', () => {
           __dirname,
           '../files/dungeon-adventure/3/application-stack.ts.template',
         ),
-      ),
+        'utf8',
+      ).replace(/\r\n/g, '\n'),
+      'utf8',
     );
 
     await runCLI(`sync --verbose`, opts);
@@ -342,7 +386,9 @@ describe('smoke test - dungeon-adventure', () => {
       `${opts.cwd}/packages/game-ui/src/config.ts`,
       readFileSync(
         join(__dirname, '../files/dungeon-adventure/4/config.ts.template'),
-      ),
+        'utf8',
+      ).replace(/\r\n/g, '\n'),
+      'utf8',
     );
 
     // Update the AppLayout
@@ -353,7 +399,9 @@ describe('smoke test - dungeon-adventure', () => {
           __dirname,
           '../files/dungeon-adventure/4/AppLayout/index.tsx.template',
         ),
-      ),
+        'utf8',
+      ).replace(/\r\n/g, '\n'),
+      'utf8',
     );
 
     // Delete unused files
@@ -370,7 +418,9 @@ describe('smoke test - dungeon-adventure', () => {
       `${opts.cwd}/packages/game-ui/src/styles.css`,
       readFileSync(
         join(__dirname, '../files/dungeon-adventure/4/styles.css.template'),
-      ),
+        'utf8',
+      ).replace(/\r\n/g, '\n'),
+      'utf8',
     );
 
     // Create game routes
@@ -383,7 +433,9 @@ describe('smoke test - dungeon-adventure', () => {
           __dirname,
           '../files/dungeon-adventure/4/routes/game/index.tsx.template',
         ),
-      ),
+        'utf8',
+      ).replace(/\r\n/g, '\n'),
+      'utf8',
     );
 
     writeFileSync(
@@ -393,7 +445,9 @@ describe('smoke test - dungeon-adventure', () => {
           __dirname,
           '../files/dungeon-adventure/4/routes/game/$playerName.tsx.template',
         ),
-      ),
+        'utf8',
+      ).replace(/\r\n/g, '\n'),
+      'utf8',
     );
 
     // Update root route
@@ -404,7 +458,9 @@ describe('smoke test - dungeon-adventure', () => {
           __dirname,
           '../files/dungeon-adventure/4/routes/index.tsx.template',
         ),
-      ),
+        'utf8',
+      ).replace(/\r\n/g, '\n'),
+      'utf8',
     );
 
     // Delete welcome route
