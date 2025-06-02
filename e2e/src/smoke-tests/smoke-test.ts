@@ -104,7 +104,7 @@ export const smokeTest = (
       // Wire up website, cognito and trpc api
       writeFileSync(
         `${opts.cwd}/packages/infra/src/stacks/application-stack.ts`,
-        readFileSync(join(__dirname, '../files/application-stack.ts.template'), 'utf8').replace(/\r\n/g, '\n'),
+        readFileSync(join(__dirname, '../files/application-stack.ts.template'), 'utf8'),
         'utf8',
       );
 
@@ -114,11 +114,34 @@ export const smokeTest = (
         readFileSync(
           join(__dirname, '../files/aws-nx-plugin.config.mts.template'),
           'utf8'
-        ).replace(/\r\n/g, '\n'),
+        ),
         'utf8',
       );
 
       await runCLI(`sync --verbose`, opts);
+      // Run lint with fix to handle line ending issues before build
+      await runCLI(
+        `run-many --target lint --all --parallel 1 --fix`,
+        opts,
+      ).catch(() => {
+        // Continue even if lint fix fails - some issues may not be auto-fixable
+        console.log('Lint fix completed with some issues');
+      });
+      
+      // Debug: Log vite config contents for website before build
+      try {
+        const viteConfigPath = `${opts.cwd}/packages/website/vite.config.mts`;
+        if (existsSync(viteConfigPath)) {
+          console.log('=== VITE CONFIG CONTENTS ===');
+          console.log(readFileSync(viteConfigPath, 'utf8'));
+          console.log('=== END VITE CONFIG ===');
+        } else {
+          console.log('Vite config not found at:', viteConfigPath);
+        }
+      } catch (error) {
+        console.log('Error reading vite config:', error);
+      }
+      
       await runCLI(
         `run-many --target build --all --parallel 1 --output-style=stream --skip-nx-cache --verbose`,
         opts,
