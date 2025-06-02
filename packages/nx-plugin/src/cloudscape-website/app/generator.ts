@@ -32,7 +32,7 @@ import {
 import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
 import { configureTsProject } from '../../ts/lib/ts-project-utils';
 import { withVersions } from '../../utils/versions';
-import { getRelativePathToRoot } from '../../utils/paths';
+import { getRelativePathToRoot, getSafeRelativePathForVite } from '../../utils/paths';
 import { toClassName, toKebabCase } from '../../utils/names';
 import {
   addStarExport,
@@ -343,10 +343,10 @@ export async function tsCloudScapeWebsiteGenerator(
                     return factory.createPropertyAssignment(
                       'outDir',
                       factory.createStringLiteral(
-                        joinPathFragments(
-                          getRelativePathToRoot(tree, fullyQualifiedName),
-                          'dist',
-                          websiteContentPath,
+                        getSafeRelativePathForVite(
+                          tree,
+                          fullyQualifiedName,
+                          joinPathFragments('dist', websiteContentPath),
                         ),
                       ),
                     );
