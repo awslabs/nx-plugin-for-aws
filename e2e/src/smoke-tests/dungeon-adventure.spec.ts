@@ -93,40 +93,37 @@ describe('smoke test - dungeon-adventure', () => {
       },
     );
 
-    ensureDirSync(`${opts.cwd}/packages/game-api/schema/src/types`);
+    ensureDirSync(`${opts.cwd}/packages/game-api/src/schema`);
 
     writeFileSync(
-      `${opts.cwd}/packages/game-api/schema/src/types/action.ts`,
+      `${opts.cwd}/packages/game-api/src/schema/action.ts`,
       readFileSync(
         join(
           __dirname,
-          '../files/dungeon-adventure/2/schema/types/action.ts.template',
+          '../files/dungeon-adventure/2/schema/action.ts.template',
         ),
       ),
     );
 
     writeFileSync(
-      `${opts.cwd}/packages/game-api/schema/src/types/common.ts`,
+      `${opts.cwd}/packages/game-api/src/schema/common.ts`,
       readFileSync(
         join(
           __dirname,
-          '../files/dungeon-adventure/2/schema/types/common.ts.template',
+          '../files/dungeon-adventure/2/schema/common.ts.template',
         ),
       ),
     );
 
     writeFileSync(
-      `${opts.cwd}/packages/game-api/schema/src/types/game.ts`,
+      `${opts.cwd}/packages/game-api/src/schema/game.ts`,
       readFileSync(
-        join(
-          __dirname,
-          '../files/dungeon-adventure/2/schema/types/game.ts.template',
-        ),
+        join(__dirname, '../files/dungeon-adventure/2/schema/game.ts.template'),
       ),
     );
 
     writeFileSync(
-      `${opts.cwd}/packages/game-api/schema/src/index.ts`,
+      `${opts.cwd}/packages/game-api/src/schema/index.ts`,
       readFileSync(
         join(
           __dirname,
@@ -135,10 +132,10 @@ describe('smoke test - dungeon-adventure', () => {
       ),
     );
 
-    ensureDirSync(`${opts.cwd}/packages/game-api/backend/src/entities`);
+    ensureDirSync(`${opts.cwd}/packages/game-api/src/entities`);
 
     writeFileSync(
-      `${opts.cwd}/packages/game-api/backend/src/entities/action.ts`,
+      `${opts.cwd}/packages/game-api/src/entities/action.ts`,
       readFileSync(
         join(
           __dirname,
@@ -148,7 +145,7 @@ describe('smoke test - dungeon-adventure', () => {
     );
 
     writeFileSync(
-      `${opts.cwd}/packages/game-api/backend/src/entities/game.ts`,
+      `${opts.cwd}/packages/game-api/src/entities/game.ts`,
       readFileSync(
         join(
           __dirname,
@@ -158,7 +155,7 @@ describe('smoke test - dungeon-adventure', () => {
     );
 
     writeFileSync(
-      `${opts.cwd}/packages/game-api/backend/src/middleware/dynamodb.ts`,
+      `${opts.cwd}/packages/game-api/src/middleware/dynamodb.ts`,
       readFileSync(
         join(
           __dirname,
@@ -168,7 +165,7 @@ describe('smoke test - dungeon-adventure', () => {
     );
 
     writeFileSync(
-      `${opts.cwd}/packages/game-api/backend/src/middleware/index.ts`,
+      `${opts.cwd}/packages/game-api/src/middleware/index.ts`,
       readFileSync(
         join(
           __dirname,
@@ -178,14 +175,14 @@ describe('smoke test - dungeon-adventure', () => {
     );
 
     writeFileSync(
-      `${opts.cwd}/packages/game-api/backend/src/init.ts`,
+      `${opts.cwd}/packages/game-api/src/init.ts`,
       readFileSync(
         join(__dirname, '../files/dungeon-adventure/2/init.ts.template'),
       ),
     );
 
     writeFileSync(
-      `${opts.cwd}/packages/game-api/backend/src/procedures/query-actions.ts`,
+      `${opts.cwd}/packages/game-api/src/procedures/query-actions.ts`,
       readFileSync(
         join(
           __dirname,
@@ -195,7 +192,7 @@ describe('smoke test - dungeon-adventure', () => {
     );
 
     writeFileSync(
-      `${opts.cwd}/packages/game-api/backend/src/procedures/query-games.ts`,
+      `${opts.cwd}/packages/game-api/src/procedures/query-games.ts`,
       readFileSync(
         join(
           __dirname,
@@ -205,7 +202,7 @@ describe('smoke test - dungeon-adventure', () => {
     );
 
     writeFileSync(
-      `${opts.cwd}/packages/game-api/backend/src/procedures/save-action.ts`,
+      `${opts.cwd}/packages/game-api/src/procedures/save-action.ts`,
       readFileSync(
         join(
           __dirname,
@@ -215,7 +212,7 @@ describe('smoke test - dungeon-adventure', () => {
     );
 
     writeFileSync(
-      `${opts.cwd}/packages/game-api/backend/src/procedures/save-game.ts`,
+      `${opts.cwd}/packages/game-api/src/procedures/save-game.ts`,
       readFileSync(
         join(
           __dirname,
@@ -224,10 +221,10 @@ describe('smoke test - dungeon-adventure', () => {
       ),
     );
 
-    rmSync(`${opts.cwd}/packages/game-api/backend/src/procedures/echo.ts`);
+    rmSync(`${opts.cwd}/packages/game-api/src/procedures/echo.ts`);
 
     writeFileSync(
-      `${opts.cwd}/packages/game-api/backend/src/router.ts`,
+      `${opts.cwd}/packages/game-api/src/router.ts`,
       readFileSync(
         join(__dirname, '../files/dungeon-adventure/2/router.ts.template'),
       ),

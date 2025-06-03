@@ -10,16 +10,16 @@ import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 
-Nx向けAWSプラグインは、<Link path="guides/trpc">tRPC API</Link>とReactウェブサイトを迅速に統合するためのジェネレータを提供します。AWS IAMおよびCognito認証サポート、適切なエラーハンドリングを含む、tRPCバックエンド接続に必要なすべての設定を構成します。この統合により、フロントエンドとtRPCバックエンド間の完全なエンドツーエンド型安全性が保証されます。
+Nx向けAWSプラグインは、<Link path="guides/trpc">tRPC API</Link>をReactウェブサイトと迅速に統合するためのジェネレータを提供します。AWS IAMやCognito認証のサポート、適切なエラーハンドリングを含む、tRPCバックエンド接続に必要なすべての設定を構成します。この統合により、フロントエンドとtRPCバックエンド間の完全なエンドツーエンド型安全性が実現されます。
 
 ## 前提条件
 
 このジェネレータを使用する前に、Reactアプリケーションが以下を満たしていることを確認してください:
 
 1. アプリケーションをレンダリングする`main.tsx`ファイルが存在すること
-2. tRPCプロバイダが自動注入される`<App/>` JSX要素が含まれていること
-3. tRPCバックエンドジェネレータで生成された動作可能なtRPCバックエンドが存在すること
-4. CognitoまたはIAM認証を使用するAPIに接続する場合、<Link path="/guides/cloudscape-website-auth">`ts#cloudscape-website-auth`ジェネレータ</Link>経由でCognito Authが追加されていること
+2. tRPCプロバイダが自動注入される`<App/>` JSX要素が存在すること
+3. 動作するtRPC APIが存在すること（tRPC APIジェネレータで生成されたもの）
+4. CognitoまたはIAM認証を使用するAPIに接続する場合、<Link path="/guides/cloudscape-website-auth">`ts#cloudscape-website-auth`ジェネレータ</Link>でCognito Authが追加されていること
 
 <details>
 <summary>必要な`main.tsx`構造の例</summary>
@@ -59,19 +59,15 @@ root.render(
 
 - src
   - components
-    - TrpcClients
-      - index.tsx
-      - TrpcProvider.tsx 複数のtRPC APIで再利用されるプロバイダ
-      - TrpcApis.tsx すべてのtRPC API接続を含むオブジェクト
-      - TrpcClientProviders.tsx tRPCクライアントとバックエンドスキーマのバインディングを設定
+    - \<ApiName>ClientProvider.tsx tRPCクライアントとバックエンドスキーマへのバインディングを設定。ApiNameはAPI名に解決されます
     - QueryClientProvider.tsx TanStack React Queryクライアントプロバイダ
   - hooks
     - useSigV4.tsx SigV4によるHTTPリクエスト署名用フック（IAM専用）
-    - use\<ApiName>.tsx 特定のバックエンドAPI用フック。ApiNameはAPI名に解決
+    - use\<ApiName>.tsx 指定されたバックエンドAPI用フック
 
 </FileTree>
 
-さらに、以下の依存関係をインストールします:
+追加で以下の依存関係をインストールします:
 
   - `@trpc/client`
   - `@trpc/tanstack-react-query`
@@ -150,7 +146,7 @@ function MyComponent() {
 
 ### ローディング状態の処理
 
-ユーザーエクスペリエンス向上のため、常にローディング状態とエラー状態を処理してください:
+ユーザーエクスペリエンス向上のため、ローディングとエラー状態を常に処理してください:
 
 ```tsx {6}
 function UserList() {
@@ -176,9 +172,9 @@ function UserList() {
 }
 ```
 
-### 楽観的更新
+### オプティミスティック更新
 
-ユーザーエクスペリエンス向上のため楽観的更新を使用します:
+ユーザーエクスペリエンス向上のためオプティミスティック更新を使用します:
 
 ```tsx {15-17,20-22,28-31}
 import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query';
@@ -194,12 +190,12 @@ function UserList() {
         // 進行中のフェッチをキャンセル
         await queryClient.cancelQueries(trpc.users.list.queryFilter());
 
-        // 現在のデータのスナップショット取得
+        // 現在のデータのスナップショットを取得
         const previousUsers = queryClient.getQueryData(
           trpc.users.list.queryKey(),
         );
 
-        // 楽観的にユーザーを削除
+        // オプティミスティックにユーザーを削除
         queryClient.setQueryData(trpc.users.list.queryKey(), (old) =>
           old?.filter((user) => user.id !== userId),
         );
@@ -231,7 +227,7 @@ function UserList() {
 
 ### データのプリフェッチ
 
-パフォーマンス向上のためデータをプリフェッチ:
+パフォーマンス向上のためデータをプリフェッチします:
 
 ```tsx {8}
 function UserList() {
@@ -258,7 +254,7 @@ function UserList() {
 
 ### 無限クエリ
 
-ページネーションを無限クエリで処理:
+ページネーションを無限クエリで処理します:
 
 ```tsx {5-12}
 function UserList() {
@@ -294,17 +290,17 @@ function UserList() {
 
 ## 型安全性
 
-この統合は完全なエンドツーエンドの型安全性を提供します。IDEはすべてのAPI呼び出しに対して完全なオートコンプリートと型チェックを提供します:
+この統合は完全なエンドツーエンド型安全性を提供します。IDEはすべてのAPI呼び出しに対して完全なオートコンプリートと型チェックを提供します:
 
 ```tsx
 function UserForm() {
   const trpc = useMyApi();
 
-  // ✅ 入力は完全に型付けされる
+  // ✅ 入力は完全に型付けされます
   const createUser = trpc.users.create.useMutation();
 
   const handleSubmit = (data: CreateUserInput) => {
-    // ✅ スキーマと一致しない場合は型エラー
+    // ✅ 入力がスキーマと一致しない場合は型エラー
     createUser.mutate(data);
   };
 
@@ -312,10 +308,10 @@ function UserForm() {
 }
 ```
 
-型はバックエンドのルーターとスキーマ定義から自動的に推論されるため、APIに変更があった場合でもフロントエンドコードをビルドせずに即座に反映されます。
+型はバックエンドのルーターとスキーマ定義から自動的に推論されるため、APIに変更があってもフロントエンドコードをビルドせずに即座に反映されます。
 
 ## 詳細情報
 
-詳細については、[tRPC TanStack React Query ドキュメント](https://trpc.io/docs/client/tanstack-react-query/usage)を参照してください。
+詳細については[tRPC TanStack React Queryドキュメント](https://trpc.io/docs/client/tanstack-react-query/usage)を参照してください。
 
-直接[TanStack Query ドキュメント](https://tanstack.com/query/v5)を参照することもできます。
+直接[TanStack Queryドキュメント](https://tanstack.com/query/v5)を参照することもできます。

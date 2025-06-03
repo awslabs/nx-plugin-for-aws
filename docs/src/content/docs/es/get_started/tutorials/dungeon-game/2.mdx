@@ -1,6 +1,6 @@
 ---
 title: "Juego de Mazmorra con IA"
-description: "Un tutorial de cómo construir un juego de aventuras de mazmorra con IA usando el @aws/nx-plugin."
+description: "Un tutorial de cómo construir un juego de aventuras de mazmorra con IA utilizando el @aws/nx-plugin."
 ---
 
 
@@ -27,43 +27,43 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 Comenzaremos implementando nuestra Game API. Para esto necesitamos crear 4 APIs en total:
 
-1. `createGame` - esto creará una nueva instancia del juego.
+1. `createGame` - este creará una nueva instancia de juego.
 2. `queryGames` - devolverá una lista paginada de juegos guardados anteriormente.
 3. `saveAction` - guardará una acción para un juego específico.
 4. `queryActions` - devolverá una lista paginada de todas las acciones relacionadas con un juego.
 
 ### Esquema de la API
 
-Para definir las entradas y salidas de nuestra API, crearemos nuestro esquema usando [Zod](https://zod.dev/) dentro del proyecto `packages/game-api/schema/src` de la siguiente manera:
+Para definir las entradas y salidas de nuestra API, crearemos nuestro esquema usando [Zod](https://zod.dev/) en el directorio `packages/game-api/src/schema` de la siguiente manera:
 
 <Tabs>
-  <TabItem label="types/action.ts">
-<E2ECode lang="typescript" path="dungeon-adventure/2/schema/types/action.ts.template" />
+  <TabItem label="action.ts">
+<E2ECode lang="typescript" path="dungeon-adventure/2/schema/action.ts.template" />
   </TabItem>
-  <TabItem label="types/common.ts">
-<E2ECode lang="typescript" path="dungeon-adventure/2/schema/types/common.ts.template" />
+  <TabItem label="common.ts">
+<E2ECode lang="typescript" path="dungeon-adventure/2/schema/common.ts.template" />
   </TabItem>
-  <TabItem label="types/game.ts">
-<E2ECode lang="typescript" path="dungeon-adventure/2/schema/types/game.ts.template" />
+  <TabItem label="game.ts">
+<E2ECode lang="typescript" path="dungeon-adventure/2/schema/game.ts.template" />
   </TabItem>
   <TabItem label="index.ts">
 <E2EDiff lang="typescript" before="dungeon-adventure/2/schema/index.ts.old.template" after="dungeon-adventure/2/schema/index.ts.template" />
   </TabItem>
 </Tabs>
 
-También puedes eliminar el archivo `./procedures/echo.ts` ya que no lo usaremos en este proyecto.
+También puedes eliminar el archivo `packages/game-api/src/schema/echo.ts` ya que no lo usaremos en este proyecto.
 
 <Aside type="tip">
-Como se muestra arriba, para cada esquema que definimos en Zod, también exportamos una interfaz usando la sintaxis `z.TypeOf`. ¡Esto convierte nuestra definición de Zod en una interfaz de Typescript sin duplicar esfuerzos!
+Como puedes ver arriba, para cada esquema que definimos en Zod, también exportamos una interfaz usando la sintaxis `z.TypeOf`. ¡Esto convierte nuestra definición de Zod en una interfaz de Typescript sin duplicar esfuerzos!
 </Aside>
 
 ### Modelado de entidades
 
-El diagrama ER de nuestra aplicación es el siguiente:
+El diagrama ER para nuestra aplicación es el siguiente:
 
 <Image class="centered-image white-bg" src={dungeonAdventureErPng} alt="dungeon-adventure-er.png" width="400" height="300" />
 
-Implementaremos nuestra base de datos en DynamoDB usando la biblioteca cliente [ElectroDB](https://electrodb.dev/en/core-concepts/introduction/). Para comenzar, primero necesitamos instalar `electrodb` ejecutando el siguiente comando:
+Implementaremos nuestra base de datos en DynamoDB usando la biblioteca cliente [ElectroDB](https://electrodb.dev/en/core-concepts/introduction/) para simplificar el proceso. Para comenzar, primero necesitamos instalar `electrodb` ejecutando el siguiente comando:
 
 <InstallCommand pkg="electrodb @aws-sdk/client-dynamodb" />
 
@@ -71,7 +71,7 @@ Implementaremos nuestra base de datos en DynamoDB usando la biblioteca cliente [
 Todas las dependencias se agregan al `package.json` raíz ya que `@aws/nx-plugin` sigue el principio de [política de versión única](https://nx.dev/concepts/decisions/dependency-management#single-version-policy). Para más información, consulta la <Link path="guides/typescript-project#dependencies">guía de proyectos TypeScript</Link>.
 </Aside>
 
-Ahora creemos los siguientes archivos en nuestra carpeta `packages/game-api/backend/src/entities` para definir nuestras entidades ElectroDB según el diagrama ER anterior:
+Ahora creemos los siguientes archivos en nuestra carpeta `packages/game-api/src/entities` para definir nuestras entidades ElectroDB según el diagrama ER anterior:
 
 <Tabs>
   <TabItem label="action.ts">
@@ -82,15 +82,15 @@ Ahora creemos los siguientes archivos en nuestra carpeta `packages/game-api/back
   </TabItem>
 </Tabs>
 
-ElectroDB es muy potente y nos permite no solo definir tipos, sino también proveer valores por defecto como los timestamps anteriores. Además, ElectroDB sigue el [diseño de tabla única](https://electrodb.dev/en/core-concepts/single-table-relationships/), considerada mejor práctica con DynamoDB.
+ElectroDB es muy potente y nos permite no solo definir nuestros tipos, sino también proporcionar valores predeterminados para ciertos campos como las marcas de tiempo anteriores. Además, ElectroDB sigue el [diseño de tabla única](https://electrodb.dev/en/core-concepts/single-table-relationships/), que es la mejor práctica al usar DynamoDB.
 
 <Aside>
-Aunque ElectroDB soporta [colecciones](https://electrodb.dev/en/modeling/collections/), no las usaremos en este tutorial por simplicidad.
+Aunque ElectroDB soporta [colecciones](https://electrodb.dev/en/modeling/collections/), hemos optado por no usarlas en este tutorial para simplificar.
 </Aside>
 
-### Añadiendo el cliente DynamoDB al contexto de tRPC
+### Añadiendo el cliente DynamoDB a nuestro contexto tRPC
 
-Como necesitamos acceso al cliente DynamoDB en cada procedimiento, crearemos una instancia única del cliente que pasaremos mediante el contexto. Para esto, realiza los siguientes cambios en `packages/game-api/backend/src`:
+Dado que necesitamos acceso al cliente DynamoDB en cada uno de nuestros procedimientos, queremos crear una única instancia del cliente que podamos pasar a través del contexto. Para esto, realiza los siguientes cambios en `packages/game-api/src`:
 
 <Tabs>
   <TabItem label="middleware/dynamodb.ts">
@@ -109,14 +109,14 @@ Aumentamos nuestro `IMiddlewareContext` para añadir el `IDynamoDBContext`.
 El plugin de DynamoDB queda instrumentado.
 
 <Aside>
-La API `concat` vincula nuestro middleware a los procedimientos. Para más detalles, consulta la [guía de concat](https://trpc.io/docs/server/middlewares#concat).
+La API `concat` vincula nuestro middleware a los procedimientos que definimos. Para más detalles, consulta la [guía de concat](https://trpc.io/docs/server/middlewares#concat).
 </Aside>
   </TabItem>
 </Tabs>
 
 ### Definiendo nuestros procedimientos
 
-Ahora implementaremos los métodos de la API. Para esto, realiza los siguientes cambios en `packages/game-api/backend/src/procedures`:
+Ahora es momento de implementar los métodos de la API. Para esto, realiza los siguientes cambios en `packages/game-api/src/procedures`:
 
 <Tabs>
   <TabItem label="query-actions.ts">
@@ -133,17 +133,17 @@ Ahora implementaremos los métodos de la API. Para esto, realiza los siguientes 
   </TabItem>
 </Tabs>
 
-También puedes eliminar el archivo `echo.ts` (de `packages/game-api/backend/src/procedures`) ya que no lo usaremos.
+También puedes eliminar el archivo `echo.ts` (de `packages/game-api/src/procedures`) ya que no lo usaremos en este proyecto.
 
 ### Configuración del router
 
-Con los procedimientos definidos, conectémoslos a nuestra API. Actualiza el siguiente archivo:
+Ahora que hemos definido nuestros procedimientos, conectémoslos a nuestra API. Para esto, actualiza el siguiente archivo:
 
 <E2EDiff lang="typescript" before="dungeon-adventure/2/router.ts.old.template" after="dungeon-adventure/2/router.ts.template" />
 
 ### Infraestructura
 
-El paso final es actualizar nuestra infraestructura para crear la tabla DynamoDB y otorgar permisos a la Game API. Actualiza `packages/infra/src` como sigue:
+El paso final es actualizar nuestra infraestructura para crear la tabla de DynamoDB y otorgar permisos para realizar operaciones desde la Game API. Para hacerlo, actualiza `packages/infra/src` como sigue:
 
 <Tabs>
   <TabItem label="constructs/electrodb-table.ts">
@@ -152,47 +152,47 @@ El paso final es actualizar nuestra infraestructura para crear la tabla DynamoDB
   <TabItem label="stacks/application-stack.ts">
 <E2EDiff lang="typescript" before="dungeon-adventure/1/application-stack.ts.template" after="dungeon-adventure/2/stacks/application-stack.ts.template" />
 
-:::note
-Nota que como cada procedimiento se sirve con una función lambda independiente, podemos aplicar el principio de mínimo privilegio asignando solo los permisos necesarios.
+:::nota
+Observa aquí que como cada procedimiento es atendido por una función lambda individual, podemos seguir el principio de mínimo privilegio y asignar solo los permisos de lectura/escritura requeridos según la implementación del procedimiento.
 :::
   </TabItem>
 </Tabs>
 
 ### Despliegue y pruebas
 
-Primero, construyamos el código:
+Primero, construyamos el código base:
 
 <NxCommands commands={['run-many --target build --all']} />
 
 <Aside type="tip">
-Si encuentras errores de linting, ejecuta este comando para corregirlos automáticamente:
+Si encuentras errores de lint, puedes ejecutar el siguiente comando para corregirlos automáticamente.
 
 <NxCommands commands={['run-many --target lint --configuration=fix --all']} />
 </Aside>
 
-Ahora puedes desplegar la aplicación con:
+Ahora puedes desplegar tu aplicación ejecutando:
 
 <NxCommands commands={['run @dungeon-adventure/infra:deploy dungeon-adventure-infra-sandbox']} />
 
-El primer despliegue tomará ~8 minutos. Los siguientes tomarán ~2 minutos.
+Tu primer despliegue tomará aproximadamente 8 minutos. Los despliegues posteriores tomarán alrededor de 2 minutos.
 
-:::tip
-Para cambios en código lambda, usa el flag `--hotswap` tras construir para despliegues rápidos (2-3 segundos):
+:::consejo
+Si estás iterando cambios en el código de las funciones lambda, puedes desplegar con la bandera `--hotswap` después de construir el código base para un tiempo de despliegue mucho más corto (2-3 segundos).
 
 <NxCommands commands={['run @dungeon-adventure/infra:deploy dungeon-adventure-infra-sandbox --hotswap']} />
 :::
 
-<Drawer title="Comando de despliegue" trigger="También puedes desplegar todos los stacks. Haz clic para más detalles.">
+<Drawer title="Comando de despliegue" trigger="También puedes desplegar todos los stacks a la vez. Haz clic aquí para más detalles.">
 
-Puedes desplegar todos los stacks de la aplicación CDK con:
+También puedes desplegar todos los stacks contenidos en la aplicación CDK ejecutando:
 
 <NxCommands commands={['run @dungeon-adventure/infra:deploy --all']} />
 
-**No recomendado** si tienes stacks separados para diferentes etapas (ej. infra-prod), ya que `--all` intentaría desplegar todo.
+Esto **no se recomienda** ya que podrías separar tus etapas de despliegue como stacks independientes `ej. infra-prod`. En este caso, la bandera `--all` intentará desplegar todos los stacks, lo que podría resultar en despliegues no deseados.
 
 </Drawer>
 
-Tras el despliegue, verás salidas similares a:
+Una vez completado el despliegue, verás salidas similares a las siguientes _(algunos valores han sido omitidos)_:
 
 ```bash
 dungeon-adventure-infra-sandbox
@@ -200,7 +200,7 @@ dungeon-adventure-infra-sandbox: deploying... [2/2]
 
  ✅  dungeon-adventure-infra-sandbox
 
-✨  Deployment time: 354s
+✨  Tiempo de despliegue: 354s
 
 Outputs:
 dungeon-adventure-infra-sandbox.ElectroDbTableTableNameXXX = dungeon-adventure-infra-sandbox-ElectroDbTableXXX-YYY
@@ -211,15 +211,15 @@ dungeon-adventure-infra-sandbox.UserIdentityUserIdentityIdentityPoolIdXXX = regi
 dungeon-adventure-infra-sandbox.UserIdentityUserIdentityUserPoolIdXXX = region_xxx
 ```
 
-Podemos probar la API mediante:
+Podemos probar nuestra API de dos formas:
 <ul>
-<li>Iniciar una instancia local del backend tRPC y usar `curl`.</li>
+<li>Iniciando una instancia local del backend tRPC e invocando las APIs usando `curl`.</li>
 <li>
-<Drawer title="curl con Sigv4" trigger="Llamar a la API desplegada usando curl con Sigv4">
+<Drawer title="curl con Sigv4 habilitado" trigger="Llamar a la API desplegada usando curl con Sigv4">
 
 <Tabs>
   <TabItem label="Bash/Linux/macOS">
-Añade este script a tu `.bashrc` o ejecútalo directamente:
+Puedes agregar el siguiente script a tu archivo `.bashrc` (y hacer `source`) o pegarlo directamente en la terminal donde ejecutarás el comando.
 ```bash
 // ~/.bashrc
 acurl () {
@@ -237,13 +237,13 @@ Ejemplos de uso:
 acurl ap-southeast-2 execute-api -X GET https://xxx
 ```
 
-###### Lambda function URL
+###### URL de función Lambda con streaming
 ```bash
 acurl ap-southeast-2 lambda -N -X POST https://xxx
 ```
   </TabItem>
   <TabItem label="Windows PowerShell">
-Añade esta función a tu perfil PowerShell o ejecútala directamente:
+Agrega esta función a tu perfil de PowerShell o pégala en la sesión actual.
 ```powershell
 function acurl {
     param(
@@ -251,11 +251,11 @@ function acurl {
         [Parameter(Mandatory=$true)][string]$Service,
         [Parameter(ValueFromRemainingArguments=$true)][string[]]$CurlArgs
     )
-    
+
     $AccessKey = aws configure get aws_access_key_id
     $SecretKey = aws configure get aws_secret_access_key
     $SessionToken = aws configure get aws_session_token
-    
+
     & curl --aws-sigv4 "aws:amz:$Region`:$Service" --user "$AccessKey`:$SecretKey" -H "X-Amz-Security-Token: $SessionToken" @CurlArgs
 }
 ```
@@ -267,7 +267,7 @@ Ejemplos de uso:
 acurl ap-southeast-2 execute-api -X GET https://xxx
 ```
 
-###### Lambda function URL
+###### URL de función Lambda con streaming
 ```powershell
 acurl ap-southeast-2 lambda -N -X POST https://xxx
 ```
@@ -281,16 +281,15 @@ acurl ap-southeast-2 lambda -N -X POST https://xxx
 
 <Tabs>
   <TabItem label="Local">
-    Inicia el servidor local `game-api` con:
+    Inicia tu servidor local `game-api` ejecutando:
 
     <NxCommands highlights={['dungeon-adventure-infra-sandbox-ElectroDbTableXXX-YYY']} env={{TABLE_NAME:"dungeon-adventure-infra-sandbox-ElectroDbTableXXX-YYY"}} commands={["run @dungeon-adventure/game-api:serve"]} />
 
     <Aside type="caution">
-    Usa el valor `dungeon-adventure-infra-sandbox.ElectroDbTableTableNameXXX` de la salida de CDK para reemplazar el marcador.
+    Usa el valor de salida `dungeon-adventure-infra-sandbox.ElectroDbTableTableNameXXX` del despliegue CDK para reemplazar el marcador de posición resaltado.
     </Aside>
 
-    Una vez iniciado, prueba con:
-
+    Una vez que el servidor esté en ejecución, puedes llamarlo con:
     ```bash
     curl -X GET 'http://localhost:2022/games.query?input=%7B%7D'
     ```
@@ -300,16 +299,16 @@ acurl ap-southeast-2 lambda -N -X POST https://xxx
 acurl ap-southeast-2 execute-api -X GET 'https://xxx.execute-api.ap-southeast-2.amazonaws.com/prod/games.query?input=%7B%7D'
 ```
     <Aside type="caution">
-    Usa el valor `dungeon-adventure-infra-sandbox.GameApiGameApiEndpointXXX` de CDK y ajusta la región.
+    Usa el valor de salida `dungeon-adventure-infra-sandbox.GameApiGameApiEndpointXXX` del despliegue CDK para reemplazar el marcador de posición y ajusta la región correspondientemente.
     </Aside>
   </TabItem>
 </Tabs>
 
-:::note
-El `%7B%7D` es un objeto JSON vacío (`{}`) codificado en URI.
+:::nota
+El `%7B%7D` que pasamos para probar la API es un objeto JSON vacío codificado en URI (`{}`).
 :::
 
-Si todo funciona, verás:
+Si el comando se ejecuta correctamente, verás una respuesta como:
 
 ```json
 {"result":{"data":{"items":[],"cursor":null}}}

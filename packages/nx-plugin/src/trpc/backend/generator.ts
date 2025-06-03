@@ -30,6 +30,7 @@ import {
   NxGeneratorInfo,
   addGeneratorMetadata,
   getGeneratorInfo,
+  readProjectConfigurationUnqualified,
 } from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { addApiGatewayConstruct } from '../../utils/api-constructs/api-constructs';
@@ -47,17 +48,9 @@ export async function tsTrpcApiGenerator(
   const apiNamespace = getNpmScopePrefix(tree);
   const apiNameKebabCase = kebabCase(options.name);
   const apiNameClassName = toClassName(options.name);
-  const projectRoot = joinPathFragments(
-    options.directory ?? '.',
-    apiNameKebabCase,
-  );
 
-  const schemaRoot = joinPathFragments(projectRoot, 'schema');
-  const backendRoot = joinPathFragments(projectRoot, 'backend');
   const backendName = apiNameKebabCase;
-  const schemaName = `${apiNameKebabCase}-schema`;
   const backendProjectName = `${apiNamespace}${backendName}`;
-  const schemaProjectName = `${apiNamespace}${schemaName}`;
 
   const port = getLocalServerPortNumber(
     tree,
@@ -65,11 +58,19 @@ export async function tsTrpcApiGenerator(
     2022,
   );
 
+  await tsProjectGenerator(tree, {
+    name: backendName,
+    directory: options.directory,
+  });
+
+  const backendRoot = readProjectConfigurationUnqualified(
+    tree,
+    backendProjectName,
+  ).root;
+
   const enhancedOptions = {
     backendProjectName,
     backendProjectAlias: toScopeAlias(backendProjectName),
-    schemaProjectName,
-    schemaProjectAlias: toScopeAlias(schemaProjectName),
     apiNameKebabCase,
     apiNameClassName,
     backendRoot,
@@ -78,17 +79,6 @@ export async function tsTrpcApiGenerator(
     port,
     ...options,
   };
-
-  await tsProjectGenerator(tree, {
-    name: backendName,
-    directory: projectRoot,
-    subDirectory: 'backend',
-  });
-  await tsProjectGenerator(tree, {
-    name: schemaName,
-    directory: projectRoot,
-    subDirectory: 'schema',
-  });
 
   addApiGatewayConstruct(tree, {
     apiNameClassName,
@@ -168,17 +158,9 @@ export async function tsTrpcApiGenerator(
       overwriteStrategy: OverwriteStrategy.Overwrite,
     },
   );
-  generateFiles(
-    tree,
-    joinPathFragments(__dirname, 'files', 'schema'),
-    schemaRoot,
-    enhancedOptions,
-    {
-      overwriteStrategy: OverwriteStrategy.Overwrite,
-    },
-  );
+
   tree.delete(joinPathFragments(backendRoot, 'src', 'lib'));
-  tree.delete(joinPathFragments(schemaRoot, 'src', 'lib'));
+
   addDependenciesToPackageJson(
     tree,
     withVersions([
@@ -201,10 +183,8 @@ export async function tsTrpcApiGenerator(
     ]),
   );
   tree.delete(joinPathFragments(backendRoot, 'package.json'));
-  tree.delete(joinPathFragments(schemaRoot, 'package.json'));
 
   addGeneratorMetadata(tree, backendName, TRPC_BACKEND_GENERATOR_INFO);
-  addGeneratorMetadata(tree, schemaName, TRPC_BACKEND_GENERATOR_INFO);
 
   await addGeneratorMetricsIfApplicable(tree, [TRPC_BACKEND_GENERATOR_INFO]);
 

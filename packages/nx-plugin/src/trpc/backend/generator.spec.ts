@@ -17,7 +17,7 @@ describe('trpc backend generator', () => {
     tree = createTreeUsingTsSolutionSetup();
   });
 
-  it('should generate backend and schema projects', async () => {
+  it('should generate the project', async () => {
     await tsTrpcApiGenerator(tree, {
       name: 'TestApi',
       directory: 'apps',
@@ -26,17 +26,15 @@ describe('trpc backend generator', () => {
     });
 
     // Verify project structure
-    expect(tree.exists('apps/test-api/backend')).toBeTruthy();
-    expect(tree.exists('apps/test-api/schema')).toBeTruthy();
+    expect(tree.exists('apps/test-api')).toBeTruthy();
 
     // Verify generated files
-    expect(tree.exists('apps/test-api/backend/src/index.ts')).toBeTruthy();
-    expect(tree.exists('apps/test-api/backend/src/procedures')).toBeTruthy();
-    expect(tree.exists('apps/test-api/schema/src/index.ts')).toBeTruthy();
+    expect(tree.exists('apps/test-api/src/index.ts')).toBeTruthy();
+    expect(tree.exists('apps/test-api/src/procedures')).toBeTruthy();
+    expect(tree.exists('apps/test-api/src/schema')).toBeTruthy();
 
     // Create snapshots of generated files
-    snapshotTreeDir(tree, 'apps/test-api/backend/src');
-    snapshotTreeDir(tree, 'apps/test-api/schema/src');
+    snapshotTreeDir(tree, 'apps/test-api/src');
   });
 
   it('should set up project configuration correctly', async () => {
@@ -47,7 +45,7 @@ describe('trpc backend generator', () => {
       auth: 'IAM',
     });
     const backendProjectConfig = JSON.parse(
-      tree.read('apps/test-api/backend/project.json', 'utf-8'),
+      tree.read('apps/test-api/project.json', 'utf-8'),
     );
     // Verify project metadata
     expect(backendProjectConfig.metadata).toEqual({
@@ -196,12 +194,10 @@ describe('trpc backend generator', () => {
     expect(devDeps).toHaveProperty('cors');
     expect(devDeps).toHaveProperty('@types/cors');
 
-    expect(
-      tree.exists('apps/test-api/backend/src/local-server.ts'),
-    ).toBeTruthy();
-    expect(
-      tree.read('apps/test-api/backend/src/local-server.ts', 'utf-8'),
-    ).toContain('middleware: cors()');
+    expect(tree.exists('apps/test-api/src/local-server.ts')).toBeTruthy();
+    expect(tree.read('apps/test-api/src/local-server.ts', 'utf-8')).toContain(
+      'middleware: cors()',
+    );
   });
 
   it('should add generator metric to app.ts', async () => {
@@ -226,10 +222,7 @@ describe('trpc backend generator', () => {
     });
 
     // Read the generated router.ts file
-    const routerTsContent = tree.read(
-      'apps/test-api/backend/src/router.ts',
-      'utf-8',
-    );
+    const routerTsContent = tree.read('apps/test-api/src/router.ts', 'utf-8');
 
     // Verify CORS headers are included in responseMeta
     expect(routerTsContent).toContain('responseMeta: () => ({');
@@ -244,7 +237,7 @@ describe('trpc backend generator', () => {
       computeType: 'ServerlessApiGatewayRestApi',
       auth: 'Cognito',
     });
-    snapshotTreeDir(tree, 'apps/test-api/backend/src/client');
+    snapshotTreeDir(tree, 'apps/test-api/src/client');
     snapshotTreeDir(tree, 'packages/common/constructs/src/app/apis');
 
     expect(
@@ -259,7 +252,7 @@ describe('trpc backend generator', () => {
       computeType: 'ServerlessApiGatewayHttpApi',
       auth: 'Cognito',
     });
-    snapshotTreeDir(tree, 'apps/test-api/backend/src/client');
+    snapshotTreeDir(tree, 'apps/test-api/src/client');
     snapshotTreeDir(tree, 'packages/common/constructs/src/app/apis');
 
     expect(
@@ -274,7 +267,7 @@ describe('trpc backend generator', () => {
       computeType: 'ServerlessApiGatewayRestApi',
       auth: 'None',
     });
-    snapshotTreeDir(tree, 'apps/test-api/backend/src/client');
+    snapshotTreeDir(tree, 'apps/test-api/src/client');
     snapshotTreeDir(tree, 'packages/common/constructs/src/app/apis');
 
     expect(
@@ -289,7 +282,7 @@ describe('trpc backend generator', () => {
       computeType: 'ServerlessApiGatewayHttpApi',
       auth: 'None',
     });
-    snapshotTreeDir(tree, 'apps/test-api/backend/src/client');
+    snapshotTreeDir(tree, 'apps/test-api/src/client');
     snapshotTreeDir(tree, 'packages/common/constructs/src/app/apis');
 
     expect(
@@ -324,13 +317,13 @@ describe('trpc backend generator', () => {
 
     // Check metadata ports
     const firstApiConfig = JSON.parse(
-      tree.read('apps/first-api/backend/project.json', 'utf-8'),
+      tree.read('apps/first-api/project.json', 'utf-8'),
     );
     const secondApiConfig = JSON.parse(
-      tree.read('apps/second-api/backend/project.json', 'utf-8'),
+      tree.read('apps/second-api/project.json', 'utf-8'),
     );
     const thirdApiConfig = JSON.parse(
-      tree.read('apps/third-api/backend/project.json', 'utf-8'),
+      tree.read('apps/third-api/project.json', 'utf-8'),
     );
 
     expect(firstApiConfig.metadata.port).toBe(2022);
@@ -339,15 +332,15 @@ describe('trpc backend generator', () => {
 
     // Check local-server.ts files contain correct ports
     const firstLocalServer = tree.read(
-      'apps/first-api/backend/src/local-server.ts',
+      'apps/first-api/src/local-server.ts',
       'utf-8',
     );
     const secondLocalServer = tree.read(
-      'apps/second-api/backend/src/local-server.ts',
+      'apps/second-api/src/local-server.ts',
       'utf-8',
     );
     const thirdLocalServer = tree.read(
-      'apps/third-api/backend/src/local-server.ts',
+      'apps/third-api/src/local-server.ts',
       'utf-8',
     );
 
