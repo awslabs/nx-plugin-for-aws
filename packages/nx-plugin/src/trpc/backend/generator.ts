@@ -35,6 +35,7 @@ import {
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { addApiGatewayConstruct } from '../../utils/api-constructs/api-constructs';
 import { getLocalServerPortNumber } from '../../utils/port';
+import { addZodV4Alias } from '../../utils/zod';
 
 export const TRPC_BACKEND_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -160,6 +161,9 @@ export async function tsTrpcApiGenerator(
   );
 
   tree.delete(joinPathFragments(backendRoot, 'src', 'lib'));
+
+  // Add an alias for zod v4
+  addZodV4Alias(tree);
 
   addDependenciesToPackageJson(
     tree,

@@ -42,7 +42,7 @@ export const VERSIONS = {
   'source-map-support': '^0.5.21',
   tsx: '^4.19.3',
   'vite-tsconfig-paths': '^5.1.4',
-  zod: '^3.24.2',
+  zod: '^3.25.50',
 } as const;
 
 /**
