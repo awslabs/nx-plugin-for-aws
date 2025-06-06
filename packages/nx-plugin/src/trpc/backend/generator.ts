@@ -152,7 +152,7 @@ export async function tsTrpcApiGenerator(
 
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'backend'),
+    joinPathFragments(__dirname, 'files'),
     backendRoot,
     enhancedOptions,
     {
