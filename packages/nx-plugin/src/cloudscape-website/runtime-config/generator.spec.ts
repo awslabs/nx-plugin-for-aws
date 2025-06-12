@@ -37,8 +37,11 @@ describe('runtime-config generator', () => {
       `import { RouterProvider } from '@tanstack/react-router';
 
         export function App() {
+        
+          const App = () => <RouterProvider router={router} />;
+
           return (
-            <RouterProvider router={router} />
+            <App/>
           );
         }`,
     );
@@ -62,8 +65,11 @@ describe('runtime-config generator', () => {
       `import { RouterProvider } from '@tanstack/react-router';
 
         export function App() {
+        
+          const App = () => <RouterProvider router={router} />;
+
           return (
-            <RouterProvider router={router} />
+            <App/>
           );
         }`,
     );
@@ -81,8 +87,11 @@ describe('runtime-config generator', () => {
       `import { RouterProvider } from '@tanstack/react-router';
 
         export function App() {
+        
+          const App = () => <RouterProvider router={router} />;
+
           return (
-            <RouterProvider router={router} />
+            <App/>
           );
         }`,
     );
@@ -118,8 +127,8 @@ describe('runtime-config generator', () => {
     );
   });
 
-  it('should throw error if RouterProvider is not found', async () => {
-    // Set up main.tsx without RouterProvider
+  it('should throw error if App is not found', async () => {
+    // Set up main.tsx without App
     tree.write(
       'packages/test-app/src/main.tsx',
       `export function App() {
@@ -127,7 +136,7 @@ describe('runtime-config generator', () => {
       }`,
     );
     await expect(runtimeConfigGenerator(tree, options)).rejects.toThrow(
-      'Could not locate the RouterProvider element in main.tsx',
+      'Could not locate the App element in main.tsx',
     );
   });
 
@@ -138,8 +147,11 @@ describe('runtime-config generator', () => {
       `import { RouterProvider } from '@tanstack/react-router';
 
         export function App() {
+        
+          const App = () => <RouterProvider router={router} />;
+
           return (
-            <RouterProvider router={router} />
+            <App/>
           );
         }`,
     );
@@ -172,8 +184,11 @@ describe('runtime-config generator', () => {
       `import { RouterProvider } from '@tanstack/react-router';
 
         export function App() {
+        
+          const App = () => <RouterProvider router={router} />;
+
           return (
-            <RouterProvider router={router} />
+            <App/>
           );
         }`,
     );

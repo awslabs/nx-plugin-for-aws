@@ -91,7 +91,7 @@ export async function runtimeConfigGenerator(
     mainTsxPath,
     'JsxSelfClosingElement',
     (node: JsxSelfClosingElement) => {
-      if (node.tagName.getText() !== 'RouterProvider') {
+      if (node.tagName.getText() !== 'App') {
         return node;
       } else {
         locatedTargetNode = true;
@@ -111,7 +111,7 @@ export async function runtimeConfigGenerator(
   );
 
   if (!locatedTargetNode) {
-    throw new Error('Could not locate the RouterProvider element in main.tsx');
+    throw new Error('Could not locate the App element in main.tsx');
   }
 
   await addGeneratorMetricsIfApplicable(tree, [RUNTIME_CONFIG_GENERATOR_INFO]);

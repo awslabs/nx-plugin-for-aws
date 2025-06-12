@@ -46,11 +46,12 @@ describe('fastapi react generator', () => {
     tree.write(
       'apps/frontend/src/main.tsx',
       `
-import { App } from './app';
 import { RouterProvider } from '@tanstack/react-router';
 
+const App = () => <RouterProvider router={router} />;
+
 export function Main() {
-  return <RouterProvider router={router} />;
+  return <App />;
 }
 `,
     );
@@ -385,7 +386,9 @@ import { App } from './app';
 import { RouterProvider } from '@tanstack/react-router';
 
 export function Main() {
-  return <RouterProvider router={router} />;
+  const App = () => <RouterProvider router={router} />;
+
+  return <App/>;
 }
 `,
     );
