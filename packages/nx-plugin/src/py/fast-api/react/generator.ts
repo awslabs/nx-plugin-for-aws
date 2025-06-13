@@ -205,7 +205,7 @@ export const fastApiReactGenerator = async (
     replace(
       tree,
       mainTsxPath,
-      'JsxSelfClosingElement[tagName.name="RouterProvider"]',
+      'JsxSelfClosingElement[tagName.name="App"]',
       (node: JsxSelfClosingElement) =>
         createJsxElementFromIdentifier('QueryClientProvider', [node]),
     );
@@ -229,7 +229,7 @@ export const fastApiReactGenerator = async (
     replace(
       tree,
       mainTsxPath,
-      'JsxSelfClosingElement[tagName.name="RouterProvider"]',
+      'JsxSelfClosingElement[tagName.name="App"]',
       (node: JsxSelfClosingElement) =>
         createJsxElementFromIdentifier(providerName, [node]),
     );

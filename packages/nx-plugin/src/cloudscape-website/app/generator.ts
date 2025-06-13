@@ -478,6 +478,7 @@ export async function tsCloudScapeWebsiteGenerator(
       },
     }),
   );
+
   addDependenciesToPackageJson(
     tree,
     withVersions([
@@ -486,7 +487,13 @@ export async function tsCloudScapeWebsiteGenerator(
       '@cloudscape-design/global-styles',
       '@tanstack/react-router',
     ]),
-    withVersions(['@tanstack/router-plugin', 'vite-tsconfig-paths']),
+    withVersions([
+      '@tanstack/router-plugin',
+      '@tanstack/router-generator',
+      '@tanstack/virtual-file-routes',
+      '@tanstack/router-utils',
+      'vite-tsconfig-paths',
+    ]),
   );
 
   await addGeneratorMetricsIfApplicable(tree, [

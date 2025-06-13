@@ -136,7 +136,7 @@ export async function reactGenerator(
     replace(
       tree,
       mainTsxPath,
-      'JsxSelfClosingElement[tagName.name="RouterProvider"]',
+      'JsxSelfClosingElement[tagName.name="App"]',
       (node: JsxSelfClosingElement) =>
         createJsxElementFromIdentifier('QueryClientProvider', [node]),
     );
@@ -153,7 +153,7 @@ export async function reactGenerator(
     replace(
       tree,
       mainTsxPath,
-      'JsxSelfClosingElement[tagName.name="RouterProvider"]',
+      'JsxSelfClosingElement[tagName.name="App"]',
       (node: JsxSelfClosingElement) =>
         createJsxElementFromIdentifier(clientProviderName, [node]),
     );
