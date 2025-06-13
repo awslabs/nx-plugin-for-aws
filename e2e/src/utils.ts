@@ -158,5 +158,9 @@ function logError(message: string, body?: string) {
   process.stdout.write('\n');
 }
 
-export const buildCreateNxWorkspaceCommand = (pm: string, workspace: string) =>
-  `npx create-nx-workspace@~21.0.3 ${workspace} --pm=${pm} --preset=@aws/nx-plugin --ci=skip`;
+export const buildCreateNxWorkspaceCommand = (
+  pm: string,
+  workspace: string,
+  yes = false,
+) =>
+  `npx ${yes ? '-y ' : ''}create-nx-workspace@~21.0.3 ${workspace} --pm=${pm} --preset=@aws/nx-plugin --ci=skip`;

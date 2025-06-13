@@ -188,11 +188,7 @@ export async function tsCloudScapeWebsiteAuthGenerator(
     );
     addDependenciesToPackageJson(
       tree,
-      withVersions([
-        'oidc-client-ts',
-        'react-oidc-context',
-        '@aws-cdk/aws-cognito-identitypool-alpha',
-      ]),
+      withVersions(['oidc-client-ts', 'react-oidc-context']),
       {},
     );
     addStarExport(
