@@ -195,7 +195,6 @@ describe('cognito-auth generator', () => {
     expect(packageJson.dependencies).toMatchObject({
       constructs: expect.any(String),
       'aws-cdk-lib': expect.any(String),
-      '@aws-cdk/aws-cognito-identitypool-alpha': expect.any(String),
       'oidc-client-ts': expect.any(String),
       'react-oidc-context': expect.any(String),
     });

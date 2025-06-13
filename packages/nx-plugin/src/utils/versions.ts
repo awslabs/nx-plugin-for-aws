@@ -4,7 +4,6 @@
  */
 export const VERSIONS = {
   '@cdklabs/cdk-validator-cfnguard': '^0.0.60',
-  '@aws-cdk/aws-cognito-identitypool-alpha': '^2.185.0-alpha.0',
   '@aws-sdk/client-cognito-identity': '^3.775.0',
   '@aws-sdk/credential-providers': '^3.775.0',
   '@aws-sdk/credential-provider-cognito-identity': '^3.775.0',
@@ -29,7 +28,7 @@ export const VERSIONS = {
   '@smithy/types': '^4.2.0',
   aws4fetch: '^1.0.20',
   'aws-cdk': '^2.1006.0',
-  'aws-cdk-lib': '^2.185.0',
+  'aws-cdk-lib': '^2.200.0',
   'aws-xray-sdk-core': '^3.10.3',
   constructs: '^10.4.2',
   cors: '^2.8.5',
@@ -40,7 +39,7 @@ export const VERSIONS = {
   prettier: '^3.5.3',
   'react-oidc-context': '^3.2.0',
   'source-map-support': '^0.5.21',
-  tsx: '^4.19.3',
+  tsx: '4.20.1', // https://github.com/privatenumber/tsx/issues/727
   'vite-tsconfig-paths': '^5.1.4',
   zod: '^3.25.50',
 } as const;

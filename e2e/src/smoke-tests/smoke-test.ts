@@ -25,7 +25,7 @@ export const smokeTest = (
 
     it(`Should generate and build - ${pkgMgr}`, async () => {
       await runCLI(
-        `${buildCreateNxWorkspaceCommand(pkgMgr, 'e2e-test')} --interactive=false --skipGit`,
+        `${buildCreateNxWorkspaceCommand(pkgMgr, 'e2e-test', true)} --interactive=false --skipGit`,
         {
           cwd: `${tmpProjPath()}/${pkgMgr}`,
           prefixWithPackageManagerCmd: false,
