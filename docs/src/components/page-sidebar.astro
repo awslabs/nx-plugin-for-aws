@@ -1,0 +1,34 @@
+---
+import Default from '@astrojs/starlight/components/PageSidebar.astro';
+
+// Defer to allow components to register custom headings in case the sidebar is rendered first
+await new Promise(resolve => setTimeout(() => resolve(), 0));
+
+// Adds any headings registered by snippets
+const addCustomHeadings = (headingItems) => {
+  let addedHeadings = new Set();
+  for (const headingItem of headingItems) {
+    if (headingItem.children) {
+      [...addCustomHeadings(headingItem.children)].map(slug => addedHeadings.add(slug));
+    }
+    const matchingSnippet = Astro.locals.customHeadings?.[headingItem.slug];
+    if (matchingSnippet && !headingItem.children.find(child => matchingSnippet.headings.find(h => h.slug === child.slug ))) {
+      headingItem.children = [
+        ...(matchingSnippet.headings.map(h => ({ ...h, children: h.children ?? [] })).filter(h => h.depth <= (Astro.locals.starlightRoute.toc?.maxHeadingLevel ?? 5))),
+        ...(headingItem.children ?? []),
+      ];
+      addedHeadings.add(headingItem.slug);
+    }
+  }
+  return addedHeadings;
+}
+
+// Continue adding headings until we haven't added any more (to handle recursively included snippets)
+let addedHeadings = new Set();
+do {
+  addedHeadings = addCustomHeadings(Astro.locals.starlightRoute.toc!.items);
+} while (addedHeadings.size !== 0)
+
+---
+
+<Default {...Astro.props}><slot /></Default>

@@ -28,18 +28,29 @@ export default defineConfig({
   integrations: [
     starlight({
       title: '@aws/nx-plugin',
-      social: {
-        github: 'https://github.com/awslabs/nx-plugin-for-aws',
-      },
+      social: [
+        {
+          icon: 'github',
+          label: 'GitHub',
+          href: 'https://github.com/awslabs/nx-plugin-for-aws',
+        },
+      ],
       head: [
         {
           tag: 'meta',
           attrs: {
             property: 'og:image',
-            content: '/nx-plugin-for-aws/favicon.svg'
+            content: '/nx-plugin-for-aws/favicon.svg',
           },
         },
       ],
+      components: {
+        PageSidebar: './src/components/page-sidebar.astro',
+      },
+      tableOfContents: {
+        minHeadingLevel: 2,
+        maxHeadingLevel: 4,
+      },
       defaultLocale: 'en',
       locales: {
         en: {
