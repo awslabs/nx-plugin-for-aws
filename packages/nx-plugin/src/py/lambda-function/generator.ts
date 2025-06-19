@@ -157,7 +157,7 @@ export const pyLambdaFunctionGenerator = async (
       outputs: [`{workspaceRoot}/dist/${dir}/bundle`],
       options: {
         commands: [
-          `uv export --frozen --no-dev --no-editable --project ${normalizedProjectName} -o dist/${dir}/bundle/requirements.txt`,
+          `uv export --frozen --no-dev --no-editable --project ${dir} -o dist/${dir}/bundle/requirements.txt`,
           `uv pip install -n --no-installer-metadata --no-compile-bytecode --python-platform x86_64-manylinux2014 --target dist/${dir}/bundle -r dist/${dir}/bundle/requirements.txt`,
         ],
         parallel: false,

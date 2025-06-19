@@ -34,7 +34,6 @@ export const PY_PROJECT_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
 
 export interface PyProjectDetails {
-  readonly normalizedName: string;
   /**
    * Full package name including scope (eg foo.bar)
    */
@@ -43,8 +42,10 @@ export interface PyProjectDetails {
    * Directory of the library relative to the root
    */
   readonly dir: string;
-
-  readonly normalizedModuleName?: string;
+  /**
+   * Module name for the project
+   */
+  readonly normalizedModuleName: string;
 }
 
 /**
@@ -56,13 +57,15 @@ export const getPyProjectDetails = (
 ): PyProjectDetails => {
   const scope = toSnakeCase(getNpmScope(tree));
   const normalizedName = toSnakeCase(schema.name);
-  const normalizedModuleName = toSnakeCase(schema.moduleName);
+  const normalizedModuleName = toSnakeCase(
+    schema.moduleName ?? `${scope}_${normalizedName}`,
+  );
   const fullyQualifiedName = `${scope}.${normalizedName}`;
   const dir = joinPathFragments(
     toSnakeCase(schema.directory) ?? '.',
     normalizedName,
   );
-  return { dir, fullyQualifiedName, normalizedName, normalizedModuleName };
+  return { dir, fullyQualifiedName, normalizedModuleName };
 };
 
 /**
@@ -72,8 +75,10 @@ export const pyProjectGenerator = async (
   tree: Tree,
   schema: PyProjectGeneratorSchema,
 ): Promise<GeneratorCallback> => {
-  const { dir, normalizedName, normalizedModuleName, fullyQualifiedName } =
-    getPyProjectDetails(tree, schema);
+  const { dir, normalizedModuleName, fullyQualifiedName } = getPyProjectDetails(
+    tree,
+    schema,
+  );
 
   const pythonPlugin = withVersions(['@nxlv/python']);
   addDependenciesToPackageJson(tree, {}, pythonPlugin);
@@ -114,7 +119,7 @@ export const pyProjectGenerator = async (
   }
 
   await uvProjectGenerator(tree, {
-    name: normalizedName,
+    name: fullyQualifiedName,
     publishable: false,
     buildLockedVersions: true,
     buildBundleLocalDependencies: true,
@@ -136,7 +141,10 @@ export const pyProjectGenerator = async (
 
   const outputPath = `{workspaceRoot}/dist/${dir}`;
   const buildOutputPath = joinPathFragments(outputPath, 'build');
-  const projectConfiguration = readProjectConfiguration(tree, normalizedName);
+  const projectConfiguration = readProjectConfiguration(
+    tree,
+    fullyQualifiedName,
+  );
   projectConfiguration.name = fullyQualifiedName;
   const buildTarget = projectConfiguration.targets.build;
   projectConfiguration.targets.compile = {
@@ -154,9 +162,9 @@ export const pyProjectGenerator = async (
     },
   };
   projectConfiguration.targets = sortObjectKeys(projectConfiguration.targets);
-  updateProjectConfiguration(tree, normalizedName, projectConfiguration);
+  updateProjectConfiguration(tree, fullyQualifiedName, projectConfiguration);
 
-  addGeneratorMetadata(tree, normalizedName, PY_PROJECT_GENERATOR_INFO);
+  addGeneratorMetadata(tree, fullyQualifiedName, PY_PROJECT_GENERATOR_INFO);
 
   // Update root .gitignore
   updateGitIgnore(tree, '.', (patterns) => [...patterns, '/reports']);
