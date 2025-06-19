@@ -33,7 +33,7 @@ import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
 import { configureTsProject } from '../../ts/lib/ts-project-utils';
 import { withVersions } from '../../utils/versions';
 import { getRelativePathToRoot } from '../../utils/paths';
-import { toClassName, toKebabCase } from '../../utils/names';
+import { kebabCase, toClassName, toKebabCase } from '../../utils/names';
 import {
   addStarExport,
   addDestructuredImport,
@@ -42,7 +42,6 @@ import {
 } from '../../utils/ast';
 import { formatFilesInSubtree } from '../../utils/format';
 import { relative } from 'path';
-import kebabCase from 'lodash.kebabcase';
 import { sortObjectKeys } from '../../utils/object';
 import {
   NxGeneratorInfo,

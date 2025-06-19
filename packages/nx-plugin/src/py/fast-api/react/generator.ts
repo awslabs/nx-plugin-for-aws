@@ -12,9 +12,8 @@ import {
 } from '@nx/devkit';
 import { FastApiReactGeneratorSchema } from './schema';
 import { runtimeConfigGenerator } from '../../../cloudscape-website/runtime-config/generator';
-import kebabCase from 'lodash.kebabcase';
 import { sortObjectKeys } from '../../../utils/object';
-import { toClassName } from '../../../utils/names';
+import { kebabCase, toClassName } from '../../../utils/names';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { withVersions } from '../../../utils/versions';
 import { updateGitIgnore } from '../../../utils/git';

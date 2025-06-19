@@ -74,7 +74,7 @@ export const smokeTest = (
         opts,
       );
       await runCLI(
-        `generate @aws/nx-plugin:py#lambda-function --project=e_2_e_test.py_project --functionName=my-function --eventSource=Any --no-interactive`,
+        `generate @aws/nx-plugin:py#lambda-function --project=e2e_test.py_project --functionName=my-function --eventSource=Any --no-interactive`,
         opts,
       );
       await runCLI(

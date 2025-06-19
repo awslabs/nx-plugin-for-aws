@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import snakeCase from 'lodash.snakecase';
+import { snakeCase } from '../../../utils/names';
 import { PRIMITIVE_TYPES, flattenModelLink, Model } from './types';
 import camelCase from 'lodash.camelcase';
 

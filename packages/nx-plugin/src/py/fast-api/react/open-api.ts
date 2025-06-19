@@ -9,8 +9,8 @@ import {
   Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import snakeCase from 'lodash.snakecase';
 import { sortObjectKeys } from '../../../utils/object';
+import { snakeCase } from '../../../utils/names';
 
 export interface AddOpenApiGenerationOptions {
   project: ProjectConfiguration;

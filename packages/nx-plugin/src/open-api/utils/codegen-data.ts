@@ -7,14 +7,18 @@ import type { Plugin } from '@hey-api/openapi-ts';
 import { normaliseOpenApiSpecForCodeGen } from './normalise';
 import { Spec } from './types';
 import type { OpenAPIV3, OpenAPIV3_1 } from 'openapi-types';
-import kebabCase from 'lodash.kebabcase';
 import camelCase from 'lodash.camelcase';
 import orderBy from 'lodash.orderby';
 import uniqBy from 'lodash.uniqby';
-import snakeCase from 'lodash.snakecase';
 import trim from 'lodash.trim';
 import { resolveIfRef, isRef, splitRef } from './refs';
-import { pascalCase, toClassName, upperFirst } from '../../utils/names';
+import {
+  kebabCase,
+  pascalCase,
+  snakeCase,
+  toClassName,
+  upperFirst,
+} from '../../utils/names';
 import {
   toPythonName,
   toTypeScriptType,
