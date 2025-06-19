@@ -42,7 +42,7 @@ describe('smoke test - dungeon-adventure', () => {
       opts,
     );
     await runCLI(
-      `generate @aws/nx-plugin:py#fast-api --name=StoryApi --no-interactive`,
+      `generate @aws/nx-plugin:py#fast-api --name=StoryApi --moduleName=story_api --no-interactive`,
       opts,
     );
     await runCLI(

@@ -14,11 +14,9 @@ import {
   writeJson,
 } from '@nx/devkit';
 import { TsNxGeneratorGeneratorSchema } from './schema';
-import kebabCase from 'lodash.kebabcase';
-import { pascalCase } from '../../utils/names';
+import { kebabCase, pascalCase, snakeCase } from '../../utils/names';
 import camelCase from 'lodash.camelcase';
 import { getRelativePathToRootByDirectory } from '../../utils/paths';
-import snakeCase from 'lodash.snakecase';
 import { addStarExport, replace } from '../../utils/ast';
 import { ArrayLiteralExpression, factory } from 'typescript';
 import NxPluginForAwsPackageJson from '../../../package.json';

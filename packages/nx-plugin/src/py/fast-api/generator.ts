@@ -51,11 +51,14 @@ export const pyFastApiProjectGenerator = async (
 ): Promise<GeneratorCallback> => {
   await sharedConstructsGenerator(tree);
 
-  const { dir, normalizedName, normalizedModuleName, fullyQualifiedName } =
-    getPyProjectDetails(tree, {
+  const { dir, normalizedModuleName, fullyQualifiedName } = getPyProjectDetails(
+    tree,
+    {
       name: schema.name,
       directory: schema.directory,
-    });
+      moduleName: schema.moduleName,
+    },
+  );
   const apiNameSnakeCase = toSnakeCase(schema.name);
   const apiNameKebabCase = toKebabCase(schema.name);
   const apiNameClassName = toClassName(schema.name);
@@ -63,7 +66,7 @@ export const pyFastApiProjectGenerator = async (
   const port = getLocalServerPortNumber(tree, FAST_API_GENERATOR_INFO, 8000);
 
   await pyProjectGenerator(tree, {
-    name: normalizedName,
+    name: schema.name,
     directory: schema.directory,
     moduleName: normalizedModuleName,
     projectType: 'application',
@@ -77,7 +80,7 @@ export const pyFastApiProjectGenerator = async (
     outputs: [`{workspaceRoot}/dist/${dir}/bundle`],
     options: {
       commands: [
-        `uv export --frozen --no-dev --no-editable --project ${normalizedName} -o dist/${dir}/bundle/requirements.txt`,
+        `uv export --frozen --no-dev --no-editable --project ${dir} -o dist/${dir}/bundle/requirements.txt`,
         `uv pip install -n --no-installer-metadata --no-compile-bytecode --python-platform x86_64-manylinux2014 --target dist/${dir}/bundle -r dist/${dir}/bundle/requirements.txt`,
       ],
       parallel: false,
@@ -91,7 +94,7 @@ export const pyFastApiProjectGenerator = async (
   projectConfig.targets.serve = {
     executor: '@nxlv/python:run-commands',
     options: {
-      command: `uv run fastapi dev ${normalizedName}/main.py --port ${port}`,
+      command: `uv run fastapi dev ${normalizedModuleName}/main.py --port ${port}`,
       cwd: dir,
     },
     continuous: true,
@@ -105,13 +108,13 @@ export const pyFastApiProjectGenerator = async (
   } as any;
 
   projectConfig.targets = sortObjectKeys(projectConfig.targets);
-  updateProjectConfiguration(tree, normalizedName, projectConfig);
+  updateProjectConfiguration(tree, fullyQualifiedName, projectConfig);
 
   // Add OpenAPI spec generation to the project, run as part of build
   const { specPath } = addOpenApiGeneration(tree, { project: projectConfig });
 
   [
-    joinPathFragments(dir, normalizedModuleName ?? normalizedName, 'hello.py'),
+    joinPathFragments(dir, normalizedModuleName, 'hello.py'),
     joinPathFragments(dir, 'tests', 'test_hello.py'),
   ].forEach((f) => tree.delete(f));
 
@@ -120,7 +123,7 @@ export const pyFastApiProjectGenerator = async (
     joinPathFragments(__dirname, 'files', 'app'), // path to the file templates
     dir, // destination path of the files
     {
-      name: normalizedName,
+      name: normalizedModuleName,
       apiNameClassName,
       computeType: schema.computeType,
     },
@@ -218,7 +221,7 @@ export const pyFastApiProjectGenerator = async (
   projectToml['dependency-groups'] = { dev: ['fastapi[standard]>=0.115'] };
   tree.write(joinPathFragments(dir, 'pyproject.toml'), stringify(projectToml));
 
-  addGeneratorMetadata(tree, normalizedName, FAST_API_GENERATOR_INFO);
+  addGeneratorMetadata(tree, fullyQualifiedName, FAST_API_GENERATOR_INFO);
 
   await addGeneratorMetricsIfApplicable(tree, [FAST_API_GENERATOR_INFO]);
 

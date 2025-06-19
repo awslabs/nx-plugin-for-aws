@@ -14,7 +14,6 @@ import {
   updateJson,
 } from '@nx/devkit';
 import { TsTrpcApiGeneratorSchema } from './schema';
-import kebabCase from 'lodash.kebabcase';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import {
   PACKAGES_DIR,
@@ -23,7 +22,7 @@ import {
 import tsProjectGenerator from '../../ts/lib/generator';
 import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
 import { withVersions } from '../../utils/versions';
-import { toClassName } from '../../utils/names';
+import { kebabCase, toClassName } from '../../utils/names';
 import { formatFilesInSubtree } from '../../utils/format';
 import { sortObjectKeys } from '../../utils/object';
 import {

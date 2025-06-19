@@ -35,13 +35,28 @@ describe('fastapi project generator', () => {
 
     // Verify project structure
     expect(tree.exists('apps/test_api')).toBeTruthy();
-    expect(tree.exists('apps/test_api/test_api')).toBeTruthy();
-    expect(tree.exists('apps/test_api/test_api/main.py')).toBeTruthy();
+    expect(tree.exists('apps/test_api/proj_test_api')).toBeTruthy();
+    expect(tree.exists('apps/test_api/proj_test_api/main.py')).toBeTruthy();
     expect(tree.exists('apps/test_api/tests/test_main.py')).toBeTruthy();
 
     // Verify default files are removed
-    expect(tree.exists('apps/test_api/test_api/hello.py')).toBeFalsy();
+    expect(tree.exists('apps/test_api/proj_test_api/hello.py')).toBeFalsy();
     expect(tree.exists('apps/test_api/tests/test_hello.py')).toBeFalsy();
+  });
+
+  it('should generate a FastAPI project with custom module name', async () => {
+    await pyFastApiProjectGenerator(tree, {
+      name: 'test-api',
+      directory: 'apps',
+      computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
+      moduleName: 'my_module',
+    });
+
+    // Verify project structure
+    expect(tree.exists('apps/test_api')).toBeTruthy();
+    expect(tree.exists('apps/test_api/my_module')).toBeTruthy();
+    expect(tree.exists('apps/test_api/my_module/main.py')).toBeTruthy();
   });
 
   it('should set up project configuration with FastAPI targets', async () => {
@@ -62,7 +77,7 @@ describe('fastapi project generator', () => {
       '{workspaceRoot}/dist/apps/test_api/bundle',
     ]);
     expect(projectConfig.targets.bundle.options.commands).toContain(
-      'uv export --frozen --no-dev --no-editable --project test_api -o dist/apps/test_api/bundle/requirements.txt',
+      'uv export --frozen --no-dev --no-editable --project apps/test_api -o dist/apps/test_api/bundle/requirements.txt',
     );
 
     // Verify openapi spec is generated
@@ -77,7 +92,7 @@ describe('fastapi project generator', () => {
       '@nxlv/python:run-commands',
     );
     expect(projectConfig.targets.serve.options.command).toBe(
-      'uv run fastapi dev test_api/main.py --port 8000',
+      'uv run fastapi dev proj_test_api/main.py --port 8000',
     );
 
     // Verify build dependencies
@@ -218,7 +233,7 @@ describe('fastapi project generator', () => {
 
     expect(tree.exists('apps/nested/path/test_api')).toBeTruthy();
     expect(
-      tree.exists('apps/nested/path/test_api/test_api/main.py'),
+      tree.exists('apps/nested/path/test_api/proj_test_api/main.py'),
     ).toBeTruthy();
   });
 
@@ -287,7 +302,7 @@ describe('fastapi project generator', () => {
 
       // Read the generated init.py file
       const initPyContent = tree.read(
-        'apps/test_api/test_api/init.py',
+        'apps/test_api/proj_test_api/init.py',
         'utf-8',
       );
 

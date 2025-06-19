@@ -26,7 +26,7 @@ describe('python project generator', () => {
     // Verify project structure
     expect(tree.exists('apps/test_project')).toBeTruthy();
     expect(tree.exists('apps/test_project/pyproject.toml')).toBeTruthy();
-    expect(tree.exists('apps/test_project/test_project')).toBeTruthy();
+    expect(tree.exists('apps/test_project/proj_test_project')).toBeTruthy();
     expect(tree.exists('apps/test_project/tests')).toBeTruthy();
   });
 

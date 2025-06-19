@@ -27,7 +27,6 @@ import {
 import { addStarExport } from '../../utils/ast';
 import path from 'path';
 import { formatFilesInSubtree } from '../../utils/format';
-import kebabCase from 'lodash.kebabcase';
 import { sortObjectKeys } from '../../utils/object';
 import {
   NxGeneratorInfo,
@@ -35,6 +34,7 @@ import {
   getGeneratorInfo,
 } from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+import { kebabCase } from '../../utils/names';
 
 export const INFRA_APP_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);

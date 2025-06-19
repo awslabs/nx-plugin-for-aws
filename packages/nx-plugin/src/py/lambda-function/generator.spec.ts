@@ -99,7 +99,7 @@ describe('lambda-handler project generator', () => {
       '{workspaceRoot}/dist/apps/test_project/bundle',
     ]);
     expect(projectConfig.targets.bundle.options.commands).toContain(
-      'uv export --frozen --no-dev --no-editable --project test_project -o dist/apps/test_project/bundle/requirements.txt',
+      'uv export --frozen --no-dev --no-editable --project apps/test_project -o dist/apps/test_project/bundle/requirements.txt',
     );
 
     // Verify build dependencies
@@ -451,7 +451,7 @@ describe('lambda-handler project generator', () => {
     );
     expect(projectConfig.targets.bundle).toBeDefined();
     expect(projectConfig.targets.bundle.options.commands[0]).toContain(
-      `--project test_project`,
+      `--project apps/test_project`,
     );
   });
 
