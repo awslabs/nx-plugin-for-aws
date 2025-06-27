@@ -41,6 +41,10 @@ describe('cognito-auth generator', () => {
       import { RuntimeConfigProvider } from './components/RuntimeConfig';
       import { RouterProvider, createRouter } from '@tanstack/react-router';
 
+      export type RouterProviderContext = {}
+
+      const router = createRouter({ routeTree });
+
       export function Main() {
 
       const App = () => <RouterProvider router={router} />;
@@ -69,6 +73,33 @@ describe('cognito-auth generator', () => {
       tree.exists('packages/common/constructs/src/core/index.ts'),
     ).toBeTruthy();
 
+    // Verify main.tsx imports are added
+    const mainTsxContent = tree
+      .read('packages/test-project/src/main.tsx')
+      .toString();
+    expect(mainTsxContent).toContain(
+      "import CognitoAuth from './components/CognitoAuth'",
+    );
+    expect(mainTsxContent).toContain(
+      "import { useRuntimeConfig } from './hooks/useRuntimeConfig'",
+    );
+    expect(mainTsxContent).toContain(
+      "import { useAuth } from 'react-oidc-context'",
+    );
+
+    // Verify router context is updated
+    expect(mainTsxContent).toContain('auth: undefined');
+    expect(mainTsxContent).toContain('runtimeConfig: undefined');
+
+    // Verify App component is updated
+    expect(mainTsxContent).toContain('const auth = useAuth();');
+    expect(mainTsxContent).toContain(
+      'const runtimeConfig = useRuntimeConfig();',
+    );
+    expect(mainTsxContent).toContain(
+      '<RouterProvider router={router} context={{ runtimeConfig, auth }} />',
+    );
+
     // Create snapshot of the generated files
     expect(
       tree
@@ -96,7 +127,7 @@ describe('cognito-auth generator', () => {
       export function Main() {
 
         const App = () => <RouterProvider router={router} />;
-        
+
         return (
           <RuntimeConfigProvider>
             <App/>
@@ -115,11 +146,125 @@ describe('cognito-auth generator', () => {
     expect(mainTsxContent).toContain(
       "import CognitoAuth from './components/CognitoAuth'",
     );
+    // Verify useRuntimeConfig import is added
+    expect(mainTsxContent).toContain(
+      "import { useRuntimeConfig } from './hooks/useRuntimeConfig'",
+    );
+    // Verify useAuth import is added
+    expect(mainTsxContent).toContain(
+      "import { useAuth } from 'react-oidc-context'",
+    );
     // Verify CognitoAuth component is wrapped around children
     expect(mainTsxContent).toContain('<CognitoAuth>');
     expect(mainTsxContent).toContain('</CognitoAuth>');
+
     // Create snapshot of the modified main.tsx
     expect(mainTsxContent).toMatchSnapshot('main-tsx-with-runtime-config');
+  });
+
+  it('should update RouterProviderContext interface when it exists', async () => {
+    // Setup main.tsx with RouterProviderContext interface and createRouter call
+    tree.write(
+      'packages/test-project/src/main.tsx',
+      `
+      import { RuntimeConfigProvider } from './components/RuntimeConfig';
+      import { RouterProvider, createRouter } from '@tanstack/react-router';
+      import { routeTree } from './routeTree.gen';
+
+      // eslint-disable-next-line @typescript-eslint/no-empty-object-type
+      export type RouterProviderContext = {};
+
+      const router = createRouter({
+        routeTree,
+        context: {}
+      });
+
+      export function Main() {
+        const App = () => <RouterProvider router={router} />;
+
+        return (
+          <RuntimeConfigProvider>
+            <App/>
+          </RuntimeConfigProvider>
+        );
+      }
+    `,
+    );
+
+    await tsCloudScapeWebsiteAuthGenerator(tree, options);
+
+    const mainTsxContent = tree
+      .read('packages/test-project/src/main.tsx')
+      .toString();
+
+    // Verify RouterProviderContext interface is updated with auth and runtimeConfig properties
+    expect(mainTsxContent).toContain('auth?: ReturnType<typeof useAuth>');
+    expect(mainTsxContent).toContain(
+      'runtimeConfig?: ReturnType<typeof useRuntimeConfig>',
+    );
+
+    // Verify the interface is no longer empty
+    expect(mainTsxContent).not.toContain(
+      'export type RouterProviderContext = {};',
+    );
+
+    // Verify router context is updated with auth (and runtimeConfig from runtime-config generator)
+    expect(mainTsxContent).toContain('auth: undefined');
+    expect(mainTsxContent).toContain('runtimeConfig: undefined');
+
+    // Verify App component uses hooks and passes context to RouterProvider
+    expect(mainTsxContent).toContain('const auth = useAuth();');
+    expect(mainTsxContent).toContain(
+      'const runtimeConfig = useRuntimeConfig();',
+    );
+    expect(mainTsxContent).toContain(
+      '<RouterProvider router={router} context={{ runtimeConfig, auth }} />',
+    );
+  });
+
+  it('should update App component to use hooks and pass context to RouterProvider', async () => {
+    // Setup main.tsx with App component and createRouter call
+    tree.write(
+      'packages/test-project/src/main.tsx',
+      `
+      import { RuntimeConfigProvider } from './components/RuntimeConfig';
+      import { RouterProvider, createRouter } from '@tanstack/react-router';
+      import { routeTree } from './routeTree.gen';
+
+      export type RouterProviderContext = {};
+
+      const router = createRouter({
+        routeTree,
+        context: {}
+      });
+
+      const App = () => {
+        return <RouterProvider router={router} context={{}} />;
+      };
+
+      export function Main() {
+        return (
+          <RuntimeConfigProvider>
+            <App/>
+          </RuntimeConfigProvider>
+        );
+      }
+    `,
+    );
+
+    await tsCloudScapeWebsiteAuthGenerator(tree, options);
+
+    const mainTsxContent = tree
+      .read('packages/test-project/src/main.tsx')
+      .toString();
+
+    // Verify App component uses hooks
+    expect(mainTsxContent).toContain('const auth = useAuth();');
+
+    // Verify RouterProvider receives the context values (auth and runtimeConfig)
+    expect(mainTsxContent).toContain(
+      '<RouterProvider router={router} context={{ runtimeConfig, auth }} />',
+    );
   });
 
   it('should handle main.tsx without RuntimeConfigProvider', async () => {
@@ -156,7 +301,7 @@ describe('cognito-auth generator', () => {
       export function Main() {
 
         const App = () => <RouterProvider router={router} />;
-        
+
         return (
           <RuntimeConfigProvider>
             <App/>
@@ -190,7 +335,7 @@ describe('cognito-auth generator', () => {
 
       export function App() {
         const App = () => <RouterProvider router={router} />;
-        
+
         return (
           <RuntimeConfigProvider>
             <App/>
@@ -246,10 +391,10 @@ describe('cognito-auth generator', () => {
       `
       import { RuntimeConfigProvider } from './components/RuntimeConfig';
       import { RouterProvider, createRouter } from '@tanstack/react-router';
-      
+
 
       export function App() {
-        
+
         const App = () => <RouterProvider router={router} />;
 
         return (

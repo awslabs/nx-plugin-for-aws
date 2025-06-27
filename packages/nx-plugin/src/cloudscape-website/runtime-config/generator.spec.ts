@@ -37,7 +37,7 @@ describe('runtime-config generator', () => {
       `import { RouterProvider } from '@tanstack/react-router';
 
         export function App() {
-        
+
           const App = () => <RouterProvider router={router} />;
 
           return (
@@ -65,7 +65,7 @@ describe('runtime-config generator', () => {
       `import { RouterProvider } from '@tanstack/react-router';
 
         export function App() {
-        
+
           const App = () => <RouterProvider router={router} />;
 
           return (
@@ -87,7 +87,7 @@ describe('runtime-config generator', () => {
       `import { RouterProvider } from '@tanstack/react-router';
 
         export function App() {
-        
+
           const App = () => <RouterProvider router={router} />;
 
           return (
@@ -147,7 +147,7 @@ describe('runtime-config generator', () => {
       `import { RouterProvider } from '@tanstack/react-router';
 
         export function App() {
-        
+
           const App = () => <RouterProvider router={router} />;
 
           return (
@@ -184,7 +184,7 @@ describe('runtime-config generator', () => {
       `import { RouterProvider } from '@tanstack/react-router';
 
         export function App() {
-        
+
           const App = () => <RouterProvider router={router} />;
 
           return (
@@ -198,5 +198,170 @@ describe('runtime-config generator', () => {
 
     // Verify the metric was added to app.ts
     expectHasMetricTags(tree, RUNTIME_CONFIG_GENERATOR_INFO.metric);
+  });
+
+  describe('router context integration', () => {
+    it('should update RouterProviderContext interface when it exists', async () => {
+      // Setup main.tsx with RouterProviderContext interface and createRouter call
+      tree.write(
+        'packages/test-app/src/main.tsx',
+        `
+        import { RouterProvider, createRouter } from '@tanstack/react-router';
+        import { routeTree } from './routeTree.gen';
+
+        // eslint-disable-next-line @typescript-eslint/no-empty-object-type
+        export type RouterProviderContext = {};
+
+        const router = createRouter({
+          routeTree,
+          context: {}
+        });
+
+        const App = () => {
+          return <RouterProvider router={router} context={{}} />;
+        };
+
+        export function Main() {
+          return <App/>;
+        }
+      `,
+      );
+
+      await runtimeConfigGenerator(tree, options);
+
+      const mainTsxContent = tree
+        .read('packages/test-app/src/main.tsx')
+        .toString();
+
+      // Verify useRuntimeConfig import is added
+      expect(mainTsxContent).toContain(
+        "import { useRuntimeConfig } from './hooks/useRuntimeConfig'",
+      );
+
+      // Verify RouterProviderContext interface is updated with runtimeConfig property
+      expect(mainTsxContent).toContain(
+        'runtimeConfig?: ReturnType<typeof useRuntimeConfig>',
+      );
+
+      // Verify the interface is no longer empty
+      expect(mainTsxContent).not.toContain(
+        'export type RouterProviderContext = {};',
+      );
+
+      // Verify router context is updated
+      expect(mainTsxContent).toContain('runtimeConfig: undefined');
+
+      // Verify App component uses hook and passes context to RouterProvider
+      expect(mainTsxContent).toContain(
+        'const runtimeConfig = useRuntimeConfig();',
+      );
+      expect(mainTsxContent).toContain(
+        '<RouterProvider router={router} context={{ runtimeConfig }} />',
+      );
+    });
+
+    it('should update router context when createRouter exists', async () => {
+      // Setup main.tsx with createRouter call but no RouterProviderContext
+      tree.write(
+        'packages/test-app/src/main.tsx',
+        `
+        import { RouterProvider, createRouter } from '@tanstack/react-router';
+        import { routeTree } from './routeTree.gen';
+
+        export type RouterProviderContext = {};
+
+        const router = createRouter({
+          routeTree,
+          context: {}
+        });
+
+        const App = () => {
+          return <RouterProvider router={router} context={{}} />;
+        };
+
+        export function Main() {
+          return <App/>;
+        }
+      `,
+      );
+
+      await runtimeConfigGenerator(tree, options);
+
+      const mainTsxContent = tree
+        .read('packages/test-app/src/main.tsx')
+        .toString();
+
+      // Verify router context includes runtimeConfig
+      expect(mainTsxContent).toContain('runtimeConfig: undefined');
+    });
+
+    it('should update App component when it exists', async () => {
+      // Setup main.tsx with App component
+      tree.write(
+        'packages/test-app/src/main.tsx',
+        `
+        import { RouterProvider, createRouter } from '@tanstack/react-router';
+        import { routeTree } from './routeTree.gen';
+
+        export type RouterProviderContext = {};
+
+        const router = createRouter({
+          routeTree,
+          context: {}
+        });
+
+        const App = () => {
+          return <RouterProvider router={router} context={{}} />;
+        };
+
+        export function Main() {
+          return <App/>;
+        }
+      `,
+      );
+
+      await runtimeConfigGenerator(tree, options);
+
+      const mainTsxContent = tree
+        .read('packages/test-app/src/main.tsx')
+        .toString();
+
+      // Verify App component uses useRuntimeConfig hook
+      expect(mainTsxContent).toContain(
+        'const runtimeConfig = useRuntimeConfig();',
+      );
+
+      // Verify RouterProvider receives the context value
+      expect(mainTsxContent).toContain(
+        '<RouterProvider router={router} context={{ runtimeConfig }} />',
+      );
+
+      // Verify the App component is now a proper function with a block body
+      expect(mainTsxContent).toMatch(/const App = \(\) => \{[\s\S]*\}/);
+    });
+
+    it('should handle cases where router context elements do not exist', async () => {
+      // Setup main.tsx without router context elements
+      tree.write(
+        'packages/test-app/src/main.tsx',
+        `
+        export function Main() {
+          const App = () => <div>Simple App</div>;
+          return <App/>;
+        }
+      `,
+      );
+
+      // Should not throw error when router elements don't exist
+      await expect(
+        runtimeConfigGenerator(tree, options),
+      ).resolves.not.toThrow();
+
+      const mainTsxContent = tree
+        .read('packages/test-app/src/main.tsx')
+        .toString();
+
+      expect(mainTsxContent).not.toContain('useRuntimeConfig()');
+    });
   });
 });

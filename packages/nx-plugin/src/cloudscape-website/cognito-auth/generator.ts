@@ -47,6 +47,7 @@ import {
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+import { addHookResultToRouterProviderContext } from '../../utils/ast/website';
 
 export const COGNITO_AUTH_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -204,7 +205,15 @@ export async function tsCloudScapeWebsiteAuthGenerator(
     );
   }
   const mainTsxPath = joinPathFragments(srcRoot, 'main.tsx');
+
   addSingleImport(tree, mainTsxPath, 'CognitoAuth', './components/CognitoAuth');
+
+  addHookResultToRouterProviderContext(tree, mainTsxPath, {
+    hook: 'useAuth',
+    module: 'react-oidc-context',
+    contextProp: 'auth',
+  });
+
   replace(
     tree,
     mainTsxPath,
