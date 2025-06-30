@@ -1,0 +1,41 @@
+<%_ if (eventSource !== 'Any') { _%>
+import { parser } from '@aws-lambda-powertools/parser/middleware';
+import { <%= eventSource %> } from '@aws-lambda-powertools/parser/schemas';
+<%_ } _%>
+import middy from '@middy/core';
+import { Tracer } from '@aws-lambda-powertools/tracer';
+import { captureLambdaHandler } from '@aws-lambda-powertools/tracer/middleware';
+import { injectLambdaContext } from '@aws-lambda-powertools/logger/middleware';
+import { Logger } from '@aws-lambda-powertools/logger';
+import { Metrics, MetricUnit } from '@aws-lambda-powertools/metrics';
+import { logMetrics } from '@aws-lambda-powertools/metrics/middleware';
+
+process.env.POWERTOOLS_METRICS_NAMESPACE = "<%= lambdaFunctionClassName %>";
+process.env.POWERTOOLS_SERVICE_NAME = "<%= lambdaFunctionClassName %>";
+
+const tracer = new Tracer();
+const logger = new Logger();
+const metrics = new Metrics();
+
+export const handler = middy()
+  .use(captureLambdaHandler(tracer))
+  .use(injectLambdaContext(logger))
+  .use(logMetrics(metrics))
+<%_ if (eventSource !== 'Any') { _%>
+  .use(parser({ schema: <%= eventSource %> }))
+<%_ } _%>
+  .handler(async (event<%_ if (eventSource === 'Any') { _%>: any<%_ } _%>) => {
+    logger.info("Received event", event);
+
+    metrics.addMetric("InvocationCount", MetricUnit.Count, 1);
+
+    try {
+        // TODO: Implement
+        metrics.addMetric("SuccessCount", MetricUnit.Count, 1);
+        // TODO: Implement success response if required
+    } catch (e) {
+        logger.error("Error processing event", e as Error);
+        metrics.addMetric("ErrorCount", MetricUnit.Count, 1);
+        // TODO: Implement error response if required
+    }
+  });

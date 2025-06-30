@@ -78,6 +78,14 @@ export const smokeTest = (
         opts,
       );
       await runCLI(
+        `generate @aws/nx-plugin:ts#project --name=ts-project --no-interactive`,
+        opts,
+      );
+      await runCLI(
+        `generate @aws/nx-plugin:ts#lambda-function --project=ts-project --functionName=my-function --eventSource=Any --no-interactive`,
+        opts,
+      );
+      await runCLI(
         `generate @aws/nx-plugin:api-connection --sourceProject=website --targetProject=py_api --no-interactive`,
         opts,
       );
