@@ -1,0 +1,239 @@
+---
+title: "Função Lambda em TypeScript"
+description: "Gerar uma função lambda em TypeScript"
+---
+
+
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+
+O gerador de Funções Lambda em TypeScript permite adicionar uma função lambda a um projeto TypeScript existente.
+
+Este gerador cria um novo handler Lambda em TypeScript com configuração de infraestrutura AWS CDK. O handler gerado utiliza [AWS Lambda Powertools for TypeScript](https://docs.powertools.aws.dev/lambda/typescript/latest/) para observabilidade, incluindo logging, rastreamento AWS X-Ray e métricas CloudWatch, além de validação opcional de tipos para eventos usando o [Parser do AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/).
+
+## Utilização
+
+### Gerar uma função Lambda em TypeScript
+
+Você pode gerar uma função lambda de duas formas:
+
+<RunGenerator generator="ts#lambda-function" />
+
+### Opções
+
+<GeneratorParameters generator="ts#lambda-function" />
+
+## Saída do Gerador
+
+O gerador adicionará os seguintes arquivos ao seu projeto:
+
+<FileTree>
+
+- \<project-name>
+  - src/
+    - \<lambda-function>.ts Implementação da função
+
+</FileTree>
+
+O gerador também cria um construct CDK para implantação da função, localizado no diretório `packages/common/constructs/src/app/lambda-functions`.
+
+Se a opção `functionPath` for fornecida, o gerador adicionará o handler no caminho especificado dentro do diretório de origem do projeto:
+
+<FileTree>
+
+- \<project-name>
+  - src/
+    - \<custom-path>/
+      - \<function-name>.ts Implementação da função
+
+</FileTree>
+
+## Implementando sua Função
+
+A implementação principal está em `<function-name>.ts`. Veja um exemplo:
+
+```typescript
+import { parser } from '@aws-lambda-powertools/parser/middleware';
+import { EventBridgeSchema } from '@aws-lambda-powertools/parser/schemas';
+import middy from '@middy/core';
+import { Tracer } from '@aws-lambda-powertools/tracer';
+import { captureLambdaHandler } from '@aws-lambda-powertools/tracer/middleware';
+import { injectLambdaContext } from '@aws-lambda-powertools/logger/middleware';
+import { Logger } from '@aws-lambda-powertools/logger';
+import { Metrics, MetricUnit } from '@aws-lambda-powertools/metrics';
+import { logMetrics } from '@aws-lambda-powertools/metrics/middleware';
+
+process.env.POWERTOOLS_METRICS_NAMESPACE = "MyFunction";
+process.env.POWERTOOLS_SERVICE_NAME = "MyFunction";
+
+const tracer = new Tracer();
+const logger = new Logger();
+const metrics = new Metrics();
+
+export const handler = middy()
+  .use(captureLambdaHandler(tracer))
+  .use(injectLambdaContext(logger))
+  .use(logMetrics(metrics))
+  .use(parser({ schema: EventBridgeSchema }))
+  .handler(async (event) => {
+    logger.info("Received event", event);
+
+    metrics.addMetric("InvocationCount", MetricUnit.Count, 1);
+
+    try {
+        // TODO: Implementar
+        metrics.addMetric("SuccessCount", MetricUnit.Count, 1);
+        // TODO: Implementar resposta de sucesso se necessário
+    } catch (e) {
+        logger.error("Error processing event", e as Error);
+        metrics.addMetric("ErrorCount", MetricUnit.Count, 1);
+        // TODO: Implementar resposta de erro se necessário
+    }
+  });
+```
+
+O gerador configura automaticamente vários recursos:
+
+1. **Stack de middleware Middy** para funcionalidades estendidas do Lambda
+2. **Integração com AWS Lambda Powertools** para observabilidade
+3. **Coleta de métricas** com CloudWatch
+4. **Validação de tipos** usando middleware de parser
+5. **Empacotamento com esbuild** para pacotes de implantação otimizados
+
+### Observabilidade com AWS Lambda Powertools
+
+#### Logging
+
+O gerador configura logging estruturado usando AWS Lambda Powertools com injeção automática de contexto via middleware Middy.
+
+```typescript
+export const handler = middy()
+  .use(injectLambdaContext(logger))
+  .handler(async (event) => {
+    logger.info("Received event", event);
+    logger.error("Error processing event", error);
+  });
+```
+
+#### Rastreamento
+
+O rastreamento AWS X-Ray é configurado automaticamente via middleware `captureLambdaHandler`. Você pode adicionar subsegmentos personalizados:
+
+```typescript
+export const handler = middy()
+  .use(captureLambdaHandler(tracer))
+  .handler(async (event) => {
+    // Cria um novo subsegmento
+    const subsegment = tracer.getSegment()?.addNewSubsegment('custom-operation');
+    try {
+      // Sua lógica aqui
+    } catch (error) {
+      subsegment?.addError(error as Error);
+      throw error;
+    } finally {
+      subsegment?.close();
+    }
+  });
+```
+
+#### Métricas
+
+Métricas CloudWatch são coletadas automaticamente via middleware `logMetrics`. Você pode adicionar métricas personalizadas:
+
+```typescript
+export const handler = middy()
+  .use(logMetrics(metrics))
+  .handler(async (event) => {
+    metrics.addMetric("CustomMetric", MetricUnit.Count, 1);
+    metrics.addMetric("ProcessingTime", MetricUnit.Milliseconds, processingTime);
+  });
+```
+
+### Validação de Tipos
+
+Se você selecionou um `eventSource` ao gerar sua função, o handler será instrumentado com o [middleware `parser` do AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/). Exemplo:
+
+```typescript {4}
+export const handler = middy()
+  .use(parser({ schema: EventBridgeSchema }))
+  .handler(async (event) => {
+    event.detail // <- tipagem segura com autocompletar IDE
+  });
+```
+
+Isso fornece segurança de tipos em tempo de compilação e validação em runtime para eventos Lambda.
+
+:::caution
+Se não quiser que seu handler lance erros quando o evento não conformar com o schema, use a [opção `safeParse`](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/#safe-parsing).
+:::
+
+:::tip
+Para dados personalizados aninhados em eventos (ex: streams DynamoDB ou eventos EventBridge), você pode usar [Envelopes](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/#envelopes) para garantir tipagem segura.
+:::
+
+Se não desejar tipar seu evento, selecione `Any` como `eventSource`, resultando no tipo `any` para o parâmetro event.
+
+## Empacotamento
+
+O gerador configura automaticamente [esbuild](https://esbuild.github.io/) para pacotes de implantação otimizados:
+
+Empacote uma função específica com:
+
+<NxCommands commands={['run <project-name>:bundle-<function-name>']} />
+
+Empacote todas as funções do projeto com:
+
+<NxCommands commands={['run <project-name>:bundle']} />
+
+## Implantando sua Função
+
+O gerador cria um construct CDK para implantação no diretório `common/constructs`. Use em uma aplicação CDK:
+
+```typescript {1, 6}
+import { MyProjectMyFunction } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    // Adicione a função à stack
+    const fn = new MyProjectMyFunction(this, 'MyFunction');
+  }
+}
+```
+
+Isso configura:
+
+1. Função AWS Lambda
+2. Grupo de logs CloudWatch
+3. Configuração de rastreamento X-Ray
+4. Namespace de métricas CloudWatch
+
+A função pode ser usada como alvo para qualquer [event source](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/) Lambda:
+
+:::note
+Garanta que o event source corresponda à opção `eventSource` selecionada para tratamento adequado do evento.
+:::
+
+Exemplo de código CDK para invocar a função em um agendamento usando EventBridge:
+
+```typescript
+import { Rule, Schedule } from 'aws-cdk-lib/aws-events';
+import { LambdaFunction } from 'aws-cdk-lib/aws-events-targets';
+import { MyProjectMyFunction } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    // Adicione a função à stack
+    const fn = new MyProjectMyFunction(this, 'MyFunction');
+
+    // Configure regra agendada no EventBridge
+    const eventRule = new Rule(this, 'MyFunctionScheduleRule', {
+      schedule: Schedule.cron({ minute: '15' }),
+      targets: [new LambdaFunction(fn)],
+    });
+  }
+}
+```
