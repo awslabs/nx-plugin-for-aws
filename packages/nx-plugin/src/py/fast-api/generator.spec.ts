@@ -77,7 +77,7 @@ describe('fastapi project generator', () => {
       '{workspaceRoot}/dist/apps/test_api/bundle',
     ]);
     expect(projectConfig.targets.bundle.options.commands).toContain(
-      'uv export --frozen --no-dev --no-editable --project apps/test_api -o dist/apps/test_api/bundle/requirements.txt',
+      'uv export --frozen --no-dev --no-editable --project apps/test_api --package proj.test_api -o dist/apps/test_api/bundle/requirements.txt',
     );
 
     // Verify openapi spec is generated
