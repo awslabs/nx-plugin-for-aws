@@ -12,7 +12,7 @@ import {
 } from '@nx/devkit';
 import { ReactGeneratorSchema } from './schema';
 import { JsxSelfClosingElement } from 'typescript';
-import { runtimeConfigGenerator } from '../../cloudscape-website/runtime-config/generator';
+import { runtimeConfigGenerator } from '../../ts/react-website/runtime-config/generator';
 import { toScopeAlias } from '../../utils/npm-scope';
 import { withVersions } from '../../utils/versions';
 import {

@@ -42,7 +42,7 @@ export const smokeTest = (
         opts,
       );
       await runCLI(
-        `generate @aws/nx-plugin:ts#cloudscape-website --name=website --no-interactive`,
+        `generate @aws/nx-plugin:ts#react-website --name=website --no-interactive`,
         opts,
       );
       await runCLI(
@@ -54,7 +54,7 @@ export const smokeTest = (
         opts,
       );
       await runCLI(
-        `generate @aws/nx-plugin:ts#cloudscape-website#auth --project=@e2e-test/website --cognitoDomain=test --no-interactive`,
+        `generate @aws/nx-plugin:ts#react-website#auth --project=@e2e-test/website --cognitoDomain=test --no-interactive`,
         opts,
       );
       await runCLI(
