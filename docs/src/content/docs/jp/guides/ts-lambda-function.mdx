@@ -13,13 +13,13 @@ import NxCommands from '@components/nx-commands.astro';
 
 TypeScript Lambda Function ジェネレータは、既存のTypeScriptプロジェクトにLambda関数を追加する機能を提供します。
 
-このジェネレータはAWS CDKインフラストラクチャ設定を備えた新しいTypeScript Lambdaハンドラを作成します。生成されたハンドラは、[AWS Lambda Powertools for TypeScript](https://docs.powertools.aws.dev/lambda/typescript/latest/)を使用して、ロギング、AWS X-Rayトレーシング、CloudWatchメトリクスなどの観測可能性を実現し、[AWS Lambda PowertoolsのParser](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/)を使用したイベントの型安全性（オプション）を提供します。
+このジェネレータはAWS CDKインフラストラクチャ設定を含む新しいTypeScript Lambdaハンドラを作成します。生成されたハンドラは、[AWS Lambda Powertools for TypeScript](https://docs.powertools.aws.dev/lambda/typescript/latest/)を使用して、ロギング、AWS X-Rayトレーシング、CloudWatchメトリクスなどの観測可能性を実現し、[AWS Lambda PowertoolsのParser](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/)を使用したイベントの型安全性（オプション）を提供します。
 
 ## 使用方法
 
 ### TypeScript Lambda関数の生成
 
-Lambda関数は2つの方法で生成できます：
+Lambda関数は2つの方法で生成できます:
 
 <RunGenerator generator="ts#lambda-function" />
 
@@ -29,7 +29,7 @@ Lambda関数は2つの方法で生成できます：
 
 ## ジェネレータの出力
 
-ジェネレータはプロジェクトに以下のファイルを追加します：
+ジェネレータはプロジェクトに以下のファイルを追加します:
 
 <FileTree>
 
@@ -39,9 +39,9 @@ Lambda関数は2つの方法で生成できます：
 
 </FileTree>
 
-ジェネレータはまた、関数のデプロイに使用できるCDKコンストラクトを`packages/common/constructs/src/app/lambda-functions`ディレクトリに作成します。
+また、`packages/common/constructs/src/app/lambda-functions`ディレクトリに関数のデプロイに使用できるCDKコンストラクトを作成します。
 
-`functionPath`オプションが指定された場合、ジェネレータはプロジェクトソースディレクトリ内の指定パスにハンドラを追加します：
+`functionPath`オプションが指定された場合、ジェネレータはプロジェクトソースディレクトリ内の指定パスにハンドラを追加します:
 
 <FileTree>
 
@@ -54,7 +54,7 @@ Lambda関数は2つの方法で生成できます：
 
 ## 関数の実装
 
-メインの関数実装は`<function-name>.ts`にあります。以下は実装例です：
+メインの関数実装は`<function-name>.ts`にあります。以下は実装例です:
 
 ```typescript
 import { parser } from '@aws-lambda-powertools/parser/middleware';
@@ -64,134 +64,143 @@ import { Tracer } from '@aws-lambda-powertools/tracer';
 import { captureLambdaHandler } from '@aws-lambda-powertools/tracer/middleware';
 import { injectLambdaContext } from '@aws-lambda-powertools/logger/middleware';
 import { Logger } from '@aws-lambda-powertools/logger';
-import { Metrics, MetricUnit } from '@aws-lambda-powertools/metrics';
+import { Metrics } from '@aws-lambda-powertools/metrics';
 import { logMetrics } from '@aws-lambda-powertools/metrics/middleware';
+import { z } from 'zod';
 
-process.env.POWERTOOLS_METRICS_NAMESPACE = "MyFunction";
-process.env.POWERTOOLS_SERVICE_NAME = "MyFunction";
+process.env.POWERTOOLS_METRICS_NAMESPACE = 'MyFunction';
+process.env.POWERTOOLS_SERVICE_NAME = 'MyFunction';
 
 const tracer = new Tracer();
 const logger = new Logger();
 const metrics = new Metrics();
 
+export const myFunction = async (
+  event: z.infer<typeof EventBridgeSchema>,
+): Promise<void> => {
+  logger.info('Received event', event);
+
+  // TODO: 実装
+};
+
 export const handler = middy()
   .use(captureLambdaHandler(tracer))
   .use(injectLambdaContext(logger))
   .use(logMetrics(metrics))
   .use(parser({ schema: EventBridgeSchema }))
-  .handler(async (event) => {
-    logger.info("Received event", event);
+  .handler(myFunction);
 
-    metrics.addMetric("InvocationCount", MetricUnit.Count, 1);
-
-    try {
-        // TODO: 実装
-        metrics.addMetric("SuccessCount", MetricUnit.Count, 1);
-        // TODO: 必要に応じて成功レスポンスを実装
-    } catch (e) {
-        logger.error("Error processing event", e as Error);
-        metrics.addMetric("ErrorCount", MetricUnit.Count, 1);
-        // TODO: 必要に応じてエラーレスポンスを実装
-    }
-  });
 ```
 
-ジェネレータは以下の機能を自動的に設定します：
+ジェネレータは以下の機能を自動的に設定します:
 
-1. **Middyミドルウェアスタック** - Lambda機能拡張のため
-2. **AWS Lambda Powertools統合** - 観測可能性のため
-3. **CloudWatchメトリクス収集**
-4. **型安全性** - パーサーミドルウェアを使用
-5. **esbuildバンドリング** - 最適化されたデプロイパッケージのため
+1. 拡張Lambda機能のための**Middyミドルウェアスタック**
+2. 観測可能性のための**AWS Lambda Powertools統合**
+3. CloudWatchを使った**メトリクス収集**
+4. パーサーミドルウェアを使用した**型安全性**
+5. 最適化されたデプロイパッケージのための**esbuildバンドリング**
 
 ### AWS Lambda Powertoolsによる観測可能性
 
 #### ロギング
 
-ジェネレータはMiddyミドルウェアを使用した構造化ロギングを自動設定します：
+ジェネレータはMiddyミドルウェアを使用した自動コンテキスト注入で、構造化ロギングを設定します。
 
 ```typescript
 export const handler = middy()
   .use(injectLambdaContext(logger))
-  .handler(async (event) => {
-    logger.info("Received event", event);
-    logger.error("Error processing event", error);
-  });
+  .handler(myFunction);
 ```
 
 #### トレーシング
 
-AWS X-Rayトレーシングは`captureLambdaHandler`ミドルウェアで自動設定されます。カスタムサブセグメントを追加可能です：
+AWS X-Rayトレーシングは`captureLambdaHandler`ミドルウェアで自動設定されます。カスタムサブセグメントを追加できます:
 
 ```typescript
+const tracer = new Tracer();
+
+export const myFunction = async (
+  event: z.infer<typeof EventBridgeSchema>,
+): Promise<void> => {
+  // 新しいサブセグメントを作成
+  const subsegment = tracer.getSegment()?.addNewSubsegment('custom-operation');
+  try {
+    // ロジックをここに実装
+  } catch (error) {
+    subsegment?.addError(error as Error);
+    throw error;
+  } finally {
+    subsegment?.close();
+  }
+};
+
 export const handler = middy()
   .use(captureLambdaHandler(tracer))
-  .handler(async (event) => {
-    // 新しいサブセグメントを作成
-    const subsegment = tracer.getSegment()?.addNewSubsegment('custom-operation');
-    try {
-      // 処理を実装
-    } catch (error) {
-      subsegment?.addError(error as Error);
-      throw error;
-    } finally {
-      subsegment?.close();
-    }
-  });
+  .handler(myFunction);
 ```
 
 #### メトリクス
 
-CloudWatchメトリクスは`logMetrics`ミドルウェアで自動収集されます。カスタムメトリクスを追加可能です：
+CloudWatchメトリクスは`logMetrics`ミドルウェアで自動収集されます。カスタムメトリクスを追加可能:
 
 ```typescript
+const metrics = new Metrics();
+
+export const myFunction = async (
+  event: z.infer<typeof EventBridgeSchema>,
+): Promise<void> => {
+  metrics.addMetric("CustomMetric", MetricUnit.Count, 1);
+  metrics.addMetric("ProcessingTime", MetricUnit.Milliseconds, processingTime);
+};
+
 export const handler = middy()
   .use(logMetrics(metrics))
-  .handler(async (event) => {
-    metrics.addMetric("CustomMetric", MetricUnit.Count, 1);
-    metrics.addMetric("ProcessingTime", MetricUnit.Milliseconds, processingTime);
-  });
+  .handler(myFunction);
 ```
 
 ### 型安全性
 
-Lambda関数生成時に`eventSource`を選択した場合、[AWS Lambda Powertoolsの`parser`ミドルウェア](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/)が組み込まれます：
+Lambda関数生成時に`eventSource`を選択した場合、[AWS Lambda Powertoolsの`parser`ミドルウェア](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/)が組み込まれます。例:
 
 ```typescript {4}
+export const myFunction = async (
+  event: z.infer<typeof EventBridgeSchema>,
+): Promise<void> => {
+  event.detail // <- IDEのオートコンプリートで型安全
+};
+
 export const handler = middy()
   .use(parser({ schema: EventBridgeSchema }))
-  .handler(async (event) => {
-    event.detail // <- IDEオートコンプリート対応の型安全なアクセス
-  });
+  .handler(myFunction);
 ```
 
-これによりコンパイル時の型安全性とランタイムバリデーションが実現されます。
+これにより、コンパイル時の型安全性とランタイムバリデーションが実現されます。
 
 :::caution
-イベントがスキーマに適合しない場合にエラーをスローしたくない場合は、[`safeParse`オプション](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/#safe-parsing)を使用できます。
+イベントがスキーマに適合しない場合にハンドラがエラーをスローしないようにするには、[`safeParse`オプション](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/#safe-parsing)を使用できます。
 :::
 
 :::tip
-DynamoDBストリームやEventBridgeイベントなど、カスタムデータを含むイベントの場合、[Envelopes](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/#envelopes)を使用して型安全性を確保できます。
+DynamoDBストリームやEventBridgeイベント内のカスタムデータなど、ネストされたカスタムデータがある場合、[Envelopes](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/#envelopes)を使用して型安全性を確保できます。
 :::
 
-イベントの型指定が必要ない場合は、`eventSource`に`Any`を選択すると、イベントパラメータは`any`型になります。
+イベントの型指定が必要ない場合は、`eventSource`に`Any`を選択できます。これによりイベントパラメータは`any`型になります。
 
 ## バンドリング
 
-ジェネレータは最適化されたLambdaデプロイパッケージのために[esbuild](https://esbuild.github.io/)を自動設定します：
+ジェネレータは最適化されたLambdaデプロイパッケージのため[esbuild](https://esbuild.github.io/)を自動設定します:
 
-特定のLambda関数をバンドル：
+特定のLambda関数をバンドル:
 
 <NxCommands commands={['run <project-name>:bundle-<function-name>']} />
 
-プロジェクト内の全Lambda関数をバンドル：
+プロジェクト内の全Lambda関数をバンドル:
 
 <NxCommands commands={['run <project-name>:bundle']} />
 
 ## 関数のデプロイ
 
-TypeScript Lambda Functionジェネレータは`common/constructs`フォルダにCDKコンストラクトを作成します。CDKアプリケーションで使用可能です：
+TypeScript Lambda Functionジェネレータは`common/constructs`フォルダにデプロイ用CDKコンストラクトを作成します。CDKアプリケーションで使用可能:
 
 ```typescript {1, 6}
 import { MyProjectMyFunction } from ':my-scope/common-constructs';
@@ -204,20 +213,20 @@ export class ExampleStack extends Stack {
 }
 ```
 
-これにより以下が設定されます：
+これにより以下が設定されます:
 
 1. AWS Lambda関数
 2. CloudWatchロググループ
 3. X-Rayトレーシング設定
-4. CloudWatchメトリクスネームスペース
+4. CloudWatchメトリクス名前空間
 
-この関数は任意のLambda[イベントソース](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/)のターゲットとして使用可能です：
+この関数はLambda[イベントソース](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/)のターゲットとして使用可能です:
 
 :::note
-イベントソースが選択した`eventSource`オプションと一致することを確認してください。
+イベントがハンドラ関数内で適切に処理されるよう、イベントソースが選択した`eventSource`オプションと一致することを確認してください。
 :::
 
-以下はEventBridgeスケジュールでLambda関数を起動するCDKコード例です：
+以下はEventBridgeスケジュールでLambda関数を起動するCDKコード例です:
 
 ```typescript
 import { Rule, Schedule } from 'aws-cdk-lib/aws-events';
