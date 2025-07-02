@@ -6,10 +6,6 @@ import { Tree } from '@nx/devkit';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import { Spec } from '../utils/types';
 import { openApiTsHooksGenerator } from './generator';
-import {
-  expectTypeScriptToCompile,
-  TypeScriptVerifier,
-} from '../ts-client/generator.utils.spec';
 import { importTypeScriptModule } from '../../utils/js';
 import { waitFor, render, fireEvent } from '@testing-library/react';
 import {
@@ -25,6 +21,7 @@ import {
 import React from 'react';
 import { Mock } from 'vitest';
 import { PET_STORE_SPEC } from '../ts-client/generator.petstore.spec';
+import { TypeScriptVerifier } from '../../utils/test/ts.spec';
 
 describe('openApiTsHooksGenerator', () => {
   let tree: Tree;

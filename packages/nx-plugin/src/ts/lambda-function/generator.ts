@@ -31,6 +31,8 @@ import {
 } from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { withVersions } from '../../utils/versions';
+import camelCase from 'lodash.camelcase';
+import { TS_HANDLER_RETURN_TYPES } from './io';
 
 export const TS_LAMBDA_FUNCTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -71,6 +73,7 @@ export const tsLambdaFunctionGenerator = async (
   const constructFunctionClassName = toClassName(
     constructFunctionNameKebabCase,
   );
+  const lambdaFunctionCamelCase = camelCase(schema.functionName);
   const lambdaFunctionClassName = pascalCase(schema.functionName);
   const lambdaFunctionKebabCase = toKebabCase(schema.functionName);
 
@@ -97,9 +100,11 @@ export const tsLambdaFunctionGenerator = async (
     dir,
     constructFunctionClassName,
     constructFunctionNameKebabCase,
+    lambdaFunctionCamelCase,
     lambdaFunctionClassName,
     lambdaFunctionKebabCase,
     bundleTargetName,
+    returnType: TS_HANDLER_RETURN_TYPES[schema.eventSource],
   };
 
   if (!projectConfig.targets) {
@@ -137,14 +142,12 @@ export const tsLambdaFunctionGenerator = async (
     projectConfig.targets.build = {};
   }
 
-  if (projectConfig.targets?.build) {
-    projectConfig.targets.build.dependsOn = [
-      ...(projectConfig.targets.build.dependsOn ?? []).filter(
-        (t) => t !== 'bundle',
-      ),
-      'bundle',
-    ];
-  }
+  projectConfig.targets.build.dependsOn = [
+    ...(projectConfig.targets.build.dependsOn ?? []).filter(
+      (t) => t !== 'bundle',
+    ),
+    'bundle',
+  ];
 
   projectConfig.targets = sortObjectKeys(projectConfig.targets);
   updateProjectConfiguration(tree, projectConfig.name, projectConfig);
@@ -219,8 +222,9 @@ export const tsLambdaFunctionGenerator = async (
       '@aws-lambda-powertools/metrics',
       '@aws-lambda-powertools/parser',
       '@middy/core',
+      'zod',
     ]),
-    withVersions(['esbuild']),
+    withVersions(['esbuild', '@types/aws-lambda']),
   );
 
   await addGeneratorMetricsIfApplicable(tree, [

@@ -6,11 +6,11 @@ import { Tree } from '@nx/devkit';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import {
   callGeneratedClientStreaming,
-  expectTypeScriptToCompile,
   mockStreamingFetch,
 } from './generator.utils.spec';
 import { Spec } from '../utils/types';
 import openApiTsClientGenerator from './generator';
+import { expectTypeScriptToCompile } from '../../utils/test/ts.spec';
 
 describe('openApiTsClientGenerator - streaming', () => {
   let tree: Tree;

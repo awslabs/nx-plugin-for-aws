@@ -62,36 +62,32 @@ import { Tracer } from '@aws-lambda-powertools/tracer';
 import { captureLambdaHandler } from '@aws-lambda-powertools/tracer/middleware';
 import { injectLambdaContext } from '@aws-lambda-powertools/logger/middleware';
 import { Logger } from '@aws-lambda-powertools/logger';
-import { Metrics, MetricUnit } from '@aws-lambda-powertools/metrics';
+import { Metrics } from '@aws-lambda-powertools/metrics';
 import { logMetrics } from '@aws-lambda-powertools/metrics/middleware';
+import { z } from 'zod';
 
-process.env.POWERTOOLS_METRICS_NAMESPACE = "MyFunction";
-process.env.POWERTOOLS_SERVICE_NAME = "MyFunction";
+process.env.POWERTOOLS_METRICS_NAMESPACE = 'MyFunction';
+process.env.POWERTOOLS_SERVICE_NAME = 'MyFunction';
 
 const tracer = new Tracer();
 const logger = new Logger();
 const metrics = new Metrics();
+
+export const myFunction = async (
+  event: z.infer<typeof EventBridgeSchema>,
+): Promise<void> => {
+  logger.info('Received event', event);
+
+  // TODO: implement
+};
 
 export const handler = middy()
   .use(captureLambdaHandler(tracer))
   .use(injectLambdaContext(logger))
   .use(logMetrics(metrics))
   .use(parser({ schema: EventBridgeSchema }))
-  .handler(async (event) => {
-    logger.info("Received event", event);
+  .handler(myFunction);
 
-    metrics.addMetric("InvocationCount", MetricUnit.Count, 1);
-
-    try {
-        // TODO: Implement
-        metrics.addMetric("SuccessCount", MetricUnit.Count, 1);
-        // TODO: Implement success response if required
-    } catch (e) {
-        logger.error("Error processing event", e as Error);
-        metrics.addMetric("ErrorCount", MetricUnit.Count, 1);
-        // TODO: Implement error response if required
-    }
-  });
 ```
 
 The generator sets up several features automatically:
@@ -111,10 +107,7 @@ The generator configures structured logging using AWS Lambda Powertools with aut
 ```typescript
 export const handler = middy()
   .use(injectLambdaContext(logger))
-  .handler(async (event) => {
-    logger.info("Received event", event);
-    logger.error("Error processing event", error);
-  });
+  .handler(myFunction);
 ```
 
 #### Tracing
@@ -122,20 +115,26 @@ export const handler = middy()
 AWS X-Ray tracing is configured automatically via the `captureLambdaHandler` middleware. You can add custom subsegments to your traces:
 
 ```typescript
+const tracer = new Tracer();
+
+export const myFunction = async (
+  event: z.infer<typeof EventBridgeSchema>,
+): Promise<void> => {
+  // Creates a new subsegment
+  const subsegment = tracer.getSegment()?.addNewSubsegment('custom-operation');
+  try {
+    // Your logic here
+  } catch (error) {
+    subsegment?.addError(error as Error);
+    throw error;
+  } finally {
+    subsegment?.close();
+  }
+};
+
 export const handler = middy()
   .use(captureLambdaHandler(tracer))
-  .handler(async (event) => {
-    // Creates a new subsegment
-    const subsegment = tracer.getSegment()?.addNewSubsegment('custom-operation');
-    try {
-      // Your logic here
-    } catch (error) {
-      subsegment?.addError(error as Error);
-      throw error;
-    } finally {
-      subsegment?.close();
-    }
-  });
+  .handler(myFunction);
 ```
 
 #### Metrics
@@ -143,12 +142,18 @@ export const handler = middy()
 CloudWatch metrics are collected automatically for each request via the `logMetrics` middleware. You can add custom metrics:
 
 ```typescript
+const metrics = new Metrics();
+
+export const myFunction = async (
+  event: z.infer<typeof EventBridgeSchema>,
+): Promise<void> => {
+  metrics.addMetric("CustomMetric", MetricUnit.Count, 1);
+  metrics.addMetric("ProcessingTime", MetricUnit.Milliseconds, processingTime);
+};
+
 export const handler = middy()
   .use(logMetrics(metrics))
-  .handler(async (event) => {
-    metrics.addMetric("CustomMetric", MetricUnit.Count, 1);
-    metrics.addMetric("ProcessingTime", MetricUnit.Milliseconds, processingTime);
-  });
+  .handler(myFunction);
 ```
 
 ### Type Safety
@@ -156,11 +161,15 @@ export const handler = middy()
 If you chose an `eventSource` when generating your lambda function, your function is instrumented with the [`parser` middleware from AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/). For example:
 
 ```typescript {4}
+export const myFunction = async (
+  event: z.infer<typeof EventBridgeSchema>,
+): Promise<void> => {
+  event.detail // <- type-safe with IDE autocompletion
+};
+
 export const handler = middy()
   .use(parser({ schema: EventBridgeSchema }))
-  .handler(async (event) => {
-    event.detail // <- type-safe with IDE autocompletion
-  });
+  .handler(myFunction);
 ```
 
 This provides compile-time type safety and runtime validation for your Lambda events.

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-type EventSource =
+export type EventSource =
   | 'Any'
   | 'AlbSchema'
   | 'APIGatewayProxyEventSchema'
@@ -15,17 +15,16 @@ type EventSource =
   | 'CloudFormationCustomResourceCreateSchema'
   | 'CloudFormationCustomResourceUpdateSchema'
   | 'CloudFormationCustomResourceDeleteSchema'
-  | 'CloudwatchLogsSchema'
+  | 'CloudWatchLogsSchema'
   | 'PreSignupTriggerSchema'
   | 'PostConfirmationTriggerSchema'
-  | 'PreTokenGenerationTriggerSchema'
   | 'CustomMessageTriggerSchema'
   | 'MigrateUserTriggerSchema'
-  | 'CustomSMSTriggerSchema'
-  | 'CustomEmailTriggerSchema'
+  | 'CustomSMSSenderTriggerSchema'
+  | 'CustomEmailSenderTriggerSchema'
   | 'DefineAuthChallengeTriggerSchema'
   | 'CreateAuthChallengeTriggerSchema'
-  | 'VerifyAuthChallengeResponseTriggerSchema'
+  | 'VerifyAuthChallengeTriggerSchema'
   | 'PreTokenGenerationTriggerSchemaV1'
   | 'PreTokenGenerationTriggerSchemaV2AndV3'
   | 'DynamoDBStreamSchema'
@@ -39,7 +38,7 @@ type EventSource =
   | 'LambdaFunctionUrlSchema'
   | 'S3EventNotificationEventBridgeSchema'
   | 'S3Schema'
-  | 'S3ObjectLambdaEvent'
+  | 'S3ObjectLambdaEventSchema'
   | 'S3SqsEventNotificationSchema'
   | 'SesSchema'
   | 'SnsSchema'

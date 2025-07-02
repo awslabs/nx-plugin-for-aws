@@ -2,15 +2,16 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { addProjectConfiguration, Tree, writeJson } from '@nx/devkit';
+import { addProjectConfiguration, Tree } from '@nx/devkit';
 import {
   tsLambdaFunctionGenerator,
   TS_LAMBDA_FUNCTION_GENERATOR_INFO,
 } from './generator';
-import { TsLambdaFunctionGeneratorSchema } from './schema';
+import { EventSource, TsLambdaFunctionGeneratorSchema } from './schema';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import { TS_HANDLER_RETURN_TYPES } from './io';
+import { TypeScriptVerifier } from '../../utils/test/ts.spec';
 
 describe('ts-lambda-function generator', () => {
   let tree: Tree;
@@ -18,6 +19,19 @@ describe('ts-lambda-function generator', () => {
     project: 'test-project',
     functionName: 'TestFunction',
     eventSource: 'EventBridgeSchema',
+  };
+  const verifier = new TypeScriptVerifier([
+    '@aws-lambda-powertools/parser',
+    '@aws-lambda-powertools/metrics',
+    '@aws-lambda-powertools/tracer',
+    '@aws-lambda-powertools/logger',
+    'zod',
+    '@types/aws-lambda',
+    '@middy/core',
+  ]);
+
+  const validateTypeScript = (paths: string[]) => {
+    verifier.expectTypeScriptToCompile(tree, paths);
   };
 
   beforeEach(() => {
@@ -350,8 +364,6 @@ describe('ts-lambda-function generator', () => {
   });
 
   it('should add generator metrics', async () => {
-    await sharedConstructsGenerator(tree);
-
     await tsLambdaFunctionGenerator(tree, options);
 
     expectHasMetricTags(tree, TS_LAMBDA_FUNCTION_GENERATOR_INFO.metric);
@@ -378,4 +390,16 @@ describe('ts-lambda-function generator', () => {
       'packages/common/constructs/src/app/lambda-functions/test-project-my-complex-function-name.ts';
     expect(tree.exists(constructPath)).toBeTruthy();
   });
+
+  it.each(Object.keys(TS_HANDLER_RETURN_TYPES))(
+    'should generate a lambda function which compiles with eventSource %s',
+    async (eventSource: EventSource) => {
+      await tsLambdaFunctionGenerator(tree, {
+        ...options,
+        eventSource,
+      });
+
+      validateTypeScript(['packages/test-project/src/test-function.ts']);
+    },
+  );
 });
