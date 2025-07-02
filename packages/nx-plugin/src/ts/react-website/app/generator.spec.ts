@@ -18,6 +18,11 @@ describe('react-website generator', () => {
     name: 'test-app',
   };
 
+  const optionsWithoutTailwind: TsReactWebsiteGeneratorSchema = {
+    name: 'test-app',
+    enableTailwind: false,
+  };
+
   beforeEach(() => {
     tree = createTreeUsingTsSolutionSetup();
   });
@@ -109,6 +114,14 @@ describe('react-website generator', () => {
       '@cloudscape-design/board-components': expect.any(String),
       '@tanstack/react-router': expect.any(String),
     });
+    // Check for TailwindCSS dependencies (enabled by default)
+    expect(packageJson.dependencies).toMatchObject({
+      tailwindcss: expect.any(String),
+    });
+    expect(packageJson.devDependencies).toMatchObject({
+      '@tailwindcss/vite': expect.any(String),
+    });
+
     // Check for AWS CDK dependencies
     expect(packageJson.dependencies).toMatchObject({
       constructs: expect.any(String),
@@ -177,5 +190,82 @@ describe('react-website generator', () => {
 
     // Verify the metric was added to app.ts
     expectHasMetricTags(tree, REACT_WEBSITE_APP_GENERATOR_INFO.metric);
+  });
+
+  describe('TailwindCSS integration', () => {
+    it('should include TailwindCSS dependencies by default', async () => {
+      await tsReactWebsiteGenerator(tree, options);
+      const packageJson = JSON.parse(tree.read('package.json').toString());
+
+      // Check for TailwindCSS dependencies
+      expect(packageJson.dependencies).toHaveProperty('tailwindcss');
+      expect(packageJson.devDependencies).toHaveProperty('@tailwindcss/vite');
+    });
+
+    it('should configure vite with TailwindCSS plugin by default', async () => {
+      await tsReactWebsiteGenerator(tree, options);
+      const viteConfig = tree.read('test-app/vite.config.ts')?.toString();
+
+      expect(viteConfig).toBeDefined();
+      expect(viteConfig).toContain(
+        "import tailwindcss from '@tailwindcss/vite'",
+      );
+      expect(viteConfig).toContain('tailwindcss()');
+      expect(viteConfig).toMatchSnapshot('vite.config.ts-with-tailwind');
+    });
+
+    it('should include TailwindCSS import in styles.css by default', async () => {
+      await tsReactWebsiteGenerator(tree, options);
+      const stylesContent = tree.read('test-app/src/styles.css')?.toString();
+
+      expect(stylesContent).toBeDefined();
+      expect(stylesContent).toContain("@import 'tailwindcss'");
+      expect(stylesContent).toMatchSnapshot('styles.css-with-tailwind');
+    });
+
+    it('should not include TailwindCSS when disabled', async () => {
+      await tsReactWebsiteGenerator(tree, optionsWithoutTailwind);
+      const packageJson = JSON.parse(tree.read('package.json').toString());
+
+      // Check that TailwindCSS dependencies are NOT included
+      expect(packageJson.dependencies).not.toHaveProperty('tailwindcss');
+      expect(packageJson.devDependencies).not.toHaveProperty(
+        '@tailwindcss/vite',
+      );
+    });
+
+    it('should configure vite without TailwindCSS plugin when disabled', async () => {
+      await tsReactWebsiteGenerator(tree, optionsWithoutTailwind);
+      const viteConfig = tree.read('test-app/vite.config.ts')?.toString();
+
+      expect(viteConfig).toBeDefined();
+      expect(viteConfig).not.toContain(
+        "import tailwindcss from '@tailwindcss/vite'",
+      );
+      expect(viteConfig).not.toContain('tailwindcss()');
+      expect(viteConfig).toMatchSnapshot('vite.config.ts-without-tailwind');
+    });
+
+    it('should not include TailwindCSS import in styles.css when disabled', async () => {
+      await tsReactWebsiteGenerator(tree, optionsWithoutTailwind);
+      const stylesContent = tree.read('test-app/src/styles.css')?.toString();
+
+      expect(stylesContent).toBeDefined();
+      expect(stylesContent).not.toContain('@import "tailwindcss"');
+      expect(stylesContent).toMatchSnapshot('styles.css-without-tailwind');
+    });
+
+    it('should handle enableTailwind explicitly set to true', async () => {
+      await tsReactWebsiteGenerator(tree, { ...options, enableTailwind: true });
+      const packageJson = JSON.parse(tree.read('package.json').toString());
+      const viteConfig = tree.read('test-app/vite.config.ts')?.toString();
+      const stylesContent = tree.read('test-app/src/styles.css')?.toString();
+
+      // Verify TailwindCSS is included
+      expect(packageJson.dependencies).toHaveProperty('tailwindcss');
+      expect(packageJson.devDependencies).toHaveProperty('@tailwindcss/vite');
+      expect(viteConfig).toContain('tailwindcss()');
+      expect(stylesContent).toContain("@import 'tailwindcss'");
+    });
   });
 });

@@ -31,7 +31,7 @@ import {
 } from '../../../utils/shared-constructs-constants';
 import { getNpmScopePrefix, toScopeAlias } from '../../../utils/npm-scope';
 import { configureTsProject } from '../../lib/ts-project-utils';
-import { withVersions } from '../../../utils/versions';
+import { IVersion, withVersions } from '../../../utils/versions';
 import { getRelativePathToRoot } from '../../../utils/paths';
 import { kebabCase, toClassName, toKebabCase } from '../../../utils/names';
 import {
@@ -57,6 +57,7 @@ export async function tsReactWebsiteGenerator(
   tree: Tree,
   schema: TsReactWebsiteGeneratorSchema,
 ) {
+  const enableTailwind = schema.enableTailwind ?? true;
   const npmScopePrefix = getNpmScopePrefix(tree);
   const websiteNameClassName = toClassName(schema.name);
   const websiteNameKebabCase = toKebabCase(schema.name);
@@ -284,6 +285,7 @@ export async function tsReactWebsiteGenerator(
       ...schema,
       fullyQualifiedName,
       pkgMgrCmd: getPackageManagerCommand().exec,
+      enableTailwind,
     }, // config object to replace variable in file templates
     {
       overwriteStrategy: OverwriteStrategy.Overwrite,
@@ -325,6 +327,11 @@ export async function tsReactWebsiteGenerator(
       'vite-tsconfig-paths',
     );
 
+    // Add TailwindCSS import if enabled
+    if (enableTailwind) {
+      addSingleImport(tree, viteConfigPath, 'tailwindcss', '@tailwindcss/vite');
+    }
+
     replaceIfExists(
       tree,
       viteConfigPath,
@@ -362,51 +369,62 @@ export async function tsReactWebsiteGenerator(
             prop.name.getText() === 'plugins'
           ) {
             const pluginsConfig = prop.initializer as ArrayLiteralExpression;
+            const pluginsArray = [
+              factory.createCallExpression(
+                factory.createIdentifier('tanstackRouter'),
+                undefined,
+                [
+                  factory.createObjectLiteralExpression([
+                    factory.createPropertyAssignment(
+                      factory.createIdentifier('routesDirectory'),
+                      factory.createCallExpression(
+                        factory.createIdentifier('resolve'),
+                        undefined,
+                        [
+                          factory.createIdentifier('__dirname'),
+                          factory.createStringLiteral('src/routes'),
+                        ],
+                      ),
+                    ),
+                    factory.createPropertyAssignment(
+                      factory.createIdentifier('generatedRouteTree'),
+                      factory.createCallExpression(
+                        factory.createIdentifier('resolve'),
+                        undefined,
+                        [
+                          factory.createIdentifier('__dirname'),
+                          factory.createStringLiteral('src/routeTree.gen.ts'),
+                        ],
+                      ),
+                    ),
+                  ]),
+                ],
+              ),
+              ...pluginsConfig.elements,
+            ];
+
+            // Add TailwindCSS plugin if enabled
+            if (enableTailwind) {
+              pluginsArray.push(
+                factory.createCallExpression(
+                  factory.createIdentifier('tailwindcss'),
+                  undefined,
+                  [],
+                ),
+              );
+            }
+
+            pluginsArray.push(
+              factory.createCallExpression(
+                factory.createIdentifier('tsconfigPaths'),
+                undefined,
+                [],
+              ),
+            );
+
             return factory.createPropertyAssignment(
               'plugins',
-              factory.createArrayLiteralExpression(
-                [
-                  factory.createCallExpression(
-                    factory.createIdentifier('tanstackRouter'),
-                    undefined,
-                    [
-                      factory.createObjectLiteralExpression([
-                        factory.createPropertyAssignment(
-                          factory.createIdentifier('routesDirectory'),
-                          factory.createCallExpression(
-                            factory.createIdentifier('resolve'),
-                            undefined,
-                            [
-                              factory.createIdentifier('__dirname'),
-                              factory.createStringLiteral('src/routes'),
-                            ],
-                          ),
-                        ),
-                        factory.createPropertyAssignment(
-                          factory.createIdentifier('generatedRouteTree'),
-                          factory.createCallExpression(
-                            factory.createIdentifier('resolve'),
-                            undefined,
-                            [
-                              factory.createIdentifier('__dirname'),
-                              factory.createStringLiteral(
-                                'src/routeTree.gen.ts',
-                              ),
-                            ],
-                          ),
-                        ),
-                      ]),
-                    ],
-                  ),
-                  ...pluginsConfig.elements,
-                  factory.createCallExpression(
-                    factory.createIdentifier('tsconfigPaths'),
-                    undefined,
-                    [],
-                  ),
-                ],
-                true,
-              ),
+              factory.createArrayLiteralExpression(pluginsArray, true),
             );
           }
           return prop;
@@ -478,21 +496,31 @@ export async function tsReactWebsiteGenerator(
     }),
   );
 
+  const devDependencies: IVersion[] = [
+    '@tanstack/router-plugin',
+    '@tanstack/router-generator',
+    '@tanstack/virtual-file-routes',
+    '@tanstack/router-utils',
+    'vite-tsconfig-paths',
+  ];
+
+  const dependencies: IVersion[] = [
+    '@cloudscape-design/components',
+    '@cloudscape-design/board-components',
+    '@cloudscape-design/global-styles',
+    '@tanstack/react-router',
+  ];
+
+  // Add TailwindCSS dependencies if enabled
+  if (enableTailwind) {
+    dependencies.push('tailwindcss');
+    devDependencies.push('@tailwindcss/vite');
+  }
+
   addDependenciesToPackageJson(
     tree,
-    withVersions([
-      '@cloudscape-design/components',
-      '@cloudscape-design/board-components',
-      '@cloudscape-design/global-styles',
-      '@tanstack/react-router',
-    ]),
-    withVersions([
-      '@tanstack/router-plugin',
-      '@tanstack/router-generator',
-      '@tanstack/virtual-file-routes',
-      '@tanstack/router-utils',
-      'vite-tsconfig-paths',
-    ]),
+    withVersions(dependencies),
+    withVersions(devDependencies),
   );
 
   await addGeneratorMetricsIfApplicable(tree, [
