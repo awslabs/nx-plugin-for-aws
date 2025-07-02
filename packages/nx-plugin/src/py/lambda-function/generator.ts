@@ -39,6 +39,7 @@ import {
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+import { createPythonBundleTarget } from '../../utils/bundle';
 
 export const LAMBDA_FUNCTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -152,16 +153,10 @@ export const pyLambdaFunctionGenerator = async (
   // Check if the project has a bundle target and if not add it
   if (!projectConfig.targets?.bundle) {
     projectConfig.targets.bundle = {
-      cache: true,
-      executor: 'nx:run-commands',
-      outputs: [`{workspaceRoot}/dist/${dir}/bundle`],
-      options: {
-        commands: [
-          `uv export --frozen --no-dev --no-editable --project ${dir} -o dist/${dir}/bundle/requirements.txt`,
-          `uv pip install -n --no-installer-metadata --no-compile-bytecode --python-platform x86_64-manylinux2014 --target dist/${dir}/bundle -r dist/${dir}/bundle/requirements.txt`,
-        ],
-        parallel: false,
-      },
+      ...createPythonBundleTarget({
+        projectDir: dir,
+        packageName: projectConfig.name,
+      }),
       dependsOn: ['compile'],
     };
   }
