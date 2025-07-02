@@ -8,4 +8,5 @@ export interface TsReactWebsiteGeneratorSchema {
   name: string;
   directory?: string;
   skipInstall?: boolean;
+  enableTailwind?: boolean;
 }
