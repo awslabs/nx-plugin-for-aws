@@ -1,6 +1,6 @@
 ---
-title: "ts#mcp-server"
-description: "为大型语言模型提供上下文的生成 TypeScript 模型上下文协议（MCP）服务器"
+title: "TypeScript MCP 服务器"
+description: "为大型语言模型提供上下文的 TypeScript 模型上下文协议（MCP）服务器"
 ---
 
 
@@ -11,62 +11,61 @@ import NxCommands from '@components/nx-commands.astro';
 import Link from '@components/link.astro';
 import Snippet from '@components/snippet.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
-import schema from '../../../../../../packages/nx-plugin/src/ts/mcp-server/schema.json';
 
-# TypeScript MCP 服务器生成器
+生成一个TypeScript [模型上下文协议（MCP）](https://modelcontextprotocol.io/)服务器，用于为大型语言模型（LLMs）提供上下文。
 
-生成用于为大型语言模型（LLM）提供上下文的 TypeScript [模型上下文协议（MCP）](https://modelcontextprotocol.io/) 服务器。
+## 什么是MCP？
 
-## 什么是 MCP？
-
-[模型上下文协议（MCP）](https://modelcontextprotocol.io/) 是一个开放标准，允许 AI 助手与外部工具和资源交互。它为 LLM 提供了一致的方式来：
+[模型上下文协议（MCP）](https://modelcontextprotocol.io/)是一个开放标准，允许AI助手与外部工具和资源交互。它为LLMs提供了一致的方式来：
 
 - 执行执行操作或检索信息的工具（函数）
 - 访问提供上下文或数据的资源
 
-## 使用方式
+## 使用方法
 
-### 生成 MCP 服务器
+### 生成MCP服务器
 
-您可以通过两种方式生成 TypeScript MCP 服务器：
+您可以通过两种方式生成TypeScript MCP服务器：
 
 <RunGenerator generator="ts#mcp-server" />
 
-### 选项配置
+:::tip
+建议先使用 <Link path="/guides/typescript-project">`ts#project`</Link> 生成器创建项目，再添加MCP服务器。
+:::
+
+### 选项参数
 
 <GeneratorParameters generator="ts#mcp-server" />
 
 ## 生成器输出
 
-生成器将创建以下项目文件：
+生成器将在现有TypeScript项目中添加以下文件：
 
 <FileTree>
-  - packages/\<名称>/
-    - README.md MCP 服务器使用说明文档
-    - project.json 包含构建、打包和开发目标的 Nx 项目配置
+  - your-project/
     - src/
-      - index.ts MCP 服务器入口文件
-      - server.ts 主服务器定义文件，声明工具和资源
-      - global.d.ts 用于导入 Markdown 文件的 TypeScript 类型声明
-      - resources/
-        - example-context.md 用作 MCP 服务器资源的示例 Markdown 文件
+      - mcp-server/ (或自定义名称)
+        - index.ts MCP服务器入口文件
+        - server.ts 主服务器定义
+        - tools/
+          - add.ts 示例工具
+        - resources/
+          - sample-guidance.ts 示例资源
+    - package.json 更新了bin入口和MCP依赖
+    - project.json 更新了MCP服务器服务目标
 </FileTree>
 
-:::note
-有关生成器输出的更多详细信息，请参考 <Link path="/guides/typescript-project">TypeScript 项目生成器文档</Link>。
-:::
-
-## 开发 MCP 服务器
+## 使用MCP服务器
 
 ### 添加工具
 
-工具是 AI 助手可以调用的功能函数。您可以在 `server.ts` 文件中添加新工具：
+工具是AI助手可以调用的功能函数。可在`server.ts`中添加新工具：
 
 ```typescript
 server.tool("工具名称", "工具描述",
-  { 参数1: z.string(), 参数2: z.number() }, // 使用 Zod 的输入模式
+  { 参数1: z.string(), 参数2: z.number() }, // 使用Zod定义输入模式
   async ({ 参数1, 参数2 }) => {
-    // 工具实现逻辑
+    // 工具实现
     return {
       content: [{ type: "text", text: "结果" }]
     };
@@ -76,89 +75,78 @@ server.tool("工具名称", "工具描述",
 
 ### 添加资源
 
-资源为 AI 助手提供上下文。您可以添加静态文件资源或动态资源：
+资源为AI助手提供上下文。可添加静态或动态资源：
 
 ```typescript
-// 从文件导入静态资源
-import exampleContext from './resources/example-context.md';
+const 示例上下文 = '要返回的上下文内容';
 
 server.resource('资源名称', 'example://resource', async (uri) => ({
-  contents: [{ uri: uri.href, text: exampleContext }],
+  contents: [{ uri: uri.href, text: 示例上下文 }],
 }));
 
 // 动态资源
 server.resource('动态资源', 'dynamic://resource', async (uri) => {
-  const data = await fetchSomeData();
+  const 数据 = await 获取数据();
   return {
-    contents: [{ uri: uri.href, text: data }],
+    contents: [{ uri: uri.href, text: 数据 }],
   };
 });
 ```
 
-## 配置 AI 助手
-
-要使用 MCP 服务器，需要先进行打包：
-
-<NxCommands commands={['run your-mcp-server:bundle']} />
-
-打包文件将生成在 `dist/packages/your-mcp-server/bundle/index.js`（路径可能因目录设置而异）。
+## 配置AI助手
 
 ### 配置文件
 
-支持 MCP 的 AI 助手通常使用类似的配置方式。需要创建或更新配置文件添加 MCP 服务器信息：
+支持MCP的AI助手通常使用类似的配置方式。需在配置文件中添加MCP服务器信息：
 
 ```json
 {
   "mcpServers": {
-    "your-mcp-server": {
-      "command": "node",
-      "args": [
-        "/path/to/workspace/dist/packages/your-mcp-server/bundle/index.js"
-      ],
-      "transportType": "stdio"
+    "你的MCP服务器": {
+      "command": "npx",
+      "args": ["tsx", "/路径/到/你的MCP服务器/index.ts"]
     }
   }
 }
 ```
 
-将 `/path/to/workspace/dist/packages/your-mcp-server/bundle/index.js` 替换为实际的打包文件路径。
-
 :::caution
-如果连接时出现 `ENOENT node` 错误，可能需要通过终端运行 `which node` 获取 node 的完整路径。
+若出现`ENOENT npx`错误，可能需要通过终端运行`which npx`获取npx的完整路径。
+:::
+
+### 热重载
+
+开发时建议添加`--watch`参数，确保AI助手获取最新工具/资源：
+
+```json {5}
+{
+  "mcpServers": {
+    "你的MCP服务器": {
+      "command": "npx",
+      "args": ["tsx", "--watch", "/路径/到/你的MCP服务器/index.ts"]
+    }
+  }
+}
+```
+
+:::note
+添加新工具/资源后可能需要刷新AI助手中的MCP服务器连接。
 :::
 
 ### 特定助手配置
 
-各 AI 助手的详细配置请参考：
+各AI助手的MCP配置请参考：
 
 <Snippet name="mcp/assistant-docs" />
 
 :::tip
-部分 AI 助手（如 Amazon Q Developer）支持工作区级别的 MCP 服务器配置，这对定义项目相关 MCP 服务器非常有用。
+部分AI助手（如Amazon Q Developer）支持工作区级MCP配置，便于定义项目相关服务器。
 :::
 
-## 开发工作流
+## 运行MCP服务器
 
-### 构建目标
+虽然推荐通过AI助手使用MCP服务器，但也可通过`<your-server-name>-serve`目标运行，这在切换[STDIO传输](https://modelcontextprotocol.io/docs/concepts/transports#standard-input%2Foutput-stdio)到[流式HTTP传输](https://modelcontextprotocol.io/docs/concepts/transports#streamable-http)时很有用。
 
-本生成器基于 <Link path="/guides/typescript-project">TypeScript 项目生成器</Link>，继承了其构建目标，并新增了以下目标：
+<NxCommands commands={['run your-project:your-server-name-serve']} />
 
-#### 打包
-
-`bundle` 任务使用 [esbuild](https://esbuild.github.io/) 创建单一 JavaScript 打包文件：
-
-<NxCommands commands={['run your-mcp-server:bundle']} />
-
-打包文件生成于 `dist/packages/your-mcp-server/bundle/index.js`（路径可能因目录设置而异）。
-
-#### 开发模式
-
-`dev` 任务会监控项目变更并自动重新打包：
-
-<NxCommands commands={['run your-mcp-server:dev']} />
-
-这在开发过程中非常实用，可确保 AI 助手始终使用最新的 MCP 服务器版本。
-
-:::note
-部分 AI 助手需要重启 MCP 服务器才能使变更生效。
-:::
+该命令使用`tsx --watch`实现文件变更时自动重启服务器。

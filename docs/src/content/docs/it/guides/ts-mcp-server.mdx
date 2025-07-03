@@ -1,6 +1,6 @@
 ---
-title: "ts#mcp-server"
-description: "Genera un server TypeScript Model Context Protocol (MCP) per fornire contesto ai modelli di linguaggio di grandi dimensioni"
+title: "Server MCP TypeScript"
+description: "Genera un server Model Context Protocol (MCP) TypeScript per fornire contesto ai modelli di linguaggio di grandi dimensioni"
 ---
 
 
@@ -11,54 +11,53 @@ import NxCommands from '@components/nx-commands.astro';
 import Link from '@components/link.astro';
 import Snippet from '@components/snippet.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
-import schema from '../../../../../../packages/nx-plugin/src/ts/mcp-server/schema.json';
-
-# Generatore di Server TypeScript MCP
 
 Genera un server [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) in TypeScript per fornire contesto ai Large Language Model (LLM).
 
-## Cos'è l'MCP?
+## Cos’è l’MCP?
 
-Il [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) è uno standard aperto che permette agli assistenti AI di interagire con strumenti e risorse esterne. Fornisce un metodo consistente per gli LLM di:
+Il [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) è uno standard aperto che permette agli assistenti AI di interagire con strumenti e risorse esterne. Fornisce un metodo consistente per consentire agli LLM di:
 
 - Eseguire strumenti (funzioni) che compiono azioni o recuperano informazioni
 - Accedere a risorse che forniscono contesto o dati
 
 ## Utilizzo
 
-### Generare un Server MCP
+### Generare un server MCP
 
-Puoi generare un server MCP TypeScript in due modi:
+Puoi generare un server MCP in TypeScript in due modi:
 
 <RunGenerator generator="ts#mcp-server" />
+
+:::tip
+Prima utilizza il generatore <Link path="/guides/typescript-project">`ts#project`</Link> per creare un progetto a cui aggiungere il tuo server MCP.
+:::
 
 ### Opzioni
 
 <GeneratorParameters generator="ts#mcp-server" />
 
-## Output del Generatore
+## Output del generatore
 
-Il generatore creerà i seguenti file del progetto:
+Il generatore aggiungerà i seguenti file al tuo progetto TypeScript esistente:
 
 <FileTree>
-  - packages/\<name>/
-    - README.md Documentazione del server MCP con istruzioni d'uso
-    - project.json Configurazione del progetto Nx con target per build, bundle e dev
+  - your-project/
     - src/
-      - index.ts Punto d'ingresso del server MCP
-      - server.ts Definizione principale del server, con strumenti e risorse
-      - global.d.ts Dichiarazioni di tipo TypeScript per l'importazione di file markdown
-      - resources/
-        - example-context.md File markdown di esempio utilizzato come risorsa per il server MCP
+      - mcp-server/ (o nome personalizzato se specificato)
+        - index.ts Punto di ingresso del server MCP
+        - server.ts Definizione principale del server
+        - tools/
+          - add.ts Strumento di esempio
+        - resources/
+          - sample-guidance.ts Risorsa di esempio
+    - package.json Aggiornato con la voce bin e le dipendenze MCP
+    - project.json Aggiornato con il target serve del server MCP
 </FileTree>
 
-:::note
-Consulta la <Link path="/guides/typescript-project">documentazione del generatore di progetti TypeScript</Link> per ulteriori dettagli sull'output del generatore.
-:::
+## Lavorare con il server MCP
 
-## Lavorare con il Tuo Server MCP
-
-### Aggiungere Strumenti
+### Aggiungere strumenti
 
 Gli strumenti sono funzioni che l'assistente AI può chiamare per eseguire azioni. Puoi aggiungere nuovi strumenti nel file `server.ts`:
 
@@ -74,13 +73,12 @@ server.tool("toolName", "tool description",
 );
 ```
 
-### Aggiungere Risorse
+### Aggiungere risorse
 
 Le risorse forniscono contesto all'assistente AI. Puoi aggiungere risorse statiche da file o risorse dinamiche:
 
 ```typescript
-// Risorsa statica da file
-import exampleContext from './resources/example-context.md';
+const exampleContext = 'some context to return';
 
 server.resource('resource-name', 'example://resource', async (uri) => ({
   contents: [{ uri: uri.href, text: exampleContext }],
@@ -95,70 +93,60 @@ server.resource('dynamic-resource', 'dynamic://resource', async (uri) => {
 });
 ```
 
-## Configurazione con Assistanti AI
+## Configurazione con assistenti AI
 
-Per utilizzare il tuo server MCP con assistanti AI, devi prima creare un bundle:
+### File di configurazione
 
-<NxCommands commands={['run your-mcp-server:bundle']} />
-
-Questo crea una versione bundled in `dist/packages/your-mcp-server/bundle/index.js` (il percorso può variare in base alle impostazioni della directory).
-
-### File di Configurazione
-
-La maggior parte degli assistanti AI che supportano MCP utilizza un approccio di configurazione simile. Dovrai creare o aggiornare un file di configurazione con i dettagli del tuo server MCP:
+La maggior parte degli assistenti AI che supportano MCP utilizza un approccio di configurazione simile. Dovrai creare o aggiornare un file di configurazione con i dettagli del tuo server MCP:
 
 ```json
 {
   "mcpServers": {
     "your-mcp-server": {
-      "command": "node",
-      "args": [
-        "/path/to/workspace/dist/packages/your-mcp-server/bundle/index.js"
-      ],
-      "transportType": "stdio"
+      "command": "npx",
+      "args": ["tsx", "/path/to/your-mcp-server/index.ts"]
     }
   }
 }
 ```
 
-Sostituisci `/path/to/workspace/dist/packages/your-mcp-server/bundle/index.js` con il percorso effettivo del tuo server MCP bundled.
-
 :::caution
-Se ricevi un errore come `ENOENT node` durante la connessione al server, potrebbe essere necessario specificare il percorso completo di `node`, ottenibile eseguendo `which node` nel terminale.
+Se ricevi un errore come `ENOENT npx` durante la connessione al server, potrebbe essere necessario specificare il percorso completo di `npx`, ottenibile eseguendo `which npx` nel terminale.
 :::
 
-### Configurazione Specifica per Assistante
+### Hot Reload
 
-Consulta la seguente documentazione per configurare MCP con assistanti AI specifici:
+Durante lo sviluppo del server MCP, puoi configurare il flag `--watch` per far sì che l'assistente AI veda sempre le versioni più recenti di strumenti/risorse:
+
+```json {5}
+{
+  "mcpServers": {
+    "your-mcp-server": {
+      "command": "npx",
+      "args": ["tsx", "--watch", "/path/to/your-mcp-server/index.ts"]
+    }
+  }
+}
+```
+
+:::note
+Se aggiungi nuovi strumenti o risorse, potrebbe essere necessario aggiornare il server MCP nell'assistente AI.
+:::
+
+### Configurazione specifica per assistente
+
+Consulta la seguente documentazione per configurare MCP con assistenti AI specifici:
 
 <Snippet name="mcp/assistant-docs" />
 
 :::tip
-Alcuni assistanti AI, come Amazon Q Developer, permettono di specificare configurazioni MCP a livello di workspace, particolarmente utili per definire i server MCP rilevanti per un progetto specifico.
+Alcuni assistenti AI, come Amazon Q Developer, permettono di specificare configurazioni MCP a livello di workspace, particolarmente utili per definire i server MCP rilevanti per un progetto specifico.
 :::
 
-## Flusso di Sviluppo
+## Esecuzione del server MCP
 
-### Target di Build
+Il modo più semplice per testare e utilizzare un server MCP è configurarlo con un assistente AI (come sopra). Tuttavia, puoi eseguire il server usando il target `<your-server-name>-serve`, utile se passi dal [trasporto STDIO](https://modelcontextprotocol.io/docs/concepts/transports#standard-input%2Foutput-stdio) al [trasporto HTTP streamable](https://modelcontextprotocol.io/docs/concepts/transports#streamable-http).
 
-Il generatore è basato sul <Link path="/guides/typescript-project">generatore di progetti TypeScript</Link> e quindi eredita i suoi target, aggiungendo inoltre i seguenti target:
+<NxCommands commands={['run your-project:your-server-name-serve']} />
 
-#### Bundle
-
-Il task `bundle` utilizza [esbuild](https://esbuild.github.io/) per creare un singolo file JavaScript bundled utilizzabile con assistenti AI:
-
-<NxCommands commands={['run your-mcp-server:bundle']} />
-
-Questo crea una versione bundled in `dist/packages/your-mcp-server/bundle/index.js` (il percorso può variare in base alle impostazioni della directory).
-
-#### Dev
-
-Il task `dev` monitora le modifiche nel progetto e ricostruisce automaticamente il bundle:
-
-<NxCommands commands={['run your-mcp-server:dev']} />
-
-Questo è particolarmente utile durante lo sviluppo poiché garantisce che l'assistente AI utilizzi l'ultima versione del tuo server MCP.
-
-:::note
-Alcuni assistanti AI richiederanno il riavvio del server MCP per applicare le modifiche.
-:::
+Questo comando utilizza `tsx --watch` per riavviare automaticamente il server quando i file cambiano.
