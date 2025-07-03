@@ -1,0 +1,72 @@
+<%_ if (eventSource !== 'Any') { _%>
+import { parser } from '@aws-lambda-powertools/parser/middleware';
+import { <%= eventSource %> } from '@aws-lambda-powertools/parser/schemas';
+import { z } from 'zod';
+<%_ } _%>
+import middy from '@middy/core';
+import { Tracer } from '@aws-lambda-powertools/tracer';
+import { captureLambdaHandler } from '@aws-lambda-powertools/tracer/middleware';
+import { injectLambdaContext } from '@aws-lambda-powertools/logger/middleware';
+import { Logger } from '@aws-lambda-powertools/logger';
+import { Metrics } from '@aws-lambda-powertools/metrics';
+import { logMetrics } from '@aws-lambda-powertools/metrics/middleware';
+<%_ if (returnType.imports.length > 0) { _%>
+import type { <%= returnType.imports.join(', ') %> } from 'aws-lambda';
+<%_ } _%>
+
+process.env.POWERTOOLS_METRICS_NAMESPACE = "<%= lambdaFunctionClassName %>";
+process.env.POWERTOOLS_SERVICE_NAME = "<%= lambdaFunctionClassName %>";
+
+const tracer = new Tracer();
+const logger = new Logger();
+const metrics = new Metrics();
+<%_ const inputType = eventSource === 'Any' ? 'any' : `z.infer<typeof ${eventSource}>`; _%>
+<%_ const outputType = `Promise<${returnType.type}>`; %>
+
+export const <%= lambdaFunctionCamelCase %> = async (event: <%- inputType %>): <%- outputType %> => {
+  logger.info("Received event", event);
+
+  // TODO: implement
+<%_ if (['APIGatewayProxyEventSchema', 'APIGatewayProxyEventV2Schema', 'APIGatewayProxyWebsocketEventSchema', 'AlbSchema', 'LambdaFunctionUrlSchema'].includes(eventSource)) { _%>
+  return {
+    statusCode: 200,
+    body: ''
+  };
+<%_ } else if (['APIGatewayRequestAuthorizerEventSchema', 'APIGatewayTokenAuthorizerEventSchema', 'APIGatewayRequestAuthorizerEventV2Schema'].includes(eventSource)) { _%>
+  return {
+    principalId: 'user',
+    policyDocument: {
+      Version: '2012-10-17',
+      Statement: [
+        {
+          Action: 'execute-api:Invoke',
+          Effect: 'Allow',
+          Resource: '*'
+        }
+      ]
+    }
+  };
+<%_ } else if (['KinesisFirehoseSchema', 'KinesisFirehoseSqsSchema'].includes(eventSource)) { _%>
+  return {
+    records: []
+  };
+<%_ } else if (eventSource === 'TransferFamilySchema') { _%>
+  return {
+    Role: '',
+    Policy: '',
+    HomeDirectory: '/'
+  };
+<%_ } else if (['PreSignupTriggerSchema', 'PostConfirmationTriggerSchema', 'CustomMessageTriggerSchema', 'MigrateUserTriggerSchema', 'CustomSMSSenderTriggerSchema', 'CustomEmailSenderTriggerSchema', 'DefineAuthChallengeTriggerSchema', 'CreateAuthChallengeTriggerSchema', 'VerifyAuthChallengeTriggerSchema', 'PreTokenGenerationTriggerSchemaV1', 'PreTokenGenerationTriggerSchemaV2AndV3'].includes(eventSource)) { _%>
+  return event;
+<%_ } else { /* Event sources which don't need to return a response */ _%>
+<%_ } _%>
+};
+
+export const handler = middy()
+  .use(captureLambdaHandler(tracer))
+  .use(injectLambdaContext(logger))
+  .use(logMetrics(metrics))
+<%_ if (eventSource !== 'Any') { _%>
+  .use(parser({ schema: <%= eventSource %> }))
+<%_ } _%>
+  .handler(<%= lambdaFunctionCamelCase %>);

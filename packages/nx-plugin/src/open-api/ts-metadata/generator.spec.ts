@@ -6,8 +6,8 @@ import { Tree } from '@nx/devkit';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import { Spec } from '../utils/types';
 import { openApiTsMetadataGenerator } from './generator';
-import { TypeScriptVerifier } from '../ts-client/generator.utils.spec';
 import { importTypeScriptModule } from '../../utils/js';
+import { TypeScriptVerifier } from '../../utils/test/ts.spec';
 
 describe('openApiTsMetadataGenerator', () => {
   let tree: Tree;

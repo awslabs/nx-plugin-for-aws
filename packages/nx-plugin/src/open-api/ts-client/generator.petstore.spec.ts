@@ -5,8 +5,8 @@
 import { openApiTsClientGenerator } from './generator';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import { Spec } from '../utils/types';
-import { expectTypeScriptToCompile } from './generator.utils.spec';
 import { Tree } from '@nx/devkit';
+import { expectTypeScriptToCompile } from '../../utils/test/ts.spec';
 
 export const PET_STORE_SPEC: Spec = {
   openapi: '3.0.4',

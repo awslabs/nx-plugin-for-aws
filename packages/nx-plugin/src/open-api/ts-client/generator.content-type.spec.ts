@@ -6,12 +6,9 @@ import { openApiTsClientGenerator } from './generator';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import { Spec } from '../utils/types';
 import { importTypeScriptModule } from '../../utils/js';
-import {
-  baseUrl,
-  callGeneratedClient,
-  expectTypeScriptToCompile,
-} from './generator.utils.spec';
+import { baseUrl, callGeneratedClient } from './generator.utils.spec';
 import { Tree } from '@nx/devkit';
+import { expectTypeScriptToCompile } from '../../utils/test/ts.spec';
 
 describe('openApiTsClientGenerator - content type header', () => {
   let tree: Tree;
