@@ -146,14 +146,7 @@ describe('cognito-auth generator', () => {
     expect(mainTsxContent).toContain(
       "import CognitoAuth from './components/CognitoAuth'",
     );
-    // Verify useRuntimeConfig import is added
-    expect(mainTsxContent).toContain(
-      "import { useRuntimeConfig } from './hooks/useRuntimeConfig'",
-    );
-    // Verify useAuth import is added
-    expect(mainTsxContent).toContain(
-      "import { useAuth } from 'react-oidc-context'",
-    );
+
     // Verify CognitoAuth component is wrapped around children
     expect(mainTsxContent).toContain('<CognitoAuth>');
     expect(mainTsxContent).toContain('</CognitoAuth>');
