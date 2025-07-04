@@ -86,6 +86,10 @@ export const smokeTest = (
         opts,
       );
       await runCLI(
+        `generate @aws/nx-plugin:ts#mcp-server --project=ts-project --name=my-mcp-server --no-interactive`,
+        opts,
+      );
+      await runCLI(
         `generate @aws/nx-plugin:api-connection --sourceProject=website --targetProject=py_api --no-interactive`,
         opts,
       );
@@ -94,10 +98,6 @@ export const smokeTest = (
 
       await runCLI(
         `generate @aws/nx-plugin:ts#project --name=plugin --directory=tools --no-interactive`,
-        opts,
-      );
-      await runCLI(
-        `generate @aws/nx-plugin:ts#mcp-server --project=plugin --name=my-mcp-server --no-interactive`,
         opts,
       );
 
