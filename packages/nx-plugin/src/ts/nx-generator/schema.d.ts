@@ -4,7 +4,7 @@
  */
 
 export interface TsNxGeneratorGeneratorSchema {
-  pluginProject: string;
+  project: string;
   name: string;
   directory?: string;
   description?: string;

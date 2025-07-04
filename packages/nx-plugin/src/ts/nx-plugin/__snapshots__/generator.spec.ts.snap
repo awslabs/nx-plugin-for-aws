@@ -1,0 +1,375 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ts#nx-plugin generator > should generate MCP server files > test-plugin/src/mcp-server/index.ts 1`] = `
+"#!/usr/bin/env node
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { createServer } from './server';
+
+export const startMcpServer = async () => {
+  const transport = new StdioServerTransport();
+  await createServer().connect(transport);
+  console.error('MCP Server listening on STDIO');
+};
+
+void (async () => {
+  try {
+    await startMcpServer();
+  } catch (e) {
+    console.error(e);
+  }
+})();
+"
+`;
+
+exports[`ts#nx-plugin generator > should generate MCP server files > test-plugin/src/mcp-server/resources/GENERAL_GUIDANCE.md 1`] = `
+"# General Guidance
+
+## Tool Selection Guide
+
+- Use the \`general-guidance\` tool for guidance and best practices for working with Nx and @proj/test-plugin.
+- Use the \`create-workspace-command\` tool to discover how to create a workspace to start a new project.
+- Use the \`list-generators\` tool to discover the available generators and how to run them.
+- Use the \`generator-guide\` tool to retrieve detailed information about a specific generator.
+
+## Getting Started
+
+- Choose a package manager first. You can choose between pnpm, bun, yarn or npm. Check if one is already in use if working in an existing project. It's recommended to use "pnpm" if the user has no preference
+- If starting from scratch, you must create an Nx workspace. Use the \`create-workspace-command\` tool for more details, and provide it with your chosen package manager
+- After this, you can start scaffolding the main components of your application using generators. Use the \`list-generators\` tool to discover available generators, and the \`generator-guide\` tool for more detailed information about a specific generator
+
+## Nx Primer
+
+- Prefix nx commands with the appropriate prefix for your package manager, for example:
+  - pnpm nx <options>
+  - bunx nx <options>
+  - npx nx <options>
+  - yarn nx <options>
+- Each project in your workspace has a file named \`project.json\` which contains important project information such as its name, and defines the "targets" which can be run for that project, for example building or testing the project
+- Use the command \`nx reset\` to reset the Nx daemon when unexpected issues arise
+- After adding dependencies between TypeScript projects, use \`nx sync\` to ensure project references are set up correctly
+
+## General Instructions
+
+- Workspaces contain a single \`package.json\` file at the root which defines the dependencies for all projects. Therefore when installing dependencies, you must add these to the root workspace using the appropriate command for your package manager:
+  - pnpm add -w -D <package>
+  - yarn add -D <package>
+  - npm install --legacy-peer-deps -D <package>
+  - bun install -D <package>
+  - (Omit -D for production dependencies)
+- When specifying project names as arguments to generators, prefer the _fully qualified_ project name, for example \`@workspace-name/project-name\`. Check the \`project.json\` file for the specific package to find its fully qualified name
+- When no generator exists for a specific framework required, look for more generic project generators if availalbe and build on top of these.
+
+## Useful Commands
+
+- Fix lint issues with \`nx run-many --target lint --configuration=fix --all --output-style=stream\`
+- Build all projects with \`nx run-many --target build --all --output-style=stream\`
+- Prefer importing the CDK constructs vended by generators in \`packages/common/constructs\` over writing your own
+
+## Best Practices
+
+- After running a generator, use the \`nx show projects\` command to check which projects have been added (if any)
+- Carefully examine the files that have been generated and always refer back to the generator guide when working in a generated project
+- Generate all projects into the \`packages/\` directory
+- After making changes to your projects, fix linting issues, then run a full build
+"
+`;
+
+exports[`ts#nx-plugin generator > should generate MCP server files > test-plugin/src/mcp-server/schema.ts 1`] = `
+"import { z } from 'zod';
+
+export const PACKAGE_MANAGERS = ['pnpm', 'yarn', 'npm', 'bun'] as const;
+export const PackageManagerSchema = z.enum(PACKAGE_MANAGERS);
+"
+`;
+
+exports[`ts#nx-plugin generator > should generate MCP server files > test-plugin/src/mcp-server/server.ts 1`] = `
+"import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { registerCreateWorkspaceCommandTool } from './tools/create-workspace-command';
+import { registerGeneralGuidanceTool } from './tools/general-guidance';
+import { registerListGeneratorsTool } from './tools/list-generators';
+import { registerGeneratorGuideTool } from './tools/generator-guide';
+import { getPackageName } from './utils';
+
+/**
+ * Create the MCP Server
+ */
+export const createServer = () => {
+  const packageName = getPackageName();
+
+  const server = new McpServer(
+    {
+      name: packageName,
+      version: '1.0.0',
+    },
+    {
+      instructions: \`# \${packageName} MCP Server
+
+This server provides resources and tools for quickly scaffolding projects using \${packageName}.
+
+\${packageName} provides "generators" to add projects or functionality to your workspace. Use this to build the foundations of any project you are building, if the generators apply to your use case.
+
+## Tool Selection Guide
+
+- Use the \\\`general-guidance\\\` tool for guidance and best practices for working with Nx and \${packageName}.
+- Use the \\\`create-workspace-command\\\` tool to discover how to create a workspace to start a new project.
+- Use the \\\`list-generators\\\` tool to discover the available generators and how to run them.
+- Use the \\\`generator-guide\\\` tool to retrieve detailed information about a specific generator.\`,
+    },
+  );
+
+  registerCreateWorkspaceCommandTool(server);
+  registerGeneralGuidanceTool(server);
+  registerListGeneratorsTool(server);
+  registerGeneratorGuideTool(server);
+
+  return server;
+};
+"
+`;
+
+exports[`ts#nx-plugin generator > should generate MCP server files > test-plugin/src/mcp-server/tools/create-workspace-command.ts 1`] = `
+"import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { z } from 'zod';
+import { PackageManagerSchema } from '../schema';
+import { buildInstallCommand, getPackageName } from '../utils';
+
+/**
+ * Registers a tool which tells a model how to create an Nx workspace
+ */
+export const registerCreateWorkspaceCommandTool = (server: McpServer) => {
+  server.tool(
+    'create-workspace-command',
+    'Tool to discover how to create a workspace to start a new project.',
+    { workspaceName: z.string(), packageManager: PackageManagerSchema },
+    ({ workspaceName, packageManager }) => ({
+      content: [
+        {
+          type: 'text',
+          text: \`Run the following command to create a workspace:
+
+\\\`\\\`\\\`bash
+npx create-nx-workspace@~21.0.3 \${workspaceName} --pm=\${packageManager} --preset=@aws/nx-plugin --ci=skip
+\\\`\\\`\\\`
+
+This will create a new workspace within the \${workspaceName} directory.
+
+Then, install the plugin package to ensure generators are available:
+
+\\\`\\\`\\\`bash
+\${buildInstallCommand(packageManager, getPackageName())}
+\\\`\\\`\\\`.
+  \`,
+        },
+      ],
+    }),
+  );
+};
+"
+`;
+
+exports[`ts#nx-plugin generator > should generate MCP server files > test-plugin/src/mcp-server/tools/general-guidance.ts 1`] = `
+"import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import * as fs from 'fs';
+import * as path from 'path';
+
+/**
+ * Registers a tool which provides general guidance for using Nx and this plugin
+ */
+export const registerGeneralGuidanceTool = (server: McpServer) => {
+  server.tool(
+    'general-guidance',
+    'Tool for guidance and best practices for working with Nx and this plugin',
+    async () => ({
+      content: [
+        {
+          type: 'text',
+          text: fs.readFileSync(
+            path.resolve(__dirname, '../resources/GENERAL_GUIDANCE.md'),
+            'utf-8',
+          ),
+        },
+      ],
+    }),
+  );
+};
+"
+`;
+
+exports[`ts#nx-plugin generator > should generate MCP server files > test-plugin/src/mcp-server/tools/generator-guide.ts 1`] = `
+"import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { z } from 'zod';
+import { renderGeneratorInfo, listGenerators } from '../utils';
+import { PackageManagerSchema } from '../schema';
+import * as fs from 'fs';
+import * as path from 'path';
+
+/**
+ * Registers a tool which provides a detailed guide for an individual generator
+ */
+export const registerGeneratorGuideTool = (server: McpServer) => {
+  server.tool(
+    'generator-guide',
+    'Tool to retrieve detailed information about a specific generator.',
+    {
+      packageManager: PackageManagerSchema,
+      generator: z.string(),
+    },
+    async ({ packageManager, generator: generatorId }) => {
+      const generators = listGenerators();
+      const generator = generators.find((g) => g.id === generatorId);
+      if (!generator) {
+        throw new Error(
+          \`No generator found with id \${generatorId}. Available generators: \${generators.map((g) => g.id).join(' ,')}\`,
+        );
+      }
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: \`## \${renderGeneratorInfo(packageManager, generator)}
+
+# Guide
+
+\${fs.readFileSync(path.join(generator.resolvedPath, 'README.md'))}
+\`,
+          },
+        ],
+      };
+    },
+  );
+};
+"
+`;
+
+exports[`ts#nx-plugin generator > should generate MCP server files > test-plugin/src/mcp-server/tools/list-generators.ts 1`] = `
+"import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { PackageManagerSchema } from '../schema';
+import { renderGeneratorInfo, listGenerators } from '../utils';
+
+/**
+ * Registers a tool which lists details about the available generators
+ */
+export const registerListGeneratorsTool = (server: McpServer) => {
+  server.tool(
+    'list-generators',
+    'Tool to discover the available generators and how to run them.',
+    { packageManager: PackageManagerSchema },
+    ({ packageManager }) => ({
+      content: [
+        {
+          type: 'text',
+          text: \`## Available Generators
+
+  \${listGenerators()
+    .map((g) => \`### \${renderGeneratorInfo(packageManager, g)}\`)
+    .join('\\n\\n')}
+  \`,
+        },
+      ],
+    }),
+  );
+};
+"
+`;
+
+exports[`ts#nx-plugin generator > should generate MCP server files > test-plugin/src/mcp-server/utils.ts 1`] = `
+"import * as fs from 'fs';
+import * as path from 'path';
+
+export interface NxGeneratorInfo {
+  readonly id: string;
+  readonly resolvedPath: string;
+  readonly description?: string;
+}
+
+export const getPackageName = (): string =>
+  JSON.parse(
+    fs.readFileSync(path.resolve(__dirname, '../../package.json'), 'utf-8'),
+  ).name;
+
+export const listGenerators = (): NxGeneratorInfo[] =>
+  Object.entries(
+    JSON.parse(
+      fs.readFileSync(
+        path.resolve(__dirname, '../../generators.json'),
+        'utf-8',
+      ),
+    ).generators,
+  ).map(([id, info]: any) => ({
+    id,
+    resolvedPath: path.resolve(__dirname, '..', '..', info.factory, '..'),
+    description: info.description,
+  }));
+
+/**
+ * Build a command to run nx
+ */
+export const buildNxCommand = (command: string, pm?: string) =>
+  \`\${
+    pm
+      ? \`\${
+          {
+            npm: 'npx',
+            bun: 'bunx',
+          }[pm] ?? pm
+        } \`
+      : ''
+  }nx \${command}\`;
+
+export const buildInstallCommand = (pm: string, pkg: string) =>
+  ({
+    pnpm: \`pnpm add -Dw \${pkg}\`,
+    yarn: \`yarn add -D \${pkg}\`,
+    npm: \`npm install --legacy-peer-deps -D \${pkg}\`,
+    bun: \`bun install -D \${pkg}\`,
+  })[pm];
+
+const renderSchema = (schema: any) =>
+  Object.entries(schema.properties)
+    .map(
+      ([parameter, parameterSchema]: [string, any]) =>
+        \`- \${parameter} [type: \${parameterSchema.type}]\${(schema.required ?? []).includes(parameter) ? \` (required)\` : ''} \${parameterSchema.description}\`,
+    )
+    .join('\\n');
+
+const renderGeneratorCommand = (
+  generatorId: string,
+  schema: any,
+  packageManager?: string,
+) => \`\\\`\\\`\\\`bash
+\${buildNxCommand(
+  \`g \${getPackageName()}:\${generatorId} --no-interactive \${Object.entries(
+    schema.properties,
+  )
+    .filter(([parameter]) => (schema.required ?? []).includes(parameter))
+    .map(([parameter]: [string, any]) => \`--\${parameter}=<\${parameter}>\`)
+    .join(' ')}\`,
+  packageManager,
+)}
+\\\`\\\`\\\`\`;
+
+/**
+ * Render summary information about a generator
+ */
+export const renderGeneratorInfo = (
+  packageManager: string,
+  info: NxGeneratorInfo,
+): string => {
+  const schema = JSON.parse(
+    fs.readFileSync(path.join(info.resolvedPath, 'schema.json'), 'utf-8'),
+  );
+
+  return \`\${info.id}
+
+Description: \${info.description}
+
+Available Parameters:
+\${renderSchema(schema)}
+
+Command:
+\${renderGeneratorCommand(info.id, schema, packageManager)}
+\`;
+};
+"
+`;
