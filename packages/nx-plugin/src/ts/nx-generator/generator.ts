@@ -3,14 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
   generateFiles,
   GeneratorCallback,
   installPackagesTask,
   joinPathFragments,
   readJson,
   Tree,
-  updateJson,
   writeJson,
 } from '@nx/devkit';
 import { TsNxGeneratorGeneratorSchema } from './schema';
@@ -19,15 +17,14 @@ import camelCase from 'lodash.camelcase';
 import { getRelativePathToRootByDirectory } from '../../utils/paths';
 import { addStarExport, replace } from '../../utils/ast';
 import { ArrayLiteralExpression, factory } from 'typescript';
-import NxPluginForAwsPackageJson from '../../../package.json';
 import {
   getGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { withVersions } from '../../utils/versions';
 import { formatFilesInSubtree } from '../../utils/format';
 import PackageJson from '../../../package.json';
+import { configureTsProjectAsNxPlugin } from '../nx-plugin/utils';
 
 export const NX_GENERATOR_GENERATOR_INFO = getGeneratorInfo(__filename);
 
@@ -35,7 +32,7 @@ export const tsNxGeneratorGenerator = async (
   tree: Tree,
   options: TsNxGeneratorGeneratorSchema,
 ): Promise<GeneratorCallback | void> => {
-  const { name, directory, pluginProject, description } = options;
+  const { name, directory, project: pluginProject, description } = options;
 
   const plugin = readProjectConfigurationUnqualified(tree, pluginProject);
   const sourceRoot = plugin.sourceRoot ?? joinPathFragments(plugin.root, 'src');
@@ -49,20 +46,8 @@ export const tsNxGeneratorGenerator = async (
     : undefined;
   const isNxPluginForAws = rootPackageJson?.name === '@aws/nx-plugin-source';
 
-  const tsConfigPath = joinPathFragments(plugin.root, 'tsconfig.json');
-  if (!tree.exists(tsConfigPath)) {
-    throw new Error(
-      `Selected plugin project ${pluginProject} is not a TypeScript project`,
-    );
-  }
-
-  // Generators must use commonjs as a limitation of nx
-  // https://github.com/nrwl/nx/issues/15682
-  updateJson(tree, tsConfigPath, (tsConfig) => {
-    tsConfig.compilerOptions ??= {};
-    tsConfig.compilerOptions.module ??= 'commonjs';
-    return tsConfig;
-  });
+  // Configure the targeted project as an Nx Plugin
+  configureTsProjectAsNxPlugin(tree, pluginProject);
 
   const enhancedOptions = {
     name,
@@ -90,9 +75,9 @@ export const tsNxGeneratorGenerator = async (
   // Add the files specific to this repo vs a local generator in another project
   if (isNxPluginForAws) {
     // Generators should be in the @aws/nx-plugin project
-    if (pluginProject !== NxPluginForAwsPackageJson.name) {
+    if (pluginProject !== PackageJson.name) {
       throw new Error(
-        `Generators should be added to the ${NxPluginForAwsPackageJson.name} project.`,
+        `Generators should be added to the ${PackageJson.name} project.`,
       );
     }
 
@@ -155,15 +140,6 @@ export const tsNxGeneratorGenerator = async (
     if (tree.exists(indexPath)) {
       addStarExport(tree, indexPath, `./${generatorSubDir}/generator`);
     }
-
-    // Add a dependency on the nx plugin for aws
-    addDependenciesToPackageJson(
-      tree,
-      {},
-      {
-        [PackageJson.name]: `^${PackageJson.version}`,
-      },
-    );
   }
 
   const factoryBasePath = `./${srcDir}/${generatorSubDir}`;
@@ -198,27 +174,6 @@ export const tsNxGeneratorGenerator = async (
       },
     },
   });
-
-  // Add the "generators" and "main" entries to package.json
-  const pluginPackageJsonPath = joinPathFragments(plugin.root, 'package.json');
-  if (!tree.exists(pluginPackageJsonPath)) {
-    // Write a simple package.json to ensure the generator can be found by the Nx VSCode extension
-    writeJson(tree, pluginPackageJsonPath, {
-      name: plugin.name,
-    });
-  }
-  updateJson(tree, pluginPackageJsonPath, (pkg) => {
-    pkg.main ??= './src/index.js';
-    pkg.generators ??= './generators.json';
-    return pkg;
-  });
-
-  if (!isNxPluginForAws) {
-    // Add the required dependencies to the root package.json, and project's package.json
-    const deps = withVersions(['@nx/devkit']);
-    addDependenciesToPackageJson(tree, {}, deps);
-    addDependenciesToPackageJson(tree, deps, {}, pluginPackageJsonPath);
-  }
 
   await addGeneratorMetricsIfApplicable(tree, [NX_GENERATOR_GENERATOR_INFO]);
 
