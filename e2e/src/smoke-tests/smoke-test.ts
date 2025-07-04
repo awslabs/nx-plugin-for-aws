@@ -97,12 +97,12 @@ export const smokeTest = (
       await runCLI(`generate @aws/nx-plugin:license --no-interactive`, opts);
 
       await runCLI(
-        `generate @aws/nx-plugin:ts#project --name=plugin --directory=tools --no-interactive`,
+        `generate @aws/nx-plugin:ts#nx-plugin --name=plugin --directory=tools --no-interactive`,
         opts,
       );
 
       await runCLI(
-        `generate @aws/nx-plugin:ts#nx-generator --pluginProject=@e2e-test/plugin --name=my#generator --no-interactive`,
+        `generate @aws/nx-plugin:ts#nx-generator --project=@e2e-test/plugin --name=my#generator --no-interactive`,
         opts,
       );
       await runCLI(

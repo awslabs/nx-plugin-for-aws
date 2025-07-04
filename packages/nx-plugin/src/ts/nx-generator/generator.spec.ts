@@ -55,7 +55,7 @@ describe('nx-generator generator', () => {
 
     it('should work when description is omitted', async () => {
       await tsNxGeneratorGenerator(tree, {
-        pluginProject: NxPluginForAwsProjectJson.name,
+        project: NxPluginForAwsProjectJson.name,
         name: 'no#description',
       });
 
@@ -78,7 +78,7 @@ describe('nx-generator generator', () => {
 
     it('should generate an example schema, generator and test', async () => {
       await tsNxGeneratorGenerator(tree, {
-        pluginProject: NxPluginForAwsProjectJson.name,
+        project: NxPluginForAwsProjectJson.name,
         name: 'foo#bar',
         description: 'Some description',
       });
@@ -107,7 +107,7 @@ describe('nx-generator generator', () => {
 
     it('should add guide page to docs', async () => {
       await tsNxGeneratorGenerator(tree, {
-        pluginProject: NxPluginForAwsProjectJson.name,
+        project: NxPluginForAwsProjectJson.name,
         name: 'foo#bar',
         description: 'Some description',
       });
@@ -127,7 +127,7 @@ describe('nx-generator generator', () => {
 
     it('should update generators.json', async () => {
       await tsNxGeneratorGenerator(tree, {
-        pluginProject: NxPluginForAwsProjectJson.name,
+        project: NxPluginForAwsProjectJson.name,
         name: 'foo#bar',
         description: 'Some description',
       });
@@ -176,7 +176,7 @@ describe('nx-generator generator', () => {
       });
 
       await tsNxGeneratorGenerator(tree, {
-        pluginProject: NxPluginForAwsProjectJson.name,
+        project: NxPluginForAwsProjectJson.name,
         name: 'foo#bar',
         description: 'Some description',
       });
@@ -195,7 +195,7 @@ describe('nx-generator generator', () => {
       });
 
       await tsNxGeneratorGenerator(tree, {
-        pluginProject: NxPluginForAwsProjectJson.name,
+        project: NxPluginForAwsProjectJson.name,
         name: 'empty#test',
         description: 'Some description',
       });
@@ -209,7 +209,7 @@ describe('nx-generator generator', () => {
 
     it('should support a nested directory', async () => {
       await tsNxGeneratorGenerator(tree, {
-        pluginProject: NxPluginForAwsProjectJson.name,
+        project: NxPluginForAwsProjectJson.name,
         name: 'nested#test',
         directory: 'nested/dir',
         description: 'Some description',
@@ -246,7 +246,7 @@ describe('nx-generator generator', () => {
       // Expect the generator to throw an error
       await expect(
         tsNxGeneratorGenerator(tree, {
-          pluginProject: 'other-project',
+          project: 'other-project',
           name: 'should#fail',
           description: 'Some description',
         }),
@@ -285,7 +285,7 @@ describe('nx-generator generator', () => {
       // Expect the generator to throw an error
       await expect(
         tsNxGeneratorGenerator(tree, {
-          pluginProject: '@test/no-tsconfig',
+          project: '@test/no-tsconfig',
           name: 'should#fail',
           description: 'Some description',
         }),
@@ -300,7 +300,7 @@ describe('nx-generator generator', () => {
 
       await expect(
         tsNxGeneratorGenerator(tree, {
-          pluginProject: '@test/plugin',
+          project: '@test/plugin',
           name: 'no#root#pkg',
           description: 'Generator with no root package.json',
         }),
@@ -312,7 +312,7 @@ describe('nx-generator generator', () => {
       writeJson(tree, 'tools/plugin/generators.json', {});
 
       await tsNxGeneratorGenerator(tree, {
-        pluginProject: '@test/plugin',
+        project: '@test/plugin',
         name: 'empty#generators',
         description: 'Generator with empty generators.json',
       });
@@ -343,7 +343,7 @@ describe('nx-generator generator', () => {
 
     it('should work when description is omitted', async () => {
       await tsNxGeneratorGenerator(tree, {
-        pluginProject: '@test/plugin',
+        project: '@test/plugin',
         name: 'no#description',
       });
 
@@ -366,7 +366,7 @@ describe('nx-generator generator', () => {
 
     it('should generate an example schema, generator and test', async () => {
       await tsNxGeneratorGenerator(tree, {
-        pluginProject: '@test/plugin',
+        project: '@test/plugin',
         name: 'foo#bar',
         description: 'Some description',
       });
@@ -395,7 +395,7 @@ describe('nx-generator generator', () => {
 
     it('should support a nested directory', async () => {
       await tsNxGeneratorGenerator(tree, {
-        pluginProject: '@test/plugin',
+        project: '@test/plugin',
         name: 'nested#test',
         directory: 'nested/dir',
         description: 'Some description',
@@ -423,7 +423,7 @@ describe('nx-generator generator', () => {
 
     it('should update generators.json', async () => {
       await tsNxGeneratorGenerator(tree, {
-        pluginProject: '@test/plugin',
+        project: '@test/plugin',
         name: 'foo#bar',
         description: 'Some description',
       });
@@ -452,7 +452,7 @@ describe('nx-generator generator', () => {
       expect(tree.exists('tools/plugin/package.json')).toBeFalsy();
 
       await tsNxGeneratorGenerator(tree, {
-        pluginProject: '@test/plugin',
+        project: '@test/plugin',
         name: 'create#pkg',
       });
 
@@ -473,7 +473,7 @@ describe('nx-generator generator', () => {
       });
 
       await tsNxGeneratorGenerator(tree, {
-        pluginProject: '@test/plugin',
+        project: '@test/plugin',
         name: 'update#pkg',
       });
 
@@ -495,7 +495,7 @@ describe('nx-generator generator', () => {
       });
 
       await tsNxGeneratorGenerator(tree, {
-        pluginProject: '@test/plugin',
+        project: '@test/plugin',
         name: 'preserve#generators',
       });
 
@@ -508,7 +508,7 @@ describe('nx-generator generator', () => {
 
     it('should generate an example template file', async () => {
       await tsNxGeneratorGenerator(tree, {
-        pluginProject: '@test/plugin',
+        project: '@test/plugin',
         name: 'template#test',
         description: 'Some description',
       });
@@ -529,7 +529,7 @@ describe('nx-generator generator', () => {
       writeJson(tree, 'tools/plugin/tsconfig.json', {});
 
       await tsNxGeneratorGenerator(tree, {
-        pluginProject: '@test/plugin',
+        project: '@test/plugin',
         name: 'module#test',
         description: 'Test module setting',
       });
@@ -551,7 +551,7 @@ describe('nx-generator generator', () => {
       writeJson(tree, 'tools/no-source-root/tsconfig.json', {});
 
       await tsNxGeneratorGenerator(tree, {
-        pluginProject: '@test/no-source-root',
+        project: '@test/no-source-root',
         name: 'no#source#root',
         description: 'Generator in project without sourceRoot',
       });
@@ -569,7 +569,7 @@ describe('nx-generator generator', () => {
       tree.write('tools/plugin/src/index.ts', '// This is the index file');
 
       await tsNxGeneratorGenerator(tree, {
-        pluginProject: '@test/plugin',
+        project: '@test/plugin',
         name: 'export#test',
         description: 'Generator with export test',
       });
@@ -585,7 +585,7 @@ describe('nx-generator generator', () => {
       await sharedConstructsGenerator(tree);
 
       await tsNxGeneratorGenerator(tree, {
-        pluginProject: '@test/plugin',
+        project: '@test/plugin',
         name: 'foo#bar-baz',
       });
 

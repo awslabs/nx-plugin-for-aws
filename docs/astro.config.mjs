@@ -276,6 +276,7 @@ export default defineConfig({
               link: '/guides/cloudscape-website-auth',
             },
             { label: 'ts#lambda-function', link: '/guides/ts-lambda-function' },
+            { label: 'ts#nx-plugin', link: '/guides/ts-nx-plugin' },
             { label: 'ts#nx-generator', link: '/guides/nx-generator' },
             { label: 'ts#mcp-server', link: '/guides/ts-mcp-server' },
             { label: 'py#project', link: '/guides/python-project' },

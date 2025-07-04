@@ -19,6 +19,10 @@ export type { TsMcpServerGeneratorSchema } from '../src/ts/mcp-server/schema';
 export { tsNxGeneratorGenerator } from '../src/ts/nx-generator/generator';
 export type { TsNxGeneratorGeneratorSchema } from '../src/ts/nx-generator/schema';
 
+// TypeScript Nx Plugin Generator
+export { tsNxPluginGenerator } from '../src/ts/nx-plugin/generator';
+export type { TsNxPluginGeneratorSchema } from '../src/ts/nx-plugin/schema';
+
 // TypeScript CloudScape Website Generator
 export { tsCloudScapeWebsiteGenerator } from '../src/cloudscape-website/app/generator';
 export type { TsCloudScapeWebsiteGeneratorSchema } from '../src/cloudscape-website/app/schema';
@@ -34,6 +38,10 @@ export type { RuntimeConfigGeneratorSchema } from '../src/cloudscape-website/run
 // TypeScript tRPC API
 export { tsTrpcApiGenerator } from '../src/trpc/backend/generator';
 export type { TsTrpcApiGeneratorSchema } from '../src/trpc/backend/schema';
+
+// TypeScript Lambda Function
+export { tsLambdaFunctionGenerator } from '../src/ts/lambda-function/generator';
+export type { TsLambdaFunctionGeneratorSchema } from '../src/ts/lambda-function/schema';
 
 // Shared Constructs
 export { sharedConstructsGenerator } from '../src/utils/shared-constructs';

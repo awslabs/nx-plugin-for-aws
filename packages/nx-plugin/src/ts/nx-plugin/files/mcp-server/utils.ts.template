@@ -1,0 +1,97 @@
+import * as fs from 'fs';
+import * as path from 'path';
+
+export interface NxGeneratorInfo {
+  readonly id: string;
+  readonly resolvedPath: string;
+  readonly description?: string;
+}
+
+export const getPackageName = (): string =>
+  JSON.parse(
+    fs.readFileSync(path.resolve(__dirname, '../../package.json'), 'utf-8'),
+  ).name;
+
+export const listGenerators = (): NxGeneratorInfo[] =>
+  Object.entries(
+    JSON.parse(
+      fs.readFileSync(
+        path.resolve(__dirname, '../../generators.json'),
+        'utf-8',
+      ),
+    ).generators,
+  ).map(([id, info]: any) => ({
+    id,
+    resolvedPath: path.resolve(__dirname, '..', '..', info.factory, '..'),
+    description: info.description,
+  }));
+
+/**
+ * Build a command to run nx
+ */
+export const buildNxCommand = (command: string, pm?: string) =>
+  `${
+    pm
+      ? `${
+          {
+            npm: 'npx',
+            bun: 'bunx',
+          }[pm] ?? pm
+        } `
+      : ''
+  }nx ${command}`;
+
+export const buildInstallCommand = (pm: string, pkg: string) =>
+  ({
+    pnpm: `pnpm add -Dw ${pkg}`,
+    yarn: `yarn add -D ${pkg}`,
+    npm: `npm install --legacy-peer-deps -D ${pkg}`,
+    bun: `bun install -D ${pkg}`,
+  })[pm];
+
+const renderSchema = (schema: any) =>
+  Object.entries(schema.properties)
+    .map(
+      ([parameter, parameterSchema]: [string, any]) =>
+        `- ${parameter} [type: ${parameterSchema.type}]${(schema.required ?? []).includes(parameter) ? ` (required)` : ''} ${parameterSchema.description}`,
+    )
+    .join('\n');
+
+const renderGeneratorCommand = (
+  generatorId: string,
+  schema: any,
+  packageManager?: string,
+) => `\`\`\`bash
+${buildNxCommand(
+  `g ${getPackageName()}:${generatorId} --no-interactive ${Object.entries(
+    schema.properties,
+  )
+    .filter(([parameter]) => (schema.required ?? []).includes(parameter))
+    .map(([parameter]: [string, any]) => `--${parameter}=<${parameter}>`)
+    .join(' ')}`,
+  packageManager,
+)}
+\`\`\``;
+
+/**
+ * Render summary information about a generator
+ */
+export const renderGeneratorInfo = (
+  packageManager: string,
+  info: NxGeneratorInfo,
+): string => {
+  const schema = JSON.parse(
+    fs.readFileSync(path.join(info.resolvedPath, 'schema.json'), 'utf-8'),
+  );
+
+  return `${info.id}
+
+Description: ${info.description}
+
+Available Parameters:
+${renderSchema(schema)}
+
+Command:
+${renderGeneratorCommand(info.id, schema, packageManager)}
+`;
+};
