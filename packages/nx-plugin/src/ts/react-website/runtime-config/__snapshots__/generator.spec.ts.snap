@@ -1,0 +1,120 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`runtime-config generator > should generate runtime config files > runtime-config-component.tsx 1`] = `
+"import { Spinner } from '@cloudscape-design/components';
+import React, {
+  createContext,
+  PropsWithChildren,
+  useEffect,
+  useState,
+} from 'react';
+import type { IRuntimeConfig } from ':proj/common-types';
+
+/**
+ * Context for storing the runtimeConfig.
+ */
+export const RuntimeConfigContext = createContext<IRuntimeConfig | undefined>(
+  undefined,
+);
+
+/**
+ * Apply any overrides to point to local servers/resources here
+ * for the serve-local target
+ */
+const applyOverrides = (runtimeConfig: IRuntimeConfig) => {
+  if (import.meta.env.MODE === 'serve-local') {
+    // Add local server urls here
+  }
+  return runtimeConfig;
+};
+
+/**
+ * Sets up the runtimeConfig.
+ *
+ * This assumes a runtime-config.json file is present at '/'.
+ */
+const RuntimeConfigProvider: React.FC<PropsWithChildren> = ({ children }) => {
+  const [runtimeConfig, setRuntimeConfig] = useState<
+    IRuntimeConfig | undefined
+  >();
+  useEffect(() => {
+    (async () => {
+      try {
+        setRuntimeConfig(
+          applyOverrides(await (await fetch('/runtime-config.json')).json()),
+        );
+      } catch {
+        setRuntimeConfig(applyOverrides({ apis: {} } as any));
+      }
+    })();
+  }, [setRuntimeConfig]);
+
+  return runtimeConfig ? (
+    <RuntimeConfigContext.Provider value={runtimeConfig}>
+      {children}
+    </RuntimeConfigContext.Provider>
+  ) : (
+    <Spinner />
+  );
+};
+
+export default RuntimeConfigProvider;
+"
+`;
+
+exports[`runtime-config generator > should generate shared constructs > common/constructs-index.ts 1`] = `
+"export * from './app.js';
+export * from './runtime-config.js';
+"
+`;
+
+exports[`runtime-config generator > should generate shared constructs > runtime-config.ts 1`] = `
+"import type { IRuntimeConfig } from ':proj/common-types';
+import { Stack } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+
+const RuntimeConfigKey = '__RuntimeConfig__';
+
+export class RuntimeConfig extends Construct {
+  private readonly _runtimeConfig: Partial<IRuntimeConfig> = {};
+
+  static ensure(scope: Construct): RuntimeConfig {
+    const stack = Stack.of(scope);
+    return (
+      RuntimeConfig.of(scope) ?? new RuntimeConfig(stack, RuntimeConfigKey)
+    );
+  }
+
+  static of(scope: Construct): RuntimeConfig | undefined {
+    const stack = Stack.of(scope);
+    return stack.node.tryFindChild(RuntimeConfigKey) as
+      | RuntimeConfig
+      | undefined;
+  }
+
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+  }
+
+  get config(): Partial<IRuntimeConfig> {
+    return this._runtimeConfig;
+  }
+}
+"
+`;
+
+exports[`runtime-config generator > should modify main.tsx correctly > modified-main.tsx 1`] = `
+"import RuntimeConfigProvider from './components/RuntimeConfig';
+import { RouterProvider } from '@tanstack/react-router';
+
+export function App() {
+  const App = () => <RouterProvider router={router} />;
+
+  return (
+    <RuntimeConfigProvider>
+      <App />
+    </RuntimeConfigProvider>
+  );
+}
+"
+`;

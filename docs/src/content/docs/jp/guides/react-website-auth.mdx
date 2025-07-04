@@ -1,0 +1,93 @@
+---
+title: "Reactウェブサイト認証"
+description: "Reactウェブサイト認証のリファレンスドキュメント"
+---
+
+
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+
+React Website Authentication ジェネレータは、[Amazon Cognito](https://aws.amazon.com/cognito/) を使用してReactウェブサイトに認証機能を追加します。
+
+このジェネレータは、Cognitoユーザープールと関連するIdentity Pool、ユーザーログインフローを処理するホスト型UI、およびReactウェブサイトとの統合を設定するCDKインフラストラクチャを構成します。
+
+## 使用方法
+
+### Reactウェブサイトに認証機能を追加
+
+Reactウェブサイトに認証機能を追加する方法は2通りあります:
+
+<RunGenerator generator="ts#react-website#auth" />
+
+### オプション
+
+<GeneratorParameters generator="ts#react-website#auth" />
+
+## ジェネレータの出力内容
+
+Reactウェブサイトに以下の変更が加えられます:
+
+<FileTree>
+  - src
+    - components
+      - CognitoAuth
+        - index.tsx メイン認証コンポーネント
+    - main.tsx CognitoAuthコンポーネントを組み込むため更新
+</FileTree>
+
+また、`packages/common/constructs` に以下のインフラストラクチャコードが生成されます:
+
+<FileTree>
+  - src
+    - core
+      - user-identity.ts ユーザープールとIdentity Poolを定義するConstruct
+</FileTree>
+
+## インフラストラクチャの使用方法
+
+スタックに`UserIdentity` Constructを追加する必要があります。ウェブサイトConstructの「前に」宣言してください:
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {3,9}
+import { Stack } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { MyWebsite, UserIdentity } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    new UserIdentity(this, 'Identity');
+
+    new MyWebsite(this, 'MyWebsite');
+  }
+}
+```
+
+`UserIdentity` Constructは、ウェブサイトが認証用に正しいCognitoユーザープールを参照できるようにするための<Link path="guides/react-website#runtime-configuration">ランタイム設定</Link>を自動的に追加します。
+
+### 認証ユーザーへのアクセス権付与
+
+API呼び出し権限の付与など、認証ユーザーに特定の操作を許可するには、Identity Poolの認証済みロールにIAMポリシーステートメントを追加できます:
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {12}
+import { Stack } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { MyWebsite, UserIdentity, MyApi } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    const identity = new UserIdentity(this, 'Identity');
+    const api = new MyApi(this, 'MyApi');
+
+    api.grantInvokeAccess(identity.identityPool.authenticatedRole);
+
+    new MyWebsite(this, 'MyWebsite');
+  }
+}
+```

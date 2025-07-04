@@ -42,7 +42,11 @@ export const smokeTest = (
         opts,
       );
       await runCLI(
-        `generate @aws/nx-plugin:ts#cloudscape-website --name=website --no-interactive`,
+        `generate @aws/nx-plugin:ts#react-website --name=website --no-interactive`,
+        opts,
+      );
+      await runCLI(
+        `generate @aws/nx-plugin:ts#react-website --name=website-no-router --enableTanstackRouter=false --no-interactive`,
         opts,
       );
       await runCLI(
@@ -54,11 +58,19 @@ export const smokeTest = (
         opts,
       );
       await runCLI(
-        `generate @aws/nx-plugin:ts#cloudscape-website#auth --project=@e2e-test/website --cognitoDomain=test --no-interactive`,
+        `generate @aws/nx-plugin:ts#react-website#auth --project=@e2e-test/website --cognitoDomain=test --no-interactive`,
+        opts,
+      );
+      await runCLI(
+        `generate @aws/nx-plugin:ts#react-website#auth --project=@e2e-test/website-no-router --cognitoDomain=test-no-router --no-interactive`,
         opts,
       );
       await runCLI(
         `generate @aws/nx-plugin:api-connection --sourceProject=@e2e-test/website --targetProject=@e2e-test/my-api --no-interactive`,
+        opts,
+      );
+      await runCLI(
+        `generate @aws/nx-plugin:api-connection --sourceProject=@e2e-test/website-no-router --targetProject=@e2e-test/my-api --no-interactive`,
         opts,
       );
       await runCLI(

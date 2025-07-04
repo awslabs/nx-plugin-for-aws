@@ -53,8 +53,8 @@
 
 - `ts#project` - Generate a new TypeScript library.
 - `ts#infra` - Generate a Typescript AWS CDK infrastructure project for your application.
-- `ts#cloudscape-website` - Generate a new Cloudscape/React/Vite based web application.
-- `ts#cloudscape-website#auth` - Add AWS Cognito authentication to your Cloudscape website.
+- `ts#react-website` - Generate a new React based web application using Vite.
+- `ts#react-website#auth` - Add AWS Cognito authentication to your React website.
 - `ts#trpc-api` - Generate a tRPC backend service with Amazon API Gateway/AWS Lambda integrations and [AWS Powertools](https://github.com/aws-powertools/powertools-lambda-typescript) pre-configured.
 - `ts#nx-generator` - Add an [Nx Generator](https://nx.dev/features/generate-code) to a TypeScript project.
 - `ts#mcp-server` - Generate a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server in TypeScript.
@@ -81,14 +81,14 @@ cd demo
 # Generate a tRPC API backend
 pnpm nx g @aws/nx-plugin:ts#trpc-api
 
-# Generate a Cloudscape website
-pnpm nx g @aws/nx-plugin:ts#cloudscape-website
+# Generate a React website
+pnpm nx g @aws/nx-plugin:ts#react-website
 
 # Connect the frontend to the backend
 pnpm nx g @aws/nx-plugin:api-connection
 
 # Add authentication to your website
-pnpm nx g @aws/nx-plugin:ts#cloudscape-website#auth
+pnpm nx g @aws/nx-plugin:ts#react-website#auth
 
 # Generate AWS CDK infrastructure
 pnpm nx g @aws/nx-plugin:ts#infra

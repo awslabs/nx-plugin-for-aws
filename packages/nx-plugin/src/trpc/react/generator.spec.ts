@@ -7,7 +7,7 @@ import { TRPC_REACT_GENERATOR_INFO, reactGenerator } from './generator';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
-import { tsCloudScapeWebsiteGenerator } from '../../cloudscape-website/app/generator';
+import { tsReactWebsiteGenerator } from '../../ts/react-website/app/generator';
 import { tsTrpcApiGenerator } from '../backend/generator';
 
 describe('trpc react generator', () => {
@@ -287,8 +287,8 @@ describe('trpc react generator with real react and trpc projects', () => {
   beforeEach(async () => {
     tree = createTreeUsingTsSolutionSetup();
 
-    // Generate a cloudscape website
-    await tsCloudScapeWebsiteGenerator(tree, {
+    // Generate a React website
+    await tsReactWebsiteGenerator(tree, {
       name: 'frontend',
       skipInstall: true,
     });
