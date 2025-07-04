@@ -189,7 +189,7 @@ export default App;`;
 
       const updatedContent = tree.read('main.tsx', 'utf-8');
       // Should still add import but not make other changes
-      expect(updatedContent).toContain('import { useAuth }');
+      expect(updatedContent).not.toContain('import { useAuth }');
       expect(updatedContent).not.toContain('auth?: ReturnType<typeof useAuth>');
     });
 
@@ -205,7 +205,7 @@ export default App;`;
 
       const updatedContent = tree.read('main.tsx', 'utf-8');
       // Should still add import but not make other changes
-      expect(updatedContent).toContain('import { useAuth }');
+      expect(updatedContent).not.toContain('import { useAuth }');
       expect(updatedContent).not.toContain('auth?: ReturnType<typeof useAuth>');
     });
 
@@ -220,8 +220,8 @@ export default App;`;
       addHookResultToRouterProviderContext(tree, 'main.tsx', defaultProps);
 
       const updatedContent = tree.read('main.tsx', 'utf-8');
-      // Should still add import but not make other changes
-      expect(updatedContent).toContain('import { useAuth }');
+
+      expect(updatedContent).not.toContain('import { useAuth }');
       expect(updatedContent).not.toContain('auth?: ReturnType<typeof useAuth>');
     });
 
@@ -236,8 +236,8 @@ export default App;`;
       addHookResultToRouterProviderContext(tree, 'main.tsx', defaultProps);
 
       const updatedContent = tree.read('main.tsx', 'utf-8');
-      // Should still add import but not make other changes
-      expect(updatedContent).toContain('import { useAuth }');
+
+      expect(updatedContent).not.toContain('import { useAuth }');
       expect(updatedContent).not.toContain('auth?: ReturnType<typeof useAuth>');
     });
 

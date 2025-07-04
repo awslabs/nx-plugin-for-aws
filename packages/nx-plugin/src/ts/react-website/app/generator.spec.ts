@@ -36,13 +36,10 @@ describe('react-website generator', () => {
     expect(tree.exists('test-app/src/styles.css')).toBeTruthy();
     expect(tree.exists('test-app/src/routes/__root.tsx')).toBeTruthy();
     expect(tree.exists('test-app/src/routes/index.tsx')).toBeTruthy();
-    expect(tree.exists('test-app/src/routes/welcome/index.tsx')).toBeTruthy();
     expect(
       tree.exists('test-app/src/components/AppLayout/index.tsx'),
     ).toBeTruthy();
-    expect(
-      tree.exists('test-app/src/components/AppLayout/navitems.ts'),
-    ).toBeTruthy();
+
     // Snapshot the main application files
     expect(tree.read('test-app/src/main.tsx')?.toString()).toMatchSnapshot(
       'main.tsx',
@@ -54,8 +51,8 @@ describe('react-website generator', () => {
       tree.read('test-app/src/components/AppLayout/index.tsx')?.toString(),
     ).toMatchSnapshot('app-layout.tsx');
     expect(
-      tree.read('test-app/src/routes/welcome/index.tsx')?.toString(),
-    ).toMatchSnapshot('welcome-index.tsx');
+      tree.read('test-app/src/routes/index.tsx')?.toString(),
+    ).toMatchSnapshot('index.tsx');
   });
 
   it('should configure vite correctly', async () => {
@@ -190,6 +187,31 @@ describe('react-website generator', () => {
 
     // Verify the metric was added to app.ts
     expectHasMetricTags(tree, REACT_WEBSITE_APP_GENERATOR_INFO.metric);
+  });
+
+  describe('Tanstack router integration', () => {
+    it('should generate website with no router correctly', async () => {
+      await tsReactWebsiteGenerator(tree, {
+        ...options,
+        enableTanstackRouter: false,
+      });
+
+      tree
+        .listChanges()
+        .forEach((change) =>
+          expect(change.content.toString('utf-8')).toMatchSnapshot(change.path),
+        );
+    });
+
+    it('should generate website with router correctly', async () => {
+      await tsReactWebsiteGenerator(tree, options);
+
+      tree
+        .listChanges()
+        .forEach((change) =>
+          expect(change.content.toString('utf-8')).toMatchSnapshot(change.path),
+        );
+    });
   });
 
   describe('TailwindCSS integration', () => {

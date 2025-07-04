@@ -58,6 +58,7 @@ export async function tsReactWebsiteGenerator(
   schema: TsReactWebsiteGeneratorSchema,
 ) {
   const enableTailwind = schema.enableTailwind ?? true;
+  const enableTanstackRouter = schema.enableTanstackRouter ?? true;
   const npmScopePrefix = getNpmScopePrefix(tree);
   const websiteNameClassName = toClassName(schema.name);
   const websiteNameKebabCase = toKebabCase(schema.name);
@@ -286,11 +287,32 @@ export async function tsReactWebsiteGenerator(
       fullyQualifiedName,
       pkgMgrCmd: getPackageManagerCommand().exec,
       enableTailwind,
+      enableTanstackRouter,
     }, // config object to replace variable in file templates
     {
       overwriteStrategy: OverwriteStrategy.Overwrite,
     },
   );
+
+  if (enableTanstackRouter) {
+    generateFiles(
+      tree, // the virtual file system
+      joinPathFragments(__dirname, './files/tanstack-router'), // path to the file templates
+      libraryRoot, // destination path of the files
+      {
+        ...schema,
+        fullyQualifiedName,
+        pkgMgrCmd: getPackageManagerCommand().exec,
+        enableTailwind,
+        enableTanstackRouter,
+      }, // config object to replace variable in file templates
+      {
+        overwriteStrategy: OverwriteStrategy.Overwrite,
+      },
+    );
+    tree.delete(joinPathFragments(websiteContentPath, 'src', 'app.tsx'));
+  }
+
   if (e2eTestRunner !== 'none') {
     const e2eFullyQualifiedName = `${fullyQualifiedName}-e2e`;
     const e2eRoot = readProjectConfiguration(tree, e2eFullyQualifiedName).root;
@@ -311,14 +333,17 @@ export async function tsReactWebsiteGenerator(
   const viteConfigPath = joinPathFragments(libraryRoot, 'vite.config.ts');
 
   if (tree.exists(viteConfigPath)) {
-    addDestructuredImport(
-      tree,
-      viteConfigPath,
-      ['tanstackRouter'],
-      '@tanstack/router-plugin/vite',
-    );
+    // Add Tanstack Router import if enabled
+    if (enableTanstackRouter) {
+      addDestructuredImport(
+        tree,
+        viteConfigPath,
+        ['tanstackRouter'],
+        '@tanstack/router-plugin/vite',
+      );
 
-    addDestructuredImport(tree, viteConfigPath, ['resolve'], 'path');
+      addDestructuredImport(tree, viteConfigPath, ['resolve'], 'path');
+    }
 
     addSingleImport(
       tree,
@@ -369,39 +394,42 @@ export async function tsReactWebsiteGenerator(
             prop.name.getText() === 'plugins'
           ) {
             const pluginsConfig = prop.initializer as ArrayLiteralExpression;
-            const pluginsArray = [
-              factory.createCallExpression(
-                factory.createIdentifier('tanstackRouter'),
-                undefined,
-                [
-                  factory.createObjectLiteralExpression([
-                    factory.createPropertyAssignment(
-                      factory.createIdentifier('routesDirectory'),
-                      factory.createCallExpression(
-                        factory.createIdentifier('resolve'),
-                        undefined,
-                        [
-                          factory.createIdentifier('__dirname'),
-                          factory.createStringLiteral('src/routes'),
-                        ],
+            const pluginsArray = [...pluginsConfig.elements];
+
+            if (enableTanstackRouter) {
+              pluginsArray.unshift(
+                factory.createCallExpression(
+                  factory.createIdentifier('tanstackRouter'),
+                  undefined,
+                  [
+                    factory.createObjectLiteralExpression([
+                      factory.createPropertyAssignment(
+                        factory.createIdentifier('routesDirectory'),
+                        factory.createCallExpression(
+                          factory.createIdentifier('resolve'),
+                          undefined,
+                          [
+                            factory.createIdentifier('__dirname'),
+                            factory.createStringLiteral('src/routes'),
+                          ],
+                        ),
                       ),
-                    ),
-                    factory.createPropertyAssignment(
-                      factory.createIdentifier('generatedRouteTree'),
-                      factory.createCallExpression(
-                        factory.createIdentifier('resolve'),
-                        undefined,
-                        [
-                          factory.createIdentifier('__dirname'),
-                          factory.createStringLiteral('src/routeTree.gen.ts'),
-                        ],
+                      factory.createPropertyAssignment(
+                        factory.createIdentifier('generatedRouteTree'),
+                        factory.createCallExpression(
+                          factory.createIdentifier('resolve'),
+                          undefined,
+                          [
+                            factory.createIdentifier('__dirname'),
+                            factory.createStringLiteral('src/routeTree.gen.ts'),
+                          ],
+                        ),
                       ),
-                    ),
-                  ]),
-                ],
-              ),
-              ...pluginsConfig.elements,
-            ];
+                    ]),
+                  ],
+                ),
+              );
+            }
 
             // Add TailwindCSS plugin if enabled
             if (enableTailwind) {
@@ -496,25 +524,27 @@ export async function tsReactWebsiteGenerator(
     }),
   );
 
-  const devDependencies: IVersion[] = [
-    '@tanstack/router-plugin',
-    '@tanstack/router-generator',
-    '@tanstack/virtual-file-routes',
-    '@tanstack/router-utils',
-    'vite-tsconfig-paths',
-  ];
+  const devDependencies: IVersion[] = ['vite-tsconfig-paths'];
 
   const dependencies: IVersion[] = [
     '@cloudscape-design/components',
     '@cloudscape-design/board-components',
     '@cloudscape-design/global-styles',
-    '@tanstack/react-router',
   ];
 
   // Add TailwindCSS dependencies if enabled
   if (enableTailwind) {
     dependencies.push('tailwindcss');
     devDependencies.push('@tailwindcss/vite');
+  }
+  if (enableTanstackRouter) {
+    dependencies.push('@tanstack/react-router');
+    devDependencies.push(
+      '@tanstack/router-plugin',
+      '@tanstack/router-generator',
+      '@tanstack/virtual-file-routes',
+      '@tanstack/router-utils',
+    );
   }
 
   addDependenciesToPackageJson(
