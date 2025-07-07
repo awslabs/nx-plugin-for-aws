@@ -219,7 +219,9 @@ const applyTransform = (
 
   const transforms: { start: number; end: number; newText: string }[] = [];
 
-  const printer = ts.createPrinter();
+  const printer = ts.createPrinter({
+    removeComments: true,
+  });
 
   tsquery.map(sourceFile, selector, (node) => {
     const newNode = transformer(node);
