@@ -2,15 +2,16 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, beforeEach } from 'vitest';
 import { Tree } from '@nx/devkit';
+import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
 import {
   ArrowFunction,
   Block,
   factory,
-  FunctionDeclaration,
-  NumericLiteral,
+  InterfaceDeclaration,
   ObjectLiteralExpression,
+  SyntaxKind,
   VariableDeclaration,
 } from 'typescript';
 import {
@@ -23,37 +24,30 @@ import {
   jsonToAst,
   hasExportDeclaration,
   replaceIfExists,
+  prependStatements,
+  appendStatements,
 } from './ast';
 
 describe('ast utils', () => {
-  let mockTree: Tree;
+  let tree: Tree;
 
   beforeEach(() => {
-    mockTree = {
-      exists: vi.fn(),
-      read: vi.fn(),
-      write: vi.fn(),
-    } as unknown as Tree;
+    tree = createTreeWithEmptyWorkspace();
   });
 
   describe('destructuredImport', () => {
     it('should add new named imports', () => {
       const initialContent = `import { existingImport } from '@scope/package';`;
-      vi.mocked(mockTree.exists).mockReturnValue(true);
-      vi.mocked(mockTree.read).mockReturnValue(initialContent);
+      tree.write('file.ts', initialContent);
 
       addDestructuredImport(
-        mockTree,
+        tree,
         'file.ts',
         ['newImport1', 'newImport2'],
         '@scope/package',
       );
 
-      expect(mockTree.write).toHaveBeenCalledWith(
-        'file.ts',
-        expect.any(String),
-      );
-      const writtenContent = vi.mocked(mockTree.write).mock.calls[0][1];
+      const writtenContent = tree.read('file.ts', 'utf-8');
       expect(writtenContent).toMatch(
         /import\s*{\s*existingImport,\s*newImport1,\s*newImport2\s*}\s*from\s*["']@scope\/package["']/,
       );
@@ -61,21 +55,16 @@ describe('ast utils', () => {
 
     it('should handle aliased imports', () => {
       const initialContent = `import { existing } from '@scope/package';`;
-      vi.mocked(mockTree.exists).mockReturnValue(true);
-      vi.mocked(mockTree.read).mockReturnValue(initialContent);
+      tree.write('file.ts', initialContent);
 
       addDestructuredImport(
-        mockTree,
+        tree,
         'file.ts',
         ['original as alias'],
         '@scope/package',
       );
 
-      expect(mockTree.write).toHaveBeenCalledWith(
-        'file.ts',
-        expect.any(String),
-      );
-      const writtenContent = vi.mocked(mockTree.write).mock.calls[0][1];
+      const writtenContent = tree.read('file.ts', 'utf-8');
       expect(writtenContent).toMatch(
         /import\s*{\s*existing,\s*original\s+as\s+alias\s*}\s*from\s*["']@scope\/package["']/,
       );
@@ -83,25 +72,23 @@ describe('ast utils', () => {
 
     it('should not duplicate existing imports', () => {
       const initialContent = `import { existingImport } from '@scope/package';`;
-      vi.mocked(mockTree.exists).mockReturnValue(true);
-      vi.mocked(mockTree.read).mockReturnValue(initialContent);
+      tree.write('file.ts', initialContent);
 
       addDestructuredImport(
-        mockTree,
+        tree,
         'file.ts',
         ['existingImport'],
         '@scope/package',
       );
 
-      expect(mockTree.write).not.toHaveBeenCalled();
+      const writtenContent = tree.read('file.ts', 'utf-8');
+      expect(writtenContent).toBe(initialContent);
     });
 
     it('should throw if file does not exist', () => {
-      vi.mocked(mockTree.exists).mockReturnValue(false);
-
       expect(() =>
         addDestructuredImport(
-          mockTree,
+          tree,
           'nonexistent.ts',
           ['import1'],
           '@scope/package',
@@ -113,16 +100,11 @@ describe('ast utils', () => {
   describe('singleImport', () => {
     it('should add new default import', () => {
       const initialContent = `// Some content`;
-      vi.mocked(mockTree.exists).mockReturnValue(true);
-      vi.mocked(mockTree.read).mockReturnValue(initialContent);
+      tree.write('file.ts', initialContent);
 
-      addSingleImport(mockTree, 'file.ts', 'DefaultImport', '@scope/package');
+      addSingleImport(tree, 'file.ts', 'DefaultImport', '@scope/package');
 
-      expect(mockTree.write).toHaveBeenCalledWith(
-        'file.ts',
-        expect.any(String),
-      );
-      const writtenContent = vi.mocked(mockTree.write).mock.calls[0][1];
+      const writtenContent = tree.read('file.ts', 'utf-8');
       expect(writtenContent).toMatch(
         /import\s+DefaultImport\s+from\s*["']@scope\/package["']/,
       );
@@ -130,66 +112,55 @@ describe('ast utils', () => {
 
     it('should not duplicate existing default import', () => {
       const initialContent = `import DefaultImport from '@scope/package';`;
-      vi.mocked(mockTree.exists).mockReturnValue(true);
-      vi.mocked(mockTree.read).mockReturnValue(initialContent);
+      tree.write('file.ts', initialContent);
 
-      addSingleImport(mockTree, 'file.ts', 'DefaultImport', '@scope/package');
+      addSingleImport(tree, 'file.ts', 'DefaultImport', '@scope/package');
 
-      expect(mockTree.write).not.toHaveBeenCalled();
+      const writtenContent = tree.read('file.ts', 'utf-8');
+      expect(writtenContent).toBe(initialContent);
     });
   });
 
   describe('addStarExport', () => {
     it('should add star export if none exists', () => {
       const initialContent = `// Some content`;
-      vi.mocked(mockTree.exists).mockReturnValue(true);
-      vi.mocked(mockTree.read).mockReturnValue(initialContent);
+      tree.write('index.ts', initialContent);
 
-      addStarExport(mockTree, 'index.ts', './module');
+      addStarExport(tree, 'index.ts', './module');
 
-      expect(mockTree.write).toHaveBeenCalledWith(
-        'index.ts',
-        expect.stringContaining('export * from "./module"'),
-      );
+      const writtenContent = tree.read('index.ts', 'utf-8');
+      expect(writtenContent).toContain('export * from "./module"');
     });
 
     it('should not duplicate existing star export', () => {
       const initialContent = `export * from './module';`;
-      vi.mocked(mockTree.exists).mockReturnValue(true);
-      vi.mocked(mockTree.read).mockReturnValue(initialContent);
+      tree.write('index.ts', initialContent);
 
-      addStarExport(mockTree, 'index.ts', './module');
+      addStarExport(tree, 'index.ts', './module');
 
-      expect(mockTree.write).not.toHaveBeenCalled();
+      const writtenContent = tree.read('index.ts', 'utf-8');
+      expect(writtenContent).toBe(initialContent);
     });
 
     it('should create file if it does not exist', () => {
-      vi.mocked(mockTree.exists).mockReturnValue(false);
-      vi.mocked(mockTree.read).mockReturnValue('');
+      addStarExport(tree, 'index.ts', './module');
 
-      addStarExport(mockTree, 'index.ts', './module');
-
-      expect(mockTree.write).toHaveBeenCalledWith(
-        'index.ts',
-        expect.stringContaining('export * from "./module"'),
-      );
+      const writtenContent = tree.read('index.ts', 'utf-8');
+      expect(writtenContent).toContain('export * from "./module"');
     });
   });
 
   describe('replace', () => {
     it('should replace matching nodes', () => {
       const initialContent = `const x = 5;`;
-      vi.mocked(mockTree.exists).mockReturnValue(true);
-      vi.mocked(mockTree.read).mockReturnValue(initialContent);
+      tree.write('file.ts', initialContent);
 
-      replace(mockTree, 'file.ts', 'NumericLiteral', () =>
+      replace(tree, 'file.ts', 'NumericLiteral', () =>
         factory.createNumericLiteral('10'),
       );
 
-      expect(mockTree.write).toHaveBeenCalledWith(
-        'file.ts',
-        expect.stringContaining('const x = 10'),
-      );
+      const writtenContent = tree.read('file.ts', 'utf-8');
+      expect(writtenContent).toContain('const x = 10');
     });
 
     it('should replace multiple matching nodes', () => {
@@ -200,23 +171,20 @@ const d = 0;
 const e = 1;
 const f = 9999;
 `;
-      vi.mocked(mockTree.exists).mockReturnValue(true);
-      vi.mocked(mockTree.read).mockReturnValue(initialContent);
+      tree.write('file.ts', initialContent);
 
-      replace(mockTree, 'file.ts', 'NumericLiteral', () =>
+      replace(tree, 'file.ts', 'NumericLiteral', () =>
         factory.createNumericLiteral('100'),
       );
 
-      expect(mockTree.write).toHaveBeenCalledWith(
-        'file.ts',
-        expect.stringContaining(`const a = 100;
+      const writtenContent = tree.read('file.ts', 'utf-8');
+      expect(writtenContent).toContain(`const a = 100;
 const b = 100;
 const c = 100;
 const d = 100;
 const e = 100;
 const f = 100;
-`),
-      );
+`);
     });
 
     it('should preserve new lines', () => {
@@ -232,16 +200,14 @@ const e = 1;
 
 const f = 9999;
 `;
-      vi.mocked(mockTree.exists).mockReturnValue(true);
-      vi.mocked(mockTree.read).mockReturnValue(initialContent);
+      tree.write('file.ts', initialContent);
 
-      replace(mockTree, 'file.ts', 'NumericLiteral', () =>
+      replace(tree, 'file.ts', 'NumericLiteral', () =>
         factory.createNumericLiteral('100'),
       );
 
-      expect(mockTree.write).toHaveBeenCalledWith(
-        'file.ts',
-        `const a = 100;
+      const writtenContent = tree.read('file.ts', 'utf-8');
+      expect(writtenContent).toBe(`const a = 100;
 const b = 100;
 
 const c = 100;
@@ -252,18 +218,16 @@ const d = 100;
 const e = 100;
 
 const f = 100;
-`,
-      );
+`);
     });
 
     it('should handle transformers which mutate the given node', () => {
       const initialContent = `const x = () => {};
 const y = () => {};`;
-      vi.mocked(mockTree.exists).mockReturnValue(true);
-      vi.mocked(mockTree.read).mockReturnValue(initialContent);
+      tree.write('file.ts', initialContent);
 
       replace(
-        mockTree,
+        tree,
         'file.ts',
         'VariableDeclaration',
         (node: VariableDeclaration) => {
@@ -271,8 +235,7 @@ const y = () => {};`;
           const functionBody = arrowFunction.body as Block;
 
           // Create new arrow function with updated body
-          const newArrowFunction = factory.updateArrowFunction(
-            arrowFunction,
+          const newArrowFunction = factory.createArrowFunction(
             arrowFunction.modifiers,
             arrowFunction.typeParameters,
             arrowFunction.parameters,
@@ -295,8 +258,7 @@ const y = () => {};`;
           );
 
           // Update the variable declaration
-          return factory.updateVariableDeclaration(
-            node,
+          return factory.createVariableDeclaration(
             node.name,
             node.exclamationToken,
             node.type,
@@ -305,15 +267,13 @@ const y = () => {};`;
         },
       );
 
-      expect(mockTree.write).toHaveBeenCalledWith(
-        'file.ts',
-        `const x = () => {
+      const writtenContent = tree.read('file.ts', 'utf-8');
+      expect(writtenContent).toBe(`const x = () => {
     var hello = true;
 };
 const y = () => {
     var hello = true;
-};`,
-      );
+};`);
     });
 
     it('should replace only the parent node where nested updates are applied', () => {
@@ -321,11 +281,10 @@ const y = () => {
   const y = () => {};
 };
 `;
-      vi.mocked(mockTree.exists).mockReturnValue(true);
-      vi.mocked(mockTree.read).mockReturnValue(initialContent);
+      tree.write('file.ts', initialContent);
 
       replace(
-        mockTree,
+        tree,
         'file.ts',
         'VariableDeclaration',
         (node: VariableDeclaration) => {
@@ -333,8 +292,7 @@ const y = () => {
           const functionBody = arrowFunction.body as Block;
 
           // Create new arrow function with updated body
-          const newArrowFunction = factory.updateArrowFunction(
-            arrowFunction,
+          const newArrowFunction = factory.createArrowFunction(
             arrowFunction.modifiers,
             arrowFunction.typeParameters,
             arrowFunction.parameters,
@@ -357,8 +315,7 @@ const y = () => {
           );
 
           // Update the variable declaration
-          return factory.updateVariableDeclaration(
-            node,
+          return factory.createVariableDeclaration(
             node.name,
             node.exclamationToken,
             node.type,
@@ -367,14 +324,12 @@ const y = () => {
         },
       );
 
-      expect(mockTree.write).toHaveBeenCalledWith(
-        'file.ts',
-        `const x = () => {
+      const writtenContent = tree.read('file.ts', 'utf-8');
+      expect(writtenContent).toBe(`const x = () => {
     const y = () => { };
     var hello = true;
 };
-`,
-      );
+`);
     });
 
     it('should handle nested replacements that return the node unchanged', () => {
@@ -382,13 +337,12 @@ const y = () => {
   const y = () => {};
 };
 `;
-      vi.mocked(mockTree.exists).mockReturnValue(true);
-      vi.mocked(mockTree.read).mockReturnValue(initialContent);
+      tree.write('file.ts', initialContent);
 
-      replace(mockTree, 'file.ts', 'VariableDeclaration', (node) => node);
+      replace(tree, 'file.ts', 'VariableDeclaration', (node) => node);
 
-      // No changes should have been made
-      expect(mockTree.write).not.toHaveBeenCalled();
+      const writtenContent = tree.read('file.ts', 'utf-8');
+      expect(writtenContent).toBe(initialContent);
     });
 
     it('should handle nested replacements where a child node is changed', () => {
@@ -402,11 +356,10 @@ const y = () => {
   };
 };
 `;
-      vi.mocked(mockTree.exists).mockReturnValue(true);
-      vi.mocked(mockTree.read).mockReturnValue(initialContent);
+      tree.write('file.ts', initialContent);
 
       replace(
-        mockTree,
+        tree,
         'file.ts',
         'VariableDeclaration',
         (node: VariableDeclaration) => {
@@ -417,8 +370,7 @@ const y = () => {
           const functionBody = arrowFunction.body as Block;
 
           // Create new arrow function with updated body
-          const newArrowFunction = factory.updateArrowFunction(
-            arrowFunction,
+          const newArrowFunction = factory.createArrowFunction(
             arrowFunction.modifiers,
             arrowFunction.typeParameters,
             arrowFunction.parameters,
@@ -441,8 +393,7 @@ const y = () => {
           );
 
           // Update the variable declaration
-          return factory.updateVariableDeclaration(
-            node,
+          return factory.createVariableDeclaration(
             node.name,
             node.exclamationToken,
             node.type,
@@ -451,9 +402,8 @@ const y = () => {
         },
       );
 
-      expect(mockTree.write).toHaveBeenCalledWith(
-        'file.ts',
-        `const x = () => {
+      const writtenContent = tree.read('file.ts', 'utf-8');
+      expect(writtenContent).toBe(`const x = () => {
   const y = () => {
       const z = () => {
     const a = () => {
@@ -462,17 +412,15 @@ const y = () => {
 };
   };
 };
-`,
-      );
+`);
     });
 
     it('should throw if no matches found and errorIfNoMatches is true', () => {
       const initialContent = `const x = "string";`;
-      vi.mocked(mockTree.exists).mockReturnValue(true);
-      vi.mocked(mockTree.read).mockReturnValue(initialContent);
+      tree.write('file.ts', initialContent);
 
       expect(() =>
-        replace(mockTree, 'file.ts', 'NumericLiteral', () =>
+        replace(tree, 'file.ts', 'NumericLiteral', () =>
           factory.createNumericLiteral('10'),
         ),
       ).toThrow();
@@ -480,12 +428,11 @@ const y = () => {
 
     it('should not throw if no matches found and errorIfNoMatches is false', () => {
       const initialContent = `const x = "string";`;
-      vi.mocked(mockTree.exists).mockReturnValue(true);
-      vi.mocked(mockTree.read).mockReturnValue(initialContent);
+      tree.write('file.ts', initialContent);
 
       expect(() =>
         replace(
-          mockTree,
+          tree,
           'file.ts',
           'NumericLiteral',
           () => factory.createNumericLiteral('10'),
@@ -494,7 +441,7 @@ const y = () => {
       ).not.toThrow();
 
       expect(() =>
-        replaceIfExists(mockTree, 'file.ts', 'NumericLiteral', () =>
+        replaceIfExists(tree, 'file.ts', 'NumericLiteral', () =>
           factory.createNumericLiteral('10'),
         ),
       ).not.toThrow();
@@ -524,11 +471,10 @@ export const handler = awsLambdaRequestHandler({
 
 export type AppRouter = typeof appRouter;
 `;
-      vi.mocked(mockTree.exists).mockReturnValue(true);
-      vi.mocked(mockTree.read).mockReturnValue(initialContent);
+      tree.write('file.ts', initialContent);
 
       replace(
-        mockTree,
+        tree,
         'file.ts',
         'CallExpression[expression.name="router"] > ObjectLiteralExpression',
         (node) =>
@@ -538,9 +484,8 @@ export type AppRouter = typeof appRouter;
           ]),
       );
 
-      expect(mockTree.write).toHaveBeenCalledWith(
-        'file.ts',
-        expect.stringContaining(`import {
+      const writtenContent = tree.read('file.ts', 'utf-8');
+      expect(writtenContent).toContain(`import {
   awsLambdaRequestHandler,
   CreateAWSLambdaContextOptions,
 } from '@trpc/server/adapters/aws-lambda';
@@ -560,13 +505,99 @@ export const handler = awsLambdaRequestHandler({
 });
 
 export type AppRouter = typeof appRouter;
-`),
+`);
+
+      expect(writtenContent).toContain(`foo`);
+    });
+
+    it('should not duplicate comments', () => {
+      const initialContent = `
+// some comment
+interface MyInterface {
+    property: string;
+}
+`;
+      tree.write('file.ts', initialContent);
+
+      replace(
+        tree,
+        'file.ts',
+        'InterfaceDeclaration',
+        (node: InterfaceDeclaration) =>
+          factory.createInterfaceDeclaration(
+            node.modifiers,
+            node.name,
+            node.typeParameters,
+            node.heritageClauses,
+            [
+              ...node.members,
+              factory.createPropertySignature(
+                undefined,
+                'anotherProperty',
+                undefined,
+                factory.createKeywordTypeNode(SyntaxKind.NumberKeyword),
+              ),
+            ],
+          ),
       );
 
-      expect(mockTree.write).toHaveBeenCalledWith(
-        'file.ts',
-        expect.stringContaining(`foo`),
+      const writtenContent = tree.read('file.ts', 'utf-8');
+      expect(writtenContent).toContain(`// some comment
+interface MyInterface {
+    property: string;
+    anotherProperty: number;
+}
+`);
+      expect(writtenContent.indexOf('some comment')).toEqual(
+        writtenContent.lastIndexOf('some comment'),
       );
+    });
+
+    it('should not duplicate comments when replacing interface with preceding interface', () => {
+      // This simulates what the file would look like with a prepended interface
+      const contentWithPrependedInterface = `export interface FirstInterface {
+    prop1: string;
+    prop2: number;
+}
+// some comment
+export interface MyInterface {
+    property: string;
+}`;
+
+      tree.write('file.ts', contentWithPrependedInterface);
+
+      replace(
+        tree,
+        'file.ts',
+        'InterfaceDeclaration[name.text="MyInterface"]',
+        (node: InterfaceDeclaration) => {
+          return factory.createInterfaceDeclaration(
+            node.modifiers,
+            node.name,
+            node.typeParameters,
+            node.heritageClauses,
+            [
+              ...node.members,
+              factory.createPropertySignature(
+                undefined,
+                factory.createIdentifier('anotherProperty'),
+                undefined,
+                factory.createKeywordTypeNode(SyntaxKind.NumberKeyword),
+              ),
+            ],
+          );
+        },
+      );
+
+      const writtenContent = tree.read('file.ts', 'utf-8');
+
+      // Check that the comment appears only once
+      expect(writtenContent.indexOf('some comment')).toEqual(
+        writtenContent.lastIndexOf('some comment'),
+      );
+
+      // Verify the transformation worked
+      expect(writtenContent).toContain('anotherProperty: number');
     });
   });
 
@@ -718,6 +749,290 @@ export type AppRouter = typeof appRouter;
     it('should return false when type alias does not exist', () => {
       const source = `type OtherType = string;`;
       expect(hasExportDeclaration(source, 'MyType')).toBe(false);
+    });
+  });
+
+  describe('prependStatements', () => {
+    it('should prepend statements to the beginning of a file', () => {
+      const initialContent = `const existing = 'value';
+console.log(existing);`;
+      tree.write('file.ts', initialContent);
+
+      const newStatement = factory.createVariableStatement(
+        undefined,
+        factory.createVariableDeclarationList([
+          factory.createVariableDeclaration(
+            'prepended',
+            undefined,
+            undefined,
+            factory.createStringLiteral('new value'),
+          ),
+        ]),
+      );
+
+      prependStatements(tree, 'file.ts', [newStatement]);
+
+      const writtenContent = tree.read('file.ts', 'utf-8');
+      expect(writtenContent).toContain('var prepended = "new value";');
+      expect(writtenContent.indexOf('var prepended')).toBeLessThan(
+        writtenContent.indexOf('const existing'),
+      );
+    });
+
+    it('should prepend multiple statements in order', () => {
+      const initialContent = `const existing = 'value';`;
+      tree.write('file.ts', initialContent);
+
+      const firstStatement = factory.createVariableStatement(
+        undefined,
+        factory.createVariableDeclarationList([
+          factory.createVariableDeclaration(
+            'first',
+            undefined,
+            undefined,
+            factory.createStringLiteral('first'),
+          ),
+        ]),
+      );
+
+      const secondStatement = factory.createVariableStatement(
+        undefined,
+        factory.createVariableDeclarationList([
+          factory.createVariableDeclaration(
+            'second',
+            undefined,
+            undefined,
+            factory.createStringLiteral('second'),
+          ),
+        ]),
+      );
+
+      prependStatements(tree, 'file.ts', [firstStatement, secondStatement]);
+
+      const writtenContent = tree.read('file.ts', 'utf-8');
+      expect(writtenContent.indexOf('var first')).toBeLessThan(
+        writtenContent.indexOf('var second'),
+      );
+      expect(writtenContent.indexOf('var second')).toBeLessThan(
+        writtenContent.indexOf('const existing'),
+      );
+    });
+
+    it('should not duplicate comments when prepending statements', () => {
+      const initialContent = `// some comment
+interface MyInterface {
+    property: string;
+}`;
+      tree.write('file.ts', initialContent);
+
+      const newStatement = factory.createVariableStatement(
+        undefined,
+        factory.createVariableDeclarationList([
+          factory.createVariableDeclaration(
+            'newVar',
+            undefined,
+            undefined,
+            factory.createStringLiteral('value'),
+          ),
+        ]),
+      );
+
+      prependStatements(tree, 'file.ts', [newStatement]);
+
+      const writtenContent = tree.read('file.ts', 'utf-8');
+
+      // Check that the comment appears only once
+      const commentMatches = writtenContent.match(/\/\/ some comment/g);
+      expect(commentMatches).toHaveLength(1);
+
+      // Check that the new statement is before the comment and interface
+      expect(writtenContent.indexOf('var newVar')).toBeLessThan(
+        writtenContent.indexOf('// some comment'),
+      );
+      expect(writtenContent.indexOf('// some comment')).toBeLessThan(
+        writtenContent.indexOf('interface MyInterface'),
+      );
+    });
+
+    it('should handle empty file', () => {
+      tree.write('empty.ts', '');
+
+      const newStatement = factory.createVariableStatement(
+        undefined,
+        factory.createVariableDeclarationList([
+          factory.createVariableDeclaration(
+            'newVar',
+            undefined,
+            undefined,
+            factory.createStringLiteral('value'),
+          ),
+        ]),
+      );
+
+      prependStatements(tree, 'empty.ts', [newStatement]);
+
+      const writtenContent = tree.read('empty.ts', 'utf-8');
+      expect(writtenContent).toContain('var newVar = "value";');
+    });
+
+    it('should throw if file does not exist', () => {
+      const newStatement = factory.createVariableStatement(
+        undefined,
+        factory.createVariableDeclarationList([
+          factory.createVariableDeclaration(
+            'newVar',
+            undefined,
+            undefined,
+            factory.createStringLiteral('value'),
+          ),
+        ]),
+      );
+
+      expect(() =>
+        prependStatements(tree, 'nonexistent.ts', [newStatement]),
+      ).toThrow('No file located at nonexistent.ts');
+    });
+  });
+
+  describe('appendStatements', () => {
+    it('should append statements to the end of a file', () => {
+      const initialContent = `const existing = 'value';
+console.log(existing);`;
+      tree.write('file.ts', initialContent);
+
+      const newStatement = factory.createVariableStatement(
+        undefined,
+        factory.createVariableDeclarationList([
+          factory.createVariableDeclaration(
+            'appended',
+            undefined,
+            undefined,
+            factory.createStringLiteral('new value'),
+          ),
+        ]),
+      );
+
+      appendStatements(tree, 'file.ts', [newStatement]);
+
+      const writtenContent = tree.read('file.ts', 'utf-8');
+      expect(writtenContent).toContain('var appended = "new value";');
+      expect(writtenContent.indexOf('const existing')).toBeLessThan(
+        writtenContent.indexOf('var appended'),
+      );
+    });
+
+    it('should append multiple statements in order', () => {
+      const initialContent = `const existing = 'value';`;
+      tree.write('file.ts', initialContent);
+
+      const firstStatement = factory.createVariableStatement(
+        undefined,
+        factory.createVariableDeclarationList([
+          factory.createVariableDeclaration(
+            'first',
+            undefined,
+            undefined,
+            factory.createStringLiteral('first'),
+          ),
+        ]),
+      );
+
+      const secondStatement = factory.createVariableStatement(
+        undefined,
+        factory.createVariableDeclarationList([
+          factory.createVariableDeclaration(
+            'second',
+            undefined,
+            undefined,
+            factory.createStringLiteral('second'),
+          ),
+        ]),
+      );
+
+      appendStatements(tree, 'file.ts', [firstStatement, secondStatement]);
+
+      const writtenContent = tree.read('file.ts', 'utf-8');
+      expect(writtenContent.indexOf('const existing')).toBeLessThan(
+        writtenContent.indexOf('var first'),
+      );
+      expect(writtenContent.indexOf('var first')).toBeLessThan(
+        writtenContent.indexOf('var second'),
+      );
+    });
+
+    it('should preserve existing comments when appending statements', () => {
+      const initialContent = `// some comment
+interface MyInterface {
+    property: string;
+}`;
+      tree.write('file.ts', initialContent);
+
+      const newStatement = factory.createVariableStatement(
+        undefined,
+        factory.createVariableDeclarationList([
+          factory.createVariableDeclaration(
+            'newVar',
+            undefined,
+            undefined,
+            factory.createStringLiteral('value'),
+          ),
+        ]),
+      );
+
+      appendStatements(tree, 'file.ts', [newStatement]);
+
+      const writtenContent = tree.read('file.ts', 'utf-8');
+
+      // Check that the comment appears only once
+      const commentMatches = writtenContent.match(/\/\/ some comment/g);
+      expect(commentMatches).toHaveLength(1);
+
+      // Check that the new statement is after the interface
+      expect(writtenContent.indexOf('// some comment')).toBeLessThan(
+        writtenContent.indexOf('interface MyInterface'),
+      );
+      expect(writtenContent.indexOf('interface MyInterface')).toBeLessThan(
+        writtenContent.indexOf('var newVar'),
+      );
+    });
+
+    it('should handle empty file', () => {
+      tree.write('empty.ts', '');
+
+      const newStatement = factory.createVariableStatement(
+        undefined,
+        factory.createVariableDeclarationList([
+          factory.createVariableDeclaration(
+            'newVar',
+            undefined,
+            undefined,
+            factory.createStringLiteral('value'),
+          ),
+        ]),
+      );
+
+      appendStatements(tree, 'empty.ts', [newStatement]);
+
+      const writtenContent = tree.read('empty.ts', 'utf-8');
+      expect(writtenContent).toContain('var newVar = "value";');
+    });
+
+    it('should throw if file does not exist', () => {
+      const newStatement = factory.createVariableStatement(
+        undefined,
+        factory.createVariableDeclarationList([
+          factory.createVariableDeclaration(
+            'newVar',
+            undefined,
+            undefined,
+            factory.createStringLiteral('value'),
+          ),
+        ]),
+      );
+
+      expect(() =>
+        appendStatements(tree, 'nonexistent.ts', [newStatement]),
+      ).toThrow('No file located at nonexistent.ts');
     });
   });
 });
