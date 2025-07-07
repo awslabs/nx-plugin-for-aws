@@ -23,8 +23,8 @@ export const addGeneratorGuideTool = (
     'Tool to retrieve detailed information about a specific generator.',
     {
       packageManager: PackageManagerSchema,
-      generator: z.custom<string>((v) =>
-        generators.map((g) => g.id).includes(v),
+      generator: z.custom<string>(
+        (v) => typeof v === 'string' && generators.map((g) => g.id).includes(v),
       ),
     },
     async ({ packageManager, generator: generatorId }) => {
