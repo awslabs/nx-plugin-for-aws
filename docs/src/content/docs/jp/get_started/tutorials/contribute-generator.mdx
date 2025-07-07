@@ -29,7 +29,7 @@ import nxGraphPng from '@assets/nx-graph.png';
 import gameSelectPng from '@assets/game-select.png';
 import gameConversationPng from '@assets/game-conversation.png';
 
-`@aws/nx-plugin`向けの新しいジェネレーターを作成して、tRPC API用のプロシージャを生成してみましょう。
+`@aws/nx-plugin` に新しいジェネレータを作成して貢献しましょう。今回の目的はtRPC API向けの新しいプロシージャを生成する機能を追加することです。
 
 ### プラグインのチェックアウト
 
@@ -39,7 +39,7 @@ import gameConversationPng from '@assets/game-conversation.png';
 git clone git@github.com:awslabs/nx-plugin-for-aws.git
 ```
 
-依存関係のインストールとビルド：
+次にインストールとビルド：
 
 ```bash
 cd nx-plugin-for-aws
@@ -47,11 +47,11 @@ pnpm i
 pnpm nx run-many --target build --all
 ```
 
-### 空のジェネレーター作成
+### 空のジェネレータ作成
 
-新しいジェネレーターを`packages/nx-plugin/src/trpc/procedure`に作成します。
+新しいジェネレータを `packages/nx-plugin/src/trpc/procedure` に作成します。
 
-ジェネレーター作成用のジェネレーターを利用してスキャフォールディングできます：
+新しいジェネレータを素早く作成するためのジェネレータを用意しています！以下のコマンドで実行できます：
 
 <RunGenerator generator="ts#nx-generator" requiredParameters={{ pluginProject: '@aws/nx-plugin', name: 'ts#trpc-api#procedure', directory: 'trpc/procedure', description: 'Adds a procedure to a tRPC API' }} />
 
@@ -59,16 +59,16 @@ pnpm nx run-many --target build --all
 
 <FileTree>
   - packages/nx-plugin/src/trpc/procedure
-    - schema.json ジェネレーターの入力スキーマ定義
+    - schema.json ジェネレータの入力定義
     - schema.d.ts スキーマに対応するTypeScriptインターフェース
-    - generator.ts ジェネレーター実行関数
-    - generator.spec.ts テストコード
+    - generator.ts Nxが実行するジェネレータ関数
+    - generator.spec.ts ジェネレータのテスト
   - docs/src/content/docs/guides/
-    - trpc-procedure.mdx ジェネレーターのドキュメント
-  - packages/nx-plugin/generators.json ジェネレーター登録情報
+    - trpc-procedure.mdx ジェネレータのドキュメンテーション
+  - packages/nx-plugin/generators.json ジェネレータ定義の更新
 </FileTree>
 
-ジェネレーターに必要なプロパティをスキーマに追加します：
+ジェネレータに必要なプロパティをスキーマに追加します：
 
 <Tabs>
   <TabItem label="schema.json">
@@ -81,21 +81,21 @@ pnpm nx run-many --target build --all
       "properties": {
         "project": {
           "type": "string",
-          "description": "tRPC API project",
-          "x-prompt": "Select the tRPC API project to add the procedure to",
+          "description": "tRPC APIプロジェクト",
+          "x-prompt": "プロシージャを追加するtRPC APIプロジェクトを選択",
           "x-dropdown": "projects",
           "x-priority": "important"
         },
         "procedure": {
-          "description": "The name of the new procedure",
+          "description": "新規プロシージャ名",
           "type": "string",
-          "x-prompt": "What would you like to call your new procedure?",
+          "x-prompt": "新規プロシージャの名前を入力",
           "x-priority": "important",
         },
         "type": {
-          "description": "The type of procedure to generate",
+          "description": "生成するプロシージャのタイプ",
           "type": "string",
-          "x-prompt": "What type of procedure would you like to generate?",
+          "x-prompt": "プロシージャのタイプを選択",
           "x-priority": "important",
           "default": "query",
           "enum": ["query", "mutation"]
@@ -117,10 +117,10 @@ pnpm nx run-many --target build --all
 </Tabs>
 
 :::note
-ジェネレーターには入力として`Tree`とスキーマで定義したオプションが渡されます。`Tree`は仮想ファイルシステムを表し、ドライラン実行時にも実際のファイルシステムに影響を与えません。
+ジェネレータは入力として `Tree` とスキーマで定義したオプションを受け取ります。`Tree` は仮想ファイルシステムで、プロジェクトファイルの作成・更新に使用します。ユーザーが「dry-run」モードで実行した場合に実際のファイルシステムに影響を与えないよう、直接的なファイル操作は行いません。
 :::
 
-`packages/nx-plugin/generators.json`にジェネレーターが登録されています：
+`packages/nx-plugin/generators.json` にジェネレータが登録されています：
 
 ```json
  ...
@@ -135,39 +135,51 @@ pnpm nx run-many --target build --all
 ...
 ```
 
-### ジェネレーターの実装
+### ジェネレータの実装
 
-tRPC APIにプロシージャを追加するには：
+tRPC APIにプロシージャを追加するには2つの作業が必要です：
 
 1. 新しいプロシージャ用TypeScriptファイルの作成
-2. ルーターへのプロシージャ登録
+2. ルーターへのプロシージャ追加
 
-#### プロシージャファイルの作成
+#### 新規プロシージャ作成
 
-`generateFiles`ユーティリティとEJSテンプレートを使用します。テンプレートは`packages/nx-plugin/src/trpc/procedure/files/procedures/__procedureNameKebabCase__.ts.template`に配置：
+`generateFiles` ユーティリティを使用してEJSテンプレートをレンダリングします。テンプレートはユーザーが選択したオプションに基づいて変数を展開します。
+
+テンプレートファイル `packages/nx-plugin/src/trpc/procedure/files/procedures/__procedureNameKebabCase__.ts.template` を作成：
 
 ```ts title="files/procedures/__procedureNameKebabCase__.ts.template"
 import { publicProcedure } from '../init.js';
-import { z } from 'zod';
+import { z } from 'zod/v4';
 
 export const <%- procedureNameCamelCase %> = publicProcedure
   .input(z.object({
-    // TODO: define input
+    // TODO: 入力定義
   }))
   .output(z.object({
-    // TODO: define output
+    // TODO: 出力定義
   }))
   .<%- procedureType %>(async ({ input, ctx }) => {
-    // TODO: implement!
+    // TODO: 実装
     return {};
   });
 ```
 
 :::tip
-`generateFiles`はファイル名の`__<変数>__`を置換し、`.template`拡張子を除去します。テンプレート内ではEJS構文を使用します。
+`generateFiles` はファイル/ディレクトリ名の `__<変数>__` を置換し、`.template` 拡張子を除去します。
+
+テンプレートコンテンツは [EJS](https://ejs.co/) 構文を使用します。
 :::
 
-テンプレートで使用する変数を渡すため、ジェネレーターを更新：
+テンプレートで参照している3つの変数：
+
+- `procedureNameCamelCase`
+- `procedureNameKebabCase`
+- `procedureType`
+
+これらを `generateFiles` に渡す必要があります。ユーザーが選択したプロジェクトのソースルート（`sourceRoot`）をプロジェクト設定から取得します。
+
+ジェネレータを更新：
 
 ```ts title="procedure/generator.ts" {8-19}
 import {
@@ -208,14 +220,14 @@ export default trpcProcedureGenerator;
 ```
 
 :::tip
-`formatFilesInSubtree`で生成ファイルの自動フォーマットを実施します。
+`formatFilesInSubtree` を呼び出すことで、作成・変更したファイルをユーザーの [prettier](https://prettier.io/) 設定に従ってフォーマットします。
 :::
 
 #### ルーターへのプロシージャ追加
 
-TypeScript AST操作でソースコードを更新：
+TypeScript AST操作でソースファイルを更新します。`replace` と `destructuredImport` ヘルパーを使用します。
 
-```ts title="procedure/generator.ts" {6,23-33}
+```ts title="procedure/generator.ts" {6, 23-33}
 import {
   generateFiles,
   joinPathFragments,
@@ -276,32 +288,38 @@ export default trpcProcedureGenerator;
 ```
 
 :::tip
-`replace`関数は[tsquery](https://github.com/phenomnomnominal/tsquery)セレクターを使用します。テストには[tsquery playground](https://tsquery-playground.firebaseapp.com/)が便利です。
+上記の `replace` は [tsquery](https://github.com/phenomnomnominal/tsquery) セレクタを使用して `router` 関数の引数を検索します。
+
+[tsquery playground](https://tsquery-playground.firebaseapp.com/) でセレクタのテストが可能です。
 :::
 
-ジェネレーターをコンパイル：
+ジェネレータをコンパイル：
 
 ```bash
 pnpm nx run @aws/nx-plugin:compile
 ```
 
-### ジェネレーターのテスト
+### ジェネレータのテスト
 
-#### テストプロジェクトの作成
+ローカルのNx Plugin for AWSを既存コードベースにリンクしてテストします。
+
+#### tRPC APIを含むテストプロジェクト作成
 
 :::note
-<Link path="get_started/tutorials/dungeon_game/overview">ダンジョンアドベンチャーチュートリアル</Link>を完了済みの場合はこの手順をスキップできます。
+<Link path="get_started/tutorials/dungeon_game/overview">ダンジョンアドベンチャーチュートリアル</Link>を完了済み、またはtRPC APIを使用する既存のNxワークスペースがある場合はこのステップをスキップできます。
 :::
 
-新規ワークスペース作成：
+別ディレクトリで新規ワークスペースを作成：
 
 <CreateNxWorkspaceCommand workspace="trpc-generator-test" />
 
-tRPC API生成：
+tRPC APIを生成：
 
 <RunGenerator generator="ts#trpc-api" requiredParameters={{apiName:"test-api"}} noInteractive />
 
 #### ローカルプラグインのリンク
+
+`@aws/nx-plugin` をリンク：
 
 <LinkCommand
   dependency="@aws/nx-plugin"
@@ -310,31 +328,47 @@ tRPC API生成：
 />
 
 :::note
-コンパイル済みの`dist`ディレクトリを指定します。
+ソースコードではなく `dist/packages/nx-plugin` のコンパイル済みプラグインをリンクします。
 :::
 
-#### ジェネレーターの実行
+#### ジェネレータの実行
+
+新規ジェネレータを実行：
 
 <RunGenerator generator="ts#trpc-api#procedure" />
 
 :::note
-VSCodeでジェネレーターが表示されない場合、ワークスペースのリフレッシュが必要です：
+VSCodeでジェネレータが表示されない場合、Nxワークスペースのリフレッシュが必要です：
 
 <NxCommands commands={['reset']} />
 :::
 
-### 発展課題
+成功すると、新しいプロシージャが生成され `router.ts` に追加されます。
 
-#### 1. ネストされた操作
-- `procedure`入力でドット表記をサポート（例：`games.query`）
-- ネストされたルーターの生成・更新
+### 演習
+
+さらに時間がある方は、ジェネレータに以下の機能を追加してみてください：
+
+#### 1. ネスト化操作
+
+ドット表記の `procedure` 入力（例：`games.query`）をサポート：
+
+- 逆ドット表記のプロシージャ名生成（例：`queryGames`）
+- 適切なネスト化ルーターの追加/更新
 
 #### 2. バリデーション
-- tRPC API以外のプロジェクト選択防止
+
+tRPC APIでないプロジェクトが選択された場合の防御処理を追加。`api-connection` ジェネレータを参考にしてください。
 
 #### 3. ユニットテスト
-- テストツリーの作成
-- ファイル生成の検証
+
+ジェネレータのユニットテスト実装：
+
+1. `createTreeUsingTsSolutionSetup()` で空ワークスペース作成
+2. 既存ファイル（`project.json` や `src/router.ts`）をツリーに追加
+3. ジェネレータ実行
+4. 期待通りの変更を検証
 
 #### 4. E2Eテスト
-- スモークテストの拡張
+
+現在の「smoke test」を更新して新規ジェネレータを含める。すべてのジェネレータのビルド成功を確認します。
