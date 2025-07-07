@@ -40,6 +40,41 @@ GitHub provides additional document on [forking a repository](https://help.githu
 
 For a detailed guide on contributing a generator, check out the [Contributing a Generator tutorial here](https://awslabs.github.io/nx-plugin-for-aws/get_started/tutorials/contribute-generator).
 
+### Documentation Translation
+
+The project supports automatic translation of documentation using AWS Bedrock's Deepseek & Haiku 3.5 models. Documentation is translated from English to multiple languages (currently Japanese, with support for French, Spanish, German, Chinese, and Korean).
+
+> **_NOTE:_** It is important that only files in english (en folder) are modified directly as the translated files are generating using english as a base.
+
+#### Running Translations Locally
+
+> **_NOTE:_** Ensure you have your aws cli configured to an AWS account with DeepSeek/Haiku 3.5 Bedrock model access before continuing.
+
+To translate documentation locally:
+
+```bash
+# Translate only changed files
+pnpm tsx ./scripts/translate.ts
+
+# Translate all files
+pnpm tsx ./scripts/translate.ts --all
+
+# Translate to specific languages
+pnpm tsx ./scripts/translate.ts --languages jp,fr,es
+
+# Show what would be translated without actually translating
+pnpm tsx ./scripts/translate.ts --dry-run
+```
+
+#### GitHub Workflow
+
+A GitHub workflow automatically translates documentation when changes are made to English documentation files in pull requests. The workflow:
+
+1. Detects changes to English documentation files
+2. Translates the changed files using DeepSeek and Haiku 3.5 on AWS Bedrock
+3. Commits the translations back to the source branch
+4. Updates the PR with files translated
+
 ## Finding contributions to work on
 
 Looking at the existing issues is a great way to find something to contribute on. As our projects, by default, use the default GitHub issue labels (enhancement/bug/duplicate/help wanted/invalid/question/wontfix), looking at any 'help wanted' issues is a great place to start.
