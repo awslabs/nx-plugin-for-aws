@@ -57,7 +57,8 @@
 - `ts#cloudscape-website#auth` - Add AWS Cognito authentication to your Cloudscape website.
 - `ts#trpc-api` - Generate a tRPC backend service with Amazon API Gateway/AWS Lambda integrations and [AWS Powertools](https://github.com/aws-powertools/powertools-lambda-typescript) pre-configured.
 - `ts#nx-generator` - Add an [Nx Generator](https://nx.dev/features/generate-code) to a TypeScript project.
-- `ts#mcp-server` - Generate a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server in TypeScript.
+- `ts#mcp-server` - Add a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server to a TypeScript project.
+- `ts#lambda-function` - Generate a TypeScript lambda function with optional type-safe event sources.
 - `py#project` - Generate a uv based Python project.
 - `py#fast-api` - Generate a FastAPI backend service with [AWS Powertools](https://github.com/aws-powertools/powertools-lambda-python) pre-configured.
 - `py#lambda-function` - Add a lambda function to an existing python project with optional type-safe event sources.
@@ -68,35 +69,10 @@
 
 @aws/nx-plugin has been designed for gradual adoption from the start, and **you can use as little or as much of it as you need**.
 
-1. Create a new NX workspace
-
-```bash
-npx create-nx-workspace@~20.6.3 demo --pm=pnpm --preset=@aws/nx-plugin --ci=skip
-cd demo
-```
-
-2. Add components:
-
-```bash
-# Generate a tRPC API backend
-pnpm nx g @aws/nx-plugin:ts#trpc-api
-
-# Generate a Cloudscape website
-pnpm nx g @aws/nx-plugin:ts#cloudscape-website
-
-# Connect the frontend to the backend
-pnpm nx g @aws/nx-plugin:api-connection
-
-# Add authentication to your website
-pnpm nx g @aws/nx-plugin:ts#cloudscape-website#auth
-
-# Generate AWS CDK infrastructure
-pnpm nx g @aws/nx-plugin:ts#infra
-```
+Follow the [Quick Start](https://awslabs.github.io/nx-plugin-for-aws/en/get_started/quick-start) guide to create a workspace and add projects.
 
 ### Additional resources
 
-- Use [Quick Start](https://awslabs.github.io/nx-plugin-for-aws/en/get_started/quick-start/) to get a taste of @aws/nx-plugin.
 - [Build a Dungeon Adventure Game](https://awslabs.github.io/nx-plugin-for-aws/en/get_started/tutorials/dungeon-game/overview/) to get an in-depth guided tutorial on how to use the @aws/nx-plugin.
 - [Add @aws/nx-plugin to your existing project](https://awslabs.github.io/nx-plugin-for-aws/en/get_started/tutorials/existing-project/)
 
@@ -123,41 +99,6 @@ Example configuration for Amazon Q CLI MCP (`~/.aws/amazonq/mcp.json`):
 If you have issues such as `ENOENT npx`, replace the command with `/full/path/to/npx` (use `which npx` to find this).
 
 For more details, [take a look at the guide here](https://awslabs.github.io/nx-plugin-for-aws/en/get_started/building-with-ai/)
-
-## Documentation Translation
-
-The project supports automatic translation of documentation using AWS Bedrock's Deepseek & Haiku 3.5 models. Documentation is translated from English to multiple languages (currently Japanese, with support for French, Spanish, German, Chinese, and Korean).
-
-> **_NOTE:_** It is important that only files in english (en folder) are modified directly as the translated files are generating using english as a base.
-
-### Running Translations Locally
-
-> **_NOTE:_** Ensure you have your aws cli configured to an AWS account with DeepSeek/Haiku 3.5 Bedrock model access before continuing.
-
-To translate documentation locally:
-
-```bash
-# Translate only changed files
-pnpm tsx ./scripts/translate.ts
-
-# Translate all files
-pnpm tsx ./scripts/translate.ts --all
-
-# Translate to specific languages
-pnpm tsx ./scripts/translate.ts --languages jp,fr,es
-
-# Show what would be translated without actually translating
-pnpm tsx ./scripts/translate.ts --dry-run
-```
-
-### GitHub Workflow
-
-A GitHub workflow automatically translates documentation when changes are made to English documentation files in pull requests. The workflow:
-
-1. Detects changes to English documentation files
-2. Translates the changed files using DeepSeek and Haiku 3.5 on AWS Bedrock
-3. Commits the translations back to the source branch
-4. Updates the PR with files translated
 
 ## Contributing
 
