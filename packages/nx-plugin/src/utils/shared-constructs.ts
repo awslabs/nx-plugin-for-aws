@@ -21,6 +21,7 @@ import {
   SHARED_CONSTRUCTS_DIR,
   SHARED_CONSTRUCTS_NAME,
 } from './shared-constructs-constants';
+import { readAwsNxPluginConfig } from './config/utils';
 
 export async function sharedConstructsGenerator(tree: Tree) {
   const npmScopePrefix = getNpmScopePrefix(tree);
@@ -81,6 +82,7 @@ export async function sharedConstructsGenerator(tree: Tree) {
       {
         npmScopePrefix,
         scopeAlias: toScopeAlias(npmScopePrefix),
+        tags: (await readAwsNxPluginConfig(tree))?.tags ?? [],
       },
       {
         overwriteStrategy: OverwriteStrategy.KeepExisting,

@@ -13,4 +13,9 @@ export interface AwsNxPluginConfig {
    * Configuration for the license sync generator
    */
   license?: LicenseConfig;
+
+  /**
+   * List of tags
+   */
+  tags?: string[];
 }
