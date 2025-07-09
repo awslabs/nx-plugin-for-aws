@@ -110,7 +110,7 @@ export const presetGenerator = async (
     isAmazonian() &&
     !process.env.VITEST &&
     !process.env.CI &&
-    !process.env.NX_DRY_RUN
+    process.env.NX_DRY_RUN !== 'true'
   ) {
     const { engagementId } = await enquirer.prompt<{ engagementId?: string }>([
       {
