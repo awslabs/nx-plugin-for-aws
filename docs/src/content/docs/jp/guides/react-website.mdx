@@ -1,0 +1,239 @@
+---
+title: "Reactウェブサイト"
+description: "Reactウェブサイトのリファレンスドキュメント"
+---
+
+
+
+import { FileTree, Steps } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+
+このジェネレータは、[CloudScape](http://cloudscape.design/)が設定された新しい[React](https://react.dev/)ウェブサイトと、[S3](https://aws.amazon.com/s3/)でホストされた静的ウェブサイトを[CloudFront](https://aws.amazon.com/cloudfront/)で配信し、[WAF](https://aws.amazon.com/waf/)で保護するクラウドデプロイ用のAWS CDKインフラストラクチャを作成します。
+
+生成されるアプリケーションはビルドツールとバンドラーとして[Vite](https://vite.dev/)を使用し、型安全なルーティングに[TanStack Router](https://tanstack.com/router/v1)を採用しています。
+
+:::note
+このジェネレータはCloudScapeをセットアップしますが、本質的にはReactプロジェクトジェネレータです。必要に応じて、別のデザインシステムやコンポーネントライブラリに変更することが可能です。
+:::
+
+## 使用方法
+
+### Reactウェブサイトの生成
+
+新しいReactウェブサイトを2つの方法で生成できます:
+
+<RunGenerator generator="ts#react-website" />
+
+### オプション
+
+<GeneratorParameters generator="ts#react-website" />
+
+## ジェネレータの出力
+
+ジェネレータは`<directory>/<name>`ディレクトリに以下のプロジェクト構造を作成します:
+
+<FileTree>
+  - index.html HTMLエントリーポイント
+  - public 静的アセット
+  - src
+    - main.tsx Reactセットアップを含むアプリケーションエントリーポイント
+    - config.ts アプリケーション設定（ロゴなど）
+    - components
+      - AppLayout CloudScapeレイアウトとナビゲーションバー用コンポーネント
+    - hooks
+      - useAppLayout.tsx ネストされたコンポーネントからAppLayoutを調整するフック
+    - routes
+      - welcome
+        - index.tsx @tanstack/react-router用のサンプルルート（ページ）
+    - styles.css グローバルスタイル
+  - vite.config.ts ViteとVitestの設定
+  - tsconfig.json ソースとテスト用の基本TypeScript設定
+  - tsconfig.app.json ソースコード用TypeScript設定
+  - tsconfig.spec.json テスト用TypeScript設定
+</FileTree>
+
+また、`packages/common/constructs`ディレクトリにウェブサイトデプロイ用のCDKインフラストラクチャコードを作成します:
+
+<FileTree>
+  - src
+    - app
+      - static-websites
+        - \<name>.ts ウェブサイト固有のインフラストラクチャ
+    - core
+      - static-website.ts 汎用StaticWebsiteコンストラクト
+</FileTree>
+
+## Reactウェブサイトの実装
+
+[Reactドキュメント](https://react.dev/learn)はReact開発の基本を学ぶのに最適です。[CloudScapeドキュメント](https://cloudscape.design/components/)では利用可能なコンポーネントとその使用方法を確認できます。
+
+### ルート
+
+#### ルート/ページの作成
+
+CloudScapeウェブサイトにはデフォルトで[TanStack Router](https://tanstack.com/router/v1)が設定されています。新しいルートの追加が簡単です:
+
+<Steps>
+  1. [ローカル開発サーバーを起動](#local-development-server)
+  2. `src/routes`に新しい`<page-name>.tsx`ファイルを作成（ファイルツリーの位置がパスを表現）
+  3. `Route`と`RouteComponent`が自動生成されます。ここでページの構築を開始できます！
+</Steps>
+
+#### ページ間ナビゲーション
+
+`Link`コンポーネントまたは`useNavigate`フックを使用してページ間を移動できます:
+
+```tsx {1, 4, 8-9, 14}
+import { Link, useNavigate } from '@tanstack/react-router';
+
+export const MyComponent = () => {
+  const navigate = useNavigate();
+
+  const submit = async () => {
+    const id = await ...
+    // 非同期アクション後のリダイレクトに`navigate`を使用
+    navigate({ to: '/products/$id', { params: { id }} });
+  };
+
+  return (
+    <>
+      <Link to="/products">キャンセル</Link>
+      <Button onClick={submit}>送信</Button>
+    </>
+  )
+};
+```
+
+詳細は[TanStack Router](https://tanstack.com/router/latest/docs/framework/react/overview)ドキュメントを参照してください。
+
+## ランタイム設定
+
+AWS CDKインフラストラクチャからの設定は、ランタイム設定を通じてウェブサイトに提供されます。これにより、デプロイ時まで不明なAPI URLなどの詳細にアクセス可能になります。
+
+### インフラストラクチャ
+
+`RuntimeConfig` CDKコンストラクトを使用して設定の追加と取得が可能です。`@aws/nx-plugin`で生成されたCDKコンストラクト（<Link path="guides/trpc">tRPC API</Link>や<Link path="guides/fastapi">FastAPI</Link>など）は自動的に適切な値を`RuntimeConfig`に追加します。
+
+ウェブサイトCDKコンストラクトは、ランタイム設定をS3バケットのルートに`runtime-config.json`ファイルとしてデプロイします。
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {9-12,14-15}
+import { Stack } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { MyWebsite } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    // RuntimeConfigに値を自動追加
+    new MyApi(this, 'MyApi', {
+      integrations: MyApi.defaultIntegrations(this).build(),
+    });
+
+    // runtime-config.jsonへ自動デプロイ
+    new MyWebsite(this, 'MyWebsite');
+  }
+}
+```
+
+:::warning
+`runtime-config.json`ファイルに設定が含まれるように、ウェブサイトの宣言は他のコンストラクトより後に行う必要があります。
+:::
+
+### ウェブサイトコード
+
+`useRuntimeConfig`フックを使用してランタイム設定値を取得できます:
+
+```tsx {1,4}
+import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
+
+const MyComponent = () => {
+  const runtimeConfig = useRuntimeConfig();
+
+  // ランタイム設定値にアクセス
+  const apiUrl = runtimeConfig.apis.MyApi;
+};
+```
+
+### ローカルランタイム設定
+
+[ローカル開発サーバー](#local-development-server)を実行する際、バックエンドURLや認証設定などを認識させるため、`public`ディレクトリに`runtime-config.json`ファイルが必要です。
+
+ウェブサイトプロジェクトは、デプロイ済みアプリケーションから`runtime-config.json`を取得する`load:runtime-config`ターゲットを装備しています:
+
+<NxCommands commands={['run <my-website>:"load:runtime-config"']} />
+
+:::warning
+インフラストラクチャプロジェクトの`src/main.ts`でスタック名を変更した場合、`project.json`ファイルの`load:runtime-config`ターゲットを更新する必要があります。
+:::
+
+## ローカル開発サーバー
+
+`serve`または`serve-local`ターゲットを使用してローカル開発サーバーを起動できます。
+
+### Serveターゲット
+
+`serve`ターゲットはウェブサイトのローカル開発サーバーを起動します。このターゲットを使用するには、関連インフラストラクチャのデプロイと[ローカルランタイム設定の読み込み](#local-runtime-config)が必要です。
+
+次のコマンドで実行できます:
+
+<NxCommands commands={['run <my-website>:serve']} />
+
+このターゲットは、実際のデプロイ済みAPIを参照しながらウェブサイトを変更する場合に有用です。
+
+### Serve Localターゲット
+
+`serve-local`ターゲットは、[Viteの`MODE`](https://vite.dev/guide/env-and-mode)を`serve-local`に設定したローカル開発サーバーを起動し、<Link path="/guides/api-connection">API接続ジェネレータ</Link>で接続したAPIのローカルサーバーも同時に起動します。
+
+このターゲットでサーバーを実行すると、`runtime-config.json`がローカルAPI URLを指すように自動上書きされます。
+
+次のコマンドで実行できます:
+
+<NxCommands commands={['run <my-website>:serve-local']} />
+
+このターゲットは、ウェブサイトとAPIを同時に開発する際の迅速な反復処理に適しています。
+
+:::warning
+このモードで実行し`runtime-config.json`が存在しない場合、<Link path="/guides/react-website-auth">CloudScapeウェブサイト認証</Link>を設定している場合でも、認証ヘッダーを含まないローカルサーバーリクエストが行われます。
+
+`serve-local`で認証を有効化するには、インフラストラクチャをデプロイしランタイム設定を読み込んでください。
+:::
+
+## ビルド
+
+`build`ターゲットでウェブサイトをビルドできます。Viteを使用して`dist/packages/<my-website>/bundle`ディレクトリに本番用バンドルを作成し、型チェック、コンパイル、リンタを実行します。
+
+<NxCommands commands={['run <my-website>:build']} />
+
+## テスト
+
+テストの作成方法は標準TypeScriptプロジェクトと同様です。詳細は<Link path="guides/typescript-project#testing">TypeScriptプロジェクトガイド</Link>を参照してください。
+
+React固有のテストにはReact Testing Libraryが事前インストールされています。使用方法は[React Testing Libraryドキュメント](https://testing-library.com/docs/react-testing-library/example-intro)を参照してください。
+
+`test`ターゲットでテストを実行できます:
+
+<NxCommands commands={['run <my-website>:test']} />
+
+## ウェブサイトのデプロイ
+
+ウェブサイトのデプロイには、<Link path="guides/typescript-infrastructure">TypeScriptインフラストラクチャジェネレータ</Link>を使用したCDKアプリケーションの作成を推奨します。
+
+`packages/common/constructs`に生成されたCDKコンストラクトを使用してデプロイできます。
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {3, 9}
+import { Stack } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { MyWebsite } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    new MyWebsite(this, 'MyWebsite');
+  }
+}
+```

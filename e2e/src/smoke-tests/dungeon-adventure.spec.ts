@@ -46,12 +46,12 @@ describe('smoke test - dungeon-adventure', () => {
       opts,
     );
     await runCLI(
-      `generate @aws/nx-plugin:ts#cloudscape-website --name=GameUI --no-interactive`,
+      `generate @aws/nx-plugin:ts#react-website --name=GameUI --no-interactive`,
       opts,
     );
     // No need to allow signup for the e2e tests
     await runCLI(
-      `generate @aws/nx-plugin:ts#cloudscape-website#auth --cognitoDomain=game-ui --project=@dungeon-adventure/game-ui --no-interactive --allowSignup=false`,
+      `generate @aws/nx-plugin:ts#react-website#auth --cognitoDomain=game-ui --project=@dungeon-adventure/game-ui --no-interactive --allowSignup=false`,
       opts,
     );
     await runCLI(

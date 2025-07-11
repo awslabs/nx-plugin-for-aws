@@ -44,11 +44,13 @@ export const VERSIONS = {
   prettier: '^3.5.3',
   'react-oidc-context': '^3.2.0',
   'source-map-support': '^0.5.21',
+  tailwindcss: '^4.1.11',
+  '@tailwindcss/vite': '^4.1.11',
   tsx: '4.20.1', // https://github.com/privatenumber/tsx/issues/727
   'vite-tsconfig-paths': '^5.1.4',
   zod: '^3.25.50',
 } as const;
-
+export type IVersion = keyof typeof VERSIONS;
 /**
  * Add versions to the given dependencies
  */
