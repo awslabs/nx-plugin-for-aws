@@ -662,7 +662,7 @@ export interface IRuntimeConfig {}
       `,
     );
 
-    await tsCloudScapeWebsiteAuthGenerator(tree, {
+    await tsReactWebsiteAuthGenerator(tree, {
       ...options,
     });
 

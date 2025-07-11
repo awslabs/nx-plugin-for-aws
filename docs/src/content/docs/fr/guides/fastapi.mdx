@@ -14,7 +14,7 @@ import Snippet from '@components/snippet.astro';
 
 [FastAPI](https://fastapi.tiangolo.com/) est un framework pour construire des API en Python.
 
-Le générateur FastAPI crée une nouvelle application FastAPI avec une infrastructure AWS CDK préconfigurée. Le backend généré utilise AWS Lambda pour un déploiement serverless, exposé via une API AWS API Gateway. Il configure [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/) pour l'observabilité, incluant la journalisation, le traçage AWS X-Ray et les métriques CloudWatch.
+Le générateur FastAPI crée une nouvelle application FastAPI avec une infrastructure AWS CDK configurée. Le backend généré utilise AWS Lambda pour un déploiement serverless, exposé via une API AWS API Gateway. Il configure [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/) pour l'observabilité, incluant la journalisation, le tracing AWS X-Ray et les métriques CloudWatch.
 
 ## Utilisation
 
@@ -32,7 +32,7 @@ Vous pouvez générer une nouvelle application FastAPI de deux manières :
 
 ## Sortie du générateur
 
-Le générateur va créer la structure de projet suivante dans le répertoire `<directory>/<api-name>` :
+Le générateur créera la structure de projet suivante dans le répertoire `<directory>/<api-name>` :
 
 <FileTree>
 
@@ -40,14 +40,14 @@ Le générateur va créer la structure de projet suivante dans le répertoire `<
 - pyproject.toml Configuration du projet Python et dépendances
 - \<module_name>
   - \_\_init\_\_.py Initialisation du module
-  - init.py Configure l'application FastAPI et les middlewares powertools
+  - init.py Configure l'application FastAPI et le middleware powertools
   - main.py Implémentation de l'API
 - scripts
   - generate_open_api.py Script pour générer un schéma OpenAPI depuis l'application FastAPI
 
 </FileTree>
 
-Le générateur crée également des constructs CDK pour déployer votre API, situés dans le répertoire `packages/common/constructs`.
+Le générateur créera également des constructs CDK pour déployer votre API, situés dans le répertoire `packages/common/constructs`.
 
 ## Implémentation de votre FastAPI
 
@@ -94,14 +94,14 @@ def read_item(item_id: int):
 
 Le logger inclut automatiquement :
 
-- IDs de corrélation pour le traçage
-- Chemin et méthode de la requête
-- Contexte Lambda
-- Indicateurs de cold start
+- Les IDs de corrélation pour le tracing
+- Le chemin et la méthode de la requête
+- Les informations de contexte Lambda
+- Les indicateurs de cold start
 
-#### Traçage
+#### Tracing
 
-Le traçage AWS X-Ray est configuré automatiquement. Vous pouvez ajouter des sous-segments personnalisés :
+Le tracing AWS X-Ray est configuré automatiquement. Vous pouvez ajouter des sous-segments personnalisés :
 
 ```python
 from .init import app, tracer
@@ -109,13 +109,15 @@ from .init import app, tracer
 @app.get("/items/{item_id}")
 @tracer.capture_method
 def read_item(item_id: int):
+    # Crée un nouveau sous-segment
     with tracer.provider.in_subsegment("fetch-item-details"):
+        # Votre logique ici
         return {"item_id": item_id}
 ```
 
 #### Métriques
 
-Des métriques CloudWatch sont collectées automatiquement pour chaque requête. Vous pouvez ajouter des métriques personnalisées :
+Les métriques CloudWatch sont collectées automatiquement pour chaque requête. Vous pouvez ajouter des métriques personnalisées :
 
 ```python
 from .init import app, metrics
@@ -129,8 +131,8 @@ def read_item(item_id: int):
 
 Les métriques par défaut incluent :
 
-- Nombre de requêtes
-- Succès/échecs
+- Le nombre de requêtes
+- Les succès/échecs
 - Métriques de cold start
 - Métriques par route
 
@@ -150,22 +152,22 @@ def read_item(item_id: int):
 
 Les exceptions non gérées sont capturées par le middleware et :
 
-1. Journalisent l'exception complète avec stack trace  
+1. Journalisent l'exception complète avec la stack trace
 2. Enregistrent une métrique d'échec
 3. Renvoient une réponse 500 sécurisée au client
 4. Préservent l'ID de corrélation
 
 :::tip
-Il est recommandé de spécifier des modèles de réponse pour vos opérations API si vous utilisez le générateur `api-connection`. <Link path="guides/api-connection/react-fastapi#errors">Plus de détails ici</Link>.
+Il est recommandé de spécifier des modèles de réponse pour vos opérations API afin d'améliorer la génération de code si vous utilisez le générateur `api-connection`. <Link path="guides/api-connection/react-fastapi#errors">Voir ici pour plus de détails</Link>.
 :::
 
 ### Streaming
 
-Avec FastAPI, vous pouvez streamer une réponse avec [`StreamingResponse`](https://fastapi.tiangolo.com/reference/responses/?h=streaming#fastapi.responses.StreamingResponse).
+Avec FastAPI, vous pouvez streamer une réponse au client avec le type de réponse [`StreamingResponse`](https://fastapi.tiangolo.com/reference/responses/?h=streaming#fastapi.responses.StreamingResponse).
 
 #### Modifications d'infrastructure
 
-Comme AWS API Gateway ne supporte pas les réponses streamées, vous devrez déployer votre FastAPI sur une plateforme qui le supporte. L'option la plus simple est d'utiliser une Function URL AWS Lambda. Pour cela, remplacez le construct généré `common/constructs/src/app/apis/<name>-api.ts` par un qui déploie une Function URL.
+Comme AWS API Gateway ne supporte pas les réponses streamées, vous devrez déployer votre FastAPI sur une plateforme qui le supporte. L'option la plus simple est d'utiliser une Function URL AWS Lambda. Pour cela, vous pouvez remplacer le construct généré `common/constructs/src/app/apis/<name>-api.ts` par un qui déploie une Function URL.
 
 <details>
 <summary>Exemple de construct FunctionURL pour le streaming</summary>
@@ -238,6 +240,7 @@ export class MyApi extends Construct {
 
     new CfnOutput(this, 'MyApiUrl', { value: functionUrl.url });
 
+    // Enregistre l'URL de l'API dans la configuration runtime pour la découverte client
     RuntimeConfig.ensure(this).config.apis = {
       ...RuntimeConfig.ensure(this).config.apis!,
       MyApi: functionUrl.url,
@@ -268,13 +271,13 @@ Pour un exemple complet, référez-vous au <Link path="/get_started/tutorials/du
 
 #### Implémentation
 
-Après avoir mis à jour l'infrastructure, vous pouvez implémenter une API de streaming dans FastAPI. L'API doit :
+Une fois l'infrastructure mise à jour pour supporter le streaming, vous pouvez implémenter une API streaming dans FastAPI. L'API doit :
 
-- Retourner un [`StreamingResponse`](https://fastapi.tiangolo.com/reference/responses/?h=streaming#fastapi.responses.StreamingResponse)
-- Déclarer le type de chaque chunk de réponse
-- Ajouter l'extension OpenAPI `x-streaming: true` si vous utilisez <Link path="guides/api-connection/react-fastapi">API Connection</Link>.
+- Retourner une [`StreamingResponse`](https://fastapi.tiangolo.com/reference/responses/?h=streaming#fastapi.responses.StreamingResponse)
+- Déclarer le type de retour de chaque chunk de réponse
+- Ajouter l'extension vendor OpenAPI `x-streaming: true` si vous comptez utiliser <Link path="guides/api-connection/react-fastapi">API Connection</Link>.
 
-Exemple pour streamer des objets JSON :
+Par exemple, pour streamer une série d'objets JSON :
 
 ```py /return (StreamingResponse)/ /openapi_extra[^)]*/ /-> (Chunk)/
 from pydantic import BaseModel
@@ -295,17 +298,18 @@ def my_stream() -> Chunk:
 
 #### Consommation
 
-Pour consommer un flux de réponses, utilisez le <Link path="guides/api-connection/react-fastapi#consuming-a-stream">Générateur API Connection</Link> qui fournira une méthode typée pour itérer sur les chunks.
+Pour consommer un flux de réponses, vous pouvez utiliser le <Link path="guides/api-connection/react-fastapi#consuming-a-stream">Générateur API Connection</Link> qui fournira une méthode typée pour itérer sur les chunks streamés.
 
 ## Déploiement de votre FastAPI
 
-Le générateur crée un construct CDK pour déployer votre API dans `common/constructs`. Utilisez-le dans une application CDK :
+Le générateur FastAPI crée un construct CDK pour déployer votre API dans le dossier `common/constructs`. Vous pouvez l'utiliser dans une application CDK :
 
 ```ts {6-8}
 import { MyApi } from ':my-scope/common-constructs';
 
 export class ExampleStack extends Stack {
   constructor(scope: Construct, id: string) {
+    // Ajoute l'API à votre stack
     const api = new MyApi(this, 'MyApi', {
       integrations: MyApi.defaultIntegrations(this).build(),
     });
@@ -315,15 +319,15 @@ export class ExampleStack extends Stack {
 
 Ceci configure :
 
-1. Une fonction AWS Lambda par opération
+1. Une fonction AWS Lambda pour chaque opération de l'API
 2. Une API Gateway HTTP/REST comme déclencheur
-3. Rôles IAM et permissions  
-4. Groupe de logs CloudWatch
-5. Configuration X-Ray
-6. Namespace de métriques CloudWatch
+3. Les rôles IAM et permissions
+4. Un groupe de logs CloudWatch
+5. La configuration de tracing X-Ray
+6. Un namespace de métriques CloudWatch
 
 :::note
-Si vous avez choisi l'authentification `Cognito`, fournissez la propriété `identity` :
+Si vous avez choisi l'authentification `Cognito`, vous devrez fournir la propriété `identity` au construct API :
 
 ```ts {9}
 import { MyApi, UserIdentity } from ':my-scope/common-constructs';
@@ -345,22 +349,22 @@ Le construct `UserIdentity` peut être généré avec le générateur <Link path
 
 ### Intégrations Type-Safe
 
-<Snippet name="api/type-safe-api-integrations" parentHeading="Intégrations Type-Safe" />
+<Snippet name="api/type-safe-api-integrations" parentHeading="Type-Safe Integrations" />
 
 #### Génération de code
 
-Les opérations FastAPI étant définies en Python et l'infrastructure en TypeScript, nous utilisons une génération de code pour fournir des métadonnées au construct CDK.
+Les opérations FastAPI étant définies en Python et l'infrastructure en TypeScript, nous utilisons une génération de code pour fournir des métadonnées au construct CDK afin d'offrir une interface type-safe.
 
-Une cible `generate:<ApiName>-metadata` est ajoutée au `project.json` des constructs pour générer un fichier comme `packages/common/constructs/src/generated/my-api/metadata.gen.ts`. Ce fichier est ignoré dans le contrôle de version.
+Une cible `generate:<ApiName>-metadata` est ajoutée au `project.json` des constructs pour faciliter cette génération, produisant un fichier comme `packages/common/constructs/src/generated/my-api/metadata.gen.ts`. Ce fichier étant généré au build, il est ignoré dans le versioning.
 
 :::note
-Exécutez un build après chaque modification de l'API pour mettre à jour les types :
+Vous devrez exécuter un build après chaque modification de votre API pour maintenir les types à jour.
 
 <NxCommands commands={["run-many --target build --all"]} />
 :::
 
 :::tip
-Pour régénérer automatiquement les types pendant le développement, utilisez [`nx watch`](https://nx.dev/nx-api/nx/documents/watch) :
+Si vous travaillez simultanément sur l'infrastructure CDK et FastAPI, vous pouvez utiliser [`nx watch`](https://nx.dev/nx-api/nx/documents/watch) pour régénérer ces types à chaque modification :
 
 <NxCommands
   commands={[
@@ -372,7 +376,7 @@ Pour régénérer automatiquement les types pendant le développement, utilisez 
 
 ### Octroi d'accès (IAM uniquement)
 
-Pour l'authentification `IAM`, utilisez `grantInvokeAccess` :
+Si vous avez choisi l'authentification `IAM`, vous pouvez utiliser `grantInvokeAccess` pour octroyer l'accès :
 
 ```ts
 api.grantInvokeAccess(myIdentityPool.authenticatedRole);
@@ -380,14 +384,14 @@ api.grantInvokeAccess(myIdentityPool.authenticatedRole);
 
 ## Développement local
 
-Le générateur configure un serveur de développement local :
+Le générateur configure un serveur de développement local que vous pouvez lancer avec :
 
 <NxCommands commands={['run my-api:serve']} />
 
 Ceci démarre un serveur FastAPI local avec :
 
-- Rechargement automatique
-- Documentation interactive sur `/docs` ou `/redoc`  
+- Rechargement automatique sur modification
+- Documentation interactive API sur `/docs` ou `/redoc`
 - Schéma OpenAPI sur `/openapi.json`
 
 ## Invocation de votre FastAPI
