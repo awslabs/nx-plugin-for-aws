@@ -250,6 +250,18 @@ export const buildOpenApiCodeGenData = async (
         (op as any).uniqueName,
       );
 
+      // Add resolved request type name (after operationIdPascalCase is set)
+      if (op.parameters && op.parameters.length > 0) {
+        const baseRequestTypeName = `${(op as any).operationIdPascalCase}Request`;
+        const hasConflict = !!spec.components?.schemas?.[baseRequestTypeName];
+        if (hasConflict) {
+          // Only set resolvedRequestTypeName if there's actually a conflict
+          (op as any).resolvedRequestTypeName =
+            `${(op as any).operationIdPascalCase}OperationRequest`;
+        }
+        // If no conflict, leave resolvedRequestTypeName undefined so template uses default
+      }
+
       mutateOperationWithAdditionalData(op);
     }
 
