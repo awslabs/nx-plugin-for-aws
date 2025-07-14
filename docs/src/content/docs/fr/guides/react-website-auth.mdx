@@ -1,0 +1,93 @@
+---
+title: "Authentification du site Web CloudScape"
+description: "Documentation de référence pour l'authentification du site Web CloudScape"
+---
+
+
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+
+Le générateur d'authentification pour site web CloudScape ajoute une authentification à votre site web CloudScape en utilisant [Amazon Cognito](https://aws.amazon.com/cognito/).
+
+Ce générateur configure l'infrastructure CDK pour créer un User Pool Cognito et un Identity Pool associé, ainsi qu'une interface hébergée pour gérer les flux de connexion utilisateur, et son intégration avec votre site web CloudScape.
+
+## Utilisation
+
+### Ajouter l'authentification à votre site web CloudScape
+
+Vous pouvez ajouter l'authentification à votre site web CloudScape de deux manières :
+
+<RunGenerator generator="ts#react-website#auth" />
+
+### Options
+
+<GeneratorParameters generator="ts#react-website#auth" />
+
+## Résultat du générateur
+
+Vous trouverez les modifications suivantes dans votre application React :
+
+<FileTree>
+  - src
+    - components
+      - CognitoAuth
+        - index.tsx Composant principal d'authentification
+    - main.tsx Mis à jour pour intégrer le composant CognitoAuth
+</FileTree>
+
+Vous trouverez également le code d'infrastructure suivant généré dans `packages/common/constructs` :
+
+<FileTree>
+  - src
+    - core
+      - user-identity.ts Construct définissant le user pool et l'identity pool
+</FileTree>
+
+## Utilisation de l'infrastructure
+
+Vous devrez ajouter le construct `UserIdentity` à votre stack, en le déclarant _avant_ le construct du site web :
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {3,9}
+import { Stack } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { MyWebsite, UserIdentity } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    new UserIdentity(this, 'Identity');
+
+    new MyWebsite(this, 'MyWebsite');
+  }
+}
+```
+
+Le construct `UserIdentity` ajoute automatiquement la <Link path="guides/react-website#runtime-configuration">Configuration Runtime</Link> nécessaire pour que votre site web puisse pointer vers le bon Cognito User Pool pour l'authentification.
+
+### Accorder des droits aux utilisateurs authentifiés
+
+Pour accorder aux utilisateurs authentifiés l'accès à certaines actions, comme l'autorisation d'appeler une API, vous pouvez ajouter des politiques IAM au rôle authentifié de l'identity pool :
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {12}
+import { Stack } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { MyWebsite, UserIdentity, MyApi } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    const identity = new UserIdentity(this, 'Identity');
+    const api = new MyApi(this, 'MyApi');
+
+    api.grantInvokeAccess(identity.identityPool.authenticatedRole);
+
+    new MyWebsite(this, 'MyWebsite');
+  }
+}
+```

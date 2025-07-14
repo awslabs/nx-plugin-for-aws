@@ -37,12 +37,12 @@ describe('smoke test - trpc-api', () => {
     await generateApiProjectPermutations('ts#trpc-api', 'trpc', '-', opts);
 
     await runCLI(
-      `generate @aws/nx-plugin:ts#cloudscape-website --name=website --no-interactive`,
+      `generate @aws/nx-plugin:ts#react-website --name=website --no-interactive`,
       opts,
     );
 
     await runCLI(
-      `generate @aws/nx-plugin:ts#cloudscape-website#auth --cognitoDomain=website --project=website --no-interactive --allowSignup=false`,
+      `generate @aws/nx-plugin:ts#react-website#auth --cognitoDomain=website --project=website --no-interactive --allowSignup=false`,
       opts,
     );
 

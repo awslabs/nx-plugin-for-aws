@@ -23,17 +23,17 @@ export type { TsNxGeneratorGeneratorSchema } from '../src/ts/nx-generator/schema
 export { tsNxPluginGenerator } from '../src/ts/nx-plugin/generator';
 export type { TsNxPluginGeneratorSchema } from '../src/ts/nx-plugin/schema';
 
-// TypeScript CloudScape Website Generator
-export { tsCloudScapeWebsiteGenerator } from '../src/cloudscape-website/app/generator';
-export type { TsCloudScapeWebsiteGeneratorSchema } from '../src/cloudscape-website/app/schema';
+// TypeScript React Website Generator
+export { tsReactWebsiteGenerator } from '../src/ts/react-website/app/generator';
+export type { TsReactWebsiteGeneratorSchema } from '../src/ts/react-website/app/schema';
 
-// TypeScript CloudScape Website Auth Generator
-export { tsCloudScapeWebsiteAuthGenerator } from '../src/cloudscape-website/cognito-auth/generator';
-export type { TsCloudScapeWebsiteAuthGeneratorSchema } from '../src/cloudscape-website/cognito-auth/schema';
+// TypeScript React Website Auth Generator
+export { tsReactWebsiteAuthGenerator } from '../src/ts/react-website/cognito-auth/generator';
+export type { TsReactWebsiteAuthGeneratorSchema } from '../src/ts/react-website/cognito-auth/schema';
 
 // Runtime Config
-export { runtimeConfigGenerator } from '../src/cloudscape-website/runtime-config/generator';
-export type { RuntimeConfigGeneratorSchema } from '../src/cloudscape-website/runtime-config/schema';
+export { runtimeConfigGenerator } from '../src/ts/react-website/runtime-config/generator';
+export type { RuntimeConfigGeneratorSchema } from '../src/ts/react-website/runtime-config/schema';
 
 // TypeScript tRPC API
 export { tsTrpcApiGenerator } from '../src/trpc/backend/generator';
