@@ -57,8 +57,8 @@ export const getTsLibDetails = (
   const normalizedName = toKebabCase(schema.name);
   const fullyQualifiedName = `${scope}${normalizedName}`;
   const dir = joinPathFragments(
-    toKebabCase(schema.directory) ?? '.',
-    toKebabCase(schema.subDirectory) ?? normalizedName,
+    schema.directory ?? '.',
+    schema.subDirectory ?? normalizedName,
   );
   return { dir, fullyQualifiedName };
 };

@@ -61,10 +61,7 @@ export const getPyProjectDetails = (
     schema.moduleName ?? `${scope}_${normalizedName}`,
   );
   const fullyQualifiedName = `${scope}.${normalizedName}`;
-  const dir = joinPathFragments(
-    toSnakeCase(schema.directory) ?? '.',
-    normalizedName,
-  );
+  const dir = joinPathFragments(schema.directory ?? '.', normalizedName);
   return { dir, fullyQualifiedName, normalizedModuleName };
 };
 
