@@ -11,7 +11,7 @@ import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
 import { query } from '../../../utils/ast';
 import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
 import { expectHasMetricTags } from '../../../utils/metrics.spec';
-import { tsCloudScapeWebsiteGenerator } from '../../../cloudscape-website/app/generator';
+import { tsReactWebsiteGenerator } from '../../../ts/react-website/app/generator';
 import { pyFastApiProjectGenerator } from '../generator';
 
 describe('fastapi react generator', () => {
@@ -464,8 +464,8 @@ describe('fastapi react generator with real react and trpc projects', () => {
   beforeEach(async () => {
     tree = createTreeUsingTsSolutionSetup();
 
-    // Generate a cloudscape website
-    await tsCloudScapeWebsiteGenerator(tree, {
+    // Generate a react website
+    await tsReactWebsiteGenerator(tree, {
       name: 'frontend',
       skipInstall: true,
     });

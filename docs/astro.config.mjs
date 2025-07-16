@@ -268,12 +268,12 @@ export default defineConfig({
             { label: 'ts#infra', link: '/guides/typescript-infrastructure' },
             { label: 'ts#trpc-api', link: '/guides/trpc' },
             {
-              label: 'ts#cloudscape-website',
-              link: '/guides/cloudscape-website',
+              label: 'ts#react-website',
+              link: '/guides/react-website',
             },
             {
-              label: 'ts#cloudscape-website#auth',
-              link: '/guides/cloudscape-website-auth',
+              label: 'ts#react-website#auth',
+              link: '/guides/react-website-auth',
             },
             { label: 'ts#lambda-function', link: '/guides/ts-lambda-function' },
             { label: 'ts#nx-plugin', link: '/guides/ts-nx-plugin' },

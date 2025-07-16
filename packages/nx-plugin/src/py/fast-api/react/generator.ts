@@ -11,7 +11,7 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { FastApiReactGeneratorSchema } from './schema';
-import { runtimeConfigGenerator } from '../../../cloudscape-website/runtime-config/generator';
+import { runtimeConfigGenerator } from '../../../ts/react-website/runtime-config/generator';
 import { sortObjectKeys } from '../../../utils/object';
 import { kebabCase, toClassName } from '../../../utils/names';
 import { formatFilesInSubtree } from '../../../utils/format';

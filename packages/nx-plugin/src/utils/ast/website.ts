@@ -33,8 +33,6 @@ export const addHookResultToRouterProviderContext = (
   mainTsxPath: string,
   { hook, module, contextProp }: AddHookResultToRouterProviderContextProps,
 ) => {
-  addDestructuredImport(tree, mainTsxPath, [hook], module);
-
   // Update RouterProviderContext interface to include auth (if it exists)
   const routerProviderContextSelector =
     'TypeAliasDeclaration[name.text="RouterProviderContext"] > TypeLiteral';
@@ -61,6 +59,8 @@ export const addHookResultToRouterProviderContext = (
   ) {
     return;
   }
+
+  addDestructuredImport(tree, mainTsxPath, [hook], module);
 
   replace(
     tree,
