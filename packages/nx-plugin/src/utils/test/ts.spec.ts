@@ -29,6 +29,10 @@ export class TypeScriptVerifier {
         moduleResolution: ts.ModuleResolutionKind.NodeNext,
         skipLibCheck: true,
         strict: true,
+        noUnusedLocals: true,
+        noImplicitReturns: true,
+        noImplicitOverride: true,
+        noFallthroughCasesInSwitch: true,
       },
     });
 
@@ -220,7 +224,7 @@ describe('expectTypeScriptToCompile', () => {
   it('should not throw for valid typescript with a dependency', () => {
     tree.write(
       'test.ts',
-      'import { createProjectSync } from "@ts-morph/bootstrap"; const project = createProjectSync()',
+      'import { createProjectSync } from "@ts-morph/bootstrap"; createProjectSync()',
     );
     verifierWithDeps.expectTypeScriptToCompile(tree, ['test.ts']);
   });
@@ -228,7 +232,7 @@ describe('expectTypeScriptToCompile', () => {
   it('should throw for invalid typescript with a dependency', () => {
     tree.write(
       'test.ts',
-      'import { createProjectSync } from "@ts-morph/bootstrap"; const project = createProjectSync(42)',
+      'import { createProjectSync } from "@ts-morph/bootstrap"; createProjectSync(42)',
     );
     expect(() =>
       verifierWithDeps.expectTypeScriptToCompile(tree, ['test.ts'], true),
