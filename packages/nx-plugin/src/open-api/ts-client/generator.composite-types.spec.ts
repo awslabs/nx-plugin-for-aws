@@ -943,4 +943,70 @@ describe('openApiTsClientGenerator - composite schemas', () => {
       /multiple array types which cannot be distinguished at runtime/,
     );
   });
+
+  it('should handle anyOf with any type', async () => {
+    const spec: Spec = {
+      openapi: '3.0.0',
+      info: { title, version: '1.0.0' },
+      paths: {
+        '/anyOfAny': {
+          post: {
+            operationId: 'testAnyOfAny',
+            requestBody: {
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      anyType: {
+                        anyOf: [
+                          {},
+                          {
+                            type: 'null' as any,
+                          },
+                        ],
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            responses: {
+              '200': {
+                description: 'test',
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'object',
+                      properties: {
+                        result: { type: 'string' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    tree.write('openapi.json', JSON.stringify(spec));
+
+    await openApiTsClientGenerator(tree, {
+      openApiSpecPath: 'openapi.json',
+      outputPath: 'src/generated',
+    });
+
+    validateTypeScript([
+      'src/generated/client.gen.ts',
+      'src/generated/types.gen.ts',
+    ]);
+
+    const types = tree.read('src/generated/types.gen.ts', 'utf-8');
+    expect(types).toMatchSnapshot();
+
+    const client = tree.read('src/generated/client.gen.ts', 'utf-8');
+    expect(client).toMatchSnapshot();
+  });
 });
