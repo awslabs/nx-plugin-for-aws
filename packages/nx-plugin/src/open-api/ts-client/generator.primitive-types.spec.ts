@@ -373,6 +373,98 @@ describe('openApiTsClientGenerator - primitive types', () => {
     );
   });
 
+  it('should handle enum reference properties', async () => {
+    const spec: Spec = {
+      openapi: '3.0.0',
+      info: { title, version: '1.0.0' },
+      paths: {
+        '/status': {
+          post: {
+            operationId: 'updateStatus',
+            requestBody: {
+              required: true,
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      status: {
+                        $ref: '#/components/schemas/MyStatus',
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            responses: {
+              '200': {
+                description: 'Updated status result',
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'object',
+                      properties: {
+                        status: {
+                          $ref: '#/components/schemas/MyStatus',
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          MyStatus: {
+            type: 'string',
+            enum: ['success', 'failed', 'pending'],
+          },
+        },
+      },
+    };
+
+    tree.write('openapi.json', JSON.stringify(spec));
+
+    await openApiTsClientGenerator(tree, {
+      openApiSpecPath: 'openapi.json',
+      outputPath: 'src/generated',
+    });
+
+    validateTypeScript([
+      'src/generated/client.gen.ts',
+      'src/generated/types.gen.ts',
+    ]);
+
+    const types = tree.read('src/generated/types.gen.ts', 'utf-8');
+    expect(types).toMatchSnapshot();
+
+    const client = tree.read('src/generated/client.gen.ts', 'utf-8');
+    expect(client).toMatchSnapshot();
+
+    const mockFetch = vi.fn();
+
+    mockFetch.mockResolvedValue({
+      status: 200,
+      json: vi.fn().mockResolvedValue({ status: 'success' }),
+    });
+
+    expect(
+      await callGeneratedClient(client, mockFetch, 'updateStatus', {
+        status: 'pending',
+      }),
+    ).toEqual({ status: 'success' });
+    expect(mockFetch).toHaveBeenCalledWith(
+      `${baseUrl}/status`,
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ status: 'pending' }),
+      }),
+    );
+  });
+
   it('should handle date and date-time formats', async () => {
     const spec: Spec = {
       openapi: '3.0.0',
