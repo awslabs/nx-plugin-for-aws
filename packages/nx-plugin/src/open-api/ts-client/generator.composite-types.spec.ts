@@ -1009,4 +1009,73 @@ describe('openApiTsClientGenerator - composite schemas', () => {
     const client = tree.read('src/generated/client.gen.ts', 'utf-8');
     expect(client).toMatchSnapshot();
   });
+
+  it('should handle anyOf with enums', async () => {
+    const spec: Spec = {
+      openapi: '3.0.0',
+      info: { title, version: '1.0.0' },
+      paths: {
+        '/anyOfEnum': {
+          post: {
+            operationId: 'testAnyOfEnum',
+            requestBody: {
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      anyType: {
+                        anyOf: [
+                          {
+                            type: 'string',
+                            enum: ['a', 'b', 'c'],
+                          },
+                          {
+                            type: 'null' as any,
+                          },
+                        ],
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            responses: {
+              '200': {
+                description: 'test',
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'object',
+                      properties: {
+                        result: { type: 'string' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    tree.write('openapi.json', JSON.stringify(spec));
+
+    await openApiTsClientGenerator(tree, {
+      openApiSpecPath: 'openapi.json',
+      outputPath: 'src/generated',
+    });
+
+    validateTypeScript([
+      'src/generated/client.gen.ts',
+      'src/generated/types.gen.ts',
+    ]);
+
+    const types = tree.read('src/generated/types.gen.ts', 'utf-8');
+    expect(types).toMatchSnapshot();
+
+    const client = tree.read('src/generated/client.gen.ts', 'utf-8');
+    expect(client).toMatchSnapshot();
+  });
 });
