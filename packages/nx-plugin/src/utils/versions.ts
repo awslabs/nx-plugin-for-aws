@@ -7,10 +7,10 @@ export const VERSIONS = {
   '@aws-sdk/client-cognito-identity': '^3.775.0',
   '@aws-sdk/credential-providers': '^3.775.0',
   '@aws-sdk/credential-provider-cognito-identity': '^3.775.0',
-  '@aws-lambda-powertools/logger': '^2.17.0',
-  '@aws-lambda-powertools/metrics': '^2.17.0',
-  '@aws-lambda-powertools/tracer': '^2.17.0',
-  '@aws-lambda-powertools/parser': '^2.17.0',
+  '@aws-lambda-powertools/logger': '^2.24.1',
+  '@aws-lambda-powertools/metrics': '^2.24.1',
+  '@aws-lambda-powertools/tracer': '^2.24.1',
+  '@aws-lambda-powertools/parser': '^2.24.1',
   '@middy/core': '^6.0.0',
   '@nxlv/python': '^21.0.0',
   '@nx/devkit': '~21.0.3',
@@ -48,7 +48,10 @@ export const VERSIONS = {
   '@tailwindcss/vite': '^4.1.11',
   tsx: '4.20.1', // https://github.com/privatenumber/tsx/issues/727
   'vite-tsconfig-paths': '^5.1.4',
-  zod: '^3.25.50',
+  zod: '^4.0.14',
+  // TODO: remove zod-v3 when @modelcontextprotocol/sdk upgrades to Zod v4 or standard schema
+  // https://github.com/modelcontextprotocol/typescript-sdk/issues/164
+  'zod-v3': 'npm:zod@^3',
 } as const;
 export type IVersion = keyof typeof VERSIONS;
 /**

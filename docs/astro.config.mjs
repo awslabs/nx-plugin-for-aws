@@ -393,5 +393,9 @@ export default defineConfig({
   ],
   vite: {
     plugins: [tailwindcss()],
+    ssr: {
+      // https://github.com/withastro/astro/issues/14117
+      noExternal: ['zod'],
+    },
   },
 });
