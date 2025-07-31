@@ -181,7 +181,7 @@ describe('ts#mcp-server generator', () => {
     expect(
       rootPackageJson.dependencies['@modelcontextprotocol/sdk'],
     ).toBeDefined();
-    expect(rootPackageJson.dependencies['zod']).toBeDefined();
+    expect(rootPackageJson.dependencies['zod-v3']).toBeDefined();
     expect(rootPackageJson.devDependencies['tsx']).toBeDefined();
 
     // Check project package.json dependencies
@@ -191,7 +191,7 @@ describe('ts#mcp-server generator', () => {
     expect(
       projectPackageJson.dependencies['@modelcontextprotocol/sdk'],
     ).toBeDefined();
-    expect(projectPackageJson.dependencies['zod']).toBeDefined();
+    expect(projectPackageJson.dependencies['zod-v3']).toBeDefined();
     expect(projectPackageJson.devDependencies['tsx']).toBeDefined();
   });
 
