@@ -33,7 +33,7 @@ export const VERSIONS = {
   '@smithy/types': '^4.2.0',
   aws4fetch: '^1.0.20',
   'aws-cdk': '^2.1006.0',
-  'aws-cdk-lib': '^2.200.0',
+  'aws-cdk-lib': '^2.207.0',
   'aws-xray-sdk-core': '^3.10.3',
   constructs: '^10.4.2',
   cors: '^2.8.5',
