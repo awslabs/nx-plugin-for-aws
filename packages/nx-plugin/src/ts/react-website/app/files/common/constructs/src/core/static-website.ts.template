@@ -1,4 +1,4 @@
-import { CfnJson, CfnOutput, RemovalPolicy, Stack, Token } from 'aws-cdk-lib';
+import { CfnOutput, RemovalPolicy, Stack } from 'aws-cdk-lib';
 import { Distribution, ViewerProtocolPolicy } from 'aws-cdk-lib/aws-cloudfront';
 import { S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import {
@@ -121,7 +121,7 @@ export class StaticWebsite extends Construct {
         Source.asset(websiteFilePath),
         Source.jsonData(
           DEFAULT_RUNTIME_CONFIG_FILENAME,
-          this.resolveTokens(RuntimeConfig.ensure(this).config)
+          RuntimeConfig.ensure(this).config
         ),
       ],
       destinationBucket: this.websiteBucket,
@@ -136,26 +136,6 @@ export class StaticWebsite extends Construct {
       value: this.websiteBucket.bucketName,
     });
   }
-  private resolveTokens = (payload: any) => {
-    const _payload: Record<string, any> = {};
-    Object.entries(payload).forEach(([key, value]) => {
-      if (
-        Token.isUnresolved(value) ||
-        (typeof value === 'string' && value.endsWith('}}'))
-      ) {
-        _payload[key] = new CfnJson(this, `ResolveToken-${key}`, {
-          value,
-        }).value;
-      } else if (typeof value === 'object') {
-        _payload[key] = this.resolveTokens(value);
-      } else if (Array.isArray(value)) {
-        _payload[key] = value.map((v) => this.resolveTokens(v));
-      } else {
-        _payload[key] = value;
-      }
-    });
-    return _payload;
-  };
 }
 
 export class CloudfrontWebAcl extends Stack {
