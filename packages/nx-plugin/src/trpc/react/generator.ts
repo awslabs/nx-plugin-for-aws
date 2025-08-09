@@ -175,6 +175,7 @@ export async function reactGenerator(
       '@trpc/client',
       '@trpc/tanstack-react-query',
       '@tanstack/react-query',
+      '@tanstack/react-query-devtools',
       ...((auth === 'IAM'
         ? [
             'oidc-client-ts',

@@ -96,6 +96,9 @@ export function Main() {
       packageJson.dependencies['@trpc/tanstack-react-query'],
     ).toBeDefined();
     expect(packageJson.dependencies['@tanstack/react-query']).toBeDefined();
+    expect(
+      packageJson.dependencies['@tanstack/react-query-devtools'],
+    ).toBeDefined();
   });
 
   it('should handle IAM auth option', async () => {
@@ -130,6 +133,9 @@ export function Main() {
       packageJson.dependencies['@trpc/tanstack-react-query'],
     ).toBeDefined();
     expect(packageJson.dependencies['@tanstack/react-query']).toBeDefined();
+    expect(
+      packageJson.dependencies['@tanstack/react-query-devtools'],
+    ).toBeDefined();
     expect(packageJson.dependencies['oidc-client-ts']).toBeDefined();
     expect(packageJson.dependencies['react-oidc-context']).toBeDefined();
     expect(
@@ -170,6 +176,9 @@ export function Main() {
       packageJson.dependencies['@trpc/tanstack-react-query'],
     ).toBeDefined();
     expect(packageJson.dependencies['@tanstack/react-query']).toBeDefined();
+    expect(
+      packageJson.dependencies['@tanstack/react-query-devtools'],
+    ).toBeDefined();
     expect(packageJson.dependencies['react-oidc-context']).toBeDefined();
   });
 
