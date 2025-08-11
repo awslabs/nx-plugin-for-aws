@@ -32,10 +32,13 @@ describe('versions utils', () => {
       const deps: (keyof typeof VERSIONS)[] = [
         '@trpc/client',
         '@tanstack/react-query',
+        '@tanstack/react-query-devtools',
       ];
       const expected = {
         '@trpc/client': VERSIONS['@trpc/client'],
         '@tanstack/react-query': VERSIONS['@tanstack/react-query'],
+        '@tanstack/react-query-devtools':
+          VERSIONS['@tanstack/react-query-devtools'],
       };
       expect(withVersions(deps)).toEqual(expected);
     });

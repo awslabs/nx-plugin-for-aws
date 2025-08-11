@@ -24,6 +24,7 @@ export const VERSIONS = {
   '@cloudscape-design/components': '^3.0.928',
   '@cloudscape-design/global-styles': '^1.0.38',
   '@tanstack/react-query': '^5.74.3',
+  '@tanstack/react-query-devtools': '^5.84.2',
   '@trpc/tanstack-react-query': '11.0.0',
   '@trpc/client': '11.0.0',
   '@trpc/server': '11.0.0',

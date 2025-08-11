@@ -54,6 +54,10 @@ const log = {
     options.verbose && console.log(chalk.gray('DEBUG: ') + message),
 };
 
+const sectionTranslationModelId = 'us.deepseek.r1-v1:0';
+const frontmatterTranslationModelId =
+  'anthropic.claude-3-5-haiku-20241022-v1:0';
+
 /**
  * Main function to run the translation process
  */
@@ -116,9 +120,15 @@ async function main() {
 
     log.success('Translation completed successfully');
   } catch (error) {
-    log.error(
-      `Translation failed: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    let errorMessage = error instanceof Error ? error.message : String(error);
+    if (
+      errorMessage.indexOf(
+        "You don't have access to the model with the specified model ID",
+      ) > -1
+    ) {
+      errorMessage += ` Approve model access for ${frontmatterTranslationModelId} and ${sectionTranslationModelId} at http://console.aws.amazon.com/bedrock/home?#/modelaccess`;
+    }
+    log.error(`Translation failed: ${errorMessage}`);
     process.exit(1);
   }
 }
@@ -215,7 +225,11 @@ async function getFilesToTranslate(): Promise<string[]> {
         baseCommit = mergeBase;
       }
 
-      const diffResult = await git.diff([`${baseCommit}..HEAD`, '--name-only', '--diff-filter=d']);
+      const diffResult = await git.diff([
+        `${baseCommit}..HEAD`,
+        '--name-only',
+        '--diff-filter=d',
+      ]);
       changedFiles = diffResult
         .split('\n')
         .filter(
@@ -420,7 +434,7 @@ ${section}
 `;
 
   const params: InvokeModelCommandInput = {
-    modelId: 'us.deepseek.r1-v1:0',
+    modelId: sectionTranslationModelId,
     contentType: 'application/json',
     accept: 'application/json',
     body: JSON.stringify({
@@ -504,7 +518,7 @@ CRITICAL: Your response must contain ONLY the translated YAML content with no ad
 `;
 
     const params: InvokeModelCommandInput = {
-      modelId: 'anthropic.claude-3-5-haiku-20241022-v1:0',
+      modelId: frontmatterTranslationModelId,
       contentType: 'application/json',
       accept: 'application/json',
       body: JSON.stringify({

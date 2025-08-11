@@ -262,6 +262,7 @@ export const fastApiReactGenerator = async (
         : []) as any),
       ...((auth === 'Cognito' ? ['react-oidc-context'] : []) as any),
       '@tanstack/react-query',
+      '@tanstack/react-query-devtools',
     ]),
     withVersions(['@smithy/types']),
   );
