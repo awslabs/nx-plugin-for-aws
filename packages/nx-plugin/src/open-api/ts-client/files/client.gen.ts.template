@@ -20,8 +20,8 @@ const returnTypeSet = new Set(allOperations.map(op => op.result.typescriptType))
 _%>
 <%_ if ((models.length + allOperations.filter(p => p.parameters.length > 0).length) > 0) { _%>
 import type {
-<%_ models.filter(model => model.export !== 'enum' || returnTypeSet.has(model.name)).forEach((model) => { _%>
-  <%- model.name %>,
+<%_ models.filter(model => model.export !== 'enum' || returnTypeSet.has(model.typescriptName)).forEach((model) => { _%>
+  <%- model.typescriptName %>,
 <%_ }) _%>
 <%_ allOperations.filter(p => p.parameters.length > 0).forEach((op) => { _%>
   <%- op.requestTypeName %>,
@@ -54,7 +54,7 @@ const renderNestedToJsonValue = (type, argumentType = undefined, depth = 0) => {
   } else if (type.type === 'unknown') {
     return `(${itemIdentifier}${argType}) => ${itemIdentifier}`;
   }
-  return `$IO.${type.name || type.type}.toJson`;
+  return `$IO.${type.typescriptType || type.typescriptName}.toJson`;
 };
 // Renders the code to transform a property of the model to its json representation from the model types
 const renderToJsonValue = (property, value, argumentType = undefined) => {
@@ -70,7 +70,7 @@ const renderToJsonValue = (property, value, argumentType = undefined) => {
   } else if (property.export === "dictionary") {
     rendered = `($IO.$mapValues(${value}, ${renderNestedToJsonValue(property.link, argumentType)}))`;
   } else if (property.type !== "any") {
-    rendered = `$IO.${property.type}.toJson(${value})`;
+    rendered = `$IO.${property.typescriptType}.toJson(${value})`;
   } else {
     rendered = value;
   }
@@ -93,7 +93,7 @@ const renderNestedFromJsonValue = (type, argumentType = undefined, depth = 0) =>
     } else if (type.type === 'unknown') {
       return `(${itemIdentifier}${argType}) => ${itemIdentifier}`;
     }
-    return `$IO.${type.name || type.type}.fromJson`;
+    return `$IO.${type.typescriptType || type.typescriptName}.fromJson`;
 };
 // Renders the code to transform a property of the model from its json representation into the model types
 const renderFromJsonValue = (property, value, argumentType = undefined) => {
@@ -108,7 +108,7 @@ const renderFromJsonValue = (property, value, argumentType = undefined) => {
     } else if (property.export === "dictionary") {
         rendered = `($IO.$mapValues(${value}, ${renderNestedFromJsonValue(property.link, argumentType)}))`;
     } else {
-        rendered = `$IO.${property.type}.fromJson(${value})`;
+        rendered = `$IO.${property.typescriptType}.fromJson(${value})`;
     }
     rendered = property.isNullable ? `${value} === null ? null : ${rendered}` : rendered;
     return rendered;
@@ -168,13 +168,13 @@ export class $IO {
 <%_ models.filter(m => m.export !== 'enum').forEach((model) => { _%>
 <%_ const isComposite = model.export === "one-of" || model.export === "any-of" || model.export === "all-of"; _%>
 
-  public static <%- model.name %> = {
-    toJson: (model: <%- model.name %>): any => {
+  public static <%- model.typescriptName %> = {
+    toJson: (model: <%- model.typescriptName %>): any => {
       if (model === undefined || model === null) {
         return model;
       }
       <%_ if (isComposite) { _%>
-      <%_ model.composedPrimitives.filter(p => !['array', 'dictionary'].includes(p.export) && !['null', 'unknown'].includes(p.type)).forEach((primitive) => { _%>
+      <%_ model.composedPrimitives.filter(p => !['array', 'dictionary', 'enum'].includes(p.export) && !['null', 'unknown'].includes(p.type)).forEach((primitive) => { _%>
       if (typeof model === "<%- primitive.typescriptType %>") {
           return model;
       }
@@ -228,7 +228,7 @@ export class $IO {
       };
       <%_ } _%>
     },
-    fromJson: (json: any): <%- model.name %> => {
+    fromJson: (json: any): <%- model.typescriptName %> => {
       if (json === undefined || json === null) {
         return json;
       }
