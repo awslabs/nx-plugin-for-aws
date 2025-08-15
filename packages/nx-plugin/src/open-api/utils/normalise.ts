@@ -60,9 +60,32 @@ const filterInlineCompositeSchemas = (
   });
 };
 
+/**
+ * Returns a unique model/schema name for any models which we hoist
+ */
+const createUniqueModelName = (
+  nameParts: string[],
+  seenModelNameCounts: { [name: string]: number },
+): string => {
+  const candidateName = nameParts.map(upperFirst).join('');
+
+  const seenModelNameCount = seenModelNameCounts[candidateName];
+
+  // We have not seen this name so we're free to use it
+  if (seenModelNameCount === undefined) {
+    seenModelNameCounts[candidateName] = 1;
+    return candidateName;
+  }
+
+  // We have seen the name before, so we must disambiguate
+  seenModelNameCounts[candidateName]++;
+  return `${candidateName}${seenModelNameCount}`;
+};
+
 const hoistInlineObjectSubSchemas = (
   nameParts: string[],
   schema: OpenAPIV3.SchemaObject,
+  seenModelNameCounts: { [name: string]: number },
 ): SubSchemaRef[] => {
   // Find all the inline subschemas we should visit
   const inlineSubSchemas: SubSchema[] = [
@@ -137,7 +160,7 @@ const hoistInlineObjectSubSchemas = (
 
   // Hoist these recursively first (ie depth first search) so that we don't miss refs
   const recursiveRefs = inlineSubSchemas.flatMap((s) =>
-    hoistInlineObjectSubSchemas(s.nameParts, s.schema),
+    hoistInlineObjectSubSchemas(s.nameParts, s.schema, seenModelNameCounts),
   );
 
   // Clone the object subschemas to build the refs. Note that only objects with "properties" are hoisted as these are non-dictionary types
@@ -150,7 +173,8 @@ const hoistInlineObjectSubSchemas = (
         (s.schema.type === 'string' && s.schema.enum),
     )
     .map((s) => {
-      const name = s.nameParts.map(upperFirst).join('');
+      const name = createUniqueModelName(s.nameParts, seenModelNameCounts);
+
       const $ref = `#/components/schemas/${name}`;
       const ref = {
         $ref,
@@ -312,11 +336,21 @@ export const normaliseOpenApiSpecForCodeGen = (inSpec: Spec): Spec => {
     }),
   );
 
+  // Initialise the models that we have seen with all schemas.
+  // This is required to ensure we do not create any clashing models below
+  const seenModelNameCounts = Object.fromEntries(
+    Object.keys(spec.components?.schemas ?? {}).map((name) => [name, 1]),
+  );
+
   // "Hoist" any nested object definitions in arrays/maps that aren't already refs, as parseOpenapi will treat the
   // type as "any" if they're defined inline (and not a ref)
   Object.entries(spec.components?.schemas ?? {}).forEach(([name, schema]) => {
     if (!isRef(schema)) {
-      const refs = hoistInlineObjectSubSchemas([name], schema);
+      const refs = hoistInlineObjectSubSchemas(
+        [name],
+        schema,
+        seenModelNameCounts,
+      );
       refs.forEach((ref) => {
         spec.components!.schemas![ref.name] = ref.schema;
       });

@@ -24,6 +24,7 @@ import {
   toTypeScriptType,
   toPythonType,
   toTypeScriptName,
+  toTypeScriptModelName,
 } from './codegen-data/languages';
 import {
   CodeGenData,
@@ -434,6 +435,10 @@ export const buildOpenApiCodeGenData = async (
       // Add language-specific names/types
       mutateModelWithAdditionalTypes(property);
     });
+
+    // Set the model's typescript name and type
+    (model as any).typescriptName = toTypeScriptModelName(model.name);
+    (model as any).typescriptType = (model as any).typescriptName;
   }
 
   // Order models lexicographically by name

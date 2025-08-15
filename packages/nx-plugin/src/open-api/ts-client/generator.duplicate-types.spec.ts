@@ -188,4 +188,196 @@ describe('openApiTsClientGenerator - duplicate types', () => {
     const orderTypeMatches = types?.match(/export type OrderRequest/g) || [];
     expect(orderTypeMatches).toHaveLength(1);
   });
+
+  it('should handle duplicated model names', async () => {
+    const spec: Spec = {
+      openapi: '3.0.0',
+      info: { title, version: '1.0.0' },
+      components: {
+        schemas: {
+          MyModel: {
+            oneOf: [
+              {
+                title: 'clash',
+                type: 'object',
+                properties: {
+                  message: { type: 'string' },
+                },
+                required: ['message'],
+              },
+              {
+                type: 'string',
+              },
+            ],
+          },
+          Clash: {
+            type: 'object',
+            properties: {
+              anotherProperty: { type: 'string' },
+            },
+            required: ['anotherProperty'],
+          },
+        },
+      },
+      paths: {
+        '/operation': {
+          post: {
+            operationId: 'operation',
+            requestBody: {
+              required: true,
+              content: {
+                'application/json': {
+                  schema: {
+                    $ref: '#/components/schemas/MyModel',
+                  },
+                },
+              },
+            },
+            responses: {
+              '200': {
+                description: 'Success',
+                content: {
+                  'application/json': {
+                    schema: { $ref: '#/components/schemas/Clash' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    tree.write('openapi.json', JSON.stringify(spec));
+
+    await openApiTsClientGenerator(tree, {
+      openApiSpecPath: 'openapi.json',
+      outputPath: 'src/generated',
+    });
+
+    validateTypeScript([
+      'src/generated/client.gen.ts',
+      'src/generated/types.gen.ts',
+    ]);
+
+    const types = tree.read('src/generated/types.gen.ts', 'utf-8');
+    expect(types).toMatchSnapshot();
+
+    const client = tree.read('src/generated/client.gen.ts', 'utf-8');
+    expect(client).toMatchSnapshot();
+
+    // Properties of both of the clashing models should be present, instead of one being erased
+    expect(types).toContain('message');
+    expect(types).toContain('anotherProperty');
+  });
+
+  it('should handle many duplicated model names', async () => {
+    const spec: Spec = {
+      openapi: '3.0.0',
+      info: { title, version: '1.0.0' },
+      components: {
+        schemas: {
+          MyModel: {
+            oneOf: [
+              {
+                title: 'clash',
+                type: 'object',
+                properties: {
+                  prop1: { type: 'string' },
+                },
+                required: ['prop1'],
+              },
+              {
+                title: 'clash',
+                type: 'object',
+                properties: {
+                  prop2: { type: 'string' },
+                },
+                required: ['prop2'],
+              },
+            ],
+          },
+          Clash: {
+            type: 'object',
+            properties: {
+              prop3: { type: 'string' },
+            },
+            required: ['prop3'],
+          },
+          AnotherModel: {
+            oneOf: [
+              {
+                title: 'clash',
+                type: 'object',
+                properties: {
+                  prop4: { type: 'string' },
+                },
+                required: ['prop4'],
+              },
+              {
+                title: 'clash',
+                type: 'object',
+                properties: {
+                  prop5: { type: 'string' },
+                },
+                required: ['prop5'],
+              },
+            ],
+          },
+        },
+      },
+      paths: {
+        '/operation': {
+          post: {
+            operationId: 'operation',
+            requestBody: {
+              required: true,
+              content: {
+                'application/json': {
+                  schema: {
+                    $ref: '#/components/schemas/MyModel',
+                  },
+                },
+              },
+            },
+            responses: {
+              '200': {
+                description: 'Success',
+                content: {
+                  'application/json': {
+                    schema: { $ref: '#/components/schemas/Clash' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    tree.write('openapi.json', JSON.stringify(spec));
+
+    await openApiTsClientGenerator(tree, {
+      openApiSpecPath: 'openapi.json',
+      outputPath: 'src/generated',
+    });
+
+    validateTypeScript([
+      'src/generated/client.gen.ts',
+      'src/generated/types.gen.ts',
+    ]);
+
+    const types = tree.read('src/generated/types.gen.ts', 'utf-8');
+    expect(types).toMatchSnapshot();
+
+    const client = tree.read('src/generated/client.gen.ts', 'utf-8');
+    expect(client).toMatchSnapshot();
+
+    // Properties of all of the clashing models should be present
+    expect(types).toContain('prop1');
+    expect(types).toContain('prop2');
+    expect(types).toContain('prop3');
+    expect(types).toContain('prop4');
+    expect(types).toContain('prop5');
+  });
 });
