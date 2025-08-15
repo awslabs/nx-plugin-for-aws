@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { snakeCase } from '../../../utils/names';
+import { snakeCase, toClassName } from '../../../utils/names';
 import { PRIMITIVE_TYPES, flattenModelLink, Model } from './types';
 import camelCase from 'lodash.camelcase';
 
@@ -24,8 +24,8 @@ const toTypescriptPrimitive = (property: Model): string => {
 export const toTypeScriptType = (property: Model): string => {
   const propertyLink = flattenModelLink(property.link);
   switch (property.export) {
+    case 'enum':
     case 'generic':
-    case 'reference':
       return toTypescriptPrimitive(property);
     case 'array':
       return `Array<${propertyLink && propertyLink.export !== 'enum' ? toTypeScriptType(propertyLink) : property.type}>`;
@@ -34,14 +34,50 @@ export const toTypeScriptType = (property: Model): string => {
     case 'one-of':
     case 'any-of':
     case 'all-of':
-      return property.name;
+      return toTypeScriptModelName(property.name);
+    case 'reference':
     default:
-      return property.type;
+      return property.type === 'unknown'
+        ? 'unknown'
+        : toTypeScriptModelName(property.type);
   }
 };
 
 export const toTypeScriptName = (name: string): string => {
   return camelCase(name);
+};
+
+const TYPESCRIPT_RESERVED_MODEL_NAMES = new Set([
+  'Date',
+  'Blob',
+  'Object',
+  'String',
+  'Boolean',
+  'Integer',
+  'Long',
+  'Float',
+  'Array',
+  'ReadonlyArray',
+  'File',
+  'Error',
+  'Map',
+  'Set',
+  'Number',
+  'Symbol',
+  'BigInt',
+  'Function',
+  'Promise',
+  'RegExp',
+  'JSON',
+]);
+
+export const toTypeScriptModelName = (name: string): string => {
+  const candidateName = toClassName(name);
+
+  // Prepend underscore for any reserved model names
+  return TYPESCRIPT_RESERVED_MODEL_NAMES.has(candidateName)
+    ? `_${candidateName}`
+    : candidateName;
 };
 
 const toPythonPrimitive = (property: Model): string => {
