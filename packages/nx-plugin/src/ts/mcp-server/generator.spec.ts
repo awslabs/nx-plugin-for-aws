@@ -53,6 +53,12 @@ describe('ts#mcp-server generator', () => {
     expect(
       tree.exists('apps/test-project/src/mcp-server/server.ts'),
     ).toBeTruthy();
+    expect(
+      tree.exists('apps/test-project/src/mcp-server/stdio.ts'),
+    ).toBeTruthy();
+    expect(
+      tree.exists('apps/test-project/src/mcp-server/http.ts'),
+    ).toBeTruthy();
 
     // Check that package.json was updated with bin entry
     const packageJson = JSON.parse(
@@ -60,20 +66,28 @@ describe('ts#mcp-server generator', () => {
     );
     expect(packageJson.bin).toBeDefined();
     expect(packageJson.bin['test-project-mcp-server']).toBe(
-      './src/mcp-server/index.js',
+      './src/mcp-server/stdio.js',
     );
 
     // Check that project configuration was updated with serve target
     const projectConfig = JSON.parse(
       tree.read('apps/test-project/project.json', 'utf-8'),
     );
-    expect(projectConfig.targets['mcp-server-serve']).toBeDefined();
-    expect(projectConfig.targets['mcp-server-serve'].executor).toBe(
+    expect(projectConfig.targets['mcp-server-serve-stdio']).toBeDefined();
+    expect(projectConfig.targets['mcp-server-serve-stdio'].executor).toBe(
       'nx:run-commands',
     );
     expect(
-      projectConfig.targets['mcp-server-serve'].options.commands[0],
-    ).toContain('tsx --watch ./src/mcp-server/index.ts');
+      projectConfig.targets['mcp-server-serve-stdio'].options.commands[0],
+    ).toContain('tsx --watch ./src/mcp-server/stdio.ts');
+
+    expect(projectConfig.targets['mcp-server-serve-http']).toBeDefined();
+    expect(projectConfig.targets['mcp-server-serve-http'].executor).toBe(
+      'nx:run-commands',
+    );
+    expect(
+      projectConfig.targets['mcp-server-serve-http'].options.commands[0],
+    ).toContain('tsx --watch ./src/mcp-server/http.ts');
   });
 
   it('should add MCP server with custom name', async () => {
@@ -89,20 +103,27 @@ describe('ts#mcp-server generator', () => {
     expect(
       tree.exists('apps/test-project/src/custom-server/server.ts'),
     ).toBeTruthy();
+    expect(
+      tree.exists('apps/test-project/src/custom-server/stdio.ts'),
+    ).toBeTruthy();
+    expect(
+      tree.exists('apps/test-project/src/custom-server/http.ts'),
+    ).toBeTruthy();
 
     // Check that package.json was updated with custom bin entry
     const packageJson = JSON.parse(
       tree.read('apps/test-project/package.json', 'utf-8'),
     );
     expect(packageJson.bin['custom-server']).toBe(
-      './src/custom-server/index.js',
+      './src/custom-server/stdio.js',
     );
 
     // Check that project configuration was updated with custom serve target
     const projectConfig = JSON.parse(
       tree.read('apps/test-project/project.json', 'utf-8'),
     );
-    expect(projectConfig.targets['custom-server-serve']).toBeDefined();
+    expect(projectConfig.targets['custom-server-serve-stdio']).toBeDefined();
+    expect(projectConfig.targets['custom-server-serve-http']).toBeDefined();
   });
 
   it('should handle ESM projects correctly', async () => {
@@ -128,7 +149,7 @@ describe('ts#mcp-server generator', () => {
       'apps/test-project/src/esm-server/index.ts',
       'utf-8',
     );
-    expect(indexContent).toBeDefined();
+    expect(indexContent).toContain('server.js');
   });
 
   it('should handle CommonJS projects correctly', async () => {
@@ -148,7 +169,8 @@ describe('ts#mcp-server generator', () => {
       'apps/test-project/src/cjs-server/index.ts',
       'utf-8',
     );
-    expect(indexContent).toBeDefined();
+    expect(indexContent).toContain('server');
+    expect(indexContent).not.toContain('server.js');
   });
 
   it('should create package.json if it does not exist', async () => {
@@ -168,7 +190,7 @@ describe('ts#mcp-server generator', () => {
     );
     expect(packageJson.name).toBe('test-project');
     expect(packageJson.type).toBe('module'); // Default to ESM
-    expect(packageJson.bin['new-server']).toBe('./src/new-server/index.js');
+    expect(packageJson.bin['new-server']).toBe('./src/new-server/stdio.js');
   });
 
   it('should add dependencies to both root and project package.json', async () => {
@@ -182,7 +204,9 @@ describe('ts#mcp-server generator', () => {
       rootPackageJson.dependencies['@modelcontextprotocol/sdk'],
     ).toBeDefined();
     expect(rootPackageJson.dependencies['zod-v3']).toBeDefined();
+    expect(rootPackageJson.dependencies['express']).toBeDefined();
     expect(rootPackageJson.devDependencies['tsx']).toBeDefined();
+    expect(rootPackageJson.devDependencies['@types/express']).toBeDefined();
 
     // Check project package.json dependencies
     const projectPackageJson = JSON.parse(
@@ -192,7 +216,9 @@ describe('ts#mcp-server generator', () => {
       projectPackageJson.dependencies['@modelcontextprotocol/sdk'],
     ).toBeDefined();
     expect(projectPackageJson.dependencies['zod-v3']).toBeDefined();
+    expect(projectPackageJson.dependencies['express']).toBeDefined();
     expect(projectPackageJson.devDependencies['tsx']).toBeDefined();
+    expect(projectPackageJson.devDependencies['@types/express']).toBeDefined();
   });
 
   it('should handle project without sourceRoot', async () => {
@@ -301,9 +327,19 @@ describe('ts#mcp-server generator', () => {
       'apps/test-project/src/snapshot-server/server.ts',
       'utf-8',
     );
+    const stdioContent = tree.read(
+      'apps/test-project/src/snapshot-server/stdio.ts',
+      'utf-8',
+    );
+    const httpContent = tree.read(
+      'apps/test-project/src/snapshot-server/http.ts',
+      'utf-8',
+    );
 
     expect(indexContent).toMatchSnapshot('mcp-server-index.ts');
     expect(serverContent).toMatchSnapshot('mcp-server-server.ts');
+    expect(stdioContent).toMatchSnapshot('mcp-server-stdio.ts');
+    expect(httpContent).toMatchSnapshot('mcp-server-http.ts');
 
     // Snapshot the updated package.json
     const packageJson = tree.read('apps/test-project/package.json', 'utf-8');

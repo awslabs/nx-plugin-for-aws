@@ -67,10 +67,12 @@ export const tsMcpServerGenerator = async (
   // https://github.com/nrwl/nx/issues/15682
   const esm = readJson(tree, projectPackageJsonPath).type === 'module';
 
-  // Add a target for running the MCP server
+  // Add a target for running the MCP server with stdio transport
+  // This allows for the project to be published to npm and then configured with npx, ie:
+  // npx -p my-package mcp-server
   updateJson(tree, projectPackageJsonPath, (pkg) => {
     pkg.bin ??= {};
-    pkg.bin[name] = `${relativeSourceDir}/index.js`;
+    pkg.bin[name] = `${relativeSourceDir}/stdio.js`;
     return pkg;
   });
 
@@ -79,8 +81,8 @@ export const tsMcpServerGenerator = async (
   // Zod v3 is needed since the MCP SDK doesn't yet support v4 (or both v3 and v4 via standard schema)
   // Tracking: https://github.com/modelcontextprotocol/typescript-sdk/issues/164
   // We use a renamed dependency so that v3 and v4 can coexist in projects until the above is resolved
-  const deps = withVersions(['@modelcontextprotocol/sdk', 'zod-v3']);
-  const devDeps = withVersions(['tsx']);
+  const deps = withVersions(['@modelcontextprotocol/sdk', 'zod-v3', 'express']);
+  const devDeps = withVersions(['tsx', '@types/express']);
   addDependenciesToPackageJson(tree, deps, devDeps);
   addDependenciesToPackageJson(tree, deps, devDeps, projectPackageJsonPath);
 
@@ -100,11 +102,18 @@ export const tsMcpServerGenerator = async (
     ...project,
     targets: {
       ...project.targets,
-      // Add target for running the MCP server
-      [`${options.name ? name : 'mcp-server'}-serve`]: {
+      // Add targets for running the MCP server
+      [`${options.name ? name : 'mcp-server'}-serve-stdio`]: {
         executor: 'nx:run-commands',
         options: {
-          commands: [`tsx --watch ${relativeSourceDir}/index.ts`],
+          commands: [`tsx --watch ${relativeSourceDir}/stdio.ts`],
+          cwd: '{projectRoot}',
+        },
+      },
+      [`${options.name ? name : 'mcp-server'}-serve-http`]: {
+        executor: 'nx:run-commands',
+        options: {
+          commands: [`tsx --watch ${relativeSourceDir}/http.ts`],
           cwd: '{projectRoot}',
         },
       },
