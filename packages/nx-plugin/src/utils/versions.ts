@@ -12,7 +12,7 @@ export const VERSIONS = {
   '@aws-lambda-powertools/tracer': '^2.24.1',
   '@aws-lambda-powertools/parser': '^2.24.1',
   '@middy/core': '^6.0.0',
-  '@nxlv/python': '^21.0.0',
+  '@nxlv/python': '~21.2.0',
   '@nx/devkit': '~21.0.3',
   '@modelcontextprotocol/sdk': '^1.11.3',
   '@tanstack/react-router': '^1.121.16',
