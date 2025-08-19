@@ -12,18 +12,18 @@ import Link from '@components/link.astro';
 import Snippet from '@components/snippet.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 
-대형 언어 모델(LLM)에 컨텍스트를 제공하기 위한 TypeScript [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) 서버 생성하기
+대형 언어 모델(LLM)에 컨텍스트를 제공하기 위한 TypeScript [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) 서버를 생성하고 선택적으로 [Amazon Bedrock AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/)에 배포합니다.
 
-## MCP란?
+## MCP란 무엇인가요?
 
-[Model Context Protocol (MCP)](https://modelcontextprotocol.io/)는 AI 어시스턴트가 외부 도구 및 리소스와 상호작용할 수 있도록 하는 오픈 표준입니다. LLM이 다음을 수행할 수 있는 일관된 방법을 제공합니다:
+[Model Context Protocol (MCP)](https://modelcontextprotocol.io/)는 AI 어시스턴트가 외부 도구 및 리소스와 상호 작용할 수 있도록 하는 개방형 표준입니다. LLM이 다음을 수행할 수 있는 일관된 방법을 제공합니다:
 
 - 작업 수행 또는 정보 검색을 위한 도구(함수) 실행
 - 컨텍스트 또는 데이터를 제공하는 리소스 접근
 
 ## 사용 방법
 
-### MCP 서버 생성하기
+### MCP 서버 생성
 
 TypeScript MCP 서버를 두 가지 방법으로 생성할 수 있습니다:
 
@@ -45,21 +45,28 @@ TypeScript MCP 서버를 두 가지 방법으로 생성할 수 있습니다:
   - your-project/
     - src/
       - mcp-server/ (사용자 지정 이름 지정 시 변경됨)
-        - index.ts MCP 서버 진입점
-        - server.ts 메인 서버 정의
+        - index.ts 서버 내보내기
+        - server.ts 주요 서버 정의
+        - stdio.ts STDIO 전송 진입점 (단순 로컬 MCP 서버에 유용)
+        - http.ts Streamable HTTP 전송 진입점 (MCP 서버 호스팅에 유용)
         - tools/
           - add.ts 샘플 도구
         - resources/
           - sample-guidance.ts 샘플 리소스
-    - package.json bin 항목 및 MCP 종속성 추가됨
-    - project.json MCP 서버 serve 타겟 업데이트됨
+        - Dockerfile MCP 서버 호스팅 진입점 (`computeType`이 `BedrockAgentCoreRuntime`으로 설정된 경우)
+    - package.json bin 항목 및 MCP 종속성 업데이트
+    - project.json MCP 서버 서빙 타겟 업데이트
 </FileTree>
+
+:::note
+`computeType`으로 `BedrockAgentCoreRuntime`을 선택한 경우, 생성기는 MCP 서버 배포를 위한 CDK 구문도 함께 생성합니다.
+:::
 
 ## MCP 서버 작업하기
 
 ### 도구 추가하기
 
-도구는 AI 어시스턴트가 호출할 수 있는 기능입니다. `server.ts` 파일에 새 도구를 추가할 수 있습니다:
+도구는 AI 어시스턴트가 작업 수행을 위해 호출할 수 있는 함수입니다. `server.ts` 파일에 새 도구를 추가할 수 있습니다:
 
 ```typescript
 server.tool("toolName", "tool description",
@@ -74,21 +81,21 @@ server.tool("toolName", "tool description",
 ```
 
 :::caution
-현재 MCP SDK는 Zod v3만 지원합니다. 다른 생성기에서 Zod v4 사용을 허용하기 위해 Zod v3 종속성이 `zod-v3`로 설치됩니다. MCP 도구 스키마 작성 시 다음과 같이 Zod를 임포트해야 합니다:
+현재 MCP SDK는 Zod v3만 지원합니다. 다른 생성기에서 Zod v4를 사용할 수 있도록 하기 위해 Zod v3 종속성이 `zod-v3`로 설치됩니다. MCP 도구 스키마에서는 다음과 같이 Zod를 임포트해야 합니다:
 
 ```ts
 import { z } from 'zod-v3';
 ```
 
-[MCP SDK의 이슈](https://github.com/modelcontextprotocol/typescript-sdk/issues/164)가 해결되면 추가 `zod-v3` 종속성을 제거하고 `zod`에서 바로 임포트할 수 있습니다.
+[MCP SDK의 이슈](https://github.com/modelcontextprotocol/typescript-sdk/issues/164)가 해결되면 추가적인 `zod-v3` 종속성을 제거하고 `zod`에서 바로 임포트할 수 있습니다.
 :::
 
 ### 리소스 추가하기
 
-리소스는 AI 어시스턴트에 컨텍스트를 제공합니다. 파일에서 정적 리소스나 동적 리소스를 추가할 수 있습니다:
+리소스는 AI 어시스턴트에 컨텍스트를 제공합니다. 파일에서 정적 리소스를 추가하거나 동적 리소스를 생성할 수 있습니다:
 
 ```typescript
-const exampleContext = '반환할 컨텍스트 내용';
+const exampleContext = '반환할 일부 컨텍스트';
 
 server.resource('resource-name', 'example://resource', async (uri) => ({
   contents: [{ uri: uri.href, text: exampleContext }],
@@ -109,8 +116,100 @@ server.resource('dynamic-resource', 'dynamic://resource', async (uri) => {
 
 ## MCP 서버 실행하기
 
-MCP 서버를 테스트하고 사용하는 가장 쉬운 방법은 AI 어시스턴트와 연동하는 것입니다(위 참조). 하지만 [STDIO 전송](https://modelcontextprotocol.io/docs/concepts/transports#standard-input%2Foutput-stdio)에서 [Streamable HTTP 전송](https://modelcontextprotocol.io/docs/concepts/transports#streamable-http)으로 전환할 경우 `<your-server-name>-serve` 타겟을 사용해 서버를 실행할 수 있습니다.
+### STDIO
 
-<NxCommands commands={['run your-project:your-server-name-serve']} />
+MCP 서버를 테스트하고 사용하는 가장 쉬운 방법은 AI 어시스턴트와 연동하는 것입니다(위 참조).
 
-이 명령어는 파일 변경 시 서버를 자동으로 재시작하는 `tsx --watch`를 사용합니다.
+[STDIO 전송](https://modelcontextprotocol.io/docs/concepts/transports#standard-input%2Foutput-stdio)을 통해 직접 서버를 실행하려면 `<your-server-name>-serve-stdio` 타겟을 사용하세요.
+
+<NxCommands commands={['run your-project:your-server-name-serve-stdio']} />
+
+이 명령은 파일 변경 시 서버를 자동으로 재시작하는 `tsx --watch`를 사용합니다.
+
+### Streamable HTTP
+
+[Streamable HTTP 전송](https://modelcontextprotocol.io/docs/concepts/transports#streamable-http)으로 로컬에서 MCP 서버를 실행하려면 `<your-server-name>-serve-http` 타겟을 사용하세요.
+
+<NxCommands commands={['run your-project:your-server-name-serve-http']} />
+
+이 명령은 파일 변경 시 서버를 자동으로 재시작하는 `tsx --watch`를 사용합니다.
+
+## Bedrock AgentCore Runtime에 MCP 서버 배포하기
+
+`computeType`으로 `BedrockAgentCoreRuntime`을 선택한 경우, [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html)에 MCP 서버를 배포하는 데 사용할 수 있는 CDK 구문이 생성됩니다.
+
+CDK 애플리케이션에서 이 CDK 구문을 사용할 수 있습니다:
+
+```ts {6}
+import { MyProjectMcpServer } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    // 스택에 MCP 서버 추가
+    new MyProjectMcpServer(this, 'MyProjectMcpServer');
+  }
+}
+```
+
+:::caution
+MCP 서버 빌드 및 배포를 위해 [Docker](https://www.docker.com/)가 필요합니다. 다음 오류를 방지하려면 Docker를 설치하고 실행했는지 확인하세요:
+
+```
+ERROR: Cannot connect to the Docker daemon at unix://path/to/docker.sock.
+```
+:::
+
+### 인증
+
+#### IAM
+
+기본적으로 MCP 서버는 IAM 인증으로 보호됩니다. 인수 없이 배포하면 됩니다:
+
+```ts {5}
+import { MyProjectMcpServer } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    new MyProjectMcpServer(this, 'MyProjectMcpServer');
+  }
+}
+```
+
+#### Cognito JWT 인증
+
+JWT 인증을 구성하려면 MCP 서버 구문에 `authorizerConfiguration` 속성을 전달할 수 있습니다. 다음은 Cognito 사용자 풀과 클라이언트를 구성하여 MCP 서버를 보호하는 예시입니다:
+
+```ts {14-17}
+import { MyProjectMcpServer } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const userPool = new UserPool(this, 'UserPool');
+    const client = userPool.addClient('Client', {
+      authFlows: {
+        userPassword: true,
+      },
+    });
+
+    new MyProjectMcpServer(this, 'MyProjectMcpServer', {
+      authorizerConfiguration: {
+        customJWTAuthorizer: {
+          discoveryUrl: `https://cognito-idp.${Stack.of(userPool).region}.amazonaws.com/${userPool.userPoolId}/.well-known/openid-configuration`,
+          allowedClients: [client.userPoolClientId],
+        },
+      },
+    });
+  }
+}
+```
+
+### 번들 타겟
+
+Bedrock AgentCore Runtime용 MCP 서버를 빌드하기 위해 `<your-mcp-server>-bundle` 타겟이 프로젝트에 추가됩니다. 이 타겟은:
+
+- [`esbuild`](https://esbuild.github.io/)을 사용해 MCP 서버를 단일 JavaScript 파일로 번들링합니다(Streamable HTTP MCP 서버의 진입점으로 `http.ts` 사용).
+- [MCP 프로토콜 계약](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-service-contract.html#mcp-protocol-contract)에 따라 포트 `8000`에서 이 번들 서버를 실행하는 `Dockerfile`에서 도커 이미지를 빌드합니다.
+
+:::tip
+도커 이미지는 태그(예: `my-scope-my-project-mcp-server:latest`)를 사용하여 빌드되며, CDK 구문의 `Dockerfile`이 이를 상속받아 MCP 서버 프로젝트와 함께 배치될 수 있습니다.
+:::
