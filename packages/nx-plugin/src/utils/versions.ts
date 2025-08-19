@@ -7,6 +7,7 @@ export const VERSIONS = {
   '@aws-sdk/client-cognito-identity': '^3.775.0',
   '@aws-sdk/credential-providers': '^3.775.0',
   '@aws-sdk/credential-provider-cognito-identity': '^3.775.0',
+  '@aws-sdk/client-bedrock-agentcore-control': '^3.848.0',
   '@aws-lambda-powertools/logger': '^2.24.1',
   '@aws-lambda-powertools/metrics': '^2.24.1',
   '@aws-lambda-powertools/tracer': '^2.24.1',
