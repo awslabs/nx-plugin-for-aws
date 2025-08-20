@@ -163,4 +163,4 @@ export const buildCreateNxWorkspaceCommand = (
   workspace: string,
   yes = false,
 ) =>
-  `npx ${yes ? '-y ' : ''}create-nx-workspace@~21.0.3 ${workspace} --pm=${pm} --preset=@aws/nx-plugin --ci=skip`;
+  `npx ${yes ? '-y ' : ''}create-nx-workspace@~21.4.1 ${workspace} --pm=${pm} --preset=@aws/nx-plugin --ci=skip`;
