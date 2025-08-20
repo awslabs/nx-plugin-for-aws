@@ -33,7 +33,7 @@ export interface TrpcBackendOptions extends BackendOptions {
 
 export interface FastApiBackendOptions extends BackendOptions {
   type: 'fastapi';
-  apiNameSnakeCase: string;
+  moduleName: string;
   dir: string;
 }
 
