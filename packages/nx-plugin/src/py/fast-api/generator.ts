@@ -60,7 +60,6 @@ export const pyFastApiProjectGenerator = async (
       moduleName: schema.moduleName,
     },
   );
-  const apiNameSnakeCase = toSnakeCase(schema.name);
   const apiNameKebabCase = toKebabCase(schema.name);
   const apiNameClassName = toClassName(schema.name);
 
@@ -136,7 +135,7 @@ export const pyFastApiProjectGenerator = async (
     backend: {
       type: 'fastapi',
       dir,
-      apiNameSnakeCase,
+      moduleName: normalizedModuleName,
     },
     auth: schema.auth,
   });

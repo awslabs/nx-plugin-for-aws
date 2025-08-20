@@ -632,6 +632,35 @@ export default AppLayout;
     });
   });
 
+  it('should throw when cognito domain is empty', async () => {
+    // Setup main.tsx with RuntimeConfigProvider
+    tree.write(
+      'packages/test-project/src/main.tsx',
+      `
+      import { RuntimeConfigProvider } from './components/RuntimeConfig';
+      import { RouterProvider, createRouter } from '@tanstack/react-router';
+
+      export function App() {
+
+        const App = () => <RouterProvider router={router} />;
+
+        return (
+          <RuntimeConfigProvider>
+            <App/>
+          </RuntimeConfigProvider>
+        );
+      }
+    `,
+    );
+
+    await expect(() =>
+      tsReactWebsiteAuthGenerator(tree, {
+        ...options,
+        cognitoDomain: '',
+      }),
+    ).rejects.toThrow(/A Cognito domain must be specified/);
+  });
+
   it('should not duplicate comments in IRuntimeConfig', async () => {
     tree.write(
       'packages/test-project/src/main.tsx',

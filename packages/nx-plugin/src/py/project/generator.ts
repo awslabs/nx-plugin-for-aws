@@ -134,6 +134,8 @@ export const pyProjectGenerator = async (
     codeCoverageXmlReport: true,
     unitTestHtmlReport: true,
     unitTestJUnitReport: true,
+    buildSystem: 'hatch',
+    srcDir: false,
   });
 
   const outputPath = `{workspaceRoot}/dist/${dir}`;

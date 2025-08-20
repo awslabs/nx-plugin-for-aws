@@ -158,6 +158,11 @@ describe('fastapi project generator', () => {
     expect(
       tree.exists('packages/common/constructs/src/core/api/rest-api.ts'),
     ).toBeFalsy();
+
+    // Check scope is included in function handler
+    expect(
+      tree.read('packages/common/constructs/src/app/apis/test-api.ts', 'utf-8'),
+    ).toContain("handler: 'proj_test_api.main.handler'");
   });
 
   it('should set up shared constructs for rest', async () => {
@@ -198,6 +203,11 @@ describe('fastapi project generator', () => {
     expect(
       tree.exists('packages/common/constructs/src/core/api/http-api.ts'),
     ).toBeFalsy();
+
+    // Check scope is included in function handler
+    expect(
+      tree.read('packages/common/constructs/src/app/apis/test-api.ts', 'utf-8'),
+    ).toContain("handler: 'proj_test_api.main.handler'");
   });
 
   it('should update shared constructs build dependencies', async () => {

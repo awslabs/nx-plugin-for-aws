@@ -68,6 +68,10 @@ export async function tsReactWebsiteAuthGenerator(
     );
   }
 
+  if (!options.cognitoDomain) {
+    throw new Error('A Cognito domain must be specified!');
+  }
+
   await runtimeConfigGenerator(tree, {
     project: options.project,
   });
