@@ -31,7 +31,7 @@ export const createPythonBundleTarget = ({
     options: {
       commands: [
         `uv export --frozen --no-dev --no-editable --project ${projectDir} --package ${packageName} -o dist/${projectDir}/bundle/requirements.txt`,
-        `uv pip install -n --no-installer-metadata --no-compile-bytecode --python-platform x86_64-manylinux2014 --target dist/${projectDir}/bundle -r dist/${projectDir}/bundle/requirements.txt`,
+        `uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform x86_64-manylinux2014 --target dist/${projectDir}/bundle -r dist/${projectDir}/bundle/requirements.txt`,
       ],
       parallel: false,
     },
