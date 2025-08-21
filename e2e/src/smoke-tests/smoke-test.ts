@@ -102,6 +102,10 @@ export const smokeTest = (
         opts,
       );
       await runCLI(
+        `generate @aws/nx-plugin:ts#mcp-server --project=ts-project --name=hosted-mcp-server --computeType=BedrockAgentCoreRuntime --no-interactive`,
+        opts,
+      );
+      await runCLI(
         `generate @aws/nx-plugin:api-connection --sourceProject=website --targetProject=py_api --no-interactive`,
         opts,
       );

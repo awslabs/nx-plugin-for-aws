@@ -12,7 +12,7 @@ import Link from '@components/link.astro';
 import Snippet from '@components/snippet.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 
-Gere um servidor TypeScript do [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) para fornecer contexto a Large Language Models (LLMs).
+Gere um servidor TypeScript do [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) para fornecer contexto a Large Language Models (LLMs), e opcionalmente implante-o no [Amazon Bedrock AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/).
 
 ## O que é o MCP?
 
@@ -23,7 +23,7 @@ O [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) é um padrão
 
 ## Utilização
 
-### Gerar um servidor MCP
+### Gerar um Servidor MCP
 
 Você pode gerar um servidor MCP em TypeScript de duas formas:
 
@@ -45,17 +45,24 @@ O gerador adicionará os seguintes arquivos ao seu projeto TypeScript existente:
   - your-project/
     - src/
       - mcp-server/ (ou nome personalizado se especificado)
-        - index.ts Ponto de entrada do servidor MCP
+        - index.ts Exporta seu servidor
         - server.ts Definição principal do servidor
+        - stdio.ts Ponto de entrada para transporte STDIO, útil para servidores MCP locais simples
+        - http.ts Ponto de entrada para transporte HTTP Streamable, útil para hospedar seu servidor MCP
         - tools/
           - add.ts Ferramenta de exemplo
         - resources/
           - sample-guidance.ts Recurso de exemplo
+        - Dockerfile Ponto de entrada para hospedar seu servidor MCP (quando `computeType` for `BedrockAgentCoreRuntime`)
     - package.json Atualizado com entrada bin e dependências MCP
     - project.json Atualizado com alvo de serviço do servidor MCP
 </FileTree>
 
-## Trabalhando com seu Servidor MCP
+:::note
+Se você selecionou `BedrockAgentCoreRuntime` para `computeType`, o gerador também criará um construct CDK para implantar seu servidor MCP.
+:::
+
+## Trabalhando com Seu Servidor MCP
 
 ### Adicionando Ferramentas
 
@@ -74,13 +81,13 @@ server.tool("toolName", "tool description",
 ```
 
 :::caution
-O SDK MCP atualmente só suporta Zod v3. Para permitir o uso de Zod v4 em outros geradores, a dependência do Zod v3 é instalada como `zod-v3`. Para esquemas de ferramentas MCP, você precisará importar Zod da seguinte forma:
+O SDK MCP atualmente só suporta Zod v3. Para permitir o uso do Zod v4 em outros geradores, a dependência do Zod v3 é instalada como `zod-v3`. Para esquemas de ferramentas MCP, você precisará importar o Zod da seguinte forma:
 
 ```ts
 import { z } from 'zod-v3';
 ```
 
-Quando [este problema do SDK MCP](https://github.com/modelcontextprotocol/typescript-sdk/issues/164) for resolvido, você poderá remover a dependência adicional `zod-v3` e importar diretamente de `zod`.
+Uma vez que [este problema do SDK MCP](https://github.com/modelcontextprotocol/typescript-sdk/issues/164) for resolvido, você poderá remover a dependência adicional `zod-v3` e importar diretamente de `zod`.
 :::
 
 ### Adicionando Recursos
@@ -103,14 +110,114 @@ server.resource('dynamic-resource', 'dynamic://resource', async (uri) => {
 });
 ```
 
-## Configurando com Assistentes de IA
+## Configurando com Assistente de IA
 
-<Snippet name="mcp/configuration" parentHeading="Configurando com Assistentes de IA" />
+<Snippet name="mcp/configuration" parentHeading="Configurando com Assistente de IA" />
 
-## Executando seu Servidor MCP
+## Executando Seu Servidor MCP
 
-A maneira mais fácil de testar e usar um servidor MCP é configurá-lo com um assistente de IA (como acima). Porém, você pode executar o servidor usando o alvo `<your-server-name>-serve`, útil se alternar do [transporte STDIO](https://modelcontextprotocol.io/docs/concepts/transports#standard-input%2Foutput-stdio) para [transporte HTTP Streamable](https://modelcontextprotocol.io/docs/concepts/transports#streamable-http).
+### STDIO
 
-<NxCommands commands={['run your-project:your-server-name-serve']} />
+A maneira mais fácil de testar e usar um servidor MCP é configurando-o com um assistente de IA (conforme acima).
 
-Este comando usa `tsx --watch` para reiniciar automaticamente o servidor quando arquivos forem alterados.
+Você também pode executar seu servidor com [transporte STDIO](https://modelcontextprotocol.io/docs/concepts/transports#standard-input%2Foutput-stdio) diretamente usando o alvo `<your-server-name>-serve-stdio`.
+
+<NxCommands commands={['run your-project:your-server-name-serve-stdio']} />
+
+Este comando usa `tsx --watch` para reiniciar automaticamente o servidor quando arquivos mudam.
+
+### HTTP Streamable
+
+Se desejar executar seu servidor MCP localmente usando [transporte HTTP Streamable](https://modelcontextprotocol.io/docs/concepts/transports#streamable-http), use o alvo `<your-server-name>-serve-http`.
+
+<NxCommands commands={['run your-project:your-server-name-serve-http']} />
+
+Este comando usa `tsx --watch` para reiniciar automaticamente o servidor quando arquivos mudam.
+
+## Implantando Seu Servidor MCP no Bedrock AgentCore Runtime
+
+Se você selecionou `BedrockAgentCoreRuntime` para `computeType`, um construct CDK é gerado para implantar seu servidor MCP no [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html).
+
+Use este construct CDK em uma aplicação CDK:
+
+```ts {6}
+import { MyProjectMcpServer } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    // Adicione o servidor MCP à sua stack
+    new MyProjectMcpServer(this, 'MyProjectMcpServer');
+  }
+}
+```
+
+:::caution
+[Docker](https://www.docker.com/) é necessário para construir e implantar seu servidor MCP. Certifique-se de tê-lo instalado e executando para evitar erros como:
+
+```
+ERROR: Cannot connect to the Docker daemon at unix://path/to/docker.sock.
+```
+:::
+
+### Autenticação
+
+#### IAM
+
+Por padrão, seu servidor MCP será protegido usando autenticação IAM. Basta implantá-lo sem argumentos:
+
+```ts {5}
+import { MyProjectMcpServer } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    new MyProjectMcpServer(this, 'MyProjectMcpServer');
+  }
+}
+```
+
+#### Autenticação Cognito JWT
+
+Para configurar autenticação JWT, passe a propriedade `authorizerConfiguration` para seu construct MCP. Aqui está um exemplo que configura um user pool e client Cognito para proteger o servidor:
+
+```ts {14-17}
+import { MyProjectMcpServer } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const userPool = new UserPool(this, 'UserPool');
+    const client = userPool.addClient('Client', {
+      authFlows: {
+        userPassword: true,
+      },
+    });
+
+    new MyProjectMcpServer(this, 'MyProjectMcpServer', {
+      authorizerConfiguration: {
+        customJWTAuthorizer: {
+          discoveryUrl: `https://cognito-idp.${Stack.of(userPool).region}.amazonaws.com/${userPool.userPoolId}/.well-known/openid-configuration`,
+          allowedClients: [client.userPoolClientId],
+        },
+      },
+    });
+  }
+}
+```
+
+### Alvo de Bundle
+
+Para construir seu servidor MCP para Bedrock AgentCore Runtime, um alvo `<your-mcp-server>-bundle` é adicionado ao seu projeto, que:
+
+- Empacota seu servidor MCP em um único arquivo JavaScript com [`esbuild`](https://esbuild.github.io/), usando `http.ts` como ponto de entrada para um servidor MCP HTTP Streamable.
+- Constrói uma imagem Docker a partir do `Dockerfile` que executa este servidor empacotado na porta `8000`, conforme [contrato do protocolo MCP](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-service-contract.html#mcp-protocol-contract)
+
+:::tip
+A imagem Docker é construída usando uma tag (ex: `my-scope-my-project-mcp-server:latest`), que o `Dockerfile` do construct CDK herda, permitindo que seu `Dockerfile` fique junto com seu projeto MCP.
+:::
+
+### Observabilidade
+
+Seu servidor MCP é configurado automaticamente com observabilidade usando [AWS Distro for Open Telemetry](https://aws.amazon.com/otel/) (ADOT), através de [auto-instrumentação](https://aws-otel.github.io/docs/getting-started/js-sdk/trace-metric-auto-instr) com o SDK JavaScript em seu `Dockerfile`.
+
+Você pode encontrar traces no Console AWS CloudWatch, selecionando "GenAI Observability" no menu. Note que para ver traces é necessário habilitar [Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search.html).
+
+Para mais detalhes, consulte a [documentação do AgentCore sobre observabilidade](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html).

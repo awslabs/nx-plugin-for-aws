@@ -33,6 +33,7 @@ import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { withVersions } from '../../utils/versions';
 import camelCase from 'lodash.camelcase';
 import { TS_HANDLER_RETURN_TYPES } from './io';
+import { addEsbuildBundleTarget } from '../../utils/esbuild';
 
 export const TS_LAMBDA_FUNCTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -107,47 +108,12 @@ export const tsLambdaFunctionGenerator = async (
     returnType: TS_HANDLER_RETURN_TYPES[schema.eventSource],
   };
 
-  if (!projectConfig.targets) {
-    projectConfig.targets = {};
-  }
-
-  // Add the specific bundle target for this lambda function
-  projectConfig.targets[bundleTargetName] = {
-    cache: true,
-    executor: 'nx:run-commands',
-    outputs: [`{workspaceRoot}/dist/${dir}/${bundleTargetName}`],
-    options: {
-      commands: [
-        `esbuild ${functionPath} --bundle --platform=node --target=node22 --format=cjs --outfile=dist/${dir}/${bundleTargetName}/index.js --external:@aws-sdk/*`,
-      ],
-      parallel: false,
-    },
-    dependsOn: ['compile'],
-  };
-
-  // Add the bundle target if it doesn't exist
-  projectConfig.targets.bundle = projectConfig.targets.bundle ?? {
-    cache: true,
-    dependsOn: [],
-  };
-  // Add the lambda's bundle target to the main bundle target's dependsOn
-  projectConfig.targets.bundle.dependsOn = [
-    ...(projectConfig.targets.bundle.dependsOn ?? []).filter(
-      (d) => d !== bundleTargetName,
-    ),
+  // Add a bundle target for the function
+  addEsbuildBundleTarget(projectConfig, {
     bundleTargetName,
-  ];
-
-  if (!projectConfig.targets?.build) {
-    projectConfig.targets.build = {};
-  }
-
-  projectConfig.targets.build.dependsOn = [
-    ...(projectConfig.targets.build.dependsOn ?? []).filter(
-      (t) => t !== 'bundle',
-    ),
-    'bundle',
-  ];
+    targetFilePath: functionPath,
+    extraEsbuildArgs: '--external:@aws-sdk/*',
+  });
 
   projectConfig.targets = sortObjectKeys(projectConfig.targets);
   updateProjectConfiguration(tree, projectConfig.name, projectConfig);

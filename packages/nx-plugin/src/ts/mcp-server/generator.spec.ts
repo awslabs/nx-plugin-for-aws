@@ -53,6 +53,17 @@ describe('ts#mcp-server generator', () => {
     expect(
       tree.exists('apps/test-project/src/mcp-server/server.ts'),
     ).toBeTruthy();
+    expect(
+      tree.exists('apps/test-project/src/mcp-server/stdio.ts'),
+    ).toBeTruthy();
+    expect(
+      tree.exists('apps/test-project/src/mcp-server/http.ts'),
+    ).toBeTruthy();
+
+    // There should be no Dockerfile since the computeType is None
+    expect(
+      tree.exists('apps/test-project/src/mcp-server/Dockerfile'),
+    ).toBeFalsy();
 
     // Check that package.json was updated with bin entry
     const packageJson = JSON.parse(
@@ -60,20 +71,28 @@ describe('ts#mcp-server generator', () => {
     );
     expect(packageJson.bin).toBeDefined();
     expect(packageJson.bin['test-project-mcp-server']).toBe(
-      './src/mcp-server/index.js',
+      './src/mcp-server/stdio.js',
     );
 
     // Check that project configuration was updated with serve target
     const projectConfig = JSON.parse(
       tree.read('apps/test-project/project.json', 'utf-8'),
     );
-    expect(projectConfig.targets['mcp-server-serve']).toBeDefined();
-    expect(projectConfig.targets['mcp-server-serve'].executor).toBe(
+    expect(projectConfig.targets['mcp-server-serve-stdio']).toBeDefined();
+    expect(projectConfig.targets['mcp-server-serve-stdio'].executor).toBe(
       'nx:run-commands',
     );
     expect(
-      projectConfig.targets['mcp-server-serve'].options.commands[0],
-    ).toContain('tsx --watch ./src/mcp-server/index.ts');
+      projectConfig.targets['mcp-server-serve-stdio'].options.commands[0],
+    ).toContain('tsx --watch ./src/mcp-server/stdio.ts');
+
+    expect(projectConfig.targets['mcp-server-serve-http']).toBeDefined();
+    expect(projectConfig.targets['mcp-server-serve-http'].executor).toBe(
+      'nx:run-commands',
+    );
+    expect(
+      projectConfig.targets['mcp-server-serve-http'].options.commands[0],
+    ).toContain('tsx --watch ./src/mcp-server/http.ts');
   });
 
   it('should add MCP server with custom name', async () => {
@@ -89,20 +108,27 @@ describe('ts#mcp-server generator', () => {
     expect(
       tree.exists('apps/test-project/src/custom-server/server.ts'),
     ).toBeTruthy();
+    expect(
+      tree.exists('apps/test-project/src/custom-server/stdio.ts'),
+    ).toBeTruthy();
+    expect(
+      tree.exists('apps/test-project/src/custom-server/http.ts'),
+    ).toBeTruthy();
 
     // Check that package.json was updated with custom bin entry
     const packageJson = JSON.parse(
       tree.read('apps/test-project/package.json', 'utf-8'),
     );
     expect(packageJson.bin['custom-server']).toBe(
-      './src/custom-server/index.js',
+      './src/custom-server/stdio.js',
     );
 
     // Check that project configuration was updated with custom serve target
     const projectConfig = JSON.parse(
       tree.read('apps/test-project/project.json', 'utf-8'),
     );
-    expect(projectConfig.targets['custom-server-serve']).toBeDefined();
+    expect(projectConfig.targets['custom-server-serve-stdio']).toBeDefined();
+    expect(projectConfig.targets['custom-server-serve-http']).toBeDefined();
   });
 
   it('should handle ESM projects correctly', async () => {
@@ -128,7 +154,7 @@ describe('ts#mcp-server generator', () => {
       'apps/test-project/src/esm-server/index.ts',
       'utf-8',
     );
-    expect(indexContent).toBeDefined();
+    expect(indexContent).toContain('server.js');
   });
 
   it('should handle CommonJS projects correctly', async () => {
@@ -148,7 +174,8 @@ describe('ts#mcp-server generator', () => {
       'apps/test-project/src/cjs-server/index.ts',
       'utf-8',
     );
-    expect(indexContent).toBeDefined();
+    expect(indexContent).toContain('server');
+    expect(indexContent).not.toContain('server.js');
   });
 
   it('should create package.json if it does not exist', async () => {
@@ -168,7 +195,7 @@ describe('ts#mcp-server generator', () => {
     );
     expect(packageJson.name).toBe('test-project');
     expect(packageJson.type).toBe('module'); // Default to ESM
-    expect(packageJson.bin['new-server']).toBe('./src/new-server/index.js');
+    expect(packageJson.bin['new-server']).toBe('./src/new-server/stdio.js');
   });
 
   it('should add dependencies to both root and project package.json', async () => {
@@ -182,7 +209,9 @@ describe('ts#mcp-server generator', () => {
       rootPackageJson.dependencies['@modelcontextprotocol/sdk'],
     ).toBeDefined();
     expect(rootPackageJson.dependencies['zod-v3']).toBeDefined();
+    expect(rootPackageJson.dependencies['express']).toBeDefined();
     expect(rootPackageJson.devDependencies['tsx']).toBeDefined();
+    expect(rootPackageJson.devDependencies['@types/express']).toBeDefined();
 
     // Check project package.json dependencies
     const projectPackageJson = JSON.parse(
@@ -192,7 +221,9 @@ describe('ts#mcp-server generator', () => {
       projectPackageJson.dependencies['@modelcontextprotocol/sdk'],
     ).toBeDefined();
     expect(projectPackageJson.dependencies['zod-v3']).toBeDefined();
+    expect(projectPackageJson.dependencies['express']).toBeDefined();
     expect(projectPackageJson.devDependencies['tsx']).toBeDefined();
+    expect(projectPackageJson.devDependencies['@types/express']).toBeDefined();
   });
 
   it('should handle project without sourceRoot', async () => {
@@ -301,13 +332,296 @@ describe('ts#mcp-server generator', () => {
       'apps/test-project/src/snapshot-server/server.ts',
       'utf-8',
     );
+    const stdioContent = tree.read(
+      'apps/test-project/src/snapshot-server/stdio.ts',
+      'utf-8',
+    );
+    const httpContent = tree.read(
+      'apps/test-project/src/snapshot-server/http.ts',
+      'utf-8',
+    );
 
     expect(indexContent).toMatchSnapshot('mcp-server-index.ts');
     expect(serverContent).toMatchSnapshot('mcp-server-server.ts');
+    expect(stdioContent).toMatchSnapshot('mcp-server-stdio.ts');
+    expect(httpContent).toMatchSnapshot('mcp-server-http.ts');
 
     // Snapshot the updated package.json
     const packageJson = tree.read('apps/test-project/package.json', 'utf-8');
     expect(packageJson).toMatchSnapshot('updated-package.json');
+  });
+
+  it('should generate MCP server with BedrockAgentCoreRuntime and default name', async () => {
+    await tsMcpServerGenerator(tree, {
+      project: 'test-project',
+      computeType: 'BedrockAgentCoreRuntime',
+    });
+
+    // Check that MCP server files were added to the existing project
+    expect(
+      tree.exists('apps/test-project/src/mcp-server/index.ts'),
+    ).toBeTruthy();
+    expect(
+      tree.exists('apps/test-project/src/mcp-server/server.ts'),
+    ).toBeTruthy();
+    expect(
+      tree.exists('apps/test-project/src/mcp-server/stdio.ts'),
+    ).toBeTruthy();
+    expect(
+      tree.exists('apps/test-project/src/mcp-server/http.ts'),
+    ).toBeTruthy();
+
+    // Dockerfile should be included for BedrockAgentCoreRuntime
+    expect(
+      tree.exists('apps/test-project/src/mcp-server/Dockerfile'),
+    ).toBeTruthy();
+
+    // Check that package.json was updated with bin entry
+    const packageJson = JSON.parse(
+      tree.read('apps/test-project/package.json', 'utf-8'),
+    );
+    expect(packageJson.bin).toBeDefined();
+    expect(packageJson.bin['test-project-mcp-server']).toBe(
+      './src/mcp-server/stdio.js',
+    );
+
+    // Check that project configuration was updated with serve targets
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+    expect(projectConfig.targets['mcp-server-serve-stdio']).toBeDefined();
+    expect(projectConfig.targets['mcp-server-serve-http']).toBeDefined();
+
+    // Check that esbuild bundle target was added
+    expect(
+      projectConfig.targets['test-project-mcp-server-bundle'],
+    ).toBeDefined();
+    expect(
+      projectConfig.targets['test-project-mcp-server-bundle'].executor,
+    ).toBe('nx:run-commands');
+
+    expect(
+      projectConfig.targets['test-project-mcp-server-bundle'].options.commands,
+    ).toEqual([
+      'esbuild apps/test-project/src/mcp-server/http.ts --bundle --platform=node --target=node22 --format=cjs --outfile=dist/apps/test-project/test-project-mcp-server-bundle/index.js',
+      'docker build -t proj-test-project-mcp-server:latest apps/test-project/src/mcp-server --build-context workspace=.',
+    ]);
+  });
+
+  it('should generate MCP server with BedrockAgentCoreRuntime and custom name', async () => {
+    await tsMcpServerGenerator(tree, {
+      project: 'test-project',
+      name: 'custom-bedrock-server',
+      computeType: 'BedrockAgentCoreRuntime',
+    });
+
+    // Check that MCP server files were added with custom name
+    expect(
+      tree.exists('apps/test-project/src/custom-bedrock-server/index.ts'),
+    ).toBeTruthy();
+    expect(
+      tree.exists('apps/test-project/src/custom-bedrock-server/server.ts'),
+    ).toBeTruthy();
+    expect(
+      tree.exists('apps/test-project/src/custom-bedrock-server/stdio.ts'),
+    ).toBeTruthy();
+    expect(
+      tree.exists('apps/test-project/src/custom-bedrock-server/http.ts'),
+    ).toBeTruthy();
+
+    // Dockerfile should be included for BedrockAgentCoreRuntime
+    expect(
+      tree.exists('apps/test-project/src/custom-bedrock-server/Dockerfile'),
+    ).toBeTruthy();
+
+    // Check that package.json was updated with custom bin entry
+    const packageJson = JSON.parse(
+      tree.read('apps/test-project/package.json', 'utf-8'),
+    );
+    expect(packageJson.bin['custom-bedrock-server']).toBe(
+      './src/custom-bedrock-server/stdio.js',
+    );
+
+    // Check that project configuration was updated with custom serve targets
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+    expect(
+      projectConfig.targets['custom-bedrock-server-serve-stdio'],
+    ).toBeDefined();
+    expect(
+      projectConfig.targets['custom-bedrock-server-serve-http'],
+    ).toBeDefined();
+
+    // Check that esbuild bundle target was added with custom name
+    expect(projectConfig.targets['custom-bedrock-server-bundle']).toBeDefined();
+  });
+
+  it('should add additional dependencies for BedrockAgentCoreRuntime', async () => {
+    await tsMcpServerGenerator(tree, {
+      project: 'test-project',
+      computeType: 'BedrockAgentCoreRuntime',
+    });
+
+    // Check root package.json dependencies
+    const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+    expect(
+      rootPackageJson.dependencies['@modelcontextprotocol/sdk'],
+    ).toBeDefined();
+    expect(rootPackageJson.dependencies['zod-v3']).toBeDefined();
+    expect(rootPackageJson.dependencies['express']).toBeDefined();
+    expect(rootPackageJson.devDependencies['tsx']).toBeDefined();
+    expect(rootPackageJson.devDependencies['@types/express']).toBeDefined();
+
+    // Additional dependencies for BedrockAgentCoreRuntime
+    expect(
+      rootPackageJson.devDependencies[
+        '@aws-sdk/client-bedrock-agentcore-control'
+      ],
+    ).toBeDefined();
+    expect(rootPackageJson.devDependencies['esbuild']).toBeDefined();
+
+    // Check project package.json dependencies
+    const projectPackageJson = JSON.parse(
+      tree.read('apps/test-project/package.json', 'utf-8'),
+    );
+    expect(
+      projectPackageJson.dependencies['@modelcontextprotocol/sdk'],
+    ).toBeDefined();
+    expect(projectPackageJson.dependencies['zod-v3']).toBeDefined();
+    expect(projectPackageJson.dependencies['express']).toBeDefined();
+    expect(projectPackageJson.devDependencies['tsx']).toBeDefined();
+    expect(projectPackageJson.devDependencies['@types/express']).toBeDefined();
+
+    // Additional dependencies for BedrockAgentCoreRuntime
+    expect(
+      projectPackageJson.devDependencies[
+        '@aws-sdk/client-bedrock-agentcore-control'
+      ],
+    ).toBeDefined();
+    expect(projectPackageJson.devDependencies['esbuild']).toBeDefined();
+  });
+
+  it('should generate shared constructs for BedrockAgentCoreRuntime', async () => {
+    await tsMcpServerGenerator(tree, {
+      project: 'test-project',
+      computeType: 'BedrockAgentCoreRuntime',
+    });
+
+    // Verify shared constructs setup
+    expect(
+      tree.exists('packages/common/constructs/src/core/agent-core/runtime.ts'),
+    ).toBeTruthy();
+    expect(
+      tree.exists('packages/common/constructs/src/app/mcp-servers/index.ts'),
+    ).toBeTruthy();
+    expect(
+      tree.exists(
+        'packages/common/constructs/src/app/mcp-servers/test-project-mcp-server/test-project-mcp-server.ts',
+      ),
+    ).toBeTruthy();
+
+    // Check that the MCP server construct exports are added
+    expect(
+      tree.read(
+        'packages/common/constructs/src/app/mcp-servers/index.ts',
+        'utf-8',
+      ),
+    ).toContain(
+      "export * from './test-project-mcp-server/test-project-mcp-server.js'",
+    );
+
+    // Check that the app index exports MCP servers
+    expect(
+      tree.read('packages/common/constructs/src/app/index.ts', 'utf-8'),
+    ).toContain("export * from './mcp-servers/index.js'");
+  });
+
+  it('should update shared constructs build dependencies for BedrockAgentCoreRuntime', async () => {
+    await tsMcpServerGenerator(tree, {
+      project: 'test-project',
+      computeType: 'BedrockAgentCoreRuntime',
+    });
+
+    const sharedConstructsConfig = JSON.parse(
+      tree.read('packages/common/constructs/project.json', 'utf-8'),
+    );
+
+    expect(sharedConstructsConfig.targets.build.dependsOn).toContain(
+      'test-project:build',
+    );
+  });
+
+  it('should generate correct docker image tag for BedrockAgentCoreRuntime', async () => {
+    // Update root package.json to have a scope
+    const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+    rootPackageJson.name = '@my-scope/workspace';
+    tree.write('package.json', JSON.stringify(rootPackageJson, null, 2));
+
+    await tsMcpServerGenerator(tree, {
+      project: 'test-project',
+      name: 'my-server',
+      computeType: 'BedrockAgentCoreRuntime',
+    });
+
+    expect(
+      tree.read(
+        'packages/common/constructs/src/app/mcp-servers/my-server/Dockerfile',
+        'utf-8',
+      ),
+    ).toContain('my-scope-my-server:latest');
+
+    // Check that the docker image tag is correctly generated in the MCP server construct
+    const mcpServerConstruct = tree.read(
+      'packages/common/constructs/src/app/mcp-servers/my-server/my-server.ts',
+      'utf-8',
+    );
+    expect(mcpServerConstruct).toContain(
+      'docker inspect my-scope-my-server:latest',
+    );
+  });
+
+  it('should match snapshot for BedrockAgentCoreRuntime generated constructs files', async () => {
+    await tsMcpServerGenerator(tree, {
+      project: 'test-project',
+      name: 'snapshot-bedrock-server',
+      computeType: 'BedrockAgentCoreRuntime',
+    });
+
+    // Snapshot the generated agent-core runtime construct
+    const runtimeContent = tree.read(
+      'packages/common/constructs/src/core/agent-core/runtime.ts',
+      'utf-8',
+    );
+    expect(runtimeContent).toMatchSnapshot('agent-core-runtime.ts');
+
+    // Snapshot the generated MCP server construct
+    const mcpServerContent = tree.read(
+      'packages/common/constructs/src/app/mcp-servers/snapshot-bedrock-server/snapshot-bedrock-server.ts',
+      'utf-8',
+    );
+    expect(mcpServerContent).toMatchSnapshot('mcp-server-construct.ts');
+
+    // Snapshot the MCP servers index file
+    const mcpServersIndexContent = tree.read(
+      'packages/common/constructs/src/app/mcp-servers/index.ts',
+      'utf-8',
+    );
+    expect(mcpServersIndexContent).toMatchSnapshot('mcp-servers-index.ts');
+
+    // Snapshot the core index file
+    const coreIndexContent = tree.read(
+      'packages/common/constructs/src/core/index.ts',
+      'utf-8',
+    );
+    expect(coreIndexContent).toMatchSnapshot('core-index.ts');
+
+    // Snapshot the app index file
+    const appIndexContent = tree.read(
+      'packages/common/constructs/src/app/index.ts',
+      'utf-8',
+    );
+    expect(appIndexContent).toMatchSnapshot('app-index.ts');
   });
 
   it('should add generator metric to app.ts', async () => {
