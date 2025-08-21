@@ -15,6 +15,7 @@ export const VERSIONS = {
   '@middy/core': '^6.0.0',
   '@nxlv/python': '~21.2.0',
   '@nx/devkit': '~21.0.3',
+  '@nx-extend/terraform': '^9.0.0',
   '@modelcontextprotocol/sdk': '^1.11.3',
   '@tanstack/react-router': '^1.121.16',
   '@tanstack/router-plugin': '^1.121.16',

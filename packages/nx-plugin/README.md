@@ -59,6 +59,7 @@
 - `ts#nx-generator` - Add an [Nx Generator](https://nx.dev/features/generate-code) to a TypeScript project.
 - `ts#mcp-server` - Add a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server to a TypeScript project.
 - `ts#lambda-function` - Generate a TypeScript lambda function with optional type-safe event sources.
+- `terraform#project` - Generate a new Terraform project.
 - `py#project` - Generate a uv based Python project.
 - `py#fast-api` - Generate a FastAPI backend service with [AWS Powertools](https://github.com/aws-powertools/powertools-lambda-python) pre-configured.
 - `py#lambda-function` - Add a lambda function to an existing python project with optional type-safe event sources.

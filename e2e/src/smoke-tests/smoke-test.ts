@@ -126,6 +126,11 @@ export const smokeTest = (
         opts,
       );
 
+      await runCLI(
+        `generate @aws/nx-plugin:terraform#project --name=tf-infra --no-interactive`,
+        opts,
+      );
+
       // Wire up website, cognito and trpc api
       writeFileSync(
         `${opts.cwd}/packages/infra/src/stacks/application-stack.ts`,
