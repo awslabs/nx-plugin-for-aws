@@ -6,6 +6,7 @@ import {
   addDependenciesToPackageJson,
   ensurePackage,
   GeneratorCallback,
+  installPackagesTask,
   joinPathFragments,
   readNxJson,
   readProjectConfiguration,
@@ -178,6 +179,7 @@ export const pyProjectGenerator = async (
   await addGeneratorMetricsIfApplicable(tree, [PY_PROJECT_GENERATOR_INFO]);
 
   return async () => {
+    installPackagesTask(tree);
     await new UVProvider(tree.root, new Logger(), tree).install();
   };
 };
