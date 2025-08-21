@@ -90,7 +90,7 @@ describe('terraformProjectGenerator', () => {
       expect(bootstrapTarget.options.commands).toHaveLength(4);
       expect(bootstrapTarget.options.commands[1]).toBe('terraform init');
       expect(bootstrapTarget.options.parallel).toBe(false);
-      expect(bootstrapTarget.options.cwd).toBe('{projectRoot}/.bootstrap');
+      expect(bootstrapTarget.options.cwd).toBe('{projectRoot}/bootstrap');
     });
 
     it('should configure plan target correctly', async () => {

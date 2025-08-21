@@ -76,7 +76,7 @@ export async function terraformProjectGenerator(
           `aws s3 cp ${tfDistDir}/bootstrap.tfstate s3://$(aws sts get-caller-identity --query Account --output text)-tf-state-$(aws configure get region)/bootstrap.tfstate`,
         ],
         parallel: false,
-        cwd: '{projectRoot}/.bootstrap',
+        cwd: '{projectRoot}/bootstrap',
       },
     },
     'bootstrap-destroy': {
@@ -84,7 +84,7 @@ export async function terraformProjectGenerator(
       options: {
         forwardAllArgs: true,
         command: `terraform destroy -state=${tfDistDir}/bootstrap.tfstate`,
-        cwd: '{projectRoot}/.bootstrap',
+        cwd: '{projectRoot}/bootstrap',
       },
     },
     destroy: {
