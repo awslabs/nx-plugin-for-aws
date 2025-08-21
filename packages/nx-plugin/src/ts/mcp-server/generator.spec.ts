@@ -404,7 +404,7 @@ describe('ts#mcp-server generator', () => {
       projectConfig.targets['test-project-mcp-server-bundle'].options.commands,
     ).toEqual([
       'esbuild apps/test-project/src/mcp-server/http.ts --bundle --platform=node --target=node22 --format=cjs --outfile=dist/apps/test-project/test-project-mcp-server-bundle/index.js',
-      'docker build -t proj-test-project-mcp-server:latest apps/test-project/src/mcp-server --build-context workspace=.',
+      'docker build --platform linux/arm64 -t proj-test-project-mcp-server:latest apps/test-project/src/mcp-server --build-context workspace=.',
     ]);
   });
 

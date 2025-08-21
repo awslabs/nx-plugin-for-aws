@@ -116,7 +116,7 @@ export const tsMcpServerGenerator = async (
       bundleTargetName: `${name}-bundle`,
       targetFilePath: `${targetSourceDir}/http.ts`,
       postBundleCommands: [
-        `docker build -t ${dockerImageTag} ${targetSourceDir} --build-context workspace=.`,
+        `docker build --platform linux/arm64 -t ${dockerImageTag} ${targetSourceDir} --build-context workspace=.`,
       ],
     });
 
