@@ -1,0 +1,296 @@
+---
+title: "Terraformインフラストラクチャ"
+description: "Terraformインフラストラクチャのリファレンスドキュメント"
+---
+
+
+
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import Link from '@components/link.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+
+[Terraform](https://www.terraform.io/) はオープンソースのInfrastructure as Codeツールで、安全かつ予測可能な方法でインフラストラクチャの作成・変更・改善を可能にします。
+
+TerraformインフラストラクチャジェネレータはTerraformインフラストラクチャプロジェクトを作成します。生成されるアプリケーションには[Checkov](https://www.checkov.io/)セキュリティチェックを通じたセキュリティベストプラクティスが含まれます。
+
+## 使用方法
+
+### Terraformプロジェクトの生成
+
+新しいTerraformプロジェクトを2つの方法で生成できます:
+
+<RunGenerator generator="terraform#project" requiredParameters={{ name: 'tf-infra' }} />
+
+### オプション
+
+<GeneratorParameters generator="terraform#project" />
+
+## ジェネレータの出力
+
+ジェネレータはプロジェクトタイプに応じて異なるファイル構造を作成します:
+
+### アプリケーションタイプ
+
+アプリケーションプロジェクト（`--type=application`）向けに、リモートステート管理を含む完全なTerraformアプリケーションを生成します:
+
+<FileTree>
+
+  - src
+    - main.tf メインTerraform設定ファイル
+    - providers.tf S3バックエンドを持つプロバイダ設定
+    - variables.tf 入力変数定義
+    - outputs.tf 出力値定義
+    - env 環境固有の変数ファイル
+      - dev.tfvars 開発環境用変数
+  - .bootstrap リモートステート用ブートストラップ設定
+    - main.tf ステート保存用S3バケットとポリシー
+    - providers.tf AWSプロバイダ設定
+    - variables.tf ブートストラップ変数定義
+  - project.json プロジェクト設定とビルドターゲット
+
+</FileTree>
+
+### ライブラリタイプ
+
+ライブラリプロジェクト（`--type=library`）向けに、再利用可能なTerraformモジュール用のシンプルな構造を生成します:
+
+<FileTree>
+
+  - src
+    - main.tf メインTerraformモジュールファイル
+  - project.json プロジェクト設定とビルドターゲット
+
+</FileTree>
+
+:::tip
+アプリケーションプロジェクトはリモートステート管理を含む完全なデプロイ機能を備え、ライブラリプロジェクトは他のプロジェクトで再利用可能なTerraformモジュール作成用に設計されています。
+:::
+
+## Terraformインフラストラクチャの実装
+
+`src/main.tf` 内にTerraformインフラストラクチャを記述できます。例:
+
+```diff title="src/main.tf" {2-4}
+-locals {
+-  account_id = data.aws_caller_identity.current.account_id
+-  aws_region = data.aws_region.current.id
+-}
+-
+-resource "null_resource" "print_info" {
+-  # triggers = {
+-  #   always_run = timestamp()
+-  # }
+-
+-  provisioner "local-exec" {
+-    command = "echo 'AWS Region: ${local.aws_region}, AWS Account: ${local.account_id}, Environment: ${var.environment}'"
+-  }
+-}
++
++# インフラストラクチャをここに宣言
++resource "aws_s3_bucket" "my_bucket" {
++  bucket = "my-unique-bucket-name"
++}
+```
+
+### クロスプロジェクト依存関係
+
+別プロジェクト（lib）のモジュールを実行する場合、次のように記述できます:
+
+```
+module "lib_module" {
+  source = "../../path/to/my-lib/src"
+}
+```
+
+これにより、消費側アプリケーションとライブラリ間に依存関係が自動的に追加されます。
+
+### 環境設定
+
+環境固有の変数は `src/env/*.tfvars` ファイルで設定します。
+
+新しい環境を追加するには、環境固有の変数ファイル `src/env/<environment>.tfvars` を作成し、`project.json` の `apply, destroy, init, plan` に新しいエントリを追加します。例: `prod` 環境を追加する場合:
+
+<Tabs>
+<TabItem label="src/env/prod.tfvars">
+```hcl
+# 本番環境変数
+environment = "prod"
+region      = "us-west-2"
+```
+</TabItem>
+<TabItem label="project.json">
+```diff
+{
+  "targets": {
+        "apply": {
+            "executor": "nx:run-commands",
+            "defaultConfiguration": "dev",
+            "configurations": {
+                "dev": {
+                    "command": "terraform apply ../../../dist/packages/infra/terraform/dev.tfplan"
+                },
++                "prod": {
++                    "command": "terraform apply ../../../dist/packages/infra/terraform/prod.tfplan"
++                }
+            },
+            "options": {
+                "forwardAllArgs": true,
+                "cwd": "{projectRoot}/src"
+            },
+            "dependsOn": ["plan"]
+        },
+        "destroy": {
+            "executor": "nx:run-commands",
+            "defaultConfiguration": "dev",
+            "configurations": {
+                "dev": {
+                    "command": "terraform destroy -var-file=env/dev.tfvars"
+                },
++                "prod": {
++                    "command": "terraform destroy -var-file=env/prod.tfvars"
++                }
+            },
+            "options": {
+                "forwardAllArgs": true,
+                "cwd":"{projectRoot}/src"
+            },
+            "dependsOn": ["init"]
+        },
+        "init": {
+            "executor": "nx:run-commands",
+            "defaultConfiguration": "dev",
+            "configurations": {
+                "dev": {
+                    "command": "terraform init -reconfigure -backend-config=\"region=$(aws configure get region)\" -backend-config=\"bucket=$(aws sts get-caller-identity --query Account --output text)-tf-state-$(aws configure get region)\" -backend-config=\"key=dev/terraform.tfstate\""
+                },
++                "prod": {
++                    "command": "terraform init -reconfigure -backend-config=\"region=$(aws configure get region)\" -backend-config=\"bucket=$(aws sts get-caller-identity --query Account --output text)-tf-state-$(aws configure get region)\" -backend-config=\"key=prod/terraform.tfstate\""
++                }
+            },
+            "options": {
+                "forwardAllArgs": true,
+                "cwd": "{projectRoot}/src"
+            }
+        },
+        "plan": {
+            "executor": "nx:run-commands",
+            "defaultConfiguration": "dev",
+            "configurations": {
+                "dev": {
+                    "command": "terraform plan -var-file=env/dev.tfvars -out=../../../dist/packages/infra/terraform/dev.tfplan"
+                },
++                "prod": {
++                    "command": "terraform plan -var-file=env/dev.tfvars -out=../../../dist/packages/infra/terraform/prod.tfplan"
++                }
+            },
+            "options": {
+                "forwardAllArgs": true,
+                "cwd": "{projectRoot}/src"
+            },
+            "dependsOn": ["init"]
+        }
+    }
+}
+```
+</TabItem>
+</Tabs>
+
+:::tip
+デフォルトではすべてのターゲットが `dev` 環境を想定しますが、特定の環境を指定できます: <NxCommands commands={['run tf-infra:apply --configuration=prod']} />
+
+環境はいつでも切り替え可能で、tfstateは環境間で自動的に分離されます。
+:::
+
+### リモートステートブートストラップ（アプリケーションプロジェクトのみ）
+
+アプリケーションプロジェクトでは、インフラをデプロイする前にリモートステートバックエンドのブートストラップが必要です。これによりTerraformステートファイルを保存するS3バケットが作成されます:
+
+<NxCommands commands={['run tf-infra:bootstrap']} />
+
+:::note
+AWS CLIプロファイルがブートストラップリソースをデプロイするアカウント/リージョンに設定されていることを確認してください。
+
+ブートストラップターゲットはアプリケーションタイププロジェクトでのみ利用可能です。ライブラリプロジェクトはリモートステート管理を必要としません。
+:::
+
+## 利用可能なターゲット
+
+利用可能なターゲットはプロジェクトタイプによって異なります:
+
+### 共通ターゲット（アプリケーションとライブラリ）
+
+#### インフラストラクチャの検証
+
+`validate` ターゲットでTerraform設定を検証できます:
+
+<NxCommands commands={['run tf-infra:validate']} />
+
+#### コードのフォーマット
+
+`fmt` ターゲットでTerraformコードをフォーマット:
+
+<NxCommands commands={['run tf-infra:fmt']} />
+
+#### セキュリティテスト
+
+`test` ターゲットでCheckovを使用したセキュリティチェックを実行:
+
+<NxCommands commands={['run tf-infra:test']} />
+
+セキュリティテスト結果はルート `dist` フォルダの `dist/packages/<my-terraform-project>/checkov` に保存されます。
+
+### アプリケーション専用ターゲット
+
+以下のターゲットはアプリケーションタイププロジェクトでのみ利用可能です:
+
+#### インフラストラクチャの計画
+
+変更を適用する前に `plan` ターゲットでTerraformの実行計画を確認:
+
+<NxCommands commands={['run tf-infra:plan']} />
+
+これにより `dist/packages/<my-terraform-project>/terraform/dev.tfplan` に計画ファイルが作成されます。
+
+#### Terraformの初期化
+
+`init` ターゲットでTerraform作業ディレクトリを初期化:
+
+<NxCommands commands={['run tf-infra:init']} />
+
+#### AWSへのデプロイ
+
+計画後に `apply` ターゲットでインフラストラクチャをAWSにデプロイ:
+
+<NxCommands commands={['run tf-infra:apply']} />
+
+:::tip
+上記コマンドは `plan` ターゲットで作成された計画を適用します。変更を確認するため必ず先に `plan` を実行してください。
+:::
+
+#### 出力値の取得
+
+Terraform設定から出力値を取得:
+
+<NxCommands commands={['run tf-infra:output']} />
+
+#### インフラストラクチャの破棄
+
+インフラストラクチャを削除するには `destroy` ターゲットを使用:
+
+<NxCommands commands={['run tf-infra:destroy']} />
+
+:::caution
+この操作はTerraformが管理するすべてのリソースを完全に削除します。注意して使用してください！
+:::
+
+#### ブートストラップリソースの削除
+
+ブートストラップリソース（ステート保存用S3バケット）を削除:
+
+<NxCommands commands={['run tf-infra:bootstrap-destroy']} />
+
+## 詳細情報
+
+Terraformの詳細については [Terraformドキュメント](https://www.terraform.io/docs) と [AWSプロバイダードキュメント](https://registry.terraform.io/providers/hashicorp/aws/latest/docs) を参照してください。

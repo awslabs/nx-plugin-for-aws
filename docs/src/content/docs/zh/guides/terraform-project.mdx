@@ -1,0 +1,296 @@
+---
+title: "Terraform基础架构"
+description: "Terraform基础架构参考文档"
+---
+
+
+
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import Link from '@components/link.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+
+[Terraform](https://www.terraform.io/) 是一款开源的基础设施即代码（IaC）工具，可帮助您安全、可预测地创建、变更和改进基础设施。
+
+Terraform 基础设施生成器用于创建 Terraform 基础设施项目。生成的应用程序通过 [Checkov](https://www.checkov.io/) 安全检查集成了安全最佳实践。
+
+## 使用方式
+
+### 生成 Terraform 项目
+
+您可以通过两种方式生成新的 Terraform 项目：
+
+<RunGenerator generator="terraform#project" requiredParameters={{ name: 'tf-infra' }} />
+
+### 选项配置
+
+<GeneratorParameters generator="terraform#project" />
+
+## 生成器输出
+
+生成器根据项目类型创建不同的文件结构：
+
+### 应用类型
+
+对于应用项目（`--type=application`），生成器会创建包含远程状态管理的完整 Terraform 应用：
+
+<FileTree>
+
+  - src
+    - main.tf Terraform 主配置文件
+    - providers.tf 带 S3 后端的 Provider 配置
+    - variables.tf 输入变量定义
+    - outputs.tf 输出值定义
+    - env 环境特定变量文件
+      - dev.tfvars 开发环境变量
+  - .bootstrap 远程状态引导配置
+    - main.tf 状态存储的 S3 桶及策略
+    - providers.tf AWS provider 配置
+    - variables.tf 引导变量定义
+  - project.json 项目配置与构建目标
+
+</FileTree>
+
+### 库类型
+
+对于库项目（`--type=library`），生成器会创建用于可复用 Terraform 模块的简化结构：
+
+<FileTree>
+
+  - src
+    - main.tf Terraform 主模块文件
+  - project.json 项目配置与构建目标
+
+</FileTree>
+
+:::tip
+应用项目包含完整的远程状态管理部署能力，而库项目专为创建可被其他项目复用的 Terraform 模块设计。
+:::
+
+## 实现 Terraform 基础设施
+
+您可以在 `src/main.tf` 中开始编写 Terraform 基础设施代码，例如：
+
+```diff title="src/main.tf" {2-4}
+-locals {
+-  account_id = data.aws_caller_identity.current.account_id
+-  aws_region = data.aws_region.current.id
+-}
+-
+-resource "null_resource" "print_info" {
+-  # triggers = {
+-  #   always_run = timestamp()
+-  # }
+-
+-  provisioner "local-exec" {
+-    command = "echo 'AWS Region: ${local.aws_region}, AWS Account: ${local.account_id}, Environment: ${var.environment}'"
+-  }
+-}
++
++# 在此声明您的基础设施
++resource "aws_s3_bucket" "my_bucket" {
++  bucket = "my-unique-bucket-name"
++}
+```
+
+### 跨项目依赖
+
+如需引用其他项目（库）中的模块，可如下操作：
+
+```
+module "lib_module" {
+  source = "../../path/to/my-lib/src"
+}
+```
+
+这将自动更新 Nx 图表，在消费应用与库之间添加依赖关系。
+
+### 环境配置
+
+在 `src/env/*.tfvars` 文件中配置环境特定变量。
+
+要添加新环境，需创建 `src/env/<environment>.tfvars` 文件并填写环境变量，同时在 `project.json` 中为 `apply, destroy, init, plan` 添加新环境配置。例如添加 `prod` 环境：
+
+<Tabs>
+<TabItem label="src/env/prod.tfvars">
+```hcl
+# 生产环境变量
+environment = "prod"
+region      = "us-west-2"
+```
+</TabItem>
+<TabItem label="project.json">
+```diff
+{
+  "targets": {
+        "apply": {
+            "executor": "nx:run-commands",
+            "defaultConfiguration": "dev",
+            "configurations": {
+                "dev": {
+                    "command": "terraform apply ../../../dist/packages/infra/terraform/dev.tfplan"
+                },
++                "prod": {
++                    "command": "terraform apply ../../../dist/packages/infra/terraform/prod.tfplan"
++                }
+            },
+            "options": {
+                "forwardAllArgs": true,
+                "cwd": "{projectRoot}/src"
+            },
+            "dependsOn": ["plan"]
+        },
+        "destroy": {
+            "executor": "nx:run-commands",
+            "defaultConfiguration": "dev",
+            "configurations": {
+                "dev": {
+                    "command": "terraform destroy -var-file=env/dev.tfvars"
+                },
++                "prod": {
++                    "command": "terraform destroy -var-file=env/prod.tfvars"
++                }
+            },
+            "options": {
+                "forwardAllArgs": true,
+                "cwd":"{projectRoot}/src"
+            },
+            "dependsOn": ["init"]
+        },
+        "init": {
+            "executor": "nx:run-commands",
+            "defaultConfiguration": "dev",
+            "configurations": {
+                "dev": {
+                    "command": "terraform init -reconfigure -backend-config=\"region=$(aws configure get region)\" -backend-config=\"bucket=$(aws sts get-caller-identity --query Account --output text)-tf-state-$(aws configure get region)\" -backend-config=\"key=dev/terraform.tfstate\""
+                },
++                "prod": {
++                    "command": "terraform init -reconfigure -backend-config=\"region=$(aws configure get region)\" -backend-config=\"bucket=$(aws sts get-caller-identity --query Account --output text)-tf-state-$(aws configure get region)\" -backend-config=\"key=prod/terraform.tfstate\""
++                }
+            },
+            "options": {
+                "forwardAllArgs": true,
+                "cwd": "{projectRoot}/src"
+            }
+        },
+        "plan": {
+            "executor": "nx:run-commands",
+            "defaultConfiguration": "dev",
+            "configurations": {
+                "dev": {
+                    "command": "terraform plan -var-file=env/dev.tfvars -out=../../../dist/packages/infra/terraform/dev.tfplan"
+                },
++                "prod": {
++                    "command": "terraform plan -var-file=env/dev.tfvars -out=../../../dist/packages/infra/terraform/prod.tfplan"
++                }
+            },
+            "options": {
+                "forwardAllArgs": true,
+                "cwd": "{projectRoot}/src"
+            },
+            "dependsOn": ["init"]
+        }
+    }
+}
+```
+</TabItem>
+</Tabs>
+
+:::tip
+默认所有目标使用 `dev` 环境，但可通过以下方式指定环境：<NxCommands commands={['run tf-infra:apply --configuration=prod']} />
+
+由于状态文件按环境自动分段，您可随时切换环境。
+:::
+
+### 远程状态引导（仅限应用项目）
+
+对于应用项目，在部署基础设施前需引导远程状态后端，创建存储 Terraform 状态文件的 S3 桶：
+
+<NxCommands commands={['run tf-infra:bootstrap']} />
+
+:::note
+请确保 AWS CLI 配置文件已配置到目标账户/区域。
+
+引导目标仅适用于应用类型项目。库项目作为可复用模块无需远程状态管理。
+:::
+
+## 可用目标
+
+可用目标取决于项目类型：
+
+### 通用目标（应用与库）
+
+#### 验证基础设施
+
+使用 `validate` 目标验证 Terraform 配置：
+
+<NxCommands commands={['run tf-infra:validate']} />
+
+#### 代码格式化
+
+使用 `fmt` 目标格式化 Terraform 代码：
+
+<NxCommands commands={['run tf-infra:fmt']} />
+
+#### 安全测试
+
+通过 `test` 目标使用 Checkov 进行安全检查：
+
+<NxCommands commands={['run tf-infra:test']} />
+
+安全测试结果位于根目录 `dist` 下的 `dist/packages/<my-terraform-project>/checkov`。
+
+### 应用专属目标
+
+以下目标仅适用于应用项目：
+
+#### 基础设施规划
+
+执行 `plan` 目标预览变更计划：
+
+<NxCommands commands={['run tf-infra:plan']} />
+
+计划文件将生成于 `dist/packages/<my-terraform-project>/terraform/dev.tfplan`。
+
+#### 初始化 Terraform
+
+使用 `init` 目标初始化工作目录：
+
+<NxCommands commands={['run tf-infra:init']} />
+
+#### 部署到 AWS
+
+规划后通过 `apply` 目标部署基础设施：
+
+<NxCommands commands={['run tf-infra:apply']} />
+
+:::tip
+该命令应用由 `plan` 生成的计划文件，请确保先执行 `plan` 查看变更。
+:::
+
+#### 获取输出值
+
+从 Terraform 配置中获取输出值：
+
+<NxCommands commands={['run tf-infra:output']} />
+
+#### 销毁基础设施
+
+使用 `destroy` 目标拆除基础设施：
+
+<NxCommands commands={['run tf-infra:destroy']} />
+
+:::caution
+此操作将永久删除该 Terraform 配置管理的所有资源，请谨慎使用！
+:::
+
+#### 销毁引导资源
+
+清理引导资源（状态存储 S3 桶）：
+
+<NxCommands commands={['run tf-infra:bootstrap-destroy']} />
+
+## 更多信息
+
+有关 Terraform 的更多信息，请参考 [Terraform 文档](https://www.terraform.io/docs) 和 [AWS Provider 文档](https://registry.terraform.io/providers/hashicorp/aws/latest/docs)。
