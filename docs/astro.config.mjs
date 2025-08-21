@@ -285,6 +285,7 @@ export default defineConfig({
               label: 'py#lambda-function',
               link: '/guides/python-lambda-function',
             },
+            { label: 'terraform#project', link: '/guides/terraform-project' },
             {
               label: 'api-connection',
               items: [
