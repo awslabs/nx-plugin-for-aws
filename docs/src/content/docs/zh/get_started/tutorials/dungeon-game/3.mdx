@@ -26,25 +26,25 @@ import gameConversationPng from '@assets/game-conversation.png'
 ## 模块3：故事API实现
 
 <Aside type="caution">
-请确保已按照[本指南](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html)中的步骤授予对**Anthropic Claude 3.5 Sonnet v2**模型的访问权限。
+确保您已按照[本指南](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html)中的步骤授予对**Anthropic Claude 3.5 Sonnet v2**模型的访问权限。
 </Aside>
 
-StoryApi包含一个单独的API `generate_story`，该API根据给定的`Game`和上下文`Action`列表推进故事情节。我们将使用Python/FastAPI将其实现为流式API，并演示如何对生成的代码进行调整以满足实际需求。
+StoryApi包含一个核心API`generate_story`，该API根据给定的`Game`和上下文`Action`列表推进故事情节。我们将使用Python/FastAPI将其实现为流式API，并演示如何对生成代码进行调整以满足实际需求。
 
 ### API实现
 
 要创建API，首先需要安装两个额外依赖：
 
-- `boto3` 用于调用Amazon Bedrock；
-- `uvicorn` 配合[Lambda Web Adapter (LWA)](https://github.com/awslabs/aws-lambda-web-adapter)启动API；
-- `copyfiles` 是npm依赖项，用于在更新`bundle`任务时支持跨平台文件复制。
+- `boto3`用于调用Amazon Bedrock；
+- `uvicorn`配合[Lambda Web Adapter (LWA)](https://github.com/awslabs/aws-lambda-web-adapter)启动API；
+- `copyfiles`是npm依赖项，用于在更新`bundle`任务时支持跨平台文件复制。
 
 运行以下命令安装依赖：
 
 <NxCommands commands={["run dungeon_adventure.story_api:add --args boto3 uvicorn"]} />
 <InstallCommand pkg="copyfiles" dev />
 
-现在替换`packages/story_api/story_api`目录中的文件内容：
+现在替换`packages/story_api/story_api`目录下的文件内容：
 
 <Tabs>
 <TabItem label="main.py">
@@ -54,7 +54,7 @@ StoryApi包含一个单独的API `generate_story`，该API根据给定的`Game`�
 <E2ECode path="dungeon-adventure/3/init.py.template" lang="python" />
 
 :::note
-上述对`init.py`的修改移除了CORS中间件，以避免与Lambda Function URL自带的CORS头处理产生冲突。
+上述对`init.py`的修改移除了CORS中间件，以避免与Lambda函数URL自带的CORS头处理产生冲突。
 :::
 
 </TabItem>
@@ -62,20 +62,20 @@ StoryApi包含一个单独的API `generate_story`，该API根据给定的`Game`�
 
 代码分析：
 
-- 使用`x-streaming`设置标记流式API，后续生成客户端SDK时将保持类型安全的流式消费能力
+- 使用`x-streaming`设置标记流式API，在生成客户端SDK时保持类型安全的流式消费能力
 - API通过`media_type="text/plain"`和`response_class=PlainTextResponse`定义纯文本流响应
 
 :::note
-每次修改FastAPI后都需要重新构建项目，才能在网站生成的客户端中看到变更效果。
+每次修改FastAPI后都需要重新构建项目，才能在网站中看到生成的客户端更新。
 
-我们将在后续进行更多修改后再执行构建。
+我们将在下面进行更多修改后再执行构建。
 :::
 
 ### 基础设施
 
-先前设置的<Link path="get_started/tutorials/dungeon-game/1#game-ui-infrastructure">基础设施</Link>假设所有API都通过API Gateway与Lambda集成。对于`story_api`，我们需要使用支持流式响应的[Lambda Function URL](https://docs.aws.amazon.com/lambda/latest/dg/configuration-response-streaming.html)替代API Gateway。
+先前设置的<Link path="get_started/tutorials/dungeon-game/1#game-ui-infrastructure">基础设施</Link>假设所有API都通过API Gateway与Lambda集成。对于`story_api`，我们需要使用[支持响应流式的Lambda函数URL](https://docs.aws.amazon.com/lambda/latest/dg/configuration-response-streaming.html)替代API Gateway。
 
-首先更新CDK构造：
+更新CDK构造如下：
 
 <Tabs>
 <TabItem label="story-api.ts">
@@ -86,7 +86,7 @@ StoryApi包含一个单独的API `generate_story`，该API根据给定的`Game`�
 </TabItem>
 </Tabs>
 
-接下来更新`story_api`以支持[Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter)部署：
+更新`story_api`以支持[Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter)部署：
 
 <Tabs>
 <TabItem label="run.sh">
@@ -107,7 +107,7 @@ StoryApi包含一个单独的API `generate_story`，该API根据给定的`Game`�
       "options": {
         "commands": [
           "uv export --frozen --no-dev --no-editable --project packages/story_api --package dungeon_adventure.story_api -o dist/packages/story_api/bundle/requirements.txt",
-          "uv pip install -n --no-installer-metadata --no-compile-bytecode --python-platform x86_64-manylinux2014 --target dist/packages/story_api/bundle -r dist/packages/story_api/bundle/requirements.txt",
+          "uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform x86_64-manylinux2014 --target dist/packages/story_api/bundle -r dist/packages/story_api/bundle/requirements.txt",
 +          "copyfiles -f packages/story_api/run.sh dist/packages/story_api/bundle"
         ],
         "parallel": false
@@ -133,19 +133,19 @@ StoryApi包含一个单独的API `generate_story`，该API根据给定的`Game`�
 <NxCommands commands={['run-many --target lint --configuration=fix --all']} />
 </Aside>
 
-运行以下命令部署应用：
+运行部署命令：
 
 <NxCommands commands={['run @dungeon-adventure/infra:deploy dungeon-adventure-infra-sandbox']} />
 
-部署过程约需2分钟。
+部署约需2分钟完成。
 
-<Drawer title="部署命令" trigger="点击查看批量部署详情">
+<Drawer title="部署命令" trigger="点击查看同时部署所有堆栈的详细信息">
 
 也可通过以下命令部署CDK应用包含的所有堆栈：
 
 <NxCommands commands={['run @dungeon-adventure/infra:deploy --all']} />
 
-但**不建议**此方式，因实际环境中可能需分阶段部署不同堆栈（如infra-prod），使用`--all`参数可能导致意外部署！
+**不建议**此操作，因实际部署可能需分阶段部署不同堆栈（如infra-prod），使用`--all`标志可能导致意外部署！
 
 </Drawer>
 
@@ -170,13 +170,13 @@ dungeon-adventure-infra-sandbox.UserIdentityUserIdentityUserPoolIdXXX = region_x
 
 可通过以下方式测试API：
 <ul>
-<li>启动本地FastAPI服务器并使用`curl`调用</li>
+<li>启动FastAPI本地实例并使用`curl`调用</li>
 <li>
-<Drawer title="Sigv4签名curl" trigger="直接调用已部署API（需签名）">
+<Drawer title="Sigv4签名curl" trigger="直接调用已部署API">
 
 <Tabs>
   <TabItem label="Bash/Linux/macOS">
-可将以下脚本加入`.bashrc`文件（并`source`）或直接在终端执行：
+将以下脚本加入`.bashrc`文件（并执行`source`），或在当前终端直接粘贴：
 ```bash
 // ~/.bashrc
 acurl () {
@@ -200,7 +200,7 @@ acurl ap-southeast-2 lambda -N -X POST https://xxx
 ```
   </TabItem>
   <TabItem label="Windows PowerShell">
-可将以下函数加入PowerShell配置文件或直接执行：
+将以下函数加入PowerShell配置文件或当前会话：
 ```powershell
 function acurl {
     param(
@@ -237,17 +237,17 @@ acurl ap-southeast-2 lambda -N -X POST https://xxx
 
 <Tabs>
   <TabItem label="本地测试">
-  启动本地FastAPI服务器：
+  启动本地FastAPI服务：
     <NxCommands commands={["run dungeon_adventure.story_api:serve"]} />
 
-    执行测试命令：
+    调用API：
     ```bash
     curl -N -X POST http://127.0.0.1:8000/story/generate \
       -d '{"genre":"superhero", "actions":[], "playerName":"UnnamedHero"}' \
       -H "Content-Type: application/json"
     ```
   </TabItem>
-  <TabItem label="云端测试">
+  <TabItem label="云端部署">
 ```bash "https://xxx.lambda-url.ap-southeast-2.on.aws/" "ap-southeast-2"
 acurl ap-southeast-2 lambda -N -X POST \
   https://xxx.lambda-url.ap-southeast-2.on.aws/story/generate \
@@ -255,7 +255,7 @@ acurl ap-southeast-2 lambda -N -X POST \
   -H "Content-Type: application/json"
 ```
     <Aside type="caution">
-    请使用CDK部署输出中的`dungeon-adventure-infra-sandbox.StoryApiStoryApiUrlXXX`值替换URL占位符，并正确设置区域。
+    使用CDK部署输出中的`dungeon-adventure-infra-sandbox.StoryApiStoryApiUrlXXX`值替换URL占位符，并正确设置区域。
     </Aside>
   </TabItem>
 </Tabs>
@@ -263,7 +263,7 @@ acurl ap-southeast-2 lambda -N -X POST \
 成功执行后将看到流式响应：
 
 ```
-UnnamedHero迎风而立，披风在风中猎猎作响....
+UnnamedHero迎风而立，披风猎猎作响....
 ```
 
 恭喜！您已成功使用FastAPI构建并部署了首个流式API！🎉🎉🎉
