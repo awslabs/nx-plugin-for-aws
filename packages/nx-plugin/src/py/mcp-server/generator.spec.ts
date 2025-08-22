@@ -58,6 +58,7 @@ dev-dependencies = []
   it('should add MCP server to existing Python project with default name', async () => {
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
+      computeType: 'None',
     });
 
     // Check that MCP server files were added to the existing project
@@ -126,6 +127,7 @@ dev-dependencies = []
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'custom-server',
+      computeType: 'None',
     });
 
     // Check that MCP server files were added with custom name
@@ -167,6 +169,7 @@ dev-dependencies = []
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'My_Special#Server!',
+      computeType: 'None',
     });
 
     // Name should be converted to snake_case for Python modules
@@ -194,6 +197,7 @@ dev-dependencies = []
     await expect(
       pyMcpServerGenerator(tree, {
         project: 'non-py-project',
+        computeType: 'None',
       }),
     ).rejects.toThrow();
   });
@@ -215,6 +219,7 @@ dev-dependencies = []
     await expect(
       pyMcpServerGenerator(tree, {
         project: 'no-source-root',
+        computeType: 'None',
       }),
     ).rejects.toThrow(
       'This project does not have a source root. Please add a source root to the project configuration before running this generator.',
@@ -245,6 +250,7 @@ dev-dependencies = []
 
     await pyMcpServerGenerator(tree, {
       project: 'proj.nested-project',
+      computeType: 'None',
     });
 
     // Should use the last part of the project name for default server name
@@ -264,6 +270,7 @@ dev-dependencies = []
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'snapshot-server',
+      computeType: 'None',
     });
 
     // Snapshot the generated MCP server files
@@ -611,6 +618,7 @@ dev-dependencies = []
 
     await pyMcpServerGenerator(tree, {
       project: 'complex-project',
+      computeType: 'None',
     });
 
     // Check that the module name is extracted correctly from the source root
@@ -627,6 +635,7 @@ dev-dependencies = []
 
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
+      computeType: 'None',
     });
 
     expectHasMetricTags(tree, PY_MCP_SERVER_GENERATOR_INFO.metric);

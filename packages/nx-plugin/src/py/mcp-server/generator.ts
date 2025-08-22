@@ -77,6 +77,8 @@ export const pyMcpServerGenerator = async (
   );
   const distDir = joinPathFragments('dist', project.root);
 
+  const computeType = options.computeType ?? 'BedrockAgentCoreRuntime';
+
   // Generate example server
   generateFiles(
     tree,
@@ -94,7 +96,7 @@ export const pyMcpServerGenerator = async (
 
   addDependenciesToPyProjectToml(tree, project.root, ['mcp']);
 
-  if (options.computeType === 'BedrockAgentCoreRuntime') {
+  if (computeType === 'BedrockAgentCoreRuntime') {
     const dockerImageTag = `${getNpmScope(tree)}-${name}:latest`;
 
     // Add bundle target
