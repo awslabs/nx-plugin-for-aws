@@ -93,6 +93,14 @@ describe('ts#mcp-server generator', () => {
     expect(
       projectConfig.targets['mcp-server-serve-http'].options.commands[0],
     ).toContain('tsx --watch ./src/mcp-server/http.ts');
+
+    expect(projectConfig.targets['mcp-server-inspect']).toBeDefined();
+    expect(projectConfig.targets['mcp-server-inspect'].executor).toBe(
+      'nx:run-commands',
+    );
+    expect(
+      projectConfig.targets['mcp-server-inspect'].options.commands[0],
+    ).toContain('mcp-inspector -- tsx --watch ./src/mcp-server/stdio.ts');
   });
 
   it('should add MCP server with custom name', async () => {
@@ -129,6 +137,10 @@ describe('ts#mcp-server generator', () => {
     );
     expect(projectConfig.targets['custom-server-serve-stdio']).toBeDefined();
     expect(projectConfig.targets['custom-server-serve-http']).toBeDefined();
+    expect(projectConfig.targets['custom-server-inspect']).toBeDefined();
+    expect(
+      projectConfig.targets['custom-server-inspect'].options.commands[0],
+    ).toContain('mcp-inspector -- tsx --watch ./src/custom-server/stdio.ts');
   });
 
   it('should handle ESM projects correctly', async () => {
@@ -212,6 +224,9 @@ describe('ts#mcp-server generator', () => {
     expect(rootPackageJson.dependencies['express']).toBeDefined();
     expect(rootPackageJson.devDependencies['tsx']).toBeDefined();
     expect(rootPackageJson.devDependencies['@types/express']).toBeDefined();
+    expect(
+      rootPackageJson.devDependencies['@modelcontextprotocol/inspector'],
+    ).toBeDefined();
 
     // Check project package.json dependencies
     const projectPackageJson = JSON.parse(
@@ -224,6 +239,9 @@ describe('ts#mcp-server generator', () => {
     expect(projectPackageJson.dependencies['express']).toBeDefined();
     expect(projectPackageJson.devDependencies['tsx']).toBeDefined();
     expect(projectPackageJson.devDependencies['@types/express']).toBeDefined();
+    expect(
+      projectPackageJson.devDependencies['@modelcontextprotocol/inspector'],
+    ).toBeDefined();
   });
 
   it('should handle project without sourceRoot', async () => {
@@ -500,6 +518,9 @@ describe('ts#mcp-server generator', () => {
       ],
     ).toBeDefined();
     expect(projectPackageJson.devDependencies['esbuild']).toBeDefined();
+    expect(
+      projectPackageJson.devDependencies['@modelcontextprotocol/inspector'],
+    ).toBeDefined();
   });
 
   it('should generate shared constructs for BedrockAgentCoreRuntime', async () => {

@@ -17,6 +17,7 @@ export const VERSIONS = {
   '@nx/devkit': '~21.0.3',
   '@nx-extend/terraform': '^9.0.0',
   '@modelcontextprotocol/sdk': '^1.11.3',
+  '@modelcontextprotocol/inspector': '^0.16.5',
   '@tanstack/react-router': '^1.121.16',
   '@tanstack/router-plugin': '^1.121.16',
   '@tanstack/router-generator': '^1.121.16',
