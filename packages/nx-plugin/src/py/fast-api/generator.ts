@@ -25,7 +25,7 @@ import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
 } from '../../utils/shared-constructs-constants';
-import { toClassName, toKebabCase, toSnakeCase } from '../../utils/names';
+import { toClassName, toKebabCase } from '../../utils/names';
 import { formatFilesInSubtree } from '../../utils/format';
 import { sortObjectKeys } from '../../utils/object';
 import {
@@ -38,7 +38,7 @@ import { addApiGatewayConstruct } from '../../utils/api-constructs/api-construct
 import { addOpenApiGeneration } from './react/open-api';
 import { updateGitIgnore } from '../../utils/git';
 import { getLocalServerPortNumber } from '../../utils/port';
-import { createPythonBundleTarget } from '../../utils/bundle';
+import { addPythonBundleTarget } from '../../utils/bundle';
 
 export const FAST_API_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -74,17 +74,8 @@ export const pyFastApiProjectGenerator = async (
 
   const projectConfig = readProjectConfiguration(tree, fullyQualifiedName);
 
-  projectConfig.targets.bundle = {
-    ...createPythonBundleTarget({
-      projectDir: dir,
-      packageName: fullyQualifiedName,
-    }),
-    dependsOn: ['compile'],
-  };
-  projectConfig.targets.build.dependsOn = [
-    ...(projectConfig.targets.build.dependsOn ?? []),
-    'bundle',
-  ];
+  addPythonBundleTarget(projectConfig);
+
   projectConfig.targets.serve = {
     executor: '@nxlv/python:run-commands',
     options: {
