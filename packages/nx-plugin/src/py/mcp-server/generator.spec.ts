@@ -85,6 +85,12 @@ dev-dependencies = []
     ) as UVPyprojectToml;
     expect(pyprojectToml.project.dependencies).toContain('mcp');
 
+    // Check root package.json dependencies for inspector
+    const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+    expect(
+      rootPackageJson.devDependencies['@modelcontextprotocol/inspector'],
+    ).toBeDefined();
+
     // Check that project configuration was updated with serve targets
     const projectConfig = JSON.parse(
       tree.read('apps/test-project/project.json', 'utf-8'),
@@ -104,6 +110,16 @@ dev-dependencies = []
     expect(
       projectConfig.targets['mcp-server-serve-http'].options.commands,
     ).toEqual(['uv run -m proj_test_project.mcp_server.http']);
+
+    expect(projectConfig.targets['mcp-server-inspect']).toBeDefined();
+    expect(projectConfig.targets['mcp-server-inspect'].executor).toBe(
+      'nx:run-commands',
+    );
+    expect(
+      projectConfig.targets['mcp-server-inspect'].options.commands,
+    ).toEqual([
+      'mcp-inspector -- uv run -m proj_test_project.mcp_server.stdio',
+    ]);
   });
 
   it('should add MCP server with custom name', async () => {
@@ -136,9 +152,15 @@ dev-dependencies = []
     );
     expect(projectConfig.targets['custom-server-serve-stdio']).toBeDefined();
     expect(projectConfig.targets['custom-server-serve-http']).toBeDefined();
+    expect(projectConfig.targets['custom-server-inspect']).toBeDefined();
     expect(
       projectConfig.targets['custom-server-serve-stdio'].options.commands,
     ).toEqual(['uv run -m proj_test_project.custom_server.stdio']);
+    expect(
+      projectConfig.targets['custom-server-inspect'].options.commands,
+    ).toEqual([
+      'mcp-inspector -- uv run -m proj_test_project.custom_server.stdio',
+    ]);
   });
 
   it('should handle kebab-case conversion for names with special characters', async () => {
@@ -401,6 +423,9 @@ dev-dependencies = []
       rootPackageJson.devDependencies[
         '@aws-sdk/client-bedrock-agentcore-control'
       ],
+    ).toBeDefined();
+    expect(
+      rootPackageJson.devDependencies['@modelcontextprotocol/inspector'],
     ).toBeDefined();
 
     // Check that pyproject.toml was updated with MCP dependency
