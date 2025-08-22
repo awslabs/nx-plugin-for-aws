@@ -160,7 +160,7 @@ export const tsMcpServerGenerator = async (
     // Add additional dependencies
     devDeps = {
       ...devDeps,
-      ...withVersions(['@aws-sdk/client-bedrock-agentcore-control', 'esbuild']),
+      ...withVersions(['esbuild']),
     };
   } else {
     // No Dockerfile needed for non-hosted MCP

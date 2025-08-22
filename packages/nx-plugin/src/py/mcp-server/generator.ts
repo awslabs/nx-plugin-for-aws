@@ -173,12 +173,6 @@ export const pyMcpServerGenerator = async (
       mcpServerNameClassName,
       dockerImageTag,
     });
-
-    addDependenciesToPackageJson(
-      tree,
-      {},
-      withVersions(['@aws-sdk/client-bedrock-agentcore-control']),
-    );
   } else {
     // No Dockerfile needed for non-hosted MCP
     tree.delete(joinPathFragments(targetSourceDir, 'Dockerfile'));
