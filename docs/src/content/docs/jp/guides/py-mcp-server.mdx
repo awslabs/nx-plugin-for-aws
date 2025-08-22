@@ -1,0 +1,145 @@
+---
+title: "Pythonの MCPサーバー"
+description: "大規模言語モデルにコンテキストを提供するためのPython Model Context Protocol (MCP)サーバーを生成"
+---
+
+
+
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Link from '@components/link.astro';
+import Snippet from '@components/snippet.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+
+大規模言語モデル（LLM）にコンテキストを提供するためのPython [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) サーバーを生成し、オプションで[Amazon Bedrock AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/)にデプロイします。
+
+## MCPとは？
+
+[Model Context Protocol (MCP)](https://modelcontextprotocol.io/) は、AIアシスタントが外部ツールやリソースと相互作用するためのオープンスタンダードです。LLMが以下を一貫した方法で行えるようにします：
+
+- アクション実行や情報取得のためのツール（関数）実行
+- コンテキストやデータを提供するリソースへのアクセス
+
+## 使用方法
+
+### MCPサーバーの生成
+
+Python MCPサーバーは2つの方法で生成できます：
+
+<RunGenerator generator="py#mcp-server" />
+
+:::tip
+最初に<Link path="/guides/python-project">`py#project`</Link>ジェネレータを使用してプロジェクトを作成し、MCPサーバーを追加することを推奨します。
+:::
+
+### オプション
+
+<GeneratorParameters generator="py#mcp-server" />
+
+## ジェネレータの出力
+
+ジェネレータは既存のPythonプロジェクトに以下のファイルを追加します：
+
+<FileTree>
+  - your-project/
+    - your_module/
+      - mcp_server/ （カスタム名指定時はその名前）
+        - \_\_init\_\_.py Pythonパッケージ初期化ファイル
+        - server.py サンプルツールとリソースを含むメインサーバー定義
+        - stdio.py STDIOトランスポート用エントリポイント（簡易ローカルMCPサーバー向け）
+        - http.py ストリーミング可能HTTPトランスポート用エントリポイント（MCPサーバーホスティング向け）
+        - Dockerfile MCPサーバーホスティング用エントリポイント（`computeType`が`BedrockAgentCoreRuntime`に設定時）
+    - pyproject.toml MCP依存関係で更新
+    - project.json MCPサーバー実行ターゲットで更新
+</FileTree>
+
+:::note
+`computeType`に`BedrockAgentCoreRuntime`を選択した場合、MCPサーバーをデプロイするCDKコンストラクトも生成されます。
+:::
+
+## MCPサーバーの操作
+
+### ツールの追加
+
+ツールはAIアシスタントが呼び出せるアクション実行関数です。Python MCPサーバーは[MCP Python SDK (FastMCP)](https://github.com/modelcontextprotocol/python-sdk)ライブラリを使用し、デコレータベースのツール定義を提供します。
+
+`server.py`ファイルに新しいツールを追加できます：
+
+```python
+@mcp.tool(description="Your tool description")
+def your_tool_name(param1: str, param2: int) -> str:
+    """型ヒント付きツール実装"""
+    # ツールロジック
+    return f"Result: {param1} with {param2}"
+```
+
+FastMCPライブラリは以下を自動処理します：
+- 関数の型ヒントに基づく型検証
+- MCPプロトコル用JSONスキーマ生成
+- エラーハンドリングとレスポンスフォーマット
+
+### リソースの追加
+
+リソースはAIアシスタントにコンテキストを提供します。`@mcp.resource`デコレータで追加できます：
+
+```python
+@mcp.resource("example://static-resource", description="静的リソース例")
+def static_resource() -> str:
+    """静的コンテンツ返却"""
+    return "AIにコンテキストを提供する静的コンテンツ"
+
+@mcp.resource("dynamic://resource/{item_id}", description="動的リソース例")
+def dynamic_resource(item_id: str) -> str:
+    """パラメータに基づく動的コンテンツ返却"""
+    # item_idに基づくデータ取得
+    data = fetch_data_for_item(item_id)
+    return f"{item_id}向け動的コンテンツ: {data}"
+```
+
+## AIアシスタントとの連携設定
+
+<Snippet name="mcp/configuration-py" parentHeading="Configuring with AI Assistants" />
+
+## MCPサーバーの実行
+
+### STDIO
+
+MCPサーバーをテスト/使用する最も簡単な方法は、AIアシスタントと連携設定することです（上記参照）。
+
+[STDIOトランスポート](https://modelcontextprotocol.io/docs/concepts/transports#standard-input%2Foutput-stdio)で直接実行するには、`<your-server-name>-serve-stdio`ターゲットを使用します。
+
+<NxCommands commands={['run your-project:your-server-name-serve-stdio']} />
+
+このコマンドは`uv run`を使用してSTDIOトランスポートでMCPサーバーを実行します。
+
+### ストリーミング可能HTTP
+
+[ストリーミング可能HTTPトランスポート](https://modelcontextprotocol.io/docs/concepts/transports#streamable-http)でローカル実行するには、`<your-server-name>-serve-http`ターゲットを使用します。
+
+<NxCommands commands={['run your-project:your-server-name-serve-http']} />
+
+このコマンドは`uv run`を使用してHTTPトランスポートでMCPサーバーを実行し、通常ポート8000で動作します。
+
+## Bedrock AgentCore Runtimeへのデプロイ
+
+<Snippet name="mcp/bedrock-deployment" parentHeading="Deploying Your MCP Server to Bedrock AgentCore Runtime" />
+
+### バンドルとDockerターゲット
+
+Bedrock AgentCore Runtime向けにMCPサーバーをビルドするため、プロジェクトに`bundle`ターゲットが追加されます。このターゲットは：
+
+- `uv export`を使用してPython依存関係を`requirements.txt`ファイルにエクスポート
+- ターゲットプラットフォーム（`aarch64-manylinux2014`）向けに`uv pip install`で依存関係をインストール
+
+また、MCPサーバー固有の`docker`ターゲットも追加されます。このターゲットは：
+
+- [MCPプロトコル契約](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-service-contract.html#mcp-protocol-contract)に従いポート`8000`で動作するMCPサーバーを実行する`Dockerfile`からイメージをビルド
+
+:::tip
+Dockerイメージはタグ（例：`my-scope-my-project-mcp-server:latest`）でビルドされ、CDKコンストラクトの`Dockerfile`がこれを継承します。これによりMCPサーバープロジェクトとDockerfileを同居させることが可能です。
+:::
+
+### オブザーバビリティ
+
+<Snippet name="mcp/observability" parentHeading="Observability" />

@@ -1,0 +1,74 @@
+---
+title: "Implementación de MCP Bedrock"
+---
+
+
+
+### Constructo CDK
+
+Si seleccionaste `BedrockAgentCoreRuntime` para `computeType`, se genera un constructo CDK que puedes usar para desplegar tu servidor MCP en [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html).
+
+Puedes usar este constructo CDK en una aplicación CDK:
+
+```ts {6}
+import { MyProjectMcpServer } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    // Agrega el servidor MCP a tu stack
+    new MyProjectMcpServer(this, 'MyProjectMcpServer');
+  }
+}
+```
+
+:::caution
+Se requiere [Docker](https://www.docker.com/) para construir y desplegar tu servidor MCP. Asegúrate de tener Docker instalado y en ejecución para evitar errores como:
+
+```
+ERROR: Cannot connect to the Docker daemon at unix://path/to/docker.sock.
+```
+:::
+
+### Autenticación
+
+#### IAM
+
+Por defecto, tu servidor MCP estará protegido con autenticación IAM. Simplemente despliégalo sin argumentos:
+
+```ts {5}
+import { MyProjectMcpServer } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    new MyProjectMcpServer(this, 'MyProjectMcpServer');
+  }
+}
+```
+
+#### Autenticación JWT con Cognito
+
+Para configurar autenticación JWT, puedes pasar la propiedad `authorizerConfiguration` a tu constructo de servidor MCP. Este ejemplo configura un grupo de usuarios y cliente Cognito para proteger el servidor MCP:
+
+```ts {14-17}
+import { MyProjectMcpServer } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const userPool = new UserPool(this, 'UserPool');
+    const client = userPool.addClient('Client', {
+      authFlows: {
+        userPassword: true,
+      },
+    });
+
+    new MyProjectMcpServer(this, 'MyProjectMcpServer', {
+      authorizerConfiguration: {
+        customJWTAuthorizer: {
+          discoveryUrl: `https://cognito-idp.${Stack.of(userPool).region}.amazonaws.com/${userPool.userPoolId}/.well-known/openid-configuration`,
+          allowedClients: [client.userPoolClientId],
+        },
+      },
+    });
+  }
+}
+```

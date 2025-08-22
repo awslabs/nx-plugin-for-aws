@@ -1,0 +1,74 @@
+---
+title: "MCPベドロック展開"
+---
+
+
+
+### CDK コンストラクト
+
+`computeType`に`BedrockAgentCoreRuntime`を選択した場合、[Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html) にMCPサーバーをデプロイするためのCDKコンストラクトが生成されます。
+
+このCDKコンストラクトはCDKアプリケーション内で使用できます：
+
+```ts {6}
+import { MyProjectMcpServer } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    // スタックにMCPサーバーを追加
+    new MyProjectMcpServer(this, 'MyProjectMcpServer');
+  }
+}
+```
+
+:::caution
+[Docker](https://www.docker.com/) のインストールが必要です。MCPサーバーのビルドとデプロイ時に以下のエラーを防ぐため、Dockerがインストールされ起動していることを確認してください：
+
+```
+ERROR: Cannot connect to the Docker daemon at unix://path/to/docker.sock.
+```
+:::
+
+### 認証
+
+#### IAM
+
+デフォルトではMCPサーバーはIAM認証で保護されます。引数なしでデプロイ可能です：
+
+```ts {5}
+import { MyProjectMcpServer } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    new MyProjectMcpServer(this, 'MyProjectMcpServer');
+  }
+}
+```
+
+#### Cognito JWT 認証
+
+JWT認証を設定するには、MCPサーバーコンストラクトに`authorizerConfiguration`プロパティを渡します。以下はCognitoユーザープールとクライアントを設定してMCPサーバーを保護する例です：
+
+```ts {14-17}
+import { MyProjectMcpServer } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const userPool = new UserPool(this, 'UserPool');
+    const client = userPool.addClient('Client', {
+      authFlows: {
+        userPassword: true,
+      },
+    });
+
+    new MyProjectMcpServer(this, 'MyProjectMcpServer', {
+      authorizerConfiguration: {
+        customJWTAuthorizer: {
+          discoveryUrl: `https://cognito-idp.${Stack.of(userPool).region}.amazonaws.com/${userPool.userPoolId}/.well-known/openid-configuration`,
+          allowedClients: [client.userPoolClientId],
+        },
+      },
+    });
+  }
+}
+```
