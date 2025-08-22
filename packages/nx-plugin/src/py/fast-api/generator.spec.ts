@@ -262,7 +262,7 @@ describe('fastapi project generator', () => {
       apiType: 'fast-api',
       auth: 'IAM',
       generator: FAST_API_GENERATOR_INFO.id,
-      port: 8000,
+      ports: [8000],
     });
   });
 
@@ -362,9 +362,9 @@ describe('fastapi project generator', () => {
       tree.read('apps/third_api/project.json', 'utf-8'),
     );
 
-    expect(firstApiConfig.metadata.port).toBe(8000);
-    expect(secondApiConfig.metadata.port).toBe(8001);
-    expect(thirdApiConfig.metadata.port).toBe(8002);
+    expect(firstApiConfig.metadata.ports).toEqual([8000]);
+    expect(secondApiConfig.metadata.ports).toEqual([8001]);
+    expect(thirdApiConfig.metadata.ports).toEqual([8002]);
 
     // Check serve target --port arguments
     expect(firstApiConfig.targets.serve.options.command).toContain(

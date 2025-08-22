@@ -50,7 +50,7 @@ export async function reactGenerator(
   const metadata = backendProjectConfig.metadata as any;
   const apiName = metadata.apiName;
   const auth = metadata.auth ?? 'IAM';
-  const port = metadata.port ?? 2022;
+  const port = metadata.port ?? metadata.ports?.[0] ?? 2022;
   const apiNameClassName = toClassName(apiName);
   const backendProjectAlias = toScopeAlias(backendProjectConfig.name);
 
