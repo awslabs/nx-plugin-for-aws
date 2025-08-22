@@ -94,7 +94,11 @@ export const pyMcpServerGenerator = async (
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
-  addDependenciesToPyProjectToml(tree, project.root, ['mcp']);
+  addDependenciesToPyProjectToml(tree, project.root, [
+    'mcp',
+    'boto3',
+    'aws-opentelemetry-distro',
+  ]);
 
   if (computeType === 'BedrockAgentCoreRuntime') {
     const dockerImageTag = `${getNpmScope(tree)}-${name}:latest`;
