@@ -16,8 +16,6 @@ import {
 import { PyLambdaFunctionGeneratorSchema } from './schema';
 import { UVProvider } from '@nxlv/python/src/provider/uv/provider';
 import { Logger } from '@nxlv/python/src/executors/utils/logger';
-import { parse, stringify } from '@iarna/toml';
-import { UVPyprojectToml } from '@nxlv/python/src/provider/uv/types';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import {
   PACKAGES_DIR,
@@ -40,6 +38,7 @@ import {
 } from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { addPythonBundleTarget } from '../../utils/bundle';
+import { addDependenciesToPyProjectToml } from '../../utils/py';
 
 export const LAMBDA_FUNCTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -245,26 +244,11 @@ export const pyLambdaFunctionGenerator = async (
     },
   );
 
-  const projectToml = parse(
-    tree.read(joinPathFragments(dir, 'pyproject.toml'), 'utf8'),
-  ) as UVPyprojectToml;
-
-  // Check if the project already has the dependencies and add them if not
-  const dependencies = projectToml.project?.dependencies || [];
-
-  if (!dependencies.includes('aws-lambda-powertools')) {
-    dependencies.push('aws-lambda-powertools');
-  }
-
-  if (!dependencies.includes('aws-lambda-powertools[tracer]')) {
-    dependencies.push('aws-lambda-powertools[tracer]');
-  }
-
-  if (!dependencies.includes('aws-lambda-powertools[parser]')) {
-    dependencies.push('aws-lambda-powertools[parser]');
-  }
-
-  tree.write(joinPathFragments(dir, 'pyproject.toml'), stringify(projectToml));
+  addDependenciesToPyProjectToml(tree, dir, [
+    'aws-lambda-powertools',
+    'aws-lambda-powertools[tracer]',
+    'aws-lambda-powertools[parser]',
+  ]);
 
   await addGeneratorMetricsIfApplicable(tree, [LAMBDA_FUNCTION_GENERATOR_INFO]);
 

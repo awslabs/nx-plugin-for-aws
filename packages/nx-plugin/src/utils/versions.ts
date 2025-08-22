@@ -2,7 +2,11 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-export const VERSIONS = {
+
+/**
+ * Versons for TypeScript dependencies added by generators
+ */
+export const TS_VERSIONS = {
   '@cdklabs/cdk-validator-cfnguard': '^0.0.60',
   '@aws-sdk/client-cognito-identity': '^3.775.0',
   '@aws-sdk/credential-providers': '^3.775.0',
@@ -59,9 +63,30 @@ export const VERSIONS = {
   // https://github.com/modelcontextprotocol/typescript-sdk/issues/164
   'zod-v3': 'npm:zod@^3',
 } as const;
-export type IVersion = keyof typeof VERSIONS;
+export type ITsDepVersion = keyof typeof TS_VERSIONS;
+
 /**
  * Add versions to the given dependencies
  */
-export const withVersions = (deps: (keyof typeof VERSIONS)[]) =>
-  Object.fromEntries(deps.map((dep) => [dep, VERSIONS[dep]]));
+export const withVersions = (deps: ITsDepVersion[]) =>
+  Object.fromEntries(deps.map((dep) => [dep, TS_VERSIONS[dep]]));
+
+/**
+ * Versions for Python dependencies added by generators
+ */
+export const PY_VERSIONS = {
+  'aws-lambda-powertools': '~=3.19.0',
+  'aws-lambda-powertools[tracer]': '~=3.19.0',
+  'aws-lambda-powertools[parser]': '~=3.19.0',
+  fastapi: '~=0.116.1',
+  'fastapi[standard]': '~=0.116.1',
+  mangum: '~=0.19.0',
+  mcp: '~=1.13.0',
+} as const;
+export type IPyDepVersion = keyof typeof PY_VERSIONS;
+
+/**
+ * Add versions to the given dependencies
+ */
+export const withPyVersions = (deps: IPyDepVersion[]) =>
+  deps.map((dep) => `${dep}${PY_VERSIONS[dep]}`);

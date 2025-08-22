@@ -113,10 +113,10 @@ describe('fastapi project generator', () => {
     ) as UVPyprojectToml;
 
     // Verify FastAPI dependencies
-    expect(pyprojectToml.project.dependencies).toContain('fastapi');
-    expect(pyprojectToml.project.dependencies).toContain('mangum');
+    expect(pyprojectToml.project.dependencies).toContain('fastapi~=0.116.1');
+    expect(pyprojectToml.project.dependencies).toContain('mangum~=0.19.0');
     expect(pyprojectToml['dependency-groups'].dev).toContain(
-      'fastapi[standard]>=0.115',
+      'fastapi[standard]~=0.116.1',
     );
   });
 
