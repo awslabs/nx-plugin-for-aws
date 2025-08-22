@@ -105,7 +105,11 @@ export const tsMcpServerGenerator = async (
   // Tracking: https://github.com/modelcontextprotocol/typescript-sdk/issues/164
   // We use a renamed dependency so that v3 and v4 can coexist in projects until the above is resolved
   const deps = withVersions(['@modelcontextprotocol/sdk', 'zod-v3', 'express']);
-  let devDeps = withVersions(['tsx', '@types/express']);
+  let devDeps = withVersions([
+    'tsx',
+    '@types/express',
+    '@modelcontextprotocol/inspector',
+  ]);
 
   // Add hosting based on compute type
   if (options.computeType === 'BedrockAgentCoreRuntime') {
@@ -180,6 +184,15 @@ export const tsMcpServerGenerator = async (
         executor: 'nx:run-commands',
         options: {
           commands: [`tsx --watch ${relativeSourceDir}/http.ts`],
+          cwd: '{projectRoot}',
+        },
+      },
+      [`${options.name ? name : 'mcp-server'}-inspect`]: {
+        executor: 'nx:run-commands',
+        options: {
+          commands: [
+            `mcp-inspector -- tsx --watch ${relativeSourceDir}/stdio.ts`,
+          ],
           cwd: '{projectRoot}',
         },
       },
