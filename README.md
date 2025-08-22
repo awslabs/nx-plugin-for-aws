@@ -63,6 +63,7 @@
 - `py#project` - Generate a uv based Python project.
 - `py#fast-api` - Generate a FastAPI backend service with [AWS Powertools](https://github.com/aws-powertools/powertools-lambda-python) pre-configured.
 - `py#lambda-function` - Add a lambda function to an existing python project with optional type-safe event sources.
+- `py#mcp-server` - Add a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server to a Python project.
 - `api-connection` - Connect frontend applications to backend APIs.
 - `license` - Automatically manage LICENSE files and source code headers in your workspace.
 

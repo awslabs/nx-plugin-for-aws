@@ -11,3 +11,6 @@ export { PyFastApiProjectGeneratorSchema } from '../src/py/fast-api/schema';
 
 export { pyLambdaFunctionGenerator } from '../src/py/lambda-function/generator';
 export { PyLambdaFunctionGeneratorSchema } from '../src/py/lambda-function/schema';
+
+export { pyMcpServerGenerator } from '../src/py/mcp-server/generator';
+export { PyMcpServerGeneratorSchema } from '../src/py/mcp-server/schema';

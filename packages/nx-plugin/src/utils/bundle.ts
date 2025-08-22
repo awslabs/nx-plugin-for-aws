@@ -3,9 +3,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { TargetConfiguration } from '@nx/devkit';
+import { ProjectConfiguration, TargetConfiguration } from '@nx/devkit';
 
-export interface CreatePythonBundleTargetOptions {
+export interface AddPythonBundleTargetOptions {
+  /**
+   * Python platform
+   * @default x86_64-manylinux2014
+   */
+  pythonPlatform?: 'x86_64-manylinux2014' | 'aarch64-manylinux2014';
+}
+
+interface CreatePythonBundleTargetOptions
+  extends Required<AddPythonBundleTargetOptions> {
   /**
    * Directory of the python project from the monorepo root
    */
@@ -20,9 +29,10 @@ export interface CreatePythonBundleTargetOptions {
 /**
  * Create a target for bundling a python project
  */
-export const createPythonBundleTarget = ({
+const createPythonBundleTarget = ({
   projectDir,
   packageName,
+  pythonPlatform,
 }: CreatePythonBundleTargetOptions): TargetConfiguration => {
   return {
     cache: true,
@@ -31,9 +41,39 @@ export const createPythonBundleTarget = ({
     options: {
       commands: [
         `uv export --frozen --no-dev --no-editable --project ${projectDir} --package ${packageName} -o dist/${projectDir}/bundle/requirements.txt`,
-        `uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform x86_64-manylinux2014 --target dist/${projectDir}/bundle -r dist/${projectDir}/bundle/requirements.txt`,
+        `uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform ${pythonPlatform} --target dist/${projectDir}/bundle -r dist/${projectDir}/bundle/requirements.txt`,
       ],
       parallel: false,
     },
   };
+};
+
+/**
+ * Adds a bundle target to the given project if it does not exist, and updates the build target to depend on it
+ */
+export const addPythonBundleTarget = (
+  project: ProjectConfiguration,
+  opts?: AddPythonBundleTargetOptions,
+) => {
+  if (!project.targets) {
+    project.targets = {};
+  }
+
+  if (!project.targets?.bundle) {
+    project.targets.bundle = {
+      ...createPythonBundleTarget({
+        projectDir: project.root,
+        packageName: project.name,
+        pythonPlatform: opts?.pythonPlatform ?? 'x86_64-manylinux2014',
+      }),
+      dependsOn: ['compile'],
+    };
+  }
+
+  if (project.targets?.build) {
+    project.targets.build.dependsOn = [
+      ...(project.targets.build.dependsOn ?? []).filter((t) => t !== 'bundle'),
+      'bundle',
+    ];
+  }
 };
