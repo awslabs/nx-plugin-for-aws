@@ -14,3 +14,6 @@ export { PyLambdaFunctionGeneratorSchema } from '../src/py/lambda-function/schem
 
 export { pyMcpServerGenerator } from '../src/py/mcp-server/generator';
 export { PyMcpServerGeneratorSchema } from '../src/py/mcp-server/schema';
+
+export { pyStrandsAgentGenerator } from '../src/py/strands-agent/generator';
+export { PyStrandsAgentGeneratorSchema } from '../src/py/strands-agent/schema';

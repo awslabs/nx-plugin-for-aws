@@ -286,6 +286,7 @@ export default defineConfig({
               link: '/guides/python-lambda-function',
             },
             { label: 'py#mcp-server', link: '/guides/py-mcp-server' },
+            { label: 'py#strands-agent', link: '/guides/py-strands-agent' },
             { label: 'terraform#project', link: '/guides/terraform-project' },
             {
               label: 'api-connection',

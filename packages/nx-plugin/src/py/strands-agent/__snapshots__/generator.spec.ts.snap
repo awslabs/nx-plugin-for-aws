@@ -1,6 +1,67 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`py#mcp-server generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > agent-core-runtime.ts 1`] = `
+exports[`py#strands-agent generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > agent-Dockerfile 1`] = `
+"FROM public.ecr.aws/docker/library/python:3.12-slim
+
+WORKDIR /app
+
+# Copy bundled package
+COPY --from=workspace dist/apps/test-project/bundle /app
+
+EXPOSE 8080
+
+ENV PYTHONPATH=/app
+
+# Auto-instrument with AWS Distro for OpenTelemetry
+# https://aws-otel.github.io/docs/getting-started/python-sdk/auto-instr
+CMD ["python", "bin/opentelemetry-instrument", "python", "-m", "proj_test_project.snapshot_bedrock_agent.main"]
+"
+`;
+
+exports[`py#strands-agent generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > agent-construct.ts 1`] = `
+"import { DockerImageAsset, Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import { Construct } from 'constructs';
+import { execSync } from 'child_process';
+import * as path from 'path';
+import * as url from 'url';
+import {
+  AgentCoreRuntime,
+  AgentCoreRuntimeProps,
+} from '../../../core/agent-core/runtime.js';
+
+export type SnapshotBedrockAgentProps = Omit<
+  AgentCoreRuntimeProps,
+  'runtimeName' | 'serverProtocol' | 'containerUri'
+>;
+
+export class SnapshotBedrockAgent extends Construct {
+  public readonly dockerImage: DockerImageAsset;
+  public readonly agentCoreRuntime: AgentCoreRuntime;
+
+  constructor(scope: Construct, id: string, props?: SnapshotBedrockAgentProps) {
+    super(scope, id);
+
+    this.dockerImage = new DockerImageAsset(this, 'DockerImage', {
+      platform: Platform.LINUX_ARM64,
+      directory: path.dirname(url.fileURLToPath(new URL(import.meta.url))),
+      extraHash: execSync(
+        \`docker inspect proj-snapshot-bedrock-agent:latest --format '{{.Descriptor.digest}}'\`,
+        { encoding: 'utf-8' },
+      ).trim(),
+    });
+
+    this.agentCoreRuntime = new AgentCoreRuntime(this, 'AgentCore', {
+      runtimeName: 'SnapshotBedrockAgent',
+      serverProtocol: 'HTTP',
+      containerUri: this.dockerImage.imageUri,
+      ...props,
+    });
+  }
+}
+"
+`;
+
+exports[`py#strands-agent generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > agent-core-runtime.ts 1`] = `
 "import {
   Role,
   ServicePrincipal,
@@ -220,118 +281,89 @@ export class AgentCoreRuntime extends Construct implements IGrantable {
 "
 `;
 
-exports[`py#mcp-server generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > app-index.ts 1`] = `
-"export * from './mcp-servers/index.js';
+exports[`py#strands-agent generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > agents-index.ts 1`] = `
+"export * from './snapshot-bedrock-agent/snapshot-bedrock-agent.js';
 "
 `;
 
-exports[`py#mcp-server generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > core-index.ts 1`] = `
+exports[`py#strands-agent generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > app-index.ts 1`] = `
+"export * from './agents/index.js';
+"
+`;
+
+exports[`py#strands-agent generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > core-index.ts 1`] = `
 "export * from './app.js';
 export * from './runtime-config.js';
 "
 `;
 
-exports[`py#mcp-server generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > mcp-server-construct.ts 1`] = `
-"import { DockerImageAsset, Platform } from 'aws-cdk-lib/aws-ecr-assets';
-import { Construct } from 'constructs';
-import { execSync } from 'child_process';
-import * as path from 'path';
-import * as url from 'url';
-import {
-  AgentCoreRuntime,
-  AgentCoreRuntimeProps,
-} from '../../../core/agent-core/runtime.js';
+exports[`py#strands-agent generator > should match snapshot for generated files > strands-agent-__init__.py 1`] = `""`;
 
-export type SnapshotBedrockServerProps = Omit<
-  AgentCoreRuntimeProps,
-  'runtimeName' | 'serverProtocol' | 'containerUri'
->;
+exports[`py#strands-agent generator > should match snapshot for generated files > strands-agent-agent.py 1`] = `
+"from contextlib import contextmanager
 
-export class SnapshotBedrockServer extends Construct {
-  public readonly dockerImage: DockerImageAsset;
-  public readonly agentCoreRuntime: AgentCoreRuntime;
+from strands import Agent, tool
+from strands_tools import current_time
 
-  constructor(
-    scope: Construct,
-    id: string,
-    props?: SnapshotBedrockServerProps,
-  ) {
-    super(scope, id);
 
-    this.dockerImage = new DockerImageAsset(this, 'DockerImage', {
-      platform: Platform.LINUX_ARM64,
-      directory: path.dirname(url.fileURLToPath(new URL(import.meta.url))),
-      extraHash: execSync(
-        \`docker inspect proj-snapshot-bedrock-server:latest --format '{{.Descriptor.digest}}'\`,
-        { encoding: 'utf-8' },
-      ).trim(),
-    });
-
-    this.agentCoreRuntime = new AgentCoreRuntime(this, 'AgentCore', {
-      runtimeName: 'SnapshotBedrockServer',
-      serverProtocol: 'MCP',
-      containerUri: this.dockerImage.imageUri,
-      ...props,
-    });
-  }
-}
-"
-`;
-
-exports[`py#mcp-server generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > mcp-servers-index.ts 1`] = `
-"export * from './snapshot-bedrock-server/snapshot-bedrock-server.js';
-"
-`;
-
-exports[`py#mcp-server generator > should match snapshot for generated files > mcp-server-__init__.py 1`] = `""`;
-
-exports[`py#mcp-server generator > should match snapshot for generated files > mcp-server-http.py 1`] = `
-"from .server import mcp
-
-if __name__ == "__main__":
-    mcp.run(transport="streamable-http")
-"
-`;
-
-exports[`py#mcp-server generator > should match snapshot for generated files > mcp-server-server.py 1`] = `
-"from mcp.server.fastmcp import FastMCP
-
-mcp = FastMCP(
-    name="SnapshotServer",
-    host="0.0.0.0",
-    stateless_http=True,
-)
-
-@mcp.tool(description="Adds two numbers")
+# Define a custom tool
+@tool
 def add(a: int, b: int) -> int:
-    """Add two numbers"""
     return a + b
 
 
-@mcp.resource("example://context", description="Sample Guidance")
-def sample_guidance() -> str:
-    return """## Sample Guidance
-
-This is some guidance in markdown format!"""
+@contextmanager
+def get_agent(session_id: str):
+    yield Agent(
+        system_prompt="""
+You are an addition wizard.
+Use the 'add' tool for addition tasks.
+Refer to tools as your 'spellbook'.
+""",
+        tools=[add, current_time],
+    )
 "
 `;
 
-exports[`py#mcp-server generator > should match snapshot for generated files > mcp-server-stdio.py 1`] = `
-"from .server import mcp
+exports[`py#strands-agent generator > should match snapshot for generated files > strands-agent-main.py 1`] = `
+"from bedrock_agentcore.runtime import BedrockAgentCoreApp
+
+from .agent import get_agent
+
+app = BedrockAgentCoreApp()
+
+
+@app.entrypoint
+async def invoke(payload, context):
+    """Handler for agent invocation"""
+    prompt = payload.get(
+        "prompt", "No prompt found in input, please guide the user "
+        "to create a json payload with prompt key"
+    )
+
+    with get_agent(session_id=context.session_id) as agent:
+        stream = agent.stream_async(prompt)
+        async for event in stream:
+            print(event)
+            yield (event)
+
 
 if __name__ == "__main__":
-    mcp.run(transport="stdio")
+    app.run()
 "
 `;
 
-exports[`py#mcp-server generator > should match snapshot for generated files > updated-pyproject.toml 1`] = `
+exports[`py#strands-agent generator > should match snapshot for generated files > updated-pyproject.toml 1`] = `
 "[project]
 name = "proj.test_project"
 version = "0.1.0"
 dependencies = [
-  "mcp~=1.13.0",
+  "aws-opentelemetry-distro~=0.11.0",
+  "bedrock-agentcore~=0.1.2",
   "boto3~=1.40.14",
-  "aws-opentelemetry-distro~=0.11.0"
+  "mcp~=1.13.0",
+  "strands-agents~=1.5.0",
+  "strands-agents-tools~=0.2.4"
 ]
 
 [dependency-groups]
