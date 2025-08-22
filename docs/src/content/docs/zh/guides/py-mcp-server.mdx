@@ -1,0 +1,145 @@
+---
+title: "Python MCP服务器"
+description: "为大型语言模型提供上下文的Python模型上下文协议（MCP）服务器"
+---
+
+
+
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Link from '@components/link.astro';
+import Snippet from '@components/snippet.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+
+生成一个Python [模型上下文协议（MCP）](https://modelcontextprotocol.io/) 服务器，用于为大型语言模型（LLMs）提供上下文，并可选择部署到[Amazon Bedrock AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/)。
+
+## 什么是MCP？
+
+[模型上下文协议（MCP）](https://modelcontextprotocol.io/) 是一个开放标准，允许AI助手与外部工具和资源交互。它为LLMs提供了一致的方式来：
+
+- 执行执行操作或检索信息的工具（函数）
+- 访问提供上下文或数据的资源
+
+## 使用方法
+
+### 生成MCP服务器
+
+您可以通过两种方式生成Python MCP服务器：
+
+<RunGenerator generator="py#mcp-server" />
+
+:::tip
+建议先使用<Link path="/guides/python-project">`py#project`</Link>生成器创建项目，再向其中添加MCP服务器。
+:::
+
+### 选项参数
+
+<GeneratorParameters generator="py#mcp-server" />
+
+## 生成器输出
+
+生成器将在现有Python项目中添加以下文件：
+
+<FileTree>
+  - your-project/
+    - your_module/
+      - mcp_server/ (如果指定了自定义名称则使用该名称)
+        - \_\_init\_\_.py Python包初始化文件
+        - server.py 主服务器定义文件，包含示例工具和资源
+        - stdio.py STDIO传输入口点，适用于简单的本地MCP服务器
+        - http.py Streamable HTTP传输入口点，适用于托管MCP服务器
+        - Dockerfile MCP服务器托管入口点（当`computeType`设为`BedrockAgentCoreRuntime`时）
+    - pyproject.toml 更新了MCP依赖项
+    - project.json 更新了MCP服务器服务目标
+</FileTree>
+
+:::note
+如果为`computeType`选择了`BedrockAgentCoreRuntime`，生成器还将创建CDK构造用于部署MCP服务器。
+:::
+
+## 使用MCP服务器
+
+### 添加工具
+
+工具是AI助手可以调用的执行操作的函数。Python MCP服务器使用[MCP Python SDK (FastMCP)](https://github.com/modelcontextprotocol/python-sdk)库，该库提供了基于装饰器的工具定义方式。
+
+在`server.py`文件中添加新工具：
+
+```python
+@mcp.tool(description="您的工具描述")
+def your_tool_name(param1: str, param2: int) -> str:
+    """带类型提示的工具实现"""
+    # 在此处编写工具逻辑
+    return f"结果：{param1} 与 {param2}"
+```
+
+FastMCP库自动处理：
+- 基于函数类型提示的类型验证
+- MCP协议的JSON模式生成
+- 错误处理和响应格式化
+
+### 添加资源
+
+资源为AI助手提供上下文。使用`@mcp.resource`装饰器添加资源：
+
+```python
+@mcp.resource("example://static-resource", description="静态资源示例")
+def static_resource() -> str:
+    """返回静态内容"""
+    return "这是为AI提供上下文的静态内容"
+
+@mcp.resource("dynamic://resource/{item_id}", description="动态资源示例")
+def dynamic_resource(item_id: str) -> str:
+    """根据参数返回动态内容"""
+    # 根据item_id获取数据
+    data = fetch_data_for_item(item_id)
+    return f"{item_id}的动态内容：{data}"
+```
+
+## 配置AI助手
+
+<Snippet name="mcp/configuration-py" parentHeading="配置AI助手" />
+
+## 运行MCP服务器
+
+### STDIO模式
+
+测试和使用MCP服务器最简单的方式是通过AI助手配置（如上所述）。
+
+您也可以直接使用`<your-server-name>-serve-stdio`目标运行[STDIO传输](https://modelcontextprotocol.io/docs/concepts/transports#standard-input%2Foutput-stdio)：
+
+<NxCommands commands={['run your-project:your-server-name-serve-stdio']} />
+
+该命令使用`uv run`通过STDIO传输执行MCP服务器。
+
+### Streamable HTTP模式
+
+如需使用[Streamable HTTP传输](https://modelcontextprotocol.io/docs/concepts/transports#streamable-http)在本地运行MCP服务器，可使用`<your-server-name>-serve-http`目标：
+
+<NxCommands commands={['run your-project:your-server-name-serve-http']} />
+
+该命令使用`uv run`通过HTTP传输执行MCP服务器，默认运行在8000端口。
+
+## 部署到Bedrock AgentCore Runtime
+
+<Snippet name="mcp/bedrock-deployment" parentHeading="部署到Bedrock AgentCore Runtime" />
+
+### 打包和Docker目标
+
+要为Bedrock AgentCore Runtime构建MCP服务器，项目中添加了`bundle`目标，该目标：
+
+- 使用`uv export`将Python依赖导出到`requirements.txt`文件
+- 使用`uv pip install`为目标平台（`aarch64-manylinux2014`）安装依赖
+
+同时添加了特定于MCP服务器的`docker`目标，该目标：
+
+- 从`Dockerfile`构建docker镜像，根据[MCP协议约定](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-service-contract.html#mcp-protocol-contract)在8000端口运行MCP服务器
+
+:::tip
+docker镜像使用特定标签（例如`my-scope-my-project-mcp-server:latest`）构建，CDK构造的`Dockerfile`继承该标签，允许将您的`Dockerfile`与MCP服务器项目共存。
+:::
+
+### 可观测性
+
+<Snippet name="mcp/observability" parentHeading="可观测性" />

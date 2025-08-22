@@ -1,0 +1,145 @@
+---
+title: "Servidor Python MCP"
+description: "Gerar um servidor de Protocolo de Contexto de Modelo (MCP) em Python para fornecer contexto a Modelos de Linguagem de Grande Porte"
+---
+
+
+
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Link from '@components/link.astro';
+import Snippet from '@components/snippet.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+
+Gerar um servidor Python [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) para fornecer contexto a Large Language Models (LLMs), e opcionalmente implantá-lo no [Amazon Bedrock AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/).
+
+## O que é MCP?
+
+O [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) é um padrão aberto que permite assistentes de IA interagirem com ferramentas e recursos externos. Ele fornece uma maneira consistente para LLMs:
+
+- Executar ferramentas (funções) que realizam ações ou recuperam informações
+- Acessar recursos que fornecem contexto ou dados
+
+## Utilização
+
+### Gerar um servidor MCP
+
+Você pode gerar um servidor MCP em Python de duas formas:
+
+<RunGenerator generator="py#mcp-server" />
+
+:::tip
+Primeiro use o gerador <Link path="/guides/python-project">`py#project`</Link> para criar um projeto onde adicionar seu servidor MCP.
+:::
+
+### Opções
+
+<GeneratorParameters generator="py#mcp-server" />
+
+## Saída do Gerador
+
+O gerador adicionará os seguintes arquivos ao seu projeto Python existente:
+
+<FileTree>
+  - your-project/
+    - your_module/
+      - mcp_server/ (ou nome personalizado se especificado)
+        - \_\_init\_\_.py Inicialização do pacote Python
+        - server.py Definição principal do servidor com ferramentas e recursos de exemplo
+        - stdio.py Ponto de entrada para transporte STDIO, útil para servidores MCP locais simples
+        - http.py Ponto de entrada para transporte HTTP Streamable, útil para hospedar seu servidor MCP
+        - Dockerfile Ponto de entrada para hospedar seu servidor MCP (quando `computeType` for definido como `BedrockAgentCoreRuntime`)
+    - pyproject.toml Atualizado com dependências MCP
+    - project.json Atualizado com alvos de serviço do servidor MCP
+</FileTree>
+
+:::note
+Se você selecionou `BedrockAgentCoreRuntime` para `computeType`, o gerador também criará um constructo CDK para implantar seu servidor MCP.
+:::
+
+## Trabalhando com seu Servidor MCP
+
+### Adicionando Ferramentas
+
+Ferramentas são funções que o assistente de IA pode chamar para realizar ações. O servidor MCP Python usa a biblioteca [MCP Python SDK (FastMCP)](https://github.com/modelcontextprotocol/python-sdk), que fornece uma abordagem baseada em decoradores para definir ferramentas.
+
+Você pode adicionar novas ferramentas no arquivo `server.py`:
+
+```python
+@mcp.tool(description="Your tool description")
+def your_tool_name(param1: str, param2: int) -> str:
+    """Tool implementation with type hints"""
+    # Your tool logic here
+    return f"Result: {param1} with {param2}"
+```
+
+A biblioteca FastMCP trata automaticamente:
+- Validação de tipos com base nas dicas de tipo da sua função
+- Geração de esquema JSON para o protocolo MCP
+- Tratamento de erros e formatação de respostas
+
+### Adicionando Recursos
+
+Recursos fornecem contexto ao assistente de IA. Você pode adicioná-los usando o decorador `@mcp.resource`:
+
+```python
+@mcp.resource("example://static-resource", description="Static resource example")
+def static_resource() -> str:
+    """Return static content"""
+    return "This is static content that provides context to the AI"
+
+@mcp.resource("dynamic://resource/{item_id}", description="Dynamic resource example")
+def dynamic_resource(item_id: str) -> str:
+    """Return dynamic content based on parameters"""
+    # Fetch data based on item_id
+    data = fetch_data_for_item(item_id)
+    return f"Dynamic content for {item_id}: {data}"
+```
+
+## Configurando com Assistente de IA
+
+<Snippet name="mcp/configuration-py" parentHeading="Configurando com Assistente de IA" />
+
+## Executando seu Servidor MCP
+
+### STDIO
+
+A maneira mais fácil de testar e usar um servidor MCP é configurando-o com um assistente de IA (como acima).
+
+Você também pode executar seu servidor com [transporte STDIO](https://modelcontextprotocol.io/docs/concepts/transports#standard-input%2Foutput-stdio) diretamente usando o alvo `<your-server-name>-serve-stdio`.
+
+<NxCommands commands={['run your-project:your-server-name-serve-stdio']} />
+
+Este comando usa `uv run` para executar seu servidor MCP com transporte STDIO.
+
+### HTTP Streamable
+
+Se desejar executar seu servidor MCP localmente usando [transporte HTTP Streamable](https://modelcontextprotocol.io/docs/concepts/transports#streamable-http), use o alvo `<your-server-name>-serve-http`.
+
+<NxCommands commands={['run your-project:your-server-name-serve-http']} />
+
+Este comando usa `uv run` para executar seu servidor MCP com transporte HTTP, normalmente na porta 8000.
+
+## Implantando seu Servidor MCP no Bedrock AgentCore Runtime
+
+<Snippet name="mcp/bedrock-deployment" parentHeading="Implantando seu Servidor MCP no Bedrock AgentCore Runtime" />
+
+### Alvos Bundle e Docker
+
+Para construir seu servidor MCP para Bedrock AgentCore Runtime, um alvo `bundle` é adicionado ao seu projeto, que:
+
+- Exporta dependências Python para um arquivo `requirements.txt` usando `uv export`
+- Instala dependências para a plataforma alvo (`aarch64-manylinux2014`) usando `uv pip install`
+
+Um alvo `docker` específico para seu servidor MCP também é adicionado, que:
+
+- Constrói uma imagem docker a partir do `Dockerfile` que executa seu servidor MCP na porta `8000`, conforme [contrato do protocolo MCP](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-service-contract.html#mcp-protocol-contract)
+
+:::tip
+A imagem docker é construída usando uma tag (exemplo `my-scope-my-project-mcp-server:latest`), que o `Dockerfile` do constructo CDK herda, permitindo que seu `Dockerfile` fique junto com seu projeto de servidor MCP.
+:::
+
+### Observabilidade
+
+<Snippet name="mcp/observability" parentHeading="Observabilidade" />

@@ -1,0 +1,74 @@
+---
+title: "Distribuzione MCP Bedrock"
+---
+
+
+
+### Costrutto CDK
+
+Se hai selezionato `BedrockAgentCoreRuntime` per `computeType`, viene generato un costrutto CDK che puoi utilizzare per distribuire il tuo server MCP su [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html).
+
+Puoi utilizzare questo costrutto CDK in un'applicazione CDK:
+
+```ts {6}
+import { MyProjectMcpServer } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    // Aggiungi il server MCP al tuo stack
+    new MyProjectMcpServer(this, 'MyProjectMcpServer');
+  }
+}
+```
+
+:::caution
+[Docker](https://www.docker.com/) è necessario per costruire e distribuire il server MCP. Assicurati di aver installato e avviato Docker per evitare errori come:
+
+```
+ERROR: Cannot connect to the Docker daemon at unix://path/to/docker.sock.
+```
+:::
+
+### Autenticazione
+
+#### IAM
+
+Per impostazione predefinita, il server MCP sarà protetto utilizzando l'autenticazione IAM. Basta distribuirlo senza alcun argomento:
+
+```ts {5}
+import { MyProjectMcpServer } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    new MyProjectMcpServer(this, 'MyProjectMcpServer');
+  }
+}
+```
+
+#### Autenticazione JWT con Cognito
+
+Per configurare l'autenticazione JWT, puoi passare la proprietà `authorizerConfiguration` al costrutto del server MCP. Ecco un esempio che configura un user pool e un client Cognito per proteggere il server MCP:
+
+```ts {14-17}
+import { MyProjectMcpServer } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const userPool = new UserPool(this, 'UserPool');
+    const client = userPool.addClient('Client', {
+      authFlows: {
+        userPassword: true,
+      },
+    });
+
+    new MyProjectMcpServer(this, 'MyProjectMcpServer', {
+      authorizerConfiguration: {
+        customJWTAuthorizer: {
+          discoveryUrl: `https://cognito-idp.${Stack.of(userPool).region}.amazonaws.com/${userPool.userPoolId}/.well-known/openid-configuration`,
+          allowedClients: [client.userPoolClientId],
+        },
+      },
+    });
+  }
+}
+```

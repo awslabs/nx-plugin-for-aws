@@ -1,0 +1,74 @@
+---
+title: "MCP基岩部署"
+---
+
+
+
+### CDK 构造
+
+如果您为 `computeType` 选择了 `BedrockAgentCoreRuntime`，则会生成一个 CDK 构造，您可以使用它将 MCP 服务器部署到 [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html)。
+
+您可以在 CDK 应用程序中使用此 CDK 构造：
+
+```ts {6}
+import { MyProjectMcpServer } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    // 将 MCP 服务器添加到您的堆栈
+    new MyProjectMcpServer(this, 'MyProjectMcpServer');
+  }
+}
+```
+
+:::caution
+构建和部署 MCP 服务器需要 [Docker](https://www.docker.com/)。请确保已安装并启动 Docker 以避免出现如下错误：
+
+```
+ERROR: Cannot connect to the Docker daemon at unix://path/to/docker.sock.
+```
+:::
+
+### 身份验证
+
+#### IAM
+
+默认情况下，您的 MCP 服务器将使用 IAM 身份验证进行保护，只需直接部署而无需任何参数：
+
+```ts {5}
+import { MyProjectMcpServer } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    new MyProjectMcpServer(this, 'MyProjectMcpServer');
+  }
+}
+```
+
+#### Cognito JWT 身份验证
+
+要配置 JWT 身份验证，您可以将 `authorizerConfiguration` 属性传递给 MCP 服务器构造。以下示例配置了 Cognito 用户池和客户端来保护 MCP 服务器：
+
+```ts {14-17}
+import { MyProjectMcpServer } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const userPool = new UserPool(this, 'UserPool');
+    const client = userPool.addClient('Client', {
+      authFlows: {
+        userPassword: true,
+      },
+    });
+
+    new MyProjectMcpServer(this, 'MyProjectMcpServer', {
+      authorizerConfiguration: {
+        customJWTAuthorizer: {
+          discoveryUrl: `https://cognito-idp.${Stack.of(userPool).region}.amazonaws.com/${userPool.userPoolId}/.well-known/openid-configuration`,
+          allowedClients: [client.userPoolClientId],
+        },
+      },
+    });
+  }
+}
+```
