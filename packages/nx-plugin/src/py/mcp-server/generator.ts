@@ -197,8 +197,23 @@ export const pyMcpServerGenerator = async (
           cwd: '{projectRoot}',
         },
       },
+      [`${options.name ? name : 'mcp-server'}-inspect`]: {
+        executor: 'nx:run-commands',
+        options: {
+          commands: [
+            `mcp-inspector -- uv run -m ${moduleName}.${mcpServerNameSnakeCase}.stdio`,
+          ],
+          cwd: '{projectRoot}',
+        },
+      },
     },
   });
+
+  addDependenciesToPackageJson(
+    tree,
+    {},
+    withVersions(['@modelcontextprotocol/inspector']),
+  );
 
   await addGeneratorMetricsIfApplicable(tree, [PY_MCP_SERVER_GENERATOR_INFO]);
 
