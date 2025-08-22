@@ -31,7 +31,7 @@ import {
 } from '../../../utils/shared-constructs-constants';
 import { getNpmScopePrefix, toScopeAlias } from '../../../utils/npm-scope';
 import { configureTsProject } from '../../lib/ts-project-utils';
-import { IVersion, withVersions } from '../../../utils/versions';
+import { ITsDepVersion, withVersions } from '../../../utils/versions';
 import { getRelativePathToRoot } from '../../../utils/paths';
 import { kebabCase, toClassName, toKebabCase } from '../../../utils/names';
 import {
@@ -524,9 +524,9 @@ export async function tsReactWebsiteGenerator(
     }),
   );
 
-  const devDependencies: IVersion[] = ['vite-tsconfig-paths'];
+  const devDependencies: ITsDepVersion[] = ['vite-tsconfig-paths'];
 
-  const dependencies: IVersion[] = [
+  const dependencies: ITsDepVersion[] = [
     '@cloudscape-design/components',
     '@cloudscape-design/board-components',
     '@cloudscape-design/global-styles',

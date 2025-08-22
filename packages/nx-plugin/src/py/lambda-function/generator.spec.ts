@@ -111,13 +111,13 @@ describe('lambda-handler project generator', () => {
 
     // Verify project dependencies
     expect(pyprojectToml.project.dependencies).toContain(
-      'aws-lambda-powertools',
+      'aws-lambda-powertools~=3.19.0',
     );
     expect(pyprojectToml.project.dependencies).toContain(
-      'aws-lambda-powertools[tracer]',
+      'aws-lambda-powertools[tracer]~=3.19.0',
     );
     expect(pyprojectToml.project.dependencies).toContain(
-      'aws-lambda-powertools[parser]',
+      'aws-lambda-powertools[parser]~=3.19.0',
     );
   });
 

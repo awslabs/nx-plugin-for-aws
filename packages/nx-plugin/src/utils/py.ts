@@ -5,6 +5,8 @@
 import { parse, stringify } from '@iarna/toml';
 import { joinPathFragments, Tree } from '@nx/devkit';
 import { UVPyprojectToml } from '@nxlv/python/src/provider/uv/types';
+import { IPyDepVersion, withPyVersions } from './versions';
+import { parsePipRequirementsLine } from 'pip-requirements-js';
 
 /**
  * Add dependencies to a pyproject.toml file
@@ -12,18 +14,19 @@ import { UVPyprojectToml } from '@nxlv/python/src/provider/uv/types';
 export const addDependenciesToPyProjectToml = (
   tree: Tree,
   projectRoot: string,
-  deps: string[],
+  deps: IPyDepVersion[],
 ) => {
   const projectToml = parse(
     tree.read(joinPathFragments(projectRoot, 'pyproject.toml'), 'utf8'),
   ) as UVPyprojectToml;
-  const newDeps = new Set(deps);
+  const newDeps = new Set<string>(deps);
   projectToml.project.dependencies = [
-    // TODO: consider parsing into name and version and replacing where name is the same
-    ...(projectToml.project?.dependencies ?? []).filter(
-      (dep) => !newDeps.has(dep),
-    ),
-    ...deps,
+    // Replace any dependencies that already exist
+    ...(projectToml.project?.dependencies ?? []).filter((dep) => {
+      const parsedDep = parsePipRequirementsLine(dep);
+      return parsedDep.type !== 'ProjectName' || !newDeps.has(parsedDep.name);
+    }),
+    ...withPyVersions(deps),
   ];
   tree.write(
     joinPathFragments(projectRoot, 'pyproject.toml'),

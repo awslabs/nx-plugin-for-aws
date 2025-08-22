@@ -83,7 +83,7 @@ dev-dependencies = []
     const pyprojectToml = parse(
       tree.read('apps/test-project/pyproject.toml', 'utf-8'),
     ) as UVPyprojectToml;
-    expect(pyprojectToml.project.dependencies).toContain('mcp');
+    expect(pyprojectToml.project.dependencies).toContain('mcp~=1.13.0');
 
     // Check root package.json dependencies for inspector
     const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
@@ -326,7 +326,7 @@ dev-dependencies = []
     const pyprojectToml = parse(
       tree.read('apps/test-project/pyproject.toml', 'utf-8'),
     ) as UVPyprojectToml;
-    expect(pyprojectToml.project.dependencies).toContain('mcp');
+    expect(pyprojectToml.project.dependencies).toContain('mcp~=1.13.0');
 
     // Check that project configuration was updated with serve targets
     const projectConfig = JSON.parse(
@@ -432,7 +432,7 @@ dev-dependencies = []
     const pyprojectToml = parse(
       tree.read('apps/test-project/pyproject.toml', 'utf-8'),
     ) as UVPyprojectToml;
-    expect(pyprojectToml.project.dependencies).toContain('mcp');
+    expect(pyprojectToml.project.dependencies).toContain('mcp~=1.13.0');
   });
 
   it('should generate shared constructs for BedrockAgentCoreRuntime', async () => {

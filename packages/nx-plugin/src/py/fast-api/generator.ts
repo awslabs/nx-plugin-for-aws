@@ -39,6 +39,8 @@ import { addOpenApiGeneration } from './react/open-api';
 import { updateGitIgnore } from '../../utils/git';
 import { getLocalServerPortNumber } from '../../utils/port';
 import { addPythonBundleTarget } from '../../utils/bundle';
+import { addDependenciesToPyProjectToml } from '../../utils/py';
+import { withPyVersions } from '../../utils/versions';
 
 export const FAST_API_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -194,16 +196,19 @@ export const pyFastApiProjectGenerator = async (
     (patterns) => [...patterns, joinPathFragments('src', generatedMetadataDir)],
   );
 
-  const projectToml = parse(
-    tree.read(joinPathFragments(dir, 'pyproject.toml'), 'utf8'),
-  ) as UVPyprojectToml;
-  projectToml.project.dependencies = [
+  addDependenciesToPyProjectToml(tree, dir, [
     'fastapi',
     'mangum',
     'aws-lambda-powertools',
     'aws-lambda-powertools[tracer]',
-  ].concat(projectToml.project?.dependencies || []);
-  projectToml['dependency-groups'] = { dev: ['fastapi[standard]>=0.115'] };
+  ]);
+
+  const projectToml = parse(
+    tree.read(joinPathFragments(dir, 'pyproject.toml'), 'utf8'),
+  ) as UVPyprojectToml;
+  projectToml['dependency-groups'] = {
+    dev: withPyVersions(['fastapi[standard]']),
+  };
   tree.write(joinPathFragments(dir, 'pyproject.toml'), stringify(projectToml));
 
   addGeneratorMetadata(tree, fullyQualifiedName, FAST_API_GENERATOR_INFO);
