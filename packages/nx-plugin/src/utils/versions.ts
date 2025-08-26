@@ -78,10 +78,15 @@ export const PY_VERSIONS = {
   'aws-lambda-powertools': '~=3.19.0',
   'aws-lambda-powertools[tracer]': '~=3.19.0',
   'aws-lambda-powertools[parser]': '~=3.19.0',
+  'aws-opentelemetry-distro': '~=0.11.0',
+  'bedrock-agentcore': '~=0.1.2',
+  boto3: '~=1.40.14',
   fastapi: '~=0.116.1',
   'fastapi[standard]': '~=0.116.1',
   mangum: '~=0.19.0',
   mcp: '~=1.13.0',
+  'strands-agents': '~=1.5.0',
+  'strands-agents-tools': '~=0.2.4',
 } as const;
 export type IPyDepVersion = keyof typeof PY_VERSIONS;
 

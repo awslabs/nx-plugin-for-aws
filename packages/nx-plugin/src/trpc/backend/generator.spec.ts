@@ -53,7 +53,7 @@ describe('trpc backend generator', () => {
       apiType: 'trpc',
       auth: 'IAM',
       generator: TRPC_BACKEND_GENERATOR_INFO.id,
-      port: 2022,
+      ports: [2022],
     });
   });
 
@@ -326,9 +326,9 @@ describe('trpc backend generator', () => {
       tree.read('apps/third-api/project.json', 'utf-8'),
     );
 
-    expect(firstApiConfig.metadata.port).toBe(2022);
-    expect(secondApiConfig.metadata.port).toBe(2023);
-    expect(thirdApiConfig.metadata.port).toBe(2024);
+    expect(firstApiConfig.metadata.ports).toEqual([2022]);
+    expect(secondApiConfig.metadata.ports).toEqual([2023]);
+    expect(thirdApiConfig.metadata.ports).toEqual([2024]);
 
     // Check local-server.ts files contain correct ports
     const firstLocalServer = tree.read(

@@ -91,7 +91,10 @@ export const tsNxPluginGenerator = async (
   tree.write(joinPathFragments(project.sourceRoot, 'index.ts'), '');
 
   // Add an MCP Server
-  await tsMcpServerGenerator(tree, { project: fullyQualifiedName });
+  await tsMcpServerGenerator(tree, {
+    project: fullyQualifiedName,
+    computeType: 'None',
+  });
 
   const mcpPath = joinPathFragments(project.sourceRoot, 'mcp-server');
   const mcpServerPath = joinPathFragments(mcpPath, 'server.ts');

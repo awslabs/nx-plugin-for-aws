@@ -77,6 +77,8 @@ export const pyMcpServerGenerator = async (
   );
   const distDir = joinPathFragments('dist', project.root);
 
+  const computeType = options.computeType ?? 'BedrockAgentCoreRuntime';
+
   // Generate example server
   generateFiles(
     tree,
@@ -92,9 +94,13 @@ export const pyMcpServerGenerator = async (
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
-  addDependenciesToPyProjectToml(tree, project.root, ['mcp']);
+  addDependenciesToPyProjectToml(tree, project.root, [
+    'mcp',
+    'boto3',
+    'aws-opentelemetry-distro',
+  ]);
 
-  if (options.computeType === 'BedrockAgentCoreRuntime') {
+  if (computeType === 'BedrockAgentCoreRuntime') {
     const dockerImageTag = `${getNpmScope(tree)}-${name}:latest`;
 
     // Add bundle target
@@ -167,12 +173,6 @@ export const pyMcpServerGenerator = async (
       mcpServerNameClassName,
       dockerImageTag,
     });
-
-    addDependenciesToPackageJson(
-      tree,
-      {},
-      withVersions(['@aws-sdk/client-bedrock-agentcore-control']),
-    );
   } else {
     // No Dockerfile needed for non-hosted MCP
     tree.delete(joinPathFragments(targetSourceDir, 'Dockerfile'));

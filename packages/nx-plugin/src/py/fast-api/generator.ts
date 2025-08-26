@@ -37,7 +37,7 @@ import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { addApiGatewayConstruct } from '../../utils/api-constructs/api-constructs';
 import { addOpenApiGeneration } from './react/open-api';
 import { updateGitIgnore } from '../../utils/git';
-import { getLocalServerPortNumber } from '../../utils/port';
+import { assignPort } from '../../utils/port';
 import { addPythonBundleTarget } from '../../utils/bundle';
 import { addDependenciesToPyProjectToml } from '../../utils/py';
 import { withPyVersions } from '../../utils/versions';
@@ -65,8 +65,6 @@ export const pyFastApiProjectGenerator = async (
   const apiNameKebabCase = toKebabCase(schema.name);
   const apiNameClassName = toClassName(schema.name);
 
-  const port = getLocalServerPortNumber(tree, FAST_API_GENERATOR_INFO, 8000);
-
   await pyProjectGenerator(tree, {
     name: schema.name,
     directory: schema.directory,
@@ -75,6 +73,7 @@ export const pyFastApiProjectGenerator = async (
   });
 
   const projectConfig = readProjectConfiguration(tree, fullyQualifiedName);
+  const port = assignPort(tree, projectConfig, 8000);
 
   addPythonBundleTarget(projectConfig);
 
@@ -88,10 +87,10 @@ export const pyFastApiProjectGenerator = async (
   };
 
   projectConfig.metadata = {
+    ...projectConfig.metadata,
     apiName: schema.name,
     apiType: 'fast-api',
     auth: schema.auth,
-    port,
   } as any;
 
   projectConfig.targets = sortObjectKeys(projectConfig.targets);

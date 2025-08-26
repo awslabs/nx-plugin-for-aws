@@ -44,6 +44,7 @@ describe('ts#mcp-server generator', () => {
   it('should add MCP server to existing TypeScript project with default name', async () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
+      computeType: 'None',
     });
 
     // Check that MCP server files were added to the existing project
@@ -107,6 +108,7 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'custom-server',
+      computeType: 'None',
     });
 
     // Check that MCP server files were added with custom name
@@ -154,6 +156,7 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'esm-server',
+      computeType: 'None',
     });
 
     // Check that files were generated (ESM flag should be passed to templates)
@@ -174,6 +177,7 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'cjs-server',
+      computeType: 'None',
     });
 
     // Check that files were generated
@@ -197,6 +201,7 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'new-server',
+      computeType: 'None',
     });
 
     // Check that package.json was created
@@ -213,6 +218,7 @@ describe('ts#mcp-server generator', () => {
   it('should add dependencies to both root and project package.json', async () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
+      computeType: 'None',
     });
 
     // Check root package.json dependencies
@@ -265,6 +271,7 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'no-source-root',
       name: 'default-src-server',
+      computeType: 'None',
     });
 
     // Should default to {projectRoot}/src
@@ -277,6 +284,7 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'My_Special#Server!',
+      computeType: 'None',
     });
 
     // Name should be converted to kebab-case
@@ -300,6 +308,7 @@ describe('ts#mcp-server generator', () => {
     await expect(
       tsMcpServerGenerator(tree, {
         project: 'non-ts-project',
+        computeType: 'None',
       }),
     ).rejects.toThrow(
       'Unsupported project non-ts-project. Expected a TypeScript project (with a tsconfig.json)',
@@ -322,6 +331,7 @@ describe('ts#mcp-server generator', () => {
 
     await tsMcpServerGenerator(tree, {
       project: '@org/nested-project',
+      computeType: 'None',
     });
 
     // Should use the last part of the project name for default server name
@@ -339,6 +349,7 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'snapshot-server',
+      computeType: 'None',
     });
 
     // Snapshot the generated MCP server files
@@ -511,12 +522,6 @@ describe('ts#mcp-server generator', () => {
     expect(projectPackageJson.devDependencies['tsx']).toBeDefined();
     expect(projectPackageJson.devDependencies['@types/express']).toBeDefined();
 
-    // Additional dependencies for BedrockAgentCoreRuntime
-    expect(
-      projectPackageJson.devDependencies[
-        '@aws-sdk/client-bedrock-agentcore-control'
-      ],
-    ).toBeDefined();
     expect(projectPackageJson.devDependencies['esbuild']).toBeDefined();
     expect(
       projectPackageJson.devDependencies['@modelcontextprotocol/inspector'],
@@ -650,6 +655,7 @@ describe('ts#mcp-server generator', () => {
 
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
+      computeType: 'None',
     });
 
     expectHasMetricTags(tree, TS_MCP_SERVER_GENERATOR_INFO.metric);

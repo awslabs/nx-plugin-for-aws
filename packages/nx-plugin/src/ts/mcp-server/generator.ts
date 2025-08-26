@@ -59,6 +59,8 @@ export const tsMcpServerGenerator = async (
   const relativeSourceDir = targetSourceDir.replace(project.root + '/', './');
   const distDir = joinPathFragments('dist', project.root);
 
+  const computeType = options.computeType ?? 'BedrockAgentCoreRuntime';
+
   // Create a package.json if one doesn't exist, since we want to add the server as a bin target
   const projectPackageJsonPath = joinPathFragments(
     project.root,
@@ -112,7 +114,7 @@ export const tsMcpServerGenerator = async (
   ]);
 
   // Add hosting based on compute type
-  if (options.computeType === 'BedrockAgentCoreRuntime') {
+  if (computeType === 'BedrockAgentCoreRuntime') {
     const dockerImageTag = `${getNpmScope(tree)}-${name}:latest`;
 
     // Add an esbuild bundle target
@@ -158,7 +160,7 @@ export const tsMcpServerGenerator = async (
     // Add additional dependencies
     devDeps = {
       ...devDeps,
-      ...withVersions(['@aws-sdk/client-bedrock-agentcore-control', 'esbuild']),
+      ...withVersions(['esbuild']),
     };
   } else {
     // No Dockerfile needed for non-hosted MCP

@@ -94,6 +94,10 @@ export const smokeTest = (
         opts,
       );
       await runCLI(
+        `generate @aws/nx-plugin:py#strands-agent --project=py_project --name=my-agent --computeType=BedrockAgentCoreRuntime --no-interactive`,
+        opts,
+      );
+      await runCLI(
         `generate @aws/nx-plugin:ts#project --name=ts-project --no-interactive`,
         opts,
       );
@@ -102,7 +106,7 @@ export const smokeTest = (
         opts,
       );
       await runCLI(
-        `generate @aws/nx-plugin:ts#mcp-server --project=ts-project --name=my-mcp-server --no-interactive`,
+        `generate @aws/nx-plugin:ts#mcp-server --project=ts-project --name=my-mcp-server --computeType=None --no-interactive`,
         opts,
       );
       await runCLI(

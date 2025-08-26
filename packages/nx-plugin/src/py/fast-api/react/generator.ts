@@ -57,7 +57,7 @@ export const fastApiReactGenerator = async (
   const metadata = fastApiProjectConfig.metadata as any;
   const apiName = metadata?.apiName;
   const auth = metadata?.auth ?? 'IAM';
-  const port = metadata?.port ?? 8000;
+  const port = metadata?.port ?? metadata?.ports?.[0] ?? 8000;
   const clientGenTarget = `generate:${kebabCase(apiName)}-client`;
   const clientGenWatchTarget = `watch-${clientGenTarget}`;
 

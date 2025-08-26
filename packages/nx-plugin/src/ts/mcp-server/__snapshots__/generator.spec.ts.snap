@@ -7,6 +7,9 @@ exports[`ts#mcp-server generator > should match snapshot for BedrockAgentCoreRun
   PolicyStatement,
   Effect,
   PolicyDocument,
+  IGrantable,
+  Grant,
+  IPrincipal,
 } from 'aws-cdk-lib/aws-iam';
 import {
   AwsCustomResource,
@@ -33,9 +36,11 @@ export interface AgentCoreRuntimeProps {
 /**
  * A construct for creating a Bedrock AgentCore Runtime
  */
-export class AgentCoreRuntime extends Construct {
+export class AgentCoreRuntime extends Construct implements IGrantable {
   public readonly role: Role;
   public readonly arn: string;
+
+  public readonly grantPrincipal: IPrincipal;
 
   constructor(scope: Construct, id: string, props: AgentCoreRuntimeProps) {
     super(scope, id);
@@ -128,6 +133,7 @@ export class AgentCoreRuntime extends Construct {
         }),
       },
     });
+    this.grantPrincipal = this.role.grantPrincipal;
 
     const agentRuntime = new AwsCustomResource(this, 'MCPSeverRuntime', {
       onCreate: {
@@ -140,6 +146,8 @@ export class AgentCoreRuntime extends Construct {
               containerUri: props.containerUri,
             },
           },
+          description: props.description,
+          environmentVariables: props.environment,
           networkConfiguration: {
             networkMode: 'PUBLIC',
           },
@@ -162,6 +170,8 @@ export class AgentCoreRuntime extends Construct {
               containerUri: props.containerUri,
             },
           },
+          description: props.description,
+          environmentVariables: props.environment,
           networkConfiguration: {
             networkMode: 'PUBLIC',
           },
@@ -195,6 +205,17 @@ export class AgentCoreRuntime extends Construct {
 
     this.arn = agentRuntime.getResponseField('agentRuntimeArn');
   }
+
+  /**
+   * Grant permissions to invoke the agent runtime (if using IAM auth - not required for JWT auth)
+   */
+  public grantInvoke = (grantee: IGrantable) => {
+    Grant.addToPrincipal({
+      grantee,
+      actions: ['bedrock-agentcore:InvokeAgentRuntime'],
+      resourceArns: [this.arn, \`\${this.arn}/*\`],
+    });
+  };
 }
 "
 `;

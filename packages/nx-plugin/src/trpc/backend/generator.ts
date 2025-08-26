@@ -12,6 +12,7 @@ import {
   ProjectConfiguration,
   Tree,
   updateJson,
+  updateProjectConfiguration,
 } from '@nx/devkit';
 import { TsTrpcApiGeneratorSchema } from './schema';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
@@ -33,7 +34,7 @@ import {
 } from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { addApiGatewayConstruct } from '../../utils/api-constructs/api-constructs';
-import { getLocalServerPortNumber } from '../../utils/port';
+import { assignPort } from '../../utils/port';
 
 export const TRPC_BACKEND_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -51,21 +52,18 @@ export async function tsTrpcApiGenerator(
   const backendName = apiNameKebabCase;
   const backendProjectName = `${apiNamespace}${backendName}`;
 
-  const port = getLocalServerPortNumber(
-    tree,
-    TRPC_BACKEND_GENERATOR_INFO,
-    2022,
-  );
-
   await tsProjectGenerator(tree, {
     name: backendName,
     directory: options.directory,
   });
 
-  const backendRoot = readProjectConfigurationUnqualified(
+  const projectConfig = readProjectConfigurationUnqualified(
     tree,
     backendProjectName,
-  ).root;
+  );
+  const backendRoot = projectConfig.root;
+
+  const port = assignPort(tree, projectConfig, 2022);
 
   const enhancedOptions = {
     backendProjectName,
@@ -92,43 +90,38 @@ export async function tsTrpcApiGenerator(
     auth: options.auth,
   });
 
-  updateJson(
-    tree,
-    joinPathFragments(backendRoot, 'project.json'),
-    (config: ProjectConfiguration) => {
-      config.metadata = {
-        apiName: options.name,
-        apiType: 'trpc',
-        auth: options.auth,
-        port,
-      } as unknown;
+  projectConfig.metadata = {
+    ...projectConfig.metadata,
+    apiName: options.name,
+    apiType: 'trpc',
+    auth: options.auth,
+  } as unknown;
 
-      config.targets.serve = {
-        executor: 'nx:run-commands',
-        options: {
-          commands: ['tsx --watch src/local-server.ts'],
-          cwd: backendRoot,
-        },
-        continuous: true,
-      };
-
-      config.targets.bundle = {
-        cache: true,
-        executor: 'nx:run-commands',
-        outputs: [`{workspaceRoot}/dist/${backendRoot}/bundle`],
-        options: {
-          command: `esbuild ${backendRoot}/src/router.ts --bundle --outfile=dist/${backendRoot}/bundle/index.js --platform=node --format=cjs`,
-        },
-      };
-      config.targets.build.dependsOn = [
-        ...(config.targets.build.dependsOn ?? []),
-        'bundle',
-      ];
-
-      config.targets = sortObjectKeys(config.targets);
-      return config;
+  projectConfig.targets.serve = {
+    executor: 'nx:run-commands',
+    options: {
+      commands: ['tsx --watch src/local-server.ts'],
+      cwd: backendRoot,
     },
-  );
+    continuous: true,
+  };
+
+  projectConfig.targets.bundle = {
+    cache: true,
+    executor: 'nx:run-commands',
+    outputs: [`{workspaceRoot}/dist/${backendRoot}/bundle`],
+    options: {
+      command: `esbuild ${backendRoot}/src/router.ts --bundle --outfile=dist/${backendRoot}/bundle/index.js --platform=node --format=cjs`,
+    },
+  };
+  projectConfig.targets.build.dependsOn = [
+    ...(projectConfig.targets.build.dependsOn ?? []),
+    'bundle',
+  ];
+
+  projectConfig.targets = sortObjectKeys(projectConfig.targets);
+
+  updateProjectConfiguration(tree, projectConfig.name, projectConfig);
 
   updateJson(
     tree,
