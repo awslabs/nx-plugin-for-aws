@@ -12,6 +12,7 @@ import {
 } from '@nx/devkit';
 import { getNpmScopePrefix, toScopeAlias } from './npm-scope';
 import tsProjectGenerator from '../ts/lib/generator';
+import terraformProjectGenerator from '../terraform/project/generator';
 import { withVersions } from './versions';
 import { formatFilesInSubtree } from './format';
 import {
@@ -23,90 +24,137 @@ import {
 } from './shared-constructs-constants';
 import { readAwsNxPluginConfig } from './config/utils';
 
-export async function sharedConstructsGenerator(tree: Tree) {
+export interface SharedConstructsGeneratorOptions {
+  iacProvider?: 'CDK' | 'Terraform';
+}
+
+export async function sharedConstructsGenerator(
+  tree: Tree,
+  options: SharedConstructsGeneratorOptions = {},
+) {
+  const { iacProvider = 'CDK' } = options;
   const npmScopePrefix = getNpmScopePrefix(tree);
   updateGitignore(tree);
 
-  if (
-    !tree.exists(
-      joinPathFragments(PACKAGES_DIR, TYPE_DEFINITIONS_DIR, 'project.json'),
-    )
-  ) {
-    await tsProjectGenerator(tree, {
-      name: TYPE_DEFINITIONS_NAME,
-      directory: PACKAGES_DIR,
-      subDirectory: TYPE_DEFINITIONS_DIR,
-    });
-    tree.delete(joinPathFragments(PACKAGES_DIR, TYPE_DEFINITIONS_DIR, 'src'));
-    generateFiles(
-      tree,
-      joinPathFragments(__dirname, 'files', TYPE_DEFINITIONS_DIR, 'src'),
-      joinPathFragments(PACKAGES_DIR, TYPE_DEFINITIONS_DIR, 'src'),
-      {
-        npmScopePrefix,
-      },
-      {
-        overwriteStrategy: OverwriteStrategy.KeepExisting,
-      },
-    );
-    generateFiles(
-      tree,
-      joinPathFragments(__dirname, 'files', 'common', 'readme'),
-      joinPathFragments(PACKAGES_DIR, TYPE_DEFINITIONS_DIR),
-      {
-        fullyQualifiedName: `${npmScopePrefix}${TYPE_DEFINITIONS_NAME}`,
+  if (iacProvider === 'CDK') {
+    if (
+      !tree.exists(
+        joinPathFragments(PACKAGES_DIR, TYPE_DEFINITIONS_DIR, 'project.json'),
+      )
+    ) {
+      await tsProjectGenerator(tree, {
         name: TYPE_DEFINITIONS_NAME,
-        pkgMgrCmd: getPackageManagerCommand().exec,
-      },
-      {
-        overwriteStrategy: OverwriteStrategy.Overwrite,
-      },
-    );
-    await formatFilesInSubtree(tree);
-  }
-  if (
-    !tree.exists(
-      joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'project.json'),
-    )
-  ) {
-    await tsProjectGenerator(tree, {
-      name: SHARED_CONSTRUCTS_NAME,
-      directory: PACKAGES_DIR,
-      subDirectory: SHARED_CONSTRUCTS_DIR,
-    });
-    tree.delete(joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'src'));
-    generateFiles(
-      tree,
-      joinPathFragments(__dirname, 'files', SHARED_CONSTRUCTS_DIR, 'src'),
-      joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'src'),
-      {
-        npmScopePrefix,
-        scopeAlias: toScopeAlias(npmScopePrefix),
-        tags: (await readAwsNxPluginConfig(tree))?.tags ?? [],
-      },
-      {
-        overwriteStrategy: OverwriteStrategy.KeepExisting,
-      },
-    );
-    generateFiles(
-      tree,
-      joinPathFragments(__dirname, 'files', 'common', 'readme'),
-      joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR),
-      {
-        fullyQualifiedName: `${npmScopePrefix}${SHARED_CONSTRUCTS_NAME}`,
+        directory: PACKAGES_DIR,
+        subDirectory: TYPE_DEFINITIONS_DIR,
+      });
+      tree.delete(joinPathFragments(PACKAGES_DIR, TYPE_DEFINITIONS_DIR, 'src'));
+      generateFiles(
+        tree,
+        joinPathFragments(__dirname, 'files', TYPE_DEFINITIONS_DIR, 'src'),
+        joinPathFragments(PACKAGES_DIR, TYPE_DEFINITIONS_DIR, 'src'),
+        {
+          npmScopePrefix,
+        },
+        {
+          overwriteStrategy: OverwriteStrategy.KeepExisting,
+        },
+      );
+      generateFiles(
+        tree,
+        joinPathFragments(__dirname, 'files', 'common', 'readme'),
+        joinPathFragments(PACKAGES_DIR, TYPE_DEFINITIONS_DIR),
+        {
+          fullyQualifiedName: `${npmScopePrefix}${TYPE_DEFINITIONS_NAME}`,
+          name: TYPE_DEFINITIONS_NAME,
+          pkgMgrCmd: getPackageManagerCommand().exec,
+        },
+        {
+          overwriteStrategy: OverwriteStrategy.Overwrite,
+        },
+      );
+      await formatFilesInSubtree(tree);
+    }
+    if (
+      !tree.exists(
+        joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'project.json'),
+      )
+    ) {
+      await tsProjectGenerator(tree, {
         name: SHARED_CONSTRUCTS_NAME,
-        pkgMgrCmd: getPackageManagerCommand().exec,
-      },
-      {
-        overwriteStrategy: OverwriteStrategy.Overwrite,
-      },
+        directory: PACKAGES_DIR,
+        subDirectory: SHARED_CONSTRUCTS_DIR,
+      });
+      tree.delete(
+        joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'src'),
+      );
+      generateFiles(
+        tree,
+        joinPathFragments(__dirname, 'files', SHARED_CONSTRUCTS_DIR, 'src'),
+        joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'src'),
+        {
+          npmScopePrefix,
+          scopeAlias: toScopeAlias(npmScopePrefix),
+          tags: (await readAwsNxPluginConfig(tree))?.tags ?? [],
+        },
+        {
+          overwriteStrategy: OverwriteStrategy.KeepExisting,
+        },
+      );
+      generateFiles(
+        tree,
+        joinPathFragments(__dirname, 'files', 'common', 'readme'),
+        joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR),
+        {
+          fullyQualifiedName: `${npmScopePrefix}${SHARED_CONSTRUCTS_NAME}`,
+          name: SHARED_CONSTRUCTS_NAME,
+          pkgMgrCmd: getPackageManagerCommand().exec,
+        },
+        {
+          overwriteStrategy: OverwriteStrategy.Overwrite,
+        },
+      );
+      addDependenciesToPackageJson(
+        tree,
+        withVersions(['constructs', 'aws-cdk-lib']),
+        withVersions(['@types/node']),
+      );
+      await formatFilesInSubtree(tree);
+    }
+  }
+
+  // Handle Terraform provider
+  if (iacProvider === 'Terraform') {
+    const terraformLibPath = joinPathFragments(
+      PACKAGES_DIR,
+      'common',
+      'terraform',
     );
-    addDependenciesToPackageJson(
-      tree,
-      withVersions(['constructs', 'aws-cdk-lib']),
-      withVersions(['@types/node']),
-    );
-    await formatFilesInSubtree(tree);
+    if (!tree.exists(joinPathFragments(terraformLibPath, 'project.json'))) {
+      await terraformProjectGenerator(tree, {
+        name: 'terraform',
+        directory: joinPathFragments(PACKAGES_DIR, 'common'),
+        type: 'library',
+      });
+
+      tree.delete(joinPathFragments(terraformLibPath, 'src', 'main.tf'));
+
+      // Create the metrics.tf file with empty initial values
+      generateFiles(
+        tree,
+        joinPathFragments(__dirname, 'files', 'terraform'),
+        terraformLibPath,
+        {
+          metricId: '',
+          version: '',
+          tags: '',
+        },
+        {
+          overwriteStrategy: OverwriteStrategy.KeepExisting,
+        },
+      );
+
+      await formatFilesInSubtree(tree);
+    }
   }
 }
 
