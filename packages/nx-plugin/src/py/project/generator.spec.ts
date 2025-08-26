@@ -153,4 +153,40 @@ describe('python project generator', () => {
     // Verify the metric was added to app.ts
     expectHasMetricTags(tree, PY_PROJECT_GENERATOR_INFO.metric);
   });
+
+  it('should set line-length to 120 in pyproject.toml', async () => {
+    await pyProjectGenerator(tree, {
+      name: 'test-project',
+      directory: 'apps',
+      projectType: 'application',
+    });
+
+    const pyprojectToml = parse(
+      tree.read('apps/test_project/pyproject.toml', 'utf-8'),
+    );
+
+    // Verify ruff line-length is set to 120
+    expect((pyprojectToml.tool as any)?.ruff?.['line-length']).toBe(120);
+  });
+
+  it('should configure lint target to depend on format target', async () => {
+    await pyProjectGenerator(tree, {
+      name: 'test-project',
+      directory: 'apps',
+      projectType: 'application',
+    });
+
+    const projectConfig = JSON.parse(
+      tree.read('apps/test_project/project.json', 'utf-8'),
+    );
+
+    // Verify lint target exists
+    expect(projectConfig.targets.lint).toBeDefined();
+
+    // Verify format target exists
+    expect(projectConfig.targets.format).toBeDefined();
+
+    // Verify lint target depends on format
+    expect(projectConfig.targets.lint.dependsOn).toContain('format');
+  });
 });

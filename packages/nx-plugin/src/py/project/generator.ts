@@ -30,6 +30,8 @@ import {
   getGeneratorInfo,
 } from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+import { updateToml } from '../../utils/toml';
+import { UVPyprojectToml } from '@nxlv/python/src/provider/uv/types';
 
 export const PY_PROJECT_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -161,6 +163,31 @@ export const pyProjectGenerator = async (
       outputPath,
     },
   };
+
+  // Set the default line length to 120, as 88 is a little too strict
+  updateToml(
+    tree,
+    joinPathFragments(dir, 'pyproject.toml'),
+    (pyProjectToml: UVPyprojectToml) => {
+      if ((pyProjectToml.tool as any)?.ruff) {
+        (pyProjectToml.tool as any).ruff['line-length'] = 120;
+      }
+      return pyProjectToml;
+    },
+  );
+
+  // Add a dependency on the format target for lint in order to reduce the number of
+  // fixable lint errors (eg line too long)
+  projectConfiguration.targets.lint = {
+    ...projectConfiguration.targets.lint,
+    dependsOn: [
+      ...(projectConfiguration.targets.lint?.dependsOn ?? []).filter(
+        (d) => d !== 'format',
+      ),
+      'format',
+    ],
+  };
+
   projectConfiguration.targets = sortObjectKeys(projectConfiguration.targets);
   updateProjectConfiguration(tree, fullyQualifiedName, projectConfiguration);
 
