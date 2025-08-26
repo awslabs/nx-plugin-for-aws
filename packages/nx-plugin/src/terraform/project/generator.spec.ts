@@ -288,7 +288,7 @@ describe('terraformProjectGenerator', () => {
       await terraformProjectGenerator(tree, schema);
 
       const nxJson = readNxJson(tree);
-      expect(nxJson.plugins).toEqual(['@nx-extend/terraform']);
+      expect(nxJson.plugins).toContain('@nx-extend/terraform');
     });
   });
 

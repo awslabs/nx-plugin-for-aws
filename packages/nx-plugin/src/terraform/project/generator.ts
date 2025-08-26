@@ -26,6 +26,8 @@ import {
 } from '../../utils/nx';
 import { updateGitIgnore } from '../../utils/git';
 import { withVersions } from '../../utils/versions';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 
 const NX_EXTEND_PLUGIN = '@nx-extend/terraform';
 export const TERRAFORM_PROJECT_GENERATOR_INFO: NxGeneratorInfo =
@@ -45,6 +47,12 @@ export async function terraformProjectGenerator(
   const distDir = join(outDirToRootRelativePath, 'dist', lib.dir);
   const tfDistDir = join(distDir, 'terraform');
   const checkovDistDir = join(distDir, 'checkov');
+
+  // Calculate relative path from current project to common/terraform/metrics
+  const metricsModulePath = relative(
+    join(tree.root, lib.dir, 'src'),
+    join(tree.root, 'packages', 'common', 'terraform', 'src', 'metrics'),
+  );
 
   updateGitIgnore(tree, '.', (patterns) => [...patterns, '.terraform']);
 
@@ -209,7 +217,9 @@ export async function terraformProjectGenerator(
     tree, // the virtual file system
     joinPathFragments(__dirname, `./files/${schema.type}`), // path to the file templates
     lib.dir, // destination path of the files
-    {},
+    {
+      metricsModulePath,
+    },
     {
       overwriteStrategy: OverwriteStrategy.Overwrite,
     },
@@ -228,10 +238,13 @@ export async function terraformProjectGenerator(
     updateNxJson(tree, nxJson);
   }
 
-  // TODO: TF Metrics
-  // await addGeneratorMetricsIfApplicable(tree, [
-  //   TERRAFORM_PROJECT_GENERATOR_INFO,
-  // ]);
+  // Ensure shared constructs for Terraform are created
+  await sharedConstructsGenerator(tree, { iacProvider: 'Terraform' });
+
+  // Add Terraform metrics
+  await addGeneratorMetricsIfApplicable(tree, [
+    TERRAFORM_PROJECT_GENERATOR_INFO,
+  ]);
 
   addDependenciesToPackageJson(
     tree,
