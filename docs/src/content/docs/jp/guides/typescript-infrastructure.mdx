@@ -11,15 +11,15 @@ import Link from '@components/link.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 
-[AWS CDK](https://docs.aws.amazon.com/cdk/v2/guide/home.html) はAWS CloudFormationを通じてクラウドインフラストラクチャをコードで定義しプロビジョニングするフレームワークです。
+[AWS CDK](https://docs.aws.amazon.com/cdk/v2/guide/home.html)はAWS CloudFormationを通じてクラウドインフラストラクチャをコードで定義するフレームワークです。
 
-TypeScriptインフラストラクチャジェネレータは、TypeScriptで記述されたAWS CDKインフラストラクチャアプリケーションを作成します。生成されたアプリケーションには[CFN Guard](https://docs.aws.amazon.com/cfn-guard/latest/ug/what-is-guard.html)チェックによるセキュリティベストプラクティスが含まれます。
+TypeScriptインフラストラクチャジェネレータは、TypeScriptで記述されたAWS CDKインフラストラクチャアプリケーションを作成します。生成されたアプリケーションには[CFN Guard](https://docs.aws.amazon.com/cfn-guard/latest/ug/what-is-guard.html)チェックによるセキュリティベストプラクティスが含まれています。
 
 ## 使用方法
 
 ### インフラストラクチャプロジェクトの生成
 
-新しいインフラストラクチャプロジェクトを2つの方法で生成できます:
+新しいインフラストラクチャプロジェクトは2つの方法で生成できます：
 
 <RunGenerator generator="ts#infra" />
 
@@ -29,12 +29,14 @@ TypeScriptインフラストラクチャジェネレータは、TypeScriptで記
 
 ## ジェネレータの出力
 
-ジェネレータは`<directory>/<name>`ディレクトリに以下のプロジェクト構造を作成します:
+ジェネレータは`<directory>/<name>`ディレクトリに以下のプロジェクト構造を作成します：
 
 <FileTree>
 
   - src
-    - main.ts デプロイするCDKスタックをインスタンス化するアプリケーションエントリポイント
+    - main.ts デプロイするCDKステージをインスタンス化するアプリケーションエントリポイント
+    - stages CDKステージ定義
+      - application-stage.ts ステージでデプロイするスタックの集合を定義
     - stacks CDKスタック定義
       - application-stack.ts メインアプリケーションスタック
   - cdk.json CDK設定ファイル
@@ -43,20 +45,20 @@ TypeScriptインフラストラクチャジェネレータは、TypeScriptで記
 </FileTree>
 
 :::tip
-インフラストラクチャはTypeScriptプロジェクトですので、一般的な使用方法の詳細については<Link path="guides/typescript-project">TypeScriptプロジェクトドキュメント</Link>を参照してください。
+インフラストラクチャはTypeScriptプロジェクトです。一般的な使用方法については<Link path="guides/typescript-project">TypeScriptプロジェクトドキュメント</Link>を参照してください。
 :::
 
 ## CDKインフラストラクチャの実装
 
-`src/stacks/application-stack.ts`内でCDKインフラストラクチャの記述を開始できます。例:
+`src/stacks/application-stack.ts`内でCDKインフラストラクチャの記述を開始できます。例：
 
 ```ts title="src/stacks/application-stack.ts" {9-10}
-import * as cdk from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Bucket } from 'aws-cdk-lib/aws-s3'
 import { Construct } from 'constructs';
 
-export class ApplicationStack extends cdk.Stack {
-  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
 
     // インフラストラクチャをここに記述
@@ -65,13 +67,69 @@ export class ApplicationStack extends cdk.Stack {
 }
 ```
 
+### ステージとスタック
+
+トップレベルの`src/main.ts`ファイルが`<namespace>-sandbox`という名前のCDK[ステージ](https://docs.aws.amazon.com/cdk/v2/guide/stages.html)をインスタンス化していることに気付くでしょう。このステージは開発とテスト用に設計されています。
+
+```ts title="src/main.ts"
+new ApplicationStage(app, 'project-sandbox', {
+  env: {
+    account: process.env.CDK_DEFAULT_ACCOUNT,
+    region: process.env.CDK_DEFAULT_REGION,
+  },
+});
+```
+
+`beta`や`prod`ステージを追加して別々の環境にデプロイすることも可能です：
+
+```ts title="src/main.ts"
+new ApplicationStage(app, 'project-beta', {
+  env: {
+    account: '123456789012', // betaアカウント
+    region: 'us-west-2',
+  },
+});
+new ApplicationStage(app, 'project-prod', {
+  env: {
+    account: '098765432109', // prodアカウント
+    region: 'us-west-2',
+  },
+});
+```
+
+ステージはアプリケーションを構成するスタックの集合を定義します。ステージ内で任意の数のスタックをインスタンス化できます：
+
+```ts title="src/stages/application-stage.ts"
+import { Stage, StageProps } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { BackendStack } from '../stacks/backend-stack.js';
+import { FrontendStack } from '../stacks/frontend-stack.js';
+
+/**
+ * アプリケーションを構成するCDKスタックの集合を定義
+ */
+export class ApplicationStage extends Stage {
+  constructor(scope: Construct, id: string, props?: StageProps) {
+    super(scope, id, props);
+
+    new BackendStack(this, 'Backend', {
+      crossRegionReferences: true,
+    })
+
+    new FrontendStack(this, 'Frontend', {
+      crossRegionReferences: true,
+    });
+  }
+}
+```
+
 ### APIインフラストラクチャ
 
 <Link path="guides/trpc">tRPC API</Link>または<Link path="guides/fastapi">FastAPI</Link>ジェネレータを使用してAPIを作成した場合、`packages/common/constructs`にデプロイ用のコンストラクトが既に存在します。
 
-例えば`my-api`というtRPC APIを作成した場合、コンストラクトをインポートしてインスタンス化するだけで必要なインフラストラクチャを追加できます:
+例えば`my-api`というtRPC APIを作成した場合、コンストラクトをインポートしてインスタンス化するだけで必要なインフラストラクチャを追加できます：
 
-```ts title="src/stacks/application-stack.ts" {3, 9-10}
+```ts title="src/stacks/application-stack.ts" {3, 9-12}
 import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { MyApi } from ':my-scope/common-constructs';
@@ -80,15 +138,17 @@ export class ApplicationStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
-    // API用インフラストラクチャを追加
-    new MyApi(this, 'MyApi');
+    // APIのインフラストラクチャを追加
+    new MyApi(this, 'MyApi', {
+      integrations: MyApi.defaultIntegrations(this).build(),
+    });
   }
 }
 ```
 
 ### ウェブサイトインフラストラクチャ
 
-<Link path="guides/react-website">CloudScapeウェブサイト</Link>ジェネレータを使用した場合、`packages/common/constructs`にデプロイ用のコンストラクトが存在します。例:
+<Link path="guides/react-website">CloudScapeウェブサイト</Link>ジェネレータを使用した場合、`packages/common/constructs`にデプロイ用のコンストラクトが存在します。例：
 
 ```ts title="src/stacks/application-stack.ts" {3, 9-10}
 import * as cdk from 'aws-cdk-lib';
@@ -99,19 +159,19 @@ export class ApplicationStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
-    // ウェブサイト用インフラストラクチャを追加
+    // ウェブサイトのインフラストラクチャを追加
     new MyWebsite(this, 'MyWebsite');
   }
 }
 ```
 
 :::warning
-ウェブサイトの<Link path="guides/react-website#runtime-configuration">ランタイム設定</Link>にすべてのAPI設定を含めるためには、APIコンストラクトの「後」にウェブサイトを宣言することが重要です。
+ウェブサイトの<Link path="guides/react-website#runtime-configuration">ランタイム設定</Link>にすべてのAPI設定を含めるためには、APIコンストラクトの*後*にウェブサイトを宣言することが重要です。
 :::
 
 ## インフラストラクチャの合成
 
-`build`ターゲットの一部として、<Link path="guides/typescript-project#building">デフォルトのコンパイル、リンター、テストターゲット</Link>を実行するのに加え、インフラストラクチャプロジェクトをCloudFormationに「合成」します。これは`synth`ターゲットを実行することで単独でも実行可能です:
+`build`ターゲットの一部として、<Link path="guides/typescript-project#building">デフォルトのコンパイル、リンター、テストターゲット</Link>に加え、インフラストラクチャプロジェクトをCloudFormationに合成します。`synth`ターゲットを実行することで単独でも実行可能です：
 
 <NxCommands commands={['run <my-infra>:synth']} />
 
@@ -123,7 +183,7 @@ export class ApplicationStack extends cdk.Stack {
 
 まず、[AWSアカウントの認証情報を設定](https://docs.aws.amazon.com/sdkref/latest/guide/access.html)してください。
 
-次に`cdk bootstrap`コマンドを使用します:
+次に`cdk bootstrap`コマンドを使用します：
 
 ```bash
 npx cdk bootstrap aws://<account-id>/<region>
@@ -141,24 +201,32 @@ CI/CDパイプラインでのデプロイには`deploy-ci`ターゲットを使�
 
 まず、[AWSアカウントの認証情報を設定](https://docs.aws.amazon.com/sdkref/latest/guide/access.html)してください。
 
-次にデプロイターゲットを実行します:
+次にデプロイターゲットを実行します：
 
-<NxCommands commands={['run <my-infra>:deploy --all']} />
+<NxCommands commands={['run <my-infra>:deploy <my-infra>-sandbox/*']} />
 
 :::tip
-上記コマンドは`main.ts`で定義された「すべて」のスタックをデプロイします。特にアプリケーションの複数ステージを設定している場合、個別のスタックを対象にしたい場合があります:
+上記コマンドは`<my-infra>-sandbox`ステージの全スタックをデプロイします。`main.ts`で定義されていれば他のステージも指定可能です。
 
-<NxCommands commands={['run <my-infra>:deploy my-sandbox-stack']} />
+完全なスタック名を指定することで個別のスタックをデプロイすることもできます：
+
+<NxCommands commands={['run <my-infra>:deploy <my-infra>-sandbox/Application']} />
 :::
 
 ## CI/CDパイプラインでのAWSデプロイ
 
-CI/CDパイプラインの一部としてAWSにデプロイする場合は`deploy-ci`ターゲットを使用してください。
+CI/CDパイプラインでAWSにデプロイする場合は`deploy-ci`ターゲットを使用します。
 
-<NxCommands commands={['run <my-infra>:deploy-ci my-stack']} />
+<NxCommands commands={['run <my-infra>:deploy-ci my-stage/*']} />
 
-このターゲットは通常の`deploy`ターゲットと異なり、事前に合成されたクラウドアセンブリを使用してデプロイします。これによりパッケージバージョンの変更による非決定性の問題を回避し、すべてのパイプラインステージで同じクラウドアセンブリを使用してデプロイできます。
+このターゲットは通常の`deploy`ターゲットと異なり、事前合成済みのクラウドアセンブリを使用します。これによりパッケージバージョンの変更による非決定性の問題を回避し、すべてのパイプラインステージで同一のクラウドアセンブリを使用してデプロイできます。
 
-## 追加情報
+## AWSリソースの削除
+
+`destroy`ターゲットを使用してリソースを削除します：
+
+<NxCommands commands={['run <my-infra>:destroy <my-infra>-sandbox/*']} />
+
+## 詳細情報
 
 CDKの詳細については[CDK開発者ガイド](https://docs.aws.amazon.com/cdk/v2/guide/core_concepts.html)と[APIリファレンス](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-construct-library.html)を参照してください。

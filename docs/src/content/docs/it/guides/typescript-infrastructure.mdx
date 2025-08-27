@@ -1,6 +1,6 @@
 ---
 title: "Infrastruttura CDK"
-description: "Documentazione di riferimento per l'Infrastruttura CDK"
+description: "Documentazione di riferimento per l'infrastruttura CDK"
 ---
 
 
@@ -11,13 +11,13 @@ import Link from '@components/link.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 
-[AWS CDK](https://docs.aws.amazon.com/cdk/v2/guide/home.html) è un framework per definire infrastrutture cloud tramite codice e provisionarle attraverso AWS CloudFormation.
+[AWS CDK](https://docs.aws.amazon.com/cdk/v2/guide/home.html) è un framework per definire l'infrastruttura cloud tramite codice e provisionarla attraverso AWS CloudFormation.
 
-Il generatore di infrastrutture TypeScript crea un'applicazione AWS CDK per l'infrastruttura scritta in TypeScript. L'applicazione generata include best practice di sicurezza tramite controlli [CFN Guard](https://docs.aws.amazon.com/cfn-guard/latest/ug/what-is-guard.html).
+Il generatore di infrastruttura TypeScript crea un'applicazione AWS CDK scritta in TypeScript. L'applicazione generata include best practice di sicurezza attraverso controlli [CFN Guard](https://docs.aws.amazon.com/cfn-guard/latest/ug/what-is-guard.html).
 
 ## Utilizzo
 
-### Generare un progetto di infrastruttura
+### Generare un Progetto di Infrastruttura
 
 Puoi generare un nuovo progetto di infrastruttura in due modi:
 
@@ -27,14 +27,16 @@ Puoi generare un nuovo progetto di infrastruttura in due modi:
 
 <GeneratorParameters generator="ts#infra" />
 
-## Output del generatore
+## Output del Generatore
 
 Il generatore creerà la seguente struttura del progetto nella directory `<directory>/<name>`:
 
 <FileTree>
 
   - src
-    - main.ts Punto d'ingresso dell'applicazione che istanzia gli stack CDK da distribuire
+    - main.ts Punto d'ingresso dell'applicazione che istanzia gli stage CDK da distribuire
+    - stages Definizioni degli stage CDK
+      - application-stage.ts Definisce una collezione di stack da distribuire in uno stage
     - stacks Definizioni degli stack CDK
       - application-stack.ts Stack applicativo principale
   - cdk.json Configurazione CDK
@@ -43,20 +45,20 @@ Il generatore creerà la seguente struttura del progetto nella directory `<direc
 </FileTree>
 
 :::tip
-La tua infrastruttura è un progetto TypeScript, quindi puoi consultare la <Link path="guides/typescript-project">documentazione dei progetti TypeScript</Link> per maggiori dettagli sull'utilizzo generale.
+La tua infrastruttura è un progetto TypeScript, quindi puoi consultare la <Link path="guides/typescript-project">documentazione sui progetti TypeScript</Link> per maggiori dettagli sull'utilizzo generale.
 :::
 
-## Implementare la tua infrastruttura CDK
+## Implementare la tua Infrastruttura CDK
 
 Puoi iniziare a scrivere la tua infrastruttura CDK all'interno di `src/stacks/application-stack.ts`, ad esempio:
 
 ```ts title="src/stacks/application-stack.ts" {9-10}
-import * as cdk from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Bucket } from 'aws-cdk-lib/aws-s3'
 import { Construct } from 'constructs';
 
-export class ApplicationStack extends cdk.Stack {
-  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
 
     // Dichiarare la propria infrastruttura qui
@@ -65,13 +67,69 @@ export class ApplicationStack extends cdk.Stack {
 }
 ```
 
+### Stage e Stack
+
+Noterai che il file principale `src/main.ts` istanzia uno [Stage](https://docs.aws.amazon.com/cdk/v2/guide/stages.html) CDK chiamato `<namespace>-sandbox`. Questo stage è pensato per il tuo sviluppo e testing personale.
+
+```ts title="src/main.ts"
+new ApplicationStage(app, 'project-sandbox', {
+  env: {
+    account: process.env.CDK_DEFAULT_ACCOUNT,
+    region: process.env.CDK_DEFAULT_REGION,
+  },
+});
+```
+
+Puoi aggiungere altri stage, ad esempio potresti voler definire stage `beta` e `prod` che distribuiscono in ambienti separati:
+
+```ts title="src/main.ts"
+new ApplicationStage(app, 'project-beta', {
+  env: {
+    account: '123456789012', // account beta
+    region: 'us-west-2',
+  },
+});
+new ApplicationStage(app, 'project-prod', {
+  env: {
+    account: '098765432109', // account prod
+    region: 'us-west-2',
+  },
+});
+```
+
+Uno Stage definisce una collezione di stack che dovrebbero essere distribuiti insieme per comporre la tua applicazione. Puoi istanziare quanti stack desideri all'interno di uno stage, ad esempio:
+
+```ts title="src/stages/application-stage.ts"
+import { Stage, StageProps } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { BackendStack } from '../stacks/backend-stack.js';
+import { FrontendStack } from '../stacks/frontend-stack.js';
+
+/**
+ * Definisce una collezione di stack CDK che compongono la tua applicazione
+ */
+export class ApplicationStage extends Stage {
+  constructor(scope: Construct, id: string, props?: StageProps) {
+    super(scope, id, props);
+
+    new BackendStack(this, 'Backend', {
+      crossRegionReferences: true,
+    })
+
+    new FrontendStack(this, 'Frontend', {
+      crossRegionReferences: true,
+    });
+  }
+}
+```
+
 ### Infrastruttura per API
 
-Se hai utilizzato i generatori <Link path="guides/trpc">tRPC API</Link> o <Link path="guides/fastapi">FastAPI</Link> per creare API, noterai che sono già disponibili alcuni costrutti in `packages/common/constructs` per distribuirle.
+Se hai utilizzato i generatori <Link path="guides/trpc">tRPC API</Link> o <Link path="guides/fastapi">FastAPI</Link> per creare API, noterai che hai già alcuni costrutti disponibili in `packages/common/constructs` per distribuirle.
 
-Ad esempio, se hai creato un'API tRPC chiamata `my-api`, puoi semplicemente importare e istanziare il costrutto per aggiungere tutta l'infrastruttura necessaria:
+Se, ad esempio, hai creato un'API tRPC chiamata `my-api`, puoi semplicemente importare e istanziare il costrutto per aggiungere tutta l'infrastruttura necessaria alla sua distribuzione:
 
-```ts title="src/stacks/application-stack.ts" {3, 9-10}
+```ts title="src/stacks/application-stack.ts" {3, 9-12}
 import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { MyApi } from ':my-scope/common-constructs';
@@ -81,14 +139,16 @@ export class ApplicationStack extends cdk.Stack {
     super(scope, id, props);
 
     // Aggiungi l'infrastruttura per la tua API
-    new MyApi(this, 'MyApi');
+    new MyApi(this, 'MyApi', {
+      integrations: MyApi.defaultIntegrations(this).build(),
+    });
   }
 }
 ```
 
-### Infrastruttura per siti web
+### Infrastruttura per Siti Web
 
-Se hai utilizzato il generatore <Link path="guides/react-website">sito web CloudScape</Link>, noterai che è già disponibile un costrutto in `packages/common/constructs` per distribuirlo. Esempio:
+Se hai utilizzato il generatore <Link path="guides/react-website">CloudScape website</Link>, noterai che hai già un costrutto in `packages/common/constructs` per distribuirlo. Ad esempio:
 
 ```ts title="src/stacks/application-stack.ts" {3, 9-10}
 import * as cdk from 'aws-cdk-lib';
@@ -106,24 +166,24 @@ export class ApplicationStack extends cdk.Stack {
 ```
 
 :::warning
-È importante assicurarsi che il sito web venga dichiarato _dopo_ eventuali costrutti API per includere tutte le configurazioni API nella <Link path="guides/react-website#runtime-configuration">Configurazione Runtime</Link> del sito web.
+È importante assicurarsi che il sito web sia dichiarato _dopo_ eventuali costrutti API affinché la <Link path="guides/react-website#runtime-configuration">Configurazione Runtime</Link> del sito includa tutte le configurazioni delle API.
 :::
 
-## Sintetizzare la tua infrastruttura
+## Sintetizzare la tua Infrastruttura
 
-Oltre agli <Link path="guides/typescript-project#building">obiettivi predefiniti di compilazione, lint e test</Link>, il target `build` della tua infrastruttura esegue la _sintesi_ in CloudFormation. Puoi eseguire questa operazione anche separatamente con il target `synth`:
+Come parte del target `build`, oltre ad eseguire i <Link path="guides/typescript-project#building">target predefiniti di compilazione, lint e test</Link>, il tuo progetto di infrastruttura viene _sintetizzato_ in CloudFormation. Questo può essere eseguito anche in modo autonomo, lanciando il target `synth`:
 
 <NxCommands commands={['run <my-infra>:synth']} />
 
-Troverai l'assembly cloud sintetizzato nella cartella `dist` principale, sotto `dist/packages/<my-infra-project>/cdk.out`.
+Troverai la tua cloud assembly sintetizzata nella cartella root `dist`, sotto `dist/packages/<my-infra-project>/cdk.out`.
 
-## Bootstrap del tuo account AWS
+## Bootstrap del tuo Account AWS
 
-Se stai distribuendo un'applicazione CDK in un account AWS per la prima volta, è necessario eseguire il bootstrap.
+Se stai distribuendo un'applicazione CDK in un account AWS per la prima volta, sarà necessario eseguire il bootstrap.
 
 Prima, assicurati di aver [configurato le credenziali per il tuo account AWS](https://docs.aws.amazon.com/sdkref/latest/guide/access.html).
 
-Poi, usa il comando `cdk bootstrap`:
+Successivamente, puoi usare il comando `cdk bootstrap`:
 
 ```bash
 npx cdk bootstrap aws://<account-id>/<region>
@@ -133,32 +193,40 @@ Per maggiori dettagli, consulta la [documentazione CDK](https://docs.aws.amazon.
 
 ## Distribuire su AWS
 
-Dopo una build, puoi distribuire l'infrastruttura su AWS con il target `deploy`.
+Dopo una build, puoi distribuire la tua infrastruttura su AWS usando il target `deploy`.
 
 :::caution
-Utilizza il target `deploy-ci` per distribuzioni in pipeline CI/CD. Vedi sotto per dettagli.
+Usa il target `deploy-ci` se distribuisci in una pipeline CI/CD. Vedi sotto per dettagli.
 :::
 
 Prima, assicurati di aver [configurato le credenziali per il tuo account AWS](https://docs.aws.amazon.com/sdkref/latest/guide/access.html).
 
-Poi, esegui il target deploy:
+Successivamente, esegui il target deploy:
 
-<NxCommands commands={['run <my-infra>:deploy --all']} />
+<NxCommands commands={['run <my-infra>:deploy <my-infra>-sandbox/*']} />
 
 :::tip
-Il comando sopra distribuisce _tutti_ gli stack definiti in `main.ts`. Potresti voler specificare uno stack singolo, specialmente se hai configurato più ambienti:
+Il comando sopra distribuisce _tutti_ gli stack per lo stage `<my-infra>-sandbox`. Puoi specificare altri stage purché siano definiti in `main.ts`.
 
-<NxCommands commands={['run <my-infra>:deploy my-sandbox-stack']} />
+Puoi anche distribuire singoli stack specificando il nome completo dello stack, ad esempio:
+
+<NxCommands commands={['run <my-infra>:deploy <my-infra>-sandbox/Application']} />
 :::
 
-## Distribuire su AWS in una pipeline CI/CD
+## Distribuire su AWS in una Pipeline CI/CD
 
-Utilizza il target `deploy-ci` per distribuzioni in pipeline CI/CD:
+Usa il target `deploy-ci` se stai distribuendo su AWS come parte di una pipeline CI/CD.
 
-<NxCommands commands={['run <my-infra>:deploy-ci my-stack']} />
+<NxCommands commands={['run <my-infra>:deploy-ci my-stage/*']} />
 
-Questo target differisce leggermente dal normale `deploy` perché utilizza l'assembly cloud pre-sintetizzato, evitando problemi di non-determinismo legati a versioni di pacchetti, garantendo che ogni fase della pipeline distribuisca lo stesso assembly.
+Questo target differisce leggermente dal normale target `deploy` in quanto garantisce la distribuzione di una cloud-assembly pre-sintetizzata, invece di sintetizzarla al volo. Questo aiuta a evitare potenziali problemi di non-determinismo dovuti a cambiamenti nelle versioni dei pacchetti, assicurando che ogni fase della pipeline distribuisca usando la stessa cloud-assembly.
 
-## Ulteriori informazioni
+## Rimuovere l'Infrastruttura AWS
 
-Per maggiori dettagli su CDK, consulta la [Guida per sviluppatori CDK](https://docs.aws.amazon.com/cdk/v2/guide/core_concepts.html) e il [Riferimento API](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-construct-library.html).
+Usa il target `destroy` per rimuovere le tue risorse:
+
+<NxCommands commands={['run <my-infra>:destroy <my-infra>-sandbox/*']} />
+
+## Ulteriori Informazioni
+
+Per maggiori informazioni su CDK, consulta la [Guida per Sviluppatori CDK](https://docs.aws.amazon.com/cdk/v2/guide/core_concepts.html) e il [Riferimento API](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-construct-library.html).
