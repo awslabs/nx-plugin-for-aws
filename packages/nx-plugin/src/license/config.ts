@@ -104,6 +104,8 @@ export const LANGUAGE_COMMENT_SYNTAX: { [ext: string]: CommentSyntax } = {
   psm1: { line: '#', block: { start: '<#', end: '#>' } },
   // Markdown
   md: { block: { start: '<!--', end: '-->' } },
+  // Terraform
+  tf: { line: '#', block: { start: '/*', end: '*/' } },
 };
 
 /**
@@ -144,7 +146,7 @@ export const defaultLicenseConfig = (
               lineEnd: ' *',
               blockEnd: ` ***${'*'.repeat(maxLen)}**/`,
             },
-            '**/*.{py,sh}': {
+            '**/*.{py,sh,tf}': {
               blockStart: `###${'#'.repeat(maxLen)}##`,
               lineStart: '#  ',
               lineEnd: ' #',
@@ -177,7 +179,7 @@ export const defaultLicenseConfig = (
               lineStart: ' * ',
               blockEnd: ' */',
             },
-            '**/*.{py,sh}': {
+            '**/*.{py,sh,tf}': {
               blockStart: '#',
               lineStart: '# ',
               blockEnd: '#',
