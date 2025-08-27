@@ -69,7 +69,7 @@ export async function tsInfraGenerator(
     {
       synthDir: synthDirFromProject,
       scopeAlias: scopeAlias,
-      namespace: kebabCase(npmScopePrefix),
+      namespace: kebabCase(fullyQualifiedName),
       fullyQualifiedName,
       pkgMgrCmd: getPackageManagerCommand().exec,
       ...schema,

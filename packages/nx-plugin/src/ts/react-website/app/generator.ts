@@ -96,7 +96,7 @@ export async function tsReactWebsiteGenerator(
       description: `Load runtime config from your deployed stack for dev purposes. You must set your AWS CLI credentials whilst calling 'pnpm exec nx run ${fullyQualifiedName}:load:runtime-config'`,
     },
     options: {
-      command: `aws s3 cp s3://\`aws cloudformation describe-stacks --query "Stacks[?StackName=='${kebabCase(npmScopePrefix)}-infra-sandbox'][].Outputs[?contains(OutputKey, 'WebsiteBucketName')].OutputValue" --output text\`/runtime-config.json './${websiteContentPath}/public/runtime-config.json'`,
+      command: `aws s3 cp s3://\`aws cloudformation describe-stacks --query "Stacks[?starts_with(StackName, '${kebabCase(npmScopePrefix)}-')][].Outputs[] | [?contains(OutputKey, '${websiteNameClassName}WebsiteBucketName')].OutputValue" --output text\`/runtime-config.json './${websiteContentPath}/public/runtime-config.json'`,
     },
   };
   const buildTarget = targets['build'];

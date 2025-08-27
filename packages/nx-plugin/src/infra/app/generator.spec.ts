@@ -32,6 +32,9 @@ describe('infra generator', () => {
     expect(
       tree.exists('packages/test/src/stacks/application-stack.ts'),
     ).toBeTruthy();
+    expect(
+      tree.exists('packages/test/src/stages/application-stage.ts'),
+    ).toBeTruthy();
     // Create snapshots of generated files
     expect(tree.read('packages/test/cdk.json').toString()).toMatchSnapshot(
       'cdk-json',
@@ -42,16 +45,9 @@ describe('infra generator', () => {
     expect(
       tree.read('packages/test/src/stacks/application-stack.ts').toString(),
     ).toMatchSnapshot('application-stack-ts');
-    // Snapshot the entire project structure
-    const projectFiles = {
-      'cdk.json': tree.read('packages/test/cdk.json').toString(),
-      'src/main.ts': tree.read('packages/test/src/main.ts').toString(),
-      'src/stacks/application-stack.ts': tree
-        .read('packages/test/src/stacks/application-stack.ts')
-        .toString(),
-      'project.json': tree.read('packages/test/project.json').toString(),
-    };
-    expect(projectFiles).toMatchSnapshot('project-structure');
+    expect(
+      tree.read('packages/test/src/stages/application-stage.ts').toString(),
+    ).toMatchSnapshot('application-stage-ts');
   });
 
   it('should configure project.json with correct targets', async () => {
@@ -145,21 +141,6 @@ describe('infra generator', () => {
     });
   });
 
-  it('should generate valid CDK application code', async () => {
-    await tsInfraGenerator(tree, options);
-    // Test main.ts content
-    const mainTs = tree.read('packages/test/src/main.ts').toString();
-    expect(mainTs).toMatchSnapshot('main-ts-content');
-    // Test application-stack.ts content
-    const stackTs = tree
-      .read('packages/test/src/stacks/application-stack.ts')
-      .toString();
-    expect(stackTs).toMatchSnapshot('stack-ts-content');
-    // Test cdk.json content
-    const cdkJson = JSON.parse(tree.read('packages/test/cdk.json').toString());
-    expect(cdkJson).toMatchSnapshot('cdk-json-content');
-  });
-
   it('should handle custom project names correctly', async () => {
     const customOptions: TsInfraGeneratorSchema = {
       name: 'custom-infra',
@@ -177,12 +158,18 @@ describe('infra generator', () => {
     expect(
       tree.exists('packages/custom-infra/src/stacks/application-stack.ts'),
     ).toBeTruthy();
+    expect(
+      tree.exists('packages/custom-infra/src/stages/application-stage.ts'),
+    ).toBeTruthy();
     // Snapshot files with custom name
     const customFiles = {
       'cdk.json': tree.read('packages/custom-infra/cdk.json').toString(),
       'src/main.ts': tree.read('packages/custom-infra/src/main.ts').toString(),
       'src/stacks/application-stack.ts': tree
         .read('packages/custom-infra/src/stacks/application-stack.ts')
+        .toString(),
+      'src/stages/application-stage.ts': tree
+        .read('packages/custom-infra/src/stages/application-stage.ts')
         .toString(),
     };
     expect(customFiles).toMatchSnapshot('custom-name-files');
@@ -197,6 +184,9 @@ describe('infra generator', () => {
       'src/stacks/application-stack.ts': tree
         .read('packages/test/src/stacks/application-stack.ts')
         .toString(),
+      'src/stages/application-stage.ts': tree
+        .read('packages/test/src/stages/application-stage.ts')
+        .toString(),
     };
     // Reset tree and run again
     tree = createTreeUsingTsSolutionSetup();
@@ -206,6 +196,9 @@ describe('infra generator', () => {
       'src/main.ts': tree.read('packages/test/src/main.ts').toString(),
       'src/stacks/application-stack.ts': tree
         .read('packages/test/src/stacks/application-stack.ts')
+        .toString(),
+      'src/stages/application-stage.ts': tree
+        .read('packages/test/src/stages/application-stage.ts')
         .toString(),
     };
     // Compare runs

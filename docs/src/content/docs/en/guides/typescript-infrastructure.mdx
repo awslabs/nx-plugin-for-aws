@@ -31,7 +31,9 @@ The generator will create the following project structure in the `<directory>/<n
 <FileTree>
 
   - src
-    - main.ts Application entry point instantiating CDK stacks to deploy
+    - main.ts Application entry point instantiating CDK stages to deploy
+    - stages CDK Stage definitions
+      - application-stage.ts Defines a collection of stacks to deploy in a stage
     - stacks CDK Stack definitions
       - application-stack.ts Main application stack
   - cdk.json CDK configuration
@@ -48,16 +50,72 @@ Your infrastructure is a TypeScript project, so you can refer to the <Link path=
 You can start writing your CDK infrastructure inside `src/stacks/application-stack.ts`, for example:
 
 ```ts title="src/stacks/application-stack.ts" {9-10}
-import * as cdk from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Bucket } from 'aws-cdk-lib/aws-s3'
 import { Construct } from 'constructs';
 
-export class ApplicationStack extends cdk.Stack {
-  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
 
     // Declare your infrastructure here
     new Bucket(this, 'MyBucket');
+  }
+}
+```
+
+### Stages and Stacks
+
+You will notice that the top level `src/main.ts` file instantiates a CDK [Stage](https://docs.aws.amazon.com/cdk/v2/guide/stages.html) named `<namespace>-sandbox`. This stage is intended for your own development and testing.
+
+```ts title="src/main.ts"
+new ApplicationStage(app, 'project-sandbox', {
+  env: {
+    account: process.env.CDK_DEFAULT_ACCOUNT,
+    region: process.env.CDK_DEFAULT_REGION,
+  },
+});
+```
+
+You can add more stages, for example you may wish to define `beta` and `prod` stages which deploy to separate environments:
+
+```ts title="src/main.ts"
+new ApplicationStage(app, 'project-beta', {
+  env: {
+    account: '123456789012', // beta account
+    region: 'us-west-2',
+  },
+});
+new ApplicationStage(app, 'project-prod', {
+  env: {
+    account: '098765432109', // prod account
+    region: 'us-west-2',
+  },
+});
+```
+
+A Stage defines a collection of stacks that should be deployed together to make up your application. You can instantiate as many stacks as you like within a stage, for example:
+
+```ts title="src/stages/application-stage.ts"
+import { Stage, StageProps } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { BackendStack } from '../stacks/backend-stack.js';
+import { FrontendStack } from '../stacks/frontend-stack.js';
+
+/**
+ * Defines a collection of CDK Stacks which make up your application
+ */
+export class ApplicationStage extends Stage {
+  constructor(scope: Construct, id: string, props?: StageProps) {
+    super(scope, id, props);
+
+    new BackendStack(this, 'Backend', {
+      crossRegionReferences: true,
+    })
+
+    new FrontendStack(this, 'Frontend', {
+      crossRegionReferences: true,
+    });
   }
 }
 ```
@@ -68,7 +126,7 @@ If you have used the <Link path="guides/trpc">tRPC API</Link> or <Link path="gui
 
 If, for example, you created a tRPC API called `my-api`, you can simply import and instantiate the construct to add all necessary infrastructure to deploy it:
 
-```ts title="src/stacks/application-stack.ts" {3, 9-10}
+```ts title="src/stacks/application-stack.ts" {3, 9-12}
 import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { MyApi } from ':my-scope/common-constructs';
@@ -78,7 +136,9 @@ export class ApplicationStack extends cdk.Stack {
     super(scope, id, props);
 
     // Add infrastructure for your API
-    new MyApi(this, 'MyApi');
+    new MyApi(this, 'MyApi', {
+      integrations: MyApi.defaultIntegrations(this).build(),
+    });
   }
 }
 ```
@@ -140,21 +200,29 @@ First, ensure that you have [configured credentials for your AWS account](https:
 
 Next, run the deploy target:
 
-<NxCommands commands={['run <my-infra>:deploy --all']} />
+<NxCommands commands={['run <my-infra>:deploy <my-infra>-sandbox/*']} />
 
 :::tip
-The above command deploys _all_ stacks defined in `main.ts`. You may wish to target an individual stack, especially if you have configured multiple stages of an application for example:
+The above command deploys _all_ stacks for the `<my-infra>-sandbox` stage. You can specify other stages so long as they are defined in `main.ts`.
 
-<NxCommands commands={['run <my-infra>:deploy my-sandbox-stack']} />
+You can also deploy individual stacks by specifying the full stack name, for example:
+
+<NxCommands commands={['run <my-infra>:deploy <my-infra>-sandbox/Application']} />
 :::
 
 ## Deploying to AWS in a CI/CD Pipeline
 
 Use the `deploy-ci` target if you are deploying to AWS as part of a CI/CD pipeline.
 
-<NxCommands commands={['run <my-infra>:deploy-ci my-stack']} />
+<NxCommands commands={['run <my-infra>:deploy-ci my-stage/*']} />
 
 This target differs slightly from the regular `deploy` target in that it ensures pre-synthesized cloud-assembly is deployed, rather than synthesizing on the fly. This helps to avoid potential issues with non-determinism due to changes package versions, ensuring that every pipeline stage deploys using the same cloud-assembly.
+
+## Tearing Down AWS Infrastructure
+
+Use the `destroy` target to tear down your resources:
+
+<NxCommands commands={['run <my-infra>:destroy <my-infra>-sandbox/*']} />
 
 ## More Information
 
