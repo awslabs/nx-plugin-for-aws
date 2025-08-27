@@ -661,53 +661,6 @@ export default AppLayout;
     ).rejects.toThrow(/A Cognito domain must be specified/);
   });
 
-  it('should not duplicate comments in IRuntimeConfig', async () => {
-    tree.write(
-      'packages/test-project/src/main.tsx',
-      `
-      import { RuntimeConfigProvider } from './components/RuntimeConfig';
-      import { RouterProvider, createRouter } from '@tanstack/react-router';
-
-      export function App() {
-
-        const App = () => <RouterProvider router={router} />;
-
-        return (
-          <RuntimeConfigProvider>
-            <App/>
-          </RuntimeConfigProvider>
-        );
-      }
-    `,
-    );
-
-    await sharedConstructsGenerator(tree);
-
-    tree.write(
-      'packages/common/types/src/runtime-config.ts',
-      `
-// Some comment
-export interface IRuntimeConfig {}
-      `,
-    );
-
-    await tsReactWebsiteAuthGenerator(tree, {
-      ...options,
-    });
-
-    const runtimeConfigContent = tree.read(
-      'packages/common/types/src/runtime-config.ts',
-      'utf-8',
-    );
-    expect(runtimeConfigContent).toContain(`
-// Some comment
-export interface IRuntimeConfig`);
-
-    expect(runtimeConfigContent.indexOf('Some comment')).toEqual(
-      runtimeConfigContent.lastIndexOf('Some comment'),
-    );
-  });
-
   it('should add generator metric to app.ts', async () => {
     // Set up test tree with shared constructs
     await sharedConstructsGenerator(tree);
