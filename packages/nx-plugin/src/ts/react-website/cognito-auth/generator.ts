@@ -12,7 +12,6 @@ import {
 } from '@nx/devkit';
 import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
 import {
-  TYPE_DEFINITIONS_DIR,
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
 } from '../../../utils/shared-constructs-constants';
@@ -27,7 +26,6 @@ import {
   NodeFlags,
   SyntaxKind,
   VariableDeclaration,
-  InterfaceDeclaration,
 } from 'typescript';
 import { withVersions } from '../../../utils/versions';
 import {
@@ -37,8 +35,6 @@ import {
   addDestructuredImport,
   replace,
   addSingleImport,
-  prependStatements,
-  query,
 } from '../../../utils/ast';
 import { formatFilesInSubtree } from '../../../utils/format';
 import {
@@ -77,90 +73,6 @@ export async function tsReactWebsiteAuthGenerator(
   });
 
   await sharedConstructsGenerator(tree);
-  // Add ICognitoProps interface and update IRuntimeConfig
-  const runtimeConfigPath = joinPathFragments(
-    PACKAGES_DIR,
-    TYPE_DEFINITIONS_DIR,
-    'src',
-    'runtime-config.ts',
-  );
-  // Check if ICognitoProps interface exists
-  const existingCognitoProps = query(
-    tree,
-    runtimeConfigPath,
-    'InterfaceDeclaration[name.text="ICognitoProps"]',
-  );
-  // Check if cognitoProps property exists in IRuntimeConfig
-  const existingCognitoPropsInConfig = query(
-    tree,
-    runtimeConfigPath,
-    'InterfaceDeclaration[name.text="IRuntimeConfig"] PropertySignature[name.text="cognitoProps"]',
-  );
-
-  // Add ICognitoProps interface if it doesn't exist
-  if (existingCognitoProps.length === 0) {
-    const cognitoPropsInterface = factory.createInterfaceDeclaration(
-      [factory.createModifier(SyntaxKind.ExportKeyword)],
-      factory.createIdentifier('ICognitoProps'),
-      undefined,
-      undefined,
-      [
-        factory.createPropertySignature(
-          undefined,
-          factory.createIdentifier('region'),
-          undefined,
-          factory.createKeywordTypeNode(SyntaxKind.StringKeyword),
-        ),
-        factory.createPropertySignature(
-          undefined,
-          factory.createIdentifier('identityPoolId'),
-          undefined,
-          factory.createKeywordTypeNode(SyntaxKind.StringKeyword),
-        ),
-        factory.createPropertySignature(
-          undefined,
-          factory.createIdentifier('userPoolId'),
-          undefined,
-          factory.createKeywordTypeNode(SyntaxKind.StringKeyword),
-        ),
-        factory.createPropertySignature(
-          undefined,
-          factory.createIdentifier('userPoolWebClientId'),
-          undefined,
-          factory.createKeywordTypeNode(SyntaxKind.StringKeyword),
-        ),
-      ],
-    );
-
-    prependStatements(tree, runtimeConfigPath, [cognitoPropsInterface]);
-  }
-
-  // Add cognitoProps to IRuntimeConfig if it doesn't exist
-  if (existingCognitoPropsInConfig.length === 0) {
-    replace(
-      tree,
-      runtimeConfigPath,
-      'InterfaceDeclaration[name.text="IRuntimeConfig"]',
-      (node: InterfaceDeclaration) => {
-        return factory.updateInterfaceDeclaration(
-          node,
-          node.modifiers,
-          node.name,
-          node.typeParameters,
-          node.heritageClauses,
-          [
-            ...node.members,
-            factory.createPropertySignature(
-              undefined,
-              factory.createIdentifier('cognitoProps'),
-              undefined,
-              factory.createTypeReferenceNode('ICognitoProps', undefined),
-            ),
-          ],
-        );
-      },
-    );
-  }
 
   const identityPath = joinPathFragments(
     PACKAGES_DIR,

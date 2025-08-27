@@ -9,17 +9,10 @@ import {
   Tree,
 } from '@nx/devkit';
 import {
-  factory,
-  SyntaxKind,
-  InterfaceDeclaration,
-  TypeLiteralNode,
-} from 'typescript';
-import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
-  TYPE_DEFINITIONS_DIR,
 } from '../shared-constructs-constants';
-import { addStarExport, prependStatements, query, replace } from '../ast';
+import { addStarExport } from '../ast';
 
 interface BackendOptions {
   type: 'trpc' | 'fastapi';
@@ -118,85 +111,4 @@ export const addApiGatewayConstruct = (
     ),
     './apis/index.js',
   );
-
-  // Update runtime-config.ts with ApiUrl type and 'apis' property
-  const runtimeConfigPath = joinPathFragments(
-    PACKAGES_DIR,
-    TYPE_DEFINITIONS_DIR,
-    'src',
-    'runtime-config.ts',
-  );
-
-  // Check if ApiUrl type exists
-  const existingApiUrl = query(
-    tree,
-    runtimeConfigPath,
-    'TypeAliasDeclaration[name.text="ApiUrl"]',
-  );
-  // Check if apis property exists in IRuntimeConfig
-  const existingApis = query(
-    tree,
-    runtimeConfigPath,
-    'InterfaceDeclaration[name.text="IRuntimeConfig"] PropertySignature[name.text="apis"]',
-  );
-
-  // Add ApiUrl type if it doesn't exist
-  if (existingApiUrl.length === 0) {
-    const apiUrlType = factory.createTypeAliasDeclaration(
-      [factory.createModifier(SyntaxKind.ExportKeyword)],
-      factory.createIdentifier('ApiUrl'),
-      undefined,
-      factory.createKeywordTypeNode(SyntaxKind.StringKeyword),
-    );
-    prependStatements(tree, runtimeConfigPath, [apiUrlType]);
-  }
-  // Add empty apis to IRuntimeConfig if it doesn't exist
-  if (existingApis.length === 0) {
-    replace(
-      tree,
-      runtimeConfigPath,
-      'InterfaceDeclaration[name.text="IRuntimeConfig"]',
-      (node: InterfaceDeclaration) => {
-        const apisProperty = factory.createPropertySignature(
-          undefined,
-          factory.createIdentifier('apis'),
-          undefined,
-          factory.createTypeLiteralNode([]),
-        );
-        return factory.updateInterfaceDeclaration(
-          node,
-          node.modifiers,
-          node.name,
-          node.typeParameters,
-          node.heritageClauses,
-          [...node.members, apisProperty],
-        );
-      },
-    );
-  }
-  // Check if apiNameClassName property exists in apis
-  const existingApiNameProperty = query(
-    tree,
-    runtimeConfigPath,
-    `InterfaceDeclaration[name.text="IRuntimeConfig"] PropertySignature[name.text="apis"] TypeLiteral PropertySignature[name.text="${options.apiNameClassName}"]`,
-  );
-  // Add apiNameClassName property to apis if it doesn't exist
-  if (existingApiNameProperty.length === 0) {
-    replace(
-      tree,
-      runtimeConfigPath,
-      'InterfaceDeclaration[name.text="IRuntimeConfig"] PropertySignature[name.text="apis"] TypeLiteral',
-      (node: TypeLiteralNode) => {
-        return factory.createTypeLiteralNode([
-          ...node.members,
-          factory.createPropertySignature(
-            undefined,
-            factory.createIdentifier(options.apiNameClassName),
-            undefined,
-            factory.createTypeReferenceNode('ApiUrl', undefined),
-          ),
-        ]);
-      },
-    );
-  }
 };

@@ -17,8 +17,6 @@ import { withVersions } from './versions';
 import { formatFilesInSubtree } from './format';
 import {
   PACKAGES_DIR,
-  TYPE_DEFINITIONS_DIR,
-  TYPE_DEFINITIONS_NAME,
   SHARED_CONSTRUCTS_DIR,
   SHARED_CONSTRUCTS_NAME,
 } from './shared-constructs-constants';
@@ -37,43 +35,6 @@ export async function sharedConstructsGenerator(
   updateGitignore(tree);
 
   if (iacProvider === 'CDK') {
-    if (
-      !tree.exists(
-        joinPathFragments(PACKAGES_DIR, TYPE_DEFINITIONS_DIR, 'project.json'),
-      )
-    ) {
-      await tsProjectGenerator(tree, {
-        name: TYPE_DEFINITIONS_NAME,
-        directory: PACKAGES_DIR,
-        subDirectory: TYPE_DEFINITIONS_DIR,
-      });
-      tree.delete(joinPathFragments(PACKAGES_DIR, TYPE_DEFINITIONS_DIR, 'src'));
-      generateFiles(
-        tree,
-        joinPathFragments(__dirname, 'files', TYPE_DEFINITIONS_DIR, 'src'),
-        joinPathFragments(PACKAGES_DIR, TYPE_DEFINITIONS_DIR, 'src'),
-        {
-          npmScopePrefix,
-        },
-        {
-          overwriteStrategy: OverwriteStrategy.KeepExisting,
-        },
-      );
-      generateFiles(
-        tree,
-        joinPathFragments(__dirname, 'files', 'common', 'readme'),
-        joinPathFragments(PACKAGES_DIR, TYPE_DEFINITIONS_DIR),
-        {
-          fullyQualifiedName: `${npmScopePrefix}${TYPE_DEFINITIONS_NAME}`,
-          name: TYPE_DEFINITIONS_NAME,
-          pkgMgrCmd: getPackageManagerCommand().exec,
-        },
-        {
-          overwriteStrategy: OverwriteStrategy.Overwrite,
-        },
-      );
-      await formatFilesInSubtree(tree);
-    }
     if (
       !tree.exists(
         joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'project.json'),
