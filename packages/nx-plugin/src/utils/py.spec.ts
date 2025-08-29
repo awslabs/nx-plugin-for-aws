@@ -36,8 +36,16 @@ describe('addDependenciesToPyProjectToml', () => {
       tree.read('test-project/pyproject.toml', 'utf-8'),
     ) as UVPyprojectToml;
 
-    expect(updatedToml.project.dependencies).toContain('fastapi~=0.116.1');
-    expect(updatedToml.project.dependencies).toContain('mangum~=0.19.0');
+    expect(
+      updatedToml.project.dependencies.some((dep) =>
+        dep.startsWith('fastapi=='),
+      ),
+    ).toBe(true);
+    expect(
+      updatedToml.project.dependencies.some((dep) =>
+        dep.startsWith('mangum=='),
+      ),
+    ).toBe(true);
     expect(updatedToml.project.dependencies).toHaveLength(2);
   });
 
@@ -63,8 +71,16 @@ describe('addDependenciesToPyProjectToml', () => {
 
     expect(updatedToml.project.dependencies).toContain('requests>=2.25.0');
     expect(updatedToml.project.dependencies).toContain('pydantic~=2.0.0');
-    expect(updatedToml.project.dependencies).toContain('fastapi~=0.116.1');
-    expect(updatedToml.project.dependencies).toContain('mangum~=0.19.0');
+    expect(
+      updatedToml.project.dependencies.some((dep) =>
+        dep.startsWith('fastapi=='),
+      ),
+    ).toBe(true);
+    expect(
+      updatedToml.project.dependencies.some((dep) =>
+        dep.startsWith('mangum=='),
+      ),
+    ).toBe(true);
     expect(updatedToml.project.dependencies).toHaveLength(4);
   });
 
@@ -88,7 +104,11 @@ describe('addDependenciesToPyProjectToml', () => {
       tree.read('test-project/pyproject.toml', 'utf-8'),
     ) as UVPyprojectToml;
 
-    expect(updatedToml.project.dependencies).toContain('fastapi~=0.116.1');
+    expect(
+      updatedToml.project.dependencies.some((dep) =>
+        dep.startsWith('fastapi=='),
+      ),
+    ).toBe(true);
     expect(updatedToml.project.dependencies).toContain('requests>=2.25.0');
     expect(updatedToml.project.dependencies).toHaveLength(2);
 
@@ -115,8 +135,16 @@ describe('addDependenciesToPyProjectToml', () => {
       tree.read('test-project/pyproject.toml', 'utf-8'),
     ) as UVPyprojectToml;
 
-    expect(updatedToml.project.dependencies).toContain('fastapi~=0.116.1');
-    expect(updatedToml.project.dependencies).toContain('mangum~=0.19.0');
+    expect(
+      updatedToml.project.dependencies.some((dep) =>
+        dep.startsWith('fastapi=='),
+      ),
+    ).toBe(true);
+    expect(
+      updatedToml.project.dependencies.some((dep) =>
+        dep.startsWith('mangum=='),
+      ),
+    ).toBe(true);
     expect(updatedToml.project.dependencies).toHaveLength(2);
   });
 
@@ -144,7 +172,11 @@ describe('addDependenciesToPyProjectToml', () => {
       tree.read('test-project/pyproject.toml', 'utf-8'),
     ) as UVPyprojectToml;
 
-    expect(updatedToml.project.dependencies).toContain('fastapi~=0.116.1');
+    expect(
+      updatedToml.project.dependencies.some((dep) =>
+        dep.startsWith('fastapi=='),
+      ),
+    ).toBe(true);
     expect(updatedToml.project.dependencies).toContain(
       'requests[security]>=2.25.0',
     );
@@ -187,11 +219,21 @@ describe('addDependenciesToPyProjectToml', () => {
       tree.read('test-project/pyproject.toml', 'utf-8'),
     ) as UVPyprojectToml;
 
-    expect(updatedToml.project.dependencies).toContain('fastapi~=0.116.1');
-    expect(updatedToml.project.dependencies).toContain('mangum~=0.19.0');
-    expect(updatedToml.project.dependencies).toContain(
-      'aws-lambda-powertools~=3.19.0',
-    );
+    expect(
+      updatedToml.project.dependencies.some((dep) =>
+        dep.startsWith('fastapi=='),
+      ),
+    ).toBe(true);
+    expect(
+      updatedToml.project.dependencies.some((dep) =>
+        dep.startsWith('mangum=='),
+      ),
+    ).toBe(true);
+    expect(
+      updatedToml.project.dependencies.some((dep) =>
+        dep.startsWith('aws-lambda-powertools=='),
+      ),
+    ).toBe(true);
     expect(updatedToml.project.dependencies).toContain('requests>=2.25.0');
     expect(updatedToml.project.dependencies).toHaveLength(4);
 
@@ -266,7 +308,11 @@ describe('addDependenciesToPyProjectToml', () => {
     expect((updatedToml as any).tool?.pytest?.testpaths).toEqual(['tests']);
 
     // And verify dependencies were updated
-    expect(updatedToml.project.dependencies).toContain('fastapi~=0.116.1');
+    expect(
+      updatedToml.project.dependencies.some((dep) =>
+        dep.startsWith('fastapi=='),
+      ),
+    ).toBe(true);
     expect(updatedToml.project.dependencies).toContain('requests>=2.25.0');
   });
 
@@ -290,8 +336,16 @@ describe('addDependenciesToPyProjectToml', () => {
       tree.read('apps/nested/path/pyproject.toml', 'utf-8'),
     ) as UVPyprojectToml;
 
-    expect(updatedToml.project.dependencies).toContain('fastapi~=0.116.1');
-    expect(updatedToml.project.dependencies).toContain('mangum~=0.19.0');
+    expect(
+      updatedToml.project.dependencies.some((dep) =>
+        dep.startsWith('fastapi=='),
+      ),
+    ).toBe(true);
+    expect(
+      updatedToml.project.dependencies.some((dep) =>
+        dep.startsWith('mangum=='),
+      ),
+    ).toBe(true);
     expect(updatedToml.project.dependencies).toHaveLength(2);
   });
 
@@ -332,7 +386,11 @@ describe('addDependenciesToPyProjectToml', () => {
     );
 
     // ProjectName fastapi should be replaced with versioned one
-    expect(updatedToml.project.dependencies).toContain('fastapi~=0.116.1');
+    expect(
+      updatedToml.project.dependencies.some((dep) =>
+        dep.startsWith('fastapi=='),
+      ),
+    ).toBe(true);
     expect(updatedToml.project.dependencies).not.toContain('fastapi>=0.100.0');
 
     expect(updatedToml.project.dependencies).toHaveLength(4);

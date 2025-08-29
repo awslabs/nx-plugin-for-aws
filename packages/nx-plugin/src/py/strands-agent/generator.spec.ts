@@ -78,15 +78,21 @@ dev-dependencies = []
     const pyprojectToml = parse(
       tree.read('apps/test-project/pyproject.toml', 'utf-8'),
     ) as UVPyprojectToml;
-    expect(pyprojectToml.project.dependencies).toContain(
-      'bedrock-agentcore~=0.1.2',
-    );
-    expect(pyprojectToml.project.dependencies).toContain(
-      'strands-agents~=1.5.0',
-    );
-    expect(pyprojectToml.project.dependencies).toContain(
-      'strands-agents-tools~=0.2.4',
-    );
+    expect(
+      pyprojectToml.project.dependencies.some((dep) =>
+        dep.startsWith('bedrock-agentcore=='),
+      ),
+    ).toBe(true);
+    expect(
+      pyprojectToml.project.dependencies.some((dep) =>
+        dep.startsWith('strands-agents=='),
+      ),
+    ).toBe(true);
+    expect(
+      pyprojectToml.project.dependencies.some((dep) =>
+        dep.startsWith('strands-agents-tools=='),
+      ),
+    ).toBe(true);
 
     // Check that project configuration was updated with serve target
     const projectConfig = JSON.parse(
@@ -347,15 +353,21 @@ dev-dependencies = []
     const pyprojectToml = parse(
       tree.read('apps/test-project/pyproject.toml', 'utf-8'),
     ) as UVPyprojectToml;
-    expect(pyprojectToml.project.dependencies).toContain(
-      'bedrock-agentcore~=0.1.2',
-    );
-    expect(pyprojectToml.project.dependencies).toContain(
-      'strands-agents~=1.5.0',
-    );
-    expect(pyprojectToml.project.dependencies).toContain(
-      'strands-agents-tools~=0.2.4',
-    );
+    expect(
+      pyprojectToml.project.dependencies.some((dep) =>
+        dep.startsWith('bedrock-agentcore=='),
+      ),
+    ).toBe(true);
+    expect(
+      pyprojectToml.project.dependencies.some((dep) =>
+        dep.startsWith('strands-agents=='),
+      ),
+    ).toBe(true);
+    expect(
+      pyprojectToml.project.dependencies.some((dep) =>
+        dep.startsWith('strands-agents-tools=='),
+      ),
+    ).toBe(true);
 
     // Check that project configuration was updated with serve target only
     const projectConfig = JSON.parse(

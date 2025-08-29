@@ -59,7 +59,7 @@ describe('versions utils', () => {
       const deps: (keyof typeof TS_VERSIONS)[] = ['aws-cdk-lib'];
       const result = withVersions(deps);
       expect(result['aws-cdk-lib']).toBe(TS_VERSIONS['aws-cdk-lib']);
-      expect(result['aws-cdk-lib']).toMatch(/^\^/); // Should preserve caret
+      expect(result['aws-cdk-lib']).toMatch(/^\d+\.\d+\.\d+$/); // Should be exact version
     });
   });
 });
