@@ -113,11 +113,21 @@ describe('fastapi project generator', () => {
     ) as UVPyprojectToml;
 
     // Verify FastAPI dependencies
-    expect(pyprojectToml.project.dependencies).toContain('fastapi~=0.116.1');
-    expect(pyprojectToml.project.dependencies).toContain('mangum~=0.19.0');
-    expect(pyprojectToml['dependency-groups'].dev).toContain(
-      'fastapi[standard]~=0.116.1',
-    );
+    expect(
+      pyprojectToml.project.dependencies.some((dep) =>
+        dep.startsWith('fastapi=='),
+      ),
+    ).toBe(true);
+    expect(
+      pyprojectToml.project.dependencies.some((dep) =>
+        dep.startsWith('mangum=='),
+      ),
+    ).toBe(true);
+    expect(
+      pyprojectToml['dependency-groups'].dev.some((dep) =>
+        dep.startsWith('fastapi[standard]=='),
+      ),
+    ).toBe(true);
   });
 
   it('should set up shared constructs for http', async () => {

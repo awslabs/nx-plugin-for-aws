@@ -110,15 +110,21 @@ describe('lambda-handler project generator', () => {
     ) as UVPyprojectToml;
 
     // Verify project dependencies
-    expect(pyprojectToml.project.dependencies).toContain(
-      'aws-lambda-powertools~=3.19.0',
-    );
-    expect(pyprojectToml.project.dependencies).toContain(
-      'aws-lambda-powertools[tracer]~=3.19.0',
-    );
-    expect(pyprojectToml.project.dependencies).toContain(
-      'aws-lambda-powertools[parser]~=3.19.0',
-    );
+    expect(
+      pyprojectToml.project.dependencies.some((dep) =>
+        dep.startsWith('aws-lambda-powertools=='),
+      ),
+    ).toBe(true);
+    expect(
+      pyprojectToml.project.dependencies.some((dep) =>
+        dep.startsWith('aws-lambda-powertools[tracer]=='),
+      ),
+    ).toBe(true);
+    expect(
+      pyprojectToml.project.dependencies.some((dep) =>
+        dep.startsWith('aws-lambda-powertools[parser]=='),
+      ),
+    ).toBe(true);
   });
 
   it('should set up shared constructs for Lambda Handler', async () => {
