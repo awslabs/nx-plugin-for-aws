@@ -13,4 +13,5 @@ export interface TsMcpServerGeneratorSchema {
   project: string;
   name?: string;
   computeType?: TsMcpServerComputeType;
+  iacProvider: 'CDK' | 'Terraform';
 }

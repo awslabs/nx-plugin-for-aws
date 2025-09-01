@@ -23,7 +23,7 @@ import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { formatFilesInSubtree } from '../../utils/format';
 import { kebabCase, toSnakeCase, toClassName } from '../../utils/names';
 import { addDependenciesToPyProjectToml } from '../../utils/py';
-import { addAgentConstruct } from '../../utils/agent-core-constructs/agent-core-constructs';
+import { addAgentInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
 import { addPythonBundleTarget } from '../../utils/bundle';
 import { getNpmScope } from '../../utils/npm-scope';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
@@ -169,10 +169,12 @@ export const pyStrandsAgentGenerator = async (
     );
 
     // Add the construct to deploy the agent
-    addAgentConstruct(tree, {
+    addAgentInfra(tree, {
       agentNameKebabCase: name,
       agentNameClassName,
       dockerImageTag,
+      iacProvider: options.iacProvider,
+      projectName: project.name,
     });
   } else {
     // No Dockerfile needed for non-hosted Agent

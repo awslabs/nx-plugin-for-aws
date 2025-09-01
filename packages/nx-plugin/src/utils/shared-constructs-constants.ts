@@ -6,3 +6,4 @@
 export const PACKAGES_DIR = 'packages';
 export const SHARED_CONSTRUCTS_NAME = 'common-constructs';
 export const SHARED_CONSTRUCTS_DIR = 'common/constructs';
+export const SHARED_TERRAFORM_DIR = 'common/terraform';

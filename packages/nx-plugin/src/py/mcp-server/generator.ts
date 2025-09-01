@@ -25,7 +25,7 @@ import { formatFilesInSubtree } from '../../utils/format';
 import { kebabCase, toClassName, toSnakeCase } from '../../utils/names';
 import { addDependenciesToPyProjectToml } from '../../utils/py';
 import { getNpmScope } from '../../utils/npm-scope';
-import { addMcpServerConstruct } from '../../utils/agent-core-constructs/agent-core-constructs';
+import { addMcpServerInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import {
   PACKAGES_DIR,
@@ -168,10 +168,12 @@ export const pyMcpServerGenerator = async (
     );
 
     // Add the construct to deploy the mcp server
-    addMcpServerConstruct(tree, {
+    addMcpServerInfra(tree, {
       mcpServerNameKebabCase: name,
       mcpServerNameClassName,
+      projectName: project.name,
       dockerImageTag,
+      iacProvider: options.iacProvider,
     });
   } else {
     // No Dockerfile needed for non-hosted MCP

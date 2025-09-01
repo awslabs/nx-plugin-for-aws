@@ -27,7 +27,7 @@ import { formatFilesInSubtree } from '../../utils/format';
 import { withVersions } from '../../utils/versions';
 import { kebabCase, toClassName } from '../../utils/names';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
-import { addMcpServerConstruct } from '../../utils/agent-core-constructs/agent-core-constructs';
+import { addMcpServerInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
@@ -151,10 +151,12 @@ export const tsMcpServerGenerator = async (
     );
 
     // Add the construct to deploy the mcp server
-    addMcpServerConstruct(tree, {
+    addMcpServerInfra(tree, {
       mcpServerNameKebabCase: name,
       mcpServerNameClassName: toClassName(name),
+      projectName: project.name,
       dockerImageTag,
+      iacProvider: options.iacProvider,
     });
 
     // Add additional dependencies

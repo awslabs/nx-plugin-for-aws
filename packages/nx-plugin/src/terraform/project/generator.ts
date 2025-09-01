@@ -39,6 +39,9 @@ export async function terraformProjectGenerator(
 ): Promise<GeneratorCallback> {
   // Just use getTsLibDetails as it isn't specific to TS
   const lib = getTsLibDetails(tree, schema);
+  const { fullyQualifiedName: sharedTfProjectName } = getTsLibDetails(tree, {
+    name: 'terraform',
+  });
 
   const outDirToRootRelativePath = relative(
     join(tree.root, lib.dir, 'src'),
@@ -95,6 +98,9 @@ export async function terraformProjectGenerator(
         cwd: '{projectRoot}/bootstrap',
       },
     },
+    build: {
+      dependsOn: ['fmt', 'test', 'validate', `${sharedTfProjectName}:build`],
+    },
     destroy: {
       executor: 'nx:run-commands',
       defaultConfiguration: 'dev',
@@ -145,13 +151,16 @@ export async function terraformProjectGenerator(
         forwardAllArgs: true,
         cwd: '{projectRoot}/src',
       },
-      dependsOn: ['init'],
+      dependsOn: ['init', 'build'],
     },
   };
 
   const libTargets: {
     [targetName: string]: TargetConfiguration;
   } = {
+    build: {
+      dependsOn: ['fmt', 'test', 'validate'],
+    },
     fmt: {
       executor: 'nx:run-commands',
       cache: true,
