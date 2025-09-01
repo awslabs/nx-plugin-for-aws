@@ -199,6 +199,8 @@ resource "aws_iam_role_policy" "lambda_additional_policies" {
 # CloudWatch Log Group for Lambda
 resource "aws_cloudwatch_log_group" "lambda_logs" {
   #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
+  #checkov:skip=CKV_AWS_338:Log retention set to forever
+  #checkov:skip=CKV_AWS_66:Log retention set to forever
   name              = "/aws/lambda/<%- apiNameClassName %>Handler"
   tags              = var.tags
 }
@@ -247,6 +249,8 @@ resource "aws_api_gateway_method" "proxy_method" {
   authorization = "COGNITO_USER_POOLS"
   authorizer_id = aws_api_gateway_authorizer.cognito_authorizer.id
   <%_ } else if (auth === 'None') { _%>
+  # Note: you may wish to suppress the checkov rule CKV_AWS_59 if you are absolutely sure you
+  # need a public API without authentication
   authorization = "NONE"
   <%_ } _%>
 
@@ -254,7 +258,7 @@ resource "aws_api_gateway_method" "proxy_method" {
     "method.request.path.proxy" = true
   }
 
-  depends_on = [<% if (auth === 'Cognito') { %>aws_apigatewayv2_authorizer.cognito_authorizer<% } %>]
+  depends_on = [<% if (auth === 'Cognito') { %>aws_api_gateway_authorizer.cognito_authorizer<% } %>]
 }
 
 # OPTIONS method for CORS preflight
@@ -358,6 +362,7 @@ resource "aws_api_gateway_rest_api_policy" "api_policy" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
+      <%_ if (auth === 'IAM') { _%>
       {
         # Grant any AWS credentials from the account to call the API
         # Machine to machine fine-grained access can be defined here using more specific principals
@@ -376,6 +381,15 @@ resource "aws_api_gateway_rest_api_policy" "api_policy" {
         Action   = "execute-api:Invoke"
         Resource = "execute-api:/*/OPTIONS/*"
       }
+      <%_ } else { _%>
+      {
+        # Allow all callers to invoke the API in the resource policy<% if (auth === 'Cognito') { %>, since auth is handled by Cognito<% } %>
+        Effect = "Allow"
+        Principal = "*"
+        Action   = "execute-api:Invoke"
+        Resource = "execute-api:/*"
+      }
+      <%_ } _%>
     ]
   })
 }
