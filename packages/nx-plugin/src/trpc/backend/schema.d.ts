@@ -9,4 +9,5 @@ export interface TsTrpcApiGeneratorSchema {
   computeType: 'ServerlessApiGatewayRestApi' | 'ServerlessApiGatewayHttpApi';
   auth: 'IAM' | 'Cognito' | 'None';
   directory?: TsLibGeneratorSchema['directory'];
+  iacProvider: 'CDK' | 'Terraform';
 }

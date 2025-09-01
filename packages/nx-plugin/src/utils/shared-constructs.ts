@@ -19,6 +19,8 @@ import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
   SHARED_CONSTRUCTS_NAME,
+  SHARED_TERRAFORM_DIR,
+  SHARED_TERRAFORM_NAME,
 } from './shared-constructs-constants';
 import { readAwsNxPluginConfig } from './config/utils';
 
@@ -87,12 +89,11 @@ export async function sharedConstructsGenerator(
   if (iacProvider === 'Terraform') {
     const terraformLibPath = joinPathFragments(
       PACKAGES_DIR,
-      'common',
-      'terraform',
+      SHARED_TERRAFORM_DIR,
     );
     if (!tree.exists(joinPathFragments(terraformLibPath, 'project.json'))) {
       await terraformProjectGenerator(tree, {
-        name: 'terraform',
+        name: SHARED_TERRAFORM_NAME,
         directory: joinPathFragments(PACKAGES_DIR, 'common'),
         type: 'library',
       });

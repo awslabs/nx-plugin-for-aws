@@ -23,6 +23,7 @@ describe('trpc backend generator', () => {
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
       auth: 'IAM',
+      iacProvider: 'CDK',
     });
 
     // Verify project structure
@@ -43,6 +44,7 @@ describe('trpc backend generator', () => {
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
       auth: 'IAM',
+      iacProvider: 'CDK',
     });
     const backendProjectConfig = JSON.parse(
       tree.read('apps/test-api/project.json', 'utf-8'),
@@ -63,6 +65,7 @@ describe('trpc backend generator', () => {
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
       auth: 'IAM',
+      iacProvider: 'CDK',
     });
     const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
     // Verify dependencies were added
@@ -89,6 +92,7 @@ describe('trpc backend generator', () => {
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
       auth: 'IAM',
+      iacProvider: 'CDK',
     });
     // Verify shared constructs setup
     expect(
@@ -131,6 +135,7 @@ describe('trpc backend generator', () => {
       directory: 'apps',
       computeType: 'ServerlessApiGatewayRestApi',
       auth: 'IAM',
+      iacProvider: 'CDK',
     });
     // Verify shared constructs setup
     expect(
@@ -173,6 +178,7 @@ describe('trpc backend generator', () => {
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
       auth: 'IAM',
+      iacProvider: 'CDK',
     });
     const projectConfig = readProjectConfiguration(tree, '@proj/test-api');
     expect(projectConfig.targets).toHaveProperty('serve');
@@ -188,6 +194,7 @@ describe('trpc backend generator', () => {
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
       auth: 'IAM',
+      iacProvider: 'CDK',
     });
 
     const devDeps = readJson(tree, 'package.json').devDependencies;
@@ -207,6 +214,7 @@ describe('trpc backend generator', () => {
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
       auth: 'IAM',
+      iacProvider: 'CDK',
     });
 
     // Verify the metric was added to app.ts
@@ -219,6 +227,7 @@ describe('trpc backend generator', () => {
       directory: 'apps',
       computeType: 'ServerlessApiGatewayRestApi',
       auth: 'IAM',
+      iacProvider: 'CDK',
     });
 
     // Read the generated router.ts file
@@ -236,6 +245,7 @@ describe('trpc backend generator', () => {
       directory: 'apps',
       computeType: 'ServerlessApiGatewayRestApi',
       auth: 'Cognito',
+      iacProvider: 'CDK',
     });
     snapshotTreeDir(tree, 'apps/test-api/src/client');
     snapshotTreeDir(tree, 'packages/common/constructs/src/app/apis');
@@ -251,6 +261,7 @@ describe('trpc backend generator', () => {
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
       auth: 'Cognito',
+      iacProvider: 'CDK',
     });
     snapshotTreeDir(tree, 'apps/test-api/src/client');
     snapshotTreeDir(tree, 'packages/common/constructs/src/app/apis');
@@ -266,6 +277,7 @@ describe('trpc backend generator', () => {
       directory: 'apps',
       computeType: 'ServerlessApiGatewayRestApi',
       auth: 'None',
+      iacProvider: 'CDK',
     });
     snapshotTreeDir(tree, 'apps/test-api/src/client');
     snapshotTreeDir(tree, 'packages/common/constructs/src/app/apis');
@@ -281,6 +293,7 @@ describe('trpc backend generator', () => {
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
       auth: 'None',
+      iacProvider: 'CDK',
     });
     snapshotTreeDir(tree, 'apps/test-api/src/client');
     snapshotTreeDir(tree, 'packages/common/constructs/src/app/apis');
@@ -297,6 +310,7 @@ describe('trpc backend generator', () => {
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
       auth: 'IAM',
+      iacProvider: 'CDK',
     });
 
     // Generate second API
@@ -305,6 +319,7 @@ describe('trpc backend generator', () => {
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
       auth: 'IAM',
+      iacProvider: 'CDK',
     });
 
     // Generate third API
@@ -313,6 +328,7 @@ describe('trpc backend generator', () => {
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
       auth: 'IAM',
+      iacProvider: 'CDK',
     });
 
     // Check metadata ports

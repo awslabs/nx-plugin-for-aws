@@ -309,6 +309,7 @@ describe('trpc react generator with real react and trpc projects', () => {
       name: 'TestApi',
       auth: 'None',
       computeType: 'ServerlessApiGatewayHttpApi',
+      iacProvider: 'CDK',
     });
 
     await reactGenerator(tree, {
@@ -348,6 +349,7 @@ describe('trpc react generator with real react and trpc projects', () => {
       name: 'FirstApi',
       auth: 'None',
       computeType: 'ServerlessApiGatewayHttpApi',
+      iacProvider: 'CDK',
     });
 
     // Generate second API
@@ -355,6 +357,7 @@ describe('trpc react generator with real react and trpc projects', () => {
       name: 'SecondApi',
       auth: 'None',
       computeType: 'ServerlessApiGatewayHttpApi',
+      iacProvider: 'CDK',
     });
 
     // Connect first API to frontend

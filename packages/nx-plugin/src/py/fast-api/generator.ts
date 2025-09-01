@@ -34,7 +34,7 @@ import {
   getGeneratorInfo,
 } from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { addApiGatewayConstruct } from '../../utils/api-constructs/api-constructs';
+import { addApiGatewayInfra } from '../../utils/api-constructs/api-constructs';
 import { addOpenApiGeneration } from './react/open-api';
 import { updateGitIgnore } from '../../utils/git';
 import { assignPort } from '../../utils/port';
@@ -52,7 +52,9 @@ export const pyFastApiProjectGenerator = async (
   tree: Tree,
   schema: PyFastApiProjectGeneratorSchema,
 ): Promise<GeneratorCallback> => {
-  await sharedConstructsGenerator(tree);
+  await sharedConstructsGenerator(tree, {
+    iacProvider: schema.iacProvider,
+  });
 
   const { dir, normalizedModuleName, fullyQualifiedName } = getPyProjectDetails(
     tree,
@@ -119,7 +121,8 @@ export const pyFastApiProjectGenerator = async (
   );
 
   // Add the CDK construct to deploy the FastAPI to shared constructs
-  addApiGatewayConstruct(tree, {
+  addApiGatewayInfra(tree, {
+    apiProjectName: projectConfig.name,
     apiNameClassName,
     apiNameKebabCase,
     constructType:
@@ -130,70 +133,80 @@ export const pyFastApiProjectGenerator = async (
       moduleName: normalizedModuleName,
     },
     auth: schema.auth,
+    iacProvider: schema.iacProvider,
   });
 
-  const generatedMetadataDir = joinPathFragments('generated', apiNameKebabCase);
-  const generatedMetadataDirFromRoot = joinPathFragments(
-    joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR),
-    'src',
-    generatedMetadataDir,
-  );
+  // For Terraform, we do not support type-safe integration builders, rather only the single lambda
+  // router pattern, and therefore do not need to add depenencies on metadata generation.
+  if (schema.iacProvider === 'CDK') {
+    const generatedMetadataDir = joinPathFragments(
+      'generated',
+      apiNameKebabCase,
+    );
+    const generatedMetadataDirFromRoot = joinPathFragments(
+      joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR),
+      'src',
+      generatedMetadataDir,
+    );
 
-  updateJson(
-    tree,
-    joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'project.json'),
-    (config: ProjectConfiguration) => {
-      if (!config.targets) {
-        config.targets = {};
-      }
-      if (!config.targets.build) {
-        config.targets.build = {};
-      }
-      // If not already defined, add a target to generate metadata from the OpenAPI spec, used
-      // for providing a type-safe CDK construct
-      const metadataTargetName = `generate:${apiNameKebabCase}-metadata`;
-      if (!config.targets[metadataTargetName]) {
-        config.targets[metadataTargetName] = {
-          cache: true,
-          executor: 'nx:run-commands',
-          inputs: [
-            {
-              dependentTasksOutputFiles: '**/*.json',
-            },
-          ],
-          outputs: [
-            joinPathFragments('{workspaceRoot}', generatedMetadataDirFromRoot),
-          ],
-          options: {
-            commands: [
-              `nx g @aws/nx-plugin:open-api#ts-metadata --openApiSpecPath="${specPath}" --outputPath="${generatedMetadataDirFromRoot}" --no-interactive`,
+    updateJson(
+      tree,
+      joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'project.json'),
+      (config: ProjectConfiguration) => {
+        if (!config.targets) {
+          config.targets = {};
+        }
+        if (!config.targets.build) {
+          config.targets.build = {};
+        }
+        // If not already defined, add a target to generate metadata from the OpenAPI spec, used
+        // for providing a type-safe CDK construct
+        const metadataTargetName = `generate:${apiNameKebabCase}-metadata`;
+        if (!config.targets[metadataTargetName]) {
+          config.targets[metadataTargetName] = {
+            cache: true,
+            executor: 'nx:run-commands',
+            inputs: [
+              {
+                dependentTasksOutputFiles: '**/*.json',
+              },
             ],
-          },
-          dependsOn: [`${projectConfig.name}:openapi`],
-        };
-      }
-      config.targets.build.dependsOn = [
-        ...(config.targets.build.dependsOn ?? []),
-        `${fullyQualifiedName}:build`,
-      ];
-      if (!config.targets.compile) {
-        config.targets.compile = {};
-      }
-      config.targets.compile.dependsOn = [
-        ...(config.targets.compile.dependsOn ?? []),
-        metadataTargetName,
-      ];
-      return config;
-    },
-  );
+            outputs: [
+              joinPathFragments(
+                '{workspaceRoot}',
+                generatedMetadataDirFromRoot,
+              ),
+            ],
+            options: {
+              commands: [
+                `nx g @aws/nx-plugin:open-api#ts-metadata --openApiSpecPath="${specPath}" --outputPath="${generatedMetadataDirFromRoot}" --no-interactive`,
+              ],
+            },
+            dependsOn: [`${projectConfig.name}:openapi`],
+          };
+        }
+        if (!config.targets.compile) {
+          config.targets.compile = {};
+        }
+        config.targets.compile.dependsOn = [
+          ...(config.targets.compile.dependsOn ?? []),
+          metadataTargetName,
+        ];
+        return config;
+      },
+    );
 
-  // Ignore the generated metadata by default
-  // Users can safely remove the entry from the .gitignore if they prefer to check it in
-  updateGitIgnore(
-    tree,
-    joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR),
-    (patterns) => [...patterns, joinPathFragments('src', generatedMetadataDir)],
-  );
+    // Ignore the generated metadata by default
+    // Users can safely remove the entry from the .gitignore if they prefer to check it in
+    updateGitIgnore(
+      tree,
+      joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR),
+      (patterns) => [
+        ...patterns,
+        joinPathFragments('src', generatedMetadataDir),
+      ],
+    );
+  }
 
   addDependenciesToPyProjectToml(tree, dir, [
     'fastapi',

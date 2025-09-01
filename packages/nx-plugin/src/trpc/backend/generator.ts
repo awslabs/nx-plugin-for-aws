@@ -9,17 +9,11 @@ import {
   installPackagesTask,
   joinPathFragments,
   OverwriteStrategy,
-  ProjectConfiguration,
   Tree,
-  updateJson,
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { TsTrpcApiGeneratorSchema } from './schema';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
-import {
-  PACKAGES_DIR,
-  SHARED_CONSTRUCTS_DIR,
-} from '../../utils/shared-constructs-constants';
 import tsProjectGenerator from '../../ts/lib/generator';
 import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
 import { withVersions } from '../../utils/versions';
@@ -33,7 +27,7 @@ import {
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { addApiGatewayConstruct } from '../../utils/api-constructs/api-constructs';
+import { addApiGatewayInfra } from '../../utils/api-constructs/api-constructs';
 import { assignPort } from '../../utils/port';
 
 export const TRPC_BACKEND_GENERATOR_INFO: NxGeneratorInfo =
@@ -43,7 +37,9 @@ export async function tsTrpcApiGenerator(
   tree: Tree,
   options: TsTrpcApiGeneratorSchema,
 ) {
-  await sharedConstructsGenerator(tree);
+  await sharedConstructsGenerator(tree, {
+    iacProvider: options.iacProvider,
+  });
 
   const apiNamespace = getNpmScopePrefix(tree);
   const apiNameKebabCase = kebabCase(options.name);
@@ -77,7 +73,8 @@ export async function tsTrpcApiGenerator(
     ...options,
   };
 
-  addApiGatewayConstruct(tree, {
+  addApiGatewayInfra(tree, {
+    apiProjectName: backendProjectName,
     apiNameClassName,
     apiNameKebabCase,
     constructType:
@@ -88,6 +85,7 @@ export async function tsTrpcApiGenerator(
       dir: backendRoot,
     },
     auth: options.auth,
+    iacProvider: options.iacProvider,
   });
 
   projectConfig.metadata = {
@@ -122,24 +120,6 @@ export async function tsTrpcApiGenerator(
   projectConfig.targets = sortObjectKeys(projectConfig.targets);
 
   updateProjectConfiguration(tree, projectConfig.name, projectConfig);
-
-  updateJson(
-    tree,
-    joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'project.json'),
-    (config: ProjectConfiguration) => {
-      if (!config.targets) {
-        config.targets = {};
-      }
-      if (!config.targets.build) {
-        config.targets.build = {};
-      }
-      config.targets.build.dependsOn = [
-        ...(config.targets.build.dependsOn ?? []),
-        `${backendProjectName}:build`,
-      ];
-      return config;
-    },
-  );
 
   generateFiles(
     tree,

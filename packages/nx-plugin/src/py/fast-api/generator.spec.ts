@@ -31,6 +31,7 @@ describe('fastapi project generator', () => {
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
       auth: 'IAM',
+      iacProvider: 'CDK',
     });
 
     // Verify project structure
@@ -51,6 +52,7 @@ describe('fastapi project generator', () => {
       computeType: 'ServerlessApiGatewayHttpApi',
       auth: 'IAM',
       moduleName: 'my_module',
+      iacProvider: 'CDK',
     });
 
     // Verify project structure
@@ -65,6 +67,7 @@ describe('fastapi project generator', () => {
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
       auth: 'IAM',
+      iacProvider: 'CDK',
     });
 
     const projectConfig = JSON.parse(
@@ -106,6 +109,7 @@ describe('fastapi project generator', () => {
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
       auth: 'IAM',
+      iacProvider: 'CDK',
     });
 
     const pyprojectToml = parse(
@@ -136,6 +140,7 @@ describe('fastapi project generator', () => {
       directory: 'apps/nested/path',
       computeType: 'ServerlessApiGatewayHttpApi',
       auth: 'IAM',
+      iacProvider: 'CDK',
     });
 
     // Verify shared constructs setup
@@ -181,6 +186,7 @@ describe('fastapi project generator', () => {
       directory: 'apps/nested/path',
       computeType: 'ServerlessApiGatewayRestApi',
       auth: 'IAM',
+      iacProvider: 'CDK',
     });
 
     // Verify shared constructs setup
@@ -226,6 +232,7 @@ describe('fastapi project generator', () => {
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
       auth: 'IAM',
+      iacProvider: 'CDK',
     });
 
     const sharedConstructsConfig = JSON.parse(
@@ -249,6 +256,7 @@ describe('fastapi project generator', () => {
       directory: 'apps/nested/path',
       computeType: 'ServerlessApiGatewayHttpApi',
       auth: 'IAM',
+      iacProvider: 'CDK',
     });
 
     expect(tree.exists('apps/nested/path/test_api')).toBeTruthy();
@@ -263,6 +271,7 @@ describe('fastapi project generator', () => {
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
       auth: 'IAM',
+      iacProvider: 'CDK',
     });
 
     const config = JSON.parse(tree.read('apps/test_api/project.json', 'utf-8'));
@@ -282,6 +291,7 @@ describe('fastapi project generator', () => {
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
       auth: 'IAM',
+      iacProvider: 'CDK',
     });
 
     const appChanges = sortObjectKeys(
@@ -304,6 +314,7 @@ describe('fastapi project generator', () => {
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
       auth: 'IAM',
+      iacProvider: 'CDK',
     });
 
     // Verify the metric was added to app.ts
@@ -318,6 +329,7 @@ describe('fastapi project generator', () => {
         directory: 'apps',
         computeType: `ServerlessApiGateway${api}Api`,
         auth: 'IAM',
+        iacProvider: 'CDK',
       });
 
       // Read the generated init.py file
@@ -343,6 +355,7 @@ describe('fastapi project generator', () => {
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
       auth: 'IAM',
+      iacProvider: 'CDK',
     });
 
     // Generate second API
@@ -351,6 +364,7 @@ describe('fastapi project generator', () => {
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
       auth: 'IAM',
+      iacProvider: 'CDK',
     });
 
     // Generate third API
@@ -359,6 +373,7 @@ describe('fastapi project generator', () => {
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
       auth: 'IAM',
+      iacProvider: 'CDK',
     });
 
     // Check metadata ports
