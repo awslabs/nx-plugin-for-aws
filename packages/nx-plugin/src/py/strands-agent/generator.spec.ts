@@ -58,6 +58,7 @@ dev-dependencies = []
   it('should add strands agent to existing Python project with default name', async () => {
     await pyStrandsAgentGenerator(tree, {
       project: 'test-project',
+      iacProvider: 'CDK',
     });
 
     // Check that agent files were added to the existing project
@@ -112,6 +113,7 @@ dev-dependencies = []
     await pyStrandsAgentGenerator(tree, {
       project: 'test-project',
       name: 'custom-agent',
+      iacProvider: 'CDK',
     });
 
     // Check that agent files were added with custom name
@@ -146,6 +148,7 @@ dev-dependencies = []
     await pyStrandsAgentGenerator(tree, {
       project: 'test-project',
       name: 'My_Special#Agent!',
+      iacProvider: 'CDK',
     });
 
     // Name should be converted to snake_case for Python modules
@@ -171,6 +174,7 @@ dev-dependencies = []
     await expect(
       pyStrandsAgentGenerator(tree, {
         project: 'non-py-project',
+        iacProvider: 'CDK',
       }),
     ).rejects.toThrow();
   });
@@ -192,6 +196,7 @@ dev-dependencies = []
     await expect(
       pyStrandsAgentGenerator(tree, {
         project: 'no-source-root',
+        iacProvider: 'CDK',
       }),
     ).rejects.toThrow(
       'This project does not have a source root. Please add a source root to the project configuration before running this generator.',
@@ -222,6 +227,7 @@ dev-dependencies = []
 
     await pyStrandsAgentGenerator(tree, {
       project: 'proj.nested-project',
+      iacProvider: 'CDK',
     });
 
     // Should use the last part of the project name for default agent name
@@ -239,6 +245,7 @@ dev-dependencies = []
     await pyStrandsAgentGenerator(tree, {
       project: 'test-project',
       computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
     });
 
     // Check that agent files were added to the existing project
@@ -291,6 +298,7 @@ dev-dependencies = []
       project: 'test-project',
       name: 'custom-bedrock-agent',
       computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
     });
 
     // Check that agent files were added with custom name
@@ -331,6 +339,7 @@ dev-dependencies = []
     await pyStrandsAgentGenerator(tree, {
       project: 'test-project',
       computeType: 'None',
+      iacProvider: 'CDK',
     });
 
     // Check that agent files were added to the existing project
@@ -384,6 +393,7 @@ dev-dependencies = []
     await pyStrandsAgentGenerator(tree, {
       project: 'test-project',
       computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
     });
 
     // Verify shared constructs setup
@@ -414,6 +424,7 @@ dev-dependencies = []
     await pyStrandsAgentGenerator(tree, {
       project: 'test-project',
       computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
     });
 
     const sharedConstructsConfig = JSON.parse(
@@ -438,6 +449,7 @@ dev-dependencies = []
       project: 'test-project',
       name: 'my-agent',
       computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
     });
 
     // Check that the docker image tag is correctly generated in the agent construct
@@ -452,6 +464,7 @@ dev-dependencies = []
     await pyStrandsAgentGenerator(tree, {
       project: 'test-project',
       computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
     });
 
     const projectConfig = JSON.parse(
@@ -500,6 +513,7 @@ dev-dependencies = []
     await pyStrandsAgentGenerator(tree, {
       project: 'complex-project',
       computeType: 'None',
+      iacProvider: 'CDK',
     });
 
     // Check that the module name is extracted correctly from the source root
@@ -515,6 +529,7 @@ dev-dependencies = []
     await pyStrandsAgentGenerator(tree, {
       project: 'test-project',
       computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
     });
 
     const projectConfig = JSON.parse(
@@ -541,6 +556,7 @@ dev-dependencies = []
       project: 'test-project',
       name: 'snapshot-agent',
       computeType: 'None',
+      iacProvider: 'CDK',
     });
 
     // Snapshot the generated agent files
@@ -574,6 +590,7 @@ dev-dependencies = []
       project: 'test-project',
       name: 'snapshot-bedrock-agent',
       computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
     });
 
     // Snapshot the generated agent-core runtime construct
@@ -620,10 +637,11 @@ dev-dependencies = []
   });
 
   it('should add generator metric to app.ts', async () => {
-    await sharedConstructsGenerator(tree);
+    await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
 
     await pyStrandsAgentGenerator(tree, {
       project: 'test-project',
+      iacProvider: 'CDK',
     });
 
     expectHasMetricTags(tree, PY_STRANDS_AGENT_GENERATOR_INFO.metric);
@@ -633,6 +651,7 @@ dev-dependencies = []
     await pyStrandsAgentGenerator(tree, {
       project: 'test-project',
       // No computeType specified, should default to BedrockAgentCoreRuntime
+      iacProvider: 'CDK',
     });
 
     // Should include Dockerfile by default
@@ -678,6 +697,7 @@ dev-dependencies = []
     await pyStrandsAgentGenerator(tree, {
       project: 'my.dotted.project',
       computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
     });
 
     const projectConfig = JSON.parse(

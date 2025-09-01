@@ -45,6 +45,7 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       computeType: 'None',
+      iacProvider: 'CDK',
     });
 
     // Check that MCP server files were added to the existing project
@@ -109,6 +110,7 @@ describe('ts#mcp-server generator', () => {
       project: 'test-project',
       name: 'custom-server',
       computeType: 'None',
+      iacProvider: 'CDK',
     });
 
     // Check that MCP server files were added with custom name
@@ -157,6 +159,7 @@ describe('ts#mcp-server generator', () => {
       project: 'test-project',
       name: 'esm-server',
       computeType: 'None',
+      iacProvider: 'CDK',
     });
 
     // Check that files were generated (ESM flag should be passed to templates)
@@ -178,6 +181,7 @@ describe('ts#mcp-server generator', () => {
       project: 'test-project',
       name: 'cjs-server',
       computeType: 'None',
+      iacProvider: 'CDK',
     });
 
     // Check that files were generated
@@ -202,6 +206,7 @@ describe('ts#mcp-server generator', () => {
       project: 'test-project',
       name: 'new-server',
       computeType: 'None',
+      iacProvider: 'CDK',
     });
 
     // Check that package.json was created
@@ -219,6 +224,7 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       computeType: 'None',
+      iacProvider: 'CDK',
     });
 
     // Check root package.json dependencies
@@ -272,6 +278,7 @@ describe('ts#mcp-server generator', () => {
       project: 'no-source-root',
       name: 'default-src-server',
       computeType: 'None',
+      iacProvider: 'CDK',
     });
 
     // Should default to {projectRoot}/src
@@ -285,6 +292,7 @@ describe('ts#mcp-server generator', () => {
       project: 'test-project',
       name: 'My_Special#Server!',
       computeType: 'None',
+      iacProvider: 'CDK',
     });
 
     // Name should be converted to kebab-case
@@ -309,6 +317,7 @@ describe('ts#mcp-server generator', () => {
       tsMcpServerGenerator(tree, {
         project: 'non-ts-project',
         computeType: 'None',
+        iacProvider: 'CDK',
       }),
     ).rejects.toThrow(
       'Unsupported project non-ts-project. Expected a TypeScript project (with a tsconfig.json)',
@@ -332,6 +341,7 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: '@org/nested-project',
       computeType: 'None',
+      iacProvider: 'CDK',
     });
 
     // Should use the last part of the project name for default server name
@@ -350,6 +360,7 @@ describe('ts#mcp-server generator', () => {
       project: 'test-project',
       name: 'snapshot-server',
       computeType: 'None',
+      iacProvider: 'CDK',
     });
 
     // Snapshot the generated MCP server files
@@ -384,6 +395,7 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
     });
 
     // Check that MCP server files were added to the existing project
@@ -442,6 +454,7 @@ describe('ts#mcp-server generator', () => {
       project: 'test-project',
       name: 'custom-bedrock-server',
       computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
     });
 
     // Check that MCP server files were added with custom name
@@ -490,6 +503,7 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
     });
 
     // Check root package.json dependencies
@@ -532,6 +546,7 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
     });
 
     // Verify shared constructs setup
@@ -567,6 +582,7 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
     });
 
     const sharedConstructsConfig = JSON.parse(
@@ -588,6 +604,7 @@ describe('ts#mcp-server generator', () => {
       project: 'test-project',
       name: 'my-server',
       computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
     });
 
     expect(
@@ -612,6 +629,7 @@ describe('ts#mcp-server generator', () => {
       project: 'test-project',
       name: 'snapshot-bedrock-server',
       computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
     });
 
     // Snapshot the generated agent-core runtime construct
@@ -651,11 +669,12 @@ describe('ts#mcp-server generator', () => {
   });
 
   it('should add generator metric to app.ts', async () => {
-    await sharedConstructsGenerator(tree);
+    await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
 
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       computeType: 'None',
+      iacProvider: 'CDK',
     });
 
     expectHasMetricTags(tree, TS_MCP_SERVER_GENERATOR_INFO.metric);

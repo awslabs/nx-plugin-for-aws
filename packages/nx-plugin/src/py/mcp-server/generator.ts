@@ -144,7 +144,7 @@ export const pyMcpServerGenerator = async (
     };
 
     // Add shared constructs
-    await sharedConstructsGenerator(tree);
+    await sharedConstructsGenerator(tree, { iacProvider: options.iacProvider });
 
     // Ensure common constructs builds after our mcp server project
     updateJson(

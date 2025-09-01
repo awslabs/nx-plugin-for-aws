@@ -1,8 +1,229 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`py#mcp-server generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > agent-core-runtime.ts 1`] = `null`;
+exports[`py#mcp-server generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > agent-core-runtime.ts 1`] = `
+"import {
+  Role,
+  ServicePrincipal,
+  PolicyStatement,
+  Effect,
+  PolicyDocument,
+  IGrantable,
+  Grant,
+  IPrincipal,
+} from 'aws-cdk-lib/aws-iam';
+import {
+  AwsCustomResource,
+  AwsCustomResourcePolicy,
+  PhysicalResourceId,
+  PhysicalResourceIdReference,
+} from 'aws-cdk-lib/custom-resources';
+import { Construct } from 'constructs';
+import type { AuthorizerConfiguration } from '@aws-sdk/client-bedrock-agentcore-control';
+import { Stack } from 'aws-cdk-lib';
 
-exports[`py#mcp-server generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > app-index.ts 1`] = `""`;
+/**
+ * Options for the AgentCoreRuntime construct
+ */
+export interface AgentCoreRuntimeProps {
+  runtimeName: string;
+  description?: string;
+  containerUri: string;
+  serverProtocol: 'MCP' | 'HTTP';
+  environment?: Record<string, string>;
+  authorizerConfiguration?: AuthorizerConfiguration;
+}
+
+/**
+ * A construct for creating a Bedrock AgentCore Runtime
+ */
+export class AgentCoreRuntime extends Construct implements IGrantable {
+  public readonly role: Role;
+  public readonly arn: string;
+
+  public readonly grantPrincipal: IPrincipal;
+
+  constructor(scope: Construct, id: string, props: AgentCoreRuntimeProps) {
+    super(scope, id);
+
+    const region = Stack.of(this).region;
+    const accountId = Stack.of(this).account;
+
+    this.role = new Role(this, 'AgentCoreRole', {
+      assumedBy: new ServicePrincipal('bedrock-agentcore.amazonaws.com'),
+      inlinePolicies: {
+        AgentCorePolicy: new PolicyDocument({
+          statements: [
+            new PolicyStatement({
+              sid: 'ECRImageAccess',
+              effect: Effect.ALLOW,
+              actions: ['ecr:BatchGetImage', 'ecr:GetDownloadUrlForLayer'],
+              resources: [\`arn:aws:ecr:\${region}:\${accountId}:repository/*\`],
+            }),
+            new PolicyStatement({
+              effect: Effect.ALLOW,
+              actions: ['logs:DescribeLogStreams', 'logs:CreateLogGroup'],
+              resources: [
+                \`arn:aws:logs:\${region}:\${accountId}:log-group:/aws/bedrock-agentcore/runtimes/*\`,
+              ],
+            }),
+            new PolicyStatement({
+              effect: Effect.ALLOW,
+              actions: ['logs:DescribeLogGroups'],
+              resources: [\`arn:aws:logs:\${region}:\${accountId}:log-group:*\`],
+            }),
+            new PolicyStatement({
+              effect: Effect.ALLOW,
+              actions: ['logs:CreateLogStream', 'logs:PutLogEvents'],
+              resources: [
+                \`arn:aws:logs:\${region}:\${accountId}:log-group:/aws/bedrock-agentcore/runtimes/*:log-stream:*\`,
+              ],
+            }),
+            new PolicyStatement({
+              sid: 'ECRTokenAccess',
+              effect: Effect.ALLOW,
+              actions: ['ecr:GetAuthorizationToken'],
+              resources: ['*'],
+            }),
+            new PolicyStatement({
+              effect: Effect.ALLOW,
+              actions: [
+                'xray:PutTraceSegments',
+                'xray:PutTelemetryRecords',
+                'xray:GetSamplingRules',
+                'xray:GetSamplingTargets',
+              ],
+              resources: ['*'],
+            }),
+            new PolicyStatement({
+              effect: Effect.ALLOW,
+              actions: ['cloudwatch:PutMetricData'],
+              resources: ['*'],
+              conditions: {
+                StringEquals: {
+                  'cloudwatch:namespace': 'bedrock-agentcore',
+                },
+              },
+            }),
+            new PolicyStatement({
+              sid: 'GetAgentAccessToken',
+              effect: Effect.ALLOW,
+              actions: [
+                'bedrock-agentcore:GetWorkloadAccessToken',
+                'bedrock-agentcore:GetWorkloadAccessTokenForJWT',
+                'bedrock-agentcore:GetWorkloadAccessTokenForUserId',
+              ],
+              resources: [
+                \`arn:aws:bedrock-agentcore:\${region}:\${accountId}:workload-identity-directory/default\`,
+                \`arn:aws:bedrock-agentcore:\${region}:\${accountId}:workload-identity-directory/default/workload-identity/*\`,
+              ],
+            }),
+            new PolicyStatement({
+              sid: 'BedrockModelInvocation',
+              effect: Effect.ALLOW,
+              actions: [
+                'bedrock:InvokeModel',
+                'bedrock:InvokeModelWithResponseStream',
+              ],
+              resources: [
+                'arn:aws:bedrock:*::foundation-model/*',
+                \`arn:aws:bedrock:\${region}:\${accountId}:*\`,
+              ],
+            }),
+          ],
+        }),
+      },
+    });
+    this.grantPrincipal = this.role.grantPrincipal;
+
+    const agentRuntime = new AwsCustomResource(this, 'MCPSeverRuntime', {
+      onCreate: {
+        service: 'bedrock-agentcore-control',
+        action: 'CreateAgentRuntime',
+        parameters: {
+          agentRuntimeName: props.runtimeName,
+          agentRuntimeArtifact: {
+            containerConfiguration: {
+              containerUri: props.containerUri,
+            },
+          },
+          description: props.description,
+          environmentVariables: props.environment,
+          networkConfiguration: {
+            networkMode: 'PUBLIC',
+          },
+          protocolConfiguration: {
+            serverProtocol: props.serverProtocol,
+          },
+          roleArn: this.role.roleArn,
+          authorizerConfiguration: props.authorizerConfiguration,
+        },
+        physicalResourceId: PhysicalResourceId.fromResponse('agentRuntimeId'),
+      },
+      onUpdate: {
+        service: 'bedrock-agentcore-control',
+        action: 'UpdateAgentRuntime',
+        parameters: {
+          agentRuntimeId: new PhysicalResourceIdReference(),
+          agentRuntimeName: props.runtimeName,
+          agentRuntimeArtifact: {
+            containerConfiguration: {
+              containerUri: props.containerUri,
+            },
+          },
+          description: props.description,
+          environmentVariables: props.environment,
+          networkConfiguration: {
+            networkMode: 'PUBLIC',
+          },
+          protocolConfiguration: {
+            serverProtocol: props.serverProtocol,
+          },
+          roleArn: this.role.roleArn,
+          authorizerConfiguration: props.authorizerConfiguration,
+        },
+        physicalResourceId: PhysicalResourceId.fromResponse('agentRuntimeId'),
+      },
+      onDelete: {
+        service: 'bedrock-agentcore-control',
+        action: 'DeleteAgentRuntime',
+        parameters: {
+          agentRuntimeId: new PhysicalResourceIdReference(),
+        },
+      },
+      policy: AwsCustomResourcePolicy.fromStatements([
+        new PolicyStatement({
+          actions: ['bedrock-agentcore:*'],
+          resources: ['*'],
+        }),
+        new PolicyStatement({
+          actions: ['iam:PassRole'],
+          resources: [this.role.roleArn],
+        }),
+      ]),
+      installLatestAwsSdk: true,
+    });
+
+    this.arn = agentRuntime.getResponseField('agentRuntimeArn');
+  }
+
+  /**
+   * Grant permissions to invoke the agent runtime (if using IAM auth - not required for JWT auth)
+   */
+  public grantInvoke = (grantee: IGrantable) => {
+    Grant.addToPrincipal({
+      grantee,
+      actions: ['bedrock-agentcore:InvokeAgentRuntime'],
+      resourceArns: [this.arn, \`\${this.arn}/*\`],
+    });
+  };
+}
+"
+`;
+
+exports[`py#mcp-server generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > app-index.ts 1`] = `
+"export * from './mcp-servers/index.js';
+"
+`;
 
 exports[`py#mcp-server generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > core-index.ts 1`] = `
 "export * from './app.js';
@@ -10,9 +231,57 @@ export * from './runtime-config.js';
 "
 `;
 
-exports[`py#mcp-server generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > mcp-server-construct.ts 1`] = `null`;
+exports[`py#mcp-server generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > mcp-server-construct.ts 1`] = `
+"import { DockerImageAsset, Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import { Construct } from 'constructs';
+import { execSync } from 'child_process';
+import * as path from 'path';
+import * as url from 'url';
+import {
+  AgentCoreRuntime,
+  AgentCoreRuntimeProps,
+} from '../../../core/agent-core/runtime.js';
 
-exports[`py#mcp-server generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > mcp-servers-index.ts 1`] = `null`;
+export type SnapshotBedrockServerProps = Omit<
+  AgentCoreRuntimeProps,
+  'runtimeName' | 'serverProtocol' | 'containerUri'
+>;
+
+export class SnapshotBedrockServer extends Construct {
+  public readonly dockerImage: DockerImageAsset;
+  public readonly agentCoreRuntime: AgentCoreRuntime;
+
+  constructor(
+    scope: Construct,
+    id: string,
+    props?: SnapshotBedrockServerProps,
+  ) {
+    super(scope, id);
+
+    this.dockerImage = new DockerImageAsset(this, 'DockerImage', {
+      platform: Platform.LINUX_ARM64,
+      directory: path.dirname(url.fileURLToPath(new URL(import.meta.url))),
+      extraHash: execSync(
+        \`docker inspect proj-snapshot-bedrock-server:latest --format '{{.Descriptor.digest}}'\`,
+        { encoding: 'utf-8' },
+      ).trim(),
+    });
+
+    this.agentCoreRuntime = new AgentCoreRuntime(this, 'AgentCore', {
+      runtimeName: 'SnapshotBedrockServer',
+      serverProtocol: 'MCP',
+      containerUri: this.dockerImage.imageUri,
+      ...props,
+    });
+  }
+}
+"
+`;
+
+exports[`py#mcp-server generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > mcp-servers-index.ts 1`] = `
+"export * from './snapshot-bedrock-server/snapshot-bedrock-server.js';
+"
+`;
 
 exports[`py#mcp-server generator > should match snapshot for generated files > mcp-server-__init__.py 1`] = `""`;
 

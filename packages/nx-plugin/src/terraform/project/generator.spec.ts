@@ -108,7 +108,7 @@ describe('terraformProjectGenerator', () => {
       expect(planTarget.configurations.dev.command).toContain(
         '-var-file=env/dev.tfvars',
       );
-      expect(planTarget.dependsOn).toEqual(['init']);
+      expect(planTarget.dependsOn).toEqual(['init', 'build']);
     });
 
     it('should configure init target correctly', async () => {
