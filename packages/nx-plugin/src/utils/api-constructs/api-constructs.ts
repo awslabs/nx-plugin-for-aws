@@ -48,7 +48,7 @@ export const addApiGatewayConstruct = (
   const generateCoreApiFile = (name: string) => {
     generateFiles(
       tree,
-      joinPathFragments(__dirname, 'files', 'core', 'api', name),
+      joinPathFragments(__dirname, 'files', 'cdk', 'core', 'api', name),
       joinPathFragments(
         PACKAGES_DIR,
         SHARED_CONSTRUCTS_DIR,
@@ -73,7 +73,14 @@ export const addApiGatewayConstruct = (
   // Generate app specific CDK construct
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'app', 'apis', options.constructType),
+    joinPathFragments(
+      __dirname,
+      'files',
+      'cdk',
+      'app',
+      'apis',
+      options.constructType,
+    ),
     joinPathFragments(
       PACKAGES_DIR,
       SHARED_CONSTRUCTS_DIR,
