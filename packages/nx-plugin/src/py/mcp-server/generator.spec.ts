@@ -689,4 +689,206 @@ dev-dependencies = []
     // Check that build target depends on docker
     expect(projectConfig.targets.build.dependsOn).toContain('docker');
   });
+
+  it('should generate MCP server with Terraform provider and default name', async () => {
+    await pyMcpServerGenerator(tree, {
+      project: 'test-project',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'Terraform',
+    });
+
+    // Check that MCP server files were added to the existing project
+    expect(
+      tree.exists('apps/test-project/proj_test_project/mcp_server/__init__.py'),
+    ).toBeTruthy();
+    expect(
+      tree.exists('apps/test-project/proj_test_project/mcp_server/server.py'),
+    ).toBeTruthy();
+    expect(
+      tree.exists('apps/test-project/proj_test_project/mcp_server/stdio.py'),
+    ).toBeTruthy();
+    expect(
+      tree.exists('apps/test-project/proj_test_project/mcp_server/http.py'),
+    ).toBeTruthy();
+
+    // Dockerfile should be included for BedrockAgentCoreRuntime
+    expect(
+      tree.exists('apps/test-project/proj_test_project/mcp_server/Dockerfile'),
+    ).toBeTruthy();
+
+    // Check that Terraform files were generated
+    expect(
+      tree.exists('packages/common/terraform/src/core/agent-core/runtime.tf'),
+    ).toBeTruthy();
+    expect(
+      tree.exists(
+        'packages/common/terraform/src/app/mcp-servers/test-project-mcp-server/test-project-mcp-server.tf',
+      ),
+    ).toBeTruthy();
+
+    // Check that shared terraform project configuration was updated with build dependency
+    const sharedTerraformConfig = JSON.parse(
+      tree.read('packages/common/terraform/project.json', 'utf-8'),
+    );
+    expect(sharedTerraformConfig.targets.build.dependsOn).toContain(
+      'test-project:build',
+    );
+  });
+
+  it('should generate MCP server with Terraform provider and custom name', async () => {
+    await pyMcpServerGenerator(tree, {
+      project: 'test-project',
+      name: 'custom-terraform-server',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'Terraform',
+    });
+
+    // Check that MCP server files were added with custom name
+    expect(
+      tree.exists(
+        'apps/test-project/proj_test_project/custom_terraform_server/__init__.py',
+      ),
+    ).toBeTruthy();
+    expect(
+      tree.exists(
+        'apps/test-project/proj_test_project/custom_terraform_server/server.py',
+      ),
+    ).toBeTruthy();
+    expect(
+      tree.exists(
+        'apps/test-project/proj_test_project/custom_terraform_server/stdio.py',
+      ),
+    ).toBeTruthy();
+    expect(
+      tree.exists(
+        'apps/test-project/proj_test_project/custom_terraform_server/http.py',
+      ),
+    ).toBeTruthy();
+
+    // Dockerfile should be included for BedrockAgentCoreRuntime
+    expect(
+      tree.exists(
+        'apps/test-project/proj_test_project/custom_terraform_server/Dockerfile',
+      ),
+    ).toBeTruthy();
+
+    // Check that Terraform files were generated with custom name
+    expect(
+      tree.exists('packages/common/terraform/src/core/agent-core/runtime.tf'),
+    ).toBeTruthy();
+    expect(
+      tree.exists(
+        'packages/common/terraform/src/app/mcp-servers/custom-terraform-server/custom-terraform-server.tf',
+      ),
+    ).toBeTruthy();
+  });
+
+  it('should match snapshot for Terraform generated files', async () => {
+    await pyMcpServerGenerator(tree, {
+      project: 'test-project',
+      name: 'terraform-snapshot-server',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'Terraform',
+    });
+
+    // Snapshot the generated Terraform core runtime file
+    const terraformRuntimeContent = tree.read(
+      'packages/common/terraform/src/core/agent-core/runtime.tf',
+      'utf-8',
+    );
+    expect(terraformRuntimeContent).toMatchSnapshot(
+      'terraform-agent-core-runtime.tf',
+    );
+
+    // Snapshot the generated MCP server Terraform file
+    const mcpServerTerraformContent = tree.read(
+      'packages/common/terraform/src/app/mcp-servers/terraform-snapshot-server/terraform-snapshot-server.tf',
+      'utf-8',
+    );
+    expect(mcpServerTerraformContent).toMatchSnapshot(
+      'terraform-mcp-server.tf',
+    );
+  });
+
+  it('should generate correct docker image tag for Terraform provider', async () => {
+    // Update root package.json to have a scope
+    const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+    rootPackageJson.name = '@terraform-scope/workspace';
+    tree.write('package.json', JSON.stringify(rootPackageJson, null, 2));
+
+    await pyMcpServerGenerator(tree, {
+      project: 'test-project',
+      name: 'terraform-server',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'Terraform',
+    });
+
+    // Check that the docker image tag is correctly generated in the Terraform file
+    const mcpServerTerraform = tree.read(
+      'packages/common/terraform/src/app/mcp-servers/terraform-server/terraform-server.tf',
+      'utf-8',
+    );
+    expect(mcpServerTerraform).toContain(
+      'terraform-scope-terraform-server:latest',
+    );
+  });
+
+  it('should not generate Terraform files when computeType is None', async () => {
+    await pyMcpServerGenerator(tree, {
+      project: 'test-project',
+      computeType: 'None',
+      iacProvider: 'Terraform',
+    });
+
+    // Check that MCP server files were added
+    expect(
+      tree.exists('apps/test-project/proj_test_project/mcp_server/__init__.py'),
+    ).toBeTruthy();
+
+    // There should be no Dockerfile since the computeType is None
+    expect(
+      tree.exists('apps/test-project/proj_test_project/mcp_server/Dockerfile'),
+    ).toBeFalsy();
+
+    // Terraform files should not be generated for None compute type
+    expect(
+      tree.exists('packages/common/terraform/src/core/agent-core/runtime.tf'),
+    ).toBeFalsy();
+    expect(
+      tree.exists(
+        'packages/common/terraform/src/app/mcp-servers/test-project-mcp-server/test-project-mcp-server.tf',
+      ),
+    ).toBeFalsy();
+  });
+
+  it('should handle Python bundle target configuration for Terraform provider', async () => {
+    await pyMcpServerGenerator(tree, {
+      project: 'test-project',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'Terraform',
+    });
+
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+
+    // Check that bundle target was configured with Python-specific options
+    expect(projectConfig.targets.bundle).toBeDefined();
+    expect(projectConfig.targets.bundle.executor).toBe('nx:run-commands');
+
+    // Check the exact commands for the bundle target
+    const commands = projectConfig.targets.bundle.options.commands;
+    expect(commands).toEqual([
+      'uv export --frozen --no-dev --no-editable --project apps/test-project --package test-project -o dist/apps/test-project/bundle/requirements.txt',
+      'uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform aarch64-manylinux2014 --target dist/apps/test-project/bundle -r dist/apps/test-project/bundle/requirements.txt',
+    ]);
+
+    // Check that docker target was added
+    expect(
+      projectConfig.targets['test-project-mcp-server-docker'],
+    ).toBeDefined();
+    expect(
+      projectConfig.targets['test-project-mcp-server-docker'].dependsOn,
+    ).toContain('bundle');
+  });
 });

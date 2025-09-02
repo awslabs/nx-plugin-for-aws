@@ -709,4 +709,222 @@ dev-dependencies = []
       projectConfig.targets['project-agent-docker'].options.commands[0],
     ).toContain('proj-project-agent:latest');
   });
+
+  it('should generate strands agent with Terraform provider and default name', async () => {
+    await pyStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'Terraform',
+    });
+
+    // Check that agent files were added to the existing project
+    expect(
+      tree.exists('apps/test-project/proj_test_project/agent/__init__.py'),
+    ).toBeTruthy();
+    expect(
+      tree.exists('apps/test-project/proj_test_project/agent/agent.py'),
+    ).toBeTruthy();
+    expect(
+      tree.exists('apps/test-project/proj_test_project/agent/main.py'),
+    ).toBeTruthy();
+
+    // Dockerfile should be included for BedrockAgentCoreRuntime
+    expect(
+      tree.exists('apps/test-project/proj_test_project/agent/Dockerfile'),
+    ).toBeTruthy();
+
+    // Check that Terraform files were generated
+    expect(
+      tree.exists('packages/common/terraform/src/core/agent-core/runtime.tf'),
+    ).toBeTruthy();
+    expect(
+      tree.exists(
+        'packages/common/terraform/src/app/agents/test-project-agent/test-project-agent.tf',
+      ),
+    ).toBeTruthy();
+
+    // Check that shared terraform project configuration was updated with build dependency
+    const sharedTerraformConfig = JSON.parse(
+      tree.read('packages/common/terraform/project.json', 'utf-8'),
+    );
+    expect(sharedTerraformConfig.targets.build.dependsOn).toContain(
+      'test-project:build',
+    );
+  });
+
+  it('should generate strands agent with Terraform provider and custom name', async () => {
+    await pyStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      name: 'custom-terraform-agent',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'Terraform',
+    });
+
+    // Check that agent files were added with custom name
+    expect(
+      tree.exists(
+        'apps/test-project/proj_test_project/custom_terraform_agent/__init__.py',
+      ),
+    ).toBeTruthy();
+    expect(
+      tree.exists(
+        'apps/test-project/proj_test_project/custom_terraform_agent/agent.py',
+      ),
+    ).toBeTruthy();
+    expect(
+      tree.exists(
+        'apps/test-project/proj_test_project/custom_terraform_agent/main.py',
+      ),
+    ).toBeTruthy();
+
+    // Dockerfile should be included for BedrockAgentCoreRuntime
+    expect(
+      tree.exists(
+        'apps/test-project/proj_test_project/custom_terraform_agent/Dockerfile',
+      ),
+    ).toBeTruthy();
+
+    // Check that Terraform files were generated with custom name
+    expect(
+      tree.exists('packages/common/terraform/src/core/agent-core/runtime.tf'),
+    ).toBeTruthy();
+    expect(
+      tree.exists(
+        'packages/common/terraform/src/app/agents/custom-terraform-agent/custom-terraform-agent.tf',
+      ),
+    ).toBeTruthy();
+  });
+
+  it('should match snapshot for Terraform generated files', async () => {
+    await pyStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      name: 'terraform-snapshot-agent',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'Terraform',
+    });
+
+    // Snapshot the generated Terraform core runtime file
+    const terraformRuntimeContent = tree.read(
+      'packages/common/terraform/src/core/agent-core/runtime.tf',
+      'utf-8',
+    );
+    expect(terraformRuntimeContent).toMatchSnapshot(
+      'terraform-agent-core-runtime.tf',
+    );
+
+    // Snapshot the generated agent Terraform file
+    const agentTerraformContent = tree.read(
+      'packages/common/terraform/src/app/agents/terraform-snapshot-agent/terraform-snapshot-agent.tf',
+      'utf-8',
+    );
+    expect(agentTerraformContent).toMatchSnapshot('terraform-agent.tf');
+  });
+
+  it('should generate correct docker image tag for Terraform provider', async () => {
+    // Update root package.json to have a scope
+    const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+    rootPackageJson.name = '@terraform-scope/workspace';
+    tree.write('package.json', JSON.stringify(rootPackageJson, null, 2));
+
+    await pyStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      name: 'terraform-agent',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'Terraform',
+    });
+
+    // Check that the docker image tag is correctly generated in the Terraform file
+    const agentTerraform = tree.read(
+      'packages/common/terraform/src/app/agents/terraform-agent/terraform-agent.tf',
+      'utf-8',
+    );
+    expect(agentTerraform).toContain('terraform-scope-terraform-agent:latest');
+  });
+
+  it('should not generate Terraform files when computeType is None', async () => {
+    await pyStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      computeType: 'None',
+      iacProvider: 'Terraform',
+    });
+
+    // Check that agent files were added
+    expect(
+      tree.exists('apps/test-project/proj_test_project/agent/__init__.py'),
+    ).toBeTruthy();
+
+    // There should be no Dockerfile since the computeType is None
+    expect(
+      tree.exists('apps/test-project/proj_test_project/agent/Dockerfile'),
+    ).toBeFalsy();
+
+    // Terraform files should not be generated for None compute type
+    expect(
+      tree.exists('packages/common/terraform/src/core/agent-core/runtime.tf'),
+    ).toBeFalsy();
+    expect(
+      tree.exists(
+        'packages/common/terraform/src/app/agents/test-project-agent/test-project-agent.tf',
+      ),
+    ).toBeFalsy();
+  });
+
+  it('should handle Python bundle target configuration for Terraform provider', async () => {
+    await pyStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'Terraform',
+    });
+
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+
+    // Check that bundle target was configured with Python-specific options
+    expect(projectConfig.targets.bundle).toBeDefined();
+    expect(projectConfig.targets.bundle.executor).toBe('nx:run-commands');
+
+    // Check the exact commands for the bundle target
+    const commands = projectConfig.targets.bundle.options.commands;
+    expect(commands).toEqual([
+      'uv export --frozen --no-dev --no-editable --project apps/test-project --package test-project -o dist/apps/test-project/bundle/requirements.txt',
+      'uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform aarch64-manylinux2014 --target dist/apps/test-project/bundle -r dist/apps/test-project/bundle/requirements.txt',
+    ]);
+
+    // Check that docker target was added
+    expect(projectConfig.targets['test-project-agent-docker']).toBeDefined();
+    expect(
+      projectConfig.targets['test-project-agent-docker'].dependsOn,
+    ).toContain('bundle');
+  });
+
+  it('should handle default computeType as BedrockAgentCoreRuntime with Terraform', async () => {
+    await pyStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      // No computeType specified, should default to BedrockAgentCoreRuntime
+      iacProvider: 'Terraform',
+    });
+
+    // Should include Dockerfile by default
+    expect(
+      tree.exists('apps/test-project/proj_test_project/agent/Dockerfile'),
+    ).toBeTruthy();
+
+    // Should have Terraform files generated
+    expect(
+      tree.exists('packages/common/terraform/src/core/agent-core/runtime.tf'),
+    ).toBeTruthy();
+    expect(
+      tree.exists(
+        'packages/common/terraform/src/app/agents/test-project-agent/test-project-agent.tf',
+      ),
+    ).toBeTruthy();
+
+    // Should have docker and bundle targets
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+    expect(projectConfig.targets['bundle']).toBeDefined();
+    expect(projectConfig.targets['test-project-agent-docker']).toBeDefined();
+  });
 });
