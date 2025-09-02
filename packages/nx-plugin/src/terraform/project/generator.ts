@@ -28,6 +28,7 @@ import { updateGitIgnore } from '../../utils/git';
 import { withVersions } from '../../utils/versions';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import { uvxCommand } from '../../utils/py';
 
 const NX_EXTEND_PLUGIN = '@nx-extend/terraform';
 export const TERRAFORM_PROJECT_GENERATOR_INFO: NxGeneratorInfo =
@@ -189,7 +190,10 @@ export async function terraformProjectGenerator(
       cache: true,
       outputs: [`{workspaceRoot}/dist/${lib.dir}/checkov`],
       options: {
-        command: `uvx checkov --directory . -o json --output-file-path ${checkovDistDir}`,
+        command: uvxCommand(
+          'checkov',
+          `--directory . -o json --output-file-path ${checkovDistDir}`,
+        ),
         forwardAllArgs: true,
         cwd: '{projectRoot}/src',
       },
@@ -204,6 +208,7 @@ export async function terraformProjectGenerator(
         forwardAllArgs: true,
         cwd: '{projectRoot}/src',
       },
+      dependsOn: ['init'],
     },
   };
 

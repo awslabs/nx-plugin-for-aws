@@ -81,6 +81,7 @@ export const PY_VERSIONS = {
   'aws-opentelemetry-distro': '==0.12.0',
   'bedrock-agentcore': '==0.1.2',
   boto3: '==1.40.20',
+  checkov: '==3.2.469',
   fastapi: '==0.116.1',
   'fastapi[standard]': '==0.116.1',
   mangum: '==0.19.0',

@@ -33,3 +33,11 @@ export const addDependenciesToPyProjectToml = (
     stringify(projectToml),
   );
 };
+
+/**
+ * Render a uvx command for a given dependency
+ * Pins the version to the one specified in versions.ts
+ */
+export const uvxCommand = (dep: IPyDepVersion, args?: string): string => {
+  return `uvx ${withPyVersions([dep])[0]}${args ? ` ${args}` : ''}`;
+};

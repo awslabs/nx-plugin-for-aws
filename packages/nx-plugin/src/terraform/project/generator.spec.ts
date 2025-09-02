@@ -206,12 +206,13 @@ describe('terraformProjectGenerator', () => {
       expect(validateTarget.cache).toBe(true);
       expect(validateTarget.options.command).toBe('terraform validate');
       expect(validateTarget.options.cwd).toBe('{projectRoot}/src');
+      expect(validateTarget.dependsOn).toEqual(['init']);
 
       // Test test target
       const testTarget = projectConfig.targets['test'];
       expect(testTarget.executor).toBe('nx:run-commands');
       expect(testTarget.cache).toBe(true);
-      expect(testTarget.options.command).toContain('uvx checkov');
+      expect(testTarget.options.command).toContain('uvx checkov==');
       expect(testTarget.dependsOn).toEqual(['validate']);
     });
   });
