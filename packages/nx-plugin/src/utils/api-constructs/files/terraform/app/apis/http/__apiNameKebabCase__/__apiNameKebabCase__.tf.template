@@ -72,7 +72,7 @@ variable "cors_expose_headers" {
 variable "cors_max_age" {
   description = "Maximum age for CORS preflight requests in seconds"
   type        = number
-  default     = 86400
+  default     = 0
 }
 
 # Tags
@@ -235,9 +235,13 @@ resource "aws_apigatewayv2_integration" "lambda_integration" {
 }
 
 # Route for proxy integration (catches all requests)
-resource "aws_apigatewayv2_route" "proxy_route" {
+resource "aws_apigatewayv2_route" "proxy_routes" {
+  # NB: OPTIONS is omitted here since API Gateway manages responding to preflight requests
+  # when cors settings are configured
+  for_each = toset(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"])
+
   api_id    = module.http_api.api_id
-  route_key = "ANY /{proxy+}"
+  route_key = "${each.key} /{proxy+}"
   target    = "integrations/${aws_apigatewayv2_integration.lambda_integration.id}"
 
   <%_ if (auth === 'IAM') { _%>
@@ -354,11 +358,6 @@ output "lambda_execution_role_name" {
 output "integration_id" {
   description = "ID of the Lambda integration"
   value       = aws_apigatewayv2_integration.lambda_integration.id
-}
-
-output "route_id" {
-  description = "ID of the proxy route"
-  value       = aws_apigatewayv2_route.proxy_route.id
 }
 
 # CloudWatch Log Groups
