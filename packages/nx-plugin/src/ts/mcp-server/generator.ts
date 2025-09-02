@@ -5,7 +5,6 @@
 import {
   GeneratorCallback,
   OverwriteStrategy,
-  ProjectConfiguration,
   Tree,
   addDependenciesToPackageJson,
   generateFiles,
@@ -28,10 +27,6 @@ import { withVersions } from '../../utils/versions';
 import { kebabCase, toClassName } from '../../utils/names';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { addMcpServerInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
-import {
-  PACKAGES_DIR,
-  SHARED_CONSTRUCTS_DIR,
-} from '../../utils/shared-constructs-constants';
 import { getNpmScope } from '../../utils/npm-scope';
 import { addEsbuildBundleTarget } from '../../utils/esbuild';
 
@@ -128,27 +123,6 @@ export const tsMcpServerGenerator = async (
 
     // Add shared constructs
     await sharedConstructsGenerator(tree, { iacProvider: options.iacProvider });
-
-    // Ensure common constructs builds after our mcp server project
-    updateJson(
-      tree,
-      joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'project.json'),
-      (config: ProjectConfiguration) => {
-        if (!config.targets) {
-          config.targets = {};
-        }
-        if (!config.targets.build) {
-          config.targets.build = {};
-        }
-        config.targets.build.dependsOn = [
-          ...(config.targets.build.dependsOn ?? []).filter(
-            (t) => t !== `${project.name}:build`,
-          ),
-          `${project.name}:build`,
-        ];
-        return config;
-      },
-    );
 
     // Add the construct to deploy the mcp server
     addMcpServerInfra(tree, {

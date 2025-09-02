@@ -93,7 +93,10 @@ resource "random_id" "unique_suffix" {
 
 # ECR Repository
 resource "aws_ecr_repository" "agent_core_repository" {
-  name                 = "${var.agent_runtime_name}_repository_${random_id.unique_suffix.hex}"
+  #checkov:skip=CKV_AWS_136:AES256 encryption is sufficient for ECR repositories
+  name                 = "${lower(var.agent_runtime_name)}_repository_${random_id.unique_suffix.hex}"
+
+  #checkov:skip=CKV_AWS_51:Image tag is reused for latest deployments
   image_tag_mutability = "MUTABLE"
   force_delete         = true
 
@@ -292,7 +295,7 @@ resource "null_resource" "docker_publish" {
     command = <<-EOT
       # Get ECR login token
       aws ecr get-login-password --region ${local.aws_region} | docker login --username AWS --password-stdin ${self.triggers.repository_url}
-      
+
       # Tag the image
       docker tag ${self.triggers.docker_image_tag} ${self.triggers.repository_url}:latest
 
@@ -326,9 +329,9 @@ client = boto3.client("bedrock-agentcore-control", region_name="${local.aws_regi
 # Environment variables for QueryAgentConfig
 environment_variables = json.loads("""${jsonencode(var.env)}""")
 agent_name = "${var.agent_runtime_name}_${random_id.unique_suffix.hex}"
-authorization_config = json.loads("""{"customJWTAuthorizer": ${jsonencode({
+authorization_config = json.loads("""{"customJWTAuthorizer": ${jsonencode(var.customJWTAuthorizer != null ? {
   for k, v in var.customJWTAuthorizer : k => v if v != null
-})}}""")
+} : {})}}""")
 
 try:
     # First, check if an agent runtime with this name already exists
@@ -342,7 +345,7 @@ try:
                 break
     except Exception as e:
         print(f"Error listing agent runtimes: {e}")
-    
+
     if existing_agent_runtime_id:
         # Update the existing agent runtime
         try:
@@ -365,7 +368,7 @@ try:
             print(f"Error updating agent runtime: {e}")
             # If update fails, try to create a new one
             existing_agent_runtime_id = None
-    
+
     if not existing_agent_runtime_id:
         # Agent runtime doesn"t exist or update failed, create it
         response = client.create_agent_runtime(
@@ -381,14 +384,14 @@ try:
             ${var.customJWTAuthorizer == null ? "" : "authorizerConfiguration=authorization_config,"}
             roleArn="${aws_iam_role.agent_core_runtime_role.arn}"
         )
-        
+
         agent_runtime_id = response.get("agentRuntimeId", "")
         print(f"Agent runtime created successfully with ID: {agent_runtime_id}")
-    
+
     # Store the agent runtime ID in a temporary file for the cleanup resource
     with open("/tmp/agent_runtime_id_${var.agent_runtime_name}_${random_id.unique_suffix.hex}", "w") as f:
         f.write(agent_runtime_id)
-        
+
 except Exception as e:
     print(f"Error managing agent runtime: {str(e)}")
     sys.exit(1)
@@ -446,13 +449,13 @@ try:
         agentRuntimeId=agent_runtime_id
     )
     print(f'Agent runtime {agent_name} (ID: {agent_runtime_id}) deleted successfully:', json.dumps(response, indent=2, default=str))
-    
+
     # Clean up the temporary file if it exists
     temp_file = f'/tmp/agent_runtime_id_{agent_name}'
     if os.path.exists(temp_file):
         os.remove(temp_file)
         print(f'Cleaned up temporary file: {temp_file}')
-        
+
 except client.exceptions.ResourceNotFoundException:
     print(f'Agent runtime {agent_name} not found, may have been already deleted')
 except Exception as e:

@@ -5,12 +5,10 @@
 import {
   GeneratorCallback,
   OverwriteStrategy,
-  ProjectConfiguration,
   Tree,
   generateFiles,
   installPackagesTask,
   joinPathFragments,
-  updateJson,
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { PyStrandsAgentGeneratorSchema } from './schema';
@@ -27,10 +25,6 @@ import { addAgentInfra } from '../../utils/agent-core-constructs/agent-core-cons
 import { addPythonBundleTarget } from '../../utils/bundle';
 import { getNpmScope } from '../../utils/npm-scope';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
-import {
-  PACKAGES_DIR,
-  SHARED_CONSTRUCTS_DIR,
-} from '../../utils/shared-constructs-constants';
 import { Logger } from '@nxlv/python/src/executors/utils/logger';
 import { UVProvider } from '@nxlv/python/src/provider/uv/provider';
 
@@ -146,27 +140,6 @@ export const pyStrandsAgentGenerator = async (
 
     // Add shared constructs
     await sharedConstructsGenerator(tree, { iacProvider: options.iacProvider });
-
-    // Ensure common constructs builds after our agent project
-    updateJson(
-      tree,
-      joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'project.json'),
-      (config: ProjectConfiguration) => {
-        if (!config.targets) {
-          config.targets = {};
-        }
-        if (!config.targets.build) {
-          config.targets.build = {};
-        }
-        config.targets.build.dependsOn = [
-          ...(config.targets.build.dependsOn ?? []).filter(
-            (t) => t !== `${project.name}:build`,
-          ),
-          `${project.name}:build`,
-        ];
-        return config;
-      },
-    );
 
     // Add the construct to deploy the agent
     addAgentInfra(tree, {

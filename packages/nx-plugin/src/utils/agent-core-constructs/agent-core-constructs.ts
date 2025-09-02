@@ -7,9 +7,9 @@ import {
   generateFiles,
   joinPathFragments,
   OverwriteStrategy,
-  readProjectConfiguration,
+  ProjectConfiguration,
   Tree,
-  updateProjectConfiguration,
+  updateJson,
 } from '@nx/devkit';
 import {
   PACKAGES_DIR,
@@ -18,7 +18,6 @@ import {
 } from '../shared-constructs-constants';
 import { addStarExport } from '../ast';
 import { withVersions } from '../versions';
-import { getTsLibDetails } from '../../ts/lib/generator';
 
 export type IACProvider = { iacProvider: 'CDK' | 'Terraform' };
 
@@ -43,6 +42,33 @@ const addAgentCoreInfra = (
       addAgentCoreTerraformInfra(tree, options);
       break;
   }
+
+  // Update shared constructs/terraform project configuration to depend on this project
+  updateJson(
+    tree,
+    joinPathFragments(
+      PACKAGES_DIR,
+      options.iacProvider === 'CDK'
+        ? SHARED_CONSTRUCTS_DIR
+        : SHARED_TERRAFORM_DIR,
+      'project.json',
+    ),
+    (config: ProjectConfiguration) => {
+      if (!config.targets) {
+        config.targets = {};
+      }
+      if (!config.targets.build) {
+        config.targets.build = {};
+      }
+      config.targets.build.dependsOn = [
+        ...(config.targets.build.dependsOn ?? []).filter(
+          (t) => t !== `${options.projectName}:build`,
+        ),
+        `${options.projectName}:build`,
+      ];
+      return config;
+    },
+  );
 };
 
 const addAgentCoreCDKInfra = (tree: Tree, options: AddAgentCoreInfraProps) => {
@@ -150,29 +176,6 @@ const addAgentCoreTerraformInfra = (
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
   );
-
-  const { fullyQualifiedName } = getTsLibDetails(tree, {
-    name: 'terraform',
-  });
-  const projectConfiguration = readProjectConfiguration(
-    tree,
-    fullyQualifiedName,
-  );
-  updateProjectConfiguration(tree, fullyQualifiedName, {
-    ...projectConfiguration,
-    targets: {
-      ...projectConfiguration.targets,
-      build: {
-        ...projectConfiguration.targets?.build,
-        dependsOn: [
-          ...(projectConfiguration.targets?.build?.dependsOn || []).filter(
-            (dep) => dep !== `${options.projectName}:build`,
-          ),
-          `${options.projectName}:build`,
-        ],
-      },
-    },
-  });
 };
 
 export interface AddMcpServerInfraProps {
