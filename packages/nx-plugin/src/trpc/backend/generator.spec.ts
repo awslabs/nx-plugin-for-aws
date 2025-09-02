@@ -364,4 +364,382 @@ describe('trpc backend generator', () => {
     expect(secondLocalServer).toContain('const PORT = 2023;');
     expect(thirdLocalServer).toContain('const PORT = 2024;');
   });
+
+  describe('terraform iacProvider', () => {
+    it('should generate terraform files for HTTP API with IAM auth and snapshot them', async () => {
+      await tsTrpcApiGenerator(tree, {
+        name: 'TestApi',
+        directory: 'apps',
+        computeType: 'ServerlessApiGatewayHttpApi',
+        auth: 'IAM',
+        iacProvider: 'Terraform',
+      });
+
+      // Find all terraform files
+      const allFiles = tree.listChanges().map((f) => f.path);
+      const terraformFiles = allFiles.filter(
+        (f) => f.includes('terraform') && f.endsWith('.tf'),
+      );
+
+      // Verify terraform files are created
+      expect(terraformFiles.length).toBeGreaterThan(0);
+
+      // Find the specific terraform files
+      const coreApiFile = terraformFiles.find((f) => f.includes('http-api'));
+      const appApiFile = terraformFiles.find((f) => f.includes('test-api'));
+
+      expect(coreApiFile).toBeDefined();
+      expect(appApiFile).toBeDefined();
+
+      // Read terraform file contents
+      const coreApiContent = tree.read(coreApiFile!, 'utf-8');
+      const appApiContent = tree.read(appApiFile!, 'utf-8');
+
+      // Verify IAM auth configuration
+      expect(appApiContent).toContain('authorization_type = "AWS_IAM"');
+      expect(appApiContent).not.toContain('variable "user_pool_id"');
+
+      // Verify tRPC-specific handler configuration
+      expect(appApiContent).toMatch(/handler\s+=\s+"index\.handler"/);
+      expect(appApiContent).toMatch(/runtime\s+=\s+"nodejs22\.x"/);
+
+      // Snapshot terraform files
+      const terraformFileContents = {
+        'http-api.tf': coreApiContent,
+        'test-api.tf': appApiContent,
+      };
+
+      expect(terraformFileContents).toMatchSnapshot('terraform-http-iam-files');
+    });
+
+    it('should generate terraform files for HTTP API with Cognito auth and snapshot them', async () => {
+      await tsTrpcApiGenerator(tree, {
+        name: 'TestApi',
+        directory: 'apps',
+        computeType: 'ServerlessApiGatewayHttpApi',
+        auth: 'Cognito',
+        iacProvider: 'Terraform',
+      });
+
+      // Find all terraform files
+      const allFiles = tree.listChanges().map((f) => f.path);
+      const terraformFiles = allFiles.filter(
+        (f) => f.includes('terraform') && f.endsWith('.tf'),
+      );
+
+      // Verify terraform files are created
+      expect(terraformFiles.length).toBeGreaterThan(0);
+
+      // Find the specific terraform files
+      const coreApiFile = terraformFiles.find((f) => f.includes('http-api'));
+      const appApiFile = terraformFiles.find((f) => f.includes('test-api'));
+
+      expect(coreApiFile).toBeDefined();
+      expect(appApiFile).toBeDefined();
+
+      // Read terraform file contents
+      const coreApiContent = tree.read(coreApiFile!, 'utf-8');
+      const appApiContent = tree.read(appApiFile!, 'utf-8');
+
+      // Verify Cognito auth configuration
+      expect(appApiContent).toContain('variable "user_pool_id"');
+      expect(appApiContent).toContain('variable "user_pool_client_ids"');
+      expect(appApiContent).toContain('authorization_type = "JWT"');
+
+      // Verify tRPC-specific handler configuration
+      expect(appApiContent).toMatch(/handler\s+=\s+"index\.handler"/);
+      expect(appApiContent).toMatch(/runtime\s+=\s+"nodejs22\.x"/);
+
+      // Snapshot terraform files
+      const terraformFileContents = {
+        'http-api.tf': coreApiContent,
+        'test-api.tf': appApiContent,
+      };
+
+      expect(terraformFileContents).toMatchSnapshot(
+        'terraform-http-cognito-files',
+      );
+    });
+
+    it('should generate terraform files for HTTP API with None auth and snapshot them', async () => {
+      await tsTrpcApiGenerator(tree, {
+        name: 'TestApi',
+        directory: 'apps',
+        computeType: 'ServerlessApiGatewayHttpApi',
+        auth: 'None',
+        iacProvider: 'Terraform',
+      });
+
+      // Find all terraform files
+      const allFiles = tree.listChanges().map((f) => f.path);
+      const terraformFiles = allFiles.filter(
+        (f) => f.includes('terraform') && f.endsWith('.tf'),
+      );
+
+      // Verify terraform files are created
+      expect(terraformFiles.length).toBeGreaterThan(0);
+
+      // Find the specific terraform files
+      const coreApiFile = terraformFiles.find((f) => f.includes('http-api'));
+      const appApiFile = terraformFiles.find((f) => f.includes('test-api'));
+
+      expect(coreApiFile).toBeDefined();
+      expect(appApiFile).toBeDefined();
+
+      // Read terraform file contents
+      const coreApiContent = tree.read(coreApiFile!, 'utf-8');
+      const appApiContent = tree.read(appApiFile!, 'utf-8');
+
+      // Verify None auth configuration
+      expect(appApiContent).toContain('authorization_type = "NONE"');
+      expect(appApiContent).not.toContain('variable "user_pool_id"');
+
+      // Verify tRPC-specific handler configuration
+      expect(appApiContent).toMatch(/handler\s+=\s+"index\.handler"/);
+      expect(appApiContent).toMatch(/runtime\s+=\s+"nodejs22\.x"/);
+
+      // Snapshot terraform files
+      const terraformFileContents = {
+        'http-api.tf': coreApiContent,
+        'test-api.tf': appApiContent,
+      };
+
+      expect(terraformFileContents).toMatchSnapshot(
+        'terraform-http-none-files',
+      );
+    });
+
+    it('should generate terraform files for REST API with IAM auth and snapshot them', async () => {
+      await tsTrpcApiGenerator(tree, {
+        name: 'TestApi',
+        directory: 'apps',
+        computeType: 'ServerlessApiGatewayRestApi',
+        auth: 'IAM',
+        iacProvider: 'Terraform',
+      });
+
+      // Find all terraform files
+      const allFiles = tree.listChanges().map((f) => f.path);
+      const terraformFiles = allFiles.filter(
+        (f) => f.includes('terraform') && f.endsWith('.tf'),
+      );
+
+      // Verify terraform files are created
+      expect(terraformFiles.length).toBeGreaterThan(0);
+
+      // Find the specific terraform files
+      const coreApiFile = terraformFiles.find((f) => f.includes('rest-api'));
+      const appApiFile = terraformFiles.find((f) => f.includes('test-api'));
+
+      expect(coreApiFile).toBeDefined();
+      expect(appApiFile).toBeDefined();
+
+      // Read terraform file contents
+      const coreApiContent = tree.read(coreApiFile!, 'utf-8');
+      const appApiContent = tree.read(appApiFile!, 'utf-8');
+
+      // Verify IAM auth configuration
+      expect(appApiContent).toContain('authorization = "AWS_IAM"');
+      expect(appApiContent).not.toContain('variable "user_pool_id"');
+
+      // Verify tRPC-specific handler configuration
+      expect(appApiContent).toMatch(/handler\s+=\s+"index\.handler"/);
+      expect(appApiContent).toMatch(/runtime\s+=\s+"nodejs22\.x"/);
+
+      // Snapshot terraform files
+      const terraformFileContents = {
+        'rest-api.tf': coreApiContent,
+        'test-api.tf': appApiContent,
+      };
+
+      expect(terraformFileContents).toMatchSnapshot('terraform-rest-iam-files');
+    });
+
+    it('should generate terraform files for REST API with Cognito auth and snapshot them', async () => {
+      await tsTrpcApiGenerator(tree, {
+        name: 'TestApi',
+        directory: 'apps',
+        computeType: 'ServerlessApiGatewayRestApi',
+        auth: 'Cognito',
+        iacProvider: 'Terraform',
+      });
+
+      // Find all terraform files
+      const allFiles = tree.listChanges().map((f) => f.path);
+      const terraformFiles = allFiles.filter(
+        (f) => f.includes('terraform') && f.endsWith('.tf'),
+      );
+
+      // Verify terraform files are created
+      expect(terraformFiles.length).toBeGreaterThan(0);
+
+      // Find the specific terraform files
+      const coreApiFile = terraformFiles.find((f) => f.includes('rest-api'));
+      const appApiFile = terraformFiles.find((f) => f.includes('test-api'));
+
+      expect(coreApiFile).toBeDefined();
+      expect(appApiFile).toBeDefined();
+
+      // Read terraform file contents
+      const coreApiContent = tree.read(coreApiFile!, 'utf-8');
+      const appApiContent = tree.read(appApiFile!, 'utf-8');
+
+      // Verify Cognito auth configuration
+      expect(appApiContent).toContain('variable "user_pool_id"');
+      expect(appApiContent).toContain('variable "user_pool_client_ids"');
+      expect(appApiContent).toContain('authorization = "COGNITO_USER_POOLS"');
+
+      // Verify tRPC-specific handler configuration
+      expect(appApiContent).toMatch(/handler\s+=\s+"index\.handler"/);
+      expect(appApiContent).toMatch(/runtime\s+=\s+"nodejs22\.x"/);
+
+      // Snapshot terraform files
+      const terraformFileContents = {
+        'rest-api.tf': coreApiContent,
+        'test-api.tf': appApiContent,
+      };
+
+      expect(terraformFileContents).toMatchSnapshot(
+        'terraform-rest-cognito-files',
+      );
+    });
+
+    it('should generate terraform files for REST API with None auth and snapshot them', async () => {
+      await tsTrpcApiGenerator(tree, {
+        name: 'TestApi',
+        directory: 'apps',
+        computeType: 'ServerlessApiGatewayRestApi',
+        auth: 'None',
+        iacProvider: 'Terraform',
+      });
+
+      // Find all terraform files
+      const allFiles = tree.listChanges().map((f) => f.path);
+      const terraformFiles = allFiles.filter(
+        (f) => f.includes('terraform') && f.endsWith('.tf'),
+      );
+
+      // Verify terraform files are created
+      expect(terraformFiles.length).toBeGreaterThan(0);
+
+      // Find the specific terraform files
+      const coreApiFile = terraformFiles.find((f) => f.includes('rest-api'));
+      const appApiFile = terraformFiles.find((f) => f.includes('test-api'));
+
+      expect(coreApiFile).toBeDefined();
+      expect(appApiFile).toBeDefined();
+
+      // Read terraform file contents
+      const coreApiContent = tree.read(coreApiFile!, 'utf-8');
+      const appApiContent = tree.read(appApiFile!, 'utf-8');
+
+      // Verify None auth configuration
+      expect(appApiContent).toContain('authorization = "NONE"');
+      expect(appApiContent).not.toContain('variable "user_pool_id"');
+
+      // Verify tRPC-specific handler configuration
+      expect(appApiContent).toMatch(/handler\s+=\s+"index\.handler"/);
+      expect(appApiContent).toMatch(/runtime\s+=\s+"nodejs22\.x"/);
+
+      // Snapshot terraform files
+      const terraformFileContents = {
+        'rest-api.tf': coreApiContent,
+        'test-api.tf': appApiContent,
+      };
+
+      expect(terraformFileContents).toMatchSnapshot(
+        'terraform-rest-none-files',
+      );
+    });
+
+    it('should configure project targets and dependencies correctly for terraform', async () => {
+      await tsTrpcApiGenerator(tree, {
+        name: 'TestApi',
+        directory: 'apps',
+        computeType: 'ServerlessApiGatewayHttpApi',
+        auth: 'IAM',
+        iacProvider: 'Terraform',
+      });
+
+      // Check that shared terraform project has build dependency on the API project
+      const sharedTerraformConfig = JSON.parse(
+        tree.read('packages/common/terraform/project.json', 'utf-8'),
+      );
+
+      expect(sharedTerraformConfig.targets.build.dependsOn).toContain(
+        '@proj/test-api:build',
+      );
+
+      // Verify project configuration doesn't have CDK-specific dependencies
+      const projectConfig = JSON.parse(
+        tree.read('apps/test-api/project.json', 'utf-8'),
+      );
+
+      // Should still have basic tRPC targets
+      expect(projectConfig.targets.build).toBeDefined();
+      expect(projectConfig.targets.serve).toBeDefined();
+    });
+
+    it('should not create CDK constructs when using terraform', async () => {
+      await tsTrpcApiGenerator(tree, {
+        name: 'TestApi',
+        directory: 'apps',
+        computeType: 'ServerlessApiGatewayHttpApi',
+        auth: 'IAM',
+        iacProvider: 'Terraform',
+      });
+
+      // Verify CDK files are NOT created
+      expect(
+        tree.exists('packages/common/constructs/src/app/apis/test-api.ts'),
+      ).toBeFalsy();
+      expect(
+        tree.exists('packages/common/constructs/src/core/api/http-api.ts'),
+      ).toBeFalsy();
+    });
+
+    it('should throw error for invalid iacProvider', async () => {
+      await expect(
+        tsTrpcApiGenerator(tree, {
+          name: 'TestApi',
+          directory: 'apps',
+          computeType: 'ServerlessApiGatewayHttpApi',
+          auth: 'IAM',
+          iacProvider: 'InvalidProvider' as any,
+        }),
+      ).rejects.toThrow('Unsupported iacProvider InvalidProvider');
+    });
+
+    it('should handle terraform with different directory structures', async () => {
+      await tsTrpcApiGenerator(tree, {
+        name: 'NestedApi',
+        directory: 'apps/nested/path',
+        computeType: 'ServerlessApiGatewayRestApi',
+        auth: 'Cognito',
+        iacProvider: 'Terraform',
+      });
+
+      // Verify terraform files are created
+      const allFiles = tree.listChanges().map((f) => f.path);
+      const terraformFiles = allFiles.filter(
+        (f) => f.includes('terraform') && f.endsWith('.tf'),
+      );
+
+      expect(terraformFiles.length).toBeGreaterThan(0);
+
+      // Find the app-specific terraform file
+      const appApiFile = terraformFiles.find((f) => f.includes('nested-api'));
+      expect(appApiFile).toBeDefined();
+
+      const terraformContent = tree.read(appApiFile!, 'utf-8');
+
+      // Verify the correct bundle path is used for nested directories
+      expect(terraformContent).toContain(
+        'dist/apps/nested/path/nested-api/bundle',
+      );
+      expect(terraformContent).toContain(
+        'authorization = "COGNITO_USER_POOLS"',
+      );
+    });
+  });
 });
