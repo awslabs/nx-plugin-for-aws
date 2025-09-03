@@ -50,7 +50,7 @@ export async function terraformProjectGenerator(
   );
   const distDir = join(outDirToRootRelativePath, 'dist', lib.dir);
   const tfDistDir = join(distDir, 'terraform');
-  const checkovDistDir = join(distDir, 'checkov');
+  const checkovReportJsonPath = join(distDir, 'checkov', 'checkov_report.json');
 
   // Calculate relative path from current project to common/terraform/metrics
   const metricsModulePath = relative(
@@ -100,7 +100,13 @@ export async function terraformProjectGenerator(
       },
     },
     build: {
-      dependsOn: ['fmt', 'test', 'validate', `${sharedTfProjectName}:build`],
+      dependsOn: [
+        'init',
+        'fmt',
+        'test',
+        'validate',
+        `${sharedTfProjectName}:build`,
+      ],
     },
     destroy: {
       executor: 'nx:run-commands',
@@ -145,14 +151,18 @@ export async function terraformProjectGenerator(
       defaultConfiguration: 'dev',
       configurations: {
         dev: {
-          command: `terraform plan -var-file=env/dev.tfvars -out=${tfDistDir}/dev.tfplan`,
+          commands: [
+            `make-dir ${tfDistDir}`,
+            `terraform plan -var-file=env/dev.tfvars -out=${tfDistDir}/dev.tfplan`,
+          ],
         },
       },
       options: {
         forwardAllArgs: true,
         cwd: '{projectRoot}/src',
+        parallel: false,
       },
-      dependsOn: ['init', 'build'],
+      dependsOn: ['build'],
     },
   };
 
@@ -192,7 +202,7 @@ export async function terraformProjectGenerator(
       options: {
         command: uvxCommand(
           'checkov',
-          `--directory . -o json --output-file-path ${checkovDistDir}`,
+          `--directory . -o cli -o json --output-file-path console,${checkovReportJsonPath}`,
         ),
         forwardAllArgs: true,
         cwd: '{projectRoot}/src',
@@ -263,7 +273,7 @@ export async function terraformProjectGenerator(
   addDependenciesToPackageJson(
     tree,
     {},
-    withVersions(['@nx-extend/terraform']),
+    withVersions(['@nx-extend/terraform', 'make-dir-cli']),
   );
 
   return () => {

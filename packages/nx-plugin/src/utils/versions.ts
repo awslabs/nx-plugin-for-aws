@@ -50,6 +50,7 @@ export const TS_VERSIONS = {
   'eslint-plugin-prettier': '5.5.4',
   express: '5.1.0',
   'jsonc-eslint-parser': '2.4.0',
+  'make-dir-cli': '4.0.0',
   'oidc-client-ts': '3.3.0',
   prettier: '3.6.2',
   'react-oidc-context': '3.3.0',

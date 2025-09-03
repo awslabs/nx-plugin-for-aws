@@ -104,11 +104,14 @@ describe('terraformProjectGenerator', () => {
 
       expect(planTarget.executor).toBe('nx:run-commands');
       expect(planTarget.defaultConfiguration).toBe('dev');
-      expect(planTarget.configurations.dev.command).toContain('terraform plan');
-      expect(planTarget.configurations.dev.command).toContain(
+      expect(planTarget.configurations.dev.commands[0]).toContain('make-dir');
+      expect(planTarget.configurations.dev.commands[1]).toContain(
+        'terraform plan',
+      );
+      expect(planTarget.configurations.dev.commands[1]).toContain(
         '-var-file=env/dev.tfvars',
       );
-      expect(planTarget.dependsOn).toEqual(['init', 'build']);
+      expect(planTarget.dependsOn).toEqual(['build']);
     });
 
     it('should configure init target correctly', async () => {
@@ -402,7 +405,7 @@ describe('terraformProjectGenerator', () => {
 
       // Check that plan target uses correct dist path
       const planCommand =
-        projectConfig.targets['plan'].configurations.dev.command;
+        projectConfig.targets['plan'].configurations.dev.commands[1];
       expect(planCommand).toContain(
         'dist/packages/my-terraform-project/terraform/dev.tfplan',
       );
