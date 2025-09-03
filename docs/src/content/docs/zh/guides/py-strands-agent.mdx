@@ -10,22 +10,23 @@ import RunGenerator from '@components/run-generator.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Link from '@components/link.astro';
 import Snippet from '@components/snippet.astro';
+import Infrastructure from '@components/infrastructure.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 
-生成一个用于构建AI工具代理的Python [Strands Agent](https://strandsagents.com/)，并可选部署到[Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/)。
+生成一个用于构建AI代理的Python [Strands Agent](https://strandsagents.com/)，并可选部署到[Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/)。
 
 ## 什么是Strands？
 
 [Strands](https://strandsagents.com/latest/documentation/docs/)是一个轻量级、生产就绪的Python框架，用于构建AI代理。主要特性包括：
 
-- **轻量且可定制**：简洁的代理循环设计，不干扰开发
-- **生产就绪**：完整的可观测性、追踪和规模化部署选项
+- **轻量且可定制**：简洁的代理循环，不干扰开发
+- **生产就绪**：完整的可观测性、追踪和扩展部署选项
 - **模型与供应商无关**：支持多种供应商的不同模型
 - **社区驱动工具**：强大的社区贡献工具集
 - **多代理支持**：支持团队协作和自主代理等高级技术
 - **灵活交互模式**：支持对话式、流式和非流式交互
 
-## 使用指南
+## 使用方式
 
 ### 生成Strands代理
 
@@ -48,25 +49,25 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 <FileTree>
   - your-project/
     - your_module/
-      - agent/ (或自定义名称)
-        - \_\_init\_\_.py Python包初始化
+      - agent/ (可自定义名称)
+        - \_\_init\_\_.py Python包初始化文件
         - agent.py 主代理定义（含示例工具）
-        - main.py Bedrock AgentCore Runtime入口
+        - main.py Bedrock AgentCore Runtime入口点
         - agentcore_mcp_client.py 用于调用Bedrock AgentCore Runtime上MCP服务的客户端工厂
-        - Dockerfile 代理部署入口文件（当`computeType`设为`None`时不生成）
+        - Dockerfile 代理容器化部署文件（当`computeType`设为`None`时不生成）
     - pyproject.toml 更新Strands依赖
     - project.json 更新代理服务目标
 </FileTree>
 
 :::note
-除非选择`None`作为`computeType`，生成器将同时创建CDK构造用于部署Strands代理。
+除非选择`None`作为`computeType`，生成器还会创建用于部署的CDK或Terraform基础设施代码。
 :::
 
 ## 开发Strands代理
 
 ### 添加工具
 
-工具是AI代理可调用的功能函数。Strands框架使用装饰器定义工具：
+工具是AI代理可调用的功能函数。Strands框架使用基于装饰器的简洁方式定义工具。
 
 在[`agent.py`](packages/nx-plugin/src/py/strands-agent/files/agent.py.template:6)中添加新工具：
 
@@ -86,15 +87,15 @@ def get_weather(city: str) -> str:
 
 # 将工具添加到代理
 agent = Agent(
-    system_prompt="您是一个拥有多种工具的智能助手",
+    system_prompt="您是一个拥有多种工具的智能助手。",
     tools=[calculate_sum, get_weather],
 )
 ```
 
-框架自动处理：
-- 基于类型提示的验证
-- JSON Schema生成
-- 错误处理与响应格式化
+Strands框架自动处理：
+- 基于函数类型提示的类型验证
+- 工具调用的JSON模式生成
+- 错误处理和响应格式化
 
 ### 使用预置工具
 
@@ -104,19 +105,20 @@ agent = Agent(
 from strands_tools import current_time, http_request, file_read
 
 agent = Agent(
-    system_prompt="您是一个智能助手",
+    system_prompt="您是一个智能助手。",
     tools=[current_time, http_request, file_read],
 )
 ```
 
 ### 模型配置
 
-默认使用Claude 4 Sonnet，可自定义模型提供方：
+默认使用Claude 4 Sonnet模型，可自定义模型供应商。参考[Strands模型供应商文档](https://strandsagents.com/latest/documentation/docs/user-guide/quickstart/#model-providers)进行配置：
 
 ```python
 from strands import Agent
 from strands.models import BedrockModel
 
+# 创建Bedrock模型实例
 bedrock_model = BedrockModel(
     model_id="anthropic.claude-sonnet-4-20250514-v1:0",
     region_name="us-west-2",
@@ -128,7 +130,11 @@ agent = Agent(model=bedrock_model)
 
 ### 集成MCP服务
 
-通过[`agentcore_mcp_client.py`](packages/nx-plugin/src/py/strands-agent/files/agentcore_mcp_client.py.template)集成MCP服务：
+可通过[添加MCP服务工具](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/tools/mcp-tools/)扩展代理能力。
+
+对于使用<Link path="/guides/py-mcp-server">`py#mcp-server`</Link>或<Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link>生成器创建的MCP服务（或部署在Bedrock AgentCore Runtime的其他服务），生成器会在`agentcore_mcp_client.py`中创建客户端工厂。
+
+在`agent.py`的`get_agent`方法中集成MCP工具。以下示例展示IAM(SigV4)认证方式：
 
 ```python
 # agent.py
@@ -140,6 +146,7 @@ from strands import Agent
 
 from .agentcore_mcp_client import AgentCoreMCPClient
 
+# 获取AWS区域和凭证
 region = os.environ["AWS_REGION"]
 boto_session = boto3.Session(region_name=region)
 credentials = boto_session.get_credentials()
@@ -163,11 +170,13 @@ def get_agent(session_id: str):
 ```
 
 :::tip
-JWT认证可使用`AgentCoreMCPClient.with_jwt_auth`方法。
+若目标MCP服务使用JWT认证，可使用`AgentCoreMCPClient.with_jwt_auth`方法创建客户端。
 :::
 
-CDK基础设施配置示例：
+上述IAM认证示例需在基础设施中配置两项：设置MCP服务ARN环境变量，授予代理调用权限。配置示例如下：
 
+<Infrastructure>
+<Fragment slot="cdk">
 ```ts {9, 13}
 import { MyProjectAgent, MyProjectMcpServer } from ':my-scope/common-constructs';
 
@@ -185,95 +194,243 @@ export class ExampleStack extends Stack {
   }
 }
 ```
+</Fragment>
+<Fragment slot="terraform">
+```terraform
+# MCP服务
+module "my_project_mcp_server" {
+  source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
+}
+
+# 代理
+module "my_project_agent" {
+  source = "../../common/terraform/src/app/agents/my-project-agent"
+
+  env = {
+    MCP_AGENTCORE_RUNTIME_ARN = module.my_project_mcp_server.agent_core_runtime_arn
+  }
+
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = [
+        "bedrock-agentcore:InvokeAgentRuntime"
+      ]
+      Resource = [
+        module.my_project_mcp_server.agent_core_runtime_arn,
+        "${module.my_project_mcp_server.agent_core_runtime_arn}/*"
+      ]
+    }
+  ]
+}
+```
+</Fragment>
+</Infrastructure>
+
+### 进阶指南
+
+深入开发Strands代理，请参考[Strands官方文档](https://strandsagents.com/latest/documentation/docs/)。
 
 ## Bedrock AgentCore Python SDK
 
-生成器配置[Bedrock AgentCore Python SDK](https://github.com/aws/bedrock-agentcore-sdk-python)实现运行时契约：
+生成器已配置[Bedrock AgentCore Python SDK](https://github.com/aws/bedrock-agentcore-sdk-python)来处理AgentCore代理的底层HTTP协议。
 
-```ts
-// CDK应用示例
-import { MyProjectAgent } from ':my-scope/common-constructs';
+SDK功能详情请参阅[官方文档](https://aws.github.io/bedrock-agentcore-starter-toolkit/user-guide/runtime/quickstart.html)。
 
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    const agent = new MyProjectAgent(this, 'MyProjectAgent');
-    agent.agentCoreRuntime.role.addToPolicy(
-      new PolicyStatement({
-        actions: ['bedrock:InvokeModel'],
-        resources: ['arn:aws:bedrock:*::foundation-model/*'],
-      }),
-    );
-  }
-}
-```
+:::note
+由于生成器已提供CDK/Terraform部署代码，无需使用文档中提到的`bedrock-agentcore-starter-toolkit`进行部署。
+:::
 
-## 运行与部署
+## 运行Strands代理
 
 ### 本地开发
 
-使用命令启动本地服务：
+生成器创建名为`<your-agent-name>-serve`的目标，用于本地启动代理进行测试：
 
 <NxCommands commands={['run your-project:agent-serve']} />
 
-### 部署到Bedrock AgentCore
+该命令使用`uv run`通过[Bedrock AgentCore Python SDK](https://github.com/aws/bedrock-agentcore-sdk-python)运行代理。
 
-CDK构造示例：
+## 部署到Bedrock AgentCore Runtime
+
+### 基础设施即代码
+
+若选择`BedrockAgentCoreRuntime`作为`computeType`，生成器将创建对应的CDK或Terraform部署代码。
+
+<Infrastructure>
+<Fragment slot="cdk">
+默认生成名为`<ProjectName>Agent`的CDK构造：
 
 ```ts {6}
 import { MyProjectAgent } from ':my-scope/common-constructs';
 
 export class ExampleStack extends Stack {
   constructor(scope: Construct, id: string) {
+    const agent = new MyProjectAgent(this, 'MyProjectAgent');
+
+    agent.agentCoreRuntime.role.addToPolicy(
+      new PolicyStatement({
+        actions: [
+          'bedrock:InvokeModel',
+          'bedrock:InvokeModelWithResponseStream',
+        ],
+        resources: ['arn:aws:bedrock:*::foundation-model/*'],
+      }),
+    );
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+默认生成名为`<ProjectName>-agent`的Terraform模块：
+
+```terraform
+module "my_project_agent" {
+  source = "../../common/terraform/src/app/agents/my-project-agent"
+
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream"
+      ]
+      Resource = [
+        "arn:aws:bedrock:*::foundation-model/*"
+      ]
+    }
+  ]
+}
+```
+</Fragment>
+</Infrastructure>
+
+:::note
+部署到AgentCore Runtime需确保AWS账户已启用所需基础模型。默认使用Claude 4 Sonnet，可按前文方法自定义。
+
+启用Bedrock模型访问权限请参考[官方指南](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html)。
+:::
+
+:::caution
+部署需要[Docker](https://www.docker.com/)环境。确保已安装并启动Docker，避免出现以下错误：
+
+```
+ERROR: 无法连接到Docker守护进程 unix://path/to/docker.sock
+```
+:::
+
+### 构建与容器化目标
+
+生成器添加`bundle`构建目标用于：
+- 使用`uv export`导出Python依赖到`requirements.txt`
+- 使用`uv pip install`安装目标平台(`aarch64-manylinux2014`)依赖
+
+同时添加`docker`目标用于：
+- 根据[Dockerfile](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-service-contract.html)构建符合AgentCore Runtime规范的容器镜像
+
+:::tip
+容器镜像使用特定标签（如`my-scope-my-project-agent:latest`），与CDK/Terraform基础设施代码关联，实现代理项目与Dockerfile的协同管理。
+:::
+
+### 认证配置
+
+#### IAM认证
+
+默认使用IAM认证部署：
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts {5}
+import { MyProjectAgent } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    new MyProjectAgent(this, 'MyProjectAgent');
+  }
+}
+
+// 授权Lambda函数调用代理
+agent.agentCoreRuntime.grantInvoke(lambdaFunction);
+```
+</Fragment>
+<Fragment slot="terraform">
+```terraform
+module "my_project_agent" {
+  source = "../../common/terraform/src/app/agents/my-project-agent"
+}
+
+// 授权策略示例
+{
+  Effect = "Allow"
+  Action = ["bedrock-agentcore:InvokeAgentRuntime"]
+  Resource = [
+    module.my_project_agent.agent_core_runtime_arn,
+    "${module.my_project_agent.agent_core_runtime_arn}/*"
+  ]
+}
+```
+</Fragment>
+</Infrastructure>
+
+#### Cognito JWT认证
+
+以下展示Cognito认证配置：
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts {13-18}
+import { MyProjectAgent } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const userPool = new UserPool(this, 'UserPool');
+    const client = userPool.addClient('Client', {
+      authFlows: { userPassword: true },
+    });
+
     new MyProjectAgent(this, 'MyProjectAgent', {
       authorizerConfiguration: {
         customJWTAuthorizer: {
-          discoveryUrl: `https://cognito-idp.${region}.amazonaws.com/${userPoolId}/.well-known/openid-configuration`,
-          allowedClients: [clientId],
+          discoveryUrl: `https://cognito-idp.${Stack.of(userPool).region}.amazonaws.com/${userPool.userPoolId}/.well-known/openid-configuration`,
+          allowedClients: [client.userPoolClientId],
         },
       },
     });
   }
 }
 ```
+</Fragment>
+<Fragment slot="terraform">
+```terraform {18-21}
+# packages/common/terraform/src/app/agents/my-project-agent/my-project-agent.tf
 
-### 认证配置
+locals {
+  aws_region = data.aws_region.current.name
+  user_pool_id = "xxx"
+  user_pool_client_ids = ["yyy"]
+}
 
-#### IAM认证
-
-默认使用IAM认证：
-
-```ts
-new MyProjectAgent(this, 'MyProjectAgent');
+module "agent_core_runtime" {
+  source = "../../../core/agent-core"
+  agent_runtime_name = "MyProjectAgent"
+  docker_image_tag = "my-scope-my-project-agent:latest"
+  server_protocol = "HTTP"
+  customJWTAuthorizer = {
+    discoveryUrl = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration",
+    allowedClients = local.user_pool_client_ids
+  }
+  env = var.env
+  additional_iam_policy_statements = var.additional_iam_policy_statements
+  tags = var.tags
+}
 ```
-
-#### Cognito JWT认证
-
-配置Cognito用户池：
-
-```ts {13-18}
-const userPool = new UserPool(this, 'UserPool');
-const client = userPool.addClient('Client', {
-  authFlows: { userPassword: true },
-});
-
-new MyProjectAgent(this, 'MyProjectAgent', {
-  authorizerConfiguration: {
-    customJWTAuthorizer: {
-      discoveryUrl: `https://cognito-idp.${region}.amazonaws.com/${userPoolId}/.well-known/openid-configuration`,
-      allowedClients: [clientId],
-    },
-  },
-});
-```
+</Fragment>
+</Infrastructure>
 
 ### 可观测性
 
-通过[AWS分布式OpenTelemetry](https://aws.amazon.com/otel/)实现监控，在CloudWatch控制台查看追踪数据。
+通过[AWS OpenTelemetry发行版](https://aws.amazon.com/otel/)自动配置可观测性，在`Dockerfile`中启用自动检测。
 
-:::caution
-部署需安装[Docker](https://www.docker.com/)，避免出现连接错误：
+在CloudWatch控制台的"GenAI Observability"菜单查看追踪数据。需启用[事务搜索](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search.html)功能。
 
-```
-ERROR: Cannot connect to the Docker daemon at unix://path/to/docker.sock.
-```
-:::
+更多细节参考[AgentCore可观测性文档](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html)。

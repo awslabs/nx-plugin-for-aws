@@ -10,18 +10,19 @@ import RunGenerator from '@components/run-generator.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Link from '@components/link.astro';
 import Snippet from '@components/snippet.astro';
+import Infrastructure from '@components/infrastructure.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 
 Genera un [Agente Strands](https://strandsagents.com/) en Python para construir agentes de IA con herramientas, y opcionalmente desplegarlo en [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/).
 
 ## ¿Qué es Strands?
 
-[Strands](https://strandsagents.com/latest/documentation/docs/) es un framework Python ligero y listo para producción para construir agentes de IA. Características clave incluyen:
+[Strands](https://strandsagents.com/latest/documentation/docs/) es un framework Python ligero y listo para producción para construir agentes de IA. Características clave:
 
 - **Ligero y personalizable**: Bucle de agente simple que no interfiere
-- **Listo para producción**: Observabilidad completa, tracing y opciones de despliegue para escalar
+- **Listo para producción**: Observabilidad completa, tracing y opciones de despliegue escalables
 - **Agnóstico a modelos y proveedores**: Soporta múltiples modelos de distintos proveedores
-- **Herramientas comunitarias**: Potente conjunto de herramientas contribuidas por la comunidad
+- **Herramientas comunitarias**: Conjunto potente de herramientas contribuidas por la comunidad
 - **Soporte multi-agente**: Técnicas avanzadas como equipos de agentes y agentes autónomos
 - **Modos de interacción flexibles**: Soporte conversacional, streaming y no streaming
 
@@ -52,21 +53,21 @@ El generador añadirá los siguientes archivos a tu proyecto Python existente:
         - \_\_init\_\_.py Inicialización del paquete Python
         - agent.py Definición principal del agente con herramientas de ejemplo
         - main.py Punto de entrada para Bedrock AgentCore Runtime
-        - agentcore_mcp_client.py Fábrica de clientes útil para invocar servidores MCP alojados en Bedrock AgentCore Runtime
+        - agentcore_mcp_client.py Factory client para invocar servidores MCP alojados en Bedrock AgentCore Runtime
         - Dockerfile Punto de entrada para alojar tu agente (excluido cuando `computeType` es `None`)
     - pyproject.toml Actualizado con dependencias de Strands
     - project.json Actualizado con objetivos de servicio del agente
 </FileTree>
 
 :::note
-A menos que hayas seleccionado `None` para `computeType`, el generador también creará un constructo CDK para desplegar tu Agente Strands.
+A menos que hayas seleccionado `None` para `computeType`, el generador también creará la infraestructura CDK o Terraform para desplegar tu Agente Strands.
 :::
 
 ## Trabajando con tu Agente Strands
 
 ### Añadiendo Herramientas
 
-Las herramientas son funciones que el agente de IA puede llamar para realizar acciones. El framework Strands usa un enfoque basado en decoradores para definir herramientas.
+Las herramientas son funciones que el agente de IA puede ejecutar para realizar acciones. Strands usa un enfoque basado en decoradores para definirlas.
 
 Puedes añadir nuevas herramientas en el archivo [`agent.py`](packages/nx-plugin/src/py/strands-agent/files/agent.py.template:6):
 
@@ -84,7 +85,7 @@ def get_weather(city: str) -> str:
     # Tu integración de API del clima aquí
     return f"Weather in {city}: Soleado, 25°C"
 
-# Añade herramientas a tu agente
+# Añade herramientas al agente
 agent = Agent(
     system_prompt="Eres un asistente útil con acceso a varias herramientas.",
     tools=[calculate_sum, get_weather],
@@ -92,13 +93,13 @@ agent = Agent(
 ```
 
 El framework Strands maneja automáticamente:
-- Validación de tipos basada en las anotaciones de tipo de tu función
-- Generación de esquema JSON para llamadas a herramientas
+- Validación de tipos según las anotaciones de tipo
+- Generación de esquemas JSON para tool calling
 - Manejo de errores y formato de respuestas
 
 ### Usando Herramientas Preconstruidas
 
-Strands provee una colección de herramientas preconstruidas a través del paquete `strands-tools`:
+Strands provee herramientas preconstruidas en el paquete `strands-tools`:
 
 ```python
 from strands_tools import current_time, http_request, file_read
@@ -109,9 +110,9 @@ agent = Agent(
 )
 ```
 
-### Configuración del Modelo
+### Configuración de Modelos
 
-Por defecto, los agentes Strands usan Claude 4 Sonnet, pero puedes personalizar el proveedor del modelo. Consulta la [documentación de Strands sobre proveedores de modelos](https://strandsagents.com/latest/documentation/docs/user-guide/quickstart/#model-providers) para opciones de configuración:
+Por defecto, Strands usa Claude 4 Sonnet, pero puedes personalizar el proveedor del modelo. Consulta la [documentación de Strands sobre proveedores de modelos](https://strandsagents.com/latest/documentation/docs/user-guide/quickstart/#model-providers):
 
 ```python
 from strands import Agent
@@ -131,7 +132,7 @@ agent = Agent(model=bedrock_model)
 
 Puedes [añadir herramientas de servidores MCP](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/tools/mcp-tools/) a tu agente Strands.
 
-Para consumir servidores MCP creados con los generadores <Link path="/guides/py-mcp-server">`py#mcp-server`</Link> o <Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link> (u otros alojados en Bedrock AgentCore Runtime), se genera una fábrica de clientes en `agentcore_mcp_client.py`.
+Para consumir servidores MCP creados con los generadores <Link path="/guides/py-mcp-server">`py#mcp-server`</Link> o <Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link> (u otros alojados en Bedrock AgentCore Runtime), se genera un client factory en `agentcore_mcp_client.py`.
 
 Puedes actualizar tu método `get_agent` en `agent.py` para crear clientes MCP y añadir herramientas. Este ejemplo muestra cómo hacerlo con autenticación IAM (SigV4):
 
@@ -163,17 +164,19 @@ def get_agent(session_id: str):
         mcp_tools = mcp_client.list_tools_sync()
 
         yield Agent(
-            system_prompt="..."
+            system_prompt="...",
             tools=[*mcp_tools],
         )
 ```
 
 :::tip
-Si tu servidor MCP objetivo usa autenticación JWT, puedes usar el método `AgentCoreMCPClient.with_jwt_auth` en su lugar.
+Si tu servidor MCP usa autenticación JWT, puedes usar el método `AgentCoreMCPClient.with_jwt_auth` en su lugar.
 :::
 
-Con el ejemplo de autenticación IAM anterior, necesitamos configurar dos cosas en nuestra infraestructura CDK. Primero, añadir la variable de entorno que consume nuestro agente para el ARN del AgentCore Runtime del servidor MCP, y segundo, otorgar permisos a nuestro agente para invocar el servidor MCP. Esto se puede lograr así:
+Con el ejemplo de autenticación IAM anterior, necesitamos configurar dos cosas en nuestra infraestructura: añadir la variable de entorno para la ARN del AgentCore Runtime del servidor MCP, y otorgar permisos para invocarlo:
 
+<Infrastructure>
+<Fragment slot="cdk">
 ```ts {9, 13}
 import { MyProjectAgent, MyProjectMcpServer } from ':my-scope/common-constructs';
 
@@ -191,99 +194,155 @@ export class ExampleStack extends Stack {
   }
 }
 ```
+</Fragment>
+<Fragment slot="terraform">
+```terraform
+# Servidor MCP
+module "my_project_mcp_server" {
+  source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
+}
+
+# Agente
+module "my_project_agent" {
+  source = "../../common/terraform/src/app/agents/my-project-agent"
+
+  env = {
+    MCP_AGENTCORE_RUNTIME_ARN = module.my_project_mcp_server.agent_core_runtime_arn
+  }
+
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = [
+        "bedrock-agentcore:InvokeAgentRuntime"
+      ]
+      Resource = [
+        module.my_project_mcp_server.agent_core_runtime_arn,
+        "${module.my_project_mcp_server.agent_core_runtime_arn}/*"
+      ]
+    }
+  ]
+}
+```
+</Fragment>
+</Infrastructure>
 
 ### Más Información
 
-Para una guía más detallada sobre cómo escribir agentes Strands, consulta la [documentación de Strands](https://strandsagents.com/latest/documentation/docs/).
+Para una guía más detallada sobre agentes Strands, consulta la [documentación de Strands](https://strandsagents.com/latest/documentation/docs/).
 
 ## SDK Python de Bedrock AgentCore
 
-El generador configura el [SDK Python de Bedrock AgentCore](https://github.com/aws/bedrock-agentcore-sdk-python) para manejar el contrato HTTP subyacente que los agentes en AgentCore deben implementar.
+El generador configura el [SDK Python de Bedrock AgentCore](https://github.com/aws/bedrock-agentcore-sdk-python) para manejar el contrato HTTP requerido por AgentCore.
 
-Puedes encontrar más detalles sobre las capacidades del SDK en la [documentación aquí](https://aws.github.io/bedrock-agentcore-starter-toolkit/user-guide/runtime/quickstart.html).
+Puedes encontrar más detalles en la [documentación del SDK](https://aws.github.io/bedrock-agentcore-starter-toolkit/user-guide/runtime/quickstart.html).
 
 :::note
-Dado que el generador provee un constructo CDK que maneja el despliegue de tu agente, no necesitas utilizar el `bedrock-agentcore-starter-toolkit` mencionado en los documentos.
+Como el generador provee infraestructura CDK/Terraform para desplegar tu agente, no necesitas usar el `bedrock-agentcore-starter-toolkit` mencionado en los docs.
 :::
 
 ## Ejecutando tu Agente Strands
 
 ### Desarrollo Local
 
-El generador configura un objetivo llamado `<your-agent-name>-serve` que inicia tu Agente Strands localmente para desarrollo y pruebas.
+El generador configura un target llamado `<your-agent-name>-serve` para iniciar tu agente localmente:
 
 <NxCommands commands={['run your-project:agent-serve']} />
 
-Este comando usa `uv run` para ejecutar tu Agente Strands usando el [SDK Python de Bedrock AgentCore](https://github.com/aws/bedrock-agentcore-sdk-python).
+Este comando usa `uv run` para ejecutar tu agente con el [SDK Python de Bedrock AgentCore](https://github.com/aws/bedrock-agentcore-sdk-python).
 
-## Desplegando tu Agente Strands en Bedrock AgentCore Runtime
+## Desplegando en Bedrock AgentCore Runtime
 
-### Constructo CDK
+### Infraestructura como Código
 
-Si seleccionaste `BedrockAgentCoreRuntime` para `computeType`, se genera un constructo CDK que puedes usar para desplegar tu Agente Strands en [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html).
+Si seleccionaste `BedrockAgentCoreRuntime` para `computeType`, se genera infraestructura CDK/Terraform relevante para desplegar tu agente en [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html).
 
-El constructo CDK se nombra según el `name` que elegiste al ejecutar el generador, o `<ProjectName>Agent` por defecto.
-
-Puedes usar este constructo CDK en una aplicación CDK:
+<Infrastructure>
+<Fragment slot="cdk">
+Se genera un construct CDK nombrado según el parámetro `name` o `<ProjectName>Agent` por defecto:
 
 ```ts {6}
 import { MyProjectAgent } from ':my-scope/common-constructs';
 
 export class ExampleStack extends Stack {
   constructor(scope: Construct, id: string) {
-    // Añade el agente a tu stack
+    // Agrega el agente a tu stack
     const agent = new MyProjectAgent(this, 'MyProjectAgent');
 
-    // Otorga permisos para invocar los modelos relevantes en Bedrock
+    // Otorga permisos para invocar modelos de Bedrock
     agent.agentCoreRuntime.role.addToPolicy(
       new PolicyStatement({
         actions: [
           'bedrock:InvokeModel',
           'bedrock:InvokeModelWithResponseStream',
         ],
-        // Puedes limitar esto a los modelos específicos que uses
         resources: ['arn:aws:bedrock:*::foundation-model/*'],
       }),
     );
   }
 }
 ```
+</Fragment>
+<Fragment slot="terraform">
+Se genera un módulo Terraform nombrado según el parámetro `name` o `<ProjectName>-agent` por defecto:
+
+```terraform
+# Agente
+module "my_project_agent" {
+  source = "../../common/terraform/src/app/agents/my-project-agent"
+
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream"
+      ]
+      Resource = [
+        "arn:aws:bedrock:*::foundation-model/*"
+      ]
+    }
+  ]
+}
+```
+</Fragment>
+</Infrastructure>
 
 :::note
-Al desplegar en Bedrock AgentCore Runtime, debes asegurarte de que los modelos base apropiados estén habilitados en tu cuenta de AWS. Por defecto, los agentes Strands usan Claude 4 Sonnet, pero esto se puede personalizar como se describió anteriormente.
+Al desplegar en Bedrock AgentCore Runtime, asegúrate de habilitar los modelos base en tu cuenta AWS. Por defecto se usa Claude 4 Sonnet, pero es configurable.
 
-Para habilitar el acceso a modelos en Amazon Bedrock, sigue las [instrucciones aquí](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html).
+Para habilitar modelos en Bedrock, sigue [estas instrucciones](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html).
 :::
 
 :::caution
-Se requiere [Docker](https://www.docker.com/) para construir y desplegar tu Agente Strands. Asegúrate de tener Docker instalado y en ejecución para evitar errores como:
+Se requiere [Docker](https://www.docker.com/) para construir y desplegar tu agente. Instala y ejecuta Docker para evitar errores como:
 
 ```
 ERROR: Cannot connect to the Docker daemon at unix://path/to/docker.sock.
 ```
 :::
 
-### Objetivos Bundle y Docker
+### Targets Bundle y Docker
 
-Para construir tu Agente Strands para Bedrock AgentCore Runtime, se añade un objetivo `bundle` a tu proyecto, que:
+El generador añade un target `bundle` que:
+- Exporta dependencias Python a `requirements.txt` con `uv export`
+- Instala dependencias para la plataforma objetivo (`aarch64-manylinux2014`) con `uv pip install`
 
-- Exporta tus dependencias Python a un archivo `requirements.txt` usando `uv export`
-- Instala dependencias para la plataforma objetivo (`aarch64-manylinux2014`) usando `uv pip install`
-
-También se añade un objetivo `docker` específico para tu Agente Strands, que:
-
-- Construye una imagen docker desde el `Dockerfile` que ejecuta tu agente, según el [contrato de runtime de AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-service-contract.html)
+También se añade un target `docker` específico que:
+- Construye una imagen Docker desde el `Dockerfile` según el [contrato de runtime de AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-service-contract.html)
 
 :::tip
-La imagen docker se construye usando un tag (por ejemplo `my-scope-my-project-agent:latest`), que el `Dockerfile` del constructo CDK hereda, permitiendo que tu `Dockerfile` esté ubicado junto a tu proyecto Strands Agent.
+La imagen Docker usa un tag (ej. `my-scope-my-project-agent:latest`) referenciado por tu infraestructura CDK/Terraform, permitiendo co-localizar el `Dockerfile` con tu proyecto.
 :::
 
 ### Autenticación
 
 #### IAM
 
-Por defecto, tu Agente Strands estará asegurado usando autenticación IAM. Simplemente despliégalo sin argumentos:
+Por defecto, tu agente usará autenticación IAM:
 
+<Infrastructure>
+<Fragment slot="cdk">
 ```ts {5}
 import { MyProjectAgent } from ':my-scope/common-constructs';
 
@@ -294,7 +353,7 @@ export class ExampleStack extends Stack {
 }
 ```
 
-Puedes otorgar acceso para invocar tu agente en Bedrock AgentCore Runtime usando el método `grantInvoke`, por ejemplo:
+Para otorgar acceso de invocación:
 
 ```ts {8}
 import { MyProjectAgent } from ':my-scope/common-constructs';
@@ -308,11 +367,38 @@ export class ExampleStack extends Stack {
   }
 }
 ```
+</Fragment>
+<Fragment slot="terraform">
+```terraform
+# Agente
+module "my_project_agent" {
+  source = "../../common/terraform/src/app/agents/my-project-agent"
+}
+```
 
-#### Autenticación Cognito JWT
+Para otorgar permisos:
 
-Para configurar autenticación JWT, puedes pasar la propiedad `authorizerConfiguration` a tu constructo de agente. Este ejemplo configura un user pool y cliente de Cognito para asegurar el agente:
+```terraform
+{
+  Effect = "Allow"
+  Action = [
+    "bedrock-agentcore:InvokeAgentRuntime"
+  ]
+  Resource = [
+    module.my_project_agent.agent_core_runtime_arn,
+    "${module.my_project_agent.agent_core_runtime_arn}/*"
+  ]
+}
+```
+</Fragment>
+</Infrastructure>
 
+#### Autenticación JWT con Cognito
+
+Ejemplo de configuración de autenticación JWT:
+
+<Infrastructure>
+<Fragment slot="cdk">
 ```ts {13-18}
 import { MyProjectAgent } from ':my-scope/common-constructs';
 
@@ -336,11 +422,40 @@ export class ExampleStack extends Stack {
   }
 }
 ```
+</Fragment>
+<Fragment slot="terraform">
+```terraform {18-21}
+# packages/common/terraform/src/app/agents/my-project-agent/my-project-agent.tf
+
+data "aws_region" "current" {}
+
+locals {
+  aws_region = data.aws_region.current.name
+  user_pool_id = "xxx"
+  user_pool_client_ids = ["yyy"]
+}
+
+module "agent_core_runtime" {
+  source = "../../../core/agent-core"
+  agent_runtime_name = "MyProjectAgent"
+  docker_image_tag = "my-scope-my-project-agent:latest"
+  server_protocol = "HTTP"
+  customJWTAuthorizer = {
+    discoveryUrl = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration",
+    allowedClients = local.user_pool_client_ids
+  }
+  env = var.env
+  additional_iam_policy_statements = var.additional_iam_policy_statements
+  tags = var.tags
+}
+```
+</Fragment>
+</Infrastructure>
 
 ### Observabilidad
 
-Tu agente se configura automáticamente con observabilidad usando [AWS Distro for Open Telemetry](https://aws.amazon.com/otel/) (ADOT), mediante la configuración de auto-instrumentación en tu `Dockerfile`.
+Tu agente se configura automáticamente con observabilidad usando [AWS Distro for Open Telemetry](https://aws.amazon.com/otel/) (ADOT) mediante auto-instrumentación en el `Dockerfile`.
 
-Puedes encontrar trazas en la consola AWS de CloudWatch, seleccionando "GenAI Observability" en el menú. Nota que para que las trazas aparezcan, debes habilitar [Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search.html).
+Puedes encontrar trazas en CloudWatch seleccionando "GenAI Observability". Para ver trazas, habilita [Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search.html).
 
-Para más detalles, consulta la [documentación de AgentCore sobre observabilidad](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html).
+Para más detalles, consulta la [documentación de observabilidad de AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html).

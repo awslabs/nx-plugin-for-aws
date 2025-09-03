@@ -4,13 +4,16 @@ title: "Déploiement MCP Bedrock"
 
 
 
-import Link from '@components/link.astro'
+import Link from '@components/link.astro';
+import Infrastructure from '@components/infrastructure.astro';
 
-### Construct CDK
+### Infrastructure en tant que code
 
-Si vous avez sélectionné `BedrockAgentCoreRuntime` pour `computeType`, un construct CDK est généré pour déployer votre serveur MCP sur [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html).
+Si vous avez sélectionné `BedrockAgentCoreRuntime` pour `computeType`, l'infrastructure CDK ou Terraform correspondante est générée. Vous pouvez l'utiliser pour déployer votre serveur MCP sur [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html).
 
-Le construct CDK est nommé selon le `name` choisi lors de l'exécution du générateur, ou `<ProjectName>McpServer` par défaut.
+<Infrastructure>
+<Fragment slot="cdk">
+Un construct CDK est généré pour votre projet, nommé selon le `name` choisi lors de l'exécution du générateur, ou `<ProjectName>McpServer` par défaut.
 
 Vous pouvez utiliser ce construct CDK dans une application CDK :
 
@@ -24,6 +27,21 @@ export class ExampleStack extends Stack {
   }
 }
 ```
+</Fragment>
+<Fragment slot="terraform">
+Un module Terraform est généré pour votre projet, nommé selon le `name` choisi lors de l'exécution du générateur, ou `<ProjectName>-mcp-server` par défaut.
+
+Vous pouvez utiliser ce module Terraform dans un projet Terraform :
+
+```terraform
+# Serveur MCP
+module "my_project_mcp_server" {
+  # Chemin relatif vers le module généré dans le projet common/terraform
+  source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
+}
+```
+</Fragment>
+</Infrastructure>
 
 :::caution
 [Docker](https://www.docker.com/) est requis pour construire et déployer votre serveur MCP. Assurez-vous d'avoir installé et lancé Docker pour éviter des erreurs comme :
@@ -37,8 +55,10 @@ ERROR: Cannot connect to the Docker daemon at unix://path/to/docker.sock.
 
 #### IAM
 
-Par défaut, votre serveur MCP sera sécurisé avec l'authentification IAM. Déployez-le simplement sans arguments :
+Par défaut, votre serveur MCP sera sécurisé via l'authentification IAM. Déployez-le simplement sans arguments :
 
+<Infrastructure>
+<Fragment slot="cdk">
 ```ts {5}
 import { MyProjectMcpServer } from ':my-scope/common-constructs';
 
@@ -49,7 +69,7 @@ export class ExampleStack extends Stack {
 }
 ```
 
-Vous pouvez autoriser l'accès à votre MCP sur Bedrock AgentCore Runtime avec la méthode `grantInvoke`. Par exemple, pour permettre à un agent généré avec le générateur <Link path="/guides/py-strands-agent">`py#strands-agent`</Link> d'appeler votre serveur MCP :
+Vous pouvez accorder l'accès pour invoquer votre MCP sur Bedrock AgentCore Runtime en utilisant la méthode `grantInvoke`. Par exemple, vous pourriez autoriser un agent généré avec le générateur <Link path="/guides/py-strands-agent">`py#strands-agent`</Link> à appeler votre serveur MCP :
 
 ```ts {8}
 import { MyProjectAgent, MyProjectMcpServer } from ':my-scope/common-constructs';
@@ -63,10 +83,40 @@ export class ExampleStack extends Stack {
   }
 }
 ```
+</Fragment>
+<Fragment slot="terraform">
+```terraform
+# Serveur MCP
+module "my_project_mcp_server" {
+  # Chemin relatif vers le module généré dans le projet common/terraform
+  source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
+}
+```
 
-#### Authentification JWT avec Cognito
+Pour accorder l'accès d'invocation, vous devrez ajouter une politique similaire à celle-ci, en référençant la sortie `module.my_project_mcp_server.agent_core_runtime_arn` :
 
-Pour configurer l'authentification JWT, passez la propriété `authorizerConfiguration` à votre construct de serveur MCP. Voici un exemple configurant un user pool Cognito pour sécuriser le serveur :
+```terraform
+{
+  Effect = "Allow"
+  Action = [
+    "bedrock-agentcore:InvokeAgentRuntime"
+  ]
+  Resource = [
+    module.my_project_mcp_server.agent_core_runtime_arn,
+    "${module.my_project_mcp_server.agent_core_runtime_arn}/*"
+  ]
+}
+```
+</Fragment>
+</Infrastructure>
+
+#### Authentification Cognito JWT
+
+L'exemple suivant montre comment configurer l'authentification Cognito pour votre agent.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Pour configurer l'authentification JWT, passez la propriété `authorizerConfiguration` à votre construct de serveur MCP. Voici un exemple configurant un user pool et client Cognito :
 
 ```ts {14-17}
 import { MyProjectMcpServer } from ':my-scope/common-constructs';
@@ -91,3 +141,36 @@ export class ExampleStack extends Stack {
   }
 }
 ```
+</Fragment>
+<Fragment slot="terraform">
+Pour configurer l'authentification JWT, modifiez votre module MCP Server pour configurer la variable `customJWTAuthorizer` comme suit :
+
+```terraform {18-21}
+# packages/common/terraform/src/app/mcp-servers/my-project-mcp-server/my-project-mcp-server.tf
+
+data "aws_region" "current" {}
+
+locals {
+  aws_region = data.aws_region.current.name
+
+  # Remplacez par vos IDs de user pool et client ou exposez-les comme variables
+  user_pool_id = "xxx"
+  user_pool_client_ids = ["yyy"]
+}
+
+module "agent_core_runtime" {
+  source = "../../../core/agent-core"
+  agent_runtime_name = "MyProjectMcpServer"
+  docker_image_tag = "my-scope-my-project-agent:latest"
+  server_protocol = "MCP"
+  customJWTAuthorizer = {
+    discoveryUrl = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration",
+    allowedClients = local.user_pool_client_ids
+  }
+  env = var.env
+  additional_iam_policy_statements = var.additional_iam_policy_statements
+  tags = var.tags
+}
+```
+</Fragment>
+</Infrastructure>
