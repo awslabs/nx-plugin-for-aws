@@ -222,7 +222,6 @@ describe('terraformProjectGenerator', () => {
       expect(testTarget.executor).toBe('nx:run-commands');
       expect(testTarget.cache).toBe(true);
       expect(testTarget.options.command).toContain('uvx checkov==');
-      expect(testTarget.dependsOn).toEqual(['validate']);
     });
   });
 

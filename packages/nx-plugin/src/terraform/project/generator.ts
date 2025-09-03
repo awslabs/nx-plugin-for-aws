@@ -202,7 +202,6 @@ export async function terraformProjectGenerator(
         forwardAllArgs: true,
         cwd: '{projectRoot}/src',
       },
-      dependsOn: ['validate'],
     },
     validate: {
       executor: 'nx:run-commands',
