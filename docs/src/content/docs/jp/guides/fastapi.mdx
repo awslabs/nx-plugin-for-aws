@@ -5,22 +5,23 @@ description: "FastAPIのリファレンスドキュメント"
 
 
 
-import { FileTree, AnchorHeading } from '@astrojs/starlight/components';
+import { FileTree, AnchorHeading, Tabs, TabItem } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
 import Snippet from '@components/snippet.astro';
 
 [FastAPI](https://fastapi.tiangolo.com/) はPythonでAPIを構築するためのフレームワークです。
 
-FastAPIジェネレータは、AWS CDKインフラストラクチャが設定された新しいFastAPIプロジェクトを作成します。生成されるバックエンドはサーバーレスデプロイ用にAWS Lambdaを使用し、AWS API Gateway APIを介して公開されます。[AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/) を設定し、ロギング、AWS X-Rayトレーシング、CloudWatchメトリクスを含むオブザーバビリティ機能を実装します。
+FastAPIジェネレータは、AWS CDKまたはTerraformのインフラストラクチャ設定を備えた新しいFastAPIを作成します。生成されるバックエンドはサーバーレスデプロイ用にAWS Lambdaを使用し、AWS API Gateway APIを介して公開されます。[AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/) を設定し、ロギング、AWS X-Rayトレーシング、Cloudwatchメトリクスを含むオブザーバビリティを実現します。
 
 ## 使用方法
 
 ### FastAPIの生成
 
-新しいFastAPIプロジェクトを2つの方法で生成できます:
+新しいFastAPIは2つの方法で生成できます:
 
 <RunGenerator generator="py#fast-api" />
 
@@ -47,11 +48,11 @@ FastAPIジェネレータは、AWS CDKインフラストラクチャが設定さ
 
 </FileTree>
 
-ジェネレータはまた、APIのデプロイに使用できるCDKコンストラクトを`packages/common/constructs`ディレクトリに作成します。
+また、`packages/common`ディレクトリにAPIをデプロイするためのCDKまたはTerraformのインフラストラクチャコードも生成されます。
 
 ## FastAPIの実装
 
-メインのAPI実装は`main.py`に記述します。APIルートとその実装を定義する場所です。例:
+メインのAPI実装は`main.py`に記述します。ここでAPIルートとその実装を定義します。例:
 
 ```python
 from .init import app, tracer
@@ -69,7 +70,7 @@ def create_item(item: Item):
     return ...
 ```
 
-ジェネレータが自動的に設定する機能:
+ジェネレータは以下の機能を自動的に設定します:
 
 1. オブザーバビリティのためのAWS Lambda Powertools統合
 2. エラーハンドリングミドルウェア
@@ -81,7 +82,7 @@ def create_item(item: Item):
 
 #### ロギング
 
-構造化ロギングをAWS Lambda Powertoolsで設定。ルートハンドラでロガーにアクセス:
+構造化ロギングをAWS Lambda Powertoolsで設定します。ルートハンドラでロガーにアクセス:
 
 ```python
 from .init import app, logger
@@ -92,16 +93,16 @@ def read_item(item_id: int):
     return {"item_id": item_id}
 ```
 
-ロガーに自動的に含まれる情報:
+ロガーには自動的に以下が含まれます:
 
-- リクエストトレーシング用相関ID
+- リクエストトレース用相関ID
 - リクエストパスとメソッド
 - Lambdaコンテキスト情報
 - コールドスタート指標
 
 #### トレーシング
 
-AWS X-Rayトレーシングを自動設定。カスタムサブセグメントを追加可能:
+AWS X-Rayトレーシングが自動設定されます。カスタムサブセグメントを追加可能:
 
 ```python
 from .init import app, tracer
@@ -117,7 +118,7 @@ def read_item(item_id: int):
 
 #### メトリクス
 
-CloudWatchメトリクスを各リクエストで自動収集。カスタムメトリクスを追加:
+リクエスト毎にCloudWatchメトリクスを自動収集。カスタムメトリクスを追加可能:
 
 ```python
 from .init import app, metrics
@@ -129,10 +130,10 @@ def read_item(item_id: int):
     return {"item_id": item_id}
 ```
 
-デフォルトで収集されるメトリクス:
+デフォルトメトリクス:
 
-- リクエスト数
-- 成功/失敗数
+- リクエストカウント
+- 成功/失敗カウント
 - コールドスタートメトリクス
 - ルート別メトリクス
 
@@ -152,22 +153,26 @@ def read_item(item_id: int):
 
 未処理例外はミドルウェアで捕捉され:
 
-1. スタックトレース付きで例外をログ記録
+1. スタックトレース付きで例外を記録
 2. 失敗メトリクスを記録
 3. クライアントに安全な500レスポンスを返却
 4. 相関IDを保持
 
 :::tip
-`api-connection`ジェネレータを使用する場合、コード生成を改善するためAPI操作のレスポンスモデルを明示的に指定することを推奨。<Link path="guides/api-connection/react-fastapi#errors">詳細はこちら</Link>。
+`api-connection`ジェネレータを使用する場合、より良いコード生成のためAPI操作のレスポンスモデルを指定することを推奨します。<Link path="guides/api-connection/react-fastapi#errors">詳細はこちら</Link>
 :::
 
 ### ストリーミング
 
-FastAPIでは[`StreamingResponse`](https://fastapi.tiangolo.com/reference/responses/?h=streaming#fastapi.responses.StreamingResponse)レスポンスタイプを使用してストリーミング応答を実装可能。
+FastAPIでは[`StreamingResponse`](https://fastapi.tiangolo.com/reference/responses/?h=streaming#fastapi.responses.StreamingResponse)レスポンスタイプを使用してストリーミング応答を実装できます。
 
 #### インフラストラクチャ変更
 
-AWS API Gatewayはストリーミング応答をサポートしていないため、AWS Lambda Function URLを使用する必要があります。生成された`common/constructs/src/app/apis/<name>-api.ts`コンストラクトをFunction URLをデプロイするものに置き換えます。
+AWS API Gatewayはストリーミング応答をサポートしていないため、ストリーミングをサポートするプラットフォームにデプロイする必要があります。最も簡単なオプションはAWS Lambda Function URLを使用することです。
+
+<Infrastructure>
+<Fragment slot="cdk">
+これを実現するには、生成された`common/constructs/src/app/apis/<name>-api.ts`コンストラクトをFunction URLをデプロイするものに置き換えます。
 
 <details>
 <summary>ストリーミング用FunctionURLコンストラクトの例</summary>
@@ -264,20 +269,177 @@ export class MyApi extends Construct {
 ```
 
 </details>
+</Fragment>
+<Fragment slot="terraform">
+Terraformでは、生成されたAPI Gatewayインフラをストリーミング応答をサポートするLambda Function URLに置き換えます。
+
+<details>
+<summary>ストリーミング用Lambda Function URL設定例</summary>
+
+```hcl
+# 現在のAWSコンテキストのデータソース
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
+# ストリーミング用FastAPI Lambda関数
+resource "aws_lambda_function" "my_api_handler" {
+  filename         = "../../../../../../dist/packages/my_api/bundle.zip"
+  function_name    = "my-api-handler"
+  role            = aws_iam_role.lambda_execution_role.arn
+  handler         = "run.sh"
+  runtime         = "python3.12"
+  timeout         = 30
+  source_code_hash = filebase64sha256("../../../../../../dist/packages/my_api/bundle.zip")
+
+  # X-Rayトレーシングを有効化
+  tracing_config {
+    mode = "Active"
+  }
+
+  # Lambda Web Adapter用環境変数
+  environment {
+    variables = {
+      AWS_CONNECTION_REUSE_ENABLED = "1"
+      PORT                        = "8000"
+      AWS_LWA_INVOKE_MODE        = "response_stream"
+      AWS_LAMBDA_EXEC_WRAPPER    = "/opt/bootstrap"
+    }
+  }
+
+  # Lambda Web Adapterレイヤー追加
+  layers = [
+    "arn:aws:lambda:${data.aws_region.current.name}:753240598075:layer:LambdaAdapterLayerX86:24"
+  ]
+
+  depends_on = [
+    aws_iam_role_policy_attachment.lambda_logs,
+    aws_cloudwatch_log_group.lambda_logs,
+  ]
+}
+
+# Lambda関数用CloudWatchロググループ
+resource "aws_cloudwatch_log_group" "lambda_logs" {
+  name              = "/aws/lambda/my-api-handler"
+  retention_in_days = 14
+}
+
+# Lambda実行用IAMロール
+resource "aws_iam_role" "lambda_execution_role" {
+  name = "my-api-lambda-execution-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+# 基本実行ポリシーをアタッチ
+resource "aws_iam_role_policy_attachment" "lambda_logs" {
+  role       = aws_iam_role.lambda_execution_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+# X-Rayトレーシングポリシーをアタッチ
+resource "aws_iam_role_policy_attachment" "lambda_xray" {
+  role       = aws_iam_role.lambda_execution_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+}
+
+# ストリーミング対応Lambda Function URL
+resource "aws_lambda_function_url" "my_api_url" {
+  function_name      = aws_lambda_function.my_api_handler.function_name
+  authorization_type = "AWS_IAM"
+  invoke_mode       = "RESPONSE_STREAM"
+
+  cors {
+    allow_credentials = false
+    allow_origins     = ["*"]
+    allow_methods     = ["*"]
+    allow_headers = [
+      "authorization",
+      "content-type",
+      "x-amz-content-sha256",
+      "x-amz-date",
+      "x-amz-security-token"
+    ]
+    expose_headers = ["date", "keep-alive"]
+    max_age       = 86400
+  }
+}
+
+# Function URLの出力
+output "my_api_url" {
+  description = "ストリーミングFastAPI Lambda関数のURL"
+  value       = aws_lambda_function_url.my_api_url.function_url
+}
+
+# オプション: ランタイム設定用SSMパラメータ作成
+resource "aws_ssm_parameter" "my_api_url" {
+  name  = "/runtime-config/apis/MyApi"
+  type  = "String"
+  value = aws_lambda_function_url.my_api_url.function_url
+
+  tags = {
+    Environment = "production"
+    Service     = "my-api"
+  }
+}
+
+# Function URL呼び出しアクセス許可用IAMポリシー
+resource "aws_iam_policy" "my_api_invoke_policy" {
+  name        = "my-api-invoke-policy"
+  description = "ストリーミングFastAPI Lambda関数URLの呼び出しを許可するポリシー"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = "lambda:InvokeFunctionUrl"
+        Resource = aws_lambda_function.my_api_handler.arn
+        Condition = {
+          StringEquals = {
+            "lambda:FunctionUrlAuthType" = "AWS_IAM"
+          }
+        }
+      }
+    ]
+  })
+}
+
+# 例: ポリシーをロールにアタッチ（必要に応じてコメント解除し修正）
+# resource "aws_iam_role_policy_attachment" "my_api_invoke_access" {
+#   role       = var.authenticated_role_name
+#   policy_arn = aws_iam_policy.my_api_invoke_policy.arn
+# }
+```
+
+</details>
+
+</Fragment>
+</Infrastructure>
 
 :::note
-エンドツーエンドの例については<Link path="/get_started/tutorials/dungeon-game/overview">ダンジョンアドベンチャーチュートリアル</Link>を参照
+エンドツーエンドの例については<Link path="/get_started/tutorials/dungeon-game/overview">ダンジョンアドベンチャーチュートリアル</Link>を参照してください
 :::
 
-#### 実装方法
+#### 実装
 
 インフラストラクチャをストリーミング対応に更新後、FastAPIでストリーミングAPIを実装できます。APIは以下を行う必要があります:
 
 - [`StreamingResponse`](https://fastapi.tiangolo.com/reference/responses/?h=streaming#fastapi.responses.StreamingResponse)を返す
 - 各レスポンスチャンクの戻り値型を宣言
-- <Link path="guides/api-connection/react-fastapi">API Connection</Link>を使用する場合はOpenAPIベンダー拡張`x-streaming: true`を追加
+- <Link path="guides/api-connection/react-fastapi">API接続</Link>を使用する場合、OpenAPIベンダー拡張`x-streaming: true`を追加
 
-例: APIからJSONオブジェクトのストリームを送信する実装:
+例: APIからJSONオブジェクトのストリームを返す実装:
 
 ```py /return (StreamingResponse)/ /openapi_extra[^)]*/ /-> (Chunk)/
 from pydantic import BaseModel
@@ -296,13 +458,17 @@ def my_stream() -> Chunk:
     return StreamingResponse(stream_chunks(), media_type="application/json")
 ```
 
-#### 消費方法
+#### 消費
 
-ストリームレスポンスを消費するには、<Link path="guides/api-connection/react-fastapi#consuming-a-stream">API Connectionジェネレータ</Link>を使用してタイプセーフなチャンク反復処理を実装できます。
+ストリーミングレスポンスを消費するには、<Link path="guides/api-connection/react-fastapi#consuming-a-stream">API接続ジェネレータ</Link>を使用してチャンクを反復処理する型安全なメソッドを利用できます。
 
 ## FastAPIのデプロイ
 
-FastAPIジェネレータは`common/constructs`フォルダにCDKコンストラクトを作成します。CDKアプリケーションで使用可能:
+FastAPIジェネレータは選択した`iacProvider`に基づきCDKまたはTerraformのインフラストラクチャコードを作成します。これを使用してFastAPIをデプロイできます。
+
+<Infrastructure>
+<Fragment slot="cdk">
+`common/constructs`フォルダにAPIデプロイ用CDKコンストラクトがあります。CDKアプリケーションで使用可能:
 
 ```ts {6-8}
 import { MyApi } from ':my-scope/common-constructs';
@@ -320,14 +486,14 @@ export class ExampleStack extends Stack {
 これにより以下が設定されます:
 
 1. FastAPIアプリの各操作用AWS Lambda関数
-2. API Gateway HTTP/REST APIトリガー
+2. 関数トリガー用API Gateway HTTP/REST API
 3. IAMロールと権限
 4. CloudWatchロググループ
 5. X-Rayトレーシング設定
 6. CloudWatchメトリクスネームスペース
 
 :::note
-Cognito認証を選択した場合、APIコンストラクトに`identity`プロパティを指定する必要があります:
+`Cognito`認証を選択した場合、APIコンストラクトに`identity`プロパティを指定する必要があります:
 
 ```ts {9}
 import { MyApi, UserIdentity } from ':my-scope/common-constructs';
@@ -346,25 +512,141 @@ export class ExampleStack extends Stack {
 
 `UserIdentity`コンストラクトは<Link path="/guides/react-website-auth">`ts#react-website-auth`ジェネレータ</Link>で生成可能
 :::
+</Fragment>
+<Fragment slot="terraform">
+`common/terraform`フォルダにTerraformモジュールがあります。Terraform設定で使用可能:
 
-### タイプセーフな統合
+```hcl {2}
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
 
-<Snippet name="api/type-safe-api-integrations" parentHeading="Type-Safe Integrations" />
+  # Lambda関数用環境変数
+  env = {
+    ENVIRONMENT = var.environment
+    LOG_LEVEL   = "INFO"
+  }
+
+  # 追加IAMポリシーが必要な場合
+  additional_iam_policy_statements = [
+    # APIに必要な追加権限を記述
+  ]
+
+  tags = local.common_tags
+}
+```
+
+これにより以下が設定されます:
+
+1. 全FastAPIルートを処理するAWS Lambda関数
+2. 関数トリガー用API Gateway HTTP/REST API
+3. IAMロールと権限
+4. CloudWatchロググループ
+5. X-Rayトレーシング設定
+6. CORS設定
+
+:::note
+`Cognito`認証を選択した場合、Cognito設定を指定する必要があります:
+
+```hcl {4-5}
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  user_pool_id         = local.user_pool_id
+  user_pool_client_ids = [local.client_id]
+
+  env = {
+    ENVIRONMENT = var.environment
+    LOG_LEVEL   = "INFO"
+  }
+
+  tags = local.common_tags
+}
+```
+
+適切なTerraformリソースまたはモジュールでCognitoユーザープールとクライアントを設定可能
+:::
+
+モジュールから利用可能な出力:
+
+```hcl
+# APIエンドポイントにアクセス
+output "api_url" {
+  value = module.my_api.stage_invoke_url
+}
+
+# Lambda関数詳細にアクセス
+output "lambda_function_name" {
+  value = module.my_api.lambda_function_name
+}
+
+# 追加権限付与用IAMロールARN
+output "lambda_execution_role_arn" {
+  value = module.my_api.lambda_execution_role_arn
+}
+```
+
+CORS設定をカスタマイズ可能:
+
+```hcl
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  # カスタムCORS設定
+  cors_allow_origins = ["https://myapp.com", "https://staging.myapp.com"]
+  cors_allow_methods = ["GET", "POST", "PUT", "DELETE"]
+  cors_allow_headers = [
+    "authorization",
+    "content-type",
+    "x-custom-header"
+  ]
+
+  tags = local.common_tags
+}
+```
+
+:::caution
+ジェネレータ実行時に`auth`に`None`を選択した場合、以下のようなCheckovチェック失敗が発生する可能性があります:
+
+<Tabs syncKey="http-rest">
+<TabItem label="HTTP API">
+```
+Check: CKV_AWS_309: "API GatewayV2ルートで認証タイプを指定"
+ FAILED for resource: aws_apigatewayv2_route.proxy_routes["PUT"]
+```
+</TabItem>
+<TabItem label="REST API">
+```
+Check: CKV_AWS_59: "API経由のバックエンドリソースへのオープンアクセス防止"
+ FAILED for resource: aws_api_gateway_method.proxy_method
+```
+</TabItem>
+</Tabs>
+
+APIを公開したい場合は[抑制コメントを追加](https://www.checkov.io/2.Basics/Suppressing%20and%20Skipping%20Policies.html)可能
+:::
+</Fragment>
+</Infrastructure>
+
+### 統合
+
+<Snippet name="api/type-safe-api-integrations" parentHeading="統合" />
 
 #### コード生成
 
-FastAPIの操作はPythonで定義され、インフラはTypeScriptで定義されるため、タイプセーフな統合インターフェースを提供するためメタデータ生成を実装しています。
+<Infrastructure>
+<Fragment slot="cdk">
+FastAPIの操作はPythonで定義され、CDKインフラはTypeScriptで記述されるため、型安全な統合を提供するためメタデータをCDKコンストラクトに供給するコード生成を実装しています。
 
-共通コンストラクトの`project.json`に`generate:<ApiName>-metadata`ターゲットを追加し、`packages/common/constructs/src/generated/my-api/metadata.gen.ts`のようなファイルを生成します。ビルド時に生成されるため、バージョン管理から除外されます。
+`common/constructs`の`project.json`に`generate:<ApiName>-metadata`ターゲットを追加し、`packages/common/constructs/src/generated/my-api/metadata.gen.ts`のようなファイルを生成します。ビルド時に生成されるためバージョン管理対象外です。
 
 :::note
-APIを変更する際は、CDKコンストラクトが消費する型を最新化するためビルドを実行する必要があります。
+APIを変更する際は、CDKコンストラクトが使用する型を最新化するためビルドを実行する必要があります。
 
 <NxCommands commands={["run-many --target build --all"]} />
 :::
 
 :::tip
-CDKインフラとFastAPIを同時に開発する場合、[`nx watch`](https://nx.dev/nx-api/nx/documents/watch)を使用してAPI変更の度に型を再生成できます:
+CDKインフラとFastAPIを同時に開発する場合、[`nx watch`](https://nx.dev/nx-api/nx/documents/watch)を使用してAPI変更の度に型を再生成可能:
 
 <NxCommands
   commands={[
@@ -373,22 +655,71 @@ CDKインフラとFastAPIを同時に開発する場合、[`nx watch`](https://n
   ]}
 />
 :::
+</Fragment>
+<Fragment slot="terraform">
+:::note
+Terraformでは型安全な統合をサポートしていないため、`iacProvider`にTerraformを選択した場合コード生成ターゲットは設定されません
+:::
+</Fragment>
+</Infrastructure>
 
 ### アクセス権限付与（IAMのみ）
 
-IAM認証を選択した場合、`grantInvokeAccess`メソッドでAPIへのアクセス権限を付与できます:
+`IAM`認証を選択した場合、`grantInvokeAccess`メソッドでAPIへのアクセスを許可可能:
 
+<Infrastructure>
+<Fragment slot="cdk">
 ```ts
 api.grantInvokeAccess(myIdentityPool.authenticatedRole);
 ```
+</Fragment>
+<Fragment slot="terraform">
+```hcl
+# API呼び出し許可用IAMポリシー作成
+resource "aws_iam_policy" "api_invoke_policy" {
+  name        = "MyApiInvokePolicy"
+  description = "FastAPI呼び出しを許可するポリシー"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = "execute-api:Invoke"
+        Resource = "${module.my_api.api_execution_arn}/*/*"
+      }
+    ]
+  })
+}
+
+# IAMロールにポリシーをアタッチ（例: 認証済みユーザーロール）
+resource "aws_iam_role_policy_attachment" "api_invoke_access" {
+  role       = aws_iam_role.authenticated_user_role.name
+  policy_arn = aws_iam_policy.api_invoke_policy.arn
+}
+
+# 既存ロールにアタッチ
+resource "aws_iam_role_policy_attachment" "api_invoke_access_existing" {
+  role       = "MyExistingRole"
+  policy_arn = aws_iam_policy.api_invoke_policy.arn
+}
+```
+
+IAMポリシーで使用可能な主要な出力:
+
+- `module.my_api.api_execution_arn` - execute-api:Invoke権限付与用
+- `module.my_api.api_arn` - API Gateway ARN
+- `module.my_api.lambda_function_arn` - Lambda関数ARN
+</Fragment>
+</Infrastructure>
 
 ## ローカル開発
 
-ジェネレータが設定するローカル開発サーバーを以下で起動:
+ジェネレータが設定したローカル開発サーバを以下で起動:
 
 <NxCommands commands={['run my-api:serve']} />
 
-これにより以下を含むFastAPI開発サーバーが起動:
+以下を含むローカルFastAPI開発サーバが起動:
 
 - コード変更時の自動リロード
 - `/docs`または`/redoc`で対話型APIドキュメント
@@ -396,4 +727,4 @@ api.grantInvokeAccess(myIdentityPool.authenticatedRole);
 
 ## FastAPIの呼び出し
 
-ReactウェブサイトからAPIを呼び出すには<Link path="guides/api-connection/react-fastapi">`api-connection`</Link>ジェネレータを使用します。
+ReactウェブサイトからAPIを呼び出すには<Link path="guides/api-connection/react-fastapi">`api-connection`</Link>ジェネレータを使用可能。

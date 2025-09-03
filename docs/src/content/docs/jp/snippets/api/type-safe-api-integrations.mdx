@@ -4,35 +4,102 @@ title: "型安全なAPIの統合"
 
 
 
-REST/HTTP API CDKコンストラクトは、各操作の統合を定義するための型安全なインターフェースを提供するように設定されています。
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Infrastructure from '@components/infrastructure.astro';
+
+REST/HTTP API CDKコンストラクトは、各オペレーションの統合を定義するための型安全なインターフェースを提供するように設定されています。
+
+<Infrastructure>
+<Fragment slot="cdk">
+CDKコンストラクトは、以下で説明する完全な型安全な統合サポートを提供します。
+</Fragment>
+<Fragment slot="terraform">
+:::note
+Terraformモジュールは「ルーターパターン」を使用し、単一のLambda関数がすべてのオペレーションを処理します。型安全な統合はサポートされていません - モジュールはすべてのAPIリクエストを処理する1つのLambda関数を作成します。
+
+Terraformでオペレーションごとの明示的な統合を行うには、個別のLambda関数とAPI Gatewayルートを手動で作成する必要があります。例については[明示的統合](#explicit-integrations)セクションを参照してください。
+:::
+</Fragment>
+</Infrastructure>
 
 #### デフォルト統合
-静的メソッド`defaultIntegrations`を使用して、各操作ごとに個別のAWS Lambda関数を定義するデフォルトパターンを利用できます：
+
+<Infrastructure>
+<Fragment slot="cdk">
+静的メソッド`defaultIntegrations`を使用して、各オペレーションに個別のAWS Lambda関数を定義するデフォルトパターンを利用できます：
 
 ```ts {2}
 new MyApi(this, 'MyApi', {
   integrations: MyApi.defaultIntegrations(this).build(),
 });
 ```
+</Fragment>
+<Fragment slot="terraform">
+Terraformモジュールはデフォルトで単一Lambda関数を使用するルーターパターンを採用します。追加設定は不要です：
+
+```hcl
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  # モジュールは自動的にすべてのAPIオペレーションを処理する
+  # 単一のLambda関数を作成します
+  tags = local.common_tags
+}
+```
+</Fragment>
+</Infrastructure>
 
 #### 統合へのアクセス
-APIコンストラクトの`integrations`プロパティを通じて、型安全な方法で基盤となるAWS Lambda関数にアクセスできます。例えば、APIが`sayHello`という操作を定義している場合、この関数にパーミッションを追加するには次のようにします：
+
+<Infrastructure>
+<Fragment slot="cdk">
+APIコンストラクトの`integrations`プロパティを通じて、型安全な方法で基盤となるAWS Lambda関数にアクセスできます。例えば、APIが`sayHello`というオペレーションを定義している場合、この関数に権限を追加するには次のようにします：
 
 ```ts {6}
 const api = new MyApi(this, 'MyApi', {
   integrations: MyApi.defaultIntegrations(this).build(),
 });
 
-// sayHelloはAPIで定義された操作に型付けされる
+// sayHelloはAPIで定義されたオペレーションに型付けされます
 api.integrations.sayHello.handler.addToRolePolicy(new PolicyStatement({
   effect: Effect.ALLOW,
   actions: [...],
   resources: [...],
 }));
 ```
+</Fragment>
+<Fragment slot="terraform">
+Terraformのルーターパターンでは単一のLambda関数のみが存在します。モジュール出力を通じてアクセスできます：
+
+```hcl
+# 単一Lambda関数に追加権限を付与
+resource "aws_iam_role_policy" "additional_permissions" {
+  name = "additional-api-permissions"
+  role = module.my_api.lambda_execution_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject"
+        ]
+        Resource = "arn:aws:s3:::my-bucket/*"
+      }
+    ]
+  })
+}
+```
+</Fragment>
+</Infrastructure>
 
 #### デフォルトオプションのカスタマイズ
-各デフォルト統合用に作成されるLambda関数のオプションをカスタマイズするには、`withDefaultOptions`メソッドを使用します。例えば、すべてのLambda関数をVPC内に配置する場合：
+
+<Infrastructure>
+<Fragment slot="cdk">
+デフォルト統合で作成されるLambda関数のオプションをカスタマイズするには、`withDefaultOptions`メソッドを使用します。例えば、すべてのLambda関数をVPC内に配置する場合：
 
 ```ts {5-7}
 const vpc = new Vpc(this, 'Vpc', ...);
@@ -45,9 +112,58 @@ new MyApi(this, 'MyApi', {
     .build(),
 });
 ```
+</Fragment>
+<Fragment slot="terraform">
+VPC設定などのオプションをカスタマイズするには、生成されたTerraformモジュールを編集します。例として、すべてのLambda関数にVPCサポートを追加する場合：
+
+```hcl
+# packages/common/terraform/src/app/apis/my-api/my-api.tf
+# VPC変数を追加
+variable "vpc_subnet_ids" {
+  description = "Lambda関数用VPCサブネットIDのリスト"
+  type        = list(string)
+  default     = []
+}
+
+variable "vpc_security_group_ids" {
+  description = "Lambda関数用VPCセキュリティグループIDのリスト"
+  type        = list(string)
+  default     = []
+}
+
+# Lambda関数リソースを更新
+resource "aws_lambda_function" "api_lambda" {
+  # ... 既存の設定 ...
+
+  # VPC設定を追加
+  vpc_config {
+    subnet_ids         = var.vpc_subnet_ids
+    security_group_ids = var.vpc_security_group_ids
+  }
+}
+```
+
+VPC設定付きでモジュールを使用：
+
+```hcl
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  # VPC設定
+  vpc_subnet_ids         = [aws_subnet.private_a.id, aws_subnet.private_b.id]
+  vpc_security_group_ids = [aws_security_group.lambda_sg.id]
+
+  tags = local.common_tags
+}
+```
+</Fragment>
+</Infrastructure>
 
 #### 統合のオーバーライド
-`withOverrides`メソッドを使用して特定の操作の統合をオーバーライドできます。各オーバーライドは、HTTPまたはREST APIに適したCDK統合コンストラクトに型付けされた`integration`プロパティを指定する必要があります。例えば、外部サイトでホストされているドキュメントを指すように`getDocumentation` APIをオーバーライドする場合：
+
+<Infrastructure>
+<Fragment slot="cdk">
+`withOverrides`メソッドを使用して特定のオペレーションの統合をオーバーライドできます。各オーバーライドは、HTTPまたはREST APIに適したCDK統合コンストラクトに型付けされた`integration`プロパティを指定する必要があります。例として、`getDocumentation` APIを外部サイトのドキュメントにポイントする場合：
 
 ```ts
 new MyApi(this, 'MyApi', {
@@ -61,9 +177,9 @@ new MyApi(this, 'MyApi', {
 });
 ```
 
-オーバーライドされた統合には、`api.integrations.getDocumentation`経由でアクセスした際に`handler`プロパティが存在しなくなります。
+オーバーライドされた統合は、`api.integrations.getDocumentation`でアクセスした際に`handler`プロパティを持たないことに注意してください。
 
-追加プロパティを統合に定義することで、他のタイプの統合を抽象化しながら型安全性を維持できます。例えばREST API用のS3統合を作成し、後で特定の操作用にバケットを参照する場合：
+追加プロパティを統合に追加することで、他のタイプの統合を抽象化しつつ型安全性を維持できます。例えば、REST API用にS3統合を作成し、後で特定のオペレーションでバケットを参照する場合：
 
 ```ts {13, 41}
 const storageBucket = new Bucket(this, 'Bucket', { ... });
@@ -104,12 +220,25 @@ const api = new MyApi(this, 'MyApi', {
     .build(),
 });
 
-// 後ほど別ファイルで、定義したバケットプロパティに型安全にアクセス可能
+// 後で別ファイルで、定義したbucketプロパティに
+// 型安全にアクセスできます
 api.integrations.getFile.bucket.grantRead(...);
 ```
+</Fragment>
+<Fragment slot="terraform">
+:::note
+Terraformモジュールはルーターパターンを使用するため、特定の統合のオーバーライドはサポートされていません。すべてのオペレーションは単一のLambda関数で処理されます。
+
+オペレーションごとに異なる統合タイプが必要な場合は、明示的統合を手動で実装する必要があります（下記[明示的統合](#explicit-integrations)セクション参照）。
+:::
+</Fragment>
+</Infrastructure>
 
 #### オーソライザーのオーバーライド
-統合に`options`を指定して、特定のメソッドオプション（オーソライザーなど）をオーバーライドできます。例えば`getDocumentation`操作にCognito認証を使用する場合：
+
+<Infrastructure>
+<Fragment slot="cdk">
+統合に`options`を指定して、特定のメソッドオプション（オーソライザーなど）をオーバーライドできます。例として、`getDocumentation`オペレーションにCognito認証を使用する場合：
 
 ```ts
 new MyApi(this, 'MyApi', {
@@ -118,16 +247,28 @@ new MyApi(this, 'MyApi', {
       getDocumentation: {
         integration: new HttpIntegration('https://example.com/documentation'),
         options: {
-          authorizer: new CognitoUserPoolsAuthorizer(...) // REST APIの場合はCognitoUserPoolsAuthorizer、HTTP APIの場合はHttpUserPoolAuthorizer
+          authorizer: new CognitoUserPoolsAuthorizer(...) // REST用、HTTP APIの場合はHttpUserPoolAuthorizer
         }
       },
     })
     .build(),
 });
 ```
+</Fragment>
+<Fragment slot="terraform">
+:::note
+Terraformモジュールではオペレーションごとのオーソライザーオーバーライドはサポートされていません。API全体で生成時に指定した認証方法（IAM、Cognito、None）が使用されます。
 
-#### 明示的な統合
-デフォルト統合を使用せず、各操作に直接統合を指定することも可能です。これは例えば、操作ごとに異なるタイプの統合を使用する必要がある場合や、新しい操作を追加した際に型エラーを受け取りたい場合に有用です：
+オペレーションごとの認証が必要な場合は、下記のように明示的統合を手動で実装する必要があります。
+:::
+</Fragment>
+</Infrastructure>
+
+#### 明示的統合
+
+<Infrastructure>
+<Fragment slot="cdk">
+必要に応じて、デフォルト統合を使用せずに各オペレーションに直接統合を指定できます。例えば、オペレーションごとに異なる統合タイプを使用する場合や、新しいオペレーション追加時に型エラーを受け取りたい場合に有用です：
 
 ```ts
 new MyApi(this, 'MyApi', {
@@ -141,9 +282,319 @@ new MyApi(this, 'MyApi', {
   },
 });
 ```
+</Fragment>
+<Fragment slot="terraform">
+Terraformで明示的なオペレーションごとの統合を行うには、生成されたアプリ固有モジュールを修正してデフォルトのプロキシ統合を置き換えます。
+
+`packages/common/terraform/src/app/apis/my-api/my-api.tf`を編集：
+
+1. **デフォルトのプロキシルートを削除**（例：`resource "aws_apigatewayv2_route" "proxy_routes"`）
+2. **単一Lambda関数を個別関数で置き換え**
+3. **オペレーションごとに特定の統合とルートを作成**（同じZIPバンドルを再利用）
+
+<Tabs syncKey="http-rest">
+<TabItem label="HTTP API">
+
+```diff
+# packages/common/terraform/src/app/apis/my-api/my-api.tf
+
+# デフォルトの単一Lambda関数を削除
+- resource "aws_lambda_function" "api_lambda" {
+-   filename         = data.archive_file.lambda_zip.output_path
+-   function_name    = "MyApiHandler"
+-   role            = aws_iam_role.lambda_execution_role.arn
+-   handler         = "index.handler"
+-   runtime         = "nodejs22.x"
+-   timeout         = 30
+-   # ... その他の設定
+- }
+
+# デフォルトのプロキシ統合を削除
+- resource "aws_apigatewayv2_integration" "lambda_integration" {
+-   api_id           = module.http_api.api_id
+-   integration_type = "AWS_PROXY"
+-   integration_uri  = aws_lambda_function.api_lambda.invoke_arn
+-   # ... その他の設定
+- }
+
+# デフォルトのプロキシルートを削除
+- resource "aws_apigatewayv2_route" "proxy_routes" {
+-   for_each = toset(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"])
+-   api_id    = module.http_api.api_id
+-   route_key = "${each.key} /{proxy+}"
+-   target    = "integrations/${aws_apigatewayv2_integration.lambda_integration.id}"
+-   # ... その他の設定
+- }
+
+# 同じバンドルを使用してオペレーションごとに個別Lambda関数を追加
++ resource "aws_lambda_function" "say_hello_handler" {
++   filename         = data.archive_file.lambda_zip.output_path
++   function_name    = "MyApi-SayHello"
++   role            = aws_iam_role.lambda_execution_role.arn
++   handler         = "sayHello.handler"  # このオペレーション用の特定ハンドラ
++   runtime         = "nodejs22.x"
++   timeout         = 30
++   source_code_hash = data.archive_file.lambda_zip.output_base64sha256
++
++   tracing_config {
++     mode = "Active"
++   }
++
++   environment {
++     variables = merge({
++       AWS_CONNECTION_REUSE_ENABLED = "1"
++     }, var.env)
++   }
++
++   tags = var.tags
++ }
+
++ resource "aws_lambda_function" "get_documentation_handler" {
++   filename         = data.archive_file.lambda_zip.output_path
++   function_name    = "MyApi-GetDocumentation"
++   role            = aws_iam_role.lambda_execution_role.arn
++   handler         = "getDocumentation.handler"  # このオペレーション用の特定ハンドラ
++   runtime         = "nodejs22.x"
++   timeout         = 30
++   source_code_hash = data.archive_file.lambda_zip.output_base64sha256
++
++   tracing_config {
++     mode = "Active"
++   }
++
++   environment {
++     variables = merge({
++       AWS_CONNECTION_REUSE_ENABLED = "1"
++     }, var.env)
++   }
++
++   tags = var.tags
++ }
+
+# オペレーションごとに特定の統合を追加
++ resource "aws_apigatewayv2_integration" "say_hello_integration" {
++   api_id           = module.http_api.api_id
++   integration_type = "AWS_PROXY"
++   integration_uri  = aws_lambda_function.say_hello_handler.invoke_arn
++   payload_format_version = "2.0"
++   timeout_milliseconds   = 30000
++ }
+
++ resource "aws_apigatewayv2_integration" "get_documentation_integration" {
++   api_id           = module.http_api.api_id
++   integration_type = "HTTP_PROXY"
++   integration_uri  = "https://example.com/documentation"
++   integration_method = "GET"
++ }
+
+# オペレーションごとに特定のルートを追加
++ resource "aws_apigatewayv2_route" "say_hello_route" {
++   api_id    = module.http_api.api_id
++   route_key = "POST /sayHello"
++   target    = "integrations/${aws_apigatewayv2_integration.say_hello_integration.id}"
++   authorization_type = "AWS_IAM"
++ }
+
++ resource "aws_apigatewayv2_route" "get_documentation_route" {
++   api_id    = module.http_api.api_id
++   route_key = "GET /documentation"
++   target    = "integrations/${aws_apigatewayv2_integration.get_documentation_integration.id}"
++   authorization_type = "NONE"
++ }
+
+# 各関数にLambda権限を追加
++ resource "aws_lambda_permission" "say_hello_permission" {
++   statement_id  = "AllowExecutionFromAPIGateway-SayHello"
++   action        = "lambda:InvokeFunction"
++   function_name = aws_lambda_function.say_hello_handler.function_name
++   principal     = "apigateway.amazonaws.com"
++   source_arn    = "${module.http_api.api_execution_arn}/*/*"
++ }
+
++ resource "aws_lambda_permission" "get_documentation_permission" {
++   statement_id  = "AllowExecutionFromAPIGateway-GetDocumentation"
++   action        = "lambda:InvokeFunction"
++   function_name = aws_lambda_function.get_documentation_handler.function_name
++   principal     = "apigateway.amazonaws.com"
++   source_arn    = "${module.http_api.api_execution_arn}/*/*"
++ }
+```
+</TabItem>
+<TabItem label="REST API">
+
+```diff
+# packages/common/terraform/src/app/apis/my-api/my-api.tf
+
+# デフォルトの単一Lambda関数を削除
+- resource "aws_lambda_function" "api_lambda" {
+-   filename         = data.archive_file.lambda_zip.output_path
+-   function_name    = "MyApiHandler"
+-   role            = aws_iam_role.lambda_execution_role.arn
+-   handler         = "index.handler"
+-   runtime         = "nodejs22.x"
+-   timeout         = 30
+-   # ... その他の設定
+- }
+
+# デフォルトのプロキシ統合を削除
+- resource "aws_apigatewayv2_integration" "lambda_integration" {
+-   api_id           = module.http_api.api_id
+-   integration_type = "AWS_PROXY"
+-   integration_uri  = aws_lambda_function.api_lambda.invoke_arn
+-   # ... その他の設定
+- }
+
+# デフォルトのプロキシルートを削除
+- resource "aws_apigatewayv2_route" "proxy_routes" {
+-   for_each = toset(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"])
+-   api_id    = module.http_api.api_id
+-   route_key = "${each.key} /{proxy+}"
+-   target    = "integrations/${aws_apigatewayv2_integration.lambda_integration.id}"
+-   # ... その他の設定
+- }
+
+# 同じバンドルを使用してオペレーションごとに個別Lambda関数を追加
++ resource "aws_lambda_function" "say_hello_handler" {
++   filename         = data.archive_file.lambda_zip.output_path
++   function_name    = "MyApi-SayHello"
++   role            = aws_iam_role.lambda_execution_role.arn
++   handler         = "sayHello.handler"  # このオペレーション用の特定ハンドラ
++   runtime         = "nodejs22.x"
++   timeout         = 30
++   source_code_hash = data.archive_file.lambda_zip.output_base64sha256
++
++   tracing_config {
++     mode = "Active"
++   }
++
++   environment {
++     variables = merge({
++       AWS_CONNECTION_REUSE_ENABLED = "1"
++     }, var.env)
++   }
++
++   tags = var.tags
++ }
+
++ resource "aws_lambda_function" "get_documentation_handler" {
++   filename         = data.archive_file.lambda_zip.output_path
++   function_name    = "MyApi-GetDocumentation"
++   role            = aws_iam_role.lambda_execution_role.arn
++   handler         = "getDocumentation.handler"  # このオペレーション用の特定ハンドラ
++   runtime         = "nodejs22.x"
++   timeout         = 30
++   source_code_hash = data.archive_file.lambda_zip.output_base64sha256
++
++   tracing_config {
++     mode = "Active"
++   }
++
++   environment {
++     variables = merge({
++       AWS_CONNECTION_REUSE_ENABLED = "1"
++     }, var.env)
++   }
++
++   tags = var.tags
++ }
+
+# オペレーションごとに特定のリソースとメソッドを追加
++ resource "aws_api_gateway_resource" "say_hello_resource" {
++   rest_api_id = module.rest_api.api_id
++   parent_id   = module.rest_api.api_root_resource_id
++   path_part   = "sayHello"
++ }
+
++ resource "aws_api_gateway_method" "say_hello_method" {
++   rest_api_id   = module.rest_api.api_id
++   resource_id   = aws_api_gateway_resource.say_hello_resource.id
++   http_method   = "POST"
++   authorization = "AWS_IAM"
++ }
+
++ resource "aws_api_gateway_integration" "say_hello_integration" {
++   rest_api_id = module.rest_api.api_id
++   resource_id = aws_api_gateway_resource.say_hello_resource.id
++   http_method = aws_api_gateway_method.say_hello_method.http_method
++
++   integration_http_method = "POST"
++   type                   = "AWS_PROXY"
++   uri                    = aws_lambda_function.say_hello_handler.invoke_arn
++ }
+
++ resource "aws_api_gateway_resource" "get_documentation_resource" {
++   rest_api_id = module.rest_api.api_id
++   parent_id   = module.rest_api.api_root_resource_id
++   path_part   = "documentation"
++ }
+
++ resource "aws_api_gateway_method" "get_documentation_method" {
++   rest_api_id   = module.rest_api.api_id
++   resource_id   = aws_api_gateway_resource.get_documentation_resource.id
++   http_method   = "GET"
++   authorization = "NONE"
++ }
+
++ resource "aws_api_gateway_integration" "get_documentation_integration" {
++   rest_api_id = module.rest_api.api_id
++   resource_id = aws_api_gateway_resource.get_documentation_resource.id
++   http_method = aws_api_gateway_method.get_documentation_method.http_method
++
++   integration_http_method = "GET"
++   type                   = "HTTP"
++   uri                    = "https://example.com/documentation"
++ }
+
+# デプロイメントの依存関係を更新
+~ resource "aws_api_gateway_deployment" "api_deployment" {
+    rest_api_id = module.rest_api.api_id
+
+    depends_on = [
+-     aws_api_gateway_integration.lambda_integration,
++     aws_api_gateway_integration.say_hello_integration,
++     aws_api_gateway_integration.get_documentation_integration,
+    ]
+
+    lifecycle {
+      create_before_destroy = true
+    }
+
++   triggers = {
++     redeployment = sha1(jsonencode([
++       aws_api_gateway_integration.say_hello_integration,
++       aws_api_gateway_integration.get_documentation_integration,
++     ]))
++   }
+  }
+
+# 各関数にLambda権限を追加
++ resource "aws_lambda_permission" "say_hello_permission" {
++   statement_id  = "AllowExecutionFromAPIGateway-SayHello"
++   action        = "lambda:InvokeFunction"
++   function_name = aws_lambda_function.say_hello_handler.function_name
++   principal     = "apigateway.amazonaws.com"
++   source_arn    = "${module.rest_api.api_execution_arn}/*/*"
++ }
+
++ resource "aws_lambda_permission" "get_documentation_permission" {
++   statement_id  = "AllowExecutionFromAPIGateway-GetDocumentation"
++   action        = "lambda:InvokeFunction"
++   function_name = aws_lambda_function.get_documentation_handler.function_name
++   principal     = "apigateway.amazonaws.com"
++   source_arn    = "${module.rest_api.api_execution_arn}/*/*"
++ }
+```
+</TabItem>
+</Tabs>
+
+</Fragment>
+</Infrastructure>
 
 #### ルーターパターン
-すべてのAPIリクエストを処理する単一のLambda関数をデプロイする場合は、`defaultIntegrations`メソッドを編集して統合ごとではなく単一の関数を作成できます：
+
+<Infrastructure>
+<Fragment slot="cdk">
+すべてのAPIリクエストを処理する単一のLambda関数をデプロイしたい場合、APIの`defaultIntegrations`メソッドを編集して、統合ごとではなく単一の関数を作成できます：
 
 ```ts {5,11-12}
 // packages/common/constructs/src/app/apis/my-api.ts
@@ -156,7 +607,7 @@ export class MyApi<...> extends ... {
       defaultIntegrationOptions: {},
       buildDefaultIntegration: (op) => {
         return {
-          // すべての統合で同じルーターLambdaハンドラーを参照
+          // すべての統合で同じルータLambdaハンドラを参照
           integration: new LambdaIntegration(router),
         };
       },
@@ -165,4 +616,21 @@ export class MyApi<...> extends ... {
 }
 ```
 
-必要に応じて、`router`関数をメソッド内で構築する代わりに`defaultIntegrations`のパラメータとして定義するなど、コードを変更することも可能です。
+必要に応じて、`router`関数を`defaultIntegrations`のパラメータとして定義するなど、他の方法でコードを修正することもできます。
+</Fragment>
+<Fragment slot="terraform">
+Terraformモジュールはデフォルトでルーターパターンを使用します - これはデフォルトかつ唯一のサポートされるアプローチです。生成されたモジュールは、すべてのAPIオペレーションを処理する単一のLambda関数を作成します。
+
+デフォルトモジュールをインスタンス化するだけでルーターパターンを取得できます：
+
+```hcl
+# デフォルトのルーターパターン - 全オペレーション用単一Lambda関数
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  # 単一Lambda関数が全オペレーションを自動処理
+  tags = local.common_tags
+}
+```
+</Fragment>
+</Infrastructure>

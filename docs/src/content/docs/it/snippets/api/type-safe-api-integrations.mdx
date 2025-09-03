@@ -4,10 +4,28 @@ title: "Integrazioni API Type-Safe"
 
 
 
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Infrastructure from '@components/infrastructure.astro';
+
 I costrutti CDK per le API REST/HTTP sono configurati per fornire un'interfaccia type-safe per definire le integrazioni per ciascuna delle tue operazioni.
 
-#### Integrazioni predefinite
+<Infrastructure>
+<Fragment slot="cdk">
+I costrutti CDK forniscono supporto completo per l'integrazione type-safe come descritto di seguito.
+</Fragment>
+<Fragment slot="terraform">
+:::note
+I moduli Terraform utilizzano il "router pattern" con una singola funzione Lambda che gestisce tutte le operazioni. Le integrazioni type-safe non sono supportate - il modulo crea un'unica funzione Lambda che elabora tutte le richieste API.
 
+Per integrazioni esplicite per operazione con Terraform, dovresti creare manualmente singole funzioni Lambda e route API Gateway. Vedi la sezione [Integrazioni Esplicite](#explicit-integrations) per esempi.
+:::
+</Fragment>
+</Infrastructure>
+
+#### Integrazioni Predefinite
+
+<Infrastructure>
+<Fragment slot="cdk">
 Puoi utilizzare il metodo statico `defaultIntegrations` per sfruttare il pattern predefinito, che definisce una singola funzione AWS Lambda per ogni operazione:
 
 ```ts {2}
@@ -15,10 +33,27 @@ new MyApi(this, 'MyApi', {
   integrations: MyApi.defaultIntegrations(this).build(),
 });
 ```
+</Fragment>
+<Fragment slot="terraform">
+I moduli Terraform utilizzano automaticamente il router pattern con una singola funzione Lambda. Nessuna configurazione aggiuntiva è necessaria:
 
-#### Accesso alle integrazioni
+```hcl
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
 
-Puoi accedere alle funzioni AWS Lambda sottostanti tramite la proprietà `integrations` del costrutto API, in modo type-safe. Ad esempio, se la tua API definisce un'operazione chiamata `sayHello` e hai bisogno di aggiungere alcune autorizzazioni a questa funzione, puoi farlo come segue:
+  # Il modulo crea automaticamente una singola funzione Lambda
+  # che gestisce tutte le operazioni API
+  tags = local.common_tags
+}
+```
+</Fragment>
+</Infrastructure>
+
+#### Accesso alle Integrazioni
+
+<Infrastructure>
+<Fragment slot="cdk">
+Puoi accedere alle funzioni AWS Lambda sottostanti tramite la proprietà `integrations` del costrutto API in modo type-safe. Ad esempio, se la tua API definisce un'operazione chiamata `sayHello` e devi aggiungere dei permessi a questa funzione, puoi farlo come segue:
 
 ```ts {6}
 const api = new MyApi(this, 'MyApi', {
@@ -32,10 +67,39 @@ api.integrations.sayHello.handler.addToRolePolicy(new PolicyStatement({
   resources: [...],
 }));
 ```
+</Fragment>
+<Fragment slot="terraform">
+Con il router pattern di Terraform, esiste solo una funzione Lambda. Puoi accedervi tramite gli output del modulo:
 
-#### Personalizzazione delle opzioni predefinite
+```hcl
+# Concedi permessi aggiuntivi alla singola funzione Lambda
+resource "aws_iam_role_policy" "additional_permissions" {
+  name = "additional-api-permissions"
+  role = module.my_api.lambda_execution_role_name
 
-Se desideri personalizzare le opzioni utilizzate durante la creazione della funzione Lambda per ogni integrazione predefinita, puoi usare il metodo `withDefaultOptions`. Ad esempio, se vuoi che tutte le tue funzioni Lambda risiedano in una Vpc:
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject"
+        ]
+        Resource = "arn:aws:s3:::my-bucket/*"
+      }
+    ]
+  })
+}
+```
+</Fragment>
+</Infrastructure>
+
+#### Personalizzazione delle Opzioni Predefinite
+
+<Infrastructure>
+<Fragment slot="cdk">
+Se desideri personalizzare le opzioni utilizzate durante la creazione delle funzioni Lambda per ogni integrazione predefinita, puoi usare il metodo `withDefaultOptions`. Ad esempio, per far risiedere tutte le funzioni Lambda in una VPC:
 
 ```ts {5-7}
 const vpc = new Vpc(this, 'Vpc', ...);
@@ -48,10 +112,58 @@ new MyApi(this, 'MyApi', {
     .build(),
 });
 ```
+</Fragment>
+<Fragment slot="terraform">
+Per personalizzare opzioni come la configurazione VPC, devi modificare il modulo Terraform generato. Esempio per aggiungere il supporto VPC:
 
-#### Override delle integrazioni
+```hcl
+# packages/common/terraform/src/app/apis/my-api/my-api.tf
+# Aggiungi variabili VPC
+variable "vpc_subnet_ids" {
+  description = "Lista di ID subnet VPC per la funzione Lambda"
+  type        = list(string)
+  default     = []
+}
 
-Puoi anche sovrascrivere le integrazioni per operazioni specifiche usando il metodo `withOverrides`. Ogni override deve specificare una proprietà `integration` tipizzata secondo l'appropriato costrutto CDK di integrazione per l'API HTTP o REST. Il metodo `withOverrides` è anch'esso type-safe. Ad esempio, se desideri sovrascrivere un'API `getDocumentation` per puntare a documentazione ospitata su un sito esterno:
+variable "vpc_security_group_ids" {
+  description = "Lista di ID security group VPC per la funzione Lambda"
+  type        = list(string)
+  default     = []
+}
+
+# Aggiorna la risorsa Lambda function
+resource "aws_lambda_function" "api_lambda" {
+  # ... configurazione esistente ...
+
+  # Aggiungi configurazione VPC
+  vpc_config {
+    subnet_ids         = var.vpc_subnet_ids
+    security_group_ids = var.vpc_security_group_ids
+  }
+}
+```
+
+Utilizza il modulo con la configurazione VPC:
+
+```hcl
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  # Configurazione VPC
+  vpc_subnet_ids         = [aws_subnet.private_a.id, aws_subnet.private_b.id]
+  vpc_security_group_ids = [aws_security_group.lambda_sg.id]
+
+  tags = local.common_tags
+}
+```
+</Fragment>
+</Infrastructure>
+
+#### Override delle Integrazioni
+
+<Infrastructure>
+<Fragment slot="cdk">
+Puoi sovrascrivere le integrazioni per operazioni specifiche usando il metodo `withOverrides`. Ogni override deve specificare una proprietà `integration` tipizzata correttamente. Esempio per reindirizzare un'API `getDocumentation`:
 
 ```ts
 new MyApi(this, 'MyApi', {
@@ -65,9 +177,9 @@ new MyApi(this, 'MyApi', {
 });
 ```
 
-Noterai che l'integrazione sovrascritta non avrà più una proprietà `handler` quando vi accedi tramite `api.integrations.getDocumentation`.
+Le integrazioni sovrascritte non avranno più la proprietà `handler` quando accedute tramite `api.integrations.getDocumentation`.
 
-Puoi aggiungere proprietà aggiuntive a un'integrazione che saranno anch'esse tipizzate correttamente, permettendo l'astrazione di altri tipi di integrazione mantenendo il type-safety. Ad esempio, se hai creato un'integrazione S3 per un'API REST e successivamente vuoi riferirti al bucket per una specifica operazione:
+Puoi aggiungere proprietà personalizzate alle integrazioni mantenendo il type-safety. Esempio con integrazione S3:
 
 ```ts {13, 41}
 const storageBucket = new Bucket(this, 'Bucket', { ... });
@@ -108,14 +220,24 @@ const api = new MyApi(this, 'MyApi', {
     .build(),
 });
 
-// Successivamente, magari in un altro file, puoi accedere alla proprietà bucket che abbiamo definito
-// in modo type-safe
+// Accesso type-safe alla proprietà bucket definita
 api.integrations.getFile.bucket.grantRead(...);
 ```
+</Fragment>
+<Fragment slot="terraform">
+:::note
+L'override di integrazioni specifiche non è supportato con i moduli Terraform a causa del router pattern. Tutte le operazioni sono gestite da un'unica funzione Lambda.
 
-#### Override degli autorizzatori
+Per tipi di integrazione diversi per operazione, devi implementare manualmente integrazioni esplicite (vedi sezione [Integrazioni Esplicite](#explicit-integrations)).
+:::
+</Fragment>
+</Infrastructure>
 
-Puoi anche fornire `options` nelle tue integrazioni per sovrascrivere opzioni specifiche dei metodi come gli autorizzatori. Ad esempio, se desideri usare l'autenticazione Cognito per l'operazione `getDocumentation`:
+#### Override degli Authorizer
+
+<Infrastructure>
+<Fragment slot="cdk">
+Puoi sovrascrivere gli authorizer specificando `options` nelle integrazioni. Esempio con autenticazione Cognito:
 
 ```ts
 new MyApi(this, 'MyApi', {
@@ -124,17 +246,28 @@ new MyApi(this, 'MyApi', {
       getDocumentation: {
         integration: new HttpIntegration('https://example.com/documentation'),
         options: {
-          authorizer: new CognitoUserPoolsAuthorizer(...) // per REST, o HttpUserPoolAuthorizer per un'API HTTP
+          authorizer: new CognitoUserPoolsAuthorizer(...) // Per REST API
         }
       },
     })
     .build(),
 });
 ```
+</Fragment>
+<Fragment slot="terraform">
+:::note
+Gli override degli authorizer per operazione non sono supportati. L'intera API utilizza il metodo di autenticazione specificato durante la generazione.
 
-#### Integrazioni esplicite
+Per autorizzazioni per operazione, devi implementare integrazioni esplicite manualmente.
+:::
+</Fragment>
+</Infrastructure>
 
-Se preferisci, puoi scegliere di non usare le integrazioni predefinite e fornirne direttamente una per ogni operazione. Questo è utile se, ad esempio, ogni operazione necessita di un tipo diverso di integrazione o vuoi ricevere un errore di tipo quando aggiungi nuove operazioni:
+#### Integrazioni Esplicite
+
+<Infrastructure>
+<Fragment slot="cdk">
+Puoi definire manualmente ogni integrazione. Utile per usare tipi diversi per ogni operazione:
 
 ```ts
 new MyApi(this, 'MyApi', {
@@ -148,29 +281,80 @@ new MyApi(this, 'MyApi', {
   },
 });
 ```
+</Fragment>
+<Fragment slot="terraform">
+Per integrazioni esplicite con Terraform, modifica il modulo generato:
 
-#### Pattern Router
+1. **Rimuovi le route proxy predefinite**
+2. **Sostituisci la singola Lambda** con funzioni individuali
+3. **Crea integrazioni specifiche** per ogni operazione:
 
-Se preferisci distribuire una singola funzione Lambda per gestire tutte le richieste API, puoi modificare liberamente il metodo `defaultIntegrations` della tua API per creare una singola funzione invece di una per integrazione:
+<Tabs syncKey="http-rest">
+<TabItem label="HTTP API">
+
+```diff
+# packages/common/terraform/src/app/apis/my-api/my-api.tf
+
+# Aggiungi funzioni Lambda individuali
++ resource "aws_lambda_function" "say_hello_handler" {
++   handler         = "sayHello.handler"
++   # ... configurazione ...
++ }
+
+# Crea integrazioni e route specifiche
++ resource "aws_apigatewayv2_integration" "say_hello_integration" {
++   integration_uri  = aws_lambda_function.say_hello_handler.invoke_arn
++   # ... configurazione ...
++ }
+```
+</TabItem>
+<TabItem label="REST API">
+
+```diff
+# packages/common/terraform/src/app/apis/my-api/my-api.tf
+
+# Aggiungi risorse API Gateway specifiche
++ resource "aws_api_gateway_resource" "say_hello_resource" {
++   path_part   = "sayHello"
++ }
+
++ resource "aws_api_gateway_method" "say_hello_method" {
++   http_method   = "POST"
++ }
+```
+</TabItem>
+</Tabs>
+</Fragment>
+</Infrastructure>
+
+#### Router Pattern
+
+<Infrastructure>
+<Fragment slot="cdk">
+Per usare una singola Lambda per tutte le richieste, modifica `defaultIntegrations`:
 
 ```ts {5,11-12}
-// packages/common/constructs/src/app/apis/my-api.ts
 export class MyApi<...> extends ... {
 
   public static defaultIntegrations = (scope: Construct) => {
     const router = new Function(scope, 'RouterHandler', { ... });
     return IntegrationBuilder.rest({
-      ...
-      defaultIntegrationOptions: {},
-      buildDefaultIntegration: (op) => {
-        return {
-          // Riferimento allo stesso router lambda handler in ogni integrazione
-          integration: new LambdaIntegration(router),
-        };
-      },
+      buildDefaultIntegration: (op) => ({
+        integration: new LambdaIntegration(router),
+      }),
     });
   };
 }
 ```
+</Fragment>
+<Fragment slot="terraform">
+Il router pattern è l'approccio predefinito di Terraform:
 
-Puoi modificare il codice in altri modi se preferisci, ad esempio potresti definire la funzione `router` come parametro di `defaultIntegrations` invece di costruirla all'interno del metodo.
+```hcl
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+  tags = local.common_tags
+}
+```
+</Fragment>
+</Infrastructure>

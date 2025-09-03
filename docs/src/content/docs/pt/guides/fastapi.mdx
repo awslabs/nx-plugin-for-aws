@@ -5,22 +5,23 @@ description: "Documentação de referência para FastAPI"
 
 
 
-import { FileTree, AnchorHeading } from '@astrojs/starlight/components';
+import { FileTree, AnchorHeading, Tabs, TabItem } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
 import Snippet from '@components/snippet.astro';
 
 [FastAPI](https://fastapi.tiangolo.com/) é um framework para construção de APIs em Python.
 
-O gerador FastAPI cria uma nova aplicação FastAPI com configuração de infraestrutura AWS CDK. O backend gerado utiliza AWS Lambda para implantação serverless, exposto via API Gateway da AWS. Configura o [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/) para observabilidade, incluindo logging, rastreamento com AWS X-Ray e métricas no Cloudwatch.
+O gerador FastAPI cria um novo projeto FastAPI com configuração de infraestrutura AWS CDK ou Terraform. O backend gerado utiliza AWS Lambda para implantação serverless, exposto via AWS API Gateway. Configura [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/) para observabilidade, incluindo logging, rastreamento com AWS X-Ray e métricas no Cloudwatch.
 
 ## Uso
 
-### Gerar uma API FastAPI
+### Gerar um FastAPI
 
-Você pode gerar uma nova API FastAPI de duas formas:
+Você pode gerar um novo FastAPI de duas formas:
 
 <RunGenerator generator="py#fast-api" />
 
@@ -40,16 +41,16 @@ O gerador criará a seguinte estrutura de projeto no diretório `<directory>/<ap
 - pyproject.toml Configuração do projeto Python e dependências
 - \<module_name>
   - \_\_init\_\_.py Inicialização do módulo
-  - init.py Configura o app FastAPI e middleware powertools
+  - init.py Configura o app FastAPI e middleware do powertools
   - main.py Implementação da API
 - scripts
   - generate_open_api.py Script para gerar schema OpenAPI a partir do app FastAPI
 
 </FileTree>
 
-O gerador também criará constructs CDK para implantação da API, localizados no diretório `packages/common/constructs`.
+O gerador também criará infraestrutura como código CDK ou Terraform para implantação da API, localizada no diretório `packages/common`.
 
-## Implementando sua API FastAPI
+## Implementando seu FastAPI
 
 A implementação principal da API está em `main.py`. Aqui você define as rotas e suas implementações. Exemplo:
 
@@ -81,7 +82,7 @@ O gerador configura automaticamente:
 
 #### Logging
 
-Configura logging estruturado usando AWS Lambda Powertools. Acesso ao logger nos handlers:
+O gerador configura logging estruturado usando AWS Lambda Powertools. Acesso o logger nos handlers:
 
 ```python
 from .init import app, logger
@@ -95,13 +96,13 @@ def read_item(item_id: int):
 O logger inclui automaticamente:
 
 - IDs de correlação para rastreamento
-- Path e método da requisição
+- Caminho e método da requisição
 - Informações de contexto Lambda
 - Indicadores de cold start
 
-#### Rastreamento
+#### Tracing
 
-Rastreamento com AWS X-Ray configurado automaticamente. Adicione subsegmentos personalizados:
+Rastreamento com AWS X-Ray é configurado automaticamente. Adicione subsegmentos personalizados:
 
 ```python
 from .init import app, tracer
@@ -115,7 +116,7 @@ def read_item(item_id: int):
 
 #### Métricas
 
-Métricas no CloudWatch coletadas automaticamente. Adicione métricas personalizadas:
+Métricas no CloudWatch são coletadas automaticamente. Adicione métricas personalizadas:
 
 ```python
 from .init import app, metrics
@@ -150,25 +151,29 @@ def read_item(item_id: int):
 
 Exceções não tratadas são capturadas pelo middleware e:
 
-1. Registram exceção completa com stack trace
+1. Registram a exceção completa com stack trace
 2. Gravam métrica de falha
 3. Retornam resposta 500 segura
-4. Preservam ID de correlação
+4. Preservam o ID de correlação
 
 :::tip
-Recomenda-se especificar modelos de resposta para melhor geração de código ao usar o gerador `api-connection`. <Link path="guides/api-connection/react-fastapi#errors">Mais detalhes aqui</Link>.
+Recomenda-se especificar modelos de resposta para melhor geração de código ao usar o gerador `api-connection`. <Link path="guides/api-connection/react-fastapi#errors">Detalhes aqui</Link>.
 :::
 
 ### Streaming
 
 Com FastAPI, você pode transmitir respostas usando [`StreamingResponse`](https://fastapi.tiangolo.com/reference/responses/?h=streaming#fastapi.responses.StreamingResponse).
 
-#### Alterações de Infraestrutura
+#### Alterações na Infraestrutura
 
-Como o API Gateway da AWS não suporta streaming, você precisará implantar em outra plataforma. A opção mais simples é usar Function URL do AWS Lambda. Substitua o construct gerado `common/constructs/src/app/apis/<name>-api.ts` por um que use Function URL.
+Como AWS API Gateway não suporta streaming, você precisará implantar em uma plataforma compatível. A opção mais simples é usar AWS Lambda Function URL.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Substitua o construct gerado `common/constructs/src/app/apis/<name>-api.ts` por um que use Function URL.
 
 <details>
-<summary>Exemplo de Construct FunctionURL para Streaming</summary>
+<summary>Exemplo de Construct FunctionURL com Streaming</summary>
 
 ```ts
 import { Duration, Stack, CfnOutput } from 'aws-cdk-lib';
@@ -257,9 +262,147 @@ export class MyApi extends Construct {
     });
   }
 }
+
 ```
 
 </details>
+</Fragment>
+<Fragment slot="terraform">
+Substitua a infraestrutura do API Gateway por Lambda Function URL com streaming.
+
+<details>
+<summary>Exemplo de Configuração Terraform para Function URL</summary>
+
+```hcl
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
+resource "aws_lambda_function" "my_api_handler" {
+  filename         = "../../../../../../dist/packages/my_api/bundle.zip"
+  function_name    = "my-api-handler"
+  role            = aws_iam_role.lambda_execution_role.arn
+  handler         = "run.sh"
+  runtime         = "python3.12"
+  timeout         = 30
+  source_code_hash = filebase64sha256("../../../../../../dist/packages/my_api/bundle.zip")
+
+  tracing_config {
+    mode = "Active"
+  }
+
+  environment {
+    variables = {
+      AWS_CONNECTION_REUSE_ENABLED = "1"
+      PORT                        = "8000"
+      AWS_LWA_INVOKE_MODE        = "response_stream"
+      AWS_LAMBDA_EXEC_WRAPPER    = "/opt/bootstrap"
+    }
+  }
+
+  layers = [
+    "arn:aws:lambda:${data.aws_region.current.name}:753240598075:layer:LambdaAdapterLayerX86:24"
+  ]
+
+  depends_on = [
+    aws_iam_role_policy_attachment.lambda_logs,
+    aws_cloudwatch_log_group.lambda_logs,
+  ]
+}
+
+resource "aws_cloudwatch_log_group" "lambda_logs" {
+  name              = "/aws/lambda/my-api-handler"
+  retention_in_days = 14
+}
+
+resource "aws_iam_role" "lambda_execution_role" {
+  name = "my-api-lambda-execution-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_logs" {
+  role       = aws_iam_role.lambda_execution_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_xray" {
+  role       = aws_iam_role.lambda_execution_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+}
+
+resource "aws_lambda_function_url" "my_api_url" {
+  function_name      = aws_lambda_function.my_api_handler.function_name
+  authorization_type = "AWS_IAM"
+  invoke_mode       = "RESPONSE_STREAM"
+
+  cors {
+    allow_credentials = false
+    allow_origins     = ["*"]
+    allow_methods     = ["*"]
+    allow_headers = [
+      "authorization",
+      "content-type",
+      "x-amz-content-sha256",
+      "x-amz-date",
+      "x-amz-security-token"
+    ]
+    expose_headers = ["date", "keep-alive"]
+    max_age       = 86400
+  }
+}
+
+output "my_api_url" {
+  value       = aws_lambda_function_url.my_api_url.function_url
+}
+
+resource "aws_ssm_parameter" "my_api_url" {
+  name  = "/runtime-config/apis/MyApi"
+  type  = "String"
+  value = aws_lambda_function_url.my_api_url.function_url
+
+  tags = {
+    Environment = "production"
+    Service     = "my-api"
+  }
+}
+
+resource "aws_iam_policy" "my_api_invoke_policy" {
+  name        = "my-api-invoke-policy"
+  description = "Policy para invocar Lambda Function URL"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = "lambda:InvokeFunctionUrl"
+        Resource = aws_lambda_function.my_api_handler.arn
+        Condition = {
+          StringEquals = {
+            "lambda:FunctionUrlAuthType" = "AWS_IAM"
+          }
+        }
+      }
+    ]
+  })
+}
+```
+
+</details>
+
+</Fragment>
+</Infrastructure>
 
 :::note
 Para um exemplo completo, consulte o <Link path="/get_started/tutorials/dungeon-game/overview">Tutorial Dungeon Adventure</Link>
@@ -267,7 +410,7 @@ Para um exemplo completo, consulte o <Link path="/get_started/tutorials/dungeon-
 
 #### Implementação
 
-Após atualizar a infraestrutura, implemente streaming no FastAPI:
+Após atualizar a infraestrutura, implemente streaming em FastAPI retornando [`StreamingResponse`](https://fastapi.tiangolo.com/reference/responses/?h=streaming#fastapi.responses.StreamingResponse):
 
 ```py /return (StreamingResponse)/ /openapi_extra[^)]*/ /-> (Chunk)/
 from pydantic import BaseModel
@@ -288,11 +431,15 @@ def my_stream() -> Chunk:
 
 #### Consumo
 
-Para consumir streams, use o <Link path="guides/api-connection/react-fastapi#consuming-a-stream">Gerador de Conexão de API</Link>.
+Para consumir streams, use o <Link path="guides/api-connection/react-fastapi#consuming-a-stream">Gerador de Conexão API</Link>.
 
-## Implantando sua API FastAPI
+## Implantando seu FastAPI
 
-O gerador cria um construct CDK em `common/constructs`. Use em aplicações CDK:
+Use a infraestrutura como código CDK/Terraform baseada no `iacProvider` selecionado.
+
+<Infrastructure>
+<Fragment slot="cdk">
+O construct CDK para implantação está em `common/constructs`. Uso em aplicação CDK:
 
 ```ts {6-8}
 import { MyApi } from ':my-scope/common-constructs';
@@ -306,17 +453,17 @@ export class ExampleStack extends Stack {
 }
 ```
 
-Isso configura:
+Configura:
 
-1. Função AWS Lambda para cada operação
-2. API Gateway HTTP/REST como trigger
-3. Roles e permissões IAM
-4. Log group no CloudWatch
+1. Função Lambda por operação
+2. API Gateway HTTP/REST
+3. Permissões IAM
+4. Log group CloudWatch
 5. Configuração X-Ray
-6. Namespace de métricas CloudWatch
+6. Namespace de métricas
 
 :::note
-Para autenticação Cognito, forneça a propriedade `identity`:
+Para autenticação Cognito, forneça `identity`:
 
 ```ts {9}
 import { MyApi, UserIdentity } from ':my-scope/common-constructs';
@@ -333,18 +480,113 @@ export class ExampleStack extends Stack {
 }
 ```
 
-O construct `UserIdentity` pode ser gerado com o <Link path="/guides/react-website-auth">gerador `ts#react-website-auth`</Link>
+`UserIdentity` pode ser gerado com <Link path="/guides/react-website-auth">`ts#react-website-auth`</Link>
+:::
+</Fragment>
+<Fragment slot="terraform">
+Módulos Terraform em `common/terraform`. Uso em configuração:
+
+```hcl {2}
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  env = {
+    ENVIRONMENT = var.environment
+    LOG_LEVEL   = "INFO"
+  }
+
+  additional_iam_policy_statements = [
+    # Permissões adicionais
+  ]
+
+  tags = local.common_tags
+}
+```
+
+Configura:
+
+1. Função Lambda única
+2. API Gateway HTTP/REST
+3. Permissões IAM
+4. Log group CloudWatch
+5. Configuração CORS
+
+:::note
+Para Cognito:
+
+```hcl {4-5}
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  user_pool_id         = local.user_pool_id
+  user_pool_client_ids = [local.client_id]
+
+  env = {
+    ENVIRONMENT = var.environment
+    LOG_LEVEL   = "INFO"
+  }
+
+  tags = local.common_tags
+}
+```
+
 :::
 
-### Integrações Type-Safe
+Saídas do módulo:
 
-<Snippet name="api/type-safe-api-integrations" parentHeading="Type-Safe Integrations" />
+```hcl
+output "api_url" {
+  value = module.my_api.stage_invoke_url
+}
+
+output "lambda_function_name" {
+  value = module.my_api.lambda_function_name
+}
+
+output "lambda_execution_role_arn" {
+  value = module.my_api.lambda_execution_role_arn
+}
+```
+
+Personalize CORS:
+
+```hcl
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  cors_allow_origins = ["https://myapp.com", "https://staging.myapp.com"]
+  cors_allow_methods = ["GET", "POST", "PUT", "DELETE"]
+  cors_allow_headers = [
+    "authorization",
+    "content-type",
+    "x-custom-header"
+  ]
+
+  tags = local.common_tags
+}
+```
+
+:::caution
+Se selecionou `None` para `auth`, suprima falhas Checkov com comentários apropriados.
+:::
+</Fragment>
+</Infrastructure>
+
+### Integrações
+
+<Snippet name="api/type-safe-api-integrations" parentHeading="Integrações" />
 
 #### Geração de Código
 
-Um target `generate:<ApiName>-metadata` é adicionado ao `project.json` para gerar metadados type-safe. Execute builds após alterações na API:
+<Infrastructure>
+<Fragment slot="cdk">
+Metadados são gerados para fornecer interface type-safe ao construct CDK via target `generate:<ApiName>-metadata`.
+
+:::note
+Execute build após alterações na API:
 
 <NxCommands commands={["run-many --target build --all"]} />
+:::
 
 :::tip
 Use [`nx watch`](https://nx.dev/nx-api/nx/documents/watch) para regenerar tipos automaticamente:
@@ -356,14 +598,59 @@ Use [`nx watch`](https://nx.dev/nx-api/nx/documents/watch) para regenerar tipos 
   ]}
 />
 :::
+</Fragment>
+<Fragment slot="terraform">
+:::note
+Integrações type-safe não são suportadas para Terraform.
+:::
+</Fragment>
+</Infrastructure>
 
-### Concessão de Acesso (IAM)
+### Concedendo Acesso (IAM)
 
 Para autenticação IAM, use `grantInvokeAccess`:
 
+<Infrastructure>
+<Fragment slot="cdk">
 ```ts
 api.grantInvokeAccess(myIdentityPool.authenticatedRole);
 ```
+</Fragment>
+<Fragment slot="terraform">
+```hcl
+resource "aws_iam_policy" "api_invoke_policy" {
+  name        = "MyApiInvokePolicy"
+  description = "Política para invocar FastAPI"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = "execute-api:Invoke"
+        Resource = "${module.my_api.api_execution_arn}/*/*"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "api_invoke_access" {
+  role       = aws_iam_role.authenticated_user_role.name
+  policy_arn = aws_iam_policy.api_invoke_policy.arn
+}
+
+resource "aws_iam_role_policy_attachment" "api_invoke_access_existing" {
+  role       = "MyExistingRole"
+  policy_arn = aws_iam_policy.api_invoke_policy.arn
+}
+```
+
+Principais saídas:
+- `module.my_api.api_execution_arn`
+- `module.my_api.api_arn`
+- `module.my_api.lambda_function_arn`
+</Fragment>
+</Infrastructure>
 
 ## Desenvolvimento Local
 
@@ -371,10 +658,10 @@ Execute o servidor local com:
 
 <NxCommands commands={['run my-api:serve']} />
 
-Isso inicia um servidor FastAPI com:
+Inicia um servidor FastAPI com:
 
 - Recarregamento automático
-- Documentação interativa em `/docs` ou `/redoc`
+- Documentação interativa em `/docs` e `/redoc`
 - Schema OpenAPI em `/openapi.json`
 
 ## Invocando sua API
