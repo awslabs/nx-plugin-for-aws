@@ -674,10 +674,6 @@ try:
         agent_runtime_id = response.get("agentRuntimeId", "")
         print(f"Agent runtime created successfully with ID: {agent_runtime_id}")
 
-    # Store the agent runtime ID in a temporary file for the cleanup resource
-    with open("/tmp/agent_runtime_id_\${var.agent_runtime_name}_\${random_id.unique_suffix.hex}", "w") as f:
-        f.write(agent_runtime_id)
-
 except Exception as e:
     print(f"Error managing agent runtime: {str(e)}")
     sys.exit(1)
@@ -736,12 +732,6 @@ try:
     )
     print(f'Agent runtime {agent_name} (ID: {agent_runtime_id}) deleted successfully:', json.dumps(response, indent=2, default=str))
 
-    # Clean up the temporary file if it exists
-    temp_file = f'/tmp/agent_runtime_id_{agent_name}'
-    if os.path.exists(temp_file):
-        os.remove(temp_file)
-        print(f'Cleaned up temporary file: {temp_file}')
-
 except client.exceptions.ResourceNotFoundException:
     print(f'Agent runtime {agent_name} not found, may have been already deleted')
 except Exception as e:
@@ -750,6 +740,57 @@ except Exception as e:
 "
     EOT
   }
+
+  depends_on = [null_resource.agent_core_runtime_deployment]
+}
+
+# Data source to find the agent runtime by name and get its ID
+data "external" "agent_runtime_lookup" {
+  program = ["uv", "run", "--with", "boto3", "python", "-c", <<-EOT
+import boto3
+import json
+import sys
+
+# Create the client
+client = boto3.client("bedrock-agentcore-control", region_name="\${local.aws_region}")
+
+agent_name = "\${var.agent_runtime_name}_\${random_id.unique_suffix.hex}"
+
+try:
+    # Find the agent runtime by name
+    list_response = client.list_agent_runtimes()
+    for runtime in list_response.get("agentRuntimes", []):
+        if runtime.get("agentRuntimeName") == agent_name:
+            agent_runtime_id = runtime.get("agentRuntimeId")
+            runtime_arn = f"arn:aws:bedrock-agentcore:\${local.aws_region}:\${local.aws_account_id}:runtime/{agent_runtime_id}"
+
+            result = {
+                "agent_runtime_id": agent_runtime_id,
+                "agent_runtime_arn": runtime_arn,
+                "agent_name": agent_name
+            }
+            print(json.dumps(result))
+            sys.exit(0)
+
+    # If not found, return empty values
+    result = {
+        "agent_runtime_id": "",
+        "agent_runtime_arn": "",
+        "agent_name": agent_name
+    }
+    print(json.dumps(result))
+
+except Exception as e:
+    print(f"Error looking up agent runtime: {str(e)}", file=sys.stderr)
+    # Return empty values on error to avoid breaking Terraform
+    result = {
+        "agent_runtime_id": "",
+        "agent_runtime_arn": "",
+        "agent_name": agent_name
+    }
+    print(json.dumps(result))
+EOT
+  ]
 
   depends_on = [null_resource.agent_core_runtime_deployment]
 }
@@ -768,7 +809,18 @@ output "agent_core_runtime_role_name" {
 output "agent_runtime_name" {
   description = "Name of the deployed agent runtime"
   value       = "\${var.agent_runtime_name}-\${random_id.unique_suffix.hex}"
-}"
+}
+
+output "agent_core_runtime_arn" {
+  description = "ARN of the Bedrock Agent Core runtime"
+  value       = data.external.agent_runtime_lookup.result.agent_runtime_arn
+}
+
+output "agent_runtime_id" {
+  description = "ID of the Bedrock Agent Core runtime"
+  value       = data.external.agent_runtime_lookup.result.agent_runtime_id
+}
+"
 `;
 
 exports[`py#mcp-server generator > should match snapshot for Terraform generated files > terraform-mcp-server.tf 1`] = `
@@ -812,6 +864,11 @@ module "agent_core_runtime" {
 output "agent_core_runtime_role_arn" {
   description = "ARN of the agent core runtime role"
   value       = module.agent_core_runtime.agent_core_runtime_role_arn
+}
+
+output "agent_core_runtime_arn" {
+  description = "ARN of the Bedrock Agent Core runtime"
+  value       = module.agent_core_runtime.agent_core_runtime_arn
 }
 "
 `;
