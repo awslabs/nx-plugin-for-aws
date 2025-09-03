@@ -8,6 +8,7 @@ import RunGenerator from '@components/run-generator.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Link from '@components/link.astro';
 import Snippet from '@components/snippet.astro';
+import Infrastructure from '@components/infrastructure.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 
 Generate a Python [Strands Agent](https://strandsagents.com/) for building AI agents with tools, and optionally deploy it to [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/).
@@ -57,7 +58,7 @@ The generator will add the following files to your existing Python project:
 </FileTree>
 
 :::note
-Unless you selected `None` for `computeType`, the generator will also create a CDK construct to deploy your Strands Agent.
+Unless you selected `None` for `computeType`, the generator will also create the CDK or Terraform infrastructure to deploy your Strands Agent.
 :::
 
 ## Working with Your Strands Agent
@@ -170,8 +171,10 @@ def get_agent(session_id: str):
 If your target MCP server uses JWT authentication, you can use the `AgentCoreMCPClient.with_jwt_auth` method to create the client instead.
 :::
 
-With the IAM authentication example above, we need to configure two things in our CDK infrastructure. Firstly, we need to add the environment variable our agent is consuming for our MCP server's AgentCore Runtime ARN, and secondly we need to grant our agent permissions to invoke the MCP server. This can be achieved as follows:
+With the IAM authentication example above, we need to configure two things in our infrastructure. Firstly, we need to add the environment variable our agent is consuming for our MCP server's AgentCore Runtime ARN, and secondly we need to grant our agent permissions to invoke the MCP server. This can be achieved as follows:
 
+<Infrastructure>
+<Fragment slot="cdk">
 ```ts {9, 13}
 import { MyProjectAgent, MyProjectMcpServer } from ':my-scope/common-constructs';
 
@@ -189,6 +192,38 @@ export class ExampleStack extends Stack {
   }
 }
 ```
+</Fragment>
+<Fragment slot="terraform">
+```terraform
+# MCP Server
+module "my_project_mcp_server" {
+  source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
+}
+
+# Agent
+module "my_project_agent" {
+  source = "../../common/terraform/src/app/agents/my-project-agent"
+
+  env = {
+    MCP_AGENTCORE_RUNTIME_ARN = module.my_project_mcp_server.agent_core_runtime_arn
+  }
+
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = [
+        "bedrock-agentcore:InvokeAgentRuntime"
+      ]
+      Resource = [
+        module.my_project_mcp_server.agent_core_runtime_arn,
+        "${module.my_project_mcp_server.agent_core_runtime_arn}/*"
+      ]
+    }
+  ]
+}
+```
+</Fragment>
+</Infrastructure>
 
 ### More
 
@@ -201,7 +236,7 @@ The generator configures the [Bedrock AgentCore Python SDK](https://github.com/a
 You can find more details about the SDK's capabilities in the [documentation here](https://aws.github.io/bedrock-agentcore-starter-toolkit/user-guide/runtime/quickstart.html).
 
 :::note
-Since the generator vends a CDK construct which manages deploying your agent, you do not need to utilise the `bedrock-agentcore-starter-toolkit` which the docs mention.
+Since the generator vends CDK or Terraform infrastructure which manages deploying your agent, you do not need to utilise the `bedrock-agentcore-starter-toolkit` which the docs mention for deploying your agent.
 :::
 
 ## Running Your Strands Agent
@@ -216,11 +251,13 @@ This command uses `uv run` to execute your Strands Agent using the [Bedrock Agen
 
 ## Deploying Your Strands Agent to Bedrock AgentCore Runtime
 
-### CDK Construct
+### Infrastructure as Code
 
-If you selected `BedrockAgentCoreRuntime` for `computeType`, a CDK construct is generated which you can use to deploy your Strands Agent to [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html).
+If you selected `BedrockAgentCoreRuntime` for `computeType`, the relevant CDK or Terraform infrastructure is generated which you can use to deploy your Strands Agent to [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html).
 
-The CDK construct is named based on the `name` you chose when running the generator, or `<ProjectName>Agent` by default.
+<Infrastructure>
+<Fragment slot="cdk">
+A CDK construct is generated for your, named based on the `name` you chose when running the generator, or `<ProjectName>Agent` by default.
 
 You can use this CDK construct in a CDK application:
 
@@ -246,6 +283,35 @@ export class ExampleStack extends Stack {
   }
 }
 ```
+</Fragment>
+<Fragment slot="terraform">
+A Terraform module is generated for you, named based on the `name` you chose when running the generator, or `<ProjectName>-agent` by default.
+
+You can use this terraform module in a Terraform project:
+
+```terraform
+# Agent
+module "my_project_agent" {
+  # Relative path to the generated module in the common/terraform project
+  source = "../../common/terraform/src/app/agents/my-project-agent"
+
+  # Grant permissions to invoke the relevant models in bedrock
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream"
+      ]
+      Resource = [
+        "arn:aws:bedrock:*::foundation-model/*"
+      ]
+    }
+  ]
+}
+```
+</Fragment>
+</Infrastructure>
 
 :::note
 When deploying to Bedrock AgentCore Runtime, you'll need to ensure that the appropriate foundation models are enabled in your AWS account. By default, Strands agents use Claude 4 Sonnet, but this can be customized as described above.
@@ -273,7 +339,7 @@ A `docker` target specific to your Strands Agent is also added, which:
 - Builds a docker image from the `Dockerfile` which runs your agent, as per the [AgentCore runtime contract](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-service-contract.html)
 
 :::tip
-The docker image is built using a tag (for example `my-scope-my-project-agent:latest`), which the CDK construct's `Dockerfile` inherits from, allowing for your `Dockerfile` to be co-located with your Strands Agent project.
+The docker image is built using a tag (for example `my-scope-my-project-agent:latest`), which is referenced by your CDK or Terraform infrastructure, allowing for your `Dockerfile` to be co-located with your Strands Agent project.
 :::
 
 ### Authentication
@@ -282,6 +348,8 @@ The docker image is built using a tag (for example `my-scope-my-project-agent:la
 
 By default, your Strands Agent will be secured using IAM authentication, simply deploy it without any arguments:
 
+<Infrastructure>
+<Fragment slot="cdk">
 ```ts {5}
 import { MyProjectAgent } from ':my-scope/common-constructs';
 
@@ -306,9 +374,39 @@ export class ExampleStack extends Stack {
   }
 }
 ```
+</Fragment>
+<Fragment slot="terraform">
+```terraform
+# Agent
+module "my_project_agent" {
+  # Relative path to the generated module in the common/terraform project
+  source = "../../common/terraform/src/app/agents/my-project-agent"
+}
+```
+
+To grant access to invoke your agent, you will need to add a policy such as the following, referencing the `module.my_project_agent.agent_core_runtime_arn` output:
+
+```terraform
+{
+  Effect = "Allow"
+  Action = [
+    "bedrock-agentcore:InvokeAgentRuntime"
+  ]
+  Resource = [
+    module.my_project_agent.agent_core_runtime_arn,
+    "${module.my_project_agent.agent_core_runtime_arn}/*"
+  ]
+}
+```
+</Fragment>
+</Infrastructure>
 
 #### Cognito JWT Authentication
 
+The below demonstrates how to configure Cognito authentication for your agent.
+
+<Infrastructure>
+<Fragment slot="cdk">
 To configure JWT authentication, you can pass the `authorizerConfiguration` property to your agent construct. Here is an example which configures a Cognito user pool and client to secure the agent:
 
 ```ts {13-18}
@@ -334,6 +432,39 @@ export class ExampleStack extends Stack {
   }
 }
 ```
+</Fragment>
+<Fragment slot="terraform">
+To configure JWT authentication, you can edit your agent module to configure the `customJWTAuthorizer` variable as follows:
+
+```terraform {18-21}
+# packages/common/terraform/src/app/agents/my-project-agent/my-project-agent.tf
+
+data "aws_region" "current" {}
+
+locals {
+  aws_region = data.aws_region.current.name
+
+  # Replace with your user pool and client ids or expose as variables
+  user_pool_id = "xxx"
+  user_pool_client_ids = ["yyy"]
+}
+
+module "agent_core_runtime" {
+  source = "../../../core/agent-core"
+  agent_runtime_name = "MyProjectAgent"
+  docker_image_tag = "my-scope-my-project-agent:latest"
+  server_protocol = "HTTP"
+  customJWTAuthorizer = {
+    discoveryUrl = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration",
+    allowedClients = local.user_pool_client_ids
+  }
+  env = var.env
+  additional_iam_policy_statements = var.additional_iam_policy_statements
+  tags = var.tags
+}
+```
+</Fragment>
+</Infrastructure>
 
 ### Observability
 
