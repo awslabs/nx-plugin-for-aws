@@ -8,11 +8,12 @@ import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
 import Snippet from '@components/snippet.astro';
 
 [FastAPI](https://fastapi.tiangolo.com/) is a framework for building APIs in Python.
 
-The FastAPI generator creates a new FastAPI with AWS CDK infrastructure setup. The generated backend uses AWS Lambda for serverless deployment, exposed via an AWS API Gateway API. It sets up [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/) for observability, including logging, AWS X-Ray tracing and Cloudwatch Metrics.
+The FastAPI generator creates a new FastAPI with AWS CDK or Terraform infrastructure setup. The generated backend uses AWS Lambda for serverless deployment, exposed via an AWS API Gateway API. It sets up [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/) for observability, including logging, AWS X-Ray tracing and Cloudwatch Metrics.
 
 ## Usage
 
@@ -45,7 +46,7 @@ The generator will create the following project structure in the `<directory>/<a
 
 </FileTree>
 
-The generator will also create CDK constructs which can be used to deploy your API, which reside in the `packages/common/constructs` directory.
+The generator will also create CDK or Terraform infrastructure as code which can be used to deploy your API, which resides in the `packages/common` directory.
 
 ## Implementing your FastAPI
 
@@ -165,7 +166,11 @@ With FastAPI, you can stream a response to the caller with the [`StreamingRespon
 
 #### Infrastructure Changes
 
-Since AWS API Gateway does not support streaming responses, you will need to deploy your FastAPI to a platform which supports this. The simplest option is to use an AWS Lambda Function URL. To achieve this, you can replace the generated `common/constructs/src/app/apis/<name>-api.ts` construct with one that deploys a function URL instead.
+Since AWS API Gateway does not support streaming responses, you will need to deploy your FastAPI to a platform which supports this. The simplest option is to use an AWS Lambda Function URL.
+
+<Infrastructure>
+<Fragment slot="cdk">
+To achieve this, you can replace the generated `common/constructs/src/app/apis/<name>-api.ts` construct with one that deploys a function URL instead.
 
 <details>
 <summary>Example Streaming FunctionURL Construct</summary>
@@ -262,6 +267,163 @@ export class MyApi extends Construct {
 ```
 
 </details>
+</Fragment>
+<Fragment slot="terraform">
+To achieve this with Terraform, you can replace the generated API Gateway infrastructure with a Lambda Function URL that supports response streaming.
+
+<details>
+<summary>Example Streaming Lambda Function URL Configuration</summary>
+
+```hcl
+# Data sources for current AWS context
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
+# Lambda function for streaming FastAPI
+resource "aws_lambda_function" "my_api_handler" {
+  filename         = "../../../../../../dist/packages/my_api/bundle.zip"
+  function_name    = "my-api-handler"
+  role            = aws_iam_role.lambda_execution_role.arn
+  handler         = "run.sh"
+  runtime         = "python3.12"
+  timeout         = 30
+  source_code_hash = filebase64sha256("../../../../../../dist/packages/my_api/bundle.zip")
+
+  # Enable X-Ray tracing
+  tracing_config {
+    mode = "Active"
+  }
+
+  # Environment variables for Lambda Web Adapter
+  environment {
+    variables = {
+      AWS_CONNECTION_REUSE_ENABLED = "1"
+      PORT                        = "8000"
+      AWS_LWA_INVOKE_MODE        = "response_stream"
+      AWS_LAMBDA_EXEC_WRAPPER    = "/opt/bootstrap"
+    }
+  }
+
+  # Add Lambda Web Adapter layer
+  layers = [
+    "arn:aws:lambda:${data.aws_region.current.name}:753240598075:layer:LambdaAdapterLayerX86:24"
+  ]
+
+  depends_on = [
+    aws_iam_role_policy_attachment.lambda_logs,
+    aws_cloudwatch_log_group.lambda_logs,
+  ]
+}
+
+# CloudWatch Log Group for Lambda function
+resource "aws_cloudwatch_log_group" "lambda_logs" {
+  name              = "/aws/lambda/my-api-handler"
+  retention_in_days = 14
+}
+
+# IAM role for Lambda execution
+resource "aws_iam_role" "lambda_execution_role" {
+  name = "my-api-lambda-execution-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+# Attach basic execution policy
+resource "aws_iam_role_policy_attachment" "lambda_logs" {
+  role       = aws_iam_role.lambda_execution_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+# Attach X-Ray tracing policy
+resource "aws_iam_role_policy_attachment" "lambda_xray" {
+  role       = aws_iam_role.lambda_execution_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+}
+
+# Lambda Function URL with streaming support
+resource "aws_lambda_function_url" "my_api_url" {
+  function_name      = aws_lambda_function.my_api_handler.function_name
+  authorization_type = "AWS_IAM"
+  invoke_mode       = "RESPONSE_STREAM"
+
+  cors {
+    allow_credentials = false
+    allow_origins     = ["*"]
+    allow_methods     = ["*"]
+    allow_headers = [
+      "authorization",
+      "content-type",
+      "x-amz-content-sha256",
+      "x-amz-date",
+      "x-amz-security-token"
+    ]
+    expose_headers = ["date", "keep-alive"]
+    max_age       = 86400
+  }
+}
+
+# Output the Function URL
+output "my_api_url" {
+  description = "URL for the streaming FastAPI Lambda Function"
+  value       = aws_lambda_function_url.my_api_url.function_url
+}
+
+# Optional: Create SSM parameter for runtime configuration
+resource "aws_ssm_parameter" "my_api_url" {
+  name  = "/runtime-config/apis/MyApi"
+  type  = "String"
+  value = aws_lambda_function_url.my_api_url.function_url
+
+  tags = {
+    Environment = "production"
+    Service     = "my-api"
+  }
+}
+
+# IAM policy for granting invoke access to the Function URL
+resource "aws_iam_policy" "my_api_invoke_policy" {
+  name        = "my-api-invoke-policy"
+  description = "Policy to allow invoking the streaming FastAPI Lambda Function URL"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = "lambda:InvokeFunctionUrl"
+        Resource = aws_lambda_function.my_api_handler.arn
+        Condition = {
+          StringEquals = {
+            "lambda:FunctionUrlAuthType" = "AWS_IAM"
+          }
+        }
+      }
+    ]
+  })
+}
+
+# Example: Attach the invoke policy to a role (uncomment and modify as needed)
+# resource "aws_iam_role_policy_attachment" "my_api_invoke_access" {
+#   role       = var.authenticated_role_name
+#   policy_arn = aws_iam_policy.my_api_invoke_policy.arn
+# }
+```
+
+</details>
+
+</Fragment>
+</Infrastructure>
 
 :::note
 For an end-to-end example, please refer to the <Link path="/get_started/tutorials/dungeon-game/overview">Dungeon Adventure Tutorial</Link>
@@ -300,7 +462,11 @@ To consume a stream of responses, you can make use of the <Link path="guides/api
 
 ## Deploying your FastAPI
 
-The FastAPI generator creates a CDK construct for deploying your API in the `common/constructs` folder. You can use this in a CDK application:
+The FastAPI generator creates CDK or Terraform infrastructure as code based on your selected `iacProvider`. You can use this to deploy your FastAPI.
+
+<Infrastructure>
+<Fragment slot="cdk">
+The CDK construct for deploying your API in the `common/constructs` folder. You can use this in a CDK application:
 
 ```ts {6-8}
 import { MyApi } from ':my-scope/common-constructs';
@@ -344,14 +510,109 @@ export class ExampleStack extends Stack {
 
 The `UserIdentity` construct can be generated using the <Link path="/guides/react-website-auth">`ts#react-website-auth` generator</Link>
 :::
+</Fragment>
+<Fragment slot="terraform">
+The Terraform modules for deploying your API are in the `common/terraform` folder. You can use this in a Terraform configuration:
 
-### Type-Safe Integrations
+```hcl {2}
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
 
-<Snippet name="api/type-safe-api-integrations" parentHeading="Type-Safe Integrations" />
+  # Environment variables for the Lambda function
+  env = {
+    ENVIRONMENT = var.environment
+    LOG_LEVEL   = "INFO"
+  }
+
+  # Additional IAM policies if needed
+  additional_iam_policy_statements = [
+    # Add any additional permissions your API needs
+  ]
+
+  tags = local.common_tags
+}
+```
+
+This sets up:
+
+1. An AWS Lambda function that serves all FastAPI routes
+2. API Gateway HTTP/REST API as the function trigger
+3. IAM roles and permissions
+4. CloudWatch log group
+5. X-Ray tracing configuration
+6. CORS configuration
+
+:::note
+If you selected to use `Cognito` authentication, you will need to supply the Cognito configuration:
+
+```hcl {4-5}
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  user_pool_id         = local.user_pool_id
+  user_pool_client_ids = [local.client_id]
+
+  env = {
+    ENVIRONMENT = var.environment
+    LOG_LEVEL   = "INFO"
+  }
+
+  tags = local.common_tags
+}
+```
+
+You can set up Cognito User Pool and Client using the appropriate Terraform resources or modules.
+:::
+
+The Terraform module provides several outputs you can use:
+
+```hcl
+# Access the API endpoint
+output "api_url" {
+  value = module.my_api.stage_invoke_url
+}
+
+# Access Lambda function details
+output "lambda_function_name" {
+  value = module.my_api.lambda_function_name
+}
+
+# Access IAM role for granting additional permissions
+output "lambda_execution_role_arn" {
+  value = module.my_api.lambda_execution_role_arn
+}
+```
+
+You can customize CORS settings by passing variables to the module:
+
+```hcl
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  # Custom CORS configuration
+  cors_allow_origins = ["https://myapp.com", "https://staging.myapp.com"]
+  cors_allow_methods = ["GET", "POST", "PUT", "DELETE"]
+  cors_allow_headers = [
+    "authorization",
+    "content-type",
+    "x-custom-header"
+  ]
+
+  tags = local.common_tags
+}
+```
+</Fragment>
+</Infrastructure>
+
+### Integrations
+
+<Snippet name="api/type-safe-api-integrations" parentHeading="Integrations" />
 
 #### Code Generation
 
-Since operations in FastAPI are defined in Python and infrastructure in TypeScript, we instrument code-generation to supply metadata to the CDK construct to provide a type-safe interface for integrations.
+<Infrastructure>
+<Fragment slot="cdk">
+Since operations in FastAPI are defined in Python and CDK infrastructure in TypeScript, we instrument code-generation to supply metadata to the CDK construct to provide a type-safe interface for integrations.
 
 A `generate:<ApiName>-metadata` target is added to the common constructs `project.json` to facilitate this code generation, which emits a file such as `packages/common/constructs/src/generated/my-api/metadata.gen.ts`. Since this is generated at build time, it is ignored in version control.
 
@@ -371,14 +632,63 @@ If you are actively working on both your CDK infrastructure and FastAPI together
   ]}
 />
 :::
+</Fragment>
+<Fragment slot="terraform">
+:::note
+We do not support type-safe integrations for Terraform, and therefore no code generation targets are configured if you selected Terraform for your `iacProvider`.
+:::
+</Fragment>
+</Infrastructure>
 
 ### Granting Access (IAM Only)
 
 If you selected to use `IAM` authentication, you can use the `grantInvokeAccess` method to grant access to your API:
 
+<Infrastructure>
+<Fragment slot="cdk">
 ```ts
 api.grantInvokeAccess(myIdentityPool.authenticatedRole);
 ```
+</Fragment>
+<Fragment slot="terraform">
+```hcl
+# Create an IAM policy to allow invoking the API
+resource "aws_iam_policy" "api_invoke_policy" {
+  name        = "MyApiInvokePolicy"
+  description = "Policy to allow invoking the FastAPI"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = "execute-api:Invoke"
+        Resource = "${module.my_api.api_execution_arn}/*/*"
+      }
+    ]
+  })
+}
+
+# Attach the policy to an IAM role (e.g., for authenticated users)
+resource "aws_iam_role_policy_attachment" "api_invoke_access" {
+  role       = aws_iam_role.authenticated_user_role.name
+  policy_arn = aws_iam_policy.api_invoke_policy.arn
+}
+
+# Or attach to an existing role by name
+resource "aws_iam_role_policy_attachment" "api_invoke_access_existing" {
+  role       = "MyExistingRole"
+  policy_arn = aws_iam_policy.api_invoke_policy.arn
+}
+```
+
+The key outputs from the API module that you can use for IAM policies are:
+
+- `module.my_api.api_execution_arn` - For granting execute-api:Invoke permissions
+- `module.my_api.api_arn` - The API Gateway ARN
+- `module.my_api.lambda_function_arn` - The Lambda function ARN
+</Fragment>
+</Infrastructure>
 
 ## Local Development
 

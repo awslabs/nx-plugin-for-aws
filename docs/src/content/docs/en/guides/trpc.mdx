@@ -8,11 +8,12 @@ import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
 import Snippet from '@components/snippet.astro';
 
 [tRPC](https://trpc.io/) is a framework for building APIs in TypeScript with end-to-end type safety. Using tRPC, updates to API operation inputs and outputs are immediately reflected in client code and are visible in your IDE without the need to rebuild your project.
 
-The tRPC API generator creates a new tRPC API with AWS CDK infrastructure setup. The generated backend uses AWS Lambda for serverless deployment and includes schema validation using [Zod](https://zod.dev/). It sets up [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/) for observability, including logging, AWS X-Ray tracing and Cloudwatch Metrics.
+The tRPC API generator creates a new tRPC API with AWS CDK or Terraform infrastructure setup. The generated backend uses AWS Lambda for serverless deployment, exposed via an AWS API Gateway API, and includes schema validation using [Zod](https://zod.dev/). It sets up [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/) for observability, including logging, AWS X-Ray tracing and Cloudwatch Metrics.
 
 ## Usage
 
@@ -53,7 +54,7 @@ The generator will create the following project structure in the `<directory>/<a
 
 </FileTree>
 
-The generator will also create CDK constructs which can be used to deploy your API, which reside in the `packages/common/constructs` directory.
+The generator will also create CDK or Terraform infrastructure as code which can be used to deploy your API, which resides in the `packages/common` directory.
 
 ## Implementing your tRPC API
 
@@ -399,7 +400,11 @@ export const createIdentityPlugin = () => {
 
 ## Deploying your tRPC API
 
-The tRPC API generator generates a CDK construct for deploying your API in the `common/constructs` folder. You can consume this in a CDK application, for example:
+The tRPC API generator creates CDK or Terraform infrastructure as code based on your selected `iacProvider`. You can use this to deploy your tRPC API.
+
+<Infrastructure>
+<Fragment slot="cdk">
+The CDK construct for deploying your API in the `common/constructs` folder. You can consume this in a CDK application, for example:
 
 ```ts {6-8}
 import { MyApi } from ':my-scope/common-constructs`;
@@ -436,22 +441,157 @@ export class ExampleStack extends Stack {
 
 The `UserIdentity` construct can be generated using the <Link path="/guides/react-website-auth">`ts#react-website-auth` generator</Link>
 :::
+</Fragment>
+<Fragment slot="terraform">
+The Terraform modules for deploying your API are in the `common/terraform` folder. You can use this in a Terraform configuration:
+
+```hcl {6-8}
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  # Environment variables for the Lambda function
+  env = {
+    ENVIRONMENT = var.environment
+    LOG_LEVEL   = "INFO"
+  }
+
+  # Additional IAM policies if needed
+  additional_iam_policy_statements = [
+    # Add any additional permissions your API needs
+  ]
+
+  tags = local.common_tags
+}
+```
+
+This sets up:
+
+1. An AWS Lambda function that serves all tRPC procedures
+2. API Gateway HTTP/REST API as the function trigger
+3. IAM roles and permissions
+4. CloudWatch log group
+5. X-Ray tracing configuration
+6. CORS configuration
+
+:::note
+If you selected to use `Cognito` authentication, you will need to supply the Cognito configuration:
+
+```hcl {4-5}
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  user_pool_id         = local.user_pool_id
+  user_pool_client_ids = [local.client_id]
+
+  env = {
+    ENVIRONMENT = var.environment
+    LOG_LEVEL   = "INFO"
+  }
+
+  tags = local.common_tags
+}
+```
+
+You can set up Cognito User Pool and Client using the appropriate Terraform resources or modules.
+:::
+
+The Terraform module provides several outputs you can use:
+
+```hcl
+# Access the API endpoint
+output "api_url" {
+  value = module.my_api.stage_invoke_url
+}
+
+# Access Lambda function details
+output "lambda_function_name" {
+  value = module.my_api.lambda_function_name
+}
+
+# Access IAM role for granting additional permissions
+output "lambda_execution_role_arn" {
+  value = module.my_api.lambda_execution_role_arn
+}
+```
+
+You can customize CORS settings by passing variables to the module:
+
+```hcl
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  # Custom CORS configuration
+  cors_allow_origins = ["https://myapp.com", "https://staging.myapp.com"]
+  cors_allow_methods = ["GET", "POST", "PUT", "DELETE"]
+  cors_allow_headers = [
+    "authorization",
+    "content-type",
+    "x-custom-header"
+  ]
+
+  tags = local.common_tags
+}
+```
+</Fragment>
+</Infrastructure>
 
 ### Type-Safe Integrations
 
 <Snippet name="api/type-safe-api-integrations" parentHeading="Type-Safe Integrations" />
 
 :::tip
-When you add or remove a procedure in your tRPC API, these changes will be reflected immediately in the CDK construct without the need to rebuild.
+If you selected CDK for your `iacProvider`, when you add or remove a procedure in your tRPC API, these changes will be reflected immediately in the CDK construct without the need to rebuild.
 :::
 
 ### Granting Access (IAM Only)
 
-If you selected to use `IAM` authentication, can use the `grantInvokeAccess` method to grant access to your API, for example you might wish to grant authenticated Cognito users access to your API:
+If you selected to use `IAM` authentication, you can grant access to your API:
 
+<Infrastructure>
+<Fragment slot="cdk">
 ```ts
 api.grantInvokeAccess(myIdentityPool.authenticatedRole);
 ```
+</Fragment>
+<Fragment slot="terraform">
+```hcl
+# Create an IAM policy to allow invoking the API
+resource "aws_iam_policy" "api_invoke_policy" {
+  name        = "MyApiInvokePolicy"
+  description = "Policy to allow invoking the tRPC API"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = "execute-api:Invoke"
+        Resource = "${module.my_api.api_execution_arn}/*/*"
+      }
+    ]
+  })
+}
+
+# Attach the policy to an IAM role (e.g., for authenticated users)
+resource "aws_iam_role_policy_attachment" "api_invoke_access" {
+  role       = aws_iam_role.authenticated_user_role.name
+  policy_arn = aws_iam_policy.api_invoke_policy.arn
+}
+
+# Or attach to an existing role by name
+resource "aws_iam_role_policy_attachment" "api_invoke_access_existing" {
+  role       = "MyExistingRole"
+  policy_arn = aws_iam_policy.api_invoke_policy.arn
+}
+```
+
+The key outputs from the API module that you can use for IAM policies are:
+
+- `module.my_api.api_execution_arn` - For granting execute-api:Invoke permissions
+- `module.my_api.api_arn` - The API Gateway ARN
+- `module.my_api.lambda_function_arn` - The Lambda function ARN
+</Fragment>
+</Infrastructure>
 
 ## Local tRPC Server
 
