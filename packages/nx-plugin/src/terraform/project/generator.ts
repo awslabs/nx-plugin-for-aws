@@ -100,13 +100,7 @@ export async function terraformProjectGenerator(
       },
     },
     build: {
-      dependsOn: [
-        'init',
-        'fmt',
-        'test',
-        'validate',
-        `${sharedTfProjectName}:build`,
-      ],
+      dependsOn: ['fmt', 'test', `${sharedTfProjectName}:build`],
     },
     destroy: {
       executor: 'nx:run-commands',
@@ -135,6 +129,7 @@ export async function terraformProjectGenerator(
         forwardAllArgs: true,
         cwd: '{projectRoot}/src',
       },
+      dependsOn: ['^init'],
     },
     output: {
       executor: 'nx:run-commands',
@@ -162,7 +157,7 @@ export async function terraformProjectGenerator(
         cwd: '{projectRoot}/src',
         parallel: false,
       },
-      dependsOn: ['build'],
+      dependsOn: ['init', 'validate', '^validate', 'build'],
     },
   };
 
@@ -170,7 +165,7 @@ export async function terraformProjectGenerator(
     [targetName: string]: TargetConfiguration;
   } = {
     build: {
-      dependsOn: ['fmt', 'test', 'validate'],
+      dependsOn: ['fmt', 'test'],
     },
     fmt: {
       executor: 'nx:run-commands',

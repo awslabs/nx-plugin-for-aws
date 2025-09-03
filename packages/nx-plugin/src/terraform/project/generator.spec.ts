@@ -111,7 +111,12 @@ describe('terraformProjectGenerator', () => {
       expect(planTarget.configurations.dev.commands[1]).toContain(
         '-var-file=env/dev.tfvars',
       );
-      expect(planTarget.dependsOn).toEqual(['build']);
+      expect(planTarget.dependsOn).toEqual([
+        'init',
+        'validate',
+        '^validate',
+        'build',
+      ]);
     });
 
     it('should configure init target correctly', async () => {
@@ -131,6 +136,7 @@ describe('terraformProjectGenerator', () => {
       expect(initTarget.configurations.dev.command).toContain(
         '-backend-config',
       );
+      expect(initTarget.dependsOn).toEqual(['^init']);
     });
 
     it('should configure destroy target correctly', async () => {
