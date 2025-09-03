@@ -29,6 +29,10 @@ import { withVersions } from '../../utils/versions';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { uvxCommand } from '../../utils/py';
+import {
+  SHARED_TERRAFORM_DIR,
+  SHARED_TERRAFORM_NAME,
+} from '../../utils/shared-constructs-constants';
 
 const NX_EXTEND_PLUGIN = '@nx-extend/terraform';
 export const TERRAFORM_PROJECT_GENERATOR_INFO: NxGeneratorInfo =
@@ -41,7 +45,7 @@ export async function terraformProjectGenerator(
   // Just use getTsLibDetails as it isn't specific to TS
   const lib = getTsLibDetails(tree, schema);
   const { fullyQualifiedName: sharedTfProjectName } = getTsLibDetails(tree, {
-    name: 'terraform',
+    name: SHARED_TERRAFORM_NAME,
   });
 
   const outDirToRootRelativePath = relative(
@@ -55,7 +59,7 @@ export async function terraformProjectGenerator(
   // Calculate relative path from current project to common/terraform/metrics
   const metricsModulePath = relative(
     join(tree.root, lib.dir, 'src'),
-    join(tree.root, 'packages', 'common', 'terraform', 'src', 'metrics'),
+    join(tree.root, 'packages', SHARED_TERRAFORM_DIR, 'src', 'metrics'),
   );
 
   updateGitIgnore(tree, '.', (patterns) => [...patterns, '.terraform']);

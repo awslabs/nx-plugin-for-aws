@@ -46,7 +46,6 @@ export default defineConfig({
       ],
       components: {
         PageSidebar: './src/components/page-sidebar.astro',
-
       },
       tableOfContents: {
         minHeadingLevel: 2,
