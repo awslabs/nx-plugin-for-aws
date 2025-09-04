@@ -4,38 +4,101 @@ title: "타입 안전한 API 통합"
 
 
 
-REST/HTTP API CDK 구성체는 각 작업에 대한 통합을 정의하기 위한 타입 안전 인터페이스를 제공하도록 구성됩니다.
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Infrastructure from '@components/infrastructure.astro';
+
+REST/HTTP API CDK 구문은 각 작업에 대한 통합을 정의하기 위한 타입 안전 인터페이스를 제공하도록 구성됩니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+CDK 구문은 아래 설명된 대로 완전한 타입 안전 통합 지원을 제공합니다.
+</Fragment>
+<Fragment slot="terraform">
+:::note
+Terraform 모듈은 모든 작업을 처리하는 단일 Lambda 함수를 사용하는 "라우터 패턴"을 적용합니다. 타입 안전 통합은 지원되지 않으며, 모듈은 모든 API 요청을 처리하는 하나의 Lambda 함수를 생성합니다.
+
+Terraform에서 작업별 명시적 통합을 사용하려면 수동으로 개별 Lambda 함수와 API Gateway 경로를 생성해야 합니다. 예시는 [명시적 통합](#explicit-integrations) 섹션을 참조하세요.
+:::
+</Fragment>
+</Infrastructure>
 
 #### 기본 통합
 
-정적 `defaultIntegrations`를 사용하여 각 작업별로 개별 AWS Lambda 함수를 정의하는 기본 패턴을 활용할 수 있습니다:
+<Infrastructure>
+<Fragment slot="cdk">
+정적 `defaultIntegrations`를 사용하여 각 작업에 대해 개별 AWS Lambda 함수를 정의하는 기본 패턴을 활용할 수 있습니다:
 
 ```ts {2}
 new MyApi(this, 'MyApi', {
   integrations: MyApi.defaultIntegrations(this).build(),
 });
 ```
+</Fragment>
+<Fragment slot="terraform">
+Terraform 모듈은 단일 Lambda 함수를 사용하는 라우터 패턴을 자동으로 적용합니다. 추가 구성이 필요하지 않습니다:
+
+```hcl
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  # 모듈은 모든 API 작업을 처리하는 단일 Lambda 함수를 자동 생성합니다
+  tags = local.common_tags
+}
+```
+</Fragment>
+</Infrastructure>
 
 #### 통합 접근
 
-API 구성체의 `integrations` 속성을 통해 타입 안전 방식으로 기본 AWS Lambda 함수에 접근할 수 있습니다. 예를 들어 API가 `sayHello` 작업을 정의하고 이 함수에 일부 권한을 추가해야 하는 경우 다음과 같이 할 수 있습니다:
+<Infrastructure>
+<Fragment slot="cdk">
+API 구문의 `integrations` 속성을 통해 타입 안전 방식으로 기본 AWS Lambda 함수에 접근할 수 있습니다. 예를 들어 API에 `sayHello` 작업이 정의된 경우 이 함수에 권한을 추가하려면 다음과 같이 할 수 있습니다:
 
 ```ts {6}
 const api = new MyApi(this, 'MyApi', {
   integrations: MyApi.defaultIntegrations(this).build(),
 });
 
-// sayHello는 API에 정의된 작업에 맞게 타입이 지정됩니다
+// sayHello는 API에 정의된 작업으로 타입이 지정됩니다
 api.integrations.sayHello.handler.addToRolePolicy(new PolicyStatement({
   effect: Effect.ALLOW,
   actions: [...],
   resources: [...],
 }));
 ```
+</Fragment>
+<Fragment slot="terraform">
+Terraform 라우터 패턴에서는 단일 Lambda 함수만 존재합니다. 모듈 출력을 통해 접근할 수 있습니다:
 
-#### 기본 옵션 커스터마이징
+```hcl
+# 단일 Lambda 함수에 추가 권한 부여
+resource "aws_iam_role_policy" "additional_permissions" {
+  name = "additional-api-permissions"
+  role = module.my_api.lambda_execution_role_name
 
-기본 통합 생성 시 사용되는 옵션을 커스터마이징하려면 `withDefaultOptions` 메서드를 사용할 수 있습니다. 예를 들어 모든 Lambda 함수를 VPC에 배치하려는 경우:
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject"
+        ]
+        Resource = "arn:aws:s3:::my-bucket/*"
+      }
+    ]
+  })
+}
+```
+</Fragment>
+</Infrastructure>
+
+#### 기본 옵션 사용자 정의
+
+<Infrastructure>
+<Fragment slot="cdk">
+`withDefaultOptions` 메서드를 사용하여 기본 통합 생성 시 사용되는 옵션을 사용자 정의할 수 있습니다. 예를 들어 모든 Lambda 함수를 VPC에 배치하려면:
 
 ```ts {5-7}
 const vpc = new Vpc(this, 'Vpc', ...);
@@ -48,10 +111,58 @@ new MyApi(this, 'MyApi', {
     .build(),
 });
 ```
+</Fragment>
+<Fragment slot="terraform">
+VPC 구성과 같은 옵션을 사용자 정의하려면 생성된 Terraform 모듈을 수정해야 합니다. 모든 Lambda 함수에 VPC 지원을 추가하려면:
+
+```hcl
+# packages/common/terraform/src/app/apis/my-api/my-api.tf
+# VPC 변수 추가
+variable "vpc_subnet_ids" {
+  description = "Lambda 함수용 VPC 서브넷 ID 목록"
+  type        = list(string)
+  default     = []
+}
+
+variable "vpc_security_group_ids" {
+  description = "Lambda 함수용 VPC 보안 그룹 ID 목록"
+  type        = list(string)
+  default     = []
+}
+
+# Lambda 함수 리소스 업데이트
+resource "aws_lambda_function" "api_lambda" {
+  # ... 기존 구성 ...
+
+  # VPC 구성 추가
+  vpc_config {
+    subnet_ids         = var.vpc_subnet_ids
+    security_group_ids = var.vpc_security_group_ids
+  }
+}
+```
+
+다음과 같이 VPC 구성으로 모듈을 사용합니다:
+
+```hcl
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  # VPC 구성
+  vpc_subnet_ids         = [aws_subnet.private_a.id, aws_subnet.private_b.id]
+  vpc_security_group_ids = [aws_security_group.lambda_sg.id]
+
+  tags = local.common_tags
+}
+```
+</Fragment>
+</Infrastructure>
 
 #### 통합 재정의
 
-`withOverrides` 메서드를 사용하여 특정 작업에 대한 통합을 재정의할 수 있습니다. 각 재정의는 HTTP 또는 REST API에 적합한 CDK 통합 구성체를 타입 안전 방식으로 지정해야 합니다. 예를 들어 `getDocumentation` API를 외부 웹사이트 호스팅 문서로 재정의하려는 경우:
+<Infrastructure>
+<Fragment slot="cdk">
+`withOverrides` 메서드를 사용하여 특정 작업에 대한 통합을 재정의할 수 있습니다. 각 재정의는 HTTP 또는 REST API에 적합한 CDK 통합 구문으로 타입이 지정된 `integration` 속성을 지정해야 합니다. `withOverrides` 메서드도 타입 안전합니다. 예를 들어 `getDocumentation` API를 외부 웹사이트 호스팅 문서로 재정의하려면:
 
 ```ts
 new MyApi(this, 'MyApi', {
@@ -65,9 +176,9 @@ new MyApi(this, 'MyApi', {
 });
 ```
 
-재정된 통합은 `api.integrations.getDocumentation`을 통해 접근할 때 더 이상 `handler` 속성을 갖지 않습니다.
+`api.integrations.getDocumentation`을 통해 접근 시 재정의된 통합에는 더 이상 `handler` 속성이 없습니다.
 
-추가 속성을 통합에 포함시켜 타입 안전성을 유지하면서 다른 유형의 통합을 추상화할 수 있습니다. 예를 들어 REST API용 S3 통합을 생성한 후 특정 작업에 대한 버킷을 참조하려는 경우:
+추가 속성을 통합에 추가하면 다른 유형의 통합을 추상화하면서도 타입 안전성을 유지할 수 있습니다. 예를 들어 REST API용 S3 통합을 생성한 후 특정 작업에 대한 버킷을 참조하려면:
 
 ```ts {13, 41}
 const storageBucket = new Bucket(this, 'Bucket', { ... });
@@ -108,13 +219,24 @@ const api = new MyApi(this, 'MyApi', {
     .build(),
 });
 
-// 다른 파일에서 타입 안전 방식으로 정의한 버킷 속성에 접근 가능
+// 이후 다른 파일에서 정의한 bucket 속성에 타입 안전 방식으로 접근 가능
 api.integrations.getFile.bucket.grantRead(...);
 ```
+</Fragment>
+<Fragment slot="terraform">
+:::note
+Terraform 모듈은 라우터 패턴을 사용하므로 특정 통합 재정의를 지원하지 않습니다. 모든 작업은 단일 Lambda 함수에서 처리됩니다.
+
+작업별 다른 통합 유형을 사용하려면 수동으로 명시적 통합을 구현해야 합니다 ([명시적 통합](#explicit-integrations) 섹션 참조).
+:::
+</Fragment>
+</Infrastructure>
 
 #### 인증자 재정의
 
-통합에서 `options`를 제공하여 특정 메서드 옵션(예: Cognito 인증 사용)을 재정의할 수 있습니다:
+<Infrastructure>
+<Fragment slot="cdk">
+통합에 `options`를 제공하여 Cognito 인증과 같은 특정 메서드 옵션을 재정의할 수 있습니다. 예를 들어 `getDocumentation` 작업에 Cognito 인증을 사용하려면:
 
 ```ts
 new MyApi(this, 'MyApi', {
@@ -123,17 +245,28 @@ new MyApi(this, 'MyApi', {
       getDocumentation: {
         integration: new HttpIntegration('https://example.com/documentation'),
         options: {
-          authorizer: new CognitoUserPoolsAuthorizer(...) // REST용 또는 HTTP API용 HttpUserPoolAuthorizer
+          authorizer: new CognitoUserPoolsAuthorizer(...) // REST용 또는 HttpUserPoolAuthorizer (HTTP API)
         }
       },
     })
     .build(),
 });
 ```
+</Fragment>
+<Fragment slot="terraform">
+:::note
+Terraform 모듈은 작업별 인증자 재정의를 지원하지 않습니다. 전체 API는 API 생성 시 지정된 인증 방법(IAM, Cognito 또는 None)을 사용합니다.
+
+작업별 권한 부여를 위해서는 아래와 같이 수동으로 명시적 통합을 구현해야 합니다.
+:::
+</Fragment>
+</Infrastructure>
 
 #### 명시적 통합
 
-기본 통합 대신 각 작업에 직접 통합을 제공할 수 있습니다. 이는 각 작업이 다른 유형의 통합을 사용해야 하거나 새 작업 추가 시 타입 오류를 받고자 할 때 유용합니다:
+<Infrastructure>
+<Fragment slot="cdk">
+기본 통합 대신 각 작업에 직접 통합을 제공할 수 있습니다. 이는 각 작업이 다른 유형의 통합을 사용해야 하거나 새 작업 추가 시 타입 오류를 수신하려는 경우 유용합니다:
 
 ```ts
 new MyApi(this, 'MyApi', {
@@ -147,10 +280,319 @@ new MyApi(this, 'MyApi', {
   },
 });
 ```
+</Fragment>
+<Fragment slot="terraform">
+Terraform에서 작업별 명시적 통합을 사용하려면 기본 프록시 통합을 작업별 특정 통합으로 교체하도록 생성된 앱별 모듈을 수정해야 합니다.
+
+`packages/common/terraform/src/app/apis/my-api/my-api.tf` 편집:
+
+1. **기본 프록시 경로 제거** (예: `resource "aws_apigatewayv2_route" "proxy_routes"`)
+2. **단일 Lambda 함수를** 작업별 개별 함수로 교체
+3. **동일 ZIP 번들 재사용**하여 작업별 특정 통합 및 경로 생성:
+
+<Tabs syncKey="http-rest">
+<TabItem label="HTTP API">
+
+```diff
+# packages/common/terraform/src/app/apis/my-api/my-api.tf
+
+# 기본 단일 Lambda 함수 제거
+- resource "aws_lambda_function" "api_lambda" {
+-   filename         = data.archive_file.lambda_zip.output_path
+-   function_name    = "MyApiHandler"
+-   role            = aws_iam_role.lambda_execution_role.arn
+-   handler         = "index.handler"
+-   runtime         = "nodejs22.x"
+-   timeout         = 30
+-   # ... 나머지 구성
+- }
+
+# 기본 프록시 통합 제거
+- resource "aws_apigatewayv2_integration" "lambda_integration" {
+-   api_id           = module.http_api.api_id
+-   integration_type = "AWS_PROXY"
+-   integration_uri  = aws_lambda_function.api_lambda.invoke_arn
+-   # ... 나머지 구성
+- }
+
+# 기본 프록시 경로 제거
+- resource "aws_apigatewayv2_route" "proxy_routes" {
+-   for_each = toset(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"])
+-   api_id    = module.http_api.api_id
+-   route_key = "${each.key} /{proxy+}"
+-   target    = "integrations/${aws_apigatewayv2_integration.lambda_integration.id}"
+-   # ... 나머지 구성
+- }
+
+# 동일 번들 사용 작업별 Lambda 함수 추가
++ resource "aws_lambda_function" "say_hello_handler" {
++   filename         = data.archive_file.lambda_zip.output_path
++   function_name    = "MyApi-SayHello"
++   role            = aws_iam_role.lambda_execution_role.arn
++   handler         = "sayHello.handler"  # 이 작업용 특정 핸들러
++   runtime         = "nodejs22.x"
++   timeout         = 30
++   source_code_hash = data.archive_file.lambda_zip.output_base64sha256
++
++   tracing_config {
++     mode = "Active"
++   }
++
++   environment {
++     variables = merge({
++       AWS_CONNECTION_REUSE_ENABLED = "1"
++     }, var.env)
++   }
++
++   tags = var.tags
++ }
+
++ resource "aws_lambda_function" "get_documentation_handler" {
++   filename         = data.archive_file.lambda_zip.output_path
++   function_name    = "MyApi-GetDocumentation"
++   role            = aws_iam_role.lambda_execution_role.arn
++   handler         = "getDocumentation.handler"  # 이 작업용 특정 핸들러
++   runtime         = "nodejs22.x"
++   timeout         = 30
++   source_code_hash = data.archive_file.lambda_zip.output_base64sha256
++
++   tracing_config {
++     mode = "Active"
++   }
++
++   environment {
++     variables = merge({
++       AWS_CONNECTION_REUSE_ENABLED = "1"
++     }, var.env)
++   }
++
++   tags = var.tags
++ }
+
+# 작업별 특정 통합 추가
++ resource "aws_apigatewayv2_integration" "say_hello_integration" {
++   api_id           = module.http_api.api_id
++   integration_type = "AWS_PROXY"
++   integration_uri  = aws_lambda_function.say_hello_handler.invoke_arn
++   payload_format_version = "2.0"
++   timeout_milliseconds   = 30000
++ }
+
++ resource "aws_apigatewayv2_integration" "get_documentation_integration" {
++   api_id           = module.http_api.api_id
++   integration_type = "HTTP_PROXY"
++   integration_uri  = "https://example.com/documentation"
++   integration_method = "GET"
++ }
+
+# 작업별 특정 경로 추가
++ resource "aws_apigatewayv2_route" "say_hello_route" {
++   api_id    = module.http_api.api_id
++   route_key = "POST /sayHello"
++   target    = "integrations/${aws_apigatewayv2_integration.say_hello_integration.id}"
++   authorization_type = "AWS_IAM"
++ }
+
++ resource "aws_apigatewayv2_route" "get_documentation_route" {
++   api_id    = module.http_api.api_id
++   route_key = "GET /documentation"
++   target    = "integrations/${aws_apigatewayv2_integration.get_documentation_integration.id}"
++   authorization_type = "NONE"
++ }
+
+# 각 함수에 Lambda 권한 추가
++ resource "aws_lambda_permission" "say_hello_permission" {
++   statement_id  = "AllowExecutionFromAPIGateway-SayHello"
++   action        = "lambda:InvokeFunction"
++   function_name = aws_lambda_function.say_hello_handler.function_name
++   principal     = "apigateway.amazonaws.com"
++   source_arn    = "${module.http_api.api_execution_arn}/*/*"
++ }
+
++ resource "aws_lambda_permission" "get_documentation_permission" {
++   statement_id  = "AllowExecutionFromAPIGateway-GetDocumentation"
++   action        = "lambda:InvokeFunction"
++   function_name = aws_lambda_function.get_documentation_handler.function_name
++   principal     = "apigateway.amazonaws.com"
++   source_arn    = "${module.http_api.api_execution_arn}/*/*"
++ }
+```
+</TabItem>
+<TabItem label="REST API">
+
+```diff
+# packages/common/terraform/src/app/apis/my-api/my-api.tf
+
+# 기본 단일 Lambda 함수 제거
+- resource "aws_lambda_function" "api_lambda" {
+-   filename         = data.archive_file.lambda_zip.output_path
+-   function_name    = "MyApiHandler"
+-   role            = aws_iam_role.lambda_execution_role.arn
+-   handler         = "index.handler"
+-   runtime         = "nodejs22.x"
+-   timeout         = 30
+-   # ... 나머지 구성
+- }
+
+# 기본 프록시 통합 제거
+- resource "aws_apigatewayv2_integration" "lambda_integration" {
+-   api_id           = module.http_api.api_id
+-   integration_type = "AWS_PROXY"
+-   integration_uri  = aws_lambda_function.api_lambda.invoke_arn
+-   # ... 나머지 구성
+- }
+
+# 기본 프록시 경로 제거
+- resource "aws_apigatewayv2_route" "proxy_routes" {
+-   for_each = toset(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"])
+-   api_id    = module.http_api.api_id
+-   route_key = "${each.key} /{proxy+}"
+-   target    = "integrations/${aws_apigatewayv2_integration.lambda_integration.id}"
+-   # ... 나머지 구성
+- }
+
+# 동일 번들 사용 작업별 Lambda 함수 추가
++ resource "aws_lambda_function" "say_hello_handler" {
++   filename         = data.archive_file.lambda_zip.output_path
++   function_name    = "MyApi-SayHello"
++   role            = aws_iam_role.lambda_execution_role.arn
++   handler         = "sayHello.handler"  # 이 작업용 특정 핸들러
++   runtime         = "nodejs22.x"
++   timeout         = 30
++   source_code_hash = data.archive_file.lambda_zip.output_base64sha256
++
++   tracing_config {
++     mode = "Active"
++   }
++
++   environment {
++     variables = merge({
++       AWS_CONNECTION_REUSE_ENABLED = "1"
++     }, var.env)
++   }
++
++   tags = var.tags
++ }
+
++ resource "aws_lambda_function" "get_documentation_handler" {
++   filename         = data.archive_file.lambda_zip.output_path
++   function_name    = "MyApi-GetDocumentation"
++   role            = aws_iam_role.lambda_execution_role.arn
++   handler         = "getDocumentation.handler"  # 이 작업용 특정 핸들러
++   runtime         = "nodejs22.x"
++   timeout         = 30
++   source_code_hash = data.archive_file.lambda_zip.output_base64sha256
++
++   tracing_config {
++     mode = "Active"
++   }
++
++   environment {
++     variables = merge({
++       AWS_CONNECTION_REUSE_ENABLED = "1"
++     }, var.env)
++   }
++
++   tags = var.tags
++ }
+
+# 작업별 리소스 및 메서드 추가
++ resource "aws_api_gateway_resource" "say_hello_resource" {
++   rest_api_id = module.rest_api.api_id
++   parent_id   = module.rest_api.api_root_resource_id
++   path_part   = "sayHello"
++ }
+
++ resource "aws_api_gateway_method" "say_hello_method" {
++   rest_api_id   = module.rest_api.api_id
++   resource_id   = aws_api_gateway_resource.say_hello_resource.id
++   http_method   = "POST"
++   authorization = "AWS_IAM"
++ }
+
++ resource "aws_api_gateway_integration" "say_hello_integration" {
++   rest_api_id = module.rest_api.api_id
++   resource_id = aws_api_gateway_resource.say_hello_resource.id
++   http_method = aws_api_gateway_method.say_hello_method.http_method
++
++   integration_http_method = "POST"
++   type                   = "AWS_PROXY"
++   uri                    = aws_lambda_function.say_hello_handler.invoke_arn
++ }
+
++ resource "aws_api_gateway_resource" "get_documentation_resource" {
++   rest_api_id = module.rest_api.api_id
++   parent_id   = module.rest_api.api_root_resource_id
++   path_part   = "documentation"
++ }
+
++ resource "aws_api_gateway_method" "get_documentation_method" {
++   rest_api_id   = module.rest_api.api_id
++   resource_id   = aws_api_gateway_resource.get_documentation_resource.id
++   http_method   = "GET"
++   authorization = "NONE"
++ }
+
++ resource "aws_api_gateway_integration" "get_documentation_integration" {
++   rest_api_id = module.rest_api.api_id
++   resource_id = aws_api_gateway_resource.get_documentation_resource.id
++   http_method = aws_api_gateway_method.get_documentation_method.http_method
++
++   integration_http_method = "GET"
++   type                   = "HTTP"
++   uri                    = "https://example.com/documentation"
++ }
+
+# 새 통합에 종속성 업데이트
+~ resource "aws_api_gateway_deployment" "api_deployment" {
+    rest_api_id = module.rest_api.api_id
+
+    depends_on = [
+-     aws_api_gateway_integration.lambda_integration,
++     aws_api_gateway_integration.say_hello_integration,
++     aws_api_gateway_integration.get_documentation_integration,
+    ]
+
+    lifecycle {
+      create_before_destroy = true
+    }
+
++   triggers = {
++     redeployment = sha1(jsonencode([
++       aws_api_gateway_integration.say_hello_integration,
++       aws_api_gateway_integration.get_documentation_integration,
++     ]))
++   }
+  }
+
+# 각 함수에 Lambda 권한 추가
++ resource "aws_lambda_permission" "say_hello_permission" {
++   statement_id  = "AllowExecutionFromAPIGateway-SayHello"
++   action        = "lambda:InvokeFunction"
++   function_name = aws_lambda_function.say_hello_handler.function_name
++   principal     = "apigateway.amazonaws.com"
++   source_arn    = "${module.rest_api.api_execution_arn}/*/*"
++ }
+
++ resource "aws_lambda_permission" "get_documentation_permission" {
++   statement_id  = "AllowExecutionFromAPIGateway-GetDocumentation"
++   action        = "lambda:InvokeFunction"
++   function_name = aws_lambda_function.get_documentation_handler.function_name
++   principal     = "apigateway.amazonaws.com"
++   source_arn    = "${module.rest_api.api_execution_arn}/*/*"
++ }
+```
+</TabItem>
+</Tabs>
+
+</Fragment>
+</Infrastructure>
 
 #### 라우터 패턴
 
-단일 Lambda 함수를 사용하여 모든 API 요청을 처리하려는 경우 API의 `defaultIntegrations` 메서드를 수정하여 통합별이 아닌 단일 함수를 생성할 수 있습니다:
+<Infrastructure>
+<Fragment slot="cdk">
+모든 API 요청을 처리하는 단일 Lambda 함수를 배포하려면 `defaultIntegrations` 메서드를 수정하여 작업당 하나가 아닌 단일 함수를 생성할 수 있습니다:
 
 ```ts {5,11-12}
 // packages/common/constructs/src/app/apis/my-api.ts
@@ -172,4 +614,21 @@ export class MyApi<...> extends ... {
 }
 ```
 
-`router` 함수를 메서드 내부에서 생성하는 대신 `defaultIntegrations`의 매개변수로 정의하는 등 다른 방식으로 코드를 수정할 수도 있습니다.
+`router` 함수를 메서드 내부에서 생성하는 대신 `defaultIntegrations`의 매개변수로 정의하는 것과 같은 다른 방식으로 코드를 수정할 수도 있습니다.
+</Fragment>
+<Fragment slot="terraform">
+Terraform 모듈은 기본적으로 라우터 패턴을 사용합니다. 이는 기본적이며 유일하게 지원되는 접근 방식입니다. 생성된 모듈은 모든 API 작업을 처리하는 단일 Lambda 함수를 생성합니다.
+
+기본 모듈을 인스턴스화하여 라우터 패턴을 얻을 수 있습니다:
+
+```hcl
+# 기본 라우터 패턴 - 모든 작업을 처리하는 단일 Lambda 함수
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  # 단일 Lambda 함수가 모든 작업을 자동으로 처리
+  tags = local.common_tags
+}
+```
+</Fragment>
+</Infrastructure>

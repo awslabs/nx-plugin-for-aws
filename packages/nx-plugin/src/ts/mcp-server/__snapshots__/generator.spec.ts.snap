@@ -283,6 +283,596 @@ exports[`ts#mcp-server generator > should match snapshot for BedrockAgentCoreRun
 "
 `;
 
+exports[`ts#mcp-server generator > should match snapshot for Terraform generated files > terraform-agent-core-runtime.tf 1`] = `
+"terraform {
+  required_version = ">= 1.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = ">= 6.0"
+    }
+    null = {
+      source  = "hashicorp/null"
+      version = ">= 3.0"
+    }
+    local = {
+      source  = "hashicorp/local"
+      version = ">= 2.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = ">= 3.0"
+    }
+  }
+}
+
+# Variables
+variable "agent_runtime_name" {
+  description = "Name of the agent runtime"
+  type        = string
+  validation {
+    condition     = can(regex("^[a-zA-Z][a-zA-Z0-9_]{0,42}$", var.agent_runtime_name))
+    error_message = "Value must start with a letter and contain only letters, numbers, and underscores (1-43 characters)."
+  }
+}
+
+variable "server_protocol" {
+  description = "Whether this is an Agent (HTTP) or MCP Server (MCP)"
+  type        = string
+  validation {
+    condition     = contains(["MCP", "HTTP"], var.server_protocol)
+    error_message = "Protocol type must be either 'MCP' or 'HTTP'."
+  }
+}
+
+variable "customJWTAuthorizer" {
+  description = "Custom JWTAuthorizer Configuration"
+  type = object({
+    discoveryUrl    = optional(string)
+    allowedAudience = optional(list(string))
+    allowedClients  = optional(list(string))
+  })
+  default = null
+}
+
+variable "docker_image_tag" {
+  description = "Name of the docker image tag to use as the agent core runtime"
+  type        = string
+}
+
+variable "env" {
+  description = "Environment variables to pass to the agent core runtime"
+  type        = map(string)
+  default     = {}
+}
+
+variable "additional_iam_policy_statements" {
+  description = "Additional IAM policy statements to attach to the agent core runtime role"
+  type = list(object({
+    Effect   = string
+    Action   = list(string)
+    Resource = list(string)
+  }))
+  default = []
+}
+
+variable "tags" {
+  description = "Tags to apply to resources"
+  type        = map(string)
+  default     = {}
+}
+
+# Data sources
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
+locals {
+  aws_account_id = data.aws_caller_identity.current.account_id
+  aws_region = data.aws_region.current.name
+}
+
+# Random ID for bucket suffix to ensure uniqueness
+resource "random_id" "unique_suffix" {
+  byte_length = 4
+}
+
+# ECR Repository
+resource "aws_ecr_repository" "agent_core_repository" {
+  #checkov:skip=CKV_AWS_136:AES256 encryption is sufficient for ECR repositories
+  name                 = "\${lower(var.agent_runtime_name)}_repository_\${random_id.unique_suffix.hex}"
+
+  #checkov:skip=CKV_AWS_51:Image tag is reused for latest deployments
+  image_tag_mutability = "MUTABLE"
+  force_delete         = true
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  tags = var.tags
+}
+
+# ECR Repository Policy
+resource "aws_ecr_repository_policy" "agent_core_ecr_policy" {
+  repository = aws_ecr_repository.agent_core_repository.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowPushPull"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::\${local.aws_account_id}:root"
+        }
+        Action = [
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage",
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:PutImage",
+          "ecr:InitiateLayerUpload",
+          "ecr:UploadLayerPart",
+          "ecr:CompleteLayerUpload"
+        ]
+      }
+    ]
+  })
+}
+
+# IAM Role for Agent Core Runtime
+resource "aws_iam_role" "agent_core_runtime_role" {
+  name = "\${var.agent_runtime_name}-AgentCoreRuntimeRole-\${random_id.unique_suffix.hex}"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AgentCoreAssumeRolePolicy"
+        Effect = "Allow"
+        Principal = {
+          Service = "bedrock-agentcore.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = local.aws_account_id
+          }
+          ArnLike = {
+            "aws:SourceArn" = "arn:aws:bedrock-agentcore:\${local.aws_region}:\${local.aws_account_id}:*"
+          }
+        }
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+# IAM Policy for Query Agent with restricted Athena permissions
+resource "aws_iam_policy" "agent_core_runtime_policy" {
+  name        = "\${var.agent_runtime_name}-QueryAgentPolicy-\${random_id.unique_suffix.hex}"
+  description = "Restricted policy for Agent"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = concat([
+      {
+        Sid    = "ECRImageAccess"
+        Effect = "Allow"
+        Action = [
+          "ecr:BatchGetImage",
+          "ecr:GetDownloadUrlForLayer"
+        ]
+        Resource = [
+          "arn:aws:ecr:\${local.aws_region}:\${local.aws_account_id}:repository/*"
+        ]
+      },
+      {
+        Sid    = "ECRTokenAccess"
+        Effect = "Allow"
+        Action = [
+          "ecr:GetAuthorizationToken"
+        ]
+        Resource = [
+          "*"
+        ]
+      },
+      {
+        "Effect" : "Allow",
+        "Action" : [
+          "logs:DescribeLogStreams",
+          "logs:CreateLogGroup"
+        ],
+        "Resource" : [
+          "arn:aws:logs:\${local.aws_region}:\${local.aws_account_id}:log-group:/aws/bedrock-agentcore/runtimes/*"
+        ]
+      },
+      {
+        "Effect" : "Allow",
+        "Action" : [
+          "logs:DescribeLogGroups"
+        ],
+        "Resource" : [
+          "arn:aws:logs:\${local.aws_region}:\${local.aws_account_id}:log-group:*"
+        ]
+      },
+      {
+        "Effect" : "Allow",
+        "Action" : [
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ],
+        "Resource" : [
+          "arn:aws:logs:\${local.aws_region}:\${local.aws_account_id}:log-group:/aws/bedrock-agentcore/runtimes/*:log-stream:*"
+        ]
+      },
+      {
+        "Effect" : "Allow",
+        "Action" : [
+          "xray:PutTraceSegments",
+          "xray:PutTelemetryRecords",
+          "xray:GetSamplingRules",
+          "xray:GetSamplingTargets"
+        ],
+        "Resource" : ["*"]
+      },
+      {
+        "Effect" : "Allow",
+        "Resource" : "*",
+        "Action" : "cloudwatch:PutMetricData",
+        "Condition" : {
+          "StringEquals" : {
+            "cloudwatch:namespace" : "bedrock-agentcore"
+          }
+        }
+      },
+      {
+        "Sid" : "GetAgentAccessToken",
+        "Effect" : "Allow",
+        "Action" : [
+          "bedrock-agentcore:GetWorkloadAccessToken",
+          "bedrock-agentcore:GetWorkloadAccessTokenForJWT",
+          "bedrock-agentcore:GetWorkloadAccessTokenForUserId"
+        ],
+        "Resource" : [
+          "arn:aws:bedrock-agentcore:\${local.aws_region}:\${local.aws_account_id}:workload-identity-directory/default",
+          "arn:aws:bedrock-agentcore:\${local.aws_region}:\${local.aws_account_id}:workload-identity-directory/default/workload-identity/*"
+        ]
+      },
+      { "Sid" : "BedrockModelInvocation",
+        "Effect" : "Allow",
+        "Action" : [
+          "bedrock:InvokeModel",
+          "bedrock:InvokeModelWithResponseStream"
+        ],
+        "Resource" : [
+          "arn:aws:bedrock:*::foundation-model/*",
+          "arn:aws:bedrock:\${local.aws_region}:\${local.aws_account_id}:*"
+        ]
+      }
+    ], var.additional_iam_policy_statements)
+  })
+
+  tags = var.tags
+}
+
+# Attach the restricted policy to the role
+resource "aws_iam_role_policy_attachment" "agent_core_policy" {
+  role       = aws_iam_role.agent_core_runtime_role.name
+  policy_arn = aws_iam_policy.agent_core_runtime_policy.arn
+}
+
+data "external" "docker_digest" {
+  program = ["sh", "-c", "echo '{\\"digest\\":\\"'$(docker inspect \${var.docker_image_tag} --format '{{.Descriptor.digest}}')'\\"}' "]
+}
+
+# Null resource for Docker publish
+resource "null_resource" "docker_publish" {
+  triggers = {
+    # Trigger rebuild when the image changes
+    docker_digest    = data.external.docker_digest.result.digest
+
+    repository_url   = aws_ecr_repository.agent_core_repository.repository_url
+    docker_image_tag = var.docker_image_tag
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      # Get ECR login token
+      aws ecr get-login-password --region \${local.aws_region} | docker login --username AWS --password-stdin \${self.triggers.repository_url}
+
+      # Tag the image
+      docker tag \${self.triggers.docker_image_tag} \${self.triggers.repository_url}:latest
+
+      # Push the image
+      docker push \${self.triggers.repository_url}:latest
+    EOT
+  }
+
+  depends_on = [aws_ecr_repository_policy.agent_core_ecr_policy]
+}
+
+# Null resource for agent core deployment with proper lifecycle management
+resource "null_resource" "agent_core_runtime_deployment" {
+  triggers = {
+    container_uri  = "\${aws_ecr_repository.agent_core_repository.repository_url}:latest"
+    role_arn       = aws_iam_role.agent_core_runtime_role.arn
+    config_hash = md5(join("", [jsonencode(var.customJWTAuthorizer), var.server_protocol]))
+    env_hash = md5(jsonencode(var.env))
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      uv run --with boto3 python -c '
+import boto3
+import json
+import sys
+
+# Create the client
+client = boto3.client("bedrock-agentcore-control", region_name="\${local.aws_region}")
+
+# Environment variables for QueryAgentConfig
+environment_variables = json.loads("""\${jsonencode(var.env)}""")
+agent_name = "\${var.agent_runtime_name}_\${random_id.unique_suffix.hex}"
+authorization_config = json.loads("""{"customJWTAuthorizer": \${jsonencode(var.customJWTAuthorizer != null ? {
+  for k, v in var.customJWTAuthorizer : k => v if v != null
+} : {})}}""")
+
+try:
+    # First, check if an agent runtime with this name already exists
+    existing_agent_runtime_id = None
+    try:
+        list_response = client.list_agent_runtimes()
+        for runtime in list_response.get("agentRuntimes", []):
+            if runtime.get("agentRuntimeName") == agent_name:
+                existing_agent_runtime_id = runtime.get("agentRuntimeId")
+                print(f"Found existing agent runtime with ID: {existing_agent_runtime_id}")
+                break
+    except Exception as e:
+        print(f"Error listing agent runtimes: {e}")
+
+    if existing_agent_runtime_id:
+        # Update the existing agent runtime
+        try:
+            update_response = client.update_agent_runtime(
+                agentRuntimeId=existing_agent_runtime_id,
+                agentRuntimeArtifact={
+                    "containerConfiguration": {
+                        "containerUri": "\${aws_ecr_repository.agent_core_repository.repository_url}:latest"
+                    }
+                },
+                environmentVariables=environment_variables,
+                networkConfiguration={"networkMode": "PUBLIC"},
+                protocolConfiguration={"serverProtocol": "\${var.server_protocol}"},
+                \${var.customJWTAuthorizer == null ? "" : "authorizerConfiguration=authorization_config,"}
+                roleArn="\${aws_iam_role.agent_core_runtime_role.arn}"
+            )
+            agent_runtime_id = existing_agent_runtime_id
+            print(f"Agent runtime updated successfully: {agent_runtime_id}")
+        except Exception as e:
+            print(f"Error updating agent runtime: {e}")
+            # If update fails, try to create a new one
+            existing_agent_runtime_id = None
+
+    if not existing_agent_runtime_id:
+        # Agent runtime doesn"t exist or update failed, create it
+        response = client.create_agent_runtime(
+            agentRuntimeName=agent_name,
+            agentRuntimeArtifact={
+                "containerConfiguration": {
+                    "containerUri": "\${aws_ecr_repository.agent_core_repository.repository_url}:latest"
+                }
+            },
+            environmentVariables=environment_variables,
+            networkConfiguration={"networkMode": "PUBLIC"},
+            protocolConfiguration={"serverProtocol": "\${var.server_protocol}"},
+            \${var.customJWTAuthorizer == null ? "" : "authorizerConfiguration=authorization_config,"}
+            roleArn="\${aws_iam_role.agent_core_runtime_role.arn}"
+        )
+
+        agent_runtime_id = response.get("agentRuntimeId", "")
+        print(f"Agent runtime created successfully with ID: {agent_runtime_id}")
+
+except Exception as e:
+    print(f"Error managing agent runtime: {str(e)}")
+    sys.exit(1)
+'
+    EOT
+  }
+
+  depends_on = [
+    null_resource.docker_publish,
+    aws_iam_role_policy_attachment.agent_core_policy
+  ]
+}
+
+
+# Null resource for cleanup/destroy
+resource "null_resource" "agent_core_cleanup" {
+  triggers = {
+    aws_region    = local.aws_region
+    agent_name    = var.agent_runtime_name
+    unique_suffix = random_id.unique_suffix.hex
+  }
+
+  provisioner "local-exec" {
+    when    = destroy
+    command = <<-EOT
+      uv run --with boto3 python -c "
+import boto3
+import json
+import os
+
+# Create the client
+client = boto3.client('bedrock-agentcore-control', region_name='\${self.triggers.aws_region}')
+
+agent_name = '\${self.triggers.agent_name}_\${self.triggers.unique_suffix}'
+
+try:
+    # Find the agent runtime by name
+    agent_runtime_id = None
+    try:
+        list_response = client.list_agent_runtimes()
+        for runtime in list_response.get('agentRuntimes', []):
+            if runtime.get('agentRuntimeName') == agent_name:
+                agent_runtime_id = runtime.get('agentRuntimeId')
+                print(f'Found agent runtime to delete: {agent_name} (ID: {agent_runtime_id})')
+                break
+    except Exception as e:
+        print(f'Error listing agent runtimes: {e}')
+
+    if not agent_runtime_id:
+        print(f'No agent runtime found with name: {agent_name}')
+        exit(0)
+
+    # Delete the agent runtime using the found ID
+    response = client.delete_agent_runtime(
+        agentRuntimeId=agent_runtime_id
+    )
+    print(f'Agent runtime {agent_name} (ID: {agent_runtime_id}) deleted successfully:', json.dumps(response, indent=2, default=str))
+
+except client.exceptions.ResourceNotFoundException:
+    print(f'Agent runtime {agent_name} not found, may have been already deleted')
+except Exception as e:
+    print(f'Error deleting agent runtime {agent_name}:', str(e))
+    # Don't exit with error code during destroy to avoid blocking cleanup
+"
+    EOT
+  }
+
+  depends_on = [null_resource.agent_core_runtime_deployment]
+}
+
+# Data source to find the agent runtime by name and get its ID
+data "external" "agent_runtime_lookup" {
+  program = ["uv", "run", "--with", "boto3", "python", "-c", <<-EOT
+import boto3
+import json
+import sys
+
+# Create the client
+client = boto3.client("bedrock-agentcore-control", region_name="\${local.aws_region}")
+
+agent_name = "\${var.agent_runtime_name}_\${random_id.unique_suffix.hex}"
+
+try:
+    # Find the agent runtime by name
+    list_response = client.list_agent_runtimes()
+    for runtime in list_response.get("agentRuntimes", []):
+        if runtime.get("agentRuntimeName") == agent_name:
+            agent_runtime_id = runtime.get("agentRuntimeId")
+            runtime_arn = f"arn:aws:bedrock-agentcore:\${local.aws_region}:\${local.aws_account_id}:runtime/{agent_runtime_id}"
+
+            result = {
+                "agent_runtime_id": agent_runtime_id,
+                "agent_runtime_arn": runtime_arn,
+                "agent_name": agent_name
+            }
+            print(json.dumps(result))
+            sys.exit(0)
+
+    # If not found, return empty values
+    result = {
+        "agent_runtime_id": "",
+        "agent_runtime_arn": "",
+        "agent_name": agent_name
+    }
+    print(json.dumps(result))
+
+except Exception as e:
+    print(f"Error looking up agent runtime: {str(e)}", file=sys.stderr)
+    # Return empty values on error to avoid breaking Terraform
+    result = {
+        "agent_runtime_id": "",
+        "agent_runtime_arn": "",
+        "agent_name": agent_name
+    }
+    print(json.dumps(result))
+EOT
+  ]
+
+  depends_on = [null_resource.agent_core_runtime_deployment]
+}
+
+# Outputs
+output "agent_core_runtime_role_arn" {
+  description = "ARN of the Agent Core Runtime IAM role"
+  value       = aws_iam_role.agent_core_runtime_role.arn
+}
+
+output "agent_core_runtime_role_name" {
+  description = "Name of the Agent Core Runtime IAM role"
+  value       = aws_iam_role.agent_core_runtime_role.name
+}
+
+output "agent_runtime_name" {
+  description = "Name of the deployed agent runtime"
+  value       = "\${var.agent_runtime_name}-\${random_id.unique_suffix.hex}"
+}
+
+output "agent_core_runtime_arn" {
+  description = "ARN of the Bedrock Agent Core runtime"
+  value       = data.external.agent_runtime_lookup.result.agent_runtime_arn
+}
+
+output "agent_runtime_id" {
+  description = "ID of the Bedrock Agent Core runtime"
+  value       = data.external.agent_runtime_lookup.result.agent_runtime_id
+}
+"
+`;
+
+exports[`ts#mcp-server generator > should match snapshot for Terraform generated files > terraform-mcp-server.tf 1`] = `
+"variable "env" {
+  description = "Environment variables to pass to the agent core runtime"
+  type        = map(string)
+  default     = {}
+}
+
+variable "additional_iam_policy_statements" {
+  description = "Additional IAM policy statements to attach to the agent core runtime role"
+  type = list(object({
+    Effect   = string
+    Action   = list(string)
+    Resource = list(string)
+  }))
+  default = []
+}
+
+variable "tags" {
+  description = "Tags to apply to resources"
+  type        = map(string)
+  default     = {}
+}
+
+module "agent_core_runtime" {
+  source = "../../../core/agent-core"
+  agent_runtime_name = "TerraformSnapshotServer"
+  docker_image_tag = "proj-terraform-snapshot-server:latest"
+  server_protocol = "MCP"
+#  customJWTAuthorizer = {
+#    discoveryUrl = "https://xxx/.well-known/openid-configuration",
+#    allowedClients = [ "xxx" ]
+#  }
+
+  env = var.env
+  additional_iam_policy_statements = var.additional_iam_policy_statements
+  tags = var.tags
+}
+
+output "agent_core_runtime_role_arn" {
+  description = "ARN of the agent core runtime role"
+  value       = module.agent_core_runtime.agent_core_runtime_role_arn
+}
+
+output "agent_core_runtime_arn" {
+  description = "ARN of the Bedrock Agent Core runtime"
+  value       = module.agent_core_runtime.agent_core_runtime_arn
+}
+"
+`;
+
 exports[`ts#mcp-server generator > should match snapshot for generated files > mcp-server-http.ts 1`] = `
 "#!/usr/bin/env node
 import { createServer } from './server';

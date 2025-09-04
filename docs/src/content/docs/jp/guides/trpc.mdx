@@ -11,17 +11,18 @@ import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
 import Snippet from '@components/snippet.astro';
 
-[tRPC](https://trpc.io/)はエンドツーエンドの型安全性を備えたTypeScript API構築フレームワークです。tRPCを使用すると、API操作の入力と出力の変更が即座にクライアントコードに反映され、プロジェクトの再ビルドなしにIDE上で確認できます。
+[tRPC](https://trpc.io/) はエンドツーエンドの型安全性を備えたTypeScript API構築フレームワークです。tRPCを使用すると、API操作の入力と出力の更新が即座にクライアントコードに反映され、プロジェクトの再ビルドなしにIDE上で変更を確認できます。
 
-tRPC APIジェネレータはAWS CDKインフラストラクチャがセットアップされた新しいtRPC APIを作成します。生成されるバックエンドはサーバーレスデプロイにAWS Lambdaを使用し、[Zod](https://zod.dev/)によるスキーマ検証を含みます。ロギング、AWS X-Rayトレーシング、Cloudwatchメトリクスを含むオブザーバビリティのために[AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/)が設定されます。
+tRPC APIジェネレータは、AWS CDKまたはTerraformのインフラストラクチャ設定を含む新しいtRPC APIを作成します。生成されるバックエンドはサーバーレスデプロイ用にAWS Lambdaを使用し、AWS API Gateway APIを介して公開され、[Zod](https://zod.dev/)を使用したスキーマ検証が含まれます。また、ロギング、AWS X-Rayトレーシング、Cloudwatchメトリクスを含むオブザーバビリティのために[AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/)を設定します。
 
 ## 使用方法
 
 ### tRPC APIの生成
 
-新しいtRPC APIは2つの方法で生成できます:
+新しいtRPC APIは2つの方法で生成できます：
 
 <RunGenerator generator="ts#trpc-api" />
 
@@ -33,14 +34,14 @@ tRPC APIジェネレータはAWS CDKインフラストラクチャがセット�
 
 ## ジェネレータの出力
 
-ジェネレータは`<directory>/<api-name>`ディレクトリに以下のプロジェクト構造を作成します:
+ジェネレータは`<directory>/<api-name>`ディレクトリに以下のプロジェクト構造を作成します：
 
 <FileTree>
   - src
     - init.ts バックエンドtRPC初期化
-    - router.ts tRPCルーター定義（LambdaハンドラAPIエントリーポイント）
+    - router.ts tRPCルータ定義（LambdaハンドラAPIエントリーポイント）
     - schema Zodを使用したスキーマ定義
-      - echo.ts "echo"プロシージャの入力出力例
+      - echo.ts 「echo」プロシージャの入力・出力例定義
     - procedures APIが公開するプロシージャ（操作）
       - echo.ts サンプルプロシージャ
     - middleware
@@ -48,24 +49,28 @@ tRPC APIジェネレータはAWS CDKインフラストラクチャがセット�
       - logger.ts AWS Powertools for Lambdaロギング設定ミドルウェア
       - tracer.ts AWS Powertools for Lambdaトレーシング設定ミドルウェア
       - metrics.ts AWS Powertools for Lambdaメトリクス設定ミドルウェア
-    - local-server.ts ローカル開発サーバー用tRPCスタンドアロンアダプターエントリーポイント
+    - local-server.ts ローカル開発サーバー用tRPCスタンドアロンアダプタエントリーポイント
     - client
       - index.ts マシン間API呼び出し用型安全クライアント
   - tsconfig.json TypeScript設定
   - project.json プロジェクト設定とビルドターゲット
 </FileTree>
 
-ジェネレータはまた`packages/common/constructs`ディレクトリにAPIデプロイ用CDKコンストラクトを作成します。
+### インフラストラクチャ
+
+<Snippet name="shared-constructs" />
+
+<Snippet name="api/shared-constructs" />
 
 ## tRPC APIの実装
 
-tRPC APIは基本的に、リクエストを特定のプロシージャに委譲するルーターで構成されます。各プロシージャはZodスキーマで定義された入力と出力を持ちます。
+大まかに言うと、tRPC APIはリクエストを特定のプロシージャに委譲するルータで構成されます。各プロシージャはZodスキーマで定義された入力と出力を持ちます。
 
 ### スキーマ
 
-`src/schema`ディレクトリにはクライアントとサーバーコード間で共有される型が含まれます。これらの型はTypeScriptファーストのスキーマ宣言・検証ライブラリ[Zod](https://zod.dev/)を使用して定義されます。
+`src/schema`ディレクトリにはクライアントとサーバーコード間で共有される型が含まれます。これらはTypeScriptファーストのスキーマ宣言・検証ライブラリである[Zod](https://zod.dev/)を使用して定義されます。
 
-スキーマの例:
+サンプルスキーマの例：
 
 ```ts
 import { z } from 'zod';
@@ -81,7 +86,7 @@ export const UserSchema = z.object({
 export type User = z.TypeOf<typeof UserSchema>;
 ```
 
-上記スキーマの場合、`User`型は以下のTypeScriptと同等です:
+上記スキーマの場合、`User`型は以下のTypeScriptインターフェースと同等です：
 
 ```ts
 interface User {
@@ -91,15 +96,17 @@ interface User {
 }
 ```
 
-スキーマはサーバーとクライアントの両方で共有され、APIで使用する構造を変更する際の単一の更新ポイントを提供します。スキーマは実行時にtRPC APIによって自動検証され、バックエンドで手動で検証ロジックを作成する手間を省きます。
+スキーマはサーバーとクライアントコードの両方で共有され、APIで使用される構造を変更する際の単一の更新ポイントを提供します。
 
-Zodはスキーマの結合や派生のための`.merge`、`.pick`、`.omit`などの強力なユーティリティを提供します。詳細は[Zodドキュメント](https://zod.dev/?id=basic-usage)を参照してください。
+スキーマは実行時にtRPC APIによって自動検証され、バックエンドでカスタム検証ロジックを手動で作成する必要がなくなります。
 
-### ルーターとプロシージャ
+Zodはスキーマを結合または派生するための`.merge`、`.pick`、`.omit`などの強力なユーティリティを提供します。詳細は[Zod公式ドキュメント](https://zod.dev/?id=basic-usage)を参照してください。
 
-APIのエントリーポイントは`src/router.ts`にあります。このファイルには、呼び出される操作に基づいてリクエストを「プロシージャ」にルーティングするLambdaハンドラが含まれます。各プロシージャは入力、出力、実装を定義します。
+### ルータとプロシージャ
 
-生成されるサンプルルーターには`echo`という単一の操作が含まれます:
+APIのエントリポイントは`src/router.ts`にあります。このファイルには、呼び出される操作に基づいてリクエストを「プロシージャ」にルーティングするLambdaハンドラが含まれます。各プロシージャは期待される入力、出力、実装を定義します。
+
+生成されるサンプルルータには`echo`という単一の操作が含まれます：
 
 ```ts
 import { echo } from './procedures/echo.js';
@@ -109,7 +116,7 @@ export const appRouter = router({
 });
 ```
 
-サンプルの`echo`プロシージャは`src/procedures/echo.ts`に生成されます:
+サンプルの`echo`プロシージャは`src/procedures/echo.ts`に生成されます：
 
 ```ts
 export const echo = publicProcedure
@@ -118,19 +125,22 @@ export const echo = publicProcedure
   .query((opts) => ({ result: opts.input.message }));
 ```
 
-上記の分解:
-- `publicProcedure`は`src/middleware`に設定されたミドルウェアを含むAPIの公開メソッドを定義
-- `input`は操作の期待入力を定義するZodスキーマを受け入れ、自動検証
-- `output`は操作の期待出力を定義するZodスキーマを受け入れ、スキーマに準拠しない出力の場合型エラーが発生
-- `query`はAPIの実装を定義する関数を受け入れ、`opts`入力と`opts.ctx`のコンテキストにアクセス可能
+上記の構成要素：
 
-`query`の使用は非変異操作を示します。データ変更操作には`mutation`メソッドを使用します。新しいプロシージャを追加する場合は、`src/router.ts`のルーターに登録する必要があります。
+- `publicProcedure`：`src/middleware`に設定されたミドルウェアを含むAPIの公開メソッドを定義
+- `input`：操作の期待される入力を定義するZodスキーマを受け入れる
+- `output`：操作の期待される出力を定義するZodスキーマを受け入れる
+- `query`：APIの実装を定義する関数を受け入れる。`opts`には入力値と`opts.ctx`経由でミドルウェアが設定したコンテキストが含まれる
+
+`query`の使用は操作が非変更的であることを示します。データ取得用メソッドに使用します。変更操作には`mutation`メソッドを使用します。
+
+新しいプロシージャを追加する場合は、`src/router.ts`でルータに登録してください。
 
 ## tRPC APIのカスタマイズ
 
 ### エラー処理
 
-実装では`TRPCError`をスローしてクライアントにエラー応答を返せます:
+実装では`TRPCError`をスローしてクライアントにエラーレスポンスを返せます：
 
 ```ts
 throw new TRPCError({
@@ -141,7 +151,7 @@ throw new TRPCError({
 
 ### 操作の整理
 
-APIが成長するにつれ、関連する操作をグループ化できます:
+APIが成長するにつれ、関連する操作をグループ化できます：
 
 ```ts
 import { getUser } from './procedures/users/get.js';
@@ -156,7 +166,7 @@ const appRouter = router({
 })
 ```
 
-クライアントはこのグループ化された操作を呼び出せます:
+クライアントはこのグループ化された操作を受け取り、`listUsers`操作の呼び出し例：
 
 ```ts
 client.users.list.query();
@@ -164,14 +174,14 @@ client.users.list.query();
 
 ### ロギング
 
-AWS Lambda Powertoolsロガーは`src/middleware/logger.ts`で設定され、`opts.ctx.logger`でアクセス可能:
+AWS Lambda Powertoolsロガーは`src/middleware/logger.ts`で設定され、`opts.ctx.logger`経由でアクセス可能：
 
 ```ts {5}
 export const echo = publicProcedure
    .input(...)
    .output(...)
    .query(async (opts) => {
-      opts.ctx.logger.info('操作が入力で呼び出されました', opts.input);
+      opts.ctx.logger.info('操作が入力値で呼び出されました', opts.input);
       return ...;
    });
 ```
@@ -180,7 +190,7 @@ export const echo = publicProcedure
 
 ### メトリクス記録
 
-AWS Lambda Powertoolsメトリクスは`src/middleware/metrics.ts`で設定され、`opts.ctx.metrics`でアクセス可能:
+AWS Lambda Powertoolsメトリクスは`src/middleware/metrics.ts`で設定され、`opts.ctx.metrics`経由でアクセス可能：
 
 ```ts {5}
 export const echo = publicProcedure
@@ -196,7 +206,7 @@ export const echo = publicProcedure
 
 ### X-Rayトレーシングの微調整
 
-AWS Lambda Powertoolsトレーサーは`src/middleware/tracer.ts`で設定され、`opts.ctx.tracer`でアクセス可能:
+AWS Lambda Powertoolsトレーサーは`src/middleware/tracer.ts`で設定され、`opts.ctx.tracer`経由でアクセス可能：
 
 ```ts {5-7}
 export const echo = publicProcedure
@@ -204,7 +214,7 @@ export const echo = publicProcedure
    .output(...)
    .query(async (opts) => {
       const subSegment = opts.ctx.tracer.getSegment()!.addNewSubsegment('MyAlgorithm');
-      // ... トレース対象のロジック
+      // ... トレース対象のアルゴリズムロジック
       subSegment.close();
       return ...;
    });
@@ -214,13 +224,13 @@ export const echo = publicProcedure
 
 ### カスタムミドルウェアの実装
 
-コンテキストに追加値を提供するミドルウェアを実装できます。例として`src/middleware/identity.ts`にAPI呼び出し元の詳細を抽出するミドルウェアを作成:
+コンテキストに追加の値を提供するミドルウェアを実装できます。例として、APIの呼び出し元ユーザー詳細を抽出するミドルウェア：
 
 :::warning
-この例は`auth`が`IAM`に設定されていることを想定。Cognito認証の場合、`event`からクレームを抽出可能
+この例は`auth`が`IAM`に設定されている場合を想定。Cognito認証の場合、`event`からクレームを抽出可能
 :::
 
-コンテキストインターフェース定義:
+コンテキストインターフェース定義：
 
 ```ts
 export interface IIdentityContext {
@@ -231,7 +241,7 @@ export interface IIdentityContext {
 }
 ```
 
-ミドルウェア実装例（REST API用）:
+ミドルウェア実装（REST API用）：
 
 <Tabs>
 <TabItem label="REST">
@@ -241,7 +251,7 @@ import { initTRPC, TRPCError } from '@trpc/server';
 import { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
 import { APIGatewayProxyEvent } from 'aws-lambda';
 
-// ... インターフェース定義 ...
+// ...（インターフェース定義は上記と同じ）
 
 export const createIdentityPlugin = () => {
   const t = initTRPC.context<IIdentityContext & CreateAWSLambdaContextOptions<APIGatewayProxyEvent>>().create();
@@ -249,16 +259,8 @@ export const createIdentityPlugin = () => {
   const cognito = new CognitoIdentityProvider();
 
   return t.procedure.use(async (opts) => {
-    // ... 認証プロバイダーからのsub抽出ロジック ...
-    
-    // Cognitoユーザー検索
-    const { Users } = await cognito.listUsers({
-      UserPoolId: process.env.USER_POOL_ID!,
-      Limit: 1,
-      Filter: `sub="${sub}"`,
-    });
-
-    // コンテキストにidentityを追加
+    const cognitoAuthenticationProvider = opts.ctx.event.requestContext?.identity?.cognitoAuthenticationProvider;
+    // ...（ユーザー情報取得ロジック）
     return await opts.next({
       ctx: {
         ...opts.ctx,
@@ -279,7 +281,7 @@ import { initTRPC, TRPCError } from '@trpc/server';
 import { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
 import { APIGatewayProxyEventV2WithIAMAuthorizer } from 'aws-lambda';
 
-// ... インターフェース定義 ...
+// ...（インターフェース定義は上記と同じ）
 
 export const createIdentityPlugin = () => {
   const t = initTRPC.context<IIdentityContext & CreateAWSLambdaContextOptions<APIGatewayProxyEventV2WithIAMAuthorizer>>().create();
@@ -287,16 +289,13 @@ export const createIdentityPlugin = () => {
   const cognito = new CognitoIdentityProvider();
 
   return t.procedure.use(async (opts) => {
-    // ... HTTP API用のsub抽出ロジック ...
-    
-    // Cognitoユーザー検索
-    const { Users } = await cognito.listUsers({
-      UserPoolId: process.env.USER_POOL_ID!,
-      Limit: 1,
-      Filter: `sub="${sub}"`,
-    });
-
-    // コンテキストにidentityを追加
+    const cognitoIdentity = opts.ctx.event.requestContext?.authorizer?.iam
+      ?.cognitoIdentity as unknown as
+      | {
+          amr: string[];
+        }
+      | undefined;
+    // ...（ユーザー情報取得ロジック）
     return await opts.next({
       ctx: {
         ...opts.ctx,
@@ -314,7 +313,11 @@ export const createIdentityPlugin = () => {
 
 ## tRPC APIのデプロイ
 
-tRPC APIジェネレータは`common/constructs`フォルダにデプロイ用CDKコンストラクトを生成。CDKアプリケーションで使用例:
+tRPC APIジェネレータは選択した`iacProvider`に基づきCDKまたはTerraformのインフラストラクチャコードを作成します。
+
+<Infrastructure>
+<Fragment slot="cdk">
+`common/constructs`フォルダのCDKコンストラクトを使用：
 
 ```ts {6-8}
 import { MyApi } from ':my-scope/common-constructs`;
@@ -328,10 +331,7 @@ export class ExampleStack extends Stack {
 }
 ```
 
-この設定はAWS API Gateway、Lambda関数、認証方法を含むAPIインフラを構築します。
-
-:::note
-Cognito認証を選択した場合、APIコンストラクトに`identity`プロパティを指定する必要があります:
+Cognito認証を使用する場合：
 
 ```ts {9}
 import { MyApi, UserIdentity } from ':my-scope/common-constructs';
@@ -339,56 +339,89 @@ import { MyApi, UserIdentity } from ':my-scope/common-constructs';
 export class ExampleStack extends Stack {
   constructor(scope: Construct, id: string) {
     const identity = new UserIdentity(this, 'Identity');
-
     const api = new MyApi(this, 'MyApi', {
-      integrations: MyApi.defaultIntegrations(this).build(),
       identity,
     });
   }
 }
 ```
+</Fragment>
+<Fragment slot="terraform">
+`common/terraform`フォルダのモジュールを使用：
 
-`UserIdentity`コンストラクトは<Link path="/guides/react-website-auth">`ts#react-website-auth`ジェネレータ</Link>で生成可能
-:::
+```hcl {6-8}
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
 
-### 型安全な統合
+  env = {
+    ENVIRONMENT = var.environment
+    LOG_LEVEL   = "INFO"
+  }
 
-<Snippet name="api/type-safe-api-integrations" parentHeading="型安全な統合" />
+  tags = local.common_tags
+}
+```
+
+Cognito認証の場合：
+
+```hcl {4-5}
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  user_pool_id         = local.user_pool_id
+  user_pool_client_ids = [local.client_id]
+}
+```
+</Fragment>
+</Infrastructure>
+
+### 統合
+
+<Snippet name="api/type-safe-api-integrations" parentHeading="統合" />
 
 :::tip
-tRPC APIでプロシージャを追加/削除すると、CDKコンストラクトに即時反映され、再ビルド不要です
+CDKを選択した場合、プロシージャの追加/削除は再ビルドなしでCDKコンストラクトに即時反映されます
 :::
 
-### アクセス権限付与（IAM認証時）
+### アクセス権付与（IAM認証時）
 
-`IAM`認証を選択した場合、`grantInvokeAccess`メソッドでAPIアクセスを許可できます:
-
+<Infrastructure>
+<Fragment slot="cdk">
 ```ts
 api.grantInvokeAccess(myIdentityPool.authenticatedRole);
 ```
+</Fragment>
+<Fragment slot="terraform">
+```hcl
+resource "aws_iam_policy" "api_invoke_policy" {
+  policy = jsonencode({
+    Statement = [{
+      Action = "execute-api:Invoke"
+      Resource = "${module.my_api.api_execution_arn}/*/*"
+    }]
+  })
+}
+```
+</Fragment>
+</Infrastructure>
 
 ## ローカルtRPCサーバー
 
-`serve`ターゲットでローカルサーバーを起動:
+`serve`ターゲットでローカルサーバーを起動：
 
 <NxCommands commands={['run @my-scope/my-api:serve']} />
 
-エントリーポイントは`src/local-server.ts`です。API変更時に自動リロードされます。
-
 ## tRPC APIの呼び出し
 
-型安全なtRPCクライアントを作成可能。バックエンド間呼び出し例:
+型安全なクライアントを作成：
 
 ```ts
 import { createMyApiClient } from ':my-scope/my-api';
 
 const client = createMyApiClient({ url: 'https://my-api-url.example.com/' });
-
 await client.echo.query({ message: 'Hello world!' });
 ```
 
-Reactウェブサイトから呼び出す場合は<Link path="guides/api-connection/react-trpc">API Connection</Link>ジェネレータの使用を検討してください。
-
 ## 詳細情報
 
-tRPCの詳細は[tRPCドキュメント](https://trpc.io/docs)を参照してください。
+[tRPC公式ドキュメント](https://trpc.io/docs)を参照してください。

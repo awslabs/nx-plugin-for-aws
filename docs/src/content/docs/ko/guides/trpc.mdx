@@ -11,15 +11,16 @@ import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
 import Snippet from '@components/snippet.astro';
 
-[tRPC](https://trpc.io/)는 엔드투엔드 타입 안전성을 갖춘 TypeScript API 구축을 위한 프레임워크입니다. tRPC를 사용하면 API 작업의 입력 및 출력 변경사항이 클라이언트 코드에 즉시 반영되며, 프로젝트 재빌드 없이 IDE에서 바로 확인할 수 있습니다.
+[tRPC](https://trpc.io/)는 엔드투엔드 타입 안전성을 갖춘 TypeScript API 구축 프레임워크입니다. tRPC를 사용하면 API 작업의 입력과 출력에 대한 변경 사항이 클라이언트 코드에 즉시 반영되며, 프로젝트 재빌드 없이도 IDE에서 바로 확인할 수 있습니다.
 
-tRPC API 생성기는 AWS CDK 인프라 설정이 완료된 새로운 tRPC API를 생성합니다. 생성된 백엔드는 서버리스 배포를 위해 AWS Lambda를 사용하며 [Zod](https://zod.dev/)를 통한 스키마 검증을 포함합니다. 또한 로깅, AWS X-Ray 추적, Cloudwatch 메트릭을 위한 [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/)를 설정합니다.
+tRPC API 생성기는 AWS CDK 또는 Terraform 인프라 설정과 함께 새로운 tRPC API를 생성합니다. 생성된 백엔드는 서버리스 배포를 위해 AWS Lambda를 사용하며, AWS API Gateway API를 통해 노출되고 [Zod](https://zod.dev/)를 이용한 스키마 검증을 포함합니다. 또한 로깅, AWS X-Ray 추적, Cloudwatch 메트릭을 포함한 관측 가능성을 위해 [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/)를 설정합니다.
 
 ## 사용 방법
 
-### tRPC API 생성하기
+### tRPC API 생성
 
 다음 두 가지 방법으로 새로운 tRPC API를 생성할 수 있습니다:
 
@@ -31,7 +32,7 @@ tRPC API 생성기는 AWS CDK 인프라 설정이 완료된 새로운 tRPC API�
 
 <Snippet name="api/api-choice-note" />
 
-## 생성기 출력 결과
+## 생성기 출력
 
 생성기는 `<directory>/<api-name>` 디렉토리에 다음 프로젝트 구조를 생성합니다:
 
@@ -40,15 +41,15 @@ tRPC API 생성기는 AWS CDK 인프라 설정이 완료된 새로운 tRPC API�
     - init.ts 백엔드 tRPC 초기화
     - router.ts tRPC 라우터 정의 (Lambda 핸들러 API 진입점)
     - schema Zod를 사용한 스키마 정의
-      - echo.ts "echo" 프로시저의 입력/출력 예제 정의
-    - procedures API가 노출하는 프로시저(작업)
+      - echo.ts "echo" 프로시저의 입력 및 출력 예제 정의
+    - procedures API가 노출하는 프로시저(또는 작업)
       - echo.ts 예제 프로시저
     - middleware
       - error.ts 오류 처리 미들웨어
-      - logger.ts AWS Powertools Lambda 로깅 설정 미들웨어
-      - tracer.ts AWS Powertools Lambda 추적 설정 미들웨어
-      - metrics.ts AWS Powertools Lambda 메트릭 설정 미들웨어
-    - local-server.ts 로컬 개발 서버용 tRPC 독립 실행형 어댑터 진입점
+      - logger.ts AWS Powertools for Lambda 로깅 설정 미들웨어
+      - tracer.ts AWS Powertools for Lambda 추적 설정 미들웨어
+      - metrics.ts AWS Powertools for Lambda 메트릭 설정 미들웨어
+    - local-server.ts 로컬 개발 서버용 tRPC 독립형 어댑터 진입점
     - client
       - index.ts 기계 간 API 호출용 타입 안전 클라이언트
   - tsconfig.json TypeScript 구성
@@ -56,17 +57,21 @@ tRPC API 생성기는 AWS CDK 인프라 설정이 완료된 새로운 tRPC API�
 
 </FileTree>
 
-생성기는 또한 API 배포에 사용할 수 있는 CDK 구문을 `packages/common/constructs` 디렉토리에 생성합니다.
+### 인프라
 
-## tRPC API 구현하기
+<Snippet name="shared-constructs" />
 
-개요적으로 tRPC API는 요청을 특정 프로시저에 위임하는 라우터로 구성됩니다. 각 프로시저는 Zod 스키마로 정의된 입력과 출력을 가집니다.
+<Snippet name="api/shared-constructs" />
+
+## tRPC API 구현 개요
+
+tRPC API는 라우터가 특정 프로시저에 요청을 위임하는 구조로 구성됩니다. 각 프로시저는 Zod 스키마로 정의된 입력과 출력을 가집니다.
 
 ### 스키마
 
-`src/schema` 디렉토리에는 클라이언트와 서버 코드 간에 공유되는 타입들이 포함되어 있습니다. 이 패키지에서는 TypeScript 우선 스키마 선언 및 검증 라이브러리인 [Zod](https://zod.dev/)를 사용하여 이러한 타입을 정의합니다.
+`src/schema` 디렉토리는 클라이언트와 서버 코드 간에 공유되는 타입을 포함합니다. 이 패키지에서는 TypeScript 우선 스키마 선언 및 검증 라이브러리인 [Zod](https://zod.dev/)를 사용하여 이러한 타입을 정의합니다.
 
-예시 스키마는 다음과 같을 수 있습니다:
+예제 스키마는 다음과 같을 수 있습니다:
 
 ```ts
 import { z } from 'zod';
@@ -92,15 +97,13 @@ interface User {
 }
 ```
 
-스키마는 서버와 클라이언트 코드 모두에서 공유되므로 API에서 사용하는 구조를 변경할 때 단일 위치에서 업데이트할 수 있습니다.
-
-스키마는 런타임에 tRPC API에 의해 자동으로 검증되므로 백엔드에서 수동으로 검증 로직을 작성할 필요가 없습니다.
+스키마는 서버와 클라이언트 코드 모두에서 공유되므로 API에서 사용하는 구조를 변경할 때 한 곳에서만 수정하면 됩니다. 스키마는 런타임에 tRPC API에 의해 자동으로 검증되므로 백엔드에서 수동으로 검증 로직을 작성할 필요가 없습니다.
 
 Zod는 `.merge`, `.pick`, `.omit` 등 스키마를 결합하거나 파생시키는 강력한 유틸리티를 제공합니다. 자세한 내용은 [Zod 문서 사이트](https://zod.dev/?id=basic-usage)에서 확인할 수 있습니다.
 
 ### 라우터와 프로시저
 
-`src/router.ts`에서 API의 진입점을 찾을 수 있습니다. 이 파일은 호출되는 작업에 따라 요청을 "프로시저"에 라우팅하는 람다 핸들러를 포함합니다. 각 프로시저는 예상 입력, 출력 및 구현을 정의합니다.
+API의 진입점은 `src/router.ts`에서 찾을 수 있습니다. 이 파일은 호출되는 작업에 따라 요청을 "프로시저"에 라우팅하는 Lambda 핸들러를 포함합니다. 각 프로시저는 예상 입력, 출력 및 구현을 정의합니다.
 
 생성된 샘플 라우터에는 `echo`라는 단일 작업이 있습니다:
 
@@ -112,7 +115,7 @@ export const appRouter = router({
 });
 ```
 
-예시 `echo` 프로시저는 `src/procedures/echo.ts`에 생성됩니다:
+예제 `echo` 프로시저는 `src/procedures/echo.ts`에 생성됩니다:
 
 ```ts
 export const echo = publicProcedure
@@ -123,20 +126,20 @@ export const echo = publicProcedure
 
 위 코드를 분석하면:
 
-- `publicProcedure`는 `src/middleware`에 설정된 미들웨어를 포함하여 API의 공개 메서드를 정의합니다. 이 미들웨어에는 로깅, 추적, 메트릭을 위한 AWS Lambda Powertools 통합이 포함됩니다.
-- `input`은 작업에 대한 예상 입력을 정의하는 Zod 스키마를 받습니다. 이 작업에 전송된 요청은 이 스키마에 대해 자동으로 검증됩니다.
-- `output`은 작업에 대한 예상 출력을 정의하는 Zod 스키마를 받습니다. 스키마를 준수하지 않는 출력을 반환하면 구현에서 타입 오류가 발생합니다.
-- `query`는 API 구현을 정의하는 함수를 받습니다. 이 구현은 `opts`를 수신하며, 여기에는 작업에 전달된 `input`과 미들웨어에 의해 설정된 다른 컨텍스트(`opts.ctx`에서 사용 가능)가 포함됩니다. `query`에 전달된 함수는 `output` 스키마를 준수하는 출력을 반환해야 합니다.
+- `publicProcedure`는 `src/middleware`에 설정된 미들웨어를 포함하여 API의 공개 메서드를 정의합니다. 이 미들웨어에는 로깅, 추적 및 메트릭을 위한 AWS Lambda Powertools 통합이 포함됩니다.
+- `input`은 작업에 필요한 입력을 정의하는 Zod 스키마를 받습니다. 이 작업에 전송된 요청은 자동으로 이 스키마에 대해 검증됩니다.
+- `output`은 작업의 예상 출력을 정의하는 Zod 스키마를 받습니다. 스키마를 준수하지 않는 출력을 반환하면 구현 단계에서 타입 오류가 발생합니다.
+- `query`는 API 구현을 정의하는 함수를 받습니다. 이 구현은 `opts`를 수신하며, `opts.input`에는 작업에 전달된 입력이 포함되고 `opts.ctx`에는 미들웨어에서 설정된 컨텍스트가 포함됩니다. `query`에 전달된 함수는 `output` 스키마를 준수하는 값을 반환해야 합니다.
 
-구현을 정의하기 위해 `query`를 사용하는 것은 작업이 변경을 일으키지 않음을 나타냅니다. 데이터 검색 메서드를 정의할 때 이 방법을 사용하세요. 변경을 일으키는 작업을 구현하려면 대신 `mutation` 메서드를 사용하세요.
+`query`를 사용하여 구현을 정의하는 것은 작업이 변경을 유발하지 않음을 나타냅니다. 데이터 검색 메서드를 정의할 때 사용합니다. 변경을 유발하는 작업을 구현하려면 대신 `mutation` 메서드를 사용하세요.
 
-새 프로시저를 추가할 때는 `src/router.ts`의 라우터에 등록해야 합니다.
+새 프로시저를 추가할 경우 `src/router.ts`의 라우터에 등록해야 합니다.
 
 ## tRPC API 커스터마이징
 
 ### 오류 처리
 
-구현에서 `TRPCError`를 발생시켜 클라이언트에 오류 응답을 반환할 수 있습니다. 이러한 오류는 오류 유형을 나타내는 `code`를 받습니다. 예시:
+구현에서 `TRPCError`를 발생시켜 클라이언트에 오류 응답을 반환할 수 있습니다. 오류 유형을 나타내는 `code`를 포함합니다:
 
 ```ts
 throw new TRPCError({
@@ -147,9 +150,7 @@ throw new TRPCError({
 
 ### 작업 구성
 
-API가 커짐에 따라 관련 작업을 그룹화하고 싶을 수 있습니다.
-
-중첩 라우터를 사용하여 작업을 그룹화할 수 있습니다. 예시:
+API가 확장됨에 따라 관련 작업을 그룹화할 수 있습니다. 중첩 라우터를 사용하여 작업을 그룹화할 수 있습니다:
 
 ```ts
 import { getUser } from './procedures/users/get.js';
@@ -164,7 +165,7 @@ const appRouter = router({
 })
 ```
 
-클라이언트는 이 작업 그룹화를 받으며, 예를 들어 `listUsers` 작업을 호출하는 것은 다음과 같이 표시됩니다:
+클라이언트는 이 그룹화된 작업을 받으며, 예를 들어 `listUsers` 작업을 호출하는 것은 다음과 같습니다:
 
 ```ts
 client.users.list.query();
@@ -172,14 +173,14 @@ client.users.list.query();
 
 ### 로깅
 
-AWS Lambda Powertools 로거는 `src/middleware/logger.ts`에 구성되며, `opts.ctx.logger`를 통해 API 구현에서 액세스할 수 있습니다. 이를 사용하여 CloudWatch Logs에 로깅하거나 모든 구조화된 로그 메시지에 포함할 추가 값을 제어할 수 있습니다. 예시:
+AWS Lambda Powertools 로거는 `src/middleware/logger.ts`에 구성되며, API 구현에서 `opts.ctx.logger`를 통해 접근할 수 있습니다. 이를 사용하여 CloudWatch Logs에 로깅하거나 모든 구조화된 로그 메시지에 추가 값을 포함시킬 수 있습니다:
 
 ```ts {5}
 export const echo = publicProcedure
    .input(...)
    .output(...)
    .query(async (opts) => {
-      opts.ctx.logger.info('작업이 입력과 함께 호출됨', opts.input);
+      opts.ctx.logger.info('입력으로 호출된 작업', opts.input);
 
       return ...;
    });
@@ -189,7 +190,7 @@ export const echo = publicProcedure
 
 ### 메트릭 기록
 
-AWS Lambda Powertools 메트릭은 `src/middleware/metrics.ts`에 구성되며, `opts.ctx.metrics`를 통해 API 구현에서 액세스할 수 있습니다. 이를 사용하여 AWS SDK를 가져오고 사용할 필요 없이 CloudWatch에 메트릭을 기록할 수 있습니다. 예시:
+AWS Lambda Powertools 메트릭은 `src/middleware/metrics.ts`에 구성되며, API 구현에서 `opts.ctx.metrics`를 통해 접근할 수 있습니다. AWS SDK를 가져오거나 사용하지 않고도 CloudWatch에 메트릭을 기록할 수 있습니다:
 
 ```ts {5}
 export const echo = publicProcedure
@@ -206,7 +207,7 @@ export const echo = publicProcedure
 
 ### X-Ray 추적 미세 조정
 
-AWS Lambda Powertools 추적기는 `src/middleware/tracer.ts`에 구성되며, `opts.ctx.tracer`를 통해 API 구현에서 액세스할 수 있습니다. 이를 사용하여 API 요청의 성능 및 흐름에 대한 자세한 통찰력을 제공하는 AWS X-Ray 추적을 추가할 수 있습니다. 예시:
+AWS Lambda Powertools 추적기는 `src/middleware/tracer.ts`에 구성되며, API 구현에서 `opts.ctx.tracer`를 통해 접근할 수 있습니다. 이를 사용하여 API 요청의 성능 및 흐름에 대한 자세한 통찰력을 제공하는 AWS X-Ray 추적을 추가할 수 있습니다:
 
 ```ts {5-7}
 export const echo = publicProcedure
@@ -225,9 +226,9 @@ export const echo = publicProcedure
 
 ### 커스텀 미들웨어 구현
 
-미들웨어를 구현하여 프로시저에 제공되는 컨텍스트에 추가 값을 추가할 수 있습니다.
+미들웨어를 구현하여 프로시저에 제공되는 컨텍스트에 추가 값을 포함시킬 수 있습니다.
 
-예를 들어, API 호출 사용자에 대한 세부 정보를 추출하기 위한 미들웨어를 `src/middleware/identity.ts`에 구현해 보겠습니다.
+예를 들어, API 호출 사용자 세부 정보를 추출하는 미들웨어를 `src/middleware/identity.ts`에 구현해 보겠습니다.
 
 :::warning
 이 예제는 `auth`가 `IAM`으로 설정되었다고 가정합니다. Cognito 인증의 경우 이벤트에서 관련 클레임을 추출하는 것이 더 간단합니다.
@@ -244,26 +245,26 @@ export interface IIdentityContext {
 }
 ```
 
-이 컨텍스트에 추가적인 _선택적_ 속성을 정의합니다. tRPC는 이 미들웨어가 올바르게 구성된 프로시저에서 이 속성이 정의되도록 관리합니다.
+이 추가 속성이 올바르게 구성된 미들웨어를 가진 프로시저에서 정의됨을 tRPC가 관리합니다.
 
-다음으로 미들웨어 자체를 구현합니다. 이는 다음 구조를 가집니다:
+다음으로 미들웨어 자체를 구현합니다. 구조는 다음과 같습니다:
 
 ```ts
 export const createIdentityPlugin = () => {
    const t = initTRPC.context<...>().create();
    return t.procedure.use(async (opts) => {
-      // 프로시저 전에 실행할 로직
+      // 프로시저 실행 전 로직 추가
 
       const response = await opts.next(...);
 
-      // 프로시저 후에 실행할 로직
+      // 프로시저 실행 후 로직 추가
 
       return response;
    });
 };
 ```
 
-이 경우 Cognito 호출 사용자의 세부 정보를 추출하려고 합니다. API Gateway 이벤트에서 사용자의 주체 ID("sub")를 추출하고 Cognito에서 사용자 세부 정보를 검색합니다. 구현은 이벤트가 REST API 또는 HTTP API에 의해 제공되는지에 따라 약간 다릅니다:
+이 경우 Cognito 사용자의 세부 정보를 추출하기 위해 API Gateway 이벤트에서 사용자의 subject ID("sub")를 추출하고 Cognito에서 사용자 세부 정보를 검색합니다. 구현은 이벤트가 REST API 또는 HTTP API에 의해 제공되는지에 따라 약간 다릅니다:
 
 <Tabs>
 <TabItem label="REST">
@@ -302,7 +303,7 @@ export const createIdentityPlugin = () => {
     }
 
     const { Users } = await cognito.listUsers({
-      // 람다 환경에 사용자 풀 ID가 구성되었다고 가정
+      // Lambda 환경에 사용자 풀 ID가 구성되었다고 가정
       UserPoolId: process.env.USER_POOL_ID!,
       Limit: 1,
       Filter: `sub="${sub}"`,
@@ -311,11 +312,11 @@ export const createIdentityPlugin = () => {
     if (!Users || Users.length !== 1) {
       throw new TRPCError({
         code: 'FORBIDDEN',
-        message: `주체 ID ${sub}에 해당하는 사용자를 찾을 수 없음`,
+        message: `subjectId ${sub}에 해당하는 사용자가 없음`,
       });
     }
 
-    // 컨텍스트에 신원 정보 제공
+    // 컨텍스트에 identity 제공
     return await opts.next({
       ctx: {
         ...opts.ctx,
@@ -371,7 +372,7 @@ export const createIdentityPlugin = () => {
     }
 
     const { Users } = await cognito.listUsers({
-      // 람다 환경에 사용자 풀 ID가 구성되었다고 가정
+      // Lambda 환경에 사용자 풀 ID가 구성되었다고 가정
       UserPoolId: process.env.USER_POOL_ID!,
       Limit: 1,
       Filter: `sub="${sub}"`,
@@ -380,11 +381,11 @@ export const createIdentityPlugin = () => {
     if (!Users || Users.length !== 1) {
       throw new TRPCError({
         code: 'FORBIDDEN',
-        message: `주체 ID ${sub}에 해당하는 사용자를 찾을 수 없음`,
+        message: `subjectId ${sub}에 해당하는 사용자가 없음`,
       });
     }
 
-    // 컨텍스트에 신원 정보 제공
+    // 컨텍스트에 identity 제공
     return await opts.next({
       ctx: {
         ...opts.ctx,
@@ -400,9 +401,13 @@ export const createIdentityPlugin = () => {
 </TabItem>
 </Tabs>
 
-## tRPC API 배포하기
+## tRPC API 배포
 
-tRPC API 생성기는 `common/constructs` 폴더에 API 배포를 위한 CDK 구문을 생성합니다. 다음 예시와 같이 CDK 애플리케이션에서 이를 사용할 수 있습니다:
+tRPC API 생성기는 선택한 `iacProvider`에 따라 CDK 또는 Terraform 인프라 코드를 생성합니다. 이를 사용하여 tRPC API를 배포할 수 있습니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+`common/constructs` 폴더에 API 배포용 CDK 구문이 생성됩니다. CDK 애플리케이션에서 다음과 같이 사용할 수 있습니다:
 
 ```ts {6-8}
 import { MyApi } from ':my-scope/common-constructs`;
@@ -417,7 +422,7 @@ export class ExampleStack extends Stack {
 }
 ```
 
-이 설정은 선택한 `auth` 메서드 기반의 AWS API Gateway REST/HTTP API, 비즈니스 로직용 AWS Lambda 함수, 인증을 포함한 API 인프라를 구성합니다.
+이 설정은 선택한 `auth` 방법에 따라 AWS API Gateway REST/HTTP API, 비즈니스 로직용 AWS Lambda 함수, 인증을 포함한 API 인프라를 구성합니다.
 
 :::note
 `Cognito` 인증을 선택한 경우 API 구문에 `identity` 속성을 제공해야 합니다:
@@ -439,36 +444,189 @@ export class ExampleStack extends Stack {
 
 `UserIdentity` 구문은 <Link path="/guides/react-website-auth">`ts#react-website-auth` 생성기</Link>를 사용하여 생성할 수 있습니다.
 :::
+</Fragment>
+<Fragment slot="terraform">
+`common/terraform` 폴더에 API 배포용 Terraform 모듈이 생성됩니다. Terraform 구성에서 다음과 같이 사용할 수 있습니다:
 
-### 타입 안전 통합
+```hcl {6-8}
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
 
-<Snippet name="api/type-safe-api-integrations" parentHeading="타입 안전 통합" />
+  # Lambda 함수 환경 변수
+  env = {
+    ENVIRONMENT = var.environment
+    LOG_LEVEL   = "INFO"
+  }
+
+  # 필요한 경우 추가 IAM 정책
+  additional_iam_policy_statements = [
+    # API에 필요한 추가 권한
+  ]
+
+  tags = local.common_tags
+}
+```
+
+이 설정은 다음을 구성합니다:
+
+1. 모든 tRPC 프로시저를 처리하는 AWS Lambda 함수
+2. 함수 트리거로 사용되는 API Gateway HTTP/REST API
+3. IAM 역할 및 권한
+4. CloudWatch 로그 그룹
+5. X-Ray 추적 구성
+6. CORS 구성
+
+:::note
+`Cognito` 인증을 선택한 경우 Cognito 구성을 제공해야 합니다:
+
+```hcl {4-5}
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  user_pool_id         = local.user_pool_id
+  user_pool_client_ids = [local.client_id]
+
+  env = {
+    ENVIRONMENT = var.environment
+    LOG_LEVEL   = "INFO"
+  }
+
+  tags = local.common_tags
+}
+```
+
+Cognito User Pool 및 Client는 적절한 Terraform 리소스나 모듈을 사용하여 설정할 수 있습니다.
+:::
+
+Terraform 모듈은 사용 가능한 여러 출력을 제공합니다:
+
+```hcl
+# API 엔드포인트 접근
+output "api_url" {
+  value = module.my_api.stage_invoke_url
+}
+
+# Lambda 함수 세부 정보 접근
+output "lambda_function_name" {
+  value = module.my_api.lambda_function_name
+}
+
+# 추가 권한 부여를 위한 IAM 역할 접근
+output "lambda_execution_role_arn" {
+  value = module.my_api.lambda_execution_role_arn
+}
+```
+
+CORS 설정을 사용자 정의하려면 모듈에 변수를 전달할 수 있습니다:
+
+```hcl
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  # 사용자 정의 CORS 구성
+  cors_allow_origins = ["https://myapp.com", "https://staging.myapp.com"]
+  cors_allow_methods = ["GET", "POST", "PUT", "DELETE"]
+  cors_allow_headers = [
+    "authorization",
+    "content-type",
+    "x-custom-header"
+  ]
+
+  tags = local.common_tags
+}
+```
+
+:::caution
+생성기 실행 시 `auth`를 `None`으로 선택한 경우 다음과 같은 Checkov 검사 실패가 발생할 수 있습니다:
+
+<Tabs syncKey="http-rest">
+<TabItem label="HTTP API">
+```
+Check: CKV_AWS_309: "API GatewayV2 경로에 권한 부여 유형 지정 확인"
+ FAILED for resource: aws_apigatewayv2_route.proxy_routes["PUT"]
+```
+</TabItem>
+<TabItem label="REST API">
+```
+Check: CKV_AWS_59: "API를 통한 백엔드 리소스에 대한 개방형 접근 금지 확인"
+ FAILED for resource: aws_api_gateway_method.proxy_method
+```
+</TabItem>
+</Tabs>
+
+API를 공개적으로 유지하려는 경우 [suppression comment 추가](https://www.checkov.io/2.Basics/Suppressing%20and%20Skipping%20Policies.html)를 고려할 수 있습니다.
+:::
+</Fragment>
+</Infrastructure>
+
+### 통합
+
+<Snippet name="api/type-safe-api-integrations" parentHeading="Integrations" />
 
 :::tip
-tRPC API에서 프로시저를 추가하거나 제거할 때, 이러한 변경사항은 재빌드 없이 즉시 CDK 구문에 반영됩니다.
+`iacProvider`로 CDK를 선택한 경우 tRPC API에서 프로시저를 추가하거나 제거할 때 CDK 구문에 즉시 반영되며 재빌드가 필요하지 않습니다.
 :::
 
 ### 접근 권한 부여 (IAM 전용)
 
-`IAM` 인증을 선택한 경우 `grantInvokeAccess` 메서드를 사용하여 API 접근 권한을 부여할 수 있습니다. 예를 들어 인증된 Cognito 사용자에게 API 접근 권한을 부여할 수 있습니다:
+`IAM` 인증을 선택한 경우 API에 대한 접근 권한을 부여할 수 있습니다:
 
+<Infrastructure>
+<Fragment slot="cdk">
 ```ts
 api.grantInvokeAccess(myIdentityPool.authenticatedRole);
 ```
+</Fragment>
+<Fragment slot="terraform">
+```hcl
+# API 호출을 허용하는 IAM 정책 생성
+resource "aws_iam_policy" "api_invoke_policy" {
+  name        = "MyApiInvokePolicy"
+  description = "tRPC API 호출 허용 정책"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = "execute-api:Invoke"
+        Resource = "${module.my_api.api_execution_arn}/*/*"
+      }
+    ]
+  })
+}
+
+# IAM 역할에 정책 연결 (예: 인증된 사용자)
+resource "aws_iam_role_policy_attachment" "api_invoke_access" {
+  role       = aws_iam_role.authenticated_user_role.name
+  policy_arn = aws_iam_policy.api_invoke_policy.arn
+}
+
+# 기존 역할에 정책 연결
+resource "aws_iam_role_policy_attachment" "api_invoke_access_existing" {
+  role       = "MyExistingRole"
+  policy_arn = aws_iam_policy.api_invoke_policy.arn
+}
+```
+
+API 모듈의 주요 출력:
+- `module.my_api.api_execution_arn` - execute-api:Invoke 권한 부여용
+- `module.my_api.api_arn` - API Gateway ARN
+- `module.my_api.lambda_function_arn` - Lambda 함수 ARN
+</Fragment>
+</Infrastructure>
 
 ## 로컬 tRPC 서버
 
-`serve` 대상을 사용하여 API용 로컬 서버를 실행할 수 있습니다. 예시:
+`serve` 대상을 사용하여 API용 로컬 서버를 실행할 수 있습니다:
 
 <NxCommands commands={['run @my-scope/my-api:serve']} />
 
-로컬 서버의 진입점은 `src/local-server.ts`입니다.
+로컬 서버의 진입점은 `src/local-server.ts`입니다. 이 서버는 API 변경 시 자동으로 재로드됩니다.
 
-이 서버는 API 변경 시 자동으로 재로드됩니다.
+## tRPC API 호출
 
-## tRPC API 호출하기
-
-타입 안전 방식으로 API를 호출하기 위한 tRPC 클라이언트를 생성할 수 있습니다. 다른 백엔드에서 tRPC API를 호출하는 경우 `src/client/index.ts`의 클라이언트를 사용할 수 있습니다. 예시:
+타입 안전 방식으로 API를 호출하기 위해 tRPC 클라이언트를 생성할 수 있습니다. 다른 백엔드에서 tRPC API를 호출하는 경우 `src/client/index.ts`의 클라이언트를 사용할 수 있습니다:
 
 ```ts
 import { createMyApiClient } from ':my-scope/my-api';
@@ -478,7 +636,7 @@ const client = createMyApiClient({ url: 'https://my-api-url.example.com/' });
 await client.echo.query({ message: 'Hello world!' });
 ```
 
-React 웹사이트에서 API를 호출하는 경우 <Link path="guides/api-connection/react-trpc">API 연결</Link> 생성기를 사용하여 클라이언트를 구성하는 것을 고려해 보세요.
+React 웹사이트에서 API를 호출하는 경우 <Link path="guides/api-connection/react-trpc">API 연결</Link> 생성기를 사용하여 클라이언트를 구성하는 것을 고려하세요.
 
 ## 추가 정보
 

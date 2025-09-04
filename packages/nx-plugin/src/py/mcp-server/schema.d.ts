@@ -12,4 +12,5 @@ export interface PyMcpServerGeneratorSchema {
   project: string;
   name?: string;
   computeType?: PyMcpServerComputeType;
+  iacProvider: 'CDK' | 'Terraform';
 }

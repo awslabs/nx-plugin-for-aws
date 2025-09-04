@@ -104,11 +104,19 @@ describe('terraformProjectGenerator', () => {
 
       expect(planTarget.executor).toBe('nx:run-commands');
       expect(planTarget.defaultConfiguration).toBe('dev');
-      expect(planTarget.configurations.dev.command).toContain('terraform plan');
-      expect(planTarget.configurations.dev.command).toContain(
+      expect(planTarget.configurations.dev.commands[0]).toContain('make-dir');
+      expect(planTarget.configurations.dev.commands[1]).toContain(
+        'terraform plan',
+      );
+      expect(planTarget.configurations.dev.commands[1]).toContain(
         '-var-file=env/dev.tfvars',
       );
-      expect(planTarget.dependsOn).toEqual(['init']);
+      expect(planTarget.dependsOn).toEqual([
+        'init',
+        'validate',
+        '^validate',
+        'build',
+      ]);
     });
 
     it('should configure init target correctly', async () => {
@@ -128,6 +136,7 @@ describe('terraformProjectGenerator', () => {
       expect(initTarget.configurations.dev.command).toContain(
         '-backend-config',
       );
+      expect(initTarget.dependsOn).toEqual(['^init']);
     });
 
     it('should configure destroy target correctly', async () => {
@@ -206,13 +215,13 @@ describe('terraformProjectGenerator', () => {
       expect(validateTarget.cache).toBe(true);
       expect(validateTarget.options.command).toBe('terraform validate');
       expect(validateTarget.options.cwd).toBe('{projectRoot}/src');
+      expect(validateTarget.dependsOn).toEqual(['init']);
 
       // Test test target
       const testTarget = projectConfig.targets['test'];
       expect(testTarget.executor).toBe('nx:run-commands');
       expect(testTarget.cache).toBe(true);
-      expect(testTarget.options.command).toContain('uvx checkov');
-      expect(testTarget.dependsOn).toEqual(['validate']);
+      expect(testTarget.options.command).toContain('uvx checkov==');
     });
   });
 
@@ -401,7 +410,7 @@ describe('terraformProjectGenerator', () => {
 
       // Check that plan target uses correct dist path
       const planCommand =
-        projectConfig.targets['plan'].configurations.dev.command;
+        projectConfig.targets['plan'].configurations.dev.commands[1];
       expect(planCommand).toContain(
         'dist/packages/my-terraform-project/terraform/dev.tfplan',
       );

@@ -5,7 +5,6 @@
 import {
   GeneratorCallback,
   OverwriteStrategy,
-  ProjectConfiguration,
   Tree,
   addDependenciesToPackageJson,
   generateFiles,
@@ -27,11 +26,7 @@ import { formatFilesInSubtree } from '../../utils/format';
 import { withVersions } from '../../utils/versions';
 import { kebabCase, toClassName } from '../../utils/names';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
-import { addMcpServerConstruct } from '../../utils/agent-core-constructs/agent-core-constructs';
-import {
-  PACKAGES_DIR,
-  SHARED_CONSTRUCTS_DIR,
-} from '../../utils/shared-constructs-constants';
+import { addMcpServerInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
 import { getNpmScope } from '../../utils/npm-scope';
 import { addEsbuildBundleTarget } from '../../utils/esbuild';
 
@@ -127,34 +122,15 @@ export const tsMcpServerGenerator = async (
     });
 
     // Add shared constructs
-    await sharedConstructsGenerator(tree);
-
-    // Ensure common constructs builds after our mcp server project
-    updateJson(
-      tree,
-      joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'project.json'),
-      (config: ProjectConfiguration) => {
-        if (!config.targets) {
-          config.targets = {};
-        }
-        if (!config.targets.build) {
-          config.targets.build = {};
-        }
-        config.targets.build.dependsOn = [
-          ...(config.targets.build.dependsOn ?? []).filter(
-            (t) => t !== `${project.name}:build`,
-          ),
-          `${project.name}:build`,
-        ];
-        return config;
-      },
-    );
+    await sharedConstructsGenerator(tree, { iacProvider: options.iacProvider });
 
     // Add the construct to deploy the mcp server
-    addMcpServerConstruct(tree, {
+    addMcpServerInfra(tree, {
       mcpServerNameKebabCase: name,
       mcpServerNameClassName: toClassName(name),
+      projectName: project.name,
       dockerImageTag,
+      iacProvider: options.iacProvider,
     });
 
     // Add additional dependencies

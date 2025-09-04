@@ -9,4 +9,5 @@ export interface PyStrandsAgentGeneratorSchema {
   project: string;
   name?: string;
   computeType?: PyStrandsAgentComputeType;
+  iacProvider: 'CDK' | 'Terraform';
 }

@@ -1,0 +1,250 @@
+# Core HTTP API Gateway module
+# This module creates the API Gateway HTTP API, stage, and logging resources
+
+terraform {
+  required_version = ">= 1.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 6.0"
+    }
+  }
+}
+
+# Core HTTP API Gateway Variables
+
+variable "api_name" {
+  description = "Name of the HTTP API Gateway"
+  type        = string
+}
+
+variable "api_description" {
+  description = "Description of the HTTP API Gateway"
+  type        = string
+  default     = "HTTP API Gateway"
+}
+
+variable "stage_name" {
+  description = "Name of the API Gateway stage"
+  type        = string
+  default     = "prod"
+}
+
+variable "stage_auto_deploy" {
+  description = "Whether to automatically deploy the API stage"
+  type        = bool
+  default     = true
+}
+
+# CORS Configuration
+
+variable "cors_allow_credentials" {
+  description = "Whether to allow credentials in CORS requests"
+  type        = bool
+  default     = false
+}
+
+variable "cors_allow_headers" {
+  description = "List of allowed headers for CORS"
+  type        = list(string)
+  default     = ["authorization", "content-type", "x-amz-content-sha256", "x-amz-date", "x-amz-security-token"]
+}
+
+variable "cors_allow_methods" {
+  description = "List of allowed HTTP methods for CORS"
+  type        = list(string)
+  default     = ["*"]
+}
+
+variable "cors_allow_origins" {
+  description = "List of allowed origins for CORS"
+  type        = list(string)
+  default     = ["*"]
+}
+
+variable "cors_expose_headers" {
+  description = "List of headers to expose in CORS responses"
+  type        = list(string)
+  default     = []
+}
+
+variable "cors_max_age" {
+  description = "Maximum age for CORS preflight requests in seconds"
+  type        = number
+  default     = 86400
+}
+
+# Tags
+
+variable "tags" {
+  description = "Tags to apply to all resources"
+  type        = map(string)
+  default     = {}
+}
+
+# Data sources
+data "aws_region" "current" {}
+data "aws_caller_identity" "current" {}
+
+# Resources
+
+# KMS key for CloudWatch log group encryption
+resource "aws_kms_key" "logs_key" {
+  description             = "KMS key for CloudWatch log group encryption"
+  deletion_window_in_days = 7
+  enable_key_rotation     = true
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "Enable IAM User Permissions"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+        }
+        Action   = "kms:*"
+        Resource = "*"
+      },
+      {
+        Sid    = "Allow CloudWatch Logs"
+        Effect = "Allow"
+        Principal = {
+          Service = "logs.${data.aws_region.current.name}.amazonaws.com"
+        }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = "*"
+        Condition = {
+          ArnEquals = {
+            "kms:EncryptionContext:aws:logs:arn" = "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:/aws/apigateway/${var.api_name}"
+          }
+        }
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_kms_alias" "logs_key_alias" {
+  name          = "alias/${var.api_name}-api-logs-encryption"
+  target_key_id = aws_kms_key.logs_key.key_id
+}
+
+# HTTP API Gateway
+resource "aws_apigatewayv2_api" "http_api" {
+  name          = var.api_name
+  protocol_type = "HTTP"
+  description   = var.api_description
+
+  cors_configuration {
+    allow_credentials = var.cors_allow_credentials
+    allow_headers     = var.cors_allow_headers
+    allow_methods     = var.cors_allow_methods
+    allow_origins     = var.cors_allow_origins
+    expose_headers    = var.cors_expose_headers
+    max_age          = var.cors_max_age
+  }
+
+  tags = var.tags
+}
+
+# API Gateway stage
+resource "aws_apigatewayv2_stage" "api_stage" {
+  api_id      = aws_apigatewayv2_api.http_api.id
+  name        = var.stage_name
+  auto_deploy = var.stage_auto_deploy
+
+  access_log_settings {
+    destination_arn = aws_cloudwatch_log_group.api_logs.arn
+    format = jsonencode({
+      requestId      = "$context.requestId"
+      ip            = "$context.identity.sourceIp"
+      requestTime   = "$context.requestTime"
+      httpMethod    = "$context.httpMethod"
+      routeKey      = "$context.routeKey"
+      status        = "$context.status"
+      protocol      = "$context.protocol"
+      responseLength = "$context.responseLength"
+      error         = "$context.error.message"
+      integrationError = "$context.integrationErrorMessage"
+    })
+  }
+
+  default_route_settings {
+    throttling_burst_limit = 5000
+    throttling_rate_limit = 10000
+  }
+
+  tags = var.tags
+
+  depends_on = [aws_cloudwatch_log_group.api_logs]
+}
+
+# CloudWatch Log Group for API Gateway
+resource "aws_cloudwatch_log_group" "api_logs" {
+  #checkov:skip=CKV_AWS_338:Log retention set to forever
+  #checkov:skip=CKV_AWS_66:Log retention set to forever
+  name         = "/aws/apigateway/${var.api_name}"
+  kms_key_id   = aws_kms_key.logs_key.arn
+  tags         = var.tags
+}
+
+# Outputs
+
+output "api_id" {
+  description = "ID of the HTTP API Gateway"
+  value       = aws_apigatewayv2_api.http_api.id
+}
+
+output "api_arn" {
+  description = "ARN of the HTTP API Gateway"
+  value       = aws_apigatewayv2_api.http_api.arn
+}
+
+output "api_endpoint" {
+  description = "Base URL of the HTTP API Gateway"
+  value       = aws_apigatewayv2_api.http_api.api_endpoint
+}
+
+output "api_execution_arn" {
+  description = "Execution ARN of the HTTP API Gateway"
+  value       = aws_apigatewayv2_api.http_api.execution_arn
+}
+
+output "stage_id" {
+  description = "ID of the API Gateway stage"
+  value       = aws_apigatewayv2_stage.api_stage.id
+}
+
+output "stage_arn" {
+  description = "ARN of the API Gateway stage"
+  value       = aws_apigatewayv2_stage.api_stage.arn
+}
+
+output "stage_execution_arn" {
+  description = "Execution ARN of the API Gateway stage"
+  value       = aws_apigatewayv2_stage.api_stage.execution_arn
+}
+
+output "stage_invoke_url" {
+  description = "Invoke URL of the API Gateway stage"
+  value       = aws_apigatewayv2_stage.api_stage.invoke_url
+}
+
+output "api_log_group_name" {
+  description = "Name of the API Gateway CloudWatch log group"
+  value       = aws_cloudwatch_log_group.api_logs.name
+}
+
+output "api_log_group_arn" {
+  description = "ARN of the API Gateway CloudWatch log group"
+  value       = aws_cloudwatch_log_group.api_logs.arn
+}

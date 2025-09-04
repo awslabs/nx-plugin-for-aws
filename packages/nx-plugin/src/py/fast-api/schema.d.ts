@@ -11,4 +11,5 @@ export interface PyFastApiProjectGeneratorSchema {
   readonly auth: 'IAM' | 'Cognito' | 'None';
   readonly directory?: string;
   readonly moduleName?: string;
+  readonly iacProvider: 'CDK' | 'Terraform';
 }

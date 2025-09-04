@@ -28,6 +28,11 @@ import { updateGitIgnore } from '../../utils/git';
 import { withVersions } from '../../utils/versions';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import { uvxCommand } from '../../utils/py';
+import {
+  SHARED_TERRAFORM_DIR,
+  SHARED_TERRAFORM_NAME,
+} from '../../utils/shared-constructs-constants';
 
 const NX_EXTEND_PLUGIN = '@nx-extend/terraform';
 export const TERRAFORM_PROJECT_GENERATOR_INFO: NxGeneratorInfo =
@@ -39,6 +44,9 @@ export async function terraformProjectGenerator(
 ): Promise<GeneratorCallback> {
   // Just use getTsLibDetails as it isn't specific to TS
   const lib = getTsLibDetails(tree, schema);
+  const { fullyQualifiedName: sharedTfProjectName } = getTsLibDetails(tree, {
+    name: SHARED_TERRAFORM_NAME,
+  });
 
   const outDirToRootRelativePath = relative(
     join(tree.root, lib.dir, 'src'),
@@ -46,12 +54,12 @@ export async function terraformProjectGenerator(
   );
   const distDir = join(outDirToRootRelativePath, 'dist', lib.dir);
   const tfDistDir = join(distDir, 'terraform');
-  const checkovDistDir = join(distDir, 'checkov');
+  const checkovReportJsonPath = join(distDir, 'checkov', 'checkov_report.json');
 
   // Calculate relative path from current project to common/terraform/metrics
   const metricsModulePath = relative(
     join(tree.root, lib.dir, 'src'),
-    join(tree.root, 'packages', 'common', 'terraform', 'src', 'metrics'),
+    join(tree.root, 'packages', SHARED_TERRAFORM_DIR, 'src', 'metrics'),
   );
 
   updateGitIgnore(tree, '.', (patterns) => [...patterns, '.terraform']);
@@ -95,6 +103,9 @@ export async function terraformProjectGenerator(
         cwd: '{projectRoot}/bootstrap',
       },
     },
+    build: {
+      dependsOn: ['fmt', 'test', `${sharedTfProjectName}:build`],
+    },
     destroy: {
       executor: 'nx:run-commands',
       defaultConfiguration: 'dev',
@@ -122,6 +133,7 @@ export async function terraformProjectGenerator(
         forwardAllArgs: true,
         cwd: '{projectRoot}/src',
       },
+      dependsOn: ['^init'],
     },
     output: {
       executor: 'nx:run-commands',
@@ -138,20 +150,27 @@ export async function terraformProjectGenerator(
       defaultConfiguration: 'dev',
       configurations: {
         dev: {
-          command: `terraform plan -var-file=env/dev.tfvars -out=${tfDistDir}/dev.tfplan`,
+          commands: [
+            `make-dir ${tfDistDir}`,
+            `terraform plan -var-file=env/dev.tfvars -out=${tfDistDir}/dev.tfplan`,
+          ],
         },
       },
       options: {
         forwardAllArgs: true,
         cwd: '{projectRoot}/src',
+        parallel: false,
       },
-      dependsOn: ['init'],
+      dependsOn: ['init', 'validate', '^validate', 'build'],
     },
   };
 
   const libTargets: {
     [targetName: string]: TargetConfiguration;
   } = {
+    build: {
+      dependsOn: ['fmt', 'test'],
+    },
     fmt: {
       executor: 'nx:run-commands',
       cache: true,
@@ -180,11 +199,13 @@ export async function terraformProjectGenerator(
       cache: true,
       outputs: [`{workspaceRoot}/dist/${lib.dir}/checkov`],
       options: {
-        command: `uvx checkov --directory . -o json --output-file-path ${checkovDistDir}`,
+        command: uvxCommand(
+          'checkov',
+          `--directory . -o cli -o json --output-file-path console,${checkovReportJsonPath}`,
+        ),
         forwardAllArgs: true,
         cwd: '{projectRoot}/src',
       },
-      dependsOn: ['validate'],
     },
     validate: {
       executor: 'nx:run-commands',
@@ -195,6 +216,7 @@ export async function terraformProjectGenerator(
         forwardAllArgs: true,
         cwd: '{projectRoot}/src',
       },
+      dependsOn: ['init'],
     },
   };
 
@@ -249,7 +271,7 @@ export async function terraformProjectGenerator(
   addDependenciesToPackageJson(
     tree,
     {},
-    withVersions(['@nx-extend/terraform']),
+    withVersions(['@nx-extend/terraform', 'make-dir-cli']),
   );
 
   return () => {

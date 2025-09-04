@@ -5,22 +5,23 @@ description: "FastAPI에 대한 참조 문서"
 
 
 
-import { FileTree, AnchorHeading } from '@astrojs/starlight/components';
+import { FileTree, AnchorHeading, Tabs, TabItem } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
 import Snippet from '@components/snippet.astro';
 
 [FastAPI](https://fastapi.tiangolo.com/)는 Python으로 API를 구축하기 위한 프레임워크입니다.
 
-FastAPI 생성자는 AWS CDK 인프라 설정이 포함된 새로운 FastAPI를 생성합니다. 생성된 백엔드는 서버리스 배포를 위해 AWS Lambda를 사용하며 AWS API Gateway API를 통해 노출됩니다. 로깅, AWS X-Ray 추적, Cloudwatch 메트릭을 포함한 관측 가능성을 위해 [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/)가 설정됩니다.
+FastAPI 생성기는 AWS CDK 또는 Terraform 인프라 설정이 포함된 새로운 FastAPI를 생성합니다. 생성된 백엔드는 서버리스 배포를 위해 AWS Lambda를 사용하며 AWS API Gateway API를 통해 노출됩니다. [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/)를 설정하여 로깅, AWS X-Ray 추적, Cloudwatch 메트릭을 포함한 관측 가능성을 제공합니다.
 
 ## 사용 방법
 
 ### FastAPI 생성
 
-다음 두 가지 방법으로 새로운 FastAPI를 생성할 수 있습니다:
+새로운 FastAPI를 두 가지 방법으로 생성할 수 있습니다:
 
 <RunGenerator generator="py#fast-api" />
 
@@ -30,13 +31,13 @@ FastAPI 생성자는 AWS CDK 인프라 설정이 포함된 새로운 FastAPI를 
 
 <Snippet name="api/api-choice-note" />
 
-## 생성자 출력 결과
+## 생성기 출력
 
-생성자는 `<directory>/<api-name>` 디렉토리에 다음 프로젝트 구조를 생성합니다:
+생성기는 `<directory>/<api-name>` 디렉토리에 다음 프로젝트 구조를 생성합니다:
 
 <FileTree>
 
-- project.json 프로젝트 구성 및 빌드 타겟
+- project.json 프로젝트 구성 및 빌드 대상
 - pyproject.toml Python 프로젝트 구성 및 의존성
 - \<module_name>
   - \_\_init\_\_.py 모듈 초기화
@@ -47,11 +48,15 @@ FastAPI 생성자는 AWS CDK 인프라 설정이 포함된 새로운 FastAPI를 
 
 </FileTree>
 
-생성자는 또한 API 배포에 사용할 수 있는 CDK 구성을 `packages/common/constructs` 디렉토리에 생성합니다.
+### 인프라
+
+<Snippet name="shared-constructs" />
+
+<Snippet name="api/shared-constructs" />
 
 ## FastAPI 구현
 
-주요 API 구현은 `main.py`에 위치합니다. 여기서 API 경로와 구현을 정의합니다. 예시:
+주요 API 구현은 `main.py`에 있습니다. 여기서 API 경로와 구현을 정의합니다. 예시:
 
 ```python
 from .init import app, tracer
@@ -69,33 +74,33 @@ def create_item(item: Item):
     return ...
 ```
 
-생성자는 자동으로 다음 기능들을 설정합니다:
+생성기는 자동으로 여러 기능을 설정합니다:
 
 1. 관측 가능성을 위한 AWS Lambda Powertools 통합
-2. 오류 처리 미들웨어
+2. 에러 핸들링 미들웨어
 3. 요청/응답 상관 관계
 4. 메트릭 수집
 5. Mangum을 사용한 AWS Lambda 핸들러
 
-### AWS Lambda Powertools를 통한 관측 가능성
+### AWS Lambda Powertools를 이용한 관측 가능성
 
 #### 로깅
 
-생성자는 AWS Lambda Powertools를 사용한 구조화된 로깅을 구성합니다. 라우트 핸들러에서 로거에 접근할 수 있습니다:
+생성기는 AWS Lambda Powertools를 사용해 구조화된 로깅을 구성합니다. 라우트 핸들러에서 로거에 접근할 수 있습니다:
 
 ```python
 from .init import app, logger
 
 @app.get("/items/{item_id}")
 def read_item(item_id: int):
-    logger.info("아이템 조회 중", extra={"item_id": item_id})
+    logger.info("Fetching item", extra={"item_id": item_id})
     return {"item_id": item_id}
 ```
 
 로거는 자동으로 다음을 포함합니다:
 
 - 요청 추적을 위한 상관 ID
-- 요청 경로 및 메소드
+- 요청 경로 및 메서드
 - Lambda 컨텍스트 정보
 - 콜드 스타트 표시기
 
@@ -131,14 +136,14 @@ def read_item(item_id: int):
 
 기본 메트릭 포함 사항:
 
-- 요청 횟수
-- 성공/실패 횟수
+- 요청 수
+- 성공/실패 수
 - 콜드 스타트 메트릭
 - 경로별 메트릭
 
-### 오류 처리
+### 에러 핸들링
 
-생성자는 포괄적인 오류 처리를 포함합니다:
+생성기는 포괄적인 에러 핸들링을 포함합니다:
 
 ```python
 from fastapi import HTTPException
@@ -146,7 +151,7 @@ from fastapi import HTTPException
 @app.get("/items/{item_id}")
 def read_item(item_id: int):
     if item_id < 0:
-        raise HTTPException(status_code=400, detail="Item ID는 양수여야 합니다")
+        raise HTTPException(status_code=400, detail="Item ID must be positive")
     return {"item_id": item_id}
 ```
 
@@ -158,16 +163,20 @@ def read_item(item_id: int):
 4. 상관 ID 유지
 
 :::tip
-`api-connection` 생성자를 사용하는 경우 더 나은 코드 생성을 위해 API 작업에 대한 응답 모델을 명시하는 것이 좋습니다. <Link path="guides/api-connection/react-fastapi#errors">자세한 내용 참조</Link>.
+`api-connection` 생성기를 사용하는 경우 더 나은 코드 생성을 위해 API 작업에 응답 모델을 지정하는 것이 좋습니다. <Link path="guides/api-connection/react-fastapi#errors">자세한 내용 참조</Link>.
 :::
 
 ### 스트리밍
 
-FastAPI를 사용하면 [`StreamingResponse`](https://fastapi.tiangolo.com/reference/responses/?h=streaming#fastapi.responses.StreamingResponse) 응답 타입으로 호출자에게 스트리밍 응답을 전송할 수 있습니다.
+FastAPI에서는 [`StreamingResponse`](https://fastapi.tiangolo.com/reference/responses/?h=streaming#fastapi.responses.StreamingResponse) 응답 타입을 사용해 호출자에게 스트리밍 응답을 전송할 수 있습니다.
 
 #### 인프라 변경
 
-AWS API Gateway는 스트리밍 응답을 지원하지 않으므로 이를 지원하는 플랫폼에 FastAPI를 배포해야 합니다. 가장 간단한 옵션은 AWS Lambda Function URL을 사용하는 것입니다. 이를 위해 생성된 `common/constructs/src/app/apis/<name>-api.ts` 구성을 Function URL을 배포하는 구성으로 교체할 수 있습니다.
+AWS API Gateway는 스트리밍 응답을 지원하지 않으므로 FastAPI를 스트리밍을 지원하는 플랫폼에 배포해야 합니다. 가장 간단한 옵션은 AWS Lambda Function URL을 사용하는 것입니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+이를 위해 생성된 `common/constructs/src/app/apis/<name>-api.ts` 구성을 Function URL을 배포하는 구성으로 교체할 수 있습니다.
 
 <details>
 <summary>스트리밍 FunctionURL 구성 예시</summary>
@@ -264,6 +273,163 @@ export class MyApi extends Construct {
 ```
 
 </details>
+</Fragment>
+<Fragment slot="terraform">
+Terraform을 사용하는 경우 생성된 API Gateway 인프라를 스트리밍 응답을 지원하는 Lambda Function URL로 교체할 수 있습니다.
+
+<details>
+<summary>스트리밍 Lambda Function URL 구성 예시</summary>
+
+```hcl
+# 현재 AWS 컨텍스트를 위한 데이터 소스
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
+# FastAPI 스트리밍을 위한 Lambda 함수
+resource "aws_lambda_function" "my_api_handler" {
+  filename         = "../../../../../../dist/packages/my_api/bundle.zip"
+  function_name    = "my-api-handler"
+  role            = aws_iam_role.lambda_execution_role.arn
+  handler         = "run.sh"
+  runtime         = "python3.12"
+  timeout         = 30
+  source_code_hash = filebase64sha256("../../../../../../dist/packages/my_api/bundle.zip")
+
+  # X-Ray 추적 활성화
+  tracing_config {
+    mode = "Active"
+  }
+
+  # Lambda Web Adapter 환경 변수
+  environment {
+    variables = {
+      AWS_CONNECTION_REUSE_ENABLED = "1"
+      PORT                        = "8000"
+      AWS_LWA_INVOKE_MODE        = "response_stream"
+      AWS_LAMBDA_EXEC_WRAPPER    = "/opt/bootstrap"
+    }
+  }
+
+  # Lambda Web Adapter 레이어 추가
+  layers = [
+    "arn:aws:lambda:${data.aws_region.current.name}:753240598075:layer:LambdaAdapterLayerX86:24"
+  ]
+
+  depends_on = [
+    aws_iam_role_policy_attachment.lambda_logs,
+    aws_cloudwatch_log_group.lambda_logs,
+  ]
+}
+
+# Lambda 함수를 위한 CloudWatch 로그 그룹
+resource "aws_cloudwatch_log_group" "lambda_logs" {
+  name              = "/aws/lambda/my-api-handler"
+  retention_in_days = 14
+}
+
+# Lambda 실행을 위한 IAM 역할
+resource "aws_iam_role" "lambda_execution_role" {
+  name = "my-api-lambda-execution-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+# 기본 실행 정책 연결
+resource "aws_iam_role_policy_attachment" "lambda_logs" {
+  role       = aws_iam_role.lambda_execution_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+# X-Ray 추적 정책 연결
+resource "aws_iam_role_policy_attachment" "lambda_xray" {
+  role       = aws_iam_role.lambda_execution_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+}
+
+# 스트리밍 지원 Lambda Function URL
+resource "aws_lambda_function_url" "my_api_url" {
+  function_name      = aws_lambda_function.my_api_handler.function_name
+  authorization_type = "AWS_IAM"
+  invoke_mode       = "RESPONSE_STREAM"
+
+  cors {
+    allow_credentials = false
+    allow_origins     = ["*"]
+    allow_methods     = ["*"]
+    allow_headers = [
+      "authorization",
+      "content-type",
+      "x-amz-content-sha256",
+      "x-amz-date",
+      "x-amz-security-token"
+    ]
+    expose_headers = ["date", "keep-alive"]
+    max_age       = 86400
+  }
+}
+
+# Function URL 출력
+output "my_api_url" {
+  description = "스트리밍 FastAPI Lambda Function URL"
+  value       = aws_lambda_function_url.my_api_url.function_url
+}
+
+# 선택 사항: 런타임 구성을 위한 SSM 파라미터 생성
+resource "aws_ssm_parameter" "my_api_url" {
+  name  = "/runtime-config/apis/MyApi"
+  type  = "String"
+  value = aws_lambda_function_url.my_api_url.function_url
+
+  tags = {
+    Environment = "production"
+    Service     = "my-api"
+  }
+}
+
+# Function URL 호출 권한을 위한 IAM 정책
+resource "aws_iam_policy" "my_api_invoke_policy" {
+  name        = "my-api-invoke-policy"
+  description = "스트리밍 FastAPI Lambda Function URL 호출 권한 정책"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = "lambda:InvokeFunctionUrl"
+        Resource = aws_lambda_function.my_api_handler.arn
+        Condition = {
+          StringEquals = {
+            "lambda:FunctionUrlAuthType" = "AWS_IAM"
+          }
+        }
+      }
+    ]
+  })
+}
+
+# 예시: 정책을 역할에 연결 (필요에 따라 주석 해제 및 수정)
+# resource "aws_iam_role_policy_attachment" "my_api_invoke_access" {
+#   role       = var.authenticated_role_name
+#   policy_arn = aws_iam_policy.my_api_invoke_policy.arn
+# }
+```
+
+</details>
+
+</Fragment>
+</Infrastructure>
 
 :::note
 종단간 예시는 <Link path="/get_started/tutorials/dungeon-game/overview">던전 어드벤처 튜토리얼</Link>을 참조하세요.
@@ -271,13 +437,13 @@ export class MyApi extends Construct {
 
 #### 구현
 
-스트리밍을 지원하도록 인프라를 업데이트한 후 FastAPI에서 스트리밍 API를 구현할 수 있습니다. API는 다음을 수행해야 합니다:
+인프라를 스트리밍을 지원하도록 업데이트한 후 FastAPI에서 스트리밍 API를 구현할 수 있습니다. API는 다음을 수행해야 합니다:
 
 - [`StreamingResponse`](https://fastapi.tiangolo.com/reference/responses/?h=streaming#fastapi.responses.StreamingResponse) 반환
 - 각 응답 청크의 반환 타입 선언
-- <Link path="guides/api-connection/react-fastapi">API 연결</Link> 사용 시 OpenAPI 벤더 확장 `x-streaming: true` 추가
+- <Link path="guides/api-connection/react-fastapi">API Connection</Link> 사용을 계획하는 경우 OpenAPI 벤더 확장 `x-streaming: true` 추가
 
-예를 들어 API에서 JSON 객체 스트림을 전송하려면 다음과 같이 구현할 수 있습니다:
+예를 들어 API에서 일련의 JSON 객체를 스트리밍하려면 다음과 같이 구현할 수 있습니다:
 
 ```py /return (StreamingResponse)/ /openapi_extra[^)]*/ /-> (Chunk)/
 from pydantic import BaseModel
@@ -298,11 +464,15 @@ def my_stream() -> Chunk:
 
 #### 소비
 
-스트리밍 응답을 소비하려면 <Link path="guides/api-connection/react-fastapi#consuming-a-stream">API 연결 생성자</Link>를 사용하여 타입 안전한 청크 반복 방법을 제공할 수 있습니다.
+스트리밍 응답을 소비하려면 <Link path="guides/api-connection/react-fastapi#consuming-a-stream">API Connection Generator</Link>를 사용하여 스트리밍 청크를 반복하는 타입 세이프 메서드를 활용할 수 있습니다.
 
 ## FastAPI 배포
 
-FastAPI 생성자는 `common/constructs` 폴더에 API 배포를 위한 CDK 구성을 생성합니다. CDK 애플리케이션에서 이를 사용할 수 있습니다:
+FastAPI 생성기는 선택한 `iacProvider`에 따라 CDK 또는 Terraform 인프라 코드를 생성합니다. 이를 사용해 FastAPI를 배포할 수 있습니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+`common/constructs` 폴더에 API 배포를 위한 CDK 구성이 있습니다. CDK 애플리케이션에서 사용할 수 있습니다:
 
 ```ts {6-8}
 import { MyApi } from ':my-scope/common-constructs';
@@ -319,7 +489,7 @@ export class ExampleStack extends Stack {
 
 이 설정은 다음을 구성합니다:
 
-1. FastAPI 애플리케이션의 각 작업에 대한 AWS Lambda 함수
+1. FastAPI 애플리케이션의 각 작업을 위한 AWS Lambda 함수
 2. 함수 트리거로 API Gateway HTTP/REST API
 3. IAM 역할 및 권한
 4. CloudWatch 로그 그룹
@@ -344,27 +514,143 @@ export class ExampleStack extends Stack {
 }
 ```
 
-`UserIdentity` 구성은 <Link path="/guides/react-website-auth">`ts#react-website-auth` 생성자</Link>를 사용하여 생성할 수 있습니다.
+`UserIdentity` 구성은 <Link path="/guides/react-website-auth">`ts#react-website-auth` 생성기</Link>를 사용해 생성할 수 있습니다.
+:::
+</Fragment>
+<Fragment slot="terraform">
+`common/terraform` 폴더에 API 배포를 위한 Terraform 모듈이 있습니다. Terraform 구성에서 사용할 수 있습니다:
+
+```hcl {2}
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  # Lambda 함수 환경 변수
+  env = {
+    ENVIRONMENT = var.environment
+    LOG_LEVEL   = "INFO"
+  }
+
+  # 추가 IAM 정책 (필요 시)
+  additional_iam_policy_statements = [
+    # API에 필요한 추가 권한
+  ]
+
+  tags = local.common_tags
+}
+```
+
+이 설정은 다음을 구성합니다:
+
+1. 모든 FastAPI 경로를 제공하는 AWS Lambda 함수
+2. 함수 트리거로 API Gateway HTTP/REST API
+3. IAM 역할 및 권한
+4. CloudWatch 로그 그룹
+5. X-Ray 추적 구성
+6. CORS 구성
+
+:::note
+`Cognito` 인증을 선택한 경우 Cognito 구성을 제공해야 합니다:
+
+```hcl {4-5}
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  user_pool_id         = local.user_pool_id
+  user_pool_client_ids = [local.client_id]
+
+  env = {
+    ENVIRONMENT = var.environment
+    LOG_LEVEL   = "INFO"
+  }
+
+  tags = local.common_tags
+}
+```
+
+Cognito User Pool 및 Client는 적절한 Terraform 리소스나 모듈을 사용해 설정할 수 있습니다.
 :::
 
-### 타입 안전 통합
+Terraform 모듈은 사용 가능한 여러 출력을 제공합니다:
 
-<Snippet name="api/type-safe-api-integrations" parentHeading="Type-Safe Integrations" />
+```hcl
+# API 엔드포인트 접근
+output "api_url" {
+  value = module.my_api.stage_invoke_url
+}
+
+# Lambda 함수 상세 정보
+output "lambda_function_name" {
+  value = module.my_api.lambda_function_name
+}
+
+# 추가 권한 부여를 위한 IAM 역할
+output "lambda_execution_role_arn" {
+  value = module.my_api.lambda_execution_role_arn
+}
+```
+
+모듈에 변수를 전달해 CORS 설정을 커스터마이즈할 수 있습니다:
+
+```hcl
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  # 커스텀 CORS 구성
+  cors_allow_origins = ["https://myapp.com", "https://staging.myapp.com"]
+  cors_allow_methods = ["GET", "POST", "PUT", "DELETE"]
+  cors_allow_headers = [
+    "authorization",
+    "content-type",
+    "x-custom-header"
+  ]
+
+  tags = local.common_tags
+}
+```
+
+:::caution
+생성기를 실행할 때 `auth`로 `None`을 선택한 경우 다음과 같은 Checkov 검사 실패가 발생할 수 있습니다:
+
+<Tabs syncKey="http-rest">
+<TabItem label="HTTP API">
+```
+Check: CKV_AWS_309: "Ensure API GatewayV2 routes specify an authorization type"
+ FAILED for resource: aws_apigatewayv2_route.proxy_routes["PUT"]
+```
+</TabItem>
+<TabItem label="REST API">
+```
+Check: CKV_AWS_59: "Ensure there is no open access to back-end resources through API"
+ FAILED for resource: aws_api_gateway_method.proxy_method
+```
+</TabItem>
+</Tabs>
+
+API를 공개로 유지하려는 경우 [suppression comment 추가](https://www.checkov.io/2.Basics/Suppressing%20and%20Skipping%20Policies.html)가 가능합니다.
+:::
+</Fragment>
+</Infrastructure>
+
+### 통합
+
+<Snippet name="api/type-safe-api-integrations" parentHeading="통합" />
 
 #### 코드 생성
 
-FastAPI의 작업이 Python으로 정의되고 인프라가 TypeScript로 정의되므로 타입 안전 통합을 위한 메타데이터를 CDK 구성에 제공하기 위해 코드 생성을 도입합니다.
+<Infrastructure>
+<Fragment slot="cdk">
+FastAPI 작업은 Python으로 정의되고 CDK 인프라는 TypeScript로 작성되므로, 통합을 위한 타입 세이프 인터페이스를 제공하기 위해 메타데이터를 CDK 구성에 전달하는 코드 생성을 도입합니다.
 
-공통 구성의 `project.json`에 `generate:<ApiName>-metadata` 타겟이 추가되어 `packages/common/constructs/src/generated/my-api/metadata.gen.ts`와 같은 파일을 생성합니다. 이는 빌드 시 생성되므로 버전 관리에서 제외됩니다.
+타입 세이프 코드 생성을 위해 `common/constructs`의 `project.json`에 `generate:<ApiName>-metadata` 대상이 추가됩니다. 이는 `packages/common/constructs/src/generated/my-api/metadata.gen.ts`와 같은 파일을 생성하며, 빌드 시 생성되므로 버전 관리에서 제외됩니다.
 
 :::note
-API를 변경할 때마다 CDK 구성에서 사용하는 타입이 최신 상태인지 확인하기 위해 빌드를 실행해야 합니다.
+API를 변경할 때마다 CDK 구성에서 사용되는 타입이 최신 상태인지 확인하기 위해 빌드를 실행해야 합니다.
 
 <NxCommands commands={["run-many --target build --all"]} />
 :::
 
 :::tip
-CDK 인프라와 FastAPI를 동시에 작업하는 경우 [`nx watch`](https://nx.dev/nx-api/nx/documents/watch)를 사용하여 API 변경 시마다 타입을 재생성할 수 있습니다:
+CDK 인프라와 FastAPI를 동시에 작업하는 경우 [`nx watch`](https://nx.dev/nx-api/nx/documents/watch)를 사용해 API 변경 시마다 타입을 재생성할 수 있습니다:
 
 <NxCommands
   commands={[
@@ -373,27 +659,75 @@ CDK 인프라와 FastAPI를 동시에 작업하는 경우 [`nx watch`](https://n
   ]}
 />
 :::
+</Fragment>
+<Fragment slot="terraform">
+:::note
+Terraform의 경우 타입 세이프 통합을 지원하지 않으므로 `iacProvider`로 Terraform을 선택한 경우 코드 생성 대상이 구성되지 않습니다.
+:::
+</Fragment>
+</Infrastructure>
 
 ### 접근 권한 부여 (IAM 전용)
 
-`IAM` 인증을 선택한 경우 `grantInvokeAccess` 메소드를 사용하여 API 접근 권한을 부여할 수 있습니다:
+`IAM` 인증을 선택한 경우 `grantInvokeAccess` 메서드를 사용해 API 접근 권한을 부여할 수 있습니다:
 
+<Infrastructure>
+<Fragment slot="cdk">
 ```ts
 api.grantInvokeAccess(myIdentityPool.authenticatedRole);
 ```
+</Fragment>
+<Fragment slot="terraform">
+```hcl
+# API 호출을 허용하는 IAM 정책 생성
+resource "aws_iam_policy" "api_invoke_policy" {
+  name        = "MyApiInvokePolicy"
+  description = "FastAPI 호출 허용 정책"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = "execute-api:Invoke"
+        Resource = "${module.my_api.api_execution_arn}/*/*"
+      }
+    ]
+  })
+}
+
+# 정책을 IAM 역할에 연결 (예: 인증된 사용자)
+resource "aws_iam_role_policy_attachment" "api_invoke_access" {
+  role       = aws_iam_role.authenticated_user_role.name
+  policy_arn = aws_iam_policy.api_invoke_policy.arn
+}
+
+# 기존 역할에 정책 연결
+resource "aws_iam_role_policy_attachment" "api_invoke_access_existing" {
+  role       = "MyExistingRole"
+  policy_arn = aws_iam_policy.api_invoke_policy.arn
+}
+```
+
+API 모듈의 주요 출력 값:
+- `module.my_api.api_execution_arn` - execute-api:Invoke 권한 부여용
+- `module.my_api.api_arn` - API Gateway ARN
+- `module.my_api.lambda_function_arn` - Lambda 함수 ARN
+</Fragment>
+</Infrastructure>
 
 ## 로컬 개발
 
-생성자는 다음 명령으로 실행할 수 있는 로컬 개발 서버를 구성합니다:
+생성기는 다음 명령으로 실행할 수 있는 로컬 개발 서버를 구성합니다:
 
 <NxCommands commands={['run my-api:serve']} />
 
-이 서버는 다음 기능을 제공합니다:
+이 명령은 다음 기능이 포함된 로컬 FastAPI 개발 서버를 시작합니다:
 
-- 코드 변경 시 자동 재시작
+- 코드 변경 시 자동 리로드
 - `/docs` 또는 `/redoc`에서 대화형 API 문서
 - `/openapi.json`에서 OpenAPI 스키마
 
 ## FastAPI 호출
 
-React 웹사이트에서 API를 호출하려면 <Link path="guides/api-connection/react-fastapi">`api-connection`</Link> 생성자를 사용할 수 있습니다.
+React 웹사이트에서 API를 호출하려면 <Link path="guides/api-connection/react-fastapi">`api-connection`</Link> 생성기를 사용할 수 있습니다.

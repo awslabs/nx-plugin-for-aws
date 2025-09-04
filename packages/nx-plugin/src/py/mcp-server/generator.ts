@@ -5,13 +5,11 @@
 import {
   GeneratorCallback,
   OverwriteStrategy,
-  ProjectConfiguration,
   Tree,
   addDependenciesToPackageJson,
   generateFiles,
   installPackagesTask,
   joinPathFragments,
-  updateJson,
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { PyMcpServerGeneratorSchema } from './schema';
@@ -25,12 +23,8 @@ import { formatFilesInSubtree } from '../../utils/format';
 import { kebabCase, toClassName, toSnakeCase } from '../../utils/names';
 import { addDependenciesToPyProjectToml } from '../../utils/py';
 import { getNpmScope } from '../../utils/npm-scope';
-import { addMcpServerConstruct } from '../../utils/agent-core-constructs/agent-core-constructs';
+import { addMcpServerInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
-import {
-  PACKAGES_DIR,
-  SHARED_CONSTRUCTS_DIR,
-} from '../../utils/shared-constructs-constants';
 import { addPythonBundleTarget } from '../../utils/bundle';
 import { withVersions } from '../../utils/versions';
 import { Logger } from '@nxlv/python/src/executors/utils/logger';
@@ -144,34 +138,15 @@ export const pyMcpServerGenerator = async (
     };
 
     // Add shared constructs
-    await sharedConstructsGenerator(tree);
-
-    // Ensure common constructs builds after our mcp server project
-    updateJson(
-      tree,
-      joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'project.json'),
-      (config: ProjectConfiguration) => {
-        if (!config.targets) {
-          config.targets = {};
-        }
-        if (!config.targets.build) {
-          config.targets.build = {};
-        }
-        config.targets.build.dependsOn = [
-          ...(config.targets.build.dependsOn ?? []).filter(
-            (t) => t !== `${project.name}:build`,
-          ),
-          `${project.name}:build`,
-        ];
-        return config;
-      },
-    );
+    await sharedConstructsGenerator(tree, { iacProvider: options.iacProvider });
 
     // Add the construct to deploy the mcp server
-    addMcpServerConstruct(tree, {
+    addMcpServerInfra(tree, {
       mcpServerNameKebabCase: name,
       mcpServerNameClassName,
+      projectName: project.name,
       dockerImageTag,
+      iacProvider: options.iacProvider,
     });
   } else {
     // No Dockerfile needed for non-hosted MCP

@@ -4,29 +4,47 @@ title: "Implantação do MCP Bedrock"
 
 
 
-import Link from '@components/link.astro'
+import Link from '@components/link.astro';
+import Infrastructure from '@components/infrastructure.astro';
 
-### CDK Construct
+### Infraestrutura como Código
 
-Se você selecionou `BedrockAgentCoreRuntime` para `computeType`, um construct CDK será gerado para implantar seu servidor MCP no [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html).
+Se você selecionou `BedrockAgentCoreRuntime` para `computeType`, a infraestrutura relevante do CDK ou Terraform será gerada para que você possa implantar seu servidor MCP no [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html).
 
-O nome do construct CDK é baseado no `name` escolhido durante a execução do gerador, ou `<ProjectName>McpServer` por padrão.
+<Infrastructure>
+<Fragment slot="cdk">
+Um construct CDK é gerado para você, nomeado com base no `name` escolhido durante a execução do gerador, ou `<ProjectName>McpServer` por padrão.
 
-Você pode utilizar este construct CDK em uma aplicação CDK:
+Você pode usar este construct CDK em uma aplicação CDK:
 
 ```ts {6}
 import { MyProjectMcpServer } from ':my-scope/common-constructs';
 
 export class ExampleStack extends Stack {
   constructor(scope: Construct, id: string) {
-    // Adiciona o servidor MCP à sua stack
+    // Adicione o servidor MCP à sua stack
     new MyProjectMcpServer(this, 'MyProjectMcpServer');
   }
 }
 ```
+</Fragment>
+<Fragment slot="terraform">
+Um módulo do Terraform é gerado para você, nomeado com base no `name` escolhido durante a execução do gerador, ou `<ProjectName>-mcp-server` por padrão.
+
+Você pode usar este módulo do Terraform em um projeto Terraform:
+
+```terraform
+# Servidor MCP
+module "my_project_mcp_server" {
+  # Caminho relativo para o módulo gerado no projeto common/terraform
+  source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
+}
+```
+</Fragment>
+</Infrastructure>
 
 :::caution
-[Docker](https://www.docker.com/) é obrigatório para construir e implantar seu servidor MCP. Certifique-se de tê-lo instalado e iniciado para evitar erros como:
+[Docker](https://www.docker.com/) é necessário para construir e implantar seu servidor MCP. Certifique-se de tê-lo instalado e iniciado para evitar erros como:
 
 ```
 ERROR: Cannot connect to the Docker daemon at unix://path/to/docker.sock.
@@ -37,8 +55,10 @@ ERROR: Cannot connect to the Docker daemon at unix://path/to/docker.sock.
 
 #### IAM
 
-Por padrão, seu servidor MCP será protegido usando autenticação IAM. Basta implantá-lo sem argumentos:
+Por padrão, seu servidor MCP será protegido usando autenticação IAM. Basta implantá-lo sem argumentos adicionais:
 
+<Infrastructure>
+<Fragment slot="cdk">
 ```ts {5}
 import { MyProjectMcpServer } from ':my-scope/common-constructs';
 
@@ -49,7 +69,7 @@ export class ExampleStack extends Stack {
 }
 ```
 
-Você pode conceder acesso para invocar seu MCP no Bedrock AgentCore Runtime usando o método `grantInvoke`. Por exemplo, para permitir que um agente gerado com o gerador <Link path="/guides/py-strands-agent">`py#strands-agent`</Link> chame seu servidor MCP:
+Você pode conceder acesso para invocar seu MCP no Bedrock AgentCore Runtime usando o método `grantInvoke`. Por exemplo, você pode permitir que um agent gerado com o gerador <Link path="/guides/py-strands-agent">`py#strands-agent`</Link> chame seu servidor MCP:
 
 ```ts {8}
 import { MyProjectAgent, MyProjectMcpServer } from ':my-scope/common-constructs';
@@ -63,10 +83,40 @@ export class ExampleStack extends Stack {
   }
 }
 ```
+</Fragment>
+<Fragment slot="terraform">
+```terraform
+# Servidor MCP
+module "my_project_mcp_server" {
+  # Caminho relativo para o módulo gerado no projeto common/terraform
+  source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
+}
+```
 
-#### Autenticação JWT com Cognito
+Para conceder acesso de invocação, você precisará adicionar uma política como a seguinte, referenciando o output `module.my_project_mcp_server.agent_core_runtime_arn`:
 
-Para configurar autenticação JWT, você pode passar a propriedade `authorizerConfiguration` para o construct do servidor MCP. Este exemplo configura um user pool e client Cognito para proteger o servidor:
+```terraform
+{
+  Effect = "Allow"
+  Action = [
+    "bedrock-agentcore:InvokeAgentRuntime"
+  ]
+  Resource = [
+    module.my_project_mcp_server.agent_core_runtime_arn,
+    "${module.my_project_mcp_server.agent_core_runtime_arn}/*"
+  ]
+}
+```
+</Fragment>
+</Infrastructure>
+
+#### Autenticação Cognito JWT
+
+O exemplo abaixo demonstra como configurar autenticação Cognito para seu agent.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Para configurar autenticação JWT, você pode passar a propriedade `authorizerConfiguration` para seu construct de servidor MCP. Aqui está um exemplo que configura um user pool e client Cognito:
 
 ```ts {14-17}
 import { MyProjectMcpServer } from ':my-scope/common-constructs';
@@ -91,3 +141,36 @@ export class ExampleStack extends Stack {
   }
 }
 ```
+</Fragment>
+<Fragment slot="terraform">
+Para configurar autenticação JWT, você pode editar seu módulo do Servidor MCP para configurar a variável `customJWTAuthorizer`:
+
+```terraform {18-21}
+# packages/common/terraform/src/app/mcp-servers/my-project-mcp-server/my-project-mcp-server.tf
+
+data "aws_region" "current" {}
+
+locals {
+  aws_region = data.aws_region.current.name
+
+  # Substitua pelos IDs do seu user pool e client ou exponha como variáveis
+  user_pool_id = "xxx"
+  user_pool_client_ids = ["yyy"]
+}
+
+module "agent_core_runtime" {
+  source = "../../../core/agent-core"
+  agent_runtime_name = "MyProjectMcpServer"
+  docker_image_tag = "my-scope-my-project-agent:latest"
+  server_protocol = "MCP"
+  customJWTAuthorizer = {
+    discoveryUrl = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration",
+    allowedClients = local.user_pool_client_ids
+  }
+  env = var.env
+  additional_iam_policy_statements = var.additional_iam_policy_statements
+  tags = var.tags
+}
+```
+</Fragment>
+</Infrastructure>

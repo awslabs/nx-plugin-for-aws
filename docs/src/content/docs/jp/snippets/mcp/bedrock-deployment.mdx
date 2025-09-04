@@ -4,15 +4,18 @@ title: "MCPベドロック デプロイメント"
 
 
 
-import Link from '@components/link.astro'
+import Link from '@components/link.astro';
+import Infrastructure from '@components/infrastructure.astro';
 
-### CDKコンストラクト
+### インフラストラクチャーとしてのコード
 
-`computeType`に`BedrockAgentCoreRuntime`を選択した場合、生成されるCDKコンストラクトを使用してMCPサーバーを[Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html)にデプロイできます。
+`computeType`に`BedrockAgentCoreRuntime`を選択した場合、関連するCDKまたはTerraformのインフラストラクチャが生成され、[Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html)にMCPサーバーをデプロイする際に使用できます。
 
-CDKコンストラクトの名前は、ジェネレーター実行時に選択した`name`に基づいて命名され、デフォルトでは`<ProjectName>McpServer`となります。
+<Infrastructure>
+<Fragment slot="cdk">
+ジェネレーター実行時に選択した`name`に基づいて命名されたCDKコンストラクトが生成されます（デフォルトは`<ProjectName>McpServer`）。
 
-このCDKコンストラクトはCDKアプリケーションで使用できます：
+このCDKコンストラクトをCDKアプリケーションで使用できます：
 
 ```ts {6}
 import { MyProjectMcpServer } from ':my-scope/common-constructs';
@@ -24,9 +27,24 @@ export class ExampleStack extends Stack {
   }
 }
 ```
+</Fragment>
+<Fragment slot="terraform">
+ジェネレーター実行時に選択した`name`に基づいて命名されたTerraformモジュールが生成されます（デフォルトは`<ProjectName>-mcp-server`）。
+
+このTerraformモジュールをTerraformプロジェクトで使用できます：
+
+```terraform
+# MCPサーバー
+module "my_project_mcp_server" {
+  # common/terraformプロジェクト内の生成されたモジュールへの相対パス
+  source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
+}
+```
+</Fragment>
+</Infrastructure>
 
 :::caution
-MCPサーバーのビルドとデプロイには[Docker](https://www.docker.com/)が必要です。以下のようなエラーを防ぐため、Dockerがインストールされ起動していることを確認してください：
+MCPサーバーのビルドとデプロイには[Docker](https://www.docker.com/)が必要です。以下のようなエラーを防ぐため、Dockerがインストールされ、起動していることを確認してください：
 
 ```
 ERROR: Cannot connect to the Docker daemon at unix://path/to/docker.sock.
@@ -39,6 +57,8 @@ ERROR: Cannot connect to the Docker daemon at unix://path/to/docker.sock.
 
 デフォルトではMCPサーバーはIAM認証で保護されます。引数なしでデプロイできます：
 
+<Infrastructure>
+<Fragment slot="cdk">
 ```ts {5}
 import { MyProjectMcpServer } from ':my-scope/common-constructs';
 
@@ -49,7 +69,7 @@ export class ExampleStack extends Stack {
 }
 ```
 
-`grantInvoke`メソッドを使用して、Bedrock AgentCore Runtime上のMCPサーバー起動権限を付与できます。例えば<Link path="/guides/py-strands-agent">`py#strands-agent`</Link>ジェネレーターで作成したエージェントにMCPサーバー呼び出し権限を付与する場合：
+`grantInvoke`メソッドを使用してBedrock AgentCore Runtime上のMCPサーバー起動権限を付与できます。例：<Link path="/guides/py-strands-agent">`py#strands-agent`</Link>ジェネレーターで作成したエージェントにMCPサーバー呼び出し権限を付与：
 
 ```ts {8}
 import { MyProjectAgent, MyProjectMcpServer } from ':my-scope/common-constructs';
@@ -63,10 +83,40 @@ export class ExampleStack extends Stack {
   }
 }
 ```
+</Fragment>
+<Fragment slot="terraform">
+```terraform
+# MCPサーバー
+module "my_project_mcp_server" {
+  # common/terraformプロジェクト内の生成されたモジュールへの相対パス
+  source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
+}
+```
+
+起動権限を付与するには、`module.my_project_mcp_server.agent_core_runtime_arn`出力を参照するポリシーを追加します：
+
+```terraform
+{
+  Effect = "Allow"
+  Action = [
+    "bedrock-agentcore:InvokeAgentRuntime"
+  ]
+  Resource = [
+    module.my_project_mcp_server.agent_core_runtime_arn,
+    "${module.my_project_mcp_server.agent_core_runtime_arn}/*"
+  ]
+}
+```
+</Fragment>
+</Infrastructure>
 
 #### Cognito JWT認証
 
-JWT認証を設定するには、MCPサーバーコンストラクトに`authorizerConfiguration`プロパティを渡します。以下はCognitoユーザープールとクライアントでMCPサーバーを保護する設定例です：
+以下はCognito認証を設定する方法を示しています。
+
+<Infrastructure>
+<Fragment slot="cdk">
+JWT認証を設定するには、MCPサーバーコンストラクトに`authorizerConfiguration`プロパティを渡します。CognitoユーザープールとクライアントでMCPサーバーを保護する例：
 
 ```ts {14-17}
 import { MyProjectMcpServer } from ':my-scope/common-constructs';
@@ -91,3 +141,36 @@ export class ExampleStack extends Stack {
   }
 }
 ```
+</Fragment>
+<Fragment slot="terraform">
+JWT認証を設定するには、MCPサーバーモジュールの`customJWTAuthorizer`変数を以下のように編集します：
+
+```terraform {18-21}
+# packages/common/terraform/src/app/mcp-servers/my-project-mcp-server/my-project-mcp-server.tf
+
+data "aws_region" "current" {}
+
+locals {
+  aws_region = data.aws_region.current.name
+
+  # ユーザープールIDとクライアントIDに置き換えるか変数として公開
+  user_pool_id = "xxx"
+  user_pool_client_ids = ["yyy"]
+}
+
+module "agent_core_runtime" {
+  source = "../../../core/agent-core"
+  agent_runtime_name = "MyProjectMcpServer"
+  docker_image_tag = "my-scope-my-project-agent:latest"
+  server_protocol = "MCP"
+  customJWTAuthorizer = {
+    discoveryUrl = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration",
+    allowedClients = local.user_pool_client_ids
+  }
+  env = var.env
+  additional_iam_policy_statements = var.additional_iam_policy_statements
+  tags = var.tags
+}
+```
+</Fragment>
+</Infrastructure>
