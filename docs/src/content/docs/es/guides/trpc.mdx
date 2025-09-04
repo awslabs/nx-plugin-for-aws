@@ -14,9 +14,9 @@ import NxCommands from '@components/nx-commands.astro';
 import Infrastructure from '@components/infrastructure.astro';
 import Snippet from '@components/snippet.astro';
 
-[tRPC](https://trpc.io/) es un framework para construir APIs en TypeScript con seguridad de tipos de extremo a extremo. Usando tRPC, las actualizaciones en las entradas y salidas de las operaciones de la API se reflejan inmediatamente en el código del cliente y son visibles en tu IDE sin necesidad de reconstruir tu proyecto.
+[tRPC](https://trpc.io/) es un framework para construir APIs en TypeScript con seguridad de tipos de extremo a extremo. Con tRPC, las actualizaciones en las entradas y salidas de las operaciones de la API se reflejan inmediatamente en el código del cliente y son visibles en tu IDE sin necesidad de reconstruir tu proyecto.
 
-El generador de API tRPC crea una nueva API tRPC con configuración de infraestructura usando AWS CDK o Terraform. El backend generado utiliza AWS Lambda para despliegues serverless, expuesto a través de un API Gateway de AWS, e incluye validación de esquemas usando [Zod](https://zod.dev/). Configura [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/) para observabilidad, incluyendo logging, trazado con AWS X-Ray y métricas de CloudWatch.
+El generador de API tRPC crea una nueva API tRPC con configuración de infraestructura en AWS CDK o Terraform. El backend generado utiliza AWS Lambda para despliegues serverless, expuesto a través de una API de AWS API Gateway, e incluye validación de esquemas usando [Zod](https://zod.dev/). Configura [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/) para observabilidad, incluyendo logging, trazado con AWS X-Ray y métricas de CloudWatch.
 
 ## Uso
 
@@ -39,7 +39,7 @@ El generador creará la siguiente estructura de proyecto en el directorio `<dire
 <FileTree>
   - src
     - init.ts Inicialización del backend tRPC
-    - router.ts Definición del router tRPC (punto de entrada del manejador Lambda)
+    - router.ts Definición del router tRPC (punto de entrada del handler Lambda)
     - schema Definiciones de esquemas usando Zod
       - echo.ts Ejemplo de definiciones para entrada y salida del procedimiento "echo"
     - procedures Procedimientos (u operaciones) expuestos por tu API
@@ -57,15 +57,19 @@ El generador creará la siguiente estructura de proyecto en el directorio `<dire
 
 </FileTree>
 
-El generador también creará infraestructura como código con CDK o Terraform que puede usarse para desplegar tu API, ubicada en el directorio `packages/common`.
+### Infraestructura
+
+<Snippet name="shared-constructs" />
+
+<Snippet name="api/shared-constructs" />
 
 ## Implementando tu API tRPC
 
-A alto nivel, las APIs tRPC consisten en un router que delega solicitudes a procedimientos específicos. Cada procedimiento tiene una entrada y salida definidas como un esquema Zod.
+En términos generales, las API tRPC constan de un router que delega solicitudes a procedimientos específicos. Cada procedimiento tiene una entrada y salida definidas como esquemas Zod.
 
 ### Esquema
 
-El directorio `src/schema` contiene los tipos compartidos entre tu código cliente y servidor. En este paquete, estos tipos se definen usando [Zod](https://zod.dev/), una biblioteca de declaración y validación de esquemas TypeScript-first.
+El directorio `src/schema` contiene los tipos compartidos entre tu código cliente y servidor. En este paquete, estos tipos se definen usando [Zod](https://zod.dev/), una biblioteca TypeScript-first para declaración y validación de esquemas.
 
 Un esquema de ejemplo podría verse así:
 
@@ -93,17 +97,17 @@ interface User {
 }
 ```
 
-Los esquemas son compartidos por el código de servidor y cliente, proporcionando un único lugar para actualizar cuando se realizan cambios en las estructuras usadas en tu API.
+Los esquemas son compartidos por el código del cliente y servidor, proporcionando un único lugar para actualizar cuando se realizan cambios en las estructuras usadas en tu API.
 
-Los esquemas son validados automáticamente por tu API tRPC en tiempo de ejecución, lo que evita tener que crear lógica de validación manual en tu backend.
+Los esquemas son validados automáticamente por tu API tRPC en tiempo de ejecución, lo que evita tener que crear lógica de validación manual en el backend.
 
-Zod provee utilidades poderosas para combinar o derivar esquemas como `.merge`, `.pick`, `.omit` y más. Puedes encontrar más información en el [sitio de documentación de Zod](https://zod.dev/?id=basic-usage).
+Zod proporciona utilidades poderosas para combinar o derivar esquemas como `.merge`, `.pick`, `.omit` y más. Puedes encontrar más información en el [sitio de documentación de Zod](https://zod.dev/?id=basic-usage).
 
 ### Router y Procedimientos
 
-El punto de entrada de tu API se encuentra en `src/router.ts`. Este archivo contiene el manejador Lambda que enruta solicitudes a "procedimientos" basados en la operación invocada. Cada procedimiento define la entrada esperada, salida e implementación.
+El punto de entrada de tu API se encuentra en `src/router.ts`. Este archivo contiene el handler Lambda que enruta las solicitudes a "procedimientos" basados en la operación invocada. Cada procedimiento define la entrada esperada, la salida y la implementación.
 
-El router de ejemplo generado tiene una sola operación llamada `echo`:
+El router de ejemplo generado para ti tiene una sola operación llamada `echo`:
 
 ```ts
 import { echo } from './procedures/echo.js';
@@ -127,9 +131,9 @@ Desglosando lo anterior:
 - `publicProcedure` define un método público en la API, incluyendo el middleware configurado en `src/middleware`. Este middleware incluye integración con AWS Lambda Powertools para logging, trazado y métricas.
 - `input` acepta un esquema Zod que define la entrada esperada para la operación. Las solicitudes para esta operación se validan automáticamente contra este esquema.
 - `output` acepta un esquema Zod que define la salida esperada. Verás errores de tipo en tu implementación si no devuelves una salida que cumpla con el esquema.
-- `query` acepta una función que define la implementación de tu API. Esta implementación recibe `opts`, que contiene el `input` pasado a tu operación, así como otro contexto configurado por middleware, disponible en `opts.ctx`. La función pasada a `query` debe devolver una salida que cumpla con el esquema de `output`.
+- `query` acepta una función que define la implementación de tu API. Esta implementación recibe `opts`, que contiene el `input` pasado a tu operación, así como otro contexto configurado por el middleware, disponible en `opts.ctx`. La función pasada a `query` debe devolver una salida que cumpla con el esquema de `output`.
 
-El uso de `query` para definir la implementación indica que la operación no es mutativa. Úsalo para definir métodos de obtención de datos. Para operaciones mutativas, usa el método `mutation` en su lugar.
+El uso de `query` para definir la implementación indica que la operación no es mutativa. Úsalo para definir métodos de recuperación de datos. Para operaciones mutativas, usa el método `mutation` en su lugar.
 
 Si agregas un nuevo procedimiento, asegúrate de registrarlo añadiéndolo al router en `src/router.ts`.
 
@@ -142,13 +146,13 @@ En tu implementación, puedes devolver respuestas de error a los clientes lanzan
 ```ts
 throw new TRPCError({
   code: 'NOT_FOUND',
-  message: 'No se pudo encontrar el recurso solicitado',
+  message: 'El recurso solicitado no pudo ser encontrado',
 });
 ```
 
 ### Organizando tus Operaciones
 
-A medida que tu API crece, quizás quieras agrupar operaciones relacionadas.
+A medida que tu API crece, puedes querer agrupar operaciones relacionadas.
 
 Puedes agrupar operaciones usando routers anidados, por ejemplo:
 
@@ -165,7 +169,7 @@ const appRouter = router({
 })
 ```
 
-Los clientes reciben entonces esta agrupación de operaciones, por ejemplo, invocar la operación `listUsers` se vería así:
+Los clientes entonces reciben esta agrupación de operaciones, por ejemplo, invocar la operación `listUsers` se vería así:
 
 ```ts
 client.users.list.query();
@@ -173,7 +177,7 @@ client.users.list.query();
 
 ### Logging
 
-El logger de AWS Lambda Powertools se configura en `src/middleware/logger.ts`, y puede accederse en una implementación de API vía `opts.ctx.logger`. Puedes usarlo para registrar en CloudWatch Logs, y/o controlar valores adicionales a incluir en cada mensaje de log estructurado. Por ejemplo:
+El logger de AWS Lambda Powertools se configura en `src/middleware/logger.ts`, y se puede acceder a él en una implementación de API via `opts.ctx.logger`. Puedes usarlo para registrar en CloudWatch Logs, y/o controlar valores adicionales a incluir en cada mensaje de log estructurado. Por ejemplo:
 
 ```ts {5}
 export const echo = publicProcedure
@@ -190,14 +194,14 @@ Para más información sobre el logger, consulta la [documentación de AWS Lambd
 
 ### Registro de Métricas
 
-Las métricas de AWS Lambda Powertools se configuran en `src/middleware/metrics.ts`, y pueden accederse en una implementación de API vía `opts.ctx.metrics`. Puedes usarlas para registrar métricas en CloudWatch sin necesidad de importar y usar el AWS SDK, por ejemplo:
+Las métricas de AWS Lambda Powertools se configuran en `src/middleware/metrics.ts`, y se puede acceder a ellas en una implementación de API via `opts.ctx.metrics`. Puedes usarlas para registrar métricas en CloudWatch sin necesidad de importar y usar el AWS SDK, por ejemplo:
 
 ```ts {5}
 export const echo = publicProcedure
    .input(...)
    .output(...)
    .query(async (opts) => {
-      opts.ctx.metrics.addMetric('Invocations', 'Count', 1);
+      opts.ctx.metrics.addMetric('Invocaciones', 'Count', 1);
 
       return ...;
    });
@@ -207,14 +211,14 @@ Para más información, consulta la [documentación de AWS Lambda Powertools Met
 
 ### Ajuste Fino de Trazado con X-Ray
 
-El tracer de AWS Lambda Powertools se configura en `src/middleware/tracer.ts`, y puede accederse en una implementación de API vía `opts.ctx.tracer`. Puedes usarlo para agregar trazas con AWS X-Ray y obtener insights detallados sobre el rendimiento y flujo de las solicitudes API. Por ejemplo:
+El tracer de AWS Lambda Powertools se configura en `src/middleware/tracer.ts`, y se puede acceder a él en una implementación de API via `opts.ctx.tracer`. Puedes usarlo para agregar trazas con AWS X-Ray y obtener insights detallados sobre el rendimiento y flujo de las solicitudes de la API. Por ejemplo:
 
 ```ts {5-7}
 export const echo = publicProcedure
    .input(...)
    .output(...)
    .query(async (opts) => {
-      const subSegment = opts.ctx.tracer.getSegment()!.addNewSubsegment('MyAlgorithm');
+      const subSegment = opts.ctx.tracer.getSegment()!.addNewSubsegment('MiAlgoritmo');
       // ... lógica de mi algoritmo para capturar
       subSegment.close();
 
@@ -228,7 +232,7 @@ Para más información, consulta la [documentación de AWS Lambda Powertools Tra
 
 Puedes agregar valores adicionales al contexto proporcionado a los procedimientos implementando middleware.
 
-Como ejemplo, implementemos middleware para extraer detalles del usuario que llama a nuestra API en `src/middleware/identity.ts`.
+Como ejemplo, implementemos un middleware para extraer detalles del usuario que llama a nuestra API en `src/middleware/identity.ts`.
 
 :::warning
 Este ejemplo asume que `auth` se configuró como `IAM`. Para autenticación con Cognito, el middleware de identidad es más directo, extrayendo los claims relevantes del `event`.
@@ -247,24 +251,24 @@ export interface IIdentityContext {
 
 Nota que definimos una propiedad adicional _opcional_ al contexto. tRPC se encarga de asegurar que esto esté definido en procedimientos que hayan configurado correctamente este middleware.
 
-Luego, implementamos el middleware. Tiene la siguiente estructura:
+Luego, implementamos el middleware mismo. Tiene la siguiente estructura:
 
 ```ts
 export const createIdentityPlugin = () => {
    const t = initTRPC.context<...>().create();
    return t.procedure.use(async (opts) => {
-      // Agregar lógica aquí para ejecutar antes del procedimiento
+      // Agrega lógica aquí para ejecutar antes del procedimiento
 
       const response = await opts.next(...);
 
-      // Agregar lógica aquí para ejecutar después del procedimiento
+      // Agrega lógica aquí para ejecutar después del procedimiento
 
       return response;
    });
 };
 ```
 
-En nuestro caso, queremos extraer detalles del usuario de Cognito. Hacemos esto extrayendo el ID de sujeto (o "sub") del usuario del evento de API Gateway, y obteniendo detalles del usuario desde Cognito. La implementación varía ligeramente dependiendo de si el evento fue provisto por una REST API o HTTP API:
+En nuestro caso, queremos extraer detalles del usuario de Cognito que llama. Hacemos esto extrayendo el ID de sujeto (o "sub") del usuario del evento de API Gateway, y recuperando detalles del usuario desde Cognito. La implementación varía ligeramente dependiendo de si el evento fue proporcionado por una REST API o una HTTP API:
 
 <Tabs>
 <TabItem label="REST">
@@ -316,7 +320,7 @@ export const createIdentityPlugin = () => {
       });
     }
 
-    // Provee la identidad a otros procedimientos en el contexto
+    // Proporciona la identidad a otros procedimientos en el contexto
     return await opts.next({
       ctx: {
         ...opts.ctx,
@@ -385,7 +389,7 @@ export const createIdentityPlugin = () => {
       });
     }
 
-    // Provee la identidad a otros procedimientos en el contexto
+    // Proporciona la identidad a otros procedimientos en el contexto
     return await opts.next({
       ctx: {
         ...opts.ctx,
@@ -403,7 +407,7 @@ export const createIdentityPlugin = () => {
 
 ## Desplegando tu API tRPC
 
-El generador de API tRPC crea infraestructura como código con CDK o Terraform basado en tu `iacProvider` seleccionado. Puedes usar esto para desplegar tu API tRPC.
+El generador de API tRPC crea código de infraestructura con CDK o Terraform basado en tu `iacProvider` seleccionado. Puedes usar esto para desplegar tu API tRPC.
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -422,10 +426,10 @@ export class ExampleStack extends Stack {
 }
 ```
 
-Esto configura la infraestructura de tu API, incluyendo un REST o HTTP API Gateway de AWS, funciones Lambda para lógica de negocio, y autenticación basada en tu método `auth` elegido.
+Esto configura la infraestructura de tu API, incluyendo una REST API o HTTP API de AWS API Gateway, funciones AWS Lambda para la lógica de negocio, y autenticación basada en tu método `auth` elegido.
 
 :::note
-Si seleccionaste usar autenticación `Cognito`, necesitarás proveer la propiedad `identity` al constructo de la API:
+Si seleccionaste usar autenticación `Cognito`, necesitarás proporcionar la propiedad `identity` al constructo de la API:
 
 ```ts {9}
 import { MyApi, UserIdentity } from ':my-scope/common-constructs';
@@ -471,13 +475,13 @@ Esto configura:
 
 1. Una función AWS Lambda que sirve todos los procedimientos tRPC
 2. API Gateway HTTP/REST API como trigger de la función
-3. Roles IAM y permisos
+3. Roles y permisos IAM
 4. Grupo de logs de CloudWatch
 5. Configuración de trazado X-Ray
 6. Configuración CORS
 
 :::note
-Si seleccionaste usar autenticación `Cognito`, necesitarás proveer la configuración de Cognito:
+Si seleccionaste usar autenticación `Cognito`, necesitarás proporcionar la configuración de Cognito:
 
 ```hcl {4-5}
 module "my_api" {
@@ -495,10 +499,10 @@ module "my_api" {
 }
 ```
 
-Puedes configurar User Pool y Client de Cognito usando los recursos o módulos apropiados de Terraform.
+Puedes configurar User Pool y Client de Cognito usando los recursos o módulos de Terraform apropiados.
 :::
 
-El módulo de Terraform provee varias salidas que puedes usar:
+El módulo de Terraform proporciona varias salidas que puedes usar:
 
 ```hcl
 # Accede al endpoint de la API
@@ -537,7 +541,7 @@ module "my_api" {
 ```
 
 :::caution
-Si seleccionaste `None` para `auth` al ejecutar el generador, podrías ver fallos en los checks de Checkov como:
+Si seleccionaste `None` para `auth` al ejecutar el generador, puedes ver fallos en las verificaciones de Checkov como:
 
 <Tabs syncKey="http-rest">
 <TabItem label="HTTP API">
@@ -554,7 +558,7 @@ Check: CKV_AWS_59: "Ensure there is no open access to back-end resources through
 </TabItem>
 </Tabs>
 
-Puedes [agregar un comentario de supresión](https://www.checkov.io/2.Basics/Suppressing%20and%20Skipping%20Policies.html) si estás seguro de querer que tu API sea pública.
+Puedes [agregar un comentario de supresión](https://www.checkov.io/2.Basics/Suppressing%20and%20Skipping%20Policies.html) si estás seguro de que deseas que tu API sea pública.
 :::
 </Fragment>
 </Infrastructure>
@@ -564,7 +568,7 @@ Puedes [agregar un comentario de supresión](https://www.checkov.io/2.Basics/Sup
 <Snippet name="api/type-safe-api-integrations" parentHeading="Integraciones" />
 
 :::tip
-Si seleccionaste CDK como tu `iacProvider`, cuando agregues o quites un procedimiento en tu API tRPC, estos cambios se reflejarán inmediatamente en el constructo CDK sin necesidad de reconstruir.
+Si seleccionaste CDK como tu `iacProvider`, cuando agregues o elimines un procedimiento en tu API tRPC, estos cambios se reflejarán inmediatamente en el constructo CDK sin necesidad de reconstruir.
 :::
 
 ### Otorgando Acceso (Solo IAM)
@@ -619,17 +623,17 @@ Las salidas clave del módulo de API que puedes usar para políticas IAM son:
 
 ## Servidor tRPC Local
 
-Puedes usar el target `serve` para ejecutar un servidor local de tu API, por ejemplo:
+Puedes usar el target `serve` para ejecutar un servidor local para tu API, por ejemplo:
 
 <NxCommands commands={['run @my-scope/my-api:serve']} />
 
 El punto de entrada para el servidor local es `src/local-server.ts`.
 
-Esto recargará automáticamente cuando hagas cambios en tu API.
+Esto se recargará automáticamente cuando hagas cambios en tu API.
 
 ## Invocando tu API tRPC
 
-Puedes crear un cliente tRPC para invocar tu API de forma tipada. Si estás llamando a tu API tRPC desde otro backend, puedes usar el cliente en `src/client/index.ts`, por ejemplo:
+Puedes crear un cliente tRPC para invocar tu API de manera tipada. Si estás llamando a tu API tRPC desde otro backend, puedes usar el cliente en `src/client/index.ts`, por ejemplo:
 
 ```ts
 import { createMyApiClient } from ':my-scope/my-api';
@@ -639,7 +643,7 @@ const client = createMyApiClient({ url: 'https://my-api-url.example.com/' });
 await client.echo.query({ message: '¡Hola mundo!' });
 ```
 
-Si estás llamando a tu API desde un sitio web React, considera usar el generador <Link path="guides/api-connection/react-trpc">Conexión API</Link> para configurar el cliente.
+Si estás llamando a tu API desde un sitio React, considera usar el generador <Link path="guides/api-connection/react-trpc">Conexión de API</Link> para configurar el cliente.
 
 ## Más Información
 

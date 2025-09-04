@@ -21,8 +21,8 @@ AIエージェントを構築するためのPython [Strands Agent](https://stran
 
 - **軽量でカスタマイズ可能**: シンプルなエージェントループで邪魔にならない設計
 - **プロダクションレディ**: 完全なオブザーバビリティ、トレーシング、スケール対応のデプロイオプション
-- **モデル/プロバイダー非依存**: 様々なプロバイダーのモデルをサポート
-- **コミュニティ提供ツール**: 強力なコミュニティ製ツールセット
+- **モデル/プロバイダー中立**: 様々なプロバイダーのモデルをサポート
+- **コミュニティ駆動のツール**: 強力なコミュニティ提供ツールセット
 - **マルチエージェントサポート**: エージェントチームや自律エージェントなどの高度な手法
 - **柔軟なインタラクションモード**: 会話型、ストリーミング/非ストリーミング対応
 
@@ -35,14 +35,14 @@ AIエージェントを構築するためのPython [Strands Agent](https://stran
 <RunGenerator generator="py#strands-agent" />
 
 :::tip
-最初に<Link path="/guides/python-project">`py#project`</Link>ジェネレーターでプロジェクトを作成してからStrandsエージェントを追加することを推奨します。
+最初に<Link path="/guides/python-project">`py#project`</Link>ジェネレータを使用してプロジェクトを作成し、その中にStrandsエージェントを追加します。
 :::
 
 ### オプション
 
 <GeneratorParameters generator="py#strands-agent" />
 
-## ジェネレーターの出力
+## ジェネレータ出力
 
 既存のPythonプロジェクトに以下のファイルが追加されます：
 
@@ -50,26 +50,60 @@ AIエージェントを構築するためのPython [Strands Agent](https://stran
   - your-project/
     - your_module/
       - agent/（カスタム名指定時はそれを使用）
-        - \_\_init\_\_.py Pythonパッケージ初期化
+        - \_\_init\_\_.py Pythonパッケージ初期化ファイル
         - agent.py サンプルツール付きメインエージェント定義
         - main.py Bedrock AgentCore Runtime用エントリーポイント
         - agentcore_mcp_client.py MCPサーバー呼び出し用クライアントファクトリ
-        - Dockerfile エージェントホスティング用（`computeType`が`None`の場合は生成されない）
+        - Dockerfile エージェントホスティング用Dockerfile（`computeType`が`None`の場合は生成されない）
     - pyproject.toml Strands依存関係が追加
-    - project.json エージェントサーバーターゲットが追加
+    - project.json エージェントサーブターゲットが追加
 </FileTree>
 
+### インフラストラクチャ
+
 :::note
-`computeType`で`None`を選択しなかった場合、CDKまたはTerraformインフラストラクチャも生成され、Strandsエージェントのデプロイが可能になります。
+`computeType`に`None`を選択した場合、インフラストラクチャコードは生成されません。
 :::
+
+<Snippet name="shared-constructs" />
+
+Strandsエージェントのデプロイ用に以下のファイルが生成されます：
+
+<Infrastructure>
+<Fragment slot="cdk">
+<FileTree>
+  - packages/common/constructs/src
+    - app
+      - agents
+        - \<project-name>
+          - \<project-name>.ts エージェントデプロイ用CDKコンストラクト
+          - Dockerfile CDKコンストラクトで使用するDockerfile
+    - core
+      - agent-core
+        - runtime.ts Bedrock AgentCore Runtimeデプロイ用汎用CDKコンストラクト
+</FileTree>
+</Fragment>
+<Fragment slot="terraform">
+<FileTree>
+  - packages/common/terraform/src
+    - app
+      - agents
+        - \<project-name>
+          - \<project-name>.tf エージェントデプロイ用Terraformモジュール
+    - core
+      - agent-core
+        - runtime.tf Bedrock AgentCore Runtimeデプロイ用汎用モジュール
+</FileTree>
+</Fragment>
+</Infrastructure>
 
 ## Strandsエージェントの操作
 
 ### ツールの追加
 
-ツールはAIエージェントが操作を実行するために呼び出す関数です。Strandsフレームワークはデコレータベースのシンプルなアプローチを採用しています。
+ツールはAIエージェントが操作を実行するために呼び出す関数です。Strandsフレームワークはデコレータベースのツール定義を採用しています。
 
-[`agent.py`](packages/nx-plugin/src/py/strands-agent/files/agent.py.template:6)ファイルに新しいツールを追加：
+[`agent.py`](packages/nx-plugin/src/py/strands-agent/files/agent.py.template:6)ファイルに新しいツールを追加できます：
 
 ```python
 from strands import Agent, tool
@@ -82,12 +116,12 @@ def calculate_sum(numbers: list[int]) -> int:
 @tool
 def get_weather(city: str) -> str:
     """都市の天気情報を取得"""
-    # 天気API連携をここに実装
+    # ここに天気APIの統合を実装
     return f"{city}の天気：晴れ、25°C"
 
 # エージェントにツールを追加
 agent = Agent(
-    system_prompt="様々なツールを利用できる有用なアシスタントです。",
+    system_prompt="様々なツールにアクセスできるヘルプフルアシスタントです。",
     tools=[calculate_sum, get_weather],
 )
 ```
@@ -105,14 +139,14 @@ Strandsフレームワークが自動的に処理する機能：
 from strands_tools import current_time, http_request, file_read
 
 agent = Agent(
-    system_prompt="有用なアシスタントです。",
+    system_prompt="ヘルプフルアシスタントです。",
     tools=[current_time, http_request, file_read],
 )
 ```
 
 ### モデル設定
 
-デフォルトでClaude 4 Sonnetを使用しますが、モデルプロバイダーをカスタマイズ可能。[モデルプロバイダー設定オプション](https://strandsagents.com/latest/documentation/docs/user-guide/quickstart/#model-providers)：
+デフォルトでClaude 4 Sonnetを使用しますが、モデルプロバイダーをカスタマイズ可能。[Strandsドキュメントのモデルプロバイダー設定](https://strandsagents.com/latest/documentation/docs/user-guide/quickstart/#model-providers)を参照：
 
 ```python
 from strands import Agent
@@ -130,9 +164,9 @@ agent = Agent(model=bedrock_model)
 
 ### MCPサーバーの利用
 
-[StrandsエージェントにMCPサーバーのツールを追加](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/tools/mcp-tools/)可能。
+[Bedrock AgentCore RuntimeにデプロイされたMCPサーバー](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/tools/mcp-tools/)からツールを追加できます。
 
-<Link path="/guides/py-mcp-server">`py#mcp-server`</Link>または<Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link>ジェネレーターで作成したMCPサーバー（またはBedrock AgentCore Runtimeでホストされた他サーバー）を利用する場合、`agentcore_mcp_client.py`にクライアントファクトリが生成されます。
+<Link path="/guides/py-mcp-server">`py#mcp-server`</Link>または<Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link>ジェネレータで作成したMCPサーバー（または他でホストされたもの）を使用する場合、`agentcore_mcp_client.py`にクライアントファクトリが生成されます。
 
 `agent.py`の`get_agent`メソッドを更新してMCPクライアントを作成しツールを追加。IAM（SigV4）認証の例：
 
@@ -231,16 +265,16 @@ module "my_project_agent" {
 
 ### 詳細
 
-Strandsエージェントの詳細な開発ガイドは[Strandsドキュメント](https://strandsagents.com/latest/documentation/docs/)を参照。
+Strandsエージェント開発の詳細は[Strandsドキュメント](https://strandsagents.com/latest/documentation/docs/)を参照。
 
 ## Bedrock AgentCore Python SDK
 
-ジェネレーターは[Bedrock AgentCore Python SDK](https://github.com/aws/bedrock-agentcore-sdk-python)を設定し、AgentCore上のエージェントに必要なHTTP契約を管理します。
+ジェネレータは[Bedrock AgentCore Python SDK](https://github.com/aws/bedrock-agentcore-sdk-python)を設定し、AgentCore上のエージェントに必要なHTTP契約を管理します。
 
-SDKの機能詳細は[ドキュメント](https://aws.github.io/bedrock-agentcore-starter-toolkit/user-guide/runtime/quickstart.html)を参照。
+SDKの詳細は[ドキュメント](https://aws.github.io/bedrock-agentcore-starter-toolkit/user-guide/runtime/quickstart.html)を参照。
 
 :::note
-ジェネレーターがCDK/Terraformインフラストラクチャを提供するため、エージェントデプロイに`bedrock-agentcore-starter-toolkit`は不要です。
+ジェネレータがCDK/Terraformインフラを提供するため、`bedrock-agentcore-starter-toolkit`を使用する必要はありません。
 :::
 
 ## Strandsエージェントの実行
@@ -251,13 +285,13 @@ SDKの機能詳細は[ドキュメント](https://aws.github.io/bedrock-agentcor
 
 <NxCommands commands={['run your-project:agent-serve']} />
 
-このコマンドは[Bedrock AgentCore Python SDK](https://github.com/aws/bedrock-agentcore-sdk-python)を使用し、`uv run`でエージェントを実行します。
+このコマンドは[Bedrock AgentCore Python SDK](https://github.com/aws/bedrock-agentcore-sdk-python)を使用してエージェントを実行します。
 
 ## Bedrock AgentCore Runtimeへのデプロイ
 
 ### インフラストラクチャ即コード
 
-`computeType`で`BedrockAgentCoreRuntime`を選択した場合、関連するCDK/Terraformインフラストラクチャが生成され、[Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html)にデプロイ可能です。
+`computeType`に`BedrockAgentCoreRuntime`を選択した場合、関連するCDK/Terraformインフラが生成され、[Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html)にデプロイできます。
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -311,11 +345,11 @@ module "my_project_agent" {
 </Infrastructure>
 
 :::note
-Bedrock AgentCore Runtimeへのデプロイ時は、AWSアカウントで適切な基盤モデルが有効化されている必要があります。デフォルトのClaude 4 Sonnetは[こちらの手順](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html)で有効化できます。
+Bedrock AgentCore Runtimeへのデプロイ時は、AWSアカウントで適切な基盤モデルが有効化されている必要があります。モデルアクセスの有効化方法は[こちら](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html)を参照。
 :::
 
 :::caution
-Dockerのインストールと起動が必要です。以下のエラーが発生する場合はDockerを確認：
+[Docker](https://www.docker.com/)がビルド/デプロイに必要です。以下のエラーを防ぐためDockerのインストールと起動を確認：
 
 ```
 ERROR: Cannot connect to the Docker daemon at unix://path/to/docker.sock.
@@ -324,15 +358,15 @@ ERROR: Cannot connect to the Docker daemon at unix://path/to/docker.sock.
 
 ### バンドルとDockerターゲット
 
-Bedrock AgentCore Runtime向けビルド用に`bundle`ターゲットが追加されます：
+Bedrock AgentCore Runtime用ビルドのために`bundle`ターゲットが追加され：
 - `uv export`で依存関係を`requirements.txt`にエクスポート
-- `uv pip install`でターゲットプラットフォーム向け依存関係をインストール
+- `uv pip install`でターゲットプラットフォーム用依存関係をインストール
 
-エージェント固有の`docker`ターゲットも追加：
-- [AgentCore runtime契約](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-service-contract.html)に準拠したDockerイメージをビルド
+エージェント固有の`docker`ターゲットも追加され：
+- [AgentCoreランタイム契約](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-service-contract.html)に準拠したDockerイメージをビルド
 
 :::tip
-Dockerイメージタグ（例：`my-scope-my-project-agent:latest`）はCDK/Terraformインフラストラクチャで参照され、Dockerfileをプロジェクトと同居可能にします。
+Dockerイメージはタグ（例：`my-scope-my-project-agent:latest`）でビルドされ、CDK/Terraformインフラから参照されます。
 :::
 
 ### 認証
@@ -362,15 +396,13 @@ module "my_project_agent" {
   source = "../../common/terraform/src/app/agents/my-project-agent"
 }
 
-# 呼び出しポリシー例
+/* 呼び出しポリシー例：
 {
   Effect = "Allow"
   Action = ["bedrock-agentcore:InvokeAgentRuntime"]
-  Resource = [
-    module.my_project_agent.agent_core_runtime_arn,
-    "${module.my_project_agent.agent_core_runtime_arn}/*"
-  ]
+  Resource = [module.my_project_agent.agent_core_runtime_arn, ...]
 }
+*/
 ```
 </Fragment>
 </Infrastructure>
@@ -422,7 +454,7 @@ module "agent_core_runtime" {
     discoveryUrl = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration",
     allowedClients = local.user_pool_client_ids
   }
-  # ...その他の設定
+  # ...その他設定
 }
 ```
 </Fragment>
