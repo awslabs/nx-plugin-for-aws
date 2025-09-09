@@ -10,4 +10,5 @@ export interface TsReactWebsiteGeneratorSchema {
   skipInstall?: boolean;
   enableTanstackRouter?: boolean;
   enableTailwind?: boolean;
+  iacProvider: 'CDK' | 'Terraform';
 }

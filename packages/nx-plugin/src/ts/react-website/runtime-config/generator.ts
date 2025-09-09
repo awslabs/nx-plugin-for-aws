@@ -58,8 +58,6 @@ export async function runtimeConfigGenerator(
     return;
   }
 
-  await sharedConstructsGenerator(tree);
-
   const npmScopePrefix = getNpmScopePrefix(tree);
   generateFiles(
     tree,

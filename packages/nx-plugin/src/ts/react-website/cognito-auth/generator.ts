@@ -11,10 +11,6 @@ import {
   OverwriteStrategy,
 } from '@nx/devkit';
 import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
-import {
-  PACKAGES_DIR,
-  SHARED_CONSTRUCTS_DIR,
-} from '../../../utils/shared-constructs-constants';
 import { TsReactWebsiteAuthGeneratorSchema as TsReactWebsiteAuthGeneratorSchema } from './schema';
 import { runtimeConfigGenerator } from '../runtime-config/generator';
 import {
@@ -29,7 +25,6 @@ import {
 } from 'typescript';
 import { withVersions } from '../../../utils/versions';
 import {
-  addStarExport,
   createJsxElement,
   createJsxElementFromIdentifier,
   addDestructuredImport,
@@ -44,6 +39,7 @@ import {
 } from '../../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { addHookResultToRouterProviderContext } from '../../../utils/ast/website';
+import { addIdentityInfra } from '../../../utils/identity-constructs/identity-constructs';
 
 export const COGNITO_AUTH_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -72,15 +68,16 @@ export async function tsReactWebsiteAuthGenerator(
     project: options.project,
   });
 
-  await sharedConstructsGenerator(tree);
+  await sharedConstructsGenerator(tree, {
+    iacProvider: options.iacProvider,
+  });
 
-  const identityPath = joinPathFragments(
-    PACKAGES_DIR,
-    SHARED_CONSTRUCTS_DIR,
-    'src',
-    'core',
-    'user-identity.ts',
-  );
+  addIdentityInfra(tree, {
+    iacProvider: options.iacProvider,
+    allowSignup: options.allowSignup,
+    cognitoDomain: options.cognitoDomain,
+  });
+
   generateFiles(
     tree,
     joinPathFragments(__dirname, 'files', 'app'),
@@ -90,36 +87,13 @@ export async function tsReactWebsiteAuthGenerator(
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
   );
-  if (!tree.exists(identityPath)) {
-    generateFiles(
-      tree,
-      joinPathFragments(__dirname, 'files', SHARED_CONSTRUCTS_DIR),
-      joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR),
-      {
-        allowSignup: options.allowSignup,
-        cognitoDomain: options.cognitoDomain,
-      },
-      {
-        overwriteStrategy: OverwriteStrategy.KeepExisting,
-      },
-    );
-    addDependenciesToPackageJson(
-      tree,
-      withVersions(['oidc-client-ts', 'react-oidc-context']),
-      {},
-    );
-    addStarExport(
-      tree,
-      joinPathFragments(
-        PACKAGES_DIR,
-        SHARED_CONSTRUCTS_DIR,
-        'src',
-        'core',
-        'index.ts',
-      ),
-      './user-identity.js',
-    );
-  }
+
+  addDependenciesToPackageJson(
+    tree,
+    withVersions(['oidc-client-ts', 'react-oidc-context']),
+    {},
+  );
+
   const mainTsxPath = joinPathFragments(srcRoot, 'main.tsx');
 
   addSingleImport(tree, mainTsxPath, 'CognitoAuth', './components/CognitoAuth');

@@ -6,4 +6,5 @@ export interface TsReactWebsiteAuthGeneratorSchema {
   project: string;
   allowSignup: boolean;
   cognitoDomain: string;
+  iacProvider: 'CDK' | 'Terraform';
 }

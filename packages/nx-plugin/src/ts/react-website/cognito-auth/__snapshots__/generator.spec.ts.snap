@@ -432,6 +432,7 @@ export default AppLayout;
 exports[`cognito-auth generator > should update main.tsx when RuntimeConfigProvider exists > main-tsx-with-runtime-config 1`] = `
 "import CognitoAuth from './components/CognitoAuth';
 import RuntimeConfigProvider from './components/RuntimeConfig';
+
 import { RuntimeConfigProvider } from './components/RuntimeConfig';
 import { RouterProvider, createRouter } from '@tanstack/react-router';
 
@@ -456,4 +457,262 @@ exports[`cognito-auth generator > should update shared constructs index.ts > com
 export * from './app.js';
 export * from './runtime-config.js';
 "
+`;
+
+exports[`cognito-auth generator > terraform iacProvider > should generate terraform files for cognito auth and snapshot them > terraform-cognito-auth-files 1`] = `
+{
+  "add-callback-url.tf": "terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 6.0"
+    }
+  }
+}
+
+# Variables
+variable "callback_url" {
+  description = "Callback URL to add (e.g., https://d123456789.cloudfront.net)"
+  type        = string
+}
+
+# Read runtime config to get user pool client details
+module "runtime_config_reader" {
+  source = "../../runtime-config/read"
+}
+
+# Extract cognito details from runtime config
+locals {
+  cognito_props = try(module.runtime_config_reader.config.cognitoProps, null)
+
+  user_pool_id        = local.cognito_props != null ? local.cognito_props.userPoolId : null
+  user_pool_client_id = local.cognito_props != null ? local.cognito_props.userPoolWebClientId : null
+}
+
+# Validation: Ensure cognito props exist in runtime config
+resource "terraform_data" "validate_cognito_props" {
+  lifecycle {
+    precondition {
+      condition     = local.cognito_props != null
+      error_message = "ERROR: cognitoProps not found in runtime config. Ensure user-identity module has been deployed first and has added cognitoProps to the runtime configuration."
+    }
+
+    precondition {
+      condition     = local.user_pool_id != null && local.user_pool_id != ""
+      error_message = "ERROR: cognitoProps.userPoolId is missing or empty in runtime config. Check that user-identity module completed successfully."
+    }
+
+    precondition {
+      condition     = local.user_pool_client_id != null && local.user_pool_client_id != ""
+      error_message = "ERROR: cognitoProps.userPoolWebClientId is missing or empty in runtime config. Check that user-identity module completed successfully."
+    }
+  }
+}
+
+
+# Update the user pool client with additional callback URL
+resource "null_resource" "add_callback_url" {
+  triggers = {
+    callback_url        = var.callback_url
+    user_pool_id        = local.user_pool_id
+    user_pool_client_id = local.user_pool_client_id
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      uv run --with boto3 python -c "
+import boto3
+import sys
+
+# Configuration
+user_pool_id = '\${local.user_pool_id}'
+client_id = '\${local.user_pool_client_id}'
+new_callback_url = '\${var.callback_url}'
+
+# Initialize Cognito client
+cognito = boto3.client('cognito-idp')
+
+try:
+    # Get current user pool client configuration
+    response = cognito.describe_user_pool_client(
+        UserPoolId=user_pool_id,
+        ClientId=client_id
+    )
+
+    client_config = response['UserPoolClient']
+    current_callback_urls = client_config.get('CallbackURLs', [])
+    current_logout_urls = client_config.get('LogoutURLs', [])
+
+    # Check if URL already exists
+    if new_callback_url in current_callback_urls:
+        print(f'Callback URL {new_callback_url} already exists')
+    else:
+        # Add new URL to both callback and logout URLs
+        updated_callback_urls = current_callback_urls + [new_callback_url]
+        updated_logout_urls = current_logout_urls + [new_callback_url]
+
+        # Update the user pool client
+        # Only include valid update parameters (exclude read-only fields and ones we're setting)
+        valid_update_params = [
+            'ClientName', 'RefreshTokenValidity', 'AccessTokenValidity', 'IdTokenValidity',
+            'TokenValidityUnits', 'ReadAttributes', 'WriteAttributes', 'ExplicitAuthFlows',
+            'SupportedIdentityProviders', 'DefaultRedirectURI', 'AllowedOAuthFlows',
+            'AllowedOAuthScopes', 'AllowedOAuthFlowsUserPoolClient', 'AnalyticsConfiguration',
+            'PreventUserExistenceErrors', 'EnableTokenRevocation',
+            'EnablePropagateAdditionalUserContextData', 'AuthSessionValidity', 'RefreshTokenRotation'
+        ]
+
+        update_config = {k: v for k, v in client_config.items() if k in valid_update_params}
+
+        cognito.update_user_pool_client(
+            UserPoolId=user_pool_id,
+            ClientId=client_id,
+            CallbackURLs=updated_callback_urls,
+            LogoutURLs=updated_logout_urls,
+            **update_config
+        )
+
+        print(f'Successfully added callback URL: {new_callback_url}')
+
+except Exception as e:
+    print(f'Error updating callback URLs: {e}')
+    sys.exit(1)
+"
+    EOT
+  }
+
+  depends_on = [terraform_data.validate_cognito_props]
+}
+
+",
+  "user-identity.tf": "module "identity" {
+  source = "./identity"
+
+  user_pool_domain_prefix = "test"
+  allow_signup = true
+}
+
+# Outputs
+output "region" {
+  description = "AWS region"
+  value       = module.identity.region
+}
+
+output "user_pool_id" {
+  description = "ID of the Cognito User Pool"
+  value       = module.identity.user_pool_id
+}
+
+output "user_pool_arn" {
+  description = "ARN of the Cognito User Pool"
+  value       = module.identity.user_pool_arn
+}
+
+output "user_pool_client_id" {
+  description = "ID of the Cognito User Pool Client"
+  value       = module.identity.user_pool_client_id
+}
+
+output "identity_pool_id" {
+  description = "ID of the Cognito Identity Pool"
+  value       = module.identity.identity_pool_id
+}
+
+output "authenticated_role_name" {
+  description = "Name of the authenticated IAM role"
+  value       = module.identity.authenticated_role_name
+}
+
+output "authenticated_role_arn" {
+  description = "ARN of the authenticated IAM role"
+  value       = module.identity.authenticated_role_arn
+}
+
+output "user_pool_domain" {
+  description = "Domain of the Cognito User Pool"
+  value       = module.identity.user_pool_domain
+}
+",
+}
+`;
+
+exports[`cognito-auth generator > terraform iacProvider > should place add-callback-url module directly after cloudfront distribution resource > complex-static-website-with-callback-url 1`] = `
+"
+# Some initial resources
+resource "aws_s3_bucket" "website" {
+  bucket = "test-bucket"
+}
+
+resource "aws_cloudfront_distribution" "website" {
+  origin {
+    domain_name = aws_s3_bucket.website.bucket_regional_domain_name
+    origin_id   = "S3-\${aws_s3_bucket.website.id}"
+  }
+
+  enabled             = true
+  is_ipv6_enabled     = true
+  default_root_object = "index.html"
+
+  default_cache_behavior {
+    allowed_methods        = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+    cached_methods         = ["GET", "HEAD"]
+    target_origin_id       = "S3-\${aws_s3_bucket.website.id}"
+    compress               = true
+    viewer_protocol_policy = "redirect-to-https"
+  }
+
+  restrictions {
+    geo_restriction {
+      restriction_type = "none"
+    }
+  }
+
+  viewer_certificate {
+    cloudfront_default_certificate = true
+  }
+}
+
+# Add CloudFront domain to user pool client callback URLs
+module "add_callback_url" {
+  source = "../user-identity/add-callback-url"
+
+  callback_url = "https://\${aws_cloudfront_distribution.website.domain_name}"
+
+  depends_on = [aws_cloudfront_distribution.website]
+}
+
+# S3 Bucket Policy for CloudFront OAC
+resource "aws_s3_bucket_policy" "website_cloudfront_policy" {
+  bucket = aws_s3_bucket.website.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "cloudfront.amazonaws.com"
+        }
+        Action   = "s3:GetObject"
+        Resource = "\${aws_s3_bucket.website.arn}/*"
+      }
+    ]
+  })
+}
+
+# Some outputs
+output "website_bucket_name" {
+  value = aws_s3_bucket.website.bucket
+}
+        "
+`;
+
+exports[`cognito-auth generator > terraform iacProvider > should update static-website.tf with add-callback-url module > static-website-with-callback-url 1`] = `
+"
+module "static_website" {
+  source = "../../../core/static-website"
+
+  website_name = "test-project"
+  build_path   = "dist/packages/test-project"
+}
+        "
 `;

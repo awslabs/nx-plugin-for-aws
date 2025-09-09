@@ -16,11 +16,13 @@ describe('react-website generator', () => {
 
   const options: TsReactWebsiteGeneratorSchema = {
     name: 'test-app',
+    iacProvider: 'CDK',
   };
 
   const optionsWithoutTailwind: TsReactWebsiteGeneratorSchema = {
     name: 'test-app',
     enableTailwind: false,
+    iacProvider: 'CDK',
   };
 
   beforeEach(() => {
@@ -288,6 +290,333 @@ describe('react-website generator', () => {
       expect(packageJson.devDependencies).toHaveProperty('@tailwindcss/vite');
       expect(viteConfig).toContain('tailwindcss()');
       expect(stylesContent).toContain("@import 'tailwindcss'");
+    });
+
+    describe('terraform iacProvider', () => {
+      it('should generate terraform files for static website and snapshot them', async () => {
+        await tsReactWebsiteGenerator(tree, {
+          ...options,
+          iacProvider: 'Terraform',
+        });
+
+        // Find all terraform files
+        const allFiles = tree.listChanges().map((f) => f.path);
+        const terraformFiles = allFiles.filter(
+          (f) => f.includes('terraform') && f.endsWith('.tf'),
+        );
+
+        // Verify terraform files are created
+        expect(terraformFiles.length).toBeGreaterThan(0);
+
+        // Find the specific terraform files
+        const coreStaticWebsiteFile = terraformFiles.find((f) =>
+          f.includes('static-website'),
+        );
+        const appWebsiteFile = terraformFiles.find((f) =>
+          f.includes('test-app'),
+        );
+
+        expect(coreStaticWebsiteFile).toBeDefined();
+        expect(appWebsiteFile).toBeDefined();
+
+        // Read terraform file contents
+        const coreStaticWebsiteContent = tree.read(
+          coreStaticWebsiteFile!,
+          'utf-8',
+        );
+        const appWebsiteContent = tree.read(appWebsiteFile!, 'utf-8');
+
+        // Verify static website configuration
+        expect(appWebsiteContent).toContain('module "static_website"');
+        expect(appWebsiteContent).toContain(
+          'source = "../../../core/static-website"',
+        );
+        expect(appWebsiteContent).toContain('website_name      = "test-app"');
+
+        // Snapshot terraform files
+        const terraformFileContents = {
+          'static-website.tf': coreStaticWebsiteContent,
+          'test-app.tf': appWebsiteContent,
+        };
+
+        expect(terraformFileContents).toMatchSnapshot(
+          'terraform-static-website-files',
+        );
+      });
+
+      it('should configure project targets and dependencies correctly for terraform', async () => {
+        await tsReactWebsiteGenerator(tree, {
+          ...options,
+          iacProvider: 'Terraform',
+        });
+
+        // Check that shared terraform project has build dependency on the website project
+        const sharedTerraformConfig = JSON.parse(
+          tree.read('packages/common/terraform/project.json', 'utf-8'),
+        );
+
+        // The dependency should include the project name (may be fully qualified)
+        const buildDependencies = sharedTerraformConfig.targets.build.dependsOn;
+        expect(
+          buildDependencies.some(
+            (dep: string) => dep.includes('test-app') && dep.includes('build'),
+          ),
+        ).toBeTruthy();
+
+        // Verify project configuration has correct targets
+        const projectConfig = JSON.parse(
+          tree.read('test-app/project.json', 'utf-8'),
+        );
+
+        // Should still have basic website targets
+        expect(projectConfig.targets.build).toBeDefined();
+        expect(projectConfig.targets['serve-local']).toBeDefined();
+      });
+
+      it('should not create CDK constructs when using terraform', async () => {
+        await tsReactWebsiteGenerator(tree, {
+          ...options,
+          iacProvider: 'Terraform',
+        });
+
+        // Verify CDK files are NOT created
+        expect(
+          tree.exists(
+            'packages/common/constructs/src/app/static-websites/test-app.ts',
+          ),
+        ).toBeFalsy();
+        expect(
+          tree.exists('packages/common/constructs/src/core/static-website.ts'),
+        ).toBeFalsy();
+      });
+
+      it('should throw error for invalid iacProvider', async () => {
+        await expect(
+          tsReactWebsiteGenerator(tree, {
+            ...options,
+            iacProvider: 'InvalidProvider' as any,
+          }),
+        ).rejects.toThrow(
+          'Unknown iacProvider: InvalidProvider. Supported providers are: CDK, Terraform',
+        );
+      });
+
+      it('should handle terraform with different directory structures', async () => {
+        await tsReactWebsiteGenerator(tree, {
+          ...options,
+          name: 'nested-website',
+          directory: 'apps/nested/path',
+          iacProvider: 'Terraform',
+        });
+
+        // Verify terraform files are created
+        const allFiles = tree.listChanges().map((f) => f.path);
+        const terraformFiles = allFiles.filter(
+          (f) => f.includes('terraform') && f.endsWith('.tf'),
+        );
+
+        expect(terraformFiles.length).toBeGreaterThan(0);
+
+        // Find the app-specific terraform file
+        const appWebsiteFile = terraformFiles.find((f) =>
+          f.includes('nested-website'),
+        );
+        expect(appWebsiteFile).toBeDefined();
+
+        const terraformContent = tree.read(appWebsiteFile!, 'utf-8');
+
+        // Verify the correct build path is used for nested directories
+        expect(terraformContent).toContain(
+          'dist/apps/nested/path/nested-website',
+        );
+        expect(terraformContent).toContain(
+          'website_name      = "nested-website"',
+        );
+      });
+
+      it('should generate terraform files with custom directory option', async () => {
+        await tsReactWebsiteGenerator(tree, {
+          ...options,
+          directory: 'custom-dir',
+          iacProvider: 'Terraform',
+        });
+
+        // Find all terraform files
+        const allFiles = tree.listChanges().map((f) => f.path);
+        const terraformFiles = allFiles.filter(
+          (f) => f.includes('terraform') && f.endsWith('.tf'),
+        );
+
+        // Verify terraform files are created
+        expect(terraformFiles.length).toBeGreaterThan(0);
+
+        // Find the app-specific terraform file
+        const appWebsiteFile = terraformFiles.find((f) =>
+          f.includes('test-app'),
+        );
+        expect(appWebsiteFile).toBeDefined();
+
+        const terraformContent = tree.read(appWebsiteFile!, 'utf-8');
+
+        // Verify the correct build path is used for custom directory
+        expect(terraformContent).toContain('dist/custom-dir/test-app');
+      });
+
+      it('should handle enableTailwind option correctly in terraform', async () => {
+        await tsReactWebsiteGenerator(tree, {
+          ...options,
+          enableTailwind: false,
+          iacProvider: 'Terraform',
+        });
+
+        // Find the app-specific terraform file
+        const allFiles = tree.listChanges().map((f) => f.path);
+        const terraformFiles = allFiles.filter(
+          (f) => f.includes('terraform') && f.endsWith('.tf'),
+        );
+        const appWebsiteFile = terraformFiles.find((f) =>
+          f.includes('test-app'),
+        );
+        expect(appWebsiteFile).toBeDefined();
+
+        const terraformContent = tree.read(appWebsiteFile!, 'utf-8');
+
+        // Basic terraform configuration should still be present
+        expect(terraformContent).toContain('module "static_website"');
+        expect(terraformContent).toContain('website_name      = "test-app"');
+      });
+
+      it('should handle enableTanstackRouter option correctly in terraform', async () => {
+        await tsReactWebsiteGenerator(tree, {
+          ...options,
+          enableTanstackRouter: false,
+          iacProvider: 'Terraform',
+        });
+
+        // Find the app-specific terraform file
+        const allFiles = tree.listChanges().map((f) => f.path);
+        const terraformFiles = allFiles.filter(
+          (f) => f.includes('terraform') && f.endsWith('.tf'),
+        );
+        const appWebsiteFile = terraformFiles.find((f) =>
+          f.includes('test-app'),
+        );
+        expect(appWebsiteFile).toBeDefined();
+
+        const terraformContent = tree.read(appWebsiteFile!, 'utf-8');
+
+        // Basic terraform configuration should still be present
+        expect(terraformContent).toContain('module "static_website"');
+        expect(terraformContent).toContain('website_name      = "test-app"');
+      });
+    });
+  });
+
+  describe('load:runtime-config target', () => {
+    it('should configure load:runtime-config target for CDK provider', async () => {
+      await tsReactWebsiteGenerator(tree, {
+        ...options,
+        iacProvider: 'CDK',
+      });
+
+      const projectConfig = readJson(tree, 'test-app/project.json');
+      const loadRuntimeConfigTarget =
+        projectConfig.targets['load:runtime-config'];
+
+      expect(loadRuntimeConfigTarget).toBeDefined();
+      expect(loadRuntimeConfigTarget.executor).toBe('nx:run-commands');
+      expect(loadRuntimeConfigTarget.metadata.description).toContain(
+        'Load runtime config from your deployed stack for dev purposes',
+      );
+      expect(loadRuntimeConfigTarget.options.command).toContain('aws s3 cp');
+      expect(loadRuntimeConfigTarget.options.command).toContain(
+        'aws cloudformation describe-stacks',
+      );
+      expect(loadRuntimeConfigTarget.options.command).toContain(
+        'TestAppWebsiteBucketName',
+      );
+    });
+
+    it('should configure load:runtime-config target for Terraform provider', async () => {
+      await tsReactWebsiteGenerator(tree, {
+        ...options,
+        iacProvider: 'Terraform',
+      });
+
+      const projectConfig = readJson(tree, 'test-app/project.json');
+      const loadRuntimeConfigTarget =
+        projectConfig.targets['load:runtime-config'];
+
+      expect(loadRuntimeConfigTarget).toBeDefined();
+      expect(loadRuntimeConfigTarget.executor).toBe('nx:run-commands');
+      expect(loadRuntimeConfigTarget.options.command).toContain('node -e');
+      expect(loadRuntimeConfigTarget.options.command).toContain(
+        'fs.copyFileSync',
+      );
+      expect(loadRuntimeConfigTarget.options.env).toEqual({
+        SRC_FILE: 'dist/packages/common/terraform/runtime-config.json',
+        DEST_DIR: '{projectRoot}/public',
+        DEST_FILE: '{projectRoot}/public/runtime-config.json',
+      });
+    });
+
+    it('should throw error for unknown iacProvider', async () => {
+      await expect(
+        tsReactWebsiteGenerator(tree, {
+          ...options,
+          iacProvider: 'UnknownProvider' as any,
+        }),
+      ).rejects.toThrow(
+        'Unknown iacProvider: UnknownProvider. Supported providers are: CDK, Terraform',
+      );
+    });
+
+    it('should configure load:runtime-config target with custom directory for Terraform', async () => {
+      await tsReactWebsiteGenerator(tree, {
+        ...options,
+        directory: 'custom-dir',
+        iacProvider: 'Terraform',
+      });
+
+      const projectConfig = readJson(tree, 'custom-dir/test-app/project.json');
+      const loadRuntimeConfigTarget =
+        projectConfig.targets['load:runtime-config'];
+
+      expect(loadRuntimeConfigTarget).toBeDefined();
+      expect(loadRuntimeConfigTarget.options.env.SRC_FILE).toBe(
+        'dist/packages/common/terraform/runtime-config.json',
+      );
+      expect(loadRuntimeConfigTarget.options.env.DEST_DIR).toBe(
+        '{projectRoot}/public',
+      );
+      expect(loadRuntimeConfigTarget.options.env.DEST_FILE).toBe(
+        '{projectRoot}/public/runtime-config.json',
+      );
+    });
+
+    it('should configure load:runtime-config target with scoped npm prefix for CDK', async () => {
+      // Set up package.json with a scope
+      tree.write(
+        'package.json',
+        JSON.stringify({
+          name: '@test-scope/root',
+          version: '0.0.0',
+        }),
+      );
+
+      await tsReactWebsiteGenerator(tree, {
+        ...options,
+        iacProvider: 'CDK',
+      });
+
+      const projectConfig = readJson(tree, 'test-app/project.json');
+      const loadRuntimeConfigTarget =
+        projectConfig.targets['load:runtime-config'];
+
+      expect(loadRuntimeConfigTarget.options.command).toContain('test-scope-');
+      expect(loadRuntimeConfigTarget.options.command).toContain(
+        'TestAppWebsiteBucketName',
+      );
     });
   });
 });

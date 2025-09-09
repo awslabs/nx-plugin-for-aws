@@ -48,7 +48,10 @@ export async function tsInfraGenerator(
 
   addGeneratorMetadata(tree, lib.fullyQualifiedName, INFRA_APP_GENERATOR_INFO);
 
-  await sharedConstructsGenerator(tree);
+  // Shared constructs always in CDK for typescript infra generator
+  await sharedConstructsGenerator(tree, {
+    iacProvider: 'CDK',
+  });
 
   const synthDirFromRoot = `/dist/${lib.dir}/cdk.out`;
   const synthDirFromProject =
