@@ -1,6 +1,6 @@
 ---
-title: "クラウドスケープ ウェブサイト認証"
-description: "クラウドスケープ ウェブサイト認証のリファレンスドキュメント"
+title: "Reactウェブサイト認証"
+description: "Reactウェブサイト認証のリファレンスドキュメント"
 ---
 
 
@@ -10,16 +10,18 @@ import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
 
-CloudScape Website Authentication ジェネレータは、[Amazon Cognito](https://aws.amazon.com/cognito/) を使用して CloudScape ウェブサイトに認証機能を追加します。
+React Website Authentication ジェネレータは [Amazon Cognito](https://aws.amazon.com/cognito/) を使用して React ウェブサイトに認証機能を追加します。
 
-このジェネレータは、Cognito ユーザープールと関連する Identity Pool、ユーザーログインフローを処理するホステッド UI、および CloudScape ウェブサイトとの統合を作成するための CDK インフラストラクチャを設定します。
+このジェネレータは、Cognito ユーザープールと関連する Identity Pool、ユーザーログインフローを処理するホスト型 UI、および React ウェブサイトとの統合を設定する CDK または Terraform インフラストラクチャを構成します。
 
 ## 使用方法
 
-### CloudScape ウェブサイトに認証を追加する
+### React ウェブサイトに認証を追加する
 
-以下の2つの方法で CloudScape ウェブサイトに認証を追加できます:
+React ウェブサイトに認証を追加する方法は2通りあります:
 
 <RunGenerator generator="ts#react-website#auth" />
 
@@ -35,21 +37,43 @@ React ウェブサイトに以下の変更が加えられます:
   - src
     - components
       - CognitoAuth
-        - index.tsx メイン認証コンポーネント
-    - main.tsx CognitoAuth コンポーネントを組み込むよう更新
+        - index.tsx メインの認証コンポーネント
+    - main.tsx CognitoAuth コンポーネントを組み込むように更新
 </FileTree>
 
-また、`packages/common/constructs` に以下のインフラストラクチャコードが生成されます:
+### インフラストラクチャ
 
+<Snippet name="shared-constructs" />
+
+選択した `iacProvider` に基づいて以下のインフラストラクチャコードが生成されます:
+
+<Infrastructure>
+<Fragment slot="cdk">
 <FileTree>
-  - src
+  - packages/common/constructs/src
     - core
       - user-identity.ts ユーザープールと Identity Pool を定義するコンストラクト
 </FileTree>
+</Fragment>
+<Fragment slot="terraform">
+<FileTree>
+  - packages/common/terraform/src
+    - core
+      - user-identity
+        - main.tf アイデンティティ設定のモジュールラッパー
+        - identity
+          - identity.tf Cognito ユーザープールと Identity Pool を含むコアアイデンティティインフラ
+        - add-callback-url
+          - add-callback-url.tf 既存ユーザープールクライアントにコールバックURLを追加するモジュール
+</FileTree>
+</Fragment>
+</Infrastructure>
 
 ## インフラストラクチャの使用方法
 
-`UserIdentity` コンストラクトをスタックに追加する必要があります。ウェブサイトコンストラクトの**前に**宣言してください:
+<Infrastructure>
+<Fragment slot="cdk">
+ユーザーアイデンティティインフラをウェブサイトの**前に**宣言してスタックに追加する必要があります:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts" {3,9}
 import { Stack } from 'aws-cdk-lib';
@@ -67,12 +91,40 @@ export class ApplicationStack extends Stack {
 }
 ```
 
-`UserIdentity` コンストラクトは、ウェブサイトが認証用に正しい Cognito ユーザープールを指すようにするための <Link path="guides/react-website#runtime-configuration">ランタイム設定</Link> を自動的に追加します。
+`UserIdentity` コンストラクトは、ウェブサイトが正しい Cognito ユーザープールを指すようにするための<Link path="guides/react-website#runtime-configuration">ランタイム設定</Link>を自動的に追加します。
+</Fragment>
+<Fragment slot="terraform">
+ユーザーアイデンティティモジュールを追加し、ウェブサイトがそれに依存するように設定します:
 
-### 認証済みユーザーへのアクセス権付与
+```hcl title="packages/infra/src/main.tf" {2-4,14-15}
+# ランタイム設定に追加するため最初にユーザーアイデンティティをデプロイ
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
+}
 
-API の呼び出し権限など、認証済みユーザーに特定のアクションを許可するには、Identity Pool の認証済みロールに IAM ポリシーステートメントを追加できます:
+# ランタイム設定を含めるためアイデンティティの後にウェブサイトをデプロイ
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
 
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+
+  # ランタイム設定に追加するためアイデンティティの先行デプロイを保証
+  depends_on = [module.user_identity]
+}
+```
+
+ユーザーアイデンティティモジュールは、ウェブサイトが正しい Cognito ユーザープールを指すようにするための<Link path="guides/react-website#runtime-configuration">ランタイム設定</Link>を自動的に追加します。
+</Fragment>
+</Infrastructure>
+
+### 認証ユーザーへのアクセス権付与
+
+APIの呼び出し権限を付与するなど、認証ユーザーに特定のアクションを許可するには、Identity Pool の認証済みロールに IAM ポリシーステートメントを追加します:
+
+<Infrastructure>
+<Fragment slot="cdk">
 ```ts title="packages/infra/src/stacks/application-stack.ts" {12}
 import { Stack } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
@@ -91,3 +143,35 @@ export class ApplicationStack extends Stack {
   }
 }
 ```
+</Fragment>
+<Fragment slot="terraform">
+```hcl title="packages/infra/src/main.tf" {12,22}
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
+}
+
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+}
+
+# 認証ユーザーがFast APIを呼び出す権限を追加
+resource "aws_iam_role_policy" "authenticated_fast_api_invoke" {
+  name = "authenticated-user-invoke-my-api"
+  role = module.user_identity.authenticated_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "execute-api:Invoke"
+        ]
+        Resource = "${module.my_api.api_execution_arn}/*"
+      }
+    ]
+  })
+}
+```
+</Fragment>
+</Infrastructure>

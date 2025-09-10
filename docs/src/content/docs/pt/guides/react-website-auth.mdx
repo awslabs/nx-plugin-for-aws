@@ -1,6 +1,6 @@
 ---
-title: "Autenticação de Website CloudScape"
-description: "Documentação de referência para Autenticação de Website CloudScape"
+title: "Autenticação de Website em React"
+description: "Documentação de referência para Autenticação de Website em React"
 ---
 
 
@@ -10,16 +10,18 @@ import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
 
-O gerador de Autenticação para Website CloudScape adiciona autenticação ao seu site CloudScape utilizando [Amazon Cognito](https://aws.amazon.com/cognito/).
+O gerador de Autenticação para Website React adiciona autenticação ao seu site React usando [Amazon Cognito](https://aws.amazon.com/cognito/).
 
-Este gerador configura a infraestrutura CDK para criar um User Pool do Cognito e um Identity Pool associado, além de uma interface hospedada para gerenciar fluxos de login de usuários e sua integração com seu site CloudScape.
+Este gerador configura a infraestrutura CDK ou Terraform para criar um User Pool do Cognito e um Identity Pool associado, além de uma interface hospedada para gerenciar fluxos de login de usuários e sua integração com seu website React.
 
 ## Utilização
 
-### Adicionar Autenticação ao seu Site CloudScape
+### Adicionar autenticação ao seu website React
 
-Você pode adicionar autenticação ao seu site CloudScape de duas formas:
+Você pode adicionar autenticação ao seu website React de duas formas:
 
 <RunGenerator generator="ts#react-website#auth" />
 
@@ -29,7 +31,7 @@ Você pode adicionar autenticação ao seu site CloudScape de duas formas:
 
 ## Saída do Gerador
 
-Você encontrará as seguintes alterações no seu site React:
+Você encontrará as seguintes alterações no seu website React:
 
 <FileTree>
   - src
@@ -39,17 +41,39 @@ Você encontrará as seguintes alterações no seu site React:
     - main.tsx Atualizado para instrumentar o componente CognitoAuth
 </FileTree>
 
-Você também encontrará o seguinte código de infraestrutura gerado em `packages/common/constructs`:
+### Infraestrutura
 
+<Snippet name="shared-constructs" />
+
+Você também encontrará o seguinte código de infraestrutura gerado com base no `iacProvider` selecionado:
+
+<Infrastructure>
+<Fragment slot="cdk">
 <FileTree>
-  - src
+  - packages/common/constructs/src
     - core
       - user-identity.ts Construct que define o user pool e identity pool
 </FileTree>
+</Fragment>
+<Fragment slot="terraform">
+<FileTree>
+  - packages/common/terraform/src
+    - core
+      - user-identity
+        - main.tf Módulo wrapper para configuração de identidade
+        - identity
+          - identity.tf Infraestrutura principal de identidade incluindo Cognito User Pool e Identity Pool
+        - add-callback-url
+          - add-callback-url.tf Módulo para adicionar URLs de callback a clientes existentes do user pool
+</FileTree>
+</Fragment>
+</Infrastructure>
 
 ## Uso da Infraestrutura
 
-Você precisará adicionar o construct `UserIdentity` à sua stack, declarando-o _antes_ do construct do website:
+<Infrastructure>
+<Fragment slot="cdk">
+Você precisará adicionar a infraestrutura de identidade do usuário à sua stack, declarando-a _antes_ do website:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts" {3,9}
 import { Stack } from 'aws-cdk-lib';
@@ -67,12 +91,40 @@ export class ApplicationStack extends Stack {
 }
 ```
 
-O construct `UserIdentity` adiciona automaticamente a <Link path="guides/react-website#runtime-configuration">Configuração de Runtime</Link> necessária para garantir que seu site possa apontar para o User Pool do Cognito correto para autenticação.
+O construct `UserIdentity` adiciona automaticamente a <Link path="guides/react-website#runtime-configuration">Configuração de Runtime</Link> necessária para garantir que seu website possa apontar para o Cognito User Pool correto para autenticação.
+</Fragment>
+<Fragment slot="terraform">
+Você precisará adicionar o módulo de identidade do usuário e garantir que seu website dependa dele:
+
+```hcl title="packages/infra/src/main.tf" {2-4,14-15}
+# Implanta identidade primeiro para adicionar à configuração de runtime
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
+}
+
+# Implanta website após identidade para incluir configuração de runtime
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+
+  # Garante que identidade seja implantada primeiro
+  depends_on = [module.user_identity]
+}
+```
+
+O módulo de identidade do usuário adiciona automaticamente a <Link path="guides/react-website#runtime-configuration">Configuração de Runtime</Link> necessária para garantir que seu website possa apontar para o Cognito User Pool correto para autenticação.
+</Fragment>
+</Infrastructure>
 
 ### Concedendo Acesso a Usuários Autenticados
 
 Para conceder acesso a usuários autenticados para realizar determinadas ações, como conceder permissões para invocar uma API, você pode adicionar políticas IAM à função autenticada do identity pool:
 
+<Infrastructure>
+<Fragment slot="cdk">
 ```ts title="packages/infra/src/stacks/application-stack.ts" {12}
 import { Stack } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
@@ -91,3 +143,35 @@ export class ApplicationStack extends Stack {
   }
 }
 ```
+</Fragment>
+<Fragment slot="terraform">
+```hcl title="packages/infra/src/main.tf" {12,22}
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
+}
+
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+}
+
+# Adiciona permissões para usuários autenticados invocarem Fast API
+resource "aws_iam_role_policy" "authenticated_fast_api_invoke" {
+  name = "authenticated-user-invoke-my-api"
+  role = module.user_identity.authenticated_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "execute-api:Invoke"
+        ]
+        Resource = "${module.my_api.api_execution_arn}/*"
+      }
+    ]
+  })
+}
+```
+</Fragment>
+</Infrastructure>
