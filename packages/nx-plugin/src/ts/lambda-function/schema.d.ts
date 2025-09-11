@@ -52,4 +52,5 @@ export interface TsLambdaFunctionGeneratorSchema {
   readonly functionName: string;
   readonly functionPath?: string;
   readonly eventSource?: EventSource;
+  readonly iacProvider: 'CDK' | 'Terraform';
 }

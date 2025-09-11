@@ -64,11 +64,10 @@ describe('smoke test - terraform', () => {
       `generate @aws/nx-plugin:py#project --name=py-project --projectType=application --no-interactive`,
       opts,
     );
-    // TODO: tf support for py lambda fn
-    // await runCLI(
-    //   `generate @aws/nx-plugin:py#lambda-function --project=e2e_test.py_project --functionName=my-function --eventSource=Any --no-interactive`,
-    //   opts,
-    // );
+    await runCLI(
+      `generate @aws/nx-plugin:py#lambda-function --project=e2e_test.py_project --functionName=my-function --eventSource=Any --iacProvider=Terraform --no-interactive`,
+      opts,
+    );
     await runCLI(
       `generate @aws/nx-plugin:py#mcp-server --project=py_project --name=my-mcp-server --computeType=BedrockAgentCoreRuntime --iacProvider=Terraform --no-interactive`,
       opts,
@@ -81,11 +80,10 @@ describe('smoke test - terraform', () => {
       `generate @aws/nx-plugin:ts#project --name=ts-project --no-interactive`,
       opts,
     );
-    // TODO: tf support for ts lambda fn
-    // await runCLI(
-    //   `generate @aws/nx-plugin:ts#lambda-function --project=ts-project --functionName=my-function --eventSource=Any --no-interactive`,
-    //   opts,
-    // );
+    await runCLI(
+      `generate @aws/nx-plugin:ts#lambda-function --project=ts-project --functionName=my-function --eventSource=Any --iacProvider=Terraform --no-interactive`,
+      opts,
+    );
     await runCLI(
       `generate @aws/nx-plugin:ts#mcp-server --project=ts-project --name=my-mcp-server --computeType=BedrockAgentCoreRuntime --iacProvider=Terraform --no-interactive`,
       opts,

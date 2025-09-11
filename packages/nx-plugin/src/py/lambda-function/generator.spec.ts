@@ -48,6 +48,7 @@ describe('lambda-handler project generator', () => {
       project: 'test-project',
       functionName: 'test-function',
       eventSource: 'Any',
+      iacProvider: 'CDK',
     });
 
     expect(
@@ -87,6 +88,7 @@ describe('lambda-handler project generator', () => {
       project: 'test-project',
       functionName: 'test-function',
       eventSource: 'Any',
+      iacProvider: 'CDK',
     });
 
     const projectConfig = JSON.parse(
@@ -156,6 +158,7 @@ describe('lambda-handler project generator', () => {
       project: 'test-project',
       functionName: 'test-function',
       eventSource: 'Any',
+      iacProvider: 'CDK',
     });
 
     // Verify shared constructs files
@@ -224,6 +227,7 @@ describe('lambda-handler project generator', () => {
       project: 'test-project',
       functionName: 'test-function',
       eventSource: 'Any',
+      iacProvider: 'CDK',
     });
 
     const sharedConstructsConfig = JSON.parse(
@@ -268,6 +272,7 @@ describe('lambda-handler project generator', () => {
       functionName: 'test-function',
       functionPath: 'nested/path',
       eventSource: 'Any',
+      iacProvider: 'CDK',
     });
 
     expect(
@@ -306,6 +311,7 @@ describe('lambda-handler project generator', () => {
       project: 'test-project',
       functionName: 'test-function',
       eventSource: 'Any',
+      iacProvider: 'CDK',
     });
 
     const lambdaFunctionPath = joinPathFragments(
@@ -352,6 +358,7 @@ describe('lambda-handler project generator', () => {
       project: 'test-project',
       functionName: 'test-function',
       eventSource: 'APIGatewayProxyEventModel',
+      iacProvider: 'CDK',
     });
 
     const lambdaFunctionContent = tree.read(
@@ -402,6 +409,7 @@ describe('lambda-handler project generator', () => {
       project: 'test-project',
       functionName: 'test-function',
       eventSource: 'Any',
+      iacProvider: 'CDK',
     });
 
     const appChanges = sortObjectKeys(
@@ -450,6 +458,7 @@ describe('lambda-handler project generator', () => {
       project: 'test_project',
       functionName: 'test-function',
       eventSource: 'Any',
+      iacProvider: 'CDK',
     });
 
     const projectConfig = JSON.parse(
@@ -491,9 +500,521 @@ describe('lambda-handler project generator', () => {
       project: 'test-project',
       functionName: 'test-function',
       eventSource: 'Any',
+      iacProvider: 'CDK',
     });
 
     // Verify the metric was added to app.ts
     expectHasMetricTags(tree, LAMBDA_FUNCTION_GENERATOR_INFO.metric);
+  });
+
+  describe('terraform iacProvider', () => {
+    it('should generate terraform files for python lambda function and snapshot them', async () => {
+      tree.write(
+        'apps/test_project/project.json',
+        JSON.stringify({
+          name: 'test-project',
+          root: 'apps/test_project',
+          sourceRoot: 'apps/test_project/test_project',
+          targets: {
+            build: {
+              dependsOn: ['lint', 'compile', 'test'],
+              options: {
+                outputPath: '{workspaceRoot}/dist/apps/test_project',
+              },
+            },
+          },
+        }),
+      );
+
+      tree.write(
+        'apps/test_project/pyproject.toml',
+        `[project]
+            dependencies = []
+        `,
+      );
+
+      await pyLambdaFunctionGenerator(tree, {
+        project: 'test-project',
+        functionName: 'test-function',
+        eventSource: 'Any',
+        iacProvider: 'Terraform',
+      });
+
+      // Find all terraform files
+      const allFiles = tree.listChanges().map((f) => f.path);
+      const terraformFiles = allFiles.filter(
+        (f) => f.includes('terraform') && f.endsWith('.tf'),
+      );
+
+      // Verify terraform files are created
+      expect(terraformFiles.length).toBeGreaterThan(0);
+
+      // Find the specific terraform file for the lambda function
+      const lambdaFunctionTerraformFile = terraformFiles.find((f) =>
+        f.includes('test-project-test-function'),
+      );
+
+      expect(lambdaFunctionTerraformFile).toBeDefined();
+
+      // Read terraform file content
+      const terraformContent = tree.read(lambdaFunctionTerraformFile!, 'utf-8');
+
+      // Verify python lambda function configuration
+      expect(terraformContent).toMatch(
+        /handler\s+=\s+"test_project\.test_function\.lambda_handler"/,
+      );
+      expect(terraformContent).toMatch(/runtime\s+=\s+"python3\.12"/);
+      expect(terraformContent).toContain('test-project-test-function');
+
+      // Snapshot terraform file
+      const terraformFileContents = {
+        'test-project-test-function.tf': terraformContent,
+      };
+
+      expect(terraformFileContents).toMatchSnapshot(
+        'terraform-python-lambda-files',
+      );
+    });
+
+    it('should generate terraform files with custom function path', async () => {
+      tree.write(
+        'apps/test_project/project.json',
+        JSON.stringify({
+          name: 'test-project',
+          root: 'apps/test_project',
+          sourceRoot: 'apps/test_project/test_project',
+          targets: {
+            build: {
+              dependsOn: ['lint', 'compile', 'test'],
+              options: {
+                outputPath: '{workspaceRoot}/dist/apps/test_project',
+              },
+            },
+          },
+        }),
+      );
+
+      tree.write(
+        'apps/test_project/pyproject.toml',
+        `[project]
+            dependencies = []
+        `,
+      );
+
+      await pyLambdaFunctionGenerator(tree, {
+        project: 'test-project',
+        functionName: 'test-function',
+        functionPath: 'lambda-functions',
+        eventSource: 'Any',
+        iacProvider: 'Terraform',
+      });
+
+      // Find terraform files
+      const allFiles = tree.listChanges().map((f) => f.path);
+      const terraformFiles = allFiles.filter(
+        (f) => f.includes('terraform') && f.endsWith('.tf'),
+      );
+
+      expect(terraformFiles.length).toBeGreaterThan(0);
+
+      const lambdaFunctionTerraformFile = terraformFiles.find((f) =>
+        f.includes('test-project-test-function'),
+      );
+
+      expect(lambdaFunctionTerraformFile).toBeDefined();
+
+      const terraformContent = tree.read(lambdaFunctionTerraformFile!, 'utf-8');
+
+      // Verify the correct bundle path is used for custom function path
+      expect(terraformContent).toContain('dist/apps/test_project/bundle');
+    });
+
+    it('should generate terraform files with different event sources', async () => {
+      tree.write(
+        'apps/test_project/project.json',
+        JSON.stringify({
+          name: 'test-project',
+          root: 'apps/test_project',
+          sourceRoot: 'apps/test_project/test_project',
+          targets: {
+            build: {
+              dependsOn: ['lint', 'compile', 'test'],
+              options: {
+                outputPath: '{workspaceRoot}/dist/apps/test_project',
+              },
+            },
+          },
+        }),
+      );
+
+      tree.write(
+        'apps/test_project/pyproject.toml',
+        `[project]
+            dependencies = []
+        `,
+      );
+
+      await pyLambdaFunctionGenerator(tree, {
+        project: 'test-project',
+        functionName: 'test-function',
+        eventSource: 'APIGatewayProxyEventModel',
+        iacProvider: 'Terraform',
+      });
+
+      // Find terraform files
+      const allFiles = tree.listChanges().map((f) => f.path);
+      const terraformFiles = allFiles.filter(
+        (f) => f.includes('terraform') && f.endsWith('.tf'),
+      );
+
+      expect(terraformFiles.length).toBeGreaterThan(0);
+
+      const lambdaFunctionTerraformFile = terraformFiles.find((f) =>
+        f.includes('test-project-test-function'),
+      );
+
+      expect(lambdaFunctionTerraformFile).toBeDefined();
+
+      const terraformContent = tree.read(lambdaFunctionTerraformFile!, 'utf-8');
+
+      // Verify python lambda function configuration is still correct regardless of event source
+      expect(terraformContent).toMatch(
+        /handler\s+=\s+"test_project\.test_function\.lambda_handler"/,
+      );
+      expect(terraformContent).toMatch(/runtime\s+=\s+"python3\.12"/);
+    });
+
+    it('should configure project targets and dependencies correctly for terraform', async () => {
+      tree.write(
+        'apps/test_project/project.json',
+        JSON.stringify({
+          name: 'test-project',
+          root: 'apps/test_project',
+          sourceRoot: 'apps/test_project/test_project',
+          targets: {
+            build: {
+              dependsOn: ['lint', 'compile', 'test'],
+              options: {
+                outputPath: '{workspaceRoot}/dist/apps/test_project',
+              },
+            },
+          },
+        }),
+      );
+
+      tree.write(
+        'apps/test_project/pyproject.toml',
+        `[project]
+            dependencies = []
+        `,
+      );
+
+      await pyLambdaFunctionGenerator(tree, {
+        project: 'test-project',
+        functionName: 'test-function',
+        eventSource: 'Any',
+        iacProvider: 'Terraform',
+      });
+
+      // Check that shared terraform project has build dependency on the lambda function project
+      const sharedTerraformConfig = JSON.parse(
+        tree.read('packages/common/terraform/project.json', 'utf-8'),
+      );
+
+      expect(sharedTerraformConfig.targets.build.dependsOn).toContain(
+        'test-project:build',
+      );
+
+      // Verify project configuration still has basic targets
+      const projectConfig = JSON.parse(
+        tree.read('apps/test_project/project.json', 'utf-8'),
+      );
+
+      // Should still have bundle and build targets
+      expect(projectConfig.targets.build).toBeDefined();
+      expect(projectConfig.targets.bundle).toBeDefined();
+    });
+
+    it('should not create CDK constructs when using terraform', async () => {
+      tree.write(
+        'apps/test_project/project.json',
+        JSON.stringify({
+          name: 'test-project',
+          root: 'apps/test_project',
+          sourceRoot: 'apps/test_project/test_project',
+          targets: {
+            build: {
+              dependsOn: ['lint', 'compile', 'test'],
+              options: {
+                outputPath: '{workspaceRoot}/dist/apps/test_project',
+              },
+            },
+          },
+        }),
+      );
+
+      tree.write(
+        'apps/test_project/pyproject.toml',
+        `[project]
+            dependencies = []
+        `,
+      );
+
+      await pyLambdaFunctionGenerator(tree, {
+        project: 'test-project',
+        functionName: 'test-function',
+        eventSource: 'Any',
+        iacProvider: 'Terraform',
+      });
+
+      // Verify CDK files are NOT created
+      expect(
+        tree.exists(
+          'packages/common/constructs/src/app/lambda-functions/test-project-test-function.ts',
+        ),
+      ).toBeFalsy();
+    });
+
+    it('should throw error for invalid iacProvider', async () => {
+      tree.write(
+        'apps/test_project/project.json',
+        JSON.stringify({
+          name: 'test-project',
+          root: 'apps/test_project',
+          sourceRoot: 'apps/test_project/test_project',
+          targets: {},
+        }),
+      );
+
+      tree.write(
+        'apps/test_project/pyproject.toml',
+        `[project]
+            dependencies = []
+        `,
+      );
+
+      await expect(
+        pyLambdaFunctionGenerator(tree, {
+          project: 'test-project',
+          functionName: 'test-function',
+          eventSource: 'Any',
+          iacProvider: 'InvalidProvider' as any,
+        }),
+      ).rejects.toThrow('Unsupported iacProvider InvalidProvider');
+    });
+
+    it('should handle terraform with scoped project names', async () => {
+      updateJson(tree, 'package.json', (packageJson) => ({
+        ...packageJson,
+        name: '@myorg/workspace',
+      }));
+
+      tree.write(
+        'apps/scoped_project/project.json',
+        JSON.stringify({
+          name: 'myorg.scoped_project',
+          root: 'apps/scoped_project',
+          sourceRoot: 'apps/scoped_project/scoped_project',
+          targets: {
+            build: {
+              dependsOn: ['lint', 'compile', 'test'],
+              options: {
+                outputPath: '{workspaceRoot}/dist/apps/scoped_project',
+              },
+            },
+          },
+        }),
+      );
+
+      tree.write(
+        'apps/scoped_project/pyproject.toml',
+        `[project]
+            dependencies = []
+        `,
+      );
+
+      await pyLambdaFunctionGenerator(tree, {
+        project: 'scoped_project',
+        functionName: 'test-function',
+        eventSource: 'Any',
+        iacProvider: 'Terraform',
+      });
+
+      // Verify terraform files are created
+      const allFiles = tree.listChanges().map((f) => f.path);
+      const terraformFiles = allFiles.filter(
+        (f) => f.includes('terraform') && f.endsWith('.tf'),
+      );
+
+      expect(terraformFiles.length).toBeGreaterThan(0);
+
+      // Find the lambda function terraform file
+      const lambdaFunctionTerraformFile = terraformFiles.find((f) =>
+        f.includes('scoped-project-test-function'),
+      );
+      expect(lambdaFunctionTerraformFile).toBeDefined();
+
+      const terraformContent = tree.read(lambdaFunctionTerraformFile!, 'utf-8');
+
+      // Verify the correct bundle path is used for scoped projects
+      expect(terraformContent).toContain('dist/apps/scoped_project/bundle');
+    });
+
+    it('should handle terraform with complex function names', async () => {
+      tree.write(
+        'apps/test_project/project.json',
+        JSON.stringify({
+          name: 'test-project',
+          root: 'apps/test_project',
+          sourceRoot: 'apps/test_project/test_project',
+          targets: {
+            build: {
+              dependsOn: ['lint', 'compile', 'test'],
+              options: {
+                outputPath: '{workspaceRoot}/dist/apps/test_project',
+              },
+            },
+          },
+        }),
+      );
+
+      tree.write(
+        'apps/test_project/pyproject.toml',
+        `[project]
+            dependencies = []
+        `,
+      );
+
+      await pyLambdaFunctionGenerator(tree, {
+        project: 'test-project',
+        functionName: 'My Complex Function Name!',
+        functionPath: 'nested/path',
+        eventSource: 'Any',
+        iacProvider: 'Terraform',
+      });
+
+      // Verify terraform files are created
+      const allFiles = tree.listChanges().map((f) => f.path);
+      const terraformFiles = allFiles.filter(
+        (f) => f.includes('terraform') && f.endsWith('.tf'),
+      );
+
+      expect(terraformFiles.length).toBeGreaterThan(0);
+
+      // Find the lambda function terraform file with normalized name
+      const lambdaFunctionTerraformFile = terraformFiles.find((f) =>
+        f.includes('test-project-my-complex-function-name'),
+      );
+      expect(lambdaFunctionTerraformFile).toBeDefined();
+
+      const terraformContent = tree.read(lambdaFunctionTerraformFile!, 'utf-8');
+
+      // Verify the correct bundle path is used for complex function names
+      expect(terraformContent).toContain('dist/apps/test_project/bundle');
+    });
+
+    it('should match snapshot for terraform generated files with different configurations', async () => {
+      tree.write(
+        'apps/test_project/project.json',
+        JSON.stringify({
+          name: 'test-project',
+          root: 'apps/test_project',
+          sourceRoot: 'apps/test_project/test_project',
+          targets: {
+            build: {
+              dependsOn: ['lint', 'compile', 'test'],
+              options: {
+                outputPath: '{workspaceRoot}/dist/apps/test_project',
+              },
+            },
+          },
+        }),
+      );
+
+      tree.write(
+        'apps/test_project/pyproject.toml',
+        `[project]
+            dependencies = []
+        `,
+      );
+
+      await pyLambdaFunctionGenerator(tree, {
+        project: 'test-project',
+        functionName: 'SnapshotFunction',
+        eventSource: 'APIGatewayProxyEventModel',
+        iacProvider: 'Terraform',
+      });
+
+      // Find terraform files
+      const allFiles = tree.listChanges().map((f) => f.path);
+      const terraformFiles = allFiles.filter(
+        (f) => f.includes('terraform') && f.endsWith('.tf'),
+      );
+
+      const lambdaFunctionTerraformFile = terraformFiles.find((f) =>
+        f.includes('test-project-snapshot-function'),
+      );
+
+      expect(lambdaFunctionTerraformFile).toBeDefined();
+
+      // Snapshot the generated terraform file
+      const terraformContent = tree.read(lambdaFunctionTerraformFile!, 'utf-8');
+
+      expect(terraformContent).toMatchSnapshot(
+        'terraform-python-lambda-snapshot-function.tf',
+      );
+    });
+
+    it('should handle Python bundle target configuration for terraform', async () => {
+      tree.write(
+        'apps/test_project/project.json',
+        JSON.stringify({
+          name: 'test-project',
+          root: 'apps/test_project',
+          sourceRoot: 'apps/test_project/test_project',
+          targets: {
+            build: {
+              dependsOn: ['lint', 'compile', 'test'],
+              options: {
+                outputPath: '{workspaceRoot}/dist/apps/test_project',
+              },
+            },
+          },
+        }),
+      );
+
+      tree.write(
+        'apps/test_project/pyproject.toml',
+        `[project]
+            dependencies = []
+        `,
+      );
+
+      await pyLambdaFunctionGenerator(tree, {
+        project: 'test-project',
+        functionName: 'test-function',
+        eventSource: 'Any',
+        iacProvider: 'Terraform',
+      });
+
+      const projectConfig = JSON.parse(
+        tree.read('apps/test_project/project.json', 'utf-8'),
+      );
+
+      // Check that bundle target was configured with Python-specific options
+      expect(projectConfig.targets.bundle).toBeDefined();
+      expect(projectConfig.targets.bundle.outputs).toEqual([
+        '{workspaceRoot}/dist/apps/test_project/bundle',
+      ]);
+
+      // Check the exact commands for the bundle target
+      const commands = projectConfig.targets.bundle.options.commands;
+      expect(commands).toContain(
+        'uv export --frozen --no-dev --no-editable --project apps/test_project --package test-project -o dist/apps/test_project/bundle/requirements.txt',
+      );
+
+      // Verify build dependencies
+      expect(projectConfig.targets.build.dependsOn).toContain('bundle');
+    });
   });
 });

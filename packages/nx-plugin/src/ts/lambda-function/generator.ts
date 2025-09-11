@@ -9,19 +9,12 @@ import {
   installPackagesTask,
   joinPathFragments,
   OverwriteStrategy,
-  ProjectConfiguration,
   Tree,
-  updateJson,
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { TsLambdaFunctionGeneratorSchema } from './schema';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
-import {
-  PACKAGES_DIR,
-  SHARED_CONSTRUCTS_DIR,
-} from '../../utils/shared-constructs-constants';
 import { toClassName, toKebabCase, pascalCase } from '../../utils/names';
-import { addStarExport } from '../../utils/ast';
 import { formatFilesInSubtree } from '../../utils/format';
 import { sortObjectKeys } from '../../utils/object';
 import {
@@ -34,6 +27,7 @@ import { withVersions } from '../../utils/versions';
 import camelCase from 'lodash.camelcase';
 import { TS_HANDLER_RETURN_TYPES } from './io';
 import { addEsbuildBundleTarget } from '../../utils/esbuild';
+import { addLambdaFunctionInfra } from '../../utils/function-constructs/function-constructs';
 
 export const TS_LAMBDA_FUNCTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -91,20 +85,28 @@ export const tsLambdaFunctionGenerator = async (
     );
   }
 
-  await sharedConstructsGenerator(tree);
+  await sharedConstructsGenerator(tree, {
+    iacProvider: schema.iacProvider,
+  });
 
   // Add bundle-<name> target for this specific lambda function
   const bundleTargetName = `bundle-${lambdaFunctionKebabCase}`;
 
+  addLambdaFunctionInfra(tree, {
+    functionProjectName: projectConfig.name,
+    functionNameClassName: constructFunctionClassName,
+    functionNameKebabCase: constructFunctionNameKebabCase,
+    handler: 'index.handler',
+    runtime: 'node',
+    bundlePathFromRoot: joinPathFragments('dist', dir, bundleTargetName),
+    iacProvider: schema.iacProvider,
+  });
+
   const enhancedOptions = {
     ...schema,
-    dir,
-    constructFunctionClassName,
-    constructFunctionNameKebabCase,
     lambdaFunctionCamelCase,
     lambdaFunctionClassName,
     lambdaFunctionKebabCase,
-    bundleTargetName,
     returnType: TS_HANDLER_RETURN_TYPES[schema.eventSource],
   };
 
@@ -125,59 +127,6 @@ export const tsLambdaFunctionGenerator = async (
     joinPathFragments(projectConfig.sourceRoot, schema.functionPath ?? ''),
     enhancedOptions,
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
-  );
-
-  generateFiles(
-    tree,
-    joinPathFragments(__dirname, 'files', SHARED_CONSTRUCTS_DIR, 'src', 'app'),
-    joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'src', 'app'),
-    enhancedOptions,
-    { overwriteStrategy: OverwriteStrategy.KeepExisting },
-  );
-
-  addStarExport(
-    tree,
-    joinPathFragments(
-      PACKAGES_DIR,
-      SHARED_CONSTRUCTS_DIR,
-      'src',
-      'app',
-      'index.ts',
-    ),
-    './lambda-functions/index.js',
-  );
-  addStarExport(
-    tree,
-    joinPathFragments(
-      PACKAGES_DIR,
-      SHARED_CONSTRUCTS_DIR,
-      'src',
-      'app',
-      'lambda-functions',
-      'index.ts',
-    ),
-    `./${constructFunctionNameKebabCase}.js`,
-  );
-
-  // Ensure common constructs builds after our lambda function project
-  updateJson(
-    tree,
-    joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'project.json'),
-    (config: ProjectConfiguration) => {
-      if (!config.targets) {
-        config.targets = {};
-      }
-      if (!config.targets.build) {
-        config.targets.build = {};
-      }
-      config.targets.build.dependsOn = [
-        ...(config.targets.build.dependsOn ?? []).filter(
-          (t) => t !== `${projectConfig.name}:build`,
-        ),
-        `${projectConfig.name}:build`,
-      ];
-      return config;
-    },
   );
 
   addDependenciesToPackageJson(
