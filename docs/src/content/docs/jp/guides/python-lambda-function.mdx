@@ -9,16 +9,19 @@ import { FileTree } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
+import NxCommands from '@components/nx-commands.astro';
 
-Python Lambda Function ジェネレータは、既存のPythonプロジェクトにLambda関数を追加する機能を提供します。
+Python Lambda Functionジェネレータは、既存のPythonプロジェクトにLambda関数を追加する機能を提供します。
 
-このジェネレータはAWS CDKインフラストラクチャ設定を含む新しいPython Lambdaハンドラを作成します。生成されるバックエンドはサーバーレスデプロイにAWS Lambdaを使用し、[AWS Lambda PowertoolsのParser](https://docs.powertools.aws.dev/lambda/python/latest/utilities/parser/)を使用した型安全性をオプションで追加します。ロギング、AWS X-Rayトレーシング、Cloudwatchメトリクスを含む可観測性のために[AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/)を設定します。
+このジェネレータは、AWS CDKまたはTerraformのインフラストラクチャ設定を含む新しいPython Lambdaハンドラを作成します。生成されるバックエンドはサーバーレスデプロイメントにAWS Lambdaを使用し、[AWS Lambda PowertoolsのParser](https://docs.powertools.aws.dev/lambda/python/latest/utilities/parser/)を使用した型安全性をオプションで提供します。ロギング、AWS X-Rayトレーシング、Cloudwatchメトリクスを含む可観測性のために[AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/)を設定します。
 
 ## 使用方法
 
 ### Lambda関数の生成
 
-新しいLambda関数は2つの方法で生成できます:
+Lambda関数は2つの方法で生成できます:
 
 <RunGenerator generator="py#lambda-function" />
 
@@ -37,8 +40,6 @@ Python Lambda Function ジェネレータは、既存のPythonプロジェクト
 
 </FileTree>
 
-ジェネレータはまた、関数のデプロイに使用できるCDKコンストラクトを`packages/common/constructs`ディレクトリに作成します。
-
 `functionPath`オプションが指定された場合、ジェネレータは指定されたパスに必要なファイルを追加します:
 
 <FileTree>
@@ -48,6 +49,21 @@ Python Lambda Function ジェネレータは、既存のPythonプロジェクト
     - \<function-name>.py 関数実装
 
 </FileTree>
+
+### インフラストラクチャ
+
+<Snippet name="shared-constructs" />
+
+ジェネレータは選択した`iacProvider`に基づいて関数をデプロイするためのIaC（Infrastructure as Code）を作成します:
+
+<Infrastructure>
+<Fragment slot="cdk">
+ジェネレータはCDKコンストラクトを作成します。これらは`packages/common/constructs`ディレクトリに配置され、関数のデプロイに使用できます。
+</Fragment>
+<Fragment slot="terraform">
+ジェネレータはTerraformモジュールを作成します。これは`packages/common/terraform/src/app/lambda-functions/<function-name>`ディレクトリに配置され、関数のデプロイに使用できます。
+</Fragment>
+</Infrastructure>
 
 ## 関数の実装
 
@@ -134,12 +150,12 @@ def lambda_handler(event: EventBridgeModel, context: LambdaContext):
     return ...
 ```
 
-デフォルトのメトリクスには以下が含まれます:
-- 呼び出し回数
+デフォルトで収集されるメトリクス:
+- 起動回数
 - 成功/失敗回数
 - コールドスタートメトリクス
 
-#### 型安全性
+### 型安全性
 
 Lambda関数生成時に`eventSource`を選択した場合、関数は[AWS Lambda Powertoolsの`@event_parser`](https://docs.powertools.aws.dev/lambda/python/latest/utilities/parser/)で計装されます。例:
 
@@ -149,58 +165,32 @@ def lambda_handler(event: EventBridgeModel, context: LambdaContext):
     event.detail_type # <- IDEのオートコンプリートが効く型安全なアクセス
 ```
 
-これは<Link path="guides/fastapi">Fast API</Link>と同様の方法で[Pydantic](https://docs.pydantic.dev/latest/)を使用したデータモデル定義を可能にします。
+これは<Link path="guides/fastapi">Fast API</Link>と同様に、[Pydantic](https://docs.pydantic.dev/latest/)を使用してデータモデルを定義できるようにします。
 
 :::tip
-DynamoDBストリームやEventBridgeイベント内のカスタムデータなどがある場合、[Envelopes](https://docs.powertools.aws.dev/lambda/python/latest/utilities/parser/#envelopes)を使用して型安全性を提供することを検討してください。
+DynamoDBストリームやEventBridgeイベント内のカスタムデータなど、イベント内にネストされたカスタムデータがある場合、[Envelopes](https://docs.powertools.aws.dev/lambda/python/latest/utilities/parser/#envelopes)を使用して型安全性を確保できます。
 :::
 
-イベントを型付けしない場合は、`eventSource`に`Any`を選択できます。
+イベントの型指定が必要ない場合は、`eventSource`で`Any`を選択できます。
+
+## バンドリング
+
+ジェネレータは[uv](https://docs.astral.sh/uv/)を使用してLambdaデプロイメントパッケージのPythonバンドリングを自動設定します:
+
+<NxCommands commands={['run <project-name>:bundle']} />
+
+:::note
+デプロイメントサイズを最小化するため、複数のLambda関数を<Link path="guides/python-project">`py#project`</Link>ジェネレータで生成した複数のPythonプロジェクトに分割することを検討してください。
+:::
+
+このプロセスでは以下を使用します:
+1. [`uv export`](https://docs.astral.sh/uv/reference/cli/#uv-export)でPython依存関係を`requirements.txt`にエクスポート
+2. [`uv pip install`](https://docs.astral.sh/uv/reference/cli/#uv-pip-install)でLambdaデプロイメント用ターゲットプラットフォーム（`x86_64-manylinux2014`）に依存関係をインストール
+
+:::note
+[LambdaアーキテクチャをARMに変更](https://docs.aws.amazon.com/lambda/latest/dg/foundation-arch.html)する場合、バンドルターゲットを`aarch64-manylinux2014`に変更する必要があります。
+:::
 
 ## 関数のデプロイ
 
-Python Lambda Functionジェネレータは`common/constructs`フォルダに関数のデプロイ用CDKコンストラクトを作成します。CDKアプリケーションで使用できます:
-
-```ts
-import { MyProjectMyFunction } from ':my-scope/common-constructs';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    // スタックに関数を追加
-    const fn = new MyProjectMyFunction(this, 'MyFunction');
-  }
-}
-```
-
-これにより以下が設定されます:
-1. AWS Lambda関数
-2. CloudWatchロググループ
-3. X-Rayトレーシング設定
-4. CloudWatchメトリクスネームスペース
-
-この関数は任意のLambda[イベントソース](https://docs.powertools.aws.dev/lambda/python/latest/utilities/parser/)のターゲットとして使用できます:
-
-:::note
-イベントがハンドラ関数内で適切に処理されるよう、イベントソースが選択した`eventSource`オプションと一致していることを確認してください。
-:::
-
-以下の例はEvent Bridgeを使用したスケジュール実行でLambda関数を呼び出すCDKコードです:
-
-```ts
-import { EventPattern, Rule, Schedule } from 'aws-cdk-lib/aws-events';
-import { LambdaFunction } from 'aws-cdk-lib/aws-events-targets';
-import { MyProjectMyFunction } from ':my-scope/common-constructs';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    // スタックに関数を追加
-    const fn = new MyProjectMyFunction(this, 'MyFunction');
-
-    // EventBridgeタスクに関数を追加
-    const eventRule = new Rule(this, 'MyFunctionScheduleRule', {
-      schedule: Schedule.cron({ minute: '15' }),
-      targets: [new LambdaFunction(fn)],
-    });
-  }
-}
-```
+<Snippet name="lambda-function/deploying-your-function" parentHeading="Deploying your Function" />

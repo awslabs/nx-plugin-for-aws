@@ -10,10 +10,12 @@ import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
 
-TypeScript Lambda Function 생성기는 기존 TypeScript 프로젝트에 람다 함수를 추가할 수 있는 기능을 제공합니다.
+TypeScript Lambda 함수 생성기를 사용하면 기존 TypeScript 프로젝트에 람다 함수를 추가할 수 있습니다.
 
-이 생성기는 AWS CDK 인프라 설정과 함께 새로운 TypeScript 람다 핸들러를 생성합니다. 생성된 핸들러는 [AWS Lambda Powertools for TypeScript](https://docs.powertools.aws.dev/lambda/typescript/latest/)를 사용하여 로깅, AWS X-Ray 추적, CloudWatch 메트릭 등의 관측 기능과 [AWS Lambda Powertools의 Parser](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/)를 통한 이벤트 유형 안전성을 제공합니다.
+이 생성기는 AWS CDK 또는 Terraform 인프라 설정과 함께 새로운 TypeScript 람다 핸들러를 생성합니다. 생성된 핸들러는 [AWS Lambda Powertools for TypeScript](https://docs.powertools.aws.dev/lambda/typescript/latest/)를 사용하여 로깅, AWS X-Ray 추적, CloudWatch 메트릭과 같은 관측 기능과 [AWS Lambda Powertools의 Parser](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/)를 통한 이벤트 유형 안전성을 제공합니다.
 
 ## 사용 방법
 
@@ -39,8 +41,6 @@ TypeScript Lambda Function 생성기는 기존 TypeScript 프로젝트에 람다
 
 </FileTree>
 
-생성기는 또한 `packages/common/constructs/src/app/lambda-functions` 디렉토리에 배포용 CDK 구문을 생성합니다.
-
 `functionPath` 옵션이 제공된 경우, 생성기는 프로젝트 소스 디렉토리 내 지정된 경로에 핸들러를 추가합니다:
 
 <FileTree>
@@ -52,9 +52,24 @@ TypeScript Lambda Function 생성기는 기존 TypeScript 프로젝트에 람다
 
 </FileTree>
 
+### 인프라
+
+<Snippet name="shared-constructs" />
+
+생성기는 선택한 `iacProvider` 기반으로 함수 배포를 위한 인프라 코드를 생성합니다:
+
+<Infrastructure>
+<Fragment slot="cdk">
+생성기는 함수 배포에 사용할 수 있는 CDK 구성을 생성하며, 이는 `packages/common/constructs/src/app/lambda-functions` 디렉토리에 위치합니다.
+</Fragment>
+<Fragment slot="terraform">
+생성기는 함수 배포에 사용할 수 있는 Terraform 모듈을 생성하며, 이는 `packages/common/terraform/src/app/lambda-functions/<function-name>` 디렉토리에 위치합니다.
+</Fragment>
+</Infrastructure>
+
 ## 함수 구현
 
-주요 함수 구현은 `<function-name>.ts`에 위치합니다. 예시:
+주요 함수 구현은 `<function-name>.ts` 파일에 있습니다. 예시:
 
 ```typescript
 import { parser } from '@aws-lambda-powertools/parser/middleware';
@@ -92,9 +107,9 @@ export const handler = middy()
 
 ```
 
-생성기는 자동으로 다음 기능들을 설정합니다:
+생성기는 자동으로 다음과 같은 기능을 설정합니다:
 
-1. 향상된 람다 기능을 위한 **Middy 미들웨어 스택**
+1. 향상된 Lambda 기능을 위한 **Middy 미들웨어 스택**
 2. 관측성을 위한 **AWS Lambda Powertools 통합**
 3. CloudWatch를 통한 **메트릭 수집**
 4. 파서 미들웨어를 사용한 **유형 안전성**
@@ -114,7 +129,7 @@ export const handler = middy()
 
 #### 추적
 
-AWS X-Ray 추적은 `captureLambdaHandler` 미들웨어를 통해 자동 구성됩니다. 커스텀 서브세그먼트 추가 가능:
+`captureLambdaHandler` 미들웨어를 통해 AWS X-Ray 추적이 자동 구성됩니다. 추적에 커스텀 서브세그먼트를 추가할 수 있습니다:
 
 ```typescript
 const tracer = new Tracer();
@@ -122,10 +137,10 @@ const tracer = new Tracer();
 export const myFunction = async (
   event: z.infer<typeof EventBridgeSchema>,
 ): Promise<void> => {
-  // 새 서브세그먼트 생성
+  // 새로운 서브세그먼트 생성
   const subsegment = tracer.getSegment()?.addNewSubsegment('custom-operation');
   try {
-    // 사용자 로직
+    // 비즈니스 로직 구현
   } catch (error) {
     subsegment?.addError(error as Error);
     throw error;
@@ -141,7 +156,7 @@ export const handler = middy()
 
 #### 메트릭
 
-`logMetrics` 미들웨어를 통해 요청별 CloudWatch 메트릭 자동 수집. 커스텀 메트릭 추가 가능:
+`logMetrics` 미들웨어를 통해 각 요청에 대한 CloudWatch 메트릭이 자동 수집됩니다. 커스텀 메트릭 추가 가능:
 
 ```typescript
 const metrics = new Metrics();
@@ -160,13 +175,13 @@ export const handler = middy()
 
 ### 유형 안전성
 
-람다 함수 생성 시 `eventSource`를 선택한 경우, [AWS Lambda Powertools의 `parser` 미들웨어](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/)가 자동 구성됩니다.
+람다 함수 생성 시 `eventSource`를 선택한 경우, [AWS Lambda Powertools의 `parser` 미들웨어](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/)가 함수에 적용됩니다. 예시:
 
 ```typescript {4}
 export const myFunction = async (
   event: z.infer<typeof EventBridgeSchema>,
 ): Promise<void> => {
-  event.detail // <- IDE 자동완성 지원되는 유형 안전 접근
+  event.detail // <- IDE 자동 완성 지원되는 유형 안전성
 };
 
 export const handler = middy()
@@ -177,18 +192,18 @@ export const handler = middy()
 이를 통해 컴파일 타임 유형 안전성과 런타임 이벤트 유효성 검증이 제공됩니다.
 
 :::caution
-이벤트가 스키마를 준수하지 않을 때 핸들러가 오류를 발생시키지 않으려면 [`safeParse` 옵션](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/#safe-parsing)을 사용하세요.
+이벤트가 스키마를 준수하지 않을 때 핸들러가 오류를 발생시키지 않도록 하려면 [`safeParse` 옵션](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/#safe-parsing)을 사용할 수 있습니다.
 :::
 
 :::tip
-DynamoDB 스트림이나 EventBridge 이벤트 내 커스텀 데이터가 있는 경우, [Envelopes](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/#envelopes)를 사용하여 유형 안전성을 확보할 수 있습니다.
+DynamoDB 스트림이나 EventBridge 이벤트와 같이 이벤트 내 중첩된 커스텀 데이터가 있는 경우, [Envelopes](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/#envelopes)를 사용하여 해당 데이터에 대한 유형 안전성을 제공할 수 있습니다.
 :::
 
-이벤트 유형을 지정하지 않으려면 `eventSource`에 `Any`를 선택하면 이벤트 매개변수가 `any` 유형으로 설정됩니다.
+이벤트 유형을 지정하지 않으려면 `eventSource`로 `Any`를 선택하면 이벤트 매개변수가 `any` 유형으로 설정됩니다.
 
 ## 번들링
 
-생성기는 최적화된 람다 배포 패키지를 위해 [esbuild](https://esbuild.github.io/)를 자동 구성합니다:
+생성기는 최적화된 Lambda 배포 패키지를 위해 [esbuild](https://esbuild.github.io/)를 자동 구성합니다:
 
 특정 람다 함수 번들링:
 
@@ -200,49 +215,4 @@ DynamoDB 스트림이나 EventBridge 이벤트 내 커스텀 데이터가 있는
 
 ## 함수 배포
 
-TypeScript Lambda Function 생성기는 `common/constructs` 폴더에 배포용 CDK 구문을 생성합니다. CDK 애플리케이션에서 사용 가능:
-
-```typescript {1, 6}
-import { MyProjectMyFunction } from ':my-scope/common-constructs';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    // 스택에 함수 추가
-    const fn = new MyProjectMyFunction(this, 'MyFunction');
-  }
-}
-```
-
-이 설정에는 다음이 포함됩니다:
-
-1. AWS Lambda 함수
-2. CloudWatch 로그 그룹
-3. X-Ray 추적 구성
-4. CloudWatch 메트릭 네임스페이스
-
-이 함수는 모든 람다 [이벤트 소스](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/)의 대상으로 사용 가능:
-
-:::note
-핸들러 함수 내 이벤트가 올바르게 처리되도록 선택한 `eventSource` 옵션이 이벤트 소스와 일치하는지 확인하세요.
-:::
-
-다음 예제는 EventBridge 스케줄을 사용하여 람다 함수를 주기적으로 실행하는 CDK 코드를 보여줍니다:
-
-```typescript
-import { Rule, Schedule } from 'aws-cdk-lib/aws-events';
-import { LambdaFunction } from 'aws-cdk-lib/aws-events-targets';
-import { MyProjectMyFunction } from ':my-scope/common-constructs';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    // 스택에 함수 추가
-    const fn = new MyProjectMyFunction(this, 'MyFunction');
-
-    // EventBridge 스케줄 규칙에 함수 추가
-    const eventRule = new Rule(this, 'MyFunctionScheduleRule', {
-      schedule: Schedule.cron({ minute: '15' }),
-      targets: [new LambdaFunction(fn)],
-    });
-  }
-}
-```
+<Snippet name="lambda-function/deploying-your-function" parentHeading="Deploying your Function" />

@@ -10,14 +10,16 @@ import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
 
 Il generatore di Funzioni Lambda TypeScript permette di aggiungere una funzione lambda a un progetto TypeScript esistente.
 
-Questo generatore crea un nuovo handler lambda TypeScript con la configurazione dell'infrastruttura AWS CDK. L'handler generato utilizza [AWS Lambda Powertools for TypeScript](https://docs.powertools.aws.dev/lambda/typescript/latest/) per l'osservabilità, inclusi logging, tracciamento AWS X-Ray e metriche CloudWatch, oltre a una validazione opzionale degli eventi tramite [Parser di AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/).
+Questo generatore crea un nuovo handler lambda TypeScript con configurazione infrastrutturale AWS CDK o Terraform. L'handler generato utilizza [AWS Lambda Powertools for TypeScript](https://docs.powertools.aws.dev/lambda/typescript/latest/) per l'osservabilità, inclusi logging, tracciamento AWS X-Ray e metriche CloudWatch, oltre a una validazione opzionale degli eventi tramite [Parser di AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/).
 
 ## Utilizzo
 
-### Generare una funzione lambda TypeScript
+### Genera una funzione lambda TypeScript
 
 Puoi generare una funzione lambda in due modi:
 
@@ -39,8 +41,6 @@ Il generatore aggiungerà i seguenti file al tuo progetto:
 
 </FileTree>
 
-Il generatore creerà anche un costrutto CDK utilizzabile per distribuire la tua funzione, situato nella directory `packages/common/constructs/src/app/lambda-functions`.
-
 Se viene fornita l'opzione `functionPath`, il generatore aggiungerà l'handler al percorso specificato all'interno della directory sorgente del progetto:
 
 <FileTree>
@@ -51,6 +51,21 @@ Se viene fornita l'opzione `functionPath`, il generatore aggiungerà l'handler a
       - \<function-name>.ts Implementazione della funzione
 
 </FileTree>
+
+### Infrastruttura
+
+<Snippet name="shared-constructs" />
+
+Il generatore crea infrastruttura as-code per il deploy della funzione in base al `iacProvider` selezionato:
+
+<Infrastructure>
+<Fragment slot="cdk">
+Il generatore crea un costrutto CDK utilizzabile per deployare la funzione, residente nella directory `packages/common/constructs/src/app/lambda-functions`.
+</Fragment>
+<Fragment slot="terraform">
+Il generatore crea un modulo Terraform utilizzabile per deployare la funzione, residente nella directory `packages/common/terraform/src/app/lambda-functions/<function-name>`.
+</Fragment>
+</Infrastructure>
 
 ## Implementazione della Funzione
 
@@ -94,11 +109,11 @@ export const handler = middy()
 
 Il generatore configura automaticamente diverse funzionalità:
 
-1. **Stack middleware Middy** per funzionalità avanzate delle Lambda
+1. **Stack middleware Middy** per funzionalità Lambda avanzate
 2. **Integrazione AWS Lambda Powertools** per l'osservabilità
 3. **Raccolta metriche** con CloudWatch
 4. **Type-safety** tramite middleware parser
-5. **Bundling esbuild** per pacchetti di distribuzione ottimizzati
+5. **Bundling esbuild** per pacchetti di deploy ottimizzati
 
 ### Osservabilità con AWS Lambda Powertools
 
@@ -114,7 +129,7 @@ export const handler = middy()
 
 #### Tracing
 
-Il tracciamento AWS X-Ray viene configurato automaticamente tramite il middleware `captureLambdaHandler`. Puoi aggiungere sottosegmenti personalizzati:
+Il tracciamento AWS X-Ray è configurato automaticamente tramite il middleware `captureLambdaHandler`. Puoi aggiungere sottosegmenti personalizzati:
 
 ```typescript
 const tracer = new Tracer();
@@ -125,7 +140,7 @@ export const myFunction = async (
   // Crea un nuovo sottosegmento
   const subsegment = tracer.getSegment()?.addNewSubsegment('custom-operation');
   try {
-    // Logica personalizzata qui
+    // Logica personalizzata
   } catch (error) {
     subsegment?.addError(error as Error);
     throw error;
@@ -160,7 +175,7 @@ export const handler = middy()
 
 ### Type Safety
 
-Se hai selezionato un `eventSource` durante la generazione della funzione lambda, questa viene strumentata con il [middleware `parser` di AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/). Esempio:
+Se hai selezionato un `eventSource` durante la generazione della funzione, questa viene strumentata con il middleware [`parser` di AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/). Esempio:
 
 ```typescript {4}
 export const myFunction = async (
@@ -174,21 +189,21 @@ export const handler = middy()
   .handler(myFunction);
 ```
 
-Questo fornisce type safety a tempo di compilazione e validazione a runtime per gli eventi Lambda.
+Questo fornisce type safety a compile-time e validazione runtime per gli eventi Lambda.
 
 :::caution
-Se non vuoi che l'handler generi un errore quando l'evento non rispetta lo schema, puoi usare l'[opzione `safeParse`](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/#safe-parsing).
+Se non vuoi che l'handler generi un errore quando l'evento non rispetta lo schema, puoi usare l'opzione [`safeParse`](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/#safe-parsing).
 :::
 
 :::tip
-Se hai dati personalizzati annidati in un evento, ad esempio uno stream DynamoDB o un evento EventBridge, puoi usare gli [Envelopes](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/#envelopes) per garantire type safety su quei dati.
+Se hai dati personalizzati annidati in un evento, ad esempio in uno stream DynamoDB o un evento EventBridge, puoi beneficiare degli [Envelopes](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/#envelopes) per garantire type safety.
 :::
 
-Se non vuoi tipizzare l'evento, puoi selezionare `Any` per `eventSource`, ottenendo un tipo `any` per il parametro event.
+Se non vuoi tipizzare l'evento, puoi selezionare `Any` come `eventSource`, risultando in un tipo `any` per il parametro event.
 
 ## Bundling
 
-Il generatore configura automaticamente [esbuild](https://esbuild.github.io/) per pacchetti Lambda ottimizzati:
+Il generatore configura automaticamente [esbuild](https://esbuild.github.io/) per pacchetti di deploy ottimizzati:
 
 Esegui il bundle di una funzione specifica con:
 
@@ -198,51 +213,6 @@ Esegui il bundle di tutte le funzioni nel progetto con:
 
 <NxCommands commands={['run <project-name>:bundle']} />
 
-## Distribuzione della Funzione
+## Deploy della Funzione
 
-Il generatore crea un costrutto CDK per distribuire la funzione nella cartella `common/constructs`. Puoi usarlo in un'applicazione CDK:
-
-```typescript {1, 6}
-import { MyProjectMyFunction } from ':my-scope/common-constructs';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    // Aggiungi la funzione allo stack
-    const fn = new MyProjectMyFunction(this, 'MyFunction');
-  }
-}
-```
-
-Questo configura:
-
-1. Funzione AWS Lambda
-2. Log group CloudWatch
-3. Configurazione tracciamento X-Ray
-4. Namespace metriche CloudWatch
-
-La funzione può essere usata come target per qualsiasi [event source lambda](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/):
-
-:::note
-Assicurati che l'event source corrisponda all'opzione `eventSource` selezionata per garantire una corretta gestione dell'evento.
-:::
-
-L'esempio seguente mostra il codice CDK per invocare la funzione lambda su una schedulazione EventBridge:
-
-```typescript
-import { Rule, Schedule } from 'aws-cdk-lib/aws-events';
-import { LambdaFunction } from 'aws-cdk-lib/aws-events-targets';
-import { MyProjectMyFunction } from ':my-scope/common-constructs';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    // Aggiungi la funzione allo stack
-    const fn = new MyProjectMyFunction(this, 'MyFunction');
-
-    // Aggiungi la funzione a una regola schedulata EventBridge
-    const eventRule = new Rule(this, 'MyFunctionScheduleRule', {
-      schedule: Schedule.cron({ minute: '15' }),
-      targets: [new LambdaFunction(fn)],
-    });
-  }
-}
-```
+<Snippet name="lambda-function/deploying-your-function" parentHeading="Deploying your Function" />

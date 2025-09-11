@@ -1,0 +1,117 @@
+---
+title: "함수 배포하기"
+---
+
+
+
+import Infrastructure from '@components/infrastructure.astro';
+
+이 생성기는 선택한 `iacProvider` 기반으로 CDK 또는 Terraform 인프라 코드를 생성합니다. 이를 통해 함수를 배포할 수 있습니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+이 생성자는 `common/constructs` 폴더에 함수 배포를 위한 CDK 구문을 생성합니다. CDK 애플리케이션에서 다음과 같이 사용할 수 있습니다:
+
+```typescript {1, 6}
+import { MyProjectMyFunction } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    // 스택에 함수 추가
+    const fn = new MyProjectMyFunction(this, 'MyFunction');
+  }
+}
+```
+
+다음 리소스가 설정됩니다:
+
+1. AWS Lambda 함수
+2. CloudWatch 로그 그룹
+3. X-Ray 트레이싱 구성
+4. CloudWatch 메트릭 네임스페이스
+
+이 함수는 람다 [이벤트 소스](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/)의 대상으로 사용될 수 있습니다:
+
+:::note
+핸들러 함수 내에서 이벤트가 올바르게 처리되도록 선택한 `eventSource` 옵션과 이벤트 소스가 일치하는지 확인하세요.
+:::
+
+다음 예제는 EventBridge를 사용해 일정에 따라 람다 함수를 호출하는 CDK 코드를 보여줍니다:
+
+```typescript
+import { Rule, Schedule } from 'aws-cdk-lib/aws-events';
+import { LambdaFunction } from 'aws-cdk-lib/aws-events-targets';
+import { MyProjectMyFunction } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    // 스택에 함수 추가
+    const fn = new MyProjectMyFunction(this, 'MyFunction');
+
+    // EventBridge 스케줄 규칙에 함수 추가
+    const eventRule = new Rule(this, 'MyFunctionScheduleRule', {
+      schedule: Schedule.cron({ minute: '15' }),
+      targets: [new LambdaFunction(fn)],
+    });
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+이 생성기는 `common/terraform` 폴더에 함수 배포를 위한 Terraform 모듈을 생성합니다. Terraform 구성에서 다음과 같이 사용할 수 있습니다:
+
+```hcl {2}
+module "my_project_my_function" {
+  source = "../../common/terraform/src/app/lambda-functions/my-project-my-function"
+
+  # Lambda 함수용 환경 변수
+  env = {
+    SOME_VARIABLE = "some value"
+  }
+
+  # 추가 IAM 정책 필요시
+  additional_iam_policy_statements = [
+    # 함수에 필요한 추가 권한 추가
+  ]
+}
+```
+
+다음 리소스가 설정됩니다:
+
+1. AWS Lambda 함수
+2. CloudWatch 로그 그룹
+3. X-Ray 트레이싱 구성
+4. CloudWatch 메트릭 네임스페이스
+
+이 함수는 모든 람다 이벤트 소스의 대상으로 사용될 수 있습니다. 다음 예제는 EventBridge를 사용해 일정에 따라 람다 함수를 호출하는 Terraform 코드를 보여줍니다:
+
+```hcl
+# 예약 실행을 위한 EventBridge 규칙
+resource "aws_cloudwatch_event_rule" "my_function_schedule" {
+  name                = "my-function-schedule"
+  description         = "15분마다 함수 트리거"
+  schedule_expression = "cron(15 * * * ? *)"
+}
+
+# EventBridge 타겟
+resource "aws_cloudwatch_event_target" "lambda_target" {
+  rule      = aws_cloudwatch_event_rule.my_function_schedule.name
+  target_id = "MyFunctionTarget"
+  arn       = module.my_project_my_function.function_arn
+}
+
+# EventBridge가 Lambda 함수 호출을 허용하는 권한
+resource "aws_lambda_permission" "allow_eventbridge" {
+  statement_id  = "AllowExecutionFromEventBridge"
+  action        = "lambda:InvokeFunction"
+  function_name = module.my_project_my_function.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.my_function_schedule.arn
+}
+```
+
+:::note
+핸들러 함수 내에서 이벤트가 올바르게 처리되도록 선택한 `eventSource` 옵션과 이벤트 소스가 일치하는지 확인하세요.
+:::
+</Fragment>
+</Infrastructure>

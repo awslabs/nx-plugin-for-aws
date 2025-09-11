@@ -1,0 +1,117 @@
+---
+title: "関数のデプロイ"
+---
+
+
+
+import Infrastructure from '@components/infrastructure.astro';
+
+このジェネレータは選択した `iacProvider` に基づいてCDKまたはTerraformのインフラストラクチャーコードを生成します。生成されたコードを使用して関数をデプロイできます。
+
+<Infrastructure>
+<Fragment slot="cdk">
+このジェネレータは `common/constructs` フォルダに関数をデプロイするためのCDKコンストラクトを作成します。CDKアプリケーションで以下のように使用できます：
+
+```typescript {1, 6}
+import { MyProjectMyFunction } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    // スタックに関数を追加
+    const fn = new MyProjectMyFunction(this, 'MyFunction');
+  }
+}
+```
+
+これにより以下が設定されます：
+
+1. AWS Lambda関数
+2. CloudWatchロググループ
+3. X-Rayトレーシング設定
+4. CloudWatchメトリクスネームスペース
+
+この関数は任意のLambda[イベントソース](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/)のターゲットとして使用できます：
+
+:::note
+ハンドラー関数内でイベントが適切に処理されるよう、イベントソースが選択した `eventSource` オプションと一致していることを確認してください。
+:::
+
+以下の例はEventBridgeを使用してスケジュールでLambda関数を起動するCDKコードを示しています：
+
+```typescript
+import { Rule, Schedule } from 'aws-cdk-lib/aws-events';
+import { LambdaFunction } from 'aws-cdk-lib/aws-events-targets';
+import { MyProjectMyFunction } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    // スタックに関数を追加
+    const fn = new MyProjectMyFunction(this, 'MyFunction');
+
+    // EventBridgeスケジュールルールに関数を追加
+    const eventRule = new Rule(this, 'MyFunctionScheduleRule', {
+      schedule: Schedule.cron({ minute: '15' }),
+      targets: [new LambdaFunction(fn)],
+    });
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+このジェネレータは `common/terraform` フォルダに関数をデプロイするためのTerraformモジュールを作成します。Terraform設定で以下のように使用できます：
+
+```hcl {2}
+module "my_project_my_function" {
+  source = "../../common/terraform/src/app/lambda-functions/my-project-my-function"
+
+  # Lambda関数の環境変数
+  env = {
+    SOME_VARIABLE = "some value"
+  }
+
+  # 追加のIAMポリシーが必要な場合
+  additional_iam_policy_statements = [
+    # 関数に必要な追加の権限を記述
+  ]
+}
+```
+
+これにより以下が設定されます：
+
+1. AWS Lambda関数
+2. CloudWatchロググループ
+3. X-Rayトレーシング設定
+4. CloudWatchメトリクスネームスペース
+
+この関数は任意のLambdaイベントソースのターゲットとして使用できます。以下の例はEventBridgeを使用してスケジュールでLambda関数を起動するTerraformコードを示しています：
+
+```hcl
+# スケジュール実行用EventBridgeルール
+resource "aws_cloudwatch_event_rule" "my_function_schedule" {
+  name                = "my-function-schedule"
+  description         = "15分毎に関数を起動"
+  schedule_expression = "cron(15 * * * ? *)"
+}
+
+# EventBridgeターゲット
+resource "aws_cloudwatch_event_target" "lambda_target" {
+  rule      = aws_cloudwatch_event_rule.my_function_schedule.name
+  target_id = "MyFunctionTarget"
+  arn       = module.my_project_my_function.function_arn
+}
+
+# EventBridgeがLambda関数を起動するための権限
+resource "aws_lambda_permission" "allow_eventbridge" {
+  statement_id  = "AllowExecutionFromEventBridge"
+  action        = "lambda:InvokeFunction"
+  function_name = module.my_project_my_function.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.my_function_schedule.arn
+}
+```
+
+:::note
+ハンドラー関数内でイベントが適切に処理されるよう、イベントソースが選択した `eventSource` オプションと一致していることを確認してください。
+:::
+</Fragment>
+</Infrastructure>

@@ -9,16 +9,19 @@ import { FileTree } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
+import NxCommands from '@components/nx-commands.astro';
 
-Python Lambda 函数生成器支持在现有 Python 项目中添加 Lambda 函数。
+Python Lambda 函数生成器能够为现有 Python 项目添加 Lambda 函数。
 
-该生成器会创建一个新的 Python Lambda 处理程序并配置 AWS CDK 基础设施。生成的后端使用 AWS Lambda 进行无服务器部署，并可选使用 [AWS Lambda Powertools 的 Parser](https://docs.powertools.aws.dev/lambda/python/latest/utilities/parser/) 实现类型安全。它通过 [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/) 配置了可观测性功能，包括日志记录、AWS X-Ray 追踪和 Cloudwatch 指标。
+该生成器会创建一个新的 Python Lambda 处理程序，并配置 AWS CDK 或 Terraform 基础设施。生成的后端使用 AWS Lambda 进行无服务器部署，并可选使用 [AWS Lambda Powertools 的 Parser](https://docs.powertools.aws.dev/lambda/python/latest/utilities/parser/) 实现类型安全。它集成了 [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/) 用于可观测性功能，包括日志记录、AWS X-Ray 追踪和 Cloudwatch 指标。
 
-## 使用方法
+## 使用方式
 
 ### 生成 Lambda 函数
 
-有两种方式可以生成新的 Lambda 函数：
+您可以通过两种方式生成新的 Lambda 函数：
 
 <RunGenerator generator="py#lambda-function" />
 
@@ -37,9 +40,7 @@ Python Lambda 函数生成器支持在现有 Python 项目中添加 Lambda 函�
 
 </FileTree>
 
-生成器还会在 `packages/common/constructs` 目录下创建用于部署函数的 CDK 构造。
-
-若提供了 `functionPath` 选项，生成器会将必要文件添加到指定路径：
+若指定了 `functionPath` 选项，生成器会将必要文件添加到指定路径：
 
 <FileTree>
 
@@ -49,9 +50,24 @@ Python Lambda 函数生成器支持在现有 Python 项目中添加 Lambda 函�
 
 </FileTree>
 
+### 基础设施
+
+<Snippet name="shared-constructs" />
+
+生成器会根据所选 `iacProvider` 创建基础设施即代码（IaC）用于部署函数：
+
+<Infrastructure>
+<Fragment slot="cdk">
+生成器创建 CDK 构造体用于部署函数，位于 `packages/common/constructs` 目录。
+</Fragment>
+<Fragment slot="terraform">
+生成器创建 Terraform 模块用于部署函数，位于 `packages/common/terraform/src/app/lambda-functions/<函数名称>` 目录。
+</Fragment>
+</Infrastructure>
+
 ## 实现函数
 
-主函数实现位于 `<函数名称>.py` 文件中。示例如下：
+主函数实现位于 `<函数名称>.py`。示例如下：
 
 ```python
 import os
@@ -86,7 +102,7 @@ def lambda_handler(event: EventBridgeModel, context: LambdaContext):
         # TODO: 按需实现错误响应
 ```
 
-生成器自动配置了以下功能：
+生成器自动配置以下功能：
 
 1. AWS Lambda Powertools 集成实现可观测性
 2. 指标收集
@@ -107,7 +123,7 @@ def lambda_handler(event: EventBridgeModel, context: LambdaContext):
 建议为所有唯一请求设置关联 ID 以便调试和监控。请参考 [AWS Powertools 日志文档](https://docs.powertools.aws.dev/lambda/python/2.22.0/core/logger/#setting-a-correlation-id) 了解关联 ID 最佳实践。
 :::
 
-日志记录器自动包含：
+日志器自动包含：
 
 - 事件请求
 - Lambda 上下文信息
@@ -115,7 +131,7 @@ def lambda_handler(event: EventBridgeModel, context: LambdaContext):
 
 #### 追踪
 
-自动配置 AWS X-Ray 追踪。可为追踪添加自定义子段：
+自动配置 AWS X-Ray 追踪。可添加自定义子段：
 
 ```python
 def lambda_handler(event: EventBridgeModel, context: LambdaContext):
@@ -127,7 +143,7 @@ def lambda_handler(event: EventBridgeModel, context: LambdaContext):
 
 #### 指标
 
-自动收集每个请求的 CloudWatch 指标。可添加自定义指标：
+自动收集 CloudWatch 指标。可添加自定义指标：
 
 ```python
 def lambda_handler(event: EventBridgeModel, context: LambdaContext):
@@ -141,9 +157,9 @@ def lambda_handler(event: EventBridgeModel, context: LambdaContext):
 - 成功/失败次数
 - 冷启动指标
 
-#### 类型安全
+### 类型安全
 
-若生成 Lambda 函数时选择了 `eventSource`，函数将通过 [AWS Lambda Powertools 的 `@event_parser`](https://docs.powertools.aws.dev/lambda/python/latest/utilities/parser/) 实现类型安全：
+若生成 Lambda 函数时指定了 `eventSource`，函数将使用 [AWS Lambda Powertools 的 `@event_parser`](https://docs.powertools.aws.dev/lambda/python/latest/utilities/parser/) 进行类型校验。例如：
 
 ```python {3}
 @event_parser(model=EventBridgeModel)
@@ -151,59 +167,33 @@ def lambda_handler(event: EventBridgeModel, context: LambdaContext):
     event.detail_type # <- 类型安全，支持 IDE 自动补全
 ```
 
-这允许使用 [Pydantic](https://docs.pydantic.dev/latest/) 定义数据模型，类似于 <Link path="guides/fastapi">Fast API</Link> 的工作方式。
+您可以使用 [Pydantic](https://docs.pydantic.dev/latest/) 定义数据模型，方式与 <Link path="guides/fastapi">Fast API</Link> 类似。
 
 :::tip
-若事件中包含自定义数据（如 DynamoDB 流或 EventBridge 事件），使用 [Envelopes](https://docs.powertools.aws.dev/lambda/python/latest/utilities/parser/#envelopes) 可为该数据提供类型安全。
+若事件中包含自定义数据（如 DynamoDB 流或 EventBridge 事件），建议使用 [Envelopes](https://docs.powertools.aws.dev/lambda/python/latest/utilities/parser/#envelopes) 实现类型安全。
 :::
 
-若不需要事件类型定义，可在 `eventSource` 选项中选择 `Any`。
+若不需要类型校验，可将 `eventSource` 设为 `Any`。
+
+## 打包部署
+
+生成器使用 [uv](https://docs.astral.sh/uv/) 自动配置 Lambda 部署包的 Python 打包：
+
+<NxCommands commands={['run <project-name>:bundle']} />
+
+:::note
+此操作会将整个项目打包为部署包。若要减小部署体积，建议使用 <Link path="guides/python-project">`py#project`</Link> 生成器将多个 Lambda 函数拆分到不同 Python 项目。
+:::
+
+打包流程包含：
+
+1. 使用 [`uv export`](https://docs.astral.sh/uv/reference/cli/#uv-export) 导出依赖到 `requirements.txt`
+2. 使用 [`uv pip install`](https://docs.astral.sh/uv/reference/cli/#uv-pip-install) 为 Lambda 目标平台 (`x86_64-manylinux2014`) 安装依赖
+
+:::note
+若需切换至 [ARM 架构](https://docs.aws.amazon.com/lambda/latest/dg/foundation-arch.html)，需修改打包目标为 `aarch64-manylinux2014`。
+:::
 
 ## 部署函数
 
-Python Lambda 函数生成器在 `common/constructs` 目录下创建了 CDK 构造。可在 CDK 应用中使用：
-
-```ts
-import { MyProjectMyFunction } from ':my-scope/common-constructs';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    // 将函数添加到堆栈
-    const fn = new MyProjectMyFunction(this, 'MyFunction');
-  }
-}
-```
-
-该构造配置了：
-
-1. AWS Lambda 函数
-2. CloudWatch 日志组
-3. X-Ray 追踪配置
-4. CloudWatch 指标命名空间
-
-该函数可作为任何 Lambda [事件源](https://docs.powertools.aws.dev/lambda/python/latest/utilities/parser/) 的目标：
-
-:::note
-请确保事件源与所选 `eventSource` 选项匹配，以保证事件在处理器函数中正确处理。
-:::
-
-以下示例演示使用 Event Bridge 定时触发 Lambda 函数的 CDK 代码：
-
-```ts
-import { EventPattern, Rule, Schedule } from 'aws-cdk-lib/aws-events';
-import { LambdaFunction } from 'aws-cdk-lib/aws-events-targets';
-import { MyProjectMyFunction } from ':my-scope/common-constructs';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    // 将函数添加到堆栈
-    const fn = new MyProjectMyFunction(this, 'MyFunction');
-
-    // 将函数添加到 EventBridge 任务
-    const eventRule = new Rule(this, 'MyFunctionScheduleRule', {
-      schedule: Schedule.cron({ minute: '15' }),
-      targets: [new LambdaFunction(fn)],
-    });
-  }
-}
-```
+<Snippet name="lambda-function/deploying-your-function" parentHeading="Deploying your Function" />
