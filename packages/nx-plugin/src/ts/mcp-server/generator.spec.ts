@@ -10,6 +10,10 @@ import {
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import {
+  ensureAwsNxPluginConfig,
+  updateAwsNxPluginConfig,
+} from '../../utils/config/utils';
 
 describe('ts#mcp-server generator', () => {
   let tree: Tree;
@@ -839,5 +843,28 @@ describe('ts#mcp-server generator', () => {
         'packages/common/terraform/src/app/mcp-servers/test-project-mcp-server/test-project-mcp-server.tf',
       ),
     ).toBeFalsy();
+  });
+
+  it('should inherit iacProvider from config when set to Inherit', async () => {
+    // Set up config with Terraform provider using utility methods
+    await ensureAwsNxPluginConfig(tree);
+    await updateAwsNxPluginConfig(tree, {
+      iac: {
+        provider: 'Terraform',
+      },
+    });
+
+    await tsMcpServerGenerator(tree, {
+      project: 'test-project',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'Inherit',
+    });
+
+    // Verify Terraform files are created (not CDK constructs)
+    expect(tree.exists('packages/common/terraform')).toBeTruthy();
+    expect(tree.exists('packages/common/constructs')).toBeFalsy();
+    expect(
+      tree.exists('packages/common/terraform/src/core/agent-core/runtime.tf'),
+    ).toBeTruthy();
   });
 });

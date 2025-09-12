@@ -17,6 +17,10 @@ import { joinPathFragments } from '@nx/devkit';
 import { UVPyprojectToml } from '@nxlv/python/src/provider/uv/types';
 import { sortObjectKeys } from '../../utils/object';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
+import {
+  ensureAwsNxPluginConfig,
+  updateAwsNxPluginConfig,
+} from '../../utils/config/utils';
 
 describe('fastapi project generator', () => {
   let tree: Tree;
@@ -828,5 +832,30 @@ describe('fastapi project generator', () => {
         'authorization = "COGNITO_USER_POOLS"',
       );
     });
+  });
+
+  it('should inherit iacProvider from config when set to Inherit', async () => {
+    // Set up config with CDK provider using utility methods
+    await ensureAwsNxPluginConfig(tree);
+    await updateAwsNxPluginConfig(tree, {
+      iac: {
+        provider: 'CDK',
+      },
+    });
+
+    await pyFastApiProjectGenerator(tree, {
+      name: 'test-api',
+      directory: 'apps',
+      computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
+      iacProvider: 'Inherit',
+    });
+
+    // Verify CDK constructs are created (not terraform)
+    expect(tree.exists('packages/common/constructs')).toBeTruthy();
+    expect(tree.exists('packages/common/terraform')).toBeFalsy();
+    expect(
+      tree.exists('packages/common/constructs/src/app/apis/test-api.ts'),
+    ).toBeTruthy();
   });
 });

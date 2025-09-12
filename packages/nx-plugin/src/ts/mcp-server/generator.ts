@@ -29,6 +29,7 @@ import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { addMcpServerInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
 import { getNpmScope } from '../../utils/npm-scope';
 import { addEsbuildBundleTarget } from '../../utils/esbuild';
+import { resolveIacProvider } from '../../utils/iac';
 
 export const TS_MCP_SERVER_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -122,7 +123,8 @@ export const tsMcpServerGenerator = async (
     });
 
     // Add shared constructs
-    await sharedConstructsGenerator(tree, { iacProvider: options.iacProvider });
+    const iacProvider = await resolveIacProvider(tree, options.iacProvider);
+    await sharedConstructsGenerator(tree, { iacProvider });
 
     // Add the construct to deploy the mcp server
     addMcpServerInfra(tree, {
@@ -130,7 +132,7 @@ export const tsMcpServerGenerator = async (
       mcpServerNameClassName: toClassName(name),
       projectName: project.name,
       dockerImageTag,
-      iacProvider: options.iacProvider,
+      iacProvider,
     });
 
     // Add additional dependencies

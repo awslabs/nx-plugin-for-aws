@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { IacProviderOption } from '../../utils/iac';
+
 type EventSource =
   | 'Any'
   | 'AlbModel'
@@ -50,5 +52,5 @@ export interface PyLambdaFunctionGeneratorSchema {
   readonly functionName: string;
   readonly functionPath?: string;
   readonly eventSource?: EventSource;
-  readonly iacProvider: 'CDK' | 'Terraform';
+  readonly iacProvider: IacProviderOption;
 }

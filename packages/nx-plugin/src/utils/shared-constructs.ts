@@ -25,16 +25,17 @@ import {
   SHARED_TERRAFORM_NAME,
 } from './shared-constructs-constants';
 import { readAwsNxPluginConfig } from './config/utils';
+import { IacProvider } from './iac';
 
 export interface SharedConstructsGeneratorOptions {
-  iacProvider?: 'CDK' | 'Terraform';
+  iacProvider: IacProvider;
 }
 
 export async function sharedConstructsGenerator(
   tree: Tree,
-  options: SharedConstructsGeneratorOptions = {},
+  options: SharedConstructsGeneratorOptions,
 ) {
-  const { iacProvider = 'CDK' } = options;
+  const { iacProvider } = options;
   const npmScopePrefix = getNpmScopePrefix(tree);
   updateGitignore(tree);
 

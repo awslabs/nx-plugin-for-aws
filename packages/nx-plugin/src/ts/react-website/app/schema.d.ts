@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { SupportedStyles } from '@nx/react';
+import { IacProviderOption } from '../../../utils/iac';
 
 export interface TsReactWebsiteGeneratorSchema {
   name: string;
@@ -10,5 +11,5 @@ export interface TsReactWebsiteGeneratorSchema {
   skipInstall?: boolean;
   enableTanstackRouter?: boolean;
   enableTailwind?: boolean;
-  iacProvider: 'CDK' | 'Terraform';
+  iacProvider: IacProviderOption;
 }

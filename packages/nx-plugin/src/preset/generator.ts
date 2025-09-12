@@ -104,7 +104,7 @@ export function isAmazonian(): boolean {
 
 export const presetGenerator = async (
   tree: Tree,
-  { addTsPlugin }: PresetGeneratorSchema,
+  { addTsPlugin, iacProvider }: PresetGeneratorSchema,
 ): Promise<GeneratorCallback> => {
   if (
     isAmazonian() &&
@@ -126,6 +126,10 @@ export const presetGenerator = async (
       await updateAwsNxPluginConfig(tree, { tags: [engagementId] });
     }
   }
+
+  // Write IaC provider to plugin config
+  await ensureAwsNxPluginConfig(tree);
+  await updateAwsNxPluginConfig(tree, { iac: { provider: iacProvider } });
 
   await initGenerator(tree, {
     formatter: 'prettier',

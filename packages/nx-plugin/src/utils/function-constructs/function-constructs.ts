@@ -16,6 +16,7 @@ import {
   SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants';
 import { addStarExport } from '../ast';
+import { IacProvider } from '../iac';
 
 export interface AddLambdaFunctionConstructOptions {
   functionProjectName: string;
@@ -32,7 +33,7 @@ export interface AddLambdaFunctionConstructOptions {
 export const addLambdaFunctionInfra = (
   tree: Tree,
   options: AddLambdaFunctionConstructOptions & {
-    iacProvider: 'CDK' | 'Terraform';
+    iacProvider: IacProvider;
   },
 ) => {
   if (options.iacProvider === 'CDK') {

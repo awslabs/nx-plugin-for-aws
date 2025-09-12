@@ -18,8 +18,9 @@ import {
 } from '../shared-constructs-constants';
 import { addStarExport } from '../ast';
 import { withVersions } from '../versions';
+import { IacProvider } from '../iac';
 
-export type IACProvider = { iacProvider: 'CDK' | 'Terraform' };
+type IACProvider = { iacProvider: IacProvider };
 
 export interface AddAgentCoreInfraProps {
   nameClassName: string;
@@ -32,7 +33,7 @@ export interface AddAgentCoreInfraProps {
 
 const addAgentCoreInfra = (
   tree: Tree,
-  options: AddAgentCoreInfraProps & IACProvider,
+  options: AddAgentCoreInfraProps & { iacProvider: IacProvider },
 ) => {
   switch (options.iacProvider) {
     case 'CDK':

@@ -183,7 +183,7 @@ export function Main() {
   });
 
   it('should add generator metric to app.ts', async () => {
-    await sharedConstructsGenerator(tree);
+    await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
 
     // Call the generator function
     await reactGenerator(tree, {

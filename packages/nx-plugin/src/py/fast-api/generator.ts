@@ -41,6 +41,7 @@ import { assignPort } from '../../utils/port';
 import { addPythonBundleTarget } from '../../utils/bundle';
 import { addDependenciesToPyProjectToml } from '../../utils/py';
 import { withPyVersions } from '../../utils/versions';
+import { resolveIacProvider } from '../../utils/iac';
 
 export const FAST_API_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -52,8 +53,10 @@ export const pyFastApiProjectGenerator = async (
   tree: Tree,
   schema: PyFastApiProjectGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  const iacProvider = await resolveIacProvider(tree, schema.iacProvider);
+
   await sharedConstructsGenerator(tree, {
-    iacProvider: schema.iacProvider,
+    iacProvider,
   });
 
   const { dir, normalizedModuleName, fullyQualifiedName } = getPyProjectDetails(
@@ -133,12 +136,12 @@ export const pyFastApiProjectGenerator = async (
       moduleName: normalizedModuleName,
     },
     auth: schema.auth,
-    iacProvider: schema.iacProvider,
+    iacProvider,
   });
 
   // For Terraform, we do not support type-safe integration builders, rather only the single lambda
   // router pattern, and therefore do not need to add depenencies on metadata generation.
-  if (schema.iacProvider === 'CDK') {
+  if (iacProvider === 'CDK') {
     const generatedMetadataDir = joinPathFragments(
       'generated',
       apiNameKebabCase,

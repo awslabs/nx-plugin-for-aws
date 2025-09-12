@@ -16,6 +16,7 @@ import {
   SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants';
 import { addStarExport } from '../ast';
+import { IacProvider } from '../iac';
 
 export interface AddWebsiteInfraOptions {
   websiteProjectName: string;
@@ -30,7 +31,7 @@ export interface AddWebsiteInfraOptions {
  */
 export const addWebsiteInfra = (
   tree: Tree,
-  options: AddWebsiteInfraOptions & { iacProvider: 'CDK' | 'Terraform' },
+  options: AddWebsiteInfraOptions & { iacProvider: IacProvider },
 ) => {
   if (options.iacProvider === 'CDK') {
     addWebsiteCdkConstructs(tree, options);

@@ -33,7 +33,7 @@ describe('shared-constructs utils', () => {
 
   describe('sharedConstructsGenerator', () => {
     it('should generate shared constructs when they do not exist', async () => {
-      await sharedConstructsGenerator(tree);
+      await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
 
       // Check if shared constructs project was created
       expect(
@@ -79,7 +79,7 @@ describe('shared-constructs utils', () => {
     });
 
     it('should add required dependencies when generating shared constructs', async () => {
-      await sharedConstructsGenerator(tree);
+      await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
 
       // Read package.json and check if dependencies were added
       const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
@@ -111,7 +111,7 @@ describe('shared-constructs utils', () => {
       );
       tree.write(markerFilePath, 'This is a marker file');
 
-      await sharedConstructsGenerator(tree);
+      await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
 
       // Check if marker file still exists (meaning the directory wasn't recreated)
       expect(tree.exists(markerFilePath)).toBeTruthy();

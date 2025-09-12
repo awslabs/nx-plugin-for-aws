@@ -17,6 +17,10 @@ import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
 } from '../../utils/shared-constructs-constants';
+import {
+  ensureAwsNxPluginConfig,
+  updateAwsNxPluginConfig,
+} from '../../utils/config/utils';
 
 describe('py#strands-agent generator', () => {
   let tree: Tree;
@@ -926,5 +930,28 @@ dev-dependencies = []
     );
     expect(projectConfig.targets['bundle']).toBeDefined();
     expect(projectConfig.targets['test-project-agent-docker']).toBeDefined();
+  });
+
+  it('should inherit iacProvider from config when set to Inherit', async () => {
+    // Set up config with Terraform provider using utility methods
+    await ensureAwsNxPluginConfig(tree);
+    await updateAwsNxPluginConfig(tree, {
+      iac: {
+        provider: 'Terraform',
+      },
+    });
+
+    await pyStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'Inherit',
+    });
+
+    // Verify Terraform files are created (not CDK constructs)
+    expect(tree.exists('packages/common/terraform')).toBeTruthy();
+    expect(tree.exists('packages/common/constructs')).toBeFalsy();
+    expect(
+      tree.exists('packages/common/terraform/src/core/agent-core/runtime.tf'),
+    ).toBeTruthy();
   });
 });

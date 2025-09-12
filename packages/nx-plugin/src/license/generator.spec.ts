@@ -80,7 +80,7 @@ describe('license generator', () => {
     tree = createTreeUsingTsSolutionSetup();
 
     // Set up test tree with shared constructs
-    await sharedConstructsGenerator(tree);
+    await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
 
     // Call the generator function
     await licenseGenerator(tree, options);

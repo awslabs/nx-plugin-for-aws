@@ -11,6 +11,7 @@ import { vi, describe, it, expect, beforeEach } from 'vitest';
 vi.mock('child_process');
 
 import { execSync } from 'child_process';
+import { readAwsNxPluginConfig } from '../utils/config/utils';
 const mockExecSync = vi.mocked(execSync);
 
 describe('preset generator', () => {
@@ -21,9 +22,24 @@ describe('preset generator', () => {
   });
 
   it('should run successfully', async () => {
-    await presetGenerator(tree, { addTsPlugin: false });
+    await presetGenerator(tree, { addTsPlugin: false, iacProvider: 'CDK' });
 
     snapshotTreeDir(tree, '.');
+  });
+
+  it('should store CDK iac provider in config', async () => {
+    await presetGenerator(tree, {
+      addTsPlugin: false,
+      iacProvider: 'Terraform',
+    });
+
+    expect((await readAwsNxPluginConfig(tree)).iac.provider).toBe('Terraform');
+  });
+
+  it('should store Terraform iac provider in config', async () => {
+    await presetGenerator(tree, { addTsPlugin: false, iacProvider: 'CDK' });
+
+    expect((await readAwsNxPluginConfig(tree)).iac.provider).toBe('CDK');
   });
 });
 

@@ -17,6 +17,10 @@ import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
 } from '../../utils/shared-constructs-constants';
+import {
+  ensureAwsNxPluginConfig,
+  updateAwsNxPluginConfig,
+} from '../../utils/config/utils';
 
 describe('py#mcp-server generator', () => {
   let tree: Tree;
@@ -890,5 +894,28 @@ dev-dependencies = []
     expect(
       projectConfig.targets['test-project-mcp-server-docker'].dependsOn,
     ).toContain('bundle');
+  });
+
+  it('should inherit iacProvider from config when set to Inherit', async () => {
+    // Set up config with CDK provider using utility methods
+    await ensureAwsNxPluginConfig(tree);
+    await updateAwsNxPluginConfig(tree, {
+      iac: {
+        provider: 'CDK',
+      },
+    });
+
+    await pyMcpServerGenerator(tree, {
+      project: 'test-project',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'Inherit',
+    });
+
+    // Verify CDK constructs are created (not terraform)
+    expect(tree.exists('packages/common/constructs')).toBeTruthy();
+    expect(tree.exists('packages/common/terraform')).toBeFalsy();
+    expect(
+      tree.exists('packages/common/constructs/src/core/agent-core/runtime.ts'),
+    ).toBeTruthy();
   });
 });

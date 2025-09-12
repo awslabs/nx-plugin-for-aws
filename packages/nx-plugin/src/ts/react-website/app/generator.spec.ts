@@ -10,6 +10,10 @@ import {
 import { TsReactWebsiteGeneratorSchema } from './schema';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
 import { expectHasMetricTags } from '../../../utils/metrics.spec';
+import {
+  ensureAwsNxPluginConfig,
+  updateAwsNxPluginConfig,
+} from '../../../utils/config/utils';
 
 describe('react-website generator', () => {
   let tree: Tree;
@@ -618,5 +622,29 @@ describe('react-website generator', () => {
         'TestAppWebsiteBucketName',
       );
     });
+  });
+
+  it('should inherit iacProvider from config when set to Inherit', async () => {
+    // Set up config with CDK provider using utility methods
+    await ensureAwsNxPluginConfig(tree);
+    await updateAwsNxPluginConfig(tree, {
+      iac: {
+        provider: 'CDK',
+      },
+    });
+
+    await tsReactWebsiteGenerator(tree, {
+      ...options,
+      iacProvider: 'Inherit',
+    });
+
+    // Verify CDK constructs are created (not terraform)
+    expect(tree.exists('packages/common/constructs')).toBeTruthy();
+    expect(tree.exists('packages/common/terraform')).toBeFalsy();
+    expect(
+      tree.exists(
+        'packages/common/constructs/src/app/static-websites/test-app.ts',
+      ),
+    ).toBeTruthy();
   });
 });

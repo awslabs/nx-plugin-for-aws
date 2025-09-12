@@ -17,6 +17,10 @@ import { joinPathFragments } from '@nx/devkit';
 import { sortObjectKeys } from '../../utils/object';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
 import { UVPyprojectToml } from '@nxlv/python/src/provider/uv/types';
+import {
+  ensureAwsNxPluginConfig,
+  updateAwsNxPluginConfig,
+} from '../../utils/config/utils';
 
 describe('lambda-handler project generator', () => {
   let tree: Tree;
@@ -1015,6 +1019,49 @@ describe('lambda-handler project generator', () => {
 
       // Verify build dependencies
       expect(projectConfig.targets.build.dependsOn).toContain('bundle');
+    });
+
+    it('should inherit iacProvider from config when set to Inherit', async () => {
+      // Set up config with CDK provider using utility methods
+      await ensureAwsNxPluginConfig(tree);
+      await updateAwsNxPluginConfig(tree, {
+        iac: {
+          provider: 'CDK',
+        },
+      });
+
+      tree.write(
+        'apps/test_project/project.json',
+        JSON.stringify({
+          name: 'test-project',
+          root: 'apps/test_project',
+          sourceRoot: 'apps/test_project/test_project',
+          targets: {},
+        }),
+      );
+
+      tree.write(
+        'apps/test_project/pyproject.toml',
+        `[project]
+            dependencies = []
+        `,
+      );
+
+      await pyLambdaFunctionGenerator(tree, {
+        project: 'test-project',
+        functionName: 'test-function',
+        eventSource: 'Any',
+        iacProvider: 'Inherit',
+      });
+
+      // Verify CDK constructs are created (not terraform)
+      expect(tree.exists('packages/common/constructs')).toBeTruthy();
+      expect(tree.exists('packages/common/terraform')).toBeFalsy();
+      expect(
+        tree.exists(
+          'packages/common/constructs/src/app/lambda-functions/test-project-test-function.ts',
+        ),
+      ).toBeTruthy();
     });
   });
 });
