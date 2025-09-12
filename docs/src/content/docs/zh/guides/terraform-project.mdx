@@ -11,7 +11,7 @@ import Link from '@components/link.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 
-[Terraform](https://www.terraform.io/) 是一款开源的基础设施即代码工具，可帮助您安全、可预测地创建、变更和改进基础设施。
+[Terraform](https://www.terraform.io/) 是一款开源的基础设施即代码工具，可帮助您安全且可预测地创建、更改和改进基础设施。
 
 Terraform 基础设施生成器用于创建 Terraform 基础设施项目。生成的应用程序通过 [Checkov](https://www.checkov.io/) 安全检查集成了安全最佳实践。
 
@@ -38,22 +38,22 @@ Terraform 基础设施生成器用于创建 Terraform 基础设施项目。生�
 <FileTree>
 
   - src
-    - main.tf 主 Terraform 配置文件
-    - providers.tf 包含 S3 后端配置的 Provider 配置
+    - main.tf Terraform 主配置文件
+    - providers.tf 包含 S3 后端配置的 Provider 定义
     - variables.tf 输入变量定义
     - outputs.tf 输出值定义
     - env 环境特定变量文件
       - dev.tfvars 开发环境变量
   - bootstrap 远程状态初始化配置
-    - main.tf 状态存储的 S3 桶和策略
+    - main.tf 状态存储的 S3 桶及策略
     - providers.tf AWS provider 配置
     - variables.tf 初始化变量定义
-  - project.json 项目配置和构建目标
+  - project.json 项目配置与构建目标
 
 </FileTree>
 
 :::note
-生成器还会创建 `packages/common/terraform` 库项目，初始仅添加指标模块（创建包含元数据的空 Cloudformation 堆栈），该模块会自动埋点以便 `nx-plugin-for-aws` 团队跟踪使用指标。
+生成器还会创建 `packages/common/terraform` 库，该库初始仅添加了一个指标模块（创建包含元数据的空 Cloudformation 栈），用于自动收集使用指标以便 `nx-plugin-for-aws` 团队进行使用情况追踪。
 :::
 
 ### 库类型
@@ -63,13 +63,13 @@ Terraform 基础设施生成器用于创建 Terraform 基础设施项目。生�
 <FileTree>
 
   - src
-    - main.tf 主 Terraform 模块文件
-  - project.json 项目配置和构建目标
+    - main.tf Terraform 主模块文件
+  - project.json 项目配置与构建目标
 
 </FileTree>
 
 :::tip
-应用项目包含完整的部署能力和远程状态管理，而库项目专为创建可被其他项目复用的 Terraform 模块设计。
+应用项目包含完整的部署能力与远程状态管理，而库项目专为创建可被其他项目引用的可复用 Terraform 模块设计。
 :::
 
 ## 实现 Terraform 基础设施
@@ -100,7 +100,7 @@ Terraform 基础设施生成器用于创建 Terraform 基础设施项目。生�
 
 ### 跨项目依赖
 
-如需引用其他项目（库）中的模块，可以按如下方式操作：
+如需引用其他项目（库）中的模块，可按如下方式操作：
 
 ```
 module "lib_module" {
@@ -108,13 +108,13 @@ module "lib_module" {
 }
 ```
 
-这将自动更新 Nx 依赖图，在消费应用和库之间建立依赖关系。
+这将自动更新 Nx 依赖图，在消费应用与库之间建立依赖关系。
 
 ### 环境配置
 
 在 `src/env/*.tfvars` 文件中配置环境特定变量。
 
-要添加新环境，需创建新的 `src/env/<environment>.tfvars` 文件并定义环境变量，同时在 `project.json` 中为 `apply, destroy, init, plan` 添加新环境配置。例如添加 `prod` 环境：
+要新增环境，请创建 `src/env/<environment>.tfvars` 文件并定义环境变量，同时在 `project.json` 中为 `apply, destroy, init, plan` 添加新环境配置。例如新增 `prod` 环境：
 
 <Tabs>
 <TabItem label="src/env/prod.tfvars">
@@ -167,10 +167,10 @@ region      = "us-west-2"
             "defaultConfiguration": "dev",
             "configurations": {
                 "dev": {
-                    "command": "terraform init -reconfigure -backend-config=\"region=$(aws configure get region)\" -backend-config=\"bucket=$(aws sts get-caller-identity --query Account --output text)-tf-state-$(aws configure get region)\" -backend-config=\"key=dev/terraform.tfstate\""
+                    "command": "terraform init -reconfigure -backend-config=\"region=$(aws configure get region)\" -backend-config=\"bucket=$(aws sts get-caller-identity --query Account --output text)-tf-state-$(aws configure get region)\" -backend-config=\"key=my-scope-my-project/dev/terraform.tfstate\""
                 },
 +                "prod": {
-+                    "command": "terraform init -reconfigure -backend-config=\"region=$(aws configure get region)\" -backend-config=\"bucket=$(aws sts get-caller-identity --query Account --output text)-tf-state-$(aws configure get region)\" -backend-config=\"key=prod/terraform.tfstate\""
++                    "command": "terraform init -reconfigure -backend-config=\"region=$(aws configure get region)\" -backend-config=\"bucket=$(aws sts get-caller-identity --query Account --output text)-tf-state-$(aws configure get region)\" -backend-config=\"key=my-scope-my-project/prod/terraform.tfstate\""
 +                }
             },
             "options": {
@@ -204,26 +204,26 @@ region      = "us-west-2"
 :::tip
 默认所有目标使用 `dev` 环境，但可通过以下方式指定环境：<NxCommands commands={['run tf-infra:apply --configuration=prod']} />
 
-由于状态文件按环境自动分段，您可以随时切换环境。
+由于状态文件按环境自动分段存储，您可以随时切换环境。
 :::
 
-### 远程状态初始化（仅应用项目）
+### 远程状态初始化（仅限应用项目）
 
 对于应用项目，在部署基础设施前需要初始化远程状态后端（创建存储 Terraform 状态文件的 S3 桶）：
 
 <NxCommands commands={['run tf-infra:bootstrap']} />
 
 :::note
-请确保 AWS CLI 配置文件已配置到目标账户/区域。
+请确保 AWS CLI 配置文件已配置至目标账户/区域。
 
-该初始化目标仅适用于应用类型项目。库项目不需要远程状态管理，因为它们设计为可复用模块。
+该初始化目标仅适用于应用类型项目。库项目不需要远程状态管理，因其设计为可复用模块。
 :::
 
 ## 可用目标
 
 可用目标取决于项目类型：
 
-### 通用目标（应用和库）
+### 通用目标（应用与库项目）
 
 #### 验证基础设施
 
@@ -239,11 +239,11 @@ region      = "us-west-2"
 
 #### 安全测试
 
-使用 `test` 目标通过 Checkov 进行基础设施安全检查：
+通过 `test` 目标使用 Checkov 进行基础设施安全检查：
 
 <NxCommands commands={['run tf-infra:test']} />
 
-安全测试结果位于根目录 `dist` 文件夹下的 `dist/packages/<my-terraform-project>/checkov`。
+安全测试结果将输出至根目录 `dist` 文件夹下的 `dist/packages/<my-terraform-project>/checkov`。
 
 ### 应用专属目标
 
@@ -251,11 +251,11 @@ region      = "us-west-2"
 
 #### 基础设施规划
 
-执行变更前可通过 `plan` 目标查看 Terraform 计划：
+执行 `plan` 目标查看 Terraform 变更计划：
 
 <NxCommands commands={['run tf-infra:plan']} />
 
-这将在 `dist/packages/<my-terraform-project>/terraform/dev.tfplan` 生成计划文件。
+该操作将在 `dist/packages/<my-terraform-project>/terraform/dev.tfplan` 生成计划文件。
 
 #### 初始化 Terraform
 
@@ -263,19 +263,19 @@ region      = "us-west-2"
 
 <NxCommands commands={['run tf-infra:init']} />
 
-#### 部署到 AWS
+#### 部署至 AWS
 
-规划完成后，使用 `apply` 目标将基础设施部署到 AWS：
+通过 `apply` 目标将基础设施部署至 AWS：
 
 <NxCommands commands={['run tf-infra:apply']} />
 
 :::tip
-该命令会应用 `plan` 目标生成的计划文件，请确保先执行 `plan` 查看变更。
+该命令将应用 `plan` 目标生成的计划文件。请务必先执行 `plan` 以审查变更。
 :::
 
 #### 获取输出值
 
-从 Terraform 配置中获取输出值：
+通过 `output` 目标获取 Terraform 配置的输出值：
 
 <NxCommands commands={['run tf-infra:output']} />
 
@@ -286,7 +286,7 @@ region      = "us-west-2"
 <NxCommands commands={['run tf-infra:destroy']} />
 
 :::caution
-这将永久删除该 Terraform 配置管理的所有资源，请谨慎使用！
+该操作将永久删除此 Terraform 配置管理的所有资源！请谨慎使用！
 :::
 
 #### 销毁初始化资源
@@ -297,4 +297,4 @@ region      = "us-west-2"
 
 ## 更多信息
 
-有关 Terraform 的更多信息，请参考 [Terraform 文档](https://www.terraform.io/docs) 和 [AWS Provider 文档](https://registry.terraform.io/providers/hashicorp/aws/latest/docs)。
+有关 Terraform 的更多信息，请参考 [Terraform 官方文档](https://www.terraform.io/docs) 和 [AWS Provider 文档](https://registry.terraform.io/providers/hashicorp/aws/latest/docs)。

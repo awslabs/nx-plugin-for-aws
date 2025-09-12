@@ -27,7 +27,7 @@ Puedes generar un nuevo proyecto Terraform de dos formas:
 
 <GeneratorParameters generator="terraform#project" />
 
-## Salida del generador
+## Resultado del generador
 
 El generador crea diferentes estructuras de archivos según el tipo de proyecto:
 
@@ -42,18 +42,18 @@ Para proyectos de aplicación (`--type=application`), el generador crea una apli
     - providers.tf Configuración de proveedores con backend S3
     - variables.tf Definiciones de variables de entrada
     - outputs.tf Definiciones de valores de salida
-    - env Archivos de variables específicas por entorno
+    - env Archivos de variables específicas del entorno
       - dev.tfvars Variables de entorno de desarrollo
   - bootstrap Configuración de bootstrap para estado remoto
     - main.tf Bucket S3 y políticas para almacenamiento de estado
     - providers.tf Configuración del proveedor AWS
-    - variables.tf Definiciones de variables para bootstrap
-  - project.json Configuración del proyecto y objetivos de build
+    - variables.tf Definiciones de variables de bootstrap
+  - project.json Configuración del proyecto y objetivos de construcción
 
 </FileTree>
 
 :::note
-El generador también crea una biblioteca `packages/common/terraform` que inicialmente solo agrega un módulo de métricas (crea un stack CloudFormation vacío con metadatos) que se instrumenta automáticamente para que el equipo de `nx-plugin-for-aws` pueda rastrear métricas de uso.
+El generador también crea una biblioteca `packages/common/terraform` que inicialmente solo agrega un módulo de métricas (crea una pila CloudFormation vacía con metadatos) que se instrumenta automáticamente para que el equipo `nx-plugin-for-aws` pueda rastrear métricas de uso.
 :::
 
 ### Tipo Biblioteca
@@ -64,7 +64,7 @@ Para proyectos de biblioteca (`--type=library`), el generador crea una estructur
 
   - src
     - main.tf Archivo principal del módulo Terraform
-  - project.json Configuración del proyecto y objetivos de build
+  - project.json Configuración del proyecto y objetivos de construcción
 
 </FileTree>
 
@@ -100,7 +100,7 @@ Puedes comenzar a escribir tu infraestructura Terraform en `src/main.tf`, por ej
 
 ### Dependencias entre proyectos
 
-Si deseas ejecutar un módulo de un proyecto separado (lib), puedes hacerlo de la siguiente manera:
+Si deseas ejecutar un módulo de otro proyecto (biblioteca), puedes hacerlo de la siguiente manera:
 
 ```
 module "lib_module" {
@@ -110,16 +110,16 @@ module "lib_module" {
 
 Esto actualizará automáticamente el grafo de Nx para agregar una dependencia entre tu aplicación consumidora y tu biblioteca.
 
-### Configuración de entornos
+### Configuración del entorno
 
-Configura variables específicas por entorno en los archivos `src/env/*.tfvars`.
+Configura variables específicas del entorno en los archivos `src/env/*.tfvars`.
 
-Para agregar nuevos entornos, crea un nuevo archivo `src/env/<entorno>.tfvars` con las variables específicas del entorno y agrega nuevas entradas para `apply, destroy, init, plan` en el `project.json` para la nueva configuración de entorno. Por ejemplo, supongamos que queremos agregar un entorno `prod`:
+Para agregar nuevos entornos, crea un nuevo archivo `src/env/<entorno>.tfvars` con las variables específicas y agrega nuevas entradas para `apply, destroy, init, plan` en el `project.json` para la nueva configuración. Por ejemplo, supongamos que queremos agregar un entorno `prod`:
 
 <Tabs>
 <TabItem label="src/env/prod.tfvars">
 ```hcl
-# Variables de entorno de producción
+# Production environment variables
 environment = "prod"
 region      = "us-west-2"
 ```
@@ -167,10 +167,10 @@ region      = "us-west-2"
             "defaultConfiguration": "dev",
             "configurations": {
                 "dev": {
-                    "command": "terraform init -reconfigure -backend-config=\"region=$(aws configure get region)\" -backend-config=\"bucket=$(aws sts get-caller-identity --query Account --output text)-tf-state-$(aws configure get region)\" -backend-config=\"key=dev/terraform.tfstate\""
+                    "command": "terraform init -reconfigure -backend-config=\"region=$(aws configure get region)\" -backend-config=\"bucket=$(aws sts get-caller-identity --query Account --output text)-tf-state-$(aws configure get region)\" -backend-config=\"key=my-scope-my-project/dev/terraform.tfstate\""
                 },
 +                "prod": {
-+                    "command": "terraform init -reconfigure -backend-config=\"region=$(aws configure get region)\" -backend-config=\"bucket=$(aws sts get-caller-identity --query Account --output text)-tf-state-$(aws configure get region)\" -backend-config=\"key=prod/terraform.tfstate\""
++                    "command": "terraform init -reconfigure -backend-config=\"region=$(aws configure get region)\" -backend-config=\"bucket=$(aws sts get-caller-identity --query Account --output text)-tf-state-$(aws configure get region)\" -backend-config=\"key=my-scope-my-project/prod/terraform.tfstate\""
 +                }
             },
             "options": {
@@ -202,44 +202,44 @@ region      = "us-west-2"
 </Tabs>
 
 :::tip
-Por defecto, todos los objetivos asumen el entorno `dev`, pero puedes especificar un entorno de la siguiente manera: <NxCommands commands={['run tf-infra:apply --configuration=prod']} />
+Por defecto, todos los objetivos asumen el entorno `dev`, pero puedes especificar un entorno con: <NxCommands commands={['run tf-infra:apply --configuration=prod']} />
 
-También puedes cambiar de entorno en cualquier momento ya que el estado segmenta automáticamente el tfstate entre entornos.
+Puedes cambiar de entorno en cualquier momento ya que el estado segmenta automáticamente el tfstate entre entornos.
 :::
 
-### Bootstrap de estado remoto (Solo proyectos de aplicación)
+### Bootstrap de estado remoto (solo proyectos aplicación)
 
-Para proyectos de aplicación, antes de desplegar tu infraestructura, necesitas inicializar el backend de estado remoto. Esto crea un bucket S3 para almacenar tus archivos de estado de Terraform:
+Para proyectos de aplicación, antes de desplegar tu infraestructura, necesitas ejecutar el bootstrap del backend de estado remoto. Esto crea un bucket S3 para almacenar tus archivos de estado de Terraform:
 
 <NxCommands commands={['run tf-infra:bootstrap']} />
 
 :::note
 Asegúrate de que tu perfil de AWS CLI esté configurado para la cuenta/región donde deseas desplegar los recursos de bootstrap.
 
-El objetivo bootstrap solo está disponible para proyectos de tipo aplicación. Los proyectos de biblioteca no requieren gestión de estado remoto ya que están diseñados para ser módulos reutilizables.
+El objetivo bootstrap solo está disponible para proyectos de tipo aplicación. Los proyectos biblioteca no requieren gestión de estado remoto ya que están diseñados para ser módulos reutilizables.
 :::
 
 ## Objetivos disponibles
 
 Los objetivos disponibles dependen del tipo de proyecto:
 
-### Objetivos comunes (Aplicación y Biblioteca)
+### Objetivos comunes (aplicación y biblioteca)
 
 #### Validar tu infraestructura
 
-Puedes validar tu configuración Terraform usando el objetivo `validate`:
+Puedes validar tu configuración Terraform con el objetivo `validate`:
 
 <NxCommands commands={['run tf-infra:validate']} />
 
 #### Formatear tu código
 
-Formatea tu código Terraform usando el objetivo `fmt`:
+Formatea tu código Terraform con el objetivo `fmt`:
 
 <NxCommands commands={['run tf-infra:fmt']} />
 
 #### Pruebas de seguridad
 
-Ejecuta verificaciones de seguridad en tu infraestructura usando Checkov con el objetivo `test`:
+Ejecuta verificaciones de seguridad en tu infraestructura con Checkov usando el objetivo `test`:
 
 <NxCommands commands={['run tf-infra:test']} />
 
@@ -265,7 +265,7 @@ Inicializa tu directorio de trabajo de Terraform con el objetivo `init`:
 
 #### Desplegar en AWS
 
-Después de planificar, puedes desplegar tu infraestructura en AWS usando el objetivo `apply`:
+Después de planificar, puedes desplegar tu infraestructura en AWS con el objetivo `apply`:
 
 <NxCommands commands={['run tf-infra:apply']} />
 
@@ -273,7 +273,7 @@ Después de planificar, puedes desplegar tu infraestructura en AWS usando el obj
 El comando anterior aplica el plan creado por el objetivo `plan`. Asegúrate de ejecutar `plan` primero para revisar los cambios.
 :::
 
-#### Obtener salidas
+#### Obtener outputs
 
 Recupera valores de salida de tu configuración Terraform:
 
@@ -286,15 +286,15 @@ Cuando necesites eliminar tu infraestructura, usa el objetivo `destroy`:
 <NxCommands commands={['run tf-infra:destroy']} />
 
 :::caution
-¡Esto eliminará permanentemente todos los recursos gestionados por esta configuración de Terraform! Usa con precaución.
+Esto eliminará permanentemente todos los recursos gestionados por esta configuración Terraform. ¡Usa con precaución!
 :::
 
 #### Destruir recursos de bootstrap
 
-Para limpiar los recursos de bootstrap (bucket S3 para almacenamiento de estado):
+Para eliminar los recursos de bootstrap (bucket S3 para almacenamiento de estado):
 
 <NxCommands commands={['run tf-infra:bootstrap-destroy']} />
 
 ## Más información
 
-Para más información sobre Terraform, consulta la [Documentación de Terraform](https://www.terraform.io/docs) y la [Documentación del Proveedor AWS](https://registry.terraform.io/providers/hashicorp/aws/latest/docs).
+Para más información sobre Terraform, consulta la [Documentación de Terraform](https://www.terraform.io/docs) y la [Documentación del proveedor AWS](https://registry.terraform.io/providers/hashicorp/aws/latest/docs).
