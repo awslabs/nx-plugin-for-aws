@@ -7,10 +7,13 @@ import { FileTree } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
+import NxCommands from '@components/nx-commands.astro';
 
 The Python Lambda Function generator provides the ability to add a lambda function to an existing python project.
 
-This generator creates a new python lambda handler with AWS CDK infrastructure setup. The generated backend uses AWS Lambda for serverless deployment, with optional type-safety using the [Parser from AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/utilities/parser/). It sets up [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/) for observability, including logging, AWS X-Ray tracing and Cloudwatch Metrics.
+This generator creates a new python lambda handler with AWS CDK or Terraform infrastructure setup. The generated backend uses AWS Lambda for serverless deployment, with optional type-safety using the [Parser from AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/utilities/parser/). It sets up [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/) for observability, including logging, AWS X-Ray tracing and Cloudwatch Metrics.
 
 ## Usage
 
@@ -35,8 +38,6 @@ The generator will add the following files to your project:
 
 </FileTree>
 
-The generator will also create CDK constructs which can be used to deploy your function, which reside in the `packages/common/constructs` directory.
-
 If the `functionPath` option is provided, the generater will add the necessary files to the specified path:
 
 <FileTree>
@@ -46,6 +47,21 @@ If the `functionPath` option is provided, the generater will add the necessary f
     - \<function-name>.py Function implementation
 
 </FileTree>
+
+### Infrastructure
+
+<Snippet name="shared-constructs" />
+
+The generator creates infrastructure as code for deploying your function based on your selected `iacProvider`:
+
+<Infrastructure>
+<Fragment slot="cdk">
+The generator creates CDK constructs which can be used to deploy your function, which reside in the `packages/common/constructs` directory.
+</Fragment>
+<Fragment slot="terraform">
+The generator creates a Terraform module which can be used to deploy your function, which resides in the `packages/common/terraform/src/app/lambda-functions/<function-name>` directory.
+</Fragment>
+</Infrastructure>
 
 ## Implementing your Function
 
@@ -139,7 +155,7 @@ Default metrics include:
 - Success/failure counts
 - Cold start metrics
 
-#### Type Safety
+### Type Safety
 
 If you chose an `eventSource` when generating your lambda function, your function is instrumented with [`@event_parser` from AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/utilities/parser/). For example:
 
@@ -157,51 +173,25 @@ If you have custom data nested within an event, for example a DynamoDB stream or
 
 If you do not wish to type your event, you can just select `Any` for your `eventSource`.
 
-## Deploying your Function
+## Bundling
 
-The Python Lambda Function generator creates a CDK construct for deploying your function in the `common/constructs` folder. You can use this in a CDK application:
+The generator automatically configures Python bundling for Lambda deployment packages using [uv](https://docs.astral.sh/uv/):
 
-```ts
-import { MyProjectMyFunction } from ':my-scope/common-constructs';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    // Add the function to your stack
-    const fn = new MyProjectMyFunction(this, 'MyFunction');
-  }
-}
-```
-
-This sets up:
-
-1. AWS Lambda function
-2. CloudWatch log group
-3. X-Ray tracing configuration
-4. CloudWatch metrics namespace
-
-This function can then be used as a target for any lambda [event source](https://docs.powertools.aws.dev/lambda/python/latest/utilities/parser/):
+<NxCommands commands={['run <project-name>:bundle']} />
 
 :::note
-Ensure the event source matches the selected `eventSource` option to ensure the event is properly handled within your handler function.
+This bundles the whole project as the deployment package. To minimise deployment size, you may wish to split multiple lambda functions over multiple Python projects generated with the <Link path="guides/python-project">`py#project`</Link> generator.
 :::
 
-The example below demonstrates the CDK code for invoking a your lambda function on a schedule using Event Bridge:
+This process uses:
 
-```ts
-import { EventPattern, Rule, Schedule } from 'aws-cdk-lib/aws-events';
-import { LambdaFunction } from 'aws-cdk-lib/aws-events-targets';
-import { MyProjectMyFunction } from ':my-scope/common-constructs';
+1. [`uv export`](https://docs.astral.sh/uv/reference/cli/#uv-export) to export your Python dependencies to a `requirements.txt` file
+2. [`uv pip install`](https://docs.astral.sh/uv/reference/cli/#uv-pip-install) to install dependencies for the target platform (`x86_64-manylinux2014`) for Lambda deployment
 
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    // Add the function to your stack
-    const fn = new MyProjectMyFunction(this, 'MyFunction');
+:::note
+If you change your [lambda architecture to ARM](https://docs.aws.amazon.com/lambda/latest/dg/foundation-arch.html), you will need to edit your bundle target to use the `aarch64-manylinux2014` target.
+:::
 
-    // Add the function to an EventBridge task
-    const eventRule = new Rule(this, 'MyFunctionScheduleRule', {
-      schedule: Schedule.cron({ minute: '15' }),
-      targets: [new LambdaFunction(fn)],
-    });
-  }
-}
-```
+## Deploying your Function
+
+<Snippet name="lambda-function/deploying-your-function" parentHeading="Deploying your Function" />

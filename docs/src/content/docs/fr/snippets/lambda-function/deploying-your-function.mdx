@@ -1,0 +1,117 @@
+---
+title: "Déploiement de votre fonction"
+---
+
+
+
+import Infrastructure from '@components/infrastructure.astro';
+
+Ce générateur crée une infrastructure CDK ou Terraform sous forme de code en fonction du `iacProvider` sélectionné. Vous pouvez l'utiliser pour déployer votre fonction.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Ce générateur crée un construct CDK pour déployer votre fonction dans le dossier `common/constructs`. Vous pouvez l'utiliser dans une application CDK :
+
+```typescript {1, 6}
+import { MyProjectMyFunction } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    // Ajoute la fonction à votre stack
+    const fn = new MyProjectMyFunction(this, 'MyFunction');
+  }
+}
+```
+
+Ceci configure :
+
+1. Une fonction AWS Lambda
+2. Un groupe de logs CloudWatch
+3. La configuration du tracing X-Ray
+4. Un espace de noms pour les métriques CloudWatch
+
+Cette fonction peut ensuite être utilisée comme cible pour n'importe quelle [source d'événement](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/) lambda :
+
+:::note
+Vérifiez que la source d'événement correspond à l'option `eventSource` sélectionnée pour garantir un traitement correct des événements dans votre fonction de gestion.
+:::
+
+L'exemple ci-dessous montre le code CDK pour invoquer votre fonction lambda selon un calendrier avec EventBridge :
+
+```typescript
+import { Rule, Schedule } from 'aws-cdk-lib/aws-events';
+import { LambdaFunction } from 'aws-cdk-lib/aws-events-targets';
+import { MyProjectMyFunction } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    // Ajoute la fonction à votre stack
+    const fn = new MyProjectMyFunction(this, 'MyFunction');
+
+    // Ajoute la fonction à une règle planifiée EventBridge
+    const eventRule = new Rule(this, 'MyFunctionScheduleRule', {
+      schedule: Schedule.cron({ minute: '15' }),
+      targets: [new LambdaFunction(fn)],
+    });
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+Ce générateur crée un module Terraform pour déployer votre fonction dans le dossier `common/terraform`. Vous pouvez l'utiliser dans une configuration Terraform :
+
+```hcl {2}
+module "my_project_my_function" {
+  source = "../../common/terraform/src/app/lambda-functions/my-project-my-function"
+
+  # Variables d'environnement pour la fonction Lambda
+  env = {
+    SOME_VARIABLE = "some value"
+  }
+
+  # Politiques IAM supplémentaires si nécessaire
+  additional_iam_policy_statements = [
+    # Ajoutez les permissions supplémentaires requises
+  ]
+}
+```
+
+Ceci configure :
+
+1. Une fonction AWS Lambda
+2. Un groupe de logs CloudWatch
+3. La configuration du tracing X-Ray
+4. Un espace de noms pour les métriques CloudWatch
+
+Cette fonction peut ensuite être utilisée comme cible pour n'importe quelle source d'événement lambda. L'exemple ci-dessous montre le code Terraform pour invoquer votre fonction lambda selon un calendrier avec EventBridge :
+
+```hcl
+# Règle EventBridge pour exécution planifiée
+resource "aws_cloudwatch_event_rule" "my_function_schedule" {
+  name                = "my-function-schedule"
+  description         = "Déclenche la fonction toutes les 15 minutes"
+  schedule_expression = "cron(15 * * * ? *)"
+}
+
+# Cible EventBridge
+resource "aws_cloudwatch_event_target" "lambda_target" {
+  rule      = aws_cloudwatch_event_rule.my_function_schedule.name
+  target_id = "MyFunctionTarget"
+  arn       = module.my_project_my_function.function_arn
+}
+
+# Permission pour EventBridge d'invoquer la fonction Lambda
+resource "aws_lambda_permission" "allow_eventbridge" {
+  statement_id  = "AllowExecutionFromEventBridge"
+  action        = "lambda:InvokeFunction"
+  function_name = module.my_project_my_function.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.my_function_schedule.arn
+}
+```
+
+:::note
+Vérifiez que la source d'événement correspond à l'option `eventSource` sélectionnée pour garantir un traitement correct des événements dans votre fonction de gestion.
+:::
+</Fragment>
+</Infrastructure>

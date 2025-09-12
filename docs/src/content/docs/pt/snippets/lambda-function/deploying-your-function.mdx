@@ -1,0 +1,117 @@
+---
+title: "Implantando sua Função"
+---
+
+
+
+import Infrastructure from '@components/infrastructure.astro';
+
+Este gerador cria infraestrutura como código CDK ou Terraform com base no `iacProvider` selecionado. Você pode usar isso para implantar sua função.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Este gerador cria um construct CDK para implantar sua função na pasta `common/constructs`. Você pode usar isso em uma aplicação CDK:
+
+```typescript {1, 6}
+import { MyProjectMyFunction } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    // Adiciona a função à sua stack
+    const fn = new MyProjectMyFunction(this, 'MyFunction');
+  }
+}
+```
+
+Isso configura:
+
+1. Função AWS Lambda
+2. Grupo de logs do CloudWatch
+3. Configuração de rastreamento do X-Ray
+4. Namespace de métricas do CloudWatch
+
+Esta função pode ser usada como destino para qualquer [fonte de evento lambda](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/):
+
+:::note
+Certifique-se de que a fonte de evento corresponda à opção `eventSource` selecionada para garantir que o evento seja processado corretamente dentro de sua função handler.
+:::
+
+O exemplo abaixo demonstra o código CDK para invocar sua função lambda em um agendamento usando o EventBridge:
+
+```typescript
+import { Rule, Schedule } from 'aws-cdk-lib/aws-events';
+import { LambdaFunction } from 'aws-cdk-lib/aws-events-targets';
+import { MyProjectMyFunction } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    // Adiciona a função à sua stack
+    const fn = new MyProjectMyFunction(this, 'MyFunction');
+
+    // Adiciona a função a uma regra agendada do EventBridge
+    const eventRule = new Rule(this, 'MyFunctionScheduleRule', {
+      schedule: Schedule.cron({ minute: '15' }),
+      targets: [new LambdaFunction(fn)],
+    });
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+Este gerador cria um módulo Terraform para implantar sua função na pasta `common/terraform`. Você pode usar isso em uma configuração Terraform:
+
+```hcl {2}
+module "my_project_my_function" {
+  source = "../../common/terraform/src/app/lambda-functions/my-project-my-function"
+
+  # Variáveis de ambiente para a função Lambda
+  env = {
+    SOME_VARIABLE = "some value"
+  }
+
+  # Políticas IAM adicionais se necessário
+  additional_iam_policy_statements = [
+    # Adicione quaisquer permissões adicionais necessárias
+  ]
+}
+```
+
+Isso configura:
+
+1. Função AWS Lambda
+2. Grupo de logs do CloudWatch
+3. Configuração de rastreamento do X-Ray
+4. Namespace de métricas do CloudWatch
+
+Esta função pode ser usada como destino para qualquer fonte de evento lambda. O exemplo abaixo demonstra o código Terraform para invocar sua função lambda em um agendamento usando o EventBridge:
+
+```hcl
+# Regra do EventBridge para execução agendada
+resource "aws_cloudwatch_event_rule" "my_function_schedule" {
+  name                = "my-function-schedule"
+  description         = "Aciona minha função a cada 15 minutos"
+  schedule_expression = "cron(15 * * * ? *)"
+}
+
+# Target do EventBridge
+resource "aws_cloudwatch_event_target" "lambda_target" {
+  rule      = aws_cloudwatch_event_rule.my_function_schedule.name
+  target_id = "MyFunctionTarget"
+  arn       = module.my_project_my_function.function_arn
+}
+
+# Permissão para o EventBridge invocar a função Lambda
+resource "aws_lambda_permission" "allow_eventbridge" {
+  statement_id  = "AllowExecutionFromEventBridge"
+  action        = "lambda:InvokeFunction"
+  function_name = module.my_project_my_function.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.my_function_schedule.arn
+}
+```
+
+:::note
+Certifique-se de que a fonte de evento corresponda à opção `eventSource` selecionada para garantir que o evento seja processado corretamente dentro de sua função handler.
+:::
+</Fragment>
+</Infrastructure>

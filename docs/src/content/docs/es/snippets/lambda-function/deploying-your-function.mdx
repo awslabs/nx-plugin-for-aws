@@ -1,0 +1,117 @@
+---
+title: "Implementando tu Función"
+---
+
+
+
+import Infrastructure from '@components/infrastructure.astro';
+
+Este generador crea infraestructura como código de CDK o Terraform según el `iacProvider` seleccionado. Puedes usarlo para implementar tu función.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Este generador crea un constructo de CDK para implementar tu función en la carpeta `common/constructs`. Puedes usarlo en una aplicación de CDK:
+
+```typescript {1, 6}
+import { MyProjectMyFunction } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    // Agrega la función a tu stack
+    const fn = new MyProjectMyFunction(this, 'MyFunction');
+  }
+}
+```
+
+Esto configura:
+
+1. Función AWS Lambda
+2. Grupo de logs de CloudWatch
+3. Configuración de trazado X-Ray
+4. Namespace de métricas en CloudWatch
+
+Esta función puede usarse como destino para cualquier [origen de eventos](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/) de Lambda:
+
+:::note
+Asegúrate de que el origen del evento coincida con la opción `eventSource` seleccionada para garantizar un manejo adecuado del evento dentro de tu función handler.
+:::
+
+El siguiente ejemplo muestra el código CDK para invocar tu función Lambda en un horario programado usando EventBridge:
+
+```typescript
+import { Rule, Schedule } from 'aws-cdk-lib/aws-events';
+import { LambdaFunction } from 'aws-cdk-lib/aws-events-targets';
+import { MyProjectMyFunction } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    // Agrega la función a tu stack
+    const fn = new MyProjectMyFunction(this, 'MyFunction');
+
+    // Agrega la función a una regla programada de EventBridge
+    const eventRule = new Rule(this, 'MyFunctionScheduleRule', {
+      schedule: Schedule.cron({ minute: '15' }),
+      targets: [new LambdaFunction(fn)],
+    });
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+Este generador crea un módulo de Terraform para implementar tu función en la carpeta `common/terraform`. Puedes usarlo en una configuración de Terraform:
+
+```hcl {2}
+module "my_project_my_function" {
+  source = "../../common/terraform/src/app/lambda-functions/my-project-my-function"
+
+  # Variables de entorno para la función Lambda
+  env = {
+    SOME_VARIABLE = "some value"
+  }
+
+  # Políticas IAM adicionales si son necesarias
+  additional_iam_policy_statements = [
+    # Agrega los permisos adicionales que requiera tu función
+  ]
+}
+```
+
+Esto configura:
+
+1. Función AWS Lambda
+2. Grupo de logs de CloudWatch
+3. Configuración de trazado X-Ray
+4. Namespace de métricas en CloudWatch
+
+Esta función puede usarse como destino para cualquier origen de eventos de Lambda. El siguiente ejemplo muestra el código Terraform para invocar tu función Lambda en un horario programado usando EventBridge:
+
+```hcl
+# Regla de EventBridge para ejecución programada
+resource "aws_cloudwatch_event_rule" "my_function_schedule" {
+  name                = "my-function-schedule"
+  description         = "Ejecuta mi función cada 15 minutos"
+  schedule_expression = "cron(15 * * * ? *)"
+}
+
+# Target de EventBridge
+resource "aws_cloudwatch_event_target" "lambda_target" {
+  rule      = aws_cloudwatch_event_rule.my_function_schedule.name
+  target_id = "MyFunctionTarget"
+  arn       = module.my_project_my_function.function_arn
+}
+
+# Permiso para que EventBridge invoque la función Lambda
+resource "aws_lambda_permission" "allow_eventbridge" {
+  statement_id  = "AllowExecutionFromEventBridge"
+  action        = "lambda:InvokeFunction"
+  function_name = module.my_project_my_function.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.my_function_schedule.arn
+}
+```
+
+:::note
+Asegúrate de que el origen del evento coincida con la opción `eventSource` seleccionada para garantizar un manejo adecuado del evento dentro de tu función handler.
+:::
+</Fragment>
+</Infrastructure>

@@ -1,0 +1,150 @@
+variable "tags" {
+  description = "Tags to apply to resources"
+  type        = map(string)
+  default     = {}
+}
+
+variable "env" {
+  description = "Additional environment variables for the Lambda function"
+  type        = map(string)
+  default     = {}
+}
+
+variable "additional_iam_policy_statements" {
+  description = "Additional IAM policy statements to attach to the Lambda role"
+  type = list(object({
+    Effect   = string
+    Action   = list(string)
+    Resource = list(string)
+  }))
+  default = []
+}
+
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
+locals {
+  aws_account_id = data.aws_caller_identity.current.account_id
+  aws_region     = data.aws_region.current.name
+}
+
+resource "random_string" "suffix" {
+  length  = 8
+  special = false
+  upper   = false
+}
+
+resource "aws_iam_role" "lambda_role" {
+  name = "<%- functionNameKebabCase %>-role-${random_string.suffix.result}"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "LambdaAssumeRolePolicy"
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_iam_policy" "lambda_policy" {
+  name        = "<%- functionNameKebabCase %>-policy-${random_string.suffix.result}"
+  description = "Policy for <%- functionNameKebabCase %> Lambda function"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = concat([
+      {
+        Sid    = "CloudWatchLogsAccess"
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Resource = [
+          "arn:aws:logs:${local.aws_region}:${local.aws_account_id}:log-group:/aws/lambda/<%- functionNameKebabCase %>-${random_string.suffix.result}:*"
+        ]
+      },
+      {
+        Sid    = "XRayAccess"
+        Effect = "Allow"
+        Action = [
+          "xray:PutTraceSegments",
+          "xray:PutTelemetryRecords"
+        ]
+        Resource = ["*"]
+      }
+    ], var.additional_iam_policy_statements)
+  })
+
+  tags = var.tags
+}
+
+# Attach the policy to the role
+resource "aws_iam_role_policy_attachment" "lambda_policy_attachment" {
+  role       = aws_iam_role.lambda_role.name
+  policy_arn = aws_iam_policy.lambda_policy.arn
+}
+
+data "archive_file" "lambda_zip" {
+  type        = "zip"
+  source_dir  = "${path.module}/../../../../../../../<%- bundlePathFromRoot %>"
+  output_path = "${path.module}/../../../../../../../dist/packages/common/terraform/lambda-functions/<%- functionNameKebabCase %>/lambda.zip"
+}
+
+resource "aws_lambda_function" "lambda_function" {
+  #checkov:skip=CKV_AWS_117:Lambda function does not need to be in VPC for this use case
+  #checkov:skip=CKV_AWS_116:Dead Letter Queue not required for this simple use case
+  #checkov:skip=CKV_AWS_272:Code signing not required for this use case
+  #checkov:skip=CKV_AWS_115:Concurrent execution limit not required for this use case
+  #checkov:skip=CKV_AWS_173:Lambda environment variables encrypted by managed key
+  filename         = data.archive_file.lambda_zip.output_path
+  function_name    = "<%- functionNameKebabCase %>-${random_string.suffix.result}"
+  role            = aws_iam_role.lambda_role.arn
+  handler         = "<%- handler %>"
+  source_code_hash = data.archive_file.lambda_zip.output_base64sha256
+  runtime         = "<%- runtime %>"
+  timeout         = 30
+
+  tracing_config {
+    mode = "Active"
+  }
+
+  environment {
+    variables = merge({
+      AWS_CONNECTION_REUSE_ENABLED = "1"
+    }, var.env)
+  }
+
+  tags = var.tags
+
+  depends_on = [aws_iam_role_policy_attachment.lambda_policy_attachment]
+}
+
+output "function_name" {
+  description = "Name of the Lambda function"
+  value       = aws_lambda_function.lambda_function.function_name
+}
+
+output "function_arn" {
+  description = "ARN of the Lambda function"
+  value       = aws_lambda_function.lambda_function.arn
+}
+
+output "role_arn" {
+  description = "ARN of the Lambda execution role"
+  value       = aws_iam_role.lambda_role.arn
+}
+
+output "role_name" {
+  description = "Name of the Lambda execution role"
+  value       = aws_iam_role.lambda_role.name
+}

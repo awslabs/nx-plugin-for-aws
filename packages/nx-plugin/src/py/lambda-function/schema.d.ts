@@ -50,4 +50,5 @@ export interface PyLambdaFunctionGeneratorSchema {
   readonly functionName: string;
   readonly functionPath?: string;
   readonly eventSource?: EventSource;
+  readonly iacProvider: 'CDK' | 'Terraform';
 }

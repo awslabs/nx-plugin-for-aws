@@ -1,0 +1,117 @@
+---
+title: "部署您的函数"
+---
+
+
+
+import Infrastructure from '@components/infrastructure.astro';
+
+该生成器会根据您选择的 `iacProvider` 创建 CDK 或 Terraform 基础设施即代码。您可以用它来部署函数。
+
+<Infrastructure>
+<Fragment slot="cdk">
+该生成器会在 `common/constructs` 目录下创建用于部署函数的 CDK 构造体。您可以在 CDK 应用中使用：
+
+```typescript {1, 6}
+import { MyProjectMyFunction } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    // 将函数添加到堆栈
+    const fn = new MyProjectMyFunction(this, 'MyFunction');
+  }
+}
+```
+
+这会配置：
+
+1. AWS Lambda 函数
+2. CloudWatch 日志组
+3. X-Ray 追踪配置
+4. CloudWatch 指标命名空间
+
+该函数可作为任何 Lambda [事件源](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/)的目标：
+
+:::note
+请确保事件源与选定的 `eventSource` 选项匹配，以保证事件在处理器函数中正确处理。
+:::
+
+以下示例演示了使用 EventBridge 定时调用 Lambda 函数的 CDK 代码：
+
+```typescript
+import { Rule, Schedule } from 'aws-cdk-lib/aws-events';
+import { LambdaFunction } from 'aws-cdk-lib/aws-events-targets';
+import { MyProjectMyFunction } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    // 将函数添加到堆栈
+    const fn = new MyProjectMyFunction(this, 'MyFunction');
+
+    // 将函数添加到 EventBridge 定时规则
+    const eventRule = new Rule(this, 'MyFunctionScheduleRule', {
+      schedule: Schedule.cron({ minute: '15' }),
+      targets: [new LambdaFunction(fn)],
+    });
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+该生成器会在 `common/terraform` 目录下创建用于部署函数的 Terraform 模块。您可以在 Terraform 配置中使用：
+
+```hcl {2}
+module "my_project_my_function" {
+  source = "../../common/terraform/src/app/lambda-functions/my-project-my-function"
+
+  # Lambda 函数的环境变量
+  env = {
+    SOME_VARIABLE = "some value"
+  }
+
+  # 额外需要的 IAM 策略
+  additional_iam_policy_statements = [
+    # 添加函数需要的其他权限
+  ]
+}
+```
+
+这会配置：
+
+1. AWS Lambda 函数
+2. CloudWatch 日志组
+3. X-Ray 追踪配置
+4. CloudWatch 指标命名空间
+
+该函数可作为任何 Lambda 事件源的目标。以下示例演示了使用 EventBridge 定时调用 Lambda 函数的 Terraform 代码：
+
+```hcl
+# 定时执行的 EventBridge 规则
+resource "aws_cloudwatch_event_rule" "my_function_schedule" {
+  name                = "my-function-schedule"
+  description         = "每15分钟触发我的函数"
+  schedule_expression = "cron(15 * * * ? *)"
+}
+
+# EventBridge 目标
+resource "aws_cloudwatch_event_target" "lambda_target" {
+  rule      = aws_cloudwatch_event_rule.my_function_schedule.name
+  target_id = "MyFunctionTarget"
+  arn       = module.my_project_my_function.function_arn
+}
+
+# EventBridge 调用 Lambda 的权限
+resource "aws_lambda_permission" "allow_eventbridge" {
+  statement_id  = "AllowExecutionFromEventBridge"
+  action        = "lambda:InvokeFunction"
+  function_name = module.my_project_my_function.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.my_function_schedule.arn
+}
+```
+
+:::note
+请确保事件源与选定的 `eventSource` 选项匹配，以保证事件在处理器函数中正确处理。
+:::
+</Fragment>
+</Infrastructure>

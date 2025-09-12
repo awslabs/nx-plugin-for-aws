@@ -8,9 +8,7 @@ import {
   installPackagesTask,
   joinPathFragments,
   OverwriteStrategy,
-  ProjectConfiguration,
   Tree,
-  updateJson,
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { PyLambdaFunctionGeneratorSchema } from './schema';
@@ -18,16 +16,11 @@ import { UVProvider } from '@nxlv/python/src/provider/uv/provider';
 import { Logger } from '@nxlv/python/src/executors/utils/logger';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import {
-  PACKAGES_DIR,
-  SHARED_CONSTRUCTS_DIR,
-} from '../../utils/shared-constructs-constants';
-import {
   toClassName,
   toDotNotation,
   toKebabCase,
   toSnakeCase,
 } from '../../utils/names';
-import { addStarExport } from '../../utils/ast';
 import { formatFilesInSubtree } from '../../utils/format';
 import { getNpmScope } from '../../utils/npm-scope';
 import { sortObjectKeys } from '../../utils/object';
@@ -39,6 +32,7 @@ import {
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { addPythonBundleTarget } from '../../utils/bundle';
 import { addDependenciesToPyProjectToml } from '../../utils/py';
+import { addLambdaFunctionInfra } from '../../utils/function-constructs/function-constructs';
 
 export const LAMBDA_FUNCTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -109,15 +103,12 @@ export const pyLambdaFunctionGenerator = async (
   const sourceParts = projectConfig.sourceRoot.split('/');
   const moduleName = sourceParts[sourceParts.length - 1];
 
-  const {
-    fullyQualifiedFunctionName,
-    normalizedFunctionName,
-    normalizedFunctionPath,
-  } = getLambdaFunctionDetails(tree, {
-    moduleName,
-    functionName: schema.functionName,
-    functionPath: schema.functionPath,
-  });
+  const { normalizedFunctionName, normalizedFunctionPath } =
+    getLambdaFunctionDetails(tree, {
+      moduleName,
+      functionName: schema.functionName,
+      functionPath: schema.functionPath,
+    });
 
   const constructFunctionName = `${normalizedProjectName}_${normalizedFunctionName}`;
   const constructFunctionClassName = toClassName(constructFunctionName);
@@ -137,14 +128,23 @@ export const pyLambdaFunctionGenerator = async (
     );
   }
 
-  await sharedConstructsGenerator(tree);
+  await sharedConstructsGenerator(tree, {
+    iacProvider: schema.iacProvider,
+  });
+
+  addLambdaFunctionInfra(tree, {
+    functionProjectName: projectConfig.name,
+    functionNameClassName: constructFunctionClassName,
+    functionNameKebabCase: constructFunctionKebabCase,
+    handler: normalizedFunctionPath,
+    bundlePathFromRoot: `dist/${dir}/bundle`,
+    runtime: 'python',
+    iacProvider: schema.iacProvider,
+  });
 
   const enhancedOptions = {
     ...schema,
     dir,
-    constructFunctionClassName,
-    constructFunctionKebabCase,
-    constructHandlerFilePath: normalizedFunctionPath,
     lambdaFunctionClassName,
     lambdaFunctionSnakeCase: normalizedFunctionName,
   };
@@ -171,77 +171,6 @@ export const pyLambdaFunctionGenerator = async (
     joinPathFragments(dir, 'tests'),
     enhancedOptions,
     { overwriteStrategy: OverwriteStrategy.Overwrite },
-  );
-
-  if (
-    !tree.exists(
-      joinPathFragments(
-        PACKAGES_DIR,
-        SHARED_CONSTRUCTS_DIR,
-        'src',
-        'app',
-        'lambda-functions',
-        `${constructFunctionKebabCase}.ts`,
-      ),
-    )
-  ) {
-    generateFiles(
-      tree,
-      joinPathFragments(
-        __dirname,
-        'files',
-        SHARED_CONSTRUCTS_DIR,
-        'src',
-        'app',
-      ),
-      joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'src', 'app'),
-      enhancedOptions,
-      { overwriteStrategy: OverwriteStrategy.KeepExisting },
-    );
-
-    addStarExport(
-      tree,
-      joinPathFragments(
-        PACKAGES_DIR,
-        SHARED_CONSTRUCTS_DIR,
-        'src',
-        'app',
-        'index.ts',
-      ),
-      './lambda-functions/index.js',
-    );
-    addStarExport(
-      tree,
-      joinPathFragments(
-        PACKAGES_DIR,
-        SHARED_CONSTRUCTS_DIR,
-        'src',
-        'app',
-        'lambda-functions',
-        'index.ts',
-      ),
-      `./${constructFunctionKebabCase}.js`,
-    );
-  }
-
-  updateJson(
-    tree,
-    joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'project.json'),
-    (config: ProjectConfiguration) => {
-      if (!config.targets) {
-        config.targets = {};
-      }
-      if (!config.targets.build) {
-        config.targets.build = {};
-      }
-      config.targets.build.dependsOn = [
-        ...(config.targets.build.dependsOn ?? []).filter(
-          (t) => t !== `${projectConfig.name}:build`,
-        ),
-        `${projectConfig.name}:build`,
-      ];
-      return config;
-    },
   );
 
   addDependenciesToPyProjectToml(tree, dir, [

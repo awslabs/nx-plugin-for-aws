@@ -1,0 +1,117 @@
+---
+title: "Distribuzione della tua Funzione"
+---
+
+
+
+import Infrastructure from '@components/infrastructure.astro';
+
+Questo generatore crea infrastrutture come codice CDK o Terraform in base al `iacProvider` selezionato. Puoi utilizzarlo per distribuire la tua funzione.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Questo generatore crea un costrutto CDK per distribuire la tua funzione nella cartella `common/constructs`. Puoi utilizzarlo in un'applicazione CDK:
+
+```typescript {1, 6}
+import { MyProjectMyFunction } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    // Aggiunge la funzione al tuo stack
+    const fn = new MyProjectMyFunction(this, 'MyFunction');
+  }
+}
+```
+
+Configura automaticamente:
+
+1. Funzione AWS Lambda
+2. Gruppo di log CloudWatch
+3. Configurazione del tracciamento X-Ray
+4. Namespace delle metriche CloudWatch
+
+La funzione può essere utilizzata come target per qualsiasi [sorgente eventi Lambda](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/):
+
+:::note
+Assicurati che la sorgente eventi corrisponda all'opzione `eventSource` selezionata per garantire una corretta gestione degli eventi nella tua funzione handler.
+:::
+
+L'esempio seguente mostra il codice CDK per invocare la tua funzione Lambda su una pianificazione usando EventBridge:
+
+```typescript
+import { Rule, Schedule } from 'aws-cdk-lib/aws-events';
+import { LambdaFunction } from 'aws-cdk-lib/aws-events-targets';
+import { MyProjectMyFunction } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    // Aggiunge la funzione al tuo stack
+    const fn = new MyProjectMyFunction(this, 'MyFunction');
+
+    // Aggiunge la funzione a una regola pianificata di EventBridge
+    const eventRule = new Rule(this, 'MyFunctionScheduleRule', {
+      schedule: Schedule.cron({ minute: '15' }),
+      targets: [new LambdaFunction(fn)],
+    });
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+Questo generatore crea un modulo Terraform per distribuire la tua funzione nella cartella `common/terraform`. Puoi utilizzarlo in una configurazione Terraform:
+
+```hcl {2}
+module "my_project_my_function" {
+  source = "../../common/terraform/src/app/lambda-functions/my-project-my-function"
+
+  # Variabili d'ambiente per la funzione Lambda
+  env = {
+    SOME_VARIABLE = "some value"
+  }
+
+  # Politiche IAM aggiuntive se necessarie
+  additional_iam_policy_statements = [
+    # Aggiungi eventuali permessi aggiuntivi richiesti dalla tua funzione
+  ]
+}
+```
+
+Configura automaticamente:
+
+1. Funzione AWS Lambda
+2. Gruppo di log CloudWatch
+3. Configurazione del tracciamento X-Ray
+4. Namespace delle metriche CloudWatch
+
+La funzione può essere utilizzata come target per qualsiasi sorgente eventi Lambda. L'esempio seguente mostra il codice Terraform per invocare la tua funzione Lambda su una pianificazione usando EventBridge:
+
+```hcl
+# Regola EventBridge per esecuzione pianificata
+resource "aws_cloudwatch_event_rule" "my_function_schedule" {
+  name                = "my-function-schedule"
+  description         = "Attiva la mia funzione ogni 15 minuti"
+  schedule_expression = "cron(15 * * * ? *)"
+}
+
+# Target EventBridge
+resource "aws_cloudwatch_event_target" "lambda_target" {
+  rule      = aws_cloudwatch_event_rule.my_function_schedule.name
+  target_id = "MyFunctionTarget"
+  arn       = module.my_project_my_function.function_arn
+}
+
+# Permesso per EventBridge di invocare la funzione Lambda
+resource "aws_lambda_permission" "allow_eventbridge" {
+  statement_id  = "AllowExecutionFromEventBridge"
+  action        = "lambda:InvokeFunction"
+  function_name = module.my_project_my_function.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.my_function_schedule.arn
+}
+```
+
+:::note
+Assicurati che la sorgente eventi corrisponda all'opzione `eventSource` selezionata per garantire una corretta gestione degli eventi nella tua funzione handler.
+:::
+</Fragment>
+</Infrastructure>

@@ -10,10 +10,12 @@ import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
 
 TypeScript Lambda 函数生成器允许您为现有 TypeScript 项目添加 Lambda 函数。
 
-该生成器会创建一个新的 TypeScript Lambda 处理程序并配置 AWS CDK 基础设施。生成的处理器使用 [AWS Lambda Powertools for TypeScript](https://docs.powertools.aws.dev/lambda/typescript/latest/) 实现可观测性功能，包括日志记录、AWS X-Ray 追踪和 CloudWatch 指标，同时通过 [AWS Lambda Powertools 的 Parser 工具](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/) 提供可选的事件类型安全校验。
+该生成器会创建一个新的 TypeScript Lambda 处理程序，并支持 AWS CDK 或 Terraform 基础设施配置。生成的处理器使用 [AWS Lambda Powertools for TypeScript](https://docs.powertools.aws.dev/lambda/typescript/latest/) 实现可观测性功能，包括日志记录、AWS X-Ray 追踪和 CloudWatch 指标，同时通过 [AWS Lambda Powertools 解析器](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/) 提供可选的事件类型安全校验。
 
 ## 使用方式
 
@@ -39,9 +41,7 @@ TypeScript Lambda 函数生成器允许您为现有 TypeScript 项目添加 Lamb
 
 </FileTree>
 
-生成器还会创建一个用于部署函数的 CDK 构造，该构造位于 `packages/common/constructs/src/app/lambda-functions` 目录。
-
-若提供 `functionPath` 选项，生成器会将处理程序添加到项目源码目录的指定路径下：
+若指定了 `functionPath` 选项，生成器将在项目源码目录的指定路径下添加处理程序：
 
 <FileTree>
 
@@ -52,9 +52,24 @@ TypeScript Lambda 函数生成器允许您为现有 TypeScript 项目添加 Lamb
 
 </FileTree>
 
-## 实现函数功能
+### 基础设施
 
-主函数实现位于 `<function-name>.ts` 文件中。示例如下：
+<Snippet name="shared-constructs" />
+
+生成器会根据您选择的 `iacProvider` 创建基础设施即代码来部署函数：
+
+<Infrastructure>
+<Fragment slot="cdk">
+生成器会创建位于 `packages/common/constructs/src/app/lambda-functions` 目录的 CDK 构造，用于部署您的函数。
+</Fragment>
+<Fragment slot="terraform">
+生成器会创建位于 `packages/common/terraform/src/app/lambda-functions/<function-name>` 目录的 Terraform 模块，用于部署您的函数。
+</Fragment>
+</Infrastructure>
+
+## 实现函数
+
+主函数实现位于 `<function-name>.ts` 文件。示例如下：
 
 ```typescript
 import { parser } from '@aws-lambda-powertools/parser/middleware';
@@ -80,7 +95,7 @@ export const myFunction = async (
 ): Promise<void> => {
   logger.info('Received event', event);
 
-  // TODO: implement
+  // TODO: 实现具体逻辑
 };
 
 export const handler = middy()
@@ -141,7 +156,7 @@ export const handler = middy()
 
 #### 指标
 
-通过 `logMetrics` 中间件自动收集每个请求的 CloudWatch 指标。可添加自定义指标：
+通过 `logMetrics` 中间件自动收集每个请求的 CloudWatch 指标。您可以添加自定义指标：
 
 ```typescript
 const metrics = new Metrics();
@@ -160,13 +175,13 @@ export const handler = middy()
 
 ### 类型安全
 
-如果在生成 Lambda 函数时选择了 `eventSource`，您的函数将通过 [AWS Lambda Powertools 的解析器中间件](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/) 实现类型安全。例如：
+如果在生成 Lambda 函数时选择了 `eventSource`，您的函数将通过 [AWS Lambda Powertools 解析器中间件](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/) 进行类型校验。例如：
 
 ```typescript {4}
 export const myFunction = async (
   event: z.infer<typeof EventBridgeSchema>,
 ): Promise<void> => {
-  event.detail // <- 类型安全且支持 IDE 自动补全
+  event.detail // <- 类型安全，支持 IDE 自动补全
 };
 
 export const handler = middy()
@@ -177,72 +192,27 @@ export const handler = middy()
 这为 Lambda 事件提供了编译时类型安全和运行时验证。
 
 :::caution
-如果不希望处理程序在事件不符合模式时抛出错误，可以使用 [`safeParse` 选项](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/#safe-parsing)。
+如果希望处理程序在事件不符合 schema 时不抛出错误，可以使用 [`safeParse` 选项](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/#safe-parsing)。
 :::
 
 :::tip
-如果事件中包含自定义数据（例如 DynamoDB 流或 EventBridge 事件），使用 [Envelopes](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/#envelopes) 可为该数据提供类型安全支持。
+如果事件中包含嵌套的自定义数据（例如 DynamoDB 流或 EventBridge 事件），可以使用 [Envelopes](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/#envelopes) 为这些数据提供类型安全。
 :::
 
-如果不需要对事件进行类型约束，可选择 `Any` 作为 `eventSource`，此时事件参数将保持 `any` 类型。
+如果不需要对事件进行类型约束，可以在 `eventSource` 中选择 `Any`，此时事件参数将保持 `any` 类型。
 
 ## 打包部署
 
-生成器自动配置 [esbuild](https://esbuild.github.io/) 以优化 Lambda 部署包：
+生成器自动配置了 [esbuild](https://esbuild.github.io/) 来优化 Lambda 部署包：
 
-打包指定 Lambda 函数：
+打包特定 Lambda 函数：
 
 <NxCommands commands={['run <project-name>:bundle-<function-name>']} />
 
-打包项目中所有 Lambda 函数：
+打包项目中的所有 Lambda 函数：
 
 <NxCommands commands={['run <project-name>:bundle']} />
 
 ## 部署函数
 
-TypeScript Lambda 函数生成器在 `common/constructs` 目录中创建了用于部署函数的 CDK 构造。可在 CDK 应用中使用：
-
-```typescript {1, 6}
-import { MyProjectMyFunction } from ':my-scope/common-constructs';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    // 将函数添加到堆栈
-    const fn = new MyProjectMyFunction(this, 'MyFunction');
-  }
-}
-```
-
-该构造自动配置：
-
-1. AWS Lambda 函数
-2. CloudWatch 日志组
-3. X-Ray 追踪配置
-4. CloudWatch 指标命名空间
-
-该函数可作为任何 Lambda [事件源](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/) 的目标：
-
-:::note
-请确保事件源与选择的 `eventSource` 选项匹配，以保证处理程序能正确处理事件。
-:::
-
-以下示例演示了使用 EventBridge 定时触发 Lambda 函数的 CDK 代码：
-
-```typescript
-import { Rule, Schedule } from 'aws-cdk-lib/aws-events';
-import { LambdaFunction } from 'aws-cdk-lib/aws-events-targets';
-import { MyProjectMyFunction } from ':my-scope/common-constructs';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    // 将函数添加到堆栈
-    const fn = new MyProjectMyFunction(this, 'MyFunction');
-
-    // 将函数添加到 EventBridge 定时规则
-    const eventRule = new Rule(this, 'MyFunctionScheduleRule', {
-      schedule: Schedule.cron({ minute: '15' }),
-      targets: [new LambdaFunction(fn)],
-    });
-  }
-}
-```
+<Snippet name="lambda-function/deploying-your-function" parentHeading="Deploying your Function" />
