@@ -12,11 +12,12 @@ import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.as
 import InstallCommand from '@components/install-command.astro';
 import RunGenerator from '@components/run-generator.astro';
 import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
 
-Questa guida ti illustra le basi per installare e utilizzare `@aws/nx-plugin` per costruire rapidamente progetti su AWS.
+Questa guida ti accompagna attraverso le basi per installare e utilizzare `@aws/nx-plugin` per costruire rapidamente progetti su AWS.
 
 :::tip
-Per un tutorial più approfondito sulla creazione di un'applicazione full-stack, consulta il <Link path="get_started/tutorials/dungeon-game/overview">Dungeon Adventure Tutorial</Link>.
+Per un tutorial più approfondito sulla creazione di un'applicazione full-stack, consulta il <Link path="get_started/tutorials/dungeon-game/overview">Tutorial dell'Avventura nel Dungeon</Link>.
 :::
 
 ## Prerequisiti
@@ -25,11 +26,24 @@ Le seguenti dipendenze globali sono necessarie prima di procedere:
 
 <Snippet name="prerequisites" />
 
-## Step 1: Inizializzare un nuovo workspace Nx
+## Passaggio 1: Inizializzare una nuova workspace Nx
 
-Esegui il seguente comando per creare un workspace Nx con il package manager preferito:
+Esegui il seguente comando per creare una workspace Nx con il package manager preferito:
 
 <CreateNxWorkspaceCommand workspace="my-project" />
+
+:::tip
+Ti verrà chiesto di selezionare un provider per l'infrastruttura as code (IaC), [CDK](https://docs.aws.amazon.com/cdk/) o [Terraform](https://developer.hashicorp.com/terraform). Puoi saltare la selezione aggiungendo `--iacProvider` al comando, ad esempio:
+
+<Infrastructure>
+<Fragment slot="cdk">
+<CreateNxWorkspaceCommand workspace="my-project" iacProvider="CDK" />
+</Fragment>
+<Fragment slot="terraform">
+<CreateNxWorkspaceCommand workspace="my-project" iacProvider="Terraform" />
+</Fragment>
+</Infrastructure>
+:::
 
 Al termine, accedi alla directory del progetto:
 
@@ -37,9 +51,9 @@ Al termine, accedi alla directory del progetto:
 cd my-project
 ```
 
-## Step 2: Utilizzare i generatori per impostare il progetto
+## Passaggio 2: Utilizzare i generatori per impostare il progetto
 
-In questa guida rapida aggiungeremo un'API tRPC, un sito React, autenticazione Cognito e infrastruttura CDK. A seconda del tipo di progetto, puoi scegliere qualsiasi combinazione di generatori per configurare rapidamente il tuo progetto. Consulta le __Guide__ nella barra di navigazione a sinistra per l'elenco completo delle opzioni.
+In questa guida rapida aggiungeremo un'API tRPC, un sito React, autenticazione Cognito e infrastruttura CDK/Terraform. A seconda del tipo di progetto, puoi combinare diversi generatori per configurare rapidamente il tuo progetto. Consulta le __Guide__ nella barra di navigazione a sinistra per l'elenco completo delle opzioni.
 
 ### Aggiungere un'API tRPC
 
@@ -63,26 +77,39 @@ Questo configura l'infrastruttura necessaria e il codice React per aggiungere l'
 
 <RunGenerator generator="api-connection" requiredParameters={{ sourceProject: '@my-project/demo-website', targetProject: '@my-project/demo-api' }} />
 
-Questo configura i provider necessari per garantire che il sito possa chiamare la tua API tRPC.
+Questo configura i provider necessari per permettere al sito di chiamare l'API tRPC.
 
-### Aggiungere infrastruttura CDK
+### Aggiungere l'infrastruttura
 
+Aggiungi il progetto infrastruttura in base al provider IaC scelto.
+
+<Infrastructure>
+<Fragment slot="cdk">
 <RunGenerator generator="ts#infra" requiredParameters={{ name: 'infra' }} />
 
 Questo configura un'app CDK che puoi utilizzare per distribuire la tua infrastruttura su AWS.
+</Fragment>
+<Fragment slot="terraform">
+<RunGenerator generator="terraform#project" requiredParameters={{ name: 'infra' }} />
 
-## Step 3: Eseguire il sito web e l'API in locale
+Questo configura un progetto Terraform che puoi utilizzare per distribuire la tua infrastruttura su AWS.
+</Fragment>
+</Infrastructure>
+
+## Passaggio 3: Eseguire il sito e l'API in locale
 
 Utilizza il seguente comando per avviare i server di sviluppo locali per il sito e le API collegate:
 
 <NxCommands commands={['run demo-website:serve-local']} />
 
-Il tuo sito sarà disponibile all'indirizzo `http://localhost:4200`.
+Il sito sarà disponibile all'indirizzo `http://localhost:4200`.
 
 Le modifiche al sito e all'API si rifletteranno in tempo reale grazie al hot-reload dei server locali.
 
-## Step 4: Definire le risorse cloud e distribuirle su AWS
+## Passaggio 4: Definire le risorse cloud e distribuire su AWS
 
+<Infrastructure>
+<Fragment slot="cdk">
 Apri `packages/infra/src/stacks/application-stack.ts` e aggiungi il seguente codice:
 
 ```typescript
@@ -106,6 +133,68 @@ export class ApplicationStack extends cdk.Stack {
 ```
 
 Questo è tutto il codice CDK necessario per distribuire la nostra applicazione full-stack.
+</Fragment>
+<Fragment slot="terraform">
+Apri `packages/infra/src/main.tf` e aggiungi il seguente codice:
+
+```hcl
+# Include metrics tracking for @aws/nx-plugin usage
+module "metrics" {
+  source = "../../common/terraform/src/metrics"
+}
+
+# Deploy user identity
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
+}
+
+# Deploy API
+module "demo_api" {
+  source = "../../common/terraform/src/app/apis/demo-api"
+}
+
+# Grant authenticated users access to invoke the API
+resource "aws_iam_policy" "api_invoke_policy" {
+  name        = "DemoApiInvokePolicy"
+  description = "Policy to allow authenticated users to invoke the API"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = "execute-api:Invoke"
+        Resource = "${module.demo_api.api_execution_arn}/*/*"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "authenticated_api_access" {
+  role       = module.user_identity.authenticated_role_name
+  policy_arn = aws_iam_policy.api_invoke_policy.arn
+}
+
+# Deploy website
+provider "aws" {
+  alias  = "us_east_1"
+  region = "us-east-1"
+}
+
+module "demo_website" {
+  source = "../../common/terraform/src/app/static-websites/demo-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+
+  depends_on = [module.user_identity, module.demo_api]
+}
+```
+
+Questo è tutto il codice Terraform necessario per distribuire la nostra applicazione full-stack.
+</Fragment>
+</Infrastructure>
 
 ### Compilare e distribuire l'infrastruttura
 
@@ -119,19 +208,41 @@ Se incontri errori di linting, puoi eseguire questo comando per correggerli auto
 <NxCommands commands={['run-many --target lint --configuration=fix --all']} />
 :::
 
-Esegui il seguente comando per distribuire il progetto:
+Esegui il bootstrap dell'infrastruttura:
 
-<NxCommands commands={['run infra:deploy my-project-sandbox/*']} />
+<Infrastructure>
+<Fragment slot="cdk">
+<NxCommands commands={['run infra:bootstrap']} />
 
 :::tip
-Assicurati che il tuo ambiente AWS sia stato configurato correttamente per CDK.
-
-Il bootstrapping CDK è necessario sia per la regione AWS target che per `us-east-1` per consentire la distribuzione della WebACL AWS WAF per il sito.
-
-<NxCommands commands={['run infra:bootstrap']} />
+Il bootstrap CDK è necessario sia per la regione AWS di destinazione che per `us-east-1` per consentire la distribuzione del WebACL AWS WAF per il sito.
 :::
+</Fragment>
+<Fragment slot="terraform">
+<NxCommands commands={['run infra:bootstrap']} />
 
-## Step 5: Testare il sito web con le risorse cloud distribuite
+:::tip
+Il bootstrap Terraform crea un bucket S3 per memorizzare gli stati di Terraform. Questo va eseguito una sola volta per combinazione account/regione AWS.
+:::
+</Fragment>
+</Infrastructure>
+
+Distribuisci il progetto:
+
+<Infrastructure>
+<Fragment slot="cdk">
+<NxCommands commands={['run infra:deploy my-project-sandbox/*']} />
+</Fragment>
+<Fragment slot="terraform">
+<NxCommands commands={['run infra:apply']} />
+
+:::tip
+Questo comando eseguirà prima `terraform plan` per mostrare le modifiche pianificate, poi le applicherà per distribuire l'infrastruttura.
+:::
+</Fragment>
+</Infrastructure>
+
+## Passaggio 5: Testare il sito con le risorse cloud distribuite
 
 <Steps>
 1. Recupera il file `runtime-config.json`:

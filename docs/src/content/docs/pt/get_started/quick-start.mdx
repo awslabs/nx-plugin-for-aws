@@ -12,11 +12,12 @@ import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.as
 import InstallCommand from '@components/install-command.astro';
 import RunGenerator from '@components/run-generator.astro';
 import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
 
 Este guia orienta você através dos fundamentos de instalação e uso do `@aws/nx-plugin` para construir projetos rapidamente na AWS.
 
 :::tip
-Para um tutorial mais detalhado sobre a construção de uma aplicação full-stack, confira o <Link path="get_started/tutorials/dungeon-game/overview">Tutorial de Aventura no Calabouço</Link>.
+Para um tutorial mais detalhado sobre como construir uma aplicação full-stack, confira o <Link path="get_started/tutorials/dungeon-game/overview">Tutorial Dungeon Adventure</Link>.
 :::
 
 ## Pré-requisitos
@@ -27,9 +28,22 @@ As seguintes dependências globais são necessárias antes de prosseguir:
 
 ## Passo 1: Inicializar um Novo Workspace Nx
 
-Execute o seguinte comando para criar um workspace Nx com o gerenciador de pacotes de sua escolha:
+Execute o seguinte comando para criar um workspace Nx com o gerenciador de pacotes de sua preferência:
 
 <CreateNxWorkspaceCommand workspace="my-project" />
+
+:::tip
+Você será questionado sobre seu provedor de infraestrutura como código (IaC) preferido, [CDK](https://docs.aws.amazon.com/cdk/) ou [Terraform](https://developer.hashicorp.com/terraform). Você pode pular a pergunta executando o comando com `--iacProvider`, ex:
+
+<Infrastructure>
+<Fragment slot="cdk">
+<CreateNxWorkspaceCommand workspace="my-project" iacProvider="CDK" />
+</Fragment>
+<Fragment slot="terraform">
+<CreateNxWorkspaceCommand workspace="my-project" iacProvider="Terraform" />
+</Fragment>
+</Infrastructure>
+:::
 
 Após a conclusão, navegue até o diretório do projeto:
 
@@ -39,50 +53,63 @@ cd my-project
 
 ## Passo 2: Usar Geradores para Estruturar seu Projeto
 
-Adicionaremos uma API tRPC, Site React, Autenticação Cognito e Infraestrutura CDK neste guia rápido. Dependendo do tipo de projeto que você está construindo, você pode escolher qualquer combinação de geradores para inicializar rapidamente seu projeto. Confira os __Guias__ na barra de navegação à esquerda para ver a lista completa de opções.
+Neste guia rápido, adicionaremos uma API tRPC, Website React, Autenticação Cognito e Infraestrutura CDK/Terraform. Dependendo do tipo de projeto, você pode escolher qualquer combinação de geradores para inicializar rapidamente seu projeto. Confira os __Guias__ na barra de navegação à esquerda para ver a lista completa de opções.
 
 ### Adicionar uma API tRPC
 
 <RunGenerator generator="ts#trpc-api" requiredParameters={{ name: 'demo-api', auth: 'IAM' }} />
 
-Isso criará a API dentro da pasta `packages/demo-api`.
+Isso criará a API na pasta `packages/demo-api`.
 
-### Adicionar um Site React
+### Adicionar um Website React
 
 <RunGenerator generator="ts#react-website" requiredParameters={{ name: 'demo-website' }} />
 
-Isso estrutura um novo site React em `packages/demo-website`.
+Isso estruturará um novo website React em `packages/demo-website`.
 
 ### Adicionar Autenticação Cognito
 
 <RunGenerator generator="ts#react-website#auth" requiredParameters={{ project: '@my-project/demo-website', cognitoDomain: 'my-demo' }} />
 
-Isso configura a infraestrutura necessária e o código React para adicionar Autenticação Cognito ao seu site.
+Isso configurará a infraestrutura necessária e o código React para adicionar Autenticação Cognito ao seu website.
 
 ### Conectar Frontend ao Backend
 
 <RunGenerator generator="api-connection" requiredParameters={{ sourceProject: '@my-project/demo-website', targetProject: '@my-project/demo-api' }} />
 
-Isso configura os provedores necessários para garantir que seu site possa chamar sua API tRPC.
+Isso configurará os provedores necessários para garantir que seu website possa chamar sua API tRPC.
 
-### Adicionar Infraestrutura CDK
+### Adicionar Infraestrutura
 
+Adicione o projeto de infraestrutura baseado no seu provedor IaC escolhido.
+
+<Infrastructure>
+<Fragment slot="cdk">
 <RunGenerator generator="ts#infra" requiredParameters={{ name: 'infra' }} />
 
 Isso configura uma Aplicação CDK que você pode usar para implantar sua infraestrutura na AWS.
+</Fragment>
+<Fragment slot="terraform">
+<RunGenerator generator="terraform#project" requiredParameters={{ name: 'infra' }} />
 
-## Passo 3: Executar seu Site e API Localmente
+Isso configura um projeto Terraform que você pode usar para implantar sua infraestrutura na AWS.
+</Fragment>
+</Infrastructure>
 
-Use o seguinte comando para iniciar servidores locais de desenvolvimento para seu site e APIs conectadas:
+## Passo 3: Executar seu Website e API Localmente
+
+Use o seguinte comando para iniciar servidores locais de desenvolvimento para seu website e APIs conectadas:
 
 <NxCommands commands={['run demo-website:serve-local']} />
 
-Seu site estará disponível em `http://localhost:4200`.
+Seu website estará disponível em `http://localhost:4200`.
 
-Alterações no seu site e na API serão refletidas em tempo real, pois ambos os servidores locais recarregarão automaticamente.
+Alterações no website e na API serão refletidas em tempo real, pois ambos os servidores locais recarregarão automaticamente.
 
 ## Passo 4: Definir Recursos Cloud e Implantar na AWS
 
+<Infrastructure>
+<Fragment slot="cdk">
 Abra `packages/infra/src/stacks/application-stack.ts` e adicione o seguinte código:
 
 ```typescript
@@ -106,6 +133,68 @@ export class ApplicationStack extends cdk.Stack {
 ```
 
 Este é todo o código CDK necessário para implantar nossa aplicação full-stack.
+</Fragment>
+<Fragment slot="terraform">
+Abra `packages/infra/src/main.tf` e adicione o seguinte código:
+
+```hcl
+# Inclui rastreamento de métricas para uso do @aws/nx-plugin
+module "metrics" {
+  source = "../../common/terraform/src/metrics"
+}
+
+# Implanta identidade do usuário
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
+}
+
+# Implanta API
+module "demo_api" {
+  source = "../../common/terraform/src/app/apis/demo-api"
+}
+
+# Concede acesso a usuários autenticados para invocar a API
+resource "aws_iam_policy" "api_invoke_policy" {
+  name        = "DemoApiInvokePolicy"
+  description = "Política para permitir que usuários autenticados invoquem a API"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = "execute-api:Invoke"
+        Resource = "${module.demo_api.api_execution_arn}/*/*"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "authenticated_api_access" {
+  role       = module.user_identity.authenticated_role_name
+  policy_arn = aws_iam_policy.api_invoke_policy.arn
+}
+
+# Implanta website
+provider "aws" {
+  alias  = "us_east_1"
+  region = "us-east-1"
+}
+
+module "demo_website" {
+  source = "../../common/terraform/src/app/static-websites/demo-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+
+  depends_on = [module.user_identity, module.demo_api]
+}
+```
+
+Este é todo o código Terraform necessário para implantar nossa aplicação full-stack.
+</Fragment>
+</Infrastructure>
 
 ### Construir e Implantar a Infraestrutura
 
@@ -114,36 +203,58 @@ Em seguida, execute o seguinte comando para construir seu projeto:
 <NxCommands commands={['run-many --target build --all']} />
 
 :::tip
-Se encontrar erros de lint, você pode executar o seguinte comando para corrigi-los automaticamente.
+Se encontrar erros de lint, você pode executar o seguinte comando para corrigi-los automaticamente:
 
 <NxCommands commands={['run-many --target lint --configuration=fix --all']} />
 :::
 
-Execute o seguinte comando para implantar seu projeto:
+Inicialize sua infraestrutura:
 
-<NxCommands commands={['run infra:deploy my-project-sandbox/*']} />
+<Infrastructure>
+<Fragment slot="cdk">
+<NxCommands commands={['run infra:bootstrap']} />
 
 :::tip
-Você precisará garantir que seu ambiente AWS foi configurado adequadamente para o CDK.
-
-A configuração do CDK é necessária tanto para a região AWS de implantação quanto para `us-east-1` para permitir a implantação do AWS WAF WebACL para o site.
-
-<NxCommands commands={['run infra:bootstrap']} />
+O bootstrap do CDK é necessário tanto para a região AWS de implantação quanto para `us-east-1` para permitir a implantação do AWS WAF WebACL para o website.
 :::
+</Fragment>
+<Fragment slot="terraform">
+<NxCommands commands={['run infra:bootstrap']} />
 
-## Passo 5: Testar o Site com Recursos Cloud Implantados
+:::tip
+O bootstrap do Terraform cria um bucket S3 para armazenar seus arquivos de estado do Terraform. Isso só precisa ser feito uma vez por combinação de conta/região AWS.
+:::
+</Fragment>
+</Infrastructure>
+
+Implante seu projeto:
+
+<Infrastructure>
+<Fragment slot="cdk">
+<NxCommands commands={['run infra:deploy my-project-sandbox/*']} />
+</Fragment>
+<Fragment slot="terraform">
+<NxCommands commands={['run infra:apply']} />
+
+:::tip
+Este comando primeiro executará `terraform plan` para mostrar as alterações planejadas, depois aplicará essas alterações para implantar sua infraestrutura.
+:::
+</Fragment>
+</Infrastructure>
+
+## Passo 5: Testar o Website com Recursos Cloud Implantados
 
 <Steps>
 1. Obtenha o arquivo `runtime-config.json`:
 
     <NxCommands commands={['run demo-website:load:runtime-config']} />
 
-2. Inicie o servidor local do site
+2. Inicie o servidor local do website
 
     <NxCommands commands={['run demo-website:serve']} />
 </Steps>
 
-Seu site estará disponível em `http://localhost:4200` e apontará para os recursos implantados da API e autenticação.
+Seu website estará disponível em `http://localhost:4200` e apontará para os recursos implantados da API e autenticação.
 
 ---
 
