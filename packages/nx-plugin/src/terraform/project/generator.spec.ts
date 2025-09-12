@@ -136,6 +136,9 @@ describe('terraformProjectGenerator', () => {
       expect(initTarget.configurations.dev.command).toContain(
         '-backend-config',
       );
+      expect(initTarget.configurations.dev.command).toContain(
+        'key=proj-my-terraform-project/dev/terraform.tfstate',
+      );
       expect(initTarget.dependsOn).toEqual(['^init']);
     });
 

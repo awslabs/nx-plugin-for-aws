@@ -33,6 +33,7 @@ import {
   SHARED_TERRAFORM_DIR,
   SHARED_TERRAFORM_NAME,
 } from '../../utils/shared-constructs-constants';
+import { kebabCase } from '../../utils/names';
 
 const NX_EXTEND_PLUGIN = '@nx-extend/terraform';
 export const TERRAFORM_PROJECT_GENERATOR_INFO: NxGeneratorInfo =
@@ -125,8 +126,7 @@ export async function terraformProjectGenerator(
       defaultConfiguration: 'dev',
       configurations: {
         dev: {
-          command:
-            'terraform init -reconfigure -backend-config="region=$(aws configure get region)" -backend-config="bucket=$(aws sts get-caller-identity --query Account --output text)-tf-state-$(aws configure get region)" -backend-config="key=dev/terraform.tfstate"',
+          command: `terraform init -reconfigure -backend-config="region=$(aws configure get region)" -backend-config="bucket=$(aws sts get-caller-identity --query Account --output text)-tf-state-$(aws configure get region)" -backend-config="key=${kebabCase(lib.fullyQualifiedName)}/dev/terraform.tfstate"`,
         },
       },
       options: {
