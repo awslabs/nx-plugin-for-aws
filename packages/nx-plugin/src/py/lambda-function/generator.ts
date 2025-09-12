@@ -33,6 +33,7 @@ import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { addPythonBundleTarget } from '../../utils/bundle';
 import { addDependenciesToPyProjectToml } from '../../utils/py';
 import { addLambdaFunctionInfra } from '../../utils/function-constructs/function-constructs';
+import { resolveIacProvider } from '../../utils/iac';
 
 export const LAMBDA_FUNCTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -128,8 +129,10 @@ export const pyLambdaFunctionGenerator = async (
     );
   }
 
+  const iacProvider = await resolveIacProvider(tree, schema.iacProvider);
+
   await sharedConstructsGenerator(tree, {
-    iacProvider: schema.iacProvider,
+    iacProvider,
   });
 
   addLambdaFunctionInfra(tree, {
@@ -139,7 +142,7 @@ export const pyLambdaFunctionGenerator = async (
     handler: normalizedFunctionPath,
     bundlePathFromRoot: `dist/${dir}/bundle`,
     runtime: 'python',
-    iacProvider: schema.iacProvider,
+    iacProvider,
   });
 
   const enhancedOptions = {

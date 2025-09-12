@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { IacProviderOption } from '../../utils/iac';
+
 export interface PyFastApiProjectGeneratorSchema {
   readonly name: string;
   readonly computeType:
@@ -11,5 +13,5 @@ export interface PyFastApiProjectGeneratorSchema {
   readonly auth: 'IAM' | 'Cognito' | 'None';
   readonly directory?: string;
   readonly moduleName?: string;
-  readonly iacProvider: 'CDK' | 'Terraform';
+  readonly iacProvider: IacProviderOption;
 }

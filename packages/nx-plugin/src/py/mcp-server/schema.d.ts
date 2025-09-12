@@ -2,6 +2,9 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+
+import { IacProviderOption } from '../../utils/iac';
+
 export type PyMcpServerComputeType = 'None' | 'BedrockAgentCoreRuntime';
 
 /**
@@ -12,5 +15,5 @@ export interface PyMcpServerGeneratorSchema {
   project: string;
   name?: string;
   computeType?: PyMcpServerComputeType;
-  iacProvider: 'CDK' | 'Terraform';
+  iacProvider: IacProviderOption;
 }

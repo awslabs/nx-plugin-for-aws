@@ -29,6 +29,7 @@ import { addPythonBundleTarget } from '../../utils/bundle';
 import { withVersions } from '../../utils/versions';
 import { Logger } from '@nxlv/python/src/executors/utils/logger';
 import { UVProvider } from '@nxlv/python/src/provider/uv/provider';
+import { resolveIacProvider } from '../../utils/iac';
 
 export const PY_MCP_SERVER_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -138,7 +139,8 @@ export const pyMcpServerGenerator = async (
     };
 
     // Add shared constructs
-    await sharedConstructsGenerator(tree, { iacProvider: options.iacProvider });
+    const iacProvider = await resolveIacProvider(tree, options.iacProvider);
+    await sharedConstructsGenerator(tree, { iacProvider });
 
     // Add the construct to deploy the mcp server
     addMcpServerInfra(tree, {
@@ -146,7 +148,7 @@ export const pyMcpServerGenerator = async (
       mcpServerNameClassName,
       projectName: project.name,
       dockerImageTag,
-      iacProvider: options.iacProvider,
+      iacProvider,
     });
   } else {
     // No Dockerfile needed for non-hosted MCP

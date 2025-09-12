@@ -65,7 +65,7 @@ describe('metrics', () => {
   });
 
   it('should update metrics and version in app.ts', async () => {
-    await sharedConstructsGenerator(tree);
+    await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
 
     // Create the app.ts file with MetricsAspect class
     const appPath = METRICS_ASPECT_FILE_PATH;
@@ -274,7 +274,7 @@ describe('metrics', () => {
 
     it('should work with both CDK and Terraform metrics simultaneously', async () => {
       // Create both CDK and Terraform shared constructs
-      await sharedConstructsGenerator(tree); // CDK (default)
+      await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
       await sharedConstructsGenerator(tree, { iacProvider: 'Terraform' });
 
       // Add metrics - should update both files

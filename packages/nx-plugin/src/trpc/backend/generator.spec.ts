@@ -9,6 +9,10 @@ import {
   snapshotTreeDir,
 } from '../../utils/test';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
+import {
+  ensureAwsNxPluginConfig,
+  updateAwsNxPluginConfig,
+} from '../../utils/config/utils';
 
 describe('trpc backend generator', () => {
   let tree: Tree;
@@ -740,6 +744,35 @@ describe('trpc backend generator', () => {
       expect(terraformContent).toContain(
         'authorization = "COGNITO_USER_POOLS"',
       );
+    });
+
+    it('should inherit iacProvider from config when set to Inherit', async () => {
+      // Set up config with Terraform provider using utility methods
+      await ensureAwsNxPluginConfig(tree);
+      await updateAwsNxPluginConfig(tree, {
+        iac: {
+          provider: 'Terraform',
+        },
+      });
+
+      await tsTrpcApiGenerator(tree, {
+        name: 'TestApi',
+        directory: 'apps',
+        computeType: 'ServerlessApiGatewayHttpApi',
+        auth: 'IAM',
+        iacProvider: 'Inherit',
+      });
+
+      // Verify Terraform files are created (not CDK constructs)
+      expect(tree.exists('packages/common/terraform')).toBeTruthy();
+      expect(tree.exists('packages/common/constructs')).toBeFalsy();
+
+      // Find terraform files
+      const allFiles = tree.listChanges().map((f) => f.path);
+      const terraformFiles = allFiles.filter(
+        (f) => f.includes('terraform') && f.endsWith('.tf'),
+      );
+      expect(terraformFiles.length).toBeGreaterThan(0);
     });
   });
 });

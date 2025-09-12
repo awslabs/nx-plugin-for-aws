@@ -12,6 +12,10 @@ import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
 import { TS_HANDLER_RETURN_TYPES } from './io';
 import { TypeScriptVerifier } from '../../utils/test/ts.spec';
+import {
+  ensureAwsNxPluginConfig,
+  updateAwsNxPluginConfig,
+} from '../../utils/config/utils';
 
 describe('ts-lambda-function generator', () => {
   let tree: Tree;
@@ -653,6 +657,30 @@ describe('ts-lambda-function generator', () => {
       expect(terraformContent).toMatchSnapshot(
         'terraform-lambda-snapshot-function.tf',
       );
+    });
+
+    it('should inherit iacProvider from config when set to Inherit', async () => {
+      // Set up config with CDK provider using utility methods
+      await ensureAwsNxPluginConfig(tree);
+      await updateAwsNxPluginConfig(tree, {
+        iac: {
+          provider: 'CDK',
+        },
+      });
+
+      await tsLambdaFunctionGenerator(tree, {
+        ...options,
+        iacProvider: 'Inherit',
+      });
+
+      // Verify CDK constructs are created (not terraform)
+      expect(tree.exists('packages/common/constructs')).toBeTruthy();
+      expect(tree.exists('packages/common/terraform')).toBeFalsy();
+      expect(
+        tree.exists(
+          'packages/common/constructs/src/app/lambda-functions/test-project-test-function.ts',
+        ),
+      ).toBeTruthy();
     });
   });
 });

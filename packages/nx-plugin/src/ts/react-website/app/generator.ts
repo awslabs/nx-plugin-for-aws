@@ -44,6 +44,7 @@ import {
 } from '../../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { addWebsiteInfra } from '../../../utils/website-constructs/website-constructs';
+import { resolveIacProvider } from '../../../utils/iac';
 
 export const REACT_WEBSITE_APP_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -88,7 +89,9 @@ export async function tsReactWebsiteGenerator(
   const targets = projectConfiguration.targets;
 
   // Configure load:runtime-config target based on IaC provider
-  if (schema.iacProvider === 'CDK') {
+  const iacProvider = await resolveIacProvider(tree, schema.iacProvider);
+
+  if (iacProvider === 'CDK') {
     targets['load:runtime-config'] = {
       executor: 'nx:run-commands',
       metadata: {
@@ -98,7 +101,7 @@ export async function tsReactWebsiteGenerator(
         command: `aws s3 cp s3://\`aws cloudformation describe-stacks --query "Stacks[?starts_with(StackName, '${kebabCase(npmScopePrefix)}-')][].Outputs[] | [?contains(OutputKey, '${websiteNameClassName}WebsiteBucketName')].OutputValue" --output text\`/runtime-config.json './${websiteContentPath}/public/runtime-config.json'`,
       },
     };
-  } else if (schema.iacProvider === 'Terraform') {
+  } else if (iacProvider === 'Terraform') {
     targets['load:runtime-config'] = {
       executor: 'nx:run-commands',
       metadata: {
@@ -117,7 +120,7 @@ export async function tsReactWebsiteGenerator(
     };
   } else {
     throw new Error(
-      `Unknown iacProvider: ${schema.iacProvider}. Supported providers are: CDK, Terraform`,
+      `Unknown iacProvider: ${iacProvider}. Supported providers are: CDK, Terraform`,
     );
   }
 
@@ -176,11 +179,11 @@ export async function tsReactWebsiteGenerator(
   });
 
   await sharedConstructsGenerator(tree, {
-    iacProvider: schema.iacProvider,
+    iacProvider,
   });
 
   addWebsiteInfra(tree, {
-    iacProvider: schema.iacProvider,
+    iacProvider,
     websiteProjectName: fullyQualifiedName,
     scopeAlias: toScopeAlias(npmScopePrefix),
     websiteContentPath: joinPathFragments('dist', websiteContentPath),

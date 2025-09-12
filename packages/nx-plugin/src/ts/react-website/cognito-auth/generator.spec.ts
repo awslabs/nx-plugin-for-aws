@@ -11,6 +11,10 @@ import { TsReactWebsiteAuthGeneratorSchema } from './schema';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
 import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
 import { expectHasMetricTags } from '../../../utils/metrics.spec';
+import {
+  ensureAwsNxPluginConfig,
+  updateAwsNxPluginConfig,
+} from '../../../utils/config/utils';
 
 describe('cognito-auth generator', () => {
   let tree: Tree;
@@ -664,7 +668,7 @@ export default AppLayout;
 
   it('should add generator metric to app.ts', async () => {
     // Set up test tree with shared constructs
-    await sharedConstructsGenerator(tree);
+    await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
 
     // Setup main.tsx with RuntimeConfigProvider
     tree.write(
@@ -1502,6 +1506,51 @@ resource "aws_s3_bucket_policy" "website_cloudfront_policy" {
       expect(cloudfrontEndIndex).toBeGreaterThan(-1);
       expect(addCallbackModuleIndex).toBeGreaterThan(cloudfrontEndIndex);
       expect(nextResourceIndex).toBeGreaterThan(addCallbackModuleIndex);
+    });
+
+    it('should inherit iacProvider from config when set to Inherit', async () => {
+      // Set up config with Terraform provider using utility methods
+      await ensureAwsNxPluginConfig(tree);
+      await updateAwsNxPluginConfig(tree, {
+        iac: {
+          provider: 'Terraform',
+        },
+      });
+
+      // Setup main.tsx with RuntimeConfigProvider
+      tree.write(
+        'packages/test-project/src/main.tsx',
+        `
+        import { RuntimeConfigProvider } from './components/RuntimeConfig';
+        import { RouterProvider, createRouter } from '@tanstack/react-router';
+
+        export function Main() {
+          const App = () => <RouterProvider router={router} />;
+
+          return (
+            <RuntimeConfigProvider>
+              <App/>
+            </RuntimeConfigProvider>
+          );
+        }
+      `,
+      );
+
+      await tsReactWebsiteAuthGenerator(tree, {
+        ...options,
+        iacProvider: 'Inherit',
+      });
+
+      // Verify Terraform files are created (not CDK constructs)
+      expect(tree.exists('packages/common/terraform')).toBeTruthy();
+      expect(tree.exists('packages/common/constructs')).toBeFalsy();
+
+      // Find terraform files
+      const allFiles = tree.listChanges().map((f) => f.path);
+      const terraformFiles = allFiles.filter(
+        (f) => f.includes('terraform') && f.endsWith('.tf'),
+      );
+      expect(terraformFiles.length).toBeGreaterThan(0);
     });
   });
 });

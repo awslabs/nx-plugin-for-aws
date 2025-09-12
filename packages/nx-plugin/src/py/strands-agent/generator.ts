@@ -27,6 +27,7 @@ import { getNpmScope } from '../../utils/npm-scope';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { Logger } from '@nxlv/python/src/executors/utils/logger';
 import { UVProvider } from '@nxlv/python/src/provider/uv/provider';
+import { resolveIacProvider } from '../../utils/iac';
 
 export const PY_STRANDS_AGENT_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -139,14 +140,15 @@ export const pyStrandsAgentGenerator = async (
     };
 
     // Add shared constructs
-    await sharedConstructsGenerator(tree, { iacProvider: options.iacProvider });
+    const iacProvider = await resolveIacProvider(tree, options.iacProvider);
+    await sharedConstructsGenerator(tree, { iacProvider });
 
     // Add the construct to deploy the agent
     addAgentInfra(tree, {
       agentNameKebabCase: name,
       agentNameClassName,
       dockerImageTag,
-      iacProvider: options.iacProvider,
+      iacProvider,
       projectName: project.name,
     });
   } else {

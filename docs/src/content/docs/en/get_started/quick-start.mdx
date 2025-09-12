@@ -9,6 +9,7 @@ import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.as
 import InstallCommand from '@components/install-command.astro';
 import RunGenerator from '@components/run-generator.astro';
 import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
 
 This guide walks you through the basics of installing and using `@aws/nx-plugin` to rapidly build projects on AWS.
 
@@ -28,6 +29,19 @@ Run the following command to create an Nx workspace with the package manager of 
 
 <CreateNxWorkspaceCommand workspace="my-project" />
 
+:::tip
+You will be prompted for your preferred infrastructure as code (IaC) provider, either [CDK](https://docs.aws.amazon.com/cdk/) or [Terraform](https://developer.hashicorp.com/terraform). You can skip the prompt by running the command with `--iacProvider`, ie:
+
+<Infrastructure>
+<Fragment slot="cdk">
+<CreateNxWorkspaceCommand workspace="my-project" iacProvider="CDK" />
+</Fragment>
+<Fragment slot="terraform">
+<CreateNxWorkspaceCommand workspace="my-project" iacProvider="Terraform" />
+</Fragment>
+</Infrastructure>
+:::
+
 Once complete, navigate to the project directory:
 
 ```sh
@@ -36,7 +50,7 @@ cd my-project
 
 ## Step 2: Use Generators to Scaffold your Project
 
-We'll add a tRPC API, React Website, Cognito Authentication, and CDK Infrastructure in this quick-start guide. Depending on the type of project you're building, you can choose any combination of generators to quickly bootstrap your project. Check out the __Guides__ in the navigation bar to the left to see the full list of options.
+We'll add a tRPC API, React Website, Cognito Authentication, and CDK or Terraform Infrastructure in this quick-start guide. Depending on the type of project you're building, you can choose any combination of generators to quickly bootstrap your project. Check out the __Guides__ in the navigation bar to the left to see the full list of options.
 
 ### Add a tRPC API
 
@@ -62,11 +76,22 @@ This sets up the necessary infrastructure and React code to add Cognito Authenti
 
 This configures the necessary providers to ensure your website can call your tRPC API.
 
-### Add CDK Infrastructure
+### Add Infrastructure
 
+Add the infrastructure project based on your chosen IAC provider.
+
+<Infrastructure>
+<Fragment slot="cdk">
 <RunGenerator generator="ts#infra" requiredParameters={{ name: 'infra' }} />
 
 This configures a CDK App which you can use to deploy your infrastructure on AWS.
+</Fragment>
+<Fragment slot="terraform">
+<RunGenerator generator="terraform#project" requiredParameters={{ name: 'infra' }} />
+
+This configures a Terraform project which you can use to deploy your infrastructure on AWS.
+</Fragment>
+</Infrastructure>
 
 ## Step 3: Run your Website and API Locally
 
@@ -80,6 +105,8 @@ Changes to both your website and API will be reflected in real-time as both the 
 
 ## Step 4: Define Cloud Resources and Deploy to AWS
 
+<Infrastructure>
+<Fragment slot="cdk">
 Open `packages/infra/src/stacks/application-stack.ts` and add the following code:
 
 ```typescript
@@ -103,6 +130,68 @@ export class ApplicationStack extends cdk.Stack {
 ```
 
 This is all the CDK we need to write to deploy our full stack application.
+</Fragment>
+<Fragment slot="terraform">
+Open `packages/infra/src/main.tf` and add the following code:
+
+```hcl
+# Include metrics tracking for @aws/nx-plugin usage
+module "metrics" {
+  source = "../../common/terraform/src/metrics"
+}
+
+# Deploy user identity
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
+}
+
+# Deploy API
+module "demo_api" {
+  source = "../../common/terraform/src/app/apis/demo-api"
+}
+
+# Grant authenticated users access to invoke the API
+resource "aws_iam_policy" "api_invoke_policy" {
+  name        = "DemoApiInvokePolicy"
+  description = "Policy to allow authenticated users to invoke the API"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = "execute-api:Invoke"
+        Resource = "${module.demo_api.api_execution_arn}/*/*"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "authenticated_api_access" {
+  role       = module.user_identity.authenticated_role_name
+  policy_arn = aws_iam_policy.api_invoke_policy.arn
+}
+
+# Deploy website
+provider "aws" {
+  alias  = "us_east_1"
+  region = "us-east-1"
+}
+
+module "demo_website" {
+  source = "../../common/terraform/src/app/static-websites/demo-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+
+  depends_on = [module.user_identity, module.demo_api]
+}
+```
+
+This is all the Terraform we need to write to deploy our full stack application.
+</Fragment>
+</Infrastructure>
 
 ### Build and Deploy the Infrastructure
 
@@ -116,17 +205,39 @@ If you encounter any lint errors, you can run the following command to automatic
 <NxCommands commands={['run-many --target lint --configuration=fix --all']} />
 :::
 
-Run the following command to deploy your project:
+Bootstrap your infrastructure:
 
-<NxCommands commands={['run infra:deploy my-project-sandbox/*']} />
+<Infrastructure>
+<Fragment slot="cdk">
+<NxCommands commands={['run infra:bootstrap']} />
 
 :::tip
-You will need to ensure your AWS environment has been appropriately bootstrapped for CDK.
-
 CDK bootstrapping is required for both your target deployment AWS region, and `us-east-1` to allow deployment of the AWS WAF WebACL for the website.
-
-<NxCommands commands={['run infra:bootstrap']} />
 :::
+</Fragment>
+<Fragment slot="terraform">
+<NxCommands commands={['run infra:bootstrap']} />
+
+:::tip
+Terraform bootstrapping creates an S3 bucket to store your Terraform state files. This only needs to be done once per AWS account/region combination.
+:::
+</Fragment>
+</Infrastructure>
+
+Deploy your project:
+
+<Infrastructure>
+<Fragment slot="cdk">
+<NxCommands commands={['run infra:deploy my-project-sandbox/*']} />
+</Fragment>
+<Fragment slot="terraform">
+<NxCommands commands={['run infra:apply']} />
+
+:::tip
+This command will first run `terraform plan` to show you what changes will be made, then apply those changes to deploy your infrastructure.
+:::
+</Fragment>
+</Infrastructure>
 
 ## Step 5: Test the Website with Deployed Cloud Resources
 

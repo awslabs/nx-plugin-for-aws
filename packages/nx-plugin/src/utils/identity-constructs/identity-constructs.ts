@@ -14,6 +14,7 @@ import {
   SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants';
 import { addStarExport } from '../ast';
+import { IacProvider } from '../iac';
 
 export interface AddIdentityInfraOptions {
   cognitoDomain: string;
@@ -25,7 +26,7 @@ export interface AddIdentityInfraOptions {
  */
 export const addIdentityInfra = (
   tree: Tree,
-  options: AddIdentityInfraOptions & { iacProvider: 'CDK' | 'Terraform' },
+  options: AddIdentityInfraOptions & { iacProvider: IacProvider },
 ) => {
   if (options.iacProvider === 'CDK') {
     addIdentityCdkConstructs(tree, options);

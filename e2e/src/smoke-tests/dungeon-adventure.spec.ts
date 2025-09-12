@@ -27,7 +27,7 @@ describe('smoke test - dungeon-adventure', () => {
     // 1. Monorepo Setup
 
     await runCLI(
-      `${buildCreateNxWorkspaceCommand(pkgMgr, 'dungeon-adventure', true)} --interactive=false --skipGit`,
+      `${buildCreateNxWorkspaceCommand(pkgMgr, 'dungeon-adventure', 'CDK', true)} --interactive=false --skipGit`,
       {
         cwd: targetDir,
         prefixWithPackageManagerCmd: false,

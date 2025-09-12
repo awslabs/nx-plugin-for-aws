@@ -28,6 +28,7 @@ import camelCase from 'lodash.camelcase';
 import { TS_HANDLER_RETURN_TYPES } from './io';
 import { addEsbuildBundleTarget } from '../../utils/esbuild';
 import { addLambdaFunctionInfra } from '../../utils/function-constructs/function-constructs';
+import { resolveIacProvider } from '../../utils/iac';
 
 export const TS_LAMBDA_FUNCTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -85,8 +86,10 @@ export const tsLambdaFunctionGenerator = async (
     );
   }
 
+  const iacProvider = await resolveIacProvider(tree, schema.iacProvider);
+
   await sharedConstructsGenerator(tree, {
-    iacProvider: schema.iacProvider,
+    iacProvider,
   });
 
   // Add bundle-<name> target for this specific lambda function
@@ -99,7 +102,7 @@ export const tsLambdaFunctionGenerator = async (
     handler: 'index.handler',
     runtime: 'node',
     bundlePathFromRoot: joinPathFragments('dist', dir, bundleTargetName),
-    iacProvider: schema.iacProvider,
+    iacProvider,
   });
 
   const enhancedOptions = {

@@ -12,16 +12,17 @@ import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.as
 import InstallCommand from '@components/install-command.astro';
 import RunGenerator from '@components/run-generator.astro';
 import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
 
 本指南将引导您完成安装和使用 `@aws/nx-plugin` 在 AWS 上快速构建项目的基础知识。
 
 :::tip
-如需更深入的完整应用构建教程，请查看<Link path="get_started/tutorials/dungeon-game/overview">地牢冒险教程</Link>。
+如需更深入的完整应用构建教程，请查看 <Link path="get_started/tutorials/dungeon-game/overview">地牢冒险教程</Link>。
 :::
 
-## 前置条件
+## 前提条件
 
-开始前需要安装以下全局依赖项：
+开始前需要安装以下全局依赖：
 
 <Snippet name="prerequisites" />
 
@@ -31,15 +32,28 @@ import NxCommands from '@components/nx-commands.astro';
 
 <CreateNxWorkspaceCommand workspace="my-project" />
 
+:::tip
+系统会提示您选择基础设施即代码（IaC）提供商，可选 [CDK](https://docs.aws.amazon.com/cdk/) 或 [Terraform](https://developer.hashicorp.com/terraform)。您可以通过添加 `--iacProvider` 参数跳过提示：
+
+<Infrastructure>
+<Fragment slot="cdk">
+<CreateNxWorkspaceCommand workspace="my-project" iacProvider="CDK" />
+</Fragment>
+<Fragment slot="terraform">
+<CreateNxWorkspaceCommand workspace="my-project" iacProvider="Terraform" />
+</Fragment>
+</Infrastructure>
+:::
+
 完成后进入项目目录：
 
 ```sh
 cd my-project
 ```
 
-## 步骤 2：使用生成器快速搭建项目
+## 步骤 2：使用生成器搭建项目框架
 
-本快速入门指南将添加 tRPC API、React 网站、Cognito 身份验证和 CDK 基础设施。根据您构建的项目类型，可以选择任意组合的生成器快速启动项目。查看左侧导航栏中的 __指南__ 查看完整选项列表。
+本快速入门指南将添加 tRPC API、React 网站、Cognito 身份验证和 CDK/Terraform 基础设施。根据项目类型，您可以选择任意组合的生成器快速启动项目。查看左侧导航栏的 __指南__ 获取完整选项列表。
 
 ### 添加 tRPC API
 
@@ -51,25 +65,36 @@ cd my-project
 
 <RunGenerator generator="ts#react-website" requiredParameters={{ name: 'demo-website' }} />
 
-这将在 `packages/demo-website` 目录下生成新的 React 网站。
+这将在 `packages/demo-website` 目录下创建新的 React 网站。
 
 ### 添加 Cognito 身份验证
 
 <RunGenerator generator="ts#react-website#auth" requiredParameters={{ project: '@my-project/demo-website', cognitoDomain: 'my-demo' }} />
 
-这将设置必要的基础设施和 React 代码，为您的网站添加 Cognito 身份验证。
+这将设置必要的基础设施和 React 代码，为网站添加 Cognito 身份验证。
 
 ### 连接前端与后端
 
 <RunGenerator generator="api-connection" requiredParameters={{ sourceProject: '@my-project/demo-website', targetProject: '@my-project/demo-api' }} />
 
-这将配置必要的提供程序，确保您的网站可以调用 tRPC API。
+这将配置必要的提供程序以确保网站可以调用 tRPC API。
 
-### 添加 CDK 基础设施
+### 添加基础设施
 
+根据选择的 IaC 提供商添加基础设施项目：
+
+<Infrastructure>
+<Fragment slot="cdk">
 <RunGenerator generator="ts#infra" requiredParameters={{ name: 'infra' }} />
 
-这将配置一个 CDK 应用，用于在 AWS 上部署基础设施。
+这将配置用于在 AWS 上部署基础设施的 CDK 应用。
+</Fragment>
+<Fragment slot="terraform">
+<RunGenerator generator="terraform#project" requiredParameters={{ name: 'infra' }} />
+
+这将配置用于在 AWS 上部署基础设施的 Terraform 项目。
+</Fragment>
+</Infrastructure>
 
 ## 步骤 3：本地运行网站和 API
 
@@ -77,12 +102,14 @@ cd my-project
 
 <NxCommands commands={['run demo-website:serve-local']} />
 
-您的网站将在 `http://localhost:4200` 可用。
+网站将运行在 `http://localhost:4200`。
 
-对网站和 API 的更改将实时反映，因为本地网站和 API 服务器都会热重载。
+对网站和 API 的修改将实时生效，本地服务器支持热重载。
 
 ## 步骤 4：定义云资源并部署到 AWS
 
+<Infrastructure>
+<Fragment slot="cdk">
 打开 `packages/infra/src/stacks/application-stack.ts` 并添加以下代码：
 
 ```typescript
@@ -105,31 +132,115 @@ export class ApplicationStack extends cdk.Stack {
 }
 ```
 
-这就是部署全栈应用所需的所有 CDK 代码。
+这是部署全栈应用所需的全部 CDK 代码。
+</Fragment>
+<Fragment slot="terraform">
+打开 `packages/infra/src/main.tf` 并添加以下代码：
+
+```hcl
+# 包含 @aws/nx-plugin 使用指标跟踪
+module "metrics" {
+  source = "../../common/terraform/src/metrics"
+}
+
+# 部署用户身份
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
+}
+
+# 部署 API
+module "demo_api" {
+  source = "../../common/terraform/src/app/apis/demo-api"
+}
+
+# 授予认证用户调用 API 的权限
+resource "aws_iam_policy" "api_invoke_policy" {
+  name        = "DemoApiInvokePolicy"
+  description = "允许认证用户调用 API 的策略"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = "execute-api:Invoke"
+        Resource = "${module.demo_api.api_execution_arn}/*/*"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "authenticated_api_access" {
+  role       = module.user_identity.authenticated_role_name
+  policy_arn = aws_iam_policy.api_invoke_policy.arn
+}
+
+# 部署网站
+provider "aws" {
+  alias  = "us_east_1"
+  region = "us-east-1"
+}
+
+module "demo_website" {
+  source = "../../common/terraform/src/app/static-websites/demo-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+
+  depends_on = [module.user_identity, module.demo_api]
+}
+```
+
+这是部署全栈应用所需的全部 Terraform 代码。
+</Fragment>
+</Infrastructure>
 
 ### 构建并部署基础设施
 
-接下来运行以下命令构建项目：
+运行以下命令构建项目：
 
 <NxCommands commands={['run-many --target build --all']} />
 
 :::tip
-如果遇到 lint 错误，可以运行以下命令自动修复：
+如遇 lint 错误，可运行以下命令自动修复：
 
 <NxCommands commands={['run-many --target lint --configuration=fix --all']} />
 :::
 
-运行以下命令部署项目：
+初始化基础设施：
 
-<NxCommands commands={['run infra:deploy my-project-sandbox/*']} />
+<Infrastructure>
+<Fragment slot="cdk">
+<NxCommands commands={['run infra:bootstrap']} />
 
 :::tip
-您需要确保 AWS 环境已为 CDK 正确引导。
-
-CDK 引导需要在目标部署 AWS 区域和 `us-east-1` 区域完成，以允许部署网站的 AWS WAF WebACL。
-
-<NxCommands commands={['run infra:bootstrap']} />
+CDK 初始化需要在目标部署区域和 `us-east-1` 区域执行，以便部署网站的 AWS WAF WebACL。
 :::
+</Fragment>
+<Fragment slot="terraform">
+<NxCommands commands={['run infra:bootstrap']} />
+
+:::tip
+Terraform 初始化会创建存储状态文件的 S3 存储桶，每个 AWS 账户/区域组合只需执行一次。
+:::
+</Fragment>
+</Infrastructure>
+
+部署项目：
+
+<Infrastructure>
+<Fragment slot="cdk">
+<NxCommands commands={['run infra:deploy my-project-sandbox/*']} />
+</Fragment>
+<Fragment slot="terraform">
+<NxCommands commands={['run infra:apply']} />
+
+:::tip
+此命令会先执行 `terraform plan` 显示变更计划，然后应用变更部署基础设施。
+:::
+</Fragment>
+</Infrastructure>
 
 ## 步骤 5：测试已部署云资源的网站
 
@@ -143,8 +254,8 @@ CDK 引导需要在目标部署 AWS 区域和 `us-east-1` 区域完成，以允�
     <NxCommands commands={['run demo-website:serve']} />
 </Steps>
 
-您的网站将在 `http://localhost:4200` 可用，并将指向已部署的 API 和身份验证资源。
+网站将运行在 `http://localhost:4200`，并指向已部署的 API 和身份验证资源。
 
 ---
 
-恭喜！🎉 您已成功使用 `@aws/nx-plugin` 构建并部署了一个全栈应用！
+恭喜！🎉 您已成功使用 `@aws/nx-plugin` 构建并部署了全栈应用！

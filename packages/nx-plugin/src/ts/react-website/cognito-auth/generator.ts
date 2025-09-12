@@ -40,6 +40,7 @@ import {
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { addHookResultToRouterProviderContext } from '../../../utils/ast/website';
 import { addIdentityInfra } from '../../../utils/identity-constructs/identity-constructs';
+import { resolveIacProvider } from '../../../utils/iac';
 
 export const COGNITO_AUTH_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -68,12 +69,14 @@ export async function tsReactWebsiteAuthGenerator(
     project: options.project,
   });
 
+  const iacProvider = await resolveIacProvider(tree, options.iacProvider);
+
   await sharedConstructsGenerator(tree, {
-    iacProvider: options.iacProvider,
+    iacProvider,
   });
 
   addIdentityInfra(tree, {
-    iacProvider: options.iacProvider,
+    iacProvider,
     allowSignup: options.allowSignup,
     cognitoDomain: options.cognitoDomain,
   });

@@ -24,7 +24,7 @@ describe('smoke test - terraform', () => {
 
   it(`Should generate and build - ${pkgMgr}`, async () => {
     await runCLI(
-      `${buildCreateNxWorkspaceCommand(pkgMgr, 'e2e-test', true)} --interactive=false --skipGit`,
+      `${buildCreateNxWorkspaceCommand(pkgMgr, 'e2e-test', 'Terraform', true)} --interactive=false --skipGit`,
       {
         cwd: targetDir,
         prefixWithPackageManagerCmd: false,

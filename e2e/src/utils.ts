@@ -161,6 +161,7 @@ function logError(message: string, body?: string) {
 export const buildCreateNxWorkspaceCommand = (
   pm: string,
   workspace: string,
+  iacProvider?: 'CDK' | 'Terraform',
   yes = false,
 ) =>
-  `npx ${yes ? '-y ' : ''}create-nx-workspace@~21.4.1 ${workspace} --pm=${pm} --preset=@aws/nx-plugin --ci=skip`;
+  `npx ${yes ? '-y ' : ''}create-nx-workspace@~21.4.1 ${workspace} --pm=${pm} --preset=@aws/nx-plugin ${iacProvider ? `--iacProvider=${iacProvider} ` : ''}--ci=skip`;

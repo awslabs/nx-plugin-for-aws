@@ -6,6 +6,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { NxGeneratorInfo } from '../../utils/nx';
 import { PACKAGE_MANAGERS } from '../schema';
 import { buildNxCommand, fetchGuidePages } from '../generator-info';
+import { IAC_PROVIDERS } from '../../utils/iac';
 
 export const TOOL_SELECTION_GUIDE = `## Tool Selection Guide
 
@@ -34,7 +35,8 @@ ${TOOL_SELECTION_GUIDE}
 
 ## Getting Started
 
-- Choose a package manager first. You can choose between ${PACKAGE_MANAGERS.join(' ,')}. It's recommended to use "pnpm" if the user has no preference
+- Choose a package manager first. You can choose between ${PACKAGE_MANAGERS.join(', ')}. It's recommended to use "pnpm" if the user has no preference
+- Choose an infrastructure as code (IaC) provider next. You can choose between ${IAC_PROVIDERS.join(', ')}. It's recommended to use CDK if the user has no preference
 - Next, you must create an Nx workspace. Use the \`create-workspace-command\` tool for more details, and provide it with your chosen package manager
 - After this, you can start scaffolding the main components of your application using generators. Use the \`list-generators\` tool to discover available generators, and the \`generator-guide\` tool for more detailed information about a specific generator
 

@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { IacProviderOption } from '../../utils/iac';
+
 export type TsMcpServerComputeType = 'None' | 'BedrockAgentCoreRuntime';
 
 /**
@@ -13,5 +15,5 @@ export interface TsMcpServerGeneratorSchema {
   project: string;
   name?: string;
   computeType?: TsMcpServerComputeType;
-  iacProvider: 'CDK' | 'Terraform';
+  iacProvider: IacProviderOption;
 }

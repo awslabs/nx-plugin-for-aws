@@ -16,6 +16,7 @@ import {
   SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants';
 import { addStarExport } from '../ast';
+import { IacProvider } from '../iac';
 
 interface BackendOptions {
   type: 'trpc' | 'fastapi';
@@ -44,7 +45,7 @@ export interface AddApiGatewayConstructOptions {
 
 export const addApiGatewayInfra = (
   tree: Tree,
-  options: AddApiGatewayConstructOptions & { iacProvider: 'CDK' | 'Terraform' },
+  options: AddApiGatewayConstructOptions & { iacProvider: IacProvider },
 ) => {
   if (options.iacProvider === 'CDK') {
     addApiGatewayCdkConstructs(tree, options);

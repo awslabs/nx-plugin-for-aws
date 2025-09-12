@@ -5,6 +5,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod-v3';
 import { PackageManagerSchema } from '../schema';
+import { IAC_PROVIDERS } from '../../utils/iac';
 
 /**
  * Add a tool which tells a model how to create an Nx workspace
@@ -25,6 +26,9 @@ npx create-nx-workspace@~21.4.1 ${workspaceName} --pm=${packageManager} --preset
 \`\`\`
 
 This will create a new workspace within the ${workspaceName} directory.
+
+Note that this will prompt for an Infrastructure as Code provider (${IAC_PROVIDERS.join(', ')}).
+If you know the preferred option, pass ${IAC_PROVIDERS.map((iac) => `\`--iacProvider=${iac}\``).join(' or ')} to the above command to skip the prompt.
   `,
         },
       ],

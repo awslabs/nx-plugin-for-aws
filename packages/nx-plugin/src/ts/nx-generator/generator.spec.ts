@@ -582,7 +582,7 @@ describe('nx-generator generator', () => {
     });
 
     it('should add generator metric to app.ts', async () => {
-      await sharedConstructsGenerator(tree);
+      await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
 
       await tsNxGeneratorGenerator(tree, {
         project: '@test/plugin',
