@@ -1,0 +1,119 @@
+terraform {
+  required_providers {
+    local = {
+      source  = "hashicorp/local"
+      version = "~> 2.0"
+    }
+  }
+}
+
+# Variables
+variable "key_path" {
+  description = "Dot-separated path for the configuration key (e.g., 'apis.FooApi', 'cognito.userPoolId')"
+  type        = string
+}
+
+variable "value" {
+  description = "Value to set at the key path"
+  type        = any
+}
+
+locals {
+  config_file_path = "${path.module}/../../../../../../../dist/packages/common/terraform/runtime-config.json"
+}
+
+# This module writes an entry to runtime-config.json which is provided to any static websites
+# as a way to pass deploy-time values to the UI such as API urls
+
+data "external" "updated_config" {
+  program = ["uv", "run", "python", "-c", <<-EOT
+import json
+import sys
+import os
+import time
+import fcntl
+from pathlib import Path
+
+# Read input from Terraform
+input_data = json.load(sys.stdin)
+config_file = input_data['config_file']
+key_path = input_data['key_path']
+value = json.loads(input_data['value'])
+
+# Create lock file path
+lock_file = config_file + '.lock'
+
+# Ensure directory exists
+Path(config_file).parent.mkdir(parents=True, exist_ok=True)
+
+# Acquire exclusive lock with retry mechanism
+max_retries = 30
+retry_delay = 1.0
+
+for attempt in range(max_retries):
+    try:
+        # Open lock file for exclusive access
+        with open(lock_file, 'w') as lock_fd:
+            # Try to acquire exclusive lock (non-blocking)
+            fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+            # Critical section - file operations under lock
+            try:
+                # Create empty base config if file doesn't exist
+                if not os.path.exists(config_file):
+                    base_config = {}
+                    with open(config_file, 'w') as f:
+                        json.dump(base_config, f, indent=2)
+
+                # Read current config
+                with open(config_file, 'r') as f:
+                    config = json.load(f)
+
+                # Set the nested key using dot notation
+                keys = key_path.split('.')
+                current = config
+                for key in keys[:-1]:
+                    if key not in current:
+                        current[key] = {}
+                    current = current[key]
+                current[keys[-1]] = value
+
+                # Write updated config back to file atomically
+                temp_file = config_file + '.tmp'
+                with open(temp_file, 'w') as f:
+                    json.dump(config, f, indent=2)
+                os.rename(temp_file, config_file)
+
+                # Output the updated config for Terraform
+                print(json.dumps({"updated_json": json.dumps(config)}))
+
+                # Success - break out of retry loop
+                break
+
+            finally:
+                # Lock is automatically released when file is closed
+                pass
+
+    except (IOError, OSError) as e:
+        if attempt < max_retries - 1:
+            # Wait before retrying
+            time.sleep(retry_delay)
+            continue
+        else:
+            # Final attempt failed
+            raise Exception(f"Failed to acquire lock after {max_retries} attempts: {e}")
+
+# Clean up lock file if it exists
+try:
+    os.remove(lock_file)
+except OSError:
+    pass
+EOT
+  ]
+
+  query = {
+    config_file = local.config_file_path
+    key_path    = var.key_path
+    value       = jsonencode(var.value)
+  }
+}

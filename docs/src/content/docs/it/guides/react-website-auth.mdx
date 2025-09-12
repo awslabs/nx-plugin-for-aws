@@ -1,6 +1,6 @@
 ---
-title: "Autenticazione del Sito Web CloudScape"
-description: "Documentazione di riferimento per l'Autenticazione del Sito Web CloudScape"
+title: "Autenticazione del Sito Web React"
+description: "Documentazione di riferimento per l'Autenticazione del Sito Web React"
 ---
 
 
@@ -10,16 +10,18 @@ import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
 
-Il generatore CloudScape Website Authentication aggiunge l'autenticazione al tuo sito web CloudScape utilizzando [Amazon Cognito](https://aws.amazon.com/cognito/).
+Il generatore di autenticazione per React Website aggiunge l'autenticazione al tuo sito React utilizzando [Amazon Cognito](https://aws.amazon.com/cognito/).
 
-Questo generatore configura l'infrastruttura CDK per creare un Cognito User Pool e un Identity Pool associato, insieme a un'interfaccia utente ospitata per gestire i flussi di login degli utenti e la sua integrazione con il tuo sito web CloudScape.
+Questo generatore configura l'infrastruttura CDK o Terraform per creare un Cognito User Pool e un Identity Pool associato, oltre a un'interfaccia utente ospitata per gestire i flussi di login degli utenti e la sua integrazione con il tuo sito React.
 
 ## Utilizzo
 
-### Aggiungi autenticazione al tuo sito web CloudScape
+### Aggiungere l'autenticazione al tuo sito React
 
-Puoi aggiungere l'autenticazione al tuo sito web CloudScape in due modi:
+Puoi aggiungere l'autenticazione al tuo sito React in due modi:
 
 <RunGenerator generator="ts#react-website#auth" />
 
@@ -29,27 +31,49 @@ Puoi aggiungere l'autenticazione al tuo sito web CloudScape in due modi:
 
 ## Output del Generatore
 
-Troverai le seguenti modifiche nella tua applicazione React:
+Troverai le seguenti modifiche nel tuo sito React:
 
 <FileTree>
   - src
     - components
       - CognitoAuth
-        - index.tsx Componente principale di autenticazione
+        - index.tsx Componente principale per l'autenticazione
     - main.tsx Aggiornato per integrare il componente CognitoAuth
 </FileTree>
 
-Troverai anche il seguente codice infrastrutturale generato in `packages/common/constructs`:
+### Infrastruttura
 
+<Snippet name="shared-constructs" />
+
+Troverai anche il seguente codice infrastrutturale generato in base al `iacProvider` selezionato:
+
+<Infrastructure>
+<Fragment slot="cdk">
 <FileTree>
-  - src
+  - packages/common/constructs/src
     - core
       - user-identity.ts Construct che definisce il user pool e identity pool
 </FileTree>
+</Fragment>
+<Fragment slot="terraform">
+<FileTree>
+  - packages/common/terraform/src
+    - core
+      - user-identity
+        - main.tf Modulo wrapper per la configurazione dell'identità
+        - identity
+          - identity.tf Infrastruttura principale dell'identità inclusi Cognito User Pool e Identity Pool
+        - add-callback-url
+          - add-callback-url.tf Modulo per aggiungere URL di callback ai client esistenti del user pool
+</FileTree>
+</Fragment>
+</Infrastructure>
 
 ## Utilizzo dell'Infrastruttura
 
-Dovrai aggiungere il construct `UserIdentity` al tuo stack, dichiarandolo _prima_ del construct del sito web:
+<Infrastructure>
+<Fragment slot="cdk">
+Dovrai aggiungere l'infrastruttura per l'identità utente al tuo stack, dichiarandola _prima_ del sito web:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts" {3,9}
 import { Stack } from 'aws-cdk-lib';
@@ -67,12 +91,40 @@ export class ApplicationStack extends Stack {
 }
 ```
 
-Il construct `UserIdentity` aggiunge automaticamente la necessaria <Link path="guides/react-website#runtime-configuration">Configurazione Runtime</Link> per garantire che il tuo sito web possa puntare al corretto Cognito User Pool per l'autenticazione.
+Il construct `UserIdentity` aggiunge automaticamente la necessaria <Link path="guides/react-website#runtime-configuration">Configurazione Runtime</Link> per garantire che il tuo sito possa puntare al corretto Cognito User Pool per l'autenticazione.
+</Fragment>
+<Fragment slot="terraform">
+Dovrai aggiungere il modulo per l'identità utente e assicurarti che il tuo sito web dipenda da esso:
+
+```hcl title="packages/infra/src/main.tf" {2-4,14-15}
+# Distribuisci prima l'identità utente per aggiungerla alla configurazione runtime
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
+}
+
+# Distribuisci il sito web dopo l'identità per includere la configurazione runtime
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+
+  # Assicura che l'identità sia distribuita prima
+  depends_on = [module.user_identity]
+}
+```
+
+Il modulo per l'identità utente aggiunge automaticamente la necessaria <Link path="guides/react-website#runtime-configuration">Configurazione Runtime</Link> per garantire che il tuo sito possa puntare al corretto Cognito User Pool per l'autenticazione.
+</Fragment>
+</Infrastructure>
 
 ### Concessione Accesso agli Utenti Autenticati
 
-Per concedere agli utenti autenticati l'accesso a determinate azioni, come concedere permessi per invocare un'API, puoi aggiungere policy IAM al ruolo autenticato dell'identity pool:
+Per concedere agli utenti autenticati l'accesso a determinate azioni, come concedere permessi per invocare un'API, puoi aggiungere dichiarazioni di policy IAM al ruolo autenticato del pool di identità:
 
+<Infrastructure>
+<Fragment slot="cdk">
 ```ts title="packages/infra/src/stacks/application-stack.ts" {12}
 import { Stack } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
@@ -91,3 +143,35 @@ export class ApplicationStack extends Stack {
   }
 }
 ```
+</Fragment>
+<Fragment slot="terraform">
+```hcl title="packages/infra/src/main.tf" {12,22}
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
+}
+
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+}
+
+# Aggiungi permessi per gli utenti autenticati di invocare Fast API
+resource "aws_iam_role_policy" "authenticated_fast_api_invoke" {
+  name = "authenticated-user-invoke-my-api"
+  role = module.user_identity.authenticated_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "execute-api:Invoke"
+        ]
+        Resource = "${module.my_api.api_execution_arn}/*"
+      }
+    ]
+  })
+}
+```
+</Fragment>
+</Infrastructure>

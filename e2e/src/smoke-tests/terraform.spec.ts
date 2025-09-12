@@ -38,24 +38,22 @@ describe('smoke test - terraform', () => {
       `generate @aws/nx-plugin:terraform#project --name=infra --type=application --no-interactive`,
       opts,
     );
-    // TODO: tf support for website
-    // await runCLI(
-    //   `generate @aws/nx-plugin:ts#react-website --name=website --no-interactive`,
-    //   opts,
-    // );
+    await runCLI(
+      `generate @aws/nx-plugin:ts#react-website --name=website --iacProvider=Terraform --no-interactive`,
+      opts,
+    );
     await runCLI(
       `generate @aws/nx-plugin:ts#trpc-api --name=my-api --computeType=ServerlessApiGatewayRestApi --iacProvider=Terraform --no-interactive`,
       opts,
     );
-    // TODO: tf support for website auth
-    // await runCLI(
-    //   `generate @aws/nx-plugin:ts#react-website#auth --project=@e2e-test/website --cognitoDomain=test --no-interactive`,
-    //   opts,
-    // );
-    // await runCLI(
-    //   `generate @aws/nx-plugin:api-connection --sourceProject=@e2e-test/website --targetProject=@e2e-test/my-api --no-interactive`,
-    //   opts,
-    // );
+    await runCLI(
+      `generate @aws/nx-plugin:ts#react-website#auth --project=@e2e-test/website --iacProvider=Terraform --cognitoDomain=test --no-interactive`,
+      opts,
+    );
+    await runCLI(
+      `generate @aws/nx-plugin:api-connection --sourceProject=@e2e-test/website --targetProject=@e2e-test/my-api --no-interactive`,
+      opts,
+    );
     await runCLI(
       `generate @aws/nx-plugin:py#fast-api --name=py-api --computeType=ServerlessApiGatewayHttpApi --iacProvider=Terraform --no-interactive`,
       opts,
@@ -90,10 +88,10 @@ describe('smoke test - terraform', () => {
       `generate @aws/nx-plugin:ts#mcp-server --project=ts-project --name=my-mcp-server --computeType=BedrockAgentCoreRuntime --iacProvider=Terraform --no-interactive`,
       opts,
     );
-    // await runCLI(
-    //   `generate @aws/nx-plugin:api-connection --sourceProject=website --targetProject=py_api --no-interactive`,
-    //   opts,
-    // );
+    await runCLI(
+      `generate @aws/nx-plugin:api-connection --sourceProject=website --targetProject=py_api --no-interactive`,
+      opts,
+    );
 
     await runCLI(`generate @aws/nx-plugin:license --no-interactive`, opts);
 

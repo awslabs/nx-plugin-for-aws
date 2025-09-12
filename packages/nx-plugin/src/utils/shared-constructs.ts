@@ -8,7 +8,9 @@ import {
   getPackageManagerCommand,
   joinPathFragments,
   OverwriteStrategy,
+  ProjectConfiguration,
   Tree,
+  updateJson,
 } from '@nx/devkit';
 import { getNpmScopePrefix, toScopeAlias } from './npm-scope';
 import tsProjectGenerator from '../ts/lib/generator';
@@ -97,6 +99,36 @@ export async function sharedConstructsGenerator(
         directory: joinPathFragments(PACKAGES_DIR, 'common'),
         type: 'library',
       });
+
+      // Add target to reset runtime config as part of the build, ensuring any plan/apply target
+      // which depends on shared terraform will build runtime-config.json from scratch, meaning no old
+      // values will remain when resources are removed.
+      // NB: runtime-config.json starts as an empty object to keep the reader terraform module simple
+      updateJson(
+        tree,
+        joinPathFragments(PACKAGES_DIR, SHARED_TERRAFORM_DIR, 'project.json'),
+        (projectConfig: ProjectConfiguration) => {
+          projectConfig.targets ??= {};
+          projectConfig.targets['reset-runtime-config'] = {
+            executor: 'nx:run-commands',
+            options: {
+              command:
+                "node -e \"const fs=require('fs');fs.mkdirSync(process.env.DIST_DIR,{recursive:true});fs.writeFileSync(process.env.DIST_DIR+'/runtime-config.json','{}');\"",
+              env: {
+                DIST_DIR: 'dist/{projectRoot}',
+              },
+            },
+          };
+          projectConfig.targets.build ??= {};
+          projectConfig.targets.build.dependsOn = [
+            ...(projectConfig.targets.build.dependsOn ?? []).filter(
+              (t) => t !== 'reset-runtime-config',
+            ),
+            'reset-runtime-config',
+          ];
+          return projectConfig;
+        },
+      );
 
       tree.delete(joinPathFragments(terraformLibPath, 'src', 'main.tf'));
 

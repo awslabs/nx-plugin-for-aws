@@ -1,6 +1,6 @@
 ---
-title: "클라우드스케이프 웹사이트 인증"
-description: "클라우드스케이프 웹사이트 인증에 대한 참조 문서"
+title: "React 웹사이트 인증"
+description: "React 웹사이트 인증에 대한 참조 문서"
 ---
 
 
@@ -10,16 +10,18 @@ import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
 
-CloudScape 웹사이트 인증 생성기는 [Amazon Cognito](https://aws.amazon.com/cognito/)를 사용해 CloudScape 웹사이트에 인증 기능을 추가합니다.
+React 웹사이트 인증 생성기는 [Amazon Cognito](https://aws.amazon.com/cognito/)를 사용하여 React 웹사이트에 인증 기능을 추가합니다.
 
-이 생성기는 Cognito 사용자 풀과 연관된 Identity Pool, 사용자 로그인 흐름을 처리하는 호스팅 UI, 그리고 CloudScape 웹사이트와의 통합을 위한 CDK 인프라스트럭처를 구성합니다.
+이 생성기는 CDK 또는 Terraform 인프라를 구성하여 Cognito 사용자 풀 및 관련 Identity Pool, 사용자 로그인 흐름을 처리하는 호스팅된 UI, 그리고 React 웹사이트와의 통합을 설정합니다.
 
 ## 사용 방법
 
-### CloudScape 웹사이트에 인증 추가하기
+### React 웹사이트에 인증 추가하기
 
-다음 두 가지 방법으로 CloudScape 웹사이트에 인증을 추가할 수 있습니다:
+다음 두 가지 방법으로 React 웹사이트에 인증을 추가할 수 있습니다:
 
 <RunGenerator generator="ts#react-website#auth" />
 
@@ -35,21 +37,43 @@ React 웹사이트에 다음과 같은 변경 사항이 적용됩니다:
   - src
     - components
       - CognitoAuth
-        - index.tsx 주요 인증 컴포넌트
-    - main.tsx CognitoAuth 컴포넌트를 적용하도록 업데이트됨
+        - index.tsx 기본 인증 컴포넌트
+    - main.tsx CognitoAuth 컴포넌트를 적용하도록 업데이트
 </FileTree>
 
-또한 `packages/common/constructs` 경로에 다음 인프라 코드가 생성됩니다:
+### 인프라
 
+<Snippet name="shared-constructs" />
+
+선택한 `iacProvider`에 따라 다음 인프라 코드가 생성됩니다:
+
+<Infrastructure>
+<Fragment slot="cdk">
 <FileTree>
-  - src
+  - packages/common/constructs/src
     - core
-      - user-identity.ts 사용자 풀과 Identity Pool을 정의하는 Construct
+      - user-identity.ts 사용자 풀 및 Identity Pool을 정의하는 Construct
 </FileTree>
+</Fragment>
+<Fragment slot="terraform">
+<FileTree>
+  - packages/common/terraform/src
+    - core
+      - user-identity
+        - main.tf Identity 구성을 위한 모듈 래퍼
+        - identity
+          - identity.tf Cognito 사용자 풀 및 Identity Pool을 포함한 핵심 Identity 인프라
+        - add-callback-url
+          - add-callback-url.tf 기존 사용자 풀 클라이언트에 콜백 URL 추가 모듈
+</FileTree>
+</Fragment>
+</Infrastructure>
 
 ## 인프라 사용 방법
 
-스택에 `UserIdentity` 구성을 추가해야 하며, 웹사이트 Construct **이전에** 선언해야 합니다:
+<Infrastructure>
+<Fragment slot="cdk">
+웹사이트 선언 _이전에_ 사용자 Identity 인프라를 스택에 추가해야 합니다:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts" {3,9}
 import { Stack } from 'aws-cdk-lib';
@@ -67,12 +91,40 @@ export class ApplicationStack extends Stack {
 }
 ```
 
-`UserIdentity` Construct는 웹사이트가 인증을 위해 올바른 Cognito 사용자 풀을 가리킬 수 있도록 필요한 <Link path="guides/react-website#runtime-configuration">런타임 구성</Link>을 자동으로 추가합니다.
+`UserIdentity` Construct는 웹사이트가 올바른 Cognito 사용자 풀을 가리킬 수 있도록 필요한 <Link path="guides/react-website#runtime-configuration">런타임 구성</Link>을 자동으로 추가합니다.
+</Fragment>
+<Fragment slot="terraform">
+사용자 Identity 모듈을 추가하고 웹사이트가 해당 모듈에 종속되도록 설정해야 합니다:
 
-### 인증된 사용자 접근 권한 부여
+```hcl title="packages/infra/src/main.tf" {2-4,14-15}
+# 런타임 구성 추가를 위해 먼저 사용자 Identity 배포
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
+}
 
-API 호출 권한과 같은 특정 작업 수행을 위해 인증된 사용자에게 접근 권한을 부여하려면 Identity Pool 인증 역할에 IAM 정책 문장을 추가할 수 있습니다:
+# 런타임 구성을 포함하기 위해 Identity 이후에 웹사이트 배포
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
 
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+
+  # 런타임 구성 추가를 위해 Identity 먼저 배포 확인
+  depends_on = [module.user_identity]
+}
+```
+
+사용자 Identity 모듈은 웹사이트가 올바른 Cognito 사용자 풀을 가리킬 수 있도록 필요한 <Link path="guides/react-website#runtime-configuration">런타임 구성</Link>을 자동으로 추가합니다.
+</Fragment>
+</Infrastructure>
+
+### 인증된 사용자에게 액세스 권한 부여
+
+API 호출 권한 부여와 같이 인증된 사용자에게 특정 작업 수행 권한을 부여하려면 Identity Pool의 인증된 역할에 IAM 정책 문을 추가할 수 있습니다:
+
+<Infrastructure>
+<Fragment slot="cdk">
 ```ts title="packages/infra/src/stacks/application-stack.ts" {12}
 import { Stack } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
@@ -91,3 +143,35 @@ export class ApplicationStack extends Stack {
   }
 }
 ```
+</Fragment>
+<Fragment slot="terraform">
+```hcl title="packages/infra/src/main.tf" {12,22}
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
+}
+
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+}
+
+# 인증된 사용자가 Fast API 호출할 수 있는 권한 추가
+resource "aws_iam_role_policy" "authenticated_fast_api_invoke" {
+  name = "authenticated-user-invoke-my-api"
+  role = module.user_identity.authenticated_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "execute-api:Invoke"
+        ]
+        Resource = "${module.my_api.api_execution_arn}/*"
+      }
+    ]
+  })
+}
+```
+</Fragment>
+</Infrastructure>

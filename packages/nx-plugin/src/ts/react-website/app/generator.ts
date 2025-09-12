@@ -10,7 +10,6 @@ import {
   generateFiles,
   names,
   updateJson,
-  ProjectConfiguration,
   installPackagesTask,
   OverwriteStrategy,
   getPackageManagerCommand,
@@ -25,17 +24,12 @@ import {
 import { TsReactWebsiteGeneratorSchema } from './schema';
 import { applicationGenerator } from '@nx/react';
 import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
-import {
-  PACKAGES_DIR,
-  SHARED_CONSTRUCTS_DIR,
-} from '../../../utils/shared-constructs-constants';
 import { getNpmScopePrefix, toScopeAlias } from '../../../utils/npm-scope';
 import { configureTsProject } from '../../lib/ts-project-utils';
 import { ITsDepVersion, withVersions } from '../../../utils/versions';
 import { getRelativePathToRoot } from '../../../utils/paths';
 import { kebabCase, toClassName, toKebabCase } from '../../../utils/names';
 import {
-  addStarExport,
   addDestructuredImport,
   replaceIfExists,
   addSingleImport,
@@ -49,6 +43,7 @@ import {
   getGeneratorInfo,
 } from '../../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
+import { addWebsiteInfra } from '../../../utils/website-constructs/website-constructs';
 
 export const REACT_WEBSITE_APP_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -89,16 +84,43 @@ export async function tsReactWebsiteGenerator(
     tree,
     fullyQualifiedName,
   );
+
   const targets = projectConfiguration.targets;
-  targets['load:runtime-config'] = {
-    executor: 'nx:run-commands',
-    metadata: {
-      description: `Load runtime config from your deployed stack for dev purposes. You must set your AWS CLI credentials whilst calling 'pnpm exec nx run ${fullyQualifiedName}:load:runtime-config'`,
-    },
-    options: {
-      command: `aws s3 cp s3://\`aws cloudformation describe-stacks --query "Stacks[?starts_with(StackName, '${kebabCase(npmScopePrefix)}-')][].Outputs[] | [?contains(OutputKey, '${websiteNameClassName}WebsiteBucketName')].OutputValue" --output text\`/runtime-config.json './${websiteContentPath}/public/runtime-config.json'`,
-    },
-  };
+
+  // Configure load:runtime-config target based on IaC provider
+  if (schema.iacProvider === 'CDK') {
+    targets['load:runtime-config'] = {
+      executor: 'nx:run-commands',
+      metadata: {
+        description: `Load runtime config from your deployed stack for dev purposes. You must set your AWS CLI credentials whilst calling 'pnpm exec nx run ${fullyQualifiedName}:load:runtime-config'`,
+      },
+      options: {
+        command: `aws s3 cp s3://\`aws cloudformation describe-stacks --query "Stacks[?starts_with(StackName, '${kebabCase(npmScopePrefix)}-')][].Outputs[] | [?contains(OutputKey, '${websiteNameClassName}WebsiteBucketName')].OutputValue" --output text\`/runtime-config.json './${websiteContentPath}/public/runtime-config.json'`,
+      },
+    };
+  } else if (schema.iacProvider === 'Terraform') {
+    targets['load:runtime-config'] = {
+      executor: 'nx:run-commands',
+      metadata: {
+        description:
+          "Load runtime config from most recently applied terraform env for dev purposes. Copies the runtime config from the Terraform dist directory to the website's public directory.",
+      },
+      options: {
+        command:
+          'node -e "const fs=require(\'fs\');fs.mkdirSync(process.env.DEST_DIR,{recursive:true});fs.copyFileSync(process.env.SRC_FILE,process.env.DEST_FILE);"',
+        env: {
+          SRC_FILE: 'dist/packages/common/terraform/runtime-config.json',
+          DEST_DIR: `{projectRoot}/public`,
+          DEST_FILE: `{projectRoot}/public/runtime-config.json`,
+        },
+      },
+    };
+  } else {
+    throw new Error(
+      `Unknown iacProvider: ${schema.iacProvider}. Supported providers are: CDK, Terraform`,
+    );
+  }
+
   const buildTarget = targets['build'];
   targets['compile'] = {
     executor: 'nx:run-commands',
@@ -152,129 +174,20 @@ export async function tsReactWebsiteGenerator(
     dir: websiteContentPath,
     fullyQualifiedName,
   });
-  await sharedConstructsGenerator(tree);
-  if (
-    !tree.exists(
-      joinPathFragments(
-        PACKAGES_DIR,
-        SHARED_CONSTRUCTS_DIR,
-        'src',
-        'app',
-        'static-websites',
-        `${websiteNameKebabCase}.ts`,
-      ),
-    )
-  ) {
-    const npmScopePrefix = getNpmScopePrefix(tree);
-    generateFiles(
-      tree,
-      joinPathFragments(
-        __dirname,
-        'files',
-        SHARED_CONSTRUCTS_DIR,
-        'src',
-        'app',
-      ),
-      joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'src', 'app'),
-      {
-        ...schema,
-        npmScopePrefix,
-        scopeAlias: toScopeAlias(npmScopePrefix),
-        websiteContentPath: joinPathFragments('dist', websiteContentPath),
-        websiteNameKebabCase,
-        websiteNameClassName,
-      },
-      {
-        overwriteStrategy: OverwriteStrategy.KeepExisting,
-      },
-    );
-    const shouldGenerateCoreStaticWebsiteConstruct = !tree.exists(
-      joinPathFragments(
-        PACKAGES_DIR,
-        SHARED_CONSTRUCTS_DIR,
-        'src',
-        'core',
-        'static-website.ts',
-      ),
-    );
-    if (shouldGenerateCoreStaticWebsiteConstruct) {
-      generateFiles(
-        tree,
-        joinPathFragments(
-          __dirname,
-          'files',
-          SHARED_CONSTRUCTS_DIR,
-          'src',
-          'core',
-        ),
-        joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'src', 'core'),
-        {
-          ...schema,
-          npmScopePrefix,
-          scopeAlias: toScopeAlias(npmScopePrefix),
-          websiteContentPath: joinPathFragments('dist', websiteContentPath),
-          websiteNameKebabCase,
-          websiteNameClassName,
-        },
-        {
-          overwriteStrategy: OverwriteStrategy.KeepExisting,
-        },
-      );
-    }
-    addStarExport(
-      tree,
-      joinPathFragments(
-        PACKAGES_DIR,
-        SHARED_CONSTRUCTS_DIR,
-        'src',
-        'app',
-        'index.ts',
-      ),
-      './static-websites/index.js',
-    );
-    addStarExport(
-      tree,
-      joinPathFragments(
-        PACKAGES_DIR,
-        SHARED_CONSTRUCTS_DIR,
-        'src',
-        'app',
-        'static-websites',
-        'index.ts',
-      ),
-      `./${websiteNameKebabCase}.js`,
-    );
-    if (shouldGenerateCoreStaticWebsiteConstruct) {
-      addStarExport(
-        tree,
-        joinPathFragments(
-          PACKAGES_DIR,
-          SHARED_CONSTRUCTS_DIR,
-          'src',
-          'core',
-          'index.ts',
-        ),
-        './static-website.js',
-      );
-    }
-  }
-  updateJson(
-    tree,
-    joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'project.json'),
-    (config: ProjectConfiguration) => {
-      if (!config.targets) {
-        config.targets = {};
-      }
-      if (!config.targets.build) {
-        config.targets.build = {};
-      }
-      config.targets.build.dependsOn = [
-        ...(config.targets.build.dependsOn ?? []),
-        `${fullyQualifiedName}:build`,
-      ];
-      return config;
-    },
-  );
+
+  await sharedConstructsGenerator(tree, {
+    iacProvider: schema.iacProvider,
+  });
+
+  addWebsiteInfra(tree, {
+    iacProvider: schema.iacProvider,
+    websiteProjectName: fullyQualifiedName,
+    scopeAlias: toScopeAlias(npmScopePrefix),
+    websiteContentPath: joinPathFragments('dist', websiteContentPath),
+    websiteNameKebabCase,
+    websiteNameClassName,
+  });
+
   const projectConfig = readProjectConfiguration(tree, fullyQualifiedName);
   const libraryRoot = projectConfig.root;
   tree.delete(joinPathFragments(libraryRoot, 'src', 'app'));

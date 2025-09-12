@@ -10,10 +10,12 @@ import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
 
-该生成器会创建一个配置了 [CloudScape](http://cloudscape.design/) 的 [React](https://react.dev/) 网站，并附带 AWS CDK 基础设施代码，用于将您的网站作为静态网站部署到云端，托管在 [S3](https://aws.amazon.com/s3/) 中，通过 [CloudFront](https://aws.amazon.com/cloudfront/) 提供服务，并通过 [WAF](https://aws.amazon.com/waf/) 进行保护。
+该生成器会创建一个配置了 [CloudScape](http://cloudscape.design/) 的 [React](https://react.dev/) 网站，并生成 AWS CDK 或 Terraform 基础设施代码，用于将您的网站作为静态站点部署到云端，托管在 [S3](https://aws.amazon.com/s3/) 中，通过 [CloudFront](https://aws.amazon.com/cloudfront/) 分发，并通过 [WAF](https://aws.amazon.com/waf/) 提供保护。
 
-生成的应用使用 [Vite](https://vite.dev/) 作为构建工具和打包器，并采用 [TanStack Router](https://tanstack.com/router/v1) 实现类型安全的路由。
+生成的应用程序使用 [Vite](https://vite.dev/) 作为构建工具和打包器，并采用 [TanStack Router](https://tanstack.com/router/v1) 实现类型安全的路由。
 
 :::note
 虽然此生成器默认配置了 CloudScape，但它本质上是一个 React 项目生成器，您可以根据需要修改代码以迁移到其他设计系统或组件库。
@@ -39,7 +41,7 @@ import NxCommands from '@components/nx-commands.astro';
   - index.html HTML 入口文件
   - public 静态资源目录
   - src
-    - main.tsx 应用入口文件（包含 React 初始化）
+    - main.tsx React 应用入口文件
     - config.ts 应用配置（如 logo）
     - components
       - AppLayout 包含 CloudScape 整体布局和导航栏的组件
@@ -47,7 +49,7 @@ import NxCommands from '@components/nx-commands.astro';
       - useAppLayout.tsx 用于从嵌套组件调整 AppLayout 的钩子
     - routes
       - welcome
-        - index.tsx 示例路由（或页面）用于 @tanstack/react-router
+        - index.tsx 使用 @tanstack/react-router 的示例路由（页面）
     - styles.css 全局样式
   - vite.config.ts Vite 和 Vitest 配置
   - tsconfig.json 基础 TypeScript 配置（源码和测试）
@@ -55,36 +57,56 @@ import NxCommands from '@components/nx-commands.astro';
   - tsconfig.spec.json 测试 TypeScript 配置
 </FileTree>
 
-生成器还会在 `packages/common/constructs` 目录下创建用于部署网站的 CDK 基础设施代码：
+### 基础设施
 
+<Snippet name="shared-constructs" />
+
+生成器会根据您选择的 `iacProvider` 创建基础设施即代码：
+
+<Infrastructure>
+<Fragment slot="cdk">
 <FileTree>
-  - src
+  - packages/common/constructs/src
     - app
       - static-websites
         - \<name>.ts 网站专属基础设施
     - core
-      - static-website.ts 通用 StaticWebsite 构造体
+      - static-website.ts 通用 StaticWebsite 构造
 </FileTree>
+</Fragment>
+<Fragment slot="terraform">
+<FileTree>
+  - packages/common/terraform/src
+    - app
+      - static-websites
+        - \<name>
+          - \<name>.tf 网站专属模块
+    - core
+      - static-website
+        - static-website.tf 通用静态网站模块
+</FileTree>
+</Fragment>
+</Infrastructure>
 
 ## 开发 React 网站
 
-[React 文档](https://react.dev/learn) 是学习 React 基础的良好起点。[CloudScape 文档](https://cloudscape.design/components/) 提供了可用组件及其使用方法的详细信息。
+[React 文档](https://react.dev/learn) 是学习 React 基础的良好起点。[CloudScape 文档](https://cloudscape.design/components/) 则详细介绍了可用组件及其使用方法。
 
 ### 路由管理
 
 #### 创建路由/页面
 
-默认配置的 CloudScape 网站已集成 [TanStack Router](https://tanstack.com/router/v1)，添加新路由非常简便：
+默认配置的 CloudScape 网站已集成 [TanStack Router](https://tanstack.com/router/v1)，添加新路由非常简单：
 
 <Steps>
   1. [启动本地开发服务器](#local-development-server)
-  2. 在 `src/routes` 中创建新 `<page-name>.tsx` 文件，文件路径对应页面路径
-  3. 系统会自动生成 `Route` 和 `RouteComponent`，您可以在此开始构建页面！
+  2. 在 `src/routes` 中创建新文件 `<page-name>.tsx`，文件路径对应页面路径
+  3. 系统会自动生成 `Route` 和 `RouteComponent`，您可在此开始构建页面
 </Steps>
 
 #### 页面间导航
 
-可使用 `Link` 组件或 `useNavigate` 钩子实现页面跳转：
+使用 `Link` 组件或 `useNavigate` 钩子实现页面跳转：
 
 ```tsx {1, 4, 8-9, 14}
 import { Link, useNavigate } from '@tanstack/react-router';
@@ -94,7 +116,7 @@ export const MyComponent = () => {
 
   const submit = async () => {
     const id = await ...
-    // 使用 `navigate` 在异步操作后重定向
+    // 使用 `navigate` 实现异步操作后跳转
     navigate({ to: '/products/$id', { params: { id }} });
   };
 
@@ -107,17 +129,19 @@ export const MyComponent = () => {
 };
 ```
 
-更多细节请参考 [TanStack Router](https://tanstack.com/router/latest/docs/framework/react/overview) 文档。
+更多细节请参考 [TanStack Router 文档](https://tanstack.com/router/latest/docs/framework/react/overview)。
 
 ## 运行时配置
 
-AWS CDK 基础设施的配置通过运行时配置提供给网站，这使得网站可以访问部署时才能确定的参数（如 API 地址）。
+基础设施配置通过运行时配置提供给网站，这使得网站可以访问部署时才能确定的参数（如 API 地址）。
 
 ### 基础设施配置
 
-`RuntimeConfig` CDK 构造体可用于添加和获取基础设施配置。由 `@aws/nx-plugin` 生成的 CDK 构造体（如 <Link path="guides/trpc">tRPC API</Link> 和 <Link path="guides/fastapi">FastAPI</Link>）会自动向 `RuntimeConfig` 添加相应值。
+<Infrastructure>
+<Fragment slot="cdk">
+使用 `RuntimeConfig` CDK 构造管理配置。通过 `@aws/nx-plugin` 生成器（如 <Link path="guides/trpc">`ts#trpc-api`</Link> 和 <Link path="guides/fastapi">`py#fast-api`</Link>）创建的 CDK 构造会自动向 `RuntimeConfig` 添加值。
 
-网站 CDK 构造体会将运行时配置部署为 S3 存储桶根目录下的 `runtime-config.json` 文件。
+网站 CDK 构造会将运行时配置部署为 S3 根目录下的 `runtime-config.json` 文件。
 
 ```ts title="packages/infra/src/stacks/application-stack.ts" {9-12,14-15}
 import { Stack } from 'aws-cdk-lib';
@@ -133,19 +157,49 @@ export class ApplicationStack extends Stack {
       integrations: MyApi.defaultIntegrations(this).build(),
     });
 
-    // 自动部署运行时配置到 runtime-config.json
+    // 自动部署 runtime-config.json
     new MyWebsite(this, 'MyWebsite');
   }
 }
 ```
 
-:::warning
-必须确保在声明网站构造体之前声明所有会向 `RuntimeConfig` 添加值的构造体，否则这些配置将不会出现在 `runtime-config.json` 文件中。
+:::caution
+必须确保在声明网站构造之前声明所有会向 `RuntimeConfig` 添加值的构造，否则这些值将不会出现在 `runtime-config.json` 中。
 :::
+</Fragment>
+<Fragment slot="terraform">
+Terraform 通过 runtime-config 模块管理配置。通过 `@aws/nx-plugin` 生成器（如 <Link path="guides/trpc">`ts#trpc-api`</Link> 和 <Link path="guides/fastapi">`py#fast-api`</Link>）创建的 Terraform 模块会自动更新运行时配置。
+
+网站 Terraform 模块会将运行时配置部署为 S3 根目录下的 `runtime-config.json` 文件。
+
+```hcl title="packages/infra/src/main.tf" {14-15}
+# 自动更新运行时配置
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+}
+
+# 自动部署 runtime-config.json
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+
+  # 确保 API 模块优先部署以更新配置
+  depends_on = [module.my_api]
+}
+```
+
+:::caution
+必须确保在声明网站模块之前声明所有会更新运行时配置的模块，并正确配置 `depends_on` 以保证执行顺序。
+:::
+</Fragment>
+</Infrastructure>
 
 ### 网站代码
 
-在网站代码中，可使用 `useRuntimeConfig` 钩子获取运行时配置值：
+在网站代码中，使用 `useRuntimeConfig` 钩子获取运行时配置值：
 
 ```tsx {1,4}
 import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
@@ -160,16 +214,23 @@ const MyComponent = () => {
 
 ### 本地运行时配置
 
-运行[本地开发服务器](#local-development-server)时，需要在 `public` 目录下放置 `runtime-config.json` 文件，以便本地网站获取后端地址、身份验证配置等信息。
+运行[本地开发服务器](#local-development-server)时，需要在 `public` 目录下放置 `runtime-config.json` 文件以使网站能获取后端 URL 等配置。
 
-网站项目已配置 `load:runtime-config` 目标，可用于从已部署环境拉取配置文件：
+网站项目已配置 `load:runtime-config` 目标，用于从已部署环境拉取配置文件：
 
 <NxCommands commands={['run <my-website>:"load:runtime-config"']} />
 
-:::warning
-如果修改了基础设施项目 `src/main.ts` 中的环境阶段前缀，需要同步更新网站项目 `project.json` 文件中的 `load:runtime-config` 目标。
+:::note
+<Infrastructure>
+<Fragment slot="cdk">
+如果修改了基础设施项目 `src/main.ts` 中的环境名前缀，需要同步更新网站项目 `project.json` 中的 `load:runtime-config` 目标配置。
 
-此外需注意，该目标假设您当前 AWS 凭证对应环境仅部署了单个应用阶段。若同一账户和区域部署了多个阶段，需要调整相关命令。
+注意该目标假设单个环境部署到当前 AWS 凭证对应的账户区域，若同一账户区域部署多环境需调整命令。
+</Fragment>
+<Fragment slot="terraform">
+对于 Terraform 项目，`load:runtime-config` 目标会复制最近一次本地 `terraform apply` 生成的 `runtime-config.json` 文件。
+</Fragment>
+</Infrastructure>
 :::
 
 ## 本地开发服务器
@@ -178,53 +239,57 @@ const MyComponent = () => {
 
 ### Serve 目标
 
-`serve` 目标启动网站本地开发服务器。该目标要求已部署网站依赖的支撑性基础设施，并已[加载本地运行时配置](#local-runtime-config)。
+`serve` 目标启动网站本地服务器，需要已部署相关基础设施并[加载本地运行时配置](#local-runtime-config)。
 
-运行以下命令启动：
+运行命令：
 
 <NxCommands commands={['run <my-website>:serve']} />
 
-此目标适用于需要对接真实部署的 API 和其他基础设施时进行网站修改。
+此模式适用于针对已部署 API 进行网站修改的场景。
 
 ### Serve Local 目标
 
-`serve-local` 目标会启动网站本地开发服务器（设置 [Vite `MODE`](https://vite.dev/guide/env-and-mode) 为 `serve-local`），同时启动通过 <Link path="/guides/api-connection">API 连接生成器</Link> 连接的本地 API 服务器。
+`serve-local` 目标启动本地服务器（设置 [Vite `MODE`](https://vite.dev/guide/env-and-mode) 为 `serve-local`），并同时启动通过 <Link path="/guides/api-connection">API 连接生成器</Link> 关联的本地 API 服务器。
 
-通过此目标运行时，`runtime-config.json` 会自动覆盖指向本地运行的 API 地址。
+在此模式下，`runtime-config.json` 会自动指向本地 API 地址。
 
-运行以下命令启动：
+运行命令：
 
 <NxCommands commands={['run <my-website>:serve-local']} />
 
-此目标适用于需要同时开发网站和 API 并进行快速迭代的场景。
+此模式适用于需要同时开发网站和 API 的快速迭代场景。
 
 :::warning
-在此模式下运行时若未配置 `runtime-config.json`，且通过 <Link path="/guides/react-website-auth">CloudScape 网站认证生成器</Link> 配置了 Cognito 认证，则登录流程会被跳过，发往本地服务器的请求也不会携带认证头信息。
-
-如需在 `serve-local` 模式下启用登录认证，请部署基础设施并加载运行时配置。
+在此模式下若未配置 `runtime-config.json`：
+- 若配置了 Cognito 认证（通过 <Link path="/guides/react-website-auth">CloudScape 网站认证生成器</Link>），登录流程将被跳过，请求不会携带认证头
+- 如需启用登录认证，请部署基础设施后加载运行时配置
 :::
 
-## 构建
+## 构建部署
 
-使用 `build` 目标可构建网站。该目标会使用 Vite 在根目录 `dist/packages/<my-website>/bundle` 下生成生产环境包，同时执行类型检查、编译和代码校验。
+使用 `build` 目标进行生产构建，该目标会执行类型检查、代码编译和打包：
 
 <NxCommands commands={['run <my-website>:build']} />
 
-## 测试
+## 测试方案
 
-网站测试方式与标准 TypeScript 项目类似，请参考 <Link path="guides/typescript-project#testing">TypeScript 项目指南</Link> 获取详细信息。
+测试方案与标准 TypeScript 项目类似，详见 <Link path="guides/typescript-project#testing">TypeScript 项目指南</Link>。
 
-针对 React 的测试，项目已预装 React Testing Library。具体使用方法请参考 [React Testing Library 文档](https://testing-library.com/docs/react-testing-library/example-intro)。
+已预装 React Testing Library，具体用法参考 [React Testing Library 文档](https://testing-library.com/docs/react-testing-library/example-intro)。
 
-运行以下命令执行测试：
+运行测试：
 
 <NxCommands commands={['run <my-website>:test']} />
 
-## 部署网站
+## 网站部署
 
-建议使用 <Link path="guides/typescript-infrastructure">TypeScript 基础设施生成器</Link> 创建 CDK 应用来部署网站。
+根据选择的 `iacProvider`，生成器会创建 CDK 或 Terraform 部署代码。
 
-可使用 `packages/common/constructs` 中生成的 CDK 构造体进行部署：
+<Infrastructure>
+<Fragment slot="cdk">
+推荐使用 <Link path="guides/typescript-infrastructure">`ts#infra` 生成器</Link> 创建 CDK 应用。
+
+使用 `packages/common/constructs` 中的构造进行部署：
 
 ```ts title="packages/infra/src/stacks/application-stack.ts" {3, 9}
 import { Stack } from 'aws-cdk-lib';
@@ -239,3 +304,46 @@ export class ApplicationStack extends Stack {
   }
 }
 ```
+
+该配置包含：
+1. 托管静态文件的 S3 存储桶
+2. 全球分发的 CloudFront
+3. 安全防护的 WAF
+4. 安全的 S3 访问控制
+5. 自动部署网站文件及运行时配置
+</Fragment>
+<Fragment slot="terraform">
+推荐使用 <Link path="guides/terraform-infrastructure">`terraform#project` 生成器</Link> 创建 Terraform 项目。
+
+使用 `packages/common/terraform` 中的模块进行部署：
+
+```hcl title="packages/infra/src/main.tf" {3}
+# 部署网站
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+}
+```
+
+该配置包含：
+1. 托管静态文件的 S3 存储桶
+2. 全球分发的 CloudFront
+3. 部署于 us-east-1 的 WAF
+4. 安全的 S3 访问控制
+5. 自动部署网站文件及运行时配置
+
+:::note
+CloudFront 和 WAF 资源必须部署在 us-east-1 区域，请确保配置了对应 provider：
+
+```hcl title="packages/infra/src/providers.tf"
+provider "aws" {
+  alias  = "us_east_1"
+  region = "us-east-1"
+}
+```
+:::
+</Fragment>
+</Infrastructure>

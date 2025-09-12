@@ -10,6 +10,7 @@ import { NxGeneratorInfo, getPackageVersion } from './nx';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
+  SHARED_TERRAFORM_DIR,
 } from './shared-constructs-constants';
 
 // Used to identify @aws/nx-plugin in AWS metrics
@@ -27,8 +28,7 @@ export const METRICS_ASPECT_FILE_PATH = joinPathFragments(
 // File in which the Terraform metrics CloudFormation stack may exist
 export const TERRAFORM_METRICS_FILE_PATH = joinPathFragments(
   PACKAGES_DIR,
-  'common',
-  'terraform',
+  SHARED_TERRAFORM_DIR,
   'src',
   'metrics',
   'metrics.tf',

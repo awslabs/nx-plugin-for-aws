@@ -300,6 +300,7 @@ describe('trpc react generator with real react and trpc projects', () => {
     await tsReactWebsiteGenerator(tree, {
       name: 'frontend',
       skipInstall: true,
+      iacProvider: 'CDK',
     });
   });
 

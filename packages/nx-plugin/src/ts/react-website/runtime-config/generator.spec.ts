@@ -9,8 +9,8 @@ import {
 } from './generator';
 import { RuntimeConfigGeneratorSchema } from './schema';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
-import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
 import { expectHasMetricTags } from '../../../utils/metrics.spec';
+import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
 
 describe('runtime-config generator', () => {
   let tree: Tree;
@@ -140,7 +140,7 @@ describe('runtime-config generator', () => {
     );
   });
 
-  it('should generate shared constructs', async () => {
+  it('should not generate shared constructs', async () => {
     // Set up a basic React app structure
     tree.write(
       'packages/test-app/src/main.tsx',
@@ -157,21 +157,8 @@ describe('runtime-config generator', () => {
     );
     await runtimeConfigGenerator(tree, options);
     // Check if shared constructs were generated
-    expect(
-      tree.exists('packages/common/constructs/src/core/index.ts'),
-    ).toBeTruthy();
-    expect(
-      tree.exists('packages/common/constructs/src/core/runtime-config.ts'),
-    ).toBeTruthy();
-    // Snapshot the shared constructs files
-    expect(
-      tree.read('packages/common/constructs/src/core/index.ts')?.toString(),
-    ).toMatchSnapshot('common/constructs-index.ts');
-    expect(
-      tree
-        .read('packages/common/constructs/src/core/runtime-config.ts')
-        ?.toString(),
-    ).toMatchSnapshot('runtime-config.ts');
+    expect(tree.exists('packages/common/constructs')).toBeFalsy();
+    expect(tree.exists('packages/common/terraform')).toBeFalsy();
   });
 
   it('should add generator metric to app.ts', async () => {

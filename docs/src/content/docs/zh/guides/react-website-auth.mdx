@@ -1,6 +1,6 @@
 ---
-title: "CloudScape网站身份验证"
-description: "CloudScape网站身份验证参考文档"
+title: "React 网站身份验证"
+description: "React 网站身份验证的参考文档"
 ---
 
 
@@ -10,46 +10,70 @@ import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
 
-CloudScape 网站认证生成器使用 [Amazon Cognito](https://aws.amazon.com/cognito/) 为您的 CloudScape 网站添加认证功能。
+React 网站身份验证生成器使用 [Amazon Cognito](https://aws.amazon.com/cognito/) 为您的 React 网站添加身份验证功能。
 
-该生成器会配置 CDK 基础设施来创建 Cognito 用户池及关联的身份池，同时生成用于处理用户登录流程的托管 UI，并将其集成到您的 CloudScape 网站中。
+该生成器会配置 CDK 或 Terraform 基础设施，用于创建 Cognito 用户池及关联的身份池、处理用户登录流程的托管 UI，以及与 React 网站的集成。
 
-## 使用方法
+## 使用方式
 
-### 为 CloudScape 网站添加认证
+### 为 React 网站添加身份验证
 
-您可以通过两种方式为 CloudScape 网站添加认证：
+您可以通过两种方式为 React 网站添加身份验证：
 
 <RunGenerator generator="ts#react-website#auth" />
 
-### 配置选项
+### 选项参数
 
 <GeneratorParameters generator="ts#react-website#auth" />
 
 ## 生成器输出
 
-您的 React 网站中将出现以下变更：
+您将在 React 网站中看到以下变更：
 
 <FileTree>
   - src
     - components
       - CognitoAuth
-        - index.tsx 主认证组件
+        - index.tsx 主身份验证组件
     - main.tsx 更新以集成 CognitoAuth 组件
 </FileTree>
 
-您还将在 `packages/common/constructs` 中看到生成的基础设施代码：
+### 基础设施
 
+<Snippet name="shared-constructs" />
+
+根据您选择的 `iacProvider`，您还将看到以下生成的基础设施代码：
+
+<Infrastructure>
+<Fragment slot="cdk">
 <FileTree>
-  - src
+  - packages/common/constructs/src
     - core
-      - user-identity.ts 定义用户池和身份池的构造体
+      - user-identity.ts 定义用户池和身份池的构造器
 </FileTree>
+</Fragment>
+<Fragment slot="terraform">
+<FileTree>
+  - packages/common/terraform/src
+    - core
+      - user-identity
+        - main.tf 身份配置的模块封装
+        - identity
+          - identity.tf 核心身份基础设施（包含 Cognito 用户池和身份池）
+        - add-callback-url
+          - add-callback-url.tf 为现有用户池客户端添加回调 URL 的模块
+</FileTree>
+</Fragment>
+</Infrastructure>
 
 ## 基础设施使用
 
-您需要在堆栈中添加 `UserIdentity` 构造体，并确保在网站构造体_之前_声明：
+<Infrastructure>
+<Fragment slot="cdk">
+您需要在堆栈中添加用户身份基础设施，并确保在网站构造器之前声明：
 
 ```ts title="packages/infra/src/stacks/application-stack.ts" {3,9}
 import { Stack } from 'aws-cdk-lib';
@@ -67,12 +91,40 @@ export class ApplicationStack extends Stack {
 }
 ```
 
-`UserIdentity` 构造体会自动添加必要的 <Link path="guides/react-website#runtime-configuration">运行时配置</Link>，确保您的网站可以指向正确的 Cognito 用户池进行认证。
+`UserIdentity` 构造器会自动添加必要的 <Link path="guides/react-website#runtime-configuration">运行时配置</Link>，确保您的网站能正确指向 Cognito 用户池进行身份验证。
+</Fragment>
+<Fragment slot="terraform">
+您需要添加用户身份模块，并确保网站模块依赖该模块：
+
+```hcl title="packages/infra/src/main.tf" {2-4,14-15}
+# 先部署用户身份以添加运行时配置
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
+}
+
+# 在身份模块之后部署网站以包含运行时配置
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+
+  # 确保身份模块优先部署以添加运行时配置
+  depends_on = [module.user_identity]
+}
+```
+
+用户身份模块会自动添加必要的 <Link path="guides/react-website#runtime-configuration">运行时配置</Link>，确保您的网站能正确指向 Cognito 用户池进行身份验证。
+</Fragment>
+</Infrastructure>
 
 ### 授予认证用户访问权限
 
 要为认证用户授予执行特定操作的权限（例如允许调用 API），可以向身份池的认证角色添加 IAM 策略声明：
 
+<Infrastructure>
+<Fragment slot="cdk">
 ```ts title="packages/infra/src/stacks/application-stack.ts" {12}
 import { Stack } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
@@ -91,3 +143,35 @@ export class ApplicationStack extends Stack {
   }
 }
 ```
+</Fragment>
+<Fragment slot="terraform">
+```hcl title="packages/infra/src/main.tf" {12,22}
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
+}
+
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+}
+
+# 为认证用户添加调用 Fast API 的权限
+resource "aws_iam_role_policy" "authenticated_fast_api_invoke" {
+  name = "authenticated-user-invoke-my-api"
+  role = module.user_identity.authenticated_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "execute-api:Invoke"
+        ]
+        Resource = "${module.my_api.api_execution_arn}/*"
+      }
+    ]
+  })
+}
+```
+</Fragment>
+</Infrastructure>

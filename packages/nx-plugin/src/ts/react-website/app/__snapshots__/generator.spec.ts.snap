@@ -123,6 +123,762 @@ exports[`react-website generator > TailwindCSS integration > should not include 
 "
 `;
 
+exports[`react-website generator > TailwindCSS integration > terraform iacProvider > should generate terraform files for static website and snapshot them > terraform-static-website-files 1`] = `
+{
+  "static-website.tf": "terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 6.0"
+      configuration_aliases = [aws.us_east_1]
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.1"
+    }
+  }
+}
+
+# Variables
+variable "website_name" {
+  description = "Name of the website"
+  type        = string
+}
+
+variable "website_file_path" {
+  description = "Path to the website files"
+  type        = string
+}
+
+
+# Data sources
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
+
+# KMS Key for encryption
+resource "aws_kms_key" "website_key" {
+  description             = "KMS key for \${var.website_name} website encryption"
+  deletion_window_in_days = 7
+  enable_key_rotation     = true
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "Enable IAM User Permissions"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::\${data.aws_caller_identity.current.account_id}:root"
+        }
+        Action   = "kms:*"
+        Resource = "*"
+      },
+      {
+        Sid    = "Allow S3 Service"
+        Effect = "Allow"
+        Principal = {
+          Service = "s3.amazonaws.com"
+        }
+        Action = [
+          "kms:Decrypt",
+          "kms:GenerateDataKey"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "AllowCloudFrontServicePrincipalSSE-KMS"
+        Effect = "Allow"
+        Principal = {
+          Service = "cloudfront.amazonaws.com"
+        }
+        Action = [
+          "kms:Decrypt",
+          "kms:Encrypt",
+          "kms:GenerateDataKey*"
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "AWS:SourceArn" = aws_cloudfront_distribution.website.arn
+          }
+        }
+      }
+    ]
+  })
+
+  tags = {
+    Name = "\${lower(var.website_name)}-website-key-\${random_id.unique_suffix.hex}"
+  }
+}
+
+resource "aws_kms_alias" "website_key_alias" {
+  name          = "alias/\${lower(var.website_name)}-website-key-\${random_id.unique_suffix.hex}"
+  target_key_id = aws_kms_key.website_key.key_id
+}
+
+# Access Logs Bucket
+resource "aws_s3_bucket" "access_logs" {
+  #checkov:skip=CKV2_AWS_61:Lifecycle configuration not required for access logs bucket
+  #checkov:skip=CKV_AWS_144:Cross-region replication not required for access logs
+  #checkov:skip=CKV2_AWS_62:Event notifications not required for access logs bucket
+  #checkov:skip=CKV_AWS_21:Versioning disabled for access logs to reduce storage costs
+  bucket        = "\${lower(var.website_name)}-access-logs-\${random_id.bucket_suffix.hex}"
+  force_destroy = true
+
+  tags = {
+    Name = "\${lower(var.website_name)}-access-logs"
+  }
+}
+
+resource "random_id" "unique_suffix" {
+  byte_length = 4
+}
+
+resource "random_id" "bucket_suffix" {
+  byte_length = 8
+}
+
+resource "aws_s3_bucket_versioning" "access_logs_versioning" {
+  bucket = aws_s3_bucket.access_logs.id
+  versioning_configuration {
+    status = "Disabled"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "access_logs_encryption" {
+  bucket = aws_s3_bucket.access_logs.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      kms_master_key_id = aws_kms_key.website_key.arn
+      sse_algorithm     = "aws:kms"
+    }
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "access_logs_pab" {
+  bucket = aws_s3_bucket.access_logs.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_policy" "access_logs_ssl_policy" {
+  bucket = aws_s3_bucket.access_logs.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "DenyInsecureConnections"
+        Effect    = "Deny"
+        Principal = "*"
+        Action    = "s3:*"
+        Resource = [
+          aws_s3_bucket.access_logs.arn,
+          "\${aws_s3_bucket.access_logs.arn}/*"
+        ]
+        Condition = {
+          Bool = {
+            "aws:SecureTransport" = "false"
+          }
+        }
+      }
+    ]
+  })
+}
+
+# Website Bucket
+resource "aws_s3_bucket" "website" {
+  #checkov:skip=CKV2_AWS_61:Lifecycle configuration not required for static website content
+  #checkov:skip=CKV_AWS_144:Cross-region replication not required for static website
+  #checkov:skip=CKV2_AWS_62:Event notifications not required for static website bucket
+  bucket        = "\${lower(var.website_name)}-website-\${random_id.bucket_suffix.hex}"
+  force_destroy = true
+
+  tags = {
+    Name = "\${lower(var.website_name)}-website"
+  }
+}
+
+resource "aws_s3_bucket_versioning" "website_versioning" {
+  bucket = aws_s3_bucket.website.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "website_encryption" {
+  bucket = aws_s3_bucket.website.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      kms_master_key_id = aws_kms_key.website_key.arn
+      sse_algorithm     = "aws:kms"
+    }
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "website_pab" {
+  bucket = aws_s3_bucket.website.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_ownership_controls" "website_ownership" {
+  bucket = aws_s3_bucket.website.id
+
+  rule {
+    object_ownership = "BucketOwnerEnforced"
+  }
+}
+
+resource "aws_s3_bucket_logging" "website_logging" {
+  bucket = aws_s3_bucket.website.id
+
+  target_bucket = aws_s3_bucket.access_logs.id
+  target_prefix = "website-access-logs/"
+}
+
+
+# Distribution Log Bucket
+resource "aws_s3_bucket" "distribution_logs" {
+  #checkov:skip=CKV2_AWS_61:Lifecycle configuration not required for CloudFront logs
+  #checkov:skip=CKV_AWS_144:Cross-region replication not required for CloudFront logs
+  #checkov:skip=CKV2_AWS_62:Event notifications not required for CloudFront logs bucket
+  #checkov:skip=CKV_AWS_21:Versioning not required for CloudFront access logs
+  bucket        = "\${lower(var.website_name)}-distribution-logs-\${random_id.bucket_suffix.hex}"
+  force_destroy = true
+
+  tags = {
+    Name = "\${lower(var.website_name)}-distribution-logs"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "distribution_logs_encryption" {
+  bucket = aws_s3_bucket.distribution_logs.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      kms_master_key_id = aws_kms_key.website_key.arn
+      sse_algorithm     = "aws:kms"
+    }
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "distribution_logs_pab" {
+  bucket = aws_s3_bucket.distribution_logs.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_ownership_controls" "distribution_logs_ownership" {
+  #checkov:skip=CKV2_AWS_65:BucketOwnerPreferred required for CloudFront logging compatibility
+  bucket = aws_s3_bucket.distribution_logs.id
+
+  rule {
+    object_ownership = "BucketOwnerPreferred"
+  }
+}
+
+
+resource "aws_s3_bucket_logging" "distribution_logs_logging" {
+  bucket = aws_s3_bucket.distribution_logs.id
+
+  target_bucket = aws_s3_bucket.access_logs.id
+  target_prefix = "distribution-access-logs/"
+}
+
+resource "aws_s3_bucket_policy" "distribution_logs_ssl_policy" {
+  bucket = aws_s3_bucket.distribution_logs.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "DenyInsecureConnections"
+        Effect    = "Deny"
+        Principal = "*"
+        Action    = "s3:*"
+        Resource = [
+          aws_s3_bucket.distribution_logs.arn,
+          "\${aws_s3_bucket.distribution_logs.arn}/*"
+        ]
+        Condition = {
+          Bool = {
+            "aws:SecureTransport" = "false"
+          }
+        }
+      }
+    ]
+  })
+}
+
+# WAF Web ACL (must be in us-east-1 for CloudFront)
+resource "aws_wafv2_web_acl" "cloudfront_waf" {
+  #checkov:skip=CKV2_AWS_31:WAF logging disabled
+  provider = aws.us_east_1
+  name     = "\${lower(var.website_name)}-cloudfront-waf-\${random_id.unique_suffix.hex}"
+  scope    = "CLOUDFRONT"
+
+  default_action {
+    allow {}
+  }
+
+  rule {
+    name     = "CRSRule"
+    priority = 0
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesCommonRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                 = "MetricForWebACLCDK-CRS"
+      sampled_requests_enabled    = true
+    }
+  }
+
+  rule {
+    name     = "KnownBadInputsRule"
+    priority = 1
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesKnownBadInputsRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                 = "MetricForWebACLCDK-KnownBadInputs"
+      sampled_requests_enabled    = true
+    }
+  }
+
+  visibility_config {
+    cloudwatch_metrics_enabled = true
+    metric_name                 = "\${lower(var.website_name)}-waf"
+    sampled_requests_enabled    = true
+  }
+
+  tags = {
+    Name = "\${lower(var.website_name)}-cloudfront-waf-\${random_id.unique_suffix.hex}"
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+
+# Origin Access Control
+resource "aws_cloudfront_origin_access_control" "website_oac" {
+  name                              = "\${lower(var.website_name)}-oac-\${random_id.unique_suffix.hex}"
+  description                       = "Origin Access Control for \${lower(var.website_name)}"
+  origin_access_control_origin_type = "s3"
+  signing_behavior                  = "always"
+  signing_protocol                  = "sigv4"
+}
+
+# CloudFront Distribution
+resource "aws_cloudfront_distribution" "website" {
+  #checkov:skip=CKV_AWS_174:Using CloudFront default certificate which does not support TLS v1.2
+  #checkov:skip=CKV_AWS_310:Origin failover not required for single S3 origin static website
+  #checkov:skip=CKV_AWS_374:Geo restrictions not required for global web application
+  #checkov:skip=CKV2_AWS_42:Custom SSL certificate not required for development - using CloudFront default
+  #checkov:skip=CKV2_AWS_32:Response headers policy not required for basic static website
+  #checkov:skip=CKV2_AWS_47:WAF includes AWSManagedRulesKnownBadInputsRuleSet which provides Log4j protection
+  origin {
+    domain_name              = aws_s3_bucket.website.bucket_regional_domain_name
+    origin_access_control_id = aws_cloudfront_origin_access_control.website_oac.id
+    origin_id                = "S3-\${aws_s3_bucket.website.bucket}"
+  }
+
+  enabled             = true
+  is_ipv6_enabled     = true
+  default_root_object = "index.html"
+  web_acl_id          = aws_wafv2_web_acl.cloudfront_waf.arn
+
+  logging_config {
+    include_cookies = false
+    bucket          = aws_s3_bucket.distribution_logs.bucket_regional_domain_name
+  }
+
+  default_cache_behavior {
+    allowed_methods  = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+    cached_methods   = ["GET", "HEAD"]
+    target_origin_id = "S3-\${aws_s3_bucket.website.bucket}"
+
+    forwarded_values {
+      query_string = false
+      cookies {
+        forward = "none"
+      }
+    }
+
+    viewer_protocol_policy = "redirect-to-https"
+    min_ttl                = 0
+    default_ttl            = 3600
+    max_ttl                = 86400
+    compress               = true
+  }
+
+  # Custom error responses for SPA routing
+  custom_error_response {
+    error_code         = 404
+    response_code      = 200
+    response_page_path = "/index.html"
+  }
+
+  custom_error_response {
+    error_code         = 403
+    response_code      = 200
+    response_page_path = "/index.html"
+  }
+
+  restrictions {
+    geo_restriction {
+      restriction_type = "none"
+    }
+  }
+
+  viewer_certificate {
+    cloudfront_default_certificate = true
+  }
+
+  tags = {
+    Name = "\${lower(var.website_name)}-distribution-\${random_id.unique_suffix.hex}"
+  }
+
+  lifecycle {
+    replace_triggered_by = [
+      aws_wafv2_web_acl.cloudfront_waf
+    ]
+  }
+}
+
+# S3 Bucket Policy for CloudFront OAC
+resource "aws_s3_bucket_policy" "website_cloudfront_policy" {
+  bucket = aws_s3_bucket.website.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "AllowCloudFrontServicePrincipal"
+        Effect    = "Allow"
+        Principal = {
+          Service = "cloudfront.amazonaws.com"
+        }
+        Action   = "s3:GetObject"
+        Resource = "\${aws_s3_bucket.website.arn}/*"
+        Condition = {
+          StringEquals = {
+            "AWS:SourceArn" = aws_cloudfront_distribution.website.arn
+          }
+        }
+      },
+      {
+        Sid       = "DenyInsecureConnections"
+        Effect    = "Deny"
+        Principal = "*"
+        Action    = "s3:*"
+        Resource = [
+          aws_s3_bucket.website.arn,
+          "\${aws_s3_bucket.website.arn}/*"
+        ]
+        Condition = {
+          Bool = {
+            "aws:SecureTransport" = "false"
+          }
+        }
+      }
+    ]
+  })
+
+  depends_on = [aws_cloudfront_distribution.website]
+}
+
+# Read runtime config using the reader module
+module "runtime_config_reader" {
+  source = "../runtime-config/read"
+}
+
+# Upload website files to S3
+resource "null_resource" "upload_website_files" {
+  triggers = {
+    # Trigger on any change to the website directory
+    website_path = var.website_file_path
+    # Trigger if any file in the directory changes using directory hash
+    directory_hash = sha256(join("", [for f in fileset(var.website_file_path, "**") : filesha256("\${var.website_file_path}/\${f}")]))
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      cd "\${path.root}"
+      uv run --with boto3 python3 -c "
+import os
+import sys
+import boto3
+import mimetypes
+from pathlib import Path
+from botocore.exceptions import ClientError, NoCredentialsError
+
+def sync_to_s3(local_path, bucket_name):
+    try:
+        s3_client = boto3.client('s3')
+
+        # Check if local directory exists
+        if not os.path.isdir(local_path):
+            print(f'Error: Website directory not found at {local_path}')
+            sys.exit(1)
+
+        # Get existing objects in bucket (for deletion)
+        try:
+            existing_objects = set()
+            paginator = s3_client.get_paginator('list_objects_v2')
+            for page in paginator.paginate(Bucket=bucket_name):
+                if 'Contents' in page:
+                    for obj in page['Contents']:
+                        existing_objects.add(obj['Key'])
+        except ClientError as e:
+            if e.response['Error']['Code'] != 'NoSuchBucket':
+                raise
+            existing_objects = set()
+
+        # Upload files
+        uploaded_objects = set()
+        local_path_obj = Path(local_path)
+
+        for file_path in local_path_obj.rglob('*'):
+            if file_path.is_file():
+                # Skip runtime-config.json as it's handled separately
+                if file_path.name == 'runtime-config.json':
+                    continue
+
+                # Calculate S3 key (relative path from local_path)
+                relative_path = file_path.relative_to(local_path_obj)
+                s3_key = str(relative_path).replace('\\\\\\\\', '/')
+                uploaded_objects.add(s3_key)
+
+                # Determine content type
+                content_type, _ = mimetypes.guess_type(str(file_path))
+                if content_type is None:
+                    content_type = 'binary/octet-stream'
+
+                # Upload file
+                try:
+                    s3_client.upload_file(
+                        str(file_path),
+                        bucket_name,
+                        s3_key,
+                        ExtraArgs={'ContentType': content_type}
+                    )
+                    print(f'Uploaded: {s3_key}')
+                except ClientError as e:
+                    print(f'Error uploading {s3_key}: {e}')
+                    sys.exit(1)
+
+        # Delete objects that no longer exist locally (excluding runtime-config.json)
+        objects_to_delete = existing_objects - uploaded_objects - {'runtime-config.json'}
+        if objects_to_delete:
+            delete_objects = [{'Key': key} for key in objects_to_delete]
+            try:
+                s3_client.delete_objects(
+                    Bucket=bucket_name,
+                    Delete={'Objects': delete_objects}
+                )
+                for obj in delete_objects:
+                    print(f'Deleted: {obj[\\"Key\\"]}')
+            except ClientError as e:
+                print(f'Error deleting objects: {e}')
+                sys.exit(1)
+
+        print(f'Website files synced to s3://{bucket_name}/')
+
+    except NoCredentialsError:
+        print('Error: AWS credentials not found')
+        sys.exit(1)
+    except Exception as e:
+        print(f'Error: {e}')
+        sys.exit(1)
+
+# Execute sync
+sync_to_s3('\${var.website_file_path}', '\${aws_s3_bucket.website.bucket}')
+"
+    EOT
+  }
+
+  depends_on = [aws_s3_bucket_policy.website_cloudfront_policy]
+}
+
+# Upload runtime config file
+resource "aws_s3_object" "runtime_config" {
+  bucket       = aws_s3_bucket.website.id
+  key          = "runtime-config.json"
+  content      = module.runtime_config_reader.config_json
+  content_type = "application/json"
+  etag         = md5(module.runtime_config_reader.config_json)
+
+  depends_on = [null_resource.upload_website_files]
+}
+
+# Invalidate CloudFront cache after uploads
+resource "null_resource" "cloudfront_invalidation" {
+  triggers = {
+    # Trigger when files or runtime config change
+    files_trigger = null_resource.upload_website_files.id
+    config_trigger = aws_s3_object.runtime_config.etag
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      uv run --with boto3 python3 -c "
+import boto3
+import sys
+from botocore.exceptions import ClientError, NoCredentialsError
+
+def create_invalidation(distribution_id):
+    try:
+        cloudfront_client = boto3.client('cloudfront')
+
+        # Create invalidation for all paths
+        response = cloudfront_client.create_invalidation(
+            DistributionId=distribution_id,
+            InvalidationBatch={
+                'Paths': {
+                    'Quantity': 1,
+                    'Items': ['/*']
+                },
+                'CallerReference': f'terraform-invalidation-{distribution_id}-{hash(distribution_id) % 1000000}'
+            }
+        )
+
+        invalidation_id = response['Invalidation']['Id']
+        print(f'CloudFront cache invalidation created: {invalidation_id}')
+        print(f'Distribution: \${aws_cloudfront_distribution.website.id}')
+        print(f'Status: {response[\\"Invalidation\\"][\\"Status\\"]}')
+
+    except NoCredentialsError:
+        print('Error: AWS credentials not found')
+        sys.exit(1)
+    except ClientError as e:
+        print(f'Error creating CloudFront invalidation: {e}')
+        sys.exit(1)
+    except Exception as e:
+        print(f'Error: {e}')
+        sys.exit(1)
+
+# Execute invalidation
+create_invalidation('\${aws_cloudfront_distribution.website.id}')
+"
+    EOT
+  }
+
+  depends_on = [
+    null_resource.upload_website_files,
+    aws_s3_object.runtime_config
+  ]
+}
+
+# Outputs
+output "website_bucket_name" {
+  description = "Name of the S3 bucket hosting the website"
+  value       = aws_s3_bucket.website.bucket
+}
+
+output "website_bucket_arn" {
+  description = "ARN of the S3 bucket hosting the website"
+  value       = aws_s3_bucket.website.arn
+}
+
+output "cloudfront_distribution_id" {
+  description = "ID of the CloudFront distribution"
+  value       = aws_cloudfront_distribution.website.id
+}
+
+output "cloudfront_distribution_arn" {
+  description = "ARN of the CloudFront distribution"
+  value       = aws_cloudfront_distribution.website.arn
+}
+
+output "cloudfront_domain_name" {
+  description = "Domain name of the CloudFront distribution"
+  value       = aws_cloudfront_distribution.website.domain_name
+}
+
+output "waf_web_acl_arn" {
+  description = "ARN of the WAF Web ACL"
+  value       = aws_wafv2_web_acl.cloudfront_waf.arn
+}",
+  "test-app.tf": "terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 6.0"
+      configuration_aliases = [aws.us_east_1]
+    }
+  }
+}
+
+# Static website module configured for the web package
+module "static_website" {
+  source = "../../../core/static-website"
+
+  website_name      = "test-app"
+  website_file_path = "\${path.module}/../../../../../../../dist/test-app/bundle"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+}
+
+# Outputs
+output "website_url" {
+  description = "URL of the deployed website"
+  value       = "https://\${module.static_website.cloudfront_domain_name}"
+}
+
+output "website_bucket_name" {
+  description = "Name of the S3 bucket hosting the website"
+  value       = module.static_website.website_bucket_name
+}
+
+output "cloudfront_distribution_id" {
+  description = "ID of the CloudFront distribution"
+  value       = module.static_website.cloudfront_distribution_id
+}
+
+output "cloudfront_domain_name" {
+  description = "Domain name of the CloudFront distribution"
+  value       = module.static_website.cloudfront_domain_name
+}",
+}
+`;
+
 exports[`react-website generator > Tanstack router integration > should generate website with no router correctly > .gitignore 1`] = `
 "vite.config.*.timestamp*
 vitest.config.*.timestamp*
