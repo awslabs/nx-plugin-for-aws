@@ -56,9 +56,10 @@ export const getTsLibDetails = (
   const scope = getNpmScopePrefix(tree);
   const normalizedName = toKebabCase(schema.name);
   const fullyQualifiedName = `${scope}${normalizedName}`;
+  // NB: interactive nx generator cli can pass empty string
   const dir = joinPathFragments(
-    schema.directory ?? '.',
-    schema.subDirectory ?? normalizedName,
+    schema.directory || '.',
+    schema.subDirectory || normalizedName,
   );
   return { dir, fullyQualifiedName };
 };
