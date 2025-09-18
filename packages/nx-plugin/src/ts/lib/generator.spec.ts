@@ -87,6 +87,19 @@ describe('ts lib generator', () => {
     );
   });
 
+  it('should use default subdirectory when subDirectory is empty string', async () => {
+    await tsProjectGenerator(tree, {
+      name: 'test-lib',
+      directory: 'feature',
+      subDirectory: '', // Empty string should fall back to normalized name
+      skipInstall: true,
+    });
+    // Verify directory structure - should use normalized name (test-lib) as subdirectory
+    expect(tree.exists('feature/test-lib')).toBeTruthy();
+    expect(tree.exists('feature/test-lib/src')).toBeTruthy();
+    expect(tree.exists('feature/test-lib/src/index.ts')).toBeTruthy();
+  });
+
   it('should not configure duplicate @nx/js/typescript plugin entries', async () => {
     await tsProjectGenerator(tree, {
       name: 'test-1',
