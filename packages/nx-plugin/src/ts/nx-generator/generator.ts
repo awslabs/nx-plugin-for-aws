@@ -25,6 +25,7 @@ import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { formatFilesInSubtree } from '../../utils/format';
 import PackageJson from '../../../package.json';
 import { configureTsProjectAsNxPlugin } from '../nx-plugin/utils';
+import { sortObjectKeys } from '../../utils/object';
 
 export const NX_GENERATOR_GENERATOR_INFO = getGeneratorInfo(__filename);
 
@@ -154,7 +155,7 @@ export const tsNxGeneratorGenerator = async (
   ) as any[];
   writeJson(tree, generatorsJsonPath, {
     ...generatorsJson,
-    generators: {
+    generators: sortObjectKeys({
       ...generatorsJson?.generators,
       [name]: {
         factory: `${factoryBasePath}/generator`,
@@ -172,7 +173,7 @@ export const tsNxGeneratorGenerator = async (
             }
           : {}),
       },
-    },
+    }),
   });
 
   await addGeneratorMetricsIfApplicable(tree, [NX_GENERATOR_GENERATOR_INFO]);
