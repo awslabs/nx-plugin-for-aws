@@ -38,8 +38,6 @@ export const LANGUAGE_COMMENT_SYNTAX: { [ext: string]: CommentSyntax } = {
       'php',
       // Java
       'java',
-      // Smithy
-      'smithy',
       // TypeSpec
       'tsp',
       // Golang
@@ -106,6 +104,8 @@ export const LANGUAGE_COMMENT_SYNTAX: { [ext: string]: CommentSyntax } = {
   md: { block: { start: '<!--', end: '-->' } },
   // Terraform
   tf: { line: '#', block: { start: '/*', end: '*/' } },
+  // Smithy
+  smithy: { line: '//' },
 };
 
 /**

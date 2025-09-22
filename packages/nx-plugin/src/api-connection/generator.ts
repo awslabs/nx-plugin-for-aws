@@ -9,6 +9,9 @@ import { hasExportDeclaration } from '../utils/ast';
 import { readToml } from '../utils/toml';
 import fastApiReactGenerator from '../py/fast-api/react/generator';
 import { readProjectConfigurationUnqualified } from '../utils/nx';
+import { SMITHY_PROJECT_GENERATOR_INFO } from '../smithy/project/generator';
+import { TS_SMITHY_API_GENERATOR_INFO } from '../smithy/ts/api/generator';
+import smithyReactConnectionGenerator from '../smithy/react-connection/generator';
 
 /**
  * List of supported source and target project types for api connections
@@ -17,6 +20,7 @@ const SUPPORTED_PROJECT_TYPES = [
   'ts#trpc-api',
   'py#fast-api',
   'react',
+  'smithy',
 ] as const;
 
 type ProjectType = (typeof SUPPORTED_PROJECT_TYPES)[number];
@@ -29,6 +33,7 @@ type Connection = { source: ProjectType; target: ProjectType };
 const SUPPORTED_CONNECTIONS = [
   { source: 'react', target: 'ts#trpc-api' },
   { source: 'react', target: 'py#fast-api' },
+  { source: 'react', target: 'smithy' },
 ] satisfies Connection[];
 
 type ConnectionKey = (typeof SUPPORTED_CONNECTIONS)[number] extends infer C
@@ -50,6 +55,11 @@ const CONNECTION_GENERATORS = {
     fastApiReactGenerator(tree, {
       frontendProjectName: options.sourceProject,
       fastApiProjectName: options.targetProject,
+    }),
+  'react -> smithy': (tree, options) =>
+    smithyReactConnectionGenerator(tree, {
+      frontendProjectName: options.sourceProject,
+      smithyModelOrBackendProjectName: options.targetProject,
     }),
 } satisfies Record<
   ConnectionKey,
@@ -113,6 +123,10 @@ export const determineProjectType = (
 
   if (isFastApi(tree, projectConfiguration)) {
     return 'py#fast-api';
+  }
+
+  if (isSmithyApi(tree, projectConfiguration)) {
+    return 'smithy';
   }
 
   if (isReact(tree, projectConfiguration)) {
@@ -206,6 +220,17 @@ const isFastApi = (
   }
 
   return false;
+};
+
+const isSmithyApi = (
+  _tree: Tree,
+  projectConfiguration: ProjectConfiguration,
+): boolean => {
+  // Support selecting either the smithy model or backend project
+  return [
+    SMITHY_PROJECT_GENERATOR_INFO.id,
+    TS_SMITHY_API_GENERATOR_INFO.id,
+  ].includes(((projectConfiguration.metadata as any) ?? {}).generator);
 };
 
 export default apiConnectionGenerator;

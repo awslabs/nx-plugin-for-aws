@@ -117,6 +117,14 @@ export const smokeTest = (
         `generate @aws/nx-plugin:api-connection --sourceProject=website --targetProject=py_api --no-interactive`,
         opts,
       );
+      await runCLI(
+        `generate @aws/nx-plugin:ts#smithy-api --name=my-smithy-api --no-interactive`,
+        opts,
+      );
+      await runCLI(
+        `generate @aws/nx-plugin:api-connection --sourceProject=website --targetProject=my-smithy-api --no-interactive`,
+        opts,
+      );
 
       await runCLI(`generate @aws/nx-plugin:license --no-interactive`, opts);
 

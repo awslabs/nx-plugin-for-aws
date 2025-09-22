@@ -39,6 +39,10 @@ export type { RuntimeConfigGeneratorSchema } from '../src/ts/react-website/runti
 export { tsTrpcApiGenerator } from '../src/trpc/backend/generator';
 export type { TsTrpcApiGeneratorSchema } from '../src/trpc/backend/schema';
 
+// TypeScript Smithy API
+export { tsSmithyApiGenerator } from '../src/smithy/ts/api/generator';
+export type { TsSmithyApiGeneratorSchema } from '../src/smithy/ts/api/schema';
+
 // TypeScript Lambda Function
 export { tsLambdaFunctionGenerator } from '../src/ts/lambda-function/generator';
 export type { TsLambdaFunctionGeneratorSchema } from '../src/ts/lambda-function/schema';

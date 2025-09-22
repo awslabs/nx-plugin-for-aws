@@ -1,0 +1,576 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`smithyProjectGenerator > should generate smithy project with all custom options > all-custom-main.smithy 1`] = `
+"$version: "2.0"
+
+namespace com.mycompany.api
+
+use aws.protocols#restJson1
+use smithy.framework#ValidationException
+
+/// TODO: describe your service here
+@title("MyCustomService")
+@restJson1
+service MyCustomService {
+    version: "1.0.0"
+    operations: [
+        Echo
+    ]
+    errors: [
+        ValidationException
+    ]
+}
+"
+`;
+
+exports[`smithyProjectGenerator > should generate smithy project with all custom options > all-custom-project.json 1`] = `
+"{
+  "name": "@proj/test-api",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "backend/model/src",
+  "projectType": "library",
+  "targets": {
+    "build": {
+      "dependsOn": ["compile"]
+    },
+    "compile": {
+      "cache": true,
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}/build"],
+      "executor": "nx:run-commands",
+      "options": {
+        "commands": [
+          "rimraf dist/backend/model/build",
+          "make-dir dist/backend/model/build",
+          "docker build -f backend/model/build.Dockerfile --target export --output type=local,dest=dist/backend/model/build backend/model"
+        ],
+        "parallel": false,
+        "cwd": "{workspaceRoot}"
+      }
+    }
+  },
+  "metadata": {
+    "generator": "smithy#project",
+    "apiName": "test-api"
+  }
+}
+"
+`;
+
+exports[`smithyProjectGenerator > should generate smithy project with custom directory > custom-dir-project.json 1`] = `
+"{
+  "name": "@proj/test-api",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apis/test-api/src",
+  "projectType": "library",
+  "targets": {
+    "build": {
+      "dependsOn": ["compile"]
+    },
+    "compile": {
+      "cache": true,
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}/build"],
+      "executor": "nx:run-commands",
+      "options": {
+        "commands": [
+          "rimraf dist/apis/test-api/build",
+          "make-dir dist/apis/test-api/build",
+          "docker build -f apis/test-api/build.Dockerfile --target export --output type=local,dest=dist/apis/test-api/build apis/test-api"
+        ],
+        "parallel": false,
+        "cwd": "{workspaceRoot}"
+      }
+    }
+  },
+  "metadata": {
+    "generator": "smithy#project",
+    "apiName": "test-api"
+  }
+}
+"
+`;
+
+exports[`smithyProjectGenerator > should generate smithy project with custom namespace > custom-namespace-main.smithy 1`] = `
+"$version: "2.0"
+
+namespace com.example.custom
+
+use aws.protocols#restJson1
+use smithy.framework#ValidationException
+
+/// TODO: describe your service here
+@title("TestApi")
+@restJson1
+service TestApi {
+    version: "1.0.0"
+    operations: [
+        Echo
+    ]
+    errors: [
+        ValidationException
+    ]
+}
+"
+`;
+
+exports[`smithyProjectGenerator > should generate smithy project with custom service name > custom-service-main.smithy 1`] = `
+"$version: "2.0"
+
+namespace proj
+
+use aws.protocols#restJson1
+use smithy.framework#ValidationException
+
+/// TODO: describe your service here
+@title("CustomService")
+@restJson1
+service CustomService {
+    version: "1.0.0"
+    operations: [
+        Echo
+    ]
+    errors: [
+        ValidationException
+    ]
+}
+"
+`;
+
+exports[`smithyProjectGenerator > should generate smithy project with default options > build.Dockerfile 1`] = `
+"FROM public.ecr.aws/docker/library/node:24 AS builder
+
+# Output directory
+RUN mkdir /out
+
+# Install Smithy CLI
+# https://smithy.io/2.0/guides/smithy-cli/cli_installation.html
+WORKDIR /smithy
+ARG TARGETPLATFORM
+RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then ARCH="aarch64"; else ARCH="x86_64"; fi && \\
+    mkdir -p smithy-install/smithy && \\
+    curl -L https://github.com/smithy-lang/smithy/releases/download/1.61.0/smithy-cli-linux-$ARCH.zip -o smithy-install/smithy-cli-linux-$ARCH.zip && \\
+    unzip -qo smithy-install/smithy-cli-linux-$ARCH.zip -d smithy-install && \\
+    mv smithy-install/smithy-cli-linux-$ARCH/* smithy-install/smithy
+RUN smithy-install/smithy/install
+
+# Add node dependencies for bundling
+WORKDIR /project
+RUN npm i -g pnpm@10.15.1 rolldown@1.0.0-beta.38
+
+# Copy project files
+COPY smithy-build.json .
+COPY src src
+
+# Smithy build with Maven cache mount
+RUN --mount=type=cache,target=/root/.m2/repository,id=maven-cache \\
+    smithy build
+
+# Copy OpenAPI specification to output location
+RUN mkdir -p /out/openapi
+RUN cp /project/build/smithy/source/openapi/*.openapi.json /out/openapi/openapi.json
+
+WORKDIR /project/build/smithy/source/typescript-ssdk-codegen
+
+# Install SSDK dependencies with pnpm cache mount
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store,id=pnpm-store \\
+    --mount=type=cache,target=/project/build/smithy/source/typescript-ssdk-codegen/node_modules,id=ssdk-node-modules \\
+    pnpm install --prefer-offline
+
+# Install rolldown plugins with pnpm cache mount
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store,id=pnpm-store \\
+    --mount=type=cache,target=/project/build/smithy/source/typescript-ssdk-codegen/node_modules,id=ssdk-node-modules \\
+    pnpm add -D rolldown-plugin-dts@0.16.5 @rollup/plugin-esm-shim@0.1.8
+
+RUN cat <<EOF > rolldown.config.js
+import { dts } from 'rolldown-plugin-dts';
+import esmShim from '@rollup/plugin-esm-shim';
+import fs from 'fs';
+import path from 'path';
+
+// Bundle the re2-wasm wasm file as part of the module
+const re2WasmPlugin = () => ({
+  name: 're2-wasm-plugin',
+  resolveId: (id) => {
+    if (!(id === 're2-wasm' || id.endsWith('/re2-wasm'))) return null;
+    try {
+      const dir = path.join(path.dirname(require.resolve('re2-wasm/package.json')), 'build/wasm');
+      return fs.existsSync(path.join(dir, 're2.wasm')) && fs.existsSync(path.join(dir, 're2.js')) ? path.join(dir, 're2.js') : null;
+    } catch { return null; }
+  },
+  load: (id) => {
+    if (!(id.endsWith('re2.js') && id.includes('re2-wasm'))) return null;
+    try {
+      const wasmPath = path.join(path.dirname(id), 're2.wasm');
+      return fs.existsSync(wasmPath) && fs.existsSync(id) ? \\\`var Module = { wasmBinary: Buffer.from("\\\${fs.readFileSync(wasmPath).toString('base64')}", "base64") }\\n\\\${fs.readFileSync(id, 'utf8')}\\\` : null;
+    } catch { return null; }
+  }
+});
+
+export default {
+  input: './src/index.ts',
+  plugins: [
+    re2WasmPlugin(),
+    dts({ resolve: true }),
+    esmShim(),
+  ],
+  output: [{
+    dir: 'dist',
+    format: 'es',
+  }],
+  resolve: {
+    tsconfigFilename: 'tsconfig.es.json',
+  },
+  platform: 'node',
+};
+EOF
+
+# Create SSDK bundle with rolldown
+RUN --mount=type=cache,target=/project/build/smithy/source/typescript-ssdk-codegen/node_modules,id=ssdk-node-modules \\
+    rolldown -c
+
+RUN mkdir -p /out/ssdk
+RUN cp dist/* /out/ssdk/
+
+# Export the /out directory
+FROM scratch AS export
+COPY --from=builder /out /
+"
+`;
+
+exports[`smithyProjectGenerator > should generate smithy project with default options > echo.smithy 1`] = `
+"$version: "2.0"
+
+namespace proj
+
+/// An example operation
+@http(method: "GET", uri: "/echo")
+@readonly
+operation Echo {
+    input := {
+        @httpQuery("message")
+        @required
+        message: String
+    }
+    output := {
+        @required
+        message: String
+    }
+}
+"
+`;
+
+exports[`smithyProjectGenerator > should generate smithy project with default options > main.smithy 1`] = `
+"$version: "2.0"
+
+namespace proj
+
+use aws.protocols#restJson1
+use smithy.framework#ValidationException
+
+/// TODO: describe your service here
+@title("TestApi")
+@restJson1
+service TestApi {
+    version: "1.0.0"
+    operations: [
+        Echo
+    ]
+    errors: [
+        ValidationException
+    ]
+}
+"
+`;
+
+exports[`smithyProjectGenerator > should generate smithy project with default options > project.json 1`] = `
+"{
+  "name": "@proj/test-api",
+  "$schema": "../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "test-api/src",
+  "projectType": "library",
+  "targets": {
+    "build": {
+      "dependsOn": ["compile"]
+    },
+    "compile": {
+      "cache": true,
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}/build"],
+      "executor": "nx:run-commands",
+      "options": {
+        "commands": [
+          "rimraf dist/test-api/build",
+          "make-dir dist/test-api/build",
+          "docker build -f test-api/build.Dockerfile --target export --output type=local,dest=dist/test-api/build test-api"
+        ],
+        "parallel": false,
+        "cwd": "{workspaceRoot}"
+      }
+    }
+  },
+  "metadata": {
+    "generator": "smithy#project",
+    "apiName": "test-api"
+  }
+}
+"
+`;
+
+exports[`smithyProjectGenerator > should generate smithy project with default options > smithy-build.json 1`] = `
+"{
+  "version": "1.0",
+  "sources": ["src/"],
+  "plugins": {
+    "openapi": {
+      "service": "proj#TestApi",
+      "version": "3.1.0",
+      "tags": true,
+      "useIntegerType": true
+    },
+    "typescript-ssdk-codegen": {
+      "package": "@proj/test-api-ssdk",
+      "packageVersion": "0.0.1"
+    }
+  },
+  "maven": {
+    "dependencies": [
+      "software.amazon.smithy:smithy-model:1.61.0",
+      "software.amazon.smithy:smithy-aws-traits:1.61.0",
+      "software.amazon.smithy:smithy-validation-model:1.61.0",
+      "software.amazon.smithy:smithy-openapi:1.61.0",
+      "software.amazon.smithy.typescript:smithy-aws-typescript-codegen:0.34.1"
+    ]
+  }
+}
+"
+`;
+
+exports[`smithyProjectGenerator > should generate smithy project with subdirectory > subdir-project.json 1`] = `
+"{
+  "name": "@proj/test-api",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "services/model/src",
+  "projectType": "library",
+  "targets": {
+    "build": {
+      "dependsOn": ["compile"]
+    },
+    "compile": {
+      "cache": true,
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}/build"],
+      "executor": "nx:run-commands",
+      "options": {
+        "commands": [
+          "rimraf dist/services/model/build",
+          "make-dir dist/services/model/build",
+          "docker build -f services/model/build.Dockerfile --target export --output type=local,dest=dist/services/model/build services/model"
+        ],
+        "parallel": false,
+        "cwd": "{workspaceRoot}"
+      }
+    }
+  },
+  "metadata": {
+    "generator": "smithy#project",
+    "apiName": "test-api"
+  }
+}
+"
+`;
+
+exports[`smithyProjectGenerator > should generate valid Docker build configuration > dockerfile 1`] = `
+"FROM public.ecr.aws/docker/library/node:24 AS builder
+
+# Output directory
+RUN mkdir /out
+
+# Install Smithy CLI
+# https://smithy.io/2.0/guides/smithy-cli/cli_installation.html
+WORKDIR /smithy
+ARG TARGETPLATFORM
+RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then ARCH="aarch64"; else ARCH="x86_64"; fi && \\
+    mkdir -p smithy-install/smithy && \\
+    curl -L https://github.com/smithy-lang/smithy/releases/download/1.61.0/smithy-cli-linux-$ARCH.zip -o smithy-install/smithy-cli-linux-$ARCH.zip && \\
+    unzip -qo smithy-install/smithy-cli-linux-$ARCH.zip -d smithy-install && \\
+    mv smithy-install/smithy-cli-linux-$ARCH/* smithy-install/smithy
+RUN smithy-install/smithy/install
+
+# Add node dependencies for bundling
+WORKDIR /project
+RUN npm i -g pnpm@10.15.1 rolldown@1.0.0-beta.38
+
+# Copy project files
+COPY smithy-build.json .
+COPY src src
+
+# Smithy build with Maven cache mount
+RUN --mount=type=cache,target=/root/.m2/repository,id=maven-cache \\
+    smithy build
+
+# Copy OpenAPI specification to output location
+RUN mkdir -p /out/openapi
+RUN cp /project/build/smithy/source/openapi/*.openapi.json /out/openapi/openapi.json
+
+WORKDIR /project/build/smithy/source/typescript-ssdk-codegen
+
+# Install SSDK dependencies with pnpm cache mount
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store,id=pnpm-store \\
+    --mount=type=cache,target=/project/build/smithy/source/typescript-ssdk-codegen/node_modules,id=ssdk-node-modules \\
+    pnpm install --prefer-offline
+
+# Install rolldown plugins with pnpm cache mount
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store,id=pnpm-store \\
+    --mount=type=cache,target=/project/build/smithy/source/typescript-ssdk-codegen/node_modules,id=ssdk-node-modules \\
+    pnpm add -D rolldown-plugin-dts@0.16.5 @rollup/plugin-esm-shim@0.1.8
+
+RUN cat <<EOF > rolldown.config.js
+import { dts } from 'rolldown-plugin-dts';
+import esmShim from '@rollup/plugin-esm-shim';
+import fs from 'fs';
+import path from 'path';
+
+// Bundle the re2-wasm wasm file as part of the module
+const re2WasmPlugin = () => ({
+  name: 're2-wasm-plugin',
+  resolveId: (id) => {
+    if (!(id === 're2-wasm' || id.endsWith('/re2-wasm'))) return null;
+    try {
+      const dir = path.join(path.dirname(require.resolve('re2-wasm/package.json')), 'build/wasm');
+      return fs.existsSync(path.join(dir, 're2.wasm')) && fs.existsSync(path.join(dir, 're2.js')) ? path.join(dir, 're2.js') : null;
+    } catch { return null; }
+  },
+  load: (id) => {
+    if (!(id.endsWith('re2.js') && id.includes('re2-wasm'))) return null;
+    try {
+      const wasmPath = path.join(path.dirname(id), 're2.wasm');
+      return fs.existsSync(wasmPath) && fs.existsSync(id) ? \\\`var Module = { wasmBinary: Buffer.from("\\\${fs.readFileSync(wasmPath).toString('base64')}", "base64") }\\n\\\${fs.readFileSync(id, 'utf8')}\\\` : null;
+    } catch { return null; }
+  }
+});
+
+export default {
+  input: './src/index.ts',
+  plugins: [
+    re2WasmPlugin(),
+    dts({ resolve: true }),
+    esmShim(),
+  ],
+  output: [{
+    dir: 'dist',
+    format: 'es',
+  }],
+  resolve: {
+    tsconfigFilename: 'tsconfig.es.json',
+  },
+  platform: 'node',
+};
+EOF
+
+# Create SSDK bundle with rolldown
+RUN --mount=type=cache,target=/project/build/smithy/source/typescript-ssdk-codegen/node_modules,id=ssdk-node-modules \\
+    rolldown -c
+
+RUN mkdir -p /out/ssdk
+RUN cp dist/* /out/ssdk/
+
+# Export the /out directory
+FROM scratch AS export
+COPY --from=builder /out /
+"
+`;
+
+exports[`smithyProjectGenerator > should handle empty service name by using project name > default-service-name-main.smithy 1`] = `
+"$version: "2.0"
+
+namespace proj
+
+use aws.protocols#restJson1
+use smithy.framework#ValidationException
+
+/// TODO: describe your service here
+@title("MyService")
+@restJson1
+service MyService {
+    version: "1.0.0"
+    operations: [
+        Echo
+    ]
+    errors: [
+        ValidationException
+    ]
+}
+"
+`;
+
+exports[`smithyProjectGenerator > should handle kebab-case conversion for service names > kebab-case-main.smithy 1`] = `
+"$version: "2.0"
+
+namespace proj
+
+use aws.protocols#restJson1
+use smithy.framework#ValidationException
+
+/// TODO: describe your service here
+@title("MyTestService")
+@restJson1
+service MyTestService {
+    version: "1.0.0"
+    operations: [
+        Echo
+    ]
+    errors: [
+        ValidationException
+    ]
+}
+"
+`;
+
+exports[`smithyProjectGenerator > should handle kebab-case conversion for service names > kebab-case-smithy-build.json 1`] = `
+"{
+  "version": "1.0",
+  "sources": ["src/"],
+  "plugins": {
+    "openapi": {
+      "service": "proj#MyTestService",
+      "version": "3.1.0",
+      "tags": true,
+      "useIntegerType": true
+    },
+    "typescript-ssdk-codegen": {
+      "package": "@proj/my-test-service-ssdk",
+      "packageVersion": "0.0.1"
+    }
+  },
+  "maven": {
+    "dependencies": [
+      "software.amazon.smithy:smithy-model:1.61.0",
+      "software.amazon.smithy:smithy-aws-traits:1.61.0",
+      "software.amazon.smithy:smithy-validation-model:1.61.0",
+      "software.amazon.smithy:smithy-openapi:1.61.0",
+      "software.amazon.smithy.typescript:smithy-aws-typescript-codegen:0.34.1"
+    ]
+  }
+}
+"
+`;
+
+exports[`smithyProjectGenerator > should use npm scope for default namespace > npm-scope-main.smithy 1`] = `
+"$version: "2.0"
+
+namespace myorg
+
+use aws.protocols#restJson1
+use smithy.framework#ValidationException
+
+/// TODO: describe your service here
+@title("TestApi")
+@restJson1
+service TestApi {
+    version: "1.0.0"
+    operations: [
+        Echo
+    ]
+    errors: [
+        ValidationException
+    ]
+}
+"
+`;

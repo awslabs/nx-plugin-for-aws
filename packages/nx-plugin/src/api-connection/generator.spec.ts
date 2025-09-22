@@ -8,6 +8,7 @@ import { createTreeUsingTsSolutionSetup } from '../utils/test';
 import { vi, expect, describe, it, beforeEach } from 'vitest';
 import trpcReactGenerator from '../trpc/react/generator';
 import fastApiReactGenerator from '../py/fast-api/react/generator';
+import smithyReactConnectionGenerator from '../smithy/react-connection/generator';
 
 // Mock the generators
 vi.mock('../trpc/react/generator', () => ({
@@ -15,6 +16,10 @@ vi.mock('../trpc/react/generator', () => ({
 }));
 
 vi.mock('../py/fast-api/react/generator', () => ({
+  default: vi.fn(),
+}));
+
+vi.mock('../smithy/react-connection/generator', () => ({
   default: vi.fn(),
 }));
 
@@ -97,6 +102,74 @@ describe('api connection generator', () => {
       expect(trpcReactGenerator).toHaveBeenCalledWith(tree, {
         frontendProjectName: 'frontend',
         backendProjectName: 'api',
+      });
+    });
+
+    it('should call smithyReactConnectionGenerator for react -> smithy (model project) connection', async () => {
+      // Setup a React project
+      tree.write('apps/frontend/src/main.tsx', '');
+      tree.write(
+        'apps/frontend/project.json',
+        JSON.stringify({
+          name: 'frontend',
+          root: 'apps/frontend',
+        }),
+      );
+
+      // Setup a Smithy model project
+      tree.write(
+        'apps/api-model/project.json',
+        JSON.stringify({
+          name: 'api-model',
+          root: 'apps/api-model',
+          metadata: {
+            generator: 'smithy#project',
+          },
+        }),
+      );
+
+      await apiConnectionGenerator(tree, {
+        sourceProject: 'frontend',
+        targetProject: 'api-model',
+      });
+
+      expect(smithyReactConnectionGenerator).toHaveBeenCalledWith(tree, {
+        frontendProjectName: 'frontend',
+        smithyModelOrBackendProjectName: 'api-model',
+      });
+    });
+
+    it('should call smithyReactConnectionGenerator for react -> smithy (backend project) connection', async () => {
+      // Setup a React project
+      tree.write('apps/frontend/src/main.tsx', '');
+      tree.write(
+        'apps/frontend/project.json',
+        JSON.stringify({
+          name: 'frontend',
+          root: 'apps/frontend',
+        }),
+      );
+
+      // Setup a Smithy TypeScript backend project
+      tree.write(
+        'apps/api-backend/project.json',
+        JSON.stringify({
+          name: 'api-backend',
+          root: 'apps/api-backend',
+          metadata: {
+            generator: 'ts#smithy-api',
+          },
+        }),
+      );
+
+      await apiConnectionGenerator(tree, {
+        sourceProject: 'frontend',
+        targetProject: 'api-backend',
+      });
+
+      expect(smithyReactConnectionGenerator).toHaveBeenCalledWith(tree, {
+        frontendProjectName: 'frontend',
+        smithyModelOrBackendProjectName: 'api-backend',
       });
     });
 
@@ -336,6 +409,36 @@ dependencies = ["fastapi"]`,
       tree.write('apps/frontend/source/main.tsx', '');
 
       expect(determineProjectType(tree, 'frontend')).toBe('react');
+    });
+
+    it('should identify smithy project by metadata (model project)', () => {
+      tree.write(
+        'apps/api-model/project.json',
+        JSON.stringify({
+          name: 'api-model',
+          root: 'apps/api-model',
+          metadata: {
+            generator: 'smithy#project',
+          },
+        }),
+      );
+
+      expect(determineProjectType(tree, 'api-model')).toBe('smithy');
+    });
+
+    it('should identify smithy project by metadata (backend project)', () => {
+      tree.write(
+        'apps/api-backend/project.json',
+        JSON.stringify({
+          name: 'api-backend',
+          root: 'apps/api-backend',
+          metadata: {
+            generator: 'ts#smithy-api',
+          },
+        }),
+      );
+
+      expect(determineProjectType(tree, 'api-backend')).toBe('smithy');
     });
 
     it('should return undefined for unknown project type', () => {

@@ -25,7 +25,7 @@ import { addDependenciesToPyProjectToml } from '../../utils/py';
 import { getNpmScope } from '../../utils/npm-scope';
 import { addMcpServerInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
-import { addPythonBundleTarget } from '../../utils/bundle';
+import { addPythonBundleTarget } from '../../utils/bundle/bundle';
 import { withVersions } from '../../utils/versions';
 import { Logger } from '@nxlv/python/src/executors/utils/logger';
 import { UVProvider } from '@nxlv/python/src/provider/uv/provider';

@@ -30,7 +30,7 @@ import {
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { addPythonBundleTarget } from '../../utils/bundle';
+import { addPythonBundleTarget } from '../../utils/bundle/bundle';
 import { addDependenciesToPyProjectToml } from '../../utils/py';
 import { addLambdaFunctionInfra } from '../../utils/function-constructs/function-constructs';
 import { resolveIacProvider } from '../../utils/iac';

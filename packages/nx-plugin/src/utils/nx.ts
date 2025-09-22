@@ -4,6 +4,7 @@
  */
 import {
   getProjects,
+  ProjectConfiguration,
   readProjectConfiguration,
   Tree,
   updateProjectConfiguration,
@@ -100,6 +101,7 @@ export const addGeneratorMetadata = (
   tree: Tree,
   projectName: string,
   info: NxGeneratorInfo,
+  additionalMetadata?: { [key: string]: any },
 ) => {
   const config = readProjectConfigurationUnqualified(tree, projectName);
   updateProjectConfiguration(tree, config.name, {
@@ -107,6 +109,26 @@ export const addGeneratorMetadata = (
     metadata: {
       ...config?.metadata,
       generator: info.id,
+      ...additionalMetadata,
     } as any,
   });
+};
+
+/**
+ * Mutate the project to add the dependency to the target if not already present
+ * Adds the target if not present.
+ */
+export const addDependencyToTargetIfNotPresent = (
+  project: ProjectConfiguration,
+  target: string,
+  dependency: string,
+) => {
+  project.targets ??= {};
+  project.targets[target] ??= {};
+  project.targets[target].dependsOn = [
+    ...(project.targets[target].dependsOn ?? []).filter(
+      (d) => d !== dependency,
+    ),
+    dependency,
+  ];
 };
