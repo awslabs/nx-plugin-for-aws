@@ -1,0 +1,1365 @@
+---
+title: "Reagir para API Smithy"
+description: "Conectar um site React a uma API TypeScript Smithy"
+---
+
+
+
+import { FileTree, Steps } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Drawer from '@components/drawer.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+
+O gerador `api-connection` fornece uma maneira rápida de integrar seu site React com o backend de API Smithy TypeScript. Ele configura toda a configuração necessária para conectar-se à API Smithy de forma type-safe, incluindo geração de clientes e hooks do [TanStack Query](https://tanstack.com/query/v5), suporte a autenticação AWS IAM e Cognito, e tratamento adequado de erros.
+
+## Pré-requisitos
+
+Antes de usar este gerador, certifique-se que sua aplicação React possui:
+
+1. Um arquivo `main.tsx` que renderiza sua aplicação
+2. Um backend de API Smithy TypeScript funcional (gerado usando o <Link path="/guides/ts-smithy-api">gerador `ts#smithy-api`</Link>)
+3. Auth Cognito adicionado via <Link path="/guides/react-website-auth">gerador `ts#react-website-auth`</Link> se conectando a uma API que usa autenticação Cognito ou IAM
+
+<details>
+<summary>Exemplo da estrutura necessária do `main.tsx`</summary>
+
+```tsx
+import { StrictMode } from 'react';
+import * as ReactDOM from 'react-dom/client';
+import App from './app/app';
+
+const root = ReactDOM.createRoot(
+  document.getElementById('root') as HTMLElement,
+);
+root.render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+);
+```
+
+</details>
+
+## Uso
+
+### Executar o Gerador
+
+<RunGenerator generator="api-connection" />
+
+### Opções
+
+<GeneratorParameters generator="api-connection" />
+
+## Saída do Gerador
+
+O gerador fará alterações nos seguintes arquivos de sua aplicação React:
+
+<FileTree>
+
+- src
+  - components
+    - \<ApiName>Provider.tsx Provedor para o cliente da sua API
+    - QueryClientProvider.tsx Provedor do cliente TanStack React Query
+    - RuntimeConfig/ Componente de configuração de runtime para desenvolvimento local
+  - hooks
+    - use\<ApiName>.tsx Adiciona um hook para chamar sua API com estado gerenciado pelo TanStack Query
+    - use\<ApiName>Client.tsx Adiciona um hook para instanciar o cliente vanilla da API que pode chamar sua API
+    - useSigV4.tsx Adiciona um hook para assinar requisições HTTP com SigV4 (se selecionou autenticação IAM)
+- project.json Um novo target é adicionado ao build para gerar um cliente type-safe
+- .gitignore Os arquivos do cliente gerados são ignorados por padrão
+
+</FileTree>
+
+O gerador também adicionará Runtime Config à infraestrutura do seu site se ainda não estiver presente, garantindo que a URL da API Smithy esteja disponível no site e configurada automaticamente pelo hook `use<ApiName>.tsx`.
+
+### Geração de Código
+
+Durante o build, um cliente type-safe é gerado a partir da especificação OpenAPI da sua API Smithy. Isso adicionará três novos arquivos à sua aplicação React:
+
+<FileTree>
+
+- src
+  - generated
+    - \<ApiName>
+      - types.gen.ts Tipos gerados a partir das estruturas do modelo Smithy
+      - client.gen.ts Cliente type-safe para chamar sua API
+      - options-proxy.gen.ts Fornece métodos para criar opções de hooks do TanStack Query para interagir com sua API
+
+</FileTree>
+
+:::tip[Dica]
+Por padrão, o cliente gerado é ignorado do controle de versão. Se preferir incluí-lo, você pode remover a entrada do arquivo `.gitignore` da sua aplicação React. Porém, note que quaisquer alterações manuais nos arquivos `.gen.ts` serão sobrescritas quando o projeto for construído.
+:::
+
+## Usando o Código Gerado
+
+O cliente type-safe gerado pode ser usado para chamar sua API Smithy a partir da aplicação React. Recomenda-se usar os hooks do TanStack Query, mas você pode usar o cliente vanilla se preferir.
+
+:::note[Nota]
+Sempre que fizer alterações no modelo da API Smithy, você precisa reconstruir seu projeto para que as mudanças sejam refletidas no cliente gerado. Por exemplo:
+
+<NxCommands commands={['run-many --target build --all']} />
+:::
+
+:::tip[Dica]
+Se estiver desenvolvendo ativamente tanto a aplicação React quanto a API Smithy, use o target `serve-local` da aplicação React. Isso regenerará automaticamente o cliente quando a API mudar, além de recarregar o site e o servidor local da API Smithy:
+
+<NxCommands commands={['run <WebsiteProject>:serve-local']} />
+
+Para controle mais granular, você pode usar o target `watch-generate:<ApiName>-client` da aplicação React para regenerar o cliente sempre que houver mudanças na API:
+
+<NxCommands commands={['run <WebsiteProject>:"watch-generate:<ApiName>-client"']}
+/>
+:::
+
+### Usando o Hook da API
+
+O gerador fornece um hook `use<ApiName>` que você pode usar para chamar sua API com TanStack Query.
+
+### Consultas
+
+Você pode usar o método `queryOptions` para obter as opções necessárias para chamar sua API usando o hook `useQuery` do TanStack Query:
+
+```tsx {7}
+import { useQuery } from '@tanstack/react-query';
+import { useState, useEffect } from 'react';
+import { useMyApi } from './hooks/useMyApi';
+
+function MyComponent() {
+  const api = useMyApi();
+  const item = useQuery(api.getItem.queryOptions({ itemId: 'some-id' }));
+
+  if (item.isLoading) return <div>Loading...</div>;
+  if (item.isError) return <div>Error: {item.error.message}</div>;
+
+  return <div>Item: {item.data.name}</div>;
+}
+```
+
+<Drawer title="Usando o cliente da API diretamente" trigger="Clique aqui para ver um exemplo usando o cliente vanilla diretamente.">
+```tsx {5,13}
+import { useState, useEffect } from 'react';
+import { useMyApiClient } from './hooks/useMyApiClient';
+
+function MyComponent() {
+  const api = useMyApiClient();
+  const [item, setItem] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const fetchItem = async () => {
+      try {
+        const data = await api.getItem({ itemId: 'some-id' });
+        setItem(data);
+      } catch (err) {
+        setError(err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchItem();
+  }, [api]);
+
+  if (loading) return <div>Loading...</div>;
+  if (error) return <div>Error: {error.message}</div>;
+
+  return <div>Item: {item.name}</div>;
+}
+```
+</Drawer>
+
+### Mutations
+
+Os hooks gerados incluem suporte para mutations usando o hook `useMutation` do TanStack Query. Isso fornece uma maneira limpa de lidar com operações de criação, atualização e exclusão com estados de carregamento, tratamento de erros e atualizações otimistas.
+
+```tsx {5-7,11}
+import { useMutation } from '@tanstack/react-query';
+import { useMyApi } from './hooks/useMyApi';
+
+function CreateItemForm() {
+  const api = useMyApi();
+  // Cria uma mutation usando as opções de mutation geradas
+  const createItem = useMutation(api.createItem.mutationOptions());
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    createItem.mutate({ name: 'New Item', description: 'A new item' });
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      {/* Campos do formulário */}
+      <button
+        type="submit"
+        disabled={createItem.isPending}
+      >
+        {createItem.isPending ? 'Criando...' : 'Criar Item'}
+      </button>
+
+      {createItem.isSuccess && (
+        <div className="success">
+          Item criado com ID: {createItem.data.id}
+        </div>
+      )}
+
+      {createItem.isError && (
+        <div className="error">
+          Erro: {createItem.error.message}
+        </div>
+      )}
+    </form>
+  );
+}
+```
+
+Você também pode adicionar callbacks para diferentes estados da mutation:
+
+```tsx
+const createItem = useMutation({
+  ...api.createItem.mutationOptions(),
+  onSuccess: (data) => {
+    // Executa quando a mutation tem sucesso
+    console.log('Item criado:', data);
+    // Você pode navegar para o novo item
+    navigate(`/items/${data.id}`);
+  },
+  onError: (error) => {
+    // Executa quando a mutation falha
+    console.error('Falha ao criar item:', error);
+  },
+  onSettled: () => {
+    // Executa quando a mutation completa (sucesso ou erro)
+    // Bom lugar para invalidar queries que possam ser afetadas
+    queryClient.invalidateQueries({ queryKey: api.listItems.queryKey() });
+  }
+});
+```
+
+<Drawer title="Mutations usando o cliente da API diretamente" trigger="Clique aqui para ver um exemplo usando o cliente diretamente.">
+```tsx
+import { useState } from 'react';
+import { useMyApiClient } from './hooks/useMyApiClient';
+
+function CreateItemForm() {
+  const api = useMyApiClient();
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [createdItem, setCreatedItem] = useState(null);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const newItem = await api.createItem({
+        name: 'New Item',
+        description: 'A new item'
+      });
+      setCreatedItem(newItem);
+      // Você pode navegar para o novo item
+      // navigate(`/items/${newItem.id}`);
+    } catch (err) {
+      setError(err);
+      console.error('Falha ao criar item:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      {/* Campos do formulário */}
+      <button
+        type="submit"
+        disabled={isLoading}
+      >
+        {isLoading ? 'Criando...' : 'Criar Item'}
+      </button>
+
+      {createdItem && (
+        <div className="success">
+          Item criado com ID: {createdItem.id}
+        </div>
+      )}
+
+      {error && (
+        <div className="error">
+          Erro: {error.message}
+        </div>
+      )}
+    </form>
+  );
+}
+```
+</Drawer>
+
+### Paginação com Infinite Queries
+
+Para endpoints que aceitam um parâmetro `cursor` como entrada, os hooks gerados fornecem suporte para infinite queries usando o hook `useInfiniteQuery` do TanStack Query. Isso facilita a implementação de funcionalidades "carregar mais" ou scroll infinito.
+
+```tsx {6-16,30-34}
+import { useInfiniteQuery } from '@tanstack/react-query';
+import { useMyApi } from './hooks/useMyApi';
+
+function ItemList() {
+  const api = useMyApi();
+  const items = useInfiniteQuery({
+    ...api.listItems.infiniteQueryOptions({
+      limit: 10, // Número de itens por página
+    }, {
+      // Certifique-se de definir uma função getNextPageParam para retornar
+      // o parâmetro que deve ser passado como 'cursor' para a próxima página
+      getNextPageParam: (lastPage) =>
+        lastPage.nextCursor || undefined
+      }),
+  });
+
+  if (items.isLoading) {
+    return <LoadingSpinner />;
+  }
+
+  if (items.isError) {
+    return <ErrorMessage message={items.error.message} />;
+  }
+
+  return (
+    <div>
+      {/* Achata o array de páginas para renderizar todos os itens */}
+      <ul>
+        {items.data.pages.flatMap(page =>
+          page.items.map(item => (
+            <li key={item.id}>{item.name}</li>
+          ))
+        )}
+      </ul>
+
+      <button
+        onClick={() => items.fetchNextPage()}
+        disabled={!items.hasNextPage || items.isFetchingNextPage}
+      >
+        {items.isFetchingNextPage
+          ? 'Carregando mais...'
+          : items.hasNextPage
+          ? 'Carregar Mais'
+          : 'Sem mais itens'}
+      </button>
+    </div>
+  );
+}
+```
+
+Os hooks gerados lidam automaticamente com a paginação baseada em cursor se sua API suportar. O valor `nextCursor` é extraído da resposta e usado para buscar a próxima página.
+
+:::tip[Dica]
+Se sua API paginada usa um parâmetro com nome diferente de `cursor`, você pode [personalizar usando a extensão OpenAPI `x-cursor`](#custom-pagination-cursor).
+:::
+
+<Drawer title="Paginação usando o cliente da API diretamente" trigger="Clique aqui para ver um exemplo usando o cliente diretamente.">
+```tsx
+import { useState, useEffect } from 'react';
+import { useMyApiClient } from './hooks/useMyApiClient';
+
+function ItemList() {
+  const api = useMyApiClient();
+  const [items, setItems] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [nextCursor, setNextCursor] = useState(null);
+  const [isFetchingMore, setIsFetchingMore] = useState(false);
+
+  // Busca dados iniciais
+  useEffect(() => {
+    const fetchItems = async () => {
+      try {
+        setIsLoading(true);
+        const response = await api.listItems({ limit: 10 });
+        setItems(response.items);
+        setNextCursor(response.nextCursor);
+      } catch (err) {
+        setError(err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchItems();
+  }, [api]);
+
+  // Função para carregar mais itens
+  const loadMore = async () => {
+    if (!nextCursor) return;
+
+    try {
+      setIsFetchingMore(true);
+      const response = await api.listItems({
+        limit: 10,
+        cursor: nextCursor
+      });
+
+      setItems(prevItems => [...prevItems, ...response.items]);
+      setNextCursor(response.nextCursor);
+    } catch (err) {
+      setError(err);
+    } finally {
+      setIsFetchingMore(false);
+    }
+  };
+
+  if (isLoading) {
+    return <LoadingSpinner />;
+  }
+
+  if (error) {
+    return <ErrorMessage message={error.message} />;
+  }
+
+  return (
+    <div>
+      <ul>
+        {items.map(item => (
+          <li key={item.id}>{item.name}</li>
+        ))}
+      </ul>
+
+      <button
+        onClick={loadMore}
+        disabled={!nextCursor || isFetchingMore}
+      >
+        {isFetchingMore
+          ? 'Carregando mais...'
+          : nextCursor
+          ? 'Carregar Mais'
+          : 'Sem mais itens'}
+      </button>
+    </div>
+  );
+}
+```
+</Drawer>
+
+### Tratamento de Erros
+
+A integração inclui tratamento de erros embutido com respostas de erro tipadas. Um tipo `<operation-name>Error` é gerado, encapsulando as possíveis respostas de erro definidas no modelo Smithy. Cada erro possui propriedades `status` e `error`, e ao verificar o valor de `status` você pode identificar um tipo específico de erro.
+
+```tsx {12}
+import { useMutation } from '@tanstack/react-query';
+
+function MyComponent() {
+  const api = useMyApi();
+  const createItem = useMutation(api.createItem.mutationOptions());
+
+  const handleClick = () => {
+    createItem.mutate({ name: 'New Item' });
+  };
+
+  if (createItem.error) {
+    switch (createItem.error.status) {
+      case 400:
+        // error.error é tipado como CreateItem400Response
+        return (
+          <div>
+            <h2>Entrada inválida:</h2>
+            <p>{createItem.error.error.message}</p>
+          </div>
+        );
+      case 403:
+        // error.error é tipado como CreateItem403Response
+        return (
+          <div>
+            <h2>Não autorizado:</h2>
+            <p>{createItem.error.error.reason}</p>
+          </div>
+        );
+      case 500:
+      case 502:
+        // error.error é tipado como CreateItem5XXResponse
+        return (
+          <div>
+            <h2>Erro do servidor:</h2>
+            <p>{createItem.error.error.message}</p>
+          </div>
+        );
+    }
+  }
+
+  return <button onClick={handleClick}>Criar Item</button>;
+}
+```
+
+<Drawer title="Tratamento de erros usando o cliente da API diretamente" trigger="Clique aqui para ver um exemplo usando o cliente vanilla diretamente.">
+```tsx {9,15}
+function MyComponent() {
+  const api = useMyApiClient();
+  const [error, setError] = useState<CreateItemError | null>(null);
+
+  const handleClick = async () => {
+    try {
+      await api.createItem({ name: 'New Item' });
+    } catch (e) {
+      const err = e as CreateItemError;
+      setError(err);
+    }
+  };
+
+  if (error) {
+    switch (error.status) {
+      case 400:
+        // error.error é tipado como CreateItem400Response
+        return (
+          <div>
+            <h2>Entrada inválida:</h2>
+            <p>{error.error.message}</p>
+          </div>
+        );
+      case 403:
+        // error.error é tipado como CreateItem403Response
+        return (
+          <div>
+            <h2>Não autorizado:</h2>
+            <p>{error.error.reason}</p>
+          </div>
+        );
+      case 500:
+      case 502:
+        // error.error é tipado como CreateItem5XXResponse
+        return (
+          <div>
+            <h2>Erro do servidor:</h2>
+            <p>{error.error.message}</p>
+          </div>
+        );
+    }
+  }
+
+  return <button onClick={handleClick}>Criar Item</button>;
+}
+```
+</Drawer>
+
+## Personalizando o Código Gerado
+
+### Consultas e Mutations
+
+Por padrão, operações na API Smithy que usam métodos HTTP `PUT`, `POST`, `PATCH` e `DELETE` são consideradas mutations, e as demais são consultas. Você pode alterar esse comportamento usando as extensões OpenAPI `x-query` e `x-mutation`.
+
+:::tip[Dica]
+No Smithy, você pode adicionar extensões OpenAPI usando a [trait `@specificationExtension`](https://smithy.io/2.0/guides/model-translations/converting-to-openapi.html#specificationextension-trait).
+:::
+
+#### x-query
+
+Primeiro, adicione a definição da trait `query` ao seu modelo:
+
+```smithy title="model/src/extensions.smithy"
+use smithy.openapi#specificationExtension
+
+@trait
+@specificationExtension(as: "x-query")
+structure query {}
+```
+
+Em seguida, aplique a trait `@query` à sua operação Smithy para forçar tratamento como consulta:
+
+```smithy
+@http(method: "POST", uri: "/items")
+@query
+operation ListItems {
+    input: ListItemsInput
+    output: ListItemsOutput
+}
+```
+
+O hook gerado fornecerá `queryOptions` mesmo usando o método HTTP `POST`:
+
+```tsx
+const items = useQuery(api.listItems.queryOptions());
+```
+
+#### x-mutation
+
+Primeiro, adicione a definição da trait `mutation` ao seu modelo:
+
+```smithy title="model/src/extensions.smithy"
+use smithy.openapi#specificationExtension
+
+@trait
+@specificationExtension(as: "x-mutation")
+structure mutation {}
+```
+
+Em seguida, aplique a trait `@mutation` à sua operação Smithy para forçar tratamento como mutation:
+
+```smithy
+@http(method: "GET", uri: "/start-processing")
+@mutation
+operation StartProcessing {
+    input: StartProcessingInput
+    output: StartProcessingOutput
+}
+```
+
+O hook gerado fornecerá `mutationOptions` mesmo usando o método HTTP `GET`:
+
+```tsx
+const startProcessing = useMutation(api.startProcessing.mutationOptions());
+```
+
+### Cursor de Paginação Personalizado
+
+Por padrão, os hooks gerados assumem paginação baseada em cursor com um parâmetro chamado `cursor`. Você pode personalizar isso usando a extensão `x-cursor`.
+
+Primeiro, adicione a definição da trait `cursor` ao seu modelo. Ela deve definir as propriedades `inputToken` e `enabled`:
+
+```smithy title="model/src/extensions.smithy"
+use smithy.openapi#specificationExtension
+
+@trait
+@specificationExtension(as: "x-cursor")
+structure cursor {
+  // Use inputToken para alterar o parâmetro de entrada usado para paginação
+  inputToken: String
+  // Use esta trait com enabled: false se sua operação define um
+  // input chamado "cursor" mas não deve ser tratada como paginada
+  enabled: Boolean
+}
+```
+
+Em seguida, aplique a trait `@cursor` para personalizar o comportamento de paginação:
+
+```smithy
+@http(method: "GET", uri: "/items")
+@cursor(inputToken: "nextToken")
+operation ListItems {
+    input: ListItemsInput
+    output: ListItemsOutput
+}
+
+structure ListItemsInput {
+    nextToken: String
+    limit: Integer
+}
+
+structure ListItemsOutput {
+    items: ItemList
+    nextToken: String
+}
+```
+
+Se não quiser gerar `infiniteQueryOptions` para uma operação, desative a paginação:
+
+```smithy
+@cursor(enabled: false)
+operation ListItems {
+    input: ListItemsInput
+    output: ListItemsOutput
+}
+```
+
+### Agrupamento de Operações
+
+Os hooks e métodos do cliente gerados são organizados automaticamente com base na trait [`@tags`](https://smithy.io/2.0/spec/documentation-traits.html#tags-trait) nas operações Smithy. Operações com as mesmas tags são agrupadas, ajudando a organizar suas chamadas de API e fornecendo melhor completação de código na IDE.
+
+Por exemplo, com este modelo Smithy:
+
+```smithy
+service MyService {
+    operations: [ListItems, CreateItem, ListUsers, CreateUser]
+}
+
+@tags(["items"])
+operation ListItems {
+    input: ListItemsInput
+    output: ListItemsOutput
+}
+
+@tags(["items"])
+operation CreateItem {
+    input: CreateItemInput
+    output: CreateItemOutput
+}
+
+@tags(["users"])
+operation ListUsers {
+    input: ListUsersInput
+    output: ListUsersOutput
+}
+
+@tags(["users"])
+operation CreateUser {
+    input: CreateUserInput
+    output: CreateUserOutput
+}
+```
+
+Os hooks gerados serão agrupados por tags:
+
+```tsx
+import { useQuery, useMutation } from '@tanstack/react-query';
+import { useMyApi } from './hooks/useMyApi';
+
+function ItemsAndUsers() {
+  const api = useMyApi();
+
+  // Operações de items são agrupadas em api.items
+  const items = useQuery(api.items.listItems.queryOptions());
+  const createItem = useMutation(api.items.createItem.mutationOptions());
+
+  // Operações de users são agrupadas em api.users
+  const users = useQuery(api.users.listUsers.queryOptions());
+
+  // Exemplo de uso
+  const handleCreateItem = () => {
+    createItem.mutate({ name: 'New Item' });
+  };
+
+  return (
+    <div>
+      <h2>Items</h2>
+      <ul>
+        {items.data?.map(item => (
+          <li key={item.id}>{item.name}</li>
+        ))}
+      </ul>
+      <button onClick={handleCreateItem}>Adicionar Item</button>
+
+      <h2>Usuários</h2>
+      <ul>
+        {users.data?.map(user => (
+          <li key={user.id}>{user.name}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+```
+
+Este agrupamento facilita a organização das chamadas de API e fornece melhor completação de código na IDE.
+
+<Drawer title="Operações agrupadas usando o cliente da API diretamente" trigger="Clique aqui para ver um exemplo usando o cliente diretamente.">
+```tsx
+import { useState, useEffect } from 'react';
+import { useMyApiClient } from './hooks/useMyApiClient';
+
+function ItemsAndUsers() {
+  const api = useMyApiClient();
+  const [items, setItems] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Carrega dados
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setIsLoading(true);
+
+        // Operações de items agrupadas em api.items
+        const itemsData = await api.items.listItems();
+        setItems(itemsData);
+
+        // Operações de users agrupadas em api.users
+        const usersData = await api.users.listUsers();
+        setUsers(usersData);
+      } catch (error) {
+        console.error('Erro ao buscar dados:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchData();
+  }, [api]);
+
+  const handleCreateItem = async () => {
+    try {
+      // Cria item usando o método agrupado
+      const newItem = await api.items.createItem({ name: 'New Item' });
+      setItems(prevItems => [...prevItems, newItem]);
+    } catch (error) {
+      console.error('Erro ao criar item:', error);
+    }
+  };
+
+  if (isLoading) {
+    return <div>Carregando...</div>;
+  }
+
+  return (
+    <div>
+      <h2>Items</h2>
+      <ul>
+        {items.map(item => (
+          <li key={item.id}>{item.name}</li>
+        ))}
+      </ul>
+      <button onClick={handleCreateItem}>Adicionar Item</button>
+
+      <h2>Usuários</h2>
+      <ul>
+        {users.map(user => (
+          <li key={user.id}>{user.name}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+```
+</Drawer>
+
+### Erros
+
+Você pode personalizar respostas de erro na API Smithy definindo estruturas de erro personalizadas no modelo. O cliente gerado lidará automaticamente com esses tipos de erro.
+
+#### Definindo Estruturas de Erro Personalizadas
+
+Defina suas estruturas de erro no modelo Smithy:
+
+```smithy
+@error("client")
+@httpError(400)
+structure InvalidRequestError {
+    @required
+    message: String
+
+    fieldErrors: FieldErrorList
+}
+
+@error("client")
+@httpError(403)
+structure UnauthorizedError {
+    @required
+    reason: String
+}
+
+@error("server")
+@httpError(500)
+structure InternalServerError {
+    @required
+    message: String
+
+    traceId: String
+}
+
+list FieldErrorList {
+    member: FieldError
+}
+
+structure FieldError {
+    @required
+    field: String
+
+    @required
+    message: String
+}
+```
+
+#### Adicionando Erros às Operações
+
+Especifique quais erros suas operações podem retornar:
+
+```smithy
+operation CreateItem {
+    input: CreateItemInput
+    output: CreateItemOutput
+    errors: [
+        InvalidRequestError
+        UnauthorizedError
+        InternalServerError
+    ]
+}
+
+operation GetItem {
+    input: GetItemInput
+    output: GetItemOutput
+    errors: [
+        ItemNotFoundError
+        InternalServerError
+    ]
+}
+
+@error("client")
+@httpError(404)
+structure ItemNotFoundError {
+    @required
+    message: String
+}
+```
+
+#### Usando Tipos de Erro Personalizados no React
+
+O cliente gerado lidará automaticamente com esses tipos de erro, permitindo verificação de tipos e tratamento de diferentes respostas de erro:
+
+```tsx
+import { useMutation, useQuery } from '@tanstack/react-query';
+
+function ItemComponent() {
+  const api = useMyApi();
+
+  // Consulta com tratamento de erro tipado
+  const getItem = useQuery({
+    ...api.getItem.queryOptions({ itemId: '123' }),
+    onError: (error) => {
+      // Error é tipado com base nos erros do modelo Smithy
+      switch (error.status) {
+        case 404:
+          // error.error é tipado como ItemNotFoundError
+          console.error('Não encontrado:', error.error.message);
+          break;
+        case 500:
+          // error.error é tipado como InternalServerError
+          console.error('Erro do servidor:', error.error.message);
+          console.error('Trace ID:', error.error.traceId);
+          break;
+      }
+    }
+  });
+
+  // Mutation com tratamento de erro tipado
+  const createItem = useMutation({
+    ...api.createItem.mutationOptions(),
+    onError: (error) => {
+      switch (error.status) {
+        case 400:
+          // error.error é tipado como InvalidRequestError
+          console.error('Erro de validação:', error.error.message);
+          console.error('Erros de campo:', error.error.fieldErrors);
+          break;
+        case 403:
+          // error.error é tipado como UnauthorizedError
+          console.error('Não autorizado:', error.error.reason);
+          break;
+      }
+    }
+  });
+
+  // Renderização do componente com tratamento de erro
+  if (getItem.isError) {
+    if (getItem.error.status === 404) {
+      return <NotFoundMessage message={getItem.error.error.message} />;
+    } else if (getItem.error.status === 500) {
+      return <ErrorMessage message={getItem.error.error.message} />;
+    }
+  }
+
+  return (
+    <div>
+      {/* Conteúdo do componente */}
+    </div>
+  );
+}
+```
+
+<Drawer title="Tratando erros personalizados com o cliente diretamente" trigger="Clique aqui para ver um exemplo usando o cliente diretamente.">
+```tsx
+import { useState, useEffect } from 'react';
+
+function ItemComponent() {
+  const api = useMyApiClient();
+  const [item, setItem] = useState(null);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  // Busca item com tratamento de erro
+  useEffect(() => {
+    const fetchItem = async () => {
+      try {
+        setLoading(true);
+        const data = await api.getItem({ itemId: '123' });
+        setItem(data);
+      } catch (e) {
+        // Error é tipado com base nos erros do modelo Smithy
+        const err = e as GetItemError;
+        setError(err);
+
+        switch (err.status) {
+          case 404:
+            // err.error é tipado como ItemNotFoundError
+            console.error('Não encontrado:', err.error.message);
+            break;
+          case 500:
+            // err.error é tipado como InternalServerError
+            console.error('Erro do servidor:', err.error.message);
+            console.error('Trace ID:', err.error.traceId);
+            break;
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchItem();
+  }, [api]);
+
+  // Cria item com tratamento de erro
+  const handleCreateItem = async (data) => {
+    try {
+      await api.createItem(data);
+    } catch (e) {
+      const err = e as CreateItemError;
+
+      switch (err.status) {
+        case 400:
+          // err.error é tipado como InvalidRequestError
+          console.error('Erro de validação:', err.error.message);
+          console.error('Erros de campo:', err.error.fieldErrors);
+          break;
+        case 403:
+          // err.error é tipado como UnauthorizedError
+          console.error('Não autorizado:', err.error.reason);
+          break;
+      }
+    }
+  };
+
+  // Renderização do componente com tratamento de erro
+  if (loading) {
+    return <LoadingSpinner />;
+  }
+
+  if (error) {
+    if (error.status === 404) {
+      return <NotFoundMessage message={error.error.message} />;
+    } else if (error.status === 500) {
+      return <ErrorMessage message={error.error.message} />;
+    }
+  }
+
+  return (
+    <div>
+      {/* Conteúdo do componente */}
+    </div>
+  );
+}
+```
+</Drawer>
+
+:::tip[Dica]
+Ao definir estruturas de erro no Smithy, sempre use as traits `@error` e `@httpError` para especificar o tipo de erro e código de status HTTP. Isso garante que o cliente gerado terá informações de tipo adequadas para tratamento de erros.
+:::
+
+## Melhores Práticas
+
+### Lidar com Estados de Carregamento
+
+Sempre trate estados de carregamento e erro para melhor experiência do usuário:
+
+```tsx
+import { useQuery } from '@tanstack/react-query';
+
+function ItemList() {
+  const api = useMyApi();
+  const items = useQuery(api.listItems.queryOptions());
+
+  if (items.isLoading) {
+    return <LoadingSpinner />;
+  }
+
+  if (items.isError) {
+    const err = items.error;
+    switch (err.status) {
+      case 403:
+        // err.error é tipado como ListItems403Response
+        return <ErrorMessage message={err.error.reason} />;
+      case 500:
+      case 502:
+        // err.error é tipado como ListItems5XXResponse
+        return (
+          <ErrorMessage
+            message={err.error.message}
+          />
+        );
+      default:
+        return <ErrorMessage message="Ocorreu um erro desconhecido" />;
+    }
+  }
+
+  return (
+    <ul>
+      {items.data.map((item) => (
+        <li key={item.id}>{item.name}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+<Drawer title="Lidar com estados de carregamento usando o cliente diretamente" trigger="Clique aqui para ver um exemplo usando o cliente vanilla diretamente.">
+```tsx
+function ItemList() {
+  const api = useMyApiClient();
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const fetchItems = async () => {
+      try {
+        const data = await api.listItems();
+        setItems(data);
+      } catch (err) {
+        setError(err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchItems();
+  }, [api]);
+
+  if (loading) {
+    return <LoadingSpinner />;
+  }
+
+  if (error) {
+    const err = error as ListItemsError;
+    switch (err.status) {
+      case 403:
+        // err.error é tipado como ListItems403Response
+        return <ErrorMessage message={err.error.reason} />;
+      case 500:
+      case 502:
+        // err.error é tipado como ListItems5XXResponse
+        return (
+          <ErrorMessage
+            message={err.error.message}
+          />
+        );
+      default:
+        return <ErrorMessage message="Ocorreu um erro desconhecido" />;
+    }
+  }
+
+  return (
+    <ul>
+      {items.map((item) => (
+        <li key={item.id}>{item.name}</li>
+      ))}
+    </ul>
+  );
+}
+```
+</Drawer>
+
+### Atualizações Otimistas
+
+Implemente atualizações otimistas para melhor experiência do usuário:
+
+```tsx
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+
+function ItemList() {
+  const api = useMyApi();
+  const queryClient = useQueryClient();
+
+  // Consulta para buscar items
+  const itemsQuery = useQuery(api.listItems.queryOptions());
+
+  // Mutation para excluir items com atualizações otimistas
+  const deleteMutation = useMutation({
+    ...api.deleteItem.mutationOptions(),
+    onMutate: async (itemId) => {
+      // Cancela refetches em andamento
+      await queryClient.cancelQueries({ queryKey: api.listItems.queryKey() });
+
+      // Captura o valor anterior
+      const previousItems = queryClient.getQueryData(api.listItems.queryKey());
+
+      // Atualiza otimistamente para o novo valor
+      queryClient.setQueryData(
+        api.listItems.queryKey(),
+        (old) => old.filter((item) => item.id !== itemId)
+      );
+
+      // Retorna um objeto de contexto com o snapshot
+      return { previousItems };
+    },
+    onError: (err, itemId, context) => {
+      // Se a mutation falhar, usa o contexto para reverter
+      queryClient.setQueryData(api.listItems.queryKey(), context.previousItems);
+      console.error('Falha ao excluir item:', err);
+    },
+    onSettled: () => {
+      // Sempre refetch após erro ou sucesso para sincronizar dados
+      queryClient.invalidateQueries({ queryKey: api.listItems.queryKey() });
+    },
+  });
+
+  if (itemsQuery.isLoading) {
+    return <LoadingSpinner />;
+  }
+
+  if (itemsQuery.isError) {
+    return <ErrorMessage message="Falha ao carregar items" />;
+  }
+
+  return (
+    <ul>
+      {itemsQuery.data.map((item) => (
+        <li key={item.id}>
+          {item.name}
+          <button
+            onClick={() => deleteMutation.mutate(item.id)}
+            disabled={deleteMutation.isPending}
+          >
+            {deleteMutation.isPending ? 'Excluindo...' : 'Excluir'}
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+<Drawer title="Atualizações otimistas usando o cliente diretamente" trigger="Clique aqui para ver um exemplo usando o cliente vanilla diretamente.">
+```tsx
+function ItemList() {
+  const api = useMyApiClient();
+  const [items, setItems] = useState([]);
+
+  const handleDelete = async (itemId) => {
+    // Remove o item otimistamente
+    const previousItems = items;
+    setItems(items.filter((item) => item.id !== itemId));
+
+    try {
+      await api.deleteItem(itemId);
+    } catch (error) {
+      // Restaura os items anteriores em caso de erro
+      setItems(previousItems);
+      console.error('Falha ao excluir item:', error);
+    }
+  };
+
+  return (
+    <ul>
+      {items.map((item) => (
+        <li key={item.id}>
+          {item.name}
+          <button onClick={() => handleDelete(item.id)}>Excluir</button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+</Drawer>
+
+## Segurança de Tipos
+
+A integração fornece segurança de tipos de ponta a ponta. Sua IDE fornecerá autocompletar e verificação de tipos para todas as chamadas de API:
+
+```tsx
+import { useMutation } from '@tanstack/react-query';
+
+function ItemForm() {
+  const api = useMyApi();
+
+  // Mutation type-safe para criar items
+  const createItem = useMutation({
+    ...api.createItem.mutationOptions(),
+    // ✅ Erro de tipo se o callback onSuccess não lidar com o tipo de resposta correto
+    onSuccess: (data) => {
+      // data é totalmente tipado com base no schema de resposta da API
+      console.log(`Item criado com ID: ${data.id}`);
+    },
+  });
+
+  const handleSubmit = (data: CreateItemInput) => {
+    // ✅ Erro de tipo se a entrada não corresponder ao schema
+    createItem.mutate(data);
+  };
+
+  // UI de erro pode usar type narrowing para lidar com diferentes tipos de erro
+  if (createItem.error) {
+    const error = createItem.error;
+    switch (error.status) {
+      case 400:
+        // error.error é tipado como InvalidRequestError
+        return (
+          <FormError
+            message="Entrada inválida"
+            errors={error.error.fieldErrors}
+          />
+        );
+      case 403:
+        // error.error é tipado como UnauthorizedError
+        return <AuthError reason={error.error.reason} />;
+      default:
+        // error.error é tipado como InternalServerError para 500, etc.
+        return <ServerError message={error.error.message} />;
+    }
+  }
+
+  return (
+    <form onSubmit={(e) => {
+      e.preventDefault();
+      handleSubmit({ name: 'New Item' });
+    }}>
+      {/* Campos do formulário */}
+      <button
+        type="submit"
+        disabled={createItem.isPending}
+      >
+        {createItem.isPending ? 'Criando...' : 'Criar Item'}
+      </button>
+    </form>
+  );
+}
+```
+
+<Drawer title="Segurança de tipos usando o cliente diretamente" trigger="Clique aqui para ver um exemplo usando o cliente vanilla diretamente.">
+```tsx
+function ItemForm() {
+  const api = useMyApiClient();
+  const [error, setError] = useState<CreateItemError | null>(null);
+
+  const handleSubmit = async (data: CreateItemInput) => {
+    try {
+      // ✅ Erro de tipo se a entrada não corresponder ao schema
+      await api.createItem(data);
+    } catch (e) {
+      // ✅ Tipo de erro inclui todas as respostas de erro possíveis
+      const err = e as CreateItemError;
+      switch (err.status) {
+        case 400:
+          // err.error é tipado como InvalidRequestError
+          console.error('Erros de validação:', err.error.fieldErrors);
+          break;
+        case 403:
+          // err.error é tipado como UnauthorizedError
+          console.error('Não autorizado:', err.error.reason);
+          break;
+        case 500:
+          // err.error é tipado como InternalServerError
+          console.error('Erro do servidor:', err.error.message);
+          break;
+      }
+      setError(err);
+    }
+  };
+
+  // UI de erro pode usar type narrowing para lidar com diferentes tipos de erro
+  if (error) {
+    switch (error.status) {
+      case 400:
+        return (
+          <FormError
+            message="Entrada inválida"
+            errors={error.error.fieldErrors}
+          />
+        );
+      case 403:
+        return <AuthError reason={error.error.reason} />;
+      default:
+        return <ServerError message={error.error.message} />;
+    }
+  }
+
+  return <form onSubmit={handleSubmit}>{/* ... */}</form>;
+}
+```
+</Drawer>
+
+Os tipos são gerados automaticamente a partir do schema OpenAPI da API Smithy, garantindo que quaisquer alterações na API sejam refletidas no código frontend após um build.

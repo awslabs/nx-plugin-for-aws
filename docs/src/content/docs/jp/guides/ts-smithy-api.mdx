@@ -1,0 +1,573 @@
+---
+title: "Smithy TypeScriptのAPI"
+description: "Smithy TypeScript APIのリファレンスドキュメント"
+---
+
+
+
+import { FileTree, AnchorHeading, Tabs, TabItem } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
+
+[Smithy](https://smithy.io/)はプロトコルに依存しないインターフェース定義言語で、モデル駆動方式でAPIを構築できます。
+
+Smithy TypeScript APIジェネレータは、サービス定義にSmithyを、実装に[Smithy TypeScript Server SDK](https://github.com/awslabs/smithy-typescript)を使用した新しいAPIを作成します。このジェネレータは、AWS LambdaにサービスをデプロイするためのCDKまたはTerraformのInfrastructure as Codeを提供し、AWS API Gateway REST API経由で公開します。Smithyモデルからの自動コード生成によりタイプセーフなAPI開発を実現します。生成されたハンドラは、ロギング、AWS X-Rayトレーシング、CloudWatchメトリクスを含むオブザーバビリティのために[AWS Lambda Powertools for TypeScript](https://docs.powertools.aws.dev/lambda/typescript/latest/)を使用します。
+
+## 使用方法
+
+### Smithy TypeScript APIの生成
+
+新しいSmithy TypeScript APIは2つの方法で生成できます:
+
+<RunGenerator generator="ts#smithy-api" />
+
+### オプション
+
+<GeneratorParameters generator="ts#smithy-api" />
+
+## ジェネレータの出力
+
+ジェネレータは`<directory>/<api-name>`ディレクトリに2つの関連プロジェクトを作成します:
+
+<FileTree>
+
+- **model/** Smithyモデルプロジェクト
+  - project.json プロジェクト設定とビルドターゲット
+  - smithy-build.json Smithyビルド設定
+  - build.Dockerfile Smithyアーティファクト構築用Docker設定
+  - src/
+    - main.smithy メインサービス定義
+    - operations/
+      - echo.smithy オペレーション定義例
+- **backend/** TypeScriptバックエンド実装
+  - project.json プロジェクト設定とビルドターゲット
+  - rolldown.config.ts バンドル設定
+  - src/
+    - handler.ts AWS Lambdaハンドラ
+    - local-server.ts ローカル開発サーバー
+    - service.ts サービス実装
+    - context.ts サービスコンテキスト定義
+    - operations/
+      - echo.ts オペレーション実装例
+    - generated/ 生成されたTypeScript SDK（ビルド時に作成）
+
+</FileTree>
+
+### インフラストラクチャ
+
+このジェネレータは選択した`iacProvider`に基づくInfrastructure as Codeを作成するため、関連するCDKコンストラクトまたはTerraformモジュールを含む`packages/common`にプロジェクトを生成します。
+
+共通のInfrastructure as Codeプロジェクトの構造は以下の通りです:
+
+<Infrastructure>
+<Fragment slot="cdk">
+<FileTree>
+  - packages/common/constructs
+    - src
+      - app/ プロジェクト/ジェネレータ固有のインフラストラクチャ用コンストラクト
+        - apis/
+          - \<project-name>.ts APIデプロイ用CDKコンストラクト
+      - core/ `app`内コンストラクトで再利用される汎用コンストラクト
+        - api/
+          - rest-api.ts REST APIデプロイ用CDKコンストラクト
+          - utils.ts APIコンストラクト用ユーティリティ
+      - index.ts `app`からコンストラクトをエクスポートするエントリポイント
+    - project.json プロジェクトビルドターゲットと設定
+</FileTree>
+
+:::note
+このプロジェクトは[`ts#project`](guides/typescript-project)ジェネレータを使用して生成されるため、同じビルドターゲットを設定します。
+:::
+</Fragment>
+<Fragment slot="terraform">
+<FileTree>
+  - packages/common/terraform
+    - src
+      - app/ プロジェクト/ジェネレータ固有のインフラストラクチャ用Terraformモジュール
+        - apis/
+          - \<project-name>/
+            - \<project-name>.tf APIデプロイ用モジュール
+      - core/ `app`内モジュールで再利用される汎用モジュール
+        - api/
+          - rest-api/
+            - rest-api.tf REST APIデプロイ用モジュール
+    - project.json プロジェクトビルドターゲットと設定
+</FileTree>
+
+:::note
+このプロジェクトは[`terraform#project`](guides/terraform-project)ジェネレータを使用して生成されるため、同じビルドターゲットを設定します。
+:::
+</Fragment>
+</Infrastructure>
+
+## Smithy APIの実装
+
+### Smithyでのオペレーション定義
+
+オペレーションはモデルプロジェクト内のSmithyファイルで定義されます。メインサービス定義は`main.smithy`にあります:
+
+```smithy
+$version: "2.0"
+
+namespace your.namespace
+
+use aws.protocols#restJson1
+use smithy.framework#ValidationException
+
+@title("YourService")
+@restJson1
+service YourService {
+    version: "1.0.0"
+    operations: [
+        Echo,
+        // オペレーションを追加
+    ]
+    errors: [
+        ValidationException
+    ]
+}
+```
+
+個々のオペレーションは`operations/`ディレクトリの別ファイルで定義します:
+
+```smithy
+$version: "2.0"
+
+namespace your.namespace
+
+@http(method: "POST", uri: "/echo")
+operation Echo {
+    input: EchoInput
+    output: EchoOutput
+}
+
+structure EchoInput {
+    @required
+    message: String
+
+    foo: Integer
+    bar: String
+}
+
+structure EchoOutput {
+    @required
+    message: String
+}
+```
+
+:::note
+`src`フォルダ内のすべての`.smithy`ファイルがSmithyビルドに含まれるため、フォルダ構造は自由に変更可能です。
+:::
+
+:::tip
+Smithyとその構文の詳細については[Smithy仕様書](https://smithy.io/2.0/spec/index.html)を参照してください。
+:::
+
+### TypeScriptでのオペレーション実装
+
+オペレーション実装はバックエンドプロジェクトの`src/operations/`ディレクトリに配置されます。各オペレーションは、Smithyモデルからビルド時に生成されるTypeScript Server SDKの型を使用して実装されます。
+
+```typescript
+import { ServiceContext } from '../context.js';
+import { Echo as EchoOperation } from '../generated/ssdk/index.js';
+
+export const Echo: EchoOperation<ServiceContext> = async (input) => {
+  // ビジネスロジックをここに実装
+  return {
+    message: `Echo: ${input.message}` // Smithyモデルに基づくタイプセーフ
+  };
+};
+```
+
+オペレーションは`src/service.ts`のサービス定義に登録する必要があります:
+
+```typescript
+import { ServiceContext } from './context.js';
+import { YourServiceService } from './generated/ssdk/index.js';
+import { Echo } from './operations/echo.js';
+// 他のオペレーションをインポート
+
+// サービスにオペレーションを登録
+export const Service: YourServiceService<ServiceContext> = {
+  Echo,
+  // 他のオペレーションを追加
+};
+```
+
+### サービスコンテキスト
+
+`context.ts`でオペレーション間で共有するコンテキストを定義できます:
+
+```typescript
+export interface ServiceContext {
+  // Powertoolsのトレーサー、ロガー、メトリクスはデフォルトで提供
+  tracer: Tracer;
+  logger: Logger;
+  metrics: Metrics;
+  // データベース接続などの共有依存関係を追加
+  dbClient: any;
+  userIdentity: string;
+}
+```
+
+このコンテキストはすべてのオペレーション実装に渡され、データベース接続や設定などのリソース共有に使用できます。
+
+:::caution
+コンテキストは`handler.ts`（Lambda関数エントリポイント）と`local-server.ts`（`serve`ターゲット用ローカル実行エントリポイント）の両方で自身で構築する必要があります。
+:::
+
+### AWS Lambda Powertoolsによるオブザーバビリティ
+
+#### ロギング
+
+ジェネレータはMiddyミドルウェアを使用した構造化ロギングを自動設定します。
+
+```typescript {4}
+// handler.ts
+export const handler = middy<APIGatewayProxyEvent, APIGatewayProxyResult>()
+  .use(captureLambdaHandler(tracer))
+  .use(injectLambdaContext(logger))
+  .use(logMetrics(metrics))
+  .handler(lambdaHandler);
+```
+
+コンテキスト経由でロガーを参照できます:
+
+```typescript {6}
+// operations/echo.ts
+import { ServiceContext } from '../context.js';
+import { Echo as EchoOperation } from '../generated/ssdk/index.js';
+
+export const Echo: EchoOperation<ServiceContext> = async (input, ctx) => {
+  ctx.logger.info('ログメッセージ');
+  // ...
+};
+```
+
+#### トレーシング
+
+`captureLambdaHandler`ミドルウェアでAWS X-Rayトレーシングを自動設定します。
+
+```typescript {3}
+// handler.ts
+export const handler = middy<APIGatewayProxyEvent, APIGatewayProxyResult>()
+  .use(captureLambdaHandler(tracer))
+  .use(injectLambdaContext(logger))
+  .use(logMetrics(metrics))
+  .handler(lambdaHandler);
+```
+
+オペレーション内でカスタムサブセグメントを追加できます:
+
+```typescript {7, 11, 14}
+// operations/echo.ts
+import { ServiceContext } from '../context.js';
+import { Echo as EchoOperation } from '../generated/ssdk/index.js';
+
+export const Echo: EchoOperation<ServiceContext> = async (input, ctx) => {
+  // 新しいサブセグメントを作成
+  const subsegment = ctx.tracer.getSegment()?.addNewSubsegment('custom-operation');
+  try {
+    // ロジックを実装
+  } catch (error) {
+    subsegment?.addError(error as Error);
+    throw error;
+  } finally {
+    subsegment?.close();
+  }
+};
+```
+
+#### メトリクス
+
+`logMetrics`ミドルウェアでリクエストごとのCloudWatchメトリクスを自動収集します。
+
+```typescript {5}
+// handler.ts
+export const handler = middy<APIGatewayProxyEvent, APIGatewayProxyResult>()
+  .use(captureLambdaHandler(tracer))
+  .use(injectLambdaContext(logger))
+  .use(logMetrics(metrics))
+  .handler(lambdaHandler);
+```
+
+オペレーション内でカスタムメトリクスを追加できます:
+
+```typescript {7}
+// operations/echo.ts
+import { MetricUnit } from '@aws-lambda-powertools/metrics';
+import { ServiceContext } from '../context.js';
+import { Echo as EchoOperation } from '../generated/ssdk/index.js';
+
+export const Echo: EchoOperation<ServiceContext> = async (input, ctx) => {
+  ctx.metrics.addMetric("CustomMetric", MetricUnit.Count, 1);
+  // ...
+};
+```
+
+### エラーハンドリング
+
+Smithyは組み込みのエラーハンドリングを提供します。カスタムエラーをSmithyモデルで定義できます:
+
+```smithy
+@error("client")
+@httpError(400)
+structure InvalidRequestError {
+    @required
+    message: String
+}
+```
+
+オペレーション/サービスに登録:
+
+```smithy
+operation MyOperation {
+  ...
+  errors: [InvalidRequestError]
+}
+```
+
+TypeScript実装でスロー:
+
+```typescript
+import { InvalidRequestError } from '../generated/ssdk/index.js';
+
+export const MyOperation: MyOperationHandler<ServiceContext> = async (input) => {
+  if (!input.requiredField) {
+    throw new InvalidRequestError({
+      message: "必須フィールドが不足しています"
+    });
+  }
+
+  return { /* 成功レスポンス */ };
+};
+```
+
+## ビルドとコード生成
+
+Smithyモデルプロジェクトは[Docker](https://www.docker.com/)を使用してSmithyアーティファクトをビルドし、TypeScript Server SDKを生成します:
+
+<NxCommands commands={['run <model-project>:build']} />
+
+このプロセスでは:
+1. Smithyモデルのコンパイルと検証
+2. SmithyモデルからOpenAPI仕様の生成
+3. タイプセーフなオペレーションインターフェースを含むTypeScript Server SDKの生成
+4. ビルドアーティファクトを`dist/<model-project>/build/`に出力
+
+バックエンドプロジェクトはビルド時に生成されたSDKを自動コピーします:
+
+<NxCommands commands={['run <backend-project>:copy-ssdk']} />
+
+### バンドルターゲット
+
+バックエンドプロジェクトは[Rolldown](https://rolldown.rs/)を使用してAWS Lambda用デプロイパッケージをバンドルします:
+
+<NxCommands commands={['run <backend-project>:bundle']} />
+
+## ローカル開発
+
+ジェネレータはホットリロード機能付きローカル開発サーバーを設定します:
+
+<NxCommands commands={['run <backend-project>:serve']} />
+
+:::tip
+ローカルサーバーはTypeScriptコードの変更時にホットリロードするだけでなく、Smithyモデルプロジェクトの変更時にもリロードされ、Smithyモデルとサーバーを連携して継続的に開発できます。
+:::
+
+## Smithy APIのデプロイ
+
+ジェネレータは選択した`iacProvider`に基づいてCDKまたはTerraformインフラストラクチャを作成します。
+
+<Infrastructure>
+<Fragment slot="cdk">
+APIデプロイ用CDKコンストラクトは`common/constructs`フォルダにあります:
+
+```ts {6-8}
+import { MyApi } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    // スタックにAPIを追加
+    const api = new MyApi(this, 'MyApi', {
+      integrations: MyApi.defaultIntegrations(this).build(),
+    });
+  }
+}
+```
+
+これにより以下が設定されます:
+1. Smithyサービス用AWS Lambda関数
+2. 関数トリガーとしてのAPI Gateway REST API
+3. IAMロールと権限
+4. CloudWatchロググループ
+5. X-Rayトレーシング設定
+
+:::note
+`Cognito`認証を選択した場合、APIコンストラクトに`identity`プロパティを指定する必要があります:
+
+```ts {9}
+import { MyApi, UserIdentity } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const identity = new UserIdentity(this, 'Identity');
+
+    const api = new MyApi(this, 'MyApi', {
+      integrations: MyApi.defaultIntegrations(this).build(),
+      identity,
+    });
+  }
+}
+```
+
+`UserIdentity`コンストラクトは<Link path="/guides/react-website-auth">`ts#react-website-auth`ジェネレータ</Link>で生成できます
+:::
+</Fragment>
+<Fragment slot="terraform">
+APIデプロイ用Terraformモジュールは`common/terraform`フォルダにあります:
+
+```hcl {2}
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  # Lambda関数用環境変数
+  env = {
+    ENVIRONMENT = var.environment
+    LOG_LEVEL   = "INFO"
+  }
+
+  # 追加IAMポリシー
+  additional_iam_policy_statements = [
+    # APIに必要な追加権限
+  ]
+
+  tags = local.common_tags
+}
+```
+
+これにより以下が設定されます:
+1. Smithy APIを提供するAWS Lambda関数
+2. 関数トリガーとしてのAPI Gateway REST API
+3. IAMロールと権限
+4. CloudWatchロググループ
+5. X-Rayトレーシング設定
+6. CORS設定
+
+:::note
+`Cognito`認証を選択した場合、Cognito設定を指定する必要があります:
+
+```hcl {4-5}
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  user_pool_id         = local.user_pool_id
+  user_pool_client_ids = [local.client_id]
+
+  env = {
+    ENVIRONMENT = var.environment
+    LOG_LEVEL   = "INFO"
+  }
+
+  tags = local.common_tags
+}
+```
+:::
+
+Terraformモジュールは複数の出力を提供します:
+
+```hcl
+# APIエンドポイントにアクセス
+output "api_url" {
+  value = module.my_api.stage_invoke_url
+}
+
+# Lambda関数詳細にアクセス
+output "lambda_function_name" {
+  value = module.my_api.lambda_function_name
+}
+```
+</Fragment>
+</Infrastructure>
+
+### インテグレーション
+
+<Snippet name="api/type-safe-api-integrations" parentHeading="Integrations" />
+
+#### コード生成
+
+<Infrastructure>
+<Fragment slot="cdk">
+オペレーションがSmithyで定義されているため、タイプセーフなインテグレーションのためにCDKコンストラクトにメタデータを提供するコード生成を使用します。
+
+共通コンストラクトの`project.json`に`generate:<ApiName>-metadata`ターゲットが追加され、`packages/common/constructs/src/generated/my-api/metadata.gen.ts`のようなファイルを生成します。これはビルド時に生成されるため、バージョン管理から除外されます。
+
+:::note
+Smithyモデルを変更するたびに、CDKコンストラクトが消費する型が最新であることを保証するため、ビルドを実行する必要があります。
+
+<NxCommands commands={["run-many --target build --all"]} />
+:::
+
+:::tip
+CDKインフラストラクチャとSmithy APIを同時に開発する場合、[`nx watch`](https://nx.dev/nx-api/nx/documents/watch)を使用してモデル変更のたびにこれらの型を再生成できます:
+
+<NxCommands
+  commands={[
+    'watch --projects=<ModelProject> -- \\ ',
+    'run <InfraProject>:"generate:<ApiName>-metadata"',
+  ]}
+/>
+:::
+</Fragment>
+<Fragment slot="terraform">
+:::note
+Terraformではタイプセーフなインテグレーションをサポートしていないため、`iacProvider`にTerraformを選択した場合、コード生成ターゲットは設定されません。
+:::
+</Fragment>
+</Infrastructure>
+
+### アクセス権限付与（IAMのみ）
+
+`IAM`認証を選択した場合、`grantInvokeAccess`メソッドでAPIへのアクセス権限を付与できます:
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts
+api.grantInvokeAccess(myIdentityPool.authenticatedRole);
+```
+</Fragment>
+<Fragment slot="terraform">
+```hcl
+# API呼び出しを許可するIAMポリシー
+resource "aws_iam_policy" "api_invoke_policy" {
+  name        = "MyApiInvokePolicy"
+  description = "Smithy API呼び出し許可ポリシー"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = "execute-api:Invoke"
+        Resource = "${module.my_api.api_execution_arn}/*/*"
+      }
+    ]
+  })
+}
+
+# IAMロールにポリシーをアタッチ
+resource "aws_iam_role_policy_attachment" "api_invoke_access" {
+  role       = aws_iam_role.authenticated_user_role.name
+  policy_arn = aws_iam_policy.api_invoke_policy.arn
+}
+```
+</Fragment>
+</Infrastructure>
+
+## Smithy APIの呼び出し
+
+ReactウェブサイトからAPIを呼び出すには、Smithyモデルからタイプセーフなクライアントを生成する<Link path="guides/api-connection/react-smithy">`api-connection`</Link>ジェネレータを使用できます。

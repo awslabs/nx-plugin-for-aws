@@ -1,0 +1,667 @@
+---
+title: "Reaccionar a la API de Smithy"
+description: "Conectar un sitio web de React a una API TypeScript de Smithy"
+---
+
+
+
+import { FileTree, Steps } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Drawer from '@components/drawer.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+
+El generador `api-connection` proporciona una forma rápida de integrar tu aplicación React con tu backend de API Smithy TypeScript. Configura toda la configuración necesaria para conectarse a tu API Smithy de manera segura en tipos, incluyendo generación de clientes y hooks de [TanStack Query](https://tanstack.com/query/v5), soporte para autenticación AWS IAM y Cognito, y manejo adecuado de errores.
+
+## Requisitos previos
+
+Antes de usar este generador, asegúrate que tu aplicación React tenga:
+
+1. Un archivo `main.tsx` que renderice tu aplicación
+2. Un backend de API Smithy TypeScript funcional (generado usando el <Link path="/guides/ts-smithy-api">generador `ts#smithy-api`</Link>)
+3. Auth con Cognito añadido mediante el <Link path="/guides/react-website-auth">generador `ts#react-website-auth`</Link> si conectas una API que use autenticación Cognito o IAM
+
+<details>
+<summary>Ejemplo de estructura requerida en `main.tsx`</summary>
+
+```tsx
+import { StrictMode } from 'react';
+import * as ReactDOM from 'react-dom/client';
+import App from './app/app';
+
+const root = ReactDOM.createRoot(
+  document.getElementById('root') as HTMLElement,
+);
+root.render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+);
+```
+
+</details>
+
+## Uso
+
+### Ejecutar el generador
+
+<RunGenerator generator="api-connection" />
+
+### Opciones
+
+<GeneratorParameters generator="api-connection" />
+
+## Salida del generador
+
+El generador modificará los siguientes archivos en tu aplicación React:
+
+<FileTree>
+
+- src
+  - components
+    - \<ApiName>Provider.tsx Proveedor del cliente de tu API
+    - QueryClientProvider.tsx Proveedor del cliente TanStack React Query
+    - RuntimeConfig/ Componente de configuración en tiempo de ejecución para desarrollo local
+  - hooks
+    - use\<ApiName>.tsx Añade un hook para llamar a tu API con estado gestionado por TanStack Query
+    - use\<ApiName>Client.tsx Añade un hook para instanciar el cliente vanilla de la API
+    - useSigV4.tsx Añade un hook para firmar peticiones HTTP con SigV4 (si seleccionaste autenticación IAM)
+- project.json Se añade un nuevo target al build que genera un cliente tipado
+- .gitignore Los archivos generados del cliente se ignoran por defecto
+
+</FileTree>
+
+El generador también añadirá Runtime Config a tu infraestructura del sitio web si no está presente, asegurando que la URL de la API para tu Smithy API esté disponible y sea configurada automáticamente por el hook `use<ApiName>.tsx`.
+
+### Generación de código
+
+En tiempo de build, se genera un cliente tipado a partir de la especificación OpenAPI de tu API Smithy. Esto añadirá tres nuevos archivos:
+
+<FileTree>
+
+- src
+  - generated
+    - \<ApiName>
+      - types.gen.ts Tipos generados de las estructuras del modelo Smithy
+      - client.gen.ts Cliente tipado para llamar a tu API
+      - options-proxy.gen.ts Provee métodos para crear opciones de hooks TanStack Query
+
+</FileTree>
+
+:::tip
+Por defecto, el cliente generado se ignora en control de versiones. Si prefieres incluirlo, puedes eliminar la entrada del `.gitignore` de tu aplicación React, pero ten en cuenta que cualquier cambio manual en los archivos `.gen.ts` será sobrescrito al construir el proyecto.
+:::
+
+## Usando el código generado
+
+El cliente tipado generado puede usarse para llamar a tu API Smithy desde tu aplicación React. Se recomienda usar los hooks de TanStack Query, pero también puedes usar el cliente vanilla.
+
+:::note
+Cuando hagas cambios en tu modelo Smithy, necesitas reconstruir tu proyecto para que se reflejen en el cliente generado. Por ejemplo:
+
+<NxCommands commands={['run-many --target build --all']} />
+:::
+
+:::tip
+Si estás trabajando simultáneamente en tu aplicación React y API Smithy, usa el target `serve-local` de la aplicación React, que regenerará automáticamente el cliente cuando la API cambie:
+
+<NxCommands commands={['run <WebsiteProject>:serve-local']} />
+
+Para control más granular, usa el target `watch-generate:<ApiName>-client` para regenerar el cliente tras cada cambio:
+
+<NxCommands commands={['run <WebsiteProject>:"watch-generate:<ApiName>-client"']}
+/>
+:::
+
+### Usando el hook de API
+
+El generador provee un hook `use<ApiName>` para llamar a tu API con TanStack Query.
+
+### Consultas
+
+Usa el método `queryOptions` para obtener las opciones requeridas para usar con el hook `useQuery`:
+
+```tsx {7}
+import { useQuery } from '@tanstack/react-query';
+import { useState, useEffect } from 'react';
+import { useMyApi } from './hooks/useMyApi';
+
+function MyComponent() {
+  const api = useMyApi();
+  const item = useQuery(api.getItem.queryOptions({ itemId: 'some-id' }));
+
+  if (item.isLoading) return <div>Loading...</div>;
+  if (item.isError) return <div>Error: {item.error.message}</div>;
+
+  return <div>Item: {item.data.name}</div>;
+}
+```
+
+<Drawer title="Usar el cliente de API directamente" trigger="Haz clic aquí para ver un ejemplo usando el cliente vanilla directamente.">
+```tsx {5,13}
+import { useState, useEffect } from 'react';
+import { useMyApiClient } from './hooks/useMyApiClient';
+
+function MyComponent() {
+  const api = useMyApiClient();
+  const [item, setItem] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const fetchItem = async () => {
+      try {
+        const data = await api.getItem({ itemId: 'some-id' });
+        setItem(data);
+      } catch (err) {
+        setError(err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchItem();
+  }, [api]);
+
+  if (loading) return <div>Loading...</div>;
+  if (error) return <div>Error: {error.message}</div>;
+
+  return <div>Item: {item.name}</div>;
+}
+```
+</Drawer>
+
+### Mutaciones
+
+Los hooks generados incluyen soporte para mutaciones usando el hook `useMutation` de TanStack Query. Esto provee una forma limpia de manejar operaciones de creación, actualización y eliminación.
+
+```tsx {5-7,11}
+import { useMutation } from '@tanstack/react-query';
+import { useMyApi } from './hooks/useMyApi';
+
+function CreateItemForm() {
+  const api = useMyApi();
+  // Crear mutación usando las opciones generadas
+  const createItem = useMutation(api.createItem.mutationOptions());
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    createItem.mutate({ name: 'New Item', description: 'A new item' });
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      {/* Campos del formulario */}
+      <button
+        type="submit"
+        disabled={createItem.isPending}
+      >
+        {createItem.isPending ? 'Creando...' : 'Crear ítem'}
+      </button>
+
+      {createItem.isSuccess && (
+        <div className="success">
+          Ítem creado con ID: {createItem.data.id}
+        </div>
+      )}
+
+      {createItem.isError && (
+        <div className="error">
+          Error: {createItem.error.message}
+        </div>
+      )}
+    </form>
+  );
+}
+```
+
+También puedes añadir callbacks para diferentes estados:
+
+```tsx
+const createItem = useMutation({
+  ...api.createItem.mutationOptions(),
+  onSuccess: (data) => {
+    console.log('Ítem creado:', data);
+    navigate(`/items/${data.id}`);
+  },
+  onError: (error) => {
+    console.error('Error al crear:', error);
+  },
+  onSettled: () => {
+    queryClient.invalidateQueries({ queryKey: api.listItems.queryKey() });
+  }
+});
+```
+
+<Drawer title="Mutaciones usando el cliente directamente" trigger="Haz clic aquí para ver un ejemplo usando el cliente directamente.">
+```tsx
+import { useState } from 'react';
+import { useMyApiClient } from './hooks/useMyApiClient';
+
+function CreateItemForm() {
+  const api = useMyApiClient();
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [createdItem, setCreatedItem] = useState(null);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const newItem = await api.createItem({
+        name: 'New Item',
+        description: 'A new item'
+      });
+      setCreatedItem(newItem);
+    } catch (err) {
+      setError(err);
+      console.error('Error al crear:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <button
+        type="submit"
+        disabled={isLoading}
+      >
+        {isLoading ? 'Creando...' : 'Crear ítem'}
+      </button>
+
+      {createdItem && (
+        <div className="success">
+          Ítem creado con ID: {createdItem.id}
+        </div>
+      )}
+
+      {error && (
+        <div className="error">
+          Error: {error.message}
+        </div>
+      )}
+    </form>
+  );
+}
+```
+</Drawer>
+
+### Paginación con consultas infinitas
+
+Para endpoints que aceptan parámetro `cursor`, los hooks generados soportan consultas infinitas usando `useInfiniteQuery`:
+
+```tsx {6-16,30-34}
+import { useInfiniteQuery } from '@tanstack/react-query';
+import { useMyApi } from './hooks/useMyApi';
+
+function ItemList() {
+  const api = useMyApi();
+  const items = useInfiniteQuery({
+    ...api.listItems.infiniteQueryOptions({
+      limit: 10,
+    }, {
+      getNextPageParam: (lastPage) =>
+        lastPage.nextCursor || undefined
+      }),
+  });
+
+  if (items.isLoading) {
+    return <LoadingSpinner />;
+  }
+
+  if (items.isError) {
+    return <ErrorMessage message={items.error.message} />;
+  }
+
+  return (
+    <div>
+      <ul>
+        {items.data.pages.flatMap(page =>
+          page.items.map(item => (
+            <li key={item.id}>{item.name}</li>
+          ))
+        )}
+      </ul>
+
+      <button
+        onClick={() => items.fetchNextPage()}
+        disabled={!items.hasNextPage || items.isFetchingNextPage}
+      >
+        {items.isFetchingNextPage
+          ? 'Cargando más...'
+          : items.hasNextPage
+          ? 'Cargar más'
+          : 'No hay más ítems'}
+      </button>
+    </div>
+  );
+}
+```
+
+:::tip
+Si tu API usa un parámetro de paginación con nombre distinto a `cursor`, puedes [personalizarlo usando la extensión OpenAPI `x-cursor`](#custom-pagination-cursor).
+:::
+
+<Drawer title="Paginación con cliente directamente" trigger="Haz clic aquí para ver un ejemplo usando el cliente directamente.">
+```tsx
+import { useState, useEffect } from 'react';
+import { useMyApiClient } from './hooks/useMyApiClient';
+
+function ItemList() {
+  const api = useMyApiClient();
+  const [items, setItems] = useState([]);
+  const [nextCursor, setNextCursor] = useState(null);
+  const [isFetchingMore, setIsFetchingMore] = useState(false);
+
+  useEffect(() => {
+    const fetchItems = async () => {
+      try {
+        const response = await api.listItems({ limit: 10 });
+        setItems(response.items);
+        setNextCursor(response.nextCursor);
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    fetchItems();
+  }, [api]);
+
+  const loadMore = async () => {
+    try {
+      setIsFetchingMore(true);
+      const response = await api.listItems({
+        limit: 10,
+        cursor: nextCursor
+      });
+      setItems(prev => [...prev, ...response.items]);
+      setNextCursor(response.nextCursor);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsFetchingMore(false);
+    }
+  };
+
+  return (
+    <div>
+      <ul>
+        {items.map(item => (
+          <li key={item.id}>{item.name}</li>
+        ))}
+      </ul>
+      <button
+        onClick={loadMore}
+        disabled={!nextCursor || isFetchingMore}
+      >
+        {isFetchingMore ? 'Cargando...' : 'Cargar más'}
+      </button>
+    </div>
+  );
+}
+```
+</Drawer>
+
+### Manejo de errores
+
+El cliente incluye manejo de errores tipados. El tipo `<operation-name>Error` encapsula posibles errores definidos en el modelo Smithy.
+
+```tsx {12}
+import { useMutation } from '@tanstack/react-query';
+
+function MyComponent() {
+  const api = useMyApi();
+  const createItem = useMutation(api.createItem.mutationOptions());
+
+  const handleClick = () => {
+    createItem.mutate({ name: 'New Item' });
+  };
+
+  if (createItem.error) {
+    switch (createItem.error.status) {
+      case 400:
+        return (
+          <div>
+            <h2>Entrada inválida:</h2>
+            <p>{createItem.error.error.message}</p>
+          </div>
+        );
+      case 403:
+        return (
+          <div>
+            <h2>No autorizado:</h2>
+            <p>{createItem.error.error.reason}</p>
+          </div>
+        );
+      case 500:
+      case 502:
+        return (
+          <div>
+            <h2>Error del servidor:</h2>
+            <p>{createItem.error.error.message}</p>
+          </div>
+        );
+    }
+  }
+
+  return <button onClick={handleClick}>Crear ítem</button>;
+}
+```
+
+<Drawer title="Manejo de errores con cliente directamente" trigger="Haz clic aquí para ver un ejemplo usando el cliente directamente.">
+```tsx {9,15}
+function MyComponent() {
+  const api = useMyApiClient();
+  const [error, setError] = useState<CreateItemError | null>(null);
+
+  const handleClick = async () => {
+    try {
+      await api.createItem({ name: 'New Item' });
+    } catch (e) {
+      const err = e as CreateItemError;
+      setError(err);
+    }
+  };
+
+  if (error) {
+    switch (error.status) {
+      case 400:
+        return (
+          <div>
+            <h2>Entrada inválida:</h2>
+            <p>{error.error.message}</p>
+          </div>
+        );
+      case 403:
+        return (
+          <div>
+            <h2>No autorizado:</h2>
+            <p>{error.error.reason}</p>
+          </div>
+        );
+      case 500:
+      case 502:
+        return (
+          <div>
+            <h2>Error del servidor:</h2>
+            <p>{error.error.message}</p>
+          </div>
+        );
+    }
+  }
+
+  return <button onClick={handleClick}>Crear ítem</button>;
+}
+```
+</Drawer>
+
+## Personalización del código generado
+
+### Consultas y mutaciones
+
+Por defecto, los métodos HTTP `PUT`, `POST`, `PATCH` y `DELETE` se consideran mutaciones. Puedes cambiar esto usando las extensiones OpenAPI `x-query` y `x-mutation`.
+
+#### x-query
+
+Añade el trait `query` a tu modelo Smithy:
+
+```smithy title="model/src/extensions.smithy"
+use smithy.openapi#specificationExtension
+
+@trait
+@specificationExtension(as: "x-query")
+structure query {}
+```
+
+Aplica el trait a una operación:
+
+```smithy
+@http(method: "POST", uri: "/items")
+@query
+operation ListItems {
+    input: ListItemsInput
+    output: ListItemsOutput
+}
+```
+
+#### x-mutation
+
+Define el trait `mutation`:
+
+```smithy title="model/src/extensions.smithy"
+use smithy.openapi#specificationExtension
+
+@trait
+@specificationExtension(as: "x-mutation")
+structure mutation {}
+```
+
+Aplica a una operación:
+
+```smithy
+@http(method: "GET", uri: "/start-processing")
+@mutation
+operation StartProcessing {
+    input: StartProcessingInput
+    output: StartProcessingOutput
+}
+```
+
+### Cursor de paginación personalizado
+
+Personaliza el parámetro de paginación con la extensión `x-cursor`:
+
+```smithy title="model/src/extensions.smithy"
+use smithy.openapi#specificationExtension
+
+@trait
+@specificationExtension(as: "x-cursor")
+structure cursor {
+  inputToken: String
+  enabled: Boolean
+}
+```
+
+Ejemplo de uso:
+
+```smithy
+@http(method: "GET", uri: "/items")
+@cursor(inputToken: "nextToken")
+operation ListItems {
+    input: ListItemsInput
+    output: ListItemsOutput
+}
+```
+
+### Agrupación de operaciones
+
+Las operaciones se agrupan automáticamente usando el trait `@tags` de Smithy:
+
+```smithy
+@tags(["items"])
+operation ListItems {
+    input: ListItemsInput
+    output: ListItemsOutput
+}
+```
+
+Esto genera hooks agrupados:
+
+```tsx
+const items = useQuery(api.items.listItems.queryOptions());
+```
+
+### Errores
+
+Define estructuras de error personalizadas en tu modelo Smithy:
+
+```smithy
+@error("client")
+@httpError(400)
+structure InvalidRequestError {
+    @required
+    message: String
+    fieldErrors: FieldErrorList
+}
+```
+
+El cliente generado manejará estos tipos de error automáticamente.
+
+## Mejores prácticas
+
+### Manejar estados de carga
+
+```tsx
+function ItemList() {
+  const api = useMyApi();
+  const items = useQuery(api.listItems.queryOptions());
+
+  if (items.isLoading) return <LoadingSpinner />;
+  if (items.isError) return <ErrorMessage message="Error cargando ítems" />;
+
+  return (
+    <ul>
+      {items.data.map(item => (
+        <li key={item.id}>{item.name}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+### Actualizaciones optimistas
+
+Implementa actualizaciones optimistas para mejor UX:
+
+```tsx
+const deleteMutation = useMutation({
+  ...api.deleteItem.mutationOptions(),
+  onMutate: async (itemId) => {
+    await queryClient.cancelQueries(api.listItems.queryKey());
+    const previous = queryClient.getQueryData(api.listItems.queryKey());
+    queryClient.setQueryData(api.listItems.queryKey(), old => old.filter(i => i.id !== itemId));
+    return { previous };
+  },
+  onError: (err, _, context) => {
+    queryClient.setQueryData(api.listItems.queryKey(), context.previous);
+  }
+});
+```
+
+## Seguridad de tipos
+
+La integración provee seguridad de tipos de extremo a extremo. Tu IDE dará autocompletado y validación para todas las llamadas API:
+
+```tsx
+const createItem = useMutation({
+  ...api.createItem.mutationOptions(),
+  onSuccess: (data) => {
+    // data está tipado según el schema de respuesta
+    console.log(`Ítem creado: ${data.id}`);
+  },
+});
+```
+
+Los tipos se generan automáticamente desde el esquema OpenAPI de tu API Smithy, asegurando sincronización entre frontend y backend.
