@@ -128,7 +128,7 @@ export async function tsInfraGenerator(
         options: {
           command: uvxCommand(
             'checkov',
-            `--config-file ${lib.dir}/.checkov.yml --file dist/packages/infra/cdk.out/**/*.template.json`,
+            `--config-file ${lib.dir}/checkov.yml --file dist/packages/infra/cdk.out/**/*.template.json`,
           ),
         },
       };

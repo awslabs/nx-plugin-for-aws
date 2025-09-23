@@ -121,8 +121,8 @@ describe('infra generator', () => {
     await tsInfraGenerator(tree, options);
 
     // Verify .checkov.yml file is generated
-    expect(tree.exists('packages/test/.checkov.yml')).toBeTruthy();
-    const checkovConfig = tree.read('packages/test/.checkov.yml').toString();
+    expect(tree.exists('packages/test/checkov.yml')).toBeTruthy();
+    const checkovConfig = tree.read('packages/test/checkov.yml').toString();
     expect(checkovConfig).toMatchSnapshot('checkov-yml');
 
     // Verify checkov.ts utility file is generated in shared constructs
