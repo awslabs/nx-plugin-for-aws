@@ -437,20 +437,26 @@ describe('ts#mcp-server generator', () => {
     expect(projectConfig.targets['mcp-server-serve-stdio']).toBeDefined();
     expect(projectConfig.targets['mcp-server-serve-http']).toBeDefined();
 
-    // Check that esbuild bundle target was added
+    // Check that rolldown bundle target was added
+    expect(projectConfig.targets['bundle']).toBeDefined();
+    expect(projectConfig.targets['bundle'].executor).toBe('nx:run-commands');
+    expect(projectConfig.targets['bundle'].options.command).toBe(
+      'rolldown -c rolldown.config.ts',
+    );
+    expect(projectConfig.targets['bundle'].options.cwd).toBe('{projectRoot}');
+
+    // Check that docker target was added
     expect(
-      projectConfig.targets['test-project-mcp-server-bundle'],
+      projectConfig.targets['test-project-mcp-server-docker'],
     ).toBeDefined();
     expect(
-      projectConfig.targets['test-project-mcp-server-bundle'].executor,
-    ).toBe('nx:run-commands');
-
-    expect(
-      projectConfig.targets['test-project-mcp-server-bundle'].options.commands,
-    ).toEqual([
-      'esbuild apps/test-project/src/mcp-server/http.ts --bundle --platform=node --target=node22 --format=cjs --outfile=dist/apps/test-project/test-project-mcp-server-bundle/index.js',
+      projectConfig.targets['test-project-mcp-server-docker'].options.command,
+    ).toBe(
       'docker build --platform linux/arm64 -t proj-test-project-mcp-server:latest apps/test-project/src/mcp-server --build-context workspace=.',
-    ]);
+    );
+    expect(
+      projectConfig.targets['test-project-mcp-server-docker'].dependsOn,
+    ).toEqual(['bundle']);
   });
 
   it('should generate MCP server with BedrockAgentCoreRuntime and custom name', async () => {
@@ -499,8 +505,11 @@ describe('ts#mcp-server generator', () => {
       projectConfig.targets['custom-bedrock-server-serve-http'],
     ).toBeDefined();
 
-    // Check that esbuild bundle target was added with custom name
-    expect(projectConfig.targets['custom-bedrock-server-bundle']).toBeDefined();
+    // Check that rolldown bundle target was added
+    expect(projectConfig.targets['bundle']).toBeDefined();
+
+    // Check that docker target was added with custom name
+    expect(projectConfig.targets['custom-bedrock-server-docker']).toBeDefined();
   });
 
   it('should add additional dependencies for BedrockAgentCoreRuntime', async () => {
@@ -526,7 +535,7 @@ describe('ts#mcp-server generator', () => {
         '@aws-sdk/client-bedrock-agentcore-control'
       ],
     ).toBeDefined();
-    expect(rootPackageJson.devDependencies['esbuild']).toBeDefined();
+    expect(rootPackageJson.devDependencies['rolldown']).toBeDefined();
 
     // Check project package.json dependencies
     const projectPackageJson = JSON.parse(
@@ -540,7 +549,7 @@ describe('ts#mcp-server generator', () => {
     expect(projectPackageJson.devDependencies['tsx']).toBeDefined();
     expect(projectPackageJson.devDependencies['@types/express']).toBeDefined();
 
-    expect(projectPackageJson.devDependencies['esbuild']).toBeDefined();
+    // rolldown is only added to root package.json, not project package.json
     expect(
       projectPackageJson.devDependencies['@modelcontextprotocol/inspector'],
     ).toBeDefined();
@@ -866,5 +875,133 @@ describe('ts#mcp-server generator', () => {
     expect(
       tree.exists('packages/common/terraform/src/core/agent-core/runtime.tf'),
     ).toBeTruthy();
+  });
+
+  it('should create rolldown config file for BedrockAgentCoreRuntime', async () => {
+    await tsMcpServerGenerator(tree, {
+      project: 'test-project',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
+    });
+
+    // Check rolldown config file was created
+    expect(tree.exists('apps/test-project/rolldown.config.ts')).toBeTruthy();
+
+    const rolldownConfig = tree.read(
+      'apps/test-project/rolldown.config.ts',
+      'utf-8',
+    );
+    expect(rolldownConfig).toContain('defineConfig');
+    expect(rolldownConfig).toContain('src/mcp-server/http.ts');
+    expect(rolldownConfig).toContain(
+      '../../dist/apps/test-project/bundle/mcp/test-project-mcp-server/index.js',
+    );
+  });
+
+  it('should ensure Dockerfile COPY path matches bundle output path', async () => {
+    await tsMcpServerGenerator(tree, {
+      project: 'test-project',
+      name: 'path-test-server',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
+    });
+
+    // Check Dockerfile COPY path
+    const dockerfile = tree.read(
+      'apps/test-project/src/path-test-server/Dockerfile',
+      'utf-8',
+    );
+    expect(dockerfile).toContain(
+      'COPY --from=workspace dist/apps/test-project/bundle/mcp/path-test-server/index.js /app',
+    );
+
+    // Check rolldown config output path matches
+    const rolldownConfig = tree.read(
+      'apps/test-project/rolldown.config.ts',
+      'utf-8',
+    );
+    expect(rolldownConfig).toContain(
+      '../../dist/apps/test-project/bundle/mcp/path-test-server/index.js',
+    );
+  });
+
+  it('should handle multiple MCP servers without clashing', async () => {
+    // Generate first MCP server
+    await tsMcpServerGenerator(tree, {
+      project: 'test-project',
+      name: 'first-server',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
+    });
+
+    // Generate second MCP server
+    await tsMcpServerGenerator(tree, {
+      project: 'test-project',
+      name: 'second-server',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
+    });
+
+    // Check both MCP server directories exist
+    expect(
+      tree.exists('apps/test-project/src/first-server/index.ts'),
+    ).toBeTruthy();
+    expect(
+      tree.exists('apps/test-project/src/second-server/index.ts'),
+    ).toBeTruthy();
+
+    // Check rolldown config contains both servers
+    const rolldownConfig = tree.read(
+      'apps/test-project/rolldown.config.ts',
+      'utf-8',
+    );
+    expect(rolldownConfig).toContain('src/first-server/http.ts');
+    expect(rolldownConfig).toContain('src/second-server/http.ts');
+    expect(rolldownConfig).toContain(
+      '../../dist/apps/test-project/bundle/mcp/first-server/index.js',
+    );
+    expect(rolldownConfig).toContain(
+      '../../dist/apps/test-project/bundle/mcp/second-server/index.js',
+    );
+
+    // Check both package.json bin entries exist
+    const packageJson = JSON.parse(
+      tree.read('apps/test-project/package.json', 'utf-8'),
+    );
+    expect(packageJson.bin['first-server']).toBe('./src/first-server/stdio.js');
+    expect(packageJson.bin['second-server']).toBe(
+      './src/second-server/stdio.js',
+    );
+
+    // Check both CDK constructs exist
+    expect(
+      tree.exists(
+        'packages/common/constructs/src/app/mcp-servers/first-server/first-server.ts',
+      ),
+    ).toBeTruthy();
+    expect(
+      tree.exists(
+        'packages/common/constructs/src/app/mcp-servers/second-server/second-server.ts',
+      ),
+    ).toBeTruthy();
+
+    // Check mcp-servers index exports both
+    const mcpServersIndex = tree.read(
+      'packages/common/constructs/src/app/mcp-servers/index.ts',
+      'utf-8',
+    );
+    expect(mcpServersIndex).toContain(
+      "export * from './first-server/first-server.js';",
+    );
+    expect(mcpServersIndex).toContain(
+      "export * from './second-server/second-server.js';",
+    );
+
+    // Check both docker targets exist
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+    expect(projectConfig.targets['first-server-docker']).toBeDefined();
+    expect(projectConfig.targets['second-server-docker']).toBeDefined();
   });
 });
