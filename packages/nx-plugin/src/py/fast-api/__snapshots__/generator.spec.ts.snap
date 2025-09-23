@@ -180,7 +180,11 @@ import {
   HttpApi as _HttpApi,
   HttpApiProps as _HttpApiProps,
   HttpMethod,
+  HttpStage,
+  LogGroupLogDestination,
 } from 'aws-cdk-lib/aws-apigatewayv2';
+import { LogGroup } from 'aws-cdk-lib/aws-logs';
+import { suppressRules } from '../checkov.js';
 
 /**
  * Properties for creating an HttpApi construct.
@@ -224,6 +228,9 @@ export class HttpApi<
   /** The underlying CDK HttpApi instance */
   public readonly api: _HttpApi;
 
+  /** Default auto-deployed stage */
+  public readonly defaultStage: HttpStage;
+
   /** Map of operation names to their API Gateway integrations */
   public readonly integrations: TIntegrations;
 
@@ -242,7 +249,28 @@ export class HttpApi<
 
     // Create the API Gateway REST API
     this.api = new _HttpApi(this, 'Api', {
+      createDefaultStage: false,
       ...props,
+    });
+
+    const accessLogGroup = new LogGroup(this, 'AccessLogs');
+    suppressRules(
+      accessLogGroup,
+      ['CKV_AWS_158'],
+      'Using default CloudWatch log encryption',
+    );
+    suppressRules(
+      accessLogGroup,
+      ['CKV_AWS_66', 'CKV_AWS_338'],
+      'Logs are retained forever',
+    );
+
+    this.defaultStage = new HttpStage(this, 'DefaultStage', {
+      httpApi: this.api,
+      autoDeploy: true,
+      accessLogSettings: {
+        destination: new LogGroupLogDestination(accessLogGroup),
+      },
     });
 
     // Create API resources and methods for each operation
@@ -260,14 +288,21 @@ export class HttpApi<
     );
 
     new CfnOutput(this, \`\${apiName}Url\`, {
-      value: this.api.url!,
+      value: this.defaultStage.url!,
     });
 
     // Register the API URL in runtime configuration for client discovery
     RuntimeConfig.ensure(this).config.apis = {
       ...RuntimeConfig.ensure(this).config.apis!,
-      [apiName]: this.api.url!,
+      [apiName]: this.defaultStage.url!,
     };
+  }
+
+  /**
+   * Return the API url
+   */
+  public get url() {
+    return this.defaultStage.url;
   }
 }
 "
@@ -636,9 +671,11 @@ import {
   RestApi as _RestApi,
   RestApiProps as _RestApiProps,
   IResource,
+  Stage,
 } from 'aws-cdk-lib/aws-apigateway';
 import { RuntimeConfig } from '../runtime-config.js';
 import { OperationDetails, RestApiIntegration } from './utils.js';
+import { suppressRules } from '../checkov.js';
 
 /**
  * Properties for creating a RestApi construct.
@@ -700,6 +737,19 @@ export class RestApi<
 
     // Create the API Gateway REST API
     this.api = new _RestApi(this, 'Api', props);
+
+    suppressRules(
+      this.api,
+      ['CKV_AWS_120'],
+      'Caching not required for this use case',
+      (c) => c instanceof Stage,
+    );
+    suppressRules(
+      this.api,
+      ['CKV_AWS_76'],
+      'API Gateway access logging disabled due to account-level CloudWatch Logs role ARN requirement',
+      (c) => c instanceof Stage,
+    );
 
     // Create API resources and methods for each operation
     (Object.entries(operations) as [TOperation, OperationDetails][]).map(
@@ -852,6 +902,9 @@ export class TestApi<
       defaultCorsPreflightOptions: {
         allowOrigins: Cors.ALL_ORIGINS,
         allowMethods: Cors.ALL_METHODS,
+      },
+      deployOptions: {
+        tracingEnabled: true,
       },
       policy: new PolicyDocument({
         statements: [

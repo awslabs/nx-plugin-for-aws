@@ -13,6 +13,8 @@ import { Construct } from 'constructs';
 import { RuntimeConfig } from './runtime-config.js';
 import { Key } from 'aws-cdk-lib/aws-kms';
 import { CfnWebACL } from 'aws-cdk-lib/aws-wafv2';
+import { suppressRules } from './checkov.js';
+
 const DEFAULT_RUNTIME_CONFIG_FILENAME = 'runtime-config.json';
 
 export interface StaticWebsiteProps {
@@ -59,6 +61,17 @@ export class StaticWebsite extends Construct {
       publicReadAccess: false,
       blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
     });
+    suppressRules(
+      accessLogsBucket,
+      ['CKV_AWS_21'],
+      'Access log bucket does not need versioning enabled',
+    );
+    suppressRules(
+      accessLogsBucket,
+      ['CKV_AWS_18'],
+      'Access log bucket does not need an access log bucket',
+    );
+
     // S3 Bucket to hold website files
     this.websiteBucket = new Bucket(this, 'WebsiteBucket', {
       versioned: true,
@@ -89,6 +102,12 @@ export class StaticWebsite extends Construct {
       serverAccessLogsPrefix: 'distribution-access-logs',
       serverAccessLogsBucket: accessLogsBucket,
     });
+    suppressRules(
+      logBucket,
+      ['CKV_AWS_21'],
+      'Distribution log bucket does not need versioning enabled',
+    );
+
     const defaultRootObject = 'index.html';
     this.cloudFrontDistribution = new Distribution(
       this,
@@ -114,8 +133,14 @@ export class StaticWebsite extends Construct {
             responsePagePath: `/${defaultRootObject}`,
           },
         ],
-      }
+      },
     );
+    suppressRules(
+      this.cloudFrontDistribution,
+      ['CKV_AWS_174'],
+      'Cloudfront default certificate does not use TLS 1.2',
+    );
+
     // Deploy Website
     this.bucketDeployment = new BucketDeployment(this, 'WebsiteDeployment', {
       sources: [
@@ -165,6 +190,24 @@ export class CloudfrontWebAcl extends Stack {
           statement: {
             managedRuleGroupStatement: {
               name: 'AWSManagedRulesCommonRuleSet',
+              vendorName: 'AWS',
+            },
+          },
+          visibilityConfig: {
+            cloudWatchMetricsEnabled: true,
+            metricName: 'MetricForWebACLCDK-CRS',
+            sampledRequestsEnabled: true,
+          },
+          overrideAction: {
+            none: {},
+          },
+        },
+        {
+          name: 'KnownBadInputsRule',
+          priority: 1,
+          statement: {
+            managedRuleGroupStatement: {
+              name: 'AWSManagedRulesKnownBadInputsRuleSet',
               vendorName: 'AWS',
             },
           },
