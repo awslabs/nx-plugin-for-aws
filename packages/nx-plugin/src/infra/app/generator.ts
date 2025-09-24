@@ -85,19 +85,6 @@ export async function tsInfraGenerator(
     },
   );
 
-  generateFiles(
-    tree, // the virtual file system
-    joinPathFragments(__dirname, 'files', SHARED_CONSTRUCTS_DIR, 'src', 'core'),
-    joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'src', 'core'),
-    {
-      synthDir: synthDirFromProject,
-      scopeAlias: toScopeAlias(getNpmScopePrefix(tree)),
-      ...schema,
-    },
-    {
-      overwriteStrategy: OverwriteStrategy.KeepExisting,
-    },
-  );
   updateJson(
     tree,
     `${libraryRoot}/project.json`,
@@ -178,17 +165,7 @@ export async function tsInfraGenerator(
       return config;
     },
   );
-  addStarExport(
-    tree,
-    joinPathFragments(
-      PACKAGES_DIR,
-      SHARED_CONSTRUCTS_DIR,
-      'src',
-      'core',
-      'index.ts',
-    ),
-    './checkov.js',
-  );
+
   addDependenciesToPackageJson(
     tree,
     withVersions([
