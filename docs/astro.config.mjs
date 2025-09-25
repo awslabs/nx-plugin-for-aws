@@ -13,6 +13,17 @@ import starlightVideos from 'starlight-videos';
 import tailwindcss from '@tailwindcss/vite';
 
 import react from '@astrojs/react';
+import * as fs from 'fs';
+
+/**
+ * Load Smithy syntax highlighting
+ */
+const smithySyntax = () => ({
+  ...JSON.parse(
+    fs.readFileSync('./src/syntax/smithy/smithy.tmLanguage.json', 'utf-8'),
+  ),
+  name: 'smithy',
+});
 
 // https://astro.build/config
 export default defineConfig({
@@ -25,6 +36,11 @@ export default defineConfig({
     service: passthroughImageService(),
   },
   outDir: '../dist/docs',
+  markdown: {
+    shikiConfig: {
+      langs: [smithySyntax()],
+    },
+  },
   integrations: [
     starlight({
       title: '@aws/nx-plugin',
@@ -267,6 +283,7 @@ export default defineConfig({
             { label: 'ts#project', link: '/guides/typescript-project' },
             { label: 'ts#infra', link: '/guides/typescript-infrastructure' },
             { label: 'ts#trpc-api', link: '/guides/trpc' },
+            { label: 'ts#smithy-api', link: '/guides/ts-smithy-api' },
             {
               label: 'ts#react-website',
               link: '/guides/react-website',
@@ -311,6 +328,10 @@ export default defineConfig({
                 {
                   label: 'React → tRPC',
                   link: '/guides/api-connection/react-trpc',
+                },
+                {
+                  label: 'React → Smithy',
+                  link: '/guides/api-connection/react-smithy',
                 },
               ],
             },

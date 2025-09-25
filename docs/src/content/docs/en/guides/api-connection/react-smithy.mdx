@@ -1,0 +1,1347 @@
+---
+title: React to Smithy API
+description: Connect a React website to a Smithy TypeScript API
+---
+
+import { FileTree, Steps } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Drawer from '@components/drawer.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+
+The `api-connection` generator provides a way to quickly integrate your React website with your Smithy TypeScript API backend. It sets up all necessary configuration for connecting to your Smithy API in a type-safe manner, including client and [TanStack Query](https://tanstack.com/query/v5) hooks generation, AWS IAM and Cognito authentication support and proper error handling.
+
+## Prerequisites
+
+Before using this generator, ensure your React application has:
+
+1. A `main.tsx` file that renders your application
+2. A working Smithy TypeScript API backend (generated using the <Link path="/guides/ts-smithy-api">`ts#smithy-api` generator</Link>)
+3. Cognito Auth added via the <Link path="/guides/react-website-auth">`ts#react-website-auth` generator</Link> if connecting an API which uses Cognito or IAM auth
+
+<details>
+<summary>Example of required `main.tsx` structure</summary>
+
+```tsx
+import { StrictMode } from 'react';
+import * as ReactDOM from 'react-dom/client';
+import App from './app/app';
+
+const root = ReactDOM.createRoot(
+  document.getElementById('root') as HTMLElement,
+);
+root.render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+);
+```
+
+</details>
+
+## Usage
+
+### Run the Generator
+
+<RunGenerator generator="api-connection" />
+
+### Options
+
+<GeneratorParameters generator="api-connection" />
+
+## Generator Output
+
+The generator will make changes to the following files in your React application:
+
+<FileTree>
+
+- src
+  - components
+    - \<ApiName>Provider.tsx Provider for your API client
+    - QueryClientProvider.tsx TanStack React Query client provider
+    - RuntimeConfig/ Runtime configuration component for local development
+  - hooks
+    - use\<ApiName>.tsx Add a hook for calling your API with state managed by TanStack Query
+    - use\<ApiName>Client.tsx Add a hook for instantiating the vanilla API client which can call your API.
+    - useSigV4.tsx Add a hook for signing HTTP requests with SigV4 (if you selected IAM authentication)
+- project.json A new target is added to the build which generates a type-safe client
+- .gitignore The generated client files are ignored by default
+
+</FileTree>
+
+The generator will also add a file to your Smithy model:
+
+<FileTree>
+
+- model
+  - src
+    - extensions.smithy Defines traits which can be used to customise the generated client
+
+</FileTree>
+
+The generator will also add Runtime Config to your website infrastructure if not present already, which ensures that the API URL for your Smithy API is available in the website and automatically configured by the `use<ApiName>.tsx` hook.
+
+### Code Generation
+
+At build time, a type-safe client is generated from your Smithy API's OpenAPI specification. This will add three new files to your React application:
+
+<FileTree>
+
+- src
+  - generated
+    - \<ApiName>
+      - types.gen.ts Generated types from the Smithy model structures
+      - client.gen.ts Type-safe client for calling your API
+      - options-proxy.gen.ts Provides methods to create TanStack Query hooks options for interacting with your API using TanStack Query
+
+</FileTree>
+
+:::tip
+By default, the generated client is ignored from version control. If you would prefer to check it in, you can remove the entry from your React application's `.gitignore` file, however note that any manual changes to the `.gen.ts` files will be overwritten when your project is built.
+:::
+
+## Using the Generated Code
+
+The generated type-safe client can be used to call your Smithy API from your React application. It's recommended to make use of the client via the TanStack Query hooks, but you can use the vanilla client if you prefer.
+
+:::note
+Whenever you make changes to your Smithy API model, you need to rebuild your project in order for those changes to be reflected in the generated client. For example:
+
+<NxCommands commands={['run-many --target build --all']} />
+:::
+
+:::tip
+If you're actively working on both your React application and Smithy API together, use the React application's `serve-local` target which will automatically regenerate the client whenever your API changes, as well as hot-reloading your website and local Smithy API server:
+
+<NxCommands commands={['run <WebsiteProject>:serve-local']} />
+
+For more fine-grained control, you can use the `watch-generate:<ApiName>-client` target for your React application to regenerate the client every time you make API changes:
+
+<NxCommands commands={['run <WebsiteProject>:"watch-generate:<ApiName>-client"']}
+/>
+:::
+
+### Using the API Hook
+
+The generator provides a `use<ApiName>` hook which you can use to call your API with TanStack Query.
+
+### Queries
+
+You can use the `queryOptions` method to retrieve the options required for calling your API using TanStack Query's `useQuery` hook:
+
+```tsx {7}
+import { useQuery } from '@tanstack/react-query';
+import { useState, useEffect } from 'react';
+import { useMyApi } from './hooks/useMyApi';
+
+function MyComponent() {
+  const api = useMyApi();
+  const item = useQuery(api.getItem.queryOptions({ itemId: 'some-id' }));
+
+  if (item.isLoading) return <div>Loading...</div>;
+  if (item.isError) return <div>Error: {item.error.message}</div>;
+
+  return <div>Item: {item.data.name}</div>;
+}
+```
+
+<Drawer title="Using the API client directly" trigger="Click here for an example using the vanilla client directly.">
+```tsx {5,13}
+import { useState, useEffect } from 'react';
+import { useMyApiClient } from './hooks/useMyApiClient';
+
+function MyComponent() {
+  const api = useMyApiClient();
+  const [item, setItem] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const fetchItem = async () => {
+      try {
+        const data = await api.getItem({ itemId: 'some-id' });
+        setItem(data);
+      } catch (err) {
+        setError(err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchItem();
+  }, [api]);
+
+  if (loading) return <div>Loading...</div>;
+  if (error) return <div>Error: {error.message}</div>;
+
+  return <div>Item: {item.name}</div>;
+}
+```
+</Drawer>
+
+### Mutations
+
+The generated hooks include support for mutations using TanStack Query's `useMutation` hook. This provides a clean way to handle create, update, and delete operations with loading states, error handling, and optimistic updates.
+
+```tsx {5-7,11}
+import { useMutation } from '@tanstack/react-query';
+import { useMyApi } from './hooks/useMyApi';
+
+function CreateItemForm() {
+  const api = useMyApi();
+  // Create a mutation using the generated mutation options
+  const createItem = useMutation(api.createItem.mutationOptions());
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    createItem.mutate({ name: 'New Item', description: 'A new item' });
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      {/* Form fields */}
+      <button
+        type="submit"
+        disabled={createItem.isPending}
+      >
+        {createItem.isPending ? 'Creating...' : 'Create Item'}
+      </button>
+
+      {createItem.isSuccess && (
+        <div className="success">
+          Item created with ID: {createItem.data.id}
+        </div>
+      )}
+
+      {createItem.isError && (
+        <div className="error">
+          Error: {createItem.error.message}
+        </div>
+      )}
+    </form>
+  );
+}
+```
+
+You can also add callbacks for different mutation states:
+
+```tsx
+const createItem = useMutation({
+  ...api.createItem.mutationOptions(),
+  onSuccess: (data) => {
+    // This will run when the mutation succeeds
+    console.log('Item created:', data);
+    // You can navigate to the new item
+    navigate(`/items/${data.id}`);
+  },
+  onError: (error) => {
+    // This will run when the mutation fails
+    console.error('Failed to create item:', error);
+  },
+  onSettled: () => {
+    // This will run when the mutation completes (success or error)
+    // Good place to invalidate queries that might be affected
+    queryClient.invalidateQueries({ queryKey: api.listItems.queryKey() });
+  }
+});
+```
+
+<Drawer title="Mutations using the API client directly" trigger="Click here for an example using the client directly.">
+```tsx
+import { useState } from 'react';
+import { useMyApiClient } from './hooks/useMyApiClient';
+
+function CreateItemForm() {
+  const api = useMyApiClient();
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [createdItem, setCreatedItem] = useState(null);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const newItem = await api.createItem({
+        name: 'New Item',
+        description: 'A new item'
+      });
+      setCreatedItem(newItem);
+      // You can navigate to the new item
+      // navigate(`/items/${newItem.id}`);
+    } catch (err) {
+      setError(err);
+      console.error('Failed to create item:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      {/* Form fields */}
+      <button
+        type="submit"
+        disabled={isLoading}
+      >
+        {isLoading ? 'Creating...' : 'Create Item'}
+      </button>
+
+      {createdItem && (
+        <div className="success">
+          Item created with ID: {createdItem.id}
+        </div>
+      )}
+
+      {error && (
+        <div className="error">
+          Error: {error.message}
+        </div>
+      )}
+    </form>
+  );
+}
+```
+</Drawer>
+
+### Pagination with Infinite Queries
+
+For endpoints that accept a `cursor` parameter as input, the generated hooks provide support for infinite queries using TanStack Query's `useInfiniteQuery` hook. This makes it easy to implement "load more" or infinite scrolling functionality.
+
+```tsx {6-16,30-34}
+import { useInfiniteQuery } from '@tanstack/react-query';
+import { useMyApi } from './hooks/useMyApi';
+
+function ItemList() {
+  const api = useMyApi();
+  const items = useInfiniteQuery({
+    ...api.listItems.infiniteQueryOptions({
+      limit: 10, // Number of items per page
+    }, {
+      // Make sure you define a getNextPageParam function to return
+      // the parameter that should be passed as the 'cursor' for the
+      // next page
+      getNextPageParam: (lastPage) =>
+        lastPage.nextCursor || undefined
+      }),
+  });
+
+  if (items.isLoading) {
+    return <LoadingSpinner />;
+  }
+
+  if (items.isError) {
+    return <ErrorMessage message={items.error.message} />;
+  }
+
+  return (
+    <div>
+      {/* Flatten the pages array to render all items */}
+      <ul>
+        {items.data.pages.flatMap(page =>
+          page.items.map(item => (
+            <li key={item.id}>{item.name}</li>
+          ))
+        )}
+      </ul>
+
+      <button
+        onClick={() => items.fetchNextPage()}
+        disabled={!items.hasNextPage || items.isFetchingNextPage}
+      >
+        {items.isFetchingNextPage
+          ? 'Loading more...'
+          : items.hasNextPage
+          ? 'Load More'
+          : 'No more items'}
+      </button>
+    </div>
+  );
+}
+```
+
+The generated hooks automatically handle cursor-based pagination if your API supports it. The `nextCursor` value is extracted from the response and used to fetch the next page.
+
+:::tip
+If you have a paginated API which has its pagination parameter named something other than `cursor`, you can [customise it using the `x-cursor` OpenAPI vendor extension](#custom-pagination-cursor).
+:::
+
+<Drawer title="Pagination using the API client directly" trigger="Click here for an example using the client directly.">
+```tsx
+import { useState, useEffect } from 'react';
+import { useMyApiClient } from './hooks/useMyApiClient';
+
+function ItemList() {
+  const api = useMyApiClient();
+  const [items, setItems] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [nextCursor, setNextCursor] = useState(null);
+  const [isFetchingMore, setIsFetchingMore] = useState(false);
+
+  // Fetch initial data
+  useEffect(() => {
+    const fetchItems = async () => {
+      try {
+        setIsLoading(true);
+        const response = await api.listItems({ limit: 10 });
+        setItems(response.items);
+        setNextCursor(response.nextCursor);
+      } catch (err) {
+        setError(err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchItems();
+  }, [api]);
+
+  // Function to load more items
+  const loadMore = async () => {
+    if (!nextCursor) return;
+
+    try {
+      setIsFetchingMore(true);
+      const response = await api.listItems({
+        limit: 10,
+        cursor: nextCursor
+      });
+
+      setItems(prevItems => [...prevItems, ...response.items]);
+      setNextCursor(response.nextCursor);
+    } catch (err) {
+      setError(err);
+    } finally {
+      setIsFetchingMore(false);
+    }
+  };
+
+  if (isLoading) {
+    return <LoadingSpinner />;
+  }
+
+  if (error) {
+    return <ErrorMessage message={error.message} />;
+  }
+
+  return (
+    <div>
+      <ul>
+        {items.map(item => (
+          <li key={item.id}>{item.name}</li>
+        ))}
+      </ul>
+
+      <button
+        onClick={loadMore}
+        disabled={!nextCursor || isFetchingMore}
+      >
+        {isFetchingMore
+          ? 'Loading more...'
+          : nextCursor
+          ? 'Load More'
+          : 'No more items'}
+      </button>
+    </div>
+  );
+}
+```
+</Drawer>
+
+### Error Handling
+
+The integration includes built-in error handling with typed error responses. An `<operation-name>Error` type is generated which encapsulates the possible error responses defined in the Smithy model. Each error has a `status` and `error` property, and by checking the value of `status` you can narrow to a specific type of error.
+
+```tsx {12}
+import { useMutation } from '@tanstack/react-query';
+
+function MyComponent() {
+  const api = useMyApi();
+  const createItem = useMutation(api.createItem.mutationOptions());
+
+  const handleClick = () => {
+    createItem.mutate({ name: 'New Item' });
+  };
+
+  if (createItem.error) {
+    switch (createItem.error.status) {
+      case 400:
+        // error.error is typed as CreateItem400Response
+        return (
+          <div>
+            <h2>Invalid input:</h2>
+            <p>{createItem.error.error.message}</p>
+          </div>
+        );
+      case 403:
+        // error.error is typed as CreateItem403Response
+        return (
+          <div>
+            <h2>Not authorized:</h2>
+            <p>{createItem.error.error.reason}</p>
+          </div>
+        );
+      case 500:
+      case 502:
+        // error.error is typed as CreateItem5XXResponse
+        return (
+          <div>
+            <h2>Server error:</h2>
+            <p>{createItem.error.error.message}</p>
+          </div>
+        );
+    }
+  }
+
+  return <button onClick={handleClick}>Create Item</button>;
+}
+```
+
+<Drawer title="Error handling using the API client directly" trigger="Click here for an example using the vanilla client directly.">
+```tsx {9,15}
+function MyComponent() {
+  const api = useMyApiClient();
+  const [error, setError] = useState<CreateItemError | null>(null);
+
+  const handleClick = async () => {
+    try {
+      await api.createItem({ name: 'New Item' });
+    } catch (e) {
+      const err = e as CreateItemError;
+      setError(err);
+    }
+  };
+
+  if (error) {
+    switch (error.status) {
+      case 400:
+        // error.error is typed as CreateItem400Response
+        return (
+          <div>
+            <h2>Invalid input:</h2>
+            <p>{error.error.message}</p>
+          </div>
+        );
+      case 403:
+        // error.error is typed as CreateItem403Response
+        return (
+          <div>
+            <h2>Not authorized:</h2>
+            <p>{error.error.reason}</p>
+          </div>
+        );
+      case 500:
+      case 502:
+        // error.error is typed as CreateItem5XXResponse
+        return (
+          <div>
+            <h2>Server error:</h2>
+            <p>{error.error.message}</p>
+          </div>
+        );
+    }
+  }
+
+  return <button onClick={handleClick}>Create Item</button>;
+}
+```
+</Drawer>
+
+## Customising the Generated Code
+
+A selection of Smithy traits are added to your target Smithy `model` project in `extensions.smithy` which you can use to customise the generated client.
+
+:::tip
+If you do not need to customise the generated client, you can safely delete `extensions.smithy`
+:::
+
+### Queries and Mutations
+
+By default, operations in your Smithy API which use the HTTP methods `PUT`, `POST`, `PATCH` and `DELETE` are considered mutations, and all others are considered queries.
+
+You can change this behaviour using the `@query` and `@mutation` Smithy traits which are added to your model project in `extensions.smithy`.
+
+:::note
+These map to OpenAPI vendor extensions using the [`@specificationExtension` trait](https://smithy.io/2.0/guides/model-translations/converting-to-openapi.html#specificationextension-trait), which our code generator interprets when generating the client from the OpenAPI specification.
+:::
+
+#### @query
+
+Then Apply the `@query` trait to your Smithy operation to force it to be treated as a query:
+
+```smithy
+@http(method: "POST", uri: "/items")
+@query
+operation ListItems {
+    input: ListItemsInput
+    output: ListItemsOutput
+}
+```
+
+The generated hook will provide `queryOptions` even though it uses the `POST` HTTP method:
+
+```tsx
+const items = useQuery(api.listItems.queryOptions());
+```
+
+#### @mutation
+
+Apply the `@mutation` trait to your Smithy operation to force it to be treated as a mutation:
+
+```smithy
+@http(method: "GET", uri: "/start-processing")
+@mutation
+operation StartProcessing {
+    input: StartProcessingInput
+    output: StartProcessingOutput
+}
+```
+
+The generated hook will provide `mutationOptions` even though it uses the `GET` HTTP method:
+
+```tsx
+const startProcessing = useMutation(api.startProcessing.mutationOptions());
+```
+
+### Custom Pagination Cursor
+
+By default, the generated hooks assume cursor-based pagination with a parameter named `cursor`. You can customize this behavior using the `@cursor` trait which is added to your model project in `extensions.smithy`.
+
+Apply the `@cursor` trait with `inputToken` to change the name of the input parameter used for the pagination token:
+
+```smithy
+@http(method: "GET", uri: "/items")
+@cursor(inputToken: "nextToken")
+operation ListItems {
+    input := {
+      nextToken: String
+      limit: Integer
+    }
+    output := {
+      items: ItemList
+      nextToken: String
+    }
+}
+```
+
+If you would not like to generate `infiniteQueryOptions` for an operation which has an input parameter named `cursor`, you can disable cursor-based pagination:
+
+```smithy
+@cursor(enabled: false)
+operation ListItems {
+    input := {
+      // Input parameter named 'cursor' will cause this operation to be treated as a paginated operation by default
+      cursor: String
+    }
+    output := {
+      ...
+    }
+}
+```
+
+### Grouping Operations
+
+The generated hooks and client methods are automatically organized based on the [`@tags` trait](https://smithy.io/2.0/spec/documentation-traits.html#tags-trait) in your Smithy operations. Operations with the same tags are grouped together, which helps keep your API calls organized and provides better code completion in your IDE.
+
+For example, with this Smithy model:
+
+```smithy
+service MyService {
+    operations: [ListItems, CreateItem, ListUsers, CreateUser]
+}
+
+@tags(["items"])
+operation ListItems {
+    input: ListItemsInput
+    output: ListItemsOutput
+}
+
+@tags(["items"])
+operation CreateItem {
+    input: CreateItemInput
+    output: CreateItemOutput
+}
+
+@tags(["users"])
+operation ListUsers {
+    input: ListUsersInput
+    output: ListUsersOutput
+}
+
+@tags(["users"])
+operation CreateUser {
+    input: CreateUserInput
+    output: CreateUserOutput
+}
+```
+
+The generated hooks will be grouped by tags:
+
+```tsx
+import { useQuery, useMutation } from '@tanstack/react-query';
+import { useMyApi } from './hooks/useMyApi';
+
+function ItemsAndUsers() {
+  const api = useMyApi();
+
+  // Items operations are grouped under api.items
+  const items = useQuery(api.items.listItems.queryOptions());
+  const createItem = useMutation(api.items.createItem.mutationOptions());
+
+  // Users operations are grouped under api.users
+  const users = useQuery(api.users.listUsers.queryOptions());
+
+  // Usage example
+  const handleCreateItem = () => {
+    createItem.mutate({ name: 'New Item' });
+  };
+
+  return (
+    <div>
+      <h2>Items</h2>
+      <ul>
+        {items.data?.map(item => (
+          <li key={item.id}>{item.name}</li>
+        ))}
+      </ul>
+      <button onClick={handleCreateItem}>Add Item</button>
+
+      <h2>Users</h2>
+      <ul>
+        {users.data?.map(user => (
+          <li key={user.id}>{user.name}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+```
+
+This grouping makes it easier to organize your API calls and provides better code completion in your IDE.
+
+<Drawer title="Grouped operations using the API client directly" trigger="Click here for an example using the client directly.">
+```tsx
+import { useState, useEffect } from 'react';
+import { useMyApiClient } from './hooks/useMyApiClient';
+
+function ItemsAndUsers() {
+  const api = useMyApiClient();
+  const [items, setItems] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Load data
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setIsLoading(true);
+
+        // Items operations are grouped under api.items
+        const itemsData = await api.items.listItems();
+        setItems(itemsData);
+
+        // Users operations are grouped under api.users
+        const usersData = await api.users.listUsers();
+        setUsers(usersData);
+      } catch (error) {
+        console.error('Error fetching data:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchData();
+  }, [api]);
+
+  const handleCreateItem = async () => {
+    try {
+      // Create item using the grouped method
+      const newItem = await api.items.createItem({ name: 'New Item' });
+      setItems(prevItems => [...prevItems, newItem]);
+    } catch (error) {
+      console.error('Error creating item:', error);
+    }
+  };
+
+  if (isLoading) {
+    return <div>Loading...</div>;
+  }
+
+  return (
+    <div>
+      <h2>Items</h2>
+      <ul>
+        {items.map(item => (
+          <li key={item.id}>{item.name}</li>
+        ))}
+      </ul>
+      <button onClick={handleCreateItem}>Add Item</button>
+
+      <h2>Users</h2>
+      <ul>
+        {users.map(user => (
+          <li key={user.id}>{user.name}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+```
+</Drawer>
+
+### Errors
+
+You can customize error responses in your Smithy API by defining custom error structures in your Smithy model. The generated client will automatically handle these custom error types.
+
+#### Defining Custom Error Structures
+
+Define your error structures in your Smithy model:
+
+```smithy
+@error("client")
+@httpError(400)
+structure InvalidRequestError {
+    @required
+    message: String
+
+    fieldErrors: FieldErrorList
+}
+
+@error("client")
+@httpError(403)
+structure UnauthorizedError {
+    @required
+    reason: String
+}
+
+@error("server")
+@httpError(500)
+structure InternalServerError {
+    @required
+    message: String
+
+    traceId: String
+}
+
+list FieldErrorList {
+    member: FieldError
+}
+
+structure FieldError {
+    @required
+    field: String
+
+    @required
+    message: String
+}
+```
+
+#### Adding Errors to Operations
+
+Specify which errors your operations can return:
+
+```smithy
+operation CreateItem {
+    input: CreateItemInput
+    output: CreateItemOutput
+    errors: [
+        InvalidRequestError
+        UnauthorizedError
+        InternalServerError
+    ]
+}
+
+operation GetItem {
+    input: GetItemInput
+    output: GetItemOutput
+    errors: [
+        ItemNotFoundError
+        InternalServerError
+    ]
+}
+
+@error("client")
+@httpError(404)
+structure ItemNotFoundError {
+    @required
+    message: String
+}
+```
+
+#### Using Custom Error Types in React
+
+The generated client will automatically handle these custom error types, allowing you to type-check and handle different error responses:
+
+```tsx
+import { useMutation, useQuery } from '@tanstack/react-query';
+
+function ItemComponent() {
+  const api = useMyApi();
+
+  // Query with typed error handling
+  const getItem = useQuery({
+    ...api.getItem.queryOptions({ itemId: '123' }),
+    onError: (error) => {
+      // Error is typed based on the errors in your Smithy model
+      switch (error.status) {
+        case 404:
+          // error.error is typed as ItemNotFoundError
+          console.error('Not found:', error.error.message);
+          break;
+        case 500:
+          // error.error is typed as InternalServerError
+          console.error('Server error:', error.error.message);
+          console.error('Trace ID:', error.error.traceId);
+          break;
+      }
+    }
+  });
+
+  // Mutation with typed error handling
+  const createItem = useMutation({
+    ...api.createItem.mutationOptions(),
+    onError: (error) => {
+      switch (error.status) {
+        case 400:
+          // error.error is typed as InvalidRequestError
+          console.error('Validation error:', error.error.message);
+          console.error('Field errors:', error.error.fieldErrors);
+          break;
+        case 403:
+          // error.error is typed as UnauthorizedError
+          console.error('Unauthorized:', error.error.reason);
+          break;
+      }
+    }
+  });
+
+  // Component rendering with error handling
+  if (getItem.isError) {
+    if (getItem.error.status === 404) {
+      return <NotFoundMessage message={getItem.error.error.message} />;
+    } else if (getItem.error.status === 500) {
+      return <ErrorMessage message={getItem.error.error.message} />;
+    }
+  }
+
+  return (
+    <div>
+      {/* Component content */}
+    </div>
+  );
+}
+```
+
+<Drawer title="Handling custom errors with the client directly" trigger="Click here for an example using the client directly.">
+```tsx
+import { useState, useEffect } from 'react';
+
+function ItemComponent() {
+  const api = useMyApiClient();
+  const [item, setItem] = useState(null);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  // Fetch item with error handling
+  useEffect(() => {
+    const fetchItem = async () => {
+      try {
+        setLoading(true);
+        const data = await api.getItem({ itemId: '123' });
+        setItem(data);
+      } catch (e) {
+        // Error is typed based on the errors in your Smithy model
+        const err = e as GetItemError;
+        setError(err);
+
+        switch (err.status) {
+          case 404:
+            // err.error is typed as ItemNotFoundError
+            console.error('Not found:', err.error.message);
+            break;
+          case 500:
+            // err.error is typed as InternalServerError
+            console.error('Server error:', err.error.message);
+            console.error('Trace ID:', err.error.traceId);
+            break;
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchItem();
+  }, [api]);
+
+  // Create item with error handling
+  const handleCreateItem = async (data) => {
+    try {
+      await api.createItem(data);
+    } catch (e) {
+      const err = e as CreateItemError;
+
+      switch (err.status) {
+        case 400:
+          // err.error is typed as InvalidRequestError
+          console.error('Validation error:', err.error.message);
+          console.error('Field errors:', err.error.fieldErrors);
+          break;
+        case 403:
+          // err.error is typed as UnauthorizedError
+          console.error('Unauthorized:', err.error.reason);
+          break;
+      }
+    }
+  };
+
+  // Component rendering with error handling
+  if (loading) {
+    return <LoadingSpinner />;
+  }
+
+  if (error) {
+    if (error.status === 404) {
+      return <NotFoundMessage message={error.error.message} />;
+    } else if (error.status === 500) {
+      return <ErrorMessage message={error.error.message} />;
+    }
+  }
+
+  return (
+    <div>
+      {/* Component content */}
+    </div>
+  );
+}
+```
+</Drawer>
+
+:::tip
+When defining error structures in Smithy, always use the `@error` and `@httpError` traits to specify the error type and HTTP status code. This ensures that the generated client will have proper type information for error handling.
+:::
+
+## Best Practices
+
+### Handle Loading States
+
+Always handle loading and error states for a better user experience:
+
+```tsx
+import { useQuery } from '@tanstack/react-query';
+
+function ItemList() {
+  const api = useMyApi();
+  const items = useQuery(api.listItems.queryOptions());
+
+  if (items.isLoading) {
+    return <LoadingSpinner />;
+  }
+
+  if (items.isError) {
+    const err = items.error;
+    switch (err.status) {
+      case 403:
+        // err.error is typed as ListItems403Response
+        return <ErrorMessage message={err.error.reason} />;
+      case 500:
+      case 502:
+        // err.error is typed as ListItems5XXResponse
+        return (
+          <ErrorMessage
+            message={err.error.message}
+          />
+        );
+      default:
+        return <ErrorMessage message="An unknown error occurred" />;
+    }
+  }
+
+  return (
+    <ul>
+      {items.data.map((item) => (
+        <li key={item.id}>{item.name}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+<Drawer title="Handle loading states using the API client directly" trigger="Click here for an example using the vanilla client directly.">
+```tsx
+function ItemList() {
+  const api = useMyApiClient();
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const fetchItems = async () => {
+      try {
+        const data = await api.listItems();
+        setItems(data);
+      } catch (err) {
+        setError(err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchItems();
+  }, [api]);
+
+  if (loading) {
+    return <LoadingSpinner />;
+  }
+
+  if (error) {
+    const err = error as ListItemsError;
+    switch (err.status) {
+      case 403:
+        // err.error is typed as ListItems403Response
+        return <ErrorMessage message={err.error.reason} />;
+      case 500:
+      case 502:
+        // err.error is typed as ListItems5XXResponse
+        return (
+          <ErrorMessage
+            message={err.error.message}
+          />
+        );
+      default:
+        return <ErrorMessage message="An unknown error occurred" />;
+    }
+  }
+
+  return (
+    <ul>
+      {items.map((item) => (
+        <li key={item.id}>{item.name}</li>
+      ))}
+    </ul>
+  );
+}
+```
+</Drawer>
+
+### Optimistic Updates
+
+Implement optimistic updates for a better user experience:
+
+```tsx
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+
+function ItemList() {
+  const api = useMyApi();
+  const queryClient = useQueryClient();
+
+  // Query to fetch items
+  const itemsQuery = useQuery(api.listItems.queryOptions());
+
+  // Mutation for deleting items with optimistic updates
+  const deleteMutation = useMutation({
+    ...api.deleteItem.mutationOptions(),
+    onMutate: async (itemId) => {
+      // Cancel any outgoing refetches
+      await queryClient.cancelQueries({ queryKey: api.listItems.queryKey() });
+
+      // Snapshot the previous value
+      const previousItems = queryClient.getQueryData(api.listItems.queryKey());
+
+      // Optimistically update to the new value
+      queryClient.setQueryData(
+        api.listItems.queryKey(),
+        (old) => old.filter((item) => item.id !== itemId)
+      );
+
+      // Return a context object with the snapshot
+      return { previousItems };
+    },
+    onError: (err, itemId, context) => {
+      // If the mutation fails, use the context returned from onMutate to roll back
+      queryClient.setQueryData(api.listItems.queryKey(), context.previousItems);
+      console.error('Failed to delete item:', err);
+    },
+    onSettled: () => {
+      // Always refetch after error or success to ensure data is in sync with server
+      queryClient.invalidateQueries({ queryKey: api.listItems.queryKey() });
+    },
+  });
+
+  if (itemsQuery.isLoading) {
+    return <LoadingSpinner />;
+  }
+
+  if (itemsQuery.isError) {
+    return <ErrorMessage message="Failed to load items" />;
+  }
+
+  return (
+    <ul>
+      {itemsQuery.data.map((item) => (
+        <li key={item.id}>
+          {item.name}
+          <button
+            onClick={() => deleteMutation.mutate(item.id)}
+            disabled={deleteMutation.isPending}
+          >
+            {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+<Drawer title="Optimistic updates using the API client directly" trigger="Click here for an example using the vanilla client directly.">
+```tsx
+function ItemList() {
+  const api = useMyApiClient();
+  const [items, setItems] = useState([]);
+
+  const handleDelete = async (itemId) => {
+    // Optimistically remove the item
+    const previousItems = items;
+    setItems(items.filter((item) => item.id !== itemId));
+
+    try {
+      await api.deleteItem(itemId);
+    } catch (error) {
+      // Restore previous items on error
+      setItems(previousItems);
+      console.error('Failed to delete item:', error);
+    }
+  };
+
+  return (
+    <ul>
+      {items.map((item) => (
+        <li key={item.id}>
+          {item.name}
+          <button onClick={() => handleDelete(item.id)}>Delete</button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+</Drawer>
+
+## Type Safety
+
+The integration provides complete end-to-end type safety. Your IDE will provide full autocompletion and type checking for all your API calls:
+
+```tsx
+import { useMutation } from '@tanstack/react-query';
+
+function ItemForm() {
+  const api = useMyApi();
+
+  // Type-safe mutation for creating items
+  const createItem = useMutation({
+    ...api.createItem.mutationOptions(),
+    // ✅ Type error if onSuccess callback doesn't handle the correct response type
+    onSuccess: (data) => {
+      // data is fully typed based on your API's response schema
+      console.log(`Item created with ID: ${data.id}`);
+    },
+  });
+
+  const handleSubmit = (data: CreateItemInput) => {
+    // ✅ Type error if input doesn't match schema
+    createItem.mutate(data);
+  };
+
+  // Error UI can use type narrowing to handle different error types
+  if (createItem.error) {
+    const error = createItem.error;
+    switch (error.status) {
+      case 400:
+        // error.error is typed as InvalidRequestError
+        return (
+          <FormError
+            message="Invalid input"
+            errors={error.error.fieldErrors}
+          />
+        );
+      case 403:
+        // error.error is typed as UnauthorizedError
+        return <AuthError reason={error.error.reason} />;
+      default:
+        // error.error is typed as InternalServerError for 500, etc.
+        return <ServerError message={error.error.message} />;
+    }
+  }
+
+  return (
+    <form onSubmit={(e) => {
+      e.preventDefault();
+      handleSubmit({ name: 'New Item' });
+    }}>
+      {/* Form fields */}
+      <button
+        type="submit"
+        disabled={createItem.isPending}
+      >
+        {createItem.isPending ? 'Creating...' : 'Create Item'}
+      </button>
+    </form>
+  );
+}
+```
+
+<Drawer title="Type safety using the API client directly" trigger="Click here for an example using the vanilla client directly.">
+```tsx
+function ItemForm() {
+  const api = useMyApiClient();
+  const [error, setError] = useState<CreateItemError | null>(null);
+
+  const handleSubmit = async (data: CreateItemInput) => {
+    try {
+      // ✅ Type error if input doesn't match schema
+      await api.createItem(data);
+    } catch (e) {
+      // ✅ Error type includes all possible error responses
+      const err = e as CreateItemError;
+      switch (err.status) {
+        case 400:
+          // err.error is typed as InvalidRequestError
+          console.error('Validation errors:', err.error.fieldErrors);
+          break;
+        case 403:
+          // err.error is typed as UnauthorizedError
+          console.error('Not authorized:', err.error.reason);
+          break;
+        case 500:
+          // err.error is typed as InternalServerError
+          console.error('Server error:', err.error.message);
+          break;
+      }
+      setError(err);
+    }
+  };
+
+  // Error UI can use type narrowing to handle different error types
+  if (error) {
+    switch (error.status) {
+      case 400:
+        return (
+          <FormError
+            message="Invalid input"
+            errors={error.error.fieldErrors}
+          />
+        );
+      case 403:
+        return <AuthError reason={error.error.reason} />;
+      default:
+        return <ServerError message={error.error.message} />;
+    }
+  }
+
+  return <form onSubmit={handleSubmit}>{/* ... */}</form>;
+}
+```
+</Drawer>
+
+The types are automatically generated from your Smithy API's OpenAPI schema, ensuring that any changes to your API are reflected in your frontend code after a build.

@@ -4,11 +4,12 @@
  */
 import { Linter } from '@nx/eslint';
 import { IacProviderOption } from '../../utils/iac';
+import { TsProjectGeneratorSchema } from '../../ts/lib/schema';
 
 export interface TsTrpcApiGeneratorSchema {
   name: string;
   computeType: 'ServerlessApiGatewayRestApi' | 'ServerlessApiGatewayHttpApi';
   auth: 'IAM' | 'Cognito' | 'None';
-  directory?: TsLibGeneratorSchema['directory'];
+  directory?: TsProjectGeneratorSchema['directory'];
   iacProvider: IacProviderOption;
 }

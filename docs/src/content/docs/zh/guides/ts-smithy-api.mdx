@@ -1,0 +1,576 @@
+---
+title: "Smithy TypeScript API 参考文档"
+description: "Smithy TypeScript API 的参考文档"
+---
+
+
+
+import { FileTree, AnchorHeading, Tabs, TabItem } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
+
+[Smithy](https://smithy.io/) 是一种协议无关的接口定义语言，用于以模型驱动的方式编写 API。
+
+Smithy TypeScript API 生成器使用 Smithy 进行服务定义，并基于 [Smithy TypeScript Server SDK](https://github.com/awslabs/smithy-typescript) 实现来创建新的 API。该生成器提供 CDK 或 Terraform 基础设施即代码（IaC），用于将服务部署到 AWS Lambda 并通过 AWS API Gateway REST API 暴露。它通过 Smithy 模型自动生成代码，实现类型安全的 API 开发。生成的处理器使用 [AWS Lambda Powertools for TypeScript](https://docs.powertools.aws.dev/lambda/typescript/latest/) 实现可观测性，包括日志记录、AWS X-Ray 追踪和 CloudWatch 指标。
+
+## 使用方法
+
+### 生成 Smithy TypeScript API
+
+您可以通过两种方式生成新的 Smithy TypeScript API：
+
+<RunGenerator generator="ts#smithy-api" />
+
+### 选项配置
+
+<GeneratorParameters generator="ts#smithy-api" />
+
+## 生成器输出
+
+生成器在 `<directory>/<api-name>` 目录下创建两个相关项目：
+
+<FileTree>
+
+- **model/** Smithy 模型项目
+  - project.json 项目配置与构建目标
+  - smithy-build.json Smithy 构建配置
+  - build.Dockerfile 构建 Smithy 产物的 Docker 配置
+  - src/
+    - main.smithy 主服务定义
+    - operations/
+      - echo.smithy 示例操作定义
+- **backend/** TypeScript 后端实现
+  - project.json 项目配置与构建目标
+  - rolldown.config.ts 打包配置
+  - src/
+    - handler.ts AWS Lambda 处理器
+    - local-server.ts 本地开发服务器
+    - service.ts 服务实现
+    - context.ts 服务上下文定义
+    - operations/
+      - echo.ts 示例操作实现
+    - generated/ 生成的 TypeScript SDK（构建时创建）
+
+</FileTree>
+
+### 基础设施
+
+由于该生成器会根据选择的 `iacProvider` 创建基础设施即代码，因此会在 `packages/common` 中创建包含相关 CDK 构造或 Terraform 模块的项目。
+
+通用基础设施即代码项目的结构如下：
+
+<Infrastructure>
+<Fragment slot="cdk">
+<FileTree>
+  - packages/common/constructs
+    - src
+      - app/ 针对特定项目/生成器的基础设施构造
+        - apis/
+          - \<project-name>.ts 部署 API 的 CDK 构造
+      - core/ 可复用的通用构造
+        - api/
+          - rest-api.ts 部署 REST API 的 CDK 构造
+          - utils.ts API 构造的实用工具
+      - index.ts 导出 `app` 中构造的入口点
+    - project.json 项目构建目标与配置
+</FileTree>
+
+:::note
+此项目使用 [`ts#project`](guides/typescript-project) 生成器生成，因此配置了相同的构建目标。
+:::
+</Fragment>
+<Fragment slot="terraform">
+<FileTree>
+  - packages/common/terraform
+    - src
+      - app/ 针对特定项目/生成器的 Terraform 模块
+        - apis/
+          - \<project-name>/
+            - \<project-name>.tf 部署 API 的模块
+      - core/ 可复用的通用模块
+        - api/
+          - rest-api/
+            - rest-api.tf 部署 REST API 的模块
+    - project.json 项目构建目标与配置
+</FileTree>
+
+:::note
+此项目使用 [`terraform#project`](guides/terraform-project) 生成器生成，因此配置了相同的构建目标。
+:::
+</Fragment>
+</Infrastructure>
+
+## 实现 Smithy API
+
+### 在 Smithy 中定义操作
+
+操作在模型项目的 Smithy 文件中定义。主服务定义位于 `main.smithy`：
+
+```smithy
+$version: "2.0"
+
+namespace your.namespace
+
+use aws.protocols#restJson1
+use smithy.framework#ValidationException
+
+@title("YourService")
+@restJson1
+service YourService {
+    version: "1.0.0"
+    operations: [
+        Echo,
+        // 在此添加其他操作
+    ]
+    errors: [
+        ValidationException
+    ]
+}
+```
+
+单个操作在 `operations/` 目录的单独文件中定义：
+
+```smithy
+$version: "2.0"
+
+namespace your.namespace
+
+@http(method: "POST", uri: "/echo")
+operation Echo {
+    input: EchoInput
+    output: EchoOutput
+}
+
+structure EchoInput {
+    @required
+    message: String
+
+    foo: Integer
+    bar: String
+}
+
+structure EchoOutput {
+    @required
+    message: String
+}
+```
+
+:::note
+您可以自由更改文件夹结构——`src` 文件夹中的所有 `.smithy` 文件都将包含在 Smithy 构建中。
+:::
+
+:::tip
+有关 Smithy 及其语法的更多细节，请参考 [Smithy 规范](https://smithy.io/2.0/spec/index.html)。
+:::
+
+### 在 TypeScript 中实现操作
+
+操作实现位于后端项目的 `src/operations/` 目录。每个操作都使用 TypeScript Server SDK（构建时从 Smithy 模型生成）生成的类型实现。
+
+```typescript
+import { ServiceContext } from '../context.js';
+import { Echo as EchoOperation } from '../generated/ssdk/index.js';
+
+export const Echo: EchoOperation<ServiceContext> = async (input) => {
+  // 业务逻辑实现
+  return {
+    message: `Echo: ${input.message}` // 基于 Smithy 模型的类型安全返回
+  };
+};
+```
+
+操作必须注册到 `src/service.ts` 中的服务定义：
+
+```typescript
+import { ServiceContext } from './context.js';
+import { YourServiceService } from './generated/ssdk/index.js';
+import { Echo } from './operations/echo.js';
+// 导入其他操作
+
+// 将操作注册到服务
+export const Service: YourServiceService<ServiceContext> = {
+  Echo,
+  // 添加其他操作
+};
+```
+
+### 服务上下文
+
+可以在 `context.ts` 中定义操作的共享上下文：
+
+```typescript
+export interface ServiceContext {
+  // 默认提供 Powertools 的追踪器、日志记录器和指标工具
+  tracer: Tracer;
+  logger: Logger;
+  metrics: Metrics;
+  // 添加共享依赖项，如数据库连接等
+  dbClient: any;
+  userIdentity: string;
+}
+```
+
+此上下文会传递给所有操作实现，可用于共享数据库连接、配置或日志工具等资源。
+
+:::caution
+您需要在 `handler.ts`（Lambda 函数入口点）和 `local-server.ts`（通过 `serve` 目标本地运行的入口点）中自行构造上下文。
+:::
+
+### 使用 AWS Lambda Powertools 实现可观测性
+
+#### 日志记录
+
+生成器通过 Middy 中间件配置了自动上下文注入的结构化日志记录。
+
+```typescript {4}
+// handler.ts
+export const handler = middy<APIGatewayProxyEvent, APIGatewayProxyResult>()
+  .use(captureLambdaHandler(tracer))
+  .use(injectLambdaContext(logger))
+  .use(logMetrics(metrics))
+  .handler(lambdaHandler);
+```
+
+可以通过上下文在操作实现中引用日志记录器：
+
+```typescript {6}
+// operations/echo.ts
+import { ServiceContext } from '../context.js';
+import { Echo as EchoOperation } from '../generated/ssdk/index.js';
+
+export const Echo: EchoOperation<ServiceContext> = async (input, ctx) => {
+  ctx.logger.info('您的日志消息');
+  // ...
+};
+```
+
+#### 追踪
+
+通过 `captureLambdaHandler` 中间件自动配置 AWS X-Ray 追踪。
+
+```typescript {3}
+// handler.ts
+export const handler = middy<APIGatewayProxyEvent, APIGatewayProxyResult>()
+  .use(captureLambdaHandler(tracer))
+  .use(injectLambdaContext(logger))
+  .use(logMetrics(metrics))
+  .handler(lambdaHandler);
+```
+
+可以在操作中添加自定义子段到追踪中：
+
+```typescript {7, 11, 14}
+// operations/echo.ts
+import { ServiceContext } from '../context.js';
+import { Echo as EchoOperation } from '../generated/ssdk/index.js';
+
+export const Echo: EchoOperation<ServiceContext> = async (input, ctx) => {
+  // 创建新子段
+  const subsegment = ctx.tracer.getSegment()?.addNewSubsegment('custom-operation');
+  try {
+    // 业务逻辑
+  } catch (error) {
+    subsegment?.addError(error as Error);
+    throw error;
+  } finally {
+    subsegment?.close();
+  }
+};
+```
+
+#### 指标
+
+通过 `logMetrics` 中间件自动收集每个请求的 CloudWatch 指标。
+
+```typescript {5}
+// handler.ts
+export const handler = middy<APIGatewayProxyEvent, APIGatewayProxyResult>()
+  .use(captureLambdaHandler(tracer))
+  .use(injectLambdaContext(logger))
+  .use(logMetrics(metrics))
+  .handler(lambdaHandler);
+```
+
+可以在操作中添加自定义指标：
+
+```typescript {7}
+// operations/echo.ts
+import { MetricUnit } from '@aws-lambda-powertools/metrics';
+import { ServiceContext } from '../context.js';
+import { Echo as EchoOperation } from '../generated/ssdk/index.js';
+
+export const Echo: EchoOperation<ServiceContext> = async (input, ctx) => {
+  ctx.metrics.addMetric("CustomMetric", MetricUnit.Count, 1);
+  // ...
+};
+```
+
+### 错误处理
+
+Smithy 提供内置错误处理。可以在 Smithy 模型中定义自定义错误：
+
+```smithy
+@error("client")
+@httpError(400)
+structure InvalidRequestError {
+    @required
+    message: String
+}
+```
+
+并将其注册到操作/服务：
+
+```smithy
+operation MyOperation {
+  ...
+  errors: [InvalidRequestError]
+}
+```
+
+然后在 TypeScript 实现中抛出：
+
+```typescript
+import { InvalidRequestError } from '../generated/ssdk/index.js';
+
+export const MyOperation: MyOperationHandler<ServiceContext> = async (input) => {
+  if (!input.requiredField) {
+    throw new InvalidRequestError({
+      message: "缺少必填字段"
+    });
+  }
+
+  return { /* 成功响应 */ };
+};
+```
+
+## 构建与代码生成
+
+Smithy 模型项目使用 [Docker](https://www.docker.com/) 构建 Smithy 产物并生成 TypeScript Server SDK：
+
+<NxCommands commands={['run <model-project>:build']} />
+
+此过程：
+
+1. **编译 Smithy 模型**并进行验证
+2. **生成 OpenAPI 规范**
+3. **创建类型安全的 TypeScript Server SDK**
+4. **输出构建产物**到 `dist/<model-project>/build/`
+
+后端项目在编译时自动复制生成的 SDK：
+
+<NxCommands commands={['run <backend-project>:copy-ssdk']} />
+
+### 打包目标
+
+后端项目使用 [Rolldown](https://rolldown.rs/) 将服务处理器打包为 AWS Lambda 的部署包：
+
+<NxCommands commands={['run <backend-project>:bundle']} />
+
+## 本地开发
+
+生成器配置了支持热重载的本地开发服务器：
+
+<NxCommands commands={['run <backend-project>:serve']} />
+
+:::tip
+本地服务器不仅会在修改 TypeScript 代码时热重载，还会在修改 Smithy 模型项目时重新加载，使您可以持续迭代 Smithy 模型和服务。
+:::
+
+## 部署 Smithy API
+
+生成器根据选择的 `iacProvider` 创建 CDK 或 Terraform 基础设施。
+
+<Infrastructure>
+<Fragment slot="cdk">
+部署 API 的 CDK 构造位于 `common/constructs` 文件夹：
+
+```ts {6-8}
+import { MyApi } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    // 将 API 添加到堆栈
+    const api = new MyApi(this, 'MyApi', {
+      integrations: MyApi.defaultIntegrations(this).build(),
+    });
+  }
+}
+```
+
+此配置包括：
+
+1. 用于 Smithy 服务的 AWS Lambda 函数
+2. 作为函数触发器的 API Gateway REST API
+3. IAM 角色与权限
+4. CloudWatch 日志组
+5. X-Ray 追踪配置
+
+:::note
+如果选择 `Cognito` 认证，需要向 API 构造提供 `identity` 属性：
+
+```ts {9}
+import { MyApi, UserIdentity } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const identity = new UserIdentity(this, 'Identity');
+
+    const api = new MyApi(this, 'MyApi', {
+      integrations: MyApi.defaultIntegrations(this).build(),
+      identity,
+    });
+  }
+}
+```
+
+`UserIdentity` 构造可通过 <Link path="/guides/react-website-auth">`ts#react-website-auth` 生成器</Link> 生成
+:::
+</Fragment>
+<Fragment slot="terraform">
+部署 API 的 Terraform 模块位于 `common/terraform` 文件夹：
+
+```hcl {2}
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  # Lambda 函数的环境变量
+  env = {
+    ENVIRONMENT = var.environment
+    LOG_LEVEL   = "INFO"
+  }
+
+  # 额外的 IAM 策略
+  additional_iam_policy_statements = [
+    # 添加 API 需要的额外权限
+  ]
+
+  tags = local.common_tags
+}
+```
+
+此配置包括：
+
+1. 服务 Smithy API 的 AWS Lambda 函数
+2. 作为函数触发器的 API Gateway REST API
+3. IAM 角色与权限
+4. CloudWatch 日志组
+5. X-Ray 追踪配置
+6. CORS 配置
+
+:::note
+如果选择 `Cognito` 认证，需要提供 Cognito 配置：
+
+```hcl {4-5}
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  user_pool_id         = local.user_pool_id
+  user_pool_client_ids = [local.client_id]
+
+  env = {
+    ENVIRONMENT = var.environment
+    LOG_LEVEL   = "INFO"
+  }
+
+  tags = local.common_tags
+}
+```
+:::
+
+Terraform 模块提供多个输出：
+
+```hcl
+# 获取 API 端点
+output "api_url" {
+  value = module.my_api.stage_invoke_url
+}
+
+# 获取 Lambda 函数详情
+output "lambda_function_name" {
+  value = module.my_api.lambda_function_name
+}
+```
+</Fragment>
+</Infrastructure>
+
+### 集成
+
+<Snippet name="api/type-safe-api-integrations" parentHeading="Integrations" />
+
+#### 代码生成
+
+<Infrastructure>
+<Fragment slot="cdk">
+由于操作在 Smithy 中定义，我们使用代码生成向 CDK 构造提供元数据以实现类型安全集成。
+
+在通用构造的 `project.json` 中添加了 `generate:<ApiName>-metadata` 目标以促进此代码生成，该目标会生成如 `packages/common/constructs/src/generated/my-api/metadata.gen.ts` 的文件。由于这是构建时生成的，因此版本控制中会忽略该文件。
+
+:::note
+修改 Smithy 模型后需要运行构建以确保 CDK 构造使用的类型是最新的。
+
+<NxCommands commands={["run-many --target build --all"]} />
+:::
+
+:::tip
+如果同时开发 CDK 基础设施和 Smithy API，可以使用 [`nx watch`](https://nx.dev/nx-api/nx/documents/watch) 在模型变更时自动重新生成类型：
+
+<NxCommands
+  commands={[
+    'watch --projects=<ModelProject> -- \\ ',
+    'run <InfraProject>:"generate:<ApiName>-metadata"',
+  ]}
+/>
+:::
+</Fragment>
+<Fragment slot="terraform">
+:::note
+Terraform 不支持类型安全集成，因此如果选择 Terraform 作为 `iacProvider` 则不会配置代码生成目标。
+:::
+</Fragment>
+</Infrastructure>
+
+### 授予访问权限（仅限 IAM）
+
+如果选择 `IAM` 认证，可以使用 `grantInvokeAccess` 方法授予 API 访问权限：
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts
+api.grantInvokeAccess(myIdentityPool.authenticatedRole);
+```
+</Fragment>
+<Fragment slot="terraform">
+```hcl
+# 创建允许调用 API 的 IAM 策略
+resource "aws_iam_policy" "api_invoke_policy" {
+  name        = "MyApiInvokePolicy"
+  description = "允许调用 Smithy API 的策略"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = "execute-api:Invoke"
+        Resource = "${module.my_api.api_execution_arn}/*/*"
+      }
+    ]
+  })
+}
+
+# 将策略附加到 IAM 角色
+resource "aws_iam_role_policy_attachment" "api_invoke_access" {
+  role       = aws_iam_role.authenticated_user_role.name
+  policy_arn = aws_iam_policy.api_invoke_policy.arn
+}
+```
+</Fragment>
+</Infrastructure>
+
+## 调用 Smithy API
+
+要从 React 网站调用 API，可以使用 <Link path="guides/api-connection/react-smithy">`api-connection`</Link> 生成器，该生成器根据 Smithy 模型提供类型安全的客户端生成。

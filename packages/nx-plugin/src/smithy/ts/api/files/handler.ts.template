@@ -1,0 +1,50 @@
+import {
+  convertEvent,
+  convertVersion1Response,
+} from '@aws-smithy/server-apigateway';
+import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
+import middy from '@middy/core';
+import { Tracer } from '@aws-lambda-powertools/tracer';
+import { captureLambdaHandler } from '@aws-lambda-powertools/tracer/middleware';
+import { injectLambdaContext } from '@aws-lambda-powertools/logger/middleware';
+import { Logger } from '@aws-lambda-powertools/logger';
+import { Metrics } from '@aws-lambda-powertools/metrics';
+import { logMetrics } from '@aws-lambda-powertools/metrics/middleware';
+import { Service } from './service.js';
+import { get<%- apiNameClassName %>ServiceHandler } from './generated/ssdk/index.js';
+
+process.env.POWERTOOLS_METRICS_NAMESPACE = '<%- apiNameClassName %>';
+process.env.POWERTOOLS_SERVICE_NAME = '<%- apiNameClassName %>';
+
+const tracer = new Tracer();
+const logger = new Logger();
+const metrics = new Metrics();
+
+const serviceHandler = get<%- apiNameClassName %>ServiceHandler(Service);
+
+export const lambdaHandler = async (
+  event: APIGatewayProxyEvent,
+): Promise<APIGatewayProxyResult> => {
+  const httpRequest = convertEvent(event);
+  const httpResponse = await serviceHandler.handle(httpRequest, {
+    tracer,
+    logger,
+    metrics,
+  });
+  const apiGatewayResponse = convertVersion1Response(httpResponse);
+
+  return {
+    ...apiGatewayResponse,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': '*',
+      ...apiGatewayResponse.headers,
+    },
+  };
+};
+
+export const handler = middy<APIGatewayProxyEvent, APIGatewayProxyResult>()
+  .use(captureLambdaHandler(tracer))
+  .use(injectLambdaContext(logger))
+  .use(logMetrics(metrics))
+  .handler(lambdaHandler);

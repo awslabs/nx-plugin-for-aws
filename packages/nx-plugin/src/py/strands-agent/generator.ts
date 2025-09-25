@@ -22,7 +22,7 @@ import { formatFilesInSubtree } from '../../utils/format';
 import { kebabCase, toSnakeCase, toClassName } from '../../utils/names';
 import { addDependenciesToPyProjectToml } from '../../utils/py';
 import { addAgentInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
-import { addPythonBundleTarget } from '../../utils/bundle';
+import { addPythonBundleTarget } from '../../utils/bundle/bundle';
 import { getNpmScope } from '../../utils/npm-scope';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { Logger } from '@nxlv/python/src/executors/utils/logger';

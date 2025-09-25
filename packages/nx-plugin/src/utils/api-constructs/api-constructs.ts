@@ -19,7 +19,7 @@ import { addStarExport } from '../ast';
 import { IacProvider } from '../iac';
 
 interface BackendOptions {
-  type: 'trpc' | 'fastapi';
+  type: 'trpc' | 'fastapi' | 'smithy';
 }
 
 export interface TrpcBackendOptions extends BackendOptions {
@@ -34,12 +34,17 @@ export interface FastApiBackendOptions extends BackendOptions {
   dir: string;
 }
 
+export interface SmithyBackendOptions extends BackendOptions {
+  type: 'smithy';
+  dir: string;
+}
+
 export interface AddApiGatewayConstructOptions {
   apiProjectName: string;
   apiNameClassName: string;
   apiNameKebabCase: string;
   constructType: 'http' | 'rest';
-  backend: TrpcBackendOptions | FastApiBackendOptions;
+  backend: TrpcBackendOptions | FastApiBackendOptions | SmithyBackendOptions;
   auth: 'IAM' | 'Cognito' | 'None';
 }
 

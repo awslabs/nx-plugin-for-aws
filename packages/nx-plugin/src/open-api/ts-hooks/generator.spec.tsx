@@ -1226,6 +1226,182 @@ describe('openApiTsHooksGenerator', () => {
     );
   });
 
+  it('should handle infinite query with custom cursor parameter via object vendor extension', async () => {
+    const spec: Spec = {
+      openapi: '3.0.0',
+      info: { title, version: '1.0.0' },
+      paths: {
+        '/records': {
+          get: {
+            ...{
+              'x-cursor': {
+                inputToken: 'nextToken',
+              },
+            },
+            operationId: 'listRecords',
+            description: 'Lists records with nextToken pagination',
+            parameters: [
+              {
+                name: 'limit',
+                in: 'query',
+                description: 'Number of records to return',
+                required: false,
+                schema: {
+                  type: 'integer',
+                  default: 10,
+                },
+              },
+              {
+                name: 'nextToken',
+                in: 'query',
+                description: 'Pagination token',
+                required: false,
+                schema: {
+                  type: 'string',
+                },
+              },
+            ],
+            responses: {
+              '200': {
+                description: 'List of records',
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'object',
+                      properties: {
+                        records: {
+                          type: 'array',
+                          items: {
+                            type: 'object',
+                            properties: {
+                              id: { type: 'string' },
+                              name: { type: 'string' },
+                              value: { type: 'number' },
+                            },
+                            required: ['id', 'name'],
+                          },
+                        },
+                        nextToken: {
+                          type: 'string',
+                        },
+                      },
+                      required: ['records'],
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    tree.write('openapi.json', JSON.stringify(spec));
+
+    await openApiTsHooksGenerator(tree, {
+      openApiSpecPath: 'openapi.json',
+      outputPath: 'src/generated',
+    });
+
+    validateTypeScript([
+      'src/generated/client.gen.ts',
+      'src/generated/types.gen.ts',
+      'src/generated/options-proxy.gen.ts',
+    ]);
+
+    const client = tree.read('src/generated/client.gen.ts', 'utf-8');
+    const optionsProxy = tree.read(
+      'src/generated/options-proxy.gen.ts',
+      'utf-8',
+    );
+    expect(optionsProxy).toMatchSnapshot();
+
+    // Create mock fetch function for first page
+    const mockFetch = vi.fn();
+
+    // First call returns first page
+    mockFetch.mockResolvedValueOnce({
+      status: 200,
+      json: vi.fn().mockResolvedValue({
+        records: [
+          { id: '1', name: 'Record 1', value: 100 },
+          { id: '2', name: 'Record 2', value: 200 },
+        ],
+        nextToken: 'next-page-token',
+      }),
+    });
+
+    // Second call returns second page
+    mockFetch.mockResolvedValue({
+      status: 200,
+      json: vi.fn().mockResolvedValue({
+        records: [
+          { id: '3', name: 'Record 3', value: 300 },
+          { id: '4', name: 'Record 4', value: 400 },
+        ],
+        // No nextToken in the response means end of pagination
+      }),
+    });
+
+    // Configure the options proxy
+    const optionsProxyInstance = await configureOptionsProxy(
+      client,
+      optionsProxy,
+      mockFetch,
+    );
+
+    // Test the infinite query hook
+    const { getLatestHookState: infiniteQuery, fetchNextPage } =
+      await renderInfiniteQueryHook(
+        optionsProxyInstance.listRecords.infiniteQueryOptions(
+          {},
+          {
+            getNextPageParam: (lastPage) => lastPage.nextToken,
+          },
+        ),
+      );
+
+    // Verify the first page data is correct
+    expect(infiniteQuery().data.pages).toHaveLength(1);
+    expect(infiniteQuery().data.pages[0]).toEqual({
+      records: [
+        { id: '1', name: 'Record 1', value: 100 },
+        { id: '2', name: 'Record 2', value: 200 },
+      ],
+      nextToken: 'next-page-token',
+    });
+
+    // Verify the fetch was called correctly for the first page
+    expect(mockFetch).toHaveBeenCalledWith(
+      `${baseUrl}/records`,
+      expect.objectContaining({
+        method: 'GET',
+      }),
+    );
+
+    fetchNextPage();
+
+    // Verify both pages are now available
+    await waitFor(() => expect(infiniteQuery().data.pages).toHaveLength(2));
+    expect(infiniteQuery().data.pages[1]).toEqual({
+      records: [
+        { id: '3', name: 'Record 3', value: 300 },
+        { id: '4', name: 'Record 4', value: 400 },
+      ],
+    });
+
+    // Verify there are no more pages as nextToken is undefined
+    expect(infiniteQuery().hasNextPage).toBe(false);
+
+    // Verify the fetch was called correctly for the second page with the nextToken
+    expect(mockFetch).toHaveBeenCalledWith(
+      `${baseUrl}/records?nextToken=next-page-token`,
+      expect.objectContaining({
+        method: 'GET',
+      }),
+    );
+  });
+
   it('should handle streaming query operation correctly', async () => {
     const spec: Spec = {
       openapi: '3.0.0',

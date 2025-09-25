@@ -1051,11 +1051,9 @@ const isOperationMutation = (op: Operation): boolean => {
  * Add infinite query details to the operation
  */
 const mutateOperationWithInfiniteQueryDetails = (op: Operation) => {
-  const { vendorExtensions } = op as any;
+  const { paginationDisabled, cursorPropertyName } = getCursorOptions(op);
 
   // Allow users to customise the "cursor" property used for paginated requests
-  const cursorPropertyName =
-    vendorExtensions?.[VENDOR_EXTENSIONS.CURSOR] ?? 'cursor';
   const cursorProperty = op.parameters.find(
     (p) => p.name === cursorPropertyName,
   );
@@ -1063,11 +1061,56 @@ const mutateOperationWithInfiniteQueryDetails = (op: Operation) => {
   // The operation is an infinite query if:
   // - x-cursor is not set to 'false' (this allows users to disable infinite queries for operations that accept a 'cursor')
   // - the operation accepts a parameter named 'cursor', or a parameter named as the user specified with x-cursor
-  (op as any).isInfiniteQuery =
-    vendorExtensions?.[VENDOR_EXTENSIONS.CURSOR] !== false && !!cursorProperty;
+  (op as any).isInfiniteQuery = !paginationDisabled && !!cursorProperty;
   if ((op as any).isInfiniteQuery) {
     (op as any).infiniteQueryCursorProperty = cursorProperty;
   }
+};
+
+/**
+ * Extracts the cursor options for this operation based on the vendor extensions
+ *
+ * Valid usage of x-cursor:
+ *
+ * x-cursor: 'property' - customises the input property used for pagination
+ * x-cursor: false - disables pagination for the operation (ie the operation would have pagination by default as an input 'cursor' property exists)
+ *
+ * We also support object equivalents of the above, since Smithy vendor extensions can only be objects
+ *
+ * x-cursor: { inputToken: 'property' }
+ * x-cursor: { enabled: false }
+ */
+const getCursorOptions = (op: Operation) => {
+  const { vendorExtensions } = op as any;
+
+  const cursorExtension = vendorExtensions?.[VENDOR_EXTENSIONS.CURSOR];
+
+  // By default pagination isn't explicitly disabled and the cursor property to look for is 'cursor'
+  let paginationDisabled = false;
+  let cursorPropertyName = 'cursor';
+
+  if (typeof cursorExtension === 'boolean' && cursorExtension === false) {
+    paginationDisabled = true;
+  } else if (typeof cursorExtension === 'string') {
+    cursorPropertyName = cursorExtension;
+  } else if (typeof cursorExtension === 'object') {
+    if (cursorExtension?.enabled === false) {
+      paginationDisabled = true;
+    }
+    if (
+      cursorExtension?.inputToken &&
+      typeof cursorExtension.inputToken === 'string'
+    ) {
+      cursorPropertyName = cursorExtension.inputToken;
+    }
+  }
+
+  // x-cursor can be: a string (indicating pagination is enabled and the property name to use)
+
+  return {
+    paginationDisabled,
+    cursorPropertyName,
+  };
 };
 
 /**
