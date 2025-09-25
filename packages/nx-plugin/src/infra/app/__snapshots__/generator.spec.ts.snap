@@ -2,7 +2,6 @@
 
 exports[`infra generator > should add required dependencies to package.json > dependencies 1`] = `
 {
-  "@cdklabs/cdk-validator-cfnguard": "0.0.60",
   "aws-cdk": "2.1027.0",
   "aws-cdk-lib": "2.213.0",
   "constructs": "10.4.2",
@@ -43,7 +42,6 @@ exports[`infra generator > should add required dependencies to package.json > de
 exports[`infra generator > should add required dependencies to package.json > package-json 1`] = `
 {
   "dependencies": {
-    "@cdklabs/cdk-validator-cfnguard": "0.0.60",
     "aws-cdk": "2.1027.0",
     "aws-cdk-lib": "2.213.0",
     "constructs": "10.4.2",
@@ -81,6 +79,25 @@ exports[`infra generator > should add required dependencies to package.json > pa
 }
 `;
 
+exports[`infra generator > should configure Checkov target correctly > checkov-target 1`] = `
+{
+  "cache": true,
+  "dependsOn": [
+    "synth",
+  ],
+  "executor": "nx:run-commands",
+  "inputs": [
+    "{workspaceRoot}/dist/{projectRoot}/cdk.out",
+  ],
+  "options": {
+    "command": "uvx checkov==3.2.469 --config-file packages/test/checkov.yml --file dist/packages/infra/cdk.out/**/*.template.json",
+  },
+  "outputs": [
+    "{workspaceRoot}/dist/{projectRoot}/checkov",
+  ],
+}
+`;
+
 exports[`infra generator > should configure project.json with correct targets > build-target 1`] = `
 {
   "dependsOn": [
@@ -88,6 +105,7 @@ exports[`infra generator > should configure project.json with correct targets > 
     "compile",
     "test",
     "synth",
+    "checkov",
   ],
 }
 `;
@@ -137,6 +155,7 @@ exports[`infra generator > should configure project.json with correct targets > 
         "compile",
         "test",
         "synth",
+        "checkov",
       ],
     },
     "cdk": {
@@ -145,6 +164,22 @@ exports[`infra generator > should configure project.json with correct targets > 
         "command": "cdk",
         "cwd": "packages/test",
       },
+    },
+    "checkov": {
+      "cache": true,
+      "dependsOn": [
+        "synth",
+      ],
+      "executor": "nx:run-commands",
+      "inputs": [
+        "{workspaceRoot}/dist/{projectRoot}/cdk.out",
+      ],
+      "options": {
+        "command": "uvx checkov==3.2.469 --config-file packages/test/checkov.yml --file dist/packages/infra/cdk.out/**/*.template.json",
+      },
+      "outputs": [
+        "{workspaceRoot}/dist/{projectRoot}/checkov",
+      ],
     },
     "compile": {
       "executor": "nx:run-commands",
@@ -213,6 +248,70 @@ exports[`infra generator > should configure project.json with correct targets > 
     },
   },
 }
+`;
+
+exports[`infra generator > should generate Checkov configuration files > checkov-ts 1`] = `
+"import { IConstruct } from 'constructs';
+import { CfnResource } from 'aws-cdk-lib';
+
+/**
+ * Suppresses a set of rules for a construct tree.
+ *
+ * @param construct The root construct to suppress the rule for.
+ * @param ids The ids of the rules to suppress.
+ * @param comment The reason for suppressing the rule
+ * @param predicate A predicate function that determines whether the rule should be suppressed for the given construct or any of its descendants.
+ *
+ * @example
+ * The following example suppresses the CKV_AWS_XXX rule for the given construct.
+ * suppressRules(construct, ['CKV_AWS_XXX'], 'Not required for this use case')
+ *
+ * @example
+ * The following example suppresses the CKV_AWS_XXX rule for the construct or any of its descendants if it is an instance of Bucket:
+ * suppressRules(construct, ['CKV_AWS_XXX'], 'Not required for this use case', (construct) => construct instanceof Bucket)
+ */
+export const suppressRules = (
+  construct: IConstruct,
+  ids: string[],
+  comment: string,
+  predicate?: (construct: IConstruct) => boolean,
+) => {
+  const resources = (
+    predicate ? construct.node.findAll().filter(predicate) : [construct]
+  )
+    .map((resource) => {
+      if (CfnResource.isCfnResource(resource)) {
+        return resource;
+      } else return resource.node.defaultChild;
+    })
+    .filter((resource) => CfnResource.isCfnResource(resource));
+
+  resources.forEach((resource) => {
+    const metadata = resource.getMetadata('checkov') || {};
+    metadata['skip'] = [
+      ...(metadata['skip'] ?? []),
+      ...ids.map((id) => ({ id, comment })),
+    ];
+    resource.addMetadata('checkov', metadata);
+  });
+};
+"
+`;
+
+exports[`infra generator > should generate Checkov configuration files > checkov-yml 1`] = `
+"# Defines the checks to skip entirely. Remove if your requirements differ.
+skip-check:
+  # Lambda function suppressions
+  - CKV_AWS_115 # Concurrent execution limit
+  - CKV_AWS_116 # Dead Letter Queue
+  - CKV_AWS_117 # Lambda functions in VPC
+  - CKV_AWS_173 # Encrypt Lambda environment variables
+  - CKV_AWS_272 # Code signing
+output:
+  - cli
+  - json
+output-file-path: console,dist/packages/test/checkov/checkov_report.json
+"
 `;
 
 exports[`infra generator > should generate consistent file content across runs > consistent-files 1`] = `
@@ -286,11 +385,9 @@ exports[`infra generator > should generate consistent file content across runs >
 }
 ",
   "src/main.ts": "import { ApplicationStage } from './stages/application-stage.js';
-import { App, CfnGuardValidator, RuleSet } from ':proj/common-constructs';
+import { App } from ':proj/common-constructs';
 
-const app = new App({
-  policyValidationBeta1: [new CfnGuardValidator(RuleSet.AWS_PROTOTYPING)],
-});
+const app = new App();
 
 // Use this to deploy your own sandbox environment (assumes your CLI credentials)
 new ApplicationStage(app, 'proj-test-sandbox', {
@@ -440,11 +537,9 @@ exports[`infra generator > should generate files with correct content > cdk-json
 
 exports[`infra generator > should generate files with correct content > main-ts 1`] = `
 "import { ApplicationStage } from './stages/application-stage.js';
-import { App, CfnGuardValidator, RuleSet } from ':proj/common-constructs';
+import { App } from ':proj/common-constructs';
 
-const app = new App({
-  policyValidationBeta1: [new CfnGuardValidator(RuleSet.AWS_PROTOTYPING)],
-});
+const app = new App();
 
 // Use this to deploy your own sandbox environment (assumes your CLI credentials)
 new ApplicationStage(app, 'proj-test-sandbox', {
@@ -529,11 +624,9 @@ exports[`infra generator > should handle custom project names correctly > custom
 }
 ",
   "src/main.ts": "import { ApplicationStage } from './stages/application-stage.js';
-import { App, CfnGuardValidator, RuleSet } from ':proj/common-constructs';
+import { App } from ':proj/common-constructs';
 
-const app = new App({
-  policyValidationBeta1: [new CfnGuardValidator(RuleSet.AWS_PROTOTYPING)],
-});
+const app = new App();
 
 // Use this to deploy your own sandbox environment (assumes your CLI credentials)
 new ApplicationStage(app, 'proj-custom-infra-sandbox', {
@@ -601,6 +694,7 @@ exports[`infra generator > should handle custom project names correctly > custom
         "compile",
         "test",
         "synth",
+        "checkov",
       ],
     },
     "cdk": {
@@ -609,6 +703,22 @@ exports[`infra generator > should handle custom project names correctly > custom
         "command": "cdk",
         "cwd": "packages/custom-infra",
       },
+    },
+    "checkov": {
+      "cache": true,
+      "dependsOn": [
+        "synth",
+      ],
+      "executor": "nx:run-commands",
+      "inputs": [
+        "{workspaceRoot}/dist/{projectRoot}/cdk.out",
+      ],
+      "options": {
+        "command": "uvx checkov==3.2.469 --config-file packages/custom-infra/checkov.yml --file dist/packages/infra/cdk.out/**/*.template.json",
+      },
+      "outputs": [
+        "{workspaceRoot}/dist/{projectRoot}/checkov",
+      ],
     },
     "compile": {
       "executor": "nx:run-commands",

@@ -13,7 +13,7 @@ import NxCommands from '@components/nx-commands.astro';
 
 [AWS CDK](https://docs.aws.amazon.com/cdk/v2/guide/home.html) est un framework permettant de définir une infrastructure cloud via du code et de la déployer via AWS CloudFormation.
 
-Le générateur d'infrastructure TypeScript crée une application d'infrastructure AWS CDK écrite en TypeScript. L'application générée intègre des bonnes pratiques de sécurité grâce à des vérifications [CFN Guard](https://docs.aws.amazon.com/cfn-guard/latest/ug/what-is-guard.html).
+Le générateur d'infrastructure TypeScript crée une application d'infrastructure AWS CDK écrite en TypeScript. L'application générée intègre des bonnes pratiques de sécurité grâce aux vérifications de [Checkov](https://www.checkov.io/).
 
 ## Utilisation
 
@@ -36,11 +36,12 @@ Le générateur créera la structure de projet suivante dans le répertoire `<di
   - src
     - main.ts Point d'entrée de l'application instanciant les stages CDK à déployer
     - stages Définitions des stages CDK
-      - application-stage.ts Définit une collection de stacks à déployer dans un stage
+      - application-stage.ts Définit un ensemble de stacks à déployer dans un stage
     - stacks Définitions des stacks CDK
       - application-stack.ts Stack principale de l'application
   - cdk.json Configuration CDK
   - project.json Configuration du projet et cibles de build
+  - checkov.yml Fichier de configuration Checkov
 
 </FileTree>
 
@@ -80,7 +81,7 @@ new ApplicationStage(app, 'project-sandbox', {
 });
 ```
 
-Vous pouvez ajouter d'autres stages, par exemple pour définir des environnements `beta` et `prod` déployés séparément :
+Vous pouvez ajouter d'autres stages, par exemple définir des stages `beta` et `prod` déployés dans des environnements distincts :
 
 ```ts title="src/main.ts"
 new ApplicationStage(app, 'project-beta', {
@@ -97,7 +98,7 @@ new ApplicationStage(app, 'project-prod', {
 });
 ```
 
-Un Stage définit une collection de stacks à déployer ensemble pour composer votre application. Vous pouvez instancier autant de stacks que nécessaire dans un stage, par exemple :
+Un Stage définit un ensemble de stacks à déployer conjointement pour composer votre application. Vous pouvez instancier autant de stacks que nécessaire dans un stage, par exemple :
 
 ```ts title="src/stages/application-stage.ts"
 import { Stage, StageProps } from 'aws-cdk-lib';
@@ -106,7 +107,7 @@ import { BackendStack } from '../stacks/backend-stack.js';
 import { FrontendStack } from '../stacks/frontend-stack.js';
 
 /**
- * Définit une collection de stacks CDK composant votre application
+ * Définit un ensemble de stacks CDK composant votre application
  */
 export class ApplicationStage extends Stage {
   constructor(scope: Construct, id: string, props?: StageProps) {
@@ -125,9 +126,9 @@ export class ApplicationStage extends Stage {
 
 ### Infrastructure d'API
 
-Si vous avez utilisé les générateurs <Link path="guides/trpc">API tRPC</Link> ou <Link path="guides/fastapi">FastAPI</Link>, vous remarquerez que des constructs sont déjà disponibles dans `packages/common/constructs` pour les déployer.
+Si vous avez utilisé les générateurs <Link path="guides/trpc">tRPC API</Link> ou <Link path="guides/fastapi">FastAPI</Link>, vous remarquerez que des constructs sont déjà disponibles dans `packages/common/constructs` pour les déployer.
 
-Si vous avez créé une API tRPC nommée `my-api`, vous pouvez simplement importer et instancier le construct pour ajouter l'infrastructure nécessaire :
+Par exemple, si vous avez créé une API tRPC nommée `my-api`, vous pouvez simplement importer et instancier le construct pour ajouter l'infrastructure nécessaire :
 
 ```ts title="src/stacks/application-stack.ts" {3, 9-12}
 import * as cdk from 'aws-cdk-lib';
@@ -148,7 +149,7 @@ export class ApplicationStack extends cdk.Stack {
 
 ### Infrastructure de site web
 
-Si vous avez utilisé le générateur <Link path="guides/react-website">site web CloudScape</Link>, un construct est déjà disponible dans `packages/common/constructs` pour le déployer. Par exemple :
+Si vous avez utilisé le générateur <Link path="guides/react-website">site web CloudScape</Link>, un construct est déjà disponible dans `packages/common/constructs`. Par exemple :
 
 ```ts title="src/stacks/application-stack.ts" {3, 9-10}
 import * as cdk from 'aws-cdk-lib';
@@ -166,58 +167,98 @@ export class ApplicationStack extends cdk.Stack {
 ```
 
 :::warning
-Il est important de déclarer le site web _après_ les constructs d'API pour que la <Link path="guides/react-website#runtime-configuration">Configuration Runtime</Link> du site inclue tous les paramètres des API.
+Il est important de déclarer le site web _après_ les constructs d'API pour que la <Link path="guides/react-website#runtime-configuration">Configuration d'exécution</Link> du site inclue toutes les configs d'API.
 :::
 
 ## Synthèse de votre infrastructure
 
-Dans le cadre de votre cible `build`, en plus des <Link path="guides/typescript-project#building">cibles par défaut de compilation, lint et tests</Link>, votre projet d'infrastructure est _synthétisé_ en CloudFormation. Ceci peut aussi être exécuté indépendamment via la cible `synth` :
+En plus des <Link path="guides/typescript-project#building">cibles de compilation, lint et test par défaut</Link>, votre projet d'infrastructure est _synthétisé_ en CloudFormation lors du build. Cette opération peut aussi être exécutée séparément via la cible `synth` :
 
 <NxCommands commands={['run <my-infra>:synth']} />
 
-Vous trouverez votre assembly cloud synthétisée dans le dossier racine `dist`, sous `dist/packages/<my-infra-project>/cdk.out`.
+Vous trouverez l'assembly cloud synthétisée dans le dossier `dist` racine, sous `dist/packages/<my-infra-project>/cdk.out`.
 
-## Bootstrap de votre/vos compte(s) AWS
+## Tests de sécurité
 
-Si vous déployez une application CDK sur un compte AWS pour la première fois, celui-ci doit d'abord être bootstrappé.
+Une cible `checkov` est ajoutée pour exécuter des vérifications de sécurité sur votre infrastructure via [Checkov](https://www.checkov.io/).
 
-1. Assurez-vous d'avoir [configuré les credentials pour votre compte AWS](https://docs.aws.amazon.com/sdkref/latest/guide/access.html).
-2. Utilisez la commande `cdk bootstrap` :
+<NxCommands commands={['run <my-infra>:checkov']} />
+
+Les résultats des tests de sécurité se trouvent dans le dossier `dist` racine, sous `dist/packages/<my-infra-project>/checkov`.
+
+:::note
+Checkov utilise `uvx`, vous devez donc [installer `uv` si ce n'est pas déjà fait](https://docs.astral.sh/uv/getting-started/installation/).
+:::
+
+:::caution
+Certaines règles Checkov sont désactivées par défaut via le fichier `checkov.yml`. Il est recommandé de les revoir selon votre cas d'usage.
+:::
+
+### Suppression de vérifications Checkov
+
+Il peut être nécessaire de supprimer certaines règles sur des ressources. Deux méthodes sont possibles :
+
+#### Supprimer une règle sur un construct donné
+
+```typescript
+import { suppressRules } from ':my-scope/common-constructs';
+
+// Supprime la règle CKV_AWS_XXX pour le construct donné
+suppressRules(construct, ['CKV_AWS_XXX'], 'Raison');
+```
+
+#### Supprimer une règle sur un construct descendant
+
+```typescript
+import { suppressRules } from ':my-scope/common-constructs';
+
+// Supprime CKV_AWS_XXX pour le construct ou ses descendants de type Bucket
+suppressRules(construct, ['CKV_AWS_XXX'], 'Raison', (construct) => construct instanceof Bucket);
+```
+
+## Bootstrap de votre(vos) compte(s) AWS
+
+Si vous déployez une application CDK sur un compte AWS pour la première fois, celui-ci doit être bootstrappé.
+
+Assurez-vous d'abord d'avoir [configuré les credentials pour votre compte AWS](https://docs.aws.amazon.com/sdkref/latest/guide/access.html).
+
+Utilisez ensuite la commande `cdk bootstrap` :
 
 ```bash
 npx cdk bootstrap aws://<account-id>/<region>
 ```
 
-Pour plus de détails, référez-vous à la [documentation CDK](https://docs.aws.amazon.com/cdk/v2/guide/bootstrapping-env.html).
+Pour plus de détails, consultez la [documentation CDK](https://docs.aws.amazon.com/cdk/v2/guide/bootstrapping-env.html).
 
 ## Déploiement sur AWS
 
-Après un build, vous pouvez déployer votre infrastructure sur AWS via la cible `deploy`.
+Après un build, vous pouvez déployer votre infrastructure via la cible `deploy`.
 
 :::caution
-Utilisez la cible `deploy-ci` pour les déploiements en pipeline CI/CD. Voir ci-dessous pour plus de détails.
+Utilisez la cible `deploy-ci` pour les pipelines CI/CD. Voir ci-dessous pour plus de détails.
 :::
 
-1. Assurez-vous d'avoir [configuré les credentials pour votre compte AWS](https://docs.aws.amazon.com/sdkref/latest/guide/access.html).
-2. Exécutez la cible deploy :
+Assurez-vous d'avoir [configuré les credentials pour votre compte AWS](https://docs.aws.amazon.com/sdkref/latest/guide/access.html).
+
+Exécutez ensuite la cible de déploiement :
 
 <NxCommands commands={['run <my-infra>:deploy <my-infra>-sandbox/*']} />
 
 :::tip
-La commande ci-dessus déploie _toutes_ les stacks du stage `<my-infra>-sandbox`. Vous pouvez spécifier d'autres stages s'ils sont définis dans `main.ts`.
+Cette commande déploie _toutes_ les stacks du stage `<my-infra>-sandbox`. Vous pouvez spécifier d'autres stages s'ils sont définis dans `main.ts`.
 
 Vous pouvez aussi déployer des stacks individuelles en spécifiant leur nom complet :
 
 <NxCommands commands={['run <my-infra>:deploy <my-infra>-sandbox/Application']} />
 :::
 
-## Déploiement sur AWS en pipeline CI/CD
+## Déploiement sur AWS dans un pipeline CI/CD
 
-Utilisez la cible `deploy-ci` pour déployer sur AWS dans un pipeline CI/CD :
+Utilisez la cible `deploy-ci` pour les déploiements dans un pipeline CI/CD :
 
 <NxCommands commands={['run <my-infra>:deploy-ci my-stage/*']} />
 
-Cette cible diffère légèrement de `deploy` en ce qu'elle déploie une cloud-assembly pré-synthétisée plutôt que de synthétiser à la volée. Cela évite les problèmes de non-déterminisme liés aux versions de packages, garantissant que chaque étape du pipeline déploie la même cloud-assembly.
+Cette cible diffère légèrement en déployant l'assembly cloud pré-synthétisée plutôt que de synthétiser à la volée. Cela évite les problèmes de non-déterminisme liés aux versions de packages, garantissant que chaque étape du pipeline déploie la même assembly cloud.
 
 ## Suppression de l'infrastructure AWS
 
@@ -225,6 +266,6 @@ Utilisez la cible `destroy` pour supprimer vos ressources :
 
 <NxCommands commands={['run <my-infra>:destroy <my-infra>-sandbox/*']} />
 
-## Plus d'informations
+## Informations complémentaires
 
-Pour en savoir plus sur CDK, consultez le [Guide développeur CDK](https://docs.aws.amazon.com/cdk/v2/guide/core_concepts.html) et la [Référence d'API](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-construct-library.html).
+Pour en savoir plus sur CDK, consultez le [Guide développeur CDK](https://docs.aws.amazon.com/cdk/v2/guide/core_concepts.html) et la [Référence API](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-construct-library.html).

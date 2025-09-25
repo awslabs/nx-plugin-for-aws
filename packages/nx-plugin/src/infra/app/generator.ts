@@ -35,6 +35,7 @@ import {
 } from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { kebabCase } from '../../utils/names';
+import { uvxCommand } from '../../utils/py';
 
 export const INFRA_APP_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -65,6 +66,7 @@ export async function tsInfraGenerator(
   const scopeAlias = toScopeAlias(npmScopePrefix);
   const fullyQualifiedName = `${npmScopePrefix}${schema.name}`;
   tree.delete(joinPathFragments(libraryRoot, 'src'));
+
   generateFiles(
     tree, // the virtual file system
     joinPathFragments(__dirname, './files/app'), // path to the file templates
@@ -75,26 +77,14 @@ export async function tsInfraGenerator(
       namespace: kebabCase(fullyQualifiedName),
       fullyQualifiedName,
       pkgMgrCmd: getPackageManagerCommand().exec,
+      dir: lib.dir,
       ...schema,
-      ruleSet: schema.ruleSet.toUpperCase(),
     },
     {
       overwriteStrategy: OverwriteStrategy.Overwrite,
     },
   );
-  generateFiles(
-    tree, // the virtual file system
-    joinPathFragments(__dirname, 'files', SHARED_CONSTRUCTS_DIR, 'src', 'core'),
-    joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'src', 'core'),
-    {
-      synthDir: synthDirFromProject,
-      scopeAlias: toScopeAlias(getNpmScopePrefix(tree)),
-      ...schema,
-    },
-    {
-      overwriteStrategy: OverwriteStrategy.KeepExisting,
-    },
-  );
+
   updateJson(
     tree,
     `${libraryRoot}/project.json`,
@@ -103,6 +93,7 @@ export async function tsInfraGenerator(
       config.targets.build.dependsOn = [
         ...(config.targets.build.dependsOn ?? []),
         'synth',
+        'checkov',
       ];
       config.targets.synth = {
         cache: true,
@@ -113,6 +104,19 @@ export async function tsInfraGenerator(
         options: {
           cwd: libraryRoot,
           command: 'cdk synth',
+        },
+      };
+      config.targets.checkov = {
+        cache: true,
+        executor: 'nx:run-commands',
+        inputs: ['{workspaceRoot}/dist/{projectRoot}/cdk.out'],
+        outputs: ['{workspaceRoot}/dist/{projectRoot}/checkov'],
+        dependsOn: ['synth'],
+        options: {
+          command: uvxCommand(
+            'checkov',
+            `--config-file ${lib.dir}/checkov.yml --file dist/packages/infra/cdk.out/**/*.template.json`,
+          ),
         },
       };
       config.targets.deploy = {
@@ -161,21 +165,10 @@ export async function tsInfraGenerator(
       return config;
     },
   );
-  addStarExport(
-    tree,
-    joinPathFragments(
-      PACKAGES_DIR,
-      SHARED_CONSTRUCTS_DIR,
-      'src',
-      'core',
-      'index.ts',
-    ),
-    './cfn-guard.js',
-  );
+
   addDependenciesToPackageJson(
     tree,
     withVersions([
-      '@cdklabs/cdk-validator-cfnguard',
       'aws-cdk-lib',
       'aws-cdk',
       'esbuild',

@@ -13,7 +13,6 @@ describe('infra generator', () => {
 
   const options: TsInfraGeneratorSchema = {
     name: 'test',
-    ruleSet: 'aws_prototyping',
     directory: 'packages',
     skipInstall: true,
   };
@@ -118,6 +117,51 @@ describe('infra generator', () => {
     });
   });
 
+  it('should generate Checkov configuration files', async () => {
+    await tsInfraGenerator(tree, options);
+
+    // Verify .checkov.yml file is generated
+    expect(tree.exists('packages/test/checkov.yml')).toBeTruthy();
+    const checkovConfig = tree.read('packages/test/checkov.yml').toString();
+    expect(checkovConfig).toMatchSnapshot('checkov-yml');
+
+    // Verify checkov.ts utility file is generated in shared constructs
+    expect(
+      tree.exists('packages/common/constructs/src/core/checkov.ts'),
+    ).toBeTruthy();
+    const checkovTs = tree
+      .read('packages/common/constructs/src/core/checkov.ts')
+      .toString();
+    expect(checkovTs).toMatchSnapshot('checkov-ts');
+
+    // Verify checkov.js export is added to shared constructs index
+    const sharedConstructsIndex = tree
+      .read('packages/common/constructs/src/core/index.ts')
+      .toString();
+    expect(sharedConstructsIndex).toContain("export * from './checkov.js';");
+  });
+
+  it('should configure Checkov target correctly', async () => {
+    await tsInfraGenerator(tree, options);
+    const config = readProjectConfiguration(tree, '@proj/test');
+
+    // Verify Checkov target configuration
+    expect(config.targets.checkov).toMatchSnapshot('checkov-target');
+    expect(config.targets.checkov).toMatchObject({
+      cache: true,
+      executor: 'nx:run-commands',
+      inputs: ['{workspaceRoot}/dist/{projectRoot}/cdk.out'],
+      outputs: ['{workspaceRoot}/dist/{projectRoot}/checkov'],
+      dependsOn: ['synth'],
+      options: {
+        command: expect.stringContaining('uvx checkov'),
+      },
+    });
+
+    // Verify Checkov is included in build dependencies
+    expect(config.targets.build.dependsOn).toContain('checkov');
+  });
+
   it('should add required dependencies to package.json', async () => {
     await tsInfraGenerator(tree, options);
     const packageJson = JSON.parse(tree.read('package.json').toString());
@@ -129,7 +173,6 @@ describe('infra generator', () => {
     expect(packageJson.devDependencies).toMatchSnapshot('dev-dependencies');
     // Test specific dependency values
     expect(packageJson.dependencies).toMatchObject({
-      '@cdklabs/cdk-validator-cfnguard': expect.any(String),
       'aws-cdk-lib': expect.any(String),
       'aws-cdk': expect.any(String),
       esbuild: expect.any(String),
@@ -145,7 +188,6 @@ describe('infra generator', () => {
     const customOptions: TsInfraGeneratorSchema = {
       name: 'custom-infra',
       directory: 'packages',
-      ruleSet: 'aws_prototyping',
       skipInstall: true,
     };
     await tsInfraGenerator(tree, customOptions);

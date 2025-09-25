@@ -1259,9 +1259,58 @@ class MetricsAspect implements IAspect {
 "
 `;
 
+exports[`react-website generator > Tanstack router integration > should generate website with no router correctly > packages/common/constructs/src/core/checkov.ts 1`] = `
+"import { IConstruct } from 'constructs';
+import { CfnResource } from 'aws-cdk-lib';
+
+/**
+ * Suppresses a set of rules for a construct tree.
+ *
+ * @param construct The root construct to suppress the rule for.
+ * @param ids The ids of the rules to suppress.
+ * @param comment The reason for suppressing the rule
+ * @param predicate A predicate function that determines whether the rule should be suppressed for the given construct or any of its descendants.
+ *
+ * @example
+ * The following example suppresses the CKV_AWS_XXX rule for the given construct.
+ * suppressRules(construct, ['CKV_AWS_XXX'], 'Not required for this use case')
+ *
+ * @example
+ * The following example suppresses the CKV_AWS_XXX rule for the construct or any of its descendants if it is an instance of Bucket:
+ * suppressRules(construct, ['CKV_AWS_XXX'], 'Not required for this use case', (construct) => construct instanceof Bucket)
+ */
+export const suppressRules = (
+  construct: IConstruct,
+  ids: string[],
+  comment: string,
+  predicate?: (construct: IConstruct) => boolean,
+) => {
+  const resources = (
+    predicate ? construct.node.findAll().filter(predicate) : [construct]
+  )
+    .map((resource) => {
+      if (CfnResource.isCfnResource(resource)) {
+        return resource;
+      } else return resource.node.defaultChild;
+    })
+    .filter((resource) => CfnResource.isCfnResource(resource));
+
+  resources.forEach((resource) => {
+    const metadata = resource.getMetadata('checkov') || {};
+    metadata['skip'] = [
+      ...(metadata['skip'] ?? []),
+      ...ids.map((id) => ({ id, comment })),
+    ];
+    resource.addMetadata('checkov', metadata);
+  });
+};
+"
+`;
+
 exports[`react-website generator > Tanstack router integration > should generate website with no router correctly > packages/common/constructs/src/core/index.ts 1`] = `
 "export * from './static-website.js';
 export * from './app.js';
+export * from './checkov.js';
 export * from './runtime-config.js';
 "
 `;
@@ -1301,7 +1350,7 @@ export class RuntimeConfig extends Construct {
 `;
 
 exports[`react-website generator > Tanstack router integration > should generate website with no router correctly > packages/common/constructs/src/core/static-website.ts 1`] = `
-"import { CfnOutput, RemovalPolicy, Stack } from 'aws-cdk-lib';
+"import { CfnOutput, CfnResource, RemovalPolicy, Stack } from 'aws-cdk-lib';
 import { Distribution, ViewerProtocolPolicy } from 'aws-cdk-lib/aws-cloudfront';
 import { S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import {
@@ -1316,6 +1365,8 @@ import { Construct } from 'constructs';
 import { RuntimeConfig } from './runtime-config.js';
 import { Key } from 'aws-cdk-lib/aws-kms';
 import { CfnWebACL } from 'aws-cdk-lib/aws-wafv2';
+import { suppressRules } from './checkov.js';
+
 const DEFAULT_RUNTIME_CONFIG_FILENAME = 'runtime-config.json';
 
 export interface StaticWebsiteProps {
@@ -1362,6 +1413,17 @@ export class StaticWebsite extends Construct {
       publicReadAccess: false,
       blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
     });
+    suppressRules(
+      accessLogsBucket,
+      ['CKV_AWS_21'],
+      'Access log bucket does not need versioning enabled',
+    );
+    suppressRules(
+      accessLogsBucket,
+      ['CKV_AWS_18'],
+      'Access log bucket does not need an access log bucket',
+    );
+
     // S3 Bucket to hold website files
     this.websiteBucket = new Bucket(this, 'WebsiteBucket', {
       versioned: true,
@@ -1392,6 +1454,12 @@ export class StaticWebsite extends Construct {
       serverAccessLogsPrefix: 'distribution-access-logs',
       serverAccessLogsBucket: accessLogsBucket,
     });
+    suppressRules(
+      logBucket,
+      ['CKV_AWS_21'],
+      'Distribution log bucket does not need versioning enabled',
+    );
+
     const defaultRootObject = 'index.html';
     this.cloudFrontDistribution = new Distribution(
       this,
@@ -1419,6 +1487,12 @@ export class StaticWebsite extends Construct {
         ],
       },
     );
+    suppressRules(
+      this.cloudFrontDistribution,
+      ['CKV_AWS_174'],
+      'Cloudfront default certificate does not use TLS 1.2',
+    );
+
     // Deploy Website
     this.bucketDeployment = new BucketDeployment(this, 'WebsiteDeployment', {
       sources: [
@@ -1433,6 +1507,17 @@ export class StaticWebsite extends Construct {
       distribution: this.cloudFrontDistribution,
       memoryLimit: 1024,
     });
+
+    suppressRules(
+      Stack.of(this),
+      ['CKV_AWS_111'],
+      'CDK Bucket Deployment uses wildcard to deploy arbitrary assets',
+      (c) =>
+        CfnResource.isCfnResource(c) &&
+        c.cfnResourceType === 'AWS::IAM::Policy' &&
+        c.node.path.includes(\`/Custom::CDKBucketDeployment\`),
+    );
+
     new CfnOutput(this, 'DistributionDomainName', {
       value: this.cloudFrontDistribution.domainName,
     });
@@ -1468,6 +1553,24 @@ export class CloudfrontWebAcl extends Stack {
           statement: {
             managedRuleGroupStatement: {
               name: 'AWSManagedRulesCommonRuleSet',
+              vendorName: 'AWS',
+            },
+          },
+          visibilityConfig: {
+            cloudWatchMetricsEnabled: true,
+            metricName: 'MetricForWebACLCDK-CRS',
+            sampledRequestsEnabled: true,
+          },
+          overrideAction: {
+            none: {},
+          },
+        },
+        {
+          name: 'KnownBadInputsRule',
+          priority: 1,
+          statement: {
+            managedRuleGroupStatement: {
+              name: 'AWSManagedRulesKnownBadInputsRuleSet',
               vendorName: 'AWS',
             },
           },
@@ -2561,9 +2664,58 @@ class MetricsAspect implements IAspect {
 "
 `;
 
+exports[`react-website generator > Tanstack router integration > should generate website with router correctly > packages/common/constructs/src/core/checkov.ts 1`] = `
+"import { IConstruct } from 'constructs';
+import { CfnResource } from 'aws-cdk-lib';
+
+/**
+ * Suppresses a set of rules for a construct tree.
+ *
+ * @param construct The root construct to suppress the rule for.
+ * @param ids The ids of the rules to suppress.
+ * @param comment The reason for suppressing the rule
+ * @param predicate A predicate function that determines whether the rule should be suppressed for the given construct or any of its descendants.
+ *
+ * @example
+ * The following example suppresses the CKV_AWS_XXX rule for the given construct.
+ * suppressRules(construct, ['CKV_AWS_XXX'], 'Not required for this use case')
+ *
+ * @example
+ * The following example suppresses the CKV_AWS_XXX rule for the construct or any of its descendants if it is an instance of Bucket:
+ * suppressRules(construct, ['CKV_AWS_XXX'], 'Not required for this use case', (construct) => construct instanceof Bucket)
+ */
+export const suppressRules = (
+  construct: IConstruct,
+  ids: string[],
+  comment: string,
+  predicate?: (construct: IConstruct) => boolean,
+) => {
+  const resources = (
+    predicate ? construct.node.findAll().filter(predicate) : [construct]
+  )
+    .map((resource) => {
+      if (CfnResource.isCfnResource(resource)) {
+        return resource;
+      } else return resource.node.defaultChild;
+    })
+    .filter((resource) => CfnResource.isCfnResource(resource));
+
+  resources.forEach((resource) => {
+    const metadata = resource.getMetadata('checkov') || {};
+    metadata['skip'] = [
+      ...(metadata['skip'] ?? []),
+      ...ids.map((id) => ({ id, comment })),
+    ];
+    resource.addMetadata('checkov', metadata);
+  });
+};
+"
+`;
+
 exports[`react-website generator > Tanstack router integration > should generate website with router correctly > packages/common/constructs/src/core/index.ts 1`] = `
 "export * from './static-website.js';
 export * from './app.js';
+export * from './checkov.js';
 export * from './runtime-config.js';
 "
 `;
@@ -2603,7 +2755,7 @@ export class RuntimeConfig extends Construct {
 `;
 
 exports[`react-website generator > Tanstack router integration > should generate website with router correctly > packages/common/constructs/src/core/static-website.ts 1`] = `
-"import { CfnOutput, RemovalPolicy, Stack } from 'aws-cdk-lib';
+"import { CfnOutput, CfnResource, RemovalPolicy, Stack } from 'aws-cdk-lib';
 import { Distribution, ViewerProtocolPolicy } from 'aws-cdk-lib/aws-cloudfront';
 import { S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import {
@@ -2618,6 +2770,8 @@ import { Construct } from 'constructs';
 import { RuntimeConfig } from './runtime-config.js';
 import { Key } from 'aws-cdk-lib/aws-kms';
 import { CfnWebACL } from 'aws-cdk-lib/aws-wafv2';
+import { suppressRules } from './checkov.js';
+
 const DEFAULT_RUNTIME_CONFIG_FILENAME = 'runtime-config.json';
 
 export interface StaticWebsiteProps {
@@ -2664,6 +2818,17 @@ export class StaticWebsite extends Construct {
       publicReadAccess: false,
       blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
     });
+    suppressRules(
+      accessLogsBucket,
+      ['CKV_AWS_21'],
+      'Access log bucket does not need versioning enabled',
+    );
+    suppressRules(
+      accessLogsBucket,
+      ['CKV_AWS_18'],
+      'Access log bucket does not need an access log bucket',
+    );
+
     // S3 Bucket to hold website files
     this.websiteBucket = new Bucket(this, 'WebsiteBucket', {
       versioned: true,
@@ -2694,6 +2859,12 @@ export class StaticWebsite extends Construct {
       serverAccessLogsPrefix: 'distribution-access-logs',
       serverAccessLogsBucket: accessLogsBucket,
     });
+    suppressRules(
+      logBucket,
+      ['CKV_AWS_21'],
+      'Distribution log bucket does not need versioning enabled',
+    );
+
     const defaultRootObject = 'index.html';
     this.cloudFrontDistribution = new Distribution(
       this,
@@ -2721,6 +2892,12 @@ export class StaticWebsite extends Construct {
         ],
       },
     );
+    suppressRules(
+      this.cloudFrontDistribution,
+      ['CKV_AWS_174'],
+      'Cloudfront default certificate does not use TLS 1.2',
+    );
+
     // Deploy Website
     this.bucketDeployment = new BucketDeployment(this, 'WebsiteDeployment', {
       sources: [
@@ -2735,6 +2912,17 @@ export class StaticWebsite extends Construct {
       distribution: this.cloudFrontDistribution,
       memoryLimit: 1024,
     });
+
+    suppressRules(
+      Stack.of(this),
+      ['CKV_AWS_111'],
+      'CDK Bucket Deployment uses wildcard to deploy arbitrary assets',
+      (c) =>
+        CfnResource.isCfnResource(c) &&
+        c.cfnResourceType === 'AWS::IAM::Policy' &&
+        c.node.path.includes(\`/Custom::CDKBucketDeployment\`),
+    );
+
     new CfnOutput(this, 'DistributionDomainName', {
       value: this.cloudFrontDistribution.domainName,
     });
@@ -2770,6 +2958,24 @@ export class CloudfrontWebAcl extends Stack {
           statement: {
             managedRuleGroupStatement: {
               name: 'AWSManagedRulesCommonRuleSet',
+              vendorName: 'AWS',
+            },
+          },
+          visibilityConfig: {
+            cloudWatchMetricsEnabled: true,
+            metricName: 'MetricForWebACLCDK-CRS',
+            sampledRequestsEnabled: true,
+          },
+          overrideAction: {
+            none: {},
+          },
+        },
+        {
+          name: 'KnownBadInputsRule',
+          priority: 1,
+          statement: {
+            managedRuleGroupStatement: {
+              name: 'AWSManagedRulesKnownBadInputsRuleSet',
               vendorName: 'AWS',
             },
           },
@@ -4025,12 +4231,13 @@ exports[`react-website generator > should generate shared constructs > common/co
 exports[`react-website generator > should generate shared constructs > common/constructs-core-index.ts 1`] = `
 "export * from './static-website.js';
 export * from './app.js';
+export * from './checkov.js';
 export * from './runtime-config.js';
 "
 `;
 
 exports[`react-website generator > should generate shared constructs > common/constructs-core-static-website.ts 1`] = `
-"import { CfnOutput, RemovalPolicy, Stack } from 'aws-cdk-lib';
+"import { CfnOutput, CfnResource, RemovalPolicy, Stack } from 'aws-cdk-lib';
 import { Distribution, ViewerProtocolPolicy } from 'aws-cdk-lib/aws-cloudfront';
 import { S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import {
@@ -4045,6 +4252,8 @@ import { Construct } from 'constructs';
 import { RuntimeConfig } from './runtime-config.js';
 import { Key } from 'aws-cdk-lib/aws-kms';
 import { CfnWebACL } from 'aws-cdk-lib/aws-wafv2';
+import { suppressRules } from './checkov.js';
+
 const DEFAULT_RUNTIME_CONFIG_FILENAME = 'runtime-config.json';
 
 export interface StaticWebsiteProps {
@@ -4091,6 +4300,17 @@ export class StaticWebsite extends Construct {
       publicReadAccess: false,
       blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
     });
+    suppressRules(
+      accessLogsBucket,
+      ['CKV_AWS_21'],
+      'Access log bucket does not need versioning enabled',
+    );
+    suppressRules(
+      accessLogsBucket,
+      ['CKV_AWS_18'],
+      'Access log bucket does not need an access log bucket',
+    );
+
     // S3 Bucket to hold website files
     this.websiteBucket = new Bucket(this, 'WebsiteBucket', {
       versioned: true,
@@ -4121,6 +4341,12 @@ export class StaticWebsite extends Construct {
       serverAccessLogsPrefix: 'distribution-access-logs',
       serverAccessLogsBucket: accessLogsBucket,
     });
+    suppressRules(
+      logBucket,
+      ['CKV_AWS_21'],
+      'Distribution log bucket does not need versioning enabled',
+    );
+
     const defaultRootObject = 'index.html';
     this.cloudFrontDistribution = new Distribution(
       this,
@@ -4148,6 +4374,12 @@ export class StaticWebsite extends Construct {
         ],
       },
     );
+    suppressRules(
+      this.cloudFrontDistribution,
+      ['CKV_AWS_174'],
+      'Cloudfront default certificate does not use TLS 1.2',
+    );
+
     // Deploy Website
     this.bucketDeployment = new BucketDeployment(this, 'WebsiteDeployment', {
       sources: [
@@ -4162,6 +4394,17 @@ export class StaticWebsite extends Construct {
       distribution: this.cloudFrontDistribution,
       memoryLimit: 1024,
     });
+
+    suppressRules(
+      Stack.of(this),
+      ['CKV_AWS_111'],
+      'CDK Bucket Deployment uses wildcard to deploy arbitrary assets',
+      (c) =>
+        CfnResource.isCfnResource(c) &&
+        c.cfnResourceType === 'AWS::IAM::Policy' &&
+        c.node.path.includes(\`/Custom::CDKBucketDeployment\`),
+    );
+
     new CfnOutput(this, 'DistributionDomainName', {
       value: this.cloudFrontDistribution.domainName,
     });
@@ -4197,6 +4440,24 @@ export class CloudfrontWebAcl extends Stack {
           statement: {
             managedRuleGroupStatement: {
               name: 'AWSManagedRulesCommonRuleSet',
+              vendorName: 'AWS',
+            },
+          },
+          visibilityConfig: {
+            cloudWatchMetricsEnabled: true,
+            metricName: 'MetricForWebACLCDK-CRS',
+            sampledRequestsEnabled: true,
+          },
+          overrideAction: {
+            none: {},
+          },
+        },
+        {
+          name: 'KnownBadInputsRule',
+          priority: 1,
+          statement: {
+            managedRuleGroupStatement: {
+              name: 'AWSManagedRulesKnownBadInputsRuleSet',
               vendorName: 'AWS',
             },
           },

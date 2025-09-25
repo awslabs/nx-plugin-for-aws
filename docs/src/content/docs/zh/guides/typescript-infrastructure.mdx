@@ -3,8 +3,6 @@ title: "CDK基础设施"
 description: "CDK基础设施参考文档"
 ---
 
-
-
 import { FileTree } from '@astrojs/starlight/components';
 import RunGenerator from '@components/run-generator.astro';
 import Link from '@components/link.astro';
@@ -13,7 +11,7 @@ import NxCommands from '@components/nx-commands.astro';
 
 [AWS CDK](https://docs.aws.amazon.com/cdk/v2/guide/home.html) 是一个通过代码定义云基础设施并通过 AWS CloudFormation 进行部署的框架。
 
-TypeScript 基础设施生成器会创建一个用 TypeScript 编写的 AWS CDK 基础设施应用。生成的应用程序通过 [CFN Guard](https://docs.aws.amazon.com/cfn-guard/latest/ug/what-is-guard.html) 检查集成了安全最佳实践。
+TypeScript 基础设施生成器会创建一个用 TypeScript 编写的 AWS CDK 基础设施应用。生成的应用程序通过 [Checkov](https://www.checkov.io/) 安全检查集成了安全最佳实践。
 
 ## 使用方式
 
@@ -23,7 +21,7 @@ TypeScript 基础设施生成器会创建一个用 TypeScript 编写的 AWS CDK 
 
 <RunGenerator generator="ts#infra" />
 
-### 选项参数
+### 选项配置
 
 <GeneratorParameters generator="ts#infra" />
 
@@ -36,11 +34,12 @@ TypeScript 基础设施生成器会创建一个用 TypeScript 编写的 AWS CDK 
   - src
     - main.ts 实例化 CDK 部署阶段的应用程序入口点
     - stages CDK 阶段定义
-      - application-stage.ts 定义要在阶段中部署的堆栈集合
+      - application-stage.ts 定义阶段中要部署的堆栈集合
     - stacks CDK 堆栈定义
       - application-stack.ts 主应用堆栈
-  - cdk.json CDK 配置
-  - project.json 项目配置与构建目标
+  - cdk.json CDK 配置文件
+  - project.json 项目配置和构建目标
+  - checkov.yml Checkov 配置文件
 
 </FileTree>
 
@@ -69,7 +68,7 @@ export class ApplicationStack extends Stack {
 
 ### 阶段与堆栈
 
-您会注意到顶层的 `src/main.ts` 文件实例化了一个名为 `<namespace>-sandbox` 的 CDK [阶段](https://docs.aws.amazon.com/cdk/v2/guide/stages.html)，该阶段用于您自己的开发和测试。
+您会注意到顶层的 `src/main.ts` 文件实例化了一个名为 `<namespace>-sandbox` 的 CDK [阶段](https://docs.aws.amazon.com/cdk/v2/guide/stages.html)。该阶段用于您自己的开发和测试。
 
 ```ts title="src/main.ts"
 new ApplicationStage(app, 'project-sandbox', {
@@ -80,24 +79,24 @@ new ApplicationStage(app, 'project-sandbox', {
 });
 ```
 
-您可以添加更多阶段，例如定义部署到不同环境的 `beta` 和 `prod` 阶段：
+您可以添加更多阶段，例如定义 `beta` 和 `prod` 阶段以部署到不同环境：
 
 ```ts title="src/main.ts"
 new ApplicationStage(app, 'project-beta', {
   env: {
-    account: '123456789012', // beta 环境账户
+    account: '123456789012', // beta 账户
     region: 'us-west-2',
   },
 });
 new ApplicationStage(app, 'project-prod', {
   env: {
-    account: '098765432109', // 生产环境账户
+    account: '098765432109', // 生产账户
     region: 'us-west-2',
   },
 });
 ```
 
-阶段定义了应一起部署以构成应用程序的堆栈集合。您可以在阶段内实例化任意数量的堆栈，例如：
+阶段定义了应一起部署的堆栈集合。您可以在一个阶段内实例化任意数量的堆栈，例如：
 
 ```ts title="src/stages/application-stage.ts"
 import { Stage, StageProps } from 'aws-cdk-lib';
@@ -171,19 +170,57 @@ export class ApplicationStack extends cdk.Stack {
 
 ## 合成基础设施
 
-作为 `build` 目标的一部分，除了运行 <Link path="guides/typescript-project#building">默认的编译、检查与测试目标</Link> 外，您的基础设施项目会被_合成_为 CloudFormation 模板。您也可以通过运行 `synth` 目标单独执行此操作：
+作为 `build` 目标的一部分，除了运行 <Link path="guides/typescript-project#building">默认的编译、检查和测试目标</Link> 外，您的基础设施项目会被 _合成_ 为 CloudFormation。也可以通过单独执行 `synth` 目标来运行：
 
 <NxCommands commands={['run <my-infra>:synth']} />
 
-您可以在根目录的 `dist` 文件夹下找到合成后的云装配件，路径为 `dist/packages/<my-infra-project>/cdk.out`。
+您可以在根目录的 `dist` 文件夹下找到合成的云装配，路径为 `dist/packages/<my-infra-project>/cdk.out`。
 
-## 初始化 AWS 账户
+## 安全测试
 
-如果是首次向 AWS 账户部署 CDK 应用，需要先进行初始化。
+项目中添加了 `checkov` 目标，使用 [Checkov](https://www.checkov.io/) 对基础设施进行安全检查。
 
-首先，确保已为您的 AWS 账户[配置凭证](https://docs.aws.amazon.com/sdkref/latest/guide/access.html)。
+<NxCommands commands={['run <my-infra>:checkov']} />
 
-接着，使用 `cdk bootstrap` 命令：
+安全测试结果位于根目录的 `dist` 文件夹下，路径为 `dist/packages/<my-infra-project>/checkov`。
+
+:::note
+Checkov 通过 `uvx` 运行，因此需要 [安装 `uv`](https://docs.astral.sh/uv/getting-started/installation/)（如果尚未安装）。
+:::
+
+:::caution
+默认情况下，`checkov.yml` 文件会抑制部分 Checkov 规则。建议根据您的使用场景重新审查这些规则。
+:::
+
+### 抑制 Checkov 检查
+
+在某些情况下，您可能需要抑制特定资源上的某些规则。可通过两种方式实现：
+
+#### 在指定构造上抑制规则
+
+```typescript
+import { suppressRules } from ':my-scope/common-constructs';
+
+// 抑制指定构造的 CKV_AWS_XXX 规则
+suppressRules(construct, ['CKV_AWS_XXX'], '原因说明');
+```
+
+#### 在派生构造上抑制规则
+
+```typescript
+import { suppressRules } from ':my-scope/common-constructs';
+
+// 如果构造或其派生构造是 Bucket 实例，则抑制 CKV_AWS_XXX 规则
+suppressRules(construct, ['CKV_AWS_XXX'], '原因说明', (construct) => construct instanceof Bucket);
+```
+
+## 引导 AWS 账户
+
+如果是首次向 AWS 账户部署 CDK 应用，需要先进行引导。
+
+首先，确保已 [为 AWS 账户配置凭证](https://docs.aws.amazon.com/sdkref/latest/guide/access.html)。
+
+然后，使用 `cdk bootstrap` 命令：
 
 ```bash
 npx cdk bootstrap aws://<account-id>/<region>
@@ -193,20 +230,20 @@ npx cdk bootstrap aws://<account-id>/<region>
 
 ## 部署到 AWS
 
-构建完成后，您可以使用 `deploy` 目标将基础设施部署到 AWS。
+构建完成后，可通过 `deploy` 目标将基础设施部署到 AWS。
 
 :::caution
-在 CI/CD 流水线中部署时请使用 `deploy-ci` 目标，详见下文。
+在 CI/CD 流水线中部署时，请使用 `deploy-ci` 目标。详见下文。
 :::
 
-首先，确保已为您的 AWS 账户[配置凭证](https://docs.aws.amazon.com/sdkref/latest/guide/access.html)。
+首先，确保已 [为 AWS 账户配置凭证](https://docs.aws.amazon.com/sdkref/latest/guide/access.html)。
 
-接着，运行部署目标：
+然后运行部署目标：
 
 <NxCommands commands={['run <my-infra>:deploy <my-infra>-sandbox/*']} />
 
 :::tip
-上述命令会部署 `<my-infra>-sandbox` 阶段的所有堆栈。只要在 `main.ts` 中定义过其他阶段，您也可以指定它们。
+上述命令部署 `<my-infra>-sandbox` 阶段的所有堆栈。只要阶段在 `main.ts` 中定义，您也可以指定其他阶段。
 
 您还可以通过指定完整堆栈名称来部署单个堆栈，例如：
 
@@ -215,18 +252,18 @@ npx cdk bootstrap aws://<account-id>/<region>
 
 ## 在 CI/CD 流水线中部署到 AWS
 
-若要在 CI/CD 流水线中部署到 AWS，请使用 `deploy-ci` 目标。
+在 CI/CD 流水线中部署时，请使用 `deploy-ci` 目标。
 
 <NxCommands commands={['run <my-infra>:deploy-ci my-stage/*']} />
 
-该目标与常规 `deploy` 目标的区别在于，它确保部署的是预先合成的云装配件，而非动态合成。这有助于避免因软件包版本变化导致的非确定性问题，确保流水线每个阶段都使用相同的云装配件进行部署。
+该目标与常规 `deploy` 目标的区别在于，它确保部署预合成的云装配，而不是动态合成。这有助于避免因包版本变化导致的非确定性问题，确保每个流水线阶段使用相同的云装配进行部署。
 
 ## 销毁 AWS 基础设施
 
-使用 `destroy` 目标来销毁您的资源：
+使用 `destroy` 目标来销毁资源：
 
 <NxCommands commands={['run <my-infra>:destroy <my-infra>-sandbox/*']} />
 
 ## 更多信息
 
-有关 CDK 的更多信息，请参考 [CDK 开发者指南](https://docs.aws.amazon.com/cdk/v2/guide/core_concepts.html) 和 [API 参考文档](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-construct-library.html)。
+有关 CDK 的更多信息，请参考 [CDK 开发者指南](https://docs.aws.amazon.com/cdk/v2/guide/core_concepts.html) 和 [API 参考](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-construct-library.html)。

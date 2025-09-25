@@ -11,11 +11,11 @@ import Link from '@components/link.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 
-O [AWS CDK](https://docs.aws.amazon.com/cdk/v2/guide/home.html) é um framework para definir infraestrutura em nuvem através de código e provisioná-la utilizando AWS CloudFormation.
+O [AWS CDK](https://docs.aws.amazon.com/cdk/v2/guide/home.html) é um framework para definir infraestrutura em nuvem em código e provisioná-la através do AWS CloudFormation.
 
-O gerador de infraestrutura TypeScript cria uma aplicação AWS CDK escrita em TypeScript. A aplicação gerada inclui práticas recomendadas de segurança através de verificações com [CFN Guard](https://docs.aws.amazon.com/cfn-guard/latest/ug/what-is-guard.html).
+O gerador de infraestrutura TypeScript cria uma aplicação de infraestrutura AWS CDK escrita em TypeScript. A aplicação gerada inclui práticas recomendadas de segurança através de verificações do [Checkov](https://www.checkov.io/).
 
-## Uso
+## Utilização
 
 ### Gerar um Projeto de Infraestrutura
 
@@ -36,16 +36,17 @@ O gerador criará a seguinte estrutura de projeto no diretório `<directory>/<na
   - src
     - main.ts Ponto de entrada da aplicação que instancia estágios do CDK para implantação
     - stages Definições de estágios do CDK
-      - application-stage.ts Define uma coleção de stacks para implantação em um estágio
+      - application-stage.ts Define uma coleção de stacks para implantar em um estágio
     - stacks Definições de stacks do CDK
       - application-stack.ts Stack principal da aplicação
   - cdk.json Configuração do CDK
   - project.json Configuração do projeto e targets de build
+  - checkov.yml Arquivo de configuração do Checkov
 
 </FileTree>
 
 :::tip
-Sua infraestrutura é um projeto TypeScript, então você pode consultar a <Link path="guides/typescript-project">documentação de projetos TypeScript</Link> para mais detalhes sobre o uso geral.
+Sua infraestrutura é um projeto TypeScript, portanto você pode consultar a <Link path="guides/typescript-project">documentação de projetos TypeScript</Link> para detalhes gerais de utilização.
 :::
 
 ## Implementando sua Infraestrutura CDK
@@ -69,7 +70,7 @@ export class ApplicationStack extends Stack {
 
 ### Estágios e Stacks
 
-Você notará que o arquivo principal `src/main.ts` instancia um [Stage](https://docs.aws.amazon.com/cdk/v2/guide/stages.html) do CDK chamado `<namespace>-sandbox`. Este estágio é destinado para seus próprios testes e desenvolvimento.
+Você notará que o arquivo principal `src/main.ts` instancia um [Stage](https://docs.aws.amazon.com/cdk/v2/guide/stages.html) do CDK chamado `<namespace>-sandbox`. Este estágio é destinado ao seu próprio desenvolvimento e testes.
 
 ```ts title="src/main.ts"
 new ApplicationStage(app, 'project-sandbox', {
@@ -138,7 +139,7 @@ export class ApplicationStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
-    // Adicione a infraestrutura para sua API
+    // Adicione infraestrutura para sua API
     new MyApi(this, 'MyApi', {
       integrations: MyApi.defaultIntegrations(this).build(),
     });
@@ -159,23 +160,61 @@ export class ApplicationStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
-    // Adicione a infraestrutura para seu website
+    // Adicione infraestrutura para seu website
     new MyWebsite(this, 'MyWebsite');
   }
 }
 ```
 
 :::warning
-É importante garantir que o website seja declarado _após_ quaisquer constructs de API para que a <Link path="guides/react-website#runtime-configuration">Configuração de Runtime</Link> do website inclua todas as configurações da API.
+É importante garantir que o website seja declarado _após_ quaisquer constructs de API para que o <Link path="guides/react-website#runtime-configuration">Runtime Config</Link> do website inclua todas as configurações de API.
 :::
 
 ## Sintetizando sua Infraestrutura
 
-Como parte do seu target `build`, além de executar os <Link path="guides/typescript-project#building">targets padrão de compilação, lint e testes</Link>, seu projeto de infraestrutura é _sintetizado_ para CloudFormation. Isso também pode ser executado separadamente através do target `synth`:
+Como parte do target `build`, além de executar os <Link path="guides/typescript-project#building">targets padrão de compilação, lint e testes</Link>, seu projeto de infraestrutura é _sintetizado_ para CloudFormation. Isso também pode ser executado separadamente através do target `synth`:
 
 <NxCommands commands={['run <my-infra>:synth']} />
 
-Você encontrará sua montagem de nuvem sintetizada na pasta raiz `dist`, em `dist/packages/<my-infra-project>/cdk.out`.
+Você encontrará sua cloud assembly sintetizada na pasta `dist` raiz, em `dist/packages/<my-infra-project>/cdk.out`.
+
+## Testes de Segurança
+
+Um target `checkov` é adicionado ao seu projeto para executar verificações de segurança usando o [Checkov](https://www.checkov.io/).
+
+<NxCommands commands={['run <my-infra>:checkov']} />
+
+Você encontrará os resultados dos testes de segurança na pasta `dist` raiz, em `dist/packages/<my-infra-project>/checkov`.
+
+:::note
+O Checkov é executado usando `uvx`, portanto você precisa [instalar o `uv` caso ainda não tenha](https://docs.astral.sh/uv/getting-started/installation/).
+:::
+
+:::caution
+Algumas regras do Checkov são suprimidas por padrão via arquivo `checkov.yml`. Recomenda-se revisá-las com base no seu caso de uso.
+:::
+
+### Suprimindo Verificações do Checkov
+
+Pode haver casos onde você queira suprimir certas regras em recursos. Você pode fazer isso de duas formas:
+
+#### Suprimir uma regra em um construct específico
+
+```typescript
+import { suppressRules } from ':my-scope/common-constructs';
+
+// suprime a CKV_AWS_XXX para o construct especificado
+suppressRules(construct, ['CKV_AWS_XXX'], 'Motivo');
+```
+
+#### Suprimir uma regra em um construct descendente
+
+```typescript
+import { suppressRules } from ':my-scope/common-constructs';
+
+// Suprime a CKV_AWS_XXX para o construct ou quaisquer descendentes se for uma instância de Bucket
+suppressRules(construct, ['CKV_AWS_XXX'], 'Motivo', (construct) => construct instanceof Bucket);
+```
 
 ## Bootstrapping da Sua Conta AWS
 
@@ -183,7 +222,7 @@ Se você está implantando uma aplicação CDK em uma conta AWS pela primeira ve
 
 Primeiro, certifique-se de ter [configurado credenciais para sua conta AWS](https://docs.aws.amazon.com/sdkref/latest/guide/access.html).
 
-Em seguida, você pode usar o comando `cdk bootstrap`:
+Em seguida, use o comando `cdk bootstrap`:
 
 ```bash
 npx cdk bootstrap aws://<account-id>/<region>
@@ -196,12 +235,12 @@ Para mais detalhes, consulte a [documentação do CDK](https://docs.aws.amazon.c
 Após um build, você pode implantar sua infraestrutura na AWS usando o target `deploy`.
 
 :::caution
-Use o target `deploy-ci` se for implantar em um pipeline CI/CD. Veja abaixo para detalhes.
+Use o target `deploy-ci` para implantações em pipelines CI/CD. Veja abaixo para detalhes.
 :::
 
 Primeiro, certifique-se de ter [configurado credenciais para sua conta AWS](https://docs.aws.amazon.com/sdkref/latest/guide/access.html).
 
-Em seguida, execute o target de deploy:
+Em seguida, execute o target deploy:
 
 <NxCommands commands={['run <my-infra>:deploy <my-infra>-sandbox/*']} />
 
@@ -215,11 +254,11 @@ Também é possível implantar stacks individuais especificando o nome completo 
 
 ## Implantando na AWS em um Pipeline CI/CD
 
-Use o target `deploy-ci` se estiver implantando na AWS como parte de um pipeline CI/CD.
+Use o target `deploy-ci` para implantações na AWS como parte de um pipeline CI/CD.
 
 <NxCommands commands={['run <my-infra>:deploy-ci my-stage/*']} />
 
-Este target difere ligeiramente do target `deploy` normal por garantir que a montagem de nuvem pré-sintetizada seja implantada, em vez de sintetizar durante a execução. Isso ajuda a evitar problemas potenciais de não-determinismo devido a alterações em versões de pacotes, garantindo que cada estágio do pipeline implante usando a mesma montagem de nuvem.
+Este target difere ligeiramente do `deploy` normal por garantir que a cloud-assembly pré-sintetizada seja implantada, em vez de sintetizar durante a execução. Isso ajuda a evitar problemas de não-determinismo devido a alterações em versões de pacotes, garantindo que cada estágio do pipeline use a mesma cloud-assembly.
 
 ## Removendo Infraestrutura AWS
 
@@ -229,4 +268,4 @@ Use o target `destroy` para remover seus recursos:
 
 ## Mais Informações
 
-Para mais informações sobre o CDK, consulte o [Guia do Desenvolvedor CDK](https://docs.aws.amazon.com/cdk/v2/guide/core_concepts.html) e a [Referência da API](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-construct-library.html).
+Para mais informações sobre o CDK, consulte o [Guia do Desenvolvedor CDK](https://docs.aws.amazon.com/cdk/v2/guide/core_concepts.html) e [Referência da API](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-construct-library.html).

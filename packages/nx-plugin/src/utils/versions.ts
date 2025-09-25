@@ -7,7 +7,6 @@
  * Versons for TypeScript dependencies added by generators
  */
 export const TS_VERSIONS = {
-  '@cdklabs/cdk-validator-cfnguard': '0.0.60',
   '@aws-sdk/client-cognito-identity': '3.876.0',
   '@aws-sdk/credential-providers': '3.876.0',
   '@aws-sdk/credential-provider-cognito-identity': '3.876.0',
