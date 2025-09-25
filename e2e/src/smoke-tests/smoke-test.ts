@@ -142,7 +142,10 @@ export const smokeTest = (
       // Wire up website, cognito and trpc api
       writeFileSync(
         `${opts.cwd}/packages/infra/src/stacks/application-stack.ts`,
-        readFileSync(join(__dirname, '../files/application-stack.ts.template')),
+        readFileSync(
+          join(__dirname, '../files/application-stack.ts.template'),
+          'utf-8',
+        ),
       );
 
       // Since the smoke tests don't run in a git repo, we need to exclude some patterns for the license sync
@@ -150,10 +153,12 @@ export const smokeTest = (
         `${opts.cwd}/aws-nx-plugin.config.mts`,
         readFileSync(
           join(__dirname, '../files/aws-nx-plugin.config.mts.template'),
+          'utf-8',
         ),
       );
 
       await runCLI(`sync --verbose`, opts);
+      await runCLI(`run-many --target lint --all --parallel 1 --fix`, opts);
       await runCLI(
         `run-many --target build --all --parallel 1 --output-style=stream --skip-nx-cache --verbose`,
         opts,

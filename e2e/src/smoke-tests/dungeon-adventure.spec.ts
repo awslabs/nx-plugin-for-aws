@@ -74,9 +74,11 @@ describe('smoke test - dungeon-adventure', () => {
           __dirname,
           '../files/dungeon-adventure/1/application-stack.ts.template',
         ),
+        'utf-8',
       ),
     );
     await runCLI(`sync --verbose`, opts);
+    await runCLI(`run-many --target lint --all --parallel 1 --fix`, opts);
     await runCLI(
       `run-many --target build --all --parallel 1 --output-style=stream --skip-nx-cache --verbose`,
       opts,
@@ -102,6 +104,7 @@ describe('smoke test - dungeon-adventure', () => {
           __dirname,
           '../files/dungeon-adventure/2/schema/action.ts.template',
         ),
+        'utf-8',
       ),
     );
 
@@ -112,6 +115,7 @@ describe('smoke test - dungeon-adventure', () => {
           __dirname,
           '../files/dungeon-adventure/2/schema/common.ts.template',
         ),
+        'utf-8',
       ),
     );
 
@@ -119,6 +123,7 @@ describe('smoke test - dungeon-adventure', () => {
       `${opts.cwd}/packages/game-api/src/schema/game.ts`,
       readFileSync(
         join(__dirname, '../files/dungeon-adventure/2/schema/game.ts.template'),
+        'utf-8',
       ),
     );
 
@@ -129,6 +134,7 @@ describe('smoke test - dungeon-adventure', () => {
           __dirname,
           '../files/dungeon-adventure/2/schema/index.ts.template',
         ),
+        'utf-8',
       ),
     );
 
@@ -141,6 +147,7 @@ describe('smoke test - dungeon-adventure', () => {
           __dirname,
           '../files/dungeon-adventure/2/entities/action.ts.template',
         ),
+        'utf-8',
       ),
     );
 
@@ -151,6 +158,7 @@ describe('smoke test - dungeon-adventure', () => {
           __dirname,
           '../files/dungeon-adventure/2/entities/game.ts.template',
         ),
+        'utf-8',
       ),
     );
 
@@ -161,6 +169,7 @@ describe('smoke test - dungeon-adventure', () => {
           __dirname,
           '../files/dungeon-adventure/2/middleware/dynamodb.ts.template',
         ),
+        'utf-8',
       ),
     );
 
@@ -171,6 +180,7 @@ describe('smoke test - dungeon-adventure', () => {
           __dirname,
           '../files/dungeon-adventure/2/middleware/index.ts.template',
         ),
+        'utf-8',
       ),
     );
 
@@ -178,6 +188,7 @@ describe('smoke test - dungeon-adventure', () => {
       `${opts.cwd}/packages/game-api/src/init.ts`,
       readFileSync(
         join(__dirname, '../files/dungeon-adventure/2/init.ts.template'),
+        'utf-8',
       ),
     );
 
@@ -188,6 +199,7 @@ describe('smoke test - dungeon-adventure', () => {
           __dirname,
           '../files/dungeon-adventure/2/procedures/query-actions.ts.template',
         ),
+        'utf-8',
       ),
     );
 
@@ -198,6 +210,7 @@ describe('smoke test - dungeon-adventure', () => {
           __dirname,
           '../files/dungeon-adventure/2/procedures/query-games.ts.template',
         ),
+        'utf-8',
       ),
     );
 
@@ -208,6 +221,7 @@ describe('smoke test - dungeon-adventure', () => {
           __dirname,
           '../files/dungeon-adventure/2/procedures/save-action.ts.template',
         ),
+        'utf-8',
       ),
     );
 
@@ -218,6 +232,7 @@ describe('smoke test - dungeon-adventure', () => {
           __dirname,
           '../files/dungeon-adventure/2/procedures/save-game.ts.template',
         ),
+        'utf-8',
       ),
     );
 
@@ -228,6 +243,7 @@ describe('smoke test - dungeon-adventure', () => {
       readFileSync(
         join(__dirname, '../files/dungeon-adventure/2/router.ts.template'),
       ),
+      'utf-8',
     );
 
     ensureDirSync(`${opts.cwd}/packages/infra/src/constructs`);
@@ -239,6 +255,7 @@ describe('smoke test - dungeon-adventure', () => {
           __dirname,
           '../files/dungeon-adventure/2/constructs/electrodb-table.ts.template',
         ),
+        'utf-8',
       ),
     );
 
@@ -249,6 +266,7 @@ describe('smoke test - dungeon-adventure', () => {
           __dirname,
           '../files/dungeon-adventure/2/stacks/application-stack.ts.template',
         ),
+        'utf-8',
       ),
     );
 
@@ -278,6 +296,7 @@ describe('smoke test - dungeon-adventure', () => {
       `${opts.cwd}/packages/story_api/story_api/main.py`,
       readFileSync(
         join(__dirname, '../files/dungeon-adventure/3/main.py.template'),
+        'utf-8',
       ),
     );
 
@@ -285,6 +304,7 @@ describe('smoke test - dungeon-adventure', () => {
       `${opts.cwd}/packages/story_api/story_api/init.py`,
       readFileSync(
         join(__dirname, '../files/dungeon-adventure/3/init.py.template'),
+        'utf-8',
       ),
     );
 
@@ -292,6 +312,7 @@ describe('smoke test - dungeon-adventure', () => {
       `${opts.cwd}/packages/story_api/run.sh`,
       readFileSync(
         join(__dirname, '../files/dungeon-adventure/3/run.sh.template'),
+        'utf-8',
       ),
     );
 
@@ -312,6 +333,7 @@ describe('smoke test - dungeon-adventure', () => {
       `${opts.cwd}/packages/common/constructs/src/app/apis/story-api.ts`,
       readFileSync(
         join(__dirname, '../files/dungeon-adventure/3/story-api.ts.template'),
+        'utf-8',
       ),
     );
 
@@ -322,6 +344,7 @@ describe('smoke test - dungeon-adventure', () => {
           __dirname,
           '../files/dungeon-adventure/3/application-stack.ts.template',
         ),
+        'utf-8',
       ),
     );
 
@@ -339,6 +362,7 @@ describe('smoke test - dungeon-adventure', () => {
       `${opts.cwd}/packages/game-ui/src/config.ts`,
       readFileSync(
         join(__dirname, '../files/dungeon-adventure/4/config.ts.template'),
+        'utf-8',
       ),
     );
 
@@ -350,6 +374,7 @@ describe('smoke test - dungeon-adventure', () => {
           __dirname,
           '../files/dungeon-adventure/4/AppLayout/index.tsx.template',
         ),
+        'utf-8',
       ),
     );
 
@@ -367,6 +392,7 @@ describe('smoke test - dungeon-adventure', () => {
       `${opts.cwd}/packages/game-ui/src/styles.css`,
       readFileSync(
         join(__dirname, '../files/dungeon-adventure/4/styles.css.template'),
+        'utf-8',
       ),
     );
 
@@ -380,6 +406,7 @@ describe('smoke test - dungeon-adventure', () => {
           __dirname,
           '../files/dungeon-adventure/4/routes/game/index.tsx.template',
         ),
+        'utf-8',
       ),
     );
 
@@ -390,6 +417,7 @@ describe('smoke test - dungeon-adventure', () => {
           __dirname,
           '../files/dungeon-adventure/4/routes/game/$playerName.tsx.template',
         ),
+        'utf-8',
       ),
     );
 
@@ -401,6 +429,7 @@ describe('smoke test - dungeon-adventure', () => {
           __dirname,
           '../files/dungeon-adventure/4/routes/index.tsx.template',
         ),
+        'utf-8',
       ),
     );
 
