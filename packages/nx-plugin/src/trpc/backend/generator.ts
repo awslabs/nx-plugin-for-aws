@@ -22,6 +22,7 @@ import { formatFilesInSubtree } from '../../utils/format';
 import { sortObjectKeys } from '../../utils/object';
 import {
   NxGeneratorInfo,
+  addDependencyToTargetIfNotPresent,
   addGeneratorMetadata,
   getGeneratorInfo,
   readProjectConfigurationUnqualified,
@@ -30,6 +31,7 @@ import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { addApiGatewayInfra } from '../../utils/api-constructs/api-constructs';
 import { assignPort } from '../../utils/port';
 import { resolveIacProvider } from '../../utils/iac';
+import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
 
 export const TRPC_BACKEND_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -107,18 +109,11 @@ export async function tsTrpcApiGenerator(
     continuous: true,
   };
 
-  projectConfig.targets.bundle = {
-    cache: true,
-    executor: 'nx:run-commands',
-    outputs: [`{workspaceRoot}/dist/${backendRoot}/bundle`],
-    options: {
-      command: `esbuild ${backendRoot}/src/router.ts --bundle --outfile=dist/${backendRoot}/bundle/index.js --platform=node --format=cjs`,
-    },
-  };
-  projectConfig.targets.build.dependsOn = [
-    ...(projectConfig.targets.build.dependsOn ?? []),
-    'bundle',
-  ];
+  addTypeScriptBundleTarget(tree, projectConfig, {
+    targetFilePath: 'src/router.ts',
+  });
+
+  addDependencyToTargetIfNotPresent(projectConfig, 'build', 'bundle');
 
   projectConfig.targets = sortObjectKeys(projectConfig.targets);
 
@@ -149,13 +144,7 @@ export async function tsTrpcApiGenerator(
       'aws4fetch',
       '@aws-sdk/credential-providers',
     ]),
-    withVersions([
-      '@types/aws-lambda',
-      'esbuild',
-      'tsx',
-      'cors',
-      '@types/cors',
-    ]),
+    withVersions(['@types/aws-lambda', 'tsx', 'cors', '@types/cors']),
   );
   tree.delete(joinPathFragments(backendRoot, 'package.json'));
 

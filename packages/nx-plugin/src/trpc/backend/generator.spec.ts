@@ -192,6 +192,90 @@ describe('trpc backend generator', () => {
     ]);
   });
 
+  it('should add rolldown bundle target', async () => {
+    await tsTrpcApiGenerator(tree, {
+      name: 'TestApi',
+      directory: 'apps',
+      computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
+      iacProvider: 'CDK',
+    });
+
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-api/project.json', 'utf-8'),
+    );
+
+    // Check bundle target
+    expect(projectConfig.targets['bundle']).toBeDefined();
+    const bundleTarget = projectConfig.targets['bundle'];
+
+    expect(bundleTarget.cache).toBe(true);
+    expect(bundleTarget.executor).toBe('nx:run-commands');
+    expect(bundleTarget.outputs).toEqual([
+      '{workspaceRoot}/dist/{projectRoot}/bundle',
+    ]);
+    expect(bundleTarget.dependsOn).toEqual(['compile']);
+
+    // Check the rolldown command
+    expect(bundleTarget.options.command).toBe('rolldown -c rolldown.config.ts');
+    expect(bundleTarget.options.cwd).toBe('{projectRoot}');
+  });
+
+  it('should create rolldown config file', async () => {
+    await tsTrpcApiGenerator(tree, {
+      name: 'TestApi',
+      directory: 'apps',
+      computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
+      iacProvider: 'CDK',
+    });
+
+    // Check rolldown config file was created
+    expect(tree.exists('apps/test-api/rolldown.config.ts')).toBeTruthy();
+
+    const rolldownConfig = tree.read(
+      'apps/test-api/rolldown.config.ts',
+      'utf-8',
+    );
+    expect(rolldownConfig).toContain('defineConfig');
+    expect(rolldownConfig).toContain('src/router.ts');
+    expect(rolldownConfig).toContain(
+      '../../dist/apps/test-api/bundle/index.js',
+    );
+  });
+
+  it('should add rolldown dependency to package.json', async () => {
+    await tsTrpcApiGenerator(tree, {
+      name: 'TestApi',
+      directory: 'apps',
+      computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
+      iacProvider: 'CDK',
+    });
+
+    const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+
+    // Check rolldown dev dependency was added
+    expect(packageJson.devDependencies['rolldown']).toBeDefined();
+  });
+
+  it('should ensure build target depends on bundle', async () => {
+    await tsTrpcApiGenerator(tree, {
+      name: 'TestApi',
+      directory: 'apps',
+      computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
+      iacProvider: 'CDK',
+    });
+
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-api/project.json', 'utf-8'),
+    );
+
+    expect(projectConfig.targets.build).toBeDefined();
+    expect(projectConfig.targets.build.dependsOn).toContain('bundle');
+  });
+
   it('should add cors headers to the local server', async () => {
     await tsTrpcApiGenerator(tree, {
       name: 'TestApi',

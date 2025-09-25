@@ -23,6 +23,7 @@ import {
 } from 'typescript';
 import { StringLiteral } from '@phenomnomnominal/tsquery';
 import { getRelativePathToRoot } from '../paths';
+import { addDependencyToTargetIfNotPresent } from '../nx';
 
 export interface AddPythonBundleTargetOptions {
   /**
@@ -108,6 +109,11 @@ export interface AddTypeScriptBundleTargetOptions {
    * Outputs to dist/{projectRoot}/bundle/{bundleOutputDir}/index.js
    */
   bundleOutputDir?: string;
+
+  /**
+   * Modules to omit from the bundle and treat as external
+   */
+  external?: (string | RegExp)[];
 }
 
 /**
@@ -144,12 +150,7 @@ export const addTypeScriptBundleTarget = (
   }
 
   // Add bundle to the build target
-  if (project.targets?.build) {
-    project.targets.build.dependsOn = [
-      ...(project.targets.build.dependsOn ?? []).filter((t) => t !== 'bundle'),
-      'bundle',
-    ];
-  }
+  addDependencyToTargetIfNotPresent(project, 'build', 'bundle');
 
   const rolldownConfigPath = joinPathFragments(
     project.root,
@@ -211,6 +212,22 @@ export const addTypeScriptBundleTarget = (
                   true,
                 ),
               ),
+              ...(opts.external
+                ? [
+                    factory.createPropertyAssignment(
+                      factory.createIdentifier('external'),
+                      factory.createArrayLiteralExpression(
+                        opts.external.map((ext) =>
+                          typeof ext === 'string'
+                            ? factory.createStringLiteral(ext, true)
+                            : factory.createRegularExpressionLiteral(
+                                `/${ext.source}/`,
+                              ),
+                        ),
+                      ),
+                    ),
+                  ]
+                : []),
             ],
             true,
           ),

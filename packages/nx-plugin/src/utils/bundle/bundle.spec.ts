@@ -270,6 +270,109 @@ export default defineConfig([
         'dist/libs/nested/project/bundle/index.js',
       );
     });
+
+    it('should configure external dependencies with strings', () => {
+      addTypeScriptBundleTarget(tree, project, {
+        targetFilePath: 'src/index.ts',
+        external: ['@aws-sdk/*', 'lodash'],
+      });
+
+      const configContent = tree.read(
+        'apps/test-project/rolldown.config.ts',
+        'utf-8',
+      );
+
+      expect(configContent).toContain("external: ['@aws-sdk/*', 'lodash']");
+    });
+
+    it('should configure external dependencies with regex patterns', () => {
+      addTypeScriptBundleTarget(tree, project, {
+        targetFilePath: 'src/index.ts',
+        external: [/@aws-sdk\/.*/, /^lodash/],
+      });
+
+      const configContent = tree.read(
+        'apps/test-project/rolldown.config.ts',
+        'utf-8',
+      );
+
+      expect(configContent).toContain('external: [/@aws-sdk\\/.*/, /^lodash/]');
+    });
+
+    it('should configure external dependencies with mixed strings and regex', () => {
+      addTypeScriptBundleTarget(tree, project, {
+        targetFilePath: 'src/index.ts',
+        external: ['@aws-sdk/*', /@types\/.*/, 'react'],
+      });
+
+      const configContent = tree.read(
+        'apps/test-project/rolldown.config.ts',
+        'utf-8',
+      );
+
+      expect(configContent).toContain(
+        "external: ['@aws-sdk/*', /@types\\/.*/, 'react']",
+      );
+    });
+
+    it('should not include external property when not provided', () => {
+      addTypeScriptBundleTarget(tree, project, {
+        targetFilePath: 'src/index.ts',
+      });
+
+      const configContent = tree.read(
+        'apps/test-project/rolldown.config.ts',
+        'utf-8',
+      );
+
+      expect(configContent).not.toContain('external:');
+    });
+
+    it('should create build target if not present', () => {
+      // Project has no build target initially
+      expect(project.targets?.build).toBeUndefined();
+
+      addTypeScriptBundleTarget(tree, project, {
+        targetFilePath: 'src/index.ts',
+      });
+
+      expect(project.targets?.build).toBeDefined();
+      expect(project.targets?.build?.dependsOn).toContain('bundle');
+    });
+
+    it('should create build target with bundle dependency even when no other dependencies exist', () => {
+      addTypeScriptBundleTarget(tree, project, {
+        targetFilePath: 'src/index.ts',
+      });
+
+      expect(project.targets?.build).toBeDefined();
+      expect(project.targets?.build?.dependsOn).toEqual(['bundle']);
+    });
+
+    it('should handle external dependencies in multiple config entries', () => {
+      // First call with external dependencies
+      addTypeScriptBundleTarget(tree, project, {
+        targetFilePath: 'src/index.ts',
+        external: ['@aws-sdk/*'],
+      });
+
+      // Second call with different external dependencies
+      addTypeScriptBundleTarget(tree, project, {
+        targetFilePath: 'src/handler.ts',
+        external: ['lodash', /@types\/.*/],
+        bundleOutputDir: 'handler',
+      });
+
+      const configContent = tree.read(
+        'apps/test-project/rolldown.config.ts',
+        'utf-8',
+      );
+
+      expect(configContent).toContain("external: ['@aws-sdk/*']");
+      expect(configContent).toContain("external: ['lodash', /@types\\/.*/]");
+      expect(configContent).toContain('src/index.ts');
+      expect(configContent).toContain('src/handler.ts');
+    });
   });
 
   describe('addPythonBundleTarget', () => {

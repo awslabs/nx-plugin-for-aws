@@ -103,33 +103,7 @@ describe('ts-lambda-function generator', () => {
     expect(lambdaFile).toMatchSnapshot('lambda-handler-sqs.ts');
   });
 
-  it('should add correct bundle target with esbuild command', async () => {
-    await tsLambdaFunctionGenerator(tree, options);
-
-    const projectJson = JSON.parse(
-      tree.read('packages/test-project/project.json', 'utf-8'),
-    );
-
-    // Check bundle-test-function target
-    expect(projectJson.targets['bundle-test-function']).toBeDefined();
-    const bundleTarget = projectJson.targets['bundle-test-function'];
-
-    expect(bundleTarget.cache).toBe(true);
-    expect(bundleTarget.executor).toBe('nx:run-commands');
-    expect(bundleTarget.outputs).toEqual([
-      '{workspaceRoot}/dist/packages/test-project/bundle-test-function',
-    ]);
-    expect(bundleTarget.options.parallel).toBe(false);
-    expect(bundleTarget.dependsOn).toEqual(['compile']);
-
-    // Check the esbuild command
-    expect(bundleTarget.options.commands).toHaveLength(1);
-    expect(bundleTarget.options.commands[0]).toBe(
-      'esbuild packages/test-project/src/test-function.ts --bundle --platform=node --target=node22 --format=cjs --outfile=dist/packages/test-project/bundle-test-function/index.js --external:@aws-sdk/*',
-    );
-  });
-
-  it('should create bundle target when it does not exist', async () => {
+  it('should add correct bundle target with rolldown command', async () => {
     await tsLambdaFunctionGenerator(tree, options);
 
     const projectJson = JSON.parse(
@@ -141,37 +115,62 @@ describe('ts-lambda-function generator', () => {
     const bundleTarget = projectJson.targets['bundle'];
 
     expect(bundleTarget.cache).toBe(true);
-    expect(bundleTarget.dependsOn).toEqual(['bundle-test-function']);
+    expect(bundleTarget.executor).toBe('nx:run-commands');
+    expect(bundleTarget.outputs).toEqual([
+      '{workspaceRoot}/dist/{projectRoot}/bundle',
+    ]);
+    expect(bundleTarget.dependsOn).toEqual(['compile']);
+
+    // Check the rolldown command
+    expect(bundleTarget.options.command).toBe('rolldown -c rolldown.config.ts');
+    expect(bundleTarget.options.cwd).toBe('{projectRoot}');
   });
 
-  it('should update existing bundle target', async () => {
-    // Add existing bundle target
-    const projectConfig = JSON.parse(
+  it('should create rolldown config file', async () => {
+    await tsLambdaFunctionGenerator(tree, options);
+
+    // Check rolldown config file was created
+    expect(
+      tree.exists('packages/test-project/rolldown.config.ts'),
+    ).toBeTruthy();
+
+    const rolldownConfig = tree.read(
+      'packages/test-project/rolldown.config.ts',
+      'utf-8',
+    );
+    expect(rolldownConfig).toContain('defineConfig');
+    expect(rolldownConfig).toContain('src/test-function.ts');
+    expect(rolldownConfig).toContain(
+      '../../dist/packages/test-project/bundle/lambda/test-function/index.js',
+    );
+    expect(rolldownConfig).toContain('external: [/@aws-sdk\\/.*/]');
+  });
+
+  it('should add rolldown dependency to package.json', async () => {
+    await tsLambdaFunctionGenerator(tree, options);
+
+    const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+
+    // Check rolldown dev dependency was added
+    expect(packageJson.devDependencies['rolldown']).toBeDefined();
+  });
+
+  it('should create build target if not present', async () => {
+    // Project initially has no build target
+    const initialProjectConfig = JSON.parse(
       tree.read('packages/test-project/project.json', 'utf-8'),
     );
-    projectConfig.targets.bundle = {
-      cache: true,
-      executor: 'nx:run-commands',
-      outputs: ['{workspaceRoot}/dist/packages/test-project/bundle'],
-      options: { commands: [], parallel: false },
-      dependsOn: ['existing-bundle-target'],
-    };
-    tree.write(
-      'packages/test-project/project.json',
-      JSON.stringify(projectConfig),
-    );
+    expect(initialProjectConfig.targets.build).toBeUndefined();
 
     await tsLambdaFunctionGenerator(tree, options);
 
     const updatedProjectJson = JSON.parse(
       tree.read('packages/test-project/project.json', 'utf-8'),
     );
-    const bundleTarget = updatedProjectJson.targets['bundle'];
 
-    expect(bundleTarget.dependsOn).toEqual([
-      'existing-bundle-target',
-      'bundle-test-function',
-    ]);
+    // Build target should be created and depend on bundle
+    expect(updatedProjectJson.targets.build).toBeDefined();
+    expect(updatedProjectJson.targets.build.dependsOn).toContain('bundle');
   });
 
   it('should update build target to depend on bundle', async () => {
@@ -219,7 +218,7 @@ describe('ts-lambda-function generator', () => {
     expect(packageJson.dependencies['@middy/core']).toBeDefined();
 
     // Check dev dependencies
-    expect(packageJson.devDependencies['esbuild']).toBeDefined();
+    expect(packageJson.devDependencies['rolldown']).toBeDefined();
   });
 
   it('should handle function path', async () => {
@@ -232,15 +231,12 @@ describe('ts-lambda-function generator', () => {
       ),
     ).toBeTruthy();
 
-    // Check that the bundle command uses the correct path
-    const projectJson = JSON.parse(
-      tree.read('packages/test-project/project.json', 'utf-8'),
+    // Check that the rolldown config uses the correct path
+    const rolldownConfig = tree.read(
+      'packages/test-project/rolldown.config.ts',
+      'utf-8',
     );
-    const bundleCommand =
-      projectJson.targets['bundle-test-function'].options.commands[0];
-    expect(bundleCommand).toContain(
-      'packages/test-project/src/lambda-functions/test-function.ts',
-    );
+    expect(rolldownConfig).toContain('src/lambda-functions/test-function.ts');
   });
 
   it('should create CDK construct', async () => {
@@ -365,7 +361,7 @@ describe('ts-lambda-function generator', () => {
     const projectJson = JSON.parse(
       tree.read('packages/scoped-project/project.json', 'utf-8'),
     );
-    expect(projectJson.targets['bundle-test-function']).toBeDefined();
+    expect(projectJson.targets['bundle']).toBeDefined();
   });
 
   it('should add generator metrics', async () => {
@@ -474,7 +470,7 @@ describe('ts-lambda-function generator', () => {
 
       // Verify the correct bundle path is used for custom function path
       expect(terraformContent).toContain(
-        'dist/packages/test-project/bundle-test-function',
+        'dist/packages/test-project/bundle/lambda/test-function',
       );
     });
 
@@ -530,7 +526,6 @@ describe('ts-lambda-function generator', () => {
 
       // Should still have bundle and build targets
       expect(projectConfig.targets.build).toBeDefined();
-      expect(projectConfig.targets['bundle-test-function']).toBeDefined();
       expect(projectConfig.targets.bundle).toBeDefined();
     });
 
@@ -594,7 +589,7 @@ describe('ts-lambda-function generator', () => {
 
       // Verify the correct bundle path is used for scoped projects
       expect(terraformContent).toContain(
-        'dist/packages/scoped-project/bundle-test-function',
+        'dist/packages/scoped-project/bundle/lambda/test-function',
       );
     });
 
@@ -626,7 +621,7 @@ describe('ts-lambda-function generator', () => {
 
       // Verify the correct bundle path is used for complex function names
       expect(terraformContent).toContain(
-        'dist/packages/test-project/bundle-my-complex-function-name',
+        'dist/packages/test-project/bundle/lambda/my-complex-function-name',
       );
     });
 
@@ -681,6 +676,69 @@ describe('ts-lambda-function generator', () => {
           'packages/common/constructs/src/app/lambda-functions/test-project-test-function.ts',
         ),
       ).toBeTruthy();
+    });
+
+    it('should handle multiple lambda functions without clashing', async () => {
+      // Generate first lambda function
+      await tsLambdaFunctionGenerator(tree, options);
+
+      // Generate second lambda function with different name
+      const secondOptions = {
+        ...options,
+        functionName: 'SecondFunction',
+      };
+      await tsLambdaFunctionGenerator(tree, secondOptions);
+
+      // Check both lambda functions exist
+      expect(
+        tree.exists('packages/test-project/src/test-function.ts'),
+      ).toBeTruthy();
+      expect(
+        tree.exists('packages/test-project/src/second-function.ts'),
+      ).toBeTruthy();
+
+      // Check rolldown config contains both functions
+      const rolldownConfig = tree.read(
+        'packages/test-project/rolldown.config.ts',
+        'utf-8',
+      );
+      expect(rolldownConfig).toContain('src/test-function.ts');
+      expect(rolldownConfig).toContain('src/second-function.ts');
+      expect(rolldownConfig).toContain(
+        '../../dist/packages/test-project/bundle/lambda/test-function/index.js',
+      );
+      expect(rolldownConfig).toContain(
+        '../../dist/packages/test-project/bundle/lambda/second-function/index.js',
+      );
+      // Both functions should have the same external dependencies
+      const externalOccurrences = (
+        rolldownConfig.match(/external: \[\/@aws-sdk\\\//g) || []
+      ).length;
+      expect(externalOccurrences).toBe(2);
+
+      // Check both CDK constructs exist
+      expect(
+        tree.exists(
+          'packages/common/constructs/src/app/lambda-functions/test-project-test-function.ts',
+        ),
+      ).toBeTruthy();
+      expect(
+        tree.exists(
+          'packages/common/constructs/src/app/lambda-functions/test-project-second-function.ts',
+        ),
+      ).toBeTruthy();
+
+      // Check lambda-functions index exports both
+      const lambdaIndex = tree.read(
+        'packages/common/constructs/src/app/lambda-functions/index.ts',
+        'utf-8',
+      );
+      expect(lambdaIndex).toContain(
+        "export * from './test-project-test-function.js';",
+      );
+      expect(lambdaIndex).toContain(
+        "export * from './test-project-second-function.js';",
+      );
     });
   });
 });

@@ -18,6 +18,7 @@ import {
 import { TsMcpServerGeneratorSchema } from './schema';
 import {
   NxGeneratorInfo,
+  addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
@@ -28,8 +29,8 @@ import { kebabCase, toClassName } from '../../utils/names';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { addMcpServerInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
 import { getNpmScope } from '../../utils/npm-scope';
-import { addEsbuildBundleTarget } from '../../utils/esbuild';
 import { resolveIacProvider } from '../../utils/iac';
+import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
 
 export const TS_MCP_SERVER_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -48,9 +49,13 @@ export const tsMcpServerGenerator = async (
 
   const defaultName = `${kebabCase(project.name.split('/').pop())}-mcp-server`;
   const name = kebabCase(options.name ?? defaultName);
-  const targetSourceDir = joinPathFragments(
-    project.sourceRoot ?? `${project.root}/src`,
+  const targetSourceDirRelativeToProjectRoot = joinPathFragments(
+    'src',
     options.name ? name : 'mcp-server',
+  );
+  const targetSourceDir = joinPathFragments(
+    project.root,
+    targetSourceDirRelativeToProjectRoot,
   );
   const relativeSourceDir = targetSourceDir.replace(project.root + '/', './');
   const distDir = joinPathFragments('dist', project.root);
@@ -103,7 +108,7 @@ export const tsMcpServerGenerator = async (
   // Tracking: https://github.com/modelcontextprotocol/typescript-sdk/issues/164
   // We use a renamed dependency so that v3 and v4 can coexist in projects until the above is resolved
   const deps = withVersions(['@modelcontextprotocol/sdk', 'zod-v3', 'express']);
-  let devDeps = withVersions([
+  const devDeps = withVersions([
     'tsx',
     '@types/express',
     '@modelcontextprotocol/inspector',
@@ -113,14 +118,23 @@ export const tsMcpServerGenerator = async (
   if (computeType === 'BedrockAgentCoreRuntime') {
     const dockerImageTag = `${getNpmScope(tree)}-${name}:latest`;
 
-    // Add an esbuild bundle target
-    addEsbuildBundleTarget(project, {
-      bundleTargetName: `${name}-bundle`,
-      targetFilePath: `${targetSourceDir}/http.ts`,
-      postBundleCommands: [
-        `docker build --platform linux/arm64 -t ${dockerImageTag} ${targetSourceDir} --build-context workspace=.`,
-      ],
+    // Add bundle target
+    addTypeScriptBundleTarget(tree, project, {
+      targetFilePath: `${targetSourceDirRelativeToProjectRoot}/http.ts`,
+      bundleOutputDir: joinPathFragments('mcp', name),
     });
+
+    project.targets[`${name}-docker`] = {
+      cache: true,
+      executor: 'nx:run-commands',
+      options: {
+        command: `docker build --platform linux/arm64 -t ${dockerImageTag} ${targetSourceDir} --build-context workspace=.`,
+      },
+      dependsOn: ['bundle'],
+    };
+
+    addDependencyToTargetIfNotPresent(project, 'docker', `${name}-docker`);
+    addDependencyToTargetIfNotPresent(project, 'build', 'docker');
 
     // Add shared constructs
     const iacProvider = await resolveIacProvider(tree, options.iacProvider);
@@ -134,12 +148,6 @@ export const tsMcpServerGenerator = async (
       dockerImageTag,
       iacProvider,
     });
-
-    // Add additional dependencies
-    devDeps = {
-      ...devDeps,
-      ...withVersions(['esbuild']),
-    };
   } else {
     // No Dockerfile needed for non-hosted MCP
     tree.delete(joinPathFragments(targetSourceDir, 'Dockerfile'));

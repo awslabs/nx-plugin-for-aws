@@ -26,9 +26,9 @@ import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { withVersions } from '../../utils/versions';
 import camelCase from 'lodash.camelcase';
 import { TS_HANDLER_RETURN_TYPES } from './io';
-import { addEsbuildBundleTarget } from '../../utils/esbuild';
 import { addLambdaFunctionInfra } from '../../utils/function-constructs/function-constructs';
 import { resolveIacProvider } from '../../utils/iac';
+import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
 
 export const TS_LAMBDA_FUNCTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -73,10 +73,14 @@ export const tsLambdaFunctionGenerator = async (
   const lambdaFunctionClassName = pascalCase(schema.functionName);
   const lambdaFunctionKebabCase = toKebabCase(schema.functionName);
 
-  const functionPath = joinPathFragments(
-    projectConfig.sourceRoot,
+  const functionPathFromProjectRoot = joinPathFragments(
+    'src',
     schema.functionPath ?? '',
     `${lambdaFunctionKebabCase}.ts`,
+  );
+  const functionPath = joinPathFragments(
+    projectConfig.root,
+    functionPathFromProjectRoot,
   );
 
   // Check that the project does not already have a lambda handler
@@ -92,8 +96,7 @@ export const tsLambdaFunctionGenerator = async (
     iacProvider,
   });
 
-  // Add bundle-<name> target for this specific lambda function
-  const bundleTargetName = `bundle-${lambdaFunctionKebabCase}`;
+  const bundleOutputDir = joinPathFragments('lambda', lambdaFunctionKebabCase);
 
   addLambdaFunctionInfra(tree, {
     functionProjectName: projectConfig.name,
@@ -101,7 +104,12 @@ export const tsLambdaFunctionGenerator = async (
     functionNameKebabCase: constructFunctionNameKebabCase,
     handler: 'index.handler',
     runtime: 'node',
-    bundlePathFromRoot: joinPathFragments('dist', dir, bundleTargetName),
+    bundlePathFromRoot: joinPathFragments(
+      'dist',
+      dir,
+      'bundle',
+      bundleOutputDir,
+    ),
     iacProvider,
   });
 
@@ -114,10 +122,10 @@ export const tsLambdaFunctionGenerator = async (
   };
 
   // Add a bundle target for the function
-  addEsbuildBundleTarget(projectConfig, {
-    bundleTargetName,
-    targetFilePath: functionPath,
-    extraEsbuildArgs: '--external:@aws-sdk/*',
+  addTypeScriptBundleTarget(tree, projectConfig, {
+    targetFilePath: functionPathFromProjectRoot,
+    bundleOutputDir,
+    external: [/@aws-sdk\/.*/],
   });
 
   projectConfig.targets = sortObjectKeys(projectConfig.targets);
@@ -142,7 +150,7 @@ export const tsLambdaFunctionGenerator = async (
       '@middy/core',
       'zod',
     ]),
-    withVersions(['esbuild', '@types/aws-lambda']),
+    withVersions(['@types/aws-lambda']),
   );
 
   await addGeneratorMetricsIfApplicable(tree, [
