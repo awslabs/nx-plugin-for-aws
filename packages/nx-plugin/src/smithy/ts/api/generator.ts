@@ -94,6 +94,9 @@ export const tsSmithyApiGenerator = async (
   );
   const port = assignPort(tree, backendProjectConfig, 3001);
 
+  // Delete default index.ts with "hello" function
+  tree.delete(joinPathFragments(backendProjectConfig.sourceRoot, 'index.ts'));
+
   generateFiles(
     tree,
     joinPathFragments(__dirname, 'files'),

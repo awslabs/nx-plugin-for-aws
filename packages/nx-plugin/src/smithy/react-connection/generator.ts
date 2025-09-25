@@ -4,8 +4,10 @@
  */
 import {
   GeneratorCallback,
+  OverwriteStrategy,
   ProjectConfiguration,
   Tree,
+  generateFiles,
   installPackagesTask,
   joinPathFragments,
 } from '@nx/devkit';
@@ -47,6 +49,21 @@ export const smithyReactConnectionGenerator = async (
   const apiName = backendMetadata?.apiName;
   const auth = backendMetadata?.auth ?? 'IAM';
   const port = backendMetadata?.port ?? backendMetadata?.ports?.[0] ?? 3001;
+
+  const namespace = inferNamespace(tree, modelProjectConfig);
+
+  // Add extensions.smithy for customising the client
+  generateFiles(
+    tree,
+    joinPathFragments(__dirname, 'files', 'model'),
+    modelProjectConfig.sourceRoot,
+    {
+      namespace,
+    },
+    {
+      overwriteStrategy: OverwriteStrategy.KeepExisting,
+    },
+  );
 
   await addOpenApiReactClient(tree, {
     apiName,
@@ -123,6 +140,33 @@ const resolveProjectConfig = (
   throw new Error(
     `Unsupported api-connection target ${modelOrBackendConfig.name}. Expected a Smithy model or backend project.`,
   );
+};
+
+/**
+ * Get the namespace from a model project
+ */
+const inferNamespace = (
+  tree: Tree,
+  modelProject: ProjectConfiguration,
+): string => {
+  const smithyBuildJsonPath = joinPathFragments(
+    modelProject.root,
+    'smithy-build.json',
+  );
+  if (!tree.exists(smithyBuildJsonPath)) {
+    throw new Error(
+      `No smithy-build.json file found for model project ${modelProject.name}`,
+    );
+  }
+
+  try {
+    const smithyBuild = JSON.parse(tree.read(smithyBuildJsonPath, 'utf-8'));
+    return smithyBuild.plugins.openapi.service.split('#')[0];
+  } catch {
+    throw new Error(
+      `Unable to determine namespace from ${smithyBuildJsonPath}. Expected plugins.openapi.service to be defined.`,
+    );
+  }
 };
 
 export default smithyReactConnectionGenerator;

@@ -70,6 +70,16 @@ The generator will make changes to the following files in your React application
 
 </FileTree>
 
+The generator will also add a file to your Smithy model:
+
+<FileTree>
+
+- model
+  - src
+    - extensions.smithy Defines traits which can be used to customise the generated client
+
+</FileTree>
+
 The generator will also add Runtime Config to your website infrastructure if not present already, which ensures that the API URL for your Smithy API is available in the website and automatically configured by the `use<ApiName>.tsx` hook.
 
 ### Code Generation
@@ -541,29 +551,25 @@ function MyComponent() {
 
 ## Customising the Generated Code
 
+A selection of Smithy traits are added to your target Smithy `model` project in `extensions.smithy` which you can use to customise the generated client.
+
+:::tip
+If you do not need to customise the generated client, you can safely delete `extensions.smithy`
+:::
+
 ### Queries and Mutations
 
 By default, operations in your Smithy API which use the HTTP methods `PUT`, `POST`, `PATCH` and `DELETE` are considered mutations, and all others are considered queries.
 
-You can change this behaviour using the `x-query` and `x-mutation` OpenAPI vendor extensions.
+You can change this behaviour using the `@query` and `@mutation` Smithy traits which are added to your model project in `extensions.smithy`.
 
-:::tip
-In Smithy, you can add OpenAPI vendor extensions using the [`@specificationExtension` trait](https://smithy.io/2.0/guides/model-translations/converting-to-openapi.html#specificationextension-trait).
+:::note
+These map to OpenAPI vendor extensions using the [`@specificationExtension` trait](https://smithy.io/2.0/guides/model-translations/converting-to-openapi.html#specificationextension-trait), which our code generator interprets when generating the client from the OpenAPI specification.
 :::
 
-#### x-query
+#### @query
 
-First, add the `query` trait definition to your model:
-
-```smithy title="model/src/extensions.smithy"
-use smithy.openapi#specificationExtension
-
-@trait
-@specificationExtension(as: "x-query")
-structure query {}
-```
-
-Then apply the `@query` trait to your Smithy operation to force it to be treated as a query:
+Then Apply the `@query` trait to your Smithy operation to force it to be treated as a query:
 
 ```smithy
 @http(method: "POST", uri: "/items")
@@ -580,19 +586,9 @@ The generated hook will provide `queryOptions` even though it uses the `POST` HT
 const items = useQuery(api.listItems.queryOptions());
 ```
 
-#### x-mutation
+#### @mutation
 
-First, add the `mutation` trait definition to your model:
-
-```smithy title="model/src/extensions.smithy"
-use smithy.openapi#specificationExtension
-
-@trait
-@specificationExtension(as: "x-mutation")
-structure mutation {}
-```
-
-Then apply the `@mutation` trait to your Smithy operation to force it to be treated as a mutation:
+Apply the `@mutation` trait to your Smithy operation to force it to be treated as a mutation:
 
 ```smithy
 @http(method: "GET", uri: "/start-processing")
@@ -611,52 +607,37 @@ const startProcessing = useMutation(api.startProcessing.mutationOptions());
 
 ### Custom Pagination Cursor
 
-By default, the generated hooks assume cursor-based pagination with a parameter named `cursor`. You can customize this behavior using the `x-cursor` extension.
+By default, the generated hooks assume cursor-based pagination with a parameter named `cursor`. You can customize this behavior using the `@cursor` trait which is added to your model project in `extensions.smithy`.
 
-First, add the `cursor` trait definition to your model. This should define `inputToken` and `enabled` properties as follows:
-
-```smithy title="model/src/extensions.smithy"
-use smithy.openapi#specificationExtension
-
-@trait
-@specificationExtension(as: "x-cursor")
-structure cursor {
-  // Use inputToken to change the input parameter used for pagination
-  inputToken: String
-  // Use this trait and set enabled to false if your operation defines an
-  // input named "cursor" but should not be treated as a paginated operation
-  enabled: Boolean
-}
-```
-
-Then apply the `@cursor` trait to customize pagination behavior:
+Apply the `@cursor` trait with `inputToken` to change the name of the input parameter used for the pagination token:
 
 ```smithy
 @http(method: "GET", uri: "/items")
 @cursor(inputToken: "nextToken")
 operation ListItems {
-    input: ListItemsInput
-    output: ListItemsOutput
-}
-
-structure ListItemsInput {
-    nextToken: String
-    limit: Integer
-}
-
-structure ListItemsOutput {
-    items: ItemList
-    nextToken: String
+    input := {
+      nextToken: String
+      limit: Integer
+    }
+    output := {
+      items: ItemList
+      nextToken: String
+    }
 }
 ```
 
-If you would not like to generate `infiniteQueryOptions` for an operation, you can disable cursor-based pagination:
+If you would not like to generate `infiniteQueryOptions` for an operation which has an input parameter named `cursor`, you can disable cursor-based pagination:
 
 ```smithy
 @cursor(enabled: false)
 operation ListItems {
-    input: ListItemsInput
-    output: ListItemsOutput
+    input := {
+      // Input parameter named 'cursor' will cause this operation to be treated as a paginated operation by default
+      cursor: String
+    }
+    output := {
+      ...
+    }
 }
 ```
 

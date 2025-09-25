@@ -247,7 +247,7 @@ export const addOpenApiReactClient = async (
     );
   }
 
-  // Update serve-local on the website to use our local FastAPI server
+  // Update serve-local on the website to use our local server
   addTargetToServeLocal(
     tree,
     frontendProjectConfig.name,
@@ -256,8 +256,10 @@ export const addOpenApiReactClient = async (
       url: `http://localhost:${port}/`,
       apiName,
       // Additionally add a dependency on the generate watch command to ensure that local
-      // FastAPI changes that affect the client are also reloaded
-      additionalDependencyTargets: [clientGenWatchTarget],
+      // API changes that affect the client are also reloaded.
+      // We include a dependency on the generate target as watch ONLY triggers on a change,
+      // and we need to ensure the client is generated the first time if not already present.
+      additionalDependencyTargets: [clientGenTarget, clientGenWatchTarget],
     },
   );
 

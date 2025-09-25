@@ -58,10 +58,28 @@ export function Main() {
         JSON.stringify({
           name: 'api-model',
           root: 'apps/api-model',
+          sourceRoot: 'apps/api-model/src',
           metadata: {
             generator: SMITHY_PROJECT_GENERATOR_INFO.id,
             apiName: 'TestApi',
             backendProject: 'api-backend',
+          },
+        }),
+      );
+
+      // Setup smithy-build.json for the model project
+      tree.write(
+        'apps/api-model/smithy-build.json',
+        JSON.stringify({
+          version: '1.0',
+          sources: ['src/'],
+          plugins: {
+            openapi: {
+              service: 'com.example.testapi#TestApiService',
+              version: '3.1.0',
+              tags: true,
+              useIntegerType: true,
+            },
           },
         }),
       );
@@ -249,6 +267,40 @@ export function Main() {
       expect(tree.read('apps/frontend/.gitignore', 'utf-8')).toContain(
         'src/generated/test-api',
       );
+    });
+
+    it('should add extensions.smithy file to model project src directory', async () => {
+      await smithyReactConnectionGenerator(tree, {
+        frontendProjectName: 'frontend',
+        smithyModelOrBackendProjectName: 'api-model',
+      });
+
+      // Verify that extensions.smithy was added to the model project's src directory
+      expect(tree.exists('apps/api-model/src/extensions.smithy')).toBeTruthy();
+
+      // Verify the content contains the expected Smithy traits
+      const extensionsContent = tree.read(
+        'apps/api-model/src/extensions.smithy',
+        'utf-8',
+      );
+      expect(extensionsContent).toContain('@trait');
+      expect(extensionsContent).toContain('structure query {}');
+      expect(extensionsContent).toContain('structure mutation {}');
+      expect(extensionsContent).toContain('structure cursor {');
+    });
+
+    it('should use correct namespace in extensions.smithy file', async () => {
+      await smithyReactConnectionGenerator(tree, {
+        frontendProjectName: 'frontend',
+        smithyModelOrBackendProjectName: 'api-model',
+      });
+
+      // Verify that extensions.smithy contains the correct namespace
+      const extensionsContent = tree.read(
+        'apps/api-model/src/extensions.smithy',
+        'utf-8',
+      );
+      expect(extensionsContent).toContain('namespace com.example.testapi');
     });
 
     it('should add runtime config for local development', async () => {
@@ -440,9 +492,27 @@ export function Main() {
         JSON.stringify({
           name: 'api-model',
           root: 'apps/api-model',
+          sourceRoot: 'apps/api-model/src',
           metadata: {
             generator: SMITHY_PROJECT_GENERATOR_INFO.id,
             apiName: 'TestApi',
+          },
+        }),
+      );
+
+      // Setup smithy-build.json for the model project
+      tree.write(
+        'apps/api-model/smithy-build.json',
+        JSON.stringify({
+          version: '1.0',
+          sources: ['src/'],
+          plugins: {
+            openapi: {
+              service: 'com.example.testapi#TestApiService',
+              version: '3.1.0',
+              tags: true,
+              useIntegerType: true,
+            },
           },
         }),
       );
@@ -501,6 +571,7 @@ export function Main() {
         JSON.stringify({
           name: 'api-model',
           root: 'apps/api-model',
+          sourceRoot: 'apps/api-model/src',
           metadata: {
             generator: SMITHY_PROJECT_GENERATOR_INFO.id,
             apiName: 'TestApi',
@@ -515,6 +586,142 @@ export function Main() {
         }),
       ).rejects.toThrow(
         'Could not find associated backend for Smithy model project api-model',
+      );
+    });
+
+    it('should throw error when smithy-build.json is missing', async () => {
+      // Setup a Smithy model project without smithy-build.json
+      tree.write(
+        'apps/api-model/project.json',
+        JSON.stringify({
+          name: 'api-model',
+          root: 'apps/api-model',
+          sourceRoot: 'apps/api-model/src',
+          metadata: {
+            generator: SMITHY_PROJECT_GENERATOR_INFO.id,
+            apiName: 'TestApi',
+            backendProject: 'api-backend',
+          },
+        }),
+      );
+
+      // Setup the associated backend project
+      tree.write(
+        'apps/api-backend/project.json',
+        JSON.stringify({
+          name: 'api-backend',
+          root: 'apps/api-backend',
+          metadata: {
+            generator: TS_SMITHY_API_GENERATOR_INFO.id,
+            apiName: 'TestApi',
+          },
+        }),
+      );
+
+      await expect(
+        smithyReactConnectionGenerator(tree, {
+          frontendProjectName: 'frontend',
+          smithyModelOrBackendProjectName: 'api-model',
+        }),
+      ).rejects.toThrow(
+        'No smithy-build.json file found for model project api-model',
+      );
+    });
+
+    it('should throw error when smithy-build.json has invalid format', async () => {
+      // Setup a Smithy model project with invalid smithy-build.json
+      tree.write(
+        'apps/api-model/project.json',
+        JSON.stringify({
+          name: 'api-model',
+          root: 'apps/api-model',
+          sourceRoot: 'apps/api-model/src',
+          metadata: {
+            generator: SMITHY_PROJECT_GENERATOR_INFO.id,
+            apiName: 'TestApi',
+            backendProject: 'api-backend',
+          },
+        }),
+      );
+
+      // Setup smithy-build.json with missing plugins.openapi.service
+      tree.write(
+        'apps/api-model/smithy-build.json',
+        JSON.stringify({
+          version: '1.0',
+          sources: ['src/'],
+          plugins: {
+            openapi: {
+              version: '3.1.0',
+              tags: true,
+              useIntegerType: true,
+            },
+          },
+        }),
+      );
+
+      // Setup the associated backend project
+      tree.write(
+        'apps/api-backend/project.json',
+        JSON.stringify({
+          name: 'api-backend',
+          root: 'apps/api-backend',
+          metadata: {
+            generator: TS_SMITHY_API_GENERATOR_INFO.id,
+            apiName: 'TestApi',
+          },
+        }),
+      );
+
+      await expect(
+        smithyReactConnectionGenerator(tree, {
+          frontendProjectName: 'frontend',
+          smithyModelOrBackendProjectName: 'api-model',
+        }),
+      ).rejects.toThrow(
+        'Unable to determine namespace from apps/api-model/smithy-build.json. Expected plugins.openapi.service to be defined.',
+      );
+    });
+
+    it('should throw error when smithy-build.json is malformed JSON', async () => {
+      // Setup a Smithy model project with malformed smithy-build.json
+      tree.write(
+        'apps/api-model/project.json',
+        JSON.stringify({
+          name: 'api-model',
+          root: 'apps/api-model',
+          sourceRoot: 'apps/api-model/src',
+          metadata: {
+            generator: SMITHY_PROJECT_GENERATOR_INFO.id,
+            apiName: 'TestApi',
+            backendProject: 'api-backend',
+          },
+        }),
+      );
+
+      // Setup malformed smithy-build.json
+      tree.write('apps/api-model/smithy-build.json', '{ invalid json }');
+
+      // Setup the associated backend project
+      tree.write(
+        'apps/api-backend/project.json',
+        JSON.stringify({
+          name: 'api-backend',
+          root: 'apps/api-backend',
+          metadata: {
+            generator: TS_SMITHY_API_GENERATOR_INFO.id,
+            apiName: 'TestApi',
+          },
+        }),
+      );
+
+      await expect(
+        smithyReactConnectionGenerator(tree, {
+          frontendProjectName: 'frontend',
+          smithyModelOrBackendProjectName: 'api-model',
+        }),
+      ).rejects.toThrow(
+        'Unable to determine namespace from apps/api-model/smithy-build.json. Expected plugins.openapi.service to be defined.',
       );
     });
 
@@ -631,10 +838,28 @@ export function Main() {
         JSON.stringify({
           name: '@my-scope/api-model',
           root: 'apps/api-model',
+          sourceRoot: 'apps/api-model/src',
           metadata: {
             generator: SMITHY_PROJECT_GENERATOR_INFO.id,
             apiName: 'TestApi',
             backendProject: '@my-scope/api-backend',
+          },
+        }),
+      );
+
+      // Setup smithy-build.json for the model project
+      tree.write(
+        'apps/api-model/smithy-build.json',
+        JSON.stringify({
+          version: '1.0',
+          sources: ['src/'],
+          plugins: {
+            openapi: {
+              service: 'com.example.testapi#TestApiService',
+              version: '3.1.0',
+              tags: true,
+              useIntegerType: true,
+            },
           },
         }),
       );
@@ -700,10 +925,28 @@ export function Main() {
         JSON.stringify({
           name: 'api-model',
           root: 'apps/api-model',
+          sourceRoot: 'apps/api-model/src',
           metadata: {
             generator: SMITHY_PROJECT_GENERATOR_INFO.id,
             apiName: 'TestApi',
             backendProject: 'api-backend',
+          },
+        }),
+      );
+
+      // Setup smithy-build.json for the model project
+      tree.write(
+        'apps/api-model/smithy-build.json',
+        JSON.stringify({
+          version: '1.0',
+          sources: ['src/'],
+          plugins: {
+            openapi: {
+              service: 'com.example.testapi#TestApiService',
+              version: '3.1.0',
+              tags: true,
+              useIntegerType: true,
+            },
           },
         }),
       );
@@ -769,7 +1012,11 @@ export function Main() {
         projects: ['@proj/test-api'],
         target: 'serve',
       });
-      // Should also depend on the generate watch target
+      // Should also depend on the generate target (for initial generation)
+      expect(frontendProject.targets['serve-local'].dependsOn).toContain(
+        'generate:test-api-client',
+      );
+      // Should also depend on the generate watch target (for ongoing changes)
       expect(frontendProject.targets['serve-local'].dependsOn).toContain(
         'watch-generate:test-api-client',
       );

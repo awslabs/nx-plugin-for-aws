@@ -496,7 +496,11 @@ describe('fastapi react generator with real react and trpc projects', () => {
       projects: ['proj.test_api'],
       target: 'serve',
     });
-    // Should also depend on the generate watch target
+    // Should also depend on the generate target (for initial generation)
+    expect(frontendProject.targets['serve-local'].dependsOn).toContain(
+      'generate:test-api-client',
+    );
+    // Should also depend on the generate watch target (for ongoing changes)
     expect(frontendProject.targets['serve-local'].dependsOn).toContain(
       'watch-generate:test-api-client',
     );
