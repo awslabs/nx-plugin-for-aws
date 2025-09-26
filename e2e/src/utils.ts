@@ -165,5 +165,7 @@ export const buildCreateNxWorkspaceCommand = (
   workspace: string,
   iacProvider?: 'CDK' | 'Terraform',
   yes = false,
+  nxVersion: string = undefined,
+  nxPluginVersion: string = undefined,
 ) =>
-  `npx ${yes ? '-y ' : ''}create-nx-workspace@${TS_VERSIONS['create-nx-workspace']} ${workspace} --pm=${pm} --preset=@aws/nx-plugin ${iacProvider ? `--iacProvider=${iacProvider} ` : ''}--ci=skip`;
+  `npx ${yes ? '-y ' : ''}create-nx-workspace@${nxVersion ?? TS_VERSIONS['create-nx-workspace']} ${workspace} --pm=${pm}  --preset=@aws/nx-plugin${nxPluginVersion ? `@${nxPluginVersion}` : ''} ${iacProvider ? `--iacProvider=${iacProvider} ` : ''}--ci=skip`;
