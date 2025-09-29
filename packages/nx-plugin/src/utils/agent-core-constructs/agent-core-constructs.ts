@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
   generateFiles,
   joinPathFragments,
   OverwriteStrategy,
@@ -17,7 +16,6 @@ import {
   SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants';
 import { addStarExport } from '../ast';
-import { withVersions } from '../versions';
 import { IacProvider } from '../iac';
 
 type IACProvider = { iacProvider: IacProvider };
@@ -73,13 +71,6 @@ const addAgentCoreInfra = (
 };
 
 const addAgentCoreCDKInfra = (tree: Tree, options: AddAgentCoreInfraProps) => {
-  // Construct uses bedrock agentcore types
-  addDependenciesToPackageJson(
-    tree,
-    {},
-    withVersions(['@aws-sdk/client-bedrock-agentcore-control']),
-  );
-
   // Add the AgentCore runtime construct
   generateFiles(
     tree,

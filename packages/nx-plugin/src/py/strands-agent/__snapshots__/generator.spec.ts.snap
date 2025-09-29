@@ -72,15 +72,9 @@ exports[`py#strands-agent generator > should match snapshot for BedrockAgentCore
   Grant,
   IPrincipal,
 } from 'aws-cdk-lib/aws-iam';
-import {
-  AwsCustomResource,
-  AwsCustomResourcePolicy,
-  PhysicalResourceId,
-  PhysicalResourceIdReference,
-} from 'aws-cdk-lib/custom-resources';
 import { Construct } from 'constructs';
-import type { AuthorizerConfiguration } from '@aws-sdk/client-bedrock-agentcore-control';
 import { Stack } from 'aws-cdk-lib';
+import { CfnRuntime } from 'aws-cdk-lib/aws-bedrockagentcore';
 
 /**
  * Options for the AgentCoreRuntime construct
@@ -91,7 +85,7 @@ export interface AgentCoreRuntimeProps {
   containerUri: string;
   serverProtocol: 'MCP' | 'HTTP';
   environment?: Record<string, string>;
-  authorizerConfiguration?: AuthorizerConfiguration;
+  authorizerConfiguration?: CfnRuntime.AuthorizerConfigurationProperty;
 }
 
 /**
@@ -196,75 +190,24 @@ export class AgentCoreRuntime extends Construct implements IGrantable {
     });
     this.grantPrincipal = this.role.grantPrincipal;
 
-    const agentRuntime = new AwsCustomResource(this, 'MCPSeverRuntime', {
-      onCreate: {
-        service: 'bedrock-agentcore-control',
-        action: 'CreateAgentRuntime',
-        parameters: {
-          agentRuntimeName: props.runtimeName,
-          agentRuntimeArtifact: {
-            containerConfiguration: {
-              containerUri: props.containerUri,
-            },
-          },
-          description: props.description,
-          environmentVariables: props.environment,
-          networkConfiguration: {
-            networkMode: 'PUBLIC',
-          },
-          protocolConfiguration: {
-            serverProtocol: props.serverProtocol,
-          },
-          roleArn: this.role.roleArn,
-          authorizerConfiguration: props.authorizerConfiguration,
-        },
-        physicalResourceId: PhysicalResourceId.fromResponse('agentRuntimeId'),
-      },
-      onUpdate: {
-        service: 'bedrock-agentcore-control',
-        action: 'UpdateAgentRuntime',
-        parameters: {
-          agentRuntimeId: new PhysicalResourceIdReference(),
-          agentRuntimeName: props.runtimeName,
-          agentRuntimeArtifact: {
-            containerConfiguration: {
-              containerUri: props.containerUri,
-            },
-          },
-          description: props.description,
-          environmentVariables: props.environment,
-          networkConfiguration: {
-            networkMode: 'PUBLIC',
-          },
-          protocolConfiguration: {
-            serverProtocol: props.serverProtocol,
-          },
-          roleArn: this.role.roleArn,
-          authorizerConfiguration: props.authorizerConfiguration,
-        },
-        physicalResourceId: PhysicalResourceId.fromResponse('agentRuntimeId'),
-      },
-      onDelete: {
-        service: 'bedrock-agentcore-control',
-        action: 'DeleteAgentRuntime',
-        parameters: {
-          agentRuntimeId: new PhysicalResourceIdReference(),
+    const agentRuntime = new CfnRuntime(this, 'MCPServerRuntime', {
+      agentRuntimeName: props.runtimeName,
+      agentRuntimeArtifact: {
+        containerConfiguration: {
+          containerUri: props.containerUri,
         },
       },
-      policy: AwsCustomResourcePolicy.fromStatements([
-        new PolicyStatement({
-          actions: ['bedrock-agentcore:*'],
-          resources: ['*'],
-        }),
-        new PolicyStatement({
-          actions: ['iam:PassRole'],
-          resources: [this.role.roleArn],
-        }),
-      ]),
-      installLatestAwsSdk: true,
+      description: props.description,
+      environmentVariables: props.environment,
+      networkConfiguration: {
+        networkMode: 'PUBLIC',
+      },
+      protocolConfiguration: props.serverProtocol,
+      roleArn: this.role.roleArn,
+      authorizerConfiguration: props.authorizerConfiguration,
     });
 
-    this.arn = agentRuntime.getResponseField('agentRuntimeArn');
+    this.arn = agentRuntime.attrAgentRuntimeArn;
   }
 
   /**
