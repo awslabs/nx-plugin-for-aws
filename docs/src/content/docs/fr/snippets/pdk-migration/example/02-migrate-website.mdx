@@ -1,0 +1,329 @@
+---
+title: "Migrer le Site Web"
+---
+
+
+
+import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
+import RunGenerator from '@components/run-generator.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Drawer from '@components/drawer.astro';
+import InstallCommand from '@components/install-command.astro';
+
+Le `CloudscapeReactTsWebsiteProject` utilisé dans l'application de liste de courses configurait un site React avec CloudScape et l'authentification Cognito intégrée.
+
+Ce type de projet s'appuyait sur [`create-react-app`](https://github.com/facebook/create-react-app), qui est maintenant obsolète. Pour migrer le site dans ce guide, nous utiliserons le <Link path="/guides/react-website">générateur `ts#react-website`</Link>, qui utilise des technologies plus modernes et maintenues, notamment [Vite](https://vite.dev/).
+
+Dans le cadre de la migration, nous passerons également du React Router configuré par PDK à [TanStack Router](https://tanstack.com/router), qui ajoute une sécurité typée supplémentaire pour le routage des sites.
+
+#### Générer un site React
+
+Exécutez le <Link path="/guides/react-website">générateur `ts#react-website`</Link> pour configurer votre projet de site dans `packages/website` :
+
+<RunGenerator generator="ts#react-website" noInteractive requiredParameters={{ name: 'website' }} />
+
+#### Ajouter l'authentification Cognito
+
+Le générateur de site React ci-dessus n'inclut pas par défaut l'authentification Cognito comme `CloudscapeReactTsWebsiteProject`, elle est ajoutée explicitement via le <Link path="/guides/react-website-auth">générateur `ts#react-website#auth`</Link>.
+
+<RunGenerator generator="ts#react-website#auth" noInteractive requiredParameters={{ project: 'website', cognitoDomain: 'shopping-list' }} />
+
+Ceci ajoute des composants React qui gèrent les redirections appropriées pour garantir que les utilisateurs se connectent via l'interface hébergée de Cognito. Cela ajoute également un construct CDK pour déployer les ressources Cognito dans `packages/common/constructs`, appelé `UserIdentity`.
+
+:::note
+Le `CloudscapeReactTsWebsiteProject` de PDK s'appuyait sur `@aws-northstar/ui` pour fournir des composants de connexion Cognito dans l'application. Si vous préférez utiliser cette approche plutôt que l'interface hébergée, vous pouvez remplacer le fichier généré `packages/common/constructs/src/core/user-identity.ts` par [l'implémentation de PDK](https://github.com/aws/aws-pdk/blob/mainline/packages/identity/src/user-identity.ts), en remplaçant les constructs de `@aws-cdk/aws-cognito-identitypool-alpha` par ceux fournis par `aws-cdk-lib`, et veiller à définir les valeurs appropriées dans `RuntimeConfig` :
+
+```ts
+RuntimeConfig.ensure(this).config = {
+  ...RuntimeConfig.ensure(this).config,
+  region: Stack.of(this).region,
+  identityPoolId: this.identityPool.identityPoolId,
+  userPoolId: this.userPool.userPoolId,
+  userPoolWebClientId: this.userPoolClient.userPoolClientId,
+};
+```
+
+Vous pouvez ensuite réutiliser le composant `Auth` de votre `CloudscapeReactTsWebsiteProject`.
+:::
+
+#### Connecter le site à l'API
+
+Dans PDK, vous pouviez passer les projets Projen configurés entre eux pour déclencher l'intégration. Cela était utilisé dans l'application de liste de courses pour configurer l'intégration du site avec l'API.
+
+Avec le Plugin Nx pour AWS, l'intégration d'API est prise en charge via le <Link path="/guides/api-connection">générateur `api-connection`</Link>. Utilisons ce générateur pour permettre à notre site d'appeler notre API Smithy :
+
+<RunGenerator generator="api-connection" noInteractive requiredParameters={{ sourceProject: 'website', targetProject: 'api' }} />
+
+Ceci génère les fournisseurs de client et les cibles de build nécessaires pour que votre site puisse appeler votre API via un client TypeScript généré.
+
+#### Ajouter la dépendance AWS Northstar
+
+Le `CloudscapeReactTsWebsiteProject` incluait automatiquement une dépendance sur `@aws-northstar/ui` utilisée dans notre application de liste de courses, ajoutons-la ici :
+
+<InstallCommand pkg="@aws-northstar/ui" />
+
+#### Déplacer les composants et pages
+
+L'[application de liste de courses](https://aws.github.io/aws-pdk/getting_started/shopping_list_app.html#create-new-pages-components) a un composant appelé `CreateItem`, et deux pages, `ShoppingList` et `ShoppingLists`. Migrons-les vers le nouveau site en ajustant quelques éléments pour utiliser TanStack Router et le générateur de client TypeScript du Plugin Nx pour AWS.
+
+<Steps>
+
+1. Copiez `packages/website/src/components/CreateItem/index.tsx` du projet PDK à l'emplacement identique dans le nouveau projet.
+
+1. Copiez `packages/website/src/pages/ShoppingLists/index.tsx` vers `packages/website/src/routes/index.tsx`, car `ShoppingLists` est notre page d'accueil et nous utilisons le routage basé sur les fichiers avec TanStack Router.
+
+1. Copiez `packages/website/src/pages/ShoppingList/index.tsx` vers `packages/website/src/routes/$shoppingListId.tsx`, car `ShoppingList` est la page à afficher sur la route `/:shoppingListId`.
+
+</Steps>
+
+Vous aurez maintenant des erreurs de build dans votre IDE, nous devrons apporter quelques modifications supplémentaires pour les résoudre, comme décrit ci-dessous.
+
+#### Migrer de React Router vers TanStack Router
+
+Comme nous utilisons le [routage basé sur les fichiers](https://tanstack.com/router/latest/docs/framework/react/routing/file-based-routing), nous pouvons utiliser le serveur de développement local pour générer automatiquement la configuration des routes. Démarrons le serveur local :
+
+<NxCommands commands={["serve-local website"]} />
+
+:::tip
+Nous utilisons la cible `serve-local` ici, qui démarre aussi les serveurs locaux pour les APIs connectées via `api-connection`, avec rechargement à chaud si le site, le modèle ou le backend changent ! Cela nous permet de tester notre API et notre site localement avant même d'écrire du code CDK.
+:::
+
+Des erreurs peuvent apparaître, mais le serveur local devrait démarrer sur le port `4200`, ainsi que le serveur Smithy local sur le port `3001`.
+
+Suivez ces étapes dans `routes/index.tsx` et `routes/$shoppingListId.tsx` pour migrer vers TanStack Router :
+
+<Steps>
+
+1. Ajoutez `createFileRoute` pour enregistrer chaque route :
+
+    <Tabs>
+    <TabItem label="routes/index.tsx">
+    ```diff lang="ts"
+    +import { createFileRoute } from "@tanstack/react-router";
+    ...
+    -export default ShoppingLists;
+    +export const Route = createFileRoute('/')({
+    +  component: ShoppingLists,
+    +});
+    ```
+    </TabItem>
+    <TabItem label="routes/$shoppingListId.tsx">
+    ```diff lang="ts"
+    +import { createFileRoute } from "@tanstack/react-router";
+    ...
+    -export default ShoppingList;
+    +export const Route = createFileRoute('/$shoppingListId')({
+    +  component: ShoppingList,
+    +});
+    ```
+    </TabItem>
+    </Tabs>
+
+    Après sauvegarde, les erreurs de type avec `createFileRoute` devraient disparaître.
+
+1. Remplacez le hook `useNavigate`.
+
+    Mettez à jour l'import :
+
+    ```diff lang="ts"
+    - import { useNavigate } from 'react-router-dom';
+    + import { useNavigate } from '@tanstack/react-router';
+    ```
+
+    Mettez à jour les appels à `navigate` pour utiliser les routes typées :
+
+    ```diff lang="ts"
+    - navigate(`/${cell.shoppingListId}`);
+    + navigate({
+    +   to: '/$shoppingListId',
+    +   params: { shoppingListId: cell.shoppingListId },
+    + });
+    ```
+
+1. Remplacez le hook `useParams`.
+
+    Supprimez l'import :
+
+    ```diff lang="ts"
+    - import { useParams } from 'react-router-dom';
+    ```
+
+    Utilisez le hook fourni par la `Route` créée ci-dessus (maintenant typé) :
+
+    ```diff lang="ts"
+    - const { shoppingListId } = useParams();
+    + const { shoppingListId } = Route.useParams();
+    ```
+
+</Steps>
+
+:::tip
+Consultez le [guide détaillé de TanStack Router](https://tanstack.com/router/latest/docs/framework/react/migrate-from-react-router) pour plus d'informations sur des scénarios complexes.
+:::
+
+#### Corriger les imports de composants
+
+Comme nos routes sont moins imbriquées que dans le projet PDK, corrigeons l'import de `CreateItem` dans les deux fichiers de route :
+
+```diff lang="ts"
+-import CreateItem from "../../components/CreateItem";
++import CreateItem from "../components/CreateItem";
+```
+
+Le contexte `AppLayoutContext` est aussi accessible à un emplacement légèrement différent :
+
+```diff lang="ts"
+-import { AppLayoutContext } from "../../layouts/App";
++import { AppLayoutContext } from "../components/AppLayout";
+```
+
+#### Migrer vers le nouveau client TypeScript généré
+
+Nous devons maintenant utiliser le client TypeScript généré par le Plugin Nx pour AWS. Suivez ces étapes :
+
+<Steps>
+
+1. Importez le nouveau client généré au lieu de l'ancien :
+
+    ```diff lang="ts"
+    -import {
+    -  ShoppingList,
+    -  usePutShoppingList,
+    -  useDeleteShoppingList,
+    -  useGetShoppingLists,
+    -} from "myapi-typescript-react-query-hooks";
+    +import { ShoppingList } from "../generated/my-api/types.gen";
+    +import { useMyApi } from "../hooks/useMyApi";
+    +import { useInfiniteQuery, useMutation } from "@tanstack/react-query";
+    ```
+
+    Notez que `routes/$shoppingListId.tsx` importe le type `ShoppingList` sous `_ShoppingList` - conservez cela en important depuis `types.gen`.
+
+1. Instanciez les nouveaux hooks TanStack Query :
+
+    ```diff lang="ts"
+    -const getShoppingLists = useGetShoppingLists({ pageSize: PAGE_SIZE });
+    -const putShoppingList = usePutShoppingList();
+    -const deleteShoppingList = useDeleteShoppingList();
+    +const api = useMyApi();
+    +const getShoppingLists = useInfiniteQuery(
+    +  api.getShoppingLists.infiniteQueryOptions(
+    +    { pageSize: PAGE_SIZE },
+    +    { getNextPageParam: (p) => p.nextToken },
+    +  ),
+    +);
+    +const putShoppingList = useMutation(api.putShoppingList.mutationOptions());
+    +const deleteShoppingList = useMutation(
+    +  api.deleteShoppingList.mutationOptions(),
+    +);
+    ```
+
+1. Supprimez les wrappers `<operation>RequestContent` pour les appels d'API :
+
+    ```diff lang="ts"
+    await putShoppingList.mutateAsync({
+    -  putShoppingListRequestContent: {
+        name: item,
+    -  },
+    });
+    ```
+
+</Steps>
+
+:::note
+Il y avait un bug mineur dans `pages/ShoppingList/index.tsx` où l'application n'utilisait pas correctement le chaînage optionnel. Corrigeons cela :
+
+```diff lang="ts"
+const shoppingList: _ShoppingList | undefined =
+-    getShoppingLists.data?.pages[0].shoppingLists[0]!;
++    getShoppingLists.data?.pages?.[0]?.shoppingLists?.[0];
+```
+
+Et mettez à jour les références :
+
+```diff lang="ts"
+-name: shoppingList.name,
+-shoppingListId: shoppingList.shoppingListId,
++name: shoppingList?.name ?? 'my list',
++shoppingListId: shoppingList?.shoppingListId,
+```
+:::
+
+#### Migrer de TanStack Query v4 vers v5
+
+Résolvons les erreurs restantes dues aux différences entre v4 et v5 :
+
+<Steps>
+
+1. Remplacez `isLoading` par `isPending` pour les mutations :
+
+    ```diff lang="ts"
+    -putShoppingList.isLoading
+    +putShoppingList.isPending
+    ```
+
+1. L'application utilisait `InfiniteQueryTable` de `@aws-northstar/ui` qui attend un type de v4. Supprimez l'erreur de type :
+
+    ```diff lang="tsx"
+    <InfiniteQueryTable
+    -  query={getShoppingLists}
+    +  query={getShoppingLists as any}
+    ```
+
+</Steps>
+
+:::tip
+Consultez le [guide de migration de TanStack Query](https://tanstack.com/query/latest/docs/framework/react/guides/migrating-to-v5) pour plus de détails.
+:::
+
+#### Visiter le site local
+
+Vous pouvez maintenant visiter le site local sur http://localhost:4200/
+
+Le site devrait se charger maintenant que tout est migré ! L'application nécessite seulement une table DynamoDB `shopping_list` dans la région et des credentials AWS locaux pour fonctionner.
+
+Si ce n'est pas le cas, pas d'inquiétude, nous migrerons l'infrastructure ensuite.
+
+<Drawer title="Migration de la page de liste de courses" trigger="Cliquez ici pour voir les exemples complets avant/après des deux pages du tutoriel">
+
+<h4>Page des listes de courses</h4>
+
+<Tabs syncKey="pdk-migration">
+<TabItem label="Avant">
+```tsx
+// pages/ShoppingLists/index.tsx
+/* eslint-disable @typescript-eslint/no-floating-promises */
+... (code inchangé)
+```
+</TabItem>
+<TabItem label="Après">
+```tsx
+// routes/index.tsx
+/* eslint-disable @typescript-eslint/no-floating-promises */
+... (code inchangé)
+```
+</TabItem>
+</Tabs>
+
+<h4>Page d'une liste de courses</h4>
+
+<Tabs syncKey="pdk-migration">
+<TabItem label="Avant">
+```tsx
+// pages/ShoppingList/index.tsx
+/* eslint-disable @typescript-eslint/no-floating-promises */
+... (code inchangé)
+```
+</TabItem>
+<TabItem label="Après">
+```tsx
+// routes/$shoppingListId.tsx
+/* eslint-disable @typescript-eslint/no-floating-promises */
+... (code inchangé)
+```
+</TabItem>
+</Tabs>
+
+</Drawer>

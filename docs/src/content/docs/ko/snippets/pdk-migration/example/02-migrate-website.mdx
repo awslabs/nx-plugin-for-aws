@@ -1,0 +1,916 @@
+---
+title: "웹사이트 마이그레이션"
+---
+
+
+
+import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
+import RunGenerator from '@components/run-generator.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Drawer from '@components/drawer.astro';
+import InstallCommand from '@components/install-command.astro';
+
+쇼핑 리스트 애플리케이션에서 사용된 `CloudscapeReactTsWebsiteProject`는 CloudScape와 Cognito 인증이 내장된 React 웹사이트를 구성했습니다.
+
+이 프로젝트 유형은 현재 더 이상 사용되지 않는 [`create-react-app`](https://github.com/facebook/create-react-app)을 활용했습니다. 이 가이드에서 웹사이트를 마이그레이션하기 위해 <Link path="/guides/react-website">`ts#react-website` 생성기</Link>를 사용할 것이며, 이는 [Vite](https://vite.dev/)와 같은 더 현대적이고 지원되는 기술을 사용합니다.
+
+마이그레이션 과정에서 PDK에서 구성한 React Router에서 [TanStack Router](https://tanstack.com/router)로 이동할 것입니다. 이는 웹사이트 라우팅에 추가적인 타입 안전성을 제공합니다.
+
+#### React 웹사이트 생성
+
+`packages/website`에 웹사이트 프로젝트를 설정하려면 <Link path="/guides/react-website">`ts#react-website` 생성기</Link>를 실행하세요:
+
+<RunGenerator generator="ts#react-website" noInteractive requiredParameters={{ name: 'website' }} />
+
+#### Cognito 인증 추가
+
+위 React 웹사이트 생성기는 `CloudscapeReactTsWebsiteProject`처럼 기본적으로 Cognito 인증을 번들로 제공하지 않습니다. 대신 <Link path="/guides/react-website-auth">`ts#react-website#auth` 생성기</Link>를 통해 명시적으로 추가합니다.
+
+<RunGenerator generator="ts#react-website#auth" noInteractive requiredParameters={{ project: 'website', cognitoDomain: 'shopping-list' }} />
+
+이렇게 하면 Cognito 호스팅 UI를 사용하여 사용자가 로그인하도록 적절한 리디렉션을 관리하는 React 컴포넌트가 추가됩니다. 또한 `packages/common/constructs`에 `UserIdentity`라는 Cognito 리소스를 배포하는 CDK 구문이 추가됩니다.
+
+:::note
+PDK `CloudscapeReactTsWebsiteProject`는 앱 내에서 Cognito 로그인 컴포넌트를 제공하기 위해 `@aws-northstar/ui`에 의존했습니다. 호스팅 UI로 이동하는 대신 이 방식을 선호하는 경우 [PDK의 구현체](https://github.com/aws/aws-pdk/blob/mainline/packages/identity/src/user-identity.ts)로 생성된 `packages/common/constructs/src/core/user-identity.ts`를 교체할 수 있습니다. 이때 `@aws-cdk/aws-cognito-identitypool-alpha`의 구문을 `aws-cdk-lib`에서 제공하는 구문으로 교체하고 `RuntimeConfig`에 관련 값을 설정해야 합니다:
+
+```ts
+RuntimeConfig.ensure(this).config = {
+  ...RuntimeConfig.ensure(this).config,
+  region: Stack.of(this).region,
+  identityPoolId: this.identityPool.identityPoolId,
+  userPoolId: this.userPool.userPoolId,
+  userPoolWebClientId: this.userPoolClient.userPoolClientId,
+};
+```
+
+그런 다음 `CloudscapeReactTsWebsiteProject`의 `Auth` 컴포넌트를 재사용할 수 있습니다.
+:::
+
+#### 웹사이트를 API에 연결
+
+PDK에서는 Projen 프로젝트를 서로 전달하여 통합 코드를 생성할 수 있었습니다. 이 기능은 쇼핑 리스트 애플리케이션에서 웹사이트가 API와 통합되도록 구성하는 데 사용되었습니다.
+
+Nx Plugin for AWS에서는 <Link path="/guides/api-connection">`api-connection` 생성기</Link>를 통해 API 통합이 지원됩니다. 다음으로 이 생성기를 사용하여 웹사이트가 Smithy API를 호출할 수 있도록 설정합니다:
+
+<RunGenerator generator="api-connection" noInteractive requiredParameters={{ sourceProject: 'website', targetProject: 'api' }} />
+
+이렇게 하면 생성된 TypeScript 클라이언트를 통해 웹사이트가 API를 호출할 수 있는 필요한 클라이언트 제공자와 빌드 대상이 생성됩니다.
+
+#### AWS Northstar 종속성 추가
+
+`CloudscapeReactTsWebsiteProject`는 쇼핑 리스트 애플리케이션에서 사용된 `@aws-northstar/ui`에 대한 종속성을 자동으로 포함했으므로 여기에 추가합니다:
+
+<InstallCommand pkg="@aws-northstar/ui" />
+
+#### 컴포넌트와 페이지 이동
+
+[쇼핑 리스트 애플리케이션](https://aws.github.io/aws-pdk/getting_started/shopping_list_app.html#create-new-pages-components)에는 `CreateItem` 컴포넌트와 `ShoppingList`, `ShoppingLists` 두 페이지가 있습니다. TanStack Router와 Nx Plugin for AWS TypeScript 클라이언트 코드 생성기를 사용하므로 일부 조정을 통해 이를 새 웹사이트로 마이그레이션합니다.
+
+<Steps>
+
+1. PDK 프로젝트의 `packages/website/src/components/CreateItem/index.tsx`를 새 프로젝트의 동일한 위치로 복사합니다.
+
+1. `packages/website/src/pages/ShoppingLists/index.tsx`를 `packages/website/src/routes/index.tsx`로 복사합니다. `ShoppingLists`는 홈 페이지이며 TanStack Router의 파일 기반 라우팅을 사용하기 때문입니다.
+
+1. `packages/website/src/pages/ShoppingList/index.tsx`를 `packages/website/src/routes/$shoppingListId.tsx`로 복사합니다. `ShoppingList`는 `/:shoppingListId` 경로에 표시할 페이지입니다.
+
+</Steps>
+
+이제 IDE에 일부 빌드 오류가 표시될 것입니다. 아래에 설명된 몇 가지 추가 변경 사항을 적용하여 새 프레임워크에 맞춰야 합니다.
+
+#### React Router에서 TanStack Router로 마이그레이션
+
+[파일 기반 라우팅](https://tanstack.com/router/latest/docs/framework/react/routing/file-based-routing)을 사용하므로 웹사이트 로컬 개발 서버를 사용하여 라우트 구성을 자동으로 생성할 수 있습니다. 로컬 웹사이트 서버를 시작합니다:
+
+<NxCommands commands={["serve-local website"]} />
+
+:::tip
+여기서는 `serve-local` 대상을 사용하며, 이는 `api-connection`으로 연결된 모든 API의 로컬 서버도 시작하고 웹사이트, 모델 또는 백엔드가 변경되면 핫 리로드됩니다! 이렇게 하면 CDK 코드를 작성하기 전에도 API와 웹사이트를 로컬에서 테스트할 수 있습니다.
+:::
+
+일부 오류가 표시되지만 포트 `4200`에서 로컬 웹사이트 서버와 포트 `3001`에서 로컬 Smithy API 서버가 시작됩니다.
+
+TanStack Router로 마이그레이션하려면 `routes/index.tsx`와 `routes/$shoppingListId.tsx`에서 다음 단계를 따르세요:
+
+<Steps>
+
+1. 각 라우트를 등록하기 위해 `createFileRoute` 추가:
+
+    <Tabs>
+    <TabItem label="routes/index.tsx">
+    ```diff lang="ts"
+    +import { createFileRoute } from "@tanstack/react-router";
+    ...
+    -export default ShoppingLists;
+    +export const Route = createFileRoute('/')({
+    +  component: ShoppingLists,
+    +});
+    ```
+    </TabItem>
+    <TabItem label="routes/$shoppingListId.tsx">
+    ```diff lang="ts"
+    +import { createFileRoute } from "@tanstack/react-router";
+    ...
+    -export default ShoppingList;
+    +export const Route = createFileRoute('/$shoppingListId')({
+    +  component: ShoppingList,
+    +});
+    ```
+    </TabItem>
+    </Tabs>
+
+    파일을 저장하면 `createFileRoute` 호출과 관련된 타입 오류가 사라집니다.
+
+1. `useNavigate` 훅 교체:
+
+    임포트 업데이트:
+
+    ```diff lang="ts"
+    - import { useNavigate } from 'react-router-dom';
+    + import { useNavigate } from '@tanstack/react-router';
+    ```
+
+    `useNavigate`에서 반환된 `navigate` 메서드 호출을 타입 안전한 경로로 업데이트:
+
+    ```diff lang="ts"
+    - navigate(`/${cell.shoppingListId}`);
+    + navigate({
+    +   to: '/$shoppingListId',
+    +   params: { shoppingListId: cell.shoppingListId },
+    + });
+    ```
+
+1. `useParams` 훅 교체:
+
+    임포트 제거:
+
+    ```diff lang="ts"
+    - import { useParams } from 'react-router-dom';
+    ```
+
+    `useParams` 호출을 위에서 생성한 `Route`의 훅으로 교체. 이제 타입 안전합니다!
+
+    ```diff lang="ts"
+    - const { shoppingListId } = useParams();
+    + const { shoppingListId } = Route.useParams();
+    ```
+
+</Steps>
+
+:::tip
+더 복잡한 시나리오를 위해 [TanStack Router 문서의 상세 가이드](https://tanstack.com/router/latest/docs/framework/react/migrate-from-react-router)를 참조할 수 있습니다.
+:::
+
+#### 컴포넌트 임포트 수정
+
+PDK 프로젝트보다 파일 트리에서 라우트 파일의 위치가 덜 중첩되었으므로 `routes/index.tsx`와 `routes/$shoppingListId.tsx`에서 `CreateItem` 임포트를 수정합니다:
+
+```diff lang="ts"
+-import CreateItem from "../../components/CreateItem";
++import CreateItem from "../components/CreateItem";
+```
+
+`AppLayoutContext`도 새 프로젝트에서 위치가 약간 다릅니다:
+
+```diff lang="ts"
+-import { AppLayoutContext } from "../../layouts/App";
++import { AppLayoutContext } from "../components/AppLayout";
+```
+
+#### 새로 생성된 TypeScript 클라이언트 사용
+
+이제 Nx Plugin for AWS에서 제공하는 개선된 TypeScript 클라이언트를 사용하도록 마이그레이션합니다. 다음 단계를 따르세요:
+
+<Steps>
+
+1. 이전 Type Safe API 대신 새로 생성된 클라이언트와 타입 임포트:
+
+    ```diff lang="ts"
+    -import {
+    -  ShoppingList,
+    -  usePutShoppingList,
+    -  useDeleteShoppingList,
+    -  useGetShoppingLists,
+    -} from "myapi-typescript-react-query-hooks";
+    +import { ShoppingList } from "../generated/my-api/types.gen";
+    +import { useMyApi } from "../hooks/useMyApi";
+    +import { useInfiniteQuery, useMutation } from "@tanstack/react-query";
+    ```
+
+    `routes/$shoppingListId.tsx`에서는 `ShoppingList` 타입을 `_ShoppingList`로 임포트하므로 동일하게 `types.gen`에서 임포트합니다.
+
+1. 새 TanStack Query 훅 인스턴스화:
+
+    ```diff lang="ts"
+    -const getShoppingLists = useGetShoppingLists({ pageSize: PAGE_SIZE });
+    -const putShoppingList = usePutShoppingList();
+    -const deleteShoppingList = useDeleteShoppingList();
+    +const api = useMyApi();
+    +const getShoppingLists = useInfiniteQuery(
+    +  api.getShoppingLists.infiniteQueryOptions(
+    +    { pageSize: PAGE_SIZE },
+    +    { getNextPageParam: (p) => p.nextToken },
+    +  ),
+    +);
+    +const putShoppingList = useMutation(api.putShoppingList.mutationOptions());
+    +const deleteShoppingList = useMutation(
+    +  api.deleteShoppingList.mutationOptions(),
+    +);
+    ```
+
+1. 요청 본문 매개변수를 위한 `<operation>RequestContent` 래퍼 제거:
+
+    ```diff lang="ts"
+    await putShoppingList.mutateAsync({
+    -  putShoppingListRequestContent: {
+        name: item,
+    -  },
+    });
+    ```
+
+</Steps>
+
+:::note
+쇼핑 리스트 애플리케이션의 `pages/ShoppingList/index.tsx`에 선택적 체이닝을 올바르게 사용하지 않는 사소한 버그가 있었습니다. 최종 빌드 시 린트 오류를 방지하기 위해 수정합니다:
+
+```diff lang="ts"
+const shoppingList: _ShoppingList | undefined =
+-    getShoppingLists.data?.pages[0].shoppingLists[0]!;
++    getShoppingLists.data?.pages?.[0]?.shoppingLists?.[0];
+```
+
+그리고 정의되었다고 가정한 참조도 업데이트합니다:
+
+```diff lang="ts"
+-name: shoppingList.name,
+-shoppingListId: shoppingList.shoppingListId,
++name: shoppingList?.name ?? 'my list',
++shoppingListId: shoppingList?.shoppingListId,
+```
+:::
+
+#### TanStack Query v4에서 v5로 마이그레이션
+
+`api-connection` 생성기에서 추가된 v5와 PDK에서 사용한 TanStack Query v4 간의 차이로 인해 남은 오류를 수정합니다:
+
+<Steps>
+
+1. 뮤테이션에서 `isLoading`을 `isPending`으로 교체:
+
+    ```diff lang="ts"
+    -putShoppingList.isLoading
+    +putShoppingList.isPending
+    ```
+
+1. 쇼핑 리스트 애플리케이션에서 TanStack Query v4의 타입을 기대하는 `@aws-northstar/ui`의 `InfiniteQueryTable`을 사용합니다. 이는 v5의 무한 쿼리와 호환되므로 타입 오류를 억제합니다:
+
+    ```diff lang="tsx"
+    <InfiniteQueryTable
+    -  query={getShoppingLists}
+    +  query={getShoppingLists as any}
+    ```
+
+</Steps>
+
+:::tip
+라이브러리의 더 많은 기능을 사용한 경우 [TanStack Query 상세 마이그레이션 가이드](https://tanstack.com/query/latest/docs/framework/react/guides/migrating-to-v5)를 참조할 수 있습니다.
+:::
+
+#### 로컬 웹사이트 방문
+
+이제 http://localhost:4200/ 에서 로컬 웹사이트에 접속할 수 있습니다!
+
+모든 것이 마이그레이션되었으므로 웹사이트가 로드되어야 합니다! 쇼핑 리스트 애플리케이션이 API, 웹사이트, Identity 외에 DynamoDB 테이블에만 의존하므로 `shopping_list` DynamoDB 테이블이 해당 리전에 있고 로컬 AWS 자격 증명이 접근 권한이 있다면 웹사이트가 완전히 작동할 것입니다.
+
+그렇지 않더라도 다음에 인프라를 마이그레이션할 예정이므로 괜찮습니다.
+
+<Drawer title="Shopping List Page Migration" trigger="튜토리얼의 두 쇼핑 리스트 페이지에 대한 전체 Before/After 예제 보기">
+
+<h4>Shopping Lists 페이지</h4>
+
+<Tabs syncKey="pdk-migration">
+<TabItem label="Before">
+```tsx
+// pages/ShoppingLists/index.tsx
+/* eslint-disable @typescript-eslint/no-floating-promises */
+import { InfiniteQueryTable } from "@aws-northstar/ui/components";
+import {
+  Button,
+  Header,
+  Link,
+  SpaceBetween,
+  TableProps,
+} from "@cloudscape-design/components";
+import {
+  ShoppingList,
+  usePutShoppingList,
+  useDeleteShoppingList,
+  useGetShoppingLists,
+} from "myapi-typescript-react-query-hooks";
+import { useContext, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import CreateItem from "../../components/CreateItem";
+import { AppLayoutContext } from "../../layouts/App";
+
+const PAGE_SIZE = 50;
+
+/**
+ * Component to render the ShoppingLists "/" route.
+ */
+const ShoppingLists: React.FC = () => {
+  const [visibleModal, setVisibleModal] = useState(false);
+  const [selectedShoppingList, setSelectedShoppingList] = useState<
+    ShoppingList[]
+  >([]);
+  const getShoppingLists = useGetShoppingLists({ pageSize: PAGE_SIZE });
+  const putShoppingList = usePutShoppingList();
+  const deleteShoppingList = useDeleteShoppingList();
+  const navigate = useNavigate();
+  const { setAppLayoutProps } = useContext(AppLayoutContext);
+
+  useEffect(() => {
+    setAppLayoutProps({
+      contentType: "table",
+    });
+  }, [setAppLayoutProps]);
+
+  const columnDefinitions = useMemo<
+    TableProps.ColumnDefinition<ShoppingList>[]
+  >(
+    () => [
+      {
+        id: "shoppingListId",
+        isRowHeader: true,
+        header: "Shopping List Id",
+        cell: (cell) => (
+          <Link
+            href={`/${cell.shoppingListId}`}
+            onFollow={(e) => {
+              e.preventDefault();
+              navigate(`/${cell.shoppingListId}`);
+            }}
+          >
+            {cell.shoppingListId}
+          </Link>
+        ),
+      },
+      {
+        id: "name",
+        header: "Name",
+        cell: (cell) => cell.name,
+      },
+      {
+        id: "shoppingItems",
+        header: "Shopping Items",
+        cell: (cell) => `${cell.shoppingItems?.length || 0} Items.`,
+      },
+    ],
+    [navigate],
+  );
+
+  return (
+    <>
+      <CreateItem
+        title="Create Shopping List"
+        callback={async (item) => {
+          await putShoppingList.mutateAsync({
+            putShoppingListRequestContent: {
+              name: item,
+            },
+          });
+          getShoppingLists.refetch();
+        }}
+        isLoading={putShoppingList.isLoading}
+        visibleModal={visibleModal}
+        setVisibleModal={setVisibleModal}
+      />
+      <InfiniteQueryTable
+        query={getShoppingLists}
+        itemsKey="shoppingLists"
+        pageSize={PAGE_SIZE}
+        selectionType="single"
+        stickyHeader={true}
+        selectedItems={selectedShoppingList}
+        onSelectionChange={(e) =>
+          setSelectedShoppingList(e.detail.selectedItems)
+        }
+        header={
+          <Header
+            variant="awsui-h1-sticky"
+            actions={
+              <SpaceBetween size="xs" direction="horizontal">
+                <Button
+                  loading={deleteShoppingList.isLoading}
+                  data-testid="header-btn-delete"
+                  disabled={selectedShoppingList.length === 0}
+                  onClick={async () => {
+                    await deleteShoppingList.mutateAsync({
+                      shoppingListId: selectedShoppingList![0].shoppingListId,
+                    });
+                    setSelectedShoppingList([]);
+                    getShoppingLists.refetch();
+                  }}
+                >
+                  Delete
+                </Button>
+                <Button
+                  data-testid="header-btn-create"
+                  variant="primary"
+                  onClick={() => setVisibleModal(true)}
+                >
+                  Create Shopping List
+                </Button>
+              </SpaceBetween>
+            }
+          >
+            Shopping Lists
+          </Header>
+        }
+        variant="full-page"
+        columnDefinitions={columnDefinitions}
+      />
+    </>
+  );
+};
+
+export default ShoppingLists;
+```
+</TabItem>
+<TabItem label="After">
+```tsx
+// routes/index.tsx
+/* eslint-disable @typescript-eslint/no-floating-promises */
+import { InfiniteQueryTable } from "@aws-northstar/ui/components";
+import {
+  Button,
+  Header,
+  Link,
+  SpaceBetween,
+  TableProps,
+} from "@cloudscape-design/components";
+import { useContext, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
+import CreateItem from "../components/CreateItem";
+import { AppLayoutContext } from "../components/AppLayout";
+import { createFileRoute } from "@tanstack/react-router";
+import { ShoppingList } from "../generated/my-api/types.gen";
+import { useMyApi } from "../hooks/useMyApi";
+import { useInfiniteQuery, useMutation } from "@tanstack/react-query";
+
+const PAGE_SIZE = 50;
+
+/**
+ * Component to render the ShoppingLists "/" route.
+ */
+const ShoppingLists: React.FC = () => {
+  const [visibleModal, setVisibleModal] = useState(false);
+  const [selectedShoppingList, setSelectedShoppingList] = useState<
+    ShoppingList[]
+  >([]);
+  const api = useMyApi();
+  const getShoppingLists = useInfiniteQuery(
+    api.getShoppingLists.infiniteQueryOptions(
+      { pageSize: PAGE_SIZE },
+      { getNextPageParam: (res) => res.nextToken },
+    ),
+  );
+  const putShoppingList = useMutation(api.putShoppingList.mutationOptions());
+  const deleteShoppingList = useMutation(
+    api.deleteShoppingList.mutationOptions(),
+  );
+  const navigate = useNavigate();
+  const { setAppLayoutProps } = useContext(AppLayoutContext);
+
+  useEffect(() => {
+    setAppLayoutProps({
+      contentType: "table",
+    });
+  }, [setAppLayoutProps]);
+
+  const columnDefinitions = useMemo<
+    TableProps.ColumnDefinition<ShoppingList>[]
+  >(
+    () => [
+      {
+        id: "shoppingListId",
+        isRowHeader: true,
+        header: "Shopping List Id",
+        cell: (cell) => (
+          <Link
+            href={`/${cell.shoppingListId}`}
+            onFollow={(e) => {
+              e.preventDefault();
+              navigate({
+  to: '/$shoppingListId',
+  params: { shoppingListId: cell.shoppingListId },
+});
+            }}
+          >
+            {cell.shoppingListId}
+          </Link>
+        ),
+      },
+      {
+        id: "name",
+        header: "Name",
+        cell: (cell) => cell.name,
+      },
+      {
+        id: "shoppingItems",
+        header: "Shopping Items",
+        cell: (cell) => `${cell.shoppingItems?.length || 0} Items.`,
+      },
+    ],
+    [navigate],
+  );
+
+  return (
+    <>
+      <CreateItem
+        title="Create Shopping List"
+        callback={async (item) => {
+          await putShoppingList.mutateAsync({
+              name: item,
+          });
+          getShoppingLists.refetch();
+        }}
+        isLoading={putShoppingList.isPending}
+        visibleModal={visibleModal}
+        setVisibleModal={setVisibleModal}
+      />
+      <InfiniteQueryTable
+        query={getShoppingLists as any}
+        itemsKey="shoppingLists"
+        pageSize={PAGE_SIZE}
+        selectionType="single"
+        stickyHeader={true}
+        selectedItems={selectedShoppingList}
+        onSelectionChange={(e) =>
+          setSelectedShoppingList(e.detail.selectedItems)
+        }
+        header={
+          <Header
+            variant="awsui-h1-sticky"
+            actions={
+              <SpaceBetween size="xs" direction="horizontal">
+                <Button
+                  loading={deleteShoppingList.isPending}
+                  data-testid="header-btn-delete"
+                  disabled={selectedShoppingList.length === 0}
+                  onClick={async () => {
+                    await deleteShoppingList.mutateAsync({
+                      shoppingListId: selectedShoppingList![0].shoppingListId,
+                    });
+                    setSelectedShoppingList([]);
+                    getShoppingLists.refetch();
+                  }}
+                >
+                  Delete
+                </Button>
+                <Button
+                  data-testid="header-btn-create"
+                  variant="primary"
+                  onClick={() => setVisibleModal(true)}
+                >
+                  Create Shopping List
+                </Button>
+              </SpaceBetween>
+            }
+          >
+            Shopping Lists
+          </Header>
+        }
+        variant="full-page"
+        columnDefinitions={columnDefinitions}
+      />
+    </>
+  );
+};
+
+export const Route = createFileRoute('/')({
+  component: ShoppingLists,
+});
+```
+</TabItem>
+</Tabs>
+
+<h4>Shopping List 페이지</h4>
+
+<Tabs syncKey="pdk-migration">
+<TabItem label="Before">
+```tsx
+// pages/ShoppingList/index.tsx
+/* eslint-disable @typescript-eslint/no-floating-promises */
+import {
+  Board,
+  BoardItem,
+  BoardProps,
+} from "@cloudscape-design/board-components";
+import {
+  Button,
+  Container,
+  ContentLayout,
+  Header,
+  SpaceBetween,
+  Spinner,
+} from "@cloudscape-design/components";
+import {
+  ShoppingList as _ShoppingList,
+  usePutShoppingList,
+  useGetShoppingLists,
+} from "myapi-typescript-react-query-hooks";
+import { useEffect, useState } from "react";
+import { useParams } from "react-router-dom";
+import CreateItem from "../../components/CreateItem";
+
+type ListItem = { name: string };
+
+/**
+ * Component to render a singular Shopping List "/:shoppingListId" route.
+ */
+const ShoppingList: React.FC = () => {
+  const { shoppingListId } = useParams();
+  const [visibleModal, setVisibleModal] = useState(false);
+  const getShoppingLists = useGetShoppingLists({ shoppingListId });
+  const putShoppingList = usePutShoppingList();
+  const shoppingList: _ShoppingList | undefined =
+    getShoppingLists.data?.pages[0].shoppingLists[0]!;
+  const [shoppingItems, setShoppingItems] =
+    useState<BoardProps.Item<ListItem>[]>();
+
+  useEffect(() => {
+    setShoppingItems(
+      shoppingList?.shoppingItems?.map((i) => ({
+        id: i,
+        definition: { minColumnSpan: 4 },
+        data: { name: i },
+      })),
+    );
+  }, [shoppingList?.shoppingItems]);
+
+  return (
+    <ContentLayout
+      header={
+        <Header
+          variant="awsui-h1-sticky"
+          actions={
+            <SpaceBetween size="xs" direction="horizontal">
+              <Button
+                data-testid="header-btn-create"
+                variant="primary"
+                onClick={() => setVisibleModal(true)}
+              >
+                Add Item
+              </Button>
+            </SpaceBetween>
+          }
+        >
+          Shopping list: {shoppingList?.name}
+        </Header>
+      }
+    >
+      <CreateItem
+        isLoading={false}
+        title="Add Item"
+        callback={async (item) => {
+          const items = [
+            ...(shoppingItems || []),
+            {
+              id: item,
+              definition: { minColumnSpan: 4 },
+              data: { name: item },
+            },
+          ];
+          setShoppingItems(items);
+          putShoppingList.mutate({
+            putShoppingListRequestContent: {
+              name: shoppingList.name,
+              shoppingListId: shoppingList.shoppingListId,
+              shoppingItems: items.map((i) => i.data.name),
+            },
+          });
+        }}
+        visibleModal={visibleModal}
+        setVisibleModal={setVisibleModal}
+      />
+      <Container>
+        {!shoppingList ? (
+          <Spinner />
+        ) : (
+          <Board<ListItem>
+            onItemsChange={(event) => {
+              const items = event.detail.items as BoardProps.Item<ListItem>[];
+              setShoppingItems(items);
+              putShoppingList.mutate({
+                putShoppingListRequestContent: {
+                  name: shoppingList.name,
+                  shoppingListId: shoppingList.shoppingListId,
+                  shoppingItems: items.map((i) => i.data.name),
+                },
+              });
+            }}
+            items={shoppingItems || []}
+            renderItem={(item, actions) => (
+              <BoardItem
+                header={item.data.name}
+                settings={
+                  <Button
+                    iconName="close"
+                    variant="icon"
+                    onClick={actions.removeItem}
+                  />
+                }
+                i18nStrings={{
+                  dragHandleAriaLabel: "Drag handle",
+                  dragHandleAriaDescription:
+                    "Use Space or Enter to activate drag, arrow keys to move, Space or Enter to submit, or Escape to discard.",
+                  resizeHandleAriaLabel: "Resize handle",
+                  resizeHandleAriaDescription:
+                    "Use Space or Enter to activate resize, arrow keys to move, Space or Enter to submit, or Escape to discard.",
+                }}
+              />
+            )}
+            i18nStrings={{
+              liveAnnouncementDndCommitted: () => "",
+              liveAnnouncementDndDiscarded: () => "",
+              liveAnnouncementDndItemInserted: () => "",
+              liveAnnouncementDndItemReordered: () => "",
+              liveAnnouncementDndItemResized: () => "",
+              liveAnnouncementDndStarted: () => "",
+              liveAnnouncementItemRemoved: () => "",
+              navigationAriaLabel: "",
+              navigationItemAriaLabel: () => "",
+            }}
+            empty={<></>}
+          />
+        )}
+      </Container>
+    </ContentLayout>
+  );
+};
+
+export default ShoppingList;
+```
+</TabItem>
+<TabItem label="After">
+```tsx
+// routes/$shoppingListId.tsx
+/* eslint-disable @typescript-eslint/no-floating-promises */
+import {
+  Board,
+  BoardItem,
+  BoardProps,
+} from "@cloudscape-design/board-components";
+import {
+  Button,
+  Container,
+  ContentLayout,
+  Header,
+  SpaceBetween,
+  Spinner,
+} from "@cloudscape-design/components";
+import { useEffect, useState } from "react";
+import CreateItem from "../components/CreateItem";
+import { createFileRoute } from "@tanstack/react-router";
+import { useMyApi } from "../hooks/useMyApi";
+import { useInfiniteQuery, useMutation } from "@tanstack/react-query";
+import { ShoppingList as _ShoppingList } from "../generated/my-api/types.gen";
+
+type ListItem = { name: string };
+
+/**
+ * Component to render a singular Shopping List "/:shoppingListId" route.
+ */
+const ShoppingList: React.FC = () => {
+  const { shoppingListId } = Route.useParams();
+  const [visibleModal, setVisibleModal] = useState(false);
+  const api = useMyApi();
+  const getShoppingLists = useInfiniteQuery(
+    api.getShoppingLists.infiniteQueryOptions(
+      { shoppingListId },
+      { getNextPageParam: (p) => p.nextToken },
+    ),
+  );
+  const putShoppingList = useMutation(api.putShoppingList.mutationOptions());
+  const shoppingList: _ShoppingList | undefined =
+    getShoppingLists.data?.pages?.[0]?.shoppingLists?.[0];
+  const [shoppingItems, setShoppingItems] =
+    useState<BoardProps.Item<ListItem>[]>();
+
+  useEffect(() => {
+    setShoppingItems(
+      shoppingList?.shoppingItems?.map((i) => ({
+        id: i,
+        definition: { minColumnSpan: 4 },
+        data: { name: i },
+      })),
+    );
+  }, [shoppingList?.shoppingItems]);
+
+  return (
+    <ContentLayout
+      header={
+        <Header
+          variant="awsui-h1-sticky"
+          actions={
+            <SpaceBetween size="xs" direction="horizontal">
+              <Button
+                data-testid="header-btn-create"
+                variant="primary"
+                onClick={() => setVisibleModal(true)}
+              >
+                Add Item
+              </Button>
+            </SpaceBetween>
+          }
+        >
+          Shopping list: {shoppingList?.name}
+        </Header>
+      }
+    >
+      <CreateItem
+        isLoading={false}
+        title="Add Item"
+        callback={async (item) => {
+          const items = [
+            ...(shoppingItems || []),
+            {
+              id: item,
+              definition: { minColumnSpan: 4 },
+              data: { name: item },
+            },
+          ];
+          setShoppingItems(items);
+          putShoppingList.mutate({
+              name: shoppingList?.name ?? 'my list',
+              shoppingListId: shoppingList?.shoppingListId,
+              shoppingItems: items.map((i) => i.data.name),
+          });
+        }}
+        visibleModal={visibleModal}
+        setVisibleModal={setVisibleModal}
+      />
+      <Container>
+        {!shoppingList ? (
+          <Spinner />
+        ) : (
+          <Board<ListItem>
+            onItemsChange={(event) => {
+              const items = event.detail.items as BoardProps.Item<ListItem>[];
+              setShoppingItems(items);
+              putShoppingList.mutate({
+                  name: shoppingList.name,
+                  shoppingListId: shoppingList.shoppingListId,
+                  shoppingItems: items.map((i) => i.data.name),
+              });
+            }}
+            items={shoppingItems || []}
+            renderItem={(item, actions) => (
+              <BoardItem
+                header={item.data.name}
+                settings={
+                  <Button
+                    iconName="close"
+                    variant="icon"
+                    onClick={actions.removeItem}
+                  />
+                }
+                i18nStrings={{
+                  dragHandleAriaLabel: "Drag handle",
+                  dragHandleAriaDescription:
+                    "Use Space or Enter to activate drag, arrow keys to move, Space or Enter to submit, or Escape to discard.",
+                  resizeHandleAriaLabel: "Resize handle",
+                  resizeHandleAriaDescription:
+                    "Use Space or Enter to activate resize, arrow keys to move, Space or Enter to submit, or Escape to discard.",
+                }}
+              />
+            )}
+            i18nStrings={{
+              liveAnnouncementDndCommitted: () => "",
+              liveAnnouncementDndDiscarded: () => "",
+              liveAnnouncementDndItemInserted: () => "",
+              liveAnnouncementDndItemReordered: () => "",
+              liveAnnouncementDndItemResized: () => "",
+              liveAnnouncementDndStarted: () => "",
+              liveAnnouncementItemRemoved: () => "",
+              navigationAriaLabel: "",
+              navigationItemAriaLabel: () => "",
+            }}
+            empty={<></>}
+          />
+        )}
+      </Container>
+    </ContentLayout>
+  );
+};
+
+export const Route = createFileRoute('/$shoppingListId')({
+  component: ShoppingList,
+});
+```
+</TabItem>
+</Tabs>
+
+</Drawer>

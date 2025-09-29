@@ -1,0 +1,605 @@
+---
+title: "API 마이그레이션"
+---
+
+
+
+import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
+import RunGenerator from '@components/run-generator.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Drawer from '@components/drawer.astro';
+import InstallCommand from '@components/install-command.astro';
+
+쇼핑 리스트 애플리케이션에서 사용된 `TypeSafeApiProject`는 다음을 활용했습니다:
+
+- 모델링 언어로 [Smithy](https://smithy.io/2.0/) 사용
+- 연산 구현을 위한 TypeScript
+- React 웹사이트 통합을 위한 TypeScript 훅 생성
+
+따라서 <Link path="/guides/ts-smithy-api">`ts#smithy-api` 생성기</Link>를 사용하여 동등한 기능을 제공할 수 있습니다.
+
+:::note
+OpenAPI나 TypeSpec을 모델링 언어로 사용했거나 Python/Java로 핸들러를 구현한 경우 [FAQ](#frequently-asked-questions)에서 가능한 옵션을 참조하세요.
+:::
+
+#### TypeScript Smithy API 생성하기
+
+<Link path="/guides/ts-smithy-api">`ts#smithy-api` 생성기</Link>를 실행하여 `packages/api`에 API 프로젝트를 설정합니다:
+
+<RunGenerator generator="ts#smithy-api" noInteractive requiredParameters={{ name: 'api', namespace: 'com.aws', auth: 'IAM' }} />
+
+이렇게 하면 `model` 프로젝트와 `backend` 프로젝트가 생성됩니다. `model` 프로젝트는 Smithy 모델을 포함하며, `backend`는 서버 구현을 포함합니다.
+
+백엔드는 [TypeScript용 Smithy 서버 생성기](https://smithy.io/2.0/languages/typescript/ts-ssdk/index.html)를 사용합니다. 이에 대해서는 아래에서 자세히 살펴보겠습니다.
+
+#### Smithy 모델 마이그레이션
+
+Smithy API 프로젝트의 기본 구조가 준비되었으므로 모델을 마이그레이션할 수 있습니다:
+
+<Steps>
+
+1. `packages/api/model/src`에 생성된 예제 Smithy 파일 삭제
+1. PDK 프로젝트의 `packages/api/model/src/main/smithy` 디렉토리에서 새 프로젝트의 `packages/api/model/src` 디렉토리로 모델 복사
+1. PDK 애플리케이션과 일치하도록 `smithy-build.json`의 서비스 이름 및 네임스페이스 업데이트:
+
+    ```json {4}
+    // smithy-build.json
+    "plugins": {
+        "openapi": {
+          "service": "com.aws#MyApi",
+          ...
+    ```
+
+1. `main.smithy`의 서비스에 Smithy TypeScript 서버 SDK 사용 시 필수인 `ValidationException` 오류 추가:
+
+    ```smithy {2, 17}
+    // main.smithy
+    use smithy.framework#ValidationException
+
+    /// My Shopping List API
+    @restJson1
+    service MyApi {
+        version: "1.0"
+        operations: [
+            GetShoppingLists
+            PutShoppingList
+            DeleteShoppingList
+        ]
+        errors: [
+            BadRequestError
+            NotAuthorizedError
+            InternalFailureError
+            ValidationException
+        ]
+    }
+    ```
+
+1. 생성된 클라이언트에 페이지네이션 정보를 제공하는 트레이트를 정의할 `extensions.smithy` 파일을 `packages/api/model/src`에 추가:
+
+    ```smithy
+    // extensions.smithy
+    $version: "2"
+    namespace com.aws
+
+    use smithy.openapi#specificationExtension
+
+    @trait
+    @specificationExtension(as: "x-cursor")
+    structure cursor {
+        inputToken: String
+        enabled: Boolean
+    }
+    ```
+
+1. `get-shopping-lists.smithy`의 `GetShoppingLists` 연산에 새 `@cursor` 트레이트 추가:
+
+    ```smithy {5}
+    // operations/get-shopping-lists.smithy
+    @readonly
+    @http(method: "GET", uri: "/shopping-list")
+    @paginated(inputToken: "nextToken", outputToken: "nextToken", pageSize: "pageSize", items: "shoppingLists")
+    @cursor(inputToken: "nextToken")
+    @handler(language: "typescript")
+    operation GetShoppingLists {
+        input := with [PaginatedInputMixin] {
+            @httpQuery("shoppingListId")
+            shoppingListId: ShoppingListId
+        }
+    ```
+
+    Nx Plugin for AWS(<Link path="guides/api-connection/react-smithy">`api-connection`</Link> 생성기 통해)에서 제공하는 클라이언트 생성기를 사용하는 경우 `@paginated` 연산에도 `@cursor`를 사용해야 합니다.
+
+1. 마지막으로 모든 연산에서 `@handler` 트레이트 제거. `ts#smithy-api`를 사용하면 이 트레이트가 생성하는 람다 함수 CDK 구성 및 번들링 대상을 사용하지 않으며, 모든 람다 함수에 단일 번들을 사용합니다.
+
+</Steps>
+
+이제 모델 변경 사항을 확인하고 생성된 서버 코드가 작동하는지 빌드를 실행해 보겠습니다. 백엔드 프로젝트(`@shopping-list/api`)에 일부 오류가 발생하지만 다음 단계에서 해결할 것입니다.
+
+<NxCommands commands={["run-many --target build"]} />
+
+:::note
+린트 문제로 빌드 실패가 발생할 수 있습니다. 일반적으로 자동 수정이 가능합니다:
+
+<NxCommands commands={["run-many --target lint --fix"]} />
+:::
+
+#### 람다 핸들러 마이그레이션
+
+`api/backend` 프로젝트는 Type Safe API의 `api/handlers/typescript` 프로젝트와 유사하다고 볼 수 있습니다.
+
+Type Safe API와 `ts#smithy-api` 생성기의 주요 차이점은 핸들러 구현 방식입니다. `ts#smithy-api`는 [TypeScript용 Smithy 서버 생성기](https://smithy.io/2.0/languages/typescript/ts-ssdk/index.html)를 사용하며, Type Safe API의 자체 생성된 핸들러 래퍼(`api/generated/typescript/runtime` 프로젝트)를 사용하지 않습니다.
+
+우리의 람다 핸들러는 `@aws-sdk/client-dynamodb` 패키지에 의존하므로 먼저 설치합니다:
+
+<InstallCommand pkg="@aws-sdk/client-dynamodb" />
+
+그런 다음 PDK 프로젝트의 `handlers/src/dynamo-client.ts` 파일을 `backend/src/operations`로 복사하여 핸들러에서 사용할 수 있도록 합니다.
+
+핸들러 마이그레이션은 다음 일반 단계를 따를 수 있습니다:
+
+<Steps>
+
+1. PDK 프로젝트의 `packages/api/handlers/typescript/src` 디렉토리에서 새 프로젝트의 `packages/api/backend/src/operations` 디렉토리로 핸들러 복사
+
+1. `my-api-typescript-runtime` 임포트 제거 및 생성된 TypeScript 서버 SDK에서 연산 타입과 `ServiceContext` 임포트:
+
+    ```diff lang="ts" wrap
+    - import {
+    -   deleteShoppingListHandler,
+    -   DeleteShoppingListChainedHandlerFunction,
+    -   INTERCEPTORS,
+    -   Response,
+    -   LoggingInterceptor,
+    - } from 'myapi-typescript-runtime';
+    + import { DeleteShoppingList as DeleteShoppingListOperation } from '../generated/ssdk/index.js';
+    + import { ServiceContext } from '../context.js';
+    ```
+
+1. 핸들러 래퍼 익스포트 삭제
+
+    ```diff lang="ts" wrap
+    - export const handler = deleteShoppingListHandler(
+    -   ...INTERCEPTORS,
+    -   deleteShoppingList,
+    - );
+    ```
+
+1. SSDK 사용을 위해 연산 핸들러 시그니처 업데이트:
+
+    ```diff lang="ts" wrap
+    - export const deleteShoppingList: DeleteShoppingListChainedHandlerFunction = async (request) => {
+    + export const DeleteShoppingList: DeleteShoppingListOperation<ServiceContext> = async (input, ctx) => {
+    ```
+
+1. `LoggingInterceptor` 사용을 `ctx.logger`로 대체 (메트릭스 및 트레이싱 인터셉터도 동일):
+
+    ```diff lang="ts" wrap
+    - LoggingInterceptor.getLogger(request).info('...');
+    + ctx.logger.info('...');
+    ```
+
+1. 입력 파라미터 참조 업데이트. SSDK는 Smithy 모델과 정확히 일치하는 타입을 제공하므로(바디 파라미터와 별도로 경로/쿼리/헤더 파라미터를 그룹화하지 않음) 입력 참조를 적절히 수정:
+
+    ```diff lang="ts" wrap
+    - const shoppingListId = request.input.requestParameters.shoppingListId;
+    + const shoppingListId = input.shoppingListId;
+    ```
+
+1. `Response` 사용 제거. SSDK에서는 일반 객체를 반환합니다.
+
+    ```diff lang="ts" wrap
+    - return Response.success({ shoppingListId });
+    + return { shoppingListId };
+    ```
+
+    또한 `Response`를 throw하거나 반환하지 않고 SSDK의 생성된 오류를 throw:
+
+    ```diff lang="ts" wrap
+    - throw Response.badRequest({ message: 'oh no' });
+    - return Response.badRequest({ message: 'oh no' });
+    + import { BadRequestError } from '../generated/ssdk/index.js';
+    + throw new BadRequestError({ message: 'oh no' });
+    ```
+
+1. 상대 임포트에 ESM 구문 사용 (`.js` 확장자 추가)
+
+1. `service.ts`에 연산 추가
+
+    ```ts {4, 12}
+    // service.ts
+    import { ServiceContext } from './context.js';
+    import { MyApiService } from './generated/ssdk/index.js';
+    import { DeleteShoppingList } from './operations/delete-shopping-list.js';
+    import { GetShoppingLists } from './operations/get-shopping-lists.js';
+    import { PutShoppingList } from './operations/put-shopping-list.js';
+
+    // 서비스에 연산 등록
+    export const Service: MyApiService<ServiceContext> = {
+      PutShoppingList,
+      GetShoppingLists,
+      DeleteShoppingList,
+    };
+    ```
+
+</Steps>
+
+<Drawer title="쇼핑 리스트 핸들러 마이그레이션" trigger="튜토리얼의 세 가지 쇼핑 리스트 연산에 대한 전체 Before/After 예제 보기">
+
+<h4>Delete Shopping List</h4>
+
+<Tabs syncKey="pdk-migration">
+<TabItem label="Before">
+```ts
+// handlers/typescript/src/delete-shopping-list.ts
+import { DeleteItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  deleteShoppingListHandler,
+  DeleteShoppingListChainedHandlerFunction,
+  INTERCEPTORS,
+  Response,
+  LoggingInterceptor,
+} from 'myapi-typescript-runtime';
+import { ddbClient } from './dynamo-client';
+
+/**
+ * DeleteShoppingList 연산용 타입 안전 핸들러
+ */
+export const deleteShoppingList: DeleteShoppingListChainedHandlerFunction = async (request) => {
+  LoggingInterceptor.getLogger(request).info(
+    'Start DeleteShoppingList Operation',
+  );
+
+  const shoppingListId = request.input.requestParameters.shoppingListId;
+  await ddbClient.send(
+    new DeleteItemCommand({
+      TableName: 'shopping_list',
+      Key: {
+        shoppingListId: {
+          S: shoppingListId,
+        },
+      },
+    }),
+  );
+
+  return Response.success({
+    shoppingListId,
+  });
+};
+
+/**
+ * DeleteShoppingList 연산용 AWS Lambda 핸들러 진입점
+ * deleteShoppingListHandler 메서드는 타입 안전 핸들러를 래핑하고 입출력 마샬링 관리
+ */
+export const handler = deleteShoppingListHandler(
+  ...INTERCEPTORS,
+  deleteShoppingList,
+);
+```
+</TabItem>
+<TabItem label="After">
+```ts
+// backend/src/operations/delete-shopping-list.ts
+import { DeleteItemCommand } from '@aws-sdk/client-dynamodb';
+import { ddbClient } from './dynamo-client.js';
+import { DeleteShoppingList as DeleteShoppingListOperation } from '../generated/ssdk/index.js';
+import { ServiceContext } from '../context.js';
+
+/**
+ * DeleteShoppingList 연산용 타입 안전 핸들러
+ */
+export const DeleteShoppingList: DeleteShoppingListOperation<ServiceContext> = async (input, ctx) => {
+  ctx.logger.info(
+    'Start DeleteShoppingList Operation',
+  );
+
+  const shoppingListId = input.shoppingListId;
+  await ddbClient.send(
+    new DeleteItemCommand({
+      TableName: 'shopping_list',
+      Key: {
+        shoppingListId: {
+          S: shoppingListId!,
+        },
+      },
+    }),
+  );
+
+  return {
+    shoppingListId,
+  };
+};
+```
+</TabItem>
+</Tabs>
+
+<h4>Get Shopping Lists</h4>
+
+<Tabs syncKey="pdk-migration">
+<TabItem label="Before">
+```ts
+// handlers/typescript/src/get-shopping-lists.ts
+import { DynamoDBClient, QueryCommand, QueryCommandInput, ScanCommand, ScanCommandInput } from '@aws-sdk/client-dynamodb';
+import {
+  getShoppingListsHandler,
+  GetShoppingListsChainedHandlerFunction,
+  INTERCEPTORS,
+  Response,
+  LoggingInterceptor,
+  ShoppingList,
+} from 'myapi-typescript-runtime';
+import { ddbClient } from './dynamo-client';
+
+/**
+ * GetShoppingLists 연산용 타입 안전 핸들러
+ */
+export const getShoppingLists: GetShoppingListsChainedHandlerFunction = async (request) => {
+  LoggingInterceptor.getLogger(request).info('Start GetShoppingLists Operation');
+
+  const nextToken = request.input.requestParameters.nextToken;
+  const pageSize = request.input.requestParameters.pageSize;
+  const shoppingListId = request.input.requestParameters.shoppingListId;
+  const commandInput: ScanCommandInput | QueryCommandInput = {
+    TableName: 'shopping_list',
+    ConsistentRead: true,
+    Limit: pageSize,
+    ExclusiveStartKey: nextToken ? fromToken(nextToken) : undefined,
+    ...(shoppingListId ? {
+      KeyConditionExpression: 'shoppingListId = :shoppingListId',
+      ExpressionAttributeValues: {
+        ':shoppingListId': {
+          S: request.input.requestParameters.shoppingListId!,
+        },
+      },
+    } : {}),
+  };
+  const response = await ddbClient.send(shoppingListId ? new QueryCommand(commandInput) : new ScanCommand(commandInput));
+
+  return Response.success({
+    shoppingLists: (response.Items || [])
+      .map<ShoppingList>(item => ({
+      shoppingListId: item.shoppingListId.S!,
+      name: item.name.S!,
+      shoppingItems: JSON.parse(item.shoppingItems.S || '[]'),
+    })),
+    nextToken: response.LastEvaluatedKey ? toToken(response.LastEvaluatedKey) : undefined,
+  });
+};
+
+/**
+ * 문자열화된 토큰 디코딩
+ * @param token 페이지네이션 요청에 전달된 토큰
+ */
+const fromToken = <T>(token?: string): T | undefined =>
+  token ? (JSON.parse(Buffer.from(decodeURIComponent(token), 'base64').toString()) as T) : undefined;
+
+/**
+ * 페이지네이션 상세를 불투명 문자열 토큰으로 인코딩
+ * @param paginationToken 페이지네이션 토큰 상세
+ */
+const toToken = <T>(paginationToken?: T): string | undefined =>
+  paginationToken ? encodeURIComponent(Buffer.from(JSON.stringify(paginationToken)).toString('base64')) : undefined;
+
+/**
+ * GetShoppingLists 연산용 AWS Lambda 핸들러 진입점
+ * getShoppingListsHandler 메서드는 타입 안전 핸들러를 래핑하고 입출력 마샬링 관리
+ */
+export const handler = getShoppingListsHandler(...INTERCEPTORS, getShoppingLists);
+```
+</TabItem>
+<TabItem label="After">
+```ts
+// backend/src/operations/get-shopping-lists.ts
+import { QueryCommand, QueryCommandInput, ScanCommand, ScanCommandInput } from '@aws-sdk/client-dynamodb';
+import { ddbClient } from './dynamo-client.js';
+import { GetShoppingLists as GetShoppingListsOperation, ShoppingList } from '../generated/ssdk/index.js';
+import { ServiceContext } from '../context.js';
+
+/**
+ * GetShoppingLists 연산용 타입 안전 핸들러
+ */
+export const GetShoppingLists: GetShoppingListsOperation<ServiceContext> = async (input, ctx) => {
+  ctx.logger.info('Start GetShoppingLists Operation');
+
+  const nextToken = input.nextToken;
+  const pageSize = input.pageSize;
+  const shoppingListId = input.shoppingListId;
+  const commandInput: ScanCommandInput | QueryCommandInput = {
+    TableName: 'shopping_list',
+    ConsistentRead: true,
+    Limit: pageSize,
+    ExclusiveStartKey: nextToken ? fromToken(nextToken) : undefined,
+    ...(shoppingListId ? {
+      KeyConditionExpression: 'shoppingListId = :shoppingListId',
+      ExpressionAttributeValues: {
+        ':shoppingListId': {
+          S: input.shoppingListId!,
+        },
+      },
+    } : {}),
+  };
+  const response = await ddbClient.send(shoppingListId ? new QueryCommand(commandInput) : new ScanCommand(commandInput));
+
+  return {
+    shoppingLists: (response.Items || [])
+      .map<ShoppingList>(item => ({
+      shoppingListId: item.shoppingListId.S!,
+      name: item.name.S!,
+      shoppingItems: JSON.parse(item.shoppingItems.S || '[]'),
+    })),
+    nextToken: response.LastEvaluatedKey ? toToken(response.LastEvaluatedKey) : undefined,
+  };
+};
+
+/**
+ * 문자열화된 토큰 디코딩
+ * @param token 페이지네이션 요청에 전달된 토큰
+ */
+const fromToken = <T>(token?: string): T | undefined =>
+  token ? (JSON.parse(Buffer.from(decodeURIComponent(token), 'base64').toString()) as T) : undefined;
+
+/**
+ * 페이지네이션 상세를 불투명 문자열 토큰으로 인코딩
+ * @param paginationToken 페이지네이션 토큰 상세
+ */
+const toToken = <T>(paginationToken?: T): string | undefined =>
+  paginationToken ? encodeURIComponent(Buffer.from(JSON.stringify(paginationToken)).toString('base64')) : undefined;
+```
+</TabItem>
+</Tabs>
+
+<h4>Put Shopping List</h4>
+
+<Tabs syncKey="pdk-migration">
+<TabItem label="Before">
+```ts
+// handlers/typescript/src/put-shopping-list.ts
+import { randomUUID } from 'crypto';
+import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  putShoppingListHandler,
+  PutShoppingListChainedHandlerFunction,
+  INTERCEPTORS,
+  Response,
+  LoggingInterceptor,
+} from 'myapi-typescript-runtime';
+import { ddbClient } from './dynamo-client';
+
+/**
+ * PutShoppingList 연산용 타입 안전 핸들러
+ */
+export const putShoppingList: PutShoppingListChainedHandlerFunction = async (request) => {
+  LoggingInterceptor.getLogger(request).info('Start PutShoppingList Operation');
+
+  const shoppingListId = request.input.body.shoppingListId ?? randomUUID();
+  await ddbClient.send(new PutItemCommand({
+    TableName: 'shopping_list',
+    Item: {
+      shoppingListId: {
+        S: shoppingListId,
+      },
+      name: {
+        S: request.input.body.name,
+      },
+      shoppingItems: {
+        S: JSON.stringify(request.input.body.shoppingItems || []),
+      },
+    },
+  }));
+
+  return Response.success({
+    shoppingListId,
+  });
+};
+
+/**
+ * PutShoppingList 연산용 AWS Lambda 핸들러 진입점
+ * putShoppingListHandler 메서드는 타입 안전 핸들러를 래핑하고 입출력 마샬링 관리
+ */
+export const handler = putShoppingListHandler(...INTERCEPTORS, putShoppingList);
+```
+</TabItem>
+<TabItem label="After">
+```ts
+// backend/src/operations/put-shopping-list.ts
+import { randomUUID } from 'crypto';
+import { PutItemCommand } from '@aws-sdk/client-dynamodb';
+import { ddbClient } from './dynamo-client.js';
+import { PutShoppingList as PutShoppingListOperation } from '../generated/ssdk/index.js';
+import { ServiceContext } from '../context.js';
+
+/**
+ * PutShoppingList 연산용 타입 안전 핸들러
+ */
+export const PutShoppingList: PutShoppingListOperation<ServiceContext> = async (input, ctx) => {
+  ctx.logger.info('Start PutShoppingList Operation');
+
+  const shoppingListId = input.shoppingListId ?? randomUUID();
+  await ddbClient.send(new PutItemCommand({
+    TableName: 'shopping_list',
+    Item: {
+      shoppingListId: {
+        S: shoppingListId,
+      },
+      name: {
+        S: input.name!,
+      },
+      shoppingItems: {
+        S: JSON.stringify(input.shoppingItems || []),
+      },
+    },
+  }));
+
+  return {
+    shoppingListId,
+  };
+};
+```
+</TabItem>
+</Tabs>
+
+</Drawer>
+
+Smithy API 프로젝트를 생성할 때 `packages/api`에 추가하기 위해 이름을 `api`로 지정했습니다. 이제 Smithy API가 `service Api` 대신 `service MyApi`를 정의하므로 `getApiServiceHandler` 인스턴스를 `getMyApiServiceHandler`로 업데이트해야 합니다.
+
+`handler.ts`에 다음 변경사항 적용:
+
+```diff lang="ts"
+// packages/api/backend/src/handler.ts
+- import { getApiServiceHandler } from './generated/ssdk/index.js';
++ import { getMyApiServiceHandler } from './generated/ssdk/index.js';
+
+process.env.POWERTOOLS_METRICS_NAMESPACE = 'Api';
+process.env.POWERTOOLS_SERVICE_NAME = 'Api';
+
+const tracer = new Tracer();
+const logger = new Logger();
+const metrics = new Metrics();
+
+- const serviceHandler = getApiServiceHandler(Service);
++ const serviceHandler = getMyApiServiceHandler(Service);
+```
+
+`local-server.ts`에도 동일하게 적용:
+
+```diff lang="ts"
+// packages/api/backend/src/local-server.ts
+-import { getApiServiceHandler } from './generated/ssdk/index.js';
++import { getMyApiServiceHandler } from './generated/ssdk/index.js';
+
+const PORT = 3001;
+
+const tracer = new Tracer();
+const logger = new Logger();
+const metrics = new Metrics();
+
+-const serviceHandler = getApiServiceHandler(Service);
++const serviceHandler = getMyApiServiceHandler(Service);
+```
+
+추가로 `packages/api/backend/project.json`의 `metadata.apiName`을 `my-api`로 업데이트:
+
+```diff lang="json"
+// packages/api/backend/project.json
+  "metadata": {
+    "generator": "ts#smithy-api",
+-    "apiName": "api",
++    "apiName": "my-api",
+    "auth": "IAM",
+    "modelProject": "@shopping-list/api-model",
+    "ports": [3001]
+  },
+```
+
+#### 빌드로 검증
+
+지금까지의 마이그레이션이 작동하는지 확인하기 위해 프로젝트 빌드:
+
+<NxCommands commands={["run-many --target build"]} />
+
+:::note
+린트 문제로 빌드 실패가 발생할 수 있습니다. 일반적으로 자동 수정이 가능합니다:
+
+<NxCommands commands={["run-many --target lint --fix"]} />
+:::

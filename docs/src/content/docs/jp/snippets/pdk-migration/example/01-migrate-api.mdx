@@ -1,0 +1,578 @@
+---
+title: "APIの移行"
+---
+
+
+
+import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
+import RunGenerator from '@components/run-generator.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Drawer from '@components/drawer.astro';
+import InstallCommand from '@components/install-command.astro';
+
+ショッピングリストアプリケーションで使用された`TypeSafeApiProject`は以下を利用していました:
+
+- モデリング言語として[Smithy](https://smithy.io/2.0/)
+- オペレーション実装用のTypeScript
+- Reactウェブサイト連携用のTypeScriptフック生成
+
+したがって、<Link path="/guides/ts-smithy-api">`ts#smithy-api`ジェネレータ</Link>を使用して同等の機能を実現できます。
+
+:::note
+OpenAPIやTypeSpecをモデリング言語として使用している場合、またはPythonやJavaでハンドラを実装している場合は、[FAQ](#frequently-asked-questions)で可能性のあるオプションを参照してください。
+:::
+
+#### TypeScript Smithy APIの生成
+
+`packages/api`にAPIプロジェクトをセットアップするため、<Link path="/guides/ts-smithy-api">`ts#smithy-api`ジェネレータ</Link>を実行します:
+
+<RunGenerator generator="ts#smithy-api" noInteractive requiredParameters={{ name: 'api', namespace: 'com.aws', auth: 'IAM' }} />
+
+これにより`model`プロジェクトと`backend`プロジェクトが生成されます。`model`プロジェクトにはSmithyモデルが含まれ、`backend`にはサーバー実装が含まれます。
+
+バックエンドは[Smithy Server Generator for TypeScript](https://smithy.io/2.0/languages/typescript/ts-ssdk/index.html)を使用しています。詳細は後述します。
+
+#### Smithyモデルの移行
+
+基本的なSmithy APIプロジェクト構造ができたので、モデルを移行します:
+
+<Steps>
+
+1. `packages/api/model/src`内の生成されたサンプルSmithyファイルを削除
+1. PDKプロジェクトの`packages/api/model/src/main/smithy`から新しいプロジェクトの`packages/api/model/src`へモデルをコピー
+1. `smithy-build.json`のサービス名とネームスペースをPDKアプリケーションに合わせて更新:
+
+    ```json {4}
+    // smithy-build.json
+    "plugins": {
+        "openapi": {
+          "service": "com.aws#MyApi",
+          ...
+    ```
+
+1. `main.smithy`のサービスに`ValidationException`エラーを追加（Smithy TypeScript Server SDK使用時に必要）:
+
+    ```smithy {2, 17}
+    // main.smithy
+    use smithy.framework#ValidationException
+
+    /// My Shopping List API
+    @restJson1
+    service MyApi {
+        version: "1.0"
+        operations: [
+            GetShoppingLists
+            PutShoppingList
+            DeleteShoppingList
+        ]
+        errors: [
+            BadRequestError
+            NotAuthorizedError
+            InternalFailureError
+            ValidationException
+        ]
+    }
+    ```
+
+1. `packages/api/model/src`に`extensions.smithy`ファイルを追加（生成クライアントにページネーション情報を提供するトレイト定義）:
+
+    ```smithy
+    // extensions.smithy
+    $version: "2"
+    namespace com.aws
+
+    use smithy.openapi#specificationExtension
+
+    @trait
+    @specificationExtension(as: "x-cursor")
+    structure cursor {
+        inputToken: String
+        enabled: Boolean
+    }
+    ```
+
+1. `get-shopping-lists.smithy`の`GetShoppingLists`オペレーションに新しい`@cursor`トレイトを追加:
+
+    ```smithy {5}
+    // operations/get-shopping-lists.smithy
+    @readonly
+    @http(method: "GET", uri: "/shopping-list")
+    @paginated(inputToken: "nextToken", outputToken: "nextToken", pageSize: "pageSize", items: "shoppingLists")
+    @cursor(inputToken: "nextToken")
+    @handler(language: "typescript")
+    operation GetShoppingLists {
+        input := with [PaginatedInputMixin] {
+            @httpQuery("shoppingListId")
+            shoppingListId: ShoppingListId
+        }
+    ```
+
+    Nx Plugin for AWSのクライアントジェネレータ（<Link path="guides/api-connection/react-smithy">`api-connection`</Link>ジェネレータ経由）を使用する場合、`@paginated`オペレーションには`@cursor`も使用する必要があります。
+
+1. 最後に、すべてのオペレーションから`@handler`トレイトを削除（Nx Plugin for AWSではサポートされていないため）。`ts#smithy-api`使用時、このトレイトが生成するLambda関数CDKコンストラクトとバンドリングターゲットは不要です（全Lambda関数で単一バンドルを使用）。
+
+</Steps>
+
+ここでビルドを実行し、モデル変更を確認するとともに生成されたサーバーコードを確認します。バックエンドプロジェクト（`@shopping-list/api`）でいくつかエラーが発生しますが、次に対処します。
+
+<NxCommands commands={["run-many --target build"]} />
+
+:::note
+リンターの問題でビルドが失敗する場合があります。通常は自動修正可能です:
+
+<NxCommands commands={["run-many --target lint --fix"]} />
+:::
+
+#### Lambdaハンドラの移行
+
+`api/backend`プロジェクトは、Type Safe APIの`api/handlers/typescript`プロジェクトとほぼ同等とみなせます。
+
+Type Safe APIと`ts#smithy-api`ジェネレータの主な違いは、ハンドラ実装に[Smithy Server Generator for TypeScript](https://smithy.io/2.0/languages/typescript/ts-ssdk/index.html)を使用する点です（Type Safe API独自の生成ラッパーは使用しません）。
+
+Lambdaハンドラは`@aws-sdk/client-dynamodb`パッケージに依存するため、まずインストールします:
+
+<InstallCommand pkg="@aws-sdk/client-dynamodb" />
+
+次に、PDKプロジェクトの`handlers/src/dynamo-client.ts`を`backend/src/operations`にコピーします。
+
+ハンドラ移行の一般的な手順:
+
+<Steps>
+
+1. PDKプロジェクトの`packages/api/handlers/typescript/src`から新しいプロジェクトの`packages/api/backend/src/operations`へハンドラをコピー
+
+1. `my-api-typescript-runtime`インポートを削除し、代わりに生成されたTypeScript Server SDKからオペレーションタイプと`ServiceContext`をインポート:
+
+    ```diff lang="ts" wrap
+    - import {
+    -   deleteShoppingListHandler,
+    -   DeleteShoppingListChainedHandlerFunction,
+    -   INTERCEPTORS,
+    -   Response,
+    -   LoggingInterceptor,
+    - } from 'myapi-typescript-runtime';
+    + import { DeleteShoppingList as DeleteShoppingListOperation } from '../generated/ssdk/index.js';
+    + import { ServiceContext } from '../context.js';
+    ```
+
+1. ハンドララッパーのエクスポートを削除:
+
+    ```diff lang="ts" wrap
+    - export const handler = deleteShoppingListHandler(
+    -   ...INTERCEPTORS,
+    -   deleteShoppingList,
+    - );
+    ```
+
+1. オペレーションハンドラのシグネチャをSSDK用に更新:
+
+    ```diff lang="ts" wrap
+    - export const deleteShoppingList: DeleteShoppingListChainedHandlerFunction = async (request) => {
+    + export const DeleteShoppingList: DeleteShoppingListOperation<ServiceContext> = async (input, ctx) => {
+    ```
+
+1. `LoggingInterceptor`の使用を`ctx.logger`に置換（メトリクスとトレーシングインターセプタも同様）:
+
+    ```diff lang="ts" wrap
+    - LoggingInterceptor.getLogger(request).info('...');
+    + ctx.logger.info('...');
+    ```
+
+1. 入力パラメータ参照を更新（SSDKはSmithyモデルに完全一致する型を提供）:
+
+    ```diff lang="ts" wrap
+    - const shoppingListId = request.input.requestParameters.shoppingListId;
+    + const shoppingListId = input.shoppingListId;
+    ```
+
+1. `Response`の使用を削除（SSDKではプレーンオブジェクトを返す）:
+
+    ```diff lang="ts" wrap
+    - return Response.success({ shoppingListId });
+    + return { shoppingListId };
+    ```
+
+    エラー処理もSSDKの生成エラーを使用:
+
+    ```diff lang="ts" wrap
+    - throw Response.badRequest({ message: 'oh no' });
+    - return Response.badRequest({ message: 'oh no' });
+    + import { BadRequestError } from '../generated/ssdk/index.js';
+    + throw new BadRequestError({ message: 'oh no' });
+    ```
+
+1. 相対インポートにESM構文を使用（`.js`拡張子追加）
+
+1. `service.ts`にオペレーションを追加:
+
+    ```ts {4, 12}
+    // service.ts
+    import { ServiceContext } from './context.js';
+    import { MyApiService } from './generated/ssdk/index.js';
+    import { DeleteShoppingList } from './operations/delete-shopping-list.js';
+    import { GetShoppingLists } from './operations/get-shopping-lists.js';
+    import { PutShoppingList } from './operations/put-shopping-list.js';
+
+    // オペレーションをサービスに登録
+    export const Service: MyApiService<ServiceContext> = {
+      PutShoppingList,
+      GetShoppingLists,
+      DeleteShoppingList,
+    };
+    ```
+
+</Steps>
+
+<Drawer title="ショッピングリストハンドラ移行" trigger="チュートリアルの3オペレーションの移住前後比較を見るにはここをクリック">
+
+<h4>Delete Shopping List</h4>
+
+<Tabs syncKey="pdk-migration">
+<TabItem label="移行前">
+```ts
+// handlers/typescript/src/delete-shopping-list.ts
+import { DeleteItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  deleteShoppingListHandler,
+  DeleteShoppingListChainedHandlerFunction,
+  INTERCEPTORS,
+  Response,
+  LoggingInterceptor,
+} from 'myapi-typescript-runtime';
+import { ddbClient } from './dynamo-client';
+
+/**
+ * DeleteShoppingList操作の型安全ハンドラ
+ */
+export const deleteShoppingList: DeleteShoppingListChainedHandlerFunction = async (request) => {
+  LoggingInterceptor.getLogger(request).info(
+    'Start DeleteShoppingList Operation',
+  );
+
+  const shoppingListId = request.input.requestParameters.shoppingListId;
+  await ddbClient.send(
+    new DeleteItemCommand({
+      TableName: 'shopping_list',
+      Key: {
+        shoppingListId: {
+          S: shoppingListId,
+        },
+      },
+    }),
+  );
+
+  return Response.success({
+    shoppingListId,
+  });
+};
+
+/**
+ * DeleteShoppingList操作のAWS Lambdaハンドラエントリーポイント
+ */
+export const handler = deleteShoppingListHandler(
+  ...INTERCEPTORS,
+  deleteShoppingList,
+);
+```
+</TabItem>
+<TabItem label="移行後">
+```ts
+// backend/src/operations/delete-shopping-list.ts
+import { DeleteItemCommand } from '@aws-sdk/client-dynamodb';
+import { ddbClient } from './dynamo-client.js';
+import { DeleteShoppingList as DeleteShoppingListOperation } from '../generated/ssdk/index.js';
+import { ServiceContext } from '../context.js';
+
+/**
+ * DeleteShoppingList操作の型安全ハンドラ
+ */
+export const DeleteShoppingList: DeleteShoppingListOperation<ServiceContext> = async (input, ctx) => {
+  ctx.logger.info(
+    'Start DeleteShoppingList Operation',
+  );
+
+  const shoppingListId = input.shoppingListId;
+  await ddbClient.send(
+    new DeleteItemCommand({
+      TableName: 'shopping_list',
+      Key: {
+        shoppingListId: {
+          S: shoppingListId!,
+        },
+      },
+    }),
+  );
+
+  return {
+    shoppingListId,
+  };
+};
+```
+</TabItem>
+</Tabs>
+
+<h4>Get Shopping Lists</h4>
+
+<Tabs syncKey="pdk-migration">
+<TabItem label="移行前">
+```ts
+// handlers/typescript/src/get-shopping-lists.ts
+import { DynamoDBClient, QueryCommand, QueryCommandInput, ScanCommand, ScanCommandInput } from '@aws-sdk/client-dynamodb';
+import {
+  getShoppingListsHandler,
+  GetShoppingListsChainedHandlerFunction,
+  INTERCEPTORS,
+  Response,
+  LoggingInterceptor,
+  ShoppingList,
+} from 'myapi-typescript-runtime';
+import { ddbClient } from './dynamo-client';
+
+/**
+ * GetShoppingLists操作の型安全ハンドラ
+ */
+export const getShoppingLists: GetShoppingListsChainedHandlerFunction = async (request) => {
+  LoggingInterceptor.getLogger(request).info('Start GetShoppingLists Operation');
+
+  const nextToken = request.input.requestParameters.nextToken;
+  const pageSize = request.input.requestParameters.pageSize;
+  const shoppingListId = request.input.requestParameters.shoppingListId;
+  const commandInput: ScanCommandInput | QueryCommandInput = {
+    TableName: 'shopping_list',
+    ConsistentRead: true,
+    Limit: pageSize,
+    ExclusiveStartKey: nextToken ? fromToken(nextToken) : undefined,
+    ...(shoppingListId ? {
+      KeyConditionExpression: 'shoppingListId = :shoppingListId',
+      ExpressionAttributeValues: {
+        ':shoppingListId': {
+          S: request.input.requestParameters.shoppingListId!,
+        },
+      },
+    } : {}),
+  };
+  const response = await ddbClient.send(shoppingListId ? new QueryCommand(commandInput) : new ScanCommand(commandInput));
+
+  return Response.success({
+    shoppingLists: (response.Items || [])
+      .map<ShoppingList>(item => ({
+      shoppingListId: item.shoppingListId.S!,
+      name: item.name.S!,
+      shoppingItems: JSON.parse(item.shoppingItems.S || '[]'),
+    })),
+    nextToken: response.LastEvaluatedKey ? toToken(response.LastEvaluatedKey) : undefined,
+  });
+};
+
+// トークン処理関数...
+
+/**
+ * GetShoppingLists操作のAWS Lambdaハンドラエントリーポイント
+ */
+export const handler = getShoppingListsHandler(...INTERCEPTORS, getShoppingLists);
+```
+</TabItem>
+<TabItem label="移行後">
+```ts
+// backend/src/operations/get-shopping-lists.ts
+import { QueryCommand, QueryCommandInput, ScanCommand, ScanCommandInput } from '@aws-sdk/client-dynamodb';
+import { ddbClient } from './dynamo-client.js';
+import { GetShoppingLists as GetShoppingListsOperation, ShoppingList } from '../generated/ssdk/index.js';
+import { ServiceContext } from '../context.js';
+
+/**
+ * GetShoppingLists操作の型安全ハンドラ
+ */
+export const GetShoppingLists: GetShoppingListsOperation<ServiceContext> = async (input, ctx) => {
+  ctx.logger.info('Start GetShoppingLists Operation');
+
+  const nextToken = input.nextToken;
+  const pageSize = input.pageSize;
+  const shoppingListId = input.shoppingListId;
+  const commandInput: ScanCommandInput | QueryCommandInput = {
+    TableName: 'shopping_list',
+    ConsistentRead: true,
+    Limit: pageSize,
+    ExclusiveStartKey: nextToken ? fromToken(nextToken) : undefined,
+    ...(shoppingListId ? {
+      KeyConditionExpression: 'shoppingListId = :shoppingListId',
+      ExpressionAttributeValues: {
+        ':shoppingListId': {
+          S: input.shoppingListId!,
+        },
+      },
+    } : {}),
+  };
+  const response = await ddbClient.send(shoppingListId ? new QueryCommand(commandInput) : new ScanCommand(commandInput));
+
+  return {
+    shoppingLists: (response.Items || [])
+      .map<ShoppingList>(item => ({
+      shoppingListId: item.shoppingListId.S!,
+      name: item.name.S!,
+      shoppingItems: JSON.parse(item.shoppingItems.S || '[]'),
+    })),
+    nextToken: response.LastEvaluatedKey ? toToken(response.LastEvaluatedKey) : undefined,
+  };
+};
+
+// トークン処理関数...
+```
+</TabItem>
+</Tabs>
+
+<h4>Put Shopping List</h4>
+
+<Tabs syncKey="pdk-migration">
+<TabItem label="移行前">
+```ts
+// handlers/typescript/src/put-shopping-list.ts
+import { randomUUID } from 'crypto';
+import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  putShoppingListHandler,
+  PutShoppingListChainedHandlerFunction,
+  INTERCEPTORS,
+  Response,
+  LoggingInterceptor,
+} from 'myapi-typescript-runtime';
+import { ddbClient } from './dynamo-client';
+
+/**
+ * PutShoppingList操作の型安全ハンドラ
+ */
+export const putShoppingList: PutShoppingListChainedHandlerFunction = async (request) => {
+  LoggingInterceptor.getLogger(request).info('Start PutShoppingList Operation');
+
+  const shoppingListId = request.input.body.shoppingListId ?? randomUUID();
+  await ddbClient.send(new PutItemCommand({
+    TableName: 'shopping_list',
+    Item: {
+      shoppingListId: {
+        S: shoppingListId,
+      },
+      name: {
+        S: request.input.body.name,
+      },
+      shoppingItems: {
+        S: JSON.stringify(request.input.body.shoppingItems || []),
+      },
+    },
+  }));
+
+  return Response.success({
+    shoppingListId,
+  });
+};
+
+/**
+ * PutShoppingList操作のAWS Lambdaハンドラエントリーポイント
+ */
+export const handler = putShoppingListHandler(...INTERCEPTORS, putShoppingList);
+```
+</TabItem>
+<TabItem label="移行後">
+```ts
+// backend/src/operations/put-shopping-list.ts
+import { randomUUID } from 'crypto';
+import { PutItemCommand } from '@aws-sdk/client-dynamodb';
+import { ddbClient } from './dynamo-client.js';
+import { PutShoppingList as PutShoppingListOperation } from '../generated/ssdk/index.js';
+import { ServiceContext } from '../context.js';
+
+/**
+ * PutShoppingList操作の型安全ハンドラ
+ */
+export const PutShoppingList: PutShoppingListOperation<ServiceContext> = async (input, ctx) => {
+  ctx.logger.info('Start PutShoppingList Operation');
+
+  const shoppingListId = input.shoppingListId ?? randomUUID();
+  await ddbClient.send(new PutItemCommand({
+    TableName: 'shopping_list',
+    Item: {
+      shoppingListId: {
+        S: shoppingListId,
+      },
+      name: {
+        S: input.name!,
+      },
+      shoppingItems: {
+        S: JSON.stringify(input.shoppingItems || []),
+      },
+    },
+  }));
+
+  return {
+    shoppingListId,
+  };
+};
+```
+</TabItem>
+</Tabs>
+
+</Drawer>
+
+Smithy APIプロジェクトを`packages/api`に配置するため、初期生成時に`api`という名前を使用しました。現在のSmithy APIでは`service MyApi`を定義しているため、`getApiServiceHandler`のインスタンスを`getMyApiServiceHandler`に更新する必要があります。
+
+`handler.ts`を以下のように変更:
+
+```diff lang="ts"
+// packages/api/backend/src/handler.ts
+- import { getApiServiceHandler } from './generated/ssdk/index.js';
++ import { getMyApiServiceHandler } from './generated/ssdk/index.js';
+
+process.env.POWERTOOLS_METRICS_NAMESPACE = 'Api';
+process.env.POWERTOOLS_SERVICE_NAME = 'Api';
+
+const tracer = new Tracer();
+const logger = new Logger();
+const metrics = new Metrics();
+
+- const serviceHandler = getApiServiceHandler(Service);
++ const serviceHandler = getMyApiServiceHandler(Service);
+```
+
+`local-server.ts`も同様に変更:
+
+```diff lang="ts"
+// packages/api/backend/src/local-server.ts
+-import { getApiServiceHandler } from './generated/ssdk/index.js';
++import { getMyApiServiceHandler } from './generated/ssdk/index.js';
+
+const PORT = 3001;
+
+const tracer = new Tracer();
+const logger = new Logger();
+const metrics = new Metrics();
+
+-const serviceHandler = getApiServiceHandler(Service);
++const serviceHandler = getMyApiServiceHandler(Service);
+```
+
+さらに、`packages/api/backend/project.json`の`metadata.apiName`を`my-api`に更新:
+
+```diff lang="json"
+// packages/api/backend/project.json
+  "metadata": {
+    "generator": "ts#smithy-api",
+-    "apiName": "api",
++    "apiName": "my-api",
+    "auth": "IAM",
+    "modelProject": "@shopping-list/api-model",
+    "ports": [3001]
+  },
+```
+
+#### ビルドによる検証
+
+ここまでの移行が正常に行われたか確認するため、プロジェクトをビルドします:
+
+<NxCommands commands={["run-many --target build"]} />
+
+:::note
+リンターの問題でビルドが失敗する場合があります。通常は自動修正可能です:
+
+<NxCommands commands={["run-many --target lint --fix"]} />
+:::

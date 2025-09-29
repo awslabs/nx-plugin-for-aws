@@ -1,0 +1,157 @@
+---
+title: "インフラストラクチャーを移行する"
+---
+
+
+
+import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
+import RunGenerator from '@components/run-generator.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Drawer from '@components/drawer.astro';
+import InstallCommand from '@components/install-command.astro';
+
+ショッピングリストアプリケーションで最後に移行が必要なプロジェクトが `InfrastructureTsProject` です。これはTypeScript CDKプロジェクトであり、Nx Plugin for AWSの同等機能は<Link path="/guides/typescript-infrastructure">`ts#infra` ジェネレータ</Link>です。
+
+PDKはProjenプロジェクトに加えて、これらのプロジェクトが依存するCDKコンストラクトも提供していました。私たちはこれらのCDKコンストラクトからもショッピングリストアプリケーションを移行し、Nx Plugin for AWSが生成するコンストラクトを採用します。
+
+:::tip
+PDKと比較したNx Plugin for AWSの大きな利点は、提供するCDKコンストラクトがサードパーティパッケージを介してインポートされるのではなく、プロジェクトに直接追加されるソースコードである点です。これにより、PDKがサポートしていた範囲を超えたカスタマイズが可能になります。
+:::
+
+#### TypeScript CDKインフラストラクチャプロジェクトの生成
+
+`packages/infra` にインフラプロジェクトをセットアップするため、<Link path="/guides/typescript-infrastructure">`ts#infra` ジェネレータ</Link>を実行します：
+
+<RunGenerator generator="ts#infra" noInteractive requiredParameters={{ name: 'infra' }} />
+
+#### CDKインフラストラクチャの移行
+
+PDKショッピングリストアプリケーションは、CDKアプリケーションスタック内で以下のコンストラクトをインスタンス化していました：
+
+- ショッピングリストを保存するDynamoDBテーブルのための `DatabaseConstruct`
+- PDKから直接インポートしたCognitoリソース用の `UserIdentity`
+- Smithy APIをデプロイするための `MyApi`（PDKの `TypeSafeRestApi` CDKコンストラクトを使用したタイプセーフな統合）
+- PDKの `StaticWebsite` CDKコンストラクトをラップしたウェブサイトデプロイ用の `Website`
+
+次に、これらを新しいプロジェクトに移行します。
+
+##### アプリケーションスタックのコピー
+
+PDKショッピングリストアプリケーションの `packages/infra/src/stacks/application-stack.ts` を新しいプロジェクトの同じ場所にコピーします。TypeScriptエラーが表示されますが、後で対応します。
+
+##### データベースコンストラクトのコピー
+
+PDKアプリケーションの `packages/src/constructs/database.ts` にある `Database` コンストラクトを新しいプロジェクトの同じ場所にコピーします。
+
+Nx Plugin for AWSはPDK Nagよりも厳格な[Checkov](https://www.checkov.io/)を使用するため、以下の抑制ルールを追加します：
+
+```diff lang="ts"
+// constructs/database.ts
++import { suppressRules } from ':shopping-list/common-constructs';
+...
++suppressRules(
++  this.shoppingListTable,
++  ['CKV_AWS_28', 'CKV_AWS_119'],
++  'Backup and KMS key not required for this project',
++);
+```
+
+`application-stack.ts` で `DatabaseConstruct` のインポートをESM構文に更新します：
+
+```diff lang="ts"
+// stacks/application-stack.ts
+-import { DatabaseConstruct } from '../constructs/database';
++import { DatabaseConstruct } from '../constructs/database.js';
+```
+
+##### UserIdentityコンストラクトの移行
+
+`UserIdentity` コンストラクトは基本的にインポートを変更するだけで置換可能です：
+
+```diff lang="ts"
+-import { UserIdentity } from "@aws/pdk/identity";
++import { UserIdentity } from ':shopping-list/common-constructs';
+...
+const userIdentity = new UserIdentity(this, `${id}UserIdentity`);
+```
+
+新しい `UserIdentity` コンストラクトが使用する基盤リソースは `aws-cdk-lib` から直接提供され、PDKでは `@aws-cdk/aws-cognito-identitypool-alpha` を使用していました。
+
+##### APIコンストラクトの移行
+
+PDKアプリケーションの `constructs/apis/myapi.ts` には、Smithyモデルから生成されたタイプセーフなCDKコンストラクトをインスタンス化するコードがありました。
+
+Nx Plugin for AWSもSmithyモデルに基づいたタイプセーフな統合を提供しますが、よりシンプルで柔軟な方法を採用しています。`packages/common/constructs/src/app/apis/api.ts` が使用する最小限のメタデータを生成し、詳細は<Link path="/guides/ts-smithy-api">`ts#smithy-api` ガイド</Link>で確認できます。
+
+以下の手順で移行します：
+
+<Steps>
+
+1. `application-stack.ts` で `Api` コンストラクトをインスタンス化
+
+    ```diff lang="ts"
+    // stacks/application-stack.ts
+    -import { MyApi } from "../constructs/apis/myapi";
+    +import { Api } from ':shopping-list/common-constructs';
+    ...
+    -const myapi = new MyApi(this, "MyApi", {
+    -  databaseConstruct,
+    -  userIdentity,
+    -});
+    +const api = new Api(this, 'MyApi', {
+    +  integrations: Api.defaultIntegrations(this).build(),
+    +});
+    ```
+
+    `Api.defaultIntegrations(this).build()` はAPIの各操作に対してLambda関数を作成するデフォルト動作です。
+
+1. Lambda関数にDynamoDBテーブルへのアクセス権限を付与
+
+    ```ts
+    // stacks/application-stack.ts
+    databaseConstruct.shoppingListTable.grantReadData(
+      api.integrations.getShoppingLists.handler,
+    );
+    [
+      api.integrations.putShoppingList.handler,
+      api.integrations.deleteShoppingList.handler,
+    ].forEach((f) => databaseConstruct.shoppingListTable.grantWriteData(f));
+    ```
+
+1. 認証ユーザーにAPI呼び出し権限を付与
+
+    ```ts
+    // stacks/application-stack.ts
+    api.grantInvokeAccess(userIdentity.identityPool.authenticatedRole);
+    ```
+
+</Steps>
+
+##### ウェブサイトコンストラクトの移行
+
+最後に、`Website` コンストラクトを `application-stack.ts` に追加します：
+
+```diff lang="ts"
+-import { Website } from "../constructs/websites/website";
++import { Website } from ':shopping-list/common-constructs';
+...
+-new Website(this, "Website", {
+-  userIdentity,
+-  myapi,
+-});
++new Website(this, 'Website');
+```
+
+Nx Plugin for AWSのコンストラクトでは、ランタイム設定が各コンストラクト内で管理され、`/runtime-config.json` に自動デプロイされます。
+
+すべてのコードを移行したら、プロジェクトをビルドします：
+
+<NxCommands commands={["run-many --target build"]} />
+
+:::caution
+リンターエラーが発生する場合、以下のコマンドで自動修正可能です：
+
+<NxCommands commands={["run-many --target lint --fix"]} />
+:::

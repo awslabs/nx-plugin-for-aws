@@ -1,0 +1,605 @@
+---
+title: "Migrar la API"
+---
+
+
+
+import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
+import RunGenerator from '@components/run-generator.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Drawer from '@components/drawer.astro';
+import InstallCommand from '@components/install-command.astro';
+
+El `TypeSafeApiProject` utilizado en la aplicación de lista de compras hizo uso de:
+
+- [Smithy](https://smithy.io/2.0/) como lenguaje de modelado
+- TypeScript para implementar operaciones
+- Generación de hooks TypeScript para integración con un sitio web en React
+
+Por lo tanto, podemos usar el <Link path="/guides/ts-smithy-api">generador `ts#smithy-api`</Link> para proporcionar funcionalidad equivalente.
+
+:::nota
+Si utilizaste OpenAPI o TypeSpec como lenguaje de modelado, o tienes manejadores implementados en Python o Java, consulta las [Preguntas Frecuentes](#frequently-asked-questions) para conocer opciones potenciales.
+:::
+
+#### Generar una API Smithy en TypeScript
+
+Ejecuta el <Link path="/guides/ts-smithy-api">generador `ts#smithy-api`</Link> para configurar tu proyecto de API en `packages/api`:
+
+<RunGenerator generator="ts#smithy-api" noInteractive requiredParameters={{ name: 'api', namespace: 'com.aws', auth: 'IAM' }} />
+
+Notarás que esto genera un proyecto `model`, así como un proyecto `backend`. El proyecto `model` contiene tu modelo Smithy, y `backend` contiene la implementación del servidor.
+
+El backend utiliza el [Smithy Server Generator for TypeScript](https://smithy.io/2.0/languages/typescript/ts-ssdk/index.html). Exploraremos esto más adelante.
+
+#### Migrar el Modelo Smithy
+
+Ahora que tenemos la estructura básica para nuestro proyecto Smithy API, podemos migrar el modelo:
+
+<Steps>
+
+1. Elimina los archivos Smithy de ejemplo generados en `packages/api/model/src`
+1. Copia tu modelo desde el directorio `packages/api/model/src/main/smithy` del proyecto PDK al directorio `packages/api/model/src` de tu nuevo proyecto.
+1. Actualiza el nombre del servicio y el namespace en `smithy-build.json` para que coincidan con la aplicación PDK:
+
+    ```json {4}
+    // smithy-build.json
+    "plugins": {
+        "openapi": {
+          "service": "com.aws#MyApi",
+          ...
+    ```
+
+1. Actualiza el servicio en `main.smithy` para agregar el error `ValidationException`, requerido cuando se usa el Smithy TypeScript Server SDK.
+
+    ```smithy {2, 17}
+    // main.smithy
+    use smithy.framework#ValidationException
+
+    /// Mi API de Lista de Compras
+    @restJson1
+    service MyApi {
+        version: "1.0"
+        operations: [
+            GetShoppingLists
+            PutShoppingList
+            DeleteShoppingList
+        ]
+        errors: [
+            BadRequestError
+            NotAuthorizedError
+            InternalFailureError
+            ValidationException
+        ]
+    }
+    ```
+
+1. Agrega un archivo `extensions.smithy` en `packages/api/model/src` donde definiremos un trait que proporciona información de paginación al cliente generado:
+
+    ```smithy
+    // extensions.smithy
+    $version: "2"
+    namespace com.aws
+
+    use smithy.openapi#specificationExtension
+
+    @trait
+    @specificationExtension(as: "x-cursor")
+    structure cursor {
+        inputToken: String
+        enabled: Boolean
+    }
+    ```
+
+1. Agrega el nuevo trait `@cursor` a la operación `GetShoppingLists` en `get-shopping-lists.smithy`:
+
+    ```smithy {5}
+    // operations/get-shopping-lists.smithy
+    @readonly
+    @http(method: "GET", uri: "/shopping-list")
+    @paginated(inputToken: "nextToken", outputToken: "nextToken", pageSize: "pageSize", items: "shoppingLists")
+    @cursor(inputToken: "nextToken")
+    @handler(language: "typescript")
+    operation GetShoppingLists {
+        input := with [PaginatedInputMixin] {
+            @httpQuery("shoppingListId")
+            shoppingListId: ShoppingListId
+        }
+    ```
+
+    Cualquier operación `@paginated` también debe usar `@cursor` si estás usando el generador de clientes proporcionado por el Nx Plugin para AWS (a través del generador <Link path="guides/api-connection/react-smithy">`api-connection`</Link>).
+
+1. Finalmente, elimina el trait `@handler` de todas las operaciones ya que no es compatible con el Nx Plugin para AWS. Al usar `ts#smithy-api`, no necesitamos las construcciones CDK de funciones lambda generadas automáticamente ni los objetivos de bundling generados por este trait, ya que usamos un solo bundle para todas las funciones lambda.
+
+</Steps>
+
+En este punto, ejecutemos un build para verificar los cambios en nuestro modelo y asegurarnos de tener código de servidor generado con el que trabajar. Habrá algunos errores en el proyecto backend (`@shopping-list/api`) pero los abordaremos a continuación.
+
+<NxCommands commands={["run-many --target build"]} />
+
+:::nota
+Puedes ver un error de build debido a problemas de lint. Estos generalmente se pueden corregir automáticamente:
+
+<NxCommands commands={["run-many --target lint --fix"]} />
+:::
+
+#### Migrar los Manejadores Lambda
+
+Puedes considerar el proyecto `api/backend` como algo equivalente al proyecto `api/handlers/typescript` de Type Safe API.
+
+Una de las principales diferencias entre Type Safe API y el generador `ts#smithy-api` es que los manejadores se implementan usando el [Smithy Server Generator for TypeScript](https://smithy.io/2.0/languages/typescript/ts-ssdk/index.html), en lugar de los wrappers de manejadores generados por Type Safe API (encontrados en el proyecto `api/generated/typescript/runtime`).
+
+Nuestros manejadores lambda dependen del paquete `@aws-sdk/client-dynamodb`, así que instalémoslo primero:
+
+<InstallCommand pkg="@aws-sdk/client-dynamodb" />
+
+Luego, copiemos el archivo `handlers/src/dynamo-client.ts` del proyecto PDK a `backend/src/operations` para que esté disponible para nuestros manejadores.
+
+Para migrar los manejadores, puedes seguir estos pasos generales:
+
+<Steps>
+
+1. Copia el manejador desde el directorio `packages/api/handlers/typescript/src` de tu proyecto PDK al directorio `packages/api/backend/src/operations` de tu nuevo proyecto.
+
+1. Elimina las importaciones de `my-api-typescript-runtime` e importa el tipo de operación desde el SDK de servidor TypeScript generado, así como el `ServiceContext` por ejemplo:
+
+    ```diff lang="ts" wrap
+    - import {
+    -   deleteShoppingListHandler,
+    -   DeleteShoppingListChainedHandlerFunction,
+    -   INTERCEPTORS,
+    -   Response,
+    -   LoggingInterceptor,
+    - } from 'myapi-typescript-runtime';
+    + import { DeleteShoppingList as DeleteShoppingListOperation } from '../generated/ssdk/index.js';
+    + import { ServiceContext } from '../context.js';
+    ```
+
+1. Elimina la exportación del wrapper del manejador
+
+    ```diff lang="ts" wrap
+    - export const handler = deleteShoppingListHandler(
+    -   ...INTERCEPTORS,
+    -   deleteShoppingList,
+    - );
+    ```
+
+1. Actualiza la firma de tu manejador de operación para usar el SSDK:
+
+    ```diff lang="ts" wrap
+    - export const deleteShoppingList: DeleteShoppingListChainedHandlerFunction = async (request) => {
+    + export const DeleteShoppingList: DeleteShoppingListOperation<ServiceContext> = async (input, ctx) => {
+    ```
+
+1. Reemplaza el uso de `LoggingInterceptor` con `ctx.logger`. (También aplica para métricas y tracing interceptors):
+
+    ```diff lang="ts" wrap
+    - LoggingInterceptor.getLogger(request).info('...');
+    + ctx.logger.info('...');
+    ```
+
+1. Actualiza las referencias a los parámetros de entrada. Dado que el SSDK proporciona tipos que coinciden exactamente con tu modelo Smithy (en lugar de agrupar parámetros de path/query/header separados del parámetro body), actualiza cualquier referencia de entrada:
+
+    ```diff lang="ts" wrap
+    - const shoppingListId = request.input.requestParameters.shoppingListId;
+    + const shoppingListId = input.shoppingListId;
+    ```
+
+1. Elimina el uso de `Response`. En su lugar, simplemente devolvemos objetos planos en el SSDK.
+
+    ```diff lang="ts" wrap
+    - return Response.success({ shoppingListId });
+    + return { shoppingListId };
+    ```
+
+    Tampoco lanzamos ni devolvemos `Response`, en su lugar lanzamos los errores generados por el SSDK:
+
+    ```diff lang="ts" wrap
+    - throw Response.badRequest({ message: 'oh no' });
+    - return Response.badRequest({ message: 'oh no' });
+    + import { BadRequestError } from '../generated/ssdk/index.js';
+    + throw new BadRequestError({ message: 'oh no' });
+    ```
+
+1. Actualiza cualquier importación para usar sintaxis ESM, es decir, agregando la extensión `.js` a las importaciones relativas.
+
+1. Agrega la operación a `service.ts`
+
+    ```ts {4, 12}
+    // service.ts
+    import { ServiceContext } from './context.js';
+    import { MyApiService } from './generated/ssdk/index.js';
+    import { DeleteShoppingList } from './operations/delete-shopping-list.js';
+    import { GetShoppingLists } from './operations/get-shopping-lists.js';
+    import { PutShoppingList } from './operations/put-shopping-list.js';
+
+    // Registra las operaciones en el servicio aquí
+    export const Service: MyApiService<ServiceContext> = {
+      PutShoppingList,
+      GetShoppingLists,
+      DeleteShoppingList,
+    };
+    ```
+
+</Steps>
+
+<Drawer title="Migración del manejador de lista de compras" trigger="Haz clic aquí para ver ejemplos completos antes/después de las tres operaciones de lista de compras del tutorial">
+
+<h4>Eliminar Lista de Compras</h4>
+
+<Tabs syncKey="pdk-migration">
+<TabItem label="Antes">
+```ts
+// handlers/typescript/src/delete-shopping-list.ts
+import { DeleteItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  deleteShoppingListHandler,
+  DeleteShoppingListChainedHandlerFunction,
+  INTERCEPTORS,
+  Response,
+  LoggingInterceptor,
+} from 'myapi-typescript-runtime';
+import { ddbClient } from './dynamo-client';
+
+/**
+ * Manejador type-safe para la operación DeleteShoppingList
+ */
+export const deleteShoppingList: DeleteShoppingListChainedHandlerFunction = async (request) => {
+  LoggingInterceptor.getLogger(request).info(
+    'Start DeleteShoppingList Operation',
+  );
+
+  const shoppingListId = request.input.requestParameters.shoppingListId;
+  await ddbClient.send(
+    new DeleteItemCommand({
+      TableName: 'shopping_list',
+      Key: {
+        shoppingListId: {
+          S: shoppingListId,
+        },
+      },
+    }),
+  );
+
+  return Response.success({
+    shoppingListId,
+  });
+};
+
+/**
+ * Punto de entrada para el manejador AWS Lambda de la operación DeleteShoppingList.
+ * El método deleteShoppingListHandler envuelve el manejador type-safe y gestiona inputs/outputs
+ */
+export const handler = deleteShoppingListHandler(
+  ...INTERCEPTORS,
+  deleteShoppingList,
+);
+```
+</TabItem>
+<TabItem label="Después">
+```ts
+// backend/src/operations/delete-shopping-list.ts
+import { DeleteItemCommand } from '@aws-sdk/client-dynamodb';
+import { ddbClient } from './dynamo-client.js';
+import { DeleteShoppingList as DeleteShoppingListOperation } from '../generated/ssdk/index.js';
+import { ServiceContext } from '../context.js';
+
+/**
+ * Manejador type-safe para la operación DeleteShoppingList
+ */
+export const DeleteShoppingList: DeleteShoppingListOperation<ServiceContext> = async (input, ctx) => {
+  ctx.logger.info(
+    'Start DeleteShoppingList Operation',
+  );
+
+  const shoppingListId = input.shoppingListId;
+  await ddbClient.send(
+    new DeleteItemCommand({
+      TableName: 'shopping_list',
+      Key: {
+        shoppingListId: {
+          S: shoppingListId!,
+        },
+      },
+    }),
+  );
+
+  return {
+    shoppingListId,
+  };
+};
+```
+</TabItem>
+</Tabs>
+
+<h4>Obtener Listas de Compras</h4>
+
+<Tabs syncKey="pdk-migration">
+<TabItem label="Antes">
+```ts
+// handlers/typescript/src/get-shopping-lists.ts
+import { DynamoDBClient, QueryCommand, QueryCommandInput, ScanCommand, ScanCommandInput } from '@aws-sdk/client-dynamodb';
+import {
+  getShoppingListsHandler,
+  GetShoppingListsChainedHandlerFunction,
+  INTERCEPTORS,
+  Response,
+  LoggingInterceptor,
+  ShoppingList,
+} from 'myapi-typescript-runtime';
+import { ddbClient } from './dynamo-client';
+
+/**
+ * Manejador type-safe para la operación GetShoppingLists
+ */
+export const getShoppingLists: GetShoppingListsChainedHandlerFunction = async (request) => {
+  LoggingInterceptor.getLogger(request).info('Start GetShoppingLists Operation');
+
+  const nextToken = request.input.requestParameters.nextToken;
+  const pageSize = request.input.requestParameters.pageSize;
+  const shoppingListId = request.input.requestParameters.shoppingListId;
+  const commandInput: ScanCommandInput | QueryCommandInput = {
+    TableName: 'shopping_list',
+    ConsistentRead: true,
+    Limit: pageSize,
+    ExclusiveStartKey: nextToken ? fromToken(nextToken) : undefined,
+    ...(shoppingListId ? {
+      KeyConditionExpression: 'shoppingListId = :shoppingListId',
+      ExpressionAttributeValues: {
+        ':shoppingListId': {
+          S: request.input.requestParameters.shoppingListId!,
+        },
+      },
+    } : {}),
+  };
+  const response = await ddbClient.send(shoppingListId ? new QueryCommand(commandInput) : new ScanCommand(commandInput));
+
+  return Response.success({
+    shoppingLists: (response.Items || [])
+      .map<ShoppingList>(item => ({
+      shoppingListId: item.shoppingListId.S!,
+      name: item.name.S!,
+      shoppingItems: JSON.parse(item.shoppingItems.S || '[]'),
+    })),
+    nextToken: response.LastEvaluatedKey ? toToken(response.LastEvaluatedKey) : undefined,
+  });
+};
+
+/**
+ * Decodificar un token stringificado
+ * @param token token pasado a la solicitud paginada
+ */
+const fromToken = <T>(token?: string): T | undefined =>
+  token ? (JSON.parse(Buffer.from(decodeURIComponent(token), 'base64').toString()) as T) : undefined;
+
+/**
+ * Codificar detalles de paginación en un token stringificado opaco
+ * @param paginationToken detalles del token de paginación
+ */
+const toToken = <T>(paginationToken?: T): string | undefined =>
+  paginationToken ? encodeURIComponent(Buffer.from(JSON.stringify(paginationToken)).toString('base64')) : undefined;
+
+/**
+ * Punto de entrada para el manejador AWS Lambda de la operación GetShoppingLists.
+ * El método getShoppingListsHandler envuelve el manejador type-safe y gestiona inputs/outputs
+ */
+export const handler = getShoppingListsHandler(...INTERCEPTORS, getShoppingLists);
+```
+</TabItem>
+<TabItem label="Después">
+```ts
+// backend/src/operations/get-shopping-lists.ts
+import { QueryCommand, QueryCommandInput, ScanCommand, ScanCommandInput } from '@aws-sdk/client-dynamodb';
+import { ddbClient } from './dynamo-client.js';
+import { GetShoppingLists as GetShoppingListsOperation, ShoppingList } from '../generated/ssdk/index.js';
+import { ServiceContext } from '../context.js';
+
+/**
+ * Manejador type-safe para la operación GetShoppingLists
+ */
+export const GetShoppingLists: GetShoppingListsOperation<ServiceContext> = async (input, ctx) => {
+  ctx.logger.info('Start GetShoppingLists Operation');
+
+  const nextToken = input.nextToken;
+  const pageSize = input.pageSize;
+  const shoppingListId = input.shoppingListId;
+  const commandInput: ScanCommandInput | QueryCommandInput = {
+    TableName: 'shopping_list',
+    ConsistentRead: true,
+    Limit: pageSize,
+    ExclusiveStartKey: nextToken ? fromToken(nextToken) : undefined,
+    ...(shoppingListId ? {
+      KeyConditionExpression: 'shoppingListId = :shoppingListId',
+      ExpressionAttributeValues: {
+        ':shoppingListId': {
+          S: input.shoppingListId!,
+        },
+      },
+    } : {}),
+  };
+  const response = await ddbClient.send(shoppingListId ? new QueryCommand(commandInput) : new ScanCommand(commandInput));
+
+  return {
+    shoppingLists: (response.Items || [])
+      .map<ShoppingList>(item => ({
+      shoppingListId: item.shoppingListId.S!,
+      name: item.name.S!,
+      shoppingItems: JSON.parse(item.shoppingItems.S || '[]'),
+    })),
+    nextToken: response.LastEvaluatedKey ? toToken(response.LastEvaluatedKey) : undefined,
+  };
+};
+
+/**
+ * Decodificar un token stringificado
+ * @param token token pasado a la solicitud paginada
+ */
+const fromToken = <T>(token?: string): T | undefined =>
+  token ? (JSON.parse(Buffer.from(decodeURIComponent(token), 'base64').toString()) as T) : undefined;
+
+/**
+ * Codificar detalles de paginación en un token stringificado opaco
+ * @param paginationToken detalles del token de paginación
+ */
+const toToken = <T>(paginationToken?: T): string | undefined =>
+  paginationToken ? encodeURIComponent(Buffer.from(JSON.stringify(paginationToken)).toString('base64')) : undefined;
+```
+</TabItem>
+</Tabs>
+
+<h4>Agregar Lista de Compras</h4>
+
+<Tabs syncKey="pdk-migration">
+<TabItem label="Antes">
+```ts
+// handlers/typescript/src/put-shopping-list.ts
+import { randomUUID } from 'crypto';
+import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  putShoppingListHandler,
+  PutShoppingListChainedHandlerFunction,
+  INTERCEPTORS,
+  Response,
+  LoggingInterceptor,
+} from 'myapi-typescript-runtime';
+import { ddbClient } from './dynamo-client';
+
+/**
+ * Manejador type-safe para la operación PutShoppingList
+ */
+export const putShoppingList: PutShoppingListChainedHandlerFunction = async (request) => {
+  LoggingInterceptor.getLogger(request).info('Start PutShoppingList Operation');
+
+  const shoppingListId = request.input.body.shoppingListId ?? randomUUID();
+  await ddbClient.send(new PutItemCommand({
+    TableName: 'shopping_list',
+    Item: {
+      shoppingListId: {
+        S: shoppingListId,
+      },
+      name: {
+        S: request.input.body.name,
+      },
+      shoppingItems: {
+        S: JSON.stringify(request.input.body.shoppingItems || []),
+      },
+    },
+  }));
+
+  return Response.success({
+    shoppingListId,
+  });
+};
+
+/**
+ * Punto de entrada para el manejador AWS Lambda de la operación PutShoppingList.
+ * El método putShoppingListHandler envuelve el manejador type-safe y gestiona inputs/outputs
+ */
+export const handler = putShoppingListHandler(...INTERCEPTORS, putShoppingList);
+```
+</TabItem>
+<TabItem label="Después">
+```ts
+// backend/src/operations/put-shopping-list.ts
+import { randomUUID } from 'crypto';
+import { PutItemCommand } from '@aws-sdk/client-dynamodb';
+import { ddbClient } from './dynamo-client.js';
+import { PutShoppingList as PutShoppingListOperation } from '../generated/ssdk/index.js';
+import { ServiceContext } from '../context.js';
+
+/**
+ * Manejador type-safe para la operación PutShoppingList
+ */
+export const PutShoppingList: PutShoppingListOperation<ServiceContext> = async (input, ctx) => {
+  ctx.logger.info('Start PutShoppingList Operation');
+
+  const shoppingListId = input.shoppingListId ?? randomUUID();
+  await ddbClient.send(new PutItemCommand({
+    TableName: 'shopping_list',
+    Item: {
+      shoppingListId: {
+        S: shoppingListId,
+      },
+      name: {
+        S: input.name!,
+      },
+      shoppingItems: {
+        S: JSON.stringify(input.shoppingItems || []),
+      },
+    },
+  }));
+
+  return {
+    shoppingListId,
+  };
+};
+```
+</TabItem>
+</Tabs>
+
+</Drawer>
+
+Generamos el proyecto Smithy API con el nombre `api` inicialmente para que se agregue a `packages/api` y sea consistente con el proyecto PDK. Dado que nuestra Smithy API ahora define `service MyApi` en lugar de `service Api`, necesitamos actualizar cualquier instancia de `getApiServiceHandler` con `getMyApiServiceHandler`.
+
+Realiza este cambio en `handler.ts`:
+
+```diff lang="ts"
+// packages/api/backend/src/handler.ts
+- import { getApiServiceHandler } from './generated/ssdk/index.js';
++ import { getMyApiServiceHandler } from './generated/ssdk/index.js';
+
+process.env.POWERTOOLS_METRICS_NAMESPACE = 'Api';
+process.env.POWERTOOLS_SERVICE_NAME = 'Api';
+
+const tracer = new Tracer();
+const logger = new Logger();
+const metrics = new Metrics();
+
+- const serviceHandler = getApiServiceHandler(Service);
++ const serviceHandler = getMyApiServiceHandler(Service);
+```
+
+Y en `local-server.ts`:
+
+```diff lang="ts"
+// packages/api/backend/src/local-server.ts
+-import { getApiServiceHandler } from './generated/ssdk/index.js';
++import { getMyApiServiceHandler } from './generated/ssdk/index.js';
+
+const PORT = 3001;
+
+const tracer = new Tracer();
+const logger = new Logger();
+const metrics = new Metrics();
+
+-const serviceHandler = getApiServiceHandler(Service);
++const serviceHandler = getMyApiServiceHandler(Service);
+```
+
+Además, actualiza `packages/api/backend/project.json` y modifica `metadata.apiName` a `my-api`:
+
+```diff lang="json"
+// packages/api/backend/project.json
+  "metadata": {
+    "generator": "ts#smithy-api",
+-    "apiName": "api",
++    "apiName": "my-api",
+    "auth": "IAM",
+    "modelProject": "@shopping-list/api-model",
+    "ports": [3001]
+  },
+```
+
+#### Verificar con un Build
+
+Ahora podemos construir el proyecto para verificar que la migración ha funcionado hasta ahora:
+
+<NxCommands commands={["run-many --target build"]} />
+
+:::nota
+Puedes ver un error de build debido a problemas de lint. Estos generalmente se pueden corregir automáticamente:
+
+<NxCommands commands={["run-many --target lint --fix"]} />
+:::

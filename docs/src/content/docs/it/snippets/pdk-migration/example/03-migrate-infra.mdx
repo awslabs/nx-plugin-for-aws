@@ -1,0 +1,164 @@
+---
+title: "Migrare l'Infrastruttura"
+---
+
+
+
+import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
+import RunGenerator from '@components/run-generator.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Drawer from '@components/drawer.astro';
+import InstallCommand from '@components/install-command.astro';
+
+L'ultimo progetto che dobbiamo migrare per la nostra applicazione della lista della spesa è l'`InfrastructureTsProject`. Si tratta di un progetto TypeScript CDK, per cui l'equivalente nel Plugin Nx per AWS è il <Link path="/guides/typescript-infrastructure">generatore `ts#infra`</Link>.
+
+Oltre ai progetti Projen, PDK forniva anche costrutti CDK da cui questi progetti dipendevano. Migreremo l'applicazione della lista della spesa anche da questi costrutti CDK, a favore di quelli generati dal Plugin Nx per AWS.
+
+:::tip
+Un grande vantaggio del Plugin Nx per AWS rispetto a PDK è che i costrutti CDK che fornisce sono codice sorgente aggiunto al tuo progetto anziché importati tramite pacchetti di terze parti. Questo ti dà il controllo e la flessibilità per personalizzarli oltre quanto supportato da PDK.
+:::
+
+#### Genera un Progetto di Infrastruttura TypeScript CDK
+
+Esegui il <Link path="/guides/typescript-infrastructure">generatore `ts#infra`</Link> per configurare il tuo progetto di infrastruttura in `packages/infra`:
+
+<RunGenerator generator="ts#infra" noInteractive requiredParameters={{ name: 'infra' }} />
+
+#### Migra l'Infrastruttura CDK
+
+L'applicazione PDK della lista della spesa istanziava i seguenti costrutti all'interno dello stack CDK:
+
+- `DatabaseConstruct` per la tabella DynamoDB che memorizza le liste della spesa
+- `UserIdentity` per le risorse Cognito, importato direttamente da PDK
+- `MyApi` per distribuire l'API Smithy, che utilizzava il costrutto CDK TypeScript generato con integrazioni type-safe, basato sul costrutto `TypeSafeRestApi` di PDK.
+- `Website` per distribuire il sito web, che incapsulava il costrutto `StaticWebsite` di PDK.
+
+Ora migreremo ciascuno di questi nel nuovo progetto.
+
+##### Copia l'Application Stack
+
+Copia `packages/infra/src/stacks/application-stack.ts` dall'applicazione PDK della lista della spesa nella stessa identica posizione nel tuo nuovo progetto. Vedrai alcuni errori TypeScript che affronteremo di seguito.
+
+##### Copia il Costrutto Database
+
+L'applicazione PDK aveva un costrutto `Database` in `packages/src/constructs/database.ts`. Copialo nella stessa posizione nel nuovo progetto.
+
+Dato che il Plugin Nx per AWS utilizza [Checkov](https://www.checkov.io/) per i test di sicurezza, che è leggermente più restrittivo di PDK Nag, dobbiamo aggiungere alcune soppressioni:
+
+```diff lang="ts"
+// constructs/database.ts
++import { suppressRules } from ':shopping-list/common-constructs';
+...
++suppressRules(
++  this.shoppingListTable,
++  ['CKV_AWS_28', 'CKV_AWS_119'],
++  'Backup and KMS key not required for this project',
++);
+```
+
+In `application-stack.ts`, aggiorna l'import per `DatabaseConstruct` con la sintassi ESM:
+
+```diff lang="ts"
+// stacks/application-stack.ts
+-import { DatabaseConstruct } from '../constructs/database';
++import { DatabaseConstruct } from '../constructs/database.js';
+```
+
+##### Migra il Costrutto UserIdentity
+
+Il costrutto `UserIdentity` può generalmente essere sostituito senza modifiche, aggiornando gli import.
+
+```diff lang="ts"
+-import { UserIdentity } from "@aws/pdk/identity";
++import { UserIdentity } from ':shopping-list/common-constructs';
+...
+const userIdentity = new UserIdentity(this, `${id}UserIdentity`);
+```
+
+Nota che i costrutti sottostanti utilizzati dal nuovo `UserIdentity` sono forniti direttamente da `aws-cdk-lib`, mentre PDK utilizzava `@aws-cdk/aws-cognito-identitypool-alpha`.
+
+##### Migra il Costrutto API
+
+L'applicazione PDK aveva un costrutto in `constructs/apis/myapi.ts` che istanziava un costrutto CDK generato da Type Safe API dal modello Smithy.
+
+Oltre a questo, dato che il progetto PDK utilizzava il trait `@handler`, venivano generati anche costrutti CDK per le funzioni lambda.
+
+Come Type Safe API, il Plugin Nx per AWS fornisce type-safety per le integrazioni basate sul modello Smithy, ma in modo più semplice e flessibile. Invece di generare un intero costrutto CDK a tempo di build, viene generato solo un minimo "metadata" che il file `packages/common/constructs/src/app/apis/api.ts` utilizza in modo generico. Puoi saperne di più nell'<Link path="/guides/ts-smithy-api">guida del generatore `ts#smithy-api`</Link>.
+
+Segui questi passaggi:
+
+<Steps>
+
+1. Istanzia il costrutto `Api` in `application-stack.ts`
+
+    ```diff lang="ts"
+    // stacks/application-stack.ts
+    -import { MyApi } from "../constructs/apis/myapi";
+    +import { Api } from ':shopping-list/common-constructs';
+    ...
+    -const myapi = new MyApi(this, "MyApi", {
+    -  databaseConstruct,
+    -  userIdentity,
+    -});
+    +const api = new Api(this, 'MyApi', {
+    +  integrations: Api.defaultIntegrations(this).build(),
+    +});
+    ```
+
+    Nota qui l'uso di `Api.defaultIntegrations(this).build()`: il comportamento predefinito è creare una funzione lambda per ogni operazione nella nostra API, come avveniva in `myapi.ts`.
+
+1. Concedi i permessi alle funzioni lambda per accedere alla tabella DynamoDB.
+
+    Nell'applicazione PDK, `DatabaseConstruct` veniva passato a `MyApi`, che gestiva l'aggiunta dei permessi ai vari costrutti funzione. Ora lo faremo direttamente in `application-stack.ts` accedendo alla proprietà type-safe `integrations` del costrutto `Api`:
+
+    ```ts
+    // stacks/application-stack.ts
+    // Concedi accesso limitato alle lambda per Dynamo
+    databaseConstruct.shoppingListTable.grantReadData(
+      api.integrations.getShoppingLists.handler,
+    );
+    [
+      api.integrations.putShoppingList.handler,
+      api.integrations.deleteShoppingList.handler,
+    ].forEach((f) => databaseConstruct.shoppingListTable.grantWriteData(f));
+    ```
+
+1. Concedi ai utenti autenticati i permessi per invocare l'API.
+
+    Nell'applicazione PDK, `myapi.ts` concedeva permessi IAM per invocare l'API. Facciamo l'equivalente in `application-stack.ts`:
+
+    ```ts
+    // stacks/application-stack.ts
+    api.grantInvokeAccess(userIdentity.identityPool.authenticatedRole);
+    ```
+
+</Steps>
+
+##### Migra il Costrutto Website
+
+Infine, aggiungiamo il costrutto `Website` da `packages/common/constructs/src/app/static-websites/website.ts` a `application-stack.ts`, poiché è l'equivalente del `packages/infra/src/constructs/websites/website.ts` dell'applicazione PDK.
+
+```diff lang="ts"
+-import { Website } from "../constructs/websites/website";
++import { Website } from ':shopping-list/common-constructs';
+...
+-new Website(this, "Website", {
+-  userIdentity,
+-  myapi,
+-});
++new Website(this, 'Website');
+```
+
+Nota che non passiamo identity o API al website: la configurazione runtime è gestita internamente dai costrutti del Plugin Nx per AWS, dove `UserIdentity` e `Api` registrano i valori necessari, e `Website` li distribuisce in `/runtime-config.json` sul sito statico.
+
+Ora compiliamo il progetto dopo aver migrato tutte le parti rilevanti.
+
+<NxCommands commands={["run-many --target build"]} />
+
+:::caution
+Potresti vedere errori di build dovuti a problemi di lint. Solitamente si risolvono automaticamente con:
+
+<NxCommands commands={["run-many --target lint --fix"]} />
+:::
