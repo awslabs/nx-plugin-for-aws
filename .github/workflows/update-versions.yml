@@ -1,0 +1,57 @@
+name: Update Versions
+
+on:
+  schedule:
+    # Run every Monday at 7:00 AM Sydney time (9:00 PM UTC Sunday)
+    - cron: '0 21 * * 0'
+  workflow_dispatch: # Allow manual triggering
+
+env:
+  CI: 'true'
+  NX_DAEMON: 'true'
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+
+jobs:
+  update_versions:
+    name: Update Versions
+    runs-on: codebuild-nx-plugin-for-aws-runner-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: ./.github/actions/init-monorepo
+      - name: Bump Nx Plugin for AWS versions
+        run: |
+          npx -y npm-check-updates@19.0.0 --configFileName .ncurc.cjs
+          pnpm i
+          pnpm tsx ./scripts/update-versions.ts
+          pnpm nx reset
+          pnpm nx test nx-plugin -u
+          pnpm nx run-many --target lint --fix
+      - name: Read version update report
+        id: report
+        run: |
+          REPORT=$(cat dist/scripts/update-versions/report.txt)
+          echo "content<<EOF" >> $GITHUB_OUTPUT
+          echo "$REPORT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: |
+            feat: update dependencies
+
+            ${{ steps.report.outputs.content }}
+          title: 'feat: update dependencies'
+          body: |
+            ## Dependency Updates
+
+            ${{ steps.report.outputs.content }}
+          branch: version-update-${{ github.run_id }}
+          delete-branch: true

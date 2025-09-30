@@ -21,6 +21,7 @@ export const TS_VERSIONS = {
   '@nxlv/python': '21.2.0',
   '@nx-extend/terraform': '9.0.0',
   '@nx/devkit': '21.4.1',
+  'create-nx-workspace': '21.4.1',
   '@modelcontextprotocol/sdk': '1.17.4',
   '@modelcontextprotocol/inspector': '0.16.5',
   '@tanstack/react-router': '1.131.28',
@@ -53,6 +54,7 @@ export const TS_VERSIONS = {
   'jsonc-eslint-parser': '2.4.0',
   'make-dir-cli': '4.0.0',
   ncp: '2.0.0',
+  'npm-check-updates': '19.0.0',
   'oidc-client-ts': '3.3.0',
   prettier: '3.6.2',
   'react-oidc-context': '3.3.0',
@@ -91,6 +93,7 @@ export const PY_VERSIONS = {
   'fastapi[standard]': '==0.116.1',
   mangum: '==0.19.0',
   mcp: '==1.13.1',
+  'pip-check-updates': '==0.27.0',
   'strands-agents': '==1.6.0',
   'strands-agents-tools': '==0.2.5',
 } as const;
