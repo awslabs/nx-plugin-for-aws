@@ -1,0 +1,317 @@
+---
+title: "ウェブサイトの移行"
+---
+
+
+
+import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
+import RunGenerator from '@components/run-generator.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Drawer from '@components/drawer.astro';
+import InstallCommand from '@components/install-command.astro';
+
+ショッピングリストアプリケーションで使用された `CloudscapeReactTsWebsiteProject` は、CloudScape と Cognito 認証が組み込まれた React ウェブサイトを設定していました。
+
+このプロジェクトタイプは非推奨となった [`create-react-app`](https://github.com/facebook/create-react-app) を利用していました。このガイドでは、より現代的でサポートされた技術（具体的には [Vite](https://vite.dev/））を使用する <Link path="/guides/react-website">`ts#react-website` ジェネレータ</Link> を利用してウェブサイトの移行を行います。
+
+移行の一環として、PDK で設定されていた React Router から [TanStack Router](https://tanstack.com/router) に移行し、ルーティングの型安全性を強化します。
+
+#### React ウェブサイトの生成
+
+<Link path="/guides/react-website">`ts#react-website` ジェネレータ</Link> を実行して、`packages/website` にウェブサイトプロジェクトをセットアップします：
+
+<RunGenerator generator="ts#react-website" noInteractive requiredParameters={{ name: 'website' }} />
+
+#### Cognito 認証の追加
+
+上記の React ウェブサイトジェネレータは `CloudscapeReactTsWebsiteProject` のようにデフォルトで Cognito 認証をバンドルしていないため、<Link path="/guides/react-website-auth">`ts#react-website#auth` ジェネレータ</Link> を使用して明示的に追加します。
+
+<RunGenerator generator="ts#react-website#auth" noInteractive requiredParameters={{ project: 'website', cognitoDomain: 'shopping-list' }} />
+
+これにより、Cognito ホスト型 UI を使用したユーザーログインを確実に行うためのリダイレクトを管理する React コンポーネントが追加されます。また、`packages/common/constructs` に `UserIdentity` という名前の Cognito リソースをデプロイする CDK コンストラクトも追加されます。
+
+:::note
+PDK の `CloudscapeReactTsWebsiteProject` はアプリ内で Cognito ログインコンポーネントを提供するために `@aws-northstar/ui` に依存していました。ホスト型 UI への移行ではなく、このアプローチを継続したい場合は、生成された `packages/common/constructs/src/core/user-identity.ts` を [PDK の実装](https://github.com/aws/aws-pdk/blob/mainline/packages/identity/src/user-identity.ts) で置き換え、`@aws-cdk/aws-cognito-identitypool-alpha` のコンストラクトを `aws-cdk-lib` が提供するものに置き換えてください。また、`RuntimeConfig` に関連する値を設定してください：
+
+```ts
+RuntimeConfig.ensure(this).config = {
+  ...RuntimeConfig.ensure(this).config,
+  region: Stack.of(this).region,
+  identityPoolId: this.identityPool.identityPoolId,
+  userPoolId: this.userPool.userPoolId,
+  userPoolWebClientId: this.userPoolClient.userPoolClientId,
+};
+```
+
+その後、`CloudscapeReactTsWebsiteProject` の `Auth` コンポーネントを再利用できます。
+:::
+
+#### ウェブサイトとAPIの接続
+
+PDK では、プロジェクト間で相互に Projen プロジェクトを渡すことで統合コードを生成できました。ショッピングリストアプリケーションでは、この機能を使用してウェブサイトがAPIと連携できるように設定していました。
+
+Nx Plugin for AWS では、<Link path="/guides/api-connection">`api-connection` ジェネレータ</Link> を介してAPI統合をサポートしています。以下を使用して、ウェブサイトが Smithy API を呼び出せるようにします：
+
+<RunGenerator generator="api-connection" noInteractive requiredParameters={{ sourceProject: 'website', targetProject: 'api' }} />
+
+これにより、生成された TypeScript クライアントを介してAPIを呼び出すために必要なクライアントプロバイダとビルドターゲットが生成されます。
+
+#### AWS Northstar 依存関係の追加
+
+`CloudscapeReactTsWebsiteProject` は自動的に `@aws-northstar/ui` の依存関係を含んでいました。ショッピングリストアプリケーションで使用されているため、ここで追加します：
+
+<InstallCommand pkg="@aws-northstar/ui" />
+
+#### コンポーネントとページの移動
+
+[ショッピングリストアプリケーション](https://aws.github.io/aws-pdk/getting_started/shopping_list_app.html#create-new-pages-components) には `CreateItem` コンポーネントと、`ShoppingList`、`ShoppingLists` の2つのページがあります。これらを新しいウェブサイトに移行し、TanStack Router と Nx Plugin for AWS の TypeScript クライアントコードジェネレータを使用するために若干の調整を行います。
+
+<Steps>
+
+1. PDK プロジェクトから `packages/website/src/components/CreateItem/index.tsx` を新しいプロジェクトの同じ場所にコピー
+
+1. `ShoppingLists` ページをホームページとして使用するため、`packages/website/src/pages/ShoppingLists/index.tsx` を `packages/website/src/routes/index.tsx` にコピー（TanStack Router のファイルベースルーティングを使用）
+
+1. `/:shoppingListId` ルートで表示する `ShoppingList` ページを、`packages/website/src/pages/ShoppingList/index.tsx` から `packages/website/src/routes/$shoppingListId.tsx` にコピー
+
+</Steps>
+
+IDE にビルドエラーが表示されますが、以下の変更で新しいフレームワークに適合させます。
+
+#### React Router から TanStack Router への移行
+
+[ファイルベースルーティング](https://tanstack.com/router/latest/docs/framework/react/routing/file-based-routing) を使用しているため、ローカル開発サーバーでルート設定の自動生成を管理できます。まずローカルサーバーを起動：
+
+<NxCommands commands={["serve-local website"]} />
+
+:::tip
+`serve-local` ターゲットは、`api-connection` で接続されたAPIのローカルサーバーも起動し、ウェブサイト・モデル・バックエンドに変更があるとホットリロードします。CDKコードを書く前にAPIとウェブサイトをローカルでテストできます！
+:::
+
+エラーが表示されますが、ローカルウェブサイトサーバーはポート `4200` で、Smithy API サーバーはポート `3001` で起動します。
+
+以下の手順で `routes/index.tsx` と `routes/$shoppingListId.tsx` を TanStack Router に移行：
+
+<Steps>
+
+1. 各ルートを登録する `createFileRoute` を追加：
+
+    <Tabs>
+    <TabItem label="routes/index.tsx">
+    ```diff lang="ts"
+    +import { createFileRoute } from "@tanstack/react-router";
+    ...
+    -export default ShoppingLists;
+    +export const Route = createFileRoute('/')({
+    +  component: ShoppingLists,
+    +});
+    ```
+    </TabItem>
+    <TabItem label="routes/$shoppingListId.tsx">
+    ```diff lang="ts"
+    +import { createFileRoute } from "@tanstack/react-router";
+    ...
+    -export default ShoppingList;
+    +export const Route = createFileRoute('/$shoppingListId')({
+    +  component: ShoppingList,
+    +});
+    ```
+    </TabItem>
+    </Tabs>
+
+    ファイル保存後、`createFileRoute` の型エラーが解消されます。
+
+1. `useNavigate` フックの置き換え：
+
+    インポートを更新：
+
+    ```diff lang="ts"
+    - import { useNavigate } from 'react-router-dom';
+    + import { useNavigate } from '@tanstack/react-router';
+    ```
+
+    `navigate` メソッドの呼び出しを型安全なルート指定に変更：
+
+    ```diff lang="ts"
+    - navigate(`/${cell.shoppingListId}`);
+    + navigate({
+    +   to: '/$shoppingListId',
+    +   params: { shoppingListId: cell.shoppingListId },
+    + });
+    ```
+
+1. `useParams` フックの置き換え：
+
+    インポートを削除：
+
+    ```diff lang="ts"
+    - import { useParams } from 'react-router-dom';
+    ```
+
+    `useParams` の呼び出しを `Route` から取得するように変更（型安全）：
+
+    ```diff lang="ts"
+    - const { shoppingListId } = useParams();
+    + const { shoppingListId } = Route.useParams();
+    ```
+
+</Steps>
+
+:::tip
+より複雑なシナリオについては [TanStack Router の詳細ガイド](https://tanstack.com/router/latest/docs/framework/react/migrate-from-react-router) を参照してください。
+:::
+
+#### コンポーネントインポートの修正
+
+ファイル構造の変更に伴い、`CreateItem` のインポートパスを修正：
+
+```diff lang="ts"
+-import CreateItem from "../../components/CreateItem";
++import CreateItem from "../components/CreateItem";
+```
+
+`AppLayoutContext` の場所も変更：
+
+```diff lang="ts"
+-import { AppLayoutContext } from "../../layouts/App";
++import { AppLayoutContext } from "../components/AppLayout";
+```
+
+#### 新しい生成TypeScriptクライアントへの移行
+
+Nx Plugin for AWS が生成するTypeScriptクライアントを使用するため、以下の手順を実行：
+
+<Steps>
+
+1. 新しいクライアントと型をインポート：
+
+    ```diff lang="ts"
+    -import {
+    -  ShoppingList,
+    -  usePutShoppingList,
+    -  useDeleteShoppingList,
+    -  useGetShoppingLists,
+    -} from "myapi-typescript-react-query-hooks";
+    +import { ShoppingList } from "../generated/my-api/types.gen";
+    +import { useMyApi } from "../hooks/useMyApi";
+    +import { useInfiniteQuery, useMutation } from "@tanstack/react-query";
+    ```
+
+1. TanStack Query フックを初期化：
+
+    ```diff lang="ts"
+    -const getShoppingLists = useGetShoppingLists({ pageSize: PAGE_SIZE });
+    -const putShoppingList = usePutShoppingList();
+    -const deleteShoppingList = useDeleteShoppingList();
+    +const api = useMyApi();
+    +const getShoppingLists = useInfiniteQuery(
+    +  api.getShoppingLists.infiniteQueryOptions(
+    +    { pageSize: PAGE_SIZE },
+    +    { getNextPageParam: (p) => p.nextToken },
+    +  ),
+    +);
+    +const putShoppingList = useMutation(api.putShoppingList.mutationOptions());
+    +const deleteShoppingList = useMutation(
+    +  api.deleteShoppingList.mutationOptions(),
+    +);
+    ```
+
+1. リクエストボディのラッパーを削除：
+
+    ```diff lang="ts"
+    await putShoppingList.mutateAsync({
+    -  putShoppingListRequestContent: {
+        name: item,
+    -  },
+    });
+    ```
+
+</Steps>
+
+:::note
+ショッピングリストアプリケーションの `pages/ShoppingList/index.tsx` にあったオプショナルチェイニングのバグを修正：
+
+```diff lang="ts"
+const shoppingList: _ShoppingList | undefined =
+-    getShoppingLists.data?.pages[0].shoppingLists[0]!;
++    getShoppingLists.data?.pages?.[0]?.shoppingLists?.[0];
+```
+
+関連する参照も更新：
+
+```diff lang="ts"
+-name: shoppingList.name,
+-shoppingListId: shoppingList.shoppingListId,
++name: shoppingList?.name ?? 'my list',
++shoppingListId: shoppingList?.shoppingListId,
+```
+:::
+
+#### TanStack Query v4 から v5 への移行
+
+`api-connection` ジェネレータが追加した TanStack Query v5 との差異を修正：
+
+<Steps>
+
+1. ミューテーションの `isLoading` を `isPending` に置換：
+
+    ```diff lang="ts"
+    -putShoppingList.isLoading
+    +putShoppingList.isPending
+    ```
+
+1. `InfiniteQueryTable` の型エラーを抑制：
+
+    ```diff lang="tsx"
+    <InfiniteQueryTable
+    -  query={getShoppingLists}
+    +  query={getShoppingLists as any}
+    ```
+
+</Steps>
+
+:::tip
+詳細な移行ガイドは [TanStack Query ドキュメント](https://tanstack.com/query/latest/docs/framework/react/guides/migrating-to-v5) を参照。
+:::
+
+#### ローカルウェブサイトの確認
+
+http://localhost:4200/ にアクセスして動作確認できます。API、ウェブサイト、認証に加えて DynamoDB テーブル `shopping_list` がリージョン内に存在し、ローカルAWS認証情報でアクセス可能な場合、完全に機能します。
+
+インフラストラクチャの移行は次に行います。
+
+<Drawer title="ショッピングリストページ移行の全例" trigger="クリックで移行前後の完全なコード例を表示">
+
+<h4>ショッピングリスト一覧ページ</h4>
+
+<Tabs syncKey="pdk-migration">
+<TabItem label="移行前">
+```tsx
+// pages/ShoppingLists/index.tsx（移行前コード）
+```
+</TabItem>
+<TabItem label="移行後">
+```tsx
+// routes/index.tsx（移行後コード）
+```
+</TabItem>
+</Tabs>
+
+<h4>個別ショッピングリストページ</h4>
+
+<Tabs syncKey="pdk-migration">
+<TabItem label="移行前">
+```tsx
+// pages/ShoppingList/index.tsx（移行前コード）
+```
+</TabItem>
+<TabItem label="移行後">
+```tsx
+// routes/$shoppingListId.tsx（移行後コード）
+```
+</TabItem>
+</Tabs>
+
+</Drawer>

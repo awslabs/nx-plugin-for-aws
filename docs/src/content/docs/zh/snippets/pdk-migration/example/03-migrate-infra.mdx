@@ -1,0 +1,162 @@
+---
+title: "迁移基础设施"
+---
+
+
+
+import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
+import RunGenerator from '@components/run-generator.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Drawer from '@components/drawer.astro';
+import InstallCommand from '@components/install-command.astro';
+
+我们购物清单应用需要迁移的最后一个项目是`InfrastructureTsProject`。这是一个TypeScript CDK项目，对应的Nx Plugin for AWS等效生成器是<Link path="/guides/typescript-infrastructure">`ts#infra`生成器</Link>。
+
+与Projen项目类似，PDK还提供了这些项目所依赖的CDK构造。我们也将从这些CDK构造迁移购物清单应用，转而使用Nx Plugin for AWS生成的构造。
+
+:::tip
+Nx Plugin for AWS相较于PDK的一大优势在于，它提供的CDK构造是以源代码形式添加到项目中，而非通过第三方包导入。这使您能够自由定制这些构造，突破了PDK原有的限制。
+:::
+
+#### 生成TypeScript CDK基础设施项目
+
+运行<Link path="/guides/typescript-infrastructure">`ts#infra`生成器</Link>在`packages/infra`目录下创建基础设施项目：
+
+<RunGenerator generator="ts#infra" noInteractive requiredParameters={{ name: 'infra' }} />
+
+#### 迁移CDK基础设施
+
+PDK购物清单应用在CDK应用栈中实例化了以下构造：
+
+- 存储购物清单的DynamoDB表`DatabaseConstruct`
+- 从PDK直接导入Cognito资源的`UserIdentity`
+- 部署Smithy API的`MyApi`，使用生成的TypeScript CDK构造实现类型安全集成，底层依赖PDK的`TypeSafeRestApi` CDK构造
+- 部署网站的`Website`，封装了PDK的`StaticWebsite` CDK构造
+
+接下来我们将逐一迁移这些构造。
+
+##### 复制应用栈
+
+将PDK购物清单应用中的`packages/infra/src/stacks/application-stack.ts`复制到新项目的相同位置。您会看到一些TypeScript错误，我们将在后续步骤中解决。
+
+##### 复制数据库构造
+
+PDK购物清单应用在`packages/src/constructs/database.ts`中有一个`Database`构造。将其复制到新项目的相同位置。
+
+由于Nx Plugin for AWS使用[Checkov](https://www.checkov.io/)进行安全检查（比PDK Nag更严格），我们需要添加抑制规则：
+
+```diff lang="ts"
+// constructs/database.ts
++import { suppressRules } from ':shopping-list/common-constructs';
+...
++suppressRules(
++  this.shoppingListTable,
++  ['CKV_AWS_28', 'CKV_AWS_119'],
++  'Backup and KMS key not required for this project',
++);
+```
+
+在`application-stack.ts`中更新`DatabaseConstruct`的导入语法为ESM格式：
+
+```diff lang="ts"
+// stacks/application-stack.ts
+-import { DatabaseConstruct } from '../constructs/database';
++import { DatabaseConstruct } from '../constructs/database.js';
+```
+
+##### 迁移用户身份构造
+
+`UserIdentity`构造通常只需调整导入路径即可直接替换：
+
+```diff lang="ts"
+-import { UserIdentity } from "@aws/pdk/identity";
++import { UserIdentity } from ':shopping-list/common-constructs';
+...
+const userIdentity = new UserIdentity(this, `${id}UserIdentity`);
+```
+
+注意新的`UserIdentity`构造底层直接使用`aws-cdk-lib`中的构造，而PDK使用的是`@aws-cdk/aws-cognito-identitypool-alpha`。
+
+##### 迁移API构造
+
+PDK购物清单应用在`constructs/apis/myapi.ts`中有一个构造，用于实例化从Smithy模型生成的Type Safe API CDK构造。
+
+由于PDK项目使用`@handler`特性，还生成了Lambda函数CDK构造。Nx Plugin for AWS通过更简洁灵活的方式实现类型安全集成——仅生成最小化的"元数据"，由`packages/common/constructs/src/app/apis/api.ts`通用处理。更多细节请参考<Link path="/guides/ts-smithy-api">`ts#smithy-api`生成器指南</Link>。
+
+迁移步骤如下：
+
+<Steps>
+
+1. 在`application-stack.ts`中实例化`Api`构造
+
+    ```diff lang="ts"
+    // stacks/application-stack.ts
+    -import { MyApi } from "../constructs/apis/myapi";
+    +import { Api } from ':shopping-list/common-constructs';
+    ...
+    -const myapi = new MyApi(this, "MyApi", {
+    -  databaseConstruct,
+    -  userIdentity,
+    -});
+    +const api = new Api(this, 'MyApi', {
+    +  integrations: Api.defaultIntegrations(this).build(),
+    +});
+    ```
+
+    这里使用`Api.defaultIntegrations(this).build()`默认会为API中的每个操作创建Lambda函数，与原有`myapi.ts`的行为一致。
+
+2. 授予Lambda函数访问DynamoDB表的权限
+
+    在PDK应用中，`DatabaseConstruct`被传入`MyApi`并管理权限。现在直接在`application-stack.ts`中通过`Api`构造的`integrations`属性实现：
+
+    ```ts
+    // stacks/application-stack.ts
+    // 授予Lambda函数细粒度Dynamo访问权限
+    databaseConstruct.shoppingListTable.grantReadData(
+      api.integrations.getShoppingLists.handler,
+    );
+    [
+      api.integrations.putShoppingList.handler,
+      api.integrations.deleteShoppingList.handler,
+    ].forEach((f) => databaseConstruct.shoppingListTable.grantWriteData(f));
+    ```
+
+3. 授予认证用户调用API的权限
+
+    在PDK的`myapi.ts`中，认证用户被授予API调用权限。现在在应用栈中实现等效操作：
+
+    ```ts
+    // stacks/application-stack.ts
+    api.grantInvokeAccess(userIdentity.identityPool.authenticatedRole);
+    ```
+
+</Steps>
+
+##### 迁移网站构造
+
+最后，将`packages/common/constructs/src/app/static-websites/website.ts`中的`Website`构造添加到`application-stack.ts`，替代原有PDK项目中的`packages/infra/src/constructs/websites/website.ts`。
+
+```diff lang="ts"
+-import { Website } from "../constructs/websites/website";
++import { Website } from ':shopping-list/common-constructs';
+...
+-new Website(this, "Website", {
+-  userIdentity,
+-  myapi,
+-});
++new Website(this, 'Website');
+```
+
+注意不再传递身份或API参数——Nx Plugin for AWS的构造会自行管理运行时配置，`UserIdentity`和`Api`注册必要值，`Website`负责部署到静态网站的`/runtime-config.json`。
+
+完成所有代码迁移后，现在可以构建项目：
+
+<NxCommands commands={["run-many --target build"]} />
+
+:::caution
+可能会遇到lint错误，通常可自动修复：
+
+<NxCommands commands={["run-many --target lint --fix"]} />
+:::

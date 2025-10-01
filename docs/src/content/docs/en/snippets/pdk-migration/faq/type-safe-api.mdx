@@ -1,0 +1,310 @@
+---
+title: Type Safe API
+---
+import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import Snippet from '@components/snippet.astro';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
+import RunGenerator from '@components/run-generator.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Drawer from '@components/drawer.astro';
+import InstallCommand from '@components/install-command.astro';
+
+The most commonly used components from Type Safe API are covered in the example migration above, however there are other features, for which migration details are below.
+
+#### APIs Modelled with OpenAPI
+
+The Nx Plugin for AWS supports APIs modelled in Smithy, but not those modelled directly OpenAPI. The <Link path="/guides/ts-smithy-api">`ts#smithy-api` generator</Link> is a good starting point which you can then modify. You can define your OpenAPI specification in the `model` project's `src` folder instead of Smithy, and modify the `build.Dockerfile` to use your desired code generation tool for clients/servers if they aren't available on NPM. If your desired tools are on NPM, you can just install them as dev dependencies to your Nx workspace and call them directly as Nx build targets.
+
+##### Backend
+
+For type-safe backends modelled in OpenAPI, you can consider using one of the [OpenAPI Generator Server Generators](https://openapi-generator.tech/docs/generators#server-generators). These won't generate directly for AWS Lambda, but you can use the [AWS Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter) to bridge the gap for a lot of them.
+
+:::tip
+For Python, the [python-fastapi](https://openapi-generator.tech/docs/generators/python-fastapi) generator could be used as a as a once-off tool to help migrate from Type Safe API to our <Link path="/guides/fastapi">`py#fast-api` generator</Link>.
+:::
+
+##### Client
+
+For TypeScript clients, you can use the <Link path="/guides/react-website">`ts#react-website` generator</Link> and <Link path="/guides/api-connection">`api-connection` generator</Link> with an example `ts#smithy-api` to see how clients are generated and integrated with a website. This configures build targets which generate clients by invoking our `open-api#ts-client` or `open-api#ts-hooks` generators. You can use these generators yourself by pointing them at your OpenAPI Specification.
+
+For other languages, you can also see if any of the generators from [OpenAPI Generator](https://openapi-generator.tech/docs/generators#client-generators) fit your needs.
+
+You can also build a bespoke generator by using the <Link path="/guides/nx-generator">`ts#nx-generator` generator</Link>. Refer that generator's documentation for details about how to generate code from OpenAPI. You can use the [templates from the Nx Plugin for AWS](https://github.com/awslabs/nx-plugin-for-aws/tree/main/packages/nx-plugin/src/open-api/ts-client/files) as a starting point. You can also even refer to the [templates from the PDK codebase](https://github.com/aws/aws-pdk/tree/mainline/packages/type-safe-api/scripts/type-safe-api/generators) for more inspiration, noting that the data structure the templates operate on is a little different to the Nx Plugin for AWS.
+
+#### APIs Modelled with TypeSpec
+
+For [TypeSpec](https://typespec.io/), the above section for OpenAPI applies too. You can start by generating a <Link path="/guides/ts-smithy-api">`ts#smithy-api`</Link>, install the TypeSpec compiler and OpenAPI packages to your Nx workspace, and update the model project's `compile` target to run `tsp compile` instead, ensuring it outputs an OpenAPI specification to the `dist` directory.
+
+##### Backend
+
+The recommended approach would be to use the [TypeSpec HTTP Server generator for JavaScript](https://typespec.io/docs/emitters/servers/http-server-js/reference/) to generate your server code, since this works directly on your TypeSpec model.
+
+You can use the [AWS Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter) for running the generated server on AWS Lambda.
+
+You can also use any of the above OpenAPI options.
+
+##### Client
+
+TypeSpec has its own code generators for clients in all three of Type Safe API's supported languages:
+
+- [TypeScript](https://typespec.io/docs/emitters/clients/http-client-js/reference/)
+- [Python](https://typespec.io/docs/emitters/clients/http-client-python/reference/)
+- [Java](https://typespec.io/docs/emitters/clients/http-client-java/reference/)
+
+The above OpenAPI section also applies since TypeSpec can compile to OpenAPI.
+
+#### APIs Modelled with Smithy
+
+The above example migration outlines migrating to use the <Link path="/guides/ts-smithy-api">`ts#smithy-api` generator</Link>. This section covers the options for Python and Java backends and clients.
+
+##### Backend
+
+The [Smithy code generator for Java](https://github.com/smithy-lang/smithy-java). This has a Java server generator as well as [an adapter](https://github.com/smithy-lang/smithy-java/tree/main/aws/integrations) to run the generated Java server on AWS Lambda.
+
+Smithy doesn't have a server generator for Python, so you will need to go via OpenAPI. Refer to the above section regarding [APIs Modelled with OpenAPI](#apis-modelled-with-openapi) for potential options.
+
+##### Client
+
+The [Smithy code generator for Java](https://github.com/smithy-lang/smithy-java). This has a Java client generator.
+
+For Python clients, you can check out [Smithy Python](https://github.com/smithy-lang/smithy-python).
+
+For TypeScript, check out [Smithy TypeScript](https://github.com/smithy-lang/smithy-typescript), or use the same approach we've taken in `ts#smithy-api` by going via OpenAPI (we opted for this as it gives us consistency between tRPC, FastAPI and Smithy APIs via TanStack Query hooks).
+
+
+##### Smithy Shape Library
+
+Type Safe API provided a Projen project type named `SmithyShapeLibraryProject` which configured a project which contained Smithy models which could be reused by multiple Smithy-based APIs.
+
+The most straightforward way to achieve this is to do the following:
+
+###### Create a Shape Library
+
+<Steps>
+
+1. Create your shape library using the `smithy#project` generator:
+
+    <RunGenerator generator="smithy#project" />
+
+    Specify any name for the `serviceName` option, as we will remove the `service` shape.
+
+    :::note
+    This generator is hidden at the time of writing and so you will need to execute it via the CLI.
+    :::
+
+1. Replace the default model in `src` with the shapes you wish to define
+
+1. Update `smithy-build.json` to remove the `plugins` and any unused maven dependencies
+
+1. Replace `build.Dockerfile` with minimal build steps:
+
+    ```docker
+    // build.Dockerfile
+    FROM public.ecr.aws/docker/library/node:24 AS builder
+
+    # Output directory
+    RUN mkdir /out
+
+    # Install Smithy CLI
+    # https://smithy.io/2.0/guides/smithy-cli/cli_installation.html
+    WORKDIR /smithy
+    ARG TARGETPLATFORM
+    RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then ARCH="aarch64"; else ARCH="x86_64"; fi && \
+        mkdir -p smithy-install/smithy && \
+        curl -L https://github.com/smithy-lang/smithy/releases/download/1.61.0/smithy-cli-linux-$ARCH.zip -o smithy-install/smithy-cli-linux-$ARCH.zip && \
+        unzip -qo smithy-install/smithy-cli-linux-$ARCH.zip -d smithy-install && \
+        mv smithy-install/smithy-cli-linux-$ARCH/* smithy-install/smithy
+    RUN smithy-install/smithy/install
+
+    # Copy project files
+    COPY smithy-build.json .
+    COPY src src
+
+    # Smithy build with Maven cache mount
+    RUN --mount=type=cache,target=/root/.m2/repository,id=maven-cache \
+        smithy build
+
+    RUN cp -r build/* /out/
+
+    # Export the /out directory
+    FROM scratch AS export
+    COPY --from=builder /out /
+    ```
+
+</Steps>
+
+###### Consume the Shape Library
+
+In your service model project(s), make the following changes to consume the shape library:
+
+<Steps>
+
+1. Update the `compile` target in `project.json` to add the workspace as build context, and a dependency on the shape library's `build` target
+
+    ```json {10,15} "--build-context workspace=." "@my-project/shapes:build"
+    // project.json
+    {
+      "cache": true,
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}/build"],
+      "executor": "nx:run-commands",
+      "options": {
+        "commands": [
+          "rimraf dist/packages/api/model/build",
+          "make-dir dist/packages/api/model/build",
+          "docker build --build-context workspace=. -f packages/api/model/build.Dockerfile --target export --output type=local,dest=dist/packages/api/model/build packages/api/model"
+        ],
+        "parallel": false,
+        "cwd": "{workspaceRoot}"
+      },
+      "dependsOn": ["@my-project/shapes:build"]
+    }
+    ```
+
+1. Update the `build.Dockerfile` to copy the `src` directory from your shape library. For example, assuming the shape library is located in `packages/shapes`:
+
+    ```docker {5}
+    // build.Dockerfile
+    # Copy project files
+    COPY smithy-build.json .
+    COPY src src
+    COPY --from=workspace packages/shapes/src shapes
+    ```
+
+1. Update `smithy-build.json` to add the shapes directory to its `sources`:
+
+    ```json {4} "shapes/"
+    // smithy-build.json
+    {
+      "version": "1.0",
+      "sources": ["src/", "shapes/"],
+      "plugins": {
+      ...
+    }
+    ```
+
+</Steps>
+
+:::note
+Please express your interest on the [GitHub issue here](https://github.com/awslabs/nx-plugin-for-aws/issues/304) if you have a use case for a dedicated Smithy shape library generator.
+:::
+
+#### Interceptors
+
+Type Safe API provided the following default interceptors:
+
+- Logging, tracing and metrics interceptors using Powertools for AWS Lambda
+- Try-catch interceptor for handling uncaught exceptions
+- CORS interceptor for returning CORS headers
+
+The `ts#smithy-api` generator instruments logging, tracing and metrics with Powertools for AWS Lambda using [Middy](https://middy.js.org/). The behaviour of the try-catch interceptor is built in to the Smithy TypeScript SSDK, and CORS headers are added in `handler.ts`.
+
+For logging, tracing and metrics interceptors in any language, use [Powertools for AWS Lambda](https://github.com/aws-powertools/) directly.
+
+For migrating custom interceptors, we recommend using the following libraries:
+
+- TypeScript - [Middy](https://middy.js.org/)
+- Python - [Powertools for AWS Lambda Middleware Factory](https://docs.powertools.aws.dev/lambda/python/latest/utilities/middleware_factory/)
+- Java - Instrument methods before/after your business logic using [aws-lambda-java-libs](https://github.com/aws/aws-lambda-java-libs) for a simple approach, or consider [AspectJ](https://github.com/eclipse-aspectj/aspectj) for building your middleware as annotations.
+
+#### Documentation Generation
+
+Type Safe API provided documentation generation using Redocly CLI. This is very easy to add to an existing project once you've migrated it as above.
+
+<Steps>
+
+1. Install the Redocly CLI
+
+    <InstallCommand pkg="@redocly/cli" dev />
+
+1. Add a documentation generation target to your `model` project using [`redocly build-docs`](https://redocly.com/docs/cli/commands/build-docs), for example:
+
+    ```json wrap
+    // model/project.json
+    {
+      ...
+      "documentation": {
+        "cache": true,
+        "outputs": ["{workspaceRoot}/dist/{projectRoot}/documentation"],
+        "executor": "nx:run-commands",
+        "options": {
+          "command": "redocly build-docs dist/packages/api/model/build/openapi/openapi.json --output=dist/packages/api/model/documentation/index.html",
+          "cwd": "{workspaceRoot}"
+        },
+        "dependsOn": ["compile"]
+      }
+    }
+    ```
+
+</Steps>
+
+You can also consider the [OpenAPI Generator documentation generators](https://openapi-generator.tech/docs/generators#documentation-generators).
+
+#### Mock Integrations
+
+Type Safe API generated mocks for you within its generated infrastructure package.
+
+You can move to [JSON Schema Faker](https://github.com/json-schema-faker/json-schema-faker) which can create the mock data based on JSON Schemas. This can work directly on an OpenAPI specification, and has [a CLI](https://github.com/oprogramador/json-schema-faker-cli) which you could run as part of your `model` project build.
+
+You can update your CDK infrastructure to read the JSON file output by JSON Schema Faker, and return the appropriate API Gateway [`MockIntegration`](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_apigateway.MockIntegration.html) for an integration, based on the generated `metadata.gen.ts` (assuming you used the <Link path="/guides/ts-smithy-api">`ts#smithy-api` generator</Link>).
+
+#### Mixed Language Backends
+
+Type Safe API supported implementing APIs with a mixture of different languages in the backend. This can also be achieved by providing "overrides" to integrations when instantiating your API construct in CDK:
+
+```ts
+// application-stack.ts
+const pythonLambdaHandler = new Function(this, 'PythonImplementation', {
+  runtime: Runtime.PYTHON_3_12,
+  ...
+});
+
+new MyApi(this, 'MyApi', {
+  integrations: Api.defaultIntegrations(this)
+    .withOverrides({
+      echo: {
+        integration: new LambdaIntegration(pythonLambdaHandler),
+        handler: pythonLambdaHandler,
+      },
+    })
+    .build(),
+});
+```
+
+You will need to "stub" your service/router for your service to compile if using the `ts#smithy-api` and the TypeScript Server SDK, eg:
+
+```ts {4}
+// service.ts
+export const Service: ApiService<ServiceContext> = {
+  ...
+  Echo: () => { throw new Error(`Not Implemented`); },
+};
+```
+
+:::note
+For type-safety for languages other than TypeScript, refer to the above "Backend" sections depending on your modelling language.
+:::
+
+#### Input Validation
+
+Type Safe API added native API Gateway validation for request bodies based on your OpenAPI specification since it used the [`SpecRestApi`](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_apigateway.SpecRestApi.html) construct under the hood.
+
+With the <Link path="/guides/ts-smithy-api">`ts#smithy-api` generator</Link>, validation is performed by the Server SDK itself. This is the same for most server generators.
+
+If you would like to implement native API Gateway validation, you could do so by modifying `packages/common/constructs/src/core/api/rest-api.ts` to read the relevant JSON schema for each operation's request body from your OpenAPI specification.
+
+#### WebSocket APIs
+
+Unfortunately there is no straightforward migration path for Type Safe API's websocket API using API Gateway and Lambda with model-driven API development. However, this section of the guide aims to at least offer a few ideas.
+
+Consider using [AsyncAPI](https://www.asyncapi.com/) to model your API instead of OpenAPI or TypeSpec since this is designed to handle asynchronous APIs. The [AsyncAPI NodeJS Template](https://github.com/asyncapi/nodejs-template) can generate a Node websocket backend which you could host on [ECS](https://docs.aws.amazon.com/ecs/) for example.
+
+You can also consider [AppSync Events](https://docs.aws.amazon.com/appsync/latest/eventapi/event-api-welcome.html) for infrastructure, and use [Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/features/event-handler/appsync-events/). [This blog post](https://aws.amazon.com/blogs/mobile/simplify-aws-appsync-events-integration-with-powertools-for-aws-lambda/) is worth a read!
+
+Another option is to use GraphQL APIs with websockets on [AppSync](https://aws.amazon.com/appsync/), for which we have a [GitHub issue](https://github.com/awslabs/nx-plugin-for-aws/issues/154) you can +1! Refer to the [AppSync developer guide](https://docs.aws.amazon.com/appsync/latest/devguide/what-is-appsync.html) for details and links to sample projects.
+
+You can also consider rolling your own code generators which interpret the same vendor extensions as Type Safe API. Refer to the [APIs Modelled with OpenAPI](#apis-modelled-with-openapi) section for details around building custom OpenAPI-based code generators. You can find the templates Type Safe API uses for API Gateway Websocket API Lambda handlers [here](https://github.com/aws/aws-pdk/tree/mainline/packages/type-safe-api/scripts/type-safe-api/generators/typescript-async-runtime/templates), and the client [here](https://github.com/aws/aws-pdk/blob/mainline/packages/type-safe-api/scripts/type-safe-api/generators/typescript-websocket-client/templates/client.ejs).
+
+You can also consider migrating to use the <Link path="/guides/trpc.mdx">`ts#trpc-api` generator</Link> to use tRPC. At the time of writing we don't yet have support for subscriptions/streaming but if this is something you need do add a +1 to our [GitHub issue tracking this](https://github.com/awslabs/nx-plugin-for-aws/issues/194).
+
+Smithy is protocol agnostic, but does not yet have support for the Websocket protocol, refer to [this GitHub issue tracking support](https://github.com/smithy-lang/smithy/issues/1505).

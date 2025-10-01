@@ -1,0 +1,289 @@
+---
+title: "迁移网站"
+---
+
+
+
+import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
+import RunGenerator from '@components/run-generator.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Drawer from '@components/drawer.astro';
+import InstallCommand from '@components/install-command.astro';
+
+购物清单应用中使用的`CloudscapeReactTsWebsiteProject`配置了一个内置CloudScape和Cognito身份验证的React网站。
+
+该项目类型基于现已弃用的[`create-react-app`](https://github.com/facebook/create-react-app)。在本迁移指南中，我们将使用<Link path="/guides/react-website">`ts#react-website`生成器</Link>，它采用了更现代且受支持的技术栈——[Vite](https://vite.dev/)。
+
+作为迁移的一部分，我们还将从PDK配置的React Router迁移到[TanStack Router](https://tanstack.com/router)，这将为网站路由增加额外的类型安全性。
+
+#### 生成React网站
+
+运行<Link path="/guides/react-website">`ts#react-website`生成器</Link>在`packages/website`目录下创建网站项目：
+
+<RunGenerator generator="ts#react-website" noInteractive requiredParameters={{ name: 'website' }} />
+
+#### 添加Cognito身份验证
+
+上述React网站生成器默认不包含Cognito身份验证（与`CloudscapeReactTsWebsiteProject`不同），需要通过<Link path="/guides/react-website-auth">`ts#react-website#auth`生成器</Link>显式添加：
+
+<RunGenerator generator="ts#react-website#auth" noInteractive requiredParameters={{ project: 'website', cognitoDomain: 'shopping-list' }} />
+
+这会添加管理重定向逻辑的React组件以确保用户通过Cognito托管UI登录，同时在`packages/common/constructs`目录下添加名为`UserIdentity`的CDK构造用于部署Cognito资源。
+
+:::note
+PDK的`CloudscapeReactTsWebsiteProject`依赖`@aws-northstar/ui`提供应用内Cognito登录组件。若希望继续使用此方式而非托管UI，可将生成的`packages/common/constructs/src/core/user-identity.ts`替换为[PDK实现](https://github.com/aws/aws-pdk/blob/mainline/packages/identity/src/user-identity.ts)，将`@aws-cdk/aws-cognito-identitypool-alpha`的构造替换为`aws-cdk-lib`提供的版本，并确保在`RuntimeConfig`中设置相关值：
+
+```ts
+RuntimeConfig.ensure(this).config = {
+  ...RuntimeConfig.ensure(this).config,
+  region: Stack.of(this).region,
+  identityPoolId: this.identityPool.identityPoolId,
+  userPoolId: this.userPool.userPoolId,
+  userPoolWebClientId: this.userPoolClient.userPoolClientId,
+};
+```
+
+之后可复用`CloudscapeReactTsWebsiteProject`中的`Auth`组件。
+:::
+
+#### 连接网站与API
+
+在PDK中，通过传递项目实例来触发集成代码生成。在Nx Plugin for AWS中，API集成通过<Link path="/guides/api-connection">`api-connection`生成器</Link>实现。运行以下命令使网站能够调用Smithy API：
+
+<RunGenerator generator="api-connection" noInteractive requiredParameters={{ sourceProject: 'website', targetProject: 'api' }} />
+
+这将生成必要的客户端提供程序与构建目标，使网站可以通过生成的TypeScript客户端调用API。
+
+#### 添加AWS Northstar依赖
+
+由于`CloudscapeReactTsWebsiteProject`自动包含`@aws-northstar/ui`依赖，需手动添加：
+
+<InstallCommand pkg="@aws-northstar/ui" />
+
+#### 迁移组件与页面
+
+[购物清单应用](https://aws.github.io/aws-pdk/getting_started/shopping_list_app.html#create-new-pages-components)包含`CreateItem`组件及`ShoppingList`、`ShoppingLists`两个页面。迁移时需调整以适应TanStack Router和Nx Plugin for AWS的TypeScript客户端代码生成。
+
+<Steps>
+
+1. 将PDK项目中的`packages/website/src/components/CreateItem/index.tsx`复制到新项目相同位置
+
+1. 将`packages/website/src/pages/ShoppingLists/index.tsx`复制为`packages/website/src/routes/index.tsx`（因`ShoppingLists`是首页且使用文件路由）
+
+1. 将`packages/website/src/pages/ShoppingList/index.tsx`复制为`packages/website/src/routes/$shoppingListId.tsx`（对应`/:shoppingListId`路由）
+
+</Steps>
+
+迁移后IDE中可能出现构建错误，需进行后续调整。
+
+#### 从React Router迁移到TanStack Router
+
+使用[文件路由](https://tanstack.com/router/latest/docs/framework/react/routing/file-based-routing)时，可通过本地开发服务器自动生成路由配置。启动本地网站服务：
+
+<NxCommands commands={["serve-local website"]} />
+
+:::tip
+`serve-local`目标会同时启动通过`api-connection`连接的API本地服务，并在网站、模型或后端变更时热重载！这使得我们无需编写CDK代码即可本地测试API与网站。
+:::
+
+服务启动后（网站端口`4200`，Smithy API端口`3001`），按以下步骤迁移路由：
+
+<Steps>
+
+1. 添加`createFileRoute`注册路由：
+
+    <Tabs>
+    <TabItem label="routes/index.tsx">
+    ```diff lang="ts"
+    +import { createFileRoute } from "@tanstack/react-router";
+    ...
+    -export default ShoppingLists;
+    +export const Route = createFileRoute('/')({
+    +  component: ShoppingLists,
+    +});
+    ```
+    </TabItem>
+    <TabItem label="routes/$shoppingListId.tsx">
+    ```diff lang="ts"
+    +import { createFileRoute } from "@tanstack/react-router";
+    ...
+    -export default ShoppingList;
+    +export const Route = createFileRoute('/$shoppingListId')({
+    +  component: ShoppingList,
+    +});
+    ```
+    </TabItem>
+    </Tabs>
+
+1. 替换`useNavigate`钩子：
+
+    ```diff lang="ts"
+    - import { useNavigate } from 'react-router-dom';
+    + import { useNavigate } from '@tanstack/react-router';
+    ```
+
+    ```diff lang="ts"
+    - navigate(`/${cell.shoppingListId}`);
+    + navigate({
+    +   to: '/$shoppingListId',
+    +   params: { shoppingListId: cell.shoppingListId },
+    + });
+    ```
+
+1. 替换`useParams`钩子：
+
+    ```diff lang="ts"
+    - import { useParams } from 'react-router-dom';
+    ```
+
+    ```diff lang="ts"
+    - const { shoppingListId } = useParams();
+    + const { shoppingListId } = Route.useParams();
+    ```
+
+</Steps>
+
+:::tip
+复杂场景可参考[TanStack Router迁移指南](https://tanstack.com/router/latest/docs/framework/react/migrate-from-react-router)。
+:::
+
+#### 修复组件导入
+
+调整路由文件中的组件导入路径：
+
+```diff lang="ts"
+-import CreateItem from "../../components/CreateItem";
++import CreateItem from "../components/CreateItem";
+```
+
+```diff lang="ts"
+-import { AppLayoutContext } from "../../layouts/App";
++import { AppLayoutContext } from "../components/AppLayout";
+```
+
+#### 迁移至新生成的TypeScript客户端
+
+使用Nx Plugin for AWS生成的改进客户端：
+
+<Steps>
+
+1. 替换旧客户端导入：
+
+    ```diff lang="ts"
+    -import {
+    -  ShoppingList,
+    -  usePutShoppingList,
+    -  useDeleteShoppingList,
+    -  useGetShoppingLists,
+    -} from "myapi-typescript-react-query-hooks";
+    +import { ShoppingList } from "../generated/my-api/types.gen";
+    +import { useMyApi } from "../hooks/useMyApi";
+    +import { useInfiniteQuery, useMutation } from "@tanstack/react-query";
+    ```
+
+1. 初始化新查询钩子：
+
+    ```diff lang="ts"
+    -const getShoppingLists = useGetShoppingLists({ pageSize: PAGE_SIZE });
+    +const api = useMyApi();
+    +const getShoppingLists = useInfiniteQuery(
+    +  api.getShoppingLists.infiniteQueryOptions(
+    +    { pageSize: PAGE_SIZE },
+    +    { getNextPageParam: (p) => p.nextToken },
+    +  ),
+    +);
+    ```
+
+1. 移除请求体包装器：
+
+    ```diff lang="ts"
+    await putShoppingList.mutateAsync({
+    -  putShoppingListRequestContent: {
+        name: item,
+    -  },
+    });
+    ```
+
+</Steps>
+
+:::note
+修复购物清单应用中的可选链问题：
+
+```diff lang="ts"
+const shoppingList: _ShoppingList | undefined =
+-    getShoppingLists.data?.pages[0].shoppingLists[0]!;
++    getShoppingLists.data?.pages?.[0]?.shoppingLists?.[0];
+```
+
+```diff lang="ts"
+-name: shoppingList.name,
++name: shoppingList?.name ?? 'my list',
+```
+:::
+
+#### 从TanStack Query v4迁移至v5
+
+处理版本差异：
+
+<Steps>
+
+1. 替换状态标识：
+
+    ```diff lang="ts"
+    -putShoppingList.isLoading
+    +putShoppingList.isPending
+    ```
+
+1. 类型断言兼容：
+
+    ```diff lang="tsx"
+    <InfiniteQueryTable
+    -  query={getShoppingLists}
+    +  query={getShoppingLists as any}
+    ```
+
+</Steps>
+
+:::tip
+更多特性迁移参考[TanStack Query v5指南](https://tanstack.com/query/latest/docs/framework/react/guides/migrating-to-v5)。
+:::
+
+#### 访问本地网站
+
+完成迁移后，访问http://localhost:4200/即可查看网站。若本地存在`shopping_list`DynamoDB表且凭证有效，网站将完全可用。否则需继续迁移基础设施。
+
+<Drawer title="购物清单页面迁移示例" trigger="点击查看完整前后代码对比">
+
+<h4>购物清单列表页</h4>
+
+<Tabs syncKey="pdk-migration">
+<TabItem label="迁移前">
+```tsx
+// pages/ShoppingLists/index.tsx（原代码）
+```
+</TabItem>
+<TabItem label="迁移后">
+```tsx
+// routes/index.tsx（迁移后代码）
+```
+</TabItem>
+</Tabs>
+
+<h4>单个购物清单页</h4>
+
+<Tabs syncKey="pdk-migration">
+<TabItem label="迁移前">
+```tsx
+// pages/ShoppingList/index.tsx（原代码）
+```
+</TabItem>
+<TabItem label="迁移后">
+```tsx
+// routes/$shoppingListId.tsx（迁移后代码）
+```
+</TabItem>
+</Tabs>
+
+</Drawer>

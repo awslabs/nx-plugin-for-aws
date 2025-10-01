@@ -1,0 +1,233 @@
+---
+title: "迁移 API"
+---
+
+
+
+import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
+import RunGenerator from '@components/run-generator.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Drawer from '@components/drawer.astro';
+import InstallCommand from '@components/install-command.astro';
+
+购物清单应用中的 `TypeSafeApiProject` 使用了：
+
+- [Smithy](https://smithy.io/2.0/) 作为建模语言
+- TypeScript 实现操作逻辑
+- TypeScript 钩子生成器与 React 网站集成
+
+因此我们可以使用 <Link path="/guides/ts-smithy-api">`ts#smithy-api` 生成器</Link> 来提供等效功能。
+
+:::note
+如果使用 OpenAPI 或 TypeSpec 作为建模语言，或使用 Python/Java 实现处理程序，请参考 [FAQ](#frequently-asked-questions) 了解可选方案。
+:::
+
+#### 生成 TypeScript Smithy API
+
+运行 <Link path="/guides/ts-smithy-api">`ts#smithy-api` 生成器</Link> 在 `packages/api` 中创建 API 项目：
+
+<RunGenerator generator="ts#smithy-api" noInteractive requiredParameters={{ name: 'api', namespace: 'com.aws', auth: 'IAM' }} />
+
+这会生成 `model` 和 `backend` 项目。`model` 包含 Smithy 模型，`backend` 包含服务端实现。后端使用 [Smithy TypeScript 服务端生成器](https://smithy.io/2.0/languages/typescript/ts-ssdk/index.html)，下文将详细探讨。
+
+#### 迁移 Smithy 模型
+
+建立基础结构后，按以下步骤迁移模型：
+
+<Steps>
+
+1. 删除 `packages/api/model/src` 中的示例文件
+1. 将 PDK 项目 `packages/api/model/src/main/smithy` 的模型复制到新项目
+1. 更新 `smithy-build.json` 中的服务名称和命名空间：
+
+    ```json {4}
+    // smithy-build.json
+    "plugins": {
+        "openapi": {
+          "service": "com.aws#MyApi",
+          ...
+    ```
+
+1. 在 `main.smithy` 中添加 `ValidationException` 错误：
+
+    ```smithy {2, 17}
+    // main.smithy
+    use smithy.framework#ValidationException
+
+    /// 我的购物清单 API
+    @restJson1
+    service MyApi {
+        version: "1.0"
+        operations: [
+            GetShoppingLists
+            PutShoppingList
+            DeleteShoppingList
+        ]
+        errors: [
+            BadRequestError
+            NotAuthorizedError
+            InternalFailureError
+            ValidationException
+        ]
+    }
+    ```
+
+1. 在 `packages/api/model/src` 创建 `extensions.smithy` 定义分页特性：
+
+    ```smithy
+    // extensions.smithy
+    $version: "2"
+    namespace com.aws
+
+    use smithy.openapi#specificationExtension
+
+    @trait
+    @specificationExtension(as: "x-cursor")
+    structure cursor {
+        inputToken: String
+        enabled: Boolean
+    }
+    ```
+
+1. 在 `GetShoppingLists` 操作添加 `@cursor` 特性：
+
+    ```smithy {5}
+    // operations/get-shopping-lists.smithy
+    @readonly
+    @http(method: "GET", uri: "/shopping-list")
+    @paginated(inputToken: "nextToken", outputToken: "nextToken", pageSize: "pageSize", items: "shoppingLists")
+    @cursor(inputToken: "nextToken")
+    @handler(language: "typescript")
+    operation GetShoppingLists {
+        input := with [PaginatedInputMixin] {
+            @httpQuery("shoppingListId")
+            shoppingListId: ShoppingListId
+        }
+    ```
+
+1. 移除所有操作的 `@handler` 特性
+
+</Steps>
+
+运行构建检查模型变更：
+
+<NxCommands commands={["run-many --target build"]} />
+
+:::note
+若出现 lint 错误可自动修复：
+
+<NxCommands commands={["run-many --target lint --fix"]} />
+:::
+
+#### 迁移 Lambda 处理程序
+
+`api/backend` 项目相当于 Type Safe API 的 `api/handlers/typescript`。主要区别在于使用 [Smithy 服务端生成器](https://smithy.io/2.0/languages/typescript/ts-ssdk/index.html) 而非 Type Safe API 的封装器。
+
+安装依赖并迁移处理程序：
+
+<InstallCommand pkg="@aws-sdk/client-dynamodb" />
+
+迁移步骤：
+
+<Steps>
+
+1. 复制处理程序文件到 `backend/src/operations`
+1. 替换运行时导入为 SSDK 生成类型
+1. 更新处理程序签名
+1. 使用 `ctx.logger` 替代拦截器
+1. 调整输入参数引用方式
+1. 返回普通对象替代 `Response`
+1. 更新导入为 ESM 格式
+1. 在 `service.ts` 注册操作
+
+</Steps>
+
+<Drawer title="购物清单处理程序迁移示例" trigger="点击查看完整前后对比">
+
+<h4>删除购物清单</h4>
+
+<Tabs syncKey="pdk-migration">
+<TabItem label="迁移前">
+```ts
+// 原始处理程序代码...
+```
+</TabItem>
+<TabItem label="迁移后">
+```ts
+// 迁移后处理程序代码...
+```
+</TabItem>
+</Tabs>
+
+<h4>获取购物清单</h4>
+
+<Tabs syncKey="pdk-migration">
+<TabItem label="迁移前">
+```ts
+// 原始处理程序代码...
+```
+</TabItem>
+<TabItem label="迁移后">
+```ts
+// 迁移后处理程序代码...
+```
+</TabItem>
+</Tabs>
+
+<h4>添加购物清单</h4>
+
+<Tabs syncKey="pdk-migration">
+<TabItem label="迁移前">
+```ts
+// 原始处理程序代码...
+```
+</TabItem>
+<TabItem label="迁移后">
+```ts
+// 迁移后处理程序代码...
+```
+</TabItem>
+</Tabs>
+
+</Drawer>
+
+#### 更新服务引用
+
+将 `getApiServiceHandler` 更新为 `getMyApiServiceHandler`：
+
+```diff lang="ts"
+// handler.ts
+- import { getApiServiceHandler } from './generated/ssdk/index.js';
++ import { getMyApiServiceHandler } from './generated/ssdk/index.js';
+```
+
+```diff lang="ts"
+// local-server.ts
+-import { getApiServiceHandler } from './generated/ssdk/index.js';
++import { getMyApiServiceHandler } from './generated/ssdk/index.js';
+```
+
+更新项目元数据：
+
+```diff lang="json"
+// project.json
+  "metadata": {
+    "generator": "ts#smithy-api",
+-    "apiName": "api",
++    "apiName": "my-api",
+  },
+```
+
+#### 验证构建
+
+最后执行构建验证：
+
+<NxCommands commands={["run-many --target build"]} />
+
+:::note
+若出现 lint 错误可自动修复：
+
+<NxCommands commands={["run-many --target lint --fix"]} />
+:::

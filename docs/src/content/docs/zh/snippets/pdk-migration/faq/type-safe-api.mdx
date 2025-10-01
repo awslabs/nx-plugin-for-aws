@@ -1,0 +1,312 @@
+---
+title: "类型安全 API"
+---
+
+
+
+import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import Snippet from '@components/snippet.astro';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
+import RunGenerator from '@components/run-generator.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Drawer from '@components/drawer.astro';
+import InstallCommand from '@components/install-command.astro';
+
+上述迁移示例涵盖了 Type Safe API 中最常用的组件，但其他功能的迁移细节如下所述。
+
+#### 使用 OpenAPI 建模的 API
+
+Nx Plugin for AWS 支持使用 Smithy 建模的 API，但不支持直接使用 OpenAPI 建模的 API。<Link path="/guides/ts-smithy-api">`ts#smithy-api` 生成器</Link>是一个良好的起点，您可以在此基础上进行修改。您可以在`model`项目的`src`文件夹中定义 OpenAPI 规范而非 Smithy，并修改`build.Dockerfile`以使用您选择的代码生成工具来生成客户端/服务端代码（如果这些工具未在 NPM 上提供）。如果所需工具已在 NPM 上，您可以直接将其作为开发依赖安装到 Nx 工作区，并作为 Nx 构建目标直接调用。
+
+##### 后端
+
+对于使用 OpenAPI 建模的类型安全后端，可以考虑使用 [OpenAPI Generator 服务端生成器](https://openapi-generator.tech/docs/generators#server-generators)。这些生成器不会直接生成适用于 AWS Lambda 的代码，但您可以使用 [AWS Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter) 来弥合这一差距。
+
+:::tip
+对于 Python，可以使用 [python-fastapi](https://openapi-generator.tech/docs/generators/python-fastapi) 生成器作为一次性工具，帮助从 Type Safe API 迁移到我们的 <Link path="/guides/fastapi">`py#fast-api` 生成器</Link>。
+:::
+
+##### 客户端
+
+对于 TypeScript 客户端，可以使用 <Link path="/guides/react-website">`ts#react-website` 生成器</Link>和 <Link path="/guides/api-connection">`api-connection` 生成器</Link>，结合示例 `ts#smithy-api` 来了解客户端的生成与网站集成方式。这会配置通过调用我们的 `open-api#ts-client` 或 `open-api#ts-hooks` 生成器来生成客户端的构建目标。您可以通过指向 OpenAPI 规范来自行使用这些生成器。
+
+对于其他语言，也可以查看 [OpenAPI Generator](https://openapi-generator.tech/docs/generators#client-generators) 中的生成器是否符合需求。
+
+您还可以使用 <Link path="/guides/nx-generator">`ts#nx-generator` 生成器</Link>构建定制生成器。参考该生成器的文档了解如何从 OpenAPI 生成代码的细节。可以使用 [Nx Plugin for AWS 的模板](https://github.com/awslabs/nx-plugin-for-aws/tree/main/packages/nx-plugin/src/open-api/ts-client/files)作为起点，甚至参考 [PDK 代码库的模板](https://github.com/aws/aws-pdk/tree/mainline/packages/type-safe-api/scripts/type-safe-api/generators)获取更多灵感，注意模板操作的数据结构与 Nx Plugin for AWS 略有不同。
+
+#### 使用 TypeSpec 建模的 API
+
+对于 [TypeSpec](https://typespec.io/)，上述 OpenAPI 部分同样适用。您可以从生成 <Link path="/guides/ts-smithy-api">`ts#smithy-api`</Link> 开始，将 TypeSpec 编译器和 OpenAPI 包安装到 Nx 工作区，并更新模型项目的`compile`目标以运行`tsp compile`，确保其将 OpenAPI 规范输出到`dist`目录。
+
+##### 后端
+
+推荐方法是使用 [TypeSpec HTTP Server generator for JavaScript](https://typespec.io/docs/emitters/servers/http-server-js/reference/) 生成服务端代码，因为这直接作用于 TypeSpec 模型。
+
+您可以使用 [AWS Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter) 在 AWS Lambda 上运行生成的服务端。
+
+也可以使用上述任何 OpenAPI 选项。
+
+##### 客户端
+
+TypeSpec 为 Type Safe API 支持的三种语言提供了自己的客户端代码生成器：
+
+- [TypeScript](https://typespec.io/docs/emitters/clients/http-client-js/reference/)
+- [Python](https://typespec.io/docs/emitters/clients/http-client-python/reference/)
+- [Java](https://typespec.io/docs/emitters/clients/http-client-java/reference/)
+
+由于 TypeSpec 可编译为 OpenAPI，上述 OpenAPI 部分同样适用。
+
+#### 使用 Smithy 建模的 API
+
+上述迁移示例概述了如何迁移到使用 <Link path="/guides/ts-smithy-api">`ts#smithy-api` 生成器</Link>。本节涵盖 Python 和 Java 后端及客户端的选项。
+
+##### 后端
+
+[Smithy 的 Java 代码生成器](https://github.com/smithy-lang/smithy-java)。该生成器包含 Java 服务端生成器以及[适配器](https://github.com/smithy-lang/smithy-java/tree/main/aws/integrations)以在 AWS Lambda 上运行生成的 Java 服务端。
+
+Smithy 没有 Python 的服务端生成器，因此需要通过 OpenAPI。请参考上述[使用 OpenAPI 建模的 API](#apis-modelled-with-openapi) 部分获取可能的选项。
+
+##### 客户端
+
+[Smithy 的 Java 代码生成器](https://github.com/smithy-lang/smithy-java)。该生成器包含 Java 客户端生成器。
+
+对于 Python 客户端，可查看 [Smithy Python](https://github.com/smithy-lang/smithy-python)。
+
+对于 TypeScript，查看 [Smithy TypeScript](https://github.com/smithy-lang/smithy-typescript)，或采用与 `ts#smithy-api` 相同的通过 OpenAPI 的方法（我们选择此方法是为了通过 TanStack Query hooks 在 tRPC、FastAPI 和 Smithy API 之间保持一致性）。
+
+##### Smithy 模型库
+
+Type Safe API 提供了一个名为 `SmithyShapeLibraryProject` 的 Projen 项目类型，用于配置包含可被多个基于 Smithy 的 API 复用的 Smithy 模型的项目。
+
+最直接的实现方式如下：
+
+###### 创建模型库
+
+<Steps>
+
+1. 使用 `smithy#project` 生成器创建模型库：
+
+    <RunGenerator generator="smithy#project" />
+
+    为 `serviceName` 选项指定任意名称，因为我们将移除 `service` 模型。
+
+    :::note
+    截至撰写本文时，此生成器处于隐藏状态，因此需要通过 CLI 执行。
+    :::
+
+1. 将 `src` 中的默认模型替换为您要定义的模型
+
+1. 更新 `smithy-build.json` 以移除 `plugins` 和未使用的 Maven 依赖
+
+1. 将 `build.Dockerfile` 替换为最小化构建步骤：
+
+    ```docker
+    // build.Dockerfile
+    FROM public.ecr.aws/docker/library/node:24 AS builder
+
+    # 输出目录
+    RUN mkdir /out
+
+    # 安装 Smithy CLI
+    # https://smithy.io/2.0/guides/smithy-cli/cli_installation.html
+    WORKDIR /smithy
+    ARG TARGETPLATFORM
+    RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then ARCH="aarch64"; else ARCH="x86_64"; fi && \
+        mkdir -p smithy-install/smithy && \
+        curl -L https://github.com/smithy-lang/smithy/releases/download/1.61.0/smithy-cli-linux-$ARCH.zip -o smithy-install/smithy-cli-linux-$ARCH.zip && \
+        unzip -qo smithy-install/smithy-cli-linux-$ARCH.zip -d smithy-install && \
+        mv smithy-install/smithy-cli-linux-$ARCH/* smithy-install/smithy
+    RUN smithy-install/smithy/install
+
+    # 复制项目文件
+    COPY smithy-build.json .
+    COPY src src
+
+    # 使用 Maven 缓存挂载进行 Smithy 构建
+    RUN --mount=type=cache,target=/root/.m2/repository,id=maven-cache \
+        smithy build
+
+    RUN cp -r build/* /out/
+
+    # 导出 /out 目录
+    FROM scratch AS export
+    COPY --from=builder /out /
+    ```
+
+</Steps>
+
+###### 使用模型库
+
+在您的服务模型项目中进行以下更改以使用模型库：
+
+<Steps>
+
+1. 更新 `project.json` 中的 `compile` 目标，添加工区作为构建上下文，并添加对模型库 `build` 目标的依赖
+
+    ```json {10,15} "--build-context workspace=." "@my-project/shapes:build"
+    // project.json
+    {
+      "cache": true,
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}/build"],
+      "executor": "nx:run-commands",
+      "options": {
+        "commands": [
+          "rimraf dist/packages/api/model/build",
+          "make-dir dist/packages/api/model/build",
+          "docker build --build-context workspace=. -f packages/api/model/build.Dockerfile --target export --output type=local,dest=dist/packages/api/model/build packages/api/model"
+        ],
+        "parallel": false,
+        "cwd": "{workspaceRoot}"
+      },
+      "dependsOn": ["@my-project/shapes:build"]
+    }
+    ```
+
+1. 更新 `build.Dockerfile` 以从模型库复制 `src` 目录。例如，假设模型库位于 `packages/shapes`：
+
+    ```docker {5}
+    // build.Dockerfile
+    # 复制项目文件
+    COPY smithy-build.json .
+    COPY src src
+    COPY --from=workspace packages/shapes/src shapes
+    ```
+
+1. 更新 `smithy-build.json` 将模型目录添加到其 `sources` 中：
+
+    ```json {4} "shapes/"
+    // smithy-build.json
+    {
+      "version": "1.0",
+      "sources": ["src/", "shapes/"],
+      "plugins": {
+      ...
+    }
+    ```
+
+</Steps>
+
+:::note
+如果您有专用 Smithy 模型库生成器的使用场景，请在[此 GitHub issue](https://github.com/awslabs/nx-plugin-for-aws/issues/304) 上表达您的兴趣。
+:::
+
+#### 拦截器
+
+Type Safe API 提供了以下默认拦截器：
+
+- 使用 Powertools for AWS Lambda 的日志、跟踪和指标拦截器
+- 用于处理未捕获异常的 try-catch 拦截器
+- 用于返回 CORS 头部的 CORS 拦截器
+
+`ts#smithy-api` 生成器通过 [Middy](https://middy.js.org/) 使用 Powertools for AWS Lambda 实现日志、跟踪和指标。try-catch 拦截器的行为内置于 Smithy TypeScript SSDK 中，CORS 头部在 `handler.ts` 中添加。
+
+对于任何语言的日志、跟踪和指标拦截器，直接使用 [Powertools for AWS Lambda](https://github.com/aws-powertools/)。
+
+对于迁移自定义拦截器，推荐使用以下库：
+
+- TypeScript - [Middy](https://middy.js.org/)
+- Python - [Powertools for AWS Lambda 中间件工厂](https://docs.powertools.aws.dev/lambda/python/latest/utilities/middleware_factory/)
+- Java - 使用 [aws-lambda-java-libs](https://github.com/aws/aws-lambda-java-libs) 在业务逻辑前后插入方法，或考虑使用 [AspectJ](https://github.com/eclipse-aspectj/aspectj) 通过注解构建中间件。
+
+#### 文档生成
+
+Type Safe API 使用 Redocly CLI 生成文档。迁移后可以轻松添加到现有项目中。
+
+<Steps>
+
+1. 安装 Redocly CLI
+
+    <InstallCommand pkg="@redocly/cli" dev />
+
+1. 使用 [`redocly build-docs`](https://redocly.com/docs/cli/commands/build-docs) 向 `model` 项目添加文档生成目标，例如：
+
+    ```json wrap
+    // model/project.json
+    {
+      ...
+      "documentation": {
+        "cache": true,
+        "outputs": ["{workspaceRoot}/dist/{projectRoot}/documentation"],
+        "executor": "nx:run-commands",
+        "options": {
+          "command": "redocly build-docs dist/packages/api/model/build/openapi/openapi.json --output=dist/packages/api/model/documentation/index.html",
+          "cwd": "{workspaceRoot}"
+        },
+        "dependsOn": ["compile"]
+      }
+    }
+    ```
+
+</Steps>
+
+也可以考虑 [OpenAPI Generator 文档生成器](https://openapi-generator.tech/docs/generators#documentation-generators)。
+
+#### 模拟集成
+
+Type Safe API 在其生成的基础设施包中为您生成模拟。
+
+可以迁移到基于 JSON Schema 生成模拟数据的 [JSON Schema Faker](https://github.com/json-schema-faker/json-schema-faker)。这可以直接作用于 OpenAPI 规范，并具有[CLI 工具](https://github.com/oprogramador/json-schema-faker-cli)，可作为 `model` 项目构建的一部分运行。
+
+可以更新 CDK 基础设施以读取 JSON Schema Faker 生成的 JSON 文件，并根据生成的 `metadata.gen.ts`（假设您使用了 <Link path="/guides/ts-smithy-api">`ts#smithy-api` 生成器</Link>）返回适当的 API Gateway [`MockIntegration`](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_apigateway.MockIntegration.html)。
+
+#### 混合语言后端
+
+Type Safe API 支持使用多种语言混合实现后端 API。这也可以通过在使用 CDK 实例化 API 构造时提供集成"覆盖"来实现：
+
+```ts
+// application-stack.ts
+const pythonLambdaHandler = new Function(this, 'PythonImplementation', {
+  runtime: Runtime.PYTHON_3_12,
+  ...
+});
+
+new MyApi(this, 'MyApi', {
+  integrations: Api.defaultIntegrations(this)
+    .withOverrides({
+      echo: {
+        integration: new LambdaIntegration(pythonLambdaHandler),
+        handler: pythonLambdaHandler,
+      },
+    })
+    .build(),
+});
+```
+
+如果使用 `ts#smithy-api` 和 TypeScript 服务端 SDK，需要为服务"桩"化以通过编译，例如：
+
+```ts {4}
+// service.ts
+export const Service: ApiService<ServiceContext> = {
+  ...
+  Echo: () => { throw new Error(`Not Implemented`); },
+};
+```
+
+:::note
+对于 TypeScript 之外语言的类型安全，请根据建模语言参考上述"后端"部分。
+:::
+
+#### 输入验证
+
+由于 Type Safe API 在底层使用了 [`SpecRestApi`](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_apigateway.SpecRestApi.html) 构造，因此基于 OpenAPI 规范为请求体添加了原生 API Gateway 验证。
+
+使用 <Link path="/guides/ts-smithy-api">`ts#smithy-api` 生成器</Link>时，验证由服务端 SDK 自身执行。大多数服务端生成器也是如此。
+
+如果需要实现原生 API Gateway 验证，可以通过修改 `packages/common/constructs/src/core/api/rest-api.ts` 来从 OpenAPI 规范中读取每个操作请求体的相关 JSON schema。
+
+#### WebSocket API
+
+目前没有从 Type Safe API 使用 API Gateway 和 Lambda 的模型驱动 WebSocket API 的直接迁移路径。但本节旨在提供一些思路。
+
+考虑使用 [AsyncAPI](https://www.asyncapi.com/) 代替 OpenAPI 或 TypeSpec 来建模 API，因为其专为异步 API 设计。[AsyncAPI NodeJS 模板](https://github.com/asyncapi/nodejs-template)可以生成 Node WebSocket 后端，您可以在 [ECS](https://docs.aws.amazon.com/ecs/) 上托管。
+
+也可以考虑将 [AppSync Events](https://docs.aws.amazon.com/appsync/latest/eventapi/event-api-welcome.html) 用于基础设施，并配合 [Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/features/event-handler/appsync-events/)。[这篇博客文章](https://aws.amazon.com/blogs/mobile/simplify-aws-appsync-events-integration-with-powertools-for-aws-lambda/)值得一读！
+
+另一个选项是在 [AppSync](https://aws.amazon.com/appsync/) 上使用带有 WebSocket 的 GraphQL API，我们有一个 [GitHub issue](https://github.com/awslabs/nx-plugin-for-aws/issues/154) 可供支持！参考 [AppSync 开发者指南](https://docs.aws.amazon.com/appsync/latest/devguide/what-is-appsync.html)获取详情和示例项目链接。
+
+也可以考虑自行开发代码生成器来解释与 Type Safe API 相同的供应商扩展。参考[使用 OpenAPI 建模的 API](#apis-modelled-with-openapi) 部分了解构建自定义 OpenAPI 代码生成器的细节。可以在[此处](https://github.com/aws/aws-pdk/tree/mainline/packages/type-safe-api/scripts/type-safe-api/generators/typescript-async-runtime/templates)找到 Type Safe API 用于 API Gateway WebSocket API Lambda 处理程序的模板，客户端模板在[此处](https://github.com/aws/aws-pdk/blob/mainline/packages/type-safe-api/scripts/type-safe-api/generators/typescript-websocket-client/templates/client.ejs)。
+
+也可以考虑迁移到使用 <Link path="/guides/trpc.mdx">`ts#trpc-api` 生成器</Link>来使用 tRPC。截至撰写本文时，我们尚未支持订阅/流式传输，如需此功能请在[GitHub issue](https://github.com/awslabs/nx-plugin-for-aws/issues/194) 中添加 +1。
+
+Smithy 是协议无关的，但尚未支持 WebSocket 协议，参考[此 GitHub issue](https://github.com/smithy-lang/smithy/issues/1505)。

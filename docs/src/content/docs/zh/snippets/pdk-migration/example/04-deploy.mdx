@@ -1,0 +1,231 @@
+---
+title: "部署"
+---
+
+
+
+import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
+import RunGenerator from '@components/run-generator.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Drawer from '@components/drawer.astro';
+import InstallCommand from '@components/install-command.astro';
+
+现在我们已经完成了代码库的完全迁移，接下来可以着手部署。此时有两种路径可供选择。
+
+#### 全新资源（简单方案）
+
+最简单的处理方式是将其视为一个全新的应用，即通过全新的 DynamoDB 表和 Cognito 用户池"重新开始"——但会丢失所有用户及其购物清单。采用此方案只需：
+
+<Steps>
+
+1. 删除名为 `shopping_list` 的 DynamoDB 表
+
+1. 部署新应用：
+
+    <NxCommands commands={["deploy infra shopping-list-infra-sandbox/*"]} />
+
+</Steps>
+
+🎉 大功告成！🎉
+
+#### 无中断迁移现有有状态资源（复杂方案）
+
+实际场景中，更可能需要将现有 AWS 资源迁移至新代码库管理，同时避免用户服务中断。
+
+:::danger
+此方案涉及较多细节且复杂度较高，由于本文仅为示例，强烈建议在非生产环境（最好新建沙盒环境）中演练，并为具体应用记录详细步骤。同时应制定应急回滚计划以应对步骤失败或意外结果。
+:::
+
+:::note
+我们的 PDK 购物清单应用未配置自定义域名或 DNS。实际应用中通常需要为网站和 API 配置域名。本节指南假设已通过 Route53 为网站和 API 设置自定义 DNS。
+:::
+
+对于购物清单应用，需重点关注的有状态资源是存储用户购物清单的 DynamoDB 表和包含注册用户信息的 Cognito 用户池。我们的核心策略是保留这两个关键资源并将其迁移至新堆栈管理，然后更新 DNS 指向新网站（及面向客户的 API）。
+
+<Steps>
+
+1. 更新新应用以引用需保留的现有资源
+
+    针对购物清单应用的 DynamoDB 表：
+
+    ```diff lang="ts"
+    // constructs/database.ts
+    -this.shoppingListTable = new Table(this, 'ShoppingList', {
+    -  ...
+    +this.shoppingListTable = Table.fromTableName(
+    +  this,
+    +  'ShoppingList',
+    +  'shopping_list',
+    +);
+    ```
+
+    针对 Cognito 用户池：
+
+    ```diff lang="ts"
+    // packages/common/constructs/src/core/user-identity.ts
+    -this.userPool = this.createUserPool();
+    +this.userPool = UserPool.fromUserPoolId(
+    +  this,
+    +  'UserPool',
+    +  '<your-user-pool-id>',
+    +);
+    ```
+
+1. 构建并部署新应用：
+
+    <NxCommands commands={["run-many --target build"]} />
+
+    <NxCommands commands={["deploy infra shopping-list-infra-sandbox/*"]} />
+
+    此时新应用已部署完成，引用现有资源但尚未接收流量。
+
+1. 执行完整集成测试确保新应用功能正常。对于购物清单应用，需验证登录及购物清单的增删改查功能。
+
+1. 还原新应用中引用现有资源的修改（暂不部署）：
+
+    ```diff lang="ts"
+    // constructs/database.ts
+    +this.shoppingListTable = new Table(this, 'ShoppingList', {
+    +  ...
+    -this.shoppingListTable = Table.fromTableName(
+    -  this,
+    -  'ShoppingList',
+    -  'shopping_list',
+    -);
+    ```
+
+    针对 Cognito 用户池：
+
+    ```diff lang="ts"
+    // packages/common/constructs/src/core/user-identity.ts
+    +this.userPool = this.createUserPool();
+    -this.userPool = UserPool.fromUserPoolId(
+    -  this,
+    -  'UserPool',
+    -  '<your-user-pool-id>',
+    -);
+    ```
+
+    随后执行构建：
+
+    <NxCommands commands={["run-many --target build"]} />
+
+1. 在新应用的 `packages/infra` 目录执行 `cdk import` 查看需导入的资源：
+
+    ```bash title="新应用"
+    cd packages/infra
+    pnpm exec cdk import shopping-list-infra-sandbox/Application --force
+    ```
+
+    按回车逐步确认。由于资源仍由旧堆栈管理，导入会失败——这符合预期，此步骤仅用于确认需保留的资源。输出示例如下：
+
+    ```bash wrap
+    shopping-list-infra-sandbox/Application/ApplicationUserIdentity/UserPool/smsRole/Resource (AWS::IAM::Role): 输入 RoleName（留空跳过）
+    shopping-list-infra-sandbox/Application/ApplicationUserIdentity/UserPool/Resource (AWS::Cognito::UserPool): 输入 UserPoolId（留空跳过）
+    shopping-list-infra-sandbox/Application/Database/ShoppingList/Resource (AWS::DynamoDB::Table): 使用 TableName=shopping_list 导入 (y/n) y
+    ```
+
+    这表明实际需导入 3 个资源至新堆栈。
+
+1. 更新旧 PDK 项目，为上步发现的资源设置 `RemovalPolicy` 为 `RETAIN`。当前 DynamoDB 表和用户池默认保留策略，但需为发现的 SMS 角色更新策略：
+
+    ```diff lang="ts"
+    // application-stack.ts
+    const userIdentity = new UserIdentity(this, `${id}UserIdentity`, {
+      userPool,
+    });
+
+    +const smsRole = userIdentity.userPool.node.findAll().filter(
+    +  c => CfnResource.isCfnResource(c) &&
+    +    c.node.path.includes('/smsRole/'))[0] as CfnResource;
+    +smsRole.applyRemovalPolicy(RemovalPolicy.RETAIN);
+    ```
+
+1. 部署 PDK 项目以应用保留策略：
+
+    ```bash title="PDK 应用"
+    cd packages/infra
+    npx projen deploy
+    ```
+
+1. 查看 CloudFormation 控制台，记录 `cdk import` 步骤提示的信息：
+
+    1. 用户池 ID，如 `us-west-2_XXXXX`
+    2. SMS 角色名称，如 `infra-sandbox-UserIdentityUserPoolsmsRoleXXXXXX`
+
+1. 更新 PDK 项目以引用现有资源：
+
+    ```diff lang="ts"
+    // constructs/database.ts
+    -this.shoppingListTable = new Table(this, 'ShoppingList', {
+    -  ...
+    +this.shoppingListTable = Table.fromTableName(
+    +  this,
+    +  'ShoppingList',
+    +  'shopping_list',
+    +);
+    ```
+
+    针对 Cognito 用户池：
+
+    ```diff lang="ts"
+    // application-stack.ts
+    +const userPool = UserPool.fromUserPoolId(
+    +  this,
+    +  'UserPool',
+    +  '<your-user-pool-id>',
+    +);
+    const userIdentity = new UserIdentity(this, `${id}UserIdentity`, {
+    +  // PDK 构造接受 UserPool 而非 IUserPool，此处仍有效！
+    +  userPool: userPool as any,
+    });
+    ```
+
+1. 再次部署 PDK 项目，使资源脱离原 CloudFormation 堆栈管理：
+
+    ```bash title="PDK 应用"
+    cd packages/infra
+    npx projen deploy
+    ```
+
+1. 资源解除托管后，在新应用中执行 `cdk import` 完成实际导入：
+
+    ```bash title="新应用"
+    cd packages/infra
+    pnpm exec cdk import shopping-list-infra-sandbox/Application --force
+    ```
+
+    输入记录的值，导入应成功完成。
+
+1. 再次部署新应用以确保对现有资源（现由新堆栈管理）的变更生效：
+
+    <NxCommands commands={["deploy infra shopping-list-infra-sandbox/*"]} />
+
+1. 再次全面测试新应用
+
+1. 更新 DNS 记录指向新网站（及 API 如需要）
+
+    建议采用 Route53 [加权路由](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/routing-policy-weighted.html)逐步切换流量。初始阶段将部分请求导向新应用，通过监控指标逐步增加新应用权重，直至旧 PDK 应用无流量。
+
+    若未配置 DNS 且使用自动生成域名，可通过 [CloudFront HTTP 源站](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_cloudfront_origins-readme.html#from-an-http-endpoint)或 [API Gateway HTTP 集成](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_apigateway.HttpIntegration.html)代理请求。
+
+1. 监控 PDK 应用指标确认无流量后，销毁旧 CloudFormation 堆栈：
+
+    ```bash
+    cd packages/infra
+    npx projen destroy
+    ```
+
+</Steps>
+
+虽然过程复杂，但我们成功实现了用户的无缝迁移！🎉🎉🎉
+
+现在，我们已获得 Nx Plugin for AWS 相较于 PDK 的新优势：
+
+- 更快的构建速度
+- 本地 API 开发支持
+- 更友好的编码体验（<Link path="/get_started/building-with-ai">试试我们的 MCP 服务！</Link>）
+- 更直观的类型安全客户端/服务端代码
+- 以及更多！

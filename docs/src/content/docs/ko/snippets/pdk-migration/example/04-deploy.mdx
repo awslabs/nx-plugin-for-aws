@@ -1,0 +1,231 @@
+---
+title: "배포"
+---
+
+
+
+import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
+import RunGenerator from '@components/run-generator.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Drawer from '@components/drawer.astro';
+import InstallCommand from '@components/install-command.astro';
+
+이제 완전히 마이그레이션된 코드베이스를 확보했으므로 배포를 진행할 수 있습니다. 이 시점에서 두 가지 경로를 선택할 수 있습니다.
+
+#### 완전히 새로운 리소스 사용 (간단한 방법)
+
+가장 간단한 접근 방식은 이 애플리케이션을 완전히 새로운 것으로 취급하는 것입니다. 즉, 새로운 DynamoDB 테이블과 Cognito 사용자 풀을 "처음부터 다시 시작"하여 모든 사용자와 그들의 쇼핑 목록을 잃게 됩니다. 이 방법을 사용하려면 다음을 수행하세요:
+
+<Steps>
+
+1. `shopping_list`라는 이름의 DynamoDB 테이블 삭제
+
+1. 새로운 애플리케이션 배포:
+
+    <NxCommands commands={["deploy infra shopping-list-infra-sandbox/*"]} />
+
+</Steps>
+
+🎉 완료되었습니다! 🎉
+
+#### 기존 상태 유지 리소스 마이그레이션 (다운타임 없음, 복잡한 방법)
+
+실제로는 기존 AWS 리소스를 새로운 코드베이스에서 관리하도록 마이그레이션하면서 고객에게 다운타임이 발생하지 않도록 하는 것이 더 현실적일 것입니다.
+
+:::danger
+이 접근 방식은 더 복잡하고 미묘한 차이가 있으며, 이는 단지 예시일 뿐이므로 비프로덕션 환경(샌드박스 스택 생성 권장)에서 연습하고 애플리케이션에 맞는 정확한 단계를 문서화할 것을 강력히 권장합니다. 또한 단계 실패나 예상치 못한 결과에 대비한 복구/롤백 계획을 수립하는 것이 좋습니다.
+:::
+
+:::note
+PDK 쇼핑 목록 애플리케이션은 사용자 정의 도메인이나 DNS를 정의하지 않았습니다. 실제로는 웹사이트와 API를 위해 도메인이 구성되어 있을 가능성이 높습니다. 이 가이드 섹션에서는 웹사이트와 API를 위한 사용자 정의 DNS 이름이 Route53에 설정되어 있다고 가정하겠습니다.
+:::
+
+쇼핑 목록 애플리케이션의 경우 중요한 상태 유지 리소스는 사용자의 쇼핑 목록을 포함하는 DynamoDB 테이블과 등록된 모든 사용자 정보를 포함하는 Cognito 사용자 풀입니다. 상위 수준 계획은 이 두 가지 핵심 리소스를 유지하고 새로운 스택에서 관리되도록 이동시킨 다음, DNS를 업데이트하여 새로운 웹사이트(및 고객에게 노출된 경우 API)로 트래픽을 전환하는 것입니다.
+
+<Steps>
+
+1. 유지하려는 기존 리소스를 참조하도록 새 애플리케이션 업데이트
+
+    쇼핑 목록 애플리케이션의 경우 DynamoDB 테이블에 대해 다음을 수행합니다.
+
+    ```diff lang="ts"
+    // constructs/database.ts
+    -this.shoppingListTable = new Table(this, 'ShoppingList', {
+    -  ...
+    +this.shoppingListTable = Table.fromTableName(
+    +  this,
+    +  'ShoppingList',
+    +  'shopping_list',
+    +);
+    ```
+
+    Cognito 사용자 풀의 경우:
+
+    ```diff lang="ts"
+    // packages/common/constructs/src/core/user-identity.ts
+    -this.userPool = this.createUserPool();
+    +this.userPool = UserPool.fromUserPoolId(
+    +  this,
+    +  'UserPool',
+    +  '<your-user-pool-id>',
+    +);
+    ```
+
+1. 새 애플리케이션 빌드 및 배포:
+
+    <NxCommands commands={["run-many --target build"]} />
+
+    <NxCommands commands={["deploy infra shopping-list-infra-sandbox/*"]} />
+
+    이제 기존 리소스를 참조하는 새 애플리케이션이 구축되었지만 아직 트래픽을 수신하지 않습니다.
+
+1. 전체 통합 테스트 수행: 새 애플리케이션이 예상대로 작동하는지 확인합니다. 쇼핑 목록 애플리케이션의 경우 웹사이트를 로드하고 로그인, 쇼핑 목록 생성/조회/수정/삭제가 가능한지 확인합니다.
+
+1. 새 애플리케이션에서 기존 리소스 참조 변경 사항을 되돌리되, 아직 배포하지 마세요.
+
+    ```diff lang="ts"
+    // constructs/database.ts
+    +this.shoppingListTable = new Table(this, 'ShoppingList', {
+    +  ...
+    -this.shoppingListTable = Table.fromTableName(
+    -  this,
+    -  'ShoppingList',
+    -  'shopping_list',
+    -);
+    ```
+
+    Cognito 사용자 풀의 경우:
+
+    ```diff lang="ts"
+    // packages/common/constructs/src/core/user-identity.ts
+    +this.userPool = this.createUserPool();
+    -this.userPool = UserPool.fromUserPoolId(
+    -  this,
+    -  'UserPool',
+    -  '<your-user-pool-id>',
+    -);
+    ```
+
+    이후 빌드 실행:
+
+    <NxCommands commands={["run-many --target build"]} />
+
+1. 새 애플리케이션의 `packages/infra` 폴더에서 `cdk import`를 사용하여 가져올 리소스 확인
+
+    ```bash title="New Application"
+    cd packages/infra
+    pnpm exec cdk import shopping-list-infra-sandbox/Application --force
+    ```
+
+    엔터를 눌러 프롬프트를 진행합니다. 리소스가 다른 스택에서 관리되므로 가져오기가 실패합니다(예상된 동작). 이 단계는 가져올 리소스를 확인하기 위한 것입니다. 다음과 같은 출력이 표시됩니다:
+
+    ```bash wrap
+    shopping-list-infra-sandbox/Application/ApplicationUserIdentity/UserPool/smsRole/Resource (AWS::IAM::Role): RoleName 입력(건너뛰려면 공백)
+    shopping-list-infra-sandbox/Application/ApplicationUserIdentity/UserPool/Resource (AWS::Cognito::UserPool): UserPoolId 입력(건너뛰려면 공백)
+    shopping-list-infra-sandbox/Application/Database/ShoppingList/Resource (AWS::DynamoDB::Table): TableName=shopping_list로 가져오기(y/n) y
+    ```
+
+    이는 실제로 3개의 리소스를 새 스택으로 가져와야 함을 나타냅니다.
+
+1. 이전 단계에서 발견된 리소스에 대해 `RemovalPolicy`를 `RETAIN`으로 설정하도록 기존 PDK 프로젝트 업데이트. 현재 작성 시점에는 User Pool과 DynamoDB 테이블에 대해 기본값이지만 위에서 발견한 SMS Role에 대해 업데이트가 필요합니다:
+
+    ```diff lang="ts"
+    // application-stack.ts
+    const userIdentity = new UserIdentity(this, `${id}UserIdentity`, {
+      userPool,
+    });
+
+    +const smsRole = userIdentity.userPool.node.findAll().filter(
+    +  c => CfnResource.isCfnResource(c) &&
+    +    c.node.path.includes('/smsRole/'))[0] as CfnResource;
+    +smsRole.applyRemovalPolicy(RemovalPolicy.RETAIN);
+    ```
+
+1. 제거 정책이 적용되도록 PDK 프로젝트 배포
+
+    ```bash title="PDK Application"
+    cd packages/infra
+    npx projen deploy
+    ```
+
+1. CloudFormation 콘솔에서 위 `cdk import` 단계에서 요청된 값 기록
+
+    1. User Pool ID (예: `us-west-2_XXXXX`)
+    2. SMS Role 이름 (예: `infra-sandbox-UserIdentityUserPoolsmsRoleXXXXXX`)
+
+1. PDK 프로젝트가 리소스를 생성하는 대신 기존 리소스를 참조하도록 업데이트
+
+    ```diff lang="ts"
+    // constructs/database.ts
+    -this.shoppingListTable = new Table(this, 'ShoppingList', {
+    -  ...
+    +this.shoppingListTable = Table.fromTableName(
+    +  this,
+    +  'ShoppingList',
+    +  'shopping_list',
+    +);
+    ```
+
+    Cognito 사용자 풀의 경우:
+
+    ```diff lang="ts"
+    // application-stack.ts
+    +const userPool = UserPool.fromUserPoolId(
+    +  this,
+    +  'UserPool',
+    +  '<your-user-pool-id>',
+    +);
+    const userIdentity = new UserIdentity(this, `${id}UserIdentity`, {
+    +  // PDK 구성 요소는 IUserPool이 아닌 UserPool을 요구하지만 여전히 작동합니다!
+    +  userPool: userPool as any,
+    });
+    ```
+
+1. PDK 프로젝트 재배포: 이제 리소스가 PDK 프로젝트의 CloudFormation 스택에서 관리되지 않습니다.
+
+    ```bash title="PDK Application"
+    cd packages/infra
+    npx projen deploy
+    ```
+
+1. 리소스가 관리 해제되었으므로 새 애플리케이션에서 `cdk import` 실행하여 실제 가져오기 수행:
+
+    ```bash title="New Application"
+    cd packages/infra
+    pnpm exec cdk import shopping-list-infra-sandbox/Application --force
+    ```
+
+    프롬프트에 값을 입력하면 가져오기가 성공적으로 완료됩니다.
+
+1. 기존 리소스에 대한 변경 사항(이제 새 스택에서 관리됨)이 적용되도록 새 애플리케이션 재배포:
+
+    <NxCommands commands={["deploy infra shopping-list-infra-sandbox/*"]} />
+
+1. 새 애플리케이션에 대한 전체 테스트 재수행
+
+1. DNS 레코드를 업데이트하여 새 웹사이트(및 필요한 경우 API)를 가리키도록 설정
+
+    Route53 [가중치 기반 라우팅](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/routing-policy-weighted.html)을 사용하여 점진적으로 트래픽을 전환할 것을 권장합니다. 처음에는 일부 요청만 새 애플리케이션으로 전달하고, 지표를 모니터링하면서 점차 비중을 높여 최종적으로 모든 트래픽이 새 애플리케이션으로 전환되도록 합니다.
+
+    DNS가 없고 웹사이트/API에 자동 생성 도메인을 사용한 경우 [CloudFront HTTP 오리진](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_cloudfront_origins-readme.html#from-an-http-endpoint)이나 [API Gateway HTTP 통합](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_apigateway.HttpIntegration.html)을 통해 요청을 프록시할 수 있습니다.
+
+1. PDK 애플리케이션 지표를 모니터링하여 트래픽이 없는지 확인한 후 최종적으로 기존 CloudFormation 스택 삭제:
+
+    ```bash
+    cd packages/infra
+    npx projen destroy
+    ```
+
+</Steps>
+
+상당히 복잡한 과정이었지만, 사용자를 새 애플리케이션으로 원활하게 마이그레이션하는 데 성공했습니다! 🎉🎉🎉
+
+이제 PDK 대비 Nx Plugin for AWS의 새로운 이점을 누릴 수 있습니다:
+
+- 더 빠른 빌드
+- 로컬 API 개발 지원
+- 개발자 친화적인 코드베이스 (<Link path="/get_started/building-with-ai">MCP 서버 사용해 보기!</Link>)
+- 더 직관적인 타입 세이프 클라이언트/서버 코드
+- 기타 다양한 개선 사항!

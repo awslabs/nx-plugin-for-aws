@@ -1,0 +1,231 @@
+---
+title: "Implantar"
+---
+
+
+
+import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
+import RunGenerator from '@components/run-generator.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Drawer from '@components/drawer.astro';
+import InstallCommand from '@components/install-command.astro';
+
+Agora que temos nossa base de código totalmente migrada, podemos pensar em implantá-la. Existem dois caminhos que podemos seguir neste momento.
+
+#### Recursos Totalmente Novos (Simples)
+
+A abordagem mais simples é tratar isso como um aplicativo completamente novo, significando que vamos "começar do zero" com uma nova tabela DynamoDB e um novo User Pool do Cognito - perdendo todos os usuários e suas listas de compras. Para esta abordagem, basta:
+
+<Steps>
+
+1. Exclua a tabela DynamoDB chamada `shopping_list`
+
+1. Implante a nova aplicação:
+
+    <NxCommands commands={["deploy infra shopping-list-infra-sandbox/*"]} />
+
+</Steps>
+
+🎉 E pronto! 🎉
+
+#### Migrar Recursos Estáveis Existentes sem Tempo de Inatividade (Mais Complexo)
+
+Na realidade, é mais provável que você queira migrar os recursos existentes da AWS para que sejam gerenciados pela nova base de código, evitando qualquer tempo de inatividade para seus clientes.
+
+:::danger
+Esta abordagem é um pouco mais complexa e cheia de nuances, e como isto é apenas um exemplo, é FORTEMENTE recomendado praticar em um ambiente não produtivo (idealmente criando um novo stack sandbox) e documentar os passos exatos para sua aplicação. Também é recomendado elaborar planos de contingência/rollback caso alguma etapa falhe ou produza resultados inesperados.
+:::
+
+:::note
+Nossa aplicação de lista de compras PDK não definiu domínios personalizados ou DNS. Na prática, você provavelmente teria domínios configurados para seu site e API. Para esta seção do guia, assumiremos que configuramos o Route53 com nomes DNS personalizados para o site e API.
+:::
+
+Para nossa aplicação de lista de compras, os recursos estáticos importantes são a tabela DynamoDB que contém as listas de compras dos usuários e o User Pool do Cognito que contém os detalhes de todos os usuários registrados. Nosso plano de alto nível será manter esses dois recursos-chave e movê-los para que sejam gerenciados por nosso novo stack, então atualizar o DNS para apontar para o novo site (e API, se exposta aos clientes).
+
+<Steps>
+
+1. Atualize sua nova aplicação para referenciar os recursos existentes que deseja manter.
+
+    Para a aplicação de lista de compras, fazemos isso para a tabela DynamoDB
+
+    ```diff lang="ts"
+    // constructs/database.ts
+    -this.shoppingListTable = new Table(this, 'ShoppingList', {
+    -  ...
+    +this.shoppingListTable = Table.fromTableName(
+    +  this,
+    +  'ShoppingList',
+    +  'shopping_list',
+    +);
+    ```
+
+    E para o User Pool do Cognito
+
+    ```diff lang="ts"
+    // packages/common/constructs/src/core/user-identity.ts
+    -this.userPool = this.createUserPool();
+    +this.userPool = UserPool.fromUserPoolId(
+    +  this,
+    +  'UserPool',
+    +  '<your-user-pool-id>',
+    +);
+    ```
+
+1. Construa e implante a nova aplicação:
+
+    <NxCommands commands={["run-many --target build"]} />
+
+    <NxCommands commands={["deploy infra shopping-list-infra-sandbox/*"]} />
+
+    Agora temos nossa nova aplicação implantada referenciando os recursos existentes, mas ainda não recebendo tráfego.
+
+1. Realize testes completos de integração para garantir que a nova aplicação funciona conforme esperado. Para a aplicação de lista de compras, acesse o site e verifique se é possível fazer login, criar, visualizar, editar e excluir listas.
+
+1. Reverta as alterações que referenciam os recursos existentes em sua nova aplicação, mas não as implante ainda.
+
+    ```diff lang="ts"
+    // constructs/database.ts
+    +this.shoppingListTable = new Table(this, 'ShoppingList', {
+    +  ...
+    -this.shoppingListTable = Table.fromTableName(
+    -  this,
+    -  'ShoppingList',
+    -  'shopping_list',
+    -);
+    ```
+
+    E para o User Pool do Cognito
+
+    ```diff lang="ts"
+    // packages/common/constructs/src/core/user-identity.ts
+    +this.userPool = this.createUserPool();
+    -this.userPool = UserPool.fromUserPoolId(
+    -  this,
+    -  'UserPool',
+    -  '<your-user-pool-id>',
+    -);
+    ```
+
+    Em seguida, execute uma build
+
+    <NxCommands commands={["run-many --target build"]} />
+
+1. Use `cdk import` na pasta `packages/infra` de sua nova aplicação para ver quais recursos serão importados.
+
+    ```bash title="New Application"
+    cd packages/infra
+    pnpm exec cdk import shopping-list-infra-sandbox/Application --force
+    ```
+
+    Siga os prompts pressionando Enter. A importação falhará porque os recursos são gerenciados por outro stack - isso é esperado, fizemos este passo apenas para confirmar quais recursos precisaremos manter. Você verá uma saída como:
+
+    ```bash wrap
+    shopping-list-infra-sandbox/Application/ApplicationUserIdentity/UserPool/smsRole/Resource (AWS::IAM::Role): insira RoleName (vazio para pular)
+    shopping-list-infra-sandbox/Application/ApplicationUserIdentity/UserPool/Resource (AWS::Cognito::UserPool): insira UserPoolId (vazio para pular)
+    shopping-list-infra-sandbox/Application/Database/ShoppingList/Resource (AWS::DynamoDB::Table): importar com TableName=shopping_list (s/n) s
+    ```
+
+    Isso nos diz que há 3 recursos que precisaremos importar para nosso novo stack.
+
+1. Atualize seu projeto PDK antigo para definir `RemovalPolicy` como `RETAIN` para os recursos descobertos no passo anterior. Atualmente, este é o padrão para o User Pool e a tabela DynamoDB, mas precisamos atualizar para a SMS Role descoberta:
+
+    ```diff lang="ts"
+    // application-stack.ts
+    const userIdentity = new UserIdentity(this, `${id}UserIdentity`, {
+      userPool,
+    });
+
+    +const smsRole = userIdentity.userPool.node.findAll().filter(
+    +  c => CfnResource.isCfnResource(c) &&
+    +    c.node.path.includes('/smsRole/'))[0] as CfnResource;
+    +smsRole.applyRemovalPolicy(RemovalPolicy.RETAIN);
+    ```
+
+1. Implante seu projeto PDK para aplicar as políticas de remoção
+
+    ```bash title="PDK Application"
+    cd packages/infra
+    npx projen deploy
+    ```
+
+1. Acesse o console do CloudFormation e registre os valores solicitados no passo anterior do `cdk import`
+
+    1. O ID do User Pool, ex: `us-west-2_XXXXX`
+    2. O Nome da SMS Role, ex: `infra-sandbox-UserIdentityUserPoolsmsRoleXXXXXX`
+
+1. Atualize seu projeto PDK para referenciar os recursos existentes em vez de criá-los
+
+    ```diff lang="ts"
+    // constructs/database.ts
+    -this.shoppingListTable = new Table(this, 'ShoppingList', {
+    -  ...
+    +this.shoppingListTable = Table.fromTableName(
+    +  this,
+    +  'ShoppingList',
+    +  'shopping_list',
+    +);
+    ```
+
+    E para o User Pool do Cognito
+
+    ```diff lang="ts"
+    // application-stack.ts
+    +const userPool = UserPool.fromUserPoolId(
+    +  this,
+    +  'UserPool',
+    +  '<your-user-pool-id>',
+    +);
+    const userIdentity = new UserIdentity(this, `${id}UserIdentity`, {
+    +  // O construct PDK aceita UserPool não IUserPool, mas ainda funciona!
+    +  userPool: userPool as any,
+    });
+    ```
+
+1. Implante seu projeto PDK novamente, isso fará com que os recursos não sejam mais gerenciados pelo stack CloudFormation do PDK.
+
+    ```bash title="PDK Application"
+    cd packages/infra
+    npx projen deploy
+    ```
+
+1. Agora que os recursos não estão mais sendo gerenciados, podemos executar `cdk import` em nossa nova aplicação para realizar a importação:
+
+    ```bash title="New Application"
+    cd packages/infra
+    pnpm exec cdk import shopping-list-infra-sandbox/Application --force
+    ```
+
+    Insira os valores quando solicitado, a importação deve ser concluída com sucesso.
+
+1. Implante a nova aplicação novamente para garantir que quaisquer alterações nesses recursos existentes (agora gerenciados pelo novo stack) sejam aplicadas:
+
+    <NxCommands commands={["deploy infra shopping-list-infra-sandbox/*"]} />
+
+1. Realize testes completos novamente na nova aplicação
+
+1. Atualize os registros DNS para apontar para seu novo Site (e API se necessário).
+
+    Recomendamos uma abordagem gradual usando [Roteamento Ponderado](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/routing-policy-weighted.html) do Route53, onde uma fração das requisições é direcionada para a nova aplicação inicialmente. Monitore suas métricas e aumente gradualmente o peso para a nova aplicação até que nenhum tráfego seja enviado para a aplicação PDK antiga.
+
+    Se você não tiver DNS e usou os domínios auto-gerados para o site e API, pode considerar o uso de proxy de requisições (ex: via [origem HTTP CloudFront](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_cloudfront_origins-readme.html#from-an-http-endpoint) ou [integrações HTTP do API Gateway](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_apigateway.HttpIntegration.html)).
+
+1. Monitore as métricas da aplicação PDK para garantir que não há tráfego e finalmente destrua o stack CloudFormation antigo:
+
+    ```bash
+    cd packages/infra
+    npx projen destroy
+    ```
+
+</Steps>
+
+Isso foi bem mais complexo, mas migramos nossos usuários perfeitamente para a nova aplicação! 🎉🎉🎉
+
+Agora temos os benefícios do Nx Plugin para AWS em relação ao PDK:
+
+- Builds mais rápidas
+- Suporte a desenvolvimento local de API
+- Base de código amigável para vibe-coding (<Link path="/get_started/building-with-ai">experimente nosso servidor MCP!</Link>)
+- Código type-safe mais intuitivo para cliente/servidor
+- E muito mais!
