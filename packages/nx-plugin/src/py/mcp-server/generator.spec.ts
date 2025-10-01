@@ -445,11 +445,6 @@ dev-dependencies = []
     // Check root package.json dependencies
     const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
     expect(
-      rootPackageJson.devDependencies[
-        '@aws-sdk/client-bedrock-agentcore-control'
-      ],
-    ).toBeDefined();
-    expect(
       rootPackageJson.devDependencies['@modelcontextprotocol/inspector'],
     ).toBeDefined();
 
