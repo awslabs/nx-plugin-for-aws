@@ -7,6 +7,8 @@ import { join } from 'path';
 import { output, PackageManager } from '@nx/devkit';
 import { existsSync } from 'fs';
 import { backOff } from 'exponential-backoff';
+// eslint-disable-next-line
+import { TS_VERSIONS } from '../../packages/nx-plugin/src/utils/versions';
 
 export interface RunCmdOpts {
   silenceError?: boolean;
@@ -164,4 +166,4 @@ export const buildCreateNxWorkspaceCommand = (
   iacProvider?: 'CDK' | 'Terraform',
   yes = false,
 ) =>
-  `npx ${yes ? '-y ' : ''}create-nx-workspace@~21.4.1 ${workspace} --pm=${pm} --preset=@aws/nx-plugin ${iacProvider ? `--iacProvider=${iacProvider} ` : ''}--ci=skip`;
+  `npx ${yes ? '-y ' : ''}create-nx-workspace@${TS_VERSIONS['create-nx-workspace']} ${workspace} --pm=${pm} --preset=@aws/nx-plugin ${iacProvider ? `--iacProvider=${iacProvider} ` : ''}--ci=skip`;
