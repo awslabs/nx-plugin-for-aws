@@ -29,14 +29,14 @@ import gameConversationPng from '@assets/game-conversation.png'
 Assurez-vous d'avoir accordé l'accès au modèle **Anthropic Claude 3.5 Sonnet v2** en suivant les étapes décrites dans [ce guide](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html).
 </Aside>
 
-La StoryApi comprend une unique API `generate_story` qui, étant donné un `Game` et une liste d'`Action` comme contexte, fait progresser une histoire. Cette API sera implémentée comme une API streaming en Python/FastAPI et démontrera également comment modifier le code généré pour l'adapter à son usage.
+La StoryApi comprend une unique API `generate_story` qui, étant donné un `Game` et une liste d'`Action` comme contexte, fera progresser une histoire. Cette API sera implémentée comme une API de streaming en Python/FastAPI et démontrera également comment modifier le code généré pour l'adapter à son usage.
 
 ### Implémentation de l'API
 
-Pour créer notre API, nous devons d'abord installer quelques dépendances supplémentaires :
+Pour créer notre API, nous devons d'abord installer quelques dépendances supplémentaires.
 
 - `boto3` sera utilisé pour appeler Amazon Bedrock ;
-- `uvicorn` sera utilisé pour démarrer notre API en conjonction avec le [Lambda Web Adapter (LWA)](https://github.com/awslabs/aws-lambda-web-adapter) ;
+- `uvicorn` sera utilisé pour démarrer notre API en conjonction avec le [Lambda Web Adapter (LWA)](https://github.com/awslabs/aws-lambda-web-adapter).
 - `copyfiles` est une dépendance npm nécessaire pour supporter la copie multiplateforme de fichiers lors de la mise à jour de notre tâche `bundle`.
 
 Pour installer ces dépendances, exécutez les commandes suivantes :
@@ -44,7 +44,7 @@ Pour installer ces dépendances, exécutez les commandes suivantes :
 <NxCommands commands={["run dungeon_adventure.story_api:add --args boto3 uvicorn"]} />
 <InstallCommand pkg="copyfiles" dev />
 
-Maintenant remplaçons le contenu des fichiers suivants dans `packages/story_api/story_api` :
+Maintenant, remplaçons le contenu des fichiers suivants dans `packages/story_api/story_api` :
 
 <Tabs>
 <TabItem label="main.py">
@@ -60,22 +60,22 @@ La modification ci-dessus dans `init.py` supprime simplement le middleware CORS 
 </TabItem>
 </Tabs>
 
-Analyse du code :
+Analyse du code ci-dessus :
 
-- Nous utilisons le paramètre `x-streaming` pour indiquer qu'il s'agit d'une API streaming lors de la génération de notre SDK client. Cela permet de consommer cette API en mode streaming tout en conservant la sécurité des types !
-- Notre API retourne simplement un flux texte comme défini par `media_type="text/plain"` et `response_class=PlainTextResponse`
+- Nous utilisons le paramètre `x-streaming` pour indiquer qu'il s'agit d'une API de streaming lors de la génération de notre SDK client. Cela nous permettra de consommer cette API en streaming tout en conservant la sécurité des types !
+- Notre API retourne simplement un flux de texte défini par `media_type="text/plain"` et `response_class=PlainTextResponse`
 
 :::note
-À chaque modification de votre FastAPI, vous devez reconstruire votre projet pour voir les changements reflétés dans le client généré de votre site.
+À chaque modification de votre FastAPI, vous devrez reconstruire votre projet pour voir ces changements reflétés dans le client généré de votre site.
 
-Nous allons effectuer quelques modifications supplémentaires ci-dessous avant de reconstruire.
+Nous apporterons quelques modifications supplémentaires ci-dessous avant de reconstruire.
 :::
 
 ### Infrastructure
 
-L'<Link path="get_started/tutorials/dungeon-game/1#game-ui-infrastructure">infrastructure configurée précédemment</Link> suppose que toutes les APIs utilisent une API Gateway intégrée à des fonctions Lambda. Pour notre `story_api`, nous ne souhaitons pas utiliser API Gateway car il ne supporte pas les réponses streaming. À la place, nous utiliserons une [URL de fonction Lambda configurée avec le streaming de réponse](https://docs.aws.amazon.com/lambda/latest/dg/configuration-response-streaming.html).
+L'<Link path="get_started/tutorials/dungeon-game/1#game-ui-infrastructure">infrastructure configurée précédemment</Link> suppose que toutes les API utilisent une API Gateway intégrée à des fonctions Lambda. Pour notre `story_api`, nous ne voulons pas utiliser API Gateway car il ne supporte pas les réponses en streaming. Nous utiliserons plutôt une [URL de fonction Lambda configurée avec le streaming de réponse](https://docs.aws.amazon.com/lambda/latest/dg/configuration-response-streaming.html).
 
-Pour supporter cela, nous allons d'abord mettre à jour nos constructions CDK comme suit :
+Pour cela, nous allons d'abord mettre à jour nos constructions CDK comme suit :
 
 <Tabs>
 <TabItem label="story-api.ts">
@@ -86,7 +86,7 @@ Pour supporter cela, nous allons d'abord mettre à jour nos constructions CDK co
 </TabItem>
 </Tabs>
 
-Maintenant mettons à jour la `story_api` pour supporter le déploiement avec [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter).
+Maintenant, nous mettrons à jour la `story_api` pour supporter le déploiement du [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter).
 
 <Tabs>
 <TabItem label="run.sh">
@@ -101,18 +101,16 @@ Maintenant mettons à jour la `story_api` pour supporter le déploiement avec [L
   "targets": {
     ...
     "bundle": {
-      "cache": true,
-      "executor": "nx:run-commands",
-      "outputs": ["{workspaceRoot}/dist/packages/story_api/bundle"],
-      "options": {
-        "commands": [
-          "uv export --frozen --no-dev --no-editable --project packages/story_api --package dungeon_adventure.story_api -o dist/packages/story_api/bundle/requirements.txt",
-          "uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform x86_64-manylinux2014 --target dist/packages/story_api/bundle -r dist/packages/story_api/bundle/requirements.txt",
++      "cache": true,
++      "executor": "nx:run-commands",
++      "outputs": ["{workspaceRoot}/dist/packages/story_api/bundle"],
++      "options": {
++        "commands": [
 +          "copyfiles -f packages/story_api/run.sh dist/packages/story_api/bundle"
-        ],
-        "parallel": false
-      },
-      "dependsOn": ["compile"]
++        ],
++        "parallel": false
++      },
+      "dependsOn": ["bundle-x86"]
     },
     ...
   }
@@ -123,23 +121,23 @@ Maintenant mettons à jour la `story_api` pour supporter le déploiement avec [L
 
 ### Déploiement et tests
 
-D'abord, construisons la base de code :
+D'abord, compilons le codebase :
 
 <NxCommands commands={['run-many --target build --all']} />
 
 <Aside type="tip">
-Si vous rencontrez des erreurs de lint, vous pouvez exécuter cette commande pour les corriger automatiquement :
+Si vous rencontrez des erreurs de linting, vous pouvez exécuter cette commande pour les corriger automatiquement.
 
 <NxCommands commands={['run-many --target lint --configuration=fix --all']} />
 </Aside>
 
-Vous pouvez maintenant déployer l'application avec cette commande :
+Vous pouvez maintenant déployer l'application en exécutant :
 
 <NxCommands commands={['run @dungeon-adventure/infra:deploy dungeon-adventure-infra-sandbox/*']} />
 
 Ce déploiement prendra environ 2 minutes.
 
-Une fois terminé, vous devriez voir des sorties similaires à ceci _(certaines valeurs ont été masquées)_ :
+Une fois terminé, vous devriez voir des sorties similaires à ceci (certaines valeurs ont été masquées) :
 
 ```bash
 dungeon-adventure-infra-sandbox-Application
@@ -166,7 +164,7 @@ Nous pouvons tester notre API en :
 
 <Tabs>
   <TabItem label="Bash/Linux/macOS">
-Vous pouvez ajouter ce script à votre `.bashrc` (puis `source`) ou le coller directement dans le terminal :
+Vous pouvez ajouter ce script à votre fichier `.bashrc` (puis `source`) ou le coller directement dans le terminal.
 ```bash
 // ~/.bashrc
 acurl () {
@@ -184,13 +182,13 @@ Exemples d'utilisation :
 acurl ap-southeast-2 execute-api -X GET https://xxx
 ```
 
-###### URL de fonction Lambda streaming
+###### URL de fonction Lambda en streaming
 ```bash
 acurl ap-southeast-2 lambda -N -X POST https://xxx
 ```
   </TabItem>
   <TabItem label="Windows PowerShell">
-Ajoutez cette fonction à votre profil PowerShell ou collez-la dans la session actuelle :
+Ajoutez cette fonction à votre profil PowerShell ou collez-la dans la session actuelle.
 ```powershell
 function acurl {
     param(
@@ -214,7 +212,7 @@ Exemples d'utilisation :
 acurl ap-southeast-2 execute-api -X GET https://xxx
 ```
 
-###### URL de fonction Lambda streaming
+###### URL de fonction Lambda en streaming
 ```powershell
 acurl ap-southeast-2 lambda -N -X POST https://xxx
 ```
@@ -230,8 +228,8 @@ acurl ap-southeast-2 lambda -N -X POST https://xxx
   Démarrez le serveur FastAPI local avec :
     <NxCommands commands={["run dungeon_adventure.story_api:serve"]} />
 
-    Puis appelez-le avec :
-    
+    Appelez l'API avec :
+
     ```bash
     curl -N -X POST http://127.0.0.1:8000/story/generate \
       -d '{"genre":"superhero", "actions":[], "playerName":"UnnamedHero"}' \
@@ -246,15 +244,15 @@ acurl ap-southeast-2 lambda -N -X POST \
   -H "Content-Type: application/json"
 ```
     <Aside type="caution">
-    Utilisez la valeur de sortie `dungeon-adventure-infra-sandbox-Application.StoryApiStoryApiUrlXXX` du déploiement CDK pour remplacer l'URL et ajustez la région.
+    Utilisez la valeur de sortie CDK `dungeon-adventure-infra-sandbox-Application.StoryApiStoryApiUrlXXX` pour remplacer l'URL et ajustez la région.
     </Aside>
   </TabItem>
 </Tabs>
 
-Si la commande réussit, vous devriez voir une réponse streamée similaire à :
+Si la commande réussit, vous devriez voir une réponse en streaming similaire à :
 
 ```
-UnnamedHero se tenait fier, sa cape flottant au vent....
+UnnamedHero se tenait droit, sa cape flottant au vent....
 ```
 
-Félicitations. Vous avez déployé votre première API avec FastAPI ! 🎉🎉🎉
+Félicitations. Vous avez créé et déployé votre première API avec FastAPI ! 🎉🎉🎉
