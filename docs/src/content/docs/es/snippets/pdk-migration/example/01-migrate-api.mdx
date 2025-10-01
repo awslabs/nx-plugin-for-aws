@@ -20,8 +20,8 @@ El `TypeSafeApiProject` utilizado en la aplicación de lista de compras hizo uso
 
 Por lo tanto, podemos usar el <Link path="/guides/ts-smithy-api">generador `ts#smithy-api`</Link> para proporcionar funcionalidad equivalente.
 
-:::nota
-Si utilizaste OpenAPI o TypeSpec como lenguaje de modelado, o tienes manejadores implementados en Python o Java, consulta las [Preguntas Frecuentes](#frequently-asked-questions) para conocer opciones potenciales.
+:::note
+Si usaste OpenAPI o TypeSpec como lenguaje de modelado, o tienes manejadores implementados en Python o Java, consulta las [Preguntas Frecuentes](#frequently-asked-questions) para ver opciones potenciales.
 :::
 
 #### Generar una API Smithy en TypeScript
@@ -36,13 +36,13 @@ El backend utiliza el [Smithy Server Generator for TypeScript](https://smithy.io
 
 #### Migrar el Modelo Smithy
 
-Ahora que tenemos la estructura básica para nuestro proyecto Smithy API, podemos migrar el modelo:
+Ahora que tenemos la estructura básica para nuestro proyecto de API Smithy, podemos migrar el modelo:
 
 <Steps>
 
 1. Elimina los archivos Smithy de ejemplo generados en `packages/api/model/src`
 1. Copia tu modelo desde el directorio `packages/api/model/src/main/smithy` del proyecto PDK al directorio `packages/api/model/src` de tu nuevo proyecto.
-1. Actualiza el nombre del servicio y el namespace en `smithy-build.json` para que coincidan con la aplicación PDK:
+1. Actualiza el nombre del servicio y namespace en `smithy-build.json` para que coincidan con la aplicación PDK:
 
     ```json {4}
     // smithy-build.json
@@ -58,7 +58,7 @@ Ahora que tenemos la estructura básica para nuestro proyecto Smithy API, podemo
     // main.smithy
     use smithy.framework#ValidationException
 
-    /// Mi API de Lista de Compras
+    /// My Shopping List API
     @restJson1
     service MyApi {
         version: "1.0"
@@ -111,15 +111,15 @@ Ahora que tenemos la estructura básica para nuestro proyecto Smithy API, podemo
 
     Cualquier operación `@paginated` también debe usar `@cursor` si estás usando el generador de clientes proporcionado por el Nx Plugin para AWS (a través del generador <Link path="guides/api-connection/react-smithy">`api-connection`</Link>).
 
-1. Finalmente, elimina el trait `@handler` de todas las operaciones ya que no es compatible con el Nx Plugin para AWS. Al usar `ts#smithy-api`, no necesitamos las construcciones CDK de funciones lambda generadas automáticamente ni los objetivos de bundling generados por este trait, ya que usamos un solo bundle para todas las funciones lambda.
+1. Finalmente, elimina el trait `@handler` de todas las operaciones ya que no es compatible con el Nx Plugin para AWS. Al usar `ts#smithy-api`, no necesitamos las construcciones CDK de funciones lambda generadas automáticamente ni los objetivos de bundling generados por este trait, ya que usamos un único bundle para todas las funciones lambda.
 
 </Steps>
 
-En este punto, ejecutemos un build para verificar los cambios en nuestro modelo y asegurarnos de tener código de servidor generado con el que trabajar. Habrá algunos errores en el proyecto backend (`@shopping-list/api`) pero los abordaremos a continuación.
+En este punto, ejecutemos un build para verificar los cambios en el modelo y asegurarnos de tener código de servidor generado para trabajar. Habrá algunos errores en el proyecto backend (`@shopping-list/api`), pero los abordaremos a continuación.
 
 <NxCommands commands={["run-many --target build"]} />
 
-:::nota
+:::note
 Puedes ver un error de build debido a problemas de lint. Estos generalmente se pueden corregir automáticamente:
 
 <NxCommands commands={["run-many --target lint --fix"]} />
@@ -131,7 +131,7 @@ Puedes considerar el proyecto `api/backend` como algo equivalente al proyecto `a
 
 Una de las principales diferencias entre Type Safe API y el generador `ts#smithy-api` es que los manejadores se implementan usando el [Smithy Server Generator for TypeScript](https://smithy.io/2.0/languages/typescript/ts-ssdk/index.html), en lugar de los wrappers de manejadores generados por Type Safe API (encontrados en el proyecto `api/generated/typescript/runtime`).
 
-Nuestros manejadores lambda dependen del paquete `@aws-sdk/client-dynamodb`, así que instalémoslo primero:
+Los manejadores lambda de la aplicación de lista de compras dependen del paquete `@aws-sdk/client-dynamodb`, así que instalémoslo primero:
 
 <InstallCommand pkg="@aws-sdk/client-dynamodb" />
 
@@ -143,7 +143,7 @@ Para migrar los manejadores, puedes seguir estos pasos generales:
 
 1. Copia el manejador desde el directorio `packages/api/handlers/typescript/src` de tu proyecto PDK al directorio `packages/api/backend/src/operations` de tu nuevo proyecto.
 
-1. Elimina las importaciones de `my-api-typescript-runtime` e importa el tipo de operación desde el SDK de servidor TypeScript generado, así como el `ServiceContext` por ejemplo:
+1. Elimina las importaciones de `my-api-typescript-runtime` e importa el tipo de operación desde el SDK de servidor TypeScript generado, así como el `ServiceContext`:
 
     ```diff lang="ts" wrap
     - import {
@@ -180,14 +180,14 @@ Para migrar los manejadores, puedes seguir estos pasos generales:
     + ctx.logger.info('...');
     ```
 
-1. Actualiza las referencias a los parámetros de entrada. Dado que el SSDK proporciona tipos que coinciden exactamente con tu modelo Smithy (en lugar de agrupar parámetros de path/query/header separados del parámetro body), actualiza cualquier referencia de entrada:
+1. Actualiza referencias a parámetros de entrada. Como el SSDK provee tipos que coinciden exactamente con tu modelo Smithy (en lugar de agrupar parámetros path/query/header separados del body), actualiza cualquier referencia de entrada:
 
     ```diff lang="ts" wrap
     - const shoppingListId = request.input.requestParameters.shoppingListId;
     + const shoppingListId = input.shoppingListId;
     ```
 
-1. Elimina el uso de `Response`. En su lugar, simplemente devolvemos objetos planos en el SSDK.
+1. Elimina el uso de `Response`. En su lugar, devolvemos objetos simples en el SSDK.
 
     ```diff lang="ts" wrap
     - return Response.success({ shoppingListId });
@@ -203,7 +203,7 @@ Para migrar los manejadores, puedes seguir estos pasos generales:
     + throw new BadRequestError({ message: 'oh no' });
     ```
 
-1. Actualiza cualquier importación para usar sintaxis ESM, es decir, agregando la extensión `.js` a las importaciones relativas.
+1. Actualiza las importaciones para usar sintaxis ESM, agregando la extensión `.js` a las importaciones relativas.
 
 1. Agrega la operación a `service.ts`
 
@@ -225,7 +225,7 @@ Para migrar los manejadores, puedes seguir estos pasos generales:
 
 </Steps>
 
-<Drawer title="Migración del manejador de lista de compras" trigger="Haz clic aquí para ver ejemplos completos antes/después de las tres operaciones de lista de compras del tutorial">
+<Drawer title="Migración del manejador de lista de compras" trigger="Haz clic aquí para ver ejemplos completos antes/después de las tres operaciones del tutorial">
 
 <h4>Eliminar Lista de Compras</h4>
 
@@ -270,7 +270,7 @@ export const deleteShoppingList: DeleteShoppingListChainedHandlerFunction = asyn
 
 /**
  * Punto de entrada para el manejador AWS Lambda de la operación DeleteShoppingList.
- * El método deleteShoppingListHandler envuelve el manejador type-safe y gestiona inputs/outputs
+ * deleteShoppingListHandler envuelve el manejador type-safe y gestiona entradas/salidas
  */
 export const handler = deleteShoppingListHandler(
   ...INTERCEPTORS,
@@ -383,7 +383,7 @@ const toToken = <T>(paginationToken?: T): string | undefined =>
 
 /**
  * Punto de entrada para el manejador AWS Lambda de la operación GetShoppingLists.
- * El método getShoppingListsHandler envuelve el manejador type-safe y gestiona inputs/outputs
+ * getShoppingListsHandler envuelve el manejador type-safe y gestiona entradas/salidas
  */
 export const handler = getShoppingListsHandler(...INTERCEPTORS, getShoppingLists);
 ```
@@ -495,7 +495,7 @@ export const putShoppingList: PutShoppingListChainedHandlerFunction = async (req
 
 /**
  * Punto de entrada para el manejador AWS Lambda de la operación PutShoppingList.
- * El método putShoppingListHandler envuelve el manejador type-safe y gestiona inputs/outputs
+ * putShoppingListHandler envuelve el manejador type-safe y gestiona entradas/salidas
  */
 export const handler = putShoppingListHandler(...INTERCEPTORS, putShoppingList);
 ```
@@ -541,7 +541,7 @@ export const PutShoppingList: PutShoppingListOperation<ServiceContext> = async (
 
 </Drawer>
 
-Generamos el proyecto Smithy API con el nombre `api` inicialmente para que se agregue a `packages/api` y sea consistente con el proyecto PDK. Dado que nuestra Smithy API ahora define `service MyApi` en lugar de `service Api`, necesitamos actualizar cualquier instancia de `getApiServiceHandler` con `getMyApiServiceHandler`.
+Generamos el proyecto Smithy API con el nombre `api` inicialmente para que se agregue a `packages/api` y sea consistente con el proyecto PDK. Como nuestra API Smithy ahora define `service MyApi` en lugar de `service Api`, necesitamos actualizar cualquier instancia de `getApiServiceHandler` con `getMyApiServiceHandler`.
 
 Realiza este cambio en `handler.ts`:
 
@@ -598,7 +598,7 @@ Ahora podemos construir el proyecto para verificar que la migración ha funciona
 
 <NxCommands commands={["run-many --target build"]} />
 
-:::nota
+:::note
 Puedes ver un error de build debido a problemas de lint. Estos generalmente se pueden corregir automáticamente:
 
 <NxCommands commands={["run-many --target lint --fix"]} />
