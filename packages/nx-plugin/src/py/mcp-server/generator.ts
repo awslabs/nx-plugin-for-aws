@@ -70,21 +70,19 @@ export const pyMcpServerGenerator = async (
     project.sourceRoot,
     mcpServerNameSnakeCase,
   );
-  const distDir = joinPathFragments('dist', project.root);
 
   const computeType = options.computeType ?? 'BedrockAgentCoreRuntime';
 
   // Generate example server
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files'),
+    joinPathFragments(__dirname, 'files', 'app'),
     targetSourceDir,
     {
       name,
       mcpServerNameSnakeCase,
       mcpServerNameClassName,
       moduleName,
-      distDir,
     },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
@@ -99,9 +97,24 @@ export const pyMcpServerGenerator = async (
     const dockerImageTag = `${getNpmScope(tree)}-${name}:latest`;
 
     // Add bundle target
-    addPythonBundleTarget(project, {
-      pythonPlatform: 'aarch64-manylinux2014',
-    });
+    const { bundleTargetName, bundleOutputDir } = addPythonBundleTarget(
+      project,
+      {
+        pythonPlatform: 'aarch64-manylinux2014',
+      },
+    );
+
+    generateFiles(
+      tree,
+      joinPathFragments(__dirname, 'files', 'deploy'),
+      targetSourceDir,
+      {
+        mcpServerNameSnakeCase,
+        moduleName,
+        bundleOutputDir,
+      },
+      { overwriteStrategy: OverwriteStrategy.KeepExisting },
+    );
 
     const dockerTargetName = `${name}-docker`;
 
@@ -115,7 +128,7 @@ export const pyMcpServerGenerator = async (
         ],
         parallel: false,
       },
-      dependsOn: ['bundle'],
+      dependsOn: [bundleTargetName],
     };
 
     project.targets.docker = {
@@ -150,9 +163,6 @@ export const pyMcpServerGenerator = async (
       dockerImageTag,
       iacProvider,
     });
-  } else {
-    // No Dockerfile needed for non-hosted MCP
-    tree.delete(joinPathFragments(targetSourceDir, 'Dockerfile'));
   }
 
   updateProjectConfiguration(tree, project.name, {

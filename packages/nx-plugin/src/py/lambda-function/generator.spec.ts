@@ -100,12 +100,12 @@ describe('lambda-handler project generator', () => {
     );
 
     // Verify Lambda Function-specific targets
-    expect(projectConfig.targets.bundle).toBeDefined();
-    expect(projectConfig.targets.bundle.outputs).toEqual([
-      '{workspaceRoot}/dist/apps/test_project/bundle',
+    expect(projectConfig.targets['bundle-x86']).toBeDefined();
+    expect(projectConfig.targets['bundle-x86'].outputs).toEqual([
+      '{workspaceRoot}/dist/apps/test_project/bundle-x86',
     ]);
-    expect(projectConfig.targets.bundle.options.commands).toContain(
-      'uv export --frozen --no-dev --no-editable --project apps/test_project --package test-project -o dist/apps/test_project/bundle/requirements.txt',
+    expect(projectConfig.targets['bundle-x86'].options.commands).toContain(
+      'uv export --frozen --no-dev --no-editable --project apps/test_project --package test-project -o dist/apps/test_project/bundle-x86/requirements.txt',
     );
 
     // Verify build dependencies
@@ -468,8 +468,8 @@ describe('lambda-handler project generator', () => {
     const projectConfig = JSON.parse(
       tree.read('apps/test_project/project.json', 'utf-8'),
     );
-    expect(projectConfig.targets.bundle).toBeDefined();
-    expect(projectConfig.targets.bundle.options.commands[0]).toContain(
+    expect(projectConfig.targets['bundle-x86']).toBeDefined();
+    expect(projectConfig.targets['bundle-x86'].options.commands[0]).toContain(
       `--project apps/test_project`,
     );
   });
@@ -736,7 +736,7 @@ describe('lambda-handler project generator', () => {
 
       // Should still have bundle and build targets
       expect(projectConfig.targets.build).toBeDefined();
-      expect(projectConfig.targets.bundle).toBeDefined();
+      expect(projectConfig.targets['bundle-x86']).toBeDefined();
     });
 
     it('should not create CDK constructs when using terraform', async () => {
@@ -1006,15 +1006,15 @@ describe('lambda-handler project generator', () => {
       );
 
       // Check that bundle target was configured with Python-specific options
-      expect(projectConfig.targets.bundle).toBeDefined();
-      expect(projectConfig.targets.bundle.outputs).toEqual([
-        '{workspaceRoot}/dist/apps/test_project/bundle',
+      expect(projectConfig.targets['bundle-x86']).toBeDefined();
+      expect(projectConfig.targets['bundle-x86'].outputs).toEqual([
+        '{workspaceRoot}/dist/apps/test_project/bundle-x86',
       ]);
 
       // Check the exact commands for the bundle target
-      const commands = projectConfig.targets.bundle.options.commands;
+      const commands = projectConfig.targets['bundle-x86'].options.commands;
       expect(commands).toContain(
-        'uv export --frozen --no-dev --no-editable --project apps/test_project --package test-project -o dist/apps/test_project/bundle/requirements.txt',
+        'uv export --frozen --no-dev --no-editable --project apps/test_project --package test-project -o dist/apps/test_project/bundle-x86/requirements.txt',
       );
 
       // Verify build dependencies

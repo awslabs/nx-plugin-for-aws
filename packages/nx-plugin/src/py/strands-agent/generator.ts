@@ -68,21 +68,19 @@ export const pyStrandsAgentGenerator = async (
     project.sourceRoot,
     agentNameSnakeCase,
   );
-  const distDir = joinPathFragments('dist', project.root);
 
   const computeType = options.computeType ?? 'BedrockAgentCoreRuntime';
 
   // Generate example agent
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files'),
+    joinPathFragments(__dirname, 'files', 'app'),
     targetSourceDir,
     {
       name,
       agentNameSnakeCase,
       agentNameClassName,
       moduleName,
-      distDir,
     },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
@@ -100,9 +98,25 @@ export const pyStrandsAgentGenerator = async (
     const dockerImageTag = `${getNpmScope(tree)}-${name}:latest`;
 
     // Add bundle target
-    addPythonBundleTarget(project, {
-      pythonPlatform: 'aarch64-manylinux2014',
-    });
+    const { bundleTargetName, bundleOutputDir } = addPythonBundleTarget(
+      project,
+      {
+        pythonPlatform: 'aarch64-manylinux2014',
+      },
+    );
+
+    // Add the Dockerfile
+    generateFiles(
+      tree,
+      joinPathFragments(__dirname, 'files', 'deploy'),
+      targetSourceDir,
+      {
+        agentNameSnakeCase,
+        moduleName,
+        bundleOutputDir,
+      },
+      { overwriteStrategy: OverwriteStrategy.KeepExisting },
+    );
 
     const dockerTargetName = `${name}-docker`;
 
@@ -116,7 +130,7 @@ export const pyStrandsAgentGenerator = async (
         ],
         parallel: false,
       },
-      dependsOn: ['bundle'],
+      dependsOn: [bundleTargetName],
     };
 
     project.targets.docker = {
@@ -151,9 +165,6 @@ export const pyStrandsAgentGenerator = async (
       iacProvider,
       projectName: project.name,
     });
-  } else {
-    // No Dockerfile needed for non-hosted Agent
-    tree.delete(joinPathFragments(targetSourceDir, 'Dockerfile'));
   }
 
   updateProjectConfiguration(tree, project.name, {

@@ -121,7 +121,11 @@ export const tsSmithyApiGenerator = async (
     constructType: 'rest', // While possible in theory, Smithy doesn't support HTTP APIs
     backend: {
       type: 'smithy',
-      dir: backendProjectConfig.root,
+      bundleOutputDir: joinPathFragments(
+        'dist',
+        backendProjectConfig.root,
+        'bundle',
+      ),
     },
   });
   addSharedConstructsOpenApiMetadataGenerateTarget(tree, {

@@ -275,7 +275,7 @@ dev-dependencies = []
     expect(projectConfig.targets['agent-serve']).toBeDefined();
 
     // Check that bundle target was added
-    expect(projectConfig.targets['bundle']).toBeDefined();
+    expect(projectConfig.targets['bundle-arm']).toBeDefined();
 
     // Check that docker target was added
     expect(projectConfig.targets['test-project-agent-docker']).toBeDefined();
@@ -288,10 +288,10 @@ dev-dependencies = []
       'docker build --platform linux/arm64 -t proj-test-project-agent:latest apps/test-project/proj_test_project/agent --build-context workspace=.',
     ]);
 
-    // Check that docker target depends on bundle
+    // Check that docker target depends on bundle-arm
     expect(
       projectConfig.targets['test-project-agent-docker'].dependsOn,
-    ).toContain('bundle');
+    ).toContain('bundle-arm');
 
     // Check that build target depends on docker
     expect(projectConfig.targets.build.dependsOn).toContain('docker');
@@ -389,7 +389,7 @@ dev-dependencies = []
     expect(projectConfig.targets['agent-serve']).toBeDefined();
 
     // Bundle and docker targets should not be added for None compute type
-    expect(projectConfig.targets['bundle']).toBeUndefined();
+    expect(projectConfig.targets['bundle-arm']).toBeUndefined();
     expect(projectConfig.targets['test-project-agent-docker']).toBeUndefined();
   });
 
@@ -476,14 +476,16 @@ dev-dependencies = []
     );
 
     // Check that bundle target was configured with Python-specific options
-    expect(projectConfig.targets.bundle).toBeDefined();
-    expect(projectConfig.targets.bundle.executor).toBe('nx:run-commands');
+    expect(projectConfig.targets['bundle-arm']).toBeDefined();
+    expect(projectConfig.targets['bundle-arm'].executor).toBe(
+      'nx:run-commands',
+    );
 
     // Check the exact commands for the bundle target
-    const commands = projectConfig.targets.bundle.options.commands;
+    const commands = projectConfig.targets['bundle-arm'].options.commands;
     expect(commands).toEqual([
-      'uv export --frozen --no-dev --no-editable --project apps/test-project --package test-project -o dist/apps/test-project/bundle/requirements.txt',
-      'uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform aarch64-manylinux2014 --target dist/apps/test-project/bundle -r dist/apps/test-project/bundle/requirements.txt',
+      'uv export --frozen --no-dev --no-editable --project apps/test-project --package test-project -o dist/apps/test-project/bundle-arm/requirements.txt',
+      'uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform aarch64-manylinux2014 --target dist/apps/test-project/bundle-arm -r dist/apps/test-project/bundle-arm/requirements.txt',
     ]);
   });
 
@@ -544,7 +546,7 @@ dev-dependencies = []
     const dockerTargetName = 'test-project-agent-docker';
     expect(projectConfig.targets[dockerTargetName]).toBeDefined();
     expect(projectConfig.targets[dockerTargetName].dependsOn).toContain(
-      'bundle',
+      'bundle-arm',
     );
 
     // Check that the general docker target includes the specific docker target
@@ -667,7 +669,7 @@ dev-dependencies = []
     const projectConfig = JSON.parse(
       tree.read('apps/test-project/project.json', 'utf-8'),
     );
-    expect(projectConfig.targets['bundle']).toBeDefined();
+    expect(projectConfig.targets['bundle-arm']).toBeDefined();
     expect(projectConfig.targets['test-project-agent-docker']).toBeDefined();
   });
 
@@ -885,21 +887,23 @@ dev-dependencies = []
     );
 
     // Check that bundle target was configured with Python-specific options
-    expect(projectConfig.targets.bundle).toBeDefined();
-    expect(projectConfig.targets.bundle.executor).toBe('nx:run-commands');
+    expect(projectConfig.targets['bundle-arm']).toBeDefined();
+    expect(projectConfig.targets['bundle-arm'].executor).toBe(
+      'nx:run-commands',
+    );
 
     // Check the exact commands for the bundle target
-    const commands = projectConfig.targets.bundle.options.commands;
+    const commands = projectConfig.targets['bundle-arm'].options.commands;
     expect(commands).toEqual([
-      'uv export --frozen --no-dev --no-editable --project apps/test-project --package test-project -o dist/apps/test-project/bundle/requirements.txt',
-      'uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform aarch64-manylinux2014 --target dist/apps/test-project/bundle -r dist/apps/test-project/bundle/requirements.txt',
+      'uv export --frozen --no-dev --no-editable --project apps/test-project --package test-project -o dist/apps/test-project/bundle-arm/requirements.txt',
+      'uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform aarch64-manylinux2014 --target dist/apps/test-project/bundle-arm -r dist/apps/test-project/bundle-arm/requirements.txt',
     ]);
 
     // Check that docker target was added
     expect(projectConfig.targets['test-project-agent-docker']).toBeDefined();
     expect(
       projectConfig.targets['test-project-agent-docker'].dependsOn,
-    ).toContain('bundle');
+    ).toContain('bundle-arm');
   });
 
   it('should handle default computeType as BedrockAgentCoreRuntime with Terraform', async () => {
@@ -928,7 +932,7 @@ dev-dependencies = []
     const projectConfig = JSON.parse(
       tree.read('apps/test-project/project.json', 'utf-8'),
     );
-    expect(projectConfig.targets['bundle']).toBeDefined();
+    expect(projectConfig.targets['bundle-arm']).toBeDefined();
     expect(projectConfig.targets['test-project-agent-docker']).toBeDefined();
   });
 

@@ -81,7 +81,7 @@ export const pyFastApiProjectGenerator = async (
   const projectConfig = readProjectConfiguration(tree, fullyQualifiedName);
   const port = assignPort(tree, projectConfig, 8000);
 
-  addPythonBundleTarget(projectConfig);
+  const { bundleOutputDir } = addPythonBundleTarget(projectConfig);
 
   projectConfig.targets.serve = {
     executor: '@nxlv/python:run-commands',
@@ -133,8 +133,8 @@ export const pyFastApiProjectGenerator = async (
       schema.computeType === 'ServerlessApiGatewayHttpApi' ? 'http' : 'rest',
     backend: {
       type: 'fastapi',
-      dir,
       moduleName: normalizedModuleName,
+      bundleOutputDir,
     },
     auth: schema.auth,
     iacProvider,
