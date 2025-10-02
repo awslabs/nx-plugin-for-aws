@@ -391,13 +391,18 @@ export default defineConfig([
     it('should add python bundle target with default platform', () => {
       addPythonBundleTarget(project);
 
-      expect(project.targets?.bundle).toBeDefined();
-      expect(project.targets?.bundle?.cache).toBe(true);
-      expect(project.targets?.bundle?.executor).toBe('nx:run-commands');
-      expect(project.targets?.bundle?.dependsOn).toContain('compile');
+      // Should create bundle-x86 target for default x86 platform
+      expect(project.targets?.['bundle-x86']).toBeDefined();
+      expect(project.targets?.['bundle-x86']?.cache).toBe(true);
+      expect(project.targets?.['bundle-x86']?.executor).toBe('nx:run-commands');
+      expect(project.targets?.['bundle-x86']?.dependsOn).toContain('compile');
 
-      const commands = project.targets?.bundle?.options?.commands;
+      const commands = project.targets?.['bundle-x86']?.options?.commands;
       expect(commands[1]).toContain('--python-platform x86_64-manylinux2014');
+
+      // Should also create a generic bundle target that depends on bundle-x86
+      expect(project.targets?.bundle).toBeDefined();
+      expect(project.targets?.bundle?.dependsOn).toContain('bundle-x86');
     });
 
     it('should add python bundle target with custom platform', () => {
@@ -405,20 +410,26 @@ export default defineConfig([
         pythonPlatform: 'aarch64-manylinux2014',
       });
 
-      const commands = project.targets?.bundle?.options?.commands;
+      // Should create bundle-arm target for ARM platform
+      expect(project.targets?.['bundle-arm']).toBeDefined();
+      const commands = project.targets?.['bundle-arm']?.options?.commands;
       expect(commands[1]).toContain('--python-platform aarch64-manylinux2014');
+
+      // Should also create a generic bundle target that depends on bundle-arm
+      expect(project.targets?.bundle).toBeDefined();
+      expect(project.targets?.bundle?.dependsOn).toContain('bundle-arm');
     });
 
-    it('should not overwrite existing bundle target', () => {
+    it('should not overwrite existing bundle-x86 target', () => {
       const existingBundleTarget = {
         cache: false,
         executor: 'custom:executor',
       };
-      project.targets = { bundle: existingBundleTarget };
+      project.targets = { 'bundle-x86': existingBundleTarget };
 
       addPythonBundleTarget(project);
 
-      expect(project.targets.bundle).toEqual(existingBundleTarget);
+      expect(project.targets['bundle-x86']).toEqual(existingBundleTarget);
     });
 
     it('should add bundle dependency to build target', () => {
@@ -445,6 +456,59 @@ export default defineConfig([
 
       expect(projectWithoutTargets.targets).toBeDefined();
       expect(projectWithoutTargets.targets?.bundle).toBeDefined();
+    });
+
+    it('should create generic bundle target that depends on architecture-specific target', () => {
+      addPythonBundleTarget(project, {
+        pythonPlatform: 'x86_64-manylinux2014',
+      });
+
+      // Should create bundle-x86 target
+      expect(project.targets?.['bundle-x86']).toBeDefined();
+
+      // Should create generic bundle target that depends on bundle-x86
+      expect(project.targets?.bundle).toBeDefined();
+      expect(project.targets?.bundle?.dependsOn).toContain('bundle-x86');
+    });
+
+    it('should support adding both platform bundle targets to the same project', () => {
+      // Add x86 bundle target
+      addPythonBundleTarget(project, {
+        pythonPlatform: 'x86_64-manylinux2014',
+      });
+
+      // Add ARM bundle target
+      addPythonBundleTarget(project, {
+        pythonPlatform: 'aarch64-manylinux2014',
+      });
+
+      // Should have both architecture-specific targets
+      expect(project.targets?.['bundle-x86']).toBeDefined();
+      expect(project.targets?.['bundle-arm']).toBeDefined();
+
+      // Generic bundle target should depend on both
+      expect(project.targets?.bundle).toBeDefined();
+      expect(project.targets?.bundle?.dependsOn).toContain('bundle-x86');
+      expect(project.targets?.bundle?.dependsOn).toContain('bundle-arm');
+
+      // Verify each has correct platform in commands
+      const x86Commands = project.targets?.['bundle-x86']?.options?.commands;
+      const armCommands = project.targets?.['bundle-arm']?.options?.commands;
+
+      expect(x86Commands[1]).toContain(
+        '--python-platform x86_64-manylinux2014',
+      );
+      expect(armCommands[1]).toContain(
+        '--python-platform aarch64-manylinux2014',
+      );
+
+      // Verify each has correct output path
+      expect(project.targets?.['bundle-x86']?.outputs).toEqual([
+        '{workspaceRoot}/dist/apps/test-python-project/bundle-x86',
+      ]);
+      expect(project.targets?.['bundle-arm']?.outputs).toEqual([
+        '{workspaceRoot}/dist/apps/test-python-project/bundle-arm',
+      ]);
     });
   });
 });

@@ -44,6 +44,11 @@ interface CreatePythonBundleTargetOptions
    * Python package name
    */
   packageName: string;
+
+  /**
+   * Name of the bundle target, used for the outdir for the bundle
+   */
+  bundleTargetName: string;
 }
 
 /**
@@ -53,15 +58,16 @@ const createPythonBundleTarget = ({
   projectDir,
   packageName,
   pythonPlatform,
+  bundleTargetName,
 }: CreatePythonBundleTargetOptions): TargetConfiguration => {
   return {
     cache: true,
     executor: 'nx:run-commands',
-    outputs: [`{workspaceRoot}/dist/${projectDir}/bundle`],
+    outputs: [`{workspaceRoot}/dist/${projectDir}/${bundleTargetName}`],
     options: {
       commands: [
-        `uv export --frozen --no-dev --no-editable --project ${projectDir} --package ${packageName} -o dist/${projectDir}/bundle/requirements.txt`,
-        `uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform ${pythonPlatform} --target dist/${projectDir}/bundle -r dist/${projectDir}/bundle/requirements.txt`,
+        `uv export --frozen --no-dev --no-editable --project ${projectDir} --package ${packageName} -o dist/${projectDir}/${bundleTargetName}/requirements.txt`,
+        `uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform ${pythonPlatform} --target dist/${projectDir}/${bundleTargetName} -r dist/${projectDir}/${bundleTargetName}/requirements.txt`,
       ],
       parallel: false,
     },
@@ -79,23 +85,30 @@ export const addPythonBundleTarget = (
     project.targets = {};
   }
 
-  if (!project.targets?.bundle) {
-    project.targets.bundle = {
+  const pythonPlatform = opts?.pythonPlatform ?? 'x86_64-manylinux2014';
+  const bundleTargetName =
+    pythonPlatform === 'aarch64-manylinux2014' ? 'bundle-arm' : 'bundle-x86';
+
+  if (!project.targets?.[bundleTargetName]) {
+    project.targets[bundleTargetName] = {
       ...createPythonBundleTarget({
         projectDir: project.root,
         packageName: project.name,
-        pythonPlatform: opts?.pythonPlatform ?? 'x86_64-manylinux2014',
+        pythonPlatform,
+        bundleTargetName,
       }),
       dependsOn: ['compile'],
     };
   }
 
-  if (project.targets?.build) {
-    project.targets.build.dependsOn = [
-      ...(project.targets.build.dependsOn ?? []).filter((t) => t !== 'bundle'),
-      'bundle',
-    ];
-  }
+  // Add a "bundle" target which depends on either bundle-arm or bundle-x86 (or both)
+  addDependencyToTargetIfNotPresent(project, 'bundle', bundleTargetName);
+  addDependencyToTargetIfNotPresent(project, 'build', 'bundle');
+
+  return {
+    bundleTargetName,
+    bundleOutputDir: joinPathFragments('dist', project.root, bundleTargetName),
+  };
 };
 
 export interface AddTypeScriptBundleTargetOptions {

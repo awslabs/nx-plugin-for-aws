@@ -25,18 +25,18 @@ interface BackendOptions {
 export interface TrpcBackendOptions extends BackendOptions {
   type: 'trpc';
   projectAlias: string;
-  dir: string;
+  bundleOutputDir: string;
 }
 
 export interface FastApiBackendOptions extends BackendOptions {
   type: 'fastapi';
   moduleName: string;
-  dir: string;
+  bundleOutputDir: string;
 }
 
 export interface SmithyBackendOptions extends BackendOptions {
   type: 'smithy';
-  dir: string;
+  bundleOutputDir: string;
 }
 
 export interface AddApiGatewayConstructOptions {

@@ -299,9 +299,18 @@ describe('smoke test - dungeon-adventure', () => {
     const storyApiProjectJson = JSON.parse(
       readFileSync(`${opts.cwd}/packages/story_api/project.json`, 'utf-8'),
     );
-    storyApiProjectJson.targets.bundle.options.commands.push(
-      'copyfiles -f packages/story_api/run.sh dist/packages/story_api/bundle',
-    );
+    storyApiProjectJson.targets.bundle = {
+      ...storyApiProjectJson.targets.bundle,
+      cache: true,
+      outputs: ['{workspaceRoot}/dist/packages/story_api/bundle'],
+      executor: 'nx:run-commands',
+      options: {
+        commands: [
+          'copyfiles -f packages/story_api/run.sh dist/packages/story_api/bundle',
+        ],
+        parallel: false,
+      },
+    };
     writeFileSync(
       `${opts.cwd}/packages/story_api/project.json`,
       JSON.stringify(storyApiProjectJson),

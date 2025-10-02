@@ -135,12 +135,15 @@ export const pyLambdaFunctionGenerator = async (
     iacProvider,
   });
 
+  // Check if the project has a bundle target and if not add it
+  const { bundleOutputDir } = addPythonBundleTarget(projectConfig);
+
   addLambdaFunctionInfra(tree, {
     functionProjectName: projectConfig.name,
     functionNameClassName: constructFunctionClassName,
     functionNameKebabCase: constructFunctionKebabCase,
     handler: normalizedFunctionPath,
-    bundlePathFromRoot: `dist/${dir}/bundle`,
+    bundlePathFromRoot: bundleOutputDir,
     runtime: 'python',
     iacProvider,
   });
@@ -151,9 +154,6 @@ export const pyLambdaFunctionGenerator = async (
     lambdaFunctionClassName,
     lambdaFunctionSnakeCase: normalizedFunctionName,
   };
-
-  // Check if the project has a bundle target and if not add it
-  addPythonBundleTarget(projectConfig);
 
   projectConfig.targets = sortObjectKeys(projectConfig.targets);
   updateProjectConfiguration(tree, projectConfig.name, projectConfig);
