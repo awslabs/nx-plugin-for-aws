@@ -1,0 +1,43 @@
+import { ApplicationStage } from './stages/application-stage.js';
+import { App } from ':e2e-test/common-constructs';
+import { Aspects, IAspect, RemovalPolicy } from 'aws-cdk-lib';
+import { IConstruct } from 'constructs';
+import { CfnResource } from 'aws-cdk-lib';
+import { CfnUserPool, CfnUserPoolDomain } from 'aws-cdk-lib/aws-cognito';
+
+/**
+ * Aspect to augment resources for integration tests
+ */
+class IntegrationTestAspect implements IAspect {
+  public visit(node: IConstruct): void {
+    // Ensure no resources are retained for a complete teardown
+    if (node instanceof CfnResource) {
+      node.applyRemovalPolicy(RemovalPolicy.DESTROY);
+    }
+
+    // Disable deletion protection on Cognito User Pools
+    if (node instanceof CfnUserPool) {
+      node.deletionProtection = 'INACTIVE';
+    }
+
+    // Ensure unique user pool domain name
+    if (node instanceof CfnUserPoolDomain) {
+      node.domain = `${node.domain}-<% TEST_RUN_ID %>`;
+    }
+  }
+}
+
+const app = new App();
+
+// Use this to deploy your own sandbox environment (assumes your CLI credentials)
+const stage = new ApplicationStage(app, 'e2e-test-infra-sandbox-<% TEST_RUN_ID %>', {
+  env: {
+    account: process.env.CDK_DEFAULT_ACCOUNT,
+    region: process.env.CDK_DEFAULT_REGION,
+  },
+});
+
+// Apply removal policy to all resources for easy cleanup
+Aspects.of(stage).add(new IntegrationTestAspect());
+
+app.synth();
