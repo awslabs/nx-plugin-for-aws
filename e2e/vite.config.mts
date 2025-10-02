@@ -30,6 +30,6 @@ export default defineConfig({
         singleThread: true,
       },
     },
-    testTimeout: 20 * 60 * 1000, /// 20 mins for long running e2e tests
+    testTimeout: 60 * 60 * 1000, /// 60 mins for long running e2e tests (eg deploy)
   },
 });
