@@ -11,7 +11,7 @@ import {
 import { CommentSyntax, LicenseConfig } from './config-types';
 
 /**
- * Licenses containing a placeholder for the copyright year
+ * Licenses containing a placeholder for the copyright year.
  */
 const LICENSES_WITH_YEAR: Set<SPDXLicenseIdentifier> = new Set(['MIT']);
 
