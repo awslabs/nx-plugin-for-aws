@@ -23,6 +23,7 @@ import { formatFilesInSubtree } from '../../utils/format';
 import tsProjectGenerator, { getTsLibDetails } from '../lib/generator';
 import { configureTsProjectAsNxPlugin } from './utils';
 import tsMcpServerGenerator from '../mcp-server/generator';
+import { TS_VERSIONS } from '../../utils/versions';
 
 export const TS_NX_PLUGIN_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -112,6 +113,7 @@ export const tsNxPluginGenerator = async (
     mcpPath,
     {
       name: fullyQualifiedName,
+      createNxWorkspaceVersion: TS_VERSIONS['create-nx-workspace'],
     },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );

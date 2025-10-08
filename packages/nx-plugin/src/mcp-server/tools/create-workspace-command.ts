@@ -23,7 +23,7 @@ export const addCreateWorkspaceCommandTool = (server: McpServer) => {
           text: `Run the following command to create a workspace:
 
 \`\`\`bash
-npx create-nx-workspace@${TS_VERSIONS['create-nx-workspace']} ${workspaceName} --pm=${packageManager} --preset=@aws/nx-plugin --ci=skip
+npx create-nx-workspace@${TS_VERSIONS['create-nx-workspace']} ${workspaceName} --pm=${packageManager} --preset=@aws/nx-plugin --ci=skip --aiAgents
 \`\`\`
 
 This will create a new workspace within the ${workspaceName} directory.
