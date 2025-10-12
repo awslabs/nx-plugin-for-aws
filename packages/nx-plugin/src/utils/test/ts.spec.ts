@@ -78,6 +78,7 @@ export class TypeScriptVerifier {
           encoding: 'utf-8',
           stdio: 'pipe',
           cwd: path.resolve(__dirname, '../../../../../'),
+          maxBuffer: 50 * 1024 * 1024, // 50 MB
         }),
       );
 
