@@ -3,7 +3,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 import { useGameApi } from '../../hooks/useGameApi';
-import { useStoryApiClient } from '../../hooks/useStoryApiClient';
+import { useStoryAgent } from '../../hooks/useStoryAgent';
 import type { IAction, IGame } from ':dungeon-adventure/game-api';
 
 type IGameState = Omit<IGame, 'lastUpdated'> & { actions: IAction[] };
@@ -26,13 +26,30 @@ function RouteComponent() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // Get genre-specific icon for assistant messages
+  const getAssistantIcon = () => {
+    switch (genre) {
+      case 'zombie':
+        return '🧟';
+      case 'superhero':
+        return '🦸';
+      case 'medieval':
+        return '⚔️';
+      default:
+        return '📖';
+    }
+  };
+
   const gameApi = useGameApi();
-  const storyApi = useStoryApiClient();
+  const storyAgent = useStoryAgent();
   const saveActionMutation = useMutation(
     gameApi.actions.save.mutationOptions(),
   );
   const gameActionsQuery = useQuery(
     gameApi.actions.query.queryOptions({ playerName, limit: 100 }),
+  );
+  const inventoryQuery = useQuery(
+    gameApi.inventory.query.queryOptions({ playerName, limit: 100 }),
   );
 
   // no actions - therefore must be a new game - generate initial story
@@ -53,7 +70,7 @@ function RouteComponent() {
   const generateStoryMutation = useMutation({
     mutationFn: async ({ playerName, genre, actions }: IGameState) => {
       let content = '';
-      for await (const chunk of storyApi.generateStory({
+      for await (const chunk of storyAgent.generateStory({
         playerName,
         genre,
         actions,
@@ -94,8 +111,9 @@ function RouteComponent() {
       });
 
       await gameActionsQuery.refetch();
-
       setStreamingContent('');
+
+      await inventoryQuery.refetch();
     } catch (error) {
       console.error('Failed to generate story:', error);
     }
@@ -128,6 +146,25 @@ function RouteComponent() {
 
   return (
     <div className="game-interface">
+      {inventoryQuery.data?.items && inventoryQuery.data.items.length > 0 && (
+        <div className="inventory-overlay">
+          <div className="inventory-header">
+            📦 Inventory{' '}
+            {inventoryQuery.isFetching ? (
+              <Spinner data-style="generating" size="normal" />
+            ) : null}
+          </div>
+          <div className="inventory-items">
+            {inventoryQuery.data.items.map((item, idx) => (
+              <div key={idx} className="inventory-item">
+                {item.emoji ?? null} {item.itemName}{' '}
+                {item.quantity > 1 && `(x${item.quantity})`}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="messages-area">
         <div className="messages-container">
           {gameActionsQuery.data?.items
@@ -144,13 +181,19 @@ function RouteComponent() {
                 : [],
             )
             .map((action, i) => (
-              <div
-                key={i}
-                className={`message ${
-                  action.role === 'assistant' ? 'assistant' : 'user'
-                }`}
-              >
-                {action.content}
+              <div key={i}>
+                <div
+                  className={`message ${
+                    action.role === 'assistant' ? 'assistant' : 'user'
+                  }`}
+                >
+                  <div className="message-header">
+                    {action.role === 'assistant'
+                      ? `${getAssistantIcon()} Story`
+                      : `⭐️ ${playerName}`}
+                  </div>
+                  <div className="message-content">{action.content}</div>
+                </div>
               </div>
             ))}
           {generateStoryMutation.isPending && streamingContent.length === 0 && (

@@ -1,6 +1,6 @@
 ---
-title: AI Dungeon Game
-description: A walkthrough of how to build an AI powered dungeon adventure game using the @aws/nx-plugin.
+title: Agentic AI Dungeon Game
+description: A walkthrough of how to build an agentic AI-powered dungeon adventure game using the @aws/nx-plugin.
 ---
 
 import { Aside, Code, FileTree, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
@@ -21,14 +21,15 @@ import nxGraphPng from '@assets/nx-graph.png'
 import gameSelectPng from '@assets/game-select.png'
 import gameConversationPng from '@assets/game-conversation.png'
 
-## Module 2: Game API implementation
+## Module 2: Game API and Inventory MCP Server implementation
 
-We are going to start by implementing our Game API. To do this, we need to create 4 API's in total:
+We are going to start by implementing our Game API. To do this, we need to create 5 API's in total:
 
 1. `createGame` - this will create a new game instance.
 2. `queryGames` - this will return a paginated list of previously saved games.
 3. `saveAction` - this will save an action for a given game.
 4. `queryActions` - this will return a paginated list of all actions related to a game.
+5. `queryInventory` - this will return a paginated list of items in a player's inventory.
 
 ### API Schema
 
@@ -43,6 +44,9 @@ To define our API inputs and outputs, let's create our schema using [Zod](https:
   </TabItem>
   <TabItem label="game.ts">
 <E2ECode lang="typescript" path="dungeon-adventure/2/schema/game.ts.template" />
+  </TabItem>
+  <TabItem label="inventory.ts">
+<E2ECode lang="typescript" path="dungeon-adventure/2/schema/inventory.ts.template" />
   </TabItem>
   <TabItem label="index.ts">
 <E2EDiff lang="typescript" before="dungeon-adventure/2/schema/index.ts.old.template" after="dungeon-adventure/2/schema/index.ts.template" />
@@ -61,6 +65,45 @@ The ER diagram for our application is as follows:
 
 <Image class="centered-image white-bg" src={dungeonAdventureErPng} alt="dungeon-adventure-er.png" width="400" height="300" />
 
+{/* Generated from the following PlantUML: */}
+{/*
+@startuml Game API Entity Relationship Diagram
+
+!theme plain
+
+skinparam linetype ortho
+skinparam roundcorner 10
+
+entity "Game" as game {
+  + playerName : string <<PK>>
+  --
+  genre : string
+  lastUpdated : string
+}
+
+entity "Action" as action {
+  + playerName : string <<PK>>
+  + timestamp : string <<SK>>
+  --
+  role : string
+  content : string
+}
+
+entity "Item" as item {
+  + playerName : string <<PK>>
+  + itemName : string
+  --
+  emoji : string (optional)
+  lastUpdated : string
+  quantity : number
+}
+
+game ||--o{ action
+game ||--o{ item
+
+@enduml
+*/}
+
 We are going to implement our Database in DynamoDB and will be using the [ElectroDB](https://electrodb.dev/en/core-concepts/introduction/) DynamoDB client library to simplify things. To get started we need to first install `electrodb` by running the following command:
 
 <InstallCommand pkg="electrodb @aws-sdk/client-dynamodb" />
@@ -78,6 +121,9 @@ Now let's create the following files within our `packages/game-api/src/entities`
   <TabItem label="game.ts">
 <E2ECode lang="typescript" path="dungeon-adventure/2/entities/game.ts.template" />
   </TabItem>
+  <TabItem label="inventory.ts">
+<E2ECode lang="typescript" path="dungeon-adventure/2/entities/inventory.ts.template" />
+  </TabItem>
 </Tabs>
 
 ElectroDB is very powerful and allows us to not only define our types, but can also provide defaults for certain values like the timestamps above. In addition, ElectroDB follows [single-table design](https://electrodb.dev/en/core-concepts/single-table-relationships/) which is the best practice when using DynamoDB.
@@ -85,6 +131,18 @@ ElectroDB is very powerful and allows us to not only define our types, but can a
 <Aside>
 Whilst ElectroDB does support [collections](https://electrodb.dev/en/modeling/collections/), we have chosen not to use them in this tutorial for simplicity.
 </Aside>
+
+To prepare for the MCP server to interact with the inventory, let's ensure we export the inventory entity in `packages/game-api/src/index.ts`:
+
+<Tabs>
+<TabItem label="packages/game-api/src/index.ts">
+<E2EDiff lang="typescript" before="dungeon-adventure/2/index.ts.old.template" after="dungeon-adventure/2/index.ts.template" />
+</TabItem>
+</Tabs>
+
+:::note
+The package structure would be better if we refactored entities into their own shared project so that the MCP server does not need to depend on the API.
+:::
 
 ### Adding the dynamoDB client to our tRPC context
 
@@ -116,6 +174,8 @@ The `concat` api binds our middleware to the procedures we define. For more deta
 
 Now it's time to implement the API methods. To do this, make the following changes within `packages/game-api/src/procedures`:
 
+#### Queries
+
 <Tabs>
   <TabItem label="query-actions.ts">
 <E2ECode lang="typescript" path="dungeon-adventure/2/procedures/query-actions.ts.template" />
@@ -123,6 +183,14 @@ Now it's time to implement the API methods. To do this, make the following chang
   <TabItem label="query-games.ts">
 <E2ECode lang="typescript" path="dungeon-adventure/2/procedures/query-games.ts.template" />
   </TabItem>
+  <TabItem label="query-inventory.ts">
+<E2ECode lang="typescript" path="dungeon-adventure/2/procedures/query-inventory.ts.template" />
+  </TabItem>
+</Tabs>
+
+#### Mutations
+
+<Tabs>
   <TabItem label="save-action.ts">
 <E2ECode lang="typescript" path="dungeon-adventure/2/procedures/save-action.ts.template" />
   </TabItem>
@@ -135,9 +203,35 @@ You can also delete the `echo.ts` file (from `packages/game-api/src/procedures`)
 
 ### Router setup
 
-Now that we have defined our procedures, let's wire them into our API. To do this, update the following file as follows:
+Now that we have defined our procedures, let's wire them into our API. To do this, update the following file:
 
+<Tabs>
+  <TabItem label="packages/game-api/src/router.ts">
 <E2EDiff lang="typescript" before="dungeon-adventure/2/router.ts.old.template" after="dungeon-adventure/2/router.ts.template" />
+</TabItem>
+</Tabs>
+
+### Inventory MCP Server
+
+Now let's create an MCP server which will allow our agent to manage items in a player's inventory.
+
+We'll define the following tools for our Agent:
+
+- `list-inventory-items` for retrieving the player's current inventory items
+- `add-to-inventory` for adding items to the player's inventory
+- `remove-from-inventory` for removing items from the player's inventory
+
+To save time, we'll define all the tools inline:
+
+<Tabs>
+  <TabItem label="packages/inventory/src/mcp-server/server.ts">
+<E2EDiff lang="typescript" before="dungeon-adventure/2/mcp/server.ts.old.template" after="dungeon-adventure/2/mcp/server.ts.template" />
+</TabItem>
+</Tabs>
+
+As the number of tools grows, you refactor them out into separate files if you like.
+
+You can now delete the `tools` and `resources` directories in `packages/inventory/src/mcp-server` as these are unused.
 
 ### Infrastructure
 

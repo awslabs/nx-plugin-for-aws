@@ -1,10 +1,12 @@
 import {
   GameApi,
   GameUI,
-  StoryApi,
+  InventoryMcpServer,
+  RuntimeConfig,
+  StoryAgent,
   UserIdentity,
 } from ':dungeon-adventure/common-constructs';
-import { Stack, StackProps } from 'aws-cdk-lib';
+import { Stack, StackProps, CfnOutput } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 
 export class ApplicationStack extends Stack {
@@ -16,14 +18,39 @@ export class ApplicationStack extends Stack {
     const gameApi = new GameApi(this, 'GameApi', {
       integrations: GameApi.defaultIntegrations(this).build(),
     });
-    const storyApi = new StoryApi(this, 'StoryApi', {
-      integrations: StoryApi.defaultIntegrations(this).build(),
+
+    const { userPool, userPoolClient } = userIdentity;
+
+    const mcpServer = new InventoryMcpServer(this, 'InventoryMcpServer');
+
+    // Use Cognito for user authentication with the agent
+    const storyAgent = new StoryAgent(this, 'StoryAgent', {
+      authorizerConfiguration: {
+        customJwtAuthorizer: {
+          discoveryUrl: `https://cognito-idp.${Stack.of(userPool).region}.amazonaws.com/${userPool.userPoolId}/.well-known/openid-configuration`,
+          allowedAudience: [userPoolClient.userPoolClientId],
+        },
+      },
+      environment: {
+        INVENTORY_MCP_ARN: mcpServer.agentCoreRuntime.arn,
+      },
+    });
+    // Add the Story Agent ARN to runtime-config.json so it can be referenced by the website
+    RuntimeConfig.ensure(this).config.agentArn =
+      storyAgent.agentCoreRuntime.arn;
+
+    new CfnOutput(this, 'StoryAgentArn', {
+      value: storyAgent.agentCoreRuntime.arn,
+    });
+    new CfnOutput(this, 'InventoryMcpArn', {
+      value: mcpServer.agentCoreRuntime.arn,
     });
 
-    // grant our authenticated role access to invoke our APIs
-    [storyApi, gameApi].forEach((api) =>
-      api.grantInvokeAccess(userIdentity.identityPool.authenticatedRole),
-    );
+    // Grant the agent permissions to invoke our mcp server
+    mcpServer.agentCoreRuntime.grantInvoke(storyAgent.agentCoreRuntime);
+
+    // Grant the authenticated role access to invoke the api
+    gameApi.grantInvokeAccess(userIdentity.identityPool.authenticatedRole);
 
     // Ensure this is instantiated last so our runtime-config.json can be automatically configured
     new GameUI(this, 'GameUI');
