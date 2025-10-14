@@ -373,6 +373,160 @@ export default defineConfig([
       expect(configContent).toContain('src/index.ts');
       expect(configContent).toContain('src/handler.ts');
     });
+
+    it('should configure platform with default value of node', () => {
+      addTypeScriptBundleTarget(tree, project, {
+        targetFilePath: 'src/index.ts',
+      });
+
+      const configContent = tree.read(
+        'apps/test-project/rolldown.config.ts',
+        'utf-8',
+      );
+
+      expect(configContent).toContain("platform: 'node'");
+    });
+
+    it('should configure platform when explicitly set to node', () => {
+      addTypeScriptBundleTarget(tree, project, {
+        targetFilePath: 'src/index.ts',
+        platform: 'node',
+      });
+
+      const configContent = tree.read(
+        'apps/test-project/rolldown.config.ts',
+        'utf-8',
+      );
+
+      expect(configContent).toContain("platform: 'node'");
+    });
+
+    it('should configure platform when set to browser', () => {
+      addTypeScriptBundleTarget(tree, project, {
+        targetFilePath: 'src/index.ts',
+        platform: 'browser',
+      });
+
+      const configContent = tree.read(
+        'apps/test-project/rolldown.config.ts',
+        'utf-8',
+      );
+
+      expect(configContent).toContain("platform: 'browser'");
+    });
+
+    it('should configure platform when set to neutral', () => {
+      addTypeScriptBundleTarget(tree, project, {
+        targetFilePath: 'src/index.ts',
+        platform: 'neutral',
+      });
+
+      const configContent = tree.read(
+        'apps/test-project/rolldown.config.ts',
+        'utf-8',
+      );
+
+      expect(configContent).toContain("platform: 'neutral'");
+    });
+
+    it('should add disableTreeShake function and plugins when AWS SDK is not external', () => {
+      addTypeScriptBundleTarget(tree, project, {
+        targetFilePath: 'src/index.ts',
+      });
+
+      const configContent = tree.read(
+        'apps/test-project/rolldown.config.ts',
+        'utf-8',
+      );
+
+      // Should include the disableTreeShake function
+      expect(configContent).toContain('const disableTreeShake');
+      expect(configContent).toContain("name: 'disable-treeshake'");
+      expect(configContent).toContain("moduleSideEffects: 'no-treeshake'");
+
+      // Should include plugins configuration
+      expect(configContent).toContain(
+        'plugins: [disableTreeShake([/@aws-sdk\\/.*/])]',
+      );
+
+      expect(
+        tree.read('apps/test-project/rolldown.config.ts', 'utf-8'),
+      ).toMatchSnapshot();
+    });
+
+    it('should not add disableTreeShake or plugins when AWS SDK is external as regex', () => {
+      addTypeScriptBundleTarget(tree, project, {
+        targetFilePath: 'src/index.ts',
+        external: [/@aws-sdk\/.*/],
+      });
+
+      const configContent = tree.read(
+        'apps/test-project/rolldown.config.ts',
+        'utf-8',
+      );
+
+      // Should NOT include the disableTreeShake function
+      expect(configContent).not.toContain('const disableTreeShake');
+      expect(configContent).not.toContain("name: 'disable-treeshake'");
+
+      // Should NOT include plugins configuration
+      expect(configContent).not.toContain('plugins:');
+
+      expect(
+        tree.read('apps/test-project/rolldown.config.ts', 'utf-8'),
+      ).toMatchSnapshot();
+    });
+
+    it('should not add disableTreeShake or plugins when AWS SDK is external with other dependencies', () => {
+      addTypeScriptBundleTarget(tree, project, {
+        targetFilePath: 'src/index.ts',
+        external: ['lodash', /@aws-sdk\/.*/, 'react'],
+      });
+
+      const configContent = tree.read(
+        'apps/test-project/rolldown.config.ts',
+        'utf-8',
+      );
+
+      // Should NOT include the disableTreeShake function
+      expect(configContent).not.toContain('const disableTreeShake');
+
+      // Should NOT include plugins configuration
+      expect(configContent).not.toContain('plugins:');
+
+      // Should still have external configuration
+      expect(configContent).toContain('external:');
+    });
+
+    it('should add disableTreeShake only once when called multiple times', () => {
+      // First call
+      addTypeScriptBundleTarget(tree, project, {
+        targetFilePath: 'src/index.ts',
+      });
+
+      // Second call with different target
+      addTypeScriptBundleTarget(tree, project, {
+        targetFilePath: 'src/handler.ts',
+        bundleOutputDir: 'handler',
+      });
+
+      const configContent = tree.read(
+        'apps/test-project/rolldown.config.ts',
+        'utf-8',
+      );
+
+      // Count occurrences of disableTreeShake function definition
+      const disableTreeShakeOccurrences = (
+        configContent.match(/const disableTreeShake = /g) || []
+      ).length;
+      expect(disableTreeShakeOccurrences).toBe(1);
+
+      // Both configs should have plugins
+      const pluginsOccurrences = (
+        configContent.match(/plugins: \[disableTreeShake/g) || []
+      ).length;
+      expect(pluginsOccurrences).toBe(2);
+    });
   });
 
   describe('addPythonBundleTarget', () => {

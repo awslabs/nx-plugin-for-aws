@@ -125,7 +125,7 @@ export const tsLambdaFunctionGenerator = async (
   addTypeScriptBundleTarget(tree, projectConfig, {
     targetFilePath: functionPathFromProjectRoot,
     bundleOutputDir,
-    external: [/@aws-sdk\/.*/],
+    external: [/@aws-sdk\/.*/], // lambda runtime provides aws sdk
   });
 
   projectConfig.targets = sortObjectKeys(projectConfig.targets);

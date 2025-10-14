@@ -111,6 +111,7 @@ export async function tsTrpcApiGenerator(
 
   addTypeScriptBundleTarget(tree, projectConfig, {
     targetFilePath: 'src/router.ts',
+    external: [/@aws-sdk\/.*/], // lambda runtime provides aws sdk
   });
 
   addDependencyToTargetIfNotPresent(projectConfig, 'build', 'bundle');
