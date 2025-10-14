@@ -12,7 +12,9 @@ import {
   getPackageManagerCommand,
   installPackagesTask,
   joinPathFragments,
+  readNxJson,
   updateJson,
+  updateNxJson,
 } from '@nx/devkit';
 import { NxGeneratorInfo, getGeneratorInfo } from '../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../utils/metrics';
@@ -175,6 +177,12 @@ export const presetGenerator = async (
       overwriteStrategy: OverwriteStrategy.Overwrite,
     },
   );
+
+  // Disable the Nx Daemon by default, users can opt in
+  updateNxJson(tree, {
+    ...readNxJson(tree),
+    useDaemonProcess: false,
+  });
 
   await addGeneratorMetricsIfApplicable(tree, [PRESET_GENERATOR_INFO]);
 
