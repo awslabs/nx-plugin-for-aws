@@ -1,6 +1,6 @@
 ---
-title: "Jogo de Dungeons com IA"
-description: "Um guia passo a passo de como construir um jogo de aventura de dungeon alimentado por IA usando o @aws/nx-plugin."
+title: "Jogo de Dungeons de IA Agêntica"
+description: "Um guia passo a passo de como construir um jogo de aventura de dungeon com IA agêntica usando o @aws/nx-plugin."
 ---
 
 
@@ -42,18 +42,15 @@ Você pode então abrir o site local em um navegador, onde será solicitado que 
 _Manteremos o servidor de desenvolvimento em execução durante o restante deste módulo, pois ele recarregará automaticamente quaisquer alterações que fizermos._
 </Aside>
 
+:::dica
+Você pode executar <NxCommands commands={["run @dungeon-adventure/game-ui:serve-local"]} /> para iniciar também quaisquer servidores de API locais conectados, permitindo que você itere tanto na sua API tRPC quanto no site simultaneamente.
+:::
+
 ### Criar uma nova rota '/game'
 
-Vamos demonstrar as capacidades do `@tanstack/react-router` criando uma nova rota tipada. Para isso, basta criar um arquivo vazio no seguinte local: `packages/game-ui/src/routes/game/index.tsx`. Observe atentamente os logs do servidor de desenvolvimento:
+Vamos demonstrar as capacidades do `@tanstack/react-router` criando uma nova rota tipada. Para isso, basta criar um arquivo vazio no seguinte local: `packages/game-ui/src/routes/game/index.tsx`. Você notará que o arquivo é atualizado imediatamente.
 
-```bash
-♻️  Regenerando rotas...
-🟡 Atualizando /Users/dimecha/dungeon-adventure/packages/game-ui/src/routes/game/index.tsx
-🟡 Atualizando /Users/dimecha/dungeon-adventure/packages/game-ui/src/routeTree.gen.ts
-✅ Rotas processadas em 27ms
-```
-
-O `@tanstack/react-router` já configurou automaticamente sua nova rota e você notará que o arquivo criado já está populado com o caminho da rota:
+O `@tanstack/react-router` já configurou automaticamente sua nova rota e você observará que o arquivo criado já está populado com o caminho da rota:
 
 ```tsx
 import { createFileRoute } from '@tanstack/react-router'
@@ -71,17 +68,21 @@ Agora, se você navegar para `http://localhost:4200/game`, verá que sua nova p�
 
 <Image src={baselineGamePng} alt="baseline-game.png" width="800" height="600" />
 
-Vamos também atualizar o arquivo `index.tsx` para carregar nossa nova rota `/game` por padrão. Observe que ao atualizar o campo `to`, você tem uma lista de rotas tipadas para escolher.
+Vamos também atualizar o arquivo `index.tsx` para carregar nossa nova rota `/game` por padrão. Observe como, ao atualizar o campo `to`, você tem uma lista de rotas tipadas para escolher.
 
-<E2EDiff before="dungeon-adventure/4/routes/index.tsx.old.template" after="dungeon-adventure/4/routes/index.tsx.template" lang="tsx" />
+<Tabs>
+<TabItem label="routes/index.tsx">
+<E2ECode path="dungeon-adventure/4/routes/index.tsx.template" lang="tsx" />
+</TabItem>
+</Tabs>
 
-Finalmente, podemos excluir a pasta `packages/game-ui/src/routes/welcome/`, pois não é mais necessária.
+Finalmente, podemos excluir a pasta `packages/game-ui/src/routes/welcome/` pois não é mais necessária.
 
 ### Atualizações de layout
 
-O layout padrão configurado é mais parecido com um aplicativo empresarial estilo SaaS do que com um jogo. Vamos reconfigurar o layout e retematizá-lo para se assemelhar mais a um jogo estilo dungeon.
+O layout padrão configurado é mais adequado para aplicativos empresariais no estilo SaaS do que para um jogo. Vamos reconfigurar o layout e retematizá-lo para se assemelhar mais a um jogo de masmorra.
 
-Vamos fazer as seguintes alterações em `packages/game-ui/src`:
+Faça as seguintes alterações em `packages/game-ui/src`:
 
 <Tabs>
 <TabItem label="config.ts">
@@ -95,11 +96,32 @@ Vamos fazer as seguintes alterações em `packages/game-ui/src`:
 </TabItem>
 </Tabs>
 
-Agora vamos excluir os arquivos `packages/game-ui/src/components/AppLayout/navitems.ts` e `packages/game-ui/src/hooks/useAppLayout.tsx`, pois não são mais usados.
+Agora vamos excluir o arquivo `packages/game-ui/src/hooks/useAppLayout.tsx` pois não está sendo usado.
+
+### Integração do Agente de História
+
+Em seguida, criaremos um hook para inicializar um cliente de interação com nosso Agente de História.
+
+<Tabs>
+<TabItem label="hooks/useStoryAgent.tsx">
+<E2ECode path="dungeon-adventure/4/hooks/useStoryAgent.tsx.template" lang="tsx" />
+</TabItem>
+</Tabs>
+
+Isso faz o seguinte:
+
+- Recupera o ARN do Agente do `runtime-config.json`
+- Constrói a URL de invocação do AgentCore Runtime a partir do ARN
+- Invoca o Agente com o token JWT do usuário autenticado e um ID de sessão aleatório
+- Retorna um iterador assíncrono para consumo de chunks de mensagens transmitidas
+
+:::dica
+Você notará que a integração com nossa Game API já está configurada - não precisamos fazer nada manualmente pois usamos o gerador `api-connection`. Por favor, dê +1 [nesta issue do GitHub](https://github.com/awslabs/nx-plugin-for-aws/issues/326) se desejar uma experiência similar para agentes.
+:::
 
 ### Páginas do jogo
 
-Vamos criar as páginas do Jogo que chamarão nossas APIs e finalizarão a implementação do jogo:
+Vamos criar as páginas do jogo que chamarão nossas APIs e finalizarão a implementação do jogo. Atualize os seguintes arquivos em `packages/game-ui/src/routes/game`:
 
 <Tabs>
 <TabItem label="index.tsx">
@@ -110,16 +132,16 @@ Vamos criar as páginas do Jogo que chamarão nossas APIs e finalizarão a imple
 <E2ECode path="dungeon-adventure/4/routes/game/$playerName.tsx.template" lang="tsx" />
 
 <Aside type="tip">
-A sintaxe `$playerName` instruirá o `@tanstack/react-router` a tratar `playerName` como um [parâmetro de caminho](https://tanstack.com/router/v1/docs/framework/react/guide/path-params). Além disso, implementamos o método `validateSearch` que garante que o parâmetro de consulta `genre` seja fortemente tipado para nosso enum de gênero.
+A sintaxe `$playerName` instruirá o `@tanstack/react-router` a tratar `playerName` como um [parâmetro de caminho](https://tanstack.com/router/v1/docs/framework/react/guide/path-params). Além disso, implementamos o método `validateSearch` que garante que o parâmetro de consulta `genre` seja fortemente tipado para nosso enum de gêneros.
 </Aside>
 </TabItem>
 </Tabs>
 
-Após fazer essas alterações, seu servidor de desenvolvimento local (http://localhost:4200/) deve ter seu jogo pronto para jogar!
+Após essas alterações, seu servidor de desenvolvimento local (http://localhost:4200/) deve ter seu jogo pronto para jogar!
 
-<Drawer title="Compilar e Implantar" trigger="Você também pode compilar e implantar seu código no Cloudfront, se preferir.">
+<Drawer title="Compilar e Implantar" trigger="Você também pode compilar e implantar seu código no Cloudfront se preferir.">
 
-Para compilar seu código, execute o seguinte comando:
+Para compilar seu código, execute:
 
 <NxCommands commands={['run-many --target build --all']} />
 
@@ -127,7 +149,7 @@ Agora implante sua aplicação:
 
 <NxCommands commands={['run @dungeon-adventure/infra:deploy dungeon-adventure-infra-sandbox/*']} />
 
-Após a implantação, navegue até sua URL do Cloudfront, que pode ser encontrada inspecionando as saídas da implantação do CDK.
+Após a implantação, navegue até sua URL do Cloudfront que pode ser encontrada inspecionando as saídas da implantação do CDK.
 
 </Drawer>
 
@@ -136,4 +158,4 @@ Após a implantação, navegue até sua URL do Cloudfront, que pode ser encontra
 <Image src={gameConversationPng} alt="game-conversation.png" width="500" height="400" />
 </div>
 
-Parabéns. Você construiu e implantou seu Dungeon Adventure Game!  🎉🎉🎉
+Parabéns. Você construiu e implantou seu Jogo de Aventura em Masmorra com Agentes! 🎉🎉🎉

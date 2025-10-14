@@ -1,6 +1,6 @@
 ---
-title: "Gioco di Dungeon con IA"
-description: "Una guida dettagliata su come costruire un gioco di avventura dungeon alimentato da IA utilizzando il plugin @aws/nx-plugin."
+title: "Gioco di Dungeon con IA Agentiva"
+description: "Una guida dettagliata su come costruire un gioco di avventura in dungeon alimentato da IA agentiva utilizzando @aws/nx-plugin."
 ---
 
 
@@ -23,105 +23,40 @@ import nxGraphPng from '@assets/nx-graph.png'
 import gameSelectPng from '@assets/game-select.png'
 import gameConversationPng from '@assets/game-conversation.png'
 
-## Modulo 3: Implementazione dell'API per la storia
+## Modulo 3: Implementazione dello Story Agent
 
 <Aside type="caution">
-Assicurati di aver concesso l'accesso al modello **Anthropic Claude 3.5 Sonnet v2** seguendo i passaggi descritti in [questa guida](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html).
+Assicurati che il tuo account AWS abbia abilitato l'accesso al [modello predefinito di Strands](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/model-providers/amazon-bedrock/) all'interno di Bedrock per la tua regione target seguendo i passaggi descritti in [questa guida](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html). Al momento della stesura, si tratta di Anthropic Claude Sonnet 4.
 </Aside>
 
-Lo StoryApi consiste in una singola API `generate_story` che, dato un `Game` e una lista di `Action` come contesto, farà progredire una storia. Questa API verrà implementata come API streaming in Python/FastAPI e dimostrerà inoltre come apportare modifiche al codice generato per adattarlo allo scopo.
-
-### Implementazione dell'API
-
-Per creare la nostra API, dobbiamo prima installare alcune dipendenze aggiuntive.
-
-- `boto3` verrà utilizzato per chiamare Amazon Bedrock;
-- `uvicorn` verrà utilizzato per avviare la nostra API in combinazione con [Lambda Web Adapter (LWA)](https://github.com/awslabs/aws-lambda-web-adapter).
-- `copyfiles` è una dipendenza npm necessaria per supportare la copia multipiattaforma di file durante l'aggiornamento del task `bundle`.
-
-Per installare queste dipendenze, esegui i seguenti comandi:
-
-<NxCommands commands={["run dungeon_adventure.story_api:add --args boto3 uvicorn"]} />
-<InstallCommand pkg="copyfiles" dev />
-
-Ora sostituiamo i contenuti dei seguenti file in `packages/story_api/story_api`:
-
-<Tabs>
-<TabItem label="main.py">
-<E2ECode path="dungeon-adventure/3/main.py.template" lang="python" />
-</TabItem>
-<TabItem label="init.py">
-<E2ECode path="dungeon-adventure/3/init.py.template" lang="python" />
+Lo Story Agent è un agente [Strands](https://strandsagents.com/) che, dato un `Game` e una lista di `Action` come contesto, farà progredire una storia. Configureremo l'agente per interagire con il nostro Inventory MCP Server per gestire gli oggetti disponibili del giocatore.
 
 :::note
-La modifica sopra riportata a `init.py` rimuove semplicemente il middleware CORS per evitare conflitti con la gestione degli header CORS dell'URL della Lambda Function.
+Per semplicità in questo tutorial implementiamo l'Agente in modo "senza stato", dove ogni invocazione è una sessione indipendente che include l'intera cronologia dei messaggi. Per ambienti di produzione, considera l'integrazione con [Bedrock AgentCore Memory](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/memory.html). Ulteriore documentazione sull'uso di AgentCore Memory con Strands è [disponibile qui](https://github.com/aws/bedrock-agentcore-sdk-python/tree/main/src/bedrock_agentcore/memory/integrations/strands).
 :::
 
-</TabItem>
-</Tabs>
+### Implementazione dell'Agente
 
-Analizzando il codice sopra:
-
-- Utilizziamo l'impostazione `x-streaming` per indicare che si tratta di un'API streaming quando genereremo il nostro client SDK. Questo ci permetterà di consumare questa API in modo streaming mantenendo la type-safety!
-- La nostra API restituisce semplicemente un flusso di testo come definito sia da `media_type="text/plain"` che da `response_class=PlainTextResponse`
-
-:::note
-Ogni volta che apporti modifiche al tuo FastAPI, dovrai ricostruire il progetto per vedere le modifiche riflesse nel client generato nel tuo sito web.
-
-Apporteremo alcune altre modifiche di seguito prima di ricostruire.
-:::
-
-### Infrastruttura
-
-L'<Link path="get_started/tutorials/dungeon-game/1#game-ui-infrastructure">infrastruttura configurata precedentemente</Link> presuppone che tutte le API abbiano un API Gateway integrato con funzioni Lambda. Per il nostro `story_api` non vogliamo utilizzare API Gateway poiché non supporta risposte streaming. Utilizzeremo invece un [Lambda Function URL configurato con response streaming](https://docs.aws.amazon.com/lambda/latest/dg/configuration-response-streaming.html).
-
-Per supportare questo, aggiorneremo prima i nostri costrutti CDK come segue:
+Implementiamo il nostro agente. Aggiorna i seguenti file in `packages/story/dungeon_adventure_story/agent`:
 
 <Tabs>
-<TabItem label="story-api.ts">
-<E2ECode path="dungeon-adventure/3/story-api.ts.template" lang="typescript" />
-</TabItem>
-<TabItem label="application-stack.ts">
-<E2EDiff before="dungeon-adventure/2/stacks/application-stack.ts.template" after="dungeon-adventure/3/application-stack.ts.template" lang="typescript" />
-</TabItem>
+  <TabItem label="main.py">
+<E2ECode lang="python" path="dungeon-adventure/3/main.py.template" />
+  </TabItem>
+  <TabItem label="agent.py">
+<E2ECode lang="python" path="dungeon-adventure/3/agent.py.template" />
+  </TabItem>
 </Tabs>
 
-Ora aggiorneremo lo `story_api` per supportare la distribuzione con [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter).
+Questa configurazione implementa:
 
-<Tabs>
-<TabItem label="run.sh">
-<E2ECode path="dungeon-adventure/3/run.sh.template" lang="bash" />
-</TabItem>
-<TabItem label="project.json">
-```diff lang="json"
-// packages/story_api/project.json
-{
-  "name": "dungeon_adventure.story_api",
-  ...
-  "targets": {
-    ...
-    "bundle": {
-+      "cache": true,
-+      "executor": "nx:run-commands",
-+      "outputs": ["{workspaceRoot}/dist/packages/story_api/bundle"],
-+      "options": {
-+        "commands": [
-+          "copyfiles -f packages/story_api/run.sh dist/packages/story_api/bundle"
-+        ],
-+        "parallel": false
-+      },
-      "dependsOn": ["bundle-x86"]
-    },
-    ...
-  }
-}
-```
-</TabItem>
-</Tabs>
+- Estrazione del giocatore, genere e azioni dal payload dell'agente
+- Costruzione di un client che l'Agente può utilizzare per invocare il nostro server MCP con Autenticazione SigV4
+- Costruzione dell'agente con un prompt di sistema e gli strumenti del server MCP
 
-### Deployment e testing
+### Distribuzione e test
 
-Prima di tutto, compiliamo il codice:
+Prima, compiliamo il codice:
 
 <NxCommands commands={['run-many --target build --all']} />
 
@@ -131,13 +66,13 @@ Se incontri errori di linting, puoi eseguire questo comando per correggerli auto
 <NxCommands commands={['run-many --target lint --configuration=fix --all']} />
 </Aside>
 
-Ora puoi deployare l'applicazione eseguendo:
+Ora puoi distribuire l'applicazione eseguendo:
 
 <NxCommands commands={['run @dungeon-adventure/infra:deploy dungeon-adventure-infra-sandbox/*']} />
 
-Il deployment richiederà circa 2 minuti.
+La distribuzione richiederà circa 2 minuti.
 
-Al completamento del deployment, dovresti vedere output simili ai seguenti (alcuni valori sono stati rimossi):
+Al completamento, dovresti vedere output simili a questi _(alcuni valori sono modificati)_:
 
 ```bash
 dungeon-adventure-infra-sandbox-Application
@@ -145,114 +80,116 @@ dungeon-adventure-infra-sandbox-Application: deploying... [2/2]
 
  ✅  dungeon-adventure-infra-sandbox-Application
 
-✨  Tempo di deployment: 354s
+✨  Tempo di distribuzione: 354s
 
 Outputs:
 dungeon-adventure-infra-sandbox-Application.ElectroDbTableTableNameXXX = dungeon-adventure-infra-sandbox-Application-ElectroDbTableXXX-YYY
 dungeon-adventure-infra-sandbox-Application.GameApiEndpointXXX = https://xxx.execute-api.region.amazonaws.com/prod/
 dungeon-adventure-infra-sandbox-Application.GameUIDistributionDomainNameXXX = xxx.cloudfront.net
-dungeon-adventure-infra-sandbox-Application.StoryApiStoryApiUrlXXX = https://xxx.lambda-url.ap-southeast-2.on.aws/
+dungeon-adventure-infra-sandbox-Application.InventoryMcpArn = arn:aws:bedrock-agentcore:region:xxxxxxx:runtime/dungeonadventureventoryMcpServerXXXX-YYYY
+dungeon-adventure-infra-sandbox-Application.StoryAgentArn = arn:aws:bedrock-agentcore:region:xxxxxxx:runtime/dungeonadventurecationStoryAgentXXXX-YYYY
 dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityIdentityPoolIdXXX = region:xxx
 dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXXX = region_xxx
 ```
 
-Possiamo testare la nostra API in due modi:
+Possiamo testare l'API in due modi:
 <ul>
-<li>Avviando un'istanza locale del server FastAPI e invocare le API con `curl`.</li>
-<li>
-<Drawer title="curl abilitato Sigv4" trigger="Chiamare l'API deployata usando curl abilitato per sigv4 direttamente">
-
-<Tabs>
-  <TabItem label="Bash/Linux/macOS">
-Puoi aggiungere questo script al tuo file `.bashrc` (e eseguire `source`) oppure incollarlo direttamente nel terminale.
-```bash
-// ~/.bashrc
-acurl () {
-    REGION=$1
-    SERVICE=$2
-    shift; shift;
-    curl --aws-sigv4 "aws:amz:$REGION:$SERVICE" --user "$(aws configure get aws_access_key_id):$(aws configure get aws_secret_access_key)" -H "X-Amz-Security-Token: $(aws configure get aws_session_token)" "$@"
-}
-```
-
-Esempi di utilizzo:
-
-###### API Gateway
-```bash
-acurl ap-southeast-2 execute-api -X GET https://xxx
-```
-
-###### Lambda Function URL streaming
-```bash
-acurl ap-southeast-2 lambda -N -X POST https://xxx
-```
-  </TabItem>
-  <TabItem label="Windows PowerShell">
-Aggiungi questa funzione al tuo profilo PowerShell o incollala nella sessione corrente.
-```powershell
-function acurl {
-    param(
-        [Parameter(Mandatory=$true)][string]$Region,
-        [Parameter(Mandatory=$true)][string]$Service,
-        [Parameter(ValueFromRemainingArguments=$true)][string[]]$CurlArgs
-    )
-
-    $AccessKey = aws configure get aws_access_key_id
-    $SecretKey = aws configure get aws_secret_access_key
-    $SessionToken = aws configure get aws_session_token
-
-    & curl --aws-sigv4 "aws:amz:$Region`:$Service" --user "$AccessKey`:$SecretKey" -H "X-Amz-Security-Token: $SessionToken" @CurlArgs
-}
-```
-
-Esempi di utilizzo:
-
-###### API Gateway
-```powershell
-acurl ap-southeast-2 execute-api -X GET https://xxx
-```
-
-###### Lambda Function URL streaming
-```powershell
-acurl ap-southeast-2 lambda -N -X POST https://xxx
-```
-  </TabItem>
-</Tabs>
-
-</Drawer>
-</li>
+<li>Avviando un'istanza locale del server Agent e invocandola via `curl`</li>
+<li>Chiamando l'API distribuita usando curl con un token JWT</li>
 </ul>
 
 <Tabs>
-  <TabItem label="Locale">
-  Avvia il server FastAPI locale con:
-    <NxCommands commands={["run dungeon_adventure.story_api:serve"]} />
+  <TabItem label="Local">
+  Avvia il server Agent locale con:
+    <NxCommands highlights={['arn:aws:bedrock-agentcore:region:xxxxxxx:runtime/dungeonadventureventoryMcpServerXXXX-YYYY', 'region']} env={{INVENTORY_MCP_ARN:"arn:aws:bedrock-agentcore:region:xxxxxxx:runtime/dungeonadventureventoryMcpServerXXXX-YYYY", AWS_REGION: '<region>'}} commands={["run dungeon_adventure.story:agent-serve"]} />
 
-    Esegui la chiamata con:
+    :::caution
+    Utilizza l'output `InventoryMcpArn` del deploy CDK sopra, specificando anche la tua `AWS_REGION`.
+    :::
+
+    Quando il server è attivo (nessun output visibile!), invocalo con:
 
     ```bash
-    curl -N -X POST http://127.0.0.1:8000/story/generate \
+    curl -N -X POST http://127.0.0.1:8080/invocations \
       -d '{"genre":"superhero", "actions":[], "playerName":"UnnamedHero"}' \
-      -H "Content-Type: application/json"
+      -H "Content-Type: application/json" \
+      -H "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id: abcdefghijklmnopqrstuvwxyz-123456789"
     ```
   </TabItem>
-  <TabItem label="Deployata">
-```bash "https://xxx.lambda-url.ap-southeast-2.on.aws/" "ap-southeast-2"
-acurl ap-southeast-2 lambda -N -X POST \
-  https://xxx.lambda-url.ap-southeast-2.on.aws/story/generate \
-  -d '{"genre":"superhero", "actions":[], "playerName":"UnnamedHero"}' \
-  -H "Content-Type: application/json"
-```
-    <Aside type="caution">
-    Sostituisci il placeholder dell'URL con il valore `dungeon-adventure-infra-sandbox-Application.StoryApiStoryApiUrlXXX` dall'output del deploy CDK e imposta la regione correttamente.
-    </Aside>
+  <TabItem label="Deployed">
+    Per testare l'agente distribuito, autenticati con Cognito per ottenere un token JWT. Imposta prima le variabili d'ambiente:
+
+    ```bash
+    export POOL_ID="<UserPoolId dagli output CDK>"
+    export CLIENT_ID="<UserPoolClientId dagli output CDK>"
+    export REGION="<tua-regione>"
+    ```
+
+    Crea un utente test e ottieni il token:
+
+    ```bash
+    # Crea utente
+    aws cognito-idp admin-create-user \
+      --user-pool-id $POOL_ID \
+      --username "testuser" \
+      --temporary-password "TempPass123!" \
+      --region $REGION \
+      --message-action SUPPRESS > /dev/null
+
+    # Imposta password permanente
+    aws cognito-idp admin-set-user-password \
+      --user-pool-id $POOL_ID \
+      --username "testuser" \
+      --password "PermanentPass123!" \
+      --region $REGION \
+      --permanent > /dev/null
+
+    # Autentica e cattura token
+    export BEARER_TOKEN=$(aws cognito-idp initiate-auth \
+      --client-id "$CLIENT_ID" \
+      --auth-flow USER_PASSWORD_AUTH \
+      --auth-parameters USERNAME='testuser',PASSWORD='PermanentPass123!' \
+      --region $REGION | jq -r '.AuthenticationResult.IdToken')
+    ```
+
+    :::caution
+    Utilizza l'output `UserIdentityUserIdentityUserPoolIdXXX` per `POOL_ID` e assicurati di avere il corrispondente Client ID dagli output CDK.
+    :::
+
+    Invoca l'agente distribuito usando l'URL Bedrock AgentCore:
+
+    ```bash
+    export AGENT_ARN="<StoryAgentArn dagli output CDK>"
+    export ENCODED_ARN=$(echo $AGENT_ARN | sed 's/:/%3A/g' | sed 's/\//%2F/g')
+    export MCP_URL="https://bedrock-agentcore.$REGION.amazonaws.com/runtimes/$ENCODED_ARN/invocations?qualifier=DEFAULT"
+
+    curl -N -X POST "$MCP_URL" \
+      -H "authorization: Bearer $BEARER_TOKEN" \
+      -H "Content-Type: application/json" \
+      -H "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id: abcdefghijklmnopqrstuvwxyz-123456789" \
+      -d '{"genre":"superhero", "actions":[], "playerName":"UnnamedHero"}'
+    ```
+
+    :::note
+    La codifica URL è necessaria per formattare correttamente l'ARN nell'endpoint API di Bedrock AgentCore.
+    :::
   </TabItem>
 </Tabs>
 
-Se il comando ha successo, dovresti vedere una risposta in streaming simile a:
+Se il comando ha successo, vedrai eventi in streaming simili a:
 
 ```
-UnnamedHero si ergeva maestoso, il mantello svolazzante al vento....
+data: {"init_event_loop": true}
+
+data: {"start": true}
+
+data: {"start_event_loop": true}
+
+data: {"event": {"messageStart": {"role": "assistant"}}}
+
+data: {"event": {"contentBlockDelta": {"delta": {"text": "Welcome"}, "contentBlockIndex": 0}}}
+
+...
 ```
 
-Congratulazioni. Hai costruito e deployato la tua prima API con FastAPI!  🎉🎉🎉
+Complimenti. Hai creato e distribuito il tuo primo Agente Strands su Bedrock AgentCore Runtime! 🎉🎉🎉

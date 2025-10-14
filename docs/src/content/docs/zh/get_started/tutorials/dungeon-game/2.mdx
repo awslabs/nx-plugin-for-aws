@@ -1,6 +1,6 @@
 ---
-title: "AI地牢游戏"
-description: "使用 @aws/nx-plugin 构建人工智能驱动的地牢冒险游戏的演练。"
+title: "代理式AI地牢游戏"
+description: "使用 @aws/nx-plugin 构建代理式AI驱动的地牢冒险游戏的演练"
 ---
 
 
@@ -23,14 +23,15 @@ import nxGraphPng from '@assets/nx-graph.png'
 import gameSelectPng from '@assets/game-select.png'
 import gameConversationPng from '@assets/game-conversation.png'
 
-## 模块二：游戏API实现
+## 模块二：游戏API与库存MCP服务实现
 
-我们将从实现游戏API开始。为此，总共需要创建4个API：
+我们将从实现游戏API开始。为此需要创建5个API接口：
 
 1. `createGame` - 创建新游戏实例
 2. `queryGames` - 返回分页的历史游戏列表
 3. `saveAction` - 保存指定游戏的操作记录
-4. `queryActions` - 返回分页的指定游戏所有操作记录
+4. `queryActions` - 返回指定游戏的所有操作分页列表
+5. `queryInventory` - 返回玩家库存物品的分页列表
 
 ### API模式定义
 
@@ -46,15 +47,18 @@ import gameConversationPng from '@assets/game-conversation.png'
   <TabItem label="game.ts">
 <E2ECode lang="typescript" path="dungeon-adventure/2/schema/game.ts.template" />
   </TabItem>
+  <TabItem label="inventory.ts">
+<E2ECode lang="typescript" path="dungeon-adventure/2/schema/inventory.ts.template" />
+  </TabItem>
   <TabItem label="index.ts">
 <E2EDiff lang="typescript" before="dungeon-adventure/2/schema/index.ts.old.template" after="dungeon-adventure/2/schema/index.ts.template" />
   </TabItem>
 </Tabs>
 
-可删除`packages/game-api/src/schema/echo.ts`文件，本项目不再使用。
+项目中将不再使用`packages/game-api/src/schema/echo.ts`文件，可将其删除。
 
 <Aside type="tip">
-如上所示，每个Zod模式定义都通过`z.TypeOf`语法导出接口类型。这实现了Zod定义到TypeScript接口的自动转换，无需重复工作！
+如上所示，我们为每个Zod模式定义导出了使用`z.TypeOf`语法生成的接口。这让我们无需重复工作即可将Zod定义转换为TypeScript接口！
 </Aside>
 
 ### 实体建模
@@ -63,15 +67,54 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 <Image class="centered-image white-bg" src={dungeonAdventureErPng} alt="dungeon-adventure-er.png" width="400" height="300" />
 
-我们将使用DynamoDB实现数据库，并通过[ElectroDB](https://electrodb.dev/en/core-concepts/introduction/)客户端库简化操作。首先安装`electrodb`：
+{/* 由以下PlantUML生成： */}
+{/*
+@startuml Game API Entity Relationship Diagram
+
+!theme plain
+
+skinparam linetype ortho
+skinparam roundcorner 10
+
+entity "Game" as game {
+  + playerName : string <<PK>>
+  --
+  genre : string
+  lastUpdated : string
+}
+
+entity "Action" as action {
+  + playerName : string <<PK>>
+  + timestamp : string <<SK>>
+  --
+  role : string
+  content : string
+}
+
+entity "Item" as item {
+  + playerName : string <<PK>>
+  + itemName : string
+  --
+  emoji : string (optional)
+  lastUpdated : string
+  quantity : number
+}
+
+game ||--o{ action
+game ||--o{ item
+
+@enduml
+*/}
+
+我们将使用DynamoDB实现数据库，并通过[ElectroDB](https://electrodb.dev/en/core-concepts/introduction/)客户端库简化操作。首先运行以下命令安装`electrodb`：
 
 <InstallCommand pkg="electrodb @aws-sdk/client-dynamodb" />
 
 <Aside>
-所有依赖项都添加到根目录`package.json`，因`@aws/nx-plugin`遵循[单一版本策略](https://nx.dev/concepts/decisions/dependency-management#single-version-policy)。更多信息请参考<Link path="guides/typescript-project#dependencies">TS项目指南</Link>。
+所有依赖项都添加到根目录`package.json`中，因为`@aws/nx-plugin`遵循[单一版本策略](https://nx.dev/concepts/decisions/dependency-management#single-version-policy)原则。更多信息请参考<Link path="guides/typescript-project#dependencies">TypeScript项目指南</Link>。
 </Aside>
 
-在`packages/game-api/src/entities`目录下创建以下文件定义ElectroDB实体：
+现在根据上述ER图，在`packages/game-api/src/entities`目录下创建以下文件定义ElectroDB实体：
 
 <Tabs>
   <TabItem label="action.ts">
@@ -80,43 +123,60 @@ import gameConversationPng from '@assets/game-conversation.png'
   <TabItem label="game.ts">
 <E2ECode lang="typescript" path="dungeon-adventure/2/entities/game.ts.template" />
   </TabItem>
+  <TabItem label="inventory.ts">
+<E2ECode lang="typescript" path="dungeon-adventure/2/entities/inventory.ts.template" />
+  </TabItem>
 </Tabs>
 
-ElectroDB不仅支持类型定义，还能为时间戳等字段提供默认值。同时遵循DynamoDB最佳实践——[单表设计](https://electrodb.dev/en/core-concepts/single-table-relationships/)。
+ElectroDB功能强大，不仅可以定义类型，还能为时间戳等字段提供默认值。此外，ElectroDB遵循[单表设计](https://electrodb.dev/en/core-concepts/single-table-relationships/)，这是使用DynamoDB的最佳实践。
 
 <Aside>
-虽然ElectroDB支持[集合](https://electrodb.dev/en/modeling/collections/)，但本教程为简化流程暂不使用。
+虽然ElectroDB支持[集合](https://electrodb.dev/en/modeling/collections/)，但本教程为简化说明暂不使用。
 </Aside>
+
+为了让MCP服务能与库存交互，确保在`packages/game-api/src/index.ts`中导出库存实体：
+
+<Tabs>
+<TabItem label="packages/game-api/src/index.ts">
+<E2EDiff lang="typescript" before="dungeon-adventure/2/index.ts.old.template" after="dungeon-adventure/2/index.ts.template" />
+</TabItem>
+</Tabs>
+
+:::note
+若将实体重构到独立的共享项目中，MCP服务就不需要依赖API，这样的包结构会更合理。
+:::
 
 ### 将DynamoDB客户端注入tRPC上下文
 
-为在所有流程中共享DynamoDB客户端实例，需通过上下文传递。修改以下文件：
+由于每个操作流程都需要访问DynamoDB客户端，我们需要创建单例客户端并通过上下文传递。在`packages/game-api/src`中进行以下修改：
 
 <Tabs>
   <TabItem label="middleware/dynamodb.ts">
 <E2ECode lang="typescript" path="dungeon-adventure/2/middleware/dynamodb.ts.template" />
 
-此插件用于创建`DynamoDBClient`并注入上下文。
+该插件用于创建`DynamoDBClient`并注入到上下文中。
   </TabItem>
   <TabItem label="middleware/index.ts">
 <E2EDiff lang="typescript" before="dungeon-adventure/2/middleware/index.ts.old.template" after="dungeon-adventure/2/middleware/index.ts.template" />
 
-扩展`IMiddlewareContext`添加`IDynamoDBContext`。
+扩展`IMiddlewareContext`以添加`IDynamoDBContext`。
   </TabItem>
   <TabItem label="init.ts">
 <E2EDiff lang="typescript" before="dungeon-adventure/2/init.ts.old.template" after="dungeon-adventure/2/init.ts.template" />
 
-DynamoDB插件已集成。
+DynamoDB插件已配置。
 
 <Aside>
-`concat` API将中间件绑定到流程定义。详情参考[concat指南](https://trpc.io/docs/server/middlewares#concat)。
+`concat` API将中间件绑定到定义的操作流程。更多细节请参考[concat指南](https://trpc.io/docs/server/middlewares#concat)。
 </Aside>
   </TabItem>
 </Tabs>
 
-### 定义流程
+### 定义操作流程
 
-在`packages/game-api/src/procedures`中实现API方法：
+现在开始实现API方法。在`packages/game-api/src/procedures`中进行以下修改：
+
+#### 查询操作
 
 <Tabs>
   <TabItem label="query-actions.ts">
@@ -125,6 +185,14 @@ DynamoDB插件已集成。
   <TabItem label="query-games.ts">
 <E2ECode lang="typescript" path="dungeon-adventure/2/procedures/query-games.ts.template" />
   </TabItem>
+  <TabItem label="query-inventory.ts">
+<E2ECode lang="typescript" path="dungeon-adventure/2/procedures/query-inventory.ts.template" />
+  </TabItem>
+</Tabs>
+
+#### 变更操作
+
+<Tabs>
   <TabItem label="save-action.ts">
 <E2ECode lang="typescript" path="dungeon-adventure/2/procedures/save-action.ts.template" />
   </TabItem>
@@ -133,17 +201,42 @@ DynamoDB插件已集成。
   </TabItem>
 </Tabs>
 
-可删除`packages/game-api/src/procedures/echo.ts`文件。
+项目中不再使用`echo.ts`文件（位于`packages/game-api/src/procedures`），可将其删除。
 
 ### 路由配置
 
-更新路由文件整合流程：
+完成操作流程定义后，将其接入API。更新以下文件：
 
+<Tabs>
+  <TabItem label="packages/game-api/src/router.ts">
 <E2EDiff lang="typescript" before="dungeon-adventure/2/router.ts.old.template" after="dungeon-adventure/2/router.ts.template" />
+</TabItem>
+</Tabs>
+
+### 库存MCP服务
+
+现在创建MCP服务，使代理能管理玩家库存物品。
+
+为代理定义以下工具：
+- `list-inventory-items` 获取玩家当前库存物品
+- `add-to-inventory` 向库存添加物品
+- `remove-from-inventory` 从库存移除物品
+
+为节省时间，我们将所有工具内联定义：
+
+<Tabs>
+  <TabItem label="packages/inventory/src/mcp-server/server.ts">
+<E2EDiff lang="typescript" before="dungeon-adventure/2/mcp/server.ts.old.template" after="dungeon-adventure/2/mcp/server.ts.template" />
+</TabItem>
+</Tabs>
+
+随着工具数量增加，可按需将其重构到独立文件中。
+
+现在可以删除`packages/inventory/src/mcp-server`中未使用的`tools`和`resources`目录。
 
 ### 基础设施
 
-最后更新基础设施以创建DynamoDB表并配置权限：
+最后更新基础设施以创建DynamoDB表并授予GameAPI操作权限。按以下方式更新`packages/infra/src`：
 
 <Tabs>
   <TabItem label="constructs/electrodb-table.ts">
@@ -153,31 +246,31 @@ DynamoDB插件已集成。
 <E2EDiff lang="typescript" before="dungeon-adventure/1/application-stack.ts.template" after="dungeon-adventure/2/stacks/application-stack.ts.template" />
 
 :::note
-由于每个流程由独立Lambda函数处理，可根据实现按需分配最小读写权限。
+注意此处每个操作流程由独立lambda函数处理，因此可以遵循最小权限原则，根据实现仅分配必要的读写权限。
 :::
   </TabItem>
 </Tabs>
 
 ### 部署与测试
 
-首先构建代码：
+首先构建代码库：
 
 <NxCommands commands={['run-many --target build --all']} />
 
 <Aside type="tip">
-若出现lint错误，可运行以下命令自动修复：
+若遇到lint错误，可运行以下命令自动修复：
 
 <NxCommands commands={['run-many --target lint --configuration=fix --all']} />
 </Aside>
 
-部署应用：
+现在运行以下命令部署应用：
 
 <NxCommands commands={['run @dungeon-adventure/infra:deploy dungeon-adventure-infra-sandbox/*']} />
 
 首次部署约需8分钟，后续部署约2分钟。
 
 :::tip
-迭代Lambda代码时，构建后使用`--hotswap`标志可大幅缩短部署时间（2-3秒）：
+若仅修改lambda函数代码，可在构建后使用`--hotswap`标志进行热部署（约2-3秒）：
 
 <NxCommands commands={['run @dungeon-adventure/infra:deploy dungeon-adventure-infra-sandbox/* --hotswap']} />
 :::
@@ -190,9 +283,9 @@ dungeon-adventure-sandbox-Application: deploying... [2/2]
 
  ✅  dungeon-adventure-sandbox-Application
 
-✨  Deployment time: 354s
+✨  部署时间：354秒
 
-Outputs:
+输出：
 dungeon-adventure-sandbox-Application.ElectroDbTableTableNameXXX = dungeon-adventure-sandbox-Application-ElectroDbTableXXX-YYY
 dungeon-adventure-sandbox-Application.GameApiEndpointXXX = https://xxx.execute-api.region.amazonaws.com/prod/
 dungeon-adventure-sandbox-Application.GameUIDistributionDomainNameXXX = xxx.cloudfront.net
@@ -201,15 +294,16 @@ dungeon-adventure-sandbox-Application.UserIdentityUserIdentityIdentityPoolIdXXX 
 dungeon-adventure-sandbox-Application.UserIdentityUserIdentityUserPoolIdXXX = region_xxx
 ```
 
-测试方式：
+可通过以下方式测试API：
 <ul>
-<li>本地启动tRPC后端，使用`curl`调用API</li>
+<li>启动本地tRPC后端实例并使用`curl`调用API</li>
 <li>
-<Drawer title="启用Sigv4的curl" trigger="调用已部署API（需Sigv4签名）">
+<Drawer title="启用Sigv4签名的curl" trigger="调用已部署API（使用Sigv4签名curl）">
 
 <Tabs>
   <TabItem label="Bash/Linux/macOS">
-将以下脚本加入`.bashrc`（需`source`）或直接粘贴到终端：
+可将以下脚本添加到`.bashrc`文件（并`source`），或直接在终端粘贴：
+
 ```bash
 // ~/.bashrc
 acurl () {
@@ -227,13 +321,14 @@ acurl () {
 acurl ap-southeast-2 execute-api -X GET https://xxx
 ```
 
-###### Lambda函数URL
+###### Lambda函数URL流式传输
 ```bash
 acurl ap-southeast-2 lambda -N -X POST https://xxx
 ```
   </TabItem>
   <TabItem label="Windows PowerShell">
-将函数加入PowerShell配置文件或当前会话：
+可将以下函数添加到PowerShell配置文件或当前会话：
+
 ```powershell
 function acurl {
     param(
@@ -257,7 +352,7 @@ function acurl {
 acurl ap-southeast-2 execute-api -X GET https://xxx
 ```
 
-###### Lambda函数URL
+###### Lambda函数URL流式传输
 ```powershell
 acurl ap-southeast-2 lambda -N -X POST https://xxx
 ```
@@ -268,38 +363,41 @@ acurl ap-southeast-2 lambda -N -X POST https://xxx
 </li>
 </ul>
 
+
 <Tabs>
   <TabItem label="本地测试">
-    运行以下命令启动本地服务：
+    运行以下命令启动本地`game-api`服务：
 
     <NxCommands highlights={['dungeon-adventure-infra-sandbox-Application-ElectroDbTableXXX-YYY']} env={{TABLE_NAME:"dungeon-adventure-infra-sandbox-Application-ElectroDbTableXXX-YYY"}} commands={["run @dungeon-adventure/game-api:serve"]} />
 
     <Aside type="caution">
-    使用CDK部署输出中的`dungeon-adventure-infra-sandbox-Application.ElectroDbTableTableNameXXX`替换高亮占位符。
+    请使用CDK部署输出中的`dungeon-adventure-infra-sandbox-Application.ElectroDbTableTableNameXXX`值替换高亮占位符。
     </Aside>
 
     服务启动后执行：
+
     ```bash
     curl -X GET 'http://localhost:2022/games.query?input=%7B%7D'
     ```
   </TabItem>
-  <TabItem label="云端测试">
+  <TabItem label="已部署环境">
 ```bash "https://xxx.execute-api.ap-southeast-2.amazonaws.com/prod/" "ap-southeast-2"
 acurl ap-southeast-2 execute-api -X GET 'https://xxx.execute-api.ap-southeast-2.amazonaws.com/prod/games.query?input=%7B%7D'
 ```
     <Aside type="caution">
-    使用CDK输出中的`dungeon-adventure-infra-sandbox-Application.GameApiGameApiEndpointXXX`替换URL，并设置正确区域。
+    使用CDK部署输出中的`dungeon-adventure-infra-sandbox-Application.GameApiGameApiEndpointXXX`值替换高亮占位符，并设置对应区域。
     </Aside>
   </TabItem>
 </Tabs>
 
 :::note
-`%7B%7D`是URI编码的空JSON对象`{}`。
+测试API时传递的`%7B%7D`是URI编码的空JSON对象(`{}`)。
 :::
 
-成功执行后将返回：
+若命令执行成功，将看到如下响应：
+
 ```json
 {"result":{"data":{"items":[],"cursor":null}}}
 ```
 
-恭喜！你已成功使用tRPC构建并部署首个API！🎉🎉🎉
+恭喜！您已成功使用tRPC构建并部署了首个API！🎉🎉🎉
