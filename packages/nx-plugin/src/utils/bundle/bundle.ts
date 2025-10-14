@@ -239,6 +239,10 @@ const disableTreeShake = (patterns: RegExp[]) => ({
           factory.createObjectLiteralExpression(
             [
               factory.createPropertyAssignment(
+                factory.createIdentifier('tsconfig'),
+                factory.createStringLiteral('tsconfig.lib.json', true),
+              ),
+              factory.createPropertyAssignment(
                 factory.createIdentifier('input'),
                 factory.createStringLiteral(opts.targetFilePath, true),
               ),
