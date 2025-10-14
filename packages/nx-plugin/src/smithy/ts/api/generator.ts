@@ -144,6 +144,7 @@ export const tsSmithyApiGenerator = async (
   // Add bundle target using rolldown
   addTypeScriptBundleTarget(tree, backendProjectConfig, {
     targetFilePath: 'src/handler.ts',
+    external: [/@aws-sdk\/.*/], // lambda runtime provides aws sdk
   });
 
   const cmd = new FsCommands(tree);

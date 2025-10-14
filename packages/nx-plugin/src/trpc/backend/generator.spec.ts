@@ -242,6 +242,9 @@ describe('trpc backend generator', () => {
     expect(rolldownConfig).toContain(
       '../../dist/apps/test-api/bundle/index.js',
     );
+
+    // AWS SDK is provided by lambda runtime
+    expect(rolldownConfig).toContain('external: [/@aws-sdk\\/.*/]');
   });
 
   it('should add rolldown dependency to package.json', async () => {

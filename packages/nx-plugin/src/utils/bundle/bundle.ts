@@ -127,6 +127,12 @@ export interface AddTypeScriptBundleTargetOptions {
    * Modules to omit from the bundle and treat as external
    */
   external?: (string | RegExp)[];
+
+  /**
+   * Target platform for the bundle
+   * @default 'node'
+   */
+  platform?: 'node' | 'browser' | 'neutral';
 }
 
 /**
@@ -138,6 +144,14 @@ export const addTypeScriptBundleTarget = (
   opts: AddTypeScriptBundleTargetOptions,
 ) => {
   project.targets ??= {};
+
+  // Check if AWS SDK is external
+  const awsSdkRegex = /@aws-sdk\/.*/;
+  const isAwsSdkExternal = opts.external?.some((ext) =>
+    ext instanceof RegExp
+      ? ext.source === awsSdkRegex.source
+      : ext === awsSdkRegex.source,
+  );
 
   // Generate empty rolldown config if it doesn't exist
   generateFiles(
@@ -172,6 +186,39 @@ export const addTypeScriptBundleTarget = (
 
   const rolldownConfigArraySelector =
     'CallExpression:has(Identifier[name="defineConfig"]) > ArrayLiteralExpression';
+
+  // Add disableTreeShake function if AWS SDK is not external and it doesn't exist
+  // This is due to an issue with rolldown bundling for the SDK, and can likely be removed when resolved
+  // https://github.com/rolldown/rolldown/issues/6513
+  if (!isAwsSdkExternal) {
+    const disableTreeShakeSelector =
+      'VariableDeclaration:has(Identifier[name="disableTreeShake"])';
+    if (
+      query(tree, rolldownConfigPath, disableTreeShakeSelector).length === 0
+    ) {
+      const content = tree.read(rolldownConfigPath, 'utf-8');
+      const disableTreeShakeFunction = `// Disables tree-shaking for the given module patterns
+const disableTreeShake = (patterns: RegExp[]) => ({
+  name: 'disable-treeshake',
+  transform: (code, id) => {
+    if (patterns.some(p => p.test(id))) {
+      return { code, map: null, moduleSideEffects: 'no-treeshake' };
+    }
+    return null;
+  },
+});
+
+`;
+      const defineConfigIndex = content.indexOf('export default defineConfig');
+      if (defineConfigIndex !== -1) {
+        const newContent =
+          content.slice(0, defineConfigIndex) +
+          disableTreeShakeFunction +
+          content.slice(defineConfigIndex);
+        tree.write(rolldownConfigPath, newContent);
+      }
+    }
+  }
 
   // Check whether we already have a config entry with input set to targetFilePath
   if (
@@ -225,6 +272,10 @@ export const addTypeScriptBundleTarget = (
                   true,
                 ),
               ),
+              factory.createPropertyAssignment(
+                factory.createIdentifier('platform'),
+                factory.createStringLiteral(opts.platform ?? 'node', true),
+              ),
               ...(opts.external
                 ? [
                     factory.createPropertyAssignment(
@@ -238,6 +289,26 @@ export const addTypeScriptBundleTarget = (
                               ),
                         ),
                       ),
+                    ),
+                  ]
+                : []),
+              ...(!isAwsSdkExternal
+                ? [
+                    factory.createPropertyAssignment(
+                      factory.createIdentifier('plugins'),
+                      factory.createArrayLiteralExpression([
+                        factory.createCallExpression(
+                          factory.createIdentifier('disableTreeShake'),
+                          undefined,
+                          [
+                            factory.createArrayLiteralExpression([
+                              factory.createRegularExpressionLiteral(
+                                `/${awsSdkRegex.source}/`,
+                              ),
+                            ]),
+                          ],
+                        ),
+                      ]),
                     ),
                   ]
                 : []),

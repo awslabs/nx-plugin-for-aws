@@ -401,6 +401,19 @@ describe('tsSmithyApiGenerator', () => {
     expect(bundleTarget.options.command).toEqual(
       'rolldown -c rolldown.config.ts',
     );
+
+    const rolldownConfig = tree.read(
+      'test-api/backend/rolldown.config.ts',
+      'utf-8',
+    );
+
+    expect(rolldownConfig).toContain('defineConfig');
+    expect(rolldownConfig).toContain('src/handler.ts');
+    expect(rolldownConfig).toContain(
+      '../../dist/test-api/backend/bundle/index.js',
+    );
+    // AWS SDK is provided by lambda runtime
+    expect(rolldownConfig).toContain('external: [/@aws-sdk\\/.*/]');
   });
 
   it('should add generator metadata to backend project configuration', async () => {
