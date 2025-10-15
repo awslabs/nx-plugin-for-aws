@@ -1,6 +1,6 @@
 ---
 title: "Jogo de Dungeons de IA Agêntica"
-description: "Um guia passo a passo de como construir um jogo de aventura de dungeon alimentado por IA agêntica usando o @aws/nx-plugin."
+description: "Um guia passo a passo de como construir um jogo de aventura de dungeon com IA agêntica usando o @aws/nx-plugin."
 ---
 
 
@@ -26,10 +26,10 @@ import gameConversationPng from '@assets/game-conversation.png'
 ## Módulo 3: Implementação do Agente de História
 
 <Aside type="caution">
-Certifique-se que sua conta AWS habilitou o acesso ao [modelo padrão da Strands](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/model-providers/amazon-bedrock/) dentro do Bedrock para sua região alvo seguindo os passos do [guia oficial](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html). No momento desta escrita, o modelo é o Anthropic Claude Sonnet 4.
+Certifique-se que sua conta AWS habilitou o acesso ao [modelo padrão da Strands](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/model-providers/amazon-bedrock/) dentro do Bedrock para sua região alvo seguindo os passos do [guia oficial](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html). No momento da escrita, este é o Anthropic Claude Sonnet 4.
 </Aside>
 
-O Story Agent é um agente [Strands](https://strandsagents.com/) que, dado um `Game` e uma lista de `Action`s como contexto, progride em uma história. Configuraremos o agente para interagir com nosso Inventory MCP Server e gerenciar os itens disponíveis do jogador.
+O Story Agent é um agente [Strands](https://strandsagents.com/) que, dado um `Game` e uma lista de `Action`s como contexto, irá progredir uma história. Configuraremos o agente para interagir com nosso Inventory MCP Server e gerenciar os itens disponíveis do jogador.
 
 :::note
 Para simplificar este tutorial, implementamos o Agente de forma "stateless" onde cada invocação é uma sessão independente incluindo todo o histórico. Para produção, considere integrar com [Bedrock AgentCore Memory](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/memory.html). Mais documentação sobre uso com Strands está [disponível aqui](https://github.com/aws/bedrock-agentcore-sdk-python/tree/main/src/bedrock_agentcore/memory/integrations/strands).
@@ -48,11 +48,11 @@ Vamos implementar nosso agente. Atualize os seguintes arquivos em `packages/stor
   </TabItem>
 </Tabs>
 
-Esta configuração realiza:
+Esta configuração define:
 
 - Extração do jogador, gênero e ações do payload do agente
 - Construção de um cliente para o Agente invocar nosso MCP server com autenticação SigV4
-- Configuração do agente com prompt de sistema e ferramentas do MCP server
+- Construção do agente com um prompt de sistema e ferramentas do MCP server
 
 ### Implantação e Testes
 
@@ -68,11 +68,11 @@ Se encontrar erros de lint, execute este comando para correção automática:
 
 Implante a aplicação com:
 
-<NxCommands commands={['run @dungeon-adventure/infra:deploy dungeon-adventure-infra-sandbox/*']} />
+<NxCommands commands={['deploy infra dungeon-adventure-infra-sandbox/*']} />
 
 Esta implantação levará aproximadamente 2 minutos.
 
-Após conclusão, você verá saídas similares a estas _(valores sensíveis omitidos)_:
+Após conclusão, você verá saídas similares a estas _(valores redigidos)_:
 
 ```bash
 dungeon-adventure-infra-sandbox-Application
@@ -94,38 +94,38 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
 
 Podemos testar nossa API de duas formas:
 <ul>
-<li>Iniciando uma instância local do Agent server e invocando via `curl`</li>
+<li>Iniciando uma instância local do servidor Agent e invocando com `curl`</li>
 <li>Chamando a API implantada usando curl com token JWT</li>
 </ul>
 
 <Tabs>
   <TabItem label="Local">
   Inicie o servidor local com:
-    <NxCommands highlights={['arn:aws:bedrock-agentcore:region:xxxxxxx:runtime/dungeonadventureventoryMcpServerXXXX-YYYY', 'region']} env={{INVENTORY_MCP_ARN:"arn:aws:bedrock-agentcore:region:xxxxxxx:runtime/dungeonadventureventoryMcpServerXXXX-YYYY", AWS_REGION: '<region>'}} commands={["run dungeon_adventure.story:agent-serve"]} />
+    <NxCommands highlights={['arn:aws:bedrock-agentcore:region:xxxxxxx:runtime/dungeonadventureventoryMcpServerXXXX-YYYY', 'region']} env={{PORT: '9999', INVENTORY_MCP_ARN:"arn:aws:bedrock-agentcore:region:xxxxxxx:runtime/dungeonadventureventoryMcpServerXXXX-YYYY", AWS_REGION: '<region>'}} commands={["run dungeon_adventure.story:agent-serve"]} />
 
     :::caution
-    Use o output `InventoryMcpArn` do CDK deploy acima, especificando também sua `AWS_REGION` alvo.
+    Use o output `InventoryMcpArn` do CDK deploy acima, e especifique sua `AWS_REGION` alvo.
     :::
 
     Com o servidor rodando (sem output visível), invoque com:
 
     ```bash
-    curl -N -X POST http://127.0.0.1:8080/invocations \
+    curl -N -X POST http://127.0.0.1:9999/invocations \
       -d '{"genre":"superhero", "actions":[], "playerName":"UnnamedHero"}' \
       -H "Content-Type: application/json" \
       -H "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id: abcdefghijklmnopqrstuvwxyz-123456789"
     ```
   </TabItem>
   <TabItem label="Deployed">
-    Para testar o agente implantado, autentique via Cognito para obter um token JWT. Primeiro configure variáveis:
+    Para testar o agente implantado, autentique via Cognito para obter um token JWT:
 
     ```bash
-    export POOL_ID="<UserPoolId dos outputs do CDK>"
-    export CLIENT_ID="<UserPoolClientId dos outputs do CDK>"
+    export POOL_ID="<UserPoolId das saídas do CDK>"
+    export CLIENT_ID="<UserPoolClientId das saídas do CDK>"
     export REGION="<sua-regiao>"
     ```
 
-    Crie um usuário de teste e capture o token:
+    Crie um usuário de teste e obtenha o token:
 
     ```bash
     aws cognito-idp admin-create-user \
@@ -156,7 +156,7 @@ Podemos testar nossa API de duas formas:
     Invoke o agente implantado:
 
     ```bash
-    export AGENT_ARN="<StoryAgentArn dos outputs do CDK>"
+    export AGENT_ARN="<StoryAgentArn das saídas do CDK>"
     export ENCODED_ARN=$(echo $AGENT_ARN | sed 's/:/%3A/g' | sed 's/\//%2F/g')
     export MCP_URL="https://bedrock-agentcore.$REGION.amazonaws.com/runtimes/$ENCODED_ARN/invocations?qualifier=DEFAULT"
 
@@ -173,7 +173,7 @@ Podemos testar nossa API de duas formas:
   </TabItem>
 </Tabs>
 
-Se bem sucedido, você verá eventos streamados como:
+Em caso de sucesso, você verá eventos sendo streamados como:
 
 ```
 data: {"init_event_loop": true}
@@ -189,4 +189,4 @@ data: {"event": {"contentBlockDelta": {"delta": {"text": "Welcome"}, "contentBlo
 ...
 ```
 
-Parabéns! Você implementou e implantou seu primeiro Agente Strands no Bedrock AgentCore Runtime! 🎉🎉🎉
+Parabéns. Você construiu e implantou seu primeiro Agente Strands no Bedrock AgentCore Runtime! 🎉🎉🎉
