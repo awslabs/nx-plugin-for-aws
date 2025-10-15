@@ -1,59 +1,29 @@
-import json
+import os
+from bedrock_agentcore.runtime import BedrockAgentCoreApp
 
-from boto3 import client
-from fastapi.responses import PlainTextResponse, StreamingResponse
-from pydantic import BaseModel
+from .agent import get_agent
 
-from .init import app, lambda_handler
+app = BedrockAgentCoreApp()
 
-handler = lambda_handler
+PORT = int(os.environ.get("PORT", "8080"))
 
-bedrock = client('bedrock-runtime')
+@app.entrypoint
+async def invoke(payload, context):
+    """Handler for agent invocation"""
+    player_name = payload.get("playerName")
+    genre = payload.get("genre")
+    actions = payload.get("actions")
 
-class Action(BaseModel):
-    role: str
-    content: str
+    messages = [{"role": "user", "content": [{"text": "Continue or create a new story..."}]}]
+    for action in actions:
+        messages.append({"role": action["role"], "content": [{"text": action["content"]}]})
 
-class StoryRequest(BaseModel):
-    genre: str
-    playerName: str
-    actions: list[Action]
+    with get_agent(player_name, genre, session_id=context.session_id) as agent:
+        stream = agent.stream_async(messages)
+        async for event in stream:
+            print(event)
+            yield (event)
 
-async def bedrock_stream(request: StoryRequest):
-    messages = [
-        {"role": "user", "content": "Continue or create a new story..."}
-    ]
 
-    for action in request.actions:
-        messages.append({"role": action.role, "content": action.content})
-
-    response = bedrock.invoke_model_with_response_stream(
-        modelId='anthropic.claude-3-sonnet-20240229-v1:0',
-        body=json.dumps({
-            "system":f"""
-            You are running an AI text adventure game in the {request.genre} genre.
-            Player: {request.playerName}. Return less than 200 characters of text.
-            """,
-            "messages": messages,
-            "max_tokens": 1000,
-            "temperature": 0.7,
-            "anthropic_version": "bedrock-2023-05-31"
-        })
-    )
-
-    stream = response.get('body')
-    if stream:
-        for event in stream:
-            chunk = event.get('chunk')
-            if chunk:
-                message = json.loads(chunk.get("bytes").decode())
-                if message['type'] == "content_block_delta":
-                    yield message['delta']['text'] or ""
-                elif message['type'] == "message_stop":
-                    yield "\n"
-
-@app.post("/story/generate",
-          openapi_extra={'x-streaming': True},
-          response_class=PlainTextResponse)
-def generate_story(request: StoryRequest) -> str:
-    return StreamingResponse(bedrock_stream(request), media_type="text/plain")
+if __name__ == "__main__":
+    app.run(port=PORT)

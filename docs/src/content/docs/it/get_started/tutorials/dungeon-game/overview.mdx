@@ -1,6 +1,6 @@
 ---
-title: "Gioco di Dungeon con IA"
-description: "Una guida dettagliata su come costruire un gioco di avventura dungeon alimentato da IA utilizzando il plugin @aws/nx-plugin."
+title: "Gioco di Dungeon con IA Agentiva"
+description: "Una guida dettagliata su come costruire un gioco di avventura in dungeon alimentato da IA agentiva utilizzando @aws/nx-plugin."
 ---
 
 
@@ -12,6 +12,8 @@ import Drawer from '@components/drawer.astro';
 import RunGenerator from '@components/run-generator.astro';
 import NxCommands from '@components/nx-commands.astro';
 import InstallCommand from '@components/install-command.astro';
+import Link from '@components/link.astro';
+
 import dungeonAdventureArchitecturePng from '@assets/dungeon-game-architecture.png'
 import dungeonAdventureErPng from '@assets/dungeon-adventure-er.png'
 import baselineWebsitePng from '@assets/baseline-website.png'
@@ -22,25 +24,26 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 ## Panoramica
 
-In questo tutorial costruirai un gioco di avventura in stile dungeon alimentato da IA. Questo tutorial non presuppone alcuna conoscenza pregressa di `@aws/nx-plugin` o tecnologie correlate. Le tecniche che apprenderai sono fondamentali per costruire qualsiasi applicazione basata su `@aws/nx-plugin`, e una comprensione completa ti darà una profonda conoscenza dello strumento insieme alle basi per utilizzare [NX](https://nx.dev/).
+Durante questo tutorial costruirai un gioco di avventura in stile dungeon potenziato da Agentic AI. Questo tutorial non richiede alcuna conoscenza pregressa di `@aws/nx-plugin` o tecnologie correlate. Le tecniche che apprenderai sono fondamentali per costruire qualsiasi applicazione basata su `@aws/nx-plugin`, e una piena comprensione ti darà una conoscenza approfondita del plugin e una comprensione di base dell'utilizzo di [NX](https://nx.dev/).
 
-<Aside>Questo tutorial è pensato per chi preferisce imparare facendo e vuole creare rapidamente qualcosa di tangibile. Se preferisci apprendere ogni concetto passo dopo passo, consulta le guide dei singoli componenti</Aside>
+<Aside>Questo tutorial è pensato per chi preferisce imparare facendo e vuole realizzare rapidamente qualcosa di tangibile. Se preferisci apprendere ogni concetto passo dopo passo, consulta le guide dei singoli componenti</Aside>
 
 Gli utenti che completeranno questo tutorial acquisiranno le conoscenze per:
 
 - utilizzare `@aws/nx-plugin` per creare nuove applicazioni
-- usare NX per gestire/compilare il codice
-- costruire API usando sia tRPC che FastAPI
+- usare NX per gestire/costruire la codebase
+- costruire API con tRPC
+- sviluppare Agent con Strands
+- implementare server MCP in TypeScript
 - utilizzare Tanstack router per creare nuove pagine
 - usare Tanstack query per chiamare API backend
-- modificare il codice generato per adattarlo allo scopo
 - creare e distribuire infrastrutture CDK
 
 ## Cosa costruirai?
 
-In questo tutorial creerai un gioco di avventura in stile dungeon alimentato da IA utilizzando `@aws/nx-plugin`.
+In questo tutorial costruirai un gioco di avventura in stile dungeon potenziato da Agentic AI utilizzando `@aws/nx-plugin`.
 
-Ecco un'anteprima del risultato finale:
+Puoi vedere come apparirà una volta completato qui:
 
 <Image src={gameSelectPng} alt="game-select.png" width="500" height="400" />
 <div style="margin-top: -100px; margin-left: 100px;">
@@ -49,21 +52,27 @@ Ecco un'anteprima del risultato finale:
 
 ### Componenti dell'applicazione
 
-L'architettura del gioco utilizza i seguenti componenti:
+Il gioco sarà costruito utilizzando la seguente architettura a componenti:
 
-<Image class="white-bg" src={dungeonAdventureArchitecturePng} alt="dungeon-game-architecture.png" width="800" height="600" />
+<Image style="margin: auto" src={dungeonAdventureArchitecturePng} alt="dungeon-game-architecture.png" height="600" />
 
-- API [tRPC](https://trpc.io/) che usa [ElectroDB](https://electrodb.dev/)/[DynamoDB](https://aws.amazon.com/dynamodb/) per gestire lo stato del gioco
-- Funzione Lambda Python/[FastAPI](https://fastapi.tiangolo.com/) con risposte in streaming per la generazione della storia (basata su [Amazon Bedrock](https://aws.amazon.com/bedrock/))
 - Frontend React/Vite che utilizza:
   - Amazon Cognito/Identity Pools per chiamate API sicure
-  - [Tanstack router](https://tanstack.com/router/latest) con routing basato su file e type safety
-  - SDK generati per chiamare le API di Gioco e Storia (con [Tanstack query](https://tanstack.com/query/latest))
-- Infrastruttura [CDK](https://docs.aws.amazon.com/cdk/v2/guide/home.html) per il deployment
+  - [Tanstack router](https://tanstack.com/router/latest) con supporto al routing basato su file type-safe
+  - SDK generati per interagire con la Game API
+- API [tRPC](https://trpc.io/) che usa [ElectroDB](https://electrodb.dev/)/[DynamoDB](https://aws.amazon.com/dynamodb/) per gestire lo stato del gioco
+- Agent [Strands](https://strandsagents.com/latest/) ospitato su [Amazon Bedrock AgentCore](https://aws.amazon.com/bedrock/agentcore/) per eseguire il gioco
+- Server MCP TypeScript ospitato su [Amazon Bedrock AgentCore](https://aws.amazon.com/bedrock/agentcore/) per gestire l'inventario del giocatore
+- Infrastruttura [CDK](https://docs.aws.amazon.com/cdk/v2/guide/home.html) per il deployment dell'applicazione
 
 ## Prerequisiti
 
-Sono necessarie le seguenti dipendenze globali:
+Sono necessarie le seguenti dipendenze globali prima di procedere:
 
-<Snippet name="prerequisites" />
-- Assicurati che il tuo account AWS abbia abilitato l'accesso al modello Anthropic Claude 3.5 Sonnet v2 in Bedrock per la regione target seguendo i passaggi della [questa guida](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html).
+<Snippet name="required-prerequisites" />
+- [Docker](https://www.docker.com/) è richiesto per la costruzione dei componenti AgentCore
+- Assicurati che il tuo account AWS abbia abilitato l'accesso al [modello predefinito di Strands](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/model-providers/amazon-bedrock/) in Bedrock per la tua regione target seguendo i passaggi della [guida ufficiale](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html). Al momento della stesura si tratta di Anthropic Claude Sonnet 4.
+
+:::tip
+Se utilizzi un assistente AI come Kiro, Amazon Q Developer, Cursor, Claude Code o Cline, potresti voler <Link path="/get_started/building-with-ai">installare il plugin Nx per AWS MCP server.</Link>
+:::

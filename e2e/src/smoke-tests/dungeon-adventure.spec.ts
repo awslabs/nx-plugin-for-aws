@@ -42,7 +42,19 @@ describe('smoke test - dungeon-adventure', () => {
       opts,
     );
     await runCLI(
-      `generate @aws/nx-plugin:py#fast-api --name=StoryApi --moduleName=story_api --no-interactive`,
+      `generate @aws/nx-plugin:py#project --name=story --no-interactive`,
+      opts,
+    );
+    await runCLI(
+      `generate @aws/nx-plugin:py#strands-agent --project=story --no-interactive`,
+      opts,
+    );
+    await runCLI(
+      `generate @aws/nx-plugin:ts#project --name=inventory --no-interactive`,
+      opts,
+    );
+    await runCLI(
+      `generate @aws/nx-plugin:ts#mcp-server --project=inventory --no-interactive`,
       opts,
     );
     await runCLI(
@@ -52,10 +64,6 @@ describe('smoke test - dungeon-adventure', () => {
     // No need to allow signup for the e2e tests
     await runCLI(
       `generate @aws/nx-plugin:ts#react-website#auth --cognitoDomain=game-ui --project=@dungeon-adventure/game-ui --no-interactive --allowSignup=false`,
-      opts,
-    );
-    await runCLI(
-      `generate @aws/nx-plugin:api-connection --sourceProject=@dungeon-adventure/game-ui --targetProject=dungeon_adventure.story_api --no-interactive`,
       opts,
     );
     await runCLI(
@@ -82,7 +90,7 @@ describe('smoke test - dungeon-adventure', () => {
       opts,
     );
 
-    // 2. Game API
+    // 2. Game API and Inventory MCP Server
 
     await runCLI(
       `${getPackageManagerCommand(pkgMgr).add} electrodb @aws-sdk/client-dynamodb`,
@@ -123,6 +131,16 @@ describe('smoke test - dungeon-adventure', () => {
     );
 
     writeFileSync(
+      `${opts.cwd}/packages/game-api/src/schema/inventory.ts`,
+      readFileSync(
+        join(
+          __dirname,
+          '../files/dungeon-adventure/2/schema/inventory.ts.template',
+        ),
+      ),
+    );
+
+    writeFileSync(
       `${opts.cwd}/packages/game-api/src/schema/index.ts`,
       readFileSync(
         join(
@@ -150,6 +168,16 @@ describe('smoke test - dungeon-adventure', () => {
         join(
           __dirname,
           '../files/dungeon-adventure/2/entities/game.ts.template',
+        ),
+      ),
+    );
+
+    writeFileSync(
+      `${opts.cwd}/packages/game-api/src/entities/inventory.ts`,
+      readFileSync(
+        join(
+          __dirname,
+          '../files/dungeon-adventure/2/entities/inventory.ts.template',
         ),
       ),
     );
@@ -202,6 +230,16 @@ describe('smoke test - dungeon-adventure', () => {
     );
 
     writeFileSync(
+      `${opts.cwd}/packages/game-api/src/procedures/query-inventory.ts`,
+      readFileSync(
+        join(
+          __dirname,
+          '../files/dungeon-adventure/2/procedures/query-inventory.ts.template',
+        ),
+      ),
+    );
+
+    writeFileSync(
       `${opts.cwd}/packages/game-api/src/procedures/save-action.ts`,
       readFileSync(
         join(
@@ -229,6 +267,29 @@ describe('smoke test - dungeon-adventure', () => {
         join(__dirname, '../files/dungeon-adventure/2/router.ts.template'),
       ),
     );
+
+    writeFileSync(
+      `${opts.cwd}/packages/game-api/src/index.ts`,
+      readFileSync(
+        join(__dirname, '../files/dungeon-adventure/2/index.ts.template'),
+      ),
+    );
+
+    writeFileSync(
+      `${opts.cwd}/packages/inventory/src/mcp-server/server.ts`,
+      readFileSync(
+        join(__dirname, '../files/dungeon-adventure/2/mcp/server.ts.template'),
+      ),
+    );
+
+    rmSync(`${opts.cwd}/packages/inventory/src/mcp-server/tools`, {
+      recursive: true,
+      force: true,
+    });
+    rmSync(`${opts.cwd}/packages/inventory/src/mcp-server/resources`, {
+      recursive: true,
+      force: true,
+    });
 
     ensureDirSync(`${opts.cwd}/packages/infra/src/constructs`);
 
@@ -261,76 +322,20 @@ describe('smoke test - dungeon-adventure', () => {
 
     // TODO: consider deploy!
 
-    // Module 3: Story API
+    // Module 3: Story Agent
 
-    await runCLI(
-      `run dungeon_adventure.story_api:add --args boto3 uvicorn`,
-      opts,
-    );
-    await runCLI(`${getPackageManagerCommand(pkgMgr).addDev} copyfiles`, {
-      ...opts,
-      prefixWithPackageManagerCmd: false,
-      retry: true,
-    });
-
-    // Update the story_api files
+    // Update the files
     writeFileSync(
-      `${opts.cwd}/packages/story_api/story_api/main.py`,
+      `${opts.cwd}/packages/story/dungeon_adventure_story/agent/main.py`,
       readFileSync(
         join(__dirname, '../files/dungeon-adventure/3/main.py.template'),
       ),
     );
 
     writeFileSync(
-      `${opts.cwd}/packages/story_api/story_api/init.py`,
+      `${opts.cwd}/packages/story/dungeon_adventure_story/agent/agent.py`,
       readFileSync(
-        join(__dirname, '../files/dungeon-adventure/3/init.py.template'),
-      ),
-    );
-
-    writeFileSync(
-      `${opts.cwd}/packages/story_api/run.sh`,
-      readFileSync(
-        join(__dirname, '../files/dungeon-adventure/3/run.sh.template'),
-      ),
-    );
-
-    // Update project.json
-    const storyApiProjectJson = JSON.parse(
-      readFileSync(`${opts.cwd}/packages/story_api/project.json`, 'utf-8'),
-    );
-    storyApiProjectJson.targets.bundle = {
-      ...storyApiProjectJson.targets.bundle,
-      cache: true,
-      outputs: ['{workspaceRoot}/dist/packages/story_api/bundle'],
-      executor: 'nx:run-commands',
-      options: {
-        commands: [
-          'copyfiles -f packages/story_api/run.sh dist/packages/story_api/bundle',
-        ],
-        parallel: false,
-      },
-    };
-    writeFileSync(
-      `${opts.cwd}/packages/story_api/project.json`,
-      JSON.stringify(storyApiProjectJson),
-    );
-
-    // Update the infrastructure files
-    writeFileSync(
-      `${opts.cwd}/packages/common/constructs/src/app/apis/story-api.ts`,
-      readFileSync(
-        join(__dirname, '../files/dungeon-adventure/3/story-api.ts.template'),
-      ),
-    );
-
-    writeFileSync(
-      `${opts.cwd}/packages/infra/src/stacks/application-stack.ts`,
-      readFileSync(
-        join(
-          __dirname,
-          '../files/dungeon-adventure/3/application-stack.ts.template',
-        ),
+        join(__dirname, '../files/dungeon-adventure/3/agent.py.template'),
       ),
     );
 
@@ -376,6 +381,17 @@ describe('smoke test - dungeon-adventure', () => {
       `${opts.cwd}/packages/game-ui/src/styles.css`,
       readFileSync(
         join(__dirname, '../files/dungeon-adventure/4/styles.css.template'),
+      ),
+    );
+
+    // Add hook
+    writeFileSync(
+      `${opts.cwd}/packages/game-ui/src/hooks/useStoryAgent.tsx`,
+      readFileSync(
+        join(
+          __dirname,
+          '../files/dungeon-adventure/4/hooks/useStoryAgent.tsx.template',
+        ),
       ),
     );
 

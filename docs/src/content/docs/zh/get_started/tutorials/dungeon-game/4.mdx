@@ -1,6 +1,6 @@
 ---
-title: "AI地牢游戏"
-description: "使用 @aws/nx-plugin 构建人工智能驱动的地牢冒险游戏的演练。"
+title: "代理式AI地牢游戏"
+description: "使用 @aws/nx-plugin 构建代理式AI驱动的地牢冒险游戏的演练"
 ---
 
 
@@ -24,7 +24,7 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 ## 模块四：用户界面实现
 
-要开始构建用户界面，我们需要将本地开发服务器指向已部署的沙盒环境。运行以下命令：
+要开始构建用户界面，我们需要将本地开发服务器配置指向已部署的沙箱环境。运行以下命令：
 
 <NxCommands commands={["run @dungeon-adventure/game-ui:load:runtime-config"]} />
 
@@ -34,26 +34,23 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 <NxCommands commands={["run @dungeon-adventure/game-ui:serve"]} />
 
-在浏览器中打开本地网站后，系统会提示登录并创建新用户。完成操作后即可看到基础网站界面：
+随后在浏览器中打开本地网站，系统将提示登录并按照指引创建新用户。完成后您将看到基础网站界面：
 
 <Image src={baselineWebsitePng} alt="baseline-website.png" width="800" height="600" />
 
 <Aside type="caution">
-_请保持开发服务器持续运行，后续所有修改都将自动热更新。_
+_在本模块剩余部分，请保持开发服务器运行，它将自动热重载所有修改。_
 </Aside>
+
+:::tip
+您也可以运行 <NxCommands commands={["run @dungeon-adventure/game-ui:serve-local"]} />，该命令会同时启动所有关联的API本地服务器，方便您同步迭代tRPC API和网站开发。
+:::
 
 ### 创建新路由 '/game'
 
-我们将通过 `@tanstack/react-router` 创建类型安全的新路由。在指定位置创建空文件：`packages/game-ui/src/routes/game/index.tsx`，注意观察开发服务器日志：
+我们将通过创建类型安全路由来展示 `@tanstack/react-router` 的功能。在指定位置创建空文件：`packages/game-ui/src/routes/game/index.tsx`，文件将立即自动更新。
 
-```bash
-♻️  重新生成路由中...
-🟡 更新 /Users/dimecha/dungeon-adventure/packages/game-ui/src/routes/game/index.tsx
-🟡 更新 /Users/dimecha/dungeon-adventure/packages/game-ui/src/routeTree.gen.ts
-✅ 路由处理完成，耗时27ms
-```
-
-`@tanstack/react-router` 已自动配置新路由，文件内容已包含路由路径：
+`@tanstack/react-router` 已自动配置新路由，您会注意到新建文件已包含路由路径：
 
 ```tsx
 import { createFileRoute } from '@tanstack/react-router'
@@ -67,19 +64,23 @@ function RouteComponent() {
 }
 ```
 
-访问 `http://localhost:4200/game` 即可看到新页面：
+访问 `http://localhost:4200/game` 即可看到新页面已渲染！
 
 <Image src={baselineGamePng} alt="baseline-game.png" width="800" height="600" />
 
-更新 `index.tsx` 文件以默认加载新路由。注意修改 `to` 字段时，系统会提供类型安全的路由选项。
+接下来更新 `index.tsx` 文件以默认加载新路由。修改 `to` 字段时，您会看到类型安全路由列表可供选择。
 
-<E2EDiff before="dungeon-adventure/4/routes/index.tsx.old.template" after="dungeon-adventure/4/routes/index.tsx.template" lang="tsx" />
+<Tabs>
+<TabItem label="routes/index.tsx">
+<E2ECode path="dungeon-adventure/4/routes/index.tsx.template" lang="tsx" />
+</TabItem>
+</Tabs>
 
-最后可删除不再需要的 `packages/game-ui/src/routes/welcome/` 目录。
+最后可删除 `packages/game-ui/src/routes/welcome/` 目录，该目录已不再需要。
 
 ### 布局更新
 
-默认布局更适合SaaS类商业应用，我们需要调整为地牢风格游戏界面。修改以下文件：
+默认布局更偏向SaaS风格商业应用，我们需要重新配置主题以适应地牢游戏风格。对 `packages/game-ui/src` 进行以下修改：
 
 <Tabs>
 <TabItem label="config.ts">
@@ -93,11 +94,31 @@ function RouteComponent() {
 </TabItem>
 </Tabs>
 
-删除不再使用的 `packages/game-ui/src/components/AppLayout/navitems.ts` 和 `packages/game-ui/src/hooks/useAppLayout.tsx` 文件。
+现在删除 `packages/game-ui/src/hooks/useAppLayout.tsx` 文件，该文件已不再使用。
+
+### 故事代理集成
+
+接下来创建用于初始化故事代理客户端的钩子：
+
+<Tabs>
+<TabItem label="hooks/useStoryAgent.tsx">
+<E2ECode path="dungeon-adventure/4/hooks/useStoryAgent.tsx.template" lang="tsx" />
+</TabItem>
+</Tabs>
+
+该钩子实现以下功能：
+- 从 `runtime-config.json` 获取代理ARN
+- 根据ARN构建AgentCore运行时调用URL
+- 使用已登录用户的JWT令牌和随机会话ID调用代理
+- 返回用于消费流式消息的异步迭代器
+
+:::tip
+您会注意到与游戏API的集成已自动配置——使用 `api-connection` 生成器后无需手动操作。如需类似代理体验，请为[此GitHub议题](https://github.com/awslabs/nx-plugin-for-aws/issues/326)点赞。
+:::
 
 ### 游戏页面
 
-创建调用API的游戏页面完成最终实现：
+创建调用API的游戏页面以完成游戏实现。更新 `packages/game-ui/src/routes/game` 目录下的文件：
 
 <Tabs>
 <TabItem label="index.tsx">
@@ -108,24 +129,22 @@ function RouteComponent() {
 <E2ECode path="dungeon-adventure/4/routes/game/$playerName.tsx.template" lang="tsx" />
 
 <Aside type="tip">
-`$playerName` 语法指示 `@tanstack/react-router` 将 `playerName` 作为[路径参数](https://tanstack.com/router/v1/docs/framework/react/guide/path-params)处理。`validateSearch` 方法确保 `genre` 查询参数严格匹配枚举类型。
+`$playerName` 语法指示 `@tanstack/react-router` 将 `playerName` 作为[路径参数](https://tanstack.com/router/v1/docs/framework/react/guide/path-params)处理。同时通过 `validateSearch` 方法确保 `genre` 查询参数严格匹配我们的类型枚举。
 </Aside>
 </TabItem>
 </Tabs>
 
-完成修改后，访问本地开发服务器（http://localhost:4200/）即可开始游戏！
+完成修改后，本地开发服务器（http://localhost:4200/）即可运行游戏！
 
-<Drawer title="构建与部署" trigger="如需部署到Cloudfront，可执行以下操作：">
+<Drawer title="构建与部署" trigger="您也可以选择构建并部署代码至Cloudfront">
 
 构建命令：
-
 <NxCommands commands={['run-many --target build --all']} />
 
 部署应用：
-
 <NxCommands commands={['run @dungeon-adventure/infra:deploy dungeon-adventure-infra-sandbox/*']} />
 
-部署完成后，可在CDK部署输出中查看Cloudfront访问地址。
+部署完成后，通过检查CDK部署输出来获取Cloudfront访问地址。
 
 </Drawer>
 
@@ -134,4 +153,4 @@ function RouteComponent() {
 <Image src={gameConversationPng} alt="game-conversation.png" width="500" height="400" />
 </div>
 
-恭喜！您已成功构建并部署地牢冒险游戏！🎉🎉🎉
+恭喜！您已成功构建并部署了自主式地牢冒险游戏！🎉🎉🎉

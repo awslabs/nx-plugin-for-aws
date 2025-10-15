@@ -1,6 +1,6 @@
 ---
-title: "Gioco di Dungeon con IA"
-description: "Una guida dettagliata su come costruire un gioco di avventura dungeon alimentato da IA utilizzando il plugin @aws/nx-plugin."
+title: "Gioco di Dungeon con IA Agentiva"
+description: "Una guida dettagliata su come costruire un gioco di avventura in dungeon alimentato da IA agentiva utilizzando @aws/nx-plugin."
 ---
 
 
@@ -24,36 +24,33 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 ## Modulo 4: Implementazione dell'interfaccia utente
 
-Per iniziare a costruire l'interfaccia utente, configuriamo il server di sviluppo locale per puntare alla sandbox distribuita. Esegui il seguente comando:
+Per iniziare a costruire l'interfaccia utente, dobbiamo configurare il server di sviluppo locale per puntare alla sandbox distribuita. Esegui questo comando:
 
 <NxCommands commands={["run @dungeon-adventure/game-ui:load:runtime-config"]} />
 
 Questo comando scaricherà il file `runtime-config.json` distribuito e lo memorizzerà localmente nella cartella `packages/game-ui/public`.
 
-Ora avvia il server di sviluppo con:
+Ora possiamo avviare il server di sviluppo con:
 
 <NxCommands commands={["run @dungeon-adventure/game-ui:serve"]} />
 
-Apri il sito locale nel browser e segui le istruzioni per accedere e creare un nuovo utente. Al termine vedrai il sito base:
+Apri quindi il sito locale nel browser e segui le istruzioni per accedere e creare un nuovo utente. Al termine vedrai il sito base:
 
-<Image src={baselineWebsitePng} alt="baseline-website.png" width="800" height="600" />
+<Image src={baselineWebsitePng} alt="Sito web di base" width="800" height="600" />
 
 <Aside type="caution">
-_Mantieni il server di sviluppo in esecuzione durante questo modulo: ricaricherà automaticamente le modifiche._
+_Mantieni il server di sviluppo in esecuzione per tutto il modulo: ricaricherà automaticamente le modifiche._
 </Aside>
+
+:::tip
+Puoi usare <NxCommands commands={["run @dungeon-adventure/game-ui:serve-local"]} /> per avviare anche eventuali server API locali collegati, permettendoti di lavorare simultaneamente su API tRPC e sito web.
+:::
 
 ### Crea una nuova route '/game'
 
-Mostriamo le capacità di `@tanstack/react-router` creando una route tipizzata. Crea un file vuoto in `packages/game-ui/src/routes/game/index.tsx`. Monitora i log del server:
+Mostriamo le capacità di `@tanstack/react-router` creando una route tipizzata. Crea un file vuoto in: `packages/game-ui/src/routes/game/index.tsx`. Noterai l'aggiornamento immediato.
 
-```bash
-♻️  Regenerating routes...
-🟡 Updating /Users/dimecha/dungeon-adventure/packages/game-ui/src/routes/game/index.tsx
-🟡 Updating /Users/dimecha/dungeon-adventure/packages/game-ui/src/routeTree.gen.ts
-✅ Processed routes in 27ms
-```
-
-Il router ha già configurato automaticamente la nuova route. Nota che il file è già popolato con il percorso:
+Il router ha già configurato automaticamente la nuova route con il percorso:
 
 ```tsx
 import { createFileRoute } from '@tanstack/react-router'
@@ -69,13 +66,17 @@ function RouteComponent() {
 
 Accedendo a `http://localhost:4200/game` vedrai la nuova pagina!
 
-<Image src={baselineGamePng} alt="baseline-game.png" width="800" height="600" />
+<Image src={baselineGamePng} alt="Gioco di base" width="800" height="600" />
 
-Aggiorna `index.tsx` per caricare la route `/game` di default. Nota come il campo `to` offra suggerimenti tipizzati.
+Aggiorniamo anche `index.tsx` per caricare la route `/game` di default. Nota come il campo `to` offra suggerimenti tipizzati.
 
-<E2EDiff before="dungeon-adventure/4/routes/index.tsx.old.template" after="dungeon-adventure/4/routes/index.tsx.template" lang="tsx" />
+<Tabs>
+<TabItem label="routes/index.tsx">
+<E2ECode path="dungeon-adventure/4/routes/index.tsx.template" lang="tsx" />
+</TabItem>
+</Tabs>
 
-Elimina la cartella `packages/game-ui/src/routes/welcome/` non più necessaria.
+Elimina infine la cartella `packages/game-ui/src/routes/welcome/`.
 
 ### Aggiornamenti al layout
 
@@ -95,11 +96,31 @@ Modifica questi file in `packages/game-ui/src`:
 </TabItem>
 </Tabs>
 
-Elimina i file `packages/game-ui/src/components/AppLayout/navitems.ts` e `packages/game-ui/src/hooks/useAppLayout.tsx` non utilizzati.
+Elimina ora `packages/game-ui/src/hooks/useAppLayout.tsx`.
+
+### Integrazione Story Agent
+
+Creiamo un hook per interagire con lo Story Agent:
+
+<Tabs>
+<TabItem label="hooks/useStoryAgent.tsx">
+<E2ECode path="dungeon-adventure/4/hooks/useStoryAgent.tsx.template" lang="tsx" />
+</TabItem>
+</Tabs>
+
+Questo hook:
+- Recupera l'ARN dell'Agent da `runtime-config.json`
+- Costruisce l'URL di invocazione da ARN
+- Invia il token JWT dell'utente e un ID sessione casuale
+- Restituisce un iteratore asincrono per lo stream dei messaggi
+
+:::tip
+L'integrazione con la Game API è già configurata automaticamente dal generatore `api-connection`. Vota [questa issue](https://github.com/awslabs/nx-plugin-for-aws/issues/326) se desideri un supporto simile per gli agenti.
+:::
 
 ### Pagine di gioco
 
-Creiamo le pagine che richiameranno le API e completeranno il gioco:
+Creiamo le pagine che richiamano le API e completano il gioco. Modifica:
 
 <Tabs>
 <TabItem label="index.tsx">
@@ -110,14 +131,14 @@ Creiamo le pagine che richiameranno le API e completeranno il gioco:
 <E2ECode path="dungeon-adventure/4/routes/game/$playerName.tsx.template" lang="tsx" />
 
 <Aside type="tip">
-La sintassi `$playerName` indica a `@tanstack/react-router` di trattare `playerName` come [parametro di percorso](https://tanstack.com/router/v1/docs/framework/react/guide/path-params). Il metodo `validateSearch` garantisce che il parametro `genre` sia tipizzato secondo l'enum.
+La sintassi `$playerName` indica a `@tanstack/react-router` di trattare `playerName` come [parametro di percorso](https://tanstack.com/router/v1/docs/framework/react/guide/path-params). Il metodo `validateSearch` garantisce che il parametro `genre` sia tipizzato correttamente.
 </Aside>
 </TabItem>
 </Tabs>
 
 Dopo queste modifiche, il gioco sarà accessibile all'indirizzo http://localhost:4200/!
 
-<Drawer title="Build e Deploy" trigger="Puoi anche compilare e distribuire il codice su Cloudfront.">
+<Drawer title="Compila e Distribuisci" trigger="Puoi anche compilare e distribuire il codice su Cloudfront.">
 
 Per compilare:
 
@@ -127,13 +148,13 @@ Per distribuire:
 
 <NxCommands commands={['run @dungeon-adventure/infra:deploy dungeon-adventure-infra-sandbox/*']} />
 
-L'URL Cloudfront è disponibile negli output del deploy CDK.
+L'URL Cloudfront sarà disponibile negli output del deploy CDK.
 
 </Drawer>
 
-<Image src={gameSelectPng} alt="game-select.png" width="500" height="400" />
+<Image src={gameSelectPng} alt="Selezione gioco" width="500" height="400" />
 <div style="margin-top: -100px; margin-left: 100px;">
-<Image src={gameConversationPng} alt="game-conversation.png" width="500" height="400" />
+<Image src={gameConversationPng} alt="Conversazione di gioco" width="500" height="400" />
 </div>
 
-Complimenti! Hai costruito e distribuito Dungeon Adventure Game! 🎉🎉🎉
+Complimenti! Hai realizzato e distribuito il tuo Gioco di Avventura Dungeon con Agenti! 🎉🎉🎉
