@@ -374,6 +374,19 @@ export default defineConfig([
       expect(configContent).toContain('src/handler.ts');
     });
 
+    it('should configure tsconfig', () => {
+      addTypeScriptBundleTarget(tree, project, {
+        targetFilePath: 'src/index.ts',
+      });
+
+      const configContent = tree.read(
+        'apps/test-project/rolldown.config.ts',
+        'utf-8',
+      );
+
+      expect(configContent).toContain("tsconfig: 'tsconfig.lib.json'");
+    });
+
     it('should configure platform with default value of node', () => {
       addTypeScriptBundleTarget(tree, project, {
         targetFilePath: 'src/index.ts',
