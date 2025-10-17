@@ -26,13 +26,13 @@ import gameConversationPng from '@assets/game-conversation.png'
 ## Módulo 3: Implementação do Agente de História
 
 <Aside type="caution">
-Certifique-se que sua conta AWS habilitou o acesso ao [modelo padrão da Strands](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/model-providers/amazon-bedrock/) dentro do Bedrock para sua região alvo seguindo os passos do [guia oficial](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html). No momento da escrita, este é o Anthropic Claude Sonnet 4.
+Certifique-se que sua conta AWS habilitou acesso ao [modelo padrão Strands](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/model-providers/amazon-bedrock/) no Bedrock para sua região alvo seguindo os passos do [guia oficial](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html). Na data desta escrita, o modelo é Anthropic Claude Sonnet 4.
 </Aside>
 
 O Story Agent é um agente [Strands](https://strandsagents.com/) que, dado um `Game` e uma lista de `Action`s como contexto, irá progredir uma história. Configuraremos o agente para interagir com nosso Inventory MCP Server e gerenciar os itens disponíveis do jogador.
 
 :::note
-Para simplificar este tutorial, implementamos o Agente de forma "stateless" onde cada invocação é uma sessão independente incluindo todo o histórico. Para produção, considere integrar com [Bedrock AgentCore Memory](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/memory.html). Mais documentação sobre uso com Strands está [disponível aqui](https://github.com/aws/bedrock-agentcore-sdk-python/tree/main/src/bedrock_agentcore/memory/integrations/strands).
+Para simplificar este tutorial, implementamos o Agente de forma "stateless" onde cada invocação é uma sessão independente incluindo todo histórico. Para produção, considere integrar com [Bedrock AgentCore Memory](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/memory.html). Mais documentação sobre uso com Strands está [disponível aqui](https://github.com/aws/bedrock-agentcore-sdk-python/tree/main/src/bedrock_agentcore/memory/integrations/strands).
 :::
 
 ### Implementação do Agente
@@ -41,18 +41,18 @@ Vamos implementar nosso agente. Atualize os seguintes arquivos em `packages/stor
 
 <Tabs>
   <TabItem label="main.py">
-<E2ECode lang="python" path="dungeon-adventure/3/main.py.template" />
+<E2EDiff lang="python" before="dungeon-adventure/3/main.py.old.template" after="dungeon-adventure/3/main.py.template" />
   </TabItem>
   <TabItem label="agent.py">
-<E2ECode lang="python" path="dungeon-adventure/3/agent.py.template" />
+<E2EDiff lang="python" before="dungeon-adventure/3/agent.py.old.template" after="dungeon-adventure/3/agent.py.template" />
   </TabItem>
 </Tabs>
 
-Esta configuração define:
+Esta configuração implementa:
 
 - Extração do jogador, gênero e ações do payload do agente
 - Construção de um cliente para o Agente invocar nosso MCP server com autenticação SigV4
-- Construção do agente com um prompt de sistema e ferramentas do MCP server
+- Configuração do agente com prompt de sistema e ferramentas do MCP server
 
 ### Implantação e Testes
 
@@ -94,7 +94,7 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
 
 Podemos testar nossa API de duas formas:
 <ul>
-<li>Iniciando uma instância local do servidor Agent e invocando com `curl`</li>
+<li>Iniciando uma instância local do Agent server e invocando via `curl`</li>
 <li>Chamando a API implantada usando curl com token JWT</li>
 </ul>
 
@@ -107,7 +107,7 @@ Podemos testar nossa API de duas formas:
     Use o output `InventoryMcpArn` do CDK deploy acima, e especifique sua `AWS_REGION` alvo.
     :::
 
-    Com o servidor rodando (sem output visível), invoque com:
+    Com o servidor rodando (sem output visível!), invoque com:
 
     ```bash
     curl -N -X POST http://127.0.0.1:9999/invocations \
@@ -117,15 +117,15 @@ Podemos testar nossa API de duas formas:
     ```
   </TabItem>
   <TabItem label="Deployed">
-    Para testar o agente implantado, autentique via Cognito para obter um token JWT:
+    Para testar a versão implantada, autentique via Cognito para obter token JWT. Primeiro configure variáveis:
 
     ```bash
-    export POOL_ID="<UserPoolId das saídas do CDK>"
-    export CLIENT_ID="<UserPoolClientId das saídas do CDK>"
+    export POOL_ID="<UserPoolId dos outputs CDK>"
+    export CLIENT_ID="<UserPoolClientId dos outputs CDK>"
     export REGION="<sua-regiao>"
     ```
 
-    Crie um usuário de teste e obtenha o token:
+    Crie usuário teste e obtenha token:
 
     ```bash
     aws cognito-idp admin-create-user \
@@ -150,13 +150,13 @@ Podemos testar nossa API de duas formas:
     ```
 
     :::caution
-    Use o output `UserIdentityUserIdentityUserPoolIdXXX` para `POOL_ID` e confirme o Client ID correspondente.
+    Use o output `UserIdentityUserIdentityUserPoolIdXXX` para `POOL_ID` e verifique o Client ID nos outputs CDK.
     :::
 
     Invoke o agente implantado:
 
     ```bash
-    export AGENT_ARN="<StoryAgentArn das saídas do CDK>"
+    export AGENT_ARN="<StoryAgentArn dos outputs CDK>"
     export ENCODED_ARN=$(echo $AGENT_ARN | sed 's/:/%3A/g' | sed 's/\//%2F/g')
     export MCP_URL="https://bedrock-agentcore.$REGION.amazonaws.com/runtimes/$ENCODED_ARN/invocations?qualifier=DEFAULT"
 
@@ -168,12 +168,12 @@ Podemos testar nossa API de duas formas:
     ```
 
     :::note
-    A codificação da URL é necessária para formatar corretamente a ARN no endpoint da API.
+    A codificação URL é necessária para formatar corretamente a ARN no endpoint Bedrock AgentCore.
     :::
   </TabItem>
 </Tabs>
 
-Em caso de sucesso, você verá eventos sendo streamados como:
+Se bem sucedido, você verá eventos sendo transmitidos como:
 
 ```
 data: {"init_event_loop": true}
@@ -189,4 +189,4 @@ data: {"event": {"contentBlockDelta": {"delta": {"text": "Welcome"}, "contentBlo
 ...
 ```
 
-Parabéns. Você construiu e implantou seu primeiro Agente Strands no Bedrock AgentCore Runtime! 🎉🎉🎉
+Parabéns! Você implementou e implantou seu primeiro Agente Strands no Bedrock AgentCore Runtime! 🎉🎉🎉
