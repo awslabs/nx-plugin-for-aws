@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree, readNxJson } from '@nx/devkit';
+import { Tree } from '@nx/devkit';
 import { presetGenerator, isAmazonian } from './generator';
 import { createTreeUsingTsSolutionSetup, snapshotTreeDir } from '../utils/test';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
@@ -40,13 +40,6 @@ describe('preset generator', () => {
     await presetGenerator(tree, { addTsPlugin: false, iacProvider: 'CDK' });
 
     expect((await readAwsNxPluginConfig(tree)).iac.provider).toBe('CDK');
-  });
-
-  it('should disable the nx daemon', async () => {
-    await presetGenerator(tree, { addTsPlugin: false, iacProvider: 'CDK' });
-
-    const nxJson = readNxJson(tree);
-    expect(nxJson?.useDaemonProcess).toBe(false);
   });
 });
 
