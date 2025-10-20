@@ -1,6 +1,6 @@
 ---
 title: "エージェント型AIダンジョンゲーム"
-description: "@aws/nx-pluginを使用したエージェント型AI搭載のダンジョン冒険ゲームの作り方チュートリアル"
+description: "@aws/nx-pluginを使用したエージェント型AI搭載のダンジョン冒険ゲームの作り方のチュートリアル"
 ---
 
 
@@ -23,19 +23,21 @@ import nxGraphPng from '@assets/nx-graph.png'
 import gameSelectPng from '@assets/game-select.png'
 import gameConversationPng from '@assets/game-conversation.png'
 
-## モジュール2: Game APIとInventory MCP Serverの実装
+import { getDungeonAdventureElectroDbDependencies } from '../../../../../../../../e2e/src/utils';
 
-まずGame APIの実装から始めます。これには合計5つのAPIを作成する必要があります：
+## モジュール2: ゲームAPIとインベントリMCPサーバーの実装
+
+まずゲームAPIの実装から始めます。これには合計5つのAPIを作成する必要があります:
 
 1. `saveGame` - ゲームの作成または更新
 2. `queryGames` - 保存済みゲームのページネーション付きリストを返す
 3. `saveAction` - 指定したゲームのアクションを保存
-4. `queryActions` - ゲームに関連する全てのアクションのページネーション付きリストを返す
+4. `queryActions` - ゲームに関連する全アクションのページネーション付きリストを返す
 5. `queryInventory` - プレイヤーのインベントリ内アイテムのページネーション付きリストを返す
 
 ### APIスキーマ
 
-APIの入力と出力を定義するため、[Zod](https://zod.dev/)を使用して`packages/game-api/src/schema`ディレクトリ内に以下のスキーマを作成します：
+APIの入力と出力を定義するため、`packages/game-api/src/schema`ディレクトリ内で[Zod](https://zod.dev/)を使用してスキーマを作成します:
 
 <Tabs>
   <TabItem label="action.ts">
@@ -58,12 +60,12 @@ APIの入力と出力を定義するため、[Zod](https://zod.dev/)を使用し
 このプロジェクトで使用しないため、`packages/game-api/src/schema/echo.ts`ファイルは削除できます。
 
 <Aside type="tip">
-上記のように、Zodで定義する各スキーマに対して`z.TypeOf`構文を使用してインターフェースをエクスポートしています。これにより、Typescriptインターフェースを重複せずに生成できます！
+上記のように、Zodで定義した各スキーマに対して`z.TypeOf`構文を使用してインターフェースをエクスポートしています。これにより、重複作業なしにZod定義をTypeScriptインターフェースに変換できます！
 </Aside>
 
 ### エンティティモデリング
 
-アプリケーションのER図は以下の通りです：
+アプリケーションのER図は以下の通りです:
 
 <Image class="centered-image white-bg" src={dungeonAdventureErPng} alt="dungeon-adventure-er.png" width="400" height="300" />
 
@@ -106,15 +108,15 @@ game ||--o{ item
 @enduml
 */}
 
-DynamoDBでデータベースを実装するため、[ElectroDB](https://electrodb.dev/en/core-concepts/introduction/) DynamoDBクライアントライブラリを使用します。まず次のコマンドで`electrodb`をインストールします：
+DynamoDBでデータベースを実装し、[ElectroDB](https://electrodb.dev/en/core-concepts/introduction/) DynamoDBクライアントライブラリを使用して簡素化します。まず`electrodb`とDynamoDBクライアントを次のコマンドでインストールします:
 
-<InstallCommand pkg="electrodb @aws-sdk/client-dynamodb" />
+<InstallCommand pkg={getDungeonAdventureElectroDbDependencies()} />
 
 <Aside>
-全ての依存関係はルート`package.json`に追加されます。これは`@aws/nx-plugin`が[シングルバージョンポリシー](https://nx.dev/concepts/decisions/dependency-management#single-version-policy)原則に従っているためです。詳細は<Link path="guides/typescript-project#dependencies">tsプロジェクトガイド</Link>を参照してください。
+すべての依存関係はルート`package.json`に追加されます。これは`@aws/nx-plugin`が[シングルバージョンポリシー](https://nx.dev/concepts/decisions/dependency-management#single-version-policy)原則に従うためです。詳細は<Link path="guides/typescript-project#dependencies">tsプロジェクトガイド</Link>を参照してください。
 </Aside>
 
-次に、`packages/game-api/src/entities`フォルダ内に以下のファイルを作成し、上記ER図に基づいてElectroDBエンティティを定義します：
+上記のER図に従ってElectroDBエンティティを定義するため、`packages/game-api/src/entities`フォルダ内に以下のファイルを作成します:
 
 <Tabs>
   <TabItem label="action.ts">
@@ -128,13 +130,13 @@ DynamoDBでデータベースを実装するため、[ElectroDB](https://electro
   </TabItem>
 </Tabs>
 
-ElectroDBではタイプ定義だけでなく、タイムスタンプなどのデフォルト値も設定可能です。またElectroDBはDynamoDB使用時のベストプラクティスである[シングルテーブル設計](https://electrodb.dev/en/core-concepts/single-table-relationships/)を採用しています。
+ElectroDBでは型定義だけでなく、タイムスタンプなどのデフォルト値も設定できます。またElectroDBはDynamoDB使用時のベストプラクティスである[シングルテーブル設計](https://electrodb.dev/en/core-concepts/single-table-relationships/)に従います。
 
 <Aside>
 ElectroDBは[コレクション](https://electrodb.dev/en/modeling/collections/)をサポートしていますが、このチュートリアルでは簡略化のため使用しません。
 </Aside>
 
-MCPサーバーがインベントリと連携できるよう、`packages/game-api/src/index.ts`でインベントリエンティティをエクスポートします：
+MCPサーバーがインベントリと連携できるよう、`packages/game-api/src/index.ts`でインベントリエンティティをエクスポートします:
 
 <Tabs>
 <TabItem label="packages/game-api/src/index.ts">
@@ -143,12 +145,12 @@ MCPサーバーがインベントリと連携できるよう、`packages/game-ap
 </Tabs>
 
 :::note
-エンティティを共有プロジェクトにリファクタリングすれば、MCPサーバーがAPIに依存せず、より良いパッケージ構造になります。
+エンティティを別の共有プロジェクトにリファクタリングすれば、MCPサーバーがAPIに依存せず、パッケージ構造が改善されます。
 :::
 
 ### tRPCコンテキストへのDynamoDBクライアント追加
 
-各プロシージャでDynamoDBクライアントにアクセスするため、コンテキスト経由で単一インスタンスを渡せるようにします。`packages/game-api/src`内で以下の変更を加えます：
+各プロシージャでDynamoDBクライアントにアクセスするため、コンテキスト経由で渡せるクライアントの単一インスタンスを作成します。これを行うため、`packages/game-api/src`内で以下の変更を加えます:
 
 <Tabs>
   <TabItem label="middleware/dynamodb.ts">
@@ -174,7 +176,7 @@ DynamoDBプラグインを組み込みます。
 
 ### プロシージャの定義
 
-APIメソッドを実装します。`packages/game-api/src/procedures`内で以下の変更を加えます：
+APIメソッドを実装します。`packages/game-api/src/procedures`内で以下の変更を加えます:
 
 #### クエリ
 
@@ -205,7 +207,7 @@ APIメソッドを実装します。`packages/game-api/src/procedures`内で以�
 
 ### ルーター設定
 
-定義したプロシージャをAPIに接続します。以下のファイルを更新します：
+プロシージャをAPIに接続するため、以下のファイルを更新します:
 
 <Tabs>
   <TabItem label="packages/game-api/src/router.ts">
@@ -213,17 +215,17 @@ APIメソッドを実装します。`packages/game-api/src/procedures`内で以�
 </TabItem>
 </Tabs>
 
-### Inventory MCP Server
+### インベントリMCPサーバー
 
-エージェントがプレイヤーのインベントリを管理するためのMCPサーバーを作成します。
+エージェントがプレイヤーのインベントリを管理できるMCPサーバーを作成します。
 
-エージェント用に以下のツールを定義します：
+エージェント用に以下のツールを定義します:
 
 - `list-inventory-items` - プレイヤーの現在のインベントリアイテムを取得
 - `add-to-inventory` - インベントリにアイテムを追加
 - `remove-from-inventory` - インベントリからアイテムを削除
 
-時間節約のため、全てのツールをインラインで定義します：
+時間節約のため、すべてのツールをインラインで定義します:
 
 <Tabs>
   <TabItem label="packages/inventory/src/mcp-server/server.ts">
@@ -231,13 +233,13 @@ APIメソッドを実装します。`packages/game-api/src/procedures`内で以�
 </TabItem>
 </Tabs>
 
-ツールが増えた場合は、必要に応じて別ファイルにリファクタリングできます。
+ツール数が増えた場合、必要に応じて別ファイルにリファクタリングできます。
 
 `packages/inventory/src/mcp-server`内の未使用の`tools`と`resources`ディレクトリは削除できます。
 
 ### インフラストラクチャ
 
-最後にDynamoDBテーブルを作成し、Game APIからの操作権限を付与するため、`packages/infra/src`を以下のように更新します：
+最後にDynamoDBテーブルを作成し、Game APIからの操作権限を付与するため、`packages/infra/src`を以下のように更新します:
 
 <Tabs>
   <TabItem label="constructs/electrodb-table.ts">
@@ -247,29 +249,29 @@ APIメソッドを実装します。`packages/game-api/src/procedures`内で以�
 <E2EDiff lang="typescript" before="dungeon-adventure/1/application-stack.ts.template" after="dungeon-adventure/2/stacks/application-stack.ts.template" />
 
 :::note
-各プロシージャが個別のLambda関数で提供されるため、最小権限の原則に従い、プロシージャの実装に基づいて必要な読み書き権限のみを付与できます。
+各プロシージャは個別のLambda関数で提供されるため、最小権限の原則に従い、プロシージャの実装に基づいて必要な読み取り/書き込み権限のみを割り当てられます。
 :::
   </TabItem>
 </Tabs>
 
 ### デプロイとテスト
 
-まずコードベースをビルドします：
+まずコードベースをビルドします:
 
 <NxCommands commands={['run-many --target build --all']} />
 
 <Aside type="tip">
-リンターエラーが発生した場合、以下のコマンドで自動修正できます：
+リンターエラーが発生した場合、以下のコマンドで自動修正できます。
 
 <NxCommands commands={['run-many --target lint --configuration=fix --all']} />
 </Aside>
 
-次のコマンドでアプリケーションをデプロイできます：
+次のコマンドでアプリケーションをデプロイできます:
 
 <NxCommands commands={['deploy infra dungeon-adventure-infra-sandbox/*']} />
 
 :::caution
-AWSアカウントのブートストラップが必要な場合：
+AWSアカウントのブートストラップが必要な場合:
 
 <NxCommands commands={['bootstrap infra']} />
 :::
@@ -277,12 +279,12 @@ AWSアカウントのブートストラップが必要な場合：
 初回デプロイは約8分かかります。以降のデプロイは約2分です。
 
 :::tip
-Lambda関数コードの変更を反復する場合、コードビルド後に`--hotswap`フラグ付きでデプロイすると時間（2-3秒）を短縮できます：
+Lambda関数コードの変更を反復する場合、コードベースをビルドした後`--hotswap`フラグ付きでデプロイすると、大幅に短縮（2-3秒）できます。
 
 <NxCommands commands={['run @dungeon-adventure/infra:deploy dungeon-adventure-infra-sandbox/* --hotswap']} />
 :::
 
-デプロイ完了後、以下のような出力が表示されます（一部値は編集済み）：
+デプロイ完了後、以下のような出力が表示されます（一部値は編集済み）:
 
 ```bash
 dungeon-adventure-sandbox-Application
@@ -301,7 +303,7 @@ dungeon-adventure-sandbox-Application.UserIdentityUserIdentityIdentityPoolIdXXX 
 dungeon-adventure-sandbox-Application.UserIdentityUserIdentityUserPoolIdXXX = region_xxx
 ```
 
-APIは以下の方法でテストできます：
+APIは以下の方法でテストできます:
 <ul>
 <li>tRPCバックエンドのローカルインスタンスを起動し`curl`でAPIを呼び出す</li>
 <li>
@@ -309,7 +311,7 @@ APIは以下の方法でテストできます：
 
 <Tabs>
   <TabItem label="Bash/Linux/macOS">
-`.bashrc`ファイルに以下のスクリプトを追加（`source`で反映）するか、直接ターミナルに貼り付けます：
+`.bashrc`ファイルに以下のスクリプトを追加（`source`で適用）するか、コマンドを実行するターミナルに直接貼り付けます。
 ```bash
 // ~/.bashrc
 acurl () {
@@ -320,7 +322,7 @@ acurl () {
 }
 ```
 
-sigv4認証済みcurlリクエストの例：
+sigv4認証済みcurlリクエストの実行例:
 
 ###### API Gateway
 ```bash
@@ -333,7 +335,7 @@ acurl ap-southeast-2 lambda -N -X POST https://xxx
 ```
   </TabItem>
   <TabItem label="Windows PowerShell">
-PowerShellプロファイルに関数を追加するか、直接セッションに貼り付けます：
+PowerShellプロファイルに関数を追加するか、現在のセッションに直接貼り付けます。
 ```powershell
 function acurl {
     param(
@@ -350,7 +352,7 @@ function acurl {
 }
 ```
 
-sigv4認証済みcurlリクエストの例：
+実行例:
 
 ###### API Gateway
 ```powershell
@@ -371,15 +373,16 @@ acurl ap-southeast-2 lambda -N -X POST https://xxx
 
 <Tabs>
   <TabItem label="ローカル">
-    ローカル`game-api`サーバーを起動：
+    以下のコマンドで`game-api`サーバーを起動:
 
     <NxCommands highlights={['dungeon-adventure-infra-sandbox-Application-ElectroDbTableXXX-YYY']} env={{TABLE_NAME:"dungeon-adventure-infra-sandbox-Application-ElectroDbTableXXX-YYY"}} commands={["run @dungeon-adventure/game-api:serve"]} />
 
     <Aside type="caution">
-    `dungeon-adventure-infra-sandbox-Application.ElectroDbTableTableNameXXX`のCDKデプロイ出力値でプレースホルダーを置き換えてください。
+    `dungeon-adventure-infra-sandbox-Application.ElectroDbTableTableNameXXX`のCDKデプロイ出力値でハイライト部分を置き換えてください。
     </Aside>
 
-    サーバー起動後、次のコマンドで呼び出し可能：
+    サーバー起動後、次のコマンドで呼び出せます:
+
     ```bash
     curl -X GET 'http://localhost:2022/games.query?input=%7B%7D'
     ```
@@ -389,16 +392,17 @@ acurl ap-southeast-2 lambda -N -X POST https://xxx
 acurl ap-southeast-2 execute-api -X GET 'https://xxx.execute-api.ap-southeast-2.amazonaws.com/prod/games.query?input=%7B%7D'
 ```
     <Aside type="caution">
-    `dungeon-adventure-infra-sandbox-Application.GameApiGameApiEndpointXXX`のCDKデプロイ出力値でプレースホルダーを置き換え、リージョンを適切に設定してください。
+    `dungeon-adventure-infra-sandbox-Application.GameApiGameApiEndpointXXX`のCDKデプロイ出力値でURLを置き換え、リージョンを適切に設定してください。
     </Aside>
   </TabItem>
 </Tabs>
 
 :::note
-テスト用に渡す`%7B%7D`はURIエンコードされた空のJSONオブジェクト（`{}`）です。
+APIテストで渡す`%7B%7D`はURIエンコードされた空のJSONオブジェクト（`{}`）です。
 :::
 
-コマンドが成功すると、以下のようなレスポンスが返ります：
+コマンドが成功すると、以下のようなレスポンスが返ります:
+
 ```json
 {"result":{"data":{"items":[],"cursor":null}}}
 ```

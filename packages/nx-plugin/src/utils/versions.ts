@@ -8,6 +8,7 @@
  */
 export const TS_VERSIONS = {
   '@aws-sdk/client-cognito-identity': '3.910.0',
+  '@aws-sdk/client-dynamodb': '3.913.0',
   '@aws-sdk/credential-providers': '3.910.0',
   '@aws-sdk/credential-provider-cognito-identity': '3.910.0',
   '@aws-smithy/server-apigateway': '1.0.0-alpha.10',
@@ -47,6 +48,7 @@ export const TS_VERSIONS = {
   'aws-xray-sdk-core': '3.10.3',
   constructs: '10.4.2',
   cors: '2.8.5',
+  electrodb: '3.5.0',
   esbuild: '0.25.10',
   'eslint-plugin-prettier': '5.5.4',
   express: '5.1.0',

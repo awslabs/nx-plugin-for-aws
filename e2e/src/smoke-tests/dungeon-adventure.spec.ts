@@ -4,7 +4,12 @@
  */
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { ensureDirSync } from 'fs-extra';
-import { buildCreateNxWorkspaceCommand, runCLI, tmpProjPath } from '../utils';
+import {
+  buildCreateNxWorkspaceCommand,
+  getDungeonAdventureElectroDbDependencies,
+  runCLI,
+  tmpProjPath,
+} from '../utils';
 import { getPackageManagerCommand } from '@nx/devkit';
 import { join } from 'path';
 
@@ -93,7 +98,7 @@ describe('smoke test - dungeon-adventure', () => {
     // 2. Game API and Inventory MCP Server
 
     await runCLI(
-      `${getPackageManagerCommand(pkgMgr).add} electrodb @aws-sdk/client-dynamodb`,
+      `${getPackageManagerCommand(pkgMgr).add} ${getDungeonAdventureElectroDbDependencies()}`,
       {
         ...opts,
         prefixWithPackageManagerCmd: false,
