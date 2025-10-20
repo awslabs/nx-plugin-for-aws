@@ -342,6 +342,33 @@ export default defineConfig({
           ],
         },
         {
+          label: 'Troubleshooting',
+          translations: {
+            jp: 'トラブルシューティング',
+            ko: '문제 해결',
+            fr: 'Dépannage',
+            it: 'Risoluzione dei problemi',
+            es: 'Solución de problemas',
+            pt: 'Solução de problemas',
+            zh: '故障排除',
+          },
+          items: [
+            {
+              label: 'Nx',
+              translations: {
+                jp: 'Nx',
+                ko: 'Nx',
+                fr: 'Nx',
+                it: 'Nx',
+                es: 'Nx',
+                pt: 'Nx',
+                zh: 'Nx',
+              },
+              link: '/troubleshooting/nx',
+            },
+          ]
+        },
+        {
           label: 'About',
           translations: {
             jp: '概要',
