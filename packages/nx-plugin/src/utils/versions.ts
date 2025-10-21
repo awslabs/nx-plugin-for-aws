@@ -67,9 +67,6 @@ export const TS_VERSIONS = {
   tsx: '4.20.6', // https://github.com/privatenumber/tsx/issues/727
   'vite-tsconfig-paths': '5.1.4',
   zod: '4.1.12',
-  // TODO: remove zod-v3 when @modelcontextprotocol/sdk upgrades to Zod v4 or standard schema
-  // https://github.com/modelcontextprotocol/typescript-sdk/issues/164
-  'zod-v3': 'npm:zod@^3',
 } as const;
 export type ITsDepVersion = keyof typeof TS_VERSIONS;
 
