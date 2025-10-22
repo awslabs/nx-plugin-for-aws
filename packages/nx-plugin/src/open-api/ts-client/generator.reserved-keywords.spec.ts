@@ -368,4 +368,59 @@ describe('openApiTsClientGenerator - reserved keywords', () => {
     expect(types).toContain('_RegExp');
     expect(types).toContain('_JSON');
   });
+
+  it('should throw error when schema name normalization creates a clash', async () => {
+    const spec: Spec = {
+      openapi: '3.0.0',
+      info: { title, version: '1.0.0' },
+      components: {
+        schemas: {
+          'Message-Output': {
+            type: 'object',
+            properties: {
+              text: { type: 'string' },
+            },
+            required: ['text'],
+          },
+          MessageOutput: {
+            type: 'object',
+            properties: {
+              content: { type: 'string' },
+            },
+            required: ['content'],
+          },
+        },
+      },
+      paths: {
+        '/test': {
+          get: {
+            operationId: 'test',
+            responses: {
+              '200': {
+                description: 'Success',
+                content: {
+                  'application/json': {
+                    schema: {
+                      $ref: '#/components/schemas/Message-Output',
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    tree.write('openapi.json', JSON.stringify(spec));
+
+    await expect(
+      openApiTsClientGenerator(tree, {
+        openApiSpecPath: 'openapi.json',
+        outputPath: 'src/generated',
+      }),
+    ).rejects.toThrow(
+      'Schema name normalization conflict: "Message-Output" would be normalized to "MessageOutput", but a schema with that name already exists',
+    );
+  });
 });

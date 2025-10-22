@@ -6,7 +6,7 @@ import cloneDeepWith from 'lodash.clonedeepwith';
 import type { OpenAPIV3 } from 'openapi-types';
 import { isRef, resolveIfRef, resolveRef, splitRef } from './refs';
 import { Spec } from './types';
-import { pascalCase, upperFirst } from '../../utils/names';
+import { pascalCase, toClassName, upperFirst } from '../../utils/names';
 import camelCase from 'lodash.camelcase';
 
 interface SubSchema {
@@ -20,6 +20,63 @@ interface SubSchemaRef {
   readonly name: string;
   readonly schema: OpenAPIV3.SchemaObject;
 }
+
+/**
+ * Normalise schema names to valid TypeScript identifiers.
+ * Converts names with hyphens or other invalid characters to PascalCase.
+ * Throws an error if normalisation would create a name clash.
+ */
+const normaliseSchemaNames = (spec: Spec): Spec => {
+  const schemaNameMapping: { [oldName: string]: string } = {};
+  const existingSchemaNames = new Set(
+    Object.keys(spec.components?.schemas ?? {}),
+  );
+
+  // Build mapping of old names to new names
+  Object.keys(spec.components?.schemas ?? {}).forEach((name) => {
+    const normalizedName = toClassName(name);
+    if (normalizedName !== name) {
+      // Check if the normalized name would clash with an existing schema
+      if (existingSchemaNames.has(normalizedName)) {
+        throw new Error(
+          `Schema name normalization conflict: "${name}" would be normalized to "${normalizedName}", but a schema with that name already exists. Please rename one of these schemas in your OpenAPI specification.`,
+        );
+      }
+      schemaNameMapping[name] = normalizedName;
+    }
+  });
+
+  // If no normalization needed, return spec as-is
+  if (Object.keys(schemaNameMapping).length === 0) {
+    return spec;
+  }
+
+  // Update all $ref references throughout the spec
+  spec = cloneDeepWith(spec, (v) => {
+    if (isRef(v)) {
+      const parts = splitRef(v.$ref);
+      if (
+        parts.length === 3 &&
+        parts[0] === 'components' &&
+        parts[1] === 'schemas'
+      ) {
+        const oldName = parts[2];
+        const newName = schemaNameMapping[oldName];
+        if (newName) {
+          return { $ref: `#/components/schemas/${newName}` };
+        }
+      }
+    }
+  });
+
+  // Rename schema keys
+  Object.entries(schemaNameMapping).forEach(([oldName, newName]) => {
+    spec.components!.schemas![newName] = spec.components!.schemas![oldName];
+    delete spec.components!.schemas![oldName];
+  });
+
+  return spec;
+};
 
 const isCompositeSchema = (schema: OpenAPIV3.SchemaObject) =>
   !!schema.allOf || !!schema.anyOf || !!schema.oneOf;
@@ -335,6 +392,9 @@ export const normaliseOpenApiSpecForCodeGen = (inSpec: Spec): Spec => {
       }
     }),
   );
+
+  // Normalize schema names to valid TypeScript identifiers (e.g., "Message-Output" -> "MessageOutput")
+  spec = normaliseSchemaNames(spec);
 
   // Initialise the models that we have seen with all schemas.
   // This is required to ensure we do not create any clashing models below
