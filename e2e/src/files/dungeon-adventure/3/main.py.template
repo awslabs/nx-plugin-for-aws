@@ -1,29 +1,53 @@
-import os
-from bedrock_agentcore.runtime import BedrockAgentCoreApp
+import uuid
+
+import uvicorn
+from bedrock_agentcore.runtime.models import PingStatus
+from fastapi.responses import PlainTextResponse, StreamingResponse
+from pydantic import BaseModel
 
 from .agent import get_agent
+from .init import app
 
-app = BedrockAgentCoreApp()
 
-PORT = int(os.environ.get("PORT", "8080"))
+class Action(BaseModel):
+    role: str
+    content: str
 
-@app.entrypoint
-async def invoke(payload, context):
-    """Handler for agent invocation"""
-    player_name = payload.get("playerName")
-    genre = payload.get("genre")
-    actions = payload.get("actions")
 
+class InvokeInput(BaseModel):
+    playerName: str
+    genre: str
+    actions: list[Action]
+
+
+async def handle_invoke(input: InvokeInput):
+    """Streaming handler for agent invocation"""
     messages = [{"role": "user", "content": [{"text": "Continue or create a new story..."}]}]
-    for action in actions:
-        messages.append({"role": action["role"], "content": [{"text": action["content"]}]})
+    for action in input.actions:
+        messages.append({"role": action.role, "content": [{"text": action.content}]})
 
-    with get_agent(player_name, genre, session_id=context.session_id) as agent:
+    with get_agent(input.playerName, input.genre, session_id=str(uuid.uuid4())) as agent:
         stream = agent.stream_async(messages)
         async for event in stream:
             print(event)
-            yield (event)
+            content = event.get("event", {}).get("contentBlockDelta", {}).get("delta", {}).get("text")
+            if content is not None:
+                yield content
+            elif event.get("event", {}).get("messageStop") is not None:
+                yield "\n"
+
+
+@app.post("/invocations", openapi_extra={"x-streaming": True}, response_class=PlainTextResponse)
+async def invoke(input: InvokeInput) -> str:
+    """Entry point for agent invocation"""
+    return StreamingResponse(handle_invoke(input), media_type="text/event-stream")
+
+
+@app.get("/ping")
+def ping() -> str:
+    # TODO: if running an async task, return PingStatus.HEALTHY_BUSY
+    return PingStatus.HEALTHY
 
 
 if __name__ == "__main__":
-    app.run(port=PORT)
+    uvicorn.run("dungeon_adventure_story.agent.main:app", port=8080)

@@ -95,7 +95,7 @@ export const readProjectConfigurationUnqualified = (
 };
 
 /**
- * Add metadata about the generator to the project.json
+ * Add metadata about the generator that generated the project to the project.json
  */
 export const addGeneratorMetadata = (
   tree: Tree,
@@ -112,6 +112,41 @@ export const addGeneratorMetadata = (
       ...additionalMetadata,
     } as any,
   });
+};
+
+/**
+ * Add metadata about the generator that generated the component to the project.json
+ */
+export const addComponentGeneratorMetadata = (
+  tree: Tree,
+  projectName: string,
+  info: NxGeneratorInfo,
+  componentName?: string,
+  additionalMetadata?: { [key: string]: any },
+) => {
+  const config = readProjectConfigurationUnqualified(tree, projectName);
+
+  const existingComponents = (config?.metadata as any)?.components ?? [];
+  const alreadyAdded = existingComponents.filter(
+    (c: any) => c.generator === info.id && c.name === componentName,
+  );
+
+  if (alreadyAdded.length === 0) {
+    updateProjectConfiguration(tree, config.name, {
+      ...config,
+      metadata: {
+        ...config?.metadata,
+        components: [
+          ...existingComponents,
+          {
+            generator: info.id,
+            ...(componentName ? { name: componentName } : {}),
+            ...additionalMetadata,
+          },
+        ],
+      } as any,
+    });
+  }
 };
 
 /**

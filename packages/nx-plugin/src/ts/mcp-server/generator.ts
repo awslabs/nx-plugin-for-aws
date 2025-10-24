@@ -18,6 +18,7 @@ import {
 import { TsMcpServerGeneratorSchema } from './schema';
 import {
   NxGeneratorInfo,
+  addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
   readProjectConfigurationUnqualified,
@@ -31,6 +32,7 @@ import { addMcpServerInfra } from '../../utils/agent-core-constructs/agent-core-
 import { getNpmScope } from '../../utils/npm-scope';
 import { resolveIacProvider } from '../../utils/iac';
 import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
+import { assignPort } from '../../utils/port';
 
 export const TS_MCP_SERVER_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -49,9 +51,10 @@ export const tsMcpServerGenerator = async (
 
   const defaultName = `${kebabCase(project.name.split('/').pop())}-mcp-server`;
   const name = kebabCase(options.name ?? defaultName);
+  const mcpTargetPrefix = options.name ? name : 'mcp-server';
   const targetSourceDirRelativeToProjectRoot = joinPathFragments(
     'src',
-    options.name ? name : 'mcp-server',
+    mcpTargetPrefix,
   );
   const targetSourceDir = joinPathFragments(
     project.root,
@@ -124,7 +127,9 @@ export const tsMcpServerGenerator = async (
       bundleOutputDir: joinPathFragments('mcp', name),
     });
 
-    project.targets[`${name}-docker`] = {
+    const dockerTargetName = `${mcpTargetPrefix}-docker`;
+
+    project.targets[dockerTargetName] = {
       cache: true,
       executor: 'nx:run-commands',
       options: {
@@ -133,7 +138,7 @@ export const tsMcpServerGenerator = async (
       dependsOn: ['bundle'],
     };
 
-    addDependencyToTargetIfNotPresent(project, 'docker', `${name}-docker`);
+    addDependencyToTargetIfNotPresent(project, 'docker', dockerTargetName);
     addDependencyToTargetIfNotPresent(project, 'build', 'docker');
 
     // Add shared constructs
@@ -156,26 +161,33 @@ export const tsMcpServerGenerator = async (
   addDependenciesToPackageJson(tree, deps, devDeps);
   addDependenciesToPackageJson(tree, deps, devDeps, projectPackageJsonPath);
 
+  const localDevPort = assignPort(tree, project, 8000);
+
   updateProjectConfiguration(tree, project.name, {
     ...project,
     targets: {
       ...project.targets,
       // Add targets for running the MCP server
-      [`${options.name ? name : 'mcp-server'}-serve-stdio`]: {
+      [`${mcpTargetPrefix}-serve-stdio`]: {
         executor: 'nx:run-commands',
         options: {
           commands: [`tsx --watch ${relativeSourceDir}/stdio.ts`],
           cwd: '{projectRoot}',
         },
+        continuous: true,
       },
-      [`${options.name ? name : 'mcp-server'}-serve-http`]: {
+      [`${mcpTargetPrefix}-serve`]: {
         executor: 'nx:run-commands',
         options: {
           commands: [`tsx --watch ${relativeSourceDir}/http.ts`],
           cwd: '{projectRoot}',
+          env: {
+            PORT: `${localDevPort}`,
+          },
         },
+        continuous: true,
       },
-      [`${options.name ? name : 'mcp-server'}-inspect`]: {
+      [`${mcpTargetPrefix}-inspect`]: {
         executor: 'nx:run-commands',
         options: {
           commands: [
@@ -183,9 +195,20 @@ export const tsMcpServerGenerator = async (
           ],
           cwd: '{projectRoot}',
         },
+        continuous: true,
       },
     },
   });
+
+  addComponentGeneratorMetadata(
+    tree,
+    project.name,
+    TS_MCP_SERVER_GENERATOR_INFO,
+    mcpTargetPrefix,
+    {
+      port: localDevPort,
+    },
+  );
 
   await addGeneratorMetricsIfApplicable(tree, [TS_MCP_SERVER_GENERATOR_INFO]);
 

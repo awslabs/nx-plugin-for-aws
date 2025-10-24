@@ -8,18 +8,6 @@ export interface GenerateStoryInput {
   actions: { role: string; content: string }[];
 }
 
-const generateSessionId = (playerName: string): string => {
-  const targetLength = 34;
-  const uuidLength = targetLength - playerName.length;
-
-  const randomSegment = crypto
-    .randomUUID()
-    .replace(/-/g, '')
-    .substring(0, uuidLength);
-
-  return `${playerName}${randomSegment}`;
-};
-
 export const useStoryAgent = () => {
   const { agentArn } = useRuntimeConfig();
   const region = agentArn.split(':')[3];
@@ -36,9 +24,6 @@ export const useStoryAgent = () => {
           headers: {
             Authorization: `Bearer ${user?.id_token}`,
             'Content-Type': 'application/json',
-            'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id': generateSessionId(
-              opts.playerName,
-            ),
           },
           method: 'POST',
           body: JSON.stringify(opts),
@@ -54,31 +39,7 @@ export const useStoryAgent = () => {
           const { value, done } = await reader.read();
 
           if (done) return;
-
-          // Parse SSE format - each chunk may contain multiple events
-          const lines = value.split('\n');
-
-          for (const line of lines) {
-            // SSE events start with "data: "
-            if (line.startsWith('data: ')) {
-              const data = line.slice(6); // Remove "data: " prefix
-
-              try {
-                const parsed = JSON.parse(data);
-
-                // Extract text from contentBlockDelta events
-                if (parsed.event?.contentBlockDelta?.delta?.text) {
-                  yield parsed.event.contentBlockDelta.delta.text;
-                }
-                if (parsed.event?.messageStop) {
-                  yield '\n';
-                }
-              } catch (e) {
-                // Skip lines that aren't valid JSON (like Python debug output)
-                continue;
-              }
-            }
-          }
+          yield value;
         }
       },
     }),

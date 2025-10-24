@@ -591,5 +591,24 @@ describe('nx-generator generator', () => {
 
       expectHasMetricTags(tree, NX_GENERATOR_GENERATOR_INFO.metric);
     });
+
+    it('should add component generator metadata', async () => {
+      await tsNxGeneratorGenerator(tree, {
+        project: '@test/plugin',
+        name: 'test-generator',
+      });
+
+      const projectConfig = JSON.parse(
+        tree.read('tools/plugin/project.json', 'utf-8'),
+      );
+
+      expect(projectConfig.metadata).toBeDefined();
+      expect(projectConfig.metadata.components).toBeDefined();
+      expect(projectConfig.metadata.components).toHaveLength(1);
+      expect(projectConfig.metadata.components[0]).toEqual({
+        generator: NX_GENERATOR_GENERATOR_INFO.id,
+        name: 'test-generator',
+      });
+    });
   });
 });

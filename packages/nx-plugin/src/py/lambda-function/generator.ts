@@ -26,6 +26,7 @@ import { getNpmScope } from '../../utils/npm-scope';
 import { sortObjectKeys } from '../../utils/object';
 import {
   NxGeneratorInfo,
+  addComponentGeneratorMetadata,
   getGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
@@ -115,6 +116,7 @@ export const pyLambdaFunctionGenerator = async (
   const constructFunctionClassName = toClassName(constructFunctionName);
   const constructFunctionKebabCase = toKebabCase(constructFunctionName);
   const lambdaFunctionClassName = toClassName(schema.functionName);
+  const lambdaFunctionKebabCase = toKebabCase(schema.functionName);
 
   const functionPath = joinPathFragments(
     projectConfig.sourceRoot,
@@ -181,6 +183,13 @@ export const pyLambdaFunctionGenerator = async (
     'aws-lambda-powertools[tracer]',
     'aws-lambda-powertools[parser]',
   ]);
+
+  addComponentGeneratorMetadata(
+    tree,
+    projectConfig.name,
+    LAMBDA_FUNCTION_GENERATOR_INFO,
+    lambdaFunctionKebabCase,
+  );
 
   await addGeneratorMetricsIfApplicable(tree, [LAMBDA_FUNCTION_GENERATOR_INFO]);
 

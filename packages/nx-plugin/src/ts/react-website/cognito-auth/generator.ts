@@ -34,6 +34,7 @@ import {
 import { formatFilesInSubtree } from '../../../utils/format';
 import {
   NxGeneratorInfo,
+  addComponentGeneratorMetadata,
   getGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
@@ -400,6 +401,12 @@ export async function tsReactWebsiteAuthGenerator(
     );
   }
   // End update App Layout
+
+  addComponentGeneratorMetadata(
+    tree,
+    options.project,
+    COGNITO_AUTH_GENERATOR_INFO,
+  );
 
   await addGeneratorMetricsIfApplicable(tree, [COGNITO_AUTH_GENERATOR_INFO]);
 

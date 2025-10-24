@@ -14,13 +14,18 @@ import {
 import { PyStrandsAgentGeneratorSchema } from './schema';
 import {
   NxGeneratorInfo,
+  addComponentGeneratorMetadata,
+  addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { formatFilesInSubtree } from '../../utils/format';
 import { kebabCase, toSnakeCase, toClassName } from '../../utils/names';
-import { addDependenciesToPyProjectToml } from '../../utils/py';
+import {
+  addDependenciesToDependencyGroupInPyProjectToml,
+  addDependenciesToPyProjectToml,
+} from '../../utils/py';
 import { addAgentInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
 import { addPythonBundleTarget } from '../../utils/bundle/bundle';
 import { getNpmScope } from '../../utils/npm-scope';
@@ -28,6 +33,7 @@ import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { Logger } from '@nxlv/python/src/executors/utils/logger';
 import { UVProvider } from '@nxlv/python/src/provider/uv/provider';
 import { resolveIacProvider } from '../../utils/iac';
+import { assignPort } from '../../utils/port';
 
 export const PY_STRANDS_AGENT_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -60,6 +66,7 @@ export const pyStrandsAgentGenerator = async (
   const name = kebabCase(
     options.name ?? `${kebabCase(project.name.split('.').pop())}-agent`,
   );
+  const agentTargetPrefix = options.name ? name : 'agent';
 
   const agentNameSnakeCase = toSnakeCase(options.name ?? 'agent');
   const agentNameClassName = toClassName(name);
@@ -88,10 +95,15 @@ export const pyStrandsAgentGenerator = async (
   addDependenciesToPyProjectToml(tree, project.root, [
     'aws-opentelemetry-distro',
     'bedrock-agentcore',
+    'fastapi',
     'boto3',
     'mcp',
     'strands-agents',
     'strands-agents-tools',
+    'uvicorn',
+  ]);
+  addDependenciesToDependencyGroupInPyProjectToml(tree, project.root, 'dev', [
+    'fastapi[standard]',
   ]);
 
   if (computeType === 'BedrockAgentCoreRuntime') {
@@ -118,7 +130,7 @@ export const pyStrandsAgentGenerator = async (
       { overwriteStrategy: OverwriteStrategy.KeepExisting },
     );
 
-    const dockerTargetName = `${name}-docker`;
+    const dockerTargetName = `${agentTargetPrefix}-docker`;
 
     // Add a docker target specific to this MCP server
     project.targets[dockerTargetName] = {
@@ -133,25 +145,8 @@ export const pyStrandsAgentGenerator = async (
       dependsOn: [bundleTargetName],
     };
 
-    project.targets.docker = {
-      ...project.targets.docker,
-      dependsOn: [
-        ...(project.targets.docker?.dependsOn ?? []).filter(
-          (t) => t !== dockerTargetName,
-        ),
-        dockerTargetName,
-      ],
-    };
-
-    project.targets.build = {
-      ...project.targets.build,
-      dependsOn: [
-        ...(project.targets.build?.dependsOn ?? []).filter(
-          (t) => t !== 'docker',
-        ),
-        'docker',
-      ],
-    };
+    addDependencyToTargetIfNotPresent(project, 'docker', dockerTargetName);
+    addDependencyToTargetIfNotPresent(project, 'build', 'docker');
 
     // Add shared constructs
     const iacProvider = await resolveIacProvider(tree, options.iacProvider);
@@ -167,16 +162,20 @@ export const pyStrandsAgentGenerator = async (
     });
   }
 
+  // NB: we assign the local dev port from 8081 as 8080 is used by vscode server, and so conflicts
+  // for those working on remote dev envirionments. The deployed agent in agentcore still runs on
+  // 8080 as per the agentcore contract.
+  const localDevPort = assignPort(tree, project, 8081);
+
   updateProjectConfiguration(tree, project.name, {
     ...project,
     targets: {
       ...project.targets,
-      // TODO: Add hot-reload
-      [`${options.name ? name : 'agent'}-serve`]: {
+      [`${agentTargetPrefix}-serve`]: {
         executor: 'nx:run-commands',
         options: {
           commands: [
-            `uv run python -m ${moduleName}.${agentNameSnakeCase}.main`,
+            `uv run fastapi dev ${moduleName}/${agentNameSnakeCase}/main.py --port ${localDevPort}`,
           ],
           cwd: '{projectRoot}',
         },
@@ -184,6 +183,16 @@ export const pyStrandsAgentGenerator = async (
       },
     },
   });
+
+  addComponentGeneratorMetadata(
+    tree,
+    project.name,
+    PY_STRANDS_AGENT_GENERATOR_INFO,
+    agentTargetPrefix,
+    {
+      port: localDevPort,
+    },
+  );
 
   await addGeneratorMetricsIfApplicable(tree, [
     PY_STRANDS_AGENT_GENERATOR_INFO,

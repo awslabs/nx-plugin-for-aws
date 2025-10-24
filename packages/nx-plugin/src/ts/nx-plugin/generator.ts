@@ -15,6 +15,7 @@ import {
 import { TsNxPluginGeneratorSchema } from './schema';
 import {
   NxGeneratorInfo,
+  addGeneratorMetadata,
   getGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
@@ -117,6 +118,8 @@ export const tsNxPluginGenerator = async (
     },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
+
+  addGeneratorMetadata(tree, project.name, TS_NX_PLUGIN_GENERATOR_INFO);
 
   await addGeneratorMetricsIfApplicable(tree, [TS_NX_PLUGIN_GENERATOR_INFO]);
 

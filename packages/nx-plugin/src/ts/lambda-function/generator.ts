@@ -19,6 +19,7 @@ import { formatFilesInSubtree } from '../../utils/format';
 import { sortObjectKeys } from '../../utils/object';
 import {
   NxGeneratorInfo,
+  addComponentGeneratorMetadata,
   getGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
@@ -151,6 +152,13 @@ export const tsLambdaFunctionGenerator = async (
       'zod',
     ]),
     withVersions(['@types/aws-lambda']),
+  );
+
+  addComponentGeneratorMetadata(
+    tree,
+    projectConfig.name,
+    TS_LAMBDA_FUNCTION_GENERATOR_INFO,
+    lambdaFunctionKebabCase,
   );
 
   await addGeneratorMetricsIfApplicable(tree, [

@@ -15,6 +15,7 @@ import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
 } from '../../../utils/config/utils';
+import { RUNTIME_CONFIG_GENERATOR_INFO } from '../runtime-config/generator';
 
 describe('cognito-auth generator', () => {
   let tree: Tree;
@@ -1551,6 +1552,29 @@ resource "aws_s3_bucket_policy" "website_cloudfront_policy" {
         (f) => f.includes('terraform') && f.endsWith('.tf'),
       );
       expect(terraformFiles.length).toBeGreaterThan(0);
+    });
+
+    it('should add component generator metadata', async () => {
+      await tsReactWebsiteAuthGenerator(tree, {
+        project: 'test-project',
+        allowSignup: true,
+        cognitoDomain: 'test-domain',
+        iacProvider: 'CDK',
+      });
+
+      const projectConfig = JSON.parse(
+        tree.read('packages/test-project/project.json', 'utf-8'),
+      );
+
+      expect(projectConfig.metadata).toBeDefined();
+      expect(projectConfig.metadata.components).toBeDefined();
+      expect(projectConfig.metadata.components).toHaveLength(2);
+      expect(projectConfig.metadata.components[0]).toEqual({
+        generator: RUNTIME_CONFIG_GENERATOR_INFO.id,
+      });
+      expect(projectConfig.metadata.components[1]).toEqual({
+        generator: COGNITO_AUTH_GENERATOR_INFO.id,
+      });
     });
   });
 });

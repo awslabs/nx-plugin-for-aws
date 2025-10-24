@@ -18,6 +18,7 @@ import { getRelativePathToRootByDirectory } from '../../utils/paths';
 import { addStarExport, replace } from '../../utils/ast';
 import { ArrayLiteralExpression, factory } from 'typescript';
 import {
+  addComponentGeneratorMetadata,
   getGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
@@ -141,6 +142,13 @@ export const tsNxGeneratorGenerator = async (
     if (tree.exists(indexPath)) {
       addStarExport(tree, indexPath, `./${generatorSubDir}/generator`);
     }
+
+    addComponentGeneratorMetadata(
+      tree,
+      plugin.name,
+      NX_GENERATOR_GENERATOR_INFO,
+      name,
+    );
   }
 
   const factoryBasePath = `./${srcDir}/${generatorSubDir}`;

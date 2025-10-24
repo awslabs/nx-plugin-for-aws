@@ -864,30 +864,47 @@ Refer to tools as your 'spellbook'.
 `;
 
 exports[`py#strands-agent generator > should match snapshot for generated files > strands-agent-main.py 1`] = `
-"from bedrock_agentcore.runtime import BedrockAgentCoreApp
+"import uvicorn
+from bedrock_agentcore.runtime.models import PingStatus
+from fastapi.responses import PlainTextResponse, StreamingResponse
+from pydantic import BaseModel
 
 from .agent import get_agent
+from .init import app
 
-app = BedrockAgentCoreApp()
+
+class InvokeInput(BaseModel):
+    prompt: str
+    session_id: str
 
 
-@app.entrypoint
-async def invoke(payload, context):
-    """Handler for agent invocation"""
-    prompt = payload.get(
-        "prompt", "No prompt found in input, please guide the user "
-        "to create a json payload with prompt key"
-    )
-
-    with get_agent(session_id=context.session_id) as agent:
-        stream = agent.stream_async(prompt)
+async def handle_invoke(input: InvokeInput):
+    """Streaming handler for agent invocation"""
+    with get_agent(session_id=input.session_id) as agent:
+        stream = agent.stream_async(input.prompt)
         async for event in stream:
             print(event)
-            yield (event)
+            content = event.get("event", {}).get("contentBlockDelta", {}).get("delta", {}).get("text")
+            if content is not None:
+                yield content
+            elif event.get("event", {}).get("messageStop") is not None:
+                yield "\\n"
+
+
+@app.post("/invocations", openapi_extra={"x-streaming": True}, response_class=PlainTextResponse)
+async def invoke(input: InvokeInput) -> str:
+    """Entry point for agent invocation"""
+    return StreamingResponse(handle_invoke(input), media_type="text/event-stream")
+
+
+@app.get("/ping")
+def ping() -> str:
+    # TODO: if running an async task, return PingStatus.HEALTHY_BUSY
+    return PingStatus.HEALTHY
 
 
 if __name__ == "__main__":
-    app.run()
+    uvicorn.run("proj_test_project.snapshot_agent.main:app", port=8080)
 "
 `;
 
@@ -898,14 +915,16 @@ version = "0.1.0"
 dependencies = [
   "aws-opentelemetry-distro==0.12.2",
   "bedrock-agentcore==0.1.7",
+  "fastapi==0.120.0",
   "boto3==1.40.59",
   "mcp==1.19.0",
   "strands-agents==1.13.0",
-  "strands-agents-tools==0.2.12"
+  "strands-agents-tools==0.2.12",
+  "uvicorn==0.38.0"
 ]
 
 [dependency-groups]
-dev = [ ]
+dev = [ "fastapi[standard]==0.120.0" ]
 
 [tool.uv]
 dev-dependencies = [ ]

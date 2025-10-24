@@ -97,6 +97,7 @@ export const PY_VERSIONS = {
   'pip-check-updates': '==0.27.0',
   'strands-agents': '==1.13.0',
   'strands-agents-tools': '==0.2.12',
+  uvicorn: '==0.38.0',
 } as const;
 export type IPyDepVersion = keyof typeof PY_VERSIONS;
 

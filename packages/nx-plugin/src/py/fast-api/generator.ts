@@ -11,20 +11,13 @@ import {
   ProjectConfiguration,
   readProjectConfiguration,
   Tree,
-  updateJson,
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { PyFastApiProjectGeneratorSchema } from './schema';
 import { UVProvider } from '@nxlv/python/src/provider/uv/provider';
 import { Logger } from '@nxlv/python/src/executors/utils/logger';
 import pyProjectGenerator, { getPyProjectDetails } from '../project/generator';
-import { parse, stringify } from '@iarna/toml';
-import { UVPyprojectToml } from '@nxlv/python/src/provider/uv/types';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
-import {
-  PACKAGES_DIR,
-  SHARED_CONSTRUCTS_DIR,
-} from '../../utils/shared-constructs-constants';
 import { toClassName, toKebabCase } from '../../utils/names';
 import { formatFilesInSubtree } from '../../utils/format';
 import { sortObjectKeys } from '../../utils/object';
@@ -36,11 +29,12 @@ import {
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { addApiGatewayInfra } from '../../utils/api-constructs/api-constructs';
 import { addOpenApiGeneration } from './react/open-api';
-import { updateGitIgnore } from '../../utils/git';
 import { assignPort } from '../../utils/port';
 import { addPythonBundleTarget } from '../../utils/bundle/bundle';
-import { addDependenciesToPyProjectToml } from '../../utils/py';
-import { withPyVersions } from '../../utils/versions';
+import {
+  addDependenciesToDependencyGroupInPyProjectToml,
+  addDependenciesToPyProjectToml,
+} from '../../utils/py';
 import { resolveIacProvider } from '../../utils/iac';
 import { addSharedConstructsOpenApiMetadataGenerateTarget } from '../../utils/api-constructs/open-api-metadata';
 
@@ -153,14 +147,9 @@ export const pyFastApiProjectGenerator = async (
     'aws-lambda-powertools',
     'aws-lambda-powertools[tracer]',
   ]);
-
-  const projectToml = parse(
-    tree.read(joinPathFragments(dir, 'pyproject.toml'), 'utf8'),
-  ) as UVPyprojectToml;
-  projectToml['dependency-groups'] = {
-    dev: withPyVersions(['fastapi[standard]']),
-  };
-  tree.write(joinPathFragments(dir, 'pyproject.toml'), stringify(projectToml));
+  addDependenciesToDependencyGroupInPyProjectToml(tree, dir, 'dev', [
+    'fastapi[standard]',
+  ]);
 
   addGeneratorMetadata(tree, fullyQualifiedName, FAST_API_GENERATOR_INFO);
 

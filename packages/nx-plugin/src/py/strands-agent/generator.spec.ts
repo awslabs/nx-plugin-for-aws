@@ -108,7 +108,7 @@ dev-dependencies = []
       'nx:run-commands',
     );
     expect(projectConfig.targets['agent-serve'].options.commands).toEqual([
-      'uv run python -m proj_test_project.agent.main',
+      'uv run fastapi dev proj_test_project/agent/main.py --port 8081',
     ]);
     expect(projectConfig.targets['agent-serve'].continuous).toBe(true);
   });
@@ -145,7 +145,9 @@ dev-dependencies = []
     expect(projectConfig.targets['custom-agent-serve']).toBeDefined();
     expect(
       projectConfig.targets['custom-agent-serve'].options.commands,
-    ).toEqual(['uv run python -m proj_test_project.custom_agent.main']);
+    ).toEqual([
+      'uv run fastapi dev proj_test_project/custom_agent/main.py --port 8081',
+    ]);
   });
 
   it('should handle kebab-case conversion for names with special characters', async () => {
@@ -278,20 +280,18 @@ dev-dependencies = []
     expect(projectConfig.targets['bundle-arm']).toBeDefined();
 
     // Check that docker target was added
-    expect(projectConfig.targets['test-project-agent-docker']).toBeDefined();
-    expect(projectConfig.targets['test-project-agent-docker'].executor).toBe(
+    expect(projectConfig.targets['agent-docker']).toBeDefined();
+    expect(projectConfig.targets['agent-docker'].executor).toBe(
       'nx:run-commands',
     );
-    expect(
-      projectConfig.targets['test-project-agent-docker'].options.commands,
-    ).toEqual([
+    expect(projectConfig.targets['agent-docker'].options.commands).toEqual([
       'docker build --platform linux/arm64 -t proj-test-project-agent:latest apps/test-project/proj_test_project/agent --build-context workspace=.',
     ]);
 
     // Check that docker target depends on bundle-arm
-    expect(
-      projectConfig.targets['test-project-agent-docker'].dependsOn,
-    ).toContain('bundle-arm');
+    expect(projectConfig.targets['agent-docker'].dependsOn).toContain(
+      'bundle-arm',
+    );
 
     // Check that build target depends on docker
     expect(projectConfig.targets.build.dependsOn).toContain('docker');
@@ -390,7 +390,7 @@ dev-dependencies = []
 
     // Bundle and docker targets should not be added for None compute type
     expect(projectConfig.targets['bundle-arm']).toBeUndefined();
-    expect(projectConfig.targets['test-project-agent-docker']).toBeUndefined();
+    expect(projectConfig.targets['agent-docker']).toBeUndefined();
   });
 
   it('should generate shared constructs for BedrockAgentCoreRuntime', async () => {
@@ -527,7 +527,7 @@ dev-dependencies = []
       tree.read('apps/complex-project/project.json', 'utf-8'),
     );
     expect(projectConfig.targets['agent-serve'].options.commands).toEqual([
-      'uv run python -m my_complex_module.agent.main',
+      'uv run fastapi dev my_complex_module/agent/main.py --port 8081',
     ]);
   });
 
@@ -543,7 +543,7 @@ dev-dependencies = []
     );
 
     // Check that the specific docker target was created
-    const dockerTargetName = 'test-project-agent-docker';
+    const dockerTargetName = 'agent-docker';
     expect(projectConfig.targets[dockerTargetName]).toBeDefined();
     expect(projectConfig.targets[dockerTargetName].dependsOn).toContain(
       'bundle-arm',
@@ -670,7 +670,7 @@ dev-dependencies = []
       tree.read('apps/test-project/project.json', 'utf-8'),
     );
     expect(projectConfig.targets['bundle-arm']).toBeDefined();
-    expect(projectConfig.targets['test-project-agent-docker']).toBeDefined();
+    expect(projectConfig.targets['agent-docker']).toBeDefined();
   });
 
   it('should handle project name with dots correctly for docker image tag', async () => {
@@ -711,9 +711,9 @@ dev-dependencies = []
     );
 
     // Check that docker command uses correct image tag
-    expect(
-      projectConfig.targets['project-agent-docker'].options.commands[0],
-    ).toContain('proj-project-agent:latest');
+    expect(projectConfig.targets['agent-docker'].options.commands[0]).toContain(
+      'proj-project-agent:latest',
+    );
   });
 
   it('should generate strands agent with Terraform provider and default name', async () => {
@@ -900,10 +900,10 @@ dev-dependencies = []
     ]);
 
     // Check that docker target was added
-    expect(projectConfig.targets['test-project-agent-docker']).toBeDefined();
-    expect(
-      projectConfig.targets['test-project-agent-docker'].dependsOn,
-    ).toContain('bundle-arm');
+    expect(projectConfig.targets['agent-docker']).toBeDefined();
+    expect(projectConfig.targets['agent-docker'].dependsOn).toContain(
+      'bundle-arm',
+    );
   });
 
   it('should handle default computeType as BedrockAgentCoreRuntime with Terraform', async () => {
@@ -933,7 +933,7 @@ dev-dependencies = []
       tree.read('apps/test-project/project.json', 'utf-8'),
     );
     expect(projectConfig.targets['bundle-arm']).toBeDefined();
-    expect(projectConfig.targets['test-project-agent-docker']).toBeDefined();
+    expect(projectConfig.targets['agent-docker']).toBeDefined();
   });
 
   it('should inherit iacProvider from config when set to Inherit', async () => {
@@ -957,5 +957,49 @@ dev-dependencies = []
     expect(
       tree.exists('packages/common/terraform/src/core/agent-core/runtime.tf'),
     ).toBeTruthy();
+  });
+
+  it('should add component generator metadata with default name', async () => {
+    await pyStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      computeType: 'None',
+      iacProvider: 'CDK',
+    });
+
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+
+    expect(projectConfig.metadata).toBeDefined();
+    expect(projectConfig.metadata.components).toBeDefined();
+    expect(projectConfig.metadata.components).toHaveLength(1);
+    expect(projectConfig.metadata.components[0].generator).toBe(
+      PY_STRANDS_AGENT_GENERATOR_INFO.id,
+    );
+    expect(projectConfig.metadata.components[0].name).toBe('agent');
+    expect(projectConfig.metadata.components[0].port).toBeDefined();
+    expect(typeof projectConfig.metadata.components[0].port).toBe('number');
+  });
+
+  it('should add component generator metadata with custom name', async () => {
+    await pyStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      name: 'custom-agent',
+      computeType: 'None',
+      iacProvider: 'CDK',
+    });
+
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+
+    expect(projectConfig.metadata).toBeDefined();
+    expect(projectConfig.metadata.components).toBeDefined();
+    expect(projectConfig.metadata.components).toHaveLength(1);
+    expect(projectConfig.metadata.components[0].generator).toBe(
+      PY_STRANDS_AGENT_GENERATOR_INFO.id,
+    );
+    expect(projectConfig.metadata.components[0].name).toBe('custom-agent');
+    expect(projectConfig.metadata.components[0].port).toBeDefined();
   });
 });

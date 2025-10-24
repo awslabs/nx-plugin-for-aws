@@ -111,13 +111,13 @@ dev-dependencies = []
       projectConfig.targets['mcp-server-serve-stdio'].options.commands,
     ).toEqual(['uv run -m proj_test_project.mcp_server.stdio']);
 
-    expect(projectConfig.targets['mcp-server-serve-http']).toBeDefined();
-    expect(projectConfig.targets['mcp-server-serve-http'].executor).toBe(
+    expect(projectConfig.targets['mcp-server-serve']).toBeDefined();
+    expect(projectConfig.targets['mcp-server-serve'].executor).toBe(
       'nx:run-commands',
     );
-    expect(
-      projectConfig.targets['mcp-server-serve-http'].options.commands,
-    ).toEqual(['uv run -m proj_test_project.mcp_server.http']);
+    expect(projectConfig.targets['mcp-server-serve'].options.commands).toEqual([
+      'uv run -m proj_test_project.mcp_server.http',
+    ]);
 
     expect(projectConfig.targets['mcp-server-inspect']).toBeDefined();
     expect(projectConfig.targets['mcp-server-inspect'].executor).toBe(
@@ -161,7 +161,7 @@ dev-dependencies = []
       tree.read('apps/test-project/project.json', 'utf-8'),
     );
     expect(projectConfig.targets['custom-server-serve-stdio']).toBeDefined();
-    expect(projectConfig.targets['custom-server-serve-http']).toBeDefined();
+    expect(projectConfig.targets['custom-server-serve']).toBeDefined();
     expect(projectConfig.targets['custom-server-inspect']).toBeDefined();
     expect(
       projectConfig.targets['custom-server-serve-stdio'].options.commands,
@@ -356,28 +356,26 @@ dev-dependencies = []
       tree.read('apps/test-project/project.json', 'utf-8'),
     );
     expect(projectConfig.targets['mcp-server-serve-stdio']).toBeDefined();
-    expect(projectConfig.targets['mcp-server-serve-http']).toBeDefined();
+    expect(projectConfig.targets['mcp-server-serve']).toBeDefined();
 
     // Check that bundle target was added
     expect(projectConfig.targets['bundle-arm']).toBeDefined();
 
     // Check that docker target was added
-    expect(
-      projectConfig.targets['test-project-mcp-server-docker'],
-    ).toBeDefined();
-    expect(
-      projectConfig.targets['test-project-mcp-server-docker'].executor,
-    ).toBe('nx:run-commands');
-    expect(
-      projectConfig.targets['test-project-mcp-server-docker'].options.commands,
-    ).toEqual([
-      'docker build --platform linux/arm64 -t proj-test-project-mcp-server:latest apps/test-project/proj_test_project/mcp_server --build-context workspace=.',
-    ]);
+    expect(projectConfig.targets['mcp-server-docker']).toBeDefined();
+    expect(projectConfig.targets['mcp-server-docker'].executor).toBe(
+      'nx:run-commands',
+    );
+    expect(projectConfig.targets['mcp-server-docker'].options.commands).toEqual(
+      [
+        'docker build --platform linux/arm64 -t proj-test-project-mcp-server:latest apps/test-project/proj_test_project/mcp_server --build-context workspace=.',
+      ],
+    );
 
     // Check that docker target depends on bundle-arm
-    expect(
-      projectConfig.targets['test-project-mcp-server-docker'].dependsOn,
-    ).toContain('bundle-arm');
+    expect(projectConfig.targets['mcp-server-docker'].dependsOn).toContain(
+      'bundle-arm',
+    );
 
     // Check that build target depends on docker
     expect(projectConfig.targets.build.dependsOn).toContain('docker');
@@ -427,9 +425,7 @@ dev-dependencies = []
     expect(
       projectConfig.targets['custom-bedrock-server-serve-stdio'],
     ).toBeDefined();
-    expect(
-      projectConfig.targets['custom-bedrock-server-serve-http'],
-    ).toBeDefined();
+    expect(projectConfig.targets['custom-bedrock-server-serve']).toBeDefined();
 
     // Check that docker target was added with custom name
     expect(projectConfig.targets['custom-bedrock-server-docker']).toBeDefined();
@@ -677,7 +673,7 @@ dev-dependencies = []
     );
 
     // Check that the specific docker target was created
-    const dockerTargetName = 'test-project-mcp-server-docker';
+    const dockerTargetName = 'mcp-server-docker';
     expect(projectConfig.targets[dockerTargetName]).toBeDefined();
     expect(projectConfig.targets[dockerTargetName].dependsOn).toContain(
       'bundle-arm',
@@ -887,12 +883,10 @@ dev-dependencies = []
     ]);
 
     // Check that docker target was added
-    expect(
-      projectConfig.targets['test-project-mcp-server-docker'],
-    ).toBeDefined();
-    expect(
-      projectConfig.targets['test-project-mcp-server-docker'].dependsOn,
-    ).toContain('bundle-arm');
+    expect(projectConfig.targets['mcp-server-docker']).toBeDefined();
+    expect(projectConfig.targets['mcp-server-docker'].dependsOn).toContain(
+      'bundle-arm',
+    );
   });
 
   it('should inherit iacProvider from config when set to Inherit', async () => {
@@ -916,5 +910,49 @@ dev-dependencies = []
     expect(
       tree.exists('packages/common/constructs/src/core/agent-core/runtime.ts'),
     ).toBeTruthy();
+  });
+
+  it('should add component generator metadata with default name', async () => {
+    await pyMcpServerGenerator(tree, {
+      project: 'test-project',
+      computeType: 'None',
+      iacProvider: 'CDK',
+    });
+
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+
+    expect(projectConfig.metadata).toBeDefined();
+    expect(projectConfig.metadata.components).toBeDefined();
+    expect(projectConfig.metadata.components).toHaveLength(1);
+    expect(projectConfig.metadata.components[0].generator).toBe(
+      PY_MCP_SERVER_GENERATOR_INFO.id,
+    );
+    expect(projectConfig.metadata.components[0].name).toBe('mcp-server');
+    expect(projectConfig.metadata.components[0].port).toBeDefined();
+    expect(typeof projectConfig.metadata.components[0].port).toBe('number');
+  });
+
+  it('should add component generator metadata with custom name', async () => {
+    await pyMcpServerGenerator(tree, {
+      project: 'test-project',
+      name: 'custom-server',
+      computeType: 'None',
+      iacProvider: 'CDK',
+    });
+
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+
+    expect(projectConfig.metadata).toBeDefined();
+    expect(projectConfig.metadata.components).toBeDefined();
+    expect(projectConfig.metadata.components).toHaveLength(1);
+    expect(projectConfig.metadata.components[0].generator).toBe(
+      PY_MCP_SERVER_GENERATOR_INFO.id,
+    );
+    expect(projectConfig.metadata.components[0].name).toBe('custom-server');
+    expect(projectConfig.metadata.components[0].port).toBeDefined();
   });
 });
