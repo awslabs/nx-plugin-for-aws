@@ -172,7 +172,7 @@ export default defineConfig({
                       link: '/get_started/tutorials/dungeon-game/overview',
                     },
                     {
-                      label: '1. Monorepo setup',
+                      label: '1. Set up a monorepo',
                       translations: {
                         jp: '1. モノレポのセットアップ',
                         ko: '1. 모노레포 설정',
@@ -185,7 +185,7 @@ export default defineConfig({
                       link: '/get_started/tutorials/dungeon-game/1',
                     },
                     {
-                      label: '2. Game API and Inventory MCP',
+                      label: '2. Implement the Game API and Inventory MCP server',
                       translations: {
                         jp: '2. ゲームAPIとインベントリMCP',
                         ko: '2. 게임 API 및 인벤토리 MCP',
@@ -198,7 +198,7 @@ export default defineConfig({
                       link: '/get_started/tutorials/dungeon-game/2',
                     },
                     {
-                      label: '3. Story Agent',
+                      label: '3. Implement the Story Agent',
                       translations: {
                         jp: '3. ストーリーエージェント',
                         ko: '3. 스토리 에이전트',
@@ -211,7 +211,7 @@ export default defineConfig({
                       link: '/get_started/tutorials/dungeon-game/3',
                     },
                     {
-                      label: '4. UI',
+                      label: '4. Build the UI',
                       translations: {
                         jp: '4. UI',
                         ko: '4. UI',
@@ -269,7 +269,7 @@ export default defineConfig({
           ],
         },
         {
-          label: 'Guides',
+          label: 'Component guides',
           translations: {
             jp: 'ガイド',
             ko: '가이드',

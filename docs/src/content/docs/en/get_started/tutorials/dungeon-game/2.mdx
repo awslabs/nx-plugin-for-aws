@@ -1,5 +1,5 @@
 ---
-title: Agentic AI Dungeon Game
+title: Implement the Game API and Inventory MCP server
 description: A walkthrough of how to build an agentic AI-powered dungeon adventure game using the @aws/nx-plugin.
 ---
 
@@ -23,17 +23,17 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 import { getDungeonAdventureElectroDbDependencies } from '../../../../../../../../e2e/src/utils';
 
-## Module 2: Game API and Inventory MCP Server implementation
+## Task 1: Implement the Game API
 
-We are going to start by implementing our Game API. To do this, we need to create 5 APIs in total:
+Before we implement our Game API, we need to create these 5 APIs:
 
-1. `saveGame` - create or updte a game.
+1. `saveGame` - create or update a game.
 2. `queryGames` - return a paginated list of previously saved games.
 3. `saveAction` - save an action for a given game.
 4. `queryActions` - return a paginated list of all actions related to a game.
 5. `queryInventory` - return a paginated list of items in a player's inventory.
 
-### API Schema
+### API schema
 
 To define our API inputs and outputs, let's create our schema using [Zod](https://zod.dev/) within the `packages/game-api/src/schema` directory as follows:
 
@@ -55,15 +55,15 @@ To define our API inputs and outputs, let's create our schema using [Zod](https:
   </TabItem>
 </Tabs>
 
-You can also delete the `packages/game-api/src/schema/echo.ts` file given we will not be using it in this project.
+You can delete the `packages/game-api/src/schema/echo.ts` file as we will not be using it in this project.
 
 <Aside type="tip">
-As you can see above, for each of the schemas we define in Zod, we also export an interface using the `z.TypeOf` syntax. This converts our zod definition into a Typescript interface without having to duplicate effort!
+For each of the schemas we define in Zod, we also export an interface using the `z.TypeOf` syntax. This converts our Zod definition into a Typescript interface without having to duplicate effort.
 </Aside>
 
 ### Entity modelling
 
-The ER diagram for our application is as follows:
+This is the ER diagram for our application.
 
 <Image class="centered-image white-bg" src={dungeonAdventureErPng} alt="dungeon-adventure-er.png" width="400" height="300" />
 
@@ -106,15 +106,15 @@ game ||--o{ item
 @enduml
 */}
 
-We are going to implement our Database in DynamoDB and will be using the [ElectroDB](https://electrodb.dev/en/core-concepts/introduction/) DynamoDB client library to simplify things. To get started we need to first install `electrodb` and the DynamoDB Client by running the following command:
+We will implement our database in DynamoDB, and will use the [ElectroDB](https://electrodb.dev/en/core-concepts/introduction/) DynamoDB client library to simplify things. To install `electrodb` and the DynamoDB Client, run this command:
 
 <InstallCommand pkg={getDungeonAdventureElectroDbDependencies()} />
 
 <Aside>
-All dependencies are added to the root `package.json` as the `@aws/nx-plugin` follows the [single version policy](https://nx.dev/concepts/decisions/dependency-management#single-version-policy) principle. For more information, please refer to the <Link path="guides/typescript-project#dependencies">ts#project guide</Link>.
+All dependencies are added to the root `package.json` as the `@aws/nx-plugin` follows the [single version policy](https://nx.dev/concepts/decisions/dependency-management#single-version-policy) principle. For more information, refer to the <Link path="guides/typescript-project#dependencies">ts#project guide</Link>.
 </Aside>
 
-Now let's create the following files within our `packages/game-api/src/entities` folder to define our ElectroDB entities as per the above ER Diagram:
+To define our ElectroDB entities from the ER Diagram, let's create the following files within our `packages/game-api/src/entities` folder:
 
 <Tabs>
   <TabItem label="action.ts">
@@ -128,7 +128,7 @@ Now let's create the following files within our `packages/game-api/src/entities`
   </TabItem>
 </Tabs>
 
-ElectroDB allows us to not only define our types, but can also provide defaults for certain values like the timestamps above. In addition, ElectroDB follows [single-table design](https://electrodb.dev/en/core-concepts/single-table-relationships/) which is the best practice when using DynamoDB.
+ElectroDB allows us to not only define our types, but can also provide defaults for certain values like timestamps. In addition, ElectroDB follows [single-table design](https://electrodb.dev/en/core-concepts/single-table-relationships/) which is the best practice when using DynamoDB.
 
 <Aside>
 Whilst ElectroDB does support [collections](https://electrodb.dev/en/modeling/collections/), we have chosen not to use them in this tutorial for simplicity.
@@ -148,7 +148,7 @@ The package structure would be better if we refactored entities into their own s
 
 ### Adding the DynamoDB client to our tRPC context
 
-Given we need access to the DynamoDB client in each of our procedures, we want to be able to create a single instance of the client which we can pass through via context. To do this, make the following changes within `packages/game-api/src`:
+As we need access to the DynamoDB client in each of our procedures, we will create a single instance of the client which we can pass through via context. To do this, make the following changes within `packages/game-api/src`:
 
 <Tabs>
   <TabItem label="middleware/dynamodb.ts">
@@ -164,7 +164,7 @@ Augment our `IMiddlewareContext` to add the `IDynamoDBContext`.
   <TabItem label="init.ts">
 <E2EDiff lang="typescript" before="dungeon-adventure/2/init.ts.old.template" after="dungeon-adventure/2/init.ts.template" />
 
-The DynamoDB plugin is instrumented.
+This will instrument the DynamoDB plugin.
 
 <Aside>
 The `concat` api binds our middleware to the procedures we define. For more details please refer to the [concat guide](https://trpc.io/docs/server/middlewares#concat).
@@ -174,7 +174,7 @@ The `concat` api binds our middleware to the procedures we define. For more deta
 
 ### Defining our procedures
 
-Now it's time to implement the API methods. To do this, make the following changes within `packages/game-api/src/procedures`:
+To implement the API methods, make the following changes within `packages/game-api/src/procedures`:
 
 #### Queries
 
@@ -201,11 +201,11 @@ Now it's time to implement the API methods. To do this, make the following chang
   </TabItem>
 </Tabs>
 
-You can also delete the `echo.ts` file (from `packages/game-api/src/procedures`) given we will not be using it in this project.
+You can delete the `echo.ts` file (from `packages/game-api/src/procedures`) as we will not be using it in this project.
 
 ### Router setup
 
-Now that we have defined our procedures, let's wire them into our API. To do this, update the following file:
+After we define our procedures, to wire them into our API, update the following file:
 
 <Tabs>
   <TabItem label="packages/game-api/src/router.ts">
@@ -213,17 +213,17 @@ Now that we have defined our procedures, let's wire them into our API. To do thi
 </TabItem>
 </Tabs>
 
-### Inventory MCP Server
+## Task 2: Create an Inventory MCP server
 
-Now let's create an MCP server which will allow our agent to manage items in a player's inventory.
+Let us create an MCP server which will allow our agent to manage items in a player's inventory.
 
-We'll define the following tools for our Agent:
+We'll define the following tools for our agent:
 
 - `list-inventory-items` for retrieving the player's current inventory items
 - `add-to-inventory` for adding items to the player's inventory
 - `remove-from-inventory` for removing items from the player's inventory
 
-To save time, we'll define all the tools inline:
+To save time, we will define all the tools inline:
 
 <Tabs>
   <TabItem label="packages/inventory/src/mcp-server/server.ts">
@@ -231,13 +231,14 @@ To save time, we'll define all the tools inline:
 </TabItem>
 </Tabs>
 
-As the number of tools grows, you refactor them out into separate files if you like.
+As the number of tools grow, you can refactor them out into separate files if you like.
 
-You can now delete the `tools` and `resources` directories in `packages/inventory/src/mcp-server` as these are unused.
+Delete the `tools` and `resources` directories in `packages/inventory/src/mcp-server` as these will not be used.
 
-### Infrastructure
+## Task 3: Update the infrastructure
 
-The final step is to update our infrastructure to create the DynamoDB table and grant permissions to perform operations from the Game API. To do so, update the `packages/infra/src` as follows:
+The final step is to update our infrastructure to create the DynamoDB table and grant permissions to perform operations from the Game API. 
+To do so, update the `packages/infra/src` as follows:
 
 <Tabs>
   <TabItem label="constructs/electrodb-table.ts">
@@ -252,24 +253,25 @@ Notice here that since each procedure is served by an individual lambda function
   </TabItem>
 </Tabs>
 
-### Deployment and testing
+## Task 4: Deployment and testing
 
-First, lets build the codebase:
+To build the codebase:
 
 <NxCommands commands={['run-many --target build --all']} />
 
 <Aside type="tip">
-If you encounter any lint errors, you can run the following command to automatically fix them.
+If you encounter any lint errors, run the following command to automatically fix them.
 
 <NxCommands commands={['run-many --target lint --configuration=fix --all']} />
 </Aside>
 
-Your application can now be deployed by running the following command:
+### Deploy your application
+To deploy your application, run the following command:
 
 <NxCommands commands={['deploy infra dungeon-adventure-infra-sandbox/*']} />
 
 :::caution
-You may need to bootstrap your AWS Account first, run:
+To bootstrap your AWS Account first, run:
 
 <NxCommands commands={['bootstrap infra']} />
 :::
@@ -277,12 +279,12 @@ You may need to bootstrap your AWS Account first, run:
 Your first deployment will take around 8 minutes to complete. Subsequent deployments will take around 2 minutes.
 
 :::tip
-If you're iterating on lambda function code changes, you can deploy with the `--hotswap` flag after building the codebase for a much shorter (2-3 second) deployment time.
+If you're iterating on Lambda function code changes, you can deploy with the `--hotswap` flag after building the codebase for a much shorter (2-3 second) deployment time.
 
 <NxCommands commands={['run @dungeon-adventure/infra:deploy dungeon-adventure-infra-sandbox/* --hotswap']} />
 :::
 
-Once the deployment completes, you should see some outputs similar to the following _(some values have been redacted)_:
+Once the deployment completes, you will see outputs similar to the following _(some values have been redacted)_:
 
 ```bash
 dungeon-adventure-sandbox-Application
@@ -300,8 +302,8 @@ dungeon-adventure-sandbox-Application.StoryApiEndpointXXX = https://xxx.execute-
 dungeon-adventure-sandbox-Application.UserIdentityUserIdentityIdentityPoolIdXXX = region:xxx
 dungeon-adventure-sandbox-Application.UserIdentityUserIdentityUserPoolIdXXX = region_xxx
 ```
-
-We can test our API by either:
+### Test the API
+You can test the API by either:
 <ul>
 <li>Starting a local instance of the tRPC backend and invoke the APIs using `curl`.</li>
 <li>
@@ -309,7 +311,7 @@ We can test our API by either:
 
 <Tabs>
   <TabItem label="Bash/Linux/macOS">
-You can either add the following script to your `.bashrc` file (and `source` it) or simply paste the following into the same terminal you wish to run the command in.
+You can either add the following script to your `.bashrc` file (and `source` it) or paste the following into the same terminal you wish to run the command in.
 ```bash
 // ~/.bashrc
 acurl () {
@@ -320,7 +322,7 @@ acurl () {
 }
 ```
 
-Then to make a sigv4 authenticated curl request, you can simply invoke `acurl` like the following examples:
+To make a `sigv4` authenticated curl request, invoke `acurl` using these examples:
 
 ###### API Gateway
 ```bash
@@ -333,7 +335,7 @@ acurl ap-southeast-2 lambda -N -X POST https://xxx
 ```
   </TabItem>
   <TabItem label="Windows PowerShell">
-You can either add the following function to your PowerShell profile or simply paste the following into the same PowerShell session you wish to run the command in.
+You can either add the following function to your PowerShell profile or paste the following into the same PowerShell session you wish to run the command in.
 ```powershell
 # PowerShell profile or current session
 function acurl {
@@ -351,7 +353,7 @@ function acurl {
 }
 ```
 
-Then to make a sigv4 authenticated curl request, you can simply invoke `acurl` like the following examples:
+To make a `sigv4` authenticated curl request, invoke `acurl` using these examples:
 
 ###### API Gateway
 ```powershell
@@ -372,7 +374,7 @@ acurl ap-southeast-2 lambda -N -X POST https://xxx
 
 <Tabs>
   <TabItem label="Local">
-    Start your local `game-api` server by running the following command:
+    To start your local `game-api` server, run the following command:
 
     <NxCommands highlights={['dungeon-adventure-infra-sandbox-Application-ElectroDbTableXXX-YYY']} env={{TABLE_NAME:"dungeon-adventure-infra-sandbox-Application-ElectroDbTableXXX-YYY"}} commands={["run @dungeon-adventure/game-api:serve"]} />
 
@@ -400,7 +402,7 @@ acurl ap-southeast-2 execute-api -X GET 'https://xxx.execute-api.ap-southeast-2.
 The `%7B%7D` we pass to test the API is a URI encoded empty JSON object (`{}`).
 :::
 
-If the command executes successfully, you should see a response as follows:
+If the command runs successfully, you will see a response as follows:
 
 ```json
 {"result":{"data":{"items":[],"cursor":null}}}
