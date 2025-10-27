@@ -23,6 +23,14 @@ const SUPPORTED_LANGUAGES = ['en', 'jp', 'ko', 'es', 'pt', 'fr', 'it', 'zh'];
 const SOURCE_LANGUAGE = 'en';
 const DOCS_DIR = path.resolve(process.cwd(), 'docs/src/content/docs');
 
+// Interface for file translation context
+interface FileToTranslate {
+  path: string;
+  sourceLanguageContent: string;
+  sourceLanguageDiff: string;
+  existingTranslations: { [code: string]: string };
+}
+
 // Define the command line interface
 const program = new Command();
 
@@ -54,9 +62,9 @@ const log = {
     options.verbose && console.log(chalk.gray('DEBUG: ') + message),
 };
 
-const sectionTranslationModelId = 'us.deepseek.r1-v1:0';
+const sectionTranslationModelId = 'us.anthropic.claude-sonnet-4-5-20250929-v1:0';
 const frontmatterTranslationModelId =
-  'anthropic.claude-3-5-haiku-20241022-v1:0';
+  'us.anthropic.claude-sonnet-4-5-20250929-v1:0';
 
 /**
  * Main function to run the translation process
@@ -96,27 +104,20 @@ async function main() {
 
     log.info(`Found ${filesToTranslate.length} files to translate`);
 
-    // Process each file
-    await Promise.all(
-      filesToTranslate.map(async (file) => {
-        log.info(`Processing file: ${file}`);
+    // Process each file sequentially
+    for (const fileObj of filesToTranslate) {
+      log.info(`Processing file: ${fileObj.path}`);
 
-        // Read the source file
-        const sourceContent = await fs.readFile(file, 'utf-8');
+      // Split the content by h2 headers
+      const sections = splitByHeaders(fileObj.sourceLanguageContent);
 
-        // Split the content by h2 headers
-        const sections = splitByHeaders(sourceContent);
+      log.verbose(`Split file into ${sections.length} sections`);
 
-        log.verbose(`Split file into ${sections.length} sections`);
-
-        // Process each target language
-        await Promise.all(
-          targetLanguages.map(async (targetLang: string) => {
-            await translateFile(file, sections, targetLang, bedrockClient);
-          }),
-        );
-      }),
-    );
+      // Process each target language sequentially
+      for (const targetLang of targetLanguages) {
+        await translateFile(fileObj, sections, targetLang, bedrockClient);
+      }
+    }
 
     log.success('Translation completed successfully');
   } catch (error) {
@@ -157,9 +158,60 @@ async function initializeBedrockClient(): Promise<BedrockRuntimeClient> {
 }
 
 /**
+ * Get the git diff for a specific file
+ */
+async function getFileDiff(filePath: string, baseCommit: string): Promise<string> {
+  try {
+    const git = simpleGit();
+    const relativePath = path.relative(process.cwd(), filePath);
+
+    // Get the diff for this specific file
+    const diff = await git.diff([`${baseCommit}..HEAD`, '--', relativePath]);
+
+    return diff || '';
+  } catch (error) {
+    log.verbose(`Could not get diff for ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+    return '';
+  }
+}
+
+/**
+ * Get existing translations for a file
+ */
+async function getExistingTranslations(
+  sourceFile: string,
+  targetLanguages: string[],
+): Promise<{ [code: string]: string }> {
+  const existingTranslations: { [code: string]: string } = {};
+
+  const relativePath = path.relative(
+    `${DOCS_DIR}/${SOURCE_LANGUAGE}`,
+    sourceFile,
+  );
+
+  for (const lang of targetLanguages) {
+    const translatedFile = path.join(DOCS_DIR, lang, relativePath);
+
+    try {
+      if (await fs.pathExists(translatedFile)) {
+        const content = await fs.readFile(translatedFile, 'utf-8');
+        existingTranslations[lang] = content;
+      } else {
+        existingTranslations[lang] = '';
+      }
+    } catch (error) {
+      log.verbose(`Could not read existing translation for ${lang}: ${error instanceof Error ? error.message : String(error)}`);
+      existingTranslations[lang] = '';
+    }
+  }
+
+  return existingTranslations;
+}
+
+/**
  * Get the list of files to translate based on command options
  */
-async function getFilesToTranslate(): Promise<string[]> {
+async function getFilesToTranslate(): Promise<FileToTranslate[]> {
   try {
     // Base pattern for markdown/mdx files in the source language directory
     const basePattern = `${DOCS_DIR}/${SOURCE_LANGUAGE}/**/*.{md,mdx}`;
@@ -167,7 +219,30 @@ async function getFilesToTranslate(): Promise<string[]> {
     if (options.all) {
       // Translate all files
       log.info('Translating all documentation files');
-      return await glob(basePattern);
+      const files = await glob(basePattern);
+
+      // For --all mode, we don't have diffs, so return empty diffs
+      const fileObjects: FileToTranslate[] = [];
+      for (const file of files) {
+        const sourceContent = await fs.readFile(file, 'utf-8');
+        const targetLanguages = options.languages
+          .split(',')
+          .map((lang: string) => lang.trim())
+          .filter(
+            (lang: string) =>
+              SUPPORTED_LANGUAGES.includes(lang) && lang !== SOURCE_LANGUAGE,
+          );
+        const existingTranslations = await getExistingTranslations(file, targetLanguages);
+
+        fileObjects.push({
+          path: file,
+          sourceLanguageContent: sourceContent,
+          sourceLanguageDiff: '',
+          existingTranslations,
+        });
+      }
+
+      return fileObjects;
     } else {
       // Translate only changed files since the last translation commit
       const git = simpleGit();
@@ -256,11 +331,35 @@ async function getFilesToTranslate(): Promise<string[]> {
 
       if (changedFiles.length === 0) {
         log.warn('No changed documentation files detected');
-      } else {
-        log.verbose(`Detected ${changedFiles.length} changed files`);
+        return [];
       }
 
-      return changedFiles;
+      log.verbose(`Detected ${changedFiles.length} changed files`);
+
+      // Build file objects with content, diff, and existing translations
+      const targetLanguages = options.languages
+        .split(',')
+        .map((lang: string) => lang.trim())
+        .filter(
+          (lang: string) =>
+            SUPPORTED_LANGUAGES.includes(lang) && lang !== SOURCE_LANGUAGE,
+        );
+
+      const fileObjects: FileToTranslate[] = [];
+      for (const file of changedFiles) {
+        const sourceContent = await fs.readFile(file, 'utf-8');
+        const diff = await getFileDiff(file, baseCommit);
+        const existingTranslations = await getExistingTranslations(file, targetLanguages);
+
+        fileObjects.push({
+          path: file,
+          sourceLanguageContent: sourceContent,
+          sourceLanguageDiff: diff,
+          existingTranslations,
+        });
+      }
+
+      return fileObjects;
     }
   } catch (error) {
     throw new Error(
@@ -347,7 +446,7 @@ function splitByHeaders(content: string, depth: number = 1): string[] {
  * Translate a file to the target language
  */
 async function translateFile(
-  sourceFile: string,
+  fileObj: FileToTranslate,
   sections: string[],
   targetLang: string,
   bedrockClient: BedrockRuntimeClient,
@@ -356,7 +455,7 @@ async function translateFile(
     // Create the target file path
     const relativePath = path.relative(
       `${DOCS_DIR}/${SOURCE_LANGUAGE}`,
-      sourceFile,
+      fileObj.path,
     );
     const targetFile = path.join(DOCS_DIR, targetLang, relativePath);
 
@@ -366,16 +465,25 @@ async function translateFile(
     await fs.ensureDir(path.dirname(targetFile));
 
     if (options.dryRun) {
-      log.info(`[DRY RUN] Would translate ${sourceFile} to ${targetFile}`);
+      log.info(`[DRY RUN] Would translate ${fileObj.path} to ${targetFile}`);
       return;
     }
 
-    // Translate each section
-    const translatedSections = await Promise.all(
-      sections.map((section) =>
-        translateSection(section, targetLang, bedrockClient),
-      ),
-    );
+    // Get the existing translation for this language
+    const existingTranslation = fileObj.existingTranslations[targetLang] || '';
+
+    // Translate each section sequentially
+    const translatedSections: string[] = [];
+    for (const section of sections) {
+      const translated = await translateSection(
+        section,
+        targetLang,
+        bedrockClient,
+        fileObj.sourceLanguageDiff,
+        existingTranslation,
+      );
+      translatedSections.push(translated);
+    }
 
     // Combine the translated sections
     const translatedContent = translatedSections.join('\n\n');
@@ -386,7 +494,7 @@ async function translateFile(
     log.success(`Translated ${relativePath} to ${targetLang}`);
   } catch (error) {
     throw new Error(
-      `Failed to translate file ${sourceFile}: ${error instanceof Error ? error.message : String(error)}`,
+      `Failed to translate file ${fileObj.path}: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 }
@@ -398,6 +506,8 @@ async function translateSection(
   section: string,
   targetLang: string,
   bedrockClient: BedrockRuntimeClient,
+  diff: string = '',
+  existingTranslation: string = '',
   depth: number = 1,
 ): Promise<string> {
   // Skip empty sections
@@ -410,12 +520,38 @@ async function translateSection(
 
   if (isFrontmatter) {
     // Handle frontmatter translation differently to preserve structure
-    return await translateFrontmatter(section, targetLang, bedrockClient);
+    return await translateFrontmatter(section, targetLang, bedrockClient, diff, existingTranslation);
+  }
+
+  let contextInfo = '';
+
+  // Add diff context if available
+  if (diff && diff.trim()) {
+    contextInfo += `
+IMPORTANT CONTEXT - Changes Made to Source Material:
+The following git diff shows what changed in the source ${getLanguageName(SOURCE_LANGUAGE)} documentation. Focus your translation efforts on the changed sections (marked with + and -), and leave unchanged sections as they were in the existing translation.
+
+<git-diff>
+${diff}
+</git-diff>
+`;
+  }
+
+  // Add existing translation context if available
+  if (existingTranslation && existingTranslation.trim()) {
+    contextInfo += `
+EXISTING TRANSLATION REFERENCE:
+Below is the existing ${getLanguageName(targetLang)} translation of this document. Use this as a reference to maintain consistency in terminology and style. For sections where the source material hasn't changed (not shown in the git diff above), keep the existing translation as-is.
+
+<existing-translation>
+${existingTranslation}
+</existing-translation>
+`;
   }
 
   const prompt = `
-You are a technical documentation translator. Translate the following text into ${getLanguageName(targetLang)}.
-
+You are a technical documentation translator. Translate the following text in <documentation-to-translate> xml tags into ${getLanguageName(targetLang)}.
+${contextInfo}
 CRITICAL REQUIREMENTS:
 1. DO NOT translate:
   - Personal names (leave them exactly as is)
@@ -427,10 +563,10 @@ CRITICAL REQUIREMENTS:
 4. Translate naturally while maintaining technical accuracy
 5. Only return translated text and never add commentary about the rest of the document.
 6. Preserve all import statements and component usage (never wrap things in backticks if they aren't already).
-
-Here is the mdx content to translate:
-
-${section}
+7. EFFICIENCY: If you have both a git diff and existing translation:
+   - For unchanged sections (not in the diff), reuse the existing translation verbatim
+   - Only translate sections that have actually changed in the source material
+   - This reduces unnecessary translation work and maintains consistency
 `;
 
   const params: InvokeModelCommandInput = {
@@ -438,10 +574,16 @@ ${section}
     contentType: 'application/json',
     accept: 'application/json',
     body: JSON.stringify({
-      max_tokens: 32000,
+      anthropic_beta: ['context-1m-2025-08-07'],
+      anthropic_version: "bedrock-2023-05-31",
       temperature: 0.7,
-      top_p: 0.9,
-      prompt: `<｜User｜>${prompt}<｜Assistant｜>`,
+      max_tokens: 64000,
+      system: prompt,
+      messages: [{ role: 'user', content: `Here is the mdx content to translate:
+
+<documentation-to-translate>
+${section}
+</documentation-to-translate>` }]
     }),
   };
 
@@ -449,29 +591,31 @@ ${section}
   const response = await bedrockClient.send(command);
 
   // Parse the response
-  const responseBody = JSON.parse(new TextDecoder().decode(response.body))
-    .choices[0];
+  const responseBody = JSON.parse(new TextDecoder().decode(response.body));
 
   // Check if we hit the token limit
-  if (responseBody.stop_reason === 'length') {
+  if (responseBody.stop_reason === 'max_tokens') {
     log.warn('Translation hit token limit. Splitting into smaller chunks.');
 
     const sections = splitByHeaders(section, depth);
 
-    const translatedSections = await Promise.all(
-      sections.map((section) =>
-        translateSection(section, targetLang, bedrockClient, depth + 1),
-      ),
-    );
+    const translatedSections: string[] = [];
+    for (const section of sections) {
+      const translated = await translateSection(
+        section,
+        targetLang,
+        bedrockClient,
+        diff,
+        existingTranslation,
+        depth + 1,
+      );
+      translatedSections.push(translated);
+    }
 
     return translatedSections.join('\n\n');
   }
 
-  // strip think tags
-  const translatedText = responseBody.text.replace(
-    /<think>(.|\n)*<\/think>/gm,
-    '',
-  );
+  const translatedText = responseBody.content[0].text;
   return translatedText;
 }
 
@@ -482,6 +626,8 @@ async function translateFrontmatter(
   frontmatter: string,
   targetLang: string,
   bedrockClient: BedrockRuntimeClient,
+  diff: string = '',
+  existingTranslation: string = '',
 ): Promise<string> {
   try {
     // Extract the content between --- markers
@@ -493,26 +639,54 @@ async function translateFrontmatter(
 
     const content = match[1];
 
-    // Create a prompt specifically for frontmatter
-    const prompt = (content: string) => `
-You are a technical documentation translator. Your task is to translate the following YAML frontmatter from English to ${getLanguageName(targetLang)}.
+    let contextInfo = '';
 
-Rules:©
+    // Add diff context if available
+    if (diff && diff.trim()) {
+      contextInfo += `
+IMPORTANT CONTEXT - Changes Made to Source Material:
+The following git diff shows what changed in the source ${getLanguageName(SOURCE_LANGUAGE)} documentation. Focus your translation efforts on the changed sections (marked with + and -), and leave unchanged sections as they were in the existing translation.
+
+<git-diff>
+${diff}
+</git-diff>
+`;
+    }
+
+    // Add existing translation context if available
+    if (existingTranslation && existingTranslation.trim()) {
+      // Extract existing frontmatter from the translation
+      const existingMatch = existingTranslation.match(/^---\n([\s\S]*?)\n---/);
+      if (existingMatch) {
+        contextInfo += `
+EXISTING TRANSLATION REFERENCE:
+Below is the existing ${getLanguageName(targetLang)} translation of this frontmatter. Use this as a reference to maintain consistency in terminology and style. For fields where the source material hasn't changed (not shown in the git diff above), keep the existing translation as-is.
+
+<existing-frontmatter-translation>
+${existingMatch[1]}
+</existing-frontmatter-translation>
+`;
+      }
+    }
+
+    // Create a prompt specifically for frontmatter
+    const prompt = `
+You are a technical documentation translator. Your task is to translate the following YAML frontmatter in <frontmatter> xml tags from ${getLanguageName(SOURCE_LANGUAGE)} to ${getLanguageName(targetLang)}.
+${contextInfo}
+Rules:
 1. Only translate the values, not the keys.
 2. Preserve all formatting, including indentation, spaces, newlines and special characters.
 3. Add quotes around title and description fields.
 4. Do not translate date, authors or template fields.
-5. Do not translate code blocks, variable names, or technical terms that should remain in English.
-6. If any localized links are present, translate the path appropriately (e.g., en/foo -> ${targetLang}/foo).
+5. Do not translate code blocks, variable names, or technical terms that should remain in ${getLanguageName(SOURCE_LANGUAGE)}.
+6. If any localized links are present, translate the path appropriately (e.g., ${SOURCE_LANGUAGE}/foo -> ${targetLang}/foo).
 7. NEVER include any explanatory text, notes, or phrases like "The following content remains unchanged".
 8. NEVER explain your translation choices or add any commentary.
 9. If you cannot translate something, simply return it as is without explanation.
-
-Here is the frontmatter to translate:
-
-\`\`\`yaml
-${content}
-\`\`\`
+10. EFFICIENCY: If you have both a git diff and existing translation:
+    - For unchanged fields (not in the diff), reuse the existing translation verbatim
+    - Only translate fields that have actually changed in the source material
+    - This reduces unnecessary translation work and maintains consistency
 
 CRITICAL: Your response must contain ONLY the translated YAML content with no additional text whatsoever. Do not include \`\`\`yaml or \`\`\` markers in your response.
 `;
@@ -522,13 +696,19 @@ CRITICAL: Your response must contain ONLY the translated YAML content with no ad
       contentType: 'application/json',
       accept: 'application/json',
       body: JSON.stringify({
+        anthropic_beta: ['context-1m-2025-08-07'],
         anthropic_version: 'bedrock-2023-05-31',
-        max_tokens: 2048,
+        max_tokens: 64000,
         temperature: 0.1,
+        system: prompt,
         messages: [
           {
             role: 'user',
-            content: prompt(content),
+            content: `Here is the frontmatter to translate:
+
+<frontmatter>
+${content}
+</frontmatter>`,
           },
         ],
       }),
@@ -551,6 +731,10 @@ CRITICAL: Your response must contain ONLY the translated YAML content with no ad
 
     // Clean up the response (remove any code block markers)
     translatedContent = translatedContent.replace(/```yaml|```/g, '').trim();
+
+    if (translatedContent.match(/^---\n([\s\S]*?)\n---/)) {
+      return translatedContent;
+    }
 
     // Reconstruct the frontmatter
     return `---\n${translatedContent}\n---`;
@@ -588,3 +772,4 @@ main().catch((error) => {
   );
   process.exit(1);
 });
+
