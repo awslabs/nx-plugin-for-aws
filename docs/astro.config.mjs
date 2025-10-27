@@ -185,7 +185,7 @@ export default defineConfig({
                       link: '/get_started/tutorials/dungeon-game/1',
                     },
                     {
-                      label: '2. Implement the Game API and Inventory MCP server',
+                      label:'2. Implement the Game API and Inventory MCP server',
                       translations: {
                         jp: '2. ゲームAPIとインベントリMCP',
                         ko: '2. 게임 API 및 인벤토리 MCP',
@@ -269,7 +269,7 @@ export default defineConfig({
           ],
         },
         {
-          label: 'Component guides',
+          label: 'Generator guides',
           translations: {
             jp: 'ガイド',
             ko: '가이드',
@@ -366,7 +366,7 @@ export default defineConfig({
               },
               link: '/troubleshooting/nx',
             },
-          ]
+          ],
         },
         {
           label: 'About',
