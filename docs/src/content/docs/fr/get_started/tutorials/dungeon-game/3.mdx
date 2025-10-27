@@ -3,8 +3,6 @@ title: "Jeu de Donjon d'IA Agentique"
 description: "Un guide pas à pas pour construire un jeu d'aventure de donjon alimenté par une IA agentique en utilisant le @aws/nx-plugin."
 ---
 
-
-
 import { Aside, Code, FileTree, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
 import { Image } from 'astro:assets';
 import Drawer from '@components/drawer.astro';
@@ -24,10 +22,6 @@ import gameSelectPng from '@assets/game-select.png'
 import gameConversationPng from '@assets/game-conversation.png'
 
 ## Module 3 : Implémentation de l'agent narratif
-
-<Aside type="caution">
-Vérifiez que votre compte AWS a activé l'accès au [modèle par défaut de Strands](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/model-providers/amazon-bedrock/) dans Bedrock pour votre région cible en suivant les étapes décrites dans [ce guide](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html). Au moment de la rédaction, il s'agit d'Anthropic Claude Sonnet 4.
-</Aside>
 
 Le Story Agent est un agent [Strands](https://strandsagents.com/) qui, étant donné un `Game` et une liste d'`Action`s comme contexte, fait progresser une histoire. Nous configurerons l'agent pour interagir avec notre Inventory MCP Server afin de gérer les objets disponibles du joueur.
 
@@ -107,7 +101,7 @@ Testez l'API via :
     Utilisez la sortie `InventoryMcpArn` du déploiement CDK ci-dessus, ainsi que votre `AWS_REGION`.
     :::
 
-    Invoquez le serveur avec :
+    Une fois le serveur Agent démarré (vous ne verrez aucune sortie !), invoquez-le avec :
 
     ```bash
     curl -N -X POST http://127.0.0.1:9999/invocations \
@@ -117,17 +111,19 @@ Testez l'API via :
     ```
   </TabItem>
   <TabItem label="Déployé">
-    Authentifiez-vous avec Cognito pour obtenir un token JWT :
+    Pour tester l'agent déployé, vous devrez vous authentifier avec Cognito et obtenir un token JWT. Commencez par configurer vos variables d'environnement :
 
     ```bash
+    # Définissez votre User Pool ID et Client ID Cognito depuis les sorties CDK
     export POOL_ID="<UserPoolId des sorties CDK>"
     export CLIENT_ID="<UserPoolClientId des sorties CDK>"
     export REGION="<votre-région>"
     ```
 
-    Créez un utilisateur test :
+    Créez un utilisateur test et obtenez un token d'authentification :
 
     ```bash
+    # Créer l'utilisateur
     aws cognito-idp admin-create-user \
       --user-pool-id $POOL_ID \
       --username "testuser" \
@@ -135,6 +131,7 @@ Testez l'API via :
       --region $REGION \
       --message-action SUPPRESS > /dev/null
 
+    # Définir un mot de passe permanent (remplacez par quelque chose de plus sécurisé !)
     aws cognito-idp admin-set-user-password \
       --user-pool-id $POOL_ID \
       --username "testuser" \
@@ -142,6 +139,7 @@ Testez l'API via :
       --region $REGION \
       --permanent > /dev/null
 
+    # Authentifier l'utilisateur et capturer le token ID
     export BEARER_TOKEN=$(aws cognito-idp initiate-auth \
       --client-id "$CLIENT_ID" \
       --auth-flow USER_PASSWORD_AUTH \
@@ -150,16 +148,22 @@ Testez l'API via :
     ```
 
     :::caution
-    Utilisez `UserIdentityUserIdentityUserPoolIdXXX` pour `POOL_ID`
+    Utilisez la sortie `UserIdentityUserIdentityUserPoolIdXXX` pour `POOL_ID` et assurez-vous d'avoir le Client ID correspondant depuis les sorties de votre déploiement CDK.
     :::
 
-    Invoquez l'agent déployé :
+    Invoquez maintenant l'agent déployé en utilisant l'URL du runtime Bedrock AgentCore :
 
     ```bash
+    # Définir l'ARN du Story Agent depuis les sorties CDK
     export AGENT_ARN="<StoryAgentArn des sorties CDK>"
+
+    # Encoder l'ARN en URL
     export ENCODED_ARN=$(echo $AGENT_ARN | sed 's/:/%3A/g' | sed 's/\//%2F/g')
+
+    # Construire l'URL d'invocation
     export MCP_URL="https://bedrock-agentcore.$REGION.amazonaws.com/runtimes/$ENCODED_ARN/invocations?qualifier=DEFAULT"
 
+    # Invoquer l'agent
     curl -N -X POST "$MCP_URL" \
       -H "authorization: Bearer $BEARER_TOKEN" \
       -H "Content-Type: application/json" \
@@ -168,7 +172,7 @@ Testez l'API via :
     ```
 
     :::note
-    L'encodage URL est nécessaire pour formater correctement l'ARN
+    L'encodage URL est nécessaire pour formater correctement l'ARN pour le point de terminaison de l'API Bedrock AgentCore.
     :::
   </TabItem>
 </Tabs>
