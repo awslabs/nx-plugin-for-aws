@@ -537,16 +537,25 @@ ${diff}
 `;
   }
 
-  // Add existing translation context if available
+  // Add existing translation context if available (excluding frontmatter to avoid confusion)
   if (existingTranslation && existingTranslation.trim()) {
-    contextInfo += `
+    // Remove frontmatter from existing translation for regular sections
+    let translationWithoutFrontmatter = existingTranslation;
+    const frontmatterMatch = existingTranslation.match(/^---\n[\s\S]*?\n---\n*/);
+    if (frontmatterMatch) {
+      translationWithoutFrontmatter = existingTranslation.substring(frontmatterMatch[0].length);
+    }
+
+    if (translationWithoutFrontmatter.trim()) {
+      contextInfo += `
 EXISTING TRANSLATION REFERENCE:
 Below is the existing ${getLanguageName(targetLang)} translation of this document. Use this as a reference to maintain consistency in terminology and style. For sections where the source material hasn't changed (not shown in the git diff above), keep the existing translation as-is.
 
 <existing-translation>
-${existingTranslation}
+${translationWithoutFrontmatter}
 </existing-translation>
 `;
+    }
   }
 
   const prompt = `
@@ -563,7 +572,9 @@ CRITICAL REQUIREMENTS:
 4. Translate naturally while maintaining technical accuracy
 5. Only return translated text and never add commentary about the rest of the document.
 6. Preserve all import statements and component usage (never wrap things in backticks if they aren't already).
-7. EFFICIENCY: If you have both a git diff and existing translation:
+7. Do NOT wrap your translated content in backticks (eg \`\`\`mdx ...\`\`\`), this will be inserted into an mdx file directly.
+8. Do not output any frontmatter.
+9. EFFICIENCY: If you have both a git diff and existing translation:
    - For unchanged sections (not in the diff), reuse the existing translation verbatim
    - Only translate sections that have actually changed in the source material
    - This reduces unnecessary translation work and maintains consistency
