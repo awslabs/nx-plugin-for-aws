@@ -3,8 +3,6 @@ title: "Agente Python Strands"
 description: "Genera un Agente Python Strands per costruire agenti AI con strumenti e distribuirli su Amazon Bedrock AgentCore Runtime"
 ---
 
-
-
 import { FileTree } from '@astrojs/starlight/components';
 import RunGenerator from '@components/run-generator.astro';
 import NxCommands from '@components/nx-commands.astro';
@@ -265,9 +263,70 @@ module "my_project_agent" {
 
 Per una guida più dettagliata sulla scrittura di agenti Strands, consulta la [documentazione Strands](https://strandsagents.com/latest/documentation/docs/).
 
+## Server FastAPI
+
+Il generatore utilizza [FastAPI](https://fastapi.tiangolo.com/) per creare il server HTTP per il tuo Strands Agent. FastAPI fornisce un framework web moderno e veloce per costruire API con Python, con documentazione API automatica e validazione dei tipi.
+
+Il server generato include:
+- Configurazione dell'applicazione FastAPI con middleware CORS
+- Middleware per la gestione degli errori
+- Generazione dello schema OpenAPI
+- Endpoint di controllo dello stato (`/ping`)
+- Endpoint di invocazione dell'agente (`/invocations`)
+
+### Personalizzare Input e Output di Invocazione con Pydantic
+
+L'endpoint di invocazione dell'agente utilizza modelli [Pydantic](https://docs.pydantic.dev/) per definire e validare gli schemi di richiesta e risposta. Puoi personalizzare questi modelli in `main.py` per adattarli ai requisiti del tuo agente.
+
+#### Definire Modelli di Input
+
+Il modello `InvokeInput` predefinito accetta un prompt e un ID di sessione.
+
+```python
+from pydantic import BaseModel
+
+class InvokeInput(BaseModel):
+    prompt: str
+    session_id: str
+```
+
+Puoi estendere questo modello per includere qualsiasi campo aggiuntivo di cui il tuo agente ha bisogno.
+
+:::caution
+Probabilmente vorrai astrarre parte o tutto l'ID di sessione dal chiamante se gli utenti devono invocare il tuo agente direttamente. Ad esempio, potresti usare l'ID utente autenticato come parte dell'ID di sessione.
+
+Vale anche la pena notare che a seconda del tuo caso d'uso potresti dover implementare l'autorizzazione per le sessioni, ad esempio assicurandoti che gli utenti possano accedere solo alle proprie sessioni e non a quelle di altri utenti.
+:::
+
+#### Definire Modelli di Output
+
+Per le risposte in streaming, l'annotazione del tipo di ritorno sul tuo endpoint corrisponde al tipo di ogni valore prodotto dalla tua funzione generatore. Di default, l'agente produce stringhe contenenti il testo di risposta dell'agente mentre viene trasmesso in streaming da Strands:
+
+```python
+@app.post("/invocations", openapi_extra={"x-streaming": True})
+async def invoke(input: InvokeInput) -> str:
+    """Entry point for agent invocation"""
+    return StreamingResponse(handle_invoke(input), media_type="text/event-stream")
+```
+
+Puoi definire un modello Pydantic per produrre dati strutturati invece:
+
+```python
+from pydantic import BaseModel
+
+class StreamChunk(BaseModel):
+    content: str
+    timestamp: str
+    token_count: int
+
+@app.post("/invocations", openapi_extra={"x-streaming": True})
+async def invoke(input: InvokeInput) -> StreamChunk:
+    return StreamingResponse(handle_invoke(input), media_type="application/json")
+```
+
 ## Bedrock AgentCore Python SDK
 
-Il generatore configura il [Bedrock AgentCore Python SDK](https://github.com/aws/bedrock-agentcore-sdk-python) per gestire il contratto HTTP sottostante che gli agenti su AgentCore devono implementare.
+Il generatore include una dipendenza sul [Bedrock AgentCore Python SDK](https://github.com/aws/bedrock-agentcore-sdk-python) per le costanti `PingStatus`. Se desiderato, è semplice utilizzare `BedrockAgentCoreApp` invece di FastAPI, tuttavia nota che la type-safety viene persa.
 
 Puoi trovare maggiori dettagli sulle capacità dell'SDK nella [documentazione qui](https://aws.github.io/bedrock-agentcore-starter-toolkit/user-guide/runtime/quickstart.html).
 

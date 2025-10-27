@@ -3,8 +3,6 @@ title: "Agent de Strands Python"
 description: "Générer un Agent de Strands Python pour construire des agents IA avec des outils et déployer sur Amazon Bedrock AgentCore Runtime"
 ---
 
-
-
 import { FileTree } from '@astrojs/starlight/components';
 import RunGenerator from '@components/run-generator.astro';
 import NxCommands from '@components/nx-commands.astro';
@@ -265,9 +263,70 @@ module "my_project_agent" {
 
 Pour un guide plus détaillé sur l'écriture d'agents Strands, consultez la [documentation Strands](https://strandsagents.com/latest/documentation/docs/).
 
+## Serveur FastAPI
+
+Le générateur utilise [FastAPI](https://fastapi.tiangolo.com/) pour créer le serveur HTTP de votre agent Strands. FastAPI fournit un framework web moderne et rapide pour créer des API avec Python, avec documentation API automatique et validation de types.
+
+Le serveur généré inclut :
+- Configuration de l'application FastAPI avec middleware CORS
+- Middleware de gestion des erreurs
+- Génération du schéma OpenAPI
+- Point de terminaison de vérification de santé (`/ping`)
+- Point de terminaison d'invocation de l'agent (`/invocations`)
+
+### Personnalisation des entrées et sorties d'invocation avec Pydantic
+
+Le point de terminaison d'invocation de l'agent utilise des modèles [Pydantic](https://docs.pydantic.dev/) pour définir et valider les schémas de requête et de réponse. Vous pouvez personnaliser ces modèles dans `main.py` pour correspondre aux besoins de votre agent.
+
+#### Définition des modèles d'entrée
+
+Le modèle `InvokeInput` par défaut accepte un prompt et un ID de session.
+
+```python
+from pydantic import BaseModel
+
+class InvokeInput(BaseModel):
+    prompt: str
+    session_id: str
+```
+
+Vous pouvez étendre ce modèle pour inclure tous les champs supplémentaires dont votre agent a besoin.
+
+:::caution
+Vous voudrez probablement abstraire tout ou partie de l'ID de session de l'appelant si les utilisateurs doivent invoquer votre agent directement. Par exemple, vous pouvez utiliser l'ID utilisateur authentifié comme partie de l'ID de session.
+
+Il est également à noter que selon votre cas d'usage, vous devrez peut-être implémenter une autorisation pour les sessions, par exemple en vous assurant que les utilisateurs ne peuvent accéder qu'à leurs propres sessions et non à celles d'autres utilisateurs.
+:::
+
+#### Définition des modèles de sortie
+
+Pour les réponses en streaming, l'annotation de type de retour sur votre point de terminaison correspond au type de chaque valeur générée par votre fonction génératrice. Par défaut, l'agent génère des chaînes contenant le texte de réponse de l'agent tel qu'il est diffusé en continu depuis Strands :
+
+```python
+@app.post("/invocations", openapi_extra={"x-streaming": True})
+async def invoke(input: InvokeInput) -> str:
+    """Point d'entrée pour l'invocation de l'agent"""
+    return StreamingResponse(handle_invoke(input), media_type="text/event-stream")
+```
+
+Vous pouvez définir un modèle Pydantic pour générer des données structurées à la place :
+
+```python
+from pydantic import BaseModel
+
+class StreamChunk(BaseModel):
+    content: str
+    timestamp: str
+    token_count: int
+
+@app.post("/invocations", openapi_extra={"x-streaming": True})
+async def invoke(input: InvokeInput) -> StreamChunk:
+    return StreamingResponse(handle_invoke(input), media_type="application/json")
+```
+
 ## SDK Python Bedrock AgentCore
 
-Le générateur configure le [SDK Python Bedrock AgentCore](https://github.com/aws/bedrock-agentcore-sdk-python) pour gérer le contrat HTTP sous-jacent requis pour les agents sur AgentCore.
+Le générateur inclut une dépendance au [SDK Python Bedrock AgentCore](https://github.com/aws/bedrock-agentcore-sdk-python) pour les constantes `PingStatus`. Si vous le souhaitez, il est simple d'utiliser `BedrockAgentCoreApp` au lieu de FastAPI, mais notez que la sécurité des types est perdue.
 
 Vous trouverez plus de détails sur les capacités du SDK dans la [documentation ici](https://aws.github.io/bedrock-agentcore-starter-toolkit/user-guide/runtime/quickstart.html).
 

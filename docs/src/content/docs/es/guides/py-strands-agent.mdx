@@ -3,8 +3,6 @@ title: "Agente de Strands de Python"
 description: "Generar un Agente de Strands de Python para construir agentes de IA con herramientas y desplegar en Amazon Bedrock AgentCore Runtime"
 ---
 
-
-
 import { FileTree } from '@astrojs/starlight/components';
 import RunGenerator from '@components/run-generator.astro';
 import NxCommands from '@components/nx-commands.astro';
@@ -265,9 +263,70 @@ module "my_project_agent" {
 
 Para una guía detallada sobre cómo escribir agentes Strands, consulta la [documentación de Strands](https://strandsagents.com/latest/documentation/docs/).
 
+## Servidor FastAPI
+
+El generador usa [FastAPI](https://fastapi.tiangolo.com/) para crear el servidor HTTP para tu Agente Strands. FastAPI proporciona un framework web moderno y rápido para construir APIs con Python, con documentación automática de API y validación de tipos.
+
+El servidor generado incluye:
+- Configuración de aplicación FastAPI con middleware CORS
+- Middleware de manejo de errores
+- Generación de esquema OpenAPI
+- Endpoint de verificación de salud (`/ping`)
+- Endpoint de invocación del agente (`/invocations`)
+
+### Personalizando Entradas y Salidas de Invocación con Pydantic
+
+El endpoint de invocación del agente usa modelos [Pydantic](https://docs.pydantic.dev/) para definir y validar los esquemas de solicitud y respuesta. Puedes personalizar estos modelos en `main.py` para que coincidan con los requisitos de tu agente.
+
+#### Definiendo Modelos de Entrada
+
+El modelo `InvokeInput` por defecto acepta un prompt y un ID de sesión.
+
+```python
+from pydantic import BaseModel
+
+class InvokeInput(BaseModel):
+    prompt: str
+    session_id: str
+```
+
+Puedes extender este modelo para incluir cualquier campo adicional que tu agente necesite.
+
+:::caution
+Probablemente querrás abstraer parte o todo el ID de sesión del llamador si los usuarios van a invocar tu agente directamente. Por ejemplo, puedes usar el ID de usuario autenticado como parte del ID de sesión.
+
+También vale la pena señalar que dependiendo de tu caso de uso, puede que necesites implementar autorización para las sesiones, por ejemplo asegurándote de que los usuarios solo puedan acceder a sus propias sesiones y no a las de otros usuarios.
+:::
+
+#### Definiendo Modelos de Salida
+
+Para respuestas de streaming, la anotación de tipo de retorno en tu endpoint corresponde al tipo de cada valor producido por tu función generadora. Por defecto, el agente produce strings que contienen el texto de respuesta del agente mientras se transmite desde Strands:
+
+```python
+@app.post("/invocations", openapi_extra={"x-streaming": True})
+async def invoke(input: InvokeInput) -> str:
+    """Entry point for agent invocation"""
+    return StreamingResponse(handle_invoke(input), media_type="text/event-stream")
+```
+
+Puedes definir un modelo Pydantic para producir datos estructurados en su lugar:
+
+```python
+from pydantic import BaseModel
+
+class StreamChunk(BaseModel):
+    content: str
+    timestamp: str
+    token_count: int
+
+@app.post("/invocations", openapi_extra={"x-streaming": True})
+async def invoke(input: InvokeInput) -> StreamChunk:
+    return StreamingResponse(handle_invoke(input), media_type="application/json")
+```
+
 ## SDK Python de Bedrock AgentCore
 
-El generador configura el [SDK Python de Bedrock AgentCore](https://github.com/aws/bedrock-agentcore-sdk-python) para manejar el contrato HTTP requerido por AgentCore.
+El generador incluye una dependencia del [SDK Python de Bedrock AgentCore](https://github.com/aws/bedrock-agentcore-sdk-python) para las constantes `PingStatus`. Si lo deseas, es sencillo usar `BedrockAgentCoreApp` en lugar de FastAPI, sin embargo ten en cuenta que se pierde la seguridad de tipos.
 
 Puedes encontrar detalles sobre las capacidades del SDK en su [documentación](https://aws.github.io/bedrock-agentcore-starter-toolkit/user-guide/runtime/quickstart.html).
 
@@ -312,6 +371,7 @@ export class ExampleStack extends Stack {
           'bedrock:InvokeModel',
           'bedrock:InvokeModelWithResponseStream',
         ],
+        // Puedes limitar esto a los modelos específicos que uses
         resources: ['arn:aws:bedrock:*::foundation-model/*'],
       }),
     );
@@ -327,8 +387,10 @@ Puedes usarlo en un proyecto Terraform:
 ```terraform
 # Agente
 module "my_project_agent" {
+  # Ruta relativa al módulo generado en el proyecto common/terraform
   source = "../../common/terraform/src/app/agents/my-project-agent"
 
+  # Otorga permisos para invocar modelos de Bedrock
   additional_iam_policy_statements = [
     {
       Effect = "Allow"
@@ -410,6 +472,7 @@ export class ExampleStack extends Stack {
 ```terraform
 # Agente
 module "my_project_agent" {
+  # Ruta relativa al módulo generado en el proyecto common/terraform
   source = "../../common/terraform/src/app/agents/my-project-agent"
 }
 ```
@@ -473,6 +536,8 @@ data "aws_region" "current" {}
 
 locals {
   aws_region = data.aws_region.current.name
+
+  # Reemplaza con tus IDs de user pool y client o expón como variables
   user_pool_id = "xxx"
   user_pool_client_ids = ["yyy"]
 }

@@ -1,9 +1,7 @@
 ---
 title: "Python Strands 代理"
-description: "使用工具构建 AI 代理并部署到 Amazon Bedrock AgentCore Runtime 的 Python Strands 代理"
+description: "生成用于构建带工具的 AI 代理并部署到 Amazon Bedrock AgentCore Runtime 的 Python Strands 代理"
 ---
-
-
 
 import { FileTree } from '@astrojs/starlight/components';
 import RunGenerator from '@components/run-generator.astro';
@@ -265,9 +263,70 @@ module "my_project_agent" {
 
 深入指南请参考[Strands官方文档](https://strandsagents.com/latest/documentation/docs/)。
 
+## FastAPI服务器
+
+生成器使用[FastAPI](https://fastapi.tiangolo.com/)为Strands智能体创建HTTP服务器。FastAPI提供了一个现代、高性能的Python API构建框架，具有自动API文档生成和类型验证功能。
+
+生成的服务器包含：
+- 配置CORS中间件的FastAPI应用
+- 错误处理中间件
+- OpenAPI模式生成
+- 健康检查端点（`/ping`）
+- 智能体调用端点（`/invocations`）
+
+### 使用Pydantic自定义调用输入和输出
+
+智能体的调用端点使用[Pydantic](https://docs.pydantic.dev/)模型来定义和验证请求及响应模式。您可以在`main.py`中自定义这些模型以满足智能体需求。
+
+#### 定义输入模型
+
+默认的`InvokeInput`模型接受提示词和会话ID。
+
+```python
+from pydantic import BaseModel
+
+class InvokeInput(BaseModel):
+    prompt: str
+    session_id: str
+```
+
+您可以扩展此模型以包含智能体所需的任何额外字段。
+
+:::caution
+如果用户直接调用您的智能体，您可能需要对调用者抽象部分或全部会话ID。例如，您可以使用已认证用户ID作为会话ID的一部分。
+
+还需要注意的是，根据您的使用场景，可能需要为会话实现授权机制，例如确保用户只能访问自己的会话而不能访问其他用户的会话。
+:::
+
+#### 定义输出模型
+
+对于流式响应，端点的返回类型注解对应于生成器函数yield的每个值的类型。默认情况下，智能体yield包含从Strands流式返回的智能体响应文本的字符串：
+
+```python
+@app.post("/invocations", openapi_extra={"x-streaming": True})
+async def invoke(input: InvokeInput) -> str:
+    """智能体调用入口点"""
+    return StreamingResponse(handle_invoke(input), media_type="text/event-stream")
+```
+
+您可以定义Pydantic模型来yield结构化数据：
+
+```python
+from pydantic import BaseModel
+
+class StreamChunk(BaseModel):
+    content: str
+    timestamp: str
+    token_count: int
+
+@app.post("/invocations", openapi_extra={"x-streaming": True})
+async def invoke(input: InvokeInput) -> StreamChunk:
+    return StreamingResponse(handle_invoke(input), media_type="application/json")
+```
+
 ## Bedrock AgentCore Python SDK
 
-生成器配置了[Bedrock AgentCore Python SDK](https://github.com/aws/bedrock-agentcore-sdk-python)来管理AgentCore智能体所需的HTTP协议实现。
+生成器包含对[Bedrock AgentCore Python SDK](https://github.com/aws/bedrock-agentcore-sdk-python)的依赖，用于`PingStatus`常量。如果需要，可以直接使用`BedrockAgentCoreApp`替代FastAPI，但请注意会失去类型安全性。
 
 SDK功能详情请参阅[文档](https://aws.github.io/bedrock-agentcore-starter-toolkit/user-guide/runtime/quickstart.html)。
 
