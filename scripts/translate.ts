@@ -54,9 +54,9 @@ const log = {
     options.verbose && console.log(chalk.gray('DEBUG: ') + message),
 };
 
-const sectionTranslationModelId = 'us.deepseek.r1-v1:0';
+const sectionTranslationModelId = 'us.anthropic.claude-sonnet-4-5-20250929-v1:0';
 const frontmatterTranslationModelId =
-  'anthropic.claude-3-5-haiku-20241022-v1:0';
+  'us.anthropic.claude-sonnet-4-5-20250929-v1:0';
 
 /**
  * Main function to run the translation process
@@ -96,27 +96,23 @@ async function main() {
 
     log.info(`Found ${filesToTranslate.length} files to translate`);
 
-    // Process each file
-    await Promise.all(
-      filesToTranslate.map(async (file) => {
-        log.info(`Processing file: ${file}`);
+    // Process each file sequentially
+    for (const file of filesToTranslate) {
+      log.info(`Processing file: ${file}`);
 
-        // Read the source file
-        const sourceContent = await fs.readFile(file, 'utf-8');
+      // Read the source file
+      const sourceContent = await fs.readFile(file, 'utf-8');
 
-        // Split the content by h2 headers
-        const sections = splitByHeaders(sourceContent);
+      // Split the content by h2 headers
+      const sections = splitByHeaders(sourceContent);
 
-        log.verbose(`Split file into ${sections.length} sections`);
+      log.verbose(`Split file into ${sections.length} sections`);
 
-        // Process each target language
-        await Promise.all(
-          targetLanguages.map(async (targetLang: string) => {
-            await translateFile(file, sections, targetLang, bedrockClient);
-          }),
-        );
-      }),
-    );
+      // Process each target language sequentially
+      for (const targetLang of targetLanguages) {
+        await translateFile(file, sections, targetLang, bedrockClient);
+      }
+    }
 
     log.success('Translation completed successfully');
   } catch (error) {
@@ -370,12 +366,12 @@ async function translateFile(
       return;
     }
 
-    // Translate each section
-    const translatedSections = await Promise.all(
-      sections.map((section) =>
-        translateSection(section, targetLang, bedrockClient),
-      ),
-    );
+    // Translate each section sequentially
+    const translatedSections: string[] = [];
+    for (const section of sections) {
+      const translated = await translateSection(section, targetLang, bedrockClient);
+      translatedSections.push(translated);
+    }
 
     // Combine the translated sections
     const translatedContent = translatedSections.join('\n\n');
@@ -414,7 +410,7 @@ async function translateSection(
   }
 
   const prompt = `
-You are a technical documentation translator. Translate the following text into ${getLanguageName(targetLang)}.
+You are a technical documentation translator. Translate the following text in <documentation-to-translate> xml tags into ${getLanguageName(targetLang)}.
 
 CRITICAL REQUIREMENTS:
 1. DO NOT translate:
@@ -427,10 +423,6 @@ CRITICAL REQUIREMENTS:
 4. Translate naturally while maintaining technical accuracy
 5. Only return translated text and never add commentary about the rest of the document.
 6. Preserve all import statements and component usage (never wrap things in backticks if they aren't already).
-
-Here is the mdx content to translate:
-
-${section}
 `;
 
   const params: InvokeModelCommandInput = {
@@ -438,10 +430,16 @@ ${section}
     contentType: 'application/json',
     accept: 'application/json',
     body: JSON.stringify({
-      max_tokens: 32000,
+      anthropic_beta: ['context-1m-2025-08-07'],
+      anthropic_version: "bedrock-2023-05-31",
       temperature: 0.7,
-      top_p: 0.9,
-      prompt: `<｜User｜>${prompt}<｜Assistant｜>`,
+      max_tokens: 64000,
+      system: prompt,
+      messages: [{ role: 'user', content: `Here is the mdx content to translate:
+
+<documentation-to-translate>
+${section}
+</documentation-to-translate>` }]
     }),
   };
 
@@ -449,29 +447,24 @@ ${section}
   const response = await bedrockClient.send(command);
 
   // Parse the response
-  const responseBody = JSON.parse(new TextDecoder().decode(response.body))
-    .choices[0];
+  const responseBody = JSON.parse(new TextDecoder().decode(response.body));
 
   // Check if we hit the token limit
-  if (responseBody.stop_reason === 'length') {
+  if (responseBody.stop_reason === 'max_tokens') {
     log.warn('Translation hit token limit. Splitting into smaller chunks.');
 
     const sections = splitByHeaders(section, depth);
 
-    const translatedSections = await Promise.all(
-      sections.map((section) =>
-        translateSection(section, targetLang, bedrockClient, depth + 1),
-      ),
-    );
+    const translatedSections: string[] = [];
+    for (const section of sections) {
+      const translated = await translateSection(section, targetLang, bedrockClient, depth + 1);
+      translatedSections.push(translated);
+    }
 
     return translatedSections.join('\n\n');
   }
 
-  // strip think tags
-  const translatedText = responseBody.text.replace(
-    /<think>(.|\n)*<\/think>/gm,
-    '',
-  );
+  const translatedText = responseBody.content[0].text;
   return translatedText;
 }
 
@@ -494,8 +487,8 @@ async function translateFrontmatter(
     const content = match[1];
 
     // Create a prompt specifically for frontmatter
-    const prompt = (content: string) => `
-You are a technical documentation translator. Your task is to translate the following YAML frontmatter from English to ${getLanguageName(targetLang)}.
+    const prompt = `
+You are a technical documentation translator. Your task is to translate the following YAML frontmatter in <frontmatter> xml tags from English to ${getLanguageName(targetLang)}.
 
 Rules:©
 1. Only translate the values, not the keys.
@@ -508,12 +501,6 @@ Rules:©
 8. NEVER explain your translation choices or add any commentary.
 9. If you cannot translate something, simply return it as is without explanation.
 
-Here is the frontmatter to translate:
-
-\`\`\`yaml
-${content}
-\`\`\`
-
 CRITICAL: Your response must contain ONLY the translated YAML content with no additional text whatsoever. Do not include \`\`\`yaml or \`\`\` markers in your response.
 `;
 
@@ -522,13 +509,19 @@ CRITICAL: Your response must contain ONLY the translated YAML content with no ad
       contentType: 'application/json',
       accept: 'application/json',
       body: JSON.stringify({
+        anthropic_beta: ['context-1m-2025-08-07'],
         anthropic_version: 'bedrock-2023-05-31',
-        max_tokens: 2048,
+        max_tokens: 64000,
         temperature: 0.1,
+        system: prompt,
         messages: [
           {
             role: 'user',
-            content: prompt(content),
+            content: `Here is the frontmatter to translate:
+
+<frontmatter>
+${content}
+</frontmatter>`,
           },
         ],
       }),
@@ -551,6 +544,10 @@ CRITICAL: Your response must contain ONLY the translated YAML content with no ad
 
     // Clean up the response (remove any code block markers)
     translatedContent = translatedContent.replace(/```yaml|```/g, '').trim();
+
+    if (translatedContent.match(/^---\n([\s\S]*?)\n---/)) {
+      return translatedContent;
+    }
 
     // Reconstruct the frontmatter
     return `---\n${translatedContent}\n---`;
