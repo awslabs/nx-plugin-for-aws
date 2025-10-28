@@ -1,5 +1,5 @@
 ---
-title: "代理式AI地牢游戏"
+title: "实现和配置Story代理"
 description: "使用 @aws/nx-plugin 构建代理式AI驱动的地牢冒险游戏的演练"
 ---
 
@@ -21,17 +21,17 @@ import nxGraphPng from '@assets/nx-graph.png'
 import gameSelectPng from '@assets/game-select.png'
 import gameConversationPng from '@assets/game-conversation.png'
 
-## 模块 3：故事代理实现
+## 任务 1：实现故事代理
 
 故事代理是一个基于 [Strands](https://strandsagents.com/) 的代理，在给定 `Game` 和 `Action` 列表作为上下文时，能够推进故事情节发展。我们将配置该代理与库存管理控制协议（MCP）服务器交互，以管理玩家的可用物品。
 
 :::note
-为简化教程，我们以"无状态"方式实现代理，每次调用都是包含完整消息历史的独立会话。生产环境中建议集成 [Bedrock AgentCore 记忆系统](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/memory.html)。关于在 Strands 中使用 AgentCore 记忆的更多文档可[在此处获取](https://github.com/aws/bedrock-agentcore-sdk-python/tree/main/src/bedrock_agentcore/memory/integrations/strands)。
+在本教程中，我们将以"无状态"方式实现代理，每次调用都是包含完整消息历史的独立会话。生产环境中建议集成 [Bedrock AgentCore 记忆系统](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/memory.html)。有关更多信息，请参阅[在 Strands 中使用 AgentCore 记忆](https://github.com/aws/bedrock-agentcore-sdk-python/tree/main/src/bedrock_agentcore/memory/integrations/strands)页面。
 :::
 
 ### 代理实现
 
-让我们实现代理。更新 `packages/story/dungeon_adventure_story/agent` 目录下的文件：
+要实现代理，请更新 `packages/story/dungeon_adventure_story/agent` 目录下的以下文件：
 
 <Tabs>
   <TabItem label="main.py">
@@ -42,29 +42,32 @@ import gameConversationPng from '@assets/game-conversation.png'
   </TabItem>
 </Tabs>
 
-此配置实现了以下功能：
+此配置将实现以下功能：
 
-- 从代理负载中提取玩家信息、游戏类型和动作列表
-- 构建使用 SigV4 认证调用 MCP 服务器的客户端
-- 通过系统提示和 MCP 服务器工具构建代理
+- 从代理负载中提取玩家信息、游戏类型和动作列表，
+- 构建使用 SigV4 认证调用 MCP 服务器的客户端，以及
+- 通过系统提示和 MCP 服务器工具构建代理。
 
-### 部署与测试
+## 任务 2：部署与测试
 
-首先构建代码库：
+### 构建代码
+
+要构建代码：
 
 <NxCommands commands={['run-many --target build --all']} />
 
 <Aside type="tip">
-若遇到 lint 错误，可运行以下命令自动修复：
+若遇到 lint 错误，可运行以下命令自动修复。
 
 <NxCommands commands={['run-many --target lint --configuration=fix --all']} />
 </Aside>
 
-现在可通过以下命令部署应用：
+### 部署应用程序
+要部署应用程序，请运行以下命令：
 
 <NxCommands commands={['deploy infra dungeon-adventure-infra-sandbox/*']} />
 
-部署过程约需 2 分钟。
+部署过程约需 2 分钟完成。
 
 部署完成后，将看到类似以下输出（部分值已脱敏）：
 
@@ -86,14 +89,16 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityIdentityPool
 dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXXX = region_xxx
 ```
 
+### 测试 API
+
 可通过以下方式测试 API：
 <ul>
-<li>启动代理服务器本地实例并使用 `curl` 调用</li>
-<li>使用携带 JWT 令牌的 curl 调用已部署 API</li>
+<li>启动代理服务器本地实例并使用 `curl` 调用，或</li>
+<li>使用携带 JWT 令牌的 curl 调用已部署 API。</li>
 </ul>
 
 <Tabs>
-  <TabItem label="本地测试">
+  <TabItem label="本地">
   运行以下命令启动本地代理服务器：
     <NxCommands highlights={['arn:aws:bedrock-agentcore:region:xxxxxxx:runtime/dungeonadventureventoryMcpServerXXXX-YYYY', 'region']} env={{INVENTORY_MCP_ARN:"arn:aws:bedrock-agentcore:region:xxxxxxx:runtime/dungeonadventureventoryMcpServerXXXX-YYYY", AWS_REGION: '<region>'}} commands={["run dungeon_adventure.story:agent-serve"]} />
 
@@ -101,7 +106,7 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
     请使用 CDK 部署输出的 `InventoryMcpArn` 值，并指定目标 `AWS_REGION`。
     :::
 
-    代理服务器启动后（无输出显示），运行以下命令进行调用：
+    代理服务器启动并运行后（无输出显示），运行以下命令进行调用：
 
     ```bash
     curl -N -X POST http://127.0.0.1:8081/invocations \
@@ -109,11 +114,11 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
       -H "Content-Type: application/json"
     ```
   </TabItem>
-  <TabItem label="云端部署">
-    测试云端代理需通过 Cognito 认证获取 JWT 令牌。首先设置环境变量：
+  <TabItem label="已部署">
+    测试已部署代理需通过 Cognito 认证获取 JWT 令牌。首先设置环境变量：
 
     ```bash
-    # 从 CDK 输出中获取 Cognito 用户池 ID 和客户端 ID
+    # 从 CDK 输出中设置 Cognito 用户池 ID 和客户端 ID
     export POOL_ID="<CDK 输出的 UserPoolId>"
     export CLIENT_ID="<CDK 输出的 UserPoolClientId>"
     export REGION="<区域>"
@@ -150,7 +155,7 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
     使用 CDK 输出的 `UserIdentityUserIdentityUserPoolIdXXX` 作为 `POOL_ID`，并确保使用对应的客户端 ID。
     :::
 
-    现在通过 Bedrock AgentCore 运行时 URL 调用已部署代理：
+    通过 Bedrock AgentCore 运行时 URL 调用已部署代理：
 
     ```bash
     # 设置 CDK 输出的 Story Agent ARN
@@ -176,7 +181,7 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
   </TabItem>
 </Tabs>
 
-若命令执行成功，将看到类似以下事件流：
+若命令运行成功，将看到类似以下事件流：
 
 ```
 data: {"init_event_loop": true}

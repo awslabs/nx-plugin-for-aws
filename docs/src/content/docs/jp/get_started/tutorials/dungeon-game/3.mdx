@@ -1,5 +1,5 @@
 ---
-title: "エージェント型AIダンジョンゲーム"
+title: "Story エージェントの実装と設定"
 description: "@aws/nx-pluginを使用したエージェント型AI搭載のダンジョン冒険ゲームの作り方のチュートリアル"
 ---
 
@@ -21,17 +21,17 @@ import nxGraphPng from '@assets/nx-graph.png'
 import gameSelectPng from '@assets/game-select.png'
 import gameConversationPng from '@assets/game-conversation.png'
 
-## モジュール3: ストーリーエージェントの実装
+## タスク1: ストーリーエージェントの実装
 
 ストーリーエージェントは[Strands](https://strandsagents.com/)のエージェントで、`Game`と`Action`のリストをコンテキストとして物語を進行します。インベントリMCPサーバーと連携してプレイヤーの所持アイテムを管理するよう設定します。
 
 :::note
-本チュートリアルでは簡略化のため、各呼び出しが完全なメッセージ履歴を含む独立セッションとなる「ステートレス」な実装を採用しています。本番環境では[Bedrock AgentCore Memory](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/memory.html)の統合を検討してください。StrandsとAgentCore Memoryの連携に関する詳細は[こちら](https://github.com/aws/bedrock-agentcore-sdk-python/tree/main/src/bedrock_agentcore/memory/integrations/strands)をご覧ください。
+本チュートリアルでは、各呼び出しが完全なメッセージ履歴を含む独立セッションとなる「ステートレス」な実装を採用しています。本番環境では[Bedrock AgentCore Memory](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/memory.html)の統合を検討してください。詳細については、[StrandsとAgentCore Memoryの連携](https://github.com/aws/bedrock-agentcore-sdk-python/tree/main/src/bedrock_agentcore/memory/integrations/strands)のページを参照してください。
 :::
 
 ### エージェント実装
 
-`packages/story/dungeon_adventure_story/agent`配下のファイルを更新してエージェントを実装します：
+エージェントを実装するには、`packages/story/dungeon_adventure_story/agent`配下のファイルを更新します：
 
 <Tabs>
   <TabItem label="main.py">
@@ -44,29 +44,32 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 この実装では以下を構成します：
 
-- エージェントペイロードからプレイヤー情報、ジャンル、アクションを抽出
-- SigV4認証でMCPサーバーを呼び出すクライアントの構築
-- システムプロンプトとMCPサーバーツールを備えたエージェントの作成
+- エージェントペイロードからプレイヤー情報、ジャンル、アクションを抽出、
+- SigV4認証でMCPサーバーを呼び出すためのクライアントの構築、および
+- システムプロンプトとMCPサーバーツールを備えたエージェントの作成。
 
-### デプロイとテスト
+## タスク2: デプロイとテスト
 
-まずコードベースをビルドします：
+### コードのビルド
+
+コードをビルドするには：
 
 <NxCommands commands={['run-many --target build --all']} />
 
 <Aside type="tip">
-リンターエラーが発生した場合、以下のコマンドで自動修正可能です。
+リンターエラーが発生した場合、以下のコマンドで自動修正できます。
 
 <NxCommands commands={['run-many --target lint --configuration=fix --all']} />
 </Aside>
 
-以下のコマンドでアプリケーションをデプロイできます：
+### アプリケーションのデプロイ
+アプリケーションをデプロイするには、以下のコマンドを実行します：
 
 <NxCommands commands={['deploy infra dungeon-adventure-infra-sandbox/*']} />
 
 デプロイは約2分で完了します。
 
-デプロイが完了すると以下のような出力が表示されます（一部の値は編集済み）：
+デプロイが完了すると、以下のような出力が表示されます（一部の値は編集済み）：
 
 ```bash
 dungeon-adventure-infra-sandbox-Application
@@ -86,22 +89,24 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityIdentityPool
 dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXXX = region_xxx
 ```
 
+### APIのテスト
+
 APIのテスト方法は2通りあります：
 <ul>
-<li>エージェントサーバーをローカルで起動し`curl`で呼び出す</li>
-<li>デプロイ済みAPIをJWTトークン付きのcurlで呼び出す</li>
+<li>エージェントサーバーをローカルで起動し`curl`で呼び出す、または</li>
+<li>デプロイ済みAPIをJWTトークン付きのcurlで呼び出す。</li>
 </ul>
 
 <Tabs>
   <TabItem label="ローカル">
-  以下のコマンドでローカルエージェントサーバーを起動：
+  以下のコマンドでローカルエージェントサーバーを起動します：
     <NxCommands highlights={['arn:aws:bedrock-agentcore:region:xxxxxxx:runtime/dungeonadventureventoryMcpServerXXXX-YYYY', 'region']} env={{INVENTORY_MCP_ARN:"arn:aws:bedrock-agentcore:region:xxxxxxx:runtime/dungeonadventureventoryMcpServerXXXX-YYYY", AWS_REGION: '<region>'}} commands={["run dungeon_adventure.story:agent-serve"]} />
 
     :::caution
-    上記コマンドではCDKデプロイ出力の`InventoryMcpArn`を使用し、対象`AWS_REGION`を指定してください
+    上記コマンドではCDKデプロイ出力の`InventoryMcpArn`を使用し、対象`AWS_REGION`を指定してください。
     :::
 
-    サーバー起動後（出力は表示されません）、以下のコマンドで呼び出し：
+    エージェントサーバー起動後（出力は表示されません）、以下のコマンドで呼び出します：
 
     ```bash
     curl -N -X POST http://127.0.0.1:8081/invocations \
@@ -110,7 +115,7 @@ APIのテスト方法は2通りあります：
     ```
   </TabItem>
   <TabItem label="デプロイ済み">
-    デプロイ済みエージェントのテストにはCognito認証によるJWTトークン取得が必要です。まず環境変数を設定：
+    デプロイ済みエージェントのテストには、Cognito認証によるJWTトークン取得が必要です。まず環境変数を設定します：
 
     ```bash
     # CDK出力からCognito User Pool IDとClient IDを設定
@@ -119,7 +124,7 @@ APIのテスト方法は2通りあります：
     export REGION="<リージョン>"
     ```
 
-    テストユーザー作成と認証トークン取得：
+    テストユーザーを作成し、認証トークンを取得します：
 
     ```bash
     # ユーザー作成
@@ -130,7 +135,7 @@ APIのテスト方法は2通りあります：
       --region $REGION \
       --message-action SUPPRESS > /dev/null
 
-    # パスワード設定（本番環境ではより安全なパスワードを使用）
+    # パスワード設定（本番環境ではより安全なパスワードを使用してください）
     aws cognito-idp admin-set-user-password \
       --user-pool-id $POOL_ID \
       --username "testuser" \
@@ -147,10 +152,10 @@ APIのテスト方法は2通りあります：
     ```
 
     :::caution
-    `POOL_ID`にはCDK出力の`UserIdentityUserIdentityUserPoolIdXXX`を、Client IDはCDKデプロイ出力から取得してください
+    `POOL_ID`にはCDK出力の`UserIdentityUserIdentityUserPoolIdXXX`を使用し、CDKデプロイ出力から対応するClient IDを取得してください。
     :::
 
-    Bedrock AgentCoreランタイムURLを使用してエージェントを呼び出し：
+    Bedrock AgentCoreランタイムURLを使用してデプロイ済みエージェントを呼び出します：
 
     ```bash
     # CDK出力からStory Agent ARNを設定
@@ -171,12 +176,12 @@ APIのテスト方法は2通りあります：
     ```
 
     :::note
-    ARNのURLエンコードはBedrock AgentCore APIエンドポイントの正しいフォーマットに必要です
+    ARNのURLエンコードは、Bedrock AgentCore APIエンドポイントの正しいフォーマットに必要です。
     :::
   </TabItem>
 </Tabs>
 
-コマンドが成功すると、以下のようなストリーミングイベントが表示されます：
+コマンドが正常に実行されると、以下のようなストリーミングイベントが表示されます：
 
 ```
 data: {"init_event_loop": true}
@@ -192,4 +197,4 @@ data: {"event": {"contentBlockDelta": {"delta": {"text": "Welcome"}, "contentBlo
 ...
 ```
 
-おめでとうございます！Bedrock AgentCore Runtime上に初めてのStrandsエージェントを構築・デプロイできました！ 🎉🎉🎉
+おめでとうございます。Bedrock AgentCore Runtime上に初めてのStrandsエージェントを構築・デプロイできました！ 🎉🎉🎉
