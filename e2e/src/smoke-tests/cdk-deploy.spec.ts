@@ -107,6 +107,7 @@ async function invokeAgentCoreAgent(
     method: 'POST',
     body: JSON.stringify({
       prompt: 'what is 3 + 5?',
+      session_id: 'abcdefghijklmnopqrstuvwxyz0123456789',
     }),
   });
   console.log('Agent Response', await response.text());
