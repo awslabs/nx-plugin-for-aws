@@ -22,6 +22,7 @@ import { Agent } from 'https';
 const SUPPORTED_LANGUAGES = ['en', 'jp', 'ko', 'es', 'pt', 'fr', 'it', 'zh'];
 const SOURCE_LANGUAGE = 'en';
 const DOCS_DIR = path.resolve(process.cwd(), 'docs/src/content/docs');
+const BATCH_SIZE = 3; // Number of concurrent Bedrock API calls
 
 // Interface for file translation context
 interface FileToTranslate {
@@ -29,6 +30,77 @@ interface FileToTranslate {
   sourceLanguageContent: string;
   sourceLanguageDiff: string;
   existingTranslations: { [code: string]: string };
+}
+
+// Interface for queued Bedrock request
+interface QueuedRequest {
+  params: InvokeModelCommandInput;
+  resolve: (value: any) => void;
+  reject: (reason?: any) => void;
+}
+
+/**
+ * Queue manager for batching Bedrock API calls
+ */
+class BedrockQueue {
+  private queue: QueuedRequest[] = [];
+  private activeRequests = 0;
+  private client: BedrockRuntimeClient;
+
+  constructor(client: BedrockRuntimeClient) {
+    this.client = client;
+  }
+
+  /**
+   * Add a request to the queue and return a promise that resolves when the request completes
+   */
+  async enqueue(params: InvokeModelCommandInput): Promise<any> {
+    return new Promise((resolve, reject) => {
+      this.queue.push({ params, resolve, reject });
+      this.processQueue();
+    });
+  }
+
+  /**
+   * Process queued requests up to the batch size limit
+   */
+  private async processQueue(): Promise<void> {
+    while (this.activeRequests < BATCH_SIZE && this.queue.length > 0) {
+      const request = this.queue.shift();
+      if (!request) break;
+
+      this.activeRequests++;
+
+      // Execute the request
+      this.executeRequest(request)
+        .finally(() => {
+          this.activeRequests--;
+          this.processQueue(); // Process next item in queue
+        });
+    }
+  }
+
+  /**
+   * Execute a single Bedrock request
+   */
+  private async executeRequest(request: QueuedRequest): Promise<void> {
+    try {
+      const command = new InvokeModelCommand(request.params);
+      const response = await this.client.send(command);
+      request.resolve(response);
+    } catch (error) {
+      request.reject(error);
+    }
+  }
+
+  /**
+   * Wait for all active requests to complete
+   */
+  async waitForCompletion(): Promise<void> {
+    while (this.activeRequests > 0 || this.queue.length > 0) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  }
 }
 
 // Define the command line interface
@@ -94,6 +166,9 @@ async function main() {
     // Initialize AWS Bedrock client
     const bedrockClient = await initializeBedrockClient();
 
+    // Create Bedrock queue for batching API calls
+    const bedrockQueue = new BedrockQueue(bedrockClient);
+
     // Get files to translate
     const filesToTranslate = await getFilesToTranslate();
 
@@ -104,7 +179,9 @@ async function main() {
 
     log.info(`Found ${filesToTranslate.length} files to translate`);
 
-    // Process each file sequentially
+    // Process all files in parallel
+    const translationPromises: Promise<void>[] = [];
+
     for (const fileObj of filesToTranslate) {
       log.info(`Processing file: ${fileObj.path}`);
 
@@ -113,11 +190,19 @@ async function main() {
 
       log.verbose(`Split file into ${sections.length} sections`);
 
-      // Process each target language sequentially
+      // Process each target language in parallel
       for (const targetLang of targetLanguages) {
-        await translateFile(fileObj, sections, targetLang, bedrockClient);
+        translationPromises.push(
+          translateFile(fileObj, sections, targetLang, bedrockQueue)
+        );
       }
     }
+
+    // Wait for all translations to complete
+    await Promise.all(translationPromises);
+
+    // Wait for any remaining queued requests
+    await bedrockQueue.waitForCompletion();
 
     log.success('Translation completed successfully');
   } catch (error) {
@@ -449,7 +534,7 @@ async function translateFile(
   fileObj: FileToTranslate,
   sections: string[],
   targetLang: string,
-  bedrockClient: BedrockRuntimeClient,
+  bedrockQueue: BedrockQueue,
 ): Promise<void> {
   try {
     // Create the target file path
@@ -472,18 +557,18 @@ async function translateFile(
     // Get the existing translation for this language
     const existingTranslation = fileObj.existingTranslations[targetLang] || '';
 
-    // Translate each section sequentially
-    const translatedSections: string[] = [];
-    for (const section of sections) {
-      const translated = await translateSection(
+    // Translate all sections in parallel using the queue
+    const translationPromises = sections.map(section =>
+      translateSection(
         section,
         targetLang,
-        bedrockClient,
+        bedrockQueue,
         fileObj.sourceLanguageDiff,
         existingTranslation,
-      );
-      translatedSections.push(translated);
-    }
+      )
+    );
+
+    const translatedSections = await Promise.all(translationPromises);
 
     // Combine the translated sections
     const translatedContent = translatedSections.join('\n\n');
@@ -505,7 +590,7 @@ async function translateFile(
 async function translateSection(
   section: string,
   targetLang: string,
-  bedrockClient: BedrockRuntimeClient,
+  bedrockQueue: BedrockQueue,
   diff: string = '',
   existingTranslation: string = '',
   depth: number = 1,
@@ -520,7 +605,7 @@ async function translateSection(
 
   if (isFrontmatter) {
     // Handle frontmatter translation differently to preserve structure
-    return await translateFrontmatter(section, targetLang, bedrockClient, diff, existingTranslation);
+    return await translateFrontmatter(section, targetLang, bedrockQueue, diff, existingTranslation);
   }
 
   let contextInfo = '';
@@ -598,8 +683,7 @@ ${section}
     }),
   };
 
-  const command = new InvokeModelCommand(params);
-  const response = await bedrockClient.send(command);
+  const response = await bedrockQueue.enqueue(params);
 
   // Parse the response
   const responseBody = JSON.parse(new TextDecoder().decode(response.body));
@@ -610,19 +694,18 @@ ${section}
 
     const sections = splitByHeaders(section, depth);
 
-    const translatedSections: string[] = [];
-    for (const section of sections) {
-      const translated = await translateSection(
+    const translationPromises = sections.map(section =>
+      translateSection(
         section,
         targetLang,
-        bedrockClient,
+        bedrockQueue,
         diff,
         existingTranslation,
         depth + 1,
-      );
-      translatedSections.push(translated);
-    }
+      )
+    );
 
+    const translatedSections = await Promise.all(translationPromises);
     return translatedSections.join('\n\n');
   }
 
@@ -636,7 +719,7 @@ ${section}
 async function translateFrontmatter(
   frontmatter: string,
   targetLang: string,
-  bedrockClient: BedrockRuntimeClient,
+  bedrockQueue: BedrockQueue,
   diff: string = '',
   existingTranslation: string = '',
 ): Promise<string> {
@@ -725,8 +808,7 @@ ${content}
       }),
     };
 
-    const command = new InvokeModelCommand(params);
-    const response = await bedrockClient.send(command);
+    const response = await bedrockQueue.enqueue(params);
 
     // Parse the response
     const responseBody = JSON.parse(new TextDecoder().decode(response.body));
