@@ -1063,5 +1063,43 @@ describe('lambda-handler project generator', () => {
         ),
       ).toBeTruthy();
     });
+
+    it('should add component generator metadata', async () => {
+      tree.write(
+        'apps/test_project/project.json',
+        JSON.stringify({
+          name: 'test-project',
+          root: 'apps/test_project',
+          sourceRoot: 'apps/test_project/test_project',
+          targets: {},
+        }),
+      );
+
+      tree.write(
+        'apps/test_project/pyproject.toml',
+        `[project]
+          dependencies = []
+      `,
+      );
+
+      await pyLambdaFunctionGenerator(tree, {
+        project: 'test-project',
+        functionName: 'test-function',
+        eventSource: 'Any',
+        iacProvider: 'CDK',
+      });
+
+      const projectConfig = JSON.parse(
+        tree.read('apps/test_project/project.json', 'utf-8'),
+      );
+
+      expect(projectConfig.metadata).toBeDefined();
+      expect(projectConfig.metadata.components).toBeDefined();
+      expect(projectConfig.metadata.components).toHaveLength(1);
+      expect(projectConfig.metadata.components[0]).toEqual({
+        generator: LAMBDA_FUNCTION_GENERATOR_INFO.id,
+        name: 'test-function',
+      });
+    });
   });
 });

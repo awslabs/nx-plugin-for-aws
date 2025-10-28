@@ -3,8 +3,6 @@ title: "Pythonストランドエージェント"
 description: "ツールを使用してAIエージェントを構築し、Amazon Bedrock AgentCoreランタイムにデプロイするためのPythonストランドエージェントを生成"
 ---
 
-
-
 import { FileTree } from '@astrojs/starlight/components';
 import RunGenerator from '@components/run-generator.astro';
 import NxCommands from '@components/nx-commands.astro';
@@ -207,9 +205,7 @@ def get_agent(session_id: str):
 対象MCPサーバーがJWT認証を使用する場合、代わりに`AgentCoreMCPClient.with_jwt_auth`メソッドを使用できます。
 :::
 
-上記のIAM認証例では、インフラストラクチャで2つの設定が必要です：
-1. MCPサーバーのAgentCore Runtime ARN用環境変数の追加
-2. エージェントにMCPサーバー呼び出し権限の付与
+上記のIAM認証例では、インフラストラクチャで2つの設定が必要です。まず、MCPサーバーのAgentCore Runtime ARN用環境変数の追加、次にエージェントにMCPサーバー呼び出し権限の付与が必要です。以下のように実現できます：
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -267,35 +263,98 @@ module "my_project_agent" {
 
 Strandsエージェントの詳細な作成方法は[Strandsドキュメント](https://strandsagents.com/latest/documentation/docs/)を参照してください。
 
+## FastAPIサーバー
+
+ジェネレーターは[FastAPI](https://fastapi.tiangolo.com/)を使用してStrandsエージェント用のHTTPサーバーを作成します。FastAPIは、自動APIドキュメント生成と型検証を備えた、PythonでAPIを構築するためのモダンで高速なWebフレームワークを提供します。
+
+生成されるサーバーには以下が含まれます：
+- CORSミドルウェア付きFastAPIアプリケーション設定
+- エラーハンドリングミドルウェア
+- OpenAPIスキーマ生成
+- ヘルスチェックエンドポイント（`/ping`）
+- エージェント呼び出しエンドポイント（`/invocations`）
+
+### Pydanticによる呼び出し入出力のカスタマイズ
+
+エージェントの呼び出しエンドポイントは[Pydantic](https://docs.pydantic.dev/)モデルを使用してリクエストとレスポンスのスキーマを定義・検証します。`main.py`でこれらのモデルをカスタマイズしてエージェントの要件に合わせることができます。
+
+#### 入力モデルの定義
+
+デフォルトの`InvokeInput`モデルはプロンプトとセッションIDを受け取ります。
+
+```python
+from pydantic import BaseModel
+
+class InvokeInput(BaseModel):
+    prompt: str
+    session_id: str
+```
+
+このモデルを拡張して、エージェントに必要な追加フィールドを含めることができます。
+
+:::caution
+ユーザーがエージェントを直接呼び出す場合、呼び出し元からセッションIDの一部または全部を抽象化することをお勧めします。例えば、認証されたユーザーIDをセッションIDの一部として使用できます。
+
+また、ユースケースによってはセッションの認可を実装する必要がある場合があります。例えば、ユーザーが自分のセッションのみにアクセスでき、他のユーザーのセッションにはアクセスできないようにするなどです。
+:::
+
+#### 出力モデルの定義
+
+ストリーミングレスポンスの場合、エンドポイントの戻り値の型アノテーションは、ジェネレーター関数が生成する各値の型に対応します。デフォルトでは、エージェントはStrandsからストリーミングバックされるエージェントのレスポンステキストを含む文字列を生成します：
+
+```python
+@app.post("/invocations", openapi_extra={"x-streaming": True})
+async def invoke(input: InvokeInput) -> str:
+    """Entry point for agent invocation"""
+    return StreamingResponse(handle_invoke(input), media_type="text/event-stream")
+```
+
+代わりに構造化データを生成するPydanticモデルを定義できます：
+
+```python
+from pydantic import BaseModel
+
+class StreamChunk(BaseModel):
+    content: str
+    timestamp: str
+    token_count: int
+
+@app.post("/invocations", openapi_extra={"x-streaming": True})
+async def invoke(input: InvokeInput) -> StreamChunk:
+    return StreamingResponse(handle_invoke(input), media_type="application/json")
+```
+
 ## Bedrock AgentCore Python SDK
 
-ジェネレーターは[Bedrock AgentCore Python SDK](https://github.com/aws/bedrock-agentcore-sdk-python)を設定し、AgentCore上のエージェントに必要なHTTP契約を管理します。
+ジェネレーターには`PingStatus`定数用に[Bedrock AgentCore Python SDK](https://github.com/aws/bedrock-agentcore-sdk-python)への依存関係が含まれています。必要に応じて、FastAPIの代わりに`BedrockAgentCoreApp`を使用することも簡単ですが、型安全性が失われることに注意してください。
 
 SDKの詳細は[ドキュメント](https://aws.github.io/bedrock-agentcore-starter-toolkit/user-guide/runtime/quickstart.html)を参照してください。
 
 :::note
-ジェネレーターがCDK/Terraformインフラストラクチャを生成するため、エージェントデプロイ用に`bedrock-agentcore-starter-toolkit`を使用する必要はありません。
+ジェネレーターがエージェントデプロイを管理するCDK/Terraformインフラストラクチャを生成するため、エージェントデプロイ用にドキュメントで言及されている`bedrock-agentcore-starter-toolkit`を使用する必要はありません。
 :::
 
 ## Strandsエージェントの実行
 
 ### ローカル開発
 
-`<your-agent-name>-serve`ターゲットが設定され、ローカルでの開発テストが可能です：
+ジェネレーターは`<your-agent-name>-serve`という名前のターゲットを設定し、開発とテストのためにStrandsエージェントをローカルで起動します。
 
 <NxCommands commands={['run your-project:agent-serve']} />
 
-このコマンドは[Bedrock AgentCore Python SDK](https://github.com/aws/bedrock-agentcore-sdk-python)を使用してエージェントを起動します。
+このコマンドは`uv run`を使用して[Bedrock AgentCore Python SDK](https://github.com/aws/bedrock-agentcore-sdk-python)でStrandsエージェントを実行します。
 
 ## Bedrock AgentCore Runtimeへのデプロイ
 
 ### インフラストラクチャ即コード
 
-`computeType`に`BedrockAgentCoreRuntime`を選択した場合、関連するCDK/Terraformインフラストラクチャが生成され、[Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html)にデプロイできます。
+`computeType`に`BedrockAgentCoreRuntime`を選択した場合、関連するCDK/Terraformインフラストラクチャが生成され、[Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html)にStrandsエージェントをデプロイできます。
 
 <Infrastructure>
 <Fragment slot="cdk">
-デフォルトで`<ProjectName>Agent`という名前のCDKコンストラクトが生成されます：
+ジェネレーター実行時に選択した`name`に基づいて、またはデフォルトで`<ProjectName>Agent`という名前のCDKコンストラクトが生成されます。
+
+このCDKコンストラクトをCDKアプリケーションで使用できます：
 
 ```ts {6}
 import { MyProjectAgent } from ':my-scope/common-constructs';
@@ -312,6 +371,7 @@ export class ExampleStack extends Stack {
           'bedrock:InvokeModel',
           'bedrock:InvokeModelWithResponseStream',
         ],
+        // 使用する特定のモデルに絞り込むことができます
         resources: ['arn:aws:bedrock:*::foundation-model/*'],
       }),
     );
@@ -320,13 +380,17 @@ export class ExampleStack extends Stack {
 ```
 </Fragment>
 <Fragment slot="terraform">
-デフォルトで`<ProjectName>-agent`という名前のTerraformモジュールが生成されます：
+ジェネレーター実行時に選択した`name`に基づいて、またはデフォルトで`<ProjectName>-agent`という名前のTerraformモジュールが生成されます。
+
+このTerraformモジュールをTerraformプロジェクトで使用できます：
 
 ```terraform
 # エージェント
 module "my_project_agent" {
+  # common/terraformプロジェクト内の生成されたモジュールへの相対パス
   source = "../../common/terraform/src/app/agents/my-project-agent"
 
+  # Bedrockモデル呼び出し権限の付与
   additional_iam_policy_statements = [
     {
       Effect = "Allow"
@@ -345,11 +409,13 @@ module "my_project_agent" {
 </Infrastructure>
 
 :::note
-Bedrock AgentCore Runtimeへのデプロイ時には、AWSアカウントで適切な基盤モデルが有効化されている必要があります。モデルアクセスの有効化方法は[こちら](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html)を参照してください。
+Bedrock AgentCore Runtimeへのデプロイ時には、AWSアカウントで適切な基盤モデルが有効化されている必要があります。デフォルトでStrandsエージェントはClaude 4 Sonnetを使用しますが、上記のようにカスタマイズ可能です。
+
+Amazon Bedrockでモデルアクセスを有効化するには、[こちらの手順](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html)に従ってください。
 :::
 
 :::caution
-[Docker](https://www.docker.com/)がビルド/デプロイに必要です。以下のエラーを防ぐためDockerのインストールと起動を確認してください：
+Strandsエージェントのビルドとデプロイには[Docker](https://www.docker.com/)が必要です。以下のようなエラーを防ぐため、Dockerのインストールと起動を確認してください：
 
 ```
 ERROR: Cannot connect to the Docker daemon at unix://path/to/docker.sock.
@@ -358,22 +424,22 @@ ERROR: Cannot connect to the Docker daemon at unix://path/to/docker.sock.
 
 ### バンドルとDockerターゲット
 
-Bedrock AgentCore Runtime向けビルド用に`bundle`ターゲットが追加されます：
-- `uv export`で依存関係を`requirements.txt`にエクスポート
+Bedrock AgentCore Runtime向けにStrandsエージェントをビルドするため、プロジェクトに`bundle`ターゲットが追加されます：
+- `uv export`でPython依存関係を`requirements.txt`ファイルにエクスポート
 - `uv pip install`でターゲットプラットフォーム（`aarch64-manylinux2014`）向け依存関係をインストール
 
-エージェント固有の`docker`ターゲットも追加され：
-- [AgentCore runtime契約](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-service-contract.html)に準拠したDockerイメージをビルド
+Strandsエージェント固有の`docker`ターゲットも追加されます：
+- [AgentCore runtime契約](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-service-contract.html)に従ってエージェントを実行する`Dockerfile`からDockerイメージをビルド
 
 :::tip
-Dockerイメージタグ（例：`my-scope-my-project-agent:latest`）はCDK/Terraformインフラストラクチャで参照され、Dockerfileをエージェントプロジェクトと同居させます。
+Dockerイメージはタグ（例：`my-scope-my-project-agent:latest`）を使用してビルドされ、CDK/Terraformインフラストラクチャで参照されるため、`Dockerfile`をStrandsエージェントプロジェクトと同じ場所に配置できます。
 :::
 
 ### 認証
 
 #### IAM
 
-デフォルトでIAM認証が使用されます：
+デフォルトでは、StrandsエージェントはIAM認証で保護されます。引数なしでデプロイするだけです：
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -385,19 +451,35 @@ export class ExampleStack extends Stack {
     new MyProjectAgent(this, 'MyProjectAgent');
   }
 }
+```
 
-// 呼び出し権限の付与例
-agent.agentCoreRuntime.grantInvoke(lambdaFunction);
+`grantInvoke`メソッドを使用して、Bedrock AgentCore Runtime上のエージェント呼び出しアクセスを付与できます。例：
+
+```ts {8}
+import { MyProjectAgent } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const agent = new MyProjectAgent(this, 'MyProjectAgent');
+    const lambdaFunction = new Function(this, ...);
+
+    agent.agentCoreRuntime.grantInvoke(lambdaFunction);
+  }
+}
 ```
 </Fragment>
 <Fragment slot="terraform">
 ```terraform
 # エージェント
 module "my_project_agent" {
+  # common/terraformプロジェクト内の生成されたモジュールへの相対パス
   source = "../../common/terraform/src/app/agents/my-project-agent"
 }
+```
 
-# 呼び出しポリシー例
+エージェント呼び出しアクセスを付与するには、`module.my_project_agent.agent_core_runtime_arn`出力を参照して以下のようなポリシーを追加する必要があります：
+
+```terraform
 {
   Effect = "Allow"
   Action = [
@@ -414,10 +496,12 @@ module "my_project_agent" {
 
 #### Cognito JWT認証
 
-Cognito認証の設定例：
+以下はエージェントのCognito認証設定方法の例です。
 
 <Infrastructure>
 <Fragment slot="cdk">
+JWT認証を設定するには、エージェントコンストラクトに`authorizerConfiguration`プロパティを渡します。以下はエージェントを保護するためにCognitoユーザープールとクライアントを設定する例です：
+
 ```ts {13-18}
 import { MyProjectAgent } from ':my-scope/common-constructs';
 
@@ -443,11 +527,17 @@ export class ExampleStack extends Stack {
 ```
 </Fragment>
 <Fragment slot="terraform">
+JWT認証を設定するには、エージェントモジュールを編集して以下のように`customJWTAuthorizer`変数を設定します：
+
 ```terraform {18-21}
 # packages/common/terraform/src/app/agents/my-project-agent/my-project-agent.tf
 
+data "aws_region" "current" {}
+
 locals {
   aws_region = data.aws_region.current.name
+
+  # ユーザープールとクライアントIDに置き換えるか、変数として公開してください
   user_pool_id = "xxx"
   user_pool_client_ids = ["yyy"]
 }
@@ -461,7 +551,9 @@ module "agent_core_runtime" {
     discoveryUrl = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration",
     allowedClients = local.user_pool_client_ids
   }
-  # ...その他の設定
+  env = var.env
+  additional_iam_policy_statements = var.additional_iam_policy_statements
+  tags = var.tags
 }
 ```
 </Fragment>
@@ -469,8 +561,8 @@ module "agent_core_runtime" {
 
 ### オブザーバビリティ
 
-[AWS Distro for Open Telemetry](https://aws.amazon.com/otel/)（ADOT）を使用したオブザーバビリティが`Dockerfile`の自動計装で設定されます。
+エージェントは`Dockerfile`で自動計装を設定することで、[AWS Distro for Open Telemetry](https://aws.amazon.com/otel/)（ADOT）を使用したオブザーバビリティが自動的に設定されます。
 
-トレースはCloudWatchコンソールの「GenAI Observability」から確認可能です。[Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search.html)の有効化が必要です。
+トレースはCloudWatch AWSコンソールのメニューから「GenAI Observability」を選択して確認できます。トレースが表示されるには[Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search.html)を有効にする必要があります。
 
 詳細は[AgentCoreオブザーバビリティドキュメント](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html)を参照してください。

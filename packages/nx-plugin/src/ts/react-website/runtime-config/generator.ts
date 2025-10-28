@@ -10,12 +10,12 @@ import {
 } from '@nx/devkit';
 import { RuntimeConfigGeneratorSchema } from './schema';
 import { factory, JsxSelfClosingElement } from 'typescript';
-import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
 import { getNpmScopePrefix, toScopeAlias } from '../../../utils/npm-scope';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { prependStatements, query, replaceIfExists } from '../../../utils/ast';
 import {
   NxGeneratorInfo,
+  addComponentGeneratorMetadata,
   getGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
@@ -118,6 +118,12 @@ export async function runtimeConfigGenerator(
     module: './hooks/useRuntimeConfig',
     contextProp: 'runtimeConfig',
   });
+
+  addComponentGeneratorMetadata(
+    tree,
+    options.project,
+    RUNTIME_CONFIG_GENERATOR_INFO,
+  );
 
   await addGeneratorMetricsIfApplicable(tree, [RUNTIME_CONFIG_GENERATOR_INFO]);
 

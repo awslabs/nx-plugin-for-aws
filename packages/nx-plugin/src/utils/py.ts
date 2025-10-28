@@ -34,6 +34,33 @@ export const addDependenciesToPyProjectToml = (
   );
 };
 
+export const addDependenciesToDependencyGroupInPyProjectToml = (
+  tree: Tree,
+  projectRoot: string,
+  group: string,
+  deps: IPyDepVersion[],
+) => {
+  const projectToml = parse(
+    tree.read(joinPathFragments(projectRoot, 'pyproject.toml'), 'utf8'),
+  ) as UVPyprojectToml;
+  const newDeps = new Set<string>(deps);
+  projectToml['dependency-groups'] = {
+    ...projectToml['dependency-groups'],
+    [group]: [
+      // Replace any dependencies that already exist
+      ...(projectToml['dependency-groups']?.[group] ?? []).filter((dep) => {
+        const parsedDep = parsePipRequirementsLine(dep);
+        return parsedDep.type !== 'ProjectName' || !newDeps.has(parsedDep.name);
+      }),
+      ...withPyVersions(deps),
+    ],
+  };
+  tree.write(
+    joinPathFragments(projectRoot, 'pyproject.toml'),
+    stringify(projectToml),
+  );
+};
+
 /**
  * Render a uvx command for a given dependency
  * Pins the version to the one specified in versions.ts

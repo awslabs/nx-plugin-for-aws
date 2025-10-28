@@ -740,5 +740,21 @@ describe('ts-lambda-function generator', () => {
         "export * from './test-project-second-function.js';",
       );
     });
+
+    it('should add component generator metadata', async () => {
+      await tsLambdaFunctionGenerator(tree, options);
+
+      const projectConfig = JSON.parse(
+        tree.read('packages/test-project/project.json', 'utf-8'),
+      );
+
+      expect(projectConfig.metadata).toBeDefined();
+      expect(projectConfig.metadata.components).toBeDefined();
+      expect(projectConfig.metadata.components).toHaveLength(1);
+      expect(projectConfig.metadata.components[0]).toEqual({
+        generator: TS_LAMBDA_FUNCTION_GENERATOR_INFO.id,
+        name: 'test-function',
+      });
+    });
   });
 });

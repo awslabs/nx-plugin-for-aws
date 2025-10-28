@@ -92,12 +92,12 @@ describe('ts#mcp-server generator', () => {
       projectConfig.targets['mcp-server-serve-stdio'].options.commands[0],
     ).toContain('tsx --watch ./src/mcp-server/stdio.ts');
 
-    expect(projectConfig.targets['mcp-server-serve-http']).toBeDefined();
-    expect(projectConfig.targets['mcp-server-serve-http'].executor).toBe(
+    expect(projectConfig.targets['mcp-server-serve']).toBeDefined();
+    expect(projectConfig.targets['mcp-server-serve'].executor).toBe(
       'nx:run-commands',
     );
     expect(
-      projectConfig.targets['mcp-server-serve-http'].options.commands[0],
+      projectConfig.targets['mcp-server-serve'].options.commands[0],
     ).toContain('tsx --watch ./src/mcp-server/http.ts');
 
     expect(projectConfig.targets['mcp-server-inspect']).toBeDefined();
@@ -144,7 +144,7 @@ describe('ts#mcp-server generator', () => {
       tree.read('apps/test-project/project.json', 'utf-8'),
     );
     expect(projectConfig.targets['custom-server-serve-stdio']).toBeDefined();
-    expect(projectConfig.targets['custom-server-serve-http']).toBeDefined();
+    expect(projectConfig.targets['custom-server-serve']).toBeDefined();
     expect(projectConfig.targets['custom-server-inspect']).toBeDefined();
     expect(
       projectConfig.targets['custom-server-inspect'].options.commands[0],
@@ -435,7 +435,7 @@ describe('ts#mcp-server generator', () => {
       tree.read('apps/test-project/project.json', 'utf-8'),
     );
     expect(projectConfig.targets['mcp-server-serve-stdio']).toBeDefined();
-    expect(projectConfig.targets['mcp-server-serve-http']).toBeDefined();
+    expect(projectConfig.targets['mcp-server-serve']).toBeDefined();
 
     // Check that rolldown bundle target was added
     expect(projectConfig.targets['bundle']).toBeDefined();
@@ -446,17 +446,13 @@ describe('ts#mcp-server generator', () => {
     expect(projectConfig.targets['bundle'].options.cwd).toBe('{projectRoot}');
 
     // Check that docker target was added
-    expect(
-      projectConfig.targets['test-project-mcp-server-docker'],
-    ).toBeDefined();
-    expect(
-      projectConfig.targets['test-project-mcp-server-docker'].options.command,
-    ).toBe(
+    expect(projectConfig.targets['mcp-server-docker']).toBeDefined();
+    expect(projectConfig.targets['mcp-server-docker'].options.command).toBe(
       'docker build --platform linux/arm64 -t proj-test-project-mcp-server:latest apps/test-project/src/mcp-server --build-context workspace=.',
     );
-    expect(
-      projectConfig.targets['test-project-mcp-server-docker'].dependsOn,
-    ).toEqual(['bundle']);
+    expect(projectConfig.targets['mcp-server-docker'].dependsOn).toEqual([
+      'bundle',
+    ]);
   });
 
   it('should generate MCP server with BedrockAgentCoreRuntime and custom name', async () => {
@@ -501,9 +497,7 @@ describe('ts#mcp-server generator', () => {
     expect(
       projectConfig.targets['custom-bedrock-server-serve-stdio'],
     ).toBeDefined();
-    expect(
-      projectConfig.targets['custom-bedrock-server-serve-http'],
-    ).toBeDefined();
+    expect(projectConfig.targets['custom-bedrock-server-serve']).toBeDefined();
 
     // Check that rolldown bundle target was added
     expect(projectConfig.targets['bundle']).toBeDefined();
@@ -1000,5 +994,49 @@ describe('ts#mcp-server generator', () => {
     );
     expect(projectConfig.targets['first-server-docker']).toBeDefined();
     expect(projectConfig.targets['second-server-docker']).toBeDefined();
+  });
+
+  it('should add component generator metadata with default name', async () => {
+    await tsMcpServerGenerator(tree, {
+      project: 'test-project',
+      computeType: 'None',
+      iacProvider: 'CDK',
+    });
+
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+
+    expect(projectConfig.metadata).toBeDefined();
+    expect(projectConfig.metadata.components).toBeDefined();
+    expect(projectConfig.metadata.components).toHaveLength(1);
+    expect(projectConfig.metadata.components[0].generator).toBe(
+      TS_MCP_SERVER_GENERATOR_INFO.id,
+    );
+    expect(projectConfig.metadata.components[0].name).toBe('mcp-server');
+    expect(projectConfig.metadata.components[0].port).toBeDefined();
+    expect(typeof projectConfig.metadata.components[0].port).toBe('number');
+  });
+
+  it('should add component generator metadata with custom name', async () => {
+    await tsMcpServerGenerator(tree, {
+      project: 'test-project',
+      name: 'custom-server',
+      computeType: 'None',
+      iacProvider: 'CDK',
+    });
+
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+
+    expect(projectConfig.metadata).toBeDefined();
+    expect(projectConfig.metadata.components).toBeDefined();
+    expect(projectConfig.metadata.components).toHaveLength(1);
+    expect(projectConfig.metadata.components[0].generator).toBe(
+      TS_MCP_SERVER_GENERATOR_INFO.id,
+    );
+    expect(projectConfig.metadata.components[0].name).toBe('custom-server');
+    expect(projectConfig.metadata.components[0].port).toBeDefined();
   });
 });

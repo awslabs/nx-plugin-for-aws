@@ -3,8 +3,6 @@ title: "파이썬 스트랜드 에이전트"
 description: "도구를 사용하여 AI 에이전트를 구축하고 Amazon Bedrock AgentCore 런타임에 배포하기 위한 파이썬 스트랜드 에이전트 생성"
 ---
 
-
-
 import { FileTree } from '@astrojs/starlight/components';
 import RunGenerator from '@components/run-generator.astro';
 import NxCommands from '@components/nx-commands.astro';
@@ -265,9 +263,70 @@ module "my_project_agent" {
 
 Strands 에이전트 작성에 대한 심층 가이드는 [Strands 문서](https://strandsagents.com/latest/documentation/docs/)를 참조하세요.
 
+## FastAPI 서버
+
+생성기는 [FastAPI](https://fastapi.tiangolo.com/)를 사용하여 Strands 에이전트용 HTTP 서버를 생성합니다. FastAPI는 자동 API 문서화 및 타입 검증 기능을 갖춘 Python API 구축을 위한 현대적이고 빠른 웹 프레임워크를 제공합니다.
+
+생성된 서버에는 다음이 포함됩니다:
+- CORS 미들웨어가 포함된 FastAPI 애플리케이션 설정
+- 오류 처리 미들웨어
+- OpenAPI 스키마 생성
+- 헬스 체크 엔드포인트 (`/ping`)
+- 에이전트 호출 엔드포인트 (`/invocations`)
+
+### Pydantic을 사용한 호출 입력 및 출력 사용자 정의
+
+에이전트의 호출 엔드포인트는 [Pydantic](https://docs.pydantic.dev/) 모델을 사용하여 요청 및 응답 스키마를 정의하고 검증합니다. `main.py`에서 이러한 모델을 에이전트의 요구사항에 맞게 사용자 정의할 수 있습니다.
+
+#### 입력 모델 정의
+
+기본 `InvokeInput` 모델은 프롬프트와 세션 ID를 받습니다.
+
+```python
+from pydantic import BaseModel
+
+class InvokeInput(BaseModel):
+    prompt: str
+    session_id: str
+```
+
+에이전트에 필요한 추가 필드를 포함하도록 이 모델을 확장할 수 있습니다.
+
+:::caution
+사용자가 에이전트를 직접 호출하는 경우 호출자로부터 세션 ID의 일부 또는 전체를 추상화하는 것이 좋습니다. 예를 들어 인증된 사용자 ID를 세션 ID의 일부로 사용할 수 있습니다.
+
+또한 사용 사례에 따라 세션에 대한 권한 부여를 구현해야 할 수 있습니다. 예를 들어 사용자가 자신의 세션에만 접근하고 다른 사용자의 세션에는 접근할 수 없도록 보장하는 것입니다.
+:::
+
+#### 출력 모델 정의
+
+스트리밍 응답의 경우 엔드포인트의 반환 타입 어노테이션은 생성기 함수가 yield하는 각 값의 타입에 해당합니다. 기본적으로 에이전트는 Strands에서 스트리밍되는 에이전트의 응답 텍스트를 포함하는 문자열을 yield합니다:
+
+```python
+@app.post("/invocations", openapi_extra={"x-streaming": True})
+async def invoke(input: InvokeInput) -> str:
+    """Entry point for agent invocation"""
+    return StreamingResponse(handle_invoke(input), media_type="text/event-stream")
+```
+
+구조화된 데이터를 yield하도록 Pydantic 모델을 정의할 수 있습니다:
+
+```python
+from pydantic import BaseModel
+
+class StreamChunk(BaseModel):
+    content: str
+    timestamp: str
+    token_count: int
+
+@app.post("/invocations", openapi_extra={"x-streaming": True})
+async def invoke(input: InvokeInput) -> StreamChunk:
+    return StreamingResponse(handle_invoke(input), media_type="application/json")
+```
+
 ## Bedrock AgentCore Python SDK
 
-생성기는 에이전트가 AgentCore에서 요구하는 기본 HTTP 계약을 관리하기 위해 [Bedrock AgentCore Python SDK](https://github.com/aws/bedrock-agentcore-sdk-python)를 구성합니다.
+생성기는 `PingStatus` 상수를 위해 [Bedrock AgentCore Python SDK](https://github.com/aws/bedrock-agentcore-sdk-python)에 대한 종속성을 포함합니다. 원하는 경우 FastAPI 대신 `BedrockAgentCoreApp`을 사용하는 것도 간단하지만, 타입 안전성이 손실된다는 점에 유의하세요.
 
 SDK 기능에 대한 자세한 내용은 [문서](https://aws.github.io/bedrock-agentcore-starter-toolkit/user-guide/runtime/quickstart.html)에서 확인할 수 있습니다.
 
@@ -293,7 +352,7 @@ SDK 기능에 대한 자세한 내용은 [문서](https://aws.github.io/bedrock-
 
 <Infrastructure>
 <Fragment slot="cdk">
-생성기는 생성기 실행 시 선택한 `name`을 기반으로 이름이 지정된 CDK 컨스트럭트를 생성합니다(기본값은 `<ProjectName>Agent`).
+생성기 실행 시 선택한 `name`을 기반으로 이름이 지정된 CDK 컨스트럭트를 생성합니다(기본값은 `<ProjectName>Agent`).
 
 CDK 애플리케이션에서 이 CDK 컨스트럭트를 사용할 수 있습니다:
 
@@ -321,7 +380,7 @@ export class ExampleStack extends Stack {
 ```
 </Fragment>
 <Fragment slot="terraform">
-생성기는 생성기 실행 시 선택한 `name`을 기반으로 이름이 지정된 테라폼 모듈을 생성합니다(기본값은 `<ProjectName>-agent`).
+생성기 실행 시 선택한 `name`을 기반으로 이름이 지정된 테라폼 모듈을 생성합니다(기본값은 `<ProjectName>-agent`).
 
 테라폼 프로젝트에서 이 모듈을 사용할 수 있습니다:
 

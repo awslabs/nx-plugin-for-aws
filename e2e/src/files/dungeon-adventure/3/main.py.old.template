@@ -1,24 +1,41 @@
-from bedrock_agentcore.runtime import BedrockAgentCoreApp
+import uvicorn
+from bedrock_agentcore.runtime.models import PingStatus
+from fastapi.responses import PlainTextResponse, StreamingResponse
+from pydantic import BaseModel
 
 from .agent import get_agent
+from .init import app
 
-app = BedrockAgentCoreApp()
+
+class InvokeInput(BaseModel):
+    prompt: str
+    session_id: str
 
 
-@app.entrypoint
-async def invoke(payload, context):
-    """Handler for agent invocation"""
-    prompt = payload.get(
-        "prompt", "No prompt found in input, please guide the user "
-        "to create a json payload with prompt key"
-    )
-
-    with get_agent(session_id=context.session_id) as agent:
-        stream = agent.stream_async(prompt)
+async def handle_invoke(input: InvokeInput):
+    """Streaming handler for agent invocation"""
+    with get_agent(session_id=input.session_id) as agent:
+        stream = agent.stream_async(input.prompt)
         async for event in stream:
             print(event)
-            yield (event)
+            content = event.get("event", {}).get("contentBlockDelta", {}).get("delta", {}).get("text")
+            if content is not None:
+                yield content
+            elif event.get("event", {}).get("messageStop") is not None:
+                yield "\n"
+
+
+@app.post("/invocations", openapi_extra={"x-streaming": True}, response_class=PlainTextResponse)
+async def invoke(input: InvokeInput) -> str:
+    """Entry point for agent invocation"""
+    return StreamingResponse(handle_invoke(input), media_type="text/event-stream")
+
+
+@app.get("/ping")
+def ping() -> str:
+    # TODO: if running an async task, return PingStatus.HEALTHY_BUSY
+    return PingStatus.HEALTHY
 
 
 if __name__ == "__main__":
-    app.run()
+    uvicorn.run("dungeon_adventure_story.agent.main:app", port=8080)

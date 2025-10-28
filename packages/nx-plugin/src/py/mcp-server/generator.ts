@@ -15,6 +15,7 @@ import {
 import { PyMcpServerGeneratorSchema } from './schema';
 import {
   NxGeneratorInfo,
+  addComponentGeneratorMetadata,
   getGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
@@ -30,6 +31,7 @@ import { withVersions } from '../../utils/versions';
 import { Logger } from '@nxlv/python/src/executors/utils/logger';
 import { UVProvider } from '@nxlv/python/src/provider/uv/provider';
 import { resolveIacProvider } from '../../utils/iac';
+import { assignPort } from '../../utils/port';
 
 export const PY_MCP_SERVER_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -62,6 +64,7 @@ export const pyMcpServerGenerator = async (
   const name = kebabCase(
     options.name ?? `${kebabCase(project.name.split('.').pop())}-mcp-server`,
   );
+  const mcpTargetPrefix = options.name ? name : 'mcp-server';
 
   const mcpServerNameSnakeCase = toSnakeCase(options.name ?? 'mcp-server');
   const mcpServerNameClassName = toClassName(name);
@@ -116,7 +119,7 @@ export const pyMcpServerGenerator = async (
       { overwriteStrategy: OverwriteStrategy.KeepExisting },
     );
 
-    const dockerTargetName = `${name}-docker`;
+    const dockerTargetName = `${mcpTargetPrefix}-docker`;
 
     // Add a docker target specific to this MCP server
     project.targets[dockerTargetName] = {
@@ -165,26 +168,34 @@ export const pyMcpServerGenerator = async (
     });
   }
 
+  const localDevPort = assignPort(tree, project, 8000);
+
   updateProjectConfiguration(tree, project.name, {
     ...project,
     targets: {
       ...project.targets,
       // Add targets for running the MCP server
-      [`${options.name ? name : 'mcp-server'}-serve-stdio`]: {
+      [`${mcpTargetPrefix}-serve-stdio`]: {
         executor: 'nx:run-commands',
         options: {
           commands: [`uv run -m ${moduleName}.${mcpServerNameSnakeCase}.stdio`],
           cwd: '{projectRoot}',
         },
+        continuous: true,
       },
-      [`${options.name ? name : 'mcp-server'}-serve-http`]: {
+      [`${mcpTargetPrefix}-serve`]: {
         executor: 'nx:run-commands',
         options: {
+          // TODO: consider hot reload
           commands: [`uv run -m ${moduleName}.${mcpServerNameSnakeCase}.http`],
           cwd: '{projectRoot}',
+          env: {
+            PORT: `${localDevPort}`,
+          },
         },
+        continuous: true,
       },
-      [`${options.name ? name : 'mcp-server'}-inspect`]: {
+      [`${mcpTargetPrefix}-inspect`]: {
         executor: 'nx:run-commands',
         options: {
           commands: [
@@ -192,6 +203,7 @@ export const pyMcpServerGenerator = async (
           ],
           cwd: '{projectRoot}',
         },
+        continuous: true,
       },
     },
   });
@@ -200,6 +212,16 @@ export const pyMcpServerGenerator = async (
     tree,
     {},
     withVersions(['@modelcontextprotocol/inspector']),
+  );
+
+  addComponentGeneratorMetadata(
+    tree,
+    project.name,
+    PY_MCP_SERVER_GENERATOR_INFO,
+    mcpTargetPrefix,
+    {
+      port: localDevPort,
+    },
   );
 
   await addGeneratorMetricsIfApplicable(tree, [PY_MCP_SERVER_GENERATOR_INFO]);

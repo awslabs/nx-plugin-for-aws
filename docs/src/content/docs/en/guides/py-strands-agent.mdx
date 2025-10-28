@@ -263,9 +263,70 @@ module "my_project_agent" {
 
 For a more in-depth guide to writing Strands agents, refer to the [Strands documentation](https://strandsagents.com/latest/documentation/docs/).
 
+## FastAPI Server
+
+The generator uses [FastAPI](https://fastapi.tiangolo.com/) to create the HTTP server for your Strands Agent. FastAPI provides a modern, fast web framework for building APIs with Python, with automatic API documentation and type validation.
+
+The generated server includes:
+- FastAPI application setup with CORS middleware
+- Error handling middleware
+- OpenAPI schema generation
+- Health check endpoint (`/ping`)
+- Agent invocation endpoint (`/invocations`)
+
+### Customizing Invoke Inputs and Outputs with Pydantic
+
+The agent's invocation endpoint uses [Pydantic](https://docs.pydantic.dev/) models to define and validate the request and response schemas. You can customize these models in `main.py` to match your agent's requirements.
+
+#### Defining Input Models
+
+The default `InvokeInput` model accepts a prompt and session ID.
+
+```python
+from pydantic import BaseModel
+
+class InvokeInput(BaseModel):
+    prompt: str
+    session_id: str
+```
+
+You can extend this model to include any additional fields your agent needs.
+
+:::caution
+You will likely want to abstract some or all of the session ID from the caller if users are to invoke your agent directly. For example, you may use the authenticated user ID as part of the session ID.
+
+It is also worth noting that depending on your use case you may need to implement authorization for sessions, for example ensuring that users may only access their own sessions and not those of other users.
+:::
+
+#### Defining Output Models
+
+For streaming responses, the return type annotation on your endpoint corresponds to the type of each value yielded by your generator function. By default, the agent yields strings containing the agent's response text as it streams back from Strands:
+
+```python
+@app.post("/invocations", openapi_extra={"x-streaming": True})
+async def invoke(input: InvokeInput) -> str:
+    """Entry point for agent invocation"""
+    return StreamingResponse(handle_invoke(input), media_type="text/event-stream")
+```
+
+You can define a Pydantic model to yield structured data instead:
+
+```python
+from pydantic import BaseModel
+
+class StreamChunk(BaseModel):
+    content: str
+    timestamp: str
+    token_count: int
+
+@app.post("/invocations", openapi_extra={"x-streaming": True})
+async def invoke(input: InvokeInput) -> StreamChunk:
+    return StreamingResponse(handle_invoke(input), media_type="application/json")
+```
+
 ## Bedrock AgentCore Python SDK
 
-The generator configures the [Bedrock AgentCore Python SDK](https://github.com/aws/bedrock-agentcore-sdk-python) to manage the underlying HTTP contract that agents on AgentCore are required to implement.
+The generator includes a dependency on the [Bedrock AgentCore Python SDK](https://github.com/aws/bedrock-agentcore-sdk-python) for the `PingStatus` constants. If desired, it is straightforward to use `BedrockAgentCoreApp` instead of FastAPI, however note that type-safety is lost.
 
 You can find more details about the SDK's capabilities in the [documentation here](https://aws.github.io/bedrock-agentcore-starter-toolkit/user-guide/runtime/quickstart.html).
 
