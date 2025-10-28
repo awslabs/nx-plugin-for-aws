@@ -109,6 +109,9 @@ async function invokeAgentCoreAgent(
       prompt: 'what is 3 + 5?',
       session_id: 'abcdefghijklmnopqrstuvwxyz0123456789',
     }),
+    headers: {
+      'Content-Type': 'application/json',
+    },
   });
   console.log('Agent Response', await response.text());
 
