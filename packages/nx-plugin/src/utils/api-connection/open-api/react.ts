@@ -6,6 +6,7 @@ import {
   addDependenciesToPackageJson,
   generateFiles,
   joinPathFragments,
+  OverwriteStrategy,
   ProjectConfiguration,
   Tree,
   updateProjectConfiguration,
@@ -154,29 +155,25 @@ export const addOpenApiReactClient = async (
       joinPathFragments(__dirname, '../../files/website/hooks/sigv4'),
       joinPathFragments(frontendProjectConfig.sourceRoot, 'hooks'),
       {},
+      {
+        overwriteStrategy: OverwriteStrategy.KeepExisting,
+      },
     );
   }
 
   // Generate the tanstack query provider if it does not exist already
-  if (
-    !tree.exists(
-      joinPathFragments(
-        frontendProjectConfig.sourceRoot,
-        'components',
-        'QueryClientProvider.tsx',
-      ),
-    )
-  ) {
-    generateFiles(
-      tree,
-      joinPathFragments(
-        __dirname,
-        '../../files/website/components/tanstack-query',
-      ),
-      joinPathFragments(frontendProjectConfig.sourceRoot, 'components'),
-      {},
-    );
-  }
+  generateFiles(
+    tree,
+    joinPathFragments(
+      __dirname,
+      '../../files/website/components/tanstack-query',
+    ),
+    joinPathFragments(frontendProjectConfig.sourceRoot, 'components'),
+    {},
+    {
+      overwriteStrategy: OverwriteStrategy.KeepExisting,
+    },
+  );
 
   const apiNameClassName = toClassName(apiName);
 
