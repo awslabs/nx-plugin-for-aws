@@ -71,25 +71,18 @@ export async function reactGenerator(
   );
 
   // Generate the tanstack query provider if it does not exist already
-  if (
-    !tree.exists(
-      joinPathFragments(
-        frontendProjectConfig.sourceRoot,
-        'components',
-        'QueryClientProvider.tsx',
-      ),
-    )
-  ) {
-    generateFiles(
-      tree,
-      joinPathFragments(
-        __dirname,
-        '../../utils/files/website/components/tanstack-query',
-      ),
-      joinPathFragments(frontendProjectConfig.sourceRoot, 'components'),
-      {},
-    );
-  }
+  generateFiles(
+    tree,
+    joinPathFragments(
+      __dirname,
+      '../../utils/files/website/components/tanstack-query',
+    ),
+    joinPathFragments(frontendProjectConfig.sourceRoot, 'components'),
+    {},
+    {
+      overwriteStrategy: OverwriteStrategy.KeepExisting,
+    },
+  );
 
   if (auth === 'IAM') {
     generateFiles(
@@ -97,6 +90,9 @@ export async function reactGenerator(
       joinPathFragments(__dirname, '../../utils/files/website/hooks/sigv4'),
       joinPathFragments(frontendProjectConfig.sourceRoot, 'hooks'),
       {},
+      {
+        overwriteStrategy: OverwriteStrategy.KeepExisting,
+      },
     );
   }
 
