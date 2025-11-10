@@ -194,6 +194,7 @@ describe('infra generator', () => {
     // Snapshot project configuration with custom name
     const config = readProjectConfiguration(tree, '@proj/custom-infra');
     expect(config).toMatchSnapshot('custom-name-project-config');
+    expect(JSON.stringify(config)).not.toContain('packages/infra');
     // Verify file paths with custom name
     expect(tree.exists('packages/custom-infra/cdk.json')).toBeTruthy();
     expect(tree.exists('packages/custom-infra/src/main.ts')).toBeTruthy();
