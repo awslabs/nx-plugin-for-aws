@@ -31,7 +31,6 @@ export default defineConfig({
       enabled: true,
       reporter: ['lcov'],
     },
-    pool: 'threads',
     sequence: {
       hooks: 'list',
     },
