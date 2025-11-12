@@ -158,14 +158,13 @@ describe('MCP Server', () => {
 
   it('should throw an error when generator-guide is called with an invalid generator', async () => {
     // Call the tool with an invalid generator ID
-    await expect(
-      client.callTool({
-        name: 'generator-guide',
-        arguments: {
-          packageManager: 'pnpm',
-          generator: 'invalid-generator-id-that-does-not-exist',
-        },
-      }),
-    ).rejects.toThrow();
+    const result = await client.callTool({
+      name: 'generator-guide',
+      arguments: {
+        packageManager: 'pnpm',
+        generator: 'invalid-generator-id-that-does-not-exist',
+      },
+    });
+    expect(result.isError).toBe(true);
   });
 });
