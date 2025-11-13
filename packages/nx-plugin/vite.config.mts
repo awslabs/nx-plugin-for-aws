@@ -20,6 +20,9 @@ export default defineConfig({
   // },
 
   test: {
+    env: {
+      NX_DAEMON: 'false',
+    },
     watch: false,
     globals: true,
     environment: 'jsdom',
