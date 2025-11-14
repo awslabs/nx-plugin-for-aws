@@ -42,6 +42,8 @@ export const TS_VERSIONS = {
   '@types/aws-lambda': '8.10.157',
   '@types/cors': '2.8.19',
   '@types/express': '5.0.5',
+  '@types/react': '19.2.0',
+  '@types/react-dom': '19.2.0',
   '@smithy/types': '4.8.1',
   aws4fetch: '1.0.20',
   'aws-cdk': '2.1031.1',

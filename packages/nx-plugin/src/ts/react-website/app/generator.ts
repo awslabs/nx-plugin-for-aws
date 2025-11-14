@@ -441,7 +441,12 @@ export async function tsReactWebsiteGenerator(
     }),
   );
 
-  const devDependencies: ITsDepVersion[] = ['vite-tsconfig-paths', '@nx/react'];
+  const devDependencies: ITsDepVersion[] = [
+    'vite-tsconfig-paths',
+    '@nx/react',
+    '@types/react',
+    '@types/react-dom',
+  ];
 
   const dependencies: ITsDepVersion[] = [
     '@cloudscape-design/components',
