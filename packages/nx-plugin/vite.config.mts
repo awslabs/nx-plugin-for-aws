@@ -20,6 +20,9 @@ export default defineConfig({
   // },
 
   test: {
+    env: {
+      NX_DAEMON: 'false',
+    },
     watch: false,
     globals: true,
     environment: 'jsdom',
@@ -31,7 +34,6 @@ export default defineConfig({
       enabled: true,
       reporter: ['lcov'],
     },
-    pool: 'threads',
     sequence: {
       hooks: 'list',
     },
