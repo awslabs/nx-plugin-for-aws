@@ -75,7 +75,6 @@ export async function tsReactWebsiteGenerator(
     bundler: 'vite',
     unitTestRunner: 'vitest',
     useProjectJson: true,
-    skipPackageJson: true,
     style: 'css',
   });
 
@@ -441,19 +440,12 @@ export async function tsReactWebsiteGenerator(
     }),
   );
 
-  const devDependencies: ITsDepVersion[] = [
-    'vite-tsconfig-paths',
-    '@nx/react',
-    '@types/react',
-    '@types/react-dom',
-  ];
+  const devDependencies: ITsDepVersion[] = ['vite-tsconfig-paths', '@nx/react'];
 
   const dependencies: ITsDepVersion[] = [
     '@cloudscape-design/components',
     '@cloudscape-design/board-components',
     '@cloudscape-design/global-styles',
-    'react',
-    'react-dom',
   ];
 
   // Add TailwindCSS dependencies if enabled
