@@ -39,7 +39,7 @@ export const TS_VERSIONS = {
   '@trpc/client': '11.7.1',
   '@trpc/server': '11.7.1',
   '@types/node': '22.19.0',
-  '@types/aws-lambda': '8.10.157',
+  '@types/aws-lambda': '8.10.158',
   '@types/cors': '2.8.19',
   '@types/express': '5.0.5',
   '@smithy/types': '4.8.1',
