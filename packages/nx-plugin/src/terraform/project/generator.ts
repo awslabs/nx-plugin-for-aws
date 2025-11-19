@@ -14,6 +14,8 @@ import {
   GeneratorCallback,
   installPackagesTask,
   addDependenciesToPackageJson,
+  detectPackageManager,
+  updateJson,
 } from '@nx/devkit';
 import { TerraformProjectGeneratorSchema } from './schema';
 import { getTsLibDetails } from '../../ts/lib/generator';
@@ -273,6 +275,19 @@ export async function terraformProjectGenerator(
     {},
     withVersions(['@nx-extend/terraform', 'make-dir-cli']),
   );
+
+  // @nx-extend/terraform has a peer dependency on @nx/devkit ^21.0.0 which causes
+  // npm install to fail, so for NPM we add a resolution
+  // Can remove when https://github.com/TriPSs/nx-extend/issues/407 is addressed
+  if (detectPackageManager() === 'npm') {
+    updateJson(tree, 'package.json', (packageJson) => {
+      packageJson.overrides = {
+        ...packageJson.overrides,
+        ...withVersions(['@nx/devkit']),
+      };
+      return packageJson;
+    });
+  }
 
   return () => {
     installPackagesTask(tree);
