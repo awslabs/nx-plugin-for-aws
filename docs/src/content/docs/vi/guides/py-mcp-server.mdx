@@ -1,0 +1,157 @@
+---
+title: "Máy chủ MCP Python"
+description: "Tạo máy chủ Model Context Protocol (MCP) bằng Python để cung cấp ngữ cảnh cho các Mô hình Ngôn ngữ Lớn"
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Link from '@components/link.astro';
+import Snippet from '@components/snippet.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+
+Tạo một máy chủ [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) bằng Python để cung cấp ngữ cảnh cho các Mô hình Ngôn ngữ Lớn (LLM), và tùy chọn triển khai nó lên [Amazon Bedrock AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/).
+
+## MCP là gì?
+
+[Model Context Protocol (MCP)](https://modelcontextprotocol.io/) là một tiêu chuẩn mở cho phép các trợ lý AI tương tác với các công cụ và tài nguyên bên ngoài. Nó cung cấp một cách nhất quán để các LLM có thể:
+
+- Thực thi các công cụ (hàm) để thực hiện các hành động hoặc truy xuất thông tin
+- Truy cập các tài nguyên cung cấp ngữ cảnh hoặc dữ liệu
+
+## Cách sử dụng
+
+### Tạo một Máy chủ MCP
+
+Bạn có thể tạo một máy chủ MCP bằng Python theo hai cách:
+
+<RunGenerator generator="py#mcp-server" />
+
+:::tip
+Trước tiên hãy sử dụng trình tạo <Link path="/guides/python-project">`py#project`</Link> để tạo một dự án để thêm máy chủ MCP của bạn vào.
+:::
+
+### Tùy chọn
+
+<GeneratorParameters generator="py#mcp-server" />
+
+## Kết quả từ Trình tạo
+
+Trình tạo sẽ thêm các tệp sau vào dự án Python hiện có của bạn:
+
+<FileTree>
+  - your-project/
+    - your_module/
+      - mcp_server/ (hoặc tên tùy chỉnh nếu được chỉ định)
+        - \_\_init\_\_.py Khởi tạo gói Python
+        - server.py Định nghĩa máy chủ chính với các công cụ và tài nguyên mẫu
+        - stdio.py Điểm vào cho giao vận STDIO, hữu ích cho các máy chủ MCP cục bộ đơn giản
+        - http.py Điểm vào cho giao vận HTTP có thể stream, hữu ích cho việc lưu trữ máy chủ MCP của bạn
+        - Dockerfile Điểm vào cho việc lưu trữ máy chủ MCP của bạn (loại trừ khi `computeType` được đặt thành `None`)
+    - pyproject.toml Đã cập nhật với các phụ thuộc MCP
+    - project.json Đã cập nhật với các target phục vụ máy chủ MCP
+</FileTree>
+
+### Hạ tầng
+
+:::note
+Nếu bạn chọn `None` cho `computeType`, trình tạo sẽ không cung cấp bất kỳ mã hạ tầng nào.
+:::
+
+<Snippet name="shared-constructs" />
+
+<Snippet name="mcp/shared-constructs" />
+
+## Làm việc với Máy chủ MCP của bạn
+
+### Thêm Công cụ
+
+Công cụ là các hàm mà trợ lý AI có thể gọi để thực hiện các hành động. Máy chủ MCP Python sử dụng thư viện [MCP Python SDK (FastMCP)](https://github.com/modelcontextprotocol/python-sdk), cung cấp một cách tiếp cận dựa trên decorator đơn giản để định nghĩa các công cụ.
+
+Bạn có thể thêm các công cụ mới trong tệp `server.py`:
+
+```python
+@mcp.tool(description="Mô tả công cụ của bạn")
+def your_tool_name(param1: str, param2: int) -> str:
+    """Triển khai công cụ với gợi ý kiểu"""
+    # Logic công cụ của bạn ở đây
+    return f"Kết quả: {param1} với {param2}"
+```
+
+Thư viện FastMCP tự động xử lý:
+- Xác thực kiểu dựa trên các gợi ý kiểu của hàm
+- Tạo JSON schema cho giao thức MCP
+- Xử lý lỗi và định dạng phản hồi
+
+### Thêm Tài nguyên
+
+Tài nguyên cung cấp ngữ cảnh cho trợ lý AI. Bạn có thể thêm tài nguyên bằng cách sử dụng decorator `@mcp.resource`:
+
+```python
+@mcp.resource("example://static-resource", description="Ví dụ tài nguyên tĩnh")
+def static_resource() -> str:
+    """Trả về nội dung tĩnh"""
+    return "Đây là nội dung tĩnh cung cấp ngữ cảnh cho AI"
+
+@mcp.resource("dynamic://resource/{item_id}", description="Ví dụ tài nguyên động")
+def dynamic_resource(item_id: str) -> str:
+    """Trả về nội dung động dựa trên tham số"""
+    # Lấy dữ liệu dựa trên item_id
+    data = fetch_data_for_item(item_id)
+    return f"Nội dung động cho {item_id}: {data}"
+```
+
+## Cấu hình với Trợ lý AI
+
+<Snippet name="mcp/configuration-py" parentHeading="Cấu hình với Trợ lý AI" />
+
+## Chạy Máy chủ MCP của bạn
+
+### Inspector
+
+Trình tạo cấu hình một target có tên `<your-server-name>-inspect`, khởi động [MCP Inspector](https://github.com/modelcontextprotocol/inspector) với cấu hình để kết nối với máy chủ MCP của bạn bằng giao vận STDIO.
+
+<NxCommands commands={['run your-project:your-server-name-inspect']} />
+
+Lệnh này sẽ khởi động inspector tại `http://localhost:6274`. Bắt đầu bằng cách nhấp vào nút "Connect".
+
+### STDIO
+
+Cách dễ nhất để kiểm tra và sử dụng máy chủ MCP là sử dụng inspector hoặc cấu hình nó với một trợ lý AI (như trên).
+
+Tuy nhiên, bạn có thể chạy máy chủ của mình với [giao vận STDIO](https://modelcontextprotocol.io/docs/concepts/transports#standard-input%2Foutput-stdio) trực tiếp bằng cách sử dụng target `<your-server-name>-serve-stdio`.
+
+<NxCommands commands={['run your-project:your-server-name-serve-stdio']} />
+
+Lệnh này sử dụng `uv run` để thực thi máy chủ MCP của bạn với giao vận STDIO.
+
+### Streamable HTTP
+
+Nếu bạn muốn chạy máy chủ MCP của mình cục bộ bằng [giao vận Streamable HTTP](https://modelcontextprotocol.io/docs/concepts/transports#streamable-http), bạn có thể sử dụng target `<your-server-name>-serve`.
+
+<NxCommands commands={['run your-project:your-server-name-serve']} />
+
+Lệnh này sử dụng `uv run` để thực thi máy chủ MCP của bạn với giao vận HTTP, thường chạy trên cổng 8000.
+
+## Triển khai Máy chủ MCP của bạn lên Bedrock AgentCore Runtime
+
+<Snippet name="mcp/bedrock-deployment" parentHeading="Triển khai Máy chủ MCP của bạn lên Bedrock AgentCore Runtime" />
+
+### Target Bundle và Docker
+
+Để xây dựng máy chủ MCP của bạn cho Bedrock AgentCore Runtime, một target `bundle` được thêm vào dự án của bạn, thực hiện:
+
+- Xuất các phụ thuộc Python của bạn sang tệp `requirements.txt` bằng `uv export`
+- Cài đặt các phụ thuộc cho nền tảng đích (`aarch64-manylinux2014`) bằng `uv pip install`
+
+Một target `docker` cụ thể cho máy chủ MCP của bạn cũng được thêm vào, thực hiện:
+
+- Xây dựng một docker image từ `Dockerfile` chạy máy chủ MCP của bạn trên cổng `8000`, theo [hợp đồng giao thức MCP](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-service-contract.html#mcp-protocol-contract)
+
+:::tip
+Docker image được xây dựng bằng cách sử dụng một tag (ví dụ `my-scope-my-project-mcp-server:latest`), được tham chiếu bởi hạ tầng CDK hoặc Terraform của bạn, cho phép `Dockerfile` của bạn được đặt cùng vị trí với dự án máy chủ MCP của bạn.
+:::
+
+### Khả năng quan sát
+
+<Snippet name="mcp/observability" parentHeading="Khả năng quan sát" />

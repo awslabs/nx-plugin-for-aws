@@ -1,0 +1,174 @@
+---
+title: "Triển khai MCP Bedrock"
+---
+
+import Link from '@components/link.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+### Cơ sở hạ tầng dưới dạng mã (Infrastructure as Code)
+
+Nếu bạn đã chọn `BedrockAgentCoreRuntime` cho `computeType`, cơ sở hạ tầng CDK hoặc Terraform tương ứng sẽ được tạo ra, bạn có thể sử dụng để triển khai MCP server của mình lên [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html).
+
+<Infrastructure>
+<Fragment slot="cdk">
+Một CDK construct được tạo cho bạn, được đặt tên dựa trên `name` bạn đã chọn khi chạy trình tạo, hoặc `<ProjectName>McpServer` theo mặc định.
+
+Bạn có thể sử dụng CDK construct này trong một ứng dụng CDK:
+
+```ts {6}
+import { MyProjectMcpServer } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    // Thêm MCP server vào stack của bạn
+    new MyProjectMcpServer(this, 'MyProjectMcpServer');
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+Một Terraform module được tạo cho bạn, được đặt tên dựa trên `name` bạn đã chọn khi chạy trình tạo, hoặc `<ProjectName>-mcp-server` theo mặc định.
+
+Bạn có thể sử dụng terraform module này trong một dự án Terraform:
+
+```terraform
+# MCP Server
+module "my_project_mcp_server" {
+  # Đường dẫn tương đối đến module được tạo trong dự án common/terraform
+  source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
+}
+```
+</Fragment>
+</Infrastructure>
+
+:::caution
+[Docker](https://www.docker.com/) là bắt buộc để xây dựng và triển khai MCP server của bạn. Hãy đảm bảo bạn đã cài đặt và khởi chạy Docker để tránh các lỗi như:
+
+```
+ERROR: Cannot connect to the Docker daemon at unix://path/to/docker.sock.
+```
+:::
+
+### Xác thực
+
+#### IAM
+
+Theo mặc định, MCP server của bạn sẽ được bảo mật bằng xác thực IAM, chỉ cần triển khai nó mà không cần tham số nào:
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts {5}
+import { MyProjectMcpServer } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    new MyProjectMcpServer(this, 'MyProjectMcpServer');
+  }
+}
+```
+
+Bạn có thể cấp quyền truy cập để gọi MCP của mình trên Bedrock AgentCore Runtime bằng phương thức `grantInvoke`. Ví dụ, bạn có thể muốn một agent được tạo bằng trình tạo <Link path="/guides/py-strands-agent">`py#strands-agent`</Link> gọi MCP server của bạn:
+
+```ts {8}
+import { MyProjectAgent, MyProjectMcpServer } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const agent = new MyProjectAgent(this, 'MyProjectAgent');
+    const mcpServer = new MyProjectMcpServer(this, 'MyProjectMcpServer');
+
+    mcpServer.agentCoreRuntime.grantInvoke(agent.agentCoreRuntime);
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+```terraform
+# MCP Server
+module "my_project_mcp_server" {
+  # Đường dẫn tương đối đến module được tạo trong dự án common/terraform
+  source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
+}
+```
+
+Để cấp quyền truy cập gọi agent của bạn, bạn sẽ cần thêm một policy như sau, tham chiếu đến output `module.my_project_mcp_server.agent_core_runtime_arn`:
+
+```terraform
+{
+  Effect = "Allow"
+  Action = [
+    "bedrock-agentcore:InvokeAgentRuntime"
+  ]
+  Resource = [
+    module.my_project_mcp_server.agent_core_runtime_arn,
+    "${module.my_project_mcp_server.agent_core_runtime_arn}/*"
+  ]
+}
+```
+</Fragment>
+</Infrastructure>
+
+#### Xác thực Cognito JWT
+
+Phần dưới đây minh họa cách cấu hình xác thực Cognito cho agent của bạn.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Để cấu hình xác thực JWT, bạn có thể truyền thuộc tính `authorizerConfiguration` vào MCP server construct của mình. Đây là một ví dụ cấu hình Cognito user pool và client để bảo mật MCP server:
+
+```ts {14-17}
+import { MyProjectMcpServer } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const userPool = new UserPool(this, 'UserPool');
+    const client = userPool.addClient('Client', {
+      authFlows: {
+        userPassword: true,
+      },
+    });
+
+    new MyProjectMcpServer(this, 'MyProjectMcpServer', {
+      authorizerConfiguration: {
+        customJwtAuthorizer: {
+          discoveryUrl: `https://cognito-idp.${Stack.of(userPool).region}.amazonaws.com/${userPool.userPoolId}/.well-known/openid-configuration`,
+          allowedClients: [client.userPoolClientId],
+        },
+      },
+    });
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+Để cấu hình xác thực JWT, bạn có thể chỉnh sửa MCP Server module của mình để cấu hình biến `customJWTAuthorizer` như sau:
+
+```terraform {18-21}
+# packages/common/terraform/src/app/mcp-servers/my-project-mcp-server/my-project-mcp-server.tf
+
+data "aws_region" "current" {}
+
+locals {
+  aws_region = data.aws_region.current.name
+
+  # Thay thế bằng user pool và client ids của bạn hoặc expose dưới dạng biến
+  user_pool_id = "xxx"
+  user_pool_client_ids = ["yyy"]
+}
+
+module "agent_core_runtime" {
+  source = "../../../core/agent-core"
+  agent_runtime_name = "MyProjectMcpServer"
+  docker_image_tag = "my-scope-my-project-agent:latest"
+  server_protocol = "MCP"
+  customJWTAuthorizer = {
+    discoveryUrl = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration",
+    allowedClients = local.user_pool_client_ids
+  }
+  env = var.env
+  additional_iam_policy_statements = var.additional_iam_policy_statements
+  tags = var.tags
+}
+```
+</Fragment>
+</Infrastructure>

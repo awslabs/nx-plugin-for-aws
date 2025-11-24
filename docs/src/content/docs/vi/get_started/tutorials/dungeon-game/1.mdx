@@ -1,0 +1,1006 @@
+---
+title: "Thiết lập monorepo"
+description: "Hướng dẫn chi tiết cách xây dựng trò chơi phiêu lưu hầm ngục được hỗ trợ bởi AI agentic sử dụng @aws/nx-plugin."
+---
+
+import { Aside, Code, FileTree, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import Link from '@components/link.astro';
+import Drawer from '@components/drawer.astro';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import InstallCommand from '@components/install-command.astro';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
+import E2EDiff from '@components/e2e-diff.astro';
+
+import dungeonAdventureArchitecturePng from '@assets/dungeon-game-architecture.png'
+import dungeonAdventureErPng from '@assets/dungeon-adventure-er.png'
+import baselineWebsitePng from '@assets/baseline-website.png'
+import baselineGamePng from '@assets/baseline-game.png'
+import nxGraphPng from '@assets/nx-graph.png'
+import gameSelectPng from '@assets/game-select.png'
+import gameConversationPng from '@assets/game-conversation.png'
+
+## Nhiệm vụ 1: Tạo một monorepo
+
+Để tạo một monorepo mới, từ thư mục mong muốn của bạn, chạy lệnh sau:
+
+<CreateNxWorkspaceCommand workspace="dungeon-adventure" iacProvider="CDK" />
+
+:::note
+Chúng ta sử dụng `--iacProvider=CDK` vì chúng ta sẽ sử dụng CDK cho cơ sở hạ tầng dưới dạng mã trong hướng dẫn này. Nx Plugin cho AWS cũng hỗ trợ `Terraform`.
+:::
+
+Điều này sẽ thiết lập một NX monorepo trong thư mục `dungeon-adventure`. Khi bạn mở thư mục trong VSCode, bạn sẽ thấy cấu trúc tệp này:
+
+<FileTree>
+- .nx/
+- .vscode/
+- node_modules/
+- packages/ đây là nơi các dự án con của bạn sẽ nằm
+- .gitignore
+- .npmrc
+- .prettierignore
+- .prettierrc
+- nx.json cấu hình Nx CLI và các giá trị mặc định của monorepo
+- package.json tất cả các phụ thuộc node được định nghĩa ở đây
+- pnpm-lock.yaml hoặc bun.lock, yarn.lock, package-lock.json tùy thuộc vào trình quản lý gói
+- pnpm-workspace.yaml nếu sử dụng pnpm
+- README.md
+- tsconfig.base.json tất cả các dự án con dựa trên node đều mở rộng từ tệp này
+- tsconfig.json
+- aws-nx-plugin.config.mts cấu hình cho Nx Plugin cho AWS
+</FileTree>
+
+Bây giờ chúng ta có thể bắt đầu tạo các dự án con khác nhau bằng cách sử dụng `@aws/nx-plugin`.
+
+<Aside type="tip">Cách tốt nhất là đảm bảo tất cả các tệp chưa được stage của bạn được commit trong Git trước khi chạy bất kỳ trình tạo nào. Điều này cho phép bạn xem những gì đã thay đổi sau khi chạy trình tạo thông qua `git diff`.</Aside>
+
+## Nhiệm vụ 2: Tạo một Game API
+
+Đầu tiên, hãy tạo Game API của chúng ta. Để làm điều này, tạo một tRPC API có tên `GameApi` bằng các bước sau:
+
+<RunGenerator generator="ts#trpc-api" requiredParameters={{ name: "GameApi" }} noInteractive />
+
+<br />
+
+Bạn sẽ thấy một số tệp mới xuất hiện trong cây tệp của mình.
+
+<Aside>
+`package.json` gốc hiện được cấu hình với `type` là `module`, có nghĩa là ESM là loại module mặc định cho tất cả các dự án con dựa trên node được cung cấp bởi `@aws/nx-plugin`.
+Để biết thêm chi tiết về làm việc với các dự án TypeScript, hãy tham khảo <Link path="guides/typescript-project">hướng dẫn trình tạo ts#project</Link>.
+</Aside>
+
+<Drawer title="Các tệp được cập nhật bởi ts#trpc-api" trigger="Nhấp vào đây để xem xét các tệp này chi tiết hơn.">
+Dưới đây là danh sách tất cả các tệp đã được tạo bởi trình tạo `ts#trpc-api`. Chúng ta sẽ xem xét một số tệp chính được đánh dấu trong cây tệp:
+<FileTree>
+- packages/
+  - common/
+    - constructs/
+      - src/
+        - app/ các cdk construct cụ thể cho ứng dụng
+          - apis/
+            - **game-api.ts** cdk construct để tạo tRPC API của bạn
+            - index.ts
+            - ...
+          - index.ts
+        - core/ các cdk construct chung
+          - api/
+            - rest-api.ts cdk construct cơ sở cho API Gateway Rest API
+            - trpc-utils.ts tiện ích cho các cdk construct của trpc API
+            - utils.ts tiện ích cho các API construct
+          - index.ts
+          - runtime-config.ts
+        - index.ts
+      - project.json
+      - ...
+    - types/ các kiểu dữ liệu được chia sẻ
+      - src/
+        - index.ts
+        - runtime-config.ts định nghĩa interface được sử dụng bởi cả CDK và website
+      - project.json
+      - ...
+  - game-api/ tRPC API
+    - src/
+      - client/ vanilla client thường được sử dụng cho các cuộc gọi máy móc với máy móc bằng ts
+        - index.ts
+        - sigv4.ts
+      - middleware/ công cụ đo lường powertools
+        - error.ts
+        - index.ts
+        - logger.ts
+        - metrics.ts
+        - tracer.ts
+      - schema/ định nghĩa đầu vào và đầu ra cho API của bạn
+        - **echo.ts**
+      - procedures/ triển khai cụ thể cho các thủ tục/tuyến đường API của bạn
+        - **echo.ts**
+      - index.ts
+      - init.ts thiết lập ngữ cảnh và middleware
+      - local-server.ts được sử dụng khi chạy máy chủ tRPC cục bộ
+      - **router.ts** điểm vào cho trình xử lý lambda của bạn, định nghĩa tất cả các thủ tục
+    - project.json
+    - ...
+- eslint.config.mjs
+- vitest.workspace.ts
+</FileTree>
+
+Hãy xem các tệp chính này:
+
+```ts {5,12}
+// packages/game-api/src/router.ts
+import {
+  awsLambdaRequestHandler,
+  CreateAWSLambdaContextOptions,
+} from '@trpc/server/adapters/aws-lambda';
+import { echo } from './procedures/echo.js';
+import { t } from './init.js';
+import { APIGatewayProxyEvent } from 'aws-lambda';
+
+export const router = t.router;
+
+export const appRouter = router({
+  echo,
+});
+
+export const handler = awsLambdaRequestHandler({
+  router: appRouter,
+  createContext: (
+    ctx: CreateAWSLambdaContextOptions<APIGatewayProxyEvent>,
+  ) => ctx,
+  responseMeta: () => ({
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': '*',
+    },
+  }),
+});
+
+export type AppRouter = typeof appRouter;
+```
+Router định nghĩa điểm vào cho tRPC API của bạn và là nơi bạn sẽ khai báo tất cả các phương thức API của mình. Như bạn có thể thấy ở trên, chúng ta có một phương thức gọi là `echo` với triển khai của nó trong tệp `./procedures/echo.ts`.
+
+```ts {2-5}
+// packages/game-api/src/procedures/echo.ts
+import { publicProcedure } from '../init.js';
+import {
+  EchoInputSchema,
+  EchoOutputSchema,
+} from '../schema/echo.js';
+
+export const echo = publicProcedure
+  .input(EchoInputSchema)
+  .output(EchoOutputSchema)
+  .query((opts) => ({ result: opts.input.message }));
+```
+
+Tệp này là triển khai của phương thức `echo` và như bạn có thể thấy được định kiểu mạnh bằng cách khai báo các cấu trúc dữ liệu đầu vào và đầu ra của nó.
+
+```ts
+// packages/game-api/src/schema/echo.ts
+import { z } from 'zod';
+
+export const EchoInputSchema = z.object({
+  message: z.string(),
+});
+
+export type IEchoInput = z.TypeOf<typeof EchoInputSchema>;
+
+export const EchoOutputSchema = z.object({
+  result: z.string(),
+});
+
+export type IEchoOutput = z.TypeOf<typeof EchoOutputSchema>;
+```
+
+Tất cả các định nghĩa schema tRPC được định nghĩa bằng [Zod](https://zod.dev/) và được xuất dưới dạng các kiểu typescript thông qua cú pháp `z.TypeOf`.
+
+```ts
+// packages/common/constructs/src/app/apis/game-api.ts
+import { Construct } from 'constructs';
+import * as url from 'url';
+import {
+  Code,
+  Runtime,
+  Function,
+  FunctionProps,
+  Tracing,
+} from 'aws-cdk-lib/aws-lambda';
+import {
+  AuthorizationType,
+  Cors,
+  LambdaIntegration,
+} from 'aws-cdk-lib/aws-apigateway';
+import { Duration, Stack } from 'aws-cdk-lib';
+import {
+  PolicyDocument,
+  PolicyStatement,
+  Effect,
+  AccountPrincipal,
+  AnyPrincipal,
+} from 'aws-cdk-lib/aws-iam';
+import {
+  IntegrationBuilder,
+  RestApiIntegration,
+} from '../../core/api/utils.js';
+import { RestApi } from '../../core/api/rest-api.js';
+import { Procedures, routerToOperations } from '../../core/api/trpc-utils.js';
+import { AppRouter, appRouter } from ':dungeon-adventure/game-api';
+
+// Kiểu union chuỗi cho tất cả tên hoạt động API
+type Operations = Procedures<AppRouter>;
+
+/**
+ * Thuộc tính để tạo một construct GameApi
+ *
+ * @template TIntegrations - Ánh xạ tên hoạt động với các tích hợp của chúng
+ */
+export interface GameApiProps<
+  TIntegrations extends Record<Operations, RestApiIntegration>,
+> {
+  /**
+   * Ánh xạ tên hoạt động với các tích hợp API Gateway của chúng
+   */
+  integrations: TIntegrations;
+}
+
+/**
+ * Một CDK construct tạo và cấu hình AWS API Gateway REST API
+ * dành riêng cho GameApi.
+ * @template TIntegrations - Ánh xạ tên hoạt động với các tích hợp của chúng
+ */
+export class GameApi<
+  TIntegrations extends Record<Operations, RestApiIntegration>,
+> extends RestApi<Operations, TIntegrations> {
+  /**
+   * Tạo các tích hợp mặc định cho tất cả các hoạt động, triển khai mỗi hoạt động như
+   * một hàm lambda riêng lẻ.
+   *
+   * @param scope - Phạm vi construct CDK
+   * @returns Một IntegrationBuilder với các tích hợp lambda mặc định
+   */
+  public static defaultIntegrations = (scope: Construct) => {
+    return IntegrationBuilder.rest({
+      operations: routerToOperations(appRouter),
+      defaultIntegrationOptions: {
+        runtime: Runtime.NODEJS_LATEST,
+        handler: 'index.handler',
+        code: Code.fromAsset(
+          url.fileURLToPath(
+            new URL(
+              '../../../../../../dist/packages/game-api/bundle',
+              import.meta.url,
+            ),
+          ),
+        ),
+        timeout: Duration.seconds(30),
+        tracing: Tracing.ACTIVE,
+        environment: {
+          AWS_CONNECTION_REUSE_ENABLED: '1',
+        },
+      } satisfies FunctionProps,
+      buildDefaultIntegration: (op, props: FunctionProps) => {
+        const handler = new Function(scope, `GameApi${op}Handler`, props);
+        return { handler, integration: new LambdaIntegration(handler) };
+      },
+    });
+  };
+
+  constructor(
+    scope: Construct,
+    id: string,
+    props: GameApiProps<TIntegrations>,
+  ) {
+    super(scope, id, {
+      apiName: 'GameApi',
+      defaultMethodOptions: {
+        authorizationType: AuthorizationType.IAM,
+      },
+      defaultCorsPreflightOptions: {
+        allowOrigins: Cors.ALL_ORIGINS,
+        allowMethods: Cors.ALL_METHODS,
+      },
+      policy: new PolicyDocument({
+        statements: [
+          // Ở đây chúng ta cấp bất kỳ thông tin xác thực AWS nào từ tài khoản mà dự án được triển khai để gọi api.
+          // Truy cập chi tiết máy móc với máy móc có thể được định nghĩa ở đây bằng cách sử dụng các principal cụ thể hơn (ví dụ: vai trò hoặc
+          // người dùng) và tài nguyên (ví dụ: đường dẫn api nào có thể được gọi bởi principal nào) nếu cần.
+          new PolicyStatement({
+            effect: Effect.ALLOW,
+            principals: [new AccountPrincipal(Stack.of(scope).account)],
+            actions: ['execute-api:Invoke'],
+            resources: ['execute-api:/*'],
+          }),
+          // Mở OPTIONS để cho phép trình duyệt thực hiện các yêu cầu preflight không xác thực
+          new PolicyStatement({
+            effect: Effect.ALLOW,
+            principals: [new AnyPrincipal()],
+            actions: ['execute-api:Invoke'],
+            resources: ['execute-api:/*/OPTIONS/*'],
+          }),
+        ],
+      }),
+      operations: routerToOperations(appRouter),
+      ...props,
+    });
+  }
+}
+```
+
+Đây là CDK construct định nghĩa `GameApi` của chúng ta. Nó cung cấp một phương thức `defaultIntegrations` tự động tạo một hàm Lambda cho mỗi thủ tục trong tRPC API của chúng ta, trỏ đến triển khai API đã được đóng gói. Điều này có nghĩa là tại thời điểm `cdk synth`, việc đóng gói không xảy ra (trái ngược với việc sử dụng [NodeJsFunction](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_lambda_nodejs.NodejsFunction.html)) vì chúng ta đã đóng gói nó như một phần của mục tiêu build của dự án backend.
+
+</Drawer>
+
+## Nhiệm vụ 3: Tạo các agent Story
+
+Bây giờ hãy tạo các Story Agent của chúng ta.
+
+### Story agent: Dự án Python
+
+Để tạo một dự án Python:
+
+<RunGenerator generator="py#project" requiredParameters={{name:"story"}} noInteractive />
+
+Bạn sẽ thấy một số tệp mới xuất hiện trong cây tệp của mình.
+<Drawer title="Các tệp được cập nhật bởi py#project" trigger="Nhấp vào đây để xem xét các tệp này chi tiết hơn.">
+`py#project` tạo các tệp sau:
+
+<FileTree>
+- .venv/ môi trường ảo duy nhất cho monorepo
+- packages/
+  - story/
+    - dungeon_adventure_story/ module python
+      - hello.py tệp python ví dụ (chúng ta sẽ bỏ qua điều này)
+    - tests/
+    - .python-version
+    - pyproject.toml
+    - project.json
+- .python-version phiên bản python uv được cố định
+- pyproject.toml
+- uv.lock
+</FileTree>
+
+Điều này đã cấu hình một dự án Python và [UV Workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/) với môi trường ảo được chia sẻ.
+
+</Drawer>
+
+### Story agent: Strands Agent
+
+Để thêm một Strands agent vào dự án với trình tạo `py#strands-agent`:
+
+<RunGenerator generator="py#strands-agent" requiredParameters={{project:"story"}} noInteractive />
+
+Bạn sẽ thấy một số tệp mới xuất hiện trong cây tệp của mình.
+<Drawer title="Các tệp được cập nhật bởi py#strands-agent" trigger="Nhấp vào đây để xem xét các tệp này chi tiết hơn.">
+Trình tạo `py#strands-agent` tạo các tệp sau:
+
+<FileTree>
+- packages/
+  - story/
+    - dungeon_adventure_story/ module python
+      - agent/
+        - main.py điểm vào cho agent của bạn trong Bedrock AgentCore Runtime
+        - agent.py định nghĩa một agent và công cụ ví dụ
+        - agentcore_mcp_client.py tiện ích để tạo client để tương tác với các máy chủ MCP
+        - Dockerfile định nghĩa docker image để triển khai lên AgentCore Runtime
+  - common/constructs/
+    - src
+      - core/agent-core/
+        - runtime.ts construct chung để triển khai lên AgentCore Runtime
+      - app/agents/story-agent/
+        - story-agent.ts construct để triển khai Story agent của bạn lên AgentCore Runtime
+</FileTree>
+
+Hãy xem xét một số tệp chi tiết:
+
+```python
+# agent/agent.py
+from contextlib import contextmanager
+
+from strands import Agent, tool
+from strands_tools import current_time
+
+
+# Định nghĩa một công cụ tùy chỉnh
+@tool
+def add(a: int, b: int) -> int:
+    return a + b
+
+
+@contextmanager
+def get_agent(session_id: str):
+    yield Agent(
+        system_prompt="""
+You are an addition wizard.
+Use the 'add' tool for addition tasks.
+Refer to tools as your 'spellbook'.
+""",
+        tools=[add, current_time],
+    )
+```
+
+Điều này tạo một Strands agent ví dụ và định nghĩa một công cụ cộng.
+
+```python
+# agent/main.py
+from bedrock_agentcore.runtime import BedrockAgentCoreApp
+
+from .agent import get_agent
+
+app = BedrockAgentCoreApp()
+
+
+@app.entrypoint
+async def invoke(payload, context):
+    """Handler cho việc gọi agent"""
+    prompt = payload.get(
+        "prompt", "No prompt found in input, please guide the user "
+        "to create a json payload with prompt key"
+    )
+
+    with get_agent(session_id=context.session_id) as agent:
+        stream = agent.stream_async(prompt)
+        async for event in stream:
+            print(event)
+            yield (event)
+
+
+if __name__ == "__main__":
+    app.run()
+```
+
+Đây là điểm vào cho agent, được cấu hình bằng [Amazon Bedrock AgentCore SDK](https://github.com/aws/bedrock-agentcore-sdk-python). Nó sử dụng hỗ trợ streaming của Strands và truyền các sự kiện trở lại client khi chúng xảy ra.
+
+```ts
+// common/constructs/src/app/agents/story-agent.ts
+import { Lazy, Names } from 'aws-cdk-lib';
+import { DockerImageAsset, Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import { Construct } from 'constructs';
+import { execSync } from 'child_process';
+import * as path from 'path';
+import * as url from 'url';
+import {
+  AgentCoreRuntime,
+  AgentCoreRuntimeProps,
+} from '../../../core/agent-core/runtime.js';
+
+export type StoryAgentProps = Omit<
+  AgentCoreRuntimeProps,
+  'runtimeName' | 'serverProtocol' | 'containerUri'
+>;
+
+export class StoryAgent extends Construct {
+  public readonly dockerImage: DockerImageAsset;
+  public readonly agentCoreRuntime: AgentCoreRuntime;
+
+  constructor(scope: Construct, id: string, props?: StoryAgentProps) {
+    super(scope, id);
+
+    this.dockerImage = new DockerImageAsset(this, 'DockerImage', {
+      platform: Platform.LINUX_ARM64,
+      directory: path.dirname(url.fileURLToPath(new URL(import.meta.url))),
+      extraHash: execSync(
+        `docker inspect dungeon-adventure-story-agent:latest --format '{{.Id}}'`,
+        { encoding: 'utf-8' },
+      ).trim(),
+    });
+
+    this.agentCoreRuntime = new AgentCoreRuntime(this, 'StoryAgent', {
+      runtimeName: Lazy.string({
+        produce: () =>
+          Names.uniqueResourceName(this.agentCoreRuntime, { maxLength: 40 }),
+      }),
+      serverProtocol: 'HTTP',
+      containerUri: this.dockerImage.imageUri,
+      ...props,
+    });
+  }
+}
+```
+
+Điều này cấu hình một CDK `DockerImageAsset` tải image Docker agent của bạn lên ECR và lưu trữ nó bằng AgentCore Runtime.
+
+Bạn có thể nhận thấy một `Dockerfile` bổ sung, tham chiếu đến Docker image từ dự án `story`, cho phép chúng ta đặt cùng vị trí Dockerfile và mã nguồn agent.
+
+</Drawer>
+
+## Nhiệm vụ 4: Thiết lập công cụ inventory
+
+### Inventory: Dự án TypeScript
+
+Hãy tạo một máy chủ MCP để cung cấp công cụ cho Story Agent của chúng ta để quản lý kho đồ của người chơi.
+
+Đầu tiên, chúng ta tạo một dự án TypeScript:
+
+<RunGenerator generator="ts#project" requiredParameters={{name:"inventory"}} noInteractive />
+
+Điều này sẽ tạo một dự án TypeScript trống.
+
+<Drawer title="Các tệp được cập nhật bởi ts#project" trigger="Nhấp vào đây để xem xét các tệp này chi tiết hơn.">
+Trình tạo `ts#project` tạo các tệp này.
+
+<FileTree>
+- packages/
+  - inventory/
+    - src/
+      - index.ts điểm vào với hàm ví dụ
+    - project.json cấu hình dự án
+    - eslint.config.mjs cấu hình lint
+    - vite.config.ts cấu hình test
+    - tsconfig.json cấu hình typescript cơ sở cho dự án
+    - tsconfig.lib.json cấu hình typescript cho dự án được nhắm mục tiêu để biên dịch và đóng gói
+    - tsconfig.spec.json cấu hình typescript cho các bài test
+- tsconfig.base.json được cập nhật để cấu hình một bí danh cho các dự án khác tham chiếu đến dự án này
+</FileTree>
+
+</Drawer>
+
+### Inventory: Máy chủ MCP
+
+Tiếp theo, chúng ta sẽ thêm một máy chủ MCP vào dự án TypeScript của mình:
+
+<RunGenerator generator="ts#mcp-server" requiredParameters={{project:"inventory"}} noInteractive />
+
+Điều này sẽ thêm một máy chủ MCP.
+<Drawer title="Các tệp được cập nhật bởi ts#mcp-server" trigger="Nhấp vào đây để xem xét các tệp này chi tiết hơn.">
+Trình tạo `ts#mcp-server` tạo các tệp này.
+
+<FileTree>
+- packages/
+  - inventory/
+    - src/mcp-server/
+      - server.ts tạo máy chủ MCP
+      - tools/
+        - add.ts công cụ ví dụ
+      - resources/
+        - sample-guidance.ts tài nguyên ví dụ
+      - stdio.ts điểm vào cho MCP với STDIO transport
+      - http.ts điểm vào cho MCP với Streamable HTTP transport
+      - Dockerfile xây dựng image cho AgentCore Runtime
+    - rolldown.config.ts cấu hình để đóng gói máy chủ MCP để triển khai lên AgentCore
+  - common/constructs/
+    - src
+      - app/mcp-servers/inventory-mcp-server/
+        - inventory-mcp-server.ts construct để triển khai máy chủ MCP inventory của bạn lên AgentCore Runtime
+</FileTree>
+
+</Drawer>
+
+## Nhiệm vụ 5: Tạo Giao diện Người dùng (UI)
+
+Trong nhiệm vụ này, chúng ta sẽ tạo UI cho phép bạn tương tác với trò chơi.
+
+### Game UI: Website
+
+Để tạo UI, tạo một website có tên `GameUI` bằng các bước sau:
+
+<RunGenerator generator="ts#react-website" requiredParameters={{name:"GameUI"}} noInteractive />
+
+Bạn sẽ thấy một số tệp mới xuất hiện trong cây tệp của mình.
+
+<Drawer title="Các tệp được cập nhật bởi ts#react-website" trigger="Nhấp vào đây để xem xét các tệp này chi tiết hơn.">
+`ts#react-website` tạo các tệp này. Hãy xem xét một số tệp chính được đánh dấu trong cây tệp:
+
+<FileTree>
+- packages/
+  - common/
+    - constructs/
+      - src/
+        - app/ các cdk construct cụ thể cho ứng dụng
+          - static-websites/
+            - **game-ui.ts** cdk construct để tạo Game UI của bạn
+        - core/
+          - static-website.ts construct website tĩnh chung
+  - game-ui/
+    - public/
+    - src/
+      - components/
+        - AppLayout/
+          - index.ts bố cục trang tổng thể: header, footer, sidebar, v.v.
+          - navitems.ts các mục điều hướng sidebar
+      - hooks/
+        - useAppLayout.tsx cho phép bạn đặt động các thứ như thông báo, kiểu trang, v.v.
+      - routes/ các tuyến đường dựa trên tệp của @tanstack/react-router
+        - index.tsx trang gốc '/' chuyển hướng đến '/welcome'
+        - __root.tsx tất cả các trang sử dụng component này làm cơ sở
+        - welcome/
+          - **index.tsx**
+        - config.ts
+        - **main.tsx** điểm vào React
+        - routeTree.gen.ts tệp này được cập nhật tự động bởi @tanstack/react-router
+        - styles.css
+    - index.html
+    - project.json
+    - vite.config.ts
+    - ...
+</FileTree>
+
+```ts
+// packages/common/constructs/src/app/static-websites/game-ui.ts
+import * as url from 'url';
+import { Construct } from 'constructs';
+import { StaticWebsite } from '../../core/index.js';
+
+export class GameUI extends StaticWebsite {
+  constructor(scope: Construct, id: string) {
+    super(scope, id, {
+      websiteName: 'GameUI',
+      websiteFilePath: url.fileURLToPath(
+        new URL(
+          '../../../../../../dist/packages/game-ui/bundle',
+          import.meta.url,
+        ),
+      ),
+    });
+  }
+}
+```
+
+Đây là CDK construct định nghĩa GameUI của chúng ta. Nó đã cấu hình đường dẫn tệp đến gói được tạo cho UI dựa trên Vite của chúng ta. Điều này có nghĩa là tại thời điểm `build`, việc đóng gói xảy ra trong mục tiêu build của dự án game-ui và đầu ra được sử dụng ở đây.
+
+```tsx
+// packages/game-ui/src/main.tsx
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { I18nProvider } from '@cloudscape-design/components/i18n';
+import messages from '@cloudscape-design/components/i18n/messages/all.en';
+import { RouterProvider, createRouter } from '@tanstack/react-router';
+import { routeTree } from './routeTree.gen';
+
+import '@cloudscape-design/global-styles/index.css';
+
+const router = createRouter({ routeTree });
+
+// Đăng ký instance router để đảm bảo kiểu an toàn
+declare module '@tanstack/react-router' {
+  interface Register {
+    router: typeof router;
+  }
+}
+
+const root = document.getElementById('root');
+root &&
+  createRoot(root).render(
+    <React.StrictMode>
+      <I18nProvider locale="en" messages={[messages]}>
+        <RouterProvider router={router} />
+      </I18nProvider>
+    </React.StrictMode>,
+  );
+```
+
+Đây là điểm vào nơi React được gắn kết. Như được hiển thị, ban đầu nó chỉ cấu hình một `@tanstack/react-router` trong cấu hình [`file-based-routing`](https://tanstack.com/router/v1/docs/framework/react/routing/file-based-routing). Miễn là máy chủ phát triển của bạn đang chạy, bạn có thể tạo các tệp trong thư mục `routes` và `@tanstack/react-router` sẽ tạo thiết lập tệp boilerplate cho bạn, cùng với việc cập nhật tệp `routeTree.gen.ts`. Tệp này duy trì tất cả các tuyến đường một cách an toàn về kiểu, có nghĩa là khi bạn sử dụng `<Link>`, tùy chọn `to` sẽ chỉ hiển thị các tuyến đường hợp lệ.
+Để biết thêm thông tin, hãy tham khảo [tài liệu `@tanstack/react-router`](https://tanstack.com/router/v1/docs/framework/react/quick-start).
+
+```tsx
+// packages/game-ui/src/routes/welcome/index.tsx
+import {
+  ContentLayout,
+  Header,
+  SpaceBetween,
+  Container,
+} from '@cloudscape-design/components';
+import { createFileRoute } from '@tanstack/react-router';
+
+export const Route = createFileRoute('/welcome/')({
+  component: RouteComponent,
+});
+
+function RouteComponent() {
+  return (
+    <ContentLayout header={<Header>Welcome</Header>}>
+      <SpaceBetween size="l">
+        <Container>Welcome to your new Cloudscape website!</Container>
+      </SpaceBetween>
+    </ContentLayout>
+  );
+}
+```
+
+Một component sẽ được render khi điều hướng đến tuyến đường `/welcome`. `@tanstack/react-router` sẽ quản lý `Route` cho bạn bất cứ khi nào bạn tạo/di chuyển tệp này (miễn là máy chủ dev đang chạy).
+
+</Drawer>
+
+### Game UI: Auth
+
+Hãy cấu hình Game UI của chúng ta để yêu cầu truy cập được xác thực qua Amazon Cognito bằng các bước sau:
+
+<RunGenerator generator="ts#react-website#auth" requiredParameters={{cognitoDomain:"game-ui", project:"@dungeon-adventure/game-ui", allowSignup:true}} noInteractive />
+
+Bạn sẽ thấy một số tệp mới xuất hiện/thay đổi trong cây tệp của mình.
+
+<Drawer title="Các tệp được cập nhật bởi ts#react-website#auth" trigger="Nhấp vào đây để xem xét các tệp này chi tiết hơn.">
+Trình tạo `ts#react-website#auth` cập nhật/tạo các tệp này. Hãy xem xét một số tệp chính được đánh dấu trong cây tệp:
+
+<FileTree>
+- packages/
+  - common/
+    - constructs/
+      - src/
+        - core/
+          - user-identity.ts cdk construct để tạo user/identity pools
+    - types/
+      - src/
+        - runtime-config.ts được cập nhật để thêm cognitoProps
+  - game-ui/
+    - src/
+      - components/
+        - AppLayout/
+          - index.tsx thêm người dùng đã đăng nhập/đăng xuất vào header
+        - CognitoAuth/
+          - index.ts quản lý đăng nhập vào Cognito
+        - RuntimeConfig/
+          - index.tsx lấy `runtime-config.json` và cung cấp cho các children qua context
+      - hooks/
+        - useRuntimeConfig.tsx
+      - **main.tsx** Được cập nhật để thêm Cognito
+</FileTree>
+
+```diff lang="tsx"
+// packages/game-ui/src/main.tsx
++import CognitoAuth from './components/CognitoAuth';
++import RuntimeConfigProvider from './components/RuntimeConfig';
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { I18nProvider } from '@cloudscape-design/components/i18n';
+import messages from '@cloudscape-design/components/i18n/messages/all.en';
+import { RouterProvider, createRouter } from '@tanstack/react-router';
+import { routeTree } from './routeTree.gen';
+import '@cloudscape-design/global-styles/index.css';
+const router = createRouter({ routeTree });
+// Đăng ký instance router để đảm bảo kiểu an toàn
+declare module '@tanstack/react-router' {
+  interface Register {
+    router: typeof router;
+  }
+}
+const root = document.getElementById('root');
+root &&
+  createRoot(root).render(
+    <React.StrictMode>
+      <I18nProvider locale="en" messages={[messages]}>
++        <RuntimeConfigProvider>
++          <CognitoAuth>
+            <RouterProvider router={router} />
++          </CognitoAuth>
++        </RuntimeConfigProvider>
+      </I18nProvider>
+    </React.StrictMode>,
+  );
+```
+
+Các component `RuntimeConfigProvider` và `CognitoAuth` đã được thêm vào tệp `main.tsx` thông qua một biến đổi AST. Điều này cho phép component `CognitoAuth` xác thực với Amazon Cognito bằng cách lấy `runtime-config.json` chứa cấu hình kết nối cognito cần thiết để thực hiện các cuộc gọi backend đến đích chính xác.
+
+</Drawer>
+
+### Game UI: Kết nối với Game API
+
+Hãy cấu hình Game UI của chúng ta để kết nối với Game API đã tạo trước đó.
+
+<RunGenerator generator="api-connection" requiredParameters={{sourceProject:"@dungeon-adventure/game-ui", targetProject:"@dungeon-adventure/game-api"}} noInteractive />
+
+Bạn sẽ thấy một số tệp mới xuất hiện/thay đổi trong cây tệp của mình.
+
+<Drawer title="Các tệp được cập nhật bởi api-connection từ UI -> tRPC" trigger="Nhấp vào đây để xem xét các tệp này chi tiết hơn.">
+Trình tạo `api-connection` tạo/cập nhật các tệp này. Hãy xem xét một số tệp chính được đánh dấu trong cây tệp:
+
+<FileTree>
+- packages/
+  - game-ui/
+    - src/
+      - components/
+        - GameApiClientProvider.tsx thiết lập client GameAPI
+      - hooks/
+        - **useGameApi.tsx** hooks để gọi GameApi
+      - **main.tsx** chèn các provider client trpc
+- package.json
+
+</FileTree>
+
+```tsx
+// packages/game-ui/src/hooks/useGameApi.tsx
+import { GameApiTRCPContext } from '../components/GameApiClientProvider';
+
+export const useGameApi = GameApiTRCPContext.useTRPC;
+```
+
+Hook này sử dụng [tích hợp React Query mới nhất](https://trpc.io/blog/introducing-tanstack-react-query-client) của tRPC cho phép người dùng tương tác trực tiếp với `@tanstack/react-query` mà không có bất kỳ lớp trừu tượng bổ sung nào. Để xem ví dụ về cách gọi tRPC API, hãy tham khảo <Link path="guides/api-connection/react-trpc#using-the-generated-code">hướng dẫn sử dụng tRPC hook</Link>.
+
+<Aside>
+Hook `useGameApi` khác với hook `useStoryApi` vì nó không yêu cầu build để các thay đổi được phản ánh nhờ vào việc sử dụng [suy luận Typescript](https://trpc.io/docs/concepts) của tRPC. Điều này cho phép các nhà phát triển thực hiện thay đổi đối với backend của họ và ngay lập tức được phản ánh trong frontend của họ.
+</Aside>
+
+```diff lang="tsx"
+// packages/game-ui/src/main.tsx
++import GameApiClientProvider from './components/GameApiClientProvider';
++import QueryClientProvider from './components/QueryClientProvider';
+import CognitoAuth from './components/CognitoAuth';
+import RuntimeConfigProvider from './components/RuntimeConfig';
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { I18nProvider } from '@cloudscape-design/components/i18n';
+import messages from '@cloudscape-design/components/i18n/messages/all.en';
+import { RouterProvider, createRouter } from '@tanstack/react-router';
+import { routeTree } from './routeTree.gen';
+import '@cloudscape-design/global-styles/index.css';
+const router = createRouter({ routeTree });
+// Đăng ký instance router để đảm bảo kiểu an toàn
+declare module '@tanstack/react-router' {
+  interface Register {
+    router: typeof router;
+  }
+}
+const root = document.getElementById('root');
+root &&
+  createRoot(root).render(
+    <React.StrictMode>
+      <I18nProvider locale="en" messages={[messages]}>
+        <RuntimeConfigProvider>
+          <CognitoAuth>
++            <QueryClientProvider>
++              <GameApiClientProvider>
+                <RouterProvider router={router} />
++              </GameApiClientProvider>
++            </QueryClientProvider>
+          </CognitoAuth>
+        </RuntimeConfigProvider>
+      </I18nProvider>
+    </React.StrictMode>,
+  );
+```
+
+Tệp `main.tsx` đã được cập nhật thông qua một biến đổi AST để chèn các provider tRPC.
+
+</Drawer>
+
+### Game UI: Cơ sở hạ tầng
+
+Hãy tạo dự án con cuối cùng cho cơ sở hạ tầng CDK.
+
+<RunGenerator generator="ts#infra" requiredParameters={{name:"infra"}} noInteractive />
+
+Bạn sẽ thấy một số tệp mới xuất hiện/thay đổi trong cây tệp của mình.
+
+<Drawer title="Các tệp được cập nhật bởi ts#infra" trigger="Nhấp vào đây để xem xét các tệp này chi tiết hơn.">
+Trình tạo `ts#infra` tạo/cập nhật các tệp này. Hãy xem xét một số tệp chính được đánh dấu trong cây tệp:
+
+<FileTree>
+- packages/
+  - common/
+    - constructs/
+      - src/
+        - core/
+          - checkov.ts
+          - index.ts
+  - infra
+    - src/
+      - stages/
+        - **application-stage.ts** các cdk stack được định nghĩa ở đây
+      - stacks/
+        - **application-stack.ts** các tài nguyên cdk được định nghĩa ở đây
+      - index.ts
+      - **main.ts** điểm vào định nghĩa tất cả các stage
+    - cdk.json
+    - project.json
+    - ...
+  - package.json
+  - tsconfig.json thêm references
+  - tsconfig.base.json thêm alias
+
+</FileTree>
+
+```ts
+// packages/infra/src/main.ts
+import { ApplicationStage } from './stacks/application-stage.js';
+import { App } from ':dungeon-adventure/common-constructs';
+
+const app = new App();
+
+// Sử dụng cái này để triển khai môi trường sandbox của riêng bạn (giả định thông tin xác thực CLI của bạn)
+new ApplicationStage(app, 'dungeon-adventure-infra-sandbox', {
+  env: {
+    account: process.env.CDK_DEFAULT_ACCOUNT,
+    region: process.env.CDK_DEFAULT_REGION,
+  },
+});
+
+app.synth();
+```
+
+<Aside type="tip">Nếu bạn thấy lỗi import trong IDE của mình, điều này là do dự án cơ sở hạ tầng của chúng ta chưa có tham chiếu typescript được thiết lập trong `tsconfig.json`. Nx đã được [cấu hình](https://nx.dev/nx-api/js/generators/typescript-sync) để tạo các tham chiếu này *động* bất cứ khi nào một build/compile được chạy hoặc nếu bạn chạy lệnh `nx sync` thủ công. Để biết thêm thông tin, hãy tham khảo <Link path="guides/typescript-project#importing-your-library-code-in-other-projects">hướng dẫn Typescript</Link>.</Aside>
+
+Đây là điểm vào cho ứng dụng CDK của bạn.
+
+```ts
+// packages/infra/src/stacks/application-stack.ts
+import * as cdk from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+
+export class ApplicationStack extends cdk.Stack {
+  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+    super(scope, id, props);
+
+    // Mã định nghĩa stack của bạn ở đây
+  }
+}
+```
+
+Hãy khởi tạo các CDK construct của chúng ta để xây dựng trò chơi phiêu lưu hầm ngục.
+
+</Drawer>
+
+## Nhiệm vụ 6: Cập nhật cơ sở hạ tầng của chúng ta
+
+Hãy cập nhật `packages/infra/src/stacks/application-stack.ts` để khởi tạo một số construct đã tạo của chúng ta:
+
+<E2EDiff before="dungeon-adventure/1/application-stack.ts.original.template" after="dungeon-adventure/1/application-stack.ts.template" lang="ts" />
+
+:::note
+Chúng ta cung cấp các tích hợp mặc định cho Game API của chúng ta. Theo mặc định, mỗi hoạt động trong API của chúng ta được ánh xạ tới một hàm Lambda riêng lẻ để xử lý hoạt động đó.
+:::
+
+## Nhiệm vụ 7: Build mã
+
+<Drawer title="Các lệnh Nx" trigger="Bây giờ đã đến lúc chúng ta build mã lần đầu tiên">
+
+###### Mục tiêu đơn lẻ vs nhiều mục tiêu
+
+Lệnh `run-many` sẽ chạy một mục tiêu trên nhiều dự án con được liệt kê (`--all` sẽ nhắm mục tiêu tất cả). Điều này đảm bảo các phụ thuộc được thực thi theo đúng thứ tự.
+
+Bạn cũng có thể kích hoạt một build (hoặc bất kỳ tác vụ nào khác) cho một mục tiêu dự án đơn lẻ bằng cách chạy mục tiêu trực tiếp trên dự án. Ví dụ: để build dự án `@dungeon-adventure/infra`, chạy lệnh sau:
+
+<NxCommands commands={['run @dungeon-adventure/infra:build']} />
+
+Bạn cũng có thể bỏ qua scope và sử dụng cú pháp viết tắt của Nx nếu muốn:
+
+<NxCommands commands={['build infra']} />
+
+###### Trực quan hóa các phụ thuộc của bạn
+
+Để trực quan hóa các phụ thuộc của bạn, chạy:
+
+<NxCommands commands={['graph']} />
+<br/>
+
+<Image src={nxGraphPng} alt="nx-graph.png" width="800" height="600" />
+
+###### Caching
+
+Nx dựa vào [caching](https://nx.dev/concepts/how-caching-works) để bạn có thể tái sử dụng các artifact từ các build trước đó nhằm tăng tốc độ phát triển. Có một số cấu hình cần thiết để điều này hoạt động chính xác và có thể có những trường hợp bạn muốn thực hiện build **mà không sử dụng cache**. Để làm điều đó, chỉ cần thêm đối số `--skip-nx-cache` vào lệnh của bạn. Ví dụ:
+
+<NxCommands commands={['run @dungeon-adventure/infra:build --skip-nx-cache']} />
+Nếu vì bất kỳ lý do gì bạn muốn xóa cache của mình (được lưu trữ trong thư mục `.nx`), bạn có thể chạy lệnh sau:
+
+<NxCommands commands={['reset']} />
+
+</Drawer>
+
+Sử dụng dòng lệnh, chạy lệnh sau để sửa các lỗi lint trước:
+
+<NxCommands commands={['run-many --target lint --configuration=fix --all']} />
+
+Sau đó, chạy lệnh sau để thực hiện build đầy đủ:
+
+<NxCommands commands={['run-many --target build --all']} />
+
+Bạn sẽ được nhắc với thông báo sau:
+
+```bash
+ NX   The workspace is out of sync
+
+[@nx/js:typescript-sync]: Some TypeScript configuration files are missing project references to the projects they depend on or contain outdated project references.
+
+This will result in an error in CI.
+
+? Would you like to sync the identified changes to get your workspace up to date? …
+Yes, sync the changes and run the tasks
+No, run the tasks without syncing the changes
+```
+
+Thông báo này cho biết rằng NX đã phát hiện một số tệp có thể được cập nhật tự động cho bạn. Trong trường hợp này, nó đề cập đến các tệp `tsconfig.json` không có tham chiếu Typescript được thiết lập trên các dự án tham chiếu.
+
+Chọn tùy chọn **Yes, sync the changes and run the tasks** để tiếp tục. Bạn sẽ nhận thấy tất cả các lỗi import liên quan đến IDE của bạn được tự động giải quyết vì trình tạo sync sẽ tự động thêm các tham chiếu typescript còn thiếu!
+
+Tất cả các artifact đã build hiện có sẵn trong `thư mục dist/` nằm ở gốc của monorepo. Đây là một thực hành tiêu chuẩn khi sử dụng các dự án được tạo bởi `@aws/nx-plugin` vì nó không làm ô nhiễm cây tệp của bạn với các tệp được tạo. Trong trường hợp bạn muốn dọn dẹp các tệp của mình, hãy xóa thư mục `dist/` mà không phải lo lắng về các artifact build bị rải rác khắp cây tệp.
+
+Chúc mừng! Bạn đã tạo tất cả các dự án con cần thiết để bắt đầu triển khai cốt lõi của trò chơi AI Dungeon Adventure của chúng ta.  🎉🎉🎉

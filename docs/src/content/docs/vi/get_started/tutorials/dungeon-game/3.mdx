@@ -1,0 +1,200 @@
+---
+title: "Triển khai và cấu hình Story agent"
+description: "Hướng dẫn chi tiết cách xây dựng trò chơi phiêu lưu hầm ngục được hỗ trợ bởi AI agentic sử dụng @aws/nx-plugin."
+---
+
+import { Aside, Code, FileTree, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import Drawer from '@components/drawer.astro';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import InstallCommand from '@components/install-command.astro';
+import E2ECode from '@components/e2e-code.astro';
+import E2EDiff from '@components/e2e-diff.astro';
+
+import dungeonAdventureArchitecturePng from '@assets/dungeon-game-architecture.png'
+import dungeonAdventureErPng from '@assets/dungeon-adventure-er.png'
+import baselineWebsitePng from '@assets/baseline-website.png'
+import baselineGamePng from '@assets/baseline-game.png'
+import nxGraphPng from '@assets/nx-graph.png'
+import gameSelectPng from '@assets/game-select.png'
+import gameConversationPng from '@assets/game-conversation.png'
+
+## Nhiệm vụ 1: Triển khai Story Agent
+
+Story Agent là một agent [Strands](https://strandsagents.com/) mà khi được cung cấp một `Game` và danh sách các `Action` làm ngữ cảnh, sẽ phát triển câu chuyện. Chúng ta sẽ cấu hình agent để tương tác với Inventory MCP Server của chúng ta nhằm quản lý các vật phẩm khả dụng của người chơi.
+
+:::note
+Đối với hướng dẫn này, chúng ta sẽ triển khai Agent theo cách "không trạng thái", trong đó mỗi lần gọi là một phiên độc lập bao gồm toàn bộ lịch sử tin nhắn. Đối với môi trường sản xuất, hãy xem xét tích hợp với [Bedrock AgentCore Memory](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/memory.html). Để biết thêm thông tin, tham khảo trang [sử dụng AgentCore Memory với Strands](https://github.com/aws/bedrock-agentcore-sdk-python/tree/main/src/bedrock_agentcore/memory/integrations/strands).
+:::
+
+### Triển khai Agent
+
+Để triển khai agent của chúng ta, cập nhật các file sau trong `packages/story/dungeon_adventure_story/agent`:
+
+<Tabs>
+  <TabItem label="main.py">
+<E2EDiff lang="python" before="dungeon-adventure/3/main.py.old.template" after="dungeon-adventure/3/main.py.template" />
+  </TabItem>
+  <TabItem label="agent.py">
+<E2EDiff lang="python" before="dungeon-adventure/3/agent.py.old.template" after="dungeon-adventure/3/agent.py.template" />
+  </TabItem>
+</Tabs>
+
+Điều này sẽ cấu hình những thứ sau:
+
+- Trích xuất player, genre và actions từ agent payload,
+- Xây dựng một client mà Agent có thể sử dụng để gọi MCP server của chúng ta với SigV4 Authentication, và
+- Xây dựng agent với system prompt và các công cụ của MCP server.
+
+## Nhiệm vụ 2: Triển khai và kiểm thử
+
+### Build code
+
+Để build code:
+
+<NxCommands commands={['run-many --target build --all']} />
+
+<Aside type="tip">
+Nếu bạn gặp bất kỳ lỗi lint nào, hãy chạy lệnh sau để tự động sửa chúng.
+
+<NxCommands commands={['run-many --target lint --configuration=fix --all']} />
+</Aside>
+
+### Triển khai ứng dụng của bạn
+Để triển khai ứng dụng của bạn, chạy lệnh sau:
+
+<NxCommands commands={['deploy infra dungeon-adventure-infra-sandbox/*']} />
+
+Quá trình triển khai này sẽ mất khoảng 2 phút để hoàn thành.
+
+Khi quá trình triển khai hoàn tất, bạn sẽ thấy các output tương tự như sau _(một số giá trị đã được ẩn)_:
+
+```bash
+dungeon-adventure-infra-sandbox-Application
+dungeon-adventure-infra-sandbox-Application: deploying... [2/2]
+
+ ✅  dungeon-adventure-infra-sandbox-Application
+
+✨  Deployment time: 354s
+
+Outputs:
+dungeon-adventure-infra-sandbox-Application.ElectroDbTableTableNameXXX = dungeon-adventure-infra-sandbox-Application-ElectroDbTableXXX-YYY
+dungeon-adventure-infra-sandbox-Application.GameApiEndpointXXX = https://xxx.execute-api.region.amazonaws.com/prod/
+dungeon-adventure-infra-sandbox-Application.GameUIDistributionDomainNameXXX = xxx.cloudfront.net
+dungeon-adventure-infra-sandbox-Application.InventoryMcpArn = arn:aws:bedrock-agentcore:region:xxxxxxx:runtime/dungeonadventureventoryMcpServerXXXX-YYYY
+dungeon-adventure-infra-sandbox-Application.StoryAgentArn = arn:aws:bedrock-agentcore:region:xxxxxxx:runtime/dungeonadventurecationStoryAgentXXXX-YYYY
+dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityIdentityPoolIdXXX = region:xxx
+dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXXX = region_xxx
+```
+
+### Kiểm thử Agent của bạn
+
+Bạn có thể kiểm thử Agent của mình bằng một trong hai cách:
+<ul>
+<li>Khởi động một instance cục bộ của Agent server và gọi nó bằng `curl`, hoặc</li>
+<li>Gọi API đã triển khai bằng curl với JWT token.</li>
+</ul>
+
+<Tabs>
+  <TabItem label="Local">
+  Khởi động Agent server cục bộ của bạn bằng cách chạy lệnh sau:
+    <NxCommands highlights={['arn:aws:bedrock-agentcore:region:xxxxxxx:runtime/dungeonadventureventoryMcpServerXXXX-YYYY', 'region']} env={{INVENTORY_MCP_ARN:"arn:aws:bedrock-agentcore:region:xxxxxxx:runtime/dungeonadventureventoryMcpServerXXXX-YYYY", AWS_REGION: '<region>'}} commands={["run dungeon_adventure.story:agent-serve"]} />
+
+    :::caution
+    Sử dụng output `InventoryMcpArn` từ CDK deploy ở trên và chỉ định `AWS_REGION` mục tiêu của bạn.
+    :::
+
+    Khi Agent server đã chạy (bạn sẽ không thấy bất kỳ output nào), gọi nó bằng cách chạy lệnh sau:
+
+    ```bash
+    curl -N -X POST http://127.0.0.1:8081/invocations \
+      -d '{"genre":"superhero", "actions":[], "playerName":"UnnamedHero"}' \
+      -H "Content-Type: application/json"
+    ```
+  </TabItem>
+  <TabItem label="Deployed">
+    Để kiểm thử agent đã triển khai, bạn cần xác thực với Cognito và lấy JWT token. Đầu tiên, thiết lập các biến môi trường của bạn:
+
+    ```bash
+    # Đặt Cognito User Pool ID và Client ID từ các output của CDK
+    export POOL_ID="<UserPoolId từ CDK outputs>"
+    export CLIENT_ID="<UserPoolClientId từ CDK outputs>"
+    export REGION="<your-region>"
+    ```
+
+    Tạo một test user và lấy authentication token:
+
+    ```bash
+    # Tạo User
+    aws cognito-idp admin-create-user \
+      --user-pool-id $POOL_ID \
+      --username "testuser" \
+      --temporary-password "TempPass123!" \
+      --region $REGION \
+      --message-action SUPPRESS > /dev/null
+
+    # Đặt Permanent Password (thay thế bằng một mật khẩu an toàn hơn!)
+    aws cognito-idp admin-set-user-password \
+      --user-pool-id $POOL_ID \
+      --username "testuser" \
+      --password "PermanentPass123!" \
+      --region $REGION \
+      --permanent > /dev/null
+
+    # Xác thực User và lấy ID Token
+    export BEARER_TOKEN=$(aws cognito-idp initiate-auth \
+      --client-id "$CLIENT_ID" \
+      --auth-flow USER_PASSWORD_AUTH \
+      --auth-parameters USERNAME='testuser',PASSWORD='PermanentPass123!' \
+      --region $REGION | jq -r '.AuthenticationResult.IdToken')
+    ```
+
+    :::caution
+    Sử dụng output `UserIdentityUserIdentityUserPoolIdXXX` cho `POOL_ID` và đảm bảo bạn có Client ID tương ứng từ các output triển khai CDK của bạn.
+    :::
+
+    Gọi agent đã triển khai bằng URL runtime của Bedrock AgentCore:
+
+    ```bash
+    # Đặt Story Agent ARN từ CDK outputs
+    export AGENT_ARN="<StoryAgentArn từ CDK outputs>"
+
+    # URL-encode ARN
+    export ENCODED_ARN=$(echo $AGENT_ARN | sed 's/:/%3A/g' | sed 's/\//%2F/g')
+
+    # Xây dựng invocation URL
+    export MCP_URL="https://bedrock-agentcore.$REGION.amazonaws.com/runtimes/$ENCODED_ARN/invocations?qualifier=DEFAULT"
+
+    # Gọi agent
+    curl -N -X POST "$MCP_URL" \
+      -H "authorization: Bearer $BEARER_TOKEN" \
+      -H "Content-Type: application/json" \
+      -H "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id: abcdefghijklmnopqrstuvwxyz-123456789" \
+      -d '{"genre":"superhero", "actions":[], "playerName":"UnnamedHero"}'
+    ```
+
+    :::note
+    URL encoding là cần thiết để định dạng đúng ARN cho endpoint API của Bedrock AgentCore.
+    :::
+  </TabItem>
+</Tabs>
+
+Nếu lệnh chạy thành công, bạn sẽ thấy các events được streaming tương tự như:
+
+```
+data: {"init_event_loop": true}
+
+data: {"start": true}
+
+data: {"start_event_loop": true}
+
+data: {"event": {"messageStart": {"role": "assistant"}}}
+
+data: {"event": {"contentBlockDelta": {"delta": {"text": "Welcome"}, "contentBlockIndex": 0}}}
+
+...
+```
+
+Chúc mừng. Bạn đã xây dựng và triển khai Strands Agent đầu tiên của mình trên Bedrock AgentCore Runtime!  🎉🎉🎉

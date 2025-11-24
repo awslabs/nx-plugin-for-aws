@@ -1,0 +1,293 @@
+---
+title: "Giấy phép"
+description: "Tài liệu tham khảo cho trình tạo Giấy phép"
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+
+Tự động quản lý các tệp `LICENSE` và header mã nguồn trong workspace của bạn.
+
+Generator này đăng ký một [sync generator](https://nx.dev/concepts/sync-generators) để thực thi như một phần của các target `lint` của bạn, đảm bảo rằng các tệp nguồn của bạn tuân thủ nội dung và định dạng giấy phép mong muốn, cũng như đảm bảo các tệp `LICENSE` của dự án được chính xác, và thông tin cấp phép được bao gồm trong các tệp dự án liên quan (`package.json`, `pyproject.toml`).
+
+## Cách sử dụng
+
+### Chạy Generator
+
+<RunGenerator generator="license" />
+
+### Tùy chọn
+
+<GeneratorParameters generator="license" />
+
+## Đầu ra của Generator
+
+Generator sẽ tạo hoặc cập nhật các tệp sau:
+
+<FileTree>
+  - nx.json Target lint được cấu hình để chạy license sync generator
+  - aws-nx-plugin.config.mts Cấu hình cho license sync generator
+</FileTree>
+
+Một số cấu hình mặc định cho nội dung và định dạng header giấy phép được thêm vào `aws-nx-plugin.config.mts` để viết các header phù hợp cho một số loại tệp. Bạn có thể muốn tùy chỉnh thêm; vui lòng xem [phần cấu hình](#configuration) bên dưới.
+
+## Quy trình làm việc
+
+Mỗi khi bạn build các dự án của mình (và target `lint` chạy), license sync generator sẽ đảm bảo rằng việc cấp phép trong dự án của bạn khớp với cấu hình của bạn (xem [hành vi đồng bộ giấy phép bên dưới](#license-sync-behaviour)). Nếu nó phát hiện bất kỳ điều gì không đồng bộ, bạn sẽ nhận được thông báo như sau:
+
+```bash
+  NX   The workspace is out of sync
+
+[@aws/nx-plugin:license#sync]: Project LICENSE files are out of sync:
+- LICENSE
+- packages/<my-project>LICENSE
+
+Project package.json files are out of sync:
+- package.json
+
+Project pyproject.toml files are out of sync:
+- pyproject.toml
+- packages/<my-python-project>/pyproject.toml
+
+License headers are out of sync in the following source files:
+- packages/<my-project>/src/index.ts
+- packages/<my-python-project>/main.py
+
+This will result in an error in CI.
+
+? Would you like to sync the identified changes to get your workspace up to date?
+Yes, sync the changes and run the tasks
+No, run the tasks without syncing the changes
+```
+
+Chọn `Yes` để đồng bộ các thay đổi.
+
+:::note
+Hãy chắc chắn rằng bạn kiểm tra các thay đổi mà license sync generator tạo ra vào hệ thống quản lý phiên bản để đảm bảo rằng bất kỳ tác vụ build tích hợp liên tục nào không thất bại do giấy phép không đồng bộ.
+:::
+
+## Hành vi đồng bộ giấy phép
+
+License sync generator thực hiện ba nhiệm vụ chính:
+
+### 1. Đồng bộ License Header của tệp nguồn
+
+Khi sync generator chạy, nó sẽ đảm bảo rằng tất cả các tệp mã nguồn trong workspace của bạn (dựa trên cấu hình của bạn) chứa license header phù hợp. Header được viết dưới dạng block comment đầu tiên hoặc chuỗi line comment liên tiếp trong tệp (ngoài shebang/hashbang nếu có trong tệp).
+
+Bạn có thể cập nhật cấu hình bất cứ lúc nào để thay đổi tệp nào nên được bao gồm hoặc loại trừ, cũng như nội dung hoặc định dạng của license header cho các loại tệp khác nhau. Để biết thêm chi tiết, vui lòng xem [phần cấu hình](#configuration) bên dưới.
+
+### 2. Đồng bộ các tệp LICENSE
+
+Khi sync generator chạy, nó sẽ đảm bảo rằng tệp `LICENSE` gốc tương ứng với giấy phép đã cấu hình của bạn, cũng như đảm bảo rằng tất cả các dự án con trong workspace của bạn cũng chứa tệp `LICENSE` chính xác.
+
+Bạn có thể loại trừ các dự án trong cấu hình nếu cần. Để biết thêm chi tiết, vui lòng xem [phần cấu hình](#configuration) bên dưới.
+
+### 3. Đồng bộ thông tin cấp phép trong các tệp dự án
+
+Khi sync generator chạy, nó sẽ đảm bảo các trường `license` trong các tệp `package.json` và `pyproject.toml` được đặt theo giấy phép đã cấu hình của bạn.
+
+Bạn có thể loại trừ các dự án trong cấu hình nếu cần. Để biết thêm chi tiết, vui lòng xem [phần cấu hình](#configuration) bên dưới.
+
+## Cấu hình
+
+Cấu hình được định nghĩa trong tệp `aws-nx-plugin.config.mts` ở thư mục gốc của workspace của bạn.
+
+### SPDX và Copyright Holder
+
+Giấy phép bạn chọn có thể được cập nhật bất cứ lúc nào thông qua thuộc tính cấu hình `spdx`:
+
+```typescript title="aws-nx-plugin.config.mts" {3}
+export default {
+  license: {
+    spdx: 'MIT',
+  },
+} satisfies AwsNxPluginConfig;
+```
+
+Khi sync generator chạy, tất cả các tệp `LICENSE`, `package.json` và `pyproject.toml` sẽ được cập nhật để phản ánh giấy phép đã cấu hình.
+
+Bạn có thể cấu hình thêm chủ sở hữu bản quyền và năm bản quyền, được bao gồm trong một số tệp `LICENSE`:
+
+```typescript title="aws-nx-plugin.config.mts" {4,5}
+export default {
+  license: {
+    spdx: 'MIT',
+    copyrightHolder: 'Amazon.com, Inc. or its affiliates',
+    copyrightYear: 2025,
+  },
+} satisfies AwsNxPluginConfig;
+```
+
+### License Header
+
+#### Nội dung
+
+Nội dung license header có thể được cấu hình theo hai cách:
+
+1. Sử dụng nội dung inline:
+
+```typescript title="aws-nx-plugin.config.mts" {5-9}
+export default {
+  license: {
+    header: {
+      content: {
+        lines: [
+          'Copyright: My Company, Incorporated.',
+          'Licensed under the MIT License',
+          'All rights reserved',
+        ];
+      }
+      // ... format configuration
+    }
+  }
+} satisfies AwsNxPluginConfig;
+```
+
+2. Tải từ một tệp:
+
+```typescript title="aws-nx-plugin.config.mts" {5}
+export default {
+  license: {
+    header: {
+      content: {
+        filePath: 'license-header.txt'; // relative to workspace root
+      }
+      // ... format configuration
+    }
+  }
+} satisfies AwsNxPluginConfig;
+```
+
+#### Định dạng
+
+Bạn có thể chỉ định cách license header nên được định dạng cho các loại tệp khác nhau bằng cách sử dụng các mẫu glob. Cấu hình định dạng hỗ trợ line comment, block comment, hoặc kết hợp cả hai:
+
+```typescript title="aws-nx-plugin.config.mts" {7-29}
+export default {
+  license: {
+    header: {
+      content: {
+        lines: ['Copyright notice here'],
+      },
+      format: {
+        // Line comments
+        '**/*.ts': {
+          lineStart: '// ',
+        },
+        // Block comments
+        '**/*.css': {
+          blockStart: '/*',
+          blockEnd: '*/',
+        },
+        // Block comments with line prefixes
+        '**/*.java': {
+          blockStart: '/*',
+          lineStart: ' * ',
+          blockEnd: ' */',
+        },
+        // Line comments with header/footer
+        '**/*.py': {
+          blockStart: '# ------------',
+          lineStart: '# ',
+          blockEnd: '# ------------',
+        },
+      },
+    },
+  },
+} satisfies AwsNxPluginConfig;
+```
+
+Cấu hình định dạng hỗ trợ:
+
+- `blockStart`: Văn bản được viết trước nội dung giấy phép (ví dụ: để bắt đầu block comment)
+- `lineStart`: Văn bản được thêm vào đầu mỗi dòng của nội dung giấy phép
+- `lineEnd`: Văn bản được thêm vào cuối mỗi dòng của nội dung giấy phép
+- `blockEnd`: Văn bản được viết sau nội dung giấy phép (ví dụ: để kết thúc block comment)
+
+#### Cú pháp Comment tùy chỉnh
+
+Đối với các loại tệp không được hỗ trợ sẵn, bạn có thể chỉ định cú pháp comment tùy chỉnh để cho sync generator biết cách xác định các license header hiện có trong các loại tệp này.
+
+```typescript title="aws-nx-plugin.config.mts" {12-22}
+export default {
+  license: {
+    header: {
+      content: {
+        lines: ['My license header'],
+      },
+      format: {
+        '**/*.xyz': {
+          lineStart: '## ',
+        },
+      },
+      commentSyntax: {
+        xyz: {
+          line: '##', // Define line comment syntax
+        },
+        abc: {
+          block: {
+            // Define block comment syntax
+            start: '<!--',
+            end: '-->',
+          },
+        },
+      },
+    },
+  },
+} satisfies AwsNxPluginConfig;
+```
+
+#### Loại trừ tệp
+
+Theo mặc định, trong một repository git, tất cả các tệp `.gitignore` được tôn trọng để đảm bảo rằng chỉ các tệp được quản lý bởi hệ thống quản lý phiên bản mới được đồng bộ. Trong các repository không phải git, tất cả các tệp đều được xem xét trừ khi được loại trừ rõ ràng trong cấu hình.
+
+Bạn có thể loại trừ các tệp bổ sung khỏi việc đồng bộ license header bằng cách sử dụng các mẫu glob:
+
+```typescript title="aws-nx-plugin.config.mts" {12-16}
+export default {
+  license: {
+    header: {
+      content: {
+        lines: ['My license header'],
+      },
+      format: {
+        '**/*.ts': {
+          lineStart: '// ',
+        },
+      },
+      exclude: ['**/generated/**', '**/dist/**', 'some-specific-file.ts'],
+    },
+  },
+} satisfies AwsNxPluginConfig;
+```
+
+### Loại trừ các tệp dự án khỏi đồng bộ
+
+Tất cả các tệp `LICENSE`, tệp `package.json` và tệp `pyproject.toml` được đồng bộ với giấy phép đã cấu hình theo mặc định.
+
+Bạn có thể loại trừ các dự án hoặc tệp cụ thể khỏi việc đồng bộ bằng cách sử dụng các mẫu glob:
+
+```typescript title="aws-nx-plugin.config.mts" {3-10}
+export default {
+  license: {
+    files: {
+      exclude: [
+        // do not sync LICENSE file, package.json or pyproject.toml
+        'packages/excluded-project',
+        // do not sync LICENSE file, but sync package.json and/or pyproject.toml
+        'apps/internal/LICENSE',
+      ];
+    }
+  }
+} satisfies AwsNxPluginConfig;
+```
+
+## Vô hiệu hóa đồng bộ giấy phép
+
+Để vô hiệu hóa license sync generator:
+
+1. Xóa phần `license` khỏi cấu hình của bạn trong `aws-nx-plugin.config.mts` (hoặc xóa tệp `aws-nx-plugin.config.mts`)
+2. Xóa generator `@aws/nx-plugin:license#sync` khỏi `targetDefaults.lint.syncGenerators`
+
+Để kích hoạt lại đồng bộ giấy phép, chỉ cần chạy lại generator `license`.

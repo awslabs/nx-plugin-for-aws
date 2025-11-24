@@ -1,0 +1,279 @@
+---
+title: "Dự án TypeScript"
+description: "Tài liệu tham khảo cho các dự án TypeScript"
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import InstallCommand from '@components/install-command.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Link from '@components/link.astro';
+
+Generator dự án TypeScript có thể được sử dụng để tạo một thư viện hoặc ứng dụng [TypeScript](https://www.typescriptlang.org/) hiện đại được cấu hình với các phương pháp hay nhất như [ECMAScript Modules (ESM)](https://www.typescriptlang.org/docs/handbook/modules/reference.html), [project references](https://www.typescriptlang.org/docs/handbook/project-references.html) của TypeScript, [Vitest](https://vitest.dev/) để chạy tests và [ESLint](https://eslint.org/) để phân tích tĩnh.
+
+## Cách Sử Dụng
+
+### Tạo một Dự Án TypeScript
+
+Bạn có thể tạo một dự án TypeScript mới theo hai cách:
+
+<RunGenerator generator="ts#project" />
+
+### Tùy Chọn
+
+<GeneratorParameters generator="ts#project" />
+
+## Kết Quả từ Generator
+
+Generator sẽ tạo cấu trúc dự án sau trong thư mục `<directory>/<name>`:
+
+<FileTree>
+
+  - src Mã nguồn TypeScript
+    - index.ts
+  - project.json Cấu hình dự án và các build targets
+  - tsconfig.json Cấu hình TypeScript cơ bản cho dự án này (kế thừa từ tsconfig.base.json ở workspace root)
+  - tsconfig.lib.json Cấu hình TypeScript cho thư viện của bạn (mã nguồn runtime hoặc đóng gói)
+  - tsconfig.spec.json Cấu hình TypeScript cho các tests
+  - vite.config.ts Cấu hình cho Vitest
+  - eslint.config.mjs Cấu hình cho ESLint
+
+</FileTree>
+
+:::tip
+Lưu ý rằng không có file `package.json` nào được tạo cho dự án này! Bạn có thể tìm hiểu lý do [bên dưới](#dependencies).
+:::
+
+Bạn cũng sẽ nhận thấy một số thay đổi đối với các file sau trong workspace root của bạn:
+
+<FileTree>
+
+  - nx.json Cấu hình Nx được cập nhật để cấu hình @nx/js/typescript plugin cho dự án của bạn
+  - tsconfig.base.json một alias TypeScript được thiết lập cho dự án của bạn để nó có thể được import bởi các dự án khác trong workspace
+  - tsconfig.json một project reference TypeScript được thêm vào cho dự án của bạn
+
+</FileTree>
+
+## Viết Mã Nguồn TypeScript
+
+Thêm mã TypeScript của bạn vào thư mục `src`.
+
+### Cú Pháp Import ESM
+
+Vì dự án TypeScript của bạn là một ES Module, hãy chắc chắn viết các câu lệnh import với cú pháp ESM chính xác, tham chiếu rõ ràng đến phần mở rộng file:
+
+```ts title="index.ts" ".js"
+import { sayHello } from './hello.js';
+```
+
+:::note
+Mặc dù chúng ta đang sử dụng TypeScript, và `sayHello` được định nghĩa trong `hello.ts`, chúng ta sử dụng phần mở rộng file `.js` trong import. Bạn có thể đọc thêm về điều này [tại đây](https://www.typescriptlang.org/docs/handbook/modules/reference.html).
+:::
+
+### Export cho Các Dự Án TypeScript Khác
+
+Entry point cho dự án TypeScript của bạn là `src/index.ts`. Bạn có thể thêm exports ở đây cho bất cứ thứ gì bạn muốn các dự án khác có thể import:
+
+```ts title="src/index.ts"
+export { sayHello } from './hello.js';
+export * from './algorithms/index.js';
+```
+
+### Import Mã Thư Viện của Bạn trong Các Dự Án Khác
+
+[TypeScript aliases](https://www.typescriptlang.org/docs/handbook/modules/reference.html#paths) cho dự án của bạn được cấu hình trong `tsconfig.base.json` của workspace, cho phép bạn tham chiếu dự án TypeScript của mình từ các dự án TypeScript khác:
+
+```ts title="packages/my-other-project/src/index.ts"
+import { sayHello } from ':my-scope/my-library';
+```
+
+:::note
+Aliases cho các dự án TypeScript của bạn bắt đầu bằng `:` thay vì `@` truyền thống, vì điều này tránh khả năng xung đột tên giữa các packages cục bộ trong workspace của bạn và các packages từ xa trong [NPM](https://www.npmjs.com/).
+:::
+
+Khi bạn thêm một câu lệnh import cho một dự án mới trong workspace lần đầu tiên, bạn có thể sẽ thấy lỗi trong IDE tương tự như bên dưới:
+
+<details>
+<summary>Lỗi import</summary>
+
+```bash wrap
+File '/path/to/my/workspace/packages/my-library/src/index.ts' is not under 'rootDir' '/path/to/my/workspace/packages/my-consumer'. 'rootDir' is expected to contain all source files.
+  File is ECMAScript module because '/path/to/my/workspace/package.json' has field "type" with value "module" ts(6059)
+File '/path/to/my/workspace/packages/my-library/src/index.ts' is not listed within the file list of project '/path/to/my/workspace/packages/my-consumer/tsconfig.lib.json'. Projects must list all files or use an 'include' pattern.
+  File is ECMAScript module because '/path/to/my/workspace/package.json' has field "type" with value "module" ts(6307)
+```
+
+</details>
+
+Điều này là do một [project reference](https://www.typescriptlang.org/docs/handbook/project-references.html) chưa được thiết lập.
+
+Các dự án TypeScript được cấu hình với Nx TypeScript Sync generator ngay từ đầu, giúp bạn không cần phải cấu hình project reference thủ công. Chỉ cần chạy lệnh sau và Nx sẽ thêm cấu hình cần thiết:
+
+<NxCommands commands={['sync']} />
+
+Sau đó, lỗi trong IDE của bạn sẽ biến mất và bạn đã sẵn sàng sử dụng thư viện của mình.
+
+:::tip
+Bạn cũng có thể chỉ cần build dự án và bạn sẽ được nhắc với thông báo như:
+
+```bash wrap
+[@nx/js:typescript-sync]: Some TypeScript configuration files are missing project references to the projects they depend on or contain outdated project references.
+
+This will result in an error in CI.
+
+? Would you like to sync the identified changes to get your workspace up to date?
+Yes, sync the changes and run the tasks
+No, run the tasks without syncing the changes
+```
+
+Chọn `Yes` để cho phép Nx cập nhật các project references của bạn.
+:::
+
+### Dependencies
+
+Bạn sẽ nhận thấy rằng dự án TypeScript của bạn không có file `package.json`, điều này có thể bất ngờ nếu bạn quen với các monorepos TypeScript truyền thống.
+
+Để thêm một dependency cho bất kỳ package TypeScript nào trong monorepo của bạn, chỉ cần thêm dependency vào `package.json` ở root của workspace. Bạn có thể thực hiện điều này qua command line cho package manager của bạn:
+
+<InstallCommand pkg="some-npm-package" />
+
+Dependency sau đó có sẵn cho bất kỳ dự án TypeScript nào trong workspace của bạn sử dụng.
+
+#### Mã Runtime
+
+Khi bạn sử dụng dự án TypeScript của mình làm mã runtime (ví dụ như handler cho một AWS Lambda function), được khuyến nghị là bạn sử dụng một công cụ như [Rolldown](https://rolldown.rs/) để bundle dự án của bạn, vì điều này có thể [tree-shake](https://rolldown.rs/guide/in-depth/why-bundlers) để đảm bảo rằng chỉ các dependencies mà dự án của bạn thực sự tham chiếu được bao gồm.
+
+Bạn có thể đạt được điều này bằng cách thêm một target như sau vào file `project.json` của bạn:
+
+```json
+{
+  ...
+  "targets": {
+    ...
+    "bundle": {
+      "cache": true,
+      "executor": "nx:run-commands",
+      "outputs": ["{workspaceRoot}/dist/packages/my-library/bundle"],
+      "options": {
+        "command": "rolldown -c rolldown.config.ts"
+      }
+    },
+  },
+}
+```
+
+Và thêm file `rolldown.config.ts` như sau:
+
+```ts
+// rolldown.config.ts
+import { defineConfig } from 'rolldown';
+
+export default defineConfig([
+  {
+    input: 'src/index.ts',
+    output: {
+      file: '../../dist/packages/my-library/bundle/index.js',
+      format: 'cjs',
+      inlineDynamicImports: true,
+    },
+  },
+]);
+```
+
+:::note
+Lưu ý rằng trong target trên, chúng ta đã chọn `src/index.ts` làm entrypoint cho bundle, có nghĩa là mã được export từ file này sẽ được bao gồm trong bundle, cùng với tất cả các dependencies của nó.
+:::
+
+:::tip
+Nếu bạn đang xây dựng một AWS Lambda function, hãy xem generator <Link path="/guides/ts-lambda-function">`ts#lambda-function`</Link> vì nó cấu hình bundling cho bạn, cũng như tạo infrastructure và thêm observability và type-safety.
+:::
+
+#### Publish lên NPM
+
+Nếu bạn đang publish dự án TypeScript của mình lên NPM, bạn phải tạo một file `package.json` cho nó.
+
+File này phải khai báo các dependencies mà dự án của bạn tham chiếu. Vì tại thời điểm build, dự án của bạn sẽ resolve các dependencies được cài đặt qua `package.json` ở workspace root, được khuyến nghị là cấu hình [Nx Dependency Checks ESLint Plugin](https://nx.dev/nx-api/eslint-plugin/documents/dependency-checks) để đảm bảo rằng `package.json` của dự án được publish bao gồm tất cả các dependencies bạn sử dụng trong dự án.
+
+### Building
+
+Dự án TypeScript của bạn được cấu hình với một `build` target (được định nghĩa trong `project.json`), bạn có thể chạy qua:
+
+<NxCommands commands={['run <project-name>:build']} />
+
+Trong đó `<project-name>` là tên đầy đủ của dự án của bạn.
+
+`build` target sẽ compile, lint và test dự án của bạn.
+
+Kết quả build có thể được tìm thấy trong thư mục `dist` root trong workspace của bạn, bên trong một thư mục cho package và target của bạn, ví dụ `dist/packages/<my-library>/tsc`
+
+## Testing
+
+[Vitest](https://vitest.dev/) được cấu hình để test dự án của bạn.
+
+### Viết Tests
+
+Tests nên được viết trong các file `.spec.ts` hoặc `.test.ts`, đặt cùng vị trí trong thư mục `src` của dự án.
+
+Ví dụ:
+
+<FileTree>
+  - src
+    - hello.ts Mã nguồn thư viện
+    - hello.spec.ts Tests cho hello.ts
+</FileTree>
+
+Vitest cung cấp cú pháp giống Jest để định nghĩa tests, với các tiện ích như `describe`, `it`, `test` và `expect`.
+
+```ts title="hello.spec.ts"
+import { sayHello } from './hello.js';
+
+describe('sayHello', () => {
+
+  it('should greet the caller', () => {
+    expect(sayHello('Darth Vader')).toBe('Hello, Darth Vader!');
+  });
+
+});
+
+```
+
+Để biết thêm chi tiết về cách viết tests và các tính năng như mocking dependencies, tham khảo [tài liệu Vitest](https://vitest.dev/guide/#writing-tests)
+
+### Chạy Tests
+
+Tests sẽ chạy như một phần của `build` target cho dự án của bạn, nhưng bạn cũng có thể chạy chúng riêng biệt bằng cách chạy `test` target:
+
+<NxCommands commands={['run <project-name>:test']} />
+
+Bạn có thể chạy một test riêng lẻ hoặc một suite tests bằng cách sử dụng flag `-t`:
+
+<NxCommands commands={["run <project-name>:test -t 'sayHello'"]} />
+
+:::tip
+Nếu bạn là người dùng VSCode, chúng tôi khuyên bạn nên cài đặt extension [Vitest Runner for VSCode that actually works](https://marketplace.visualstudio.com/items?itemName=rluvaton.vscode-vitest), cho phép bạn chạy, watch hoặc debug tests từ IDE của mình.
+:::
+
+## Linting
+
+Các dự án TypeScript sử dụng [ESLint](https://eslint.org/) để linting, cùng với [Prettier](https://prettier.io/) để formatting.
+
+Chúng tôi khuyên bạn nên cấu hình ESLint trong file `eslint.config.mjs` ở workspace root, vì các thay đổi đối với file này sẽ áp dụng cho tất cả các dự án TypeScript trong workspace của bạn và đảm bảo tính nhất quán.
+
+Tương tự, bạn có thể cấu hình Prettier trong file `.prettierrc` ở root.
+
+### Chạy Linter
+
+Để gọi linter kiểm tra dự án của bạn, bạn có thể chạy `lint` target.
+
+<NxCommands commands={["run <project-name>:lint"]} />
+
+### Sửa Các Vấn Đề Lint
+
+Phần lớn các vấn đề linting hoặc formatting có thể được sửa tự động. Bạn có thể yêu cầu ESLint sửa các vấn đề lint bằng cách chạy với argument `--configuration=fix`.
+
+<NxCommands commands={["run <project-name>:lint --configuration=fix"]} />
+
+Tương tự, nếu bạn muốn sửa tất cả các vấn đề lint trong tất cả các packages trong workspace của bạn, bạn có thể chạy:
+
+<NxCommands commands={["run-many --target lint --all --configuration=fix"]} />

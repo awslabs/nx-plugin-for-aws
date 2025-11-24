@@ -1,0 +1,259 @@
+---
+title: "Hướng Dẫn Bắt Đầu Nhanh"
+description: "Hướng dẫn nhanh về cách sử dụng @aws/nx-plugin."
+---
+
+import { Steps } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import Snippet from '@components/snippet.astro';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
+import InstallCommand from '@components/install-command.astro';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+Hướng dẫn này sẽ hướng dẫn bạn các bước cơ bản để cài đặt và sử dụng `@aws/nx-plugin` để xây dựng nhanh các dự án trên AWS.
+
+:::tip
+Để có hướng dẫn chi tiết hơn về việc xây dựng một ứng dụng full-stack, hãy xem <Link path="get_started/tutorials/dungeon-game/overview">Hướng dẫn Dungeon Adventure</Link>.
+:::
+
+## Yêu cầu trước
+
+Các phụ thuộc toàn cục sau là cần thiết trước khi tiếp tục:
+
+<Snippet name="prerequisites" />
+
+## Bước 1: Khởi tạo Nx Workspace mới
+
+Chạy lệnh sau để tạo một Nx workspace với trình quản lý gói mà bạn chọn:
+
+<CreateNxWorkspaceCommand workspace="my-project" />
+
+:::tip
+Bạn sẽ được nhắc chọn nhà cung cấp infrastructure as code (IaC) ưa thích, có thể là [CDK](https://docs.aws.amazon.com/cdk/) hoặc [Terraform](https://developer.hashicorp.com/terraform). Bạn có thể bỏ qua lời nhắc bằng cách chạy lệnh với `--iacProvider`, ví dụ:
+
+<Infrastructure>
+<Fragment slot="cdk">
+<CreateNxWorkspaceCommand workspace="my-project" iacProvider="CDK" />
+</Fragment>
+<Fragment slot="terraform">
+<CreateNxWorkspaceCommand workspace="my-project" iacProvider="Terraform" />
+</Fragment>
+</Infrastructure>
+:::
+
+Sau khi hoàn tất, điều hướng đến thư mục dự án:
+
+```sh
+cd my-project
+```
+
+## Bước 2: Sử dụng Generators để Tạo khung Dự án
+
+Chúng ta sẽ thêm một tRPC API, React Website, Cognito Authentication, và CDK hoặc Terraform Infrastructure trong hướng dẫn nhanh này. Tùy thuộc vào loại dự án bạn đang xây dựng, bạn có thể chọn bất kỳ tổ hợp nào của các generators để nhanh chóng khởi tạo dự án của mình. Xem phần __Guides__ trong thanh điều hướng bên trái để xem danh sách đầy đủ các tùy chọn.
+
+### Thêm tRPC API
+
+<RunGenerator generator="ts#trpc-api" requiredParameters={{ name: 'demo-api', auth: 'IAM' }} />
+
+Lệnh này sẽ tạo API bên trong thư mục `packages/demo-api`.
+
+### Thêm React Website
+
+<RunGenerator generator="ts#react-website" requiredParameters={{ name: 'demo-website' }} />
+
+Lệnh này tạo khung một React website mới trong `packages/demo-website`.
+
+### Thêm Cognito Authentication
+
+<RunGenerator generator="ts#react-website#auth" requiredParameters={{ project: '@my-project/demo-website', cognitoDomain: 'my-demo' }} />
+
+Lệnh này thiết lập cơ sở hạ tầng cần thiết và mã React để thêm Cognito Authentication vào website của bạn.
+
+### Kết nối Frontend với Backend
+
+<RunGenerator generator="api-connection" requiredParameters={{ sourceProject: '@my-project/demo-website', targetProject: '@my-project/demo-api' }} />
+
+Lệnh này cấu hình các providers cần thiết để đảm bảo website của bạn có thể gọi tRPC API.
+
+### Thêm Infrastructure
+
+Thêm dự án infrastructure dựa trên nhà cung cấp IAC bạn đã chọn.
+
+<Infrastructure>
+<Fragment slot="cdk">
+<RunGenerator generator="ts#infra" requiredParameters={{ name: 'infra' }} />
+
+Lệnh này cấu hình một CDK App mà bạn có thể sử dụng để triển khai cơ sở hạ tầng của mình trên AWS.
+</Fragment>
+<Fragment slot="terraform">
+<RunGenerator generator="terraform#project" requiredParameters={{ name: 'infra' }} />
+
+Lệnh này cấu hình một dự án Terraform mà bạn có thể sử dụng để triển khai cơ sở hạ tầng của mình trên AWS.
+</Fragment>
+</Infrastructure>
+
+## Bước 3: Chạy Website và API của bạn ở Local
+
+Sử dụng lệnh sau để khởi động các dev server local cho website và các API được kết nối:
+
+<NxCommands commands={['run demo-website:serve-local']} />
+
+Website của bạn sẽ có sẵn tại `http://localhost:4200`.
+
+Các thay đổi đối với cả website và API của bạn sẽ được phản ánh theo thời gian thực vì cả website local và API server đều sẽ hot-reload.
+
+## Bước 4: Định nghĩa Cloud Resources và Triển khai lên AWS
+
+<Infrastructure>
+<Fragment slot="cdk">
+Mở `packages/infra/src/stacks/application-stack.ts` và thêm đoạn mã sau:
+
+```typescript
+import * as cdk from 'aws-cdk-lib';
+import { DemoApi, DemoWebsite, UserIdentity } from ':my-project/common-constructs';
+import { Construct } from 'constructs';
+
+export class ApplicationStack extends cdk.Stack {
+  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+    super(scope, id, props);
+
+    const identity = new UserIdentity(this, 'identity');
+    const api = new DemoApi(this, 'api', {
+      integrations: DemoApi.defaultIntegrations(this).build(),
+    });
+    api.grantInvokeAccess(identity.identityPool.authenticatedRole);
+
+    new DemoWebsite(this, 'website');
+  }
+}
+```
+
+Đây là tất cả CDK chúng ta cần viết để triển khai ứng dụng full stack của mình.
+</Fragment>
+<Fragment slot="terraform">
+Mở `packages/infra/src/main.tf` và thêm đoạn mã sau:
+
+```hcl
+# Include metrics tracking for @aws/nx-plugin usage
+module "metrics" {
+  source = "../../common/terraform/src/metrics"
+}
+
+# Deploy user identity
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
+}
+
+# Deploy API
+module "demo_api" {
+  source = "../../common/terraform/src/app/apis/demo-api"
+}
+
+# Grant authenticated users access to invoke the API
+resource "aws_iam_policy" "api_invoke_policy" {
+  name        = "DemoApiInvokePolicy"
+  description = "Policy to allow authenticated users to invoke the API"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = "execute-api:Invoke"
+        Resource = "${module.demo_api.api_execution_arn}/*/*"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "authenticated_api_access" {
+  role       = module.user_identity.authenticated_role_name
+  policy_arn = aws_iam_policy.api_invoke_policy.arn
+}
+
+# Deploy website
+provider "aws" {
+  alias  = "us_east_1"
+  region = "us-east-1"
+}
+
+module "demo_website" {
+  source = "../../common/terraform/src/app/static-websites/demo-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+
+  depends_on = [module.user_identity, module.demo_api]
+}
+```
+
+Đây là tất cả Terraform chúng ta cần viết để triển khai ứng dụng full stack của mình.
+</Fragment>
+</Infrastructure>
+
+### Build và Deploy Infrastructure
+
+Tiếp theo, chạy lệnh sau để build dự án của bạn:
+
+<NxCommands commands={['run-many --target build --all']} />
+
+:::tip
+Nếu bạn gặp bất kỳ lỗi lint nào, bạn có thể chạy lệnh sau để tự động sửa chúng.
+
+<NxCommands commands={['run-many --target lint --configuration=fix --all']} />
+:::
+
+Bootstrap cơ sở hạ tầng của bạn:
+
+<Infrastructure>
+<Fragment slot="cdk">
+<NxCommands commands={['run infra:bootstrap']} />
+
+:::tip
+CDK bootstrapping là bắt buộc cho cả AWS region triển khai mục tiêu của bạn và `us-east-1` để cho phép triển khai AWS WAF WebACL cho website.
+:::
+</Fragment>
+<Fragment slot="terraform">
+<NxCommands commands={['run infra:bootstrap']} />
+
+:::tip
+Terraform bootstrapping tạo một S3 bucket để lưu trữ các tệp state Terraform của bạn. Điều này chỉ cần thực hiện một lần cho mỗi tổ hợp AWS account/region.
+:::
+</Fragment>
+</Infrastructure>
+
+Triển khai dự án của bạn:
+
+<Infrastructure>
+<Fragment slot="cdk">
+<NxCommands commands={['run infra:deploy my-project-sandbox/*']} />
+</Fragment>
+<Fragment slot="terraform">
+<NxCommands commands={['run infra:apply']} />
+
+:::tip
+Lệnh này trước tiên sẽ chạy `terraform plan` để hiển thị những thay đổi sẽ được thực hiện, sau đó áp dụng các thay đổi đó để triển khai cơ sở hạ tầng của bạn.
+:::
+</Fragment>
+</Infrastructure>
+
+## Bước 5: Kiểm tra Website với Cloud Resources đã Triển khai
+
+<Steps>
+1. Lấy tệp `runtime-config.json`:
+
+    <NxCommands commands={['run demo-website:load:runtime-config']} />
+
+2. Khởi động local website server
+
+    <NxCommands commands={['run demo-website:serve']} />
+</Steps>
+
+Website của bạn sẽ có sẵn tại `http://localhost:4200`, và sẽ trỏ đến các tài nguyên bạn đã triển khai cho API và authentication.
+
+---
+
+Chúc mừng! 🎉 Bạn đã xây dựng và triển khai thành công một ứng dụng full-stack bằng cách sử dụng `@aws/nx-plugin`!
