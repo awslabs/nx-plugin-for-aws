@@ -65,7 +65,7 @@ import gameConversationPng from '@assets/game-conversation.png'
 ### アプリケーションのデプロイ
 アプリケーションをデプロイするには、以下のコマンドを実行します：
 
-<NxCommands commands={['deploy infra dungeon-adventure-infra-sandbox/*']} />
+<NxCommands commands={['deploy infra "dungeon-adventure-infra-sandbox/*"']} />
 
 デプロイは約2分で完了します。
 
@@ -89,9 +89,9 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityIdentityPool
 dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXXX = region_xxx
 ```
 
-### APIのテスト
+### エージェントのテスト
 
-APIのテスト方法は2通りあります：
+エージェントのテスト方法は2通りあります：
 <ul>
 <li>エージェントサーバーをローカルで起動し`curl`で呼び出す、または</li>
 <li>デプロイ済みAPIをJWTトークン付きのcurlで呼び出す。</li>
@@ -127,19 +127,24 @@ APIのテスト方法は2通りあります：
     テストユーザーを作成し、認証トークンを取得します：
 
     ```bash
+    # ユーザー作成を簡素化するためMFAを無効化
+    aws cognito-idp set-user-pool-mfa-config \
+      --mfa-configuration OFF \
+      --user-pool-id $POOL_ID
+
     # ユーザー作成
     aws cognito-idp admin-create-user \
       --user-pool-id $POOL_ID \
-      --username "testuser" \
-      --temporary-password "TempPass123!" \
+      --username "test" \
+      --temporary-password "TempPass123-" \
       --region $REGION \
       --message-action SUPPRESS > /dev/null
 
     # パスワード設定（本番環境ではより安全なパスワードを使用してください）
     aws cognito-idp admin-set-user-password \
       --user-pool-id $POOL_ID \
-      --username "testuser" \
-      --password "PermanentPass123!" \
+      --username "test" \
+      --password "PermanentPass123-" \
       --region $REGION \
       --permanent > /dev/null
 
@@ -147,13 +152,11 @@ APIのテスト方法は2通りあります：
     export BEARER_TOKEN=$(aws cognito-idp initiate-auth \
       --client-id "$CLIENT_ID" \
       --auth-flow USER_PASSWORD_AUTH \
-      --auth-parameters USERNAME='testuser',PASSWORD='PermanentPass123!' \
-      --region $REGION | jq -r '.AuthenticationResult.IdToken')
+      --auth-parameters USERNAME='test',PASSWORD='PermanentPass123-' \
+      --region $REGION \
+      --query "AuthenticationResult.IdToken" \
+      --output text)
     ```
-
-    :::caution
-    `POOL_ID`にはCDK出力の`UserIdentityUserIdentityUserPoolIdXXX`を使用し、CDKデプロイ出力から対応するClient IDを取得してください。
-    :::
 
     Bedrock AgentCoreランタイムURLを使用してデプロイ済みエージェントを呼び出します：
 
@@ -181,20 +184,10 @@ APIのテスト方法は2通りあります：
   </TabItem>
 </Tabs>
 
-コマンドが正常に実行されると、以下のようなストリーミングイベントが表示されます：
+コマンドが正常に実行されると、以下のようにストーリーの冒頭テキストがストリーミングされ始めます：
 
 ```
-data: {"init_event_loop": true}
-
-data: {"start": true}
-
-data: {"start_event_loop": true}
-
-data: {"event": {"messageStart": {"role": "assistant"}}}
-
-data: {"event": {"contentBlockDelta": {"delta": {"text": "Welcome"}, "contentBlockIndex": 0}}}
-
-...
+You are a new superhero in the bustling metropolis of Metro City...
 ```
 
 おめでとうございます。Bedrock AgentCore Runtime上に初めてのStrandsエージェントを構築・デプロイできました！ 🎉🎉🎉
