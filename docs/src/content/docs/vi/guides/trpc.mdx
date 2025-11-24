@@ -1,0 +1,652 @@
+---
+title: "tRPC"
+description: "Tài liệu tham khảo cho tRPC"
+---
+
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
+import AnchorHeading from '@astrojs/starlight/components/AnchorHeading.astro';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
+
+[tRPC](https://trpc.io/) là một framework để xây dựng API trong TypeScript với tính an toàn kiểu từ đầu đến cuối. Sử dụng tRPC, các cập nhật đối với đầu vào và đầu ra của các thao tác API sẽ được phản ánh ngay lập tức trong mã client và hiển thị trong IDE của bạn mà không cần rebuild dự án.
+
+Trình tạo API tRPC tạo ra một API tRPC mới với cấu hình cơ sở hạ tầng AWS CDK hoặc Terraform. Backend được tạo ra sử dụng AWS Lambda cho triển khai serverless, được expose thông qua AWS API Gateway API, và bao gồm xác thực schema sử dụng [Zod](https://zod.dev/). Nó thiết lập [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/) cho khả năng quan sát, bao gồm logging, AWS X-Ray tracing và Cloudwatch Metrics.
+
+## Cách sử dụng
+
+### Tạo API tRPC
+
+Bạn có thể tạo một API tRPC mới theo hai cách:
+
+<RunGenerator generator="ts#trpc-api" />
+
+### Tùy chọn
+
+<GeneratorParameters generator="ts#trpc-api" />
+
+<Snippet name="api/api-choice-note" />
+
+## Kết quả từ trình tạo
+
+Trình tạo sẽ tạo cấu trúc dự án sau trong thư mục `<directory>/<api-name>`:
+
+<FileTree>
+  - src
+    - init.ts Khởi tạo tRPC Backend
+    - router.ts Định nghĩa tRPC router (điểm vào API của Lambda handler)
+    - schema Định nghĩa schema sử dụng Zod
+      - echo.ts Định nghĩa ví dụ cho đầu vào và đầu ra của procedure "echo"
+    - procedures Các procedure (hoặc operation) được expose bởi API của bạn
+      - echo.ts Procedure ví dụ
+    - middleware
+      - error.ts Middleware để xử lý lỗi
+      - logger.ts middleware để cấu hình AWS Powertools for Lambda logging
+      - tracer.ts middleware để cấu hình AWS Powertools for Lambda tracing
+      - metrics.ts middleware để cấu hình AWS Powertools for Lambda metrics
+    - local-server.ts Điểm vào tRPC standalone adapter cho máy chủ phát triển cục bộ
+    - client
+      - index.ts Client an toàn kiểu cho các lời gọi API máy-đến-máy
+  - tsconfig.json Cấu hình TypeScript
+  - project.json Cấu hình dự án và các build target
+
+</FileTree>
+
+### Cơ sở hạ tầng
+
+<Snippet name="shared-constructs" />
+
+<Snippet name="api/shared-constructs" />
+
+## Triển khai API tRPC của bạn
+
+Ở mức độ cao, các API tRPC bao gồm một router ủy quyền các yêu cầu đến các procedure cụ thể. Mỗi procedure có một đầu vào và đầu ra, được định nghĩa dưới dạng Zod schema.
+
+### Schema
+
+Thư mục `src/schema` chứa các kiểu được chia sẻ giữa mã client và server của bạn. Trong package này, các kiểu này được định nghĩa sử dụng [Zod](https://zod.dev/), một thư viện khai báo và xác thực schema ưu tiên TypeScript.
+
+Một schema ví dụ có thể trông như sau:
+
+```ts
+import { z } from 'zod';
+
+// Định nghĩa schema
+export const UserSchema = z.object({
+  name: z.string(),
+  height: z.number(),
+  dateOfBirth: z.string().datetime(),
+});
+
+// Kiểu TypeScript tương ứng
+export type User = z.TypeOf<typeof UserSchema>;
+```
+
+Với schema trên, kiểu `User` tương đương với TypeScript sau:
+
+```ts
+interface User {
+  name: string;
+  height: number;
+  dateOfBirth: string;
+}
+```
+
+Các schema được chia sẻ bởi cả mã server và client, cung cấp một nơi duy nhất để cập nhật khi thực hiện thay đổi đối với các cấu trúc được sử dụng trong API của bạn.
+
+Các schema được tự động xác thực bởi API tRPC của bạn tại runtime, giúp tiết kiệm việc tạo logic xác thực tùy chỉnh thủ công trong backend của bạn.
+
+Zod cung cấp các tiện ích mạnh mẽ để kết hợp hoặc tạo schema như `.merge`, `.pick`, `.omit` và nhiều hơn nữa. Bạn có thể tìm thêm thông tin trên [trang tài liệu Zod](https://zod.dev/?id=basic-usage).
+
+### Router và Procedure
+
+Bạn có thể tìm thấy điểm vào cho api của bạn trong `src/router.ts`. File này chứa lambda handler định tuyến các yêu cầu đến "procedure" dựa trên operation đang được gọi. Mỗi procedure định nghĩa đầu vào, đầu ra và triển khai mong đợi.
+
+Router mẫu được tạo cho bạn có một operation duy nhất, được gọi là `echo`:
+
+```ts
+import { echo } from './procedures/echo.js';
+
+export const appRouter = router({
+  echo,
+});
+```
+
+Procedure `echo` ví dụ được tạo cho bạn trong `src/procedures/echo.ts`:
+
+```ts
+export const echo = publicProcedure
+  .input(EchoInputSchema)
+  .output(EchoOutputSchema)
+  .query((opts) => ({ result: opts.input.message }));
+```
+
+Để phân tích đoạn mã trên:
+
+- `publicProcedure` định nghĩa một phương thức công khai trên API, bao gồm middleware được thiết lập trong `src/middleware`. Middleware này bao gồm tích hợp AWS Lambda Powertools cho logging, tracing và metrics.
+- `input` chấp nhận một Zod schema định nghĩa đầu vào mong đợi cho operation. Các yêu cầu được gửi cho operation này được tự động xác thực với schema này.
+- `output` chấp nhận một Zod schema định nghĩa đầu ra mong đợi cho operation. Bạn sẽ thấy lỗi kiểu trong triển khai của bạn nếu bạn không trả về đầu ra phù hợp với schema.
+- `query` chấp nhận một hàm định nghĩa triển khai cho API của bạn. Triển khai này nhận `opts`, chứa `input` được truyền đến operation của bạn, cũng như context khác được thiết lập bởi middleware, có sẵn trong `opts.ctx`. Hàm được truyền cho `query` phải trả về một đầu ra phù hợp với schema `output`.
+
+Việc sử dụng `query` để định nghĩa triển khai cho biết rằng operation không có tính thay đổi (mutative). Sử dụng điều này để định nghĩa các phương thức để truy xuất dữ liệu. Để triển khai một operation có tính thay đổi, hãy sử dụng phương thức `mutation` thay thế.
+
+Nếu bạn thêm một procedure mới, hãy đảm bảo bạn đăng ký nó bằng cách thêm nó vào router trong `src/router.ts`.
+
+## Tùy chỉnh API tRPC của bạn
+
+### Lỗi
+
+Trong triển khai của bạn, bạn có thể trả về các phản hồi lỗi cho client bằng cách throw một `TRPCError`. Chúng chấp nhận một `code` cho biết loại lỗi, ví dụ:
+
+```ts
+throw new TRPCError({
+  code: 'NOT_FOUND',
+  message: 'The requested resource could not be found',
+});
+```
+
+### Tổ chức các Operation của bạn
+
+Khi API của bạn phát triển, bạn có thể muốn nhóm các operation liên quan lại với nhau.
+
+Bạn có thể nhóm các operation lại với nhau bằng cách sử dụng các router lồng nhau, ví dụ:
+
+```ts
+import { getUser } from './procedures/users/get.js';
+import { listUsers } from './procedures/users/list.js';
+
+const appRouter = router({
+   users: router({
+      get: getUser,
+      list: listUsers,
+   }),
+   ...
+})
+```
+
+Client sau đó nhận được nhóm operation này, ví dụ gọi operation `listUsers` trong trường hợp này có thể trông như sau:
+
+```ts
+client.users.list.query();
+```
+
+### Logging
+
+AWS Lambda Powertools logger được cấu hình trong `src/middleware/logger.ts`, và có thể được truy cập trong triển khai API thông qua `opts.ctx.logger`. Bạn có thể sử dụng điều này để log vào CloudWatch Logs, và/hoặc kiểm soát các giá trị bổ sung để bao gồm trong mọi thông báo log có cấu trúc. Ví dụ:
+
+```ts {5}
+export const echo = publicProcedure
+   .input(...)
+   .output(...)
+   .query(async (opts) => {
+      opts.ctx.logger.info('Operation called with input', opts.input);
+
+      return ...;
+   });
+```
+
+Để biết thêm thông tin về logger, vui lòng tham khảo [tài liệu AWS Lambda Powertools Logger](https://docs.powertools.aws.dev/lambda/typescript/latest/core/logger/).
+
+### Ghi lại Metric
+
+AWS Lambda Powertools metrics được cấu hình trong `src/middleware/metrics.ts`, và có thể được truy cập trong triển khai API thông qua `opts.ctx.metrics`. Bạn có thể sử dụng điều này để ghi lại metrics trong CloudWatch mà không cần import và sử dụng AWS SDK, ví dụ:
+
+```ts {5}
+export const echo = publicProcedure
+   .input(...)
+   .output(...)
+   .query(async (opts) => {
+      opts.ctx.metrics.addMetric('Invocations', 'Count', 1);
+
+      return ...;
+   });
+```
+
+Để biết thêm thông tin, vui lòng tham khảo [tài liệu AWS Lambda Powertools Metrics](https://docs.powertools.aws.dev/lambda/typescript/latest/core/metrics/).
+
+### Tinh chỉnh X-Ray Tracing
+
+AWS Lambda Powertools tracer được cấu hình trong `src/middleware/tracer.ts`, và có thể được truy cập trong triển khai API thông qua `opts.ctx.tracer`. Bạn có thể sử dụng điều này để thêm trace với AWS X-Ray để cung cấp thông tin chi tiết về hiệu suất và luồng của các yêu cầu API. Ví dụ:
+
+```ts {5-7}
+export const echo = publicProcedure
+   .input(...)
+   .output(...)
+   .query(async (opts) => {
+      const subSegment = opts.ctx.tracer.getSegment()!.addNewSubsegment('MyAlgorithm');
+      // ... logic thuật toán của tôi để capture
+      subSegment.close();
+
+      return ...;
+   });
+```
+
+Để biết thêm thông tin, vui lòng tham khảo [tài liệu AWS Lambda Powertools Tracer](https://docs.powertools.aws.dev/lambda/typescript/latest/core/tracer/).
+
+### Triển khai Middleware tùy chỉnh
+
+Bạn có thể thêm các giá trị bổ sung vào context được cung cấp cho các procedure bằng cách triển khai middleware.
+
+Ví dụ, hãy triển khai một số middleware để trích xuất một số chi tiết về người dùng đang gọi từ API của chúng ta trong `src/middleware/identity.ts`.
+
+:::warning
+Ví dụ này giả định `auth` được đặt thành `IAM`. Đối với xác thực Cognito, middleware identity đơn giản hơn, trích xuất các claim liên quan từ `event`.
+:::
+
+Đầu tiên, chúng ta định nghĩa những gì chúng ta sẽ thêm vào context:
+
+```ts
+export interface IIdentityContext {
+  identity?: {
+    sub: string;
+    username: string;
+  };
+}
+```
+
+Lưu ý rằng chúng ta định nghĩa một thuộc tính _tùy chọn_ bổ sung cho context. tRPC quản lý đảm bảo rằng điều này được định nghĩa trong các procedure đã cấu hình middleware này một cách chính xác.
+
+Tiếp theo, chúng ta sẽ triển khai middleware đó. Điều này có cấu trúc sau:
+
+```ts
+export const createIdentityPlugin = () => {
+   const t = initTRPC.context<...>().create();
+   return t.procedure.use(async (opts) => {
+      // Thêm logic ở đây để chạy trước procedure
+
+      const response = await opts.next(...);
+
+      // Thêm logic ở đây để chạy sau procedure
+
+      return response;
+   });
+};
+```
+
+Trong trường hợp của chúng ta, chúng ta muốn trích xuất chi tiết về người dùng Cognito đang gọi. Chúng ta sẽ thực hiện điều đó bằng cách trích xuất ID subject của người dùng (hoặc "sub") từ API Gateway event, và truy xuất chi tiết người dùng từ Cognito. Triển khai thay đổi một chút tùy thuộc vào việc event được cung cấp cho function của chúng ta bởi REST API hay HTTP API:
+
+<Tabs>
+<TabItem label="REST">
+```ts
+import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
+import { initTRPC, TRPCError } from '@trpc/server';
+import { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
+import { APIGatewayProxyEvent } from 'aws-lambda';
+
+export interface IIdentityContext {
+  identity?: {
+    sub: string;
+    username: string;
+  };
+}
+
+export const createIdentityPlugin = () => {
+  const t = initTRPC.context<IIdentityContext & CreateAWSLambdaContextOptions<APIGatewayProxyEvent>>().create();
+
+  const cognito = new CognitoIdentityProvider();
+
+  return t.procedure.use(async (opts) => {
+    const cognitoAuthenticationProvider = opts.ctx.event.requestContext?.identity?.cognitoAuthenticationProvider;
+
+    let sub: string | undefined = undefined;
+    if (cognitoAuthenticationProvider) {
+      const providerParts = cognitoAuthenticationProvider.split(':');
+      sub = providerParts[providerParts.length - 1];
+    }
+
+    if (!sub) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: `Unable to determine calling user`,
+      });
+    }
+
+    const { Users } = await cognito.listUsers({
+      // Giả định user pool id được cấu hình trong môi trường lambda
+      UserPoolId: process.env.USER_POOL_ID!,
+      Limit: 1,
+      Filter: `sub="${sub}"`,
+    });
+
+    if (!Users || Users.length !== 1) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: `No user found with subjectId ${sub}`,
+      });
+    }
+
+    // Cung cấp identity cho các procedure khác trong context
+    return await opts.next({
+      ctx: {
+        ...opts.ctx,
+        identity: {
+          sub,
+          username: Users[0].Username!,
+        },
+      },
+    });
+  });
+};
+```
+</TabItem>
+<TabItem label="HTTP">
+```ts
+import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
+import { initTRPC, TRPCError } from '@trpc/server';
+import { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
+import { APIGatewayProxyEventV2WithIAMAuthorizer } from 'aws-lambda';
+
+export interface IIdentityContext {
+  identity?: {
+    sub: string;
+    username: string;
+  };
+}
+
+export const createIdentityPlugin = () => {
+  const t = initTRPC.context<IIdentityContext & CreateAWSLambdaContextOptions<APIGatewayProxyEventV2WithIAMAuthorizer>>().create();
+
+  const cognito = new CognitoIdentityProvider();
+
+  return t.procedure.use(async (opts) => {
+    const cognitoIdentity = opts.ctx.event.requestContext?.authorizer?.iam
+      ?.cognitoIdentity as unknown as
+      | {
+          amr: string[];
+        }
+      | undefined;
+
+    const sub = (cognitoIdentity?.amr ?? [])
+      .flatMap((s) => (s.includes(':CognitoSignIn:') ? [s] : []))
+      .map((s) => {
+        const parts = s.split(':');
+        return parts[parts.length - 1];
+      })?.[0];
+
+    if (!sub) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: `Unable to determine calling user`,
+      });
+    }
+
+    const { Users } = await cognito.listUsers({
+      // Giả định user pool id được cấu hình trong môi trường lambda
+      UserPoolId: process.env.USER_POOL_ID!,
+      Limit: 1,
+      Filter: `sub="${sub}"`,
+    });
+
+    if (!Users || Users.length !== 1) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: `No user found with subjectId ${sub}`,
+      });
+    }
+
+    // Cung cấp identity cho các procedure khác trong context
+    return await opts.next({
+      ctx: {
+        ...opts.ctx,
+        identity: {
+          sub,
+          username: Users[0].Username!,
+        },
+      },
+    });
+  });
+};
+```
+</TabItem>
+</Tabs>
+
+## Triển khai API tRPC của bạn
+
+Trình tạo API tRPC tạo mã cơ sở hạ tầng CDK hoặc Terraform dựa trên `iacProvider` bạn đã chọn. Bạn có thể sử dụng điều này để triển khai API tRPC của bạn.
+
+<Infrastructure>
+<Fragment slot="cdk">
+CDK construct để triển khai API của bạn trong thư mục `common/constructs`. Bạn có thể sử dụng nó trong ứng dụng CDK, ví dụ:
+
+```ts {6-8}
+import { MyApi } from ':my-scope/common-constructs`;
+
+export class ExampleStack extends Stack {
+   constructor(scope: Construct, id: string) {
+      // Thêm api vào stack của bạn
+      const api = new MyApi(this, 'MyApi', {
+        integrations: MyApi.defaultIntegrations(this).build(),
+      });
+   }
+}
+```
+
+Điều này thiết lập cơ sở hạ tầng API của bạn, bao gồm AWS API Gateway REST hoặc HTTP API, các hàm AWS Lambda cho logic nghiệp vụ, và xác thực dựa trên phương thức `auth` bạn đã chọn.
+
+:::note
+Nếu bạn đã chọn sử dụng xác thực `Cognito`, bạn sẽ cần cung cấp thuộc tính `identity` cho API construct:
+
+```ts {9}
+import { MyApi, UserIdentity } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const identity = new UserIdentity(this, 'Identity');
+
+    const api = new MyApi(this, 'MyApi', {
+      integrations: MyApi.defaultIntegrations(this).build(),
+      identity,
+    });
+  }
+}
+```
+
+Construct `UserIdentity` có thể được tạo bằng cách sử dụng <Link path="/guides/react-website-auth">trình tạo `ts#react-website-auth`</Link>
+:::
+</Fragment>
+<Fragment slot="terraform">
+Các module Terraform để triển khai API của bạn nằm trong thư mục `common/terraform`. Bạn có thể sử dụng chúng trong cấu hình Terraform:
+
+```hcl {6-8}
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  # Biến môi trường cho Lambda function
+  env = {
+    ENVIRONMENT = var.environment
+    LOG_LEVEL   = "INFO"
+  }
+
+  # Các chính sách IAM bổ sung nếu cần
+  additional_iam_policy_statements = [
+    # Thêm bất kỳ quyền bổ sung nào mà API của bạn cần
+  ]
+
+  tags = local.common_tags
+}
+```
+
+Điều này thiết lập:
+
+1. Một hàm AWS Lambda phục vụ tất cả các tRPC procedure
+2. API Gateway HTTP/REST API làm trigger cho function
+3. Vai trò và quyền IAM
+4. CloudWatch log group
+5. Cấu hình X-Ray tracing
+6. Cấu hình CORS
+
+:::note
+Nếu bạn đã chọn sử dụng xác thực `Cognito`, bạn sẽ cần cung cấp cấu hình Cognito:
+
+```hcl {4-5}
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  user_pool_id         = local.user_pool_id
+  user_pool_client_ids = [local.client_id]
+
+  env = {
+    ENVIRONMENT = var.environment
+    LOG_LEVEL   = "INFO"
+  }
+
+  tags = local.common_tags
+}
+```
+
+Bạn có thể thiết lập Cognito User Pool và Client bằng cách sử dụng các resource hoặc module Terraform thích hợp.
+:::
+
+Module Terraform cung cấp một số output mà bạn có thể sử dụng:
+
+```hcl
+# Truy cập API endpoint
+output "api_url" {
+  value = module.my_api.stage_invoke_url
+}
+
+# Truy cập chi tiết Lambda function
+output "lambda_function_name" {
+  value = module.my_api.lambda_function_name
+}
+
+# Truy cập vai trò IAM để cấp quyền bổ sung
+output "lambda_execution_role_arn" {
+  value = module.my_api.lambda_execution_role_arn
+}
+```
+
+Bạn có thể tùy chỉnh cài đặt CORS bằng cách truyền biến vào module:
+
+```hcl
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  # Cấu hình CORS tùy chỉnh
+  cors_allow_origins = ["https://myapp.com", "https://staging.myapp.com"]
+  cors_allow_methods = ["GET", "POST", "PUT", "DELETE"]
+  cors_allow_headers = [
+    "authorization",
+    "content-type",
+    "x-custom-header"
+  ]
+
+  tags = local.common_tags
+}
+```
+
+:::caution
+Nếu bạn đã chọn `None` cho `auth` khi chạy trình tạo, bạn có thể thấy các lỗi kiểm tra Checkov như:
+
+<Tabs syncKey="http-rest">
+<TabItem label="HTTP API">
+```
+Check: CKV_AWS_309: "Ensure API GatewayV2 routes specify an authorization type"
+ FAILED for resource: aws_apigatewayv2_route.proxy_routes["PUT"]
+```
+</TabItem>
+<TabItem label="REST API">
+```
+Check: CKV_AWS_59: "Ensure there is no open access to back-end resources through API"
+ FAILED for resource: aws_api_gateway_method.proxy_method
+```
+</TabItem>
+</Tabs>
+
+Bạn có thể [thêm comment suppression](https://www.checkov.io/2.Basics/Suppressing%20and%20Skipping%20Policies.html) nếu bạn chắc chắn muốn API của mình công khai.
+:::
+</Fragment>
+</Infrastructure>
+
+### Tích hợp
+
+<Snippet name="api/type-safe-api-integrations" parentHeading="Integrations" />
+
+:::tip
+Nếu bạn đã chọn CDK cho `iacProvider` của mình, khi bạn thêm hoặc xóa một procedure trong API tRPC của bạn, những thay đổi này sẽ được phản ánh ngay lập tức trong CDK construct mà không cần rebuild.
+:::
+
+### Cấp quyền truy cập (chỉ IAM)
+
+Nếu bạn đã chọn sử dụng xác thực `IAM`, bạn có thể cấp quyền truy cập vào API của bạn:
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts
+api.grantInvokeAccess(myIdentityPool.authenticatedRole);
+```
+</Fragment>
+<Fragment slot="terraform">
+```hcl
+# Tạo chính sách IAM để cho phép gọi API
+resource "aws_iam_policy" "api_invoke_policy" {
+  name        = "MyApiInvokePolicy"
+  description = "Policy to allow invoking the tRPC API"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = "execute-api:Invoke"
+        Resource = "${module.my_api.api_execution_arn}/*/*"
+      }
+    ]
+  })
+}
+
+# Gắn chính sách vào vai trò IAM (ví dụ: cho người dùng đã xác thực)
+resource "aws_iam_role_policy_attachment" "api_invoke_access" {
+  role       = aws_iam_role.authenticated_user_role.name
+  policy_arn = aws_iam_policy.api_invoke_policy.arn
+}
+
+# Hoặc gắn vào vai trò hiện có theo tên
+resource "aws_iam_role_policy_attachment" "api_invoke_access_existing" {
+  role       = "MyExistingRole"
+  policy_arn = aws_iam_policy.api_invoke_policy.arn
+}
+```
+
+Các output chính từ module API mà bạn có thể sử dụng cho các chính sách IAM là:
+
+- `module.my_api.api_execution_arn` - Để cấp quyền execute-api:Invoke
+- `module.my_api.api_arn` - ARN của API Gateway
+- `module.my_api.lambda_function_arn` - ARN của Lambda function
+</Fragment>
+</Infrastructure>
+
+### Bundle Target
+
+<Snippet name="ts-bundle" />
+
+## Máy chủ tRPC cục bộ
+
+Bạn có thể sử dụng target `serve` để chạy máy chủ cục bộ cho API của bạn, ví dụ:
+
+<NxCommands commands={['run @my-scope/my-api:serve']} />
+
+Điểm vào cho máy chủ cục bộ là `src/local-server.ts`.
+
+Điều này sẽ tự động reload khi bạn thực hiện thay đổi đối với API của bạn.
+
+## Gọi API tRPC của bạn
+
+Bạn có thể tạo một tRPC client để gọi API của bạn theo cách an toàn kiểu. Nếu bạn đang gọi API tRPC của bạn từ backend khác, bạn có thể sử dụng client trong `src/client/index.ts`, ví dụ:
+
+```ts
+import { createMyApiClient } from ':my-scope/my-api';
+
+const client = createMyApiClient({ url: 'https://my-api-url.example.com/' });
+
+await client.echo.query({ message: 'Hello world!' });
+```
+
+Nếu bạn đang gọi API của bạn từ một website React, hãy xem xét sử dụng trình tạo <Link path="guides/api-connection/react-trpc">API Connection</Link> để cấu hình client.
+
+## Thông tin thêm
+
+Để biết thêm thông tin về tRPC, vui lòng tham khảo [tài liệu tRPC](https://trpc.io/docs).

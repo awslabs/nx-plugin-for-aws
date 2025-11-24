@@ -1,0 +1,603 @@
+---
+title: "Di chuyển API"
+---
+
+import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
+import RunGenerator from '@components/run-generator.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Drawer from '@components/drawer.astro';
+import InstallCommand from '@components/install-command.astro';
+
+`TypeSafeApiProject` được sử dụng trong ứng dụng danh sách mua sắm đã tận dụng:
+
+- [Smithy](https://smithy.io/2.0/) làm ngôn ngữ mô hình hóa
+- TypeScript để triển khai các operation
+- Tạo hook TypeScript để tích hợp với website react
+
+Do đó, chúng ta có thể sử dụng <Link path="/guides/ts-smithy-api">generator `ts#smithy-api`</Link> để cung cấp chức năng tương đương.
+
+:::note
+Nếu bạn đã sử dụng OpenAPI hoặc TypeSpec làm ngôn ngữ mô hình hóa, hoặc có handler được triển khai bằng Python hoặc Java, vui lòng tham khảo [FAQ](#frequently-asked-questions) để biết các tùy chọn khả thi.
+:::
+
+#### Tạo một TypeScript Smithy API
+
+Chạy <Link path="/guides/ts-smithy-api">generator `ts#smithy-api`</Link> để thiết lập dự án api của bạn trong `packages/api`:
+
+<RunGenerator generator="ts#smithy-api" noInteractive requiredParameters={{ name: 'api', namespace: 'com.aws', auth: 'IAM' }} />
+
+Bạn sẽ nhận thấy điều này tạo ra một dự án `model`, cũng như một dự án `backend`. Dự án `model` chứa mô hình Smithy của bạn, và `backend` chứa triển khai máy chủ của bạn.
+
+Backend sử dụng [Smithy Server Generator for TypeScript](https://smithy.io/2.0/languages/typescript/ts-ssdk/index.html). Chúng ta sẽ khám phá điều này chi tiết hơn bên dưới.
+
+#### Di chuyển Mô hình Smithy
+
+Bây giờ chúng ta đã có cấu trúc cơ bản cho dự án Smithy API, chúng ta có thể di chuyển mô hình:
+
+<Steps>
+
+1. Xóa các tệp Smithy ví dụ đã được tạo trong `packages/api/model/src`
+1. Sao chép mô hình của bạn từ thư mục `packages/api/model/src/main/smithy` của dự án PDK vào thư mục `packages/api/model/src` của dự án mới.
+1. Cập nhật tên dịch vụ và namespace trong `smithy-build.json` để khớp với ứng dụng PDK:
+
+    ```json {4}
+    // smithy-build.json
+    "plugins": {
+        "openapi": {
+          "service": "com.aws#MyApi",
+          ...
+    ```
+
+1. Cập nhật dịch vụ trong `main.smithy` để thêm lỗi `ValidationException`, điều này là bắt buộc khi sử dụng Smithy TypeScript Server SDK.
+
+    ```smithy {2, 17}
+    // main.smithy
+    use smithy.framework#ValidationException
+
+    /// My Shopping List API
+    @restJson1
+    service MyApi {
+        version: "1.0"
+        operations: [
+            GetShoppingLists
+            PutShoppingList
+            DeleteShoppingList
+        ]
+        errors: [
+            BadRequestError
+            NotAuthorizedError
+            InternalFailureError
+            ValidationException
+        ]
+    }
+    ```
+
+1. Thêm tệp `extensions.smithy` vào `packages/api/model/src` nơi chúng ta sẽ định nghĩa một trait cung cấp thông tin phân trang cho client được tạo:
+
+    ```smithy
+    // extensions.smithy
+    $version: "2"
+    namespace com.aws
+
+    use smithy.openapi#specificationExtension
+
+    @trait
+    @specificationExtension(as: "x-cursor")
+    structure cursor {
+        inputToken: String
+        enabled: Boolean
+    }
+    ```
+
+1. Thêm trait `@cursor` mới vào operation `GetShoppingLists` trong `get-shopping-lists.smithy`:
+
+    ```smithy {5}
+    // operations/get-shopping-lists.smithy
+    @readonly
+    @http(method: "GET", uri: "/shopping-list")
+    @paginated(inputToken: "nextToken", outputToken: "nextToken", pageSize: "pageSize", items: "shoppingLists")
+    @cursor(inputToken: "nextToken")
+    @handler(language: "typescript")
+    operation GetShoppingLists {
+        input := with [PaginatedInputMixin] {
+            @httpQuery("shoppingListId")
+            shoppingListId: ShoppingListId
+        }
+    ```
+
+    Bất kỳ operation `@paginated` nào cũng nên sử dụng `@cursor` nếu bạn đang sử dụng client generator được cung cấp bởi Nx Plugin for AWS (thông qua generator <Link path="guides/api-connection/react-smithy">`api-connection`</Link>).
+
+1. Cuối cùng, xóa trait `@handler` khỏi tất cả các operation vì điều này không được hỗ trợ bởi Nx Plugin for AWS. Khi sử dụng `ts#smithy-api`, chúng ta không cần các construct CDK hàm lambda được tự động tạo và các target đóng gói được tạo bởi trait này, vì chúng ta sử dụng một bundle duy nhất cho tất cả các hàm lambda.
+
+</Steps>
+
+Tại thời điểm này, hãy chạy một bản build để kiểm tra các thay đổi mô hình của chúng ta và đảm bảo rằng chúng ta có một số mã máy chủ được tạo để làm việc. Sẽ có một số lỗi trong dự án backend (`@shopping-list/api`) nhưng chúng ta sẽ giải quyết chúng tiếp theo.
+
+<NxCommands commands={["run-many --target build"]} />
+
+:::note
+Bạn có thể thấy lỗi build do các vấn đề lint. Những lỗi này thường có thể được tự động sửa:
+
+<NxCommands commands={["run-many --target lint --fix"]} />
+:::
+
+#### Di chuyển Lambda Handler
+
+Bạn có thể coi dự án `api/backend` phần nào tương đương với dự án `api/handlers/typescript` của Type Safe API.
+
+Một trong những khác biệt chính giữa Type Safe API và generator `ts#smithy-api` là các handler được triển khai bằng cách sử dụng [Smithy Server Generator for TypeScript](https://smithy.io/2.0/languages/typescript/ts-ssdk/index.html), thay vì các wrapper handler được tạo riêng của Type Safe API (được tìm thấy trong dự án `api/generated/typescript/runtime`).
+
+Các lambda handler của ứng dụng danh sách mua sắm phụ thuộc vào package `@aws-sdk/client-dynamodb`, vì vậy hãy cài đặt nó trước:
+
+<InstallCommand pkg="@aws-sdk/client-dynamodb" />
+
+Sau đó, hãy sao chép tệp `handlers/src/dynamo-client.ts` từ dự án PDK vào `backend/src/operations` để nó có sẵn cho các handler của chúng ta.
+
+Để di chuyển các handler, bạn có thể làm theo các bước chung sau:
+
+<Steps>
+
+1. Sao chép handler từ thư mục `packages/api/handlers/typescript/src` của dự án PDK sang thư mục `packages/api/backend/src/operations` của dự án mới.
+
+1. Xóa các import `my-api-typescript-runtime` và thay vào đó import kiểu operation từ TypeScript Server SDK được tạo, cũng như `ServiceContext` ví dụ:
+
+    ```diff lang="ts" wrap
+    - import {
+    -   deleteShoppingListHandler,
+    -   DeleteShoppingListChainedHandlerFunction,
+    -   INTERCEPTORS,
+    -   Response,
+    -   LoggingInterceptor,
+    - } from 'myapi-typescript-runtime';
+    + import { DeleteShoppingList as DeleteShoppingListOperation } from '../generated/ssdk/index.js';
+    + import { ServiceContext } from '../context.js';
+    ```
+
+1. Xóa export wrapper handler
+
+    ```diff lang="ts" wrap
+    - export const handler = deleteShoppingListHandler(
+    -   ...INTERCEPTORS,
+    -   deleteShoppingList,
+    - );
+    ```
+
+1. Cập nhật chữ ký cho operation handler của bạn để sử dụng SSDK:
+
+    ```diff lang="ts" wrap
+    - export const deleteShoppingList: DeleteShoppingListChainedHandlerFunction = async (request) => {
+    + export const DeleteShoppingList: DeleteShoppingListOperation<ServiceContext> = async (input, ctx) => {
+    ```
+
+1. Thay thế việc sử dụng `LoggingInterceptor` bằng `ctx.logger`. (Cũng áp dụng cho các interceptor metrics và tracing):
+
+    ```diff lang="ts" wrap
+    - LoggingInterceptor.getLogger(request).info('...');
+    + ctx.logger.info('...');
+    ```
+
+1. Cập nhật các tham chiếu đến tham số đầu vào. Vì SSDK cung cấp các kiểu khớp chính xác với mô hình Smithy của bạn (thay vì nhóm các tham số path/query/header riêng biệt với tham số body), hãy cập nhật mọi tham chiếu đầu vào tương ứng:
+
+    ```diff lang="ts" wrap
+    - const shoppingListId = request.input.requestParameters.shoppingListId;
+    + const shoppingListId = input.shoppingListId;
+    ```
+
+1. Xóa việc sử dụng `Response`. Thay vào đó, chúng ta chỉ trả về các đối tượng thuần túy trong SSDK.
+
+    ```diff lang="ts" wrap
+    - return Response.success({ shoppingListId });
+    + return { shoppingListId };
+    ```
+
+    Chúng ta cũng không còn throw hoặc return `Response`, thay vào đó chúng ta throw các lỗi được tạo của SSDK:
+
+    ```diff lang="ts" wrap
+    - throw Response.badRequest({ message: 'oh no' });
+    - return Response.badRequest({ message: 'oh no' });
+    + import { BadRequestError } from '../generated/ssdk/index.js';
+    + throw new BadRequestError({ message: 'oh no' });
+    ```
+
+1. Cập nhật mọi import để sử dụng cú pháp ESM, cụ thể là thêm phần mở rộng `.js` vào các import tương đối.
+
+1. Thêm operation vào `service.ts`
+
+    ```ts {4, 12}
+    // service.ts
+    import { ServiceContext } from './context.js';
+    import { MyApiService } from './generated/ssdk/index.js';
+    import { DeleteShoppingList } from './operations/delete-shopping-list.js';
+    import { GetShoppingLists } from './operations/get-shopping-lists.js';
+    import { PutShoppingList } from './operations/put-shopping-list.js';
+
+    // Register operations to the service here
+    export const Service: MyApiService<ServiceContext> = {
+      PutShoppingList,
+      GetShoppingLists,
+      DeleteShoppingList,
+    };
+    ```
+
+</Steps>
+
+<Drawer title="Di chuyển Handler Danh sách Mua sắm" trigger="Nhấp vào đây để xem ví dụ trước/sau đầy đủ cho ba operation danh sách mua sắm từ hướng dẫn">
+
+<h4>Delete Shopping List</h4>
+
+<Tabs syncKey="pdk-migration">
+<TabItem label="Trước">
+```ts
+// handlers/typescript/src/delete-shopping-list.ts
+import { DeleteItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  deleteShoppingListHandler,
+  DeleteShoppingListChainedHandlerFunction,
+  INTERCEPTORS,
+  Response,
+  LoggingInterceptor,
+} from 'myapi-typescript-runtime';
+import { ddbClient } from './dynamo-client';
+
+/**
+ * Type-safe handler for the DeleteShoppingList operation
+ */
+export const deleteShoppingList: DeleteShoppingListChainedHandlerFunction = async (request) => {
+  LoggingInterceptor.getLogger(request).info(
+    'Start DeleteShoppingList Operation',
+  );
+
+  const shoppingListId = request.input.requestParameters.shoppingListId;
+  await ddbClient.send(
+    new DeleteItemCommand({
+      TableName: 'shopping_list',
+      Key: {
+        shoppingListId: {
+          S: shoppingListId,
+        },
+      },
+    }),
+  );
+
+  return Response.success({
+    shoppingListId,
+  });
+};
+
+/**
+ * Entry point for the AWS Lambda handler for the DeleteShoppingList operation.
+ * The deleteShoppingListHandler method wraps the type-safe handler and manages marshalling inputs and outputs
+ */
+export const handler = deleteShoppingListHandler(
+  ...INTERCEPTORS,
+  deleteShoppingList,
+);
+```
+</TabItem>
+<TabItem label="Sau">
+```ts
+// backend/src/operations/delete-shopping-list.ts
+import { DeleteItemCommand } from '@aws-sdk/client-dynamodb';
+import { ddbClient } from './dynamo-client.js';
+import { DeleteShoppingList as DeleteShoppingListOperation } from '../generated/ssdk/index.js';
+import { ServiceContext } from '../context.js';
+
+/**
+ * Type-safe handler for the DeleteShoppingList operation
+ */
+export const DeleteShoppingList: DeleteShoppingListOperation<ServiceContext> = async (input, ctx) => {
+  ctx.logger.info(
+    'Start DeleteShoppingList Operation',
+  );
+
+  const shoppingListId = input.shoppingListId;
+  await ddbClient.send(
+    new DeleteItemCommand({
+      TableName: 'shopping_list',
+      Key: {
+        shoppingListId: {
+          S: shoppingListId!,
+        },
+      },
+    }),
+  );
+
+  return {
+    shoppingListId,
+  };
+};
+```
+</TabItem>
+</Tabs>
+
+<h4>Get Shopping Lists</h4>
+
+<Tabs syncKey="pdk-migration">
+<TabItem label="Trước">
+```ts
+// handlers/typescript/src/get-shopping-lists.ts
+import { DynamoDBClient, QueryCommand, QueryCommandInput, ScanCommand, ScanCommandInput } from '@aws-sdk/client-dynamodb';
+import {
+  getShoppingListsHandler,
+  GetShoppingListsChainedHandlerFunction,
+  INTERCEPTORS,
+  Response,
+  LoggingInterceptor,
+  ShoppingList,
+} from 'myapi-typescript-runtime';
+import { ddbClient } from './dynamo-client';
+
+/**
+ * Type-safe handler for the GetShoppingLists operation
+ */
+export const getShoppingLists: GetShoppingListsChainedHandlerFunction = async (request) => {
+  LoggingInterceptor.getLogger(request).info('Start GetShoppingLists Operation');
+
+  const nextToken = request.input.requestParameters.nextToken;
+  const pageSize = request.input.requestParameters.pageSize;
+  const shoppingListId = request.input.requestParameters.shoppingListId;
+  const commandInput: ScanCommandInput | QueryCommandInput = {
+    TableName: 'shopping_list',
+    ConsistentRead: true,
+    Limit: pageSize,
+    ExclusiveStartKey: nextToken ? fromToken(nextToken) : undefined,
+    ...(shoppingListId ? {
+      KeyConditionExpression: 'shoppingListId = :shoppingListId',
+      ExpressionAttributeValues: {
+        ':shoppingListId': {
+          S: request.input.requestParameters.shoppingListId!,
+        },
+      },
+    } : {}),
+  };
+  const response = await ddbClient.send(shoppingListId ? new QueryCommand(commandInput) : new ScanCommand(commandInput));
+
+  return Response.success({
+    shoppingLists: (response.Items || [])
+      .map<ShoppingList>(item => ({
+      shoppingListId: item.shoppingListId.S!,
+      name: item.name.S!,
+      shoppingItems: JSON.parse(item.shoppingItems.S || '[]'),
+    })),
+    nextToken: response.LastEvaluatedKey ? toToken(response.LastEvaluatedKey) : undefined,
+  });
+};
+
+/**
+ * Decode a stringified token
+ * @param token a token passed to the paginated request
+ */
+const fromToken = <T>(token?: string): T | undefined =>
+  token ? (JSON.parse(Buffer.from(decodeURIComponent(token), 'base64').toString()) as T) : undefined;
+
+/**
+ * Encode pagination details into an opaque stringified token
+ * @param paginationToken pagination token details
+ */
+const toToken = <T>(paginationToken?: T): string | undefined =>
+  paginationToken ? encodeURIComponent(Buffer.from(JSON.stringify(paginationToken)).toString('base64')) : undefined;
+
+/**
+ * Entry point for the AWS Lambda handler for the GetShoppingLists operation.
+ * The getShoppingListsHandler method wraps the type-safe handler and manages marshalling inputs and outputs
+ */
+export const handler = getShoppingListsHandler(...INTERCEPTORS, getShoppingLists);
+```
+</TabItem>
+<TabItem label="Sau">
+```ts
+// backend/src/operations/get-shopping-lists.ts
+import { QueryCommand, QueryCommandInput, ScanCommand, ScanCommandInput } from '@aws-sdk/client-dynamodb';
+import { ddbClient } from './dynamo-client.js';
+import { GetShoppingLists as GetShoppingListsOperation, ShoppingList } from '../generated/ssdk/index.js';
+import { ServiceContext } from '../context.js';
+
+/**
+ * Type-safe handler for the GetShoppingLists operation
+ */
+export const GetShoppingLists: GetShoppingListsOperation<ServiceContext> = async (input, ctx) => {
+  ctx.logger.info('Start GetShoppingLists Operation');
+
+  const nextToken = input.nextToken;
+  const pageSize = input.pageSize;
+  const shoppingListId = input.shoppingListId;
+  const commandInput: ScanCommandInput | QueryCommandInput = {
+    TableName: 'shopping_list',
+    ConsistentRead: true,
+    Limit: pageSize,
+    ExclusiveStartKey: nextToken ? fromToken(nextToken) : undefined,
+    ...(shoppingListId ? {
+      KeyConditionExpression: 'shoppingListId = :shoppingListId',
+      ExpressionAttributeValues: {
+        ':shoppingListId': {
+          S: input.shoppingListId!,
+        },
+      },
+    } : {}),
+  };
+  const response = await ddbClient.send(shoppingListId ? new QueryCommand(commandInput) : new ScanCommand(commandInput));
+
+  return {
+    shoppingLists: (response.Items || [])
+      .map<ShoppingList>(item => ({
+      shoppingListId: item.shoppingListId.S!,
+      name: item.name.S!,
+      shoppingItems: JSON.parse(item.shoppingItems.S || '[]'),
+    })),
+    nextToken: response.LastEvaluatedKey ? toToken(response.LastEvaluatedKey) : undefined,
+  };
+};
+
+/**
+ * Decode a stringified token
+ * @param token a token passed to the paginated request
+ */
+const fromToken = <T>(token?: string): T | undefined =>
+  token ? (JSON.parse(Buffer.from(decodeURIComponent(token), 'base64').toString()) as T) : undefined;
+
+/**
+ * Encode pagination details into an opaque stringified token
+ * @param paginationToken pagination token details
+ */
+const toToken = <T>(paginationToken?: T): string | undefined =>
+  paginationToken ? encodeURIComponent(Buffer.from(JSON.stringify(paginationToken)).toString('base64')) : undefined;
+```
+</TabItem>
+</Tabs>
+
+<h4>Put Shopping List</h4>
+
+<Tabs syncKey="pdk-migration">
+<TabItem label="Trước">
+```ts
+// handlers/typescript/src/put-shopping-list.ts
+import { randomUUID } from 'crypto';
+import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  putShoppingListHandler,
+  PutShoppingListChainedHandlerFunction,
+  INTERCEPTORS,
+  Response,
+  LoggingInterceptor,
+} from 'myapi-typescript-runtime';
+import { ddbClient } from './dynamo-client';
+
+/**
+ * Type-safe handler for the PutShoppingList operation
+ */
+export const putShoppingList: PutShoppingListChainedHandlerFunction = async (request) => {
+  LoggingInterceptor.getLogger(request).info('Start PutShoppingList Operation');
+
+  const shoppingListId = request.input.body.shoppingListId ?? randomUUID();
+  await ddbClient.send(new PutItemCommand({
+    TableName: 'shopping_list',
+    Item: {
+      shoppingListId: {
+        S: shoppingListId,
+      },
+      name: {
+        S: request.input.body.name,
+      },
+      shoppingItems: {
+        S: JSON.stringify(request.input.body.shoppingItems || []),
+      },
+    },
+  }));
+
+  return Response.success({
+    shoppingListId,
+  });
+};
+
+/**
+ * Entry point for the AWS Lambda handler for the PutShoppingList operation.
+ * The putShoppingListHandler method wraps the type-safe handler and manages marshalling inputs and outputs
+ */
+export const handler = putShoppingListHandler(...INTERCEPTORS, putShoppingList);
+```
+</TabItem>
+<TabItem label="Sau">
+```ts
+// backend/src/operations/put-shopping-list.ts
+import { randomUUID } from 'crypto';
+import { PutItemCommand } from '@aws-sdk/client-dynamodb';
+import { ddbClient } from './dynamo-client.js';
+import { PutShoppingList as PutShoppingListOperation } from '../generated/ssdk/index.js';
+import { ServiceContext } from '../context.js';
+
+/**
+ * Type-safe handler for the PutShoppingList operation
+ */
+export const PutShoppingList: PutShoppingListOperation<ServiceContext> = async (input, ctx) => {
+  ctx.logger.info('Start PutShoppingList Operation');
+
+  const shoppingListId = input.shoppingListId ?? randomUUID();
+  await ddbClient.send(new PutItemCommand({
+    TableName: 'shopping_list',
+    Item: {
+      shoppingListId: {
+        S: shoppingListId,
+      },
+      name: {
+        S: input.name!,
+      },
+      shoppingItems: {
+        S: JSON.stringify(input.shoppingItems || []),
+      },
+    },
+  }));
+
+  return {
+    shoppingListId,
+  };
+};
+```
+</TabItem>
+</Tabs>
+
+</Drawer>
+
+Chúng ta đã tạo dự án Smithy API với tên `api` ban đầu vì chúng ta muốn nó được thêm vào `packages/api` để đảm bảo tính nhất quán với dự án PDK. Vì Smithy API của chúng ta bây giờ định nghĩa `service MyApi` thay vì `service Api`, chúng ta cần cập nhật bất kỳ instance nào của `getApiServiceHandler` thành `getMyApiServiceHandler`.
+
+Thực hiện thay đổi này trong `handler.ts`:
+
+```diff lang="ts"
+// packages/api/backend/src/handler.ts
+- import { getApiServiceHandler } from './generated/ssdk/index.js';
++ import { getMyApiServiceHandler } from './generated/ssdk/index.js';
+
+process.env.POWERTOOLS_METRICS_NAMESPACE = 'Api';
+process.env.POWERTOOLS_SERVICE_NAME = 'Api';
+
+const tracer = new Tracer();
+const logger = new Logger();
+const metrics = new Metrics();
+
+- const serviceHandler = getApiServiceHandler(Service);
++ const serviceHandler = getMyApiServiceHandler(Service);
+```
+
+Và trong `local-server.ts`:
+
+```diff lang="ts"
+// packages/api/backend/src/local-server.ts
+-import { getApiServiceHandler } from './generated/ssdk/index.js';
++import { getMyApiServiceHandler } from './generated/ssdk/index.js';
+
+const PORT = 3001;
+
+const tracer = new Tracer();
+const logger = new Logger();
+const metrics = new Metrics();
+
+-const serviceHandler = getApiServiceHandler(Service);
++const serviceHandler = getMyApiServiceHandler(Service);
+```
+
+Ngoài ra, cập nhật `packages/api/backend/project.json` và cập nhật `metadata.apiName` thành `my-api`:
+
+```diff lang="json"
+// packages/api/backend/project.json
+  "metadata": {
+    "generator": "ts#smithy-api",
+-    "apiName": "api",
++    "apiName": "my-api",
+    "auth": "IAM",
+    "modelProject": "@shopping-list/api-model",
+    "ports": [3001]
+  },
+```
+
+#### Xác minh với Build
+
+Bây giờ chúng ta có thể build dự án để kiểm tra xem việc di chuyển đã hoạt động đến đâu:
+
+<NxCommands commands={["run-many --target build"]} />
+
+:::note
+Bạn có thể thấy lỗi build do các vấn đề lint. Những lỗi này thường có thể được tự động sửa:
+
+<NxCommands commands={["run-many --target lint --fix"]} />
+:::

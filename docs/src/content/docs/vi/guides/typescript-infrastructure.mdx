@@ -1,0 +1,269 @@
+---
+title: "Cơ sở hạ tầng CDK"
+description: "Tài liệu tham khảo cho Cơ sở hạ tầng CDK"
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import Link from '@components/link.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+
+[AWS CDK](https://docs.aws.amazon.com/cdk/v2/guide/home.html) là một framework để định nghĩa cơ sở hạ tầng đám mây bằng code và triển khai nó thông qua AWS CloudFormation.
+
+Trình tạo cơ sở hạ tầng TypeScript tạo ra một ứng dụng cơ sở hạ tầng AWS CDK được viết bằng TypeScript. Ứng dụng được tạo ra bao gồm các phương pháp bảo mật tốt nhất thông qua kiểm tra bảo mật [Checkov](https://www.checkov.io/).
+
+## Cách sử dụng
+
+### Tạo một dự án cơ sở hạ tầng
+
+Bạn có thể tạo một dự án cơ sở hạ tầng mới theo hai cách:
+
+<RunGenerator generator="ts#infra" />
+
+### Tùy chọn
+
+<GeneratorParameters generator="ts#infra" />
+
+## Kết quả đầu ra của trình tạo
+
+Trình tạo sẽ tạo cấu trúc dự án sau trong thư mục `<directory>/<name>`:
+
+<FileTree>
+
+  - src
+    - main.ts Điểm khởi đầu ứng dụng khởi tạo các CDK stage để triển khai
+    - stages Định nghĩa CDK Stage
+      - application-stage.ts Định nghĩa một tập hợp các stack để triển khai trong một stage
+    - stacks Định nghĩa CDK Stack
+      - application-stack.ts Stack ứng dụng chính
+  - cdk.json Cấu hình CDK
+  - project.json Cấu hình dự án và các target build
+  - checkov.yml Tệp cấu hình Checkov
+
+</FileTree>
+
+:::tip
+Cơ sở hạ tầng của bạn là một dự án TypeScript, vì vậy bạn có thể tham khảo <Link path="guides/typescript-project">tài liệu dự án TypeScript</Link> để biết thêm chi tiết về cách sử dụng chung của chúng.
+:::
+
+## Triển khai cơ sở hạ tầng CDK của bạn
+
+Bạn có thể bắt đầu viết cơ sở hạ tầng CDK của mình bên trong `src/stacks/application-stack.ts`, ví dụ:
+
+```ts title="src/stacks/application-stack.ts" {9-10}
+import { Stack, StackProps } from 'aws-cdk-lib';
+import { Bucket } from 'aws-cdk-lib/aws-s3'
+import { Construct } from 'constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    // Khai báo cơ sở hạ tầng của bạn ở đây
+    new Bucket(this, 'MyBucket');
+  }
+}
+```
+
+### Stage và Stack
+
+Bạn sẽ nhận thấy rằng tệp `src/main.ts` cấp cao nhất khởi tạo một CDK [Stage](https://docs.aws.amazon.com/cdk/v2/guide/stages.html) có tên là `<namespace>-sandbox`. Stage này được dành cho việc phát triển và thử nghiệm của riêng bạn.
+
+```ts title="src/main.ts"
+new ApplicationStage(app, 'project-sandbox', {
+  env: {
+    account: process.env.CDK_DEFAULT_ACCOUNT,
+    region: process.env.CDK_DEFAULT_REGION,
+  },
+});
+```
+
+Bạn có thể thêm nhiều stage hơn, ví dụ bạn có thể muốn định nghĩa các stage `beta` và `prod` để triển khai đến các môi trường riêng biệt:
+
+```ts title="src/main.ts"
+new ApplicationStage(app, 'project-beta', {
+  env: {
+    account: '123456789012', // tài khoản beta
+    region: 'us-west-2',
+  },
+});
+new ApplicationStage(app, 'project-prod', {
+  env: {
+    account: '098765432109', // tài khoản prod
+    region: 'us-west-2',
+  },
+});
+```
+
+Một Stage định nghĩa một tập hợp các stack nên được triển khai cùng nhau để tạo thành ứng dụng của bạn. Bạn có thể khởi tạo bao nhiêu stack tùy thích trong một stage, ví dụ:
+
+```ts title="src/stages/application-stage.ts"
+import { Stage, StageProps } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { BackendStack } from '../stacks/backend-stack.js';
+import { FrontendStack } from '../stacks/frontend-stack.js';
+
+/**
+ * Định nghĩa một tập hợp các CDK Stack tạo thành ứng dụng của bạn
+ */
+export class ApplicationStage extends Stage {
+  constructor(scope: Construct, id: string, props?: StageProps) {
+    super(scope, id, props);
+
+    new BackendStack(this, 'Backend', {
+      crossRegionReferences: true,
+    })
+
+    new FrontendStack(this, 'Frontend', {
+      crossRegionReferences: true,
+    });
+  }
+}
+```
+
+### Cơ sở hạ tầng API
+
+Nếu bạn đã sử dụng trình tạo <Link path="guides/trpc">tRPC API</Link> hoặc <Link path="guides/fastapi">FastAPI</Link> để tạo API, bạn sẽ nhận thấy bạn đã có một số construct có sẵn trong `packages/common/constructs` để triển khai chúng.
+
+Ví dụ, nếu bạn đã tạo một tRPC API có tên là `my-api`, bạn chỉ cần import và khởi tạo construct để thêm tất cả cơ sở hạ tầng cần thiết để triển khai nó:
+
+```ts title="src/stacks/application-stack.ts" {3, 9-12}
+import * as cdk from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { MyApi } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends cdk.Stack {
+  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+    super(scope, id, props);
+
+    // Thêm cơ sở hạ tầng cho API của bạn
+    new MyApi(this, 'MyApi', {
+      integrations: MyApi.defaultIntegrations(this).build(),
+    });
+  }
+}
+```
+
+### Cơ sở hạ tầng Website
+
+Nếu bạn đã sử dụng trình tạo <Link path="guides/react-website">CloudScape website</Link>, bạn sẽ nhận thấy bạn đã có một construct trong `packages/common/constructs` để triển khai nó. Ví dụ:
+
+```ts title="src/stacks/application-stack.ts" {3, 9-10}
+import * as cdk from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { MyWebsite } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends cdk.Stack {
+  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+    super(scope, id, props);
+
+    // Thêm cơ sở hạ tầng cho website của bạn
+    new MyWebsite(this, 'MyWebsite');
+  }
+}
+```
+
+:::warning
+Điều quan trọng là đảm bảo rằng website được khai báo _sau_ bất kỳ construct API nào để <Link path="guides/react-website#runtime-configuration">Runtime Config</Link> của website bao gồm tất cả cấu hình API.
+:::
+
+## Tổng hợp cơ sở hạ tầng của bạn
+
+Như một phần của target `build`, cũng như chạy <Link path="guides/typescript-project#building">các target compile, lint và test mặc định</Link>, dự án cơ sở hạ tầng của bạn được _tổng hợp_ thành CloudFormation. Điều này cũng có thể được thực thi một cách độc lập, bằng cách chạy target `synth`:
+
+<NxCommands commands={['run <my-infra>:synth']} />
+
+Bạn sẽ tìm thấy cloud assembly đã tổng hợp của mình trong thư mục `dist` gốc, dưới `dist/packages/<my-infra-project>/cdk.out`.
+
+## Kiểm tra bảo mật
+
+Một target `checkov` được thêm vào dự án của bạn để chạy kiểm tra bảo mật trên cơ sở hạ tầng của bạn bằng [Checkov](https://www.checkov.io/).
+
+<NxCommands commands={['run <my-infra>:checkov']} />
+
+Bạn sẽ tìm thấy kết quả kiểm tra bảo mật của mình trong thư mục `dist` gốc, dưới `dist/packages/<my-infra-project>/checkov`.
+
+:::note
+Checkov được chạy bằng `uvx`, vì vậy bạn sẽ cần [cài đặt `uv` nếu bạn chưa có](https://docs.astral.sh/uv/getting-started/installation/).
+:::
+
+:::caution
+Một số quy tắc Checkov được loại trừ theo mặc định thông qua tệp `checkov.yml`. Bạn nên xem xét lại những quy tắc này dựa trên trường hợp sử dụng của bạn.
+:::
+
+### Loại trừ kiểm tra Checkov
+
+Có thể có những trường hợp bạn muốn loại trừ một số quy tắc nhất định trên các tài nguyên. Bạn có thể làm điều này theo hai cách:
+
+#### Loại trừ một quy tắc trên một construct nhất định
+
+```typescript
+import { suppressRules } from ':my-scope/common-constructs';
+
+// loại trừ CKV_AWS_XXX cho construct đã cho.
+suppressRules(construct, ['CKV_AWS_XXX'], 'Reason');
+```
+
+#### Loại trừ một quy tắc trên một construct con cháu
+
+```typescript
+import { suppressRules } from ':my-scope/common-constructs';
+
+// Loại trừ CKV_AWS_XXX cho construct hoặc bất kỳ construct con cháu nào của nó nếu nó là một instance của Bucket
+suppressRules(construct, ['CKV_AWS_XXX'], 'Reason', (construct) => construct instanceof Bucket);
+```
+
+## Bootstrap tài khoản AWS của bạn
+
+Nếu bạn đang triển khai một ứng dụng CDK đến một tài khoản AWS lần đầu tiên, nó sẽ cần được bootstrap trước.
+
+Đầu tiên, đảm bảo rằng bạn đã [cấu hình thông tin xác thực cho tài khoản AWS của mình](https://docs.aws.amazon.com/sdkref/latest/guide/access.html).
+
+Tiếp theo, bạn có thể sử dụng lệnh `cdk bootstrap`:
+
+```bash
+npx cdk bootstrap aws://<account-id>/<region>
+```
+
+Để biết thêm chi tiết, vui lòng tham khảo [tài liệu CDK](https://docs.aws.amazon.com/cdk/v2/guide/bootstrapping-env.html).
+
+## Triển khai lên AWS
+
+Sau khi build, bạn có thể triển khai cơ sở hạ tầng của mình lên AWS bằng target `deploy`.
+
+:::caution
+Sử dụng target `deploy-ci` nếu triển khai trong một pipeline CI/CD. Xem bên dưới để biết thêm chi tiết.
+:::
+
+Đầu tiên, đảm bảo rằng bạn đã [cấu hình thông tin xác thực cho tài khoản AWS của mình](https://docs.aws.amazon.com/sdkref/latest/guide/access.html).
+
+Tiếp theo, chạy target deploy:
+
+<NxCommands commands={['run <my-infra>:deploy <my-infra>-sandbox/*']} />
+
+:::tip
+Lệnh trên triển khai _tất cả_ các stack cho stage `<my-infra>-sandbox`. Bạn có thể chỉ định các stage khác miễn là chúng được định nghĩa trong `main.ts`.
+
+Bạn cũng có thể triển khai các stack riêng lẻ bằng cách chỉ định tên stack đầy đủ, ví dụ:
+
+<NxCommands commands={['run <my-infra>:deploy <my-infra>-sandbox/Application']} />
+:::
+
+## Triển khai lên AWS trong một pipeline CI/CD
+
+Sử dụng target `deploy-ci` nếu bạn đang triển khai lên AWS như một phần của pipeline CI/CD.
+
+<NxCommands commands={['run <my-infra>:deploy-ci my-stage/*']} />
+
+Target này khác một chút so với target `deploy` thông thường ở chỗ nó đảm bảo cloud-assembly đã được tổng hợp trước được triển khai, thay vì tổng hợp ngay lập tức. Điều này giúp tránh các vấn đề tiềm ẩn với tính không xác định do thay đổi phiên bản package, đảm bảo rằng mọi giai đoạn pipeline triển khai sử dụng cùng một cloud-assembly.
+
+## Xóa bỏ cơ sở hạ tầng AWS
+
+Sử dụng target `destroy` để xóa bỏ tài nguyên của bạn:
+
+<NxCommands commands={['run <my-infra>:destroy <my-infra>-sandbox/*']} />
+
+## Thông tin thêm
+
+Để biết thêm thông tin về CDK, vui lòng tham khảo [CDK Developer Guide](https://docs.aws.amazon.com/cdk/v2/guide/core_concepts.html) và [API Reference](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-construct-library.html).

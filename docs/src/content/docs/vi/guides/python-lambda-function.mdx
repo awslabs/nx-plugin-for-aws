@@ -1,0 +1,197 @@
+---
+title: "Hàm Lambda trong Python"
+description: "Tài liệu tham khảo về Hàm Lambda trong Python"
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
+import NxCommands from '@components/nx-commands.astro';
+
+Generator Python Lambda Function cung cấp khả năng thêm một lambda function vào một dự án python hiện có.
+
+Generator này tạo một python lambda handler mới với cấu hình hạ tầng AWS CDK hoặc Terraform. Backend được tạo sử dụng AWS Lambda cho triển khai serverless, với tùy chọn type-safety sử dụng [Parser từ AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/utilities/parser/). Nó thiết lập [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/) cho khả năng quan sát, bao gồm logging, AWS X-Ray tracing và Cloudwatch Metrics.
+
+## Cách sử dụng
+
+### Tạo một Lambda Function
+
+Bạn có thể tạo một Lambda Function mới theo hai cách:
+
+<RunGenerator generator="py#lambda-function" />
+
+### Tùy chọn
+
+<GeneratorParameters generator="py#lambda-function" />
+
+## Kết quả của Generator
+
+Generator sẽ thêm các file sau vào dự án của bạn:
+
+<FileTree>
+
+- \<module-name>
+  - \<lambda-function>.py Triển khai function
+
+</FileTree>
+
+Nếu tùy chọn `functionPath` được cung cấp, generator sẽ thêm các file cần thiết vào đường dẫn được chỉ định:
+
+<FileTree>
+
+- \<module-name>
+  - \<custom-path>
+    - \<function-name>.py Triển khai function
+
+</FileTree>
+
+### Hạ tầng
+
+<Snippet name="shared-constructs" />
+
+Generator tạo infrastructure as code để triển khai function của bạn dựa trên `iacProvider` đã chọn:
+
+<Infrastructure>
+<Fragment slot="cdk">
+Generator tạo các CDK construct có thể được sử dụng để triển khai function của bạn, nằm trong thư mục `packages/common/constructs`.
+</Fragment>
+<Fragment slot="terraform">
+Generator tạo một Terraform module có thể được sử dụng để triển khai function của bạn, nằm trong thư mục `packages/common/terraform/src/app/lambda-functions/<function-name>`.
+</Fragment>
+</Infrastructure>
+
+## Triển khai Function của bạn
+
+Triển khai function chính nằm trong `<function-name>.py`. Đây là một ví dụ:
+
+```python
+import os
+
+from aws_lambda_powertools import Logger, Metrics, Tracer
+from aws_lambda_powertools.metrics import MetricUnit
+from aws_lambda_powertools.utilities.parser import event_parser
+from aws_lambda_powertools.utilities.parser.models import EventBridgeModel
+from aws_lambda_powertools.utilities.typing import LambdaContext
+
+os.environ["POWERTOOLS_METRICS_NAMESPACE"] = "Foo"
+os.environ["POWERTOOLS_SERVICE_NAME"] = "Foo"
+
+logger: Logger = Logger()
+metrics: Metrics = Metrics()
+tracer: Tracer = Tracer()
+
+@tracer.capture_lambda_handler
+@metrics.log_metrics
+@event_parser(model=EventBridgeModel)
+def lambda_handler(event: EventBridgeModel, context: LambdaContext):
+    logger.info("Received event", extra={"event": event.model_dump() })
+    metrics.add_metric(name="InvocationCount", unit=MetricUnit.Count, value=1)
+
+    try:
+        # TODO: Implement
+        metrics.add_metric(name="SuccessCount", unit=MetricUnit.Count, value=1)
+        # TODO: Implement success response if required
+    except Exception as e:
+        logger.exception(e)
+        metrics.add_metric(name="ErrorCount", unit=MetricUnit.Count, value=1)
+        # TODO: Implement error response if required
+```
+
+Generator tự động thiết lập một số tính năng:
+
+1. Tích hợp AWS Lambda Powertools cho khả năng quan sát
+2. Thu thập metrics
+3. Type-safety sử dụng `@event_parser`
+
+### Khả năng quan sát với AWS Lambda Powertools
+
+#### Logging
+
+Generator cấu hình structured logging sử dụng AWS Lambda Powertools.
+
+```python
+def lambda_handler(event: EventBridgeModel, context: LambdaContext):
+    logger.info("Received event", extra={"event": event.model_dump()})
+```
+
+:::tip
+Nên đặt correlation id cho tất cả các request duy nhất để dễ dàng debug và giám sát hơn. Vui lòng tham khảo tài liệu [aws powertools logger](https://docs.powertools.aws.dev/lambda/python/2.22.0/core/logger/#setting-a-correlation-id) để biết các best practice về correlation id.
+:::
+
+Logger tự động bao gồm:
+
+- Các request event
+- Thông tin Lambda context
+- Chỉ báo cold start
+
+#### Tracing
+
+AWS X-Ray tracing được cấu hình tự động. Bạn có thể thêm các subsegment tùy chỉnh vào traces của mình:
+
+```python
+def lambda_handler(event: EventBridgeModel, context: LambdaContext):
+    # Tạo một subsegment mới
+    with tracer.provider.in_subsegment("function-subsegment"):
+        # Logic của bạn ở đây
+        return ....
+```
+
+#### Metrics
+
+CloudWatch metrics được thu thập tự động cho mỗi request. Bạn có thể thêm các metric tùy chỉnh:
+
+```python
+def lambda_handler(event: EventBridgeModel, context: LambdaContext):
+    metrics.add_metric(name="NewMetric", unit=MetricUnit.Count, value=1)
+    return ...
+```
+
+Các metric mặc định bao gồm:
+
+- Số lần invocation
+- Số lần thành công/thất bại
+- Các metric cold start
+
+### Type Safety
+
+Nếu bạn đã chọn một `eventSource` khi tạo lambda function, function của bạn được trang bị [`@event_parser` từ AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/utilities/parser/). Ví dụ:
+
+```python {3}
+@event_parser(model=EventBridgeModel)
+def lambda_handler(event: EventBridgeModel, context: LambdaContext):
+    event.detail_type # <- type-safe với IDE autocompletion
+```
+
+Điều này cho phép bạn định nghĩa các data model sử dụng [Pydantic](https://docs.pydantic.dev/latest/), theo cách tương tự như làm việc với <Link path="guides/fastapi">Fast API</Link>.
+
+:::tip
+Nếu bạn có dữ liệu tùy chỉnh lồng trong một event, ví dụ như DynamoDB stream hoặc EventBridge event, bạn có thể hưởng lợi từ việc sử dụng [Envelopes](https://docs.powertools.aws.dev/lambda/python/latest/utilities/parser/#envelopes) để cung cấp type-safety cho dữ liệu tùy chỉnh đó.
+:::
+
+Nếu bạn không muốn type cho event của mình, bạn chỉ cần chọn `Any` cho `eventSource`.
+
+## Bundling
+
+Generator tự động cấu hình Python bundling cho các deployment package Lambda sử dụng [uv](https://docs.astral.sh/uv/):
+
+<NxCommands commands={['run <project-name>:bundle']} />
+
+:::note
+Điều này bundle toàn bộ dự án làm deployment package. Để giảm thiểu kích thước triển khai, bạn có thể muốn chia nhiều lambda function thành nhiều dự án Python được tạo bằng generator <Link path="guides/python-project">`py#project`</Link>.
+:::
+
+Quá trình này sử dụng:
+
+1. [`uv export`](https://docs.astral.sh/uv/reference/cli/#uv-export) để export các Python dependency của bạn vào file `requirements.txt`
+2. [`uv pip install`](https://docs.astral.sh/uv/reference/cli/#uv-pip-install) để cài đặt các dependency cho nền tảng target (`x86_64-manylinux2014`) cho triển khai Lambda
+
+:::note
+Nếu bạn thay đổi [lambda architecture sang ARM](https://docs.aws.amazon.com/lambda/latest/dg/foundation-arch.html), bạn sẽ cần chỉnh sửa bundle target của mình để sử dụng target `aarch64-manylinux2014`.
+:::
+
+## Triển khai Function của bạn
+
+<Snippet name="lambda-function/deploying-your-function" parentHeading="Deploying your Function" />

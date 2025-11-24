@@ -1,0 +1,377 @@
+---
+title: "Đóng góp một Generator"
+description: "Hướng dẫn chi tiết cách xây dựng một generator sử dụng @aws/nx-plugin."
+---
+
+```xml
+import {
+  Aside,
+  Code,
+  FileTree,
+  Steps,
+  Tabs,
+  TabItem,
+} from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import Drawer from '@components/drawer.astro';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import LinkCommand from '@components/link-command.astro';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
+import InstallCommand from '@components/install-command.astro';
+import dungeonAdventureArchitecturePng from '@assets/dungeon-game-architecture.png';
+import dungeonAdventureErPng from '@assets/dungeon-adventure-er.png';
+import baselineWebsitePng from '@assets/baseline-website.png';
+import baselineGamePng from '@assets/baseline-game.png';
+import nxGraphPng from '@assets/nx-graph.png';
+import gameSelectPng from '@assets/game-select.png';
+import gameConversationPng from '@assets/game-conversation.png';
+
+Hãy tạo một generator mới để đóng góp cho `@aws/nx-plugin`. Mục tiêu của chúng ta sẽ là tạo một procedure mới cho một tRPC API.
+
+### Kiểm tra Plugin
+
+Đầu tiên, hãy clone plugin:
+
+```bash
+git clone git@github.com:awslabs/nx-plugin-for-aws.git
+```
+
+Tiếp theo, cài đặt và build:
+
+```bash
+cd nx-plugin-for-aws
+pnpm i
+pnpm nx run-many --target build --all
+```
+
+### Tạo một Generator Trống
+
+Hãy tạo generator mới trong `packages/nx-plugin/src/trpc/procedure`.
+
+Chúng tôi cung cấp một generator để tạo các generator mới nên bạn có thể nhanh chóng scaffold generator mới của mình! Bạn có thể chạy generator này như sau:
+
+<RunGenerator generator="ts#nx-generator" requiredParameters={{ pluginProject: '@aws/nx-plugin', name: 'ts#trpc-api#procedure', directory: 'trpc/procedure', description: 'Adds a procedure to a tRPC API' }} />
+
+Bạn sẽ nhận thấy các file sau đã được tạo cho bạn:
+
+<FileTree>
+  - packages/nx-plugin/src/trpc/procedure
+    - schema.json Định nghĩa đầu vào cho generator
+    - schema.d.ts Một interface typescript khớp với schema
+    - generator.ts Function mà Nx chạy như generator
+    - generator.spec.ts Tests cho generator
+  - docs/src/content/docs/guides/
+    - trpc-procedure.mdx Tài liệu cho generator
+  - packages/nx-plugin/generators.json Được cập nhật để bao gồm generator
+</FileTree>
+
+Hãy cập nhật schema để thêm các thuộc tính chúng ta cần cho generator:
+
+<Tabs>
+  <TabItem label="schema.json">
+    ```json
+    {
+      "$schema": "https://json-schema.org/schema",
+      "$id": "tRPCProcedure",
+      "title": "Adds a procedure to a tRPC API",
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string",
+          "description": "tRPC API project",
+          "x-prompt": "Select the tRPC API project to add the procedure to",
+          "x-dropdown": "projects",
+          "x-priority": "important"
+        },
+        "procedure": {
+          "description": "The name of the new procedure",
+          "type": "string",
+          "x-prompt": "What would you like to call your new procedure?",
+          "x-priority": "important",
+        },
+        "type": {
+          "description": "The type of procedure to generate",
+          "type": "string",
+          "x-prompt": "What type of procedure would you like to generate?",
+          "x-priority": "important",
+          "default": "query",
+          "enum": ["query", "mutation"]
+        }
+      },
+      "required": ["project", "procedure"]
+    }
+    ```
+  </TabItem>
+  <TabItem label="schema.d.ts">
+    ```ts
+    export interface TrpcProcedureSchema {
+      project: string;
+      procedure: string;
+      type: 'query' | 'mutation';
+    }
+    ```
+  </TabItem>
+</Tabs>
+
+:::note
+Lưu ý rằng generator được cung cấp một `Tree` làm đầu vào, cũng như các options mà chúng ta đã định nghĩa trong schema. `Tree` về cơ bản là một hệ thống file ảo mà chúng ta có thể đọc và ghi để tạo hoặc cập nhật các file dự án. Chúng ta không muốn trực tiếp thao tác với filesystem, vì chúng ta không muốn thực hiện bất kỳ thay đổi nào nếu người dùng chạy generator ở chế độ "dry-run".
+:::
+
+Bạn sẽ nhận thấy generator đã được kết nối trong `packages/nx-plugin/generators.json`:
+
+```json
+ ...
+  "generators": {
+    ...
+    "ts#trpc-api#procedure": {
+      "factory": "./src/trpc/procedure/generator",
+      "schema": "./src/trpc/procedure/schema.json",
+      "description": "Adds a procedure to a tRPC API"
+    }
+  },
+...
+```
+
+### Triển khai Generator
+
+Để thêm một procedure vào tRPC API, chúng ta cần làm hai việc:
+
+1. Tạo một file TypeScript cho procedure mới
+2. Thêm procedure vào router
+
+#### Tạo Procedure mới
+
+Để tạo file TypeScript cho procedure mới, chúng ta sẽ sử dụng một tiện ích gọi là `generateFiles`. Sử dụng công cụ này, chúng ta có thể định nghĩa một template [EJS](https://ejs.co/) mà chúng ta có thể render trong generator với các biến dựa trên các options được người dùng chọn.
+
+Đầu tiên, chúng ta sẽ định nghĩa template trong `packages/nx-plugin/src/trpc/procedure/files/procedures/__procedureNameKebabCase__.ts.template`:
+
+```ts title="files/procedures/__procedureNameKebabCase__.ts.template"
+import { publicProcedure } from '../init.js';
+import { z } from 'zod';
+
+export const <%- procedureNameCamelCase %> = publicProcedure
+  .input(z.object({
+    // TODO: define input
+  }))
+  .output(z.object({
+    // TODO: define output
+  }))
+  .<%- procedureType %>(async ({ input, ctx }) => {
+    // TODO: implement!
+    return {};
+  });
+```
+
+:::tip
+Khi `generateFiles` xử lý template, nó sẽ thay thế các tham chiếu đến `__<variable>__` trong tên file/thư mục bằng các giá trị được cung cấp, cũng như loại bỏ `.template` khỏi tên file.
+
+Nội dung template là [EJS](https://ejs.co/), trong đó các biến được tham chiếu bằng cú pháp `<% ... %>`.
+:::
+
+Trong template, chúng ta đã tham chiếu ba biến:
+
+- `procedureNameCamelCase`
+- `procedureNameKebabCase`
+- `procedureType`
+
+Vì vậy, chúng ta cần đảm bảo truyền những biến đó cho `generateFiles`, cũng như thư mục để tạo file vào, cụ thể là vị trí của các file nguồn (tức là `sourceRoot`) cho dự án tRPC mà người dùng đã chọn làm đầu vào cho generator, mà chúng ta có thể trích xuất từ cấu hình dự án.
+
+Hãy cập nhật generator để làm điều đó:
+
+```ts title="procedure/generator.ts" {8-19}
+import {
+  generateFiles,
+  joinPathFragments,
+  readProjectConfiguration,
+  Tree,
+} from '@nx/devkit';
+import { TrpcProcedureSchema } from './schema';
+import { formatFilesInSubtree } from '../../utils/format';
+import camelCase from 'lodash.camelcase';
+import kebabCase from 'lodash.kebabcase';
+
+export const trpcProcedureGenerator = async (
+  tree: Tree,
+  options: TrpcProcedureSchema,
+) => {
+  const projectConfig = readProjectConfiguration(tree, options.project);
+
+  const procedureNameCamelCase = camelCase(options.procedure);
+  const procedureNameKebabCase = kebabCase(options.procedure);
+
+  generateFiles(
+    tree,
+    joinPathFragments(__dirname, 'files'),
+    projectConfig.sourceRoot,
+    {
+      procedureNameCamelCase,
+      procedureNameKebabCase,
+      procedureType: options.type,
+    },
+  );
+
+  await formatFilesInSubtree(tree);
+};
+
+export default trpcProcedureGenerator;
+```
+
+:::tip
+Chúng ta cũng đã gọi `formatFilesInSubtree` ở cuối generator, điều này đảm bảo rằng bất kỳ file nào chúng ta tạo hoặc sửa đổi đều được định dạng theo cài đặt [prettier](https://prettier.io/) của người dùng.
+:::
+
+#### Thêm Procedure vào Router
+
+Tiếp theo, chúng ta muốn generator kết nối procedure mới vào router. Điều này có nghĩa là đọc và cập nhật mã nguồn của người dùng!
+
+Chúng ta sử dụng thao tác TypeScript AST để cập nhật các phần liên quan của file nguồn TypeScript. Có một số helper gọi là `replace` và `destructuredImport` để làm cho việc này dễ dàng hơn một chút.
+
+```ts title="procedure/generator.ts" {6, 23-33}
+import {
+  generateFiles,
+  joinPathFragments,
+  readProjectConfiguration,
+  Tree,
+} from '@nx/devkit';
+import { TrpcProcedureSchema } from './schema';
+import { formatFilesInSubtree } from '../../utils/format';
+import camelCase from 'lodash.camelcase';
+import kebabCase from 'lodash.kebabcase';
+import { destructuredImport, replace } from '../../utils/ast';
+import { factory, ObjectLiteralExpression } from 'typescript';
+
+export const trpcProcedureGenerator = async (
+  tree: Tree,
+  options: TrpcProcedureSchema,
+) => {
+  const projectConfig = readProjectConfiguration(tree, options.project);
+
+  const procedureNameCamelCase = camelCase(options.procedure);
+  const procedureNameKebabCase = kebabCase(options.procedure);
+
+  generateFiles(
+    tree,
+    joinPathFragments(__dirname, 'files'),
+    projectConfig.sourceRoot,
+    {
+      procedureNameCamelCase,
+      procedureNameKebabCase,
+      procedureType: options.type,
+    },
+  );
+
+  const routerPath = joinPathFragments(projectConfig.sourceRoot, 'router.ts');
+
+  destructuredImport(
+    tree,
+    routerPath,
+    [procedureNameCamelCase],
+    `./procedures/${procedureNameKebabCase}.js`,
+  );
+
+  replace(
+    tree,
+    routerPath,
+    'CallExpression[expression.name="router"] > ObjectLiteralExpression',
+    (node) =>
+      factory.createObjectLiteralExpression([
+        ...(node as ObjectLiteralExpression).properties,
+        factory.createShorthandPropertyAssignment(procedureNameCamelCase),
+      ]),
+  );
+
+  await formatFilesInSubtree(tree);
+};
+
+export default trpcProcedureGenerator;
+```
+
+:::tip
+Trong đoạn code trên, `replace` sử dụng một selector [tsquery](https://github.com/phenomnomnominal/tsquery) để tìm đối số được thêm vào function `router`.
+
+Bạn có thể sử dụng [tsquery playground](https://tsquery-playground.firebaseapp.com/) như một công cụ hữu ích để thử nghiệm các selector khác nhau.
+:::
+
+Bây giờ chúng ta đã triển khai generator, hãy compile nó để đảm bảo nó có sẵn để chúng ta kiểm tra trong dự án dungeon adventure.
+
+```bash
+pnpm nx run @aws/nx-plugin:compile
+```
+
+### Kiểm thử Generator
+
+Để kiểm thử generator, chúng ta sẽ liên kết Nx Plugin for AWS local của mình với một codebase hiện có.
+
+#### Tạo một Dự án Test với tRPC API
+
+:::note
+Nếu bạn đã hoàn thành <Link path="get_started/tutorials/dungeon_game/overview">tutorial dungeon adventure</Link>, hoặc đã có một Nx workspace hiện có khác sử dụng tRPC API, bạn có thể bỏ qua bước này.
+:::
+
+Trong một thư mục riêng, tạo một test workspace mới:
+
+<CreateNxWorkspaceCommand workspace="trpc-generator-test" />
+
+Tiếp theo, hãy tạo một tRPC API để thêm procedure vào:
+
+<RunGenerator generator="ts#trpc-api" requiredParameters={{apiName:"test-api"}} noInteractive />
+
+#### Liên kết Nx Plugin for AWS local của chúng ta
+
+Trong codebase của bạn, hãy liên kết `@aws/nx-plugin` local của chúng ta:
+
+<LinkCommand
+  dependency="@aws/nx-plugin"
+  dependencyPath="path/to/nx-plugin-for-aws/dist/packages/nx-plugin"
+  projectPath="path/to/trpc-generator-test"
+/>
+
+:::note
+Lưu ý ở trên chúng ta đã liên kết đến plugin đã compile trong `dist/packages/nx-plugin` thay vì mã nguồn.
+:::
+
+#### Chạy Generator mới
+
+Hãy thử generator mới:
+
+<RunGenerator generator="ts#trpc-api#procedure" />
+
+:::note
+Nếu bạn không thấy generator mới trong danh sách trong VSCode, bạn có thể cần làm mới Nx workspace:
+
+<NxCommands commands={['reset']} />
+:::
+
+Nếu thành công, chúng ta đã tạo một procedure mới và thêm procedure vào router của chúng ta trong `router.ts`.
+
+### Bài tập
+
+Nếu bạn đã đến đây và vẫn còn thời gian để thử nghiệm với Nx generators, đây là một số gợi ý về các tính năng để thêm vào procedure generator:
+
+#### 1. Nested Operations
+
+Thử cập nhật generator để hỗ trợ nested routers bằng cách:
+
+- Chấp nhận ký hiệu dấu chấm cho đầu vào `procedure` (ví dụ: `games.query`)
+- Tạo một procedure với tên dựa trên ký hiệu dấu chấm đảo ngược (ví dụ: `queryGames`)
+- Thêm nested router thích hợp (hoặc cập nhật nó nếu nó đã tồn tại!)
+
+#### 2. Validation
+
+Generator của chúng ta nên bảo vệ chống lại các vấn đề tiềm ẩn, chẳng hạn như người dùng chọn một `project` không phải là tRPC API. Hãy xem generator `api-connection` để xem ví dụ về điều này.
+
+#### 3. Unit Tests
+
+Viết một số unit tests cho generator. Chúng khá đơn giản để triển khai, và hầu hết tuân theo luồng chung:
+
+1. Tạo một empty workspace tree bằng cách sử dụng `createTreeUsingTsSolutionSetup()`
+2. Thêm bất kỳ file nào đã tồn tại trong tree (ví dụ: `project.json` và `src/router.ts` cho tRPC backend)
+3. Chạy generator đang được kiểm thử
+4. Xác thực các thay đổi mong đợi được thực hiện đối với tree
+
+#### 4. End to End Tests
+
+Hiện tại, chúng ta có một "smoke test" duy nhất chạy tất cả các generators và đảm bảo rằng build thành công. Điều này nên được cập nhật để bao gồm generator mới.
+```

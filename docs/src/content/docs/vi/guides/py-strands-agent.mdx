@@ -1,0 +1,570 @@
+---
+title: "Python Strands Agent"
+description: "Tạo Python Strands Agent để xây dựng AI agent với các công cụ và triển khai lên Amazon Bedrock AgentCore Runtime"
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Link from '@components/link.astro';
+import Snippet from '@components/snippet.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+
+Tạo một Python [Strands Agent](https://strandsagents.com/) để xây dựng các AI agent với các công cụ, và tùy chọn triển khai nó lên [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/).
+
+## Strands là gì?
+
+[Strands](https://strandsagents.com/latest/documentation/docs/) là một framework Python nhẹ, sẵn sàng cho production để xây dựng các AI agent. Các tính năng chính bao gồm:
+
+- **Nhẹ và có thể tùy chỉnh**: Vòng lặp agent đơn giản không cản trở bạn
+- **Sẵn sàng cho production**: Khả năng quan sát đầy đủ, theo dõi và các tùy chọn triển khai cho quy mô lớn
+- **Không phụ thuộc vào model và provider**: Hỗ trợ nhiều model khác nhau từ các provider khác nhau
+- **Công cụ được cộng đồng đóng góp**: Bộ công cụ mạnh mẽ do cộng đồng đóng góp
+- **Hỗ trợ đa agent**: Các kỹ thuật nâng cao như nhóm agent và agent tự động
+- **Chế độ tương tác linh hoạt**: Hỗ trợ hội thoại, streaming và non-streaming
+
+## Cách sử dụng
+
+### Tạo một Strands Agent
+
+Bạn có thể tạo một Python Strands Agent theo hai cách:
+
+<RunGenerator generator="py#strands-agent" />
+
+:::tip
+Đầu tiên hãy sử dụng generator <Link path="/guides/python-project">`py#project`</Link> để tạo một project để thêm Strands Agent của bạn vào.
+:::
+
+### Tùy chọn
+
+<GeneratorParameters generator="py#strands-agent" />
+
+## Kết quả của Generator
+
+Generator sẽ thêm các file sau vào Python project hiện có của bạn:
+
+<FileTree>
+  - your-project/
+    - your_module/
+      - agent/ (hoặc tên tùy chỉnh nếu được chỉ định)
+        - \_\_init\_\_.py Khởi tạo Python package
+        - agent.py Định nghĩa agent chính với các công cụ mẫu
+        - main.py Entry point cho Bedrock AgentCore Runtime
+        - agentcore_mcp_client.py Client factory hữu ích để gọi các MCP server cũng được host trên Bedrock AgentCore runtime
+        - Dockerfile Entry point để host agent của bạn (bị loại trừ khi `computeType` được đặt thành `None`)
+    - pyproject.toml Được cập nhật với các dependencies của Strands
+    - project.json Được cập nhật với các target serve agent
+</FileTree>
+
+### Hạ tầng
+
+:::note
+Nếu bạn chọn `None` cho `computeType`, generator sẽ không tạo bất kỳ infrastructure as code nào.
+:::
+
+<Snippet name="shared-constructs" />
+
+Để triển khai Strands Agent của bạn, các file sau được tạo:
+
+<Infrastructure>
+<Fragment slot="cdk">
+<FileTree>
+  - packages/common/constructs/src
+    - app
+      - agents
+        - \<project-name>
+          - \<project-name>.ts CDK construct để triển khai agent của bạn
+          - Dockerfile File docker passthrough được sử dụng bởi CDK construct
+    - core
+      - agent-core
+        - runtime.ts CDK construct chung để triển khai lên Bedrock AgentCore Runtime
+</FileTree>
+</Fragment>
+<Fragment slot="terraform">
+<FileTree>
+  - packages/common/terraform/src
+    - app
+      - agents
+        - \<project-name>
+          - \<project-name>.tf Module để triển khai agent của bạn
+    - core
+      - agent-core
+        - runtime.tf Module chung để triển khai lên Bedrock AgentCore Runtime
+</FileTree>
+</Fragment>
+</Infrastructure>
+
+## Làm việc với Strands Agent của bạn
+
+### Thêm công cụ
+
+Các công cụ là các hàm mà AI agent có thể gọi để thực hiện các hành động. Framework Strands sử dụng phương pháp dựa trên decorator đơn giản để định nghĩa các công cụ.
+
+Bạn có thể thêm các công cụ mới trong file [`agent.py`](packages/nx-plugin/src/py/strands-agent/files/agent.py.template:6):
+
+```python
+from strands import Agent, tool
+
+@tool
+def calculate_sum(numbers: list[int]) -> int:
+    """Calculate the sum of a list of numbers"""
+    return sum(numbers)
+
+@tool
+def get_weather(city: str) -> str:
+    """Get weather information for a city"""
+    # Your weather API integration here
+    return f"Weather in {city}: Sunny, 25°C"
+
+# Add tools to your agent
+agent = Agent(
+    system_prompt="You are a helpful assistant with access to various tools.",
+    tools=[calculate_sum, get_weather],
+)
+```
+
+Framework Strands tự động xử lý:
+- Xác thực kiểu dựa trên type hints của hàm
+- Tạo JSON schema cho tool calling
+- Xử lý lỗi và định dạng response
+
+### Sử dụng các công cụ có sẵn
+
+Strands cung cấp một bộ sưu tập các công cụ có sẵn thông qua package `strands-tools`:
+
+```python
+from strands_tools import current_time, http_request, file_read
+
+agent = Agent(
+    system_prompt="You are a helpful assistant.",
+    tools=[current_time, http_request, file_read],
+)
+```
+
+### Cấu hình Model
+
+Mặc định, các Strands agent sử dụng Claude 4 Sonnet, nhưng bạn có thể tùy chỉnh model provider. Xem [tài liệu Strands về model providers](https://strandsagents.com/latest/documentation/docs/user-guide/quickstart/#model-providers) để biết các tùy chọn cấu hình:
+
+```python
+from strands import Agent
+from strands.models import BedrockModel
+
+# Create a BedrockModel
+bedrock_model = BedrockModel(
+    model_id="anthropic.claude-sonnet-4-20250514-v1:0",
+    region_name="us-west-2",
+    temperature=0.3,
+)
+
+agent = Agent(model=bedrock_model)
+```
+
+### Sử dụng MCP Servers
+
+Bạn có thể [thêm các công cụ từ MCP servers](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/tools/mcp-tools/) vào Strands agent của bạn.
+
+Để sử dụng các MCP Server mà bạn đã tạo bằng generator <Link path="/guides/py-mcp-server">`py#mcp-server`</Link> hoặc <Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link> (hoặc các server khác được host trên Bedrock AgentCore Runtime), một client factory được tạo cho bạn trong `agentcore_mcp_client.py`.
+
+Bạn có thể cập nhật phương thức `get_agent` trong `agent.py` để tạo các MCP client và thêm công cụ. Ví dụ sau đây cho thấy cách thực hiện điều này với xác thực IAM (SigV4):
+
+```python
+# agent.py
+import os
+from contextlib import contextmanager
+
+import boto3
+from strands import Agent
+
+from .agentcore_mcp_client import AgentCoreMCPClient
+
+# Obtain the region an credentials
+region = os.environ["AWS_REGION"]
+boto_session = boto3.Session(region_name=region)
+credentials = boto_session.get_credentials()
+
+@contextmanager
+def get_agent(session_id: str):
+    mcp_client = AgentCoreMCPClient.with_iam_auth(
+        agent_runtime_arn=os.environ["MCP_AGENTCORE_RUNTIME_ARN"],
+        credentials=credentials,
+        region=region,
+        session_id=session_id,
+    )
+
+    with mcp_client:
+        mcp_tools = mcp_client.list_tools_sync()
+
+        yield Agent(
+            system_prompt="..."
+            tools=[*mcp_tools],
+        )
+```
+
+:::tip
+Nếu MCP server đích của bạn sử dụng xác thực JWT, bạn có thể sử dụng phương thức `AgentCoreMCPClient.with_jwt_auth` để tạo client thay thế.
+:::
+
+Với ví dụ xác thực IAM ở trên, chúng ta cần cấu hình hai thứ trong hạ tầng của mình. Thứ nhất, chúng ta cần thêm biến môi trường mà agent của chúng ta đang sử dụng cho ARN của AgentCore Runtime của MCP server, và thứ hai chúng ta cần cấp quyền cho agent của chúng ta để gọi MCP server. Điều này có thể đạt được như sau:
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts {9, 13}
+import { MyProjectAgent, MyProjectMcpServer } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const mcpServer = new MyProjectMcpServer(this, 'MyProjectMcpServer');
+
+    const agent = new MyProjectAgent(this, 'MyProjectAgent', {
+      environment: {
+        MCP_AGENTCORE_RUNTIME_ARN: mcpServer.agentCoreRuntime.arn,
+      },
+    });
+
+    mcpServer.agentCoreRuntime.grantInvoke(agent.agentCoreRuntime);
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+```terraform
+# MCP Server
+module "my_project_mcp_server" {
+  source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
+}
+
+# Agent
+module "my_project_agent" {
+  source = "../../common/terraform/src/app/agents/my-project-agent"
+
+  env = {
+    MCP_AGENTCORE_RUNTIME_ARN = module.my_project_mcp_server.agent_core_runtime_arn
+  }
+
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = [
+        "bedrock-agentcore:InvokeAgentRuntime"
+      ]
+      Resource = [
+        module.my_project_mcp_server.agent_core_runtime_arn,
+        "${module.my_project_mcp_server.agent_core_runtime_arn}/*"
+      ]
+    }
+  ]
+}
+```
+</Fragment>
+</Infrastructure>
+
+### Thêm nữa
+
+Để có hướng dẫn chuyên sâu hơn về viết Strands agent, hãy tham khảo [tài liệu Strands](https://strandsagents.com/latest/documentation/docs/).
+
+## FastAPI Server
+
+Generator sử dụng [FastAPI](https://fastapi.tiangolo.com/) để tạo HTTP server cho Strands Agent của bạn. FastAPI cung cấp một web framework hiện đại, nhanh để xây dựng API với Python, với tài liệu API tự động và xác thực kiểu.
+
+Server được tạo bao gồm:
+- Thiết lập ứng dụng FastAPI với CORS middleware
+- Middleware xử lý lỗi
+- Tạo OpenAPI schema
+- Health check endpoint (`/ping`)
+- Agent invocation endpoint (`/invocations`)
+
+### Tùy chỉnh Invoke Inputs và Outputs với Pydantic
+
+Invocation endpoint của agent sử dụng các model [Pydantic](https://docs.pydantic.dev/) để định nghĩa và xác thực các schema request và response. Bạn có thể tùy chỉnh các model này trong `main.py` để phù hợp với yêu cầu của agent.
+
+#### Định nghĩa Input Models
+
+Model `InvokeInput` mặc định chấp nhận một prompt và session ID.
+
+```python
+from pydantic import BaseModel
+
+class InvokeInput(BaseModel):
+    prompt: str
+    session_id: str
+```
+
+Bạn có thể mở rộng model này để bao gồm bất kỳ trường bổ sung nào mà agent của bạn cần.
+
+:::caution
+Bạn có thể muốn trừu tượng hóa một phần hoặc toàn bộ session ID khỏi caller nếu người dùng gọi agent của bạn trực tiếp. Ví dụ, bạn có thể sử dụng ID người dùng đã xác thực như một phần của session ID.
+
+Cũng đáng lưu ý rằng tùy thuộc vào use case của bạn, bạn có thể cần triển khai authorization cho các session, ví dụ đảm bảo rằng người dùng chỉ có thể truy cập các session của riêng họ chứ không phải của người dùng khác.
+:::
+
+#### Định nghĩa Output Models
+
+Đối với streaming responses, type annotation trả về trên endpoint của bạn tương ứng với kiểu của mỗi giá trị được yield bởi generator function của bạn. Mặc định, agent yield các string chứa văn bản response của agent khi nó stream trở lại từ Strands:
+
+```python
+@app.post("/invocations", openapi_extra={"x-streaming": True})
+async def invoke(input: InvokeInput) -> str:
+    """Entry point for agent invocation"""
+    return StreamingResponse(handle_invoke(input), media_type="text/event-stream")
+```
+
+Bạn có thể định nghĩa một Pydantic model để yield dữ liệu có cấu trúc thay thế:
+
+```python
+from pydantic import BaseModel
+
+class StreamChunk(BaseModel):
+    content: str
+    timestamp: str
+    token_count: int
+
+@app.post("/invocations", openapi_extra={"x-streaming": True})
+async def invoke(input: InvokeInput) -> StreamChunk:
+    return StreamingResponse(handle_invoke(input), media_type="application/json")
+```
+
+## Bedrock AgentCore Python SDK
+
+Generator bao gồm một dependency trên [Bedrock AgentCore Python SDK](https://github.com/aws/bedrock-agentcore-sdk-python) cho các hằng số `PingStatus`. Nếu muốn, việc sử dụng `BedrockAgentCoreApp` thay vì FastAPI là khá đơn giản, tuy nhiên lưu ý rằng type-safety sẽ bị mất.
+
+Bạn có thể tìm thêm chi tiết về khả năng của SDK trong [tài liệu tại đây](https://aws.github.io/bedrock-agentcore-starter-toolkit/user-guide/runtime/quickstart.html).
+
+:::note
+Vì generator tạo ra hạ tầng CDK hoặc Terraform để quản lý việc triển khai agent của bạn, bạn không cần sử dụng `bedrock-agentcore-starter-toolkit` mà tài liệu đề cập để triển khai agent của bạn.
+:::
+
+## Chạy Strands Agent của bạn
+
+### Phát triển Local
+
+Generator cấu hình một target có tên `<your-agent-name>-serve`, khởi động Strands Agent của bạn locally để phát triển và kiểm thử.
+
+<NxCommands commands={['run your-project:agent-serve']} />
+
+Lệnh này sử dụng `uv run` để thực thi Strands Agent của bạn bằng [Bedrock AgentCore Python SDK](https://github.com/aws/bedrock-agentcore-sdk-python).
+
+## Triển khai Strands Agent của bạn lên Bedrock AgentCore Runtime
+
+### Infrastructure as Code
+
+Nếu bạn chọn `BedrockAgentCoreRuntime` cho `computeType`, hạ tầng CDK hoặc Terraform liên quan được tạo mà bạn có thể sử dụng để triển khai Strands Agent của bạn lên [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html).
+
+<Infrastructure>
+<Fragment slot="cdk">
+Một CDK construct được tạo cho bạn, được đặt tên dựa trên `name` bạn đã chọn khi chạy generator, hoặc `<ProjectName>Agent` theo mặc định.
+
+Bạn có thể sử dụng CDK construct này trong một ứng dụng CDK:
+
+```ts {6}
+import { MyProjectAgent } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    // Add the agent to your stack
+    const agent = new MyProjectAgent(this, 'MyProjectAgent');
+
+    // Grant permissions to invoke the relevant models in bedrock
+    agent.agentCoreRuntime.role.addToPolicy(
+      new PolicyStatement({
+        actions: [
+          'bedrock:InvokeModel',
+          'bedrock:InvokeModelWithResponseStream',
+        ],
+        // You can scope the below down to the specific models you use
+        resources: ['arn:aws:bedrock:*::foundation-model/*'],
+      }),
+    );
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+Một Terraform module được tạo cho bạn, được đặt tên dựa trên `name` bạn đã chọn khi chạy generator, hoặc `<ProjectName>-agent` theo mặc định.
+
+Bạn có thể sử dụng terraform module này trong một Terraform project:
+
+```terraform
+# Agent
+module "my_project_agent" {
+  # Relative path to the generated module in the common/terraform project
+  source = "../../common/terraform/src/app/agents/my-project-agent"
+
+  # Grant permissions to invoke the relevant models in bedrock
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream"
+      ]
+      Resource = [
+        "arn:aws:bedrock:*::foundation-model/*"
+      ]
+    }
+  ]
+}
+```
+</Fragment>
+</Infrastructure>
+
+:::note
+Khi triển khai lên Bedrock AgentCore Runtime, bạn cần đảm bảo rằng các foundation model thích hợp được bật trong tài khoản AWS của bạn. Mặc định, các Strands agent sử dụng Claude 4 Sonnet, nhưng điều này có thể được tùy chỉnh như mô tả ở trên.
+
+Để bật quyền truy cập model trong Amazon Bedrock, hãy làm theo [hướng dẫn tại đây](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html).
+:::
+
+:::caution
+[Docker](https://www.docker.com/) là bắt buộc để build và triển khai Strands Agent của bạn. Đảm bảo bạn đã cài đặt và khởi động Docker để tránh các lỗi như:
+
+```
+ERROR: Cannot connect to the Docker daemon at unix://path/to/docker.sock.
+```
+:::
+
+### Bundle và Docker Targets
+
+Để build Strands Agent của bạn cho Bedrock AgentCore Runtime, một target `bundle` được thêm vào project của bạn, thực hiện:
+
+- Export các Python dependencies của bạn vào file `requirements.txt` bằng `uv export`
+- Cài đặt dependencies cho nền tảng đích (`aarch64-manylinux2014`) bằng `uv pip install`
+
+Một target `docker` cụ thể cho Strands Agent của bạn cũng được thêm vào, thực hiện:
+
+- Build một docker image từ `Dockerfile` chạy agent của bạn, theo [hợp đồng runtime AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-service-contract.html)
+
+:::tip
+Docker image được build bằng một tag (ví dụ `my-scope-my-project-agent:latest`), được tham chiếu bởi hạ tầng CDK hoặc Terraform của bạn, cho phép `Dockerfile` của bạn được đặt cùng với Strands Agent project của bạn.
+:::
+
+### Xác thực
+
+#### IAM
+
+Mặc định, Strands Agent của bạn sẽ được bảo mật bằng xác thực IAM, chỉ cần triển khai nó mà không có bất kỳ tham số nào:
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts {5}
+import { MyProjectAgent } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    new MyProjectAgent(this, 'MyProjectAgent');
+  }
+}
+```
+
+Bạn có thể cấp quyền truy cập để gọi agent của bạn trên Bedrock AgentCore Runtime bằng phương thức `grantInvoke`, ví dụ:
+
+```ts {8}
+import { MyProjectAgent } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const agent = new MyProjectAgent(this, 'MyProjectAgent');
+    const lambdaFunction = new Function(this, ...);
+
+    agent.agentCoreRuntime.grantInvoke(lambdaFunction);
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+```terraform
+# Agent
+module "my_project_agent" {
+  # Relative path to the generated module in the common/terraform project
+  source = "../../common/terraform/src/app/agents/my-project-agent"
+}
+```
+
+Để cấp quyền truy cập gọi agent của bạn, bạn sẽ cần thêm một policy như sau, tham chiếu đến output `module.my_project_agent.agent_core_runtime_arn`:
+
+```terraform
+{
+  Effect = "Allow"
+  Action = [
+    "bedrock-agentcore:InvokeAgentRuntime"
+  ]
+  Resource = [
+    module.my_project_agent.agent_core_runtime_arn,
+    "${module.my_project_agent.agent_core_runtime_arn}/*"
+  ]
+}
+```
+</Fragment>
+</Infrastructure>
+
+#### Cognito JWT Authentication
+
+Dưới đây minh họa cách cấu hình xác thực Cognito cho agent của bạn.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Để cấu hình xác thực JWT, bạn có thể truyền thuộc tính `authorizerConfiguration` cho agent construct của bạn. Đây là một ví dụ cấu hình một Cognito user pool và client để bảo mật agent:
+
+```ts {13-18}
+import { MyProjectAgent } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const userPool = new UserPool(this, 'UserPool');
+    const client = userPool.addClient('Client', {
+      authFlows: {
+        userPassword: true,
+      },
+    });
+
+    new MyProjectAgent(this, 'MyProjectAgent', {
+      authorizerConfiguration: {
+        customJwtAuthorizer: {
+          discoveryUrl: `https://cognito-idp.${Stack.of(userPool).region}.amazonaws.com/${userPool.userPoolId}/.well-known/openid-configuration`,
+          allowedClients: [client.userPoolClientId],
+        },
+      },
+    });
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+Để cấu hình xác thực JWT, bạn có thể chỉnh sửa agent module của bạn để cấu hình biến `customJWTAuthorizer` như sau:
+
+```terraform {18-21}
+# packages/common/terraform/src/app/agents/my-project-agent/my-project-agent.tf
+
+data "aws_region" "current" {}
+
+locals {
+  aws_region = data.aws_region.current.name
+
+  # Replace with your user pool and client ids or expose as variables
+  user_pool_id = "xxx"
+  user_pool_client_ids = ["yyy"]
+}
+
+module "agent_core_runtime" {
+  source = "../../../core/agent-core"
+  agent_runtime_name = "MyProjectAgent"
+  docker_image_tag = "my-scope-my-project-agent:latest"
+  server_protocol = "HTTP"
+  customJWTAuthorizer = {
+    discoveryUrl = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration",
+    allowedClients = local.user_pool_client_ids
+  }
+  env = var.env
+  additional_iam_policy_statements = var.additional_iam_policy_statements
+  tags = var.tags
+}
+```
+</Fragment>
+</Infrastructure>
+
+### Khả năng quan sát
+
+Agent của bạn được tự động cấu hình với khả năng quan sát bằng cách sử dụng [AWS Distro for Open Telemetry](https://aws.amazon.com/otel/) (ADOT), bằng cách cấu hình auto-instrumentation trong `Dockerfile` của bạn.
+
+Bạn có thể tìm thấy các trace trong AWS Console CloudWatch, bằng cách chọn "GenAI Observability" trong menu. Lưu ý rằng để các trace được điền, bạn sẽ cần bật [Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search.html).
+
+Để biết thêm chi tiết, hãy tham khảo [tài liệu AgentCore về observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html).

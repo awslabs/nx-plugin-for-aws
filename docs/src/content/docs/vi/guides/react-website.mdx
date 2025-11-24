@@ -1,0 +1,349 @@
+---
+title: "Trang Web React"
+description: "Tài liệu tham khảo cho Trang Web React"
+---
+
+import { FileTree, Steps } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
+
+Generator này tạo một trang web [React](https://react.dev/) mới với [CloudScape](http://cloudscape.design/) đã được cấu hình, cùng với cơ sở hạ tầng AWS CDK hoặc Terraform để triển khai trang web của bạn lên đám mây dưới dạng trang web tĩnh được lưu trữ trong [S3](https://aws.amazon.com/s3/), phân phối bởi [CloudFront](https://aws.amazon.com/cloudfront/) và được bảo vệ bởi [WAF](https://aws.amazon.com/waf/).
+
+Ứng dụng được tạo ra sử dụng [Vite](https://vite.dev/) làm công cụ xây dựng và đóng gói. Nó sử dụng [TanStack Router](https://tanstack.com/router/v1) cho định tuyến an toàn kiểu.
+
+:::note
+Mặc dù generator này thiết lập cho bạn CloudScape, về cơ bản đây là một generator dự án React, và bạn có thể sửa đổi mã của mình để chuyển sang một hệ thống thiết kế hoặc thư viện component thay thế nếu muốn.
+:::
+
+## Cách sử dụng
+
+### Tạo một React Website
+
+Bạn có thể tạo một React Website mới theo hai cách:
+
+<RunGenerator generator="ts#react-website" />
+
+### Tùy chọn
+
+<GeneratorParameters generator="ts#react-website" />
+
+## Kết quả từ Generator
+
+Generator sẽ tạo cấu trúc dự án sau trong thư mục `<directory>/<name>`:
+
+<FileTree>
+  - index.html Điểm vào HTML
+  - public Tài nguyên tĩnh
+  - src
+    - main.tsx Điểm vào ứng dụng với thiết lập React
+    - config.ts Cấu hình ứng dụng (ví dụ: logo)
+    - components
+      - AppLayout Các component cho bố cục tổng thể CloudScape và thanh điều hướng
+    - hooks
+      - useAppLayout.tsx Hook để điều chỉnh AppLayout từ các component lồng nhau
+    - routes
+      - welcome
+        - index.tsx Ví dụ route (hoặc trang) cho @tanstack/react-router
+    - styles.css Các style toàn cục
+  - vite.config.ts Cấu hình Vite và Vitest
+  - tsconfig.json Cấu hình TypeScript cơ bản cho mã nguồn và test
+  - tsconfig.app.json Cấu hình TypeScript cho mã nguồn
+  - tsconfig.spec.json Cấu hình TypeScript cho test
+</FileTree>
+
+### Cơ sở hạ tầng
+
+<Snippet name="shared-constructs" />
+
+Generator tạo infrastructure as code để triển khai trang web của bạn dựa trên `iacProvider` bạn đã chọn:
+
+<Infrastructure>
+<Fragment slot="cdk">
+<FileTree>
+  - packages/common/constructs/src
+    - app
+      - static-websites
+        - \<name>.ts Cơ sở hạ tầng cụ thể cho trang web của bạn
+    - core
+      - static-website.ts Construct StaticWebsite chung
+</FileTree>
+</Fragment>
+<Fragment slot="terraform">
+<FileTree>
+  - packages/common/terraform/src
+    - app
+      - static-websites
+        - \<name>
+          - \<name>.tf Module cụ thể cho trang web của bạn
+    - core
+      - static-website
+        - static-website.tf Module trang web tĩnh chung
+</FileTree>
+</Fragment>
+</Infrastructure>
+
+## Triển khai React Website của bạn
+
+[Tài liệu React](https://react.dev/learn) là nơi tốt để bắt đầu học các kiến thức cơ bản về xây dựng với React. Bạn có thể tham khảo [tài liệu CloudScape](https://cloudscape.design/components/) để biết chi tiết về các component có sẵn và cách sử dụng chúng.
+
+### Routes
+
+#### Tạo một Route/Trang
+
+Trang web CloudScape của bạn đi kèm với [TanStack Router](https://tanstack.com/router/v1) được cấu hình mặc định. Điều này giúp dễ dàng thêm các route mới:
+
+<Steps>
+  1. [Chạy Local Development Server](#local-development-server)
+  2. Tạo một file `<page-name>.tsx` mới trong `src/routes`, với vị trí của nó trong cây thư mục đại diện cho đường dẫn
+  3. Lưu ý rằng `Route` và `RouteComponent` được tự động tạo cho bạn. Bạn có thể bắt đầu xây dựng trang của mình tại đây!
+</Steps>
+
+#### Điều hướng giữa các Trang
+
+Bạn có thể sử dụng component `Link` hoặc hook `useNavigate` để điều hướng giữa các trang:
+
+```tsx {1, 4, 8-9, 14}
+import { Link, useNavigate } from '@tanstack/react-router';
+
+export const MyComponent = () => {
+  const navigate = useNavigate();
+
+  const submit = async () => {
+    const id = await ...
+    // Sử dụng `navigate` để chuyển hướng sau một hành động bất đồng bộ
+    navigate({ to: '/products/$id', { params: { id }} });
+  };
+
+  return (
+    <>
+      <Link to="/products">Cancel</Link>
+      <Button onClick={submit}>Submit</Button>
+    </>
+  )
+};
+```
+
+Để biết thêm chi tiết, hãy xem tài liệu [TanStack Router](https://tanstack.com/router/latest/docs/framework/react/overview).
+
+## Cấu hình Runtime
+
+Cấu hình từ cơ sở hạ tầng của bạn được cung cấp cho trang web của bạn thông qua Runtime Configuration. Điều này cho phép trang web của bạn truy cập các chi tiết như URL API mà không được biết cho đến khi ứng dụng của bạn được triển khai.
+
+### Cơ sở hạ tầng
+
+<Infrastructure>
+<Fragment slot="cdk">
+Construct CDK `RuntimeConfig` có thể được sử dụng để thêm và truy xuất cấu hình trong cơ sở hạ tầng CDK của bạn. Các construct CDK được tạo bởi các generator `@aws/nx-plugin` (như <Link path="guides/trpc">`ts#trpc-api`</Link> và <Link path="guides/fastapi">`py#fast-api`</Link>) sẽ tự động thêm các giá trị phù hợp vào `RuntimeConfig`.
+
+Construct CDK của trang web của bạn sẽ triển khai cấu hình runtime dưới dạng file `runtime-config.json` vào thư mục gốc của bucket S3 của bạn.
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {9-12,14-15}
+import { Stack } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { MyWebsite } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    // Tự động thêm các giá trị vào RuntimeConfig
+    new MyApi(this, 'MyApi', {
+      integrations: MyApi.defaultIntegrations(this).build(),
+    });
+
+    // Tự động triển khai runtime config vào runtime-config.json
+    new MyWebsite(this, 'MyWebsite');
+  }
+}
+```
+
+:::caution
+Bạn phải đảm bảo rằng bạn khai báo trang web của mình _sau_ bất kỳ construct nào thêm vào `RuntimeConfig`, nếu không chúng sẽ bị thiếu trong file `runtime-config.json` của bạn.
+:::
+</Fragment>
+<Fragment slot="terraform">
+Với Terraform, cấu hình runtime được quản lý thông qua các module runtime-config. Các module Terraform được tạo bởi các generator `@aws/nx-plugin` (như <Link path="guides/trpc">`ts#trpc-api`</Link> và <Link path="guides/fastapi">`py#fast-api`</Link>) sẽ tự động thêm các giá trị phù hợp vào cấu hình runtime.
+
+Module Terraform của trang web của bạn sẽ triển khai cấu hình runtime dưới dạng file `runtime-config.json` vào thư mục gốc của bucket S3 của bạn.
+
+```hcl title="packages/infra/src/main.tf" {14-15}
+# Tự động thêm các giá trị vào runtime config
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+}
+
+# Tự động triển khai runtime config vào runtime-config.json
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+
+  # Đảm bảo API được triển khai trước để thêm vào runtime config
+  depends_on = [module.my_api]
+}
+```
+
+:::caution
+Bạn phải đảm bảo rằng bạn khai báo module trang web của mình _sau_ bất kỳ module nào thêm vào cấu hình runtime và cấu hình `depends_on` phù hợp để đảm bảo thứ tự, nếu không chúng sẽ bị thiếu trong file `runtime-config.json` của bạn.
+:::
+</Fragment>
+</Infrastructure>
+
+### Mã Website
+
+Trong trang web của bạn, bạn có thể sử dụng hook `useRuntimeConfig` để truy xuất các giá trị từ cấu hình runtime:
+
+```tsx {1,4}
+import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
+
+const MyComponent = () => {
+  const runtimeConfig = useRuntimeConfig();
+
+  // Truy cập các giá trị trong runtime config tại đây
+  const apiUrl = runtimeConfig.apis.MyApi;
+};
+```
+
+### Runtime Config Local
+
+Khi chạy [local development server](#local-development-server), bạn sẽ cần một file `runtime-config.json` trong thư mục `public` của bạn để trang web local của bạn biết các URL backend, cấu hình identity, v.v.
+
+Dự án trang web của bạn được cấu hình với target `load:runtime-config` mà bạn có thể sử dụng để tải xuống file `runtime-config.json` từ một ứng dụng đã triển khai:
+
+<NxCommands commands={['run <my-website>:"load:runtime-config"']} />
+
+:::note
+<Infrastructure>
+<Fragment slot="cdk">
+Nếu bạn thay đổi tiền tố cho tên stage trong file `src/main.ts` của dự án cơ sở hạ tầng, bạn sẽ cần cập nhật target `load:runtime-config` trong file `project.json` của trang web tương ứng.
+
+Ngoài ra, cần lưu ý rằng target `load:runtime-config` giả định một stage duy nhất của ứng dụng của bạn được triển khai vào môi trường mà bạn có thông tin đăng nhập AWS. Bạn sẽ cần điều chỉnh lệnh nếu bạn triển khai nhiều stage vào cùng một tài khoản và khu vực.
+</Fragment>
+<Fragment slot="terraform">
+Đối với các dự án Terraform, target `load:runtime-config` sao chép file `runtime-config.json` được tạo sau lần `terraform apply` local gần nhất của bạn.
+</Fragment>
+</Infrastructure>
+:::
+
+## Local Development Server
+
+Bạn có thể chạy một local development server bằng cách sử dụng target `serve` hoặc `serve-local`.
+
+### Target Serve
+
+Target `serve` khởi động một local development server cho trang web của bạn. Target này yêu cầu bạn đã triển khai bất kỳ cơ sở hạ tầng hỗ trợ nào mà trang web tương tác với, và đã [tải cấu hình runtime local](#local-runtime-config).
+
+Bạn có thể chạy target này với lệnh sau:
+
+<NxCommands commands={['run <my-website>:serve']} />
+
+Target này hữu ích để làm việc với các thay đổi trang web trong khi trỏ đến các API và cơ sở hạ tầng khác đã được triển khai "thực sự".
+
+### Target Serve Local
+
+Target `serve-local` khởi động một local development server cho trang web của bạn (với [Vite `MODE`](https://vite.dev/guide/env-and-mode) được đặt thành `serve-local`), cũng như khởi động bất kỳ server local nào cho các API mà bạn đã kết nối trang web của mình thông qua <Link path="/guides/api-connection">API Connection generator</Link>.
+
+Khi server trang web local của bạn được chạy thông qua target này, `runtime-config.json` được tự động ghi đè để trỏ đến các url API đang chạy local của bạn.
+
+Bạn có thể chạy target này với lệnh sau:
+
+<NxCommands commands={['run <my-website>:serve-local']} />
+
+Target này hữu ích khi bạn đang làm việc trên cả trang web và API của mình và muốn lặp lại nhanh chóng mà không cần triển khai cơ sở hạ tầng của bạn.
+
+:::warning
+Khi chạy ở chế độ này và không có `runtime-config.json`, nếu bạn đã cấu hình Cognito Authentication (thông qua <Link path="/guides/react-website-auth">CloudScape Website Auth generator</Link>), đăng nhập sẽ được bỏ qua và các yêu cầu đến server local của bạn sẽ không bao gồm header xác thực.
+
+Để bật đăng nhập và xác thực cho `serve-local`, hãy triển khai cơ sở hạ tầng của bạn và tải runtime config.
+:::
+
+## Xây dựng
+
+Bạn có thể xây dựng trang web của mình bằng cách sử dụng target `build`. Điều này sử dụng Vite để tạo một bundle production trong thư mục gốc `dist/packages/<my-website>/bundle`, cũng như kiểm tra kiểu, biên dịch và lint trang web của bạn.
+
+<NxCommands commands={['run <my-website>:build']} />
+
+## Testing
+
+Testing trang web của bạn giống như viết test trong một dự án TypeScript tiêu chuẩn, vì vậy vui lòng tham khảo <Link path="guides/typescript-project#testing">hướng dẫn dự án TypeScript</Link> để biết thêm chi tiết.
+
+Đối với testing cụ thể của React, React Testing Library đã được cài đặt và có sẵn cho bạn sử dụng để viết test. Để biết thêm chi tiết về cách sử dụng, vui lòng tham khảo [tài liệu React Testing Library](https://testing-library.com/docs/react-testing-library/example-intro).
+
+Bạn có thể chạy test của mình bằng cách sử dụng target `test`:
+
+<NxCommands commands={['run <my-website>:test']} />
+
+## Triển khai Trang web của bạn
+
+Generator React website tạo infrastructure as code CDK hoặc Terraform dựa trên `iacProvider` bạn đã chọn. Bạn có thể sử dụng điều này để triển khai trang web của mình.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Để triển khai trang web của bạn, chúng tôi khuyên bạn nên sử dụng <Link path="guides/typescript-infrastructure">generator `ts#infra`</Link> để tạo một ứng dụng CDK.
+
+Bạn có thể sử dụng construct CDK được tạo cho bạn trong `packages/common/constructs` để triển khai trang web của bạn.
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {3, 9}
+import { Stack } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { MyWebsite } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    new MyWebsite(this, 'MyWebsite');
+  }
+}
+```
+
+Điều này thiết lập:
+
+1. Một bucket S3 để lưu trữ các file trang web tĩnh của bạn
+2. CloudFront distribution để phân phối nội dung toàn cầu
+3. WAF Web ACL để bảo vệ bảo mật
+4. Origin Access Control để truy cập S3 an toàn
+5. Tự động triển khai các file trang web và cấu hình runtime
+</Fragment>
+<Fragment slot="terraform">
+Để triển khai trang web của bạn, chúng tôi khuyên bạn nên sử dụng <Link path="guides/terraform-infrastructure">generator `terraform#project`</Link> để tạo một dự án Terraform.
+
+Bạn có thể sử dụng module Terraform được tạo cho bạn trong `packages/common/terraform` để triển khai trang web của bạn.
+
+```hcl title="packages/infra/src/main.tf" {3}
+# Triển khai website
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+}
+```
+
+Điều này thiết lập:
+
+1. Một bucket S3 để lưu trữ các file trang web tĩnh của bạn
+2. CloudFront distribution để phân phối nội dung toàn cầu
+3. WAF Web ACL để bảo vệ bảo mật (được triển khai trong us-east-1)
+4. Origin Access Control để truy cập S3 an toàn
+5. Tự động triển khai các file trang web và cấu hình runtime
+
+:::note
+Provider `aws.us_east_1` là bắt buộc cho các tài nguyên CloudFront và WAF, phải được triển khai trong khu vực us-east-1. Đảm bảo cấu hình Terraform của bạn bao gồm provider này:
+
+```hcl title="packages/infra/src/providers.tf"
+provider "aws" {
+  alias  = "us_east_1"
+  region = "us-east-1"
+}
+```
+:::
+</Fragment>
+</Infrastructure>

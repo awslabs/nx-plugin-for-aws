@@ -1,0 +1,572 @@
+---
+title: "API TypeScript của Smithy"
+description: "Tài liệu tham khảo cho API TypeScript của Smithy"
+---
+
+import { FileTree, AnchorHeading, Tabs, TabItem } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
+
+[Smithy](https://smithy.io/) là một ngôn ngữ định nghĩa giao diện độc lập với giao thức để tạo API theo cách hướng mô hình.
+
+Trình tạo Smithy TypeScript API tạo một API mới sử dụng Smithy để định nghĩa dịch vụ, và [Smithy TypeScript Server SDK](https://github.com/awslabs/smithy-typescript) để triển khai. Trình tạo cung cấp infrastructure as code bằng CDK hoặc Terraform để triển khai dịch vụ của bạn lên AWS Lambda, được truy cập thông qua AWS API Gateway REST API. Nó cung cấp phát triển API an toàn kiểu với tự động tạo mã từ mô hình Smithy. Handler được tạo sử dụng [AWS Lambda Powertools for TypeScript](https://docs.powertools.aws.dev/lambda/typescript/latest/) cho khả năng quan sát, bao gồm logging, AWS X-Ray tracing và CloudWatch Metrics
+
+## Sử dụng
+
+### Tạo một Smithy TypeScript API
+
+Bạn có thể tạo một Smithy TypeScript API mới theo hai cách:
+
+<RunGenerator generator="ts#smithy-api" />
+
+### Tùy chọn
+
+<GeneratorParameters generator="ts#smithy-api" />
+
+## Kết quả của Trình tạo
+
+Trình tạo tạo hai dự án liên quan trong thư mục `<directory>/<api-name>`:
+
+<FileTree>
+
+- **model/** Dự án mô hình Smithy
+  - project.json Cấu hình dự án và build targets
+  - smithy-build.json Cấu hình build Smithy
+  - build.Dockerfile Cấu hình Docker để build các artifact Smithy
+  - src/
+    - main.smithy Định nghĩa dịch vụ chính
+    - operations/
+      - echo.smithy Ví dụ định nghĩa operation
+- **backend/** Triển khai backend TypeScript
+  - project.json Cấu hình dự án và build targets
+  - rolldown.config.ts Cấu hình bundle
+  - src/
+    - handler.ts AWS Lambda handler
+    - local-server.ts Server phát triển local
+    - service.ts Triển khai dịch vụ
+    - context.ts Định nghĩa context dịch vụ
+    - operations/
+      - echo.ts Ví dụ triển khai operation
+    - generated/ TypeScript SDK được tạo (tạo trong quá trình build)
+
+</FileTree>
+
+### Infrastructure
+
+Vì trình tạo này tạo infrastructure as code dựa trên `iacProvider` bạn chọn, nó sẽ tạo một dự án trong `packages/common` bao gồm các CDK constructs hoặc Terraform modules tương ứng.
+
+Dự án infrastructure as code chung được cấu trúc như sau:
+
+<Infrastructure>
+<Fragment slot="cdk">
+<FileTree>
+  - packages/common/constructs
+    - src
+      - app/ Constructs cho infrastructure cụ thể cho một dự án/trình tạo
+        - apis/
+          - \<project-name>.ts CDK construct để triển khai API của bạn
+      - core/ Constructs chung được tái sử dụng bởi constructs trong `app`
+        - api/
+          - rest-api.ts CDK construct để triển khai REST API
+          - utils.ts Tiện ích cho API constructs
+      - index.ts Entry point xuất các constructs từ `app`
+    - project.json Build targets và cấu hình dự án
+</FileTree>
+
+:::note
+Dự án này được tạo bằng trình tạo [`ts#project`](guides/typescript-project) và do đó cấu hình các build targets giống nhau.
+:::
+</Fragment>
+<Fragment slot="terraform">
+<FileTree>
+  - packages/common/terraform
+    - src
+      - app/ Terraform modules cho infrastructure cụ thể cho một dự án/trình tạo
+        - apis/
+          - \<project-name>/
+            - \<project-name>.tf Module để triển khai API của bạn
+      - core/ Modules chung được tái sử dụng bởi modules trong `app`
+        - api/
+          - rest-api/
+            - rest-api.tf Module để triển khai REST API
+    - project.json Build targets và cấu hình dự án
+</FileTree>
+
+:::note
+Dự án này được tạo bằng trình tạo [`terraform#project`](guides/terraform-project) và do đó cấu hình các build targets giống nhau.
+:::
+</Fragment>
+</Infrastructure>
+
+## Triển khai Smithy API của bạn
+
+### Định nghĩa Operations trong Smithy
+
+Operations được định nghĩa trong các file Smithy trong dự án model. Định nghĩa dịch vụ chính nằm trong `main.smithy`:
+
+```smithy
+$version: "2.0"
+
+namespace your.namespace
+
+use aws.protocols#restJson1
+use smithy.framework#ValidationException
+
+@title("YourService")
+@restJson1
+service YourService {
+    version: "1.0.0"
+    operations: [
+        Echo,
+        // Thêm operations của bạn ở đây
+    ]
+    errors: [
+        ValidationException
+    ]
+}
+```
+
+Các operations riêng lẻ được định nghĩa trong các file riêng biệt trong thư mục `operations/`:
+
+```smithy
+$version: "2.0"
+
+namespace your.namespace
+
+@http(method: "POST", uri: "/echo")
+operation Echo {
+    input: EchoInput
+    output: EchoOutput
+}
+
+structure EchoInput {
+    @required
+    message: String
+
+    foo: Integer
+    bar: String
+}
+
+structure EchoOutput {
+    @required
+    message: String
+}
+```
+
+:::note
+Bạn có thể thay đổi cấu trúc thư mục tùy thích - tất cả các file `.smithy` trong thư mục `src` sẽ được bao gồm trong Smithy build.
+:::
+
+:::tip
+Để biết thêm chi tiết về Smithy và cú pháp của nó, tham khảo [đặc tả Smithy](https://smithy.io/2.0/spec/index.html).
+:::
+
+### Triển khai Operations trong TypeScript
+
+Các triển khai operation nằm trong thư mục `src/operations/` của dự án backend. Mỗi operation được triển khai sử dụng các kiểu được tạo từ TypeScript Server SDK (được tạo tại thời điểm build từ mô hình Smithy của bạn).
+
+```typescript
+import { ServiceContext } from '../context.js';
+import { Echo as EchoOperation } from '../generated/ssdk/index.js';
+
+export const Echo: EchoOperation<ServiceContext> = async (input) => {
+  // Logic nghiệp vụ của bạn ở đây
+  return {
+    message: `Echo: ${input.message}` // an toàn kiểu dựa trên mô hình Smithy của bạn
+  };
+};
+```
+
+Operations phải được đăng ký vào định nghĩa dịch vụ trong `src/service.ts`:
+
+```typescript
+import { ServiceContext } from './context.js';
+import { YourServiceService } from './generated/ssdk/index.js';
+import { Echo } from './operations/echo.js';
+// Import các operations khác ở đây
+
+// Đăng ký operations vào dịch vụ ở đây
+export const Service: YourServiceService<ServiceContext> = {
+  Echo,
+  // Thêm các operations khác ở đây
+};
+```
+
+### Service Context
+
+Bạn có thể định nghĩa context được chia sẻ cho các operations của bạn trong `context.ts`:
+
+```typescript
+export interface ServiceContext {
+  // Powertools tracer, logger và metrics được cung cấp mặc định
+  tracer: Tracer;
+  logger: Logger;
+  metrics: Metrics;
+  // Thêm các dependencies được chia sẻ, kết nối database, v.v.
+  dbClient: any;
+  userIdentity: string;
+}
+```
+
+Context này được truyền cho tất cả các triển khai operation và có thể được sử dụng để chia sẻ tài nguyên như kết nối database, cấu hình, hoặc tiện ích logging.
+
+:::caution
+Bạn phải tự xây dựng context trong cả `handler.ts` (điểm vào của Lambda function) và `local-server.ts` (điểm vào để chạy locally thông qua target `serve`).
+:::
+
+### Khả năng quan sát với AWS Lambda Powertools
+
+#### Logging
+
+Trình tạo cấu hình structured logging sử dụng AWS Lambda Powertools với tự động inject context thông qua Middy middleware.
+
+```typescript {4}
+// handler.ts
+export const handler = middy<APIGatewayProxyEvent, APIGatewayProxyResult>()
+  .use(captureLambdaHandler(tracer))
+  .use(injectLambdaContext(logger))
+  .use(logMetrics(metrics))
+  .handler(lambdaHandler);
+```
+
+Bạn có thể tham chiếu logger từ các triển khai operation của bạn thông qua context:
+
+```typescript {6}
+// operations/echo.ts
+import { ServiceContext } from '../context.js';
+import { Echo as EchoOperation } from '../generated/ssdk/index.js';
+
+export const Echo: EchoOperation<ServiceContext> = async (input, ctx) => {
+  ctx.logger.info('Thông điệp log của bạn');
+  // ...
+};
+```
+
+#### Tracing
+
+AWS X-Ray tracing được cấu hình tự động thông qua middleware `captureLambdaHandler`.
+
+```typescript {3}
+// handler.ts
+export const handler = middy<APIGatewayProxyEvent, APIGatewayProxyResult>()
+  .use(captureLambdaHandler(tracer))
+  .use(injectLambdaContext(logger))
+  .use(logMetrics(metrics))
+  .handler(lambdaHandler);
+```
+
+Bạn có thể thêm subsegments tùy chỉnh vào traces của bạn trong các operations:
+
+```typescript {7, 11, 14}
+// operations/echo.ts
+import { ServiceContext } from '../context.js';
+import { Echo as EchoOperation } from '../generated/ssdk/index.js';
+
+export const Echo: EchoOperation<ServiceContext> = async (input, ctx) => {
+  // Tạo một subsegment mới
+  const subsegment = ctx.tracer.getSegment()?.addNewSubsegment('custom-operation');
+  try {
+    // Logic của bạn ở đây
+  } catch (error) {
+    subsegment?.addError(error as Error);
+    throw error;
+  } finally {
+    subsegment?.close();
+  }
+};
+```
+
+#### Metrics
+
+CloudWatch metrics được thu thập tự động cho mỗi request thông qua middleware `logMetrics`.
+
+```typescript {5}
+// handler.ts
+export const handler = middy<APIGatewayProxyEvent, APIGatewayProxyResult>()
+  .use(captureLambdaHandler(tracer))
+  .use(injectLambdaContext(logger))
+  .use(logMetrics(metrics))
+  .handler(lambdaHandler);
+```
+
+Bạn có thể thêm custom metrics trong các operations của bạn:
+
+```typescript {7}
+// operations/echo.ts
+import { MetricUnit } from '@aws-lambda-powertools/metrics';
+import { ServiceContext } from '../context.js';
+import { Echo as EchoOperation } from '../generated/ssdk/index.js';
+
+export const Echo: EchoOperation<ServiceContext> = async (input, ctx) => {
+  ctx.metrics.addMetric("CustomMetric", MetricUnit.Count, 1);
+  // ...
+};
+```
+
+### Xử lý Lỗi
+
+Smithy cung cấp xử lý lỗi tích hợp sẵn. Bạn có thể định nghĩa các lỗi tùy chỉnh trong mô hình Smithy của bạn:
+
+```smithy
+@error("client")
+@httpError(400)
+structure InvalidRequestError {
+    @required
+    message: String
+}
+```
+
+Và đăng ký chúng vào operation/service của bạn:
+
+```smithy
+operation MyOperation {
+  ...
+  errors: [InvalidRequestError]
+}
+```
+
+Sau đó ném chúng trong triển khai TypeScript của bạn:
+
+```typescript
+import { InvalidRequestError } from '../generated/ssdk/index.js';
+
+export const MyOperation: MyOperationHandler<ServiceContext> = async (input) => {
+  if (!input.requiredField) {
+    throw new InvalidRequestError({
+      message: "Trường bắt buộc bị thiếu"
+    });
+  }
+
+  return { /* phản hồi thành công */ };
+};
+```
+
+## Building và Tạo Mã
+
+Dự án mô hình Smithy sử dụng [Docker](https://www.docker.com/) để build các artifact Smithy và tạo TypeScript Server SDK:
+
+<NxCommands commands={['run <model-project>:build']} />
+
+Quá trình này:
+
+1. **Biên dịch mô hình Smithy** và xác thực nó
+2. **Tạo đặc tả OpenAPI** từ mô hình Smithy
+3. **Tạo TypeScript Server SDK** với các giao diện operation an toàn kiểu
+4. **Xuất các build artifacts** ra `dist/<model-project>/build/`
+
+Dự án backend tự động sao chép SDK được tạo trong quá trình biên dịch:
+
+<NxCommands commands={['run <backend-project>:copy-ssdk']} />
+
+### Bundle Target
+
+<Snippet name="ts-bundle" />
+
+## Phát triển Local
+
+Trình tạo cấu hình một server phát triển local với hot reloading:
+
+<NxCommands commands={['run <backend-project>:serve']} />
+
+:::tip
+Server local sẽ không chỉ hot-reload khi bạn thực hiện thay đổi TypeScript cho mã backend của bạn, mà còn reload khi bạn thực hiện thay đổi cho dự án mô hình Smithy của bạn, cho phép bạn liên tục lặp lại trên mô hình Smithy và server cùng nhau.
+:::
+
+## Triển khai Smithy API của bạn
+
+Trình tạo tạo infrastructure CDK hoặc Terraform dựa trên `iacProvider` bạn đã chọn.
+
+<Infrastructure>
+<Fragment slot="cdk">
+CDK construct để triển khai API của bạn nằm trong thư mục `common/constructs`:
+
+```ts {6-8}
+import { MyApi } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    // Thêm API vào stack của bạn
+    const api = new MyApi(this, 'MyApi', {
+      integrations: MyApi.defaultIntegrations(this).build(),
+    });
+  }
+}
+```
+
+Điều này thiết lập:
+
+1. Một AWS Lambda function cho dịch vụ Smithy
+2. API Gateway REST API làm trigger cho function
+3. IAM roles và permissions
+4. CloudWatch log group
+5. Cấu hình X-Ray tracing
+
+:::note
+Nếu bạn đã chọn xác thực `Cognito`, bạn sẽ cần cung cấp thuộc tính `identity` cho API construct:
+
+```ts {9}
+import { MyApi, UserIdentity } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const identity = new UserIdentity(this, 'Identity');
+
+    const api = new MyApi(this, 'MyApi', {
+      integrations: MyApi.defaultIntegrations(this).build(),
+      identity,
+    });
+  }
+}
+```
+
+Construct `UserIdentity` có thể được tạo bằng <Link path="/guides/react-website-auth">trình tạo `ts#react-website-auth`</Link>
+:::
+</Fragment>
+<Fragment slot="terraform">
+Các Terraform modules để triển khai API của bạn nằm trong thư mục `common/terraform`:
+
+```hcl {2}
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  # Biến môi trường cho Lambda function
+  env = {
+    ENVIRONMENT = var.environment
+    LOG_LEVEL   = "INFO"
+  }
+
+  # Các IAM policies bổ sung nếu cần
+  additional_iam_policy_statements = [
+    # Thêm bất kỳ quyền bổ sung nào mà API của bạn cần
+  ]
+
+  tags = local.common_tags
+}
+```
+
+Điều này thiết lập:
+
+1. Một AWS Lambda function phục vụ Smithy API
+2. API Gateway REST API làm trigger cho function
+3. IAM roles và permissions
+4. CloudWatch log group
+5. Cấu hình X-Ray tracing
+6. Cấu hình CORS
+
+:::note
+Nếu bạn đã chọn xác thực `Cognito`, bạn sẽ cần cung cấp cấu hình Cognito:
+
+```hcl {4-5}
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  user_pool_id         = local.user_pool_id
+  user_pool_client_ids = [local.client_id]
+
+  env = {
+    ENVIRONMENT = var.environment
+    LOG_LEVEL   = "INFO"
+  }
+
+  tags = local.common_tags
+}
+```
+:::
+
+Terraform module cung cấp một số outputs:
+
+```hcl
+# Truy cập API endpoint
+output "api_url" {
+  value = module.my_api.stage_invoke_url
+}
+
+# Truy cập chi tiết Lambda function
+output "lambda_function_name" {
+  value = module.my_api.lambda_function_name
+}
+```
+</Fragment>
+</Infrastructure>
+
+### Integrations
+
+<Snippet name="api/type-safe-api-integrations" parentHeading="Integrations" />
+
+#### Tạo Mã
+
+<Infrastructure>
+<Fragment slot="cdk">
+Vì operations được định nghĩa trong Smithy, chúng tôi sử dụng tạo mã để cung cấp metadata cho CDK construct để có integrations an toàn kiểu.
+
+Một target `generate:<ApiName>-metadata` được thêm vào `project.json` của common constructs để tạo điều kiện cho việc tạo mã này, xuất một file như `packages/common/constructs/src/generated/my-api/metadata.gen.ts`. Vì điều này được tạo tại thời điểm build, nó bị bỏ qua trong kiểm soát phiên bản.
+
+:::note
+Bạn sẽ cần chạy build bất cứ khi nào bạn thay đổi mô hình Smithy của mình để đảm bảo các kiểu được sử dụng bởi CDK construct được cập nhật.
+
+<NxCommands commands={["run-many --target build --all"]} />
+:::
+
+:::tip
+Nếu bạn đang tích cực làm việc trên cả infrastructure CDK và Smithy API cùng nhau, bạn có thể sử dụng [`nx watch`](https://nx.dev/nx-api/nx/documents/watch) để tái tạo các kiểu này mỗi khi bạn thực hiện thay đổi mô hình:
+
+<NxCommands
+  commands={[
+    'watch --projects=<ModelProject> -- \\ ',
+    'run <InfraProject>:"generate:<ApiName>-metadata"',
+  ]}
+/>
+:::
+</Fragment>
+<Fragment slot="terraform">
+:::note
+Chúng tôi không hỗ trợ integrations an toàn kiểu cho Terraform, và do đó không có targets tạo mã nào được cấu hình nếu bạn đã chọn Terraform cho `iacProvider` của mình.
+:::
+</Fragment>
+</Infrastructure>
+
+### Cấp Quyền Truy cập (Chỉ IAM)
+
+Nếu bạn đã chọn xác thực `IAM`, bạn có thể sử dụng phương thức `grantInvokeAccess` để cấp quyền truy cập vào API của bạn:
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts
+api.grantInvokeAccess(myIdentityPool.authenticatedRole);
+```
+</Fragment>
+<Fragment slot="terraform">
+```hcl
+# Tạo một IAM policy để cho phép gọi API
+resource "aws_iam_policy" "api_invoke_policy" {
+  name        = "MyApiInvokePolicy"
+  description = "Policy để cho phép gọi Smithy API"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = "execute-api:Invoke"
+        Resource = "${module.my_api.api_execution_arn}/*/*"
+      }
+    ]
+  })
+}
+
+# Đính kèm policy vào IAM role
+resource "aws_iam_role_policy_attachment" "api_invoke_access" {
+  role       = aws_iam_role.authenticated_user_role.name
+  policy_arn = aws_iam_policy.api_invoke_policy.arn
+}
+```
+</Fragment>
+</Infrastructure>
+
+## Gọi Smithy API của bạn
+
+Để gọi API của bạn từ một React website, bạn có thể sử dụng trình tạo <Link path="guides/api-connection/react-smithy">`api-connection`</Link>, cung cấp tạo client an toàn kiểu từ mô hình Smithy của bạn.

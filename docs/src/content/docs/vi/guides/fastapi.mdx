@@ -1,0 +1,728 @@
+---
+title: "FastAPI"
+description: "Tài liệu tham khảo cho FastAPI"
+---
+
+import { FileTree, AnchorHeading, Tabs, TabItem } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
+
+[FastAPI](https://fastapi.tiangolo.com/) là một framework để xây dựng API trong Python.
+
+Generator FastAPI tạo ra một FastAPI mới với cấu hình hạ tầng AWS CDK hoặc Terraform. Backend được tạo sử dụng AWS Lambda cho triển khai serverless, được expose thông qua AWS API Gateway API. Nó thiết lập [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/python/latest/) cho khả năng quan sát, bao gồm logging, AWS X-Ray tracing và Cloudwatch Metrics.
+
+## Cách sử dụng
+
+### Tạo một FastAPI
+
+Bạn có thể tạo một FastAPI mới theo hai cách:
+
+<RunGenerator generator="py#fast-api" />
+
+### Tùy chọn
+
+<GeneratorParameters generator="py#fast-api" />
+
+<Snippet name="api/api-choice-note" />
+
+## Kết quả từ Generator
+
+Generator sẽ tạo cấu trúc dự án sau trong thư mục `<directory>/<api-name>`:
+
+<FileTree>
+
+- project.json Cấu hình dự án và build targets
+- pyproject.toml Cấu hình dự án Python và dependencies
+- \<module_name>
+  - \_\_init\_\_.py Khởi tạo module
+  - init.py Thiết lập ứng dụng FastAPI và cấu hình powertools middleware
+  - main.py Triển khai API
+- scripts
+  - generate_open_api.py Script để tạo OpenAPI schema từ ứng dụng FastAPI
+
+</FileTree>
+
+### Hạ tầng
+
+<Snippet name="shared-constructs" />
+
+<Snippet name="api/shared-constructs" />
+
+## Triển khai FastAPI của bạn
+
+Triển khai API chính nằm trong `main.py`. Đây là nơi bạn định nghĩa các route API và triển khai của chúng. Ví dụ:
+
+```python
+from .init import app, tracer
+from pydantic import BaseModel
+
+class Item(BaseModel):
+  name: str
+
+@app.get("/items/{item_id}")
+def get_item(item_id: int) -> Item:
+    return Item(name=...)
+
+@app.post("/items")
+def create_item(item: Item):
+    return ...
+```
+
+Generator tự động thiết lập một số tính năng:
+
+1. Tích hợp AWS Lambda Powertools cho khả năng quan sát
+2. Error handling middleware
+3. Request/response correlation
+4. Thu thập metrics
+5. AWS Lambda handler sử dụng Mangum
+
+### Khả năng quan sát với AWS Lambda Powertools
+
+#### Logging
+
+Generator cấu hình structured logging sử dụng AWS Lambda Powertools. Bạn có thể truy cập logger trong các route handler:
+
+```python
+from .init import app, logger
+
+@app.get("/items/{item_id}")
+def read_item(item_id: int):
+    logger.info("Fetching item", extra={"item_id": item_id})
+    return {"item_id": item_id}
+```
+
+Logger tự động bao gồm:
+
+- Correlation IDs cho request tracing
+- Request path và method
+- Thông tin Lambda context
+- Chỉ báo cold start
+
+#### Tracing
+
+AWS X-Ray tracing được cấu hình tự động. Bạn có thể thêm custom subsegments vào traces của mình:
+
+```python
+from .init import app, tracer
+
+@app.get("/items/{item_id}")
+@tracer.capture_method
+def read_item(item_id: int):
+    # Tạo một subsegment mới
+    with tracer.provider.in_subsegment("fetch-item-details"):
+        # Logic của bạn ở đây
+        return {"item_id": item_id}
+```
+
+#### Metrics
+
+CloudWatch metrics được thu thập tự động cho mỗi request. Bạn có thể thêm custom metrics:
+
+```python
+from .init import app, metrics
+from aws_lambda_powertools.metrics import MetricUnit
+
+@app.get("/items/{item_id}")
+def read_item(item_id: int):
+    metrics.add_metric(name="ItemViewed", unit=MetricUnit.Count, value=1)
+    return {"item_id": item_id}
+```
+
+Metrics mặc định bao gồm:
+
+- Số lượng request
+- Số lượng thành công/thất bại
+- Metrics cold start
+- Metrics theo từng route
+
+### Xử lý lỗi
+
+Generator bao gồm xử lý lỗi toàn diện:
+
+```python
+from fastapi import HTTPException
+
+@app.get("/items/{item_id}")
+def read_item(item_id: int):
+    if item_id < 0:
+        raise HTTPException(status_code=400, detail="Item ID must be positive")
+    return {"item_id": item_id}
+```
+
+Các exception không được xử lý sẽ được middleware bắt và:
+
+1. Ghi log exception đầy đủ với stack trace
+2. Ghi lại failure metric
+3. Trả về response 500 an toàn cho client
+4. Bảo toàn correlation ID
+
+:::tip
+Nên chỉ định response models cho các API operation để tạo code tốt hơn nếu sử dụng generator `api-connection`. <Link path="guides/api-connection/react-fastapi#errors">Xem thêm chi tiết tại đây</Link>.
+:::
+
+### Streaming
+
+Với FastAPI, bạn có thể stream response đến người gọi với response type [`StreamingResponse`](https://fastapi.tiangolo.com/reference/responses/?h=streaming#fastapi.responses.StreamingResponse).
+
+#### Thay đổi Hạ tầng
+
+Vì AWS API Gateway không hỗ trợ streaming responses, bạn sẽ cần triển khai FastAPI của mình lên một nền tảng hỗ trợ điều này. Tùy chọn đơn giản nhất là sử dụng AWS Lambda Function URL.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Để đạt được điều này, bạn có thể thay thế construct `common/constructs/src/app/apis/<name>-api.ts` đã được tạo bằng một construct triển khai function URL thay thế.
+
+<details>
+<summary>Ví dụ Streaming FunctionURL Construct</summary>
+
+```ts
+import { Duration, Stack, CfnOutput } from 'aws-cdk-lib';
+import { IGrantable, Grant } from 'aws-cdk-lib/aws-iam';
+import {
+  Runtime,
+  Code,
+  Tracing,
+  LayerVersion,
+  FunctionUrlAuthType,
+  InvokeMode,
+  Function,
+} from 'aws-cdk-lib/aws-lambda';
+import { Construct } from 'constructs';
+import url from 'url';
+import { RuntimeConfig } from '../../core/runtime-config.js';
+
+export class MyApi extends Construct {
+  public readonly handler: Function;
+
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    this.handler = new Function(this, 'Handler', {
+      runtime: Runtime.PYTHON_3_12,
+      handler: 'run.sh',
+      code: Code.fromAsset(
+        url.fileURLToPath(
+          new URL(
+            '../../../../../../dist/packages/my_api/bundle-x86',
+            import.meta.url,
+          ),
+        ),
+      ),
+      timeout: Duration.seconds(30),
+      tracing: Tracing.ACTIVE,
+      environment: {
+        AWS_CONNECTION_REUSE_ENABLED: '1',
+      },
+    });
+
+    const stack = Stack.of(this);
+    this.handler.addLayers(
+      LayerVersion.fromLayerVersionArn(
+        this,
+        'LWALayer',
+        `arn:aws:lambda:${stack.region}:753240598075:layer:LambdaAdapterLayerX86:24`,
+      ),
+    );
+    this.handler.addEnvironment('PORT', '8000');
+    this.handler.addEnvironment('AWS_LWA_INVOKE_MODE', 'response_stream');
+    this.handler.addEnvironment('AWS_LAMBDA_EXEC_WRAPPER', '/opt/bootstrap');
+    const functionUrl = this.handler.addFunctionUrl({
+      authType: FunctionUrlAuthType.AWS_IAM,
+      invokeMode: InvokeMode.RESPONSE_STREAM,
+      cors: {
+        allowedOrigins: ['*'],
+        allowedHeaders: [
+          'authorization',
+          'content-type',
+          'x-amz-content-sha256',
+          'x-amz-date',
+          'x-amz-security-token',
+        ],
+      },
+    });
+
+    new CfnOutput(this, 'MyApiUrl', { value: functionUrl.url });
+
+    // Đăng ký API URL trong runtime configuration để client discovery
+    RuntimeConfig.ensure(this).config.apis = {
+      ...RuntimeConfig.ensure(this).config.apis!,
+      MyApi: functionUrl.url,
+    };
+  }
+
+  public grantInvokeAccess(grantee: IGrantable) {
+    Grant.addToPrincipal({
+      grantee,
+      actions: ['lambda:InvokeFunctionUrl'],
+      resourceArns: [this.handler.functionArn],
+      conditions: {
+        StringEquals: {
+          'lambda:FunctionUrlAuthType': 'AWS_IAM',
+        },
+      },
+    });
+  }
+}
+
+```
+
+</details>
+</Fragment>
+<Fragment slot="terraform">
+Để đạt được điều này với Terraform, bạn có thể thay thế hạ tầng API Gateway đã được tạo bằng Lambda Function URL hỗ trợ response streaming.
+
+<details>
+<summary>Ví dụ Cấu hình Lambda Function URL Streaming</summary>
+
+```hcl
+# Data sources cho AWS context hiện tại
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
+# Lambda function cho streaming FastAPI
+resource "aws_lambda_function" "my_api_handler" {
+  filename         = "../../../../../../dist/packages/my_api/bundle.zip"
+  function_name    = "my-api-handler"
+  role            = aws_iam_role.lambda_execution_role.arn
+  handler         = "run.sh"
+  runtime         = "python3.12"
+  timeout         = 30
+  source_code_hash = filebase64sha256("../../../../../../dist/packages/my_api/bundle.zip")
+
+  # Bật X-Ray tracing
+  tracing_config {
+    mode = "Active"
+  }
+
+  # Biến môi trường cho Lambda Web Adapter
+  environment {
+    variables = {
+      AWS_CONNECTION_REUSE_ENABLED = "1"
+      PORT                        = "8000"
+      AWS_LWA_INVOKE_MODE        = "response_stream"
+      AWS_LAMBDA_EXEC_WRAPPER    = "/opt/bootstrap"
+    }
+  }
+
+  # Thêm Lambda Web Adapter layer
+  layers = [
+    "arn:aws:lambda:${data.aws_region.current.name}:753240598075:layer:LambdaAdapterLayerX86:24"
+  ]
+
+  depends_on = [
+    aws_iam_role_policy_attachment.lambda_logs,
+    aws_cloudwatch_log_group.lambda_logs,
+  ]
+}
+
+# CloudWatch Log Group cho Lambda function
+resource "aws_cloudwatch_log_group" "lambda_logs" {
+  name              = "/aws/lambda/my-api-handler"
+  retention_in_days = 14
+}
+
+# IAM role cho Lambda execution
+resource "aws_iam_role" "lambda_execution_role" {
+  name = "my-api-lambda-execution-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+# Attach basic execution policy
+resource "aws_iam_role_policy_attachment" "lambda_logs" {
+  role       = aws_iam_role.lambda_execution_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+# Attach X-Ray tracing policy
+resource "aws_iam_role_policy_attachment" "lambda_xray" {
+  role       = aws_iam_role.lambda_execution_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+}
+
+# Lambda Function URL với hỗ trợ streaming
+resource "aws_lambda_function_url" "my_api_url" {
+  function_name      = aws_lambda_function.my_api_handler.function_name
+  authorization_type = "AWS_IAM"
+  invoke_mode       = "RESPONSE_STREAM"
+
+  cors {
+    allow_credentials = false
+    allow_origins     = ["*"]
+    allow_methods     = ["*"]
+    allow_headers = [
+      "authorization",
+      "content-type",
+      "x-amz-content-sha256",
+      "x-amz-date",
+      "x-amz-security-token"
+    ]
+    expose_headers = ["date", "keep-alive"]
+    max_age       = 86400
+  }
+}
+
+# Output Function URL
+output "my_api_url" {
+  description = "URL cho streaming FastAPI Lambda Function"
+  value       = aws_lambda_function_url.my_api_url.function_url
+}
+
+# Tùy chọn: Tạo SSM parameter cho runtime configuration
+resource "aws_ssm_parameter" "my_api_url" {
+  name  = "/runtime-config/apis/MyApi"
+  type  = "String"
+  value = aws_lambda_function_url.my_api_url.function_url
+
+  tags = {
+    Environment = "production"
+    Service     = "my-api"
+  }
+}
+
+# IAM policy để cấp quyền invoke cho Function URL
+resource "aws_iam_policy" "my_api_invoke_policy" {
+  name        = "my-api-invoke-policy"
+  description = "Policy để cho phép invoke streaming FastAPI Lambda Function URL"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = "lambda:InvokeFunctionUrl"
+        Resource = aws_lambda_function.my_api_handler.arn
+        Condition = {
+          StringEquals = {
+            "lambda:FunctionUrlAuthType" = "AWS_IAM"
+          }
+        }
+      }
+    ]
+  })
+}
+
+# Ví dụ: Attach invoke policy vào một role (bỏ comment và chỉnh sửa nếu cần)
+# resource "aws_iam_role_policy_attachment" "my_api_invoke_access" {
+#   role       = var.authenticated_role_name
+#   policy_arn = aws_iam_policy.my_api_invoke_policy.arn
+# }
+```
+
+</details>
+
+</Fragment>
+</Infrastructure>
+
+#### Triển khai
+
+Sau khi bạn đã cập nhật hạ tầng để hỗ trợ streaming, bạn có thể triển khai một streaming API trong FastAPI. API nên:
+
+- Trả về một [`StreamingResponse`](https://fastapi.tiangolo.com/reference/responses/?h=streaming#fastapi.responses.StreamingResponse)
+- Khai báo kiểu trả về của mỗi response chunk
+- Thêm OpenAPI vendor extension `x-streaming: true` nếu bạn định sử dụng <Link path="guides/api-connection/react-fastapi">API Connection</Link>.
+
+Ví dụ, nếu bạn muốn stream một chuỗi các JSON object từ API của mình, bạn có thể triển khai như sau:
+
+```py /return (StreamingResponse)/ /openapi_extra[^)]*/ /-> (Chunk)/
+from pydantic import BaseModel
+from fastapi.responses import StreamingResponse
+
+class Chunk(BaseModel):
+  message: str
+  timestamp: datetime
+
+async def stream_chunks():
+  for i in range(0, 100):
+    yield Chunk(message=f"This is chunk {i}", timestamp=datetime.now())
+
+@app.get("/stream", openapi_extra={'x-streaming': True})
+def my_stream() -> Chunk:
+    return StreamingResponse(stream_chunks(), media_type="application/json")
+```
+
+#### Sử dụng
+
+Để sử dụng một stream của responses, bạn có thể tận dụng <Link path="guides/api-connection/react-fastapi#consuming-a-stream">API Connection Generator</Link> sẽ cung cấp một phương thức type-safe để lặp qua các streamed chunks của bạn.
+
+## Triển khai FastAPI của bạn
+
+Generator FastAPI tạo CDK hoặc Terraform infrastructure as code dựa trên `iacProvider` bạn đã chọn. Bạn có thể sử dụng điều này để triển khai FastAPI của mình.
+
+<Infrastructure>
+<Fragment slot="cdk">
+CDK construct để triển khai API của bạn trong thư mục `common/constructs`. Bạn có thể sử dụng nó trong một ứng dụng CDK:
+
+```ts {6-8}
+import { MyApi } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    // Thêm api vào stack của bạn
+    const api = new MyApi(this, 'MyApi', {
+      integrations: MyApi.defaultIntegrations(this).build(),
+    });
+  }
+}
+```
+
+Điều này thiết lập:
+
+1. Một AWS Lambda function cho mỗi operation trong ứng dụng FastAPI
+2. API Gateway HTTP/REST API làm function trigger
+3. IAM roles và permissions
+4. CloudWatch log group
+5. Cấu hình X-Ray tracing
+6. CloudWatch metrics namespace
+
+:::note
+Nếu bạn chọn sử dụng xác thực `Cognito`, bạn sẽ cần cung cấp thuộc tính `identity` cho API construct:
+
+```ts {9}
+import { MyApi, UserIdentity } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const identity = new UserIdentity(this, 'Identity');
+
+    const api = new MyApi(this, 'MyApi', {
+      integrations: MyApi.defaultIntegrations(this).build(),
+      identity,
+    });
+  }
+}
+```
+
+Construct `UserIdentity` có thể được tạo bằng cách sử dụng <Link path="/guides/react-website-auth">generator `ts#react-website-auth`</Link>
+:::
+</Fragment>
+<Fragment slot="terraform">
+Các module Terraform để triển khai API của bạn nằm trong thư mục `common/terraform`. Bạn có thể sử dụng nó trong cấu hình Terraform:
+
+```hcl {2}
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  # Biến môi trường cho Lambda function
+  env = {
+    ENVIRONMENT = var.environment
+    LOG_LEVEL   = "INFO"
+  }
+
+  # IAM policies bổ sung nếu cần
+  additional_iam_policy_statements = [
+    # Thêm bất kỳ quyền bổ sung nào mà API của bạn cần
+  ]
+
+  tags = local.common_tags
+}
+```
+
+Điều này thiết lập:
+
+1. Một AWS Lambda function phục vụ tất cả các route FastAPI
+2. API Gateway HTTP/REST API làm function trigger
+3. IAM roles và permissions
+4. CloudWatch log group
+5. Cấu hình X-Ray tracing
+6. Cấu hình CORS
+
+:::note
+Nếu bạn chọn sử dụng xác thực `Cognito`, bạn sẽ cần cung cấp cấu hình Cognito:
+
+```hcl {4-5}
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  user_pool_id         = local.user_pool_id
+  user_pool_client_ids = [local.client_id]
+
+  env = {
+    ENVIRONMENT = var.environment
+    LOG_LEVEL   = "INFO"
+  }
+
+  tags = local.common_tags
+}
+```
+
+Bạn có thể thiết lập Cognito User Pool và Client sử dụng các Terraform resources hoặc modules phù hợp.
+:::
+
+Module Terraform cung cấp một số outputs bạn có thể sử dụng:
+
+```hcl
+# Truy cập API endpoint
+output "api_url" {
+  value = module.my_api.stage_invoke_url
+}
+
+# Truy cập chi tiết Lambda function
+output "lambda_function_name" {
+  value = module.my_api.lambda_function_name
+}
+
+# Truy cập IAM role để cấp quyền bổ sung
+output "lambda_execution_role_arn" {
+  value = module.my_api.lambda_execution_role_arn
+}
+```
+
+Bạn có thể tùy chỉnh cài đặt CORS bằng cách truyền biến cho module:
+
+```hcl
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  # Cấu hình CORS tùy chỉnh
+  cors_allow_origins = ["https://myapp.com", "https://staging.myapp.com"]
+  cors_allow_methods = ["GET", "POST", "PUT", "DELETE"]
+  cors_allow_headers = [
+    "authorization",
+    "content-type",
+    "x-custom-header"
+  ]
+
+  tags = local.common_tags
+}
+```
+
+:::caution
+Nếu bạn chọn `None` cho `auth` khi chạy generator, bạn có thể thấy các lỗi kiểm tra Checkov như:
+
+<Tabs syncKey="http-rest">
+<TabItem label="HTTP API">
+```
+Check: CKV_AWS_309: "Ensure API GatewayV2 routes specify an authorization type"
+ FAILED for resource: aws_apigatewayv2_route.proxy_routes["PUT"]
+```
+</TabItem>
+<TabItem label="REST API">
+```
+Check: CKV_AWS_59: "Ensure there is no open access to back-end resources through API"
+ FAILED for resource: aws_api_gateway_method.proxy_method
+```
+</TabItem>
+</Tabs>
+
+Bạn có thể [thêm suppression comment](https://www.checkov.io/2.Basics/Suppressing%20and%20Skipping%20Policies.html) nếu bạn chắc chắn muốn API của mình là công khai.
+:::
+</Fragment>
+</Infrastructure>
+
+### Integrations
+
+<Snippet name="api/type-safe-api-integrations" parentHeading="Integrations" />
+
+#### Tạo Code
+
+<Infrastructure>
+<Fragment slot="cdk">
+Vì các operation trong FastAPI được định nghĩa bằng Python và hạ tầng CDK bằng TypeScript, chúng tôi sử dụng code-generation để cung cấp metadata cho CDK construct nhằm cung cấp giao diện type-safe cho integrations.
+
+Một target `generate:<ApiName>-metadata` được thêm vào `project.json` của common constructs để hỗ trợ việc tạo code này, tạo ra một file như `packages/common/constructs/src/generated/my-api/metadata.gen.ts`. Vì điều này được tạo tại thời điểm build, nó bị bỏ qua trong version control.
+
+:::note
+Bạn sẽ cần chạy build mỗi khi thay đổi API để đảm bảo các kiểu được sử dụng bởi CDK construct được cập nhật.
+
+<NxCommands commands={["run-many --target build --all"]} />
+:::
+
+:::tip
+Nếu bạn đang tích cực làm việc trên cả hạ tầng CDK và FastAPI cùng nhau, bạn có thể sử dụng [`nx watch`](https://nx.dev/nx-api/nx/documents/watch) để tạo lại các kiểu này mỗi khi bạn thực hiện thay đổi API:
+
+<NxCommands
+  commands={[
+    'watch --projects=<FastAPIProject> -- \\ ',
+    'run <InfraProject>:"generate:<ApiName>-metadata"',
+  ]}
+/>
+:::
+</Fragment>
+<Fragment slot="terraform">
+:::note
+Chúng tôi không hỗ trợ type-safe integrations cho Terraform, và do đó không có targets tạo code nào được cấu hình nếu bạn chọn Terraform cho `iacProvider`.
+:::
+</Fragment>
+</Infrastructure>
+
+### Cấp quyền truy cập (Chỉ IAM)
+
+Nếu bạn chọn sử dụng xác thực `IAM`, bạn có thể sử dụng phương thức `grantInvokeAccess` để cấp quyền truy cập vào API của mình:
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts
+api.grantInvokeAccess(myIdentityPool.authenticatedRole);
+```
+</Fragment>
+<Fragment slot="terraform">
+```hcl
+# Tạo IAM policy để cho phép invoke API
+resource "aws_iam_policy" "api_invoke_policy" {
+  name        = "MyApiInvokePolicy"
+  description = "Policy để cho phép invoke FastAPI"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = "execute-api:Invoke"
+        Resource = "${module.my_api.api_execution_arn}/*/*"
+      }
+    ]
+  })
+}
+
+# Attach policy vào IAM role (ví dụ, cho authenticated users)
+resource "aws_iam_role_policy_attachment" "api_invoke_access" {
+  role       = aws_iam_role.authenticated_user_role.name
+  policy_arn = aws_iam_policy.api_invoke_policy.arn
+}
+
+# Hoặc attach vào một role hiện có theo tên
+resource "aws_iam_role_policy_attachment" "api_invoke_access_existing" {
+  role       = "MyExistingRole"
+  policy_arn = aws_iam_policy.api_invoke_policy.arn
+}
+```
+
+Các outputs chính từ API module mà bạn có thể sử dụng cho IAM policies là:
+
+- `module.my_api.api_execution_arn` - Để cấp quyền execute-api:Invoke
+- `module.my_api.api_arn` - API Gateway ARN
+- `module.my_api.lambda_function_arn` - Lambda function ARN
+</Fragment>
+</Infrastructure>
+
+## Phát triển Local
+
+Generator cấu hình một local development server mà bạn có thể chạy với:
+
+<NxCommands commands={['run my-api:serve']} />
+
+Điều này khởi động một local FastAPI development server với:
+
+- Auto-reload khi có thay đổi code
+- Tài liệu API tương tác tại `/docs` hoặc `/redoc`
+- OpenAPI schema tại `/openapi.json`
+
+## Gọi FastAPI của bạn
+
+Để gọi API của bạn từ một React website, bạn có thể sử dụng generator <Link path="guides/api-connection/react-fastapi">`api-connection`</Link>.

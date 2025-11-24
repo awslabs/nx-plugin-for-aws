@@ -1,0 +1,180 @@
+---
+title: "Dự án Python"
+description: "Tài liệu tham khảo cho Dự án Python"
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+
+Trình tạo dự án Python có thể được sử dụng để tạo một thư viện hoặc ứng dụng [Python](https://www.python.org/) hiện đại được cấu hình với các phương pháp hay nhất, được quản lý bằng [UV](https://docs.astral.sh/uv/), một lockfile và môi trường ảo duy nhất trong [UV workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/), [pytest](https://docs.pytest.org/en/stable/) để chạy các bài kiểm tra, và [Ruff](https://docs.astral.sh/ruff/) để phân tích tĩnh.
+
+## Cách sử dụng
+
+### Tạo một Dự án Python
+
+Bạn có thể tạo một dự án Python mới theo hai cách:
+
+<RunGenerator generator="py#project" />
+
+### Tùy chọn
+
+<GeneratorParameters generator="py#project" />
+
+## Kết quả của Trình tạo
+
+Trình tạo sẽ tạo cấu trúc dự án sau trong thư mục `<directory>/<name>`:
+
+<FileTree>
+
+  - \<module-name>
+    - \_\_init\_\_.py Khởi tạo module
+    - hello.py Tệp nguồn Python mẫu
+  - tests
+    - \_\_init\_\_.py Khởi tạo module
+    - conftest.py Cấu hình kiểm tra
+    - test_hello.py Các bài kiểm tra mẫu
+  - project.json Cấu hình dự án và các target build
+  - pyproject.toml Tệp cấu hình đóng gói được sử dụng bởi UV
+  - .python-version Chứa phiên bản Python của dự án
+
+</FileTree>
+
+Bạn cũng có thể nhận thấy các tệp sau được tạo/cập nhật trong thư mục gốc của workspace:
+
+<FileTree>
+
+  - pyproject.toml Cấu hình đóng gói cấp workspace cho UV
+  - .python-version Chứa phiên bản Python của workspace
+  - uv.lock Lockfile cho các phụ thuộc Python
+
+</FileTree>
+
+## Viết Mã nguồn Python
+
+Thêm mã nguồn Python của bạn vào thư mục `<module-name>`.
+
+### Import Mã Thư viện của bạn trong Các Dự án Khác
+
+Sử dụng target `add` để thêm phụ thuộc vào một dự án Python.
+
+Giả sử chúng ta đã tạo hai dự án python, `my_app` và `my_lib`. Chúng sẽ có tên dự án đầy đủ là `my_scope.my_app` và `my_scope.my_lib`, và theo mặc định sẽ có tên module là `my_scope_my_app` và `my_scope_my_lib`.
+
+Để `my_app` phụ thuộc vào `my_lib`, chúng ta có thể chạy lệnh sau:
+
+<NxCommands commands={['run my_scope.my_app:add my_scope.my_lib']} />
+
+:::note
+Chúng ta sử dụng tên dự án đầy đủ cho cả dự án phụ thuộc và dự án được phụ thuộc. Chúng ta có thể sử dụng cú pháp viết tắt cho dự án mà chúng ta muốn thêm phụ thuộc, nhưng phải viết đầy đủ tên của dự án cần phụ thuộc vào.
+:::
+
+Sau đó bạn có thể import mã thư viện của mình:
+
+```python title="packages/my_app/my_scope_my_app/main.py"
+from my_scope_my_lib.hello import say_hello
+```
+
+Ở trên, `my_scope_my_lib` là tên module cho thư viện, `hello` tương ứng với tệp nguồn Python `hello.py`, và `say_hello` là một phương thức được định nghĩa trong `hello.py`
+
+### Phụ thuộc
+
+Để thêm phụ thuộc vào dự án của bạn, bạn có thể chạy target `add` trong dự án Python của mình, ví dụ:
+
+<NxCommands commands={['run my_scope.my_library:add some-pip-package']} />
+
+Điều này sẽ thêm phụ thuộc vào tệp `pyproject.toml` của dự án và cập nhật `uv.lock` ở thư mục gốc.
+
+#### Mã Runtime
+
+Khi bạn sử dụng dự án Python của mình làm mã runtime (ví dụ như handler cho một hàm AWS lambda), bạn sẽ cần tạo một bundle của mã nguồn và tất cả các phụ thuộc của nó. Bạn có thể đạt được điều này bằng cách thêm một target như sau vào tệp `project.json` của bạn:
+
+```json title="project.json"
+{
+  ...
+  "targets": {
+    ...
+    "bundle": {
+      "cache": true,
+      "executor": "nx:run-commands",
+      "outputs": ["{workspaceRoot}/dist/packages/my_library/bundle"],
+      "options": {
+        "commands": [
+          "uv export --frozen --no-dev --no-editable --project packages/my_library --package my_scope.my_library -o dist/packages/my_library/bundle/requirements.txt",
+          "uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform x86_64-manylinux2014 --python `uv python pin` --target dist/packages/my_library/bundle -r dist/packages/my_library/bundle/requirements.txt"
+        ],
+        "parallel": false
+      },
+      "dependsOn": ["compile"]
+    },
+  },
+}
+```
+
+### Build
+
+Dự án Python của bạn được cấu hình với target `build` (được định nghĩa trong `project.json`), mà bạn có thể chạy thông qua:
+
+<NxCommands commands={['run <project-name>:build']} />
+
+Trong đó `<project-name>` là tên đầy đủ của dự án của bạn.
+
+Target `build` sẽ biên dịch, lint và kiểm tra dự án của bạn.
+
+Kết quả build có thể được tìm thấy trong thư mục `dist` gốc trong workspace của bạn, bên trong một thư mục cho package và target của bạn, ví dụ `dist/packages/<my-library>/build`
+
+## Kiểm tra
+
+[pytest](https://docs.pytest.org/en/stable/) được cấu hình để kiểm tra dự án của bạn.
+
+### Viết Các Bài Kiểm tra
+
+Các bài kiểm tra nên được viết trong thư mục `test` trong dự án của bạn, trong các tệp python có tiền tố `test_`, ví dụ:
+
+<FileTree>
+  - my_library
+    - hello.py
+  - test
+    - test_hello.py Các bài kiểm tra cho hello.py
+</FileTree>
+
+Các bài kiểm tra là các phương thức bắt đầu bằng `test_` và thực hiện các assertion để xác minh kỳ vọng, ví dụ:
+
+```python title="test/test_hello.py"
+from my_library.hello import say_hello
+
+def test_say_hello():
+  assert say_hello("Darth Vader") == "Hello, Darth Vader!"
+```
+
+Để biết thêm chi tiết về cách viết các bài kiểm tra, vui lòng tham khảo [tài liệu pytest](https://docs.pytest.org/en/stable/how-to/assert.html#).
+
+### Chạy Các Bài Kiểm tra
+
+Các bài kiểm tra sẽ chạy như một phần của target `build` cho dự án của bạn, nhưng bạn cũng có thể chạy chúng riêng biệt bằng cách chạy target `test`:
+
+<NxCommands commands={['run <project-name>:test']} />
+
+Bạn có thể chạy một bài kiểm tra riêng lẻ hoặc một nhóm bài kiểm tra bằng cách sử dụng cờ `-k`, chỉ định tên của tệp kiểm tra hoặc phương thức:
+
+<NxCommands commands={["run <project-name>:test -k 'test_say_hello'"]} />
+
+## Linting
+
+Các dự án Python sử dụng [Ruff](https://docs.astral.sh/ruff/) để linting.
+
+### Chạy Linter
+
+Để gọi linter để kiểm tra dự án của bạn, bạn có thể chạy target `lint`.
+
+<NxCommands commands={["run <project-name>:lint"]} />
+
+### Sửa Các Vấn đề Lint
+
+Phần lớn các vấn đề linting hoặc formatting có thể được sửa tự động. Bạn có thể yêu cầu Ruff sửa các vấn đề lint bằng cách chạy với tham số `--configuration=fix`.
+
+<NxCommands commands={["run <project-name>:lint --configuration=fix"]} />
+
+Tương tự, nếu bạn muốn sửa tất cả các vấn đề lint trong tất cả các package trong workspace của mình, bạn có thể chạy:
+
+<NxCommands commands={["run-many --target lint --all --configuration=fix"]} />
