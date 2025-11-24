@@ -65,7 +65,7 @@ import gameConversationPng from '@assets/game-conversation.png'
 ### 애플리케이션 배포
 애플리케이션을 배포하려면 다음 명령어를 실행하세요:
 
-<NxCommands commands={['deploy infra dungeon-adventure-infra-sandbox/*']} />
+<NxCommands commands={['deploy infra "dungeon-adventure-infra-sandbox/*"']} />
 
 배포는 약 2분 정도 소요됩니다.
 
@@ -89,9 +89,9 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityIdentityPool
 dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXXX = region_xxx
 ```
 
-### API 테스트
+### 에이전트 테스트
 
-다음 방법 중 하나로 API를 테스트할 수 있습니다:
+다음 방법 중 하나로 에이전트를 테스트할 수 있습니다:
 <ul>
 <li>에이전트 서버 로컬 인스턴스를 시작하고 `curl`로 호출하거나,</li>
 <li>JWT 토큰을 사용하여 배포된 API를 curl로 호출합니다.</li>
@@ -127,19 +127,24 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
     테스트 사용자를 생성하고 인증 토큰을 획득하세요:
 
     ```bash
+    # 사용자 생성을 간소화하기 위해 MFA 비활성화
+    aws cognito-idp set-user-pool-mfa-config \
+      --mfa-configuration OFF \
+      --user-pool-id $POOL_ID
+
     # 사용자 생성
     aws cognito-idp admin-create-user \
       --user-pool-id $POOL_ID \
-      --username "testuser" \
-      --temporary-password "TempPass123!" \
+      --username "test" \
+      --temporary-password "TempPass123-" \
       --region $REGION \
       --message-action SUPPRESS > /dev/null
 
     # 영구 비밀번호 설정(더 안전한 비밀번호로 교체 권장)
     aws cognito-idp admin-set-user-password \
       --user-pool-id $POOL_ID \
-      --username "testuser" \
-      --password "PermanentPass123!" \
+      --username "test" \
+      --password "PermanentPass123-" \
       --region $REGION \
       --permanent > /dev/null
 
@@ -147,13 +152,11 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
     export BEARER_TOKEN=$(aws cognito-idp initiate-auth \
       --client-id "$CLIENT_ID" \
       --auth-flow USER_PASSWORD_AUTH \
-      --auth-parameters USERNAME='testuser',PASSWORD='PermanentPass123!' \
-      --region $REGION | jq -r '.AuthenticationResult.IdToken')
+      --auth-parameters USERNAME='test',PASSWORD='PermanentPass123-' \
+      --region $REGION \
+      --query "AuthenticationResult.IdToken" \
+      --output text)
     ```
-
-    :::caution
-    `POOL_ID`에는 CDK 배포 출력의 `UserIdentityUserIdentityUserPoolIdXXX`를 사용하고 CDK 출력에서 해당 Client ID를 확인하세요.
-    :::
 
     Bedrock AgentCore 런타임 URL을 사용하여 배포된 에이전트를 호출하세요:
 
@@ -181,20 +184,10 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
   </TabItem>
 </Tabs>
 
-명령이 성공적으로 실행되면 다음과 유사한 스트리밍 이벤트가 표시됩니다:
+명령이 성공적으로 실행되면 초기 스토리 텍스트가 스트리밍되기 시작합니다:
 
 ```
-data: {"init_event_loop": true}
-
-data: {"start": true}
-
-data: {"start_event_loop": true}
-
-data: {"event": {"messageStart": {"role": "assistant"}}}
-
-data: {"event": {"contentBlockDelta": {"delta": {"text": "Welcome"}, "contentBlockIndex": 0}}}
-
-...
+You are a new superhero in the bustling metropolis of Metro City...
 ```
 
 축하합니다. Bedrock AgentCore 런타임에 첫 번째 Strands 에이전트를 구축하고 배포했습니다! 🎉🎉🎉

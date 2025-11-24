@@ -65,7 +65,7 @@ import gameConversationPng from '@assets/game-conversation.png'
 ### 部署应用程序
 要部署应用程序，请运行以下命令：
 
-<NxCommands commands={['deploy infra dungeon-adventure-infra-sandbox/*']} />
+<NxCommands commands={['deploy infra "dungeon-adventure-infra-sandbox/*"']} />
 
 部署过程约需 2 分钟完成。
 
@@ -89,9 +89,9 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityIdentityPool
 dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXXX = region_xxx
 ```
 
-### 测试 API
+### 测试代理
 
-可通过以下方式测试 API：
+可通过以下方式测试代理：
 <ul>
 <li>启动代理服务器本地实例并使用 `curl` 调用，或</li>
 <li>使用携带 JWT 令牌的 curl 调用已部署 API。</li>
@@ -127,19 +127,24 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
     创建测试用户并获取认证令牌：
 
     ```bash
+    # 禁用 MFA 以简化用户创建
+    aws cognito-idp set-user-pool-mfa-config \
+      --mfa-configuration OFF \
+      --user-pool-id $POOL_ID
+
     # 创建用户
     aws cognito-idp admin-create-user \
       --user-pool-id $POOL_ID \
-      --username "testuser" \
-      --temporary-password "TempPass123!" \
+      --username "test" \
+      --temporary-password "TempPass123-" \
       --region $REGION \
       --message-action SUPPRESS > /dev/null
 
     # 设置永久密码（请替换为更安全的密码！）
     aws cognito-idp admin-set-user-password \
       --user-pool-id $POOL_ID \
-      --username "testuser" \
-      --password "PermanentPass123!" \
+      --username "test" \
+      --password "PermanentPass123-" \
       --region $REGION \
       --permanent > /dev/null
 
@@ -147,13 +152,11 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
     export BEARER_TOKEN=$(aws cognito-idp initiate-auth \
       --client-id "$CLIENT_ID" \
       --auth-flow USER_PASSWORD_AUTH \
-      --auth-parameters USERNAME='testuser',PASSWORD='PermanentPass123!' \
-      --region $REGION | jq -r '.AuthenticationResult.IdToken')
+      --auth-parameters USERNAME='test',PASSWORD='PermanentPass123-' \
+      --region $REGION \
+      --query "AuthenticationResult.IdToken" \
+      --output text)
     ```
-
-    :::caution
-    使用 CDK 输出的 `UserIdentityUserIdentityUserPoolIdXXX` 作为 `POOL_ID`，并确保使用对应的客户端 ID。
-    :::
 
     通过 Bedrock AgentCore 运行时 URL 调用已部署代理：
 
@@ -181,20 +184,10 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
   </TabItem>
 </Tabs>
 
-若命令运行成功，将看到类似以下事件流：
+若命令运行成功，将开始看到初始故事文本流式输出：
 
 ```
-data: {"init_event_loop": true}
-
-data: {"start": true}
-
-data: {"start_event_loop": true}
-
-data: {"event": {"messageStart": {"role": "assistant"}}}
-
-data: {"event": {"contentBlockDelta": {"delta": {"text": "Welcome"}, "contentBlockIndex": 0}}}
-
-...
+You are a new superhero in the bustling metropolis of Metro City...
 ```
 
 恭喜！您已成功在 Bedrock AgentCore 运行时上构建并部署首个 Strands 代理！🎉🎉🎉
