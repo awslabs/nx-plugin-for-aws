@@ -446,6 +446,8 @@ export async function tsReactWebsiteGenerator(
     '@cloudscape-design/components',
     '@cloudscape-design/board-components',
     '@cloudscape-design/global-styles',
+    'react',
+    'react-dom',
   ];
 
   // Add TailwindCSS dependencies if enabled

@@ -60,6 +60,8 @@ export const TS_VERSIONS = {
   'oidc-client-ts': '3.3.0',
   prettier: '3.6.2',
   'react-oidc-context': '3.3.0',
+  react: '19.1.1',
+  'react-dom': '19.1.1',
   rimraf: '6.1.0',
   rolldown: '1.0.0-beta.45',
   'source-map-support': '0.5.21',
