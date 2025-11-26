@@ -19,7 +19,17 @@ import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
 import { Agent } from 'https';
 
 // Define supported languages
-const SUPPORTED_LANGUAGES = ['en', 'jp', 'ko', 'es', 'pt', 'fr', 'it', 'zh'];
+const SUPPORTED_LANGUAGES = [
+  'en',
+  'jp',
+  'ko',
+  'es',
+  'pt',
+  'fr',
+  'it',
+  'zh',
+  'vi',
+];
 const SOURCE_LANGUAGE = 'en';
 const DOCS_DIR = path.resolve(process.cwd(), 'docs/src/content/docs');
 const BATCH_SIZE = 3; // Number of concurrent Bedrock API calls
@@ -72,11 +82,10 @@ class BedrockQueue {
       this.activeRequests++;
 
       // Execute the request
-      this.executeRequest(request)
-        .finally(() => {
-          this.activeRequests--;
-          this.processQueue(); // Process next item in queue
-        });
+      this.executeRequest(request).finally(() => {
+        this.activeRequests--;
+        this.processQueue(); // Process next item in queue
+      });
     }
   }
 
@@ -98,7 +107,7 @@ class BedrockQueue {
    */
   async waitForCompletion(): Promise<void> {
     while (this.activeRequests > 0 || this.queue.length > 0) {
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 100));
     }
   }
 }
@@ -134,7 +143,8 @@ const log = {
     options.verbose && console.log(chalk.gray('DEBUG: ') + message),
 };
 
-const sectionTranslationModelId = 'us.anthropic.claude-sonnet-4-5-20250929-v1:0';
+const sectionTranslationModelId =
+  'us.anthropic.claude-sonnet-4-5-20250929-v1:0';
 const frontmatterTranslationModelId =
   'us.anthropic.claude-sonnet-4-5-20250929-v1:0';
 
@@ -193,7 +203,7 @@ async function main() {
       // Process each target language in parallel
       for (const targetLang of targetLanguages) {
         translationPromises.push(
-          translateFile(fileObj, sections, targetLang, bedrockQueue)
+          translateFile(fileObj, sections, targetLang, bedrockQueue),
         );
       }
     }
@@ -245,7 +255,10 @@ async function initializeBedrockClient(): Promise<BedrockRuntimeClient> {
 /**
  * Get the git diff for a specific file
  */
-async function getFileDiff(filePath: string, baseCommit: string): Promise<string> {
+async function getFileDiff(
+  filePath: string,
+  baseCommit: string,
+): Promise<string> {
   try {
     const git = simpleGit();
     const relativePath = path.relative(process.cwd(), filePath);
@@ -255,7 +268,9 @@ async function getFileDiff(filePath: string, baseCommit: string): Promise<string
 
     return diff || '';
   } catch (error) {
-    log.verbose(`Could not get diff for ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+    log.verbose(
+      `Could not get diff for ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
+    );
     return '';
   }
 }
@@ -285,7 +300,9 @@ async function getExistingTranslations(
         existingTranslations[lang] = '';
       }
     } catch (error) {
-      log.verbose(`Could not read existing translation for ${lang}: ${error instanceof Error ? error.message : String(error)}`);
+      log.verbose(
+        `Could not read existing translation for ${lang}: ${error instanceof Error ? error.message : String(error)}`,
+      );
       existingTranslations[lang] = '';
     }
   }
@@ -317,7 +334,10 @@ async function getFilesToTranslate(): Promise<FileToTranslate[]> {
             (lang: string) =>
               SUPPORTED_LANGUAGES.includes(lang) && lang !== SOURCE_LANGUAGE,
           );
-        const existingTranslations = await getExistingTranslations(file, targetLanguages);
+        const existingTranslations = await getExistingTranslations(
+          file,
+          targetLanguages,
+        );
 
         fileObjects.push({
           path: file,
@@ -434,7 +454,10 @@ async function getFilesToTranslate(): Promise<FileToTranslate[]> {
       for (const file of changedFiles) {
         const sourceContent = await fs.readFile(file, 'utf-8');
         const diff = await getFileDiff(file, baseCommit);
-        const existingTranslations = await getExistingTranslations(file, targetLanguages);
+        const existingTranslations = await getExistingTranslations(
+          file,
+          targetLanguages,
+        );
 
         fileObjects.push({
           path: file,
@@ -558,14 +581,14 @@ async function translateFile(
     const existingTranslation = fileObj.existingTranslations[targetLang] || '';
 
     // Translate all sections in parallel using the queue
-    const translationPromises = sections.map(section =>
+    const translationPromises = sections.map((section) =>
       translateSection(
         section,
         targetLang,
         bedrockQueue,
         fileObj.sourceLanguageDiff,
         existingTranslation,
-      )
+      ),
     );
 
     const translatedSections = await Promise.all(translationPromises);
@@ -605,7 +628,13 @@ async function translateSection(
 
   if (isFrontmatter) {
     // Handle frontmatter translation differently to preserve structure
-    return await translateFrontmatter(section, targetLang, bedrockQueue, diff, existingTranslation);
+    return await translateFrontmatter(
+      section,
+      targetLang,
+      bedrockQueue,
+      diff,
+      existingTranslation,
+    );
   }
 
   let contextInfo = '';
@@ -626,9 +655,13 @@ ${diff}
   if (existingTranslation && existingTranslation.trim()) {
     // Remove frontmatter from existing translation for regular sections
     let translationWithoutFrontmatter = existingTranslation;
-    const frontmatterMatch = existingTranslation.match(/^---\n[\s\S]*?\n---\n*/);
+    const frontmatterMatch = existingTranslation.match(
+      /^---\n[\s\S]*?\n---\n*/,
+    );
     if (frontmatterMatch) {
-      translationWithoutFrontmatter = existingTranslation.substring(frontmatterMatch[0].length);
+      translationWithoutFrontmatter = existingTranslation.substring(
+        frontmatterMatch[0].length,
+      );
     }
 
     if (translationWithoutFrontmatter.trim()) {
@@ -671,15 +704,20 @@ CRITICAL REQUIREMENTS:
     accept: 'application/json',
     body: JSON.stringify({
       anthropic_beta: ['context-1m-2025-08-07'],
-      anthropic_version: "bedrock-2023-05-31",
+      anthropic_version: 'bedrock-2023-05-31',
       temperature: 0.7,
       max_tokens: 64000,
       system: prompt,
-      messages: [{ role: 'user', content: `Here is the mdx content to translate:
+      messages: [
+        {
+          role: 'user',
+          content: `Here is the mdx content to translate:
 
 <documentation-to-translate>
 ${section}
-</documentation-to-translate>` }]
+</documentation-to-translate>`,
+        },
+      ],
     }),
   };
 
@@ -694,7 +732,7 @@ ${section}
 
     const sections = splitByHeaders(section, depth);
 
-    const translationPromises = sections.map(section =>
+    const translationPromises = sections.map((section) =>
       translateSection(
         section,
         targetLang,
@@ -702,7 +740,7 @@ ${section}
         diff,
         existingTranslation,
         depth + 1,
-      )
+      ),
     );
 
     const translatedSections = await Promise.all(translationPromises);
@@ -853,6 +891,7 @@ function getLanguageName(langCode: string): string {
     pt: 'Portugese',
     zh: 'Chinese',
     ko: 'Korean',
+    vi: 'Vietnamese',
   };
 
   return languageMap[langCode] || langCode;
@@ -865,4 +904,3 @@ main().catch((error) => {
   );
   process.exit(1);
 });
-

@@ -1,0 +1,163 @@
+---
+title: "Xây dựng giao diện người dùng"
+description: "Hướng dẫn chi tiết cách xây dựng trò chơi phiêu lưu hầm ngục được hỗ trợ bởi AI tác nhân sử dụng @aws/nx-plugin."
+---
+
+import { Aside, Code, FileTree, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import Drawer from '@components/drawer.astro';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import InstallCommand from '@components/install-command.astro';
+import E2ECode from '@components/e2e-code.astro';
+import E2EDiff from '@components/e2e-diff.astro';
+
+import dungeonAdventureArchitecturePng from '@assets/dungeon-game-architecture.png'
+import dungeonAdventureErPng from '@assets/dungeon-adventure-er.png'
+import baselineWebsitePng from '@assets/baseline-website.png'
+import baselineGamePng from '@assets/baseline-game.png'
+import nxGraphPng from '@assets/nx-graph.png'
+import gameSelectPng from '@assets/game-select.png'
+import gameConversationPng from '@assets/game-conversation.png'
+
+## Nhiệm vụ 1: Cấu hình máy chủ phát triển cục bộ
+
+Để bắt đầu xây dựng giao diện người dùng, chúng ta cần cấu hình máy chủ phát triển cục bộ để trỏ đến sandbox đã triển khai của chúng ta. Để thực hiện điều này, hãy chạy lệnh sau:
+
+<NxCommands commands={["run @dungeon-adventure/game-ui:load:runtime-config"]} />
+
+Lệnh này sẽ tải xuống file `runtime-config.json` đã được triển khai và lưu trữ nó cục bộ trong thư mục `packages/game-ui/public`.
+
+Để khởi động máy chủ phát triển, hãy chạy lệnh sau:
+
+<NxCommands commands={["run @dungeon-adventure/game-ui:serve"]} />
+
+Mở trang web cục bộ của bạn trong trình duyệt, nơi bạn sẽ được nhắc đăng nhập và làm theo các hướng dẫn để tạo người dùng mới. Sau khi hoàn tất, bạn sẽ thấy trang web cơ bản:
+
+<Image src={baselineWebsitePng} alt="baseline-website.png" width="800" height="600" />
+
+<Aside type="caution">
+Chúng tôi khuyến nghị giữ máy chủ phát triển chạy trong suốt phần còn lại của module này vì nó sẽ tự động tải lại bất kỳ thay đổi nào chúng ta thực hiện.
+</Aside>
+
+:::tip
+Bạn có thể chạy các lệnh Nx thay thế để khởi động bất kỳ máy chủ API cục bộ nào được kết nối, cho phép bạn lặp lại cả tRPC API và trang web của bạn cùng nhau. <NxCommands commands={["run @dungeon-adventure/game-ui:serve-local"]} /> 
+:::
+
+## Nhiệm vụ 2: Tạo route '/game' mới
+
+Hãy giới thiệu các khả năng của `@tanstack/react-router` bằng cách tạo một route an toàn kiểu mới.
+Để thực hiện điều này, hãy tạo một file trống tại vị trí sau: `packages/game-ui/src/routes/game/index.tsx`. Bạn sẽ nhận thấy file được cập nhật ngay lập tức.
+
+`@tanstack/react-router` tự động cấu hình route mới của bạn và file bạn vừa tạo đã được điền sẵn với đường dẫn route:
+
+```tsx
+import { createFileRoute } from '@tanstack/react-router'
+
+export const Route = createFileRoute('/game/')({
+  component: RouteComponent,
+})
+
+function RouteComponent() {
+  return <div>Hello "/game/"!</div>
+}
+```
+
+Nếu bạn điều hướng đến `http://localhost:4200/game`, bạn sẽ thấy trang mới của bạn đã được hiển thị.
+
+<Image src={baselineGamePng} alt="baseline-game.png" width="800" height="600" />
+
+Cập nhật file `index.tsx` để tải route `/game` mới của chúng ta theo mặc định. Khi bạn cập nhật trường `to`, bạn có danh sách các route an toàn kiểu để chọn.
+
+<Tabs>
+<TabItem label="routes/index.tsx">
+<E2EDiff before="dungeon-adventure/4/routes/index.tsx.old.template" after="dungeon-adventure/4/routes/index.tsx.template" lang="tsx" />
+</TabItem>
+</Tabs>
+
+Bạn có thể xóa thư mục `packages/game-ui/src/routes/welcome/` vì nó không còn cần thiết nữa.
+
+## Nhiệm vụ 3: Cập nhật layout
+
+Layout mặc định được cấu hình giống với ứng dụng kinh doanh kiểu SaaS hơn là một trò chơi.
+Để cấu hình lại layout và thay đổi theme để giống với trò chơi kiểu hầm ngục hơn, hãy thực hiện các thay đổi sau đối với `packages/game-ui/src`:
+
+<Tabs>
+<TabItem label="config.ts">
+<E2EDiff before="dungeon-adventure/4/config.ts.old.template" after="dungeon-adventure/4/config.ts.template" lang="typescript" />
+</TabItem>
+<TabItem label="components/AppLayout/index.tsx">
+<E2ECode path="dungeon-adventure/4/AppLayout/index.tsx.template" lang="tsx" />
+</TabItem>
+<TabItem label="styles.css">
+<E2ECode path="dungeon-adventure/4/styles.css.template" lang="css" />
+</TabItem>
+</Tabs>
+
+Xóa file `packages/game-ui/src/hooks/useAppLayout.tsx` vì nó không được sử dụng.
+
+## Nhiệm vụ 4: Tích hợp Story Agent
+
+Hãy tạo một hook để khởi tạo client cho việc tương tác với Story Agent của chúng ta.
+
+<Tabs>
+<TabItem label="hooks/useStoryAgent.tsx">
+<E2ECode path="dungeon-adventure/4/hooks/useStoryAgent.tsx.template" lang="tsx" />
+</TabItem>
+</Tabs>
+
+Hook này:
+
+- Truy xuất Agent ARN từ `runtime-config.json`,
+- Xây dựng URL gọi AgentCore Runtime từ ARN,
+- Gọi Agent với JWT token của người dùng đã đăng nhập và một session ID ngẫu nhiên, và
+- Trả về một async iterator để tiêu thụ các chunk thông điệp agent được stream.
+
+:::tip
+Tích hợp với Game API của chúng ta đã được cấu hình sẵn, vì chúng ta đã sử dụng generator `api-connection`. Nếu bạn muốn có trải nghiệm tương tự cho các agent, hãy +1 [GitHub issue này](https://github.com/awslabs/nx-plugin-for-aws/issues/326).
+:::
+
+## Nhiệm vụ 5: Tạo các trang Game
+
+Để tạo các trang Game sẽ gọi API của chúng ta và hoàn thiện việc triển khai trò chơi, hãy cập nhật các file sau trong `packages/game-ui/src/routes/game`:
+
+<Tabs>
+<TabItem label="index.tsx">
+<E2ECode path="dungeon-adventure/4/routes/game/index.tsx.template" lang="tsx" />
+</TabItem>
+<TabItem label="$playerName.tsx">
+
+<E2ECode path="dungeon-adventure/4/routes/game/$playerName.tsx.template" lang="tsx" />
+
+<Aside type="tip">
+Cú pháp `$playerName` sẽ hướng dẫn `@tanstack/react-router` xử lý `playerName` như một [path param](https://tanstack.com/router/v1/docs/framework/react/guide/path-params). Ngoài ra, chúng ta triển khai phương thức `validateSearch` để đảm bảo rằng tham số truy vấn `genre` được định kiểu mạnh theo enum genre của chúng ta.
+</Aside>
+</TabItem>
+</Tabs>
+
+Sau khi bạn thực hiện những thay đổi này, máy chủ phát triển cục bộ của bạn (http://localhost:4200/) giờ đây sẽ có trò chơi sẵn sàng để chơi.
+
+<Drawer title="Build và Deploy" trigger="Bạn cũng có thể build & deploy code của mình lên Cloudfront nếu muốn.">
+
+## Nhiệm vụ 6: Build và deploy
+
+### Build code của bạn
+Để build code của bạn, hãy chạy lệnh sau:
+
+<NxCommands commands={['run-many --target build --all']} />
+
+### Deploy ứng dụng của bạn
+Để deploy ứng dụng của bạn, hãy chạy lệnh sau:
+
+<NxCommands commands={['run @dungeon-adventure/infra:deploy dungeon-adventure-infra-sandbox/*']} />
+
+Sau khi deploy, hãy điều hướng đến URL Cloudfront của bạn. Để tìm URL này, hãy kiểm tra các đầu ra deploy của CDK.
+
+</Drawer>
+
+<Image src={gameSelectPng} alt="game-select.png" width="500" height="400" />
+<div style="margin-top: -100px; margin-left: 100px;">
+<Image src={gameConversationPng} alt="game-conversation.png" width="500" height="400" />
+</div>
+
+Chúc mừng. Bạn đã xây dựng và triển khai Trò chơi Phiêu lưu Hầm ngục với Agent của mình!  🎉🎉🎉

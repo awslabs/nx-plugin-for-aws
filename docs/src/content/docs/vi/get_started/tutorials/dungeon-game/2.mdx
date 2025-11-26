@@ -1,0 +1,344 @@
+---
+title: "Triển khai Game API và Inventory MCP server"
+description: "Hướng dẫn chi tiết cách xây dựng trò chơi phiêu lưu hầm ngục được hỗ trợ bởi AI agentic sử dụng @aws/nx-plugin."
+---
+
+import { Aside, Code, FileTree, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import Link from '@components/link.astro';
+import Drawer from '@components/drawer.astro';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import InstallCommand from '@components/install-command.astro';
+import E2EDiff from '@components/e2e-diff.astro';
+import E2ECode from '@components/e2e-code.astro';
+
+import dungeonAdventureArchitecturePng from '@assets/dungeon-game-architecture.png'
+import dungeonAdventureErPng from '@assets/dungeon-adventure-er.png'
+import baselineWebsitePng from '@assets/baseline-website.png'
+import baselineGamePng from '@assets/baseline-game.png'
+import nxGraphPng from '@assets/nx-graph.png'
+import gameSelectPng from '@assets/game-select.png'
+import gameConversationPng from '@assets/game-conversation.png'
+
+import { getDungeonAdventureElectroDbDependencies } from '../../../../../../../../e2e/src/utils';
+
+## Nhiệm vụ 1: Triển khai Game API
+
+Chúng ta sẽ triển khai các API sau trong phần này:
+
+1. `saveGame` - tạo hoặc cập nhật một trò chơi.
+2. `queryGames` - trả về danh sách phân trang các trò chơi đã lưu trước đó.
+3. `saveAction` - lưu một hành động cho một trò chơi nhất định.
+4. `queryActions` - trả về danh sách phân trang tất cả các hành động liên quan đến một trò chơi.
+5. `queryInventory` - trả về danh sách phân trang các vật phẩm trong kho của người chơi.
+
+### Schema API
+
+Để định nghĩa đầu vào và đầu ra của API, hãy tạo schema của chúng ta bằng [Zod](https://zod.dev/) trong file `packages/game-api/src/schema/index.ts` như sau:
+
+<E2EDiff lang="typescript" before="dungeon-adventure/2/schema/index.ts.old.template" after="dungeon-adventure/2/schema/index.ts.template" />
+
+Xóa file `packages/game-api/src/schema/echo.ts` vì chúng ta sẽ không sử dụng nó trong dự án này.
+
+<Aside type="tip">
+Đối với mỗi schema chúng ta định nghĩa trong Zod, chúng ta cũng xuất một interface bằng cách sử dụng cú pháp `z.TypeOf`. Điều này chuyển đổi định nghĩa Zod của chúng ta thành một interface Typescript mà không cần phải trùng lặp công sức.
+</Aside>
+
+### Mô hình hóa thực thể
+
+Đây là sơ đồ ER cho ứng dụng của chúng ta.
+
+<Image class="centered-image white-bg" src={dungeonAdventureErPng} alt="dungeon-adventure-er.png" width="400" height="300" />
+
+{/* Generated from the following PlantUML: */}
+{/*
+@startuml Game API Entity Relationship Diagram
+
+!theme plain
+
+skinparam linetype ortho
+skinparam roundcorner 10
+
+entity "Game" as game {
+  + playerName : string <<PK>>
+  --
+  genre : string
+  lastUpdated : string
+}
+
+entity "Action" as action {
+  + playerName : string <<PK>>
+  + timestamp : string <<SK>>
+  --
+  role : string
+  content : string
+}
+
+entity "Item" as item {
+  + playerName : string <<PK>>
+  + itemName : string
+  --
+  emoji : string (optional)
+  lastUpdated : string
+  quantity : number
+}
+
+game ||--o{ action
+game ||--o{ item
+
+@enduml
+*/}
+
+Chúng ta sẽ triển khai cơ sở dữ liệu trong DynamoDB và sẽ sử dụng thư viện client DynamoDB [ElectroDB](https://electrodb.dev/en/core-concepts/introduction/) để đơn giản hóa mọi thứ. Để cài đặt `electrodb` và DynamoDB Client, chạy lệnh này:
+
+<InstallCommand pkg={getDungeonAdventureElectroDbDependencies()} />
+
+<Aside>
+Tất cả các dependencies được thêm vào `package.json` gốc vì `@aws/nx-plugin` tuân theo nguyên tắc [single version policy](https://nx.dev/concepts/decisions/dependency-management#single-version-policy). Để biết thêm thông tin, tham khảo <Link path="guides/typescript-project#dependencies">hướng dẫn ts#project</Link>.
+</Aside>
+
+Để định nghĩa các thực thể ElectroDB từ Sơ đồ ER, hãy tạo file `packages/game-api/src/entities/index.ts`:
+
+<E2ECode lang="typescript" path="dungeon-adventure/2/entities/index.ts.template" />
+
+ElectroDB cho phép chúng ta không chỉ định nghĩa các kiểu của mình mà còn có thể cung cấp giá trị mặc định cho các giá trị nhất định như timestamps. Ngoài ra, ElectroDB tuân theo [single-table design](https://electrodb.dev/en/core-concepts/single-table-relationships/) là best practice khi sử dụng DynamoDB.
+
+<Aside>
+Mặc dù ElectroDB hỗ trợ [collections](https://electrodb.dev/en/modeling/collections/), chúng ta đã chọn không sử dụng chúng trong hướng dẫn này để đơn giản.
+</Aside>
+
+Để chuẩn bị cho MCP server tương tác với inventory, hãy đảm bảo chúng ta xuất inventory entity trong `packages/game-api/src/index.ts`:
+
+<Tabs>
+<TabItem label="packages/game-api/src/index.ts">
+<E2EDiff lang="typescript" before="dungeon-adventure/2/index.ts.old.template" after="dungeon-adventure/2/index.ts.template" />
+</TabItem>
+</Tabs>
+
+:::note
+Cấu trúc package sẽ tốt hơn nếu chúng ta tái cấu trúc các entities thành dự án chia sẻ riêng của chúng để MCP server không cần phụ thuộc vào API.
+:::
+
+### Định nghĩa các procedures
+
+Để triển khai các phương thức API, thực hiện các thay đổi sau trong `packages/game-api/src/procedures`:
+
+<Tabs>
+  <TabItem label="actions.ts">
+<E2ECode lang="typescript" path="dungeon-adventure/2/procedures/actions.ts.template" />
+  </TabItem>
+  <TabItem label="games.ts">
+<E2ECode lang="typescript" path="dungeon-adventure/2/procedures/games.ts.template" />
+  </TabItem>
+  <TabItem label="inventory.ts">
+<E2ECode lang="typescript" path="dungeon-adventure/2/procedures/inventory.ts.template" />
+  </TabItem>
+</Tabs>
+
+Xóa file `echo.ts` (từ `packages/game-api/src/procedures`) vì chúng ta sẽ không sử dụng nó trong dự án này.
+
+### Thiết lập Router
+
+Sau khi chúng ta định nghĩa các procedures, để kết nối chúng vào API của chúng ta, cập nhật file sau:
+
+<Tabs>
+  <TabItem label="packages/game-api/src/router.ts">
+<E2EDiff lang="typescript" before="dungeon-adventure/2/router.ts.old.template" after="dungeon-adventure/2/router.ts.template" />
+</TabItem>
+</Tabs>
+
+## Nhiệm vụ 2: Tạo Inventory MCP server
+
+Hãy tạo một MCP server cho phép agent của chúng ta quản lý các vật phẩm trong kho của người chơi.
+
+Chúng ta sẽ định nghĩa các công cụ sau cho agent của chúng ta:
+
+- `list-inventory-items` để lấy các vật phẩm kho hiện tại của người chơi
+- `add-to-inventory` để thêm vật phẩm vào kho của người chơi
+- `remove-from-inventory` để xóa vật phẩm khỏi kho của người chơi
+
+Để tiết kiệm thời gian, chúng ta sẽ định nghĩa tất cả các công cụ inline:
+
+<Tabs>
+  <TabItem label="packages/inventory/src/mcp-server/server.ts">
+<E2EDiff lang="typescript" before="dungeon-adventure/2/mcp/server.ts.old.template" after="dungeon-adventure/2/mcp/server.ts.template" />
+</TabItem>
+</Tabs>
+
+Khi số lượng công cụ tăng lên, bạn có thể tái cấu trúc chúng thành các file riêng biệt nếu muốn.
+
+Xóa các thư mục `tools` và `resources` trong `packages/inventory/src/mcp-server` vì chúng sẽ không được sử dụng.
+
+## Nhiệm vụ 3: Cập nhật cơ sở hạ tầng
+
+Bước cuối cùng là cập nhật cơ sở hạ tầng của chúng ta để tạo bảng DynamoDB và cấp quyền thực hiện các thao tác từ Game API.
+Để làm điều này, cập nhật `packages/infra/src` như sau:
+
+<Tabs>
+  <TabItem label="constructs/electrodb-table.ts">
+<E2ECode lang="typescript" path="dungeon-adventure/2/constructs/electrodb-table.ts.template" />
+  </TabItem>
+  <TabItem label="stacks/application-stack.ts">
+<E2EDiff lang="typescript" before="dungeon-adventure/1/application-stack.ts.template" after="dungeon-adventure/2/stacks/application-stack.ts.template" />
+
+:::note
+Lưu ý ở đây rằng vì mỗi procedure được phục vụ bởi một lambda function riêng lẻ, chúng ta có thể tuân theo nguyên tắc least privilege và chỉ gán các quyền đọc/ghi cần thiết dựa trên triển khai của procedure.
+:::
+  </TabItem>
+</Tabs>
+
+## Nhiệm vụ 4: Triển khai và kiểm thử
+
+Đầu tiên, sửa mọi vấn đề lint:
+
+<NxCommands commands={['run-many --target lint --configuration=fix --all']} />
+
+Sau đó build codebase:
+
+<NxCommands commands={['run-many --target build --all']} />
+
+### Triển khai ứng dụng của bạn
+Để triển khai ứng dụng của bạn, chạy lệnh sau:
+
+<NxCommands commands={['deploy infra "dungeon-adventure-infra-sandbox/*"']} />
+
+:::caution
+Để bootstrap AWS Account của bạn trước, chạy:
+
+<NxCommands commands={['bootstrap infra']} />
+:::
+
+Triển khai đầu tiên của bạn sẽ mất khoảng 8 phút để hoàn thành. Các lần triển khai tiếp theo sẽ mất khoảng 2 phút.
+
+:::tip
+Nếu bạn đang lặp lại các thay đổi code Lambda function, bạn có thể triển khai với cờ `--hotswap` sau khi build codebase để có thời gian triển khai ngắn hơn nhiều (2-3 giây).
+
+<NxCommands commands={['run @dungeon-adventure/infra:deploy "dungeon-adventure-infra-sandbox/*" --hotswap']} />
+:::
+
+Khi triển khai hoàn tất, bạn sẽ thấy các outputs tương tự như sau _(một số giá trị đã được che đi)_:
+
+```bash
+dungeon-adventure-sandbox-Application
+dungeon-adventure-sandbox-Application: deploying... [2/2]
+
+ ✅  dungeon-adventure-sandbox-Application
+
+✨  Deployment time: 354s
+
+Outputs:
+dungeon-adventure-sandbox-Application.ElectroDbTableTableNameXXX = dungeon-adventure-sandbox-Application-ElectroDbTableXXX-YYY
+dungeon-adventure-sandbox-Application.GameApiEndpointXXX = https://xxx.execute-api.region.amazonaws.com/prod/
+dungeon-adventure-sandbox-Application.GameUIDistributionDomainNameXXX = xxx.cloudfront.net
+dungeon-adventure-sandbox-Application.StoryApiEndpointXXX = https://xxx.execute-api.region.amazonaws.com/prod/
+dungeon-adventure-sandbox-Application.UserIdentityUserIdentityIdentityPoolIdXXX = region:xxx
+dungeon-adventure-sandbox-Application.UserIdentityUserIdentityUserPoolIdXXX = region_xxx
+```
+### Kiểm thử API
+Bạn có thể kiểm thử API bằng cách:
+<ul>
+<li>Khởi động một instance local của tRPC backend và gọi các API bằng `curl`.</li>
+<li>
+<Drawer title="Sigv4 enabled curl" trigger="Gọi API đã triển khai bằng curl hỗ trợ sigv4">
+
+<Tabs>
+  <TabItem label="Bash/Linux/macOS">
+Bạn có thể thêm script sau vào file `.bashrc` của bạn (và `source` nó) hoặc paste nội dung sau vào cùng terminal mà bạn muốn chạy lệnh.
+```bash
+// ~/.bashrc
+acurl () {
+    REGION=$1
+    SERVICE=$2
+    shift; shift;
+    curl --aws-sigv4 "aws:amz:$REGION:$SERVICE" --user "$(aws configure get aws_access_key_id):$(aws configure get aws_secret_access_key)" -H "X-Amz-Security-Token: $(aws configure get aws_session_token)" "$@"
+}
+```
+
+Để thực hiện yêu cầu curl với xác thực `sigv4`, gọi `acurl` bằng các ví dụ sau:
+
+###### API Gateway
+```bash
+acurl ap-southeast-2 execute-api -X GET https://xxx
+```
+
+###### Streaming Lambda function url
+```bash
+acurl ap-southeast-2 lambda -N -X POST https://xxx
+```
+  </TabItem>
+  <TabItem label="Windows PowerShell">
+Bạn có thể thêm function sau vào PowerShell profile của bạn hoặc paste nội dung sau vào cùng phiên PowerShell mà bạn muốn chạy lệnh.
+```powershell
+# PowerShell profile or current session
+function acurl {
+    param(
+        [Parameter(Mandatory=$true)][string]$Region,
+        [Parameter(Mandatory=$true)][string]$Service,
+        [Parameter(ValueFromRemainingArguments=$true)][string[]]$CurlArgs
+    )
+
+    $AccessKey = aws configure get aws_access_key_id
+    $SecretKey = aws configure get aws_secret_access_key
+    $SessionToken = aws configure get aws_session_token
+
+    & curl --aws-sigv4 "aws:amz:$Region`:$Service" --user "$AccessKey`:$SecretKey" -H "X-Amz-Security-Token: $SessionToken" @CurlArgs
+}
+```
+
+Để thực hiện yêu cầu curl với xác thực `sigv4`, gọi `acurl` bằng các ví dụ sau:
+
+###### API Gateway
+```powershell
+acurl ap-southeast-2 execute-api -X GET https://xxx
+```
+
+###### Streaming Lambda function url
+```powershell
+acurl ap-southeast-2 lambda -N -X POST https://xxx
+```
+  </TabItem>
+</Tabs>
+
+</Drawer>
+</li>
+</ul>
+
+
+<Tabs>
+  <TabItem label="Local">
+    Để khởi động server `game-api` local của bạn, chạy lệnh sau:
+
+    <NxCommands highlights={['dungeon-adventure-infra-sandbox-Application-ElectroDbTableXXX-YYY']} env={{TABLE_NAME:"dungeon-adventure-infra-sandbox-Application-ElectroDbTableXXX-YYY"}} commands={["run @dungeon-adventure/game-api:serve"]} />
+
+    <Aside type="caution">
+    Sử dụng giá trị output CDK deploy của `dungeon-adventure-infra-sandbox-Application.ElectroDbTableTableNameXXX` để thay thế placeholder được đánh dấu.
+    </Aside>
+
+    Khi server của bạn đã chạy, bạn có thể gọi nó bằng cách chạy lệnh sau:
+
+    ```bash
+    curl -X GET 'http://localhost:2022/games.query?input=%7B%7D'
+    ```
+  </TabItem>
+  <TabItem label="Deployed">
+```bash "https://xxx.execute-api.ap-southeast-2.amazonaws.com/prod/" "ap-southeast-2"
+acurl ap-southeast-2 execute-api -X GET 'https://xxx.execute-api.ap-southeast-2.amazonaws.com/prod/games.query?input=%7B%7D'
+```
+    <Aside type="caution">
+    Sử dụng giá trị output CDK deploy của `dungeon-adventure-infra-sandbox-Application.GameApiGameApiEndpointXXX` để thay thế placeholder được đánh dấu và đặt region tương ứng.
+    </Aside>
+  </TabItem>
+</Tabs>
+
+:::note
+`%7B%7D` mà chúng ta truyền để kiểm thử API là một đối tượng JSON rỗng được mã hóa URI (`{}`).
+:::
+
+Nếu lệnh chạy thành công, bạn sẽ thấy phản hồi như sau:
+
+```json
+{"result":{"data":{"items":[],"cursor":null}}}
+```
+
+Chúc mừng, bạn đã xây dựng và triển khai API đầu tiên của mình bằng tRPC!  🎉🎉🎉

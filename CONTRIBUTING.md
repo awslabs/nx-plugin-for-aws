@@ -44,13 +44,13 @@ For a detailed guide on contributing a generator, check out the [Contributing a 
 
 ### Documentation Translation
 
-The project supports automatic translation of documentation using AWS Bedrock's Deepseek & Haiku 3.5 models. Documentation is translated from English to multiple languages (currently Japanese, with support for French, Spanish, German, Chinese, and Korean).
+The project supports automatic translation of documentation using Anthropic's Claude Sonnet 4.5 model on Amazon Bedrock. Documentation is translated from English to multiple languages (currently Japanese, with support for French, Spanish, German, Chinese, Vietnamese and Korean).
 
 > **_NOTE:_** It is important that only files in english (en folder) are modified directly as the translated files are generating using english as a base.
 
 #### Running Translations Locally
 
-> **_NOTE:_** Ensure you have your aws cli configured to an AWS account with DeepSeek/Haiku 3.5 Bedrock model access before continuing.
+> **_NOTE:_** Ensure you have your aws cli configured to an AWS account with Claude Sonnet 4.5 Bedrock model access before continuing.
 
 To translate documentation locally:
 

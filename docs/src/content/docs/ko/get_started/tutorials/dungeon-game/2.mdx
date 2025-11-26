@@ -25,7 +25,7 @@ import { getDungeonAdventureElectroDbDependencies } from '../../../../../../../.
 
 ## 작업 1: Game API 구현
 
-Game API를 구현하기 전에 다음 5개의 API를 생성해야 합니다:
+이 섹션에서는 다음 API를 구현합니다:
 
 1. `saveGame` - 게임 생성 또는 업데이트
 2. `queryGames` - 저장된 게임 목록을 페이지네이션으로 반환
@@ -35,27 +35,11 @@ Game API를 구현하기 전에 다음 5개의 API를 생성해야 합니다:
 
 ### API 스키마
 
-[Zod](https://zod.dev/)를 사용하여 API 입력/출력 스키마를 `packages/game-api/src/schema` 디렉토리에 다음과 같이 정의합니다:
+[Zod](https://zod.dev/)를 사용하여 API 입력/출력 스키마를 `packages/game-api/src/schema/index.ts` 파일에 다음과 같이 정의합니다:
 
-<Tabs>
-  <TabItem label="action.ts">
-<E2ECode lang="typescript" path="dungeon-adventure/2/schema/action.ts.template" />
-  </TabItem>
-  <TabItem label="common.ts">
-<E2ECode lang="typescript" path="dungeon-adventure/2/schema/common.ts.template" />
-  </TabItem>
-  <TabItem label="game.ts">
-<E2ECode lang="typescript" path="dungeon-adventure/2/schema/game.ts.template" />
-  </TabItem>
-  <TabItem label="inventory.ts">
-<E2ECode lang="typescript" path="dungeon-adventure/2/schema/inventory.ts.template" />
-  </TabItem>
-  <TabItem label="index.ts">
 <E2EDiff lang="typescript" before="dungeon-adventure/2/schema/index.ts.old.template" after="dungeon-adventure/2/schema/index.ts.template" />
-  </TabItem>
-</Tabs>
 
-이 프로젝트에서 사용하지 않을 `packages/game-api/src/schema/echo.ts` 파일은 삭제할 수 있습니다.
+이 프로젝트에서 사용하지 않을 `packages/game-api/src/schema/echo.ts` 파일은 삭제합니다.
 
 <Aside type="tip">
 각 Zod 스키마 정의에 `z.TypeOf` 구문을 사용하여 인터페이스를 함께 내보냅니다. 이렇게 하면 중복 작업 없이 Zod 정의를 TypeScript 인터페이스로 변환할 수 있습니다.
@@ -114,19 +98,9 @@ DynamoDB에 데이터베이스를 구현할 것이며, [ElectroDB](https://elect
 모든 종속성은 루트 `package.json`에 추가됩니다. `@aws/nx-plugin`은 [단일 버전 정책](https://nx.dev/concepts/decisions/dependency-management#single-version-policy) 원칙을 따릅니다. 자세한 내용은 <Link path="guides/typescript-project#dependencies">TypeScript 프로젝트 가이드</Link>를 참조하세요.
 </Aside>
 
-ER 다이어그램에서 ElectroDB 엔티티를 정의하기 위해 `packages/game-api/src/entities` 폴더 내에 다음 파일들을 생성합니다:
+ER 다이어그램에서 ElectroDB 엔티티를 정의하기 위해 `packages/game-api/src/entities/index.ts` 파일을 생성합니다:
 
-<Tabs>
-  <TabItem label="action.ts">
-<E2ECode lang="typescript" path="dungeon-adventure/2/entities/action.ts.template" />
-  </TabItem>
-  <TabItem label="game.ts">
-<E2ECode lang="typescript" path="dungeon-adventure/2/entities/game.ts.template" />
-  </TabItem>
-  <TabItem label="inventory.ts">
-<E2ECode lang="typescript" path="dungeon-adventure/2/entities/inventory.ts.template" />
-  </TabItem>
-</Tabs>
+<E2ECode lang="typescript" path="dungeon-adventure/2/entities/index.ts.template" />
 
 ElectroDB를 사용하면 타입 정의뿐만 아니라 타임스탬프와 같은 특정 값에 대한 기본값을 제공할 수 있습니다. 또한 ElectroDB는 DynamoDB 사용 시 권장되는 [단일 테이블 디자인](https://electrodb.dev/en/core-concepts/single-table-relationships/)을 따릅니다.
 
@@ -146,62 +120,23 @@ MCP 서버가 인벤토리와 상호작용할 수 있도록 `packages/game-api/s
 MCP 서버가 API에 의존하지 않도록 엔티티를 별도의 공유 프로젝트로 리팩토링하면 패키지 구조가 더 개선될 수 있습니다.
 :::
 
-### tRPC 컨텍스트에 DynamoDB 클라이언트 추가
-
-모든 프로시저에서 DynamoDB 클라이언트에 접근할 수 있도록 컨텍스트를 통해 단일 인스턴스를 전달해야 합니다. 이를 위해 `packages/game-api/src` 내에서 다음 변경사항을 적용합니다:
-
-<Tabs>
-  <TabItem label="middleware/dynamodb.ts">
-<E2ECode lang="typescript" path="dungeon-adventure/2/middleware/dynamodb.ts.template" />
-
-이 플러그인은 `DynamoDBClient`를 생성하고 컨텍스트에 주입합니다.
-  </TabItem>
-  <TabItem label="middleware/index.ts">
-<E2EDiff lang="typescript" before="dungeon-adventure/2/middleware/index.ts.old.template" after="dungeon-adventure/2/middleware/index.ts.template" />
-
-`IMiddlewareContext`에 `IDynamoDBContext`를 추가합니다.
-  </TabItem>
-  <TabItem label="init.ts">
-<E2EDiff lang="typescript" before="dungeon-adventure/2/init.ts.old.template" after="dungeon-adventure/2/init.ts.template" />
-
-DynamoDB 플러그인이 적용됩니다.
-
-<Aside>
-`concat` API는 정의한 프로시저에 미들웨어를 바인딩합니다. 자세한 내용은 [concat 가이드](https://trpc.io/docs/server/middlewares#concat)를 참조하세요.
-</Aside>
-  </TabItem>
-</Tabs>
-
 ### 프로시저 정의
 
 API 메서드를 구현하기 위해 `packages/game-api/src/procedures` 내에서 다음 변경사항을 적용합니다:
 
-#### 쿼리
-
 <Tabs>
-  <TabItem label="query-actions.ts">
-<E2ECode lang="typescript" path="dungeon-adventure/2/procedures/query-actions.ts.template" />
+  <TabItem label="actions.ts">
+<E2ECode lang="typescript" path="dungeon-adventure/2/procedures/actions.ts.template" />
   </TabItem>
-  <TabItem label="query-games.ts">
-<E2ECode lang="typescript" path="dungeon-adventure/2/procedures/query-games.ts.template" />
+  <TabItem label="games.ts">
+<E2ECode lang="typescript" path="dungeon-adventure/2/procedures/games.ts.template" />
   </TabItem>
-  <TabItem label="query-inventory.ts">
-<E2ECode lang="typescript" path="dungeon-adventure/2/procedures/query-inventory.ts.template" />
+  <TabItem label="inventory.ts">
+<E2ECode lang="typescript" path="dungeon-adventure/2/procedures/inventory.ts.template" />
   </TabItem>
 </Tabs>
 
-#### 뮤테이션
-
-<Tabs>
-  <TabItem label="save-action.ts">
-<E2ECode lang="typescript" path="dungeon-adventure/2/procedures/save-action.ts.template" />
-  </TabItem>
-  <TabItem label="save-game.ts">
-<E2ECode lang="typescript" path="dungeon-adventure/2/procedures/save-game.ts.template" />
-  </TabItem>
-</Tabs>
-
-이 프로젝트에서 사용하지 않을 `echo.ts` 파일(`packages/game-api/src/procedures` 내)은 삭제할 수 있습니다.
+이 프로젝트에서 사용하지 않을 `echo.ts` 파일(`packages/game-api/src/procedures` 내)은 삭제합니다.
 
 ### 라우터 설정
 
@@ -255,20 +190,18 @@ API 메서드를 구현하기 위해 `packages/game-api/src/procedures` 내에�
 
 ## 작업 4: 배포 및 테스트
 
-코드베이스를 빌드하려면:
-
-<NxCommands commands={['run-many --target build --all']} />
-
-<Aside type="tip">
-린트 오류가 발생하면 다음 명령어로 자동 수정할 수 있습니다.
+먼저 린트 문제를 수정합니다:
 
 <NxCommands commands={['run-many --target lint --configuration=fix --all']} />
-</Aside>
+
+그런 다음 코드베이스를 빌드합니다:
+
+<NxCommands commands={['run-many --target build --all']} />
 
 ### 애플리케이션 배포
 애플리케이션을 배포하려면 다음 명령어를 실행합니다:
 
-<NxCommands commands={['deploy infra dungeon-adventure-infra-sandbox/*']} />
+<NxCommands commands={['deploy infra "dungeon-adventure-infra-sandbox/*"']} />
 
 :::caution
 AWS 계정을 먼저 부트스트랩하려면 다음을 실행하세요:
@@ -281,7 +214,7 @@ AWS 계정을 먼저 부트스트랩하려면 다음을 실행하세요:
 :::tip
 람다 함수 코드 변경을 반복하는 경우 코드베이스 빌드 후 `--hotswap` 플래그를 사용하여 배포 시간을 크게 단축(2-3초)할 수 있습니다.
 
-<NxCommands commands={['run @dungeon-adventure/infra:deploy dungeon-adventure-infra-sandbox/* --hotswap']} />
+<NxCommands commands={['run @dungeon-adventure/infra:deploy "dungeon-adventure-infra-sandbox/*" --hotswap']} />
 :::
 
 배포가 완료되면 다음과 유사한 출력을 확인할 수 있습니다 _(일부 값은 편집됨)_:

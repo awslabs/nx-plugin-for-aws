@@ -1,0 +1,171 @@
+---
+title: "Máy chủ MCP TypeScript"
+description: "Tạo máy chủ Model Context Protocol (MCP) bằng TypeScript để cung cấp ngữ cảnh cho các Mô hình Ngôn ngữ Lớn"
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Link from '@components/link.astro';
+import Snippet from '@components/snippet.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+
+Tạo một máy chủ [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) TypeScript để cung cấp ngữ cảnh cho các Mô hình Ngôn ngữ Lớn (LLMs), và tùy chọn triển khai nó lên [Amazon Bedrock AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/).
+
+## MCP là gì?
+
+[Model Context Protocol (MCP)](https://modelcontextprotocol.io/) là một tiêu chuẩn mở cho phép các trợ lý AI tương tác với các công cụ và tài nguyên bên ngoài. Nó cung cấp một cách nhất quán để LLMs có thể:
+
+- Thực thi các công cụ (hàm) để thực hiện các hành động hoặc truy xuất thông tin
+- Truy cập các tài nguyên cung cấp ngữ cảnh hoặc dữ liệu
+
+## Cách sử dụng
+
+### Tạo một Máy chủ MCP
+
+Bạn có thể tạo một máy chủ MCP TypeScript theo hai cách:
+
+<RunGenerator generator="ts#mcp-server" />
+
+:::tip
+Đầu tiên hãy sử dụng generator <Link path="/guides/typescript-project">`ts#project`</Link> để tạo một dự án để thêm máy chủ MCP của bạn vào.
+:::
+
+### Tùy chọn
+
+<GeneratorParameters generator="ts#mcp-server" />
+
+## Kết quả của Generator
+
+Generator sẽ thêm các tệp sau vào dự án TypeScript hiện có của bạn:
+
+<FileTree>
+  - your-project/
+    - src/
+      - mcp-server/ (hoặc tên tùy chỉnh nếu được chỉ định)
+        - index.ts Xuất máy chủ của bạn
+        - server.ts Định nghĩa máy chủ chính
+        - stdio.ts Điểm vào cho STDIO transport, hữu ích cho các máy chủ MCP cục bộ đơn giản
+        - http.ts Điểm vào cho Streamable HTTP transport, hữu ích cho việc lưu trữ máy chủ MCP của bạn
+        - tools/
+          - add.ts Công cụ mẫu
+        - resources/
+          - sample-guidance.ts Tài nguyên mẫu
+        - Dockerfile Điểm vào cho việc lưu trữ máy chủ MCP của bạn (loại trừ khi `computeType` được đặt thành `None`)
+    - package.json Được cập nhật với mục bin và các phụ thuộc MCP
+    - project.json Được cập nhật với target serve của máy chủ MCP
+</FileTree>
+
+### Cơ sở hạ tầng
+
+:::note
+Nếu bạn chọn `None` cho `computeType`, generator sẽ không tạo bất kỳ infrastructure as code nào.
+:::
+
+<Snippet name="shared-constructs" />
+
+<Snippet name="mcp/shared-constructs" />
+
+## Làm việc với Máy chủ MCP của bạn
+
+### Thêm Công cụ
+
+Công cụ là các hàm mà trợ lý AI có thể gọi để thực hiện các hành động. Bạn có thể thêm các công cụ mới trong tệp `server.ts`:
+
+```typescript
+server.tool("toolName", "tool description",
+  { param1: z.string(), param2: z.number() }, // Input schema sử dụng Zod
+  async ({ param1, param2 }) => {
+    // Triển khai công cụ
+    return {
+      content: [{ type: "text", text: "Result" }]
+    };
+  }
+);
+```
+
+:::caution
+MCP SDK hiện tại chỉ hỗ trợ Zod v3. Để cho phép Zod v4 được sử dụng trong các generator khác, phụ thuộc vào Zod v3 được cài đặt dưới tên `zod-v3`. Đối với các schema công cụ MCP, bạn sẽ cần import Zod như sau:
+
+```ts
+import { z } from 'zod-v3';
+```
+
+Khi [vấn đề này với MCP SDK](https://github.com/modelcontextprotocol/typescript-sdk/issues/164) được giải quyết, bạn có thể xóa phụ thuộc `zod-v3` bổ sung và chỉ cần import từ `zod`.
+:::
+
+### Thêm Tài nguyên
+
+Tài nguyên cung cấp ngữ cảnh cho trợ lý AI. Bạn có thể thêm các tài nguyên tĩnh từ tệp hoặc tài nguyên động:
+
+```typescript
+const exampleContext = 'some context to return';
+
+server.resource('resource-name', 'example://resource', async (uri) => ({
+  contents: [{ uri: uri.href, text: exampleContext }],
+}));
+
+// Tài nguyên động
+server.resource('dynamic-resource', 'dynamic://resource', async (uri) => {
+  const data = await fetchSomeData();
+  return {
+    contents: [{ uri: uri.href, text: data }],
+  };
+});
+```
+
+## Cấu hình với Trợ lý AI
+
+<Snippet name="mcp/configuration-ts" parentHeading="Cấu hình với Trợ lý AI" />
+
+## Chạy Máy chủ MCP của bạn
+
+### Inspector
+
+Generator cấu hình một target có tên `<your-server-name>-inspect`, khởi động [MCP Inspector](https://github.com/modelcontextprotocol/inspector) với cấu hình để kết nối với máy chủ MCP của bạn bằng STDIO transport.
+
+<NxCommands commands={['run your-project:your-server-name-inspect']} />
+
+Điều này sẽ khởi động inspector tại `http://localhost:6274`. Bắt đầu bằng cách nhấp vào nút "Connect".
+
+### STDIO
+
+Cách dễ nhất để kiểm tra và sử dụng máy chủ MCP là bằng cách sử dụng inspector hoặc cấu hình nó với một trợ lý AI (như trên).
+
+Tuy nhiên, bạn có thể chạy máy chủ của mình với [STDIO transport](https://modelcontextprotocol.io/docs/concepts/transports#standard-input%2Foutput-stdio) trực tiếp bằng cách sử dụng target `<your-server-name>-serve-stdio`.
+
+<NxCommands commands={['run your-project:your-server-name-serve-stdio']} />
+
+Lệnh này sử dụng `tsx --watch` để tự động khởi động lại máy chủ khi các tệp thay đổi.
+
+### Streamable HTTP
+
+Nếu bạn muốn chạy máy chủ MCP của mình cục bộ bằng [Streamable HTTP transport](https://modelcontextprotocol.io/docs/concepts/transports#streamable-http), bạn có thể sử dụng target `<your-server-name>-serve`.
+
+<NxCommands commands={['run your-project:your-server-name-serve']} />
+
+Lệnh này sử dụng `tsx --watch` để tự động khởi động lại máy chủ khi các tệp thay đổi.
+
+## Triển khai Máy chủ MCP của bạn lên Bedrock AgentCore Runtime
+
+<Snippet name="mcp/bedrock-deployment" parentHeading="Triển khai Máy chủ MCP của bạn lên Bedrock AgentCore Runtime" />
+
+### Bundle Target
+
+<Snippet name="ts-bundle" />
+
+Bundle target sử dụng `http.ts` làm điểm vào cho máy chủ MCP Streamable HTTP để lưu trữ trên Bedrock AgentCore Runtime.
+
+### Docker Target
+
+Generator cấu hình một target `<your-server-name>-docker` chạy máy chủ MCP Streamable HTTP đã được đóng gói trên cổng `8000` theo [MCP protocol contract](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-service-contract.html#mcp-protocol-contract).
+
+:::tip
+Docker image được xây dựng bằng cách sử dụng một tag (ví dụ `my-scope-my-project-mcp-server:latest`), mà `Dockerfile` của CDK construct kế thừa từ đó, cho phép `Dockerfile` của bạn được đặt cùng vị trí với dự án máy chủ MCP của bạn.
+:::
+
+Một target `docker` cũng được tạo ra để chạy docker build cho tất cả các máy chủ MCP nếu bạn có nhiều máy chủ được định nghĩa.
+
+### Khả năng quan sát
+
+<Snippet name="mcp/observability" parentHeading="Khả năng quan sát" />

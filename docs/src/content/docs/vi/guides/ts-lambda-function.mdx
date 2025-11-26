@@ -1,0 +1,208 @@
+---
+title: "Hàm Lambda TypeScript"
+description: "Tạo một hàm lambda TypeScript"
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
+
+Generator TypeScript Lambda Function cung cấp khả năng thêm một lambda function vào dự án TypeScript hiện có.
+
+Generator này tạo một lambda handler TypeScript mới với cấu hình cơ sở hạ tầng AWS CDK hoặc Terraform. Handler được tạo ra sử dụng [AWS Lambda Powertools for TypeScript](https://docs.powertools.aws.dev/lambda/typescript/latest/) để quan sát, bao gồm logging, AWS X-Ray tracing và CloudWatch Metrics, cũng như tùy chọn type-safety cho event bằng cách sử dụng [Parser từ AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/)
+
+## Cách sử dụng
+
+### Tạo một TypeScript lambda function
+
+Bạn có thể tạo một lambda function theo hai cách:
+
+<RunGenerator generator="ts#lambda-function" />
+
+### Tùy chọn
+
+<GeneratorParameters generator="ts#lambda-function" />
+
+## Kết quả của Generator
+
+Generator sẽ thêm các file sau vào dự án của bạn:
+
+<FileTree>
+
+- \<project-name>
+  - src/
+    - \<lambda-function>.ts Triển khai Function
+
+</FileTree>
+
+Nếu tùy chọn `functionPath` được cung cấp, generator sẽ thêm handler vào đường dẫn được chỉ định trong thư mục nguồn của dự án:
+
+<FileTree>
+
+- \<project-name>
+  - src/
+    - \<custom-path>/
+      - \<function-name>.ts Triển khai Function
+
+</FileTree>
+
+### Cơ sở hạ tầng
+
+<Snippet name="shared-constructs" />
+
+Generator tạo infrastructure as code để triển khai function của bạn dựa trên `iacProvider` đã chọn:
+
+<Infrastructure>
+<Fragment slot="cdk">
+Generator tạo một CDK construct có thể được sử dụng để triển khai function của bạn, nằm trong thư mục `packages/common/constructs/src/app/lambda-functions`.
+</Fragment>
+<Fragment slot="terraform">
+Generator tạo một Terraform module có thể được sử dụng để triển khai function của bạn, nằm trong thư mục `packages/common/terraform/src/app/lambda-functions/<function-name>`.
+</Fragment>
+</Infrastructure>
+
+## Triển khai Function của bạn
+
+Triển khai function chính nằm trong `<function-name>.ts`. Đây là một ví dụ:
+
+```typescript
+import { parser } from '@aws-lambda-powertools/parser/middleware';
+import { EventBridgeSchema } from '@aws-lambda-powertools/parser/schemas';
+import middy from '@middy/core';
+import { Tracer } from '@aws-lambda-powertools/tracer';
+import { captureLambdaHandler } from '@aws-lambda-powertools/tracer/middleware';
+import { injectLambdaContext } from '@aws-lambda-powertools/logger/middleware';
+import { Logger } from '@aws-lambda-powertools/logger';
+import { Metrics } from '@aws-lambda-powertools/metrics';
+import { logMetrics } from '@aws-lambda-powertools/metrics/middleware';
+import { z } from 'zod';
+
+process.env.POWERTOOLS_METRICS_NAMESPACE = 'MyFunction';
+process.env.POWERTOOLS_SERVICE_NAME = 'MyFunction';
+
+const tracer = new Tracer();
+const logger = new Logger();
+const metrics = new Metrics();
+
+export const myFunction = async (
+  event: z.infer<typeof EventBridgeSchema>,
+): Promise<void> => {
+  logger.info('Received event', event);
+
+  // TODO: implement
+};
+
+export const handler = middy()
+  .use(captureLambdaHandler(tracer))
+  .use(injectLambdaContext(logger))
+  .use(logMetrics(metrics))
+  .use(parser({ schema: EventBridgeSchema }))
+  .handler(myFunction);
+
+```
+
+Generator tự động thiết lập một số tính năng:
+
+1. **Middy middleware stack** để tăng cường chức năng Lambda
+2. **Tích hợp AWS Lambda Powertools** để quan sát
+3. **Thu thập Metrics** với CloudWatch
+4. **Type-safety** sử dụng parser middleware
+5. **Bundling với Rolldown** cho các gói triển khai được tối ưu hóa
+
+### Khả năng quan sát với AWS Lambda Powertools
+
+#### Logging
+
+Generator cấu hình structured logging sử dụng AWS Lambda Powertools với tự động inject context thông qua Middy middleware.
+
+```typescript
+export const handler = middy()
+  .use(injectLambdaContext(logger))
+  .handler(myFunction);
+```
+
+#### Tracing
+
+AWS X-Ray tracing được cấu hình tự động thông qua middleware `captureLambdaHandler`. Bạn có thể thêm các subsegment tùy chỉnh vào traces của mình:
+
+```typescript
+const tracer = new Tracer();
+
+export const myFunction = async (
+  event: z.infer<typeof EventBridgeSchema>,
+): Promise<void> => {
+  // Tạo một subsegment mới
+  const subsegment = tracer.getSegment()?.addNewSubsegment('custom-operation');
+  try {
+    // Logic của bạn ở đây
+  } catch (error) {
+    subsegment?.addError(error as Error);
+    throw error;
+  } finally {
+    subsegment?.close();
+  }
+};
+
+export const handler = middy()
+  .use(captureLambdaHandler(tracer))
+  .handler(myFunction);
+```
+
+#### Metrics
+
+CloudWatch metrics được thu thập tự động cho mỗi request thông qua middleware `logMetrics`. Bạn có thể thêm các metric tùy chỉnh:
+
+```typescript
+const metrics = new Metrics();
+
+export const myFunction = async (
+  event: z.infer<typeof EventBridgeSchema>,
+): Promise<void> => {
+  metrics.addMetric("CustomMetric", MetricUnit.Count, 1);
+  metrics.addMetric("ProcessingTime", MetricUnit.Milliseconds, processingTime);
+};
+
+export const handler = middy()
+  .use(logMetrics(metrics))
+  .handler(myFunction);
+```
+
+### Type Safety
+
+Nếu bạn đã chọn một `eventSource` khi tạo lambda function, function của bạn sẽ được trang bị [`parser` middleware từ AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/). Ví dụ:
+
+```typescript {4}
+export const myFunction = async (
+  event: z.infer<typeof EventBridgeSchema>,
+): Promise<void> => {
+  event.detail // <- type-safe với tự động hoàn thành IDE
+};
+
+export const handler = middy()
+  .use(parser({ schema: EventBridgeSchema }))
+  .handler(myFunction);
+```
+
+Điều này cung cấp type safety tại thời điểm biên dịch và xác thực runtime cho các Lambda events của bạn.
+
+:::caution
+Nếu bạn không muốn handler của mình throw error khi event không tuân thủ schema, bạn có thể sử dụng [tùy chọn `safeParse`](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/#safe-parsing).
+:::
+
+:::tip
+Nếu bạn có dữ liệu tùy chỉnh lồng nhau trong một event, ví dụ như DynamoDB stream hoặc EventBridge event, bạn có thể hưởng lợi từ việc sử dụng [Envelopes](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/#envelopes) để cung cấp type-safety cho dữ liệu tùy chỉnh đó.
+:::
+
+Nếu bạn không muốn type cho event của mình, bạn có thể chọn `Any` cho `eventSource`, điều này sẽ dẫn đến kiểu `any` cho tham số event.
+
+## Bundling
+
+<Snippet name="ts-bundle" />
+
+## Triển khai Function của bạn
+
+<Snippet name="lambda-function/deploying-your-function" parentHeading="Deploying your Function" />

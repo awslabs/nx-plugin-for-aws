@@ -109,43 +109,6 @@ describe('smoke test - dungeon-adventure', () => {
     ensureDirSync(`${opts.cwd}/packages/game-api/src/schema`);
 
     writeFileSync(
-      `${opts.cwd}/packages/game-api/src/schema/action.ts`,
-      readFileSync(
-        join(
-          __dirname,
-          '../files/dungeon-adventure/2/schema/action.ts.template',
-        ),
-      ),
-    );
-
-    writeFileSync(
-      `${opts.cwd}/packages/game-api/src/schema/common.ts`,
-      readFileSync(
-        join(
-          __dirname,
-          '../files/dungeon-adventure/2/schema/common.ts.template',
-        ),
-      ),
-    );
-
-    writeFileSync(
-      `${opts.cwd}/packages/game-api/src/schema/game.ts`,
-      readFileSync(
-        join(__dirname, '../files/dungeon-adventure/2/schema/game.ts.template'),
-      ),
-    );
-
-    writeFileSync(
-      `${opts.cwd}/packages/game-api/src/schema/inventory.ts`,
-      readFileSync(
-        join(
-          __dirname,
-          '../files/dungeon-adventure/2/schema/inventory.ts.template',
-        ),
-      ),
-    );
-
-    writeFileSync(
       `${opts.cwd}/packages/game-api/src/schema/index.ts`,
       readFileSync(
         join(
@@ -158,108 +121,41 @@ describe('smoke test - dungeon-adventure', () => {
     ensureDirSync(`${opts.cwd}/packages/game-api/src/entities`);
 
     writeFileSync(
-      `${opts.cwd}/packages/game-api/src/entities/action.ts`,
+      `${opts.cwd}/packages/game-api/src/entities/index.ts`,
       readFileSync(
         join(
           __dirname,
-          '../files/dungeon-adventure/2/entities/action.ts.template',
+          '../files/dungeon-adventure/2/entities/index.ts.template',
         ),
       ),
     );
 
     writeFileSync(
-      `${opts.cwd}/packages/game-api/src/entities/game.ts`,
+      `${opts.cwd}/packages/game-api/src/procedures/actions.ts`,
       readFileSync(
         join(
           __dirname,
-          '../files/dungeon-adventure/2/entities/game.ts.template',
+          '../files/dungeon-adventure/2/procedures/actions.ts.template',
         ),
       ),
     );
 
     writeFileSync(
-      `${opts.cwd}/packages/game-api/src/entities/inventory.ts`,
+      `${opts.cwd}/packages/game-api/src/procedures/games.ts`,
       readFileSync(
         join(
           __dirname,
-          '../files/dungeon-adventure/2/entities/inventory.ts.template',
+          '../files/dungeon-adventure/2/procedures/games.ts.template',
         ),
       ),
     );
 
     writeFileSync(
-      `${opts.cwd}/packages/game-api/src/middleware/dynamodb.ts`,
+      `${opts.cwd}/packages/game-api/src/procedures/inventory.ts`,
       readFileSync(
         join(
           __dirname,
-          '../files/dungeon-adventure/2/middleware/dynamodb.ts.template',
-        ),
-      ),
-    );
-
-    writeFileSync(
-      `${opts.cwd}/packages/game-api/src/middleware/index.ts`,
-      readFileSync(
-        join(
-          __dirname,
-          '../files/dungeon-adventure/2/middleware/index.ts.template',
-        ),
-      ),
-    );
-
-    writeFileSync(
-      `${opts.cwd}/packages/game-api/src/init.ts`,
-      readFileSync(
-        join(__dirname, '../files/dungeon-adventure/2/init.ts.template'),
-      ),
-    );
-
-    writeFileSync(
-      `${opts.cwd}/packages/game-api/src/procedures/query-actions.ts`,
-      readFileSync(
-        join(
-          __dirname,
-          '../files/dungeon-adventure/2/procedures/query-actions.ts.template',
-        ),
-      ),
-    );
-
-    writeFileSync(
-      `${opts.cwd}/packages/game-api/src/procedures/query-games.ts`,
-      readFileSync(
-        join(
-          __dirname,
-          '../files/dungeon-adventure/2/procedures/query-games.ts.template',
-        ),
-      ),
-    );
-
-    writeFileSync(
-      `${opts.cwd}/packages/game-api/src/procedures/query-inventory.ts`,
-      readFileSync(
-        join(
-          __dirname,
-          '../files/dungeon-adventure/2/procedures/query-inventory.ts.template',
-        ),
-      ),
-    );
-
-    writeFileSync(
-      `${opts.cwd}/packages/game-api/src/procedures/save-action.ts`,
-      readFileSync(
-        join(
-          __dirname,
-          '../files/dungeon-adventure/2/procedures/save-action.ts.template',
-        ),
-      ),
-    );
-
-    writeFileSync(
-      `${opts.cwd}/packages/game-api/src/procedures/save-game.ts`,
-      readFileSync(
-        join(
-          __dirname,
-          '../files/dungeon-adventure/2/procedures/save-game.ts.template',
+          '../files/dungeon-adventure/2/procedures/inventory.ts.template',
         ),
       ),
     );

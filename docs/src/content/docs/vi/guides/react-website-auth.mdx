@@ -1,0 +1,175 @@
+---
+title: "Xác thực Website React"
+description: "Tài liệu tham khảo cho Xác thực Website React"
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
+
+Generator Xác thực Website React thêm tính năng xác thực vào website React của bạn bằng cách sử dụng [Amazon Cognito](https://aws.amazon.com/cognito/).
+
+Generator này cấu hình hạ tầng CDK hoặc Terraform để tạo Cognito User Pool và Identity Pool liên quan, cũng như giao diện người dùng được lưu trữ để xử lý luồng đăng nhập của người dùng và tích hợp với website React của bạn.
+
+## Cách sử dụng
+
+### Thêm Xác thực vào Website React của bạn
+
+Bạn có thể thêm xác thực vào website React của mình theo hai cách:
+
+<RunGenerator generator="ts#react-website#auth" />
+
+### Tùy chọn
+
+<GeneratorParameters generator="ts#react-website#auth" />
+
+## Kết quả của Generator
+
+Bạn sẽ thấy các thay đổi sau trong website React của mình:
+
+<FileTree>
+  - src
+    - components
+      - CognitoAuth
+        - index.tsx Component xác thực chính
+    - main.tsx Được cập nhật để tích hợp component CognitoAuth
+</FileTree>
+
+### Hạ tầng
+
+<Snippet name="shared-constructs" />
+
+Bạn cũng sẽ thấy mã hạ tầng sau được tạo dựa trên `iacProvider` bạn đã chọn:
+
+<Infrastructure>
+<Fragment slot="cdk">
+<FileTree>
+  - packages/common/constructs/src
+    - core
+      - user-identity.ts Construct định nghĩa user pool và identity pool
+</FileTree>
+</Fragment>
+<Fragment slot="terraform">
+<FileTree>
+  - packages/common/terraform/src
+    - core
+      - user-identity
+        - main.tf Module wrapper cho cấu hình identity
+        - identity
+          - identity.tf Hạ tầng identity cốt lõi bao gồm Cognito User Pool và Identity Pool
+        - add-callback-url
+          - add-callback-url.tf Module để thêm callback URLs vào user pool clients hiện có
+</FileTree>
+</Fragment>
+</Infrastructure>
+
+## Sử dụng Hạ tầng
+
+<Infrastructure>
+<Fragment slot="cdk">
+Bạn cần thêm hạ tầng user identity vào stack của mình, khai báo nó _trước_ website:
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {3,9}
+import { Stack } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { MyWebsite, UserIdentity } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    new UserIdentity(this, 'Identity');
+
+    new MyWebsite(this, 'MyWebsite');
+  }
+}
+```
+
+Construct `UserIdentity` tự động thêm <Link path="guides/react-website#runtime-configuration">Cấu hình Runtime</Link> cần thiết để đảm bảo rằng website của bạn có thể trỏ đến đúng Cognito User Pool cho xác thực.
+</Fragment>
+<Fragment slot="terraform">
+Bạn cần thêm module user identity và đảm bảo website của bạn phụ thuộc vào nó:
+
+```hcl title="packages/infra/src/main.tf" {2-4,14-15}
+# Deploy user identity first to add to runtime config
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
+}
+
+# Deploy website after identity to include runtime config
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+
+  # Ensure identity is deployed first to add to runtime config
+  depends_on = [module.user_identity]
+}
+```
+
+Module user identity tự động thêm <Link path="guides/react-website#runtime-configuration">Cấu hình Runtime</Link> cần thiết để đảm bảo rằng website của bạn có thể trỏ đến đúng Cognito User Pool cho xác thực.
+</Fragment>
+</Infrastructure>
+
+### Cấp Quyền Truy cập cho Người dùng Đã xác thực
+
+Để cấp cho người dùng đã xác thực quyền thực hiện các hành động nhất định, chẳng hạn như cấp quyền gọi API, bạn có thể thêm các câu lệnh IAM policy vào vai trò đã xác thực của identity pool:
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts title="packages/infra/src/stacks/application-stack.ts" {12}
+import { Stack } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { MyWebsite, UserIdentity, MyApi } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    const identity = new UserIdentity(this, 'Identity');
+    const api = new MyApi(this, 'MyApi');
+
+    api.grantInvokeAccess(identity.identityPool.authenticatedRole);
+
+    new MyWebsite(this, 'MyWebsite');
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+```hcl title="packages/infra/src/main.tf" {12,22}
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
+}
+
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+}
+
+# Add permissions for authenticated users to invoke Fast API
+resource "aws_iam_role_policy" "authenticated_fast_api_invoke" {
+  name = "authenticated-user-invoke-my-api"
+  role = module.user_identity.authenticated_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "execute-api:Invoke"
+        ]
+        Resource = "${module.my_api.api_execution_arn}/*"
+      }
+    ]
+  })
+}
+```
+</Fragment>
+</Infrastructure>

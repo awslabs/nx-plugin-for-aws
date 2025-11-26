@@ -25,7 +25,7 @@ import { getDungeonAdventureElectroDbDependencies } from '../../../../../../../.
 
 ## 任务 1：实现游戏 API
 
-在实现游戏 API 之前，我们需要创建以下 5 个 API：
+我们将在本节中实现以下 API：
 
 1. `saveGame` - 创建或更新游戏。
 2. `queryGames` - 返回分页的历史游戏列表。
@@ -35,27 +35,11 @@ import { getDungeonAdventureElectroDbDependencies } from '../../../../../../../.
 
 ### API 模式定义
 
-使用 [Zod](https://zod.dev/) 在 `packages/game-api/src/schema` 目录下定义 API 输入输出模式：
+使用 [Zod](https://zod.dev/) 在 `packages/game-api/src/schema/index.ts` 文件中定义 API 输入输出模式：
 
-<Tabs>
-  <TabItem label="action.ts">
-<E2ECode lang="typescript" path="dungeon-adventure/2/schema/action.ts.template" />
-  </TabItem>
-  <TabItem label="common.ts">
-<E2ECode lang="typescript" path="dungeon-adventure/2/schema/common.ts.template" />
-  </TabItem>
-  <TabItem label="game.ts">
-<E2ECode lang="typescript" path="dungeon-adventure/2/schema/game.ts.template" />
-  </TabItem>
-  <TabItem label="inventory.ts">
-<E2ECode lang="typescript" path="dungeon-adventure/2/schema/inventory.ts.template" />
-  </TabItem>
-  <TabItem label="index.ts">
 <E2EDiff lang="typescript" before="dungeon-adventure/2/schema/index.ts.old.template" after="dungeon-adventure/2/schema/index.ts.template" />
-  </TabItem>
-</Tabs>
 
-可以删除 `packages/game-api/src/schema/echo.ts` 文件，因为本项目不会使用它。
+删除 `packages/game-api/src/schema/echo.ts` 文件，因为本项目不会使用它。
 
 <Aside type="tip">
 我们为每个 Zod 模式定义都使用 `z.TypeOf` 语法导出了接口类型。这让我们无需重复工作就能将 Zod 定义转换为 TypeScript 接口。
@@ -106,7 +90,7 @@ game ||--o{ item
 @enduml
 */}
 
-我们将使用 DynamoDB 实现数据库，并通过 [ElectroDB](https://electrodb.dev/en/core-concepts/introduction/) 客户端库简化操作。要安装 `electrodb` 和 DynamoDB 客户端，运行以下命令：
+我们将使用 DynamoDB 实现数据库，并通过 [ElectroDB](https://electrodb.dev/en/core-concepts/introduction/) DynamoDB 客户端库简化操作。要安装 `electrodb` 和 DynamoDB 客户端，运行以下命令：
 
 <InstallCommand pkg={getDungeonAdventureElectroDbDependencies()} />
 
@@ -114,19 +98,9 @@ game ||--o{ item
 所有依赖都添加到根目录的 `package.json`，因为 `@aws/nx-plugin` 遵循[单一版本策略](https://nx.dev/concepts/decisions/dependency-management#single-version-policy)原则。更多信息请参考<Link path="guides/typescript-project#dependencies">TypeScript 项目指南</Link>。
 </Aside>
 
-根据 ER 图定义 ElectroDB 实体，在 `packages/game-api/src/entities` 目录下创建以下文件：
+根据 ER 图定义 ElectroDB 实体，创建 `packages/game-api/src/entities/index.ts` 文件：
 
-<Tabs>
-  <TabItem label="action.ts">
-<E2ECode lang="typescript" path="dungeon-adventure/2/entities/action.ts.template" />
-  </TabItem>
-  <TabItem label="game.ts">
-<E2ECode lang="typescript" path="dungeon-adventure/2/entities/game.ts.template" />
-  </TabItem>
-  <TabItem label="inventory.ts">
-<E2ECode lang="typescript" path="dungeon-adventure/2/entities/inventory.ts.template" />
-  </TabItem>
-</Tabs>
+<E2ECode lang="typescript" path="dungeon-adventure/2/entities/index.ts.template" />
 
 ElectroDB 不仅可以定义类型，还能为时间戳等字段提供默认值。此外，ElectroDB 遵循 DynamoDB 最佳实践的[单表设计](https://electrodb.dev/en/core-concepts/single-table-relationships/)。
 
@@ -146,62 +120,23 @@ ElectroDB 不仅可以定义类型，还能为时间戳等字段提供默认值�
 若将实体重构到独立的共享项目中，让 MCP 服务不依赖 API 会更符合包结构设计。
 :::
 
-### 将 DynamoDB 客户端注入 tRPC 上下文
-
-由于每个操作流程都需要访问 DynamoDB 客户端，我们需要创建单一实例并通过上下文传递。在 `packages/game-api/src` 目录下进行以下修改：
-
-<Tabs>
-  <TabItem label="middleware/dynamodb.ts">
-<E2ECode lang="typescript" path="dungeon-adventure/2/middleware/dynamodb.ts.template" />
-
-这是一个用于创建 `DynamoDBClient` 并注入上下文的插件。
-  </TabItem>
-  <TabItem label="middleware/index.ts">
-<E2EDiff lang="typescript" before="dungeon-adventure/2/middleware/index.ts.old.template" after="dungeon-adventure/2/middleware/index.ts.template" />
-
-扩展 `IMiddlewareContext` 以添加 `IDynamoDBContext`。
-  </TabItem>
-  <TabItem label="init.ts">
-<E2EDiff lang="typescript" before="dungeon-adventure/2/init.ts.old.template" after="dungeon-adventure/2/init.ts.template" />
-
-这将配置 DynamoDB 插件。
-
-<Aside>
-`concat` API 将中间件绑定到定义的操作流程。更多细节请参考 [concat 指南](https://trpc.io/docs/server/middlewares#concat)。
-</Aside>
-  </TabItem>
-</Tabs>
-
 ### 定义操作流程
 
 要实现 API 方法，在 `packages/game-api/src/procedures` 目录下进行以下修改：
 
-#### 查询操作
-
 <Tabs>
-  <TabItem label="query-actions.ts">
-<E2ECode lang="typescript" path="dungeon-adventure/2/procedures/query-actions.ts.template" />
+  <TabItem label="actions.ts">
+<E2ECode lang="typescript" path="dungeon-adventure/2/procedures/actions.ts.template" />
   </TabItem>
-  <TabItem label="query-games.ts">
-<E2ECode lang="typescript" path="dungeon-adventure/2/procedures/query-games.ts.template" />
+  <TabItem label="games.ts">
+<E2ECode lang="typescript" path="dungeon-adventure/2/procedures/games.ts.template" />
   </TabItem>
-  <TabItem label="query-inventory.ts">
-<E2ECode lang="typescript" path="dungeon-adventure/2/procedures/query-inventory.ts.template" />
+  <TabItem label="inventory.ts">
+<E2ECode lang="typescript" path="dungeon-adventure/2/procedures/inventory.ts.template" />
   </TabItem>
 </Tabs>
 
-#### 变更操作
-
-<Tabs>
-  <TabItem label="save-action.ts">
-<E2ECode lang="typescript" path="dungeon-adventure/2/procedures/save-action.ts.template" />
-  </TabItem>
-  <TabItem label="save-game.ts">
-<E2ECode lang="typescript" path="dungeon-adventure/2/procedures/save-game.ts.template" />
-  </TabItem>
-</Tabs>
-
-可以删除 `packages/game-api/src/procedures` 中的 `echo.ts` 文件，因为本项目不会使用。
+删除 `packages/game-api/src/procedures` 中的 `echo.ts` 文件，因为本项目不会使用。
 
 ### 路由配置
 
@@ -255,20 +190,18 @@ ElectroDB 不仅可以定义类型，还能为时间戳等字段提供默认值�
 
 ## 任务 4：部署与测试
 
-构建代码库：
-
-<NxCommands commands={['run-many --target build --all']} />
-
-<Aside type="tip">
-若遇到 lint 错误，运行以下命令自动修复：
+首先修复 lint 问题：
 
 <NxCommands commands={['run-many --target lint --configuration=fix --all']} />
-</Aside>
+
+然后构建代码库：
+
+<NxCommands commands={['run-many --target build --all']} />
 
 ### 部署应用
 要部署应用，运行以下命令：
 
-<NxCommands commands={['deploy infra dungeon-adventure-infra-sandbox/*']} />
+<NxCommands commands={['deploy infra "dungeon-adventure-infra-sandbox/*"']} />
 
 :::caution
 要先初始化 AWS 账户，运行：
@@ -281,7 +214,7 @@ ElectroDB 不仅可以定义类型，还能为时间戳等字段提供默认值�
 :::tip
 若仅修改 Lambda 函数代码，构建后使用 `--hotswap` 标志部署可大幅缩短时间（2-3 秒）：
 
-<NxCommands commands={['run @dungeon-adventure/infra:deploy dungeon-adventure-infra-sandbox/* --hotswap']} />
+<NxCommands commands={['run @dungeon-adventure/infra:deploy "dungeon-adventure-infra-sandbox/*" --hotswap']} />
 :::
 
 部署完成后将看到类似以下输出（部分值已脱敏）：

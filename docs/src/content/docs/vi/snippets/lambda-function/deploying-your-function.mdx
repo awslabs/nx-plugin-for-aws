@@ -1,0 +1,115 @@
+---
+title: "Triển khai Function của bạn"
+---
+
+import Infrastructure from '@components/infrastructure.astro';
+
+Generator này tạo ra mã infrastructure as code bằng CDK hoặc Terraform dựa trên `iacProvider` bạn đã chọn. Bạn có thể sử dụng nó để triển khai function của mình.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Generator này tạo ra một CDK construct để triển khai function của bạn trong thư mục `common/constructs`. Bạn có thể sử dụng nó trong một ứng dụng CDK:
+
+```typescript {1, 6}
+import { MyProjectMyFunction } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    // Add the function to your stack
+    const fn = new MyProjectMyFunction(this, 'MyFunction');
+  }
+}
+```
+
+Điều này thiết lập:
+
+1. AWS Lambda function
+2. CloudWatch log group
+3. Cấu hình X-Ray tracing
+4. CloudWatch metrics namespace
+
+Function này sau đó có thể được sử dụng làm target cho bất kỳ lambda [event source](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/) nào:
+
+:::note
+Đảm bảo event source khớp với tùy chọn `eventSource` đã chọn để đảm bảo event được xử lý đúng cách trong handler function của bạn.
+:::
+
+Ví dụ dưới đây minh họa mã CDK để gọi lambda function của bạn theo lịch trình sử dụng EventBridge:
+
+```typescript
+import { Rule, Schedule } from 'aws-cdk-lib/aws-events';
+import { LambdaFunction } from 'aws-cdk-lib/aws-events-targets';
+import { MyProjectMyFunction } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    // Add the function to your stack
+    const fn = new MyProjectMyFunction(this, 'MyFunction');
+
+    // Add the function to an EventBridge scheduled rule
+    const eventRule = new Rule(this, 'MyFunctionScheduleRule', {
+      schedule: Schedule.cron({ minute: '15' }),
+      targets: [new LambdaFunction(fn)],
+    });
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+Generator này tạo ra một Terraform module để triển khai function của bạn trong thư mục `common/terraform`. Bạn có thể sử dụng nó trong cấu hình Terraform:
+
+```hcl {2}
+module "my_project_my_function" {
+  source = "../../common/terraform/src/app/lambda-functions/my-project-my-function"
+
+  # Environment variables for the Lambda function
+  env = {
+    SOME_VARIABLE = "some value"
+  }
+
+  # Additional IAM policies if needed
+  additional_iam_policy_statements = [
+    # Add any additional permissions your function needs
+  ]
+}
+```
+
+Điều này thiết lập:
+
+1. AWS Lambda function
+2. CloudWatch log group
+3. Cấu hình X-Ray tracing
+4. CloudWatch metrics namespace
+
+Function này sau đó có thể được sử dụng làm target cho bất kỳ lambda event source nào. Ví dụ dưới đây minh họa mã Terraform để gọi lambda function của bạn theo lịch trình sử dụng EventBridge:
+
+```hcl
+# EventBridge rule for scheduled execution
+resource "aws_cloudwatch_event_rule" "my_function_schedule" {
+  name                = "my-function-schedule"
+  description         = "Trigger my function every 15 minutes"
+  schedule_expression = "cron(15 * * * ? *)"
+}
+
+# EventBridge target
+resource "aws_cloudwatch_event_target" "lambda_target" {
+  rule      = aws_cloudwatch_event_rule.my_function_schedule.name
+  target_id = "MyFunctionTarget"
+  arn       = module.my_project_my_function.function_arn
+}
+
+# Permission for EventBridge to invoke the Lambda function
+resource "aws_lambda_permission" "allow_eventbridge" {
+  statement_id  = "AllowExecutionFromEventBridge"
+  action        = "lambda:InvokeFunction"
+  function_name = module.my_project_my_function.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.my_function_schedule.arn
+}
+```
+
+:::note
+Đảm bảo event source khớp với tùy chọn `eventSource` đã chọn để đảm bảo event được xử lý đúng cách trong handler function của bạn.
+:::
+</Fragment>
+</Infrastructure>

@@ -93,6 +93,9 @@ export default defineConfig({
         zh: {
           label: '中文',
         },
+        vi: {
+          label: 'Tiếng Việt',
+        },
       },
       sidebar: [
         {
@@ -105,6 +108,7 @@ export default defineConfig({
             es: 'Comenzar',
             pt: 'Começar',
             zh: '开始使用',
+            vi: 'Bắt đầu',
           },
           items: [
             {
@@ -118,6 +122,7 @@ export default defineConfig({
                 es: 'Conceptos',
                 pt: 'Conceitos',
                 zh: '概念',
+                vi: 'Khái niệm',
               },
             },
             {
@@ -131,6 +136,7 @@ export default defineConfig({
                 es: 'Inicio rápido',
                 pt: 'Início rápido',
                 zh: '快速开始',
+                vi: 'Bắt đầu nhanh',
               },
             },
             {
@@ -143,6 +149,7 @@ export default defineConfig({
                 es: 'Tutoriales',
                 pt: 'Tutoriais',
                 zh: '教程',
+                vi: 'Hướng dẫn',
               },
               items: [
                 {
@@ -155,6 +162,7 @@ export default defineConfig({
                     es: 'Juego de mazmorra con IA agéntica',
                     pt: 'Jogo de masmorra com IA agêntica',
                     zh: '智能体 AI 地下城游戏',
+                    vi: 'Trò chơi hầm ngục AI tác nhân',
                   },
                   collapsed: true,
                   items: [
@@ -168,6 +176,7 @@ export default defineConfig({
                         es: 'Visión general',
                         pt: 'Visão geral',
                         zh: '概述',
+                        vi: 'Tổng quan',
                       },
                       link: '/get_started/tutorials/dungeon-game/overview',
                     },
@@ -181,6 +190,7 @@ export default defineConfig({
                         es: '1. Configuración de monorepo',
                         pt: '1. Configuração do monorepo',
                         zh: '1. Monorepo 设置',
+                        vi: '1. Thiết lập monorepo',
                       },
                       link: '/get_started/tutorials/dungeon-game/1',
                     },
@@ -194,6 +204,7 @@ export default defineConfig({
                         es: '2. API del juego y MCP de inventario',
                         pt: '2. API do jogo e MCP de inventário',
                         zh: '2. 游戏 API 和库存 MCP',
+                        vi: '2. Triển khai API trò chơi và máy chủ MCP kho đồ',
                       },
                       link: '/get_started/tutorials/dungeon-game/2',
                     },
@@ -207,6 +218,7 @@ export default defineConfig({
                         es: '3. Agente de historia',
                         pt: '3. Agente de história',
                         zh: '3. 故事智能体',
+                        vi: '3. Triển khai tác nhân câu chuyện',
                       },
                       link: '/get_started/tutorials/dungeon-game/3',
                     },
@@ -220,6 +232,7 @@ export default defineConfig({
                         es: '4. UI',
                         pt: '4. UI',
                         zh: '4. UI',
+                        vi: '4. Xây dựng giao diện',
                       },
                       link: '/get_started/tutorials/dungeon-game/4',
                     },
@@ -233,6 +246,7 @@ export default defineConfig({
                         es: 'Conclusión',
                         pt: 'Conclusão',
                         zh: '总结',
+                        vi: 'Kết thúc',
                       },
                       link: '/get_started/tutorials/dungeon-game/wrap-up',
                     },
@@ -248,6 +262,7 @@ export default defineConfig({
                     es: 'Contribuir un generador',
                     pt: 'Contribuir um gerador',
                     zh: '贡献生成器',
+                    vi: 'Đóng góp trình tạo',
                   },
                   link: '/get_started/tutorials/contribute-generator',
                 },
@@ -264,6 +279,7 @@ export default defineConfig({
                 es: 'Construyendo con IA',
                 pt: 'Construindo com IA',
                 zh: '使用 AI 构建',
+                vi: 'Xây dựng với AI',
               },
             },
           ],
@@ -278,6 +294,7 @@ export default defineConfig({
             es: 'Guías',
             pt: 'Guias',
             zh: '指南',
+            vi: 'Hướng dẫn trình tạo',
           },
           items: [
             { label: 'ts#project', link: '/guides/typescript-project' },
@@ -318,6 +335,7 @@ export default defineConfig({
                     es: 'Conexión de API',
                     pt: 'Conexão de APIs',
                     zh: '连接 API',
+                    vi: 'Kết nối API',
                   },
                   link: '/guides/api-connection',
                 },
@@ -351,6 +369,7 @@ export default defineConfig({
             es: 'Solución de problemas',
             pt: 'Solução de problemas',
             zh: '故障排除',
+            vi: 'Khắc phục sự cố',
           },
           items: [
             {
@@ -363,6 +382,7 @@ export default defineConfig({
                 es: 'Nx',
                 pt: 'Nx',
                 zh: 'Nx',
+                vi: 'Nx',
               },
               link: '/troubleshooting/nx',
             },
@@ -378,6 +398,7 @@ export default defineConfig({
             es: 'Acerca de',
             pt: 'Sobre',
             zh: '关于',
+            vi: 'Giới thiệu',
           },
           items: [
             {
@@ -390,6 +411,7 @@ export default defineConfig({
                 es: 'Métricas de uso',
                 pt: 'Métricas de uso',
                 zh: '使用指标',
+                vi: 'Số liệu sử dụng',
               },
               link: '/about/metrics',
             },
@@ -403,6 +425,7 @@ export default defineConfig({
                 es: 'Traducción de la documentación',
                 pt: 'Tradução da documentação',
                 zh: '文档翻译',
+                vi: 'Dịch tài liệu',
               },
               link: '/about/translation',
             },
