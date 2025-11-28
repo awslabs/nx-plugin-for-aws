@@ -76,9 +76,6 @@ Strandsエージェントのデプロイ用に以下のファイルが生成さ�
         - \<project-name>
           - \<project-name>.ts エージェントデプロイ用CDKコンストラクト
           - Dockerfile CDKコンストラクトで使用されるDockerfile
-    - core
-      - agent-core
-        - runtime.ts Bedrock AgentCore Runtimeデプロイ用汎用CDKコンストラクト
 </FileTree>
 </Fragment>
 <Fragment slot="terraform">
@@ -217,8 +214,8 @@ export class ExampleStack extends Stack {
     const mcpServer = new MyProjectMcpServer(this, 'MyProjectMcpServer');
 
     const agent = new MyProjectAgent(this, 'MyProjectAgent', {
-      environment: {
-        MCP_AGENTCORE_RUNTIME_ARN: mcpServer.agentCoreRuntime.arn,
+      environmentVariables: {
+        MCP_AGENTCORE_RUNTIME_ARN: mcpServer.agentCoreRuntime.agentRuntimeArn,
       },
     });
 
@@ -365,7 +362,7 @@ export class ExampleStack extends Stack {
     const agent = new MyProjectAgent(this, 'MyProjectAgent');
 
     // Bedrockモデル呼び出し権限の付与
-    agent.agentCoreRuntime.role.addToPolicy(
+    agent.agentCoreRuntime.addToRolePolicy(
       new PolicyStatement({
         actions: [
           'bedrock:InvokeModel',
@@ -378,6 +375,10 @@ export class ExampleStack extends Stack {
   }
 }
 ```
+
+:::note
+このコンストラクトは[`@aws-cdk/aws-bedrock-agentcore-alpha`モジュール](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-bedrock-agentcore-alpha-readme.html)を使用します。
+:::
 </Fragment>
 <Fragment slot="terraform">
 ジェネレーター実行時に選択した`name`に基づいて、またはデフォルトで`<ProjectName>-agent`という名前のTerraformモジュールが生成されます。
@@ -500,10 +501,11 @@ module "my_project_agent" {
 
 <Infrastructure>
 <Fragment slot="cdk">
-JWT認証を設定するには、エージェントコンストラクトに`authorizerConfiguration`プロパティを渡します。以下はエージェントを保護するためにCognitoユーザープールとクライアントを設定する例です：
+CognitoによるJWT認証を設定するには、`RuntimeAuthorizerConfiguration.usingCognito()`ファクトリメソッドを使用します：
 
-```ts {13-18}
+```ts {13-16}
 import { MyProjectAgent } from ':my-scope/common-constructs';
+import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
 
 export class ExampleStack extends Stack {
   constructor(scope: Construct, id: string) {
@@ -515,27 +517,44 @@ export class ExampleStack extends Stack {
     });
 
     new MyProjectAgent(this, 'MyProjectAgent', {
-      authorizerConfiguration: {
-        customJwtAuthorizer: {
-          discoveryUrl: `https://cognito-idp.${Stack.of(userPool).region}.amazonaws.com/${userPool.userPoolId}/.well-known/openid-configuration`,
-          allowedClients: [client.userPoolClientId],
-        },
-      },
+      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingCognito(
+        userPool,
+        [client],
+      ),
+    });
+  }
+}
+```
+
+または、独自のOIDCプロバイダーを使用したカスタムJWT認証の場合は、`RuntimeAuthorizerConfiguration.usingJWT()`を使用します：
+
+```ts {6-10}
+import { MyProjectAgent } from ':my-scope/common-constructs';
+import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    new MyProjectAgent(this, 'MyProjectAgent', {
+      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingJWT(
+        'https://example.com/.well-known/openid-configuration',
+        ['client1', 'client2'], // 許可されたクライアントID（オプション）
+        ['audience1'],          // 許可されたオーディエンス（オプション）
+      ),
     });
   }
 }
 ```
 </Fragment>
 <Fragment slot="terraform">
-JWT認証を設定するには、エージェントモジュールを編集して以下のように`customJWTAuthorizer`変数を設定します：
+JWT認証を設定するには、エージェントモジュールを編集して以下のように`authorizer_configuration`変数を設定します：
 
-```terraform {18-21}
+```terraform {18-23}
 # packages/common/terraform/src/app/agents/my-project-agent/my-project-agent.tf
 
 data "aws_region" "current" {}
 
 locals {
-  aws_region = data.aws_region.current.name
+  aws_region = data.aws_region.current.id
 
   # ユーザープールとクライアントIDに置き換えるか、変数として公開してください
   user_pool_id = "xxx"
@@ -547,9 +566,11 @@ module "agent_core_runtime" {
   agent_runtime_name = "MyProjectAgent"
   docker_image_tag = "my-scope-my-project-agent:latest"
   server_protocol = "HTTP"
-  customJWTAuthorizer = {
-    discoveryUrl = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration",
-    allowedClients = local.user_pool_client_ids
+  authorizer_configuration = {
+    custom_jwt_authorizer = {
+      discovery_url = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration"
+      allowed_clients = local.user_pool_client_ids
+    }
   }
   env = var.env
   additional_iam_policy_statements = var.additional_iam_policy_statements

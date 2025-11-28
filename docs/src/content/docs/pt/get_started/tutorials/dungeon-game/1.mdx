@@ -385,8 +385,6 @@ O `py#strands-agent` gera estes arquivos:
         - Dockerfile define a imagem Docker para implantação no AgentCore Runtime
   - common/constructs/
     - src
-      - core/agent-core/
-        - runtime.ts construct genérico para implantação no AgentCore Runtime
       - app/agents/story-agent/
         - story-agent.ts construct para implantar seu agente Story no AgentCore Runtime
 </FileTree>
@@ -454,51 +452,55 @@ Este é o ponto de entrada do agente, configurado usando o [Amazon Bedrock Agent
 ```ts
 // common/constructs/src/app/agents/story-agent.ts
 import { Lazy, Names } from 'aws-cdk-lib';
-import { DockerImageAsset, Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import { Construct } from 'constructs';
 import { execSync } from 'child_process';
 import * as path from 'path';
 import * as url from 'url';
 import {
-  AgentCoreRuntime,
-  AgentCoreRuntimeProps,
-} from '../../../core/agent-core/runtime.js';
+  AgentRuntimeArtifact,
+  ProtocolType,
+  Runtime,
+  RuntimeProps,
+} from '@aws-cdk/aws-bedrock-agentcore-alpha';
 
 export type StoryAgentProps = Omit<
-  AgentCoreRuntimeProps,
-  'runtimeName' | 'serverProtocol' | 'containerUri'
+  RuntimeProps,
+  'runtimeName' | 'protocolConfiguration' | 'agentRuntimeArtifact'
 >;
 
 export class StoryAgent extends Construct {
-  public readonly dockerImage: DockerImageAsset;
-  public readonly agentCoreRuntime: AgentCoreRuntime;
+  public readonly dockerImage: AgentRuntimeArtifact;
+  public readonly agentCoreRuntime: Runtime;
 
   constructor(scope: Construct, id: string, props?: StoryAgentProps) {
     super(scope, id);
 
-    this.dockerImage = new DockerImageAsset(this, 'DockerImage', {
-      platform: Platform.LINUX_ARM64,
-      directory: path.dirname(url.fileURLToPath(new URL(import.meta.url))),
-      extraHash: execSync(
-        `docker inspect dungeon-adventure-story-agent:latest --format '{{.Id}}'`,
-        { encoding: 'utf-8' },
-      ).trim(),
-    });
+    this.dockerImage = AgentRuntimeArtifact.fromAsset(
+      path.dirname(url.fileURLToPath(new URL(import.meta.url))),
+      {
+        platform: Platform.LINUX_ARM64,
+        extraHash: execSync(
+          `docker inspect dungeon-adventure-story-agent:latest --format '{{.Id}}'`,
+          { encoding: 'utf-8' },
+        ).trim(),
+      },
+    );
 
-    this.agentCoreRuntime = new AgentCoreRuntime(this, 'StoryAgent', {
+    this.agentCoreRuntime = new Runtime(this, 'StoryAgent', {
       runtimeName: Lazy.string({
         produce: () =>
           Names.uniqueResourceName(this.agentCoreRuntime, { maxLength: 40 }),
       }),
-      serverProtocol: 'HTTP',
-      containerUri: this.dockerImage.imageUri,
+      protocolConfiguration: ProtocolType.HTTP,
+      agentRuntimeArtifact: this.dockerImage,
       ...props,
     });
   }
 }
 ```
 
-Isso configura um `DockerImageAsset` do CDK que envia sua imagem Docker do agente para o ECR e a hospeda usando o AgentCore Runtime.
+Isso configura um `AgentRuntimeArtifact` do CDK que envia sua imagem Docker do agente para o ECR e a hospeda usando o AgentCore Runtime.
 
 Você pode notar um `Dockerfile` extra, que referencia a imagem Docker do projeto `story`, permitindo que co-localizemos o Dockerfile e o código-fonte do agente.
 

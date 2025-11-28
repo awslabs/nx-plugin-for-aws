@@ -2,8 +2,6 @@
 title: "MCPベドロック デプロイメント"
 ---
 
-
-
 import Link from '@components/link.astro';
 import Infrastructure from '@components/infrastructure.astro';
 
@@ -13,7 +11,7 @@ import Infrastructure from '@components/infrastructure.astro';
 
 <Infrastructure>
 <Fragment slot="cdk">
-ジェネレーター実行時に選択した`name`に基づいて命名されたCDKコンストラクトが生成されます（デフォルトは`<ProjectName>McpServer`）。
+MCPサーバー用のCDKコンストラクトが生成されます。ジェネレーター実行時に選択した`name`に基づいて命名されます（デフォルトは`<ProjectName>McpServer`）。
 
 このCDKコンストラクトをCDKアプリケーションで使用できます：
 
@@ -27,6 +25,10 @@ export class ExampleStack extends Stack {
   }
 }
 ```
+
+:::note
+このコンストラクトは[`@aws-cdk/aws-bedrock-agentcore-alpha`モジュール](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-bedrock-agentcore-alpha-readme.html)を使用します。
+:::
 </Fragment>
 <Fragment slot="terraform">
 ジェネレーター実行時に選択した`name`に基づいて命名されたTerraformモジュールが生成されます（デフォルトは`<ProjectName>-mcp-server`）。
@@ -116,10 +118,11 @@ module "my_project_mcp_server" {
 
 <Infrastructure>
 <Fragment slot="cdk">
-JWT認証を設定するには、MCPサーバーコンストラクトに`authorizerConfiguration`プロパティを渡します。CognitoユーザープールとクライアントでMCPサーバーを保護する例：
+CognitoでJWT認証を設定するには、`RuntimeAuthorizerConfiguration.usingCognito()`ファクトリーメソッドを使用します：
 
 ```ts {14-17}
 import { MyProjectMcpServer } from ':my-scope/common-constructs';
+import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
 
 export class ExampleStack extends Stack {
   constructor(scope: Construct, id: string) {
@@ -131,27 +134,44 @@ export class ExampleStack extends Stack {
     });
 
     new MyProjectMcpServer(this, 'MyProjectMcpServer', {
-      authorizerConfiguration: {
-        customJwtAuthorizer: {
-          discoveryUrl: `https://cognito-idp.${Stack.of(userPool).region}.amazonaws.com/${userPool.userPoolId}/.well-known/openid-configuration`,
-          allowedClients: [client.userPoolClientId],
-        },
-      },
+      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingCognito(
+        userPool,
+        [client],
+      ),
+    });
+  }
+}
+```
+
+または、独自のOIDCプロバイダーでカスタムJWT認証を行う場合は、`RuntimeAuthorizerConfiguration.usingJWT()`を使用します：
+
+```ts {6-10}
+import { MyProjectMcpServer } from ':my-scope/common-constructs';
+import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    new MyProjectMcpServer(this, 'MyProjectMcpServer', {
+      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingJWT(
+        'https://example.com/.well-known/openid-configuration',
+        ['client1', 'client2'], // 許可されたクライアントID（オプション）
+        ['audience1'],          // 許可されたオーディエンス（オプション）
+      ),
     });
   }
 }
 ```
 </Fragment>
 <Fragment slot="terraform">
-JWT認証を設定するには、MCPサーバーモジュールの`customJWTAuthorizer`変数を以下のように設定：
+JWT認証を設定するには、MCPサーバーモジュールの`authorizer_configuration`変数を以下のように設定：
 
-```terraform {18-21}
+```terraform {18-23}
 # packages/common/terraform/src/app/mcp-servers/my-project-mcp-server/my-project-mcp-server.tf
 
 data "aws_region" "current" {}
 
 locals {
-  aws_region = data.aws_region.current.name
+  aws_region = data.aws_region.current.id
 
   # ユーザープールIDとクライアントIDに置き換え、または変数として公開
   user_pool_id = "xxx"
@@ -161,11 +181,13 @@ locals {
 module "agent_core_runtime" {
   source = "../../../core/agent-core"
   agent_runtime_name = "MyProjectMcpServer"
-  docker_image_tag = "my-scope-my-project-agent:latest"
+  docker_image_tag = "my-scope-my-project-mcp-server:latest"
   server_protocol = "MCP"
-  customJWTAuthorizer = {
-    discoveryUrl = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration",
-    allowedClients = local.user_pool_client_ids
+  authorizer_configuration = {
+    custom_jwt_authorizer = {
+      discovery_url = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration"
+      allowed_clients = local.user_pool_client_ids
+    }
   }
   env = var.env
   additional_iam_policy_statements = var.additional_iam_policy_statements

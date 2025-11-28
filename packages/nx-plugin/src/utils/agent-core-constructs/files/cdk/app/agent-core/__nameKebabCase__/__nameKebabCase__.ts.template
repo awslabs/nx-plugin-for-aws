@@ -1,42 +1,46 @@
 import { Lazy, Names } from 'aws-cdk-lib';
-import { DockerImageAsset, Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import { Construct } from 'constructs';
 import { execSync } from 'child_process';
 import * as path from 'path';
 import * as url from 'url';
 import {
-  AgentCoreRuntime,
-  AgentCoreRuntimeProps,
-} from '../../../core/agent-core/runtime.js';
+  AgentRuntimeArtifact,
+  ProtocolType,
+  Runtime,
+  RuntimeProps,
+} from '@aws-cdk/aws-bedrock-agentcore-alpha';
 
 export type <%- nameClassName %>Props = Omit<
-  AgentCoreRuntimeProps,
-  'runtimeName' | 'serverProtocol' | 'containerUri'
+  RuntimeProps,
+  'runtimeName' | 'protocolConfiguration' | 'agentRuntimeArtifact'
 >;
 
 export class <%- nameClassName %> extends Construct {
-  public readonly dockerImage: DockerImageAsset;
-  public readonly agentCoreRuntime: AgentCoreRuntime;
+  public readonly dockerImage: AgentRuntimeArtifact;
+  public readonly agentCoreRuntime: Runtime;
 
   constructor(scope: Construct, id: string, props?: <%- nameClassName %>Props) {
     super(scope, id);
 
-    this.dockerImage = new DockerImageAsset(this, 'DockerImage', {
-      platform: Platform.LINUX_ARM64,
-      directory: path.dirname(url.fileURLToPath(new URL(import.meta.url))),
-      extraHash: execSync(
-        `docker inspect <%- dockerImageTag %> --format '{{.Id}}'`,
-        { encoding: 'utf-8' },
-      ).trim(),
-    });
+    this.dockerImage = AgentRuntimeArtifact.fromAsset(
+      path.dirname(url.fileURLToPath(new URL(import.meta.url))),
+      {
+        platform: Platform.LINUX_ARM64,
+        extraHash: execSync(
+          `docker inspect <%- dockerImageTag %> --format '{{.Id}}'`,
+          { encoding: 'utf-8' },
+        ).trim(),
+      },
+    );
 
-    this.agentCoreRuntime = new AgentCoreRuntime(this, '<%- nameClassName %>', {
+    this.agentCoreRuntime = new Runtime(this, '<%- nameClassName %>', {
       runtimeName: Lazy.string({
         produce: () =>
           Names.uniqueResourceName(this.agentCoreRuntime, { maxLength: 40 }),
       }),
-      serverProtocol: '<%- serverProtocol %>',
-      containerUri: this.dockerImage.imageUri,
+      protocolConfiguration: ProtocolType.<%- serverProtocol %>,
+      agentRuntimeArtifact: this.dockerImage,
       ...props,
     });
   }

@@ -76,9 +76,6 @@ Para implantar seu Agente Strands, os seguintes arquivos são gerados:
         - \<project-name>
           - \<project-name>.ts Construct CDK para implantar seu agente
           - Dockerfile Arquivo Docker repassado usado pelo construct CDK
-    - core
-      - agent-core
-        - runtime.ts Construct CDK genérico para implantação no Bedrock AgentCore Runtime
 </FileTree>
 </Fragment>
 <Fragment slot="terraform">
@@ -217,8 +214,8 @@ export class ExampleStack extends Stack {
     const mcpServer = new MyProjectMcpServer(this, 'MyProjectMcpServer');
 
     const agent = new MyProjectAgent(this, 'MyProjectAgent', {
-      environment: {
-        MCP_AGENTCORE_RUNTIME_ARN: mcpServer.agentCoreRuntime.arn,
+      environmentVariables: {
+        MCP_AGENTCORE_RUNTIME_ARN: mcpServer.agentCoreRuntime.agentRuntimeArn,
       },
     });
 
@@ -352,7 +349,7 @@ Se selecionou `BedrockAgentCoreRuntime` para `computeType`, a infraestrutura CDK
 
 <Infrastructure>
 <Fragment slot="cdk">
-Um construct CDK é gerado para você, nomeado com base no `name` escolhido ao executar o gerador, ou `<ProjectName>Agent` por padrão.
+Um construct CDK é gerado para seu agente, nomeado com base no `name` escolhido ao executar o gerador, ou `<ProjectName>Agent` por padrão.
 
 Você pode usar este construct CDK em uma aplicação CDK:
 
@@ -365,7 +362,7 @@ export class ExampleStack extends Stack {
     const agent = new MyProjectAgent(this, 'MyProjectAgent');
 
     // Conceda permissões para invocar os modelos relevantes no bedrock
-    agent.agentCoreRuntime.role.addToPolicy(
+    agent.agentCoreRuntime.addToRolePolicy(
       new PolicyStatement({
         actions: [
           'bedrock:InvokeModel',
@@ -378,6 +375,10 @@ export class ExampleStack extends Stack {
   }
 }
 ```
+
+:::note
+Este construct usa o [módulo `@aws-cdk/aws-bedrock-agentcore-alpha`](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-bedrock-agentcore-alpha-readme.html).
+:::
 </Fragment>
 <Fragment slot="terraform">
 Um módulo Terraform é gerado para você, nomeado com base no `name` escolhido ao executar o gerador, ou `<ProjectName>-agent` por padrão.
@@ -500,10 +501,11 @@ O exemplo abaixo demonstra como configurar autenticação Cognito para seu agent
 
 <Infrastructure>
 <Fragment slot="cdk">
-Para configurar autenticação JWT, você pode passar a propriedade `authorizerConfiguration` para seu construct de agente. Aqui está um exemplo que configura um user pool e client Cognito para proteger o agente:
+Para configurar autenticação JWT usando Cognito, use o método de fábrica `RuntimeAuthorizerConfiguration.usingCognito()`:
 
-```ts {13-18}
+```ts {13-16}
 import { MyProjectAgent } from ':my-scope/common-constructs';
+import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
 
 export class ExampleStack extends Stack {
   constructor(scope: Construct, id: string) {
@@ -515,27 +517,44 @@ export class ExampleStack extends Stack {
     });
 
     new MyProjectAgent(this, 'MyProjectAgent', {
-      authorizerConfiguration: {
-        customJwtAuthorizer: {
-          discoveryUrl: `https://cognito-idp.${Stack.of(userPool).region}.amazonaws.com/${userPool.userPoolId}/.well-known/openid-configuration`,
-          allowedClients: [client.userPoolClientId],
-        },
-      },
+      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingCognito(
+        userPool,
+        [client],
+      ),
+    });
+  }
+}
+```
+
+Alternativamente, para autenticação JWT personalizada com seu próprio provedor OIDC, use `RuntimeAuthorizerConfiguration.usingJWT()`:
+
+```ts {6-10}
+import { MyProjectAgent } from ':my-scope/common-constructs';
+import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    new MyProjectAgent(this, 'MyProjectAgent', {
+      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingJWT(
+        'https://example.com/.well-known/openid-configuration',
+        ['client1', 'client2'], // IDs de Cliente Permitidos (opcional)
+        ['audience1'],          // Audiências Permitidas (opcional)
+      ),
     });
   }
 }
 ```
 </Fragment>
 <Fragment slot="terraform">
-Para configurar autenticação JWT, você pode editar seu módulo de agente para configurar a variável `customJWTAuthorizer` da seguinte forma:
+Para configurar autenticação JWT, você pode editar seu módulo de agente para configurar a variável `authorizer_configuration` da seguinte forma:
 
-```terraform {18-21}
+```terraform {18-23}
 # packages/common/terraform/src/app/agents/my-project-agent/my-project-agent.tf
 
 data "aws_region" "current" {}
 
 locals {
-  aws_region = data.aws_region.current.name
+  aws_region = data.aws_region.current.id
 
   # Substitua pelos IDs do seu user pool e client ou exponha como variáveis
   user_pool_id = "xxx"
@@ -547,9 +566,11 @@ module "agent_core_runtime" {
   agent_runtime_name = "MyProjectAgent"
   docker_image_tag = "my-scope-my-project-agent:latest"
   server_protocol = "HTTP"
-  customJWTAuthorizer = {
-    discoveryUrl = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration",
-    allowedClients = local.user_pool_client_ids
+  authorizer_configuration = {
+    custom_jwt_authorizer = {
+      discovery_url = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration"
+      allowed_clients = local.user_pool_client_ids
+    }
   }
   env = var.env
   additional_iam_policy_statements = var.additional_iam_policy_statements
