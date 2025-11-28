@@ -2,8 +2,6 @@
 title: "MCP基岩部署"
 ---
 
-
-
 import Link from '@components/link.astro';
 import Infrastructure from '@components/infrastructure.astro';
 
@@ -13,7 +11,7 @@ import Infrastructure from '@components/infrastructure.astro';
 
 <Infrastructure>
 <Fragment slot="cdk">
-系统会基于生成器运行时指定的 `name`（默认为 `<ProjectName>McpServer`）生成一个 CDK 构造。
+系统会为您的 MCP 服务器生成一个 CDK 构造，其名称基于生成器运行时指定的 `name`（默认为 `<ProjectName>McpServer`）。
 
 您可以在 CDK 应用中使用该 CDK 构造：
 
@@ -27,6 +25,10 @@ export class ExampleStack extends Stack {
   }
 }
 ```
+
+:::note
+此构造使用 [`@aws-cdk/aws-bedrock-agentcore-alpha` 模块](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-bedrock-agentcore-alpha-readme.html)。
+:::
 </Fragment>
 <Fragment slot="terraform">
 系统会基于生成器运行时指定的 `name`（默认为 `<ProjectName>-mcp-server`）生成一个 Terraform 模块。
@@ -116,10 +118,11 @@ module "my_project_mcp_server" {
 
 <Infrastructure>
 <Fragment slot="cdk">
-要配置 JWT 认证，您可以通过 `authorizerConfiguration` 属性传递给 MCP 服务器构造。以下示例配置了 Cognito 用户池和客户端来保护 MCP 服务器：
+要使用 Cognito 配置 JWT 认证，请使用 `RuntimeAuthorizerConfiguration.usingCognito()` 工厂方法：
 
 ```ts {14-17}
 import { MyProjectMcpServer } from ':my-scope/common-constructs';
+import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
 
 export class ExampleStack extends Stack {
   constructor(scope: Construct, id: string) {
@@ -131,27 +134,44 @@ export class ExampleStack extends Stack {
     });
 
     new MyProjectMcpServer(this, 'MyProjectMcpServer', {
-      authorizerConfiguration: {
-        customJwtAuthorizer: {
-          discoveryUrl: `https://cognito-idp.${Stack.of(userPool).region}.amazonaws.com/${userPool.userPoolId}/.well-known/openid-configuration`,
-          allowedClients: [client.userPoolClientId],
-        },
-      },
+      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingCognito(
+        userPool,
+        [client],
+      ),
+    });
+  }
+}
+```
+
+或者，对于使用您自己的 OIDC 提供商的自定义 JWT 认证，请使用 `RuntimeAuthorizerConfiguration.usingJWT()`：
+
+```ts {6-10}
+import { MyProjectMcpServer } from ':my-scope/common-constructs';
+import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    new MyProjectMcpServer(this, 'MyProjectMcpServer', {
+      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingJWT(
+        'https://example.com/.well-known/openid-configuration',
+        ['client1', 'client2'], // 允许的客户端 ID（可选）
+        ['audience1'],          // 允许的受众（可选）
+      ),
     });
   }
 }
 ```
 </Fragment>
 <Fragment slot="terraform">
-要配置 JWT 认证，您可以编辑 MCP 服务器模块来配置 `customJWTAuthorizer` 变量：
+要配置 JWT 认证，您可以编辑 MCP 服务器模块来配置 `authorizer_configuration` 变量：
 
-```terraform {18-21}
+```terraform {18-23}
 # packages/common/terraform/src/app/mcp-servers/my-project-mcp-server/my-project-mcp-server.tf
 
 data "aws_region" "current" {}
 
 locals {
-  aws_region = data.aws_region.current.name
+  aws_region = data.aws_region.current.id
 
   # 替换为您的用户池和客户端 ID，或通过变量暴露
   user_pool_id = "xxx"
@@ -161,11 +181,13 @@ locals {
 module "agent_core_runtime" {
   source = "../../../core/agent-core"
   agent_runtime_name = "MyProjectMcpServer"
-  docker_image_tag = "my-scope-my-project-agent:latest"
+  docker_image_tag = "my-scope-my-project-mcp-server:latest"
   server_protocol = "MCP"
-  customJWTAuthorizer = {
-    discoveryUrl = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration",
-    allowedClients = local.user_pool_client_ids
+  authorizer_configuration = {
+    custom_jwt_authorizer = {
+      discovery_url = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration"
+      allowed_clients = local.user_pool_client_ids
+    }
   }
   env = var.env
   additional_iam_policy_statements = var.additional_iam_policy_statements

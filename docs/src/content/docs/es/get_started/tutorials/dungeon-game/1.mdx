@@ -385,8 +385,6 @@ El generador `py#strands-agent` genera estos archivos:
         - Dockerfile define la imagen Docker para despliegue en AgentCore Runtime
   - common/constructs/
     - src
-      - core/agent-core/
-        - runtime.ts construct genérico para desplegar en AgentCore Runtime
       - app/agents/story-agent/
         - story-agent.ts construct para desplegar tu agente Story en AgentCore Runtime
 </FileTree>
@@ -454,51 +452,55 @@ Este es el punto de entrada para el agente, configurado usando el [Amazon Bedroc
 ```ts
 // common/constructs/src/app/agents/story-agent.ts
 import { Lazy, Names } from 'aws-cdk-lib';
-import { DockerImageAsset, Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import { Construct } from 'constructs';
 import { execSync } from 'child_process';
 import * as path from 'path';
 import * as url from 'url';
 import {
-  AgentCoreRuntime,
-  AgentCoreRuntimeProps,
-} from '../../../core/agent-core/runtime.js';
+  AgentRuntimeArtifact,
+  ProtocolType,
+  Runtime,
+  RuntimeProps,
+} from '@aws-cdk/aws-bedrock-agentcore-alpha';
 
 export type StoryAgentProps = Omit<
-  AgentCoreRuntimeProps,
-  'runtimeName' | 'serverProtocol' | 'containerUri'
+  RuntimeProps,
+  'runtimeName' | 'protocolConfiguration' | 'agentRuntimeArtifact'
 >;
 
 export class StoryAgent extends Construct {
-  public readonly dockerImage: DockerImageAsset;
-  public readonly agentCoreRuntime: AgentCoreRuntime;
+  public readonly dockerImage: AgentRuntimeArtifact;
+  public readonly agentCoreRuntime: Runtime;
 
   constructor(scope: Construct, id: string, props?: StoryAgentProps) {
     super(scope, id);
 
-    this.dockerImage = new DockerImageAsset(this, 'DockerImage', {
-      platform: Platform.LINUX_ARM64,
-      directory: path.dirname(url.fileURLToPath(new URL(import.meta.url))),
-      extraHash: execSync(
-        `docker inspect dungeon-adventure-story-agent:latest --format '{{.Id}}'`,
-        { encoding: 'utf-8' },
-      ).trim(),
-    });
+    this.dockerImage = AgentRuntimeArtifact.fromAsset(
+      path.dirname(url.fileURLToPath(new URL(import.meta.url))),
+      {
+        platform: Platform.LINUX_ARM64,
+        extraHash: execSync(
+          `docker inspect dungeon-adventure-story-agent:latest --format '{{.Id}}'`,
+          { encoding: 'utf-8' },
+        ).trim(),
+      },
+    );
 
-    this.agentCoreRuntime = new AgentCoreRuntime(this, 'StoryAgent', {
+    this.agentCoreRuntime = new Runtime(this, 'StoryAgent', {
       runtimeName: Lazy.string({
         produce: () =>
           Names.uniqueResourceName(this.agentCoreRuntime, { maxLength: 40 }),
       }),
-      serverProtocol: 'HTTP',
-      containerUri: this.dockerImage.imageUri,
+      protocolConfiguration: ProtocolType.HTTP,
+      agentRuntimeArtifact: this.dockerImage,
       ...props,
     });
   }
 }
 ```
 
-Esto configura un `DockerImageAsset` de CDK que sube tu imagen Docker del agente a ECR, y la aloja usando AgentCore Runtime.
+Esto configura un `AgentRuntimeArtifact` de CDK que sube tu imagen Docker del agente a ECR, y la aloja usando AgentCore Runtime.
 
 Puedes notar un `Dockerfile` adicional, que referencia la imagen Docker del proyecto `story`, permitiéndonos ubicar conjuntamente el Dockerfile y el código fuente del agente.
 
@@ -999,7 +1001,7 @@ No, run the tasks without syncing the changes
 
 Este mensaje indica que NX ha detectado algunos archivos que pueden actualizarse automáticamente. En este caso, se refiere a los archivos `tsconfig.json` que no tienen referencias de proyecto configuradas en proyectos dependientes.
 
-Selecciona la opción **Yes, sync the changes and run the tasks** para continuar. Deberías notar que todos los errores de importación en tu IDE se resuelven automáticamente, ya que el generador de sync agregará las referencias TypeScript faltantes.
+Selecciona la opción **Yes, sync the changes and run the tasks** para continuar. Deberías notar que todos los errores de importación en tu IDE se resuelven automáticamente, ya que el generador de sync agregará las referencias TypeScript faltantes automáticamente.
 
 Todos los artefactos construidos están ahora disponibles dentro de la carpeta `dist/` ubicada en la raíz del monorepo. Esta es una práctica estándar cuando se usan proyectos generados por el `@aws/nx-plugin` ya que no contamina tu árbol de archivos con archivos generados. En caso de que quieras limpiar tus archivos, elimina la carpeta `dist/` sin preocuparte por artefactos de build esparcidos por el árbol de directorios.
 
