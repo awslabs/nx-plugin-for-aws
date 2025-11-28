@@ -71,23 +71,6 @@ const addAgentCoreInfra = (
 };
 
 const addAgentCoreCDKInfra = (tree: Tree, options: AddAgentCoreInfraProps) => {
-  // Add the AgentCore runtime construct
-  generateFiles(
-    tree,
-    joinPathFragments(__dirname, 'files', 'cdk', 'core', 'agent-core'),
-    joinPathFragments(
-      PACKAGES_DIR,
-      SHARED_CONSTRUCTS_DIR,
-      'src',
-      'core',
-      'agent-core',
-    ),
-    {},
-    {
-      overwriteStrategy: OverwriteStrategy.KeepExisting,
-    },
-  );
-
   // Generate app specific CDK construct
   generateFiles(
     tree,

@@ -462,9 +462,6 @@ dev-dependencies = []
 
     // Verify shared constructs setup
     expect(
-      tree.exists('packages/common/constructs/src/core/agent-core/runtime.ts'),
-    ).toBeTruthy();
-    expect(
       tree.exists('packages/common/constructs/src/app/mcp-servers/index.ts'),
     ).toBeTruthy();
     expect(
@@ -545,13 +542,6 @@ dev-dependencies = []
       computeType: 'BedrockAgentCoreRuntime',
       iacProvider: 'CDK',
     });
-
-    // Snapshot the generated agent-core runtime construct
-    const runtimeContent = tree.read(
-      'packages/common/constructs/src/core/agent-core/runtime.ts',
-      'utf-8',
-    );
-    expect(runtimeContent).toMatchSnapshot('agent-core-runtime.ts');
 
     // Snapshot the generated MCP server construct
     const mcpServerContent = tree.read(
@@ -907,9 +897,6 @@ dev-dependencies = []
     // Verify CDK constructs are created (not terraform)
     expect(tree.exists('packages/common/constructs')).toBeTruthy();
     expect(tree.exists('packages/common/terraform')).toBeFalsy();
-    expect(
-      tree.exists('packages/common/constructs/src/core/agent-core/runtime.ts'),
-    ).toBeTruthy();
   });
 
   it('should add component generator metadata with default name', async () => {
