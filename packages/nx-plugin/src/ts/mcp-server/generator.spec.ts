@@ -525,6 +525,9 @@ describe('ts#mcp-server generator', () => {
 
     // Additional dependencies for BedrockAgentCoreRuntime
     expect(rootPackageJson.devDependencies['rolldown']).toBeDefined();
+    expect(
+      rootPackageJson.devDependencies['@aws-cdk/aws-bedrock-agentcore-alpha'],
+    ).toBeDefined();
 
     // Check project package.json dependencies
     const projectPackageJson = JSON.parse(

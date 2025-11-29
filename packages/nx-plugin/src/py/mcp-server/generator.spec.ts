@@ -443,6 +443,9 @@ dev-dependencies = []
     expect(
       rootPackageJson.devDependencies['@modelcontextprotocol/inspector'],
     ).toBeDefined();
+    expect(
+      rootPackageJson.devDependencies['@aws-cdk/aws-bedrock-agentcore-alpha'],
+    ).toBeDefined();
 
     // Check that pyproject.toml was updated with MCP dependency
     const pyprojectToml = parse(

@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
+  addDependenciesToPackageJson,
   generateFiles,
   joinPathFragments,
   OverwriteStrategy,
@@ -17,6 +18,7 @@ import {
 } from '../shared-constructs-constants';
 import { addStarExport } from '../ast';
 import { IacProvider } from '../iac';
+import { withVersions } from '../versions';
 
 type IACProvider = { iacProvider: IacProvider };
 
@@ -71,6 +73,13 @@ const addAgentCoreInfra = (
 };
 
 const addAgentCoreCDKInfra = (tree: Tree, options: AddAgentCoreInfraProps) => {
+  // Add dependency on bedrock agentcore alpha package
+  addDependenciesToPackageJson(
+    tree,
+    {},
+    withVersions(['@aws-cdk/aws-bedrock-agentcore-alpha']),
+  );
+
   // Generate app specific CDK construct
   generateFiles(
     tree,

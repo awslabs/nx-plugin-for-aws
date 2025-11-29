@@ -706,6 +706,20 @@ dev-dependencies = []
     );
   });
 
+  it('should add CDK dependencies for BedrockAgentCoreRuntime', async () => {
+    await pyStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
+    });
+
+    // Check root package.json dependencies
+    const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+    expect(
+      rootPackageJson.devDependencies['@aws-cdk/aws-bedrock-agentcore-alpha'],
+    ).toBeDefined();
+  });
+
   it('should generate strands agent with Terraform provider and default name', async () => {
     await pyStrandsAgentGenerator(tree, {
       project: 'test-project',
