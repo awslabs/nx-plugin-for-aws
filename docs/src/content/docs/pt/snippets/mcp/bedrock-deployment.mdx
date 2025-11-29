@@ -2,8 +2,6 @@
 title: "Implantação do MCP Bedrock"
 ---
 
-
-
 import Link from '@components/link.astro';
 import Infrastructure from '@components/infrastructure.astro';
 
@@ -13,7 +11,7 @@ Se você selecionou `BedrockAgentCoreRuntime` para `computeType`, a infraestrutu
 
 <Infrastructure>
 <Fragment slot="cdk">
-Um construto CDK é gerado para você, nomeado com base no `name` escolhido ao executar o gerador, ou `<ProjectName>McpServer` por padrão.
+Um construto CDK é gerado para seu Servidor MCP, nomeado com base no `name` escolhido ao executar o gerador, ou `<ProjectName>McpServer` por padrão.
 
 Você pode usar este construto CDK em uma aplicação CDK:
 
@@ -27,6 +25,10 @@ export class ExampleStack extends Stack {
   }
 }
 ```
+
+:::note
+Este construto usa o [módulo `@aws-cdk/aws-bedrock-agentcore-alpha`](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-bedrock-agentcore-alpha-readme.html).
+:::
 </Fragment>
 <Fragment slot="terraform">
 Um módulo do Terraform é gerado para você, nomeado com base no `name` escolhido ao executar o gerador, ou `<ProjectName>-mcp-server` por padrão.
@@ -116,10 +118,11 @@ O exemplo abaixo demonstra como configurar autenticação Cognito para seu servi
 
 <Infrastructure>
 <Fragment slot="cdk">
-Para configurar autenticação JWT, você pode passar a propriedade `authorizerConfiguration` para seu construto de servidor MCP. Este exemplo configura um user pool e client Cognito para proteger o servidor:
+Para configurar autenticação JWT usando Cognito, use o método factory `RuntimeAuthorizerConfiguration.usingCognito()`:
 
 ```ts {14-17}
 import { MyProjectMcpServer } from ':my-scope/common-constructs';
+import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
 
 export class ExampleStack extends Stack {
   constructor(scope: Construct, id: string) {
@@ -131,27 +134,44 @@ export class ExampleStack extends Stack {
     });
 
     new MyProjectMcpServer(this, 'MyProjectMcpServer', {
-      authorizerConfiguration: {
-        customJwtAuthorizer: {
-          discoveryUrl: `https://cognito-idp.${Stack.of(userPool).region}.amazonaws.com/${userPool.userPoolId}/.well-known/openid-configuration`,
-          allowedClients: [client.userPoolClientId],
-        },
-      },
+      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingCognito(
+        userPool,
+        [client],
+      ),
+    });
+  }
+}
+```
+
+Alternativamente, para autenticação JWT personalizada com seu próprio provedor OIDC, use `RuntimeAuthorizerConfiguration.usingJWT()`:
+
+```ts {6-10}
+import { MyProjectMcpServer } from ':my-scope/common-constructs';
+import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    new MyProjectMcpServer(this, 'MyProjectMcpServer', {
+      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingJWT(
+        'https://example.com/.well-known/openid-configuration',
+        ['client1', 'client2'], // IDs de Cliente Permitidos (opcional)
+        ['audience1'],          // Audiências Permitidas (opcional)
+      ),
     });
   }
 }
 ```
 </Fragment>
 <Fragment slot="terraform">
-Para configurar autenticação JWT, você pode editar seu módulo do Servidor MCP para configurar a variável `customJWTAuthorizer` da seguinte forma:
+Para configurar autenticação JWT, você pode editar seu módulo do Servidor MCP para configurar a variável `authorizer_configuration` da seguinte forma:
 
-```terraform {18-21}
+```terraform {18-23}
 # packages/common/terraform/src/app/mcp-servers/my-project-mcp-server/my-project-mcp-server.tf
 
 data "aws_region" "current" {}
 
 locals {
-  aws_region = data.aws_region.current.name
+  aws_region = data.aws_region.current.id
 
   # Substitua pelos IDs do seu user pool e client ou exponha como variáveis
   user_pool_id = "xxx"
@@ -161,11 +181,13 @@ locals {
 module "agent_core_runtime" {
   source = "../../../core/agent-core"
   agent_runtime_name = "MyProjectMcpServer"
-  docker_image_tag = "my-scope-my-project-agent:latest"
+  docker_image_tag = "my-scope-my-project-mcp-server:latest"
   server_protocol = "MCP"
-  customJWTAuthorizer = {
-    discoveryUrl = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration",
-    allowedClients = local.user_pool_client_ids
+  authorizer_configuration = {
+    custom_jwt_authorizer = {
+      discovery_url = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration"
+      allowed_clients = local.user_pool_client_ids
+    }
   }
   env = var.env
   additional_iam_policy_statements = var.additional_iam_policy_statements

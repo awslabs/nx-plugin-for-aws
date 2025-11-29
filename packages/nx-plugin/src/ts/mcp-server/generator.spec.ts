@@ -525,6 +525,9 @@ describe('ts#mcp-server generator', () => {
 
     // Additional dependencies for BedrockAgentCoreRuntime
     expect(rootPackageJson.devDependencies['rolldown']).toBeDefined();
+    expect(
+      rootPackageJson.devDependencies['@aws-cdk/aws-bedrock-agentcore-alpha'],
+    ).toBeDefined();
 
     // Check project package.json dependencies
     const projectPackageJson = JSON.parse(
@@ -552,9 +555,6 @@ describe('ts#mcp-server generator', () => {
     });
 
     // Verify shared constructs setup
-    expect(
-      tree.exists('packages/common/constructs/src/core/agent-core/runtime.ts'),
-    ).toBeTruthy();
     expect(
       tree.exists('packages/common/constructs/src/app/mcp-servers/index.ts'),
     ).toBeTruthy();
@@ -633,13 +633,6 @@ describe('ts#mcp-server generator', () => {
       computeType: 'BedrockAgentCoreRuntime',
       iacProvider: 'CDK',
     });
-
-    // Snapshot the generated agent-core runtime construct
-    const runtimeContent = tree.read(
-      'packages/common/constructs/src/core/agent-core/runtime.ts',
-      'utf-8',
-    );
-    expect(runtimeContent).toMatchSnapshot('agent-core-runtime.ts');
 
     // Snapshot the generated MCP server construct
     const mcpServerContent = tree.read(

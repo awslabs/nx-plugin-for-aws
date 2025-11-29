@@ -7,6 +7,7 @@
  * Versons for TypeScript dependencies added by generators
  */
 export const TS_VERSIONS = {
+  '@aws-cdk/aws-bedrock-agentcore-alpha': '2.222.0-alpha.0',
   '@aws-sdk/client-cognito-identity': '3.922.0',
   '@aws-sdk/client-dynamodb': '3.922.0',
   '@aws-sdk/credential-providers': '3.922.0',

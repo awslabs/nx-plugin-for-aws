@@ -382,8 +382,6 @@ Python 프로젝트를 생성하려면:
         - Dockerfile AgentCore 런타임 배포용 Docker 이미지 정의
   - common/constructs/
     - src
-      - core/agent-core/
-        - runtime.ts AgentCore 런타임 배포용 일반 구성 요소
       - app/agents/story-agent/
         - story-agent.ts Story 에이전트를 AgentCore 런타임에 배포하는 구성 요소
 </FileTree>
@@ -451,51 +449,55 @@ if __name__ == "__main__":
 ```ts
 // common/constructs/src/app/agents/story-agent.ts
 import { Lazy, Names } from 'aws-cdk-lib';
-import { DockerImageAsset, Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import { Construct } from 'constructs';
 import { execSync } from 'child_process';
 import * as path from 'path';
 import * as url from 'url';
 import {
-  AgentCoreRuntime,
-  AgentCoreRuntimeProps,
-} from '../../../core/agent-core/runtime.js';
+  AgentRuntimeArtifact,
+  ProtocolType,
+  Runtime,
+  RuntimeProps,
+} from '@aws-cdk/aws-bedrock-agentcore-alpha';
 
 export type StoryAgentProps = Omit<
-  AgentCoreRuntimeProps,
-  'runtimeName' | 'serverProtocol' | 'containerUri'
+  RuntimeProps,
+  'runtimeName' | 'protocolConfiguration' | 'agentRuntimeArtifact'
 >;
 
 export class StoryAgent extends Construct {
-  public readonly dockerImage: DockerImageAsset;
-  public readonly agentCoreRuntime: AgentCoreRuntime;
+  public readonly dockerImage: AgentRuntimeArtifact;
+  public readonly agentCoreRuntime: Runtime;
 
   constructor(scope: Construct, id: string, props?: StoryAgentProps) {
     super(scope, id);
 
-    this.dockerImage = new DockerImageAsset(this, 'DockerImage', {
-      platform: Platform.LINUX_ARM64,
-      directory: path.dirname(url.fileURLToPath(new URL(import.meta.url))),
-      extraHash: execSync(
-        `docker inspect dungeon-adventure-story-agent:latest --format '{{.Id}}'`,
-        { encoding: 'utf-8' },
-      ).trim(),
-    });
+    this.dockerImage = AgentRuntimeArtifact.fromAsset(
+      path.dirname(url.fileURLToPath(new URL(import.meta.url))),
+      {
+        platform: Platform.LINUX_ARM64,
+        extraHash: execSync(
+          `docker inspect dungeon-adventure-story-agent:latest --format '{{.Id}}'`,
+          { encoding: 'utf-8' },
+        ).trim(),
+      },
+    );
 
-    this.agentCoreRuntime = new AgentCoreRuntime(this, 'StoryAgent', {
+    this.agentCoreRuntime = new Runtime(this, 'StoryAgent', {
       runtimeName: Lazy.string({
         produce: () =>
           Names.uniqueResourceName(this.agentCoreRuntime, { maxLength: 40 }),
       }),
-      serverProtocol: 'HTTP',
-      containerUri: this.dockerImage.imageUri,
+      protocolConfiguration: ProtocolType.HTTP,
+      agentRuntimeArtifact: this.dockerImage,
       ...props,
     });
   }
 }
 ```
 
-이 코드는 ECR에 에이전트 Docker 이미지를 업로드하고 AgentCore 런타임을 사용하여 호스팅하는 CDK `DockerImageAsset`을 구성합니다.
+이 코드는 ECR에 에이전트 Docker 이미지를 업로드하고 AgentCore 런타임을 사용하여 호스팅하는 CDK `AgentRuntimeArtifact`를 구성합니다.
 
 추가 `Dockerfile`이 있는데, 이는 `story` 프로젝트의 Docker 이미지를 참조하여 Dockerfile과 에이전트 소스 코드를 함께 위치시킬 수 있도록 합니다.
 
