@@ -122,7 +122,7 @@ program
   .option(
     '-l, --languages <languages>',
     'Comma-separated list of target languages',
-    'jp,ko,es,pt,fr,it,zh',
+    'jp,ko,es,pt,fr,it,zh,vi',
   )
   .option(
     '-d, --dry-run',
