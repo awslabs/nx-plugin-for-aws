@@ -15,19 +15,13 @@ import {
   CognitoUserPoolsAuthorizer,
   <%_ } _%>
 } from 'aws-cdk-lib/aws-apigateway';
-import {
-  Duration,
-  <%_ if (auth === 'IAM') { _%>
-  Stack,
-  <%_ } _%>
-} from 'aws-cdk-lib';
+import { Duration } from 'aws-cdk-lib';
 import {
   PolicyDocument,
   PolicyStatement,
   Effect,
   AnyPrincipal,
   <%_ if (auth === 'IAM') { _%>
-  AccountPrincipal,
   IGrantable,
   Grant,
   <%_ } _%>
@@ -163,15 +157,6 @@ export class <%= apiNameClassName %><
       policy: new PolicyDocument({
         statements: [
           <%_ if (auth === 'IAM') { _%>
-          // Here we grant any AWS credentials from the account that the project is deployed in to call the api.
-          // Machine to machine fine-grained access can be defined here using more specific principals (eg roles or
-          // users) and resources (eg which api paths may be invoked by which principal) if required.
-          new PolicyStatement({
-            effect: Effect.ALLOW,
-            principals: [new AccountPrincipal(Stack.of(scope).account)],
-            actions: ['execute-api:Invoke'],
-            resources: ['execute-api:/*'],
-          }),
           // Open up OPTIONS to allow browsers to make unauthenticated preflight requests
           new PolicyStatement({
             effect: Effect.ALLOW,
@@ -206,6 +191,18 @@ export class <%= apiNameClassName %><
    * @param grantee - The IAM principal to grant permissions to
    */
   public grantInvokeAccess(grantee: IGrantable) {
+    // Here we grant grantee permission to call the api.
+    // Machine to machine fine-grained access can be defined here using more specific principals (eg roles or
+    // users) and resources (eg which api paths may be invoked by which principal) if required.
+    this.api.addToResourcePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        principals: [grantee.grantPrincipal],
+        actions: ['execute-api:Invoke'],
+        resources: ['execute-api:/*'],
+      }),
+    );
+
     Grant.addToPrincipal({
       grantee,
       actions: ['execute-api:Invoke'],
