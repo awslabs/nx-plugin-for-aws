@@ -9,6 +9,7 @@ import {
 import { Stack, StackProps, CfnOutput } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { ElectrodbDynamoTable } from '../constructs/electrodb-table.js';
+import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
 
 export class ApplicationStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
@@ -41,7 +42,7 @@ export class ApplicationStack extends Stack {
     const { userPool, userPoolClient } = userIdentity;
 
     const mcpServer = new InventoryMcpServer(this, 'InventoryMcpServer', {
-      environment: {
+      environmentVariables: {
         TABLE_NAME: electroDbTable.tableName,
       },
     });
@@ -49,25 +50,23 @@ export class ApplicationStack extends Stack {
 
     // Use Cognito for user authentication with the agent
     const storyAgent = new StoryAgent(this, 'StoryAgent', {
-      authorizerConfiguration: {
-        customJwtAuthorizer: {
-          discoveryUrl: `https://cognito-idp.${Stack.of(userPool).region}.amazonaws.com/${userPool.userPoolId}/.well-known/openid-configuration`,
-          allowedAudience: [userPoolClient.userPoolClientId],
-        },
-      },
-      environment: {
-        INVENTORY_MCP_ARN: mcpServer.agentCoreRuntime.arn,
+      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingCognito(
+        userPool,
+        [userPoolClient],
+      ),
+      environmentVariables: {
+        INVENTORY_MCP_ARN: mcpServer.agentCoreRuntime.agentRuntimeArn,
       },
     });
     // Add the Story Agent ARN to runtime-config.json so it can be referenced by the website
     RuntimeConfig.ensure(this).config.agentArn =
-      storyAgent.agentCoreRuntime.arn;
+      storyAgent.agentCoreRuntime.agentRuntimeArn;
 
     new CfnOutput(this, 'StoryAgentArn', {
-      value: storyAgent.agentCoreRuntime.arn,
+      value: storyAgent.agentCoreRuntime.agentRuntimeArn,
     });
     new CfnOutput(this, 'InventoryMcpArn', {
-      value: mcpServer.agentCoreRuntime.arn,
+      value: mcpServer.agentCoreRuntime.agentRuntimeArn,
     });
 
     // Grant the agent permissions to invoke our mcp server

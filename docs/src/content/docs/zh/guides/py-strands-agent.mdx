@@ -76,9 +76,6 @@ import GeneratorParameters from '@components/generator-parameters.astro';
         - \<project-name>
           - \<project-name>.ts 部署智能体的CDK构造
           - Dockerfile CDK构造使用的透传Docker文件
-    - core
-      - agent-core
-        - runtime.ts 部署到Bedrock AgentCore Runtime的通用CDK构造
 </FileTree>
 </Fragment>
 <Fragment slot="terraform">
@@ -217,8 +214,8 @@ export class ExampleStack extends Stack {
     const mcpServer = new MyProjectMcpServer(this, 'MyProjectMcpServer');
 
     const agent = new MyProjectAgent(this, 'MyProjectAgent', {
-      environment: {
-        MCP_AGENTCORE_RUNTIME_ARN: mcpServer.agentCoreRuntime.arn,
+      environmentVariables: {
+        MCP_AGENTCORE_RUNTIME_ARN: mcpServer.agentCoreRuntime.agentRuntimeArn,
       },
     });
 
@@ -352,35 +349,49 @@ SDK功能详情请参阅[文档](https://aws.github.io/bedrock-agentcore-starter
 
 <Infrastructure>
 <Fragment slot="cdk">
-默认生成基于生成器`name`参数的CDK构造（默认`<ProjectName>Agent`）：
+生成器会为您的智能体创建CDK构造，命名基于运行生成器时选择的`name`参数，默认为`<ProjectName>Agent`。
+
+可在CDK应用中使用此构造：
 
 ```ts {6}
 import { MyProjectAgent } from ':my-scope/common-constructs';
 
 export class ExampleStack extends Stack {
   constructor(scope: Construct, id: string) {
+    // 将智能体添加到堆栈
     const agent = new MyProjectAgent(this, 'MyProjectAgent');
 
-    agent.agentCoreRuntime.role.addToPolicy(
+    // 授予调用Bedrock相关模型的权限
+    agent.agentCoreRuntime.addToRolePolicy(
       new PolicyStatement({
         actions: [
           'bedrock:InvokeModel',
           'bedrock:InvokeModelWithResponseStream',
         ],
+        // 可将以下范围缩小到您使用的具体模型
         resources: ['arn:aws:bedrock:*::foundation-model/*'],
       }),
     );
   }
 }
 ```
+
+:::note
+此构造使用[`@aws-cdk/aws-bedrock-agentcore-alpha`模块](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-bedrock-agentcore-alpha-readme.html)。
+:::
 </Fragment>
 <Fragment slot="terraform">
-默认生成基于生成器`name`参数的Terraform模块（默认`<ProjectName>-agent`）：
+生成器会为您创建Terraform模块，命名基于运行生成器时选择的`name`参数，默认为`<ProjectName>-agent`。
+
+可在Terraform项目中使用此模块：
 
 ```terraform
+# 智能体
 module "my_project_agent" {
+  # common/terraform项目中生成模块的相对路径
   source = "../../common/terraform/src/app/agents/my-project-agent"
 
+  # 授予调用Bedrock相关模型的权限
   additional_iam_policy_statements = [
     {
       Effect = "Allow"
@@ -441,22 +452,44 @@ export class ExampleStack extends Stack {
     new MyProjectAgent(this, 'MyProjectAgent');
   }
 }
+```
 
-// 授权调用示例
-agent.agentCoreRuntime.grantInvoke(lambdaFunction);
+可使用`grantInvoke`方法授权调用Bedrock AgentCore Runtime上的智能体，例如：
+
+```ts {8}
+import { MyProjectAgent } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const agent = new MyProjectAgent(this, 'MyProjectAgent');
+    const lambdaFunction = new Function(this, ...);
+
+    agent.agentCoreRuntime.grantInvoke(lambdaFunction);
+  }
+}
 ```
 </Fragment>
 <Fragment slot="terraform">
 ```terraform
+# 智能体
 module "my_project_agent" {
+  # common/terraform项目中生成模块的相对路径
   source = "../../common/terraform/src/app/agents/my-project-agent"
 }
+```
 
-# 授权策略示例
+要授予调用智能体的权限，需添加如下策略，引用`module.my_project_agent.agent_core_runtime_arn`输出：
+
+```terraform
 {
   Effect = "Allow"
-  Action = ["bedrock-agentcore:InvokeAgentRuntime"]
-  Resource = [module.my_project_agent.agent_core_runtime_arn, "${module.my_project_agent.agent_core_runtime_arn}/*"]
+  Action = [
+    "bedrock-agentcore:InvokeAgentRuntime"
+  ]
+  Resource = [
+    module.my_project_agent.agent_core_runtime_arn,
+    "${module.my_project_agent.agent_core_runtime_arn}/*"
+  ]
 }
 ```
 </Fragment>
@@ -468,34 +501,62 @@ module "my_project_agent" {
 
 <Infrastructure>
 <Fragment slot="cdk">
-```ts {13-18}
+使用Cognito配置JWT认证时，使用`RuntimeAuthorizerConfiguration.usingCognito()`工厂方法：
+
+```ts {13-16}
 import { MyProjectAgent } from ':my-scope/common-constructs';
+import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
 
 export class ExampleStack extends Stack {
   constructor(scope: Construct, id: string) {
     const userPool = new UserPool(this, 'UserPool');
     const client = userPool.addClient('Client', {
-      authFlows: { userPassword: true },
+      authFlows: {
+        userPassword: true,
+      },
     });
 
     new MyProjectAgent(this, 'MyProjectAgent', {
-      authorizerConfiguration: {
-        customJwtAuthorizer: {
-          discoveryUrl: `https://cognito-idp.${Stack.of(userPool).region}.amazonaws.com/${userPool.userPoolId}/.well-known/openid-configuration`,
-          allowedClients: [client.userPoolClientId],
-        },
-      },
+      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingCognito(
+        userPool,
+        [client],
+      ),
+    });
+  }
+}
+```
+
+或者，对于使用自有OIDC提供商的自定义JWT认证，使用`RuntimeAuthorizerConfiguration.usingJWT()`：
+
+```ts {6-10}
+import { MyProjectAgent } from ':my-scope/common-constructs';
+import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    new MyProjectAgent(this, 'MyProjectAgent', {
+      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingJWT(
+        'https://example.com/.well-known/openid-configuration',
+        ['client1', 'client2'], // 允许的客户端ID（可选）
+        ['audience1'],          // 允许的受众（可选）
+      ),
     });
   }
 }
 ```
 </Fragment>
 <Fragment slot="terraform">
-```terraform {18-21}
+配置JWT认证时，可编辑智能体模块配置`authorizer_configuration`变量：
+
+```terraform {18-23}
 # packages/common/terraform/src/app/agents/my-project-agent/my-project-agent.tf
 
+data "aws_region" "current" {}
+
 locals {
-  aws_region = data.aws_region.current.name
+  aws_region = data.aws_region.current.id
+
+  # 替换为您的用户池和客户端ID或作为变量暴露
   user_pool_id = "xxx"
   user_pool_client_ids = ["yyy"]
 }
@@ -505,11 +566,15 @@ module "agent_core_runtime" {
   agent_runtime_name = "MyProjectAgent"
   docker_image_tag = "my-scope-my-project-agent:latest"
   server_protocol = "HTTP"
-  customJWTAuthorizer = {
-    discoveryUrl = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration",
-    allowedClients = local.user_pool_client_ids
+  authorizer_configuration = {
+    custom_jwt_authorizer = {
+      discovery_url = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration"
+      allowed_clients = local.user_pool_client_ids
+    }
   }
-  # 其他配置...
+  env = var.env
+  additional_iam_policy_statements = var.additional_iam_policy_statements
+  tags = var.tags
 }
 ```
 </Fragment>

@@ -402,9 +402,6 @@ dev-dependencies = []
 
     // Verify shared constructs setup
     expect(
-      tree.exists('packages/common/constructs/src/core/agent-core/runtime.ts'),
-    ).toBeTruthy();
-    expect(
       tree.exists('packages/common/constructs/src/app/agents/index.ts'),
     ).toBeTruthy();
     expect(
@@ -599,13 +596,6 @@ dev-dependencies = []
       iacProvider: 'CDK',
     });
 
-    // Snapshot the generated agent-core runtime construct
-    const runtimeContent = tree.read(
-      'packages/common/constructs/src/core/agent-core/runtime.ts',
-      'utf-8',
-    );
-    expect(runtimeContent).toMatchSnapshot('agent-core-runtime.ts');
-
     // Snapshot the generated agent construct
     const agentConstructContent = tree.read(
       'packages/common/constructs/src/app/agents/snapshot-bedrock-agent/snapshot-bedrock-agent.ts',
@@ -714,6 +704,20 @@ dev-dependencies = []
     expect(projectConfig.targets['agent-docker'].options.commands[0]).toContain(
       'proj-project-agent:latest',
     );
+  });
+
+  it('should add CDK dependencies for BedrockAgentCoreRuntime', async () => {
+    await pyStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
+    });
+
+    // Check root package.json dependencies
+    const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+    expect(
+      rootPackageJson.devDependencies['@aws-cdk/aws-bedrock-agentcore-alpha'],
+    ).toBeDefined();
   });
 
   it('should generate strands agent with Terraform provider and default name', async () => {

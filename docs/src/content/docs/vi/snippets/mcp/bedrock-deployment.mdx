@@ -11,7 +11,7 @@ Nếu bạn đã chọn `BedrockAgentCoreRuntime` cho `computeType`, cơ sở h�
 
 <Infrastructure>
 <Fragment slot="cdk">
-Một CDK construct được tạo cho bạn, được đặt tên dựa trên `name` bạn đã chọn khi chạy trình tạo, hoặc `<ProjectName>McpServer` theo mặc định.
+Một CDK construct được tạo cho MCP Server của bạn, được đặt tên dựa trên `name` bạn đã chọn khi chạy trình tạo, hoặc `<ProjectName>McpServer` theo mặc định.
 
 Bạn có thể sử dụng CDK construct này trong một ứng dụng CDK:
 
@@ -25,6 +25,10 @@ export class ExampleStack extends Stack {
   }
 }
 ```
+
+:::note
+Construct này sử dụng [module `@aws-cdk/aws-bedrock-agentcore-alpha`](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-bedrock-agentcore-alpha-readme.html).
+:::
 </Fragment>
 <Fragment slot="terraform">
 Một Terraform module được tạo cho bạn, được đặt tên dựa trên `name` bạn đã chọn khi chạy trình tạo, hoặc `<ProjectName>-mcp-server` theo mặc định.
@@ -114,10 +118,11 @@ Phần dưới đây minh họa cách cấu hình xác thực Cognito cho agent 
 
 <Infrastructure>
 <Fragment slot="cdk">
-Để cấu hình xác thực JWT, bạn có thể truyền thuộc tính `authorizerConfiguration` vào MCP server construct của mình. Đây là một ví dụ cấu hình Cognito user pool và client để bảo mật MCP server:
+Để cấu hình xác thực JWT sử dụng Cognito, sử dụng phương thức factory `RuntimeAuthorizerConfiguration.usingCognito()`:
 
 ```ts {14-17}
 import { MyProjectMcpServer } from ':my-scope/common-constructs';
+import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
 
 export class ExampleStack extends Stack {
   constructor(scope: Construct, id: string) {
@@ -129,27 +134,44 @@ export class ExampleStack extends Stack {
     });
 
     new MyProjectMcpServer(this, 'MyProjectMcpServer', {
-      authorizerConfiguration: {
-        customJwtAuthorizer: {
-          discoveryUrl: `https://cognito-idp.${Stack.of(userPool).region}.amazonaws.com/${userPool.userPoolId}/.well-known/openid-configuration`,
-          allowedClients: [client.userPoolClientId],
-        },
-      },
+      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingCognito(
+        userPool,
+        [client],
+      ),
+    });
+  }
+}
+```
+
+Ngoài ra, để xác thực JWT tùy chỉnh với OIDC provider của riêng bạn, sử dụng `RuntimeAuthorizerConfiguration.usingJWT()`:
+
+```ts {6-10}
+import { MyProjectMcpServer } from ':my-scope/common-constructs';
+import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    new MyProjectMcpServer(this, 'MyProjectMcpServer', {
+      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingJWT(
+        'https://example.com/.well-known/openid-configuration',
+        ['client1', 'client2'], // Allowed Client IDs (tùy chọn)
+        ['audience1'],          // Allowed Audiences (tùy chọn)
+      ),
     });
   }
 }
 ```
 </Fragment>
 <Fragment slot="terraform">
-Để cấu hình xác thực JWT, bạn có thể chỉnh sửa MCP Server module của mình để cấu hình biến `customJWTAuthorizer` như sau:
+Để cấu hình xác thực JWT, bạn có thể chỉnh sửa MCP Server module của mình để cấu hình biến `authorizer_configuration` như sau:
 
-```terraform {18-21}
+```terraform {18-23}
 # packages/common/terraform/src/app/mcp-servers/my-project-mcp-server/my-project-mcp-server.tf
 
 data "aws_region" "current" {}
 
 locals {
-  aws_region = data.aws_region.current.name
+  aws_region = data.aws_region.current.id
 
   # Thay thế bằng user pool và client ids của bạn hoặc expose dưới dạng biến
   user_pool_id = "xxx"
@@ -159,11 +181,13 @@ locals {
 module "agent_core_runtime" {
   source = "../../../core/agent-core"
   agent_runtime_name = "MyProjectMcpServer"
-  docker_image_tag = "my-scope-my-project-agent:latest"
+  docker_image_tag = "my-scope-my-project-mcp-server:latest"
   server_protocol = "MCP"
-  customJWTAuthorizer = {
-    discoveryUrl = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration",
-    allowedClients = local.user_pool_client_ids
+  authorizer_configuration = {
+    custom_jwt_authorizer = {
+      discovery_url = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration"
+      allowed_clients = local.user_pool_client_ids
+    }
   }
   env = var.env
   additional_iam_policy_statements = var.additional_iam_policy_statements

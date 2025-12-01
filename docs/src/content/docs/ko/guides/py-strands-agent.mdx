@@ -76,9 +76,6 @@ Strands 에이전트 배포를 위해 다음 파일들이 생성됩니다:
         - \<project-name>
           - \<project-name>.ts 에이전트 배포용 CDK 컨스트럭트
           - Dockerfile CDK 컨스트럭트에서 사용하는 도커 파일
-    - core
-      - agent-core
-        - runtime.ts Bedrock AgentCore Runtime 배포용 일반 CDK 컨스트럭트
 </FileTree>
 </Fragment>
 <Fragment slot="terraform">
@@ -217,8 +214,8 @@ export class ExampleStack extends Stack {
     const mcpServer = new MyProjectMcpServer(this, 'MyProjectMcpServer');
 
     const agent = new MyProjectAgent(this, 'MyProjectAgent', {
-      environment: {
-        MCP_AGENTCORE_RUNTIME_ARN: mcpServer.agentCoreRuntime.arn,
+      environmentVariables: {
+        MCP_AGENTCORE_RUNTIME_ARN: mcpServer.agentCoreRuntime.agentRuntimeArn,
       },
     });
 
@@ -352,7 +349,7 @@ SDK 기능에 대한 자세한 내용은 [문서](https://aws.github.io/bedrock-
 
 <Infrastructure>
 <Fragment slot="cdk">
-생성기 실행 시 선택한 `name`을 기반으로 이름이 지정된 CDK 컨스트럭트를 생성합니다(기본값은 `<ProjectName>Agent`).
+에이전트를 위한 CDK 컨스트럭트가 생성되며, 생성기 실행 시 선택한 `name`을 기반으로 이름이 지정됩니다(기본값은 `<ProjectName>Agent`).
 
 CDK 애플리케이션에서 이 CDK 컨스트럭트를 사용할 수 있습니다:
 
@@ -365,7 +362,7 @@ export class ExampleStack extends Stack {
     const agent = new MyProjectAgent(this, 'MyProjectAgent');
 
     // Bedrock 관련 모델 호출 권한 부여
-    agent.agentCoreRuntime.role.addToPolicy(
+    agent.agentCoreRuntime.addToRolePolicy(
       new PolicyStatement({
         actions: [
           'bedrock:InvokeModel',
@@ -378,6 +375,10 @@ export class ExampleStack extends Stack {
   }
 }
 ```
+
+:::note
+이 컨스트럭트는 [`@aws-cdk/aws-bedrock-agentcore-alpha` 모듈](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-bedrock-agentcore-alpha-readme.html)을 사용합니다.
+:::
 </Fragment>
 <Fragment slot="terraform">
 생성기 실행 시 선택한 `name`을 기반으로 이름이 지정된 테라폼 모듈을 생성합니다(기본값은 `<ProjectName>-agent`).
@@ -502,10 +503,11 @@ module "my_project_agent" {
 
 <Infrastructure>
 <Fragment slot="cdk">
-JWT 인증을 구성하려면 에이전트 컨스트럭트에 `authorizerConfiguration` 속성을 전달할 수 있습니다. 다음은 Cognito 사용자 풀 및 클라이언트를 구성하여 에이전트를 보호하는 예시입니다:
+Cognito를 사용한 JWT 인증을 구성하려면 `RuntimeAuthorizerConfiguration.usingCognito()` 팩토리 메서드를 사용하세요:
 
-```ts {13-18}
+```ts {13-16}
 import { MyProjectAgent } from ':my-scope/common-constructs';
+import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
 
 export class ExampleStack extends Stack {
   constructor(scope: Construct, id: string) {
@@ -517,27 +519,44 @@ export class ExampleStack extends Stack {
     });
 
     new MyProjectAgent(this, 'MyProjectAgent', {
-      authorizerConfiguration: {
-        customJwtAuthorizer: {
-          discoveryUrl: `https://cognito-idp.${Stack.of(userPool).region}.amazonaws.com/${userPool.userPoolId}/.well-known/openid-configuration`,
-          allowedClients: [client.userPoolClientId],
-        },
-      },
+      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingCognito(
+        userPool,
+        [client],
+      ),
+    });
+  }
+}
+```
+
+또는 자체 OIDC 제공자를 사용한 사용자 정의 JWT 인증의 경우 `RuntimeAuthorizerConfiguration.usingJWT()`를 사용하세요:
+
+```ts {6-10}
+import { MyProjectAgent } from ':my-scope/common-constructs';
+import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    new MyProjectAgent(this, 'MyProjectAgent', {
+      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingJWT(
+        'https://example.com/.well-known/openid-configuration',
+        ['client1', 'client2'], // 허용된 클라이언트 ID (선택 사항)
+        ['audience1'],          // 허용된 오디언스 (선택 사항)
+      ),
     });
   }
 }
 ```
 </Fragment>
 <Fragment slot="terraform">
-JWT 인증을 구성하려면 에이전트 모듈의 `customJWTAuthorizer` 변수를 다음과 같이 편집할 수 있습니다:
+JWT 인증을 구성하려면 에이전트 모듈의 `authorizer_configuration` 변수를 다음과 같이 편집할 수 있습니다:
 
-```terraform {18-21}
+```terraform {18-23}
 # packages/common/terraform/src/app/agents/my-project-agent/my-project-agent.tf
 
 data "aws_region" "current" {}
 
 locals {
-  aws_region = data.aws_region.current.name
+  aws_region = data.aws_region.current.id
 
   # 사용자 풀 및 클라이언트 ID로 교체하거나 변수로 노출
   user_pool_id = "xxx"
@@ -549,9 +568,11 @@ module "agent_core_runtime" {
   agent_runtime_name = "MyProjectAgent"
   docker_image_tag = "my-scope-my-project-agent:latest"
   server_protocol = "HTTP"
-  customJWTAuthorizer = {
-    discoveryUrl = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration",
-    allowedClients = local.user_pool_client_ids
+  authorizer_configuration = {
+    custom_jwt_authorizer = {
+      discovery_url = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration"
+      allowed_clients = local.user_pool_client_ids
+    }
   }
   env = var.env
   additional_iam_policy_statements = var.additional_iam_policy_statements
