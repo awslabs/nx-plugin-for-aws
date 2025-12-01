@@ -81,6 +81,20 @@ export const tsProjectGenerator = async (
     linter: 'eslint',
     unitTestRunner: 'vitest',
   });
+
+  // Rename vite.config.ts to vite.config.mts for ESM compatibility
+  // The @nx/js library generator creates vite.config.ts when bundler !== 'vite',
+  // but we need .mts extension to ensure proper ESM module resolution in Node.js
+  // when using "type": "module" in package.json or when moduleResolution is set to
+  // "node16" or "nodenext" in tsconfig.json
+  const viteConfigTsPath = joinPathFragments(dir, 'vite.config.ts');
+  const viteConfigMtsPath = joinPathFragments(dir, 'vite.config.mts');
+  if (tree.exists(viteConfigTsPath)) {
+    const content = tree.read(viteConfigTsPath, 'utf-8');
+    tree.delete(viteConfigTsPath);
+    tree.write(viteConfigMtsPath, content);
+  }
+
   // Replace with simpler sample source code
   tree.delete(joinPathFragments(dir, 'src'));
   generateFiles(
@@ -118,7 +132,7 @@ export const tsProjectGenerator = async (
     dependsOn: ['lint', 'compile', 'test'],
   };
   targets['test'] = {
-    executor: '@nx/vite:test',
+    executor: '@nx/vitest:test',
     outputs: ['{options.reportsDirectory}'],
     options: {
       reportsDirectory: joinPathFragments(

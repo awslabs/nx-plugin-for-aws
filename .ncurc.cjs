@@ -14,4 +14,5 @@ module.exports = {
   reject: ['@hey-api/openapi-ts'],
   packageFile: '{package.json,packages/**/package.json}',
   cooldown: 5, // Only latest versions published for 5 days are updated to
+  dep: ['prod', 'dev', 'optional', 'packageManager', 'peer'],
 };

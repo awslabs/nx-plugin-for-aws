@@ -18,7 +18,7 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     include: ['src/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'],
-    reporters: ['basic'],
+    reporters: [['default', { summary: false }]],
     disableConsoleIntercept: true,
     fileParallelism: false,
     globalSetup: 'src/global-setup.ts',
