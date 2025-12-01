@@ -246,7 +246,7 @@ export async function tsReactWebsiteGenerator(
       dir: e2eRoot,
     });
   }
-  const viteConfigPath = joinPathFragments(libraryRoot, 'vite.config.ts');
+  const viteConfigPath = joinPathFragments(libraryRoot, 'vite.config.mts');
 
   if (tree.exists(viteConfigPath)) {
     // Add Tanstack Router import if enabled

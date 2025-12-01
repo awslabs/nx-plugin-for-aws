@@ -208,6 +208,17 @@ describe('ts lib generator', () => {
     );
   });
 
+  it('should create vite.config.mts', async () => {
+    // Call the generator function
+    await tsProjectGenerator(tree, {
+      name: 'test-lib',
+      skipInstall: true,
+    });
+
+    expect(tree.exists('test-lib/vite.config.mts')).toBeTruthy();
+    expect(tree.exists('test-lib/vite.config.ts')).toBeFalsy();
+  });
+
   it('should add generator metric to app.ts', async () => {
     // Set up test tree with shared constructs
     await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });

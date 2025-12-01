@@ -8,11 +8,22 @@ import { createTreeUsingTsSolutionSetup, snapshotTreeDir } from '../utils/test';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 
 // Mock execSync to control git command behavior in tests
-vi.mock('child_process');
+vi.mock('child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('child_process')>();
+  const execSync = vi.fn();
+  return {
+    ...actual,
+    execSync,
+    default: {
+      ...actual,
+      execSync,
+    },
+  };
+});
 
 import { execSync } from 'child_process';
 import { readAwsNxPluginConfig } from '../utils/config/utils';
-const mockExecSync = vi.mocked(execSync);
+const mockExecSync = execSync as ReturnType<typeof vi.fn>;
 
 describe('preset generator', () => {
   let tree: Tree;

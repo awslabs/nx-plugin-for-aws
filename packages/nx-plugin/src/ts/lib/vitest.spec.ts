@@ -20,7 +20,7 @@ describe('vitest utils', () => {
       dir: 'test',
       fullyQualifiedName: 'test',
     });
-    const content = tree.read('test/vite.config.ts', 'utf8');
+    const content = tree.read('test/vite.config.mts', 'utf8');
     expect(content).toContain('passWithNoTests: true');
   });
 });

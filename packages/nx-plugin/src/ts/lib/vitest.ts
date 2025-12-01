@@ -12,7 +12,7 @@ export const configureVitest = (
   tree: Tree,
   options: ConfigureProjectOptions,
 ) => {
-  const configPath = join(options.dir, 'vite.config.ts');
+  const configPath = join(options.dir, 'vite.config.mts');
 
   if (tree.exists(configPath)) {
     replaceIfExists(
@@ -45,7 +45,7 @@ export const configureVitest = (
       ...nxJson,
       targetDefaults: {
         ...(nxJson.targetDefaults ?? {}),
-        '@nx/vite:test': {
+        '@nx/vitest:test': {
           cache: true,
           inputs: ['default', '^production'],
           configurations: {
@@ -53,7 +53,7 @@ export const configureVitest = (
               args: '--update',
             },
           },
-          ...nxJson.targetDefaults['@nx/vite:test'],
+          ...nxJson.targetDefaults['@nx/vitest:test'],
         },
       },
     });

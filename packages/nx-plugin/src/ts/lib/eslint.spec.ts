@@ -126,7 +126,7 @@ describe('eslint configuration', () => {
 
       const eslintConfig = tree.read('eslint.config.mjs', 'utf-8');
       expect(eslintConfig).toContain('ignores');
-      expect(eslintConfig).toContain('**/vite.config.ts.timestamp*');
+      expect(eslintConfig).toContain('**/vite.config.*.timestamp*');
     });
 
     it('should add to existing ignores array', () => {
@@ -144,7 +144,7 @@ describe('eslint configuration', () => {
 
       const eslintConfig = tree.read('eslint.config.mjs', 'utf-8');
       expect(eslintConfig).toContain('existing-pattern');
-      expect(eslintConfig).toContain('**/vite.config.ts.timestamp*');
+      expect(eslintConfig).toContain('**/vite.config.*.timestamp*');
     });
 
     it('should not duplicate ignore patterns', () => {
@@ -153,7 +153,7 @@ describe('eslint configuration', () => {
         'eslint.config.mjs',
         `export default [
   {
-    ignores: ["**/vite.config.ts.timestamp*"]
+    ignores: ["**/vite.config.*.timestamp*"]
   }
 ];`,
       );
@@ -163,7 +163,7 @@ describe('eslint configuration', () => {
       const eslintConfig = tree.read('eslint.config.mjs', 'utf-8');
       // Count occurrences of the pattern
       const patternMatches = eslintConfig.match(
-        /\*\*\/vite\.config\.ts\.timestamp\*/g,
+        /\*\*\/vite\.config\.\*\.timestamp\*/g,
       );
       expect(patternMatches).toHaveLength(1);
     });
@@ -185,7 +185,7 @@ describe('eslint configuration', () => {
       expect(eslintConfig).toContain('existing-pattern');
       expect(eslintConfig).toContain('someVariable');
       expect(eslintConfig).toContain('123');
-      expect(eslintConfig).toContain('**/vite.config.ts.timestamp*');
+      expect(eslintConfig).toContain('**/vite.config.*.timestamp*');
     });
 
     it('should handle complex eslint config structure', () => {
@@ -214,7 +214,7 @@ export default [
       expect(eslintConfig).toContain('eslintPluginPrettierRecommended');
       expect(eslintConfig).toContain('dist/**');
       expect(eslintConfig).toContain('build/**');
-      expect(eslintConfig).toContain('**/vite.config.ts.timestamp*');
+      expect(eslintConfig).toContain('**/vite.config.*.timestamp*');
       expect(eslintConfig).toContain('js.configs.recommended');
       expect(eslintConfig).toContain('"no-console": "warn"');
     });

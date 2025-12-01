@@ -79,7 +79,7 @@ export const configureEslint = (tree: Tree) => {
 
     // Add ignore patterns to eslint config
     addIgnoresToEslintConfig(tree, eslintConfigPath, [
-      '**/vite.config.ts.timestamp*',
+      '**/vite.config.*.timestamp*',
     ]);
 
     nxJson = readNxJson(tree);
