@@ -236,7 +236,7 @@ describe('ts#mcp-server generator', () => {
     expect(
       rootPackageJson.dependencies['@modelcontextprotocol/sdk'],
     ).toBeDefined();
-    expect(rootPackageJson.dependencies['zod-v3']).toBeDefined();
+    expect(rootPackageJson.dependencies['zod']).toBeDefined();
     expect(rootPackageJson.dependencies['express']).toBeDefined();
     expect(rootPackageJson.devDependencies['tsx']).toBeDefined();
     expect(rootPackageJson.devDependencies['@types/express']).toBeDefined();
@@ -251,7 +251,7 @@ describe('ts#mcp-server generator', () => {
     expect(
       projectPackageJson.dependencies['@modelcontextprotocol/sdk'],
     ).toBeDefined();
-    expect(projectPackageJson.dependencies['zod-v3']).toBeDefined();
+    expect(projectPackageJson.dependencies['zod']).toBeDefined();
     expect(projectPackageJson.dependencies['express']).toBeDefined();
     expect(projectPackageJson.devDependencies['tsx']).toBeDefined();
     expect(projectPackageJson.devDependencies['@types/express']).toBeDefined();
@@ -518,7 +518,7 @@ describe('ts#mcp-server generator', () => {
     expect(
       rootPackageJson.dependencies['@modelcontextprotocol/sdk'],
     ).toBeDefined();
-    expect(rootPackageJson.dependencies['zod-v3']).toBeDefined();
+    expect(rootPackageJson.dependencies['zod']).toBeDefined();
     expect(rootPackageJson.dependencies['express']).toBeDefined();
     expect(rootPackageJson.devDependencies['tsx']).toBeDefined();
     expect(rootPackageJson.devDependencies['@types/express']).toBeDefined();
@@ -536,7 +536,7 @@ describe('ts#mcp-server generator', () => {
     expect(
       projectPackageJson.dependencies['@modelcontextprotocol/sdk'],
     ).toBeDefined();
-    expect(projectPackageJson.dependencies['zod-v3']).toBeDefined();
+    expect(projectPackageJson.dependencies['zod']).toBeDefined();
     expect(projectPackageJson.dependencies['express']).toBeDefined();
     expect(projectPackageJson.devDependencies['tsx']).toBeDefined();
     expect(projectPackageJson.devDependencies['@types/express']).toBeDefined();

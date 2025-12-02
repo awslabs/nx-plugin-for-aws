@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { z } from 'zod-v3';
+import { z } from 'zod';
 import { PackageManagerSchema } from '../schema';
 import { IAC_PROVIDERS } from '../../utils/iac';
 import { TS_VERSIONS } from '../../utils/versions';
@@ -12,14 +12,20 @@ import { TS_VERSIONS } from '../../utils/versions';
  * Add a tool which tells a model how to create an Nx workspace
  */
 export const addCreateWorkspaceCommandTool = (server: McpServer) => {
-  server.tool(
+  server.registerTool(
     'create-workspace-command',
-    'Tool to discover how to create a workspace to start a new project.',
-    { workspaceName: z.string(), packageManager: PackageManagerSchema },
+    {
+      description:
+        'Tool to discover how to create a workspace to start a new project.',
+      inputSchema: {
+        workspaceName: z.string(),
+        packageManager: PackageManagerSchema,
+      },
+    },
     ({ workspaceName, packageManager }) => ({
       content: [
         {
-          type: 'text',
+          type: 'text' as const,
           text: `Run the following command to create a workspace:
 
 \`\`\`bash

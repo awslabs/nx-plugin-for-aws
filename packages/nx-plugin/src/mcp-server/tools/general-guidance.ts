@@ -22,13 +22,17 @@ export const addGeneralGuidanceTool = (
   server: McpServer,
   generators: NxGeneratorInfo[],
 ) => {
-  server.tool(
+  server.registerTool(
     'general-guidance',
-    'Tool for guidance and best practices for working with Nx and the Nx Plugin for AWS',
+    {
+      title: 'General Guidance',
+      description:
+        'Tool for guidance and best practices for working with Nx and the Nx Plugin for AWS',
+    },
     async () => ({
       content: [
         {
-          type: 'text',
+          type: 'text' as const,
           text: `# Nx Plugin for AWS Guidance
 
 ${TOOL_SELECTION_GUIDE}
