@@ -118,13 +118,19 @@ export class ApplicationStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
-    const identity = new UserIdentity(this, 'identity');
-    const api = new DemoApi(this, 'api', {
-      integrations: DemoApi.defaultIntegrations(this).build(),
-    });
-    api.grantInvokeAccess(identity.identityPool.authenticatedRole);
+    const { identityPool } = new UserIdentity(this, 'identity');
+    const integrations = DemoApi.defaultIntegrations(this).build();
+    const api = new DemoApi(this, 'api', { integrations });
+    const { cloudFrontDistribution } = new DemoWebsite(this, 'website');
 
-    new DemoWebsite(this, 'website');
+    // Update API lambda environment variables with website domain name for CORS
+    // NOTE: If you add a custom domain to the website, update this to use that domain instead
+    const allowedOrigin = `https://${cloudFrontDistribution.domainName}`;
+    Object.values(integrations).forEach(({ handler }) =>
+      handler.addEnvironment('ALLOWED_ORIGIN', allowedOrigin),
+    );
+
+    api.grantInvokeAccess(identityPool.authenticatedRole);
   }
 }
 ```
@@ -148,6 +154,11 @@ module "user_identity" {
 # Deploy API
 module "demo_api" {
   source = "../../common/terraform/src/app/apis/demo-api"
+  # Update API lambda environment variable with website domain name for CORS
+  # NOTE: If you add a custom domain to the website, update this to use that domain instead
+  # env = {
+  #   ALLOWED_ORIGIN = "https://CLOUDFRONT_DOMAIN_NAME"
+  # }
 }
 
 # Grant authenticated users access to invoke the API
@@ -236,6 +247,19 @@ Deploy your project:
 :::tip
 This command will first run `terraform plan` to show you what changes will be made, then apply those changes to deploy your infrastructure.
 :::
+
+Uncomment the following within `packages/infra/src/main.tf` and replace `CLOUDFRONT_DOMAIN_NAME` with the CloudFront domain name of the deployed project. 
+
+```hcl
+  # env = {
+  #   ALLOWED_ORIGIN = "https://CLOUDFRONT_DOMAIN_NAME"
+  # }
+```
+
+Deploy your project again:
+
+<NxCommands commands={['run infra:apply']} />
+
 </Fragment>
 </Infrastructure>
 
