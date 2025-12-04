@@ -14,14 +14,17 @@ export const addListGeneratorsTool = (
   server: McpServer,
   generators: NxGeneratorInfo[],
 ) => {
-  server.tool(
+  server.registerTool(
     'list-generators',
-    'Tool to discover the available generators and how to run them.',
-    { packageManager: PackageManagerSchema },
+    {
+      description:
+        'Tool to discover the available generators and how to run them.',
+      inputSchema: { packageManager: PackageManagerSchema },
+    },
     ({ packageManager }) => ({
       content: [
         {
-          type: 'text',
+          type: 'text' as const,
           text: `## Available Generators
 
   ${generators.map((g) => `### ${renderGeneratorInfo(packageManager, g)}`).join('\n\n')}

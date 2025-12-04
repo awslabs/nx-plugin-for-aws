@@ -148,7 +148,7 @@ exports[`ts#nx-plugin generator > should generate MCP server files > test-plugin
 `;
 
 exports[`ts#nx-plugin generator > should generate MCP server files > test-plugin/src/mcp-server/schema.ts 1`] = `
-"import { z } from 'zod-v3';
+"import { z } from 'zod';
 
 export const PACKAGE_MANAGERS = ['pnpm', 'yarn', 'npm', 'bun'] as const;
 export const PackageManagerSchema = z.enum(PACKAGE_MANAGERS);
@@ -223,7 +223,7 @@ void (async () => {
 
 exports[`ts#nx-plugin generator > should generate MCP server files > test-plugin/src/mcp-server/tools/create-workspace-command.ts 1`] = `
 "import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { z } from 'zod-v3';
+import { z } from 'zod';
 import { PackageManagerSchema } from '../schema';
 import { buildInstallCommand, getPackageName } from '../utils';
 
@@ -231,14 +231,20 @@ import { buildInstallCommand, getPackageName } from '../utils';
  * Registers a tool which tells a model how to create an Nx workspace
  */
 export const registerCreateWorkspaceCommandTool = (server: McpServer) => {
-  server.tool(
+  server.registerTool(
     'create-workspace-command',
-    'Tool to discover how to create a workspace to start a new project.',
-    { workspaceName: z.string(), packageManager: PackageManagerSchema },
+    {
+      description:
+        'Tool to discover how to create a workspace to start a new project.',
+      inputSchema: {
+        workspaceName: z.string(),
+        packageManager: PackageManagerSchema,
+      },
+    },
     ({ workspaceName, packageManager }) => ({
       content: [
         {
-          type: 'text',
+          type: 'text' as const,
           text: \`Run the following command to create a workspace:
 
 \\\`\\\`\\\`bash
@@ -270,13 +276,16 @@ import * as path from 'path';
  * Registers a tool which provides general guidance for using Nx and this plugin
  */
 export const registerGeneralGuidanceTool = (server: McpServer) => {
-  server.tool(
+  server.registerTool(
     'general-guidance',
-    'Tool for guidance and best practices for working with Nx and this plugin',
+    {
+      description:
+        'Tool for guidance and best practices for working with Nx and this plugin',
+    },
     async () => ({
       content: [
         {
-          type: 'text',
+          type: 'text' as const,
           text: fs.readFileSync(
             path.resolve(__dirname, '../resources/GENERAL_GUIDANCE.md'),
             'utf-8',
@@ -291,7 +300,7 @@ export const registerGeneralGuidanceTool = (server: McpServer) => {
 
 exports[`ts#nx-plugin generator > should generate MCP server files > test-plugin/src/mcp-server/tools/generator-guide.ts 1`] = `
 "import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { z } from 'zod-v3';
+import { z } from 'zod';
 import { renderGeneratorInfo, listGenerators } from '../utils';
 import { PackageManagerSchema } from '../schema';
 import * as fs from 'fs';
@@ -301,15 +310,18 @@ import * as path from 'path';
  * Registers a tool which provides a detailed guide for an individual generator
  */
 export const registerGeneratorGuideTool = (server: McpServer) => {
-  server.tool(
+  const generators = listGenerators();
+  server.registerTool(
     'generator-guide',
-    'Tool to retrieve detailed information about a specific generator.',
     {
-      packageManager: PackageManagerSchema,
-      generator: z.string(),
+      description:
+        'Tool to retrieve detailed information about a specific generator.',
+      inputSchema: {
+        packageManager: PackageManagerSchema,
+        generator: z.enum(generators.map((g) => g.id)),
+      },
     },
     async ({ packageManager, generator: generatorId }) => {
-      const generators = listGenerators();
       const generator = generators.find((g) => g.id === generatorId);
       if (!generator) {
         throw new Error(
@@ -320,7 +332,7 @@ export const registerGeneratorGuideTool = (server: McpServer) => {
       return {
         content: [
           {
-            type: 'text',
+            type: 'text' as const,
             text: \`## \${renderGeneratorInfo(packageManager, generator)}
 
 # Guide
@@ -345,14 +357,17 @@ import { renderGeneratorInfo, listGenerators } from '../utils';
  * Registers a tool which lists details about the available generators
  */
 export const registerListGeneratorsTool = (server: McpServer) => {
-  server.tool(
+  server.registerTool(
     'list-generators',
-    'Tool to discover the available generators and how to run them.',
-    { packageManager: PackageManagerSchema },
+    {
+      description:
+        'Tool to discover the available generators and how to run them.',
+      inputSchema: { packageManager: PackageManagerSchema },
+    },
     ({ packageManager }) => ({
       content: [
         {
-          type: 'text',
+          type: 'text' as const,
           text: \`## Available Generators
 
   \${listGenerators()

@@ -4,7 +4,7 @@
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { NxGeneratorInfo } from '../../utils/nx';
-import { z } from 'zod-v3';
+import { z } from 'zod';
 import {
   renderGeneratorInfo,
   fetchGuidePagesForGenerator,
@@ -18,14 +18,15 @@ export const addGeneratorGuideTool = (
   server: McpServer,
   generators: NxGeneratorInfo[],
 ) => {
-  server.tool(
+  server.registerTool(
     'generator-guide',
-    'Tool to retrieve detailed information about a specific generator.',
     {
-      packageManager: PackageManagerSchema,
-      generator: z.custom<string>(
-        (v) => typeof v === 'string' && generators.map((g) => g.id).includes(v),
-      ),
+      description:
+        'Tool to retrieve detailed information about a specific generator.',
+      inputSchema: {
+        packageManager: PackageManagerSchema,
+        generator: z.enum(generators.map((g) => g.id)),
+      },
     },
     async ({ packageManager, generator: generatorId }) => {
       const generator = generators.find((g) => g.id === generatorId);
@@ -38,7 +39,7 @@ export const addGeneratorGuideTool = (
       return {
         content: [
           {
-            type: 'text',
+            type: 'text' as const,
             text: `## ${renderGeneratorInfo(packageManager, generator)}
 
 # Guide

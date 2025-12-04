@@ -106,11 +106,7 @@ export const tsMcpServerGenerator = async (
   );
 
   // Add dependencies
-  // Note here we depend on zod v3 (default zod is v4 for all other generators)
-  // Zod v3 is needed since the MCP SDK doesn't yet support v4 (or both v3 and v4 via standard schema)
-  // Tracking: https://github.com/modelcontextprotocol/typescript-sdk/issues/164
-  // We use a renamed dependency so that v3 and v4 can coexist in projects until the above is resolved
-  const deps = withVersions(['@modelcontextprotocol/sdk', 'zod-v3', 'express']);
+  const deps = withVersions(['@modelcontextprotocol/sdk', 'zod', 'express']);
   const devDeps = withVersions([
     'tsx',
     '@types/express',
