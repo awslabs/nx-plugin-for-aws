@@ -1,5 +1,6 @@
 import { Construct } from 'constructs';
 import * as url from 'url';
+import { Distribution } from 'aws-cdk-lib/aws-cloudfront';
 import {
   Code,
   Runtime,
@@ -181,6 +182,29 @@ export class <%= apiNameClassName %><
       operations: OPERATION_DETAILS,
       <%_ } _%>
       ...props,
+    });
+  }
+
+  /**
+   * Grants CORS to this API from the CloudFront distribution domain
+   *
+   * Configures the CloudFront distribution domain as the only permitted CORS origin
+   * (other than local host) in the AWS Lambda integrations
+   *
+   * @param cloudFrontDistribution - The CloudFront distribution to grant CORS from
+   */
+  public grantCorsFrom({
+    cloudFrontDistribution,
+  }: {
+    cloudFrontDistribution: Distribution;
+  }) {
+    const allowedOrigin = `https://${cloudFrontDistribution.distributionDomainName}`;
+
+    // Set ALLOWED_ORIGINS environment variable for all Lambda integrations
+    Object.values(this.integrations).forEach((integration) => {
+      if ('handler' in integration && integration.handler instanceof Function) {
+        integration.handler.addEnvironment('ALLOWED_ORIGINS', allowedOrigin);
+      }
     });
   }
   <%_ if (auth === 'IAM') { _%>

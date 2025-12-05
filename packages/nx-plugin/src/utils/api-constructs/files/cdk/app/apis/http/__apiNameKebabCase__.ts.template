@@ -1,5 +1,6 @@
 import { Construct } from 'constructs';
 import * as url from 'url';
+import { Distribution } from 'aws-cdk-lib/aws-cloudfront';
 import {
   Code,
   Runtime,
@@ -10,6 +11,7 @@ import {
 import { Duration } from 'aws-cdk-lib';
 import {
   CorsHttpMethod,
+  CfnApi,
   <%_ if (auth === 'None') { _%>
   HttpNoneAuthorizer,
   <%_ } _%>
@@ -167,6 +169,47 @@ export class <%= apiNameClassName %><
       <%_ } _%>
       ...props,
     });
+  }
+
+  /**
+   * Grants CORS to this API from the CloudFront distribution domain
+   *
+   * Configures the CloudFront distribution domain as the only permitted CORS origin
+   * (other than local host with default ports) in the API gateway
+   * The CORS origin is not configured within the AWS Lambda integrations since
+   * the associated header is controlled by API Gateway v2
+   *
+   * @param cloudFrontDistribution - The CloudFront distribution to grant CORS from
+   */
+  public grantCorsFrom({
+    cloudFrontDistribution,
+  }: {
+    cloudFrontDistribution: Distribution;
+  }) {
+    const allowedOrigin = `https://${cloudFrontDistribution.distributionDomainName}`;
+
+    const cfnApi = this.api.node.defaultChild;
+    if (!(cfnApi instanceof CfnApi)) {
+      throw new Error(
+        'Unable to configure CORS: API default child is not a CfnApi instance',
+      );
+    }
+
+    cfnApi.corsConfiguration = {
+      allowOrigins: [
+        'http://localhost:4200',
+        'http://localhost:4300',
+        allowedOrigin,
+      ],
+      allowMethods: [CorsHttpMethod.ANY],
+      allowHeaders: [
+        'authorization',
+        'content-type',
+        'x-amz-content-sha256',
+        'x-amz-date',
+        'x-amz-security-token',
+      ],
+    };
   }
   <%_ if (auth === 'IAM') { _%>
 

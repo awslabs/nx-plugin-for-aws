@@ -342,13 +342,10 @@ describe('fastapi project generator', () => {
         'utf-8',
       );
 
-      // Verify CORS middleware import is included
+      // Verify CORS origin is configured
       expect(initPyContent).toContain(
-        'from fastapi.middleware.cors import CORSMiddleware',
+        'response.headers["Access-Control-Allow-Origin"] = cors_origin',
       );
-
-      // Verify CORS middleware is added with correct configuration
-      expect(initPyContent).toContain('app.add_middleware(CORSMiddleware,');
     },
   );
 

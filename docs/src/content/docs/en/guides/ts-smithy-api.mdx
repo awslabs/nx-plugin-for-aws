@@ -406,6 +406,27 @@ This sets up:
 5. X-Ray tracing configuration
 
 :::note
+If your solution includes a website you can configure its CloudFront distribution as the only permitted CORS origin in the API gateway / API AWS Lambda integrations for HTTP / REST APIs.
+You will need to create the API and then call the API `grantCorsFrom` method with the created website.
+
+```ts
+import { MyApi, MyWebsite } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const api = new MyApi(this, 'MyApi', {
+      integrations: MyApi.defaultIntegrations(this).build(),
+    });
+    const website = new MyWebsite(this, 'MyWebsite');
+    api.grantCorsFrom(website);
+  }
+}
+```
+
+The `MyWebsite` construct can be generated using the <Link path="/guides/react-website">`ts#react-website` generator</Link>
+:::
+
+:::note
 If you selected `Cognito` authentication, you will need to supply the `identity` property to the API construct:
 
 ```ts {9}
@@ -456,6 +477,28 @@ This sets up:
 4. CloudWatch log group
 5. X-Ray tracing configuration
 6. CORS configuration
+
+:::note
+If your solution includes a Terraform website module then you can use its CloudFront domain name to restrict CORS.
+Given a CloudFront domain name `<domain_name>`, within the Terraform module for deploying your API add
+- a `cors_allow_origins` property, set to `["http://localhost:4200", "http://localhost:4300", "https://<domain name>"]`, for HTTP APIs. This restricts the API gateway CORS to this distribution and local host.
+- an `ALLOWED_ORIGINS` environment variable, set to `"https://<domain_name>"`, for REST APIs. This sets the CloudFront distribution as the only permitted CORS origin (other than local host) in AWS Lambda integrations.
+
+```hcl {4,7}
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  cors_allow_origins = ["http://localhost:4200", "http://localhost:4300", "https://<domain name>"] // Only required for HTTP API
+
+  env = {
+    ALLOWED_ORIGINS = "https://<domain name>" // Only required for REST API
+    ENVIRONMENT = var.environment
+    LOG_LEVEL   = "INFO"
+  }
+}
+```
+The `MyWebsite` construct can be generated using the <Link path="/guides/react-website">`ts#react-website` generator</Link>
+:::
 
 :::note
 If you selected `Cognito` authentication, you will need to supply the Cognito configuration:

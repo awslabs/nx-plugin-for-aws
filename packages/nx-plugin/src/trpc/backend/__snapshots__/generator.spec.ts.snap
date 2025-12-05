@@ -347,6 +347,7 @@ exports[`trpc backend generator > should generate with cognito auth for a REST A
 exports[`trpc backend generator > should generate with cognito auth for a REST API > packages/common/constructs/src/app/apis/test-api.ts 1`] = `
 "import { Construct } from 'constructs';
 import * as url from 'url';
+import { Distribution } from 'aws-cdk-lib/aws-cloudfront';
 import {
   Code,
   Runtime,
@@ -476,6 +477,29 @@ export class TestApi<
       ...props,
     });
   }
+
+  /**
+   * Grants CORS to this API from the CloudFront distribution domain
+   *
+   * Configures the CloudFront distribution domain as the only permitted CORS origin
+   * (other than local host) in the AWS Lambda integrations
+   *
+   * @param cloudFrontDistribution - The CloudFront distribution to grant CORS from
+   */
+  public grantCorsFrom({
+    cloudFrontDistribution,
+  }: {
+    cloudFrontDistribution: Distribution;
+  }) {
+    const allowedOrigin = \`https://\${cloudFrontDistribution.distributionDomainName}\`;
+
+    // Set ALLOWED_ORIGINS environment variable for all Lambda integrations
+    Object.values(this.integrations).forEach((integration) => {
+      if ('handler' in integration && integration.handler instanceof Function) {
+        integration.handler.addEnvironment('ALLOWED_ORIGINS', allowedOrigin);
+      }
+    });
+  }
 }
 "
 `;
@@ -511,6 +535,7 @@ exports[`trpc backend generator > should generate with cognito auth for an HTTP 
 exports[`trpc backend generator > should generate with cognito auth for an HTTP API > packages/common/constructs/src/app/apis/test-api.ts 1`] = `
 "import { Construct } from 'constructs';
 import * as url from 'url';
+import { Distribution } from 'aws-cdk-lib/aws-cloudfront';
 import {
   Code,
   Runtime,
@@ -519,7 +544,7 @@ import {
   Tracing,
 } from 'aws-cdk-lib/aws-lambda';
 import { Duration } from 'aws-cdk-lib';
-import { CorsHttpMethod } from 'aws-cdk-lib/aws-apigatewayv2';
+import { CorsHttpMethod, CfnApi } from 'aws-cdk-lib/aws-apigatewayv2';
 import { HttpUserPoolAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
 import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import { IUserPool, IUserPoolClient } from 'aws-cdk-lib/aws-cognito';
@@ -632,6 +657,47 @@ export class TestApi<
       ...props,
     });
   }
+
+  /**
+   * Grants CORS to this API from the CloudFront distribution domain
+   *
+   * Configures the CloudFront distribution domain as the only permitted CORS origin
+   * (other than local host with default ports) in the API gateway
+   * The CORS origin is not configured within the AWS Lambda integrations since
+   * the associated header is controlled by API Gateway v2
+   *
+   * @param cloudFrontDistribution - The CloudFront distribution to grant CORS from
+   */
+  public grantCorsFrom({
+    cloudFrontDistribution,
+  }: {
+    cloudFrontDistribution: Distribution;
+  }) {
+    const allowedOrigin = \`https://\${cloudFrontDistribution.distributionDomainName}\`;
+
+    const cfnApi = this.api.node.defaultChild;
+    if (!(cfnApi instanceof CfnApi)) {
+      throw new Error(
+        'Unable to configure CORS: API default child is not a CfnApi instance',
+      );
+    }
+
+    cfnApi.corsConfiguration = {
+      allowOrigins: [
+        'http://localhost:4200',
+        'http://localhost:4300',
+        allowedOrigin,
+      ],
+      allowMethods: [CorsHttpMethod.ANY],
+      allowHeaders: [
+        'authorization',
+        'content-type',
+        'x-amz-content-sha256',
+        'x-amz-date',
+        'x-amz-security-token',
+      ],
+    };
+  }
 }
 "
 `;
@@ -663,6 +729,7 @@ exports[`trpc backend generator > should generate with no auth for a REST API > 
 exports[`trpc backend generator > should generate with no auth for a REST API > packages/common/constructs/src/app/apis/test-api.ts 1`] = `
 "import { Construct } from 'constructs';
 import * as url from 'url';
+import { Distribution } from 'aws-cdk-lib/aws-cloudfront';
 import {
   Code,
   Runtime,
@@ -781,6 +848,29 @@ export class TestApi<
       ...props,
     });
   }
+
+  /**
+   * Grants CORS to this API from the CloudFront distribution domain
+   *
+   * Configures the CloudFront distribution domain as the only permitted CORS origin
+   * (other than local host) in the AWS Lambda integrations
+   *
+   * @param cloudFrontDistribution - The CloudFront distribution to grant CORS from
+   */
+  public grantCorsFrom({
+    cloudFrontDistribution,
+  }: {
+    cloudFrontDistribution: Distribution;
+  }) {
+    const allowedOrigin = \`https://\${cloudFrontDistribution.distributionDomainName}\`;
+
+    // Set ALLOWED_ORIGINS environment variable for all Lambda integrations
+    Object.values(this.integrations).forEach((integration) => {
+      if ('handler' in integration && integration.handler instanceof Function) {
+        integration.handler.addEnvironment('ALLOWED_ORIGINS', allowedOrigin);
+      }
+    });
+  }
 }
 "
 `;
@@ -812,6 +902,7 @@ exports[`trpc backend generator > should generate with no auth for an HTTP API >
 exports[`trpc backend generator > should generate with no auth for an HTTP API > packages/common/constructs/src/app/apis/test-api.ts 1`] = `
 "import { Construct } from 'constructs';
 import * as url from 'url';
+import { Distribution } from 'aws-cdk-lib/aws-cloudfront';
 import {
   Code,
   Runtime,
@@ -822,6 +913,7 @@ import {
 import { Duration } from 'aws-cdk-lib';
 import {
   CorsHttpMethod,
+  CfnApi,
   HttpNoneAuthorizer,
 } from 'aws-cdk-lib/aws-apigatewayv2';
 import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
@@ -920,6 +1012,47 @@ export class TestApi<
       operations: routerToOperations(appRouter),
       ...props,
     });
+  }
+
+  /**
+   * Grants CORS to this API from the CloudFront distribution domain
+   *
+   * Configures the CloudFront distribution domain as the only permitted CORS origin
+   * (other than local host with default ports) in the API gateway
+   * The CORS origin is not configured within the AWS Lambda integrations since
+   * the associated header is controlled by API Gateway v2
+   *
+   * @param cloudFrontDistribution - The CloudFront distribution to grant CORS from
+   */
+  public grantCorsFrom({
+    cloudFrontDistribution,
+  }: {
+    cloudFrontDistribution: Distribution;
+  }) {
+    const allowedOrigin = \`https://\${cloudFrontDistribution.distributionDomainName}\`;
+
+    const cfnApi = this.api.node.defaultChild;
+    if (!(cfnApi instanceof CfnApi)) {
+      throw new Error(
+        'Unable to configure CORS: API default child is not a CfnApi instance',
+      );
+    }
+
+    cfnApi.corsConfiguration = {
+      allowOrigins: [
+        'http://localhost:4200',
+        'http://localhost:4300',
+        allowedOrigin,
+      ],
+      allowMethods: [CorsHttpMethod.ANY],
+      allowHeaders: [
+        'authorization',
+        'content-type',
+        'x-amz-content-sha256',
+        'x-amz-date',
+        'x-amz-security-token',
+      ],
+    };
   }
 }
 "
@@ -1065,6 +1198,7 @@ export class HttpApi<
 exports[`trpc backend generator > should set up shared constructs for http > test-api.ts 1`] = `
 "import { Construct } from 'constructs';
 import * as url from 'url';
+import { Distribution } from 'aws-cdk-lib/aws-cloudfront';
 import {
   Code,
   Runtime,
@@ -1073,7 +1207,7 @@ import {
   Tracing,
 } from 'aws-cdk-lib/aws-lambda';
 import { Duration } from 'aws-cdk-lib';
-import { CorsHttpMethod } from 'aws-cdk-lib/aws-apigatewayv2';
+import { CorsHttpMethod, CfnApi } from 'aws-cdk-lib/aws-apigatewayv2';
 import { HttpIamAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
 import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import { Grant, IGrantable } from 'aws-cdk-lib/aws-iam';
@@ -1172,6 +1306,47 @@ export class TestApi<
       operations: routerToOperations(appRouter),
       ...props,
     });
+  }
+
+  /**
+   * Grants CORS to this API from the CloudFront distribution domain
+   *
+   * Configures the CloudFront distribution domain as the only permitted CORS origin
+   * (other than local host with default ports) in the API gateway
+   * The CORS origin is not configured within the AWS Lambda integrations since
+   * the associated header is controlled by API Gateway v2
+   *
+   * @param cloudFrontDistribution - The CloudFront distribution to grant CORS from
+   */
+  public grantCorsFrom({
+    cloudFrontDistribution,
+  }: {
+    cloudFrontDistribution: Distribution;
+  }) {
+    const allowedOrigin = \`https://\${cloudFrontDistribution.distributionDomainName}\`;
+
+    const cfnApi = this.api.node.defaultChild;
+    if (!(cfnApi instanceof CfnApi)) {
+      throw new Error(
+        'Unable to configure CORS: API default child is not a CfnApi instance',
+      );
+    }
+
+    cfnApi.corsConfiguration = {
+      allowOrigins: [
+        'http://localhost:4200',
+        'http://localhost:4300',
+        allowedOrigin,
+      ],
+      allowMethods: [CorsHttpMethod.ANY],
+      allowHeaders: [
+        'authorization',
+        'content-type',
+        'x-amz-content-sha256',
+        'x-amz-date',
+        'x-amz-security-token',
+      ],
+    };
   }
 
   /**
@@ -1627,6 +1802,7 @@ export class RestApi<
 exports[`trpc backend generator > should set up shared constructs for rest > test-api.ts 1`] = `
 "import { Construct } from 'constructs';
 import * as url from 'url';
+import { Distribution } from 'aws-cdk-lib/aws-cloudfront';
 import {
   Code,
   Runtime,
@@ -1745,6 +1921,29 @@ export class TestApi<
       }),
       operations: routerToOperations(appRouter),
       ...props,
+    });
+  }
+
+  /**
+   * Grants CORS to this API from the CloudFront distribution domain
+   *
+   * Configures the CloudFront distribution domain as the only permitted CORS origin
+   * (other than local host) in the AWS Lambda integrations
+   *
+   * @param cloudFrontDistribution - The CloudFront distribution to grant CORS from
+   */
+  public grantCorsFrom({
+    cloudFrontDistribution,
+  }: {
+    cloudFrontDistribution: Distribution;
+  }) {
+    const allowedOrigin = \`https://\${cloudFrontDistribution.distributionDomainName}\`;
+
+    // Set ALLOWED_ORIGINS environment variable for all Lambda integrations
+    Object.values(this.integrations).forEach((integration) => {
+      if ('handler' in integration && integration.handler instanceof Function) {
+        integration.handler.addEnvironment('ALLOWED_ORIGINS', allowedOrigin);
+      }
     });
   }
 

@@ -34,6 +34,7 @@ exports[`tsSmithyApiGenerator > should configure git and eslint ignores for gene
 exports[`tsSmithyApiGenerator > should generate smithy ts api with Cognito auth > cognito-auth-infra.ts 1`] = `
 "import { Construct } from 'constructs';
 import * as url from 'url';
+import { Distribution } from 'aws-cdk-lib/aws-cloudfront';
 import {
   Code,
   Runtime,
@@ -162,6 +163,29 @@ export class TestApi<
       ...props,
     });
   }
+
+  /**
+   * Grants CORS to this API from the CloudFront distribution domain
+   *
+   * Configures the CloudFront distribution domain as the only permitted CORS origin
+   * (other than local host) in the AWS Lambda integrations
+   *
+   * @param cloudFrontDistribution - The CloudFront distribution to grant CORS from
+   */
+  public grantCorsFrom({
+    cloudFrontDistribution,
+  }: {
+    cloudFrontDistribution: Distribution;
+  }) {
+    const allowedOrigin = \`https://\${cloudFrontDistribution.distributionDomainName}\`;
+
+    // Set ALLOWED_ORIGINS environment variable for all Lambda integrations
+    Object.values(this.integrations).forEach((integration) => {
+      if ('handler' in integration && integration.handler instanceof Function) {
+        integration.handler.addEnvironment('ALLOWED_ORIGINS', allowedOrigin);
+      }
+    });
+  }
 }
 "
 `;
@@ -169,6 +193,7 @@ export class TestApi<
 exports[`tsSmithyApiGenerator > should generate smithy ts api with IAM auth > iam-auth-infra.ts 1`] = `
 "import { Construct } from 'constructs';
 import * as url from 'url';
+import { Distribution } from 'aws-cdk-lib/aws-cloudfront';
 import {
   Code,
   Runtime,
@@ -286,6 +311,29 @@ export class TestApi<
       }),
       operations: OPERATION_DETAILS,
       ...props,
+    });
+  }
+
+  /**
+   * Grants CORS to this API from the CloudFront distribution domain
+   *
+   * Configures the CloudFront distribution domain as the only permitted CORS origin
+   * (other than local host) in the AWS Lambda integrations
+   *
+   * @param cloudFrontDistribution - The CloudFront distribution to grant CORS from
+   */
+  public grantCorsFrom({
+    cloudFrontDistribution,
+  }: {
+    cloudFrontDistribution: Distribution;
+  }) {
+    const allowedOrigin = \`https://\${cloudFrontDistribution.distributionDomainName}\`;
+
+    // Set ALLOWED_ORIGINS environment variable for all Lambda integrations
+    Object.values(this.integrations).forEach((integration) => {
+      if ('handler' in integration && integration.handler instanceof Function) {
+        integration.handler.addEnvironment('ALLOWED_ORIGINS', allowedOrigin);
+      }
     });
   }
 
@@ -1107,10 +1155,19 @@ export const lambdaHandler = async (
   });
   const apiGatewayResponse = convertVersion1Response(httpResponse);
 
+  const origin = event.headers?.origin ?? event.headers?.Origin;
+  const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') ?? [];
+  const isLocalHost =
+    origin && new Set(['localhost', '127.0.0.1']).has(new URL(origin).hostname);
+  const isAllowedOrigin = origin && allowedOrigins.includes(origin);
+  let corsOrigin = '*';
+  if (allowedOrigins.length > 0 && !isLocalHost) {
+    corsOrigin = isAllowedOrigin ? origin : allowedOrigins[0];
+  }
   return {
     ...apiGatewayResponse,
     headers: {
-      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Origin': corsOrigin,
       'Access-Control-Allow-Methods': '*',
       ...apiGatewayResponse.headers,
     },
@@ -1252,10 +1309,19 @@ export const lambdaHandler = async (
   });
   const apiGatewayResponse = convertVersion1Response(httpResponse);
 
+  const origin = event.headers?.origin ?? event.headers?.Origin;
+  const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') ?? [];
+  const isLocalHost =
+    origin && new Set(['localhost', '127.0.0.1']).has(new URL(origin).hostname);
+  const isAllowedOrigin = origin && allowedOrigins.includes(origin);
+  let corsOrigin = '*';
+  if (allowedOrigins.length > 0 && !isLocalHost) {
+    corsOrigin = isAllowedOrigin ? origin : allowedOrigins[0];
+  }
   return {
     ...apiGatewayResponse,
     headers: {
-      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Origin': corsOrigin,
       'Access-Control-Allow-Methods': '*',
       ...apiGatewayResponse.headers,
     },
