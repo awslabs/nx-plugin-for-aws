@@ -14,6 +14,7 @@ import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
 } from '../../../utils/config/utils';
+import { UX_PROVIDERS } from '../../../utils/ux';
 
 describe('react-website generator', () => {
   let tree: Tree;
@@ -21,12 +22,14 @@ describe('react-website generator', () => {
   const options: TsReactWebsiteGeneratorSchema = {
     name: 'test-app',
     iacProvider: 'CDK',
+    uxProvider: 'Cloudscape',
   };
 
   const optionsWithoutTailwind: TsReactWebsiteGeneratorSchema = {
     name: 'test-app',
     enableTailwind: false,
     iacProvider: 'CDK',
+    uxProvider: 'Cloudscape',
   };
 
   beforeEach(() => {
@@ -111,10 +114,8 @@ describe('react-website generator', () => {
   it('should update package.json with required dependencies', async () => {
     await tsReactWebsiteGenerator(tree, options);
     const packageJson = JSON.parse(tree.read('package.json').toString());
-    // Check for website dependencies
+    // Check for Tanstack router dependencies
     expect(packageJson.dependencies).toMatchObject({
-      '@cloudscape-design/components': expect.any(String),
-      '@cloudscape-design/board-components': expect.any(String),
       '@tanstack/react-router': expect.any(String),
     });
     // Check for TailwindCSS dependencies (enabled by default)
@@ -650,3 +651,39 @@ describe('react-website generator', () => {
     ).toBeTruthy();
   });
 });
+
+describe.each(UX_PROVIDERS.map((p) => [p]))(
+  'react-website generator (uxProvider=%s)',
+  (uxProvider) => {
+    let tree: Tree;
+
+    const options: TsReactWebsiteGeneratorSchema = {
+      name: 'test-app',
+      iacProvider: 'CDK',
+      uxProvider: uxProvider,
+    };
+
+    beforeEach(() => {
+      tree = createTreeUsingTsSolutionSetup();
+    });
+
+    it('should update package.json with required dependencies', async () => {
+      await tsReactWebsiteGenerator(tree, options);
+      const packageJson = JSON.parse(tree.read('package.json').toString());
+      // Check for website dependencies
+
+      switch (uxProvider) {
+        case 'None':
+          break;
+        case 'Cloudscape':
+          expect(packageJson.dependencies).toMatchObject({
+            '@cloudscape-design/components': expect.any(String),
+            '@cloudscape-design/board-components': expect.any(String),
+          });
+          break;
+        default:
+          throw new Error(`Unhandled uxProvider in test: ${uxProvider}`);
+      }
+    });
+  },
+);

@@ -18,9 +18,7 @@ import {
   Block,
   factory,
   JsxElement,
-  JsxSelfClosingElement,
   NodeFlags,
-  SyntaxKind,
   VariableDeclaration,
 } from 'typescript';
 import { withVersions } from '../../../utils/versions';
@@ -42,6 +40,8 @@ import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { addHookResultToRouterProviderContext } from '../../../utils/ast/website';
 import { addIdentityInfra } from '../../../utils/identity-constructs/identity-constructs';
 import { resolveIacProvider } from '../../../utils/iac';
+import { readUxProviderFromConfig } from '../app/utils';
+import { addCloudscapeAuthMenu, addNoneAuthMenu } from './utils';
 
 export const COGNITO_AUTH_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -107,6 +107,11 @@ export async function tsReactWebsiteAuthGenerator(
     module: 'react-oidc-context',
     contextProp: 'auth',
   });
+
+  const uxProvider = await readUxProviderFromConfig(
+    tree,
+    joinPathFragments(srcRoot, 'config.ts'),
+  );
 
   replace(
     tree,
@@ -211,190 +216,12 @@ export async function tsReactWebsiteAuthGenerator(
       },
     );
     // TODO: update utils if they exist by appending to the array
-    replace(
-      tree,
-      appLayoutTsxPath,
-      'JsxSelfClosingElement[tagName.text="TopNavigation"]',
-      (node: JsxSelfClosingElement) => {
-        // Create the utilities attribute
-        const utilitiesAttribute = factory.createJsxAttribute(
-          factory.createIdentifier('utilities'),
-          factory.createJsxExpression(
-            undefined,
-            factory.createArrayLiteralExpression(
-              [
-                factory.createObjectLiteralExpression([
-                  factory.createPropertyAssignment(
-                    'type',
-                    factory.createStringLiteral('menu-dropdown'),
-                  ),
-                  factory.createPropertyAssignment(
-                    'text',
-                    factory.createTemplateExpression(
-                      factory.createTemplateHead(''),
-                      [
-                        factory.createTemplateSpan(
-                          factory.createElementAccessChain(
-                            factory.createPropertyAccessChain(
-                              factory.createIdentifier('user'),
-                              factory.createToken(SyntaxKind.QuestionDotToken),
-                              factory.createIdentifier('profile'),
-                            ),
-                            factory.createToken(SyntaxKind.QuestionDotToken),
-                            factory.createStringLiteral('cognito:username'),
-                          ),
-                          factory.createTemplateTail(''),
-                        ),
-                      ],
-                    ),
-                  ),
-                  factory.createPropertyAssignment(
-                    'iconName',
-                    factory.createStringLiteral('user-profile-active'),
-                  ),
-                  factory.createPropertyAssignment(
-                    'onItemClick',
-                    factory.createArrowFunction(
-                      undefined,
-                      undefined,
-                      [
-                        factory.createParameterDeclaration(
-                          undefined,
-                          undefined,
-                          factory.createIdentifier('e'),
-                          undefined,
-                          undefined,
-                          undefined,
-                        ),
-                      ],
-                      undefined,
-                      factory.createToken(SyntaxKind.EqualsGreaterThanToken),
-                      factory.createBlock(
-                        [
-                          factory.createIfStatement(
-                            factory.createBinaryExpression(
-                              factory.createPropertyAccessExpression(
-                                factory.createPropertyAccessExpression(
-                                  factory.createIdentifier('e'),
-                                  factory.createIdentifier('detail'),
-                                ),
-                                factory.createIdentifier('id'),
-                              ),
-                              factory.createToken(
-                                SyntaxKind.EqualsEqualsEqualsToken,
-                              ),
-                              factory.createStringLiteral('signout'),
-                            ),
-                            factory.createBlock(
-                              [
-                                factory.createExpressionStatement(
-                                  factory.createCallExpression(
-                                    factory.createIdentifier('removeUser'),
-                                    undefined,
-                                    [],
-                                  ),
-                                ),
-                                factory.createExpressionStatement(
-                                  factory.createCallExpression(
-                                    factory.createIdentifier('signoutRedirect'),
-                                    undefined,
-                                    [
-                                      factory.createObjectLiteralExpression([
-                                        factory.createPropertyAssignment(
-                                          'post_logout_redirect_uri',
-                                          factory.createPropertyAccessExpression(
-                                            factory.createPropertyAccessExpression(
-                                              factory.createIdentifier(
-                                                'window',
-                                              ),
-                                              factory.createIdentifier(
-                                                'location',
-                                              ),
-                                            ),
-                                            factory.createIdentifier('origin'),
-                                          ),
-                                        ),
-                                        factory.createPropertyAssignment(
-                                          'extraQueryParams',
-                                          factory.createObjectLiteralExpression(
-                                            [
-                                              factory.createPropertyAssignment(
-                                                'redirect_uri',
-                                                factory.createPropertyAccessExpression(
-                                                  factory.createPropertyAccessExpression(
-                                                    factory.createIdentifier(
-                                                      'window',
-                                                    ),
-                                                    factory.createIdentifier(
-                                                      'location',
-                                                    ),
-                                                  ),
-                                                  factory.createIdentifier(
-                                                    'origin',
-                                                  ),
-                                                ),
-                                              ),
-                                              factory.createPropertyAssignment(
-                                                'response_type',
-                                                factory.createStringLiteral(
-                                                  'code',
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ]),
-                                    ],
-                                  ),
-                                ),
-                                factory.createExpressionStatement(
-                                  factory.createCallExpression(
-                                    factory.createIdentifier('clearStaleState'),
-                                    undefined,
-                                    [],
-                                  ),
-                                ),
-                              ],
-                              true,
-                            ),
-                          ),
-                        ],
-                        true,
-                      ),
-                    ),
-                  ),
-                  factory.createPropertyAssignment(
-                    'items',
-                    factory.createArrayLiteralExpression([
-                      factory.createObjectLiteralExpression([
-                        factory.createPropertyAssignment(
-                          'id',
-                          factory.createStringLiteral('signout'),
-                        ),
-                        factory.createPropertyAssignment(
-                          'text',
-                          factory.createStringLiteral('Sign out'),
-                        ),
-                      ]),
-                    ]),
-                  ),
-                ]),
-              ],
-              true,
-            ),
-          ),
-        );
-        // Add the utilities attribute to existing attributes
-        return factory.createJsxSelfClosingElement(
-          node.tagName,
-          node.typeArguments,
-          factory.createJsxAttributes([
-            ...node.attributes.properties,
-            utilitiesAttribute,
-          ]),
-        );
-      },
-    );
+    // Add a top level navigation menu for user profile
+    if (uxProvider === 'Cloudscape') {
+      addCloudscapeAuthMenu(tree, appLayoutTsxPath);
+    } else if (uxProvider === 'None') {
+      addNoneAuthMenu(tree, appLayoutTsxPath);
+    }
   } else {
     console.info(
       `Skipping update to ${appLayoutTsxPath} as it does not exist.`,
