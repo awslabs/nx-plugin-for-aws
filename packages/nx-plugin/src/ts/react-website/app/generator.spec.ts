@@ -5,10 +5,14 @@
 import { readJson, Tree } from '@nx/devkit';
 import {
   REACT_WEBSITE_APP_GENERATOR_INFO,
+  SUPPORTED_UX_PROVIDERS,
   tsReactWebsiteGenerator,
 } from './generator';
 import { TsReactWebsiteGeneratorSchema } from './schema';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
+import {
+  createTreeUsingTsSolutionSetup,
+  snapshotTreeDir,
+} from '../../../utils/test';
 import { expectHasMetricTags } from '../../../utils/metrics.spec';
 import {
   ensureAwsNxPluginConfig,
@@ -21,12 +25,14 @@ describe('react-website generator', () => {
   const options: TsReactWebsiteGeneratorSchema = {
     name: 'test-app',
     iacProvider: 'CDK',
+    uxProvider: 'Cloudscape',
   };
 
   const optionsWithoutTailwind: TsReactWebsiteGeneratorSchema = {
     name: 'test-app',
     enableTailwind: false,
     iacProvider: 'CDK',
+    uxProvider: 'Cloudscape',
   };
 
   beforeEach(() => {
@@ -111,10 +117,8 @@ describe('react-website generator', () => {
   it('should update package.json with required dependencies', async () => {
     await tsReactWebsiteGenerator(tree, options);
     const packageJson = JSON.parse(tree.read('package.json').toString());
-    // Check for website dependencies
+    // Check for Tanstack router dependencies
     expect(packageJson.dependencies).toMatchObject({
-      '@cloudscape-design/components': expect.any(String),
-      '@cloudscape-design/board-components': expect.any(String),
       '@tanstack/react-router': expect.any(String),
     });
     // Check for TailwindCSS dependencies (enabled by default)
@@ -650,3 +654,52 @@ describe('react-website generator', () => {
     ).toBeTruthy();
   });
 });
+
+describe.each(SUPPORTED_UX_PROVIDERS.map((p) => [p]))(
+  'react-website generator (uxProvider=%s)',
+  (uxProvider) => {
+    let tree: Tree;
+
+    const options: TsReactWebsiteGeneratorSchema = {
+      name: 'test-app',
+      iacProvider: 'CDK',
+      uxProvider: uxProvider,
+    };
+
+    beforeEach(() => {
+      tree = createTreeUsingTsSolutionSetup();
+    });
+
+    it('should add uxProvider metadata', async () => {
+      await tsReactWebsiteGenerator(tree, options);
+
+      const projectConfig = JSON.parse(
+        tree.read(`test-app/project.json`, 'utf-8'),
+      );
+
+      expect(projectConfig.metadata.uxProvider).toEqual(uxProvider);
+    });
+
+    it('should update package.json with required dependencies', async () => {
+      await tsReactWebsiteGenerator(tree, options);
+
+      snapshotTreeDir(tree, 'test-app/src');
+
+      const packageJson = JSON.parse(tree.read('package.json').toString());
+      // Check for website dependencies
+
+      switch (uxProvider) {
+        case 'None':
+          break;
+        case 'Cloudscape':
+          expect(packageJson.dependencies).toMatchObject({
+            '@cloudscape-design/components': expect.any(String),
+            '@cloudscape-design/board-components': expect.any(String),
+          });
+          break;
+        default:
+          throw new Error(`Unhandled uxProvider in test: ${uxProvider}`);
+      }
+    });
+  },
+);
