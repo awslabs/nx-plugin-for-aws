@@ -40,7 +40,6 @@ import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { addHookResultToRouterProviderContext } from '../../../utils/ast/website';
 import { addIdentityInfra } from '../../../utils/identity-constructs/identity-constructs';
 import { resolveIacProvider } from '../../../utils/iac';
-import { readUxProviderFromConfig } from '../app/utils';
 import { addCloudscapeAuthMenu, addNoneAuthMenu } from './utils';
 
 export const COGNITO_AUTH_GENERATOR_INFO: NxGeneratorInfo =
@@ -108,10 +107,13 @@ export async function tsReactWebsiteAuthGenerator(
     contextProp: 'auth',
   });
 
-  const uxProvider = await readUxProviderFromConfig(
+  const projectConfiguration = readProjectConfigurationUnqualified(
     tree,
-    joinPathFragments(srcRoot, 'config.ts'),
+    options.project,
   );
+
+  const uxProvider =
+    (projectConfiguration.metadata as any)?.uxProvider ?? 'Cloudscape';
 
   replace(
     tree,
@@ -216,11 +218,15 @@ export async function tsReactWebsiteAuthGenerator(
       },
     );
     // TODO: update utils if they exist by appending to the array
-    // Add a top level navigation menu for user profile
+    // Add a top-level navigation menu that shows the signed-in user's profile and actions
     if (uxProvider === 'Cloudscape') {
       addCloudscapeAuthMenu(tree, appLayoutTsxPath);
     } else if (uxProvider === 'None') {
       addNoneAuthMenu(tree, appLayoutTsxPath);
+    } else {
+      throw new Error(
+        `Top-level navigation menu to show the signed-in user for uxProvider "${uxProvider}" is not implemented.`,
+      );
     }
   } else {
     console.info(

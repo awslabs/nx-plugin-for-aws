@@ -5,16 +5,19 @@
 import { readJson, Tree } from '@nx/devkit';
 import {
   REACT_WEBSITE_APP_GENERATOR_INFO,
+  SUPPORTED_UX_PROVIDERS,
   tsReactWebsiteGenerator,
 } from './generator';
 import { TsReactWebsiteGeneratorSchema } from './schema';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
+import {
+  createTreeUsingTsSolutionSetup,
+  snapshotTreeDir,
+} from '../../../utils/test';
 import { expectHasMetricTags } from '../../../utils/metrics.spec';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
 } from '../../../utils/config/utils';
-import { UX_PROVIDERS } from '../../../utils/ux';
 
 describe('react-website generator', () => {
   let tree: Tree;
@@ -652,7 +655,7 @@ describe('react-website generator', () => {
   });
 });
 
-describe.each(UX_PROVIDERS.map((p) => [p]))(
+describe.each(SUPPORTED_UX_PROVIDERS.map((p) => [p]))(
   'react-website generator (uxProvider=%s)',
   (uxProvider) => {
     let tree: Tree;
@@ -667,8 +670,21 @@ describe.each(UX_PROVIDERS.map((p) => [p]))(
       tree = createTreeUsingTsSolutionSetup();
     });
 
+    it('should add uxProvider metadata', async () => {
+      await tsReactWebsiteGenerator(tree, options);
+
+      const projectConfig = JSON.parse(
+        tree.read(`test-app/project.json`, 'utf-8'),
+      );
+
+      expect(projectConfig.metadata.uxProvider).toEqual(uxProvider);
+    });
+
     it('should update package.json with required dependencies', async () => {
       await tsReactWebsiteGenerator(tree, options);
+
+      snapshotTreeDir(tree, 'test-app/src');
+
       const packageJson = JSON.parse(tree.read('package.json').toString());
       // Check for website dependencies
 

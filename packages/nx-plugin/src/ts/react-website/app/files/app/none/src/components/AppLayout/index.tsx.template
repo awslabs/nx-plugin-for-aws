@@ -1,116 +1,123 @@
 import * as React from 'react';
+<% if (enableTanstackRouter) { %>
 import {
-  createContext,
-  useCallback,
+  useEffect,
   useMemo,
   useState,
 } from 'react';
+<% } %>
 import Config from '../../config';
-<% if (enableTanstackRouter) { %>import { Link, useLocation } from '@tanstack/react-router';<% } %>
+<% if (enableTanstackRouter) { %>import { Link, useLocation, useMatchRoute } from '@tanstack/react-router';
 
-export interface AppLayoutContext {
-  contentProps: React.HTMLAttributes<HTMLElement>;
-  setContentProps: (props: React.HTMLAttributes<HTMLElement>) => void;
-}
+  const getBreadcrumbs = (
+    matchRoute: ReturnType<typeof useMatchRoute>,
+    pathName: string,
+    search: string,
+    defaultBreadcrumb: string,
+    availableRoutes?: string[],
+  ) => {
+    const segments = [
+      defaultBreadcrumb,
+      ...pathName.split('/').filter((segment) => segment !== ''),
+    ];
 
-/**
- * Context for updating/retrieving the AppLayout.
- */
-export const AppLayoutContext = createContext<AppLayoutContext>({
-  // eslint-disable-next-line @typescript-eslint/no-empty-function
-  contentProps: {},
-  // eslint-disable-next-line @typescript-eslint/no-empty-function
-  setContentProps: () => {},
-});
+    return segments.map((segment, i) => {
+      const href =
+        i === 0
+          ? '/'
+          : `/${segments
+            .slice(1, i + 1)
+            .join('/')
+            .replace('//', '/')}`;
+
+      const matched =
+        !availableRoutes || availableRoutes.find((r) => matchRoute({ to: href }));
+
+      return {
+        href: matched ? `${href}${search}` : '#',
+        text: segment,
+      };
+    });
+  };<% } %>
+
 
 /**
  * Defines the App layout and contains logic for routing.
  */
 const AppLayout: React.FC<React.PropsWithChildren> = ({ children }) => {
-  const [contentProps, setContentProps] = useState<React.HTMLAttributes<HTMLElement>>({});
-  const setContentPropsSafe = useCallback(
-    (props: React.HTMLAttributes<HTMLElement>) => {
-      setContentProps((current) =>
-        JSON.stringify(current) !== JSON.stringify(props) ? props : current,
-      );
-    },
-    [],
-  );
+
   <% if (enableTanstackRouter) { %>
-  const { pathname } = useLocation();
-  const navItems = useMemo(
-    () => [
-      { to: '/', label: 'Home' },
-    ],
-    [],
-  );
-  const breadcrumbs = useMemo(() => {
-    const segments = pathname.split('/').filter(Boolean);
-    const trail: { href: string; label: string }[] = [{ href: '/', label: 'Home' }];
-    segments.reduce((acc, segment) => {
-      const next = `${acc}/${segment}`;
-      trail.push({ href: next, label: decodeURIComponent(segment) || '...' });
-      return next;
-    }, '');
-    return trail;
-  }, [pathname]);
+  const [activeBreadcrumbs, setActiveBreadcrumbs] = useState<{ href: string; text: string }[]>([
+    { text: '/', href: '/' },
+  ]);
+    const matchRoute = useMatchRoute();
+    const { pathname, search } = useLocation();
+    const navItems = useMemo(
+      () => [
+        { to: '/', label: 'Home' },
+      ],
+      [],
+    );
+
+    useEffect(() => {
+      const breadcrumbs = getBreadcrumbs(
+        matchRoute,
+        pathname,
+        Object.entries(search).reduce((p, [k, v]) => p + `${k}=${v}`, ''),
+        'Home',
+      );
+      setActiveBreadcrumbs(breadcrumbs);
+    }, [matchRoute, pathname, search]);
   <% } %>
 
   return (
-    <AppLayoutContext.Provider
-      value={{
-        contentProps,
-        setContentProps: setContentPropsSafe,
-      }}
-    >
-      <div className="app-shell">
-        <header className="app-header">
-          <div className='app-header-inner'>
-            <div className="brand">
-              <a href="/">
-                <img
-                  src={Config.logo}
-                  alt={`${Config.applicationName} logo`}
-                  className="brand-logo"
-                />
-                <span className="brand-name">{Config.applicationName}</span>
-              </a>
-            </div>
-          
-            <% if (enableTanstackRouter) { %>
-            <nav className="app-nav">
-              {navItems.map((item) => (
-                <Link
-                  key={item.to}
-                  to={item.to}
-                  className={pathname === item.to ? 'active' : undefined}
-                >
-                  {item.label}
-                </Link>
-              ))}
-            </nav>
-            <% } %>
+    <div className="app-shell">
+      <header className="app-header">
+        <div className='app-header-inner'>
+          <div className="brand">
+            <a href="/">
+              <img
+                src={Config.logo}
+                alt={`${Config.applicationName} logo`}
+                className="brand-logo"
+              />
+              <span className="brand-name">{Config.applicationName}</span>
+            </a>
           </div>
-        </header>
-        <main className="app-main" {...contentProps}>
+
           <% if (enableTanstackRouter) { %>
-          <nav className="breadcrumbs" aria-label="Breadcrumb">
-            {breadcrumbs.map((crumb, index) => (
-              <span className="breadcrumb-segment" key={crumb.href || index}>
-                {index > 0 && <span className="breadcrumb-separator">/</span>}
-                {index === breadcrumbs.length - 1 ? (
-                  <span className="breadcrumb-current">{crumb.label}</span>
-                ) : (
-                  <Link to={crumb.href}>{crumb.label}</Link>
-                )}
-              </span>
+          <nav className="app-nav">
+            {navItems.map((item) => (
+              <Link
+                key={item.to}
+                to={item.to}
+                className={pathname === item.to ? 'active' : undefined}
+              >
+                {item.label}
+              </Link>
             ))}
           </nav>
           <% } %>
-          <section className="card">{children}</section>
-        </main>
-      </div>
-    </AppLayoutContext.Provider>
+        </div>
+      </header>
+      <main className="app-main">
+        <% if (enableTanstackRouter) { %>
+        <nav className="breadcrumbs" aria-label="Breadcrumb">
+          {activeBreadcrumbs.map((crumb, index) => (
+            <span className="breadcrumb-segment" key={crumb.href || index}>
+              {index > 0 && <span className="breadcrumb-separator">/</span>}
+              {index === activeBreadcrumbs.length - 1 ? (
+                <span className="breadcrumb-current">{crumb.text}</span>
+              ) : (
+                <Link to={crumb.href}>{crumb.text}</Link>
+              )}
+            </span>
+          ))}
+        </nav>
+        <% } %>
+        <section className="card">{children}</section>
+      </main>
+    </div>
   );
 };
 

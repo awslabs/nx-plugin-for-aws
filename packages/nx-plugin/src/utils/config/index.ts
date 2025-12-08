@@ -4,11 +4,9 @@
  */
 import { LicenseConfig } from '../../license/config-types';
 import { IacConfig } from '../iac';
-import { UxConfig } from '../ux';
 
 export * from '../../license/config-types';
 export { IacConfig, IacProvider } from '../iac';
-export { UxConfig } from '../ux';
 
 /**
  * Configuration for the nx plugin
@@ -23,11 +21,6 @@ export interface AwsNxPluginConfig {
    * Configuration for infrastructure as code
    */
   iac?: IacConfig;
-
-  /**
-   * Configuration for ux
-   */
-  ux?: UxConfig;
 
   /**
    * List of tags

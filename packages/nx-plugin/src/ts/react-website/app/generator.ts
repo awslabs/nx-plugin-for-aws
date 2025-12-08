@@ -45,7 +45,10 @@ import {
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { addWebsiteInfra } from '../../../utils/website-constructs/website-constructs';
 import { resolveIacProvider } from '../../../utils/iac';
-import { UxProvider } from '../../../utils/ux';
+
+export const SUPPORTED_UX_PROVIDERS = ['None', 'Cloudscape'] as const;
+
+export type UxProvider = (typeof SUPPORTED_UX_PROVIDERS)[number];
 
 export const REACT_WEBSITE_APP_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -56,7 +59,7 @@ export async function tsReactWebsiteGenerator(
 ) {
   const enableTailwind = schema.enableTailwind ?? true;
   const enableTanstackRouter = schema.enableTanstackRouter ?? true;
-  const uxProvider: UxProvider = schema.uxProvider ?? 'None';
+  const uxProvider: UxProvider = schema.uxProvider ?? 'Cloudscape';
   const npmScopePrefix = getNpmScopePrefix(tree);
   const websiteNameClassName = toClassName(schema.name);
   const websiteNameKebabCase = toKebabCase(schema.name);
@@ -173,6 +176,9 @@ export async function tsReactWebsiteGenerator(
     tree,
     projectConfiguration.name,
     REACT_WEBSITE_APP_GENERATOR_INFO,
+    {
+      uxProvider,
+    },
   );
 
   configureTsProject(tree, {
@@ -200,10 +206,10 @@ export async function tsReactWebsiteGenerator(
     __dirname,
     './files/app/common',
   );
-  const appTemplatePath =
-    uxProvider === 'Cloudscape'
-      ? joinPathFragments(__dirname, './files/app/cloudscape')
-      : joinPathFragments(__dirname, './files/app/none');
+  const appTemplatePath = joinPathFragments(
+    __dirname,
+    `./files/app/${uxProvider.toLowerCase()}`,
+  );
 
   generateFiles(
     tree, // the virtual file system
@@ -215,7 +221,6 @@ export async function tsReactWebsiteGenerator(
       pkgMgrCmd: getPackageManagerCommand().exec,
       enableTailwind,
       enableTanstackRouter,
-      uxProvider,
     }, // config object to replace variable in file templates
     {
       overwriteStrategy: OverwriteStrategy.Overwrite,
@@ -232,7 +237,6 @@ export async function tsReactWebsiteGenerator(
       pkgMgrCmd: getPackageManagerCommand().exec,
       enableTailwind,
       enableTanstackRouter,
-      uxProvider,
     }, // config object to replace variable in file templates
     {
       overwriteStrategy: OverwriteStrategy.Overwrite,
@@ -244,10 +248,10 @@ export async function tsReactWebsiteGenerator(
       __dirname,
       './files/tanstack-router/common',
     );
-    const routerTemplatePath =
-      uxProvider === 'Cloudscape'
-        ? joinPathFragments(__dirname, './files/tanstack-router/cloudscape')
-        : joinPathFragments(__dirname, './files/tanstack-router/none');
+    const routerTemplatePath = joinPathFragments(
+      __dirname,
+      `./files/tanstack-router/${uxProvider.toLowerCase()}`,
+    );
 
     generateFiles(
       tree,
@@ -259,7 +263,6 @@ export async function tsReactWebsiteGenerator(
         pkgMgrCmd: getPackageManagerCommand().exec,
         enableTailwind,
         enableTanstackRouter,
-        uxProvider,
       },
       {
         overwriteStrategy: OverwriteStrategy.Overwrite,
@@ -276,7 +279,6 @@ export async function tsReactWebsiteGenerator(
         pkgMgrCmd: getPackageManagerCommand().exec,
         enableTailwind,
         enableTanstackRouter,
-        uxProvider,
       }, // config object to replace variable in file templates
       {
         overwriteStrategy: OverwriteStrategy.Overwrite,
