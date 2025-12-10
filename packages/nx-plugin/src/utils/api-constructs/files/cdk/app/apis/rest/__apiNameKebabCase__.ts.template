@@ -186,24 +186,29 @@ export class <%= apiNameClassName %><
   }
 
   /**
-   * Grants CORS to this API from the CloudFront distribution domain
+   * Restricts CORS to the website CloudFront distribution domains
    *
-   * Configures the CloudFront distribution domain as the only permitted CORS origin
+   * Configures the CloudFront distribution domains as the only permitted CORS origins
    * (other than local host) in the AWS Lambda integrations
+   * 
+   * Note that this restriction is not applied to preflight OPTIONS
    *
-   * @param cloudFrontDistribution - The CloudFront distribution to grant CORS from
+   * @param websites - The CloudFront distribution to grant CORS from
    */
-  public grantCorsFrom({
-    cloudFrontDistribution,
-  }: {
-    cloudFrontDistribution: Distribution;
-  }) {
-    const allowedOrigin = `https://${cloudFrontDistribution.distributionDomainName}`;
+  public restrictCorsTo(
+    ...websites: { cloudFrontDistribution: Distribution }[]
+  ) {
+    const allowedOrigins = websites
+      .map(
+        ({ cloudFrontDistribution }) =>
+          `https://${cloudFrontDistribution.distributionDomainName}`,
+      )
+      .join(',');
 
     // Set ALLOWED_ORIGINS environment variable for all Lambda integrations
     Object.values(this.integrations).forEach((integration) => {
       if ('handler' in integration && integration.handler instanceof Function) {
-        integration.handler.addEnvironment('ALLOWED_ORIGINS', allowedOrigin);
+        integration.handler.addEnvironment('ALLOWED_ORIGINS', allowedOrigins);
       }
     });
   }
