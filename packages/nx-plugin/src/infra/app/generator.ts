@@ -121,6 +121,7 @@ export async function tsInfraGenerator(
       };
       config.targets.deploy = {
         executor: 'nx:run-commands',
+        dependsOn: ['^build', 'compile'],
         options: {
           cwd: libraryRoot,
           command: `cdk deploy --require-approval=never`,
@@ -135,6 +136,7 @@ export async function tsInfraGenerator(
       };
       config.targets.destroy = {
         executor: 'nx:run-commands',
+        dependsOn: ['^build', 'compile'],
         options: {
           cwd: libraryRoot,
           command: `cdk destroy --require-approval=never`,
