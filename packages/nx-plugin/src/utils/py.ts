@@ -61,10 +61,30 @@ export const addDependenciesToDependencyGroupInPyProjectToml = (
   );
 };
 
+export interface UvxWithDep {
+  dep: string;
+  version: string;
+  specifier?: string;
+}
+
 /**
  * Render a uvx command for a given dependency
  * Pins the version to the one specified in versions.ts
+ * Optionally specify withDeps to render uvx --with dep==version
  */
-export const uvxCommand = (dep: IPyDepVersion, args?: string): string => {
-  return `uvx ${withPyVersions([dep])[0]}${args ? ` ${args}` : ''}`;
+export const uvxCommand = (
+  dep: IPyDepVersion,
+  args?: string,
+  withDeps?: UvxWithDep[],
+): string => {
+  return `uvx ${
+    withDeps
+      ? `${withDeps
+          .map(
+            ({ dep, version, specifier }) =>
+              `--with ${dep}${specifier ?? '=='}${version}`,
+          )
+          .join(' ')} `
+      : ''
+  }${withPyVersions([dep])[0]}${args ? ` ${args}` : ''}`;
 };
