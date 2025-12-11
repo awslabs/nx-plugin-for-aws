@@ -25,11 +25,11 @@ export const tsSyncGeneratorGenerator = async (
 ): Promise<SyncGeneratorResult> => {
   const basePaths = readBaseTsConfigPaths(tree);
 
-  if (!basePaths || Object.keys(basePaths).length === 0) {
+  if (!basePaths) {
     return {};
   }
 
-  const addedPathsByConfig: Record<string, string[]> = {};
+  const changesByConfigFile: Record<string, PathChange[]> = {};
 
   for (const project of getProjects(tree).values()) {
     for (const tsConfigFileName of [
@@ -42,21 +42,26 @@ export const tsSyncGeneratorGenerator = async (
         continue;
       }
 
-      const addedAliases = addBasePathsIfMissing(tree, tsConfigPath, basePaths);
-      if (addedAliases.length > 0) {
-        addedPathsByConfig[tsConfigPath] = addedAliases;
+      const { changes, updated } = syncPathsWithBase(
+        tree,
+        tsConfigPath,
+        basePaths,
+      );
+
+      if (updated) {
+        changesByConfigFile[tsConfigPath] = changes;
       }
     }
   }
 
-  if (Object.keys(addedPathsByConfig).length === 0) {
+  if (Object.keys(changesByConfigFile).length === 0) {
     return {};
   }
 
   await formatFilesInSubtree(tree);
 
   return {
-    outOfSyncMessage: buildOutOfSyncMessage(addedPathsByConfig),
+    outOfSyncMessage: buildOutOfSyncMessage(changesByConfigFile),
   };
 };
 
@@ -74,59 +79,112 @@ const readBaseTsConfigPaths = (
   }
 
   const baseConfigJson = readJson<Record<string, any>>(tree, baseConfigPath);
-  return baseConfigJson?.compilerOptions?.paths;
+  return baseConfigJson?.compilerOptions?.paths ?? {};
 };
 
-const addBasePathsIfMissing = (
+type PathChangeType = 'added' | 'updated' | 'removed' | 'metadata';
+
+type PathChange = {
+  alias: string;
+  type: PathChangeType;
+};
+
+const arePathArraysEqual = (first: string[], second: string[]): boolean => {
+  if (first.length !== second.length) {
+    return false;
+  }
+
+  return first.every((value, index) => value === second[index]);
+};
+
+const syncPathsWithBase = (
   tree: Tree,
   tsConfigPath: string,
   basePaths: Record<string, string[]>,
-): string[] => {
-  const addedAliases: string[] = [];
+): { updated: boolean; changes: PathChange[] } => {
+  const changes: PathChange[] = [];
 
   const tsConfigJson = readJson(tree, tsConfigPath);
   const paths = tsConfigJson?.compilerOptions?.paths;
 
   if (!paths) {
-    return addedAliases;
+    return { updated: false, changes };
   }
 
-  const projectPathAliases = new Set(Object.keys(paths));
-  const missingEntries = Object.entries(basePaths).filter(
-    ([alias]) => !projectPathAliases.has(alias),
-  );
+  const baseAliases = new Set(Object.keys(basePaths));
+  const initialManagedAliases: string[] = tsConfigJson.tsSyncManagedPaths ?? [];
+  const managedAliases = new Set<string>(initialManagedAliases);
 
-  if (missingEntries.length === 0) {
-    return addedAliases;
+  const updatedAliases: Record<string, string[]> = {
+    ...(tsConfigJson.compilerOptions?.paths ?? {}),
+  };
+  let updated = false;
+
+  // Remove aliases that were managed previously but are no longer present in the base config
+  for (const alias of [...managedAliases]) {
+    if (!baseAliases.has(alias) && alias in updatedAliases) {
+      delete updatedAliases[alias];
+      managedAliases.delete(alias);
+      updated = true;
+      changes.push({ alias, type: 'removed' });
+    }
   }
 
-  updateJson(tree, tsConfigPath, (json) => {
-    addedAliases.push(...missingEntries.map(([alias]) => alias));
+  // Add or update aliases that exist in the base config
+  for (const [alias, baseValue] of Object.entries(basePaths)) {
+    const existingValue = updatedAliases[alias];
+    if (!existingValue) {
+      changes.push({ alias, type: 'added' });
+      updated = true;
+    } else if (!arePathArraysEqual(existingValue, baseValue)) {
+      changes.push({ alias, type: 'updated' });
+      updated = true;
+    }
 
-    return {
+    updatedAliases[alias] = baseValue;
+    managedAliases.add(alias);
+  }
+
+  const expectedManagedAliases = [...baseAliases].sort();
+  if (
+    !arePathArraysEqual(
+      initialManagedAliases.slice().sort(),
+      expectedManagedAliases,
+    )
+  ) {
+    updated = true;
+    changes.push({ alias: 'tsSyncManagedPaths', type: 'metadata' });
+  }
+
+  if (updated) {
+    updateJson(tree, tsConfigPath, (json) => ({
       ...json,
+      tsSyncManagedPaths: expectedManagedAliases,
       compilerOptions: {
         ...json.compilerOptions,
-        paths: {
-          ...paths,
-          ...Object.fromEntries(missingEntries),
-        },
+        paths: updatedAliases,
       },
-    };
-  });
+    }));
+  }
 
-  return addedAliases;
+  return { updated, changes };
 };
 
 /**
  * Build the message to display when the sync generator would make changes to the tree
  */
-const buildOutOfSyncMessage = (addedPaths: Record<string, string[]>): string =>
+const buildOutOfSyncMessage = (
+  changesByConfig: Record<string, PathChange[]>,
+): string =>
   `TypeScript path aliases are out of sync with the base tsconfig. The following configs will be updated:\n${Object.entries(
-    addedPaths,
+    changesByConfig,
   )
     .map(
-      ([config, aliases]) =>
-        `${config}:\n${aliases.map((alias) => `- ${alias}`).join('\n')}`,
+      ([config, changes]) =>
+        `${config}:\n${changes
+          .slice()
+          .sort((left, right) => left.alias.localeCompare(right.alias))
+          .map(({ alias, type }) => `- ${alias} (${type})`)
+          .join('\n')}`,
     )
     .join('\n\n')}`;

@@ -58,19 +58,27 @@ describe('ts-sync generator', () => {
       readJson<Record<string, any>>(tree, 'packages/proj/tsconfig.json')
         .compilerOptions.paths,
     ).toEqual({
-      '@local/*': ['src/*'],
       ':shared': ['packages/shared/src/index.ts'],
       '@shared/*': ['packages/shared/src/*'],
+      '@local/*': ['src/*'],
     });
+    expect(
+      readJson<Record<string, any>>(tree, 'packages/proj/tsconfig.json')
+        .tsSyncManagedPaths,
+    ).toEqual([':shared', '@shared/*']);
 
     expect(
       readJson<Record<string, any>>(tree, 'packages/proj/tsconfig.lib.json')
         .compilerOptions.paths,
     ).toEqual({
-      '@local/*': ['src/*'],
       ':shared': ['packages/shared/src/index.ts'],
       '@shared/*': ['packages/shared/src/*'],
+      '@local/*': ['src/*'],
     });
+    expect(
+      readJson<Record<string, any>>(tree, 'packages/proj/tsconfig.lib.json')
+        .tsSyncManagedPaths,
+    ).toEqual([':shared', '@shared/*']);
 
     expect(
       readJson<Record<string, any>>(tree, 'packages/proj/tsconfig.app.json')
@@ -81,8 +89,8 @@ describe('ts-sync generator', () => {
     expect((result as any).outOfSyncMessage).toContain(
       'packages/proj/tsconfig.json',
     );
-    expect((result as any).outOfSyncMessage).toContain(':shared');
-    expect((result as any).outOfSyncMessage).toContain('@shared/*');
+    expect((result as any).outOfSyncMessage).toContain(':shared (added)');
+    expect((result as any).outOfSyncMessage).toContain('@shared/* (added)');
   });
 
   it('should do nothing when tsconfig paths are not configured', async () => {
@@ -114,7 +122,7 @@ describe('ts-sync generator', () => {
     expect(result).toEqual({});
   });
 
-  it('should do nothing when project tsconfig paths already include base paths', async () => {
+  it('should update managed metadata when project tsconfig paths already include base paths', async () => {
     writeJson('tsconfig.base.json', {
       compilerOptions: {
         paths: {
@@ -144,12 +152,88 @@ describe('ts-sync generator', () => {
 
     const result = await tsSyncGeneratorGenerator(tree);
 
-    expect(readJson(tree, 'packages/proj/tsconfig.json')).toEqual(
-      projectTsConfig,
-    );
-    expect(readJson(tree, 'packages/proj/tsconfig.lib.json')).toEqual(
-      projectTsConfig,
-    );
-    expect(result).toEqual({});
+    expect(readJson(tree, 'packages/proj/tsconfig.json')).toEqual({
+      ...projectTsConfig,
+      tsSyncManagedPaths: [':shared', '@shared/*'],
+    });
+    expect(readJson(tree, 'packages/proj/tsconfig.lib.json')).toEqual({
+      ...projectTsConfig,
+      tsSyncManagedPaths: [':shared', '@shared/*'],
+    });
+    expect(result).toHaveProperty('outOfSyncMessage');
+    expect((result as any).outOfSyncMessage).toContain('tsSyncManagedPaths');
+  });
+
+  it('should update existing paths when base config changes', async () => {
+    writeJson('tsconfig.base.json', {
+      compilerOptions: {
+        paths: {
+          ':shared': ['packages/shared/src/main.ts'],
+        },
+      },
+    });
+
+    addProjectConfiguration(tree, 'proj', {
+      root: 'packages/proj',
+      targets: {},
+    });
+
+    writeJson('packages/proj/tsconfig.json', {
+      compilerOptions: {
+        paths: {
+          ':shared': ['packages/shared/src/old.ts'],
+        },
+      },
+      tsSyncManagedPaths: [':shared'],
+    });
+
+    const result = await tsSyncGeneratorGenerator(tree);
+
+    expect(
+      readJson<Record<string, any>>(tree, 'packages/proj/tsconfig.json')
+        .compilerOptions.paths,
+    ).toEqual({
+      ':shared': ['packages/shared/src/main.ts'],
+    });
+    expect(result).toHaveProperty('outOfSyncMessage');
+    expect((result as any).outOfSyncMessage).toContain(':shared (updated)');
+  });
+
+  it('should remove paths that are removed from the base config', async () => {
+    writeJson('tsconfig.base.json', {
+      compilerOptions: {
+        paths: {},
+      },
+    });
+
+    addProjectConfiguration(tree, 'proj', {
+      root: 'packages/proj',
+      targets: {},
+    });
+
+    writeJson('packages/proj/tsconfig.json', {
+      compilerOptions: {
+        paths: {
+          ':shared': ['packages/shared/src/index.ts'],
+          '@local/*': ['src/*'],
+        },
+      },
+      tsSyncManagedPaths: [':shared'],
+    });
+
+    const result = await tsSyncGeneratorGenerator(tree);
+
+    expect(
+      readJson<Record<string, any>>(tree, 'packages/proj/tsconfig.json')
+        .compilerOptions.paths,
+    ).toEqual({
+      '@local/*': ['src/*'],
+    });
+    expect(
+      readJson<Record<string, any>>(tree, 'packages/proj/tsconfig.json')
+        .tsSyncManagedPaths,
+    ).toEqual([]);
+    expect(result).toHaveProperty('outOfSyncMessage');
+    expect((result as any).outOfSyncMessage).toContain(':shared (removed)');
   });
 });
