@@ -2,10 +2,11 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
+import { Tree, readNxJson } from '@nx/devkit';
 import { presetGenerator, isAmazonian } from './generator';
 import { createTreeUsingTsSolutionSetup, snapshotTreeDir } from '../utils/test';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
+import { SYNC_GENERATOR_NAME as TS_SYNC_GENERATOR_NAME } from '../ts/sync/generator';
 
 // Mock execSync to control git command behavior in tests
 vi.mock('child_process', async (importOriginal) => {
@@ -51,6 +52,14 @@ describe('preset generator', () => {
     await presetGenerator(tree, { addTsPlugin: false, iacProvider: 'CDK' });
 
     expect((await readAwsNxPluginConfig(tree)).iac.provider).toBe('CDK');
+  });
+
+  it('should register the TypeScript sync generator for compile targets', async () => {
+    await presetGenerator(tree, { addTsPlugin: false, iacProvider: 'CDK' });
+
+    expect(readNxJson(tree).targetDefaults?.compile?.syncGenerators).toContain(
+      TS_SYNC_GENERATOR_NAME,
+    );
   });
 });
 

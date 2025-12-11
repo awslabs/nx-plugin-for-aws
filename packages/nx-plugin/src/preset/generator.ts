@@ -12,7 +12,9 @@ import {
   getPackageManagerCommand,
   installPackagesTask,
   joinPathFragments,
+  readNxJson,
   updateJson,
+  updateNxJson,
 } from '@nx/devkit';
 import { NxGeneratorInfo, getGeneratorInfo } from '../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../utils/metrics';
@@ -28,6 +30,7 @@ import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
 } from '../utils/config/utils';
+import { SYNC_GENERATOR_NAME as TS_SYNC_GENERATOR_NAME } from '../ts/sync/generator';
 
 const WORKSPACES = ['packages/*'];
 
@@ -141,6 +144,23 @@ export const presetGenerator = async (
   tree.write('packages/.gitkeep', '');
 
   setUpWorkspaces(tree);
+
+  const nxJson = readNxJson(tree);
+  updateNxJson(tree, {
+    ...nxJson,
+    targetDefaults: {
+      ...nxJson.targetDefaults,
+      compile: {
+        ...nxJson.targetDefaults?.compile,
+        syncGenerators: [
+          ...(nxJson.targetDefaults?.compile?.syncGenerators ?? []).filter(
+            (g) => g !== TS_SYNC_GENERATOR_NAME,
+          ),
+          TS_SYNC_GENERATOR_NAME,
+        ],
+      },
+    },
+  });
 
   updateJson(tree, 'package.json', (packageJson) => ({
     ...packageJson,
