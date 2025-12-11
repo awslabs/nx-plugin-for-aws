@@ -3,10 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { Tree } from '@nx/devkit';
-import { TS_SYNC_GENERATOR_INFO, syncGeneratorGenerator } from './generator';
+import { tsSyncGeneratorGenerator } from './generator';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { expectHasMetricTags } from '../../utils/metrics.spec';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { addProjectConfiguration, readJson } from '@nx/devkit';
 
 describe('ts-sync generator', () => {
@@ -54,7 +52,7 @@ describe('ts-sync generator', () => {
       },
     });
 
-    const result = await syncGeneratorGenerator(tree);
+    const result = await tsSyncGeneratorGenerator(tree);
 
     expect(
       readJson<Record<string, any>>(tree, 'packages/proj/tsconfig.json')
@@ -80,10 +78,6 @@ describe('ts-sync generator', () => {
     ).toBeUndefined();
 
     expect(result).toHaveProperty('outOfSyncMessage');
-    expect((result as any).outOfSyncMessage).toContain(
-      'packages/proj/tsconfig.json',
-    );
-    expect((result as any).outOfSyncMessage).toContain(':shared');
   });
 
   it('should do nothing when tsconfig paths are not configured', async () => {
@@ -106,7 +100,7 @@ describe('ts-sync generator', () => {
       },
     });
 
-    const result = await syncGeneratorGenerator(tree);
+    const result = await tsSyncGeneratorGenerator(tree);
 
     expect(
       readJson<Record<string, any>>(tree, 'packages/proj/tsconfig.json')
@@ -115,19 +109,42 @@ describe('ts-sync generator', () => {
     expect(result).toEqual({});
   });
 
-  it('should add generator metric to app.ts', async () => {
+  it('should do nothing when project tsconfig paths already include base paths', async () => {
     writeJson('tsconfig.base.json', {
       compilerOptions: {
         paths: {
           ':shared': ['packages/shared/src/index.ts'],
+          '@shared/*': ['packages/shared/src/*'],
         },
       },
     });
 
-    await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
+    addProjectConfiguration(tree, 'proj', {
+      root: 'packages/proj',
+      targets: {},
+    });
 
-    await syncGeneratorGenerator(tree);
+    const projectTsConfig = {
+      compilerOptions: {
+        paths: {
+          ':shared': ['packages/shared/src/index.ts'],
+          '@shared/*': ['packages/shared/src/*'],
+          '@local/*': ['src/*'],
+        },
+      },
+    };
 
-    expectHasMetricTags(tree, TS_SYNC_GENERATOR_INFO.metric);
+    writeJson('packages/proj/tsconfig.json', projectTsConfig);
+    writeJson('packages/proj/tsconfig.lib.json', projectTsConfig);
+
+    const result = await tsSyncGeneratorGenerator(tree);
+
+    expect(readJson(tree, 'packages/proj/tsconfig.json')).toEqual(
+      projectTsConfig,
+    );
+    expect(readJson(tree, 'packages/proj/tsconfig.lib.json')).toEqual(
+      projectTsConfig,
+    );
+    expect(result).toEqual({});
   });
 });

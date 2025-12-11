@@ -11,7 +11,6 @@ import {
   updateJson,
 } from '@nx/devkit';
 import { NxGeneratorInfo, getGeneratorInfo } from '../../utils/nx';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { formatFilesInSubtree } from '../../utils/format';
 import { SyncGeneratorResult } from 'nx/src/utils/sync-generators';
 import PackageJson from '../../../package.json';
@@ -21,12 +20,10 @@ export const TS_SYNC_GENERATOR_INFO: NxGeneratorInfo =
 
 export const SYNC_GENERATOR_NAME = `${PackageJson.name}:${TS_SYNC_GENERATOR_INFO.id}`;
 
-export const syncGeneratorGenerator = async (
+export const tsSyncGeneratorGenerator = async (
   tree: Tree,
 ): Promise<SyncGeneratorResult> => {
   const basePaths = readBaseTsConfigPaths(tree);
-
-  await addGeneratorMetricsIfApplicable(tree, [TS_SYNC_GENERATOR_INFO]);
 
   if (!basePaths || Object.keys(basePaths).length === 0) {
     return {};
@@ -59,11 +56,11 @@ export const syncGeneratorGenerator = async (
   await formatFilesInSubtree(tree);
 
   return {
-    outOfSyncMessage: buildOutOfSyncMessage(addedPathsByConfig),
+    outOfSyncMessage: buildOutOfSyncMessage(),
   };
 };
 
-export default syncGeneratorGenerator;
+export default tsSyncGeneratorGenerator;
 
 const readBaseTsConfigPaths = (
   tree: Tree,
@@ -76,32 +73,34 @@ const readBaseTsConfigPaths = (
     return undefined;
   }
 
-  const baseConfig = readJson<Record<string, any>>(tree, baseConfigPath);
-  return baseConfig?.compilerOptions?.paths;
+  const baseConfigJson = readJson<Record<string, any>>(tree, baseConfigPath);
+  return baseConfigJson?.compilerOptions?.paths;
 };
 
 const addBasePathsIfMissing = (
   tree: Tree,
-  tsconfigPath: string,
+  tsConfigPath: string,
   basePaths: Record<string, string[]>,
 ): string[] => {
   const addedAliases: string[] = [];
 
-  updateJson(tree, tsconfigPath, (json) => {
-    const paths = json?.compilerOptions?.paths;
+  const tsConfigJson = readJson(tree, tsConfigPath);
+  const paths = tsConfigJson?.compilerOptions?.paths;
 
-    if (!paths) {
-      return json;
-    }
+  if (!paths) {
+    return addedAliases;
+  }
 
-    const missingEntries = Object.entries(basePaths).filter(
-      ([alias]) => !(alias in paths),
-    );
+  const projectPathAliases = new Set(Object.keys(paths));
+  const missingEntries = Object.entries(basePaths).filter(
+    ([alias]) => !projectPathAliases.has(alias),
+  );
 
-    if (missingEntries.length === 0) {
-      return json;
-    }
+  if (missingEntries.length === 0) {
+    return addedAliases;
+  }
 
+  updateJson(tree, tsConfigPath, (json) => {
     addedAliases.push(...missingEntries.map(([alias]) => alias));
 
     return {
@@ -122,12 +121,5 @@ const addBasePathsIfMissing = (
 /**
  * Build the message to display when the sync generator would make changes to the tree
  */
-const buildOutOfSyncMessage = (addedPaths: Record<string, string[]>): string =>
-  `TypeScript path aliases are out of sync with the base tsconfig. The following configs were updated:\n${Object.entries(
-    addedPaths,
-  )
-    .map(
-      ([config, aliases]) =>
-        `${config}:\n${aliases.map((alias) => `- ${alias}`).join('\n')}`,
-    )
-    .join('\n\n')}`;
+const buildOutOfSyncMessage = (): string =>
+  `TypeScript path aliases are out of sync with the base tsconfig.`;
