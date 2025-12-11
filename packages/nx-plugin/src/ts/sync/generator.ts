@@ -56,7 +56,7 @@ export const tsSyncGeneratorGenerator = async (
   await formatFilesInSubtree(tree);
 
   return {
-    outOfSyncMessage: buildOutOfSyncMessage(),
+    outOfSyncMessage: buildOutOfSyncMessage(addedPathsByConfig),
   };
 };
 
@@ -121,5 +121,12 @@ const addBasePathsIfMissing = (
 /**
  * Build the message to display when the sync generator would make changes to the tree
  */
-const buildOutOfSyncMessage = (): string =>
-  `TypeScript path aliases are out of sync with the base tsconfig.`;
+const buildOutOfSyncMessage = (addedPaths: Record<string, string[]>): string =>
+  `TypeScript path aliases are out of sync with the base tsconfig. The following configs will be updated:\n${Object.entries(
+    addedPaths,
+  )
+    .map(
+      ([config, aliases]) =>
+        `${config}:\n${aliases.map((alias) => `- ${alias}`).join('\n')}`,
+    )
+    .join('\n\n')}`;

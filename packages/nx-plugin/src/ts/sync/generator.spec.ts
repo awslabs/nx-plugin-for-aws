@@ -78,6 +78,11 @@ describe('ts-sync generator', () => {
     ).toBeUndefined();
 
     expect(result).toHaveProperty('outOfSyncMessage');
+    expect((result as any).outOfSyncMessage).toContain(
+      'packages/proj/tsconfig.json',
+    );
+    expect((result as any).outOfSyncMessage).toContain(':shared');
+    expect((result as any).outOfSyncMessage).toContain('@shared/*');
   });
 
   it('should do nothing when tsconfig paths are not configured', async () => {
