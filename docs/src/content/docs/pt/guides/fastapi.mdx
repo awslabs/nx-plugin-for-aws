@@ -3,8 +3,6 @@ title: "FastAPI"
 description: "Documentação de referência para FastAPI"
 ---
 
-
-
 import { FileTree, AnchorHeading, Tabs, TabItem } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
@@ -160,7 +158,7 @@ Exceções não tratadas são capturadas pelo middleware e:
 3. Retornam resposta 500 segura ao cliente
 4. Preservam o ID de correlação
 
-:::dica
+:::tip
 Recomenda-se especificar modelos de resposta para operações da API para melhor geração de código ao usar o `api-connection`. <Link path="guides/api-connection/react-fastapi#errors">Veja detalhes aqui</Link>.
 :::
 
@@ -272,10 +270,10 @@ export class MyApi extends Construct {
 </details>
 </Fragment>
 <Fragment slot="terraform">
-Para configurar com Terraform, substitua a infraestrutura do API Gateway por Lambda Function URL.
+Para configurar com Terraform, substitua a infraestrutura do API Gateway por Lambda Function URL que suporta streaming de respostas.
 
 <details>
-<summary>Exemplo de Configuração Terraform para Function URL</summary>
+<summary>Exemplo de Configuração Lambda Function URL para Streaming</summary>
 
 ```hcl
 data "aws_caller_identity" "current" {}
@@ -351,7 +349,9 @@ resource "aws_lambda_function_url" "my_api_url" {
   invoke_mode       = "RESPONSE_STREAM"
 
   cors {
+    allow_credentials = false
     allow_origins     = ["*"]
+    allow_methods     = ["*"]
     allow_headers = [
       "authorization",
       "content-type",
@@ -359,10 +359,13 @@ resource "aws_lambda_function_url" "my_api_url" {
       "x-amz-date",
       "x-amz-security-token"
     ]
+    expose_headers = ["date", "keep-alive"]
+    max_age       = 86400
   }
 }
 
 output "my_api_url" {
+  description = "URL para a FastAPI Lambda Function com streaming"
   value       = aws_lambda_function_url.my_api_url.function_url
 }
 
@@ -379,6 +382,7 @@ resource "aws_ssm_parameter" "my_api_url" {
 
 resource "aws_iam_policy" "my_api_invoke_policy" {
   name        = "my-api-invoke-policy"
+  description = "Política para permitir invocar a FastAPI Lambda Function URL com streaming"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -396,6 +400,11 @@ resource "aws_iam_policy" "my_api_invoke_policy" {
     ]
   })
 }
+
+# resource "aws_iam_role_policy_attachment" "my_api_invoke_access" {
+#   role       = var.authenticated_role_name
+#   policy_arn = aws_iam_policy.my_api_invoke_policy.arn
+# }
 ```
 
 </details>
@@ -405,13 +414,13 @@ resource "aws_iam_policy" "my_api_invoke_policy" {
 
 #### Implementação
 
-Após atualizar a infraestrutura, você pode implementar streaming no FastAPI. A API deve:
+Após atualizar a infraestrutura para suportar streaming, você pode implementar uma API de streaming no FastAPI. A API deve:
 
 - Retornar [`StreamingResponse`](https://fastapi.tiangolo.com/reference/responses/?h=streaming#fastapi.responses.StreamingResponse)
-- Declarar o tipo de retorno de cada chunk
+- Declarar o tipo de retorno de cada chunk de resposta
 - Adicionar a extensão OpenAPI `x-streaming: true` se usar <Link path="guides/api-connection/react-fastapi">API Connection</Link>.
 
-Exemplo de streaming de objetos JSON:
+Por exemplo, para transmitir uma série de objetos JSON da API:
 
 ```py /return (StreamingResponse)/ /openapi_extra[^)]*/ /-> (Chunk)/
 from pydantic import BaseModel
@@ -432,11 +441,11 @@ def my_stream() -> Chunk:
 
 #### Consumo
 
-Para consumir streams, utilize o <Link path="guides/api-connection/react-fastapi#consuming-a-stream">Gerador de Conexão de API</Link>.
+Para consumir streams, utilize o <Link path="guides/api-connection/react-fastapi#consuming-a-stream">Gerador de Conexão de API</Link>, que fornece um método type-safe para iterar sobre os chunks transmitidos.
 
 ## Implantando sua API FastAPI
 
-O gerador cria código de infraestrutura CDK/Terraform baseado no `iacProvider`. Use para implantar:
+O gerador cria código de infraestrutura CDK ou Terraform baseado no `iacProvider`. Use para implantar:
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -463,6 +472,8 @@ Isso configura:
 5. Configuração de X-Ray
 6. Namespace de métricas
 
+<Snippet name="api/cors-configuration-cdk-note" />
+
 :::note
 Se usar `Cognito`, forneça a propriedade `identity`:
 
@@ -474,6 +485,7 @@ export class ExampleStack extends Stack {
     const identity = new UserIdentity(this, 'Identity');
 
     const api = new MyApi(this, 'MyApi', {
+      integrations: MyApi.defaultIntegrations(this).build(),
       identity,
     });
   }
@@ -509,7 +521,10 @@ Isso configura:
 2. API Gateway HTTP/REST
 3. Permissões IAM
 4. Log group no CloudWatch
-5. Configuração de CORS
+5. Configuração de X-Ray
+6. Configuração de CORS
+
+<Snippet name="api/cors-configuration-terraform-note" />
 
 :::note
 Para `Cognito`, forneça:
@@ -530,6 +545,7 @@ module "my_api" {
 }
 ```
 
+Você pode configurar Cognito User Pool e Client usando recursos ou módulos Terraform apropriados.
 :::
 
 Saídas do módulo:
@@ -554,13 +570,19 @@ Personalize CORS:
 module "my_api" {
   source = "../../common/terraform/src/app/apis/my-api"
 
-  cors_allow_origins = ["https://myapp.com"]
-  cors_allow_methods = ["GET", "POST"]
-  cors_allow_headers = ["authorization"]
+  cors_allow_origins = ["https://myapp.com", "https://staging.myapp.com"]
+  cors_allow_methods = ["GET", "POST", "PUT", "DELETE"]
+  cors_allow_headers = [
+    "authorization",
+    "content-type",
+    "x-custom-header"
+  ]
+
+  tags = local.common_tags
 }
 ```
 
-:::cuidado
+:::caution
 Se selecionar `None` para `auth`, Checkov pode reportar falhas:
 
 <Tabs syncKey="http-rest">
@@ -601,7 +623,7 @@ Execute um build após alterar a API:
 <NxCommands commands={["run-many --target build --all"]} />
 :::
 
-:::dica
+:::tip
 Use [`nx watch`](https://nx.dev/nx-api/nx/documents/watch) para regenerar tipos automaticamente:
 
 <NxCommands
@@ -633,9 +655,13 @@ api.grantInvokeAccess(myIdentityPool.authenticatedRole);
 ```hcl
 resource "aws_iam_policy" "api_invoke_policy" {
   name        = "MyApiInvokePolicy"
+  description = "Política para permitir invocar a FastAPI"
+
   policy = jsonencode({
+    Version = "2012-10-17"
     Statement = [
       {
+        Effect = "Allow"
         Action = "execute-api:Invoke"
         Resource = "${module.my_api.api_execution_arn}/*/*"
       }
@@ -647,12 +673,18 @@ resource "aws_iam_role_policy_attachment" "api_invoke_access" {
   role       = aws_iam_role.authenticated_user_role.name
   policy_arn = aws_iam_policy.api_invoke_policy.arn
 }
+
+resource "aws_iam_role_policy_attachment" "api_invoke_access_existing" {
+  role       = "MyExistingRole"
+  policy_arn = aws_iam_policy.api_invoke_policy.arn
+}
 ```
 
 Principais saídas:
-- `module.my_api.api_execution_arn`
-- `module.my_api.api_arn`
-- `module.my_api.lambda_function_arn`
+
+- `module.my_api.api_execution_arn` - Para permissões execute-api:Invoke
+- `module.my_api.api_arn` - ARN do API Gateway
+- `module.my_api.lambda_function_arn` - ARN da função Lambda
 </Fragment>
 </Infrastructure>
 

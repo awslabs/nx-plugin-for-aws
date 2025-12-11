@@ -7,11 +7,11 @@ exports[`fastapi project generator > should match snapshot > main-snapshot 1`] =
   "apps/test_api/proj_test_api/init.py": "import os
 import uuid
 from collections.abc import Callable
+from urllib.parse import urlparse
 
 from aws_lambda_powertools import Logger, Metrics, Tracer
 from aws_lambda_powertools.metrics import MetricUnit
 from fastapi import FastAPI, Request, Response
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
@@ -46,10 +46,25 @@ lambda_handler = logger.inject_lambda_context(lambda_handler, clear_state=True)
 lambda_handler = metrics.log_metrics(lambda_handler, capture_cold_start_metric=True)
 
 # Add cors middleware
-app.add_middleware(CORSMiddleware,
-                   allow_origins=['*'],
-                   allow_methods=['*'],
-                   allow_headers=['*'])
+@app.middleware("http")
+async def cors_middleware(request: Request, call_next):
+    response = await call_next(request)
+    
+    origin = request.headers.get("origin")
+    allowed_origins = os.environ.get('ALLOWED_ORIGINS', '').split(',') if os.environ.get('ALLOWED_ORIGINS') else []
+    
+    is_localhost = origin and urlparse(origin).hostname in ['localhost', '127.0.0.1']
+    is_allowed_origin = origin and origin in allowed_origins
+    
+    cors_origin = '*'
+    if allowed_origins and not is_localhost:
+        cors_origin = origin if is_allowed_origin else allowed_origins[0]
+    
+    response.headers["Access-Control-Allow-Origin"] = cors_origin
+    response.headers["Access-Control-Allow-Methods"] = "*"
+    response.headers["Access-Control-Allow-Headers"] = "*"
+    
+    return response
 
 # Add exception middleware(s)
 app.add_middleware(ExceptionMiddleware, handlers=app.exception_handlers)
@@ -311,6 +326,7 @@ export class HttpApi<
 exports[`fastapi project generator > should set up shared constructs for http > test-api.ts 1`] = `
 "import { Construct } from 'constructs';
 import * as url from 'url';
+import { Distribution } from 'aws-cdk-lib/aws-cloudfront';
 import {
   Code,
   Runtime,
@@ -319,7 +335,7 @@ import {
   Tracing,
 } from 'aws-cdk-lib/aws-lambda';
 import { Duration } from 'aws-cdk-lib';
-import { CorsHttpMethod } from 'aws-cdk-lib/aws-apigatewayv2';
+import { CorsHttpMethod, CfnApi } from 'aws-cdk-lib/aws-apigatewayv2';
 import { HttpIamAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
 import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import { Grant, IGrantable } from 'aws-cdk-lib/aws-iam';
@@ -417,6 +433,48 @@ export class TestApi<
       operations: OPERATION_DETAILS,
       ...props,
     });
+  }
+
+  /**
+   * Restricts CORS to the website CloudFront distribution domains
+   *
+   * Configures the CloudFront distribution domains as the only permitted CORS origins
+   * (other than local host with default ports) in the API gateway
+   * The CORS origins are not configured within the AWS Lambda integrations since
+   * the associated header is controlled by API Gateway v2
+   *
+   * @param cloudFrontDistribution - The CloudFront distribution to grant CORS from
+   */
+  public restrictCorsTo(
+    ...websites: { cloudFrontDistribution: Distribution }[]
+  ) {
+    const allowedOrigins = websites.map(
+      ({ cloudFrontDistribution }) =>
+        \`https://\${cloudFrontDistribution.distributionDomainName}\`,
+    );
+
+    const cfnApi = this.api.node.defaultChild;
+    if (!(cfnApi instanceof CfnApi)) {
+      throw new Error(
+        'Unable to configure CORS: API default child is not a CfnApi instance',
+      );
+    }
+
+    cfnApi.corsConfiguration = {
+      allowOrigins: [
+        'http://localhost:4200',
+        'http://localhost:4300',
+        ...allowedOrigins,
+      ],
+      allowMethods: [CorsHttpMethod.ANY],
+      allowHeaders: [
+        'authorization',
+        'content-type',
+        'x-amz-content-sha256',
+        'x-amz-date',
+        'x-amz-security-token',
+      ],
+    };
   }
 
   /**
@@ -801,6 +859,7 @@ export class RestApi<
 exports[`fastapi project generator > should set up shared constructs for rest > test-api.ts 1`] = `
 "import { Construct } from 'constructs';
 import * as url from 'url';
+import { Distribution } from 'aws-cdk-lib/aws-cloudfront';
 import {
   Code,
   Runtime,
@@ -918,6 +977,34 @@ export class TestApi<
       }),
       operations: OPERATION_DETAILS,
       ...props,
+    });
+  }
+
+  /**
+   * Restricts CORS to the website CloudFront distribution domains
+   *
+   * Configures the CloudFront distribution domains as the only permitted CORS origins
+   * (other than local host) in the AWS Lambda integrations
+   *
+   * Note that this restriction is not applied to preflight OPTIONS
+   *
+   * @param websites - The CloudFront distribution to grant CORS from
+   */
+  public restrictCorsTo(
+    ...websites: { cloudFrontDistribution: Distribution }[]
+  ) {
+    const allowedOrigins = websites
+      .map(
+        ({ cloudFrontDistribution }) =>
+          \`https://\${cloudFrontDistribution.distributionDomainName}\`,
+      )
+      .join(',');
+
+    // Set ALLOWED_ORIGINS environment variable for all Lambda integrations
+    Object.values(this.integrations).forEach((integration) => {
+      if ('handler' in integration && integration.handler instanceof Function) {
+        integration.handler.addEnvironment('ALLOWED_ORIGINS', allowedOrigins);
+      }
     });
   }
 

@@ -34,6 +34,7 @@ exports[`tsSmithyApiGenerator > should configure git and eslint ignores for gene
 exports[`tsSmithyApiGenerator > should generate smithy ts api with Cognito auth > cognito-auth-infra.ts 1`] = `
 "import { Construct } from 'constructs';
 import * as url from 'url';
+import { Distribution } from 'aws-cdk-lib/aws-cloudfront';
 import {
   Code,
   Runtime,
@@ -162,6 +163,34 @@ export class TestApi<
       ...props,
     });
   }
+
+  /**
+   * Restricts CORS to the website CloudFront distribution domains
+   *
+   * Configures the CloudFront distribution domains as the only permitted CORS origins
+   * (other than local host) in the AWS Lambda integrations
+   *
+   * Note that this restriction is not applied to preflight OPTIONS
+   *
+   * @param websites - The CloudFront distribution to grant CORS from
+   */
+  public restrictCorsTo(
+    ...websites: { cloudFrontDistribution: Distribution }[]
+  ) {
+    const allowedOrigins = websites
+      .map(
+        ({ cloudFrontDistribution }) =>
+          \`https://\${cloudFrontDistribution.distributionDomainName}\`,
+      )
+      .join(',');
+
+    // Set ALLOWED_ORIGINS environment variable for all Lambda integrations
+    Object.values(this.integrations).forEach((integration) => {
+      if ('handler' in integration && integration.handler instanceof Function) {
+        integration.handler.addEnvironment('ALLOWED_ORIGINS', allowedOrigins);
+      }
+    });
+  }
 }
 "
 `;
@@ -169,6 +198,7 @@ export class TestApi<
 exports[`tsSmithyApiGenerator > should generate smithy ts api with IAM auth > iam-auth-infra.ts 1`] = `
 "import { Construct } from 'constructs';
 import * as url from 'url';
+import { Distribution } from 'aws-cdk-lib/aws-cloudfront';
 import {
   Code,
   Runtime,
@@ -286,6 +316,34 @@ export class TestApi<
       }),
       operations: OPERATION_DETAILS,
       ...props,
+    });
+  }
+
+  /**
+   * Restricts CORS to the website CloudFront distribution domains
+   *
+   * Configures the CloudFront distribution domains as the only permitted CORS origins
+   * (other than local host) in the AWS Lambda integrations
+   *
+   * Note that this restriction is not applied to preflight OPTIONS
+   *
+   * @param websites - The CloudFront distribution to grant CORS from
+   */
+  public restrictCorsTo(
+    ...websites: { cloudFrontDistribution: Distribution }[]
+  ) {
+    const allowedOrigins = websites
+      .map(
+        ({ cloudFrontDistribution }) =>
+          \`https://\${cloudFrontDistribution.distributionDomainName}\`,
+      )
+      .join(',');
+
+    // Set ALLOWED_ORIGINS environment variable for all Lambda integrations
+    Object.values(this.integrations).forEach((integration) => {
+      if ('handler' in integration && integration.handler instanceof Function) {
+        integration.handler.addEnvironment('ALLOWED_ORIGINS', allowedOrigins);
+      }
     });
   }
 
@@ -1110,11 +1168,24 @@ export const lambdaHandler = async (
   return {
     ...apiGatewayResponse,
     headers: {
-      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Origin': getAllowedOrigin(event),
       'Access-Control-Allow-Methods': '*',
       ...apiGatewayResponse.headers,
     },
   };
+};
+
+const getAllowedOrigin = (event: APIGatewayProxyEvent) => {
+  const origin = event.headers?.origin ?? event.headers?.Origin;
+  const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') ?? [];
+  const isLocalHost =
+    origin && new Set(['localhost', '127.0.0.1']).has(new URL(origin).hostname);
+  const isAllowedOrigin = origin && allowedOrigins.includes(origin);
+  let corsOrigin = '*';
+  if (allowedOrigins.length > 0 && !isLocalHost) {
+    corsOrigin = isAllowedOrigin ? origin : allowedOrigins[0];
+  }
+  return corsOrigin;
 };
 
 export const handler = middy<APIGatewayProxyEvent, APIGatewayProxyResult>()
@@ -1255,11 +1326,24 @@ export const lambdaHandler = async (
   return {
     ...apiGatewayResponse,
     headers: {
-      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Origin': getAllowedOrigin(event),
       'Access-Control-Allow-Methods': '*',
       ...apiGatewayResponse.headers,
     },
   };
+};
+
+const getAllowedOrigin = (event: APIGatewayProxyEvent) => {
+  const origin = event.headers?.origin ?? event.headers?.Origin;
+  const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') ?? [];
+  const isLocalHost =
+    origin && new Set(['localhost', '127.0.0.1']).has(new URL(origin).hostname);
+  const isAllowedOrigin = origin && allowedOrigins.includes(origin);
+  let corsOrigin = '*';
+  if (allowedOrigins.length > 0 && !isLocalHost) {
+    corsOrigin = isAllowedOrigin ? origin : allowedOrigins[0];
+  }
+  return corsOrigin;
 };
 
 export const handler = middy<APIGatewayProxyEvent, APIGatewayProxyResult>()
