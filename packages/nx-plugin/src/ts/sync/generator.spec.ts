@@ -63,11 +63,6 @@ describe('ts-sync generator', () => {
       '@local/*': ['src/*'],
     });
     expect(
-      readJson<Record<string, any>>(tree, 'packages/proj/tsconfig.json')
-        .tsSyncManagedPaths,
-    ).toEqual([':shared', '@shared/*']);
-
-    expect(
       readJson<Record<string, any>>(tree, 'packages/proj/tsconfig.lib.json')
         .compilerOptions.paths,
     ).toEqual({
@@ -75,11 +70,6 @@ describe('ts-sync generator', () => {
       '@shared/*': ['packages/shared/src/*'],
       '@local/*': ['src/*'],
     });
-    expect(
-      readJson<Record<string, any>>(tree, 'packages/proj/tsconfig.lib.json')
-        .tsSyncManagedPaths,
-    ).toEqual([':shared', '@shared/*']);
-
     expect(
       readJson<Record<string, any>>(tree, 'packages/proj/tsconfig.app.json')
         .compilerOptions.paths,
@@ -122,7 +112,7 @@ describe('ts-sync generator', () => {
     expect(result).toEqual({});
   });
 
-  it('should update managed metadata when project tsconfig paths already include base paths', async () => {
+  it('should leave project tsconfig unchanged when base paths already exist', async () => {
     writeJson('tsconfig.base.json', {
       compilerOptions: {
         paths: {
@@ -152,16 +142,13 @@ describe('ts-sync generator', () => {
 
     const result = await tsSyncGeneratorGenerator(tree);
 
-    expect(readJson(tree, 'packages/proj/tsconfig.json')).toEqual({
-      ...projectTsConfig,
-      tsSyncManagedPaths: [':shared', '@shared/*'],
-    });
-    expect(readJson(tree, 'packages/proj/tsconfig.lib.json')).toEqual({
-      ...projectTsConfig,
-      tsSyncManagedPaths: [':shared', '@shared/*'],
-    });
-    expect(result).toHaveProperty('outOfSyncMessage');
-    expect((result as any).outOfSyncMessage).toContain('tsSyncManagedPaths');
+    expect(readJson(tree, 'packages/proj/tsconfig.json')).toEqual(
+      projectTsConfig,
+    );
+    expect(readJson(tree, 'packages/proj/tsconfig.lib.json')).toEqual(
+      projectTsConfig,
+    );
+    expect(result).toEqual({});
   });
 
   it('should update existing paths when base config changes', async () => {
@@ -184,7 +171,6 @@ describe('ts-sync generator', () => {
           ':shared': ['packages/shared/src/old.ts'],
         },
       },
-      tsSyncManagedPaths: [':shared'],
     });
 
     const result = await tsSyncGeneratorGenerator(tree);
@@ -199,7 +185,7 @@ describe('ts-sync generator', () => {
     expect((result as any).outOfSyncMessage).toContain(':shared (updated)');
   });
 
-  it('should remove paths that are removed from the base config', async () => {
+  it('should ignore paths that are removed from the base config', async () => {
     writeJson('tsconfig.base.json', {
       compilerOptions: {
         paths: {},
@@ -218,7 +204,6 @@ describe('ts-sync generator', () => {
           '@local/*': ['src/*'],
         },
       },
-      tsSyncManagedPaths: [':shared'],
     });
 
     const result = await tsSyncGeneratorGenerator(tree);
@@ -227,13 +212,9 @@ describe('ts-sync generator', () => {
       readJson<Record<string, any>>(tree, 'packages/proj/tsconfig.json')
         .compilerOptions.paths,
     ).toEqual({
+      ':shared': ['packages/shared/src/index.ts'],
       '@local/*': ['src/*'],
     });
-    expect(
-      readJson<Record<string, any>>(tree, 'packages/proj/tsconfig.json')
-        .tsSyncManagedPaths,
-    ).toEqual([]);
-    expect(result).toHaveProperty('outOfSyncMessage');
-    expect((result as any).outOfSyncMessage).toContain(':shared (removed)');
+    expect(result).toEqual({});
   });
 });

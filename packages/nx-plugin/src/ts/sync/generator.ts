@@ -82,7 +82,7 @@ const readBaseTsConfigPaths = (
   return baseConfigJson?.compilerOptions?.paths ?? {};
 };
 
-type PathChangeType = 'added' | 'updated' | 'removed' | 'metadata';
+type PathChangeType = 'added' | 'updated';
 
 type PathChange = {
   alias: string;
@@ -111,24 +111,10 @@ const syncPathsWithBase = (
     return { updated: false, changes };
   }
 
-  const baseAliases = new Set(Object.keys(basePaths));
-  const initialManagedAliases: string[] = tsConfigJson.tsSyncManagedPaths ?? [];
-  const managedAliases = new Set<string>(initialManagedAliases);
-
   const updatedAliases: Record<string, string[]> = {
     ...(tsConfigJson.compilerOptions?.paths ?? {}),
   };
   let updated = false;
-
-  // Remove aliases that were managed previously but are no longer present in the base config
-  for (const alias of [...managedAliases]) {
-    if (!baseAliases.has(alias) && alias in updatedAliases) {
-      delete updatedAliases[alias];
-      managedAliases.delete(alias);
-      updated = true;
-      changes.push({ alias, type: 'removed' });
-    }
-  }
 
   // Add or update aliases that exist in the base config
   for (const [alias, baseValue] of Object.entries(basePaths)) {
@@ -142,24 +128,11 @@ const syncPathsWithBase = (
     }
 
     updatedAliases[alias] = baseValue;
-    managedAliases.add(alias);
-  }
-
-  const expectedManagedAliases = [...baseAliases].sort();
-  if (
-    !arePathArraysEqual(
-      initialManagedAliases.slice().sort(),
-      expectedManagedAliases,
-    )
-  ) {
-    updated = true;
-    changes.push({ alias: 'tsSyncManagedPaths', type: 'metadata' });
   }
 
   if (updated) {
     updateJson(tree, tsConfigPath, (json) => ({
       ...json,
-      tsSyncManagedPaths: expectedManagedAliases,
       compilerOptions: {
         ...json.compilerOptions,
         paths: updatedAliases,
