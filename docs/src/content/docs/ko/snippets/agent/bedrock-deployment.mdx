@@ -1,0 +1,229 @@
+---
+title: "Agent Bedrock 배포"
+---
+
+import Link from '@components/link.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+### Infrastructure as Code
+
+`computeType`에 대해 `BedrockAgentCoreRuntime`을 선택한 경우, Strands Agent를 [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html)에 배포하는 데 사용할 수 있는 관련 CDK 또는 Terraform 인프라가 생성됩니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+에이전트에 대한 CDK 구성이 생성되며, 생성기를 실행할 때 선택한 `name`을 기반으로 이름이 지정되거나 기본적으로 `<ProjectName>Agent`로 지정됩니다.
+
+CDK 애플리케이션에서 이 CDK 구성을 사용할 수 있습니다:
+
+```ts {6}
+import { MyProjectAgent } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    // Add the agent to your stack
+    const agent = new MyProjectAgent(this, 'MyProjectAgent');
+
+    // Grant permissions to invoke the relevant models in bedrock
+    agent.agentCoreRuntime.addToRolePolicy(
+      new PolicyStatement({
+        actions: [
+          'bedrock:InvokeModel',
+          'bedrock:InvokeModelWithResponseStream',
+        ],
+        // You can scope the below down to the specific models you use
+        resources: [
+          'arn:aws:bedrock:*:*:foundation-model/*',
+          'arn:aws:bedrock:*:*:inference-profile/*',
+        ],
+      }),
+    );
+  }
+}
+```
+
+:::note
+이 구성은 [`@aws-cdk/aws-bedrock-agentcore-alpha` 모듈](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-bedrock-agentcore-alpha-readme.html)을 사용합니다.
+:::
+</Fragment>
+<Fragment slot="terraform">
+Terraform 모듈이 생성되며, 생성기를 실행할 때 선택한 `name`을 기반으로 이름이 지정되거나 기본적으로 `<ProjectName>-agent`로 지정됩니다.
+
+Terraform 프로젝트에서 이 terraform 모듈을 사용할 수 있습니다:
+
+```terraform
+# Agent
+module "my_project_agent" {
+  # Relative path to the generated module in the common/terraform project
+  source = "../../common/terraform/src/app/agents/my-project-agent"
+
+  # Grant permissions to invoke the relevant models in bedrock
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream"
+      ]
+      # You can scope the below down to the specific models you use
+      Resource = [
+        "arn:aws:bedrock:*:*:foundation-model/*",
+        "arn:aws:bedrock:*:*:inference-profile/*"
+      ]
+    }
+  ]
+}
+```
+</Fragment>
+</Infrastructure>
+
+:::caution
+Strands Agent를 빌드하고 배포하려면 [Docker](https://www.docker.com/)가 필요합니다. 다음과 같은 오류를 방지하려면 Docker를 설치하고 실행했는지 확인하세요:
+
+```
+ERROR: Cannot connect to the Docker daemon at unix://path/to/docker.sock.
+```
+:::
+
+### 인증
+
+#### IAM
+
+기본적으로 Strands Agent는 IAM 인증을 사용하여 보호되며, 인수 없이 간단히 배포할 수 있습니다:
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts {5}
+import { MyProjectAgent } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    new MyProjectAgent(this, 'MyProjectAgent');
+  }
+}
+```
+
+`grantInvoke` 메서드를 사용하여 Bedrock AgentCore Runtime에서 에이전트를 호출할 수 있는 액세스 권한을 부여할 수 있습니다. 예를 들어:
+
+```ts {8}
+import { MyProjectAgent } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const agent = new MyProjectAgent(this, 'MyProjectAgent');
+    const lambdaFunction = new Function(this, ...);
+
+    agent.agentCoreRuntime.grantInvoke(lambdaFunction);
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+```terraform
+# Agent
+module "my_project_agent" {
+  # Relative path to the generated module in the common/terraform project
+  source = "../../common/terraform/src/app/agents/my-project-agent"
+}
+```
+
+에이전트를 호출할 수 있는 액세스 권한을 부여하려면 `module.my_project_agent.agent_core_runtime_arn` 출력을 참조하여 다음과 같은 정책을 추가해야 합니다:
+
+```terraform
+{
+  Effect = "Allow"
+  Action = [
+    "bedrock-agentcore:InvokeAgentRuntime"
+  ]
+  Resource = [
+    module.my_project_agent.agent_core_runtime_arn,
+    "${module.my_project_agent.agent_core_runtime_arn}/*"
+  ]
+}
+```
+</Fragment>
+</Infrastructure>
+
+#### Cognito JWT 인증
+
+다음은 에이전트에 대한 Cognito 인증을 구성하는 방법을 보여줍니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Cognito를 사용하여 JWT 인증을 구성하려면 `RuntimeAuthorizerConfiguration.usingCognito()` 팩토리 메서드를 사용하세요:
+
+```ts {14-17}
+import { MyProjectAgent } from ':my-scope/common-constructs';
+import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const userPool = new UserPool(this, 'UserPool');
+    const client = userPool.addClient('Client', {
+      authFlows: {
+        userPassword: true,
+      },
+    });
+
+    new MyProjectAgent(this, 'MyProjectAgent', {
+      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingCognito(
+        userPool,
+        [client],
+      ),
+    });
+  }
+}
+```
+
+또는 자체 OIDC 공급자를 사용하는 사용자 지정 JWT 인증의 경우 `RuntimeAuthorizerConfiguration.usingJWT()`를 사용하세요:
+
+```ts {7-11}
+import { MyProjectAgent } from ':my-scope/common-constructs';
+import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    new MyProjectAgent(this, 'MyProjectAgent', {
+      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingJWT(
+        'https://example.com/.well-known/openid-configuration',
+        ['client1', 'client2'], // Allowed Client IDs (optional)
+        ['audience1'],          // Allowed Audiences (optional)
+      ),
+    });
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+JWT 인증을 구성하려면 다음과 같이 `authorizer_configuration` 변수를 구성하도록 에이전트 모듈을 편집할 수 있습니다:
+
+```terraform {18-23}
+# packages/common/terraform/src/app/agents/my-project-agent/my-project-agent.tf
+
+data "aws_region" "current" {}
+
+locals {
+  aws_region = data.aws_region.current.id
+
+  # Replace with your user pool and client ids or expose as variables
+  user_pool_id = "xxx"
+  user_pool_client_ids = ["yyy"]
+}
+
+module "agent_core_runtime" {
+  source = "../../../core/agent-core"
+  agent_runtime_name = "MyProjectAgent"
+  docker_image_tag = "my-scope-my-project-agent:latest"
+  server_protocol = "HTTP"
+  authorizer_configuration = {
+    custom_jwt_authorizer = {
+      discovery_url = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration"
+      allowed_clients = local.user_pool_client_ids
+    }
+  }
+  env = var.env
+  additional_iam_policy_statements = var.additional_iam_policy_statements
+  tags = var.tags
+}
+```
+</Fragment>
+</Infrastructure>

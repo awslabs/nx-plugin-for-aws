@@ -10,6 +10,7 @@ import Link from '@components/link.astro';
 import Snippet from '@components/snippet.astro';
 import Infrastructure from '@components/infrastructure.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
+import Drawer from '@components/drawer.astro';
 
 AIエージェントをツール付きで構築するためのPython [Strands Agent](https://strandsagents.com/)を生成し、オプションで[Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/)にデプロイします。
 
@@ -306,7 +307,7 @@ async def invoke(input: InvokeInput) -> str:
     return StreamingResponse(handle_invoke(input), media_type="text/event-stream")
 ```
 
-代わりに構造化データを生成するPydanticモデルを定義できます：
+代わりに構造化データを生成するPydanticモデルを定義できます。これを行うには、`handle_invoke`が生成するPydanticモデルをシリアライズする必要があります：
 
 ```python
 from pydantic import BaseModel
@@ -316,10 +317,22 @@ class StreamChunk(BaseModel):
     timestamp: str
     token_count: int
 
+def handle_invoke(...):
+    ...
+    yield StreamChunk(content="xx", timestamp="yy", token_count=5)
+
+def serialize_stream(generator):
+    async for output in generator:
+        yield (output.model_dump_json() + "\n").encode("utf-8")
+
 @app.post("/invocations", openapi_extra={"x-streaming": True})
 async def invoke(input: InvokeInput) -> StreamChunk:
-    return StreamingResponse(handle_invoke(input), media_type="application/json")
+    return StreamingResponse(serialize_stream(handle_invoke(input)), media_type="application/json")
 ```
+
+:::caution
+ここで注意すべき点は、提供されるサーバー（および上記の`serialize_stream`メソッド）は現在Server-Sent Events（SSE）標準に準拠していないため、必要に応じてフロントエンドから生成されたTypeScriptクライアントでエージェントを呼び出すことができますが、現在はSSE形式のストリーミングイベントを想定していません。この問題が影響する場合は、優先順位付けのために[このGitHub issue](https://github.com/awslabs/nx-plugin-for-aws/issues/369)に+1をお願いします。
+:::
 
 ## Bedrock AgentCore Python SDK
 
@@ -343,85 +356,7 @@ SDKの詳細は[ドキュメント](https://aws.github.io/bedrock-agentcore-star
 
 ## Bedrock AgentCore Runtimeへのデプロイ
 
-### インフラストラクチャ即コード
-
-`computeType`に`BedrockAgentCoreRuntime`を選択した場合、関連するCDK/Terraformインフラストラクチャが生成され、[Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html)にStrandsエージェントをデプロイできます。
-
-<Infrastructure>
-<Fragment slot="cdk">
-ジェネレーター実行時に選択した`name`に基づいて、またはデフォルトで`<ProjectName>Agent`という名前のCDKコンストラクトがエージェント用に生成されます。
-
-このCDKコンストラクトをCDKアプリケーションで使用できます：
-
-```ts {6}
-import { MyProjectAgent } from ':my-scope/common-constructs';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    // スタックにエージェントを追加
-    const agent = new MyProjectAgent(this, 'MyProjectAgent');
-
-    // Bedrockモデル呼び出し権限の付与
-    agent.agentCoreRuntime.addToRolePolicy(
-      new PolicyStatement({
-        actions: [
-          'bedrock:InvokeModel',
-          'bedrock:InvokeModelWithResponseStream',
-        ],
-        // 使用する特定のモデルに絞り込むことができます
-        resources: ['arn:aws:bedrock:*::foundation-model/*'],
-      }),
-    );
-  }
-}
-```
-
-:::note
-このコンストラクトは[`@aws-cdk/aws-bedrock-agentcore-alpha`モジュール](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-bedrock-agentcore-alpha-readme.html)を使用します。
-:::
-</Fragment>
-<Fragment slot="terraform">
-ジェネレーター実行時に選択した`name`に基づいて、またはデフォルトで`<ProjectName>-agent`という名前のTerraformモジュールが生成されます。
-
-このTerraformモジュールをTerraformプロジェクトで使用できます：
-
-```terraform
-# エージェント
-module "my_project_agent" {
-  # common/terraformプロジェクト内の生成されたモジュールへの相対パス
-  source = "../../common/terraform/src/app/agents/my-project-agent"
-
-  # Bedrockモデル呼び出し権限の付与
-  additional_iam_policy_statements = [
-    {
-      Effect = "Allow"
-      Action = [
-        "bedrock:InvokeModel",
-        "bedrock:InvokeModelWithResponseStream"
-      ]
-      Resource = [
-        "arn:aws:bedrock:*::foundation-model/*"
-      ]
-    }
-  ]
-}
-```
-</Fragment>
-</Infrastructure>
-
-:::note
-Bedrock AgentCore Runtimeへのデプロイ時には、AWSアカウントで適切な基盤モデルが有効化されている必要があります。デフォルトでStrandsエージェントはClaude 4 Sonnetを使用しますが、上記のようにカスタマイズ可能です。
-
-Amazon Bedrockでモデルアクセスを有効化するには、[こちらの手順](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html)に従ってください。
-:::
-
-:::caution
-Strandsエージェントのビルドとデプロイには[Docker](https://www.docker.com/)が必要です。以下のようなエラーを防ぐため、Dockerのインストールと起動を確認してください：
-
-```
-ERROR: Cannot connect to the Docker daemon at unix://path/to/docker.sock.
-```
-:::
+<Snippet name="agent/bedrock-deployment" parentHeading="Bedrock AgentCore Runtimeへのデプロイ" />
 
 ### バンドルとDockerターゲット
 
@@ -587,3 +522,64 @@ module "agent_core_runtime" {
 トレースはCloudWatch AWSコンソールのメニューから「GenAI Observability」を選択して確認できます。トレースが表示されるには[Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search.html)を有効にする必要があります。
 
 詳細は[AgentCoreオブザーバビリティドキュメント](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html)を参照してください。
+
+## Strandsエージェントの呼び出し
+
+### ローカルサーバーの呼び出し
+
+`<your-agent-name>-serve`ターゲット経由でローカル実行中のエージェントを呼び出すには、ローカルエージェントが実行されているポートの`/invocations`に単純なPOSTリクエストを送信できます。例えば、`curl`を使用：
+
+```bash
+curl -N -X POST http://localhost:8081/invocations \
+  -d '{"prompt": "what is 3 + 5?", "session_id": "abcdefghijklmnopqrstuvwxyz0123456789"}' \
+  -H "Content-Type: application/json"
+```
+
+:::note
+`curl`に与えられる`-N`引数は出力ストリームのバッファリングを無効にするため、ストリーミングレスポンスをリアルタイムで確認できます。
+:::
+
+### デプロイされたエージェントの呼び出し
+
+<Snippet name="agent/runtime-arn" parentHeading="デプロイされたエージェントの呼び出し" />
+
+#### IAM認証
+
+IAM認証の場合、リクエストはAWS Signature Version 4（SigV4）を使用して署名する必要があります。
+
+```bash
+acurl <region> bedrock-agentcore -N -X POST \
+'https://bedrock
+-agentcore.<region>.amazonaws.com/runtimes/<url-encoded-arn>/invocations' \
+-d '{"prompt": "what is 3 + 5?", "session_id": "abcdefghijklmnopqrstuvwxyz0123456789"}' \
+-H 'Content-Type: application/json'
+```
+
+<Drawer title="Sigv4対応curl" trigger="上記のacurlコマンドの設定詳細についてはこちらをクリック">
+<Snippet name="tools/acurl" />
+</Drawer>
+
+#### JWT / Cognito認証
+
+Cognito認証の場合、`Authorization`ヘッダーにCognitoアクセストークンを渡します：
+
+```bash
+curl -N -X POST 'https://bedrock
+-agentcore.<region>.amazonaws.com/runtimes/<url-encoded-arn>/invocations' \
+  -d '{"prompt": "what is 3 + 5?", "session_id": "abcdefghijklmnopqrstuvwxyz0123456789"}' \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <access-token>"
+```
+
+AWS CLIの`cognito-idp admin-initiate-auth`コマンドを使用してアクセストークンを取得できます。例：
+
+```bash
+aws cognito-idp admin-initiate-auth \
+  --user-pool-id <user-pool-id> \
+  --client-id <user-pool-client-id> \
+  --auth-flow ADMIN_NO_SRP_AUTH \
+  --auth-parameters USERNAME=<username>,PASSWORD=<password> \
+  --region <region> \
+  --query 'AuthenticationResult.AccessToken' \
+  --output text
+```
