@@ -22,7 +22,7 @@ export default {
         },
         '**/*.{py,sh}': { blockStart: '# ', lineStart: '# ', blockEnd: '# ' },
       },
-      exclude: [],
+      exclude: ['e2e/src/linked-templates/**/*'],
     },
   },
 } satisfies AwsNxPluginConfig;

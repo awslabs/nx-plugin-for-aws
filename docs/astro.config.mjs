@@ -195,7 +195,8 @@ export default defineConfig({
                       link: '/get_started/tutorials/dungeon-game/1',
                     },
                     {
-                      label:'2. Implement the Game API and Inventory MCP server',
+                      label:
+                        '2. Implement the Game API and Inventory MCP server',
                       translations: {
                         jp: '2. ゲームAPIとインベントリMCP',
                         ko: '2. 게임 API 및 인벤토리 MCP',
@@ -313,6 +314,7 @@ export default defineConfig({
             { label: 'ts#nx-plugin', link: '/guides/ts-nx-plugin' },
             { label: 'ts#nx-generator', link: '/guides/nx-generator' },
             { label: 'ts#mcp-server', link: '/guides/ts-mcp-server' },
+            { label: 'ts#strands-agent', link: '/guides/ts-strands-agent' },
             { label: 'py#project', link: '/guides/python-project' },
             { label: 'py#fast-api', link: '/guides/fastapi' },
             {
