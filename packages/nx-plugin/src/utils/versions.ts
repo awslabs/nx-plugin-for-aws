@@ -25,7 +25,7 @@ export const TS_VERSIONS = {
   'create-nx-workspace': '22.1.3',
   '@modelcontextprotocol/sdk': '1.25.1',
   '@modelcontextprotocol/inspector': '0.18.0',
-  '@strands-agents/sdk': '0.1.2',
+  '@strands-agents/sdk': '0.1.3',
   '@tanstack/react-router': '1.139.7',
   '@tanstack/router-plugin': '1.139.7',
   '@tanstack/router-generator': '1.139.7',
