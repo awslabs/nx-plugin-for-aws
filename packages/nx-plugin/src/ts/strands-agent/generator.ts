@@ -63,7 +63,7 @@ export const tsStrandsAgentGenerator = async (
 
   const computeType = options.computeType ?? 'BedrockAgentCoreRuntime';
 
-  // Generate example server
+  // Generate example agent
   generateFiles(
     tree,
     joinPathFragments(__dirname, 'files', 'app'),
