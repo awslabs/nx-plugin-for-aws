@@ -25,6 +25,7 @@ export const TS_VERSIONS = {
   'create-nx-workspace': '22.1.3',
   '@modelcontextprotocol/sdk': '1.25.1',
   '@modelcontextprotocol/inspector': '0.18.0',
+  '@strands-agents/sdk': '0.1.2',
   '@tanstack/react-router': '1.139.7',
   '@tanstack/router-plugin': '1.139.7',
   '@tanstack/router-generator': '1.139.7',
@@ -42,11 +43,12 @@ export const TS_VERSIONS = {
   '@types/aws-lambda': '8.10.159',
   '@types/cors': '2.8.19',
   '@types/express': '5.0.5',
+  '@types/ws': '8.18.1',
   '@smithy/types': '4.9.0',
   aws4fetch: '1.0.20',
   'aws-cdk': '2.1033.0',
-  'aws-cdk-lib': '2.230.0',
-  '@aws-cdk/aws-bedrock-agentcore-alpha': '2.229.1-alpha.0',
+  'aws-cdk-lib': '2.232.1',
+  '@aws-cdk/aws-bedrock-agentcore-alpha': '2.232.1-alpha.0',
   'aws-xray-sdk-core': '3.12.0',
   constructs: '10.4.3',
   cors: '2.8.5',
@@ -71,6 +73,7 @@ export const TS_VERSIONS = {
   tsx: '4.20.6',
   'vite-tsconfig-paths': '5.1.4',
   zod: '4.2.1',
+  ws: '8.18.3',
 } as const;
 export type ITsDepVersion = keyof typeof TS_VERSIONS;
 

@@ -1,0 +1,1037 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ts#strands-agent generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > agent-Dockerfile 1`] = `
+"FROM public.ecr.aws/docker/library/node:lts-jod
+
+WORKDIR /app
+
+# Add AWS Distro for OpenTelemetry for observability
+# https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html
+RUN npm install @aws/aws-distro-opentelemetry-node-autoinstrumentation@^0.7.0
+
+# Copy bundled agent
+COPY --from=workspace dist/apps/test-project/bundle/agent/snapshot-bedrock-agent/index.js /app
+
+EXPOSE 8080
+
+# Auto-instrument with AWS Distro for OpenTelemetry
+# https://aws-otel.github.io/docs/getting-started/js-sdk/trace-metric-auto-instr
+CMD [ "node", "--require", "@aws/aws-distro-opentelemetry-node-autoinstrumentation/register", "index.js" ]
+"
+`;
+
+exports[`ts#strands-agent generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > agent-construct.ts 1`] = `
+"import { Lazy, Names } from 'aws-cdk-lib';
+import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import { Construct } from 'constructs';
+import { execSync } from 'child_process';
+import * as path from 'path';
+import * as url from 'url';
+import {
+  AgentRuntimeArtifact,
+  ProtocolType,
+  Runtime,
+  RuntimeProps,
+} from '@aws-cdk/aws-bedrock-agentcore-alpha';
+
+export type SnapshotBedrockAgentProps = Omit<
+  RuntimeProps,
+  'runtimeName' | 'protocolConfiguration' | 'agentRuntimeArtifact'
+>;
+
+export class SnapshotBedrockAgent extends Construct {
+  public readonly dockerImage: AgentRuntimeArtifact;
+  public readonly agentCoreRuntime: Runtime;
+
+  constructor(scope: Construct, id: string, props?: SnapshotBedrockAgentProps) {
+    super(scope, id);
+
+    this.dockerImage = AgentRuntimeArtifact.fromAsset(
+      path.dirname(url.fileURLToPath(new URL(import.meta.url))),
+      {
+        platform: Platform.LINUX_ARM64,
+        extraHash: execSync(
+          \`docker inspect proj-snapshot-bedrock-agent:latest --format '{{.Id}}'\`,
+          { encoding: 'utf-8' },
+        ).trim(),
+      },
+    );
+
+    this.agentCoreRuntime = new Runtime(this, 'SnapshotBedrockAgent', {
+      runtimeName: Lazy.string({
+        produce: () =>
+          Names.uniqueResourceName(this.agentCoreRuntime, { maxLength: 40 }),
+      }),
+      protocolConfiguration: ProtocolType.HTTP,
+      agentRuntimeArtifact: this.dockerImage,
+      ...props,
+    });
+  }
+}
+"
+`;
+
+exports[`ts#strands-agent generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > agents-index.ts 1`] = `
+"export * from './snapshot-bedrock-agent/snapshot-bedrock-agent.js';
+"
+`;
+
+exports[`ts#strands-agent generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > app-index.ts 1`] = `
+"export * from './agents/index.js';
+"
+`;
+
+exports[`ts#strands-agent generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > core-index.ts 1`] = `
+"export * from './app.js';
+export * from './checkov.js';
+export * from './runtime-config.js';
+"
+`;
+
+exports[`ts#strands-agent generator > should match snapshot for Terraform generated files > terraform-agent.tf 1`] = `
+"variable "env" {
+  description = "Environment variables to pass to the agent core runtime"
+  type        = map(string)
+  default     = {}
+}
+
+variable "additional_iam_policy_statements" {
+  description = "Additional IAM policy statements to attach to the agent core runtime role"
+  type = list(object({
+    Effect   = string
+    Action   = list(string)
+    Resource = list(string)
+  }))
+  default = []
+}
+
+variable "tags" {
+  description = "Tags to apply to resources"
+  type        = map(string)
+  default     = {}
+}
+
+module "agent_core_runtime" {
+  source = "../../../core/agent-core"
+  agent_runtime_name = "TerraformSnapshotAgent"
+  docker_image_tag = "proj-terraform-snapshot-agent:latest"
+  server_protocol = "HTTP"
+#  authorizer_configuration = {
+#    custom_jwt_authorizer = {
+#      discovery_url = "https://xxx/.well-known/openid-configuration"
+#      allowed_clients = [ "xxx" ]
+#    }
+#  }
+
+  env = var.env
+  additional_iam_policy_statements = var.additional_iam_policy_statements
+  tags = var.tags
+}
+
+output "agent_core_runtime_role_arn" {
+  description = "ARN of the agent core runtime role"
+  value       = module.agent_core_runtime.agent_core_runtime_role_arn
+}
+
+output "agent_core_runtime_arn" {
+  description = "ARN of the Bedrock Agent Core runtime"
+  value       = module.agent_core_runtime.agent_core_runtime_arn
+}
+"
+`;
+
+exports[`ts#strands-agent generator > should match snapshot for Terraform generated files > terraform-agent-core-runtime.tf 1`] = `
+"terraform {
+  required_version = ">= 1.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = ">= 6.23"
+    }
+    null = {
+      source  = "hashicorp/null"
+      version = ">= 3.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = ">= 3.0"
+    }
+  }
+}
+
+# Variables
+variable "agent_runtime_name" {
+  description = "Name of the agent runtime"
+  type        = string
+  validation {
+    condition     = can(regex("^[a-zA-Z][a-zA-Z0-9_]{0,42}$", var.agent_runtime_name))
+    error_message = "Value must start with a letter and contain only letters, numbers, and underscores (1-43 characters)."
+  }
+}
+
+variable "server_protocol" {
+  description = "Server protocol for the agent runtime (HTTP, MCP, or A2A)"
+  type        = string
+  default     = "HTTP"
+  validation {
+    condition     = contains(["MCP", "HTTP", "A2A"], var.server_protocol)
+    error_message = "Protocol type must be either 'MCP', 'HTTP', or 'A2A'."
+  }
+}
+
+variable "authorizer_configuration" {
+  description = "Authorization configuration for authenticating incoming requests"
+  type = object({
+    custom_jwt_authorizer = optional(object({
+      discovery_url    = string
+      allowed_audience = optional(list(string))
+      allowed_clients  = optional(list(string))
+    }))
+  })
+  default = null
+}
+
+variable "docker_image_tag" {
+  description = "Name of the docker image tag to use as the agent core runtime"
+  type        = string
+}
+
+variable "env" {
+  description = "Environment variables to pass to the agent core runtime"
+  type        = map(string)
+  default     = {}
+}
+
+variable "additional_iam_policy_statements" {
+  description = "Additional IAM policy statements to attach to the agent core runtime role"
+  type = list(object({
+    Effect   = string
+    Action   = list(string)
+    Resource = list(string)
+  }))
+  default = []
+}
+
+variable "tags" {
+  description = "Tags to apply to resources"
+  type        = map(string)
+  default     = {}
+}
+
+# Data sources
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
+locals {
+  aws_account_id = data.aws_caller_identity.current.account_id
+  aws_region     = data.aws_region.current.id
+}
+
+# Random ID for bucket suffix to ensure uniqueness
+resource "random_id" "unique_suffix" {
+  byte_length = 4
+}
+
+# ECR Repository
+resource "aws_ecr_repository" "agent_core_repository" {
+  #checkov:skip=CKV_AWS_136:AES256 encryption is sufficient for ECR repositories
+  name = "\${lower(var.agent_runtime_name)}_repository_\${random_id.unique_suffix.hex}"
+
+  #checkov:skip=CKV_AWS_51:Image tag is reused for latest deployments
+  image_tag_mutability = "MUTABLE"
+  force_delete         = true
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  tags = var.tags
+}
+
+# ECR Repository Policy
+resource "aws_ecr_repository_policy" "agent_core_ecr_policy" {
+  repository = aws_ecr_repository.agent_core_repository.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowPushPull"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::\${local.aws_account_id}:root"
+        }
+        Action = [
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage",
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:PutImage",
+          "ecr:InitiateLayerUpload",
+          "ecr:UploadLayerPart",
+          "ecr:CompleteLayerUpload"
+        ]
+      }
+    ]
+  })
+}
+
+# IAM Role for Agent Core Runtime
+resource "aws_iam_role" "agent_core_runtime_role" {
+  name = "\${var.agent_runtime_name}-AgentCoreRuntimeRole-\${random_id.unique_suffix.hex}"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AgentCoreAssumeRolePolicy"
+        Effect = "Allow"
+        Principal = {
+          Service = "bedrock-agentcore.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = local.aws_account_id
+          }
+          ArnLike = {
+            "aws:SourceArn" = "arn:aws:bedrock-agentcore:\${local.aws_region}:\${local.aws_account_id}:*"
+          }
+        }
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+# IAM Policy for Agent Core Runtime
+resource "aws_iam_policy" "agent_core_runtime_policy" {
+  name        = "\${var.agent_runtime_name}-QueryAgentPolicy-\${random_id.unique_suffix.hex}"
+  description = "Restricted policy for Agent"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = concat([
+      {
+        Sid    = "ECRImageAccess"
+        Effect = "Allow"
+        Action = [
+          "ecr:BatchGetImage",
+          "ecr:GetDownloadUrlForLayer"
+        ]
+        Resource = [
+          aws_ecr_repository.agent_core_repository.arn
+        ]
+      },
+      {
+        Sid    = "ECRTokenAccess"
+        Effect = "Allow"
+        Action = [
+          "ecr:GetAuthorizationToken"
+        ]
+        Resource = [
+          "*"
+        ]
+      },
+      {
+        "Effect" : "Allow",
+        "Action" : [
+          "logs:DescribeLogStreams",
+          "logs:CreateLogGroup"
+        ],
+        "Resource" : [
+          "arn:aws:logs:\${local.aws_region}:\${local.aws_account_id}:log-group:/aws/bedrock-agentcore/runtimes/*"
+        ]
+      },
+      {
+        "Effect" : "Allow",
+        "Action" : [
+          "logs:DescribeLogGroups"
+        ],
+        "Resource" : [
+          "arn:aws:logs:\${local.aws_region}:\${local.aws_account_id}:log-group:*"
+        ]
+      },
+      {
+        "Effect" : "Allow",
+        "Action" : [
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ],
+        "Resource" : [
+          "arn:aws:logs:\${local.aws_region}:\${local.aws_account_id}:log-group:/aws/bedrock-agentcore/runtimes/*:log-stream:*"
+        ]
+      },
+      {
+        "Effect" : "Allow",
+        "Action" : [
+          "xray:PutTraceSegments",
+          "xray:PutTelemetryRecords",
+          "xray:GetSamplingRules",
+          "xray:GetSamplingTargets"
+        ],
+        "Resource" : ["*"]
+      },
+      {
+        "Effect" : "Allow",
+        "Resource" : "*",
+        "Action" : "cloudwatch:PutMetricData",
+        "Condition" : {
+          "StringEquals" : {
+            "cloudwatch:namespace" : "bedrock-agentcore"
+          }
+        }
+      },
+      {
+        "Sid" : "GetAgentAccessToken",
+        "Effect" : "Allow",
+        "Action" : [
+          "bedrock-agentcore:GetWorkloadAccessToken",
+          "bedrock-agentcore:GetWorkloadAccessTokenForJWT",
+          "bedrock-agentcore:GetWorkloadAccessTokenForUserId"
+        ],
+        "Resource" : [
+          "arn:aws:bedrock-agentcore:\${local.aws_region}:\${local.aws_account_id}:workload-identity-directory/default",
+          "arn:aws:bedrock-agentcore:\${local.aws_region}:\${local.aws_account_id}:workload-identity-directory/default/workload-identity/*"
+        ]
+      }
+    ], var.additional_iam_policy_statements)
+  })
+
+  tags = var.tags
+}
+
+# Attach the restricted policy to the role
+resource "aws_iam_role_policy_attachment" "agent_core_policy" {
+  role       = aws_iam_role.agent_core_runtime_role.name
+  policy_arn = aws_iam_policy.agent_core_runtime_policy.arn
+}
+
+# Data source to get Docker image digest
+data "external" "docker_digest" {
+  program = ["sh", "-c", "echo '{\\"digest\\":\\"'$(docker inspect \${var.docker_image_tag} --format '{{.Id}}')'\\"}' "]
+}
+
+# Null resource for Docker publish
+resource "null_resource" "docker_publish" {
+  triggers = {
+    docker_digest    = data.external.docker_digest.result.digest
+    repository_url   = aws_ecr_repository.agent_core_repository.repository_url
+    docker_image_tag = var.docker_image_tag
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      # Get ECR login token
+      aws ecr get-login-password --region \${local.aws_region} | docker login --username AWS --password-stdin \${self.triggers.repository_url}
+
+      # Tag the image
+      docker tag \${self.triggers.docker_image_tag} \${self.triggers.repository_url}:latest
+
+      # Push the image
+      docker push \${self.triggers.repository_url}:latest
+    EOT
+  }
+
+  depends_on = [aws_ecr_repository_policy.agent_core_ecr_policy]
+}
+
+# Bedrock AgentCore Agent Runtime
+resource "aws_bedrockagentcore_agent_runtime" "agent_runtime" {
+  agent_runtime_name = "\${var.agent_runtime_name}_\${random_id.unique_suffix.hex}"
+  description        = "Agent Runtime for \${var.agent_runtime_name}"
+  role_arn           = aws_iam_role.agent_core_runtime_role.arn
+
+  agent_runtime_artifact {
+    container_configuration {
+      container_uri = "\${aws_ecr_repository.agent_core_repository.repository_url}:latest"
+    }
+  }
+
+  environment_variables = length(var.env) > 0 ? var.env : null
+
+  dynamic "authorizer_configuration" {
+    for_each = var.authorizer_configuration != null && var.authorizer_configuration.custom_jwt_authorizer != null ? [var.authorizer_configuration.custom_jwt_authorizer] : []
+    content {
+      custom_jwt_authorizer {
+        discovery_url    = authorizer_configuration.value.discovery_url
+        allowed_audience = authorizer_configuration.value.allowed_audience
+        allowed_clients  = authorizer_configuration.value.allowed_clients
+      }
+    }
+  }
+
+  network_configuration {
+    network_mode = "PUBLIC"
+  }
+
+  protocol_configuration {
+    server_protocol = var.server_protocol
+  }
+
+  tags = var.tags
+
+  depends_on = [
+    null_resource.docker_publish,
+    aws_iam_role_policy.agent_core_runtime_policy
+  ]
+}
+
+# Outputs
+output "agent_core_runtime_role_arn" {
+  description = "ARN of the Agent Core Runtime IAM role"
+  value       = aws_iam_role.agent_core_runtime_role.arn
+}
+
+output "agent_core_runtime_role_name" {
+  description = "Name of the Agent Core Runtime IAM role"
+  value       = aws_iam_role.agent_core_runtime_role.name
+}
+
+output "agent_runtime_name" {
+  description = "Name of the deployed agent runtime"
+  value       = aws_bedrockagentcore_agent_runtime.agent_runtime.agent_runtime_name
+}
+
+output "agent_core_runtime_arn" {
+  description = "ARN of the Bedrock Agent Core runtime"
+  value       = aws_bedrockagentcore_agent_runtime.agent_runtime.agent_runtime_arn
+}
+
+output "agent_runtime_id" {
+  description = "ID of the Bedrock Agent Core runtime"
+  value       = aws_bedrockagentcore_agent_runtime.agent_runtime.agent_runtime_id
+}
+
+output "agent_runtime_version" {
+  description = "Version of the Bedrock Agent Core runtime"
+  value       = aws_bedrockagentcore_agent_runtime.agent_runtime.agent_runtime_version
+}
+"
+`;
+
+exports[`ts#strands-agent generator > should match snapshot for generated files > strands-agent-agent.ts 1`] = `
+"import { Agent, tool } from '@strands-agents/sdk';
+import { z } from 'zod';
+
+const add = tool({
+  name: 'Add',
+  description: 'Add two numbers',
+  inputSchema: z.object({
+    a: z.number(),
+    b: z.number(),
+  }),
+  callback: ({ a, b }) => a + b,
+});
+
+export const getAgent = () =>
+  new Agent({
+    systemPrompt: \`You are an addition wizard.
+  Use the add tool for addition tasks.
+  Refer to tools as your 'spellbook'.\`,
+    tools: [add],
+  });
+"
+`;
+
+exports[`ts#strands-agent generator > should match snapshot for generated files > strands-agent-agent-core-mcp-client.ts 1`] = `
+"import { McpClient } from '@strands-agents/sdk';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { AwsClient } from 'aws4fetch';
+import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
+
+/**
+ * Options for creating an AgentCore MCP client with IAM authentication
+ */
+export interface AgentCoreMcpClientIamOptions {
+  agentRuntimeArn: string;
+  region: string;
+  sessionId: string;
+}
+
+/**
+ * Options for creating an AgentCore MCP client with JWT authentication
+ */
+export interface AgentCoreMcpClientJwtOptions {
+  agentRuntimeArn: string;
+  accessToken: string;
+  region: string;
+  sessionId: string;
+}
+
+/**
+ * Internal options for creating an AgentCore MCP client
+ */
+interface CreateOptions {
+  agentRuntimeArn: string;
+  region: string;
+  sessionId: string;
+  additionalHeaders?: Record<string, string>;
+  fetch?: typeof fetch;
+}
+
+/**
+ * Factory for clients to call MCP servers hosted on Bedrock AgentCore Runtime
+ */
+export class AgentCoreMcpClient {
+  /**
+   * Internal method to create an MCP client
+   */
+  private static create(options: CreateOptions): McpClient {
+    const {
+      agentRuntimeArn,
+      region,
+      sessionId,
+      additionalHeaders = {},
+      fetch: customFetch,
+    } = options;
+
+    // Encode the ARN for URL
+    const encodedArn = agentRuntimeArn
+      .replace(/:/g, '%3A')
+      .replace(/\\//g, '%2F');
+    const url = \`https://bedrock-agentcore.\${region}.amazonaws.com/runtimes/\${encodedArn}/invocations?qualifier=DEFAULT\`;
+
+    // Create a custom fetch that adds required headers
+    const fetchWithHeaders: typeof fetch = async (input, init) => {
+      const headers = {
+        'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id': sessionId,
+        ...additionalHeaders,
+      };
+      const existingHeaders = init?.headers;
+
+      const mergedInit = {
+        ...init,
+        headers: !existingHeaders
+          ? headers
+          : existingHeaders instanceof Headers
+            ? (() => {
+                const h = new Headers(existingHeaders);
+                Object.entries(headers).forEach(([k, v]) => h.append(k, v));
+                return h;
+              })()
+            : Array.isArray(existingHeaders)
+              ? [...existingHeaders, ...Object.entries(headers)]
+              : { ...existingHeaders, ...headers },
+      };
+      return (customFetch || fetch)(input, mergedInit);
+    };
+
+    // Create the transport
+    const transport = new StreamableHTTPClientTransport(new URL(url), {
+      fetch: fetchWithHeaders,
+    });
+
+    // Create and return the MCP client
+    return new McpClient({ transport });
+  }
+
+  /**
+   * Create an MCP client with IAM (SigV4) authentication
+   */
+  static withIamAuth(options: AgentCoreMcpClientIamOptions): McpClient {
+    const { region, ...rest } = options;
+
+    // Create credential provider
+    const credentialProvider = fromNodeProviderChain();
+
+    // Create a SigV4 signing fetch function
+    const sigv4Fetch: typeof fetch = async (...args) => {
+      const credentials = await credentialProvider();
+      const client = new AwsClient({
+        ...credentials,
+        service: 'bedrock-agentcore',
+        region,
+      });
+      return client.fetch(...args);
+    };
+
+    return AgentCoreMcpClient.create({
+      ...rest,
+      region,
+      fetch: sigv4Fetch,
+    });
+  }
+
+  /**
+   * Create an MCP client with JWT authentication
+   */
+  static withJwtAuth(options: AgentCoreMcpClientJwtOptions): McpClient {
+    const { accessToken, ...rest } = options;
+
+    return AgentCoreMcpClient.create({
+      ...rest,
+      additionalHeaders: {
+        Authorization: \`Bearer \${accessToken}\`,
+      },
+    });
+  }
+}
+"
+`;
+
+exports[`ts#strands-agent generator > should match snapshot for generated files > strands-agent-agent-core-trpc-client.ts 1`] = `
+"import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
+import {
+  createTRPCClient,
+  createWSClient,
+  WebSocketLinkOptions,
+  wsLink,
+} from '@trpc/client';
+import { AwsClient } from 'aws4fetch';
+import { AnyTRPCRouter } from '@trpc/server';
+import { WebSocket } from 'node:http';
+
+export interface WebSocketTrpcClientOptions {
+  /**
+   * URL of the websocket server, eg http://localhost:8080/ws
+   */
+  url: string;
+  /**
+   * Factory for creating headers to include in the WebSocket handshake
+   */
+  buildHeaders?: () => Promise<{ [key: string]: string }>;
+}
+
+/**
+ * Client for connecting to tRPC APIs via WebSocket
+ */
+export class WebSocketTrpcClient {
+  /**
+   * Utility for creating a tRPC client with a WebSocket link and custom headers
+   */
+  public static create = <TRouter extends AnyTRPCRouter>({
+    url,
+    buildHeaders = async () => ({}),
+  }: WebSocketTrpcClientOptions) => {
+    let headers = {};
+    const client = createWSClient({
+      url: async () => {
+        headers = await buildHeaders();
+        return url;
+      },
+      WebSocket: class extends WebSocket {
+        constructor(wsUrl: string | URL) {
+          super(wsUrl, { headers });
+        }
+      } as any,
+    });
+
+    return createTRPCClient<TRouter>({
+      links: [wsLink({ client } as WebSocketLinkOptions<TRouter>)],
+    });
+  };
+}
+
+export interface AgentCoreTrpcClientOptions {
+  /**
+   * The ARN of the Bedrock AgentCore Runtime to connect to
+   */
+  agentRuntimeArn: string;
+}
+
+export interface AgentCoreTrpcClientIamOptions
+  extends AgentCoreTrpcClientOptions {
+  /**
+   * Optional AWS credential provider. If not provided, uses the default
+   * credential provider chain from the AWS SDK.
+   */
+  credentialProvider?: ReturnType<typeof fromNodeProviderChain>;
+}
+
+export interface AgentCoreTrpcClientJwtOptions
+  extends AgentCoreTrpcClientOptions {
+  /**
+   * A function which returns the JWT access token used to authenticate
+   */
+  accessTokenProvider: () => Promise<string>;
+}
+
+/**
+ * Client for connecting to a tRPC API on Bedrock AgentCore Runtime via WebSocket.
+ */
+export class AgentCoreTrpcClient {
+  /**
+   * Construct the websocket url for connecting to Bedrock AgentCore Runtime
+   */
+  private static buildUrl = (agentRuntimeArn: string) => {
+    const region = agentRuntimeArn.split(':')[3];
+    const url = \`wss://bedrock-agentcore.\${region}.amazonaws.com/runtimes/\${agentRuntimeArn.replace(/:/g, '%3A').replace(/\\//g, '%2F')}/ws\`;
+    return { region, url };
+  };
+
+  /**
+   * Creates a tRPC client with IAM authentication using AWS credentials.
+   *
+   * The WebSocket connection is authenticated using AWS Signature Version 4 (SigV4) signed headers.
+   * This method signs the WebSocket upgrade request headers directly, rather than using a presigned URL.
+   */
+  public static withIamAuth = <TRouter extends AnyTRPCRouter>(
+    options: AgentCoreTrpcClientIamOptions,
+  ) => {
+    const credentialProvider =
+      options.credentialProvider ?? fromNodeProviderChain();
+    const { region, url } = AgentCoreTrpcClient.buildUrl(
+      options.agentRuntimeArn,
+    );
+
+    return WebSocketTrpcClient.create<TRouter>({
+      url,
+      buildHeaders: async () =>
+        Object.fromEntries(
+          (
+            await new AwsClient({
+              ...(await credentialProvider()),
+              region,
+              service: 'bedrock-agentcore',
+            }).sign(url)
+          ).headers,
+        ),
+    });
+  };
+
+  /**
+   * Creates a tRPC client with JWT (JSON Web Token) authentication.
+   *
+   * The WebSocket connection includes the JWT as a Bearer token in the Authorization header.
+   */
+  public static withJwtAuth = <TRouter extends AnyTRPCRouter>(
+    options: AgentCoreTrpcClientJwtOptions,
+  ) => {
+    const { url } = AgentCoreTrpcClient.buildUrl(options.agentRuntimeArn);
+
+    return WebSocketTrpcClient.create<TRouter>({
+      url,
+      buildHeaders: async () => ({
+        Authorization: \`Bearer \${await options.accessTokenProvider()}\`,
+      }),
+    });
+  };
+}
+"
+`;
+
+exports[`ts#strands-agent generator > should match snapshot for generated files > strands-agent-client.ts 1`] = `
+"import { AppRouter } from './router.js';
+import {
+  AgentCoreTrpcClient,
+  WebSocketTrpcClient,
+} from './agent-core-trpc-client.js';
+
+/**
+ * Client for connecting to SnapshotAgent on Bedrock AgentCore Runtime via WebSocket from a NodeJS environment
+ *
+ * Refer to the Nx Plugin for AWS documentation for instructions to connect to this agent in a browser.
+ */
+export class SnapshotAgentClient {
+  /**
+   * Creates a tRPC client with IAM authentication using AWS credentials.
+   *
+   * The WebSocket connection is authenticated using AWS Signature Version 4 (SigV4)
+   */
+  public static withIamAuth = AgentCoreTrpcClient.withIamAuth<AppRouter>;
+
+  /**
+   * Creates a tRPC client with JWT (JSON Web Token) authentication.
+   *
+   * The WebSocket connection includes the JWT as a Bearer token in the Authorization header.
+   */
+  public static withJwtAuth = AgentCoreTrpcClient.withJwtAuth<AppRouter>;
+
+  /**
+   * Creates a tRPC client for use with a locally running SnapshotAgent.
+   */
+  public static local = WebSocketTrpcClient.create<AppRouter>;
+}
+"
+`;
+
+exports[`ts#strands-agent generator > should match snapshot for generated files > strands-agent-index.ts 1`] = `
+"import { createServer } from 'http';
+import {
+  CreateHTTPContextOptions,
+  createHTTPHandler,
+} from '@trpc/server/adapters/standalone';
+import { appRouter, AppRouter } from './router.js';
+import { WebSocketServer } from 'ws';
+import cors from 'cors';
+import {
+  CreateWSSContextFnOptions,
+  applyWSSHandler,
+} from '@trpc/server/adapters/ws';
+import { Context } from './init.js';
+
+const PORT = parseInt(process.env.PORT || '8080');
+
+const createContext = (
+  opts: CreateHTTPContextOptions | CreateWSSContextFnOptions,
+): Context => ({});
+
+const handler = createHTTPHandler({
+  router: appRouter,
+  middleware: cors(),
+  createContext,
+});
+
+const server = createServer((req, res) => {
+  const url = new URL(req.url || '', \`https://\${req.headers.host}\`);
+
+  // Handle bedrock agentcore health check
+  if (url.pathname === '/ping') {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('Healthy');
+    return;
+  }
+
+  // Handle other requests with tRPC
+  handler(req, res);
+});
+
+const wss = new WebSocketServer({
+  server,
+  path: '/ws',
+});
+
+applyWSSHandler<AppRouter>({
+  wss,
+  router: appRouter,
+  createContext,
+});
+
+server.listen(PORT);
+
+console.log(\`TRPC server listening on port \${PORT}\`);
+"
+`;
+
+exports[`ts#strands-agent generator > should match snapshot for generated files > strands-agent-init.ts 1`] = `
+"import { initTRPC } from '@trpc/server';
+
+// eslint-disable-next-line
+export interface Context {}
+
+export const t = initTRPC.context<Context>().create();
+
+export const publicProcedure = t.procedure;
+"
+`;
+
+exports[`ts#strands-agent generator > should match snapshot for generated files > strands-agent-router.ts 1`] = `
+"import { publicProcedure, t } from './init.js';
+import { z } from 'zod';
+import { zAsyncIterable } from './schema/z-async-iterable.js';
+import { getAgent } from './agent.js';
+
+export const router = t.router;
+
+export const appRouter = router({
+  invoke: publicProcedure
+    .input(z.object({ message: z.string() }))
+    .output(
+      zAsyncIterable({
+        yield: z.string(),
+        tracked: false,
+      }),
+    )
+    .subscription(async function* (opts) {
+      const agent = getAgent();
+
+      for await (const event of agent.stream(opts.input.message)) {
+        if (
+          event.type === 'modelContentBlockDeltaEvent' &&
+          event.delta.type === 'textDelta'
+        ) {
+          yield event.delta.text;
+        } else if (event.type === 'modelMessageStopEvent') {
+          yield '\\n';
+        }
+      }
+      return;
+    }),
+});
+
+export type AppRouter = typeof appRouter;
+"
+`;
+
+exports[`ts#strands-agent generator > should match snapshot for generated files > strands-agent-z-async-iterable.ts 1`] = `
+"import { isTrackedEnvelope, tracked, TrackedEnvelope } from '@trpc/server';
+import { z } from 'zod';
+
+function isAsyncIterable<TValue, TReturn = unknown>(
+  value: unknown,
+): value is AsyncIterable<TValue, TReturn> {
+  return !!value && typeof value === 'object' && Symbol.asyncIterator in value;
+}
+
+const trackedEnvelopeSchema =
+  z.custom<TrackedEnvelope<unknown>>(isTrackedEnvelope);
+
+/**
+ * A Zod schema helper designed specifically for validating async iterables. This schema ensures that:
+ * 1. The value being validated is an async iterable.
+ * 2. Each item yielded by the async iterable conforms to a specified type.
+ * 3. The return value of the async iterable, if any, also conforms to a specified type.
+ */
+export function zAsyncIterable<
+  TYieldIn,
+  TYieldOut,
+  TReturnIn = void,
+  TReturnOut = void,
+  Tracked extends boolean = false,
+>(opts: {
+  /**
+   * Validate the value yielded by the async generator
+   */
+  yield: z.ZodType<TYieldOut, TYieldIn>;
+  /**
+   * Validate the return value of the async generator
+   * @remark not applicable for subscriptions
+   */
+  return?: z.ZodType<TReturnOut, TReturnIn>;
+  /**
+   * Whether if the yielded values are tracked
+   * @remark only applicable for subscriptions
+   */
+  tracked?: Tracked;
+}) {
+  return z
+    .custom<
+      AsyncIterable<
+        Tracked extends true ? TrackedEnvelope<TYieldIn> : TYieldIn,
+        TReturnIn
+      >
+    >((val) => isAsyncIterable(val))
+    .transform(async function* (iter) {
+      const iterator = iter[Symbol.asyncIterator]();
+      try {
+        let next;
+        while ((next = await iterator.next()) && !next.done) {
+          if (opts.tracked) {
+            const [id, data] = trackedEnvelopeSchema.parse(next.value);
+            yield tracked(id, await opts.yield.parseAsync(data));
+            continue;
+          }
+          yield opts.yield.parseAsync(next.value);
+        }
+        if (opts.return) {
+          return await opts.return.parseAsync(next.value);
+        }
+        return;
+      } finally {
+        await iterator.return?.();
+      }
+    }) as z.ZodType<
+    AsyncIterable<
+      Tracked extends true ? TrackedEnvelope<TYieldIn> : TYieldIn,
+      TReturnIn
+    >,
+    AsyncIterable<
+      Tracked extends true ? TrackedEnvelope<TYieldOut> : TYieldOut,
+      TReturnOut
+    >
+  >;
+}
+"
+`;

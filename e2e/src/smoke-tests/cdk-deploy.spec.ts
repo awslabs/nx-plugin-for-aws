@@ -14,6 +14,9 @@ import { runSmokeTest } from './smoke-test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
+// @ts-expect-error no types for virtual module
+import { AgentCoreTrpcClient } from 'virtual:ts-template/ts/strands-agent/files/app/agent-core-trpc-client';
+
 /**
  * Helper function to create an AWS client with SigV4 signing
  */
@@ -113,11 +116,56 @@ async function invokeAgentCoreAgent(
       'Content-Type': 'application/json',
     },
   });
-  console.log('Agent Response', await response.text());
+
+  let responseText = '';
+  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+  while (reader) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    responseText += value;
+    console.log(value);
+  }
+
+  console.log('Agent Response:', responseText);
 
   console.log(`${agentName} response status:`, response.status);
   expect(response.status).toBe(200);
+  expect(responseText).not.toHaveLength(0);
   console.log(`Successfully invoked ${agentName}`);
+}
+
+async function invokeTrpcAgentCoreAgent(
+  arn: string,
+  agentName: string,
+): Promise<void> {
+  console.log(`Testing ${agentName} with ARN ${arn}`);
+
+  // Dogfood our vended client
+  const client = AgentCoreTrpcClient.withIamAuth({
+    agentRuntimeArn: arn,
+  });
+
+  // Wait for any data, or an error
+  const response = await new Promise((resolve, reject) => {
+    let responseMessage = '';
+
+    // NB the trpc api is generated code so we don't have a type-safe trpc client here
+    (client.invoke as any).subscribe(
+      {
+        message: 'what is 3 + 5?',
+      },
+      {
+        onData: (chunk: string) => {
+          console.log(chunk);
+          responseMessage += chunk;
+        },
+        onComplete: () => resolve(responseMessage),
+        onError: (error: any) => reject(error),
+      },
+    );
+  });
+  console.log('Agent Response', response);
+  expect(response).not.toHaveLength(0);
 }
 
 async function invokeLambda(arn: string, lambdaName: string) {
@@ -229,6 +277,10 @@ describe('smoke test - cdk-deploy', () => {
       await invokeAgentCoreAgent(
         findOutput('StrandsAgentArn'),
         'Strands Agent',
+      );
+      await invokeTrpcAgentCoreAgent(
+        findOutput('TsStrandsAgentArn'),
+        'TypeScript Strands Agent',
       );
 
       // Lambda functions

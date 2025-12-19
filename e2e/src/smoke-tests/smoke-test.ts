@@ -128,6 +128,14 @@ export const runSmokeTest = async (
     opts,
   );
   await runCLI(
+    `generate @aws/nx-plugin:ts#strands-agent --project=ts-project --name=my-ts-agent --computeType=None --no-interactive`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:ts#strands-agent --project=ts-project --computeType=BedrockAgentCoreRuntime --no-interactive`,
+    opts,
+  );
+  await runCLI(
     `generate @aws/nx-plugin:api-connection --sourceProject=website --targetProject=py_api --no-interactive`,
     opts,
   );

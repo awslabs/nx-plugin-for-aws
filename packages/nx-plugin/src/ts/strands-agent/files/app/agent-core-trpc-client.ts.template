@@ -1,0 +1,124 @@
+import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
+import { createTRPCClient, createWSClient, WebSocketLinkOptions, wsLink } from '@trpc/client';
+import { AwsClient } from 'aws4fetch';
+import { AnyTRPCRouter } from '@trpc/server';
+import { WebSocket } from 'node:http';
+
+export interface WebSocketTrpcClientOptions {
+  /**
+   * URL of the websocket server, eg http://localhost:8080/ws
+   */
+  url: string;
+  /**
+   * Factory for creating headers to include in the WebSocket handshake
+   */
+  buildHeaders?: () => Promise<{ [key: string]: string }>;
+}
+
+/**
+ * Client for connecting to tRPC APIs via WebSocket
+ */
+export class WebSocketTrpcClient {
+  /**
+   * Utility for creating a tRPC client with a WebSocket link and custom headers
+   */
+  public static create = <TRouter extends AnyTRPCRouter>({
+    url,
+    buildHeaders = async () => ({}),
+  }: WebSocketTrpcClientOptions) => {
+    let headers = {};
+    const client = createWSClient({
+      url: async () => {
+        headers = await buildHeaders();
+        return url;
+      },
+      WebSocket: class extends WebSocket {
+        constructor(wsUrl: string | URL) {
+          super(wsUrl, { headers });
+        }
+      } as any,
+    });
+
+    return createTRPCClient<TRouter>({
+      links: [wsLink({ client } as WebSocketLinkOptions<TRouter>)],
+    });
+  };
+}
+
+export interface AgentCoreTrpcClientOptions {
+  /**
+   * The ARN of the Bedrock AgentCore Runtime to connect to
+   */
+  agentRuntimeArn: string;
+}
+
+export interface AgentCoreTrpcClientIamOptions extends AgentCoreTrpcClientOptions {
+  /**
+   * Optional AWS credential provider. If not provided, uses the default
+   * credential provider chain from the AWS SDK.
+   */
+  credentialProvider?: ReturnType<typeof fromNodeProviderChain>;
+}
+
+export interface AgentCoreTrpcClientJwtOptions extends AgentCoreTrpcClientOptions {
+  /**
+   * A function which returns the JWT access token used to authenticate
+   */
+  accessTokenProvider: () => Promise<string>;
+}
+
+/**
+ * Client for connecting to a tRPC API on Bedrock AgentCore Runtime via WebSocket.
+ */
+export class AgentCoreTrpcClient {
+  /**
+   * Construct the websocket url for connecting to Bedrock AgentCore Runtime
+   */
+  private static buildUrl = (agentRuntimeArn: string) => {
+    const region = agentRuntimeArn.split(':')[3];
+    const url = `wss://bedrock-agentcore.${region}.amazonaws.com/runtimes/${agentRuntimeArn.replace(/:/g, '%3A').replace(/\//g, '%2F')}/ws`;
+    return { region, url };
+  };
+
+  /**
+   * Creates a tRPC client with IAM authentication using AWS credentials.
+   *
+   * The WebSocket connection is authenticated using AWS Signature Version 4 (SigV4) signed headers.
+   * This method signs the WebSocket upgrade request headers directly, rather than using a presigned URL.
+   */
+  public static withIamAuth = <TRouter extends AnyTRPCRouter>(options: AgentCoreTrpcClientIamOptions) => {
+    const credentialProvider =
+      options.credentialProvider ?? fromNodeProviderChain();
+    const { region, url } = AgentCoreTrpcClient.buildUrl(options.agentRuntimeArn);
+
+    return WebSocketTrpcClient.create<TRouter>({
+      url,
+      buildHeaders: async () =>
+        Object.fromEntries(
+          (
+            await new AwsClient({
+              ...(await credentialProvider()),
+              region,
+              service: 'bedrock-agentcore',
+            }).sign(url)
+          ).headers,
+        ),
+    });
+  };
+
+  /**
+   * Creates a tRPC client with JWT (JSON Web Token) authentication.
+   *
+   * The WebSocket connection includes the JWT as a Bearer token in the Authorization header.
+   */
+  public static withJwtAuth = <TRouter extends AnyTRPCRouter>(options: AgentCoreTrpcClientJwtOptions) => {
+    const { url } = AgentCoreTrpcClient.buildUrl(options.agentRuntimeArn);
+
+    return WebSocketTrpcClient.create<TRouter>({
+      url,
+      buildHeaders: async () => ({
+        Authorization: `Bearer ${await options.accessTokenProvider()}`,
+      }),
+    });
+  };
+}

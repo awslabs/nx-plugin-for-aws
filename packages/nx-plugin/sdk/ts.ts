@@ -15,6 +15,10 @@ export type { TsInfraGeneratorSchema } from '../src/infra/app/schema';
 export { tsMcpServerGenerator } from '../src/ts/mcp-server/generator';
 export type { TsMcpServerGeneratorSchema } from '../src/ts/mcp-server/schema';
 
+// TypeScript Strands Agent Generator
+export { tsStrandsAgentGenerator } from '../src/ts/strands-agent/generator';
+export type { TsStrandsAgentGeneratorSchema } from '../src/ts/strands-agent/schema';
+
 // TypeScript Nx Generator Generator
 export { tsNxGeneratorGenerator } from '../src/ts/nx-generator/generator';
 export type { TsNxGeneratorGeneratorSchema } from '../src/ts/nx-generator/schema';

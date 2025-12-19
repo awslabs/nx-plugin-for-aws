@@ -1,0 +1,132 @@
+import { McpClient } from '@strands-agents/sdk';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { AwsClient } from 'aws4fetch';
+import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
+
+/**
+ * Options for creating an AgentCore MCP client with IAM authentication
+ */
+export interface AgentCoreMcpClientIamOptions {
+  agentRuntimeArn: string;
+  region: string;
+  sessionId: string;
+}
+
+/**
+ * Options for creating an AgentCore MCP client with JWT authentication
+ */
+export interface AgentCoreMcpClientJwtOptions {
+  agentRuntimeArn: string;
+  accessToken: string;
+  region: string;
+  sessionId: string;
+}
+
+/**
+ * Internal options for creating an AgentCore MCP client
+ */
+interface CreateOptions {
+  agentRuntimeArn: string;
+  region: string;
+  sessionId: string;
+  additionalHeaders?: Record<string, string>;
+  fetch?: typeof fetch;
+}
+
+/**
+ * Factory for clients to call MCP servers hosted on Bedrock AgentCore Runtime
+ */
+export class AgentCoreMcpClient {
+  /**
+   * Internal method to create an MCP client
+   */
+  private static create(options: CreateOptions): McpClient {
+    const {
+      agentRuntimeArn,
+      region,
+      sessionId,
+      additionalHeaders = {},
+      fetch: customFetch,
+    } = options;
+
+    // Encode the ARN for URL
+    const encodedArn = agentRuntimeArn
+      .replace(/:/g, '%3A')
+      .replace(/\//g, '%2F');
+    const url = `https://bedrock-agentcore.${region}.amazonaws.com/runtimes/${encodedArn}/invocations?qualifier=DEFAULT`;
+
+    // Create a custom fetch that adds required headers
+    const fetchWithHeaders: typeof fetch = async (input, init) => {
+      const headers = {
+        'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id': sessionId,
+        ...additionalHeaders,
+      };
+      const existingHeaders = init?.headers;
+
+      const mergedInit = {
+        ...init,
+        headers: !existingHeaders
+          ? headers
+          : existingHeaders instanceof Headers
+            ? (() => {
+                const h = new Headers(existingHeaders);
+                Object.entries(headers).forEach(([k, v]) => h.append(k, v));
+                return h;
+              })()
+            : Array.isArray(existingHeaders)
+              ? [...existingHeaders, ...Object.entries(headers)]
+              : { ...existingHeaders, ...headers },
+      };
+      return (customFetch || fetch)(input, mergedInit);
+    };
+
+    // Create the transport
+    const transport = new StreamableHTTPClientTransport(new URL(url), {
+      fetch: fetchWithHeaders,
+    });
+
+    // Create and return the MCP client
+    return new McpClient({ transport });
+  }
+
+  /**
+   * Create an MCP client with IAM (SigV4) authentication
+   */
+  static withIamAuth(options: AgentCoreMcpClientIamOptions): McpClient {
+    const { region, ...rest } = options;
+
+    // Create credential provider
+    const credentialProvider = fromNodeProviderChain();
+
+    // Create a SigV4 signing fetch function
+    const sigv4Fetch: typeof fetch = async (...args) => {
+      const credentials = await credentialProvider();
+      const client = new AwsClient({
+        ...credentials,
+        service: 'bedrock-agentcore',
+        region,
+      });
+      return client.fetch(...args);
+    };
+
+    return AgentCoreMcpClient.create({
+      ...rest,
+      region,
+      fetch: sigv4Fetch,
+    });
+  }
+
+  /**
+   * Create an MCP client with JWT authentication
+   */
+  static withJwtAuth(options: AgentCoreMcpClientJwtOptions): McpClient {
+    const { accessToken, ...rest } = options;
+
+    return AgentCoreMcpClient.create({
+      ...rest,
+      additionalHeaders: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+  }
+}
