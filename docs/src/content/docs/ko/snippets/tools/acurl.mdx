@@ -1,0 +1,73 @@
+---
+title: "AWS Sigv4 Curl"
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+<Tabs>
+  <TabItem label="Bash/Linux/macOS">
+다음 스크립트를 `.bashrc` 파일에 추가하고 `source`하거나, 명령을 실행하려는 터미널에 직접 붙여넣을 수 있습니다.
+```bash
+// ~/.bashrc
+acurl () {
+    REGION=$1
+    SERVICE=$2
+    shift; shift;
+    curl --aws-sigv4 "aws:amz:$REGION:$SERVICE" --user "$(aws configure get aws_access_key_id):$(aws configure get aws_secret_access_key)" -H "X-Amz-Security-Token: $(aws configure get aws_session_token)" "$@"
+}
+```
+
+`sigv4` 인증된 curl 요청을 만들려면 다음과 같이 `acurl`을 호출하세요:
+
+```bash
+acurl <region> <service> <other-curl-arguments>
+```
+
+예시:
+
+###### API Gateway
+```bash
+acurl ap-southeast-2 execute-api -X GET https://xxx
+```
+
+###### Streaming Lambda function url
+```bash
+acurl ap-southeast-2 lambda -N -X POST https://xxx
+```
+  </TabItem>
+  <TabItem label="Windows PowerShell">
+다음 함수를 PowerShell 프로필에 추가하거나, 명령을 실행하려는 PowerShell 세션에 직접 붙여넣을 수 있습니다.
+```powershell
+# PowerShell profile or current session
+function acurl {
+    param(
+        [Parameter(Mandatory=$true)][string]$Region,
+        [Parameter(Mandatory=$true)][string]$Service,
+        [Parameter(ValueFromRemainingArguments=$true)][string[]]$CurlArgs
+    )
+
+    $AccessKey = aws configure get aws_access_key_id
+    $SecretKey = aws configure get aws_secret_access_key
+    $SessionToken = aws configure get aws_session_token
+
+    & curl --aws-sigv4 "aws:amz:$Region`:$Service" --user "$AccessKey`:$SecretKey" -H "X-Amz-Security-Token: $SessionToken" @CurlArgs
+}
+```
+
+`sigv4` 인증된 curl 요청을 만들려면 다음 예시를 사용하여 `acurl`을 호출하세요:
+
+###### API Gateway
+```powershell
+acurl ap-southeast-2 execute-api -X GET https://xxx
+```
+
+###### Streaming Lambda function url
+```powershell
+acurl ap-southeast-2 lambda -N -X POST https://xxx
+```
+  </TabItem>
+</Tabs>
+
+:::caution
+AWS Signature v4 지원은 최신 버전의 `curl`에 추가되었으며, 최근 몇 년간 이 지원에 대한 버그 수정이 있었습니다. `curl` 버전 8.17.0 이상을 설치하는 것을 권장합니다. 운영 체제와 함께 배포된 버전은 오래되었을 수 있습니다.
+:::

@@ -1,0 +1,229 @@
+---
+title: "Triển khai Agent trên Bedrock"
+---
+
+import Link from '@components/link.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+### Infrastructure as Code
+
+Nếu bạn đã chọn `BedrockAgentCoreRuntime` cho `computeType`, cơ sở hạ tầng CDK hoặc Terraform liên quan sẽ được tạo ra mà bạn có thể sử dụng để triển khai Strands Agent của mình lên [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html).
+
+<Infrastructure>
+<Fragment slot="cdk">
+Một CDK construct được tạo ra cho agent của bạn, được đặt tên dựa trên `name` bạn đã chọn khi chạy trình tạo, hoặc mặc định là `<ProjectName>Agent`.
+
+Bạn có thể sử dụng CDK construct này trong một ứng dụng CDK:
+
+```ts {6}
+import { MyProjectAgent } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    // Add the agent to your stack
+    const agent = new MyProjectAgent(this, 'MyProjectAgent');
+
+    // Grant permissions to invoke the relevant models in bedrock
+    agent.agentCoreRuntime.addToRolePolicy(
+      new PolicyStatement({
+        actions: [
+          'bedrock:InvokeModel',
+          'bedrock:InvokeModelWithResponseStream',
+        ],
+        // You can scope the below down to the specific models you use
+        resources: [
+          'arn:aws:bedrock:*:*:foundation-model/*',
+          'arn:aws:bedrock:*:*:inference-profile/*',
+        ],
+      }),
+    );
+  }
+}
+```
+
+:::note
+Construct này sử dụng [module `@aws-cdk/aws-bedrock-agentcore-alpha`](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-bedrock-agentcore-alpha-readme.html).
+:::
+</Fragment>
+<Fragment slot="terraform">
+Một module Terraform được tạo ra cho bạn, được đặt tên dựa trên `name` bạn đã chọn khi chạy trình tạo, hoặc mặc định là `<ProjectName>-agent`.
+
+Bạn có thể sử dụng module terraform này trong một dự án Terraform:
+
+```terraform
+# Agent
+module "my_project_agent" {
+  # Relative path to the generated module in the common/terraform project
+  source = "../../common/terraform/src/app/agents/my-project-agent"
+
+  # Grant permissions to invoke the relevant models in bedrock
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream"
+      ]
+      # You can scope the below down to the specific models you use
+      Resource = [
+        "arn:aws:bedrock:*:*:foundation-model/*",
+        "arn:aws:bedrock:*:*:inference-profile/*"
+      ]
+    }
+  ]
+}
+```
+</Fragment>
+</Infrastructure>
+
+:::caution
+[Docker](https://www.docker.com/) là bắt buộc để xây dựng và triển khai Strands Agent của bạn. Hãy đảm bảo bạn đã cài đặt và khởi chạy Docker để tránh các lỗi như:
+
+```
+ERROR: Cannot connect to the Docker daemon at unix://path/to/docker.sock.
+```
+:::
+
+### Xác thực
+
+#### IAM
+
+Theo mặc định, Strands Agent của bạn sẽ được bảo mật bằng xác thực IAM, chỉ cần triển khai nó mà không cần bất kỳ tham số nào:
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts {5}
+import { MyProjectAgent } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    new MyProjectAgent(this, 'MyProjectAgent');
+  }
+}
+```
+
+Bạn có thể cấp quyền truy cập để gọi agent của mình trên Bedrock AgentCore Runtime bằng phương thức `grantInvoke`, ví dụ:
+
+```ts {8}
+import { MyProjectAgent } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const agent = new MyProjectAgent(this, 'MyProjectAgent');
+    const lambdaFunction = new Function(this, ...);
+
+    agent.agentCoreRuntime.grantInvoke(lambdaFunction);
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+```terraform
+# Agent
+module "my_project_agent" {
+  # Relative path to the generated module in the common/terraform project
+  source = "../../common/terraform/src/app/agents/my-project-agent"
+}
+```
+
+Để cấp quyền truy cập gọi agent của bạn, bạn sẽ cần thêm một policy như sau, tham chiếu đến output `module.my_project_agent.agent_core_runtime_arn`:
+
+```terraform
+{
+  Effect = "Allow"
+  Action = [
+    "bedrock-agentcore:InvokeAgentRuntime"
+  ]
+  Resource = [
+    module.my_project_agent.agent_core_runtime_arn,
+    "${module.my_project_agent.agent_core_runtime_arn}/*"
+  ]
+}
+```
+</Fragment>
+</Infrastructure>
+
+#### Xác thực Cognito JWT
+
+Dưới đây minh họa cách cấu hình xác thực Cognito cho agent của bạn.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Để cấu hình xác thực JWT sử dụng Cognito, hãy sử dụng phương thức factory `RuntimeAuthorizerConfiguration.usingCognito()`:
+
+```ts {14-17}
+import { MyProjectAgent } from ':my-scope/common-constructs';
+import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const userPool = new UserPool(this, 'UserPool');
+    const client = userPool.addClient('Client', {
+      authFlows: {
+        userPassword: true,
+      },
+    });
+
+    new MyProjectAgent(this, 'MyProjectAgent', {
+      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingCognito(
+        userPool,
+        [client],
+      ),
+    });
+  }
+}
+```
+
+Ngoài ra, để xác thực JWT tùy chỉnh với nhà cung cấp OIDC của riêng bạn, hãy sử dụng `RuntimeAuthorizerConfiguration.usingJWT()`:
+
+```ts {7-11}
+import { MyProjectAgent } from ':my-scope/common-constructs';
+import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    new MyProjectAgent(this, 'MyProjectAgent', {
+      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingJWT(
+        'https://example.com/.well-known/openid-configuration',
+        ['client1', 'client2'], // Allowed Client IDs (optional)
+        ['audience1'],          // Allowed Audiences (optional)
+      ),
+    });
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+Để cấu hình xác thực JWT, bạn có thể chỉnh sửa module agent của mình để cấu hình biến `authorizer_configuration` như sau:
+
+```terraform {18-23}
+# packages/common/terraform/src/app/agents/my-project-agent/my-project-agent.tf
+
+data "aws_region" "current" {}
+
+locals {
+  aws_region = data.aws_region.current.id
+
+  # Replace with your user pool and client ids or expose as variables
+  user_pool_id = "xxx"
+  user_pool_client_ids = ["yyy"]
+}
+
+module "agent_core_runtime" {
+  source = "../../../core/agent-core"
+  agent_runtime_name = "MyProjectAgent"
+  docker_image_tag = "my-scope-my-project-agent:latest"
+  server_protocol = "HTTP"
+  authorizer_configuration = {
+    custom_jwt_authorizer = {
+      discovery_url = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration"
+      allowed_clients = local.user_pool_client_ids
+    }
+  }
+  env = var.env
+  additional_iam_policy_statements = var.additional_iam_policy_statements
+  tags = var.tags
+}
+```
+</Fragment>
+</Infrastructure>
