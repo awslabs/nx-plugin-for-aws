@@ -680,26 +680,85 @@ describe.each(SUPPORTED_UX_PROVIDERS.map((p) => [p]))(
       expect(projectConfig.metadata.uxProvider).toEqual(uxProvider);
     });
 
-    it('should update package.json with required dependencies', async () => {
-      await tsReactWebsiteGenerator(tree, options);
-
-      snapshotTreeDir(tree, 'test-app/src');
-
-      const packageJson = JSON.parse(tree.read('package.json').toString());
-      // Check for website dependencies
-
-      switch (uxProvider) {
-        case 'None':
-          break;
-        case 'Cloudscape':
+    switch (uxProvider) {
+      case 'None':
+        break;
+      case 'Cloudscape':
+        it('should update package.json with required dependencies', async () => {
+          await tsReactWebsiteGenerator(tree, options);
+          snapshotTreeDir(tree, 'test-app/src');
+          const packageJson = JSON.parse(tree.read('package.json').toString());
+          // Check for website dependencies
           expect(packageJson.dependencies).toMatchObject({
             '@cloudscape-design/components': expect.any(String),
             '@cloudscape-design/board-components': expect.any(String),
           });
-          break;
-        default:
-          throw new Error(`Unhandled uxProvider in test: ${uxProvider}`);
-      }
-    });
+        });
+
+        break;
+      case 'Shadcn':
+        it('should update package.json with required dependencies', async () => {
+          await tsReactWebsiteGenerator(tree, options);
+          snapshotTreeDir(tree, 'test-app/src');
+          const packageJson = JSON.parse(tree.read('package.json').toString());
+          expect(packageJson.dependencies).toMatchObject({
+            'class-variance-authority': expect.any(String),
+            clsx: expect.any(String),
+            'tailwind-merge': expect.any(String),
+            'tw-animate-css': expect.any(String),
+            'lucide-react': expect.any(String),
+            '@radix-ui/react-dialog': expect.any(String),
+            '@radix-ui/react-slot': expect.any(String),
+            '@radix-ui/react-label': expect.any(String),
+            '@radix-ui/react-primitive': expect.any(String),
+            '@radix-ui/react-separator': expect.any(String),
+            '@radix-ui/react-tooltip': expect.any(String),
+          });
+        });
+
+        it('should scaffold the shared Shadcn package and components.json', async () => {
+          await tsReactWebsiteGenerator(tree, options);
+
+          expect(
+            tree.exists('packages/common/shadcn/project.json'),
+          ).toBeTruthy();
+          expect(
+            tree.exists('packages/common/shadcn/src/components/ui/button.tsx'),
+          ).toBeTruthy();
+          expect(tree.exists('components.json')).toBeTruthy();
+        });
+
+        it('should ensure .npmrc ignores workspace root check when using Shadcn', async () => {
+          await tsReactWebsiteGenerator(tree, options);
+
+          const npmrc = tree.read('.npmrc', 'utf-8') ?? '';
+          const npmrcLines = npmrc.split(/\r?\n/);
+          expect(npmrcLines).toContain('ignore-workspace-root-check=true');
+        });
+
+        it('should append ignore-workspace-root-check to existing .npmrc', async () => {
+          tree.write('.npmrc', 'strict-peer-dependencies=false\n');
+
+          await tsReactWebsiteGenerator(tree, options);
+
+          const npmrc = tree.read('.npmrc', 'utf-8') ?? '';
+          const npmrcLines = npmrc.split(/\r?\n/).filter(Boolean);
+          expect(npmrcLines).toContain('strict-peer-dependencies=false');
+          expect(npmrcLines).toContain('ignore-workspace-root-check=true');
+        });
+
+        it('should use shared Shadcn components when uxProvider is Shadcn', async () => {
+          await tsReactWebsiteGenerator(tree, options);
+          expect(
+            tree
+              .read('test-app/src/components/AppLayout/index.tsx')
+              ?.toString(),
+          ).toContain('common-shadcn');
+        });
+
+        break;
+      default:
+        throw new Error(`Unhandled uxProvider in test: ${uxProvider}`);
+    }
   },
 );

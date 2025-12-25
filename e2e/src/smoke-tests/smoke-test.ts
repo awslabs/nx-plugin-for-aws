@@ -46,11 +46,19 @@ export const runSmokeTest = async (
     opts,
   );
   await runCLI(
+    `generate @aws/nx-plugin:ts#react-website --name=website-shadcn --uxProvider=Shadcn --no-interactive`,
+    opts,
+  );
+  await runCLI(
     `generate @aws/nx-plugin:ts#react-website --name=website-no-router --enableTanstackRouter=false --no-interactive`,
     opts,
   );
   await runCLI(
     `generate @aws/nx-plugin:ts#react-website --name=website-none-no-router --uxProvider=None --enableTanstackRouter=false --no-interactive`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:ts#react-website --name=website-shadcn-no-router --uxProvider=Shadcn --enableTanstackRouter=false --no-interactive`,
     opts,
   );
   await runCLI(
@@ -70,11 +78,19 @@ export const runSmokeTest = async (
     opts,
   );
   await runCLI(
+    `generate @aws/nx-plugin:ts#react-website#auth --project=@e2e-test/website-shadcn --cognitoDomain=test-shadcn --no-interactive`,
+    opts,
+  );
+  await runCLI(
     `generate @aws/nx-plugin:ts#react-website#auth --project=@e2e-test/website-no-router --cognitoDomain=test-no-router --no-interactive`,
     opts,
   );
   await runCLI(
     `generate @aws/nx-plugin:ts#react-website#auth --project=@e2e-test/website-none-no-router --cognitoDomain=test-none-no-router --no-interactive`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:ts#react-website#auth --project=@e2e-test/website-shadcn-no-router --cognitoDomain=test-shadcn-no-router --no-interactive`,
     opts,
   );
   await runCLI(
@@ -86,11 +102,19 @@ export const runSmokeTest = async (
     opts,
   );
   await runCLI(
+    `generate @aws/nx-plugin:api-connection --sourceProject=@e2e-test/website-shadcn --targetProject=@e2e-test/my-api --no-interactive`,
+    opts,
+  );
+  await runCLI(
     `generate @aws/nx-plugin:api-connection --sourceProject=@e2e-test/website-no-router --targetProject=@e2e-test/my-api --no-interactive`,
     opts,
   );
   await runCLI(
     `generate @aws/nx-plugin:api-connection --sourceProject=@e2e-test/website-none-no-router --targetProject=@e2e-test/my-api --no-interactive`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:api-connection --sourceProject=@e2e-test/website-shadcn-no-router --targetProject=@e2e-test/my-api --no-interactive`,
     opts,
   );
   await runCLI(

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { IacProviderOption } from '../../../utils/iac';
-import { UxProviderOption } from '../../../utils/ux';
+import { UxProviderOption } from './generator';
 
 export interface TsReactWebsiteGeneratorSchema {
   name: string;
