@@ -3,15 +3,22 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { Tree } from '@nx/devkit';
-import { replace } from '../../../utils/ast';
 import {
+  addDestructuredImport,
+  replace,
+  replaceIfExists,
+} from '../../../utils/ast';
+import {
+  Block,
   factory,
   isJsxAttribute,
   isStringLiteral,
   JsxAttribute,
   JsxElement,
   JsxSelfClosingElement,
+  NodeFlags,
   SyntaxKind,
+  VariableDeclaration,
 } from 'typescript';
 
 // Adds a user greeting and sign-out button to the default AppLayout header when using the None UX provider.
@@ -28,7 +35,7 @@ export function addNoneAuthMenu(tree: Tree, appLayoutTsxPath: string) {
         ? classAttr.initializer.text
         : undefined;
 
-    return classValue === 'app-header-inner';
+    return classValue?.split(/\s+/).includes('app-header-inner');
   }
 
   replace(
@@ -372,5 +379,581 @@ export function addCloudscapeAuthMenu(tree: Tree, appLayoutTsxPath: string) {
         ]),
       );
     },
+  );
+}
+
+export function addShadcnAuthMenu(tree: Tree, appLayoutTsxPath: string) {
+  if (!tree.exists(appLayoutTsxPath)) {
+    throw new Error(`Expected top nav component at ${appLayoutTsxPath}`);
+  }
+
+  addDestructuredImport(
+    tree,
+    appLayoutTsxPath,
+    ['useEffect', 'useRef', 'useState'],
+    'react',
+  );
+
+  const menuStateDeclaration = factory.createVariableStatement(
+    undefined,
+    factory.createVariableDeclarationList(
+      [
+        factory.createVariableDeclaration(
+          factory.createArrayBindingPattern([
+            factory.createBindingElement(
+              undefined,
+              undefined,
+              factory.createIdentifier('menuOpen'),
+              undefined,
+            ),
+            factory.createBindingElement(
+              undefined,
+              undefined,
+              factory.createIdentifier('setMenuOpen'),
+              undefined,
+            ),
+          ]),
+          undefined,
+          undefined,
+          factory.createCallExpression(
+            factory.createIdentifier('useState'),
+            undefined,
+            [factory.createFalse()],
+          ),
+        ),
+      ],
+      NodeFlags.Const,
+    ),
+  );
+
+  const menuRefDeclaration = factory.createVariableStatement(
+    undefined,
+    factory.createVariableDeclarationList(
+      [
+        factory.createVariableDeclaration(
+          factory.createIdentifier('menuRef'),
+          undefined,
+          undefined,
+          factory.createCallExpression(
+            factory.createIdentifier('useRef'),
+            [
+              factory.createTypeReferenceNode(
+                factory.createIdentifier('HTMLDivElement'),
+                undefined,
+              ),
+            ],
+            [factory.createNull()],
+          ),
+        ),
+      ],
+      NodeFlags.Const,
+    ),
+  );
+
+  const userNameExpr = factory.createAsExpression(
+    factory.createElementAccessChain(
+      factory.createPropertyAccessChain(
+        factory.createIdentifier('user'),
+        factory.createToken(SyntaxKind.QuestionDotToken),
+        factory.createIdentifier('profile'),
+      ),
+      factory.createToken(SyntaxKind.QuestionDotToken),
+      factory.createStringLiteral('cognito:username'),
+    ),
+    factory.createKeywordTypeNode(SyntaxKind.AnyKeyword),
+  );
+
+  const userInitialExpr = factory.createCallChain(
+    factory.createPropertyAccessChain(
+      factory.createCallChain(
+        factory.createPropertyAccessExpression(
+          userNameExpr,
+          factory.createIdentifier('charAt'),
+        ),
+        factory.createToken(SyntaxKind.QuestionDotToken),
+        undefined,
+        [factory.createNumericLiteral(0)],
+      ),
+      factory.createToken(SyntaxKind.QuestionDotToken),
+      factory.createIdentifier('toUpperCase'),
+    ),
+    factory.createToken(SyntaxKind.QuestionDotToken),
+    undefined,
+    [],
+  );
+
+  const useEffectStatement = factory.createExpressionStatement(
+    factory.createCallExpression(
+      factory.createIdentifier('useEffect'),
+      undefined,
+      [
+        factory.createArrowFunction(
+          undefined,
+          undefined,
+          [],
+          undefined,
+          factory.createToken(SyntaxKind.EqualsGreaterThanToken),
+          factory.createBlock(
+            [
+              factory.createVariableStatement(
+                undefined,
+                factory.createVariableDeclarationList(
+                  [
+                    factory.createVariableDeclaration(
+                      factory.createIdentifier('handleClickOutside'),
+                      undefined,
+                      undefined,
+                      factory.createArrowFunction(
+                        undefined,
+                        undefined,
+                        [
+                          factory.createParameterDeclaration(
+                            undefined,
+                            undefined,
+                            factory.createIdentifier('event'),
+                            undefined,
+                            factory.createTypeReferenceNode(
+                              factory.createIdentifier('MouseEvent'),
+                              undefined,
+                            ),
+                            undefined,
+                          ),
+                        ],
+                        undefined,
+                        factory.createToken(SyntaxKind.EqualsGreaterThanToken),
+                        factory.createBlock(
+                          [
+                            factory.createIfStatement(
+                              factory.createBinaryExpression(
+                                factory.createPropertyAccessExpression(
+                                  factory.createIdentifier('menuRef'),
+                                  factory.createIdentifier('current'),
+                                ),
+                                factory.createToken(
+                                  SyntaxKind.AmpersandAmpersandToken,
+                                ),
+                                factory.createPrefixUnaryExpression(
+                                  SyntaxKind.ExclamationToken,
+                                  factory.createCallExpression(
+                                    factory.createPropertyAccessExpression(
+                                      factory.createPropertyAccessExpression(
+                                        factory.createIdentifier('menuRef'),
+                                        factory.createIdentifier('current'),
+                                      ),
+                                      factory.createIdentifier('contains'),
+                                    ),
+                                    undefined,
+                                    [
+                                      factory.createAsExpression(
+                                        factory.createPropertyAccessExpression(
+                                          factory.createIdentifier('event'),
+                                          factory.createIdentifier('target'),
+                                        ),
+                                        factory.createKeywordTypeNode(
+                                          SyntaxKind.AnyKeyword,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              factory.createBlock(
+                                [
+                                  factory.createExpressionStatement(
+                                    factory.createCallExpression(
+                                      factory.createIdentifier('setMenuOpen'),
+                                      undefined,
+                                      [factory.createFalse()],
+                                    ),
+                                  ),
+                                ],
+                                true,
+                              ),
+                              undefined,
+                            ),
+                          ],
+                          true,
+                        ),
+                      ),
+                    ),
+                  ],
+                  NodeFlags.Const,
+                ),
+              ),
+              factory.createExpressionStatement(
+                factory.createCallExpression(
+                  factory.createPropertyAccessExpression(
+                    factory.createIdentifier('document'),
+                    factory.createIdentifier('addEventListener'),
+                  ),
+                  undefined,
+                  [
+                    factory.createStringLiteral('mousedown'),
+                    factory.createIdentifier('handleClickOutside'),
+                  ],
+                ),
+              ),
+              factory.createReturnStatement(
+                factory.createArrowFunction(
+                  undefined,
+                  undefined,
+                  [],
+                  undefined,
+                  factory.createToken(SyntaxKind.EqualsGreaterThanToken),
+                  factory.createBlock(
+                    [
+                      factory.createExpressionStatement(
+                        factory.createCallExpression(
+                          factory.createPropertyAccessExpression(
+                            factory.createIdentifier('document'),
+                            factory.createIdentifier('removeEventListener'),
+                          ),
+                          undefined,
+                          [
+                            factory.createStringLiteral('mousedown'),
+                            factory.createIdentifier('handleClickOutside'),
+                          ],
+                        ),
+                      ),
+                    ],
+                    true,
+                  ),
+                ),
+              ),
+            ],
+            true,
+          ),
+        ),
+        factory.createArrayLiteralExpression([], false),
+      ],
+    ),
+  );
+
+  replace(
+    tree,
+    appLayoutTsxPath,
+    'VariableDeclaration[name.text="AppLayout"]',
+    (node: VariableDeclaration) => {
+      const arrowFunction = node.initializer as
+        | import('typescript').ArrowFunction
+        | undefined;
+      if (!arrowFunction || arrowFunction.body.kind !== SyntaxKind.Block) {
+        return node;
+      }
+      const body = arrowFunction.body as Block;
+      const newStatements = [
+        menuStateDeclaration,
+        menuRefDeclaration,
+        useEffectStatement,
+        ...body.statements,
+      ];
+      const newArrowFunction = factory.updateArrowFunction(
+        arrowFunction,
+        arrowFunction.modifiers,
+        arrowFunction.typeParameters,
+        arrowFunction.parameters,
+        arrowFunction.type,
+        arrowFunction.equalsGreaterThanToken,
+        factory.updateBlock(body, newStatements),
+      );
+      return factory.updateVariableDeclaration(
+        node,
+        node.name,
+        node.exclamationToken,
+        node.type,
+        newArrowFunction,
+      );
+    },
+  );
+
+  const authMenu = factory.createJsxElement(
+    factory.createJsxOpeningElement(
+      factory.createIdentifier('div'),
+      undefined,
+      factory.createJsxAttributes([
+        factory.createJsxAttribute(
+          factory.createIdentifier('className'),
+          factory.createStringLiteral('ml-auto flex items-center gap-3'),
+        ),
+        factory.createJsxAttribute(
+          factory.createIdentifier('ref'),
+          factory.createJsxExpression(
+            undefined,
+            factory.createIdentifier('menuRef'),
+          ),
+        ),
+      ]),
+    ),
+    [
+      factory.createJsxElement(
+        factory.createJsxOpeningElement(
+          factory.createIdentifier('button'),
+          undefined,
+          factory.createJsxAttributes([
+            factory.createJsxAttribute(
+              factory.createIdentifier('type'),
+              factory.createStringLiteral('button'),
+            ),
+            factory.createJsxAttribute(
+              factory.createIdentifier('onClick'),
+              factory.createJsxExpression(
+                undefined,
+                factory.createArrowFunction(
+                  undefined,
+                  undefined,
+                  [],
+                  undefined,
+                  factory.createToken(SyntaxKind.EqualsGreaterThanToken),
+                  factory.createCallExpression(
+                    factory.createIdentifier('setMenuOpen'),
+                    undefined,
+                    [
+                      factory.createArrowFunction(
+                        undefined,
+                        undefined,
+                        [
+                          factory.createParameterDeclaration(
+                            undefined,
+                            undefined,
+                            factory.createIdentifier('open'),
+                            undefined,
+                            undefined,
+                            undefined,
+                          ),
+                        ],
+                        undefined,
+                        factory.createToken(SyntaxKind.EqualsGreaterThanToken),
+                        factory.createPrefixUnaryExpression(
+                          SyntaxKind.ExclamationToken,
+                          factory.createIdentifier('open'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            factory.createJsxAttribute(
+              factory.createIdentifier('className'),
+              factory.createStringLiteral(
+                'focus-visible:ring-ring/60 bg-muted text-muted-foreground flex size-10 items-center justify-center rounded-full border border-border/60 font-semibold shadow-sm outline-none transition hover:bg-muted/80 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background cursor-pointer',
+              ),
+            ),
+            factory.createJsxAttribute(
+              factory.createIdentifier('aria-label'),
+              factory.createStringLiteral('Open user menu'),
+            ),
+            factory.createJsxAttribute(
+              factory.createIdentifier('aria-expanded'),
+              factory.createJsxExpression(
+                undefined,
+                factory.createIdentifier('menuOpen'),
+              ),
+            ),
+          ]),
+        ),
+        [factory.createJsxExpression(undefined, userInitialExpr)],
+        factory.createJsxClosingElement(factory.createIdentifier('button')),
+      ),
+      factory.createJsxExpression(
+        undefined,
+        factory.createBinaryExpression(
+          factory.createIdentifier('menuOpen'),
+          factory.createToken(SyntaxKind.AmpersandAmpersandToken),
+          factory.createParenthesizedExpression(
+            factory.createJsxElement(
+              factory.createJsxOpeningElement(
+                factory.createIdentifier('div'),
+                undefined,
+                factory.createJsxAttributes([
+                  factory.createJsxAttribute(
+                    factory.createIdentifier('className'),
+                    factory.createStringLiteral(
+                      'bg-popover text-popover-foreground absolute right-4 top-14 w-36 overflow-hidden rounded-md border shadow-md',
+                    ),
+                  ),
+                ]),
+              ),
+              [
+                factory.createJsxElement(
+                  factory.createJsxOpeningElement(
+                    factory.createIdentifier('div'),
+                    undefined,
+                    factory.createJsxAttributes([
+                      factory.createJsxAttribute(
+                        factory.createIdentifier('className'),
+                        factory.createStringLiteral(
+                          'px-3 py-2 text-sm font-semibold',
+                        ),
+                      ),
+                    ]),
+                  ),
+                  [
+                    factory.createJsxText('Hi, '),
+                    factory.createJsxExpression(undefined, userNameExpr),
+                    factory.createJsxText('!'),
+                  ],
+                  factory.createJsxClosingElement(
+                    factory.createIdentifier('div'),
+                  ),
+                ),
+                factory.createJsxSelfClosingElement(
+                  factory.createIdentifier('div'),
+                  undefined,
+                  factory.createJsxAttributes([
+                    factory.createJsxAttribute(
+                      factory.createIdentifier('className'),
+                      factory.createStringLiteral('bg-border/70 h-px w-full'),
+                    ),
+                    factory.createJsxAttribute(
+                      factory.createIdentifier('role'),
+                      factory.createStringLiteral('separator'),
+                    ),
+                  ]),
+                ),
+                factory.createJsxElement(
+                  factory.createJsxOpeningElement(
+                    factory.createIdentifier('button'),
+                    undefined,
+                    factory.createJsxAttributes([
+                      factory.createJsxAttribute(
+                        factory.createIdentifier('type'),
+                        factory.createStringLiteral('button'),
+                      ),
+                      factory.createJsxAttribute(
+                        factory.createIdentifier('className'),
+                        factory.createStringLiteral(
+                          'hover:bg-muted w-full px-3 py-2 text-left text-sm cursor-pointer',
+                        ),
+                      ),
+                      factory.createJsxAttribute(
+                        factory.createIdentifier('onClick'),
+                        factory.createJsxExpression(
+                          undefined,
+                          factory.createArrowFunction(
+                            undefined,
+                            undefined,
+                            [],
+                            undefined,
+                            factory.createToken(
+                              SyntaxKind.EqualsGreaterThanToken,
+                            ),
+                            factory.createBlock(
+                              [
+                                factory.createExpressionStatement(
+                                  factory.createCallExpression(
+                                    factory.createIdentifier('setMenuOpen'),
+                                    undefined,
+                                    [factory.createFalse()],
+                                  ),
+                                ),
+                                factory.createExpressionStatement(
+                                  factory.createCallExpression(
+                                    factory.createIdentifier('removeUser'),
+                                    undefined,
+                                    [],
+                                  ),
+                                ),
+                                factory.createExpressionStatement(
+                                  factory.createCallExpression(
+                                    factory.createIdentifier('signoutRedirect'),
+                                    undefined,
+                                    [
+                                      factory.createObjectLiteralExpression(
+                                        [
+                                          factory.createPropertyAssignment(
+                                            'post_logout_redirect_uri',
+                                            factory.createPropertyAccessExpression(
+                                              factory.createPropertyAccessExpression(
+                                                factory.createIdentifier(
+                                                  'window',
+                                                ),
+                                                factory.createIdentifier(
+                                                  'location',
+                                                ),
+                                              ),
+                                              factory.createIdentifier(
+                                                'origin',
+                                              ),
+                                            ),
+                                          ),
+                                          factory.createPropertyAssignment(
+                                            'extraQueryParams',
+                                            factory.createObjectLiteralExpression(
+                                              [
+                                                factory.createPropertyAssignment(
+                                                  'redirect_uri',
+                                                  factory.createPropertyAccessExpression(
+                                                    factory.createPropertyAccessExpression(
+                                                      factory.createIdentifier(
+                                                        'window',
+                                                      ),
+                                                      factory.createIdentifier(
+                                                        'location',
+                                                      ),
+                                                    ),
+                                                    factory.createIdentifier(
+                                                      'origin',
+                                                    ),
+                                                  ),
+                                                ),
+                                                factory.createPropertyAssignment(
+                                                  'response_type',
+                                                  factory.createStringLiteral(
+                                                    'code',
+                                                  ),
+                                                ),
+                                              ],
+                                              true,
+                                            ),
+                                          ),
+                                        ],
+                                        true,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                factory.createExpressionStatement(
+                                  factory.createCallExpression(
+                                    factory.createIdentifier('clearStaleState'),
+                                    undefined,
+                                    [],
+                                  ),
+                                ),
+                              ],
+                              true,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ]),
+                  ),
+                  [factory.createJsxText('Sign out')],
+                  factory.createJsxClosingElement(
+                    factory.createIdentifier('button'),
+                  ),
+                ),
+              ],
+              factory.createJsxClosingElement(factory.createIdentifier('div')),
+            ),
+          ),
+        ),
+      ),
+    ],
+    factory.createJsxClosingElement(factory.createIdentifier('div')),
+  );
+
+  const appendAuthMenu = (node: JsxElement) =>
+    factory.createJsxElement(
+      node.openingElement,
+      [...node.children, authMenu],
+      node.closingElement,
+    );
+
+  replace(
+    tree,
+    appLayoutTsxPath,
+    'JsxElement[openingElement.tagName.text="header"]',
+    appendAuthMenu,
   );
 }
