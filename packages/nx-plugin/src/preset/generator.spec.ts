@@ -8,6 +8,8 @@ import { createTreeUsingTsSolutionSetup, snapshotTreeDir } from '../utils/test';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import { SYNC_GENERATOR_NAME as TS_SYNC_GENERATOR_NAME } from '../ts/sync/generator';
 
+const NX_TYPESCRIPT_SYNC_GENERATOR = '@nx/js:typescript-sync';
+
 // Mock execSync to control git command behavior in tests
 vi.mock('child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('child_process')>();
@@ -54,12 +56,14 @@ describe('preset generator', () => {
     expect((await readAwsNxPluginConfig(tree)).iac.provider).toBe('CDK');
   });
 
-  it('should register the TypeScript sync generator for compile targets', async () => {
+  it('should register the TypeScript sync generators for compile targets', async () => {
     await presetGenerator(tree, { addTsPlugin: false, iacProvider: 'CDK' });
 
-    expect(readNxJson(tree).targetDefaults?.compile?.syncGenerators).toContain(
-      TS_SYNC_GENERATOR_NAME,
-    );
+    const syncGenerators =
+      readNxJson(tree).targetDefaults?.compile?.syncGenerators;
+
+    expect(syncGenerators).toContain(TS_SYNC_GENERATOR_NAME);
+    expect(syncGenerators).toContain(NX_TYPESCRIPT_SYNC_GENERATOR);
   });
 });
 
