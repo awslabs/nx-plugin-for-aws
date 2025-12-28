@@ -23,8 +23,8 @@ export const TS_VERSIONS = {
   '@nx/devkit': '22.1.3',
   '@nx/react': '22.1.3',
   'create-nx-workspace': '22.1.3',
-  '@modelcontextprotocol/sdk': '1.24.0',
-  '@modelcontextprotocol/inspector': '0.17.2',
+  '@modelcontextprotocol/sdk': '1.25.1',
+  '@modelcontextprotocol/inspector': '0.18.0',
   '@tanstack/react-router': '1.139.7',
   '@tanstack/router-plugin': '1.139.7',
   '@tanstack/router-generator': '1.139.7',
@@ -70,7 +70,7 @@ export const TS_VERSIONS = {
   '@tailwindcss/vite': '4.1.17',
   tsx: '4.20.6',
   'vite-tsconfig-paths': '5.1.4',
-  zod: '4.1.13',
+  zod: '4.2.1',
 } as const;
 export type ITsDepVersion = keyof typeof TS_VERSIONS;
 
