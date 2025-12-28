@@ -33,6 +33,7 @@ import {
 import { SYNC_GENERATOR_NAME as TS_SYNC_GENERATOR_NAME } from '../ts/sync/generator';
 
 const WORKSPACES = ['packages/*'];
+const NX_TYPESCRIPT_SYNC_GENERATOR = '@nx/js:typescript-sync';
 
 export const PRESET_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -154,8 +155,12 @@ export const presetGenerator = async (
         ...nxJson.targetDefaults?.compile,
         syncGenerators: [
           ...(nxJson.targetDefaults?.compile?.syncGenerators ?? []).filter(
-            (g) => g !== TS_SYNC_GENERATOR_NAME,
+            (g) =>
+              ![TS_SYNC_GENERATOR_NAME, NX_TYPESCRIPT_SYNC_GENERATOR].includes(
+                g,
+              ),
           ),
+          NX_TYPESCRIPT_SYNC_GENERATOR,
           TS_SYNC_GENERATOR_NAME,
         ],
       },
