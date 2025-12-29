@@ -1,0 +1,472 @@
+---
+title: "Agente TypeScript Strands"
+description: "Gere um Agente TypeScript Strands para construir agentes de IA com ferramentas e implante no Amazon Bedrock AgentCore Runtime"
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Link from '@components/link.astro';
+import Snippet from '@components/snippet.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import PackageManagerExecCommand from '@components/package-manager-exec-command.astro';
+
+Gere um [Strands Agent](https://strandsagents.com/) TypeScript para construir agentes de IA com ferramentas e, opcionalmente, implante-o no [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/). O gerador usa [tRPC](https://trpc.io/) sobre WebSocket para aproveitar o [suporte de streaming bidirecional do AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html) para comunicação em tempo real com segurança de tipo.
+
+## O que é Strands?
+
+[Strands](https://strandsagents.com/latest/documentation/docs/) é um framework leve para construir agentes de IA. Os principais recursos incluem:
+
+- **Leve e personalizável**: Loop de agente simples que não atrapalha
+- **Pronto para produção**: Observabilidade completa, rastreamento e opções de implantação em escala
+- **Agnóstico de modelo e provedor**: Suporta muitos modelos diferentes de vários provedores
+- **Ferramentas orientadas pela comunidade**: Conjunto poderoso de ferramentas contribuídas pela comunidade
+- **Suporte multi-agente**: Técnicas avançadas como equipes de agentes e agentes autônomos
+- **Modos de interação flexíveis**: Suporte conversacional, streaming e não-streaming
+
+## Uso
+
+### Gerar um Strands Agent
+
+Você pode gerar um Strands Agent TypeScript de duas maneiras:
+
+<RunGenerator generator="ts#strands-agent" />
+
+:::tip
+Primeiro use o gerador <Link path="/guides/typescript-project">`ts#project`</Link> para criar um projeto ao qual adicionar seu Strands Agent.
+:::
+
+### Opções
+
+<GeneratorParameters generator="ts#strands-agent" />
+
+## Saída do Gerador
+
+O gerador adicionará os seguintes arquivos ao seu projeto TypeScript existente:
+
+<FileTree>
+  - your-project/
+    - src/
+      - agent/ (ou nome personalizado se especificado)
+        - index.ts Ponto de entrada para Bedrock AgentCore Runtime
+        - init.ts Inicialização do tRPC
+        - router.ts Roteador tRPC com procedimentos de agente
+        - agent.ts Definição principal do agente com ferramentas de exemplo
+        - client.ts Cliente fornecido para invocar seu agente
+        - agent-core-trpc-client.ts Fábrica de cliente para conectar a agentes no AgentCore Runtime
+        - agent-core-mcp-client.ts Fábrica de cliente para conectar a servidores MCP no AgentCore Runtime
+        - Dockerfile Ponto de entrada para hospedar seu agente (excluído quando `computeType` está definido como `None`)
+    - package.json Atualizado com dependências do Strands
+    - project.json Atualizado com destinos de servir do agente
+</FileTree>
+
+### Infraestrutura
+
+:::note
+Se você selecionou `None` para `computeType`, o gerador não fornecerá nenhuma infraestrutura como código.
+:::
+
+<Snippet name="shared-constructs" />
+
+Para implantar seu Strands Agent, os seguintes arquivos são gerados:
+
+<Infrastructure>
+<Fragment slot="cdk">
+<FileTree>
+  - packages/common/constructs/src
+    - app
+      - agents
+        - \<project-name>
+          - \<project-name>.ts Construto CDK para implantar seu agente
+          - Dockerfile Arquivo docker passthrough usado pelo construto CDK
+</FileTree>
+</Fragment>
+<Fragment slot="terraform">
+<FileTree>
+  - packages/common/terraform/src
+    - app
+      - agents
+        - \<project-name>
+          - \<project-name>.tf Módulo para implantar seu agente
+    - core
+      - agent-core
+        - runtime.tf Módulo genérico para implantar no Bedrock AgentCore Runtime
+</FileTree>
+</Fragment>
+</Infrastructure>
+
+## Trabalhando com seu Strands Agent
+
+### tRPC sobre WebSocket
+
+O Strands Agent TypeScript usa [tRPC](https://trpc.io/) sobre WebSocket, aproveitando o [suporte de streaming bidirecional do AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html) para permitir comunicação em tempo real com segurança de tipo entre clientes e seu agente.
+
+Como o tRPC suporta procedimentos Query, Mutation e Subscription sobre WebSocket, você pode definir qualquer número de procedimentos. Por padrão, um único procedimento de assinatura chamado `invoke` é definido para você em `router.ts`.
+
+### Adicionando Ferramentas
+
+Ferramentas são funções que o agente de IA pode chamar para executar ações. Você pode adicionar novas ferramentas no arquivo `agent.ts`:
+
+```typescript
+import { Agent, tool } from '@strands-agents/sdk';
+import z from 'zod';
+
+const letterCounter = tool({
+  name: 'letter_counter',
+  description: 'Count occurrences of a specific letter in a word',
+  inputSchema: z.object({
+    word: z.string().describe('The input word to search in'),
+    letter: z.string().length(1).describe('The specific letter to count'),
+  }),
+  callback: (input) => {
+    const { word, letter } = input;
+    const count = word.toLowerCase().split(letter.toLowerCase()).length - 1;
+    return `The letter '${letter}' appears ${count} time(s) in '${word}'`;
+  },
+});
+
+// Add tools to your agent
+export const agent = new Agent({
+  systemPrompt: 'You are a helpful assistant with access to various tools.',
+  tools: [letterCounter],
+});
+```
+
+O framework Strands trata automaticamente:
+- Validação de entrada usando esquemas Zod
+- Geração de esquema JSON para chamada de ferramenta
+- Tratamento de erros e formatação de resposta
+
+### Configuração de Modelo
+
+Por padrão, os agentes Strands usam Claude 4 Sonnet, mas você pode alternar facilmente entre provedores de modelo:
+
+```typescript
+import { Agent } from '@strands-agents/sdk';
+import { BedrockModel } from '@strands-agents/sdk/models/bedrock';
+import { OpenAIModel } from '@strands-agents/sdk/models/openai';
+
+// Use Bedrock
+const bedrockModel = new BedrockModel({
+  modelId: 'anthropic.claude-sonnet-4-20250514-v1:0',
+});
+let agent = new Agent({ model: bedrockModel });
+let response = await agent.invoke('What can you help me with?');
+
+// Alternatively, use OpenAI by just switching model provider
+const openaiModel = new OpenAIModel({
+  apiKey: process.env.OPENAI_API_KEY,
+  modelId: 'gpt-4o',
+});
+agent = new Agent({ model: openaiModel });
+response = await agent.invoke('What can you help me with?');
+```
+
+Consulte a [documentação do Strands sobre provedores de modelo](https://strandsagents.com/latest/documentation/docs/user-guide/quickstart/#model-providers) para mais opções de configuração.
+
+### Consumindo Servidores MCP
+
+Você pode [adicionar ferramentas de servidores MCP](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/tools/mcp-tools/) ao seu agente Strands.
+
+Para consumir Servidores MCP que você criou usando os geradores <Link path="/guides/py-mcp-server">`py#mcp-server`</Link> ou <Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link> (ou outros hospedados no Bedrock AgentCore Runtime), uma fábrica de cliente é gerada para você em `agent-core-mcp-client.ts`.
+
+Você pode atualizar a inicialização do seu agente em `agent.ts` para criar clientes MCP e adicionar ferramentas. O exemplo a seguir mostra como fazer isso com autenticação IAM (SigV4):
+
+```typescript
+// agent.ts
+import { Agent } from '@strands-agents/sdk';
+import { AgentCoreMcpClient } from './agent-core-mcp-client.js';
+
+const mcpClient = AgentCoreMcpClient.withIamAuth({
+  agentRuntimeArn: process.env.MCP_AGENTCORE_RUNTIME_ARN!,
+  region: process.env.AWS_REGION || 'us-west-2',
+  sessionId: 'my-session-id',
+});
+
+export const agent = new Agent({
+  systemPrompt: '...',
+  tools: [mcpClient],
+});
+```
+
+:::tip
+Se o seu servidor MCP de destino usar autenticação JWT, você pode usar o método `AgentCoreMcpClient.withJwtAuth` para criar o cliente.
+:::
+
+Com o exemplo de autenticação IAM acima, precisamos configurar duas coisas em nossa infraestrutura. Primeiro, precisamos adicionar a variável de ambiente que nosso agente está consumindo para o ARN do AgentCore Runtime do nosso servidor MCP e, em segundo lugar, precisamos conceder permissões ao nosso agente para invocar o servidor MCP. Isso pode ser alcançado da seguinte forma:
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts {9, 13}
+import { MyProjectAgent, MyProjectMcpServer } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const mcpServer = new MyProjectMcpServer(this, 'MyProjectMcpServer');
+
+    const agent = new MyProjectAgent(this, 'MyProjectAgent', {
+      environmentVariables: {
+        MCP_AGENTCORE_RUNTIME_ARN: mcpServer.agentCoreRuntime.agentRuntimeArn,
+      },
+    });
+
+    mcpServer.agentCoreRuntime.grantInvoke(agent.agentCoreRuntime);
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+```terraform
+# MCP Server
+module "my_project_mcp_server" {
+  source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
+}
+
+# Agent
+module "my_project_agent" {
+  source = "../../common/terraform/src/app/agents/my-project-agent"
+
+  env = {
+    MCP_AGENTCORE_RUNTIME_ARN = module.my_project_mcp_server.agent_core_runtime_arn
+  }
+
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = [
+        "bedrock-agentcore:InvokeAgentRuntime"
+      ]
+      Resource = [
+        module.my_project_mcp_server.agent_core_runtime_arn,
+        "${module.my_project_mcp_server.agent_core_runtime_arn}/*"
+      ]
+    }
+  ]
+}
+```
+</Fragment>
+</Infrastructure>
+
+### Mais
+
+Para um guia mais aprofundado sobre como escrever agentes Strands, consulte a [documentação do Strands](https://strandsagents.com/latest/documentation/docs/).
+
+## Executando seu Strands Agent
+
+### Desenvolvimento Local
+
+O gerador configura um destino chamado `<your-agent-name>-serve`, que inicia seu Strands Agent localmente para desenvolvimento e testes.
+
+<NxCommands commands={['run your-project:agent-serve']} />
+
+Este comando usa `tsx --watch` para reiniciar automaticamente o servidor quando os arquivos mudam. O agente estará disponível em `http://localhost:8081` (ou a porta atribuída se você tiver múltiplos agentes).
+
+## Implantando seu Strands Agent no Bedrock AgentCore Runtime
+
+<Snippet name="agent/bedrock-deployment" parentHeading="Implantando seu Strands Agent no Bedrock AgentCore Runtime" />
+
+### Destino Bundle
+
+<Snippet name="ts-bundle" />
+
+O destino bundle usa `index.ts` como ponto de entrada para o servidor WebSocket hospedar no Bedrock AgentCore Runtime.
+
+### Destino Docker
+
+O gerador configura um destino `<your-agent-name>-docker` que executa o servidor WebSocket empacotado na porta `8080` conforme o [contrato de runtime do AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-service-contract.html).
+
+:::tip
+A imagem docker é construída usando uma tag (por exemplo `my-scope-my-project-agent:latest`), que é referenciada pela sua infraestrutura CDK ou Terraform, permitindo que seu `Dockerfile` seja co-localizado com seu projeto Strands Agent.
+:::
+
+Um destino `docker` também é gerado que executa o docker build para todos os agentes se você tiver múltiplos definidos.
+
+### Observabilidade
+
+Seu agente é automaticamente configurado com observabilidade usando o [AWS Distro for Open Telemetry](https://aws.amazon.com/otel/) (ADOT), configurando auto-instrumentação em seu `Dockerfile`.
+
+Você pode encontrar traces no Console AWS do CloudWatch, selecionando "GenAI Observability" no menu. Observe que para que os traces sejam populados você precisará habilitar [Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search.html).
+
+Para mais detalhes, consulte a [documentação do AgentCore sobre observabilidade](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html).
+
+## Invocando seu Strands Agent
+
+A comunicação do agente é transmitida via tRPC sobre WebSocket. Como tal, é recomendado usar a fábrica de cliente com segurança de tipo gerada em `client.ts`.
+
+### Invocar o Servidor Local
+
+Você pode invocar um agente em execução local usando o método de fábrica `.local` da fábrica de cliente.
+
+Você pode, por exemplo, criar um arquivo chamado `scripts/test.ts` em seu workspace que importa o cliente:
+
+```typescript
+// scripts/test.ts
+import { AgentClient } from '../packages/<project>/src/agent/client.js';
+
+const client = AgentClient.local({ url: 'http://localhost:8081/ws' });
+
+client.invoke.subscribe({ message: 'what is 1 plus 1?' }, { onData: console.log });
+```
+
+:::tip
+Execute com `tsx` como uma maneira rápida de testar seu agente.
+
+<PackageManagerExecCommand commands={['tsx scripts/test.ts']} />
+:::
+
+### Invocar o Agente Implantado
+
+<Snippet name="agent/runtime-arn" parentHeading="Invocar o Agente Implantado" />
+
+#### NodeJS
+
+O arquivo `client.ts` gerado inclui uma fábrica de cliente com segurança de tipo que pode ser usada para invocar seu agente implantado.
+
+:::caution
+A fábrica de cliente usa cabeçalhos HTTP no handshake do WebSocket para autenticar solicitações ao Bedrock AgentCore Runtime. Isso não é possível em um navegador e, portanto, este cliente não é adequado para ambientes de navegador. Consulte a seção "Browser" abaixo para detalhes sobre invocação a partir de um navegador.
+:::
+
+##### Autenticação IAM
+
+Você pode invocar seu agente implantado passando seu ARN para o método de fábrica `withIamAuth`:
+
+```typescript
+import { AgentClient } from './agent/client.js';
+
+const client = AgentClient.withIamAuth({
+  agentRuntimeArn: 'arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/my-agent',
+});
+
+client.invoke.subscribe({ message: 'what is 1 plus 1?' }, {
+  onData: (message) => console.log(message),
+  onError: (error) => console.error(error),
+  onComplete: () => console.log('Done'),
+});
+```
+
+:::note
+Isso usará a cadeia de provedores de credenciais AWS padrão para autenticar solicitações, portanto o ambiente no qual o código acima é executado deve ter credenciais AWS configuradas, com acesso para invocar o runtime.
+:::
+
+##### Autenticação JWT / Cognito
+
+Use o método de fábrica `withJwtAuth` para autenticar com o token de acesso JWT / Cognito.
+
+```typescript
+const client = AgentClient.withJwtAuth({
+  agentRuntimeArn: 'arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/my-agent',
+  accessTokenProvider: async () => `<access-token>`,
+});
+
+client.invoke.subscribe({ message: 'what is 1 plus 1?' }, {
+  onData: console.log,
+});
+```
+
+O `accessTokenProvider` deve retornar o token usado para autenticar a solicitação. Você pode, por exemplo, obter um token dentro deste método para garantir que credenciais atualizadas sejam reutilizadas quando o tRPC reiniciar uma conexão WebSocket. O exemplo abaixo demonstra o uso do AWS SDK para obter o token do Cognito:
+
+```typescript
+import { CognitoIdentityProvider } from "@aws-sdk/client-cognito-identity-provider";
+
+const cognito = new CognitoIdentityProvider();
+
+const jwtClient = AgentClient.withJwtAuth({
+  agentRuntimeArn: 'arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/my-agent',
+  accessTokenProvider: async () => {
+    const response = await cognito.adminInitiateAuth({
+      UserPoolId: '<user-pool-id>',
+      ClientId: '<user-pool-client-id>',
+      AuthFlow: 'ADMIN_NO_SRP_AUTH',
+      AuthParameters: {
+        USERNAME: '<username>',
+        PASSWORD: '<password>',
+      },
+    });
+    return response.AuthenticationResult!.AccessToken!;
+  },
+});
+```
+
+#### Browser
+
+WebSockets no navegador não suportam a especificação de cabeçalhos (além de `Sec-WebSocket-Protocol`) e, portanto, a fábrica de cliente gerada em `client.ts` não pode ser usada em um navegador (isso na verdade resultará em um erro de compilação, pois o construtor `WebSocket` não aceita cabeçalhos como faz no NodeJS).
+
+##### Autenticação JWT / Cognito
+
+:::caution
+No momento da escrita, o Bedrock AgentCore Runtime requer que tokens JWT sejam passados no cabeçalho `Authorization` e, portanto, os navegadores não podem autenticar com o Bedrock AgentCore Runtime usando autenticação JWT. Apenas a autenticação AWS Signature Version 4 (SigV4) é suportada via URLs pré-assinadas.
+
+Nos esforçaremos para atualizar esta documentação caso o suporte seja adicionado no futuro.
+:::
+
+##### Autenticação IAM
+
+Para invocar seu agente a partir de um navegador, você precisa criar uma URL WebSocket pré-assinada usando AWS SigV4.
+
+O exemplo abaixo mostra um fluxo de ponta a ponta de obtenção de credenciais, criação de uma URL pré-assinada e invocação do agente:
+
+```typescript
+import { createTRPCClient, createWSClient, wsLink } from '@trpc/client';
+import { AwsClient } from 'aws4fetch';
+import { CognitoIdentityClient } from '@aws-sdk/client-cognito-identity';
+import { fromCognitoIdentityPool } from '@aws-sdk/credential-provider-cognito-identity';
+import type { AppRouter } from './your-agent/router';
+
+// Build a presigned WebSocket URL
+async function buildSignedUrl(
+  agentRuntimeArn: string,
+  idToken: string,
+  region: string = 'us-west-2'
+): Promise<string> {
+  // Get credentials from a Cognito Identity Pool (or other source)
+  const credentials = fromCognitoIdentityPool({
+    client: new CognitoIdentityClient({ region }),
+    identityPoolId: 'us-west-2:xxxxx',
+    logins: {
+      [`cognito-idp.${region}.amazonaws.com/us-west-2_xxxxx`]: idToken,
+    },
+  });
+
+  const cognitoIdentity = new CognitoIdentityClient({ credentials });
+  const credential = await cognitoIdentity.config.credentials();
+
+  // Create AWS SigV4 client
+  const awsClient = new AwsClient({
+    ...credential,
+    service: 'bedrock-agentcore',
+  });
+
+  // Build WebSocket URL from ARN
+  const wsUrl = `wss://bedrock-agentcore.${region}.amazonaws.com/runtimes/${agentRuntimeArn.replace(/:/g, '%3A').replace(/\//g, '%2F')}/ws`;
+
+  // Create presigned URL
+  const signedRequest = await awsClient.sign(wsUrl, {
+    method: 'GET',
+    aws: { signQuery: true },
+  });
+
+  return signedRequest.url;
+}
+
+// Create tRPC client with presigned WebSocket URL
+const agentRuntimeArn = 'arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/my-agent';
+const idToken = '<your-id-token>';
+
+const wsClient = createWSClient({
+  url: async () => buildSignedUrl(agentRuntimeArn, idToken),
+});
+
+const trpcClient = createTRPCClient<AppRouter>({
+  links: [wsLink({ client: wsClient })],
+});
+
+// Invoke the agent
+trpcClient.invoke.subscribe({ message: 'what is 1 plus 1?' }, {
+  onData: (message) => console.log(message),
+});
+```
+
+:::tip
+Se você gostaria de uma experiência similar ao <Link path="/guides/api-connection">gerador de conexão de API</Link> para agentes, por favor +1 [nesta issue do GitHub](https://github.com/awslabs/nx-plugin-for-aws/issues/326).
+:::

@@ -1,6 +1,6 @@
 <div align="center">
-  <h1>NX plugin for AWS - @aws/nx-plugin</h1>
-  <h3>Quickly bootstrap and build AWS projects easily</h3>
+  <h1>Nx Plugin for AWS - @aws/nx-plugin</h1>
+  <h3>Rapidly scaffold and build projects on AWS</h3>
   <a href="https://opensource.org/licenses/Apache-2.0">
     <img
       src="https://img.shields.io/badge/License-Apache%202.0-yellowgreen.svg"
@@ -43,10 +43,12 @@
 ## Key Features
 
 - **Declarative**: Generate code that follows best practices for AWS cloud development.
+- **End-to-end**: Generate application code and CDK/Terraform infrastructure to deploy to AWS.
 - **Component-Based**: Add components to your project as needed, from React websites to serverless APIs using either the CLI or UI.
 - **Learn Once, Use Anywhere**: Consistent patterns across different AWS services and application types.
 - **Open for modification**: All code generated is your code and can be edited as you see fit.
 - **Type safety**: Type-safety is employed to support IDE completions and reduce the number of runtime errors encountered.
+- **Local-first**: Iterate quickly by developing locally before deploying to AWS.
 - **Minimal dependencies**: Getting up and running is simple and only requires langugage level global dependencies.
 
 ## Available Generators
@@ -58,13 +60,14 @@
 - `ts#trpc-api` - Generate a tRPC backend service with Amazon API Gateway/AWS Lambda integrations and [AWS Powertools](https://github.com/aws-powertools/powertools-lambda-typescript) pre-configured.
 - `ts#nx-generator` - Add an [Nx Generator](https://nx.dev/features/generate-code) to a TypeScript project.
 - `ts#mcp-server` - Add a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server to a TypeScript project.
+- `ts#strands-agent` - Add a [Strands Agent](https://strandsagents.com/) to a TypeScript project.
 - `ts#lambda-function` - Generate a TypeScript lambda function with optional type-safe event sources.
 - `terraform#project` - Generate a new Terraform project.
 - `py#project` - Generate a uv based Python project.
 - `py#fast-api` - Generate a FastAPI backend service with [AWS Powertools](https://github.com/aws-powertools/powertools-lambda-python) pre-configured.
 - `py#lambda-function` - Add a lambda function to an existing python project with optional type-safe event sources.
 - `py#mcp-server` - Add a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server to a Python project.
-- `py#strands-agent` Add a [Strands Agent](https://strandsagents.com/) to a Python project
+- `py#strands-agent` Add a [Strands Agent](https://strandsagents.com/) to a Python project.
 - `api-connection` - Connect frontend applications to backend APIs.
 - `license` - Automatically manage LICENSE files and source code headers in your workspace.
 

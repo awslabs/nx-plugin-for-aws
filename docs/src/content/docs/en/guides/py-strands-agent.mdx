@@ -10,6 +10,7 @@ import Link from '@components/link.astro';
 import Snippet from '@components/snippet.astro';
 import Infrastructure from '@components/infrastructure.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
+import Drawer from '@components/drawer.astro';
 
 Generate a Python [Strands Agent](https://strandsagents.com/) for building AI agents with tools, and optionally deploy it to [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/).
 
@@ -306,7 +307,7 @@ async def invoke(input: InvokeInput) -> str:
     return StreamingResponse(handle_invoke(input), media_type="text/event-stream")
 ```
 
-You can define a Pydantic model to yield structured data instead:
+You can define a Pydantic model to yield structured data instead. In order to do this, you will need to serialize the pydantic models yielded by `handle_invoke`:
 
 ```python
 from pydantic import BaseModel
@@ -316,10 +317,22 @@ class StreamChunk(BaseModel):
     timestamp: str
     token_count: int
 
+def handle_invoke(...):
+    ...
+    yield StreamChunk(content="xx", timestamp="yy", token_count=5)
+
+def serialize_stream(generator):
+    async for output in generator:
+        yield (output.model_dump_json() + "\n").encode("utf-8")
+
 @app.post("/invocations", openapi_extra={"x-streaming": True})
 async def invoke(input: InvokeInput) -> StreamChunk:
-    return StreamingResponse(handle_invoke(input), media_type="application/json")
+    return StreamingResponse(serialize_stream(handle_invoke(input)), media_type="application/json")
 ```
+
+:::caution
+Note here that the vended server (and the above `serialize_stream` method) does not currently conform to the Server-Sent Events (SSE) standard, such that if desired the Agent can be invoked by our generated TypeScript client from a frontend, which doesn't currently expect streaming events in SSE format. Please +1 [this GitHub issue](https://github.com/awslabs/nx-plugin-for-aws/issues/369) if this affects you to help us prioritise addressing this.
+:::
 
 ## Bedrock AgentCore Python SDK
 
@@ -343,85 +356,7 @@ This command uses `uv run` to execute your Strands Agent using the [Bedrock Agen
 
 ## Deploying Your Strands Agent to Bedrock AgentCore Runtime
 
-### Infrastructure as Code
-
-If you selected `BedrockAgentCoreRuntime` for `computeType`, the relevant CDK or Terraform infrastructure is generated which you can use to deploy your Strands Agent to [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html).
-
-<Infrastructure>
-<Fragment slot="cdk">
-A CDK construct is generated for your agent, named based on the `name` you chose when running the generator, or `<ProjectName>Agent` by default.
-
-You can use this CDK construct in a CDK application:
-
-```ts {6}
-import { MyProjectAgent } from ':my-scope/common-constructs';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    // Add the agent to your stack
-    const agent = new MyProjectAgent(this, 'MyProjectAgent');
-
-    // Grant permissions to invoke the relevant models in bedrock
-    agent.agentCoreRuntime.addToRolePolicy(
-      new PolicyStatement({
-        actions: [
-          'bedrock:InvokeModel',
-          'bedrock:InvokeModelWithResponseStream',
-        ],
-        // You can scope the below down to the specific models you use
-        resources: ['arn:aws:bedrock:*::foundation-model/*'],
-      }),
-    );
-  }
-}
-```
-
-:::note
-This construct uses the [`@aws-cdk/aws-bedrock-agentcore-alpha` module](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-bedrock-agentcore-alpha-readme.html).
-:::
-</Fragment>
-<Fragment slot="terraform">
-A Terraform module is generated for you, named based on the `name` you chose when running the generator, or `<ProjectName>-agent` by default.
-
-You can use this terraform module in a Terraform project:
-
-```terraform
-# Agent
-module "my_project_agent" {
-  # Relative path to the generated module in the common/terraform project
-  source = "../../common/terraform/src/app/agents/my-project-agent"
-
-  # Grant permissions to invoke the relevant models in bedrock
-  additional_iam_policy_statements = [
-    {
-      Effect = "Allow"
-      Action = [
-        "bedrock:InvokeModel",
-        "bedrock:InvokeModelWithResponseStream"
-      ]
-      Resource = [
-        "arn:aws:bedrock:*::foundation-model/*"
-      ]
-    }
-  ]
-}
-```
-</Fragment>
-</Infrastructure>
-
-:::note
-When deploying to Bedrock AgentCore Runtime, you'll need to ensure that the appropriate foundation models are enabled in your AWS account. By default, Strands agents use Claude 4 Sonnet, but this can be customized as described above.
-
-To enable model access in Amazon Bedrock, follow the [instructions here](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html).
-:::
-
-:::caution
-[Docker](https://www.docker.com/) is required to build and deploy your Strands Agent. Make sure you have installed and launched Docker to avoid errors such as:
-
-```
-ERROR: Cannot connect to the Docker daemon at unix://path/to/docker.sock.
-```
-:::
+<Snippet name="agent/bedrock-deployment" parentHeading="Deploying Your Strands Agent to Bedrock AgentCore Runtime" />
 
 ### Bundle and Docker Targets
 
@@ -589,3 +524,64 @@ Your agent is automatically configured with observability using the [AWS Distro 
 You can find traces in the CloudWatch AWS Console, by selecting "GenAI Observability" in the menu. Note that for traces to be populated you will need to enable [Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search.html).
 
 For more details, refer to the [AgentCore documentation on observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html).
+
+## Invoking your Strands Agent
+
+### Invoke the Local Server
+
+To invoke an Agent running locally via the `<your-agent-name>-serve` target, you can send a simple POST request to `/invocations` on the port your local agent is running on. For example, with `curl`:
+
+```bash
+curl -N -X POST http://localhost:8081/invocations \
+  -d '{"prompt": "what is 3 + 5?", "session_id": "abcdefghijklmnopqrstuvwxyz0123456789"}' \
+  -H "Content-Type: application/json"
+```
+
+:::note
+The `-N` argument given to `curl` disables buffering the output stream, so you can see the streaming response in real-time.
+:::
+
+### Invoke the Deployed Agent
+
+<Snippet name="agent/runtime-arn" parentHeading="Invoke the Deployed Agent" />
+
+#### IAM Authentication
+
+For IAM Authentication, the request must be signed using AWS Signature Version 4 (SigV4).
+
+```bash
+acurl <region> bedrock-agentcore -N -X POST \
+'https://bedrock
+-agentcore.<region>.amazonaws.com/runtimes/<url-encoded-arn>/invocations' \
+-d '{"prompt": "what is 3 + 5?", "session_id": "abcdefghijklmnopqrstuvwxyz0123456789"}' \
+-H 'Content-Type: application/json'
+```
+
+<Drawer title="Sigv4 enabled curl" trigger="Click here for more details on configuring the above acurl command">
+<Snippet name="tools/acurl" />
+</Drawer>
+
+#### JWT / Cognito Authentication
+
+For Cognito Authentication, pass the Cognito Access Token in the `Authorization` header:
+
+```bash
+curl -N -X POST 'https://bedrock
+-agentcore.<region>.amazonaws.com/runtimes/<url-encoded-arn>/invocations' \
+  -d '{"prompt": "what is 3 + 5?", "session_id": "abcdefghijklmnopqrstuvwxyz0123456789"}' \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <access-token>"
+```
+
+You can obtain the access token using the AWS CLI's `cognito-idp admin-initiate-auth` command, for example:
+
+```bash
+aws cognito-idp admin-initiate-auth \
+  --user-pool-id <user-pool-id> \
+  --client-id <user-pool-client-id> \
+  --auth-flow ADMIN_NO_SRP_AUTH \
+  --auth-parameters USERNAME=<username>,PASSWORD=<password> \
+  --region <region> \
+  --query 'AuthenticationResult.AccessToken' \
+  --output text
+```

@@ -10,6 +10,7 @@ import Link from '@components/link.astro';
 import Snippet from '@components/snippet.astro';
 import Infrastructure from '@components/infrastructure.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
+import Drawer from '@components/drawer.astro';
 
 Tạo một Python [Strands Agent](https://strandsagents.com/) để xây dựng các AI agent với các công cụ, và tùy chọn triển khai nó lên [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/).
 
@@ -306,7 +307,7 @@ async def invoke(input: InvokeInput) -> str:
     return StreamingResponse(handle_invoke(input), media_type="text/event-stream")
 ```
 
-Bạn có thể định nghĩa một Pydantic model để yield dữ liệu có cấu trúc thay thế:
+Bạn có thể định nghĩa một Pydantic model để yield dữ liệu có cấu trúc thay thế. Để làm điều này, bạn sẽ cần serialize các pydantic model được yield bởi `handle_invoke`:
 
 ```python
 from pydantic import BaseModel
@@ -316,10 +317,22 @@ class StreamChunk(BaseModel):
     timestamp: str
     token_count: int
 
+def handle_invoke(...):
+    ...
+    yield StreamChunk(content="xx", timestamp="yy", token_count=5)
+
+def serialize_stream(generator):
+    async for output in generator:
+        yield (output.model_dump_json() + "\n").encode("utf-8")
+
 @app.post("/invocations", openapi_extra={"x-streaming": True})
 async def invoke(input: InvokeInput) -> StreamChunk:
-    return StreamingResponse(handle_invoke(input), media_type="application/json")
+    return StreamingResponse(serialize_stream(handle_invoke(input)), media_type="application/json")
 ```
+
+:::caution
+Lưu ý ở đây rằng server được tạo (và phương thức `serialize_stream` ở trên) hiện không tuân theo tiêu chuẩn Server-Sent Events (SSE), do đó nếu muốn Agent có thể được gọi bởi TypeScript client được tạo của chúng ta từ frontend, hiện không mong đợi các streaming event ở định dạng SSE. Vui lòng +1 [GitHub issue này](https://github.com/awslabs/nx-plugin-for-aws/issues/369) nếu điều này ảnh hưởng đến bạn để giúp chúng tôi ưu tiên giải quyết vấn đề này.
+:::
 
 ## Bedrock AgentCore Python SDK
 
@@ -343,85 +356,7 @@ Lệnh này sử dụng `uv run` để thực thi Strands Agent của bạn bằ
 
 ## Triển khai Strands Agent của bạn lên Bedrock AgentCore Runtime
 
-### Infrastructure as Code
-
-Nếu bạn chọn `BedrockAgentCoreRuntime` cho `computeType`, hạ tầng CDK hoặc Terraform liên quan được tạo mà bạn có thể sử dụng để triển khai Strands Agent của bạn lên [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html).
-
-<Infrastructure>
-<Fragment slot="cdk">
-Một CDK construct được tạo cho agent của bạn, được đặt tên dựa trên `name` bạn đã chọn khi chạy generator, hoặc `<ProjectName>Agent` theo mặc định.
-
-Bạn có thể sử dụng CDK construct này trong một ứng dụng CDK:
-
-```ts {6}
-import { MyProjectAgent } from ':my-scope/common-constructs';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    // Add the agent to your stack
-    const agent = new MyProjectAgent(this, 'MyProjectAgent');
-
-    // Grant permissions to invoke the relevant models in bedrock
-    agent.agentCoreRuntime.addToRolePolicy(
-      new PolicyStatement({
-        actions: [
-          'bedrock:InvokeModel',
-          'bedrock:InvokeModelWithResponseStream',
-        ],
-        // You can scope the below down to the specific models you use
-        resources: ['arn:aws:bedrock:*::foundation-model/*'],
-      }),
-    );
-  }
-}
-```
-
-:::note
-Construct này sử dụng [module `@aws-cdk/aws-bedrock-agentcore-alpha`](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-bedrock-agentcore-alpha-readme.html).
-:::
-</Fragment>
-<Fragment slot="terraform">
-Một Terraform module được tạo cho bạn, được đặt tên dựa trên `name` bạn đã chọn khi chạy generator, hoặc `<ProjectName>-agent` theo mặc định.
-
-Bạn có thể sử dụng terraform module này trong một Terraform project:
-
-```terraform
-# Agent
-module "my_project_agent" {
-  # Relative path to the generated module in the common/terraform project
-  source = "../../common/terraform/src/app/agents/my-project-agent"
-
-  # Grant permissions to invoke the relevant models in bedrock
-  additional_iam_policy_statements = [
-    {
-      Effect = "Allow"
-      Action = [
-        "bedrock:InvokeModel",
-        "bedrock:InvokeModelWithResponseStream"
-      ]
-      Resource = [
-        "arn:aws:bedrock:*::foundation-model/*"
-      ]
-    }
-  ]
-}
-```
-</Fragment>
-</Infrastructure>
-
-:::note
-Khi triển khai lên Bedrock AgentCore Runtime, bạn cần đảm bảo rằng các foundation model thích hợp được bật trong tài khoản AWS của bạn. Mặc định, các Strands agent sử dụng Claude 4 Sonnet, nhưng điều này có thể được tùy chỉnh như mô tả ở trên.
-
-Để bật quyền truy cập model trong Amazon Bedrock, hãy làm theo [hướng dẫn tại đây](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-modify.html).
-:::
-
-:::caution
-[Docker](https://www.docker.com/) là bắt buộc để build và triển khai Strands Agent của bạn. Đảm bảo bạn đã cài đặt và khởi động Docker để tránh các lỗi như:
-
-```
-ERROR: Cannot connect to the Docker daemon at unix://path/to/docker.sock.
-```
-:::
+<Snippet name="agent/bedrock-deployment" parentHeading="Deploying Your Strands Agent to Bedrock AgentCore Runtime" />
 
 ### Bundle và Docker Targets
 
@@ -589,3 +524,64 @@ Agent của bạn được tự động cấu hình với khả năng quan sát 
 Bạn có thể tìm thấy các trace trong AWS Console CloudWatch, bằng cách chọn "GenAI Observability" trong menu. Lưu ý rằng để các trace được điền, bạn sẽ cần bật [Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search.html).
 
 Để biết thêm chi tiết, hãy tham khảo [tài liệu AgentCore về observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html).
+
+## Gọi Strands Agent của bạn
+
+### Gọi Local Server
+
+Để gọi một Agent đang chạy locally thông qua target `<your-agent-name>-serve`, bạn có thể gửi một POST request đơn giản tới `/invocations` trên port mà local agent của bạn đang chạy. Ví dụ, với `curl`:
+
+```bash
+curl -N -X POST http://localhost:8081/invocations \
+  -d '{"prompt": "what is 3 + 5?", "session_id": "abcdefghijklmnopqrstuvwxyz0123456789"}' \
+  -H "Content-Type: application/json"
+```
+
+:::note
+Tham số `-N` được cung cấp cho `curl` vô hiệu hóa việc buffer output stream, để bạn có thể xem streaming response theo thời gian thực.
+:::
+
+### Gọi Agent đã triển khai
+
+<Snippet name="agent/runtime-arn" parentHeading="Invoke the Deployed Agent" />
+
+#### Xác thực IAM
+
+Đối với Xác thực IAM, request phải được ký bằng AWS Signature Version 4 (SigV4).
+
+```bash
+acurl <region> bedrock-agentcore -N -X POST \
+'https://bedrock
+-agentcore.<region>.amazonaws.com/runtimes/<url-encoded-arn>/invocations' \
+-d '{"prompt": "what is 3 + 5?", "session_id": "abcdefghijklmnopqrstuvwxyz0123456789"}' \
+-H 'Content-Type: application/json'
+```
+
+<Drawer title="Sigv4 enabled curl" trigger="Click here for more details on configuring the above acurl command">
+<Snippet name="tools/acurl" />
+</Drawer>
+
+#### Xác thực JWT / Cognito
+
+Đối với Xác thực Cognito, truyền Cognito Access Token trong header `Authorization`:
+
+```bash
+curl -N -X POST 'https://bedrock
+-agentcore.<region>.amazonaws.com/runtimes/<url-encoded-arn>/invocations' \
+  -d '{"prompt": "what is 3 + 5?", "session_id": "abcdefghijklmnopqrstuvwxyz0123456789"}' \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <access-token>"
+```
+
+Bạn có thể lấy access token bằng lệnh `cognito-idp admin-initiate-auth` của AWS CLI, ví dụ:
+
+```bash
+aws cognito-idp admin-initiate-auth \
+  --user-pool-id <user-pool-id> \
+  --client-id <user-pool-client-id> \
+  --auth-flow ADMIN_NO_SRP_AUTH \
+  --auth-parameters USERNAME=<username>,PASSWORD=<password> \
+  --region <region> \
+  --query 'AuthenticationResult.AccessToken' \
+  --output text
+```
