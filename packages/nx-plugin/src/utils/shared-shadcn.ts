@@ -148,64 +148,50 @@ export async function sharedShadcnGenerator(tree: Tree) {
     },
   }));
 
-  if (tree.exists(joinPathFragments(libraryRoot, 'project.json'))) {
-    updateJson(tree, joinPathFragments(libraryRoot, 'project.json'), (json) => {
-      const buildTarget = json.targets?.build;
-      if (!buildTarget) {
-        return json;
-      }
+  updateJson(tree, joinPathFragments(libraryRoot, 'project.json'), (json) => {
+    const buildTarget = json.targets?.build;
+    if (!buildTarget) {
+      return json;
+    }
 
-      const desiredOutputPath = joinPathFragments('dist', libraryRoot);
-      const currentOutputPath = buildTarget.options?.outputPath;
-      const outputs =
-        buildTarget.outputs && buildTarget.outputs.length > 0
-          ? buildTarget.outputs
-          : ['{options.outputPath}'];
-      const compileTarget =
-        json.targets?.compile ??
-        ({
-          executor: 'nx:run-commands',
-          outputs: [
-            `{workspaceRoot}/${joinPathFragments('dist', libraryRoot, 'tsc')}`,
-          ],
-          options: {
-            command: 'tsc --build tsconfig.lib.json',
-            cwd: '{projectRoot}',
-          },
-        } as const);
-      const buildDependsOn = Array.from(
-        new Set([...(buildTarget.dependsOn ?? []), 'compile']),
-      );
-      const unchanged =
-        currentOutputPath === desiredOutputPath &&
-        outputs === buildTarget.outputs &&
-        buildDependsOn.length === (buildTarget.dependsOn ?? []).length &&
-        buildDependsOn.every(
-          (d, i) => d === (buildTarget.dependsOn ?? [])[i],
-        ) &&
-        json.targets?.compile;
-      if (unchanged) {
-        return json;
-      }
-
-      return {
-        ...json,
-        targets: {
-          ...json.targets,
-          build: {
-            ...buildTarget,
-            outputs,
-            dependsOn: buildDependsOn,
-            options: {
-              ...buildTarget.options,
-              outputPath: desiredOutputPath,
-            },
-          },
-          compile: compileTarget,
+    const outputPath = joinPathFragments('dist', libraryRoot);
+    const outputs =
+      buildTarget.outputs && buildTarget.outputs.length > 0
+        ? buildTarget.outputs
+        : ['{options.outputPath}'];
+    const compileTarget =
+      json.targets?.compile ??
+      ({
+        executor: 'nx:run-commands',
+        outputs: [
+          `{workspaceRoot}/${joinPathFragments('dist', libraryRoot, 'tsc')}`,
+        ],
+        options: {
+          command: 'tsc --build tsconfig.lib.json',
+          cwd: '{projectRoot}',
         },
-      };
-    });
-  }
+      } as const);
+    const buildDependsOn = Array.from(
+      new Set([...(buildTarget.dependsOn ?? []), 'compile']),
+    );
+
+    return {
+      ...json,
+      targets: {
+        ...json.targets,
+        build: {
+          ...buildTarget,
+          outputs,
+          dependsOn: buildDependsOn,
+          options: {
+            ...buildTarget.options,
+            outputPath: outputPath,
+          },
+        },
+        compile: compileTarget,
+      },
+    };
+  });
 
   if (!tree.exists('components.json')) {
     generateFiles(
