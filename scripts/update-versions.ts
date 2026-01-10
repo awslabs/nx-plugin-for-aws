@@ -13,15 +13,19 @@ import {
   cpSync,
   rmSync,
   mkdirSync,
+  existsSync,
 } from 'fs';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { join, relative } from 'path';
 import { execSync } from 'child_process';
 import { flushChanges, FsTree } from 'nx/src/generators/tree';
 import { replace } from '../packages/nx-plugin/src/utils/ast';
 import { factory } from 'typescript';
-import { parsePipRequirementsLine } from 'pip-requirements-js';
-import { ProjectNameRequirement, VersionOperator } from 'pip-requirements-js';
+import {
+  parsePipRequirementsLine,
+  ProjectNameRequirement,
+  VersionOperator,
+} from 'pip-requirements-js';
 
 interface VersionChange {
   name: string;
@@ -33,6 +37,175 @@ interface ChangeGroup {
   title: string;
   changes: VersionChange[];
 }
+
+const SHADCN_COMPONENTS = [
+  'alert',
+  'breadcrumb',
+  'button',
+  'card',
+  'input',
+  'separator',
+  'sheet',
+  'sidebar',
+  'skeleton',
+  'spinner',
+  'tooltip',
+];
+
+const SHADCN_TEMPLATE_ROOT = join(
+  process.cwd(),
+  'packages',
+  'nx-plugin',
+  'src',
+  'utils',
+  'files',
+  'common',
+  'shadcn',
+  'src',
+);
+
+const applyShadcnTemplateAliases = (contents: string): string =>
+  contents.replace(/@\//g, '<%= scopeAlias %>common-shadcn/');
+
+const refreshShadcnTemplates = (
+  shadcnVersion: string,
+  tmpDir: string,
+): string[] => {
+  const shadcnDir = join(tmpDir, 'shadcn');
+  const shadcnSrcDir = join(shadcnDir, 'src');
+  const shadcnUiDir = join(shadcnSrcDir, 'components', 'ui');
+  const updatedTemplates: string[] = [];
+
+  rmSync(shadcnDir, { recursive: true, force: true });
+  mkdirSync(shadcnUiDir, { recursive: true });
+  mkdirSync(join(shadcnSrcDir, 'lib'), { recursive: true });
+  mkdirSync(join(shadcnSrcDir, 'hooks'), { recursive: true });
+  mkdirSync(join(shadcnSrcDir, 'styles'), { recursive: true });
+
+  // Update the current globals.css.template instead of starting from a blank file.
+  const globalsTemplatePath = join(
+    SHADCN_TEMPLATE_ROOT,
+    'styles',
+    'globals.css.template',
+  );
+  writeFileSync(
+    join(shadcnSrcDir, 'styles', 'globals.css'),
+    readFileSync(globalsTemplatePath, 'utf-8'),
+  );
+
+  writeFileSync(
+    join(shadcnDir, 'package.json'),
+    JSON.stringify(
+      {
+        name: 'shadcn-template-refresh',
+        private: true,
+      },
+      null,
+      2,
+    ),
+  );
+
+  writeFileSync(
+    join(shadcnDir, 'tsconfig.json'),
+    JSON.stringify(
+      {
+        compilerOptions: {
+          baseUrl: '.',
+          paths: {
+            '@/*': ['src/*'],
+          },
+        },
+      },
+      null,
+      2,
+    ),
+  );
+
+  writeFileSync(
+    join(shadcnDir, 'components.json'),
+    JSON.stringify(
+      {
+        $schema: 'https://ui.shadcn.com/schema.json',
+        style: 'new-york',
+        rsc: true,
+        tsx: true,
+        tailwind: {
+          config: '',
+          css: 'src/styles/globals.css',
+          baseColor: 'zinc',
+          cssVariables: true,
+        },
+        iconLibrary: 'lucide',
+        aliases: {
+          components: '@/components',
+          utils: '@/lib/utils',
+          hooks: '@/hooks',
+          lib: '@/lib',
+          ui: '@/components/ui',
+        },
+      },
+      null,
+      2,
+    ),
+  );
+
+  console.log('Refreshing Shadcn templates...');
+  execSync(
+    `npx -y shadcn@${shadcnVersion} add ${SHADCN_COMPONENTS.join(' ')}`,
+    {
+      cwd: shadcnDir,
+      stdio: 'inherit',
+      env: {
+        ...process.env,
+        CI: '1',
+      },
+    },
+  );
+
+  const writeTemplateFile = (sourcePath: string, targetPath: string): void => {
+    const sourceContents = readFileSync(sourcePath, 'utf-8');
+    const templatedContents = applyShadcnTemplateAliases(sourceContents);
+    writeFileSync(targetPath, templatedContents);
+    updatedTemplates.push(relative(process.cwd(), targetPath));
+  };
+
+  for (const component of SHADCN_COMPONENTS) {
+    const sourcePath = join(shadcnUiDir, `${component}.tsx`);
+    if (!existsSync(sourcePath)) {
+      console.warn(
+        `Skipping Shadcn component output (not generated): ${sourcePath}`,
+      );
+      continue;
+    }
+    const targetPath = join(
+      SHADCN_TEMPLATE_ROOT,
+      'components',
+      'ui',
+      `${component}.tsx.template`,
+    );
+    writeTemplateFile(sourcePath, targetPath);
+  }
+
+  const useMobileSource = join(shadcnSrcDir, 'hooks', 'use-mobile.ts');
+  if (existsSync(useMobileSource)) {
+    writeTemplateFile(
+      useMobileSource,
+      join(SHADCN_TEMPLATE_ROOT, 'hooks', 'use-mobile.ts.template'),
+    );
+  } else {
+    console.warn(
+      `Skipping Shadcn hook output (not generated): ${useMobileSource}`,
+    );
+  }
+
+  writeTemplateFile(
+    join(shadcnSrcDir, 'styles', 'globals.css'),
+    join(SHADCN_TEMPLATE_ROOT, 'styles', 'globals.css.template'),
+  );
+
+  console.log('Shadcn templates refreshed.');
+  return updatedTemplates;
+};
 
 /**
  * Gets updated TypeScript versions by running npm-check-updates
@@ -262,6 +435,7 @@ const main = async () => {
       'packages/nx-plugin/src/utils/versions.ts',
       'TS_VERSIONS',
     );
+    const shadcnChange = tsChanges.find((change) => change.name === 'shadcn');
 
     // Get updated Python versions
     const updatedPyVersions = getUpdatedPythonVersions(tmpDir);
@@ -278,6 +452,9 @@ const main = async () => {
     // Only apply changes if not a dry run
     if (!isDryRun) {
       flushChanges(tree.root, tree.listChanges());
+      if (shadcnChange?.newVersion) {
+        refreshShadcnTemplates(shadcnChange.newVersion, tmpDir);
+      }
     }
 
     // Write the report

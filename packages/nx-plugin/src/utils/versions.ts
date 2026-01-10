@@ -80,6 +80,7 @@ export const TS_VERSIONS = {
   '@radix-ui/react-slot': '1.2.4',
   '@radix-ui/react-separator': '1.1.8',
   '@radix-ui/react-tooltip': '1.2.8',
+  shadcn: '3.6.2',
   'tw-animate-css': '1.4.0',
   'tailwind-merge': '3.4.0',
   'vite-tsconfig-paths': '5.1.4',
