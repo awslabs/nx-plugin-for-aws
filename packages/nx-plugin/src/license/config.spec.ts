@@ -12,6 +12,7 @@ import { SPDXLicenseIdentifier } from './schema';
 import { createTreeUsingTsSolutionSetup } from '../utils/test';
 import { AWS_NX_PLUGIN_CONFIG_FILE_NAME } from '../utils/config/utils';
 import { LicenseConfig } from './config-types';
+import { beforeEach, afterEach, vi } from 'vitest';
 
 const LICENSES: SPDXLicenseIdentifier[] = ['Apache-2.0', 'MIT', 'ASL'];
 
@@ -35,6 +36,13 @@ describe('license config', () => {
 
   beforeEach(() => {
     tree = createTreeUsingTsSolutionSetup();
+    // Mock Date to return a consistent year for snapshot tests
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2025-01-01T00:00:00.000Z'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   describe('defaultLicenseConfig', () => {
