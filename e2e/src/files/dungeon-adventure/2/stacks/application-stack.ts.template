@@ -7,6 +7,7 @@ import {
   UserIdentity,
 } from ':dungeon-adventure/common-constructs';
 import { Stack, StackProps, CfnOutput } from 'aws-cdk-lib';
+import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
 import { Construct } from 'constructs';
 import { ElectrodbDynamoTable } from '../constructs/electrodb-table.js';
 import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
@@ -58,6 +59,22 @@ export class ApplicationStack extends Stack {
         INVENTORY_MCP_ARN: mcpServer.agentCoreRuntime.agentRuntimeArn,
       },
     });
+
+    // Grant the agent access to bedrock models
+    storyAgent.agentCoreRuntime.addToRolePolicy(
+      new PolicyStatement({
+        actions: [
+          'bedrock:InvokeModel',
+          'bedrock:InvokeModelWithResponseStream',
+        ],
+        // You can scope the below down to the specific models you use
+        resources: [
+          'arn:aws:bedrock:*:*:foundation-model/*',
+          'arn:aws:bedrock:*:*:inference-profile/*',
+        ],
+      }),
+    );
+
     // Add the Story Agent ARN to runtime-config.json so it can be referenced by the website
     RuntimeConfig.ensure(this).config.agentArn =
       storyAgent.agentCoreRuntime.agentRuntimeArn;

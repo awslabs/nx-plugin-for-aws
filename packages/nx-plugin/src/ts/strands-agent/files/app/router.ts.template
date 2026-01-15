@@ -1,0 +1,34 @@
+import { publicProcedure, t } from './init.js';
+import { z } from 'zod';
+import { zAsyncIterable } from './schema/z-async-iterable.js';
+import { getAgent } from './agent.js';
+
+export const router = t.router;
+
+export const appRouter = router({
+  invoke: publicProcedure
+    .input(z.object({ message: z.string() }))
+    .output(
+      zAsyncIterable({
+        yield: z.string(),
+        tracked: false,
+      }),
+    )
+    .subscription(async function* (opts) {
+      const agent = getAgent();
+
+      for await (const event of agent.stream(opts.input.message)) {
+        if (
+          event.type === 'modelContentBlockDeltaEvent' &&
+          event.delta.type === 'textDelta'
+        ) {
+          yield event.delta.text;
+        } else if (event.type === 'modelMessageStopEvent') {
+          yield '\n';
+        }
+      }
+      return;
+    }),
+});
+
+export type AppRouter = typeof appRouter;

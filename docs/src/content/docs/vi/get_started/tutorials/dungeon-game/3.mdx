@@ -65,7 +65,7 @@ Nếu bạn gặp bất kỳ lỗi lint nào, hãy chạy lệnh sau để tự 
 ### Triển khai ứng dụng của bạn
 Để triển khai ứng dụng của bạn, chạy lệnh sau:
 
-<NxCommands commands={['deploy infra dungeon-adventure-infra-sandbox/*']} />
+<NxCommands commands={['deploy infra "dungeon-adventure-infra-sandbox/*"']} />
 
 Quá trình triển khai này sẽ mất khoảng 2 phút để hoàn thành.
 
@@ -127,33 +127,36 @@ Bạn có thể kiểm thử Agent của mình bằng một trong hai cách:
     Tạo một test user và lấy authentication token:
 
     ```bash
+    # Vô hiệu hóa MFA để đơn giản hóa việc tạo user
+    aws cognito-idp set-user-pool-mfa-config \
+      --mfa-configuration OFF \
+      --user-pool-id $POOL_ID
+
     # Tạo User
     aws cognito-idp admin-create-user \
       --user-pool-id $POOL_ID \
-      --username "testuser" \
-      --temporary-password "TempPass123!" \
+      --username "test" \
+      --temporary-password "TempPass123-" \
       --region $REGION \
       --message-action SUPPRESS > /dev/null
 
     # Đặt Permanent Password (thay thế bằng một mật khẩu an toàn hơn!)
     aws cognito-idp admin-set-user-password \
       --user-pool-id $POOL_ID \
-      --username "testuser" \
-      --password "PermanentPass123!" \
+      --username "test" \
+      --password "PermanentPass123-" \
       --region $REGION \
       --permanent > /dev/null
 
-    # Xác thực User và lấy ID Token
+    # Xác thực User và lấy Access Token
     export BEARER_TOKEN=$(aws cognito-idp initiate-auth \
       --client-id "$CLIENT_ID" \
       --auth-flow USER_PASSWORD_AUTH \
-      --auth-parameters USERNAME='testuser',PASSWORD='PermanentPass123!' \
-      --region $REGION | jq -r '.AuthenticationResult.IdToken')
+      --auth-parameters USERNAME='test',PASSWORD='PermanentPass123-' \
+      --region $REGION \
+      --query "AuthenticationResult.AccessToken" \
+      --output text)
     ```
-
-    :::caution
-    Sử dụng output `UserIdentityUserIdentityUserPoolIdXXX` cho `POOL_ID` và đảm bảo bạn có Client ID tương ứng từ các output triển khai CDK của bạn.
-    :::
 
     Gọi agent đã triển khai bằng URL runtime của Bedrock AgentCore:
 
@@ -165,10 +168,10 @@ Bạn có thể kiểm thử Agent của mình bằng một trong hai cách:
     export ENCODED_ARN=$(echo $AGENT_ARN | sed 's/:/%3A/g' | sed 's/\//%2F/g')
 
     # Xây dựng invocation URL
-    export MCP_URL="https://bedrock-agentcore.$REGION.amazonaws.com/runtimes/$ENCODED_ARN/invocations?qualifier=DEFAULT"
+    export AGENT_URL="https://bedrock-agentcore.$REGION.amazonaws.com/runtimes/$ENCODED_ARN/invocations?qualifier=DEFAULT"
 
     # Gọi agent
-    curl -N -X POST "$MCP_URL" \
+    curl -N -X POST "$AGENT_URL" \
       -H "authorization: Bearer $BEARER_TOKEN" \
       -H "Content-Type: application/json" \
       -H "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id: abcdefghijklmnopqrstuvwxyz-123456789" \
@@ -181,20 +184,10 @@ Bạn có thể kiểm thử Agent của mình bằng một trong hai cách:
   </TabItem>
 </Tabs>
 
-Nếu lệnh chạy thành công, bạn sẽ thấy các events được streaming tương tự như:
+Nếu lệnh chạy thành công, bạn sẽ bắt đầu thấy văn bản câu chuyện ban đầu được streaming:
 
 ```
-data: {"init_event_loop": true}
-
-data: {"start": true}
-
-data: {"start_event_loop": true}
-
-data: {"event": {"messageStart": {"role": "assistant"}}}
-
-data: {"event": {"contentBlockDelta": {"delta": {"text": "Welcome"}, "contentBlockIndex": 0}}}
-
-...
+You are a new superhero in the bustling metropolis of Metro City...
 ```
 
 Chúc mừng. Bạn đã xây dựng và triển khai Strands Agent đầu tiên của mình trên Bedrock AgentCore Runtime!  🎉🎉🎉

@@ -1,0 +1,229 @@
+---
+title: "Déploiement d'Agent Bedrock"
+---
+
+import Link from '@components/link.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+### Infrastructure as Code
+
+Si vous avez sélectionné `BedrockAgentCoreRuntime` pour `computeType`, l'infrastructure CDK ou Terraform correspondante est générée, que vous pouvez utiliser pour déployer votre Strands Agent sur [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html).
+
+<Infrastructure>
+<Fragment slot="cdk">
+Un construct CDK est généré pour votre agent, nommé en fonction du `name` que vous avez choisi lors de l'exécution du générateur, ou `<ProjectName>Agent` par défaut.
+
+Vous pouvez utiliser ce construct CDK dans une application CDK :
+
+```ts {6}
+import { MyProjectAgent } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    // Add the agent to your stack
+    const agent = new MyProjectAgent(this, 'MyProjectAgent');
+
+    // Grant permissions to invoke the relevant models in bedrock
+    agent.agentCoreRuntime.addToRolePolicy(
+      new PolicyStatement({
+        actions: [
+          'bedrock:InvokeModel',
+          'bedrock:InvokeModelWithResponseStream',
+        ],
+        // You can scope the below down to the specific models you use
+        resources: [
+          'arn:aws:bedrock:*:*:foundation-model/*',
+          'arn:aws:bedrock:*:*:inference-profile/*',
+        ],
+      }),
+    );
+  }
+}
+```
+
+:::note
+Ce construct utilise le [module `@aws-cdk/aws-bedrock-agentcore-alpha`](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-bedrock-agentcore-alpha-readme.html).
+:::
+</Fragment>
+<Fragment slot="terraform">
+Un module Terraform est généré pour vous, nommé en fonction du `name` que vous avez choisi lors de l'exécution du générateur, ou `<ProjectName>-agent` par défaut.
+
+Vous pouvez utiliser ce module terraform dans un projet Terraform :
+
+```terraform
+# Agent
+module "my_project_agent" {
+  # Relative path to the generated module in the common/terraform project
+  source = "../../common/terraform/src/app/agents/my-project-agent"
+
+  # Grant permissions to invoke the relevant models in bedrock
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream"
+      ]
+      # You can scope the below down to the specific models you use
+      Resource = [
+        "arn:aws:bedrock:*:*:foundation-model/*",
+        "arn:aws:bedrock:*:*:inference-profile/*"
+      ]
+    }
+  ]
+}
+```
+</Fragment>
+</Infrastructure>
+
+:::caution
+[Docker](https://www.docker.com/) est requis pour construire et déployer votre Strands Agent. Assurez-vous d'avoir installé et lancé Docker pour éviter des erreurs telles que :
+
+```
+ERROR: Cannot connect to the Docker daemon at unix://path/to/docker.sock.
+```
+:::
+
+### Authentification
+
+#### IAM
+
+Par défaut, votre Strands Agent sera sécurisé à l'aide de l'authentification IAM, déployez-le simplement sans aucun argument :
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts {5}
+import { MyProjectAgent } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    new MyProjectAgent(this, 'MyProjectAgent');
+  }
+}
+```
+
+Vous pouvez accorder l'accès pour invoquer votre agent sur Bedrock AgentCore Runtime en utilisant la méthode `grantInvoke`, par exemple :
+
+```ts {8}
+import { MyProjectAgent } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const agent = new MyProjectAgent(this, 'MyProjectAgent');
+    const lambdaFunction = new Function(this, ...);
+
+    agent.agentCoreRuntime.grantInvoke(lambdaFunction);
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+```terraform
+# Agent
+module "my_project_agent" {
+  # Relative path to the generated module in the common/terraform project
+  source = "../../common/terraform/src/app/agents/my-project-agent"
+}
+```
+
+Pour accorder l'accès pour invoquer votre agent, vous devrez ajouter une politique telle que la suivante, en référençant la sortie `module.my_project_agent.agent_core_runtime_arn` :
+
+```terraform
+{
+  Effect = "Allow"
+  Action = [
+    "bedrock-agentcore:InvokeAgentRuntime"
+  ]
+  Resource = [
+    module.my_project_agent.agent_core_runtime_arn,
+    "${module.my_project_agent.agent_core_runtime_arn}/*"
+  ]
+}
+```
+</Fragment>
+</Infrastructure>
+
+#### Authentification Cognito JWT
+
+Ce qui suit démontre comment configurer l'authentification Cognito pour votre agent.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Pour configurer l'authentification JWT en utilisant Cognito, utilisez la méthode factory `RuntimeAuthorizerConfiguration.usingCognito()` :
+
+```ts {14-17}
+import { MyProjectAgent } from ':my-scope/common-constructs';
+import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const userPool = new UserPool(this, 'UserPool');
+    const client = userPool.addClient('Client', {
+      authFlows: {
+        userPassword: true,
+      },
+    });
+
+    new MyProjectAgent(this, 'MyProjectAgent', {
+      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingCognito(
+        userPool,
+        [client],
+      ),
+    });
+  }
+}
+```
+
+Alternativement, pour une authentification JWT personnalisée avec votre propre fournisseur OIDC, utilisez `RuntimeAuthorizerConfiguration.usingJWT()` :
+
+```ts {7-11}
+import { MyProjectAgent } from ':my-scope/common-constructs';
+import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    new MyProjectAgent(this, 'MyProjectAgent', {
+      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingJWT(
+        'https://example.com/.well-known/openid-configuration',
+        ['client1', 'client2'], // Allowed Client IDs (optional)
+        ['audience1'],          // Allowed Audiences (optional)
+      ),
+    });
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+Pour configurer l'authentification JWT, vous pouvez modifier votre module agent pour configurer la variable `authorizer_configuration` comme suit :
+
+```terraform {18-23}
+# packages/common/terraform/src/app/agents/my-project-agent/my-project-agent.tf
+
+data "aws_region" "current" {}
+
+locals {
+  aws_region = data.aws_region.current.id
+
+  # Replace with your user pool and client ids or expose as variables
+  user_pool_id = "xxx"
+  user_pool_client_ids = ["yyy"]
+}
+
+module "agent_core_runtime" {
+  source = "../../../core/agent-core"
+  agent_runtime_name = "MyProjectAgent"
+  docker_image_tag = "my-scope-my-project-agent:latest"
+  server_protocol = "HTTP"
+  authorizer_configuration = {
+    custom_jwt_authorizer = {
+      discovery_url = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration"
+      allowed_clients = local.user_pool_client_ids
+    }
+  }
+  env = var.env
+  additional_iam_policy_statements = var.additional_iam_policy_statements
+  tags = var.tags
+}
+```
+</Fragment>
+</Infrastructure>

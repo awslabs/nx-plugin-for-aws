@@ -1,0 +1,472 @@
+---
+title: "TypeScript Strands Agent"
+description: "Tạo TypeScript Strands Agent để xây dựng các AI agent với công cụ và triển khai lên Amazon Bedrock AgentCore Runtime"
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Link from '@components/link.astro';
+import Snippet from '@components/snippet.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import PackageManagerExecCommand from '@components/package-manager-exec-command.astro';
+
+Tạo một TypeScript [Strands Agent](https://strandsagents.com/) để xây dựng các AI agent với công cụ, và tùy chọn triển khai nó lên [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/). Generator sử dụng [tRPC](https://trpc.io/) qua WebSocket để tận dụng [hỗ trợ streaming hai chiều của AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html) cho giao tiếp thời gian thực, type-safe.
+
+## Strands là gì?
+
+[Strands](https://strandsagents.com/latest/documentation/docs/) là một framework nhẹ để xây dựng các AI agent. Các tính năng chính bao gồm:
+
+- **Nhẹ và có thể tùy chỉnh**: Vòng lặp agent đơn giản không cản trở bạn
+- **Sẵn sàng cho production**: Khả năng quan sát đầy đủ, tracing, và các tùy chọn triển khai cho quy mô lớn
+- **Không phụ thuộc vào model và provider**: Hỗ trợ nhiều model khác nhau từ nhiều provider
+- **Công cụ do cộng đồng đóng góp**: Bộ công cụ mạnh mẽ do cộng đồng đóng góp
+- **Hỗ trợ đa agent**: Các kỹ thuật nâng cao như nhóm agent và agent tự động
+- **Chế độ tương tác linh hoạt**: Hỗ trợ hội thoại, streaming, và non-streaming
+
+## Sử dụng
+
+### Tạo một Strands Agent
+
+Bạn có thể tạo một TypeScript Strands Agent theo hai cách:
+
+<RunGenerator generator="ts#strands-agent" />
+
+:::tip
+Đầu tiên hãy sử dụng generator <Link path="/guides/typescript-project">`ts#project`</Link> để tạo một dự án để thêm Strands Agent của bạn vào.
+:::
+
+### Tùy chọn
+
+<GeneratorParameters generator="ts#strands-agent" />
+
+## Đầu ra của Generator
+
+Generator sẽ thêm các file sau vào dự án TypeScript hiện có của bạn:
+
+<FileTree>
+  - your-project/
+    - src/
+      - agent/ (hoặc tên tùy chỉnh nếu được chỉ định)
+        - index.ts Điểm vào cho Bedrock AgentCore Runtime
+        - init.ts Khởi tạo tRPC
+        - router.ts tRPC router với các agent procedure
+        - agent.ts Định nghĩa agent chính với các công cụ mẫu
+        - client.ts Client được cung cấp để gọi agent của bạn
+        - agent-core-trpc-client.ts Client factory để kết nối với các agent trên AgentCore Runtime
+        - agent-core-mcp-client.ts Client factory để kết nối với các MCP server trên AgentCore Runtime
+        - Dockerfile Điểm vào để host agent của bạn (loại trừ khi `computeType` được đặt thành `None`)
+    - package.json Được cập nhật với các dependency của Strands
+    - project.json Được cập nhật với các target serve agent
+</FileTree>
+
+### Hạ tầng
+
+:::note
+Nếu bạn chọn `None` cho `computeType`, generator sẽ không cung cấp bất kỳ infrastructure as code nào.
+:::
+
+<Snippet name="shared-constructs" />
+
+Để triển khai Strands Agent của bạn, các file sau được tạo ra:
+
+<Infrastructure>
+<Fragment slot="cdk">
+<FileTree>
+  - packages/common/constructs/src
+    - app
+      - agents
+        - \<project-name>
+          - \<project-name>.ts CDK construct để triển khai agent của bạn
+          - Dockerfile File docker passthrough được sử dụng bởi CDK construct
+</FileTree>
+</Fragment>
+<Fragment slot="terraform">
+<FileTree>
+  - packages/common/terraform/src
+    - app
+      - agents
+        - \<project-name>
+          - \<project-name>.tf Module để triển khai agent của bạn
+    - core
+      - agent-core
+        - runtime.tf Module chung để triển khai lên Bedrock AgentCore Runtime
+</FileTree>
+</Fragment>
+</Infrastructure>
+
+## Làm việc với Strands Agent của bạn
+
+### tRPC qua WebSocket
+
+TypeScript Strands Agent sử dụng [tRPC](https://trpc.io/) qua WebSocket, tận dụng [hỗ trợ streaming hai chiều của AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html) để cho phép giao tiếp thời gian thực, type-safe giữa client và agent của bạn.
+
+Vì tRPC hỗ trợ các procedure Query, Mutation và Subscription qua WebSocket, bạn có thể định nghĩa bất kỳ số lượng procedure nào. Mặc định, một subscription procedure duy nhất có tên `invoke` được định nghĩa cho bạn trong `router.ts`.
+
+### Thêm công cụ
+
+Công cụ là các hàm mà AI agent có thể gọi để thực hiện các hành động. Bạn có thể thêm công cụ mới trong file `agent.ts`:
+
+```typescript
+import { Agent, tool } from '@strands-agents/sdk';
+import z from 'zod';
+
+const letterCounter = tool({
+  name: 'letter_counter',
+  description: 'Count occurrences of a specific letter in a word',
+  inputSchema: z.object({
+    word: z.string().describe('The input word to search in'),
+    letter: z.string().length(1).describe('The specific letter to count'),
+  }),
+  callback: (input) => {
+    const { word, letter } = input;
+    const count = word.toLowerCase().split(letter.toLowerCase()).length - 1;
+    return `The letter '${letter}' appears ${count} time(s) in '${word}'`;
+  },
+});
+
+// Add tools to your agent
+export const agent = new Agent({
+  systemPrompt: 'You are a helpful assistant with access to various tools.',
+  tools: [letterCounter],
+});
+```
+
+Framework Strands tự động xử lý:
+- Xác thực đầu vào sử dụng Zod schema
+- Tạo JSON schema cho việc gọi công cụ
+- Xử lý lỗi và định dạng response
+
+### Cấu hình Model
+
+Mặc định, các Strands agent sử dụng Claude 4 Sonnet, nhưng bạn có thể dễ dàng chuyển đổi giữa các model provider:
+
+```typescript
+import { Agent } from '@strands-agents/sdk';
+import { BedrockModel } from '@strands-agents/sdk/models/bedrock';
+import { OpenAIModel } from '@strands-agents/sdk/models/openai';
+
+// Use Bedrock
+const bedrockModel = new BedrockModel({
+  modelId: 'anthropic.claude-sonnet-4-20250514-v1:0',
+});
+let agent = new Agent({ model: bedrockModel });
+let response = await agent.invoke('What can you help me with?');
+
+// Alternatively, use OpenAI by just switching model provider
+const openaiModel = new OpenAIModel({
+  apiKey: process.env.OPENAI_API_KEY,
+  modelId: 'gpt-4o',
+});
+agent = new Agent({ model: openaiModel });
+response = await agent.invoke('What can you help me with?');
+```
+
+Xem [tài liệu Strands về các model provider](https://strandsagents.com/latest/documentation/docs/user-guide/quickstart/#model-providers) để biết thêm các tùy chọn cấu hình.
+
+### Sử dụng MCP Server
+
+Bạn có thể [thêm công cụ từ các MCP server](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/tools/mcp-tools/) vào Strands agent của bạn.
+
+Để sử dụng các MCP Server mà bạn đã tạo bằng generator <Link path="/guides/py-mcp-server">`py#mcp-server`</Link> hoặc <Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link> (hoặc các server khác được host trên Bedrock AgentCore Runtime), một client factory được tạo cho bạn trong `agent-core-mcp-client.ts`.
+
+Bạn có thể cập nhật khởi tạo agent của bạn trong `agent.ts` để tạo MCP client và thêm công cụ. Ví dụ sau đây cho thấy cách thực hiện điều này với xác thực IAM (SigV4):
+
+```typescript
+// agent.ts
+import { Agent } from '@strands-agents/sdk';
+import { AgentCoreMcpClient } from './agent-core-mcp-client.js';
+
+const mcpClient = AgentCoreMcpClient.withIamAuth({
+  agentRuntimeArn: process.env.MCP_AGENTCORE_RUNTIME_ARN!,
+  region: process.env.AWS_REGION || 'us-west-2',
+  sessionId: 'my-session-id',
+});
+
+export const agent = new Agent({
+  systemPrompt: '...',
+  tools: [mcpClient],
+});
+```
+
+:::tip
+Nếu MCP server đích của bạn sử dụng xác thực JWT, bạn có thể sử dụng phương thức `AgentCoreMcpClient.withJwtAuth` để tạo client thay thế.
+:::
+
+Với ví dụ xác thực IAM ở trên, chúng ta cần cấu hình hai thứ trong hạ tầng của mình. Thứ nhất, chúng ta cần thêm biến môi trường mà agent của chúng ta đang sử dụng cho ARN của AgentCore Runtime của MCP server, và thứ hai chúng ta cần cấp quyền cho agent của chúng ta để gọi MCP server. Điều này có thể đạt được như sau:
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts {9, 13}
+import { MyProjectAgent, MyProjectMcpServer } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const mcpServer = new MyProjectMcpServer(this, 'MyProjectMcpServer');
+
+    const agent = new MyProjectAgent(this, 'MyProjectAgent', {
+      environmentVariables: {
+        MCP_AGENTCORE_RUNTIME_ARN: mcpServer.agentCoreRuntime.agentRuntimeArn,
+      },
+    });
+
+    mcpServer.agentCoreRuntime.grantInvoke(agent.agentCoreRuntime);
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+```terraform
+# MCP Server
+module "my_project_mcp_server" {
+  source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
+}
+
+# Agent
+module "my_project_agent" {
+  source = "../../common/terraform/src/app/agents/my-project-agent"
+
+  env = {
+    MCP_AGENTCORE_RUNTIME_ARN = module.my_project_mcp_server.agent_core_runtime_arn
+  }
+
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = [
+        "bedrock-agentcore:InvokeAgentRuntime"
+      ]
+      Resource = [
+        module.my_project_mcp_server.agent_core_runtime_arn,
+        "${module.my_project_mcp_server.agent_core_runtime_arn}/*"
+      ]
+    }
+  ]
+}
+```
+</Fragment>
+</Infrastructure>
+
+### Thêm
+
+Để có hướng dẫn chi tiết hơn về viết Strands agent, tham khảo [tài liệu Strands](https://strandsagents.com/latest/documentation/docs/).
+
+## Chạy Strands Agent của bạn
+
+### Phát triển Local
+
+Generator cấu hình một target có tên `<your-agent-name>-serve`, khởi động Strands Agent của bạn locally để phát triển và kiểm thử.
+
+<NxCommands commands={['run your-project:agent-serve']} />
+
+Lệnh này sử dụng `tsx --watch` để tự động khởi động lại server khi các file thay đổi. Agent sẽ có sẵn tại `http://localhost:8081` (hoặc cổng được gán nếu bạn có nhiều agent).
+
+## Triển khai Strands Agent của bạn lên Bedrock AgentCore Runtime
+
+<Snippet name="agent/bedrock-deployment" parentHeading="Triển khai Strands Agent của bạn lên Bedrock AgentCore Runtime" />
+
+### Bundle Target
+
+<Snippet name="ts-bundle" />
+
+Bundle target sử dụng `index.ts` làm entrypoint cho WebSocket server để host trên Bedrock AgentCore Runtime.
+
+### Docker Target
+
+Generator cấu hình một target `<your-agent-name>-docker` chạy WebSocket server đã được bundle trên cổng `8080` theo [hợp đồng runtime của AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-service-contract.html).
+
+:::tip
+Docker image được build sử dụng một tag (ví dụ `my-scope-my-project-agent:latest`), được tham chiếu bởi hạ tầng CDK hoặc Terraform của bạn, cho phép `Dockerfile` của bạn được đặt cùng với dự án Strands Agent của bạn.
+:::
+
+Một target `docker` cũng được tạo ra để chạy docker build cho tất cả các agent nếu bạn có nhiều agent được định nghĩa.
+
+### Khả năng quan sát
+
+Agent của bạn được tự động cấu hình với khả năng quan sát sử dụng [AWS Distro for Open Telemetry](https://aws.amazon.com/otel/) (ADOT), bằng cách cấu hình auto-instrumentation trong `Dockerfile` của bạn.
+
+Bạn có thể tìm thấy các trace trong CloudWatch AWS Console, bằng cách chọn "GenAI Observability" trong menu. Lưu ý rằng để các trace được điền, bạn sẽ cần bật [Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search.html).
+
+Để biết thêm chi tiết, tham khảo [tài liệu AgentCore về khả năng quan sát](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html).
+
+## Gọi Strands Agent của bạn
+
+Giao tiếp với agent được truyền qua tRPC qua WebSocket. Do đó, nên sử dụng client factory type-safe được tạo ra trong `client.ts`.
+
+### Gọi Local Server
+
+Bạn có thể gọi một agent đang chạy locally sử dụng phương thức factory `.local` từ client factory.
+
+Bạn có thể, ví dụ, tạo một file có tên `scripts/test.ts` trong workspace của bạn để import client:
+
+```typescript
+// scripts/test.ts
+import { AgentClient } from '../packages/<project>/src/agent/client.js';
+
+const client = AgentClient.local({ url: 'http://localhost:8081/ws' });
+
+client.invoke.subscribe({ message: 'what is 1 plus 1?' }, { onData: console.log });
+```
+
+:::tip
+Chạy với `tsx` như một cách nhanh chóng để kiểm tra agent của bạn.
+
+<PackageManagerExecCommand commands={['tsx scripts/test.ts']} />
+:::
+
+### Gọi Agent đã triển khai
+
+<Snippet name="agent/runtime-arn" parentHeading="Gọi Agent đã triển khai" />
+
+#### NodeJS
+
+File `client.ts` được tạo ra bao gồm một client factory type-safe có thể được sử dụng để gọi agent đã triển khai của bạn.
+
+:::caution
+Client factory sử dụng HTTP header trong WebSocket handshake để xác thực các request đến Bedrock AgentCore Runtime. Điều này không thể thực hiện được trong trình duyệt, và do đó client này không phù hợp cho môi trường trình duyệt. Tham khảo phần "Browser" bên dưới để biết chi tiết về việc gọi từ trình duyệt.
+:::
+
+##### Xác thực IAM
+
+Bạn có thể gọi agent đã triển khai của bạn bằng cách truyền ARN của nó vào phương thức factory `withIamAuth`:
+
+```typescript
+import { AgentClient } from './agent/client.js';
+
+const client = AgentClient.withIamAuth({
+  agentRuntimeArn: 'arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/my-agent',
+});
+
+client.invoke.subscribe({ message: 'what is 1 plus 1?' }, {
+  onData: (message) => console.log(message),
+  onError: (error) => console.error(error),
+  onComplete: () => console.log('Done'),
+});
+```
+
+:::note
+Điều này sẽ sử dụng chuỗi provider credential AWS mặc định để xác thực các request, vì vậy môi trường mà đoạn code trên được chạy phải có AWS credential được cấu hình, với quyền truy cập để gọi runtime.
+:::
+
+##### Xác thực JWT / Cognito
+
+Sử dụng phương thức factory `withJwtAuth` để xác thực với JWT / Cognito access token.
+
+```typescript
+const client = AgentClient.withJwtAuth({
+  agentRuntimeArn: 'arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/my-agent',
+  accessTokenProvider: async () => `<access-token>`,
+});
+
+client.invoke.subscribe({ message: 'what is 1 plus 1?' }, {
+  onData: console.log,
+});
+```
+
+`accessTokenProvider` phải trả về token được sử dụng để xác thực request. Bạn có thể, ví dụ, lấy token trong phương thức này để đảm bảo rằng credential mới được tái sử dụng khi tRPC khởi động lại kết nối WebSocket. Ví dụ dưới đây cho thấy việc sử dụng AWS SDK để lấy token từ Cognito:
+
+```typescript
+import { CognitoIdentityProvider } from "@aws-sdk/client-cognito-identity-provider";
+
+const cognito = new CognitoIdentityProvider();
+
+const jwtClient = AgentClient.withJwtAuth({
+  agentRuntimeArn: 'arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/my-agent',
+  accessTokenProvider: async () => {
+    const response = await cognito.adminInitiateAuth({
+      UserPoolId: '<user-pool-id>',
+      ClientId: '<user-pool-client-id>',
+      AuthFlow: 'ADMIN_NO_SRP_AUTH',
+      AuthParameters: {
+        USERNAME: '<username>',
+        PASSWORD: '<password>',
+      },
+    });
+    return response.AuthenticationResult!.AccessToken!;
+  },
+});
+```
+
+#### Browser
+
+WebSocket trong trình duyệt không hỗ trợ chỉ định header (ngoại trừ `Sec-WebSocket-Protocol`), và do đó client factory được tạo ra trong `client.ts` không thể được sử dụng trong trình duyệt (điều này thực sự sẽ dẫn đến lỗi biên dịch vì constructor `WebSocket` không chấp nhận header như nó làm trong NodeJS).
+
+##### Xác thực JWT / Cognito
+
+:::caution
+Tại thời điểm viết bài, Bedrock AgentCore Runtime yêu cầu rằng JWT token được truyền trong header `Authorization`, và do đó trình duyệt không thể xác thực với Bedrock AgentCore Runtime sử dụng xác thực JWT. Chỉ xác thực AWS Signature Version 4 (SigV4) được hỗ trợ thông qua presigned URL.
+
+Chúng tôi sẽ cố gắng cập nhật tài liệu này nếu hỗ trợ được thêm vào trong tương lai.
+:::
+
+##### Xác thực IAM
+
+Để gọi agent của bạn từ trình duyệt, bạn cần tạo một presigned WebSocket URL sử dụng AWS SigV4.
+
+Ví dụ dưới đây cho thấy luồng end-to-end của việc lấy credential, tạo presigned URL, và gọi agent:
+
+```typescript
+import { createTRPCClient, createWSClient, wsLink } from '@trpc/client';
+import { AwsClient } from 'aws4fetch';
+import { CognitoIdentityClient } from '@aws-sdk/client-cognito-identity';
+import { fromCognitoIdentityPool } from '@aws-sdk/credential-provider-cognito-identity';
+import type { AppRouter } from './your-agent/router';
+
+// Build a presigned WebSocket URL
+async function buildSignedUrl(
+  agentRuntimeArn: string,
+  idToken: string,
+  region: string = 'us-west-2'
+): Promise<string> {
+  // Get credentials from a Cognito Identity Pool (or other source)
+  const credentials = fromCognitoIdentityPool({
+    client: new CognitoIdentityClient({ region }),
+    identityPoolId: 'us-west-2:xxxxx',
+    logins: {
+      [`cognito-idp.${region}.amazonaws.com/us-west-2_xxxxx`]: idToken,
+    },
+  });
+
+  const cognitoIdentity = new CognitoIdentityClient({ credentials });
+  const credential = await cognitoIdentity.config.credentials();
+
+  // Create AWS SigV4 client
+  const awsClient = new AwsClient({
+    ...credential,
+    service: 'bedrock-agentcore',
+  });
+
+  // Build WebSocket URL from ARN
+  const wsUrl = `wss://bedrock-agentcore.${region}.amazonaws.com/runtimes/${agentRuntimeArn.replace(/:/g, '%3A').replace(/\//g, '%2F')}/ws`;
+
+  // Create presigned URL
+  const signedRequest = await awsClient.sign(wsUrl, {
+    method: 'GET',
+    aws: { signQuery: true },
+  });
+
+  return signedRequest.url;
+}
+
+// Create tRPC client with presigned WebSocket URL
+const agentRuntimeArn = 'arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/my-agent';
+const idToken = '<your-id-token>';
+
+const wsClient = createWSClient({
+  url: async () => buildSignedUrl(agentRuntimeArn, idToken),
+});
+
+const trpcClient = createTRPCClient<AppRouter>({
+  links: [wsLink({ client: wsClient })],
+});
+
+// Invoke the agent
+trpcClient.invoke.subscribe({ message: 'what is 1 plus 1?' }, {
+  onData: (message) => console.log(message),
+});
+```
+
+:::tip
+Nếu bạn muốn có trải nghiệm tương tự như <Link path="/guides/api-connection">generator API connection</Link> cho các agent, vui lòng +1 [GitHub issue này](https://github.com/awslabs/nx-plugin-for-aws/issues/326).
+:::

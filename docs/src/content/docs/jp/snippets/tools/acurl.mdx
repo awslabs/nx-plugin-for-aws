@@ -1,0 +1,73 @@
+---
+title: "AWS Sigv4 Curl"
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+<Tabs>
+  <TabItem label="Bash/Linux/macOS">
+以下のスクリプトを `.bashrc` ファイルに追加して（`source` で読み込む）、またはコマンドを実行したいターミナルに直接貼り付けることができます。
+```bash
+// ~/.bashrc
+acurl () {
+    REGION=$1
+    SERVICE=$2
+    shift; shift;
+    curl --aws-sigv4 "aws:amz:$REGION:$SERVICE" --user "$(aws configure get aws_access_key_id):$(aws configure get aws_secret_access_key)" -H "X-Amz-Security-Token: $(aws configure get aws_session_token)" "$@"
+}
+```
+
+`sigv4` 認証された curl リクエストを行うには、次のように `acurl` を呼び出します:
+
+```bash
+acurl <region> <service> <other-curl-arguments>
+```
+
+例:
+
+###### API Gateway
+```bash
+acurl ap-southeast-2 execute-api -X GET https://xxx
+```
+
+###### Streaming Lambda function url
+```bash
+acurl ap-southeast-2 lambda -N -X POST https://xxx
+```
+  </TabItem>
+  <TabItem label="Windows PowerShell">
+以下の関数を PowerShell プロファイルに追加するか、コマンドを実行したい PowerShell セッションに直接貼り付けることができます。
+```powershell
+# PowerShell profile or current session
+function acurl {
+    param(
+        [Parameter(Mandatory=$true)][string]$Region,
+        [Parameter(Mandatory=$true)][string]$Service,
+        [Parameter(ValueFromRemainingArguments=$true)][string[]]$CurlArgs
+    )
+
+    $AccessKey = aws configure get aws_access_key_id
+    $SecretKey = aws configure get aws_secret_access_key
+    $SessionToken = aws configure get aws_session_token
+
+    & curl --aws-sigv4 "aws:amz:$Region`:$Service" --user "$AccessKey`:$SecretKey" -H "X-Amz-Security-Token: $SessionToken" @CurlArgs
+}
+```
+
+`sigv4` 認証された curl リクエストを行うには、次の例を使用して `acurl` を呼び出します:
+
+###### API Gateway
+```powershell
+acurl ap-southeast-2 execute-api -X GET https://xxx
+```
+
+###### Streaming Lambda function url
+```powershell
+acurl ap-southeast-2 lambda -N -X POST https://xxx
+```
+  </TabItem>
+</Tabs>
+
+:::caution
+AWS Signature v4 のサポートは、最近のバージョンの `curl` に追加されており、近年このサポートにいくつかのバグ修正が行われています。`curl` バージョン 8.17.0 以上をインストールすることをお勧めします。OS に付属するバージョンは古い可能性があります。
+:::

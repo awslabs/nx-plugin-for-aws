@@ -1,5 +1,6 @@
 import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
+import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
 import {
   UserIdentity,
   Website,
@@ -11,6 +12,7 @@ import {
   MyMcpServer,
   MyAgent,
   TsProjectMyFunction,
+  TsProjectAgent,
   HostedMcpServer,
   MySmithyApi,
 } from ':e2e-test/common-constructs';
@@ -46,10 +48,30 @@ export class ApplicationStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'TsFunctionArn', {
       value: tsFn.functionArn,
     });
+
     const strandsAgent = new MyAgent(this, 'MyAgent');
     new cdk.CfnOutput(this, 'StrandsAgentArn', {
       value: strandsAgent.agentCoreRuntime.agentRuntimeArn,
     });
+    const tsStrandsAgent = new TsProjectAgent(this, 'TsProjectAgent');
+    new cdk.CfnOutput(this, 'TsStrandsAgentArn', {
+      value: tsStrandsAgent.agentCoreRuntime.agentRuntimeArn,
+    });
+    [strandsAgent, tsStrandsAgent].forEach((agent) => {
+      agent.agentCoreRuntime.addToRolePolicy(
+        new PolicyStatement({
+          actions: [
+            'bedrock:InvokeModel',
+            'bedrock:InvokeModelWithResponseStream',
+          ],
+          resources: [
+            'arn:aws:bedrock:*:*:foundation-model/*',
+            'arn:aws:bedrock:*:*:inference-profile/*',
+          ],
+        }),
+      );
+    });
+
     const pyMcp = new MyMcpServer(this, 'MyMcpServer');
     new cdk.CfnOutput(this, 'PyMcpServerArn', {
       value: pyMcp.agentCoreRuntime.agentRuntimeArn,

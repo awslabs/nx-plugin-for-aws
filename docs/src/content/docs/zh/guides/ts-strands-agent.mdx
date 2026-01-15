@@ -1,0 +1,472 @@
+---
+title: "TypeScript Strands 代理"
+description: "生成用于构建带工具的 AI 代理的 TypeScript Strands 代理，并部署到 Amazon Bedrock AgentCore Runtime"
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Link from '@components/link.astro';
+import Snippet from '@components/snippet.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import PackageManagerExecCommand from '@components/package-manager-exec-command.astro';
+
+生成一个 TypeScript [Strands Agent](https://strandsagents.com/) 用于构建带有工具的 AI 代理,并可选择将其部署到 [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/)。该生成器使用基于 WebSocket 的 [tRPC](https://trpc.io/) 来利用 [AgentCore 的双向流支持](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html),实现实时、类型安全的通信。
+
+## 什么是 Strands?
+
+[Strands](https://strandsagents.com/latest/documentation/docs/) 是一个用于构建 AI 代理的轻量级框架。主要特性包括:
+
+- **轻量且可定制**: 简单的代理循环,不会妨碍您的工作
+- **生产就绪**: 完整的可观测性、追踪和大规模部署选项
+- **模型和提供商无关**: 支持来自各种提供商的多种不同模型
+- **社区驱动的工具**: 强大的社区贡献工具集
+- **多代理支持**: 高级技术,如代理团队和自主代理
+- **灵活的交互模式**: 对话式、流式和非流式支持
+
+## 用法
+
+### 生成 Strands Agent
+
+您可以通过两种方式生成 TypeScript Strands Agent:
+
+<RunGenerator generator="ts#strands-agent" />
+
+:::tip
+首先使用 <Link path="/guides/typescript-project">`ts#project`</Link> 生成器创建一个项目,然后将您的 Strands Agent 添加到其中。
+:::
+
+### 选项
+
+<GeneratorParameters generator="ts#strands-agent" />
+
+## 生成器输出
+
+生成器将向您现有的 TypeScript 项目添加以下文件:
+
+<FileTree>
+  - your-project/
+    - src/
+      - agent/ (如果指定,则为自定义名称)
+        - index.ts Bedrock AgentCore Runtime 的入口点
+        - init.ts tRPC 初始化
+        - router.ts 带有代理过程的 tRPC 路由器
+        - agent.ts 带有示例工具的主代理定义
+        - client.ts 用于调用代理的客户端
+        - agent-core-trpc-client.ts 用于连接到 AgentCore Runtime 上的代理的客户端工厂
+        - agent-core-mcp-client.ts 用于连接到 AgentCore Runtime 上的 MCP 服务器的客户端工厂
+        - Dockerfile 托管代理的入口点(当 `computeType` 设置为 `None` 时排除)
+    - package.json 已更新 Strands 依赖项
+    - project.json 已更新代理服务目标
+</FileTree>
+
+### 基础设施
+
+:::note
+如果您为 `computeType` 选择了 `None`,生成器将不会提供任何基础设施即代码。
+:::
+
+<Snippet name="shared-constructs" />
+
+为了部署您的 Strands Agent,将生成以下文件:
+
+<Infrastructure>
+<Fragment slot="cdk">
+<FileTree>
+  - packages/common/constructs/src
+    - app
+      - agents
+        - \<project-name>
+          - \<project-name>.ts 用于部署代理的 CDK 构造
+          - Dockerfile CDK 构造使用的传递 docker 文件
+</FileTree>
+</Fragment>
+<Fragment slot="terraform">
+<FileTree>
+  - packages/common/terraform/src
+    - app
+      - agents
+        - \<project-name>
+          - \<project-name>.tf 用于部署代理的模块
+    - core
+      - agent-core
+        - runtime.tf 用于部署到 Bedrock AgentCore Runtime 的通用模块
+</FileTree>
+</Fragment>
+</Infrastructure>
+
+## 使用您的 Strands Agent
+
+### 基于 WebSocket 的 tRPC
+
+TypeScript Strands Agent 使用基于 WebSocket 的 [tRPC](https://trpc.io/),利用 [AgentCore 的双向流支持](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html) 在客户端和您的代理之间实现实时、类型安全的通信。
+
+由于 tRPC 支持通过 WebSocket 的 Query、Mutation 和 Subscription 过程,您可以定义任意数量的过程。默认情况下,在 `router.ts` 中为您定义了一个名为 `invoke` 的单个订阅过程。
+
+### 添加工具
+
+工具是 AI 代理可以调用以执行操作的函数。您可以在 `agent.ts` 文件中添加新工具:
+
+```typescript
+import { Agent, tool } from '@strands-agents/sdk';
+import z from 'zod';
+
+const letterCounter = tool({
+  name: 'letter_counter',
+  description: 'Count occurrences of a specific letter in a word',
+  inputSchema: z.object({
+    word: z.string().describe('The input word to search in'),
+    letter: z.string().length(1).describe('The specific letter to count'),
+  }),
+  callback: (input) => {
+    const { word, letter } = input;
+    const count = word.toLowerCase().split(letter.toLowerCase()).length - 1;
+    return `The letter '${letter}' appears ${count} time(s) in '${word}'`;
+  },
+});
+
+// Add tools to your agent
+export const agent = new Agent({
+  systemPrompt: 'You are a helpful assistant with access to various tools.',
+  tools: [letterCounter],
+});
+```
+
+Strands 框架自动处理:
+- 使用 Zod 模式进行输入验证
+- 为工具调用生成 JSON 模式
+- 错误处理和响应格式化
+
+### 模型配置
+
+默认情况下,Strands 代理使用 Claude 4 Sonnet,但您可以轻松切换模型提供商:
+
+```typescript
+import { Agent } from '@strands-agents/sdk';
+import { BedrockModel } from '@strands-agents/sdk/models/bedrock';
+import { OpenAIModel } from '@strands-agents/sdk/models/openai';
+
+// Use Bedrock
+const bedrockModel = new BedrockModel({
+  modelId: 'anthropic.claude-sonnet-4-20250514-v1:0',
+});
+let agent = new Agent({ model: bedrockModel });
+let response = await agent.invoke('What can you help me with?');
+
+// Alternatively, use OpenAI by just switching model provider
+const openaiModel = new OpenAIModel({
+  apiKey: process.env.OPENAI_API_KEY,
+  modelId: 'gpt-4o',
+});
+agent = new Agent({ model: openaiModel });
+response = await agent.invoke('What can you help me with?');
+```
+
+有关更多配置选项,请参阅 [Strands 关于模型提供商的文档](https://strandsagents.com/latest/documentation/docs/user-guide/quickstart/#model-providers)。
+
+### 使用 MCP 服务器
+
+您可以[从 MCP 服务器添加工具](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/tools/mcp-tools/)到您的 Strands 代理。
+
+对于使用 <Link path="/guides/py-mcp-server">`py#mcp-server`</Link> 或 <Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link> 生成器创建的 MCP 服务器(或托管在 Bedrock AgentCore Runtime 上的其他服务器),会在 `agent-core-mcp-client.ts` 中为您生成一个客户端工厂。
+
+您可以在 `agent.ts` 中更新代理初始化以创建 MCP 客户端并添加工具。以下示例显示如何使用 IAM (SigV4) 身份验证执行此操作:
+
+```typescript
+// agent.ts
+import { Agent } from '@strands-agents/sdk';
+import { AgentCoreMcpClient } from './agent-core-mcp-client.js';
+
+const mcpClient = AgentCoreMcpClient.withIamAuth({
+  agentRuntimeArn: process.env.MCP_AGENTCORE_RUNTIME_ARN!,
+  region: process.env.AWS_REGION || 'us-west-2',
+  sessionId: 'my-session-id',
+});
+
+export const agent = new Agent({
+  systemPrompt: '...',
+  tools: [mcpClient],
+});
+```
+
+:::tip
+如果您的目标 MCP 服务器使用 JWT 身份验证,您可以使用 `AgentCoreMcpClient.withJwtAuth` 方法来创建客户端。
+:::
+
+使用上面的 IAM 身份验证示例,我们需要在基础设施中配置两件事。首先,我们需要为代理添加环境变量,用于 MCP 服务器的 AgentCore Runtime ARN,其次我们需要授予代理调用 MCP 服务器的权限。这可以按如下方式实现:
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts {9, 13}
+import { MyProjectAgent, MyProjectMcpServer } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const mcpServer = new MyProjectMcpServer(this, 'MyProjectMcpServer');
+
+    const agent = new MyProjectAgent(this, 'MyProjectAgent', {
+      environmentVariables: {
+        MCP_AGENTCORE_RUNTIME_ARN: mcpServer.agentCoreRuntime.agentRuntimeArn,
+      },
+    });
+
+    mcpServer.agentCoreRuntime.grantInvoke(agent.agentCoreRuntime);
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+```terraform
+# MCP Server
+module "my_project_mcp_server" {
+  source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
+}
+
+# Agent
+module "my_project_agent" {
+  source = "../../common/terraform/src/app/agents/my-project-agent"
+
+  env = {
+    MCP_AGENTCORE_RUNTIME_ARN = module.my_project_mcp_server.agent_core_runtime_arn
+  }
+
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = [
+        "bedrock-agentcore:InvokeAgentRuntime"
+      ]
+      Resource = [
+        module.my_project_mcp_server.agent_core_runtime_arn,
+        "${module.my_project_mcp_server.agent_core_runtime_arn}/*"
+      ]
+    }
+  ]
+}
+```
+</Fragment>
+</Infrastructure>
+
+### 更多
+
+有关编写 Strands 代理的更深入指南,请参阅 [Strands 文档](https://strandsagents.com/latest/documentation/docs/)。
+
+## 运行您的 Strands Agent
+
+### 本地开发
+
+生成器配置了一个名为 `<your-agent-name>-serve` 的目标,用于在本地启动您的 Strands Agent 进行开发和测试。
+
+<NxCommands commands={['run your-project:agent-serve']} />
+
+此命令使用 `tsx --watch` 在文件更改时自动重启服务器。代理将在 `http://localhost:8081` 上可用(如果您有多个代理,则为分配的端口)。
+
+## 将您的 Strands Agent 部署到 Bedrock AgentCore Runtime
+
+<Snippet name="agent/bedrock-deployment" parentHeading="将您的 Strands Agent 部署到 Bedrock AgentCore Runtime" />
+
+### Bundle 目标
+
+<Snippet name="ts-bundle" />
+
+bundle 目标使用 `index.ts` 作为在 Bedrock AgentCore Runtime 上托管的 WebSocket 服务器的入口点。
+
+### Docker 目标
+
+生成器配置了一个 `<your-agent-name>-docker` 目标,根据 [AgentCore 运行时契约](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-service-contract.html) 在端口 `8080` 上运行打包的 WebSocket 服务器。
+
+:::tip
+docker 镜像使用标签构建(例如 `my-scope-my-project-agent:latest`),该标签由您的 CDK 或 Terraform 基础设施引用,允许您的 `Dockerfile` 与 Strands Agent 项目共存。
+:::
+
+如果您定义了多个代理,还会生成一个 `docker` 目标,用于为所有代理运行 docker 构建。
+
+### 可观测性
+
+您的代理会自动配置可观测性,使用 [AWS Distro for Open Telemetry](https://aws.amazon.com/otel/) (ADOT),通过在 `Dockerfile` 中配置自动检测。
+
+您可以在 CloudWatch AWS 控制台中找到追踪,方法是在菜单中选择"GenAI Observability"。请注意,要填充追踪,您需要启用 [Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search.html)。
+
+有关更多详细信息,请参阅 [AgentCore 关于可观测性的文档](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html)。
+
+## 调用您的 Strands Agent
+
+代理通信通过基于 WebSocket 的 tRPC 传输。因此,建议使用 `client.ts` 中生成的类型安全客户端工厂。
+
+### 调用本地服务器
+
+您可以使用客户端工厂的 `.local` 工厂方法调用本地运行的代理。
+
+例如,您可以在工作区中创建一个名为 `scripts/test.ts` 的文件来导入客户端:
+
+```typescript
+// scripts/test.ts
+import { AgentClient } from '../packages/<project>/src/agent/client.js';
+
+const client = AgentClient.local({ url: 'http://localhost:8081/ws' });
+
+client.invoke.subscribe({ message: 'what is 1 plus 1?' }, { onData: console.log });
+```
+
+:::tip
+使用 `tsx` 运行是测试代理的快速方法。
+
+<PackageManagerExecCommand commands={['tsx scripts/test.ts']} />
+:::
+
+### 调用已部署的代理
+
+<Snippet name="agent/runtime-arn" parentHeading="调用已部署的代理" />
+
+#### NodeJS
+
+生成的 `client.ts` 文件包含一个类型安全的客户端工厂,可用于调用已部署的代理。
+
+:::caution
+客户端工厂在 WebSocket 握手中使用 HTTP 头来验证对 Bedrock AgentCore Runtime 的请求。这在浏览器中不可能实现,因此此客户端不适合浏览器环境。有关从浏览器调用的详细信息,请参阅下面的"浏览器"部分。
+:::
+
+##### IAM 身份验证
+
+您可以通过将其 ARN 传递给 `withIamAuth` 工厂方法来调用已部署的代理:
+
+```typescript
+import { AgentClient } from './agent/client.js';
+
+const client = AgentClient.withIamAuth({
+  agentRuntimeArn: 'arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/my-agent',
+});
+
+client.invoke.subscribe({ message: 'what is 1 plus 1?' }, {
+  onData: (message) => console.log(message),
+  onError: (error) => console.error(error),
+  onComplete: () => console.log('Done'),
+});
+```
+
+:::note
+这将使用默认的 AWS 凭证提供程序链来验证请求,因此运行上述代码的环境必须配置了 AWS 凭证,并具有调用运行时的访问权限。
+:::
+
+##### JWT / Cognito 身份验证
+
+使用 `withJwtAuth` 工厂方法通过 JWT / Cognito 访问令牌进行身份验证。
+
+```typescript
+const client = AgentClient.withJwtAuth({
+  agentRuntimeArn: 'arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/my-agent',
+  accessTokenProvider: async () => `<access-token>`,
+});
+
+client.invoke.subscribe({ message: 'what is 1 plus 1?' }, {
+  onData: console.log,
+});
+```
+
+`accessTokenProvider` 必须返回用于验证请求的令牌。例如,您可以在此方法中获取令牌,以确保在 tRPC 重启 WebSocket 连接时重用新凭证。以下演示了使用 AWS SDK 从 Cognito 获取令牌:
+
+```typescript
+import { CognitoIdentityProvider } from "@aws-sdk/client-cognito-identity-provider";
+
+const cognito = new CognitoIdentityProvider();
+
+const jwtClient = AgentClient.withJwtAuth({
+  agentRuntimeArn: 'arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/my-agent',
+  accessTokenProvider: async () => {
+    const response = await cognito.adminInitiateAuth({
+      UserPoolId: '<user-pool-id>',
+      ClientId: '<user-pool-client-id>',
+      AuthFlow: 'ADMIN_NO_SRP_AUTH',
+      AuthParameters: {
+        USERNAME: '<username>',
+        PASSWORD: '<password>',
+      },
+    });
+    return response.AuthenticationResult!.AccessToken!;
+  },
+});
+```
+
+#### 浏览器
+
+浏览器中的 WebSocket 不支持指定头(除了 `Sec-WebSocket-Protocol`),因此 `client.ts` 中生成的客户端工厂无法在浏览器中使用(这实际上会导致编译错误,因为 `WebSocket` 构造函数不像在 NodeJS 中那样接受头)。
+
+##### JWT / Cognito 身份验证
+
+:::caution
+在撰写本文时,Bedrock AgentCore Runtime 要求在 `Authorization` 头中传递 JWT 令牌,因此浏览器无法使用 JWT 身份验证向 Bedrock AgentCore Runtime 进行身份验证。仅支持通过预签名 URL 进行 AWS Signature Version 4 (SigV4) 身份验证。
+
+如果将来添加支持,我们将努力更新此文档。
+:::
+
+##### IAM 身份验证
+
+要从浏览器调用您的代理,您需要使用 AWS SigV4 创建预签名的 WebSocket URL。
+
+以下示例显示了获取凭证、创建预签名 URL 和调用代理的端到端流程:
+
+```typescript
+import { createTRPCClient, createWSClient, wsLink } from '@trpc/client';
+import { AwsClient } from 'aws4fetch';
+import { CognitoIdentityClient } from '@aws-sdk/client-cognito-identity';
+import { fromCognitoIdentityPool } from '@aws-sdk/credential-provider-cognito-identity';
+import type { AppRouter } from './your-agent/router';
+
+// Build a presigned WebSocket URL
+async function buildSignedUrl(
+  agentRuntimeArn: string,
+  idToken: string,
+  region: string = 'us-west-2'
+): Promise<string> {
+  // Get credentials from a Cognito Identity Pool (or other source)
+  const credentials = fromCognitoIdentityPool({
+    client: new CognitoIdentityClient({ region }),
+    identityPoolId: 'us-west-2:xxxxx',
+    logins: {
+      [`cognito-idp.${region}.amazonaws.com/us-west-2_xxxxx`]: idToken,
+    },
+  });
+
+  const cognitoIdentity = new CognitoIdentityClient({ credentials });
+  const credential = await cognitoIdentity.config.credentials();
+
+  // Create AWS SigV4 client
+  const awsClient = new AwsClient({
+    ...credential,
+    service: 'bedrock-agentcore',
+  });
+
+  // Build WebSocket URL from ARN
+  const wsUrl = `wss://bedrock-agentcore.${region}.amazonaws.com/runtimes/${agentRuntimeArn.replace(/:/g, '%3A').replace(/\//g, '%2F')}/ws`;
+
+  // Create presigned URL
+  const signedRequest = await awsClient.sign(wsUrl, {
+    method: 'GET',
+    aws: { signQuery: true },
+  });
+
+  return signedRequest.url;
+}
+
+// Create tRPC client with presigned WebSocket URL
+const agentRuntimeArn = 'arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/my-agent';
+const idToken = '<your-id-token>';
+
+const wsClient = createWSClient({
+  url: async () => buildSignedUrl(agentRuntimeArn, idToken),
+});
+
+const trpcClient = createTRPCClient<AppRouter>({
+  links: [wsLink({ client: wsClient })],
+});
+
+// Invoke the agent
+trpcClient.invoke.subscribe({ message: 'what is 1 plus 1?' }, {
+  onData: (message) => console.log(message),
+});
+```
+
+:::tip
+如果您希望为代理提供类似于 <Link path="/guides/api-connection">API 连接生成器</Link> 的体验,请为[此 GitHub issue](https://github.com/awslabs/nx-plugin-for-aws/issues/326) 点赞 +1。
+:::
