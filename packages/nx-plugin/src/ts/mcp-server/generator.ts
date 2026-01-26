@@ -50,7 +50,7 @@ export const tsMcpServerGenerator = async (
   }
 
   const defaultName = `${kebabCase(project.name.split('/').pop())}-mcp-server`;
-  const name = kebabCase(options.name ?? defaultName);
+  const name = kebabCase(options.name || defaultName);
   const mcpTargetPrefix = options.name ? name : 'mcp-server';
   const targetSourceDirRelativeToProjectRoot = joinPathFragments(
     'src',

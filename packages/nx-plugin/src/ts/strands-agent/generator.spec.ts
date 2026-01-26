@@ -827,4 +827,29 @@ describe('ts#strands-agent generator', () => {
       `${secondAgentPort}`,
     );
   });
+
+  it('should use default name when empty string is provided', async () => {
+    await tsStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      name: '',
+      computeType: 'None',
+      iacProvider: 'CDK',
+    });
+
+    // Check that agent files were added with default name
+    expect(tree.exists('apps/test-project/src/agent/index.ts')).toBeTruthy();
+    expect(tree.exists('apps/test-project/src/agent/router.ts')).toBeTruthy();
+
+    // Check that project configuration was updated with default serve target
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+    expect(projectConfig.targets['agent-serve']).toBeDefined();
+    expect(projectConfig.targets['agent-serve'].options.commands[0]).toContain(
+      'tsx --watch ./src/agent/index.ts',
+    );
+
+    // Check that metadata uses default name
+    expect(projectConfig.metadata.components[0].name).toBe('agent');
+  });
 });

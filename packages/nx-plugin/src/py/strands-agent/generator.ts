@@ -64,11 +64,11 @@ export const pyStrandsAgentGenerator = async (
   const moduleName = sourceParts[sourceParts.length - 1];
 
   const name = kebabCase(
-    options.name ?? `${kebabCase(project.name.split('.').pop())}-agent`,
+    options.name || `${kebabCase(project.name.split('.').pop())}-agent`,
   );
   const agentTargetPrefix = options.name ? name : 'agent';
 
-  const agentNameSnakeCase = toSnakeCase(options.name ?? 'agent');
+  const agentNameSnakeCase = toSnakeCase(options.name || 'agent');
   const agentNameClassName = toClassName(name);
 
   const targetSourceDir = joinPathFragments(
