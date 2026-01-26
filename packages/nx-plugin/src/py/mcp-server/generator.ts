@@ -62,11 +62,11 @@ export const pyMcpServerGenerator = async (
   const moduleName = sourceParts[sourceParts.length - 1];
 
   const name = kebabCase(
-    options.name ?? `${kebabCase(project.name.split('.').pop())}-mcp-server`,
+    options.name || `${kebabCase(project.name.split('.').pop())}-mcp-server`,
   );
   const mcpTargetPrefix = options.name ? name : 'mcp-server';
 
-  const mcpServerNameSnakeCase = toSnakeCase(options.name ?? 'mcp-server');
+  const mcpServerNameSnakeCase = toSnakeCase(options.name || 'mcp-server');
   const mcpServerNameClassName = toClassName(name);
 
   const targetSourceDir = joinPathFragments(

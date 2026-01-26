@@ -1032,4 +1032,43 @@ describe('ts#mcp-server generator', () => {
     expect(projectConfig.metadata.components[0].name).toBe('custom-server');
     expect(projectConfig.metadata.components[0].port).toBeDefined();
   });
+
+  it('should use default name when empty string is provided', async () => {
+    await tsMcpServerGenerator(tree, {
+      project: 'test-project',
+      name: '',
+      computeType: 'None',
+      iacProvider: 'CDK',
+    });
+
+    // Check that MCP server files were added with default name
+    expect(
+      tree.exists('apps/test-project/src/mcp-server/index.ts'),
+    ).toBeTruthy();
+    expect(
+      tree.exists('apps/test-project/src/mcp-server/server.ts'),
+    ).toBeTruthy();
+
+    // Check that the server.ts file contains the default name
+    const serverContent = tree.read(
+      'apps/test-project/src/mcp-server/server.ts',
+      'utf-8',
+    );
+    expect(serverContent).toContain("name: 'test-project-mcp-server'");
+
+    // Check that package.json was updated with default bin entry
+    const packageJson = JSON.parse(
+      tree.read('apps/test-project/package.json', 'utf-8'),
+    );
+    expect(packageJson.bin['test-project-mcp-server']).toBe(
+      './src/mcp-server/stdio.js',
+    );
+
+    // Check that project configuration was updated with default serve targets
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+    expect(projectConfig.targets['mcp-server-serve-stdio']).toBeDefined();
+    expect(projectConfig.targets['mcp-server-serve']).toBeDefined();
+  });
 });

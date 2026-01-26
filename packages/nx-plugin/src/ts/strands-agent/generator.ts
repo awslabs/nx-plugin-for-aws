@@ -47,7 +47,7 @@ export const tsStrandsAgentGenerator = async (
   }
 
   const defaultName = `${kebabCase(project.name.split('/').pop())}-agent`;
-  const name = kebabCase(options.name ?? defaultName);
+  const name = kebabCase(options.name || defaultName);
   const agentNameClassName = toClassName(name);
   const agentTargetPrefix = options.name ? name : 'agent';
   const targetSourceDirRelativeToProjectRoot = joinPathFragments(

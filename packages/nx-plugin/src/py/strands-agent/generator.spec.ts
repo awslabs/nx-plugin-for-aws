@@ -1006,4 +1006,34 @@ dev-dependencies = []
     expect(projectConfig.metadata.components[0].name).toBe('custom-agent');
     expect(projectConfig.metadata.components[0].port).toBeDefined();
   });
+
+  it('should use default name when empty string is provided', async () => {
+    await pyStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      name: '',
+      computeType: 'None',
+      iacProvider: 'CDK',
+    });
+
+    // Check that agent files were added with default name
+    expect(
+      tree.exists('apps/test-project/proj_test_project/agent/__init__.py'),
+    ).toBeTruthy();
+    expect(
+      tree.exists('apps/test-project/proj_test_project/agent/init.py'),
+    ).toBeTruthy();
+
+    // Check that the init.py file contains the default name (title)
+    const initContent = tree.read(
+      'apps/test-project/proj_test_project/agent/init.py',
+      'utf-8',
+    );
+    expect(initContent).toContain('title="TestProjectAgent"');
+
+    // Check that project configuration was updated with default serve target
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+    expect(projectConfig.targets['agent-serve']).toBeDefined();
+  });
 });

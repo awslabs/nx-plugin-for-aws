@@ -945,4 +945,35 @@ dev-dependencies = []
     expect(projectConfig.metadata.components[0].name).toBe('custom-server');
     expect(projectConfig.metadata.components[0].port).toBeDefined();
   });
+
+  it('should use default name when empty string is provided', async () => {
+    await pyMcpServerGenerator(tree, {
+      project: 'test-project',
+      name: '',
+      computeType: 'None',
+      iacProvider: 'CDK',
+    });
+
+    // Check that MCP server files were added with default name
+    expect(
+      tree.exists('apps/test-project/proj_test_project/mcp_server/__init__.py'),
+    ).toBeTruthy();
+    expect(
+      tree.exists('apps/test-project/proj_test_project/mcp_server/server.py'),
+    ).toBeTruthy();
+
+    // Check that the server.py file contains the default name
+    const serverContent = tree.read(
+      'apps/test-project/proj_test_project/mcp_server/server.py',
+      'utf-8',
+    );
+    expect(serverContent).toContain('name="TestProjectMcpServer"');
+
+    // Check that project configuration was updated with default serve targets
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+    expect(projectConfig.targets['mcp-server-serve-stdio']).toBeDefined();
+    expect(projectConfig.targets['mcp-server-serve']).toBeDefined();
+  });
 });
