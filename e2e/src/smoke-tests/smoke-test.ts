@@ -23,7 +23,13 @@ export const runSmokeTest = async (
     },
   );
   const projectRoot = `${dir}/e2e-test`;
-  const opts = { cwd: projectRoot, env: { NX_DAEMON: 'false' } };
+  const opts = {
+    cwd: projectRoot,
+    env: {
+      NX_DAEMON: 'false',
+      NODE_OPTIONS: '--max-old-space-size=8192',
+    },
+  };
   if (onProjectCreate) {
     onProjectCreate(projectRoot);
   }
