@@ -2,6 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+import * as devkit from '@nx/devkit';
 import { addProjectConfiguration, Tree, writeJson } from '@nx/devkit';
 import {
   tsStrandsAgentGenerator,
@@ -851,5 +852,37 @@ describe('ts#strands-agent generator', () => {
 
     // Check that metadata uses default name
     expect(projectConfig.metadata.components[0].name).toBe('agent');
+  });
+
+  describe('package manager specific behavior', () => {
+    it('should add resolutions for yarn package manager', async () => {
+      vi.spyOn(devkit, 'detectPackageManager').mockReturnValue('yarn');
+
+      await tsStrandsAgentGenerator(tree, {
+        project: 'test-project',
+        computeType: 'None',
+        iacProvider: 'CDK',
+      });
+
+      const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+      expect(rootPackageJson.resolutions).toBeDefined();
+      expect(
+        rootPackageJson.resolutions['**/@strands-agents/sdk/**/zod'],
+      ).toBeDefined();
+    });
+
+    it('should add overrides for bun package manager', async () => {
+      vi.spyOn(devkit, 'detectPackageManager').mockReturnValue('bun');
+
+      await tsStrandsAgentGenerator(tree, {
+        project: 'test-project',
+        computeType: 'None',
+        iacProvider: 'CDK',
+      });
+
+      const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+      expect(rootPackageJson.overrides).toBeDefined();
+      expect(rootPackageJson.overrides['zod@^4']).toBeDefined();
+    });
   });
 });

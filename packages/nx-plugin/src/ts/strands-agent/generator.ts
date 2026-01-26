@@ -7,9 +7,11 @@ import {
   OverwriteStrategy,
   Tree,
   addDependenciesToPackageJson,
+  detectPackageManager,
   generateFiles,
   installPackagesTask,
   joinPathFragments,
+  updateJson,
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { TsStrandsAgentGeneratorSchema } from './schema';
@@ -23,7 +25,7 @@ import {
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { formatFilesInSubtree } from '../../utils/format';
 import { kebabCase, toClassName } from '../../utils/names';
-import { withVersions } from '../../utils/versions';
+import { TS_VERSIONS, withVersions } from '../../utils/versions';
 import { getNpmScope } from '../../utils/npm-scope';
 import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
 import { resolveIacProvider } from '../../utils/iac';
@@ -140,6 +142,30 @@ export const tsStrandsAgentGenerator = async (
     ]),
     withVersions(['tsx', '@types/ws', '@types/cors']),
   );
+
+  // Strands SDK depends on zod directly, and yarn/bun don't resolve to the same version we depend on
+  // in the workspace which leads to type errors due to conflicting zod versions
+  // Can likely remove this when https://github.com/strands-agents/sdk-typescript/issues/406 is resolved.
+  const packageManager = detectPackageManager();
+  if (packageManager === 'yarn') {
+    updateJson(tree, 'package.json', (packageJson: any) => {
+      packageJson.resolutions = {
+        ...packageJson.resolutions,
+        '**/@strands-agents/sdk/**/zod': TS_VERSIONS['zod'],
+      };
+      return packageJson;
+    });
+  } else if (packageManager === 'bun') {
+    // Bun doesn't support nested overrides like yarn (https://github.com/oven-sh/bun/issues/6608)
+    // but it does support top-level overrides which can force all zod@^4 to use our pinned version
+    updateJson(tree, 'package.json', (packageJson: any) => {
+      packageJson.overrides = {
+        ...packageJson.overrides,
+        'zod@^4': TS_VERSIONS['zod'],
+      };
+      return packageJson;
+    });
+  }
 
   // NB: we assign the local dev port from 8081 as 8080 is used by vscode server, and so conflicts
   // for those working on remote dev envirionments. The deployed agent in agentcore still runs on
