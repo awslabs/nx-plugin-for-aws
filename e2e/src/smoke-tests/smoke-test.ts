@@ -4,7 +4,6 @@
  */
 import { PackageManager } from '@nx/devkit';
 import { buildCreateNxWorkspaceCommand, runCLI, tmpProjPath } from '../utils';
-import { execSync } from 'child_process';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { ensureDirSync } from 'fs-extra';
 import { join } from 'path';
@@ -142,20 +141,6 @@ export const runSmokeTest = async (
     `generate @aws/nx-plugin:ts#strands-agent --project=ts-project --computeType=BedrockAgentCoreRuntime --no-interactive`,
     opts,
   );
-
-  // For bun, the strands-agent generator adds an override for zod@^4 to fix version conflicts.
-  // We need to delete node_modules and bun.lock and reinstall for the override to take effect.
-  // See: https://github.com/oven-sh/bun/issues/6608
-  if (pkgMgr === 'bun') {
-    rmSync(`${projectRoot}/node_modules`, { recursive: true, force: true });
-    rmSync(`${projectRoot}/bun.lock`, { force: true });
-    execSync('bun install', {
-      cwd: projectRoot,
-      stdio: 'inherit',
-      env: process.env,
-    });
-  }
-
   await runCLI(
     `generate @aws/nx-plugin:api-connection --sourceProject=website --targetProject=py_api --no-interactive`,
     opts,
