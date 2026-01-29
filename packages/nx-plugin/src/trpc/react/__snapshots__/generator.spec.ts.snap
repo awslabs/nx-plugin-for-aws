@@ -145,7 +145,7 @@ exports[`trpc react generator > should handle IAM auth option > useSigV4.tsx 1`]
 "import { AwsClient } from 'aws4fetch';
 import { CognitoIdentityClient } from '@aws-sdk/client-cognito-identity';
 import { fromCognitoIdentityPool } from '@aws-sdk/credential-provider-cognito-identity';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef } from 'react';
 import { useAuth } from 'react-oidc-context';
 import { useRuntimeConfig } from './useRuntimeConfig';
 import {
@@ -161,9 +161,9 @@ export const useSigV4 = () => {
   const auth = useAuth();
   const user = auth?.user;
 
-  const [cachedCredentials, setCachedCredentials] = useState<{
-    [key: string]: AwsCredentialIdentity;
-  }>({});
+  const cachedCredentials = useRef<{ [key: string]: AwsCredentialIdentity }>(
+    {},
+  );
 
   const withCachedCredentials = useCallback(
     async (
@@ -171,7 +171,7 @@ export const useSigV4 = () => {
       ...cacheKeys: string[]
     ): Promise<AwsCredentialIdentity> => {
       const key = \`sigv4/\${cacheKeys.join('/')}\`;
-      const cachedCreds = cachedCredentials[key];
+      const cachedCreds = cachedCredentials.current[key];
       if (
         cachedCreds &&
         cachedCreds.expiration &&
@@ -181,10 +181,10 @@ export const useSigV4 = () => {
         return cachedCreds;
       }
       const credentials = await provider();
-      setCachedCredentials((prev) => ({ ...prev, [key]: credentials }));
+      cachedCredentials.current[key] = credentials;
       return credentials;
     },
-    [cachedCredentials, setCachedCredentials],
+    [],
   );
 
   return useCallback(
@@ -208,11 +208,8 @@ export const useSigV4 = () => {
             user.id_token,
         },
       });
-      const cognitoidentity = new CognitoIdentityClient({
-        credentials: credentialsFromCognitoIdentityPool,
-      });
       const credential = await withCachedCredentials(
-        cognitoidentity.config.credentials,
+        credentialsFromCognitoIdentityPool,
         cognitoProps.identityPoolId,
         user.profile.sub,
       );

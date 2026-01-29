@@ -11,9 +11,7 @@ module.exports = {
     }
     return 'minor'; // Upgrade stable to latest minor
   },
-  // TODO: Address root cause of react 19.2 incompatibility with tRPC client
-  // https://github.com/awslabs/nx-plugin-for-aws/issues/399
-  reject: ['@hey-api/openapi-ts', 'react', 'react-dom'],
+  reject: ['@hey-api/openapi-ts'],
   packageFile: '{package.json,packages/**/package.json}',
   cooldown: 5, // Only latest versions published for 5 days are updated to
   dep: ['prod', 'dev', 'optional', 'packageManager', 'peer'],
