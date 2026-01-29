@@ -1,7 +1,7 @@
 import { AwsClient } from 'aws4fetch';
 import { CognitoIdentityClient } from '@aws-sdk/client-cognito-identity';
 import { fromCognitoIdentityPool } from '@aws-sdk/credential-provider-cognito-identity';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef } from 'react';
 import { useAuth } from 'react-oidc-context';
 import { useRuntimeConfig } from './useRuntimeConfig';
 import { AwsCredentialIdentity, AwsCredentialIdentityProvider } from '@smithy/types';
@@ -14,18 +14,18 @@ export const useSigV4 = () => {
   const auth = useAuth();
   const user = auth?.user;
 
-  const [cachedCredentials, setCachedCredentials] = useState<{ [key: string]: AwsCredentialIdentity }>({});
+  const cachedCredentials = useRef<{ [key: string]: AwsCredentialIdentity }>({});
 
   const withCachedCredentials = useCallback(async (provider: AwsCredentialIdentityProvider, ...cacheKeys: string[]): Promise<AwsCredentialIdentity> => {
     const key = `sigv4/${cacheKeys.join('/')}`;
-    const cachedCreds = cachedCredentials[key];
+    const cachedCreds = cachedCredentials.current[key];
     if (cachedCreds && cachedCreds.expiration && cachedCreds.expiration.getTime() > Date.now() + CREDENTIAL_EXPIRY_OFFSET_MILLIS) {
       return cachedCreds;
     }
     const credentials = await provider();
-    setCachedCredentials((prev) => ({ ...prev, [key]: credentials }));
+    cachedCredentials.current[key] = credentials;
     return credentials;
-  }, [cachedCredentials, setCachedCredentials]);
+  }, []);
 
   return useCallback(
     async (input: RequestInfo | URL, init?: RequestInit | undefined) => {
@@ -48,10 +48,7 @@ export const useSigV4 = () => {
             user.id_token,
         },
       });
-      const cognitoidentity = new CognitoIdentityClient({
-        credentials: credentialsFromCognitoIdentityPool,
-      });
-      const credential = await withCachedCredentials(cognitoidentity.config.credentials, cognitoProps.identityPoolId, user.profile.sub);
+      const credential = await withCachedCredentials(credentialsFromCognitoIdentityPool, cognitoProps.identityPoolId, user.profile.sub);
       const awsClient = new AwsClient(credential);
       return awsClient.fetch(input, init);
     },
