@@ -20,8 +20,12 @@ import { execSync } from 'child_process';
 import { flushChanges, FsTree } from 'nx/src/generators/tree';
 import { replace } from '../packages/nx-plugin/src/utils/ast';
 import { factory } from 'typescript';
-import { parsePipRequirementsLine } from 'pip-requirements-js';
-import { ProjectNameRequirement, VersionOperator } from 'pip-requirements-js';
+import {
+  parsePipRequirementsLine,
+  ProjectNameRequirement,
+  VersionOperator,
+} from 'pip-requirements-js';
+import { refreshShadcnTemplates } from './update-versions/shadcn';
 
 interface VersionChange {
   name: string;
@@ -29,9 +33,15 @@ interface VersionChange {
   newVersion: string;
 }
 
+interface TemplateChange {
+  path: string;
+}
+
+type ReportChange = VersionChange | TemplateChange;
+
 interface ChangeGroup {
   title: string;
-  changes: VersionChange[];
+  changes: ReportChange[];
 }
 
 /**
@@ -219,8 +229,12 @@ const writeReport = (changeGroups: ChangeGroup[]): void => {
       }
 
       reportContent += `${group.title}\n`;
-      group.changes.forEach(({ name, oldVersion, newVersion }) => {
-        reportContent += `- ${name} ${oldVersion} -> ${newVersion}\n`;
+      group.changes.forEach((change) => {
+        if ('oldVersion' in change) {
+          reportContent += `- ${change.name} ${change.oldVersion} -> ${change.newVersion}\n`;
+          return;
+        }
+        reportContent += `- ${change.path}\n`;
       });
     }
   });
@@ -262,6 +276,7 @@ const main = async () => {
       'packages/nx-plugin/src/utils/versions.ts',
       'TS_VERSIONS',
     );
+    const shadcnChange = tsChanges.find((change) => change.name === 'shadcn');
 
     // Get updated Python versions
     const updatedPyVersions = getUpdatedPythonVersions(tmpDir);
@@ -275,6 +290,8 @@ const main = async () => {
       'PY_VERSIONS',
     );
 
+    const shadcnTemplates = refreshShadcnTemplates(tree, tmpDir);
+
     // Only apply changes if not a dry run
     if (!isDryRun) {
       flushChanges(tree.root, tree.listChanges());
@@ -284,6 +301,14 @@ const main = async () => {
     writeReport([
       { title: 'TypeScript Dependencies', changes: tsChanges },
       { title: 'Python Dependencies', changes: pyChanges },
+      ...(shadcnChange?.newVersion
+        ? [
+            {
+              title: `Shadcn Templates`,
+              changes: shadcnTemplates.map((path) => ({ path })),
+            },
+          ]
+        : []),
     ]);
   } catch (error) {
     console.error('Error updating versions:', error);
