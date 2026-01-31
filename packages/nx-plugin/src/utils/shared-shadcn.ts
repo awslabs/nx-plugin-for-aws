@@ -5,16 +5,17 @@
 import {
   addDependenciesToPackageJson,
   generateFiles,
-  getPackageManagerCommand,
   joinPathFragments,
   OverwriteStrategy,
   Tree,
   updateJson,
 } from '@nx/devkit';
-import { libraryGenerator } from '@nx/react';
+import { ArrayLiteralExpression, Expression, factory } from 'typescript';
+import tsProjectGenerator from '../ts/lib/generator';
 import { configureTsProject } from '../ts/lib/ts-project-utils';
 import { formatFilesInSubtree } from './format';
 import { getNpmScopePrefix, toScopeAlias } from './npm-scope';
+import { jsonToAst, query, replace } from './ast';
 import {
   PACKAGES_DIR,
   SHARED_SHADCN_DIR,
@@ -63,6 +64,47 @@ const ensureNpmrcIgnoresWorkspaceRoot = (tree: Tree): boolean => {
   return true;
 };
 
+const addSharedShadcnEslintRules = (
+  tree: Tree,
+  eslintConfigPath: string,
+): void => {
+  if (!tree.exists(eslintConfigPath)) {
+    return;
+  }
+
+  const existingRule = query(
+    tree,
+    eslintConfigPath,
+    'PropertyAssignment:has(StringLiteral[value="@nx/enforce-module-boundaries"])',
+  );
+
+  if (existingRule.length > 0) {
+    return;
+  }
+
+  // shadcn generates aliased imports from components.json, which conflict with our
+  // relative-import lint rule. This rule is therefore disabled for common-shadcn.
+  // import { cn } from ':my-app/common-shadcn/lib/utils';
+
+  const ruleConfig = jsonToAst({
+    files: ['**/*.{ts,tsx,js,jsx}'],
+    rules: {
+      '@nx/enforce-module-boundaries': 'off',
+    },
+  }) as Expression;
+
+  replace(
+    tree,
+    eslintConfigPath,
+    'ExportAssignment > ArrayLiteralExpression',
+    (node: ArrayLiteralExpression) =>
+      factory.createArrayLiteralExpression(
+        [...node.elements, ruleConfig],
+        true,
+      ),
+  );
+};
+
 export async function sharedShadcnGenerator(tree: Tree) {
   const npmScopePrefix = getNpmScopePrefix(tree);
   const scopeAlias = toScopeAlias(npmScopePrefix);
@@ -70,21 +112,18 @@ export async function sharedShadcnGenerator(tree: Tree) {
   const fullyQualifiedName = `${npmScopePrefix}${SHARED_SHADCN_NAME}`;
   const libraryRoot = joinPathFragments(PACKAGES_DIR, SHARED_SHADCN_DIR);
   const shadcnSrcRoot = joinPathFragments(libraryRoot, 'src');
+  const eslintConfigPath = joinPathFragments(libraryRoot, 'eslint.config.mjs');
 
   ensureNpmrcIgnoresWorkspaceRoot(tree);
 
   if (!tree.exists(joinPathFragments(libraryRoot, 'project.json'))) {
-    await libraryGenerator(tree, {
-      name: fullyQualifiedName,
-      directory: libraryRoot,
-      bundler: 'vite',
-      unitTestRunner: 'vitest',
-      linter: 'eslint',
-      style: 'css',
+    await tsProjectGenerator(tree, {
+      name: SHARED_SHADCN_NAME,
+      directory: PACKAGES_DIR,
+      subDirectory: SHARED_SHADCN_DIR,
     });
+
     tree.delete(shadcnSrcRoot);
-    // The Nx React library generator can scaffold a Babel config we don't need.
-    tree.delete(joinPathFragments(libraryRoot, '.babelrc'));
 
     generateFiles(
       tree,
@@ -100,15 +139,14 @@ export async function sharedShadcnGenerator(tree: Tree) {
 
     generateFiles(
       tree,
-      joinPathFragments(__dirname, 'files', SHARED_SHADCN_DIR),
+      joinPathFragments(__dirname, 'files', SHARED_SHADCN_DIR, 'readme'),
       libraryRoot,
       {
         fullyQualifiedName,
-        pkgMgrCmd: getPackageManagerCommand().exec,
         scopeAlias,
       },
       {
-        overwriteStrategy: OverwriteStrategy.KeepExisting,
+        overwriteStrategy: OverwriteStrategy.Overwrite,
       },
     );
 
@@ -125,13 +163,17 @@ export async function sharedShadcnGenerator(tree: Tree) {
         compilerOptions: {
           ...json.compilerOptions,
           jsx: 'react-jsx',
+          module: 'preserve',
+          moduleResolution: 'bundler',
           lib: Array.from(
             new Set([...(json.compilerOptions?.lib ?? []), 'DOM']),
           ),
         },
+        include: Array.from(new Set([...(json.include ?? []), 'src/**/*.tsx'])),
       }),
     );
 
+    addSharedShadcnEslintRules(tree, eslintConfigPath);
     addDependenciesToPackageJson(tree, withVersions([...SHADCN_DEPS]), {});
   }
 
@@ -147,51 +189,6 @@ export async function sharedShadcnGenerator(tree: Tree) {
       },
     },
   }));
-
-  updateJson(tree, joinPathFragments(libraryRoot, 'project.json'), (json) => {
-    const buildTarget = json.targets?.build;
-    if (!buildTarget) {
-      return json;
-    }
-
-    const outputPath = joinPathFragments('dist', libraryRoot);
-    const outputs =
-      buildTarget.outputs && buildTarget.outputs.length > 0
-        ? buildTarget.outputs
-        : ['{options.outputPath}'];
-    const compileTarget =
-      json.targets?.compile ??
-      ({
-        executor: 'nx:run-commands',
-        outputs: [
-          `{workspaceRoot}/${joinPathFragments('dist', libraryRoot, 'tsc')}`,
-        ],
-        options: {
-          command: 'tsc --build tsconfig.lib.json',
-          cwd: '{projectRoot}',
-        },
-      } as const);
-    const buildDependsOn = Array.from(
-      new Set([...(buildTarget.dependsOn ?? []), 'compile']),
-    );
-
-    return {
-      ...json,
-      targets: {
-        ...json.targets,
-        build: {
-          ...buildTarget,
-          outputs,
-          dependsOn: buildDependsOn,
-          options: {
-            ...buildTarget.options,
-            outputPath: outputPath,
-          },
-        },
-        compile: compileTarget,
-      },
-    };
-  });
 
   if (!tree.exists('components.json')) {
     generateFiles(

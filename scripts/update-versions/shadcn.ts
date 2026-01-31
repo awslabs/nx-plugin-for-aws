@@ -46,7 +46,6 @@ const applyShadcnTemplateAliases = (contents: string): string =>
 
 export const refreshShadcnTemplates = (
   tree: FsTree,
-  shadcnVersion: string,
   tmpDir: string,
 ): string[] => {
   const shadcnDir = join(tmpDir, 'shadcn');
@@ -128,17 +127,14 @@ export const refreshShadcnTemplates = (
   );
 
   console.log('Refreshing Shadcn templates...');
-  execSync(
-    `npx -y shadcn@${shadcnVersion} add ${SHADCN_COMPONENTS.join(' ')}`,
-    {
-      cwd: shadcnDir,
-      stdio: 'inherit',
-      env: {
-        ...process.env,
-        CI: '1',
-      },
+  execSync(`npx -y shadcn@latest add ${SHADCN_COMPONENTS.join(' ')}`, {
+    cwd: shadcnDir,
+    stdio: 'inherit',
+    env: {
+      ...process.env,
+      CI: '1',
     },
-  );
+  });
 
   const writeTemplateFile = (sourcePath: string, targetPath: string): void => {
     const sourceContents = readFileSync(sourcePath, 'utf-8');

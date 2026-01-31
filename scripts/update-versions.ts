@@ -13,10 +13,9 @@ import {
   cpSync,
   rmSync,
   mkdirSync,
-  existsSync,
 } from 'fs';
 import { tmpdir } from 'os';
-import { join, relative } from 'path';
+import { join } from 'path';
 import { execSync } from 'child_process';
 import { flushChanges, FsTree } from 'nx/src/generators/tree';
 import { replace } from '../packages/nx-plugin/src/utils/ast';
@@ -26,6 +25,7 @@ import {
   ProjectNameRequirement,
   VersionOperator,
 } from 'pip-requirements-js';
+import { refreshShadcnTemplates } from './update-versions/shadcn';
 
 interface VersionChange {
   name: string;
@@ -33,179 +33,16 @@ interface VersionChange {
   newVersion: string;
 }
 
-interface ChangeGroup {
-  title: string;
-  changes: VersionChange[];
+interface TemplateChange {
+  path: string;
 }
 
-const SHADCN_COMPONENTS = [
-  'alert',
-  'breadcrumb',
-  'button',
-  'card',
-  'input',
-  'separator',
-  'sheet',
-  'sidebar',
-  'skeleton',
-  'spinner',
-  'tooltip',
-];
+type ReportChange = VersionChange | TemplateChange;
 
-const SHADCN_TEMPLATE_ROOT = join(
-  process.cwd(),
-  'packages',
-  'nx-plugin',
-  'src',
-  'utils',
-  'files',
-  'common',
-  'shadcn',
-  'src',
-);
-
-const applyShadcnTemplateAliases = (contents: string): string =>
-  contents.replace(/@\//g, '<%= scopeAlias %>common-shadcn/');
-
-const refreshShadcnTemplates = (
-  shadcnVersion: string,
-  tmpDir: string,
-): string[] => {
-  const shadcnDir = join(tmpDir, 'shadcn');
-  const shadcnSrcDir = join(shadcnDir, 'src');
-  const shadcnUiDir = join(shadcnSrcDir, 'components', 'ui');
-  const updatedTemplates: string[] = [];
-
-  rmSync(shadcnDir, { recursive: true, force: true });
-  mkdirSync(shadcnUiDir, { recursive: true });
-  mkdirSync(join(shadcnSrcDir, 'lib'), { recursive: true });
-  mkdirSync(join(shadcnSrcDir, 'hooks'), { recursive: true });
-  mkdirSync(join(shadcnSrcDir, 'styles'), { recursive: true });
-
-  // Update the current globals.css.template instead of starting from a blank file.
-  const globalsTemplatePath = join(
-    SHADCN_TEMPLATE_ROOT,
-    'styles',
-    'globals.css.template',
-  );
-  writeFileSync(
-    join(shadcnSrcDir, 'styles', 'globals.css'),
-    readFileSync(globalsTemplatePath, 'utf-8'),
-  );
-
-  writeFileSync(
-    join(shadcnDir, 'package.json'),
-    JSON.stringify(
-      {
-        name: 'shadcn-template-refresh',
-        private: true,
-      },
-      null,
-      2,
-    ),
-  );
-
-  writeFileSync(
-    join(shadcnDir, 'tsconfig.json'),
-    JSON.stringify(
-      {
-        compilerOptions: {
-          baseUrl: '.',
-          paths: {
-            '@/*': ['src/*'],
-          },
-        },
-      },
-      null,
-      2,
-    ),
-  );
-
-  writeFileSync(
-    join(shadcnDir, 'components.json'),
-    JSON.stringify(
-      {
-        $schema: 'https://ui.shadcn.com/schema.json',
-        style: 'new-york',
-        rsc: true,
-        tsx: true,
-        tailwind: {
-          config: '',
-          css: 'src/styles/globals.css',
-          baseColor: 'zinc',
-          cssVariables: true,
-        },
-        iconLibrary: 'lucide',
-        aliases: {
-          components: '@/components',
-          utils: '@/lib/utils',
-          hooks: '@/hooks',
-          lib: '@/lib',
-          ui: '@/components/ui',
-        },
-      },
-      null,
-      2,
-    ),
-  );
-
-  console.log('Refreshing Shadcn templates...');
-  execSync(
-    `npx -y shadcn@${shadcnVersion} add ${SHADCN_COMPONENTS.join(' ')}`,
-    {
-      cwd: shadcnDir,
-      stdio: 'inherit',
-      env: {
-        ...process.env,
-        CI: '1',
-      },
-    },
-  );
-
-  const writeTemplateFile = (sourcePath: string, targetPath: string): void => {
-    const sourceContents = readFileSync(sourcePath, 'utf-8');
-    const templatedContents = applyShadcnTemplateAliases(sourceContents);
-    writeFileSync(targetPath, templatedContents);
-    updatedTemplates.push(relative(process.cwd(), targetPath));
-  };
-
-  for (const component of SHADCN_COMPONENTS) {
-    const sourcePath = join(shadcnUiDir, `${component}.tsx`);
-    if (!existsSync(sourcePath)) {
-      console.warn(
-        `Skipping Shadcn component output (not generated): ${sourcePath}`,
-      );
-      continue;
-    }
-    const targetPath = join(
-      SHADCN_TEMPLATE_ROOT,
-      'components',
-      'ui',
-      `${component}.tsx.template`,
-    );
-    writeTemplateFile(sourcePath, targetPath);
-  }
-
-  const useMobileSource = join(shadcnSrcDir, 'hooks', 'use-mobile.ts');
-  if (existsSync(useMobileSource)) {
-    writeTemplateFile(
-      useMobileSource,
-      join(SHADCN_TEMPLATE_ROOT, 'hooks', 'use-mobile.ts.template'),
-    );
-  } else {
-    console.warn(
-      `Skipping Shadcn hook output (not generated): ${useMobileSource}`,
-    );
-  }
-
-  writeTemplateFile(
-    join(shadcnSrcDir, 'styles', 'globals.css'),
-    join(SHADCN_TEMPLATE_ROOT, 'styles', 'globals.css.template'),
-  );
-
-  console.log('Shadcn templates refreshed.');
-  return updatedTemplates;
-};
+interface ChangeGroup {
+  title: string;
+  changes: ReportChange[];
+}
 
 /**
  * Gets updated TypeScript versions by running npm-check-updates
@@ -392,8 +229,12 @@ const writeReport = (changeGroups: ChangeGroup[]): void => {
       }
 
       reportContent += `${group.title}\n`;
-      group.changes.forEach(({ name, oldVersion, newVersion }) => {
-        reportContent += `- ${name} ${oldVersion} -> ${newVersion}\n`;
+      group.changes.forEach((change) => {
+        if ('oldVersion' in change) {
+          reportContent += `- ${change.name} ${change.oldVersion} -> ${change.newVersion}\n`;
+          return;
+        }
+        reportContent += `- ${change.path}\n`;
       });
     }
   });
@@ -449,18 +290,25 @@ const main = async () => {
       'PY_VERSIONS',
     );
 
+    const shadcnTemplates = refreshShadcnTemplates(tree, tmpDir);
+
     // Only apply changes if not a dry run
     if (!isDryRun) {
       flushChanges(tree.root, tree.listChanges());
-      if (shadcnChange?.newVersion) {
-        refreshShadcnTemplates(shadcnChange.newVersion, tmpDir);
-      }
     }
 
     // Write the report
     writeReport([
       { title: 'TypeScript Dependencies', changes: tsChanges },
       { title: 'Python Dependencies', changes: pyChanges },
+      ...(shadcnChange?.newVersion
+        ? [
+            {
+              title: `Shadcn Templates`,
+              changes: shadcnTemplates.map((path) => ({ path })),
+            },
+          ]
+        : []),
     ]);
   } catch (error) {
     console.error('Error updating versions:', error);
