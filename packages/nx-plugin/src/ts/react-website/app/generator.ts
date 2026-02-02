@@ -28,6 +28,10 @@ import { getNpmScopePrefix, toScopeAlias } from '../../../utils/npm-scope';
 import { configureTsProject } from '../../lib/ts-project-utils';
 import { ITsDepVersion, withVersions } from '../../../utils/versions';
 import { getRelativePathToRoot } from '../../../utils/paths';
+import {
+  PACKAGES_DIR,
+  SHARED_SHADCN_DIR,
+} from '../../../utils/shared-constructs-constants';
 import { kebabCase, toClassName, toKebabCase } from '../../../utils/names';
 import {
   addDestructuredImport,
@@ -35,20 +39,23 @@ import {
   addSingleImport,
 } from '../../../utils/ast';
 import { formatFilesInSubtree } from '../../../utils/format';
-import { relative } from 'path';
+import { relative, sep } from 'path';
 import { sortObjectKeys } from '../../../utils/object';
 import {
   NxGeneratorInfo,
   addGeneratorMetadata,
   getGeneratorInfo,
 } from '../../../utils/nx';
+import { sharedShadcnGenerator } from '../../../utils/shared-shadcn';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { addWebsiteInfra } from '../../../utils/website-constructs/website-constructs';
 import { resolveIacProvider } from '../../../utils/iac';
 
-export const SUPPORTED_UX_PROVIDERS = ['None', 'Cloudscape'] as const;
+export const SUPPORTED_UX_PROVIDERS = ['None', 'Cloudscape', 'Shadcn'] as const;
 
-export type UxProvider = (typeof SUPPORTED_UX_PROVIDERS)[number];
+export type UxProviderOption = (typeof SUPPORTED_UX_PROVIDERS)[number];
+
+export type UxProvider = UxProviderOption;
 
 export const REACT_WEBSITE_APP_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -60,7 +67,11 @@ export async function tsReactWebsiteGenerator(
   const enableTailwind = schema.enableTailwind ?? true;
   const enableTanstackRouter = schema.enableTanstackRouter ?? true;
   const uxProvider: UxProvider = schema.uxProvider ?? 'Cloudscape';
+  if (uxProvider === 'Shadcn' && !enableTailwind) {
+    throw new Error('Shadcn requires TailwindCSS to be enabled.');
+  }
   const npmScopePrefix = getNpmScopePrefix(tree);
+  const scopeAlias = toScopeAlias(npmScopePrefix);
   const websiteNameClassName = toClassName(schema.name);
   const websiteNameKebabCase = toKebabCase(schema.name);
   const fullyQualifiedName = `${npmScopePrefix}${websiteNameKebabCase}`;
@@ -186,6 +197,10 @@ export async function tsReactWebsiteGenerator(
     fullyQualifiedName,
   });
 
+  if (uxProvider === 'Shadcn') {
+    await sharedShadcnGenerator(tree);
+  }
+
   await sharedConstructsGenerator(tree, {
     iacProvider,
   });
@@ -193,7 +208,7 @@ export async function tsReactWebsiteGenerator(
   addWebsiteInfra(tree, {
     iacProvider,
     websiteProjectName: fullyQualifiedName,
-    scopeAlias: toScopeAlias(npmScopePrefix),
+    scopeAlias,
     websiteContentPath: joinPathFragments('dist', websiteContentPath),
     websiteNameKebabCase,
     websiteNameClassName,
@@ -201,6 +216,38 @@ export async function tsReactWebsiteGenerator(
 
   const projectConfig = readProjectConfiguration(tree, fullyQualifiedName);
   const libraryRoot = projectConfig.root;
+  const sharedShadcnStylesImport = relative(
+    joinPathFragments(libraryRoot, 'src'),
+    joinPathFragments(
+      PACKAGES_DIR,
+      SHARED_SHADCN_DIR,
+      'src',
+      'styles',
+      'globals.css',
+    ),
+  )
+    .split(sep)
+    .join('/');
+  const sharedShadcnTsconfigRef = relative(
+    joinPathFragments(tree.root, websiteContentPath),
+    joinPathFragments(
+      tree.root,
+      PACKAGES_DIR,
+      SHARED_SHADCN_DIR,
+      'tsconfig.json',
+    ),
+  )
+    .split(sep)
+    .join('/');
+  const templateOptions = {
+    ...schema,
+    fullyQualifiedName,
+    pkgMgrCmd: getPackageManagerCommand().exec,
+    enableTailwind,
+    enableTanstackRouter,
+    scopeAlias,
+    sharedShadcnStylesImport,
+  };
   tree.delete(joinPathFragments(libraryRoot, 'src', 'app'));
   const appCommonTemplatePath = joinPathFragments(
     __dirname,
@@ -215,13 +262,7 @@ export async function tsReactWebsiteGenerator(
     tree, // the virtual file system
     appCommonTemplatePath, // path to the file templates
     libraryRoot, // destination path of the files
-    {
-      ...schema,
-      fullyQualifiedName,
-      pkgMgrCmd: getPackageManagerCommand().exec,
-      enableTailwind,
-      enableTanstackRouter,
-    }, // config object to replace variable in file templates
+    templateOptions, // config object to replace variable in file templates
     {
       overwriteStrategy: OverwriteStrategy.Overwrite,
     },
@@ -231,13 +272,7 @@ export async function tsReactWebsiteGenerator(
     tree, // the virtual file system
     appTemplatePath, // path to the file templates
     libraryRoot, // destination path of the files
-    {
-      ...schema,
-      fullyQualifiedName,
-      pkgMgrCmd: getPackageManagerCommand().exec,
-      enableTailwind,
-      enableTanstackRouter,
-    }, // config object to replace variable in file templates
+    templateOptions, // config object to replace variable in file templates
     {
       overwriteStrategy: OverwriteStrategy.Overwrite,
     },
@@ -257,13 +292,7 @@ export async function tsReactWebsiteGenerator(
       tree,
       routerCommonTemplatePath,
       libraryRoot,
-      {
-        ...schema,
-        fullyQualifiedName,
-        pkgMgrCmd: getPackageManagerCommand().exec,
-        enableTailwind,
-        enableTanstackRouter,
-      },
+      templateOptions,
       {
         overwriteStrategy: OverwriteStrategy.Overwrite,
       },
@@ -273,13 +302,7 @@ export async function tsReactWebsiteGenerator(
       tree,
       routerTemplatePath,
       libraryRoot,
-      {
-        ...schema,
-        fullyQualifiedName,
-        pkgMgrCmd: getPackageManagerCommand().exec,
-        enableTailwind,
-        enableTanstackRouter,
-      }, // config object to replace variable in file templates
+      templateOptions, // config object to replace variable in file templates
       {
         overwriteStrategy: OverwriteStrategy.Overwrite,
       },
@@ -495,6 +518,17 @@ export async function tsReactWebsiteGenerator(
         tsBuildInfoFile: joinPathFragments(distDir, 'tsconfig.lib.tsbuildinfo'),
         lib: ['DOM'],
       },
+      references:
+        uxProvider === 'Shadcn'
+          ? [
+              ...(tsconfig.references ?? []).filter(
+                (ref) => ref.path !== sharedShadcnTsconfigRef,
+              ),
+              {
+                path: sharedShadcnTsconfigRef,
+              },
+            ]
+          : tsconfig.references,
     }),
   );
 
@@ -508,6 +542,8 @@ export async function tsReactWebsiteGenerator(
       '@cloudscape-design/board-components',
       '@cloudscape-design/global-styles',
     );
+  } else if (uxProvider === 'Shadcn') {
+    // not required to add any dependencies because dependencies are added by the common/shadcn package.
   }
 
   // Add TailwindCSS dependencies if enabled
