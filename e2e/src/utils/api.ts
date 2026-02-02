@@ -50,7 +50,7 @@ export const connectApiProjectPermutations = async (
         SHORT_COMPUTE_TYPES[computeType],
       ].join(sep);
       await runCLI(
-        `generate @aws/nx-plugin:api-connection --sourceProject=${sourceProject} --targetProject=${name} --no-interactive`,
+        `generate @aws/nx-plugin:connection --sourceProject=${sourceProject} --targetProject=${name} --no-interactive`,
         opts,
       );
     }

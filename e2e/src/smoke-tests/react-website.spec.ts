@@ -71,7 +71,7 @@ describe('smoke test - react-website', () => {
       );
 
       await runCLI(
-        `generate @aws/nx-plugin:api-connection --sourceProject=${name} --targetProject=my-api --no-interactive`,
+        `generate @aws/nx-plugin:connection --sourceProject=${name} --targetProject=my-api --no-interactive`,
         opts,
       );
     }

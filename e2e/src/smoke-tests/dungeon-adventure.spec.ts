@@ -72,7 +72,7 @@ describe('smoke test - dungeon-adventure', () => {
       opts,
     );
     await runCLI(
-      `generate @aws/nx-plugin:api-connection --sourceProject=@dungeon-adventure/game-ui --targetProject=@dungeon-adventure/game-api --no-interactive`,
+      `generate @aws/nx-plugin:connection --sourceProject=@dungeon-adventure/game-ui --targetProject=@dungeon-adventure/game-api --no-interactive`,
       opts,
     );
     await runCLI(
