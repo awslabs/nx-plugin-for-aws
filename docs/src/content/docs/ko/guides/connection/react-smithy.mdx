@@ -1,0 +1,1264 @@
+---
+title: "Smithy API에 React 연결"
+description: "React 웹사이트를 Smithy TypeScript API에 연결"
+---
+
+
+
+import { FileTree, Steps } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Drawer from '@components/drawer.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+
+`connection` 제너레이터는 React 웹사이트를 Smithy TypeScript API 백엔드와 빠르게 통합할 수 있는 방법을 제공합니다. 타입 세이프한 방식으로 Smithy API 연결에 필요한 모든 구성을 설정하며, 클라이언트 및 [TanStack Query](https://tanstack.com/query/v5) 훅 생성, AWS IAM 및 Cognito 인증 지원, 적절한 오류 처리를 포함합니다.
+
+## 필수 조건
+
+이 제너레이터를 사용하기 전에 React 애플리케이션이 다음을 갖추었는지 확인하세요:
+
+1. 애플리케이션을 렌더링하는 `main.tsx` 파일
+2. 작동하는 Smithy TypeScript API 백엔드 (<Link path="/guides/ts-smithy-api">`ts#smithy-api` 제너레이터</Link>로 생성)
+3. Cognito 또는 IAM 인증을 사용하는 API 연결 시 <Link path="/guides/react-website-auth">`ts#react-website-auth` 제너레이터</Link>로 추가된 Cognito 인증
+
+<details>
+<summary>필요한 `main.tsx` 구조 예시</summary>
+
+```tsx
+import { StrictMode } from 'react';
+import * as ReactDOM from 'react-dom/client';
+import App from './app/app';
+
+const root = ReactDOM.createRoot(
+  document.getElementById('root') as HTMLElement,
+);
+root.render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+);
+```
+
+</details>
+
+## 사용 방법
+
+### 제너레이터 실행
+
+<RunGenerator generator="connection" />
+
+### 옵션
+
+<GeneratorParameters generator="connection" />
+
+## 제너레이터 출력
+
+제너레이터는 React 애플리케이션의 다음 파일들을 변경합니다:
+
+<FileTree>
+
+- src
+  - components
+    - \<ApiName>Provider.tsx API 클라이언트용 프로바이더
+    - QueryClientProvider.tsx TanStack React Query 클라이언트 프로바이더
+    - RuntimeConfig/ 로컬 개발용 런타임 설정 컴포넌트
+  - hooks
+    - use\<ApiName>.tsx TanStack Query로 상태 관리되는 API 호출 훅 추가
+    - use\<ApiName>Client.tsx 기본 API 클라이언트 인스턴스 생성 훅 추가
+    - useSigV4.tsx IAM 인증 선택 시 SigV4 서명 훅 추가
+- project.json 타입 세이프 클라이언트 생성용 새 빌드 타겟 추가
+- .gitignore 기본적으로 생성된 클라이언트 파일 무시
+
+</FileTree>
+
+제너레이터는 Smithy 모델에도 파일을 추가합니다:
+
+<FileTree>
+
+- model
+  - src
+    - extensions.smithy 생성된 클라이언트 커스터마이즈용 트레이트 정의
+
+</FileTree>
+
+또한 제너레이터는 웹사이트 인프라에 런타임 구성을 추가하여 Smithy API URL이 웹사이트에서 사용 가능하도록 하고 `use<ApiName>.tsx` 훅에서 자동으로 구성됩니다.
+
+### 코드 생성
+
+빌드 시 Smithy API의 OpenAPI 명세로부터 타입 세이프 클라이언트가 생성됩니다. 이는 React 애플리케이션에 세 개의 새 파일을 추가합니다:
+
+<FileTree>
+
+- src
+  - generated
+    - \<ApiName>
+      - types.gen.ts Smithy 모델 구조에서 생성된 타입
+      - client.gen.ts API 호출용 타입 세이프 클라이언트
+      - options-proxy.gen.ts TanStack Query 훅 옵션 생성 메서드 제공
+
+</FileTree>
+
+:::tip
+기본적으로 생성된 클라이언트는 버전 관리에서 제외됩니다. 버전 관리를 원할 경우 React 애플리케이션의 `.gitignore`에서 해당 항목을 제거할 수 있지만, `.gen.ts` 파일을 수동으로 변경하면 프로젝트 빌드 시 덮어쓰여집니다.
+:::
+
+## 생성된 코드 사용
+
+생성된 타입 세이프 클라이언트로 React 애플리케이션에서 Smithy API를 호출할 수 있습니다. TanStack Query 훅을 사용하는 것이 권장되지만 기본 클라이언트도 사용 가능합니다.
+
+:::note
+Smithy API 모델을 변경할 때마다 생성된 클라이언트에 반영하려면 프로젝트를 재빌드해야 합니다. 예시:
+
+<NxCommands commands={['run-many --target build --all']} />
+:::
+
+:::tip
+React 애플리케이션과 Smithy API를 동시에 개발 중인 경우 React 애플리케이션의 `serve-local` 타겟을 사용하면 API 변경 시 클라이언트를 자동 재생성하고 웹사이트와 로컬 Smithy API 서버를 핫 리로드합니다:
+
+<NxCommands commands={['run <WebsiteProject>:serve-local']} />
+
+더 세밀한 제어를 원하면 `watch-generate:<ApiName>-client` 타겟을 사용하여 API 변경 시마다 클라이언트를 재생성할 수 있습니다:
+
+<NxCommands commands={['run <WebsiteProject>:"watch-generate:<ApiName>-client"']}
+/>
+:::
+
+### API 훅 사용
+
+제너레이터는 TanStack Query로 API를 호출할 수 있는 `use<ApiName>` 훅을 제공합니다.
+
+### 쿼리
+
+`queryOptions` 메서드를 사용하여 TanStack Query의 `useQuery` 훅에 필요한 옵션을 검색할 수 있습니다:
+
+```tsx {7}
+import { useQuery } from '@tanstack/react-query';
+import { useState, useEffect } from 'react';
+import { useMyApi } from './hooks/useMyApi';
+
+function MyComponent() {
+  const api = useMyApi();
+  const item = useQuery(api.getItem.queryOptions({ itemId: 'some-id' }));
+
+  if (item.isLoading) return <div>Loading...</div>;
+  if (item.isError) return <div>Error: {item.error.message}</div>;
+
+  return <div>Item: {item.data.name}</div>;
+}
+```
+
+<Drawer title="기본 API 클라이언트 직접 사용" trigger="기본 클라이언트 사용 예시를 보려면 클릭하세요.">
+```tsx {5,13}
+import { useState, useEffect } from 'react';
+import { useMyApiClient } from './hooks/useMyApiClient';
+
+function MyComponent() {
+  const api = useMyApiClient();
+  const [item, setItem] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const fetchItem = async () => {
+      try {
+        const data = await api.getItem({ itemId: 'some-id' });
+        setItem(data);
+      } catch (err) {
+        setError(err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchItem();
+  }, [api]);
+
+  if (loading) return <div>Loading...</div>;
+  if (error) return <div>Error: {error.message}</div>;
+
+  return <div>Item: {item.name}</div>;
+}
+```
+</Drawer>
+
+### 뮤테이션
+
+생성된 훅은 TanStack Query의 `useMutation` 훅을 사용한 뮤테이션을 지원합니다. 이는 로딩 상태, 오류 처리, 낙관적 업데이트가 포함된 생성/수정/삭제 작업을 깔끔하게 처리합니다.
+
+```tsx {5-7,11}
+import { useMutation } from '@tanstack/react-query';
+import { useMyApi } from './hooks/useMyApi';
+
+function CreateItemForm() {
+  const api = useMyApi();
+  // 생성된 뮤테이션 옵션 사용
+  const createItem = useMutation(api.createItem.mutationOptions());
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    createItem.mutate({ name: 'New Item', description: 'A new item' });
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      {/* 폼 필드 */}
+      <button
+        type="submit"
+        disabled={createItem.isPending}
+      >
+        {createItem.isPending ? 'Creating...' : 'Create Item'}
+      </button>
+
+      {createItem.isSuccess && (
+        <div className="success">
+          Item created with ID: {createItem.data.id}
+        </div>
+      )}
+
+      {createItem.isError && (
+        <div className="error">
+          Error: {createItem.error.message}
+        </div>
+      )}
+    </form>
+  );
+}
+```
+
+다양한 뮤테이션 상태에 대한 콜백 추가 가능:
+
+```tsx
+const createItem = useMutation({
+  ...api.createItem.mutationOptions(),
+  onSuccess: (data) => {
+    console.log('Item created:', data);
+    navigate(`/items/${data.id}`);
+  },
+  onError: (error) => {
+    console.error('Failed to create item:', error);
+  },
+  onSettled: () => {
+    queryClient.invalidateQueries({ queryKey: api.listItems.queryKey() });
+  }
+});
+```
+
+<Drawer title="기본 클라이언트로 뮤테이션 사용" trigger="기본 클라이언트 사용 예시를 보려면 클릭하세요.">
+```tsx
+import { useState } from 'react';
+import { useMyApiClient } from './hooks/useMyApiClient';
+
+function CreateItemForm() {
+  const api = useMyApiClient();
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [createdItem, setCreatedItem] = useState(null);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const newItem = await api.createItem({
+        name: 'New Item',
+        description: 'A new item'
+      });
+      setCreatedItem(newItem);
+    } catch (err) {
+      setError(err);
+      console.error('Failed to create item:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      {/* 폼 필드 */}
+      <button
+        type="submit"
+        disabled={isLoading}
+      >
+        {isLoading ? 'Creating...' : 'Create Item'}
+      </button>
+
+      {createdItem && (
+        <div className="success">
+          Item created with ID: {createdItem.id}
+        </div>
+      )}
+
+      {error && (
+        <div className="error">
+          Error: {error.message}
+        </div>
+      )}
+    </form>
+  );
+}
+```
+</Drawer>
+
+### 무한 쿼리 페이지네이션
+
+`cursor` 파라미터를 입력으로 받는 엔드포인트의 경우 TanStack Query의 `useInfiniteQuery` 훅을 사용한 무한 쿼리를 지원합니다. "더 보기" 또는 무한 스크롤 기능 구현에 유용합니다.
+
+```tsx {6-16,30-34}
+import { useInfiniteQuery } from '@tanstack/react-query';
+import { useMyApi } from './hooks/useMyApi';
+
+function ItemList() {
+  const api = useMyApi();
+  const items = useInfiniteQuery({
+    ...api.listItems.infiniteQueryOptions({
+      limit: 10,
+    }, {
+      getNextPageParam: (lastPage) =>
+        lastPage.nextCursor || undefined
+      }),
+  });
+
+  if (items.isLoading) {
+    return <LoadingSpinner />;
+  }
+
+  if (items.isError) {
+    return <ErrorMessage message={items.error.message} />;
+  }
+
+  return (
+    <div>
+      <ul>
+        {items.data.pages.flatMap(page =>
+          page.items.map(item => (
+            <li key={item.id}>{item.name}</li>
+          ))
+        )}
+      </ul>
+
+      <button
+        onClick={() => items.fetchNextPage()}
+        disabled={!items.hasNextPage || items.isFetchingNextPage}
+      >
+        {items.isFetchingNextPage
+          ? 'Loading more...'
+          : items.hasNextPage
+          ? 'Load More'
+          : 'No more items'}
+      </button>
+    </div>
+  );
+}
+```
+
+생성된 훅은 API가 커서 기반 페이지네이션을 지원할 경우 자동으로 처리합니다. `nextCursor` 값이 응답에서 추출되어 다음 페이지 호출에 사용됩니다.
+
+:::tip
+페이지네이션 파라미터 이름이 `cursor`가 아닌 경우 [`x-cursor` OpenAPI 벤더 확장](#custom-pagination-cursor)으로 커스터마이즈 가능합니다.
+:::
+
+<Drawer title="기본 클라이언트로 페이지네이션 사용" trigger="기본 클라이언트 사용 예시를 보려면 클릭하세요.">
+```tsx
+import { useState, useEffect } from 'react';
+import { useMyApiClient } from './hooks/useMyApiClient';
+
+function ItemList() {
+  const api = useMyApiClient();
+  const [items, setItems] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [nextCursor, setNextCursor] = useState(null);
+  const [isFetchingMore, setIsFetchingMore] = useState(false);
+
+  useEffect(() => {
+    const fetchItems = async () => {
+      try {
+        setIsLoading(true);
+        const response = await api.listItems({ limit: 10 });
+        setItems(response.items);
+        setNextCursor(response.nextCursor);
+      } catch (err) {
+        setError(err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchItems();
+  }, [api]);
+
+  const loadMore = async () => {
+    if (!nextCursor) return;
+
+    try {
+      setIsFetchingMore(true);
+      const response = await api.listItems({
+        limit: 10,
+        cursor: nextCursor
+      });
+
+      setItems(prevItems => [...prevItems, ...response.items]);
+      setNextCursor(response.nextCursor);
+    } catch (err) {
+      setError(err);
+    } finally {
+      setIsFetchingMore(false);
+    }
+  };
+
+  if (isLoading) {
+    return <LoadingSpinner />;
+  }
+
+  if (error) {
+    return <ErrorMessage message={error.message} />;
+  }
+
+  return (
+    <div>
+      <ul>
+        {items.map(item => (
+          <li key={item.id}>{item.name}</li>
+        ))}
+      </ul>
+
+      <button
+        onClick={loadMore}
+        disabled={!nextCursor || isFetchingMore}
+      >
+        {isFetchingMore
+          ? 'Loading more...'
+          : nextCursor
+          ? 'Load More'
+          : 'No more items'}
+      </button>
+    </div>
+  );
+}
+```
+</Drawer>
+
+### 오류 처리
+
+통합에는 타입화된 오류 응답이 포함됩니다. Smithy 모델에 정의된 가능한 오류 응답을 캡슐화하는 `<operation-name>Error` 타입이 생성됩니다. 각 오류는 `status`와 `error` 속성을 가지며, `status` 값을 확인하여 특정 오류 유형을 식별할 수 있습니다.
+
+```tsx {12}
+import { useMutation } from '@tanstack/react-query';
+
+function MyComponent() {
+  const api = useMyApi();
+  const createItem = useMutation(api.createItem.mutationOptions());
+
+  const handleClick = () => {
+    createItem.mutate({ name: 'New Item' });
+  };
+
+  if (createItem.error) {
+    switch (createItem.error.status) {
+      case 400:
+        return (
+          <div>
+            <h2>Invalid input:</h2>
+            <p>{createItem.error.error.message}</p>
+          </div>
+        );
+      case 403:
+        return (
+          <div>
+            <h2>Not authorized:</h2>
+            <p>{createItem.error.error.reason}</p>
+          </div>
+        );
+      case 500:
+      case 502:
+        return (
+          <div>
+            <h2>Server error:</h2>
+            <p>{createItem.error.error.message}</p>
+          </div>
+        );
+    }
+  }
+
+  return <button onClick={handleClick}>Create Item</button>;
+}
+```
+
+<Drawer title="기본 클라이언트로 오류 처리" trigger="기본 클라이언트 사용 예시를 보려면 클릭하세요.">
+```tsx {9,15}
+function MyComponent() {
+  const api = useMyApiClient();
+  const [error, setError] = useState<CreateItemError | null>(null);
+
+  const handleClick = async () => {
+    try {
+      await api.createItem({ name: 'New Item' });
+    } catch (e) {
+      const err = e as CreateItemError;
+      setError(err);
+    }
+  };
+
+  if (error) {
+    switch (error.status) {
+      case 400:
+        return (
+          <div>
+            <h2>Invalid input:</h2>
+            <p>{error.error.message}</p>
+          </div>
+        );
+      case 403:
+        return (
+          <div>
+            <h2>Not authorized:</h2>
+            <p>{error.error.reason}</p>
+          </div>
+        );
+      case 500:
+      case 502:
+        return (
+          <div>
+            <h2>Server error:</h2>
+            <p>{error.error.message}</p>
+          </div>
+        );
+    }
+  }
+
+  return <button onClick={handleClick}>Create Item</button>;
+}
+```
+</Drawer>
+
+## 생성된 코드 커스터마이징
+
+Smithy `model` 프로젝트의 `extensions.smithy`에 추가된 여러 트레이트를 사용하여 생성된 클라이언트를 커스터마이즈할 수 있습니다.
+
+:::tip
+커스터마이즈가 필요 없는 경우 `extensions.smithy`를 삭제해도 됩니다.
+:::
+
+### 쿼리와 뮤테이션
+
+기본적으로 Smithy API의 `PUT`, `POST`, `PATCH`, `DELETE` HTTP 메서드를 사용하는 작업은 뮤테이션으로, 나머지는 쿼리로 간주됩니다.
+
+`@query` 및 `@mutation` Smithy 트레이트를 사용하여 이 동작을 변경할 수 있습니다.
+
+:::note
+이 트레이트는 OpenAPI 벤더 확장에 매핑되며, 코드 제너레이터가 OpenAPI 명세에서 클라이언트 생성 시 해석합니다.
+:::
+
+#### @query
+
+`@query` 트레이트를 적용하여 `POST` 메서드임에도 쿼리로 처리되도록 강제:
+
+```smithy
+@http(method: "POST", uri: "/items")
+@query
+operation ListItems {
+    input: ListItemsInput
+    output: ListItemsOutput
+}
+```
+
+생성된 훅은 `POST` 메서드임에도 `queryOptions`를 제공합니다:
+
+```tsx
+const items = useQuery(api.listItems.queryOptions());
+```
+
+#### @mutation
+
+`@mutation` 트레이트를 적용하여 `GET` 메서드임에도 뮤테이션으로 처리되도록 강제:
+
+```smithy
+@http(method: "GET", uri: "/start-processing")
+@mutation
+operation StartProcessing {
+    input: StartProcessingInput
+    output: StartProcessingOutput
+}
+```
+
+생성된 훅은 `GET` 메서드임에도 `mutationOptions`를 제공합니다:
+
+```tsx
+const startProcessing = useMutation(api.startProcessing.mutationOptions());
+```
+
+### 커스텀 페이지네이션 커서
+
+기본적으로 생성된 훅은 `cursor` 파라미터 이름을 가정합니다. `@cursor` 트레이트로 커스터마이즈 가능합니다.
+
+`inputToken`으로 입력 파라미터 이름 변경:
+
+```smithy
+@http(method: "GET", uri: "/items")
+@cursor(inputToken: "nextToken")
+operation ListItems {
+    input := {
+      nextToken: String
+      limit: Integer
+    }
+    output := {
+      items: ItemList
+      nextToken: String
+    }
+}
+```
+
+`cursor` 파라미터가 있더라도 페이지네이션 비활성화:
+
+```smithy
+@cursor(enabled: false)
+operation ListItems {
+    input := {
+      cursor: String
+    }
+    output := {
+      ...
+    }
+}
+```
+
+### 작업 그룹화
+
+생성된 훅과 클라이언트 메서드는 Smithy 작업의 [`@tags` 트레이트](https://smithy.io/2.0/spec/documentation-traits.html#tags-trait)를 기반으로 자동 구성됩니다. 동일한 태그를 가진 작업은 그룹화되어 API 호출을 체계적으로 관리하고 IDE의 코드 완성 기능을 개선합니다.
+
+예시 Smithy 모델:
+
+```smithy
+service MyService {
+    operations: [ListItems, CreateItem, ListUsers, CreateUser]
+}
+
+@tags(["items"])
+operation ListItems {
+    input: ListItemsInput
+    output: ListItemsOutput
+}
+
+@tags(["items"])
+operation CreateItem {
+    input: CreateItemInput
+    output: CreateItemOutput
+}
+
+@tags(["users"])
+operation ListUsers {
+    input: ListUsersInput
+    output: ListUsersOutput
+}
+
+@tags(["users"])
+operation CreateUser {
+    input: CreateUserInput
+    output: CreateUserOutput
+}
+```
+
+생성된 훅은 태그별로 그룹화됩니다:
+
+```tsx
+import { useQuery, useMutation } from '@tanstack/react-query';
+import { useMyApi } from './hooks/useMyApi';
+
+function ItemsAndUsers() {
+  const api = useMyApi();
+
+  const items = useQuery(api.items.listItems.queryOptions());
+  const createItem = useMutation(api.items.createItem.mutationOptions());
+
+  const users = useQuery(api.users.listUsers.queryOptions());
+
+  const handleCreateItem = () => {
+    createItem.mutate({ name: 'New Item' });
+  };
+
+  return (
+    <div>
+      <h2>Items</h2>
+      <ul>
+        {items.data?.map(item => (
+          <li key={item.id}>{item.name}</li>
+        ))}
+      </ul>
+      <button onClick={handleCreateItem}>Add Item</button>
+
+      <h2>Users</h2>
+      <ul>
+        {users.data?.map(user => (
+          <li key={user.id}>{user.name}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+```
+
+<Drawer title="기본 클라이언트로 그룹화된 작업 사용" trigger="기본 클라이언트 사용 예시를 보려면 클릭하세요.">
+```tsx
+import { useState, useEffect } from 'react';
+import { useMyApiClient } from './hooks/useMyApiClient';
+
+function ItemsAndUsers() {
+  const api = useMyApiClient();
+  const [items, setItems] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setIsLoading(true);
+        const itemsData = await api.items.listItems();
+        setItems(itemsData);
+        const usersData = await api.users.listUsers();
+        setUsers(usersData);
+      } catch (error) {
+        console.error('Error fetching data:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchData();
+  }, [api]);
+
+  const handleCreateItem = async () => {
+    try {
+      const newItem = await api.items.createItem({ name: 'New Item' });
+      setItems(prevItems => [...prevItems, newItem]);
+    } catch (error) {
+      console.error('Error creating item:', error);
+    }
+  };
+
+  if (isLoading) {
+    return <div>Loading...</div>;
+  }
+
+  return (
+    <div>
+      <h2>Items</h2>
+      <ul>
+        {items.map(item => (
+          <li key={item.id}>{item.name}</li>
+        ))}
+      </ul>
+      <button onClick={handleCreateItem}>Add Item</button>
+
+      <h2>Users</h2>
+      <ul>
+        {users.map(user => (
+          <li key={user.id}>{user.name}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+```
+</Drawer>
+
+### 오류
+
+Smithy 모델에 커스텀 오류 구조를 정의하여 생성된 클라이언트에서 자동 처리할 수 있습니다.
+
+#### 커스텀 오류 구조 정의
+
+Smithy 모델에 오류 구조 정의:
+
+```smithy
+@error("client")
+@httpError(400)
+structure InvalidRequestError {
+    @required
+    message: String
+
+    fieldErrors: FieldErrorList
+}
+
+@error("client")
+@httpError(403)
+structure UnauthorizedError {
+    @required
+    reason: String
+}
+
+@error("server")
+@httpError(500)
+structure InternalServerError {
+    @required
+    message: String
+
+    traceId: String
+}
+
+list FieldErrorList {
+    member: FieldError
+}
+
+structure FieldError {
+    @required
+    field: String
+
+    @required
+    message: String
+}
+```
+
+#### 작업에 오류 추가
+
+작업이 반환할 수 있는 오류 지정:
+
+```smithy
+operation CreateItem {
+    input: CreateItemInput
+    output: CreateItemOutput
+    errors: [
+        InvalidRequestError
+        UnauthorizedError
+        InternalServerError
+    ]
+}
+
+operation GetItem {
+    input: GetItemInput
+    output: GetItemOutput
+    errors: [
+        ItemNotFoundError
+        InternalServerError
+    ]
+}
+
+@error("client")
+@httpError(404)
+structure ItemNotFoundError {
+    @required
+    message: String
+}
+```
+
+#### React에서 커스텀 오류 타입 사용
+
+생성된 클라이언트는 커스텀 오류 타입을 자동 처리하여 타입 검사 및 오류 응답 처리를 가능하게 합니다:
+
+```tsx
+import { useMutation, useQuery } from '@tanstack/react-query';
+
+function ItemComponent() {
+  const api = useMyApi();
+
+  const getItem = useQuery({
+    ...api.getItem.queryOptions({ itemId: '123' }),
+    onError: (error) => {
+      switch (error.status) {
+        case 404:
+          console.error('Not found:', error.error.message);
+          break;
+        case 500:
+          console.error('Server error:', error.error.message);
+          break;
+      }
+    }
+  });
+
+  const createItem = useMutation({
+    ...api.createItem.mutationOptions(),
+    onError: (error) => {
+      switch (error.status) {
+        case 400:
+          console.error('Validation error:', error.error.message);
+          break;
+        case 403:
+          console.error('Unauthorized:', error.error.reason);
+          break;
+      }
+    }
+  });
+
+  if (getItem.isError) {
+    if (getItem.error.status === 404) {
+      return <NotFoundMessage message={getItem.error.error.message} />;
+    } else if (getItem.error.status === 500) {
+      return <ErrorMessage message={getItem.error.error.message} />;
+    }
+  }
+
+  return (
+    <div>
+      {/* 컴포넌트 내용 */}
+    </div>
+  );
+}
+```
+
+<Drawer title="기본 클라이언트로 커스텀 오류 처리" trigger="기본 클라이언트 사용 예시를 보려면 클릭하세요.">
+```tsx
+import { useState, useEffect } from 'react';
+
+function ItemComponent() {
+  const api = useMyApiClient();
+  const [item, setItem] = useState(null);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchItem = async () => {
+      try {
+        setLoading(true);
+        const data = await api.getItem({ itemId: '123' });
+        setItem(data);
+      } catch (e) {
+        const err = e as GetItemError;
+        setError(err);
+        switch (err.status) {
+          case 404:
+            console.error('Not found:', err.error.message);
+            break;
+          case 500:
+            console.error('Server error:', err.error.message);
+            break;
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchItem();
+  }, [api]);
+
+  const handleCreateItem = async (data) => {
+    try {
+      await api.createItem(data);
+    } catch (e) {
+      const err = e as CreateItemError;
+      switch (err.status) {
+        case 400:
+          console.error('Validation error:', err.error.message);
+          break;
+        case 403:
+          console.error('Unauthorized:', err.error.reason);
+          break;
+      }
+    }
+  };
+
+  if (loading) {
+    return <LoadingSpinner />;
+  }
+
+  if (error) {
+    if (error.status === 404) {
+      return <NotFoundMessage message={error.error.message} />;
+    } else if (error.status === 500) {
+      return <ErrorMessage message={error.error.message} />;
+    }
+  }
+
+  return (
+    <div>
+      {/* 컴포넌트 내용 */}
+    </div>
+  );
+}
+```
+</Drawer>
+
+:::tip
+Smithy에서 오류 구조를 정의할 때 항상 `@error` 및 `@httpError` 트레이트를 사용하여 오류 유형과 HTTP 상태 코드를 지정하세요. 이렇게 하면 생성된 클라이언트가 오류 처리에 적절한 타입 정보를 갖게 됩니다.
+:::
+
+## 모범 사례
+
+### 로딩 상태 처리
+
+더 나은 사용자 경험을 위해 로딩 및 오류 상태 처리:
+
+```tsx
+import { useQuery } from '@tanstack/react-query';
+
+function ItemList() {
+  const api = useMyApi();
+  const items = useQuery(api.listItems.queryOptions());
+
+  if (items.isLoading) {
+    return <LoadingSpinner />;
+  }
+
+  if (items.isError) {
+    const err = items.error;
+    switch (err.status) {
+      case 403:
+        return <ErrorMessage message={err.error.reason} />;
+      case 500:
+      case 502:
+        return (
+          <ErrorMessage
+            message={err.error.message}
+          />
+        );
+      default:
+        return <ErrorMessage message="An unknown error occurred" />;
+    }
+  }
+
+  return (
+    <ul>
+      {items.data.map((item) => (
+        <li key={item.id}>{item.name}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+<Drawer title="기본 클라이언트로 로딩 상태 처리" trigger="기본 클라이언트 사용 예시를 보려면 클릭하세요.">
+```tsx
+function ItemList() {
+  const api = useMyApiClient();
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const fetchItems = async () => {
+      try {
+        const data = await api.listItems();
+        setItems(data);
+      } catch (err) {
+        setError(err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchItems();
+  }, [api]);
+
+  if (loading) {
+    return <LoadingSpinner />;
+  }
+
+  if (error) {
+    const err = error as ListItemsError;
+    switch (err.status) {
+      case 403:
+        return <ErrorMessage message={err.error.reason} />;
+      case 500:
+      case 502:
+        return (
+          <ErrorMessage
+            message={err.error.message}
+          />
+        );
+      default:
+        return <ErrorMessage message="An unknown error occurred" />;
+    }
+  }
+
+  return (
+    <ul>
+      {items.map((item) => (
+        <li key={item.id}>{item.name}</li>
+      ))}
+    </ul>
+  );
+}
+```
+</Drawer>
+
+### 낙관적 업데이트
+
+사용자 경험 개선을 위한 낙관적 업데이트 구현:
+
+```tsx
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+
+function ItemList() {
+  const api = useMyApi();
+  const queryClient = useQueryClient();
+
+  const itemsQuery = useQuery(api.listItems.queryOptions());
+
+  const deleteMutation = useMutation({
+    ...api.deleteItem.mutationOptions(),
+    onMutate: async (itemId) => {
+      await queryClient.cancelQueries({ queryKey: api.listItems.queryKey() });
+      const previousItems = queryClient.getQueryData(api.listItems.queryKey());
+      queryClient.setQueryData(
+        api.listItems.queryKey(),
+        (old) => old.filter((item) => item.id !== itemId)
+      );
+      return { previousItems };
+    },
+    onError: (err, itemId, context) => {
+      queryClient.setQueryData(api.listItems.queryKey(), context.previousItems);
+      console.error('Failed to delete item:', err);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: api.listItems.queryKey() });
+    },
+  });
+
+  if (itemsQuery.isLoading) {
+    return <LoadingSpinner />;
+  }
+
+  if (itemsQuery.isError) {
+    return <ErrorMessage message="Failed to load items" />;
+  }
+
+  return (
+    <ul>
+      {itemsQuery.data.map((item) => (
+        <li key={item.id}>
+          {item.name}
+          <button
+            onClick={() => deleteMutation.mutate(item.id)}
+            disabled={deleteMutation.isPending}
+          >
+            {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+<Drawer title="기본 클라이언트로 낙관적 업데이트" trigger="기본 클라이언트 사용 예시를 보려면 클릭하세요.">
+```tsx
+function ItemList() {
+  const api = useMyApiClient();
+  const [items, setItems] = useState([]);
+
+  const handleDelete = async (itemId) => {
+    const previousItems = items;
+    setItems(items.filter((item) => item.id !== itemId));
+
+    try {
+      await api.deleteItem(itemId);
+    } catch (error) {
+      setItems(previousItems);
+      console.error('Failed to delete item:', error);
+    }
+  };
+
+  return (
+    <ul>
+      {items.map((item) => (
+        <li key={item.id}>
+          {item.name}
+          <button onClick={() => handleDelete(item.id)}>Delete</button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+</Drawer>
+
+## 타입 안전성
+
+통합은 완전한 엔드투엔드 타입 안전성을 제공합니다. IDE는 모든 API 호출에 대한 자동 완성 및 타입 검사를 지원합니다:
+
+```tsx
+import { useMutation } from '@tanstack/react-query';
+
+function ItemForm() {
+  const api = useMyApi();
+
+  const createItem = useMutation({
+    ...api.createItem.mutationOptions(),
+    onSuccess: (data) => {
+      console.log(`Item created with ID: ${data.id}`);
+    },
+  });
+
+  const handleSubmit = (data: CreateItemInput) => {
+    createItem.mutate(data);
+  };
+
+  if (createItem.error) {
+    const error = createItem.error;
+    switch (error.status) {
+      case 400:
+        return (
+          <FormError
+            message="Invalid input"
+            errors={error.error.fieldErrors}
+          />
+        );
+      case 403:
+        return <AuthError reason={error.error.reason} />;
+      default:
+        return <ServerError message={error.error.message} />;
+    }
+  }
+
+  return (
+    <form onSubmit={(e) => {
+      e.preventDefault();
+      handleSubmit({ name: 'New Item' });
+    }}>
+      <button
+        type="submit"
+        disabled={createItem.isPending}
+      >
+        {createItem.isPending ? 'Creating...' : 'Create Item'}
+      </button>
+    </form>
+  );
+}
+```
+
+<Drawer title="기본 클라이언트 타입 안전성" trigger="기본 클라이언트 사용 예시를 보려면 클릭하세요.">
+```tsx
+function ItemForm() {
+  const api = useMyApiClient();
+  const [error, setError] = useState<CreateItemError | null>(null);
+
+  const handleSubmit = async (data: CreateItemInput) => {
+    try {
+      await api.createItem(data);
+    } catch (e) {
+      const err = e as CreateItemError;
+      switch (err.status) {
+        case 400:
+          console.error('Validation errors:', err.error.fieldErrors);
+          break;
+        case 403:
+          console.error('Not authorized:', err.error.reason);
+          break;
+        case 500:
+          console.error('Server error:', err.error.message);
+          break;
+      }
+      setError(err);
+    }
+  };
+
+  if (error) {
+    switch (error.status) {
+      case 400:
+        return (
+          <FormError
+            message="Invalid input"
+            errors={error.error.fieldErrors}
+          />
+        );
+      case 403:
+        return <AuthError reason={error.error.reason} />;
+      default:
+        return <ServerError message={error.error.message} />;
+    }
+  }
+
+  return <form onSubmit={handleSubmit}>{/* ... */}</form>;
+}
+```
+</Drawer>
+
+타입은 Smithy API의 OpenAPI 스키마에서 자동 생성되므로 API 변경 사항은 빌드 후 프론트엔드 코드에 반영됩니다.

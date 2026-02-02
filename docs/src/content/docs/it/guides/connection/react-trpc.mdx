@@ -1,0 +1,317 @@
+---
+title: "React con tRPC"
+description: "Connettere un sito web React a un'API tRPC"
+---
+
+
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+
+Il plugin AWS per Nx fornisce un generatore per integrare rapidamente la tua <Link path="guides/trpc">API tRPC</Link> con un sito React. Configura automaticamente tutto il necessario per connettersi ai backend tRPC, incluso il supporto per autenticazione AWS IAM e Cognito, oltre a una corretta gestione degli errori. L'integrazione garantisce una completa type safety end-to-end tra frontend e backend tRPC.
+
+## Prerequisiti
+
+Prima di utilizzare questo generatore, assicurati che la tua applicazione React abbia:
+
+1. Un file `main.tsx` che renderizza l'applicazione
+2. Un elemento JSX `<App/>` dove il provider tRPC verrà iniettato automaticamente
+3. Un'API tRPC funzionante (generata usando il generatore di API tRPC)
+4. Autenticazione Cognito aggiunta tramite il <Link path="/guides/react-website-auth">generatore `ts#react-website-auth`</Link> se si connette un'API che utilizza autenticazione Cognito o IAM
+
+<details>
+<summary>Esempio della struttura richiesta per `main.tsx`</summary>
+
+```tsx
+import { StrictMode } from 'react';
+import * as ReactDOM from 'react-dom/client';
+import App from './app/app';
+
+const root = ReactDOM.createRoot(
+  document.getElementById('root') as HTMLElement,
+);
+root.render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+);
+```
+
+</details>
+
+## Utilizzo
+
+### Esegui il generatore
+
+<RunGenerator generator="connection" />
+
+### Opzioni
+
+<GeneratorParameters generator="connection" />
+
+## Output del generatore
+
+Il generatore crea la seguente struttura nella tua applicazione React:
+
+<FileTree>
+
+- src
+  - components
+    - \<ApiName>ClientProvider.tsx Configura i client tRPC e il binding agli schemi del backend. ApiName corrisponderà al nome dell'API
+    - QueryClientProvider.tsx Provider del client TanStack React Query
+  - hooks
+    - useSigV4.tsx Hook per firmare richieste HTTP con SigV4 (solo IAM)
+    - use\<ApiName>.tsx Hook specifico per l'API backend.
+
+</FileTree>
+
+Inoltre, installa le dipendenze necessarie:
+
+  - `@trpc/client`
+  - `@trpc/tanstack-react-query`
+  - `@tanstack/react-query`
+  - `aws4fetch` (se si utilizza autenticazione IAM)
+
+## Utilizzo del codice generato
+
+### Utilizzo dell'hook tRPC
+
+Il generatore fornisce un hook `use<ApiName>` che dà accesso al client tRPC con type safety:
+
+```tsx {5,8,11}
+import { useQuery, useMutation } from '@tanstack/react-query';
+import { useMyApi } from './hooks/useMyApi';
+
+function MyComponent() {
+  const trpc = useMyApi();
+
+  // Esempio di query
+  const { data, isLoading, error } = useQuery(trpc.users.list.queryOptions());
+
+  // Esempio di mutation
+  const mutation = useMutation(trpc.users.create.mutationOptions());
+
+  const handleCreate = () => {
+    mutation.mutate({
+      name: 'John Doe',
+      email: 'john@example.com',
+    });
+  };
+
+  if (isLoading) return <div>Caricamento...</div>;
+
+  return (
+    <ul>
+      {data.map((user) => (
+        <li key={user.id}>{user.name}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+### Gestione degli errori
+
+L'integrazione include una gestione degli errori che processa correttamente gli errori tRPC:
+
+```tsx {4, 6}
+function MyComponent() {
+  const trpc = useMyApi();
+
+  const { data, error } = useQuery(trpc.users.list.queryOptions());
+
+  if (error) {
+    return (
+      <div>
+        <h2>Errore:</h2>
+        <p>{error.message}</p>
+        {error.data?.code && <p>Codice: {error.data.code}</p>}
+      </div>
+    );
+  }
+
+  return (
+    <ul>
+      {data.map((user) => (
+        <li key={user.id}>{user.name}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+## Best Practices
+
+### Gestione degli stati di caricamento
+
+Gestisci sempre gli stati di caricamento e errore per una migliore user experience:
+
+```tsx {6}
+function UserList() {
+  const trpc = useMyApi();
+
+  const users = useQuery(trpc.users.list.queryOptions());
+
+  if (users.isLoading) {
+    return <LoadingSpinner />;
+  }
+
+  if (users.error) {
+    return <ErrorMessage error={users.error} />;
+  }
+
+  return (
+    <ul>
+      {users.data.map((user) => (
+        <li key={user.id}>{user.name}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+### Aggiornamenti ottimistici
+
+Utilizza aggiornamenti ottimistici per una user experience migliore:
+
+```tsx {15-17,20-22,28-31}
+import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query';
+
+function UserList() {
+  const trpc = useMyApi();
+  const users = useQuery(trpc.users.list.queryOptions());
+  const queryClient = useQueryClient();
+
+  const deleteMutation = useMutation(
+    trpc.users.delete.mutationOptions({
+      onMutate: async (userId) => {
+        // Interrompi le richieste in corso
+        await queryClient.cancelQueries(trpc.users.list.queryFilter());
+
+        // Ottieni snapshot dei dati correnti
+        const previousUsers = queryClient.getQueryData(
+          trpc.users.list.queryKey(),
+        );
+
+        // Rimuovi utente in modo ottimistico
+        queryClient.setQueryData(trpc.users.list.queryKey(), (old) =>
+          old?.filter((user) => user.id !== userId),
+        );
+
+        return { previousUsers };
+      },
+      onError: (err, userId, context) => {
+        // Ripristina dati precedenti in caso di errore
+        queryClient.setQueryData(
+          trpc.users.list.queryKey(),
+          context?.previousUsers,
+        );
+      },
+    }),
+  );
+
+  return (
+    <ul>
+      {users.map((user) => (
+        <li key={user.id}>
+          {user.name}
+          <button onClick={() => deleteMutation.mutate(user.id)}>Elimina</button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+### Prefetch dei dati
+
+Esegui prefetch dei dati per migliorare le performance:
+
+```tsx {8}
+function UserList() {
+  const trpc = useMyApi();
+  const users = useQuery(trpc.users.list.queryOptions());
+  const queryClient = useQueryClient();
+
+  // Prefetch dei dettagli utente al passaggio del mouse
+  const prefetchUser = async (userId: string) => {
+    await queryClient.prefetchQuery(trpc.users.getById.queryOptions(userId));
+  };
+
+  return (
+    <ul>
+      {users.map((user) => (
+        <li key={user.id} onMouseEnter={() => prefetchUser(user.id)}>
+          <Link to={`/users/${user.id}`}>{user.name}</Link>
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+### Query infinite
+
+Gestisci la paginazione con query infinite:
+
+```tsx {5-12}
+function UserList() {
+  const trpc = useMyApi();
+
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage } =
+    useInfiniteQuery(
+      trpc.users.list.infiniteQueryOptions(
+        { limit: 10 },
+        {
+          getNextPageParam: (lastPage) => lastPage.nextCursor,
+        },
+      ),
+    );
+
+  return (
+    <div>
+      {data?.pages.map((page) =>
+        page.users.map((user) => <UserCard key={user.id} user={user} />),
+      )}
+
+      {hasNextPage && (
+        <button onClick={() => fetchNextPage()} disabled={isFetchingNextPage}>
+          {isFetchingNextPage ? 'Caricamento...' : 'Carica altro'}
+        </button>
+      )}
+    </div>
+  );
+}
+```
+
+È importante notare che le query infinite possono essere utilizzate solo per procedure con una proprietà di input chiamata `cursor`.
+
+## Type Safety
+
+L'integrazione garantisce una completa type safety end-to-end. La tua IDE fornirà autocompletamento e type checking per tutte le chiamate API:
+
+```tsx
+function UserForm() {
+  const trpc = useMyApi();
+
+  // ✅ L'input è completamente tipizzato
+  const createUser = trpc.users.create.useMutation();
+
+  const handleSubmit = (data: CreateUserInput) => {
+    // ✅ Errore di tipo se l'input non corrisponde allo schema
+    createUser.mutate(data);
+  };
+
+  return <form onSubmit={handleSubmit}>{/* ... */}</form>;
+}
+```
+
+I tipi sono automaticamente derivati dal router e dagli schemi del backend, garantendo che qualsiasi modifica all'API si rifletta immediatamente nel codice frontend senza necessità di build.
+
+## Ulteriori informazioni
+
+Per maggiori informazioni, consulta la [documentazione tRPC TanStack React Query](https://trpc.io/docs/client/tanstack-react-query/usage).
+
+Puoi anche consultare direttamente la [documentazione di TanStack Query](https://tanstack.com/query/v5).
