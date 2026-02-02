@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { joinPathFragments, ProjectConfiguration, Tree } from '@nx/devkit';
-import { ApiConnectionGeneratorSchema } from './schema';
+import { ConnectionGeneratorSchema } from './schema';
 import trpcReactGenerator from '../trpc/react/generator';
 import { hasExportDeclaration } from '../utils/ast';
 import { readToml } from '../utils/toml';
@@ -14,7 +14,7 @@ import { TS_SMITHY_API_GENERATOR_INFO } from '../smithy/ts/api/generator';
 import smithyReactConnectionGenerator from '../smithy/react-connection/generator';
 
 /**
- * List of supported source and target project types for api connections
+ * List of supported source and target project types for connections
  */
 const SUPPORTED_PROJECT_TYPES = [
   'ts#trpc-api',
@@ -63,15 +63,15 @@ const CONNECTION_GENERATORS = {
     }),
 } satisfies Record<
   ConnectionKey,
-  (tree: Tree, options: ApiConnectionGeneratorSchema) => Promise<any>
+  (tree: Tree, options: ConnectionGeneratorSchema) => Promise<any>
 >;
 
 /**
- * Generator for a connection from a project to an API project
+ * Generator for a connection between two projects
  */
-export const apiConnectionGenerator = async (
+export const connectionGenerator = async (
   tree: Tree,
-  options: ApiConnectionGeneratorSchema,
+  options: ConnectionGeneratorSchema,
 ) => {
   const sourceType = determineProjectType(tree, options.sourceProject);
   const targetType = determineProjectType(tree, options.targetProject);
@@ -233,4 +233,4 @@ const isSmithyApi = (
   ].includes(((projectConfiguration.metadata as any) ?? {}).generator);
 };
 
-export default apiConnectionGenerator;
+export default connectionGenerator;

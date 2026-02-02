@@ -16,7 +16,7 @@ import { sortObjectKeys } from '../../object';
 import { updateGitIgnore } from '../../git';
 import runtimeConfigGenerator from '../../../ts/react-website/runtime-config/generator';
 import { query, replace } from '../../ast';
-import { addTargetToServeLocal } from '../../../api-connection/serve-local';
+import { addTargetToServeLocal } from '../../../connection/serve-local';
 import { JsxSelfClosingElement } from 'typescript';
 import { addSingleImport, createJsxElementFromIdentifier } from '../../ast';
 import { withVersions } from '../../versions';

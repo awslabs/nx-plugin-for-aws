@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export interface ApiConnectionGeneratorSchema {
+export interface ConnectionGeneratorSchema {
   sourceProject: string;
   targetProject: string;
 }

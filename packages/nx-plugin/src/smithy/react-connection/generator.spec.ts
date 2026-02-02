@@ -768,7 +768,7 @@ export function Main() {
           smithyModelOrBackendProjectName: 'unknown',
         }),
       ).rejects.toThrow(
-        'Unsupported api-connection target unknown. Expected a Smithy model or backend project.',
+        'Unsupported connection target unknown. Expected a Smithy model or backend project.',
       );
     });
 
@@ -788,7 +788,7 @@ export function Main() {
           smithyModelOrBackendProjectName: 'unknown',
         }),
       ).rejects.toThrow(
-        'Unsupported api-connection target unknown. Expected a Smithy model or backend project.',
+        'Unsupported connection target unknown. Expected a Smithy model or backend project.',
       );
     });
   });

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { Tree, updateJson } from '@nx/devkit';
-import { apiConnectionGenerator, determineProjectType } from './generator';
+import { connectionGenerator, determineProjectType } from './generator';
 import { createTreeUsingTsSolutionSetup } from '../utils/test';
 import { vi, expect, describe, it, beforeEach } from 'vitest';
 import trpcReactGenerator from '../trpc/react/generator';
@@ -55,7 +55,7 @@ describe('api connection generator', () => {
         }),
       );
 
-      await apiConnectionGenerator(tree, {
+      await connectionGenerator(tree, {
         sourceProject: 'frontend',
         targetProject: 'api',
       });
@@ -94,7 +94,7 @@ describe('api connection generator', () => {
         }),
       );
 
-      await apiConnectionGenerator(tree, {
+      await connectionGenerator(tree, {
         sourceProject: 'frontend',
         targetProject: 'api',
       });
@@ -128,7 +128,7 @@ describe('api connection generator', () => {
         }),
       );
 
-      await apiConnectionGenerator(tree, {
+      await connectionGenerator(tree, {
         sourceProject: 'frontend',
         targetProject: 'api-model',
       });
@@ -162,7 +162,7 @@ describe('api connection generator', () => {
         }),
       );
 
-      await apiConnectionGenerator(tree, {
+      await connectionGenerator(tree, {
         sourceProject: 'frontend',
         targetProject: 'api-backend',
       });
@@ -196,7 +196,7 @@ describe('api connection generator', () => {
       );
 
       await expect(
-        apiConnectionGenerator(tree, {
+        connectionGenerator(tree, {
           sourceProject: 'unknown',
           targetProject: 'api',
         }),
@@ -226,7 +226,7 @@ describe('api connection generator', () => {
       );
 
       await expect(
-        apiConnectionGenerator(tree, {
+        connectionGenerator(tree, {
           sourceProject: 'frontend',
           targetProject: 'unknown',
         }),
@@ -259,7 +259,7 @@ describe('api connection generator', () => {
       );
 
       await expect(
-        apiConnectionGenerator(tree, {
+        connectionGenerator(tree, {
           sourceProject: 'api1',
           targetProject: 'api2',
         }),

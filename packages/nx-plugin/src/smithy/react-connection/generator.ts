@@ -21,7 +21,7 @@ import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { formatFilesInSubtree } from '../../utils/format';
 import { SMITHY_PROJECT_GENERATOR_INFO } from '../project/generator';
 import { TS_SMITHY_API_GENERATOR_INFO } from '../ts/api/generator';
-import { addOpenApiReactClient } from '../../utils/api-connection/open-api/react';
+import { addOpenApiReactClient } from '../../utils/connection/open-api/react';
 
 export const SMITHY_REACT_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -138,7 +138,7 @@ const resolveProjectConfig = (
     };
   }
   throw new Error(
-    `Unsupported api-connection target ${modelOrBackendConfig.name}. Expected a Smithy model or backend project.`,
+    `Unsupported connection target ${modelOrBackendConfig.name}. Expected a Smithy model or backend project.`,
   );
 };
 
