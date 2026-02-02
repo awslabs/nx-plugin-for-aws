@@ -3,8 +3,6 @@ title: "React から Smithy API へ"
 description: "React ウェブサイトを Smithy TypeScript API に接続する"
 ---
 
-
-
 import { FileTree, Steps } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
@@ -66,7 +64,7 @@ root.render(
   - hooks
     - use\<ApiName>.tsx TanStack Query で状態管理されたAPI呼び出し用フック
     - use\<ApiName>Client.tsx バニラAPIクライアントインスタンス生成用フック
-    - useSigV4.tsx IAM認証選択時にSigV4でHTTPリクエストに署名するフック（IAM認証選択時）
+    - useSigV4.tsx IAM認証でSigV4によるHTTPリクエスト署名用フック（IAM認証選択時）
 - project.json タイプセーフなクライアントを生成する新しいビルドターゲットが追加
 - .gitignore 生成されたクライアントファイルはデフォルトで無視
 
@@ -95,7 +93,7 @@ root.render(
     - \<ApiName>
       - types.gen.ts Smithyモデル構造から生成された型
       - client.gen.ts API呼び出し用タイプセーフクライアント
-      - options-proxy.gen.ts TanStack Query フックオプション生成メソッド
+      - options-proxy.gen.ts TanStack Query を使用してAPIと対話するためのTanStack Query フックオプション生成メソッド
 
 </FileTree>
 
@@ -148,7 +146,7 @@ function MyComponent() {
 }
 ```
 
-<Drawer title="バニラクライアントの直接使用" trigger="クリックでバニラクライアント直接使用例を表示">
+<Drawer title="APIクライアントの直接使用" trigger="クリックでバニラクライアント直接使用例を表示">
 ```tsx {5,13}
 import { useState, useEffect } from 'react';
 import { useMyApiClient } from './hooks/useMyApiClient';
@@ -183,7 +181,7 @@ function MyComponent() {
 
 ### ミューテーション
 
-生成フックはTanStack Queryの`useMutation`を使用したミューテーションをサポートします。ローディング状態、エラーハンドリング、楽観的更新を扱うクリーンな方法を提供します。
+生成フックはTanStack Queryの`useMutation`フックを使用したミューテーションをサポートします。作成、更新、削除操作をローディング状態、エラーハンドリング、楽観的更新とともに扱うクリーンな方法を提供します。
 
 ```tsx {5-7,11}
 import { useMutation } from '@tanstack/react-query';
@@ -191,7 +189,7 @@ import { useMyApi } from './hooks/useMyApi';
 
 function CreateItemForm() {
   const api = useMyApi();
-  // 生成されたミューテーションオプションを使用
+  // 生成されたミューテーションオプションを使用してミューテーションを作成
   const createItem = useMutation(api.createItem.mutationOptions());
 
   const handleSubmit = (e) => {
@@ -231,19 +229,24 @@ function CreateItemForm() {
 const createItem = useMutation({
   ...api.createItem.mutationOptions(),
   onSuccess: (data) => {
+    // ミューテーション成功時に実行
     console.log('アイテム作成成功:', data);
+    // 新しいアイテムに遷移可能
     navigate(`/items/${data.id}`);
   },
   onError: (error) => {
+    // ミューテーション失敗時に実行
     console.error('アイテム作成失敗:', error);
   },
   onSettled: () => {
+    // ミューテーション完了時に実行（成功または失敗）
+    // 影響を受ける可能性のあるクエリを無効化する適切な場所
     queryClient.invalidateQueries({ queryKey: api.listItems.queryKey() });
   }
 });
 ```
 
-<Drawer title="バニラクライアントでのミューテーション" trigger="クリックでバニラクライアント直接使用例を表示">
+<Drawer title="APIクライアントを直接使用したミューテーション" trigger="クリックでクライアント直接使用例を表示">
 ```tsx
 import { useState } from 'react';
 import { useMyApiClient } from './hooks/useMyApiClient';
@@ -265,6 +268,8 @@ function CreateItemForm() {
         description: 'A new item'
       });
       setCreatedItem(newItem);
+      // 新しいアイテムに遷移可能
+      // navigate(`/items/${newItem.id}`);
     } catch (err) {
       setError(err);
       console.error('アイテム作成失敗:', err);
@@ -302,7 +307,7 @@ function CreateItemForm() {
 
 ### 無限クエリによるページネーション
 
-`cursor`パラメータを受け入れるエンドポイント向けに、TanStack Queryの`useInfiniteQuery`を使用した無限クエリをサポートします。
+`cursor`パラメータを入力として受け入れるエンドポイント向けに、生成フックはTanStack Queryの`useInfiniteQuery`フックを使用した無限クエリをサポートします。これにより「さらに読み込む」や無限スクロール機能の実装が容易になります。
 
 ```tsx {6-16,30-34}
 import { useInfiniteQuery } from '@tanstack/react-query';
@@ -312,8 +317,10 @@ function ItemList() {
   const api = useMyApi();
   const items = useInfiniteQuery({
     ...api.listItems.infiniteQueryOptions({
-      limit: 10,
+      limit: 10, // ページあたりのアイテム数
     }, {
+      // 次ページの 'cursor' として渡すパラメータを返す
+      // getNextPageParam 関数を必ず定義してください
       getNextPageParam: (lastPage) =>
         lastPage.nextCursor || undefined
       }),
@@ -329,6 +336,7 @@ function ItemList() {
 
   return (
     <div>
+      {/* ページ配列をフラット化してすべてのアイテムをレンダリング */}
       <ul>
         {items.data.pages.flatMap(page =>
           page.items.map(item => (
@@ -352,13 +360,13 @@ function ItemList() {
 }
 ```
 
-生成フックはカーソルベースのページネーションを自動処理します。`nextCursor`値はレスポンスから抽出され次ページの取得に使用されます。
+生成フックはAPIがサポートしている場合、カーソルベースのページネーションを自動処理します。`nextCursor`値はレスポンスから抽出され次ページの取得に使用されます。
 
 :::tip
-`cursor`以外のパラメータ名を使用する場合、[`x-cursor` OpenAPIベンダー拡張](#custom-pagination-cursor)でカスタマイズ可能です。
+`cursor`以外のパラメータ名を使用するページネーションAPIがある場合、[`x-cursor` OpenAPIベンダー拡張を使用してカスタマイズ](#custom-pagination-cursor)できます。
 :::
 
-<Drawer title="バニラクライアントでのページネーション" trigger="クリックでバニラクライアント直接使用例を表示">
+<Drawer title="APIクライアントを直接使用したページネーション" trigger="クリックでクライアント直接使用例を表示">
 ```tsx
 import { useState, useEffect } from 'react';
 import { useMyApiClient } from './hooks/useMyApiClient';
@@ -371,6 +379,7 @@ function ItemList() {
   const [nextCursor, setNextCursor] = useState(null);
   const [isFetchingMore, setIsFetchingMore] = useState(false);
 
+  // 初期データを取得
   useEffect(() => {
     const fetchItems = async () => {
       try {
@@ -388,6 +397,7 @@ function ItemList() {
     fetchItems();
   }, [api]);
 
+  // さらにアイテムを読み込む関数
   const loadMore = async () => {
     if (!nextCursor) return;
 
@@ -441,7 +451,7 @@ function ItemList() {
 
 ### エラーハンドリング
 
-統合には型付きエラーレスポンスが含まれます。`<operation-name>Error`型でSmithyモデルで定義された可能性のあるエラーをカプセル化します。
+統合には型付きエラーレスポンスを持つ組み込みエラーハンドリングが含まれます。`<operation-name>Error`型が生成され、Smithyモデルで定義された可能性のあるエラーレスポンスをカプセル化します。各エラーには`status`と`error`プロパティがあり、`status`の値をチェックすることで特定のエラータイプに絞り込むことができます。
 
 ```tsx {12}
 import { useMutation } from '@tanstack/react-query';
@@ -457,6 +467,7 @@ function MyComponent() {
   if (createItem.error) {
     switch (createItem.error.status) {
       case 400:
+        // error.error は CreateItem400Response として型付け
         return (
           <div>
             <h2>無効な入力:</h2>
@@ -464,6 +475,7 @@ function MyComponent() {
           </div>
         );
       case 403:
+        // error.error は CreateItem403Response として型付け
         return (
           <div>
             <h2>権限なし:</h2>
@@ -472,6 +484,7 @@ function MyComponent() {
         );
       case 500:
       case 502:
+        // error.error は CreateItem5XXResponse として型付け
         return (
           <div>
             <h2>サーバーエラー:</h2>
@@ -485,7 +498,7 @@ function MyComponent() {
 }
 ```
 
-<Drawer title="バニラクライアントでのエラーハンドリング" trigger="クリックでバニラクライアント直接使用例を表示">
+<Drawer title="APIクライアントを直接使用したエラーハンドリング" trigger="クリックでバニラクライアント直接使用例を表示">
 ```tsx {9,15}
 function MyComponent() {
   const api = useMyApiClient();
@@ -503,6 +516,7 @@ function MyComponent() {
   if (error) {
     switch (error.status) {
       case 400:
+        // error.error は CreateItem400Response として型付け
         return (
           <div>
             <h2>無効な入力:</h2>
@@ -510,6 +524,7 @@ function MyComponent() {
           </div>
         );
       case 403:
+        // error.error は CreateItem403Response として型付け
         return (
           <div>
             <h2>権限なし:</h2>
@@ -518,6 +533,7 @@ function MyComponent() {
         );
       case 500:
       case 502:
+        // error.error は CreateItem5XXResponse として型付け
         return (
           <div>
             <h2>サーバーエラー:</h2>
@@ -534,19 +550,25 @@ function MyComponent() {
 
 ## 生成コードのカスタマイズ
 
-Smithyモデルの`extensions.smithy`に追加されるトレートを使用して生成クライアントをカスタマイズできます。
+ターゲットSmithy `model`プロジェクトの`extensions.smithy`に一連のSmithyトレートが追加され、生成クライアントのカスタマイズに使用できます。
 
 :::tip
-カスタマイズ不要の場合、`extensions.smithy`は安全に削除可能です
+生成クライアントのカスタマイズが不要の場合、`extensions.smithy`は安全に削除可能です
 :::
 
 ### クエリとミューテーション
 
-デフォルトで`PUT`、`POST`、`PATCH`、`DELETE`メソッドはミューテーション、他はクエリとして扱われます。`@query`と`@mutation`トレートでこの動作を変更できます。
+デフォルトで、Smithy APIでHTTPメソッド`PUT`、`POST`、`PATCH`、`DELETE`を使用する操作はミューテーションとして扱われ、他はすべてクエリとして扱われます。
+
+`extensions.smithy`のモデルプロジェクトに追加される`@query`と`@mutation` Smithyトレートを使用してこの動作を変更できます。
+
+:::note
+これらは[`@specificationExtension`トレート](https://smithy.io/2.0/guides/model-translations/converting-to-openapi.html#specificationextension-trait)を使用してOpenAPIベンダー拡張にマッピングされ、コードジェネレータがOpenAPI仕様からクライアントを生成する際に解釈します。
+:::
 
 #### @query
 
-`POST`メソッドでもクエリとして扱いたい場合:
+Smithy操作に`@query`トレートを適用して、クエリとして扱うよう強制します:
 
 ```smithy
 @http(method: "POST", uri: "/items")
@@ -557,9 +579,15 @@ operation ListItems {
 }
 ```
 
+生成フックは`POST` HTTPメソッドを使用していても`queryOptions`を提供します:
+
+```tsx
+const items = useQuery(api.listItems.queryOptions());
+```
+
 #### @mutation
 
-`GET`メソッドでもミューテーションとして扱いたい場合:
+Smithy操作に`@mutation`トレートを適用して、ミューテーションとして扱うよう強制します:
 
 ```smithy
 @http(method: "GET", uri: "/start-processing")
@@ -570,9 +598,17 @@ operation StartProcessing {
 }
 ```
 
+生成フックは`GET` HTTPメソッドを使用していても`mutationOptions`を提供します:
+
+```tsx
+const startProcessing = useMutation(api.startProcessing.mutationOptions());
+```
+
 ### カスタムページネーションカーソル
 
-デフォルトの`cursor`パラメータ名を変更する場合:
+デフォルトで、生成フックは`cursor`という名前のパラメータを使用したカーソルベースのページネーションを想定します。`extensions.smithy`のモデルプロジェクトに追加される`@cursor`トレートを使用してこの動作をカスタマイズできます。
+
+`@cursor`トレートに`inputToken`を指定して、ページネーショントークンに使用する入力パラメータ名を変更します:
 
 ```smithy
 @http(method: "GET", uri: "/items")
@@ -589,12 +625,13 @@ operation ListItems {
 }
 ```
 
-ページネーションを無効化する場合:
+`cursor`という名前の入力パラメータを持つ操作に対して`infiniteQueryOptions`を生成したくない場合、カーソルベースのページネーションを無効化できます:
 
 ```smithy
 @cursor(enabled: false)
 operation ListItems {
     input := {
+      // 'cursor'という名前の入力パラメータは、デフォルトでこの操作をページネーション操作として扱います
       cursor: String
     }
     output := {
@@ -605,39 +642,161 @@ operation ListItems {
 
 ### 操作のグループ化
 
-[`@tags`トレート](https://smithy.io/2.0/spec/documentation-traits.html#tags-trait)を使用して操作をグループ化できます。同じタグの操作はグループ化され、IDEでのコード補完が向上します。
+生成されたフックとクライアントメソッドは、Smithy操作の[`@tags`トレート](https://smithy.io/2.0/spec/documentation-traits.html#tags-trait)に基づいて自動的に整理されます。同じタグを持つ操作はグループ化され、API呼び出しを整理しやすくし、IDEでのコード補完が向上します。
+
+例えば、このSmithyモデルの場合:
 
 ```smithy
-@tags(["items"])
-operation ListItems { ... }
+service MyService {
+    operations: [ListItems, CreateItem, ListUsers, CreateUser]
+}
 
 @tags(["items"])
-operation CreateItem { ... }
+operation ListItems {
+    input: ListItemsInput
+    output: ListItemsOutput
+}
+
+@tags(["items"])
+operation CreateItem {
+    input: CreateItemInput
+    output: CreateItemOutput
+}
 
 @tags(["users"])
-operation ListUsers { ... }
+operation ListUsers {
+    input: ListUsersInput
+    output: ListUsersOutput
+}
+
+@tags(["users"])
+operation CreateUser {
+    input: CreateUserInput
+    output: CreateUserOutput
+}
 ```
 
 生成フックはタグごとにグループ化されます:
 
 ```tsx
-const items = useQuery(api.items.listItems.queryOptions());
-const createItem = useMutation(api.items.createItem.mutationOptions());
-const users = useQuery(api.users.listUsers.queryOptions());
+import { useQuery, useMutation } from '@tanstack/react-query';
+import { useMyApi } from './hooks/useMyApi';
+
+function ItemsAndUsers() {
+  const api = useMyApi();
+
+  // Items操作は api.items 配下にグループ化
+  const items = useQuery(api.items.listItems.queryOptions());
+  const createItem = useMutation(api.items.createItem.mutationOptions());
+
+  // Users操作は api.users 配下にグループ化
+  const users = useQuery(api.users.listUsers.queryOptions());
+
+  // 使用例
+  const handleCreateItem = () => {
+    createItem.mutate({ name: 'New Item' });
+  };
+
+  return (
+    <div>
+      <h2>Items</h2>
+      <ul>
+        {items.data?.map(item => (
+          <li key={item.id}>{item.name}</li>
+        ))}
+      </ul>
+      <button onClick={handleCreateItem}>アイテム追加</button>
+
+      <h2>Users</h2>
+      <ul>
+        {users.data?.map(user => (
+          <li key={user.id}>{user.name}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 ```
 
-<Drawer title="バニラクライアントでのグループ化操作" trigger="クリックでバニラクライアント直接使用例を表示">
+このグループ化により、API呼び出しを整理しやすくなり、IDEでのコード補完が向上します。
+
+<Drawer title="APIクライアントを直接使用したグループ化操作" trigger="クリックでクライアント直接使用例を表示">
 ```tsx
-const itemsData = await api.items.listItems();
-const usersData = await api.users.listUsers();
+import { useState, useEffect } from 'react';
+import { useMyApiClient } from './hooks/useMyApiClient';
+
+function ItemsAndUsers() {
+  const api = useMyApiClient();
+  const [items, setItems] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // データを読み込む
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setIsLoading(true);
+
+        // Items操作は api.items 配下にグループ化
+        const itemsData = await api.items.listItems();
+        setItems(itemsData);
+
+        // Users操作は api.users 配下にグループ化
+        const usersData = await api.users.listUsers();
+        setUsers(usersData);
+      } catch (error) {
+        console.error('データ取得エラー:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchData();
+  }, [api]);
+
+  const handleCreateItem = async () => {
+    try {
+      // グループ化されたメソッドを使用してアイテムを作成
+      const newItem = await api.items.createItem({ name: 'New Item' });
+      setItems(prevItems => [...prevItems, newItem]);
+    } catch (error) {
+      console.error('アイテム作成エラー:', error);
+    }
+  };
+
+  if (isLoading) {
+    return <div>読み込み中...</div>;
+  }
+
+  return (
+    <div>
+      <h2>Items</h2>
+      <ul>
+        {items.map(item => (
+          <li key={item.id}>{item.name}</li>
+        ))}
+      </ul>
+      <button onClick={handleCreateItem}>アイテム追加</button>
+
+      <h2>Users</h2>
+      <ul>
+        {users.map(user => (
+          <li key={user.id}>{user.name}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 ```
 </Drawer>
 
 ### エラー
 
-Smithyモデルでカスタムエラー構造を定義できます。生成クライアントはこれらのエラータイプを自動処理します。
+Smithyモデルでカスタムエラー構造を定義することで、Smithy APIのエラーレスポンスをカスタマイズできます。生成クライアントはこれらのカスタムエラータイプを自動的に処理します。
 
 #### カスタムエラー構造の定義
+
+Smithyモデルでエラー構造を定義します:
 
 ```smithy
 @error("client")
@@ -645,146 +804,543 @@ Smithyモデルでカスタムエラー構造を定義できます。生成ク�
 structure InvalidRequestError {
     @required
     message: String
+
     fieldErrors: FieldErrorList
+}
+
+@error("client")
+@httpError(403)
+structure UnauthorizedError {
+    @required
+    reason: String
+}
+
+@error("server")
+@httpError(500)
+structure InternalServerError {
+    @required
+    message: String
+
+    traceId: String
+}
+
+list FieldErrorList {
+    member: FieldError
+}
+
+structure FieldError {
+    @required
+    field: String
+
+    @required
+    message: String
 }
 ```
 
 #### 操作へのエラー追加
 
+操作が返す可能性のあるエラーを指定します:
+
 ```smithy
 operation CreateItem {
-    ...
+    input: CreateItemInput
+    output: CreateItemOutput
     errors: [
         InvalidRequestError
         UnauthorizedError
+        InternalServerError
     ]
+}
+
+operation GetItem {
+    input: GetItemInput
+    output: GetItemOutput
+    errors: [
+        ItemNotFoundError
+        InternalServerError
+    ]
+}
+
+@error("client")
+@httpError(404)
+structure ItemNotFoundError {
+    @required
+    message: String
 }
 ```
 
 #### Reactでのカスタムエラータイプの使用
 
+生成クライアントはこれらのカスタムエラータイプを自動的に処理し、異なるエラーレスポンスの型チェックと処理が可能になります:
+
 ```tsx
-switch (error.status) {
-  case 400:
-    console.error('バリデーションエラー:', error.error.fieldErrors);
-    break;
-  case 403:
-    console.error('権限不足:', error.error.reason);
-    break;
+import { useMutation, useQuery } from '@tanstack/react-query';
+
+function ItemComponent() {
+  const api = useMyApi();
+
+  // 型付きエラーハンドリングを伴うクエリ
+  const getItem = useQuery({
+    ...api.getItem.queryOptions({ itemId: '123' }),
+    onError: (error) => {
+      // エラーはSmithyモデルのエラーに基づいて型付け
+      switch (error.status) {
+        case 404:
+          // error.error は ItemNotFoundError として型付け
+          console.error('見つかりません:', error.error.message);
+          break;
+        case 500:
+          // error.error は InternalServerError として型付け
+          console.error('サーバーエラー:', error.error.message);
+          console.error('トレースID:', error.error.traceId);
+          break;
+      }
+    }
+  });
+
+  // 型付きエラーハンドリングを伴うミューテーション
+  const createItem = useMutation({
+    ...api.createItem.mutationOptions(),
+    onError: (error) => {
+      switch (error.status) {
+        case 400:
+          // error.error は InvalidRequestError として型付け
+          console.error('バリデーションエラー:', error.error.message);
+          console.error('フィールドエラー:', error.error.fieldErrors);
+          break;
+        case 403:
+          // error.error は UnauthorizedError として型付け
+          console.error('権限なし:', error.error.reason);
+          break;
+      }
+    }
+  });
+
+  // エラーハンドリングを伴うコンポーネントレンダリング
+  if (getItem.isError) {
+    if (getItem.error.status === 404) {
+      return <NotFoundMessage message={getItem.error.error.message} />;
+    } else if (getItem.error.status === 500) {
+      return <ErrorMessage message={getItem.error.error.message} />;
+    }
+  }
+
+  return (
+    <div>
+      {/* コンポーネントコンテンツ */}
+    </div>
+  );
 }
 ```
 
-<Drawer title="バニラクライアントでのカスタムエラーハンドリング" trigger="クリックでバニラクライアント直接使用例を表示">
+<Drawer title="クライアントを直接使用したカスタムエラーハンドリング" trigger="クリックでクライアント直接使用例を表示">
 ```tsx
-try {
-  await api.createItem(data);
-} catch (e) {
-  const err = e as CreateItemError;
-  switch (err.status) {
-    case 400:
-      console.error('バリデーションエラー:', err.error.fieldErrors);
-      break;
-    case 403:
-      console.error('権限不足:', err.error.reason);
-      break;
+import { useState, useEffect } from 'react';
+
+function ItemComponent() {
+  const api = useMyApiClient();
+  const [item, setItem] = useState(null);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  // エラーハンドリングを伴うアイテム取得
+  useEffect(() => {
+    const fetchItem = async () => {
+      try {
+        setLoading(true);
+        const data = await api.getItem({ itemId: '123' });
+        setItem(data);
+      } catch (e) {
+        // エラーはSmithyモデルのエラーに基づいて型付け
+        const err = e as GetItemError;
+        setError(err);
+
+        switch (err.status) {
+          case 404:
+            // err.error は ItemNotFoundError として型付け
+            console.error('見つかりません:', err.error.message);
+            break;
+          case 500:
+            // err.error は InternalServerError として型付け
+            console.error('サーバーエラー:', err.error.message);
+            console.error('トレースID:', err.error.traceId);
+            break;
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchItem();
+  }, [api]);
+
+  // エラーハンドリングを伴うアイテム作成
+  const handleCreateItem = async (data) => {
+    try {
+      await api.createItem(data);
+    } catch (e) {
+      const err = e as CreateItemError;
+
+      switch (err.status) {
+        case 400:
+          // err.error は InvalidRequestError として型付け
+          console.error('バリデーションエラー:', err.error.message);
+          console.error('フィールドエラー:', err.error.fieldErrors);
+          break;
+        case 403:
+          // err.error は UnauthorizedError として型付け
+          console.error('権限なし:', err.error.reason);
+          break;
+      }
+    }
+  };
+
+  // エラーハンドリングを伴うコンポーネントレンダリング
+  if (loading) {
+    return <LoadingSpinner />;
   }
+
+  if (error) {
+    if (error.status === 404) {
+      return <NotFoundMessage message={error.error.message} />;
+    } else if (error.status === 500) {
+      return <ErrorMessage message={error.error.message} />;
+    }
+  }
+
+  return (
+    <div>
+      {/* コンポーネントコンテンツ */}
+    </div>
+  );
 }
 ```
 </Drawer>
 
 :::tip
-Smithyでエラー構造を定義する際は、`@error`と`@httpError`トレートを使用してエラータイプとHTTPステータスコードを指定してください。
+Smithyでエラー構造を定義する際は、エラータイプとHTTPステータスコードを指定するために常に`@error`と`@httpError`トレートを使用してください。これにより、生成クライアントがエラーハンドリングのための適切な型情報を持つことが保証されます。
 :::
 
 ## ベストプラクティス
 
 ### ローディング状態の処理
 
-ユーザーエクスペリエンス向上のため、ローディングとエラー状態を常に処理しましょう:
+より良いユーザーエクスペリエンスのため、ローディングとエラー状態を常に処理しましょう:
 
 ```tsx
-if (items.isLoading) {
-  return <LoadingSpinner />;
-}
+import { useQuery } from '@tanstack/react-query';
 
-if (items.isError) {
-  return <ErrorMessage message={items.error.message} />;
+function ItemList() {
+  const api = useMyApi();
+  const items = useQuery(api.listItems.queryOptions());
+
+  if (items.isLoading) {
+    return <LoadingSpinner />;
+  }
+
+  if (items.isError) {
+    const err = items.error;
+    switch (err.status) {
+      case 403:
+        // err.error は ListItems403Response として型付け
+        return <ErrorMessage message={err.error.reason} />;
+      case 500:
+      case 502:
+        // err.error は ListItems5XXResponse として型付け
+        return (
+          <ErrorMessage
+            message={err.error.message}
+          />
+        );
+      default:
+        return <ErrorMessage message="不明なエラーが発生しました" />;
+    }
+  }
+
+  return (
+    <ul>
+      {items.data.map((item) => (
+        <li key={item.id}>{item.name}</li>
+      ))}
+    </ul>
+  );
 }
 ```
 
-<Drawer title="バニラクライアントでのローディング状態処理" trigger="クリックでバニラクライアント直接使用例を表示">
+<Drawer title="APIクライアントを直接使用したローディング状態処理" trigger="クリックでバニラクライアント直接使用例を表示">
 ```tsx
-if (loading) {
-  return <div>読み込み中...</div>;
-}
+function ItemList() {
+  const api = useMyApiClient();
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-if (error) {
-  return <ErrorMessage message={error.message} />;
+  useEffect(() => {
+    const fetchItems = async () => {
+      try {
+        const data = await api.listItems();
+        setItems(data);
+      } catch (err) {
+        setError(err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchItems();
+  }, [api]);
+
+  if (loading) {
+    return <LoadingSpinner />;
+  }
+
+  if (error) {
+    const err = error as ListItemsError;
+    switch (err.status) {
+      case 403:
+        // err.error は ListItems403Response として型付け
+        return <ErrorMessage message={err.error.reason} />;
+      case 500:
+      case 502:
+        // err.error は ListItems5XXResponse として型付け
+        return (
+          <ErrorMessage
+            message={err.error.message}
+          />
+        );
+      default:
+        return <ErrorMessage message="不明なエラーが発生しました" />;
+    }
+  }
+
+  return (
+    <ul>
+      {items.map((item) => (
+        <li key={item.id}>{item.name}</li>
+      ))}
+    </ul>
+  );
 }
 ```
 </Drawer>
 
 ### 楽観的更新
 
-ユーザーエクスペリエンス向上のため、楽観的更新を実装しましょう:
+より良いユーザーエクスペリエンスのため、楽観的更新を実装しましょう:
 
 ```tsx
-const deleteMutation = useMutation({
-  ...api.deleteItem.mutationOptions(),
-  onMutate: async (itemId) => {
-    await queryClient.cancelQueries(api.listItems.queryKey());
-    const previousItems = queryClient.getQueryData(api.listItems.queryKey());
-    queryClient.setQueryData(api.listItems.queryKey(), 
-      (old) => old.filter(item => item.id !== itemId));
-    return { previousItems };
-  },
-  onError: (err, itemId, context) => {
-    queryClient.setQueryData(api.listItems.queryKey(), context.previousItems);
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+
+function ItemList() {
+  const api = useMyApi();
+  const queryClient = useQueryClient();
+
+  // アイテムを取得するクエリ
+  const itemsQuery = useQuery(api.listItems.queryOptions());
+
+  // 楽観的更新を伴うアイテム削除のミューテーション
+  const deleteMutation = useMutation({
+    ...api.deleteItem.mutationOptions(),
+    onMutate: async (itemId) => {
+      // 進行中の再取得をキャンセル
+      await queryClient.cancelQueries({ queryKey: api.listItems.queryKey() });
+
+      // 以前の値のスナップショット
+      const previousItems = queryClient.getQueryData(api.listItems.queryKey());
+
+      // 新しい値に楽観的に更新
+      queryClient.setQueryData(
+        api.listItems.queryKey(),
+        (old) => old.filter((item) => item.id !== itemId)
+      );
+
+      // スナップショットを含むコンテキストオブジェクトを返す
+      return { previousItems };
+    },
+    onError: (err, itemId, context) => {
+      // ミューテーションが失敗した場合、onMutateから返されたコンテキストを使用してロールバック
+      queryClient.setQueryData(api.listItems.queryKey(), context.previousItems);
+      console.error('アイテム削除失敗:', err);
+    },
+    onSettled: () => {
+      // エラーまたは成功後に常に再取得してサーバーとデータを同期
+      queryClient.invalidateQueries({ queryKey: api.listItems.queryKey() });
+    },
+  });
+
+  if (itemsQuery.isLoading) {
+    return <LoadingSpinner />;
   }
-});
+
+  if (itemsQuery.isError) {
+    return <ErrorMessage message="アイテムの読み込みに失敗しました" />;
+  }
+
+  return (
+    <ul>
+      {itemsQuery.data.map((item) => (
+        <li key={item.id}>
+          {item.name}
+          <button
+            onClick={() => deleteMutation.mutate(item.id)}
+            disabled={deleteMutation.isPending}
+          >
+            {deleteMutation.isPending ? '削除中...' : '削除'}
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
 ```
 
-<Drawer title="バニラクライアントでの楽観的更新" trigger="クリックでバニラクライアント直接使用例を表示">
+<Drawer title="APIクライアントを直接使用した楽観的更新" trigger="クリックでバニラクライアント直接使用例を表示">
 ```tsx
-const handleDelete = async (itemId) => {
-  const previousItems = items;
-  setItems(items.filter(item => item.id !== itemId));
-  try {
-    await api.deleteItem(itemId);
-  } catch (error) {
-    setItems(previousItems);
-  }
-};
+function ItemList() {
+  const api = useMyApiClient();
+  const [items, setItems] = useState([]);
+
+  const handleDelete = async (itemId) => {
+    // 楽観的にアイテムを削除
+    const previousItems = items;
+    setItems(items.filter((item) => item.id !== itemId));
+
+    try {
+      await api.deleteItem(itemId);
+    } catch (error) {
+      // エラー時に以前のアイテムを復元
+      setItems(previousItems);
+      console.error('アイテム削除失敗:', error);
+    }
+  };
+
+  return (
+    <ul>
+      {items.map((item) => (
+        <li key={item.id}>
+          {item.name}
+          <button onClick={() => handleDelete(item.id)}>削除</button>
+        </li>
+      ))}
+    </ul>
+  );
+}
 ```
 </Drawer>
 
 ## タイプセーフティ
 
-統合は完全なエンドツーエンドのタイプセーフティを提供します。IDEはすべてのAPI呼び出しで完全なオートコンプリートと型チェックを提供します。
+統合は完全なエンドツーエンドのタイプセーフティを提供します。IDEはすべてのAPI呼び出しで完全なオートコンプリートと型チェックを提供します:
 
 ```tsx
-const createItem = useMutation({
-  ...api.createItem.mutationOptions(),
-  onSuccess: (data) => {
-    console.log(`作成されたアイテムID: ${data.id}`);
-  },
-});
+import { useMutation } from '@tanstack/react-query';
 
-const handleSubmit = (data: CreateItemInput) => {
-  createItem.mutate(data); // 入力スキーマの型チェック
-};
+function ItemForm() {
+  const api = useMyApi();
+
+  // アイテム作成のためのタイプセーフなミューテーション
+  const createItem = useMutation({
+    ...api.createItem.mutationOptions(),
+    // ✅ onSuccessコールバックが正しいレスポンスタイプを処理しない場合は型エラー
+    onSuccess: (data) => {
+      // data は API のレスポンススキーマに基づいて完全に型付け
+      console.log(`作成されたアイテムID: ${data.id}`);
+    },
+  });
+
+  const handleSubmit = (data: CreateItemInput) => {
+    // ✅ 入力がスキーマと一致しない場合は型エラー
+    createItem.mutate(data);
+  };
+
+  // エラーUIは型の絞り込みを使用して異なるエラータイプを処理可能
+  if (createItem.error) {
+    const error = createItem.error;
+    switch (error.status) {
+      case 400:
+        // error.error は InvalidRequestError として型付け
+        return (
+          <FormError
+            message="無効な入力"
+            errors={error.error.fieldErrors}
+          />
+        );
+      case 403:
+        // error.error は UnauthorizedError として型付け
+        return <AuthError reason={error.error.reason} />;
+      default:
+        // error.error は 500 などの場合 InternalServerError として型付け
+        return <ServerError message={error.error.message} />;
+    }
+  }
+
+  return (
+    <form onSubmit={(e) => {
+      e.preventDefault();
+      handleSubmit({ name: 'New Item' });
+    }}>
+      {/* フォームフィールド */}
+      <button
+        type="submit"
+        disabled={createItem.isPending}
+      >
+        {createItem.isPending ? '作成中...' : 'アイテム作成'}
+      </button>
+    </form>
+  );
+}
 ```
 
-<Drawer title="バニラクライアントでのタイプセーフティ" trigger="クリックでバニラクライアント直接使用例を表示">
+<Drawer title="APIクライアントを直接使用したタイプセーフティ" trigger="クリックでバニラクライアント直接使用例を表示">
 ```tsx
-const handleSubmit = async (data: CreateItemInput) => {
-  try {
-    await api.createItem(data); // 入力スキーマの型チェック
-  } catch (e) {
-    const err = e as CreateItemError; // エラータイプの型チェック
+function ItemForm() {
+  const api = useMyApiClient();
+  const [error, setError] = useState<CreateItemError | null>(null);
+
+  const handleSubmit = async (data: CreateItemInput) => {
+    try {
+      // ✅ 入力がスキーマと一致しない場合は型エラー
+      await api.createItem(data);
+    } catch (e) {
+      // ✅ エラータイプにはすべての可能なエラーレスポンスが含まれる
+      const err = e as CreateItemError;
+      switch (err.status) {
+        case 400:
+          // err.error は InvalidRequestError として型付け
+          console.error('バリデーションエラー:', err.error.fieldErrors);
+          break;
+        case 403:
+          // err.error は UnauthorizedError として型付け
+          console.error('権限なし:', err.error.reason);
+          break;
+        case 500:
+          // err.error は InternalServerError として型付け
+          console.error('サーバーエラー:', err.error.message);
+          break;
+      }
+      setError(err);
+    }
+  };
+
+  // エラーUIは型の絞り込みを使用して異なるエラータイプを処理可能
+  if (error) {
+    switch (error.status) {
+      case 400:
+        return (
+          <FormError
+            message="無効な入力"
+            errors={error.error.fieldErrors}
+          />
+        );
+      case 403:
+        return <AuthError reason={error.error.reason} />;
+      default:
+        return <ServerError message={error.error.message} />;
+    }
   }
-};
+
+  return <form onSubmit={handleSubmit}>{/* ... */}</form>;
+}
 ```
 </Drawer>
 
-生成された型はSmithy APIのOpenAPIスキーマから自動生成されるため、API変更後はビルドすることでフロントエンドコードに反映されます。
+型はSmithy APIのOpenAPIスキーマから自動生成されるため、APIへの変更はビルド後にフロントエンドコードに反映されます。

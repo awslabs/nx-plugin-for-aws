@@ -2,8 +2,6 @@
 title: "迁移 API"
 ---
 
-
-
 import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
 import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
 import RunGenerator from '@components/run-generator.astro';
@@ -30,7 +28,9 @@ import InstallCommand from '@components/install-command.astro';
 
 <RunGenerator generator="ts#smithy-api" noInteractive requiredParameters={{ name: 'api', namespace: 'com.aws', auth: 'IAM' }} />
 
-这会生成 `model` 和 `backend` 项目。`model` 包含 Smithy 模型，`backend` 包含服务端实现。后端使用 [Smithy TypeScript 服务端生成器](https://smithy.io/2.0/languages/typescript/ts-ssdk/index.html)，下文将详细探讨。
+这会生成 `model` 和 `backend` 项目。`model` 包含 Smithy 模型，`backend` 包含服务端实现。
+
+后端使用 [Smithy TypeScript 服务端生成器](https://smithy.io/2.0/languages/typescript/ts-ssdk/index.html)，下文将详细探讨。
 
 #### 迁移 Smithy 模型
 
@@ -39,8 +39,8 @@ import InstallCommand from '@components/install-command.astro';
 <Steps>
 
 1. 删除 `packages/api/model/src` 中的示例文件
-1. 将 PDK 项目 `packages/api/model/src/main/smithy` 的模型复制到新项目
-1. 更新 `smithy-build.json` 中的服务名称和命名空间：
+1. 将 PDK 项目 `packages/api/model/src/main/smithy` 的模型复制到新项目的 `packages/api/model/src` 目录
+1. 更新 `smithy-build.json` 中的服务名称和命名空间以匹配 PDK 应用：
 
     ```json {4}
     // smithy-build.json
@@ -50,7 +50,7 @@ import InstallCommand from '@components/install-command.astro';
           ...
     ```
 
-1. 在 `main.smithy` 中添加 `ValidationException` 错误：
+1. 更新 `main.smithy` 中的服务，添加 `ValidationException` 错误，使用 Smithy TypeScript 服务端 SDK 时需要此错误：
 
     ```smithy {2, 17}
     // main.smithy
@@ -74,7 +74,7 @@ import InstallCommand from '@components/install-command.astro';
     }
     ```
 
-1. 在 `packages/api/model/src` 创建 `extensions.smithy` 定义分页特性：
+1. 在 `packages/api/model/src` 创建 `extensions.smithy` 文件，定义一个特性为生成的客户端提供分页信息：
 
     ```smithy
     // extensions.smithy
@@ -91,7 +91,7 @@ import InstallCommand from '@components/install-command.astro';
     }
     ```
 
-1. 在 `GetShoppingLists` 操作添加 `@cursor` 特性：
+1. 在 `get-shopping-lists.smithy` 的 `GetShoppingLists` 操作添加新的 `@cursor` 特性：
 
     ```smithy {5}
     // operations/get-shopping-lists.smithy
@@ -107,11 +107,13 @@ import InstallCommand from '@components/install-command.astro';
         }
     ```
 
-1. 移除所有操作的 `@handler` 特性
+    如果使用 Nx Plugin for AWS 提供的客户端生成器（通过 <Link path="guides/connection/react-smithy">`connection`</Link> 生成器），任何 `@paginated` 操作也应使用 `@cursor`。
+
+1. 最后，移除所有操作的 `@handler` 特性，因为 Nx Plugin for AWS 不支持此特性。使用 `ts#smithy-api` 时，我们不需要此特性生成的自动 Lambda 函数 CDK 构造和打包目标，因为我们为所有 Lambda 函数使用单个打包。
 
 </Steps>
 
-运行构建检查模型变更：
+此时，让我们运行构建来检查模型变更，并确保有一些生成的服务端代码可用。后端项目（`@shopping-list/api`）会有一些失败，但我们接下来会解决这些问题。
 
 <NxCommands commands={["run-many --target build"]} />
 
@@ -123,40 +125,189 @@ import InstallCommand from '@components/install-command.astro';
 
 #### 迁移 Lambda 处理程序
 
-`api/backend` 项目相当于 Type Safe API 的 `api/handlers/typescript`。主要区别在于使用 [Smithy 服务端生成器](https://smithy.io/2.0/languages/typescript/ts-ssdk/index.html) 而非 Type Safe API 的封装器。
+`api/backend` 项目相当于 Type Safe API 的 `api/handlers/typescript` 项目。
 
-安装依赖并迁移处理程序：
+Type Safe API 和 `ts#smithy-api` 生成器的主要区别之一是，处理程序使用 [Smithy TypeScript 服务端生成器](https://smithy.io/2.0/languages/typescript/ts-ssdk/index.html) 实现，而非 Type Safe API 自己生成的处理程序封装器（位于 `api/generated/typescript/runtime` 项目中）。
+
+购物清单应用的 Lambda 处理程序依赖 `@aws-sdk/client-dynamodb` 包，让我们先安装它：
 
 <InstallCommand pkg="@aws-sdk/client-dynamodb" />
 
-迁移步骤：
+然后，将 PDK 项目的 `handlers/src/dynamo-client.ts` 文件复制到 `backend/src/operations`，使其可供处理程序使用。
+
+迁移处理程序可遵循以下步骤：
 
 <Steps>
 
-1. 复制处理程序文件到 `backend/src/operations`
-1. 替换运行时导入为 SSDK 生成类型
-1. 更新处理程序签名
-1. 使用 `ctx.logger` 替代拦截器
-1. 调整输入参数引用方式
-1. 返回普通对象替代 `Response`
-1. 更新导入为 ESM 格式
-1. 在 `service.ts` 注册操作
+1. 将处理程序从 PDK 项目的 `packages/api/handlers/typescript/src` 目录复制到新项目的 `packages/api/backend/src/operations` 目录。
+
+1. 移除 `my-api-typescript-runtime` 导入，改为从生成的 TypeScript 服务端 SDK 导入操作类型以及 `ServiceContext`，例如：
+
+    ```diff lang="ts" wrap
+    - import {
+    -   deleteShoppingListHandler,
+    -   DeleteShoppingListChainedHandlerFunction,
+    -   INTERCEPTORS,
+    -   Response,
+    -   LoggingInterceptor,
+    - } from 'myapi-typescript-runtime';
+    + import { DeleteShoppingList as DeleteShoppingListOperation } from '../generated/ssdk/index.js';
+    + import { ServiceContext } from '../context.js';
+    ```
+
+1. 删除处理程序封装器导出
+
+    ```diff lang="ts" wrap
+    - export const handler = deleteShoppingListHandler(
+    -   ...INTERCEPTORS,
+    -   deleteShoppingList,
+    - );
+    ```
+
+1. 更新操作处理程序的签名以使用 SSDK：
+
+    ```diff lang="ts" wrap
+    - export const deleteShoppingList: DeleteShoppingListChainedHandlerFunction = async (request) => {
+    + export const DeleteShoppingList: DeleteShoppingListOperation<ServiceContext> = async (input, ctx) => {
+    ```
+
+1. 用 `ctx.logger` 替换 `LoggingInterceptor` 的使用（也适用于指标和追踪拦截器）：
+
+    ```diff lang="ts" wrap
+    - LoggingInterceptor.getLogger(request).info('...');
+    + ctx.logger.info('...');
+    ```
+
+1. 更新输入参数的引用。由于 SSDK 提供的类型与 Smithy 模型完全匹配（而不是将路径/查询/头参数与主体参数分开分组），相应更新所有输入引用：
+
+    ```diff lang="ts" wrap
+    - const shoppingListId = request.input.requestParameters.shoppingListId;
+    + const shoppingListId = input.shoppingListId;
+    ```
+
+1. 移除 `Response` 的使用。在 SSDK 中我们只返回普通对象。
+
+    ```diff lang="ts" wrap
+    - return Response.success({ shoppingListId });
+    + return { shoppingListId };
+    ```
+
+    我们也不再抛出或返回 `Response`，而是抛出 SSDK 生成的错误：
+
+    ```diff lang="ts" wrap
+    - throw Response.badRequest({ message: 'oh no' });
+    - return Response.badRequest({ message: 'oh no' });
+    + import { BadRequestError } from '../generated/ssdk/index.js';
+    + throw new BadRequestError({ message: 'oh no' });
+    ```
+
+1. 更新所有导入使用 ESM 语法，即为相对导入添加 `.js` 扩展名。
+
+1. 在 `service.ts` 中添加操作
+
+    ```ts {4, 12}
+    // service.ts
+    import { ServiceContext } from './context.js';
+    import { MyApiService } from './generated/ssdk/index.js';
+    import { DeleteShoppingList } from './operations/delete-shopping-list.js';
+    import { GetShoppingLists } from './operations/get-shopping-lists.js';
+    import { PutShoppingList } from './operations/put-shopping-list.js';
+
+    // 在此注册操作到服务
+    export const Service: MyApiService<ServiceContext> = {
+      PutShoppingList,
+      GetShoppingLists,
+      DeleteShoppingList,
+    };
+    ```
 
 </Steps>
 
-<Drawer title="购物清单处理程序迁移示例" trigger="点击查看完整前后对比">
+<Drawer title="购物清单处理程序迁移" trigger="点击查看教程中三个购物清单操作的完整前后对比示例">
 
 <h4>删除购物清单</h4>
 
 <Tabs syncKey="pdk-migration">
 <TabItem label="迁移前">
 ```ts
-// 原始处理程序代码...
+// handlers/typescript/src/delete-shopping-list.ts
+import { DeleteItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  deleteShoppingListHandler,
+  DeleteShoppingListChainedHandlerFunction,
+  INTERCEPTORS,
+  Response,
+  LoggingInterceptor,
+} from 'myapi-typescript-runtime';
+import { ddbClient } from './dynamo-client';
+
+/**
+ * Type-safe handler for the DeleteShoppingList operation
+ */
+export const deleteShoppingList: DeleteShoppingListChainedHandlerFunction = async (request) => {
+  LoggingInterceptor.getLogger(request).info(
+    'Start DeleteShoppingList Operation',
+  );
+
+  const shoppingListId = request.input.requestParameters.shoppingListId;
+  await ddbClient.send(
+    new DeleteItemCommand({
+      TableName: 'shopping_list',
+      Key: {
+        shoppingListId: {
+          S: shoppingListId,
+        },
+      },
+    }),
+  );
+
+  return Response.success({
+    shoppingListId,
+  });
+};
+
+/**
+ * Entry point for the AWS Lambda handler for the DeleteShoppingList operation.
+ * The deleteShoppingListHandler method wraps the type-safe handler and manages marshalling inputs and outputs
+ */
+export const handler = deleteShoppingListHandler(
+  ...INTERCEPTORS,
+  deleteShoppingList,
+);
 ```
 </TabItem>
 <TabItem label="迁移后">
 ```ts
-// 迁移后处理程序代码...
+// backend/src/operations/delete-shopping-list.ts
+import { DeleteItemCommand } from '@aws-sdk/client-dynamodb';
+import { ddbClient } from './dynamo-client.js';
+import { DeleteShoppingList as DeleteShoppingListOperation } from '../generated/ssdk/index.js';
+import { ServiceContext } from '../context.js';
+
+/**
+ * Type-safe handler for the DeleteShoppingList operation
+ */
+export const DeleteShoppingList: DeleteShoppingListOperation<ServiceContext> = async (input, ctx) => {
+  ctx.logger.info(
+    'Start DeleteShoppingList Operation',
+  );
+
+  const shoppingListId = input.shoppingListId;
+  await ddbClient.send(
+    new DeleteItemCommand({
+      TableName: 'shopping_list',
+      Key: {
+        shoppingListId: {
+          S: shoppingListId!,
+        },
+      },
+    }),
+  );
+
+  return {
+    shoppingListId,
+  };
+};
 ```
 </TabItem>
 </Tabs>
@@ -166,12 +317,132 @@ import InstallCommand from '@components/install-command.astro';
 <Tabs syncKey="pdk-migration">
 <TabItem label="迁移前">
 ```ts
-// 原始处理程序代码...
+// handlers/typescript/src/get-shopping-lists.ts
+import { DynamoDBClient, QueryCommand, QueryCommandInput, ScanCommand, ScanCommandInput } from '@aws-sdk/client-dynamodb';
+import {
+  getShoppingListsHandler,
+  GetShoppingListsChainedHandlerFunction,
+  INTERCEPTORS,
+  Response,
+  LoggingInterceptor,
+  ShoppingList,
+} from 'myapi-typescript-runtime';
+import { ddbClient } from './dynamo-client';
+
+/**
+ * Type-safe handler for the GetShoppingLists operation
+ */
+export const getShoppingLists: GetShoppingListsChainedHandlerFunction = async (request) => {
+  LoggingInterceptor.getLogger(request).info('Start GetShoppingLists Operation');
+
+  const nextToken = request.input.requestParameters.nextToken;
+  const pageSize = request.input.requestParameters.pageSize;
+  const shoppingListId = request.input.requestParameters.shoppingListId;
+  const commandInput: ScanCommandInput | QueryCommandInput = {
+    TableName: 'shopping_list',
+    ConsistentRead: true,
+    Limit: pageSize,
+    ExclusiveStartKey: nextToken ? fromToken(nextToken) : undefined,
+    ...(shoppingListId ? {
+      KeyConditionExpression: 'shoppingListId = :shoppingListId',
+      ExpressionAttributeValues: {
+        ':shoppingListId': {
+          S: request.input.requestParameters.shoppingListId!,
+        },
+      },
+    } : {}),
+  };
+  const response = await ddbClient.send(shoppingListId ? new QueryCommand(commandInput) : new ScanCommand(commandInput));
+
+  return Response.success({
+    shoppingLists: (response.Items || [])
+      .map<ShoppingList>(item => ({
+      shoppingListId: item.shoppingListId.S!,
+      name: item.name.S!,
+      shoppingItems: JSON.parse(item.shoppingItems.S || '[]'),
+    })),
+    nextToken: response.LastEvaluatedKey ? toToken(response.LastEvaluatedKey) : undefined,
+  });
+};
+
+/**
+ * Decode a stringified token
+ * @param token a token passed to the paginated request
+ */
+const fromToken = <T>(token?: string): T | undefined =>
+  token ? (JSON.parse(Buffer.from(decodeURIComponent(token), 'base64').toString()) as T) : undefined;
+
+/**
+ * Encode pagination details into an opaque stringified token
+ * @param paginationToken pagination token details
+ */
+const toToken = <T>(paginationToken?: T): string | undefined =>
+  paginationToken ? encodeURIComponent(Buffer.from(JSON.stringify(paginationToken)).toString('base64')) : undefined;
+
+/**
+ * Entry point for the AWS Lambda handler for the GetShoppingLists operation.
+ * The getShoppingListsHandler method wraps the type-safe handler and manages marshalling inputs and outputs
+ */
+export const handler = getShoppingListsHandler(...INTERCEPTORS, getShoppingLists);
 ```
 </TabItem>
 <TabItem label="迁移后">
 ```ts
-// 迁移后处理程序代码...
+// backend/src/operations/get-shopping-lists.ts
+import { QueryCommand, QueryCommandInput, ScanCommand, ScanCommandInput } from '@aws-sdk/client-dynamodb';
+import { ddbClient } from './dynamo-client.js';
+import { GetShoppingLists as GetShoppingListsOperation, ShoppingList } from '../generated/ssdk/index.js';
+import { ServiceContext } from '../context.js';
+
+/**
+ * Type-safe handler for the GetShoppingLists operation
+ */
+export const GetShoppingLists: GetShoppingListsOperation<ServiceContext> = async (input, ctx) => {
+  ctx.logger.info('Start GetShoppingLists Operation');
+
+  const nextToken = input.nextToken;
+  const pageSize = input.pageSize;
+  const shoppingListId = input.shoppingListId;
+  const commandInput: ScanCommandInput | QueryCommandInput = {
+    TableName: 'shopping_list',
+    ConsistentRead: true,
+    Limit: pageSize,
+    ExclusiveStartKey: nextToken ? fromToken(nextToken) : undefined,
+    ...(shoppingListId ? {
+      KeyConditionExpression: 'shoppingListId = :shoppingListId',
+      ExpressionAttributeValues: {
+        ':shoppingListId': {
+          S: input.shoppingListId!,
+        },
+      },
+    } : {}),
+  };
+  const response = await ddbClient.send(shoppingListId ? new QueryCommand(commandInput) : new ScanCommand(commandInput));
+
+  return {
+    shoppingLists: (response.Items || [])
+      .map<ShoppingList>(item => ({
+      shoppingListId: item.shoppingListId.S!,
+      name: item.name.S!,
+      shoppingItems: JSON.parse(item.shoppingItems.S || '[]'),
+    })),
+    nextToken: response.LastEvaluatedKey ? toToken(response.LastEvaluatedKey) : undefined,
+  };
+};
+
+/**
+ * Decode a stringified token
+ * @param token a token passed to the paginated request
+ */
+const fromToken = <T>(token?: string): T | undefined =>
+  token ? (JSON.parse(Buffer.from(decodeURIComponent(token), 'base64').toString()) as T) : undefined;
+
+/**
+ * Encode pagination details into an opaque stringified token
+ * @param paginationToken pagination token details
+ */
+const toToken = <T>(paginationToken?: T): string | undefined =>
+  paginationToken ? encodeURIComponent(Buffer.from(JSON.stringify(paginationToken)).toString('base64')) : undefined;
 ```
 </TabItem>
 </Tabs>
@@ -181,48 +452,147 @@ import InstallCommand from '@components/install-command.astro';
 <Tabs syncKey="pdk-migration">
 <TabItem label="迁移前">
 ```ts
-// 原始处理程序代码...
+// handlers/typescript/src/put-shopping-list.ts
+import { randomUUID } from 'crypto';
+import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  putShoppingListHandler,
+  PutShoppingListChainedHandlerFunction,
+  INTERCEPTORS,
+  Response,
+  LoggingInterceptor,
+} from 'myapi-typescript-runtime';
+import { ddbClient } from './dynamo-client';
+
+/**
+ * Type-safe handler for the PutShoppingList operation
+ */
+export const putShoppingList: PutShoppingListChainedHandlerFunction = async (request) => {
+  LoggingInterceptor.getLogger(request).info('Start PutShoppingList Operation');
+
+  const shoppingListId = request.input.body.shoppingListId ?? randomUUID();
+  await ddbClient.send(new PutItemCommand({
+    TableName: 'shopping_list',
+    Item: {
+      shoppingListId: {
+        S: shoppingListId,
+      },
+      name: {
+        S: request.input.body.name,
+      },
+      shoppingItems: {
+        S: JSON.stringify(request.input.body.shoppingItems || []),
+      },
+    },
+  }));
+
+  return Response.success({
+    shoppingListId,
+  });
+};
+
+/**
+ * Entry point for the AWS Lambda handler for the PutShoppingList operation.
+ * The putShoppingListHandler method wraps the type-safe handler and manages marshalling inputs and outputs
+ */
+export const handler = putShoppingListHandler(...INTERCEPTORS, putShoppingList);
 ```
 </TabItem>
 <TabItem label="迁移后">
 ```ts
-// 迁移后处理程序代码...
+// backend/src/operations/put-shopping-list.ts
+import { randomUUID } from 'crypto';
+import { PutItemCommand } from '@aws-sdk/client-dynamodb';
+import { ddbClient } from './dynamo-client.js';
+import { PutShoppingList as PutShoppingListOperation } from '../generated/ssdk/index.js';
+import { ServiceContext } from '../context.js';
+
+/**
+ * Type-safe handler for the PutShoppingList operation
+ */
+export const PutShoppingList: PutShoppingListOperation<ServiceContext> = async (input, ctx) => {
+  ctx.logger.info('Start PutShoppingList Operation');
+
+  const shoppingListId = input.shoppingListId ?? randomUUID();
+  await ddbClient.send(new PutItemCommand({
+    TableName: 'shopping_list',
+    Item: {
+      shoppingListId: {
+        S: shoppingListId,
+      },
+      name: {
+        S: input.name!,
+      },
+      shoppingItems: {
+        S: JSON.stringify(input.shoppingItems || []),
+      },
+    },
+  }));
+
+  return {
+    shoppingListId,
+  };
+};
 ```
 </TabItem>
 </Tabs>
 
 </Drawer>
 
-#### 更新服务引用
+我们最初生成 Smithy API 项目时使用名称 `api`，因为我们希望将其添加到 `packages/api` 以与 PDK 项目保持一致。由于我们的 Smithy API 现在定义的是 `service MyApi` 而不是 `service Api`，我们需要将所有 `getApiServiceHandler` 实例更新为 `getMyApiServiceHandler`。
 
-将 `getApiServiceHandler` 更新为 `getMyApiServiceHandler`：
+在 `handler.ts` 中进行此更改：
 
 ```diff lang="ts"
-// handler.ts
+// packages/api/backend/src/handler.ts
 - import { getApiServiceHandler } from './generated/ssdk/index.js';
 + import { getMyApiServiceHandler } from './generated/ssdk/index.js';
+
+process.env.POWERTOOLS_METRICS_NAMESPACE = 'Api';
+process.env.POWERTOOLS_SERVICE_NAME = 'Api';
+
+const tracer = new Tracer();
+const logger = new Logger();
+const metrics = new Metrics();
+
+- const serviceHandler = getApiServiceHandler(Service);
++ const serviceHandler = getMyApiServiceHandler(Service);
 ```
+
+在 `local-server.ts` 中进行此更改：
 
 ```diff lang="ts"
-// local-server.ts
+// packages/api/backend/src/local-server.ts
 -import { getApiServiceHandler } from './generated/ssdk/index.js';
 +import { getMyApiServiceHandler } from './generated/ssdk/index.js';
+
+const PORT = 3001;
+
+const tracer = new Tracer();
+const logger = new Logger();
+const metrics = new Metrics();
+
+-const serviceHandler = getApiServiceHandler(Service);
++const serviceHandler = getMyApiServiceHandler(Service);
 ```
 
-更新项目元数据：
+此外，更新 `packages/api/backend/project.json`，将 `metadata.apiName` 更新为 `my-api`：
 
 ```diff lang="json"
-// project.json
+// packages/api/backend/project.json
   "metadata": {
     "generator": "ts#smithy-api",
 -    "apiName": "api",
 +    "apiName": "my-api",
+    "auth": "IAM",
+    "modelProject": "@shopping-list/api-model",
+    "ports": [3001]
   },
 ```
 
 #### 验证构建
 
-最后执行构建验证：
+现在可以构建项目来检查迁移是否成功：
 
 <NxCommands commands={["run-many --target build"]} />
 

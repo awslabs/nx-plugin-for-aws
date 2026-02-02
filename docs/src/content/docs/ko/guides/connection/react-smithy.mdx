@@ -3,8 +3,6 @@ title: "Smithy API에 React 연결"
 description: "React 웹사이트를 Smithy TypeScript API에 연결"
 ---
 
-
-
 import { FileTree, Steps } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
@@ -231,13 +229,18 @@ function CreateItemForm() {
 const createItem = useMutation({
   ...api.createItem.mutationOptions(),
   onSuccess: (data) => {
+    // 뮤테이션 성공 시 실행
     console.log('Item created:', data);
+    // 새 아이템으로 이동 가능
     navigate(`/items/${data.id}`);
   },
   onError: (error) => {
+    // 뮤테이션 실패 시 실행
     console.error('Failed to create item:', error);
   },
   onSettled: () => {
+    // 뮤테이션 완료 시 실행 (성공 또는 실패)
+    // 영향을 받을 수 있는 쿼리 무효화에 적합한 위치
     queryClient.invalidateQueries({ queryKey: api.listItems.queryKey() });
   }
 });
@@ -265,6 +268,8 @@ function CreateItemForm() {
         description: 'A new item'
       });
       setCreatedItem(newItem);
+      // 새 아이템으로 이동 가능
+      // navigate(`/items/${newItem.id}`);
     } catch (err) {
       setError(err);
       console.error('Failed to create item:', err);
@@ -312,8 +317,10 @@ function ItemList() {
   const api = useMyApi();
   const items = useInfiniteQuery({
     ...api.listItems.infiniteQueryOptions({
-      limit: 10,
+      limit: 10, // 페이지당 아이템 수
     }, {
+      // 다음 페이지의 'cursor'로 전달될 파라미터를 반환하는
+      // getNextPageParam 함수를 정의해야 합니다
       getNextPageParam: (lastPage) =>
         lastPage.nextCursor || undefined
       }),
@@ -329,6 +336,7 @@ function ItemList() {
 
   return (
     <div>
+      {/* 모든 아이템을 렌더링하기 위해 pages 배열 평탄화 */}
       <ul>
         {items.data.pages.flatMap(page =>
           page.items.map(item => (
@@ -371,6 +379,7 @@ function ItemList() {
   const [nextCursor, setNextCursor] = useState(null);
   const [isFetchingMore, setIsFetchingMore] = useState(false);
 
+  // 초기 데이터 가져오기
   useEffect(() => {
     const fetchItems = async () => {
       try {
@@ -388,6 +397,7 @@ function ItemList() {
     fetchItems();
   }, [api]);
 
+  // 더 많은 아이템 로드 함수
   const loadMore = async () => {
     if (!nextCursor) return;
 
@@ -457,6 +467,7 @@ function MyComponent() {
   if (createItem.error) {
     switch (createItem.error.status) {
       case 400:
+        // error.error는 CreateItem400Response로 타입 지정됨
         return (
           <div>
             <h2>Invalid input:</h2>
@@ -464,6 +475,7 @@ function MyComponent() {
           </div>
         );
       case 403:
+        // error.error는 CreateItem403Response로 타입 지정됨
         return (
           <div>
             <h2>Not authorized:</h2>
@@ -472,6 +484,7 @@ function MyComponent() {
         );
       case 500:
       case 502:
+        // error.error는 CreateItem5XXResponse로 타입 지정됨
         return (
           <div>
             <h2>Server error:</h2>
@@ -503,6 +516,7 @@ function MyComponent() {
   if (error) {
     switch (error.status) {
       case 400:
+        // error.error는 CreateItem400Response로 타입 지정됨
         return (
           <div>
             <h2>Invalid input:</h2>
@@ -510,6 +524,7 @@ function MyComponent() {
           </div>
         );
       case 403:
+        // error.error는 CreateItem403Response로 타입 지정됨
         return (
           <div>
             <h2>Not authorized:</h2>
@@ -518,6 +533,7 @@ function MyComponent() {
         );
       case 500:
       case 502:
+        // error.error는 CreateItem5XXResponse로 타입 지정됨
         return (
           <div>
             <h2>Server error:</h2>
@@ -547,7 +563,7 @@ Smithy `model` 프로젝트의 `extensions.smithy`에 추가된 여러 트레이
 `@query` 및 `@mutation` Smithy 트레이트를 사용하여 이 동작을 변경할 수 있습니다.
 
 :::note
-이 트레이트는 OpenAPI 벤더 확장에 매핑되며, 코드 제너레이터가 OpenAPI 명세에서 클라이언트 생성 시 해석합니다.
+이 트레이트는 [`@specificationExtension` 트레이트](https://smithy.io/2.0/guides/model-translations/converting-to-openapi.html#specificationextension-trait)를 사용하여 OpenAPI 벤더 확장에 매핑되며, 코드 제너레이터가 OpenAPI 명세에서 클라이언트 생성 시 해석합니다.
 :::
 
 #### @query
@@ -609,12 +625,13 @@ operation ListItems {
 }
 ```
 
-`cursor` 파라미터가 있더라도 페이지네이션 비활성화:
+`cursor` 파라미터가 있더라도 `infiniteQueryOptions` 생성을 원하지 않는 경우 페이지네이션 비활성화:
 
 ```smithy
 @cursor(enabled: false)
 operation ListItems {
     input := {
+      // 'cursor'라는 이름의 입력 파라미터는 기본적으로 이 작업을 페이지네이션 작업으로 처리하게 함
       cursor: String
     }
     output := {
@@ -668,11 +685,14 @@ import { useMyApi } from './hooks/useMyApi';
 function ItemsAndUsers() {
   const api = useMyApi();
 
+  // Items 작업은 api.items 아래에 그룹화됨
   const items = useQuery(api.items.listItems.queryOptions());
   const createItem = useMutation(api.items.createItem.mutationOptions());
 
+  // Users 작업은 api.users 아래에 그룹화됨
   const users = useQuery(api.users.listUsers.queryOptions());
 
+  // 사용 예시
   const handleCreateItem = () => {
     createItem.mutate({ name: 'New Item' });
   };
@@ -698,6 +718,8 @@ function ItemsAndUsers() {
 }
 ```
 
+이러한 그룹화는 API 호출을 체계적으로 관리하고 IDE의 코드 완성 기능을 개선합니다.
+
 <Drawer title="기본 클라이언트로 그룹화된 작업 사용" trigger="기본 클라이언트 사용 예시를 보려면 클릭하세요.">
 ```tsx
 import { useState, useEffect } from 'react';
@@ -709,12 +731,17 @@ function ItemsAndUsers() {
   const [users, setUsers] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
 
+  // 데이터 로드
   useEffect(() => {
     const fetchData = async () => {
       try {
         setIsLoading(true);
+
+        // Items 작업은 api.items 아래에 그룹화됨
         const itemsData = await api.items.listItems();
         setItems(itemsData);
+
+        // Users 작업은 api.users 아래에 그룹화됨
         const usersData = await api.users.listUsers();
         setUsers(usersData);
       } catch (error) {
@@ -729,6 +756,7 @@ function ItemsAndUsers() {
 
   const handleCreateItem = async () => {
     try {
+      // 그룹화된 메서드를 사용하여 아이템 생성
       const newItem = await api.items.createItem({ name: 'New Item' });
       setItems(prevItems => [...prevItems, newItem]);
     } catch (error) {
@@ -851,34 +879,44 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 function ItemComponent() {
   const api = useMyApi();
 
+  // 타입화된 오류 처리가 포함된 쿼리
   const getItem = useQuery({
     ...api.getItem.queryOptions({ itemId: '123' }),
     onError: (error) => {
+      // 오류는 Smithy 모델의 오류를 기반으로 타입 지정됨
       switch (error.status) {
         case 404:
+          // error.error는 ItemNotFoundError로 타입 지정됨
           console.error('Not found:', error.error.message);
           break;
         case 500:
+          // error.error는 InternalServerError로 타입 지정됨
           console.error('Server error:', error.error.message);
+          console.error('Trace ID:', error.error.traceId);
           break;
       }
     }
   });
 
+  // 타입화된 오류 처리가 포함된 뮤테이션
   const createItem = useMutation({
     ...api.createItem.mutationOptions(),
     onError: (error) => {
       switch (error.status) {
         case 400:
+          // error.error는 InvalidRequestError로 타입 지정됨
           console.error('Validation error:', error.error.message);
+          console.error('Field errors:', error.error.fieldErrors);
           break;
         case 403:
+          // error.error는 UnauthorizedError로 타입 지정됨
           console.error('Unauthorized:', error.error.reason);
           break;
       }
     }
   });
 
+  // 오류 처리가 포함된 컴포넌트 렌더링
   if (getItem.isError) {
     if (getItem.error.status === 404) {
       return <NotFoundMessage message={getItem.error.error.message} />;
@@ -905,6 +943,7 @@ function ItemComponent() {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // 오류 처리가 포함된 아이템 가져오기
   useEffect(() => {
     const fetchItem = async () => {
       try {
@@ -912,14 +951,19 @@ function ItemComponent() {
         const data = await api.getItem({ itemId: '123' });
         setItem(data);
       } catch (e) {
+        // 오류는 Smithy 모델의 오류를 기반으로 타입 지정됨
         const err = e as GetItemError;
         setError(err);
+
         switch (err.status) {
           case 404:
+            // err.error는 ItemNotFoundError로 타입 지정됨
             console.error('Not found:', err.error.message);
             break;
           case 500:
+            // err.error는 InternalServerError로 타입 지정됨
             console.error('Server error:', err.error.message);
+            console.error('Trace ID:', err.error.traceId);
             break;
         }
       } finally {
@@ -930,22 +974,28 @@ function ItemComponent() {
     fetchItem();
   }, [api]);
 
+  // 오류 처리가 포함된 아이템 생성
   const handleCreateItem = async (data) => {
     try {
       await api.createItem(data);
     } catch (e) {
       const err = e as CreateItemError;
+
       switch (err.status) {
         case 400:
+          // err.error는 InvalidRequestError로 타입 지정됨
           console.error('Validation error:', err.error.message);
+          console.error('Field errors:', err.error.fieldErrors);
           break;
         case 403:
+          // err.error는 UnauthorizedError로 타입 지정됨
           console.error('Unauthorized:', err.error.reason);
           break;
       }
     }
   };
 
+  // 오류 처리가 포함된 컴포넌트 렌더링
   if (loading) {
     return <LoadingSpinner />;
   }
@@ -992,9 +1042,11 @@ function ItemList() {
     const err = items.error;
     switch (err.status) {
       case 403:
+        // err.error는 ListItems403Response로 타입 지정됨
         return <ErrorMessage message={err.error.reason} />;
       case 500:
       case 502:
+        // err.error는 ListItems5XXResponse로 타입 지정됨
         return (
           <ErrorMessage
             message={err.error.message}
@@ -1045,9 +1097,11 @@ function ItemList() {
     const err = error as ListItemsError;
     switch (err.status) {
       case 403:
+        // err.error는 ListItems403Response로 타입 지정됨
         return <ErrorMessage message={err.error.reason} />;
       case 500:
       case 502:
+        // err.error는 ListItems5XXResponse로 타입 지정됨
         return (
           <ErrorMessage
             message={err.error.message}
@@ -1080,24 +1134,35 @@ function ItemList() {
   const api = useMyApi();
   const queryClient = useQueryClient();
 
+  // 아이템 가져오기 쿼리
   const itemsQuery = useQuery(api.listItems.queryOptions());
 
+  // 낙관적 업데이트가 포함된 아이템 삭제 뮤테이션
   const deleteMutation = useMutation({
     ...api.deleteItem.mutationOptions(),
     onMutate: async (itemId) => {
+      // 진행 중인 리페치 취소
       await queryClient.cancelQueries({ queryKey: api.listItems.queryKey() });
+
+      // 이전 값 스냅샷
       const previousItems = queryClient.getQueryData(api.listItems.queryKey());
+
+      // 새 값으로 낙관적 업데이트
       queryClient.setQueryData(
         api.listItems.queryKey(),
         (old) => old.filter((item) => item.id !== itemId)
       );
+
+      // 스냅샷이 포함된 컨텍스트 객체 반환
       return { previousItems };
     },
     onError: (err, itemId, context) => {
+      // 뮤테이션 실패 시 onMutate에서 반환된 컨텍스트를 사용하여 롤백
       queryClient.setQueryData(api.listItems.queryKey(), context.previousItems);
       console.error('Failed to delete item:', err);
     },
     onSettled: () => {
+      // 오류 또는 성공 후 항상 리페치하여 서버와 데이터 동기화 보장
       queryClient.invalidateQueries({ queryKey: api.listItems.queryKey() });
     },
   });
@@ -1135,12 +1200,14 @@ function ItemList() {
   const [items, setItems] = useState([]);
 
   const handleDelete = async (itemId) => {
+    // 낙관적으로 아이템 제거
     const previousItems = items;
     setItems(items.filter((item) => item.id !== itemId));
 
     try {
       await api.deleteItem(itemId);
     } catch (error) {
+      // 오류 시 이전 아이템 복원
       setItems(previousItems);
       console.error('Failed to delete item:', error);
     }
@@ -1170,21 +1237,27 @@ import { useMutation } from '@tanstack/react-query';
 function ItemForm() {
   const api = useMyApi();
 
+  // 아이템 생성을 위한 타입 세이프 뮤테이션
   const createItem = useMutation({
     ...api.createItem.mutationOptions(),
+    // ✅ onSuccess 콜백이 올바른 응답 타입을 처리하지 않으면 타입 오류 발생
     onSuccess: (data) => {
+      // data는 API의 응답 스키마를 기반으로 완전히 타입 지정됨
       console.log(`Item created with ID: ${data.id}`);
     },
   });
 
   const handleSubmit = (data: CreateItemInput) => {
+    // ✅ 입력이 스키마와 일치하지 않으면 타입 오류 발생
     createItem.mutate(data);
   };
 
+  // 오류 UI는 타입 좁히기를 사용하여 다양한 오류 유형 처리 가능
   if (createItem.error) {
     const error = createItem.error;
     switch (error.status) {
       case 400:
+        // error.error는 InvalidRequestError로 타입 지정됨
         return (
           <FormError
             message="Invalid input"
@@ -1192,8 +1265,10 @@ function ItemForm() {
           />
         );
       case 403:
+        // error.error는 UnauthorizedError로 타입 지정됨
         return <AuthError reason={error.error.reason} />;
       default:
+        // error.error는 500 등에 대해 InternalServerError로 타입 지정됨
         return <ServerError message={error.error.message} />;
     }
   }
@@ -1203,6 +1278,7 @@ function ItemForm() {
       e.preventDefault();
       handleSubmit({ name: 'New Item' });
     }}>
+      {/* 폼 필드 */}
       <button
         type="submit"
         disabled={createItem.isPending}
@@ -1222,17 +1298,22 @@ function ItemForm() {
 
   const handleSubmit = async (data: CreateItemInput) => {
     try {
+      // ✅ 입력이 스키마와 일치하지 않으면 타입 오류 발생
       await api.createItem(data);
     } catch (e) {
+      // ✅ 오류 타입은 가능한 모든 오류 응답을 포함
       const err = e as CreateItemError;
       switch (err.status) {
         case 400:
+          // err.error는 InvalidRequestError로 타입 지정됨
           console.error('Validation errors:', err.error.fieldErrors);
           break;
         case 403:
+          // err.error는 UnauthorizedError로 타입 지정됨
           console.error('Not authorized:', err.error.reason);
           break;
         case 500:
+          // err.error는 InternalServerError로 타입 지정됨
           console.error('Server error:', err.error.message);
           break;
       }
@@ -1240,6 +1321,7 @@ function ItemForm() {
     }
   };
 
+  // 오류 UI는 타입 좁히기를 사용하여 다양한 오류 유형 처리 가능
   if (error) {
     switch (error.status) {
       case 400:
