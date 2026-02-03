@@ -3,37 +3,51 @@
 exports[`trpc react generator > should generate trpc react files > TestApiClientProvider.tsx 1`] = `
 "import { AppRouter } from 'backend';
 import { useQueryClient } from '@tanstack/react-query';
-import { createTRPCContext } from '@trpc/tanstack-react-query';
-import { FC, PropsWithChildren, useMemo } from 'react';
+import { createTRPCOptionsProxy } from '@trpc/tanstack-react-query';
+import { createContext, FC, PropsWithChildren, useMemo } from 'react';
 import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
-import { HTTPLinkOptions, createTRPCClient, httpLink } from '@trpc/client';
+import {
+  HTTPLinkOptions,
+  TRPCClient,
+  createTRPCClient,
+  httpLink,
+} from '@trpc/client';
 
-export const TestApiTRPCContext: ReturnType<
-  typeof createTRPCContext<AppRouter>
-> = createTRPCContext<AppRouter>();
+interface TestApiTRPCContextValue {
+  optionsProxy: ReturnType<typeof createTRPCOptionsProxy<AppRouter>>;
+  client: TRPCClient<AppRouter>;
+}
+
+export const TestApiTRPCContext = createContext<TestApiTRPCContextValue | null>(
+  null,
+);
 
 export const TestApiClientProvider: FC<PropsWithChildren> = ({ children }) => {
   const queryClient = useQueryClient();
   const runtimeConfig = useRuntimeConfig();
   const apiUrl = runtimeConfig.apis.TestApi;
 
-  const trpcClient = useMemo(() => {
+  const container = useMemo<TestApiTRPCContextValue>(() => {
     const linkOptions: HTTPLinkOptions<any> = {
       url: apiUrl,
     };
 
-    return createTRPCClient<AppRouter>({
+    const client = createTRPCClient<AppRouter>({
       links: [httpLink(linkOptions)],
     });
-  }, [apiUrl]);
+
+    const optionsProxy = createTRPCOptionsProxy<AppRouter>({
+      client,
+      queryClient,
+    });
+
+    return { optionsProxy, client };
+  }, [apiUrl, queryClient]);
 
   return (
-    <TestApiTRPCContext.TRPCProvider
-      trpcClient={trpcClient}
-      queryClient={queryClient}
-    >
+    <TestApiTRPCContext.Provider value={container}>
       {children}
-    </TestApiTRPCContext.TRPCProvider>
+    </TestApiTRPCContext.Provider>
   );
 };
 
@@ -42,34 +56,60 @@ export default TestApiClientProvider;
 `;
 
 exports[`trpc react generator > should generate trpc react files > useTestApi.tsx 1`] = `
-"import { TestApiTRPCContext } from '../components/TestApiClientProvider';
+"import { useContext } from 'react';
+import { TestApiTRPCContext } from '../components/TestApiClientProvider';
 
-export const useTestApi = TestApiTRPCContext.useTRPC;
+export const useTestApi = () => {
+  const container = useContext(TestApiTRPCContext);
+  if (!container) {
+    throw new Error('useTestApi must be used within TestApiClientProvider');
+  }
+  return container.optionsProxy;
+};
+
+export const useTestApiClient = () => {
+  const container = useContext(TestApiTRPCContext);
+  if (!container) {
+    throw new Error(
+      'useTestApiClient must be used within TestApiClientProvider',
+    );
+  }
+  return container.client;
+};
 "
 `;
 
 exports[`trpc react generator > should handle Cognito auth option > TestApiClientProvider-Cognito.tsx 1`] = `
 "import { AppRouter } from 'backend';
 import { useQueryClient } from '@tanstack/react-query';
-import { createTRPCContext } from '@trpc/tanstack-react-query';
-import { FC, PropsWithChildren, useMemo } from 'react';
+import { createTRPCOptionsProxy } from '@trpc/tanstack-react-query';
+import { createContext, FC, PropsWithChildren, useMemo } from 'react';
 import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
-import { HTTPLinkOptions, createTRPCClient, httpLink } from '@trpc/client';
+import {
+  HTTPLinkOptions,
+  TRPCClient,
+  createTRPCClient,
+  httpLink,
+} from '@trpc/client';
 import { useAuth } from 'react-oidc-context';
 
-export const TestApiTRPCContext: ReturnType<
-  typeof createTRPCContext<AppRouter>
-> = createTRPCContext<AppRouter>();
+interface TestApiTRPCContextValue {
+  optionsProxy: ReturnType<typeof createTRPCOptionsProxy<AppRouter>>;
+  client: TRPCClient<AppRouter>;
+}
+
+export const TestApiTRPCContext = createContext<TestApiTRPCContextValue | null>(
+  null,
+);
 
 export const TestApiClientProvider: FC<PropsWithChildren> = ({ children }) => {
   const queryClient = useQueryClient();
   const runtimeConfig = useRuntimeConfig();
   const apiUrl = runtimeConfig.apis.TestApi;
-
   const auth = useAuth();
   const user = auth?.user;
 
-  const trpcClient = useMemo(() => {
+  const container = useMemo<TestApiTRPCContextValue>(() => {
     const linkOptions: HTTPLinkOptions<any> = {
       url: apiUrl,
       headers: {
@@ -77,18 +117,22 @@ export const TestApiClientProvider: FC<PropsWithChildren> = ({ children }) => {
       },
     };
 
-    return createTRPCClient<AppRouter>({
+    const client = createTRPCClient<AppRouter>({
       links: [httpLink(linkOptions)],
     });
-  }, [apiUrl, user]);
+
+    const optionsProxy = createTRPCOptionsProxy<AppRouter>({
+      client,
+      queryClient,
+    });
+
+    return { optionsProxy, client };
+  }, [apiUrl, queryClient, user]);
 
   return (
-    <TestApiTRPCContext.TRPCProvider
-      trpcClient={trpcClient}
-      queryClient={queryClient}
-    >
+    <TestApiTRPCContext.Provider value={container}>
       {children}
-    </TestApiTRPCContext.TRPCProvider>
+    </TestApiTRPCContext.Provider>
   );
 };
 
@@ -99,41 +143,54 @@ export default TestApiClientProvider;
 exports[`trpc react generator > should handle IAM auth option > TestApiClientProvider-IAM.tsx 1`] = `
 "import { AppRouter } from 'backend';
 import { useQueryClient } from '@tanstack/react-query';
-import { createTRPCContext } from '@trpc/tanstack-react-query';
-import { FC, PropsWithChildren, useMemo } from 'react';
+import { createTRPCOptionsProxy } from '@trpc/tanstack-react-query';
+import { createContext, FC, PropsWithChildren, useMemo } from 'react';
 import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
-import { HTTPLinkOptions, createTRPCClient, httpLink } from '@trpc/client';
+import {
+  HTTPLinkOptions,
+  TRPCClient,
+  createTRPCClient,
+  httpLink,
+} from '@trpc/client';
 import { useSigV4 } from '../hooks/useSigV4';
 
-export const TestApiTRPCContext: ReturnType<
-  typeof createTRPCContext<AppRouter>
-> = createTRPCContext<AppRouter>();
+interface TestApiTRPCContextValue {
+  optionsProxy: ReturnType<typeof createTRPCOptionsProxy<AppRouter>>;
+  client: TRPCClient<AppRouter>;
+}
+
+export const TestApiTRPCContext = createContext<TestApiTRPCContextValue | null>(
+  null,
+);
 
 export const TestApiClientProvider: FC<PropsWithChildren> = ({ children }) => {
   const queryClient = useQueryClient();
   const runtimeConfig = useRuntimeConfig();
   const apiUrl = runtimeConfig.apis.TestApi;
-
   const sigv4Client = useSigV4();
 
-  const trpcClient = useMemo(() => {
+  const container = useMemo<TestApiTRPCContextValue>(() => {
     const linkOptions: HTTPLinkOptions<any> = {
       url: apiUrl,
       fetch: sigv4Client,
     };
 
-    return createTRPCClient<AppRouter>({
+    const client = createTRPCClient<AppRouter>({
       links: [httpLink(linkOptions)],
     });
-  }, [apiUrl, sigv4Client]);
+
+    const optionsProxy = createTRPCOptionsProxy<AppRouter>({
+      client,
+      queryClient,
+    });
+
+    return { optionsProxy, client };
+  }, [apiUrl, queryClient, sigv4Client]);
 
   return (
-    <TestApiTRPCContext.TRPCProvider
-      trpcClient={trpcClient}
-      queryClient={queryClient}
-    >
+    <TestApiTRPCContext.Provider value={container}>
       {children}
-    </TestApiTRPCContext.TRPCProvider>
+    </TestApiTRPCContext.Provider>
   );
 };
 
