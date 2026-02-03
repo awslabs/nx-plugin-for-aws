@@ -62,11 +62,11 @@ export const runSmokeTest = async (
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:api-connection --sourceProject=@e2e-test/website --targetProject=@e2e-test/my-api --no-interactive`,
+    `generate @aws/nx-plugin:connection --sourceProject=@e2e-test/website --targetProject=@e2e-test/my-api --no-interactive`,
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:api-connection --sourceProject=@e2e-test/website-no-router --targetProject=@e2e-test/my-api --no-interactive`,
+    `generate @aws/nx-plugin:connection --sourceProject=@e2e-test/website-no-router --targetProject=@e2e-test/my-api --no-interactive`,
     opts,
   );
   await runCLI(
@@ -118,7 +118,7 @@ export const runSmokeTest = async (
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:api-connection --sourceProject=website --targetProject=py_api --no-interactive`,
+    `generate @aws/nx-plugin:connection --sourceProject=website --targetProject=py_api --no-interactive`,
     opts,
   );
   await runCLI(
@@ -126,7 +126,7 @@ export const runSmokeTest = async (
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:api-connection --sourceProject=website --targetProject=my-smithy-api --no-interactive`,
+    `generate @aws/nx-plugin:connection --sourceProject=website --targetProject=my-smithy-api --no-interactive`,
     opts,
   );
 

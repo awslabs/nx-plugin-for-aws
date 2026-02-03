@@ -29,7 +29,7 @@ import {
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { addTargetToServeLocal } from '../../api-connection/serve-local';
+import { addTargetToServeLocal } from '../../connection/serve-local';
 
 export const TRPC_REACT_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);

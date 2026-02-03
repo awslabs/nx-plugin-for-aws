@@ -1,0 +1,1467 @@
+---
+title: "ReactからFastAPIへ"
+description: "ReactウェブサイトをPython FastAPIに接続する"
+---
+
+import { FileTree, Steps } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Drawer from '@components/drawer.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+
+`connection` ジェネレータは、React ウェブサイトと FastAPI バックエンドを迅速に統合する方法を提供します。型安全な方法で FastAPI バックエンドに接続するために必要なすべての設定（クライアントと [TanStack Query](https://tanstack.com/query/v5) フックの生成、AWS IAM および Cognito 認証のサポート、適切なエラーハンドリングなど）をセットアップします。
+
+## 前提条件
+
+このジェネレータを使用する前に、React アプリケーションが以下を満たしていることを確認してください:
+
+1. アプリケーションをレンダリングする `main.tsx` ファイルが存在すること
+2. FastAPI ジェネレータで生成された動作可能な FastAPI バックエンドが存在すること
+3. Cognito または IAM 認証を使用する API に接続する場合、<Link path="/guides/react-website-auth">`ts#react-website-auth` ジェネレータ</Link>経由で Cognito 認証が追加されていること
+
+<details>
+<summary>必要な `main.tsx` の構造例</summary>
+
+```tsx
+import { StrictMode } from 'react';
+import * as ReactDOM from 'react-dom/client';
+import App from './app/app';
+
+const root = ReactDOM.createRoot(
+  document.getElementById('root') as HTMLElement,
+);
+root.render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+);
+```
+
+</details>
+
+## 使用方法
+
+### ジェネレータの実行
+
+<RunGenerator generator="connection" />
+
+### オプション
+
+<GeneratorParameters generator="connection" />
+
+## ジェネレータの出力
+
+ジェネレータは FastAPI プロジェクトの以下のファイルを変更します:
+
+<FileTree>
+
+- scripts
+  - generate_open_api.py API の OpenAPI 仕様を生成するスクリプトを追加
+- project.json 上記の生成スクリプトを呼び出す新しいターゲットをビルドに追加
+
+</FileTree>
+
+ジェネレータは React アプリケーションの以下のファイルを変更します:
+
+<FileTree>
+
+- src
+  - components
+    - \<ApiName>Provider.tsx API クライアント用プロバイダ
+    - QueryClientProvider.tsx TanStack React Query クライアントプロバイダ
+  - hooks
+    - use\<ApiName>.tsx TanStack Query で状態管理された API 呼び出し用フックを追加
+    - use\<ApiName>Client.tsx API を呼び出せる通常の API クライアントをインスタンス化するフックを追加
+    - useSigV4.tsx IAM 認証を選択した場合、SigV4 で HTTP リクエストに署名するフックを追加
+- project.json 型安全なクライアントを生成する新しいビルドターゲットを追加
+- .gitignore 生成されたクライアントファイルをデフォルトで無視
+
+</FileTree>
+
+また、ジェネレータは、まだ存在しない場合、ウェブサイトインフラにランタイム設定を追加します。これにより、FastAPI の API URL がウェブサイトで利用可能になり、`use<ApiName>.tsx` フックで自動設定されます。
+
+### コード生成
+
+ビルド時に、FastAPI の OpenAPI 仕様から型安全なクライアントが生成されます。これにより React アプリケーションに3つの新しいファイルが追加されます:
+
+<FileTree>
+
+- src
+  - generated
+    - \<ApiName>
+      - types.gen.ts FastAPI で定義された pydantic モデルから生成された型
+      - client.gen.ts API 呼び出し用の型安全なクライアント
+      - options-proxy.gen.ts TanStack Query を使用して API とやり取りするための TanStack Query フックオプションを作成するメソッドを提供
+
+</FileTree>
+
+:::tip
+デフォルトでは、生成されたクライアントはバージョン管理から除外されます。チェックインしたい場合は、React アプリケーションの `.gitignore` ファイルから該当エントリを削除できますが、`.gen.ts` ファイルへの手動変更はプロジェクトビルド時に上書きされることに注意してください。
+:::
+
+## 生成コードの使用方法
+
+生成された型安全なクライアントを使用して、React アプリケーションから FastAPI を呼び出すことができます。TanStack Query フック経由での使用が推奨されますが、通常のクライアントを直接使用することも可能です。
+
+:::note
+FastAPI に変更を加えた場合、生成クライアントに変更を反映させるにはプロジェクトの再ビルドが必要です。例:
+
+<NxCommands commands={['run-many --target build --all']} />
+:::
+
+:::tip
+React アプリケーションと FastAPI を同時に開発している場合は、React アプリケーションの `serve-local` ターゲットを使用してください。API が変更されるたびにクライアントの自動再生成、ウェブサイトとローカル FastAPI サーバーのホットリロードが行われます:
+
+<NxCommands commands={['run <WebsiteProject>:serve-local']} />
+
+より細かい制御が必要な場合は、React アプリケーションの `watch-generate:<ApiName>-client` ターゲットを使用して、API 変更のたびにクライアントを再生成できます:
+
+<NxCommands commands={['run <WebsiteProject>:"watch-generate:<ApiName>-client"']}
+/>
+:::
+
+:::warning
+`watch-generate:<ApiName>-client` は [`nx watch`](https://nx.dev/docs/guides/tasks--caching/workspace-watching) コマンドに依存しており、[Nx Daemon](https://nx.dev/docs/concepts/nx-daemon) の実行が必要です。デーモンを無効にしている場合、FastAPI への変更時にクライアントが自動再生成されません。
+:::
+
+### API フックの使用方法
+
+ジェネレータが提供する `use<ApiName>` フックを使用して、TanStack Query で API を呼び出すことができます。
+
+### クエリ
+
+`queryOptions` メソッドを使用して、TanStack Query の `useQuery` フックで API を呼び出すためのオプションを取得できます:
+
+```tsx {7}
+import { useQuery } from '@tanstack/react-query';
+import { useState, useEffect } from 'react';
+import { useMyApi } from './hooks/useMyApi';
+
+function MyComponent() {
+  const api = useMyApi();
+  const item = useQuery(api.getItem.queryOptions({ itemId: 'some-id' }));
+
+  if (item.isLoading) return <div>Loading...</div>;
+  if (item.isError) return <div>Error: {item.error.message}</div>;
+
+  return <div>Item: {item.data.name}</div>;
+}
+```
+
+<Drawer title="API クライアントを直接使用する例" trigger="クリックして通常クライアントを直接使用する例を表示">
+```tsx {5,13}
+import { useState, useEffect } from 'react';
+import { useMyApiClient } from './hooks/useMyApiClient';
+
+function MyComponent() {
+  const api = useMyApiClient();
+  const [item, setItem] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const fetchItem = async () => {
+      try {
+        const data = await api.getItem({ itemId: 'some-id' });
+        setItem(data);
+      } catch (err) {
+        setError(err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchItem();
+  }, [api]);
+
+  if (loading) return <div>Loading...</div>;
+  if (error) return <div>Error: {error.message}</div>;
+
+  return <div>Item: {item.name}</div>;
+}
+```
+</Drawer>
+
+### ミューテーション
+
+生成されたフックは、TanStack Query の `useMutation` フックを使用したミューテーションをサポートします。これにより、ローディング状態、エラーハンドリング、楽観的更新を伴う作成・更新・削除操作を効率的に処理できます。
+
+```tsx {5-7,11}
+import { useMutation } from '@tanstack/react-query';
+import { useMyApi } from './hooks/useMyApi';
+
+function CreateItemForm() {
+  const api = useMyApi();
+  // 生成されたミューテーションオプションを使用してミューテーションを作成
+  const createItem = useMutation(api.createItem.mutationOptions());
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    createItem.mutate({ name: 'New Item', description: 'A new item' });
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      {/* フォームフィールド */}
+      <button
+        type="submit"
+        disabled={createItem.isPending}
+      >
+        {createItem.isPending ? '作成中...' : 'アイテム作成'}
+      </button>
+
+      {createItem.isSuccess && (
+        <div className="success">
+          作成されたアイテムID: {createItem.data.id}
+        </div>
+      )}
+
+      {createItem.isError && (
+        <div className="error">
+          エラー: {createItem.error.message}
+        </div>
+      )}
+    </form>
+  );
+}
+```
+
+ミューテーション状態に応じたコールバックも追加可能です:
+
+```tsx
+const createItem = useMutation({
+  ...api.createItem.mutationOptions(),
+  onSuccess: (data) => {
+    // ミューテーション成功時に実行
+    console.log('アイテム作成成功:', data);
+    // 新しいアイテムに遷移
+    navigate(`/items/${data.id}`);
+  },
+  onError: (error) => {
+    // ミューテーション失敗時に実行
+    console.error('アイテム作成失敗:', error);
+  },
+  onSettled: () => {
+    // ミューテーション完了時（成功または失敗）に実行
+    // 影響を受ける可能性のあるクエリを無効化するのに適した場所
+    queryClient.invalidateQueries({ queryKey: api.listItems.queryKey() });
+  }
+});
+```
+
+<Drawer title="クライアント直接使用したミューテーション例" trigger="クリックして通常クライアント使用例を表示">
+```tsx
+import { useState } from 'react';
+import { useMyApiClient } from './hooks/useMyApiClient';
+
+function CreateItemForm() {
+  const api = useMyApiClient();
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [createdItem, setCreatedItem] = useState(null);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const newItem = await api.createItem({
+        name: 'New Item',
+        description: 'A new item'
+      });
+      setCreatedItem(newItem);
+      // 新しいアイテムに遷移
+      // navigate(`/items/${newItem.id}`);
+    } catch (err) {
+      setError(err);
+      console.error('アイテム作成失敗:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      {/* フォームフィールド */}
+      <button
+        type="submit"
+        disabled={isLoading}
+      >
+        {isLoading ? '作成中...' : 'アイテム作成'}
+      </button>
+
+      {createdItem && (
+        <div className="success">
+          作成されたアイテムID: {createdItem.id}
+        </div>
+      )}
+
+      {error && (
+        <div className="error">
+          エラー: {error.message}
+        </div>
+      )}
+    </form>
+  );
+}
+```
+</Drawer>
+
+### 無限クエリによるページネーション
+
+`cursor` パラメータを受け入れるエンドポイントの場合、生成フックは TanStack Query の `useInfiniteQuery` フックを使用した無限クエリをサポートします。「さらに読み込む」や無限スクロール機能の実装が容易になります。
+
+```tsx {6-16,30-34}
+import { useInfiniteQuery } from '@tanstack/react-query';
+import { useMyApi } from './hooks/useMyApi';
+
+function ItemList() {
+  const api = useMyApi();
+  const items = useInfiniteQuery({
+    ...api.listItems.infiniteQueryOptions({
+      limit: 10, // 1ページあたりのアイテム数
+    }, {
+      // 次のページの 'cursor' として渡すパラメータを返す
+      // getNextPageParam 関数を定義してください
+      getNextPageParam: (lastPage) =>
+        lastPage.nextCursor || undefined
+      }),
+  });
+
+  if (items.isLoading) {
+    return <LoadingSpinner />;
+  }
+
+  if (items.isError) {
+    return <ErrorMessage message={items.error.message} />;
+  }
+
+  return (
+    <div>
+      {/* すべてのアイテムをレンダリングするためにページ配列をフラット化 */}
+      <ul>
+        {items.data.pages.flatMap(page =>
+          page.items.map(item => (
+            <li key={item.id}>{item.name}</li>
+          ))
+        )}
+      </ul>
+
+      <button
+        onClick={() => items.fetchNextPage()}
+        disabled={!items.hasNextPage || items.isFetchingNextPage}
+      >
+        {items.isFetchingNextPage
+          ? '読み込み中...'
+          : items.hasNextPage
+          ? 'さらに読み込む'
+          : 'これ以上アイテムはありません'}
+      </button>
+    </div>
+  );
+}
+```
+
+生成フックは、API がサポートするカーソルベースのページネーションを自動処理します。`nextCursor` 値はレスポンスから抽出され、次のページの取得に使用されます。
+
+:::tip
+`cursor` 以外の名前のページネーションパラメータを使用する場合、[`x-cursor` OpenAPI ベンダー拡張でカスタマイズ](#custom-pagination-cursor)可能です。
+:::
+
+<Drawer title="クライアント直接使用したページネーション例" trigger="クリックして通常クライアント使用例を表示">
+```tsx
+import { useState, useEffect } from 'react';
+import { useMyApiClient } from './hooks/useMyApiClient';
+
+function ItemList() {
+  const api = useMyApiClient();
+  const [items, setItems] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [nextCursor, setNextCursor] = useState(null);
+  const [isFetchingMore, setIsFetchingMore] = useState(false);
+
+  // 初期データの取得
+  useEffect(() => {
+    const fetchItems = async () => {
+      try {
+        setIsLoading(true);
+        const response = await api.listItems({ limit: 10 });
+        setItems(response.items);
+        setNextCursor(response.nextCursor);
+      } catch (err) {
+        setError(err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchItems();
+  }, [api]);
+
+  // さらにアイテムを読み込む関数
+  const loadMore = async () => {
+    if (!nextCursor) return;
+
+    try {
+      setIsFetchingMore(true);
+      const response = await api.listItems({
+        limit: 10,
+        cursor: nextCursor
+      });
+
+      setItems(prevItems => [...prevItems, ...response.items]);
+      setNextCursor(response.nextCursor);
+    } catch (err) {
+      setError(err);
+    } finally {
+      setIsFetchingMore(false);
+    }
+  };
+
+  if (isLoading) {
+    return <LoadingSpinner />;
+  }
+
+  if (error) {
+    return <ErrorMessage message={error.message} />;
+  }
+
+  return (
+    <div>
+      <ul>
+        {items.map(item => (
+          <li key={item.id}>{item.name}</li>
+        ))}
+      </ul>
+
+      <button
+        onClick={loadMore}
+        disabled={!nextCursor || isFetchingMore}
+      >
+        {isFetchingMore
+          ? '読み込み中...'
+          : nextCursor
+          ? 'さらに読み込む'
+          : 'これ以上アイテムはありません'}
+      </button>
+    </div>
+  );
+}
+```
+</Drawer>
+
+### エラーハンドリング
+
+統合には型指定されたエラーレスポンスを伴う組み込みのエラーハンドリングが含まれます。OpenAPI 仕様で定義された可能なエラーレスポンスをカプセル化する `<operation-name>Error` 型が生成されます。各エラーは `status` と `error` プロパティを持ち、`status` 値をチェックすることで特定のエラータイプを判別できます。
+
+```tsx {12}
+import { useMutation } from '@tanstack/react-query';
+
+function MyComponent() {
+  const api = useMyApi();
+  const createItem = useMutation(api.createItem.mutationOptions());
+
+  const handleClick = () => {
+    createItem.mutate({ name: 'New Item' });
+  };
+
+  if (createItem.error) {
+    switch (createItem.error.status) {
+      case 400:
+        // error.error は CreateItem400Response として型指定
+        return (
+          <div>
+            <h2>無効な入力:</h2>
+            <p>{createItem.error.error.message}</p>
+            <ul>
+              {createItem.error.error.validationErrors.map((err) => (
+                <li key={err.field}>{err.message}</li>
+              ))}
+            </ul>
+          </div>
+        );
+      case 403:
+        // error.error は CreateItem403Response として型指定
+        return (
+          <div>
+            <h2>権限なし:</h2>
+            <p>{createItem.error.error.reason}</p>
+          </div>
+        );
+      case 500:
+      case 502:
+        // error.error は CreateItem5XXResponse として型指定
+        return (
+          <div>
+            <h2>サーバーエラー:</h2>
+            <p>{createItem.error.error.message}</p>
+            <p>トレースID: {createItem.error.error.traceId}</p>
+          </div>
+        );
+    }
+  }
+
+  return <button onClick={handleClick}>アイテム作成</button>;
+}
+```
+
+<Drawer title="クライアント直接使用したエラーハンドリング例" trigger="クリックして通常クライアント使用例を表示">
+```tsx {9,15}
+function MyComponent() {
+  const api = useMyApiClient();
+  const [error, setError] = useState<CreateItemError | null>(null);
+
+  const handleClick = async () => {
+    try {
+      await api.createItem({ name: 'New Item' });
+    } catch (e) {
+      const err = e as CreateItemError;
+      setError(err);
+    }
+  };
+
+  if (error) {
+    switch (error.status) {
+      case 400:
+        // error.error は CreateItem400Response として型指定
+        return (
+          <div>
+            <h2>無効な入力:</h2>
+            <p>{error.error.message}</p>
+            <ul>
+              {error.error.validationErrors.map((err) => (
+                <li key={err.field}>{err.message}</li>
+              ))}
+            </ul>
+          </div>
+        );
+      case 403:
+        // error.error は CreateItem403Response として型指定
+        return (
+          <div>
+            <h2>権限なし:</h2>
+            <p>{error.error.reason}</p>
+          </div>
+        );
+      case 500:
+      case 502:
+        // error.error は CreateItem5XXResponse として型指定
+        return (
+          <div>
+            <h2>サーバーエラー:</h2>
+            <p>{error.error.message}</p>
+            <p>トレースID: {error.error.traceId}</p>
+          </div>
+        );
+    }
+  }
+
+  return <button onClick={handleClick}>アイテム作成</button>;
+}
+```
+</Drawer>
+
+### ストリームの消費
+
+<Link path="guides/fastapi#streaming">ストリーム応答を設定した FastAPI</Link> がある場合、`useQuery` フックは新しいストリームチャンクが到着するたびにデータを自動更新します。
+
+例:
+
+```tsx {3}
+function MyStreamingComponent() {
+  const api = useMyApi();
+  const stream = useQuery(api.myStream.queryOptions());
+
+  return (
+    <ul>
+      {(stream.data ?? []).map((chunk) => (
+        <li>
+          {chunk.timestamp.toISOString()}: {chunk.message}
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+必要に応じて、ストリームの現在の状態を判断するために `isLoading` と `fetchStatus` プロパティを使用できます。ストリームのライフサイクル:
+
+<Steps>
+  1. ストリーム開始 HTTP リクエスト送信
+
+      - `isLoading`: `true`
+      - `fetchStatus`: `'fetching'`
+      - `data`: `undefined`
+
+  2. 最初のチャンク受信
+
+      - `isLoading`: `false`
+      - `fetchStatus`: `'fetching'`
+      - `data`: 最初のチャンクを含む配列
+
+  3. 後続のチャンク受信
+
+      - `isLoading`: `false`
+      - `fetchStatus`: `'fetching'`
+      - `data`: 受信したチャンクごとに即座に更新
+
+  4. ストリーム完了
+
+      - `isLoading`: `false`
+      - `fetchStatus`: `'idle'`
+      - `data`: 全チャンクを含む配列
+</Steps>
+
+<Drawer title="クライアント直接使用したストリーミング例" trigger="クリックして通常クライアント使用例を表示">
+
+<Link path="guides/fastapi#streaming">ストリーム応答を設定した FastAPI</Link> がある場合、生成クライアントは `for await` 構文を使用したストリームチャンクの非同期反復処理をサポートする型安全なメソッドを含みます。
+
+例:
+
+```tsx {8}
+function MyStreamingComponent() {
+  const api = useMyApiClient();
+
+  const [chunks, setChunks] = useState<Chunk[]>([]);
+
+  useEffect(() => {
+    const streamChunks = async () => {
+      for await (const chunk of api.myStream()) {
+        setChunks((prev) => [...prev, chunk]);
+      }
+    };
+    streamChunks();
+  }, [api]);
+
+  return (
+    <ul>
+      {chunks.map((chunk) => (
+        <li>
+          {chunk.timestamp.toISOString()}: {chunk.message}
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+</Drawer>
+
+:::note
+`cursor` パラメータを受け入れるストリーミング API を使用する場合、`useInfiniteQuery` フックを使用すると、各ページはストリームが完了するのを待ってから読み込まれます。
+:::
+
+## 生成コードのカスタマイズ
+
+### クエリとミューテーション
+
+デフォルトでは、HTTP メソッド `PUT`、`POST`、`PATCH`、`DELETE` を使用する FastAPI 操作はミューテーションと見なされ、その他はクエリと見なされます。
+
+`x-query` と `x-mutation` でこの動作を変更できます。
+
+#### x-query
+
+```python
+@app.post(
+    "/items",
+    openapi_extra={
+        "x-query": True
+    }
+)
+def list_items():
+    # ...
+```
+
+`POST` メソッドを使用していても、生成フックは `queryOptions` を提供:
+
+```tsx
+const items = useQuery(api.listItems.queryOptions());
+```
+
+#### x-mutation
+
+```python
+@app.get(
+    "/start-processing",
+    openapi_extra={
+        "x-mutation": True
+    }
+)
+def start_processing():
+    # ...
+```
+
+`GET` メソッドを使用していても、生成フックは `mutationOptions` を提供:
+
+```tsx
+// 生成フックにはカスタムオプションが含まれます
+const startProcessing = useMutation(api.startProcessing.mutationOptions());
+```
+
+### カスタムページネーションカーソル
+
+デフォルトでは、生成フックは `cursor` という名前のパラメータを使用したカーソルベースのページネーションを想定します。`x-cursor` 拡張でこの動作をカスタマイズ可能:
+
+```python
+@app.get(
+    "/items",
+    openapi_extra={
+        # カーソル用の異なるパラメータ名を指定
+        "x-cursor": "page_token"
+    }
+)
+def list_items(page_token: str = None, limit: int = 10):
+    # ...
+    return {
+        "items": items,
+        "page_token": next_page_token
+    }
+```
+
+操作の `infiniteQueryOptions` を生成したくない場合、`x-cursor` を `False` に設定:
+
+```python
+@app.get(
+    "/items",
+    openapi_extra={
+        # このエンドポイントのカーソルベースページネーションを無効化
+        "x-cursor": False
+    }
+)
+def list_items(page: int = 1, limit: int = 10):
+    # ...
+    return {
+        "items": items,
+        "total": total_count,
+        "page": page,
+        "pages": total_pages
+    }
+```
+
+### 操作のグループ化
+
+生成フックとクライアントメソッドは、FastAPI エンドポイントの OpenAPI タグに基づいて自動的に整理されます。これにより API 呼び出しが整理され、関連する操作を簡単に見つけられるようになります。
+
+例:
+
+```python title="items.py"
+@app.get(
+    "/items",
+    tags=["items"],
+)
+def list():
+    # ...
+
+@app.post(
+    "/items",
+    tags=["items"],
+)
+def create(item: Item):
+    # ...
+```
+
+```python title="users.py"
+@app.get(
+    "/users",
+    tags=["users"],
+)
+def list():
+    # ...
+```
+
+生成フックはこれらのタグでグループ化:
+
+```tsx
+import { useQuery, useMutation } from '@tanstack/react-query';
+import { useMyApi } from './hooks/useMyApi';
+
+function ItemsAndUsers() {
+  const api = useMyApi();
+
+  // Items 操作は api.items の下にグループ化
+  const items = useQuery(api.items.list.queryOptions());
+  const createItem = useMutation(api.items.create.mutationOptions());
+
+  // Users 操作は api.users の下にグループ化
+  const users = useQuery(api.users.list.queryOptions());
+
+  // 使用例
+  const handleCreateItem = () => {
+    createItem.mutate({ name: 'New Item' });
+  };
+
+  return (
+    <div>
+      <h2>Items</h2>
+      <ul>
+        {items.data?.map(item => (
+          <li key={item.id}>{item.name}</li>
+        ))}
+      </ul>
+      <button onClick={handleCreateItem}>アイテム追加</button>
+
+      <h2>Users</h2>
+      <ul>
+        {users.data?.map(user => (
+          <li key={user.id}>{user.name}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+```
+
+このグループ化により、API 呼び出しの整理が容易になり、IDE でのコード補完が向上します。
+
+<Drawer title="クライアント直接使用したグループ化例" trigger="クリックして通常クライアント使用例を表示">
+```tsx
+import { useState, useEffect } from 'react';
+import { useMyApiClient } from './hooks/useMyApiClient';
+
+function ItemsAndUsers() {
+  const api = useMyApiClient();
+  const [items, setItems] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // データ読み込み
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setIsLoading(true);
+
+        // Items 操作は api.items の下にグループ化
+        const itemsData = await api.items.list();
+        setItems(itemsData);
+
+        // Users 操作は api.users の下にグループ化
+        const usersData = await api.users.list();
+        setUsers(usersData);
+      } catch (error) {
+        console.error('データ取得エラー:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchData();
+  }, [api]);
+
+  const handleCreateItem = async () => {
+    try {
+      // グループ化されたメソッドを使用してアイテムを作成
+      const newItem = await api.items.create({ name: 'New Item' });
+      setItems(prevItems => [...prevItems, newItem]);
+    } catch (error) {
+      console.error('アイテム作成エラー:', error);
+    }
+  };
+
+  if (isLoading) {
+    return <div>Loading...</div>;
+  }
+
+  return (
+    <div>
+      <h2>Items</h2>
+      <ul>
+        {items.map(item => (
+          <li key={item.id}>{item.name}</li>
+        ))}
+      </ul>
+      <button onClick={handleCreateItem}>アイテム追加</button>
+
+      <h2>Users</h2>
+      <ul>
+        {users.map(user => (
+          <li key={user.id}>{user.name}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+```
+</Drawer>
+
+:::tip
+API を複数の `router` で分割することも可能です。詳細は [FastAPI ドキュメント](https://fastapi.tiangolo.com/tutorial/bigger-applications/) を参照。
+:::
+
+### エラー
+
+カスタム例外クラス、例外ハンドラ、異なるエラーステータスコードのレスポンスモデルを定義することで、FastAPI のエラーレスポンスをカスタマイズできます。生成クライアントはこれらのカスタムエラータイプを自動処理します。
+
+#### カスタムエラーモデルの定義
+
+まず、Pydantic でエラーモデルを定義:
+
+```python title="models.py"
+from pydantic import BaseModel
+
+class ErrorDetails(BaseModel):
+    message: str
+
+class ValidationError(BaseModel):
+    message: str
+    field_errors: list[str]
+```
+
+#### カスタム例外の作成
+
+異なるエラーシナリオ用のカスタム例外クラスを作成:
+
+```python title="exceptions.py"
+class NotFoundException(Exception):
+    def __init__(self, message: str):
+        self.message = message
+
+class ValidationException(Exception):
+    def __init__(self, details: ValidationError):
+        self.details = details
+```
+
+#### 例外ハンドラの追加
+
+例外を HTTP レスポンスに変換する例外ハンドラを登録:
+
+```python title="main.py"
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
+@app.exception_handler(NotFoundException)
+async def not_found_handler(request: Request, exc: NotFoundException):
+    return JSONResponse(
+        status_code=404,
+        content=exc.message,
+    )
+
+@app.exception_handler(ValidationException)
+async def validation_error_handler(request: Request, exc: ValidationException):
+    return JSONResponse(
+        status_code=400,
+        content=exc.details.model_dump(),
+    )
+```
+
+:::tip
+`JSONResponse` は辞書を受け入れるため、Pydantic モデルの `model_dump` メソッドを使用します。
+:::
+
+#### レスポンスモデルの指定
+
+最後に、エンドポイント定義で異なるエラーステータスコードのレスポンスモデルを指定:
+
+```python title="main.py"
+@app.get(
+    "/items/{item_id}",
+    responses={
+        404: {"model": str}
+        500: {"model": ErrorDetails}
+    }
+)
+def get_item(item_id: str) -> Item:
+    item = find_item(item_id)
+    if not item:
+        raise NotFoundException(message=f"Item with ID {item_id} not found")
+    return item
+
+@app.post(
+    "/items",
+    responses={
+        400: {"model": ValidationError},
+        403: {"model": str}
+    }
+)
+def create_item(item: Item) -> Item:
+    if not is_valid(item):
+        raise ValidationException(
+            ValidationError(
+                message="Invalid item data",
+                field_errors=["name is required"]
+            )
+        )
+    return save_item(item)
+```
+
+#### React でのカスタムエラータイプの使用
+
+生成クライアントはこれらのカスタムエラータイプを自動処理し、異なるエラーレスポンスの型チェックと処理が可能:
+
+```tsx
+import { useMutation, useQuery } from '@tanstack/react-query';
+
+function ItemComponent() {
+  const api = useMyApi();
+
+  // 型指定されたエラーハンドリング付きクエリ
+  const getItem = useQuery({
+    ...api.getItem.queryOptions({ itemId: '123' }),
+    onError: (error) => {
+      // エラーは FastAPI の responses に基づいて型指定
+      switch (error.status) {
+        case 404:
+          // error.error は responses で指定された文字列
+          console.error('Not found:', error.error);
+          break;
+        case 500:
+          // error.error は ErrorDetails として型指定
+          console.error('Server error:', error.error.message);
+          break;
+      }
+    }
+  });
+
+  // 型指定されたエラーハンドリング付きミューテーション
+  const createItem = useMutation({
+    ...api.createItem.mutationOptions(),
+    onError: (error) => {
+      switch (error.status) {
+        case 400:
+          // error.error は ValidationError として型指定
+          console.error('Validation error:', error.error.message);
+          console.error('Field errors:', error.error.field_errors);
+          break;
+        case 403:
+          // error.error は responses で指定された文字列
+          console.error('Forbidden:', error.error);
+          break;
+      }
+    }
+  });
+
+  // エラーハンドリング付きコンポーネントレンダリング
+  if (getItem.isError) {
+    if (getItem.error.status === 404) {
+      return <NotFoundMessage message={getItem.error.error} />;
+    } else {
+      return <ErrorMessage message={getItem.error.error.message} />;
+    }
+  }
+
+  return (
+    <div>
+      {/* コンポーネントコンテンツ */}
+    </div>
+  );
+}
+```
+
+<Drawer title="クライアント直接使用したカスタムエラーハンドリング例" trigger="クリックして通常クライアント使用例を表示">
+```tsx
+import { useState, useEffect } from 'react';
+
+function ItemComponent() {
+  const api = useMyApiClient();
+  const [item, setItem] = useState(null);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  // エラーハンドリング付きアイテム取得
+  useEffect(() => {
+    const fetchItem = async () => {
+      try {
+        setLoading(true);
+        const data = await api.getItem({ itemId: '123' });
+        setItem(data);
+      } catch (e) {
+        // エラーは FastAPI の responses に基づいて型指定
+        const err = e as GetItemError;
+        setError(err);
+
+        switch (err.status) {
+          case 404:
+            // err.error は responses で指定された文字列
+            console.error('Not found:', err.error);
+            break;
+          case 500:
+            // err.error は ErrorDetails として型指定
+            console.error('Server error:', err.error.message);
+            break;
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchItem();
+  }, [api]);
+
+  // エラーハンドリング付きアイテム作成
+  const handleCreateItem = async (data) => {
+    try {
+      await api.createItem(data);
+    } catch (e) {
+      const err = e as CreateItemError;
+
+      switch (err.status) {
+        case 400:
+          // err.error は ValidationError として型指定
+          console.error('Validation error:', err.error.message);
+          console.error('Field errors:', err.error.field_errors);
+          break;
+        case 403:
+          // err.error は responses で指定された文字列
+          console.error('Forbidden:', err.error);
+          break;
+      }
+    }
+  };
+
+  // エラーハンドリング付きコンポーネントレンダリング
+  if (loading) {
+    return <LoadingSpinner />;
+  }
+
+  if (error) {
+    if (error.status === 404) {
+      return <NotFoundMessage message={error.error} />;
+    } else if (error.status === 500) {
+      return <ErrorMessage message={error.error.message} />;
+    }
+  }
+
+  return (
+    <div>
+      {/* コンポーネントコンテンツ */}
+    </div>
+  );
+}
+```
+</Drawer>
+
+:::tip
+FastAPI でエラーレスポンスを定義する際は、常に `responses` パラメータを使用して各ステータスコードのモデルを指定してください。これにより、生成クライアントがエラーハンドリング用の適切な型情報を持つようになります。
+:::
+
+## ベストプラクティス
+
+### ローディング状態の処理
+
+ユーザーエクスペリエンス向上のため、ローディングとエラー状態を常に処理:
+
+```tsx
+import { useQuery } from '@tanstack/react-query';
+
+function ItemList() {
+  const api = useMyApi();
+  const items = useQuery(api.listItems.queryOptions());
+
+  if (items.isLoading) {
+    return <LoadingSpinner />;
+  }
+
+  if (items.isError) {
+    const err = items.error;
+    switch (err.status) {
+      case 403:
+        // err.error は ListItems403Response として型指定
+        return <ErrorMessage message={err.error.reason} />;
+      case 500:
+      case 502:
+        // err.error は ListItems5XXResponse として型指定
+        return (
+          <ErrorMessage
+            message={err.error.message}
+            details={`トレースID: ${err.error.traceId}`}
+          />
+        );
+      default:
+        return <ErrorMessage message="不明なエラーが発生しました" />;
+    }
+  }
+
+  return (
+    <ul>
+      {items.data.map((item) => (
+        <li key={item.id}>{item.name}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+<Drawer title="クライアント直接使用したローディング処理例" trigger="クリックして通常クライアント使用例を表示">
+```tsx
+function ItemList() {
+  const api = useMyApiClient();
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const fetchItems = async () => {
+      try {
+        const data = await api.listItems();
+        setItems(data);
+      } catch (err) {
+        setError(err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchItems();
+  }, [api]);
+
+  if (loading) {
+    return <LoadingSpinner />;
+  }
+
+  if (error) {
+    const err = error as ListItemsError;
+    switch (err.status) {
+      case 403:
+        // err.error は ListItems403Response として型指定
+        return <ErrorMessage message={err.error.reason} />;
+      case 500:
+      case 502:
+        // err.error は ListItems5XXResponse として型指定
+        return (
+          <ErrorMessage
+            message={err.error.message}
+            details={`トレースID: ${err.error.traceId}`}
+          />
+        );
+      default:
+        return <ErrorMessage message="不明なエラーが発生しました" />;
+    }
+  }
+
+  return (
+    <ul>
+      {items.map((item) => (
+        <li key={item.id}>{item.name}</li>
+      ))}
+    </ul>
+  );
+}
+```
+</Drawer>
+
+### 楽観的更新
+
+ユーザーエクスペリエンス向上のため、楽観的更新を実装:
+
+```tsx
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+
+function ItemList() {
+  const api = useMyApi();
+  const queryClient = useQueryClient();
+
+  // アイテム取得クエリ
+  const itemsQuery = useQuery(api.listItems.queryOptions());
+
+  // 楽観的更新付きアイテム削除ミューテーション
+  const deleteMutation = useMutation({
+    ...api.deleteItem.mutationOptions(),
+    onMutate: async (itemId) => {
+      // 進行中のリフェッチをキャンセル
+      await queryClient.cancelQueries({ queryKey: api.listItems.queryKey() });
+
+      // 以前の値のスナップショット
+      const previousItems = queryClient.getQueryData(api.listItems.queryKey());
+
+      // 新しい値に楽観的更新
+      queryClient.setQueryData(
+        api.listItems.queryKey(),
+        (old) => old.filter((item) => item.id !== itemId)
+      );
+
+      // スナップショットを含むコンテキストオブジェクトを返す
+      return { previousItems };
+    },
+    onError: (err, itemId, context) => {
+      // ミューテーション失敗時、onMutate から返されたコンテキストを使用してロールバック
+      queryClient.setQueryData(api.listItems.queryKey(), context.previousItems);
+      console.error('アイテム削除失敗:', err);
+    },
+    onSettled: () => {
+      // エラーまたは成功後、常にリフェッチしてサーバーとデータを同期
+      queryClient.invalidateQueries({ queryKey: api.listItems.queryKey() });
+    },
+  });
+
+  if (itemsQuery.isLoading) {
+    return <LoadingSpinner />;
+  }
+
+  if (itemsQuery.isError) {
+    return <ErrorMessage message="アイテムの読み込みに失敗しました" />;
+  }
+
+  return (
+    <ul>
+      {itemsQuery.data.map((item) => (
+        <li key={item.id}>
+          {item.name}
+          <button
+            onClick={() => deleteMutation.mutate(item.id)}
+            disabled={deleteMutation.isPending}
+          >
+            {deleteMutation.isPending ? '削除中...' : '削除'}
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+<Drawer title="クライアント直接使用した楽観的更新例" trigger="クリックして通常クライアント使用例を表示">
+```tsx
+function ItemList() {
+  const api = useMyApiClient();
+  const [items, setItems] = useState([]);
+
+  const handleDelete = async (itemId) => {
+    // アイテムを楽観的に削除
+    const previousItems = items;
+    setItems(items.filter((item) => item.id !== itemId));
+
+    try {
+      await api.deleteItem(itemId);
+    } catch (error) {
+      // エラー時に以前のアイテムを復元
+      setItems(previousItems);
+      console.error('アイテム削除失敗:', error);
+    }
+  };
+
+  return (
+    <ul>
+      {items.map((item) => (
+        <li key={item.id}>
+          {item.name}
+          <button onClick={() => handleDelete(item.id)}>削除</button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+</Drawer>
+
+## 型安全性
+
+統合は完全なエンドツーエンドの型安全性を提供します。IDE はすべての API 呼び出しに対して完全なオートコンプリートと型チェックを提供します:
+
+```tsx
+import { useMutation } from '@tanstack/react-query';
+
+function ItemForm() {
+  const api = useMyApi();
+
+  // アイテム作成用の型安全なミューテーション
+  const createItem = useMutation({
+    ...api.createItem.mutationOptions(),
+    // ✅ onSuccess コールバックが正しいレスポンス型を処理しない場合、型エラー
+    onSuccess: (data) => {
+      // data は API のレスポンススキーマに基づいて完全に型指定
+      console.log(`作成されたアイテムID: ${data.id}`);
+    },
+  });
+
+  const handleSubmit = (data: CreateItemInput) => {
+    // ✅ 入力がスキーマと一致しない場合、型エラー
+    createItem.mutate(data);
+  };
+
+  // エラー UI は型の絞り込みを使用して異なるエラータイプを処理可能
+  if (createItem.error) {
+    const error = createItem.error;
+    switch (error.status) {
+      case 400:
+        // error.error は CreateItem400Response として型指定
+        return (
+          <FormError
+            message="無効な入力"
+            errors={error.error.validationErrors}
+          />
+        );
+      case 403:
+        // error.error は CreateItem403Response として型指定
+        return <AuthError reason={error.error.reason} />;
+      default:
+        // error.error は 500、502 などの CreateItem5XXResponse として型指定
+        return <ServerError message={error.error.message} />;
+    }
+  }
+
+  return (
+    <form onSubmit={(e) => {
+      e.preventDefault();
+      handleSubmit({ name: 'New Item' });
+    }}>
+      {/* フォームフィールド */}
+      <button
+        type="submit"
+        disabled={createItem.isPending}
+      >
+        {createItem.isPending ? '作成中...' : 'アイテム作成'}
+      </button>
+    </form>
+  );
+}
+```
+
+<Drawer title="クライアント直接使用した型安全性例" trigger="クリックして通常クライアント使用例を表示">
+```tsx
+function ItemForm() {
+  const api = useMyApiClient();
+  const [error, setError] = useState<CreateItemError | null>(null);
+
+  const handleSubmit = async (data: CreateItemInput) => {
+    try {
+      // ✅ 入力がスキーマと一致しない場合、型エラー
+      await api.createItem(data);
+    } catch (e) {
+      // ✅ エラー型にはすべての可能なエラーレスポンスが含まれる
+      const err = e as CreateItemError;
+      switch (err.status) {
+        case 400:
+          // err.error は CreateItem400Response として型指定
+          console.error('検証エラー:', err.error.validationErrors);
+          break;
+        case 403:
+          // err.error は CreateItem403Response として型指定
+          console.error('権限なし:', err.error.reason);
+          break;
+        case 500:
+        case 502:
+          // err.error は CreateItem5XXResponse として型指定
+          console.error(
+            'サーバーエラー:',
+            err.error.message,
+            'トレース:',
+            err.error.traceId,
+          );
+          break;
+      }
+      setError(err);
+    }
+  };
+
+  // エラー UI は型の絞り込みを使用して異なるエラータイプを処理可能
+  if (error) {
+    switch (error.status) {
+      case 400:
+        return (
+          <FormError
+            message="無効な入力"
+            errors={error.error.validationErrors}
+          />
+        );
+      case 403:
+        return <AuthError reason={error.error.reason} />;
+      default:
+        return <ServerError message={error.error.message} />;
+    }
+  }
+
+  return <form onSubmit={handleSubmit}>{/* ... */}</form>;
+}
+```
+</Drawer>
+
+型は FastAPI の OpenAPI スキーマから自動生成されるため、API への変更はビルド後にフロントエンドコードに反映されます。

@@ -12,7 +12,7 @@ import {
 } from '../../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { addOpenApiGeneration } from './open-api';
-import { addOpenApiReactClient } from '../../../utils/api-connection/open-api/react';
+import { addOpenApiReactClient } from '../../../utils/connection/open-api/react';
 
 export const FAST_API_REACT_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
