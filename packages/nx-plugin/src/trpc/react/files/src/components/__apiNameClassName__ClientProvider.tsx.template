@@ -1,16 +1,21 @@
 import { AppRouter } from "<%- backendProjectAlias %>";
 import { useQueryClient } from "@tanstack/react-query";
-import { createTRPCContext } from "@trpc/tanstack-react-query";
-import { FC, PropsWithChildren, useMemo } from "react";
+import { createTRPCOptionsProxy } from "@trpc/tanstack-react-query";
+import { createContext, FC, PropsWithChildren, useMemo } from "react";
 import { useRuntimeConfig } from "../hooks/useRuntimeConfig";
-import { HTTPLinkOptions, createTRPCClient, httpLink } from "@trpc/client";
+import { HTTPLinkOptions, TRPCClient, createTRPCClient, httpLink } from "@trpc/client";
 <%_ if (auth === 'IAM') { _%>
 import { useSigV4 } from "../hooks/useSigV4";
 <%_ } else if (auth === 'Cognito') { _%>
 import { useAuth } from "react-oidc-context";
 <%_ } _%>
 
-export const <%= apiNameClassName %>TRPCContext: ReturnType<typeof createTRPCContext<AppRouter>> = createTRPCContext<AppRouter>();
+interface <%= apiNameClassName %>TRPCContextValue {
+  optionsProxy: ReturnType<typeof createTRPCOptionsProxy<AppRouter>>;
+  client: TRPCClient<AppRouter>;
+}
+
+export const <%= apiNameClassName %>TRPCContext = createContext<<%= apiNameClassName %>TRPCContextValue | null>(null);
 
 export const <%= apiNameClassName %>ClientProvider: FC<PropsWithChildren> = ({
   children,
@@ -18,7 +23,6 @@ export const <%= apiNameClassName %>ClientProvider: FC<PropsWithChildren> = ({
   const queryClient = useQueryClient();
   const runtimeConfig = useRuntimeConfig();
   const apiUrl = runtimeConfig.apis.<%= apiNameClassName %>;
-
   <%_ if (auth === 'IAM') { _%>
   const sigv4Client = useSigV4();
   <%_ } else if (auth === 'Cognito') { _%>
@@ -26,7 +30,7 @@ export const <%= apiNameClassName %>ClientProvider: FC<PropsWithChildren> = ({
   const user = auth?.user;
   <%_ } _%>
 
-  const trpcClient = useMemo(() => {
+  const container = useMemo<<%= apiNameClassName %>TRPCContextValue>(() => {
     const linkOptions: HTTPLinkOptions<any> = {
       url: apiUrl,
       <%_ if (auth === 'IAM') { _%>
@@ -38,15 +42,22 @@ export const <%= apiNameClassName %>ClientProvider: FC<PropsWithChildren> = ({
       <%_ } _%>
     };
 
-    return createTRPCClient<AppRouter>({
+    const client = createTRPCClient<AppRouter>({
       links: [httpLink(linkOptions)],
     });
-  }, [apiUrl<% if (auth === 'IAM') { %>, sigv4Client<% } else if (auth === 'Cognito') { %>, user<% } %>]);
+
+    const optionsProxy = createTRPCOptionsProxy<AppRouter>({
+      client,
+      queryClient,
+    });
+
+    return { optionsProxy, client };
+  }, [apiUrl, queryClient<% if (auth === 'IAM') { %>, sigv4Client<% } else if (auth === 'Cognito') { %>, user<% } %>]);
 
   return (
-    <<%= apiNameClassName %>TRPCContext.TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
+    <<%= apiNameClassName %>TRPCContext.Provider value={container}>
       {children}
-    </<%= apiNameClassName %>TRPCContext.TRPCProvider>
+    </<%= apiNameClassName %>TRPCContext.Provider>
   );
 };
 
