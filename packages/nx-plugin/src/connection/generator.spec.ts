@@ -23,7 +23,7 @@ vi.mock('../smithy/react-connection/generator', () => ({
   default: vi.fn(),
 }));
 
-describe('api connection generator', () => {
+describe('connection generator', () => {
   let tree: Tree;
 
   beforeEach(() => {
