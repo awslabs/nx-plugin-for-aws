@@ -21,7 +21,7 @@ import {
   SHARED_SHADCN_DIR,
   SHARED_SHADCN_NAME,
 } from './shared-constructs-constants';
-import { withVersions } from './versions';
+import { ITsDepVersion, withVersions } from './versions';
 
 const SHADCN_DEPS = [
   'class-variance-authority',
@@ -29,13 +29,8 @@ const SHADCN_DEPS = [
   'tailwind-merge',
   'lucide-react',
   'tw-animate-css',
-  '@radix-ui/react-label',
-  '@radix-ui/react-primitive',
-  '@radix-ui/react-slot',
-  '@radix-ui/react-separator',
-  '@radix-ui/react-dialog',
-  '@radix-ui/react-tooltip',
-] as const;
+  'radix-ui',
+] as const satisfies ITsDepVersion[];
 
 const NPMRC_IGNORE_WORKSPACE_ROOT_CHECK = 'ignore-workspace-root-check=true';
 
