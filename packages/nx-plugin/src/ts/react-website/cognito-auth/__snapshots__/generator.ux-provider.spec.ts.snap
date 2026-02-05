@@ -1,0 +1,335 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`cognito-auth generator uxProvider tests > Cloudscape > should update AppLayout > app-layout-with-auth 1`] = `
+"import { useAuth } from 'react-oidc-context';
+import * as React from 'react';
+import { createContext, useCallback, useEffect, useState } from 'react';
+import { NavItems } from './navitems';
+import Config from '../../config';
+
+import {
+  BreadcrumbGroup,
+  BreadcrumbGroupProps,
+  SideNavigation,
+  TopNavigation,
+} from '@cloudscape-design/components';
+
+import CloudscapeAppLayout, {
+  AppLayoutProps,
+} from '@cloudscape-design/components/app-layout';
+
+import { matchByPath, useLocation, useNavigate } from '@tanstack/react-router';
+import { Outlet } from '@tanstack/react-router';
+
+const getBreadcrumbs = (
+  pathName: string,
+  search: string,
+  defaultBreadcrumb: string,
+  availableRoutes?: string[],
+) => {
+  const segments = [
+    defaultBreadcrumb,
+    ...pathName.split('/').filter((segment) => segment !== ''),
+  ];
+
+  return segments.map((segment, i) => {
+    const href =
+      i === 0
+        ? '/'
+        : \`/\${segments
+            .slice(1, i + 1)
+            .join('/')
+            .replace('//', '/')}\`;
+
+    const matched =
+      !availableRoutes || availableRoutes.find((r) => matchByPath(r, href, {}));
+
+    return {
+      href: matched ? \`\${href}\${search}\` : '#',
+      text: segment,
+    };
+  });
+};
+
+export interface AppLayoutContext {
+  appLayoutProps: AppLayoutProps;
+  setAppLayoutProps: (props: AppLayoutProps) => void;
+  displayHelpPanel: (helpContent: React.ReactNode) => void;
+}
+
+/**
+ * Context for updating/retrieving the AppLayout.
+ */
+export const AppLayoutContext = createContext({
+  appLayoutProps: {},
+  // eslint-disable-next-line @typescript-eslint/no-empty-function
+  setAppLayoutProps: (_: AppLayoutProps) => {},
+  // eslint-disable-next-line @typescript-eslint/no-empty-function
+  displayHelpPanel: (_: React.ReactNode) => {},
+});
+
+/**
+ * Defines the App layout and contains logic for routing.
+ */
+const AppLayout: React.FC = () => {
+  const { user, removeUser, signoutRedirect, clearStaleState } = useAuth();
+  const navigate = useNavigate();
+  const appLayout = React.useRef<AppLayoutProps.Ref>(null);
+  const [activeBreadcrumbs, setActiveBreadcrumbs] = useState<
+    BreadcrumbGroupProps.Item[]
+  >([{ text: '/', href: '/' }]);
+  const [appLayoutProps, setAppLayoutProps] = useState<AppLayoutProps>({});
+  const { pathname, search } = useLocation();
+  const setAppLayoutPropsSafe = useCallback(
+    (props: AppLayoutProps) => {
+      JSON.stringify(appLayoutProps) !== JSON.stringify(props) &&
+        setAppLayoutProps(props);
+    },
+    [appLayoutProps],
+  );
+  useEffect(() => {
+    const breadcrumbs = getBreadcrumbs(
+      pathname,
+      Object.entries(search).reduce((p, [k, v]) => p + \`\${k}=\${v}\`, ''),
+      '/',
+    );
+    setActiveBreadcrumbs(breadcrumbs);
+  }, [pathname, search]);
+  const onNavigate = useCallback(
+    (
+      e: CustomEvent<{
+        href: string;
+        external?: boolean;
+      }>,
+    ) => {
+      if (!e.detail.external) {
+        e.preventDefault();
+        setAppLayoutPropsSafe({
+          contentType: undefined,
+        });
+        navigate({ to: e.detail.href });
+      }
+    },
+    [navigate, setAppLayoutPropsSafe],
+  );
+  return (
+    <AppLayoutContext.Provider
+      value={{
+        appLayoutProps,
+        setAppLayoutProps: setAppLayoutPropsSafe,
+        displayHelpPanel: (helpContent: React.ReactNode) => {
+          setAppLayoutPropsSafe({ tools: helpContent, toolsHide: false });
+          appLayout.current?.openTools();
+        },
+      }}
+    >
+      <TopNavigation
+        identity={{
+          href: '/',
+          title: Config.applicationName,
+          logo: {
+            src: Config.logo,
+          },
+        }}
+        utilities={[
+          {
+            type: 'menu-dropdown',
+            text: \`\${user?.profile?.['cognito:username']}\`,
+            iconName: 'user-profile-active',
+            onItemClick: (e) => {
+              if (e.detail.id === 'signout') {
+                removeUser();
+                signoutRedirect({
+                  post_logout_redirect_uri: window.location.origin,
+                  extraQueryParams: {
+                    redirect_uri: window.location.origin,
+                    response_type: 'code',
+                  },
+                });
+                clearStaleState();
+              }
+            },
+            items: [{ id: 'signout', text: 'Sign out' }],
+          },
+        ]}
+      />
+      <CloudscapeAppLayout
+        ref={appLayout}
+        breadcrumbs={
+          <BreadcrumbGroup onFollow={onNavigate} items={activeBreadcrumbs} />
+        }
+        toolsHide
+        navigation={
+          <SideNavigation
+            header={{ text: Config.applicationName, href: '/' }}
+            activeHref={pathname}
+            onFollow={onNavigate}
+            items={NavItems}
+          />
+        }
+        content={<Outlet />}
+        {...appLayoutProps}
+      />
+    </AppLayoutContext.Provider>
+  );
+};
+
+export default AppLayout;
+"
+`;
+
+exports[`cognito-auth generator uxProvider tests > None > should update AppLayout > app-layout-with-auth 1`] = `
+"import { useAuth } from 'react-oidc-context';
+import * as React from 'react';
+
+import { useEffect, useMemo, useState } from 'react';
+
+import Config from '../../config';
+import { Link, useLocation, useMatchRoute } from '@tanstack/react-router';
+
+const getBreadcrumbs = (
+  matchRoute: ReturnType<typeof useMatchRoute>,
+  pathName: string,
+  search: string,
+  defaultBreadcrumb: string,
+  availableRoutes?: string[],
+) => {
+  const segments = [
+    defaultBreadcrumb,
+    ...pathName.split('/').filter((segment) => segment !== ''),
+  ];
+
+  return segments.map((segment, i) => {
+    const href =
+      i === 0
+        ? '/'
+        : \`/\${segments
+            .slice(1, i + 1)
+            .join('/')
+            .replace('//', '/')}\`;
+
+    const matched =
+      !availableRoutes || availableRoutes.find((r) => matchRoute({ to: href }));
+
+    return {
+      href: matched ? \`\${href}\${search}\` : '#',
+      text: segment,
+    };
+  });
+};
+
+/**
+ * Defines the App layout and contains logic for routing.
+ */
+const AppLayout: React.FC<React.PropsWithChildren> = ({ children }) => {
+  const { user, removeUser, signoutRedirect, clearStaleState } = useAuth();
+  const { user, removeUser, signoutRedirect, clearStaleState } = useAuth();
+  const [activeBreadcrumbs, setActiveBreadcrumbs] = useState<
+    {
+      href: string;
+      text: string;
+    }[]
+  >([{ text: '/', href: '/' }]);
+  const matchRoute = useMatchRoute();
+  const { pathname, search } = useLocation();
+  const navItems = useMemo(() => [{ to: '/', label: 'Home' }], []);
+  useEffect(() => {
+    const breadcrumbs = getBreadcrumbs(
+      matchRoute,
+      pathname,
+      Object.entries(search).reduce((p, [k, v]) => p + \`\${k}=\${v}\`, ''),
+      'Home',
+    );
+    setActiveBreadcrumbs(breadcrumbs);
+  }, [matchRoute, pathname, search]);
+  return (
+    <div className="app-shell">
+      <header className="app-header">
+        <div className="app-header-inner">
+          <div className="brand">
+            <a href="/">
+              <img
+                src={Config.logo}
+                alt={\`\${Config.applicationName} logo\`}
+                className="brand-logo"
+              />
+              <span className="brand-name">{Config.applicationName}</span>
+            </a>
+          </div>
+
+          <nav className="app-nav">
+            {navItems.map((item) => (
+              <Link
+                key={item.to}
+                to={item.to}
+                className={pathname === item.to ? 'active' : undefined}
+              >
+                {item.label}
+              </Link>
+            ))}
+          </nav>
+          <div className="user-greeting">
+            <span>Hi, {\`\${user?.profile?.['cognito:username']}\`}</span>
+            <button
+              type="button"
+              className="signout-link"
+              onClick={() => {
+                removeUser();
+                signoutRedirect({
+                  post_logout_redirect_uri: window.location.origin,
+                  extraQueryParams: {
+                    redirect_uri: window.location.origin,
+                    response_type: 'code',
+                  },
+                });
+                clearStaleState();
+              }}
+            >
+              Sign out
+            </button>
+          </div>
+          <div className="user-greeting">
+            <span>Hi, {\`\${user?.profile?.['cognito:username']}\`}</span>
+            <button
+              type="button"
+              className="signout-link"
+              onClick={() => {
+                removeUser();
+                signoutRedirect({
+                  post_logout_redirect_uri: window.location.origin,
+                  extraQueryParams: {
+                    redirect_uri: window.location.origin,
+                    response_type: 'code',
+                  },
+                });
+                clearStaleState();
+              }}
+            >
+              Sign out
+            </button>
+          </div>
+        </div>
+      </header>
+      <main className="app-main">
+        <nav className="breadcrumbs" aria-label="Breadcrumb">
+          {activeBreadcrumbs.map((crumb, index) => (
+            <span className="breadcrumb-segment" key={crumb.href || index}>
+              {index > 0 && <span className="breadcrumb-separator">/</span>}
+              {index === activeBreadcrumbs.length - 1 ? (
+                <span className="breadcrumb-current">{crumb.text}</span>
+              ) : (
+                <Link to={crumb.href}>{crumb.text}</Link>
+              )}
+            </span>
+          ))}
+        </nav>
+
+        <section className="card">{children}</section>
+      </main>
+    </div>
+  );
+};
+
+export default AppLayout;
+"
+`;
