@@ -23,7 +23,7 @@ export const TS_VERSIONS = {
   '@nx/devkit': '22.4.4',
   '@nx/react': '22.4.4',
   'create-nx-workspace': '22.4.4',
-  '@modelcontextprotocol/sdk': '1.25.3',
+  '@modelcontextprotocol/sdk': '1.26.0',
   '@modelcontextprotocol/inspector': '0.19.0',
   '@strands-agents/sdk': '0.2.0',
   '@tanstack/react-router': '1.158.0',
