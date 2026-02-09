@@ -1,7 +1,9 @@
+from typing import Any, AsyncIterator, Type
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.routing import APIRoute
 from pydantic import BaseModel
 from starlette.middleware.exceptions import ExceptionMiddleware
@@ -9,6 +11,91 @@ from starlette.middleware.exceptions import ExceptionMiddleware
 
 class InternalServerErrorDetails(BaseModel):
     detail: str
+
+
+class JsonStreamingResponse(StreamingResponse):
+    """
+    A streaming response that serializes items to JSON Lines format.
+
+    This response type is compatible with OpenAPI 3.2's streaming specification,
+    using application/jsonl media type with itemSchema for type definitions.
+    """
+
+    media_type = "application/jsonl"
+
+    def __init__(
+        self,
+        content: AsyncIterator[BaseModel],
+        status_code: int = 200,
+        headers: dict[str, str] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """
+        Initialize a JSON Lines streaming response.
+
+        Args:
+            content: An async iterator yielding Pydantic models
+            status_code: HTTP status code (default: 200)
+            headers: Optional additional headers
+            **kwargs: Additional arguments passed to StreamingResponse
+        """
+        super().__init__(
+            content=self._serialize(content),
+            status_code=status_code,
+            headers=headers,
+            media_type=self.media_type,
+            **kwargs,
+        )
+
+    @staticmethod
+    async def _serialize(
+        content: AsyncIterator[BaseModel],
+    ) -> AsyncIterator[bytes]:
+        """Serialize Pydantic models to JSON Lines format."""
+        async for item in content:
+            yield (item.model_dump_json() + "\n").encode("utf-8")
+
+    @staticmethod
+    def openapi_response(
+        item_model: Type[BaseModel],
+        description: str = "Streaming response",
+    ) -> dict[str, Any]:
+        """
+        Generate OpenAPI 3.2 response specification for streaming endpoints.
+
+        This helper method generates the correct response schema for OpenAPI 3.2
+        streaming with itemSchema support.
+
+        Args:
+            item_model: The Pydantic model class for each streamed item
+            description: Description for the response
+
+        Returns:
+            A dictionary suitable for use in FastAPI's responses parameter
+
+        Example:
+            @app.post(
+                "/stream",
+                responses={
+                    200: JsonStreamingResponse.openapi_response(
+                        StreamChunk,
+                        "Stream of response chunks"
+                    )
+                }
+            )
+        """
+        return {
+            "description": description,
+            "content": {
+                "application/jsonl": {
+                    "schema": {
+                        "type": "string",
+                        "x-model-name": item_model.__name__,
+                    },
+                    "x-itemSchema": {"$ref": f"#/components/schemas/{item_model.__name__}"},
+                }
+            },
+        }
 
 
 app = FastAPI(title="<%= agentNameClassName %>", responses={500: {"model": InternalServerErrorDetails}})
@@ -29,6 +116,39 @@ async def unhandled_exception_handler(request, err):
     )
 
 
+def _process_item_schema(openapi_schema: dict) -> dict:
+    """
+    Process x-itemSchema references in OpenAPI schema for OpenAPI 3.2 streaming support.
+
+    This function converts x-itemSchema to the standard itemSchema field and ensures
+    that the referenced schema is properly included in components/schemas.
+    """
+    if "paths" not in openapi_schema:
+        return openapi_schema
+
+    for path_item in openapi_schema["paths"].values():
+        for operation in path_item.values():
+            if not isinstance(operation, dict) or "responses" not in operation:
+                continue
+
+            for response in operation.get("responses", {}).values():
+                if not isinstance(response, dict) or "content" not in response:
+                    continue
+
+                content = response.get("content", {})
+
+                for media_type in ["application/jsonl", "application/x-ndjson"]:
+                    if media_type in content:
+                        media_content = content[media_type]
+                        if "x-itemSchema" in media_content:
+                            media_content["schema"] = {
+                                "type": "string",
+                                "itemSchema": media_content.pop("x-itemSchema"),
+                            }
+
+    return openapi_schema
+
+
 def custom_openapi():
     if app.openapi_schema:
         return app.openapi_schema
@@ -42,6 +162,10 @@ def custom_openapi():
         description=app.description,
         routes=app.routes,
     )
+
+    # Process itemSchema for OpenAPI 3.2 streaming support
+    openapi_schema = _process_item_schema(openapi_schema)
+
     app.openapi_schema = openapi_schema
     return app.openapi_schema
 
