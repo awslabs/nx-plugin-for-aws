@@ -7,6 +7,7 @@ import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import {
   callGeneratedClientStreaming,
   mockStreamingFetch,
+  mockJsonlStreamingFetch,
 } from './generator.utils.spec';
 import { Spec } from '../utils/types';
 import openApiTsClientGenerator from './generator';
@@ -1043,5 +1044,241 @@ describe('openApiTsClientGenerator - streaming', () => {
         },
       }),
     );
+  });
+
+  describe('OpenAPI 3.2 JSONL streaming (application/jsonl with itemSchema)', () => {
+    it('should detect and handle application/jsonl with itemSchema', async () => {
+      const spec: Spec = {
+        openapi: '3.0.0',
+        info: { title, version: '1.0.0' },
+        paths: {
+          '/stream': {
+            post: {
+              operationId: 'streamData',
+              requestBody: {
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'object',
+                      properties: {
+                        prompt: { type: 'string' },
+                      },
+                      required: ['prompt'],
+                    },
+                  },
+                },
+              },
+              responses: {
+                '200': {
+                  description: 'Streaming response',
+                  content: {
+                    'application/jsonl': {
+                      schema: {
+                        type: 'string',
+                        itemSchema: {
+                          $ref: '#/components/schemas/StreamChunk',
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        components: {
+          schemas: {
+            StreamChunk: {
+              type: 'object',
+              properties: {
+                content: { type: 'string' },
+              },
+              required: ['content'],
+            },
+          },
+        },
+      };
+
+      tree.write('openapi.json', JSON.stringify(spec));
+
+      await openApiTsClientGenerator(tree, {
+        openApiSpecPath: 'openapi.json',
+        outputPath: 'src/generated',
+      });
+
+      validateTypeScript([
+        'src/generated/client.gen.ts',
+        'src/generated/types.gen.ts',
+      ]);
+
+      const types = tree.read('src/generated/types.gen.ts', 'utf-8');
+      expect(types).toMatchSnapshot();
+
+      const client = tree.read('src/generated/client.gen.ts', 'utf-8');
+      expect(client).toMatchSnapshot();
+
+      // Verify the generated code has JSONL line buffering logic
+      expect(client).toContain('let buffer');
+      expect(client).toContain("split('\\n')");
+
+      // Test with JSONL mock
+      const mockFetch = mockJsonlStreamingFetch(200, [
+        '{"content":"Hello"}',
+        '{"content":" World"}',
+        '{"content":"!"}',
+      ]);
+
+      const receivedChunks: { content: string }[] = [];
+      for await (const chunk of await callGeneratedClientStreaming(
+        client,
+        mockFetch,
+        'streamData',
+        { prompt: 'test' },
+      )) {
+        receivedChunks.push(chunk);
+      }
+
+      expect(receivedChunks).toEqual([
+        { content: 'Hello' },
+        { content: ' World' },
+        { content: '!' },
+      ]);
+    });
+
+    it('should handle application/x-ndjson with itemSchema', async () => {
+      const spec: Spec = {
+        openapi: '3.0.0',
+        info: { title, version: '1.0.0' },
+        paths: {
+          '/events': {
+            get: {
+              operationId: 'getEvents',
+              responses: {
+                '200': {
+                  description: 'Event stream',
+                  content: {
+                    'application/x-ndjson': {
+                      schema: {
+                        type: 'string',
+                        itemSchema: {
+                          $ref: '#/components/schemas/Event',
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        components: {
+          schemas: {
+            Event: {
+              type: 'object',
+              properties: {
+                id: { type: 'number' },
+                type: { type: 'string' },
+                data: { type: 'string' },
+              },
+              required: ['id', 'type'],
+            },
+          },
+        },
+      };
+
+      tree.write('openapi.json', JSON.stringify(spec));
+
+      await openApiTsClientGenerator(tree, {
+        openApiSpecPath: 'openapi.json',
+        outputPath: 'src/generated',
+      });
+
+      validateTypeScript([
+        'src/generated/client.gen.ts',
+        'src/generated/types.gen.ts',
+      ]);
+
+      const client = tree.read('src/generated/client.gen.ts', 'utf-8');
+      expect(client).toMatchSnapshot();
+
+      const mockFetch = mockJsonlStreamingFetch(200, [
+        '{"id":1,"type":"start","data":"Starting..."}',
+        '{"id":2,"type":"progress","data":"50%"}',
+        '{"id":3,"type":"complete"}',
+      ]);
+
+      const receivedEvents: { id: number; type: string; data?: string }[] = [];
+      for await (const event of await callGeneratedClientStreaming(
+        client,
+        mockFetch,
+        'getEvents',
+      )) {
+        receivedEvents.push(event);
+      }
+
+      expect(receivedEvents).toEqual([
+        { id: 1, type: 'start', data: 'Starting...' },
+        { id: 2, type: 'progress', data: '50%' },
+        { id: 3, type: 'complete' },
+      ]);
+    });
+
+    it('should maintain backward compatibility with x-streaming vendor extension', async () => {
+      const spec: Spec = {
+        openapi: '3.0.0',
+        info: { title, version: '1.0.0' },
+        paths: {
+          '/legacy-stream': {
+            get: {
+              ...{ 'x-streaming': true },
+              operationId: 'legacyStream',
+              responses: {
+                '200': {
+                  description: 'Legacy streaming',
+                  content: {
+                    'text/event-stream': {
+                      schema: {
+                        type: 'string',
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      };
+
+      tree.write('openapi.json', JSON.stringify(spec));
+
+      await openApiTsClientGenerator(tree, {
+        openApiSpecPath: 'openapi.json',
+        outputPath: 'src/generated',
+      });
+
+      validateTypeScript([
+        'src/generated/client.gen.ts',
+        'src/generated/types.gen.ts',
+      ]);
+
+      const client = tree.read('src/generated/client.gen.ts', 'utf-8');
+      expect(client).toMatchSnapshot();
+
+      // Legacy streaming should NOT have JSONL buffering
+      expect(client).not.toContain('let buffer');
+
+      const mockFetch = mockStreamingFetch(200, ['event1', 'event2', 'event3']);
+
+      const receivedChunks: string[] = [];
+      for await (const chunk of await callGeneratedClientStreaming(
+        client,
+        mockFetch,
+        'legacyStream',
+      )) {
+        receivedChunks.push(chunk);
+      }
+
+      expect(receivedChunks).toEqual(['event1', 'event2', 'event3']);
+    });
   });
 });

@@ -433,11 +433,35 @@ export class <%- className %> {
     return;
     <%_ } else { _%>
     const reader = response.body?<% if (response.type !== 'binary') { %>.pipeThrough(new TextDecoderStream())<% } %>.getReader();
+    <%_ if (op.isJsonlStreaming) { _%>
+    <%_ const itemSchemaModel = models.find(m => m.name === op.streamingItemSchema); _%>
+    let buffer = '';
+    while (reader) {
+      const { value: chunk, done } = await reader.read();
+      if (done) {
+        if (buffer.trim()) {
+          yield <%- itemSchemaModel ? `$IO.${itemSchemaModel.typescriptName}.fromJson(JSON.parse(buffer))` : 'JSON.parse(buffer)' %>;
+        }
+        return;
+      }
+      if (chunk) {
+        buffer += chunk;
+      }
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        if (line.trim()) {
+          yield <%- itemSchemaModel ? `$IO.${itemSchemaModel.typescriptName}.fromJson(JSON.parse(line))` : 'JSON.parse(line)' %>;
+        }
+      }
+    }
+    <%_ } else { _%>
     while (reader) {
       const { value, done } = await reader.read();
       if (done) return;
       yield <%- renderStreamingResponseChunk(response) %>;
     }
+    <%_ } _%>
     return;
     <%_ } _%>
     <%_ } else { _%>

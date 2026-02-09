@@ -65,6 +65,62 @@ export const mockStreamingFetch = (
   return mockFetch;
 };
 
+export const mockJsonlStreamingFetch = (
+  status: number,
+  jsonlLines: string[],
+  options?: { splitChunks?: boolean },
+): Mock<any> => {
+  const mockFetch = vi.fn();
+
+  let fullContent = jsonlLines.join('\n');
+  if (jsonlLines.length > 0) {
+    fullContent += '\n';
+  }
+
+  let chunks: string[];
+  if (options?.splitChunks && fullContent.length > 10) {
+    chunks = [];
+    let pos = 0;
+    while (pos < fullContent.length) {
+      const chunkSize = Math.min(
+        Math.floor(Math.random() * 10) + 1,
+        fullContent.length - pos,
+      );
+      chunks.push(fullContent.slice(pos, pos + chunkSize));
+      pos += chunkSize;
+    }
+  } else {
+    chunks = jsonlLines.map((line) => line + '\n');
+  }
+
+  let i = 0;
+
+  const mockReader = vi.fn();
+  mockReader.mockReturnValue({
+    read: vi.fn().mockImplementation(() => {
+      const value = chunks[i];
+      const done = i >= chunks.length;
+      i++;
+      return {
+        done,
+        value,
+      };
+    }),
+  });
+
+  mockFetch.mockResolvedValue({
+    status,
+    body: {
+      pipeThrough: () => ({
+        getReader: mockReader,
+      }),
+      getReader: () => mockReader,
+    },
+  });
+
+  return mockFetch;
+};
+
 describe('openapi test utils', () => {
   it('should have a test', () => {
     // A test is required for this to be a .spec.ts file.
