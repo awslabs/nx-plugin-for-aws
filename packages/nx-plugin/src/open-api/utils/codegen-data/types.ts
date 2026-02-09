@@ -36,6 +36,14 @@ export const PRIMITIVE_TYPES = new Set([
 ]);
 
 /**
+ * Content types that indicate JSON Lines streaming (OpenAPI 3.2)
+ */
+export const STREAMING_CONTENT_TYPES = new Set([
+  'application/jsonl',
+  'application/x-ndjson',
+]);
+
+/**
  * Vendor extensions which are used to customise generated code
  */
 export const VENDOR_EXTENSIONS = {

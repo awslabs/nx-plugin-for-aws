@@ -35,6 +35,7 @@ import {
   COMPOSED_SCHEMA_TYPES,
   PRIMITIVE_TYPES,
   VENDOR_EXTENSIONS,
+  STREAMING_CONTENT_TYPES,
   Operation,
 } from './codegen-data/types';
 
@@ -265,7 +266,7 @@ export const buildOpenApiCodeGenData = async (
         }
       }
 
-      mutateOperationWithAdditionalData(op);
+      mutateOperationWithAdditionalData(op, spec);
     }
 
     // Lexicographical ordering of operations
@@ -1114,20 +1115,84 @@ const getCursorOptions = (op: Operation) => {
 };
 
 /**
+ * Detect OpenAPI 3.2 style streaming (application/jsonl with itemSchema)
+ * Returns streaming info if detected, undefined otherwise
+ */
+const detectOpenApi32Streaming = (
+  op: Operation,
+  spec: Spec,
+): { itemSchemaRef: string; contentType: string } | undefined => {
+  const specOp = (spec as any)?.paths?.[op.path]?.[op.method.toLowerCase()] as
+    | OpenAPIV3.OperationObject
+    | undefined;
+
+  if (!specOp?.responses) {
+    return undefined;
+  }
+
+  const successResponse =
+    specOp.responses['200'] ??
+    specOp.responses['201'] ??
+    specOp.responses['2XX'];
+
+  if (!successResponse) {
+    return undefined;
+  }
+
+  const response = resolveIfRef(spec, successResponse);
+  if (!response?.content) {
+    return undefined;
+  }
+
+  for (const contentType of STREAMING_CONTENT_TYPES) {
+    const content = response.content[contentType];
+    if (content) {
+      const schema = content.schema as any;
+      if (schema?.itemSchema) {
+        const itemSchemaRef = schema.itemSchema.$ref ?? schema.itemSchema;
+        return {
+          itemSchemaRef:
+            typeof itemSchemaRef === 'string'
+              ? (itemSchemaRef.split('/').pop() ?? 'unknown')
+              : 'unknown',
+          contentType,
+        };
+      }
+    }
+  }
+
+  return undefined;
+};
+
+/**
  * Add additional data to an operation for code generation decisions
  */
-const mutateOperationWithAdditionalData = (op: Operation) => {
-  // Add mutation/query details
+const mutateOperationWithAdditionalData = (op: Operation, spec?: Spec) => {
   const isMutation = isOperationMutation(op);
   (op as any).isMutation = isMutation;
   (op as any).isQuery = !isMutation;
 
-  // Streaming responses
-  (op as any).isStreaming = !!(op as any).vendorExtensions?.[
-    VENDOR_EXTENSIONS.STREAMING
-  ];
+  const jsonlStreaming = spec ? detectOpenApi32Streaming(op, spec) : undefined;
 
-  // Add infinite query details if applicable
+  if (jsonlStreaming) {
+    (op as any).isStreaming = true;
+    (op as any).isJsonlStreaming = true;
+    (op as any).streamingItemSchema = jsonlStreaming.itemSchemaRef;
+
+    const result = (op as any).result;
+    if (result) {
+      result.type = jsonlStreaming.itemSchemaRef;
+      result.typescriptType = jsonlStreaming.itemSchemaRef;
+      result.export = 'reference';
+    }
+  } else {
+    // Fall back to legacy x-streaming vendor extension
+    (op as any).isStreaming = !!(op as any).vendorExtensions?.[
+      VENDOR_EXTENSIONS.STREAMING
+    ];
+    (op as any).isJsonlStreaming = false;
+  }
+
   if (!isMutation) {
     mutateOperationWithInfiniteQueryDetails(op);
   }
