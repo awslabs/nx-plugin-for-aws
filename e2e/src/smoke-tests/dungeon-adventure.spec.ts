@@ -13,6 +13,31 @@ import {
 import { getPackageManagerCommand } from '@nx/devkit';
 import { join } from 'path';
 
+const isUpdateSnapshot = () =>
+  (globalThis as any).__vitest_worker__?.config?.snapshotOptions
+    ?.updateSnapshot === 'all';
+
+/**
+ * Asserts that the generated file matches the expected "old" template.
+ * When vitest is run with `-u`, the old template is overwritten with the
+ * actual generated content so the templates stay up-to-date automatically.
+ */
+const expectFileMatchesOldTemplate = (
+  generatedFilePath: string,
+  oldTemplatePath: string,
+) => {
+  const actual = readFileSync(generatedFilePath, 'utf-8');
+  if (isUpdateSnapshot()) {
+    const existing = readFileSync(oldTemplatePath).toString();
+    if (actual !== existing) {
+      console.log(`Updating template: ${oldTemplatePath}`);
+      writeFileSync(oldTemplatePath, actual);
+    }
+  } else {
+    expect(actual).toEqual(readFileSync(oldTemplatePath).toString());
+  }
+};
+
 /**
  * This test runs through the dungeon adventure tutorial from the docs
  */
@@ -80,8 +105,18 @@ describe('smoke test - dungeon-adventure', () => {
       opts,
     );
 
+    // Check application stack matches application-stack.ts.original.template
+    const applicationStackPath = `${opts.cwd}/packages/infra/src/stacks/application-stack.ts`;
+    expectFileMatchesOldTemplate(
+      applicationStackPath,
+      join(
+        __dirname,
+        '../files/dungeon-adventure/1/application-stack.ts.original.template',
+      ),
+    );
+
     writeFileSync(
-      `${opts.cwd}/packages/infra/src/stacks/application-stack.ts`,
+      applicationStackPath,
       readFileSync(
         join(
           __dirname,
@@ -162,22 +197,43 @@ describe('smoke test - dungeon-adventure', () => {
 
     rmSync(`${opts.cwd}/packages/game-api/src/procedures/echo.ts`);
 
+    // Check router.ts matches router.ts.old.template before modification
+    const routerPath = `${opts.cwd}/packages/game-api/src/router.ts`;
+    expectFileMatchesOldTemplate(
+      routerPath,
+      join(__dirname, '../files/dungeon-adventure/2/router.ts.old.template'),
+    );
     writeFileSync(
-      `${opts.cwd}/packages/game-api/src/router.ts`,
+      routerPath,
       readFileSync(
         join(__dirname, '../files/dungeon-adventure/2/router.ts.template'),
       ),
     );
 
+    // Check index.ts matches index.ts.old.template before modification
+    const indexPath = `${opts.cwd}/packages/game-api/src/index.ts`;
+    expectFileMatchesOldTemplate(
+      indexPath,
+      join(__dirname, '../files/dungeon-adventure/2/index.ts.old.template'),
+    );
     writeFileSync(
-      `${opts.cwd}/packages/game-api/src/index.ts`,
+      indexPath,
       readFileSync(
         join(__dirname, '../files/dungeon-adventure/2/index.ts.template'),
       ),
     );
 
+    // Check mcp server.ts matches server.ts.old.template before modification
+    const mcpServerPath = `${opts.cwd}/packages/inventory/src/mcp-server/server.ts`;
+    expectFileMatchesOldTemplate(
+      mcpServerPath,
+      join(
+        __dirname,
+        '../files/dungeon-adventure/2/mcp/server.ts.old.template',
+      ),
+    );
     writeFileSync(
-      `${opts.cwd}/packages/inventory/src/mcp-server/server.ts`,
+      mcpServerPath,
       readFileSync(
         join(__dirname, '../files/dungeon-adventure/2/mcp/server.ts.template'),
       ),
@@ -225,16 +281,27 @@ describe('smoke test - dungeon-adventure', () => {
 
     // Module 3: Story Agent
 
-    // Update the files
+    // Check main.py matches main.py.old.template before modification
+    const mainPyPath = `${opts.cwd}/packages/story/dungeon_adventure_story/agent/main.py`;
+    expectFileMatchesOldTemplate(
+      mainPyPath,
+      join(__dirname, '../files/dungeon-adventure/3/main.py.old.template'),
+    );
     writeFileSync(
-      `${opts.cwd}/packages/story/dungeon_adventure_story/agent/main.py`,
+      mainPyPath,
       readFileSync(
         join(__dirname, '../files/dungeon-adventure/3/main.py.template'),
       ),
     );
 
+    // Check agent.py matches agent.py.old.template before modification
+    const agentPyPath = `${opts.cwd}/packages/story/dungeon_adventure_story/agent/agent.py`;
+    expectFileMatchesOldTemplate(
+      agentPyPath,
+      join(__dirname, '../files/dungeon-adventure/3/agent.py.old.template'),
+    );
     writeFileSync(
-      `${opts.cwd}/packages/story/dungeon_adventure_story/agent/agent.py`,
+      agentPyPath,
       readFileSync(
         join(__dirname, '../files/dungeon-adventure/3/agent.py.template'),
       ),
@@ -319,9 +386,17 @@ describe('smoke test - dungeon-adventure', () => {
       ),
     );
 
-    // Update root route
+    // Check routes/index.tsx matches index.tsx.old.template before modification
+    const routesIndexPath = `${opts.cwd}/packages/game-ui/src/routes/index.tsx`;
+    expectFileMatchesOldTemplate(
+      routesIndexPath,
+      join(
+        __dirname,
+        '../files/dungeon-adventure/4/routes/index.tsx.old.template',
+      ),
+    );
     writeFileSync(
-      `${opts.cwd}/packages/game-ui/src/routes/index.tsx`,
+      routesIndexPath,
       readFileSync(
         join(
           __dirname,

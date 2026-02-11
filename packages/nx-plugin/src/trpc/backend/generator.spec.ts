@@ -325,7 +325,7 @@ describe('trpc backend generator', () => {
     const routerTsContent = tree.read('apps/test-api/src/router.ts', 'utf-8');
 
     // Verify CORS headers are included in responseMeta
-    expect(routerTsContent).toContain('responseMeta: ({ ctx }) => {');
+    expect(routerTsContent).toContain('responseMeta: ({ ctx }) => ({');
     expect(routerTsContent).toContain("'Access-Control-Allow-Origin':");
     expect(routerTsContent).toContain("'Access-Control-Allow-Methods': '*'");
   });

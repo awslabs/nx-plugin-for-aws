@@ -33,7 +33,8 @@ To send us a pull request, please:
 1. Run tests `pnpm nx run @aws/nx-plugin:test`
 1. (Optional) Update snapshots if required `pnpm nx run @aws/nx-plugin:test -u`
 1. Ensure local tests pass (run a full build with `pnpm nx run-many --target build --all`).
-1. Commit to your fork using clear commit messages.
+1. Update and run any integration tests relevant to your changes.
+1. Commit to your fork using clear commit messages ([see section below](#end-to-end-tests))
 1. Send us a pull request, answering any default questions in the pull request interface.
 1. Pay attention to any automated CI failures reported in the pull request, and stay involved in the conversation.
 
@@ -41,6 +42,22 @@ GitHub provides additional document on [forking a repository](https://help.githu
 [creating a pull request](https://help.github.com/articles/creating-a-pull-request/).
 
 For a detailed guide on contributing a generator, check out the [Contributing a Generator tutorial here](https://awslabs.github.io/nx-plugin-for-aws/get_started/tutorials/contribute-generator).
+
+### End to End Tests
+
+The end to end tests run our generators and check that generated projects function correctly (usually by performing a build).
+
+First ensure you have at least compiled the Nx Plugin (`pnpm nx compile nx-plugin`)
+
+You can run them using `pnpm nx test nx-plugin-e2e -t 'smoke test - xxx'` (replacing xxx with the test to run).
+
+Note that we have a test which runs through our main tutorial (the Dungeon Adventure Game). If you have updated generators which affect files which we show the contents of in the tutorial, you will need to update this test. You can update the "before" files automatically by running:
+
+`pnpm nx test nx-plugin-e2e -t 'dungeon-adventure' -u`
+
+However you will still need to make changes to any "after" files manually to ensure the tutorial works end to end. You can also use `pnpm nx start docs` to run the docs site locally and follow the tutorial yourself.
+
+Note that if you are running e2e tests that use `pnpm` as the package manager, you may need to run `pnpm store prune` to ensure that your changes are picked up in the tests.
 
 ### Documentation Translation
 
