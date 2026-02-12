@@ -42,6 +42,24 @@ The generator will create the following project structure in the `<directory>/<n
 
 </FileTree>
 
+The generator also creates two shared packages (if they don't already exist):
+
+<FileTree>
+
+  - packages/common
+    - infra-config Stage configuration types and credential mappings
+      - src
+        - stages.types.ts Type definitions for stage credentials and config
+        - stages.config.ts Your stage-to-credential mappings (edit this)
+        - index.ts Re-exports for importing from other packages
+    - infra-scripts Centralized deploy/destroy scripts
+      - src
+        - solution-deploy.ts Deploy bin script
+        - solution-destroy.ts Destroy bin script
+        - lib/ Shared logic (credential lookup, CDK command building)
+
+</FileTree>
+
 :::tip
 Your infrastructure is a TypeScript project, so you can refer to the <Link path="guides/typescript-project">TypeScript project documentation</Link> for more details about their general usage.
 :::
@@ -67,13 +85,18 @@ export class ApplicationStack extends Stack {
 
 ### Stages and Stacks
 
-You will notice that the top level `src/main.ts` file instantiates a CDK [Stage](https://docs.aws.amazon.com/cdk/v2/guide/stages.html) named `<namespace>-sandbox`. This stage is intended for your own development and testing.
+You will notice that the top level `src/main.ts` file instantiates a CDK [Stage](https://docs.aws.amazon.com/cdk/v2/guide/stages.html) named `<namespace>-sandbox`. This stage is intended for your own development and testing. It reads account and region from the stage configuration if available, falling back to environment variables.
 
 ```ts title="src/main.ts"
-new ApplicationStage(app, 'project-sandbox', {
+import stagesConfig from ':my-scope/common-infra-config';
+
+const projectStages = stagesConfig.projects?.['packages/infra']?.stages ?? {};
+const sandboxConfig = projectStages['my-app-sandbox'];
+
+new ApplicationStage(app, 'my-app-sandbox', {
   env: {
-    account: process.env.CDK_DEFAULT_ACCOUNT,
-    region: process.env.CDK_DEFAULT_REGION,
+    account: sandboxConfig?.account ?? process.env.CDK_DEFAULT_ACCOUNT,
+    region: sandboxConfig?.region ?? process.env.CDK_DEFAULT_REGION,
   },
 });
 ```
@@ -120,6 +143,102 @@ export class ApplicationStage extends Stage {
   }
 }
 ```
+
+### Stage Credential Configuration
+
+When working with multiple CDK stages (dev, staging, prod), each targeting different AWS accounts and regions, managing credentials becomes a challenge. Without centralized configuration, developers need to manually export `AWS_PROFILE` or assume roles before every deploy, and remember which credentials go with which stage. This is error-prone — deploying to the wrong account with the wrong credentials can have serious consequences.
+
+The generator creates a shared `infra-config` package that serves as a single source of truth for all stage settings across your workspace. This means:
+
+- **One place to configure all stages** — credentials, regions, and accounts for every infra project live in a single file, not scattered across environment variables or shell scripts
+- **No accidental cross-account deploys** — the deploy command automatically resolves the right credentials for the target stage
+- **Importable from any package** — your CDK `main.ts` reads account and region from the same config, keeping environment definitions consistent between deployment and synthesis
+- **Team-shareable** — commit the config for shared team settings, or gitignore it for personal profiles
+
+The generator also creates a shared `infra-scripts` package with `solution-deploy` and `solution-destroy` commands. These wrap CDK with automatic credential resolution, so developers just run `deploy` and the right credentials are applied. This keeps the infra project clean — no deployment scripts or credential logic in your CDK code.
+
+#### Configuring Credentials
+
+Edit `packages/common/infra-config/src/stages.config.ts` to map stage names to AWS credentials:
+
+```ts title="packages/common/infra-config/src/stages.config.ts"
+import type { StagesConfig } from './stages.types.js';
+
+const config: StagesConfig = {
+  projects: {
+    'packages/infra': {
+      stages: {
+        'my-app-dev': {
+          credentials: { type: 'profile', profile: 'dev-account' },
+          region: 'us-east-1',
+        },
+        'my-app-prod': {
+          credentials: {
+            type: 'assumeRole',
+            assumeRole: 'arn:aws:iam::123456789012:role/DeployRole',
+          },
+          region: 'us-west-2',
+          account: '123456789012',
+        },
+      },
+    },
+  },
+  shared: {
+    stages: {
+      sandbox: {
+        credentials: { type: 'profile', profile: 'personal-sandbox' },
+        region: 'us-east-1',
+      },
+    },
+  },
+};
+
+export default config;
+```
+
+Project keys are the project path relative to the workspace root (e.g., `packages/infra`). This is used instead of the project name because a workspace can have multiple infra projects at different paths, and the path is unambiguous — it's the same value you see in `project.json`'s location and in the deploy command.
+
+Stage names (e.g., `my-app-dev`, `my-app-prod`) must match the CDK stage identifiers you define in `main.ts` — the first argument to `new ApplicationStage(app, 'my-app-dev', ...)`. This is the same string you use in deploy commands like `pnpm nx run infra:deploy my-app-dev/*`.
+
+Shared stages are available to all projects — project-specific entries take priority. Shared stages don't need a project path because they apply to any infra project in the workspace. When you run `pnpm nx run infra:deploy sandbox/*`, the deploy script first checks for a project-specific entry under `packages/infra`, and if none is found, falls back to the shared `sandbox` entry. This is useful when multiple infra projects deploy to the same sandbox account — you define the credentials once instead of repeating them for each project.
+
+#### Credential Types
+
+- **`profile`** — Uses an AWS CLI profile from `~/.aws/config`
+- **`assumeRole`** — Assumes an IAM role via STS. Optionally specify a `profile` as the source identity, `externalId`, and `sessionDuration`
+
+#### Account and Region
+
+Each stage config includes a required `region` and an optional `account`. If `account` is omitted, CDK infers it from the active credentials. The generated `main.ts` reads these values from the config:
+
+```ts title="src/main.ts"
+import stagesConfig from ':my-scope/common-infra-config';
+
+const projectStages = stagesConfig.projects?.['packages/infra']?.stages ?? {};
+const sandboxConfig = projectStages['my-app-sandbox'];
+
+new ApplicationStage(app, 'my-app-sandbox', {
+  env: {
+    account: sandboxConfig?.account ?? process.env.CDK_DEFAULT_ACCOUNT,
+    region: sandboxConfig?.region ?? process.env.CDK_DEFAULT_REGION,
+  },
+});
+```
+
+#### How Deployment Works
+
+When you run `deploy`, the `solution-deploy` script handles credential resolution automatically:
+
+1. Reads the stage name from the command arguments
+2. Looks up credentials in `stages.config.ts` (project-specific → shared → environment fallback)
+3. Sets the appropriate AWS environment variables for the CDK child process only (your shell environment is never modified)
+4. Runs `cdk deploy` with the resolved credentials
+
+If no matching stage config is found, the script falls back to whatever AWS credentials are already in your environment — so existing workflows continue to work without any configuration.
+
+:::tip
+You can commit `stages.config.ts` for shared team configuration, or add it to `.gitignore` if it contains personal profile names.
+:::
 
 ### API Infrastructure
 
@@ -235,7 +354,7 @@ After a build, you can deploy your infrastructure to AWS using the `deploy` targ
 Use the `deploy-ci` target if deploying in a CI/CD pipeline. See below for more details.
 :::
 
-First, ensure that you have [configured credentials for your AWS account](https://docs.aws.amazon.com/sdkref/latest/guide/access.html).
+If you have configured stage credentials in `packages/common/infra-config/src/stages.config.ts`, the deploy command will automatically resolve and apply the correct AWS credentials for the target stage. Otherwise, it uses whatever AWS credentials are in your environment.
 
 Next, run the deploy target:
 

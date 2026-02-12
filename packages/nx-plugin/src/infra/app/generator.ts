@@ -20,11 +20,13 @@ import tsProjectGenerator, { getTsLibDetails } from '../../ts/lib/generator';
 import { withVersions } from '../../utils/versions';
 import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import { sharedInfraConfigGenerator } from '../../utils/shared-infra-config';
+import { sharedInfraScriptsGenerator } from '../../utils/shared-infra-scripts';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
+  SHARED_INFRA_CONFIG_DIR,
 } from '../../utils/shared-constructs-constants';
-import { addStarExport } from '../../utils/ast';
 import path from 'path';
 import { formatFilesInSubtree } from '../../utils/format';
 import { sortObjectKeys } from '../../utils/object';
@@ -53,6 +55,10 @@ export async function tsInfraGenerator(
   await sharedConstructsGenerator(tree, {
     iacProvider: 'CDK',
   });
+
+  // Shared infra-config and infra-scripts packages (lazy creation)
+  await sharedInfraConfigGenerator(tree);
+  await sharedInfraScriptsGenerator(tree);
 
   const synthDirFromRoot = `/dist/${lib.dir}/cdk.out`;
   const synthDirFromProject =
@@ -124,8 +130,7 @@ export async function tsInfraGenerator(
         executor: 'nx:run-commands',
         dependsOn: ['^build', 'compile'],
         options: {
-          cwd: libraryRoot,
-          command: `cdk deploy --require-approval=never`,
+          command: `solution-deploy ${libraryRoot}`,
         },
       };
       config.targets['deploy-ci'] = {
@@ -139,8 +144,7 @@ export async function tsInfraGenerator(
         executor: 'nx:run-commands',
         dependsOn: ['^build', 'compile'],
         options: {
-          cwd: libraryRoot,
-          command: `cdk destroy --require-approval=never`,
+          command: `solution-destroy ${libraryRoot}`,
         },
       };
       config.targets['destroy-ci'] = {
@@ -190,6 +194,12 @@ export async function tsInfraGenerator(
           libraryRoot,
           `${tree.root}/${PACKAGES_DIR}`,
         )}/${SHARED_CONSTRUCTS_DIR}/tsconfig.json`,
+      },
+      {
+        path: `${path.relative(
+          libraryRoot,
+          `${tree.root}/${PACKAGES_DIR}`,
+        )}/${SHARED_INFRA_CONFIG_DIR}/tsconfig.json`,
       },
     ],
   }));
