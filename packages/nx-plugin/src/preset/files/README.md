@@ -27,7 +27,7 @@ You also have the option of using additional [commmunity plugins](https://nx.dev
 <%= pkgMgrCmd %> nx g @aws/nx-plugin:<generator-name>
 ```
 
-Alternatively you can use the NX IDE plugin to invoke your generators.
+Alternatively you can use the Nx IDE plugin to invoke your generators.
 
 Refer to the [full documentation](https://awslabs.github.io/nx-plugin-for-aws) for additional guidance for each generator.
 
@@ -44,7 +44,7 @@ Refer to the [full documentation](https://awslabs.github.io/nx-plugin-for-aws) f
 ```sh
 <%= pkgMgrCmd %> nx run-many --target build --all
 # or
-<%= pkgMgrCmd %> build:all
+<%= pkgMgrCmd %> build
 ```
 
 ### Run arbitrary task
@@ -57,6 +57,8 @@ Refer to the [full documentation](https://awslabs.github.io/nx-plugin-for-aws) f
 
 ```sh
 <%= pkgMgrCmd %> nx run-many --target lint --configuration=fix --all
+# or
+<%= pkgMgrCmd %> lint
 ```
 
 ## Test all projects (and update snapshots)

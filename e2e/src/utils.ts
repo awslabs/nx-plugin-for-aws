@@ -172,3 +172,6 @@ export const buildCreateNxWorkspaceCommand = (
 
 export const getDungeonAdventureElectroDbDependencies = () =>
   `electrodb@${TS_VERSIONS['electrodb']} @aws-sdk/client-dynamodb@${TS_VERSIONS['@aws-sdk/client-dynamodb']}`;
+
+export const buildPackageManagerShortCommand = (pm: string, command: string) =>
+  pm === 'npm' ? `npm run ${command}` : `${pm} ${command}`;

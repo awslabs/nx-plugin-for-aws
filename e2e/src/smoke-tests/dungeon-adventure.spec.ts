@@ -6,6 +6,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { ensureDirSync } from 'fs-extra';
 import {
   buildCreateNxWorkspaceCommand,
+  buildPackageManagerShortCommand,
   getDungeonAdventureElectroDbDependencies,
   runCLI,
   tmpProjPath,
@@ -126,8 +127,8 @@ describe('smoke test - dungeon-adventure', () => {
     );
     await runCLI(`sync --verbose`, opts);
     await runCLI(
-      `run-many --target build --all --parallel 1 --output-style=stream --skip-nx-cache --verbose`,
-      opts,
+      `${buildPackageManagerShortCommand(pkgMgr, 'build')} --parallel 1 --output-style=stream --skip-nx-cache --verbose`,
+      { ...opts, prefixWithPackageManagerCmd: false },
     );
 
     // 2. Game API and Inventory MCP Server
@@ -271,10 +272,13 @@ describe('smoke test - dungeon-adventure', () => {
     );
 
     await runCLI(`sync --verbose`, opts);
-    await runCLI(`run-many --target lint --configuration=fix --all`, opts);
+    await runCLI(`${buildPackageManagerShortCommand(pkgMgr, 'lint')}`, {
+      ...opts,
+      prefixWithPackageManagerCmd: false,
+    });
     await runCLI(
-      `run-many --target build --all --parallel 1 --output-style=stream --verbose`,
-      opts,
+      `${buildPackageManagerShortCommand(pkgMgr, 'build')} --parallel 1 --output-style=stream --verbose`,
+      { ...opts, prefixWithPackageManagerCmd: false },
     );
 
     // TODO: consider deploy!
@@ -308,10 +312,13 @@ describe('smoke test - dungeon-adventure', () => {
     );
 
     await runCLI(`sync --verbose`, opts);
-    await runCLI(`run-many --target lint --configuration=fix --all`, opts);
+    await runCLI(`${buildPackageManagerShortCommand(pkgMgr, 'lint')}`, {
+      ...opts,
+      prefixWithPackageManagerCmd: false,
+    });
     await runCLI(
-      `run-many --target build --all --parallel 1 --output-style=stream --verbose`,
-      opts,
+      `${buildPackageManagerShortCommand(pkgMgr, 'build')} --parallel 1 --output-style=stream --verbose`,
+      { ...opts, prefixWithPackageManagerCmd: false },
     );
 
     // Module 4: UI
@@ -412,10 +419,13 @@ describe('smoke test - dungeon-adventure', () => {
     });
 
     await runCLI(`sync --verbose`, opts);
-    await runCLI(`run-many --target lint --configuration=fix --all`, opts);
+    await runCLI(`${buildPackageManagerShortCommand(pkgMgr, 'lint')}`, {
+      ...opts,
+      prefixWithPackageManagerCmd: false,
+    });
     await runCLI(
-      `run-many --target build --all --parallel 1 --output-style=stream --verbose`,
-      opts,
+      `${buildPackageManagerShortCommand(pkgMgr, 'build')} --parallel 1 --output-style=stream --verbose`,
+      { ...opts, prefixWithPackageManagerCmd: false },
     );
   });
 });
