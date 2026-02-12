@@ -1,8 +1,34 @@
 import { ApplicationStage } from './stages/application-stage.js';
 import { App } from '<%= scopeAlias %>common-constructs';
-
+<% if (enableStageConfig) { %>import type { StageConfig } from '<%= scopeAlias %>common-infra-config';
+import stagesConfig from '<%= scopeAlias %>common-infra-config';
+<% } %>
 const app = new App();
+<% if (enableStageConfig) { %>
+// Stage configuration is defined in packages/common/infra-config/src/stages.config.ts
+// The project path '<%= dir %>' is used as the key in the config.
+// Project-specific settings override shared settings for the same stage name.
+const projectStages = stagesConfig.projects?.['<%= dir %>']?.stages ?? {};
+const sharedStages = stagesConfig.shared?.stages ?? {};
 
+// Resolve stage config: project-specific fields take priority over shared ones.
+const resolveStage = (name: string): StageConfig | undefined => {
+  const shared = sharedStages[name];
+  const project = projectStages[name];
+  if (!shared && !project) return undefined;
+  return { ...shared, ...project } as StageConfig;
+};
+
+// Sandbox stage — uses your CLI credentials by default.
+// Add an entry in stages.config.ts to configure specific credentials.
+const sandboxConfig = resolveStage('<%= namespace %>-sandbox');
+new ApplicationStage(app, '<%= namespace %>-sandbox', {
+  env: {
+    account: sandboxConfig?.account ?? process.env.CDK_DEFAULT_ACCOUNT,
+    region: sandboxConfig?.region ?? process.env.CDK_DEFAULT_REGION,
+  },
+});
+<% } else { %>
 // Use this to deploy your own sandbox environment (assumes your CLI credentials)
 new ApplicationStage(app, '<%= namespace %>-sandbox', {
   env: {
@@ -10,5 +36,5 @@ new ApplicationStage(app, '<%= namespace %>-sandbox', {
     region: process.env.CDK_DEFAULT_REGION,
   },
 });
-
+<% } %>
 app.synth();

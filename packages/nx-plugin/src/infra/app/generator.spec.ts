@@ -71,6 +71,7 @@ describe('infra generator', () => {
         command: 'cdk synth',
       },
     });
+    // Default (enableStageConfig=false): deploy uses cdk directly
     expect(config.targets.deploy).toMatchObject({
       executor: 'nx:run-commands',
       options: {
@@ -87,6 +88,7 @@ describe('infra generator', () => {
           'cdk deploy --require-approval=never --app ../../dist/{projectRoot}/cdk.out',
       },
     });
+    // Default (enableStageConfig=false): destroy uses cdk directly
     expect(config.targets.destroy).toMatchObject({
       executor: 'nx:run-commands',
       options: {
@@ -252,7 +254,6 @@ describe('infra generator', () => {
   });
 
   it('should add generator to project metadata', async () => {
-    // Call the generator function
     await tsInfraGenerator(tree, options);
 
     expect(
@@ -261,10 +262,200 @@ describe('infra generator', () => {
   });
 
   it('should add generator metric to app.ts', async () => {
-    // Call the generator function
     await tsInfraGenerator(tree, options);
 
     // Verify the metric was added to app.ts
     expectHasMetricTags(tree, INFRA_APP_GENERATOR_INFO.metric);
+  });
+
+  it('should not generate deploy-stage.ts in infra project', async () => {
+    await tsInfraGenerator(tree, options);
+    expect(tree.exists('packages/test/scripts/deploy-stage.ts')).toBeFalsy();
+    expect(tree.exists('packages/test/src/deploy-stage.ts')).toBeFalsy();
+  });
+
+  it('should not generate infra-config or scripts packages by default', async () => {
+    await tsInfraGenerator(tree, options);
+    expect(
+      tree.exists('packages/common/infra-config/project.json'),
+    ).toBeFalsy();
+    expect(tree.exists('packages/common/scripts/project.json')).toBeFalsy();
+  });
+
+  it('should use cdk directly for deploy and destroy targets by default', async () => {
+    await tsInfraGenerator(tree, options);
+    const config = readProjectConfiguration(tree, '@proj/test');
+    expect(config.targets.deploy.options.command).toBe(
+      'cdk deploy --require-approval=never',
+    );
+    expect(config.targets.deploy.options.cwd).toBe('packages/test');
+    expect(config.targets.destroy.options.command).toBe(
+      'cdk destroy --require-approval=never',
+    );
+    expect(config.targets.destroy.options.cwd).toBe('packages/test');
+  });
+
+  it('should not import from infra-config in main.ts by default', async () => {
+    await tsInfraGenerator(tree, options);
+    const mainTs = tree.read('packages/test/src/main.ts').toString();
+    expect(mainTs).not.toContain('infra-config');
+    expect(mainTs).not.toContain('stagesConfig');
+    expect(mainTs).toContain('process.env.CDK_DEFAULT_ACCOUNT');
+    expect(mainTs).toContain('process.env.CDK_DEFAULT_REGION');
+  });
+
+  it('should not add infra-config tsconfig reference by default', async () => {
+    await tsInfraGenerator(tree, options);
+    const tsConfig = readJson(tree, 'packages/test/tsconfig.json');
+    const refPaths = tsConfig.references.map((r: { path: string }) => r.path);
+    expect(refPaths.some((p: string) => p.includes('infra-config'))).toBe(
+      false,
+    );
+  });
+
+  it('should leave deploy-ci and destroy-ci targets unchanged', async () => {
+    await tsInfraGenerator(tree, options);
+    const config = readProjectConfiguration(tree, '@proj/test');
+    // CI targets still call cdk directly with --app pointing to synth output
+    expect(config.targets['deploy-ci'].options.command).toContain(
+      'cdk deploy --require-approval=never --app',
+    );
+    expect(config.targets['destroy-ci'].options.command).toContain(
+      'cdk destroy --require-approval=never --app',
+    );
+  });
+
+  describe('with enableStageConfig', () => {
+    const stageConfigOptions: TsInfraGeneratorSchema = {
+      ...options,
+      enableStageConfig: true,
+    };
+
+    it('should use solution-deploy/solution-destroy for deploy and destroy targets', async () => {
+      await tsInfraGenerator(tree, stageConfigOptions);
+      const config = readProjectConfiguration(tree, '@proj/test');
+      expect(config.targets.deploy.options.command).toBe(
+        'solution-deploy packages/test',
+      );
+      expect(config.targets.destroy.options.command).toBe(
+        'solution-destroy packages/test',
+      );
+    });
+
+    it('should generate infra-config package with stages types and config', async () => {
+      await tsInfraGenerator(tree, stageConfigOptions);
+      expect(
+        tree.exists('packages/common/infra-config/src/stages.config.ts'),
+      ).toBeTruthy();
+      expect(
+        tree.exists('packages/common/infra-config/src/stages.types.ts'),
+      ).toBeTruthy();
+      // Verify types file has the discriminated union
+      const typesContent = tree
+        .read('packages/common/infra-config/src/stages.types.ts')
+        .toString();
+      expect(typesContent).toContain("type: 'profile'");
+      expect(typesContent).toContain("type: 'assumeRole'");
+      expect(typesContent).toContain('StageCredentials');
+      expect(typesContent).toContain('StagesConfig');
+    });
+
+    it('should not overwrite existing infra-config files', async () => {
+      // Pre-create infra-config with custom content
+      tree.write('packages/common/infra-config/project.json', '{}');
+      tree.write(
+        'packages/common/infra-config/src/stages.config.ts',
+        '// custom config\n',
+      );
+      await tsInfraGenerator(tree, stageConfigOptions);
+      // Should preserve the existing files
+      expect(
+        tree
+          .read('packages/common/infra-config/src/stages.config.ts')
+          .toString(),
+      ).toBe('// custom config\n');
+    });
+
+    it('should not overwrite existing scripts package', async () => {
+      // Pre-create scripts with project.json to trigger early return
+      tree.write('packages/common/scripts/project.json', '{}');
+      tree.write(
+        'packages/common/scripts/src/solution-deploy.ts',
+        '// custom deploy\n',
+      );
+      await tsInfraGenerator(tree, stageConfigOptions);
+      // Should preserve the existing files
+      expect(
+        tree.read('packages/common/scripts/src/solution-deploy.ts').toString(),
+      ).toBe('// custom deploy\n');
+    });
+
+    it('should generate scripts package with bin entries', async () => {
+      await tsInfraGenerator(tree, stageConfigOptions);
+      expect(
+        tree.exists('packages/common/scripts/src/solution-deploy.ts'),
+      ).toBeTruthy();
+      expect(
+        tree.exists('packages/common/scripts/src/solution-destroy.ts'),
+      ).toBeTruthy();
+      // Verify package.json has bin entries
+      const pkgJson = JSON.parse(
+        tree.read('packages/common/scripts/package.json').toString(),
+      );
+      expect(pkgJson.bin['solution-deploy']).toBeDefined();
+      expect(pkgJson.bin['solution-destroy']).toBeDefined();
+    });
+
+    it('should import from infra-config in main.ts', async () => {
+      await tsInfraGenerator(tree, stageConfigOptions);
+      const mainTs = tree.read('packages/test/src/main.ts').toString();
+      expect(mainTs).toContain('infra-config');
+      expect(mainTs).toContain('stagesConfig');
+    });
+
+    it('should add infra-config tsconfig reference', async () => {
+      await tsInfraGenerator(tree, stageConfigOptions);
+      const tsConfig = readJson(tree, 'packages/test/tsconfig.json');
+      const refPaths = tsConfig.references.map((r: { path: string }) => r.path);
+      expect(refPaths.some((p: string) => p.includes('infra-config'))).toBe(
+        true,
+      );
+    });
+
+    it('should add @aws-sdk/client-sts dependency', async () => {
+      await tsInfraGenerator(tree, stageConfigOptions);
+      const packageJson = JSON.parse(tree.read('package.json').toString());
+      expect(packageJson.dependencies['@aws-sdk/client-sts']).toBeDefined();
+    });
+
+    it('should configure deploy and destroy targets with solution scripts', async () => {
+      await tsInfraGenerator(tree, stageConfigOptions);
+      const config = readProjectConfiguration(tree, '@proj/test');
+      expect(config.targets.deploy).toMatchObject({
+        executor: 'nx:run-commands',
+        dependsOn: ['^build', 'compile'],
+        options: {
+          command: 'solution-deploy packages/test',
+        },
+      });
+      expect(config.targets.destroy).toMatchObject({
+        executor: 'nx:run-commands',
+        dependsOn: ['^build', 'compile'],
+        options: {
+          command: 'solution-destroy packages/test',
+        },
+      });
+    });
+
+    it('should leave deploy-ci and destroy-ci targets unchanged', async () => {
+      await tsInfraGenerator(tree, stageConfigOptions);
+      const config = readProjectConfiguration(tree, '@proj/test');
+      expect(config.targets['deploy-ci'].options.command).toContain(
+        'cdk deploy --require-approval=never --app',
+      );
+      expect(config.targets['destroy-ci'].options.command).toContain(
+        'cdk destroy --require-approval=never --app',
+      );
+    });
   });
 });

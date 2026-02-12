@@ -20,9 +20,12 @@ import tsProjectGenerator, { getTsLibDetails } from '../../ts/lib/generator';
 import { withVersions } from '../../utils/versions';
 import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import { sharedInfraConfigGenerator } from '../../utils/shared-infra-config';
+import { sharedScriptsGenerator } from '../../utils/shared-scripts';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
+  SHARED_INFRA_CONFIG_DIR,
 } from '../../utils/shared-constructs-constants';
 import path from 'path';
 import { formatFilesInSubtree } from '../../utils/format';
@@ -53,6 +56,14 @@ export async function tsInfraGenerator(
     iacProvider: 'CDK',
   });
 
+  // Shared infra-config and infra-scripts packages (lazy creation, only when enabled)
+  const enableStageConfig = schema.enableStageConfig ?? false;
+  if (enableStageConfig) {
+    await sharedInfraConfigGenerator(tree);
+    await sharedScriptsGenerator(tree);
+  }
+
+  const synthDirFromRoot = `/dist/${lib.dir}/cdk.out`;
   const synthDirFromProject =
     lib.dir
       .split('/')
@@ -81,6 +92,7 @@ export async function tsInfraGenerator(
       fullyQualifiedName,
       pkgMgrCmd: getPackageManagerCommand().exec,
       dir: lib.dir,
+      enableStageConfig,
       ...schema,
     },
     {
@@ -128,10 +140,14 @@ export async function tsInfraGenerator(
       config.targets.deploy = {
         executor: 'nx:run-commands',
         dependsOn: ['^build', 'compile'],
-        options: {
-          cwd: '{projectRoot}',
-          command: `cdk deploy --require-approval=never`,
-        },
+        options: enableStageConfig
+          ? {
+              command: `solution-deploy ${libraryRoot}`,
+            }
+          : {
+              cwd: '{projectRoot}',
+              command: 'cdk deploy --require-approval=never',
+            },
       };
       config.targets['deploy-ci'] = {
         executor: 'nx:run-commands',
@@ -143,10 +159,14 @@ export async function tsInfraGenerator(
       config.targets.destroy = {
         executor: 'nx:run-commands',
         dependsOn: ['^build', 'compile'],
-        options: {
-          cwd: '{projectRoot}',
-          command: `cdk destroy --require-approval=never`,
-        },
+        options: enableStageConfig
+          ? {
+              command: `solution-destroy ${libraryRoot}`,
+            }
+          : {
+              cwd: '{projectRoot}',
+              command: 'cdk destroy --require-approval=never',
+            },
       };
       config.targets['destroy-ci'] = {
         executor: 'nx:run-commands',
@@ -196,6 +216,16 @@ export async function tsInfraGenerator(
           `${tree.root}/${PACKAGES_DIR}`,
         )}/${SHARED_CONSTRUCTS_DIR}/tsconfig.lib.json`,
       },
+      ...(enableStageConfig
+        ? [
+            {
+              path: `${path.relative(
+                libraryRoot,
+                `${tree.root}/${PACKAGES_DIR}`,
+              )}/${SHARED_INFRA_CONFIG_DIR}/tsconfig.json`,
+            },
+          ]
+        : []),
     ],
   }));
 
