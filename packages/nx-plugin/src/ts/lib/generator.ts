@@ -215,7 +215,7 @@ export const tsProjectGenerator = async (
           },
         },
       },
-      ...nxJson.plugins.filter(
+      ...(nxJson.plugins ?? []).filter(
         (p) => typeof p === 'string' || p.plugin !== '@nx/js/typescript',
       ),
     ];

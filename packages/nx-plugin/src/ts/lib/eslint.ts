@@ -7,32 +7,32 @@ import {
   updateNxJson,
   readNxJson,
   addDependenciesToPackageJson,
+  updateProjectConfiguration,
 } from '@nx/devkit';
 import { withVersions } from '../../utils/versions';
 import { factory, ArrayLiteralExpression, SyntaxKind } from 'typescript';
 import { addSingleImport, query, replace } from '../../utils/ast';
+import { ConfigureProjectOptions } from './types';
+import { readProjectConfigurationUnqualified } from '../../utils/nx';
 
-export const configureEslint = (tree: Tree) => {
+export const configureEslint = (
+  tree: Tree,
+  options: ConfigureProjectOptions,
+) => {
   // Configure the lint task
-  let nxJson = readNxJson(tree);
-  if (
-    !nxJson.plugins
-      ?.filter((e) => typeof e !== 'string')
-      .some((e) => e.plugin === '@nx/eslint/plugin')
-  ) {
-    updateNxJson(tree, {
-      ...nxJson,
-      plugins: [
-        ...(nxJson.plugins ?? []),
-        {
-          plugin: '@nx/eslint/plugin',
-          options: {
-            targetName: 'lint',
-          },
-        },
-      ],
-    });
-  }
+  const projectJson = readProjectConfigurationUnqualified(
+    tree,
+    options.fullyQualifiedName,
+  );
+  updateProjectConfiguration(tree, options.fullyQualifiedName, {
+    ...projectJson,
+    targets: {
+      ...projectJson?.targets,
+      lint: {
+        executor: '@nx/eslint:lint',
+      },
+    },
+  });
 
   addDependenciesToPackageJson(
     tree,
@@ -82,7 +82,7 @@ export const configureEslint = (tree: Tree) => {
       '**/vite.config.*.timestamp*',
     ]);
 
-    nxJson = readNxJson(tree);
+    const nxJson = readNxJson(tree);
     updateNxJson(tree, {
       ...nxJson,
       targetDefaults: {
@@ -93,6 +93,9 @@ export const configureEslint = (tree: Tree) => {
           configurations: {
             fix: {
               fix: true,
+            },
+            'skip-lint': {
+              force: true,
             },
           },
           inputs: [
