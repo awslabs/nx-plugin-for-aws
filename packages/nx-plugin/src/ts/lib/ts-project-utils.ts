@@ -90,6 +90,6 @@ export const configureTsProject = (
     tree.delete(join(options.dir, 'package.json'));
   }
 
-  configureEslint(tree);
+  configureEslint(tree, options);
   configureVitest(tree, options);
 };
