@@ -81,15 +81,16 @@ describe('eslint configuration', () => {
       });
     });
 
-    it('should configure target defaults for lint in nx.json', () => {
+    it('should configure target defaults for @nx/eslint:lint in nx.json', () => {
       tree.write('eslint.config.mjs', `export default [];`);
 
       configureEslint(tree, options);
 
       const nxJson = readNxJson(tree);
-      expect(nxJson.targetDefaults?.lint).toBeDefined();
-      expect(nxJson.targetDefaults.lint.cache).toBe(true);
-      expect(nxJson.targetDefaults.lint.configurations).toEqual({
+      expect(nxJson.targetDefaults?.lint).not.toBeDefined();
+      expect(nxJson.targetDefaults?.['@nx/eslint:lint']).toBeDefined();
+      expect(nxJson.targetDefaults['@nx/eslint:lint'].cache).toBe(true);
+      expect(nxJson.targetDefaults['@nx/eslint:lint'].configurations).toEqual({
         fix: {
           fix: true,
         },
@@ -97,7 +98,7 @@ describe('eslint configuration', () => {
           force: true,
         },
       });
-      expect(nxJson.targetDefaults.lint.inputs).toEqual([
+      expect(nxJson.targetDefaults['@nx/eslint:lint'].inputs).toEqual([
         'default',
         '{workspaceRoot}/eslint.config.mjs',
         '{projectRoot}/eslint.config.mjs',

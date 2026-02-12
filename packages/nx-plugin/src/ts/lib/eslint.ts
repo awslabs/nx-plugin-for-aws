@@ -87,8 +87,8 @@ export const configureEslint = (
       ...nxJson,
       targetDefaults: {
         ...(nxJson.targetDefaults ?? {}),
-        lint: {
-          ...nxJson.targetDefaults?.lint,
+        '@nx/eslint:lint': {
+          ...nxJson.targetDefaults?.['@nx/eslint:lint'],
           cache: true,
           configurations: {
             fix: {
