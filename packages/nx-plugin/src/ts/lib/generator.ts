@@ -142,7 +142,6 @@ export const tsProjectGenerator = async (
       ),
     },
   };
-  delete targets['lint'];
   projectConfiguration.targets = sortObjectKeys(targets);
 
   updateProjectConfiguration(tree, fullyQualifiedName, projectConfiguration);
