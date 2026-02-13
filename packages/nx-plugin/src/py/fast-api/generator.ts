@@ -14,8 +14,7 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { PyFastApiProjectGeneratorSchema } from './schema';
-import { UVProvider } from '@nxlv/python/src/provider/uv/provider';
-import { Logger } from '@nxlv/python/src/executors/utils/logger';
+import { UVProvider, Logger } from '../../utils/nxlv-python';
 import pyProjectGenerator, { getPyProjectDetails } from '../project/generator';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { toClassName, toKebabCase } from '../../utils/names';

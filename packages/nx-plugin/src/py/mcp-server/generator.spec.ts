@@ -11,7 +11,7 @@ import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { parse } from '@iarna/toml';
-import { UVPyprojectToml } from '@nxlv/python/src/provider/uv/types';
+import type { UVPyprojectToml } from '../../utils/nxlv-python';
 import { joinPathFragments } from '@nx/devkit';
 import {
   PACKAGES_DIR,

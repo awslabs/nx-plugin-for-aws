@@ -18,7 +18,7 @@ export const TS_VERSIONS = {
   '@aws-lambda-powertools/tracer': '2.30.2',
   '@aws-lambda-powertools/parser': '2.30.2',
   '@middy/core': '6.4.5',
-  '@nxlv/python': '21.3.1',
+  '@nxlv/python': '22.1.0',
   '@nx-extend/terraform': '9.0.1',
   '@nx/devkit': '22.4.4',
   '@nx/react': '22.4.4',
