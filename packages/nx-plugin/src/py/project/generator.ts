@@ -107,8 +107,21 @@ export const pyProjectGenerator = async (
         },
       },
     ];
-    updateNxJson(tree, nxJson);
   }
+
+  nxJson.targetDefaults ??= {};
+  nxJson.targetDefaults['@nxlv/python:ruff-check'] ??= {
+    configurations: {
+      fix: {
+        fix: true,
+      },
+      'skip-lint': {
+        exitZero: true,
+      },
+    },
+  };
+
+  updateNxJson(tree, nxJson);
 
   if (!tree.exists('uv.lock')) {
     await migrateToSharedVenvGenerator(tree, {

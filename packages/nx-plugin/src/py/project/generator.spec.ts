@@ -189,4 +189,27 @@ describe('python project generator', () => {
     // Verify lint target depends on format
     expect(projectConfig.targets.lint.dependsOn).toContain('format');
   });
+
+  it('should add target defaults for ruff-check', async () => {
+    await pyProjectGenerator(tree, {
+      name: 'test-project',
+      directory: 'apps',
+      projectType: 'application',
+    });
+
+    const nxJson = JSON.parse(tree.read('nx.json', 'utf-8'));
+
+    // Verify ruff-check target defaults are configured
+    expect(nxJson.targetDefaults['@nxlv/python:ruff-check']).toBeDefined();
+    expect(
+      nxJson.targetDefaults['@nxlv/python:ruff-check'].configurations,
+    ).toEqual({
+      fix: {
+        fix: true,
+      },
+      'skip-lint': {
+        exitZero: true,
+      },
+    });
+  });
 });
