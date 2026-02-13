@@ -28,8 +28,7 @@ import { addMcpServerInfra } from '../../utils/agent-core-constructs/agent-core-
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { addPythonBundleTarget } from '../../utils/bundle/bundle';
 import { withVersions } from '../../utils/versions';
-import { Logger } from '@nxlv/python/src/executors/utils/logger';
-import { UVProvider } from '@nxlv/python/src/provider/uv/provider';
+import { Logger, UVProvider } from '../../utils/nxlv-python';
 import { resolveIacProvider } from '../../utils/iac';
 import { assignPort } from '../../utils/port';
 

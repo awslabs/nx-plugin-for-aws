@@ -15,10 +15,12 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { PyProjectGeneratorSchema } from './schema';
-import migrateToSharedVenvGenerator from '@nxlv/python/src/generators/migrate-to-shared-venv/generator';
-import uvProjectGenerator from '@nxlv/python/src/generators/uv-project/generator';
-import { UVProvider } from '@nxlv/python/src/provider/uv/provider';
-import { Logger } from '@nxlv/python/src/executors/utils/logger';
+import {
+  migrateToSharedVenvGenerator,
+  uvProjectGenerator,
+  UVProvider,
+  Logger,
+} from '../../utils/nxlv-python';
 import { withVersions } from '../../utils/versions';
 import { getNpmScope } from '../../utils/npm-scope';
 import { toSnakeCase } from '../../utils/names';
@@ -31,7 +33,7 @@ import {
 } from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { updateToml } from '../../utils/toml';
-import { UVPyprojectToml } from '@nxlv/python/src/provider/uv/types';
+import type { UVPyprojectToml } from '../../utils/nxlv-python';
 
 export const PY_PROJECT_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);

@@ -12,8 +12,7 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { PyLambdaFunctionGeneratorSchema } from './schema';
-import { UVProvider } from '@nxlv/python/src/provider/uv/provider';
-import { Logger } from '@nxlv/python/src/executors/utils/logger';
+import { UVProvider, Logger } from '../../utils/nxlv-python';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import {
   toClassName,

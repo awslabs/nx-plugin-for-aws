@@ -14,7 +14,7 @@ import {
   SHARED_CONSTRUCTS_DIR,
 } from '../../utils/shared-constructs-constants';
 import { joinPathFragments } from '@nx/devkit';
-import { UVPyprojectToml } from '@nxlv/python/src/provider/uv/types';
+import type { UVPyprojectToml } from '../../utils/nxlv-python';
 import { sortObjectKeys } from '../../utils/object';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
 import {

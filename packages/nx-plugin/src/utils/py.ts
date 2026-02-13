@@ -4,7 +4,7 @@
  */
 import { parse, stringify } from '@iarna/toml';
 import { joinPathFragments, Tree } from '@nx/devkit';
-import { UVPyprojectToml } from '@nxlv/python/src/provider/uv/types';
+import type { UVPyprojectToml } from './nxlv-python';
 import { IPyDepVersion, withPyVersions } from './versions';
 import { parsePipRequirementsLine } from 'pip-requirements-js';
 

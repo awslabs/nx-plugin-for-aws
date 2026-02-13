@@ -5,7 +5,7 @@
 import { Tree } from '@nx/devkit';
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
 import { parse, stringify } from '@iarna/toml';
-import { UVPyprojectToml } from '@nxlv/python/src/provider/uv/types';
+import type { UVPyprojectToml } from './nxlv-python';
 import { addDependenciesToPyProjectToml } from './py';
 import { IPyDepVersion } from './versions';
 

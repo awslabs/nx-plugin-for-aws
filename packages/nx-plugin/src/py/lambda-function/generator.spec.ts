@@ -16,7 +16,7 @@ import {
 import { joinPathFragments } from '@nx/devkit';
 import { sortObjectKeys } from '../../utils/object';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
-import { UVPyprojectToml } from '@nxlv/python/src/provider/uv/types';
+import type { UVPyprojectToml } from '../../utils/nxlv-python';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
