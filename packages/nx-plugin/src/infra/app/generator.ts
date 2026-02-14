@@ -24,7 +24,6 @@ import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
 } from '../../utils/shared-constructs-constants';
-import { addStarExport } from '../../utils/ast';
 import path from 'path';
 import { formatFilesInSubtree } from '../../utils/format';
 import { sortObjectKeys } from '../../utils/object';
@@ -181,7 +180,7 @@ export async function tsInfraGenerator(
     withVersions(['tsx']),
   );
 
-  updateJson(tree, `${libraryRoot}/tsconfig.json`, (tsConfig) => ({
+  updateJson(tree, `${libraryRoot}/tsconfig.lib.json`, (tsConfig) => ({
     ...tsConfig,
     references: [
       ...(tsConfig.references || []),
@@ -189,7 +188,7 @@ export async function tsInfraGenerator(
         path: `${path.relative(
           libraryRoot,
           `${tree.root}/${PACKAGES_DIR}`,
-        )}/${SHARED_CONSTRUCTS_DIR}/tsconfig.json`,
+        )}/${SHARED_CONSTRUCTS_DIR}/tsconfig.lib.json`,
       },
     ],
   }));
