@@ -217,6 +217,9 @@ describe('ts lib generator', () => {
 
     expect(tree.exists('test-lib/vite.config.mts')).toBeTruthy();
     expect(tree.exists('test-lib/vite.config.ts')).toBeFalsy();
+
+    // vite.config.mts is used for test configuration
+    expect(tree.exists('test-lib/vitest.config.mts')).toBeFalsy();
   });
 
   it('should add generator metric to app.ts', async () => {
