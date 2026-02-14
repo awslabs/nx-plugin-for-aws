@@ -204,7 +204,6 @@ export async function terraformProjectGenerator(
         command: uvxCommand(
           'checkov',
           `--directory . -o cli -o json --output-file-path console,${checkovReportJsonPath}`,
-          [{ dep: 'pycares', version: '4.11.0' }], // TODO: remove when https://github.com/aio-libs/aiodns/issues/214 is resolved
         ),
         forwardAllArgs: true,
         cwd: '{projectRoot}/src',

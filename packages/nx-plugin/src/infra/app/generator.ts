@@ -115,7 +115,6 @@ export async function tsInfraGenerator(
           command: uvxCommand(
             'checkov',
             `--config-file ${lib.dir}/checkov.yml --directory dist/${lib.dir}/cdk.out --framework cloudformation`,
-            [{ dep: 'pycares', version: '4.11.0' }], // TODO: remove when https://github.com/aio-libs/aiodns/issues/214 is resolved
           ),
         },
       };
