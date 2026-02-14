@@ -156,9 +156,7 @@ describe('infra generator', () => {
       outputs: ['{workspaceRoot}/dist/{projectRoot}/checkov'],
       dependsOn: ['synth'],
       options: {
-        command: expect.stringContaining(
-          'uvx --with pycares==4.11.0 checkov==',
-        ),
+        command: expect.stringContaining('uvx checkov=='),
       },
     });
 
