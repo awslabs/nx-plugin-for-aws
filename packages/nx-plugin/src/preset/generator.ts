@@ -198,6 +198,8 @@ export const presetGenerator = async (
         .filter(([_, v]) => !v['hidden'])
         .map(([k, v]) => ({ name: k, description: v.description })),
       pkgMgrCmd: getPackageManagerCommand().exec,
+      buildCmd: getPackageManagerCommand().run('build'),
+      lintCmd: getPackageManagerCommand().run('lint'),
     },
     {
       overwriteStrategy: OverwriteStrategy.Overwrite,

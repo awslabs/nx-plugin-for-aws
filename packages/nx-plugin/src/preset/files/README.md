@@ -44,7 +44,7 @@ Refer to the [full documentation](https://awslabs.github.io/nx-plugin-for-aws) f
 ```sh
 <%= pkgMgrCmd %> nx run-many --target build --all
 # or
-<%= pkgMgrCmd %> build
+<%= buildCmd %>
 ```
 
 ### Run arbitrary task
@@ -58,7 +58,7 @@ Refer to the [full documentation](https://awslabs.github.io/nx-plugin-for-aws) f
 ```sh
 <%= pkgMgrCmd %> nx run-many --target lint --configuration=fix --all
 # or
-<%= pkgMgrCmd %> lint
+<%= lintCmd %>
 ```
 
 ## Test all projects (and update snapshots)
