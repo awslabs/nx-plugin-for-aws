@@ -95,6 +95,12 @@ export const tsProjectGenerator = async (
     tree.write(viteConfigMtsPath, content);
   }
 
+  // Remove redundant vitest.config.mts file if it exists, since we have vite.config.mts
+  const vitestConfigPath = joinPathFragments(dir, 'vitest.config.mts');
+  if (tree.exists(vitestConfigPath)) {
+    tree.delete(vitestConfigPath);
+  }
+
   // Replace with simpler sample source code
   tree.delete(joinPathFragments(dir, 'src'));
   generateFiles(
