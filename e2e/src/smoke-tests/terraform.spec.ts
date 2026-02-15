@@ -111,7 +111,7 @@ describe('smoke test - terraform', () => {
 
     await runCLI(`sync --verbose`, opts);
     await runCLI(
-      `run-many --target build --all --parallel 1 --output-style=stream --skip-nx-cache --verbose`,
+      `run-many --target build --all --output-style=stream --skip-nx-cache --verbose`,
       opts,
     );
   });

@@ -142,6 +142,7 @@ export async function tsReactWebsiteGenerator(
 
   const buildTarget = targets['build'];
   targets['compile'] = {
+    dependsOn: ['bundle'],
     executor: 'nx:run-commands',
     outputs: ['{workspaceRoot}/dist/{projectRoot}/tsc'],
     options: {
