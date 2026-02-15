@@ -50,7 +50,7 @@ describe('smoke test - trpc-api', () => {
 
     await runCLI(`sync --verbose`, opts);
     await runCLI(
-      `run-many --target build --all --parallel 1 --output-style=stream --verbose`,
+      `run-many --target build --all --output-style=stream --verbose`,
       opts,
     );
   });
