@@ -127,7 +127,7 @@ describe('smoke test - dungeon-adventure', () => {
     );
     await runCLI(`sync --verbose`, opts);
     await runCLI(
-      `${buildPackageManagerShortCommand(pkgMgr, 'build')} --parallel 1 --output-style=stream --skip-nx-cache --verbose`,
+      `${buildPackageManagerShortCommand(pkgMgr, 'build')} --output-style=stream --skip-nx-cache --verbose`,
       { ...opts, prefixWithPackageManagerCmd: false },
     );
 
@@ -277,7 +277,7 @@ describe('smoke test - dungeon-adventure', () => {
       prefixWithPackageManagerCmd: false,
     });
     await runCLI(
-      `${buildPackageManagerShortCommand(pkgMgr, 'build')} --parallel 1 --output-style=stream --verbose`,
+      `${buildPackageManagerShortCommand(pkgMgr, 'build')} --output-style=stream --verbose`,
       { ...opts, prefixWithPackageManagerCmd: false },
     );
 
@@ -317,7 +317,7 @@ describe('smoke test - dungeon-adventure', () => {
       prefixWithPackageManagerCmd: false,
     });
     await runCLI(
-      `${buildPackageManagerShortCommand(pkgMgr, 'build')} --parallel 1 --output-style=stream --verbose`,
+      `${buildPackageManagerShortCommand(pkgMgr, 'build')} --output-style=stream --verbose`,
       { ...opts, prefixWithPackageManagerCmd: false },
     );
 
@@ -424,7 +424,7 @@ describe('smoke test - dungeon-adventure', () => {
       prefixWithPackageManagerCmd: false,
     });
     await runCLI(
-      `${buildPackageManagerShortCommand(pkgMgr, 'build')} --parallel 1 --output-style=stream --verbose`,
+      `${buildPackageManagerShortCommand(pkgMgr, 'build')} --output-style=stream --verbose`,
       { ...opts, prefixWithPackageManagerCmd: false },
     );
   });
