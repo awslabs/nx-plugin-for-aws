@@ -22,6 +22,7 @@ export default defineConfig({
   test: {
     env: {
       NX_DAEMON: 'false',
+      NX_NATIVE_LOGGING: 'error',
     },
     watch: false,
     globals: true,
