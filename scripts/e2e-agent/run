@@ -1,0 +1,162 @@
+#!/usr/bin/env bash
+#
+# e2e-agent/run - Agent-driven documentation verification
+#
+# Usage: run [--capture]
+#
+# Creates an isolated git worktree from the current checkout, spawns a
+# kiro-cli agent in a dedicated tmux session, and captures output with script(1).
+# The agent follows AGENTS.md to verify the documentation works end-to-end.
+#
+# Options:
+#   --capture   Flush script(1) output in real-time (for watching)
+#
+# Requires: tmux, expect, git
+#
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+# === CONFIG ===
+
+SESSION_NAME="e2e-agent"
+AGENTS_DIR="$SCRIPT_DIR/agents"
+LOGS_DIR="$SCRIPT_DIR/logs"
+
+# === ARGUMENT PARSING ===
+
+CAPTURE_MODE=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --capture) CAPTURE_MODE=true; shift ;;
+        -h|--help) head -15 "$0" | tail -13; exit 0 ;;
+        *)         echo "Unknown option: $1" >&2; exit 1 ;;
+    esac
+done
+
+# === HELPERS ===
+
+die() { echo "Error: $1" >&2; exit 1; }
+
+script_to_text() {
+    local script_file=$1 text_file=$2
+    case "$(uname -s)" in
+        Darwin) script -p -d "$script_file" 2>/dev/null ;;
+        *)      cat "$script_file" ;;
+    esac \
+      | LC_ALL=C sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g' \
+      | tr -d '\r' \
+      | sed 's/[^ ]*Thinking\.\.\.//g' \
+      | sed 's/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] *//g' \
+      > "$text_file" || true
+}
+
+# === PREFLIGHT ===
+
+command -v tmux >/dev/null   || die "tmux is required"
+command -v expect >/dev/null || die "expect is required"
+command -v git >/dev/null    || die "git is required"
+
+if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
+    die "Session '$SESSION_NAME' already exists (tmux attach -t $SESSION_NAME)"
+fi
+
+# === WORKTREE ===
+
+WORKTREE_PATH="$(mktemp -d)/wt-e2e-agent"
+
+echo "Creating worktree: $WORKTREE_PATH"
+CODE_DEFENDER_SKIP_LOCAL_HOOKS=true \
+    git -C "$REPO_ROOT" worktree add --detach "$WORKTREE_PATH"
+
+# === AGENT CONFIG ===
+
+mkdir -p "$WORKTREE_PATH/.kiro/agents"
+cp "$AGENTS_DIR/e2e-agent.json" "$WORKTREE_PATH/.kiro/agents/"
+
+# Copy working-tree CLAUDE.md (may have uncommitted changes) into the worktree
+cp "$SCRIPT_DIR/../../CLAUDE.md" "$WORKTREE_PATH/CLAUDE.md"
+
+# === LOGGING ===
+
+RUN_STAMP="run-$(date +%Y%m%d-%H%M%S)"
+RUN_DIR="$LOGS_DIR/$RUN_STAMP"
+REPORTS_DIR="$RUN_DIR/reports"
+mkdir -p "$REPORTS_DIR"
+
+LOG_FILE="$RUN_DIR/$RUN_STAMP-$$.txt"
+SCRIPT_FILE="${LOG_FILE}.script"
+
+# === BUILD PROMPT ===
+
+PROMPT="Work through all the documentation to verify that everything works. Write reports to $REPORTS_DIR. Previous run logs are in $LOGS_DIR."
+
+# === SPAWN ===
+
+# Wrapper: expect sends prompt then hands control to user
+WRAPPER=$(mktemp)
+chmod +x "$WRAPPER"
+cat > "$WRAPPER" << EOF
+#!/usr/bin/env bash
+set -eo pipefail
+cd "$WORKTREE_PATH"
+
+echo "=== e2e-agent ==="
+echo "Time: \$(date)"
+echo "Worktree: $WORKTREE_PATH"
+echo "Log: $SCRIPT_FILE"
+echo ""
+
+expect -c "
+    set timeout 120
+    spawn kiro-cli chat --agent e2e-agent
+    expect -re {\\\[e2e-agent\\\]} { expect -re {> }; send \"$PROMPT\r\" }
+    interact
+"
+EOF
+
+# Build script(1) command for terminal capture
+case "$(uname -s)" in
+    Darwin)
+        if $CAPTURE_MODE
+        then SCRIPT_CMD="script -q -r -F '$SCRIPT_FILE' bash '$WRAPPER'"
+        else SCRIPT_CMD="script -q -r '$SCRIPT_FILE' bash '$WRAPPER'"
+        fi ;;
+    Linux)
+        if $CAPTURE_MODE
+        then SCRIPT_CMD="script -q -f -c 'bash \"$WRAPPER\"' '$SCRIPT_FILE'"
+        else SCRIPT_CMD="script -q -c 'bash \"$WRAPPER\"' '$SCRIPT_FILE'"
+        fi ;;
+    *)  SCRIPT_CMD="bash '$WRAPPER' | tee '$SCRIPT_FILE'" ;;
+esac
+
+# Create dedicated tmux session with the agent
+tmux new-session -d -s "$SESSION_NAME" -c "$WORKTREE_PATH" \
+    "$SCRIPT_CMD"
+
+echo ""
+echo "Agent running in tmux session '$SESSION_NAME'"
+echo "  Log: $SCRIPT_FILE"
+echo ""
+
+# Attach so the user can watch; returns when the session ends
+tmux attach -t "$SESSION_NAME" || true
+
+# === POST-RUN ===
+
+script_to_text "$SCRIPT_FILE" "$LOG_FILE"
+rm -f "$WRAPPER"
+
+echo ""
+echo "=== Agent finished ==="
+echo "  Log (text):   $LOG_FILE"
+echo "  Log (script): $SCRIPT_FILE"
+echo "  Reports:      $REPORTS_DIR"
+echo "  Worktree:     $WORKTREE_PATH"
+
+echo ""
+echo "Cleaning up worktree..."
+git -C "$REPO_ROOT" worktree remove "$WORKTREE_PATH" --force 2>/dev/null || true
+echo "Done."
