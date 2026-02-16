@@ -276,7 +276,6 @@ const main = async () => {
       'packages/nx-plugin/src/utils/versions.ts',
       'TS_VERSIONS',
     );
-    const shadcnChange = tsChanges.find((change) => change.name === 'shadcn');
 
     // Get updated Python versions
     const updatedPyVersions = getUpdatedPythonVersions(tmpDir);
@@ -290,7 +289,7 @@ const main = async () => {
       'PY_VERSIONS',
     );
 
-    const shadcnTemplates = refreshShadcnTemplates(tree, tmpDir);
+    const updatedShadcnTemplateFiles = refreshShadcnTemplates(tree, tmpDir);
 
     // Only apply changes if not a dry run
     if (!isDryRun) {
@@ -301,11 +300,11 @@ const main = async () => {
     writeReport([
       { title: 'TypeScript Dependencies', changes: tsChanges },
       { title: 'Python Dependencies', changes: pyChanges },
-      ...(shadcnChange?.newVersion
+      ...(updatedShadcnTemplateFiles.length > 0
         ? [
             {
               title: `Shadcn Templates`,
-              changes: shadcnTemplates.map((path) => ({ path })),
+              changes: updatedShadcnTemplateFiles.map((path) => ({ path })),
             },
           ]
         : []),

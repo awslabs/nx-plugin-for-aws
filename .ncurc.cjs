@@ -11,7 +11,10 @@ module.exports = {
     }
     return 'minor'; // Upgrade stable to latest minor
   },
-  reject: ['@hey-api/openapi-ts'],
+  reject: [
+    '@hey-api/openapi-ts',
+    '@modelcontextprotocol/inspector', // TODO: consider allowing updates when transitive dep on @types/react 18.x is removed
+  ],
   packageFile: '{package.json,packages/**/package.json}',
   cooldown: 5, // Only latest versions published for 5 days are updated to
   dep: ['prod', 'dev', 'optional', 'packageManager', 'peer'],
