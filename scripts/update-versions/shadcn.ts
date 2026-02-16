@@ -140,8 +140,12 @@ export const refreshShadcnTemplates = (
     const sourceContents = readFileSync(sourcePath, 'utf-8');
     const templatedContents = applyShadcnTemplateAliases(sourceContents);
     const targetRelativePath = relative(process.cwd(), targetPath);
-    tree.write(targetRelativePath, templatedContents);
-    updatedTemplates.push(targetRelativePath);
+
+    const previousContents = tree.read(targetRelativePath, 'utf-8');
+    if (previousContents !== templatedContents) {
+      tree.write(targetRelativePath, templatedContents);
+      updatedTemplates.push(targetRelativePath);
+    }
   };
 
   for (const component of SHADCN_COMPONENTS) {
