@@ -20,6 +20,10 @@ Run tests and update snapshots:
 pnpm nx run @aws/nx-plugin:test -u
 ```
 
+## Tips
+
+- Always use `npx -y` (not bare `npx`) to avoid the "Ok to proceed?" prompt hanging in non-interactive environments.
+
 ## Best Practices
 
 - Always ensure the build passes before raising a PR
