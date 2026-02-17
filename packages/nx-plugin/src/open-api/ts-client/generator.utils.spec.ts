@@ -68,30 +68,12 @@ export const mockStreamingFetch = (
 export const mockJsonlStreamingFetch = (
   status: number,
   jsonlLines: string[],
-  options?: { splitChunks?: boolean },
+  options?: { rawChunks?: string[] },
 ): Mock<any> => {
   const mockFetch = vi.fn();
 
-  let fullContent = jsonlLines.join('\n');
-  if (jsonlLines.length > 0) {
-    fullContent += '\n';
-  }
-
-  let chunks: string[];
-  if (options?.splitChunks && fullContent.length > 10) {
-    chunks = [];
-    let pos = 0;
-    while (pos < fullContent.length) {
-      const chunkSize = Math.min(
-        Math.floor(Math.random() * 10) + 1,
-        fullContent.length - pos,
-      );
-      chunks.push(fullContent.slice(pos, pos + chunkSize));
-      pos += chunkSize;
-    }
-  } else {
-    chunks = jsonlLines.map((line) => line + '\n');
-  }
+  const chunks: string[] =
+    options?.rawChunks ?? jsonlLines.map((line) => line + '\n');
 
   let i = 0;
 

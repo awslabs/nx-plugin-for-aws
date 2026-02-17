@@ -1073,14 +1073,11 @@ describe('openApiTsClientGenerator - streaming', () => {
                   description: 'Streaming response',
                   content: {
                     'application/jsonl': {
-                      schema: {
-                        type: 'string',
-                        itemSchema: {
-                          $ref: '#/components/schemas/StreamChunk',
-                        },
+                      itemSchema: {
+                        $ref: '#/components/schemas/StreamChunk',
                       },
                     },
-                  },
+                  } as any,
                 },
               },
             },
@@ -1143,6 +1140,36 @@ describe('openApiTsClientGenerator - streaming', () => {
         { content: ' World' },
         { content: '!' },
       ]);
+
+      // Test with chunks split across JSON boundaries
+      const mockFetchSplitChunks = mockJsonlStreamingFetch(
+        200,
+        ['{"content":"Hello"}', '{"content":" World"}', '{"content":"!"}'],
+        {
+          rawChunks: [
+            '{"conten',
+            't":"Hello"}\n{"content":',
+            '" World"}\n{"conte',
+            'nt":"!"}\n',
+          ],
+        },
+      );
+
+      const receivedSplitChunks: { content: string }[] = [];
+      for await (const chunk of await callGeneratedClientStreaming(
+        client,
+        mockFetchSplitChunks,
+        'streamData',
+        { prompt: 'test' },
+      )) {
+        receivedSplitChunks.push(chunk);
+      }
+
+      expect(receivedSplitChunks).toEqual([
+        { content: 'Hello' },
+        { content: ' World' },
+        { content: '!' },
+      ]);
     });
 
     it('should handle application/x-ndjson with itemSchema', async () => {
@@ -1158,14 +1185,11 @@ describe('openApiTsClientGenerator - streaming', () => {
                   description: 'Event stream',
                   content: {
                     'application/x-ndjson': {
-                      schema: {
-                        type: 'string',
-                        itemSchema: {
-                          $ref: '#/components/schemas/Event',
-                        },
+                      itemSchema: {
+                        $ref: '#/components/schemas/Event',
                       },
                     },
-                  },
+                  } as any,
                 },
               },
             },
@@ -1221,64 +1245,6 @@ describe('openApiTsClientGenerator - streaming', () => {
         { id: 2, type: 'progress', data: '50%' },
         { id: 3, type: 'complete' },
       ]);
-    });
-
-    it('should maintain backward compatibility with x-streaming vendor extension', async () => {
-      const spec: Spec = {
-        openapi: '3.0.0',
-        info: { title, version: '1.0.0' },
-        paths: {
-          '/legacy-stream': {
-            get: {
-              ...{ 'x-streaming': true },
-              operationId: 'legacyStream',
-              responses: {
-                '200': {
-                  description: 'Legacy streaming',
-                  content: {
-                    'text/event-stream': {
-                      schema: {
-                        type: 'string',
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-      };
-
-      tree.write('openapi.json', JSON.stringify(spec));
-
-      await openApiTsClientGenerator(tree, {
-        openApiSpecPath: 'openapi.json',
-        outputPath: 'src/generated',
-      });
-
-      validateTypeScript([
-        'src/generated/client.gen.ts',
-        'src/generated/types.gen.ts',
-      ]);
-
-      const client = tree.read('src/generated/client.gen.ts', 'utf-8');
-      expect(client).toMatchSnapshot();
-
-      // Legacy streaming should NOT have JSONL buffering
-      expect(client).not.toContain('let buffer');
-
-      const mockFetch = mockStreamingFetch(200, ['event1', 'event2', 'event3']);
-
-      const receivedChunks: string[] = [];
-      for await (const chunk of await callGeneratedClientStreaming(
-        client,
-        mockFetch,
-        'legacyStream',
-      )) {
-        receivedChunks.push(chunk);
-      }
-
-      expect(receivedChunks).toEqual(['event1', 'event2', 'event3']);
     });
   });
 });

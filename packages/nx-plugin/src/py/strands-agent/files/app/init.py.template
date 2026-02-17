@@ -88,13 +88,11 @@ class JsonStreamingResponse(StreamingResponse):
             "description": description,
             "content": {
                 "application/jsonl": {
-                    "schema": {
-                        "type": "string",
-                        "x-model-name": item_model.__name__,
-                    },
-                    "x-itemSchema": {"$ref": f"#/components/schemas/{item_model.__name__}"},
+                    "itemSchema": {"$ref": f"#/components/schemas/{item_model.__name__}"},
                 }
             },
+            # Include the model so FastAPI registers the schema in components/schemas
+            "model": item_model,
         }
 
 
@@ -116,39 +114,6 @@ async def unhandled_exception_handler(request, err):
     )
 
 
-def _process_item_schema(openapi_schema: dict) -> dict:
-    """
-    Process x-itemSchema references in OpenAPI schema for OpenAPI 3.2 streaming support.
-
-    This function converts x-itemSchema to the standard itemSchema field and ensures
-    that the referenced schema is properly included in components/schemas.
-    """
-    if "paths" not in openapi_schema:
-        return openapi_schema
-
-    for path_item in openapi_schema["paths"].values():
-        for operation in path_item.values():
-            if not isinstance(operation, dict) or "responses" not in operation:
-                continue
-
-            for response in operation.get("responses", {}).values():
-                if not isinstance(response, dict) or "content" not in response:
-                    continue
-
-                content = response.get("content", {})
-
-                for media_type in ["application/jsonl", "application/x-ndjson"]:
-                    if media_type in content:
-                        media_content = content[media_type]
-                        if "x-itemSchema" in media_content:
-                            media_content["schema"] = {
-                                "type": "string",
-                                "itemSchema": media_content.pop("x-itemSchema"),
-                            }
-
-    return openapi_schema
-
-
 def custom_openapi():
     if app.openapi_schema:
         return app.openapi_schema
@@ -162,9 +127,6 @@ def custom_openapi():
         description=app.description,
         routes=app.routes,
     )
-
-    # Process itemSchema for OpenAPI 3.2 streaming support
-    openapi_schema = _process_item_schema(openapi_schema)
 
     app.openapi_schema = openapi_schema
     return app.openapi_schema

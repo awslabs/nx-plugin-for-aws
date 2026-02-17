@@ -298,50 +298,41 @@ It is also worth noting that depending on your use case you may need to implemen
 
 #### Defining Output Models
 
-For streaming responses, the generator uses `JsonStreamingResponse` which automatically serializes Pydantic models to JSON Lines format (`application/jsonl`). This format is compatible with OpenAPI 3.2's streaming specification and works seamlessly with the generated TypeScript client.
+For streaming responses, the generator provides `JsonStreamingResponse` which automatically serializes Pydantic models to JSON Lines format (`application/jsonl`). This format is compatible with OpenAPI 3.2's streaming specification and works seamlessly with the generated TypeScript client.
 
 By default, the agent yields `StreamChunk` objects containing the agent's response text:
 
 ```python
-from .streaming import JsonStreamingResponse
-
 class StreamChunk(BaseModel):
     content: str
-
-@app.post(
-    "/invocations",
-    response_class=JsonStreamingResponse,
-    responses={200: JsonStreamingResponse.openapi_response(StreamChunk, "Stream of agent response chunks")},
-)
-async def invoke(input: InvokeInput) -> JsonStreamingResponse:
-    return JsonStreamingResponse(handle_invoke(input))
 ```
 
-You can define your own Pydantic model to yield structured data. Simply update the `StreamChunk` model and the response configuration:
+You can customise the `StreamChunk` model to suit your needs:
 
 ```python
 from pydantic import BaseModel
-from .streaming import JsonStreamingResponse
 
 class StreamChunk(BaseModel):
     content: str
     timestamp: str
     token_count: int
+```
 
-async def handle_invoke(...):
-    ...
-    yield StreamChunk(content="xx", timestamp="yy", token_count=5)
+:::note
+Note that since FastAPI does not currently support generating an OpenAPI specification for streaming responses, we must explicitly set the response model for each streaming operation, ie:
 
+```python
 @app.post(
     "/invocations",
     response_class=JsonStreamingResponse,
-    responses={200: JsonStreamingResponse.openapi_response(StreamChunk, "Stream of response chunks")},
+    responses={200: JsonStreamingResponse.of(StreamChunk)},
 )
 async def invoke(input: InvokeInput) -> JsonStreamingResponse:
     return JsonStreamingResponse(handle_invoke(input))
 ```
+:::
 
-The `JsonStreamingResponse` class handles serialization automatically, converting each yielded Pydantic model to a JSON line.
+There is an [open feature request for native support in FastAPI](https://github.com/fastapi/fastapi/discussions/14362).
 
 ## Bedrock AgentCore Python SDK
 

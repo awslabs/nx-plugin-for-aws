@@ -147,11 +147,11 @@ const renderResponse = (response, options) => {
   }
   return renderFromJsonValue(response, `(${opts.asJson})`);
 };
-const renderStreamingResponseChunk = (response) => {
+const renderStreamingResponseChunk = (response, chunkVariableName = 'value') => {
   return renderResponse(response, {
-    asJson: 'JSON.parse(value)',
-    asText: 'value',
-    asBlob: 'new Blob([value])',
+    asJson: `JSON.parse(${chunkVariableName})`,
+    asText: chunkVariableName,
+    asBlob: `new Blob([${chunkVariableName}])`,
   });
 };
 const matchPattern = (pattern, value) => {
@@ -433,14 +433,13 @@ export class <%- className %> {
     return;
     <%_ } else { _%>
     const reader = response.body?<% if (response.type !== 'binary') { %>.pipeThrough(new TextDecoderStream())<% } %>.getReader();
-    <%_ if (op.isJsonlStreaming) { _%>
-    <%_ const itemSchemaModel = models.find(m => m.name === op.streamingItemSchema); _%>
+    <%_ if (response.isJsonlStreaming) { _%>
     let buffer = '';
     while (reader) {
       const { value: chunk, done } = await reader.read();
       if (done) {
         if (buffer.trim()) {
-          yield <%- itemSchemaModel ? `$IO.${itemSchemaModel.typescriptName}.fromJson(JSON.parse(buffer))` : 'JSON.parse(buffer)' %>;
+          yield <%- renderStreamingResponseChunk(response.itemSchemaModel, 'buffer') %>;
         }
         return;
       }
@@ -451,7 +450,7 @@ export class <%- className %> {
       buffer = lines.pop() ?? '';
       for (const line of lines) {
         if (line.trim()) {
-          yield <%- itemSchemaModel ? `$IO.${itemSchemaModel.typescriptName}.fromJson(JSON.parse(line))` : 'JSON.parse(line)' %>;
+          yield <%- renderStreamingResponseChunk(response.itemSchemaModel, 'line') %>;
         }
       }
     }
