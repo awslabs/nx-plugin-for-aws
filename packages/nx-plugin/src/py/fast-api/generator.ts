@@ -80,7 +80,7 @@ export const pyFastApiProjectGenerator = async (
     executor: '@nxlv/python:run-commands',
     options: {
       command: `uv run fastapi dev ${normalizedModuleName}/main.py --port ${port}`,
-      cwd: dir,
+      cwd: '{projectRoot}',
     },
     continuous: true,
   };

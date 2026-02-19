@@ -53,12 +53,16 @@ export async function tsInfraGenerator(
     iacProvider: 'CDK',
   });
 
-  const synthDirFromRoot = `/dist/${lib.dir}/cdk.out`;
   const synthDirFromProject =
     lib.dir
       .split('/')
       .map(() => '..')
-      .join('/') + synthDirFromRoot;
+      .join('/') + `/dist/${lib.dir}/cdk.out`;
+  const distDirFromProjectRoot =
+    lib.dir
+      .split('/')
+      .map(() => '..')
+      .join('/') + '/dist/{projectRoot}/cdk.out';
   const projectConfig = readProjectConfiguration(tree, lib.fullyQualifiedName);
   const libraryRoot = projectConfig.root;
   const npmScopePrefix = getNpmScopePrefix(tree);
@@ -94,14 +98,17 @@ export async function tsInfraGenerator(
         'synth',
         'checkov',
       ];
+      config.targets.compile.outputs = [
+        '{workspaceRoot}/dist/{projectRoot}/tsc',
+      ];
       config.targets.synth = {
         cache: true,
         executor: 'nx:run-commands',
         inputs: ['default'],
-        outputs: [`{workspaceRoot}${synthDirFromRoot}`],
+        outputs: ['{workspaceRoot}/dist/{projectRoot}/cdk.out'],
         dependsOn: ['^build', 'compile'], // compile clobbers dist directory, so ensure synth runs afterwards
         options: {
-          cwd: libraryRoot,
+          cwd: '{projectRoot}',
           command: 'cdk synth',
         },
       };
@@ -114,7 +121,7 @@ export async function tsInfraGenerator(
         options: {
           command: uvxCommand(
             'checkov',
-            `--config-file ${lib.dir}/checkov.yml --directory dist/${lib.dir}/cdk.out --framework cloudformation`,
+            '--config-file {projectRoot}/checkov.yml --directory dist/{projectRoot}/cdk.out --framework cloudformation',
           ),
         },
       };
@@ -122,43 +129,43 @@ export async function tsInfraGenerator(
         executor: 'nx:run-commands',
         dependsOn: ['^build', 'compile'],
         options: {
-          cwd: libraryRoot,
+          cwd: '{projectRoot}',
           command: `cdk deploy --require-approval=never`,
         },
       };
       config.targets['deploy-ci'] = {
         executor: 'nx:run-commands',
         options: {
-          cwd: libraryRoot,
-          command: `cdk deploy --require-approval=never --app ${synthDirFromProject}`,
+          cwd: '{projectRoot}',
+          command: `cdk deploy --require-approval=never --app ${distDirFromProjectRoot}`,
         },
       };
       config.targets.destroy = {
         executor: 'nx:run-commands',
         dependsOn: ['^build', 'compile'],
         options: {
-          cwd: libraryRoot,
+          cwd: '{projectRoot}',
           command: `cdk destroy --require-approval=never`,
         },
       };
       config.targets['destroy-ci'] = {
         executor: 'nx:run-commands',
         options: {
-          cwd: libraryRoot,
-          command: `cdk destroy --require-approval=never --app ${synthDirFromProject}`,
+          cwd: '{projectRoot}',
+          command: `cdk destroy --require-approval=never --app ${distDirFromProjectRoot}`,
         },
       };
       config.targets.cdk = {
         executor: 'nx:run-commands',
         options: {
-          cwd: libraryRoot,
+          cwd: '{projectRoot}',
           command: 'cdk',
         },
       };
       config.targets.bootstrap = {
         executor: 'nx:run-commands',
         options: {
-          cwd: libraryRoot,
+          cwd: '{projectRoot}',
           command: 'cdk bootstrap',
         },
       };

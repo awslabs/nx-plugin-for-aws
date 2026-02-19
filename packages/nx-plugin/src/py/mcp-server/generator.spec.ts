@@ -595,8 +595,8 @@ dev-dependencies = []
     // Check the exact commands for the bundle target
     const commands = projectConfig.targets['bundle-arm'].options.commands;
     expect(commands).toEqual([
-      'uv export --frozen --no-dev --no-editable --project apps/test-project --package test-project -o dist/apps/test-project/bundle-arm/requirements.txt',
-      'uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform aarch64-manylinux2014 --target dist/apps/test-project/bundle-arm -r dist/apps/test-project/bundle-arm/requirements.txt',
+      'uv export --frozen --no-dev --no-editable --project {projectRoot} --package test-project -o dist/{projectRoot}/bundle-arm/requirements.txt',
+      'uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform aarch64-manylinux2014 --target dist/{projectRoot}/bundle-arm -r dist/{projectRoot}/bundle-arm/requirements.txt',
     ]);
   });
 
@@ -871,8 +871,8 @@ dev-dependencies = []
     // Check the exact commands for the bundle target
     const commands = projectConfig.targets['bundle-arm'].options.commands;
     expect(commands).toEqual([
-      'uv export --frozen --no-dev --no-editable --project apps/test-project --package test-project -o dist/apps/test-project/bundle-arm/requirements.txt',
-      'uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform aarch64-manylinux2014 --target dist/apps/test-project/bundle-arm -r dist/apps/test-project/bundle-arm/requirements.txt',
+      'uv export --frozen --no-dev --no-editable --project {projectRoot} --package test-project -o dist/{projectRoot}/bundle-arm/requirements.txt',
+      'uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform aarch64-manylinux2014 --target dist/{projectRoot}/bundle-arm -r dist/{projectRoot}/bundle-arm/requirements.txt',
     ]);
 
     // Check that docker target was added

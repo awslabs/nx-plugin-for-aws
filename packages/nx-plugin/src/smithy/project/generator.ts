@@ -49,9 +49,9 @@ export const smithyProjectGenerator = async (
         executor: 'nx:run-commands',
         options: {
           commands: [
-            cmd.rm(`dist/${dir}/build`),
-            cmd.mkdir(`dist/${dir}/build`),
-            `docker build -f ${dir}/build.Dockerfile --target export --output type=local,dest=dist/${dir}/build ${dir}`,
+            cmd.rm('dist/{projectRoot}/build'),
+            cmd.mkdir('dist/{projectRoot}/build'),
+            'docker build -f {projectRoot}/build.Dockerfile --target export --output type=local,dest=dist/{projectRoot}/build {projectRoot}',
           ],
           parallel: false,
           cwd: '{workspaceRoot}',

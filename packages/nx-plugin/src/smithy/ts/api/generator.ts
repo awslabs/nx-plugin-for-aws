@@ -148,10 +148,7 @@ export const tsSmithyApiGenerator = async (
   });
 
   const cmd = new FsCommands(tree);
-  const generatedSrcDirFromRoot = joinPathFragments(
-    backendProjectConfig.sourceRoot,
-    'generated',
-  );
+  const generatedSrcDirFromRoot = '{projectRoot}/src/generated';
 
   // Target for copying the ssdk built by the model
   backendProjectConfig.targets['copy-ssdk'] = {
