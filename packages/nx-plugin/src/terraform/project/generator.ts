@@ -55,7 +55,7 @@ export async function terraformProjectGenerator(
     join(tree.root, lib.dir, 'src'),
     tree.root,
   );
-  const distDir = join(outDirToRootRelativePath, 'dist', lib.dir);
+  const distDir = join(outDirToRootRelativePath, 'dist', '{projectRoot}');
   const tfDistDir = join(distDir, 'terraform');
   const checkovReportJsonPath = join(distDir, 'checkov', 'checkov_report.json');
 
@@ -199,7 +199,7 @@ export async function terraformProjectGenerator(
     test: {
       executor: 'nx:run-commands',
       cache: true,
-      outputs: [`{workspaceRoot}/dist/${lib.dir}/checkov`],
+      outputs: ['{workspaceRoot}/dist/{projectRoot}/checkov'],
       options: {
         command: uvxCommand(
           'checkov',

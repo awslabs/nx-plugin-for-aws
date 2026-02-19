@@ -88,7 +88,7 @@ export function Main() {
     expect(projectConfig.targets.openapi).toBeDefined();
     expect(projectConfig.targets.openapi.executor).toBe('nx:run-commands');
     expect(projectConfig.targets.openapi.outputs).toEqual([
-      '{workspaceRoot}/dist/apps/backend/openapi',
+      '{workspaceRoot}/dist/{projectRoot}/openapi',
     ]);
 
     // Verify build target was updated to depend on openapi

@@ -64,17 +64,17 @@ describe('infra generator', () => {
     expect(config.targets.synth).toMatchObject({
       cache: true,
       executor: 'nx:run-commands',
-      outputs: ['{workspaceRoot}/dist/packages/test/cdk.out'],
+      outputs: ['{workspaceRoot}/dist/{projectRoot}/cdk.out'],
       dependsOn: ['^build', 'compile'],
       options: {
-        cwd: 'packages/test',
+        cwd: '{projectRoot}',
         command: 'cdk synth',
       },
     });
     expect(config.targets.deploy).toMatchObject({
       executor: 'nx:run-commands',
       options: {
-        cwd: 'packages/test',
+        cwd: '{projectRoot}',
         command: 'cdk deploy --require-approval=never',
       },
       dependsOn: ['^build', 'compile'],
@@ -82,15 +82,15 @@ describe('infra generator', () => {
     expect(config.targets['deploy-ci']).toMatchObject({
       executor: 'nx:run-commands',
       options: {
-        cwd: 'packages/test',
+        cwd: '{projectRoot}',
         command:
-          'cdk deploy --require-approval=never --app ../../dist/packages/test/cdk.out',
+          'cdk deploy --require-approval=never --app ../../dist/{projectRoot}/cdk.out',
       },
     });
     expect(config.targets.destroy).toMatchObject({
       executor: 'nx:run-commands',
       options: {
-        cwd: 'packages/test',
+        cwd: '{projectRoot}',
         command: 'cdk destroy --require-approval=never',
       },
       dependsOn: ['^build', 'compile'],
@@ -98,22 +98,22 @@ describe('infra generator', () => {
     expect(config.targets['destroy-ci']).toMatchObject({
       executor: 'nx:run-commands',
       options: {
-        cwd: 'packages/test',
+        cwd: '{projectRoot}',
         command:
-          'cdk destroy --require-approval=never --app ../../dist/packages/test/cdk.out',
+          'cdk destroy --require-approval=never --app ../../dist/{projectRoot}/cdk.out',
       },
     });
     expect(config.targets.cdk).toMatchObject({
       executor: 'nx:run-commands',
       options: {
-        cwd: 'packages/test',
+        cwd: '{projectRoot}',
         command: 'cdk',
       },
     });
     expect(config.targets.bootstrap).toMatchObject({
       executor: 'nx:run-commands',
       options: {
-        cwd: 'packages/test',
+        cwd: '{projectRoot}',
         command: 'cdk bootstrap',
       },
     });

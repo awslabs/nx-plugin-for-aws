@@ -414,22 +414,16 @@ describe('terraformProjectGenerator', () => {
       // Check that plan target uses correct dist path
       const planCommand =
         projectConfig.targets['plan'].configurations.dev.commands[1];
-      expect(planCommand).toContain(
-        'dist/packages/my-terraform-project/terraform/dev.tfplan',
-      );
+      expect(planCommand).toContain('dist/{projectRoot}/terraform/dev.tfplan');
 
       // Check that apply target uses correct dist path
       const applyCommand =
         projectConfig.targets['apply'].configurations.dev.command;
-      expect(applyCommand).toContain(
-        'dist/packages/my-terraform-project/terraform/dev.tfplan',
-      );
+      expect(applyCommand).toContain('dist/{projectRoot}/terraform/dev.tfplan');
 
       // Check that test target uses correct checkov output path
       const testCommand = projectConfig.targets['test'].options.command;
-      expect(testCommand).toContain(
-        'dist/packages/my-terraform-project/checkov',
-      );
+      expect(testCommand).toContain('dist/{projectRoot}/checkov');
     });
   });
 

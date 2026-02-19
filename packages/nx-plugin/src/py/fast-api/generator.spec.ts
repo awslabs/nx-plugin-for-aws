@@ -81,16 +81,16 @@ describe('fastapi project generator', () => {
     // Verify FastAPI-specific targets
     expect(projectConfig.targets['bundle-x86']).toBeDefined();
     expect(projectConfig.targets['bundle-x86'].outputs).toEqual([
-      '{workspaceRoot}/dist/apps/test_api/bundle-x86',
+      '{workspaceRoot}/dist/{projectRoot}/bundle-x86',
     ]);
     expect(projectConfig.targets['bundle-x86'].options.commands).toContain(
-      'uv export --frozen --no-dev --no-editable --project apps/test_api --package proj.test_api -o dist/apps/test_api/bundle-x86/requirements.txt',
+      'uv export --frozen --no-dev --no-editable --project {projectRoot} --package proj.test_api -o dist/{projectRoot}/bundle-x86/requirements.txt',
     );
 
     // Verify openapi spec is generated
     expect(projectConfig.targets.openapi).toBeDefined();
     expect(projectConfig.targets.openapi.options.commands).toContain(
-      'uv run python apps/test_api/scripts/generate_open_api.py "dist/apps/test_api/openapi/openapi.json"',
+      'uv run python {projectRoot}/scripts/generate_open_api.py "dist/{projectRoot}/openapi/openapi.json"',
     );
 
     // Verify start target for development

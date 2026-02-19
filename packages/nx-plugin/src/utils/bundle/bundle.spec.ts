@@ -671,10 +671,10 @@ export default defineConfig([
 
       // Verify each has correct output path
       expect(project.targets?.['bundle-x86']?.outputs).toEqual([
-        '{workspaceRoot}/dist/apps/test-python-project/bundle-x86',
+        '{workspaceRoot}/dist/{projectRoot}/bundle-x86',
       ]);
       expect(project.targets?.['bundle-arm']?.outputs).toEqual([
-        '{workspaceRoot}/dist/apps/test-python-project/bundle-arm',
+        '{workspaceRoot}/dist/{projectRoot}/bundle-arm',
       ]);
     });
   });

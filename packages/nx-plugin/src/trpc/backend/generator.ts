@@ -104,7 +104,7 @@ export async function tsTrpcApiGenerator(
     executor: 'nx:run-commands',
     options: {
       commands: ['tsx --watch src/local-server.ts'],
-      cwd: backendRoot,
+      cwd: '{projectRoot}',
     },
     continuous: true,
   };

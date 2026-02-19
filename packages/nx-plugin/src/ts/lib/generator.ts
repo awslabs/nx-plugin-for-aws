@@ -20,7 +20,6 @@ import { libraryGenerator } from '@nx/js';
 import { getNpmScopePrefix } from '../../utils/npm-scope';
 import { configureTsProject } from './ts-project-utils';
 import { toKebabCase } from '../../utils/names';
-import { relative } from 'path';
 import { formatFilesInSubtree } from '../../utils/format';
 import { sortObjectKeys } from '../../utils/object';
 import {
@@ -128,7 +127,7 @@ export const tsProjectGenerator = async (
 
   targets['compile'] = {
     executor: 'nx:run-commands',
-    outputs: [`{workspaceRoot}/dist/${dir}/tsc`],
+    outputs: ['{workspaceRoot}/dist/{projectRoot}/tsc'],
     options: {
       command: 'tsc --build tsconfig.lib.json',
       cwd: '{projectRoot}',
@@ -141,11 +140,7 @@ export const tsProjectGenerator = async (
     executor: '@nx/vitest:test',
     outputs: ['{options.reportsDirectory}'],
     options: {
-      reportsDirectory: joinPathFragments(
-        relative(joinPathFragments(tree.root, dir), tree.root),
-        'coverage',
-        dir,
-      ),
+      reportsDirectory: '{workspaceRoot}/coverage/{projectRoot}',
     },
   };
   projectConfiguration.targets = sortObjectKeys(targets);

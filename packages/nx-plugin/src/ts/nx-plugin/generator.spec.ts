@@ -28,37 +28,37 @@ describe('ts#nx-plugin generator', () => {
     expect(project.targets?.package?.executor).toBe('@nx/js:tsc');
     expect(project.targets?.package?.outputs).toEqual(['{options.outputPath}']);
     expect(project.targets?.package?.options?.outputPath).toBe(
-      'dist/test-plugin/package',
+      'dist/{projectRoot}/package',
     );
     expect(project.targets?.package?.options?.main).toBe(
-      'test-plugin/src/index.ts',
+      '{projectRoot}/src/index.ts',
     );
     expect(project.targets?.package?.options?.tsConfig).toBe(
-      'test-plugin/tsconfig.lib.json',
+      '{projectRoot}/tsconfig.lib.json',
     );
 
     // Should have correct assets
     const assets = project.targets?.package?.options?.assets;
-    expect(assets).toContain('test-plugin/*.md');
-    expect(assets).toContain('test-plugin/LICENSE*');
-    expect(assets).toContain('test-plugin/NOTICE');
+    expect(assets).toContain('{projectRoot}/*.md');
+    expect(assets).toContain('{projectRoot}/LICENSE*');
+    expect(assets).toContain('{projectRoot}/NOTICE');
     expect(assets).toContainEqual({
-      input: './test-plugin/src',
+      input: './{projectRoot}/src',
       glob: '**/!(*.ts)',
       output: './src',
     });
     expect(assets).toContainEqual({
-      input: './test-plugin/src',
+      input: './{projectRoot}/src',
       glob: '**/*.d.ts',
       output: './src',
     });
     expect(assets).toContainEqual({
-      input: './test-plugin',
+      input: './{projectRoot}',
       glob: 'generators.json',
       output: '.',
     });
     expect(assets).toContainEqual({
-      input: './test-plugin',
+      input: './{projectRoot}',
       glob: 'executors.json',
       output: '.',
     });

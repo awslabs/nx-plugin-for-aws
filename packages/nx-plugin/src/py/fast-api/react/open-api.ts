@@ -54,10 +54,10 @@ export const addOpenApiGeneration = (
       openapi: {
         cache: true,
         executor: 'nx:run-commands',
-        outputs: [joinPathFragments('{workspaceRoot}', fastApiOpenApiDist)],
+        outputs: ['{workspaceRoot}/dist/{projectRoot}/openapi'],
         options: {
           commands: [
-            `uv run python ${joinPathFragments(project.root, 'scripts', 'generate_open_api.py')} "${specPath}"`,
+            'uv run python {projectRoot}/scripts/generate_open_api.py "dist/{projectRoot}/openapi/openapi.json"',
           ],
         },
       },

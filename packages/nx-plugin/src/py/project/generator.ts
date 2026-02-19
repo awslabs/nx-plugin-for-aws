@@ -156,7 +156,7 @@ export const pyProjectGenerator = async (
     srcDir: false,
   });
 
-  const outputPath = `{workspaceRoot}/dist/${dir}`;
+  const outputPath = '{workspaceRoot}/dist/{projectRoot}';
   const buildOutputPath = joinPathFragments(outputPath, 'build');
   const projectConfiguration = readProjectConfiguration(
     tree,

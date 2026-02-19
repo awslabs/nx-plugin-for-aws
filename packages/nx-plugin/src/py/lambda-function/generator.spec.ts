@@ -102,10 +102,10 @@ describe('lambda-handler project generator', () => {
     // Verify Lambda Function-specific targets
     expect(projectConfig.targets['bundle-x86']).toBeDefined();
     expect(projectConfig.targets['bundle-x86'].outputs).toEqual([
-      '{workspaceRoot}/dist/apps/test_project/bundle-x86',
+      '{workspaceRoot}/dist/{projectRoot}/bundle-x86',
     ]);
     expect(projectConfig.targets['bundle-x86'].options.commands).toContain(
-      'uv export --frozen --no-dev --no-editable --project apps/test_project --package test-project -o dist/apps/test_project/bundle-x86/requirements.txt',
+      'uv export --frozen --no-dev --no-editable --project {projectRoot} --package test-project -o dist/{projectRoot}/bundle-x86/requirements.txt',
     );
 
     // Verify build dependencies
@@ -470,7 +470,7 @@ describe('lambda-handler project generator', () => {
     );
     expect(projectConfig.targets['bundle-x86']).toBeDefined();
     expect(projectConfig.targets['bundle-x86'].options.commands[0]).toContain(
-      `--project apps/test_project`,
+      `--project {projectRoot}`,
     );
   });
 
@@ -1008,13 +1008,13 @@ describe('lambda-handler project generator', () => {
       // Check that bundle target was configured with Python-specific options
       expect(projectConfig.targets['bundle-x86']).toBeDefined();
       expect(projectConfig.targets['bundle-x86'].outputs).toEqual([
-        '{workspaceRoot}/dist/apps/test_project/bundle-x86',
+        '{workspaceRoot}/dist/{projectRoot}/bundle-x86',
       ]);
 
       // Check the exact commands for the bundle target
       const commands = projectConfig.targets['bundle-x86'].options.commands;
       expect(commands).toContain(
-        'uv export --frozen --no-dev --no-editable --project apps/test_project --package test-project -o dist/apps/test_project/bundle-x86/requirements.txt',
+        'uv export --frozen --no-dev --no-editable --project {projectRoot} --package test-project -o dist/{projectRoot}/bundle-x86/requirements.txt',
       );
 
       // Verify build dependencies

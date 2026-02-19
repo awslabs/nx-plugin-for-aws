@@ -33,13 +33,7 @@ export interface AddPythonBundleTargetOptions {
   pythonPlatform?: 'x86_64-manylinux2014' | 'aarch64-manylinux2014';
 }
 
-interface CreatePythonBundleTargetOptions
-  extends Required<AddPythonBundleTargetOptions> {
-  /**
-   * Directory of the python project from the monorepo root
-   */
-  projectDir: string;
-
+interface CreatePythonBundleTargetOptions extends Required<AddPythonBundleTargetOptions> {
   /**
    * Python package name
    */
@@ -55,7 +49,6 @@ interface CreatePythonBundleTargetOptions
  * Create a target for bundling a python project
  */
 const createPythonBundleTarget = ({
-  projectDir,
   packageName,
   pythonPlatform,
   bundleTargetName,
@@ -63,11 +56,11 @@ const createPythonBundleTarget = ({
   return {
     cache: true,
     executor: 'nx:run-commands',
-    outputs: [`{workspaceRoot}/dist/${projectDir}/${bundleTargetName}`],
+    outputs: [`{workspaceRoot}/dist/{projectRoot}/${bundleTargetName}`],
     options: {
       commands: [
-        `uv export --frozen --no-dev --no-editable --project ${projectDir} --package ${packageName} -o dist/${projectDir}/${bundleTargetName}/requirements.txt`,
-        `uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform ${pythonPlatform} --target dist/${projectDir}/${bundleTargetName} -r dist/${projectDir}/${bundleTargetName}/requirements.txt`,
+        `uv export --frozen --no-dev --no-editable --project {projectRoot} --package ${packageName} -o dist/{projectRoot}/${bundleTargetName}/requirements.txt`,
+        `uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform ${pythonPlatform} --target dist/{projectRoot}/${bundleTargetName} -r dist/{projectRoot}/${bundleTargetName}/requirements.txt`,
       ],
       parallel: false,
     },
@@ -92,7 +85,6 @@ export const addPythonBundleTarget = (
   if (!project.targets?.[bundleTargetName]) {
     project.targets[bundleTargetName] = {
       ...createPythonBundleTarget({
-        projectDir: project.root,
         packageName: project.name,
         pythonPlatform,
         bundleTargetName,
