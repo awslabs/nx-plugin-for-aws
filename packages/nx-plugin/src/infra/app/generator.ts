@@ -142,7 +142,7 @@ export async function tsInfraGenerator(
         dependsOn: ['^build', 'compile'],
         options: enableStageConfig
           ? {
-              command: `solution-deploy ${libraryRoot}`,
+              command: `tsx packages/common/scripts/src/infra-deploy.ts ${libraryRoot}`,
             }
           : {
               cwd: '{projectRoot}',
@@ -161,7 +161,7 @@ export async function tsInfraGenerator(
         dependsOn: ['^build', 'compile'],
         options: enableStageConfig
           ? {
-              command: `solution-destroy ${libraryRoot}`,
+              command: `tsx packages/common/scripts/src/infra-destroy.ts ${libraryRoot}`,
             }
           : {
               cwd: '{projectRoot}',

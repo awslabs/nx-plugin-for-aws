@@ -9,7 +9,6 @@ import {
   joinPathFragments,
   OverwriteStrategy,
   Tree,
-  updateJson,
 } from '@nx/devkit';
 import { getNpmScopePrefix, toScopeAlias } from './npm-scope';
 import tsProjectGenerator from '../ts/lib/generator';
@@ -23,9 +22,9 @@ import {
 
 /**
  * Lazily creates the shared scripts package at packages/common/scripts/.
- * Contains solution-deploy and solution-destroy bin scripts that resolve
- * credentials from infra-config and call CDK. Can be extended with other
- * build-time scripts in the future.
+ * Contains infra-deploy and infra-destroy scripts that resolve
+ * credentials from infra-config and call CDK.
+ * Invoked via `tsx packages/common/scripts/src/infra-deploy.ts` from NX targets.
  */
 export async function sharedScriptsGenerator(tree: Tree): Promise<void> {
   const scriptsDir = joinPathFragments(PACKAGES_DIR, SHARED_SCRIPTS_DIR);
@@ -54,48 +53,11 @@ export async function sharedScriptsGenerator(tree: Tree): Promise<void> {
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
-  // Add bin entries to package.json so solution-deploy/solution-destroy
-  // appear in node_modules/.bin/ after install.
-  // The tsProjectGenerator may delete the package.json for workspace projects,
-  // so we create it if it doesn't exist.
-  const pkgJsonPath = joinPathFragments(scriptsDir, 'package.json');
-  if (!tree.exists(pkgJsonPath)) {
-    tree.write(
-      pkgJsonPath,
-      JSON.stringify(
-        {
-          name: `${npmScopePrefix}${SHARED_SCRIPTS_NAME}`,
-          version: '0.0.0',
-          type: 'module',
-          bin: {
-            'solution-deploy': './src/solution-deploy.ts',
-            'solution-destroy': './src/solution-destroy.ts',
-          },
-        },
-        null,
-        2,
-      ),
-    );
-  } else {
-    updateJson(tree, pkgJsonPath, (pkg) => ({
-      ...pkg,
-      bin: {
-        'solution-deploy': './src/solution-deploy.ts',
-        'solution-destroy': './src/solution-destroy.ts',
-      },
-    }));
-  }
-
-  // Add @aws-sdk/client-sts as a dependency of this package
-  // (used by the assumeRole credential strategy)
-  addDependenciesToPackageJson(tree, withVersions(['@aws-sdk/client-sts']), {});
-
-  // Register as a workspace dependency so the bin scripts are linked
-  // to node_modules/.bin/ and available to all projects
+  // Add AWS SDK deps as dev dependencies (used by deploy-time scripts for assumeRole)
   addDependenciesToPackageJson(
     tree,
-    { [`${npmScopePrefix}${SHARED_SCRIPTS_NAME}`]: 'workspace:*' },
     {},
+    withVersions(['@aws-sdk/client-sts', '@aws-sdk/credential-providers']),
   );
 
   // Generate README

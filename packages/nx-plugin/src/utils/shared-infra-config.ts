@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
-  addDependenciesToPackageJson,
   generateFiles,
   getPackageManagerCommand,
   joinPathFragments,
@@ -22,7 +21,7 @@ import {
 /**
  * Lazily creates the shared infra-config package at packages/common/infra-config/.
  * Contains stage configuration types and the user's stage-to-credential mappings.
- * Importable from any package via scope alias.
+ * Importable from any package via ts project references.
  */
 export async function sharedInfraConfigGenerator(tree: Tree): Promise<void> {
   const configDir = joinPathFragments(PACKAGES_DIR, SHARED_INFRA_CONFIG_DIR);
@@ -33,6 +32,7 @@ export async function sharedInfraConfigGenerator(tree: Tree): Promise<void> {
   }
 
   const npmScopePrefix = getNpmScopePrefix(tree);
+  const pkgMgrCmd = getPackageManagerCommand();
 
   await tsProjectGenerator(tree, {
     name: SHARED_INFRA_CONFIG_NAME,
@@ -46,7 +46,9 @@ export async function sharedInfraConfigGenerator(tree: Tree): Promise<void> {
     tree,
     joinPathFragments(__dirname, 'files', SHARED_INFRA_CONFIG_DIR, 'src'),
     joinPathFragments(configDir, 'src'),
-    {},
+    {
+      pkgMgrRunNx: `${pkgMgrCmd.exec} nx`,
+    },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
@@ -58,34 +60,9 @@ export async function sharedInfraConfigGenerator(tree: Tree): Promise<void> {
     {
       fullyQualifiedName: `${npmScopePrefix}${SHARED_INFRA_CONFIG_NAME}`,
       name: SHARED_INFRA_CONFIG_NAME,
-      pkgMgrCmd: getPackageManagerCommand().exec,
+      pkgMgrCmd: pkgMgrCmd.exec,
     },
     { overwriteStrategy: OverwriteStrategy.Overwrite },
-  );
-
-  // Ensure package.json exists (tsProjectGenerator may delete it for workspace projects)
-  const pkgJsonPath = joinPathFragments(configDir, 'package.json');
-  if (!tree.exists(pkgJsonPath)) {
-    tree.write(
-      pkgJsonPath,
-      JSON.stringify(
-        {
-          name: `${npmScopePrefix}${SHARED_INFRA_CONFIG_NAME}`,
-          version: '0.0.0',
-          type: 'module',
-          main: './src/index.ts',
-        },
-        null,
-        2,
-      ),
-    );
-  }
-
-  // Register as a workspace dependency so it's importable from any package
-  addDependenciesToPackageJson(
-    tree,
-    { [`${npmScopePrefix}${SHARED_INFRA_CONFIG_NAME}`]: 'workspace:*' },
-    {},
   );
 
   await formatFilesInSubtree(tree);

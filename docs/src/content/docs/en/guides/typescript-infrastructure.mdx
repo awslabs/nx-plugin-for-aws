@@ -54,9 +54,9 @@ If you set the `enableStageConfig` option, the generator also creates two shared
         - index.ts Re-exports for importing from other packages
     - scripts Centralized deploy/destroy scripts
       - src
-        - solution-deploy.ts Deploy bin script
-        - solution-destroy.ts Destroy bin script
-        - lib/ Shared logic (credential lookup, CDK command building)
+        - infra-deploy.ts Deploy bin script
+        - infra-destroy.ts Destroy bin script
+        - stage-credentials/ Shared logic (credential lookup, CDK command building)
 
 </FileTree>
 
@@ -160,12 +160,12 @@ export class ApplicationStage extends Stage {
 This section applies when you generate with `enableStageConfig`. Without it, the generator produces a simpler setup where you manage AWS credentials yourself (e.g., by exporting `AWS_PROFILE` before deploying).
 :::
 
-When you have multiple stages targeting different AWS accounts, managing credentials manually gets tedious and error-prone. You'd need to remember which profile or role goes with which stage, and a mistake could mean deploying to the wrong account.
+When you have multiple stages targeting different AWS accounts, managing credentials manually can be error-prone, especially as the number of stages grows.
 
 The `enableStageConfig` option solves this by generating two shared packages:
 
 - **`packages/common/infra-config`** — A single config file where you map each stage to its AWS credentials, account, and region. This is importable from any package in your workspace, so your CDK `main.ts` can read account and region from the same source of truth.
-- **`packages/common/scripts`** — `solution-deploy` and `solution-destroy` commands that wrap CDK with automatic credential resolution. When you run `deploy`, the script reads the config, sets the right AWS environment variables for the CDK child process, and runs `cdk deploy`. Your shell environment is never modified. This package can also be extended with other build-time scripts in the future.
+- **`packages/common/scripts`** — `infra-deploy` and `infra-destroy` commands that wrap CDK with automatic credential resolution. When you run `deploy`, the script reads the config, sets the right AWS environment variables for the CDK child process, and runs `cdk deploy`. Your shell environment is never modified.
 
 #### Configuring Credentials
 
@@ -212,7 +212,11 @@ const config: StagesConfig = {
 export default config;
 ```
 
-When you run `pnpm nx run infra:deploy my-app-dev/*`, the deploy script:
+When you deploy, for example:
+
+<NxCommands commands={['run infra:deploy my-app-dev/*']} />
+
+The deploy script:
 1. Extracts the stage name `my-app-dev` from the command arguments
 2. Looks up credentials in the config: first under `projects['packages/infra']`, then under `shared`
 3. If found, sets `AWS_PROFILE` (or assumes the IAM role) for the CDK child process only
@@ -225,7 +229,7 @@ This means existing workflows without any config continue to work — the script
 Two credential strategies are supported:
 
 - **`profile`** — Uses a named [AWS CLI profile](https://docs.aws.amazon.com/cli/v1/userguide/cli-configure-profiles.html) from `~/.aws/config`. The script sets `AWS_PROFILE` for the CDK process.
-- **`assumeRole`** — Calls [STS AssumeRole](https://docs.aws.amazon.com/STS/latest/APIReference/API_AssumeRole.html) with the specified role ARN and passes the temporary credentials to CDK. You can optionally specify a `profile` as the source identity for the AssumeRole call, an `externalId` for cross-account trust policies, and a `sessionDuration` in seconds.
+- **`assumeRole`** — Calls [STS AssumeRole](https://docs.aws.amazon.com/STS/latest/APIReference/API_AssumeRole.html) with the specified role ARN and passes the temporary credentials to CDK. You can optionally specify a `profile` as the source credentials for the AssumeRole call, an `externalId` for cross-account trust policies, and a `sessionDuration` in seconds.
 
 #### Account and Region
 
@@ -253,7 +257,7 @@ Shared stages (under `shared.stages`) apply to any infra project in the workspac
 Project-specific stages (under `projects['packages/infra'].stages`) only apply to that project. When both exist for the same stage name, the project-specific entry takes priority.
 
 :::tip
-You can commit `stages.config.ts` for shared team settings, or add it to `.gitignore` if it contains personal profile names.
+We recommend committing `stages.config.ts` so the team shares a single source of truth for stage credentials. If it contains personal profile names, you can add it to `.gitignore` and use a local override instead.
 :::
 
 ### API Infrastructure

@@ -5,7 +5,10 @@
 import { Tree, readJson, readProjectConfiguration } from '@nx/devkit';
 import { INFRA_APP_GENERATOR_INFO, tsInfraGenerator } from './generator';
 import { TsInfraGeneratorSchema } from './schema';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
+import {
+  createTreeUsingTsSolutionSetup,
+  snapshotTreeDir,
+} from '../../utils/test';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
 
 describe('infra generator', () => {
@@ -268,12 +271,6 @@ describe('infra generator', () => {
     expectHasMetricTags(tree, INFRA_APP_GENERATOR_INFO.metric);
   });
 
-  it('should not generate deploy-stage.ts in infra project', async () => {
-    await tsInfraGenerator(tree, options);
-    expect(tree.exists('packages/test/scripts/deploy-stage.ts')).toBeFalsy();
-    expect(tree.exists('packages/test/src/deploy-stage.ts')).toBeFalsy();
-  });
-
   it('should not generate infra-config or scripts packages by default', async () => {
     await tsInfraGenerator(tree, options);
     expect(
@@ -288,40 +285,28 @@ describe('infra generator', () => {
     expect(config.targets.deploy.options.command).toBe(
       'cdk deploy --require-approval=never',
     );
-    expect(config.targets.deploy.options.cwd).toBe('packages/test');
+    expect(config.targets.deploy.options.cwd).toBe('{projectRoot}');
     expect(config.targets.destroy.options.command).toBe(
       'cdk destroy --require-approval=never',
     );
-    expect(config.targets.destroy.options.cwd).toBe('packages/test');
+    expect(config.targets.destroy.options.cwd).toBe('{projectRoot}');
   });
 
   it('should not import from infra-config in main.ts by default', async () => {
     await tsInfraGenerator(tree, options);
     const mainTs = tree.read('packages/test/src/main.ts').toString();
     expect(mainTs).not.toContain('infra-config');
-    expect(mainTs).not.toContain('stagesConfig');
+    expect(mainTs).not.toContain('resolveStage');
     expect(mainTs).toContain('process.env.CDK_DEFAULT_ACCOUNT');
     expect(mainTs).toContain('process.env.CDK_DEFAULT_REGION');
   });
 
   it('should not add infra-config tsconfig reference by default', async () => {
     await tsInfraGenerator(tree, options);
-    const tsConfig = readJson(tree, 'packages/test/tsconfig.json');
+    const tsConfig = readJson(tree, 'packages/test/tsconfig.lib.json');
     const refPaths = tsConfig.references.map((r: { path: string }) => r.path);
     expect(refPaths.some((p: string) => p.includes('infra-config'))).toBe(
       false,
-    );
-  });
-
-  it('should leave deploy-ci and destroy-ci targets unchanged', async () => {
-    await tsInfraGenerator(tree, options);
-    const config = readProjectConfiguration(tree, '@proj/test');
-    // CI targets still call cdk directly with --app pointing to synth output
-    expect(config.targets['deploy-ci'].options.command).toContain(
-      'cdk deploy --require-approval=never --app',
-    );
-    expect(config.targets['destroy-ci'].options.command).toContain(
-      'cdk destroy --require-approval=never --app',
     );
   });
 
@@ -331,14 +316,14 @@ describe('infra generator', () => {
       enableStageConfig: true,
     };
 
-    it('should use solution-deploy/solution-destroy for deploy and destroy targets', async () => {
+    it('should use tsx infra-deploy/infra-destroy for deploy and destroy targets', async () => {
       await tsInfraGenerator(tree, stageConfigOptions);
       const config = readProjectConfiguration(tree, '@proj/test');
       expect(config.targets.deploy.options.command).toBe(
-        'solution-deploy packages/test',
+        'tsx packages/common/scripts/src/infra-deploy.ts packages/test',
       );
       expect(config.targets.destroy.options.command).toBe(
-        'solution-destroy packages/test',
+        'tsx packages/common/scripts/src/infra-destroy.ts packages/test',
       );
     });
 
@@ -380,82 +365,77 @@ describe('infra generator', () => {
       // Pre-create scripts with project.json to trigger early return
       tree.write('packages/common/scripts/project.json', '{}');
       tree.write(
-        'packages/common/scripts/src/solution-deploy.ts',
+        'packages/common/scripts/src/infra-deploy.ts',
         '// custom deploy\n',
       );
       await tsInfraGenerator(tree, stageConfigOptions);
       // Should preserve the existing files
       expect(
-        tree.read('packages/common/scripts/src/solution-deploy.ts').toString(),
+        tree.read('packages/common/scripts/src/infra-deploy.ts').toString(),
       ).toBe('// custom deploy\n');
     });
 
-    it('should generate scripts package with bin entries', async () => {
+    it('should generate scripts package with deploy and destroy scripts', async () => {
       await tsInfraGenerator(tree, stageConfigOptions);
       expect(
-        tree.exists('packages/common/scripts/src/solution-deploy.ts'),
+        tree.exists('packages/common/scripts/src/infra-deploy.ts'),
       ).toBeTruthy();
       expect(
-        tree.exists('packages/common/scripts/src/solution-destroy.ts'),
+        tree.exists('packages/common/scripts/src/infra-destroy.ts'),
       ).toBeTruthy();
-      // Verify package.json has bin entries
-      const pkgJson = JSON.parse(
-        tree.read('packages/common/scripts/package.json').toString(),
-      );
-      expect(pkgJson.bin['solution-deploy']).toBeDefined();
-      expect(pkgJson.bin['solution-destroy']).toBeDefined();
     });
 
-    it('should import from infra-config in main.ts', async () => {
+    it('should import resolveStage from infra-config in main.ts', async () => {
       await tsInfraGenerator(tree, stageConfigOptions);
       const mainTs = tree.read('packages/test/src/main.ts').toString();
       expect(mainTs).toContain('infra-config');
-      expect(mainTs).toContain('stagesConfig');
+      expect(mainTs).toContain('resolveStage');
     });
 
     it('should add infra-config tsconfig reference', async () => {
       await tsInfraGenerator(tree, stageConfigOptions);
-      const tsConfig = readJson(tree, 'packages/test/tsconfig.json');
+      const tsConfig = readJson(tree, 'packages/test/tsconfig.lib.json');
       const refPaths = tsConfig.references.map((r: { path: string }) => r.path);
       expect(refPaths.some((p: string) => p.includes('infra-config'))).toBe(
         true,
       );
     });
 
-    it('should add @aws-sdk/client-sts dependency', async () => {
+    it('should add @aws-sdk/client-sts as dev dependency', async () => {
       await tsInfraGenerator(tree, stageConfigOptions);
       const packageJson = JSON.parse(tree.read('package.json').toString());
-      expect(packageJson.dependencies['@aws-sdk/client-sts']).toBeDefined();
+      expect(packageJson.devDependencies['@aws-sdk/client-sts']).toBeDefined();
     });
 
-    it('should configure deploy and destroy targets with solution scripts', async () => {
+    it('should configure deploy and destroy targets with tsx scripts', async () => {
       await tsInfraGenerator(tree, stageConfigOptions);
       const config = readProjectConfiguration(tree, '@proj/test');
       expect(config.targets.deploy).toMatchObject({
         executor: 'nx:run-commands',
         dependsOn: ['^build', 'compile'],
         options: {
-          command: 'solution-deploy packages/test',
+          command:
+            'tsx packages/common/scripts/src/infra-deploy.ts packages/test',
         },
       });
       expect(config.targets.destroy).toMatchObject({
         executor: 'nx:run-commands',
         dependsOn: ['^build', 'compile'],
         options: {
-          command: 'solution-destroy packages/test',
+          command:
+            'tsx packages/common/scripts/src/infra-destroy.ts packages/test',
         },
       });
     });
 
-    it('should leave deploy-ci and destroy-ci targets unchanged', async () => {
+    it('should snapshot generated infra-config src directory', async () => {
       await tsInfraGenerator(tree, stageConfigOptions);
-      const config = readProjectConfiguration(tree, '@proj/test');
-      expect(config.targets['deploy-ci'].options.command).toContain(
-        'cdk deploy --require-approval=never --app',
-      );
-      expect(config.targets['destroy-ci'].options.command).toContain(
-        'cdk destroy --require-approval=never --app',
-      );
+      snapshotTreeDir(tree, 'packages/common/infra-config/src');
+    });
+
+    it('should snapshot generated scripts src directory', async () => {
+      await tsInfraGenerator(tree, stageConfigOptions);
+      snapshotTreeDir(tree, 'packages/common/scripts/src');
     });
   });
 });
