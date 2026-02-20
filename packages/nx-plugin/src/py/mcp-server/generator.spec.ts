@@ -116,7 +116,7 @@ dev-dependencies = []
       'nx:run-commands',
     );
     expect(projectConfig.targets['mcp-server-serve'].options.commands).toEqual([
-      'uv run uvicorn --reload proj_test_project.mcp_server.http:app',
+      'uv run uvicorn --reload proj_test_project.mcp_server.http:app --host 0.0.0.0 --port 8000',
     ]);
 
     expect(projectConfig.targets['mcp-server-inspect']).toBeDefined();

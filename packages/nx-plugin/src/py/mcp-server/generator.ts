@@ -91,6 +91,7 @@ export const pyMcpServerGenerator = async (
 
   addDependenciesToPyProjectToml(tree, project.root, [
     'mcp',
+    'uvicorn',
     'boto3',
     'aws-opentelemetry-distro',
   ]);
@@ -186,7 +187,7 @@ export const pyMcpServerGenerator = async (
         executor: 'nx:run-commands',
         options: {
           commands: [
-            `uv run uvicorn --reload ${moduleName}.${mcpServerNameSnakeCase}.http:app`,
+            `uv run uvicorn --reload ${moduleName}.${mcpServerNameSnakeCase}.http:app --host 0.0.0.0 --port ${localDevPort}`,
           ],
           cwd: '{projectRoot}',
           env: {
