@@ -33,6 +33,7 @@
   <figure>
     <img src="docs/src/content/docs/assets/website-generator.gif" alt="Demo" />
   </figure>
+  <br />
   👉 See full documentation on <a href="https://awslabs.github.io/nx-plugin-for-aws">https://awslabs.github.io/nx-plugin-for-aws</a> 👈
 </div>
 
@@ -105,6 +106,10 @@ Example configuration for Amazon Q CLI MCP (`~/.aws/amazonq/mcp.json`):
 If you have issues such as `ENOENT npx`, replace the command with `/full/path/to/npx` (use `which npx` to find this).
 
 For more details, [take a look at the guide here](https://awslabs.github.io/nx-plugin-for-aws/en/get_started/building-with-ai/)
+
+## Community
+
+Join us on Slack in the [#nx-plugin-for-aws](https://cdk-dev.slack.com/archives/C0AG11EUHM4) channel to ask questions, share feedback, and connect with other users and contributors.
 
 ## Contributing
 

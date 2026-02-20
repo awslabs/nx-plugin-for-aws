@@ -46,6 +46,11 @@ export default defineConfig({
       title: '@aws/nx-plugin',
       social: [
         {
+          icon: 'slack',
+          label: 'Slack',
+          href: 'https://cdk-dev.slack.com/archives/C0AG11EUHM4',
+        },
+        {
           icon: 'github',
           label: 'GitHub',
           href: 'https://github.com/awslabs/nx-plugin-for-aws',
