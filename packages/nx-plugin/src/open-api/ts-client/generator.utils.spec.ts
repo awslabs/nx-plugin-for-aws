@@ -65,6 +65,44 @@ export const mockStreamingFetch = (
   return mockFetch;
 };
 
+export const mockJsonlStreamingFetch = (
+  status: number,
+  jsonlLines: string[],
+  options?: { rawChunks?: string[] },
+): Mock<any> => {
+  const mockFetch = vi.fn();
+
+  const chunks: string[] =
+    options?.rawChunks ?? jsonlLines.map((line) => line + '\n');
+
+  let i = 0;
+
+  const mockReader = vi.fn();
+  mockReader.mockReturnValue({
+    read: vi.fn().mockImplementation(() => {
+      const value = chunks[i];
+      const done = i >= chunks.length;
+      i++;
+      return {
+        done,
+        value,
+      };
+    }),
+  });
+
+  mockFetch.mockResolvedValue({
+    status,
+    body: {
+      pipeThrough: () => ({
+        getReader: mockReader,
+      }),
+      getReader: () => mockReader,
+    },
+  });
+
+  return mockFetch;
+};
+
 describe('openapi test utils', () => {
   it('should have a test', () => {
     // A test is required for this to be a .spec.ts file.

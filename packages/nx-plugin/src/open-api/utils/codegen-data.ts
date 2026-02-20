@@ -35,6 +35,7 @@ import {
   COMPOSED_SCHEMA_TYPES,
   PRIMITIVE_TYPES,
   VENDOR_EXTENSIONS,
+  STREAMING_CONTENT_TYPES,
   Operation,
 } from './codegen-data/types';
 
@@ -142,6 +143,18 @@ export const buildOpenApiCodeGenData = async (
                     responseSchema,
                     modelsByName,
                   );
+                }
+                if (
+                  STREAMING_CONTENT_TYPES.has(mediaType) &&
+                  'itemSchema' in responseContent
+                ) {
+                  (response as any).isJsonlStreaming = true;
+                  (response as any).itemSchemaModel =
+                    await buildOrReferenceModel(
+                      spec,
+                      modelsByName,
+                      responseContent.itemSchema,
+                    );
                 }
               }
             }
@@ -1117,17 +1130,27 @@ const getCursorOptions = (op: Operation) => {
  * Add additional data to an operation for code generation decisions
  */
 const mutateOperationWithAdditionalData = (op: Operation) => {
-  // Add mutation/query details
   const isMutation = isOperationMutation(op);
   (op as any).isMutation = isMutation;
   (op as any).isQuery = !isMutation;
 
-  // Streaming responses
-  (op as any).isStreaming = !!(op as any).vendorExtensions?.[
-    VENDOR_EXTENSIONS.STREAMING
-  ];
+  (op as any).isStreaming =
+    !!(op as any).vendorExtensions?.[VENDOR_EXTENSIONS.STREAMING] ||
+    op.responses.some((res) => (res as any).isJsonlStreaming);
 
-  // Add infinite query details if applicable
+  const jsonlResponse = op.responses.find(
+    (res) => (res as any).isJsonlStreaming,
+  );
+  if (jsonlResponse) {
+    const itemSchemaModel = (jsonlResponse as any).itemSchemaModel;
+    const result = (op as any).result;
+    if (result && itemSchemaModel) {
+      result.type = itemSchemaModel.name;
+      result.typescriptType = itemSchemaModel.name;
+      result.export = 'reference';
+    }
+  }
+
   if (!isMutation) {
     mutateOperationWithInfiniteQueryDetails(op);
   }
