@@ -30,6 +30,10 @@ Puoi generare una nuova API tRPC in due modi:
 
 <Snippet name="api/api-choice-note" />
 
+:::tip
+Seleziona `ServerlessApiGatewayRestApi` (predefinito) come `computeType` se desideri utilizzare le [tRPC Subscriptions](https://trpc.io/docs/server/subscriptions) per lo streaming delle risposte.
+:::
+
 ## Output del Generatore
 
 Il generatore creerà la seguente struttura del progetto nella directory `<directory>/<api-name>`:
@@ -37,9 +41,11 @@ Il generatore creerà la seguente struttura del progetto nella directory `<direc
 <FileTree>
   - src
     - init.ts Inizializzazione backend tRPC
-    - router.ts Definizione router tRPC (punto di ingresso API per Lambda handler)
+    - handler.ts Punto di ingresso del Lambda handler
+    - router.ts Definizione router tRPC
     - schema Definizioni schema con Zod
       - echo.ts Esempio di definizioni per input e output della procedura "echo"
+      - z-async-iterable.ts Helper Zod per le subscriptions (solo REST API)
     - procedures Procedure (o operazioni) esposte dalla tua API
       - echo.ts Procedura di esempio
     - middleware
@@ -103,7 +109,7 @@ Zod fornisce utility potenti per combinare o derivare schemi come `.merge`, `.pi
 
 ### Router e Procedure
 
-Il punto di ingresso della tua API si trova in `src/router.ts`. Questo file contiene il lambda handler che instrada le richieste alle "procedure" in base all'operazione invocata. Ogni procedura definisce l'input atteso, l'output e l'implementazione.
+Il tuo router tRPC è definito in `src/router.ts`, che registra tutte le procedure. Ogni procedura definisce l'input atteso, l'output e l'implementazione. Il punto di ingresso del Lambda handler si trova in `src/handler.ts`, che inoltra le richieste al tuo router.
 
 Il router di esempio generato per te ha una singola operazione chiamata `echo`:
 
@@ -134,6 +140,50 @@ Analizzando il codice sopra:
 L'uso di `query` per definire l'implementazione indica che l'operazione non è mutativa. Usalo per definire metodi di recupero dati. Per implementare un'operazione mutativa, utilizza invece il metodo `mutation`.
 
 Se aggiungi una nuova procedura, assicurati di registrarla aggiungendola al router in `src/router.ts`.
+
+### Subscriptions (Streaming)
+
+:::caution
+Le subscriptions sono supportate solo quando `computeType` è `ServerlessApiGatewayRestApi` (predefinito), poiché le API HTTP di API Gateway non supportano lo streaming delle risposte.
+:::
+
+Le subscriptions tRPC ti permettono di effettuare lo streaming di dati dal server al client utilizzando [Server-Sent Events (SSE)](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events). Quando selezioni `ServerlessApiGatewayRestApi` come tipo di compute, il generatore configura automaticamente l'infrastruttura necessaria per lo streaming, oltre a un Lambda handler per lo streaming e l'helper schema `ZodAsyncIterable`.
+
+Per definire una procedura subscription, utilizza il metodo `.subscription` con una funzione async generator. Usa l'helper `ZodAsyncIterable` da `src/schema/z-async-iterable.ts` per definire lo schema di output:
+
+```ts
+import { publicProcedure } from '../init.js';
+import { z } from 'zod';
+import { ZodAsyncIterable } from '../schema/z-async-iterable.js';
+
+const InputSchema = z.object({ query: z.string() });
+const ChunkSchema = z.object({ text: z.string() });
+
+export const myStream = publicProcedure
+  .input(InputSchema)
+  .output(
+    ZodAsyncIterable({
+      yield: ChunkSchema,
+    }),
+  )
+  .subscription(async function* (opts) {
+    // Invia dati al client man mano che diventano disponibili
+    for (const chunk of await getResults(opts.input.query)) {
+      yield { text: chunk };
+    }
+  });
+```
+
+Registra la subscription nel tuo router come qualsiasi altra procedura:
+
+```ts
+export const appRouter = router({
+  echo,
+  myStream,
+});
+```
+
+L'infrastruttura generata utilizza un Lambda handler per lo streaming con `ResponseTransferMode.STREAM` in API Gateway per tutte le operazioni REST API, il che consente alle subscriptions di funzionare insieme a query e mutation regolari.
 
 ## Personalizzazione della tua API tRPC
 

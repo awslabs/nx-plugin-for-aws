@@ -8,7 +8,7 @@ import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 
-Il plugin AWS per Nx fornisce un generatore per integrare rapidamente la tua <Link path="guides/trpc">API tRPC</Link> con un sito React. Configura automaticamente tutto il necessario per connettersi ai backend tRPC, incluso il supporto per autenticazione AWS IAM e Cognito, oltre a una corretta gestione degli errori. L'integrazione garantisce una completa type safety end-to-end tra frontend e backend tRPC.
+Il plugin Nx per AWS fornisce un generatore per integrare rapidamente la tua <Link path="guides/trpc">API tRPC</Link> con un sito React. Configura automaticamente tutto il necessario per connettersi ai backend tRPC, incluso il supporto per autenticazione AWS IAM e Cognito, oltre a una corretta gestione degli errori. L'integrazione garantisce una completa type safety end-to-end tra frontend e backend tRPC.
 
 ## Prerequisiti
 
@@ -61,7 +61,8 @@ Il generatore crea la seguente struttura nella tua applicazione React:
     - QueryClientProvider.tsx Provider del client TanStack React Query
   - hooks
     - useSigV4.tsx Hook per firmare richieste HTTP con SigV4 (solo IAM)
-    - use\<ApiName>.tsx Hook specifico per l'API backend.
+    - use\<ApiName>.tsx Hook che restituisce il proxy delle opzioni tRPC per l'integrazione con TanStack Query
+    - use\<ApiName>Client.tsx Hook che restituisce il client vanilla tRPC per chiamate API dirette
 
 </FileTree>
 
@@ -71,12 +72,13 @@ Inoltre, installa le dipendenze necessarie:
   - `@trpc/tanstack-react-query`
   - `@tanstack/react-query`
   - `aws4fetch` (se si utilizza autenticazione IAM)
+  - `event-source-polyfill` (se si utilizza REST API, per il supporto alle subscription)
 
 ## Utilizzo del codice generato
 
-### Utilizzo dell'hook tRPC
+### Utilizzo dell'hook proxy delle opzioni tRPC
 
-Il generatore fornisce un hook `use<ApiName>` che dà accesso al client tRPC con type safety:
+Il generatore fornisce un hook `use<ApiName>` che restituisce un [proxy delle opzioni tRPC](https://trpc.io/docs/client/tanstack-react-query) da utilizzare con gli hook di TanStack Query come `useQuery` e `useMutation`:
 
 ```tsx {5,8,11}
 import { useQuery, useMutation } from '@tanstack/react-query';
@@ -110,6 +112,29 @@ function MyComponent() {
 }
 ```
 
+### Utilizzo del client vanilla tRPC
+
+L'hook `use<ApiName>Client` fornisce accesso al [client vanilla tRPC](https://trpc.io/docs/client/vanilla), utile per chiamate API imperative e subscription:
+
+```tsx {2,5,8,11}
+import { useState } from 'react';
+import { useMyApiClient } from './hooks/useMyApi';
+
+function MyComponent() {
+  const client = useMyApiClient();
+
+  const handleClick = async () => {
+    const result = await client.echo.query({ message: 'Hello!' });
+    console.log(result);
+
+    const mutationResult = await client.users.create.mutate({ name: 'Jane' });
+    console.log(mutationResult);
+  };
+
+  return <button onClick={handleClick}>Call API</button>;
+}
+```
+
 ### Gestione degli errori
 
 L'integrazione include una gestione degli errori che processa correttamente gli errori tRPC:
@@ -134,6 +159,105 @@ function MyComponent() {
     <ul>
       {data.map((user) => (
         <li key={user.id}>{user.name}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+### Subscription (Streaming)
+
+:::caution
+Le subscription sono supportate solo quando l'API tRPC utilizza `ServerlessApiGatewayRestApi` (REST API) come tipo di compute. Le API Gateway HTTP APIs non supportano lo streaming delle risposte.
+:::
+
+Quando ci si connette a un backend tRPC REST API, il client generato viene automaticamente configurato con un `splitLink` che instrada le operazioni di subscription attraverso `httpSubscriptionLink` (utilizzando SSE) e le query/mutation regolari attraverso `httpLink`. Ciò significa che le subscription funzionano immediatamente senza configurazione aggiuntiva.
+
+Per informazioni su come definire procedure di subscription nel backend, consulta la <Link path="guides/trpc">guida al generatore `ts#trpc-api`</Link>.
+
+#### Utilizzo dell'hook useSubscription
+
+Puoi consumare subscription utilizzando l'hook `useSubscription` con `subscriptionOptions` dal proxy delle opzioni:
+
+```tsx {1-2,7-22}
+import { useSubscription } from '@trpc/tanstack-react-query';
+import { useMyApi } from './hooks/useMyApi';
+
+function StreamingComponent() {
+  const trpc = useMyApi();
+
+  const subscription = useSubscription(
+    trpc.myStream.subscriptionOptions(
+      { query: 'hello' },
+      {
+        enabled: true,
+        onStarted: () => {
+          console.log('Subscription started');
+        },
+        onData: (data) => {
+          console.log('Received:', data.text);
+        },
+        onError: (error) => {
+          console.error('Subscription error:', error);
+        },
+      },
+    ),
+  );
+
+  return (
+    <div>
+      <p>Status: {subscription.status}</p>
+      {subscription.data && <p>Latest: {subscription.data.text}</p>}
+      {subscription.error && <p>Error: {subscription.error.message}</p>}
+      <button onClick={() => subscription.reset()}>Reset</button>
+    </div>
+  );
+}
+```
+
+L'oggetto `subscription` fornisce:
+
+- `subscription.data` — i dati ricevuti più recentemente
+- `subscription.error` — l'errore ricevuto più recentemente
+- `subscription.status` — uno tra `'idle'`, `'connecting'`, `'pending'`, o `'error'`
+- `subscription.reset()` — resetta la subscription (utile per recuperare dagli errori)
+
+#### Utilizzo del client vanilla
+
+In alternativa, puoi utilizzare il client vanilla tRPC tramite l'hook `use<ApiName>Client` per avere maggiore controllo sul ciclo di vita della subscription:
+
+```tsx {2,5,9-22,25}
+import { useState, useEffect } from 'react';
+import { useMyApiClient } from './hooks/useMyApi';
+
+function StreamingComponent() {
+  const client = useMyApiClient();
+  const [messages, setMessages] = useState<string[]>([]);
+
+  useEffect(() => {
+    const subscription = client.myStream.subscribe(
+      { query: 'hello' },
+      {
+        onData: (data) => {
+          setMessages((prev) => [...prev, data.text]);
+        },
+        onComplete: () => {
+          console.log('Stream complete');
+        },
+        onError: (error) => {
+          console.error('Stream error:', error);
+        },
+      },
+    );
+
+    // Pulisce la subscription allo smontaggio
+    return () => subscription.unsubscribe();
+  }, [client]);
+
+  return (
+    <ul>
+      {messages.map((msg, i) => (
+        <li key={i}>{msg}</li>
       ))}
     </ul>
   );
@@ -310,6 +434,8 @@ I tipi sono automaticamente derivati dal router e dagli schemi del backend, gara
 
 ## Ulteriori informazioni
 
-Per maggiori informazioni, consulta la [documentazione tRPC TanStack React Query](https://trpc.io/docs/client/tanstack-react-query/usage).
+Per maggiori informazioni, consulta:
 
-Puoi anche consultare direttamente la [documentazione di TanStack Query](https://tanstack.com/query/v5).
+- [tRPC TanStack React Query Integration](https://trpc.io/docs/client/tanstack-react-query)
+- [tRPC Vanilla Client](https://trpc.io/docs/client/vanilla)
+- [TanStack Query documentation](https://tanstack.com/query/v5)
