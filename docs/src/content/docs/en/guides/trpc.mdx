@@ -29,6 +29,10 @@ You can generate a new tRPC API in two ways:
 
 <Snippet name="api/api-choice-note" />
 
+:::tip
+Select `ServerlessApiGatewayRestApi` (default) as your `computeType` if you would like to use [tRPC Subscriptions](https://trpc.io/docs/server/subscriptions) to stream responses.
+:::
+
 ## Generator Output
 
 The generator will create the following project structure in the `<directory>/<api-name>` directory:
@@ -36,9 +40,11 @@ The generator will create the following project structure in the `<directory>/<a
 <FileTree>
   - src
     - init.ts Backend tRPC initialisation
-    - router.ts tRPC router definition (Lambda handler API entrypoint)
+    - handler.ts Lambda handler entrypoint
+    - router.ts tRPC router definition
     - schema Schema definitions using Zod
       - echo.ts Example definitions for the input and output of the "echo" procedure
+      - z-async-iterable.ts Zod helper for subscriptions (REST API only)
     - procedures Procedures (or operations) exposed by your API
       - echo.ts Example procedure
     - middleware
@@ -102,7 +108,7 @@ Zod provides powerful utilities to combine or derive schemas such as `.merge`, `
 
 ### Router and Procedures
 
-You can find the entry point to your api in `src/router.ts`. This file contains the lambda handler which routes requests to "procedures" based on the operation being invoked. Each procedure defines the expected input, output, and implementation.
+Your tRPC router is defined in `src/router.ts`, which registers all procedures. Each procedure defines the expected input, output, and implementation. The Lambda handler entry point is in `src/handler.ts`, which forwards requests to your router.
 
 The sample router generated for you has a single operation, called `echo`:
 
@@ -133,6 +139,50 @@ To break down the above:
 The use of `query` to define the implementation indicates that the operation is not mutative. Use this to define methods to retrieve data. To implement a mutative operation, use the `mutation` method instead.
 
 If you add a new procedure, make sure you register it by adding it to the router in `src/router.ts`.
+
+### Subscriptions (Streaming)
+
+:::caution
+Subscriptions are only supported when `computeType` is `ServerlessApiGatewayRestApi` (default), since API Gateway HTTP APIs do not support response streaming.
+:::
+
+tRPC subscriptions allow you to stream data from the server to the client using [Server-Sent Events (SSE)](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events). When you select `ServerlessApiGatewayRestApi` as your compute type, the generator automatically configures the infrastructure required for streaming, as well as a streaming Lambda handler and the `ZodAsyncIterable` schema helper.
+
+To define a subscription procedure, use the `.subscription` method with an async generator function. Use the `ZodAsyncIterable` helper from `src/schema/z-async-iterable.ts` to define the output schema:
+
+```ts
+import { publicProcedure } from '../init.js';
+import { z } from 'zod';
+import { ZodAsyncIterable } from '../schema/z-async-iterable.js';
+
+const InputSchema = z.object({ query: z.string() });
+const ChunkSchema = z.object({ text: z.string() });
+
+export const myStream = publicProcedure
+  .input(InputSchema)
+  .output(
+    ZodAsyncIterable({
+      yield: ChunkSchema,
+    }),
+  )
+  .subscription(async function* (opts) {
+    // Yield data to the client as it becomes available
+    for (const chunk of await getResults(opts.input.query)) {
+      yield { text: chunk };
+    }
+  });
+```
+
+Register the subscription in your router just like any other procedure:
+
+```ts
+export const appRouter = router({
+  echo,
+  myStream,
+});
+```
+
+The generated infrastructure uses a streaming Lambda handler with `ResponseTransferMode.STREAM` in API Gateway for all REST API operations, which enables subscriptions to work alongside regular queries and mutations.
 
 ## Customising your tRPC API
 

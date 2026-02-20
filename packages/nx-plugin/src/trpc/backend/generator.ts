@@ -98,6 +98,7 @@ export async function tsTrpcApiGenerator(
     apiName: options.name,
     apiType: 'trpc',
     auth: options.auth,
+    computeType: options.computeType,
   } as unknown;
 
   projectConfig.targets.serve = {
@@ -110,7 +111,7 @@ export async function tsTrpcApiGenerator(
   };
 
   addTypeScriptBundleTarget(tree, projectConfig, {
-    targetFilePath: 'src/router.ts',
+    targetFilePath: 'src/handler.ts',
     external: [/@aws-sdk\/.*/], // lambda runtime provides aws sdk
   });
 
@@ -131,6 +132,13 @@ export async function tsTrpcApiGenerator(
   );
 
   tree.delete(joinPathFragments(backendRoot, 'src', 'lib'));
+
+  // Remove streaming schema helper for HTTP APIs (API Gateway HTTP API doesn't support streaming)
+  if (options.computeType !== 'ServerlessApiGatewayRestApi') {
+    tree.delete(
+      joinPathFragments(backendRoot, 'src', 'schema', 'z-async-iterable.ts'),
+    );
+  }
 
   addDependenciesToPackageJson(
     tree,

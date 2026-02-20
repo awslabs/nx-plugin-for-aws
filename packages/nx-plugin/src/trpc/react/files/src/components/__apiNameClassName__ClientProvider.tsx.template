@@ -3,7 +3,14 @@ import { useQueryClient } from "@tanstack/react-query";
 import { createTRPCOptionsProxy } from "@trpc/tanstack-react-query";
 import { createContext, FC, PropsWithChildren, useMemo } from "react";
 import { useRuntimeConfig } from "../hooks/useRuntimeConfig";
+<%_ if (isRestApi) { _%>
+import { TRPCClient, createTRPCClient, httpLink, httpSubscriptionLink, splitLink } from "@trpc/client";
+<%_ if (auth !== 'None') { _%>
+import { EventSourcePolyfill } from "event-source-polyfill";
+<%_ } _%>
+<%_ } else { _%>
 import { HTTPLinkOptions, TRPCClient, createTRPCClient, httpLink } from "@trpc/client";
+<%_ } _%>
 <%_ if (auth === 'IAM') { _%>
 import { useSigV4 } from "../hooks/useSigV4";
 <%_ } else if (auth === 'Cognito') { _%>
@@ -31,10 +38,58 @@ export const <%= apiNameClassName %>ClientProvider: FC<PropsWithChildren> = ({
   <%_ } _%>
 
   const container = useMemo<<%= apiNameClassName %>TRPCContextValue>(() => {
+    <%_ if (isRestApi) { _%>
+    const client = createTRPCClient<AppRouter>({
+      links: [
+        splitLink({
+          condition: (op) => op.type === 'subscription',
+          true: httpSubscriptionLink({
+            url: apiUrl,
+            <%_ if (auth !== 'None') { _%>
+            EventSource: EventSourcePolyfill,
+            eventSourceOptions: async ({ op }) => {
+              const url =
+                `${apiUrl.replace(/\/$/, '')}/${op.path}` +
+                (op.input !== undefined
+                  ? `?input=${encodeURIComponent(JSON.stringify(op.input))}`
+                  : '');
+              <%_ if (auth === 'IAM') { _%>
+              const signed = await sigv4Client.sign(url, { method: 'GET' });
+              const headers: Record<string, string> = {};
+              signed.headers.forEach((v, k) => {
+                headers[k] = v;
+              });
+              return { headers };
+              <%_ } else if (auth === 'Cognito') { _%>
+              return {
+                headers: {
+                  Authorization: `Bearer ${user?.id_token}`,
+                },
+              };
+              <%_ } else { _%>
+              return {};
+              <%_ } _%>
+            },
+            <%_ } _%>
+          }),
+          false: httpLink({
+            url: apiUrl,
+            <%_ if (auth === 'IAM') { _%>
+            fetch: sigv4Client.fetch,
+            <%_ } else if (auth === 'Cognito') { _%>
+            headers: {
+              Authorization: `Bearer ${user?.id_token}`,
+            },
+            <%_ } _%>
+          }),
+        }),
+      ],
+    });
+    <%_ } else { _%>
     const linkOptions: HTTPLinkOptions<any> = {
       url: apiUrl,
       <%_ if (auth === 'IAM') { _%>
-      fetch: sigv4Client,
+      fetch: sigv4Client.fetch,
       <%_ } else if (auth === 'Cognito') { _%>
       headers: {
         Authorization: `Bearer ${user?.id_token}`,
@@ -45,6 +100,7 @@ export const <%= apiNameClassName %>ClientProvider: FC<PropsWithChildren> = ({
     const client = createTRPCClient<AppRouter>({
       links: [httpLink(linkOptions)],
     });
+    <%_ } _%>
 
     const optionsProxy = createTRPCOptionsProxy<AppRouter>({
       client,
