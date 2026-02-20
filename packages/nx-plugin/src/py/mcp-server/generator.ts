@@ -185,8 +185,9 @@ export const pyMcpServerGenerator = async (
       [`${mcpTargetPrefix}-serve`]: {
         executor: 'nx:run-commands',
         options: {
-          // TODO: consider hot reload
-          commands: [`uv run -m ${moduleName}.${mcpServerNameSnakeCase}.http`],
+          commands: [
+            `uv run uvicorn --reload ${moduleName}.${mcpServerNameSnakeCase}.http:app`,
+          ],
           cwd: '{projectRoot}',
           env: {
             PORT: `${localDevPort}`,
