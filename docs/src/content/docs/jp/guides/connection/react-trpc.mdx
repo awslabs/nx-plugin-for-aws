@@ -61,7 +61,8 @@ root.render(
     - QueryClientProvider.tsx TanStack React Queryクライアントプロバイダ
   - hooks
     - useSigV4.tsx SigV4によるHTTPリクエスト署名用フック（IAM専用）
-    - use\<ApiName>.tsx 指定されたバックエンドAPI用フック
+    - use\<ApiName>.tsx TanStack Query統合用のtRPCオプションプロキシを返すフック
+    - use\<ApiName>Client.tsx 直接API呼び出し用のバニラtRPCクライアントを返すフック
 
 </FileTree>
 
@@ -71,12 +72,13 @@ root.render(
   - `@trpc/tanstack-react-query`
   - `@tanstack/react-query`
   - `aws4fetch`（IAM認証使用時）
+  - `event-source-polyfill`（REST API使用時、サブスクリプションサポート用）
 
 ## 生成コードの使用方法
 
-### tRPCフックの使用
+### tRPCオプションプロキシフックの使用
 
-ジェネレータが提供する`use<ApiName>`フックを使用して、型安全なtRPCクライアントにアクセス:
+ジェネレータが提供する`use<ApiName>`フックは、`useQuery`や`useMutation`などのTanStack Queryフックで使用する[tRPCオプションプロキシ](https://trpc.io/docs/client/tanstack-react-query)を返します:
 
 ```tsx {5,8,11}
 import { useQuery, useMutation } from '@tanstack/react-query';
@@ -110,6 +112,29 @@ function MyComponent() {
 }
 ```
 
+### バニラtRPCクライアントの使用
+
+`use<ApiName>Client`フックは[バニラtRPCクライアント](https://trpc.io/docs/client/vanilla)へのアクセスを提供し、命令的なAPI呼び出しやサブスクリプションに便利です:
+
+```tsx {2,5,8,11}
+import { useState } from 'react';
+import { useMyApiClient } from './hooks/useMyApi';
+
+function MyComponent() {
+  const client = useMyApiClient();
+
+  const handleClick = async () => {
+    const result = await client.echo.query({ message: 'Hello!' });
+    console.log(result);
+
+    const mutationResult = await client.users.create.mutate({ name: 'Jane' });
+    console.log(mutationResult);
+  };
+
+  return <button onClick={handleClick}>Call API</button>;
+}
+```
+
 ### エラーハンドリング
 
 統合されたエラーハンドリングによりtRPCエラーを適切に処理:
@@ -134,6 +159,105 @@ function MyComponent() {
     <ul>
       {data.map((user) => (
         <li key={user.id}>{user.name}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+### サブスクリプション（ストリーミング）
+
+:::caution
+サブスクリプションは、tRPC APIがコンピュートタイプとして`ServerlessApiGatewayRestApi`（REST API）を使用している場合のみサポートされます。API Gateway HTTP APIはレスポンスストリーミングをサポートしていません。
+:::
+
+REST API tRPCバックエンドに接続する場合、生成されたクライアントは自動的に`splitLink`で構成され、サブスクリプション操作は`httpSubscriptionLink`（SSEを使用）を経由し、通常のクエリ/ミューテーションは`httpLink`を経由します。つまり、サブスクリプションは追加の設定なしですぐに動作します。
+
+バックエンドでサブスクリプションプロシージャを定義する方法については、<Link path="guides/trpc">`ts#trpc-api`ジェネレータガイド</Link>を参照してください。
+
+#### useSubscriptionフックの使用
+
+オプションプロキシの`subscriptionOptions`を使用して`useSubscription`フックでサブスクリプションを利用できます:
+
+```tsx {1-2,7-22}
+import { useSubscription } from '@trpc/tanstack-react-query';
+import { useMyApi } from './hooks/useMyApi';
+
+function StreamingComponent() {
+  const trpc = useMyApi();
+
+  const subscription = useSubscription(
+    trpc.myStream.subscriptionOptions(
+      { query: 'hello' },
+      {
+        enabled: true,
+        onStarted: () => {
+          console.log('Subscription started');
+        },
+        onData: (data) => {
+          console.log('Received:', data.text);
+        },
+        onError: (error) => {
+          console.error('Subscription error:', error);
+        },
+      },
+    ),
+  );
+
+  return (
+    <div>
+      <p>Status: {subscription.status}</p>
+      {subscription.data && <p>Latest: {subscription.data.text}</p>}
+      {subscription.error && <p>Error: {subscription.error.message}</p>}
+      <button onClick={() => subscription.reset()}>Reset</button>
+    </div>
+  );
+}
+```
+
+`subscription`オブジェクトは以下を提供します:
+
+- `subscription.data` — 最後に受信したデータ
+- `subscription.error` — 最後に受信したエラー
+- `subscription.status` — `'idle'`、`'connecting'`、`'pending'`、または`'error'`のいずれか
+- `subscription.reset()` — サブスクリプションをリセット（エラーからの復旧に便利）
+
+#### バニラクライアントの使用
+
+または、`use<ApiName>Client`フック経由でバニラtRPCクライアントを使用して、サブスクリプションのライフサイクルをより細かく制御できます:
+
+```tsx {2,5,9-22,25}
+import { useState, useEffect } from 'react';
+import { useMyApiClient } from './hooks/useMyApi';
+
+function StreamingComponent() {
+  const client = useMyApiClient();
+  const [messages, setMessages] = useState<string[]>([]);
+
+  useEffect(() => {
+    const subscription = client.myStream.subscribe(
+      { query: 'hello' },
+      {
+        onData: (data) => {
+          setMessages((prev) => [...prev, data.text]);
+        },
+        onComplete: () => {
+          console.log('Stream complete');
+        },
+        onError: (error) => {
+          console.error('Stream error:', error);
+        },
+      },
+    );
+
+    // アンマウント時にサブスクリプションをクリーンアップ
+    return () => subscription.unsubscribe();
+  }, [client]);
+
+  return (
+    <ul>
+      {messages.map((msg, i) => (
+        <li key={i}>{msg}</li>
       ))}
     </ul>
   );
@@ -310,6 +434,8 @@ function UserForm() {
 
 ## 詳細情報
 
-詳細については[tRPC TanStack React Queryドキュメント](https://trpc.io/docs/client/tanstack-react-query/usage)を参照してください。
+詳細については以下を参照してください:
 
-直接[TanStack Queryドキュメント](https://tanstack.com/query/v5)を参照することも可能です。
+- [tRPC TanStack React Query統合](https://trpc.io/docs/client/tanstack-react-query)
+- [tRPCバニラクライアント](https://trpc.io/docs/client/vanilla)
+- [TanStack Queryドキュメント](https://tanstack.com/query/v5)

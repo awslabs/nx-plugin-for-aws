@@ -30,6 +30,10 @@ Vous pouvez générer une nouvelle API tRPC de deux manières :
 
 <Snippet name="api/api-choice-note" />
 
+:::tip
+Sélectionnez `ServerlessApiGatewayRestApi` (par défaut) comme `computeType` si vous souhaitez utiliser les [tRPC Subscriptions](https://trpc.io/docs/server/subscriptions) pour diffuser des réponses en streaming.
+:::
+
 ## Sortie du générateur
 
 Le générateur créera la structure de projet suivante dans le répertoire `<directory>/<api-name>` :
@@ -37,9 +41,11 @@ Le générateur créera la structure de projet suivante dans le répertoire `<di
 <FileTree>
   - src
     - init.ts Initialisation du backend tRPC
-    - router.ts Définition du routeur tRPC (point d'entrée de l'API du gestionnaire Lambda)
+    - handler.ts Point d'entrée du gestionnaire Lambda
+    - router.ts Définition du routeur tRPC
     - schema Définitions de schémas avec Zod
       - echo.ts Exemples de définitions pour l'entrée et la sortie de la procédure "echo"
+      - z-async-iterable.ts Helper Zod pour les subscriptions (API REST uniquement)
     - procedures Procédures (ou opérations) exposées par votre API
       - echo.ts Exemple de procédure
     - middleware
@@ -103,7 +109,7 @@ Zod fournit des utilitaires puissants pour combiner ou dériver des schémas com
 
 ### Routeur et Procédures
 
-Vous trouverez le point d'entrée de votre API dans `src/router.ts`. Ce fichier contient le gestionnaire Lambda qui route les requêtes vers des "procédures" basées sur l'opération invoquée. Chaque procédure définit l'entrée attendue, la sortie et l'implémentation.
+Votre routeur tRPC est défini dans `src/router.ts`, qui enregistre toutes les procédures. Chaque procédure définit l'entrée attendue, la sortie et l'implémentation. Le point d'entrée du gestionnaire Lambda se trouve dans `src/handler.ts`, qui transmet les requêtes à votre routeur.
 
 Le routeur exemple généré pour vous a une seule opération appelée `echo` :
 
@@ -134,6 +140,50 @@ Décomposons ceci :
 L'utilisation de `query` pour définir l'implémentation indique que l'opération n'est pas mutative. Utilisez ceci pour définir des méthodes de récupération de données. Pour implémenter une opération mutative, utilisez plutôt la méthode `mutation`.
 
 Si vous ajoutez une nouvelle procédure, assurez-vous de l'enregistrer en l'ajoutant au routeur dans `src/router.ts`.
+
+### Subscriptions (Streaming)
+
+:::caution
+Les subscriptions ne sont supportées que lorsque `computeType` est `ServerlessApiGatewayRestApi` (par défaut), car les API HTTP API Gateway ne supportent pas le streaming de réponses.
+:::
+
+Les subscriptions tRPC vous permettent de diffuser des données du serveur vers le client en utilisant les [Server-Sent Events (SSE)](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events). Lorsque vous sélectionnez `ServerlessApiGatewayRestApi` comme type de calcul, le générateur configure automatiquement l'infrastructure requise pour le streaming, ainsi qu'un gestionnaire Lambda de streaming et le helper de schéma `ZodAsyncIterable`.
+
+Pour définir une procédure de subscription, utilisez la méthode `.subscription` avec une fonction générateur asynchrone. Utilisez le helper `ZodAsyncIterable` de `src/schema/z-async-iterable.ts` pour définir le schéma de sortie :
+
+```ts
+import { publicProcedure } from '../init.js';
+import { z } from 'zod';
+import { ZodAsyncIterable } from '../schema/z-async-iterable.js';
+
+const InputSchema = z.object({ query: z.string() });
+const ChunkSchema = z.object({ text: z.string() });
+
+export const myStream = publicProcedure
+  .input(InputSchema)
+  .output(
+    ZodAsyncIterable({
+      yield: ChunkSchema,
+    }),
+  )
+  .subscription(async function* (opts) {
+    // Envoyez des données au client au fur et à mesure qu'elles deviennent disponibles
+    for (const chunk of await getResults(opts.input.query)) {
+      yield { text: chunk };
+    }
+  });
+```
+
+Enregistrez la subscription dans votre routeur comme n'importe quelle autre procédure :
+
+```ts
+export const appRouter = router({
+  echo,
+  myStream,
+});
+```
+
+L'infrastructure générée utilise un gestionnaire Lambda de streaming avec `ResponseTransferMode.STREAM` dans API Gateway pour toutes les opérations d'API REST, ce qui permet aux subscriptions de fonctionner aux côtés des requêtes et mutations régulières.
 
 ## Personnalisation de votre API tRPC
 

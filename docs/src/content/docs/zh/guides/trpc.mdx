@@ -30,6 +30,10 @@ tRPC API 生成器会创建一个新的 tRPC API,并配置 AWS CDK 或 Terraform
 
 <Snippet name="api/api-choice-note" />
 
+:::tip
+如果您希望使用 [tRPC 订阅](https://trpc.io/docs/server/subscriptions)来流式传输响应,请选择 `ServerlessApiGatewayRestApi`(默认)作为您的 `computeType`。
+:::
+
 ## 生成器输出
 
 生成器将在 `<directory>/<api-name>` 目录中创建以下项目结构:
@@ -37,10 +41,12 @@ tRPC API 生成器会创建一个新的 tRPC API,并配置 AWS CDK 或 Terraform
 <FileTree>
   - src
     - init.ts 后端 tRPC 初始化
-    - router.ts tRPC 路由定义（Lambda 处理程序 API 入口点）
+    - handler.ts Lambda 处理程序入口点
+    - router.ts tRPC 路由定义
     - schema 使用 Zod 的模式定义
       - echo.ts "echo" 过程的输入输出示例定义
-    - procedures API 暴露的过程（或操作）
+      - z-async-iterable.ts 订阅的 Zod 辅助工具(仅限 REST API)
+    - procedures API 暴露的过程(或操作)
       - echo.ts 示例过程
     - middleware
       - error.ts 错误处理中间件
@@ -103,7 +109,7 @@ Zod 提供了强大的工具来组合或派生模式,如 `.merge`、`.pick`、`.
 
 ### 路由与过程
 
-您可以在 `src/router.ts` 中找到 API 的入口点。该文件包含 Lambda 处理程序,根据调用的操作将请求路由到"过程"。每个过程定义预期的输入、输出和实现。
+您的 tRPC 路由在 `src/router.ts` 中定义,它注册所有过程。每个过程定义预期的输入、输出和实现。Lambda 处理程序入口点在 `src/handler.ts` 中,它将请求转发到您的路由器。
 
 生成的示例路由器有一个名为 `echo` 的单一操作:
 
@@ -134,6 +140,50 @@ export const echo = publicProcedure
 使用 `query` 定义实现表示该操作是非变更性的。使用此方法来定义数据检索方法。要实现变更性操作,请改用 `mutation` 方法。
 
 如果添加新过程,请确保在 `src/router.ts` 的路由器中注册它。
+
+### 订阅(流式传输)
+
+:::caution
+订阅仅在 `computeType` 为 `ServerlessApiGatewayRestApi`(默认)时受支持,因为 API Gateway HTTP API 不支持响应流式传输。
+:::
+
+tRPC 订阅允许您使用[服务器发送事件(SSE)](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events)从服务器向客户端流式传输数据。当您选择 `ServerlessApiGatewayRestApi` 作为计算类型时,生成器会自动配置流式传输所需的基础设施,以及流式传输 Lambda 处理程序和 `ZodAsyncIterable` 模式辅助工具。
+
+要定义订阅过程,请使用 `.subscription` 方法和异步生成器函数。使用 `src/schema/z-async-iterable.ts` 中的 `ZodAsyncIterable` 辅助工具来定义输出模式:
+
+```ts
+import { publicProcedure } from '../init.js';
+import { z } from 'zod';
+import { ZodAsyncIterable } from '../schema/z-async-iterable.js';
+
+const InputSchema = z.object({ query: z.string() });
+const ChunkSchema = z.object({ text: z.string() });
+
+export const myStream = publicProcedure
+  .input(InputSchema)
+  .output(
+    ZodAsyncIterable({
+      yield: ChunkSchema,
+    }),
+  )
+  .subscription(async function* (opts) {
+    // 在数据可用时向客户端产出数据
+    for (const chunk of await getResults(opts.input.query)) {
+      yield { text: chunk };
+    }
+  });
+```
+
+像注册任何其他过程一样在路由器中注册订阅:
+
+```ts
+export const appRouter = router({
+  echo,
+  myStream,
+});
+```
+
+生成的基础设施对所有 REST API 操作使用具有 `ResponseTransferMode.STREAM` 的流式传输 Lambda 处理程序,这使订阅能够与常规查询和变更一起工作。
 
 ## 自定义 tRPC API
 
@@ -573,7 +623,7 @@ Check: CKV_AWS_59: "Ensure there is no open access to back-end resources through
 如果为 `iacProvider` 选择 CDK,当在 tRPC API 中添加或删除过程时,这些更改将立即反映在 CDK 构造中,无需重新构建。
 :::
 
-### 授予访问权限（仅限 IAM）
+### 授予访问权限(仅限 IAM)
 
 如果选择使用 `IAM` 身份验证,可以授予 API 访问权限:
 
@@ -602,7 +652,7 @@ resource "aws_iam_policy" "api_invoke_policy" {
   })
 }
 
-# 将策略附加到 IAM 角色（例如已验证用户角色）
+# 将策略附加到 IAM 角色(例如已验证用户角色)
 resource "aws_iam_role_policy_attachment" "api_invoke_access" {
   role       = aws_iam_role.authenticated_user_role.name
   policy_arn = aws_iam_policy.api_invoke_policy.arn

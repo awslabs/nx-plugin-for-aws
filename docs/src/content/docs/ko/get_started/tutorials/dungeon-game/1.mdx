@@ -118,8 +118,9 @@ TypeScript 프로젝트 작업에 대한 자세한 내용은 <Link path="guides/
         - **echo.ts**
       - index.ts
       - init.ts 컨텍스트 및 미들웨어 설정
+      - handler.ts Lambda 핸들러 진입점 (REST API용 응답 스트리밍 사용)
       - local-server.ts 로컬 tRPC 서버 실행용
-      - **router.ts** 모든 프로시저를 정의하는 람다 핸들러 진입점
+      - **router.ts** tRPC 라우터 및 모든 프로시저 정의
     - project.json
     - ...
 - eslint.config.mjs
@@ -128,15 +129,10 @@ TypeScript 프로젝트 작업에 대한 자세한 내용은 <Link path="guides/
 
 주요 파일 몇 가지를 살펴보겠습니다:
 
-```ts {5,12}
+```ts {5}
 // packages/game-api/src/router.ts
-import {
-  awsLambdaRequestHandler,
-  CreateAWSLambdaContextOptions,
-} from '@trpc/server/adapters/aws-lambda';
 import { echo } from './procedures/echo.js';
 import { t } from './init.js';
-import { APIGatewayProxyEvent } from 'aws-lambda';
 
 export const router = t.router;
 
@@ -144,22 +140,9 @@ export const appRouter = router({
   echo,
 });
 
-export const handler = awsLambdaRequestHandler({
-  router: appRouter,
-  createContext: (
-    ctx: CreateAWSLambdaContextOptions<APIGatewayProxyEvent>,
-  ) => ctx,
-  responseMeta: () => ({
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': '*',
-    },
-  }),
-});
-
 export type AppRouter = typeof appRouter;
 ```
-라우터는 tRPC API의 진입점이며 모든 API 메서드를 선언하는 곳입니다. 위에서 볼 수 있듯이 `echo` 메서드가 있으며 구현은 `./procedures/echo.ts` 파일에 있습니다.
+라우터는 API의 tRPC 라우터를 정의하며 모든 API 메서드를 선언하는 곳입니다. 위에서 볼 수 있듯이 `echo` 메서드가 있으며 구현은 `./procedures/echo.ts` 파일에 있습니다. Lambda 핸들러 진입점은 `handler.ts`에 있으며, 생성기에 의해 자동으로 구성됩니다.
 
 ```ts {2-5}
 // packages/game-api/src/procedures/echo.ts
@@ -254,6 +237,7 @@ export class GameApi<
 > extends RestApi<Operations, TIntegrations> {
   /**
    * 모든 작업에 대한 기본 람다 함수 통합 생성
+   * 각 작업을 개별 람다 함수로 구현
    *
    * @param scope - CDK 구성 요소 범위
    * @returns 기본 람다 통합이 포함된 IntegrationBuilder

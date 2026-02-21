@@ -30,6 +30,10 @@ tRPC API 생성기는 AWS CDK 또는 Terraform 인프라 설정과 함께 새로
 
 <Snippet name="api/api-choice-note" />
 
+:::tip
+응답을 스트리밍하기 위해 [tRPC Subscriptions](https://trpc.io/docs/server/subscriptions)를 사용하려면 `computeType`으로 `ServerlessApiGatewayRestApi`(기본값)를 선택하세요.
+:::
+
 ## 생성기 출력
 
 생성기는 `<directory>/<api-name>` 디렉토리에 다음 프로젝트 구조를 생성합니다:
@@ -37,9 +41,11 @@ tRPC API 생성기는 AWS CDK 또는 Terraform 인프라 설정과 함께 새로
 <FileTree>
   - src
     - init.ts 백엔드 tRPC 초기화
-    - router.ts tRPC 라우터 정의 (Lambda 핸들러 API 진입점)
+    - handler.ts Lambda 핸들러 진입점
+    - router.ts tRPC 라우터 정의
     - schema Zod를 사용한 스키마 정의
       - echo.ts "echo" 프로시저의 입력 및 출력 예제 정의
+      - z-async-iterable.ts 구독을 위한 Zod 헬퍼 (REST API 전용)
     - procedures API가 노출하는 프로시저(또는 작업)
       - echo.ts 예제 프로시저
     - middleware
@@ -103,7 +109,7 @@ Zod는 `.merge`, `.pick`, `.omit` 등과 같은 스키마를 결합하거나 파
 
 ### 라우터 및 프로시저
 
-API의 진입점은 `src/router.ts`에서 찾을 수 있습니다. 이 파일은 호출되는 작업에 따라 요청을 "프로시저"로 라우팅하는 Lambda 핸들러를 포함합니다. 각 프로시저는 예상 입력, 출력 및 구현을 정의합니다.
+tRPC 라우터는 `src/router.ts`에 정의되어 있으며, 모든 프로시저를 등록합니다. 각 프로시저는 예상 입력, 출력 및 구현을 정의합니다. Lambda 핸들러 진입점은 `src/handler.ts`에 있으며, 요청을 라우터로 전달합니다.
 
 생성된 샘플 라우터에는 `echo`라는 단일 작업이 있습니다:
 
@@ -134,6 +140,50 @@ export const echo = publicProcedure
 `query`를 사용하여 구현을 정의하는 것은 작업이 변경을 일으키지 않음을 나타냅니다. 데이터를 검색하기 위한 메서드를 정의할 때 사용합니다. 변경을 일으키는 작업을 구현하려면 대신 `mutation` 메서드를 사용하세요.
 
 새 프로시저를 추가할 경우 `src/router.ts`의 라우터에 등록해야 합니다.
+
+### 구독 (스트리밍)
+
+:::caution
+구독은 `computeType`이 `ServerlessApiGatewayRestApi`(기본값)일 때만 지원됩니다. API Gateway HTTP API는 응답 스트리밍을 지원하지 않기 때문입니다.
+:::
+
+tRPC 구독을 사용하면 [Server-Sent Events (SSE)](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events)를 사용하여 서버에서 클라이언트로 데이터를 스트리밍할 수 있습니다. `computeType`으로 `ServerlessApiGatewayRestApi`를 선택하면 생성기가 스트리밍에 필요한 인프라와 스트리밍 Lambda 핸들러 및 `ZodAsyncIterable` 스키마 헬퍼를 자동으로 구성합니다.
+
+구독 프로시저를 정의하려면 비동기 제너레이터 함수와 함께 `.subscription` 메서드를 사용하세요. 출력 스키마를 정의하려면 `src/schema/z-async-iterable.ts`의 `ZodAsyncIterable` 헬퍼를 사용하세요:
+
+```ts
+import { publicProcedure } from '../init.js';
+import { z } from 'zod';
+import { ZodAsyncIterable } from '../schema/z-async-iterable.js';
+
+const InputSchema = z.object({ query: z.string() });
+const ChunkSchema = z.object({ text: z.string() });
+
+export const myStream = publicProcedure
+  .input(InputSchema)
+  .output(
+    ZodAsyncIterable({
+      yield: ChunkSchema,
+    }),
+  )
+  .subscription(async function* (opts) {
+    // 데이터가 사용 가능해지면 클라이언트에 전달
+    for (const chunk of await getResults(opts.input.query)) {
+      yield { text: chunk };
+    }
+  });
+```
+
+다른 프로시저와 마찬가지로 라우터에 구독을 등록하세요:
+
+```ts
+export const appRouter = router({
+  echo,
+  myStream,
+});
+```
+
+생성된 인프라는 모든 REST API 작업에 대해 API Gateway에서 `ResponseTransferMode.STREAM`을 사용하는 스트리밍 Lambda 핸들러를 사용하므로, 구독이 일반 쿼리 및 뮤테이션과 함께 작동할 수 있습니다.
 
 ## tRPC API 사용자 정의
 

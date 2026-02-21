@@ -51,6 +51,7 @@ export async function reactGenerator(
   const apiName = metadata.apiName;
   const auth = metadata.auth ?? 'IAM';
   const port = metadata.port ?? metadata.ports?.[0] ?? 2022;
+  const isRestApi = metadata.computeType === 'ServerlessApiGatewayRestApi';
   const apiNameClassName = toClassName(apiName);
   const backendProjectAlias = toScopeAlias(backendProjectConfig.name);
 
@@ -63,6 +64,7 @@ export async function reactGenerator(
       apiNameClassName: toClassName(apiName),
       ...options,
       auth,
+      isRestApi,
       backendProjectAlias,
     },
     {
@@ -172,6 +174,9 @@ export async function reactGenerator(
       '@trpc/tanstack-react-query',
       '@tanstack/react-query',
       '@tanstack/react-query-devtools',
+      ...((isRestApi && auth !== 'None'
+        ? ['event-source-polyfill']
+        : []) as any),
       ...((auth === 'IAM'
         ? [
             'oidc-client-ts',
@@ -183,7 +188,12 @@ export async function reactGenerator(
         : []) as any),
       ...((auth === 'Cognito' ? ['react-oidc-context'] : []) as any),
     ]),
-    withVersions(['@smithy/types']),
+    withVersions([
+      '@smithy/types',
+      ...((isRestApi && auth !== 'None'
+        ? ['@types/event-source-polyfill']
+        : []) as any),
+    ]),
   );
 
   await addGeneratorMetricsIfApplicable(tree, [TRPC_REACT_GENERATOR_INFO]);
