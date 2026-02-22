@@ -812,3 +812,374 @@ exports[`infra generator > should handle custom project names correctly > custom
   },
 }
 `;
+
+exports[`infra generator > with enableStageConfig > should snapshot generated infra-config src directory > packages/common/infra-config/src/index.ts 1`] = `
+"export * from './stages.types.js';
+export { default } from './stages.config.js';
+export { resolveStage } from './resolve-stage.js';
+"
+`;
+
+exports[`infra generator > with enableStageConfig > should snapshot generated infra-config src directory > packages/common/infra-config/src/resolve-stage.ts 1`] = `
+"import type { StageConfig, StagesConfig } from './stages.types.js';
+import stagesConfig from './stages.config.js';
+
+// Widen the narrow \`as const\` type to StagesConfig for dynamic key access
+const config: StagesConfig = stagesConfig;
+
+/**
+ * Resolves stage config for a given project and stage name.
+ * Project-specific fields take priority over shared ones.
+ *
+ * @param projectPath - Project path relative to workspace root (e.g., 'packages/infra')
+ * @param stageName - CDK stage name (e.g., 'my-app-dev')
+ * @returns Merged StageConfig or undefined if no config exists for this stage
+ */
+export function resolveStage(
+  projectPath: string,
+  stageName: string,
+): StageConfig | undefined {
+  const shared = config.shared?.stages?.[stageName];
+  const project = config.projects?.[projectPath]?.stages?.[stageName];
+  if (!shared && !project) return undefined;
+  return { ...shared, ...project } as StageConfig;
+}
+"
+`;
+
+exports[`infra generator > with enableStageConfig > should snapshot generated infra-config src directory > packages/common/infra-config/src/stages.config.ts 1`] = `
+"/**
+ * Stage configuration for CDK deployments.
+ *
+ * This file maps CDK stage names to their deployment settings. When you run
+ * \`npx nx run <project>:deploy <stage-name>/*\`, the infra-deploy script
+ * automatically resolves and applies the correct credentials.
+ *
+ * Project keys are the project path relative to the workspace root
+ * (e.g., 'packages/infra').
+ *
+ * Stage names must match the CDK stage identifiers defined in your main.ts —
+ * the first argument to \`new ApplicationStage(app, '<stage-name>', ...)\`.
+ * For example, if main.ts has \`new ApplicationStage(app, 'my-app-dev', ...)\`
+ * then the stage name here is 'my-app-dev'.
+ *
+ * We recommend committing this file so the team shares a single source of truth.
+ * If it contains personal profile names, you can add it to .gitignore instead.
+ */
+import type { StagesConfig } from './stages.types.js';
+
+export default {
+  projects: {
+    // Example: map stages for a specific infra project
+    // 'packages/infra': {
+    //   stages: {
+    //     'my-app-dev': {
+    //       credentials: { type: 'profile', profile: 'dev-account' },
+    //       region: 'us-east-1',
+    //       // account is optional — if omitted, CDK infers from the profile
+    //     },
+    //     'my-app-prod': {
+    //       credentials: { type: 'assumeRole', assumeRole: 'arn:aws:iam::123456789012:role/DeployRole' },
+    //       region: 'us-west-2',
+    //       account: '123456789012',
+    //     },
+    //   },
+    // },
+  },
+  shared: {
+    stages: {
+      // Example: shared sandbox stage available to all projects
+      // 'sandbox': {
+      //   credentials: { type: 'profile', profile: 'sandbox-profile' },
+      //   region: 'us-east-1',
+      // },
+    },
+  },
+} as const satisfies StagesConfig;
+"
+`;
+
+exports[`infra generator > with enableStageConfig > should snapshot generated infra-config src directory > packages/common/infra-config/src/stages.types.ts 1`] = `
+"/**
+ * Type definitions for stage and project configuration.
+ *
+ * These types are used by both stages.config.ts and the infra-deploy/
+ * infra-destroy scripts. They live in a shared package so any
+ * project in the workspace can import them.
+ */
+
+/** Use an AWS CLI profile from ~/.aws/config */
+export type ProfileCredentials = {
+  type: 'profile';
+  /** AWS CLI profile name */
+  profile: string;
+};
+
+/** Assume an IAM role via STS, optionally using a profile as the source credentials */
+export type AssumeRoleCredentials = {
+  type: 'assumeRole';
+  /** IAM Role ARN to assume */
+  assumeRole: string;
+  /** Optional: AWS CLI profile to use as source credentials for the AssumeRole call */
+  profile?: string;
+  /** Optional: External ID required by the role's trust policy */
+  externalId?: string;
+  /** Optional: Session duration in seconds (default: 3600). Increase for long deployments. */
+  sessionDuration?: number;
+};
+
+/**
+ * Credentials for deploying to a specific CDK stage.
+ * The \`type\` field determines which credential strategy is used.
+ */
+export type StageCredentials = ProfileCredentials | AssumeRoleCredentials;
+
+/**
+ * Configuration for a single CDK stage.
+ * Includes credentials, region, and optionally account.
+ */
+export type StageConfig = {
+  /** How to authenticate when deploying this stage */
+  credentials: StageCredentials;
+  /** AWS region for this stage (e.g., 'us-east-1') */
+  region: string;
+  /** AWS account ID. If omitted, CDK infers it from the active credentials. */
+  account?: string;
+};
+
+/**
+ * Configuration for a single infrastructure project.
+ * The key in the parent map is the project path relative to workspace root
+ * (e.g., 'packages/infra').
+ */
+export type ProjectConfig = {
+  /** Map of CDK stage names to their configuration */
+  stages: { [stageName: string]: StageConfig };
+};
+
+/** Top-level configuration mapping projects and stages to their settings. */
+export type StagesConfig = {
+  /** Project-specific config. Key is the project path relative to workspace root. */
+  projects?: { [projectPath: string]: ProjectConfig };
+  /** Shared stage config available to all projects. */
+  shared?: {
+    stages: { [stageName: string]: StageConfig };
+  };
+};
+"
+`;
+
+exports[`infra generator > with enableStageConfig > should snapshot generated scripts src directory > packages/common/scripts/src/index.ts 1`] = `
+"// Scripts (infra-deploy, infra-destroy) are the public interface of this package.
+"
+`;
+
+exports[`infra generator > with enableStageConfig > should snapshot generated scripts src directory > packages/common/scripts/src/infra-deploy.ts 1`] = `
+"import { run } from './stage-credentials/run.js';
+run('deploy');
+"
+`;
+
+exports[`infra generator > with enableStageConfig > should snapshot generated scripts src directory > packages/common/scripts/src/infra-destroy.ts 1`] = `
+"import { run } from './stage-credentials/run.js';
+run('destroy');
+"
+`;
+
+exports[`infra generator > with enableStageConfig > should snapshot generated scripts src directory > packages/common/scripts/src/stage-credentials/cdk-command.ts 1`] = `
+"/**
+ * Builds the CDK command as an array of arguments for spawnSync.
+ *
+ * Defaults to --require-approval=never (standard for local dev deploys).
+ * If the user explicitly passes --require-approval with any value, we
+ * respect their choice and don't add the default.
+ */
+export function buildCdkCommand(
+  action: string,
+  remainingArgs: string[],
+): string[] {
+  const hasRequireApproval = remainingArgs.some(
+    (a) => a === '--require-approval' || a.startsWith('--require-approval='),
+  );
+  return hasRequireApproval
+    ? ['cdk', action, ...remainingArgs]
+    : ['cdk', action, '--require-approval=never', ...remainingArgs];
+}
+"
+`;
+
+exports[`infra generator > with enableStageConfig > should snapshot generated scripts src directory > packages/common/scripts/src/stage-credentials/credentials.ts 1`] = `
+"import type { StageCredentials, StagesConfig } from ':proj/common-infra-config';
+
+/**
+ * Looks up credentials for a given project + stage combination.
+ *
+ * Lookup order:
+ *   1. Project-specific: config.projects[projectPath].stages[stageName].credentials
+ *   2. Shared:           config.shared.stages[stageName].credentials
+ *   3. No match:         returns undefined — caller falls back to env vars
+ */
+export function lookupCredentials(
+  config: StagesConfig | undefined,
+  projectPath: string,
+  stageName: string,
+): { credentials: StageCredentials | undefined; source: string } {
+  const projectCreds =
+    config?.projects?.[projectPath]?.stages?.[stageName]?.credentials;
+  if (projectCreds) {
+    return { credentials: projectCreds, source: 'project-specific' };
+  }
+
+  const sharedCreds = config?.shared?.stages?.[stageName]?.credentials;
+  if (sharedCreds) {
+    return { credentials: sharedCreds, source: 'shared' };
+  }
+
+  return { credentials: undefined, source: 'environment fallback' };
+}
+
+/**
+ * Builds a child process environment with the resolved credentials overlaid.
+ * Never modifies process.env — returns a new object.
+ */
+export async function buildChildEnv(
+  credentials: StageCredentials,
+  projectPath: string,
+): Promise<Record<string, string | undefined>> {
+  const env = { ...process.env };
+
+  switch (credentials.type) {
+    case 'profile': {
+      env.AWS_PROFILE = credentials.profile;
+      break;
+    }
+    case 'assumeRole': {
+      let STSClient: typeof import('@aws-sdk/client-sts').STSClient;
+      let AssumeRoleCommand: typeof import('@aws-sdk/client-sts').AssumeRoleCommand;
+      try {
+        ({ STSClient, AssumeRoleCommand } =
+          await import('@aws-sdk/client-sts'));
+      } catch {
+        console.error(
+          '[infra-deploy] Error: @aws-sdk/client-sts is required for assumeRole credentials but is not installed.',
+        );
+        console.error('[infra-deploy] Please install @aws-sdk/client-sts');
+        process.exit(1);
+      }
+
+      // If a source profile is specified, configure the STS client to use it
+      const stsClientOptions: Record<string, unknown> = {};
+      if (credentials.profile) {
+        const { fromIni } = await import('@aws-sdk/credential-providers');
+        stsClientOptions.credentials = fromIni({
+          profile: credentials.profile,
+        });
+      }
+
+      const response = await new STSClient(stsClientOptions).send(
+        new AssumeRoleCommand({
+          RoleArn: credentials.assumeRole,
+          RoleSessionName: \`infra-deploy-\${projectPath.replace(/\\//g, '-')}\`,
+          ...(credentials.externalId
+            ? { ExternalId: credentials.externalId }
+            : {}),
+          ...(credentials.sessionDuration
+            ? { DurationSeconds: credentials.sessionDuration }
+            : {}),
+        }),
+      );
+
+      env.AWS_ACCESS_KEY_ID = response.Credentials?.AccessKeyId;
+      env.AWS_SECRET_ACCESS_KEY = response.Credentials?.SecretAccessKey;
+      env.AWS_SESSION_TOKEN = response.Credentials?.SessionToken;
+      delete env.AWS_PROFILE;
+      break;
+    }
+  }
+
+  return env;
+}
+
+/** Human-readable description of credentials for logging */
+export function describeCredentials(creds: StageCredentials): string {
+  return creds.type === 'profile'
+    ? \`profile '\${creds.profile}'\`
+    : \`role '\${creds.assumeRole}'\`;
+}
+"
+`;
+
+exports[`infra generator > with enableStageConfig > should snapshot generated scripts src directory > packages/common/scripts/src/stage-credentials/run.ts 1`] = `
+"import { spawnSync } from 'child_process';
+import stagesConfig from ':proj/common-infra-config';
+import { parseStageName } from './stage-parser.js';
+import {
+  lookupCredentials,
+  buildChildEnv,
+  describeCredentials,
+} from './credentials.js';
+import { buildCdkCommand } from './cdk-command.js';
+
+const log = (msg: string) => console.error(\`[infra-deploy] \${msg}\`);
+
+export async function run(action: 'deploy' | 'destroy'): Promise<void> {
+  const [projectPath, ...remainingArgs] = process.argv.slice(2);
+
+  if (!projectPath) {
+    log(\`Usage: infra-\${action} <project-path> [stage/*] [cdk-args...]\`);
+    process.exit(1);
+  }
+
+  const stageName = parseStageName(remainingArgs[0]);
+  let childEnv: Record<string, string | undefined> = { ...process.env };
+
+  if (stageName) {
+    const { credentials, source } = lookupCredentials(
+      stagesConfig,
+      projectPath,
+      stageName,
+    );
+
+    if (credentials) {
+      log(
+        \`Using \${describeCredentials(credentials)} for '\${stageName}' (\${source})\`,
+      );
+      childEnv = await buildChildEnv(credentials, projectPath);
+    } else {
+      log(\`No credentials for '\${stageName}' — using environment\`);
+    }
+  } else {
+    log('No stage specified — using environment credentials');
+  }
+
+  // Run CDK from the project directory so it finds cdk.json
+  const cmd = buildCdkCommand(action, remainingArgs);
+  const { status } = spawnSync(cmd[0], cmd.slice(1), {
+    stdio: 'inherit',
+    env: childEnv,
+    cwd: projectPath,
+  });
+
+  process.exit(status ?? 1);
+}
+"
+`;
+
+exports[`infra generator > with enableStageConfig > should snapshot generated scripts src directory > packages/common/scripts/src/stage-credentials/stage-parser.ts 1`] = `
+"/**
+ * Extracts the CDK stage name from the first positional argument.
+ *
+ * Examples:
+ *   parseStageName('my-app-dev/*')  → 'my-app-dev'
+ *   parseStageName('my-app-dev')    → 'my-app-dev'
+ *   parseStageName('--verbose')     → undefined (flag, not a stage)
+ *   parseStageName(undefined)       → undefined
+ */
+export function parseStageName(
+  firstArg: string | undefined,
+): string | undefined {
+  if (!firstArg || firstArg.startsWith('-')) return undefined;
+  return firstArg.includes('/') ? firstArg.split('/')[0] : firstArg;
+}
+"
+`;
