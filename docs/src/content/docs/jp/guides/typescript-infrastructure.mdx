@@ -3,8 +3,6 @@ title: "CDKインフラストラクチャ"
 description: "CDKインフラストラクチャのリファレンスドキュメント"
 ---
 
-
-
 import { FileTree } from '@astrojs/starlight/components';
 import RunGenerator from '@components/run-generator.astro';
 import Link from '@components/link.astro';
@@ -45,6 +43,24 @@ TypeScriptインフラストラクチャジェネレータは、TypeScriptで記
 
 </FileTree>
 
+`enableStageConfig`オプションを設定した場合、ジェネレータは集中認証情報管理用の2つの共有パッケージも作成します（まだ存在しない場合）:
+
+<FileTree>
+
+  - packages/common
+    - infra-config ステージ設定タイプと認証情報マッピング
+      - src
+        - stages.types.ts ステージ認証情報と設定の型定義
+        - stages.config.ts ステージと認証情報のマッピング（編集してください）
+        - index.ts 他のパッケージからインポートするための再エクスポート
+    - scripts 集中デプロイ/削除スクリプト
+      - src
+        - infra-deploy.ts デプロイbinスクリプト
+        - infra-destroy.ts 削除binスクリプト
+        - stage-credentials/ 共有ロジック（認証情報検索、CDKコマンド構築）
+
+</FileTree>
+
 :::tip
 インフラストラクチャはTypeScriptプロジェクトです。一般的な使用方法の詳細については<Link path="guides/typescript-project">TypeScriptプロジェクトドキュメント</Link>を参照してください。
 :::
@@ -70,10 +86,10 @@ export class ApplicationStack extends Stack {
 
 ### ステージとスタック
 
-トップレベルの`src/main.ts`ファイルが`<namespace>-sandbox`という名前のCDK[Stage](https://docs.aws.amazon.com/cdk/v2/guide/stages.html)をインスタンス化していることに気付くでしょう。このステージは開発とテスト用に設計されています。
+CDKは[ステージ](https://docs.aws.amazon.com/cdk/v2/guide/stages.html)を使用して、特定の環境に一緒にデプロイすべきスタックをグループ化します。生成された`src/main.ts`は、自身の開発とテスト用のsandboxステージを作成します:
 
 ```ts title="src/main.ts"
-new ApplicationStage(app, 'project-sandbox', {
+new ApplicationStage(app, 'my-app-sandbox', {
   env: {
     account: process.env.CDK_DEFAULT_ACCOUNT,
     region: process.env.CDK_DEFAULT_REGION,
@@ -81,24 +97,42 @@ new ApplicationStage(app, 'project-sandbox', {
 });
 ```
 
-追加のステージを定義できます。例えば、`beta`と`prod`ステージを別々の環境にデプロイする場合:
+`env`プロパティは、デプロイ先のAWSアカウントとリージョンをCDKに指示します。`CDK_DEFAULT_ACCOUNT`と`CDK_DEFAULT_REGION`は、アクティブなAWS認証情報からCDK CLIによって自動的に解決されます。詳細は[CDK環境ドキュメント](https://docs.aws.amazon.com/cdk/v2/guide/environments.html)を参照してください。
+
+`enableStageConfig`で生成した場合、`main.ts`は集中設定ファイルからアカウントとリージョンを読み取り、設定がない場合は環境変数にフォールバックします:
+
+```ts title="src/main.ts (enableStageConfigの場合)"
+import stagesConfig from ':my-scope/common-infra-config';
+
+const projectStages = stagesConfig.projects?.['packages/infra']?.stages ?? {};
+const sandboxConfig = projectStages['my-app-sandbox'];
+
+new ApplicationStage(app, 'my-app-sandbox', {
+  env: {
+    account: sandboxConfig?.account ?? process.env.CDK_DEFAULT_ACCOUNT,
+    region: sandboxConfig?.region ?? process.env.CDK_DEFAULT_REGION,
+  },
+});
+```
+
+異なる環境にデプロイするために、さらにステージを追加できます。例えば、別々のAWSアカウントをターゲットとする`beta`と`prod`ステージ:
 
 ```ts title="src/main.ts"
 new ApplicationStage(app, 'project-beta', {
   env: {
-    account: '123456789012', // betaアカウント
+    account: '123456789012',
     region: 'us-west-2',
   },
 });
 new ApplicationStage(app, 'project-prod', {
   env: {
-    account: '098765432109', // prodアカウント
+    account: '098765432109',
     region: 'us-west-2',
   },
 });
 ```
 
-ステージはアプリケーションを構成するスタックのコレクションを定義します。ステージ内で任意の数のスタックをインスタンス化できます。例:
+ステージは1つ以上のスタックをグループ化します。ステージ内に必要な数のスタックを追加できます:
 
 ```ts title="src/stages/application-stage.ts"
 import { Stage, StageProps } from 'aws-cdk-lib';
@@ -106,9 +140,6 @@ import { Construct } from 'constructs';
 import { BackendStack } from '../stacks/backend-stack.js';
 import { FrontendStack } from '../stacks/frontend-stack.js';
 
-/**
- * アプリケーションを構成するCDKスタックのコレクションを定義
- */
 export class ApplicationStage extends Stage {
   constructor(scope: Construct, id: string, props?: StageProps) {
     super(scope, id, props);
@@ -123,6 +154,112 @@ export class ApplicationStage extends Stage {
   }
 }
 ```
+
+### ステージ認証情報の設定
+
+:::note
+このセクションは`enableStageConfig`で生成した場合に適用されます。これを使用しない場合、ジェネレータはAWS認証情報を自分で管理する（例: デプロイ前に`AWS_PROFILE`をエクスポートする）よりシンプルなセットアップを生成します。
+:::
+
+複数のステージが異なるAWSアカウントをターゲットとする場合、特にステージ数が増えるにつれて、認証情報を手動で管理することはエラーが発生しやすくなります。
+
+`enableStageConfig`オプションは、2つの共有パッケージを生成することでこれを解決します:
+
+- **`packages/common/infra-config`** — 各ステージをAWS認証情報、アカウント、リージョンにマッピングする単一の設定ファイル。これはワークスペース内の任意のパッケージからインポート可能なため、CDKの`main.ts`は同じ信頼できる情報源からアカウントとリージョンを読み取ることができます。
+- **`packages/common/scripts`** — CDKを自動認証情報解決でラップする`infra-deploy`と`infra-destroy`コマンド。`deploy`を実行すると、スクリプトは設定を読み取り、CDK子プロセス用に適切なAWS環境変数を設定し、`cdk deploy`を実行します。シェル環境は変更されません。
+
+#### 認証情報の設定
+
+`packages/common/infra-config/src/stages.config.ts`を編集して、ステージをAWS認証情報にマッピングします:
+
+```ts title="packages/common/infra-config/src/stages.config.ts"
+import type { StagesConfig } from './stages.types.js';
+
+const config: StagesConfig = {
+  projects: {
+    // キーはワークスペースルートからの相対プロジェクトパスです。
+    // これはproject.jsonのパスとデプロイコマンドのパスと一致します。
+    'packages/infra': {
+      stages: {
+        // ステージ名はmain.tsのCDKステージ識別子と一致する必要があります
+        // (`new ApplicationStage(app, 'my-app-dev', ...)`の最初の引数)。
+        'my-app-dev': {
+          credentials: { type: 'profile', profile: 'dev-account' },
+          region: 'us-east-1',
+        },
+        'my-app-prod': {
+          credentials: {
+            type: 'assumeRole',
+            assumeRole: 'arn:aws:iam::123456789012:role/DeployRole',
+          },
+          region: 'us-west-2',
+          account: '123456789012',
+        },
+      },
+    },
+  },
+  shared: {
+    // 共有ステージはすべてのインフラプロジェクトで利用可能です。
+    // プロジェクト固有のエントリが共有エントリより優先されます。
+    stages: {
+      sandbox: {
+        credentials: { type: 'profile', profile: 'personal-sandbox' },
+        region: 'us-east-1',
+      },
+    },
+  },
+};
+
+export default config;
+```
+
+例えば、デプロイする場合:
+
+<NxCommands commands={['run infra:deploy my-app-dev/*']} />
+
+デプロイスクリプトは:
+1. コマンド引数からステージ名`my-app-dev`を抽出
+2. 設定内で認証情報を検索: まず`projects['packages/infra']`の下、次に`shared`の下
+3. 見つかった場合、CDK子プロセスのみに`AWS_PROFILE`を設定（またはIAMロールを引き受ける）
+4. 見つからない場合、環境内の既存のAWS認証情報にフォールバック
+
+つまり、設定のない既存のワークフローは引き続き機能します — スクリプトは一致するエントリが見つかった場合にのみ認証情報を適用します。
+
+#### 認証情報タイプ
+
+2つの認証情報戦略がサポートされています:
+
+- **`profile`** — `~/.aws/config`から名前付き[AWS CLIプロファイル](https://docs.aws.amazon.com/cli/v1/userguide/cli-configure-profiles.html)を使用します。スクリプトはCDKプロセスに`AWS_PROFILE`を設定します。
+- **`assumeRole`** — 指定されたロールARNで[STS AssumeRole](https://docs.aws.amazon.com/STS/latest/APIReference/API_AssumeRole.html)を呼び出し、一時認証情報をCDKに渡します。オプションで、AssumeRole呼び出しのソース認証情報として`profile`、クロスアカウント信頼ポリシー用の`externalId`、および秒単位の`sessionDuration`を指定できます。
+
+#### アカウントとリージョン
+
+各ステージ設定には必須の`region`とオプションの`account`が含まれます:
+
+- **`region`** (必須) — デプロイ先のAWSリージョン（例: `us-east-1`、`eu-west-2`）。
+- **`account`** (オプション) — AWSアカウントID。省略した場合、CDKはデプロイ時にアクティブな認証情報から推測します。CDKがアカウントとリージョンを解決する方法については、[CDK環境ドキュメント](https://docs.aws.amazon.com/cdk/v2/guide/environments.html)を参照してください。
+
+生成された`main.ts`は設定からこれらの値を読み取るため、CDKの合成とデプロイは同じ環境設定を使用します:
+
+```ts title="src/main.ts"
+const sandboxConfig = projectStages['my-app-sandbox'];
+new ApplicationStage(app, 'my-app-sandbox', {
+  env: {
+    account: sandboxConfig?.account ?? process.env.CDK_DEFAULT_ACCOUNT,
+    region: sandboxConfig?.region ?? process.env.CDK_DEFAULT_REGION,
+  },
+});
+```
+
+#### 共有ステージとプロジェクト固有ステージ
+
+共有ステージ（`shared.stages`の下）はワークスペース内の任意のインフラプロジェクトに適用されます。これは、複数のプロジェクトが同じsandboxアカウントにデプロイする場合に便利です — 各プロジェクトで繰り返す代わりに、認証情報を一度定義します。
+
+プロジェクト固有のステージ（`projects['packages/infra'].stages`の下）はそのプロジェクトにのみ適用されます。同じステージ名で両方が存在する場合、プロジェクト固有のエントリが優先されます。
+
+:::tip
+チームがステージ認証情報の単一の信頼できる情報源を共有できるように、`stages.config.ts`をコミットすることをお勧めします。個人のプロファイル名が含まれている場合は、`.gitignore`に追加してローカルオーバーライドを使用できます。
+:::
 
 ### APIインフラストラクチャ
 
@@ -218,17 +355,17 @@ suppressRules(construct, ['CKV_AWS_XXX'], '理由', (construct) => construct ins
 
 ## AWSアカウントのブートストラップ
 
-AWSアカウントに初めてCDKアプリケーションをデプロイする場合、事前にブートストラップが必要です。
+AWSアカウントに初めてCDKアプリケーションをデプロイする場合、事前に[ブートストラップ](https://docs.aws.amazon.com/cdk/v2/guide/bootstrapping-env.html)が必要です。ブートストラップは、CDKがデプロイを管理するために必要なリソース（アセット用のS3バケット、IAMロールなど）を作成します。
 
 まず、[AWSアカウントの認証情報を設定](https://docs.aws.amazon.com/sdkref/latest/guide/access.html)してください。
 
-次に`cdk bootstrap`コマンドを使用します:
+次に、デプロイ予定の各アカウントとリージョンに対してブートストラップコマンドを実行します:
 
 ```bash
 npx cdk bootstrap aws://<account-id>/<region>
 ```
 
-詳細は[CDKドキュメント](https://docs.aws.amazon.com/cdk/v2/guide/bootstrapping-env.html)を参照してください。
+詳細は[CDKブートストラップドキュメント](https://docs.aws.amazon.com/cdk/v2/guide/bootstrapping-env.html)を参照してください。
 
 ## AWSへのデプロイ
 
@@ -238,14 +375,14 @@ npx cdk bootstrap aws://<account-id>/<region>
 CI/CDパイプラインでのデプロイには`deploy-ci`ターゲットを使用してください。詳細は後述します。
 :::
 
-まず、[AWSアカウントの認証情報を設定](https://docs.aws.amazon.com/sdkref/latest/guide/access.html)してください。
+まず、AWS認証情報が設定されていることを確認してください。`enableStageConfig`で生成し、`packages/common/infra-config/src/stages.config.ts`でステージ認証情報を設定している場合、デプロイコマンドはターゲットステージに対して正しい認証情報を自動的に解決して適用します。それ以外の場合は、環境にAWS認証情報が設定されていることを確認してください（例: `AWS_PROFILE`または環境変数経由）。利用可能なオプションについては、[AWS認証情報ドキュメント](https://docs.aws.amazon.com/sdkref/latest/guide/access.html)を参照してください。
 
 次にデプロイターゲットを実行します:
 
 <NxCommands commands={['run <my-infra>:deploy <my-infra>-sandbox/*']} />
 
 :::tip
-上記のコマンドは`<my-infra>-sandbox`ステージのすべてのスタックをデプロイします。`main.ts`で定義されている他のステージを指定できます。
+上記のコマンドは`<my-infra>-sandbox`ステージの*すべて*のスタックをデプロイします。`main.ts`で定義されている他のステージを指定できます。
 
 完全なスタック名を指定して個別のスタックをデプロイすることも可能です:
 

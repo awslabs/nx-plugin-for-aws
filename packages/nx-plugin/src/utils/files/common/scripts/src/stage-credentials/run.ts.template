@@ -1,0 +1,52 @@
+import { spawnSync } from 'child_process';
+import stagesConfig from '<%= scopeAlias %>common-infra-config';
+import { parseStageName } from './stage-parser.js';
+import {
+  lookupCredentials,
+  buildChildEnv,
+  describeCredentials,
+} from './credentials.js';
+import { buildCdkCommand } from './cdk-command.js';
+
+const log = (msg: string) => console.error(`[infra-deploy] ${msg}`);
+
+export async function run(action: 'deploy' | 'destroy'): Promise<void> {
+  const [projectPath, ...remainingArgs] = process.argv.slice(2);
+
+  if (!projectPath) {
+    log(`Usage: infra-${action} <project-path> [stage/*] [cdk-args...]`);
+    process.exit(1);
+  }
+
+  const stageName = parseStageName(remainingArgs[0]);
+  let childEnv: Record<string, string | undefined> = { ...process.env };
+
+  if (stageName) {
+    const { credentials, source } = lookupCredentials(
+      stagesConfig,
+      projectPath,
+      stageName,
+    );
+
+    if (credentials) {
+      log(
+        `Using ${describeCredentials(credentials)} for '${stageName}' (${source})`,
+      );
+      childEnv = await buildChildEnv(credentials, projectPath);
+    } else {
+      log(`No credentials for '${stageName}' — using environment`);
+    }
+  } else {
+    log('No stage specified — using environment credentials');
+  }
+
+  // Run CDK from the project directory so it finds cdk.json
+  const cmd = buildCdkCommand(action, remainingArgs);
+  const { status } = spawnSync(cmd[0], cmd.slice(1), {
+    stdio: 'inherit',
+    env: childEnv,
+    cwd: projectPath,
+  });
+
+  process.exit(status ?? 1);
+}

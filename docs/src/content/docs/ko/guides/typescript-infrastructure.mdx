@@ -3,8 +3,6 @@ title: "CDK 인프라"
 description: "CDK 인프라에 대한 참조 문서"
 ---
 
-
-
 import { FileTree } from '@astrojs/starlight/components';
 import RunGenerator from '@components/run-generator.astro';
 import Link from '@components/link.astro';
@@ -34,7 +32,7 @@ TypeScript 인프라 생성기는 TypeScript로 작성된 AWS CDK 인프라 애�
 <FileTree>
 
   - src
-    - main.ts CDK 스테이지를 인스턴스화하는 애플리케이션 진입점
+    - main.ts 배포할 CDK 스테이지를 인스턴스화하는 애플리케이션 진입점
     - stages CDK 스테이지 정의
       - application-stage.ts 스테이지에서 배포할 스택 컬렉션 정의
     - stacks CDK 스택 정의
@@ -42,6 +40,24 @@ TypeScript 인프라 생성기는 TypeScript로 작성된 AWS CDK 인프라 애�
   - cdk.json CDK 구성 파일
   - project.json 프로젝트 구성 및 빌드 타겟
   - checkov.yml Checkov 구성 파일
+
+</FileTree>
+
+`enableStageConfig` 옵션을 설정한 경우, 생성기는 중앙 집중식 자격 증명 관리를 위한 두 개의 공유 패키지도 생성합니다(아직 존재하지 않는 경우):
+
+<FileTree>
+
+  - packages/common
+    - infra-config 스테이지 구성 타입 및 자격 증명 매핑
+      - src
+        - stages.types.ts 스테이지 자격 증명 및 구성을 위한 타입 정의
+        - stages.config.ts 스테이지-자격 증명 매핑 (이 파일을 편집하세요)
+        - index.ts 다른 패키지에서 임포트하기 위한 재내보내기
+    - scripts 중앙 집중식 배포/제거 스크립트
+      - src
+        - infra-deploy.ts 배포 bin 스크립트
+        - infra-destroy.ts 제거 bin 스크립트
+        - stage-credentials/ 공유 로직 (자격 증명 조회, CDK 명령 빌드)
 
 </FileTree>
 
@@ -70,10 +86,10 @@ export class ApplicationStack extends Stack {
 
 ### 스테이지와 스택
 
-최상위 `src/main.ts` 파일이 `<namespace>-sandbox` 이름의 CDK [스테이지](https://docs.aws.amazon.com/cdk/v2/guide/stages.html)를 인스턴스화하는 것을 확인할 수 있습니다. 이 스테이지는 개발 및 테스트용으로 사용됩니다.
+CDK는 [스테이지](https://docs.aws.amazon.com/cdk/v2/guide/stages.html)를 사용하여 특정 환경에 함께 배포해야 하는 스택을 그룹화합니다. 생성된 `src/main.ts`는 개발 및 테스트를 위한 샌드박스 스테이지를 생성합니다:
 
 ```ts title="src/main.ts"
-new ApplicationStage(app, 'project-sandbox', {
+new ApplicationStage(app, 'my-app-sandbox', {
   env: {
     account: process.env.CDK_DEFAULT_ACCOUNT,
     region: process.env.CDK_DEFAULT_REGION,
@@ -81,24 +97,42 @@ new ApplicationStage(app, 'project-sandbox', {
 });
 ```
 
-`beta` 및 `prod` 스테이지를 추가하여 별도 환경에 배포할 수 있습니다:
+`env` 속성은 CDK에게 배포할 AWS 계정과 리전을 알려줍니다. `CDK_DEFAULT_ACCOUNT`와 `CDK_DEFAULT_REGION`은 활성 AWS 자격 증명에서 CDK CLI에 의해 자동으로 확인됩니다. 자세한 내용은 [CDK 환경 문서](https://docs.aws.amazon.com/cdk/v2/guide/environments.html)를 참조하세요.
+
+`enableStageConfig`로 생성한 경우, `main.ts`는 중앙 집중식 구성 파일에서 계정과 리전을 읽으며, 구성이 설정되지 않은 경우 환경 변수로 폴백합니다:
+
+```ts title="src/main.ts (enableStageConfig 사용 시)"
+import stagesConfig from ':my-scope/common-infra-config';
+
+const projectStages = stagesConfig.projects?.['packages/infra']?.stages ?? {};
+const sandboxConfig = projectStages['my-app-sandbox'];
+
+new ApplicationStage(app, 'my-app-sandbox', {
+  env: {
+    account: sandboxConfig?.account ?? process.env.CDK_DEFAULT_ACCOUNT,
+    region: sandboxConfig?.region ?? process.env.CDK_DEFAULT_REGION,
+  },
+});
+```
+
+다른 환경에 배포하기 위해 더 많은 스테이지를 추가할 수 있습니다. 예를 들어 별도의 AWS 계정을 대상으로 하는 `beta` 및 `prod` 스테이지:
 
 ```ts title="src/main.ts"
 new ApplicationStage(app, 'project-beta', {
   env: {
-    account: '123456789012', // 베타 계정
+    account: '123456789012',
     region: 'us-west-2',
   },
 });
 new ApplicationStage(app, 'project-prod', {
   env: {
-    account: '098765432109', // 프로덕션 계정
+    account: '098765432109',
     region: 'us-west-2',
   },
 });
 ```
 
-스테이지는 애플리케이션을 구성하는 스택 컬렉션을 정의합니다. 스테이지 내에서 원하는 만큼 스택을 생성할 수 있습니다:
+스테이지는 하나 이상의 스택을 그룹화합니다. 스테이지 내에 필요한 만큼 스택을 추가할 수 있습니다:
 
 ```ts title="src/stages/application-stage.ts"
 import { Stage, StageProps } from 'aws-cdk-lib';
@@ -106,9 +140,6 @@ import { Construct } from 'constructs';
 import { BackendStack } from '../stacks/backend-stack.js';
 import { FrontendStack } from '../stacks/frontend-stack.js';
 
-/**
- * 애플리케이션을 구성하는 CDK 스택 컬렉션 정의
- */
 export class ApplicationStage extends Stage {
   constructor(scope: Construct, id: string, props?: StageProps) {
     super(scope, id, props);
@@ -124,11 +155,117 @@ export class ApplicationStage extends Stage {
 }
 ```
 
+### 스테이지 자격 증명 구성
+
+:::note
+이 섹션은 `enableStageConfig`로 생성한 경우에 적용됩니다. 이 옵션 없이는 생성기가 더 간단한 설정을 생성하며, AWS 자격 증명을 직접 관리해야 합니다(예: 배포 전에 `AWS_PROFILE`을 내보내기).
+:::
+
+여러 스테이지가 서로 다른 AWS 계정을 대상으로 할 때, 특히 스테이지 수가 증가함에 따라 자격 증명을 수동으로 관리하는 것은 오류가 발생하기 쉽습니다.
+
+`enableStageConfig` 옵션은 두 개의 공유 패키지를 생성하여 이 문제를 해결합니다:
+
+- **`packages/common/infra-config`** — 각 스테이지를 AWS 자격 증명, 계정, 리전에 매핑하는 단일 구성 파일입니다. 워크스페이스의 모든 패키지에서 임포트할 수 있으므로 CDK `main.ts`가 동일한 신뢰할 수 있는 소스에서 계정과 리전을 읽을 수 있습니다.
+- **`packages/common/scripts`** — 자동 자격 증명 확인으로 CDK를 래핑하는 `infra-deploy` 및 `infra-destroy` 명령입니다. `deploy`를 실행하면 스크립트가 구성을 읽고, CDK 자식 프로세스에 올바른 AWS 환경 변수를 설정하고, `cdk deploy`를 실행합니다. 셸 환경은 수정되지 않습니다.
+
+#### 자격 증명 구성하기
+
+`packages/common/infra-config/src/stages.config.ts`를 편집하여 스테이지를 AWS 자격 증명에 매핑합니다:
+
+```ts title="packages/common/infra-config/src/stages.config.ts"
+import type { StagesConfig } from './stages.types.js';
+
+const config: StagesConfig = {
+  projects: {
+    // 키는 워크스페이스 루트에 상대적인 프로젝트 경로입니다.
+    // 이는 project.json 및 배포 명령의 경로와 일치합니다.
+    'packages/infra': {
+      stages: {
+        // 스테이지 이름은 main.ts의 CDK 스테이지 식별자와 일치해야 합니다
+        // (`new ApplicationStage(app, 'my-app-dev', ...)`의 첫 번째 인수).
+        'my-app-dev': {
+          credentials: { type: 'profile', profile: 'dev-account' },
+          region: 'us-east-1',
+        },
+        'my-app-prod': {
+          credentials: {
+            type: 'assumeRole',
+            assumeRole: 'arn:aws:iam::123456789012:role/DeployRole',
+          },
+          region: 'us-west-2',
+          account: '123456789012',
+        },
+      },
+    },
+  },
+  shared: {
+    // 공유 스테이지는 모든 인프라 프로젝트에서 사용할 수 있습니다.
+    // 프로젝트별 항목이 공유 항목보다 우선합니다.
+    stages: {
+      sandbox: {
+        credentials: { type: 'profile', profile: 'personal-sandbox' },
+        region: 'us-east-1',
+      },
+    },
+  },
+};
+
+export default config;
+```
+
+예를 들어 배포할 때:
+
+<NxCommands commands={['run infra:deploy my-app-dev/*']} />
+
+배포 스크립트는:
+1. 명령 인수에서 스테이지 이름 `my-app-dev`를 추출합니다
+2. 구성에서 자격 증명을 조회합니다: 먼저 `projects['packages/infra']` 아래에서, 그 다음 `shared` 아래에서
+3. 찾으면 CDK 자식 프로세스에 대해서만 `AWS_PROFILE`을 설정하거나 IAM 역할을 가정합니다
+4. 찾지 못하면 환경에 있는 AWS 자격 증명으로 폴백합니다
+
+이는 구성이 없는 기존 워크플로우가 계속 작동함을 의미합니다 — 스크립트는 일치하는 항목을 찾을 때만 자격 증명을 적용합니다.
+
+#### 자격 증명 유형
+
+두 가지 자격 증명 전략이 지원됩니다:
+
+- **`profile`** — `~/.aws/config`의 명명된 [AWS CLI 프로필](https://docs.aws.amazon.com/cli/v1/userguide/cli-configure-profiles.html)을 사용합니다. 스크립트가 CDK 프로세스에 `AWS_PROFILE`을 설정합니다.
+- **`assumeRole`** — 지정된 역할 ARN으로 [STS AssumeRole](https://docs.aws.amazon.com/STS/latest/APIReference/API_AssumeRole.html)을 호출하고 임시 자격 증명을 CDK에 전달합니다. 선택적으로 AssumeRole 호출을 위한 소스 자격 증명으로 `profile`을, 교차 계정 신뢰 정책을 위한 `externalId`를, 초 단위의 `sessionDuration`을 지정할 수 있습니다.
+
+#### 계정과 리전
+
+각 스테이지 구성에는 필수 `region`과 선택적 `account`가 포함됩니다:
+
+- **`region`** (필수) — 배포할 AWS 리전 (예: `us-east-1`, `eu-west-2`)입니다.
+- **`account`** (선택) — AWS 계정 ID입니다. 생략하면 CDK가 배포 시 활성 자격 증명에서 추론합니다. CDK가 계정과 리전을 확인하는 방법은 [CDK 환경 문서](https://docs.aws.amazon.com/cdk/v2/guide/environments.html)를 참조하세요.
+
+생성된 `main.ts`는 구성에서 이러한 값을 읽어 CDK 합성 및 배포가 동일한 환경 설정을 사용하도록 합니다:
+
+```ts title="src/main.ts"
+const sandboxConfig = projectStages['my-app-sandbox'];
+new ApplicationStage(app, 'my-app-sandbox', {
+  env: {
+    account: sandboxConfig?.account ?? process.env.CDK_DEFAULT_ACCOUNT,
+    region: sandboxConfig?.region ?? process.env.CDK_DEFAULT_REGION,
+  },
+});
+```
+
+#### 공유 vs 프로젝트별 스테이지
+
+공유 스테이지(`shared.stages` 아래)는 워크스페이스의 모든 인프라 프로젝트에 적용됩니다. 이는 여러 프로젝트가 동일한 샌드박스 계정에 배포될 때 유용합니다 — 각 프로젝트에 대해 반복하는 대신 자격 증명을 한 번 정의합니다.
+
+프로젝트별 스테이지(`projects['packages/infra'].stages` 아래)는 해당 프로젝트에만 적용됩니다. 동일한 스테이지 이름에 대해 둘 다 존재하는 경우 프로젝트별 항목이 우선합니다.
+
+:::tip
+팀이 스테이지 자격 증명에 대한 단일 신뢰할 수 있는 소스를 공유할 수 있도록 `stages.config.ts`를 커밋하는 것이 좋습니다. 개인 프로필 이름이 포함된 경우 `.gitignore`에 추가하고 로컬 재정의를 사용할 수 있습니다.
+:::
+
 ### API 인프라
 
-<Link path="guides/trpc">tRPC API</Link> 또는 <Link path="guides/fastapi">FastAPI</Link> 생성기를 사용한 경우 `packages/common/constructs`에 배포용 구문이 이미 존재합니다.
+<Link path="guides/trpc">tRPC API</Link> 또는 <Link path="guides/fastapi">FastAPI</Link> 생성기를 사용하여 API를 생성한 경우 `packages/common/constructs`에 배포용 구문이 이미 존재합니다.
 
-예를 들어 `my-api` 이름의 tRPC API를 생성한 경우, 구문을 임포트하여 인프라에 추가할 수 있습니다:
+예를 들어 `my-api` 이름의 tRPC API를 생성한 경우, 구문을 임포트하고 인스턴스화하여 배포에 필요한 모든 인프라를 추가할 수 있습니다:
 
 ```ts title="src/stacks/application-stack.ts" {3, 9-12}
 import * as cdk from 'aws-cdk-lib';
@@ -149,7 +286,7 @@ export class ApplicationStack extends cdk.Stack {
 
 ### 웹사이트 인프라
 
-<Link path="guides/react-website">CloudScape 웹사이트</Link> 생성기를 사용한 경우 `packages/common/constructs`에 배포용 구문이 존재합니다:
+<Link path="guides/react-website">CloudScape 웹사이트</Link> 생성기를 사용한 경우 `packages/common/constructs`에 배포용 구문이 존재합니다. 예시:
 
 ```ts title="src/stacks/application-stack.ts" {3, 9-10}
 import * as cdk from 'aws-cdk-lib';
@@ -172,7 +309,7 @@ export class ApplicationStack extends cdk.Stack {
 
 ## 인프라 합성하기
 
-`build` 타겟의 일부로 <Link path="guides/typescript-project#building">기본 컴파일, 린트, 테스트</Link> 외에 인프라 프로젝트를 CloudFormation으로 _합성_합니다. `synth` 타겟을 실행하여 별도로 수행할 수도 있습니다:
+`build` 타겟의 일부로 <Link path="guides/typescript-project#building">기본 컴파일, 린트, 테스트 타겟</Link> 실행 외에 인프라 프로젝트를 CloudFormation으로 _합성_합니다. `synth` 타겟을 실행하여 별도로 수행할 수도 있습니다:
 
 <NxCommands commands={['run <my-infra>:synth']} />
 
@@ -218,47 +355,47 @@ suppressRules(construct, ['CKV_AWS_XXX'], '사유', (construct) => construct ins
 
 ## AWS 계정 부트스트랩
 
-AWS 계정에 CDK 애플리케이션을 처음 배포할 때 부트스트랩이 필요합니다.
+AWS 계정에 CDK 애플리케이션을 처음 배포할 때 [부트스트랩](https://docs.aws.amazon.com/cdk/v2/guide/bootstrapping-env.html)이 필요합니다. 부트스트랩은 CDK가 배포를 관리하는 데 필요한 리소스(자산용 S3 버킷, IAM 역할 등)를 생성합니다.
 
 먼저 [AWS 계정 자격 증명 구성](https://docs.aws.amazon.com/sdkref/latest/guide/access.html)이 필요합니다.
 
-다음으로 `cdk bootstrap` 명령을 사용합니다:
+다음으로 배포할 각 계정과 리전에 대해 부트스트랩 명령을 실행합니다:
 
 ```bash
 npx cdk bootstrap aws://<account-id>/<region>
 ```
 
-자세한 내용은 [CDK 문서](https://docs.aws.amazon.com/cdk/v2/guide/bootstrapping-env.html)를 참조하세요.
+자세한 내용은 [CDK 부트스트랩 문서](https://docs.aws.amazon.com/cdk/v2/guide/bootstrapping-env.html)를 참조하세요.
 
 ## AWS에 배포하기
 
 빌드 후 `deploy` 타겟을 사용하여 인프라를 AWS에 배포할 수 있습니다.
 
 :::caution
-CI/CD 파이프라인 배포 시 `deploy-ci` 타겟을 사용하세요.
+CI/CD 파이프라인 배포 시 `deploy-ci` 타겟을 사용하세요. 자세한 내용은 아래를 참조하세요.
 :::
 
-먼저 [AWS 계정 자격 증명 구성](https://docs.aws.amazon.com/sdkref/latest/guide/access.html)이 필요합니다.
+먼저 AWS 자격 증명이 구성되어 있는지 확인하세요. `enableStageConfig`로 생성하고 `packages/common/infra-config/src/stages.config.ts`에 스테이지 자격 증명을 구성한 경우, 배포 명령이 대상 스테이지에 대한 올바른 자격 증명을 자동으로 확인하고 적용합니다. 그렇지 않으면 환경에 AWS 자격 증명이 설정되어 있는지 확인하세요(예: `AWS_PROFILE` 또는 환경 변수를 통해). 사용 가능한 옵션은 [AWS 자격 증명 문서](https://docs.aws.amazon.com/sdkref/latest/guide/access.html)를 참조하세요.
 
-다음으로 배포 타겟을 실행합니다:
+그런 다음 배포 타겟을 실행합니다:
 
 <NxCommands commands={['run <my-infra>:deploy <my-infra>-sandbox/*']} />
 
 :::tip
-위 명령은 `<my-infra>-sandbox` 스테이지의 모든 스택을 배포합니다. `main.ts`에 정의된 다른 스테이지를 지정할 수 있습니다.
+위 명령은 `<my-infra>-sandbox` 스테이지의 _모든_ 스택을 배포합니다. `main.ts`에 정의된 다른 스테이지를 지정할 수 있습니다.
 
-개별 스택 배포도 가능합니다:
+전체 스택 이름을 지정하여 개별 스택을 배포할 수도 있습니다. 예시:
 
 <NxCommands commands={['run <my-infra>:deploy <my-infra>-sandbox/Application']} />
 :::
 
 ## CI/CD 파이프라인에서 AWS 배포
 
-CI/CD 파이프라인에서 배포할 경우 `deploy-ci` 타겟을 사용합니다:
+CI/CD 파이프라인의 일부로 AWS에 배포하는 경우 `deploy-ci` 타겟을 사용합니다.
 
 <NxCommands commands={['run <my-infra>:deploy-ci my-stage/*']} />
 
-이 타겟은 실시간 합성 대신 사전 합성된 클라우드 어셈블리를 배포하여 패키지 버전 변경으로 인한 비결정적 문제를 방지합니다.
+이 타겟은 실시간 합성 대신 사전 합성된 클라우드 어셈블리를 배포한다는 점에서 일반 `deploy` 타겟과 약간 다릅니다. 이는 패키지 버전 변경으로 인한 잠재적 비결정성을 방지하여 모든 파이프라인 스테이지가 동일한 클라우드 어셈블리를 사용하여 배포하도록 보장합니다.
 
 ## AWS 인프라 정리하기
 

@@ -9,6 +9,7 @@
 export const TS_VERSIONS = {
   '@aws-sdk/client-cognito-identity': '3.987.0',
   '@aws-sdk/client-dynamodb': '3.987.0',
+  '@aws-sdk/client-sts': '3.987.0',
   '@aws-sdk/credential-providers': '3.987.0',
   '@aws-sdk/credential-provider-cognito-identity': '3.972.3',
   '@aws-smithy/server-apigateway': '1.0.0-alpha.10',

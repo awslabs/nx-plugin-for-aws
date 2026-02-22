@@ -43,6 +43,24 @@ TypeScript 基础设施生成器会创建一个用 TypeScript 编写的 AWS CDK 
 
 </FileTree>
 
+如果您设置了 `enableStageConfig` 选项，生成器还会创建两个用于集中凭证管理的共享包（如果它们尚不存在）：
+
+<FileTree>
+
+  - packages/common
+    - infra-config 阶段配置类型和凭证映射
+      - src
+        - stages.types.ts 阶段凭证和配置的类型定义
+        - stages.config.ts 您的阶段到凭证的映射（编辑此文件）
+        - index.ts 用于从其他包导入的重新导出
+    - scripts 集中式部署/销毁脚本
+      - src
+        - infra-deploy.ts 部署 bin 脚本
+        - infra-destroy.ts 销毁 bin 脚本
+        - stage-credentials/ 共享逻辑（凭证查找、CDK 命令构建）
+
+</FileTree>
+
 :::tip
 您的基础设施是一个 TypeScript 项目，因此可以参考 <Link path="guides/typescript-project">TypeScript 项目文档</Link> 了解其常规使用的详细信息。
 :::
@@ -68,10 +86,10 @@ export class ApplicationStack extends Stack {
 
 ### 阶段与堆栈
 
-您会注意到顶层的 `src/main.ts` 文件实例化了一个名为 `<namespace>-sandbox` 的 CDK [阶段](https://docs.aws.amazon.com/cdk/v2/guide/stages.html)。该阶段用于您自己的开发和测试。
+CDK 使用 [阶段](https://docs.aws.amazon.com/cdk/v2/guide/stages.html) 来组合应一起部署到特定环境的堆栈。生成的 `src/main.ts` 会创建一个用于您自己开发和测试的沙箱阶段：
 
 ```ts title="src/main.ts"
-new ApplicationStage(app, 'project-sandbox', {
+new ApplicationStage(app, 'my-app-sandbox', {
   env: {
     account: process.env.CDK_DEFAULT_ACCOUNT,
     region: process.env.CDK_DEFAULT_REGION,
@@ -79,24 +97,42 @@ new ApplicationStage(app, 'project-sandbox', {
 });
 ```
 
-您可以添加更多阶段，例如定义 `beta` 和 `prod` 阶段以部署到不同环境：
+`env` 属性告诉 CDK 要部署到哪个 AWS 账户和区域。`CDK_DEFAULT_ACCOUNT` 和 `CDK_DEFAULT_REGION` 由 CDK CLI 从您的活动 AWS 凭证中自动解析。有关更多详细信息，请参阅 [CDK 环境文档](https://docs.aws.amazon.com/cdk/v2/guide/environments.html)。
+
+如果您使用 `enableStageConfig` 生成，`main.ts` 会从集中式配置文件中读取账户和区域，当未设置配置时会回退到环境变量：
+
+```ts title="src/main.ts (使用 enableStageConfig)"
+import stagesConfig from ':my-scope/common-infra-config';
+
+const projectStages = stagesConfig.projects?.['packages/infra']?.stages ?? {};
+const sandboxConfig = projectStages['my-app-sandbox'];
+
+new ApplicationStage(app, 'my-app-sandbox', {
+  env: {
+    account: sandboxConfig?.account ?? process.env.CDK_DEFAULT_ACCOUNT,
+    region: sandboxConfig?.region ?? process.env.CDK_DEFAULT_REGION,
+  },
+});
+```
+
+您可以添加更多阶段来部署到不同的环境。例如，针对不同 AWS 账户的 `beta` 和 `prod` 阶段：
 
 ```ts title="src/main.ts"
 new ApplicationStage(app, 'project-beta', {
   env: {
-    account: '123456789012', // beta 账户
+    account: '123456789012',
     region: 'us-west-2',
   },
 });
 new ApplicationStage(app, 'project-prod', {
   env: {
-    account: '098765432109', // 生产账户
+    account: '098765432109',
     region: 'us-west-2',
   },
 });
 ```
 
-阶段定义了应一起部署的堆栈集合。您可以在一个阶段内实例化任意数量的堆栈，例如：
+一个阶段可以组合一个或多个堆栈。您可以在阶段内添加任意数量的堆栈：
 
 ```ts title="src/stages/application-stage.ts"
 import { Stage, StageProps } from 'aws-cdk-lib';
@@ -104,9 +140,6 @@ import { Construct } from 'constructs';
 import { BackendStack } from '../stacks/backend-stack.js';
 import { FrontendStack } from '../stacks/frontend-stack.js';
 
-/**
- * 定义构成应用程序的 CDK 堆栈集合
- */
 export class ApplicationStage extends Stage {
   constructor(scope: Construct, id: string, props?: StageProps) {
     super(scope, id, props);
@@ -121,6 +154,112 @@ export class ApplicationStage extends Stage {
   }
 }
 ```
+
+### 阶段凭证配置
+
+:::note
+本节适用于使用 `enableStageConfig` 生成的情况。如果不使用该选项，生成器会生成一个更简单的设置，您需要自己管理 AWS 凭证（例如，在部署前导出 `AWS_PROFILE`）。
+:::
+
+当您有多个针对不同 AWS 账户的阶段时，手动管理凭证可能容易出错，尤其是随着阶段数量的增长。
+
+`enableStageConfig` 选项通过生成两个共享包来解决这个问题：
+
+- **`packages/common/infra-config`** — 一个单一的配置文件，您可以在其中将每个阶段映射到其 AWS 凭证、账户和区域。此文件可从工作区中的任何包导入，因此您的 CDK `main.ts` 可以从同一真实来源读取账户和区域。
+- **`packages/common/scripts`** — `infra-deploy` 和 `infra-destroy` 命令，它们包装了 CDK 并自动解析凭证。当您运行 `deploy` 时，脚本会读取配置，为 CDK 子进程设置正确的 AWS 环境变量，并运行 `cdk deploy`。您的 shell 环境永远不会被修改。
+
+#### 配置凭证
+
+编辑 `packages/common/infra-config/src/stages.config.ts` 将您的阶段映射到 AWS 凭证：
+
+```ts title="packages/common/infra-config/src/stages.config.ts"
+import type { StagesConfig } from './stages.types.js';
+
+const config: StagesConfig = {
+  projects: {
+    // 键是相对于工作区根目录的项目路径。
+    // 这与 project.json 中的路径和部署命令中的路径匹配。
+    'packages/infra': {
+      stages: {
+        // 阶段名称必须与 main.ts 中的 CDK 阶段标识符匹配
+        // （`new ApplicationStage(app, 'my-app-dev', ...)` 的第一个参数）。
+        'my-app-dev': {
+          credentials: { type: 'profile', profile: 'dev-account' },
+          region: 'us-east-1',
+        },
+        'my-app-prod': {
+          credentials: {
+            type: 'assumeRole',
+            assumeRole: 'arn:aws:iam::123456789012:role/DeployRole',
+          },
+          region: 'us-west-2',
+          account: '123456789012',
+        },
+      },
+    },
+  },
+  shared: {
+    // 共享阶段可供所有基础设施项目使用。
+    // 项目特定的条目优先于共享条目。
+    stages: {
+      sandbox: {
+        credentials: { type: 'profile', profile: 'personal-sandbox' },
+        region: 'us-east-1',
+      },
+    },
+  },
+};
+
+export default config;
+```
+
+当您部署时，例如：
+
+<NxCommands commands={['run infra:deploy my-app-dev/*']} />
+
+部署脚本会：
+1. 从命令参数中提取阶段名称 `my-app-dev`
+2. 在配置中查找凭证：首先在 `projects['packages/infra']` 下，然后在 `shared` 下
+3. 如果找到，仅为 CDK 子进程设置 `AWS_PROFILE`（或承担 IAM 角色）
+4. 如果未找到，则回退到您环境中的任何 AWS 凭证
+
+这意味着没有任何配置的现有工作流程将继续工作 — 脚本仅在找到匹配条目时应用凭证。
+
+#### 凭证类型
+
+支持两种凭证策略：
+
+- **`profile`** — 使用 `~/.aws/config` 中的命名 [AWS CLI 配置文件](https://docs.aws.amazon.com/cli/v1/userguide/cli-configure-profiles.html)。脚本为 CDK 进程设置 `AWS_PROFILE`。
+- **`assumeRole`** — 使用指定的角色 ARN 调用 [STS AssumeRole](https://docs.aws.amazon.com/STS/latest/APIReference/API_AssumeRole.html)，并将临时凭证传递给 CDK。您可以选择指定一个 `profile` 作为 AssumeRole 调用的源凭证，一个用于跨账户信任策略的 `externalId`，以及一个以秒为单位的 `sessionDuration`。
+
+#### 账户和区域
+
+每个阶段配置都包含一个必需的 `region` 和一个可选的 `account`：
+
+- **`region`**（必需）— 要部署到的 AWS 区域（例如，`us-east-1`、`eu-west-2`）。
+- **`account`**（可选）— AWS 账户 ID。如果省略，CDK 会在部署时从活动凭证中推断它。有关 CDK 如何解析账户和区域的信息，请参阅 [CDK 环境文档](https://docs.aws.amazon.com/cdk/v2/guide/environments.html)。
+
+生成的 `main.ts` 从配置中读取这些值，以便 CDK 合成和部署使用相同的环境设置：
+
+```ts title="src/main.ts"
+const sandboxConfig = projectStages['my-app-sandbox'];
+new ApplicationStage(app, 'my-app-sandbox', {
+  env: {
+    account: sandboxConfig?.account ?? process.env.CDK_DEFAULT_ACCOUNT,
+    region: sandboxConfig?.region ?? process.env.CDK_DEFAULT_REGION,
+  },
+});
+```
+
+#### 共享阶段与项目特定阶段
+
+共享阶段（在 `shared.stages` 下）适用于工作区中的任何基础设施项目。当多个项目部署到同一个沙箱账户时，这很有用 — 您只需定义一次凭证，而不是为每个项目重复定义。
+
+项目特定阶段（在 `projects['packages/infra'].stages` 下）仅适用于该项目。当同一阶段名称同时存在时，项目特定条目优先。
+
+:::tip
+我们建议提交 `stages.config.ts`，以便团队共享阶段凭证的单一真实来源。如果它包含个人配置文件名称，您可以将其添加到 `.gitignore` 并使用本地覆盖。
+:::
 
 ### API 基础设施
 
@@ -216,17 +355,17 @@ suppressRules(construct, ['CKV_AWS_XXX'], '原因说明', (construct) => constru
 
 ## 引导 AWS 账户
 
-如果是首次向 AWS 账户部署 CDK 应用，需要先进行引导。
+如果是首次向 AWS 账户部署 CDK 应用，需要先进行 [引导](https://docs.aws.amazon.com/cdk/v2/guide/bootstrapping-env.html)。引导会创建 CDK 管理部署所需的资源（用于资产的 S3 存储桶、IAM 角色等）。
 
 首先，确保已 [为 AWS 账户配置凭证](https://docs.aws.amazon.com/sdkref/latest/guide/access.html)。
 
-然后，使用 `cdk bootstrap` 命令：
+然后，为您计划部署的每个账户和区域运行引导命令：
 
 ```bash
 npx cdk bootstrap aws://<account-id>/<region>
 ```
 
-更多详情请参考 [CDK 文档](https://docs.aws.amazon.com/cdk/v2/guide/bootstrapping-env.html)。
+更多详情请参考 [CDK 引导文档](https://docs.aws.amazon.com/cdk/v2/guide/bootstrapping-env.html)。
 
 ## 部署到 AWS
 
@@ -236,14 +375,14 @@ npx cdk bootstrap aws://<account-id>/<region>
 在 CI/CD 流水线中部署时，请使用 `deploy-ci` 目标。详见下文。
 :::
 
-首先，确保已 [为 AWS 账户配置凭证](https://docs.aws.amazon.com/sdkref/latest/guide/access.html)。
+首先，确保已配置 AWS 凭证。如果您使用 `enableStageConfig` 生成并在 `packages/common/infra-config/src/stages.config.ts` 中配置了阶段凭证，部署命令将自动解析并应用目标阶段的正确凭证。否则，请确保在您的环境中设置了 AWS 凭证（例如，通过 `AWS_PROFILE` 或环境变量）。有关可用选项，请参阅 [AWS 凭证文档](https://docs.aws.amazon.com/sdkref/latest/guide/access.html)。
 
 然后运行部署目标：
 
 <NxCommands commands={['run <my-infra>:deploy <my-infra>-sandbox/*']} />
 
 :::tip
-上述命令部署 `<my-infra>-sandbox` 阶段的所有堆栈。只要阶段在 `main.ts` 中定义，您也可以指定其他阶段。
+上述命令部署 `<my-infra>-sandbox` 阶段的 _所有_ 堆栈。只要阶段在 `main.ts` 中定义，您也可以指定其他阶段。
 
 您还可以通过指定完整堆栈名称来部署单个堆栈，例如：
 

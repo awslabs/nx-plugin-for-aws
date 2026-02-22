@@ -10,3 +10,7 @@ export const SHARED_TERRAFORM_NAME = 'terraform';
 export const SHARED_TERRAFORM_DIR = 'common/terraform';
 export const SHARED_SHADCN_NAME = 'common-shadcn';
 export const SHARED_SHADCN_DIR = 'common/shadcn';
+export const SHARED_INFRA_CONFIG_NAME = 'common-infra-config';
+export const SHARED_INFRA_CONFIG_DIR = 'common/infra-config';
+export const SHARED_SCRIPTS_NAME = 'common-scripts';
+export const SHARED_SCRIPTS_DIR = 'common/scripts';

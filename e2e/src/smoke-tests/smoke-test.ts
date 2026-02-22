@@ -4,6 +4,7 @@
  */
 import { PackageManager } from '@nx/devkit';
 import { buildCreateNxWorkspaceCommand, runCLI, tmpProjPath } from '../utils';
+import { execSync } from 'child_process';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { ensureDirSync } from 'fs-extra';
 import { join } from 'path';
@@ -35,6 +36,10 @@ export const runSmokeTest = async (
   }
   await runCLI(
     `generate @aws/nx-plugin:ts#infra --name=infra --no-interactive`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:ts#infra --name=infra-with-stages --enableStageConfig=true --no-interactive`,
     opts,
   );
   await runCLI(
