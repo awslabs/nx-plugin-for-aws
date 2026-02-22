@@ -3,8 +3,6 @@ title: "Infraestrutura CDK"
 description: "Documentação de referência para Infraestrutura CDK"
 ---
 
-
-
 import { FileTree } from '@astrojs/starlight/components';
 import RunGenerator from '@components/run-generator.astro';
 import Link from '@components/link.astro';
@@ -45,6 +43,24 @@ O gerador criará a seguinte estrutura de projeto no diretório `<directory>/<na
 
 </FileTree>
 
+Se você definir a opção `enableStageConfig`, o gerador também cria dois pacotes compartilhados para gerenciamento centralizado de credenciais (caso ainda não existam):
+
+<FileTree>
+
+  - packages/common
+    - infra-config Tipos de configuração de estágio e mapeamentos de credenciais
+      - src
+        - stages.types.ts Definições de tipos para credenciais e configuração de estágios
+        - stages.config.ts Seus mapeamentos de estágio para credenciais (edite este arquivo)
+        - index.ts Re-exportações para importar de outros pacotes
+    - scripts Scripts centralizados de deploy/destroy
+      - src
+        - infra-deploy.ts Script bin de deploy
+        - infra-destroy.ts Script bin de destroy
+        - stage-credentials/ Lógica compartilhada (busca de credenciais, construção de comandos CDK)
+
+</FileTree>
+
 :::tip
 Sua infraestrutura é um projeto TypeScript, portanto você pode consultar a <Link path="guides/typescript-project">documentação de projetos TypeScript</Link> para detalhes gerais de utilização.
 :::
@@ -70,10 +86,10 @@ export class ApplicationStack extends Stack {
 
 ### Estágios e Stacks
 
-Você notará que o arquivo principal `src/main.ts` instancia um [Stage](https://docs.aws.amazon.com/cdk/v2/guide/stages.html) do CDK chamado `<namespace>-sandbox`. Este estágio é destinado ao seu próprio desenvolvimento e testes.
+O CDK usa [Stages](https://docs.aws.amazon.com/cdk/v2/guide/stages.html) para agrupar stacks que devem ser implantadas juntas em um ambiente específico. O `src/main.ts` gerado cria um estágio sandbox para seu próprio desenvolvimento e testes:
 
 ```ts title="src/main.ts"
-new ApplicationStage(app, 'project-sandbox', {
+new ApplicationStage(app, 'my-app-sandbox', {
   env: {
     account: process.env.CDK_DEFAULT_ACCOUNT,
     region: process.env.CDK_DEFAULT_REGION,
@@ -81,24 +97,42 @@ new ApplicationStage(app, 'project-sandbox', {
 });
 ```
 
-Você pode adicionar mais estágios, por exemplo, pode definir estágios `beta` e `prod` que implantam em ambientes separados:
+A propriedade `env` informa ao CDK em qual conta AWS e região implantar. `CDK_DEFAULT_ACCOUNT` e `CDK_DEFAULT_REGION` são resolvidos automaticamente pelo CDK CLI a partir de suas credenciais AWS ativas. Consulte a [documentação de ambientes do CDK](https://docs.aws.amazon.com/cdk/v2/guide/environments.html) para mais detalhes.
+
+Se você gerou com `enableStageConfig`, o `main.ts` lê conta e região de um arquivo de configuração centralizado, recorrendo a variáveis de ambiente quando nenhuma configuração está definida:
+
+```ts title="src/main.ts (com enableStageConfig)"
+import stagesConfig from ':my-scope/common-infra-config';
+
+const projectStages = stagesConfig.projects?.['packages/infra']?.stages ?? {};
+const sandboxConfig = projectStages['my-app-sandbox'];
+
+new ApplicationStage(app, 'my-app-sandbox', {
+  env: {
+    account: sandboxConfig?.account ?? process.env.CDK_DEFAULT_ACCOUNT,
+    region: sandboxConfig?.region ?? process.env.CDK_DEFAULT_REGION,
+  },
+});
+```
+
+Você pode adicionar mais estágios para implantar em diferentes ambientes. Por exemplo, estágios `beta` e `prod` direcionados a contas AWS separadas:
 
 ```ts title="src/main.ts"
 new ApplicationStage(app, 'project-beta', {
   env: {
-    account: '123456789012', // conta beta
+    account: '123456789012',
     region: 'us-west-2',
   },
 });
 new ApplicationStage(app, 'project-prod', {
   env: {
-    account: '098765432109', // conta prod
+    account: '098765432109',
     region: 'us-west-2',
   },
 });
 ```
 
-Um Stage define uma coleção de stacks que devem ser implantadas juntas para compor sua aplicação. Você pode instanciar quantas stacks quiser dentro de um estágio, por exemplo:
+Um Stage agrupa uma ou mais stacks. Você pode adicionar quantas stacks precisar dentro de um estágio:
 
 ```ts title="src/stages/application-stage.ts"
 import { Stage, StageProps } from 'aws-cdk-lib';
@@ -106,9 +140,6 @@ import { Construct } from 'constructs';
 import { BackendStack } from '../stacks/backend-stack.js';
 import { FrontendStack } from '../stacks/frontend-stack.js';
 
-/**
- * Define uma coleção de CDK Stacks que compõem sua aplicação
- */
 export class ApplicationStage extends Stage {
   constructor(scope: Construct, id: string, props?: StageProps) {
     super(scope, id, props);
@@ -124,11 +155,117 @@ export class ApplicationStage extends Stage {
 }
 ```
 
+### Configuração de Credenciais de Estágio
+
+:::note
+Esta seção se aplica quando você gera com `enableStageConfig`. Sem ela, o gerador produz uma configuração mais simples onde você gerencia as credenciais AWS por conta própria (por exemplo, exportando `AWS_PROFILE` antes de implantar).
+:::
+
+Quando você tem múltiplos estágios direcionados a diferentes contas AWS, gerenciar credenciais manualmente pode ser propenso a erros, especialmente à medida que o número de estágios cresce.
+
+A opção `enableStageConfig` resolve isso gerando dois pacotes compartilhados:
+
+- **`packages/common/infra-config`** — Um único arquivo de configuração onde você mapeia cada estágio para suas credenciais AWS, conta e região. Este arquivo pode ser importado de qualquer pacote no seu workspace, então seu `main.ts` do CDK pode ler conta e região da mesma fonte de verdade.
+- **`packages/common/scripts`** — Comandos `infra-deploy` e `infra-destroy` que encapsulam o CDK com resolução automática de credenciais. Quando você executa `deploy`, o script lê a configuração, define as variáveis de ambiente AWS corretas para o processo filho do CDK e executa `cdk deploy`. Seu ambiente shell nunca é modificado.
+
+#### Configurando Credenciais
+
+Edite `packages/common/infra-config/src/stages.config.ts` para mapear seus estágios para credenciais AWS:
+
+```ts title="packages/common/infra-config/src/stages.config.ts"
+import type { StagesConfig } from './stages.types.js';
+
+const config: StagesConfig = {
+  projects: {
+    // A chave é o caminho do projeto relativo à raiz do workspace.
+    // Isso corresponde ao caminho em project.json e nos comandos de deploy.
+    'packages/infra': {
+      stages: {
+        // Os nomes dos estágios devem corresponder aos identificadores de estágio do CDK em main.ts
+        // (o primeiro argumento para `new ApplicationStage(app, 'my-app-dev', ...)`).
+        'my-app-dev': {
+          credentials: { type: 'profile', profile: 'dev-account' },
+          region: 'us-east-1',
+        },
+        'my-app-prod': {
+          credentials: {
+            type: 'assumeRole',
+            assumeRole: 'arn:aws:iam::123456789012:role/DeployRole',
+          },
+          region: 'us-west-2',
+          account: '123456789012',
+        },
+      },
+    },
+  },
+  shared: {
+    // Estágios compartilhados estão disponíveis para todos os projetos de infraestrutura.
+    // Entradas específicas de projeto têm prioridade sobre as compartilhadas.
+    stages: {
+      sandbox: {
+        credentials: { type: 'profile', profile: 'personal-sandbox' },
+        region: 'us-east-1',
+      },
+    },
+  },
+};
+
+export default config;
+```
+
+Quando você implanta, por exemplo:
+
+<NxCommands commands={['run infra:deploy my-app-dev/*']} />
+
+O script de deploy:
+1. Extrai o nome do estágio `my-app-dev` dos argumentos do comando
+2. Busca credenciais na configuração: primeiro em `projects['packages/infra']`, depois em `shared`
+3. Se encontrado, define `AWS_PROFILE` (ou assume a role IAM) apenas para o processo filho do CDK
+4. Se não encontrado, recorre às credenciais AWS que estiverem no seu ambiente
+
+Isso significa que workflows existentes sem qualquer configuração continuam a funcionar — o script só aplica credenciais quando encontra uma entrada correspondente.
+
+#### Tipos de Credenciais
+
+Duas estratégias de credenciais são suportadas:
+
+- **`profile`** — Usa um [perfil AWS CLI](https://docs.aws.amazon.com/cli/v1/userguide/cli-configure-profiles.html) nomeado de `~/.aws/config`. O script define `AWS_PROFILE` para o processo CDK.
+- **`assumeRole`** — Chama [STS AssumeRole](https://docs.aws.amazon.com/STS/latest/APIReference/API_AssumeRole.html) com o ARN da role especificado e passa as credenciais temporárias para o CDK. Você pode opcionalmente especificar um `profile` como credenciais de origem para a chamada AssumeRole, um `externalId` para políticas de confiança entre contas e uma `sessionDuration` em segundos.
+
+#### Conta e Região
+
+Cada configuração de estágio inclui uma `region` obrigatória e uma `account` opcional:
+
+- **`region`** (obrigatória) — A região AWS para implantar (por exemplo, `us-east-1`, `eu-west-2`).
+- **`account`** (opcional) — O ID da conta AWS. Se omitido, o CDK o infere das credenciais ativas no momento da implantação. Consulte a [documentação de ambientes do CDK](https://docs.aws.amazon.com/cdk/v2/guide/environments.html) para saber como o CDK resolve conta e região.
+
+O `main.ts` gerado lê esses valores da configuração para que a síntese e implantação do CDK usem as mesmas configurações de ambiente:
+
+```ts title="src/main.ts"
+const sandboxConfig = projectStages['my-app-sandbox'];
+new ApplicationStage(app, 'my-app-sandbox', {
+  env: {
+    account: sandboxConfig?.account ?? process.env.CDK_DEFAULT_ACCOUNT,
+    region: sandboxConfig?.region ?? process.env.CDK_DEFAULT_REGION,
+  },
+});
+```
+
+#### Estágios Compartilhados vs Específicos de Projeto
+
+Estágios compartilhados (em `shared.stages`) se aplicam a qualquer projeto de infraestrutura no workspace. Isso é útil quando múltiplos projetos implantam na mesma conta sandbox — você define as credenciais uma vez em vez de repeti-las para cada projeto.
+
+Estágios específicos de projeto (em `projects['packages/infra'].stages`) aplicam-se apenas àquele projeto. Quando ambos existem para o mesmo nome de estágio, a entrada específica de projeto tem prioridade.
+
+:::tip
+Recomendamos fazer commit de `stages.config.ts` para que a equipe compartilhe uma única fonte de verdade para credenciais de estágio. Se ele contiver nomes de perfis pessoais, você pode adicioná-lo ao `.gitignore` e usar uma sobrescrita local.
+:::
+
 ### Infraestrutura de API
 
 Se você usou os geradores <Link path="guides/trpc">tRPC API</Link> ou <Link path="guides/fastapi">FastAPI</Link> para criar APIs, notará que já tem alguns constructs disponíveis em `packages/common/constructs` para implantá-los.
 
-Se, por exemplo, você criou uma API tRPC chamada `my-api`, pode simplesmente importar e instanciar o construct para adicionar toda a infraestrutura necessária:
+Se, por exemplo, você criou uma API tRPC chamada `my-api`, pode simplesmente importar e instanciar o construct para adicionar toda a infraestrutura necessária para implantá-la:
 
 ```ts title="src/stacks/application-stack.ts" {3, 9-12}
 import * as cdk from 'aws-cdk-lib';
@@ -216,29 +353,29 @@ import { suppressRules } from ':my-scope/common-constructs';
 suppressRules(construct, ['CKV_AWS_XXX'], 'Motivo', (construct) => construct instanceof Bucket);
 ```
 
-## Bootstrapping da Sua Conta AWS
+## Bootstrapping das Suas Contas AWS
 
-Se você está implantando uma aplicação CDK em uma conta AWS pela primeira vez, será necessário fazer o bootstrap primeiro.
+Se você está implantando uma aplicação CDK em uma Conta AWS pela primeira vez, ela precisará ser [bootstrapped](https://docs.aws.amazon.com/cdk/v2/guide/bootstrapping-env.html). O bootstrapping cria os recursos que o CDK precisa para gerenciar implantações (um bucket S3 para assets, roles IAM, etc.).
 
 Primeiro, certifique-se de ter [configurado credenciais para sua conta AWS](https://docs.aws.amazon.com/sdkref/latest/guide/access.html).
 
-Em seguida, use o comando `cdk bootstrap`:
+Em seguida, execute o comando bootstrap para cada conta e região em que você planeja implantar:
 
 ```bash
 npx cdk bootstrap aws://<account-id>/<region>
 ```
 
-Para mais detalhes, consulte a [documentação do CDK](https://docs.aws.amazon.com/cdk/v2/guide/bootstrapping-env.html).
+Para mais detalhes, consulte a [documentação de bootstrapping do CDK](https://docs.aws.amazon.com/cdk/v2/guide/bootstrapping-env.html).
 
 ## Implantando na AWS
 
 Após um build, você pode implantar sua infraestrutura na AWS usando o target `deploy`.
 
 :::caution
-Use o target `deploy-ci` para implantações em pipelines CI/CD. Veja abaixo para detalhes.
+Use o target `deploy-ci` se estiver implantando em um pipeline CI/CD. Veja abaixo para mais detalhes.
 :::
 
-Primeiro, certifique-se de ter [configurado credenciais para sua conta AWS](https://docs.aws.amazon.com/sdkref/latest/guide/access.html).
+Primeiro, certifique-se de ter credenciais AWS configuradas. Se você gerou com `enableStageConfig` e configurou credenciais de estágio em `packages/common/infra-config/src/stages.config.ts`, o comando deploy resolverá e aplicará automaticamente as credenciais corretas para o estágio alvo. Caso contrário, certifique-se de que suas credenciais AWS estejam definidas no seu ambiente (por exemplo, via `AWS_PROFILE` ou variáveis de ambiente). Consulte a [documentação de credenciais AWS](https://docs.aws.amazon.com/sdkref/latest/guide/access.html) para as opções disponíveis.
 
 Em seguida, execute o target deploy:
 
@@ -247,18 +384,18 @@ Em seguida, execute o target deploy:
 :::tip
 O comando acima implanta _todas_ as stacks do estágio `<my-infra>-sandbox`. Você pode especificar outros estágios desde que estejam definidos em `main.ts`.
 
-Também é possível implantar stacks individuais especificando o nome completo da stack, por exemplo:
+Você também pode implantar stacks individuais especificando o nome completo da stack, por exemplo:
 
 <NxCommands commands={['run <my-infra>:deploy <my-infra>-sandbox/Application']} />
 :::
 
 ## Implantando na AWS em um Pipeline CI/CD
 
-Use o target `deploy-ci` para implantações na AWS como parte de um pipeline CI/CD.
+Use o target `deploy-ci` se estiver implantando na AWS como parte de um pipeline CI/CD.
 
 <NxCommands commands={['run <my-infra>:deploy-ci my-stage/*']} />
 
-Este target difere ligeiramente do `deploy` normal por garantir que a cloud-assembly pré-sintetizada seja implantada, em vez de sintetizar durante a execução. Isso ajuda a evitar problemas de não-determinismo devido a alterações em versões de pacotes, garantindo que cada estágio do pipeline use a mesma cloud-assembly.
+Este target difere ligeiramente do target `deploy` normal por implantar uma cloud assembly pré-sintetizada em vez de sintetizar em tempo de execução. Isso evita potencial não-determinismo de mudanças em versões de pacotes, garantindo que cada estágio do pipeline implante usando a mesma cloud assembly.
 
 ## Removendo Infraestrutura AWS
 

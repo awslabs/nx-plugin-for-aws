@@ -43,6 +43,24 @@ Trình tạo sẽ tạo cấu trúc dự án sau trong thư mục `<directory>/<
 
 </FileTree>
 
+Nếu bạn đặt tùy chọn `enableStageConfig`, trình tạo cũng tạo hai package được chia sẻ để quản lý thông tin xác thực tập trung (nếu chúng chưa tồn tại):
+
+<FileTree>
+
+  - packages/common
+    - infra-config Các loại cấu hình Stage và ánh xạ thông tin xác thực
+      - src
+        - stages.types.ts Định nghĩa kiểu cho thông tin xác thực và cấu hình stage
+        - stages.config.ts Ánh xạ stage-to-credential của bạn (chỉnh sửa tệp này)
+        - index.ts Re-exports để import từ các package khác
+    - scripts Các script deploy/destroy tập trung
+      - src
+        - infra-deploy.ts Script bin deploy
+        - infra-destroy.ts Script bin destroy
+        - stage-credentials/ Logic được chia sẻ (tra cứu thông tin xác thực, xây dựng lệnh CDK)
+
+</FileTree>
+
 :::tip
 Cơ sở hạ tầng của bạn là một dự án TypeScript, vì vậy bạn có thể tham khảo <Link path="guides/typescript-project">tài liệu dự án TypeScript</Link> để biết thêm chi tiết về cách sử dụng chung của chúng.
 :::
@@ -68,10 +86,10 @@ export class ApplicationStack extends Stack {
 
 ### Stage và Stack
 
-Bạn sẽ nhận thấy rằng tệp `src/main.ts` cấp cao nhất khởi tạo một CDK [Stage](https://docs.aws.amazon.com/cdk/v2/guide/stages.html) có tên là `<namespace>-sandbox`. Stage này được dành cho việc phát triển và thử nghiệm của riêng bạn.
+CDK sử dụng [Stages](https://docs.aws.amazon.com/cdk/v2/guide/stages.html) để nhóm các stack nên được triển khai cùng nhau đến một môi trường cụ thể. Tệp `src/main.ts` được tạo ra sẽ tạo một stage sandbox cho việc phát triển và thử nghiệm của riêng bạn:
 
 ```ts title="src/main.ts"
-new ApplicationStage(app, 'project-sandbox', {
+new ApplicationStage(app, 'my-app-sandbox', {
   env: {
     account: process.env.CDK_DEFAULT_ACCOUNT,
     region: process.env.CDK_DEFAULT_REGION,
@@ -79,24 +97,42 @@ new ApplicationStage(app, 'project-sandbox', {
 });
 ```
 
-Bạn có thể thêm nhiều stage hơn, ví dụ bạn có thể muốn định nghĩa các stage `beta` và `prod` để triển khai đến các môi trường riêng biệt:
+Thuộc tính `env` cho CDK biết tài khoản AWS và region nào để triển khai. `CDK_DEFAULT_ACCOUNT` và `CDK_DEFAULT_REGION` được CDK CLI tự động phân giải từ thông tin xác thực AWS đang hoạt động của bạn. Xem [tài liệu về môi trường CDK](https://docs.aws.amazon.com/cdk/v2/guide/environments.html) để biết thêm chi tiết.
+
+Nếu bạn tạo với `enableStageConfig`, tệp `main.ts` sẽ đọc account và region từ một tệp cấu hình tập trung thay vì vậy, và quay lại sử dụng biến môi trường khi không có cấu hình được đặt:
+
+```ts title="src/main.ts (với enableStageConfig)"
+import stagesConfig from ':my-scope/common-infra-config';
+
+const projectStages = stagesConfig.projects?.['packages/infra']?.stages ?? {};
+const sandboxConfig = projectStages['my-app-sandbox'];
+
+new ApplicationStage(app, 'my-app-sandbox', {
+  env: {
+    account: sandboxConfig?.account ?? process.env.CDK_DEFAULT_ACCOUNT,
+    region: sandboxConfig?.region ?? process.env.CDK_DEFAULT_REGION,
+  },
+});
+```
+
+Bạn có thể thêm nhiều stage hơn để triển khai đến các môi trường khác nhau. Ví dụ, các stage `beta` và `prod` nhắm đến các tài khoản AWS riêng biệt:
 
 ```ts title="src/main.ts"
 new ApplicationStage(app, 'project-beta', {
   env: {
-    account: '123456789012', // tài khoản beta
+    account: '123456789012',
     region: 'us-west-2',
   },
 });
 new ApplicationStage(app, 'project-prod', {
   env: {
-    account: '098765432109', // tài khoản prod
+    account: '098765432109',
     region: 'us-west-2',
   },
 });
 ```
 
-Một Stage định nghĩa một tập hợp các stack nên được triển khai cùng nhau để tạo thành ứng dụng của bạn. Bạn có thể khởi tạo bao nhiêu stack tùy thích trong một stage, ví dụ:
+Một Stage nhóm một hoặc nhiều stack. Bạn có thể thêm bao nhiêu stack tùy thích bên trong một stage:
 
 ```ts title="src/stages/application-stage.ts"
 import { Stage, StageProps } from 'aws-cdk-lib';
@@ -104,9 +140,6 @@ import { Construct } from 'constructs';
 import { BackendStack } from '../stacks/backend-stack.js';
 import { FrontendStack } from '../stacks/frontend-stack.js';
 
-/**
- * Định nghĩa một tập hợp các CDK Stack tạo thành ứng dụng của bạn
- */
 export class ApplicationStage extends Stage {
   constructor(scope: Construct, id: string, props?: StageProps) {
     super(scope, id, props);
@@ -121,6 +154,112 @@ export class ApplicationStage extends Stage {
   }
 }
 ```
+
+### Cấu hình thông tin xác thực Stage
+
+:::note
+Phần này áp dụng khi bạn tạo với `enableStageConfig`. Nếu không có nó, trình tạo sẽ tạo ra một thiết lập đơn giản hơn, trong đó bạn tự quản lý thông tin xác thực AWS (ví dụ: bằng cách export `AWS_PROFILE` trước khi triển khai).
+:::
+
+Khi bạn có nhiều stage nhắm đến các tài khoản AWS khác nhau, việc quản lý thông tin xác thực thủ công có thể dễ xảy ra lỗi, đặc biệt khi số lượng stage tăng lên.
+
+Tùy chọn `enableStageConfig` giải quyết vấn đề này bằng cách tạo hai package được chia sẻ:
+
+- **`packages/common/infra-config`** — Một tệp cấu hình duy nhất, nơi bạn ánh xạ mỗi stage với thông tin xác thực AWS, account và region của nó. Tệp này có thể import từ bất kỳ package nào trong workspace của bạn, vì vậy tệp `main.ts` CDK của bạn có thể đọc account và region từ cùng một nguồn chân lý.
+- **`packages/common/scripts`** — Các lệnh `infra-deploy` và `infra-destroy` bao bọc CDK với khả năng phân giải thông tin xác thực tự động. Khi bạn chạy `deploy`, script sẽ đọc cấu hình, đặt các biến môi trường AWS phù hợp cho tiến trình con CDK, và chạy `cdk deploy`. Môi trường shell của bạn không bao giờ bị thay đổi.
+
+#### Cấu hình thông tin xác thực
+
+Chỉnh sửa `packages/common/infra-config/src/stages.config.ts` để ánh xạ các stage của bạn với thông tin xác thực AWS:
+
+```ts title="packages/common/infra-config/src/stages.config.ts"
+import type { StagesConfig } from './stages.types.js';
+
+const config: StagesConfig = {
+  projects: {
+    // Key là đường dẫn dự án tương đối với workspace root.
+    // Điều này khớp với đường dẫn trong project.json và trong các lệnh deploy.
+    'packages/infra': {
+      stages: {
+        // Tên stage phải khớp với các định danh CDK stage trong main.ts
+        // (tham số đầu tiên của `new ApplicationStage(app, 'my-app-dev', ...)`).
+        'my-app-dev': {
+          credentials: { type: 'profile', profile: 'dev-account' },
+          region: 'us-east-1',
+        },
+        'my-app-prod': {
+          credentials: {
+            type: 'assumeRole',
+            assumeRole: 'arn:aws:iam::123456789012:role/DeployRole',
+          },
+          region: 'us-west-2',
+          account: '123456789012',
+        },
+      },
+    },
+  },
+  shared: {
+    // Các stage được chia sẻ có sẵn cho tất cả các dự án infra.
+    // Các mục cụ thể của dự án được ưu tiên hơn các mục được chia sẻ.
+    stages: {
+      sandbox: {
+        credentials: { type: 'profile', profile: 'personal-sandbox' },
+        region: 'us-east-1',
+      },
+    },
+  },
+};
+
+export default config;
+```
+
+Khi bạn triển khai, ví dụ:
+
+<NxCommands commands={['run infra:deploy my-app-dev/*']} />
+
+Script deploy sẽ:
+1. Trích xuất tên stage `my-app-dev` từ các tham số lệnh
+2. Tra cứu thông tin xác thực trong cấu hình: đầu tiên trong `projects['packages/infra']`, sau đó trong `shared`
+3. Nếu tìm thấy, đặt `AWS_PROFILE` (hoặc assume IAM role) chỉ cho tiến trình con CDK
+4. Nếu không tìm thấy, quay lại sử dụng bất kỳ thông tin xác thực AWS nào có trong môi trường của bạn
+
+Điều này có nghĩa là các workflow hiện có không có bất kỳ cấu hình nào vẫn tiếp tục hoạt động — script chỉ áp dụng thông tin xác thực khi tìm thấy một mục khớp.
+
+#### Các loại thông tin xác thực
+
+Hai chiến lược thông tin xác thực được hỗ trợ:
+
+- **`profile`** — Sử dụng một [AWS CLI profile](https://docs.aws.amazon.com/cli/v1/userguide/cli-configure-profiles.html) được đặt tên từ `~/.aws/config`. Script đặt `AWS_PROFILE` cho tiến trình CDK.
+- **`assumeRole`** — Gọi [STS AssumeRole](https://docs.aws.amazon.com/STS/latest/APIReference/API_AssumeRole.html) với ARN role được chỉ định và truyền thông tin xác thực tạm thời cho CDK. Bạn có thể tùy chọn chỉ định một `profile` làm thông tin xác thực nguồn cho lệnh gọi AssumeRole, một `externalId` cho các chính sách ủy thác cross-account, và một `sessionDuration` tính bằng giây.
+
+#### Account và Region
+
+Mỗi cấu hình stage bao gồm một `region` bắt buộc và một `account` tùy chọn:
+
+- **`region`** (bắt buộc) — AWS region để triển khai (ví dụ: `us-east-1`, `eu-west-2`).
+- **`account`** (tùy chọn) — ID tài khoản AWS. Nếu bỏ qua, CDK sẽ suy ra nó từ thông tin xác thực đang hoạt động tại thời điểm triển khai. Xem [tài liệu về môi trường CDK](https://docs.aws.amazon.com/cdk/v2/guide/environments.html) để biết cách CDK phân giải account và region.
+
+Tệp `main.ts` được tạo ra đọc các giá trị này từ cấu hình để quá trình tổng hợp và triển khai CDK sử dụng cùng các thiết lập môi trường:
+
+```ts title="src/main.ts"
+const sandboxConfig = projectStages['my-app-sandbox'];
+new ApplicationStage(app, 'my-app-sandbox', {
+  env: {
+    account: sandboxConfig?.account ?? process.env.CDK_DEFAULT_ACCOUNT,
+    region: sandboxConfig?.region ?? process.env.CDK_DEFAULT_REGION,
+  },
+});
+```
+
+#### Stage được chia sẻ so với Stage cụ thể của dự án
+
+Các stage được chia sẻ (trong `shared.stages`) áp dụng cho bất kỳ dự án infra nào trong workspace. Điều này hữu ích khi nhiều dự án triển khai đến cùng một tài khoản sandbox — bạn định nghĩa thông tin xác thực một lần thay vì lặp lại cho từng dự án.
+
+Các stage cụ thể của dự án (trong `projects['packages/infra'].stages`) chỉ áp dụng cho dự án đó. Khi cả hai tồn tại cho cùng một tên stage, mục cụ thể của dự án được ưu tiên.
+
+:::tip
+Chúng tôi khuyên bạn nên commit `stages.config.ts` để nhóm chia sẻ một nguồn chân lý duy nhất cho thông tin xác thực stage. Nếu nó chứa tên profile cá nhân, bạn có thể thêm nó vào `.gitignore` và sử dụng một override cục bộ thay thế.
+:::
 
 ### Cơ sở hạ tầng API
 
@@ -216,17 +355,17 @@ suppressRules(construct, ['CKV_AWS_XXX'], 'Reason', (construct) => construct ins
 
 ## Bootstrap tài khoản AWS của bạn
 
-Nếu bạn đang triển khai một ứng dụng CDK đến một tài khoản AWS lần đầu tiên, nó sẽ cần được bootstrap trước.
+Nếu bạn đang triển khai một ứng dụng CDK đến một tài khoản AWS lần đầu tiên, nó sẽ cần được [bootstrap](https://docs.aws.amazon.com/cdk/v2/guide/bootstrapping-env.html). Bootstrap tạo ra các tài nguyên mà CDK cần để quản lý các lần triển khai (một S3 bucket cho các assets, IAM roles, v.v.).
 
 Đầu tiên, đảm bảo rằng bạn đã [cấu hình thông tin xác thực cho tài khoản AWS của mình](https://docs.aws.amazon.com/sdkref/latest/guide/access.html).
 
-Tiếp theo, bạn có thể sử dụng lệnh `cdk bootstrap`:
+Tiếp theo, chạy lệnh bootstrap cho mỗi account và region bạn định triển khai:
 
 ```bash
 npx cdk bootstrap aws://<account-id>/<region>
 ```
 
-Để biết thêm chi tiết, vui lòng tham khảo [tài liệu CDK](https://docs.aws.amazon.com/cdk/v2/guide/bootstrapping-env.html).
+Để biết thêm chi tiết, vui lòng tham khảo [tài liệu bootstrapping CDK](https://docs.aws.amazon.com/cdk/v2/guide/bootstrapping-env.html).
 
 ## Triển khai lên AWS
 
@@ -236,9 +375,9 @@ Sau khi build, bạn có thể triển khai cơ sở hạ tầng của mình lê
 Sử dụng target `deploy-ci` nếu triển khai trong một pipeline CI/CD. Xem bên dưới để biết thêm chi tiết.
 :::
 
-Đầu tiên, đảm bảo rằng bạn đã [cấu hình thông tin xác thực cho tài khoản AWS của mình](https://docs.aws.amazon.com/sdkref/latest/guide/access.html).
+Đầu tiên, đảm bảo rằng bạn đã cấu hình thông tin xác thực AWS. Nếu bạn tạo với `enableStageConfig` và đã cấu hình thông tin xác thực stage trong `packages/common/infra-config/src/stages.config.ts`, lệnh deploy sẽ tự động phân giải và áp dụng thông tin xác thực chính xác cho stage đích. Nếu không, hãy đảm bảo thông tin xác thực AWS của bạn được đặt trong môi trường của bạn (ví dụ: thông qua `AWS_PROFILE` hoặc biến môi trường). Xem [tài liệu thông tin xác thực AWS](https://docs.aws.amazon.com/sdkref/latest/guide/access.html) để biết các tùy chọn có sẵn.
 
-Tiếp theo, chạy target deploy:
+Sau đó chạy target deploy:
 
 <NxCommands commands={['run <my-infra>:deploy <my-infra>-sandbox/*']} />
 
@@ -256,7 +395,7 @@ Sử dụng target `deploy-ci` nếu bạn đang triển khai lên AWS như mộ
 
 <NxCommands commands={['run <my-infra>:deploy-ci my-stage/*']} />
 
-Target này khác một chút so với target `deploy` thông thường ở chỗ nó đảm bảo cloud-assembly đã được tổng hợp trước được triển khai, thay vì tổng hợp ngay lập tức. Điều này giúp tránh các vấn đề tiềm ẩn với tính không xác định do thay đổi phiên bản package, đảm bảo rằng mọi giai đoạn pipeline triển khai sử dụng cùng một cloud-assembly.
+Target này khác một chút so với target `deploy` thông thường ở chỗ nó triển khai một cloud-assembly đã được tổng hợp trước thay vì tổng hợp ngay lập tức. Điều này giúp tránh các vấn đề tiềm ẩn với tính không xác định do thay đổi phiên bản package, đảm bảo rằng mọi giai đoạn pipeline triển khai sử dụng cùng một cloud-assembly.
 
 ## Xóa bỏ cơ sở hạ tầng AWS
 
