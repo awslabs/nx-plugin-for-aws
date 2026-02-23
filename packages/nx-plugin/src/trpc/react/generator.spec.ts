@@ -194,6 +194,114 @@ export function Main() {
     // Verify the metric was added to app.ts
     expectHasMetricTags(tree, TRPC_REACT_GENERATOR_INFO.metric);
   });
+  describe('REST API (ServerlessApiGatewayRestApi)', () => {
+    beforeEach(() => {
+      updateJson(tree, 'apps/backend/project.json', (config) => ({
+        ...config,
+        metadata: {
+          ...config.metadata,
+          computeType: 'ServerlessApiGatewayRestApi',
+        },
+      }));
+    });
+
+    it('should generate REST API client provider with splitLink for None auth', async () => {
+      await reactGenerator(tree, {
+        frontendProjectName: 'frontend',
+        backendProjectName: 'backend',
+      });
+
+      expect(
+        tree.read(
+          'apps/frontend/src/components/TestApiClientProvider.tsx',
+          'utf-8',
+        ),
+      ).toMatchSnapshot('TestApiClientProvider-REST-None.tsx');
+
+      // None auth does not need EventSourcePolyfill since no auth headers are required
+      const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+      expect(packageJson.dependencies['event-source-polyfill']).toBeUndefined();
+    });
+
+    it('should generate REST API client provider with splitLink for IAM auth', async () => {
+      updateJson(tree, 'apps/backend/project.json', (config) => ({
+        ...config,
+        metadata: {
+          ...config.metadata,
+          auth: 'IAM',
+        },
+      }));
+
+      await reactGenerator(tree, {
+        frontendProjectName: 'frontend',
+        backendProjectName: 'backend',
+      });
+
+      expect(
+        tree.read(
+          'apps/frontend/src/components/TestApiClientProvider.tsx',
+          'utf-8',
+        ),
+      ).toMatchSnapshot('TestApiClientProvider-REST-IAM.tsx');
+
+      const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+      expect(packageJson.dependencies['event-source-polyfill']).toBeDefined();
+      expect(
+        packageJson.devDependencies['@types/event-source-polyfill'],
+      ).toBeDefined();
+      expect(packageJson.dependencies['aws4fetch']).toBeDefined();
+    });
+
+    it('should generate REST API client provider with splitLink for Cognito auth', async () => {
+      updateJson(tree, 'apps/backend/project.json', (config) => ({
+        ...config,
+        metadata: {
+          ...config.metadata,
+          auth: 'Cognito',
+        },
+      }));
+
+      await reactGenerator(tree, {
+        frontendProjectName: 'frontend',
+        backendProjectName: 'backend',
+      });
+
+      expect(
+        tree.read(
+          'apps/frontend/src/components/TestApiClientProvider.tsx',
+          'utf-8',
+        ),
+      ).toMatchSnapshot('TestApiClientProvider-REST-Cognito.tsx');
+
+      const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+      expect(packageJson.dependencies['event-source-polyfill']).toBeDefined();
+      expect(
+        packageJson.devDependencies['@types/event-source-polyfill'],
+      ).toBeDefined();
+      expect(packageJson.dependencies['react-oidc-context']).toBeDefined();
+    });
+
+    it('should not add event-source-polyfill for HTTP API', async () => {
+      updateJson(tree, 'apps/backend/project.json', (config) => ({
+        ...config,
+        metadata: {
+          ...config.metadata,
+          computeType: 'ServerlessApiGatewayHttpApi',
+        },
+      }));
+
+      await reactGenerator(tree, {
+        frontendProjectName: 'frontend',
+        backendProjectName: 'backend',
+      });
+
+      const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+      expect(packageJson.dependencies['event-source-polyfill']).toBeUndefined();
+      expect(
+        packageJson.devDependencies?.['@types/event-source-polyfill'],
+      ).toBeUndefined();
+    });
+  });
 });
 
 describe('trpc react generator with unqualified names', () => {

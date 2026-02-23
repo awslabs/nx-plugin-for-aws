@@ -30,6 +30,10 @@ Você pode gerar uma nova API tRPC de duas formas:
 
 <Snippet name="api/api-choice-note" />
 
+:::tip
+Selecione `ServerlessApiGatewayRestApi` (padrão) como seu `computeType` se desejar usar [tRPC Subscriptions](https://trpc.io/docs/server/subscriptions) para transmitir respostas em streaming.
+:::
+
 ## Saída do Gerador
 
 O gerador criará a seguinte estrutura de projeto no diretório `<directory>/<api-name>`:
@@ -37,9 +41,11 @@ O gerador criará a seguinte estrutura de projeto no diretório `<directory>/<ap
 <FileTree>
   - src
     - init.ts Inicialização do backend tRPC
-    - router.ts Definição do roteador tRPC (ponto de entrada da API no handler Lambda)
+    - handler.ts Ponto de entrada do handler Lambda
+    - router.ts Definição do roteador tRPC
     - schema Definições de schema usando Zod
       - echo.ts Exemplo de definições para entrada e saída do procedimento "echo"
+      - z-async-iterable.ts Helper Zod para subscriptions (somente REST API)
     - procedures Procedimentos (ou operações) expostos pela sua API
       - echo.ts Procedimento de exemplo
     - middleware
@@ -103,7 +109,7 @@ Zod fornece utilitários poderosos para combinar ou derivar schemas como `.merge
 
 ### Roteador e Procedimentos
 
-O ponto de entrada da API está em `src/router.ts`. Este arquivo contém o handler Lambda que roteia requisições para "procedimentos" baseado na operação invocada. Cada procedimento define a entrada esperada, saída e implementação.
+Seu roteador tRPC é definido em `src/router.ts`, que registra todos os procedimentos. Cada procedimento define a entrada esperada, saída e implementação. O ponto de entrada do handler Lambda está em `src/handler.ts`, que encaminha requisições para seu roteador.
 
 O roteador de exemplo gerado possui uma única operação chamada `echo`:
 
@@ -134,6 +140,50 @@ Analisando o código acima:
 O uso de `query` indica que a operação não é mutativa. Use para métodos de recuperação de dados. Para operações mutativas, use `mutation`.
 
 Ao adicionar novos procedimentos, registre-os no roteador em `src/router.ts`.
+
+### Subscriptions (Streaming)
+
+:::caution
+Subscriptions são suportadas apenas quando `computeType` é `ServerlessApiGatewayRestApi` (padrão), pois API Gateway HTTP APIs não suportam streaming de resposta.
+:::
+
+tRPC subscriptions permitem transmitir dados do servidor para o cliente usando [Server-Sent Events (SSE)](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events). Quando você seleciona `ServerlessApiGatewayRestApi` como seu tipo de computação, o gerador configura automaticamente a infraestrutura necessária para streaming, bem como um handler Lambda de streaming e o helper de schema `ZodAsyncIterable`.
+
+Para definir um procedimento de subscription, use o método `.subscription` com uma função geradora assíncrona. Use o helper `ZodAsyncIterable` de `src/schema/z-async-iterable.ts` para definir o schema de saída:
+
+```ts
+import { publicProcedure } from '../init.js';
+import { z } from 'zod';
+import { ZodAsyncIterable } from '../schema/z-async-iterable.js';
+
+const InputSchema = z.object({ query: z.string() });
+const ChunkSchema = z.object({ text: z.string() });
+
+export const myStream = publicProcedure
+  .input(InputSchema)
+  .output(
+    ZodAsyncIterable({
+      yield: ChunkSchema,
+    }),
+  )
+  .subscription(async function* (opts) {
+    // Retorna dados ao cliente conforme ficam disponíveis
+    for (const chunk of await getResults(opts.input.query)) {
+      yield { text: chunk };
+    }
+  });
+```
+
+Registre a subscription no seu roteador como qualquer outro procedimento:
+
+```ts
+export const appRouter = router({
+  echo,
+  myStream,
+});
+```
+
+A infraestrutura gerada usa um handler Lambda de streaming com `ResponseTransferMode.STREAM` no API Gateway para todas as operações REST API, o que permite que subscriptions funcionem junto com queries e mutations regulares.
 
 ## Personalizando sua API tRPC
 
@@ -247,6 +297,8 @@ export interface IIdentityContext {
 }
 ```
 
+Note que definimos uma propriedade adicional _opcional_ no contexto. tRPC gerencia a garantia de que isso esteja definido em procedimentos que configuraram corretamente este middleware.
+
 Em seguida, implementamos o middleware:
 
 ```ts
@@ -264,7 +316,7 @@ export const createIdentityPlugin = () => {
 };
 ```
 
-Exemplo completo para REST e HTTP APIs:
+No nosso caso, queremos extrair detalhes sobre o usuário Cognito chamador. Faremos isso extraindo o ID de assunto do usuário (ou "sub") do evento do API Gateway e recuperando detalhes do usuário do Cognito. A implementação varia ligeiramente dependendo se o evento foi fornecido à nossa função por uma REST API ou uma HTTP API:
 
 <Tabs>
 <TabItem label="REST">
@@ -303,6 +355,7 @@ export const createIdentityPlugin = () => {
     }
 
     const { Users } = await cognito.listUsers({
+      // Assume que o ID do user pool está configurado no ambiente Lambda
       UserPoolId: process.env.USER_POOL_ID!,
       Limit: 1,
       Filter: `sub="${sub}"`,
@@ -315,6 +368,7 @@ export const createIdentityPlugin = () => {
       });
     }
 
+    // Fornece a identidade para outros procedimentos no contexto
     return await opts.next({
       ctx: {
         ...opts.ctx,
@@ -370,6 +424,7 @@ export const createIdentityPlugin = () => {
     }
 
     const { Users } = await cognito.listUsers({
+      // Assume que o ID do user pool está configurado no ambiente Lambda
       UserPoolId: process.env.USER_POOL_ID!,
       Limit: 1,
       Filter: `sub="${sub}"`,
@@ -382,6 +437,7 @@ export const createIdentityPlugin = () => {
       });
     }
 
+    // Fornece a identidade para outros procedimentos no contexto
     return await opts.next({
       ctx: {
         ...opts.ctx,

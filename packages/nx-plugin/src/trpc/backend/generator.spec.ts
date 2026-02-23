@@ -58,6 +58,7 @@ describe('trpc backend generator', () => {
       apiName: 'TestApi',
       apiType: 'trpc',
       auth: 'IAM',
+      computeType: 'ServerlessApiGatewayHttpApi',
       generator: TRPC_BACKEND_GENERATOR_INFO.id,
       ports: [2022],
     });
@@ -238,7 +239,7 @@ describe('trpc backend generator', () => {
       'utf-8',
     );
     expect(rolldownConfig).toContain('defineConfig');
-    expect(rolldownConfig).toContain('src/router.ts');
+    expect(rolldownConfig).toContain('src/handler.ts');
     expect(rolldownConfig).toContain(
       '../../dist/apps/test-api/bundle/index.js',
     );
@@ -312,7 +313,7 @@ describe('trpc backend generator', () => {
     expectHasMetricTags(tree, TRPC_BACKEND_GENERATOR_INFO.metric);
   });
 
-  it('should include CORS headers in router.ts when using REST API', async () => {
+  it('should include CORS headers in handler.ts when using REST API', async () => {
     await tsTrpcApiGenerator(tree, {
       name: 'TestApi',
       directory: 'apps',
@@ -321,13 +322,27 @@ describe('trpc backend generator', () => {
       iacProvider: 'CDK',
     });
 
-    // Read the generated router.ts file
-    const routerTsContent = tree.read('apps/test-api/src/router.ts', 'utf-8');
+    // Read the generated handler.ts file
+    const handlerTsContent = tree.read('apps/test-api/src/handler.ts', 'utf-8');
 
     // Verify CORS headers are included in responseMeta
-    expect(routerTsContent).toContain('responseMeta: ({ ctx }) => ({');
-    expect(routerTsContent).toContain("'Access-Control-Allow-Origin':");
-    expect(routerTsContent).toContain("'Access-Control-Allow-Methods': '*'");
+    expect(handlerTsContent).toContain('responseMeta: ({ ctx }) => ({');
+    expect(handlerTsContent).toContain("'Access-Control-Allow-Origin':");
+    expect(handlerTsContent).toContain("'Access-Control-Allow-Methods': '*'");
+
+    // Verify streaming handler is used
+    expect(handlerTsContent).toContain('awsLambdaStreamingRequestHandler');
+    expect(handlerTsContent).toContain('streamifyResponse');
+    expect(handlerTsContent).not.toContain('awsLambdaRequestHandler');
+
+    // Verify router.ts does not contain handler code
+    const routerTsContent = tree.read('apps/test-api/src/router.ts', 'utf-8');
+    expect(routerTsContent).not.toContain('awsLambdaRequestHandler');
+
+    // Verify z-async-iterable schema helper is generated for REST APIs
+    expect(
+      tree.exists('apps/test-api/src/schema/z-async-iterable.ts'),
+    ).toBeTruthy();
   });
 
   it('should generate with cognito auth for a REST API', async () => {

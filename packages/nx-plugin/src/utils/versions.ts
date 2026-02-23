@@ -57,6 +57,8 @@ export const TS_VERSIONS = {
   clsx: '2.1.1',
   electrodb: '3.5.3',
   esbuild: '0.27.3',
+  'event-source-polyfill': '1.0.31',
+  '@types/event-source-polyfill': '1.0.5',
   'eslint-plugin-prettier': '5.5.5',
   express: '5.2.1',
   'jsonc-eslint-parser': '2.4.2',

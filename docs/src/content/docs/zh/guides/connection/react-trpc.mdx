@@ -61,7 +61,8 @@ root.render(
     - QueryClientProvider.tsx TanStack React Query 客户端提供程序
   - hooks
     - useSigV4.tsx 用于使用 SigV4 签名 HTTP 请求的钩子（仅限 IAM）
-    - use\<ApiName>.tsx 对应后端 API 的钩子
+    - use\<ApiName>.tsx 返回 tRPC 选项代理的钩子，用于 TanStack Query 集成
+    - use\<ApiName>Client.tsx 返回原生 tRPC 客户端的钩子，用于直接 API 调用
 
 </FileTree>
 
@@ -71,12 +72,13 @@ root.render(
   - `@trpc/tanstack-react-query`
   - `@tanstack/react-query`
   - `aws4fetch`（如果使用 IAM 认证）
+  - `event-source-polyfill`（如果使用 REST API，用于订阅支持）
 
 ## 使用生成代码
 
-### 使用 tRPC 钩子
+### 使用 tRPC 选项代理钩子
 
-生成器提供 `use<ApiName>` 钩子来访问类型安全的 tRPC 客户端：
+生成器提供 `use<ApiName>` 钩子，返回 [tRPC 选项代理](https://trpc.io/docs/client/tanstack-react-query)，用于 TanStack Query 钩子（如 `useQuery` 和 `useMutation`）：
 
 ```tsx {5,8,11}
 import { useQuery, useMutation } from '@tanstack/react-query';
@@ -110,6 +112,29 @@ function MyComponent() {
 }
 ```
 
+### 使用原生 tRPC 客户端
+
+`use<ApiName>Client` 钩子提供对 [原生 tRPC 客户端](https://trpc.io/docs/client/vanilla) 的访问，适用于命令式 API 调用和订阅：
+
+```tsx {2,5,8,11}
+import { useState } from 'react';
+import { useMyApiClient } from './hooks/useMyApi';
+
+function MyComponent() {
+  const client = useMyApiClient();
+
+  const handleClick = async () => {
+    const result = await client.echo.query({ message: 'Hello!' });
+    console.log(result);
+
+    const mutationResult = await client.users.create.mutate({ name: 'Jane' });
+    console.log(mutationResult);
+  };
+
+  return <button onClick={handleClick}>Call API</button>;
+}
+```
+
 ### 错误处理
 
 集成包含内置错误处理机制，可正确处理 tRPC 错误：
@@ -134,6 +159,105 @@ function MyComponent() {
     <ul>
       {data.map((user) => (
         <li key={user.id}>{user.name}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+### 订阅（流式传输）
+
+:::caution
+仅当 tRPC API 使用 `ServerlessApiGatewayRestApi`（REST API）作为计算类型时才支持订阅。API Gateway HTTP API 不支持响应流式传输。
+:::
+
+连接到 REST API tRPC 后端时，生成的客户端会自动配置 `splitLink`，将订阅操作通过 `httpSubscriptionLink`（使用 SSE）路由，常规查询/变更通过 `httpLink` 路由。这意味着订阅开箱即用，无需额外配置。
+
+有关如何在后端定义订阅过程的信息，请参阅 <Link path="guides/trpc">`ts#trpc-api` 生成器指南</Link>。
+
+#### 使用 useSubscription 钩子
+
+您可以使用 `useSubscription` 钩子和选项代理中的 `subscriptionOptions` 来消费订阅：
+
+```tsx {1-2,7-22}
+import { useSubscription } from '@trpc/tanstack-react-query';
+import { useMyApi } from './hooks/useMyApi';
+
+function StreamingComponent() {
+  const trpc = useMyApi();
+
+  const subscription = useSubscription(
+    trpc.myStream.subscriptionOptions(
+      { query: 'hello' },
+      {
+        enabled: true,
+        onStarted: () => {
+          console.log('Subscription started');
+        },
+        onData: (data) => {
+          console.log('Received:', data.text);
+        },
+        onError: (error) => {
+          console.error('Subscription error:', error);
+        },
+      },
+    ),
+  );
+
+  return (
+    <div>
+      <p>Status: {subscription.status}</p>
+      {subscription.data && <p>Latest: {subscription.data.text}</p>}
+      {subscription.error && <p>Error: {subscription.error.message}</p>}
+      <button onClick={() => subscription.reset()}>Reset</button>
+    </div>
+  );
+}
+```
+
+`subscription` 对象提供：
+
+- `subscription.data` — 最近接收到的数据
+- `subscription.error` — 最近接收到的错误
+- `subscription.status` — `'idle'`、`'connecting'`、`'pending'` 或 `'error'` 之一
+- `subscription.reset()` — 重置订阅（用于从错误中恢复）
+
+#### 使用原生客户端
+
+或者，您可以通过 `use<ApiName>Client` 钩子使用原生 tRPC 客户端，以更好地控制订阅生命周期：
+
+```tsx {2,5,9-22,25}
+import { useState, useEffect } from 'react';
+import { useMyApiClient } from './hooks/useMyApi';
+
+function StreamingComponent() {
+  const client = useMyApiClient();
+  const [messages, setMessages] = useState<string[]>([]);
+
+  useEffect(() => {
+    const subscription = client.myStream.subscribe(
+      { query: 'hello' },
+      {
+        onData: (data) => {
+          setMessages((prev) => [...prev, data.text]);
+        },
+        onComplete: () => {
+          console.log('Stream complete');
+        },
+        onError: (error) => {
+          console.error('Stream error:', error);
+        },
+      },
+    );
+
+    // 组件卸载时清理订阅
+    return () => subscription.unsubscribe();
+  }, [client]);
+
+  return (
+    <ul>
+      {messages.map((msg, i) => (
+        <li key={i}>{msg}</li>
       ))}
     </ul>
   );
@@ -310,6 +434,8 @@ function UserForm() {
 
 ## 更多信息
 
-更多信息请参考 [tRPC TanStack React Query 文档](https://trpc.io/docs/client/tanstack-react-query/usage)。
+更多信息请参考：
 
-也可直接查阅 [TanStack Query 文档](https://tanstack.com/query/v5)。
+- [tRPC TanStack React Query 集成](https://trpc.io/docs/client/tanstack-react-query)
+- [tRPC 原生客户端](https://trpc.io/docs/client/vanilla)
+- [TanStack Query 文档](https://tanstack.com/query/v5)

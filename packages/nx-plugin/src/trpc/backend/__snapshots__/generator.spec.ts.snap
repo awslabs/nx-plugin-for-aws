@@ -29,6 +29,23 @@ export const createTestApiClient = (config: TestApiClientConfig) => {
 "
 `;
 
+exports[`trpc backend generator > should generate the project > apps/test-api/src/handler.ts 1`] = `
+"import {
+  CreateAWSLambdaContextOptions,
+  awsLambdaRequestHandler,
+} from '@trpc/server/adapters/aws-lambda';
+import type { APIGatewayProxyEventV2WithIAMAuthorizer } from 'aws-lambda';
+import { appRouter } from './router.js';
+
+export const handler = awsLambdaRequestHandler({
+  router: appRouter,
+  createContext: (
+    ctx: CreateAWSLambdaContextOptions<APIGatewayProxyEventV2WithIAMAuthorizer>,
+  ) => ctx,
+});
+"
+`;
+
 exports[`trpc backend generator > should generate the project > apps/test-api/src/index.ts 1`] = `
 "export type { AppRouter } from './router.js';
 export { appRouter } from './router.js';
@@ -269,25 +286,13 @@ export const echo = publicProcedure
 `;
 
 exports[`trpc backend generator > should generate the project > apps/test-api/src/router.ts 1`] = `
-"import {
-  awsLambdaRequestHandler,
-  CreateAWSLambdaContextOptions,
-} from '@trpc/server/adapters/aws-lambda';
-import { echo } from './procedures/echo.js';
+"import { echo } from './procedures/echo.js';
 import { t } from './init.js';
-import type { APIGatewayProxyEventV2WithIAMAuthorizer } from 'aws-lambda';
 
 export const router = t.router;
 
 export const appRouter = router({
   echo,
-});
-
-export const handler = awsLambdaRequestHandler({
-  router: appRouter,
-  createContext: (
-    ctx: CreateAWSLambdaContextOptions<APIGatewayProxyEventV2WithIAMAuthorizer>,
-  ) => ctx,
 });
 
 export type AppRouter = typeof appRouter;
@@ -359,6 +364,7 @@ import {
   AuthorizationType,
   Cors,
   LambdaIntegration,
+  ResponseTransferMode,
   CognitoUserPoolsAuthorizer,
 } from 'aws-cdk-lib/aws-apigateway';
 import { Duration } from 'aws-cdk-lib';
@@ -437,7 +443,12 @@ export class TestApi<
       } satisfies FunctionProps,
       buildDefaultIntegration: (op, props: FunctionProps) => {
         const handler = new Function(scope, \`TestApi\${op}Handler\`, props);
-        return { handler, integration: new LambdaIntegration(handler) };
+        return {
+          handler,
+          integration: new LambdaIntegration(handler, {
+            responseTransferMode: ResponseTransferMode.STREAM,
+          }),
+        };
       },
     });
   };
@@ -747,6 +758,7 @@ import {
   AuthorizationType,
   Cors,
   LambdaIntegration,
+  ResponseTransferMode,
 } from 'aws-cdk-lib/aws-apigateway';
 import { Duration } from 'aws-cdk-lib';
 import {
@@ -817,7 +829,12 @@ export class TestApi<
       } satisfies FunctionProps,
       buildDefaultIntegration: (op, props: FunctionProps) => {
         const handler = new Function(scope, \`TestApi\${op}Handler\`, props);
-        return { handler, integration: new LambdaIntegration(handler) };
+        return {
+          handler,
+          integration: new LambdaIntegration(handler, {
+            responseTransferMode: ResponseTransferMode.STREAM,
+          }),
+        };
       },
     });
   };
@@ -1436,9 +1453,9 @@ export const routerToOperations = <TRouter extends AnyTRPCRouter>(
                 {
                   path: fullPath,
                   method:
-                    procedureOrRouter._def.type === 'query'
-                      ? HttpMethod.GET
-                      : HttpMethod.POST,
+                    procedureOrRouter._def.type === 'mutation'
+                      ? HttpMethod.POST
+                      : HttpMethod.GET,
                 },
               ],
             ];
@@ -1827,6 +1844,7 @@ import {
   AuthorizationType,
   Cors,
   LambdaIntegration,
+  ResponseTransferMode,
 } from 'aws-cdk-lib/aws-apigateway';
 import { Duration } from 'aws-cdk-lib';
 import {
@@ -1899,7 +1917,12 @@ export class TestApi<
       } satisfies FunctionProps,
       buildDefaultIntegration: (op, props: FunctionProps) => {
         const handler = new Function(scope, \`TestApi\${op}Handler\`, props);
-        return { handler, integration: new LambdaIntegration(handler) };
+        return {
+          handler,
+          integration: new LambdaIntegration(handler, {
+            responseTransferMode: ResponseTransferMode.STREAM,
+          }),
+        };
       },
     });
   };
@@ -2051,9 +2074,9 @@ export const routerToOperations = <TRouter extends AnyTRPCRouter>(
                 {
                   path: fullPath,
                   method:
-                    procedureOrRouter._def.type === 'query'
-                      ? HttpMethod.GET
-                      : HttpMethod.POST,
+                    procedureOrRouter._def.type === 'mutation'
+                      ? HttpMethod.POST
+                      : HttpMethod.GET,
                 },
               ],
             ];
@@ -4151,7 +4174,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 6.0"
+      version = "~> 6.33"
     }
   }
 }
@@ -4298,7 +4321,7 @@ output "api_root_resource_id" {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 6.0"
+      version = "~> 6.33"
     }
   }
 }
@@ -4495,8 +4518,9 @@ resource "aws_api_gateway_integration" "lambda_integration" {
   http_method = aws_api_gateway_method.proxy_method.http_method
 
   integration_http_method = "POST"
-  type                   = "AWS_PROXY"
-  uri                    = aws_lambda_function.api_lambda.invoke_arn
+  type                    = "AWS_PROXY"
+  uri                     = aws_lambda_function.api_lambda.response_streaming_invoke_arn
+  response_transfer_mode  = "STREAM"
 
   depends_on = [aws_lambda_function.api_lambda]
 }
@@ -4787,7 +4811,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 6.0"
+      version = "~> 6.33"
     }
   }
 }
@@ -4934,7 +4958,7 @@ output "api_root_resource_id" {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 6.0"
+      version = "~> 6.33"
     }
   }
 }
@@ -5113,8 +5137,9 @@ resource "aws_api_gateway_integration" "lambda_integration" {
   http_method = aws_api_gateway_method.proxy_method.http_method
 
   integration_http_method = "POST"
-  type                   = "AWS_PROXY"
-  uri                    = aws_lambda_function.api_lambda.invoke_arn
+  type                    = "AWS_PROXY"
+  uri                     = aws_lambda_function.api_lambda.response_streaming_invoke_arn
+  response_transfer_mode  = "STREAM"
 
   depends_on = [aws_lambda_function.api_lambda]
 }
@@ -5415,7 +5440,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 6.0"
+      version = "~> 6.33"
     }
   }
 }
@@ -5562,7 +5587,7 @@ output "api_root_resource_id" {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 6.0"
+      version = "~> 6.33"
     }
   }
 }
@@ -5741,8 +5766,9 @@ resource "aws_api_gateway_integration" "lambda_integration" {
   http_method = aws_api_gateway_method.proxy_method.http_method
 
   integration_http_method = "POST"
-  type                   = "AWS_PROXY"
-  uri                    = aws_lambda_function.api_lambda.invoke_arn
+  type                    = "AWS_PROXY"
+  uri                     = aws_lambda_function.api_lambda.response_streaming_invoke_arn
+  response_transfer_mode  = "STREAM"
 
   depends_on = [aws_lambda_function.api_lambda]
 }
