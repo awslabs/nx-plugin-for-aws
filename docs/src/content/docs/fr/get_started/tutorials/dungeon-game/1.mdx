@@ -40,7 +40,6 @@ Cela configurera un monorepo NX dans le répertoire `dungeon-adventure`. Lorsque
 - node_modules/
 - packages/ c'est ici que résideront vos sous-projets
 - .gitignore
-- .npmrc
 - .prettierignore
 - .prettierrc
 - nx.json configure le CLI Nx et les paramètres par défaut du monorepo
@@ -95,17 +94,10 @@ Voici la liste de tous les fichiers générés par le générateur `ts#trpc-api`
         - index.ts
       - project.json
       - ...
-    - types/ types partagés
-      - src/
-        - index.ts
-        - runtime-config.ts définition d'interface utilisée par CDK et le site web
-      - project.json
-      - ...
   - game-api/ API tRPC
     - src/
       - client/ client vanilla typiquement utilisé pour les appels TypeScript machine à machine
         - index.ts
-        - sigv4.ts
       - middleware/ instrumentation Powertools
         - error.ts
         - index.ts
@@ -113,9 +105,11 @@ Voici la liste de tous les fichiers générés par le générateur `ts#trpc-api`
         - metrics.ts
         - tracer.ts
       - schema/ définitions des entrées et sorties pour votre API
-        - **echo.ts**
+        - index.ts
+        - **echo.ts** exemple de schéma d'entrée et de sortie
+        - z-async-iterable.ts wrapper schéma Zod pour la sortie d'abonnement tRPC
       - procedures/ implémentations spécifiques pour vos procédures/routes d'API
-        - **echo.ts**
+        - **echo.ts** exemple d'implémentation de procédure
       - index.ts
       - init.ts configure le contexte et le middleware
       - handler.ts point d'entrée du handler Lambda (utilise le streaming de réponse pour les API REST)
@@ -183,6 +177,7 @@ Toutes les définitions de schéma tRPC sont définies en utilisant [Zod](https:
 // packages/common/constructs/src/app/apis/game-api.ts
 import { Construct } from 'constructs';
 import * as url from 'url';
+import { Distribution } from 'aws-cdk-lib/aws-cloudfront';
 import {
   Code,
   Runtime,
@@ -194,14 +189,16 @@ import {
   AuthorizationType,
   Cors,
   LambdaIntegration,
+  ResponseTransferMode,
 } from 'aws-cdk-lib/aws-apigateway';
-import { Duration, Stack } from 'aws-cdk-lib';
+import { Duration } from 'aws-cdk-lib';
 import {
   PolicyDocument,
   PolicyStatement,
   Effect,
-  AccountPrincipal,
   AnyPrincipal,
+  IGrantable,
+  Grant,
 } from 'aws-cdk-lib/aws-iam';
 import {
   IntegrationBuilder,
@@ -265,7 +262,12 @@ export class GameApi<
       } satisfies FunctionProps,
       buildDefaultIntegration: (op, props: FunctionProps) => {
         const handler = new Function(scope, `GameApi${op}Handler`, props);
-        return { handler, integration: new LambdaIntegration(handler) };
+        return {
+          handler,
+          integration: new LambdaIntegration(handler, {
+            responseTransferMode: ResponseTransferMode.STREAM,
+          }),
+        };
       },
     });
   };
@@ -284,18 +286,11 @@ export class GameApi<
         allowOrigins: Cors.ALL_ORIGINS,
         allowMethods: Cors.ALL_METHODS,
       },
+      deployOptions: {
+        tracingEnabled: true,
+      },
       policy: new PolicyDocument({
         statements: [
-          // Ici, nous accordons à toutes les informations d'identification AWS du compte dans lequel le projet est déployé
-          // le droit d'appeler l'API. Un accès machine à machine plus fin peut être défini ici en utilisant des principaux
-          // plus spécifiques (par exemple, des rôles ou des utilisateurs) et des ressources (par exemple, quels chemins d'API
-          // peuvent être invoqués par quel principal) si nécessaire.
-          new PolicyStatement({
-            effect: Effect.ALLOW,
-            principals: [new AccountPrincipal(Stack.of(scope).account)],
-            actions: ['execute-api:Invoke'],
-            resources: ['execute-api:/*'],
-          }),
           // Ouvrir OPTIONS pour permettre aux navigateurs de faire des requêtes de pré-vérification non authentifiées
           new PolicyStatement({
             effect: Effect.ALLOW,
@@ -307,6 +302,60 @@ export class GameApi<
       }),
       operations: routerToOperations(appRouter),
       ...props,
+    });
+  }
+
+  /**
+   * Restreint CORS aux domaines de distribution CloudFront du site web
+   *
+   * Configure les domaines de distribution CloudFront comme les seules origines CORS autorisées
+   * (autres que localhost) dans les intégrations AWS Lambda
+   *
+   * Notez que cette restriction n'est pas appliquée aux OPTIONS de pré-vérification
+   *
+   * @param websites - La distribution CloudFront à partir de laquelle accorder CORS
+   */
+  public restrictCorsTo(
+    ...websites: { cloudFrontDistribution: Distribution }[]
+  ) {
+    const allowedOrigins = websites
+      .map(
+        ({ cloudFrontDistribution }) =>
+          `https://${cloudFrontDistribution.distributionDomainName}`,
+      )
+      .join(',');
+
+    // Définir la variable d'environnement ALLOWED_ORIGINS pour toutes les intégrations Lambda
+    Object.values(this.integrations).forEach((integration) => {
+      if ('handler' in integration && integration.handler instanceof Function) {
+        integration.handler.addEnvironment('ALLOWED_ORIGINS', allowedOrigins);
+      }
+    });
+  }
+
+  /**
+   * Accorde les permissions IAM pour invoquer n'importe quelle méthode sur cette API.
+   *
+   * @param grantee - Le principal IAM auquel accorder les permissions
+   */
+  public grantInvokeAccess(grantee: IGrantable) {
+    // Ici, nous accordons au bénéficiaire la permission d'appeler l'API.
+    // Un accès machine à machine plus fin peut être défini ici en utilisant des principaux
+    // plus spécifiques (par exemple, des rôles ou des utilisateurs) et des ressources (par exemple, quels chemins d'API
+    // peuvent être invoqués par quel principal) si nécessaire.
+    this.api.addToResourcePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        principals: [grantee.grantPrincipal],
+        actions: ['execute-api:Invoke'],
+        resources: ['execute-api:/*'],
+      }),
+    );
+
+    Grant.addToPrincipal({
+      grantee,
+      actions: ['execute-api:Invoke'],
+      resourceArns: [this.api.arnForExecuteApi('*', '/*', '*')],
     });
   }
 }
@@ -364,6 +413,7 @@ Le générateur `py#strands-agent` génère ces fichiers :
   - story/
     - dungeon_adventure_story/ module Python
       - agent/
+        - init.py configure l'application FastAPI et le middleware
         - main.py point d'entrée pour votre agent dans Bedrock AgentCore Runtime
         - agent.py définit un exemple d'agent et d'outils
         - agentcore_mcp_client.py utilitaire pour créer des clients pour interagir avec les serveurs MCP
@@ -406,33 +456,57 @@ Cela crée un exemple d'agent Strands et définit un outil d'addition.
 
 ```python
 # agent/main.py
-from bedrock_agentcore.runtime import BedrockAgentCoreApp
+import uvicorn
+from bedrock_agentcore.runtime.models import PingStatus
+from pydantic import BaseModel
 
 from .agent import get_agent
+from .init import JsonStreamingResponse, app
 
-app = BedrockAgentCoreApp()
+
+class InvokeInput(BaseModel):
+    prompt: str
+    session_id: str
 
 
-@app.entrypoint
-async def invoke(payload, context):
-    """Handler pour l'invocation de l'agent"""
-    prompt = payload.get(
-        "prompt", "Aucun prompt trouvé dans l'entrée, veuillez guider l'utilisateur "
-        "à créer un payload JSON avec une clé prompt"
-    )
+class StreamChunk(BaseModel):
+    content: str
 
-    with get_agent(session_id=context.session_id) as agent:
-        stream = agent.stream_async(prompt)
+
+async def handle_invoke(input: InvokeInput):
+    """Handler de streaming pour l'invocation de l'agent"""
+    with get_agent(session_id=input.session_id) as agent:
+        stream = agent.stream_async(input.prompt)
         async for event in stream:
             print(event)
-            yield (event)
+            text = event.get("event", {}).get("contentBlockDelta", {}).get("delta", {}).get("text")
+            if text is not None:
+                yield StreamChunk(content=text)
+            elif event.get("event", {}).get("messageStop") is not None:
+                yield StreamChunk(content="\n")
+
+
+@app.post(
+    "/invocations",
+    response_class=JsonStreamingResponse,
+    responses={200: JsonStreamingResponse.openapi_response(StreamChunk, "Stream of agent response chunks")},
+)
+async def invoke(input: InvokeInput) -> JsonStreamingResponse:
+    """Point d'entrée pour l'invocation de l'agent"""
+    return JsonStreamingResponse(handle_invoke(input))
+
+
+@app.get("/ping")
+def ping() -> str:
+    # TODO: si exécution d'une tâche asynchrone, retourner PingStatus.HEALTHY_BUSY
+    return PingStatus.HEALTHY
 
 
 if __name__ == "__main__":
-    app.run()
+    uvicorn.run("dungeon_adventure_story.agent.main:app", port=8080)
 ```
 
-C'est le point d'entrée de l'agent, configuré en utilisant le [SDK Amazon Bedrock AgentCore](https://github.com/aws/bedrock-agentcore-sdk-python). Il utilise le support de streaming de Strands et diffuse les événements au client au fur et à mesure qu'ils se produisent.
+C'est le point d'entrée de l'agent, configuré comme une application FastAPI compatible avec [Amazon Bedrock AgentCore Runtime](https://github.com/aws/bedrock-agentcore-sdk-python). Il utilise le support de streaming de Strands et diffuse les événements au client au fur et à mesure qu'ils se produisent via JSON Lines.
 
 ```ts
 // common/constructs/src/app/agents/story-agent.ts
@@ -513,7 +587,7 @@ Le générateur `ts#project` génère ces fichiers.
       - index.ts point d'entrée avec fonction d'exemple
     - project.json configuration du projet
     - eslint.config.mjs configuration du linter
-    - vite.config.ts configuration des tests
+    - vite.config.mts configuration des tests
     - tsconfig.json configuration TypeScript de base pour le projet
     - tsconfig.lib.json configuration TypeScript pour le projet ciblée pour la compilation et l'empaquetage
     - tsconfig.spec.json configuration TypeScript pour les tests
@@ -536,6 +610,7 @@ Le générateur `ts#mcp-server` génère ces fichiers.
 - packages/
   - inventory/
     - src/mcp-server/
+      - index.ts barrel export
       - server.ts crée le serveur MCP
       - tools/
         - add.ts outil d'exemple
@@ -583,22 +658,19 @@ Le générateur `ts#react-website` génère ces fichiers. Examinons certains des
     - src/
       - components/
         - AppLayout/
-          - index.ts mise en page globale : en-tête, pied de page, barre latérale, etc.
-          - navitems.ts éléments de navigation de la barre latérale
+          - index.tsx mise en page globale : en-tête, pied de page, barre latérale, etc.
       - hooks/
         - useAppLayout.tsx vous permet de définir dynamiquement des éléments comme les notifications, le style de page, etc.
       - routes/ routes basées sur des fichiers @tanstack/react-router
-        - index.tsx page racine '/' redirige vers '/welcome'
+        - **index.tsx** page racine '/'
         - __root.tsx toutes les pages utilisent ce composant comme base
-        - welcome/
-          - **index.tsx**
-        - config.ts
-        - **main.tsx** point d'entrée React
-        - routeTree.gen.ts automatiquement mis à jour par @tanstack/react-router
-        - styles.css
+      - config.ts
+      - **main.tsx** point d'entrée React
+      - routeTree.gen.ts automatiquement mis à jour par @tanstack/react-router
+      - styles.css
     - index.html
     - project.json
-    - vite.config.ts
+    - vite.config.mts
     - ...
 </FileTree>
 
@@ -631,12 +703,17 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { I18nProvider } from '@cloudscape-design/components/i18n';
 import messages from '@cloudscape-design/components/i18n/messages/all.en';
+import '@cloudscape-design/global-styles/index.css';
 import { RouterProvider, createRouter } from '@tanstack/react-router';
 import { routeTree } from './routeTree.gen';
 
-import '@cloudscape-design/global-styles/index.css';
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export type RouterProviderContext = {};
 
-const router = createRouter({ routeTree });
+const router = createRouter({
+  routeTree,
+  context: {},
+});
 
 // Enregistrer l'instance du routeur pour la sécurité des types
 declare module '@tanstack/react-router' {
@@ -645,12 +722,16 @@ declare module '@tanstack/react-router' {
   }
 }
 
+const App = () => {
+  return <RouterProvider router={router} context={{}} />;
+};
+
 const root = document.getElementById('root');
 root &&
   createRoot(root).render(
     <React.StrictMode>
       <I18nProvider locale="en" messages={[messages]}>
-        <RouterProvider router={router} />
+        <App />
       </I18nProvider>
     </React.StrictMode>,
   );
@@ -660,7 +741,7 @@ C'est le point d'entrée où React est monté. Comme indiqué, il configure init
 Pour plus d'informations, consultez la [documentation de `@tanstack/react-router`](https://tanstack.com/router/v1/docs/framework/react/quick-start).
 
 ```tsx
-// packages/game-ui/src/routes/welcome/index.tsx
+// packages/game-ui/src/routes/index.tsx
 import {
   ContentLayout,
   Header,
@@ -669,7 +750,7 @@ import {
 } from '@cloudscape-design/components';
 import { createFileRoute } from '@tanstack/react-router';
 
-export const Route = createFileRoute('/welcome/')({
+export const Route = createFileRoute('/')({
   component: RouteComponent,
 });
 
@@ -677,14 +758,14 @@ function RouteComponent() {
   return (
     <ContentLayout header={<Header>Welcome</Header>}>
       <SpaceBetween size="l">
-        <Container>Welcome to your new Cloudscape website!</Container>
+        <Container>Welcome to your new React website!</Container>
       </SpaceBetween>
     </ContentLayout>
   );
 }
 ```
 
-Un composant sera rendu lors de la navigation vers la route `/welcome`. `@tanstack/react-router` gérera la `Route` pour vous chaque fois que vous créez/déplacez ce fichier (tant que le serveur de développement est en cours d'exécution).
+Un composant sera rendu lors de la navigation vers la route `/`. `@tanstack/react-router` gérera la `Route` pour vous chaque fois que vous créez/déplacez ce fichier (tant que le serveur de développement est en cours d'exécution).
 
 </Drawer>
 
@@ -706,16 +787,13 @@ Le générateur `ts#react-website#auth` met à jour/génère ces fichiers. Exami
       - src/
         - core/
           - user-identity.ts construct CDK pour créer des pools d'utilisateurs/d'identité
-    - types/
-      - src/
-        - runtime-config.ts mis à jour pour ajouter les cognitoProps
   - game-ui/
     - src/
       - components/
         - AppLayout/
           - index.tsx ajoute l'utilisateur connecté/déconnexion à l'en-tête
         - CognitoAuth/
-          - index.ts gère la connexion à Cognito
+          - index.tsx gère la connexion à Cognito
         - RuntimeConfig/
           - index.tsx récupère le `runtime-config.json` et le fournit aux enfants via le contexte
       - hooks/
@@ -725,22 +803,48 @@ Le générateur `ts#react-website#auth` met à jour/génère ces fichiers. Exami
 
 ```diff lang="tsx"
 // packages/game-ui/src/main.tsx
++import { useAuth } from 'react-oidc-context';
 +import CognitoAuth from './components/CognitoAuth';
++import { useRuntimeConfig } from './hooks/useRuntimeConfig';
 +import RuntimeConfigProvider from './components/RuntimeConfig';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { I18nProvider } from '@cloudscape-design/components/i18n';
 import messages from '@cloudscape-design/components/i18n/messages/all.en';
+import '@cloudscape-design/global-styles/index.css';
 import { RouterProvider, createRouter } from '@tanstack/react-router';
 import { routeTree } from './routeTree.gen';
-import '@cloudscape-design/global-styles/index.css';
-const router = createRouter({ routeTree });
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+-export type RouterProviderContext = {};
++export type RouterProviderContext = {
++  runtimeConfig?: ReturnType<typeof useRuntimeConfig>;
++  auth?: ReturnType<typeof useAuth>;
++};
+-const router = createRouter({
+-  routeTree,
+-  context: {},
+-});
++const router = createRouter({
++  routeTree,
++  context: {
++    runtimeConfig: undefined,
++    auth: undefined,
++  },
++});
 // Enregistrer l'instance du routeur pour la sécurité des types
 declare module '@tanstack/react-router' {
   interface Register {
     router: typeof router;
   }
 }
+-const App = () => {
+-  return <RouterProvider router={router} context={{}} />;
+-};
++const App = () => {
++  const auth = useAuth();
++  const runtimeConfig = useRuntimeConfig();
++  return <RouterProvider router={router} context={{ runtimeConfig, auth }} />;
++};
 const root = document.getElementById('root');
 root &&
   createRoot(root).render(
@@ -748,7 +852,7 @@ root &&
       <I18nProvider locale="en" messages={[messages]}>
 +        <RuntimeConfigProvider>
 +          <CognitoAuth>
-            <RouterProvider router={router} />
+            <App />
 +          </CognitoAuth>
 +        </RuntimeConfigProvider>
       </I18nProvider>
@@ -786,12 +890,29 @@ Le générateur `connection` génère/met à jour ces fichiers. Examinons certai
 
 ```tsx
 // packages/game-ui/src/hooks/useGameApi.tsx
-import { GameApiTRCPContext } from '../components/GameApiClientProvider';
+import { useContext } from 'react';
+import { GameApiTRPCContext } from '../components/GameApiClientProvider';
 
-export const useGameApi = GameApiTRCPContext.useTRPC;
+export const useGameApi = () => {
+  const container = useContext(GameApiTRPCContext);
+  if (!container) {
+    throw new Error('useGameApi must be used within GameApiClientProvider');
+  }
+  return container.optionsProxy;
+};
+
+export const useGameApiClient = () => {
+  const container = useContext(GameApiTRPCContext);
+  if (!container) {
+    throw new Error(
+      'useGameApiClient must be used within GameApiClientProvider',
+    );
+  }
+  return container.client;
+};
 ```
 
-Ce hook utilise la dernière [intégration React Query](https://trpc.io/blog/introducing-tanstack-react-query-client) de tRPC permettant aux utilisateurs d'interagir avec `@tanstack/react-query` directement sans aucune couche d'abstraction supplémentaire. Pour des exemples sur la façon d'appeler des API tRPC, consultez le <Link path="guides/connection/react-trpc#using-the-generated-code">guide d'utilisation du hook tRPC</Link>.
+Ce hook fournit un accès au client tRPC pour appeler le GameApi. Pour des exemples sur la façon d'appeler des API tRPC, consultez le <Link path="guides/connection/react-trpc#using-the-generated-code">guide d'utilisation du hook tRPC</Link>.
 
 <Aside>
 Le hook `useGameApi` est différent du hook `useStoryApi` car il ne nécessite pas de build pour que les changements soient reflétés grâce à l'utilisation par tRPC de [l'inférence TypeScript](https://trpc.io/docs/concepts). Cela permet aux développeurs de faire des changements dans leur backend qui sont instantanément reflétés dans leur frontend.
@@ -801,22 +922,23 @@ Le hook `useGameApi` est différent du hook `useStoryApi` car il ne nécessite p
 // packages/game-ui/src/main.tsx
 +import GameApiClientProvider from './components/GameApiClientProvider';
 +import QueryClientProvider from './components/QueryClientProvider';
+import { useAuth } from 'react-oidc-context';
 import CognitoAuth from './components/CognitoAuth';
+import { useRuntimeConfig } from './hooks/useRuntimeConfig';
 import RuntimeConfigProvider from './components/RuntimeConfig';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { I18nProvider } from '@cloudscape-design/components/i18n';
 import messages from '@cloudscape-design/components/i18n/messages/all.en';
+import '@cloudscape-design/global-styles/index.css';
 import { RouterProvider, createRouter } from '@tanstack/react-router';
 import { routeTree } from './routeTree.gen';
-import '@cloudscape-design/global-styles/index.css';
-const router = createRouter({ routeTree });
-// Enregistrer l'instance du routeur pour la sécurité des types
-declare module '@tanstack/react-router' {
-  interface Register {
-    router: typeof router;
-  }
-}
+...
+const App = () => {
+  const auth = useAuth();
+  const runtimeConfig = useRuntimeConfig();
+  return <RouterProvider router={router} context={{ runtimeConfig, auth }} />;
+};
 const root = document.getElementById('root');
 root &&
   createRoot(root).render(
@@ -826,7 +948,7 @@ root &&
           <CognitoAuth>
 +            <QueryClientProvider>
 +              <GameApiClientProvider>
-                <RouterProvider router={router} />
+                <App />
 +              </GameApiClientProvider>
 +            </QueryClientProvider>
           </CognitoAuth>
@@ -865,9 +987,9 @@ Le générateur `ts#infra` génère/met à jour ces fichiers. Examinons certains
         - **application-stage.ts** stacks CDK définis ici
       - stacks/
         - **application-stack.ts** ressources CDK définies ici
-      - index.ts
       - **main.ts** point d'entrée qui définit toutes les étapes
     - cdk.json
+    - checkov.yml
     - project.json
     - ...
   - package.json
@@ -878,7 +1000,7 @@ Le générateur `ts#infra` génère/met à jour ces fichiers. Examinons certains
 
 ```ts
 // packages/infra/src/main.ts
-import { ApplicationStage } from './stacks/application-stage.js';
+import { ApplicationStage } from './stages/application-stage.js';
 import { App } from ':dungeon-adventure/common-constructs';
 
 const app = new App();
@@ -900,11 +1022,11 @@ C'est le point d'entrée de votre application CDK.
 
 ```ts
 // packages/infra/src/stacks/application-stack.ts
-import * as cdk from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 
-export class ApplicationStack extends cdk.Stack {
-  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
 
     // Le code qui définit votre stack va ici

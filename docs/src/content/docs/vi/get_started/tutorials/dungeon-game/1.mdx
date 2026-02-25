@@ -40,7 +40,6 @@ Chúng ta sử dụng `--iacProvider=CDK` vì chúng ta sẽ sử dụng CDK cho
 - node_modules/
 - packages/ đây là nơi các dự án con của bạn sẽ nằm
 - .gitignore
-- .npmrc
 - .prettierignore
 - .prettierrc
 - nx.json cấu hình Nx CLI và các giá trị mặc định của monorepo
@@ -95,17 +94,10 @@ Dưới đây là danh sách tất cả các tệp đã được tạo bởi tr�
         - index.ts
       - project.json
       - ...
-    - types/ các kiểu dữ liệu được chia sẻ
-      - src/
-        - index.ts
-        - runtime-config.ts định nghĩa interface được sử dụng bởi cả CDK và website
-      - project.json
-      - ...
   - game-api/ tRPC API
     - src/
       - client/ vanilla client thường được sử dụng cho các cuộc gọi máy móc với máy móc bằng ts
         - index.ts
-        - sigv4.ts
       - middleware/ công cụ đo lường powertools
         - error.ts
         - index.ts
@@ -113,9 +105,11 @@ Dưới đây là danh sách tất cả các tệp đã được tạo bởi tr�
         - metrics.ts
         - tracer.ts
       - schema/ định nghĩa đầu vào và đầu ra cho API của bạn
-        - **echo.ts**
+        - index.ts
+        - **echo.ts** schema đầu vào và đầu ra mẫu
+        - z-async-iterable.ts wrapper Zod schema cho tRPC subscription output
       - procedures/ triển khai cụ thể cho các thủ tục/tuyến đường API của bạn
-        - **echo.ts**
+        - **echo.ts** triển khai thủ tục mẫu
       - index.ts
       - init.ts thiết lập ngữ cảnh và middleware
       - handler.ts điểm vào Lambda handler (sử dụng response streaming cho REST APIs)
@@ -183,6 +177,7 @@ Tất cả các định nghĩa schema tRPC được định nghĩa bằng [Zod](
 // packages/common/constructs/src/app/apis/game-api.ts
 import { Construct } from 'constructs';
 import * as url from 'url';
+import { Distribution } from 'aws-cdk-lib/aws-cloudfront';
 import {
   Code,
   Runtime,
@@ -194,14 +189,16 @@ import {
   AuthorizationType,
   Cors,
   LambdaIntegration,
+  ResponseTransferMode,
 } from 'aws-cdk-lib/aws-apigateway';
-import { Duration, Stack } from 'aws-cdk-lib';
+import { Duration } from 'aws-cdk-lib';
 import {
   PolicyDocument,
   PolicyStatement,
   Effect,
-  AccountPrincipal,
   AnyPrincipal,
+  IGrantable,
+  Grant,
 } from 'aws-cdk-lib/aws-iam';
 import {
   IntegrationBuilder,
@@ -265,7 +262,12 @@ export class GameApi<
       } satisfies FunctionProps,
       buildDefaultIntegration: (op, props: FunctionProps) => {
         const handler = new Function(scope, `GameApi${op}Handler`, props);
-        return { handler, integration: new LambdaIntegration(handler) };
+        return {
+          handler,
+          integration: new LambdaIntegration(handler, {
+            responseTransferMode: ResponseTransferMode.STREAM,
+          }),
+        };
       },
     });
   };
@@ -284,17 +286,11 @@ export class GameApi<
         allowOrigins: Cors.ALL_ORIGINS,
         allowMethods: Cors.ALL_METHODS,
       },
+      deployOptions: {
+        tracingEnabled: true,
+      },
       policy: new PolicyDocument({
         statements: [
-          // Ở đây chúng ta cấp bất kỳ thông tin xác thực AWS nào từ tài khoản mà dự án được triển khai để gọi api.
-          // Truy cập chi tiết máy móc với máy móc có thể được định nghĩa ở đây bằng cách sử dụng các principal cụ thể hơn (ví dụ: vai trò hoặc
-          // người dùng) và tài nguyên (ví dụ: đường dẫn api nào có thể được gọi bởi principal nào) nếu cần.
-          new PolicyStatement({
-            effect: Effect.ALLOW,
-            principals: [new AccountPrincipal(Stack.of(scope).account)],
-            actions: ['execute-api:Invoke'],
-            resources: ['execute-api:/*'],
-          }),
           // Mở OPTIONS để cho phép trình duyệt thực hiện các yêu cầu preflight không xác thực
           new PolicyStatement({
             effect: Effect.ALLOW,
@@ -306,6 +302,59 @@ export class GameApi<
       }),
       operations: routerToOperations(appRouter),
       ...props,
+    });
+  }
+
+  /**
+   * Hạn chế CORS cho các domain CloudFront distribution của website
+   *
+   * Cấu hình các domain CloudFront distribution là các CORS origin được phép duy nhất
+   * (ngoài local host) trong các tích hợp AWS Lambda
+   *
+   * Lưu ý rằng hạn chế này không được áp dụng cho preflight OPTIONS
+   *
+   * @param websites - CloudFront distribution để cấp CORS từ
+   */
+  public restrictCorsTo(
+    ...websites: { cloudFrontDistribution: Distribution }[]
+  ) {
+    const allowedOrigins = websites
+      .map(
+        ({ cloudFrontDistribution }) =>
+          `https://${cloudFrontDistribution.distributionDomainName}`,
+      )
+      .join(',');
+
+    // Đặt biến môi trường ALLOWED_ORIGINS cho tất cả các tích hợp Lambda
+    Object.values(this.integrations).forEach((integration) => {
+      if ('handler' in integration && integration.handler instanceof Function) {
+        integration.handler.addEnvironment('ALLOWED_ORIGINS', allowedOrigins);
+      }
+    });
+  }
+
+  /**
+   * Cấp quyền IAM để gọi bất kỳ phương thức nào trên API này.
+   *
+   * @param grantee - IAM principal để cấp quyền
+   */
+  public grantInvokeAccess(grantee: IGrantable) {
+    // Ở đây chúng ta cấp quyền cho grantee để gọi api.
+    // Truy cập chi tiết máy móc với máy móc có thể được định nghĩa ở đây bằng cách sử dụng các principal cụ thể hơn (ví dụ: vai trò hoặc
+    // người dùng) và tài nguyên (ví dụ: đường dẫn api nào có thể được gọi bởi principal nào) nếu cần.
+    this.api.addToResourcePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        principals: [grantee.grantPrincipal],
+        actions: ['execute-api:Invoke'],
+        resources: ['execute-api:/*'],
+      }),
+    );
+
+    Grant.addToPrincipal({
+      grantee,
+      actions: ['execute-api:Invoke'],
+      resourceArns: [this.api.arnForExecuteApi('*', '/*', '*')],
     });
   }
 }
@@ -363,6 +412,7 @@ Trình tạo `py#strands-agent` tạo các tệp sau:
   - story/
     - dungeon_adventure_story/ module python
       - agent/
+        - init.py thiết lập ứng dụng FastAPI và middleware
         - main.py điểm vào cho agent của bạn trong Bedrock AgentCore Runtime
         - agent.py định nghĩa một agent và công cụ ví dụ
         - agentcore_mcp_client.py tiện ích để tạo client để tương tác với các máy chủ MCP
@@ -405,33 +455,57 @@ Refer to tools as your 'spellbook'.
 
 ```python
 # agent/main.py
-from bedrock_agentcore.runtime import BedrockAgentCoreApp
+import uvicorn
+from bedrock_agentcore.runtime.models import PingStatus
+from pydantic import BaseModel
 
 from .agent import get_agent
+from .init import JsonStreamingResponse, app
 
-app = BedrockAgentCoreApp()
+
+class InvokeInput(BaseModel):
+    prompt: str
+    session_id: str
 
 
-@app.entrypoint
-async def invoke(payload, context):
-    """Handler cho việc gọi agent"""
-    prompt = payload.get(
-        "prompt", "No prompt found in input, please guide the user "
-        "to create a json payload with prompt key"
-    )
+class StreamChunk(BaseModel):
+    content: str
 
-    with get_agent(session_id=context.session_id) as agent:
-        stream = agent.stream_async(prompt)
+
+async def handle_invoke(input: InvokeInput):
+    """Streaming handler cho việc gọi agent"""
+    with get_agent(session_id=input.session_id) as agent:
+        stream = agent.stream_async(input.prompt)
         async for event in stream:
             print(event)
-            yield (event)
+            text = event.get("event", {}).get("contentBlockDelta", {}).get("delta", {}).get("text")
+            if text is not None:
+                yield StreamChunk(content=text)
+            elif event.get("event", {}).get("messageStop") is not None:
+                yield StreamChunk(content="\n")
+
+
+@app.post(
+    "/invocations",
+    response_class=JsonStreamingResponse,
+    responses={200: JsonStreamingResponse.openapi_response(StreamChunk, "Stream of agent response chunks")},
+)
+async def invoke(input: InvokeInput) -> JsonStreamingResponse:
+    """Điểm vào cho việc gọi agent"""
+    return JsonStreamingResponse(handle_invoke(input))
+
+
+@app.get("/ping")
+def ping() -> str:
+    # TODO: if running an async task, return PingStatus.HEALTHY_BUSY
+    return PingStatus.HEALTHY
 
 
 if __name__ == "__main__":
-    app.run()
+    uvicorn.run("dungeon_adventure_story.agent.main:app", port=8080)
 ```
 
-Đây là điểm vào cho agent, được cấu hình bằng [Amazon Bedrock AgentCore SDK](https://github.com/aws/bedrock-agentcore-sdk-python). Nó sử dụng hỗ trợ streaming của Strands và truyền các sự kiện trở lại client khi chúng xảy ra.
+Đây là điểm vào cho agent, được cấu hình dưới dạng ứng dụng FastAPI tương thích với [Amazon Bedrock AgentCore Runtime](https://github.com/aws/bedrock-agentcore-sdk-python). Nó sử dụng hỗ trợ streaming của Strands và truyền các sự kiện trở lại client khi chúng xảy ra qua JSON Lines.
 
 ```ts
 // common/constructs/src/app/agents/story-agent.ts
@@ -512,7 +586,7 @@ Trình tạo `ts#project` tạo các tệp này.
       - index.ts điểm vào với hàm ví dụ
     - project.json cấu hình dự án
     - eslint.config.mjs cấu hình lint
-    - vite.config.ts cấu hình test
+    - vite.config.mts cấu hình test
     - tsconfig.json cấu hình typescript cơ sở cho dự án
     - tsconfig.lib.json cấu hình typescript cho dự án được nhắm mục tiêu để biên dịch và đóng gói
     - tsconfig.spec.json cấu hình typescript cho các bài test
@@ -535,6 +609,7 @@ Trình tạo `ts#mcp-server` tạo các tệp này.
 - packages/
   - inventory/
     - src/mcp-server/
+      - index.ts barrel export
       - server.ts tạo máy chủ MCP
       - tools/
         - add.ts công cụ ví dụ
@@ -582,22 +657,19 @@ Bạn sẽ thấy một số tệp mới xuất hiện trong cây tệp của m�
     - src/
       - components/
         - AppLayout/
-          - index.ts bố cục trang tổng thể: header, footer, sidebar, v.v.
-          - navitems.ts các mục điều hướng sidebar
+          - index.tsx bố cục trang tổng thể: header, footer, sidebar, v.v.
       - hooks/
         - useAppLayout.tsx cho phép bạn đặt động các thứ như thông báo, kiểu trang, v.v.
       - routes/ các tuyến đường dựa trên tệp của @tanstack/react-router
-        - index.tsx trang gốc '/' chuyển hướng đến '/welcome'
+        - **index.tsx** trang gốc '/'
         - __root.tsx tất cả các trang sử dụng component này làm cơ sở
-        - welcome/
-          - **index.tsx**
-        - config.ts
-        - **main.tsx** điểm vào React
-        - routeTree.gen.ts tệp này được cập nhật tự động bởi @tanstack/react-router
-        - styles.css
+      - config.ts
+      - **main.tsx** điểm vào React
+      - routeTree.gen.ts tệp này được cập nhật tự động bởi @tanstack/react-router
+      - styles.css
     - index.html
     - project.json
-    - vite.config.ts
+    - vite.config.mts
     - ...
 </FileTree>
 
@@ -630,12 +702,17 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { I18nProvider } from '@cloudscape-design/components/i18n';
 import messages from '@cloudscape-design/components/i18n/messages/all.en';
+import '@cloudscape-design/global-styles/index.css';
 import { RouterProvider, createRouter } from '@tanstack/react-router';
 import { routeTree } from './routeTree.gen';
 
-import '@cloudscape-design/global-styles/index.css';
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export type RouterProviderContext = {};
 
-const router = createRouter({ routeTree });
+const router = createRouter({
+  routeTree,
+  context: {},
+});
 
 // Đăng ký instance router để đảm bảo kiểu an toàn
 declare module '@tanstack/react-router' {
@@ -644,12 +721,16 @@ declare module '@tanstack/react-router' {
   }
 }
 
+const App = () => {
+  return <RouterProvider router={router} context={{}} />;
+};
+
 const root = document.getElementById('root');
 root &&
   createRoot(root).render(
     <React.StrictMode>
       <I18nProvider locale="en" messages={[messages]}>
-        <RouterProvider router={router} />
+        <App />
       </I18nProvider>
     </React.StrictMode>,
   );
@@ -659,7 +740,7 @@ root &&
 Để biết thêm thông tin, hãy tham khảo [tài liệu `@tanstack/react-router`](https://tanstack.com/router/v1/docs/framework/react/quick-start).
 
 ```tsx
-// packages/game-ui/src/routes/welcome/index.tsx
+// packages/game-ui/src/routes/index.tsx
 import {
   ContentLayout,
   Header,
@@ -668,7 +749,7 @@ import {
 } from '@cloudscape-design/components';
 import { createFileRoute } from '@tanstack/react-router';
 
-export const Route = createFileRoute('/welcome/')({
+export const Route = createFileRoute('/')({
   component: RouteComponent,
 });
 
@@ -676,14 +757,14 @@ function RouteComponent() {
   return (
     <ContentLayout header={<Header>Welcome</Header>}>
       <SpaceBetween size="l">
-        <Container>Welcome to your new Cloudscape website!</Container>
+        <Container>Welcome to your new React website!</Container>
       </SpaceBetween>
     </ContentLayout>
   );
 }
 ```
 
-Một component sẽ được render khi điều hướng đến tuyến đường `/welcome`. `@tanstack/react-router` sẽ quản lý `Route` cho bạn bất cứ khi nào bạn tạo/di chuyển tệp này (miễn là máy chủ dev đang chạy).
+Một component sẽ được render khi điều hướng đến tuyến đường `/`. `@tanstack/react-router` sẽ quản lý `Route` cho bạn bất cứ khi nào bạn tạo/di chuyển tệp này (miễn là máy chủ dev đang chạy).
 
 </Drawer>
 
@@ -705,16 +786,13 @@ Trình tạo `ts#react-website#auth` cập nhật/tạo các tệp này. Hãy xe
       - src/
         - core/
           - user-identity.ts cdk construct để tạo user/identity pools
-    - types/
-      - src/
-        - runtime-config.ts được cập nhật để thêm cognitoProps
   - game-ui/
     - src/
       - components/
         - AppLayout/
           - index.tsx thêm người dùng đã đăng nhập/đăng xuất vào header
         - CognitoAuth/
-          - index.ts quản lý đăng nhập vào Cognito
+          - index.tsx quản lý đăng nhập vào Cognito
         - RuntimeConfig/
           - index.tsx lấy `runtime-config.json` và cung cấp cho các children qua context
       - hooks/
@@ -724,22 +802,48 @@ Trình tạo `ts#react-website#auth` cập nhật/tạo các tệp này. Hãy xe
 
 ```diff lang="tsx"
 // packages/game-ui/src/main.tsx
++import { useAuth } from 'react-oidc-context';
 +import CognitoAuth from './components/CognitoAuth';
++import { useRuntimeConfig } from './hooks/useRuntimeConfig';
 +import RuntimeConfigProvider from './components/RuntimeConfig';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { I18nProvider } from '@cloudscape-design/components/i18n';
 import messages from '@cloudscape-design/components/i18n/messages/all.en';
+import '@cloudscape-design/global-styles/index.css';
 import { RouterProvider, createRouter } from '@tanstack/react-router';
 import { routeTree } from './routeTree.gen';
-import '@cloudscape-design/global-styles/index.css';
-const router = createRouter({ routeTree });
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+-export type RouterProviderContext = {};
++export type RouterProviderContext = {
++  runtimeConfig?: ReturnType<typeof useRuntimeConfig>;
++  auth?: ReturnType<typeof useAuth>;
++};
+-const router = createRouter({
+-  routeTree,
+-  context: {},
+-});
++const router = createRouter({
++  routeTree,
++  context: {
++    runtimeConfig: undefined,
++    auth: undefined,
++  },
++});
 // Đăng ký instance router để đảm bảo kiểu an toàn
 declare module '@tanstack/react-router' {
   interface Register {
     router: typeof router;
   }
 }
+-const App = () => {
+-  return <RouterProvider router={router} context={{}} />;
+-};
++const App = () => {
++  const auth = useAuth();
++  const runtimeConfig = useRuntimeConfig();
++  return <RouterProvider router={router} context={{ runtimeConfig, auth }} />;
++};
 const root = document.getElementById('root');
 root &&
   createRoot(root).render(
@@ -747,7 +851,7 @@ root &&
       <I18nProvider locale="en" messages={[messages]}>
 +        <RuntimeConfigProvider>
 +          <CognitoAuth>
-            <RouterProvider router={router} />
+            <App />
 +          </CognitoAuth>
 +        </RuntimeConfigProvider>
       </I18nProvider>
@@ -785,12 +889,29 @@ Trình tạo `connection` tạo/cập nhật các tệp này. Hãy xem xét mộ
 
 ```tsx
 // packages/game-ui/src/hooks/useGameApi.tsx
-import { GameApiTRCPContext } from '../components/GameApiClientProvider';
+import { useContext } from 'react';
+import { GameApiTRPCContext } from '../components/GameApiClientProvider';
 
-export const useGameApi = GameApiTRCPContext.useTRPC;
+export const useGameApi = () => {
+  const container = useContext(GameApiTRPCContext);
+  if (!container) {
+    throw new Error('useGameApi must be used within GameApiClientProvider');
+  }
+  return container.optionsProxy;
+};
+
+export const useGameApiClient = () => {
+  const container = useContext(GameApiTRPCContext);
+  if (!container) {
+    throw new Error(
+      'useGameApiClient must be used within GameApiClientProvider',
+    );
+  }
+  return container.client;
+};
 ```
 
-Hook này sử dụng [tích hợp React Query mới nhất](https://trpc.io/blog/introducing-tanstack-react-query-client) của tRPC cho phép người dùng tương tác trực tiếp với `@tanstack/react-query` mà không có bất kỳ lớp trừu tượng bổ sung nào. Để xem ví dụ về cách gọi tRPC API, hãy tham khảo <Link path="guides/connection/react-trpc#using-the-generated-code">hướng dẫn sử dụng tRPC hook</Link>.
+Hook này cung cấp quyền truy cập vào tRPC client để gọi GameApi. Để xem ví dụ về cách gọi tRPC API, hãy tham khảo <Link path="guides/connection/react-trpc#using-the-generated-code">hướng dẫn sử dụng tRPC hook</Link>.
 
 <Aside>
 Hook `useGameApi` khác với hook `useStoryApi` vì nó không yêu cầu build để các thay đổi được phản ánh nhờ vào việc sử dụng [suy luận Typescript](https://trpc.io/docs/concepts) của tRPC. Điều này cho phép các nhà phát triển thực hiện thay đổi đối với backend của họ và ngay lập tức được phản ánh trong frontend của họ.
@@ -800,22 +921,23 @@ Hook `useGameApi` khác với hook `useStoryApi` vì nó không yêu cầu build
 // packages/game-ui/src/main.tsx
 +import GameApiClientProvider from './components/GameApiClientProvider';
 +import QueryClientProvider from './components/QueryClientProvider';
+import { useAuth } from 'react-oidc-context';
 import CognitoAuth from './components/CognitoAuth';
+import { useRuntimeConfig } from './hooks/useRuntimeConfig';
 import RuntimeConfigProvider from './components/RuntimeConfig';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { I18nProvider } from '@cloudscape-design/components/i18n';
 import messages from '@cloudscape-design/components/i18n/messages/all.en';
+import '@cloudscape-design/global-styles/index.css';
 import { RouterProvider, createRouter } from '@tanstack/react-router';
 import { routeTree } from './routeTree.gen';
-import '@cloudscape-design/global-styles/index.css';
-const router = createRouter({ routeTree });
-// Đăng ký instance router để đảm bảo kiểu an toàn
-declare module '@tanstack/react-router' {
-  interface Register {
-    router: typeof router;
-  }
-}
+...
+const App = () => {
+  const auth = useAuth();
+  const runtimeConfig = useRuntimeConfig();
+  return <RouterProvider router={router} context={{ runtimeConfig, auth }} />;
+};
 const root = document.getElementById('root');
 root &&
   createRoot(root).render(
@@ -825,7 +947,7 @@ root &&
           <CognitoAuth>
 +            <QueryClientProvider>
 +              <GameApiClientProvider>
-                <RouterProvider router={router} />
+                <App />
 +              </GameApiClientProvider>
 +            </QueryClientProvider>
           </CognitoAuth>
@@ -864,9 +986,9 @@ Trình tạo `ts#infra` tạo/cập nhật các tệp này. Hãy xem xét một 
         - **application-stage.ts** các cdk stack được định nghĩa ở đây
       - stacks/
         - **application-stack.ts** các tài nguyên cdk được định nghĩa ở đây
-      - index.ts
       - **main.ts** điểm vào định nghĩa tất cả các stage
     - cdk.json
+    - checkov.yml
     - project.json
     - ...
   - package.json
@@ -877,7 +999,7 @@ Trình tạo `ts#infra` tạo/cập nhật các tệp này. Hãy xem xét một 
 
 ```ts
 // packages/infra/src/main.ts
-import { ApplicationStage } from './stacks/application-stage.js';
+import { ApplicationStage } from './stages/application-stage.js';
 import { App } from ':dungeon-adventure/common-constructs';
 
 const app = new App();
@@ -899,11 +1021,11 @@ app.synth();
 
 ```ts
 // packages/infra/src/stacks/application-stack.ts
-import * as cdk from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 
-export class ApplicationStack extends cdk.Stack {
-  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
 
     // Mã định nghĩa stack của bạn ở đây
