@@ -40,7 +40,6 @@ import gameConversationPng from '@assets/game-conversation.png'
 - node_modules/
 - packages/ 하위 프로젝트가 위치할 폴더
 - .gitignore
-- .npmrc
 - .prettierignore
 - .prettierrc
 - nx.json Nx CLI 및 모노레포 기본값 구성
@@ -95,17 +94,10 @@ TypeScript 프로젝트 작업에 대한 자세한 내용은 <Link path="guides/
         - index.ts
       - project.json
       - ...
-    - types/ 공유 타입
-      - src/
-        - index.ts
-        - runtime-config.ts CDK와 웹사이트 모두에서 사용되는 인터페이스 정의
-      - project.json
-      - ...
   - game-api/ tRPC API
     - src/
       - client/ 기계 간 통신용 바닐라 클라이언트
         - index.ts
-        - sigv4.ts
       - middleware/ Powertools 계측
         - error.ts
         - index.ts
@@ -113,9 +105,11 @@ TypeScript 프로젝트 작업에 대한 자세한 내용은 <Link path="guides/
         - metrics.ts
         - tracer.ts
       - schema/ API 입력/출력 정의
-        - **echo.ts**
+        - index.ts
+        - **echo.ts** 샘플 입력 및 출력 스키마
+        - z-async-iterable.ts tRPC 구독 출력용 래퍼 Zod 스키마
       - procedures/ API 프로시저/라우트 구현
-        - **echo.ts**
+        - **echo.ts** 샘플 프로시저 구현
       - index.ts
       - init.ts 컨텍스트 및 미들웨어 설정
       - handler.ts Lambda 핸들러 진입점 (REST API용 응답 스트리밍 사용)
@@ -183,6 +177,7 @@ export type IEchoOutput = z.TypeOf<typeof EchoOutputSchema>;
 // packages/common/constructs/src/app/apis/game-api.ts
 import { Construct } from 'constructs';
 import * as url from 'url';
+import { Distribution } from 'aws-cdk-lib/aws-cloudfront';
 import {
   Code,
   Runtime,
@@ -194,14 +189,16 @@ import {
   AuthorizationType,
   Cors,
   LambdaIntegration,
+  ResponseTransferMode,
 } from 'aws-cdk-lib/aws-apigateway';
-import { Duration, Stack } from 'aws-cdk-lib';
+import { Duration } from 'aws-cdk-lib';
 import {
   PolicyDocument,
   PolicyStatement,
   Effect,
-  AccountPrincipal,
   AnyPrincipal,
+  IGrantable,
+  Grant,
 } from 'aws-cdk-lib/aws-iam';
 import {
   IntegrationBuilder,
@@ -264,7 +261,12 @@ export class GameApi<
       } satisfies FunctionProps,
       buildDefaultIntegration: (op, props: FunctionProps) => {
         const handler = new Function(scope, `GameApi${op}Handler`, props);
-        return { handler, integration: new LambdaIntegration(handler) };
+        return {
+          handler,
+          integration: new LambdaIntegration(handler, {
+            responseTransferMode: ResponseTransferMode.STREAM,
+          }),
+        };
       },
     });
   };
@@ -283,16 +285,11 @@ export class GameApi<
         allowOrigins: Cors.ALL_ORIGINS,
         allowMethods: Cors.ALL_METHODS,
       },
+      deployOptions: {
+        tracingEnabled: true,
+      },
       policy: new PolicyDocument({
         statements: [
-          // 배포 계정의 모든 AWS 자격 증명에 API 호출 권한 부여
-          // 필요한 경우 더 구체적인 주체(예: 역할 또는 사용자) 및 리소스(예: 어떤 주체가 호출할 수 있는 API 경로)를 사용하여 기계 간 세밀한 액세스를 정의할 수 있습니다.
-          new PolicyStatement({
-            effect: Effect.ALLOW,
-            principals: [new AccountPrincipal(Stack.of(scope).account)],
-            actions: ['execute-api:Invoke'],
-            resources: ['execute-api:/*'],
-          }),
           // 브라우저 사전 요청 허용을 위해 OPTIONS 열기
           new PolicyStatement({
             effect: Effect.ALLOW,
@@ -304,6 +301,58 @@ export class GameApi<
       }),
       operations: routerToOperations(appRouter),
       ...props,
+    });
+  }
+
+  /**
+   * 웹사이트 CloudFront 배포 도메인으로 CORS 제한
+   *
+   * CloudFront 배포 도메인을 AWS Lambda 통합에서 허용되는 유일한 CORS 출처로 구성
+   * (로컬 호스트 제외)
+   *
+   * 이 제한은 사전 요청 OPTIONS에는 적용되지 않음
+   *
+   * @param websites - CORS를 허용할 CloudFront 배포
+   */
+  public restrictCorsTo(
+    ...websites: { cloudFrontDistribution: Distribution }[]
+  ) {
+    const allowedOrigins = websites
+      .map(
+        ({ cloudFrontDistribution }) =>
+          `https://${cloudFrontDistribution.distributionDomainName}`,
+      )
+      .join(',');
+
+    // 모든 Lambda 통합에 대해 ALLOWED_ORIGINS 환경 변수 설정
+    Object.values(this.integrations).forEach((integration) => {
+      if ('handler' in integration && integration.handler instanceof Function) {
+        integration.handler.addEnvironment('ALLOWED_ORIGINS', allowedOrigins);
+      }
+    });
+  }
+
+  /**
+   * 이 API의 모든 메서드를 호출할 수 있는 IAM 권한 부여
+   *
+   * @param grantee - 권한을 부여할 IAM 주체
+   */
+  public grantInvokeAccess(grantee: IGrantable) {
+    // 여기서 grantee에게 API 호출 권한을 부여합니다.
+    // 필요한 경우 더 구체적인 주체(예: 역할 또는 사용자) 및 리소스(예: 어떤 주체가 호출할 수 있는 API 경로)를 사용하여 기계 간 세밀한 액세스를 정의할 수 있습니다.
+    this.api.addToResourcePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        principals: [grantee.grantPrincipal],
+        actions: ['execute-api:Invoke'],
+        resources: ['execute-api:/*'],
+      }),
+    );
+
+    Grant.addToPrincipal({
+      grantee,
+      actions: ['execute-api:Invoke'],
+      resourceArns: [this.api.arnForExecuteApi('*', '/*', '*')],
     });
   }
 }
@@ -361,6 +410,7 @@ Python 프로젝트를 생성하려면:
   - story/
     - dungeon_adventure_story/ Python 모듈
       - agent/
+        - init.py FastAPI 앱 및 미들웨어 설정
         - main.py Bedrock AgentCore 런타임용 에이전트 진입점
         - agent.py 예제 에이전트 및 도구 정의
         - agentcore_mcp_client.py MCP 서버와 상호작용용 유틸리티
@@ -403,33 +453,57 @@ Refer to tools as your 'spellbook'.
 
 ```python
 # agent/main.py
-from bedrock_agentcore.runtime import BedrockAgentCoreApp
+import uvicorn
+from bedrock_agentcore.runtime.models import PingStatus
+from pydantic import BaseModel
 
 from .agent import get_agent
+from .init import JsonStreamingResponse, app
 
-app = BedrockAgentCoreApp()
+
+class InvokeInput(BaseModel):
+    prompt: str
+    session_id: str
 
 
-@app.entrypoint
-async def invoke(payload, context):
-    """에이전트 호출 핸들러"""
-    prompt = payload.get(
-        "prompt", "No prompt found in input, please guide the user "
-        "to create a json payload with prompt key"
-    )
+class StreamChunk(BaseModel):
+    content: str
 
-    with get_agent(session_id=context.session_id) as agent:
-        stream = agent.stream_async(prompt)
+
+async def handle_invoke(input: InvokeInput):
+    """에이전트 호출용 스트리밍 핸들러"""
+    with get_agent(session_id=input.session_id) as agent:
+        stream = agent.stream_async(input.prompt)
         async for event in stream:
             print(event)
-            yield (event)
+            text = event.get("event", {}).get("contentBlockDelta", {}).get("delta", {}).get("text")
+            if text is not None:
+                yield StreamChunk(content=text)
+            elif event.get("event", {}).get("messageStop") is not None:
+                yield StreamChunk(content="\n")
+
+
+@app.post(
+    "/invocations",
+    response_class=JsonStreamingResponse,
+    responses={200: JsonStreamingResponse.openapi_response(StreamChunk, "Stream of agent response chunks")},
+)
+async def invoke(input: InvokeInput) -> JsonStreamingResponse:
+    """에이전트 호출 진입점"""
+    return JsonStreamingResponse(handle_invoke(input))
+
+
+@app.get("/ping")
+def ping() -> str:
+    # TODO: 비동기 작업 실행 시 PingStatus.HEALTHY_BUSY 반환
+    return PingStatus.HEALTHY
 
 
 if __name__ == "__main__":
-    app.run()
+    uvicorn.run("dungeon_adventure_story.agent.main:app", port=8080)
 ```
 
-이 파일은 [Amazon Bedrock AgentCore SDK](https://github.com/aws/bedrock-agentcore-sdk-python)를 사용한 에이전트의 진입점입니다. 스트리밍 지원을 사용하며 이벤트 발생 시 클라이언트로 스트리밍합니다.
+이 파일은 [Amazon Bedrock AgentCore Runtime](https://github.com/aws/bedrock-agentcore-sdk-python)과 호환되는 FastAPI 애플리케이션으로 구성된 에이전트의 진입점입니다. 스트리밍 지원을 사용하며 JSON Lines를 통해 이벤트 발생 시 클라이언트로 스트리밍합니다.
 
 ```ts
 // common/constructs/src/app/agents/story-agent.ts
@@ -510,7 +584,7 @@ export class StoryAgent extends Construct {
       - index.ts 예제 함수가 포함된 진입점
     - project.json 프로젝트 구성
     - eslint.config.mjs 린트 구성
-    - vite.config.ts 테스트 구성
+    - vite.config.mts 테스트 구성
     - tsconfig.json 프로젝트 기본 TypeScript 구성
     - tsconfig.lib.json 컴파일 및 번들링용 TypeScript 구성
     - tsconfig.spec.json 테스트용 TypeScript 구성
@@ -533,6 +607,7 @@ export class StoryAgent extends Construct {
 - packages/
   - inventory/
     - src/mcp-server/
+      - index.ts 배럴 익스포트
       - server.ts MCP 서버 생성
       - tools/
         - add.ts 예제 도구
@@ -580,22 +655,19 @@ UI를 생성하려면 다음 단계에 따라 `GameUI`라는 웹사이트를 생
     - src/
       - components/
         - AppLayout/
-          - index.ts 전체 페이지 레이아웃: 헤더, 푸터, 사이드바 등
-          - navitems.ts 사이드바 네비게이션 항목
+          - index.tsx 전체 페이지 레이아웃: 헤더, 푸터, 사이드바 등
       - hooks/
         - useAppLayout.tsx 알림, 페이지 스타일 등을 동적으로 설정
       - routes/ @tanstack/react-router 파일 기반 라우트
-        - index.tsx 루트 '/' 페이지를 '/welcome'으로 리디렉션
+        - **index.tsx** 루트 '/' 페이지
         - __root.tsx 모든 페이지의 기본 컴포넌트
-        - welcome/
-          - **index.tsx**
-        - config.ts
-        - **main.tsx** React 진입점
-        - routeTree.gen.ts @tanstack/react-router에 의해 자동 업데이트
-        - styles.css
+      - config.ts
+      - **main.tsx** React 진입점
+      - routeTree.gen.ts @tanstack/react-router에 의해 자동 업데이트
+      - styles.css
     - index.html
     - project.json
-    - vite.config.ts
+    - vite.config.mts
     - ...
 </FileTree>
 
@@ -628,12 +700,17 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { I18nProvider } from '@cloudscape-design/components/i18n';
 import messages from '@cloudscape-design/components/i18n/messages/all.en';
+import '@cloudscape-design/global-styles/index.css';
 import { RouterProvider, createRouter } from '@tanstack/react-router';
 import { routeTree } from './routeTree.gen';
 
-import '@cloudscape-design/global-styles/index.css';
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export type RouterProviderContext = {};
 
-const router = createRouter({ routeTree });
+const router = createRouter({
+  routeTree,
+  context: {},
+});
 
 // 타입 안전성을 위해 라우터 인스턴스 등록
 declare module '@tanstack/react-router' {
@@ -642,12 +719,16 @@ declare module '@tanstack/react-router' {
   }
 }
 
+const App = () => {
+  return <RouterProvider router={router} context={{}} />;
+};
+
 const root = document.getElementById('root');
 root &&
   createRoot(root).render(
     <React.StrictMode>
       <I18nProvider locale="en" messages={[messages]}>
-        <RouterProvider router={router} />
+        <App />
       </I18nProvider>
     </React.StrictMode>,
   );
@@ -657,7 +738,7 @@ root &&
 자세한 내용은 [`@tanstack/react-router` 문서](https://tanstack.com/router/v1/docs/framework/react/quick-start)를 참조하세요.
 
 ```tsx
-// packages/game-ui/src/routes/welcome/index.tsx
+// packages/game-ui/src/routes/index.tsx
 import {
   ContentLayout,
   Header,
@@ -666,7 +747,7 @@ import {
 } from '@cloudscape-design/components';
 import { createFileRoute } from '@tanstack/react-router';
 
-export const Route = createFileRoute('/welcome/')({
+export const Route = createFileRoute('/')({
   component: RouteComponent,
 });
 
@@ -674,14 +755,14 @@ function RouteComponent() {
   return (
     <ContentLayout header={<Header>Welcome</Header>}>
       <SpaceBetween size="l">
-        <Container>Welcome to your new Cloudscape website!</Container>
+        <Container>Welcome to your new React website!</Container>
       </SpaceBetween>
     </ContentLayout>
   );
 }
 ```
 
-`/welcome` 라우트로 이동할 때 컴포넌트가 렌더링됩니다. `@tanstack/react-router`는 파일 생성/이동 시 `Route`를 관리합니다(개발 서버가 실행 중인 경우).
+`/` 라우트로 이동할 때 컴포넌트가 렌더링됩니다. `@tanstack/react-router`는 파일 생성/이동 시 `Route`를 관리합니다(개발 서버가 실행 중인 경우).
 
 </Drawer>
 
@@ -703,16 +784,13 @@ Amazon Cognito를 통해 인증된 액세스가 필요한 Game UI를 구성해 �
       - src/
         - core/
           - user-identity.ts 사용자/ID 풀 생성용 CDK 구성 요소
-    - types/
-      - src/
-        - runtime-config.ts cognitoProps 추가됨
   - game-ui/
     - src/
       - components/
         - AppLayout/
           - index.tsx 로그인 사용자/로그아웃을 헤더에 추가
         - CognitoAuth/
-          - index.ts Cognito 로그인 관리
+          - index.tsx Cognito 로그인 관리
         - RuntimeConfig/
           - index.tsx `runtime-config.json` 가져와 컨텍스트로 제공
       - hooks/
@@ -722,22 +800,48 @@ Amazon Cognito를 통해 인증된 액세스가 필요한 Game UI를 구성해 �
 
 ```diff lang="tsx"
 // packages/game-ui/src/main.tsx
++import { useAuth } from 'react-oidc-context';
 +import CognitoAuth from './components/CognitoAuth';
++import { useRuntimeConfig } from './hooks/useRuntimeConfig';
 +import RuntimeConfigProvider from './components/RuntimeConfig';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { I18nProvider } from '@cloudscape-design/components/i18n';
 import messages from '@cloudscape-design/components/i18n/messages/all.en';
+import '@cloudscape-design/global-styles/index.css';
 import { RouterProvider, createRouter } from '@tanstack/react-router';
 import { routeTree } from './routeTree.gen';
-import '@cloudscape-design/global-styles/index.css';
-const router = createRouter({ routeTree });
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+-export type RouterProviderContext = {};
++export type RouterProviderContext = {
++  runtimeConfig?: ReturnType<typeof useRuntimeConfig>;
++  auth?: ReturnType<typeof useAuth>;
++};
+-const router = createRouter({
+-  routeTree,
+-  context: {},
+-});
++const router = createRouter({
++  routeTree,
++  context: {
++    runtimeConfig: undefined,
++    auth: undefined,
++  },
++});
 // 타입 안전성을 위해 라우터 인스턴스 등록
 declare module '@tanstack/react-router' {
   interface Register {
     router: typeof router;
   }
 }
+-const App = () => {
+-  return <RouterProvider router={router} context={{}} />;
+-};
++const App = () => {
++  const auth = useAuth();
++  const runtimeConfig = useRuntimeConfig();
++  return <RouterProvider router={router} context={{ runtimeConfig, auth }} />;
++};
 const root = document.getElementById('root');
 root &&
   createRoot(root).render(
@@ -745,7 +849,7 @@ root &&
       <I18nProvider locale="en" messages={[messages]}>
 +        <RuntimeConfigProvider>
 +          <CognitoAuth>
-            <RouterProvider router={router} />
+            <App />
 +          </CognitoAuth>
 +        </RuntimeConfigProvider>
       </I18nProvider>
@@ -783,12 +887,29 @@ root &&
 
 ```tsx
 // packages/game-ui/src/hooks/useGameApi.tsx
-import { GameApiTRCPContext } from '../components/GameApiClientProvider';
+import { useContext } from 'react';
+import { GameApiTRPCContext } from '../components/GameApiClientProvider';
 
-export const useGameApi = GameApiTRCPContext.useTRPC;
+export const useGameApi = () => {
+  const container = useContext(GameApiTRPCContext);
+  if (!container) {
+    throw new Error('useGameApi must be used within GameApiClientProvider');
+  }
+  return container.optionsProxy;
+};
+
+export const useGameApiClient = () => {
+  const container = useContext(GameApiTRPCContext);
+  if (!container) {
+    throw new Error(
+      'useGameApiClient must be used within GameApiClientProvider',
+    );
+  }
+  return container.client;
+};
 ```
 
-이 훅은 tRPC의 최신 [React Query 통합](https://trpc.io/blog/introducing-tanstack-react-query-client)을 사용하여 사용자가 추가 추상화 계층 없이 `@tanstack/react-query`와 직접 상호작용할 수 있도록 합니다. tRPC API 호출 예제는 <Link path="guides/connection/react-trpc#using-the-generated-code">tRPC 훅 사용 가이드</Link>를 참조하세요.
+이 훅은 GameApi 호출을 위한 tRPC 클라이언트에 대한 액세스를 제공합니다. tRPC API 호출 예제는 <Link path="guides/connection/react-trpc#using-the-generated-code">tRPC 훅 사용 가이드</Link>를 참조하세요.
 
 <Aside>
 `useGameApi` 훅은 tRPC의 [TypeScript 추론](https://trpc.io/docs/concepts) 덕분에 변경 사항이 반영되기 위해 빌드가 필요하지 않습니다. 이를 통해 개발자는 프론트엔드에 즉시 반영되는 백엔드 변경을 수행할 수 있습니다.
@@ -798,22 +919,23 @@ export const useGameApi = GameApiTRCPContext.useTRPC;
 // packages/game-ui/src/main.tsx
 +import GameApiClientProvider from './components/GameApiClientProvider';
 +import QueryClientProvider from './components/QueryClientProvider';
+import { useAuth } from 'react-oidc-context';
 import CognitoAuth from './components/CognitoAuth';
+import { useRuntimeConfig } from './hooks/useRuntimeConfig';
 import RuntimeConfigProvider from './components/RuntimeConfig';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { I18nProvider } from '@cloudscape-design/components/i18n';
 import messages from '@cloudscape-design/components/i18n/messages/all.en';
+import '@cloudscape-design/global-styles/index.css';
 import { RouterProvider, createRouter } from '@tanstack/react-router';
 import { routeTree } from './routeTree.gen';
-import '@cloudscape-design/global-styles/index.css';
-const router = createRouter({ routeTree });
-// 타입 안전성을 위해 라우터 인스턴스 등록
-declare module '@tanstack/react-router' {
-  interface Register {
-    router: typeof router;
-  }
-}
+...
+const App = () => {
+  const auth = useAuth();
+  const runtimeConfig = useRuntimeConfig();
+  return <RouterProvider router={router} context={{ runtimeConfig, auth }} />;
+};
 const root = document.getElementById('root');
 root &&
   createRoot(root).render(
@@ -823,7 +945,7 @@ root &&
           <CognitoAuth>
 +            <QueryClientProvider>
 +              <GameApiClientProvider>
-                <RouterProvider router={router} />
+                <App />
 +              </GameApiClientProvider>
 +            </QueryClientProvider>
           </CognitoAuth>
@@ -862,9 +984,9 @@ CDK 인프라스트럭처를 위한 마지막 하위 프로젝트를 생성해 �
         - **application-stage.ts** CDK 스택 정의
       - stacks/
         - **application-stack.ts** CDK 리소스 정의
-      - index.ts
       - **main.ts** 모든 스테이지 정의 진입점
     - cdk.json
+    - checkov.yml
     - project.json
     - ...
   - package.json
@@ -875,7 +997,7 @@ CDK 인프라스트럭처를 위한 마지막 하위 프로젝트를 생성해 �
 
 ```ts
 // packages/infra/src/main.ts
-import { ApplicationStage } from './stacks/application-stage.js';
+import { ApplicationStage } from './stages/application-stage.js';
 import { App } from ':dungeon-adventure/common-constructs';
 
 const app = new App();
@@ -897,11 +1019,11 @@ app.synth();
 
 ```ts
 // packages/infra/src/stacks/application-stack.ts
-import * as cdk from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 
-export class ApplicationStack extends cdk.Stack {
-  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
 
     // 스택 정의 코드 작성 위치
