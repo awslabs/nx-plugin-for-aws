@@ -298,16 +298,16 @@ class InvokeInput(BaseModel):
 
 #### 定义输出模型
 
-对于流式响应，端点的返回类型注解对应于生成器函数yield的每个值的类型。默认情况下，智能体yield包含从Strands流式返回的智能体响应文本的字符串：
+对于流式响应，生成器提供`JsonStreamingResponse`，它会自动将Pydantic模型序列化为JSON Lines格式（`application/jsonl`）。该格式兼容OpenAPI 3.2的流式规范，并与生成的TypeScript客户端无缝协作。
+
+默认情况下，智能体yield包含智能体响应文本的`StreamChunk`对象：
 
 ```python
-@app.post("/invocations", openapi_extra={"x-streaming": True})
-async def invoke(input: InvokeInput) -> str:
-    """智能体调用入口点"""
-    return StreamingResponse(handle_invoke(input), media_type="text/event-stream")
+class StreamChunk(BaseModel):
+    content: str
 ```
 
-您可以定义Pydantic模型来yield结构化数据。为此，您需要序列化`handle_invoke`所yield的pydantic模型：
+您可以自定义`StreamChunk`模型以满足需求：
 
 ```python
 from pydantic import BaseModel
@@ -316,23 +316,23 @@ class StreamChunk(BaseModel):
     content: str
     timestamp: str
     token_count: int
-
-def handle_invoke(...):
-    ...
-    yield StreamChunk(content="xx", timestamp="yy", token_count=5)
-
-def serialize_stream(generator):
-    async for output in generator:
-        yield (output.model_dump_json() + "\n").encode("utf-8")
-
-@app.post("/invocations", openapi_extra={"x-streaming": True})
-async def invoke(input: InvokeInput) -> StreamChunk:
-    return StreamingResponse(serialize_stream(handle_invoke(input)), media_type="application/json")
 ```
 
-:::caution
-请注意，提供的服务器（以及上述`serialize_stream`方法）目前不符合Server-Sent Events（SSE）标准，因此如果希望通过生成的TypeScript客户端从前端调用智能体，目前不支持SSE格式的流式事件。如果这影响到您，请为[此GitHub issue](https://github.com/awslabs/nx-plugin-for-aws/issues/369)点赞，以帮助我们优先处理此问题。
+:::note
+注意，由于FastAPI目前不支持为流式响应生成OpenAPI规范，我们必须为每个流式操作显式设置响应模型，例如：
+
+```python
+@app.post(
+    "/invocations",
+    response_class=JsonStreamingResponse,
+    responses={200: JsonStreamingResponse.openapi_response(StreamChunk)},
+)
+async def invoke(input: InvokeInput) -> JsonStreamingResponse:
+    return JsonStreamingResponse(handle_invoke(input))
+```
 :::
+
+FastAPI有一个[关于原生支持的开放功能请求](https://github.com/fastapi/fastapi/discussions/14362)。
 
 ## Bedrock AgentCore Python SDK
 

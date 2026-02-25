@@ -18,15 +18,11 @@ class SigV4HTTPXAuth(httpx.Auth):
         self.region = region
         self.signer = SigV4Auth(credentials, self.service, region)
 
-    def auth_flow(
-        self, request: httpx.Request
-    ) -> Generator[httpx.Request, httpx.Response, None]:
+    def auth_flow(self, request: httpx.Request) -> Generator[httpx.Request, httpx.Response, None]:
         headers = dict(request.headers)
 
         headers.pop("connection", None)
-        headers["x-amz-content-sha256"] = hashlib.sha256(
-            request.content if request.content else b""
-        ).hexdigest()
+        headers["x-amz-content-sha256"] = hashlib.sha256(request.content if request.content else b"").hexdigest()
 
         aws_request = AWSRequest(
             method=request.method,
@@ -73,9 +69,7 @@ class AgentCoreMCPClient:
         )
 
     @staticmethod
-    def with_iam_auth(
-        agent_runtime_arn: str, credentials: Any, region: str, session_id: str
-    ) -> MCPClient:
+    def with_iam_auth(agent_runtime_arn: str, credentials: Any, region: str, session_id: str) -> MCPClient:
         """Create an MCP client with IAM (SigV4) authentication."""
         return AgentCoreMCPClient._create(
             agent_runtime_arn=agent_runtime_arn,
@@ -85,9 +79,7 @@ class AgentCoreMCPClient:
         )
 
     @staticmethod
-    def with_jwt_auth(
-        agent_runtime_arn: str, access_token: str, region: str, session_id: str
-    ) -> MCPClient:
+    def with_jwt_auth(agent_runtime_arn: str, access_token: str, region: str, session_id: str) -> MCPClient:
         """Create an MCP client with JWT authentication."""
         return AgentCoreMCPClient._create(
             agent_runtime_arn=agent_runtime_arn,

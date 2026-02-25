@@ -117,20 +117,35 @@ async function invokeAgentCoreAgent(
     },
   });
 
-  let responseText = '';
+  const chunks: { content: string }[] = [];
+  let buffer = '';
   const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
   while (reader) {
     const { value, done } = await reader.read();
-    if (done) break;
-    responseText += value;
-    console.log(value);
+    if (done) {
+      if (buffer.trim()) {
+        chunks.push(JSON.parse(buffer));
+      }
+      break;
+    }
+    buffer += value;
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    for (const line of lines) {
+      if (line.trim()) {
+        const chunk = JSON.parse(line);
+        chunks.push(chunk);
+        console.log(chunk);
+      }
+    }
   }
 
-  console.log('Agent Response:', responseText);
+  console.log('Agent Response chunks:', chunks);
 
   console.log(`${agentName} response status:`, response.status);
   expect(response.status).toBe(200);
-  expect(responseText).not.toHaveLength(0);
+  expect(chunks.length).toBeGreaterThan(0);
+  expect(chunks.every((c) => typeof c.content === 'string')).toBe(true);
   console.log(`Successfully invoked ${agentName}`);
 }
 

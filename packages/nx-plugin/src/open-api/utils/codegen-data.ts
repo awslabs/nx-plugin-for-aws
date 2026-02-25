@@ -35,6 +35,7 @@ import {
   COMPOSED_SCHEMA_TYPES,
   PRIMITIVE_TYPES,
   VENDOR_EXTENSIONS,
+  STREAMING_CONTENT_TYPES,
   Operation,
 } from './codegen-data/types';
 
@@ -142,6 +143,18 @@ export const buildOpenApiCodeGenData = async (
                     responseSchema,
                     modelsByName,
                   );
+                }
+                if (
+                  STREAMING_CONTENT_TYPES.has(mediaType) &&
+                  'itemSchema' in responseContent
+                ) {
+                  (response as any).isJsonlStreaming = true;
+                  (response as any).itemSchemaModel =
+                    await buildOrReferenceModel(
+                      spec,
+                      modelsByName,
+                      responseContent.itemSchema,
+                    );
                 }
               }
             }
@@ -1123,9 +1136,24 @@ const mutateOperationWithAdditionalData = (op: Operation) => {
   (op as any).isQuery = !isMutation;
 
   // Streaming responses
-  (op as any).isStreaming = !!(op as any).vendorExtensions?.[
-    VENDOR_EXTENSIONS.STREAMING
-  ];
+  (op as any).isStreaming =
+    !!(op as any).vendorExtensions?.[VENDOR_EXTENSIONS.STREAMING] ||
+    op.responses.some((res) => (res as any).isJsonlStreaming);
+
+  // Set the result type for the client method to the item schema so that
+  // it will resolve to AsyncIterableIterator<{itemSchemaModel.name}>
+  const jsonlResponse = op.responses.find(
+    (res) => (res as any).isJsonlStreaming,
+  );
+  if (jsonlResponse) {
+    const itemSchemaModel = (jsonlResponse as any).itemSchemaModel;
+    const result = (op as any).result;
+    if (result && itemSchemaModel) {
+      result.type = itemSchemaModel.name;
+      result.typescriptType = itemSchemaModel.name;
+      result.export = 'reference';
+    }
+  }
 
   // Add infinite query details if applicable
   if (!isMutation) {

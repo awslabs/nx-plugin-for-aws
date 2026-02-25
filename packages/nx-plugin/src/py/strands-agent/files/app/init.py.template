@@ -1,7 +1,10 @@
+from collections.abc import AsyncIterator
+from typing import Any
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.routing import APIRoute
 from pydantic import BaseModel
 from starlette.middleware.exceptions import ExceptionMiddleware
@@ -9,6 +12,53 @@ from starlette.middleware.exceptions import ExceptionMiddleware
 
 class InternalServerErrorDetails(BaseModel):
     detail: str
+
+
+class JsonStreamingResponse(StreamingResponse):
+    """A streaming response that serializes items to JSON Lines format."""
+
+    media_type = "application/jsonl"
+
+    def __init__(
+        self,
+        content: AsyncIterator[BaseModel],
+        status_code: int = 200,
+        headers: dict[str, str] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """Stream json lines from an async iterator yielding Pydantic models"""
+        super().__init__(
+            content=self._serialize(content),
+            status_code=status_code,
+            headers=headers,
+            media_type=self.media_type,
+            **kwargs,
+        )
+
+    @staticmethod
+    async def _serialize(
+        content: AsyncIterator[BaseModel],
+    ) -> AsyncIterator[bytes]:
+        """Serialize Pydantic models to JSON Lines format."""
+        async for item in content:
+            yield (item.model_dump_json() + "\n").encode("utf-8")
+
+    @staticmethod
+    def openapi_response(
+        item_model: type[BaseModel],
+        description: str = "Streaming response",
+    ) -> dict[str, Any]:
+        """Generate an OpenAPI application/jsonl response for a stream of the given model"""
+        return {
+            "description": description,
+            "content": {
+                "application/jsonl": {
+                    "itemSchema": {"$ref": f"#/components/schemas/{item_model.__name__}"},
+                }
+            },
+            # Include the model so FastAPI registers the schema in components/schemas
+            "model": item_model,
+        }
 
 
 app = FastAPI(title="<%= agentNameClassName %>", responses={500: {"model": InternalServerErrorDetails}})

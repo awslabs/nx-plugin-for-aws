@@ -298,16 +298,16 @@ Vale anche la pena notare che a seconda del tuo caso d'uso potresti dover implem
 
 #### Definire Modelli di Output
 
-Per le risposte in streaming, l'annotazione del tipo di ritorno sul tuo endpoint corrisponde al tipo di ogni valore prodotto dalla tua funzione generatore. Di default, l'agente produce stringhe contenenti il testo di risposta dell'agente mentre viene trasmesso in streaming da Strands:
+Per le risposte in streaming, il generatore fornisce `JsonStreamingResponse` che serializza automaticamente i modelli Pydantic in formato JSON Lines (`application/jsonl`). Questo formato è compatibile con la specifica di streaming di OpenAPI 3.2 e funziona perfettamente con il client TypeScript generato.
+
+Di default, l'agente produce oggetti `StreamChunk` contenenti il testo di risposta dell'agente:
 
 ```python
-@app.post("/invocations", openapi_extra={"x-streaming": True})
-async def invoke(input: InvokeInput) -> str:
-    """Entry point for agent invocation"""
-    return StreamingResponse(handle_invoke(input), media_type="text/event-stream")
+class StreamChunk(BaseModel):
+    content: str
 ```
 
-Puoi definire un modello Pydantic per produrre dati strutturati invece. Per fare questo, dovrai serializzare i modelli pydantic prodotti da `handle_invoke`:
+Puoi personalizzare il modello `StreamChunk` per adattarlo alle tue esigenze:
 
 ```python
 from pydantic import BaseModel
@@ -316,23 +316,23 @@ class StreamChunk(BaseModel):
     content: str
     timestamp: str
     token_count: int
-
-def handle_invoke(...):
-    ...
-    yield StreamChunk(content="xx", timestamp="yy", token_count=5)
-
-def serialize_stream(generator):
-    async for output in generator:
-        yield (output.model_dump_json() + "\n").encode("utf-8")
-
-@app.post("/invocations", openapi_extra={"x-streaming": True})
-async def invoke(input: InvokeInput) -> StreamChunk:
-    return StreamingResponse(serialize_stream(handle_invoke(input)), media_type="application/json")
 ```
 
-:::caution
-Nota che il server fornito (e il metodo `serialize_stream` sopra) attualmente non è conforme allo standard Server-Sent Events (SSE), quindi se desiderato l'Agente può essere invocato dal nostro client TypeScript generato da un frontend, che attualmente non si aspetta eventi in streaming in formato SSE. Per favore +1 [questa issue su GitHub](https://github.com/awslabs/nx-plugin-for-aws/issues/369) se questo ti riguarda per aiutarci a dare priorità alla risoluzione.
+:::note
+Nota che poiché FastAPI attualmente non supporta la generazione di una specifica OpenAPI per le risposte in streaming, dobbiamo impostare esplicitamente il modello di risposta per ogni operazione di streaming, cioè:
+
+```python
+@app.post(
+    "/invocations",
+    response_class=JsonStreamingResponse,
+    responses={200: JsonStreamingResponse.openapi_response(StreamChunk)},
+)
+async def invoke(input: InvokeInput) -> JsonStreamingResponse:
+    return JsonStreamingResponse(handle_invoke(input))
+```
 :::
+
+Esiste una [richiesta di funzionalità aperta per il supporto nativo in FastAPI](https://github.com/fastapi/fastapi/discussions/14362).
 
 ## Bedrock AgentCore Python SDK
 
