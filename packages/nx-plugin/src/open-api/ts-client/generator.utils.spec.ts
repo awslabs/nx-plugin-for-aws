@@ -65,6 +65,14 @@ export const mockStreamingFetch = (
   return mockFetch;
 };
 
+export const mockJsonlStreamingFetch = (
+  status: number,
+  jsonlLines: string[],
+): Mock<any> => {
+  const chunks: string[] = jsonlLines.map((line) => line + '\n');
+  return mockStreamingFetch(status, chunks);
+};
+
 describe('openapi test utils', () => {
   it('should have a test', () => {
     // A test is required for this to be a .spec.ts file.

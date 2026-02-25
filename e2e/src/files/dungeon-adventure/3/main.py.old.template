@@ -1,15 +1,18 @@
 import uvicorn
 from bedrock_agentcore.runtime.models import PingStatus
-from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
 
 from .agent import get_agent
-from .init import app
+from .init import JsonStreamingResponse, app
 
 
 class InvokeInput(BaseModel):
     prompt: str
     session_id: str
+
+
+class StreamChunk(BaseModel):
+    content: str
 
 
 async def handle_invoke(input: InvokeInput):
@@ -18,17 +21,21 @@ async def handle_invoke(input: InvokeInput):
         stream = agent.stream_async(input.prompt)
         async for event in stream:
             print(event)
-            content = event.get("event", {}).get("contentBlockDelta", {}).get("delta", {}).get("text")
-            if content is not None:
-                yield content
+            text = event.get("event", {}).get("contentBlockDelta", {}).get("delta", {}).get("text")
+            if text is not None:
+                yield StreamChunk(content=text)
             elif event.get("event", {}).get("messageStop") is not None:
-                yield "\n"
+                yield StreamChunk(content="\n")
 
 
-@app.post("/invocations", openapi_extra={"x-streaming": True}, response_class=PlainTextResponse)
-async def invoke(input: InvokeInput) -> str:
+@app.post(
+    "/invocations",
+    response_class=JsonStreamingResponse,
+    responses={200: JsonStreamingResponse.openapi_response(StreamChunk, "Stream of agent response chunks")},
+)
+async def invoke(input: InvokeInput) -> JsonStreamingResponse:
     """Entry point for agent invocation"""
-    return StreamingResponse(handle_invoke(input), media_type="text/event-stream")
+    return JsonStreamingResponse(handle_invoke(input))
 
 
 @app.get("/ping")

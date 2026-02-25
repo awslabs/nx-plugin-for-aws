@@ -8,6 +8,10 @@ export interface GenerateStoryInput {
   actions: { role: string; content: string }[];
 }
 
+export interface StreamChunk {
+  content: string;
+}
+
 export const useStoryAgent = () => {
   const { agentArn } = useRuntimeConfig();
   const region = agentArn.split(':')[3];
@@ -19,7 +23,7 @@ export const useStoryAgent = () => {
     () => ({
       generateStory: async function* (
         opts: GenerateStoryInput,
-      ): AsyncIterableIterator<string> {
+      ): AsyncIterableIterator<StreamChunk> {
         const response = await fetch(url, {
           headers: {
             Authorization: `Bearer ${user?.id_token}`,
@@ -35,11 +39,25 @@ export const useStoryAgent = () => {
 
         if (!reader) return;
 
+        let buffer = '';
         while (true) {
           const { value, done } = await reader.read();
 
-          if (done) return;
-          yield value;
+          if (done) {
+            if (buffer.trim()) {
+              yield JSON.parse(buffer) as StreamChunk;
+            }
+            return;
+          }
+
+          buffer += value;
+          const lines = buffer.split('\n');
+          buffer = lines.pop() ?? '';
+          for (const line of lines) {
+            if (line.trim()) {
+              yield JSON.parse(line) as StreamChunk;
+            }
+          }
         }
       },
     }),

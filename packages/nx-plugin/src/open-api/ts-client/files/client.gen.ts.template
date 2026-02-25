@@ -147,11 +147,11 @@ const renderResponse = (response, options) => {
   }
   return renderFromJsonValue(response, `(${opts.asJson})`);
 };
-const renderStreamingResponseChunk = (response) => {
+const renderStreamingResponseChunk = (response, chunkVariableName = 'value') => {
   return renderResponse(response, {
-    asJson: 'JSON.parse(value)',
-    asText: 'value',
-    asBlob: 'new Blob([value])',
+    asJson: `JSON.parse(${chunkVariableName})`,
+    asText: chunkVariableName,
+    asBlob: `new Blob([${chunkVariableName}])`,
   });
 };
 const matchPattern = (pattern, value) => {
@@ -433,11 +433,34 @@ export class <%- className %> {
     return;
     <%_ } else { _%>
     const reader = response.body?<% if (response.type !== 'binary') { %>.pipeThrough(new TextDecoderStream())<% } %>.getReader();
+    <%_ if (response.isJsonlStreaming) { _%>
+    let buffer = '';
+    while (reader) {
+      const { value: chunk, done } = await reader.read();
+      if (done) {
+        if (buffer.trim()) {
+          yield <%- renderStreamingResponseChunk(response.itemSchemaModel, 'buffer') %>;
+        }
+        return;
+      }
+      if (chunk) {
+        buffer += chunk;
+      }
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        if (line.trim()) {
+          yield <%- renderStreamingResponseChunk(response.itemSchemaModel, 'line') %>;
+        }
+      }
+    }
+    <%_ } else { _%>
     while (reader) {
       const { value, done } = await reader.read();
       if (done) return;
       yield <%- renderStreamingResponseChunk(response) %>;
     }
+    <%_ } _%>
     return;
     <%_ } _%>
     <%_ } else { _%>
