@@ -298,16 +298,16 @@ class InvokeInput(BaseModel):
 
 #### 出力モデルの定義
 
-ストリーミングレスポンスの場合、エンドポイントの戻り値の型アノテーションは、ジェネレーター関数が生成する各値の型に対応します。デフォルトでは、エージェントはStrandsからストリーミングバックされるエージェントのレスポンステキストを含む文字列を生成します：
+ストリーミングレスポンスの場合、ジェネレーターは`JsonStreamingResponse`を提供し、PydanticモデルをJSON Lines形式（`application/jsonl`）に自動的にシリアライズします。この形式はOpenAPI 3.2のストリーミング仕様と互換性があり、生成されたTypeScriptクライアントとシームレスに連携します。
+
+デフォルトでは、エージェントはエージェントのレスポンステキストを含む`StreamChunk`オブジェクトを生成します：
 
 ```python
-@app.post("/invocations", openapi_extra={"x-streaming": True})
-async def invoke(input: InvokeInput) -> str:
-    """Entry point for agent invocation"""
-    return StreamingResponse(handle_invoke(input), media_type="text/event-stream")
+class StreamChunk(BaseModel):
+    content: str
 ```
 
-代わりに構造化データを生成するPydanticモデルを定義できます。これを行うには、`handle_invoke`が生成するPydanticモデルをシリアライズする必要があります：
+ニーズに合わせて`StreamChunk`モデルをカスタマイズできます：
 
 ```python
 from pydantic import BaseModel
@@ -316,23 +316,23 @@ class StreamChunk(BaseModel):
     content: str
     timestamp: str
     token_count: int
-
-def handle_invoke(...):
-    ...
-    yield StreamChunk(content="xx", timestamp="yy", token_count=5)
-
-def serialize_stream(generator):
-    async for output in generator:
-        yield (output.model_dump_json() + "\n").encode("utf-8")
-
-@app.post("/invocations", openapi_extra={"x-streaming": True})
-async def invoke(input: InvokeInput) -> StreamChunk:
-    return StreamingResponse(serialize_stream(handle_invoke(input)), media_type="application/json")
 ```
 
-:::caution
-ここで注意すべき点は、提供されるサーバー（および上記の`serialize_stream`メソッド）は現在Server-Sent Events（SSE）標準に準拠していないため、必要に応じてフロントエンドから生成されたTypeScriptクライアントでエージェントを呼び出すことができますが、現在はSSE形式のストリーミングイベントを想定していません。この問題が影響する場合は、優先順位付けのために[このGitHub issue](https://github.com/awslabs/nx-plugin-for-aws/issues/369)に+1をお願いします。
+:::note
+FastAPIは現在ストリーミングレスポンスのOpenAPI仕様生成をサポートしていないため、各ストリーミング操作のレスポンスモデルを明示的に設定する必要があります：
+
+```python
+@app.post(
+    "/invocations",
+    response_class=JsonStreamingResponse,
+    responses={200: JsonStreamingResponse.openapi_response(StreamChunk)},
+)
+async def invoke(input: InvokeInput) -> JsonStreamingResponse:
+    return JsonStreamingResponse(handle_invoke(input))
+```
 :::
+
+[FastAPIでのネイティブサポートのための機能リクエスト](https://github.com/fastapi/fastapi/discussions/14362)が公開されています。
 
 ## Bedrock AgentCore Python SDK
 
