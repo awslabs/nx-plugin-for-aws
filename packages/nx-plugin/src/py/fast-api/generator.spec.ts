@@ -128,7 +128,7 @@ describe('fastapi project generator', () => {
     ).toBe(true);
     expect(
       pyprojectToml.project.dependencies.some((dep) =>
-        dep.startsWith('mangum=='),
+        dep.startsWith('uvicorn=='),
       ),
     ).toBe(true);
     expect(
@@ -178,10 +178,10 @@ describe('fastapi project generator', () => {
       tree.exists('packages/common/constructs/src/core/api/rest-api.ts'),
     ).toBeFalsy();
 
-    // Check scope is included in function handler
+    // Check handler is set to run.sh for Lambda Web Adapter
     expect(
       tree.read('packages/common/constructs/src/app/apis/test-api.ts', 'utf-8'),
-    ).toContain("handler: 'proj_test_api.main.handler'");
+    ).toContain("handler: 'run.sh'");
   });
 
   it('should set up shared constructs for rest', async () => {
@@ -224,10 +224,10 @@ describe('fastapi project generator', () => {
       tree.exists('packages/common/constructs/src/core/api/http-api.ts'),
     ).toBeFalsy();
 
-    // Check scope is included in function handler
+    // Check handler is set to run.sh for Lambda Web Adapter
     expect(
       tree.read('packages/common/constructs/src/app/apis/test-api.ts', 'utf-8'),
-    ).toContain("handler: 'proj_test_api.main.handler'");
+    ).toContain("handler: 'run.sh'");
   });
 
   it('should update shared constructs build dependencies', async () => {
@@ -438,10 +438,8 @@ describe('fastapi project generator', () => {
       expect(appApiContent).toContain('authorization_type = "AWS_IAM"');
       expect(appApiContent).not.toContain('variable "user_pool_id"');
 
-      // Verify FastAPI-specific handler configuration
-      expect(appApiContent).toMatch(
-        /handler\s+=\s+"proj_test_api\.main\.handler"/,
-      );
+      // Verify FastAPI-specific handler configuration (Lambda Web Adapter)
+      expect(appApiContent).toMatch(/handler\s+=\s+"run\.sh"/);
       expect(appApiContent).toMatch(/runtime\s+=\s+"python3\.12"/);
 
       // Snapshot terraform files
@@ -488,9 +486,7 @@ describe('fastapi project generator', () => {
       expect(appApiContent).toContain('authorization_type = "JWT"');
 
       // Verify FastAPI-specific handler configuration
-      expect(appApiContent).toMatch(
-        /handler\s+=\s+"proj_test_api\.main\.handler"/,
-      );
+      expect(appApiContent).toMatch(/handler\s+=\s+"run\.sh"/);
       expect(appApiContent).toMatch(/runtime\s+=\s+"python3\.12"/);
 
       // Snapshot terraform files
@@ -538,9 +534,7 @@ describe('fastapi project generator', () => {
       expect(appApiContent).not.toContain('variable "user_pool_id"');
 
       // Verify FastAPI-specific handler configuration
-      expect(appApiContent).toMatch(
-        /handler\s+=\s+"proj_test_api\.main\.handler"/,
-      );
+      expect(appApiContent).toMatch(/handler\s+=\s+"run\.sh"/);
       expect(appApiContent).toMatch(/runtime\s+=\s+"python3\.12"/);
 
       // Snapshot terraform files
@@ -588,9 +582,7 @@ describe('fastapi project generator', () => {
       expect(appApiContent).not.toContain('variable "user_pool_id"');
 
       // Verify FastAPI-specific handler configuration
-      expect(appApiContent).toMatch(
-        /handler\s+=\s+"proj_test_api\.main\.handler"/,
-      );
+      expect(appApiContent).toMatch(/handler\s+=\s+"run\.sh"/);
       expect(appApiContent).toMatch(/runtime\s+=\s+"python3\.12"/);
 
       // Snapshot terraform files
@@ -637,9 +629,7 @@ describe('fastapi project generator', () => {
       expect(appApiContent).toContain('authorization = "COGNITO_USER_POOLS"');
 
       // Verify FastAPI-specific handler configuration
-      expect(appApiContent).toMatch(
-        /handler\s+=\s+"proj_test_api\.main\.handler"/,
-      );
+      expect(appApiContent).toMatch(/handler\s+=\s+"run\.sh"/);
       expect(appApiContent).toMatch(/runtime\s+=\s+"python3\.12"/);
 
       // Snapshot terraform files
@@ -687,9 +677,7 @@ describe('fastapi project generator', () => {
       expect(appApiContent).not.toContain('variable "user_pool_id"');
 
       // Verify FastAPI-specific handler configuration
-      expect(appApiContent).toMatch(
-        /handler\s+=\s+"proj_test_api\.main\.handler"/,
-      );
+      expect(appApiContent).toMatch(/handler\s+=\s+"run\.sh"/);
       expect(appApiContent).toMatch(/runtime\s+=\s+"python3\.12"/);
 
       // Snapshot terraform files
@@ -792,9 +780,7 @@ describe('fastapi project generator', () => {
       const terraformFile = tree.read(appApiFile!, 'utf-8');
 
       // Verify FastAPI-specific handler configuration with custom module
-      expect(terraformFile).toMatch(
-        /handler\s+=\s+"custom_module\.main\.handler"/,
-      );
+      expect(terraformFile).toMatch(/handler\s+=\s+"run\.sh"/);
       expect(terraformFile).toMatch(/runtime\s+=\s+"python3\.12"/);
     });
 

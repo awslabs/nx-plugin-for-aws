@@ -110,11 +110,15 @@ resource "aws_lambda_function" "api_lambda" {
   handler         = "index.handler"
   runtime         = "nodejs22.x"
   <%_ } else if (backend.type === 'fastapi') { _%>
-  handler         = "<%= backend.moduleName %>.main.handler"
+  handler         = "run.sh"
   runtime         = "python3.12"
+  layers          = ["arn:aws:lambda:${data.aws_region.current.name}:753240598075:layer:LambdaAdapterLayerX86:24"]
   <%_ } _%>
   timeout         = 30
   memory_size     = 128
+  <%_ if (backend.type === 'fastapi') { _%>
+  publish         = true
+  <%_ } _%>
 
   source_code_hash = data.archive_file.lambda_zip.output_base64sha256
 
@@ -123,9 +127,21 @@ resource "aws_lambda_function" "api_lambda" {
     mode = "Active"
   }
 
+  <%_ if (backend.type === 'fastapi') { _%>
+  # Enable SnapStart for faster cold starts
+  snap_start {
+    apply_on = "PublishedVersions"
+  }
+  <%_ } _%>
+
   environment {
     variables = merge({
       AWS_CONNECTION_REUSE_ENABLED = "1"
+      <%_ if (backend.type === 'fastapi') { _%>
+      PORT                        = "8000"
+      AWS_LWA_INVOKE_MODE         = "response_stream"
+      AWS_LAMBDA_EXEC_WRAPPER     = "/opt/bootstrap"
+      <%_ } _%>
     }, var.env)
   }
 
@@ -185,6 +201,17 @@ resource "aws_cloudwatch_log_group" "lambda_logs" {
   tags              = var.tags
 }
 
+<%_ if (backend.type === 'fastapi') { _%>
+# Lambda alias pointing to the latest published version for SnapStart
+resource "aws_lambda_alias" "live" {
+  name             = "live"
+  function_name    = aws_lambda_function.api_lambda.function_name
+  function_version = aws_lambda_function.api_lambda.version
+
+  depends_on = [aws_lambda_function.api_lambda]
+}
+<%_ } _%>
+
 <%_ if (auth === 'Cognito') { _%>
 # Cognito User Pool Authorizer
 resource "aws_api_gateway_authorizer" "cognito_authorizer" {
@@ -211,14 +238,22 @@ resource "aws_api_gateway_integration" "lambda_integration" {
 
   integration_http_method = "POST"
   type                    = "AWS_PROXY"
-  <%_ if (backend.type === 'trpc') { _%>
+  <%_ if (backend.type === 'fastapi') { _%>
+  # Use the response streaming invocation path with the alias ARN for SnapStart
+  uri                     = "arn:aws:apigateway:${data.aws_region.current.name}:lambda:path/2021-11-15/functions/${aws_lambda_alias.live.arn}/response-streaming-invocations"
+  response_transfer_mode  = "STREAM"
+  <%_ } else if (backend.type === 'trpc') { _%>
   uri                     = aws_lambda_function.api_lambda.response_streaming_invoke_arn
   response_transfer_mode  = "STREAM"
   <%_ } else { _%>
   uri                     = aws_lambda_function.api_lambda.invoke_arn
   <%_ } _%>
 
+  <%_ if (backend.type === 'fastapi') { _%>
+  depends_on = [aws_lambda_alias.live]
+  <%_ } else { _%>
   depends_on = [aws_lambda_function.api_lambda]
+  <%_ } _%>
 }
 
 # Method for proxy integration
@@ -379,16 +414,41 @@ resource "aws_api_gateway_rest_api_policy" "api_policy" {
   })
 }
 
+<%_ if (backend.type === 'fastapi') { _%>
+# Lambda permission for API Gateway to invoke the function via alias
+<%_ } else { _%>
 # Lambda permission for API Gateway to invoke the function
+<%_ } _%>
 resource "aws_lambda_permission" "api_gateway_invoke" {
   statement_id  = "AllowExecutionFromAPIGateway"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.api_lambda.function_name
+  <%_ if (backend.type === 'fastapi') { _%>
+  qualifier     = aws_lambda_alias.live.name
+  <%_ } _%>
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${module.rest_api.api_execution_arn}/*/*"
 
+  <%_ if (backend.type === 'fastapi') { _%>
+  depends_on = [module.rest_api, aws_lambda_alias.live]
+  <%_ } else { _%>
   depends_on = [module.rest_api, aws_lambda_function.api_lambda]
+  <%_ } _%>
 }
+
+<%_ if (backend.type === 'fastapi') { _%>
+# Lambda permission for API Gateway to invoke with response streaming via alias
+resource "aws_lambda_permission" "api_gateway_invoke_streaming" {
+  statement_id  = "AllowStreamingFromAPIGateway"
+  action        = "lambda:InvokeFunctionWithResponseStream"
+  function_name = aws_lambda_function.api_lambda.function_name
+  qualifier     = aws_lambda_alias.live.name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${module.rest_api.api_execution_arn}/*/*"
+
+  depends_on = [module.rest_api, aws_lambda_alias.live]
+}
+<%_ } _%>
 
 # Add API url to runtime config
 module "add_url_to_runtime_config" {

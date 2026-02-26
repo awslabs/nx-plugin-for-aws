@@ -106,7 +106,6 @@ export const PY_VERSIONS = {
   checkov: '==3.2.505',
   fastapi: '==0.131.0',
   'fastapi[standard]': '==0.131.0',
-  mangum: '==0.21.0',
   mcp: '==1.26.0',
   'pip-check-updates': '==0.28.0',
   'strands-agents': '==1.27.0',

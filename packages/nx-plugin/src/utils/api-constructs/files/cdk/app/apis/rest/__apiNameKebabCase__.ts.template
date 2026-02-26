@@ -7,19 +7,23 @@ import {
   Function,
   FunctionProps,
   Tracing,
+  <%_ if (backend.type === 'fastapi') { _%>
+  LayerVersion,
+  SnapStartConf,
+  <%_ } _%>
 } from 'aws-cdk-lib/aws-lambda';
 import {
   AuthorizationType,
   Cors,
   LambdaIntegration,
-  <%_ if (backend.type === 'trpc') { _%>
+  <%_ if (['trpc', 'fastapi'].includes(backend.type)) { _%>
   ResponseTransferMode,
   <%_ } _%>
   <%_ if (auth === 'Cognito') { _%>
   CognitoUserPoolsAuthorizer,
   <%_ } _%>
 } from 'aws-cdk-lib/aws-apigateway';
-import { Duration } from 'aws-cdk-lib';
+import { Duration<%_ if (backend.type === 'fastapi') { _%>, Stack<%_ } _%> } from 'aws-cdk-lib';
 import {
   PolicyDocument,
   PolicyStatement,
@@ -109,7 +113,7 @@ export class <%= apiNameClassName %><
         ),
         <%_ } else if (backend.type === 'fastapi') { _%>
         runtime: Runtime.PYTHON_3_12,
-        handler: '<%= backend.moduleName %>.main.handler',
+        handler: 'run.sh',
         code: Code.fromAsset(
           url.fileURLToPath(
             new URL(
@@ -121,15 +125,37 @@ export class <%= apiNameClassName %><
         <%_ } _%>
         timeout: Duration.seconds(30),
         tracing: Tracing.ACTIVE,
+        <%_ if (backend.type === 'fastapi') { _%>
+        snapStart: SnapStartConf.ON_PUBLISHED_VERSIONS,
+        <%_ } _%>
         environment: {
           AWS_CONNECTION_REUSE_ENABLED: '1',
+          <%_ if (backend.type === 'fastapi') { _%>
+          PORT: '8000',
+          AWS_LWA_INVOKE_MODE: 'response_stream',
+          AWS_LAMBDA_EXEC_WRAPPER: '/opt/bootstrap',
+          <%_ } _%>
         },
       } satisfies FunctionProps,
       buildDefaultIntegration: (op, props: FunctionProps) => {
         const handler = new Function(scope, `<%= apiNameClassName %>${op}Handler`, props);
+        <%_ if (backend.type === 'fastapi') { _%>
+        const stack = Stack.of(scope);
+        handler.addLayers(
+          LayerVersion.fromLayerVersionArn(
+            scope,
+            `<%= apiNameClassName %>${op}LWALayer`,
+            `arn:aws:lambda:${stack.region}:753240598075:layer:LambdaAdapterLayerX86:24`,
+          ),
+        );
+        <%_ } _%>
         return {
           handler,
-          <%_ if (backend.type === 'trpc') { _%>
+          <%_ if (backend.type === 'fastapi') { _%>
+          integration: new LambdaIntegration(handler.currentVersion, {
+            responseTransferMode: ResponseTransferMode.STREAM,
+          }),
+          <%_ } else if (backend.type === 'trpc') { _%>
           integration: new LambdaIntegration(handler, {
             responseTransferMode: ResponseTransferMode.STREAM,
           }),

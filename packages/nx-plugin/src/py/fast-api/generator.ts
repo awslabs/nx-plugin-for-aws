@@ -27,6 +27,7 @@ import {
 } from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { addApiGatewayInfra } from '../../utils/api-constructs/api-constructs';
+import { FsCommands } from '../../utils/fs';
 import { addOpenApiGeneration } from './react/open-api';
 import { assignPort } from '../../utils/port';
 import { addPythonBundleTarget } from '../../utils/bundle/bundle';
@@ -74,7 +75,19 @@ export const pyFastApiProjectGenerator = async (
   const projectConfig = readProjectConfiguration(tree, fullyQualifiedName);
   const port = assignPort(tree, projectConfig, 8000);
 
-  const { bundleOutputDir } = addPythonBundleTarget(projectConfig);
+  const { bundleOutputDir, bundleTargetName } =
+    addPythonBundleTarget(projectConfig);
+
+  // Add a command to copy run.sh to the bundle output for Lambda Web Adapter
+  const fs = new FsCommands(tree);
+  const bundleTarget = projectConfig.targets[bundleTargetName];
+  bundleTarget.options.commands = [
+    ...bundleTarget.options.commands,
+    fs.cp(
+      `{projectRoot}/run.sh`,
+      `dist/{projectRoot}/${bundleTargetName}/run.sh`,
+    ),
+  ];
 
   projectConfig.targets.serve = {
     executor: '@nxlv/python:run-commands',
@@ -142,7 +155,7 @@ export const pyFastApiProjectGenerator = async (
 
   addDependenciesToPyProjectToml(tree, dir, [
     'fastapi',
-    'mangum',
+    'uvicorn',
     'aws-lambda-powertools',
     'aws-lambda-powertools[tracer]',
   ]);
