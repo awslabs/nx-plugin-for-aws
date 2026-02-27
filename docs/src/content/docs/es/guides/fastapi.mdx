@@ -30,6 +30,10 @@ Puedes generar una nueva API FastAPI de dos maneras:
 
 <Snippet name="api/api-choice-note" />
 
+:::tip
+Selecciona `ServerlessApiGatewayRestApi` (predeterminado) como tu `computeType` si planeas construir operaciones de streaming.
+:::
+
 ## Salida del generador
 
 El generador creará la siguiente estructura de proyecto en el directorio `<directory>/<api-name>`:
@@ -38,6 +42,7 @@ El generador creará la siguiente estructura de proyecto en el directorio `<dire
 
 - project.json Configuración del proyecto y objetivos de build
 - pyproject.toml Configuración del proyecto Python y dependencias
+- run.sh Script de arranque de Lambda Web Adapter para iniciar la app FastAPI mediante uvicorn
 - \<module_name>
   - \_\_init\_\_.py Inicialización del módulo
   - init.py Configura la aplicación FastAPI y el middleware de powertools
@@ -58,17 +63,19 @@ El generador creará la siguiente estructura de proyecto en el directorio `<dire
 La implementación principal de la API está en `main.py`. Aquí es donde defines las rutas de tu API y sus implementaciones. Aquí un ejemplo:
 
 ```python
-from .init import app, tracer
 from pydantic import BaseModel
+from .init import app, tracer
 
 class Item(BaseModel):
   name: str
 
 @app.get("/items/{item_id}")
+@tracer.capture_method
 def get_item(item_id: int) -> Item:
     return Item(name=...)
 
 @app.post("/items")
+@tracer.capture_method
 def create_item(item: Item):
     return ...
 ```
@@ -79,7 +86,8 @@ El generador configura automáticamente varias características:
 2. Middleware de manejo de errores
 3. Correlación de solicitudes/respuestas
 4. Recolección de métricas
-5. Manejador de AWS Lambda usando Mangum
+5. Despliegue en AWS Lambda mediante [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter) con uvicorn
+6. Streaming con tipos seguros (solo REST API)
 
 ### Observabilidad con AWS Lambda Powertools
 
@@ -167,299 +175,44 @@ Se recomienda especificar modelos de respuesta para tus operaciones API para una
 
 ### Streaming
 
-Con FastAPI, puedes transmitir una respuesta al cliente usando el tipo de respuesta [`StreamingResponse`](https://fastapi.tiangolo.com/reference/responses/?h=streaming#fastapi.responses.StreamingResponse).
+:::caution
+El streaming solo está soportado cuando `computeType` es `ServerlessApiGatewayRestApi` (predeterminado), ya que las HTTP APIs de API Gateway no soportan streaming de respuestas.
+:::
 
-#### Cambios en la infraestructura
+La FastAPI generada soporta respuestas en streaming de forma predeterminada cuando se usa una REST API. La infraestructura está configurada para usar el [AWS Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter) para ejecutar tu FastAPI mediante uvicorn dentro de Lambda, con `ResponseTransferMode.STREAM` en API Gateway para todas las operaciones de REST API, lo que permite que el streaming funcione junto con operaciones que no son de streaming.
 
-Dado que AWS API Gateway no soporta respuestas en streaming, necesitarás desplegar tu FastAPI en una plataforma que lo soporte. La opción más simple es usar una URL de función de AWS Lambda.
+#### Usando `JsonStreamingResponse`
 
-<Infrastructure>
-<Fragment slot="cdk">
-Para esto, puedes reemplazar el constructo generado `common/constructs/src/app/apis/<name>-api.ts` por uno que despliegue una URL de función.
+El `init.py` generado exporta una clase `JsonStreamingResponse` que proporciona streaming con tipos seguros y generación adecuada del esquema OpenAPI. Esto asegura que el <Link path="guides/connection/react-fastapi">generador `connection`</Link> pueda producir métodos de cliente de streaming correctamente tipados.
 
-<details>
-<summary>Ejemplo de constructo FunctionURL para streaming</summary>
-
-```ts
-import { Duration, Stack, CfnOutput } from 'aws-cdk-lib';
-import { IGrantable, Grant } from 'aws-cdk-lib/aws-iam';
-import {
-  Runtime,
-  Code,
-  Tracing,
-  LayerVersion,
-  FunctionUrlAuthType,
-  InvokeMode,
-  Function,
-} from 'aws-cdk-lib/aws-lambda';
-import { Construct } from 'constructs';
-import url from 'url';
-import { RuntimeConfig } from '../../core/runtime-config.js';
-
-export class MyApi extends Construct {
-  public readonly handler: Function;
-
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
-
-    this.handler = new Function(this, 'Handler', {
-      runtime: Runtime.PYTHON_3_12,
-      handler: 'run.sh',
-      code: Code.fromAsset(
-        url.fileURLToPath(
-          new URL(
-            '../../../../../../dist/packages/my_api/bundle-x86',
-            import.meta.url,
-          ),
-        ),
-      ),
-      timeout: Duration.seconds(30),
-      tracing: Tracing.ACTIVE,
-      environment: {
-        AWS_CONNECTION_REUSE_ENABLED: '1',
-      },
-    });
-
-    const stack = Stack.of(this);
-    this.handler.addLayers(
-      LayerVersion.fromLayerVersionArn(
-        this,
-        'LWALayer',
-        `arn:aws:lambda:${stack.region}:753240598075:layer:LambdaAdapterLayerX86:24`,
-      ),
-    );
-    this.handler.addEnvironment('PORT', '8000');
-    this.handler.addEnvironment('AWS_LWA_INVOKE_MODE', 'response_stream');
-    this.handler.addEnvironment('AWS_LAMBDA_EXEC_WRAPPER', '/opt/bootstrap');
-    const functionUrl = this.handler.addFunctionUrl({
-      authType: FunctionUrlAuthType.AWS_IAM,
-      invokeMode: InvokeMode.RESPONSE_STREAM,
-      cors: {
-        allowedOrigins: ['*'],
-        allowedHeaders: [
-          'authorization',
-          'content-type',
-          'x-amz-content-sha256',
-          'x-amz-date',
-          'x-amz-security-token',
-        ],
-      },
-    });
-
-    new CfnOutput(this, 'MyApiUrl', { value: functionUrl.url });
-
-    // Registrar la URL de la API en la configuración de runtime para descubrimiento del cliente
-    RuntimeConfig.ensure(this).config.apis = {
-      ...RuntimeConfig.ensure(this).config.apis!,
-      MyApi: functionUrl.url,
-    };
-  }
-
-  public grantInvokeAccess(grantee: IGrantable) {
-    Grant.addToPrincipal({
-      grantee,
-      actions: ['lambda:InvokeFunctionUrl'],
-      resourceArns: [this.handler.functionArn],
-      conditions: {
-        StringEquals: {
-          'lambda:FunctionUrlAuthType': 'AWS_IAM',
-        },
-      },
-    });
-  }
-}
-
-```
-
-</details>
-</Fragment>
-<Fragment slot="terraform">
-Para esto con Terraform, puedes reemplazar la infraestructura generada de API Gateway por una Lambda Function URL que soporte streaming de respuestas.
-
-<details>
-<summary>Ejemplo de configuración de Lambda Function URL para streaming</summary>
-
-```hcl
-# Data sources para contexto AWS actual
-data "aws_caller_identity" "current" {}
-data "aws_region" "current" {}
-
-# Función Lambda para FastAPI con streaming
-resource "aws_lambda_function" "my_api_handler" {
-  filename         = "../../../../../../dist/packages/my_api/bundle.zip"
-  function_name    = "my-api-handler"
-  role            = aws_iam_role.lambda_execution_role.arn
-  handler         = "run.sh"
-  runtime         = "python3.12"
-  timeout         = 30
-  source_code_hash = filebase64sha256("../../../../../../dist/packages/my_api/bundle.zip")
-
-  # Habilitar trazado X-Ray
-  tracing_config {
-    mode = "Active"
-  }
-
-  # Variables de entorno para Lambda Web Adapter
-  environment {
-    variables = {
-      AWS_CONNECTION_REUSE_ENABLED = "1"
-      PORT                        = "8000"
-      AWS_LWA_INVOKE_MODE        = "response_stream"
-      AWS_LAMBDA_EXEC_WRAPPER    = "/opt/bootstrap"
-    }
-  }
-
-  # Añadir capa de Lambda Web Adapter
-  layers = [
-    "arn:aws:lambda:${data.aws_region.current.name}:753240598075:layer:LambdaAdapterLayerX86:24"
-  ]
-
-  depends_on = [
-    aws_iam_role_policy_attachment.lambda_logs,
-    aws_cloudwatch_log_group.lambda_logs,
-  ]
-}
-
-# Grupo de logs de CloudWatch para la función Lambda
-resource "aws_cloudwatch_log_group" "lambda_logs" {
-  name              = "/aws/lambda/my-api-handler"
-  retention_in_days = 14
-}
-
-# Rol IAM para ejecución de Lambda
-resource "aws_iam_role" "lambda_execution_role" {
-  name = "my-api-lambda-execution-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "lambda.amazonaws.com"
-        }
-      }
-    ]
-  })
-}
-
-# Adjuntar política básica de ejecución
-resource "aws_iam_role_policy_attachment" "lambda_logs" {
-  role       = aws_iam_role.lambda_execution_role.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-}
-
-# Adjuntar política de trazado X-Ray
-resource "aws_iam_role_policy_attachment" "lambda_xray" {
-  role       = aws_iam_role.lambda_execution_role.name
-  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
-}
-
-# Lambda Function URL con soporte para streaming
-resource "aws_lambda_function_url" "my_api_url" {
-  function_name      = aws_lambda_function.my_api_handler.function_name
-  authorization_type = "AWS_IAM"
-  invoke_mode       = "RESPONSE_STREAM"
-
-  cors {
-    allow_credentials = false
-    allow_origins     = ["*"]
-    allow_methods     = ["*"]
-    allow_headers = [
-      "authorization",
-      "content-type",
-      "x-amz-content-sha256",
-      "x-amz-date",
-      "x-amz-security-token"
-    ]
-    expose_headers = ["date", "keep-alive"]
-    max_age       = 86400
-  }
-}
-
-# Output de la URL de la función
-output "my_api_url" {
-  description = "URL para la función Lambda de FastAPI con streaming"
-  value       = aws_lambda_function_url.my_api_url.function_url
-}
-
-# Opcional: Crear parámetro SSM para configuración de runtime
-resource "aws_ssm_parameter" "my_api_url" {
-  name  = "/runtime-config/apis/MyApi"
-  type  = "String"
-  value = aws_lambda_function_url.my_api_url.function_url
-
-  tags = {
-    Environment = "production"
-    Service     = "my-api"
-  }
-}
-
-# Política IAM para conceder acceso de invocación a la Function URL
-resource "aws_iam_policy" "my_api_invoke_policy" {
-  name        = "my-api-invoke-policy"
-  description = "Política para permitir invocar la Lambda Function URL de FastAPI con streaming"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = "lambda:InvokeFunctionUrl"
-        Resource = aws_lambda_function.my_api_handler.arn
-        Condition = {
-          StringEquals = {
-            "lambda:FunctionUrlAuthType" = "AWS_IAM"
-          }
-        }
-      }
-    ]
-  })
-}
-
-# Ejemplo: Adjuntar la política de invocación a un rol (descomentar y modificar según sea necesario)
-# resource "aws_iam_role_policy_attachment" "my_api_invoke_access" {
-#   role       = var.authenticated_role_name
-#   policy_arn = aws_iam_policy.my_api_invoke_policy.arn
-# }
-```
-
-</details>
-
-</Fragment>
-</Infrastructure>
-
-#### Implementación
-
-Una vez actualizada la infraestructura para soportar streaming, puedes implementar una API de streaming en FastAPI. La API debe:
-
-- Devolver un [`StreamingResponse`](https://fastapi.tiangolo.com/reference/responses/?h=streaming#fastapi.responses.StreamingResponse)
-- Declarar el tipo de retorno de cada fragmento de respuesta
-- Añadir la extensión de proveedor OpenAPI `x-streaming: true` si planeas usar el generador <Link path="guides/connection/react-fastapi">Connection</Link>.
-
-Por ejemplo, si deseas transmitir una serie de objetos JSON desde tu API, puedes implementarlo de la siguiente manera:
-
-```py /return (StreamingResponse)/ /openapi_extra[^)]*/ /-> (Chunk)/
+```python
 from pydantic import BaseModel
-from fastapi.responses import StreamingResponse
+from .init import app, JsonStreamingResponse
 
 class Chunk(BaseModel):
-  message: str
-  timestamp: datetime
+    message: str
 
-async def stream_chunks():
-  for i in range(0, 100):
-    yield Chunk(message=f"This is chunk {i}", timestamp=datetime.now())
+async def generate_chunks():
+    for i in range(100):
+        yield Chunk(message=f"This is chunk {i}")
 
-@app.get("/stream", openapi_extra={'x-streaming': True})
-def my_stream() -> Chunk:
-    return StreamingResponse(stream_chunks(), media_type="application/json")
+@app.post(
+    "/stream",
+    response_class=JsonStreamingResponse,
+    responses={200: JsonStreamingResponse.openapi_response(Chunk, "Stream of chunks")},
+)
+async def my_stream() -> JsonStreamingResponse:
+    return JsonStreamingResponse(generate_chunks())
 ```
+
+La clase `JsonStreamingResponse`:
+
+1. Serializa modelos Pydantic al formato [JSON Lines](https://jsonlines.org/) (`application/jsonl`)
+2. Proporciona un helper `openapi_response` que genera el esquema OpenAPI correcto con `itemSchema`, permitiendo que el <Link path="guides/connection/react-fastapi#consuming-a-stream">generador `connection`</Link> produzca métodos de cliente de streaming con tipos seguros
 
 #### Consumo
 
-Para consumir un stream de respuestas, puedes usar el <Link path="guides/connection/react-fastapi#consuming-a-stream">generador Connection</Link> que provee un método tipado para iterar sobre los fragmentos transmitidos.
+Para consumir un stream de respuestas, puedes usar el <Link path="guides/connection/react-fastapi#consuming-a-stream">generador `connection`</Link> que provee un método tipado para iterar sobre los fragmentos transmitidos.
 
 ## Desplegando tu API FastAPI
 
@@ -730,4 +483,4 @@ Esto inicia un servidor de desarrollo FastAPI local con:
 
 ## Invocando tu API FastAPI
 
-Para invocar tu API desde un sitio React, puedes usar el generador <Link path="guides/connection/react-fastapi">`connection`</Link>.
+Para invocar tu API desde un sitio React, puedes usar el <Link path="guides/connection/react-fastapi">generador `connection`</Link>.

@@ -30,6 +30,10 @@ FastAPI 生成器可创建带有 AWS CDK 或 Terraform 基础设施配置的新 
 
 <Snippet name="api/api-choice-note" />
 
+:::tip
+如果您打算构建任何流式操作,请选择 `ServerlessApiGatewayRestApi`(默认)作为您的 `computeType`。
+:::
+
 ## 生成器输出
 
 生成器将在 `<directory>/<api-name>` 目录下创建以下项目结构:
@@ -38,6 +42,7 @@ FastAPI 生成器可创建带有 AWS CDK 或 Terraform 基础设施配置的新 
 
 - project.json 项目配置和构建目标
 - pyproject.toml Python 项目配置和依赖项
+- run.sh Lambda Web Adapter 引导脚本,通过 uvicorn 启动 FastAPI 应用
 - \<module_name>
   - \_\_init\_\_.py 模块初始化
   - init.py 设置 FastAPI 应用并配置 powertools 中间件
@@ -58,17 +63,19 @@ FastAPI 生成器可创建带有 AWS CDK 或 Terraform 基础设施配置的新 
 主要的 API 实现位于 `main.py`。这是定义 API 路由及其实现的地方。示例如下:
 
 ```python
-from .init import app, tracer
 from pydantic import BaseModel
+from .init import app, tracer
 
 class Item(BaseModel):
   name: str
 
 @app.get("/items/{item_id}")
+@tracer.capture_method
 def get_item(item_id: int) -> Item:
     return Item(name=...)
 
 @app.post("/items")
+@tracer.capture_method
 def create_item(item: Item):
     return ...
 ```
@@ -79,7 +86,8 @@ def create_item(item: Item):
 2. 错误处理中间件
 3. 请求/响应关联
 4. 指标收集
-5. 使用 Mangum 的 AWS Lambda 处理程序
+5. 通过 [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter) 使用 uvicorn 进行 AWS Lambda 部署
+6. 类型安全的流式传输(仅限 REST API)
 
 ### 使用 AWS Lambda Powertools 实现可观测性
 
@@ -167,299 +175,44 @@ def read_item(item_id: int):
 
 ### 流式传输
 
-使用 FastAPI 时,您可以通过 [`StreamingResponse`](https://fastapi.tiangolo.com/reference/responses/?h=streaming#fastapi.responses.StreamingResponse) 响应类型向调用方流式传输响应。
+:::caution
+流式传输仅在 `computeType` 为 `ServerlessApiGatewayRestApi`(默认)时支持,因为 API Gateway HTTP API 不支持响应流式传输。
+:::
 
-#### 基础设施变更
+生成的 FastAPI 在使用 REST API 时开箱即支持流式响应。基础设施配置为使用 [AWS Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter) 在 Lambda 内通过 uvicorn 运行您的 FastAPI,并在 API Gateway 中为所有 REST API 操作设置 `ResponseTransferMode.STREAM`,这使得流式传输可以与非流式操作并行工作。
 
-由于 AWS API Gateway 不支持流式响应,您需要将 FastAPI 部署到支持此功能的平台。最简单的选择是使用 AWS Lambda 函数 URL。
+#### 使用 `JsonStreamingResponse`
 
-<Infrastructure>
-<Fragment slot="cdk">
-要实现此功能,可以替换生成的 `common/constructs/src/app/apis/<name>-api.ts` 构造,改用支持流式传输的函数 URL。
+生成的 `init.py` 导出了 `JsonStreamingResponse` 类,该类提供类型安全的流式传输和正确的 OpenAPI 模式生成。这确保 <Link path="guides/connection/react-fastapi">`connection` 生成器</Link> 可以生成正确类型的流式客户端方法。
 
-<details>
-<summary>流式传输 FunctionURL 构造示例</summary>
-
-```ts
-import { Duration, Stack, CfnOutput } from 'aws-cdk-lib';
-import { IGrantable, Grant } from 'aws-cdk-lib/aws-iam';
-import {
-  Runtime,
-  Code,
-  Tracing,
-  LayerVersion,
-  FunctionUrlAuthType,
-  InvokeMode,
-  Function,
-} from 'aws-cdk-lib/aws-lambda';
-import { Construct } from 'constructs';
-import url from 'url';
-import { RuntimeConfig } from '../../core/runtime-config.js';
-
-export class MyApi extends Construct {
-  public readonly handler: Function;
-
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
-
-    this.handler = new Function(this, 'Handler', {
-      runtime: Runtime.PYTHON_3_12,
-      handler: 'run.sh',
-      code: Code.fromAsset(
-        url.fileURLToPath(
-          new URL(
-            '../../../../../../dist/packages/my_api/bundle-x86',
-            import.meta.url,
-          ),
-        ),
-      ),
-      timeout: Duration.seconds(30),
-      tracing: Tracing.ACTIVE,
-      environment: {
-        AWS_CONNECTION_REUSE_ENABLED: '1',
-      },
-    });
-
-    const stack = Stack.of(this);
-    this.handler.addLayers(
-      LayerVersion.fromLayerVersionArn(
-        this,
-        'LWALayer',
-        `arn:aws:lambda:${stack.region}:753240598075:layer:LambdaAdapterLayerX86:24`,
-      ),
-    );
-    this.handler.addEnvironment('PORT', '8000');
-    this.handler.addEnvironment('AWS_LWA_INVOKE_MODE', 'response_stream');
-    this.handler.addEnvironment('AWS_LAMBDA_EXEC_WRAPPER', '/opt/bootstrap');
-    const functionUrl = this.handler.addFunctionUrl({
-      authType: FunctionUrlAuthType.AWS_IAM,
-      invokeMode: InvokeMode.RESPONSE_STREAM,
-      cors: {
-        allowedOrigins: ['*'],
-        allowedHeaders: [
-          'authorization',
-          'content-type',
-          'x-amz-content-sha256',
-          'x-amz-date',
-          'x-amz-security-token',
-        ],
-      },
-    });
-
-    new CfnOutput(this, 'MyApiUrl', { value: functionUrl.url });
-
-    // 在运行时配置中注册 API URL 供客户端发现
-    RuntimeConfig.ensure(this).config.apis = {
-      ...RuntimeConfig.ensure(this).config.apis!,
-      MyApi: functionUrl.url,
-    };
-  }
-
-  public grantInvokeAccess(grantee: IGrantable) {
-    Grant.addToPrincipal({
-      grantee,
-      actions: ['lambda:InvokeFunctionUrl'],
-      resourceArns: [this.handler.functionArn],
-      conditions: {
-        StringEquals: {
-          'lambda:FunctionUrlAuthType': 'AWS_IAM',
-        },
-      },
-    });
-  }
-}
-
-```
-
-</details>
-</Fragment>
-<Fragment slot="terraform">
-要在 Terraform 中实现此功能,可以替换生成的 API Gateway 基础设施为支持响应流式传输的 Lambda 函数 URL。
-
-<details>
-<summary>流式传输 Lambda 函数 URL 配置示例</summary>
-
-```hcl
-# 当前 AWS 上下文的数据源
-data "aws_caller_identity" "current" {}
-data "aws_region" "current" {}
-
-# 用于流式传输 FastAPI 的 Lambda 函数
-resource "aws_lambda_function" "my_api_handler" {
-  filename         = "../../../../../../dist/packages/my_api/bundle.zip"
-  function_name    = "my-api-handler"
-  role            = aws_iam_role.lambda_execution_role.arn
-  handler         = "run.sh"
-  runtime         = "python3.12"
-  timeout         = 30
-  source_code_hash = filebase64sha256("../../../../../../dist/packages/my_api/bundle.zip")
-
-  # 启用 X-Ray 追踪
-  tracing_config {
-    mode = "Active"
-  }
-
-  # Lambda Web Adapter 的环境变量
-  environment {
-    variables = {
-      AWS_CONNECTION_REUSE_ENABLED = "1"
-      PORT                        = "8000"
-      AWS_LWA_INVOKE_MODE        = "response_stream"
-      AWS_LAMBDA_EXEC_WRAPPER    = "/opt/bootstrap"
-    }
-  }
-
-  # 添加 Lambda Web Adapter 层
-  layers = [
-    "arn:aws:lambda:${data.aws_region.current.name}:753240598075:layer:LambdaAdapterLayerX86:24"
-  ]
-
-  depends_on = [
-    aws_iam_role_policy_attachment.lambda_logs,
-    aws_cloudwatch_log_group.lambda_logs,
-  ]
-}
-
-# Lambda 函数的 CloudWatch 日志组
-resource "aws_cloudwatch_log_group" "lambda_logs" {
-  name              = "/aws/lambda/my-api-handler"
-  retention_in_days = 14
-}
-
-# Lambda 执行 IAM 角色
-resource "aws_iam_role" "lambda_execution_role" {
-  name = "my-api-lambda-execution-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "lambda.amazonaws.com"
-        }
-      }
-    ]
-  })
-}
-
-# 附加基本执行策略
-resource "aws_iam_role_policy_attachment" "lambda_logs" {
-  role       = aws_iam_role.lambda_execution_role.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-}
-
-# 附加 X-Ray 追踪策略
-resource "aws_iam_role_policy_attachment" "lambda_xray" {
-  role       = aws_iam_role.lambda_execution_role.name
-  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
-}
-
-# 支持流式传输的 Lambda 函数 URL
-resource "aws_lambda_function_url" "my_api_url" {
-  function_name      = aws_lambda_function.my_api_handler.function_name
-  authorization_type = "AWS_IAM"
-  invoke_mode       = "RESPONSE_STREAM"
-
-  cors {
-    allow_credentials = false
-    allow_origins     = ["*"]
-    allow_methods     = ["*"]
-    allow_headers = [
-      "authorization",
-      "content-type",
-      "x-amz-content-sha256",
-      "x-amz-date",
-      "x-amz-security-token"
-    ]
-    expose_headers = ["date", "keep-alive"]
-    max_age       = 86400
-  }
-}
-
-# 输出函数 URL
-output "my_api_url" {
-  description = "流式传输 FastAPI Lambda 函数的 URL"
-  value       = aws_lambda_function_url.my_api_url.function_url
-}
-
-# 可选:为运行时配置创建 SSM 参数
-resource "aws_ssm_parameter" "my_api_url" {
-  name  = "/runtime-config/apis/MyApi"
-  type  = "String"
-  value = aws_lambda_function_url.my_api_url.function_url
-
-  tags = {
-    Environment = "production"
-    Service     = "my-api"
-  }
-}
-
-# 授予函数 URL 调用权限的 IAM 策略
-resource "aws_iam_policy" "my_api_invoke_policy" {
-  name        = "my-api-invoke-policy"
-  description = "允许调用流式传输 FastAPI Lambda 函数 URL 的策略"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = "lambda:InvokeFunctionUrl"
-        Resource = aws_lambda_function.my_api_handler.arn
-        Condition = {
-          StringEquals = {
-            "lambda:FunctionUrlAuthType" = "AWS_IAM"
-          }
-        }
-      }
-    ]
-  })
-}
-
-# 示例:将调用策略附加到角色(根据需要取消注释并修改)
-# resource "aws_iam_role_policy_attachment" "my_api_invoke_access" {
-#   role       = var.authenticated_role_name
-#   policy_arn = aws_iam_policy.my_api_invoke_policy.arn
-# }
-```
-
-</details>
-
-</Fragment>
-</Infrastructure>
-
-#### 实现
-
-更新基础设施以支持流式传输后,您可以在 FastAPI 中实现流式 API。API 应:
-
-- 返回 [`StreamingResponse`](https://fastapi.tiangolo.com/reference/responses/?h=streaming#fastapi.responses.StreamingResponse)
-- 声明每个响应块的返回类型
-- 如果计划使用 <Link path="guides/connection/react-fastapi">Connection</Link> 生成器,需添加 OpenAPI 供应商扩展 `x-streaming: true`
-
-例如,如果要从 API 流式传输一系列 JSON 对象,可以按如下方式实现:
-
-```py /return (StreamingResponse)/ /openapi_extra[^)]*/ /-> (Chunk)/
+```python
 from pydantic import BaseModel
-from fastapi.responses import StreamingResponse
+from .init import app, JsonStreamingResponse
 
 class Chunk(BaseModel):
-  message: str
-  timestamp: datetime
+    message: str
 
-async def stream_chunks():
-  for i in range(0, 100):
-    yield Chunk(message=f"This is chunk {i}", timestamp=datetime.now())
+async def generate_chunks():
+    for i in range(100):
+        yield Chunk(message=f"This is chunk {i}")
 
-@app.get("/stream", openapi_extra={'x-streaming': True})
-def my_stream() -> Chunk:
-    return StreamingResponse(stream_chunks(), media_type="application/json")
+@app.post(
+    "/stream",
+    response_class=JsonStreamingResponse,
+    responses={200: JsonStreamingResponse.openapi_response(Chunk, "Stream of chunks")},
+)
+async def my_stream() -> JsonStreamingResponse:
+    return JsonStreamingResponse(generate_chunks())
 ```
+
+`JsonStreamingResponse` 类:
+
+1. 将 Pydantic 模型序列化为 [JSON Lines](https://jsonlines.org/) 格式(`application/jsonl`)
+2. 提供 `openapi_response` 辅助方法,生成包含 `itemSchema` 的正确 OpenAPI 模式,使 <Link path="guides/connection/react-fastapi#consuming-a-stream">`connection` 生成器</Link> 能够生成类型安全的流式客户端方法
 
 #### 消费
 
-要消费流式响应,可以使用 <Link path="guides/connection/react-fastapi#consuming-a-stream">Connection 生成器</Link>,该生成器将提供类型安全的方法来迭代流式数据块。
+要消费流式响应,可以使用 <Link path="guides/connection/react-fastapi#consuming-a-stream">`connection` 生成器</Link>,该生成器将提供类型安全的方法来迭代流式数据块。
 
 ## 部署 FastAPI
 
@@ -467,7 +220,7 @@ FastAPI 生成器根据您选择的 `iacProvider` 创建 CDK 或 Terraform 基�
 
 <Infrastructure>
 <Fragment slot="cdk">
-CDK 构造位于 `common/constructs` 文件夹中,可用于 CDK 应用程序:
+用于部署 API 的 CDK 构造位于 `common/constructs` 文件夹中。您可以在 CDK 应用程序中使用它:
 
 ```ts {6-8}
 import { MyApi } from ':my-scope/common-constructs';
@@ -515,7 +268,7 @@ export class ExampleStack extends Stack {
 :::
 </Fragment>
 <Fragment slot="terraform">
-Terraform 模块位于 `common/terraform` 文件夹中,可用于 Terraform 配置:
+用于部署 API 的 Terraform 模块位于 `common/terraform` 文件夹中。您可以在 Terraform 配置中使用它:
 
 ```hcl {2}
 module "my_api" {
@@ -701,7 +454,7 @@ resource "aws_iam_role_policy_attachment" "api_invoke_access" {
   policy_arn = aws_iam_policy.api_invoke_policy.arn
 }
 
-# 或附加到现有角色
+# 或按名称附加到现有角色
 resource "aws_iam_role_policy_attachment" "api_invoke_access_existing" {
   role       = "MyExistingRole"
   policy_arn = aws_iam_policy.api_invoke_policy.arn
@@ -730,4 +483,4 @@ API 模块的关键输出可用于 IAM 策略:
 
 ## 调用 FastAPI
 
-要从 React 网站调用 API,可以使用 <Link path="guides/connection/react-fastapi">`connection`</Link> 生成器。
+要从 React 网站调用 API,可以使用 <Link path="guides/connection/react-fastapi">`connection` 生成器</Link>。
