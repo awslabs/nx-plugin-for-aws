@@ -208,18 +208,19 @@ describe('ts lib generator', () => {
     );
   });
 
-  it('should create vite.config.mts', async () => {
+  it('should create vitest.config.mts', async () => {
     // Call the generator function
     await tsProjectGenerator(tree, {
       name: 'test-lib',
       skipInstall: true,
     });
 
-    expect(tree.exists('test-lib/vite.config.mts')).toBeTruthy();
+    // No vite configuration as we build with tsc
+    expect(tree.exists('test-lib/vite.config.mts')).toBeFalsy();
     expect(tree.exists('test-lib/vite.config.ts')).toBeFalsy();
 
-    // vite.config.mts is used for test configuration
-    expect(tree.exists('test-lib/vitest.config.mts')).toBeFalsy();
+    // vitest.config.mts is used for test configuration
+    expect(tree.exists('test-lib/vitest.config.mts')).toBeTruthy();
   });
 
   it('should add generator metric to app.ts', async () => {
