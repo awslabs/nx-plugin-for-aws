@@ -26,6 +26,8 @@ import {
   replaceIfExists,
   prependStatements,
   appendStatements,
+  applyGritQLTransform,
+  hasGritQLMatch,
 } from './ast';
 
 describe('ast utils', () => {
@@ -1033,6 +1035,213 @@ interface MyInterface {
       expect(() =>
         appendStatements(tree, 'nonexistent.ts', [newStatement]),
       ).toThrow('No file located at nonexistent.ts');
+    });
+  });
+
+  describe('applyGritQLTransform', () => {
+    it('should apply a simple rewrite pattern', async () => {
+      tree.write('file.ts', `const x = 5;`);
+
+      const changed = await applyGritQLTransform(
+        tree,
+        'file.ts',
+        '`const x = $val` => `const x = 10`',
+      );
+
+      expect(changed).toBe(true);
+      expect(tree.read('file.ts', 'utf-8')).toContain('const x = 10');
+    });
+
+    it('should return false when pattern does not match', async () => {
+      tree.write('file.ts', `const x = 5;`);
+
+      const changed = await applyGritQLTransform(
+        tree,
+        'file.ts',
+        '`const y = $val` => `const y = 10`',
+      );
+
+      expect(changed).toBe(false);
+      expect(tree.read('file.ts', 'utf-8')).toBe('const x = 5;');
+    });
+
+    it('should throw when file does not exist', async () => {
+      await expect(
+        applyGritQLTransform(
+          tree,
+          'nonexistent.ts',
+          '`const x = $val` => `const x = 10`',
+        ),
+      ).rejects.toThrow('No file at nonexistent.ts');
+    });
+
+    it('should support where clause with not contains for idempotency', async () => {
+      tree.write('file.ts', `const tags = ['a'];`);
+
+      // First call adds 'b'
+      await applyGritQLTransform(
+        tree,
+        'file.ts',
+        "`const tags = [$items]` => `const tags = [$items, 'b']` where { $program <: not contains `'b'` }",
+      );
+      expect(tree.read('file.ts', 'utf-8')).toContain("'a', 'b'");
+
+      // Second call should be idempotent
+      await applyGritQLTransform(
+        tree,
+        'file.ts',
+        "`const tags = [$items]` => `const tags = [$items, 'b']` where { $program <: not contains `'b'` }",
+      );
+      expect(tree.read('file.ts', 'utf-8')).not.toContain("'b', 'b'");
+    });
+
+    it('should support within clause for scoped matching', async () => {
+      tree.write(
+        'file.ts',
+        `const id = 'outer';
+class MyClass implements SomeInterface {
+  method(): void {
+    const id = 'inner';
+  }
+}`,
+      );
+
+      await applyGritQLTransform(
+        tree,
+        'file.ts',
+        "`const id = $old` => `const id = 'replaced'` where { $old <: within `class MyClass implements $_ { $_ }` }",
+      );
+
+      const content = tree.read('file.ts', 'utf-8')!;
+      expect(content).toContain("const id = 'outer'");
+      expect(content).toContain("const id = 'replaced'");
+    });
+
+    it('should support if/else for empty vs non-empty arrays', async () => {
+      tree.write(
+        'file.ts',
+        `class Foo implements Bar {
+  visit(): void {
+    const tags: string[] = [];
+  }
+}`,
+      );
+
+      const WITHIN = '$old <: within `class Foo implements $_ { $_ }`';
+
+      // Add first tag to empty array
+      await applyGritQLTransform(
+        tree,
+        'file.ts',
+        '`const tags: string[] = $old`' +
+          ` where { ${WITHIN},` +
+          " if ($old <: `[]`) { $old => `['a']` }" +
+          " else { $old <: `[$items]` => `[$items, 'a']` }," +
+          " $old <: not contains `'a'` }",
+      );
+      expect(tree.read('file.ts', 'utf-8')).toContain("['a']");
+
+      // Add second tag to non-empty array
+      await applyGritQLTransform(
+        tree,
+        'file.ts',
+        '`const tags: string[] = $old`' +
+          ` where { ${WITHIN},` +
+          " if ($old <: `[]`) { $old => `['b']` }" +
+          " else { $old <: `[$items]` => `[$items, 'b']` }," +
+          " $old <: not contains `'b'` }",
+      );
+      expect(tree.read('file.ts', 'utf-8')).toContain("['a', 'b']");
+    });
+
+    it('should work with HCL (.tf) files', async () => {
+      tree.write(
+        'main.tf',
+        `locals {
+  name = "old"
+}`,
+      );
+
+      await applyGritQLTransform(
+        tree,
+        'main.tf',
+        '`name = $old` => `name = "new"`',
+      );
+
+      expect(tree.read('main.tf', 'utf-8')).toContain('name = "new"');
+    });
+
+    it('should support or{} pattern for HCL arrays', async () => {
+      tree.write(
+        'main.tf',
+        `locals {
+  tags = []
+}`,
+      );
+
+      // Add first tag
+      await applyGritQLTransform(
+        tree,
+        'main.tf',
+        'or { `tags = []` => `tags = ["t1"]`, `tags = [$items]` => `tags = [$items, "t1"]` where { $items <: not contains `"t1"` } }',
+      );
+      expect(tree.read('main.tf', 'utf-8')).toContain('["t1"]');
+
+      // Add second tag
+      await applyGritQLTransform(
+        tree,
+        'main.tf',
+        'or { `tags = []` => `tags = ["t2"]`, `tags = [$items]` => `tags = [$items, "t2"]` where { $items <: not contains `"t2"` } }',
+      );
+      expect(tree.read('main.tf', 'utf-8')).toContain('["t1", "t2"]');
+
+      // Idempotency
+      await applyGritQLTransform(
+        tree,
+        'main.tf',
+        'or { `tags = []` => `tags = ["t1"]`, `tags = [$items]` => `tags = [$items, "t1"]` where { $items <: not contains `"t1"` } }',
+      );
+      expect(tree.read('main.tf', 'utf-8')).not.toContain('"t1", "t2", "t1"');
+    });
+  });
+
+  describe('hasGritQLMatch', () => {
+    it('should return true when pattern matches', async () => {
+      tree.write('file.ts', `const x = 5;`);
+
+      const result = await hasGritQLMatch(tree, 'file.ts', '`const x = $val`');
+      expect(result).toBe(true);
+    });
+
+    it('should return false when pattern does not match', async () => {
+      tree.write('file.ts', `const x = 5;`);
+
+      const result = await hasGritQLMatch(tree, 'file.ts', '`const y = $val`');
+      expect(result).toBe(false);
+    });
+
+    it('should return false when file does not exist', async () => {
+      const result = await hasGritQLMatch(
+        tree,
+        'nonexistent.ts',
+        '`const x = $val`',
+      );
+      expect(result).toBe(false);
+    });
+
+    it('should match structural patterns', async () => {
+      tree.write(
+        'file.ts',
+        `class MyClass implements SomeInterface {
+  method(): void {}
+}`,
+      );
+
+      expect(await hasGritQLMatch(tree, 'file.ts', '`MyClass`')).toBe(true);
+      expect(await hasGritQLMatch(tree, 'file.ts', '`SomeInterface`')).toBe(
+        true,
+      );
+      expect(await hasGritQLMatch(tree, 'file.ts', '`OtherClass`')).toBe(false);
     });
   });
 });
