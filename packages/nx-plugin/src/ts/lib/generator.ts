@@ -81,25 +81,6 @@ export const tsProjectGenerator = async (
     unitTestRunner: 'vitest',
   });
 
-  // Rename vite.config.ts to vite.config.mts for ESM compatibility
-  // The @nx/js library generator creates vite.config.ts when bundler !== 'vite',
-  // but we need .mts extension to ensure proper ESM module resolution in Node.js
-  // when using "type": "module" in package.json or when moduleResolution is set to
-  // "node16" or "nodenext" in tsconfig.json
-  const viteConfigTsPath = joinPathFragments(dir, 'vite.config.ts');
-  const viteConfigMtsPath = joinPathFragments(dir, 'vite.config.mts');
-  if (tree.exists(viteConfigTsPath)) {
-    const content = tree.read(viteConfigTsPath, 'utf-8');
-    tree.delete(viteConfigTsPath);
-    tree.write(viteConfigMtsPath, content);
-  }
-
-  // Remove redundant vitest.config.mts file if it exists, since we have vite.config.mts
-  const vitestConfigPath = joinPathFragments(dir, 'vitest.config.mts');
-  if (tree.exists(vitestConfigPath)) {
-    tree.delete(vitestConfigPath);
-  }
-
   // Replace with simpler sample source code
   tree.delete(joinPathFragments(dir, 'src'));
   generateFiles(

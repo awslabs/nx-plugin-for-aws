@@ -6,8 +6,10 @@ import { Tree } from '@nx/devkit';
 import tsProjectGenerator from './generator';
 import { configureVitest } from './vitest';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
+
 describe('vitest utils', () => {
   let tree: Tree;
+
   beforeEach(async () => {
     tree = createTreeUsingTsSolutionSetup();
     await tsProjectGenerator(tree, {
@@ -15,12 +17,13 @@ describe('vitest utils', () => {
       skipInstall: true,
     });
   });
+
   it('should configure vitest to pass with no tests', () => {
     configureVitest(tree, {
       dir: 'test',
       fullyQualifiedName: 'test',
     });
-    const content = tree.read('test/vite.config.mts', 'utf8');
+    const content = tree.read('test/vitest.config.mts', 'utf8');
     expect(content).toContain('passWithNoTests: true');
   });
 });
