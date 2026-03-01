@@ -180,6 +180,14 @@ export const presetGenerator = async (
       'build:all': 'nx run-many --target build --all',
       'affected:all': 'nx affected --target build',
     },
+    pnpm: {
+      ...packageJson.pnpm,
+      onlyBuiltDependencies: [
+        ...(packageJson.pnpm?.onlyBuiltDependencies ?? []),
+        '@getgrit/cli',
+        'nx',
+      ],
+    },
   }));
 
   addDependenciesToPackageJson(
@@ -212,8 +220,6 @@ export const presetGenerator = async (
       overwriteStrategy: OverwriteStrategy.Overwrite,
     },
   );
-
-  await addGeneratorMetricsIfApplicable(tree, [PRESET_GENERATOR_INFO]);
 
   await formatFilesInSubtree(tree);
   return () => {

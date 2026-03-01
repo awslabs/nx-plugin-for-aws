@@ -14,6 +14,9 @@ import ts, {
   Node,
   Expression,
 } from 'typescript';
+import { execFileSync } from 'child_process';
+import { existsSync } from 'fs';
+import { dirname, join } from 'path';
 
 const assertFilePath = (tree: Tree, filePath: string) => {
   if (!tree.exists(filePath)) {
@@ -429,4 +432,119 @@ export const hasExportDeclaration = (
       `TypeAliasDeclaration:has(ExportKeyword):has(Identifier[name="${identifierName}"])`,
     ).length > 0
   );
+};
+
+let gritBin: string | undefined;
+
+const resolveGritBin = (): string => {
+  if (!gritBin) {
+    const cliPkgDir = dirname(require.resolve('@getgrit/cli/package.json'));
+    const binPath = join(cliPkgDir, 'node_modules', '.bin_real', 'grit');
+    if (!existsSync(binPath)) {
+      // Binary not yet installed — trigger the @getgrit/cli install synchronously.
+      // This handles cases where the postinstall was skipped (e.g. pnpm cache restore).
+      try {
+        execFileSync('node', [join(cliPkgDir, 'install.js')], {
+          cwd: cliPkgDir,
+          stdio: 'pipe',
+          timeout: 60_000,
+        });
+      } catch {
+        // Ignore install errors — check below will throw with a clear message
+      }
+    }
+    if (!existsSync(binPath)) {
+      throw new Error(
+        `grit binary not found at ${binPath}. Run "pnpm install" to trigger the @getgrit/cli postinstall.`,
+      );
+    }
+    gritBin = binPath;
+  }
+  return gritBin;
+};
+
+/** Node.js error codes that are known to be transient and worth retrying. */
+const RETRYABLE_CODES = new Set(['ETXTBSY', 'ENOBUFS', 'EAGAIN', 'EMFILE']);
+
+/** Run the grit CLI synchronously with the given args and stdin input. */
+const execGrit = async (
+  args: string[],
+  input: string,
+  timeout = 30_000,
+  retries = 3,
+): Promise<string> => {
+  const bin = resolveGritBin();
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const result = execFileSync(bin, args, {
+        encoding: 'utf-8',
+        timeout,
+        maxBuffer: 10 * 1024 * 1024, // 10 MB — prevents ENOBUFS
+        input,
+      });
+      return result.trim();
+    } catch (err: unknown) {
+      const errnoCode = (err as NodeJS.ErrnoException).code;
+      const exitStatus = (err as { status?: number }).status;
+      const isRetryable =
+        (errnoCode && RETRYABLE_CODES.has(errnoCode)) ||
+        // Non-zero exit without a Node errno likely means the binary crashed
+        // under contention (e.g. signal 11 / segfault) — worth retrying.
+        (exitStatus != null && exitStatus !== 0 && !errnoCode);
+      if (isRetryable && attempt < retries) {
+        // Exponential back-off: ~50ms, ~150ms, ~350ms
+        const delay = 50 * Math.pow(2, attempt) + Math.random() * 50;
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      } else {
+        throw err;
+      }
+    }
+  }
+};
+
+/**
+ * Apply a GritQL pattern to a file in the Nx tree.
+ * Content is passed via stdin; filePath is used only for language detection.
+ *
+ * Returns a Promise for backward-compatibility with existing call sites that
+ * `await` the result, but the underlying work is synchronous.
+ */
+export const applyGritQLTransform = async (
+  tree: Tree,
+  filePath: string,
+  pattern: string,
+): Promise<boolean> => {
+  if (!tree.exists(filePath)) throw new Error(`No file at ${filePath}`);
+  const source = tree.read(filePath)!.toString();
+  const result = await execGrit(
+    ['apply', pattern, '--stdin', filePath, '--dry-run'],
+    source,
+  );
+  if (result && result !== source) {
+    tree.write(filePath, result);
+    return true;
+  }
+  return false;
+};
+
+/**
+ * Check whether a GritQL pattern matches anywhere in a file.
+ * Returns true if the pattern matches at least once.
+ */
+export const hasGritQLMatch = async (
+  tree: Tree,
+  filePath: string,
+  pattern: string,
+): Promise<boolean> => {
+  if (!tree.exists(filePath)) return false;
+  const source = tree.read(filePath)!.toString();
+  try {
+    const result = await execGrit(
+      ['apply', `${pattern} => ${pattern}`, '--stdin', filePath, '--dry-run'],
+      source,
+    );
+    return result !== '';
+  } catch {
+    return false;
+  }
 };
