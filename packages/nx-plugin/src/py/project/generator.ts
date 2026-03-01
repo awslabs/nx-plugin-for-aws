@@ -109,18 +109,6 @@ export const pyProjectGenerator = async (
     ];
   }
 
-  nxJson.targetDefaults ??= {};
-  nxJson.targetDefaults['@nxlv/python:ruff-check'] ??= {
-    configurations: {
-      fix: {
-        fix: true,
-      },
-      'skip-lint': {
-        exitZero: true,
-      },
-    },
-  };
-
   updateNxJson(tree, nxJson);
 
   if (!tree.exists('uv.lock')) {
@@ -195,12 +183,22 @@ export const pyProjectGenerator = async (
   // fixable lint errors (eg line too long)
   projectConfiguration.targets.lint = {
     ...projectConfiguration.targets.lint,
+    cache: true,
     dependsOn: [
       ...(projectConfiguration.targets.lint?.dependsOn ?? []).filter(
         (d) => d !== 'format',
       ),
       'format',
     ],
+    configurations: {
+      ...projectConfiguration.targets.lint?.configurations,
+      fix: {
+        fix: true,
+      },
+      'skip-lint': {
+        exitZero: true,
+      },
+    },
   };
 
   projectConfiguration.targets = sortObjectKeys(projectConfiguration.targets);
