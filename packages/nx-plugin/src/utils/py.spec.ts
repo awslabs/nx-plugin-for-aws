@@ -28,7 +28,7 @@ describe('addDependenciesToPyProjectToml', () => {
     tree.write('test-project/pyproject.toml', stringify(initialToml));
 
     // Act: Add dependencies
-    const deps: IPyDepVersion[] = ['fastapi', 'mangum'];
+    const deps: IPyDepVersion[] = ['fastapi', 'uvicorn'];
     addDependenciesToPyProjectToml(tree, 'test-project', deps);
 
     // Assert: Verify dependencies were added
@@ -43,7 +43,7 @@ describe('addDependenciesToPyProjectToml', () => {
     ).toBe(true);
     expect(
       updatedToml.project.dependencies.some((dep) =>
-        dep.startsWith('mangum=='),
+        dep.startsWith('uvicorn=='),
       ),
     ).toBe(true);
     expect(updatedToml.project.dependencies).toHaveLength(2);
@@ -61,7 +61,7 @@ describe('addDependenciesToPyProjectToml', () => {
     tree.write('test-project/pyproject.toml', stringify(initialToml));
 
     // Act: Add new dependencies
-    const deps: IPyDepVersion[] = ['fastapi', 'mangum'];
+    const deps: IPyDepVersion[] = ['fastapi', 'uvicorn'];
     addDependenciesToPyProjectToml(tree, 'test-project', deps);
 
     // Assert: Verify all dependencies are present
@@ -78,7 +78,7 @@ describe('addDependenciesToPyProjectToml', () => {
     ).toBe(true);
     expect(
       updatedToml.project.dependencies.some((dep) =>
-        dep.startsWith('mangum=='),
+        dep.startsWith('uvicorn=='),
       ),
     ).toBe(true);
     expect(updatedToml.project.dependencies).toHaveLength(4);
@@ -127,7 +127,7 @@ describe('addDependenciesToPyProjectToml', () => {
     tree.write('test-project/pyproject.toml', stringify(initialToml));
 
     // Act: Add dependencies
-    const deps: IPyDepVersion[] = ['fastapi', 'mangum'];
+    const deps: IPyDepVersion[] = ['fastapi', 'uvicorn'];
     addDependenciesToPyProjectToml(tree, 'test-project', deps);
 
     // Assert: Verify dependencies were added
@@ -142,7 +142,7 @@ describe('addDependenciesToPyProjectToml', () => {
     ).toBe(true);
     expect(
       updatedToml.project.dependencies.some((dep) =>
-        dep.startsWith('mangum=='),
+        dep.startsWith('uvicorn=='),
       ),
     ).toBe(true);
     expect(updatedToml.project.dependencies).toHaveLength(2);
@@ -209,7 +209,7 @@ describe('addDependenciesToPyProjectToml', () => {
     // Act: Add dependencies (some new, some replacements)
     const deps: IPyDepVersion[] = [
       'fastapi',
-      'mangum',
+      'uvicorn',
       'aws-lambda-powertools',
     ];
     addDependenciesToPyProjectToml(tree, 'test-project', deps);
@@ -226,7 +226,7 @@ describe('addDependenciesToPyProjectToml', () => {
     ).toBe(true);
     expect(
       updatedToml.project.dependencies.some((dep) =>
-        dep.startsWith('mangum=='),
+        dep.startsWith('uvicorn=='),
       ),
     ).toBe(true);
     expect(
@@ -328,7 +328,7 @@ describe('addDependenciesToPyProjectToml', () => {
     tree.write('apps/nested/path/pyproject.toml', stringify(initialToml));
 
     // Act: Add dependencies to nested project
-    const deps: IPyDepVersion[] = ['fastapi', 'mangum'];
+    const deps: IPyDepVersion[] = ['fastapi', 'uvicorn'];
     addDependenciesToPyProjectToml(tree, 'apps/nested/path', deps);
 
     // Assert: Verify dependencies were added to correct file
@@ -343,7 +343,7 @@ describe('addDependenciesToPyProjectToml', () => {
     ).toBe(true);
     expect(
       updatedToml.project.dependencies.some((dep) =>
-        dep.startsWith('mangum=='),
+        dep.startsWith('uvicorn=='),
       ),
     ).toBe(true);
     expect(updatedToml.project.dependencies).toHaveLength(2);

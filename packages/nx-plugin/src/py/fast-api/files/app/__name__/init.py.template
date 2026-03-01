@@ -1,15 +1,16 @@
+import json
 import os
 import uuid
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from typing import Any
 from urllib.parse import urlparse
 
 from aws_lambda_powertools import Logger, Metrics, Tracer
 from aws_lambda_powertools.metrics import MetricUnit
 from fastapi import FastAPI, Request, Response
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.routing import APIRoute
-from mangum import Mangum
 from pydantic import BaseModel
 from starlette.middleware.exceptions import ExceptionMiddleware
 
@@ -25,16 +26,54 @@ class InternalServerErrorDetails(BaseModel):
     detail: str
 
 
-app = FastAPI(title="<%= apiNameClassName %>", responses={500: {"model": InternalServerErrorDetails}})
-lambda_handler = Mangum(app)
+class JsonStreamingResponse(StreamingResponse):
+    """A streaming response that serializes items to JSON Lines format."""
 
-# Add tracing
-lambda_handler.__name__ = "handler"  # tracer requires __name__ to be set
-lambda_handler = tracer.capture_lambda_handler(lambda_handler)
-# Add logging
-lambda_handler = logger.inject_lambda_context(lambda_handler, clear_state=True)
-# Add metrics last to properly flush metrics.
-lambda_handler = metrics.log_metrics(lambda_handler, capture_cold_start_metric=True)
+    media_type = "application/jsonl"
+
+    def __init__(
+        self,
+        content: AsyncIterator[BaseModel],
+        status_code: int = 200,
+        headers: dict[str, str] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """Stream json lines from an async iterator yielding Pydantic models"""
+        super().__init__(
+            content=self._serialize(content),
+            status_code=status_code,
+            headers=headers,
+            media_type=self.media_type,
+            **kwargs,
+        )
+
+    @staticmethod
+    async def _serialize(
+        content: AsyncIterator[BaseModel],
+    ) -> AsyncIterator[bytes]:
+        """Serialize Pydantic models to JSON Lines format."""
+        async for item in content:
+            yield (item.model_dump_json() + "\n").encode("utf-8")
+
+    @staticmethod
+    def openapi_response(
+        item_model: type[BaseModel],
+        description: str = "Streaming response",
+    ) -> dict[str, Any]:
+        """Generate an OpenAPI application/jsonl response for a stream of the given model"""
+        return {
+            "description": description,
+            "content": {
+                "application/jsonl": {
+                    "itemSchema": {"$ref": f"#/components/schemas/{item_model.__name__}"},
+                }
+            },
+            # Include the model so FastAPI registers the schema in components/schemas
+            "model": item_model,
+        }
+
+
+app = FastAPI(title="<%= apiNameClassName %>", responses={500: {"model": InternalServerErrorDetails}})
 
 
 # Add cors middleware
@@ -92,10 +131,16 @@ async def metrics_handler(request: Request, call_next):
 async def add_correlation_id(request: Request, call_next):
     # Get correlation id from X-Correlation-Id header
     corr_id = request.headers.get("x-correlation-id")
-    if not corr_id and "aws.context" in request.scope:
-        # If empty, use request id from aws context
-        corr_id = request.scope["aws.context"].aws_request_id
-    elif not corr_id:
+    if not corr_id:
+        # Try to get request id from Lambda context (forwarded by Lambda Web Adapter)
+        lambda_context_header = request.headers.get("x-amzn-lambda-context")
+        if lambda_context_header:
+            try:
+                lambda_context = json.loads(lambda_context_header)
+                corr_id = lambda_context.get("request_id")
+            except (json.JSONDecodeError, KeyError):
+                pass
+    if not corr_id:
         # If still empty, use uuid
         corr_id = uuid.uuid4().hex
 

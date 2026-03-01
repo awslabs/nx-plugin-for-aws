@@ -30,6 +30,10 @@ FastAPI 생성기는 AWS CDK 또는 Terraform 인프라 설정이 포함된 새�
 
 <Snippet name="api/api-choice-note" />
 
+:::tip
+스트리밍 작업을 구축하려는 경우 `computeType`으로 `ServerlessApiGatewayRestApi`(기본값)를 선택하세요.
+:::
+
 ## 생성기 출력
 
 생성기는 `<directory>/<api-name>` 디렉토리에 다음 프로젝트 구조를 생성합니다:
@@ -38,6 +42,7 @@ FastAPI 생성기는 AWS CDK 또는 Terraform 인프라 설정이 포함된 새�
 
 - project.json 프로젝트 구성 및 빌드 대상
 - pyproject.toml Python 프로젝트 구성 및 의존성
+- run.sh uvicorn을 통해 FastAPI 앱을 시작하는 Lambda Web Adapter 부트스트랩 스크립트
 - \<module_name>
   - \_\_init\_\_.py 모듈 초기화
   - init.py FastAPI 앱 설정 및 powertools 미들웨어 구성
@@ -58,17 +63,19 @@ FastAPI 생성기는 AWS CDK 또는 Terraform 인프라 설정이 포함된 새�
 주요 API 구현은 `main.py`에 있습니다. 여기서 API 경로와 구현을 정의합니다. 예시:
 
 ```python
-from .init import app, tracer
 from pydantic import BaseModel
+from .init import app, tracer
 
 class Item(BaseModel):
   name: str
 
 @app.get("/items/{item_id}")
+@tracer.capture_method
 def get_item(item_id: int) -> Item:
     return Item(name=...)
 
 @app.post("/items")
+@tracer.capture_method
 def create_item(item: Item):
     return ...
 ```
@@ -79,7 +86,8 @@ def create_item(item: Item):
 2. 오류 처리 미들웨어
 3. 요청/응답 상관 관계
 4. 메트릭 수집
-5. Mangum을 사용한 AWS Lambda 핸들러
+5. uvicorn과 함께 [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter)를 통한 AWS Lambda 배포
+6. 타입 세이프 스트리밍 (REST API 전용)
 
 ### AWS Lambda Powertools를 이용한 관측 가능성
 
@@ -167,299 +175,44 @@ def read_item(item_id: int):
 
 ### 스트리밍
 
-FastAPI에서는 [`StreamingResponse`](https://fastapi.tiangolo.com/reference/responses/?h=streaming#fastapi.responses.StreamingResponse) 응답 타입을 사용해 호출자에게 스트리밍 응답을 전송할 수 있습니다.
+:::caution
+API Gateway HTTP API는 응답 스트리밍을 지원하지 않으므로, 스트리밍은 `computeType`이 `ServerlessApiGatewayRestApi`(기본값)일 때만 지원됩니다.
+:::
 
-#### 인프라 변경
+생성된 FastAPI는 REST API를 사용할 때 기본적으로 스트리밍 응답을 지원합니다. 인프라는 [AWS Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter)를 사용하여 Lambda 내에서 uvicorn을 통해 FastAPI를 실행하도록 구성되어 있으며, 모든 REST API 작업에 대해 API Gateway에서 `ResponseTransferMode.STREAM`을 사용하여 스트리밍이 비스트리밍 작업과 함께 작동할 수 있도록 합니다.
 
-AWS API Gateway는 스트리밍 응답을 지원하지 않으므로 FastAPI를 스트리밍을 지원하는 플랫폼에 배포해야 합니다. 가장 간단한 옵션은 AWS Lambda Function URL을 사용하는 것입니다.
+#### `JsonStreamingResponse` 사용
 
-<Infrastructure>
-<Fragment slot="cdk">
-이를 위해 생성된 `common/constructs/src/app/apis/<name>-api.ts` 구성을 Function URL을 배포하는 구성으로 교체할 수 있습니다.
+생성된 `init.py`는 적절한 OpenAPI 스키마 생성과 함께 타입 세이프 스트리밍을 제공하는 `JsonStreamingResponse` 클래스를 내보냅니다. 이를 통해 <Link path="guides/connection/react-fastapi">`connection` 생성기</Link>가 올바르게 타입이 지정된 스트리밍 클라이언트 메서드를 생성할 수 있습니다.
 
-<details>
-<summary>스트리밍 FunctionURL 구성 예시</summary>
-
-```ts
-import { Duration, Stack, CfnOutput } from 'aws-cdk-lib';
-import { IGrantable, Grant } from 'aws-cdk-lib/aws-iam';
-import {
-  Runtime,
-  Code,
-  Tracing,
-  LayerVersion,
-  FunctionUrlAuthType,
-  InvokeMode,
-  Function,
-} from 'aws-cdk-lib/aws-lambda';
-import { Construct } from 'constructs';
-import url from 'url';
-import { RuntimeConfig } from '../../core/runtime-config.js';
-
-export class MyApi extends Construct {
-  public readonly handler: Function;
-
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
-
-    this.handler = new Function(this, 'Handler', {
-      runtime: Runtime.PYTHON_3_12,
-      handler: 'run.sh',
-      code: Code.fromAsset(
-        url.fileURLToPath(
-          new URL(
-            '../../../../../../dist/packages/my_api/bundle-x86',
-            import.meta.url,
-          ),
-        ),
-      ),
-      timeout: Duration.seconds(30),
-      tracing: Tracing.ACTIVE,
-      environment: {
-        AWS_CONNECTION_REUSE_ENABLED: '1',
-      },
-    });
-
-    const stack = Stack.of(this);
-    this.handler.addLayers(
-      LayerVersion.fromLayerVersionArn(
-        this,
-        'LWALayer',
-        `arn:aws:lambda:${stack.region}:753240598075:layer:LambdaAdapterLayerX86:24`,
-      ),
-    );
-    this.handler.addEnvironment('PORT', '8000');
-    this.handler.addEnvironment('AWS_LWA_INVOKE_MODE', 'response_stream');
-    this.handler.addEnvironment('AWS_LAMBDA_EXEC_WRAPPER', '/opt/bootstrap');
-    const functionUrl = this.handler.addFunctionUrl({
-      authType: FunctionUrlAuthType.AWS_IAM,
-      invokeMode: InvokeMode.RESPONSE_STREAM,
-      cors: {
-        allowedOrigins: ['*'],
-        allowedHeaders: [
-          'authorization',
-          'content-type',
-          'x-amz-content-sha256',
-          'x-amz-date',
-          'x-amz-security-token',
-        ],
-      },
-    });
-
-    new CfnOutput(this, 'MyApiUrl', { value: functionUrl.url });
-
-    // 클라이언트 탐색을 위해 런타임 구성에 API URL 등록
-    RuntimeConfig.ensure(this).config.apis = {
-      ...RuntimeConfig.ensure(this).config.apis!,
-      MyApi: functionUrl.url,
-    };
-  }
-
-  public grantInvokeAccess(grantee: IGrantable) {
-    Grant.addToPrincipal({
-      grantee,
-      actions: ['lambda:InvokeFunctionUrl'],
-      resourceArns: [this.handler.functionArn],
-      conditions: {
-        StringEquals: {
-          'lambda:FunctionUrlAuthType': 'AWS_IAM',
-        },
-      },
-    });
-  }
-}
-
-```
-
-</details>
-</Fragment>
-<Fragment slot="terraform">
-Terraform을 사용하는 경우 생성된 API Gateway 인프라를 스트리밍 응답을 지원하는 Lambda Function URL로 교체할 수 있습니다.
-
-<details>
-<summary>스트리밍 Lambda Function URL 구성 예시</summary>
-
-```hcl
-# 현재 AWS 컨텍스트를 위한 데이터 소스
-data "aws_caller_identity" "current" {}
-data "aws_region" "current" {}
-
-# 스트리밍 FastAPI를 위한 Lambda 함수
-resource "aws_lambda_function" "my_api_handler" {
-  filename         = "../../../../../../dist/packages/my_api/bundle.zip"
-  function_name    = "my-api-handler"
-  role            = aws_iam_role.lambda_execution_role.arn
-  handler         = "run.sh"
-  runtime         = "python3.12"
-  timeout         = 30
-  source_code_hash = filebase64sha256("../../../../../../dist/packages/my_api/bundle.zip")
-
-  # X-Ray 추적 활성화
-  tracing_config {
-    mode = "Active"
-  }
-
-  # Lambda Web Adapter를 위한 환경 변수
-  environment {
-    variables = {
-      AWS_CONNECTION_REUSE_ENABLED = "1"
-      PORT                        = "8000"
-      AWS_LWA_INVOKE_MODE        = "response_stream"
-      AWS_LAMBDA_EXEC_WRAPPER    = "/opt/bootstrap"
-    }
-  }
-
-  # Lambda Web Adapter 레이어 추가
-  layers = [
-    "arn:aws:lambda:${data.aws_region.current.name}:753240598075:layer:LambdaAdapterLayerX86:24"
-  ]
-
-  depends_on = [
-    aws_iam_role_policy_attachment.lambda_logs,
-    aws_cloudwatch_log_group.lambda_logs,
-  ]
-}
-
-# Lambda 함수를 위한 CloudWatch 로그 그룹
-resource "aws_cloudwatch_log_group" "lambda_logs" {
-  name              = "/aws/lambda/my-api-handler"
-  retention_in_days = 14
-}
-
-# Lambda 실행을 위한 IAM 역할
-resource "aws_iam_role" "lambda_execution_role" {
-  name = "my-api-lambda-execution-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "lambda.amazonaws.com"
-        }
-      }
-    ]
-  })
-}
-
-# 기본 실행 정책 연결
-resource "aws_iam_role_policy_attachment" "lambda_logs" {
-  role       = aws_iam_role.lambda_execution_role.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-}
-
-# X-Ray 추적 정책 연결
-resource "aws_iam_role_policy_attachment" "lambda_xray" {
-  role       = aws_iam_role.lambda_execution_role.name
-  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
-}
-
-# 스트리밍 지원 Lambda Function URL
-resource "aws_lambda_function_url" "my_api_url" {
-  function_name      = aws_lambda_function.my_api_handler.function_name
-  authorization_type = "AWS_IAM"
-  invoke_mode       = "RESPONSE_STREAM"
-
-  cors {
-    allow_credentials = false
-    allow_origins     = ["*"]
-    allow_methods     = ["*"]
-    allow_headers = [
-      "authorization",
-      "content-type",
-      "x-amz-content-sha256",
-      "x-amz-date",
-      "x-amz-security-token"
-    ]
-    expose_headers = ["date", "keep-alive"]
-    max_age       = 86400
-  }
-}
-
-# Function URL 출력
-output "my_api_url" {
-  description = "스트리밍 FastAPI Lambda Function URL"
-  value       = aws_lambda_function_url.my_api_url.function_url
-}
-
-# 선택 사항: 런타임 구성을 위한 SSM 파라미터 생성
-resource "aws_ssm_parameter" "my_api_url" {
-  name  = "/runtime-config/apis/MyApi"
-  type  = "String"
-  value = aws_lambda_function_url.my_api_url.function_url
-
-  tags = {
-    Environment = "production"
-    Service     = "my-api"
-  }
-}
-
-# Function URL 호출 권한을 위한 IAM 정책
-resource "aws_iam_policy" "my_api_invoke_policy" {
-  name        = "my-api-invoke-policy"
-  description = "스트리밍 FastAPI Lambda Function URL 호출을 허용하는 정책"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = "lambda:InvokeFunctionUrl"
-        Resource = aws_lambda_function.my_api_handler.arn
-        Condition = {
-          StringEquals = {
-            "lambda:FunctionUrlAuthType" = "AWS_IAM"
-          }
-        }
-      }
-    ]
-  })
-}
-
-# 예시: 정책을 역할에 연결 (필요에 따라 주석 해제 및 수정)
-# resource "aws_iam_role_policy_attachment" "my_api_invoke_access" {
-#   role       = var.authenticated_role_name
-#   policy_arn = aws_iam_policy.my_api_invoke_policy.arn
-# }
-```
-
-</details>
-
-</Fragment>
-</Infrastructure>
-
-#### 구현
-
-인프라를 스트리밍을 지원하도록 업데이트한 후 FastAPI에서 스트리밍 API를 구현할 수 있습니다. API는 다음을 수행해야 합니다:
-
-- [`StreamingResponse`](https://fastapi.tiangolo.com/reference/responses/?h=streaming#fastapi.responses.StreamingResponse) 반환
-- 각 응답 청크의 반환 타입 선언
-- <Link path="guides/connection/react-fastapi">Connection</Link> 생성기 사용을 계획하는 경우 OpenAPI 벤더 확장 `x-streaming: true` 추가
-
-예를 들어 API에서 일련의 JSON 객체를 스트리밍하려면 다음과 같이 구현할 수 있습니다:
-
-```py /return (StreamingResponse)/ /openapi_extra[^)]*/ /-> (Chunk)/
+```python
 from pydantic import BaseModel
-from fastapi.responses import StreamingResponse
+from .init import app, JsonStreamingResponse
 
 class Chunk(BaseModel):
-  message: str
-  timestamp: datetime
+    message: str
 
-async def stream_chunks():
-  for i in range(0, 100):
-    yield Chunk(message=f"This is chunk {i}", timestamp=datetime.now())
+async def generate_chunks():
+    for i in range(100):
+        yield Chunk(message=f"This is chunk {i}")
 
-@app.get("/stream", openapi_extra={'x-streaming': True})
-def my_stream() -> Chunk:
-    return StreamingResponse(stream_chunks(), media_type="application/json")
+@app.post(
+    "/stream",
+    response_class=JsonStreamingResponse,
+    responses={200: JsonStreamingResponse.openapi_response(Chunk, "Stream of chunks")},
+)
+async def my_stream() -> JsonStreamingResponse:
+    return JsonStreamingResponse(generate_chunks())
 ```
+
+`JsonStreamingResponse` 클래스는:
+
+1. Pydantic 모델을 [JSON Lines](https://jsonlines.org/) 형식(`application/jsonl`)으로 직렬화
+2. `itemSchema`가 포함된 올바른 OpenAPI 스키마를 생성하는 `openapi_response` 헬퍼를 제공하여, <Link path="guides/connection/react-fastapi#consuming-a-stream">`connection` 생성기</Link>가 타입 세이프 스트리밍 클라이언트 메서드를 생성할 수 있도록 함
 
 #### 소비
 
-스트리밍 응답을 소비하려면 <Link path="guides/connection/react-fastapi#consuming-a-stream">Connection Generator</Link>를 사용하여 스트리밍 청크를 반복하는 타입 세이프 메서드를 제공할 수 있습니다.
+스트리밍 응답을 소비하려면 <Link path="guides/connection/react-fastapi#consuming-a-stream">`connection` 생성기</Link>를 사용하여 스트리밍 청크를 반복하는 타입 세이프 메서드를 제공할 수 있습니다.
 
 ## FastAPI 배포
 
@@ -708,7 +461,7 @@ resource "aws_iam_role_policy_attachment" "api_invoke_access_existing" {
 }
 ```
 
-API 모듈의 주요 출력:
+IAM 정책에 사용할 수 있는 API 모듈의 주요 출력:
 
 - `module.my_api.api_execution_arn` - execute-api:Invoke 권한 부여용
 - `module.my_api.api_arn` - API Gateway ARN
@@ -730,4 +483,4 @@ API 모듈의 주요 출력:
 
 ## FastAPI 호출
 
-React 웹사이트에서 API를 호출하려면 <Link path="guides/connection/react-fastapi">`connection`</Link> 생성기를 사용할 수 있습니다.
+React 웹사이트에서 API를 호출하려면 <Link path="guides/connection/react-fastapi">`connection` 생성기</Link>를 사용할 수 있습니다.

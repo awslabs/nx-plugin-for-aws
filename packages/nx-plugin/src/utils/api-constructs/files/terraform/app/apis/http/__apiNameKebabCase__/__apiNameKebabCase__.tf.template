@@ -132,11 +132,15 @@ resource "aws_lambda_function" "api_lambda" {
   handler         = "index.handler"
   runtime         = "nodejs22.x"
   <%_ } else if (backend.type === 'fastapi') { _%>
-  handler         = "<%= backend.moduleName %>.main.handler"
+  handler         = "run.sh"
   runtime         = "python3.12"
+  layers          = ["arn:aws:lambda:${data.aws_region.current.name}:753240598075:layer:LambdaAdapterLayerX86:24"]
   <%_ } _%>
   timeout         = 30
   memory_size     = 128
+  <%_ if (backend.type === 'fastapi') { _%>
+  publish         = true
+  <%_ } _%>
 
   source_code_hash = data.archive_file.lambda_zip.output_base64sha256
 
@@ -145,9 +149,21 @@ resource "aws_lambda_function" "api_lambda" {
     mode = "Active"
   }
 
+  <%_ if (backend.type === 'fastapi') { _%>
+  # Enable SnapStart for faster cold starts
+  snap_start {
+    apply_on = "PublishedVersions"
+  }
+  <%_ } _%>
+
   environment {
     variables = merge({
       AWS_CONNECTION_REUSE_ENABLED = "1"
+      <%_ if (backend.type === 'fastapi') { _%>
+      PORT                        = "8000"
+      AWS_LWA_INVOKE_MODE         = "buffered"
+      AWS_LAMBDA_EXEC_WRAPPER     = "/opt/bootstrap"
+      <%_ } _%>
     }, var.env)
   }
 
@@ -207,6 +223,17 @@ resource "aws_cloudwatch_log_group" "lambda_logs" {
   tags              = var.tags
 }
 
+<%_ if (backend.type === 'fastapi') { _%>
+# Lambda alias pointing to the latest published version for SnapStart
+resource "aws_lambda_alias" "live" {
+  name             = "live"
+  function_name    = aws_lambda_function.api_lambda.function_name
+  function_version = aws_lambda_function.api_lambda.version
+
+  depends_on = [aws_lambda_function.api_lambda]
+}
+<%_ } _%>
+
 <%_ if (auth === 'Cognito') { _%>
 # Cognito User Pool Authorizer
 resource "aws_apigatewayv2_authorizer" "cognito_authorizer" {
@@ -226,12 +253,20 @@ resource "aws_apigatewayv2_authorizer" "cognito_authorizer" {
 resource "aws_apigatewayv2_integration" "lambda_integration" {
   api_id           = module.http_api.api_id
   integration_type = "AWS_PROXY"
+  <%_ if (backend.type === 'fastapi') { _%>
+  integration_uri  = aws_lambda_alias.live.invoke_arn
+  <%_ } else { _%>
   integration_uri  = aws_lambda_function.api_lambda.invoke_arn
+  <%_ } _%>
 
   payload_format_version = "2.0"
   timeout_milliseconds   = 30000
 
+  <%_ if (backend.type === 'fastapi') { _%>
+  depends_on = [aws_lambda_alias.live]
+  <%_ } else { _%>
   depends_on = [aws_lambda_function.api_lambda]
+  <%_ } _%>
 }
 
 # Route for proxy integration (catches all requests)
@@ -268,15 +303,22 @@ module "add_url_to_runtime_config" {
   depends_on = [module.http_api]
 }
 
-# Lambda permission for API Gateway to invoke the function
+# Lambda permission for API Gateway to invoke the function<% if (backend.type === 'fastapi') { %> via alias<% } %>
 resource "aws_lambda_permission" "api_gateway_invoke" {
   statement_id  = "AllowExecutionFromAPIGateway"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.api_lambda.function_name
+  <%_ if (backend.type === 'fastapi') { _%>
+  qualifier     = aws_lambda_alias.live.name
+  <%_ } _%>
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${module.http_api.api_execution_arn}/*/*"
 
+  <%_ if (backend.type === 'fastapi') { _%>
+  depends_on = [module.http_api, aws_lambda_alias.live]
+  <%_ } else { _%>
   depends_on = [module.http_api, aws_lambda_function.api_lambda]
+  <%_ } _%>
 }
 
 # Outputs

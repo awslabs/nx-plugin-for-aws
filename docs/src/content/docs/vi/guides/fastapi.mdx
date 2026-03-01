@@ -30,6 +30,10 @@ Bạn có thể tạo một FastAPI mới theo hai cách:
 
 <Snippet name="api/api-choice-note" />
 
+:::tip
+Chọn `ServerlessApiGatewayRestApi` (mặc định) làm `computeType` của bạn nếu bạn định xây dựng bất kỳ streaming operations nào.
+:::
+
 ## Kết quả từ Generator
 
 Generator sẽ tạo cấu trúc dự án sau trong thư mục `<directory>/<api-name>`:
@@ -38,6 +42,7 @@ Generator sẽ tạo cấu trúc dự án sau trong thư mục `<directory>/<api
 
 - project.json Cấu hình dự án và build targets
 - pyproject.toml Cấu hình dự án Python và dependencies
+- run.sh Lambda Web Adapter bootstrap script để khởi động ứng dụng FastAPI thông qua uvicorn
 - \<module_name>
   - \_\_init\_\_.py Khởi tạo module
   - init.py Thiết lập ứng dụng FastAPI và cấu hình powertools middleware
@@ -58,17 +63,19 @@ Generator sẽ tạo cấu trúc dự án sau trong thư mục `<directory>/<api
 Triển khai API chính nằm trong `main.py`. Đây là nơi bạn định nghĩa các route API và triển khai của chúng. Ví dụ:
 
 ```python
-from .init import app, tracer
 from pydantic import BaseModel
+from .init import app, tracer
 
 class Item(BaseModel):
   name: str
 
 @app.get("/items/{item_id}")
+@tracer.capture_method
 def get_item(item_id: int) -> Item:
     return Item(name=...)
 
 @app.post("/items")
+@tracer.capture_method
 def create_item(item: Item):
     return ...
 ```
@@ -79,7 +86,8 @@ Generator tự động thiết lập một số tính năng:
 2. Error handling middleware
 3. Request/response correlation
 4. Thu thập metrics
-5. AWS Lambda handler sử dụng Mangum
+5. Triển khai AWS Lambda thông qua [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter) với uvicorn
+6. Type-safe streaming (chỉ REST API)
 
 ### Khả năng quan sát với AWS Lambda Powertools
 
@@ -167,299 +175,44 @@ Nên chỉ định response models cho các API operation để tạo code tốt
 
 ### Streaming
 
-Với FastAPI, bạn có thể stream response đến người gọi với response type [`StreamingResponse`](https://fastapi.tiangolo.com/reference/responses/?h=streaming#fastapi.responses.StreamingResponse).
+:::caution
+Streaming chỉ được hỗ trợ khi `computeType` là `ServerlessApiGatewayRestApi` (mặc định), vì API Gateway HTTP APIs không hỗ trợ response streaming.
+:::
 
-#### Thay đổi Hạ tầng
+FastAPI được tạo hỗ trợ streaming responses ngay từ đầu khi sử dụng REST API. Hạ tầng được cấu hình để sử dụng [AWS Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter) để chạy FastAPI của bạn thông qua uvicorn bên trong Lambda, với `ResponseTransferMode.STREAM` trong API Gateway cho tất cả các REST API operations, cho phép streaming hoạt động cùng với các non-streaming operations.
 
-Vì AWS API Gateway không hỗ trợ streaming responses, bạn sẽ cần triển khai FastAPI của mình lên một nền tảng hỗ trợ điều này. Tùy chọn đơn giản nhất là sử dụng AWS Lambda Function URL.
+#### Sử dụng `JsonStreamingResponse`
 
-<Infrastructure>
-<Fragment slot="cdk">
-Để đạt được điều này, bạn có thể thay thế construct `common/constructs/src/app/apis/<name>-api.ts` đã được tạo bằng một construct triển khai function URL thay thế.
+File `init.py` được tạo exports một class `JsonStreamingResponse` cung cấp type-safe streaming với việc tạo OpenAPI schema phù hợp. Điều này đảm bảo rằng <Link path="guides/connection/react-fastapi">`connection` generator</Link> có thể tạo ra các streaming client methods được type đúng cách.
 
-<details>
-<summary>Ví dụ Streaming FunctionURL Construct</summary>
-
-```ts
-import { Duration, Stack, CfnOutput } from 'aws-cdk-lib';
-import { IGrantable, Grant } from 'aws-cdk-lib/aws-iam';
-import {
-  Runtime,
-  Code,
-  Tracing,
-  LayerVersion,
-  FunctionUrlAuthType,
-  InvokeMode,
-  Function,
-} from 'aws-cdk-lib/aws-lambda';
-import { Construct } from 'constructs';
-import url from 'url';
-import { RuntimeConfig } from '../../core/runtime-config.js';
-
-export class MyApi extends Construct {
-  public readonly handler: Function;
-
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
-
-    this.handler = new Function(this, 'Handler', {
-      runtime: Runtime.PYTHON_3_12,
-      handler: 'run.sh',
-      code: Code.fromAsset(
-        url.fileURLToPath(
-          new URL(
-            '../../../../../../dist/packages/my_api/bundle-x86',
-            import.meta.url,
-          ),
-        ),
-      ),
-      timeout: Duration.seconds(30),
-      tracing: Tracing.ACTIVE,
-      environment: {
-        AWS_CONNECTION_REUSE_ENABLED: '1',
-      },
-    });
-
-    const stack = Stack.of(this);
-    this.handler.addLayers(
-      LayerVersion.fromLayerVersionArn(
-        this,
-        'LWALayer',
-        `arn:aws:lambda:${stack.region}:753240598075:layer:LambdaAdapterLayerX86:24`,
-      ),
-    );
-    this.handler.addEnvironment('PORT', '8000');
-    this.handler.addEnvironment('AWS_LWA_INVOKE_MODE', 'response_stream');
-    this.handler.addEnvironment('AWS_LAMBDA_EXEC_WRAPPER', '/opt/bootstrap');
-    const functionUrl = this.handler.addFunctionUrl({
-      authType: FunctionUrlAuthType.AWS_IAM,
-      invokeMode: InvokeMode.RESPONSE_STREAM,
-      cors: {
-        allowedOrigins: ['*'],
-        allowedHeaders: [
-          'authorization',
-          'content-type',
-          'x-amz-content-sha256',
-          'x-amz-date',
-          'x-amz-security-token',
-        ],
-      },
-    });
-
-    new CfnOutput(this, 'MyApiUrl', { value: functionUrl.url });
-
-    // Đăng ký API URL trong runtime configuration để client discovery
-    RuntimeConfig.ensure(this).config.apis = {
-      ...RuntimeConfig.ensure(this).config.apis!,
-      MyApi: functionUrl.url,
-    };
-  }
-
-  public grantInvokeAccess(grantee: IGrantable) {
-    Grant.addToPrincipal({
-      grantee,
-      actions: ['lambda:InvokeFunctionUrl'],
-      resourceArns: [this.handler.functionArn],
-      conditions: {
-        StringEquals: {
-          'lambda:FunctionUrlAuthType': 'AWS_IAM',
-        },
-      },
-    });
-  }
-}
-
-```
-
-</details>
-</Fragment>
-<Fragment slot="terraform">
-Để đạt được điều này với Terraform, bạn có thể thay thế hạ tầng API Gateway đã được tạo bằng Lambda Function URL hỗ trợ response streaming.
-
-<details>
-<summary>Ví dụ Cấu hình Lambda Function URL Streaming</summary>
-
-```hcl
-# Data sources cho AWS context hiện tại
-data "aws_caller_identity" "current" {}
-data "aws_region" "current" {}
-
-# Lambda function cho streaming FastAPI
-resource "aws_lambda_function" "my_api_handler" {
-  filename         = "../../../../../../dist/packages/my_api/bundle.zip"
-  function_name    = "my-api-handler"
-  role            = aws_iam_role.lambda_execution_role.arn
-  handler         = "run.sh"
-  runtime         = "python3.12"
-  timeout         = 30
-  source_code_hash = filebase64sha256("../../../../../../dist/packages/my_api/bundle.zip")
-
-  # Bật X-Ray tracing
-  tracing_config {
-    mode = "Active"
-  }
-
-  # Biến môi trường cho Lambda Web Adapter
-  environment {
-    variables = {
-      AWS_CONNECTION_REUSE_ENABLED = "1"
-      PORT                        = "8000"
-      AWS_LWA_INVOKE_MODE        = "response_stream"
-      AWS_LAMBDA_EXEC_WRAPPER    = "/opt/bootstrap"
-    }
-  }
-
-  # Thêm Lambda Web Adapter layer
-  layers = [
-    "arn:aws:lambda:${data.aws_region.current.name}:753240598075:layer:LambdaAdapterLayerX86:24"
-  ]
-
-  depends_on = [
-    aws_iam_role_policy_attachment.lambda_logs,
-    aws_cloudwatch_log_group.lambda_logs,
-  ]
-}
-
-# CloudWatch Log Group cho Lambda function
-resource "aws_cloudwatch_log_group" "lambda_logs" {
-  name              = "/aws/lambda/my-api-handler"
-  retention_in_days = 14
-}
-
-# IAM role cho Lambda execution
-resource "aws_iam_role" "lambda_execution_role" {
-  name = "my-api-lambda-execution-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "lambda.amazonaws.com"
-        }
-      }
-    ]
-  })
-}
-
-# Attach basic execution policy
-resource "aws_iam_role_policy_attachment" "lambda_logs" {
-  role       = aws_iam_role.lambda_execution_role.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-}
-
-# Attach X-Ray tracing policy
-resource "aws_iam_role_policy_attachment" "lambda_xray" {
-  role       = aws_iam_role.lambda_execution_role.name
-  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
-}
-
-# Lambda Function URL với hỗ trợ streaming
-resource "aws_lambda_function_url" "my_api_url" {
-  function_name      = aws_lambda_function.my_api_handler.function_name
-  authorization_type = "AWS_IAM"
-  invoke_mode       = "RESPONSE_STREAM"
-
-  cors {
-    allow_credentials = false
-    allow_origins     = ["*"]
-    allow_methods     = ["*"]
-    allow_headers = [
-      "authorization",
-      "content-type",
-      "x-amz-content-sha256",
-      "x-amz-date",
-      "x-amz-security-token"
-    ]
-    expose_headers = ["date", "keep-alive"]
-    max_age       = 86400
-  }
-}
-
-# Output Function URL
-output "my_api_url" {
-  description = "URL cho streaming FastAPI Lambda Function"
-  value       = aws_lambda_function_url.my_api_url.function_url
-}
-
-# Tùy chọn: Tạo SSM parameter cho runtime configuration
-resource "aws_ssm_parameter" "my_api_url" {
-  name  = "/runtime-config/apis/MyApi"
-  type  = "String"
-  value = aws_lambda_function_url.my_api_url.function_url
-
-  tags = {
-    Environment = "production"
-    Service     = "my-api"
-  }
-}
-
-# IAM policy để cấp quyền invoke cho Function URL
-resource "aws_iam_policy" "my_api_invoke_policy" {
-  name        = "my-api-invoke-policy"
-  description = "Policy để cho phép invoke streaming FastAPI Lambda Function URL"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = "lambda:InvokeFunctionUrl"
-        Resource = aws_lambda_function.my_api_handler.arn
-        Condition = {
-          StringEquals = {
-            "lambda:FunctionUrlAuthType" = "AWS_IAM"
-          }
-        }
-      }
-    ]
-  })
-}
-
-# Ví dụ: Attach invoke policy vào một role (bỏ comment và chỉnh sửa nếu cần)
-# resource "aws_iam_role_policy_attachment" "my_api_invoke_access" {
-#   role       = var.authenticated_role_name
-#   policy_arn = aws_iam_policy.my_api_invoke_policy.arn
-# }
-```
-
-</details>
-
-</Fragment>
-</Infrastructure>
-
-#### Triển khai
-
-Sau khi bạn đã cập nhật hạ tầng để hỗ trợ streaming, bạn có thể triển khai một streaming API trong FastAPI. API nên:
-
-- Trả về một [`StreamingResponse`](https://fastapi.tiangolo.com/reference/responses/?h=streaming#fastapi.responses.StreamingResponse)
-- Khai báo kiểu trả về của mỗi response chunk
-- Thêm OpenAPI vendor extension `x-streaming: true` nếu bạn định sử dụng generator <Link path="guides/connection/react-fastapi">Connection</Link>.
-
-Ví dụ, nếu bạn muốn stream một chuỗi các JSON object từ API của mình, bạn có thể triển khai như sau:
-
-```py /return (StreamingResponse)/ /openapi_extra[^)]*/ /-> (Chunk)/
+```python
 from pydantic import BaseModel
-from fastapi.responses import StreamingResponse
+from .init import app, JsonStreamingResponse
 
 class Chunk(BaseModel):
-  message: str
-  timestamp: datetime
+    message: str
 
-async def stream_chunks():
-  for i in range(0, 100):
-    yield Chunk(message=f"This is chunk {i}", timestamp=datetime.now())
+async def generate_chunks():
+    for i in range(100):
+        yield Chunk(message=f"This is chunk {i}")
 
-@app.get("/stream", openapi_extra={'x-streaming': True})
-def my_stream() -> Chunk:
-    return StreamingResponse(stream_chunks(), media_type="application/json")
+@app.post(
+    "/stream",
+    response_class=JsonStreamingResponse,
+    responses={200: JsonStreamingResponse.openapi_response(Chunk, "Stream of chunks")},
+)
+async def my_stream() -> JsonStreamingResponse:
+    return JsonStreamingResponse(generate_chunks())
 ```
+
+Class `JsonStreamingResponse`:
+
+1. Serialize các Pydantic models sang định dạng [JSON Lines](https://jsonlines.org/) (`application/jsonl`)
+2. Cung cấp helper `openapi_response` tạo ra OpenAPI schema đúng với `itemSchema`, cho phép <Link path="guides/connection/react-fastapi#consuming-a-stream">`connection` generator</Link> tạo ra các type-safe streaming client methods
 
 #### Sử dụng
 
-Để sử dụng một stream của responses, bạn có thể tận dụng <Link path="guides/connection/react-fastapi#consuming-a-stream">Connection Generator</Link> sẽ cung cấp một phương thức type-safe để lặp qua các streamed chunks của bạn.
+Để sử dụng một stream của responses, bạn có thể tận dụng <Link path="guides/connection/react-fastapi#consuming-a-stream">`connection` generator</Link> sẽ cung cấp một phương thức type-safe để lặp qua các streamed chunks của bạn.
 
 ## Triển khai FastAPI của bạn
 
@@ -730,4 +483,4 @@ Generator cấu hình một local development server mà bạn có thể chạy 
 
 ## Gọi FastAPI của bạn
 
-Để gọi API của bạn từ một React website, bạn có thể sử dụng generator <Link path="guides/connection/react-fastapi">`connection`</Link>.
+Để gọi API của bạn từ một React website, bạn có thể sử dụng <Link path="guides/connection/react-fastapi">`connection` generator</Link>.
