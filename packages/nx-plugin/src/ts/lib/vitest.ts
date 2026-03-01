@@ -12,9 +12,13 @@ export const configureVitest = (
   tree: Tree,
   options: ConfigureProjectOptions,
 ) => {
-  const configPath = join(options.dir, 'vite.config.mts');
+  // Find vitest.config.mts or vite.config.mts
+  const configPath = [
+    join(options.dir, 'vitest.config.mts'),
+    join(options.dir, 'vite.config.mts'),
+  ].find((config) => tree.exists(config));
 
-  if (tree.exists(configPath)) {
+  if (configPath) {
     replaceIfExists(
       tree,
       configPath,
