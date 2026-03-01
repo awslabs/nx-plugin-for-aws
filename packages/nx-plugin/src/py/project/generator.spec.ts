@@ -190,7 +190,31 @@ describe('python project generator', () => {
     expect(projectConfig.targets.lint.dependsOn).toContain('format');
   });
 
-  it('should add target defaults for ruff-check', async () => {
+  it('should configure cache, fix and skip-lint on the project lint target', async () => {
+    await pyProjectGenerator(tree, {
+      name: 'test-project',
+      directory: 'apps',
+      projectType: 'application',
+    });
+
+    const projectConfig = JSON.parse(
+      tree.read('apps/test_project/project.json', 'utf-8'),
+    );
+
+    // Verify cache is set on the project lint target
+    expect(projectConfig.targets.lint.cache).toBe(true);
+
+    // Verify configurations are set on the project lint target
+    expect(projectConfig.targets.lint.configurations).toBeDefined();
+    expect(projectConfig.targets.lint.configurations.fix).toEqual({
+      fix: true,
+    });
+    expect(projectConfig.targets.lint.configurations['skip-lint']).toEqual({
+      exitZero: true,
+    });
+  });
+
+  it('should not add executor-based target defaults for ruff-check', async () => {
     await pyProjectGenerator(tree, {
       name: 'test-project',
       directory: 'apps',
@@ -199,17 +223,9 @@ describe('python project generator', () => {
 
     const nxJson = JSON.parse(tree.read('nx.json', 'utf-8'));
 
-    // Verify ruff-check target defaults are configured
-    expect(nxJson.targetDefaults['@nxlv/python:ruff-check']).toBeDefined();
+    // Verify no executor-based ruff-check target defaults exist
     expect(
-      nxJson.targetDefaults['@nxlv/python:ruff-check'].configurations,
-    ).toEqual({
-      fix: {
-        fix: true,
-      },
-      'skip-lint': {
-        exitZero: true,
-      },
-    });
+      nxJson.targetDefaults?.['@nxlv/python:ruff-check'],
+    ).not.toBeDefined();
   });
 });

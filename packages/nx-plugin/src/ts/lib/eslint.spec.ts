@@ -49,13 +49,23 @@ describe('eslint configuration', () => {
   });
 
   describe('configureEslint', () => {
-    it('should configure project with lint target', () => {
+    it('should configure project with lint target including cache, inputs, fix and skip-lint configurations', () => {
       configureEslint(tree, options);
 
       const projectConfig = readProjectConfiguration(tree, projectName);
       expect(projectConfig.targets?.lint).toBeDefined();
       expect(projectConfig.targets.lint).toEqual({
         executor: '@nx/eslint:lint',
+        cache: true,
+        inputs: ['eslint'],
+        configurations: {
+          fix: {
+            fix: true,
+          },
+          'skip-lint': {
+            force: true,
+          },
+        },
       });
     });
 
@@ -75,30 +85,31 @@ describe('eslint configuration', () => {
       const projectConfig = readProjectConfiguration(tree, projectName);
       expect(projectConfig.targets?.lint).toEqual({
         executor: '@nx/eslint:lint',
+        cache: true,
+        inputs: ['eslint'],
+        configurations: {
+          fix: {
+            fix: true,
+          },
+          'skip-lint': {
+            force: true,
+          },
+        },
       });
       expect(projectConfig.targets?.build).toEqual({
         executor: '@nx/js:tsc',
       });
     });
 
-    it('should configure target defaults for @nx/eslint:lint in nx.json', () => {
+    it('should add namedInputs.eslint to nx.json when eslint.config.mjs exists', () => {
       tree.write('eslint.config.mjs', `export default [];`);
 
       configureEslint(tree, options);
 
       const nxJson = readNxJson(tree);
-      expect(nxJson.targetDefaults?.lint).not.toBeDefined();
-      expect(nxJson.targetDefaults?.['@nx/eslint:lint']).toBeDefined();
-      expect(nxJson.targetDefaults['@nx/eslint:lint'].cache).toBe(true);
-      expect(nxJson.targetDefaults['@nx/eslint:lint'].configurations).toEqual({
-        fix: {
-          fix: true,
-        },
-        'skip-lint': {
-          force: true,
-        },
-      });
-      expect(nxJson.targetDefaults['@nx/eslint:lint'].inputs).toEqual([
+      expect(nxJson.targetDefaults?.['@nx/eslint:lint']).not.toBeDefined();
+      expect(nxJson.namedInputs?.eslint).toBeDefined();
+      expect(nxJson.namedInputs.eslint).toEqual([
         'default',
         '{workspaceRoot}/eslint.config.mjs',
         '{projectRoot}/eslint.config.mjs',

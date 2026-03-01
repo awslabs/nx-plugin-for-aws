@@ -30,6 +30,16 @@ export const configureEslint = (
       ...projectJson?.targets,
       lint: {
         executor: '@nx/eslint:lint',
+        cache: true,
+        inputs: ['eslint'],
+        configurations: {
+          fix: {
+            fix: true,
+          },
+          'skip-lint': {
+            force: true,
+          },
+        },
       },
     },
   });
@@ -85,25 +95,13 @@ export const configureEslint = (
     const nxJson = readNxJson(tree);
     updateNxJson(tree, {
       ...nxJson,
-      targetDefaults: {
-        ...(nxJson.targetDefaults ?? {}),
-        '@nx/eslint:lint': {
-          ...nxJson.targetDefaults?.['@nx/eslint:lint'],
-          cache: true,
-          configurations: {
-            fix: {
-              fix: true,
-            },
-            'skip-lint': {
-              force: true,
-            },
-          },
-          inputs: [
-            'default',
-            '{workspaceRoot}/eslint.config.mjs',
-            '{projectRoot}/eslint.config.mjs',
-          ],
-        },
+      namedInputs: {
+        ...nxJson.namedInputs,
+        eslint: [
+          'default',
+          '{workspaceRoot}/eslint.config.mjs',
+          '{projectRoot}/eslint.config.mjs',
+        ],
       },
     });
   }
