@@ -466,8 +466,9 @@ export function addShadcnAuthMenu(tree: Tree, appLayoutTsxPath: string) {
   const userInitialExpr = factory.createCallChain(
     factory.createPropertyAccessChain(
       factory.createCallChain(
-        factory.createPropertyAccessExpression(
+        factory.createPropertyAccessChain(
           userNameExpr,
+          factory.createToken(SyntaxKind.QuestionDotToken),
           factory.createIdentifier('charAt'),
         ),
         factory.createToken(SyntaxKind.QuestionDotToken),
