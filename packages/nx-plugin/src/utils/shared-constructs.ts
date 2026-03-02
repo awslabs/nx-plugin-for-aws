@@ -138,11 +138,7 @@ export async function sharedConstructsGenerator(
         tree,
         joinPathFragments(__dirname, 'files', 'terraform'),
         terraformLibPath,
-        {
-          metricId: '',
-          version: '',
-          tags: '',
-        },
+        {},
         {
           overwriteStrategy: OverwriteStrategy.KeepExisting,
         },
