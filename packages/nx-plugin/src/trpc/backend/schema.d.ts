@@ -9,6 +9,7 @@ import { TsProjectGeneratorSchema } from '../../ts/lib/schema';
 export interface TsTrpcApiGeneratorSchema {
   name: string;
   computeType: 'ServerlessApiGatewayRestApi' | 'ServerlessApiGatewayHttpApi';
+  integrationStyle?: 'Individual Functions' | 'Router';
   auth: 'IAM' | 'Cognito' | 'None';
   directory?: TsProjectGeneratorSchema['directory'];
   iacProvider: IacProviderOption;

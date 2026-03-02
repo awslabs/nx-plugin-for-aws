@@ -36,10 +36,19 @@ import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
 export const TRPC_BACKEND_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
 
+const VALID_TRPC_INTEGRATION_PERMUTATIONS = new Set([
+  'ServerlessApiGatewayRestApi::Individual Functions',
+  'ServerlessApiGatewayRestApi::Router',
+  'ServerlessApiGatewayHttpApi::Individual Functions',
+  'ServerlessApiGatewayHttpApi::Router',
+]);
+
 export async function tsTrpcApiGenerator(
   tree: Tree,
   options: TsTrpcApiGeneratorSchema,
 ) {
+  validateTrpcComputeTypeAndIntegrationStyleCombination(options);
+
   const iacProvider = await resolveIacProvider(tree, options.iacProvider);
 
   await sharedConstructsGenerator(tree, {
@@ -88,6 +97,7 @@ export async function tsTrpcApiGenerator(
       type: 'trpc',
       projectAlias: enhancedOptions.backendProjectAlias,
       bundleOutputDir: joinPathFragments('dist', backendRoot, 'bundle'),
+      integrationStyle: options.integrationStyle ?? 'Individual Functions',
     },
     auth: options.auth,
     iacProvider,
@@ -99,6 +109,7 @@ export async function tsTrpcApiGenerator(
     apiType: 'trpc',
     auth: options.auth,
     computeType: options.computeType,
+    integrationStyle: options.integrationStyle ?? 'Individual Functions',
   } as unknown;
 
   projectConfig.targets.serve = {
@@ -166,6 +177,19 @@ export async function tsTrpcApiGenerator(
     installPackagesTask(tree);
   };
 }
+
+const validateTrpcComputeTypeAndIntegrationStyleCombination = (
+  options: TsTrpcApiGeneratorSchema,
+) => {
+  const integrationStyle = options.integrationStyle ?? 'Individual Functions';
+  const permutation = `${options.computeType}::${integrationStyle}`;
+
+  if (!VALID_TRPC_INTEGRATION_PERMUTATIONS.has(permutation)) {
+    throw new Error(
+      `Invalid tRPC computeType/integrationStyle combination: ${options.computeType} + ${integrationStyle}.`,
+    );
+  }
+};
 
 const getApiGatewayEventType = (options: TsTrpcApiGeneratorSchema): string => {
   if (options.computeType === 'ServerlessApiGatewayRestApi') {

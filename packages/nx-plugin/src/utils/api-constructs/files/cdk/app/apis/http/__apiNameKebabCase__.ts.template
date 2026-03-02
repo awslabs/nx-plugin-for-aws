@@ -86,20 +86,46 @@ export class <%= apiNameClassName %><
   TIntegrations extends Record<Operations, HttpApiIntegration>,
 > extends HttpApi<Operations, TIntegrations> {
   /**
+   <%_ if (backend.integrationStyle === 'Router') { _%>
+   * Creates default integrations for all operations using a single shared
+   * router lambda function.
+   <%_ } else { _%>
    * Creates default integrations for all operations, which implement each operation as
    * its own individual lambda function.
+   <%_ } _%>
    *
    * @param scope - The CDK construct scope
    * @returns An IntegrationBuilder with default lambda integrations
    */
   public static defaultIntegrations = (scope: Construct) => {
+    <%_ if (backend.integrationStyle === 'Router') { _%>
+    const handlerProps = {
+      runtime: Runtime.NODEJS_LATEST,
+      handler: 'index.handler',
+      code: Code.fromAsset(
+        url.fileURLToPath(
+          new URL(
+            '../../../../../../<%- backend.bundleOutputDir %>',
+            import.meta.url,
+          ),
+        ),
+      ),
+      timeout: Duration.seconds(30),
+      tracing: Tracing.ACTIVE,
+      environment: {
+        AWS_CONNECTION_REUSE_ENABLED: '1',
+      },
+    } satisfies FunctionProps;
+    const handler = new Function(scope, '<%= apiNameClassName %>RouterHandler', handlerProps);
+
+    <%_ } _%>
     return IntegrationBuilder.http({
       <%_ if (backend.type === 'trpc') { _%>
       operations: routerToOperations(appRouter),
       <%_ } else { _%>
       operations: OPERATION_DETAILS,
       <%_ } _%>
-      defaultIntegrationOptions: {
+      defaultIntegrationOptions: <%_ if (backend.integrationStyle === 'Router') { _%>handlerProps<%_ } else { _%>{
         <%_ if (['trpc', 'smithy'].includes(backend.type)) { _%>
         runtime: Runtime.NODEJS_LATEST,
         handler: 'index.handler',
@@ -136,8 +162,21 @@ export class <%= apiNameClassName %><
           AWS_LAMBDA_EXEC_WRAPPER: '/opt/bootstrap',
           <%_ } _%>
         },
-      } satisfies FunctionProps,
+      } satisfies FunctionProps<%_ } _%>,
       buildDefaultIntegration: (op, props: FunctionProps) => {
+        <%_ if (backend.integrationStyle === 'Router') { _%>
+        void props;
+        return {
+          handler,
+          integration: new HttpLambdaIntegration(
+            `<%= apiNameClassName %>Router${op}Integration`,
+            handler,
+            {
+              scopePermissionToRoute: false,
+            },
+          ),
+        };
+        <%_ } else { _%>
         const handler = new Function(scope, `<%= apiNameClassName %>${op}Handler`, props);
         <%_ if (backend.type === 'fastapi') { _%>
         const stack = Stack.of(scope);
@@ -157,6 +196,7 @@ export class <%= apiNameClassName %><
           integration: new HttpLambdaIntegration(`<%= apiNameClassName %>${op}Integration`, handler),
           <%_ } _%>
         };
+        <%_ } _%>
       },
     });
   };
