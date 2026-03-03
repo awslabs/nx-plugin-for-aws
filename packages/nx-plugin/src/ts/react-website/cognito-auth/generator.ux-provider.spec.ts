@@ -505,6 +505,8 @@ export default AppLayout;
       expect(appLayoutContent).toContain('removeUser()');
       expect(appLayoutContent).toContain('signoutRedirect(');
       expect(appLayoutContent).toContain('clearStaleState()');
+
+      expect(appLayoutContent).toMatchSnapshot('app-layout-with-auth');
     });
   });
 });
