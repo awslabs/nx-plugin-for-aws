@@ -194,13 +194,7 @@ const validateTrpcComputeTypeAndIntegrationPatternCombination = (
 const getIntegrationPattern = (
   options: TsTrpcApiGeneratorSchema,
 ): 'isolated' | 'shared' => {
-  if (options.integrationPattern) {
-    return options.integrationPattern;
-  }
-  if (options.integrationStyle === 'Router') {
-    return 'shared';
-  }
-  return 'isolated';
+  return options.integrationPattern ?? 'isolated';
 };
 
 const getApiGatewayEventType = (options: TsTrpcApiGeneratorSchema): string => {

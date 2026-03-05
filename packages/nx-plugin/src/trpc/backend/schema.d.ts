@@ -10,7 +10,6 @@ export interface TsTrpcApiGeneratorSchema {
   name: string;
   computeType: 'ServerlessApiGatewayRestApi' | 'ServerlessApiGatewayHttpApi';
   integrationPattern?: 'isolated' | 'shared';
-  integrationStyle?: 'Individual Functions' | 'Router';
   auth: 'IAM' | 'Cognito' | 'None';
   directory?: TsProjectGeneratorSchema['directory'];
   iacProvider: IacProviderOption;
