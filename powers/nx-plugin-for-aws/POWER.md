@@ -186,6 +186,6 @@ Add capabilities to existing projects:
 
 **No additional configuration required** — the MCP server works out of the box via npx.
 
-**MCP Server:** `aws-nx-mcp`
+**MCP Server:** `nx-plugin-for-aws`
 **Package:** `@aws/nx-plugin`
 **Documentation:** [https://awslabs.github.io/nx-plugin-for-aws](https://awslabs.github.io/nx-plugin-for-aws)
