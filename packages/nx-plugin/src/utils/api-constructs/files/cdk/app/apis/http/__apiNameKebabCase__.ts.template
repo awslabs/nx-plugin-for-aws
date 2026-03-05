@@ -37,6 +37,7 @@ import { IUserPool, IUserPoolClient } from 'aws-cdk-lib/aws-cognito';
 import { Grant, IGrantable } from 'aws-cdk-lib/aws-iam';
 <%_ } _%>
 import {
+  ApiIntegrations,
   HttpApiIntegration,
   IntegrationBuilder,
 } from '../../core/api/utils.js';
@@ -60,7 +61,7 @@ import {
  * @template TIntegrations - Map of operation names to their integrations
  */
 export interface <%= apiNameClassName %>Props<
-  TIntegrations extends Record<Operations, HttpApiIntegration>,
+  TIntegrations extends ApiIntegrations<Operations, HttpApiIntegration>,
 > {
   /**
    * Map of operation names to their API Gateway integrations
@@ -83,10 +84,10 @@ export interface <%= apiNameClassName %>Props<
  * @template TIntegrations - Map of operation names to their integrations
  */
 export class <%= apiNameClassName %><
-  TIntegrations extends Record<Operations, HttpApiIntegration>,
+  TIntegrations extends ApiIntegrations<Operations, HttpApiIntegration>,
 > extends HttpApi<Operations, TIntegrations> {
   /**
-   <%_ if (backend.integrationStyle === 'Router') { _%>
+   <%_ if (backend.integrationPattern === 'shared') { _%>
    * Creates default integrations for all operations using a single shared
    * router lambda function.
    <%_ } else { _%>
@@ -96,10 +97,11 @@ export class <%= apiNameClassName %><
    *
    * @param scope - The CDK construct scope
    * @returns An IntegrationBuilder with default lambda integrations
-   */
+  */
   public static defaultIntegrations = (scope: Construct) => {
-    <%_ if (backend.integrationStyle === 'Router') { _%>
-    const handlerProps = {
+    <%_ const integrationPattern = backend.type === 'trpc' ? backend.integrationPattern : 'isolated'; _%>
+    const defaultIntegrationOptions: FunctionProps = {
+      <%_ if (integrationPattern === 'shared') { _%>
       runtime: Runtime.NODEJS_LATEST,
       handler: 'index.handler',
       code: Code.fromAsset(
@@ -110,62 +112,56 @@ export class <%= apiNameClassName %><
           ),
         ),
       ),
+      <%_ } else { _%>
+      <%_ if (['trpc', 'smithy'].includes(backend.type)) { _%>
+      runtime: Runtime.NODEJS_LATEST,
+      handler: 'index.handler',
+      code: Code.fromAsset(
+        url.fileURLToPath(
+          new URL(
+            '../../../../../../<%- backend.bundleOutputDir %>',
+            import.meta.url,
+          ),
+        ),
+      ),
+      <%_ } else if (backend.type === 'fastapi') { _%>
+      runtime: Runtime.PYTHON_3_12,
+      handler: 'run.sh',
+      code: Code.fromAsset(
+        url.fileURLToPath(
+          new URL(
+            '../../../../../../<%- backend.bundleOutputDir %>',
+            import.meta.url,
+          ),
+        ),
+      ),
+      <%_ } _%>
+      <%_ } _%>
       timeout: Duration.seconds(30),
       tracing: Tracing.ACTIVE,
+      <%_ if (backend.type === 'fastapi' && integrationPattern === 'isolated') { _%>
+      snapStart: SnapStartConf.ON_PUBLISHED_VERSIONS,
+      <%_ } _%>
       environment: {
         AWS_CONNECTION_REUSE_ENABLED: '1',
+        <%_ if (backend.type === 'fastapi' && integrationPattern === 'isolated') { _%>
+        PORT: '8000',
+        AWS_LWA_INVOKE_MODE: 'buffered',
+        AWS_LAMBDA_EXEC_WRAPPER: '/opt/bootstrap',
+        <%_ } _%>
       },
-    } satisfies FunctionProps;
-    const handler = new Function(scope, '<%= apiNameClassName %>RouterHandler', handlerProps);
-
-    <%_ } _%>
+    };
     return IntegrationBuilder.http({
+      pattern: '<%= integrationPattern %>',
       <%_ if (backend.type === 'trpc') { _%>
       operations: routerToOperations(appRouter),
       <%_ } else { _%>
       operations: OPERATION_DETAILS,
       <%_ } _%>
-      defaultIntegrationOptions: <%_ if (backend.integrationStyle === 'Router') { _%>handlerProps<%_ } else { _%>{
-        <%_ if (['trpc', 'smithy'].includes(backend.type)) { _%>
-        runtime: Runtime.NODEJS_LATEST,
-        handler: 'index.handler',
-        code: Code.fromAsset(
-          url.fileURLToPath(
-            new URL(
-              '../../../../../../<%- backend.bundleOutputDir %>',
-              import.meta.url,
-            ),
-          ),
-        ),
-        <%_ } else if (backend.type === 'fastapi') { _%>
-        runtime: Runtime.PYTHON_3_12,
-        handler: 'run.sh',
-        code: Code.fromAsset(
-          url.fileURLToPath(
-            new URL(
-              '../../../../../../<%- backend.bundleOutputDir %>',
-              import.meta.url,
-            ),
-          ),
-        ),
-        <%_ } _%>
-        timeout: Duration.seconds(30),
-        tracing: Tracing.ACTIVE,
-        <%_ if (backend.type === 'fastapi') { _%>
-        snapStart: SnapStartConf.ON_PUBLISHED_VERSIONS,
-        <%_ } _%>
-        environment: {
-          AWS_CONNECTION_REUSE_ENABLED: '1',
-          <%_ if (backend.type === 'fastapi') { _%>
-          PORT: '8000',
-          AWS_LWA_INVOKE_MODE: 'buffered',
-          AWS_LAMBDA_EXEC_WRAPPER: '/opt/bootstrap',
-          <%_ } _%>
-        },
-      } satisfies FunctionProps<%_ } _%>,
+      defaultIntegrationOptions,
       buildDefaultIntegration: (op, props: FunctionProps) => {
-        <%_ if (backend.integrationStyle === 'Router') { _%>
-        void props;
+        <%_ if (integrationPattern === 'shared') { _%>
+        const handler = new Function(scope, `<%= apiNameClassName %>${op}Handler`, props);
         return {
           handler,
           integration: new HttpLambdaIntegration(

@@ -27,7 +27,7 @@ describe('trpc backend generator', () => {
       name: 'TestApi',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
-      integrationStyle: 'Individual Functions',
+      integrationPattern: 'isolated',
       auth: 'IAM',
       iacProvider: 'CDK',
     });
@@ -49,7 +49,7 @@ describe('trpc backend generator', () => {
       name: 'TestApi',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
-      integrationStyle: 'Individual Functions',
+      integrationPattern: 'isolated',
       auth: 'IAM',
       iacProvider: 'CDK',
     });
@@ -62,7 +62,7 @@ describe('trpc backend generator', () => {
       apiType: 'trpc',
       auth: 'IAM',
       computeType: 'ServerlessApiGatewayHttpApi',
-      integrationStyle: 'Individual Functions',
+      integrationPattern: 'isolated',
       generator: TRPC_BACKEND_GENERATOR_INFO.id,
       ports: [2022],
     });
@@ -74,7 +74,7 @@ describe('trpc backend generator', () => {
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
       auth: 'IAM',
-      integrationStyle: 'Individual Functions',
+      integrationPattern: 'isolated',
       iacProvider: 'CDK',
     });
     const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
@@ -102,7 +102,7 @@ describe('trpc backend generator', () => {
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
       auth: 'IAM',
-      integrationStyle: 'Individual Functions',
+      integrationPattern: 'isolated',
       iacProvider: 'CDK',
     });
     // Verify shared constructs setup
@@ -146,7 +146,7 @@ describe('trpc backend generator', () => {
       directory: 'apps',
       computeType: 'ServerlessApiGatewayRestApi',
       auth: 'IAM',
-      integrationStyle: 'Individual Functions',
+      integrationPattern: 'isolated',
       iacProvider: 'CDK',
     });
     // Verify shared constructs setup
@@ -190,7 +190,7 @@ describe('trpc backend generator', () => {
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
       auth: 'IAM',
-      integrationStyle: 'Individual Functions',
+      integrationPattern: 'isolated',
       iacProvider: 'CDK',
     });
     const projectConfig = readProjectConfiguration(tree, '@proj/test-api');
@@ -207,7 +207,7 @@ describe('trpc backend generator', () => {
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
       auth: 'IAM',
-      integrationStyle: 'Individual Functions',
+      integrationPattern: 'isolated',
       iacProvider: 'CDK',
     });
 
@@ -237,7 +237,7 @@ describe('trpc backend generator', () => {
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
       auth: 'IAM',
-      integrationStyle: 'Individual Functions',
+      integrationPattern: 'isolated',
       iacProvider: 'CDK',
     });
 
@@ -264,7 +264,7 @@ describe('trpc backend generator', () => {
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
       auth: 'IAM',
-      integrationStyle: 'Individual Functions',
+      integrationPattern: 'isolated',
       iacProvider: 'CDK',
     });
 
@@ -280,7 +280,7 @@ describe('trpc backend generator', () => {
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
       auth: 'IAM',
-      integrationStyle: 'Individual Functions',
+      integrationPattern: 'isolated',
       iacProvider: 'CDK',
     });
 
@@ -331,7 +331,7 @@ describe('trpc backend generator', () => {
       directory: 'apps',
       computeType: 'ServerlessApiGatewayRestApi',
       auth: 'IAM',
-      integrationStyle: 'Individual Functions',
+      integrationPattern: 'isolated',
       iacProvider: 'CDK',
     });
 
@@ -364,7 +364,7 @@ describe('trpc backend generator', () => {
       directory: 'apps',
       computeType: 'ServerlessApiGatewayRestApi',
       auth: 'Cognito',
-      integrationStyle: 'Individual Functions',
+      integrationPattern: 'isolated',
       iacProvider: 'CDK',
     });
     snapshotTreeDir(tree, 'apps/test-api/src/client');
@@ -381,7 +381,7 @@ describe('trpc backend generator', () => {
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
       auth: 'Cognito',
-      integrationStyle: 'Individual Functions',
+      integrationPattern: 'isolated',
       iacProvider: 'CDK',
     });
     snapshotTreeDir(tree, 'apps/test-api/src/client');
@@ -398,7 +398,7 @@ describe('trpc backend generator', () => {
       directory: 'apps',
       computeType: 'ServerlessApiGatewayRestApi',
       auth: 'None',
-      integrationStyle: 'Individual Functions',
+      integrationPattern: 'isolated',
       iacProvider: 'CDK',
     });
     snapshotTreeDir(tree, 'apps/test-api/src/client');
@@ -415,7 +415,7 @@ describe('trpc backend generator', () => {
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
       auth: 'None',
-      integrationStyle: 'Individual Functions',
+      integrationPattern: 'isolated',
       iacProvider: 'CDK',
     });
     snapshotTreeDir(tree, 'apps/test-api/src/client');
@@ -426,13 +426,13 @@ describe('trpc backend generator', () => {
     ).toContain('HttpNoneAuthorizer');
   });
 
-  it('should generate a single router lambda for REST APIs when using the Router integration style', async () => {
+  it('should generate a single router lambda for REST APIs when using the shared integration pattern', async () => {
     await tsTrpcApiGenerator(tree, {
       name: 'TestApi',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayRestApi',
       auth: 'IAM',
-      integrationStyle: 'Router',
+      integrationPattern: 'shared',
       iacProvider: 'CDK',
     });
 
@@ -444,23 +444,21 @@ describe('trpc backend generator', () => {
       tree.read('apps/test-api/project.json', 'utf-8'),
     );
 
-    expect(projectConfig.metadata.integrationStyle).toBe('Router');
+    expect(projectConfig.metadata.integrationPattern).toBe('shared');
+    expect(appApiContent).toContain("pattern: 'shared'");
     expect(appApiContent).toContain(
-      "const handler = new Function(scope, 'TestApiRouterHandler', handlerProps);",
-    );
-    expect(appApiContent).toContain('scopePermissionToMethod: false');
-    expect(appApiContent).not.toContain(
       'new Function(scope, `TestApi${op}Handler`, props)',
     );
+    expect(appApiContent).toContain('scopePermissionToMethod: false');
   });
 
-  it('should generate a single router lambda for HTTP APIs when using the Router integration style', async () => {
+  it('should generate a single router lambda for HTTP APIs when using the shared integration pattern', async () => {
     await tsTrpcApiGenerator(tree, {
       name: 'TestApi',
       directory: 'apps',
       computeType: 'ServerlessApiGatewayHttpApi',
       auth: 'IAM',
-      integrationStyle: 'Router',
+      integrationPattern: 'shared',
       iacProvider: 'CDK',
     });
 
@@ -469,18 +467,16 @@ describe('trpc backend generator', () => {
       'utf-8',
     );
 
+    expect(appApiContent).toContain("pattern: 'shared'");
     expect(appApiContent).toContain(
-      "const handler = new Function(scope, 'TestApiRouterHandler', handlerProps);",
+      'new Function(scope, `TestApi${op}Handler`, props)',
     );
     expect(appApiContent).toContain('new HttpLambdaIntegration(');
     expect(appApiContent).toContain('`TestApiRouter${op}Integration`');
     expect(appApiContent).toContain('scopePermissionToRoute: false');
-    expect(appApiContent).not.toContain(
-      'new Function(scope, `TestApi${op}Handler`, props)',
-    );
   });
 
-  it('should throw for unsupported compute type and integration style permutations', async () => {
+  it('should throw for unsupported compute type and integration pattern permutations', async () => {
     await expect(
       tsTrpcApiGenerator(tree, {
         name: 'TestApi',
@@ -488,11 +484,11 @@ describe('trpc backend generator', () => {
         computeType:
           'ApplicationLoadBalancedFargateService' as TsTrpcApiGeneratorSchema['computeType'],
         auth: 'IAM',
-        integrationStyle: 'Individual Functions',
+        integrationPattern: 'isolated',
         iacProvider: 'CDK',
       }),
     ).rejects.toThrow(
-      'Invalid tRPC computeType/integrationStyle combination: ApplicationLoadBalancedFargateService + Individual Functions.',
+      'Invalid tRPC computeType/integrationPattern combination: ApplicationLoadBalancedFargateService + isolated.',
     );
 
     expect(tree.exists('apps/test-api')).toBeFalsy();

@@ -26,7 +26,7 @@ export interface TrpcBackendOptions extends BackendOptions {
   type: 'trpc';
   projectAlias: string;
   bundleOutputDir: string;
-  integrationStyle: 'Individual Functions' | 'Router';
+  integrationPattern: 'isolated' | 'shared';
 }
 
 export interface FastApiBackendOptions extends BackendOptions {
