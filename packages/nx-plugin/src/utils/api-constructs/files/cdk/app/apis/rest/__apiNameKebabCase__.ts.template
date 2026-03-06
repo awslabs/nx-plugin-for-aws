@@ -99,16 +99,15 @@ export class <%= apiNameClassName %><
    * @returns An IntegrationBuilder with default lambda integrations
   */
   public static defaultIntegrations = (scope: Construct) => {
-    <%_ const integrationPattern = backend.type === 'trpc' ? backend.integrationPattern : 'isolated'; _%>
     return IntegrationBuilder.rest({
-      pattern: '<%= integrationPattern %>',
+      pattern: '<%= backend.integrationPattern %>',
       <%_ if (backend.type === 'trpc') { _%>
       operations: routerToOperations(appRouter),
       <%_ } else { _%>
       operations: OPERATION_DETAILS,
       <%_ } _%>
       defaultIntegrationOptions: <FunctionProps>{
-        <%_ if (integrationPattern === 'shared') { _%>
+        <%_ if (backend.integrationPattern === 'shared') { _%>
         runtime: Runtime.NODEJS_LATEST,
         handler: 'index.handler',
         code: Code.fromAsset(
@@ -146,12 +145,12 @@ export class <%= apiNameClassName %><
         <%_ } _%>
         timeout: Duration.seconds(30),
         tracing: Tracing.ACTIVE,
-        <%_ if (backend.type === 'fastapi' && integrationPattern === 'isolated') { _%>
+        <%_ if (backend.type === 'fastapi') { _%>
         snapStart: SnapStartConf.ON_PUBLISHED_VERSIONS,
         <%_ } _%>
         environment: {
           AWS_CONNECTION_REUSE_ENABLED: '1',
-          <%_ if (backend.type === 'fastapi' && integrationPattern === 'isolated') { _%>
+          <%_ if (backend.type === 'fastapi') { _%>
           PORT: '8000',
           AWS_LWA_INVOKE_MODE: 'response_stream',
           AWS_LAMBDA_EXEC_WRAPPER: '/opt/bootstrap',
@@ -159,16 +158,12 @@ export class <%= apiNameClassName %><
         },
       },
       buildDefaultIntegration: (op, props: FunctionProps) => {
-        <%_ if (integrationPattern === 'shared') { _%>
-        const handler = new Function(scope, `<%= apiNameClassName %>${op}Handler`, props);
-        return {
-          handler,
-          integration: new LambdaIntegration(handler, {
-            scopePermissionToMethod: false,
-            responseTransferMode: ResponseTransferMode.STREAM,
-          }),
-        };
-        <%_ } else { _%>
+        <%_ const lambdaTarget = backend.type === 'fastapi' ? 'handler.currentVersion' : 'handler'; _%>
+        <%_ const integrationOptions = backend.integrationPattern === 'shared'
+          ? ', { scopePermissionToMethod: false, responseTransferMode: ResponseTransferMode.STREAM }'
+          : ['fastapi', 'trpc'].includes(backend.type)
+            ? ', { responseTransferMode: ResponseTransferMode.STREAM }'
+            : ''; _%>
         const handler = new Function(scope, `<%= apiNameClassName %>${op}Handler`, props);
         <%_ if (backend.type === 'fastapi') { _%>
         const stack = Stack.of(scope);
@@ -182,19 +177,8 @@ export class <%= apiNameClassName %><
         <%_ } _%>
         return {
           handler,
-          <%_ if (backend.type === 'fastapi') { _%>
-          integration: new LambdaIntegration(handler.currentVersion, {
-            responseTransferMode: ResponseTransferMode.STREAM,
-          }),
-          <%_ } else if (backend.type === 'trpc') { _%>
-          integration: new LambdaIntegration(handler, {
-            responseTransferMode: ResponseTransferMode.STREAM,
-          }),
-          <%_ } else { _%>
-          integration: new LambdaIntegration(handler),
-          <%_ } _%>
+          integration: new LambdaIntegration(<%- lambdaTarget %><%- integrationOptions %>),
         };
-        <%_ } _%>
       },
     });
   };

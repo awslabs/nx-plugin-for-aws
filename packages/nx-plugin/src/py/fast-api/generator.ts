@@ -141,6 +141,7 @@ export const pyFastApiProjectGenerator = async (
       type: 'fastapi',
       moduleName: normalizedModuleName,
       bundleOutputDir,
+      integrationPattern: 'isolated',
     },
     auth: schema.auth,
     iacProvider,

@@ -46,6 +46,37 @@ module "my_api" {
 </Fragment>
 </Infrastructure>
 
+#### Choosing an Integration Pattern
+
+<Infrastructure>
+<Fragment slot="cdk">
+Generated CDK API constructs support two integration patterns:
+
+- `isolated` creates one Lambda function per operation. This is the default for generated APIs.
+- `shared` creates a single default router Lambda and reuses it for every operation unless you override specific integrations.
+
+`isolated` gives you finer-grained permissions and configuration per operation. `shared` reduces Lambda and API Gateway integration sprawl while still allowing selective overrides.
+
+Generator support currently varies by backend:
+
+- `trpc#backend` supports both `isolated` and `shared` for `ServerlessApiGatewayRestApi` and `ServerlessApiGatewayHttpApi` via the `integrationPattern` option.
+- `py#fast-api` and `smithy#ts-api` currently generate `isolated`.
+
+You can also switch an existing generated CDK API construct between the two patterns by editing the `pattern` field in its `defaultIntegrations` method:
+
+```ts {3}
+return IntegrationBuilder.rest({
+  // Change this to 'isolated' or 'shared'
+  pattern: 'isolated',
+  ...
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+Terraform modules already use the router pattern by default, with a single Lambda function handling all API operations.
+</Fragment>
+</Infrastructure>
+
 #### Accessing Integrations
 
 <Infrastructure>
@@ -63,6 +94,16 @@ api.integrations.sayHello.handler.addToRolePolicy(new PolicyStatement({
   actions: [...],
   resources: [...],
 }));
+```
+
+If your API uses the `shared` pattern, the shared router Lambda is exposed as `api.integrations.$router`:
+
+```ts {6}
+const api = new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this).build(),
+});
+
+api.integrations.$router.handler.addEnvironment('LOG_LEVEL', 'DEBUG');
 ```
 </Fragment>
 <Fragment slot="terraform">
@@ -587,11 +628,11 @@ Edit `packages/common/terraform/src/app/apis/my-api/my-api.tf`:
 </Fragment>
 </Infrastructure>
 
-#### Router Pattern
+#### Custom Router Pattern
 
 <Infrastructure>
 <Fragment slot="cdk">
-If you prefer to deploy a single Lambda function to service all API requests, you can freely edit the `defaultIntegrations` method for your API to create a single function instead of one per integration:
+If your generator does not expose the router pattern directly, or you want to customise it further, you can edit the `defaultIntegrations` method for your API to create a single function instead of one per integration:
 
 ```ts {5,11-12}
 // packages/common/constructs/src/app/apis/my-api.ts
@@ -631,5 +672,3 @@ module "my_api" {
 ```
 </Fragment>
 </Infrastructure>
-
-

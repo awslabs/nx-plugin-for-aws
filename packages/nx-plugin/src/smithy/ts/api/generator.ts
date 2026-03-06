@@ -126,6 +126,7 @@ export const tsSmithyApiGenerator = async (
         backendProjectConfig.root,
         'bundle',
       ),
+      integrationPattern: 'isolated',
     },
   });
   addSharedConstructsOpenApiMetadataGenerateTarget(tree, {

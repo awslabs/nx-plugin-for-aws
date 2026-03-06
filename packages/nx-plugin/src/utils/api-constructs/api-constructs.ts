@@ -20,13 +20,13 @@ import { IacProvider } from '../iac';
 
 interface BackendOptions {
   type: 'trpc' | 'fastapi' | 'smithy';
+  integrationPattern: 'isolated' | 'shared';
 }
 
 export interface TrpcBackendOptions extends BackendOptions {
   type: 'trpc';
   projectAlias: string;
   bundleOutputDir: string;
-  integrationPattern: 'isolated' | 'shared';
 }
 
 export interface FastApiBackendOptions extends BackendOptions {
