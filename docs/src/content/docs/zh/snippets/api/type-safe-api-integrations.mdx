@@ -2,8 +2,6 @@
 title: "类型安全的API集成"
 ---
 
-
-
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 import Infrastructure from '@components/infrastructure.astro';
 
@@ -49,6 +47,37 @@ module "my_api" {
 </Fragment>
 </Infrastructure>
 
+#### 选择集成模式
+
+<Infrastructure>
+<Fragment slot="cdk">
+生成的 CDK API 构造支持两种集成模式：
+
+- `isolated` 为每个操作创建一个 Lambda 函数。这是生成 API 的默认模式。
+- `shared` 创建单个默认路由 Lambda 函数并在所有操作中复用，除非您覆盖特定集成。
+
+`isolated` 为每个操作提供更细粒度的权限和配置。`shared` 减少 Lambda 和 API Gateway 集成的数量，同时仍允许选择性覆盖。
+
+生成器支持因后端而异：
+
+- `ts#trpc-api` 通过 `integrationPattern` 选项为 `ServerlessApiGatewayRestApi` 和 `ServerlessApiGatewayHttpApi` 同时支持 `isolated` 和 `shared`。
+- `py#fast-api` 和 `ts#smithy-api` 目前生成 `isolated`。
+
+您也可以通过编辑现有生成的 CDK API 构造的 `defaultIntegrations` 方法中的 `pattern` 字段在两种模式间切换：
+
+```ts {3}
+return IntegrationBuilder.rest({
+  // 将此更改为 'isolated' 或 'shared'
+  pattern: 'isolated',
+  ...
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+Terraform 模块默认已使用路由模式，单个 Lambda 函数处理所有 API 操作。
+</Fragment>
+</Infrastructure>
+
 #### 访问集成
 
 <Infrastructure>
@@ -66,6 +95,16 @@ api.integrations.sayHello.handler.addToRolePolicy(new PolicyStatement({
   actions: [...],
   resources: [...],
 }));
+```
+
+如果您的 API 使用 `shared` 模式，共享路由 Lambda 函数通过 `api.integrations.$router` 暴露：
+
+```ts {6}
+const api = new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this).build(),
+});
+
+api.integrations.$router.handler.addEnvironment('LOG_LEVEL', 'DEBUG');
 ```
 </Fragment>
 <Fragment slot="terraform">
@@ -283,7 +322,9 @@ new MyApi(this, 'MyApi', {
 ```
 </Fragment>
 <Fragment slot="terraform">
-在 Terraform 中实现显式集成，需修改生成的模块：
+在 Terraform 中实现显式集成，需修改生成的应用特定模块，将默认代理集成替换为每个操作的特定集成。
+
+编辑 `packages/common/terraform/src/app/apis/my-api/my-api.tf`：
 
 1. **移除默认代理路由**（如 `resource "aws_apigatewayv2_route" "proxy_routes"`）
 2. **替换单个 Lambda 函数**为各操作独立函数
@@ -295,31 +336,126 @@ new MyApi(this, 'MyApi', {
 ```diff
 # packages/common/terraform/src/app/apis/my-api/my-api.tf
 
-# 移除默认 Lambda 函数和代理集成
-- resource "aws_lambda_function" "api_lambda" { ... }
-- resource "aws_apigatewayv2_integration" "lambda_integration" { ... }
-- resource "aws_apigatewayv2_route" "proxy_routes" { ... }
+# 移除默认单个 Lambda 函数
+- resource "aws_lambda_function" "api_lambda" {
+-   filename         = data.archive_file.lambda_zip.output_path
+-   function_name    = "MyApiHandler"
+-   role            = aws_iam_role.lambda_execution_role.arn
+-   handler         = "index.handler"
+-   runtime         = "nodejs22.x"
+-   timeout         = 30
+-   # ... 其余配置
+- }
 
-# 添加各操作独立 Lambda 函数
+# 移除默认代理集成
+- resource "aws_apigatewayv2_integration" "lambda_integration" {
+-   api_id           = module.http_api.api_id
+-   integration_type = "AWS_PROXY"
+-   integration_uri  = aws_lambda_function.api_lambda.invoke_arn
+-   # ... 其余配置
+- }
+
+# 移除默认代理路由
+- resource "aws_apigatewayv2_route" "proxy_routes" {
+-   for_each = toset(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"])
+-   api_id    = module.http_api.api_id
+-   route_key = "${each.key} /{proxy+}"
+-   target    = "integrations/${aws_apigatewayv2_integration.lambda_integration.id}"
+-   # ... 其余配置
+- }
+
+# 为每个操作添加独立 Lambda 函数，使用相同的包
 + resource "aws_lambda_function" "say_hello_handler" {
-+   handler = "sayHello.handler"  # 特定操作处理器
-+   ... 
++   filename         = data.archive_file.lambda_zip.output_path
++   function_name    = "MyApi-SayHello"
++   role            = aws_iam_role.lambda_execution_role.arn
++   handler         = "sayHello.handler"  # 此操作的特定处理器
++   runtime         = "nodejs22.x"
++   timeout         = 30
++   source_code_hash = data.archive_file.lambda_zip.output_base64sha256
++
++   tracing_config {
++     mode = "Active"
++   }
++
++   environment {
++     variables = merge({
++       AWS_CONNECTION_REUSE_ENABLED = "1"
++     }, var.env)
++   }
++
++   tags = var.tags
 + }
 
 + resource "aws_lambda_function" "get_documentation_handler" {
-+   handler = "getDocumentation.handler"
-+   ...
++   filename         = data.archive_file.lambda_zip.output_path
++   function_name    = "MyApi-GetDocumentation"
++   role            = aws_iam_role.lambda_execution_role.arn
++   handler         = "getDocumentation.handler"  # 此操作的特定处理器
++   runtime         = "nodejs22.x"
++   timeout         = 30
++   source_code_hash = data.archive_file.lambda_zip.output_base64sha256
++
++   tracing_config {
++     mode = "Active"
++   }
++
++   environment {
++     variables = merge({
++       AWS_CONNECTION_REUSE_ENABLED = "1"
++     }, var.env)
++   }
++
++   tags = var.tags
 + }
 
-# 添加具体集成和路由
-+ resource "aws_apigatewayv2_integration" "say_hello_integration" { ... }
-+ resource "aws_apigatewayv2_route" "say_hello_route" { ... }
-+ resource "aws_apigatewayv2_integration" "get_documentation_integration" { ... }
-+ resource "aws_apigatewayv2_route" "get_documentation_route" { ... }
+# 为每个操作添加特定集成
++ resource "aws_apigatewayv2_integration" "say_hello_integration" {
++   api_id           = module.http_api.api_id
++   integration_type = "AWS_PROXY"
++   integration_uri  = aws_lambda_function.say_hello_handler.invoke_arn
++   payload_format_version = "2.0"
++   timeout_milliseconds   = 30000
++ }
 
-# 添加 Lambda 权限
-+ resource "aws_lambda_permission" "say_hello_permission" { ... }
-+ resource "aws_lambda_permission" "get_documentation_permission" { ... }
++ resource "aws_apigatewayv2_integration" "get_documentation_integration" {
++   api_id           = module.http_api.api_id
++   integration_type = "HTTP_PROXY"
++   integration_uri  = "https://example.com/documentation"
++   integration_method = "GET"
++ }
+
+# 为每个操作添加特定路由
++ resource "aws_apigatewayv2_route" "say_hello_route" {
++   api_id    = module.http_api.api_id
++   route_key = "POST /sayHello"
++   target    = "integrations/${aws_apigatewayv2_integration.say_hello_integration.id}"
++   authorization_type = "AWS_IAM"
++ }
+
++ resource "aws_apigatewayv2_route" "get_documentation_route" {
++   api_id    = module.http_api.api_id
++   route_key = "GET /documentation"
++   target    = "integrations/${aws_apigatewayv2_integration.get_documentation_integration.id}"
++   authorization_type = "NONE"
++ }
+
+# 为每个函数添加 Lambda 权限
++ resource "aws_lambda_permission" "say_hello_permission" {
++   statement_id  = "AllowExecutionFromAPIGateway-SayHello"
++   action        = "lambda:InvokeFunction"
++   function_name = aws_lambda_function.say_hello_handler.function_name
++   principal     = "apigateway.amazonaws.com"
++   source_arn    = "${module.http_api.api_execution_arn}/*/*"
++ }
+
++ resource "aws_lambda_permission" "get_documentation_permission" {
++   statement_id  = "AllowExecutionFromAPIGateway-GetDocumentation"
++   action        = "lambda:InvokeFunction"
++   function_name = aws_lambda_function.get_documentation_handler.function_name
++   principal     = "apigateway.amazonaws.com"
++   source_arn    = "${module.http_api.api_execution_arn}/*/*"
++ }
 ```
 </TabItem>
 <TabItem label="REST API">
@@ -327,31 +463,164 @@ new MyApi(this, 'MyApi', {
 ```diff
 # packages/common/terraform/src/app/apis/my-api/my-api.tf
 
-# 移除默认配置
-- resource "aws_lambda_function" "api_lambda" { ... }
-- resource "aws_apigatewayv2_integration" "lambda_integration" { ... }
-- resource "aws_apigatewayv2_route" "proxy_routes" { ... }
+# 移除默认单个 Lambda 函数
+- resource "aws_lambda_function" "api_lambda" {
+-   filename         = data.archive_file.lambda_zip.output_path
+-   function_name    = "MyApiHandler"
+-   role            = aws_iam_role.lambda_execution_role.arn
+-   handler         = "index.handler"
+-   runtime         = "nodejs22.x"
+-   timeout         = 30
+-   # ... 其余配置
+- }
 
-# 添加各操作资源和集成
-+ resource "aws_api_gateway_resource" "say_hello_resource" { ... }
-+ resource "aws_api_gateway_method" "say_hello_method" { ... }
-+ resource "aws_api_gateway_integration" "say_hello_integration" { ... }
+# 移除默认代理集成
+- resource "aws_apigatewayv2_integration" "lambda_integration" {
+-   api_id           = module.http_api.api_id
+-   integration_type = "AWS_PROXY"
+-   integration_uri  = aws_lambda_function.api_lambda.invoke_arn
+-   # ... 其余配置
+- }
 
-+ resource "aws_api_gateway_resource" "get_documentation_resource" { ... }
-+ resource "aws_api_gateway_method" "get_documentation_method" { ... }
-+ resource "aws_api_gateway_integration" "get_documentation_integration" { ... }
+# 移除默认代理路由
+- resource "aws_apigatewayv2_route" "proxy_routes" {
+-   for_each = toset(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"])
+-   api_id    = module.http_api.api_id
+-   route_key = "${each.key} /{proxy+}"
+-   target    = "integrations/${aws_apigatewayv2_integration.lambda_integration.id}"
+-   # ... 其余配置
+- }
 
-# 更新部署依赖
+# 为每个操作添加独立 Lambda 函数，使用相同的包
++ resource "aws_lambda_function" "say_hello_handler" {
++   filename         = data.archive_file.lambda_zip.output_path
++   function_name    = "MyApi-SayHello"
++   role            = aws_iam_role.lambda_execution_role.arn
++   handler         = "sayHello.handler"  # 此操作的特定处理器
++   runtime         = "nodejs22.x"
++   timeout         = 30
++   source_code_hash = data.archive_file.lambda_zip.output_base64sha256
++
++   tracing_config {
++     mode = "Active"
++   }
++
++   environment {
++     variables = merge({
++       AWS_CONNECTION_REUSE_ENABLED = "1"
++     }, var.env)
++   }
++
++   tags = var.tags
++ }
+
++ resource "aws_lambda_function" "get_documentation_handler" {
++   filename         = data.archive_file.lambda_zip.output_path
++   function_name    = "MyApi-GetDocumentation"
++   role            = aws_iam_role.lambda_execution_role.arn
++   handler         = "getDocumentation.handler"  # 此操作的特定处理器
++   runtime         = "nodejs22.x"
++   timeout         = 30
++   source_code_hash = data.archive_file.lambda_zip.output_base64sha256
++
++   tracing_config {
++     mode = "Active"
++   }
++
++   environment {
++     variables = merge({
++       AWS_CONNECTION_REUSE_ENABLED = "1"
++     }, var.env)
++   }
++
++   tags = var.tags
++ }
+
+# 为每个操作添加特定资源和方法
++ resource "aws_api_gateway_resource" "say_hello_resource" {
++   rest_api_id = module.rest_api.api_id
++   parent_id   = module.rest_api.api_root_resource_id
++   path_part   = "sayHello"
++ }
+
++ resource "aws_api_gateway_method" "say_hello_method" {
++   rest_api_id   = module.rest_api.api_id
++   resource_id   = aws_api_gateway_resource.say_hello_resource.id
++   http_method   = "POST"
++   authorization = "AWS_IAM"
++ }
+
++ resource "aws_api_gateway_integration" "say_hello_integration" {
++   rest_api_id = module.rest_api.api_id
++   resource_id = aws_api_gateway_resource.say_hello_resource.id
++   http_method = aws_api_gateway_method.say_hello_method.http_method
++
++   integration_http_method = "POST"
++   type                   = "AWS_PROXY"
++   uri                    = aws_lambda_function.say_hello_handler.invoke_arn
++ }
+
++ resource "aws_api_gateway_resource" "get_documentation_resource" {
++   rest_api_id = module.rest_api.api_id
++   parent_id   = module.rest_api.api_root_resource_id
++   path_part   = "documentation"
++ }
+
++ resource "aws_api_gateway_method" "get_documentation_method" {
++   rest_api_id   = module.rest_api.api_id
++   resource_id   = aws_api_gateway_resource.get_documentation_resource.id
++   http_method   = "GET"
++   authorization = "NONE"
++ }
+
++ resource "aws_api_gateway_integration" "get_documentation_integration" {
++   rest_api_id = module.rest_api.api_id
++   resource_id = aws_api_gateway_resource.get_documentation_resource.id
++   http_method = aws_api_gateway_method.get_documentation_method.http_method
++
++   integration_http_method = "GET"
++   type                   = "HTTP"
++   uri                    = "https://example.com/documentation"
++ }
+
+# 更新部署以依赖新集成
 ~ resource "aws_api_gateway_deployment" "api_deployment" {
+    rest_api_id = module.rest_api.api_id
+
     depends_on = [
+-     aws_api_gateway_integration.lambda_integration,
 +     aws_api_gateway_integration.say_hello_integration,
 +     aws_api_gateway_integration.get_documentation_integration,
     ]
+
+    lifecycle {
+      create_before_destroy = true
+    }
+
++   triggers = {
++     redeployment = sha1(jsonencode([
++       aws_api_gateway_integration.say_hello_integration,
++       aws_api_gateway_integration.get_documentation_integration,
++     ]))
++   }
   }
 
-# 添加 Lambda 权限
-+ resource "aws_lambda_permission" "say_hello_permission" { ... }
-+ resource "aws_lambda_permission" "get_documentation_permission" { ... }
+# 为每个函数添加 Lambda 权限
++ resource "aws_lambda_permission" "say_hello_permission" {
++   statement_id  = "AllowExecutionFromAPIGateway-SayHello"
++   action        = "lambda:InvokeFunction"
++   function_name = aws_lambda_function.say_hello_handler.function_name
++   principal     = "apigateway.amazonaws.com"
++   source_arn    = "${module.rest_api.api_execution_arn}/*/*"
++ }
+
++ resource "aws_lambda_permission" "get_documentation_permission" {
++   statement_id  = "AllowExecutionFromAPIGateway-GetDocumentation"
++   action        = "lambda:InvokeFunction"
++   function_name = aws_lambda_function.get_documentation_handler.function_name
++   principal     = "apigateway.amazonaws.com"
++   source_arn    = "${module.rest_api.api_execution_arn}/*/*"
++ }
 ```
 </TabItem>
 </Tabs>
@@ -359,11 +628,11 @@ new MyApi(this, 'MyApi', {
 </Fragment>
 </Infrastructure>
 
-#### 路由模式
+#### 自定义路由模式
 
 <Infrastructure>
 <Fragment slot="cdk">
-如需部署单个 Lambda 函数处理所有请求，可修改 `defaultIntegrations` 方法：
+如果生成器未直接暴露路由模式，或您想进一步自定义，可以随意编辑 API 的 `defaultIntegrations` 方法以按您的偏好配置集成：
 
 ```ts {5,11-12}
 // packages/common/constructs/src/app/apis/my-api.ts
@@ -373,6 +642,7 @@ export class MyApi<...> extends ... {
     const router = new Function(scope, 'RouterHandler', { ... });
     return IntegrationBuilder.rest({
       ...
+      defaultIntegrationOptions: {},
       buildDefaultIntegration: (op) => {
         return {
           // 所有集成引用同一个路由处理器
@@ -383,14 +653,20 @@ export class MyApi<...> extends ... {
   };
 }
 ```
+
+您也可以用其他方式修改代码，例如您可能更喜欢将 `router` 函数定义为 `defaultIntegrations` 的参数，而不是在方法内构造它。
 </Fragment>
 <Fragment slot="terraform">
-Terraform 模块默认使用路由模式，自动创建处理所有操作的单个 Lambda 函数：
+Terraform 模块自动使用路由模式 - 这是默认且唯一支持的方式。生成的模块创建单个 Lambda 函数处理所有 API 操作。
+
+您只需实例化默认模块即可获得路由模式：
 
 ```hcl
+# 默认路由模式 - 单个 Lambda 函数处理所有操作
 module "my_api" {
   source = "../../common/terraform/src/app/apis/my-api"
 
+  # 单个 Lambda 函数自动处理所有操作
   tags = local.common_tags
 }
 ```

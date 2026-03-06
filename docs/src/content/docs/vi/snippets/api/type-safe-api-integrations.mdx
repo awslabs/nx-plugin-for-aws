@@ -47,6 +47,37 @@ module "my_api" {
 </Fragment>
 </Infrastructure>
 
+#### Lựa chọn Integration Pattern
+
+<Infrastructure>
+<Fragment slot="cdk">
+Các construct CDK API được tạo hỗ trợ hai integration pattern:
+
+- `isolated` tạo một Lambda function cho mỗi operation. Đây là mặc định cho các API được tạo.
+- `shared` tạo một router Lambda mặc định duy nhất và tái sử dụng nó cho mọi operation trừ khi bạn ghi đè các tích hợp cụ thể.
+
+`isolated` cung cấp cho bạn quyền và cấu hình chi tiết hơn cho mỗi operation. `shared` giảm sự phân tán của Lambda và tích hợp API Gateway trong khi vẫn cho phép ghi đè có chọn lọc.
+
+Hỗ trợ từ generator hiện tại khác nhau tùy theo backend:
+
+- `ts#trpc-api` hỗ trợ cả `isolated` và `shared` cho `ServerlessApiGatewayRestApi` và `ServerlessApiGatewayHttpApi` thông qua tùy chọn `integrationPattern`.
+- `py#fast-api` và `ts#smithy-api` hiện tại tạo `isolated`.
+
+Bạn cũng có thể chuyển đổi một construct CDK API đã được tạo giữa hai pattern bằng cách chỉnh sửa trường `pattern` trong phương thức `defaultIntegrations` của nó:
+
+```ts {3}
+return IntegrationBuilder.rest({
+  // Thay đổi giá trị này thành 'isolated' hoặc 'shared'
+  pattern: 'isolated',
+  ...
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+Các module Terraform đã sử dụng router pattern theo mặc định, với một Lambda function duy nhất xử lý tất cả các operation API.
+</Fragment>
+</Infrastructure>
+
 #### Truy cập các tích hợp
 
 <Infrastructure>
@@ -64,6 +95,16 @@ api.integrations.sayHello.handler.addToRolePolicy(new PolicyStatement({
   actions: [...],
   resources: [...],
 }));
+```
+
+Nếu API của bạn sử dụng pattern `shared`, router Lambda dùng chung được expose dưới dạng `api.integrations.$router`:
+
+```ts {6}
+const api = new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this).build(),
+});
+
+api.integrations.$router.handler.addEnvironment('LOG_LEVEL', 'DEBUG');
 ```
 </Fragment>
 <Fragment slot="terraform">
@@ -588,11 +629,11 @@ Chỉnh sửa `packages/common/terraform/src/app/apis/my-api/my-api.tf`:
 </Fragment>
 </Infrastructure>
 
-#### Router Pattern
+#### Custom Router Pattern
 
 <Infrastructure>
 <Fragment slot="cdk">
-Nếu bạn muốn triển khai một Lambda function duy nhất để phục vụ tất cả các request API, bạn có thể tự do chỉnh sửa phương thức `defaultIntegrations` cho API của mình để tạo một function duy nhất thay vì một function cho mỗi tích hợp:
+Nếu generator của bạn không expose router pattern trực tiếp, hoặc bạn muốn tùy chỉnh nó thêm, bạn có thể chỉnh sửa phương thức `defaultIntegrations` cho API của mình để kết nối các tích hợp theo cách bạn muốn:
 
 ```ts {5,11-12}
 // packages/common/constructs/src/app/apis/my-api.ts

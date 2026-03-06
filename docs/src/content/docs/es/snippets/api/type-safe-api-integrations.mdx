@@ -2,8 +2,6 @@
 title: "Integraciones de API con Seguridad de Tipos"
 ---
 
-
-
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 import Infrastructure from '@components/infrastructure.astro';
 
@@ -49,6 +47,37 @@ module "my_api" {
 </Fragment>
 </Infrastructure>
 
+#### Eligiendo un Patrón de Integración
+
+<Infrastructure>
+<Fragment slot="cdk">
+Los constructos de API CDK generados admiten dos patrones de integración:
+
+- `isolated` crea una función Lambda por operación. Este es el valor por defecto para las APIs generadas.
+- `shared` crea un único router Lambda por defecto y lo reutiliza para cada operación a menos que sobrescribas integraciones específicas.
+
+`isolated` te brinda permisos y configuración más granulares por operación. `shared` reduce la proliferación de funciones Lambda e integraciones de API Gateway mientras aún permite sobrescritas selectivas.
+
+El soporte del generador actualmente varía según el backend:
+
+- `ts#trpc-api` admite tanto `isolated` como `shared` para `ServerlessApiGatewayRestApi` y `ServerlessApiGatewayHttpApi` a través de la opción `integrationPattern`.
+- `py#fast-api` y `ts#smithy-api` actualmente generan `isolated`.
+
+También puedes cambiar un constructo de API CDK generado existente entre los dos patrones editando el campo `pattern` en su método `defaultIntegrations`:
+
+```ts {3}
+return IntegrationBuilder.rest({
+  // Cambia esto a 'isolated' o 'shared'
+  pattern: 'isolated',
+  ...
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+Los módulos de Terraform ya usan el patrón router por defecto, con una única función Lambda que maneja todas las operaciones de la API.
+</Fragment>
+</Infrastructure>
+
 #### Accediendo a las integraciones
 
 <Infrastructure>
@@ -66,6 +95,16 @@ api.integrations.sayHello.handler.addToRolePolicy(new PolicyStatement({
   actions: [...],
   resources: [...],
 }));
+```
+
+Si tu API usa el patrón `shared`, el router Lambda compartido se expone como `api.integrations.$router`:
+
+```ts {6}
+const api = new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this).build(),
+});
+
+api.integrations.$router.handler.addEnvironment('LOG_LEVEL', 'DEBUG');
 ```
 </Fragment>
 <Fragment slot="terraform">
@@ -590,11 +629,11 @@ Edita `packages/common/terraform/src/app/apis/my-api/my-api.tf`:
 </Fragment>
 </Infrastructure>
 
-#### Patrón Router
+#### Patrón Router Personalizado
 
 <Infrastructure>
 <Fragment slot="cdk">
-Si prefieres desplegar una única función Lambda para manejar todas las solicitudes de la API, puedes modificar libremente el método `defaultIntegrations` de tu API para crear una sola función en lugar de una por integración:
+Si necesitas personalizar el patrón router más allá de los valores por defecto generados, puedes modificar libremente el método `defaultIntegrations` de tu API para configurar las integraciones como prefieras:
 
 ```ts {5,11-12}
 // packages/common/constructs/src/app/apis/my-api.ts
