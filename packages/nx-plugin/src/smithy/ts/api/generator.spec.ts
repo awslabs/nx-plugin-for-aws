@@ -181,6 +181,27 @@ describe('tsSmithyApiGenerator', () => {
     ).toMatchSnapshot('cognito-auth-infra.ts');
   });
 
+  it('should generate a shared router lambda for REST APIs when using the shared integration pattern', async () => {
+    await tsSmithyApiGenerator(tree, {
+      name: 'test-api',
+      computeType: 'ServerlessApiGatewayRestApi',
+      integrationPattern: 'shared',
+      auth: 'IAM',
+      iacProvider: 'CDK',
+    });
+
+    const appApiContent = tree.read(
+      'packages/common/constructs/src/app/apis/test-api.ts',
+      'utf-8',
+    );
+
+    expect(appApiContent).toContain("pattern: 'shared'");
+    expect(appApiContent).toContain('scopePermissionToMethod: false');
+    expect(appApiContent).not.toContain(
+      'responseTransferMode: ResponseTransferMode.STREAM',
+    );
+  });
+
   it('should generate smithy ts api with Terraform provider', async () => {
     await tsSmithyApiGenerator(tree, {
       name: 'test-api',

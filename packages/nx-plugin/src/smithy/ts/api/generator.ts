@@ -42,6 +42,7 @@ export const tsSmithyApiGenerator = async (
   tree: Tree,
   options: TsSmithyApiGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  const integrationPattern = getIntegrationPattern(options);
   const apiNameClassName = toClassName(options.name);
   const apiNameKebabCase = toKebabCase(options.name);
   const { fullyQualifiedName: backendFullyQualifiedName, dir } =
@@ -126,7 +127,7 @@ export const tsSmithyApiGenerator = async (
         backendProjectConfig.root,
         'bundle',
       ),
-      integrationPattern: 'isolated',
+      integrationPattern,
     },
   });
   addSharedConstructsOpenApiMetadataGenerateTarget(tree, {
@@ -238,5 +239,9 @@ export const tsSmithyApiGenerator = async (
     installPackagesTask(tree);
   };
 };
+
+const getIntegrationPattern = (
+  options: TsSmithyApiGeneratorSchema,
+): 'isolated' | 'shared' => options.integrationPattern ?? 'isolated';
 
 export default tsSmithyApiGenerator;
