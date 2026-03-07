@@ -1,6 +1,10 @@
 import { Construct } from 'constructs';
 import { RuntimeConfig } from '../runtime-config.js';
-import { HttpApiIntegration, OperationDetails } from './utils.js';
+import {
+  ApiIntegrations,
+  HttpApiIntegration,
+  OperationDetails,
+} from './utils.js';
 import { CfnOutput } from 'aws-cdk-lib';
 import {
   HttpApi as _HttpApi,
@@ -19,7 +23,7 @@ import { suppressRules } from '../checkov.js';
  * @template TOperation - String literal type representing operation names
  */
 export interface HttpApiProps<
-  TIntegrations extends Record<TOperation, HttpApiIntegration>,
+  TIntegrations extends ApiIntegrations<TOperation, HttpApiIntegration>,
   TOperation extends string,
 > extends _HttpApiProps {
   /**
@@ -49,7 +53,7 @@ export interface HttpApiProps<
  */
 export class HttpApi<
   TOperation extends string,
-  TIntegrations extends Record<TOperation, HttpApiIntegration>,
+  TIntegrations extends ApiIntegrations<TOperation, HttpApiIntegration>,
 > extends Construct {
   /** The underlying CDK HttpApi instance */
   public readonly api: _HttpApi;
@@ -99,16 +103,32 @@ export class HttpApi<
       },
     });
 
+    // Resolve the integration for a given operation.
+    // If the operation has a dedicated integration, use it; otherwise fall back to $router.
+    const resolveIntegration = (op: TOperation): HttpApiIntegration => {
+      const record = integrations as Record<string, HttpApiIntegration>;
+      if (op in record) {
+        return record[op];
+      }
+      if ('$router' in record) {
+        return record['$router'];
+      }
+      throw new Error(
+        `No integration found for operation '${op}' and no $router integration available`,
+      );
+    };
+
     // Create API resources and methods for each operation
     (Object.entries(operations) as [TOperation, OperationDetails][]).map(
       ([op, details]) => {
+        const integration = resolveIntegration(op);
         this.api.addRoutes({
           path: details.path.startsWith('/')
             ? details.path
             : `/${details.path}`,
           methods: [details.method as HttpMethod],
-          integration: integrations[op].integration,
-          ...integrations[op].options,
+          integration: integration.integration,
+          ...integration.options,
         });
       },
     );

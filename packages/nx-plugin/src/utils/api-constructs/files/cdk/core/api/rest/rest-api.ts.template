@@ -6,17 +6,21 @@ import {
   Stage,
 } from 'aws-cdk-lib/aws-apigateway';
 import { RuntimeConfig } from '../runtime-config.js';
-import { OperationDetails, RestApiIntegration } from './utils.js';
+import {
+  ApiIntegrations,
+  OperationDetails,
+  RestApiIntegration,
+} from './utils.js';
 import { suppressRules } from '../checkov.js';
 
 /**
  * Properties for creating a RestApi construct.
  *
- * @template TIntegrations - Record mapping operation names to their integrations
+ * @template TIntegrations - Record mapping integration keys to their integrations
  * @template TOperation - String literal type representing operation names
  */
 export interface RestApiProps<
-  TIntegrations extends Record<TOperation, RestApiIntegration>,
+  TIntegrations extends ApiIntegrations<TOperation, RestApiIntegration>,
   TOperation extends string,
 > extends _RestApiProps {
   /**
@@ -28,7 +32,7 @@ export interface RestApiProps<
    */
   readonly operations: Record<TOperation, OperationDetails>;
   /**
-   * Map of operation names to their API Gateway integrations
+   * Map of integration keys to their API Gateway integrations
    */
   readonly integrations: TIntegrations;
 }
@@ -42,16 +46,16 @@ export interface RestApiProps<
  * - Integration with runtime configuration for client discovery
  *
  * @template TOperation - String literal type representing operation names
- * @template TIntegrations - Record mapping operation names to their integrations
+ * @template TIntegrations - Record mapping integration keys to their integrations
  */
 export class RestApi<
   TOperation extends string,
-  TIntegrations extends Record<TOperation, RestApiIntegration>,
+  TIntegrations extends ApiIntegrations<TOperation, RestApiIntegration>,
 > extends Construct {
   /** The underlying CDK RestApi instance */
   public readonly api: _RestApi;
 
-  /** Map of operation names to their API Gateway integrations */
+  /** Map of integration keys to their API Gateway integrations */
   public readonly integrations: TIntegrations;
 
   constructor(
@@ -83,9 +87,25 @@ export class RestApi<
       (c) => c instanceof Stage,
     );
 
+    // Resolve the integration for a given operation.
+    // If the operation has a dedicated integration, use it; otherwise fall back to $router.
+    const resolveIntegration = (op: TOperation): RestApiIntegration => {
+      const record = integrations as Record<string, RestApiIntegration>;
+      if (op in record) {
+        return record[op];
+      }
+      if ('$router' in record) {
+        return record['$router'];
+      }
+      throw new Error(
+        `No integration found for operation '${op}' and no $router integration available`,
+      );
+    };
+
     // Create API resources and methods for each operation
     (Object.entries(operations) as [TOperation, OperationDetails][]).map(
       ([op, details]) => {
+        const integration = resolveIntegration(op);
         const resource = this.getOrCreateResource(
           this.api.root,
           (details.path.startsWith('/')
@@ -93,7 +113,11 @@ export class RestApi<
             : details.path
           ).split('/'),
         );
-        resource.addMethod(details.method, integrations[op].integration, integrations[op].options);
+        resource.addMethod(
+          details.method,
+          integration.integration,
+          integration.options,
+        );
       },
     );
 

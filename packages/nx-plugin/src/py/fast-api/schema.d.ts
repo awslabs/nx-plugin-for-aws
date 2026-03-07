@@ -10,6 +10,7 @@ export interface PyFastApiProjectGeneratorSchema {
   readonly computeType:
     | 'ServerlessApiGatewayRestApi'
     | 'ServerlessApiGatewayHttpApi';
+  readonly integrationPattern?: 'isolated' | 'shared';
   readonly auth: 'IAM' | 'Cognito' | 'None';
   readonly directory?: string;
   readonly moduleName?: string;

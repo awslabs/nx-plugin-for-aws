@@ -20,6 +20,7 @@ import { IacProvider } from '../iac';
 
 interface BackendOptions {
   type: 'trpc' | 'fastapi' | 'smithy';
+  integrationPattern: 'isolated' | 'shared';
 }
 
 export interface TrpcBackendOptions extends BackendOptions {

@@ -64,6 +64,16 @@ api.integrations.sayHello.handler.addToRolePolicy(new PolicyStatement({
   resources: [...],
 }));
 ```
+
+If your API uses the `shared` pattern, the shared router Lambda is exposed as `api.integrations.$router`:
+
+```ts {6}
+const api = new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this).build(),
+});
+
+api.integrations.$router.handler.addEnvironment('LOG_LEVEL', 'DEBUG');
+```
 </Fragment>
 <Fragment slot="terraform">
 With Terraform's router pattern, there's only one Lambda function. You can access it via the module outputs:
@@ -587,33 +597,33 @@ Edit `packages/common/terraform/src/app/apis/my-api/my-api.tf`:
 </Fragment>
 </Infrastructure>
 
-#### Router Pattern
+#### Integration Pattern
 
 <Infrastructure>
 <Fragment slot="cdk">
-If you prefer to deploy a single Lambda function to service all API requests, you can freely edit the `defaultIntegrations` method for your API to create a single function instead of one per integration:
+
+Generated CDK API constructs support two integration patterns:
+
+- `isolated` creates one Lambda function per operation. This is the default for generated APIs.
+- `shared` creates a single default router Lambda and reuses it for every operation unless you override specific integrations.
+
+`isolated` gives you finer-grained permissions and configuration per operation. `shared` reduces Lambda and API Gateway integration sprawl while still allowing selective overrides.
+
+For example, setting `pattern` to `'shared'` creates a single function instead of one per integration:
 
 ```ts {5,11-12}
 // packages/common/constructs/src/app/apis/my-api.ts
 export class MyApi<...> extends ... {
 
   public static defaultIntegrations = (scope: Construct) => {
-    const router = new Function(scope, 'RouterHandler', { ... });
+    ...
     return IntegrationBuilder.rest({
+      pattern: 'shared',
       ...
-      defaultIntegrationOptions: {},
-      buildDefaultIntegration: (op) => {
-        return {
-          // Reference the same router lambda handler in every integration
-          integration: new LambdaIntegration(router),
-        };
-      },
     });
   };
 }
 ```
-
-You can modify the code in other ways if you prefer, for example you may prefer to define the `router` function as a parameter to `defaultIntegrations` instead of constructing it within the method.
 </Fragment>
 <Fragment slot="terraform">
 Terraform modules automatically use the router pattern - this is the default and only supported approach. The generated module creates a single Lambda function that handles all API operations.
@@ -631,5 +641,3 @@ module "my_api" {
 ```
 </Fragment>
 </Infrastructure>
-
-

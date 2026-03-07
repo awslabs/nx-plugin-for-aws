@@ -48,6 +48,7 @@ export const pyFastApiProjectGenerator = async (
   tree: Tree,
   schema: PyFastApiProjectGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  const integrationPattern = getIntegrationPattern(schema);
   const iacProvider = await resolveIacProvider(tree, schema.iacProvider);
 
   await sharedConstructsGenerator(tree, {
@@ -141,6 +142,7 @@ export const pyFastApiProjectGenerator = async (
       type: 'fastapi',
       moduleName: normalizedModuleName,
       bundleOutputDir,
+      integrationPattern,
     },
     auth: schema.auth,
     iacProvider,
@@ -174,4 +176,9 @@ export const pyFastApiProjectGenerator = async (
     installPackagesTask(tree);
   };
 };
+
+const getIntegrationPattern = (
+  schema: PyFastApiProjectGeneratorSchema,
+): 'isolated' | 'shared' => schema.integrationPattern ?? 'isolated';
+
 export default pyFastApiProjectGenerator;

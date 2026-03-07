@@ -2,8 +2,6 @@
 title: "Intégrations d'API sécurisées en termes de type"
 ---
 
-
-
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 import Infrastructure from '@components/infrastructure.astro';
 
@@ -49,6 +47,37 @@ module "my_api" {
 </Fragment>
 </Infrastructure>
 
+#### Choix d'un modèle d'intégration
+
+<Infrastructure>
+<Fragment slot="cdk">
+Les constructs d'API CDK générés supportent deux modèles d'intégration :
+
+- `isolated` crée une fonction Lambda par opération. C'est le modèle par défaut pour les API générées.
+- `shared` crée une seule fonction Lambda router par défaut et la réutilise pour chaque opération sauf si vous surchargez des intégrations spécifiques.
+
+`isolated` vous donne des permissions et une configuration plus granulaires par opération. `shared` réduit la prolifération des fonctions Lambda et des intégrations API Gateway tout en permettant des surcharges sélectives.
+
+Le support du générateur varie actuellement selon le backend :
+
+- `ts#trpc-api` supporte à la fois `isolated` et `shared` pour `ServerlessApiGatewayRestApi` et `ServerlessApiGatewayHttpApi` via l'option `integrationPattern`.
+- `py#fast-api` et `ts#smithy-api` génèrent actuellement `isolated`.
+
+Vous pouvez également basculer un construct d'API CDK généré existant entre les deux modèles en modifiant le champ `pattern` dans sa méthode `defaultIntegrations` :
+
+```ts {3}
+return IntegrationBuilder.rest({
+  // Changez ceci en 'isolated' ou 'shared'
+  pattern: 'isolated',
+  ...
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+Les modules Terraform utilisent déjà le modèle router par défaut, avec une seule fonction Lambda gérant toutes les opérations de l'API.
+</Fragment>
+</Infrastructure>
+
 #### Accès aux intégrations
 
 <Infrastructure>
@@ -66,6 +95,16 @@ api.integrations.sayHello.handler.addToRolePolicy(new PolicyStatement({
   actions: [...],
   resources: [...],
 }));
+```
+
+Si votre API utilise le modèle `shared`, la fonction Lambda router partagée est exposée via `api.integrations.$router` :
+
+```ts {6}
+const api = new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this).build(),
+});
+
+api.integrations.$router.handler.addEnvironment('LOG_LEVEL', 'DEBUG');
 ```
 </Fragment>
 <Fragment slot="terraform">
@@ -120,13 +159,13 @@ Pour personnaliser des options comme la configuration VPC, vous devez modifier l
 # packages/common/terraform/src/app/apis/my-api/my-api.tf
 # Ajouter des variables VPC
 variable "vpc_subnet_ids" {
-  description = "Liste des IDs de sous-réseaux VPC pour la fonction Lambda"
+  description = "List of VPC subnet IDs for Lambda function"
   type        = list(string)
   default     = []
 }
 
 variable "vpc_security_group_ids" {
-  description = "Liste des IDs de groupes de sécurité VPC pour la fonction Lambda"
+  description = "List of VPC security group IDs for Lambda function"
   type        = list(string)
   default     = []
 }
@@ -590,36 +629,36 @@ Modifiez `packages/common/terraform/src/app/apis/my-api/my-api.tf` :
 </Fragment>
 </Infrastructure>
 
-#### Modèle Router
+#### Modèle d'intégration
 
 <Infrastructure>
 <Fragment slot="cdk">
-Si vous préférez déployer une seule fonction Lambda pour gérer toutes les requêtes API, vous pouvez librement modifier la méthode `defaultIntegrations` de votre API pour créer une seule fonction au lieu d'une par intégration :
+
+Les constructs d'API CDK générés supportent deux modèles d'intégration :
+
+- `isolated` crée une fonction Lambda par opération. C'est le modèle par défaut pour les API générées.
+- `shared` crée une seule fonction Lambda router par défaut et la réutilise pour chaque opération sauf si vous surchargez des intégrations spécifiques.
+
+`isolated` vous donne des permissions et une configuration plus granulaires par opération. `shared` réduit la prolifération des fonctions Lambda et des intégrations API Gateway tout en permettant des surcharges sélectives.
+
+Par exemple, définir `pattern` sur `'shared'` crée une fonction unique au lieu d'une par intégration :
 
 ```ts {5,11-12}
 // packages/common/constructs/src/app/apis/my-api.ts
 export class MyApi<...> extends ... {
 
   public static defaultIntegrations = (scope: Construct) => {
-    const router = new Function(scope, 'RouterHandler', { ... });
+    ...
     return IntegrationBuilder.rest({
+      pattern: 'shared',
       ...
-      defaultIntegrationOptions: {},
-      buildDefaultIntegration: (op) => {
-        return {
-          # Référencer le même handler router dans chaque intégration
-          integration: new LambdaIntegration(router),
-        };
-      },
     });
   };
 }
 ```
-
-Vous pouvez modifier le code selon vos préférences, par exemple définir la fonction `router` comme paramètre de `defaultIntegrations` au lieu de la construire dans la méthode.
 </Fragment>
 <Fragment slot="terraform">
-Les modules Terraform utilisent automatiquement le modèle router - c'est l'approche par défaut et la seule supportée. Le module généré crée une fonction Lambda unique qui gère toutes les opérations API.
+Les modules Terraform utilisent automatiquement le modèle router - c'est l'approche par défaut et la seule supportée. Le module généré crée une fonction Lambda unique qui gère toutes les opérations de l'API.
 
 Vous pouvez simplement instancier le module par défaut pour obtenir le modèle router :
 
