@@ -184,6 +184,50 @@ describe('fastapi project generator', () => {
     ).toContain("handler: 'run.sh'");
   });
 
+  it('should generate a shared router lambda for REST APIs when using the shared integration pattern', async () => {
+    await pyFastApiProjectGenerator(tree, {
+      name: 'test-api',
+      directory: 'apps',
+      computeType: 'ServerlessApiGatewayRestApi',
+      integrationPattern: 'shared',
+      auth: 'IAM',
+      iacProvider: 'CDK',
+    });
+
+    const appApiContent = tree.read(
+      'packages/common/constructs/src/app/apis/test-api.ts',
+      'utf-8',
+    );
+
+    expect(appApiContent).toContain("pattern: 'shared'");
+    expect(appApiContent).toContain('scopePermissionToMethod: false');
+    expect(appApiContent).toContain(
+      'responseTransferMode: ResponseTransferMode.STREAM',
+    );
+    expect(appApiContent).toContain("handler: 'run.sh'");
+  });
+
+  it('should generate a shared router lambda for HTTP APIs when using the shared integration pattern', async () => {
+    await pyFastApiProjectGenerator(tree, {
+      name: 'test-api',
+      directory: 'apps',
+      computeType: 'ServerlessApiGatewayHttpApi',
+      integrationPattern: 'shared',
+      auth: 'IAM',
+      iacProvider: 'CDK',
+    });
+
+    const appApiContent = tree.read(
+      'packages/common/constructs/src/app/apis/test-api.ts',
+      'utf-8',
+    );
+
+    expect(appApiContent).toContain("pattern: 'shared'");
+    expect(appApiContent).toContain('scopePermissionToRoute: false');
+    expect(appApiContent).toContain('`TestApiRouter${op}Integration`');
+    expect(appApiContent).toContain("handler: 'run.sh'");
+  });
+
   it('should set up shared constructs for rest', async () => {
     await pyFastApiProjectGenerator(tree, {
       name: 'test-api',

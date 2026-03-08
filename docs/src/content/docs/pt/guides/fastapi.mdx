@@ -34,6 +34,10 @@ Você pode gerar uma nova API FastAPI de duas formas:
 Selecione `ServerlessApiGatewayRestApi` (padrão) como seu `computeType` se você pretende construir operações de streaming.
 :::
 
+:::tip
+A opção `integrationPattern` tem como padrão `isolated`, que cria um Lambda por operação FastAPI. Selecione `shared` se você preferir um único handler Lambda compartilhado para toda a API, com substituições opcionais por operação.
+:::
+
 ## Saída do Gerador
 
 O gerador criará a seguinte estrutura de projeto no diretório `<directory>/<api-name>`:
@@ -93,7 +97,7 @@ O gerador configura automaticamente vários recursos:
 
 #### Logs
 
-O gerador configura logging estruturado usando AWS Lambda Powertools. Você pode acessar o logger nos handlers:
+O gerador configura logging estruturado usando AWS Lambda Powertools. Você pode acessar o logger nos handlers de rota:
 
 ```python
 from .init import app, logger
@@ -106,14 +110,14 @@ def read_item(item_id: int):
 
 O logger inclui automaticamente:
 
-- IDs de correlação para rastreamento
+- IDs de correlação para rastreamento de requisições
 - Caminho e método da requisição
 - Informações de contexto do Lambda
 - Indicadores de cold start
 
 #### Rastreamento
 
-O rastreamento com AWS X-Ray é configurado automaticamente. Você pode adicionar subsegmentos personalizados:
+O rastreamento com AWS X-Ray é configurado automaticamente. Você pode adicionar subsegmentos personalizados aos seus traces:
 
 ```python
 from .init import app, tracer
@@ -129,7 +133,7 @@ def read_item(item_id: int):
 
 #### Métricas
 
-Métricas no CloudWatch são coletadas automaticamente. Você pode adicionar métricas personalizadas:
+Métricas no CloudWatch são coletadas automaticamente para cada requisição. Você pode adicionar métricas personalizadas:
 
 ```python
 from .init import app, metrics
@@ -216,11 +220,11 @@ Para consumir streams de respostas, utilize o <Link path="guides/connection/reac
 
 ## Implantando sua API FastAPI
 
-O gerador cria código de infraestrutura CDK ou Terraform baseado no `iacProvider`. Use para implantar:
+O gerador FastAPI cria código de infraestrutura CDK ou Terraform baseado no `iacProvider` selecionado. Use para implantar sua FastAPI.
 
 <Infrastructure>
 <Fragment slot="cdk">
-O construct CDK para implantação está em `common/constructs`. Use em uma aplicação CDK:
+O construct CDK para implantação da API está na pasta `common/constructs`. Use em uma aplicação CDK:
 
 ```ts {6-8}
 import { MyApi } from ':my-scope/common-constructs';
@@ -237,17 +241,17 @@ export class ExampleStack extends Stack {
 
 Isso configura:
 
-1. Função Lambda para cada operação na aplicação FastAPI
+1. Uma função AWS Lambda para cada operação na aplicação FastAPI
 2. API Gateway HTTP/REST como trigger da função
-3. Permissões IAM
+3. Roles e permissões IAM
 4. Log group no CloudWatch
-5. Configuração de X-Ray
+5. Configuração de rastreamento X-Ray
 6. Namespace de métricas no CloudWatch
 
 <Snippet name="api/cors-configuration-cdk-note" />
 
 :::note
-Se usar `Cognito`, forneça a propriedade `identity`:
+Se você selecionou autenticação `Cognito`, precisará fornecer a propriedade `identity` ao construct da API:
 
 ```ts {9}
 import { MyApi, UserIdentity } from ':my-scope/common-constructs';
@@ -264,11 +268,11 @@ export class ExampleStack extends Stack {
 }
 ```
 
-O construct `UserIdentity` pode ser gerado com <Link path="/guides/react-website-auth">gerador `ts#react-website-auth`</Link>
+O construct `UserIdentity` pode ser gerado usando o <Link path="/guides/react-website-auth">gerador `ts#react-website-auth`</Link>
 :::
 </Fragment>
 <Fragment slot="terraform">
-Use os módulos Terraform em `common/terraform`:
+Os módulos Terraform para implantação da API estão na pasta `common/terraform`. Use em uma configuração Terraform:
 
 ```hcl {2}
 module "my_api" {
@@ -291,17 +295,17 @@ module "my_api" {
 
 Isso configura:
 
-1. Função Lambda que serve todas as rotas FastAPI
+1. Uma função AWS Lambda que serve todas as rotas FastAPI
 2. API Gateway HTTP/REST como trigger da função
-3. Permissões IAM
+3. Roles e permissões IAM
 4. Log group no CloudWatch
-5. Configuração de X-Ray
+5. Configuração de rastreamento X-Ray
 6. Configuração de CORS
 
 <Snippet name="api/cors-configuration-terraform-note" />
 
 :::note
-Para `Cognito`, forneça:
+Se você selecionou autenticação `Cognito`, precisará fornecer a configuração do Cognito:
 
 ```hcl {4-5}
 module "my_api" {
@@ -319,10 +323,10 @@ module "my_api" {
 }
 ```
 
-Você pode configurar Cognito User Pool e Client usando recursos ou módulos Terraform apropriados.
+Você pode configurar Cognito User Pool e Client usando os recursos ou módulos Terraform apropriados.
 :::
 
-Saídas do módulo:
+O módulo Terraform fornece várias saídas que você pode usar:
 
 ```hcl
 # Acessar o endpoint da API
@@ -341,7 +345,7 @@ output "lambda_execution_role_arn" {
 }
 ```
 
-Personalize CORS:
+Você pode personalizar as configurações de CORS passando variáveis ao módulo:
 
 ```hcl
 module "my_api" {
@@ -361,7 +365,7 @@ module "my_api" {
 ```
 
 :::caution
-Se selecionar `None` para `auth`, Checkov pode reportar falhas:
+Se você selecionou `None` para `auth` ao executar o gerador, pode ver falhas de verificação do Checkov como:
 
 <Tabs syncKey="http-rest">
 <TabItem label="HTTP API">
@@ -378,7 +382,7 @@ Check: CKV_AWS_59: "Ensure there is no open access to back-end resources through
 </TabItem>
 </Tabs>
 
-Adicione [comentários de supressão](https://www.checkov.io/2.Basics/Suppressing%20and%20Skipping%20Policies.html) se necessário.
+Você pode [adicionar um comentário de supressão](https://www.checkov.io/2.Basics/Suppressing%20and%20Skipping%20Policies.html) se tiver certeza de que deseja que sua API seja pública.
 :::
 </Fragment>
 </Infrastructure>
@@ -391,18 +395,18 @@ Adicione [comentários de supressão](https://www.checkov.io/2.Basics/Suppressin
 
 <Infrastructure>
 <Fragment slot="cdk">
-Como as operações são definidas em Python e a infraestrutura em TypeScript, geramos código para fornecer metadados ao construct CDK.
+Como as operações em FastAPI são definidas em Python e a infraestrutura CDK em TypeScript, instrumentamos geração de código para fornecer metadados ao construct CDK e prover uma interface type-safe para integrações.
 
-Um alvo `generate:<ApiName>-metadata` é adicionado ao `project.json` para gerar arquivos como `packages/common/constructs/src/generated/my-api/metadata.gen.ts`.
+Um alvo `generate:<ApiName>-metadata` é adicionado ao `project.json` dos constructs comuns para facilitar essa geração de código, que emite um arquivo como `packages/common/constructs/src/generated/my-api/metadata.gen.ts`. Como isso é gerado em tempo de build, é ignorado no controle de versão.
 
 :::note
-Execute um build após alterar a API:
+Você precisará executar um build sempre que alterar sua API para garantir que os tipos consumidos pelo construct CDK estejam atualizados.
 
 <PackageManagerShortCommand commands={["build"]} />
 :::
 
 :::tip
-Use [`nx watch`](https://nx.dev/nx-api/nx/documents/watch) para regenerar tipos automaticamente:
+Se você está trabalhando ativamente tanto na infraestrutura CDK quanto na FastAPI juntas, pode usar [`nx watch`](https://nx.dev/nx-api/nx/documents/watch) para regenerar esses tipos toda vez que fizer alterações na API:
 
 <NxCommands
   commands={[
@@ -414,14 +418,14 @@ Use [`nx watch`](https://nx.dev/nx-api/nx/documents/watch) para regenerar tipos 
 </Fragment>
 <Fragment slot="terraform">
 :::note
-Não há suporte para integrações type-safe com Terraform.
+Não oferecemos suporte a integrações type-safe para Terraform e, portanto, nenhum alvo de geração de código é configurado se você selecionou Terraform para seu `iacProvider`.
 :::
 </Fragment>
 </Infrastructure>
 
 ### Concedendo Acesso (Somente IAM)
 
-Para autenticação `IAM`, use `grantInvokeAccess`:
+Se você selecionou autenticação `IAM`, pode usar o método `grantInvokeAccess` para conceder acesso à sua API:
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -431,7 +435,7 @@ api.grantInvokeAccess(myIdentityPool.authenticatedRole);
 </Fragment>
 <Fragment slot="terraform">
 ```hcl
-# Criar política IAM para permitir invocar a API
+# Criar uma política IAM para permitir invocar a API
 resource "aws_iam_policy" "api_invoke_policy" {
   name        = "MyApiInvokePolicy"
   description = "Política para permitir invocar a FastAPI"
@@ -448,7 +452,7 @@ resource "aws_iam_policy" "api_invoke_policy" {
   })
 }
 
-# Anexar a política a uma role IAM (ex: usuários autenticados)
+# Anexar a política a uma role IAM (ex: para usuários autenticados)
 resource "aws_iam_role_policy_attachment" "api_invoke_access" {
   role       = aws_iam_role.authenticated_user_role.name
   policy_arn = aws_iam_policy.api_invoke_policy.arn
@@ -461,26 +465,26 @@ resource "aws_iam_role_policy_attachment" "api_invoke_access_existing" {
 }
 ```
 
-Principais saídas:
+As principais saídas do módulo da API que você pode usar para políticas IAM são:
 
-- `module.my_api.api_execution_arn` - Para permissões execute-api:Invoke
-- `module.my_api.api_arn` - ARN do API Gateway
-- `module.my_api.lambda_function_arn` - ARN da função Lambda
+- `module.my_api.api_execution_arn` - Para conceder permissões execute-api:Invoke
+- `module.my_api.api_arn` - O ARN do API Gateway
+- `module.my_api.lambda_function_arn` - O ARN da função Lambda
 </Fragment>
 </Infrastructure>
 
 ## Desenvolvimento Local
 
-Execute o servidor local com:
+O gerador configura um servidor de desenvolvimento local que você pode executar com:
 
 <NxCommands commands={['run my-api:serve']} />
 
-Isso inicia um servidor FastAPI com:
+Isso inicia um servidor de desenvolvimento FastAPI local com:
 
-- Recarregamento automático
-- Documentação interativa em `/docs` ou `/redoc`
+- Recarregamento automático em alterações de código
+- Documentação interativa da API em `/docs` ou `/redoc`
 - Schema OpenAPI em `/openapi.json`
 
 ## Invocando sua API FastAPI
 
-Para consumir a API de um site React, use o <Link path="guides/connection/react-fastapi">gerador `connection`</Link>.
+Para invocar sua API de um site React, você pode usar o <Link path="guides/connection/react-fastapi">gerador `connection`</Link>.

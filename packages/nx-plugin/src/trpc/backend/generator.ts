@@ -36,10 +36,19 @@ import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
 export const TRPC_BACKEND_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
 
+const VALID_TRPC_INTEGRATION_PERMUTATIONS = new Set([
+  'ServerlessApiGatewayRestApi::isolated',
+  'ServerlessApiGatewayRestApi::shared',
+  'ServerlessApiGatewayHttpApi::isolated',
+  'ServerlessApiGatewayHttpApi::shared',
+]);
+
 export async function tsTrpcApiGenerator(
   tree: Tree,
   options: TsTrpcApiGeneratorSchema,
 ) {
+  validateTrpcComputeTypeAndIntegrationPatternCombination(options);
+
   const iacProvider = await resolveIacProvider(tree, options.iacProvider);
 
   await sharedConstructsGenerator(tree, {
@@ -88,6 +97,7 @@ export async function tsTrpcApiGenerator(
       type: 'trpc',
       projectAlias: enhancedOptions.backendProjectAlias,
       bundleOutputDir: joinPathFragments('dist', backendRoot, 'bundle'),
+      integrationPattern: getIntegrationPattern(options),
     },
     auth: options.auth,
     iacProvider,
@@ -99,6 +109,7 @@ export async function tsTrpcApiGenerator(
     apiType: 'trpc',
     auth: options.auth,
     computeType: options.computeType,
+    integrationPattern: getIntegrationPattern(options),
   } as unknown;
 
   projectConfig.targets.serve = {
@@ -166,6 +177,25 @@ export async function tsTrpcApiGenerator(
     installPackagesTask(tree);
   };
 }
+
+const validateTrpcComputeTypeAndIntegrationPatternCombination = (
+  options: TsTrpcApiGeneratorSchema,
+) => {
+  const integrationPattern = getIntegrationPattern(options);
+  const permutation = `${options.computeType}::${integrationPattern}`;
+
+  if (!VALID_TRPC_INTEGRATION_PERMUTATIONS.has(permutation)) {
+    throw new Error(
+      `Invalid tRPC computeType/integrationPattern combination: ${options.computeType} + ${integrationPattern}.`,
+    );
+  }
+};
+
+const getIntegrationPattern = (
+  options: TsTrpcApiGeneratorSchema,
+): 'isolated' | 'shared' => {
+  return options.integrationPattern ?? 'isolated';
+};
 
 const getApiGatewayEventType = (options: TsTrpcApiGeneratorSchema): string => {
   if (options.computeType === 'ServerlessApiGatewayRestApi') {

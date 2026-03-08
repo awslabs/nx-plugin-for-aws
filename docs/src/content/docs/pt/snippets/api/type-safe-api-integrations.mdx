@@ -2,8 +2,6 @@
 title: "Integrações de API com Segurança de Tipo"
 ---
 
-
-
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 import Infrastructure from '@components/infrastructure.astro';
 
@@ -49,6 +47,37 @@ module "my_api" {
 </Fragment>
 </Infrastructure>
 
+#### Escolhendo um Padrão de Integração
+
+<Infrastructure>
+<Fragment slot="cdk">
+Os construtos CDK de API gerados suportam dois padrões de integração:
+
+- `isolated` cria uma função Lambda por operação. Este é o padrão para APIs geradas.
+- `shared` cria um único roteador Lambda padrão e o reutiliza para cada operação, a menos que você sobrescreva integrações específicas.
+
+`isolated` oferece permissões e configuração mais granulares por operação. `shared` reduz a proliferação de funções Lambda e integrações do API Gateway, ainda permitindo sobrescritas seletivas.
+
+O suporte do gerador atualmente varia por backend:
+
+- `ts#trpc-api` suporta tanto `isolated` quanto `shared` para `ServerlessApiGatewayRestApi` e `ServerlessApiGatewayHttpApi` através da opção `integrationPattern`.
+- `py#fast-api` e `ts#smithy-api` atualmente geram `isolated`.
+
+Você também pode alternar um construto CDK de API gerado existente entre os dois padrões editando o campo `pattern` em seu método `defaultIntegrations`:
+
+```ts {3}
+return IntegrationBuilder.rest({
+  // Altere isto para 'isolated' ou 'shared'
+  pattern: 'isolated',
+  ...
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+Os módulos Terraform já usam o padrão de roteador por padrão, com uma única função Lambda processando todas as operações da API.
+</Fragment>
+</Infrastructure>
+
 #### Acessando Integrações
 
 <Infrastructure>
@@ -66,6 +95,16 @@ api.integrations.sayHello.handler.addToRolePolicy(new PolicyStatement({
   actions: [...],
   resources: [...],
 }));
+```
+
+Se sua API usa o padrão `shared`, o roteador Lambda compartilhado é exposto como `api.integrations.$router`:
+
+```ts {6}
+const api = new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this).build(),
+});
+
+api.integrations.$router.handler.addEnvironment('LOG_LEVEL', 'DEBUG');
 ```
 </Fragment>
 <Fragment slot="terraform">
@@ -590,33 +629,33 @@ Edite `packages/common/terraform/src/app/apis/my-api/my-api.tf`:
 </Fragment>
 </Infrastructure>
 
-#### Padrão de Roteador
+#### Padrão de Integração
 
 <Infrastructure>
 <Fragment slot="cdk">
-Se você preferir implantar uma única função Lambda para atender todas as requisições da API, pode livremente editar o método `defaultIntegrations` de sua API para criar uma única função em vez de uma por integração:
+
+Os construtos CDK de API gerados suportam dois padrões de integração:
+
+- `isolated` cria uma função Lambda por operação. Este é o padrão para APIs geradas.
+- `shared` cria um único roteador Lambda padrão e o reutiliza para cada operação, a menos que você sobrescreva integrações específicas.
+
+`isolated` oferece permissões e configuração mais granulares por operação. `shared` reduz a proliferação de funções Lambda e integrações do API Gateway, ainda permitindo sobrescritas seletivas.
+
+Por exemplo, definir `pattern` como `'shared'` cria uma única função em vez de uma por integração:
 
 ```ts {5,11-12}
 // packages/common/constructs/src/app/apis/my-api.ts
 export class MyApi<...> extends ... {
 
   public static defaultIntegrations = (scope: Construct) => {
-    const router = new Function(scope, 'RouterHandler', { ... });
+    ...
     return IntegrationBuilder.rest({
+      pattern: 'shared',
       ...
-      defaultIntegrationOptions: {},
-      buildDefaultIntegration: (op) => {
-        return {
-          // Referencia o mesmo router lambda handler em todas as integrações
-          integration: new LambdaIntegration(router),
-        };
-      },
     });
   };
 }
 ```
-
-Você pode modificar o código de outras formas se preferir, por exemplo pode definir a função `router` como parâmetro para `defaultIntegrations` em vez de construí-la dentro do método.
 </Fragment>
 <Fragment slot="terraform">
 Os módulos Terraform automaticamente usam o padrão de roteador - esta é a abordagem padrão e única suportada. O módulo gerado cria uma única função Lambda que processa todas as operações da API.
@@ -624,7 +663,7 @@ Os módulos Terraform automaticamente usam o padrão de roteador - esta é a abo
 Você pode simplesmente instanciar o módulo padrão para obter o padrão de roteador:
 
 ```hcl
-# Padrão de roteador - função Lambda única para todas as operações
+# Padrão de roteador padrão - função Lambda única para todas as operações
 module "my_api" {
   source = "../../common/terraform/src/app/apis/my-api"
 

@@ -37,6 +37,7 @@ import { IUserPool, IUserPoolClient } from 'aws-cdk-lib/aws-cognito';
 import { Grant, IGrantable } from 'aws-cdk-lib/aws-iam';
 <%_ } _%>
 import {
+  ApiIntegrations,
   HttpApiIntegration,
   IntegrationBuilder,
 } from '../../core/api/utils.js';
@@ -60,7 +61,7 @@ import {
  * @template TIntegrations - Map of operation names to their integrations
  */
 export interface <%= apiNameClassName %>Props<
-  TIntegrations extends Record<Operations, HttpApiIntegration>,
+  TIntegrations extends ApiIntegrations<Operations, HttpApiIntegration>,
 > {
   /**
    * Map of operation names to their API Gateway integrations
@@ -83,23 +84,29 @@ export interface <%= apiNameClassName %>Props<
  * @template TIntegrations - Map of operation names to their integrations
  */
 export class <%= apiNameClassName %><
-  TIntegrations extends Record<Operations, HttpApiIntegration>,
+  TIntegrations extends ApiIntegrations<Operations, HttpApiIntegration>,
 > extends HttpApi<Operations, TIntegrations> {
   /**
+   <%_ if (backend.integrationPattern === 'shared') { _%>
+   * Creates default integrations for all operations using a single shared
+   * router lambda function.
+   <%_ } else { _%>
    * Creates default integrations for all operations, which implement each operation as
    * its own individual lambda function.
+   <%_ } _%>
    *
    * @param scope - The CDK construct scope
    * @returns An IntegrationBuilder with default lambda integrations
-   */
+  */
   public static defaultIntegrations = (scope: Construct) => {
     return IntegrationBuilder.http({
+      pattern: '<%= backend.integrationPattern %>',
       <%_ if (backend.type === 'trpc') { _%>
       operations: routerToOperations(appRouter),
       <%_ } else { _%>
       operations: OPERATION_DETAILS,
       <%_ } _%>
-      defaultIntegrationOptions: {
+      defaultIntegrationOptions: <FunctionProps>{
         <%_ if (['trpc', 'smithy'].includes(backend.type)) { _%>
         runtime: Runtime.NODEJS_LATEST,
         handler: 'index.handler',
@@ -136,8 +143,10 @@ export class <%= apiNameClassName %><
           AWS_LAMBDA_EXEC_WRAPPER: '/opt/bootstrap',
           <%_ } _%>
         },
-      } satisfies FunctionProps,
+      },
       buildDefaultIntegration: (op, props: FunctionProps) => {
+        <%_ const lambdaTarget = backend.type === 'fastapi' ? 'handler.currentVersion' : 'handler'; _%>
+        <%_ const integrationOptions = backend.integrationPattern === 'shared' ? ', { scopePermissionToRoute: false }' : ''; _%>
         const handler = new Function(scope, `<%= apiNameClassName %>${op}Handler`, props);
         <%_ if (backend.type === 'fastapi') { _%>
         const stack = Stack.of(scope);
@@ -151,11 +160,10 @@ export class <%= apiNameClassName %><
         <%_ } _%>
         return {
           handler,
-          <%_ if (backend.type === 'fastapi') { _%>
-          integration: new HttpLambdaIntegration(`<%= apiNameClassName %>${op}Integration`, handler.currentVersion),
-          <%_ } else { _%>
-          integration: new HttpLambdaIntegration(`<%= apiNameClassName %>${op}Integration`, handler),
-          <%_ } _%>
+          integration: new HttpLambdaIntegration(
+            `<%= apiNameClassName %><%_ if (backend.integrationPattern === 'shared') { _%>Router<%_ } _%>${op}Integration`,
+            <%- lambdaTarget %><%- integrationOptions %>,
+          ),
         };
       },
     });
