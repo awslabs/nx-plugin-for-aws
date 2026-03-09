@@ -181,8 +181,7 @@ export async function reactGenerator(
         ? [
             'oidc-client-ts',
             'aws4fetch',
-            '@aws-sdk/client-cognito-identity',
-            '@aws-sdk/credential-provider-cognito-identity',
+            '@aws-sdk/credential-providers',
             'react-oidc-context',
           ]
         : []) as any),

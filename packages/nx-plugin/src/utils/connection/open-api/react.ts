@@ -267,8 +267,7 @@ export const addOpenApiReactClient = async (
         ? [
             'oidc-client-ts',
             'react-oidc-context',
-            '@aws-sdk/client-cognito-identity',
-            '@aws-sdk/credential-provider-cognito-identity',
+            '@aws-sdk/credential-providers',
             'aws4fetch',
           ]
         : []) as any),

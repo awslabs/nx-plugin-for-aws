@@ -329,12 +329,7 @@ export function Main() {
       expect(packageJson.dependencies['oidc-client-ts']).toBeDefined();
       expect(packageJson.dependencies['react-oidc-context']).toBeDefined();
       expect(
-        packageJson.dependencies['@aws-sdk/client-cognito-identity'],
-      ).toBeDefined();
-      expect(
-        packageJson.dependencies[
-          '@aws-sdk/credential-provider-cognito-identity'
-        ],
+        packageJson.dependencies['@aws-sdk/credential-providers'],
       ).toBeDefined();
       expect(packageJson.dependencies['aws4fetch']).toBeDefined();
 
@@ -1109,7 +1104,7 @@ export function Main() {
       const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
       expect(packageJson.dependencies['aws4fetch']).toBeDefined();
       expect(
-        packageJson.dependencies['@aws-sdk/client-cognito-identity'],
+        packageJson.dependencies['@aws-sdk/credential-providers'],
       ).toBeDefined();
 
       // Verify that the runtime config includes the correct API

@@ -7,11 +7,9 @@
  * Versons for TypeScript dependencies added by generators
  */
 export const TS_VERSIONS = {
-  '@aws-sdk/client-cognito-identity': '3.1001.0',
-  '@aws-sdk/client-dynamodb': '3.1001.0',
-  '@aws-sdk/client-sts': '3.1001.0',
-  '@aws-sdk/credential-providers': '3.1001.0',
-  '@aws-sdk/credential-provider-cognito-identity': '3.972.7',
+  '@aws-sdk/client-dynamodb': '3.1004.0',
+  '@aws-sdk/client-sts': '3.1004.0',
+  '@aws-sdk/credential-providers': '3.1004.0',
   '@aws-smithy/server-apigateway': '1.0.0-alpha.10',
   '@aws-smithy/server-node': '1.0.0-alpha.10',
   '@aws-lambda-powertools/logger': '2.31.0',

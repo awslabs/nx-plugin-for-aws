@@ -139,10 +139,7 @@ export function Main() {
     expect(packageJson.dependencies['oidc-client-ts']).toBeDefined();
     expect(packageJson.dependencies['react-oidc-context']).toBeDefined();
     expect(
-      packageJson.dependencies['@aws-sdk/client-cognito-identity'],
-    ).toBeDefined();
-    expect(
-      packageJson.dependencies['@aws-sdk/credential-provider-cognito-identity'],
+      packageJson.dependencies['@aws-sdk/credential-providers'],
     ).toBeDefined();
     expect(packageJson.dependencies['aws4fetch']).toBeDefined();
   });
