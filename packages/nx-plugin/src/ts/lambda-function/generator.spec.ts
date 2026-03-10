@@ -753,6 +753,7 @@ describe('ts-lambda-function generator', () => {
       expect(projectConfig.metadata.components).toHaveLength(1);
       expect(projectConfig.metadata.components[0]).toEqual({
         generator: TS_LAMBDA_FUNCTION_GENERATOR_INFO.id,
+        path: 'src/test-function.ts',
         name: 'test-function',
       });
     });

@@ -168,6 +168,7 @@ export const tsStrandsAgentGenerator = async (
     tree,
     project.name,
     TS_STRANDS_AGENT_GENERATOR_INFO,
+    targetSourceDirRelativeToProjectRoot,
     agentTargetPrefix,
     { port: localDevPort },
   );

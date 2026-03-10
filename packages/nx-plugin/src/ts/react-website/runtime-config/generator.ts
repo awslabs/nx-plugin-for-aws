@@ -20,6 +20,7 @@ import {
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
+import { toProjectRelativePath } from '../../../utils/paths';
 import { addHookResultToRouterProviderContext } from '../../../utils/ast/website';
 
 export const RUNTIME_CONFIG_GENERATOR_INFO: NxGeneratorInfo =
@@ -29,10 +30,11 @@ export async function runtimeConfigGenerator(
   tree: Tree,
   options: RuntimeConfigGeneratorSchema,
 ) {
-  const srcRoot = readProjectConfigurationUnqualified(
+  const projectConfig = readProjectConfigurationUnqualified(
     tree,
     options.project,
-  ).sourceRoot;
+  );
+  const srcRoot = projectConfig.sourceRoot;
   const mainTsxPath = joinPathFragments(srcRoot, 'main.tsx');
   if (!tree.exists(mainTsxPath)) {
     throw new Error(
@@ -123,6 +125,10 @@ export async function runtimeConfigGenerator(
     tree,
     options.project,
     RUNTIME_CONFIG_GENERATOR_INFO,
+    toProjectRelativePath(
+      projectConfig,
+      joinPathFragments(srcRoot, 'components', 'RuntimeConfig'),
+    ),
   );
 
   await addGeneratorMetricsIfApplicable(tree, [RUNTIME_CONFIG_GENERATOR_INFO]);

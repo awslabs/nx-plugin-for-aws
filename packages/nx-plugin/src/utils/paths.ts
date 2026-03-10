@@ -2,7 +2,8 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
+import { ProjectConfiguration, Tree } from '@nx/devkit';
+import * as path from 'path';
 import { readProjectConfigurationUnqualified } from './nx';
 
 export const getRelativePathToRoot = (
@@ -19,4 +20,14 @@ export const getRelativePathToRootByDirectory = (directory: string): string => {
   const levels = directory.split('/').filter(Boolean).length;
   // Create the relative path back to root
   return '../'.repeat(levels);
+};
+
+/**
+ * Convert an absolute path within a project to a path relative to the project root.
+ */
+export const toProjectRelativePath = (
+  projectConfiguration: ProjectConfiguration,
+  absolutePath: string,
+): string => {
+  return path.relative(projectConfiguration.root, absolutePath);
 };

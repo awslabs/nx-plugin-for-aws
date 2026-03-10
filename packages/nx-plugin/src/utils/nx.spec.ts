@@ -123,6 +123,7 @@ describe('addComponentGeneratorMetadata', () => {
       tree,
       'test-project',
       mockGeneratorInfo,
+      'src/test-component',
       'test-component',
     );
 
@@ -134,6 +135,7 @@ describe('addComponentGeneratorMetadata', () => {
     expect(projectConfig.metadata.components).toHaveLength(1);
     expect(projectConfig.metadata.components[0]).toEqual({
       generator: 'test-generator',
+      path: 'src/test-component',
       name: 'test-component',
     });
   });
@@ -152,6 +154,7 @@ describe('addComponentGeneratorMetadata', () => {
       tree,
       'test-project',
       mockGeneratorInfo,
+      'src/test-component',
       'test-component',
       {
         port: 8080,
@@ -165,6 +168,7 @@ describe('addComponentGeneratorMetadata', () => {
 
     expect(projectConfig.metadata.components[0]).toEqual({
       generator: 'test-generator',
+      path: 'src/test-component',
       name: 'test-component',
       port: 8080,
       customField: 'value',
@@ -185,6 +189,7 @@ describe('addComponentGeneratorMetadata', () => {
       tree,
       'test-project',
       mockGeneratorInfo,
+      'src/unnamed-component',
       undefined,
       {
         port: 3000,
@@ -197,6 +202,7 @@ describe('addComponentGeneratorMetadata', () => {
 
     expect(projectConfig.metadata.components[0]).toEqual({
       generator: 'test-generator',
+      path: 'src/unnamed-component',
       port: 3000,
     });
     expect(projectConfig.metadata.components[0].name).toBeUndefined();
@@ -224,6 +230,7 @@ describe('addComponentGeneratorMetadata', () => {
       tree,
       'test-project',
       mockGeneratorInfo,
+      'src/new-component',
       'new-component',
     );
 
@@ -238,6 +245,7 @@ describe('addComponentGeneratorMetadata', () => {
     });
     expect(projectConfig.metadata.components[1]).toEqual({
       generator: 'test-generator',
+      path: 'src/new-component',
       name: 'new-component',
     });
   });
@@ -264,6 +272,7 @@ describe('addComponentGeneratorMetadata', () => {
       tree,
       'test-project',
       mockGeneratorInfo,
+      'src/test-component',
       'test-component',
     );
 
@@ -297,6 +306,7 @@ describe('addComponentGeneratorMetadata', () => {
       tree,
       'test-project',
       mockGeneratorInfo,
+      'src/test-component',
       'test-component',
     );
 
@@ -323,6 +333,7 @@ describe('addComponentGeneratorMetadata', () => {
       tree,
       'test-project',
       mockGeneratorInfo,
+      'src/test-component',
       'test-component',
     );
 
@@ -333,6 +344,7 @@ describe('addComponentGeneratorMetadata', () => {
     expect(projectConfig.metadata.components).toHaveLength(1);
     expect(projectConfig.metadata.components[0]).toEqual({
       generator: 'test-generator',
+      path: 'src/test-component',
       name: 'test-component',
     });
   });

@@ -200,6 +200,7 @@ export const tsMcpServerGenerator = async (
     tree,
     project.name,
     TS_MCP_SERVER_GENERATOR_INFO,
+    targetSourceDirRelativeToProjectRoot,
     mcpTargetPrefix,
     {
       port: localDevPort,

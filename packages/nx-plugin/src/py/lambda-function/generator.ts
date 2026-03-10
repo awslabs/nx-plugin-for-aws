@@ -33,6 +33,7 @@ import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { addPythonBundleTarget } from '../../utils/bundle/bundle';
 import { addDependenciesToPyProjectToml } from '../../utils/py';
 import { addLambdaFunctionInfra } from '../../utils/function-constructs/function-constructs';
+import { toProjectRelativePath } from '../../utils/paths';
 import { resolveIacProvider } from '../../utils/iac';
 
 export const LAMBDA_FUNCTION_GENERATOR_INFO: NxGeneratorInfo =
@@ -187,6 +188,7 @@ export const pyLambdaFunctionGenerator = async (
     tree,
     projectConfig.name,
     LAMBDA_FUNCTION_GENERATOR_INFO,
+    toProjectRelativePath(projectConfig, functionPath),
     lambdaFunctionKebabCase,
   );
 

@@ -33,6 +33,7 @@ import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { Logger, UVProvider } from '../../utils/nxlv-python';
 import { resolveIacProvider } from '../../utils/iac';
 import { assignPort } from '../../utils/port';
+import { toProjectRelativePath } from '../../utils/paths';
 
 export const PY_STRANDS_AGENT_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -187,6 +188,7 @@ export const pyStrandsAgentGenerator = async (
     tree,
     project.name,
     PY_STRANDS_AGENT_GENERATOR_INFO,
+    toProjectRelativePath(project, targetSourceDir),
     agentTargetPrefix,
     {
       port: localDevPort,

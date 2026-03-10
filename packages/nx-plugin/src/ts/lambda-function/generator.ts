@@ -158,6 +158,7 @@ export const tsLambdaFunctionGenerator = async (
     tree,
     projectConfig.name,
     TS_LAMBDA_FUNCTION_GENERATOR_INFO,
+    functionPathFromProjectRoot,
     lambdaFunctionKebabCase,
   );
 

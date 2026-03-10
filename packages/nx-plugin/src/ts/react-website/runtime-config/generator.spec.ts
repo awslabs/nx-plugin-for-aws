@@ -386,6 +386,7 @@ describe('runtime-config generator', () => {
       expect(projectConfig.metadata.components).toHaveLength(1);
       expect(projectConfig.metadata.components[0]).toEqual({
         generator: RUNTIME_CONFIG_GENERATOR_INFO.id,
+        path: 'src/components/RuntimeConfig',
       });
     });
   });

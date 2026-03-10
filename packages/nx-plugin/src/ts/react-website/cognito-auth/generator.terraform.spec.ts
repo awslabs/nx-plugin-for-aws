@@ -899,9 +899,11 @@ resource "aws_s3_bucket_policy" "website_cloudfront_policy" {
     expect(projectConfig.metadata.components).toHaveLength(2);
     expect(projectConfig.metadata.components[0]).toEqual({
       generator: RUNTIME_CONFIG_GENERATOR_INFO.id,
+      path: 'src/components/RuntimeConfig',
     });
     expect(projectConfig.metadata.components[1]).toEqual({
       generator: COGNITO_AUTH_GENERATOR_INFO.id,
+      path: 'src/components/CognitoAuth',
     });
   });
 });
