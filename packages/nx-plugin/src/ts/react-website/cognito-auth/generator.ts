@@ -227,13 +227,13 @@ export async function tsReactWebsiteAuthGenerator(
     // Add a top-level navigation menu that shows the signed-in user's profile and actions
     switch (uxProvider) {
       case 'Cloudscape':
-        addCloudscapeAuthMenu(tree, appLayoutTsxPath);
+        await addCloudscapeAuthMenu(tree, appLayoutTsxPath);
         break;
       case 'Shadcn':
-        addShadcnAuthMenu(tree, appLayoutTsxPath);
+        await addShadcnAuthMenu(tree, appLayoutTsxPath);
         break;
       case 'None':
-        addNoneAuthMenu(tree, appLayoutTsxPath);
+        await addNoneAuthMenu(tree, appLayoutTsxPath);
         break;
       default:
         throw new Error(
