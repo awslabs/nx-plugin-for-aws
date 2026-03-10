@@ -121,6 +121,7 @@ export const addComponentGeneratorMetadata = (
   tree: Tree,
   projectName: string,
   info: NxGeneratorInfo,
+  componentPath: string,
   componentName?: string,
   additionalMetadata?: { [key: string]: any },
 ) => {
@@ -140,6 +141,7 @@ export const addComponentGeneratorMetadata = (
           ...existingComponents,
           {
             generator: info.id,
+            path: componentPath,
             ...(componentName ? { name: componentName } : {}),
             ...additionalMetadata,
           },

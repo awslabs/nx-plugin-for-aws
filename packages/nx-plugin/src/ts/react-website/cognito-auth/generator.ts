@@ -45,6 +45,7 @@ import {
   addNoneAuthMenu,
   addShadcnAuthMenu,
 } from './utils';
+import { toProjectRelativePath } from '../../../utils/paths';
 
 export const COGNITO_AUTH_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -53,10 +54,11 @@ export async function tsReactWebsiteAuthGenerator(
   tree: Tree,
   options: TsReactWebsiteAuthGeneratorSchema,
 ) {
-  const srcRoot = readProjectConfigurationUnqualified(
+  const projectConfig = readProjectConfigurationUnqualified(
     tree,
     options.project,
-  ).sourceRoot;
+  );
+  const srcRoot = projectConfig.sourceRoot;
   if (
     tree.exists(joinPathFragments(srcRoot, 'components/CognitoAuth/index.tsx'))
   ) {
@@ -249,6 +251,10 @@ export async function tsReactWebsiteAuthGenerator(
     tree,
     options.project,
     COGNITO_AUTH_GENERATOR_INFO,
+    toProjectRelativePath(
+      projectConfig,
+      joinPathFragments(srcRoot, 'components', 'CognitoAuth'),
+    ),
   );
 
   await addGeneratorMetricsIfApplicable(tree, [COGNITO_AUTH_GENERATOR_INFO]);

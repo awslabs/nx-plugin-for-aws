@@ -147,6 +147,7 @@ export const tsNxGeneratorGenerator = async (
       tree,
       plugin.name,
       NX_GENERATOR_GENERATOR_INFO,
+      joinPathFragments(srcDir, generatorSubDir),
       name,
     );
   }

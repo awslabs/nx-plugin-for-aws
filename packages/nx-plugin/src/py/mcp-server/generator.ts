@@ -31,6 +31,7 @@ import { withVersions } from '../../utils/versions';
 import { Logger, UVProvider } from '../../utils/nxlv-python';
 import { resolveIacProvider } from '../../utils/iac';
 import { assignPort } from '../../utils/port';
+import { toProjectRelativePath } from '../../utils/paths';
 
 export const PY_MCP_SERVER_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -219,6 +220,7 @@ export const pyMcpServerGenerator = async (
     tree,
     project.name,
     PY_MCP_SERVER_GENERATOR_INFO,
+    toProjectRelativePath(project, targetSourceDir),
     mcpTargetPrefix,
     {
       port: localDevPort,

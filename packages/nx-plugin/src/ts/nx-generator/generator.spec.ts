@@ -607,6 +607,7 @@ describe('nx-generator generator', () => {
       expect(projectConfig.metadata.components).toHaveLength(1);
       expect(projectConfig.metadata.components[0]).toEqual({
         generator: NX_GENERATOR_GENERATOR_INFO.id,
+        path: 'src/test-generator',
         name: 'test-generator',
       });
     });

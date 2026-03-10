@@ -1098,6 +1098,7 @@ describe('lambda-handler project generator', () => {
       expect(projectConfig.metadata.components).toHaveLength(1);
       expect(projectConfig.metadata.components[0]).toEqual({
         generator: LAMBDA_FUNCTION_GENERATOR_INFO.id,
+        path: 'test_project/test_function.py',
         name: 'test-function',
       });
     });
