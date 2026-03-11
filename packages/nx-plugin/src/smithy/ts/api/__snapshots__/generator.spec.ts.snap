@@ -34,7 +34,6 @@ exports[`tsSmithyApiGenerator > should configure git and eslint ignores for gene
 exports[`tsSmithyApiGenerator > should generate smithy ts api with Cognito auth > cognito-auth-infra.ts 1`] = `
 "import { Construct } from 'constructs';
 import * as url from 'url';
-import { Distribution } from 'aws-cdk-lib/aws-cloudfront';
 import {
   Code,
   Runtime,
@@ -79,6 +78,12 @@ export interface TestApiProps<
    * Map of operation names to their API Gateway integrations
    */
   integrations: TIntegrations;
+  /**
+   * Restricts browser CORS access to the supplied origins.
+   *
+   * When omitted or empty, CORS remains open to all origins.
+   */
+  allowOrigins?: string[];
   /**
    * Identity details for Cognito Authentication
    */
@@ -136,7 +141,7 @@ export class TestApi<
   constructor(
     scope: Construct,
     id: string,
-    props: TestApiProps<TIntegrations>,
+    { allowOrigins, ...props }: TestApiProps<TIntegrations>,
   ) {
     super(scope, id, {
       apiName: 'TestApi',
@@ -147,7 +152,10 @@ export class TestApi<
         }),
       },
       defaultCorsPreflightOptions: {
-        allowOrigins: Cors.ALL_ORIGINS,
+        allowOrigins:
+          allowOrigins && allowOrigins.length > 0
+            ? allowOrigins
+            : Cors.ALL_ORIGINS,
         allowMethods: Cors.ALL_METHODS,
       },
       deployOptions: {
@@ -167,32 +175,24 @@ export class TestApi<
       operations: OPERATION_DETAILS,
       ...props,
     });
+
+    this.applyAllowOrigins(allowOrigins);
   }
 
   /**
-   * Restricts CORS to the website CloudFront distribution domains
-   *
-   * Configures the CloudFront distribution domains as the only permitted CORS origins
-   * (other than local host) in the AWS Lambda integrations
-   *
-   * Note that this restriction is not applied to preflight OPTIONS
-   *
-   * @param websites - The CloudFront distribution to grant CORS from
+   * Sets ALLOWED_ORIGINS on all Lambda integrations so actual responses use the
+   * same origin allowlist as the API Gateway preflight handlers.
    */
-  public restrictCorsTo(
-    ...websites: { cloudFrontDistribution: Distribution }[]
-  ) {
-    const allowedOrigins = websites
-      .map(
-        ({ cloudFrontDistribution }) =>
-          \`https://\${cloudFrontDistribution.distributionDomainName}\`,
-      )
-      .join(',');
-
-    // Set ALLOWED_ORIGINS environment variable for all Lambda integrations
+  private applyAllowOrigins(allowOrigins?: string[]) {
     Object.values(this.integrations).forEach((integration) => {
       if ('handler' in integration && integration.handler instanceof Function) {
-        integration.handler.addEnvironment('ALLOWED_ORIGINS', allowedOrigins);
+        integration.handler.addEnvironment(
+          'ALLOWED_ORIGINS',
+          (allowOrigins && allowOrigins.length > 0
+            ? allowOrigins
+            : Cors.ALL_ORIGINS
+          ).join(','),
+        );
       }
     });
   }
@@ -203,7 +203,6 @@ export class TestApi<
 exports[`tsSmithyApiGenerator > should generate smithy ts api with IAM auth > iam-auth-infra.ts 1`] = `
 "import { Construct } from 'constructs';
 import * as url from 'url';
-import { Distribution } from 'aws-cdk-lib/aws-cloudfront';
 import {
   Code,
   Runtime,
@@ -248,6 +247,12 @@ export interface TestApiProps<
    * Map of operation names to their API Gateway integrations
    */
   integrations: TIntegrations;
+  /**
+   * Restricts browser CORS access to the supplied origins.
+   *
+   * When omitted or empty, CORS remains open to all origins.
+   */
+  allowOrigins?: string[];
 }
 
 /**
@@ -299,7 +304,7 @@ export class TestApi<
   constructor(
     scope: Construct,
     id: string,
-    props: TestApiProps<TIntegrations>,
+    { allowOrigins, ...props }: TestApiProps<TIntegrations>,
   ) {
     super(scope, id, {
       apiName: 'TestApi',
@@ -307,7 +312,10 @@ export class TestApi<
         authorizationType: AuthorizationType.IAM,
       },
       defaultCorsPreflightOptions: {
-        allowOrigins: Cors.ALL_ORIGINS,
+        allowOrigins:
+          allowOrigins && allowOrigins.length > 0
+            ? allowOrigins
+            : Cors.ALL_ORIGINS,
         allowMethods: Cors.ALL_METHODS,
       },
       deployOptions: {
@@ -327,32 +335,24 @@ export class TestApi<
       operations: OPERATION_DETAILS,
       ...props,
     });
+
+    this.applyAllowOrigins(allowOrigins);
   }
 
   /**
-   * Restricts CORS to the website CloudFront distribution domains
-   *
-   * Configures the CloudFront distribution domains as the only permitted CORS origins
-   * (other than local host) in the AWS Lambda integrations
-   *
-   * Note that this restriction is not applied to preflight OPTIONS
-   *
-   * @param websites - The CloudFront distribution to grant CORS from
+   * Sets ALLOWED_ORIGINS on all Lambda integrations so actual responses use the
+   * same origin allowlist as the API Gateway preflight handlers.
    */
-  public restrictCorsTo(
-    ...websites: { cloudFrontDistribution: Distribution }[]
-  ) {
-    const allowedOrigins = websites
-      .map(
-        ({ cloudFrontDistribution }) =>
-          \`https://\${cloudFrontDistribution.distributionDomainName}\`,
-      )
-      .join(',');
-
-    // Set ALLOWED_ORIGINS environment variable for all Lambda integrations
+  private applyAllowOrigins(allowOrigins?: string[]) {
     Object.values(this.integrations).forEach((integration) => {
       if ('handler' in integration && integration.handler instanceof Function) {
-        integration.handler.addEnvironment('ALLOWED_ORIGINS', allowedOrigins);
+        integration.handler.addEnvironment(
+          'ALLOWED_ORIGINS',
+          (allowOrigins && allowOrigins.length > 0
+            ? allowOrigins
+            : Cors.ALL_ORIGINS
+          ).join(','),
+        );
       }
     });
   }
