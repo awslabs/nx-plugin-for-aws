@@ -6,4 +6,6 @@
 export interface ConnectionGeneratorSchema {
   sourceProject: string;
   targetProject: string;
+  sourceComponent?: string;
+  targetComponent?: string;
 }

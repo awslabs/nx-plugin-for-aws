@@ -115,6 +115,16 @@ export const addGeneratorMetadata = (
 };
 
 /**
+ * Represents a component entry in project metadata
+ */
+export interface ComponentMetadata {
+  readonly generator: string;
+  readonly name?: string;
+  readonly path?: string;
+  [key: string]: any;
+}
+
+/**
  * Add metadata about the generator that generated the component to the project.json
  */
 export const addComponentGeneratorMetadata = (
@@ -133,19 +143,17 @@ export const addComponentGeneratorMetadata = (
   );
 
   if (alreadyAdded.length === 0) {
+    const componentMetadata: ComponentMetadata = {
+      generator: info.id,
+      path: componentPath,
+      ...(componentName ? { name: componentName } : {}),
+      ...additionalMetadata,
+    };
     updateProjectConfiguration(tree, config.name, {
       ...config,
       metadata: {
         ...config?.metadata,
-        components: [
-          ...existingComponents,
-          {
-            generator: info.id,
-            path: componentPath,
-            ...(componentName ? { name: componentName } : {}),
-            ...additionalMetadata,
-          },
-        ],
+        components: [...existingComponents, componentMetadata],
       } as any,
     });
   }

@@ -8,13 +8,18 @@ import trpcReactGenerator from '../trpc/react/generator';
 import { hasExportDeclaration } from '../utils/ast';
 import { readToml } from '../utils/toml';
 import fastApiReactGenerator from '../py/fast-api/react/generator';
-import { readProjectConfigurationUnqualified } from '../utils/nx';
+import {
+  ComponentMetadata,
+  readProjectConfigurationUnqualified,
+} from '../utils/nx';
 import { SMITHY_PROJECT_GENERATOR_INFO } from '../smithy/project/generator';
 import { TS_SMITHY_API_GENERATOR_INFO } from '../smithy/ts/api/generator';
 import smithyReactConnectionGenerator from '../smithy/react-connection/generator';
 
 /**
- * List of supported source and target project types for connections
+ * List of supported source and target project types for connections.
+ * These can be project-level types (determined by introspection) or
+ * component generator ids (from component metadata).
  */
 const SUPPORTED_PROJECT_TYPES = [
   'ts#trpc-api',
@@ -25,16 +30,33 @@ const SUPPORTED_PROJECT_TYPES = [
 
 type ProjectType = (typeof SUPPORTED_PROJECT_TYPES)[number];
 
-type Connection = { source: ProjectType; target: ProjectType };
+export type Connection = { source: string; target: string };
 
 /**
- * Enumerates the supported project connections
+ * Sentinel value for sourceComponent/targetComponent that means
+ * "use the project-level connection, not a component".
+ */
+export const PROJECT_COMPONENT_SENTINEL = '.';
+
+/**
+ * The result of resolving a connection, including the matched connection
+ * and any resolved source/target component metadata.
+ */
+export interface ResolvedConnection {
+  readonly connection: Connection;
+  readonly sourceComponent?: ComponentMetadata;
+  readonly targetComponent?: ComponentMetadata;
+}
+
+/**
+ * Enumerates the supported project connections.
+ * Source and target can be project-level types or component generator ids.
  */
 const SUPPORTED_CONNECTIONS = [
   { source: 'react', target: 'ts#trpc-api' },
   { source: 'react', target: 'py#fast-api' },
   { source: 'react', target: 'smithy' },
-] satisfies Connection[];
+] as const satisfies readonly Connection[];
 
 type ConnectionKey = (typeof SUPPORTED_CONNECTIONS)[number] extends infer C
   ? C extends Connection
@@ -73,33 +95,196 @@ export const connectionGenerator = async (
   tree: Tree,
   options: ConnectionGeneratorSchema,
 ) => {
-  const sourceType = determineProjectType(tree, options.sourceProject);
-  const targetType = determineProjectType(tree, options.targetProject);
+  const { connection } = resolveConnection(tree, options);
 
-  if (!sourceType || !SUPPORTED_PROJECT_TYPES.includes(sourceType)) {
+  const connectionKey =
+    `${connection.source} -> ${connection.target}` as ConnectionKey;
+
+  return await CONNECTION_GENERATORS[connectionKey](tree, options);
+};
+
+/**
+ * Find a component in project metadata matching the given reference.
+ * Checks by name first, then by path, then by generator.
+ */
+export const findComponentInMetadata = (
+  projectConfiguration: ProjectConfiguration,
+  componentRef: string,
+): ComponentMetadata | undefined => {
+  const components: ComponentMetadata[] =
+    (projectConfiguration.metadata as any)?.components ?? [];
+
+  return (
+    components.find((c) => c.name === componentRef) ??
+    components.find((c) => c.path === componentRef) ??
+    components.find((c) => c.generator === componentRef)
+  );
+};
+
+/**
+ * Represents a candidate source or target for a connection, which may be
+ * the project itself or a specific component within the project.
+ */
+interface ConnectionCandidate {
+  readonly type: string;
+  readonly component?: ComponentMetadata;
+}
+
+/**
+ * A matched connection between source and target candidates.
+ */
+interface ConnectionMatch {
+  readonly connection: Connection;
+  readonly sourceComponent?: ComponentMetadata;
+  readonly targetComponent?: ComponentMetadata;
+}
+
+/**
+ * Gather all connection candidates for a project configuration. This includes:
+ * - The project-level type (if it's a supported type)
+ * - Each component's generator id as a candidate type
+ */
+const gatherCandidates = (
+  tree: Tree,
+  projectConfig: ProjectConfiguration,
+): ConnectionCandidate[] => {
+  const projectType = determineProjectTypeFromConfig(tree, projectConfig);
+  const components: ComponentMetadata[] =
+    (projectConfig.metadata as any)?.components ?? [];
+
+  return [
+    ...(projectType ? [{ type: projectType }] : []),
+    ...components.map((component) => ({
+      type: component.generator,
+      component,
+    })),
+  ];
+};
+
+/**
+ * Validate that a specified component exists in the project metadata.
+ * Skips validation for undefined refs and the project sentinel '.'.
+ */
+const validateComponent = (
+  componentRef: string | undefined,
+  projectConfig: ProjectConfiguration,
+  side: 'source' | 'target',
+) => {
+  if (!componentRef || componentRef === PROJECT_COMPONENT_SENTINEL) return;
+  const found = findComponentInMetadata(projectConfig, componentRef);
+  if (!found) {
+    const components: ComponentMetadata[] =
+      (projectConfig.metadata as any)?.components ?? [];
     throw new Error(
-      `This generator does not support selected source project ${options.sourceProject}`,
+      `Component '${componentRef}' not found in ${side} project ${projectConfig.name}. ` +
+        `Available components: ${components.length > 0 ? components.map((c) => c.name ?? c.generator).join(', ') : 'none'}`,
     );
   }
-  if (!targetType || !SUPPORTED_PROJECT_TYPES.includes(targetType)) {
-    throw new Error(
-      `This generator does not support selected target project ${options.targetProject}`,
-    );
-  }
+};
 
-  const connection = SUPPORTED_CONNECTIONS.find(
-    (c) => c.source === sourceType && c.target === targetType,
+/**
+ * Narrow candidates based on the user's specified component reference.
+ */
+const filterConnectionCandidatesForComponentReference = (
+  componentRef: string | undefined,
+  projectConfig: ProjectConfiguration,
+  candidates: ConnectionCandidate[],
+  supportedConnections: readonly Connection[],
+  side: 'source' | 'target',
+): ConnectionCandidate[] => {
+  if (!componentRef) return candidates;
+  if (componentRef === PROJECT_COMPONENT_SENTINEL) {
+    return candidates.filter((c) => !c.component);
+  }
+  const component = findComponentInMetadata(projectConfig, componentRef);
+  if (!component) return candidates;
+  const isConnectionParticipant = supportedConnections.some(
+    (c) => c[side] === component.generator,
+  );
+  if (!isConnectionParticipant) return candidates;
+  return candidates.filter(
+    (c) => c.component?.generator === component.generator,
+  );
+};
+
+/**
+ * Resolve the connection to use, considering source/target projects and components.
+ */
+export const resolveConnection = (
+  tree: Tree,
+  options: ConnectionGeneratorSchema,
+  supportedConnections: readonly Connection[] = SUPPORTED_CONNECTIONS,
+): ResolvedConnection => {
+  const sourceConfig = readProjectConfigurationUnqualified(
+    tree,
+    options.sourceProject,
+  );
+  const targetConfig = readProjectConfigurationUnqualified(
+    tree,
+    options.targetProject,
   );
 
-  if (!connection) {
+  // Validate explicitly specified components exist
+  validateComponent(options.sourceComponent, sourceConfig, 'source');
+  validateComponent(options.targetComponent, targetConfig, 'target');
+
+  // Gather and narrow candidates
+  const sourceCandidates = filterConnectionCandidatesForComponentReference(
+    options.sourceComponent,
+    sourceConfig,
+    gatherCandidates(tree, sourceConfig),
+    supportedConnections,
+    'source',
+  );
+  const targetCandidates = filterConnectionCandidatesForComponentReference(
+    options.targetComponent,
+    targetConfig,
+    gatherCandidates(tree, targetConfig),
+    supportedConnections,
+    'target',
+  );
+
+  // Cross-product candidates and find supported connections
+  const matches: ConnectionMatch[] = [];
+  for (const source of sourceCandidates) {
+    for (const target of targetCandidates) {
+      const match = supportedConnections.find(
+        (c) => c.source === source.type && c.target === target.type,
+      );
+      if (match) {
+        matches.push({
+          connection: match,
+          sourceComponent: source.component,
+          targetComponent: target.component,
+        });
+      }
+    }
+  }
+
+  if (matches.length === 0) {
+    const sourceTypes = [...new Set(sourceCandidates.map((c) => c.type))];
+    const targetTypes = [...new Set(targetCandidates.map((c) => c.type))];
     throw new Error(
-      `This generator does not support a connection from ${options.sourceProject} (${sourceType}) to ${options.targetProject} (${targetType})`,
+      `This generator does not support a connection from ${options.sourceProject}${sourceTypes.length > 0 ? ` (${sourceTypes.join(', ')})` : ''} to ${options.targetProject}${targetTypes.length > 0 ? ` (${targetTypes.join(', ')})` : ''}`,
     );
   }
 
-  return await CONNECTION_GENERATORS[
-    `${connection.source} -> ${connection.target}`
-  ](tree, options);
+  if (matches.length > 1) {
+    const connectionDescriptions = matches
+      .map((m) => `${m.connection.source} -> ${m.connection.target}`)
+      .join(', ');
+    throw new Error(
+      `Ambiguous connection from ${options.sourceProject} to ${options.targetProject}. ` +
+        `Multiple supported connections found: ${connectionDescriptions}. ` +
+        `Please specify sourceComponent and/or targetComponent to disambiguate.`,
+    );
+  }
+
+  return {
+    connection: matches[0].connection,
+    sourceComponent: matches[0].sourceComponent,
+    targetComponent: matches[0].targetComponent,
+  };
 };
 
 /**
@@ -113,7 +298,16 @@ export const determineProjectType = (
     tree,
     projectName,
   );
+  return determineProjectTypeFromConfig(tree, projectConfiguration);
+};
 
+/**
+ * Determine whether the given project configuration is of a known project type
+ */
+const determineProjectTypeFromConfig = (
+  tree: Tree,
+  projectConfiguration: ProjectConfiguration,
+): ProjectType | undefined => {
   // NB: if adding new checks, ensure these go from most to least specific
   // eg. react website is more specific than typescript project
 
