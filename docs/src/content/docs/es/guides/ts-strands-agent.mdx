@@ -394,10 +394,69 @@ Los WebSockets en el navegador no soportan especificar encabezados (aparte de `S
 
 ##### Autenticación JWT / Cognito
 
-:::caution
-Al momento de escribir esto, Bedrock AgentCore Runtime requiere que los tokens JWT se pasen en el encabezado `Authorization`, y por lo tanto los navegadores no pueden autenticarse con Bedrock AgentCore Runtime usando autenticación JWT. Solo se soporta la autenticación AWS Signature Version 4 (SigV4) vía URLs prefirmadas.
+Bedrock AgentCore Runtime soporta [autenticación OAuth/JWT desde navegadores](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html#:~:text=Browser%20JavaScript%20client%20with%20OAuth) aceptando el token bearer incrustado en el encabezado `Sec-WebSocket-Protocol` durante el handshake de WebSocket. El token debe estar codificado en base64url y prefijado con `base64UrlBearerAuthorization.`, seguido del subprotocolo centinela `base64UrlBearerAuthorization`.
 
-Nos esforzaremos por actualizar esta documentación si se agrega soporte en el futuro.
+El siguiente ejemplo muestra cómo crear un cliente tRPC en una aplicación React usando autenticación Cognito:
+
+```typescript
+import { createTRPCClient, createWSClient, wsLink } from '@trpc/client';
+import { useAuth } from 'react-oidc-context';
+import type { AppRouter } from './your-agent/router';
+
+// Helper to base64url-encode a string
+function base64UrlEncode(str: string): string {
+  return btoa(str)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=/g, '');
+}
+
+// Build a WebSocket URL with the bearer token in Sec-WebSocket-Protocol
+function buildAgentCoreWsUrl(
+  agentRuntimeArn: string,
+  region: string = 'us-west-2',
+): string {
+  return `wss://bedrock-agentcore.${region}.amazonaws.com/runtimes/${agentRuntimeArn}/ws`;
+}
+
+// Inside your React component or hook:
+const auth = useAuth();
+const accessToken = auth.user?.access_token;
+
+const agentRuntimeArn = 'arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/my-agent';
+
+const wsClient = createWSClient({
+  url: buildAgentCoreWsUrl(agentRuntimeArn),
+  WebSocket: class extends WebSocket {
+    constructor(url: string | URL, protocols?: string | string[]) {
+      const base64Token = base64UrlEncode(accessToken!);
+      const authProtocols = [
+        `base64UrlBearerAuthorization.${base64Token}`,
+        'base64UrlBearerAuthorization',
+      ];
+      // Merge any existing protocols with the auth protocols
+      const existingProtocols = protocols
+        ? Array.isArray(protocols)
+          ? protocols
+          : [protocols]
+        : [];
+      super(url, [...existingProtocols, ...authProtocols]);
+    }
+  },
+});
+
+const trpcClient = createTRPCClient<AppRouter>({
+  links: [wsLink({ client: wsClient })],
+});
+
+// Invoke the agent
+trpcClient.invoke.subscribe({ message: 'what is 1 plus 1?' }, {
+  onData: (message) => console.log(message),
+});
+```
+
+:::note
+El ejemplo anterior usa [`react-oidc-context`](https://github.com/authts/react-oidc-context) para obtener el token de acceso, que es la misma biblioteca usada por el <Link path="/guides/react-website-auth">generador `ts#react-website#auth`</Link>. Puedes obtener el token desde cualquier proveedor OAuth/OIDC.
 :::
 
 ##### Autenticación IAM

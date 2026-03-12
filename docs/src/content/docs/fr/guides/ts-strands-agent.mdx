@@ -394,10 +394,69 @@ Les WebSockets dans le navigateur ne prennent pas en charge la spécification d'
 
 ##### Authentification JWT / Cognito
 
-:::caution
-Au moment de la rédaction, Bedrock AgentCore Runtime exige que les jetons JWT soient passés dans l'en-tête `Authorization`, et par conséquent les navigateurs ne peuvent pas s'authentifier auprès de Bedrock AgentCore Runtime en utilisant l'authentification JWT. Seule l'authentification AWS Signature Version 4 (SigV4) est prise en charge via des URL présignées.
+Bedrock AgentCore Runtime prend en charge [l'authentification OAuth/JWT depuis les navigateurs](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html#:~:text=Browser%20JavaScript%20client%20with%20OAuth) en acceptant le jeton bearer intégré dans l'en-tête `Sec-WebSocket-Protocol` lors de la négociation WebSocket. Le jeton doit être encodé en base64url et préfixé par `base64UrlBearerAuthorization.`, suivi du sous-protocole sentinelle `base64UrlBearerAuthorization`.
 
-Nous nous efforcerons de mettre à jour cette documentation si la prise en charge est ajoutée à l'avenir.
+L'exemple suivant montre comment créer un client tRPC dans une application React en utilisant l'authentification Cognito :
+
+```typescript
+import { createTRPCClient, createWSClient, wsLink } from '@trpc/client';
+import { useAuth } from 'react-oidc-context';
+import type { AppRouter } from './your-agent/router';
+
+// Helper to base64url-encode a string
+function base64UrlEncode(str: string): string {
+  return btoa(str)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=/g, '');
+}
+
+// Build a WebSocket URL with the bearer token in Sec-WebSocket-Protocol
+function buildAgentCoreWsUrl(
+  agentRuntimeArn: string,
+  region: string = 'us-west-2',
+): string {
+  return `wss://bedrock-agentcore.${region}.amazonaws.com/runtimes/${agentRuntimeArn}/ws`;
+}
+
+// Inside your React component or hook:
+const auth = useAuth();
+const accessToken = auth.user?.access_token;
+
+const agentRuntimeArn = 'arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/my-agent';
+
+const wsClient = createWSClient({
+  url: buildAgentCoreWsUrl(agentRuntimeArn),
+  WebSocket: class extends WebSocket {
+    constructor(url: string | URL, protocols?: string | string[]) {
+      const base64Token = base64UrlEncode(accessToken!);
+      const authProtocols = [
+        `base64UrlBearerAuthorization.${base64Token}`,
+        'base64UrlBearerAuthorization',
+      ];
+      // Merge any existing protocols with the auth protocols
+      const existingProtocols = protocols
+        ? Array.isArray(protocols)
+          ? protocols
+          : [protocols]
+        : [];
+      super(url, [...existingProtocols, ...authProtocols]);
+    }
+  },
+});
+
+const trpcClient = createTRPCClient<AppRouter>({
+  links: [wsLink({ client: wsClient })],
+});
+
+// Invoke the agent
+trpcClient.invoke.subscribe({ message: 'what is 1 plus 1?' }, {
+  onData: (message) => console.log(message),
+});
+```
+
+:::note
+L'exemple ci-dessus utilise [`react-oidc-context`](https://github.com/authts/react-oidc-context) pour obtenir le jeton d'accès, qui est la même bibliothèque utilisée par le <Link path="/guides/react-website-auth">générateur `ts#react-website#auth`</Link>. Vous pouvez obtenir le jeton depuis n'importe quel fournisseur OAuth/OIDC.
 :::
 
 ##### Authentification IAM

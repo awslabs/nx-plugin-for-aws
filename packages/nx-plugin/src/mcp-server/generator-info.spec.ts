@@ -34,13 +34,17 @@ describe('postProcessGuide', () => {
         required: ['name'],
       }),
     );
+    // Mock global fetch to return empty by default (no snippets found)
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('', { status: 404 }),
+    );
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it('should transform NxCommands components to markdown code blocks', () => {
+  it('should transform NxCommands components to markdown code blocks', async () => {
     const input = `
 # Test Guide
 Here's how to run a command:
@@ -55,11 +59,11 @@ nx generate @aws/nx-plugin:ts#project
 \`\`\`
 `;
 
-    const result = postProcessGuide(input, generators);
+    const result = await postProcessGuide(input, generators);
     expect(result).toBe(expected);
   });
 
-  it('should transform NxCommands components with single quotes', () => {
+  it('should transform NxCommands components with single quotes', async () => {
     const input = `
 # Test Guide
 Here's how to run a command:
@@ -74,11 +78,11 @@ nx generate @aws/nx-plugin:ts#project
 \`\`\`
 `;
 
-    const result = postProcessGuide(input, generators);
+    const result = await postProcessGuide(input, generators);
     expect(result).toBe(expected);
   });
 
-  it('should transform NxCommands components with multiple commands', () => {
+  it('should transform NxCommands components with multiple commands', async () => {
     const input = `
 # Test Guide
 Here's how to run a command:
@@ -95,11 +99,11 @@ nx foo
 \`\`\`
 `;
 
-    const result = postProcessGuide(input, generators);
+    const result = await postProcessGuide(input, generators);
     expect(result).toBe(expected);
   });
 
-  it('should transform NxCommands components with package manager prefix', () => {
+  it('should transform NxCommands components with package manager prefix', async () => {
     const input = `
 # Test Guide
 Here's how to run a command:
@@ -114,11 +118,11 @@ pnpm nx generate @aws/nx-plugin:ts#project
 \`\`\`
 `;
 
-    const result = postProcessGuide(input, generators, 'pnpm');
+    const result = await postProcessGuide(input, generators, 'pnpm');
     expect(result).toBe(expected);
   });
 
-  it('should transform RunGenerator components to generator commands', () => {
+  it('should transform RunGenerator components to generator commands', async () => {
     const input = `
 # Test Guide
 Here's how to run a generator:
@@ -133,11 +137,11 @@ nx g @aws/nx-plugin:test-generator --no-interactive --name=<name>
 \`\`\`
 `;
 
-    const result = postProcessGuide(input, generators);
+    const result = await postProcessGuide(input, generators);
     expect(result).toBe(expected);
   });
 
-  it('should transform RunGenerator components with package manager prefix', () => {
+  it('should transform RunGenerator components with package manager prefix', async () => {
     const input = `
 # Test Guide
 Here's how to run a generator:
@@ -152,11 +156,11 @@ npx nx g @aws/nx-plugin:test-generator --no-interactive --name=<name>
 \`\`\`
 `;
 
-    const result = postProcessGuide(input, generators, 'npm');
+    const result = await postProcessGuide(input, generators, 'npm');
     expect(result).toBe(expected);
   });
 
-  it('should transform GeneratorParameters components to schema documentation', () => {
+  it('should transform GeneratorParameters components to schema documentation', async () => {
     const input = `
 # Test Guide
 Here are the parameters for the generator:
@@ -170,33 +174,33 @@ Here are the parameters for the generator:
 - directory [type: string] The directory to create the project in
 `;
 
-    const result = postProcessGuide(input, generators);
+    const result = await postProcessGuide(input, generators);
     expect(result).toBe(expected);
   });
 
-  it('should leave GeneratorParameters components unchanged if generator is not found', () => {
+  it('should leave GeneratorParameters components unchanged if generator is not found', async () => {
     const input = `
 # Test Guide
 Here are the parameters for the generator:
 <GeneratorParameters generator="non-existent-generator" />
 `;
 
-    const result = postProcessGuide(input, generators);
+    const result = await postProcessGuide(input, generators);
     expect(result).toBe(input);
   });
 
-  it('should leave GeneratorParameters components unchanged if generator parameter is missing', () => {
+  it('should leave GeneratorParameters components unchanged if generator parameter is missing', async () => {
     const input = `
 # Test Guide
 Here are the parameters for the generator:
 <GeneratorParameters somethingElse="value" />
 `;
 
-    const result = postProcessGuide(input, generators);
+    const result = await postProcessGuide(input, generators);
     expect(result).toBe(input);
   });
 
-  it('should handle multiple transformations in a single guide', () => {
+  it('should handle multiple transformations in a single guide', async () => {
     const input = `
 # Test Guide
 Here's how to run a command:
@@ -226,11 +230,11 @@ Here are the parameters for the generator:
 - directory [type: string] The directory to create the project in
 `;
 
-    const result = postProcessGuide(input, generators, 'bun');
+    const result = await postProcessGuide(input, generators, 'bun');
     expect(result).toBe(expected);
   });
 
-  it('should handle errors when reading schema file', () => {
+  it('should handle errors when reading schema file', async () => {
     // Mock fs.readFileSync to throw an error
     vi.spyOn(fs, 'readFileSync').mockImplementation(() => {
       throw new Error('File not found');
@@ -245,7 +249,173 @@ Here are the parameters for the generator:
 <GeneratorParameters generator="test-generator" />
 `;
 
-    const result = postProcessGuide(input, generators);
+    const result = await postProcessGuide(input, generators);
     expect(result).toBe(input);
+  });
+
+  it('should replace Snippet tags with fetched snippet content', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('This is shared content about constructs.', {
+        status: 200,
+      }),
+    );
+
+    const input = `
+# Test Guide
+Some intro text.
+
+<Snippet name="shared-constructs" />
+
+More text after.
+`;
+
+    const expected = `
+# Test Guide
+Some intro text.
+
+<Snippet name="shared-constructs">
+This is shared content about constructs.
+</Snippet>
+
+More text after.
+`;
+
+    const result = await postProcessGuide(input, generators);
+    expect(result).toBe(expected);
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/snippets/shared-constructs.mdx'),
+    );
+  });
+
+  it('should replace Snippet tags with nested path names', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('Consider your API choice carefully.', { status: 200 }),
+    );
+
+    const input = `
+# Test Guide
+<Snippet name="api/api-choice-note" />
+`;
+
+    const expected = `
+# Test Guide
+<Snippet name="api/api-choice-note">
+Consider your API choice carefully.
+</Snippet>
+`;
+
+    const result = await postProcessGuide(input, generators);
+    expect(result).toBe(expected);
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/snippets/api/api-choice-note.mdx'),
+    );
+  });
+
+  it('should leave Snippet tags unchanged when fetch fails', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('', { status: 404 }),
+    );
+
+    const input = `
+# Test Guide
+<Snippet name="non-existent-snippet" />
+`;
+
+    const result = await postProcessGuide(input, generators);
+    expect(result).toBe(input);
+  });
+
+  it('should post-process NxCommands within fetched snippet content', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        `The generator configures a bundle target:
+
+<NxCommands commands={['run <project-name>:bundle']} />`,
+        { status: 200 },
+      ),
+    );
+
+    const input = `
+# Test Guide
+<Snippet name="ts-bundle" />
+`;
+
+    const expected = `
+# Test Guide
+<Snippet name="ts-bundle">
+The generator configures a bundle target:
+
+\`\`\`bash
+pnpm nx run <project-name>:bundle
+\`\`\`
+</Snippet>
+`;
+
+    const result = await postProcessGuide(input, generators, 'pnpm');
+    expect(result).toBe(expected);
+  });
+
+  it('should handle multiple Snippet tags in a single guide', async () => {
+    let callCount = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      callCount++;
+      if (callCount === 1) {
+        return new Response('Shared constructs content.', { status: 200 });
+      }
+      return new Response('Bundle content.', { status: 200 });
+    });
+
+    const input = `
+# Test Guide
+
+<Snippet name="shared-constructs" />
+
+Some middle text.
+
+<Snippet name="ts-bundle" />
+`;
+
+    const expected = `
+# Test Guide
+
+<Snippet name="shared-constructs">
+Shared constructs content.
+</Snippet>
+
+Some middle text.
+
+<Snippet name="ts-bundle">
+Bundle content.
+</Snippet>
+`;
+
+    const result = await postProcessGuide(input, generators);
+    expect(result).toBe(expected);
+  });
+
+  it('should handle Snippet tags with parentHeading attribute', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('Deploy instructions here.', { status: 200 }),
+    );
+
+    const input = `
+# Test Guide
+<Snippet name="lambda-function/deploying-your-function" parentHeading="Deploying your Function" />
+`;
+
+    const expected = `
+# Test Guide
+<Snippet name="lambda-function/deploying-your-function">
+Deploy instructions here.
+</Snippet>
+`;
+
+    const result = await postProcessGuide(input, generators);
+    expect(result).toBe(expected);
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      expect.stringContaining(
+        '/snippets/lambda-function/deploying-your-function.mdx',
+      ),
+    );
   });
 });
