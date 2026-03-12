@@ -44,11 +44,10 @@ import {
 } from 'aws-cdk-lib/aws-lambda';
 import {
   AuthorizationType,
-  Cors,
   LambdaIntegration,
   CognitoUserPoolsAuthorizer,
 } from 'aws-cdk-lib/aws-apigateway';
-import { Duration } from 'aws-cdk-lib';
+import { Aspects, Duration } from 'aws-cdk-lib';
 import {
   PolicyDocument,
   PolicyStatement,
@@ -61,7 +60,7 @@ import {
   IntegrationBuilder,
   RestApiIntegration,
 } from '../../core/api/utils.js';
-import { RestApi } from '../../core/api/rest-api.js';
+import { AddCorsPreflightAspect, RestApi } from '../../core/api/rest-api.js';
 import {
   OPERATION_DETAILS,
   Operations,
@@ -95,6 +94,8 @@ export interface TestApiProps<
 export class TestApi<
   TIntegrations extends ApiIntegrations<Operations, RestApiIntegration>,
 > extends RestApi<Operations, TIntegrations> {
+  private allowedOrigins: readonly string[] = ['*'];
+
   /**
    * Creates default integrations for all operations, which implement each operation as
    * its own individual lambda function.
@@ -146,10 +147,6 @@ export class TestApi<
           cognitoUserPools: [props.identity.userPool],
         }),
       },
-      defaultCorsPreflightOptions: {
-        allowOrigins: Cors.ALL_ORIGINS,
-        allowMethods: Cors.ALL_METHODS,
-      },
       deployOptions: {
         tracingEnabled: true,
       },
@@ -167,32 +164,42 @@ export class TestApi<
       operations: OPERATION_DETAILS,
       ...props,
     });
+    Aspects.of(this).add(new AddCorsPreflightAspect(() => this.allowedOrigins));
   }
 
   /**
-   * Restricts CORS to the website CloudFront distribution domains
+   * Restricts CORS to the provided origins
    *
-   * Configures the CloudFront distribution domains as the only permitted CORS origins
-   * (other than local host) in the AWS Lambda integrations
+   * Configures the provided CloudFront distribution domains or origin strings
+   * as the only permitted CORS origins in API Gateway preflight responses and the
+   * AWS Lambda integrations.
    *
-   * Note that this restriction is not applied to preflight OPTIONS
-   *
-   * @param websites - The CloudFront distribution to grant CORS from
+   * @param origins - The origin strings, CloudFront distributions, or objects containing a CloudFront distribution to grant CORS from
    */
   public restrictCorsTo(
-    ...websites: { cloudFrontDistribution: Distribution }[]
+    ...origins: (
+      | string
+      | Distribution
+      | { cloudFrontDistribution: Distribution }
+    )[]
   ) {
-    const allowedOrigins = websites
-      .map(
-        ({ cloudFrontDistribution }) =>
-          \`https://\${cloudFrontDistribution.distributionDomainName}\`,
-      )
-      .join(',');
+    const allowedOrigins = origins.map((origin) =>
+      typeof origin === 'string'
+        ? origin
+        : 'cloudFrontDistribution' in origin
+          ? \`https://\${origin.cloudFrontDistribution.distributionDomainName}\`
+          : \`https://\${origin.distributionDomainName}\`,
+    );
+
+    this.allowedOrigins = allowedOrigins;
 
     // Set ALLOWED_ORIGINS environment variable for all Lambda integrations
     Object.values(this.integrations).forEach((integration) => {
       if ('handler' in integration && integration.handler instanceof Function) {
-        integration.handler.addEnvironment('ALLOWED_ORIGINS', allowedOrigins);
+        integration.handler.addEnvironment(
+          'ALLOWED_ORIGINS',
+          allowedOrigins.join(','),
+        );
       }
     });
   }
@@ -213,10 +220,9 @@ import {
 } from 'aws-cdk-lib/aws-lambda';
 import {
   AuthorizationType,
-  Cors,
   LambdaIntegration,
 } from 'aws-cdk-lib/aws-apigateway';
-import { Duration } from 'aws-cdk-lib';
+import { Aspects, Duration } from 'aws-cdk-lib';
 import {
   PolicyDocument,
   PolicyStatement,
@@ -230,7 +236,7 @@ import {
   IntegrationBuilder,
   RestApiIntegration,
 } from '../../core/api/utils.js';
-import { RestApi } from '../../core/api/rest-api.js';
+import { AddCorsPreflightAspect, RestApi } from '../../core/api/rest-api.js';
 import {
   OPERATION_DETAILS,
   Operations,
@@ -258,6 +264,8 @@ export interface TestApiProps<
 export class TestApi<
   TIntegrations extends ApiIntegrations<Operations, RestApiIntegration>,
 > extends RestApi<Operations, TIntegrations> {
+  private allowedOrigins: readonly string[] = ['*'];
+
   /**
    * Creates default integrations for all operations, which implement each operation as
    * its own individual lambda function.
@@ -306,10 +314,6 @@ export class TestApi<
       defaultMethodOptions: {
         authorizationType: AuthorizationType.IAM,
       },
-      defaultCorsPreflightOptions: {
-        allowOrigins: Cors.ALL_ORIGINS,
-        allowMethods: Cors.ALL_METHODS,
-      },
       deployOptions: {
         tracingEnabled: true,
       },
@@ -327,32 +331,42 @@ export class TestApi<
       operations: OPERATION_DETAILS,
       ...props,
     });
+    Aspects.of(this).add(new AddCorsPreflightAspect(() => this.allowedOrigins));
   }
 
   /**
-   * Restricts CORS to the website CloudFront distribution domains
+   * Restricts CORS to the provided origins
    *
-   * Configures the CloudFront distribution domains as the only permitted CORS origins
-   * (other than local host) in the AWS Lambda integrations
+   * Configures the provided CloudFront distribution domains or origin strings
+   * as the only permitted CORS origins in API Gateway preflight responses and the
+   * AWS Lambda integrations.
    *
-   * Note that this restriction is not applied to preflight OPTIONS
-   *
-   * @param websites - The CloudFront distribution to grant CORS from
+   * @param origins - The origin strings, CloudFront distributions, or objects containing a CloudFront distribution to grant CORS from
    */
   public restrictCorsTo(
-    ...websites: { cloudFrontDistribution: Distribution }[]
+    ...origins: (
+      | string
+      | Distribution
+      | { cloudFrontDistribution: Distribution }
+    )[]
   ) {
-    const allowedOrigins = websites
-      .map(
-        ({ cloudFrontDistribution }) =>
-          \`https://\${cloudFrontDistribution.distributionDomainName}\`,
-      )
-      .join(',');
+    const allowedOrigins = origins.map((origin) =>
+      typeof origin === 'string'
+        ? origin
+        : 'cloudFrontDistribution' in origin
+          ? \`https://\${origin.cloudFrontDistribution.distributionDomainName}\`
+          : \`https://\${origin.distributionDomainName}\`,
+    );
+
+    this.allowedOrigins = allowedOrigins;
 
     // Set ALLOWED_ORIGINS environment variable for all Lambda integrations
     Object.values(this.integrations).forEach((integration) => {
       if ('handler' in integration && integration.handler instanceof Function) {
-        integration.handler.addEnvironment('ALLOWED_ORIGINS', allowedOrigins);
+        integration.handler.addEnvironment(
+          'ALLOWED_ORIGINS',
+          allowedOrigins.join(','),
+        );
       }
     });
   }

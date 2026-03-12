@@ -187,11 +187,10 @@ import {
 } from 'aws-cdk-lib/aws-lambda';
 import {
   AuthorizationType,
-  Cors,
   LambdaIntegration,
   ResponseTransferMode,
 } from 'aws-cdk-lib/aws-apigateway';
-import { Duration } from 'aws-cdk-lib';
+import { Aspects, Duration } from 'aws-cdk-lib';
 import {
   PolicyDocument,
   PolicyStatement,
@@ -204,7 +203,7 @@ import {
   IntegrationBuilder,
   RestApiIntegration,
 } from '../../core/api/utils.js';
-import { RestApi } from '../../core/api/rest-api.js';
+import { AddCorsPreflightAspect, RestApi } from '../../core/api/rest-api.js';
 import { Procedures, routerToOperations } from '../../core/api/trpc-utils.js';
 import { AppRouter, appRouter } from ':dungeon-adventure/game-api';
 
@@ -233,6 +232,8 @@ export interface GameApiProps<
 export class GameApi<
   TIntegrations extends Record<Operations, RestApiIntegration>,
 > extends RestApi<Operations, TIntegrations> {
+  private allowedOrigins: readonly string[] = ['*'];
+
   /**
    * 为所有操作创建默认集成,将每个操作实现为独立的 lambda 函数
    *
@@ -281,10 +282,6 @@ export class GameApi<
       defaultMethodOptions: {
         authorizationType: AuthorizationType.IAM,
       },
-      defaultCorsPreflightOptions: {
-        allowOrigins: Cors.ALL_ORIGINS,
-        allowMethods: Cors.ALL_METHODS,
-      },
       deployOptions: {
         tracingEnabled: true,
       },
@@ -302,32 +299,37 @@ export class GameApi<
       operations: routerToOperations(appRouter),
       ...props,
     });
+    Aspects.of(this).add(new AddCorsPreflightAspect(() => this.allowedOrigins));
   }
 
   /**
-   * 将 CORS 限制为网站 CloudFront 分发域
+   * 将 CORS 限制为提供的来源
    *
-   * 将 CloudFront 分发域配置为 AWS Lambda 集成中唯一允许的 CORS 来源
-   * (除本地主机外)
+   * 将 CloudFront 分发域或来源字符串配置为 API Gateway 预检响应和 AWS
+   * Lambda 集成中唯一允许的 CORS 来源
    *
-   * 注意此限制不适用于预检 OPTIONS
-   *
-   * @param websites - 授予 CORS 的 CloudFront 分发
+   * @param origins - 授予 CORS 的来源字符串、CloudFront 分发或包含 CloudFront 分发的对象
    */
   public restrictCorsTo(
-    ...websites: { cloudFrontDistribution: Distribution }[]
+    ...origins: (string | Distribution | { cloudFrontDistribution: Distribution })[]
   ) {
-    const allowedOrigins = websites
-      .map(
-        ({ cloudFrontDistribution }) =>
-          `https://${cloudFrontDistribution.distributionDomainName}`,
-      )
-      .join(',');
+    const allowedOrigins = origins.map((origin) =>
+      typeof origin === 'string'
+        ? origin
+        : 'cloudFrontDistribution' in origin
+          ? `https://${origin.cloudFrontDistribution.distributionDomainName}`
+          : `https://${origin.distributionDomainName}`,
+    );
+
+    this.allowedOrigins = allowedOrigins;
 
     // 为所有 Lambda 集成设置 ALLOWED_ORIGINS 环境变量
     Object.values(this.integrations).forEach((integration) => {
       if ('handler' in integration && integration.handler instanceof Function) {
-        integration.handler.addEnvironment('ALLOWED_ORIGINS', allowedOrigins);
+        integration.handler.addEnvironment(
+          'ALLOWED_ORIGINS',
+          allowedOrigins.join(','),
+        );
       }
     });
   }

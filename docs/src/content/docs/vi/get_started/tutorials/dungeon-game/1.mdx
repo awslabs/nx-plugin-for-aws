@@ -187,11 +187,10 @@ import {
 } from 'aws-cdk-lib/aws-lambda';
 import {
   AuthorizationType,
-  Cors,
   LambdaIntegration,
   ResponseTransferMode,
 } from 'aws-cdk-lib/aws-apigateway';
-import { Duration } from 'aws-cdk-lib';
+import { Aspects, Duration } from 'aws-cdk-lib';
 import {
   PolicyDocument,
   PolicyStatement,
@@ -204,7 +203,7 @@ import {
   IntegrationBuilder,
   RestApiIntegration,
 } from '../../core/api/utils.js';
-import { RestApi } from '../../core/api/rest-api.js';
+import { AddCorsPreflightAspect, RestApi } from '../../core/api/rest-api.js';
 import { Procedures, routerToOperations } from '../../core/api/trpc-utils.js';
 import { AppRouter, appRouter } from ':dungeon-adventure/game-api';
 
@@ -233,6 +232,8 @@ export interface GameApiProps<
 export class GameApi<
   TIntegrations extends Record<Operations, RestApiIntegration>,
 > extends RestApi<Operations, TIntegrations> {
+  private allowedOrigins: readonly string[] = ['*'];
+
   /**
    * Tạo các tích hợp mặc định cho tất cả các hoạt động, triển khai mỗi hoạt động như
    * một hàm lambda riêng lẻ.
@@ -282,10 +283,6 @@ export class GameApi<
       defaultMethodOptions: {
         authorizationType: AuthorizationType.IAM,
       },
-      defaultCorsPreflightOptions: {
-        allowOrigins: Cors.ALL_ORIGINS,
-        allowMethods: Cors.ALL_METHODS,
-      },
       deployOptions: {
         tracingEnabled: true,
       },
@@ -303,32 +300,38 @@ export class GameApi<
       operations: routerToOperations(appRouter),
       ...props,
     });
+    Aspects.of(this).add(new AddCorsPreflightAspect(() => this.allowedOrigins));
   }
 
   /**
-   * Hạn chế CORS cho các domain CloudFront distribution của website
+   * Hạn chế CORS cho các origin được cung cấp
    *
-   * Cấu hình các domain CloudFront distribution là các CORS origin được phép duy nhất
-   * (ngoài local host) trong các tích hợp AWS Lambda
+   * Cấu hình các domain CloudFront distribution hoặc chuỗi origin
+   * là các CORS origin được phép duy nhất trong các phản hồi preflight của API Gateway và các
+   * tích hợp AWS Lambda.
    *
-   * Lưu ý rằng hạn chế này không được áp dụng cho preflight OPTIONS
-   *
-   * @param websites - CloudFront distribution để cấp CORS từ
+   * @param origins - Các chuỗi origin, CloudFront distribution, hoặc các đối tượng chứa CloudFront distribution để cấp CORS từ
    */
   public restrictCorsTo(
-    ...websites: { cloudFrontDistribution: Distribution }[]
+    ...origins: (string | Distribution | { cloudFrontDistribution: Distribution })[]
   ) {
-    const allowedOrigins = websites
-      .map(
-        ({ cloudFrontDistribution }) =>
-          `https://${cloudFrontDistribution.distributionDomainName}`,
-      )
-      .join(',');
+    const allowedOrigins = origins.map((origin) =>
+      typeof origin === 'string'
+        ? origin
+        : 'cloudFrontDistribution' in origin
+          ? `https://${origin.cloudFrontDistribution.distributionDomainName}`
+          : `https://${origin.distributionDomainName}`,
+    );
+
+    this.allowedOrigins = allowedOrigins;
 
     // Đặt biến môi trường ALLOWED_ORIGINS cho tất cả các tích hợp Lambda
     Object.values(this.integrations).forEach((integration) => {
       if ('handler' in integration && integration.handler instanceof Function) {
-        integration.handler.addEnvironment('ALLOWED_ORIGINS', allowedOrigins);
+        integration.handler.addEnvironment(
+          'ALLOWED_ORIGINS',
+          allowedOrigins.join(','),
+        );
       }
     });
   }

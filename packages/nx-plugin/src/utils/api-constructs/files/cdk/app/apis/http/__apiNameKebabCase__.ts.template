@@ -206,23 +206,25 @@ export class <%= apiNameClassName %><
   }
 
   /**
-   * Restricts CORS to the website CloudFront distribution domains
+   * Restricts CORS to the provided origins
    *
-   * Configures the CloudFront distribution domains as the only permitted CORS origins
-   * (other than local host with default ports) in the API gateway
-   * The CORS origins are not configured within the AWS Lambda integrations since
-   * the associated header is controlled by API Gateway v2
+   * Configures the provided CloudFront distribution domains or origin strings
+   * as the only permitted CORS origins
+   * in the API gateway. The CORS origins are not configured within the AWS Lambda
+   * integrations since the associated header is controlled by API Gateway v2.
    *
-   * @param cloudFrontDistribution - The CloudFront distribution to grant CORS from
+   * @param origins - The origin strings, CloudFront distributions, or objects containing a CloudFront distribution to grant CORS from
    */
   public restrictCorsTo(
-    ...websites: { cloudFrontDistribution: Distribution }[]
+    ...origins: (string | Distribution | { cloudFrontDistribution: Distribution })[]
   ) {
-    const allowedOrigins = websites
-      .map(
-        ({ cloudFrontDistribution }) =>
-          `https://${cloudFrontDistribution.distributionDomainName}`,
-      );
+    const allowedOrigins = origins.map((origin) =>
+      typeof origin === 'string'
+        ? origin
+        : 'cloudFrontDistribution' in origin
+          ? `https://${origin.cloudFrontDistribution.distributionDomainName}`
+          : `https://${origin.distributionDomainName}`,
+    );
 
     const cfnApi = this.api.node.defaultChild;
     if (!(cfnApi instanceof CfnApi)) {
@@ -232,11 +234,7 @@ export class <%= apiNameClassName %><
     }
 
     cfnApi.corsConfiguration = {
-      allowOrigins: [
-        'http://localhost:4200',
-        'http://localhost:4300',
-        ...allowedOrigins,
-      ],
+      allowOrigins: allowedOrigins,
       allowMethods: [CorsHttpMethod.ANY],
       allowHeaders: [
         'authorization',

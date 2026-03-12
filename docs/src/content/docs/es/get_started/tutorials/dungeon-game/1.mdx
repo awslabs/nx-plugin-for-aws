@@ -187,11 +187,10 @@ import {
 } from 'aws-cdk-lib/aws-lambda';
 import {
   AuthorizationType,
-  Cors,
   LambdaIntegration,
   ResponseTransferMode,
 } from 'aws-cdk-lib/aws-apigateway';
-import { Duration } from 'aws-cdk-lib';
+import { Aspects, Duration } from 'aws-cdk-lib';
 import {
   PolicyDocument,
   PolicyStatement,
@@ -204,7 +203,7 @@ import {
   IntegrationBuilder,
   RestApiIntegration,
 } from '../../core/api/utils.js';
-import { RestApi } from '../../core/api/rest-api.js';
+import { AddCorsPreflightAspect, RestApi } from '../../core/api/rest-api.js';
 import { Procedures, routerToOperations } from '../../core/api/trpc-utils.js';
 import { AppRouter, appRouter } from ':dungeon-adventure/game-api';
 
@@ -233,6 +232,8 @@ export interface GameApiProps<
 export class GameApi<
   TIntegrations extends Record<Operations, RestApiIntegration>,
 > extends RestApi<Operations, TIntegrations> {
+  private allowedOrigins: readonly string[] = ['*'];
+
   /**
    * Crea integraciones predeterminadas para todas las operaciones, que implementan cada operación como
    * su propia función lambda individual.
@@ -282,10 +283,6 @@ export class GameApi<
       defaultMethodOptions: {
         authorizationType: AuthorizationType.IAM,
       },
-      defaultCorsPreflightOptions: {
-        allowOrigins: Cors.ALL_ORIGINS,
-        allowMethods: Cors.ALL_METHODS,
-      },
       deployOptions: {
         tracingEnabled: true,
       },
@@ -303,32 +300,38 @@ export class GameApi<
       operations: routerToOperations(appRouter),
       ...props,
     });
+    Aspects.of(this).add(new AddCorsPreflightAspect(() => this.allowedOrigins));
   }
 
   /**
-   * Restringe CORS a los dominios de distribución CloudFront del sitio web
+   * Restringe CORS a los orígenes proporcionados
    *
-   * Configura los dominios de distribución CloudFront como los únicos orígenes CORS permitidos
-   * (aparte de local host) en las integraciones AWS Lambda
+   * Configura los dominios de distribución CloudFront o strings de origen
+   * como los únicos orígenes CORS permitidos en las respuestas preflight de API Gateway y las
+   * integraciones AWS Lambda.
    *
-   * Nota: esta restricción no se aplica a las OPTIONS de preflight
-   *
-   * @param websites - La distribución CloudFront desde la cual otorgar CORS
+   * @param origins - Los strings de origen, distribuciones CloudFront u objetos que contienen una distribución CloudFront desde los cuales otorgar CORS
    */
   public restrictCorsTo(
-    ...websites: { cloudFrontDistribution: Distribution }[]
+    ...origins: (string | Distribution | { cloudFrontDistribution: Distribution })[]
   ) {
-    const allowedOrigins = websites
-      .map(
-        ({ cloudFrontDistribution }) =>
-          `https://${cloudFrontDistribution.distributionDomainName}`,
-      )
-      .join(',');
+    const allowedOrigins = origins.map((origin) =>
+      typeof origin === 'string'
+        ? origin
+        : 'cloudFrontDistribution' in origin
+          ? `https://${origin.cloudFrontDistribution.distributionDomainName}`
+          : `https://${origin.distributionDomainName}`,
+    );
+
+    this.allowedOrigins = allowedOrigins;
 
     // Establece la variable de entorno ALLOWED_ORIGINS para todas las integraciones Lambda
     Object.values(this.integrations).forEach((integration) => {
       if ('handler' in integration && integration.handler instanceof Function) {
-        integration.handler.addEnvironment('ALLOWED_ORIGINS', allowedOrigins);
+        integration.handler.addEnvironment(
+          'ALLOWED_ORIGINS',
+          allowedOrigins.join(','),
+        );
       }
     });
   }

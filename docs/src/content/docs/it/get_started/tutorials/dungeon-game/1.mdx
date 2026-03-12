@@ -187,11 +187,10 @@ import {
 } from 'aws-cdk-lib/aws-lambda';
 import {
   AuthorizationType,
-  Cors,
   LambdaIntegration,
   ResponseTransferMode,
 } from 'aws-cdk-lib/aws-apigateway';
-import { Duration } from 'aws-cdk-lib';
+import { Aspects, Duration } from 'aws-cdk-lib';
 import {
   PolicyDocument,
   PolicyStatement,
@@ -204,7 +203,7 @@ import {
   IntegrationBuilder,
   RestApiIntegration,
 } from '../../core/api/utils.js';
-import { RestApi } from '../../core/api/rest-api.js';
+import { AddCorsPreflightAspect, RestApi } from '../../core/api/rest-api.js';
 import { Procedures, routerToOperations } from '../../core/api/trpc-utils.js';
 import { AppRouter, appRouter } from ':dungeon-adventure/game-api';
 
@@ -233,6 +232,8 @@ export interface GameApiProps<
 export class GameApi<
   TIntegrations extends Record<Operations, RestApiIntegration>,
 > extends RestApi<Operations, TIntegrations> {
+  private allowedOrigins: readonly string[] = ['*'];
+
   /**
    * Crea integrazioni predefinite per tutte le operazioni, implementando ciascuna operazione
    * come singola funzione lambda.
@@ -282,10 +283,6 @@ export class GameApi<
       defaultMethodOptions: {
         authorizationType: AuthorizationType.IAM,
       },
-      defaultCorsPreflightOptions: {
-        allowOrigins: Cors.ALL_ORIGINS,
-        allowMethods: Cors.ALL_METHODS,
-      },
       deployOptions: {
         tracingEnabled: true,
       },
@@ -303,32 +300,38 @@ export class GameApi<
       operations: routerToOperations(appRouter),
       ...props,
     });
+    Aspects.of(this).add(new AddCorsPreflightAspect(() => this.allowedOrigins));
   }
 
   /**
-   * Limita CORS ai domini della distribuzione CloudFront del sito web
+   * Limita CORS alle origini fornite
    *
-   * Configura i domini della distribuzione CloudFront come uniche origini CORS permesse
-   * (oltre a local host) nelle integrazioni AWS Lambda
+   * Configura i domini della distribuzione CloudFront o le stringhe di origine
+   * come uniche origini CORS permesse nelle risposte preflight di API Gateway e nelle
+   * integrazioni AWS Lambda.
    *
-   * Nota che questa restrizione non viene applicata al preflight OPTIONS
-   *
-   * @param websites - La distribuzione CloudFront da cui concedere CORS
+   * @param origins - Le stringhe di origine, distribuzioni CloudFront, o oggetti contenenti una distribuzione CloudFront da cui concedere CORS
    */
   public restrictCorsTo(
-    ...websites: { cloudFrontDistribution: Distribution }[]
+    ...origins: (string | Distribution | { cloudFrontDistribution: Distribution })[]
   ) {
-    const allowedOrigins = websites
-      .map(
-        ({ cloudFrontDistribution }) =>
-          `https://${cloudFrontDistribution.distributionDomainName}`,
-      )
-      .join(',');
+    const allowedOrigins = origins.map((origin) =>
+      typeof origin === 'string'
+        ? origin
+        : 'cloudFrontDistribution' in origin
+          ? `https://${origin.cloudFrontDistribution.distributionDomainName}`
+          : `https://${origin.distributionDomainName}`,
+    );
+
+    this.allowedOrigins = allowedOrigins;
 
     // Imposta la variabile d'ambiente ALLOWED_ORIGINS per tutte le integrazioni Lambda
     Object.values(this.integrations).forEach((integration) => {
       if ('handler' in integration && integration.handler instanceof Function) {
-        integration.handler.addEnvironment('ALLOWED_ORIGINS', allowedOrigins);
+        integration.handler.addEnvironment(
+          'ALLOWED_ORIGINS',
+          allowedOrigins.join(','),
+        );
       }
     });
   }
@@ -340,7 +343,8 @@ export class GameApi<
    */
   public grantInvokeAccess(grantee: IGrantable) {
     // Qui concediamo al grantee il permesso di chiamare l'API.
-    // È possibile definire qui accessi granulari machine-to-machine usando principal specifici
+    // È possibile definire qui accessi granulari machine-to-machine usando principal specifici (es. ruoli o
+    // utenti) e risorse (es. quali percorsi API possono essere invocati da quale principal) se necessario.
     this.api.addToResourcePolicy(
       new PolicyStatement({
         effect: Effect.ALLOW,
@@ -414,7 +418,7 @@ Il generatore `py#strands-agent` genera questi file:
         - init.py configura l'app FastAPI e il middleware
         - main.py entrypoint per l'agente in Bedrock AgentCore Runtime
         - agent.py definisce un agente e strumenti di esempio
-        - agentcore_mcp_client.py utility per client MCP
+        - agentcore_mcp_client.py utility per creare client per interagire con server MCP
         - Dockerfile definisce l'immagine Docker per il deployment in AgentCore Runtime
   - common/constructs/
     - src
@@ -617,11 +621,11 @@ Il generatore `ts#mcp-server` genera questi file.
       - stdio.ts entry point per MCP con trasporto STDIO
       - http.ts entry point per MCP con trasporto HTTP streamable
       - Dockerfile builda l'immagine per AgentCore Runtime
-    - rolldown.config.ts configurazione per il bundling del server MCP
+    - rolldown.config.ts configurazione per il bundling del server MCP per il deployment in AgentCore
   - common/constructs/
     - src
       - app/mcp-servers/inventory-mcp-server/
-        - inventory-mcp-server.ts construct per deployare il server MCP in AgentCore Runtime
+        - inventory-mcp-server.ts construct per deployare il server MCP inventory in AgentCore Runtime
 </FileTree>
 
 </Drawer>

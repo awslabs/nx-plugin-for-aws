@@ -187,11 +187,10 @@ import {
 } from 'aws-cdk-lib/aws-lambda';
 import {
   AuthorizationType,
-  Cors,
   LambdaIntegration,
   ResponseTransferMode,
 } from 'aws-cdk-lib/aws-apigateway';
-import { Duration } from 'aws-cdk-lib';
+import { Aspects, Duration } from 'aws-cdk-lib';
 import {
   PolicyDocument,
   PolicyStatement,
@@ -204,11 +203,11 @@ import {
   IntegrationBuilder,
   RestApiIntegration,
 } from '../../core/api/utils.js';
-import { RestApi } from '../../core/api/rest-api.js';
+import { AddCorsPreflightAspect, RestApi } from '../../core/api/rest-api.js';
 import { Procedures, routerToOperations } from '../../core/api/trpc-utils.js';
 import { AppRouter, appRouter } from ':dungeon-adventure/game-api';
 
-// Tipo union de strings para todos os nomes de operações da API
+// Tipo union de strings para todos os nomes de operação da API
 type Operations = Procedures<AppRouter>;
 
 /**
@@ -233,6 +232,8 @@ export interface GameApiProps<
 export class GameApi<
   TIntegrations extends Record<Operations, RestApiIntegration>,
 > extends RestApi<Operations, TIntegrations> {
+  private allowedOrigins: readonly string[] = ['*'];
+
   /**
    * Cria integrações padrão para todas as operações, implementando cada operação como
    * sua própria função lambda individual.
@@ -282,10 +283,6 @@ export class GameApi<
       defaultMethodOptions: {
         authorizationType: AuthorizationType.IAM,
       },
-      defaultCorsPreflightOptions: {
-        allowOrigins: Cors.ALL_ORIGINS,
-        allowMethods: Cors.ALL_METHODS,
-      },
       deployOptions: {
         tracingEnabled: true,
       },
@@ -303,32 +300,38 @@ export class GameApi<
       operations: routerToOperations(appRouter),
       ...props,
     });
+    Aspects.of(this).add(new AddCorsPreflightAspect(() => this.allowedOrigins));
   }
 
   /**
-   * Restringe CORS aos domínios da distribuição CloudFront do website
+   * Restringe CORS às origens fornecidas
    *
-   * Configura os domínios da distribuição CloudFront como as únicas origens CORS permitidas
-   * (além do local host) nas integrações AWS Lambda
+   * Configura os domínios da distribuição CloudFront ou strings de origem
+   * como as únicas origens CORS permitidas nas respostas preflight do API Gateway e nas
+   * integrações AWS Lambda.
    *
-   * Note que esta restrição não é aplicada ao preflight OPTIONS
-   *
-   * @param websites - A distribuição CloudFront para conceder CORS
+   * @param origins - As strings de origem, distribuições CloudFront, ou objetos contendo uma distribuição CloudFront para conceder CORS
    */
   public restrictCorsTo(
-    ...websites: { cloudFrontDistribution: Distribution }[]
+    ...origins: (string | Distribution | { cloudFrontDistribution: Distribution })[]
   ) {
-    const allowedOrigins = websites
-      .map(
-        ({ cloudFrontDistribution }) =>
-          `https://${cloudFrontDistribution.distributionDomainName}`,
-      )
-      .join(',');
+    const allowedOrigins = origins.map((origin) =>
+      typeof origin === 'string'
+        ? origin
+        : 'cloudFrontDistribution' in origin
+          ? `https://${origin.cloudFrontDistribution.distributionDomainName}`
+          : `https://${origin.distributionDomainName}`,
+    );
+
+    this.allowedOrigins = allowedOrigins;
 
     // Define a variável de ambiente ALLOWED_ORIGINS para todas as integrações Lambda
     Object.values(this.integrations).forEach((integration) => {
       if ('handler' in integration && integration.handler instanceof Function) {
-        integration.handler.addEnvironment('ALLOWED_ORIGINS', allowedOrigins);
+        integration.handler.addEnvironment(
+          'ALLOWED_ORIGINS',
+          allowedOrigins.join(','),
+        );
       }
     });
   }
@@ -737,7 +740,7 @@ root &&
 ```
 
 Este é o ponto de entrada onde o React é montado. Como mostrado, inicialmente apenas configura um `@tanstack/react-router` em uma configuração de [`roteamento baseado em arquivo`](https://tanstack.com/router/v1/docs/framework/react/routing/file-based-routing). Enquanto o servidor de desenvolvimento estiver em execução, você pode criar arquivos na pasta `routes` e o `@tanstack/react-router` criará a configuração de arquivo boilerplate para você, atualizando o arquivo `routeTree.gen.ts`. Este arquivo mantém todas as rotas de forma type-safe, o que significa que ao usar `<Link>`, a opção `to` só mostrará rotas válidas.
-Para mais informações, consulte a [documentação do @tanstack/react-router](https://tanstack.com/router/v1/docs/framework/react/quick-start).
+Para mais informações, consulte a [documentação do `@tanstack/react-router`](https://tanstack.com/router/v1/docs/framework/react/quick-start).
 
 ```tsx
 // packages/game-ui/src/routes/index.tsx
