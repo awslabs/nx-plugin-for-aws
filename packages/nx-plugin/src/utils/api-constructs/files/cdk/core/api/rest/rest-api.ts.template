@@ -1,10 +1,13 @@
-import { Construct } from 'constructs';
+import { Construct, IConstruct } from 'constructs';
 import {
+  Cors,
+  Resource,
   RestApi as _RestApi,
   RestApiProps as _RestApiProps,
   IResource,
   Stage,
 } from 'aws-cdk-lib/aws-apigateway';
+import { IAspect } from 'aws-cdk-lib';
 import { RuntimeConfig } from '../runtime-config.js';
 import {
   ApiIntegrations,
@@ -145,5 +148,20 @@ export class RestApi<
     const childResource =
       resource.getResource(nextPathPart) ?? resource.addResource(nextPathPart);
     return this.getOrCreateResource(childResource, pathParts);
+  }
+}
+
+export class AddCorsPreflightAspect implements IAspect {
+  private getAllowedOrigins: () => readonly string[];
+  constructor(getAllowedOrigins: () => readonly string[]) {
+    this.getAllowedOrigins = getAllowedOrigins;
+  }
+  public visit(node: IConstruct): void {
+    if (node instanceof Resource) {
+      node.addCorsPreflight({
+        allowOrigins: [...this.getAllowedOrigins()],
+        allowMethods: Cors.ALL_METHODS,
+      });
+    }
   }
 }
