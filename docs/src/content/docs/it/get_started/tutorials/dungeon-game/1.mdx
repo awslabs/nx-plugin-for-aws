@@ -187,11 +187,10 @@ import {
 } from 'aws-cdk-lib/aws-lambda';
 import {
   AuthorizationType,
-  Cors,
   LambdaIntegration,
   ResponseTransferMode,
 } from 'aws-cdk-lib/aws-apigateway';
-import { Duration } from 'aws-cdk-lib';
+import { Aspects, Duration } from 'aws-cdk-lib';
 import {
   PolicyDocument,
   PolicyStatement,
@@ -201,6 +200,7 @@ import {
   Grant,
 } from 'aws-cdk-lib/aws-iam';
 import {
+  AddCorsPreflightAspect,
   IntegrationBuilder,
   RestApiIntegration,
 } from '../../core/api/utils.js';
@@ -233,7 +233,7 @@ export interface GameApiProps<
 export class GameApi<
   TIntegrations extends Record<Operations, RestApiIntegration>,
 > extends RestApi<Operations, TIntegrations> {
-  private corsRestricted = false;
+  private allowedOrigins: readonly string[] = ['*'];
 
   /**
    * Crea integrazioni predefinite per tutte le operazioni, implementando ciascuna operazione
@@ -301,6 +301,7 @@ export class GameApi<
       operations: routerToOperations(appRouter),
       ...props,
     });
+    Aspects.of(this).add(new AddCorsPreflightAspect(() => this.allowedOrigins));
   }
 
   /**
@@ -310,45 +311,27 @@ export class GameApi<
    * come uniche origini CORS permesse nelle risposte preflight di API Gateway e nelle
    * integrazioni AWS Lambda.
    *
-   * @param allowedOrigins - Le distribuzioni CloudFront o stringhe di origine da cui concedere CORS
+   * @param origins - Le stringhe di origine, distribuzioni CloudFront, o oggetti contenenti una distribuzione CloudFront da cui concedere CORS
    */
-  public restrictCorsTo(allowedOrigins: (Distribution | string)[]) {
-    if (this.corsRestricted) {
-      throw new Error('restrictCorsTo può essere chiamato solo una volta');
-    }
-    this.corsRestricted = true;
-
-    const origins = allowedOrigins.map((allowedOrigin) =>
-      typeof allowedOrigin === 'string'
-        ? allowedOrigin
-        : `https://${allowedOrigin.distributionDomainName}`,
+  public restrictCorsTo(
+    ...origins: (string | Distribution | { cloudFrontDistribution: Distribution })[]
+  ) {
+    const allowedOrigins = origins.map((origin) =>
+      typeof origin === 'string'
+        ? origin
+        : 'cloudFrontDistribution' in origin
+          ? `https://${origin.cloudFrontDistribution.distributionDomainName}`
+          : `https://${origin.distributionDomainName}`,
     );
 
-    const operations = routerToOperations(appRouter);
-
-    const resourcePaths = new Set(
-      Object.values(operations).map(({ path }) =>
-        path.startsWith('/') ? path : `/${path}`,
-      ),
-    );
-
-    for (const resourcePath of resourcePaths) {
-      const resource =
-        resourcePath === '/'
-          ? this.api.root
-          : this.api.root.resourceForPath(resourcePath.slice(1));
-      resource.addCorsPreflight({
-        allowOrigins: origins,
-        allowMethods: Cors.ALL_METHODS,
-      });
-    }
+    this.allowedOrigins = allowedOrigins;
 
     // Imposta la variabile d'ambiente ALLOWED_ORIGINS per tutte le integrazioni Lambda
     Object.values(this.integrations).forEach((integration) => {
       if ('handler' in integration && integration.handler instanceof Function) {
         integration.handler.addEnvironment(
           'ALLOWED_ORIGINS',
-          origins.join(','),
+          allowedOrigins.join(','),
         );
       }
     });

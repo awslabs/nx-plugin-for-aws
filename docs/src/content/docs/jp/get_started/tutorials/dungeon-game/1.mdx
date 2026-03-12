@@ -187,11 +187,10 @@ import {
 } from 'aws-cdk-lib/aws-lambda';
 import {
   AuthorizationType,
-  Cors,
   LambdaIntegration,
   ResponseTransferMode,
 } from 'aws-cdk-lib/aws-apigateway';
-import { Duration } from 'aws-cdk-lib';
+import { Aspects, Duration } from 'aws-cdk-lib';
 import {
   PolicyDocument,
   PolicyStatement,
@@ -201,6 +200,7 @@ import {
   Grant,
 } from 'aws-cdk-lib/aws-iam';
 import {
+  AddCorsPreflightAspect,
   IntegrationBuilder,
   RestApiIntegration,
 } from '../../core/api/utils.js';
@@ -232,7 +232,7 @@ export interface GameApiProps<
 export class GameApi<
   TIntegrations extends Record<Operations, RestApiIntegration>,
 > extends RestApi<Operations, TIntegrations> {
-  private corsRestricted = false;
+  private allowedOrigins: readonly string[] = ['*'];
 
   /**
    * すべての操作のデフォルト統合を作成します。各操作を
@@ -300,6 +300,7 @@ export class GameApi<
       operations: routerToOperations(appRouter),
       ...props,
     });
+    Aspects.of(this).add(new AddCorsPreflightAspect(() => this.allowedOrigins));
   }
 
   /**
@@ -309,45 +310,27 @@ export class GameApi<
    * API Gatewayプリフライトレスポンスおよび
    * AWS Lambda統合で許可される唯一のCORSオリジンとして設定します。
    *
-   * @param allowedOrigins - CORSを許可するCloudFrontディストリビューションまたはオリジン文字列
+   * @param origins - CORSを許可するオリジン文字列、CloudFrontディストリビューション、またはCloudFrontディストリビューションを含むオブジェクト
    */
-  public restrictCorsTo(allowedOrigins: (Distribution | string)[]) {
-    if (this.corsRestricted) {
-      throw new Error('restrictCorsTo can only be called once');
-    }
-    this.corsRestricted = true;
-
-    const origins = allowedOrigins.map((allowedOrigin) =>
-      typeof allowedOrigin === 'string'
-        ? allowedOrigin
-        : `https://${allowedOrigin.distributionDomainName}`,
+  public restrictCorsTo(
+    ...origins: (string | Distribution | { cloudFrontDistribution: Distribution })[]
+  ) {
+    const allowedOrigins = origins.map((origin) =>
+      typeof origin === 'string'
+        ? origin
+        : 'cloudFrontDistribution' in origin
+          ? `https://${origin.cloudFrontDistribution.distributionDomainName}`
+          : `https://${origin.distributionDomainName}`,
     );
 
-    const operations = routerToOperations(appRouter);
-
-    const resourcePaths = new Set(
-      Object.values(operations).map(({ path }) =>
-        path.startsWith('/') ? path : `/${path}`,
-      ),
-    );
-
-    for (const resourcePath of resourcePaths) {
-      const resource =
-        resourcePath === '/'
-          ? this.api.root
-          : this.api.root.resourceForPath(resourcePath.slice(1));
-      resource.addCorsPreflight({
-        allowOrigins: origins,
-        allowMethods: Cors.ALL_METHODS,
-      });
-    }
+    this.allowedOrigins = allowedOrigins;
 
     // すべてのLambda統合にALLOWED_ORIGINS環境変数を設定
     Object.values(this.integrations).forEach((integration) => {
       if ('handler' in integration && integration.handler instanceof Function) {
         integration.handler.addEnvironment(
           'ALLOWED_ORIGINS',
-          origins.join(','),
+          allowedOrigins.join(','),
         );
       }
     });

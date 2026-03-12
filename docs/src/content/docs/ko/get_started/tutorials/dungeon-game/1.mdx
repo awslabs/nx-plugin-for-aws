@@ -187,11 +187,10 @@ import {
 } from 'aws-cdk-lib/aws-lambda';
 import {
   AuthorizationType,
-  Cors,
   LambdaIntegration,
   ResponseTransferMode,
 } from 'aws-cdk-lib/aws-apigateway';
-import { Duration } from 'aws-cdk-lib';
+import { Aspects, Duration } from 'aws-cdk-lib';
 import {
   PolicyDocument,
   PolicyStatement,
@@ -201,6 +200,7 @@ import {
   Grant,
 } from 'aws-cdk-lib/aws-iam';
 import {
+  AddCorsPreflightAspect,
   IntegrationBuilder,
   RestApiIntegration,
 } from '../../core/api/utils.js';
@@ -232,7 +232,7 @@ export interface GameApiProps<
 export class GameApi<
   TIntegrations extends Record<Operations, RestApiIntegration>,
 > extends RestApi<Operations, TIntegrations> {
-  private corsRestricted = false;
+  private allowedOrigins: readonly string[] = ['*'];
 
   /**
    * 모든 작업에 대한 기본 람다 함수 통합 생성
@@ -300,6 +300,7 @@ export class GameApi<
       operations: routerToOperations(appRouter),
       ...props,
     });
+    Aspects.of(this).add(new AddCorsPreflightAspect(() => this.allowedOrigins));
   }
 
   /**
@@ -308,45 +309,27 @@ export class GameApi<
    * CloudFront 배포 도메인 또는 출처 문자열을
    * API Gateway 사전 요청 응답 및 AWS Lambda 통합에서 허용되는 유일한 CORS 출처로 구성
    *
-   * @param allowedOrigins - CORS를 허용할 CloudFront 배포 또는 출처 문자열
+   * @param origins - CORS를 허용할 출처 문자열, CloudFront 배포 또는 CloudFront 배포를 포함하는 객체
    */
-  public restrictCorsTo(allowedOrigins: (Distribution | string)[]) {
-    if (this.corsRestricted) {
-      throw new Error('restrictCorsTo can only be called once');
-    }
-    this.corsRestricted = true;
-
-    const origins = allowedOrigins.map((allowedOrigin) =>
-      typeof allowedOrigin === 'string'
-        ? allowedOrigin
-        : `https://${allowedOrigin.distributionDomainName}`,
+  public restrictCorsTo(
+    ...origins: (string | Distribution | { cloudFrontDistribution: Distribution })[]
+  ) {
+    const allowedOrigins = origins.map((origin) =>
+      typeof origin === 'string'
+        ? origin
+        : 'cloudFrontDistribution' in origin
+          ? `https://${origin.cloudFrontDistribution.distributionDomainName}`
+          : `https://${origin.distributionDomainName}`,
     );
 
-    const operations = routerToOperations(appRouter);
-
-    const resourcePaths = new Set(
-      Object.values(operations).map(({ path }) =>
-        path.startsWith('/') ? path : `/${path}`,
-      ),
-    );
-
-    for (const resourcePath of resourcePaths) {
-      const resource =
-        resourcePath === '/'
-          ? this.api.root
-          : this.api.root.resourceForPath(resourcePath.slice(1));
-      resource.addCorsPreflight({
-        allowOrigins: origins,
-        allowMethods: Cors.ALL_METHODS,
-      });
-    }
+    this.allowedOrigins = allowedOrigins;
 
     // 모든 Lambda 통합에 대해 ALLOWED_ORIGINS 환경 변수 설정
     Object.values(this.integrations).forEach((integration) => {
       if ('handler' in integration && integration.handler instanceof Function) {
         integration.handler.addEnvironment(
           'ALLOWED_ORIGINS',
-          origins.join(','),
+          allowedOrigins.join(','),
         );
       }
     });

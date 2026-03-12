@@ -213,13 +213,17 @@ export class <%= apiNameClassName %><
    * in the API gateway. The CORS origins are not configured within the AWS Lambda
    * integrations since the associated header is controlled by API Gateway v2.
    *
-   * @param allowedOrigins - The CloudFront distributions or origin strings to grant CORS from
+   * @param origins - The origin strings, CloudFront distributions, or objects containing a CloudFront distribution to grant CORS from
    */
-  public restrictCorsTo(allowedOrigins: (Distribution | string)[]) {
-    const origins = allowedOrigins.map((allowedOrigin) =>
-      typeof allowedOrigin === 'string'
-        ? allowedOrigin
-        : `https://${allowedOrigin.distributionDomainName}`,
+  public restrictCorsTo(
+    ...origins: (string | Distribution | { cloudFrontDistribution: Distribution })[]
+  ) {
+    const allowedOrigins = origins.map((origin) =>
+      typeof origin === 'string'
+        ? origin
+        : 'cloudFrontDistribution' in origin
+          ? `https://${origin.cloudFrontDistribution.distributionDomainName}`
+          : `https://${origin.distributionDomainName}`,
     );
 
     const cfnApi = this.api.node.defaultChild;
@@ -230,7 +234,7 @@ export class <%= apiNameClassName %><
     }
 
     cfnApi.corsConfiguration = {
-      allowOrigins: origins,
+      allowOrigins: allowedOrigins,
       allowMethods: [CorsHttpMethod.ANY],
       allowHeaders: [
         'authorization',
