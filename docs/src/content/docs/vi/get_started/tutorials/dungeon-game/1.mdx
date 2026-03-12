@@ -233,6 +233,8 @@ export interface GameApiProps<
 export class GameApi<
   TIntegrations extends Record<Operations, RestApiIntegration>,
 > extends RestApi<Operations, TIntegrations> {
+  private corsRestricted = false;
+
   /**
    * Tạo các tích hợp mặc định cho tất cả các hoạt động, triển khai mỗi hoạt động như
    * một hàm lambda riêng lẻ.
@@ -282,10 +284,6 @@ export class GameApi<
       defaultMethodOptions: {
         authorizationType: AuthorizationType.IAM,
       },
-      defaultCorsPreflightOptions: {
-        allowOrigins: Cors.ALL_ORIGINS,
-        allowMethods: Cors.ALL_METHODS,
-      },
       deployOptions: {
         tracingEnabled: true,
       },
@@ -306,29 +304,52 @@ export class GameApi<
   }
 
   /**
-   * Hạn chế CORS cho các domain CloudFront distribution của website
+   * Hạn chế CORS cho các origin được cung cấp
    *
-   * Cấu hình các domain CloudFront distribution là các CORS origin được phép duy nhất
-   * (ngoài local host) trong các tích hợp AWS Lambda
+   * Cấu hình các domain CloudFront distribution hoặc chuỗi origin
+   * là các CORS origin được phép duy nhất trong các phản hồi preflight của API Gateway và các
+   * tích hợp AWS Lambda.
    *
-   * Lưu ý rằng hạn chế này không được áp dụng cho preflight OPTIONS
-   *
-   * @param websites - CloudFront distribution để cấp CORS từ
+   * @param allowedOrigins - CloudFront distribution hoặc chuỗi origin để cấp CORS từ
    */
-  public restrictCorsTo(
-    ...websites: { cloudFrontDistribution: Distribution }[]
-  ) {
-    const allowedOrigins = websites
-      .map(
-        ({ cloudFrontDistribution }) =>
-          `https://${cloudFrontDistribution.distributionDomainName}`,
-      )
-      .join(',');
+  public restrictCorsTo(allowedOrigins: (Distribution | string)[]) {
+    if (this.corsRestricted) {
+      throw new Error('restrictCorsTo can only be called once');
+    }
+    this.corsRestricted = true;
+
+    const origins = allowedOrigins.map((allowedOrigin) =>
+      typeof allowedOrigin === 'string'
+        ? allowedOrigin
+        : `https://${allowedOrigin.distributionDomainName}`,
+    );
+
+    const operations = routerToOperations(appRouter);
+
+    const resourcePaths = new Set(
+      Object.values(operations).map(({ path }) =>
+        path.startsWith('/') ? path : `/${path}`,
+      ),
+    );
+
+    for (const resourcePath of resourcePaths) {
+      const resource =
+        resourcePath === '/'
+          ? this.api.root
+          : this.api.root.resourceForPath(resourcePath.slice(1));
+      resource.addCorsPreflight({
+        allowOrigins: origins,
+        allowMethods: Cors.ALL_METHODS,
+      });
+    }
 
     // Đặt biến môi trường ALLOWED_ORIGINS cho tất cả các tích hợp Lambda
     Object.values(this.integrations).forEach((integration) => {
       if ('handler' in integration && integration.handler instanceof Function) {
-        integration.handler.addEnvironment('ALLOWED_ORIGINS', allowedOrigins);
+        integration.handler.addEnvironment(
+          'ALLOWED_ORIGINS',
+          origins.join(','),
+        );
       }
     });
   }
