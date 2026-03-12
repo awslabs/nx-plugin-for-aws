@@ -101,10 +101,31 @@ export const fetchGuidePages = async (
         ).text(),
     ),
   );
-  return guides
-    .filter((result) => result.status === 'fulfilled')
-    .map((result) => postProcessGuide(result.value, generators, packageManager))
-    .join('\n\n');
+  const fulfilled = guides.filter((result) => result.status === 'fulfilled');
+  const processed = await Promise.all(
+    fulfilled.map((result) =>
+      postProcessGuide(result.value, generators, packageManager),
+    ),
+  );
+  return processed.join('\n\n');
+};
+
+const SNIPPET_BASE_URL =
+  'https://raw.githubusercontent.com/awslabs/nx-plugin-for-aws/refs/heads/main/docs/src/content/docs/en/snippets';
+
+/**
+ * Fetch a snippet's content from github
+ */
+export const fetchSnippet = async (snippetName: string): Promise<string> => {
+  try {
+    const response = await fetch(`${SNIPPET_BASE_URL}/${snippetName}.mdx`);
+    if (!response.ok) {
+      return '';
+    }
+    return await response.text();
+  } catch {
+    return '';
+  }
 };
 
 const findGeneratorAndSchema = (
@@ -129,13 +150,51 @@ const findGeneratorAndSchema = (
 /**
  * Post-process a guide page to "inline" relevant components
  */
-export const postProcessGuide = (
+export const postProcessGuide = async (
   guide: string,
   generators: NxGeneratorInfo[],
   packageManager?: string,
-): string => {
+): Promise<string> => {
+  // Replace <Snippet /> with fetched snippet content
+  // Use a regex that matches the full self-closing tag, allowing / in attribute values
+  const snippetRegex = /<Snippet\s+((?:[^/]|\/(?!>))+)\s*\/>/g;
+  const snippetMatches = [...guide.matchAll(snippetRegex)];
+
+  let processedGuide = guide;
+
+  if (snippetMatches.length > 0) {
+    // Fetch all snippets in parallel
+    const snippetResults = await Promise.all(
+      snippetMatches.map(async (match) => {
+        const nameMatch = match[1].match(/name=["']([^"']+)["']/);
+        if (!nameMatch) {
+          return { original: match[0], replacement: match[0] };
+        }
+        const snippetName = nameMatch[1];
+        const snippetContent = await fetchSnippet(snippetName);
+        if (!snippetContent) {
+          return { original: match[0], replacement: match[0] };
+        }
+        // Recursively post-process the snippet content
+        const processedContent = await postProcessGuide(
+          snippetContent.trim(),
+          generators,
+          packageManager,
+        );
+        return {
+          original: match[0],
+          replacement: `<Snippet name="${snippetName}">\n${processedContent}\n</Snippet>`,
+        };
+      }),
+    );
+
+    for (const { original, replacement } of snippetResults) {
+      processedGuide = processedGuide.replace(original, replacement);
+    }
+  }
+
   // Replace <NxCommands /> with markdown code blocks
-  let processedGuide = guide.replace(
+  processedGuide = processedGuide.replace(
     /<NxCommands\s+commands={([^}]+)}\s*\/>/g,
     (match, commandsMatch) => {
       try {
