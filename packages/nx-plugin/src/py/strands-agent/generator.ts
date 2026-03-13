@@ -93,6 +93,7 @@ export const pyStrandsAgentGenerator = async (
   );
 
   addDependenciesToPyProjectToml(tree, project.root, [
+    'aws-lambda-powertools',
     'aws-opentelemetry-distro',
     'bedrock-agentcore',
     'fastapi',

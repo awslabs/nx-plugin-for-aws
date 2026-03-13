@@ -8,22 +8,30 @@ terraform {
 }
 
 # Variables
-variable "key_path" {
-  description = "Dot-separated path for the configuration key (e.g., 'apis.FooApi', 'cognito.userPoolId')"
+variable "namespace" {
+  description = "Namespace for the configuration entry (e.g., 'connection', 'tables')"
+  type        = string
+  default     = "connection"
+}
+
+variable "key" {
+  description = "Key name within the namespace (e.g., 'apis', 'cognitoProps')"
   type        = string
 }
 
 variable "value" {
-  description = "Value to set at the key path"
+  description = "Value to set at the key"
   type        = any
 }
 
 locals {
-  config_file_path = "${path.module}/../../../../../../../dist/packages/common/terraform/runtime-config.json"
+  config_dir       = "${path.module}/../../../../../../../dist/packages/common/terraform/runtime-config"
+  config_file_path = "${local.config_dir}/${var.namespace}.json"
 }
 
-# This module writes an entry to runtime-config.json which is provided to any static websites
-# as a way to pass deploy-time values to the UI such as API urls
+# This module writes an entry to a namespaced runtime config JSON file.
+# Each namespace maps to a separate file (e.g., connection.json, tables.json)
+# which is then used by the AppConfig module and static website module.
 
 data "external" "updated_config" {
   program = ["uv", "run", "python", "-c", <<-EOT
@@ -37,7 +45,7 @@ from pathlib import Path
 # Read input from Terraform
 input_data = json.load(sys.stdin)
 config_file = input_data['config_file']
-key_path = input_data['key_path']
+key = input_data['key']
 value = json.loads(input_data['value'])
 
 # Create lock file path
@@ -69,14 +77,8 @@ for attempt in range(max_retries):
                 with open(config_file, 'r') as f:
                     config = json.load(f)
 
-                # Set the nested key using dot notation
-                keys = key_path.split('.')
-                current = config
-                for key in keys[:-1]:
-                    if key not in current:
-                        current[key] = {}
-                    current = current[key]
-                current[keys[-1]] = value
+                # Set the key directly in the namespace file
+                config[key] = value
 
                 # Write updated config back to file atomically
                 temp_file = config_file + '.tmp'
@@ -113,7 +115,7 @@ EOT
 
   query = {
     config_file = local.config_file_path
-    key_path    = var.key_path
+    key         = var.key
     value       = jsonencode(var.value)
   }
 }

@@ -16,18 +16,19 @@ export class ApplicationStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
 
+    const rc = RuntimeConfig.ensure(this);
+
     const userIdentity = new UserIdentity(this, 'UserIdentity');
 
     const electroDbTable = new ElectrodbDynamoTable(this, 'ElectroDbTable');
 
+    // Register the table name in runtime config 'tables' namespace
+    rc.set('tables', 'ElectroDbTable', {
+      tableName: electroDbTable.tableName,
+    });
+
     const gameApi = new GameApi(this, 'GameApi', {
-      integrations: GameApi.defaultIntegrations(this)
-        .withDefaultOptions({
-          environment: {
-            TABLE_NAME: electroDbTable.tableName,
-          },
-        })
-        .build(),
+      integrations: GameApi.defaultIntegrations(this).build(),
     });
 
     electroDbTable.grantReadData(gameApi.integrations['actions.query'].handler);
@@ -42,11 +43,7 @@ export class ApplicationStack extends Stack {
 
     const { userPool, userPoolClient } = userIdentity;
 
-    const mcpServer = new InventoryMcpServer(this, 'InventoryMcpServer', {
-      environmentVariables: {
-        TABLE_NAME: electroDbTable.tableName,
-      },
-    });
+    const mcpServer = new InventoryMcpServer(this, 'InventoryMcpServer');
     electroDbTable.grantReadWriteData(mcpServer.agentCoreRuntime);
 
     // Use Cognito for user authentication with the agent
@@ -55,9 +52,6 @@ export class ApplicationStack extends Stack {
         userPool,
         [userPoolClient],
       ),
-      environmentVariables: {
-        INVENTORY_MCP_ARN: mcpServer.agentCoreRuntime.agentRuntimeArn,
-      },
     });
 
     // Grant the agent access to bedrock models
@@ -75,10 +69,6 @@ export class ApplicationStack extends Stack {
       }),
     );
 
-    // Add the Story Agent ARN to runtime-config.json so it can be referenced by the website
-    RuntimeConfig.ensure(this).config.agentArn =
-      storyAgent.agentCoreRuntime.agentRuntimeArn;
-
     new CfnOutput(this, 'StoryAgentArn', {
       value: storyAgent.agentCoreRuntime.agentRuntimeArn,
     });
@@ -92,7 +82,6 @@ export class ApplicationStack extends Stack {
     // Grant the authenticated role access to invoke the api
     gameApi.grantInvokeAccess(userIdentity.identityPool.authenticatedRole);
 
-    // Ensure this is instantiated last so our runtime-config.json can be automatically configured
     new GameUI(this, 'GameUI');
   }
 }

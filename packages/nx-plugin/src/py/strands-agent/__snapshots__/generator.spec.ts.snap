@@ -31,6 +31,7 @@ import {
   Runtime,
   RuntimeProps,
 } from '@aws-cdk/aws-bedrock-agentcore-alpha';
+import { RuntimeConfig } from '../../../core/runtime-config.js';
 
 export type SnapshotBedrockAgentProps = Omit<
   RuntimeProps,
@@ -43,6 +44,8 @@ export class SnapshotBedrockAgent extends Construct {
 
   constructor(scope: Construct, id: string, props?: SnapshotBedrockAgentProps) {
     super(scope, id);
+
+    const rc = RuntimeConfig.ensure(this);
 
     this.dockerImage = AgentRuntimeArtifact.fromAsset(
       path.dirname(url.fileURLToPath(new URL(import.meta.url))),
@@ -63,6 +66,17 @@ export class SnapshotBedrockAgent extends Construct {
       protocolConfiguration: ProtocolType.HTTP,
       agentRuntimeArtifact: this.dockerImage,
       ...props,
+      environmentVariables: {
+        RUNTIME_CONFIG_APP_ID: rc.appConfigApplicationId,
+        ...props?.environmentVariables,
+      },
+    });
+
+    rc.grantReadAppConfig(this.agentCoreRuntime);
+
+    rc.set('connection', 'agentRuntimes', {
+      ...rc.get('connection').agentRuntimes,
+      SnapshotBedrockAgent: this.agentCoreRuntime.agentRuntimeArn,
     });
   }
 }
@@ -109,6 +123,12 @@ variable "tags" {
   default     = {}
 }
 
+module "appconfig" {
+  source = "../../../core/runtime-config/appconfig"
+
+  application_name = "TerraformSnapshotAgent-runtime-config"
+}
+
 module "agent_core_runtime" {
   source = "../../../core/agent-core"
   agent_runtime_name = "TerraformSnapshotAgent"
@@ -121,9 +141,33 @@ module "agent_core_runtime" {
 #    }
 #  }
 
-  env = var.env
-  additional_iam_policy_statements = var.additional_iam_policy_statements
+  env = merge({
+    RUNTIME_CONFIG_APP_ID = module.appconfig.application_id
+  }, var.env)
+  additional_iam_policy_statements = concat([
+    {
+      Effect   = "Allow"
+      Action   = [
+        "appconfig:StartConfigurationSession",
+        "appconfig:GetLatestConfiguration"
+      ]
+      Resource = ["\${module.appconfig.application_arn}/*"]
+    }
+  ], var.additional_iam_policy_statements)
   tags = var.tags
+
+  depends_on = [module.appconfig]
+}
+
+# Add agent runtime ARN to runtime config
+module "add_agent_runtime_to_runtime_config" {
+  source = "../../../core/runtime-config/entry"
+
+  namespace = "connection"
+  key       = "agentRuntimes"
+  value     = { "TerraformSnapshotAgent" = module.agent_core_runtime.agent_core_runtime_arn }
+
+  depends_on = [module.agent_core_runtime]
 }
 
 output "agent_core_runtime_role_arn" {
@@ -134,6 +178,11 @@ output "agent_core_runtime_role_arn" {
 output "agent_core_runtime_arn" {
   description = "ARN of the Bedrock Agent Core runtime"
   value       = module.agent_core_runtime.agent_core_runtime_arn
+}
+
+output "appconfig_application_id" {
+  description = "AppConfig Application ID for runtime config"
+  value       = module.appconfig.application_id
 }
 "
 `;
@@ -472,7 +521,7 @@ resource "aws_bedrockagentcore_agent_runtime" "agent_runtime" {
 
   depends_on = [
     null_resource.docker_publish,
-    aws_iam_role_policy.agent_core_runtime_policy
+    aws_iam_role_policy_attachment.agent_core_policy
   ]
 }
 
@@ -594,6 +643,7 @@ exports[`py#strands-agent generator > should match snapshot for generated files 
 name = "proj.test_project"
 version = "0.1.0"
 dependencies = [
+  "aws-lambda-powertools==3.25.0",
   "aws-opentelemetry-distro==0.15.0",
   "bedrock-agentcore==0.1.7",
   "fastapi==0.135.1",

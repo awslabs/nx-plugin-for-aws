@@ -1,0 +1,100 @@
+terraform {
+  required_version = ">= 1.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = ">= 5.0"
+    }
+    local = {
+      source  = "hashicorp/local"
+      version = "~> 2.0"
+    }
+  }
+}
+
+variable "application_name" {
+  description = "Name of the AppConfig application"
+  type        = string
+}
+
+locals {
+  config_dir = "${path.module}/../../../../../../../dist/packages/common/terraform/runtime-config"
+}
+
+# AppConfig Application
+resource "aws_appconfig_application" "runtime_config" {
+  name        = var.application_name
+  description = "Runtime configuration for ${var.application_name}"
+}
+
+# AppConfig Environment
+resource "aws_appconfig_environment" "default" {
+  name           = "default"
+  application_id = aws_appconfig_application.runtime_config.id
+}
+
+# Instant deployment strategy (zero wait)
+resource "aws_appconfig_deployment_strategy" "instant" {
+  name                           = "${var.application_name}-instant"
+  deployment_duration_in_minutes = 0
+  growth_factor                  = 100
+  replicate_to                   = "NONE"
+  final_bake_time_in_minutes     = 0
+}
+
+# Read all namespace JSON files from the config directory
+locals {
+  namespace_files = fileset(local.config_dir, "*.json")
+  namespaces = {
+    for f in local.namespace_files :
+    trimsuffix(f, ".json") => jsondecode(file("${local.config_dir}/${f}"))
+  }
+}
+
+# Configuration Profile per namespace
+resource "aws_appconfig_configuration_profile" "namespace" {
+  for_each = local.namespaces
+
+  application_id = aws_appconfig_application.runtime_config.id
+  name           = each.key
+  location_uri   = "hosted"
+  type           = "AWS.Freeform"
+}
+
+# Hosted Configuration Version per namespace
+resource "aws_appconfig_hosted_configuration_version" "namespace" {
+  for_each = local.namespaces
+
+  application_id           = aws_appconfig_application.runtime_config.id
+  configuration_profile_id = aws_appconfig_configuration_profile.namespace[each.key].configuration_profile_id
+  content_type             = "application/json"
+  content                  = jsonencode(each.value)
+}
+
+# Deployment per namespace
+resource "aws_appconfig_deployment" "namespace" {
+  for_each = local.namespaces
+
+  application_id           = aws_appconfig_application.runtime_config.id
+  environment_id           = aws_appconfig_environment.default.environment_id
+  configuration_profile_id = aws_appconfig_configuration_profile.namespace[each.key].configuration_profile_id
+  configuration_version    = aws_appconfig_hosted_configuration_version.namespace[each.key].version_number
+  deployment_strategy_id   = aws_appconfig_deployment_strategy.instant.id
+}
+
+# Outputs
+output "application_id" {
+  description = "AppConfig Application ID"
+  value       = aws_appconfig_application.runtime_config.id
+}
+
+output "application_arn" {
+  description = "AppConfig Application ARN"
+  value       = aws_appconfig_application.runtime_config.arn
+}
+
+output "environment_id" {
+  description = "AppConfig Environment ID"
+  value       = aws_appconfig_environment.default.environment_id
+}

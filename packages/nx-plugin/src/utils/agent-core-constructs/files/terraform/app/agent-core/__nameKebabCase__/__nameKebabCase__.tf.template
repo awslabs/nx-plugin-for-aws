@@ -20,6 +20,12 @@ variable "tags" {
   default     = {}
 }
 
+module "appconfig" {
+  source = "../../../core/runtime-config/appconfig"
+
+  application_name = "<%= nameClassName %>-runtime-config"
+}
+
 module "agent_core_runtime" {
   source = "../../../core/agent-core"
   agent_runtime_name = "<%= nameClassName %>"
@@ -32,9 +38,33 @@ module "agent_core_runtime" {
 #    }
 #  }
 
-  env = var.env
-  additional_iam_policy_statements = var.additional_iam_policy_statements
+  env = merge({
+    RUNTIME_CONFIG_APP_ID = module.appconfig.application_id
+  }, var.env)
+  additional_iam_policy_statements = concat([
+    {
+      Effect   = "Allow"
+      Action   = [
+        "appconfig:StartConfigurationSession",
+        "appconfig:GetLatestConfiguration"
+      ]
+      Resource = ["${module.appconfig.application_arn}/*"]
+    }
+  ], var.additional_iam_policy_statements)
   tags = var.tags
+
+  depends_on = [module.appconfig]
+}
+
+# Add agent runtime ARN to runtime config
+module "add_agent_runtime_to_runtime_config" {
+  source = "../../../core/runtime-config/entry"
+
+  namespace = "connection"
+  key       = "agentRuntimes"
+  value     = { "<%= nameClassName %>" = module.agent_core_runtime.agent_core_runtime_arn }
+
+  depends_on = [module.agent_core_runtime]
 }
 
 output "agent_core_runtime_role_arn" {
@@ -45,4 +75,9 @@ output "agent_core_runtime_role_arn" {
 output "agent_core_runtime_arn" {
   description = "ARN of the Bedrock Agent Core runtime"
   value       = module.agent_core_runtime.agent_core_runtime_arn
+}
+
+output "appconfig_application_id" {
+  description = "AppConfig Application ID for runtime config"
+  value       = module.appconfig.application_id
 }

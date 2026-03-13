@@ -91,6 +91,7 @@ export const pyMcpServerGenerator = async (
   );
 
   addDependenciesToPyProjectToml(tree, project.root, [
+    'aws-lambda-powertools',
     'mcp',
     'uvicorn',
     'boto3',

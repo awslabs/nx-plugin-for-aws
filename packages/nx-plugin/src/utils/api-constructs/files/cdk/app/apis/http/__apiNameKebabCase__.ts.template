@@ -13,6 +13,7 @@ import {
   <%_ } _%>
 } from 'aws-cdk-lib/aws-lambda';
 import { Duration<%_ if (backend.type === 'fastapi') { _%>, Stack<%_ } _%> } from 'aws-cdk-lib';
+import { RuntimeConfig } from '../../core/runtime-config.js';
 import {
   CorsHttpMethod,
   CfnApi,
@@ -99,6 +100,7 @@ export class <%= apiNameClassName %><
    * @returns An IntegrationBuilder with default lambda integrations
   */
   public static defaultIntegrations = (scope: Construct) => {
+    const rc = RuntimeConfig.ensure(scope);
     return IntegrationBuilder.http({
       pattern: '<%= backend.integrationPattern %>',
       <%_ if (backend.type === 'trpc') { _%>
@@ -137,6 +139,7 @@ export class <%= apiNameClassName %><
         <%_ } _%>
         environment: {
           AWS_CONNECTION_REUSE_ENABLED: '1',
+          RUNTIME_CONFIG_APP_ID: rc.appConfigApplicationId,
           <%_ if (backend.type === 'fastapi') { _%>
           PORT: '8000',
           AWS_LWA_INVOKE_MODE: 'buffered',
@@ -148,6 +151,7 @@ export class <%= apiNameClassName %><
         <%_ const lambdaTarget = backend.type === 'fastapi' ? 'handler.currentVersion' : 'handler'; _%>
         <%_ const integrationOptions = backend.integrationPattern === 'shared' ? ', { scopePermissionToRoute: false }' : ''; _%>
         const handler = new Function(scope, `<%= apiNameClassName %>${op}Handler`, props);
+        rc.grantReadAppConfig(handler);
         <%_ if (backend.type === 'fastapi') { _%>
         const stack = Stack.of(scope);
         handler.addLayers(
