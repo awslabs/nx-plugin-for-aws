@@ -226,8 +226,10 @@ export const tsSmithyApiGenerator = async (
       '@aws-smithy/server-node',
       '@middy/core',
       '@aws-lambda-powertools/logger',
+      '@aws-lambda-powertools/parameters',
       '@aws-lambda-powertools/tracer',
       '@aws-lambda-powertools/metrics',
+      '@aws-sdk/client-appconfigdata',
     ]),
     withVersions(['@types/aws-lambda']),
   );

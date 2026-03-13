@@ -135,10 +135,12 @@ export const tsStrandsAgentGenerator = async (
       'ws',
       'cors',
       '@aws-sdk/credential-providers',
+      '@aws-sdk/client-appconfigdata',
+      '@aws-lambda-powertools/parameters',
       'aws4fetch',
       '@modelcontextprotocol/sdk',
     ]),
-    withVersions(['tsx', '@types/ws', '@types/cors']),
+    withVersions(['tsx', '@types/ws', '@types/cors', '@types/node']),
   );
 
   // NB: we assign the local dev port from 8081 as 8080 is used by vscode server, and so conflicts

@@ -384,10 +384,11 @@ export class HttpApi<
     });
 
     // Register the API URL in runtime configuration for client discovery
-    RuntimeConfig.ensure(this).config.apis = {
-      ...RuntimeConfig.ensure(this).config.apis!,
+    const rc = RuntimeConfig.ensure(this);
+    rc.set('connection', 'apis', {
+      ...rc.get('connection').apis,
       [apiName]: this.defaultStage.url!,
-    };
+    });
   }
 
   /**
@@ -414,6 +415,7 @@ import {
   SnapStartConf,
 } from 'aws-cdk-lib/aws-lambda';
 import { Duration, Stack } from 'aws-cdk-lib';
+import { RuntimeConfig } from '../../core/runtime-config.js';
 import { CorsHttpMethod, CfnApi } from 'aws-cdk-lib/aws-apigatewayv2';
 import { HttpIamAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
 import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
@@ -459,6 +461,7 @@ export class TestApi<
    * @returns An IntegrationBuilder with default lambda integrations
    */
   public static defaultIntegrations = (scope: Construct) => {
+    const rc = RuntimeConfig.ensure(scope);
     return IntegrationBuilder.http({
       pattern: 'isolated',
       operations: OPERATION_DETAILS,
@@ -478,6 +481,7 @@ export class TestApi<
         snapStart: SnapStartConf.ON_PUBLISHED_VERSIONS,
         environment: {
           AWS_CONNECTION_REUSE_ENABLED: '1',
+          RUNTIME_CONFIG_APP_ID: rc.appConfigApplicationId,
           PORT: '8000',
           AWS_LWA_INVOKE_MODE: 'buffered',
           AWS_LAMBDA_EXEC_WRAPPER: '/opt/bootstrap',
@@ -485,6 +489,7 @@ export class TestApi<
       },
       buildDefaultIntegration: (op, props: FunctionProps) => {
         const handler = new Function(scope, \`TestApi\${op}Handler\`, props);
+        rc.grantReadAppConfig(handler);
         const stack = Stack.of(scope);
         handler.addLayers(
           LayerVersion.fromLayerVersionArn(
@@ -1066,10 +1071,11 @@ export class RestApi<
     );
 
     // Register the API URL in runtime configuration for client discovery
-    RuntimeConfig.ensure(this).config.apis = {
-      ...RuntimeConfig.ensure(this).config.apis!,
+    const rc = RuntimeConfig.ensure(this);
+    rc.set('connection', 'apis', {
+      ...rc.get('connection').apis,
       [apiName]: this.api.url!,
-    };
+    });
   }
 
   /**
@@ -1122,6 +1128,7 @@ import {
   LayerVersion,
   SnapStartConf,
 } from 'aws-cdk-lib/aws-lambda';
+import { RuntimeConfig } from '../../core/runtime-config.js';
 import {
   AuthorizationType,
   LambdaIntegration,
@@ -1179,6 +1186,7 @@ export class TestApi<
    * @returns An IntegrationBuilder with default lambda integrations
    */
   public static defaultIntegrations = (scope: Construct) => {
+    const rc = RuntimeConfig.ensure(scope);
     return IntegrationBuilder.rest({
       pattern: 'isolated',
       operations: OPERATION_DETAILS,
@@ -1198,6 +1206,7 @@ export class TestApi<
         snapStart: SnapStartConf.ON_PUBLISHED_VERSIONS,
         environment: {
           AWS_CONNECTION_REUSE_ENABLED: '1',
+          RUNTIME_CONFIG_APP_ID: rc.appConfigApplicationId,
           PORT: '8000',
           AWS_LWA_INVOKE_MODE: 'response_stream',
           AWS_LAMBDA_EXEC_WRAPPER: '/opt/bootstrap',
@@ -1205,6 +1214,7 @@ export class TestApi<
       },
       buildDefaultIntegration: (op, props: FunctionProps) => {
         const handler = new Function(scope, \`TestApi\${op}Handler\`, props);
+        rc.grantReadAppConfig(handler);
         const stack = Stack.of(scope);
         handler.addLayers(
           LayerVersion.fromLayerVersionArn(
@@ -2185,10 +2195,19 @@ resource "aws_apigatewayv2_route" "proxy_routes" {
 module "add_url_to_runtime_config" {
   source = "../../../core/runtime-config/entry"
 
-  key_path = "apis.TestApi"
-  value    = module.http_api.stage_invoke_url
+  namespace = "connection"
+  key       = "apis"
+  value     = { "TestApi" = module.http_api.stage_invoke_url }
 
   depends_on = [module.http_api]
+}
+
+module "appconfig" {
+  source = "../../../core/runtime-config/appconfig"
+
+  application_name = "TestApi-runtime-config"
+
+  depends_on = [module.add_url_to_runtime_config]
 }
 
 # Lambda permission for API Gateway to invoke the function via alias
@@ -2812,10 +2831,19 @@ resource "aws_apigatewayv2_route" "proxy_routes" {
 module "add_url_to_runtime_config" {
   source = "../../../core/runtime-config/entry"
 
-  key_path = "apis.TestApi"
-  value    = module.http_api.stage_invoke_url
+  namespace = "connection"
+  key       = "apis"
+  value     = { "TestApi" = module.http_api.stage_invoke_url }
 
   depends_on = [module.http_api]
+}
+
+module "appconfig" {
+  source = "../../../core/runtime-config/appconfig"
+
+  application_name = "TestApi-runtime-config"
+
+  depends_on = [module.add_url_to_runtime_config]
 }
 
 # Lambda permission for API Gateway to invoke the function via alias
@@ -3441,10 +3469,19 @@ resource "aws_apigatewayv2_route" "proxy_routes" {
 module "add_url_to_runtime_config" {
   source = "../../../core/runtime-config/entry"
 
-  key_path = "apis.TestApi"
-  value    = module.http_api.stage_invoke_url
+  namespace = "connection"
+  key       = "apis"
+  value     = { "TestApi" = module.http_api.stage_invoke_url }
 
   depends_on = [module.http_api]
+}
+
+module "appconfig" {
+  source = "../../../core/runtime-config/appconfig"
+
+  application_name = "TestApi-runtime-config"
+
+  depends_on = [module.add_url_to_runtime_config]
 }
 
 # Lambda permission for API Gateway to invoke the function via alias
@@ -4112,10 +4149,19 @@ resource "aws_lambda_permission" "api_gateway_invoke_streaming" {
 module "add_url_to_runtime_config" {
   source = "../../../core/runtime-config/entry"
 
-  key_path = "apis.TestApi"
-  value    = aws_api_gateway_stage.api_stage.invoke_url
+  namespace = "connection"
+  key       = "apis"
+  value     = { "TestApi" = aws_api_gateway_stage.api_stage.invoke_url }
 
   depends_on = [aws_api_gateway_stage.api_stage]
+}
+
+module "appconfig" {
+  source = "../../../core/runtime-config/appconfig"
+
+  application_name = "TestApi-runtime-config"
+
+  depends_on = [module.add_url_to_runtime_config]
 }
 
 # Outputs
@@ -4774,10 +4820,19 @@ resource "aws_lambda_permission" "api_gateway_invoke_streaming" {
 module "add_url_to_runtime_config" {
   source = "../../../core/runtime-config/entry"
 
-  key_path = "apis.TestApi"
-  value    = aws_api_gateway_stage.api_stage.invoke_url
+  namespace = "connection"
+  key       = "apis"
+  value     = { "TestApi" = aws_api_gateway_stage.api_stage.invoke_url }
 
   depends_on = [aws_api_gateway_stage.api_stage]
+}
+
+module "appconfig" {
+  source = "../../../core/runtime-config/appconfig"
+
+  application_name = "TestApi-runtime-config"
+
+  depends_on = [module.add_url_to_runtime_config]
 }
 
 # Outputs
@@ -5427,10 +5482,19 @@ resource "aws_lambda_permission" "api_gateway_invoke_streaming" {
 module "add_url_to_runtime_config" {
   source = "../../../core/runtime-config/entry"
 
-  key_path = "apis.TestApi"
-  value    = aws_api_gateway_stage.api_stage.invoke_url
+  namespace = "connection"
+  key       = "apis"
+  value     = { "TestApi" = aws_api_gateway_stage.api_stage.invoke_url }
 
   depends_on = [aws_api_gateway_stage.api_stage]
+}
+
+module "appconfig" {
+  source = "../../../core/runtime-config/appconfig"
+
+  application_name = "TestApi-runtime-config"
+
+  depends_on = [module.add_url_to_runtime_config]
 }
 
 # Outputs
