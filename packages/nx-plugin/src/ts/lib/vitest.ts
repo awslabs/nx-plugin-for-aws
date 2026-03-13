@@ -2,11 +2,17 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { readNxJson, Tree, updateNxJson } from '@nx/devkit';
+import {
+  addDependenciesToPackageJson,
+  readNxJson,
+  Tree,
+  updateNxJson,
+} from '@nx/devkit';
 import { join } from 'path';
 import ts, { factory, ObjectLiteralExpression } from 'typescript';
 import { ConfigureProjectOptions } from './types';
 import { replaceIfExists } from '../../utils/ast';
+import { withVersions } from '../../utils/versions';
 
 export const configureVitest = (
   tree: Tree,
@@ -62,4 +68,10 @@ export const configureVitest = (
       },
     });
   }
+
+  addDependenciesToPackageJson(
+    tree,
+    {},
+    withVersions(['vitest', '@vitest/coverage-v8']),
+  );
 };

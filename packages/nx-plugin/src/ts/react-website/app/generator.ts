@@ -540,7 +540,11 @@ export async function tsReactWebsiteGenerator(
     }),
   );
 
-  const devDependencies: ITsDepVersion[] = ['vite-tsconfig-paths', '@nx/react'];
+  const devDependencies: ITsDepVersion[] = [
+    'vite-tsconfig-paths',
+    '@nx/react',
+    '@vitest/ui',
+  ];
 
   const dependencies: ITsDepVersion[] = ['react', 'react-dom'];
 
