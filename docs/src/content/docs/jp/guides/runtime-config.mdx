@@ -1,0 +1,260 @@
+---
+title: "ランタイム設定"
+description: "AWS AppConfigを使用して生成されたプロジェクトを接続するランタイム設定の仕組み"
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+
+ランタイム設定は、Nx Plugin for AWSが生成されたプロジェクトとコンポーネント間でデプロイ時の値を渡し、相互に接続できるようにするための仕組みです。例えば、APIを生成すると、そのURLが自動的にランタイム設定に登録され、接続されたウェブサイトがそれを検出できるようになります。
+
+## 仕組み
+
+ランタイム設定は**名前空間**に整理されます。各名前空間は、関連する設定値の論理的なグループです。デプロイ時に、すべての名前空間は**AWS AppConfig**に設定プロファイルとして保存されます。
+
+組み込みの`connection`名前空間は、生成されたプロジェクト同士を接続するための設定に使用されます。例えば:
+- **API URL** — APIコンストラクトによって自動的に登録されます
+- **Cognito設定** — UserIdentityコンストラクトによって自動的に登録されます
+- **エージェントランタイムARN** — エージェントコンストラクトによって自動的に登録されます
+
+`connection`名前空間は、ウェブサイトのS3バケットに`runtime-config.json`ファイルとしてもデプロイされ、クライアント側でバックエンドリソースを検出できるようにします。
+
+必要に応じて追加の名前空間をいくつでも定義でき、DynamoDBテーブル名などのデプロイ時の値をLambda関数や他のコンピュートリソースに渡すための、環境変数に代わる便利な方法を提供します。
+
+## インフラストラクチャ
+
+### 設定の書き込み
+
+生成されたコンストラクトは、関連する設定を`connection`名前空間に自動的に書き込みます。任意の名前空間に独自の値を書き込むこともできます。
+
+<Infrastructure>
+<Fragment slot="cdk">
+`RuntimeConfig` CDKコンストラクトはステージスコープのシングルトンです。`set()`を使用して名前空間にキーを書き込みます:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RuntimeConfig } from ':my-scope/common-constructs';
+
+const rc = RuntimeConfig.ensure(this);
+
+// Built-in 'connection' namespace (written automatically by generated constructs)
+rc.set('connection', 'apis', {
+  ...rc.get('connection').apis,
+  MyApi: api.url,
+});
+
+// Custom namespaces for server-side configuration
+rc.set('tables', 'users', {
+  tableName: usersTable.tableName,
+  tableArn: usersTable.tableArn,
+});
+```
+
+synth/デプロイ時に、`RuntimeConfig`は以下を含む**AWS AppConfig**アプリケーションを作成します:
+- 各名前空間の**設定プロファイル**
+- 各プロファイルのJSONデータを含む**ホステッド設定バージョン**
+- `default`環境への即座の**デプロイメント**
+</Fragment>
+<Fragment slot="terraform">
+`runtime-config/entry`モジュールを使用して名前空間にキーを書き込みます:
+
+```hcl title="packages/infra/src/main.tf"
+# Writes to the 'connection' namespace (done automatically by generated modules)
+module "add_api_url" {
+  source = "../../common/terraform/src/core/runtime-config/entry"
+
+  namespace = "connection"
+  key       = "apis"
+  value     = { "MyApi" = module.my_api.api_url }
+}
+
+# Custom namespace for server-side configuration
+module "add_table_config" {
+  source = "../../common/terraform/src/core/runtime-config/entry"
+
+  namespace = "tables"
+  key       = "users"
+  value     = {
+    tableName = aws_dynamodb_table.users.name
+    arn       = aws_dynamodb_table.users.arn
+  }
+}
+```
+
+次に、`runtime-config/appconfig`モジュールを宣言して、すべての名前空間ファイルからAppConfigリソースを作成する必要があります:
+
+```hcl
+module "appconfig" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig"
+
+  application_name = "my-app-runtime-config"
+
+  depends_on = [module.add_api_url, module.add_table_config]
+}
+```
+
+:::note
+生成された各コンストラクト(API、エージェント)は、独自の自己完結型の`appconfig`モジュールインスタンスを作成します。これらはすべて同一で、同じ名前空間ファイルのセットを読み取り、同じAppConfigアプリケーションを生成します。これにより、各モジュールが独立してデプロイ可能になります。
+:::
+</Fragment>
+</Infrastructure>
+
+### 設定の読み取り
+
+サーバー側のコンシューマーは、ランタイムで設定を読み取るために**AppConfig Application ID**とIAMパーミッションが必要です。生成されたコンストラクトはこれを自動的に処理します。
+
+<Infrastructure>
+<Fragment slot="cdk">
+`appConfigApplicationId`を使用してAppConfig Application IDを取得し、`grantReadAppConfig()`を使用して読み取り権限を付与します:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const rc = RuntimeConfig.ensure(this);
+
+// Get the AppConfig Application ID (lazy token, resolved at synth time)
+const appId = rc.appConfigApplicationId;
+
+// Pass it as an environment variable to a Lambda function
+const myFunction = new Function(this, 'MyFunction', {
+  // ...
+  environment: {
+    RUNTIME_CONFIG_APP_ID: appId,
+  },
+});
+
+// Grant the function permission to read from AppConfig
+rc.grantReadAppConfig(myFunction);
+```
+
+:::note
+生成されたAPIおよびエージェントコンストラクトはこれを自動的に行います — ランタイム設定を読み取る必要がある独自のLambda関数やコンピュートリソースを作成する場合にのみ、手動で行う必要があります。
+:::
+</Fragment>
+<Fragment slot="terraform">
+`appconfig`モジュールの`application_id`出力を参照してAppConfig Application IDを取得し、適切なIAMポリシーステートメントを追加します:
+
+```hcl title="packages/infra/src/main.tf"
+module "appconfig" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig"
+  application_name = "my-app-runtime-config"
+}
+
+# Pass the AppConfig Application ID as an environment variable
+resource "aws_lambda_function" "my_function" {
+  # ...
+  environment {
+    variables = {
+      RUNTIME_CONFIG_APP_ID = module.appconfig.application_id
+    }
+  }
+}
+
+# Grant the function permission to read from AppConfig
+resource "aws_iam_policy" "appconfig_read" {
+  name = "AppConfigReadPolicy"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "appconfig:StartConfigurationSession",
+        "appconfig:GetLatestConfiguration"
+      ]
+      Resource = ["${module.appconfig.application_arn}/*"]
+    }]
+  })
+}
+```
+
+:::note
+生成されたAPIおよびエージェントモジュールはこれを自動的に処理します — 各モジュールは独自の`appconfig`モジュールインスタンスを作成し、環境変数とIAMパーミッションを配線します。カスタムLambda関数やコンピュートリソースの場合にのみ、手動で行う必要があります。
+:::
+</Fragment>
+</Infrastructure>
+
+:::tip[ローカル開発]
+カスタム名前空間(例: `tables`、`features`)でランタイム設定を使用する場合、ローカルで単一の`RUNTIME_CONFIG_APP_ID`環境変数を定義するだけで、デプロイされたAppConfigアプリケーションを指すことができます。これにより、すべての個別の環境変数を複製することなく、ローカルのAPIやエージェントがデプロイされた環境と同じ設定を取得できます。
+:::
+
+## AppConfig経由のサーバー側アクセス
+
+Lambda関数やエージェントなどのサーバー側コンシューマーは、[AWS Lambda Powertools](https://docs.aws.amazon.com/powertools/)を使用して**AWS AppConfig**からランタイム設定を取得できます。
+
+生成されたすべてのAPIおよびエージェントコンストラクトは、以下で自動的に設定されます:
+- `RUNTIME_CONFIG_APP_ID`環境変数(AppConfig Application ID)
+- AppConfigから読み取るためのIAMパーミッション
+
+<Tabs>
+  <TabItem label="TypeScript" icon="seti:typescript">
+
+[`@aws-lambda-powertools/parameters`](https://docs.aws.amazon.com/powertools/typescript/latest/features/parameters)から`getAppConfig`を使用します:
+
+```ts
+import { getAppConfig } from '@aws-lambda-powertools/parameters/appconfig';
+
+// Retrieve the 'connection' namespace as a parsed JSON object
+const config = await getAppConfig('connection', {
+  application: process.env.RUNTIME_CONFIG_APP_ID!,
+  environment: 'default',
+  transform: 'json',
+});
+
+// Access values
+const apiUrl = config.apis?.MyApi;
+const cognitoProps = config.cognitoProps;
+```
+
+カスタム名前空間を取得することもできます:
+
+```ts
+// Retrieve a custom 'tables' namespace
+const tablesConfig = await getAppConfig('tables', {
+  application: process.env.RUNTIME_CONFIG_APP_ID!,
+  environment: 'default',
+  transform: 'json',
+});
+
+const usersTableName = tablesConfig.users?.tableName;
+```
+
+  </TabItem>
+  <TabItem label="Python" icon="seti:python">
+
+[`aws_lambda_powertools.utilities.parameters`](https://docs.aws.amazon.com/powertools/python/latest/utilities/parameters/)から`get_app_config`を使用します:
+
+```python
+import os
+from aws_lambda_powertools.utilities import parameters
+
+# Retrieve the 'connection' namespace as a parsed JSON object
+config = parameters.get_app_config(
+    name="connection",
+    environment="default",
+    application=os.environ["RUNTIME_CONFIG_APP_ID"],
+    transform="json",
+)
+
+# Access values
+api_url = config.get("apis", {}).get("MyApi")
+cognito_props = config.get("cognitoProps")
+```
+
+カスタム名前空間を取得することもできます:
+
+```python
+# Retrieve a custom 'tables' namespace
+tables_config = parameters.get_app_config(
+    name="tables",
+    environment="default",
+    application=os.environ["RUNTIME_CONFIG_APP_ID"],
+    transform="json",
+)
+
+users_table_name = tables_config.get("users", {}).get("tableName")
+```
+
+  </TabItem>
+</Tabs>
+
+## クライアント側アクセス
+
+ウェブサイトの場合、`connection`名前空間はS3バケットに`runtime-config.json`ファイルとしてデプロイされます。フロントエンドコードからこれらの値にアクセスする方法の詳細については、<Link path="guides/react-website#runtime-configuration">React Websiteランタイム設定</Link>ガイドを参照してください。

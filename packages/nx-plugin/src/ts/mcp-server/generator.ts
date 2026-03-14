@@ -106,7 +106,13 @@ export const tsMcpServerGenerator = async (
   );
 
   // Add dependencies
-  const deps = withVersions(['@modelcontextprotocol/sdk', 'zod', 'express']);
+  const deps = withVersions([
+    '@modelcontextprotocol/sdk',
+    'zod',
+    'express',
+    '@aws-lambda-powertools/parameters',
+    '@aws-sdk/client-appconfigdata',
+  ]);
   const devDeps = withVersions([
     'tsx',
     '@types/express',

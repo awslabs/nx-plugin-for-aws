@@ -134,7 +134,7 @@ export const MyComponent = () => {
 
 ## ランタイム設定
 
-インフラストラクチャからの設定はランタイム設定を通じてウェブサイトに提供されます。これにより、デプロイ時まで不明なAPI URLなどの詳細情報にアクセス可能になります。
+インフラストラクチャからの設定は<Link href="guides/runtime-config">ランタイム設定</Link>を通じてウェブサイトに提供されます。これにより、デプロイ時まで不明なAPI URLなどの詳細情報にアクセス可能になります。
 
 ### インフラストラクチャ
 
@@ -142,36 +142,36 @@ export const MyComponent = () => {
 <Fragment slot="cdk">
 `RuntimeConfig` CDKコンストラクトを使用して設定の追加・取得が可能です。`@aws/nx-plugin`ジェネレータ（<Link path="guides/trpc">`ts#trpc-api`</Link>や<Link path="guides/fastapi">`py#fast-api`</Link>など）で生成されたCDKコンストラクトは自動的に`RuntimeConfig`に値を追加します。
 
-ウェブサイトCDKコンストラクトはランタイム設定を`runtime-config.json`ファイルとしてS3バケットのルートにデプロイします。
+ウェブサイトCDKコンストラクトはランタイム設定の`connection`名前空間を`runtime-config.json`ファイルとしてS3バケットのルートにデプロイします。
 
-```ts title="packages/infra/src/stacks/application-stack.ts" {9-12,14-15}
+```ts title="packages/infra/src/stacks/application-stack.ts"
 import { Stack } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
-import { MyWebsite } from ':my-scope/common-constructs';
+import { MyWebsite, MyApi } from ':my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
   constructor(scope: Construct, id: string) {
     super(scope, id);
 
+    // ウェブサイトは任意のタイミングで宣言可能 — ランタイム設定は遅延解決される
+    new MyWebsite(this, 'MyWebsite');
+
     // RuntimeConfigに自動的に値を追加
     new MyApi(this, 'MyApi', {
       integrations: MyApi.defaultIntegrations(this).build(),
     });
-
-    // runtime-config.jsonとして自動デプロイ
-    new MyWebsite(this, 'MyWebsite');
   }
 }
 ```
 
-:::caution
-`runtime-config.json`に設定が含まれるように、`RuntimeConfig`に追加するコンストラクトの後にウェブサイトを宣言する必要があります。
+:::note
+CDKでは、ウェブサイトコンストラクトはスタック内の任意のタイミングで宣言できます。ランタイム設定はsynth時に遅延解決されるため、宣言順序に関係なくすべての値が含まれます。
 :::
 </Fragment>
 <Fragment slot="terraform">
 Terraformではランタイム設定はruntime-configモジュールで管理されます。`@aws/nx-plugin`ジェネレータ（<Link path="guides/trpc">`ts#trpc-api`</Link>や<Link path="guides/fastapi">`py#fast-api`</Link>など）で生成されたTerraformモジュールは自動的にランタイム設定に値を追加します。
 
-ウェブサイトTerraformモジュールはランタイム設定を`runtime-config.json`ファイルとしてS3バケットのルートにデプロイします。
+ウェブサイトTerraformモジュールはランタイム設定の`connection`名前空間を`runtime-config.json`ファイルとしてS3バケットのルートにデプロイします。
 
 ```hcl title="packages/infra/src/main.tf" {14-15}
 # ランタイム設定に自動的に値を追加
@@ -193,7 +193,7 @@ module "my_website" {
 ```
 
 :::caution
-`runtime-config.json`に設定が含まれるよう、適切な`depends_on`を設定してウェブサイトモジュールを他のモジュールより後に宣言する必要があります。
+`runtime-config.json`に設定が含まれるよう、ランタイム設定に追加するモジュールの後にウェブサイトモジュールを宣言し、適切な`depends_on`を設定して順序を確保する必要があります。
 :::
 </Fragment>
 </Infrastructure>
@@ -212,6 +212,10 @@ const MyComponent = () => {
   const apiUrl = runtimeConfig.apis.MyApi;
 };
 ```
+
+:::note
+ランタイム設定がAWS AppConfigにどのように保存され、サーバーサイドのコンシューマー（Lambda関数、エージェント）がどのように取得できるかについては、<Link path="guides/runtime-config">ランタイム設定</Link>ガイドを参照してください。
+:::
 
 ### ローカルランタイム設定
 
