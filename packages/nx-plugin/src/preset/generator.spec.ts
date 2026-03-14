@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree, readNxJson } from '@nx/devkit';
+import { Tree, readJson, readNxJson } from '@nx/devkit';
 import { presetGenerator, isAmazonian } from './generator';
 import { createTreeUsingTsSolutionSetup, snapshotTreeDir } from '../utils/test';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
@@ -64,6 +64,16 @@ describe('preset generator', () => {
 
     expect(syncGenerators).toContain(TS_SYNC_GENERATOR_NAME);
     expect(syncGenerators).toContain(NX_TYPESCRIPT_SYNC_GENERATOR);
+  });
+
+  it('should allow-list gritql and nx postinstall scripts', async () => {
+    await presetGenerator(tree, { addTsPlugin: false, iacProvider: 'CDK' });
+
+    const packageJson = readJson(tree, 'package.json');
+    expect(packageJson.pnpm).toBeDefined();
+    expect(packageJson.pnpm.onlyBuiltDependencies).toBeDefined();
+    expect(packageJson.pnpm.onlyBuiltDependencies).toContain('nx');
+    expect(packageJson.pnpm.onlyBuiltDependencies).toContain('@getgrit/cli');
   });
 });
 
