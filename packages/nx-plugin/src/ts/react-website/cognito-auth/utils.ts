@@ -3,7 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { Tree } from '@nx/devkit';
-import { applyGritQLTransform } from '../../../utils/ast';
+import {
+  addDestructuredImport,
+  applyGritQLTransform,
+} from '../../../utils/ast';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
@@ -37,11 +40,18 @@ export async function addShadcnAuthMenu(tree: Tree, appLayoutTsxPath: string) {
   }
 
   // Prepend state declarations to the AppLayout component body
-  // (also adds useEffect, useRef, useState imports via ensure_import_from)
   await applyGritQLTransform(
     tree,
     appLayoutTsxPath,
     readGritPattern('shadcn-state-declarations'),
+  );
+
+  // Add useEffect, useRef, useState imports from react
+  addDestructuredImport(
+    tree,
+    appLayoutTsxPath,
+    ['useEffect', 'useRef', 'useState'],
+    'react',
   );
 
   // Append the auth menu to the header element
