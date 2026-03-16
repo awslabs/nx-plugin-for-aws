@@ -1,0 +1,260 @@
+---
+title: "运行时配置"
+description: "运行时配置如何使用 AWS AppConfig 连接您生成的项目"
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+
+运行时配置是 Nx Plugin for AWS 用于在生成的项目和组件之间传递部署时值的机制,以便它们可以相互连接。例如,当您生成一个 API 时,其 URL 会自动注册到运行时配置中,以便连接的网站可以发现它。
+
+## 工作原理
+
+运行时配置被组织成**命名空间**。每个命名空间是相关配置值的逻辑分组。在部署时,所有命名空间都作为配置文件存储在 **AWS AppConfig** 中。
+
+内置的 `connection` 命名空间用于使生成的项目能够相互连接的配置,例如:
+- **API URLs** — 由 API 构造自动注册
+- **Cognito settings** — 由 UserIdentity 构造自动注册
+- **Agent runtime ARNs** — 由 agent 构造自动注册
+
+`connection` 命名空间还会作为 `runtime-config.json` 文件部署到您网站的 S3 存储桶中,从而使客户端能够发现后端资源。
+
+您可以定义任意数量的附加命名空间,为传递部署时值(例如 DynamoDB 表名)到 Lambda 函数或其他计算资源提供了一种便捷的环境变量替代方案。
+
+## 基础设施
+
+### 写入配置
+
+生成的构造会自动将相关配置写入 `connection` 命名空间。您也可以将自己的值写入任何命名空间。
+
+<Infrastructure>
+<Fragment slot="cdk">
+`RuntimeConfig` CDK 构造是一个阶段范围的单例。使用 `set()` 将键写入命名空间:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RuntimeConfig } from ':my-scope/common-constructs';
+
+const rc = RuntimeConfig.ensure(this);
+
+// Built-in 'connection' namespace (written automatically by generated constructs)
+rc.set('connection', 'apis', {
+  ...rc.get('connection').apis,
+  MyApi: api.url,
+});
+
+// Custom namespaces for server-side configuration
+rc.set('tables', 'users', {
+  tableName: usersTable.tableName,
+  tableArn: usersTable.tableArn,
+});
+```
+
+在合成/部署时,`RuntimeConfig` 会创建一个包含以下内容的 **AWS AppConfig** 应用程序:
+- 每个命名空间的 **Configuration Profile**
+- 每个配置文件的 JSON 数据的 **Hosted Configuration Version**
+- 到 `default` 环境的即时 **Deployment**
+</Fragment>
+<Fragment slot="terraform">
+使用 `runtime-config/entry` 模块将键写入命名空间:
+
+```hcl title="packages/infra/src/main.tf"
+# Writes to the 'connection' namespace (done automatically by generated modules)
+module "add_api_url" {
+  source = "../../common/terraform/src/core/runtime-config/entry"
+
+  namespace = "connection"
+  key       = "apis"
+  value     = { "MyApi" = module.my_api.api_url }
+}
+
+# Custom namespace for server-side configuration
+module "add_table_config" {
+  source = "../../common/terraform/src/core/runtime-config/entry"
+
+  namespace = "tables"
+  key       = "users"
+  value     = {
+    tableName = aws_dynamodb_table.users.name
+    arn       = aws_dynamodb_table.users.arn
+  }
+}
+```
+
+然后您必须声明 `runtime-config/appconfig` 模块,以从所有命名空间文件创建 AppConfig 资源:
+
+```hcl
+module "appconfig" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig"
+
+  application_name = "my-app-runtime-config"
+
+  depends_on = [module.add_api_url, module.add_table_config]
+}
+```
+
+:::note
+每个生成的构造(API、agent)都会创建自己独立的 `appconfig` 模块实例。它们都是相同的——每个都读取相同的命名空间文件集并生成相同的 AppConfig 应用程序。这确保了每个模块都可以独立部署。
+:::
+</Fragment>
+</Infrastructure>
+
+### 读取配置
+
+服务器端消费者需要 **AppConfig Application ID** 和 IAM 权限才能在运行时读取配置。生成的构造会自动处理这些。
+
+<Infrastructure>
+<Fragment slot="cdk">
+使用 `appConfigApplicationId` 获取 AppConfig Application ID,并使用 `grantReadAppConfig()` 授予读取权限:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const rc = RuntimeConfig.ensure(this);
+
+// Get the AppConfig Application ID (lazy token, resolved at synth time)
+const appId = rc.appConfigApplicationId;
+
+// Pass it as an environment variable to a Lambda function
+const myFunction = new Function(this, 'MyFunction', {
+  // ...
+  environment: {
+    RUNTIME_CONFIG_APP_ID: appId,
+  },
+});
+
+// Grant the function permission to read from AppConfig
+rc.grantReadAppConfig(myFunction);
+```
+
+:::note
+生成的 API 和 agent 构造会自动执行此操作——仅当您创建自己的 Lambda 函数或需要读取运行时配置的计算资源时,才需要手动执行此操作。
+:::
+</Fragment>
+<Fragment slot="terraform">
+引用 `appconfig` 模块的 `application_id` 输出以获取 AppConfig Application ID,并添加适当的 IAM 策略语句:
+
+```hcl title="packages/infra/src/main.tf"
+module "appconfig" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig"
+  application_name = "my-app-runtime-config"
+}
+
+# Pass the AppConfig Application ID as an environment variable
+resource "aws_lambda_function" "my_function" {
+  # ...
+  environment {
+    variables = {
+      RUNTIME_CONFIG_APP_ID = module.appconfig.application_id
+    }
+  }
+}
+
+# Grant the function permission to read from AppConfig
+resource "aws_iam_policy" "appconfig_read" {
+  name = "AppConfigReadPolicy"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "appconfig:StartConfigurationSession",
+        "appconfig:GetLatestConfiguration"
+      ]
+      Resource = ["${module.appconfig.application_arn}/*"]
+    }]
+  })
+}
+```
+
+:::note
+生成的 API 和 agent 模块会自动处理这些——每个都会创建自己的 `appconfig` 模块实例并连接环境变量和 IAM 权限。仅当您需要为自定义 Lambda 函数或计算资源手动执行此操作时才需要。
+:::
+</Fragment>
+</Infrastructure>
+
+:::tip[本地开发]
+如果您使用带有自定义命名空间(例如 `tables`、`features`)的运行时配置,您只需在本地定义单个 `RUNTIME_CONFIG_APP_ID` 环境变量来指向已部署的 AppConfig 应用程序。这允许您的本地 API 或 agent 检索与已部署环境相同的配置,而无需复制所有单独的环境变量。
+:::
+
+## 通过 AppConfig 进行服务器端访问
+
+Lambda 函数和 agent 等服务器端消费者可以使用 [AWS Lambda Powertools](https://docs.aws.amazon.com/powertools/) 从 **AWS AppConfig** 检索运行时配置。
+
+所有生成的 API 和 agent 构造都会自动配置:
+- `RUNTIME_CONFIG_APP_ID` 环境变量(AppConfig Application ID)
+- 从 AppConfig 读取的 IAM 权限
+
+<Tabs>
+  <TabItem label="TypeScript" icon="seti:typescript">
+
+使用 [`@aws-lambda-powertools/parameters`](https://docs.aws.amazon.com/powertools/typescript/latest/features/parameters) 中的 `getAppConfig`:
+
+```ts
+import { getAppConfig } from '@aws-lambda-powertools/parameters/appconfig';
+
+// Retrieve the 'connection' namespace as a parsed JSON object
+const config = await getAppConfig('connection', {
+  application: process.env.RUNTIME_CONFIG_APP_ID!,
+  environment: 'default',
+  transform: 'json',
+});
+
+// Access values
+const apiUrl = config.apis?.MyApi;
+const cognitoProps = config.cognitoProps;
+```
+
+您还可以检索自定义命名空间:
+
+```ts
+// Retrieve a custom 'tables' namespace
+const tablesConfig = await getAppConfig('tables', {
+  application: process.env.RUNTIME_CONFIG_APP_ID!,
+  environment: 'default',
+  transform: 'json',
+});
+
+const usersTableName = tablesConfig.users?.tableName;
+```
+
+  </TabItem>
+  <TabItem label="Python" icon="seti:python">
+
+使用 [`aws_lambda_powertools.utilities.parameters`](https://docs.aws.amazon.com/powertools/python/latest/utilities/parameters/) 中的 `get_app_config`:
+
+```python
+import os
+from aws_lambda_powertools.utilities import parameters
+
+# Retrieve the 'connection' namespace as a parsed JSON object
+config = parameters.get_app_config(
+    name="connection",
+    environment="default",
+    application=os.environ["RUNTIME_CONFIG_APP_ID"],
+    transform="json",
+)
+
+# Access values
+api_url = config.get("apis", {}).get("MyApi")
+cognito_props = config.get("cognitoProps")
+```
+
+您还可以检索自定义命名空间:
+
+```python
+# Retrieve a custom 'tables' namespace
+tables_config = parameters.get_app_config(
+    name="tables",
+    environment="default",
+    application=os.environ["RUNTIME_CONFIG_APP_ID"],
+    transform="json",
+)
+
+users_table_name = tables_config.get("users", {}).get("tableName")
+```
+
+  </TabItem>
+</Tabs>
+
+## 客户端访问
+
+对于网站,`connection` 命名空间会作为 `runtime-config.json` 文件部署到 S3 存储桶。有关如何从前端代码访问这些值的详细信息,请参阅 <Link path="guides/react-website#runtime-configuration">React Website Runtime Configuration</Link> 指南。

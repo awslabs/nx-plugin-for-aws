@@ -1,0 +1,260 @@
+---
+title: "런타임 구성"
+description: "AWS AppConfig를 사용하여 생성된 프로젝트를 연결하는 런타임 구성 방법"
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+
+런타임 구성은 Nx Plugin for AWS가 생성된 프로젝트와 컴포넌트 간에 배포 시점 값을 전달하여 서로 연결할 수 있도록 하는 메커니즘입니다. 예를 들어, API를 생성하면 해당 URL이 런타임 구성에 자동으로 등록되어 연결된 웹사이트가 이를 검색할 수 있습니다.
+
+## 작동 방식
+
+런타임 구성은 **네임스페이스**로 구성됩니다. 각 네임스페이스는 관련된 구성 값의 논리적 그룹입니다. 배포 시점에 모든 네임스페이스는 **AWS AppConfig**에 Configuration Profile로 저장됩니다.
+
+내장된 `connection` 네임스페이스는 생성된 프로젝트가 서로 연결될 수 있도록 하는 구성에 사용됩니다. 예를 들어:
+- **API URLs** — API 구성 요소에 의해 자동으로 등록됨
+- **Cognito settings** — UserIdentity 구성 요소에 의해 자동으로 등록됨
+- **Agent runtime ARNs** — 에이전트 구성 요소에 의해 자동으로 등록됨
+
+`connection` 네임스페이스는 또한 웹사이트의 S3 버킷에 `runtime-config.json` 파일로 배포되어 클라이언트 측에서 백엔드 리소스를 검색할 수 있도록 합니다.
+
+원하는 만큼 추가 네임스페이스를 정의할 수 있으며, 이는 DynamoDB 테이블 이름과 같은 배포 시점 값을 Lambda 함수나 다른 컴퓨팅 리소스에 전달하기 위한 환경 변수의 편리한 대안을 제공합니다.
+
+## 인프라
+
+### 구성 작성
+
+생성된 구성 요소는 자동으로 관련 구성을 `connection` 네임스페이스에 작성합니다. 또한 모든 네임스페이스에 자신의 값을 작성할 수도 있습니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+`RuntimeConfig` CDK 구성 요소는 스테이지 범위의 싱글톤입니다. `set()`을 사용하여 네임스페이스에 키를 작성합니다:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RuntimeConfig } from ':my-scope/common-constructs';
+
+const rc = RuntimeConfig.ensure(this);
+
+// Built-in 'connection' namespace (written automatically by generated constructs)
+rc.set('connection', 'apis', {
+  ...rc.get('connection').apis,
+  MyApi: api.url,
+});
+
+// Custom namespaces for server-side configuration
+rc.set('tables', 'users', {
+  tableName: usersTable.tableName,
+  tableArn: usersTable.tableArn,
+});
+```
+
+synth/배포 시점에 `RuntimeConfig`는 다음을 포함하는 **AWS AppConfig** 애플리케이션을 생성합니다:
+- 각 네임스페이스에 대한 **Configuration Profile**
+- 각 프로필의 JSON 데이터가 포함된 **Hosted Configuration Version**
+- `default` 환경으로의 즉시 **Deployment**
+</Fragment>
+<Fragment slot="terraform">
+`runtime-config/entry` 모듈을 사용하여 네임스페이스에 키를 작성합니다:
+
+```hcl title="packages/infra/src/main.tf"
+# Writes to the 'connection' namespace (done automatically by generated modules)
+module "add_api_url" {
+  source = "../../common/terraform/src/core/runtime-config/entry"
+
+  namespace = "connection"
+  key       = "apis"
+  value     = { "MyApi" = module.my_api.api_url }
+}
+
+# Custom namespace for server-side configuration
+module "add_table_config" {
+  source = "../../common/terraform/src/core/runtime-config/entry"
+
+  namespace = "tables"
+  key       = "users"
+  value     = {
+    tableName = aws_dynamodb_table.users.name
+    arn       = aws_dynamodb_table.users.arn
+  }
+}
+```
+
+그런 다음 모든 네임스페이스 파일에서 AppConfig 리소스를 생성하기 위해 `runtime-config/appconfig` 모듈을 선언해야 합니다:
+
+```hcl
+module "appconfig" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig"
+
+  application_name = "my-app-runtime-config"
+
+  depends_on = [module.add_api_url, module.add_table_config]
+}
+```
+
+:::note
+생성된 각 구성 요소(API, 에이전트)는 자체 독립형 `appconfig` 모듈 인스턴스를 생성합니다. 이들은 모두 동일하며 — 각각 동일한 네임스페이스 파일 세트를 읽고 동일한 AppConfig 애플리케이션을 생성합니다. 이를 통해 각 모듈을 독립적으로 배포할 수 있습니다.
+:::
+</Fragment>
+</Infrastructure>
+
+### 구성 읽기
+
+서버 측 소비자는 런타임에 구성을 읽기 위해 **AppConfig Application ID**와 IAM 권한이 필요합니다. 생성된 구성 요소는 이를 자동으로 처리합니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+`appConfigApplicationId`를 사용하여 AppConfig Application ID를 가져오고, `grantReadAppConfig()`를 사용하여 읽기 권한을 부여합니다:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const rc = RuntimeConfig.ensure(this);
+
+// Get the AppConfig Application ID (lazy token, resolved at synth time)
+const appId = rc.appConfigApplicationId;
+
+// Pass it as an environment variable to a Lambda function
+const myFunction = new Function(this, 'MyFunction', {
+  // ...
+  environment: {
+    RUNTIME_CONFIG_APP_ID: appId,
+  },
+});
+
+// Grant the function permission to read from AppConfig
+rc.grantReadAppConfig(myFunction);
+```
+
+:::note
+생성된 API 및 에이전트 구성 요소는 이를 자동으로 수행합니다 — 런타임 구성을 읽어야 하는 자체 Lambda 함수나 컴퓨팅 리소스를 생성하는 경우에만 수동으로 수행하면 됩니다.
+:::
+</Fragment>
+<Fragment slot="terraform">
+`appconfig` 모듈의 `application_id` 출력을 참조하여 AppConfig Application ID를 가져오고, 적절한 IAM 정책 문을 추가합니다:
+
+```hcl title="packages/infra/src/main.tf"
+module "appconfig" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig"
+  application_name = "my-app-runtime-config"
+}
+
+# Pass the AppConfig Application ID as an environment variable
+resource "aws_lambda_function" "my_function" {
+  # ...
+  environment {
+    variables = {
+      RUNTIME_CONFIG_APP_ID = module.appconfig.application_id
+    }
+  }
+}
+
+# Grant the function permission to read from AppConfig
+resource "aws_iam_policy" "appconfig_read" {
+  name = "AppConfigReadPolicy"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "appconfig:StartConfigurationSession",
+        "appconfig:GetLatestConfiguration"
+      ]
+      Resource = ["${module.appconfig.application_arn}/*"]
+    }]
+  })
+}
+```
+
+:::note
+생성된 API 및 에이전트 모듈은 이를 자동으로 처리합니다 — 각각 자체 `appconfig` 모듈 인스턴스를 생성하고 환경 변수와 IAM 권한을 연결합니다. 사용자 정의 Lambda 함수나 컴퓨팅 리소스에 대해서만 수동으로 수행하면 됩니다.
+:::
+</Fragment>
+</Infrastructure>
+
+:::tip[로컬 개발]
+사용자 정의 네임스페이스(예: `tables`, `features`)와 함께 런타임 구성을 사용하는 경우, 배포된 AppConfig 애플리케이션을 가리키도록 로컬에서 단일 `RUNTIME_CONFIG_APP_ID` 환경 변수만 정의하면 됩니다. 이를 통해 로컬 API나 에이전트가 모든 개별 환경 변수를 복제할 필요 없이 배포된 환경과 동일한 구성을 검색할 수 있습니다.
+:::
+
+## AppConfig를 통한 서버 측 액세스
+
+Lambda 함수 및 에이전트와 같은 서버 측 소비자는 [AWS Lambda Powertools](https://docs.aws.amazon.com/powertools/)를 사용하여 **AWS AppConfig**에서 런타임 구성을 검색할 수 있습니다.
+
+생성된 모든 API 및 에이전트 구성 요소는 다음과 함께 자동으로 구성됩니다:
+- `RUNTIME_CONFIG_APP_ID` 환경 변수 (AppConfig Application ID)
+- AppConfig에서 읽을 수 있는 IAM 권한
+
+<Tabs>
+  <TabItem label="TypeScript" icon="seti:typescript">
+
+[`@aws-lambda-powertools/parameters`](https://docs.aws.amazon.com/powertools/typescript/latest/features/parameters)에서 `getAppConfig`를 사용합니다:
+
+```ts
+import { getAppConfig } from '@aws-lambda-powertools/parameters/appconfig';
+
+// Retrieve the 'connection' namespace as a parsed JSON object
+const config = await getAppConfig('connection', {
+  application: process.env.RUNTIME_CONFIG_APP_ID!,
+  environment: 'default',
+  transform: 'json',
+});
+
+// Access values
+const apiUrl = config.apis?.MyApi;
+const cognitoProps = config.cognitoProps;
+```
+
+사용자 정의 네임스페이스도 검색할 수 있습니다:
+
+```ts
+// Retrieve a custom 'tables' namespace
+const tablesConfig = await getAppConfig('tables', {
+  application: process.env.RUNTIME_CONFIG_APP_ID!,
+  environment: 'default',
+  transform: 'json',
+});
+
+const usersTableName = tablesConfig.users?.tableName;
+```
+
+  </TabItem>
+  <TabItem label="Python" icon="seti:python">
+
+[`aws_lambda_powertools.utilities.parameters`](https://docs.aws.amazon.com/powertools/python/latest/utilities/parameters/)에서 `get_app_config`를 사용합니다:
+
+```python
+import os
+from aws_lambda_powertools.utilities import parameters
+
+# Retrieve the 'connection' namespace as a parsed JSON object
+config = parameters.get_app_config(
+    name="connection",
+    environment="default",
+    application=os.environ["RUNTIME_CONFIG_APP_ID"],
+    transform="json",
+)
+
+# Access values
+api_url = config.get("apis", {}).get("MyApi")
+cognito_props = config.get("cognitoProps")
+```
+
+사용자 정의 네임스페이스도 검색할 수 있습니다:
+
+```python
+# Retrieve a custom 'tables' namespace
+tables_config = parameters.get_app_config(
+    name="tables",
+    environment="default",
+    application=os.environ["RUNTIME_CONFIG_APP_ID"],
+    transform="json",
+)
+
+users_table_name = tables_config.get("users", {}).get("tableName")
+```
+
+  </TabItem>
+</Tabs>
+
+## 클라이언트 측 액세스
+
+웹사이트의 경우 `connection` 네임스페이스는 S3 버킷에 `runtime-config.json` 파일로 배포됩니다. 프론트엔드 코드에서 이러한 값에 액세스하는 방법에 대한 자세한 내용은 <Link path="guides/react-website#runtime-configuration">React Website Runtime Configuration</Link> 가이드를 참조하세요.

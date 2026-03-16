@@ -134,7 +134,7 @@ Para más detalles, consulta la [documentación de TanStack Router](https://tans
 
 ## Configuración en tiempo de ejecución
 
-La configuración de tu infraestructura se provee al sitio web mediante Configuración en Tiempo de Ejecución. Esto permite acceder a detalles como URLs de API que no se conocen hasta el despliegue.
+La configuración de tu infraestructura se provee al sitio web mediante <Link href="guides/runtime-config">Configuración en Tiempo de Ejecución</Link>. Esto permite acceder a detalles como URLs de API que no se conocen hasta el despliegue.
 
 ### Infraestructura
 
@@ -142,36 +142,36 @@ La configuración de tu infraestructura se provee al sitio web mediante Configur
 <Fragment slot="cdk">
 El construct `RuntimeConfig` de CDK puede usarse para añadir y recuperar configuración. Los constructs generados por generadores `@aws/nx-plugin` (como <Link path="guides/trpc">`ts#trpc-api`</Link> y <Link path="guides/fastapi">`py#fast-api`</Link>) añaden automáticamente valores al `RuntimeConfig`.
 
-Tu construct CDK del sitio web desplegará la configuración como archivo `runtime-config.json` en la raíz de tu bucket S3.
+Tu construct CDK del sitio web desplegará el namespace `connection` de la configuración en tiempo de ejecución como archivo `runtime-config.json` en la raíz de tu bucket S3.
 
-```ts title="packages/infra/src/stacks/application-stack.ts" {9-12,14-15}
+```ts title="packages/infra/src/stacks/application-stack.ts"
 import { Stack } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
-import { MyWebsite } from ':my-scope/common-constructs';
+import { MyWebsite, MyApi } from ':my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
   constructor(scope: Construct, id: string) {
     super(scope, id);
 
+    // El sitio web puede declararse en cualquier punto — la configuración se resuelve de forma diferida
+    new MyWebsite(this, 'MyWebsite');
+
     // Añade automáticamente valores al RuntimeConfig
     new MyApi(this, 'MyApi', {
       integrations: MyApi.defaultIntegrations(this).build(),
     });
-
-    // Despliega automáticamente la configuración en runtime-config.json
-    new MyWebsite(this, 'MyWebsite');
   }
 }
 ```
 
-:::caution
-Debes declarar tu sitio web _después_ de cualquier construct que añada al `RuntimeConfig`, de lo contrario faltarán en tu archivo `runtime-config.json`.
+:::note
+Con CDK, el construct del sitio web puede declararse en cualquier punto de tu stack. La configuración en tiempo de ejecución se resuelve de forma diferida en tiempo de síntesis, por lo que todos los valores se incluirán independientemente del orden de declaración.
 :::
 </Fragment>
 <Fragment slot="terraform">
 Con Terraform, la configuración se gestiona mediante módulos runtime-config. Los módulos generados por `@aws/nx-plugin` (como <Link path="guides/trpc">`ts#trpc-api`</Link> y <Link path="guides/fastapi">`py#fast-api`</Link>) añaden automáticamente valores a la configuración.
 
-Tu módulo Terraform del sitio web desplegará la configuración como archivo `runtime-config.json` en la raíz de tu bucket S3.
+Tu módulo Terraform del sitio web desplegará el namespace `connection` de la configuración en tiempo de ejecución como archivo `runtime-config.json` en la raíz de tu bucket S3.
 
 ```hcl title="packages/infra/src/main.tf" {14-15}
 # Añade valores a la configuración automáticamente
@@ -179,7 +179,7 @@ module "my_api" {
   source = "../../common/terraform/src/app/apis/my-api"
 }
 
-# Despliega la configuración en runtime-config.json
+# Despliega la configuración en runtime-config.json automáticamente
 module "my_website" {
   source = "../../common/terraform/src/app/static-websites/my-website"
 
@@ -187,13 +187,13 @@ module "my_website" {
     aws.us_east_1 = aws.us_east_1
   }
 
-  # Garantiza que la API se despliega primero
+  # Garantiza que la API se despliega primero para añadir a la configuración
   depends_on = [module.my_api]
 }
 ```
 
 :::caution
-Debes declarar tu módulo del sitio web _después_ de cualquier módulo que añada a la configuración y configurar `depends_on` apropiado, de lo contrario faltarán valores en `runtime-config.json`.
+Debes declarar tu módulo del sitio web _después_ de cualquier módulo que añada a la configuración y configurar el `depends_on` apropiado para garantizar el orden, de lo contrario faltarán valores en `runtime-config.json`.
 :::
 </Fragment>
 </Infrastructure>
@@ -212,6 +212,10 @@ const MyComponent = () => {
   const apiUrl = runtimeConfig.apis.MyApi;
 };
 ```
+
+:::note
+Para detalles sobre cómo se almacena la configuración en tiempo de ejecución en AWS AppConfig y cómo los consumidores del lado del servidor (funciones Lambda, agentes) pueden recuperarla, consulta la guía de <Link path="guides/runtime-config">Configuración en Tiempo de Ejecución</Link>.
+:::
 
 ### Configuración local
 

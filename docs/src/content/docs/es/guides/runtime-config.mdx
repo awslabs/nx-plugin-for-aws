@@ -1,0 +1,260 @@
+---
+title: "Configuración en Tiempo de Ejecución"
+description: "Cómo la configuración en tiempo de ejecución conecta tus proyectos generados usando AWS AppConfig"
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+
+La configuración en tiempo de ejecución es el mecanismo utilizado por Nx Plugin for AWS para pasar valores en tiempo de despliegue entre proyectos y componentes generados para que puedan conectarse entre sí. Por ejemplo, cuando generas una API, su URL se registra automáticamente en la configuración en tiempo de ejecución para que un sitio web conectado pueda descubrirla.
+
+## Cómo Funciona
+
+La configuración en tiempo de ejecución se organiza en **espacios de nombres**. Cada espacio de nombres es una agrupación lógica de valores de configuración relacionados. En tiempo de despliegue, todos los espacios de nombres se almacenan en **AWS AppConfig** como Perfiles de Configuración.
+
+El espacio de nombres `connection` integrado se utiliza para la configuración que permite que los proyectos generados se conecten entre sí, por ejemplo:
+- **URLs de API** — registradas automáticamente por los constructos de API
+- **Configuración de Cognito** — registrada automáticamente por el constructo UserIdentity
+- **ARNs de runtime de agentes** — registrados automáticamente por los constructos de agentes
+
+El espacio de nombres `connection` también se despliega como un archivo `runtime-config.json` en el bucket S3 de tu sitio web, permitiendo el descubrimiento del lado del cliente de los recursos del backend.
+
+Puedes definir tantos espacios de nombres adicionales como desees, proporcionando una alternativa conveniente a las variables de entorno para pasar valores en tiempo de despliegue como nombres de tablas de DynamoDB a tus funciones Lambda u otros recursos de cómputo.
+
+## Infraestructura
+
+### Escribir Configuración
+
+Los constructos generados escriben automáticamente la configuración relevante en el espacio de nombres `connection`. También puedes escribir tus propios valores en cualquier espacio de nombres.
+
+<Infrastructure>
+<Fragment slot="cdk">
+El constructo CDK `RuntimeConfig` es un singleton con ámbito de stage. Usa `set()` para escribir una clave en un espacio de nombres:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RuntimeConfig } from ':my-scope/common-constructs';
+
+const rc = RuntimeConfig.ensure(this);
+
+// Built-in 'connection' namespace (written automatically by generated constructs)
+rc.set('connection', 'apis', {
+  ...rc.get('connection').apis,
+  MyApi: api.url,
+});
+
+// Custom namespaces for server-side configuration
+rc.set('tables', 'users', {
+  tableName: usersTable.tableName,
+  tableArn: usersTable.tableArn,
+});
+```
+
+En tiempo de synth/deploy, `RuntimeConfig` crea una aplicación de **AWS AppConfig** que contiene:
+- Un **Configuration Profile** para cada espacio de nombres
+- Una **Hosted Configuration Version** con los datos JSON para cada perfil
+- Un **Deployment** instantáneo al entorno `default`
+</Fragment>
+<Fragment slot="terraform">
+Usa el módulo `runtime-config/entry` para escribir una clave en un espacio de nombres:
+
+```hcl title="packages/infra/src/main.tf"
+# Writes to the 'connection' namespace (done automatically by generated modules)
+module "add_api_url" {
+  source = "../../common/terraform/src/core/runtime-config/entry"
+
+  namespace = "connection"
+  key       = "apis"
+  value     = { "MyApi" = module.my_api.api_url }
+}
+
+# Custom namespace for server-side configuration
+module "add_table_config" {
+  source = "../../common/terraform/src/core/runtime-config/entry"
+
+  namespace = "tables"
+  key       = "users"
+  value     = {
+    tableName = aws_dynamodb_table.users.name
+    arn       = aws_dynamodb_table.users.arn
+  }
+}
+```
+
+Luego debes declarar el módulo `runtime-config/appconfig` para crear los recursos de AppConfig desde todos los archivos de espacios de nombres:
+
+```hcl
+module "appconfig" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig"
+
+  application_name = "my-app-runtime-config"
+
+  depends_on = [module.add_api_url, module.add_table_config]
+}
+```
+
+:::note
+Cada constructo generado (APIs, agentes) crea su propia instancia del módulo `appconfig` autocontenida. Todas son idénticas — cada una lee el mismo conjunto de archivos de espacios de nombres y produce la misma aplicación de AppConfig. Esto asegura que cada módulo sea desplegable de forma independiente.
+:::
+</Fragment>
+</Infrastructure>
+
+### Leer Configuración
+
+Los consumidores del lado del servidor necesitan el **AppConfig Application ID** y permisos IAM para leer la configuración en tiempo de ejecución. Los constructos generados manejan esto automáticamente.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Usa `appConfigApplicationId` para obtener el AppConfig Application ID, y `grantReadAppConfig()` para otorgar permisos de lectura:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const rc = RuntimeConfig.ensure(this);
+
+// Get the AppConfig Application ID (lazy token, resolved at synth time)
+const appId = rc.appConfigApplicationId;
+
+// Pass it as an environment variable to a Lambda function
+const myFunction = new Function(this, 'MyFunction', {
+  // ...
+  environment: {
+    RUNTIME_CONFIG_APP_ID: appId,
+  },
+});
+
+// Grant the function permission to read from AppConfig
+rc.grantReadAppConfig(myFunction);
+```
+
+:::note
+Los constructos de API y agentes generados hacen esto automáticamente — solo necesitas hacer esto manualmente si creas tus propias funciones Lambda o recursos de cómputo que necesitan leer la configuración en tiempo de ejecución.
+:::
+</Fragment>
+<Fragment slot="terraform">
+Referencia la salida `application_id` del módulo `appconfig` para obtener el AppConfig Application ID, y agrega las declaraciones de política IAM apropiadas:
+
+```hcl title="packages/infra/src/main.tf"
+module "appconfig" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig"
+  application_name = "my-app-runtime-config"
+}
+
+# Pass the AppConfig Application ID as an environment variable
+resource "aws_lambda_function" "my_function" {
+  # ...
+  environment {
+    variables = {
+      RUNTIME_CONFIG_APP_ID = module.appconfig.application_id
+    }
+  }
+}
+
+# Grant the function permission to read from AppConfig
+resource "aws_iam_policy" "appconfig_read" {
+  name = "AppConfigReadPolicy"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "appconfig:StartConfigurationSession",
+        "appconfig:GetLatestConfiguration"
+      ]
+      Resource = ["${module.appconfig.application_arn}/*"]
+    }]
+  })
+}
+```
+
+:::note
+Los módulos de API y agentes generados manejan esto automáticamente — cada uno crea su propia instancia del módulo `appconfig` y conecta la variable de entorno y los permisos IAM. Solo necesitas hacer esto manualmente para funciones Lambda personalizadas o recursos de cómputo.
+:::
+</Fragment>
+</Infrastructure>
+
+:::tip[Desarrollo Local]
+Si usas runtime config con espacios de nombres personalizados (por ejemplo, `tables`, `features`), solo necesitas definir una única variable de entorno `RUNTIME_CONFIG_APP_ID` localmente para apuntar a tu aplicación de AppConfig desplegada. Esto permite que tus APIs o agentes locales recuperen la misma configuración que el entorno desplegado sin necesidad de replicar todas las variables de entorno individuales.
+:::
+
+## Acceso del Lado del Servidor vía AppConfig
+
+Los consumidores del lado del servidor como las funciones Lambda y los agentes pueden recuperar la configuración en tiempo de ejecución desde **AWS AppConfig** usando [AWS Lambda Powertools](https://docs.aws.amazon.com/powertools/).
+
+Todos los constructos de API y agentes generados se configuran automáticamente con:
+- La variable de entorno `RUNTIME_CONFIG_APP_ID` (el AppConfig Application ID)
+- Permisos IAM para leer desde AppConfig
+
+<Tabs>
+  <TabItem label="TypeScript" icon="seti:typescript">
+
+Usa `getAppConfig` de [`@aws-lambda-powertools/parameters`](https://docs.aws.amazon.com/powertools/typescript/latest/features/parameters):
+
+```ts
+import { getAppConfig } from '@aws-lambda-powertools/parameters/appconfig';
+
+// Retrieve the 'connection' namespace as a parsed JSON object
+const config = await getAppConfig('connection', {
+  application: process.env.RUNTIME_CONFIG_APP_ID!,
+  environment: 'default',
+  transform: 'json',
+});
+
+// Access values
+const apiUrl = config.apis?.MyApi;
+const cognitoProps = config.cognitoProps;
+```
+
+También puedes recuperar espacios de nombres personalizados:
+
+```ts
+// Retrieve a custom 'tables' namespace
+const tablesConfig = await getAppConfig('tables', {
+  application: process.env.RUNTIME_CONFIG_APP_ID!,
+  environment: 'default',
+  transform: 'json',
+});
+
+const usersTableName = tablesConfig.users?.tableName;
+```
+
+  </TabItem>
+  <TabItem label="Python" icon="seti:python">
+
+Usa `get_app_config` de [`aws_lambda_powertools.utilities.parameters`](https://docs.aws.amazon.com/powertools/python/latest/utilities/parameters/):
+
+```python
+import os
+from aws_lambda_powertools.utilities import parameters
+
+# Retrieve the 'connection' namespace as a parsed JSON object
+config = parameters.get_app_config(
+    name="connection",
+    environment="default",
+    application=os.environ["RUNTIME_CONFIG_APP_ID"],
+    transform="json",
+)
+
+# Access values
+api_url = config.get("apis", {}).get("MyApi")
+cognito_props = config.get("cognitoProps")
+```
+
+También puedes recuperar espacios de nombres personalizados:
+
+```python
+# Retrieve a custom 'tables' namespace
+tables_config = parameters.get_app_config(
+    name="tables",
+    environment="default",
+    application=os.environ["RUNTIME_CONFIG_APP_ID"],
+    transform="json",
+)
+
+users_table_name = tables_config.get("users", {}).get("tableName")
+```
+
+  </TabItem>
+</Tabs>
+
+## Acceso del Lado del Cliente
+
+Para sitios web, el espacio de nombres `connection` se despliega como un archivo `runtime-config.json` en el bucket S3. Consulta la guía <Link path="guides/react-website#runtime-configuration">React Website Runtime Configuration</Link> para obtener detalles sobre cómo acceder a estos valores desde tu código frontend.

@@ -1,0 +1,260 @@
+---
+title: "Cấu Hình Runtime"
+description: "Cách cấu hình runtime kết nối các dự án được tạo của bạn bằng AWS AppConfig"
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+
+Cấu hình runtime là cơ chế được Nx Plugin for AWS sử dụng để truyền các giá trị thời điểm triển khai giữa các dự án và thành phần được tạo để chúng có thể kết nối với nhau. Ví dụ, khi bạn tạo một API, URL của nó sẽ tự động được đăng ký trong cấu hình runtime để một website được kết nối có thể khám phá nó.
+
+## Cách Hoạt Động
+
+Cấu hình runtime được tổ chức thành các **namespaces**. Mỗi namespace là một nhóm logic của các giá trị cấu hình liên quan. Tại thời điểm triển khai, tất cả các namespaces được lưu trữ trong **AWS AppConfig** dưới dạng Configuration Profiles.
+
+Namespace `connection` được tích hợp sẵn được sử dụng cho cấu hình cho phép các dự án được tạo kết nối với nhau, ví dụ:
+- **API URLs** — được đăng ký tự động bởi các API constructs
+- **Cognito settings** — được đăng ký tự động bởi UserIdentity construct
+- **Agent runtime ARNs** — được đăng ký tự động bởi các agent constructs
+
+Namespace `connection` cũng được triển khai dưới dạng tệp `runtime-config.json` vào S3 bucket của website, cho phép khám phá các tài nguyên backend từ phía client.
+
+Bạn có thể định nghĩa bao nhiêu namespace bổ sung tùy thích, cung cấp một giải pháp thay thế thuận tiện cho các biến môi trường để truyền các giá trị thời điểm triển khai như tên bảng DynamoDB đến các Lambda functions hoặc tài nguyên tính toán khác.
+
+## Hạ Tầng
+
+### Ghi Cấu Hình
+
+Các constructs được tạo tự động ghi cấu hình liên quan vào namespace `connection`. Bạn cũng có thể ghi các giá trị của riêng mình vào bất kỳ namespace nào.
+
+<Infrastructure>
+<Fragment slot="cdk">
+CDK construct `RuntimeConfig` là một singleton có phạm vi stage. Sử dụng `set()` để ghi một key vào namespace:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RuntimeConfig } from ':my-scope/common-constructs';
+
+const rc = RuntimeConfig.ensure(this);
+
+// Built-in 'connection' namespace (written automatically by generated constructs)
+rc.set('connection', 'apis', {
+  ...rc.get('connection').apis,
+  MyApi: api.url,
+});
+
+// Custom namespaces for server-side configuration
+rc.set('tables', 'users', {
+  tableName: usersTable.tableName,
+  tableArn: usersTable.tableArn,
+});
+```
+
+Tại thời điểm synth/deploy, `RuntimeConfig` tạo một ứng dụng **AWS AppConfig** chứa:
+- Một **Configuration Profile** cho mỗi namespace
+- Một **Hosted Configuration Version** với dữ liệu JSON cho mỗi profile
+- Một **Deployment** tức thì đến môi trường `default`
+</Fragment>
+<Fragment slot="terraform">
+Sử dụng module `runtime-config/entry` để ghi một key vào namespace:
+
+```hcl title="packages/infra/src/main.tf"
+# Writes to the 'connection' namespace (done automatically by generated modules)
+module "add_api_url" {
+  source = "../../common/terraform/src/core/runtime-config/entry"
+
+  namespace = "connection"
+  key       = "apis"
+  value     = { "MyApi" = module.my_api.api_url }
+}
+
+# Custom namespace for server-side configuration
+module "add_table_config" {
+  source = "../../common/terraform/src/core/runtime-config/entry"
+
+  namespace = "tables"
+  key       = "users"
+  value     = {
+    tableName = aws_dynamodb_table.users.name
+    arn       = aws_dynamodb_table.users.arn
+  }
+}
+```
+
+Sau đó bạn phải khai báo module `runtime-config/appconfig` để tạo các tài nguyên AppConfig từ tất cả các tệp namespace:
+
+```hcl
+module "appconfig" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig"
+
+  application_name = "my-app-runtime-config"
+
+  depends_on = [module.add_api_url, module.add_table_config]
+}
+```
+
+:::note
+Mỗi construct được tạo (APIs, agents) tạo instance module `appconfig` độc lập của riêng nó. Chúng đều giống hệt nhau — mỗi cái đọc cùng một tập hợp các tệp namespace và tạo ra cùng một ứng dụng AppConfig. Điều này đảm bảo mỗi module có thể triển khai độc lập.
+:::
+</Fragment>
+</Infrastructure>
+
+### Đọc Cấu Hình
+
+Các consumers phía server cần **AppConfig Application ID** và quyền IAM để đọc cấu hình tại runtime. Các constructs được tạo xử lý điều này tự động.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Sử dụng `appConfigApplicationId` để lấy AppConfig Application ID, và `grantReadAppConfig()` để cấp quyền đọc:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const rc = RuntimeConfig.ensure(this);
+
+// Get the AppConfig Application ID (lazy token, resolved at synth time)
+const appId = rc.appConfigApplicationId;
+
+// Pass it as an environment variable to a Lambda function
+const myFunction = new Function(this, 'MyFunction', {
+  // ...
+  environment: {
+    RUNTIME_CONFIG_APP_ID: appId,
+  },
+});
+
+// Grant the function permission to read from AppConfig
+rc.grantReadAppConfig(myFunction);
+```
+
+:::note
+Các API và agent constructs được tạo làm điều này tự động — bạn chỉ cần làm thủ công nếu bạn tạo các Lambda functions hoặc tài nguyên tính toán của riêng mình cần đọc cấu hình runtime.
+:::
+</Fragment>
+<Fragment slot="terraform">
+Tham chiếu output `application_id` của module `appconfig` để lấy AppConfig Application ID, và thêm các câu lệnh IAM policy phù hợp:
+
+```hcl title="packages/infra/src/main.tf"
+module "appconfig" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig"
+  application_name = "my-app-runtime-config"
+}
+
+# Pass the AppConfig Application ID as an environment variable
+resource "aws_lambda_function" "my_function" {
+  # ...
+  environment {
+    variables = {
+      RUNTIME_CONFIG_APP_ID = module.appconfig.application_id
+    }
+  }
+}
+
+# Grant the function permission to read from AppConfig
+resource "aws_iam_policy" "appconfig_read" {
+  name = "AppConfigReadPolicy"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "appconfig:StartConfigurationSession",
+        "appconfig:GetLatestConfiguration"
+      ]
+      Resource = ["${module.appconfig.application_arn}/*"]
+    }]
+  })
+}
+```
+
+:::note
+Các API và agent modules được tạo xử lý điều này tự động — mỗi cái tạo instance module `appconfig` của riêng nó và thiết lập biến môi trường và quyền IAM. Bạn chỉ cần làm thủ công cho các Lambda functions hoặc tài nguyên tính toán tùy chỉnh.
+:::
+</Fragment>
+</Infrastructure>
+
+:::tip[Phát Triển Cục Bộ]
+Nếu bạn sử dụng runtime config với các namespace tùy chỉnh (ví dụ: `tables`, `features`), bạn chỉ cần định nghĩa một biến môi trường `RUNTIME_CONFIG_APP_ID` duy nhất ở local để trỏ đến ứng dụng AppConfig đã triển khai của bạn. Điều này cho phép các APIs hoặc agents local của bạn truy xuất cùng một cấu hình như môi trường đã triển khai mà không cần sao chép tất cả các biến môi trường riêng lẻ.
+:::
+
+## Truy Cập Phía Server qua AppConfig
+
+Các consumers phía server như Lambda functions và agents có thể truy xuất cấu hình runtime từ **AWS AppConfig** bằng cách sử dụng [AWS Lambda Powertools](https://docs.aws.amazon.com/powertools/).
+
+Tất cả các API và agent constructs được tạo đều tự động được cấu hình với:
+- Biến môi trường `RUNTIME_CONFIG_APP_ID` (AppConfig Application ID)
+- Quyền IAM để đọc từ AppConfig
+
+<Tabs>
+  <TabItem label="TypeScript" icon="seti:typescript">
+
+Sử dụng `getAppConfig` từ [`@aws-lambda-powertools/parameters`](https://docs.aws.amazon.com/powertools/typescript/latest/features/parameters):
+
+```ts
+import { getAppConfig } from '@aws-lambda-powertools/parameters/appconfig';
+
+// Retrieve the 'connection' namespace as a parsed JSON object
+const config = await getAppConfig('connection', {
+  application: process.env.RUNTIME_CONFIG_APP_ID!,
+  environment: 'default',
+  transform: 'json',
+});
+
+// Access values
+const apiUrl = config.apis?.MyApi;
+const cognitoProps = config.cognitoProps;
+```
+
+Bạn cũng có thể truy xuất các namespace tùy chỉnh:
+
+```ts
+// Retrieve a custom 'tables' namespace
+const tablesConfig = await getAppConfig('tables', {
+  application: process.env.RUNTIME_CONFIG_APP_ID!,
+  environment: 'default',
+  transform: 'json',
+});
+
+const usersTableName = tablesConfig.users?.tableName;
+```
+
+  </TabItem>
+  <TabItem label="Python" icon="seti:python">
+
+Sử dụng `get_app_config` từ [`aws_lambda_powertools.utilities.parameters`](https://docs.aws.amazon.com/powertools/python/latest/utilities/parameters/):
+
+```python
+import os
+from aws_lambda_powertools.utilities import parameters
+
+# Retrieve the 'connection' namespace as a parsed JSON object
+config = parameters.get_app_config(
+    name="connection",
+    environment="default",
+    application=os.environ["RUNTIME_CONFIG_APP_ID"],
+    transform="json",
+)
+
+# Access values
+api_url = config.get("apis", {}).get("MyApi")
+cognito_props = config.get("cognitoProps")
+```
+
+Bạn cũng có thể truy xuất các namespace tùy chỉnh:
+
+```python
+# Retrieve a custom 'tables' namespace
+tables_config = parameters.get_app_config(
+    name="tables",
+    environment="default",
+    application=os.environ["RUNTIME_CONFIG_APP_ID"],
+    transform="json",
+)
+
+users_table_name = tables_config.get("users", {}).get("tableName")
+```
+
+  </TabItem>
+</Tabs>
+
+## Truy Cập Phía Client
+
+Đối với các websites, namespace `connection` được triển khai dưới dạng tệp `runtime-config.json` vào S3 bucket. Xem hướng dẫn <Link path="guides/react-website#runtime-configuration">React Website Runtime Configuration</Link> để biết chi tiết về cách truy cập các giá trị này từ code frontend của bạn.
