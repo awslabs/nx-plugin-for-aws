@@ -12,7 +12,7 @@ Los constructos CDK de la API REST/HTTP están configurados para proporcionar un
 Los constructos CDK proporcionan soporte completo de integración con seguridad de tipos como se describe a continuación.
 </Fragment>
 <Fragment slot="terraform">
-:::nota
+:::note
 Los módulos de Terraform usan el "patrón router" con una única función Lambda que maneja todas las operaciones. No se admiten integraciones type-safe - el módulo crea una función Lambda que maneja todas las solicitudes de la API.
 
 Para integraciones explícitas por operación con Terraform, necesitarías crear manualmente funciones Lambda individuales y rutas de API Gateway. Consulta la sección [Integraciones Explícitas](#explicit-integrations) para ver ejemplos.
@@ -44,37 +44,6 @@ module "my_api" {
   tags = local.common_tags
 }
 ```
-</Fragment>
-</Infrastructure>
-
-#### Eligiendo un Patrón de Integración
-
-<Infrastructure>
-<Fragment slot="cdk">
-Los constructos de API CDK generados admiten dos patrones de integración:
-
-- `isolated` crea una función Lambda por operación. Este es el valor por defecto para las APIs generadas.
-- `shared` crea un único router Lambda por defecto y lo reutiliza para cada operación a menos que sobrescribas integraciones específicas.
-
-`isolated` te brinda permisos y configuración más granulares por operación. `shared` reduce la proliferación de funciones Lambda e integraciones de API Gateway mientras aún permite sobrescritas selectivas.
-
-El soporte del generador actualmente varía según el backend:
-
-- `ts#trpc-api` admite tanto `isolated` como `shared` para `ServerlessApiGatewayRestApi` y `ServerlessApiGatewayHttpApi` a través de la opción `integrationPattern`.
-- `py#fast-api` y `ts#smithy-api` actualmente generan `isolated`.
-
-También puedes cambiar un constructo de API CDK generado existente entre los dos patrones editando el campo `pattern` en su método `defaultIntegrations`:
-
-```ts {3}
-return IntegrationBuilder.rest({
-  // Cambia esto a 'isolated' o 'shared'
-  pattern: 'isolated',
-  ...
-});
-```
-</Fragment>
-<Fragment slot="terraform">
-Los módulos de Terraform ya usan el patrón router por defecto, con una única función Lambda que maneja todas las operaciones de la API.
 </Fragment>
 </Infrastructure>
 
@@ -151,6 +120,17 @@ new MyApi(this, 'MyApi', {
     .build(),
 });
 ```
+
+:::caution[Variables de Entorno de Lambda]
+Si especificas `environment` en tus opciones por defecto, esto __sobrescribirá__ cualquier variable de entorno que esté definida dentro de tu constructo de API generado. Generalmente es preferible usar el método `addEnvironment` para las funciones Lambda. Puedes lograr esto fácilmente iterando a través de tus integraciones:
+
+```ts
+Object.values(api.integrations).forEach(({ handler }) => {
+  handler.addEnvironment('LOG_LEVEL', 'INFO');
+});
+```
+:::
+
 </Fragment>
 <Fragment slot="terraform">
 Para personalizar opciones como configuración de VPC, necesitas editar el módulo de Terraform generado. Por ejemplo, para agregar soporte de VPC a todas las funciones Lambda:
@@ -265,7 +245,7 @@ api.integrations.getFile.bucket.grantRead(...);
 ```
 </Fragment>
 <Fragment slot="terraform">
-:::nota
+:::note
 No se admite sobrescribir integraciones específicas con módulos de Terraform debido al patrón router. Todas las operaciones son manejadas por una única función Lambda.
 
 Para diferentes tipos de integración por operación, necesitarías implementar integraciones explícitas manualmente (ver sección [Integraciones Explícitas](#explicit-integrations)).
@@ -295,7 +275,7 @@ new MyApi(this, 'MyApi', {
 ```
 </Fragment>
 <Fragment slot="terraform">
-:::nota
+:::note
 No se admiten sobrescritas de autorizadores por operación con módulos de Terraform. Toda la API usa el método de autenticación especificado al generar la API (IAM, Cognito o None).
 
 Para autorización por operación, necesitarías implementar integraciones explícitas manualmente como se muestra abajo.

@@ -10,6 +10,7 @@ import {
   Runtime,
   RuntimeProps,
 } from '@aws-cdk/aws-bedrock-agentcore-alpha';
+import { RuntimeConfig } from '../../../core/runtime-config.js';
 
 export type <%- nameClassName %>Props = Omit<
   RuntimeProps,
@@ -22,6 +23,8 @@ export class <%- nameClassName %> extends Construct {
 
   constructor(scope: Construct, id: string, props?: <%- nameClassName %>Props) {
     super(scope, id);
+
+    const rc = RuntimeConfig.ensure(this);
 
     this.dockerImage = AgentRuntimeArtifact.fromAsset(
       path.dirname(url.fileURLToPath(new URL(import.meta.url))),
@@ -42,6 +45,17 @@ export class <%- nameClassName %> extends Construct {
       protocolConfiguration: ProtocolType.<%- serverProtocol %>,
       agentRuntimeArtifact: this.dockerImage,
       ...props,
+      environmentVariables: {
+        RUNTIME_CONFIG_APP_ID: rc.appConfigApplicationId,
+        ...props?.environmentVariables,
+      },
+    });
+
+    rc.grantReadAppConfig(this.agentCoreRuntime);
+
+    rc.set('connection', 'agentRuntimes', {
+      ...rc.get('connection').agentRuntimes,
+      <%- nameClassName %>: this.agentCoreRuntime.agentRuntimeArn,
     });
   }
 }

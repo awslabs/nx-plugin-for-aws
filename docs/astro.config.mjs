@@ -347,6 +347,10 @@ export default defineConfig({
                   link: '/guides/connection',
                 },
                 {
+                  label: 'Runtime Configuration',
+                  link: '/guides/runtime-config',
+                },
+                {
                   label: 'React → FastAPI',
                   link: '/guides/connection/react-fastapi',
                 },

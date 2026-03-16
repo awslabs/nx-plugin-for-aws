@@ -134,7 +134,7 @@ export const MyComponent = () => {
 
 ## 运行时配置
 
-基础设施配置通过运行时配置提供给网站，这使得网站可以访问部署时才能确定的参数（如 API 地址）。
+基础设施配置通过 <Link href="guides/runtime-config">运行时配置</Link> 提供给网站，这使得网站可以访问部署时才能确定的参数（如 API 地址）。
 
 ### 基础设施配置
 
@@ -142,36 +142,36 @@ export const MyComponent = () => {
 <Fragment slot="cdk">
 使用 `RuntimeConfig` CDK 构造管理配置。通过 `@aws/nx-plugin` 生成器（如 <Link path="guides/trpc">`ts#trpc-api`</Link> 和 <Link path="guides/fastapi">`py#fast-api`</Link>）创建的 CDK 构造会自动向 `RuntimeConfig` 添加值。
 
-网站 CDK 构造会将运行时配置部署为 S3 根目录下的 `runtime-config.json` 文件。
+网站 CDK 构造会将运行时配置的 `connection` 命名空间部署为 S3 根目录下的 `runtime-config.json` 文件。
 
-```ts title="packages/infra/src/stacks/application-stack.ts" {9-12,14-15}
+```ts title="packages/infra/src/stacks/application-stack.ts"
 import { Stack } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
-import { MyWebsite } from ':my-scope/common-constructs';
+import { MyWebsite, MyApi } from ':my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
   constructor(scope: Construct, id: string) {
     super(scope, id);
 
+    // 网站构造可以在任意位置声明 — 运行时配置会延迟解析
+    new MyWebsite(this, 'MyWebsite');
+
     // 自动向 RuntimeConfig 添加值
     new MyApi(this, 'MyApi', {
       integrations: MyApi.defaultIntegrations(this).build(),
     });
-
-    // 自动部署 runtime-config.json
-    new MyWebsite(this, 'MyWebsite');
   }
 }
 ```
 
-:::caution
-必须确保在声明网站构造之前声明所有会向 `RuntimeConfig` 添加值的构造，否则这些值将不会出现在 `runtime-config.json` 中。
+:::note
+在 CDK 中，网站构造可以在堆栈的任意位置声明。运行时配置会在合成时延迟解析，因此无论声明顺序如何，所有值都会被包含。
 :::
 </Fragment>
 <Fragment slot="terraform">
 Terraform 通过 runtime-config 模块管理配置。通过 `@aws/nx-plugin` 生成器（如 <Link path="guides/trpc">`ts#trpc-api`</Link> 和 <Link path="guides/fastapi">`py#fast-api`</Link>）创建的 Terraform 模块会自动更新运行时配置。
 
-网站 Terraform 模块会将运行时配置部署为 S3 根目录下的 `runtime-config.json` 文件。
+网站 Terraform 模块会将运行时配置的 `connection` 命名空间部署为 S3 根目录下的 `runtime-config.json` 文件。
 
 ```hcl title="packages/infra/src/main.tf" {14-15}
 # 自动更新运行时配置
@@ -212,6 +212,10 @@ const MyComponent = () => {
   const apiUrl = runtimeConfig.apis.MyApi;
 };
 ```
+
+:::note
+有关运行时配置如何存储在 AWS AppConfig 中，以及服务器端消费者（Lambda 函数、代理）如何检索配置的详细信息，请参阅 <Link path="guides/runtime-config">运行时配置</Link> 指南。
+:::
 
 ### 本地运行时配置
 
