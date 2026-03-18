@@ -55,7 +55,6 @@ import PackageManagerExecCommand from '@components/package-manager-exec-command.
         - agent.ts 샘플 도구가 포함된 메인 에이전트 정의
         - client.ts 에이전트를 호출하기 위한 제공된 클라이언트
         - agent-core-trpc-client.ts AgentCore Runtime의 에이전트에 연결하기 위한 클라이언트 팩토리
-        - agent-core-mcp-client.ts AgentCore Runtime의 MCP 서버에 연결하기 위한 클라이언트 팩토리
         - Dockerfile 에이전트 호스팅을 위한 진입점 (`computeType`이 `None`으로 설정된 경우 제외)
     - package.json Strands 종속성으로 업데이트됨
     - project.json 에이전트 서브 타겟으로 업데이트됨
@@ -110,7 +109,7 @@ tRPC는 WebSocket을 통한 Query, Mutation 및 Subscription 프로시저를 지
 
 ```typescript
 import { Agent, tool } from '@strands-agents/sdk';
-import z from 'zod';
+import { z } from 'zod';
 
 const letterCounter = tool({
   name: 'letter_counter',
@@ -127,10 +126,12 @@ const letterCounter = tool({
 });
 
 // Add tools to your agent
-export const agent = new Agent({
-  systemPrompt: 'You are a helpful assistant with access to various tools.',
-  tools: [letterCounter],
-});
+export const getAgent = async (sessionId: string) => {
+  return new Agent({
+    systemPrompt: 'You are a helpful assistant with access to various tools.',
+    tools: [letterCounter],
+  });
+};
 ```
 
 Strands 프레임워크는 다음을 자동으로 처리합니다:
@@ -167,86 +168,15 @@ response = await agent.invoke('What can you help me with?');
 
 ### MCP 서버 사용
 
-Strands 에이전트에 [MCP 서버의 도구를 추가](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/tools/mcp-tools/)할 수 있습니다.
+Strands 에이전트에 [MCP 서버의 도구를 추가](https://strandsagents.com/docs/user-guide/concepts/tools/mcp-tools/)할 수 있습니다.
 
-<Link path="/guides/py-mcp-server">`py#mcp-server`</Link> 또는 <Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link> 생성기를 사용하여 생성한 MCP 서버(또는 Bedrock AgentCore Runtime에 호스팅된 다른 서버)를 사용하려면 `agent-core-mcp-client.ts`에 클라이언트 팩토리가 생성됩니다.
+<Link path="/guides/py-mcp-server">`py#mcp-server`</Link> 또는 <Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link> 생성기를 사용하여 생성한 MCP 서버를 사용하려면 <Link path="/guides/connection/ts-strands-agent-mcp">`connection` 생성기</Link>를 활용할 수 있습니다.
 
-`agent.ts`에서 에이전트 초기화를 업데이트하여 MCP 클라이언트를 생성하고 도구를 추가할 수 있습니다. 다음 예제는 IAM (SigV4) 인증으로 이를 수행하는 방법을 보여줍니다:
+<RunGenerator generator="connection" />
 
-```typescript
-// agent.ts
-import { Agent } from '@strands-agents/sdk';
-import { AgentCoreMcpClient } from './agent-core-mcp-client.js';
+연결 설정 방법에 대한 자세한 내용은 <Link path="/guides/connection/ts-strands-agent-mcp">`connection` 생성기 가이드</Link>를 참조하세요.
 
-const mcpClient = AgentCoreMcpClient.withIamAuth({
-  agentRuntimeArn: process.env.MCP_AGENTCORE_RUNTIME_ARN!,
-  region: process.env.AWS_REGION || 'us-west-2',
-  sessionId: 'my-session-id',
-});
-
-export const agent = new Agent({
-  systemPrompt: '...',
-  tools: [mcpClient],
-});
-```
-
-:::tip
-대상 MCP 서버가 JWT 인증을 사용하는 경우 대신 `AgentCoreMcpClient.withJwtAuth` 메서드를 사용하여 클라이언트를 생성할 수 있습니다.
-:::
-
-위의 IAM 인증 예제에서는 인프라에서 두 가지를 구성해야 합니다. 첫째, MCP 서버의 AgentCore Runtime ARN에 대해 에이전트가 사용하는 환경 변수를 추가해야 하고, 둘째 에이전트에 MCP 서버를 호출할 수 있는 권한을 부여해야 합니다. 이는 다음과 같이 수행할 수 있습니다:
-
-<Infrastructure>
-<Fragment slot="cdk">
-```ts {9, 13}
-import { MyProjectAgent, MyProjectMcpServer } from ':my-scope/common-constructs';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    const mcpServer = new MyProjectMcpServer(this, 'MyProjectMcpServer');
-
-    const agent = new MyProjectAgent(this, 'MyProjectAgent', {
-      environmentVariables: {
-        MCP_AGENTCORE_RUNTIME_ARN: mcpServer.agentCoreRuntime.agentRuntimeArn,
-      },
-    });
-
-    mcpServer.agentCoreRuntime.grantInvoke(agent.agentCoreRuntime);
-  }
-}
-```
-</Fragment>
-<Fragment slot="terraform">
-```terraform
-# MCP Server
-module "my_project_mcp_server" {
-  source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
-}
-
-# Agent
-module "my_project_agent" {
-  source = "../../common/terraform/src/app/agents/my-project-agent"
-
-  env = {
-    MCP_AGENTCORE_RUNTIME_ARN = module.my_project_mcp_server.agent_core_runtime_arn
-  }
-
-  additional_iam_policy_statements = [
-    {
-      Effect = "Allow"
-      Action = [
-        "bedrock-agentcore:InvokeAgentRuntime"
-      ]
-      Resource = [
-        module.my_project_mcp_server.agent_core_runtime_arn,
-        "${module.my_project_mcp_server.agent_core_runtime_arn}/*"
-      ]
-    }
-  ]
-}
-```
-</Fragment>
-</Infrastructure>
+다른 MCP 서버의 경우 [Strands 문서](https://strandsagents.com/docs/user-guide/concepts/tools/mcp-tools/)를 참조하세요.
 
 ### 더 보기
 
@@ -497,7 +427,7 @@ async function buildSignedUrl(
   });
 
   // Build WebSocket URL from ARN
-  const wsUrl = `wss://bedrock-agentcore.${region}.amazonaws.com/runtimes/${agentRuntimeArn.replace(/:/g, '%3A').replace(/\//g, '%2F')}/ws`;
+  const wsUrl = `wss://bedrock-agentcore.${region}.amazonaws.com/runtimes/${encodeURIComponent(agentRuntimeArn)}/ws`;
 
   // Create presigned URL
   const signedRequest = await awsClient.sign(wsUrl, {

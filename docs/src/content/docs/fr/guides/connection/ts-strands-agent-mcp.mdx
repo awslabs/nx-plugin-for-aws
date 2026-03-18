@@ -1,0 +1,148 @@
+---
+title: "Agent TypeScript Strands vers MCP"
+description: "Connecter un Agent TypeScript Strands à un serveur MCP"
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+Le générateur `connection` peut connecter votre <Link path="guides/ts-strands-agent">TypeScript Strands Agent</Link> à un serveur MCP (soit <Link path="guides/ts-mcp-server">TypeScript</Link> soit <Link path="guides/py-mcp-server">Python</Link>).
+
+Le générateur configure tout le câblage nécessaire pour que votre agent puisse découvrir et invoquer les outils du serveur MCP, à la fois lorsqu'il est déployé sur AWS (via Bedrock AgentCore) et lorsqu'il s'exécute localement.
+
+## Prérequis
+
+Avant d'utiliser ce générateur, assurez-vous d'avoir :
+
+1. Un projet TypeScript avec un composant <Link path="guides/ts-strands-agent">Strands Agent</Link>
+2. Un projet avec un composant serveur MCP (soit <Link path="guides/ts-mcp-server">`ts#mcp-server`</Link> soit <Link path="guides/py-mcp-server">`py#mcp-server`</Link>)
+3. Les deux composants créés avec `computeType: BedrockAgentCoreRuntime`
+
+## Utilisation
+
+### Exécuter le générateur
+
+<RunGenerator generator="connection" />
+
+Sélectionnez votre projet d'agent comme source et votre projet de serveur MCP comme cible. Si vos projets contiennent plusieurs composants, spécifiez les options `sourceComponent` et `targetComponent` pour lever l'ambiguïté.
+
+### Options
+
+<GeneratorParameters generator="connection" />
+
+## Sortie du générateur
+
+Le générateur crée un package partagé `agent-connection` et modifie le code de votre agent :
+
+<FileTree>
+
+- packages/common/agent-connection
+  - src
+    - app
+      - \<mcp-server-name>-client.ts Client de haut niveau pour le serveur MCP connecté
+    - core
+      - agentcore-mcp-client.ts Client MCP AgentCore de bas niveau avec authentification SigV4/JWT
+    - index.ts Exporte tous les clients
+  - project.json
+  - tsconfig.json
+
+</FileTree>
+
+De plus, il :
+- Transforme le fichier `agent.ts` de votre agent pour importer et utiliser les outils du serveur MCP
+- Met à jour la cible `serve-local` de l'agent pour dépendre de la cible serve du serveur MCP
+- Installe les dépendances requises
+
+## Utilisation du serveur MCP connecté
+
+Le générateur transforme le fichier `agent.ts` de votre agent pour utiliser les outils du serveur MCP :
+
+```ts title="packages/example/src/my-agent/agent.ts" {2,5,8}
+import { Agent, tool } from '@strands-agents/sdk';
+import { MyMcpServerClient } from ':my-scope/agent-connection';
+
+export const getAgent = async (sessionId: string) => {
+  const myMcpServerClient = await MyMcpServerClient.create(sessionId);
+  return new Agent({
+    systemPrompt: '...',
+    tools: [myMcpServerClient],
+  });
+};
+```
+
+Le paramètre `sessionId` est transmis depuis l'appelant, garantissant la cohérence pour [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
+
+## Infrastructure
+
+<Infrastructure>
+<Fragment slot="cdk">
+Après avoir exécuté le générateur de connexion, vous devez accorder à l'agent la permission d'invoquer le serveur MCP :
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {12-13}
+const mcpServer = new MyMcpServer(this, 'MyMcpServer');
+const myAgent = new MyAgent(this, 'MyAgent');
+
+// Grant the agent access to bedrock models
+myAgent.agentCoreRuntime.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream'],
+    resources: ['arn:aws:bedrock:*:*:foundation-model/*', 'arn:aws:bedrock:*:*:inference-profile/*'],
+  }),
+);
+
+// Grant the agent permissions to invoke the MCP server
+mcpServer.agentCoreRuntime.grantInvoke(myAgent.agentCoreRuntime);
+```
+
+L'ARN du runtime AgentCore du serveur MCP est automatiquement enregistré dans l'espace de noms `connection` de la <Link path="guides/runtime-config">Configuration Runtime</Link> par la construction CDK générée, afin que l'agent puisse le découvrir à l'exécution.
+</Fragment>
+<Fragment slot="terraform">
+Après avoir exécuté le générateur de connexion, vous devez accorder à l'agent la permission d'invoquer le serveur MCP dans votre configuration Terraform :
+
+```hcl title="packages/infra/src/main.tf" {12-24}
+module "inventory_mcp_server" {
+  source = "../../common/terraform/src/app/mcp-servers/inventory-mcp"
+}
+
+module "story_agent" {
+  source = "../../common/terraform/src/app/agents/story-agent"
+}
+
+# Grant the agent permissions to invoke the MCP server
+resource "aws_iam_policy" "agent_invoke_mcp" {
+  name = "AgentInvokeMcpPolicy"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = "bedrock-agentcore:InvokeAgent"
+      Resource = module.inventory_mcp_server.agent_core_runtime_arn
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "agent_invoke_mcp" {
+  role       = module.story_agent.agent_core_runtime_role_arn
+  policy_arn = aws_iam_policy.agent_invoke_mcp.arn
+}
+```
+
+L'ARN du runtime AgentCore du serveur MCP est automatiquement enregistré dans l'espace de noms `connection` de la <Link path="guides/runtime-config">Configuration Runtime</Link> par le module Terraform généré, afin que l'agent puisse le découvrir à l'exécution.
+</Fragment>
+</Infrastructure>
+
+## Développement local
+
+Le générateur configure la cible `serve-local` de l'agent pour :
+1. Démarrer automatiquement le(s) serveur(s) MCP connecté(s)
+2. Définir `SERVE_LOCAL=true` afin que le client généré utilise le transport HTTP direct au lieu d'AgentCore
+
+Exécutez l'agent localement avec :
+
+<NxCommands commands={["<agent-name>-serve-local <project-name>"]} />
+
+Cela démarrera à la fois l'agent et tous les serveurs MCP connectés, l'agent se connectant aux serveurs MCP directement via HTTP sur leurs ports locaux assignés.
