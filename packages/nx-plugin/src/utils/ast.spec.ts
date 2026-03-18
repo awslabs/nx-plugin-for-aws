@@ -85,6 +85,36 @@ describe('ast utils', () => {
       expect(writtenContent).toBe(initialContent);
     });
 
+    it('should merge imports when called twice with different variables from same module', () => {
+      const initialContent = `import { Agent } from '@strands-agents/sdk';`;
+      tree.write('file.ts', initialContent);
+
+      addDestructuredImport(
+        tree,
+        'file.ts',
+        ['ClientA'],
+        ':scope/agent-connection',
+      );
+      addDestructuredImport(
+        tree,
+        'file.ts',
+        ['ClientB'],
+        ':scope/agent-connection',
+      );
+
+      const writtenContent = tree.read('file.ts', 'utf-8')!;
+
+      // Should have exactly one import from agent-connection
+      const importLines = writtenContent
+        .split('\n')
+        .filter((l) => l.includes('agent-connection'));
+      expect(importLines).toHaveLength(1);
+
+      // The single import should contain both clients
+      expect(importLines[0]).toContain('ClientA');
+      expect(importLines[0]).toContain('ClientB');
+    });
+
     it('should throw if file does not exist', () => {
       expect(() =>
         addDestructuredImport(

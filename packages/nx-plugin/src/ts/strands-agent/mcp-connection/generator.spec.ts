@@ -324,6 +324,67 @@ export const getAgent = async (sessionId: string) => {
     expect(importCount).toBeLessThanOrEqual(4);
   });
 
+  it('should not duplicate import when connecting two different MCP servers to same agent', async () => {
+    setupProjects();
+
+    // First connection: inventory-mcp
+    await tsStrandsAgentMcpConnectionGenerator(tree, {
+      sourceProject: '@test/my-api',
+      targetProject: '@test/my-api',
+      sourceComponent: {
+        generator: 'ts#strands-agent',
+        name: 'my-agent',
+        path: 'src/my-agent',
+        port: 8081,
+      },
+      targetComponent: {
+        generator: 'ts#mcp-server',
+        name: 'inventory-mcp',
+        path: 'src/inventory-mcp',
+        port: 8082,
+        rc: 'InventoryMcp',
+      },
+    });
+
+    // Second connection: catalog-mcp (different MCP server)
+    await tsStrandsAgentMcpConnectionGenerator(tree, {
+      sourceProject: '@test/my-api',
+      targetProject: '@test/my-api',
+      sourceComponent: {
+        generator: 'ts#strands-agent',
+        name: 'my-agent',
+        path: 'src/my-agent',
+        port: 8081,
+      },
+      targetComponent: {
+        generator: 'ts#mcp-server',
+        name: 'catalog-mcp',
+        path: 'src/catalog-mcp',
+        port: 8083,
+        rc: 'CatalogMcp',
+      },
+    });
+
+    const agentContent = tree.read(
+      'packages/my-api/src/my-agent/agent.ts',
+      'utf-8',
+    )!;
+
+    // Should have exactly one import from agent-connection (with both clients)
+    const importLines = agentContent
+      .split('\n')
+      .filter((l) => l.includes('agent-connection'));
+    expect(importLines).toHaveLength(1);
+
+    // The single import should contain both clients
+    expect(importLines[0]).toContain('InventoryMcpClient');
+    expect(importLines[0]).toContain('CatalogMcpClient');
+
+    // Both clients should be in the tools array
+    expect(agentContent).toContain('catalogMcp');
+    expect(agentContent).toContain('inventoryMcp');
+  });
+
   it('should throw if components are not provided', async () => {
     setupProjects();
 
