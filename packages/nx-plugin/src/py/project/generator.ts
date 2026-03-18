@@ -144,6 +144,12 @@ export const pyProjectGenerator = async (
     srcDir: false,
   });
 
+  // Remove generated hello.py and test_hello.py as they are not needed
+  [
+    joinPathFragments(dir, normalizedModuleName, 'hello.py'),
+    joinPathFragments(dir, 'tests', 'test_hello.py'),
+  ].forEach((f) => tree.delete(f));
+
   const outputPath = '{workspaceRoot}/dist/{projectRoot}';
   const buildOutputPath = joinPathFragments(outputPath, 'build');
   const projectConfiguration = readProjectConfiguration(

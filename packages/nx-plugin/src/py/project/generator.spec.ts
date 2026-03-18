@@ -28,6 +28,10 @@ describe('python project generator', () => {
     expect(tree.exists('apps/test_project/pyproject.toml')).toBeTruthy();
     expect(tree.exists('apps/test_project/proj_test_project')).toBeTruthy();
     expect(tree.exists('apps/test_project/tests')).toBeTruthy();
+
+    // Verify hello.py files are removed
+    expect(tree.exists('apps/test_project/proj_test_project/hello.py')).toBeFalsy();
+    expect(tree.exists('apps/test_project/tests/test_hello.py')).toBeFalsy();
   });
 
   it('should set up project configuration correctly', async () => {
