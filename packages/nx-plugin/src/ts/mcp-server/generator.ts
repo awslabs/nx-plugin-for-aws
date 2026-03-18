@@ -25,7 +25,7 @@ import {
 } from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { formatFilesInSubtree } from '../../utils/format';
-import { withVersions } from '../../utils/versions';
+import { TS_VERSIONS, withVersions } from '../../utils/versions';
 import { kebabCase, toClassName } from '../../utils/names';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { addMcpServerInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
@@ -101,6 +101,10 @@ export const tsMcpServerGenerator = async (
       name,
       esm,
       distDir,
+      adotVersion:
+        TS_VERSIONS[
+          '@aws/aws-distro-opentelemetry-node-autoinstrumentation'
+        ],
     },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
