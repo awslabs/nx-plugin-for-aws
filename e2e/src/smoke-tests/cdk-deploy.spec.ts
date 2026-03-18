@@ -109,7 +109,7 @@ async function invokeAgentCoreAgent(
   const response = await aws.fetch(agentUrl, {
     method: 'POST',
     body: JSON.stringify({
-      prompt: 'what is 3 + 5?',
+      prompt: 'what is 3 + 5 - 2?',
       session_id: 'abcdefghijklmnopqrstuvwxyz0123456789',
     }),
     headers: {
@@ -167,7 +167,7 @@ async function invokeTrpcAgentCoreAgent(
     // NB the trpc api is generated code so we don't have a type-safe trpc client here
     (client.invoke as any).subscribe(
       {
-        message: 'what is 3 + 5?',
+        message: 'what is 3 * 5 / 4?',
       },
       {
         onData: (chunk: string) => {

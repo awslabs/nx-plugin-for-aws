@@ -163,6 +163,18 @@ export const tsStrandsAgentGenerator = async (
         },
         continuous: true,
       },
+      [`${agentTargetPrefix}-serve-local`]: {
+        executor: 'nx:run-commands',
+        options: {
+          commands: [`tsx --watch ${relativeSourceDir}/index.ts`],
+          cwd: '{projectRoot}',
+          env: {
+            PORT: `${localDevPort}`,
+            SERVE_LOCAL: 'true',
+          },
+        },
+        continuous: true,
+      },
     },
   });
 
@@ -172,7 +184,7 @@ export const tsStrandsAgentGenerator = async (
     TS_STRANDS_AGENT_GENERATOR_INFO,
     targetSourceDirRelativeToProjectRoot,
     agentTargetPrefix,
-    { port: localDevPort },
+    { port: localDevPort, rc: agentNameClassName },
   );
 
   await addGeneratorMetricsIfApplicable(tree, [
