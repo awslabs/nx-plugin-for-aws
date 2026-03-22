@@ -376,6 +376,8 @@ Docker image được build bằng một tag (ví dụ `my-scope-my-project-agen
 
 ### Xác thực
 
+Generator cung cấp một tùy chọn `auth` để cấu hình xác thực cho Strands Agent của bạn. Bạn có thể chọn giữa xác thực `IAM` (mặc định) hoặc `Cognito` khi tạo agent của bạn.
+
 #### IAM
 
 Mặc định, Strands Agent của bạn sẽ được bảo mật bằng xác thực IAM, chỉ cần triển khai nó mà không có bất kỳ tham số nào:
@@ -392,7 +394,7 @@ export class ExampleStack extends Stack {
 }
 ```
 
-Bạn có thể cấp quyền truy cập để gọi agent của bạn trên Bedrock AgentCore Runtime bằng phương thức `grantInvoke`, ví dụ:
+Bạn có thể cấp quyền truy cập để gọi agent của bạn trên Bedrock AgentCore Runtime bằng phương thức `grantInvokeAccess`, ví dụ:
 
 ```ts {8}
 import { MyProjectAgent } from ':my-scope/common-constructs';
@@ -402,7 +404,7 @@ export class ExampleStack extends Stack {
     const agent = new MyProjectAgent(this, 'MyProjectAgent');
     const lambdaFunction = new Function(this, ...);
 
-    agent.agentCoreRuntime.grantInvoke(lambdaFunction);
+    agent.grantInvokeAccess(lambdaFunction);
   }
 }
 ```
@@ -433,86 +435,47 @@ module "my_project_agent" {
 </Fragment>
 </Infrastructure>
 
-#### Cognito JWT Authentication
+#### Xác thực Cognito
 
-Dưới đây minh họa cách cấu hình xác thực Cognito cho agent của bạn.
+Khi bạn chọn xác thực `Cognito`, generator tự động tạo construct `UserIdentity` và cấu hình agent để sử dụng Cognito cho xác thực.
 
 <Infrastructure>
 <Fragment slot="cdk">
-Để cấu hình xác thực JWT sử dụng Cognito, hãy dùng factory method `RuntimeAuthorizerConfiguration.usingCognito()`:
+Construct được tạo chấp nhận một prop `identity` để cấu hình xác thực Cognito:
 
-```ts {13-16}
+```ts {8-11}
 import { MyProjectAgent } from ':my-scope/common-constructs';
-import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
+import { UserIdentity } from ':my-scope/common-constructs';
 
 export class ExampleStack extends Stack {
   constructor(scope: Construct, id: string) {
-    const userPool = new UserPool(this, 'UserPool');
-    const client = userPool.addClient('Client', {
-      authFlows: {
-        userPassword: true,
+    const identity = new UserIdentity(this, 'Identity');
+
+    new MyProjectAgent(this, 'MyProjectAgent', {
+      identity: {
+        userPool: identity.userPool,
+        userPoolClient: identity.userPoolClient,
       },
     });
-
-    new MyProjectAgent(this, 'MyProjectAgent', {
-      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingCognito(
-        userPool,
-        [client],
-      ),
-    });
   }
 }
 ```
 
-Ngoài ra, để xác thực JWT tùy chỉnh với OIDC provider của riêng bạn, hãy sử dụng `RuntimeAuthorizerConfiguration.usingJWT()`:
-
-```ts {6-10}
-import { MyProjectAgent } from ':my-scope/common-constructs';
-import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    new MyProjectAgent(this, 'MyProjectAgent', {
-      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingJWT(
-        'https://example.com/.well-known/openid-configuration',
-        ['client1', 'client2'], // Allowed Client IDs (optional)
-        ['audience1'],          // Allowed Audiences (optional)
-      ),
-    });
-  }
-}
-```
+Construct `UserIdentity` được tự động tạo khi bạn chọn xác thực `Cognito`.
 </Fragment>
 <Fragment slot="terraform">
-Để cấu hình xác thực JWT, bạn có thể chỉnh sửa agent module của bạn để cấu hình biến `authorizer_configuration` như sau:
+Module được tạo chấp nhận các biến `user_pool_id` và `user_pool_client_ids` cho xác thực Cognito:
 
-```terraform {18-23}
-# packages/common/terraform/src/app/agents/my-project-agent/my-project-agent.tf
-
-data "aws_region" "current" {}
-
-locals {
-  aws_region = data.aws_region.current.id
-
-  # Replace with your user pool and client ids or expose as variables
-  user_pool_id = "xxx"
-  user_pool_client_ids = ["yyy"]
+```terraform
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
 }
 
-module "agent_core_runtime" {
-  source = "../../../core/agent-core"
-  agent_runtime_name = "MyProjectAgent"
-  docker_image_tag = "my-scope-my-project-agent:latest"
-  server_protocol = "HTTP"
-  authorizer_configuration = {
-    custom_jwt_authorizer = {
-      discovery_url = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration"
-      allowed_clients = local.user_pool_client_ids
-    }
-  }
-  env = var.env
-  additional_iam_policy_statements = var.additional_iam_policy_statements
-  tags = var.tags
+module "my_project_agent" {
+  source = "../../common/terraform/src/app/agents/my-project-agent"
+
+  user_pool_id         = module.user_identity.user_pool_id
+  user_pool_client_ids = [module.user_identity.user_pool_client_id]
 }
 ```
 </Fragment>

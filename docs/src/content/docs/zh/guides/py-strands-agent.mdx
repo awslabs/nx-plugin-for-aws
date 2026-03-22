@@ -374,6 +374,8 @@ Docker镜像使用特定标签（如`my-scope-my-project-agent:latest`），与C
 
 ### 认证配置
 
+生成器提供`auth`选项来配置Strands智能体的认证方式。生成智能体时可选择`IAM`（默认）或`Cognito`认证。
+
 #### IAM认证
 
 默认使用IAM认证，直接部署即可：
@@ -390,7 +392,7 @@ export class ExampleStack extends Stack {
 }
 ```
 
-可使用`grantInvoke`方法授权调用Bedrock AgentCore Runtime上的智能体，例如：
+可使用`grantInvokeAccess`方法授权调用Bedrock AgentCore Runtime上的智能体，例如：
 
 ```ts {8}
 import { MyProjectAgent } from ':my-scope/common-constructs';
@@ -400,7 +402,7 @@ export class ExampleStack extends Stack {
     const agent = new MyProjectAgent(this, 'MyProjectAgent');
     const lambdaFunction = new Function(this, ...);
 
-    agent.agentCoreRuntime.grantInvoke(lambdaFunction);
+    agent.grantInvokeAccess(lambdaFunction);
   }
 }
 ```
@@ -431,86 +433,47 @@ module "my_project_agent" {
 </Fragment>
 </Infrastructure>
 
-#### Cognito JWT认证
+#### Cognito认证
 
-以下演示如何配置Cognito认证：
+选择`Cognito`认证时，生成器会自动创建`UserIdentity`构造，并配置智能体使用Cognito进行认证。
 
 <Infrastructure>
 <Fragment slot="cdk">
-使用Cognito配置JWT认证时，使用`RuntimeAuthorizerConfiguration.usingCognito()`工厂方法：
+生成的构造接受`identity`属性来配置Cognito认证：
 
-```ts {13-16}
+```ts {8-11}
 import { MyProjectAgent } from ':my-scope/common-constructs';
-import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
+import { UserIdentity } from ':my-scope/common-constructs';
 
 export class ExampleStack extends Stack {
   constructor(scope: Construct, id: string) {
-    const userPool = new UserPool(this, 'UserPool');
-    const client = userPool.addClient('Client', {
-      authFlows: {
-        userPassword: true,
+    const identity = new UserIdentity(this, 'Identity');
+
+    new MyProjectAgent(this, 'MyProjectAgent', {
+      identity: {
+        userPool: identity.userPool,
+        userPoolClient: identity.userPoolClient,
       },
     });
-
-    new MyProjectAgent(this, 'MyProjectAgent', {
-      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingCognito(
-        userPool,
-        [client],
-      ),
-    });
   }
 }
 ```
 
-或者，对于使用自有OIDC提供商的自定义JWT认证，使用`RuntimeAuthorizerConfiguration.usingJWT()`：
-
-```ts {6-10}
-import { MyProjectAgent } from ':my-scope/common-constructs';
-import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    new MyProjectAgent(this, 'MyProjectAgent', {
-      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingJWT(
-        'https://example.com/.well-known/openid-configuration',
-        ['client1', 'client2'], // 允许的客户端ID（可选）
-        ['audience1'],          // 允许的受众（可选）
-      ),
-    });
-  }
-}
-```
+选择`Cognito`认证时会自动生成`UserIdentity`构造。
 </Fragment>
 <Fragment slot="terraform">
-配置JWT认证时，可编辑智能体模块配置`authorizer_configuration`变量：
+生成的模块接受`user_pool_id`和`user_pool_client_ids`变量进行Cognito认证配置：
 
-```terraform {18-23}
-# packages/common/terraform/src/app/agents/my-project-agent/my-project-agent.tf
-
-data "aws_region" "current" {}
-
-locals {
-  aws_region = data.aws_region.current.id
-
-  # 替换为您的用户池和客户端ID或作为变量暴露
-  user_pool_id = "xxx"
-  user_pool_client_ids = ["yyy"]
+```terraform
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
 }
 
-module "agent_core_runtime" {
-  source = "../../../core/agent-core"
-  agent_runtime_name = "MyProjectAgent"
-  docker_image_tag = "my-scope-my-project-agent:latest"
-  server_protocol = "HTTP"
-  authorizer_configuration = {
-    custom_jwt_authorizer = {
-      discovery_url = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration"
-      allowed_clients = local.user_pool_client_ids
-    }
-  }
-  env = var.env
-  additional_iam_policy_statements = var.additional_iam_policy_statements
-  tags = var.tags
+module "my_project_agent" {
+  source = "../../common/terraform/src/app/agents/my-project-agent"
+
+  user_pool_id         = module.user_identity.user_pool_id
+  user_pool_client_ids = [module.user_identity.user_pool_client_id]
 }
 ```
 </Fragment>

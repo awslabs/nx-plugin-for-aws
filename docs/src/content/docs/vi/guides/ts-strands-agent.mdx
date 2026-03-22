@@ -282,6 +282,113 @@ Docker image được build sử dụng một tag (ví dụ `my-scope-my-project
 
 Một target `docker` cũng được tạo ra để chạy docker build cho tất cả các agent nếu bạn có nhiều agent được định nghĩa.
 
+### Xác thực
+
+Generator cung cấp tùy chọn `auth` để cấu hình xác thực cho Strands Agent của bạn. Bạn có thể chọn giữa xác thực `IAM` (mặc định) hoặc `Cognito` khi tạo agent của bạn.
+
+#### IAM
+
+Mặc định, Strands Agent của bạn sẽ được bảo mật bằng xác thực IAM, chỉ cần triển khai nó mà không cần bất kỳ tham số nào:
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts {5}
+import { MyProjectAgent } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    new MyProjectAgent(this, 'MyProjectAgent');
+  }
+}
+```
+
+Bạn có thể cấp quyền truy cập để gọi agent của bạn trên Bedrock AgentCore Runtime bằng phương thức `grantInvokeAccess`, ví dụ:
+
+```ts {8}
+import { MyProjectAgent } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const agent = new MyProjectAgent(this, 'MyProjectAgent');
+    const lambdaFunction = new Function(this, ...);
+
+    agent.grantInvokeAccess(lambdaFunction);
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+```terraform
+# Agent
+module "my_project_agent" {
+  # Relative path to the generated module in the common/terraform project
+  source = "../../common/terraform/src/app/agents/my-project-agent"
+}
+```
+
+Để cấp quyền truy cập để gọi agent của bạn, bạn sẽ cần thêm một policy như sau, tham chiếu output `module.my_project_agent.agent_core_runtime_arn`:
+
+```terraform
+{
+  Effect = "Allow"
+  Action = [
+    "bedrock-agentcore:InvokeAgentRuntime"
+  ]
+  Resource = [
+    module.my_project_agent.agent_core_runtime_arn,
+    "${module.my_project_agent.agent_core_runtime_arn}/*"
+  ]
+}
+```
+</Fragment>
+</Infrastructure>
+
+#### Xác thực Cognito
+
+Khi bạn chọn xác thực `Cognito`, generator tự động tạo construct `UserIdentity` và cấu hình agent để sử dụng Cognito cho xác thực.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Construct được tạo ra chấp nhận prop `identity` để cấu hình xác thực Cognito:
+
+```ts {8-11}
+import { MyProjectAgent } from ':my-scope/common-constructs';
+import { UserIdentity } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const identity = new UserIdentity(this, 'Identity');
+
+    new MyProjectAgent(this, 'MyProjectAgent', {
+      identity: {
+        userPool: identity.userPool,
+        userPoolClient: identity.userPoolClient,
+      },
+    });
+  }
+}
+```
+
+Construct `UserIdentity` được tự động tạo ra khi bạn chọn xác thực `Cognito`.
+</Fragment>
+<Fragment slot="terraform">
+Module được tạo ra chấp nhận các biến `user_pool_id` và `user_pool_client_ids` cho xác thực Cognito:
+
+```terraform
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
+}
+
+module "my_project_agent" {
+  source = "../../common/terraform/src/app/agents/my-project-agent"
+
+  user_pool_id         = module.user_identity.user_pool_id
+  user_pool_client_ids = [module.user_identity.user_pool_client_id]
+}
+```
+</Fragment>
+</Infrastructure>
+
 ### Khả năng quan sát
 
 Agent của bạn được tự động cấu hình với khả năng quan sát sử dụng [AWS Distro for Open Telemetry](https://aws.amazon.com/otel/) (ADOT), bằng cách cấu hình auto-instrumentation trong `Dockerfile` của bạn.

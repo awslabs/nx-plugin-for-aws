@@ -282,6 +282,113 @@ docker イメージはタグ (例: `my-scope-my-project-agent:latest`) を使用
 
 複数のエージェントが定義されている場合、すべてのエージェントに対して docker ビルドを実行する `docker` ターゲットも生成されます。
 
+### 認証
+
+ジェネレーターは、Strands Agent の認証を設定するための `auth` オプションを提供します。エージェントを生成する際に、`IAM` (デフォルト) または `Cognito` 認証を選択できます。
+
+#### IAM
+
+デフォルトでは、Strands Agent は IAM 認証を使用して保護されます。引数なしでデプロイするだけです:
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts {5}
+import { MyProjectAgent } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    new MyProjectAgent(this, 'MyProjectAgent');
+  }
+}
+```
+
+`grantInvokeAccess` メソッドを使用して、Bedrock AgentCore Runtime でエージェントを呼び出すアクセス権を付与できます。例:
+
+```ts {8}
+import { MyProjectAgent } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const agent = new MyProjectAgent(this, 'MyProjectAgent');
+    const lambdaFunction = new Function(this, ...);
+
+    agent.grantInvokeAccess(lambdaFunction);
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+```terraform
+# Agent
+module "my_project_agent" {
+  # Relative path to the generated module in the common/terraform project
+  source = "../../common/terraform/src/app/agents/my-project-agent"
+}
+```
+
+エージェントを呼び出すアクセス権を付与するには、`module.my_project_agent.agent_core_runtime_arn` 出力を参照して、次のようなポリシーを追加する必要があります:
+
+```terraform
+{
+  Effect = "Allow"
+  Action = [
+    "bedrock-agentcore:InvokeAgentRuntime"
+  ]
+  Resource = [
+    module.my_project_agent.agent_core_runtime_arn,
+    "${module.my_project_agent.agent_core_runtime_arn}/*"
+  ]
+}
+```
+</Fragment>
+</Infrastructure>
+
+#### Cognito 認証
+
+`Cognito` 認証を選択すると、ジェネレーターは自動的に `UserIdentity` コンストラクトを作成し、Cognito を使用した認証を行うようにエージェントを設定します。
+
+<Infrastructure>
+<Fragment slot="cdk">
+生成されたコンストラクトは、Cognito 認証を設定する `identity` プロパティを受け入れます:
+
+```ts {8-11}
+import { MyProjectAgent } from ':my-scope/common-constructs';
+import { UserIdentity } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const identity = new UserIdentity(this, 'Identity');
+
+    new MyProjectAgent(this, 'MyProjectAgent', {
+      identity: {
+        userPool: identity.userPool,
+        userPoolClient: identity.userPoolClient,
+      },
+    });
+  }
+}
+```
+
+`UserIdentity` コンストラクトは、`Cognito` 認証を選択すると自動的に生成されます。
+</Fragment>
+<Fragment slot="terraform">
+生成されたモジュールは、Cognito 認証用の `user_pool_id` および `user_pool_client_ids` 変数を受け入れます:
+
+```terraform
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
+}
+
+module "my_project_agent" {
+  source = "../../common/terraform/src/app/agents/my-project-agent"
+
+  user_pool_id         = module.user_identity.user_pool_id
+  user_pool_client_ids = [module.user_identity.user_pool_client_id]
+}
+```
+</Fragment>
+</Infrastructure>
+
 ### 可観測性
 
 エージェントは、`Dockerfile` で自動計装を設定することにより、[AWS Distro for Open Telemetry](https://aws.amazon.com/otel/) (ADOT) を使用した可観測性で自動的に構成されます。

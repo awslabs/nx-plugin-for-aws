@@ -282,6 +282,113 @@ La imagen docker se construye usando una etiqueta (por ejemplo `my-scope-my-proj
 
 También se genera un target `docker` que ejecuta la construcción docker para todos los agentes si tienes múltiples definidos.
 
+### Autenticación
+
+El generador proporciona una opción `auth` para configurar la autenticación de tu Strands Agent. Puedes elegir entre autenticación `IAM` (predeterminada) o `Cognito` al generar tu agente.
+
+#### IAM
+
+Por defecto, tu Strands Agent estará protegido usando autenticación IAM, simplemente despliégalo sin ningún argumento:
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts {5}
+import { MyProjectAgent } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    new MyProjectAgent(this, 'MyProjectAgent');
+  }
+}
+```
+
+Puedes otorgar acceso para invocar tu agente en Bedrock AgentCore Runtime usando el método `grantInvokeAccess`, por ejemplo:
+
+```ts {8}
+import { MyProjectAgent } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const agent = new MyProjectAgent(this, 'MyProjectAgent');
+    const lambdaFunction = new Function(this, ...);
+
+    agent.grantInvokeAccess(lambdaFunction);
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+```terraform
+# Agent
+module "my_project_agent" {
+  # Relative path to the generated module in the common/terraform project
+  source = "../../common/terraform/src/app/agents/my-project-agent"
+}
+```
+
+Para otorgar acceso para invocar tu agente, necesitarás agregar una política como la siguiente, referenciando la salida `module.my_project_agent.agent_core_runtime_arn`:
+
+```terraform
+{
+  Effect = "Allow"
+  Action = [
+    "bedrock-agentcore:InvokeAgentRuntime"
+  ]
+  Resource = [
+    module.my_project_agent.agent_core_runtime_arn,
+    "${module.my_project_agent.agent_core_runtime_arn}/*"
+  ]
+}
+```
+</Fragment>
+</Infrastructure>
+
+#### Autenticación Cognito
+
+Cuando seleccionas autenticación `Cognito`, el generador crea automáticamente el constructo `UserIdentity` y configura el agente para usar Cognito para autenticación.
+
+<Infrastructure>
+<Fragment slot="cdk">
+El constructo generado acepta una prop `identity` que configura la autenticación Cognito:
+
+```ts {8-11}
+import { MyProjectAgent } from ':my-scope/common-constructs';
+import { UserIdentity } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const identity = new UserIdentity(this, 'Identity');
+
+    new MyProjectAgent(this, 'MyProjectAgent', {
+      identity: {
+        userPool: identity.userPool,
+        userPoolClient: identity.userPoolClient,
+      },
+    });
+  }
+}
+```
+
+El constructo `UserIdentity` se genera automáticamente cuando seleccionas autenticación `Cognito`.
+</Fragment>
+<Fragment slot="terraform">
+El módulo generado acepta las variables `user_pool_id` y `user_pool_client_ids` para autenticación Cognito:
+
+```terraform
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
+}
+
+module "my_project_agent" {
+  source = "../../common/terraform/src/app/agents/my-project-agent"
+
+  user_pool_id         = module.user_identity.user_pool_id
+  user_pool_client_ids = [module.user_identity.user_pool_client_id]
+}
+```
+</Fragment>
+</Infrastructure>
+
 ### Observabilidad
 
 Tu agente está configurado automáticamente con observabilidad usando el [AWS Distro for Open Telemetry](https://aws.amazon.com/otel/) (ADOT), configurando auto-instrumentación en tu `Dockerfile`.

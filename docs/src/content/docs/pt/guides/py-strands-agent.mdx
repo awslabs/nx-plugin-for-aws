@@ -376,6 +376,8 @@ A imagem Docker é construída usando uma tag (por exemplo `my-scope-my-project-
 
 ### Autenticação
 
+O gerador fornece uma opção `auth` para configurar autenticação para seu Agente Strands. Você pode escolher entre autenticação `IAM` (padrão) ou `Cognito` ao gerar seu agente.
+
 #### IAM
 
 Por padrão, seu Agente Strands será protegido usando autenticação IAM. Basta implantá-lo sem argumentos:
@@ -392,7 +394,7 @@ export class ExampleStack extends Stack {
 }
 ```
 
-Você pode conceder acesso para invocar seu agente no Bedrock AgentCore Runtime usando o método `grantInvoke`, por exemplo:
+Você pode conceder acesso para invocar seu agente no Bedrock AgentCore Runtime usando o método `grantInvokeAccess`, por exemplo:
 
 ```ts {8}
 import { MyProjectAgent } from ':my-scope/common-constructs';
@@ -402,7 +404,7 @@ export class ExampleStack extends Stack {
     const agent = new MyProjectAgent(this, 'MyProjectAgent');
     const lambdaFunction = new Function(this, ...);
 
-    agent.agentCoreRuntime.grantInvoke(lambdaFunction);
+    agent.grantInvokeAccess(lambdaFunction);
   }
 }
 ```
@@ -433,86 +435,47 @@ Para conceder acesso para invocar seu agente, você precisará adicionar uma pol
 </Fragment>
 </Infrastructure>
 
-#### Autenticação Cognito JWT
+#### Autenticação Cognito
 
-O exemplo abaixo demonstra como configurar autenticação Cognito para seu agente.
+Quando você seleciona autenticação `Cognito`, o gerador cria automaticamente o construct `UserIdentity` e configura o agente para usar Cognito para autenticação.
 
 <Infrastructure>
 <Fragment slot="cdk">
-Para configurar autenticação JWT usando Cognito, use o método de fábrica `RuntimeAuthorizerConfiguration.usingCognito()`:
+O construct gerado aceita uma prop `identity` que configura autenticação Cognito:
 
-```ts {13-16}
+```ts {8-11}
 import { MyProjectAgent } from ':my-scope/common-constructs';
-import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
+import { UserIdentity } from ':my-scope/common-constructs';
 
 export class ExampleStack extends Stack {
   constructor(scope: Construct, id: string) {
-    const userPool = new UserPool(this, 'UserPool');
-    const client = userPool.addClient('Client', {
-      authFlows: {
-        userPassword: true,
+    const identity = new UserIdentity(this, 'Identity');
+
+    new MyProjectAgent(this, 'MyProjectAgent', {
+      identity: {
+        userPool: identity.userPool,
+        userPoolClient: identity.userPoolClient,
       },
     });
-
-    new MyProjectAgent(this, 'MyProjectAgent', {
-      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingCognito(
-        userPool,
-        [client],
-      ),
-    });
   }
 }
 ```
 
-Alternativamente, para autenticação JWT personalizada com seu próprio provedor OIDC, use `RuntimeAuthorizerConfiguration.usingJWT()`:
-
-```ts {6-10}
-import { MyProjectAgent } from ':my-scope/common-constructs';
-import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    new MyProjectAgent(this, 'MyProjectAgent', {
-      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingJWT(
-        'https://example.com/.well-known/openid-configuration',
-        ['client1', 'client2'], // IDs de Cliente Permitidos (opcional)
-        ['audience1'],          // Audiências Permitidas (opcional)
-      ),
-    });
-  }
-}
-```
+O construct `UserIdentity` é gerado automaticamente quando você seleciona autenticação `Cognito`.
 </Fragment>
 <Fragment slot="terraform">
-Para configurar autenticação JWT, você pode editar seu módulo de agente para configurar a variável `authorizer_configuration` da seguinte forma:
+O módulo gerado aceita variáveis `user_pool_id` e `user_pool_client_ids` para autenticação Cognito:
 
-```terraform {18-23}
-# packages/common/terraform/src/app/agents/my-project-agent/my-project-agent.tf
-
-data "aws_region" "current" {}
-
-locals {
-  aws_region = data.aws_region.current.id
-
-  # Substitua pelos IDs do seu user pool e client ou exponha como variáveis
-  user_pool_id = "xxx"
-  user_pool_client_ids = ["yyy"]
+```terraform
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
 }
 
-module "agent_core_runtime" {
-  source = "../../../core/agent-core"
-  agent_runtime_name = "MyProjectAgent"
-  docker_image_tag = "my-scope-my-project-agent:latest"
-  server_protocol = "HTTP"
-  authorizer_configuration = {
-    custom_jwt_authorizer = {
-      discovery_url = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration"
-      allowed_clients = local.user_pool_client_ids
-    }
-  }
-  env = var.env
-  additional_iam_policy_statements = var.additional_iam_policy_statements
-  tags = var.tags
+module "my_project_agent" {
+  source = "../../common/terraform/src/app/agents/my-project-agent"
+
+  user_pool_id         = module.user_identity.user_pool_id
+  user_pool_client_ids = [module.user_identity.user_pool_client_id]
 }
 ```
 </Fragment>

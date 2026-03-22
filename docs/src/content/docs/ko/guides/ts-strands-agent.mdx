@@ -282,6 +282,113 @@ Strands 에이전트 작성에 대한 더 심층적인 가이드는 [Strands 문
 
 여러 에이전트가 정의된 경우 모든 에이전트에 대한 도커 빌드를 실행하는 `docker` 타겟도 생성됩니다.
 
+### 인증
+
+생성기는 Strands Agent에 대한 인증을 구성하기 위한 `auth` 옵션을 제공합니다. 에이전트를 생성할 때 `IAM`(기본값) 또는 `Cognito` 인증 중에서 선택할 수 있습니다.
+
+#### IAM
+
+기본적으로 Strands Agent는 IAM 인증을 사용하여 보호되며, 인수 없이 간단히 배포할 수 있습니다:
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts {5}
+import { MyProjectAgent } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    new MyProjectAgent(this, 'MyProjectAgent');
+  }
+}
+```
+
+`grantInvokeAccess` 메서드를 사용하여 Bedrock AgentCore Runtime에서 에이전트를 호출할 수 있는 액세스 권한을 부여할 수 있습니다. 예를 들어:
+
+```ts {8}
+import { MyProjectAgent } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const agent = new MyProjectAgent(this, 'MyProjectAgent');
+    const lambdaFunction = new Function(this, ...);
+
+    agent.grantInvokeAccess(lambdaFunction);
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+```terraform
+# Agent
+module "my_project_agent" {
+  # Relative path to the generated module in the common/terraform project
+  source = "../../common/terraform/src/app/agents/my-project-agent"
+}
+```
+
+에이전트를 호출할 수 있는 액세스 권한을 부여하려면 `module.my_project_agent.agent_core_runtime_arn` 출력을 참조하여 다음과 같은 정책을 추가해야 합니다:
+
+```terraform
+{
+  Effect = "Allow"
+  Action = [
+    "bedrock-agentcore:InvokeAgentRuntime"
+  ]
+  Resource = [
+    module.my_project_agent.agent_core_runtime_arn,
+    "${module.my_project_agent.agent_core_runtime_arn}/*"
+  ]
+}
+```
+</Fragment>
+</Infrastructure>
+
+#### Cognito 인증
+
+`Cognito` 인증을 선택하면 생성기가 자동으로 `UserIdentity` 구성을 생성하고 Cognito를 사용하여 인증하도록 에이전트를 구성합니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+생성된 구성은 Cognito 인증을 구성하는 `identity` prop을 허용합니다:
+
+```ts {8-11}
+import { MyProjectAgent } from ':my-scope/common-constructs';
+import { UserIdentity } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const identity = new UserIdentity(this, 'Identity');
+
+    new MyProjectAgent(this, 'MyProjectAgent', {
+      identity: {
+        userPool: identity.userPool,
+        userPoolClient: identity.userPoolClient,
+      },
+    });
+  }
+}
+```
+
+`UserIdentity` 구성은 `Cognito` 인증을 선택할 때 자동으로 생성됩니다.
+</Fragment>
+<Fragment slot="terraform">
+생성된 모듈은 Cognito 인증을 위한 `user_pool_id` 및 `user_pool_client_ids` 변수를 허용합니다:
+
+```terraform
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
+}
+
+module "my_project_agent" {
+  source = "../../common/terraform/src/app/agents/my-project-agent"
+
+  user_pool_id         = module.user_identity.user_pool_id
+  user_pool_client_ids = [module.user_identity.user_pool_client_id]
+}
+```
+</Fragment>
+</Infrastructure>
+
 ### 관찰성
 
 에이전트는 `Dockerfile`에서 자동 계측을 구성하여 [AWS Distro for Open Telemetry](https://aws.amazon.com/otel/) (ADOT)를 사용한 관찰성으로 자동 구성됩니다.
