@@ -20,6 +20,20 @@ variable "tags" {
   default     = {}
 }
 
+<%_ if (auth === 'Cognito') { _%>
+variable "user_pool_id" {
+  description = "Cognito User Pool ID for authentication"
+  type        = string
+}
+
+variable "user_pool_client_id" {
+  description = "Cognito User Pool Client ID for authentication"
+  type        = string
+}
+
+data "aws_region" "current" {}
+
+<%_ } _%>
 module "appconfig" {
   source = "../../../core/runtime-config/appconfig"
 
@@ -31,12 +45,14 @@ module "agent_core_runtime" {
   agent_runtime_name = "<%= nameClassName %>"
   docker_image_tag = "<%= dockerImageTag %>"
   server_protocol = "<%= serverProtocol %>"
-#  authorizer_configuration = {
-#    custom_jwt_authorizer = {
-#      discovery_url = "https://xxx/.well-known/openid-configuration"
-#      allowed_clients = [ "xxx" ]
-#    }
-#  }
+<%_ if (auth === 'Cognito') { _%>
+  authorizer_configuration = {
+    custom_jwt_authorizer = {
+      discovery_url = "https://cognito-idp.${data.aws_region.current.name}.amazonaws.com/${var.user_pool_id}/.well-known/openid-configuration"
+      allowed_clients = [var.user_pool_client_id]
+    }
+  }
+<%_ } _%>
 
   env = merge({
     RUNTIME_CONFIG_APP_ID = module.appconfig.application_id

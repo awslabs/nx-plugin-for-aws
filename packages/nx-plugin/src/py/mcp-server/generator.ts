@@ -25,6 +25,7 @@ import { kebabCase, toClassName, toSnakeCase } from '../../utils/names';
 import { addDependenciesToPyProjectToml } from '../../utils/py';
 import { getNpmScope } from '../../utils/npm-scope';
 import { addMcpServerInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
+import { addIdentityInfra } from '../../utils/identity-constructs/identity-constructs';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { addPythonBundleTarget } from '../../utils/bundle/bundle';
 import { withVersions } from '../../utils/versions';
@@ -75,6 +76,7 @@ export const pyMcpServerGenerator = async (
   );
 
   const computeType = options.computeType ?? 'BedrockAgentCoreRuntime';
+  const auth = options.auth ?? 'IAM';
 
   // Generate example server
   generateFiles(
@@ -160,6 +162,14 @@ export const pyMcpServerGenerator = async (
     const iacProvider = await resolveIacProvider(tree, options.iacProvider);
     await sharedConstructsGenerator(tree, { iacProvider });
 
+    if (auth === 'Cognito') {
+      addIdentityInfra(tree, {
+        iacProvider,
+        allowSignup: false,
+        cognitoDomain: name,
+      });
+    }
+
     // Add the construct to deploy the mcp server
     await addMcpServerInfra(tree, {
       mcpServerNameKebabCase: name,
@@ -167,6 +177,7 @@ export const pyMcpServerGenerator = async (
       projectName: project.name,
       dockerImageTag,
       iacProvider,
+      auth,
     });
   }
 
@@ -239,7 +250,7 @@ export const pyMcpServerGenerator = async (
     mcpTargetPrefix,
     {
       port: localDevPort,
-      rc: mcpServerNameClassName,
+      auth,
     },
   );
 

@@ -27,6 +27,7 @@ import {
   addDependenciesToPyProjectToml,
 } from '../../utils/py';
 import { addAgentInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
+import { addIdentityInfra } from '../../utils/identity-constructs/identity-constructs';
 import { addPythonBundleTarget } from '../../utils/bundle/bundle';
 import { getNpmScope } from '../../utils/npm-scope';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
@@ -77,6 +78,7 @@ export const pyStrandsAgentGenerator = async (
   );
 
   const computeType = options.computeType ?? 'BedrockAgentCoreRuntime';
+  const auth = options.auth ?? 'IAM';
 
   // Generate example agent
   generateFiles(
@@ -153,6 +155,14 @@ export const pyStrandsAgentGenerator = async (
     const iacProvider = await resolveIacProvider(tree, options.iacProvider);
     await sharedConstructsGenerator(tree, { iacProvider });
 
+    if (auth === 'Cognito') {
+      addIdentityInfra(tree, {
+        iacProvider,
+        allowSignup: false,
+        cognitoDomain: name,
+      });
+    }
+
     // Add the construct to deploy the agent
     await addAgentInfra(tree, {
       agentNameKebabCase: name,
@@ -160,6 +170,7 @@ export const pyStrandsAgentGenerator = async (
       dockerImageTag,
       iacProvider,
       projectName: project.name,
+      auth,
     });
   }
 
@@ -206,7 +217,7 @@ export const pyStrandsAgentGenerator = async (
     agentTargetPrefix,
     {
       port: localDevPort,
-      rc: agentNameClassName,
+      auth,
     },
   );
 
