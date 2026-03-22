@@ -464,74 +464,18 @@ export class ExampleStack extends Stack {
 The `UserIdentity` construct is automatically generated when you select `Cognito` authentication.
 </Fragment>
 <Fragment slot="terraform">
-When `Cognito` authentication is selected, the generated Terraform module includes `user_pool_id` and `user_pool_client_id` variables that configure JWT authentication automatically:
+The generated module accepts `user_pool_id` and `user_pool_client_ids` variables for Cognito authentication:
 
 ```terraform
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
+}
+
 module "my_project_agent" {
   source = "../../common/terraform/src/app/agents/my-project-agent"
 
-  user_pool_id        = module.identity.user_pool_id
-  user_pool_client_id = module.identity.user_pool_client_id
-}
-```
-</Fragment>
-</Infrastructure>
-
-#### Custom JWT Authentication
-
-For custom JWT authentication with your own OIDC provider, you can manually configure the agent construct.
-
-<Infrastructure>
-<Fragment slot="cdk">
-Use `RuntimeAuthorizerConfiguration.usingJWT()`:
-
-```ts {6-10}
-import { MyProjectAgent } from ':my-scope/common-constructs';
-import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    new MyProjectAgent(this, 'MyProjectAgent', {
-      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingJWT(
-        'https://example.com/.well-known/openid-configuration',
-        ['client1', 'client2'], // Allowed Client IDs (optional)
-        ['audience1'],          // Allowed Audiences (optional)
-      ),
-    });
-  }
-}
-```
-</Fragment>
-<Fragment slot="terraform">
-To configure JWT authentication, you can edit your agent module to configure the `authorizer_configuration` variable as follows:
-
-```terraform {18-23}
-# packages/common/terraform/src/app/agents/my-project-agent/my-project-agent.tf
-
-data "aws_region" "current" {}
-
-locals {
-  aws_region = data.aws_region.current.id
-
-  # Replace with your user pool and client ids or expose as variables
-  user_pool_id = "xxx"
-  user_pool_client_ids = ["yyy"]
-}
-
-module "agent_core_runtime" {
-  source = "../../../core/agent-core"
-  agent_runtime_name = "MyProjectAgent"
-  docker_image_tag = "my-scope-my-project-agent:latest"
-  server_protocol = "HTTP"
-  authorizer_configuration = {
-    custom_jwt_authorizer = {
-      discovery_url = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration"
-      allowed_clients = local.user_pool_client_ids
-    }
-  }
-  env = var.env
-  additional_iam_policy_statements = var.additional_iam_policy_statements
-  tags = var.tags
+  user_pool_id         = module.user_identity.user_pool_id
+  user_pool_client_ids = [module.user_identity.user_pool_client_id]
 }
 ```
 </Fragment>
