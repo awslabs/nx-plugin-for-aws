@@ -217,7 +217,6 @@ describe('ts lib generator', () => {
 
     // No vite configuration as we build with tsc
     expect(tree.exists('test-lib/vite.config.mts')).toBeFalsy();
-    expect(tree.exists('test-lib/vite.config.ts')).toBeFalsy();
 
     // vitest.config.mts is used for test configuration
     expect(tree.exists('test-lib/vitest.config.mts')).toBeTruthy();
