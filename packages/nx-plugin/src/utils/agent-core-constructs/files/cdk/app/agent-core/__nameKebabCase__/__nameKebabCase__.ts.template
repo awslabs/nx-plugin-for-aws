@@ -9,19 +9,43 @@ import {
   ProtocolType,
   Runtime,
   RuntimeProps,
+<%_ if (auth === 'Cognito') { _%>
+  RuntimeAuthorizerConfiguration,
+<%_ } _%>
 } from '@aws-cdk/aws-bedrock-agentcore-alpha';
+<%_ if (auth === 'IAM') { _%>
+import { IGrantable, Grant } from 'aws-cdk-lib/aws-iam';
+<%_ } _%>
+<%_ if (auth === 'Cognito') { _%>
+import { IUserPool, IUserPoolClient } from 'aws-cdk-lib/aws-cognito';
+<%_ } _%>
 import { RuntimeConfig } from '../../../core/runtime-config.js';
 
+<%_ if (auth === 'IAM') { _%>
 export type <%- nameClassName %>Props = Omit<
   RuntimeProps,
   'runtimeName' | 'protocolConfiguration' | 'agentRuntimeArtifact'
 >;
+<%_ } else if (auth === 'Cognito') { _%>
+export type <%- nameClassName %>Props = Omit<
+  RuntimeProps,
+  'runtimeName' | 'protocolConfiguration' | 'agentRuntimeArtifact' | 'authorizerConfiguration'
+> & {
+  /**
+   * Identity details for Cognito Authentication
+   */
+  identity: {
+    userPool: IUserPool;
+    userPoolClient: IUserPoolClient;
+  };
+};
+<%_ } _%>
 
 export class <%- nameClassName %> extends Construct {
   public readonly dockerImage: AgentRuntimeArtifact;
   public readonly agentCoreRuntime: Runtime;
 
-  constructor(scope: Construct, id: string, props?: <%- nameClassName %>Props) {
+  constructor(scope: Construct, id: string, props<%_ if (auth === 'Cognito') { _%>: <%- nameClassName %>Props<%_ } else { _%>?: <%- nameClassName %>Props<%_ } _%>) {
     super(scope, id);
 
     const rc = RuntimeConfig.ensure(this);
@@ -37,6 +61,10 @@ export class <%- nameClassName %> extends Construct {
       },
     );
 
+<%_ if (auth === 'Cognito') { _%>
+    const { identity, ...restProps } = props;
+
+<%_ } _%>
     this.agentCoreRuntime = new Runtime(this, '<%- nameClassName %>', {
       runtimeName: Lazy.string({
         produce: () =>
@@ -44,10 +72,22 @@ export class <%- nameClassName %> extends Construct {
       }),
       protocolConfiguration: ProtocolType.<%- serverProtocol %>,
       agentRuntimeArtifact: this.dockerImage,
+<%_ if (auth === 'Cognito') { _%>
+      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingCognito(
+        identity.userPool,
+        [identity.userPoolClient],
+      ),
+      ...restProps,
+<%_ } else { _%>
       ...props,
+<%_ } _%>
       environmentVariables: {
         RUNTIME_CONFIG_APP_ID: rc.appConfigApplicationId,
+<%_ if (auth === 'Cognito') { _%>
+        ...restProps?.environmentVariables,
+<%_ } else { _%>
         ...props?.environmentVariables,
+<%_ } _%>
       },
     });
 
@@ -58,4 +98,19 @@ export class <%- nameClassName %> extends Construct {
       <%- nameClassName %>: this.agentCoreRuntime.agentRuntimeArn,
     });
   }
+<%_ if (auth === 'IAM') { _%>
+
+  /**
+   * Grants IAM permissions to invoke this agent runtime.
+   *
+   * @param grantee - The IAM principal to grant permissions to
+   */
+  public grantInvokeAccess(grantee: IGrantable) {
+    Grant.addToPrincipal({
+      grantee,
+      actions: ['bedrock-agentcore:InvokeRuntime'],
+      resourceArns: [this.agentCoreRuntime.agentRuntimeArn],
+    });
+  }
+<%_ } _%>
 }

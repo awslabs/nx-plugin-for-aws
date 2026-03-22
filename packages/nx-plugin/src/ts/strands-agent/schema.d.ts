@@ -7,9 +7,12 @@ import { IacProviderOption } from '../../utils/iac';
 
 export type TsStrandsAgentComputeType = 'BedrockAgentCoreRuntime' | 'None';
 
+export type TsStrandsAgentAuth = 'IAM' | 'Cognito';
+
 export interface TsStrandsAgentGeneratorSchema {
   project: string;
   name?: string;
   computeType?: TsStrandsAgentComputeType;
+  auth?: TsStrandsAgentAuth;
   iacProvider: IacProviderOption;
 }

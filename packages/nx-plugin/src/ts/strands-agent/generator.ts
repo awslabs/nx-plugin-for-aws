@@ -29,6 +29,7 @@ import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
 import { resolveIacProvider } from '../../utils/iac';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { addAgentInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
+import { addIdentityInfra } from '../../utils/identity-constructs/identity-constructs';
 import { assignPort } from '../../utils/port';
 
 export const TS_STRANDS_AGENT_GENERATOR_INFO: NxGeneratorInfo =
@@ -62,6 +63,7 @@ export const tsStrandsAgentGenerator = async (
   const distDir = joinPathFragments('dist', project.root);
 
   const computeType = options.computeType ?? 'BedrockAgentCoreRuntime';
+  const auth = options.auth ?? 'IAM';
 
   // Generate example agent
   generateFiles(
@@ -94,9 +96,7 @@ export const tsStrandsAgentGenerator = async (
         distDir,
         name,
         adotVersion:
-          TS_VERSIONS[
-            '@aws/aws-distro-opentelemetry-node-autoinstrumentation'
-          ],
+          TS_VERSIONS['@aws/aws-distro-opentelemetry-node-autoinstrumentation'],
       },
       { overwriteStrategy: OverwriteStrategy.KeepExisting },
     );
@@ -119,12 +119,21 @@ export const tsStrandsAgentGenerator = async (
     const iacProvider = await resolveIacProvider(tree, options.iacProvider);
     await sharedConstructsGenerator(tree, { iacProvider });
 
+    if (auth === 'Cognito') {
+      addIdentityInfra(tree, {
+        iacProvider,
+        allowSignup: false,
+        cognitoDomain: name,
+      });
+    }
+
     addAgentInfra(tree, {
       agentNameKebabCase: name,
       agentNameClassName,
       projectName: project.name,
       dockerImageTag,
       iacProvider,
+      auth,
     });
   }
 
@@ -176,7 +185,7 @@ export const tsStrandsAgentGenerator = async (
     TS_STRANDS_AGENT_GENERATOR_INFO,
     targetSourceDirRelativeToProjectRoot,
     agentTargetPrefix,
-    { port: localDevPort },
+    { port: localDevPort, auth },
   );
 
   await addGeneratorMetricsIfApplicable(tree, [

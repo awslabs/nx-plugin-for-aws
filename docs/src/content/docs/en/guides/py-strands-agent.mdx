@@ -376,6 +376,8 @@ The docker image is built using a tag (for example `my-scope-my-project-agent:la
 
 ### Authentication
 
+The generator provides an `auth` option to configure authentication for your Strands Agent. You can choose between `IAM` (default) or `Cognito` authentication when generating your agent.
+
 #### IAM
 
 By default, your Strands Agent will be secured using IAM authentication, simply deploy it without any arguments:
@@ -392,7 +394,7 @@ export class ExampleStack extends Stack {
 }
 ```
 
-You can grant access to invoke your agent on Bedrock AgentCore Runtime using the `grantInvoke` method, for example:
+You can grant access to invoke your agent on Bedrock AgentCore Runtime using the `grantInvokeAccess` method, for example:
 
 ```ts {8}
 import { MyProjectAgent } from ':my-scope/common-constructs';
@@ -402,7 +404,7 @@ export class ExampleStack extends Stack {
     const agent = new MyProjectAgent(this, 'MyProjectAgent');
     const lambdaFunction = new Function(this, ...);
 
-    agent.agentCoreRuntime.grantInvoke(lambdaFunction);
+    agent.grantInvokeAccess(lambdaFunction);
   }
 }
 ```
@@ -433,38 +435,55 @@ To grant access to invoke your agent, you will need to add a policy such as the 
 </Fragment>
 </Infrastructure>
 
-#### Cognito JWT Authentication
+#### Cognito Authentication
 
-The below demonstrates how to configure Cognito authentication for your agent.
+When you select `Cognito` authentication, the generator automatically creates the `UserIdentity` construct and configures the agent to use Cognito for authentication.
 
 <Infrastructure>
 <Fragment slot="cdk">
-To configure JWT authentication using Cognito, use the `RuntimeAuthorizerConfiguration.usingCognito()` factory method:
+The generated construct accepts an `identity` prop which configures Cognito authentication:
 
-```ts {13-16}
+```ts {8-11}
 import { MyProjectAgent } from ':my-scope/common-constructs';
-import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
+import { UserIdentity } from ':my-scope/common-constructs';
 
 export class ExampleStack extends Stack {
   constructor(scope: Construct, id: string) {
-    const userPool = new UserPool(this, 'UserPool');
-    const client = userPool.addClient('Client', {
-      authFlows: {
-        userPassword: true,
-      },
-    });
+    const identity = new UserIdentity(this, 'Identity');
 
     new MyProjectAgent(this, 'MyProjectAgent', {
-      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingCognito(
-        userPool,
-        [client],
-      ),
+      identity: {
+        userPool: identity.userPool,
+        userPoolClient: identity.userPoolClient,
+      },
     });
   }
 }
 ```
 
-Alternatively, for custom JWT authentication with your own OIDC provider, use `RuntimeAuthorizerConfiguration.usingJWT()`:
+The `UserIdentity` construct is automatically generated when you select `Cognito` authentication.
+</Fragment>
+<Fragment slot="terraform">
+When `Cognito` authentication is selected, the generated Terraform module includes `user_pool_id` and `user_pool_client_id` variables that configure JWT authentication automatically:
+
+```terraform
+module "my_project_agent" {
+  source = "../../common/terraform/src/app/agents/my-project-agent"
+
+  user_pool_id        = module.identity.user_pool_id
+  user_pool_client_id = module.identity.user_pool_client_id
+}
+```
+</Fragment>
+</Infrastructure>
+
+#### Custom JWT Authentication
+
+For custom JWT authentication with your own OIDC provider, you can manually configure the agent construct.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Use `RuntimeAuthorizerConfiguration.usingJWT()`:
 
 ```ts {6-10}
 import { MyProjectAgent } from ':my-scope/common-constructs';

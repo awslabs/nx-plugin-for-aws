@@ -29,6 +29,7 @@ import { TS_VERSIONS, withVersions } from '../../utils/versions';
 import { kebabCase, toClassName } from '../../utils/names';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { addMcpServerInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
+import { addIdentityInfra } from '../../utils/identity-constructs/identity-constructs';
 import { getNpmScope } from '../../utils/npm-scope';
 import { resolveIacProvider } from '../../utils/iac';
 import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
@@ -64,6 +65,7 @@ export const tsMcpServerGenerator = async (
   const distDir = joinPathFragments('dist', project.root);
 
   const computeType = options.computeType ?? 'BedrockAgentCoreRuntime';
+  const auth = options.auth ?? 'IAM';
 
   // Create a package.json if one doesn't exist, since we want to add the server as a bin target
   const projectPackageJsonPath = joinPathFragments(
@@ -102,9 +104,7 @@ export const tsMcpServerGenerator = async (
       esm,
       distDir,
       adotVersion:
-        TS_VERSIONS[
-          '@aws/aws-distro-opentelemetry-node-autoinstrumentation'
-        ],
+        TS_VERSIONS['@aws/aws-distro-opentelemetry-node-autoinstrumentation'],
     },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
@@ -151,6 +151,14 @@ export const tsMcpServerGenerator = async (
     const iacProvider = await resolveIacProvider(tree, options.iacProvider);
     await sharedConstructsGenerator(tree, { iacProvider });
 
+    if (auth === 'Cognito') {
+      addIdentityInfra(tree, {
+        iacProvider,
+        allowSignup: false,
+        cognitoDomain: name,
+      });
+    }
+
     // Add the construct to deploy the mcp server
     addMcpServerInfra(tree, {
       mcpServerNameKebabCase: name,
@@ -158,6 +166,7 @@ export const tsMcpServerGenerator = async (
       projectName: project.name,
       dockerImageTag,
       iacProvider,
+      auth,
     });
   } else {
     // No Dockerfile needed for non-hosted MCP
@@ -214,6 +223,7 @@ export const tsMcpServerGenerator = async (
     mcpTargetPrefix,
     {
       port: localDevPort,
+      auth,
     },
   );
 

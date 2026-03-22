@@ -22,6 +22,8 @@ import { withVersions } from '../versions';
 
 type IACProvider = { iacProvider: IacProvider };
 
+export type AgentCoreAuth = 'IAM' | 'Cognito';
+
 export interface AddAgentCoreInfraProps {
   nameClassName: string;
   nameKebabCase: string;
@@ -29,6 +31,7 @@ export interface AddAgentCoreInfraProps {
   dockerImageTag: string;
   appDirectory: string;
   serverProtocol: 'MCP' | 'HTTP';
+  auth: AgentCoreAuth;
 }
 
 const addAgentCoreInfra = (
@@ -167,6 +170,7 @@ export interface AddMcpServerInfraProps {
   mcpServerNameKebabCase: string;
   projectName: string;
   dockerImageTag: string;
+  auth: AgentCoreAuth;
 }
 
 /**
@@ -184,6 +188,7 @@ export const addMcpServerInfra = (
     appDirectory: 'mcp-servers',
     serverProtocol: 'MCP',
     iacProvider: options.iacProvider,
+    auth: options.auth,
   });
 };
 
@@ -192,6 +197,7 @@ export interface AddAgentInfraProps {
   agentNameKebabCase: string;
   projectName: string;
   dockerImageTag: string;
+  auth: AgentCoreAuth;
 }
 
 /**
@@ -209,5 +215,6 @@ export const addAgentInfra = (
     appDirectory: 'agents',
     serverProtocol: 'HTTP',
     iacProvider: options.iacProvider,
+    auth: options.auth,
   });
 };
