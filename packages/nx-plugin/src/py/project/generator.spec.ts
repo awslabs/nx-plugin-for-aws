@@ -30,8 +30,13 @@ describe('python project generator', () => {
     expect(tree.exists('apps/test_project/tests')).toBeTruthy();
 
     // Verify hello.py files are removed
-    expect(tree.exists('apps/test_project/proj_test_project/hello.py')).toBeFalsy();
+    expect(
+      tree.exists('apps/test_project/proj_test_project/hello.py'),
+    ).toBeFalsy();
     expect(tree.exists('apps/test_project/tests/test_hello.py')).toBeFalsy();
+
+    // Verify placeholder test is added
+    expect(tree.exists('apps/test_project/tests/test_noop.py')).toBeTruthy();
   });
 
   it('should set up project configuration correctly', async () => {

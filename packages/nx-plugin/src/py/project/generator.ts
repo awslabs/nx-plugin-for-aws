@@ -150,6 +150,12 @@ export const pyProjectGenerator = async (
     joinPathFragments(dir, 'tests', 'test_hello.py'),
   ].forEach((f) => tree.delete(f));
 
+  // Add a placeholder test so pytest doesn't fail with "no tests collected"
+  tree.write(
+    joinPathFragments(dir, 'tests', 'test_noop.py'),
+    'def test_noop():\n    pass\n',
+  );
+
   const outputPath = '{workspaceRoot}/dist/{projectRoot}';
   const buildOutputPath = joinPathFragments(outputPath, 'build');
   const projectConfiguration = readProjectConfiguration(
