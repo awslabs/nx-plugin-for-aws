@@ -23,7 +23,7 @@ import {
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { formatFilesInSubtree } from '../../utils/format';
 import { kebabCase, toClassName } from '../../utils/names';
-import { withVersions } from '../../utils/versions';
+import { TS_VERSIONS, withVersions } from '../../utils/versions';
 import { getNpmScope } from '../../utils/npm-scope';
 import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
 import { resolveIacProvider } from '../../utils/iac';
@@ -93,6 +93,10 @@ export const tsStrandsAgentGenerator = async (
       {
         distDir,
         name,
+        adotVersion:
+          TS_VERSIONS[
+            '@aws/aws-distro-opentelemetry-node-autoinstrumentation'
+          ],
       },
       { overwriteStrategy: OverwriteStrategy.KeepExisting },
     );
