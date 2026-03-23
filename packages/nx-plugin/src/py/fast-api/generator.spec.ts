@@ -885,4 +885,17 @@ describe('fastapi project generator', () => {
       tree.exists('packages/common/constructs/src/app/apis/test-api.ts'),
     ).toBeTruthy();
   });
+
+  it('should place project in subDirectory when provided', async () => {
+    await pyFastApiProjectGenerator(tree, {
+      name: 'test-api',
+      directory: 'packages',
+      subDirectory: 'apis',
+      computeType: 'ServerlessApiGatewayHttpApi',
+      auth: 'IAM',
+      iacProvider: 'CDK',
+    });
+    expect(tree.exists('packages/apis')).toBeTruthy();
+    expect(tree.exists('packages/apis/pyproject.toml')).toBeTruthy();
+  });
 });

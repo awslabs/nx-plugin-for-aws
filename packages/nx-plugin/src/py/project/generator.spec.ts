@@ -228,4 +228,15 @@ describe('python project generator', () => {
       nxJson.targetDefaults?.['@nxlv/python:ruff-check'],
     ).not.toBeDefined();
   });
+
+  it('should place project in subDirectory when provided', async () => {
+    await pyProjectGenerator(tree, {
+      name: 'test-project',
+      directory: 'packages',
+      subDirectory: 'libs',
+      projectType: 'library',
+    });
+    expect(tree.exists('packages/libs')).toBeTruthy();
+    expect(tree.exists('packages/libs/pyproject.toml')).toBeTruthy();
+  });
 });
