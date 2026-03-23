@@ -84,6 +84,7 @@ export const TS_VERSIONS = {
   shadcn: '3.8.5',
   'tw-animate-css': '1.4.0',
   'tailwind-merge': '3.5.0',
+  vite: '7.3.1',
   vitest: '4.1.0',
   'vite-tsconfig-paths': '5.1.4',
   zod: '4.3.6',
