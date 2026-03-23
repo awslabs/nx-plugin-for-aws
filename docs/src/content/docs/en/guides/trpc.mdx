@@ -75,73 +75,17 @@ At a high-level, tRPC APIs consist of a router which delegates requests to speci
 
 ### Schema
 
-The `src/schema` directory contains the types that are shared between your client and server code. In this package, these types are defined using [Zod](https://zod.dev/), a TypeScript-first schema declaration and validation library.
-
-An example schema might look as follows:
-
-```ts
-import { z } from 'zod';
-
-// Schema definition
-export const UserSchema = z.object({
-  name: z.string(),
-  height: z.number(),
-  dateOfBirth: z.string().datetime(),
-});
-
-// Corresponding TypeScript type
-export type User = z.TypeOf<typeof UserSchema>;
-```
-
-Given the above schema, the `User` type is equivalent to the following TypeScript:
-
-```ts
-interface User {
-  name: string;
-  height: number;
-  dateOfBirth: string;
-}
-```
-
-Schemas are shared by both server and client code, providing a single place to update when making changes to the structures used in your API.
-
-Schemas are automatically validated by your tRPC API at runtime, which saves hand-crafting custom validation logic in your backend.
-
-Zod provides powerful utilities to combine or derive schemas such as `.merge`, `.pick`, `.omit` and more. You can find more information on the [Zod documentation website](https://zod.dev/?id=basic-usage).
+<Snippet name="trpc/schema" />
 
 ### Router and Procedures
 
 Your tRPC router is defined in `src/router.ts`, which registers all procedures. Each procedure defines the expected input, output, and implementation. The Lambda handler entry point is in `src/handler.ts`, which forwards requests to your router.
 
-The sample router generated for you has a single operation, called `echo`:
+<Snippet name="trpc/echo-procedure" />
 
-```ts
-import { echo } from './procedures/echo.js';
-
-export const appRouter = router({
-  echo,
-});
-```
-
-The example `echo` procedure is generated for you in `src/procedures/echo.ts`:
-
-```ts
-export const echo = publicProcedure
-  .input(EchoInputSchema)
-  .output(EchoOutputSchema)
-  .query((opts) => ({ result: opts.input.message }));
-```
-
-To break down the above:
-
-- `publicProcedure` defines a public method on the API, including the middleware set up in `src/middleware`. This middleware includes AWS Lambda Powertools integration for logging, tracing and metrics.
-- `input` accepts a Zod schema which defines the expected input for the operation. Requests sent for this operation are automatically validated against this schema.
-- `output` accepts a Zod schema which defines the expected output for the operation. You will see type errors in your implementation if you don't return an output which conforms to the schema.
-- `query` accepts a function which defines the implementation for your API. This implementation receives `opts`, which contains the `input` passed to your operation, as well as other context set up by middleware, available in `opts.ctx`. The function passed to `query` must return an output which conforms to the `output` schema.
-
-The use of `query` to define the implementation indicates that the operation is not mutative. Use this to define methods to retrieve data. To implement a mutative operation, use the `mutation` method instead.
-
-If you add a new procedure, make sure you register it by adding it to the router in `src/router.ts`.
+:::note
+In the Lambda variant, `publicProcedure` also includes the middleware set up in `src/middleware`, which provides AWS Lambda Powertools integration for logging, tracing and metrics.
+:::
 
 ### Subscriptions (Streaming)
 
@@ -191,39 +135,11 @@ The generated infrastructure uses a streaming Lambda handler with `ResponseTrans
 
 ### Errors
 
-In your implementation, you can return error responses to clients by throwing a `TRPCError`. These accept a `code` which indicates the type of error, for example:
-
-```ts
-throw new TRPCError({
-  code: 'NOT_FOUND',
-  message: 'The requested resource could not be found',
-});
-```
+<Snippet name="trpc/errors" />
 
 ### Organising Your Operations
 
-As your API grows, you may wish to group related operations together.
-
-You can group operations together using nested routers, for example:
-
-```ts
-import { getUser } from './procedures/users/get.js';
-import { listUsers } from './procedures/users/list.js';
-
-const appRouter = router({
-   users: router({
-      get: getUser,
-      list: listUsers,
-   }),
-   ...
-})
-```
-
-Clients then receive this grouping of operations, for example invoking the `listUsers` operation in this case might look as follows:
-
-```ts
-client.users.list.query();
-```
+<Snippet name="trpc/organising-operations" />
 
 ### Logging
 

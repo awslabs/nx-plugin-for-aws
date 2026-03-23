@@ -46,6 +46,7 @@ export async function reactGenerator(
   const auth = metadata.auth ?? 'IAM';
   const port = metadata.port ?? metadata.ports?.[0] ?? 2022;
   const isRestApi = metadata.computeType === 'ServerlessApiGatewayRestApi';
+  const isEcs = metadata.apiType === 'ecs-trpc';
   const apiNameClassName = toClassName(apiName);
   const backendProjectAlias = toScopeAlias(backendProjectConfig.name);
 
@@ -59,6 +60,7 @@ export async function reactGenerator(
       ...options,
       auth,
       isRestApi,
+      isEcs,
       backendProjectAlias,
     },
     {

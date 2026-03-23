@@ -143,6 +143,17 @@ export async function tsTrpcApiGenerator(
     },
   );
 
+  // Generate shared tRPC template files (router, procedures, schema)
+  generateFiles(
+    tree,
+    joinPathFragments(__dirname, '../../utils/files/trpc'),
+    backendRoot,
+    enhancedOptions,
+    {
+      overwriteStrategy: OverwriteStrategy.Overwrite,
+    },
+  );
+
   tree.delete(joinPathFragments(backendRoot, 'src', 'lib'));
 
   // Remove streaming schema helper for HTTP APIs (API Gateway HTTP API doesn't support streaming)
