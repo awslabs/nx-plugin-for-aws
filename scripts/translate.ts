@@ -32,6 +32,14 @@ const SUPPORTED_LANGUAGES = [
 ];
 const SOURCE_LANGUAGE = 'en';
 const DOCS_DIR = path.resolve(process.cwd(), 'docs/src/content/docs');
+const SCHEMA_TRANSLATIONS_PATH = path.resolve(
+  process.cwd(),
+  'docs/src/i18n/schema-translations.json',
+);
+const GENERATORS_JSON_PATH = path.resolve(
+  process.cwd(),
+  'packages/nx-plugin/generators.json',
+);
 const BATCH_SIZE = 3; // Number of concurrent Bedrock API calls
 
 // Interface for file translation context
@@ -179,11 +187,14 @@ async function main() {
     // Create Bedrock queue for batching API calls
     const bedrockQueue = new BedrockQueue(bedrockClient);
 
+    // Translate schema descriptions
+    await translateSchemaDescriptions(targetLanguages, bedrockQueue);
+
     // Get files to translate
     const filesToTranslate = await getFilesToTranslate();
 
     if (filesToTranslate.length === 0) {
-      log.info('No files to translate');
+      log.info('No documentation files to translate');
       return;
     }
 
@@ -895,6 +906,266 @@ function getLanguageName(langCode: string): string {
   };
 
   return languageMap[langCode] || langCode;
+}
+
+/**
+ * Interface for a schema description entry to translate
+ */
+interface SchemaDescriptionEntry {
+  generator: string;
+  property: string;
+  description: string;
+}
+
+/**
+ * Load the current schema translations file
+ */
+function loadSchemaTranslations(): Record<
+  string,
+  Record<string, Record<string, string>>
+> {
+  try {
+    return JSON.parse(fs.readFileSync(SCHEMA_TRANSLATIONS_PATH, 'utf-8'));
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Extract all descriptions from generator schema.json files
+ */
+function extractSchemaDescriptions(): Record<string, Record<string, string>> {
+  const generatorsJson = JSON.parse(
+    fs.readFileSync(GENERATORS_JSON_PATH, 'utf-8'),
+  );
+  const result: Record<string, Record<string, string>> = {};
+
+  for (const [name, gen] of Object.entries(
+    generatorsJson.generators as Record<string, { schema: string }>,
+  )) {
+    const schemaPath = path.resolve(
+      process.cwd(),
+      'packages/nx-plugin',
+      gen.schema.slice(2),
+    );
+    try {
+      const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf-8'));
+      if (schema.properties) {
+        const props: Record<string, string> = {};
+        for (const [prop, def] of Object.entries(
+          schema.properties as Record<string, { description?: string }>,
+        )) {
+          if (def.description) {
+            props[prop] = def.description;
+          }
+        }
+        if (Object.keys(props).length > 0) {
+          result[name] = props;
+        }
+      }
+    } catch {
+      log.verbose(`Could not read schema for generator ${name}`);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Get schema descriptions that need translation (new or changed English text)
+ */
+function getSchemaDescriptionsToTranslate(
+  targetLanguages: string[],
+  forceAll: boolean = false,
+): SchemaDescriptionEntry[] {
+  const currentDescriptions = extractSchemaDescriptions();
+  const existingTranslations = forceAll ? {} : loadSchemaTranslations();
+  const toTranslate: SchemaDescriptionEntry[] = [];
+
+  for (const [generator, props] of Object.entries(currentDescriptions)) {
+    for (const [property, description] of Object.entries(props)) {
+      const existing = existingTranslations?.[generator]?.[property];
+      // Translate if English text changed or any target language is missing
+      const englishChanged = !existing || existing.en !== description;
+      const missingLanguages = targetLanguages.some(
+        (lang) => !existing?.[lang],
+      );
+
+      if (englishChanged || missingLanguages) {
+        toTranslate.push({ generator, property, description });
+      }
+    }
+  }
+
+  return toTranslate;
+}
+
+/**
+ * Translate schema descriptions to all target languages
+ */
+async function translateSchemaDescriptions(
+  targetLanguages: string[],
+  bedrockQueue: BedrockQueue,
+): Promise<void> {
+  const toTranslate = getSchemaDescriptionsToTranslate(
+    targetLanguages,
+    options.all,
+  );
+
+  if (toTranslate.length === 0) {
+    log.info('No schema descriptions to translate');
+    return;
+  }
+
+  log.info(`Found ${toTranslate.length} schema description(s) to translate`);
+
+  if (options.dryRun) {
+    for (const entry of toTranslate) {
+      log.info(
+        `[DRY RUN] Would translate ${entry.generator}.${entry.property}: "${entry.description}"`,
+      );
+    }
+    return;
+  }
+
+  const translations = loadSchemaTranslations();
+
+  // Group descriptions by generator to batch translate
+  const grouped: Record<string, Record<string, string>> = {};
+  for (const entry of toTranslate) {
+    if (!grouped[entry.generator]) {
+      grouped[entry.generator] = {};
+    }
+    grouped[entry.generator][entry.property] = entry.description;
+  }
+
+  const translationPromises: Promise<void>[] = [];
+
+  for (const [generator, properties] of Object.entries(grouped)) {
+    if (!translations[generator]) {
+      translations[generator] = {};
+    }
+
+    // Update English entries
+    for (const [property, description] of Object.entries(properties)) {
+      if (!translations[generator][property]) {
+        translations[generator][property] = {};
+      }
+      translations[generator][property].en = description;
+    }
+
+    // Translate to each target language
+    for (const targetLang of targetLanguages) {
+      translationPromises.push(
+        translateSchemaDescriptionBatch(
+          generator,
+          properties,
+          targetLang,
+          translations,
+          bedrockQueue,
+        ),
+      );
+    }
+  }
+
+  await Promise.all(translationPromises);
+
+  // Also remove generators/properties that no longer exist
+  const currentDescriptions = extractSchemaDescriptions();
+  for (const generator of Object.keys(translations)) {
+    if (!currentDescriptions[generator]) {
+      delete translations[generator];
+      continue;
+    }
+    for (const property of Object.keys(translations[generator])) {
+      if (!currentDescriptions[generator][property]) {
+        delete translations[generator][property];
+      }
+    }
+  }
+
+  // Write updated translations
+  await fs.writeFile(
+    SCHEMA_TRANSLATIONS_PATH,
+    JSON.stringify(translations, null, 2) + '\n',
+    'utf-8',
+  );
+
+  log.success('Schema description translations updated');
+}
+
+/**
+ * Translate a batch of schema descriptions for a single generator to a target language
+ */
+async function translateSchemaDescriptionBatch(
+  generator: string,
+  properties: Record<string, string>,
+  targetLang: string,
+  translations: Record<string, Record<string, Record<string, string>>>,
+  bedrockQueue: BedrockQueue,
+): Promise<void> {
+  const descriptionsText = Object.entries(properties)
+    .map(([prop, desc]) => `${prop}: ${desc}`)
+    .join('\n');
+
+  const prompt = `You are a technical documentation translator. Translate the following generator parameter descriptions from English to ${getLanguageName(targetLang)}.
+
+Each line has the format "parameter_name: description". Translate ONLY the description part, keeping the parameter_name exactly as is.
+
+CRITICAL REQUIREMENTS:
+1. Do NOT translate technical terms like API, CDK, Lambda, MCP, Cognito, IAM, TypeScript, Python, React, Smithy, FastAPI, tRPC, Terraform, Nx, etc.
+2. Keep the exact same format: "parameter_name: translated description"
+3. Return ONLY the translated lines, no additional commentary.
+4. Maintain technical accuracy in the translations.`;
+
+  const params: InvokeModelCommandInput = {
+    modelId: frontmatterTranslationModelId,
+    contentType: 'application/json',
+    accept: 'application/json',
+    body: JSON.stringify({
+      anthropic_version: 'bedrock-2023-05-31',
+      max_tokens: 4096,
+      temperature: 0.1,
+      system: prompt,
+      messages: [
+        {
+          role: 'user',
+          content: descriptionsText,
+        },
+      ],
+    }),
+  };
+
+  try {
+    const response = await bedrockQueue.enqueue(params);
+    const responseBody = JSON.parse(new TextDecoder().decode(response.body));
+    const translatedText = responseBody.content[0].text;
+
+    // Parse the response lines back into property -> translation
+    const lines = translatedText.trim().split('\n');
+    for (const line of lines) {
+      const colonIndex = line.indexOf(':');
+      if (colonIndex === -1) continue;
+
+      const prop = line.substring(0, colonIndex).trim();
+      const translated = line.substring(colonIndex + 1).trim();
+
+      if (properties[prop] && translated) {
+        if (!translations[generator][prop]) {
+          translations[generator][prop] = {};
+        }
+        translations[generator][prop][targetLang] = translated;
+      }
+    }
+
+    log.success(
+      `Translated ${Object.keys(properties).length} descriptions for ${generator} to ${targetLang}`,
+    );
+  } catch (error) {
+    log.error(
+      `Failed to translate schema descriptions for ${generator} to ${targetLang}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }
 
 // Run the main function
