@@ -362,6 +362,10 @@ export default defineConfig({
                   label: 'React → Smithy',
                   link: '/guides/connection/react-smithy',
                 },
+                {
+                  label: 'TypeScript Strands Agent → MCP Server',
+                  link: '/guides/connection/ts-strands-agent-mcp',
+                },
               ],
             },
             {

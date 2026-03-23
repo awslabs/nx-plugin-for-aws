@@ -15,6 +15,7 @@ import {
 import { SMITHY_PROJECT_GENERATOR_INFO } from '../smithy/project/generator';
 import { TS_SMITHY_API_GENERATOR_INFO } from '../smithy/ts/api/generator';
 import smithyReactConnectionGenerator from '../smithy/react-connection/generator';
+import tsStrandsAgentMcpConnectionGenerator from '../ts/strands-agent/mcp-connection/generator';
 
 /**
  * List of supported source and target project types for connections.
@@ -56,6 +57,8 @@ const SUPPORTED_CONNECTIONS = [
   { source: 'react', target: 'ts#trpc-api' },
   { source: 'react', target: 'py#fast-api' },
   { source: 'react', target: 'smithy' },
+  { source: 'ts#strands-agent', target: 'ts#mcp-server' },
+  { source: 'ts#strands-agent', target: 'py#mcp-server' },
 ] as const satisfies readonly Connection[];
 
 type ConnectionKey = (typeof SUPPORTED_CONNECTIONS)[number] extends infer C
@@ -67,6 +70,16 @@ type ConnectionKey = (typeof SUPPORTED_CONNECTIONS)[number] extends infer C
 /**
  * Generators for each connection type
  */
+/**
+ * Options passed to connection generators, including resolved component metadata.
+ */
+export interface ResolvedConnectionOptions {
+  sourceProject: string;
+  targetProject: string;
+  sourceComponent?: ComponentMetadata;
+  targetComponent?: ComponentMetadata;
+}
+
 const CONNECTION_GENERATORS = {
   'react -> ts#trpc-api': (tree, options) =>
     trpcReactGenerator(tree, {
@@ -83,9 +96,13 @@ const CONNECTION_GENERATORS = {
       frontendProjectName: options.sourceProject,
       smithyModelOrBackendProjectName: options.targetProject,
     }),
+  'ts#strands-agent -> ts#mcp-server': (tree, options) =>
+    tsStrandsAgentMcpConnectionGenerator(tree, options),
+  'ts#strands-agent -> py#mcp-server': (tree, options) =>
+    tsStrandsAgentMcpConnectionGenerator(tree, options),
 } satisfies Record<
   ConnectionKey,
-  (tree: Tree, options: ConnectionGeneratorSchema) => Promise<any>
+  (tree: Tree, options: ResolvedConnectionOptions) => Promise<any>
 >;
 
 /**
@@ -95,12 +112,17 @@ export const connectionGenerator = async (
   tree: Tree,
   options: ConnectionGeneratorSchema,
 ) => {
-  const { connection } = resolveConnection(tree, options);
+  const resolved = resolveConnection(tree, options);
 
   const connectionKey =
-    `${connection.source} -> ${connection.target}` as ConnectionKey;
+    `${resolved.connection.source} -> ${resolved.connection.target}` as ConnectionKey;
 
-  return await CONNECTION_GENERATORS[connectionKey](tree, options);
+  return await CONNECTION_GENERATORS[connectionKey](tree, {
+    sourceProject: options.sourceProject,
+    targetProject: options.targetProject,
+    sourceComponent: resolved.sourceComponent,
+    targetComponent: resolved.targetComponent,
+  });
 };
 
 /**
@@ -202,9 +224,8 @@ const filterConnectionCandidatesForComponentReference = (
     (c) => c[side] === component.generator,
   );
   if (!isConnectionParticipant) return candidates;
-  return candidates.filter(
-    (c) => c.component?.generator === component.generator,
-  );
+  // Filter to the specific matched component, not all components with the same generator
+  return candidates.filter((c) => c.component === component);
 };
 
 /**
@@ -271,7 +292,17 @@ export const resolveConnection = (
 
   if (matches.length > 1) {
     const connectionDescriptions = matches
-      .map((m) => `${m.connection.source} -> ${m.connection.target}`)
+      .map((m) => {
+        const sourceName = m.sourceComponent?.name;
+        const targetName = m.targetComponent?.name;
+        const sourceLabel = sourceName
+          ? `${sourceName} (${m.connection.source})`
+          : m.connection.source;
+        const targetLabel = targetName
+          ? `${targetName} (${m.connection.target})`
+          : m.connection.target;
+        return `${sourceLabel} -> ${targetLabel}`;
+      })
       .join(', ');
     throw new Error(
       `Ambiguous connection from ${options.sourceProject} to ${options.targetProject}. ` +

@@ -1,0 +1,37 @@
+import { McpClient } from '@strands-agents/sdk';
+import { AgentCoreMcpClient } from '../core/agentcore-mcp-client.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { getAppConfig } from '@aws-lambda-powertools/parameters/appconfig';
+
+/**
+ * Client for connecting to the <%- mcpServerClassName %> MCP server.
+ *
+ * In deployed mode: resolves the AgentCore runtime ARN from runtime config
+ * and uses SigV4-authenticated AgentCore transport.
+ *
+ * In local mode (SERVE_LOCAL env var set): connects directly
+ * to the local MCP server via Streamable HTTP.
+ */
+export class <%- mcpServerClassName %>Client {
+  static async create(sessionId: string): Promise<McpClient> {
+    if (process.env.SERVE_LOCAL === 'true') {
+      // Local development: connect directly via Streamable HTTP
+      const transport = new StreamableHTTPClientTransport(
+        new URL('http://localhost:<%- mcpServerPort %>/mcp'),
+      );
+      return new McpClient({ transport });
+    }
+
+    // Deployed: resolve ARN from runtime config, use AgentCore transport
+    const config = (await getAppConfig('connection', {
+      application: process.env.RUNTIME_CONFIG_APP_ID!,
+      environment: 'default',
+      transform: 'json',
+    })) as Record<string, any>;
+
+    return AgentCoreMcpClient.withIamAuth({
+      agentRuntimeArn: config.agentRuntimes.<%- mcpServerClassName %>,
+      sessionId,
+    });
+  }
+}
