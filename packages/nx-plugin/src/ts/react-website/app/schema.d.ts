@@ -8,6 +8,7 @@ import { UxProviderOption } from './generator';
 export interface TsReactWebsiteGeneratorSchema {
   name: string;
   directory?: string;
+  subDirectory?: string;
   skipInstall?: boolean;
   enableTanstackRouter?: boolean;
   enableTailwind?: boolean;

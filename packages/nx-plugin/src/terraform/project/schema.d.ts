@@ -12,4 +12,5 @@ export interface TerraformProjectGeneratorSchema {
   name: string;
   type: ProjectType;
   directory?: string;
+  subDirectory?: string;
 }

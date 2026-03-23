@@ -427,6 +427,18 @@ describe('terraformProjectGenerator', () => {
     });
   });
 
+  it('should place project in subDirectory when provided', async () => {
+    await terraformProjectGenerator(tree, {
+      name: 'my-terraform-project',
+      type: 'application',
+      directory: 'packages',
+      subDirectory: 'infra',
+    });
+    expect(tree.exists('packages/infra')).toBeTruthy();
+    expect(tree.exists('packages/infra/src')).toBeTruthy();
+    expect(tree.exists('packages/infra/src/main.tf')).toBeTruthy();
+  });
+
   describe('error handling', () => {
     it('should handle missing getTsLibDetails gracefully', async () => {
       vi.spyOn(tsLibGenerator, 'getTsLibDetails').mockImplementation(() => {
