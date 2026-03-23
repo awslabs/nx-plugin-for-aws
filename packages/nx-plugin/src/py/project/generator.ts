@@ -58,7 +58,12 @@ export interface PyProjectDetails {
  */
 export const getPyProjectDetails = (
   tree: Tree,
-  schema: { name: string; directory?: string; moduleName?: string },
+  schema: {
+    name: string;
+    directory?: string;
+    subDirectory?: string;
+    moduleName?: string;
+  },
 ): PyProjectDetails => {
   const scope = toSnakeCase(getNpmScope(tree));
   const normalizedName = toSnakeCase(schema.name);
@@ -66,7 +71,11 @@ export const getPyProjectDetails = (
     schema.moduleName ?? `${scope}_${normalizedName}`,
   );
   const fullyQualifiedName = `${scope}.${normalizedName}`;
-  const dir = joinPathFragments(schema.directory ?? '.', normalizedName);
+  // NB: interactive nx generator cli can pass empty string
+  const dir = joinPathFragments(
+    schema.directory || '.',
+    schema.subDirectory || normalizedName,
+  );
   return { dir, fullyQualifiedName, normalizedModuleName };
 };
 

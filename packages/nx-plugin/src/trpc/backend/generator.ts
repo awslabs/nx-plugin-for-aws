@@ -65,6 +65,7 @@ export async function tsTrpcApiGenerator(
   await tsProjectGenerator(tree, {
     name: backendName,
     directory: options.directory,
+    subDirectory: options.subDirectory,
   });
 
   const projectConfig = readProjectConfigurationUnqualified(

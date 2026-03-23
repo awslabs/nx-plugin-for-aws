@@ -13,6 +13,7 @@ export interface PyFastApiProjectGeneratorSchema {
   readonly integrationPattern?: 'isolated' | 'shared';
   readonly auth: 'IAM' | 'Cognito' | 'None';
   readonly directory?: string;
+  readonly subDirectory?: string;
   readonly moduleName?: string;
   readonly iacProvider: IacProviderOption;
 }
