@@ -9,7 +9,6 @@ import {
   addDependenciesToPackageJson,
   detectPackageManager,
   generateFiles,
-  getPackageManagerCommand,
   installPackagesTask,
   joinPathFragments,
   readNxJson,
@@ -197,9 +196,9 @@ export const presetGenerator = async (
       generators: Object.entries(GeneratorsJson.generators)
         .filter(([_, v]) => !v['hidden'])
         .map(([k, v]) => ({ name: k, description: v.description })),
-      pkgMgrCmd: getPackageManagerCommand().exec,
-      buildCmd: getPackageManagerCommand().run('build'),
-      lintCmd: getPackageManagerCommand().run('lint'),
+      pkgMgrCmd: detectPackageManager(),
+      buildCmd: `${detectPackageManager()} build`,
+      lintCmd: `${detectPackageManager()} lint`,
     },
     {
       overwriteStrategy: OverwriteStrategy.Overwrite,
