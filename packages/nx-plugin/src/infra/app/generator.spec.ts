@@ -438,4 +438,15 @@ describe('infra generator', () => {
       snapshotTreeDir(tree, 'packages/common/scripts/src');
     });
   });
+
+  it('should place project in subDirectory when provided', async () => {
+    await tsInfraGenerator(tree, {
+      ...options,
+      directory: 'packages',
+      subDirectory: 'infra',
+    });
+    expect(tree.exists('packages/infra')).toBeTruthy();
+    expect(tree.exists('packages/infra/src')).toBeTruthy();
+    expect(tree.exists('packages/infra/cdk.json')).toBeTruthy();
+  });
 });

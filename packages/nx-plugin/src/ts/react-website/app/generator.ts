@@ -75,9 +75,10 @@ export async function tsReactWebsiteGenerator(
   const websiteNameClassName = toClassName(schema.name);
   const websiteNameKebabCase = toKebabCase(schema.name);
   const fullyQualifiedName = `${npmScopePrefix}${websiteNameKebabCase}`;
+  // NB: interactive nx generator cli can pass empty string
   const websiteContentPath = joinPathFragments(
-    schema.directory ?? '.',
-    websiteNameKebabCase,
+    schema.directory || '.',
+    schema.subDirectory || websiteNameKebabCase,
   );
   // TODO: consider exposing and supporting e2e tests
   const e2eTestRunner = 'none';

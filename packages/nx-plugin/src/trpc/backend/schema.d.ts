@@ -12,5 +12,6 @@ export interface TsTrpcApiGeneratorSchema {
   integrationPattern?: 'isolated' | 'shared';
   auth: 'IAM' | 'Cognito' | 'None';
   directory?: TsProjectGeneratorSchema['directory'];
+  subDirectory?: TsProjectGeneratorSchema['subDirectory'];
   iacProvider: IacProviderOption;
 }

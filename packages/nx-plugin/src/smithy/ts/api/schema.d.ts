@@ -14,5 +14,6 @@ export interface TsSmithyApiGeneratorSchema {
   integrationPattern?: 'isolated' | 'shared';
   auth: 'IAM' | 'Cognito' | 'None';
   directory?: TsProjectGeneratorSchema['directory'];
+  subDirectory?: TsProjectGeneratorSchema['subDirectory'];
   iacProvider: IacProviderOption;
 }

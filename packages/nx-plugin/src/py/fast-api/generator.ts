@@ -60,6 +60,7 @@ export const pyFastApiProjectGenerator = async (
     {
       name: schema.name,
       directory: schema.directory,
+      subDirectory: schema.subDirectory,
       moduleName: schema.moduleName,
     },
   );
@@ -69,6 +70,7 @@ export const pyFastApiProjectGenerator = async (
   await pyProjectGenerator(tree, {
     name: schema.name,
     directory: schema.directory,
+    subDirectory: schema.subDirectory,
     moduleName: normalizedModuleName,
     projectType: 'application',
   });
