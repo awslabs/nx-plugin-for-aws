@@ -35,7 +35,7 @@ export default defineConfig({
   image: {
     service: passthroughImageService(),
   },
-  outDir: '../dist/docs',
+  outDir: './dist',
   markdown: {
     shikiConfig: {
       langs: [smithySyntax()],
@@ -478,9 +478,5 @@ export default defineConfig({
   ],
   vite: {
     plugins: [tailwindcss()],
-    ssr: {
-      // https://github.com/withastro/astro/issues/14117
-      noExternal: ['zod'],
-    },
   },
 });
