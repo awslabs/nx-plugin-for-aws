@@ -7,7 +7,7 @@ import { ensureDirSync } from 'fs-extra';
 import { runCLI, tmpProjPath } from '../utils';
 import { join } from 'path';
 import { AwsClient } from 'aws4fetch';
-import { CloudFormation } from '@aws-sdk/client-cloudformation';
+import { CloudFormation, StackStatus } from '@aws-sdk/client-cloudformation';
 import { Lambda } from '@aws-sdk/client-lambda';
 import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
 import { runSmokeTest } from './smoke-test';
@@ -209,6 +209,54 @@ async function pingWebsite(domain: string) {
 }
 
 /**
+ * Clean up orphaned CloudFormation stacks from a test run.
+ *
+ * CDK destroy may not clean up cross-region stacks (e.g. WAF in us-east-1)
+ * or stacks left in ROLLBACK_COMPLETE state from failed deploys. This
+ * function explicitly deletes any stacks matching the test run prefix
+ * in both the deploy region and us-east-1 (where CloudFront WAF stacks
+ * are created).
+ */
+async function cleanupOrphanedStacks(cdkStageName: string): Promise<void> {
+  const regions = [process.env.AWS_REGION || 'us-west-2', 'us-east-1'];
+  // Deduplicate if AWS_REGION is already us-east-1
+  const uniqueRegions = [...new Set(regions)];
+
+  const orphanedStatuses = [
+    StackStatus.ROLLBACK_COMPLETE,
+    StackStatus.CREATE_FAILED,
+    StackStatus.DELETE_FAILED,
+    StackStatus.ROLLBACK_FAILED,
+  ];
+
+  for (const region of uniqueRegions) {
+    const cfn = new CloudFormation({ region });
+    try {
+      const stacks = await cfn.listStacks({
+        StackStatusFilter: orphanedStatuses,
+      });
+      const orphanedStacks = (stacks.StackSummaries ?? []).filter((s) =>
+        s.StackName?.startsWith(cdkStageName),
+      );
+      for (const stack of orphanedStacks) {
+        console.log(
+          `Deleting orphaned stack ${stack.StackName} (${stack.StackStatus}) in ${region}`,
+        );
+        try {
+          await cfn.deleteStack({ StackName: stack.StackName });
+        } catch (e) {
+          console.warn(
+            `Failed to delete orphaned stack ${stack.StackName}: ${e}`,
+          );
+        }
+      }
+    } catch (e) {
+      console.warn(`Failed to list stacks in ${region}: ${e}`);
+    }
+  }
+}
+
+/**
  * A test which deploys the smoke test resources to aws
  */
 describe('smoke test - cdk-deploy', () => {
@@ -305,10 +353,17 @@ describe('smoke test - cdk-deploy', () => {
       // Website
       await pingWebsite(findOutput('WebsiteDistributionDomainName'));
     } finally {
-      await runCLI(
-        `destroy infra ${cdkStageName}/* --output-style=stream --force`,
-        opts,
-      );
+      try {
+        await runCLI(
+          `destroy infra ${cdkStageName}/* --output-style=stream --force`,
+          opts,
+        );
+      } catch (e) {
+        console.warn(`cdk destroy failed: ${e}`);
+      }
+      // Clean up any stacks that cdk destroy missed (e.g. cross-region WAF
+      // stacks left in ROLLBACK_COMPLETE after a failed deploy)
+      await cleanupOrphanedStacks(cdkStageName);
     }
   });
 });
