@@ -221,8 +221,6 @@ async function deleteLeftoverStacks(cdkStageName: string): Promise<void> {
   const regions = [process.env.AWS_REGION || 'us-west-2', 'us-east-1'];
   const uniqueRegions = [...new Set(regions)];
 
-  const deletePromises: Promise<void>[] = [];
-
   for (const region of uniqueRegions) {
     const cfn = new CloudFormation({ region });
     try {
@@ -231,8 +229,6 @@ async function deleteLeftoverStacks(cdkStageName: string): Promise<void> {
           StackStatus.CREATE_COMPLETE,
           StackStatus.UPDATE_COMPLETE,
           StackStatus.ROLLBACK_COMPLETE,
-          StackStatus.CREATE_FAILED,
-          StackStatus.DELETE_FAILED,
         ],
       });
       const leftoverStacks = (stacks.StackSummaries ?? []).filter((s) =>
@@ -242,29 +238,16 @@ async function deleteLeftoverStacks(cdkStageName: string): Promise<void> {
         console.log(
           `Deleting leftover stack ${stack.StackName} (${stack.StackStatus}) in ${region}`,
         );
-        deletePromises.push(
-          cfn
-            .deleteStack({ StackName: stack.StackName })
-            .then(() =>
-              cfn.waitUntilStackDeleteComplete(
-                { maxWaitTime: 300 },
-                { StackName: stack.StackName! },
-              ),
-            )
-            .then(() =>
-              console.log(`Deleted stack ${stack.StackName} in ${region}`),
-            )
-            .catch((e) =>
-              console.warn(`Failed to delete stack ${stack.StackName}: ${e}`),
-            ),
-        );
+        await cfn
+          .deleteStack({ StackName: stack.StackName })
+          .catch((e) =>
+            console.warn(`Failed to delete stack ${stack.StackName}: ${e}`),
+          );
       }
     } catch (e) {
       console.warn(`Failed to list stacks in ${region}: ${e}`);
     }
   }
-
-  await Promise.all(deletePromises);
 }
 
 /**
