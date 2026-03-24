@@ -7,7 +7,7 @@ import { ensureDirSync } from 'fs-extra';
 import { runCLI, tmpProjPath } from '../utils';
 import { join } from 'path';
 import { AwsClient } from 'aws4fetch';
-import { CloudFormation } from '@aws-sdk/client-cloudformation';
+import { CloudFormation, StackStatus } from '@aws-sdk/client-cloudformation';
 import { Lambda } from '@aws-sdk/client-lambda';
 import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
 import { runSmokeTest } from './smoke-test';
@@ -109,7 +109,7 @@ async function invokeAgentCoreAgent(
   const response = await aws.fetch(agentUrl, {
     method: 'POST',
     body: JSON.stringify({
-      prompt: 'what is 3 + 5?',
+      prompt: 'what is 3 + 5 - 2?',
       session_id: 'abcdefghijklmnopqrstuvwxyz0123456789',
     }),
     headers: {
@@ -167,7 +167,7 @@ async function invokeTrpcAgentCoreAgent(
     // NB the trpc api is generated code so we don't have a type-safe trpc client here
     (client.invoke as any).subscribe(
       {
-        message: 'what is 3 + 5?',
+        message: 'what is 3 * 5 / 4?',
       },
       {
         onData: (chunk: string) => {
@@ -206,6 +206,48 @@ async function pingWebsite(domain: string) {
     await (await fetch(`https://${domain}/runtime-config.json`)).json(),
   ).toHaveProperty('cognitoProps');
   console.log('Successfully pinged website');
+}
+
+/**
+ * Delete any CloudFormation stacks matching the test run prefix that were
+ * not cleaned up by cdk destroy.
+ *
+ * The Website construct creates a cross-region WAF WebACL stack in us-east-1.
+ * When the Application stack deploy fails, cdk destroy only tears down the
+ * Application stack and skips the WAF stack, leaving orphaned WebACLs that
+ * accumulate towards the NUM_WEBACLS_BY_ACCOUNT limit.
+ */
+async function deleteLeftoverStacks(cdkStageName: string): Promise<void> {
+  const regions = [process.env.AWS_REGION || 'us-west-2', 'us-east-1'];
+  const uniqueRegions = [...new Set(regions)];
+
+  for (const region of uniqueRegions) {
+    const cfn = new CloudFormation({ region });
+    try {
+      const stacks = await cfn.listStacks({
+        StackStatusFilter: [
+          StackStatus.CREATE_COMPLETE,
+          StackStatus.UPDATE_COMPLETE,
+          StackStatus.ROLLBACK_COMPLETE,
+        ],
+      });
+      const leftoverStacks = (stacks.StackSummaries ?? []).filter((s) =>
+        s.StackName?.startsWith(cdkStageName),
+      );
+      for (const stack of leftoverStacks) {
+        console.log(
+          `Deleting leftover stack ${stack.StackName} (${stack.StackStatus}) in ${region}`,
+        );
+        await cfn
+          .deleteStack({ StackName: stack.StackName })
+          .catch((e) =>
+            console.warn(`Failed to delete stack ${stack.StackName}: ${e}`),
+          );
+      }
+    } catch (e) {
+      console.warn(`Failed to list stacks in ${region}: ${e}`);
+    }
+  }
 }
 
 /**
@@ -305,10 +347,17 @@ describe('smoke test - cdk-deploy', () => {
       // Website
       await pingWebsite(findOutput('WebsiteDistributionDomainName'));
     } finally {
-      await runCLI(
-        `destroy infra ${cdkStageName}/* --output-style=stream --force`,
-        opts,
-      );
+      try {
+        await runCLI(
+          `destroy infra ${cdkStageName}/* --output-style=stream --force`,
+          opts,
+        );
+      } catch (e) {
+        console.warn(`cdk destroy failed (will still clean up): ${e}`);
+      }
+      // cdk destroy skips cross-region stacks (e.g. WAF in us-east-1) when
+      // the main stack is in ROLLBACK_COMPLETE. Clean up any leftovers.
+      await deleteLeftoverStacks(cdkStageName);
     }
   });
 });

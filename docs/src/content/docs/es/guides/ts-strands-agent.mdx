@@ -55,7 +55,6 @@ El generador agregará los siguientes archivos a tu proyecto TypeScript existent
         - agent.ts Definición principal del agente con herramientas de ejemplo
         - client.ts Cliente provisto para invocar tu agente
         - agent-core-trpc-client.ts Fábrica de cliente para conectar a agentes en AgentCore Runtime
-        - agent-core-mcp-client.ts Fábrica de cliente para conectar a servidores MCP en AgentCore Runtime
         - Dockerfile Punto de entrada para alojar tu agente (excluido cuando `computeType` está establecido en `None`)
     - package.json Actualizado con dependencias de Strands
     - project.json Actualizado con targets de servicio del agente
@@ -110,7 +109,7 @@ Las herramientas son funciones que el agente de IA puede llamar para realizar ac
 
 ```typescript
 import { Agent, tool } from '@strands-agents/sdk';
-import z from 'zod';
+import { z } from 'zod';
 
 const letterCounter = tool({
   name: 'letter_counter',
@@ -127,10 +126,12 @@ const letterCounter = tool({
 });
 
 // Add tools to your agent
-export const agent = new Agent({
-  systemPrompt: 'You are a helpful assistant with access to various tools.',
-  tools: [letterCounter],
-});
+export const getAgent = async (sessionId: string) => {
+  return new Agent({
+    systemPrompt: 'You are a helpful assistant with access to various tools.',
+    tools: [letterCounter],
+  });
+};
 ```
 
 El framework Strands maneja automáticamente:
@@ -167,86 +168,15 @@ Consulta la [documentación de Strands sobre proveedores de modelos](https://str
 
 ### Consumir Servidores MCP
 
-Puedes [agregar herramientas desde servidores MCP](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/tools/mcp-tools/) a tu agente Strands.
+Puedes [agregar herramientas desde servidores MCP](https://strandsagents.com/docs/user-guide/concepts/tools/mcp-tools/) a tu agente Strands.
 
-Para consumir Servidores MCP que has creado usando los generadores <Link path="/guides/py-mcp-server">`py#mcp-server`</Link> o <Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link> (u otros alojados en Bedrock AgentCore Runtime), se genera una fábrica de cliente para ti en `agent-core-mcp-client.ts`.
+Para consumir Servidores MCP que has creado usando los generadores <Link path="/guides/py-mcp-server">`py#mcp-server`</Link> o <Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link> puedes hacer uso del <Link path="/guides/connection/ts-strands-agent-mcp">generador `connection`</Link>.
 
-Puedes actualizar la inicialización de tu agente en `agent.ts` para crear clientes MCP y agregar herramientas. El siguiente ejemplo muestra cómo realizar esto con autenticación IAM (SigV4):
+<RunGenerator generator="connection" />
 
-```typescript
-// agent.ts
-import { Agent } from '@strands-agents/sdk';
-import { AgentCoreMcpClient } from './agent-core-mcp-client.js';
+Consulta la <Link path="/guides/connection/ts-strands-agent-mcp">guía del generador `connection`</Link> para detalles sobre cómo se configura la conexión.
 
-const mcpClient = AgentCoreMcpClient.withIamAuth({
-  agentRuntimeArn: process.env.MCP_AGENTCORE_RUNTIME_ARN!,
-  region: process.env.AWS_REGION || 'us-west-2',
-  sessionId: 'my-session-id',
-});
-
-export const agent = new Agent({
-  systemPrompt: '...',
-  tools: [mcpClient],
-});
-```
-
-:::tip
-Si tu servidor MCP objetivo usa autenticación JWT, puedes usar el método `AgentCoreMcpClient.withJwtAuth` para crear el cliente en su lugar.
-:::
-
-Con el ejemplo de autenticación IAM anterior, necesitamos configurar dos cosas en nuestra infraestructura. Primero, necesitamos agregar la variable de entorno que nuestro agente está consumiendo para el ARN de AgentCore Runtime de nuestro servidor MCP, y segundo necesitamos otorgar permisos a nuestro agente para invocar el servidor MCP. Esto se puede lograr de la siguiente manera:
-
-<Infrastructure>
-<Fragment slot="cdk">
-```ts {9, 13}
-import { MyProjectAgent, MyProjectMcpServer } from ':my-scope/common-constructs';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    const mcpServer = new MyProjectMcpServer(this, 'MyProjectMcpServer');
-
-    const agent = new MyProjectAgent(this, 'MyProjectAgent', {
-      environmentVariables: {
-        MCP_AGENTCORE_RUNTIME_ARN: mcpServer.agentCoreRuntime.agentRuntimeArn,
-      },
-    });
-
-    mcpServer.agentCoreRuntime.grantInvoke(agent.agentCoreRuntime);
-  }
-}
-```
-</Fragment>
-<Fragment slot="terraform">
-```terraform
-# MCP Server
-module "my_project_mcp_server" {
-  source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
-}
-
-# Agent
-module "my_project_agent" {
-  source = "../../common/terraform/src/app/agents/my-project-agent"
-
-  env = {
-    MCP_AGENTCORE_RUNTIME_ARN = module.my_project_mcp_server.agent_core_runtime_arn
-  }
-
-  additional_iam_policy_statements = [
-    {
-      Effect = "Allow"
-      Action = [
-        "bedrock-agentcore:InvokeAgentRuntime"
-      ]
-      Resource = [
-        module.my_project_mcp_server.agent_core_runtime_arn,
-        "${module.my_project_mcp_server.agent_core_runtime_arn}/*"
-      ]
-    }
-  ]
-}
-```
-</Fragment>
-</Infrastructure>
+Para otros servidores MCP, por favor consulta la [Documentación de Strands](https://strandsagents.com/docs/user-guide/concepts/tools/mcp-tools/).
 
 ### Más
 
@@ -497,7 +427,7 @@ async function buildSignedUrl(
   });
 
   // Build WebSocket URL from ARN
-  const wsUrl = `wss://bedrock-agentcore.${region}.amazonaws.com/runtimes/${agentRuntimeArn.replace(/:/g, '%3A').replace(/\//g, '%2F')}/ws`;
+  const wsUrl = `wss://bedrock-agentcore.${region}.amazonaws.com/runtimes/${encodeURIComponent(agentRuntimeArn)}/ws`;
 
   // Create presigned URL
   const signedRequest = await awsClient.sign(wsUrl, {

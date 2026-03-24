@@ -182,6 +182,19 @@ export const pyStrandsAgentGenerator = async (
         },
         continuous: true,
       },
+      [`${agentTargetPrefix}-serve-local`]: {
+        executor: 'nx:run-commands',
+        options: {
+          commands: [
+            `uv run fastapi dev ${moduleName}/${agentNameSnakeCase}/main.py --port ${localDevPort}`,
+          ],
+          cwd: '{projectRoot}',
+          env: {
+            SERVE_LOCAL: 'true',
+          },
+        },
+        continuous: true,
+      },
     },
   });
 
@@ -193,6 +206,7 @@ export const pyStrandsAgentGenerator = async (
     agentTargetPrefix,
     {
       port: localDevPort,
+      rc: agentNameClassName,
     },
   );
 

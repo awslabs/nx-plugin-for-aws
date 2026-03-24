@@ -697,7 +697,7 @@ describe('connection generator', () => {
             { source: 'react', target: 'ts#trpc-api' },
             { source: 'cs', target: 'ct' },
           ]),
-        ).toThrow(/Ambiguous.*react -> ts#trpc-api.*cs -> ct/);
+        ).toThrow(/Ambiguous.*react -> ts#trpc-api.*c \(cs\) -> c \(ct\)/);
       });
 
       it('should list available components when not found', () => {
@@ -1038,6 +1038,83 @@ describe('connection generator', () => {
           customConnections,
         ),
       ).toThrow(/Ambiguous connection from source to target/);
+    });
+
+    it('should disambiguate when sourceComponent and targetComponent are specified with multiple same-type components', () => {
+      // Reproduces the smoke test scenario: project has 2 agents and 2 MCP servers
+      const connections: Connection[] = [
+        { source: 'ts#strands-agent', target: 'ts#mcp-server' },
+      ];
+
+      setupUnknownProject('ts-project', [
+        {
+          generator: 'ts#mcp-server',
+          path: 'src/my-mcp-server',
+          name: 'my-mcp-server',
+        },
+        {
+          generator: 'ts#mcp-server',
+          path: 'src/hosted-mcp-server',
+          name: 'hosted-mcp-server',
+        },
+        {
+          generator: 'ts#strands-agent',
+          path: 'src/my-ts-agent',
+          name: 'my-ts-agent',
+        },
+        { generator: 'ts#strands-agent', path: 'src/agent', name: 'agent' },
+      ]);
+
+      // Without specifying components: ambiguous (2 agents × 2 MCP servers = 4 matches)
+      expect(() =>
+        resolveConnection(
+          tree,
+          { sourceProject: 'ts-project', targetProject: 'ts-project' },
+          connections,
+        ),
+      ).toThrow(/Ambiguous/);
+
+      // With sourceComponent and targetComponent: resolves to the specific pair
+      const result = resolveConnection(
+        tree,
+        {
+          sourceProject: 'ts-project',
+          targetProject: 'ts-project',
+          sourceComponent: 'agent',
+          targetComponent: 'hosted-mcp-server',
+        },
+        connections,
+      );
+      expect(result.connection).toEqual({
+        source: 'ts#strands-agent',
+        target: 'ts#mcp-server',
+      });
+      expect(result.sourceComponent?.name).toBe('agent');
+      expect(result.targetComponent?.name).toBe('hosted-mcp-server');
+    });
+
+    it('should include component names in ambiguity error message', () => {
+      const connections: Connection[] = [
+        { source: 'comp-src', target: 'comp-tgt' },
+      ];
+
+      setupUnknownProject('source', [
+        { generator: 'comp-src', path: 'src/a', name: 'alpha' },
+        { generator: 'comp-src', path: 'src/b', name: 'beta' },
+      ]);
+      setupUnknownProject('target', [
+        { generator: 'comp-tgt', path: 'src/c', name: 'gamma' },
+      ]);
+
+      expect(() =>
+        resolveConnection(
+          tree,
+          { sourceProject: 'source', targetProject: 'target' },
+          connections,
+        ),
+      ).toThrow(
+        /alpha \(comp-src\) -> gamma \(comp-tgt\).*beta \(comp-src\) -> gamma \(comp-tgt\)/,
+      );
     });
 
     it('should throw when no candidates exist on either side (empty project)', () => {

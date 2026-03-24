@@ -35,7 +35,7 @@ export default defineConfig({
   image: {
     service: passthroughImageService(),
   },
-  outDir: './dist',
+  outDir: '../dist/docs',
   markdown: {
     shikiConfig: {
       langs: [smithySyntax()],
@@ -362,6 +362,10 @@ export default defineConfig({
                   label: 'React → Smithy',
                   link: '/guides/connection/react-smithy',
                 },
+                {
+                  label: 'TypeScript Strands Agent → MCP Server',
+                  link: '/guides/connection/ts-strands-agent-mcp',
+                },
               ],
             },
             {
@@ -478,5 +482,9 @@ export default defineConfig({
   ],
   vite: {
     plugins: [tailwindcss()],
+    ssr: {
+      // https://github.com/withastro/astro/issues/14117
+      noExternal: ['zod'],
+    },
   },
 });
