@@ -58,7 +58,11 @@ Additionally, it:
 
 ## Using the Connected MCP Server
 
-The generator transforms your agent's `agent.ts` to use the MCP server's tools:
+The generator transforms your agent's `agent.ts` to use the MCP server's tools. The generated code depends on the target MCP server's authentication type.
+
+### IAM Authentication (Default)
+
+When the MCP server uses IAM authentication, the generated client uses SigV4-signed requests:
 
 ```ts title="packages/example/src/my-agent/agent.ts" {2,5,8}
 import { Agent, tool } from '@strands-agents/sdk';
@@ -73,15 +77,46 @@ export const getAgent = async (sessionId: string) => {
 };
 ```
 
+### Cognito JWT Authentication
+
+When the MCP server uses `auth: 'Cognito'`, the generated client uses JWT-authenticated requests via [Bedrock AgentCore Identity](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/identity.html). The generator additionally:
+
+- Creates an `AgentCoreIdentityTokenProvider` in the `core/` directory
+- Adds `workloadAccessToken` to the agent's tRPC context (extracted from the `workloadaccesstoken` header delivered by AgentCore Runtime)
+- Passes the workload access token through `init.ts` → `router.ts` → `agent.ts` → client
+
+```ts title="packages/example/src/my-agent/agent.ts" {2,5-6,9}
+import { Agent, tool } from '@strands-agents/sdk';
+import { MyMcpServerClient } from ':my-scope/agent-connection';
+
+export const getAgent = async (
+  sessionId: string,
+  workloadAccessToken?: string,
+) => {
+  const myMcpServerClient = await MyMcpServerClient.create(
+    sessionId,
+    workloadAccessToken,
+  );
+  return new Agent({
+    systemPrompt: '...',
+    tools: [myMcpServerClient],
+  });
+};
+```
+
+The agent's Runtime must be configured with a Cognito JWT authorizer for the workload access token to be delivered. See the [Infrastructure](#infrastructure) section below.
+
 The `sessionId` parameter is plumbed through from the caller, ensuring consistency for [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
 
 ## Infrastructure
 
 <Infrastructure>
 <Fragment slot="cdk">
-After running the connection generator, you need to grant the agent permission to invoke the MCP server:
+After running the connection generator, you need to grant the agent permission to invoke the MCP server.
 
-```ts title="packages/infra/src/stacks/application-stack.ts" {12-13}
+**IAM Authentication:**
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
 const mcpServer = new MyMcpServer(this, 'MyMcpServer');
 const myAgent = new MyAgent(this, 'MyAgent');
 
@@ -96,6 +131,58 @@ myAgent.agentCoreRuntime.addToRolePolicy(
 // Grant the agent permissions to invoke the MCP server
 mcpServer.agentCoreRuntime.grantInvoke(myAgent.agentCoreRuntime);
 ```
+
+**Cognito JWT Authentication:**
+
+When connecting to a Cognito-protected MCP server, the infrastructure setup requires additional resources for the M2M (machine-to-machine) OAuth2 flow:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { UserIdentity, AgentCoreM2MIdentity } from ':my-scope/common-constructs';
+
+// 1. Shared Cognito User Pool
+const identity = new UserIdentity(this, 'Identity');
+
+// 2. Register M2M credentials with AgentCore Identity
+new AgentCoreM2MIdentity(this, 'McpM2MIdentity', {
+  providerName: 'mcp-my-mcp-server',
+  serverClassName: 'MyMcpServer',
+  userPool: identity.userPool,
+  m2mClient: identity.m2mClient,
+  scope: identity.scope,
+  cognitoDomainPrefix: identity.domainPrefix,
+});
+
+// 3. MCP server with Cognito JWT authorizer
+const mcpServer = new MyMcpServer(this, 'MyMcpServer', {
+  identity: {
+    userPool: identity.userPool,
+    userPoolClient: identity.m2mClient,
+  },
+});
+
+// 4. Agent with Cognito JWT authorizer (enables workload access token delivery)
+const myAgent = new MyAgent(this, 'MyAgent', {
+  identity: {
+    userPool: identity.userPool,
+    userPoolClient: identity.userClient,
+    m2mClients: [identity.m2mClient],
+  },
+});
+
+// Grant the agent access to bedrock models
+myAgent.agentCoreRuntime.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream'],
+    resources: ['arn:aws:bedrock:*:*:foundation-model/*', 'arn:aws:bedrock:*:*:inference-profile/*'],
+  }),
+);
+```
+
+The Cognito setup includes:
+- **UserIdentity**: Creates a Cognito User Pool with M2M app client and resource server
+- **AgentCoreM2MIdentity**: Registers the M2M client credentials in AgentCore Identity's Token Vault via `CreateOauth2CredentialProvider`
+- **MCP server authorizer**: `RuntimeAuthorizerConfiguration.usingCognito()` validates incoming JWT tokens
+- **Agent authorizer**: Required for AgentCore Runtime to deliver the workload access token to agent code
 
 The MCP server's AgentCore runtime ARN is automatically registered in the `connection` namespace of <Link path="guides/runtime-config">Runtime Configuration</Link> by the generated CDK construct, so the agent can discover it at runtime.
 </Fragment>

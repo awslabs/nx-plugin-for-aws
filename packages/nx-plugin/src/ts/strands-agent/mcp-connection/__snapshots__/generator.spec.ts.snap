@@ -1,5 +1,140 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`ts#strands-agent#mcp-connection generator > Cognito auth > should match snapshot for Cognito auth client > agentcore-identity-token-provider.ts 1`] = `
+"import {
+  BedrockAgentCoreClient,
+  GetResourceOauth2TokenCommand,
+} from '@aws-sdk/client-bedrock-agentcore';
+
+export interface AgentCoreIdentityTokenProviderOptions {
+  providerName: string;
+  scope: string;
+  workloadAccessToken: string;
+}
+
+/**
+ * Token provider that uses AgentCore Identity to obtain OAuth2 access tokens
+ * via the M2M (client_credentials) flow.
+ *
+ * AgentCore Identity handles:
+ * - Token caching in the managed Token Vault
+ * - The client_credentials grant against Cognito
+ */
+export class AgentCoreIdentityTokenProvider {
+  private readonly client = new BedrockAgentCoreClient({});
+  private readonly providerName: string;
+  private readonly scope: string;
+  private readonly workloadAccessToken: string;
+
+  constructor(options: AgentCoreIdentityTokenProviderOptions) {
+    this.providerName = options.providerName;
+    this.scope = options.scope;
+    this.workloadAccessToken = options.workloadAccessToken;
+  }
+
+  async getToken(): Promise<string> {
+    const response = await this.client.send(
+      new GetResourceOauth2TokenCommand({
+        workloadIdentityToken: this.workloadAccessToken,
+        resourceCredentialProviderName: this.providerName,
+        scopes: [this.scope],
+        oauth2Flow: 'M2M',
+      }),
+    );
+
+    if (!response.accessToken) {
+      throw new Error(
+        \`Failed to obtain M2M token from AgentCore Identity. Session status: \${response.sessionStatus}\`,
+      );
+    }
+
+    return response.accessToken;
+  }
+}
+"
+`;
+
+exports[`ts#strands-agent#mcp-connection generator > Cognito auth > should match snapshot for Cognito auth client > inventory-mcp-client-cognito.ts 1`] = `
+"import { McpClient } from '@strands-agents/sdk';
+import { AgentCoreMcpClient } from '../core/agentcore-mcp-client.js';
+import { AgentCoreIdentityTokenProvider } from '../core/agentcore-identity-token-provider.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { getAppConfig } from '@aws-lambda-powertools/parameters/appconfig';
+
+/**
+ * Client for connecting to the InventoryMcp MCP server.
+ *
+ * In deployed mode: resolves the AgentCore runtime ARN from runtime config
+ * and uses JWT-authenticated AgentCore transport via AgentCore Identity.
+ *
+ * In local mode (SERVE_LOCAL env var set): connects directly
+ * to the local MCP server via Streamable HTTP.
+ */
+export class InventoryMcpClient {
+  static async create(
+    sessionId: string,
+    workloadAccessToken?: string,
+  ): Promise<McpClient> {
+    if (process.env.SERVE_LOCAL === 'true') {
+      // Local development: connect directly via Streamable HTTP
+      const transport = new StreamableHTTPClientTransport(
+        new URL('http://localhost:8082/mcp'),
+      );
+      return new McpClient({ transport });
+    }
+
+    // Deployed: resolve ARN and credentials from runtime config
+    const config = (await getAppConfig('connection', {
+      application: process.env.RUNTIME_CONFIG_APP_ID!,
+      environment: 'default',
+      transform: 'json',
+    })) as Record<string, any>;
+
+    const m2mConfig = config.cognitoM2M?.['InventoryMcp'];
+    const tokenProvider = new AgentCoreIdentityTokenProvider({
+      providerName: m2mConfig.credentialProviderName,
+      scope: m2mConfig.scope,
+      workloadAccessToken: workloadAccessToken!,
+    });
+
+    return AgentCoreMcpClient.withJwtAuth({
+      agentRuntimeArn: config.agentRuntimes.InventoryMcp,
+      accessTokenProvider: () => tokenProvider.getToken(),
+      sessionId,
+    });
+  }
+}
+"
+`;
+
+exports[`ts#strands-agent#mcp-connection generator > Cognito auth > should match snapshot for Cognito auth client > transformed-agent-cognito.ts 1`] = `
+"import { InventoryMcpClient } from ':proj/agent-connection';
+import { Agent, tool } from '@strands-agents/sdk';
+import { z } from 'zod';
+
+const multiply = tool({
+  name: 'Multiply',
+  description: 'Multiply two numbers',
+  inputSchema: z.object({ a: z.number(), b: z.number() }),
+  callback: ({ a, b }) => a * b,
+});
+
+export const getAgent = async (
+  sessionId: string,
+  workloadAccessToken?: string,
+) => {
+  const inventoryMcp = await InventoryMcpClient.create(
+    sessionId,
+    workloadAccessToken,
+  );
+  return new Agent({
+    systemPrompt: 'You are a mathematical wizard.',
+    tools: [inventoryMcp, multiply],
+  });
+};
+"
+`;
+
 exports[`ts#strands-agent#mcp-connection generator > should match snapshot for agent-connection src files > agent-connection-index.ts 1`] = `
 "export * from './app/inventory-mcp-client.js';
 // Export your library code here

@@ -466,4 +466,241 @@ export const getAgent = async (sessionId: string) => {
     const agentTs = tree.read('packages/my-api/src/my-agent/agent.ts', 'utf-8');
     expect(agentTs).toMatchSnapshot('transformed-agent.ts');
   });
+
+  describe('Cognito auth', () => {
+    it('should generate Cognito JWT auth client when target has auth=Cognito', async () => {
+      setupProjects();
+
+      await tsStrandsAgentMcpConnectionGenerator(tree, {
+        sourceProject: '@test/my-api',
+        targetProject: '@test/my-api',
+        sourceComponent: {
+          generator: 'ts#strands-agent',
+          name: 'my-agent',
+          path: 'src/my-agent',
+          port: 8081,
+        },
+        targetComponent: {
+          generator: 'ts#mcp-server',
+          name: 'inventory-mcp',
+          path: 'src/inventory-mcp',
+          port: 8082,
+          rc: 'InventoryMcp',
+          auth: 'Cognito',
+        },
+      });
+
+      // Check per-connection client uses JWT auth
+      const clientContent = tree.read(
+        'packages/common/agent-connection/src/app/inventory-mcp-client.ts',
+        'utf-8',
+      )!;
+      expect(clientContent).toContain('AgentCoreIdentityTokenProvider');
+      expect(clientContent).toContain('withJwtAuth');
+      expect(clientContent).toContain('workloadAccessToken');
+      expect(clientContent).not.toContain('withIamAuth');
+
+      // Check AgentCore Identity token provider was generated
+      expect(
+        tree.exists(
+          'packages/common/agent-connection/src/core/agentcore-identity-token-provider.ts',
+        ),
+      ).toBe(true);
+
+      // Check index.ts re-exports the identity module
+      const coreIndexContent = tree.read(
+        'packages/common/agent-connection/src/core/index.ts',
+        'utf-8',
+      );
+      expect(coreIndexContent).toContain(
+        'agentcore-identity-token-provider',
+      );
+    });
+
+    it('should pass workloadAccessToken in agent.ts AST transform for Cognito auth', async () => {
+      setupProjects();
+
+      await tsStrandsAgentMcpConnectionGenerator(tree, {
+        sourceProject: '@test/my-api',
+        targetProject: '@test/my-api',
+        sourceComponent: {
+          generator: 'ts#strands-agent',
+          name: 'my-agent',
+          path: 'src/my-agent',
+          port: 8081,
+        },
+        targetComponent: {
+          generator: 'ts#mcp-server',
+          name: 'inventory-mcp',
+          path: 'src/inventory-mcp',
+          port: 8082,
+          rc: 'InventoryMcp',
+          auth: 'Cognito',
+        },
+      });
+
+      const agentContent = tree.read(
+        'packages/my-api/src/my-agent/agent.ts',
+        'utf-8',
+      )!;
+
+      // Check create() is called with both sessionId and workloadAccessToken
+      expect(agentContent).toContain('InventoryMcpClient.create(');
+      expect(agentContent).toContain('workloadAccessToken');
+    });
+
+    it('should add @aws-sdk/client-bedrock-agentcore dependency for Cognito auth', async () => {
+      setupProjects();
+
+      await tsStrandsAgentMcpConnectionGenerator(tree, {
+        sourceProject: '@test/my-api',
+        targetProject: '@test/my-api',
+        sourceComponent: {
+          generator: 'ts#strands-agent',
+          name: 'my-agent',
+          path: 'src/my-agent',
+          port: 8081,
+        },
+        targetComponent: {
+          generator: 'ts#mcp-server',
+          name: 'inventory-mcp',
+          path: 'src/inventory-mcp',
+          port: 8082,
+          rc: 'InventoryMcp',
+          auth: 'Cognito',
+        },
+      });
+
+      const packageJson = JSON.parse(
+        tree.read('package.json', 'utf-8')!,
+      );
+      expect(
+        packageJson.dependencies['@aws-sdk/client-bedrock-agentcore'],
+      ).toBeDefined();
+      // Should NOT have IAM-specific deps
+      expect(packageJson.dependencies['aws4fetch']).toBeUndefined();
+    });
+
+    it('should handle mixed auth connections (IAM + Cognito to same agent)', async () => {
+      setupProjects();
+
+      // Add a second MCP server component
+      const config = JSON.parse(
+        tree.read('packages/my-api/project.json', 'utf-8')!,
+      );
+      config.metadata.components.push({
+        generator: 'ts#mcp-server',
+        name: 'catalog-mcp',
+        path: 'src/catalog-mcp',
+        port: 8083,
+        rc: 'CatalogMcp',
+      });
+      tree.write('packages/my-api/project.json', JSON.stringify(config));
+
+      // First connection: Cognito auth
+      await tsStrandsAgentMcpConnectionGenerator(tree, {
+        sourceProject: '@test/my-api',
+        targetProject: '@test/my-api',
+        sourceComponent: {
+          generator: 'ts#strands-agent',
+          name: 'my-agent',
+          path: 'src/my-agent',
+          port: 8081,
+        },
+        targetComponent: {
+          generator: 'ts#mcp-server',
+          name: 'inventory-mcp',
+          path: 'src/inventory-mcp',
+          port: 8082,
+          rc: 'InventoryMcp',
+          auth: 'Cognito',
+        },
+      });
+
+      // Second connection: IAM auth (default)
+      await tsStrandsAgentMcpConnectionGenerator(tree, {
+        sourceProject: '@test/my-api',
+        targetProject: '@test/my-api',
+        sourceComponent: {
+          generator: 'ts#strands-agent',
+          name: 'my-agent',
+          path: 'src/my-agent',
+          port: 8081,
+        },
+        targetComponent: {
+          generator: 'ts#mcp-server',
+          name: 'catalog-mcp',
+          path: 'src/catalog-mcp',
+          port: 8083,
+          rc: 'CatalogMcp',
+        },
+      });
+
+      // Check both clients were generated
+      const inventoryClient = tree.read(
+        'packages/common/agent-connection/src/app/inventory-mcp-client.ts',
+        'utf-8',
+      )!;
+      expect(inventoryClient).toContain('withJwtAuth');
+
+      const catalogClient = tree.read(
+        'packages/common/agent-connection/src/app/catalog-mcp-client.ts',
+        'utf-8',
+      )!;
+      expect(catalogClient).toContain('withIamAuth');
+
+      // Agent should have both clients
+      const agentContent = tree.read(
+        'packages/my-api/src/my-agent/agent.ts',
+        'utf-8',
+      )!;
+      expect(agentContent).toContain('inventoryMcp');
+      expect(agentContent).toContain('catalogMcp');
+    });
+
+    it('should match snapshot for Cognito auth client', async () => {
+      setupProjects();
+
+      await tsStrandsAgentMcpConnectionGenerator(tree, {
+        sourceProject: '@test/my-api',
+        targetProject: '@test/my-api',
+        sourceComponent: {
+          generator: 'ts#strands-agent',
+          name: 'my-agent',
+          path: 'src/my-agent',
+          port: 8081,
+        },
+        targetComponent: {
+          generator: 'ts#mcp-server',
+          name: 'inventory-mcp',
+          path: 'src/inventory-mcp',
+          port: 8082,
+          rc: 'InventoryMcp',
+          auth: 'Cognito',
+        },
+      });
+
+      const inventoryMcpClient = tree.read(
+        'packages/common/agent-connection/src/app/inventory-mcp-client.ts',
+        'utf-8',
+      );
+      expect(inventoryMcpClient).toMatchSnapshot(
+        'inventory-mcp-client-cognito.ts',
+      );
+
+      const tokenProvider = tree.read(
+        'packages/common/agent-connection/src/core/agentcore-identity-token-provider.ts',
+        'utf-8',
+      );
+      expect(tokenProvider).toMatchSnapshot(
+        'agentcore-identity-token-provider.ts',
+      );
+
+      const agentTs = tree.read(
+        'packages/my-api/src/my-agent/agent.ts',
+        'utf-8',
+      );
+      expect(agentTs).toMatchSnapshot('transformed-agent-cognito.ts');
+    });
+  });
 });

@@ -9,6 +9,7 @@ import {
   Tree,
 } from '@nx/devkit';
 import tsProjectGenerator from '../../ts/lib/generator';
+import { addStarExport } from '../ast';
 
 const AGENT_CONNECTION_DIR = 'agent-connection';
 const PACKAGES_DIR = 'packages';
@@ -48,5 +49,36 @@ export async function ensureTypeScriptAgentConnectionProject(
     joinPathFragments(AGENT_CONNECTION_PROJECT_DIR, 'src', 'core'),
     {},
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
+  );
+}
+
+/**
+ * Ensure the AgentCore Identity token provider core module exists.
+ * Generated once when the first Cognito-auth connection is created.
+ */
+export function ensureAgentCoreIdentityModule(tree: Tree): void {
+  const tokenProviderPath = joinPathFragments(
+    AGENT_CONNECTION_PROJECT_DIR,
+    'src',
+    'core',
+    'agentcore-identity-token-provider.ts',
+  );
+
+  if (tree.exists(tokenProviderPath)) {
+    return; // Already exists
+  }
+
+  generateFiles(
+    tree,
+    joinPathFragments(__dirname, 'files', 'core-identity'),
+    joinPathFragments(AGENT_CONNECTION_PROJECT_DIR, 'src', 'core'),
+    {},
+    { overwriteStrategy: OverwriteStrategy.KeepExisting },
+  );
+
+  addStarExport(
+    tree,
+    joinPathFragments(AGENT_CONNECTION_PROJECT_DIR, 'src', 'core', 'index.ts'),
+    './agentcore-identity-token-provider.js',
   );
 }

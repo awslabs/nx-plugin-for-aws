@@ -30,6 +30,7 @@ import {
 } from '../../../utils/ast';
 import {
   ensureTypeScriptAgentConnectionProject,
+  ensureAgentCoreIdentityModule,
   AGENT_CONNECTION_PROJECT_DIR,
 } from '../../../utils/agent-connection/agent-connection';
 import ts, { factory, ArrayLiteralExpression, ArrowFunction, Expression } from 'typescript';
@@ -63,16 +64,28 @@ export const tsStrandsAgentMcpConnectionGenerator = async (
   const mcpServerClassName = mcpComponent.rc as string;
   const mcpServerKebabCase = kebabCase(mcpServerClassName);
   const mcpServerPort = mcpComponent.port ?? 8000;
+  const mcpAuth = (mcpComponent.auth as string) ?? 'IAM';
 
   const npmScope = getNpmScope(tree);
 
   // 1. Ensure the shared agent-connection project exists
   await ensureTypeScriptAgentConnectionProject(tree);
 
-  // 2. Generate the per-connection <Name>Client into app/
+  // 2. If Cognito auth, ensure the AgentCore Identity core module exists
+  if (mcpAuth === 'Cognito') {
+    ensureAgentCoreIdentityModule(tree);
+  }
+
+  // 3. Generate the per-connection <Name>Client into app/
+  //    Use the Cognito template if auth is Cognito, otherwise use the IAM template
+  const templateDir =
+    mcpAuth === 'Cognito'
+      ? joinPathFragments(__dirname, 'files', 'agent-connection-cognito', 'app')
+      : joinPathFragments(__dirname, 'files', 'agent-connection', 'app');
+
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'agent-connection', 'app'),
+    templateDir,
     joinPathFragments(AGENT_CONNECTION_PROJECT_DIR, 'src', 'app'),
     {
       mcpServerKebabCase,
@@ -89,7 +102,7 @@ export const tsStrandsAgentMcpConnectionGenerator = async (
     `./app/${mcpServerKebabCase}-client.js`,
   );
 
-  // 3. AST transform agent.ts to add MCP tools
+  // 4. AST transform agent.ts to add MCP tools
   const agentSourceDir = joinPathFragments(
     sourceProject.root,
     agentComponent.path ?? 'src',
@@ -109,7 +122,15 @@ export const tsStrandsAgentMcpConnectionGenerator = async (
       `:${npmScope}/agent-connection`,
     );
 
-    // Create: const <clientVarName> = await <ClientClassName>.create(sessionId);
+    // Build the arguments for the create() call
+    // IAM: create(sessionId)
+    // Cognito: create(sessionId, workloadAccessToken)
+    const createArgs: Expression[] = [factory.createIdentifier('sessionId')];
+    if (mcpAuth === 'Cognito') {
+      createArgs.push(factory.createIdentifier('workloadAccessToken'));
+    }
+
+    // Create: const <clientVarName> = await <ClientClassName>.create(...args);
     const clientCreationStatement = factory.createVariableStatement(
       undefined,
       factory.createVariableDeclarationList(
@@ -125,7 +146,7 @@ export const tsStrandsAgentMcpConnectionGenerator = async (
                   'create',
                 ),
                 undefined,
-                [factory.createIdentifier('sessionId')],
+                createArgs,
               ),
             ),
           ),
@@ -206,7 +227,78 @@ export const tsStrandsAgentMcpConnectionGenerator = async (
     );
   }
 
-  // 4. Set up serve-local target
+  // 5. Thread workload access token through the agent's tRPC context (Cognito auth only)
+  if (mcpAuth === 'Cognito') {
+    const initPath = joinPathFragments(agentSourceDir, 'init.ts');
+    const indexPath = joinPathFragments(agentSourceDir, 'index.ts');
+    const routerPath = joinPathFragments(agentSourceDir, 'router.ts');
+
+    // Add workloadAccessToken to Context interface in init.ts
+    if (tree.exists(initPath)) {
+      const initContent = tree.read(initPath, 'utf-8')!;
+      if (!initContent.includes('workloadAccessToken')) {
+        tree.write(
+          initPath,
+          initContent.replace(
+            'sessionId: string;',
+            'sessionId: string;\n  workloadAccessToken?: string;',
+          ),
+        );
+      }
+    }
+
+    // Extract workloadaccesstoken header in index.ts createContext
+    if (tree.exists(indexPath)) {
+      const indexContent = tree.read(indexPath, 'utf-8')!;
+      if (!indexContent.includes('workloadaccesstoken')) {
+        tree.write(
+          indexPath,
+          indexContent
+            .replace(
+              /return \{\s*\n\s*sessionId:/,
+              `const workloadAccessToken = ('req' in opts\n      ? opts.req.headers['workloadaccesstoken']\n      : undefined) as string | undefined;\n    return {\n      workloadAccessToken,\n      sessionId:`,
+            ),
+        );
+      }
+    }
+
+    // Pass workloadAccessToken in router.ts getAgent call
+    if (tree.exists(routerPath)) {
+      const routerContent = tree.read(routerPath, 'utf-8')!;
+      if (
+        !routerContent.includes('workloadAccessToken') &&
+        routerContent.includes('getAgent(opts.ctx.sessionId)')
+      ) {
+        tree.write(
+          routerPath,
+          routerContent.replace(
+            'getAgent(opts.ctx.sessionId)',
+            'getAgent(\n        opts.ctx.sessionId,\n        opts.ctx.workloadAccessToken,\n      )',
+          ),
+        );
+      }
+    }
+
+    // Add workloadAccessToken parameter to getAgent in agent.ts
+    if (tree.exists(agentFilePath)) {
+      const agentContent = tree.read(agentFilePath, 'utf-8')!;
+      if (
+        !agentContent.includes('workloadAccessToken') ||
+        !agentContent.includes('workloadAccessToken?')
+      ) {
+        // Add parameter to getAgent function signature
+        tree.write(
+          agentFilePath,
+          agentContent.replace(
+            /getAgent\s*=\s*async\s*\(\s*sessionId:\s*string\s*\)/,
+            'getAgent = async (\n  sessionId: string,\n  workloadAccessToken?: string,\n)',
+          ),
+        );
+      }
+    }
+  }
+
+  // 6. Set up serve-local target
   const agentName = agentComponent.name ?? 'agent';
   const serveLocalTargetName = `${agentName}-serve-local`;
   const mcpServeLocalTargetName = `${mcpComponentName}-serve-local`;
@@ -223,18 +315,26 @@ export const tsStrandsAgentMcpConnectionGenerator = async (
     updateProjectConfiguration(tree, sourceProject.name, sourceProject);
   }
 
-  // 5. Add dependencies
-  addDependenciesToPackageJson(
-    tree,
-    withVersions([
-      '@modelcontextprotocol/sdk',
-      '@aws-lambda-powertools/parameters',
-      '@aws-sdk/client-appconfigdata',
-      'aws4fetch',
-      '@aws-sdk/credential-providers',
-    ]),
-    {},
-  );
+  // 7. Add dependencies based on auth type
+  const commonDeps = [
+    '@modelcontextprotocol/sdk',
+    '@aws-lambda-powertools/parameters',
+    '@aws-sdk/client-appconfigdata',
+  ] as const;
+
+  if (mcpAuth === 'Cognito') {
+    addDependenciesToPackageJson(
+      tree,
+      withVersions([...commonDeps, '@aws-sdk/client-bedrock-agentcore']),
+      {},
+    );
+  } else {
+    addDependenciesToPackageJson(
+      tree,
+      withVersions([...commonDeps, 'aws4fetch', '@aws-sdk/credential-providers']),
+      {},
+    );
+  }
 
   await addGeneratorMetricsIfApplicable(tree, [
     TS_STRANDS_AGENT_MCP_CONNECTION_GENERATOR_INFO,

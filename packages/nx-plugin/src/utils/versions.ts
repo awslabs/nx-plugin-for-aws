@@ -8,6 +8,7 @@
  */
 export const TS_VERSIONS = {
   '@aws/aws-distro-opentelemetry-node-autoinstrumentation': '0.9.0',
+  '@aws-sdk/client-bedrock-agentcore': '3.1016.0',
   '@aws-sdk/client-dynamodb': '3.1004.0',
   '@aws-sdk/client-sts': '3.1004.0',
   '@aws-sdk/credential-providers': '3.1004.0',

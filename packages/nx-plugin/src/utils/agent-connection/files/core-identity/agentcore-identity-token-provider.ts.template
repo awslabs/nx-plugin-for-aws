@@ -1,0 +1,50 @@
+import {
+  BedrockAgentCoreClient,
+  GetResourceOauth2TokenCommand,
+} from '@aws-sdk/client-bedrock-agentcore';
+
+export interface AgentCoreIdentityTokenProviderOptions {
+  providerName: string;
+  scope: string;
+  workloadAccessToken: string;
+}
+
+/**
+ * Token provider that uses AgentCore Identity to obtain OAuth2 access tokens
+ * via the M2M (client_credentials) flow.
+ *
+ * AgentCore Identity handles:
+ * - Token caching in the managed Token Vault
+ * - The client_credentials grant against Cognito
+ */
+export class AgentCoreIdentityTokenProvider {
+  private readonly client = new BedrockAgentCoreClient({});
+  private readonly providerName: string;
+  private readonly scope: string;
+  private readonly workloadAccessToken: string;
+
+  constructor(options: AgentCoreIdentityTokenProviderOptions) {
+    this.providerName = options.providerName;
+    this.scope = options.scope;
+    this.workloadAccessToken = options.workloadAccessToken;
+  }
+
+  async getToken(): Promise<string> {
+    const response = await this.client.send(
+      new GetResourceOauth2TokenCommand({
+        workloadIdentityToken: this.workloadAccessToken,
+        resourceCredentialProviderName: this.providerName,
+        scopes: [this.scope],
+        oauth2Flow: 'M2M',
+      }),
+    );
+
+    if (!response.accessToken) {
+      throw new Error(
+        `Failed to obtain M2M token from AgentCore Identity. Session status: ${response.sessionStatus}`,
+      );
+    }
+
+    return response.accessToken;
+  }
+}
