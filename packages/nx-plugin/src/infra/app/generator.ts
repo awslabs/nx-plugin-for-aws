@@ -12,7 +12,6 @@ import {
   ProjectConfiguration,
   GeneratorCallback,
   OverwriteStrategy,
-  getPackageManagerCommand,
   installPackagesTask,
 } from '@nx/devkit';
 import { TsInfraGeneratorSchema } from './schema';
@@ -37,6 +36,7 @@ import {
 } from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { kebabCase } from '../../utils/names';
+import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager';
 import { uvxCommand } from '../../utils/py';
 
 export const INFRA_APP_GENERATOR_INFO: NxGeneratorInfo =
@@ -90,7 +90,7 @@ export async function tsInfraGenerator(
       scopeAlias: scopeAlias,
       namespace: kebabCase(fullyQualifiedName),
       fullyQualifiedName,
-      pkgMgrCmd: getPackageManagerCommand().exec,
+      pkgMgrCmd: getPackageManagerDisplayCommands().exec,
       dir: lib.dir,
       enableStageConfig,
       ...schema,

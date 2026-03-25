@@ -12,7 +12,6 @@ import {
   updateJson,
   installPackagesTask,
   OverwriteStrategy,
-  getPackageManagerCommand,
   updateProjectConfiguration,
 } from '@nx/devkit';
 import {
@@ -39,6 +38,7 @@ import {
   addSingleImport,
 } from '../../../utils/ast';
 import { formatFilesInSubtree } from '../../../utils/format';
+import { getPackageManagerDisplayCommands } from '../../../utils/pkg-manager';
 import { relative, sep } from 'path';
 import { sortObjectKeys } from '../../../utils/object';
 import {
@@ -112,7 +112,7 @@ export async function tsReactWebsiteGenerator(
     targets['load:runtime-config'] = {
       executor: 'nx:run-commands',
       metadata: {
-        description: `Load runtime config from your deployed stack for dev purposes. You must set your AWS CLI credentials whilst calling 'pnpm exec nx run ${fullyQualifiedName}:load:runtime-config'`,
+        description: `Load runtime config from your deployed stack for dev purposes. You must set your AWS CLI credentials whilst calling '${getPackageManagerDisplayCommands().exec} nx run ${fullyQualifiedName}:load:runtime-config'`,
       },
       options: {
         command: `aws s3 cp s3://\`aws cloudformation describe-stacks --query "Stacks[?starts_with(StackName, '${kebabCase(npmScopePrefix)}-')][].Outputs[] | [?contains(OutputKey, '${websiteNameClassName}WebsiteBucketName')].OutputValue" --output text\`/runtime-config.json "{projectRoot}/public/runtime-config.json"`,
@@ -251,7 +251,7 @@ export async function tsReactWebsiteGenerator(
   const templateOptions = {
     ...schema,
     fullyQualifiedName,
-    pkgMgrCmd: getPackageManagerCommand().exec,
+    pkgMgrCmd: getPackageManagerDisplayCommands().exec,
     enableTailwind,
     enableTanstackRouter,
     scopeAlias,

@@ -5,7 +5,6 @@
 import {
   addDependenciesToPackageJson,
   generateFiles,
-  getPackageManagerCommand,
   installPackagesTask,
   joinPathFragments,
   OverwriteStrategy,
@@ -19,6 +18,7 @@ import { getNpmScopePrefix, toScopeAlias } from '../../utils/npm-scope';
 import { withVersions } from '../../utils/versions';
 import { kebabCase, toClassName } from '../../utils/names';
 import { formatFilesInSubtree } from '../../utils/format';
+import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager';
 import { sortObjectKeys } from '../../utils/object';
 import {
   NxGeneratorInfo,
@@ -82,7 +82,7 @@ export async function tsTrpcApiGenerator(
     apiNameKebabCase,
     apiNameClassName,
     backendRoot,
-    pkgMgrCmd: getPackageManagerCommand().exec,
+    pkgMgrCmd: getPackageManagerDisplayCommands().exec,
     apiGatewayEventType: getApiGatewayEventType(options),
     port,
     ...options,

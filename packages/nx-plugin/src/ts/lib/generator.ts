@@ -8,7 +8,6 @@ import {
   OverwriteStrategy,
   Tree,
   generateFiles,
-  getPackageManagerCommand,
   installPackagesTask,
   joinPathFragments,
   readProjectConfiguration,
@@ -21,6 +20,7 @@ import { getNpmScopePrefix } from '../../utils/npm-scope';
 import { configureTsProject } from './ts-project-utils';
 import { toKebabCase } from '../../utils/names';
 import { formatFilesInSubtree } from '../../utils/format';
+import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager';
 import { sortObjectKeys } from '../../utils/object';
 import {
   NxGeneratorInfo,
@@ -89,7 +89,7 @@ export const tsProjectGenerator = async (
     joinPathFragments(dir),
     {
       fullyQualifiedName,
-      pkgMgrCmd: getPackageManagerCommand().exec,
+      pkgMgrCmd: getPackageManagerDisplayCommands().exec,
     },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,

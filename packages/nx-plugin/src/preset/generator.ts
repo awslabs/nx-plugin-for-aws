@@ -18,6 +18,7 @@ import {
 import { NxGeneratorInfo, getGeneratorInfo } from '../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../utils/metrics';
 import { formatFilesInSubtree } from '../utils/format';
+import { getPackageManagerDisplayCommands } from '../utils/pkg-manager';
 import { initGenerator } from '@nx/js';
 import { readModulePackageJson } from 'nx/src/utils/package-json';
 import { getNpmScope } from '../utils/npm-scope';
@@ -32,48 +33,6 @@ import {
 import { SYNC_GENERATOR_NAME as TS_SYNC_GENERATOR_NAME } from '../ts/sync/generator';
 
 const WORKSPACES = ['packages/*'];
-
-/**
- * Returns the correct README command snippets for the detected package manager.
- *
- * We use custom mappings rather than getPackageManagerCommand() because:
- * - pnpm: exec returns "pnpm exec" but convention is "pnpm" for running local bins
- * - bun: exec returns "bun" but convention is "bunx" for running local bins
- * - bun: run() appends "-- undefined" due to an Nx bug
- */
-const readmeCommands = (): {
-  pkgMgrCmd: string;
-  buildCmd: string;
-  lintCmd: string;
-} => {
-  const pm = detectPackageManager();
-  switch (pm) {
-    case 'pnpm':
-      return {
-        pkgMgrCmd: 'pnpm',
-        buildCmd: 'pnpm build',
-        lintCmd: 'pnpm lint',
-      };
-    case 'yarn':
-      return {
-        pkgMgrCmd: 'yarn',
-        buildCmd: 'yarn build',
-        lintCmd: 'yarn lint',
-      };
-    case 'bun':
-      return {
-        pkgMgrCmd: 'bunx',
-        buildCmd: 'bun run build',
-        lintCmd: 'bun run lint',
-      };
-    default:
-      return {
-        pkgMgrCmd: 'npx',
-        buildCmd: 'npm run build',
-        lintCmd: 'npm run lint',
-      };
-  }
-};
 const NX_TYPESCRIPT_SYNC_GENERATOR = '@nx/js:typescript-sync';
 
 export const PRESET_GENERATOR_INFO: NxGeneratorInfo =
@@ -239,7 +198,14 @@ export const presetGenerator = async (
       generators: Object.entries(GeneratorsJson.generators)
         .filter(([_, v]) => !v['hidden'])
         .map(([k, v]) => ({ name: k, description: v.description })),
-      ...readmeCommands(),
+      ...(() => {
+        const cmds = getPackageManagerDisplayCommands();
+        return {
+          pkgMgrCmd: cmds.exec,
+          buildCmd: `${cmds.run} build`,
+          lintCmd: `${cmds.run} lint`,
+        };
+      })(),
     },
     {
       overwriteStrategy: OverwriteStrategy.Overwrite,

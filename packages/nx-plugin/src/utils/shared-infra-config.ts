@@ -4,7 +4,6 @@
  */
 import {
   generateFiles,
-  getPackageManagerCommand,
   joinPathFragments,
   OverwriteStrategy,
   Tree,
@@ -12,6 +11,7 @@ import {
 import { getNpmScopePrefix } from './npm-scope';
 import tsProjectGenerator from '../ts/lib/generator';
 import { formatFilesInSubtree } from './format';
+import { getPackageManagerDisplayCommands } from './pkg-manager';
 import {
   PACKAGES_DIR,
   SHARED_INFRA_CONFIG_NAME,
@@ -32,7 +32,7 @@ export async function sharedInfraConfigGenerator(tree: Tree): Promise<void> {
   }
 
   const npmScopePrefix = getNpmScopePrefix(tree);
-  const pkgMgrCmd = getPackageManagerCommand();
+  const displayCmds = getPackageManagerDisplayCommands();
 
   await tsProjectGenerator(tree, {
     name: SHARED_INFRA_CONFIG_NAME,
@@ -47,7 +47,7 @@ export async function sharedInfraConfigGenerator(tree: Tree): Promise<void> {
     joinPathFragments(__dirname, 'files', SHARED_INFRA_CONFIG_DIR, 'src'),
     joinPathFragments(configDir, 'src'),
     {
-      pkgMgrRunNx: `${pkgMgrCmd.exec} nx`,
+      pkgMgrRunNx: `${displayCmds.exec} nx`,
     },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
@@ -60,7 +60,7 @@ export async function sharedInfraConfigGenerator(tree: Tree): Promise<void> {
     {
       fullyQualifiedName: `${npmScopePrefix}${SHARED_INFRA_CONFIG_NAME}`,
       name: SHARED_INFRA_CONFIG_NAME,
-      pkgMgrCmd: pkgMgrCmd.exec,
+      pkgMgrCmd: displayCmds.exec,
     },
     { overwriteStrategy: OverwriteStrategy.Overwrite },
   );
