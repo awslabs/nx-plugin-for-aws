@@ -72,6 +72,6 @@ export const configureVitest = (
   addDependenciesToPackageJson(
     tree,
     {},
-    withVersions(['vitest', '@vitest/coverage-v8']),
+    withVersions(['vite', 'vitest', '@vitest/coverage-v8']),
   );
 };

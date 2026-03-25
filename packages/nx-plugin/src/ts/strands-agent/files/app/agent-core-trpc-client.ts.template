@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
 import { createTRPCClient, createWSClient, WebSocketLinkOptions, wsLink } from '@trpc/client';
 import { AwsClient } from 'aws4fetch';
@@ -9,6 +10,11 @@ export interface WebSocketTrpcClientOptions {
    * URL of the websocket server, eg http://localhost:8080/ws
    */
   url: string;
+  /**
+   * Session ID to include in the WebSocket handshake headers.
+   * Defaults to a random UUID if not provided.
+   */
+  sessionId?: string;
   /**
    * Factory for creating headers to include in the WebSocket handshake
    */
@@ -24,12 +30,16 @@ export class WebSocketTrpcClient {
    */
   public static create = <TRouter extends AnyTRPCRouter>({
     url,
+    sessionId = randomUUID(),
     buildHeaders = async () => ({}),
   }: WebSocketTrpcClientOptions) => {
     let headers = {};
     const client = createWSClient({
       url: async () => {
-        headers = await buildHeaders();
+        headers = {
+          ...(await buildHeaders()),
+          'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id': sessionId,
+        };
         return url;
       },
       WebSocket: class extends WebSocket {
@@ -50,6 +60,11 @@ export interface AgentCoreTrpcClientOptions {
    * The ARN of the Bedrock AgentCore Runtime to connect to
    */
   agentRuntimeArn: string;
+  /**
+   * Session ID to include in the WebSocket handshake headers.
+   * Defaults to a random UUID if not provided.
+   */
+  sessionId?: string;
 }
 
 export interface AgentCoreTrpcClientIamOptions extends AgentCoreTrpcClientOptions {
@@ -76,7 +91,7 @@ export class AgentCoreTrpcClient {
    */
   private static buildUrl = (agentRuntimeArn: string) => {
     const region = agentRuntimeArn.split(':')[3];
-    const url = `wss://bedrock-agentcore.${region}.amazonaws.com/runtimes/${agentRuntimeArn.replace(/:/g, '%3A').replace(/\//g, '%2F')}/ws`;
+    const url = `wss://bedrock-agentcore.${region}.amazonaws.com/runtimes/${encodeURIComponent(agentRuntimeArn)}/ws`;
     return { region, url };
   };
 
@@ -93,6 +108,7 @@ export class AgentCoreTrpcClient {
 
     return WebSocketTrpcClient.create<TRouter>({
       url,
+      sessionId: options.sessionId,
       buildHeaders: async () =>
         Object.fromEntries(
           (
@@ -116,6 +132,7 @@ export class AgentCoreTrpcClient {
 
     return WebSocketTrpcClient.create<TRouter>({
       url,
+      sessionId: options.sessionId,
       buildHeaders: async () => ({
         Authorization: `Bearer ${await options.accessTokenProvider()}`,
       }),

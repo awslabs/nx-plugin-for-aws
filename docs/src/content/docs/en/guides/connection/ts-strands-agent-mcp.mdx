@@ -1,0 +1,147 @@
+---
+title: TypeScript Strands Agent to MCP
+description: Connect a TypeScript Strands Agent to an MCP server
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+The `connection` generator can connect your <Link path="guides/ts-strands-agent">TypeScript Strands Agent</Link> to an MCP server (either <Link path="guides/ts-mcp-server">TypeScript</Link> or <Link path="guides/py-mcp-server">Python</Link>).
+
+The generator sets up all the necessary wiring so your agent can discover and invoke the MCP server's tools, both when deployed to AWS (via Bedrock AgentCore) and when running locally.
+
+## Prerequisites
+
+Before using this generator, ensure you have:
+
+1. A TypeScript project with a <Link path="guides/ts-strands-agent">Strands Agent</Link> component
+2. A project with an MCP server component (either <Link path="guides/ts-mcp-server">`ts#mcp-server`</Link> or <Link path="guides/py-mcp-server">`py#mcp-server`</Link>)
+3. Both components created with `computeType: BedrockAgentCoreRuntime`
+
+## Usage
+
+### Run the Generator
+
+<RunGenerator generator="connection" />
+
+Select your agent project as the source and your MCP server project as the target. If your projects contain multiple components, specify the `sourceComponent` and `targetComponent` options to disambiguate.
+
+### Options
+
+<GeneratorParameters generator="connection" />
+
+## Generator Output
+
+The generator creates a shared `agent-connection` package and modifies your agent code:
+
+<FileTree>
+
+- packages/common/agent-connection
+  - src
+    - app
+      - \<mcp-server-name>-client.ts High-level client for the connected MCP server
+    - core
+      - agentcore-mcp-client.ts Low-level AgentCore MCP client with SigV4/JWT authentication
+    - index.ts Exports all clients
+  - project.json
+  - tsconfig.json
+
+</FileTree>
+
+Additionally, it:
+- Transforms your agent's `agent.ts` to import and use the MCP server's tools
+- Updates the agent's `serve-local` target to depend on the MCP server's serve target
+- Installs required dependencies
+
+## Using the Connected MCP Server
+
+The generator transforms your agent's `agent.ts` to use the MCP server's tools:
+
+```ts title="packages/example/src/my-agent/agent.ts" {2,5,8}
+import { Agent, tool } from '@strands-agents/sdk';
+import { MyMcpServerClient } from ':my-scope/agent-connection';
+
+export const getAgent = async (sessionId: string) => {
+  const myMcpServerClient = await MyMcpServerClient.create(sessionId);
+  return new Agent({
+    systemPrompt: '...',
+    tools: [myMcpServerClient],
+  });
+};
+```
+
+The `sessionId` parameter is plumbed through from the caller, ensuring consistency for [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
+
+## Infrastructure
+
+<Infrastructure>
+<Fragment slot="cdk">
+After running the connection generator, you need to grant the agent permission to invoke the MCP server:
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {12-13}
+const mcpServer = new MyMcpServer(this, 'MyMcpServer');
+const myAgent = new MyAgent(this, 'MyAgent');
+
+// Grant the agent access to bedrock models
+myAgent.agentCoreRuntime.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream'],
+    resources: ['arn:aws:bedrock:*:*:foundation-model/*', 'arn:aws:bedrock:*:*:inference-profile/*'],
+  }),
+);
+
+// Grant the agent permissions to invoke the MCP server
+mcpServer.agentCoreRuntime.grantInvoke(myAgent.agentCoreRuntime);
+```
+
+The MCP server's AgentCore runtime ARN is automatically registered in the `connection` namespace of <Link path="guides/runtime-config">Runtime Configuration</Link> by the generated CDK construct, so the agent can discover it at runtime.
+</Fragment>
+<Fragment slot="terraform">
+After running the connection generator, you need to grant the agent permission to invoke the MCP server in your Terraform configuration:
+
+```hcl title="packages/infra/src/main.tf" {12-24}
+module "inventory_mcp_server" {
+  source = "../../common/terraform/src/app/mcp-servers/inventory-mcp"
+}
+
+module "story_agent" {
+  source = "../../common/terraform/src/app/agents/story-agent"
+}
+
+# Grant the agent permissions to invoke the MCP server
+resource "aws_iam_policy" "agent_invoke_mcp" {
+  name = "AgentInvokeMcpPolicy"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = "bedrock-agentcore:InvokeAgent"
+      Resource = module.inventory_mcp_server.agent_core_runtime_arn
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "agent_invoke_mcp" {
+  role       = module.story_agent.agent_core_runtime_role_arn
+  policy_arn = aws_iam_policy.agent_invoke_mcp.arn
+}
+```
+
+The MCP server's AgentCore runtime ARN is automatically registered in the `connection` namespace of <Link path="guides/runtime-config">Runtime Configuration</Link> by the generated Terraform module, so the agent can discover it at runtime.
+</Fragment>
+</Infrastructure>
+
+## Local Development
+
+The generator configures the agent's `serve-local` target to:
+1. Start the connected MCP server(s) automatically
+2. Set `SERVE_LOCAL=true` so the generated client uses direct HTTP transport instead of AgentCore
+
+Run the agent locally with:
+
+<NxCommands commands={["<agent-name>-serve-local <project-name>"]} />
+
+This will start both the agent and all connected MCP servers, with the agent connecting to the MCP servers directly via HTTP on their assigned local ports.

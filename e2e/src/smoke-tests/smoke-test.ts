@@ -135,6 +135,16 @@ export const runSmokeTest = async (
     opts,
   );
 
+  // Connect the TS strands agent to both TS and Python MCP servers
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=ts-project --sourceComponent=agent --targetProject=ts-project --targetComponent=hosted-mcp-server --no-interactive`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=ts-project --sourceComponent=agent --targetProject=py_project --targetComponent=my-mcp-server --no-interactive`,
+    opts,
+  );
+
   await runCLI(`generate @aws/nx-plugin:license --no-interactive`, opts);
 
   await runCLI(

@@ -1,0 +1,231 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ts#strands-agent#mcp-connection generator > should match snapshot for agent-connection src files > agent-connection-index.ts 1`] = `
+"export * from './app/inventory-mcp-client.js';
+// Export your library code here
+"
+`;
+
+exports[`ts#strands-agent#mcp-connection generator > should match snapshot for agent-connection src files > agentcore-mcp-client.ts 1`] = `
+"import { randomUUID } from 'node:crypto';
+import { McpClient } from '@strands-agents/sdk';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { AwsClient } from 'aws4fetch';
+import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
+
+/**
+ * Common options for creating an AgentCore MCP client
+ */
+export interface AgentCoreMcpClientOptions {
+  /**
+   * The ARN of the Bedrock AgentCore Runtime to connect to
+   */
+  agentRuntimeArn: string;
+  /**
+   * Session ID to include in request headers.
+   * Defaults to a random UUID if not provided.
+   */
+  sessionId?: string;
+}
+
+/**
+ * Options for creating an AgentCore MCP client with IAM authentication
+ */
+export interface AgentCoreMcpClientIamOptions extends AgentCoreMcpClientOptions {
+  /**
+   * Optional AWS credential provider. If not provided, uses the default
+   * credential provider chain from the AWS SDK.
+   */
+  credentialProvider?: ReturnType<typeof fromNodeProviderChain>;
+}
+
+/**
+ * Options for creating an AgentCore MCP client with JWT authentication
+ */
+export interface AgentCoreMcpClientJwtOptions extends AgentCoreMcpClientOptions {
+  /**
+   * A function which returns the JWT access token used to authenticate
+   */
+  accessTokenProvider: () => Promise<string>;
+}
+
+/**
+ * Internal options for creating an AgentCore MCP client
+ */
+interface CreateOptions {
+  url: string;
+  sessionId?: string;
+  buildHeaders?: () => Promise<Record<string, string>>;
+  fetch?: typeof fetch;
+}
+
+/**
+ * Factory for clients to call MCP servers hosted on Bedrock AgentCore Runtime
+ */
+export class AgentCoreMcpClient {
+  /**
+   * Construct the invocation URL for an AgentCore runtime ARN and extract the region.
+   * ARN format: arn:partition:service:region:account-id:resource
+   */
+  private static buildUrl(agentRuntimeArn: string): {
+    region: string;
+    url: string;
+  } {
+    const region = agentRuntimeArn.split(':')[3];
+    const url = \`https://bedrock-agentcore.\${region}.amazonaws.com/runtimes/\${encodeURIComponent(agentRuntimeArn)}/invocations?qualifier=DEFAULT\`;
+    return { region, url };
+  }
+
+  /**
+   * Internal method to create an MCP client
+   */
+  private static create(options: CreateOptions): McpClient {
+    const {
+      url,
+      sessionId = randomUUID(),
+      buildHeaders = async () => ({}),
+      fetch: customFetch,
+    } = options;
+
+    // Create a custom fetch that adds required headers
+    const fetchWithHeaders: typeof fetch = async (input, init) => {
+      const headers = {
+        'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id': sessionId,
+        ...(await buildHeaders()),
+      };
+      const existingHeaders = init?.headers;
+
+      const mergedInit = {
+        ...init,
+        headers: !existingHeaders
+          ? headers
+          : existingHeaders instanceof Headers
+            ? (() => {
+                const h = new Headers(existingHeaders);
+                Object.entries(headers).forEach(([k, v]) => h.append(k, v));
+                return h;
+              })()
+            : Array.isArray(existingHeaders)
+              ? [...existingHeaders, ...Object.entries(headers)]
+              : { ...existingHeaders, ...headers },
+      };
+      return (customFetch || fetch)(input, mergedInit);
+    };
+
+    // Create the transport
+    const transport = new StreamableHTTPClientTransport(new URL(url), {
+      fetch: fetchWithHeaders,
+    });
+
+    // Create and return the MCP client
+    return new McpClient({ transport });
+  }
+
+  /**
+   * Create an MCP client with IAM (SigV4) authentication
+   */
+  static withIamAuth(options: AgentCoreMcpClientIamOptions): McpClient {
+    const { agentRuntimeArn, sessionId } = options;
+    const credentialProvider =
+      options.credentialProvider ?? fromNodeProviderChain();
+    const { region, url } = AgentCoreMcpClient.buildUrl(agentRuntimeArn);
+
+    // Create a SigV4 signing fetch function
+    const sigv4Fetch: typeof fetch = async (...args) => {
+      const credentials = await credentialProvider();
+      const client = new AwsClient({
+        ...credentials,
+        service: 'bedrock-agentcore',
+        region,
+      });
+      return client.fetch(...args);
+    };
+
+    return AgentCoreMcpClient.create({
+      url,
+      sessionId,
+      fetch: sigv4Fetch,
+    });
+  }
+
+  /**
+   * Create an MCP client with JWT authentication
+   */
+  static withJwtAuth(options: AgentCoreMcpClientJwtOptions): McpClient {
+    const { agentRuntimeArn, accessTokenProvider, sessionId } = options;
+    const { url } = AgentCoreMcpClient.buildUrl(agentRuntimeArn);
+
+    return AgentCoreMcpClient.create({
+      url,
+      sessionId,
+      buildHeaders: async () => ({
+        Authorization: \`Bearer \${await accessTokenProvider()}\`,
+      }),
+    });
+  }
+}
+"
+`;
+
+exports[`ts#strands-agent#mcp-connection generator > should match snapshot for agent-connection src files > inventory-mcp-client.ts 1`] = `
+"import { McpClient } from '@strands-agents/sdk';
+import { AgentCoreMcpClient } from '../core/agentcore-mcp-client.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { getAppConfig } from '@aws-lambda-powertools/parameters/appconfig';
+
+/**
+ * Client for connecting to the InventoryMcp MCP server.
+ *
+ * In deployed mode: resolves the AgentCore runtime ARN from runtime config
+ * and uses SigV4-authenticated AgentCore transport.
+ *
+ * In local mode (SERVE_LOCAL env var set): connects directly
+ * to the local MCP server via Streamable HTTP.
+ */
+export class InventoryMcpClient {
+  static async create(sessionId: string): Promise<McpClient> {
+    if (process.env.SERVE_LOCAL === 'true') {
+      // Local development: connect directly via Streamable HTTP
+      const transport = new StreamableHTTPClientTransport(
+        new URL('http://localhost:8082/mcp'),
+      );
+      return new McpClient({ transport });
+    }
+
+    // Deployed: resolve ARN from runtime config, use AgentCore transport
+    const config = (await getAppConfig('connection', {
+      application: process.env.RUNTIME_CONFIG_APP_ID!,
+      environment: 'default',
+      transform: 'json',
+    })) as Record<string, any>;
+
+    return AgentCoreMcpClient.withIamAuth({
+      agentRuntimeArn: config.agentRuntimes.InventoryMcp,
+      sessionId,
+    });
+  }
+}
+"
+`;
+
+exports[`ts#strands-agent#mcp-connection generator > should match snapshot for agent-connection src files > transformed-agent.ts 1`] = `
+"import { InventoryMcpClient } from ':proj/agent-connection';
+import { Agent, tool } from '@strands-agents/sdk';
+import { z } from 'zod';
+
+const multiply = tool({
+  name: 'Multiply',
+  description: 'Multiply two numbers',
+  inputSchema: z.object({ a: z.number(), b: z.number() }),
+  callback: ({ a, b }) => a * b,
+});
+
+export const getAgent = async (sessionId: string) => {
+  const inventoryMcp = await InventoryMcpClient.create(sessionId);
+  return new Agent({
+    systemPrompt: 'You are a mathematical wizard.',
+    tools: [inventoryMcp, multiply],
+  });
+};
+"
+`;

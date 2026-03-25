@@ -16,6 +16,6 @@ module.exports = {
     '@modelcontextprotocol/inspector', // TODO: consider allowing updates when transitive dep on @types/react 18.x is removed
   ],
   packageFile: '{package.json,packages/**/package.json}',
-  cooldown: 5, // Only latest versions published for 5 days are updated to
+  cooldown: 1, // Only latest versions published for at least 1 day are updated to
   dep: ['prod', 'dev', 'optional', 'packageManager', 'peer'],
 };

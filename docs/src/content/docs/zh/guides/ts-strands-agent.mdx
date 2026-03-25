@@ -55,7 +55,6 @@ import PackageManagerExecCommand from '@components/package-manager-exec-command.
         - agent.ts 带有示例工具的主代理定义
         - client.ts 用于调用代理的客户端
         - agent-core-trpc-client.ts 用于连接到 AgentCore Runtime 上的代理的客户端工厂
-        - agent-core-mcp-client.ts 用于连接到 AgentCore Runtime 上的 MCP 服务器的客户端工厂
         - Dockerfile 托管代理的入口点(当 `computeType` 设置为 `None` 时排除)
     - package.json 已更新 Strands 依赖项
     - project.json 已更新代理服务目标
@@ -110,7 +109,7 @@ TypeScript Strands Agent 使用基于 WebSocket 的 [tRPC](https://trpc.io/),利
 
 ```typescript
 import { Agent, tool } from '@strands-agents/sdk';
-import z from 'zod';
+import { z } from 'zod';
 
 const letterCounter = tool({
   name: 'letter_counter',
@@ -127,10 +126,12 @@ const letterCounter = tool({
 });
 
 // Add tools to your agent
-export const agent = new Agent({
-  systemPrompt: 'You are a helpful assistant with access to various tools.',
-  tools: [letterCounter],
-});
+export const getAgent = async (sessionId: string) => {
+  return new Agent({
+    systemPrompt: 'You are a helpful assistant with access to various tools.',
+    tools: [letterCounter],
+  });
+};
 ```
 
 Strands 框架自动处理:
@@ -167,86 +168,15 @@ response = await agent.invoke('What can you help me with?');
 
 ### 使用 MCP 服务器
 
-您可以[从 MCP 服务器添加工具](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/tools/mcp-tools/)到您的 Strands 代理。
+您可以[从 MCP 服务器添加工具](https://strandsagents.com/docs/user-guide/concepts/tools/mcp-tools/)到您的 Strands 代理。
 
-对于使用 <Link path="/guides/py-mcp-server">`py#mcp-server`</Link> 或 <Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link> 生成器创建的 MCP 服务器(或托管在 Bedrock AgentCore Runtime 上的其他服务器),会在 `agent-core-mcp-client.ts` 中为您生成一个客户端工厂。
+对于使用 <Link path="/guides/py-mcp-server">`py#mcp-server`</Link> 或 <Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link> 生成器创建的 MCP 服务器,您可以使用 <Link path="/guides/connection/ts-strands-agent-mcp">`connection` 生成器</Link>。
 
-您可以在 `agent.ts` 中更新代理初始化以创建 MCP 客户端并添加工具。以下示例显示如何使用 IAM (SigV4) 身份验证执行此操作:
+<RunGenerator generator="connection" />
 
-```typescript
-// agent.ts
-import { Agent } from '@strands-agents/sdk';
-import { AgentCoreMcpClient } from './agent-core-mcp-client.js';
+有关如何设置连接的详细信息,请参阅 <Link path="/guides/connection/ts-strands-agent-mcp">`connection` 生成器指南</Link>。
 
-const mcpClient = AgentCoreMcpClient.withIamAuth({
-  agentRuntimeArn: process.env.MCP_AGENTCORE_RUNTIME_ARN!,
-  region: process.env.AWS_REGION || 'us-west-2',
-  sessionId: 'my-session-id',
-});
-
-export const agent = new Agent({
-  systemPrompt: '...',
-  tools: [mcpClient],
-});
-```
-
-:::tip
-如果您的目标 MCP 服务器使用 JWT 身份验证,您可以使用 `AgentCoreMcpClient.withJwtAuth` 方法来创建客户端。
-:::
-
-使用上面的 IAM 身份验证示例,我们需要在基础设施中配置两件事。首先,我们需要为代理添加环境变量,用于 MCP 服务器的 AgentCore Runtime ARN,其次我们需要授予代理调用 MCP 服务器的权限。这可以按如下方式实现:
-
-<Infrastructure>
-<Fragment slot="cdk">
-```ts {9, 13}
-import { MyProjectAgent, MyProjectMcpServer } from ':my-scope/common-constructs';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    const mcpServer = new MyProjectMcpServer(this, 'MyProjectMcpServer');
-
-    const agent = new MyProjectAgent(this, 'MyProjectAgent', {
-      environmentVariables: {
-        MCP_AGENTCORE_RUNTIME_ARN: mcpServer.agentCoreRuntime.agentRuntimeArn,
-      },
-    });
-
-    mcpServer.agentCoreRuntime.grantInvoke(agent.agentCoreRuntime);
-  }
-}
-```
-</Fragment>
-<Fragment slot="terraform">
-```terraform
-# MCP Server
-module "my_project_mcp_server" {
-  source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
-}
-
-# Agent
-module "my_project_agent" {
-  source = "../../common/terraform/src/app/agents/my-project-agent"
-
-  env = {
-    MCP_AGENTCORE_RUNTIME_ARN = module.my_project_mcp_server.agent_core_runtime_arn
-  }
-
-  additional_iam_policy_statements = [
-    {
-      Effect = "Allow"
-      Action = [
-        "bedrock-agentcore:InvokeAgentRuntime"
-      ]
-      Resource = [
-        module.my_project_mcp_server.agent_core_runtime_arn,
-        "${module.my_project_mcp_server.agent_core_runtime_arn}/*"
-      ]
-    }
-  ]
-}
-```
-</Fragment>
-</Infrastructure>
+对于其他 MCP 服务器,请参阅 [Strands 文档](https://strandsagents.com/docs/user-guide/concepts/tools/mcp-tools/)。
 
 ### 更多
 
@@ -497,7 +427,7 @@ async function buildSignedUrl(
   });
 
   // Build WebSocket URL from ARN
-  const wsUrl = `wss://bedrock-agentcore.${region}.amazonaws.com/runtimes/${agentRuntimeArn.replace(/:/g, '%3A').replace(/\//g, '%2F')}/ws`;
+  const wsUrl = `wss://bedrock-agentcore.${region}.amazonaws.com/runtimes/${encodeURIComponent(agentRuntimeArn)}/ws`;
 
   // Create presigned URL
   const signedRequest = await awsClient.sign(wsUrl, {

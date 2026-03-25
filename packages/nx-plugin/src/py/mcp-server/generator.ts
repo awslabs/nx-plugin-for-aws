@@ -198,6 +198,20 @@ export const pyMcpServerGenerator = async (
         },
         continuous: true,
       },
+      [`${mcpTargetPrefix}-serve-local`]: {
+        executor: 'nx:run-commands',
+        options: {
+          commands: [
+            `uv run uvicorn --reload ${moduleName}.${mcpServerNameSnakeCase}.http:app --host 0.0.0.0 --port ${localDevPort}`,
+          ],
+          cwd: '{projectRoot}',
+          env: {
+            PORT: `${localDevPort}`,
+            SERVE_LOCAL: 'true',
+          },
+        },
+        continuous: true,
+      },
       [`${mcpTargetPrefix}-inspect`]: {
         executor: 'nx:run-commands',
         options: {
@@ -225,6 +239,7 @@ export const pyMcpServerGenerator = async (
     mcpTargetPrefix,
     {
       port: localDevPort,
+      rc: mcpServerNameClassName,
     },
   );
 

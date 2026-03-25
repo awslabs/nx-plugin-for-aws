@@ -5,6 +5,7 @@
 export interface TsInfraGeneratorSchema {
   name: string;
   directory?: string;
+  subDirectory?: string;
   //   unitTestRunner?: 'jest' | 'vitest' | 'none';
   //   linter?: Linter;
   skipInstall?: boolean;

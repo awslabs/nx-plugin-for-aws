@@ -28,6 +28,15 @@ describe('python project generator', () => {
     expect(tree.exists('apps/test_project/pyproject.toml')).toBeTruthy();
     expect(tree.exists('apps/test_project/proj_test_project')).toBeTruthy();
     expect(tree.exists('apps/test_project/tests')).toBeTruthy();
+
+    // Verify hello.py files are removed
+    expect(
+      tree.exists('apps/test_project/proj_test_project/hello.py'),
+    ).toBeFalsy();
+    expect(tree.exists('apps/test_project/tests/test_hello.py')).toBeFalsy();
+
+    // Verify placeholder test is added
+    expect(tree.exists('apps/test_project/tests/test_noop.py')).toBeTruthy();
   });
 
   it('should set up project configuration correctly', async () => {
@@ -227,5 +236,16 @@ describe('python project generator', () => {
     expect(
       nxJson.targetDefaults?.['@nxlv/python:ruff-check'],
     ).not.toBeDefined();
+  });
+
+  it('should place project in subDirectory when provided', async () => {
+    await pyProjectGenerator(tree, {
+      name: 'test-project',
+      directory: 'packages',
+      subDirectory: 'libs',
+      projectType: 'library',
+    });
+    expect(tree.exists('packages/libs')).toBeTruthy();
+    expect(tree.exists('packages/libs/pyproject.toml')).toBeTruthy();
   });
 });

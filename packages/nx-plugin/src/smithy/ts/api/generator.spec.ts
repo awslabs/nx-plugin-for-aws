@@ -796,4 +796,18 @@ describe('tsSmithyApiGenerator', () => {
       expect(terraformContent).toMatchSnapshot('terraform-custom-namespace.tf');
     });
   });
+
+  it('should place project in subDirectory when provided', async () => {
+    await tsSmithyApiGenerator(tree, {
+      name: 'test-api',
+      computeType: 'ServerlessApiGatewayRestApi',
+      auth: 'None',
+      iacProvider: 'CDK',
+      directory: 'packages',
+      subDirectory: 'apis',
+    });
+    expect(tree.exists('packages/apis/model')).toBeTruthy();
+    expect(tree.exists('packages/apis/backend')).toBeTruthy();
+    expect(tree.exists('packages/apis/backend/src')).toBeTruthy();
+  });
 });

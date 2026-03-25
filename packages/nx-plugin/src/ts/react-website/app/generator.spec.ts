@@ -653,6 +653,17 @@ describe('react-website generator', () => {
       ),
     ).toBeTruthy();
   });
+
+  it('should place project in subDirectory when provided', async () => {
+    await tsReactWebsiteGenerator(tree, {
+      ...options,
+      directory: 'packages',
+      subDirectory: 'websites',
+    });
+    expect(tree.exists('packages/websites')).toBeTruthy();
+    expect(tree.exists('packages/websites/src')).toBeTruthy();
+    expect(tree.exists('packages/websites/src/main.tsx')).toBeTruthy();
+  });
 });
 
 describe('react-website generator uxProvider tests', () => {

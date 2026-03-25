@@ -80,22 +80,47 @@ export const addDestructuredImport = (
       return contents;
     }
 
+    const newImportSpecifiers = newVariables.map((variableName) => {
+      const [name, alias] = variableName.split(' as ');
+      return factory.createImportSpecifier(
+        false,
+        alias ? factory.createIdentifier(name) : undefined,
+        factory.createIdentifier(alias || name),
+      );
+    });
+
+    // If there's an existing import from this module, replace it with an updated one
+    if (existingImports.length > 0) {
+      return applyTransform(
+        contents,
+        `ImportDeclaration[moduleSpecifier.text="${from}"]`,
+        (node) => {
+          const decl = node as ts.ImportDeclaration;
+          return factory.updateImportDeclaration(
+            decl,
+            decl.modifiers,
+            factory.createImportClause(
+              false,
+              undefined,
+              factory.createNamedImports([
+                ...existingImports,
+                ...newImportSpecifiers,
+              ]),
+            ),
+            decl.moduleSpecifier,
+            decl.attributes,
+          );
+        },
+      );
+    }
+
+    // No existing import — prepend a new one
     const destructuredImport = factory.createImportDeclaration(
       undefined,
       factory.createImportClause(
         false,
         undefined,
-        factory.createNamedImports([
-          ...existingImports,
-          ...newVariables.map((variableName) => {
-            const [name, alias] = variableName.split(' as ');
-            return factory.createImportSpecifier(
-              false,
-              alias ? factory.createIdentifier(name) : undefined,
-              factory.createIdentifier(alias || name),
-            );
-          }),
-        ]),
+        factory.createNamedImports(newImportSpecifiers),
       ),
       factory.createStringLiteral(from, true),
     );

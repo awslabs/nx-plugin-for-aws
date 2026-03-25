@@ -962,4 +962,19 @@ describe('trpc backend generator', () => {
       expect(terraformFiles.length).toBeGreaterThan(0);
     });
   });
+
+  it('should place project in subDirectory when provided', async () => {
+    await tsTrpcApiGenerator(tree, {
+      name: 'TestApi',
+      directory: 'packages',
+      subDirectory: 'apis',
+      computeType: 'ServerlessApiGatewayHttpApi',
+      integrationPattern: 'isolated',
+      auth: 'IAM',
+      iacProvider: 'CDK',
+    });
+    expect(tree.exists('packages/apis')).toBeTruthy();
+    expect(tree.exists('packages/apis/src')).toBeTruthy();
+    expect(tree.exists('packages/apis/src/index.ts')).toBeTruthy();
+  });
 });

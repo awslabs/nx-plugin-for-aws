@@ -25,7 +25,7 @@ import {
 } from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { formatFilesInSubtree } from '../../utils/format';
-import { withVersions } from '../../utils/versions';
+import { TS_VERSIONS, withVersions } from '../../utils/versions';
 import { kebabCase, toClassName } from '../../utils/names';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { addMcpServerInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
@@ -51,6 +51,7 @@ export const tsMcpServerGenerator = async (
 
   const defaultName = `${kebabCase(project.name.split('/').pop())}-mcp-server`;
   const name = kebabCase(options.name || defaultName);
+  const mcpServerNameClassName = toClassName(name);
   const mcpTargetPrefix = options.name ? name : 'mcp-server';
   const targetSourceDirRelativeToProjectRoot = joinPathFragments(
     'src',
@@ -101,6 +102,10 @@ export const tsMcpServerGenerator = async (
       name,
       esm,
       distDir,
+      adotVersion:
+        TS_VERSIONS[
+          '@aws/aws-distro-opentelemetry-node-autoinstrumentation'
+        ],
     },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
@@ -150,7 +155,7 @@ export const tsMcpServerGenerator = async (
     // Add the construct to deploy the mcp server
     addMcpServerInfra(tree, {
       mcpServerNameKebabCase: name,
-      mcpServerNameClassName: toClassName(name),
+      mcpServerNameClassName,
       projectName: project.name,
       dockerImageTag,
       iacProvider,
@@ -189,6 +194,18 @@ export const tsMcpServerGenerator = async (
         },
         continuous: true,
       },
+      [`${mcpTargetPrefix}-serve-local`]: {
+        executor: 'nx:run-commands',
+        options: {
+          commands: [`tsx --watch ${relativeSourceDir}/http.ts`],
+          cwd: '{projectRoot}',
+          env: {
+            PORT: `${localDevPort}`,
+            SERVE_LOCAL: 'true',
+          },
+        },
+        continuous: true,
+      },
       [`${mcpTargetPrefix}-inspect`]: {
         executor: 'nx:run-commands',
         options: {
@@ -210,6 +227,7 @@ export const tsMcpServerGenerator = async (
     mcpTargetPrefix,
     {
       port: localDevPort,
+      rc: mcpServerNameClassName,
     },
   );
 

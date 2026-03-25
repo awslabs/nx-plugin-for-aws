@@ -5,7 +5,6 @@
 import {
   addDependenciesToPackageJson,
   generateFiles,
-  getPackageManagerCommand,
   joinPathFragments,
   OverwriteStrategy,
   ProjectConfiguration,
@@ -17,6 +16,7 @@ import tsProjectGenerator from '../ts/lib/generator';
 import terraformProjectGenerator from '../terraform/project/generator';
 import { withVersions } from './versions';
 import { formatFilesInSubtree } from './format';
+import { getPackageManagerDisplayCommands } from './pkg-manager';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
@@ -73,7 +73,7 @@ export async function sharedConstructsGenerator(
         {
           fullyQualifiedName: `${npmScopePrefix}${SHARED_CONSTRUCTS_NAME}`,
           name: SHARED_CONSTRUCTS_NAME,
-          pkgMgrCmd: getPackageManagerCommand().exec,
+          pkgMgrCmd: getPackageManagerDisplayCommands().exec,
         },
         {
           overwriteStrategy: OverwriteStrategy.Overwrite,
