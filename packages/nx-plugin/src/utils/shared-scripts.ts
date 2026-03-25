@@ -5,7 +5,6 @@
 import {
   addDependenciesToPackageJson,
   generateFiles,
-  getPackageManagerCommand,
   joinPathFragments,
   OverwriteStrategy,
   Tree,
@@ -14,6 +13,7 @@ import { getNpmScopePrefix, toScopeAlias } from './npm-scope';
 import tsProjectGenerator from '../ts/lib/generator';
 import { withVersions } from './versions';
 import { formatFilesInSubtree } from './format';
+import { getPackageManagerDisplayCommands } from './pkg-manager';
 import {
   PACKAGES_DIR,
   SHARED_SCRIPTS_NAME,
@@ -68,7 +68,7 @@ export async function sharedScriptsGenerator(tree: Tree): Promise<void> {
     {
       fullyQualifiedName: `${npmScopePrefix}${SHARED_SCRIPTS_NAME}`,
       name: SHARED_SCRIPTS_NAME,
-      pkgMgrCmd: getPackageManagerCommand().exec,
+      pkgMgrCmd: getPackageManagerDisplayCommands().exec,
     },
     { overwriteStrategy: OverwriteStrategy.Overwrite },
   );

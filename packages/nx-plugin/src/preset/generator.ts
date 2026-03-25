@@ -9,7 +9,6 @@ import {
   addDependenciesToPackageJson,
   detectPackageManager,
   generateFiles,
-  getPackageManagerCommand,
   installPackagesTask,
   joinPathFragments,
   readNxJson,
@@ -19,6 +18,7 @@ import {
 import { NxGeneratorInfo, getGeneratorInfo } from '../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../utils/metrics';
 import { formatFilesInSubtree } from '../utils/format';
+import { getPackageManagerDisplayCommands } from '../utils/pkg-manager';
 import { initGenerator } from '@nx/js';
 import { readModulePackageJson } from 'nx/src/utils/package-json';
 import { getNpmScope } from '../utils/npm-scope';
@@ -198,9 +198,14 @@ export const presetGenerator = async (
       generators: Object.entries(GeneratorsJson.generators)
         .filter(([_, v]) => !v['hidden'])
         .map(([k, v]) => ({ name: k, description: v.description })),
-      pkgMgrCmd: getPackageManagerCommand().exec,
-      buildCmd: getPackageManagerCommand().run('build'),
-      lintCmd: getPackageManagerCommand().run('lint'),
+      ...(() => {
+        const cmds = getPackageManagerDisplayCommands();
+        return {
+          pkgMgrCmd: cmds.exec,
+          buildCmd: `${cmds.run} build`,
+          lintCmd: `${cmds.run} lint`,
+        };
+      })(),
     },
     {
       overwriteStrategy: OverwriteStrategy.Overwrite,
