@@ -563,6 +563,7 @@ output "agent_runtime_version" {
 exports[`ts#strands-agent generator > should match snapshot for generated files > strands-agent-agent.ts 1`] = `
 "import { Agent, tool } from '@strands-agents/sdk';
 import { z } from 'zod';
+import type { Context } from './init.js';
 
 const multiply = tool({
   name: 'Multiply',
@@ -574,8 +575,8 @@ const multiply = tool({
   callback: ({ a, b }) => a * b,
 });
 
-export const getAgent = async (sessionId: string) => {
-  console.log(\`Creating agent for session \${sessionId}\`);
+export const getAgent = async (ctx: Context) => {
+  console.log(\`Creating agent for session \${ctx.sessionId}\`);
   return new Agent({
     systemPrompt: \`You are a mathematical wizard.
   Use your tools for mathematical tasks.
@@ -800,12 +801,16 @@ const PORT = parseInt(process.env.PORT || '8080');
 const createContext = (
   opts: CreateHTTPContextOptions | CreateWSSContextFnOptions,
 ): Context => {
+  const headers = 'req' in opts ? opts.req.headers : undefined;
   const sessionId =
-    ('req' in opts
-      ? opts.req.headers['x-amzn-bedrock-agentcore-runtime-session-id']
-      : undefined) ?? randomUUID();
+    (headers?.['x-amzn-bedrock-agentcore-runtime-session-id'] as string) ??
+    randomUUID();
+  const workloadAccessToken = headers?.['workloadaccesstoken'] as
+    | string
+    | undefined;
   return {
     sessionId: Array.isArray(sessionId) ? sessionId[0] : sessionId,
+    workloadAccessToken,
   };
 };
 
@@ -851,6 +856,7 @@ exports[`ts#strands-agent generator > should match snapshot for generated files 
 
 export interface Context {
   sessionId: string;
+  workloadAccessToken?: string;
 }
 
 export const t = initTRPC.context<Context>().create();
@@ -877,7 +883,7 @@ export const appRouter = router({
       }),
     )
     .subscription(async function* (opts) {
-      const agent = await getAgent(opts.ctx.sessionId);
+      const agent = await getAgent(opts.ctx);
 
       for await (const event of agent.stream(opts.input.message)) {
         if (

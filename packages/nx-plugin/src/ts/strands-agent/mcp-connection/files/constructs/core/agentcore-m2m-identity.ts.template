@@ -1,0 +1,109 @@
+import * as cr from 'aws-cdk-lib/custom-resources';
+import * as iam from 'aws-cdk-lib/aws-iam';
+import { Construct } from 'constructs';
+import { UserPool, UserPoolClient } from 'aws-cdk-lib/aws-cognito';
+import { Stack } from 'aws-cdk-lib';
+import { RuntimeConfig } from './runtime-config.js';
+
+export interface AgentCoreM2MIdentityProps {
+  /**
+   * Name for the credential provider (must be unique per account/region).
+   */
+  providerName: string;
+  /**
+   * The PascalCase class name of the MCP server this provider serves.
+   * Used to key the cognitoM2M runtime config.
+   */
+  serverClassName: string;
+  /**
+   * The Cognito User Pool.
+   */
+  userPool: UserPool;
+  /**
+   * The M2M app client with client_credentials grant.
+   */
+  m2mClient: UserPoolClient;
+  /**
+   * The OAuth scope to request (e.g., "mcp-123456789/invoke").
+   */
+  scope: string;
+  /**
+   * The Cognito domain prefix (e.g., "mcp-auth-123456789").
+   */
+  cognitoDomainPrefix: string;
+}
+
+/**
+ * Creates an AgentCore Identity OAuth2 credential provider backed by Cognito M2M.
+ * Uses AwsCustomResource since no L2 CDK constructs exist yet for AgentCore Identity.
+ *
+ * At deploy time, registers the Cognito M2M client credentials in AgentCore Identity's
+ * Token Vault via CreateOauth2CredentialProvider. At runtime, agents call
+ * GetResourceOauth2Token to obtain JWT access tokens from the Token Vault.
+ */
+export class AgentCoreM2MIdentity extends Construct {
+  public readonly providerName: string;
+
+  constructor(scope: Construct, id: string, props: AgentCoreM2MIdentityProps) {
+    super(scope, id);
+
+    this.providerName = props.providerName;
+    const region = Stack.of(this).region;
+    const authBase = `https://${props.cognitoDomainPrefix}.auth.${region}.amazoncognito.com/oauth2`;
+
+    new cr.AwsCustomResource(this, 'CredentialProvider', {
+      resourceType: 'Custom::AgentCoreOauth2Provider',
+      onCreate: {
+        service: '@aws-sdk/client-bedrock-agentcore-control',
+        action: 'CreateOauth2CredentialProvider',
+        parameters: {
+          name: props.providerName,
+          credentialProviderVendor: 'CognitoOauth2',
+          oauth2ProviderConfigInput: {
+            includedOauth2ProviderConfig: {
+              clientId: props.m2mClient.userPoolClientId,
+              clientSecret:
+                props.m2mClient.userPoolClientSecret.unsafeUnwrap(),
+              authorizationEndpoint: `${authBase}/authorize`,
+              tokenEndpoint: `${authBase}/token`,
+              issuer: `https://cognito-idp.${region}.amazonaws.com/${props.userPool.userPoolId}`,
+            },
+          },
+        },
+        physicalResourceId: cr.PhysicalResourceId.of(props.providerName),
+      },
+      onDelete: {
+        service: '@aws-sdk/client-bedrock-agentcore-control',
+        action: 'DeleteOauth2CredentialProvider',
+        parameters: {
+          name: props.providerName,
+        },
+      },
+      policy: cr.AwsCustomResourcePolicy.fromStatements([
+        new iam.PolicyStatement({
+          actions: [
+            'bedrock-agentcore:CreateOauth2CredentialProvider',
+            'bedrock-agentcore:DeleteOauth2CredentialProvider',
+            'bedrock-agentcore:GetOauth2CredentialProvider',
+            'bedrock-agentcore:CreateTokenVault',
+            'bedrock-agentcore:GetTokenVault',
+            'secretsmanager:CreateSecret',
+            'secretsmanager:DeleteSecret',
+            'secretsmanager:TagResource',
+          ],
+          resources: ['*'],
+        }),
+      ]),
+    });
+
+    // Publish credential provider config to runtime config (keyed by server class name)
+    const rc = RuntimeConfig.ensure(this);
+    rc.set('connection', 'cognitoM2M', {
+      ...rc.get('connection').cognitoM2M,
+      [props.serverClassName]: {
+        credentialProviderName: props.providerName,
+        scope: props.scope,
+      },
+    });
+  }
+}

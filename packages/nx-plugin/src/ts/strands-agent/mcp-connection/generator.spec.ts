@@ -58,6 +58,7 @@ describe('ts#strands-agent#mcp-connection generator', () => {
       `
 import { Agent, tool } from '@strands-agents/sdk';
 import { z } from 'zod';
+import type { Context } from './init.js';
 
 const multiply = tool({
   name: 'Multiply',
@@ -66,11 +67,69 @@ const multiply = tool({
   callback: ({ a, b }) => a * b,
 });
 
-export const getAgent = async (sessionId: string) =>
+export const getAgent = async (ctx: Context) =>
   new Agent({
     systemPrompt: 'You are a mathematical wizard.',
     tools: [multiply],
   });
+`,
+    );
+
+    // Create init.ts
+    tree.write(
+      'packages/my-api/src/my-agent/init.ts',
+      `
+import { initTRPC } from '@trpc/server';
+
+export interface Context {
+  sessionId: string;
+  workloadAccessToken?: string;
+}
+
+export const t = initTRPC.context<Context>().create();
+
+export const publicProcedure = t.procedure;
+`,
+    );
+
+    // Create router.ts
+    tree.write(
+      'packages/my-api/src/my-agent/router.ts',
+      `
+import { publicProcedure, t } from './init.js';
+import { getAgent } from './agent.js';
+
+export const router = t.router;
+
+export const appRouter = router({
+  invoke: publicProcedure
+    .subscription(async function* (opts) {
+      const agent = await getAgent(opts.ctx);
+      return;
+    }),
+});
+
+export type AppRouter = typeof appRouter;
+`,
+    );
+
+    // Create index.ts
+    tree.write(
+      'packages/my-api/src/my-agent/index.ts',
+      `
+import { randomUUID } from 'node:crypto';
+import { Context } from './init.js';
+
+const createContext = (opts: any): Context => {
+  const headers = 'req' in opts ? opts.req.headers : undefined;
+  const sessionId =
+    (headers?.['x-amzn-bedrock-agentcore-runtime-session-id'] as string) ?? randomUUID();
+  const workloadAccessToken = headers?.['workloadaccesstoken'] as string | undefined;
+  return {
+    sessionId: Array.isArray(sessionId) ? sessionId[0] : sessionId,
+    workloadAccessToken,
+  };
+};
 `,
     );
 
@@ -184,7 +243,7 @@ export const getAgent = async (sessionId: string) =>
     expect(agentContent).toContain('agent-connection');
 
     // Check client creation was added
-    expect(agentContent).toContain('InventoryMcpClient.create(sessionId)');
+    expect(agentContent).toContain('InventoryMcpClient.create(ctx)');
 
     // Check client was added to tools array
     expect(agentContent).toContain('inventoryMcp, multiply');
@@ -207,7 +266,7 @@ const multiply = tool({
   callback: ({ a, b }) => a * b,
 });
 
-export const getAgent = async (sessionId: string) => {
+export const getAgent = async (ctx: Context) => {
   console.log('Creating agent');
   return new Agent({
     systemPrompt: 'You are a mathematical wizard.',
@@ -241,7 +300,7 @@ export const getAgent = async (sessionId: string) => {
     )!;
 
     // Check client creation was inserted before new Agent
-    expect(agentContent).toContain('InventoryMcpClient.create(sessionId)');
+    expect(agentContent).toContain('InventoryMcpClient.create(ctx)');
     expect(agentContent).toContain('inventoryMcp, multiply');
 
     // Verify the console.log is still present (block body preserved)
@@ -497,7 +556,7 @@ export const getAgent = async (sessionId: string) => {
       )!;
       expect(clientContent).toContain('AgentCoreIdentityTokenProvider');
       expect(clientContent).toContain('withJwtAuth');
-      expect(clientContent).toContain('workloadAccessToken');
+      expect(clientContent).toContain('ctx.workloadAccessToken');
       expect(clientContent).not.toContain('withIamAuth');
 
       // Check AgentCore Identity token provider was generated
@@ -544,9 +603,8 @@ export const getAgent = async (sessionId: string) => {
         'utf-8',
       )!;
 
-      // Check create() is called with both sessionId and workloadAccessToken
-      expect(agentContent).toContain('InventoryMcpClient.create(');
-      expect(agentContent).toContain('workloadAccessToken');
+      // Check create() is called with ctx
+      expect(agentContent).toContain('InventoryMcpClient.create(ctx)');
     });
 
     it('should add @aws-sdk/client-bedrock-agentcore dependency for Cognito auth', async () => {
@@ -656,6 +714,52 @@ export const getAgent = async (sessionId: string) => {
       )!;
       expect(agentContent).toContain('inventoryMcp');
       expect(agentContent).toContain('catalogMcp');
+    });
+
+    it('should generate Cognito infrastructure constructs', async () => {
+      setupProjects();
+      await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
+
+      await tsStrandsAgentMcpConnectionGenerator(tree, {
+        sourceProject: '@test/my-api',
+        targetProject: '@test/my-api',
+        sourceComponent: {
+          generator: 'ts#strands-agent',
+          name: 'my-agent',
+          path: 'src/my-agent',
+          port: 8081,
+        },
+        targetComponent: {
+          generator: 'ts#mcp-server',
+          name: 'inventory-mcp',
+          path: 'src/inventory-mcp',
+          port: 8082,
+          rc: 'InventoryMcp',
+          auth: 'Cognito',
+        },
+      });
+
+      // Check UserIdentity construct was generated
+      expect(
+        tree.exists(
+          'packages/common/constructs/src/core/user-identity.ts',
+        ),
+      ).toBe(true);
+
+      // Check AgentCoreM2MIdentity construct was generated
+      expect(
+        tree.exists(
+          'packages/common/constructs/src/core/agentcore-m2m-identity.ts',
+        ),
+      ).toBe(true);
+
+      // Check exports were added
+      const coreIndex = tree.read(
+        'packages/common/constructs/src/core/index.ts',
+        'utf-8',
+      );
+      expect(coreIndex).toContain('user-identity');
+      expect(coreIndex).toContain('agentcore-m2m-identity');
     });
 
     it('should match snapshot for Cognito auth client', async () => {
