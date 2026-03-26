@@ -150,6 +150,7 @@ export const presetGenerator = async (
   const nxJson = readNxJson(tree);
   updateNxJson(tree, {
     ...nxJson,
+    analytics: false,
     targetDefaults: {
       ...nxJson.targetDefaults,
       compile: {
