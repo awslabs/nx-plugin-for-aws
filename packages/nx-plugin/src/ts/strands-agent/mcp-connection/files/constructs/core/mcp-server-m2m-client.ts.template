@@ -1,0 +1,67 @@
+import { CfnOutput } from 'aws-cdk-lib';
+import {
+  IUserPool,
+  OAuthScope,
+  UserPoolClient,
+  UserPoolResourceServer,
+} from 'aws-cdk-lib/aws-cognito';
+import { Construct } from 'constructs';
+
+export interface McpServerM2MClientProps {
+  /**
+   * The shared Cognito User Pool.
+   */
+  userPool: IUserPool;
+  /**
+   * A unique identifier for this MCP server (e.g., "inventory-mcp").
+   * Used as the resource server identifier and in scope names.
+   */
+  serverIdentifier: string;
+}
+
+/**
+ * Per-MCP-server Cognito M2M resources: a dedicated resource server and M2M app client.
+ *
+ * Each MCP server gets its own resource server with a unique scope
+ * and its own M2M client restricted to that scope. This follows
+ * AWS best practices for least-privilege M2M authorization:
+ * https://docs.aws.amazon.com/cognito/latest/developerguide/scope-based-multi-tenancy.html
+ */
+export class McpServerM2MClient extends Construct {
+  public readonly resourceServer: UserPoolResourceServer;
+  public readonly m2mClient: UserPoolClient;
+  public readonly scope: string;
+
+  constructor(scope: Construct, id: string, props: McpServerM2MClientProps) {
+    super(scope, id);
+
+    const resourceServerIdentifier = `mcp-${props.serverIdentifier}`;
+    this.scope = `${resourceServerIdentifier}/invoke`;
+
+    this.resourceServer = props.userPool.addResourceServer(
+      `${id}ResourceServer`,
+      {
+        identifier: resourceServerIdentifier,
+        scopes: [
+          {
+            scopeName: 'invoke',
+            scopeDescription: `Invoke the ${props.serverIdentifier} MCP server`,
+          },
+        ],
+      },
+    );
+
+    this.m2mClient = props.userPool.addClient(`${id}M2MClient`, {
+      generateSecret: true,
+      oAuth: {
+        flows: { clientCredentials: true },
+        scopes: [OAuthScope.custom(this.scope)],
+      },
+    });
+    this.m2mClient.node.addDependency(this.resourceServer);
+
+    new CfnOutput(this, 'M2MClientId', {
+      value: this.m2mClient.userPoolClientId,
+    });
+  }
+}

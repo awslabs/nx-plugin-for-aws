@@ -2,26 +2,24 @@ import { CfnOutput, Duration, Stack } from 'aws-cdk-lib';
 import {
   AccountRecovery,
   Mfa,
-  OAuthScope,
   UserPool,
   UserPoolClient,
   UserPoolDomain,
-  UserPoolResourceServer,
 } from 'aws-cdk-lib/aws-cognito';
 import { Construct } from 'constructs';
 import { RuntimeConfig } from './runtime-config.js';
 
 /**
- * Creates a Cognito UserPool with an M2M app client and resource server
- * for agent-to-MCP server authentication.
+ * Shared Cognito User Pool for the workspace.
+ *
+ * Creates the User Pool, domain, and a user-facing app client.
+ * Per-MCP-server M2M resources (resource server, M2M client) are created
+ * by McpServerM2MClient — one per MCP server for least-privilege isolation.
  */
 export class UserIdentity extends Construct {
   public readonly userPool: UserPool;
   public readonly userPoolDomain: UserPoolDomain;
-  public readonly m2mClient: UserPoolClient;
   public readonly userClient: UserPoolClient;
-  public readonly resourceServer: UserPoolResourceServer;
-  public readonly scope: string;
   public readonly domainPrefix: string;
 
   constructor(scope: Construct, id: string) {
@@ -54,30 +52,6 @@ export class UserIdentity extends Construct {
       },
     });
 
-    // Resource server with invoke scope
-    const resourceServerIdentifier = `mcp-${account}`;
-    this.scope = `${resourceServerIdentifier}/invoke`;
-
-    this.resourceServer = this.userPool.addResourceServer('McpResourceServer', {
-      identifier: resourceServerIdentifier,
-      scopes: [
-        {
-          scopeName: 'invoke',
-          scopeDescription: 'Invoke MCP server runtimes',
-        },
-      ],
-    });
-
-    // M2M app client with client_credentials grant
-    this.m2mClient = this.userPool.addClient('M2MClient', {
-      generateSecret: true,
-      oAuth: {
-        flows: { clientCredentials: true },
-        scopes: [OAuthScope.custom(this.scope)],
-      },
-    });
-    this.m2mClient.node.addDependency(this.resourceServer);
-
     // User-facing app client (for JWT inbound auth on agent runtimes)
     this.userClient = this.userPool.addClient('UserClient', {
       generateSecret: false,
@@ -94,10 +68,6 @@ export class UserIdentity extends Construct {
 
     new CfnOutput(this, 'UserPoolId', {
       value: this.userPool.userPoolId,
-    });
-
-    new CfnOutput(this, 'M2MClientId', {
-      value: this.m2mClient.userPoolClientId,
     });
 
     new CfnOutput(this, 'UserClientId', {

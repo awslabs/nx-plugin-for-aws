@@ -137,35 +137,45 @@ mcpServer.agentCoreRuntime.grantInvoke(myAgent.agentCoreRuntime);
 When connecting to a Cognito-protected MCP server, the infrastructure setup requires additional resources for the M2M (machine-to-machine) OAuth2 flow:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
-import { UserIdentity, AgentCoreM2MIdentity } from ':my-scope/common-constructs';
+import {
+  UserIdentity,
+  McpServerM2MClient,
+  AgentCoreM2MIdentity,
+} from ':my-scope/common-constructs';
 
-// 1. Shared Cognito User Pool
+// 1. Shared Cognito User Pool (one per workspace)
 const identity = new UserIdentity(this, 'Identity');
 
-// 2. Register M2M credentials with AgentCore Identity
+// 2. Per-MCP-server M2M client (least-privilege isolation)
+const mcpM2M = new McpServerM2MClient(this, 'MyMcpM2M', {
+  userPool: identity.userPool,
+  serverIdentifier: 'my-mcp-server',
+});
+
+// 3. Register M2M credentials with AgentCore Identity
 new AgentCoreM2MIdentity(this, 'McpM2MIdentity', {
   providerName: 'mcp-my-mcp-server',
   serverClassName: 'MyMcpServer',
   userPool: identity.userPool,
-  m2mClient: identity.m2mClient,
-  scope: identity.scope,
+  m2mClient: mcpM2M.m2mClient,
+  scope: mcpM2M.scope,
   cognitoDomainPrefix: identity.domainPrefix,
 });
 
-// 3. MCP server with Cognito JWT authorizer
+// 4. MCP server with Cognito JWT authorizer
 const mcpServer = new MyMcpServer(this, 'MyMcpServer', {
   identity: {
     userPool: identity.userPool,
-    userPoolClient: identity.m2mClient,
+    userPoolClient: mcpM2M.m2mClient,
   },
 });
 
-// 4. Agent with Cognito JWT authorizer (enables workload access token delivery)
+// 5. Agent with Cognito JWT authorizer (enables workload access token delivery)
 const myAgent = new MyAgent(this, 'MyAgent', {
   identity: {
     userPool: identity.userPool,
     userPoolClient: identity.userClient,
-    m2mClients: [identity.m2mClient],
+    m2mClients: [mcpM2M.m2mClient],
   },
 });
 
@@ -179,8 +189,9 @@ myAgent.agentCoreRuntime.addToRolePolicy(
 ```
 
 The Cognito setup includes:
-- **UserIdentity**: Creates a Cognito User Pool with M2M app client and resource server
-- **AgentCoreM2MIdentity**: Registers the M2M client credentials in AgentCore Identity's Token Vault via `CreateOauth2CredentialProvider`
+- **UserIdentity**: Shared Cognito User Pool, domain, and user-facing client (one per workspace)
+- **McpServerM2MClient**: Per-server resource server and M2M app client — each MCP server gets its own client with scopes restricted to that server only, following [AWS least-privilege best practices](https://docs.aws.amazon.com/cognito/latest/developerguide/scope-based-multi-tenancy.html)
+- **AgentCoreM2MIdentity**: Registers the per-server M2M client credentials in AgentCore Identity's Token Vault
 - **MCP server authorizer**: `RuntimeAuthorizerConfiguration.usingCognito()` validates incoming JWT tokens
 - **Agent authorizer**: Required for AgentCore Runtime to deliver the workload access token to agent code
 

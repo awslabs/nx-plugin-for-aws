@@ -365,7 +365,13 @@ function ensureWorkloadAccessTokenContext(
 
 /**
  * Generate CDK constructs for Cognito M2M auth infrastructure.
- * Creates UserIdentity and AgentCoreM2MIdentity constructs if they don't exist.
+ *
+ * Creates shared constructs (UserIdentity, AgentCoreM2MIdentity) if they don't exist,
+ * and per-server constructs (McpServerM2MClient) for each MCP server.
+ *
+ * Per AWS best practices, each MCP server gets its own resource server and M2M client
+ * for least-privilege scope isolation:
+ * https://docs.aws.amazon.com/cognito/latest/developerguide/scope-based-multi-tenancy.html
  */
 function generateCognitoInfraConstructs(
   tree: Tree,
@@ -377,7 +383,7 @@ function generateCognitoInfraConstructs(
     'index.ts',
   );
 
-  // Generate UserIdentity construct if not present
+  // Generate shared constructs (UserIdentity, McpServerM2MClient, AgentCoreM2MIdentity) if not present
   const userIdentityPath = joinPathFragments(
     constructsCorePath,
     'user-identity.ts',
@@ -391,9 +397,14 @@ function generateCognitoInfraConstructs(
       { overwriteStrategy: OverwriteStrategy.KeepExisting },
     );
 
-    // Add re-exports
+    // Add re-exports for all Cognito constructs
     if (tree.exists(constructsCoreIndexPath)) {
       addStarExport(tree, constructsCoreIndexPath, './user-identity.js');
+      addStarExport(
+        tree,
+        constructsCoreIndexPath,
+        './mcp-server-m2m-client.js',
+      );
       addStarExport(
         tree,
         constructsCoreIndexPath,

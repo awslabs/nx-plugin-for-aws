@@ -739,26 +739,34 @@ export const getAgent = async (ctx: Context) => {
         },
       });
 
-      // Check UserIdentity construct was generated
+      // Check shared constructs were generated
       expect(
         tree.exists(
           'packages/common/constructs/src/core/user-identity.ts',
         ),
       ).toBe(true);
 
-      // Check AgentCoreM2MIdentity construct was generated
+      // Check per-server M2M client construct was generated
+      expect(
+        tree.exists(
+          'packages/common/constructs/src/core/mcp-server-m2m-client.ts',
+        ),
+      ).toBe(true);
+
+      // Check AgentCore Identity credential provider construct was generated
       expect(
         tree.exists(
           'packages/common/constructs/src/core/agentcore-m2m-identity.ts',
         ),
       ).toBe(true);
 
-      // Check exports were added
+      // Check exports were added for all Cognito constructs
       const coreIndex = tree.read(
         'packages/common/constructs/src/core/index.ts',
         'utf-8',
       );
       expect(coreIndex).toContain('user-identity');
+      expect(coreIndex).toContain('mcp-server-m2m-client');
       expect(coreIndex).toContain('agentcore-m2m-identity');
     });
 
