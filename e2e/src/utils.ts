@@ -168,7 +168,7 @@ export const buildCreateNxWorkspaceCommand = (
   nxVersion: string = undefined,
   nxPluginVersion: string = undefined,
 ) =>
-  `npx ${yes ? '-y ' : ''}create-nx-workspace@${nxVersion ?? TS_VERSIONS['create-nx-workspace']} ${workspace} --pm=${pm}  --preset=@aws/nx-plugin${nxPluginVersion ? `@${nxPluginVersion}` : ''} ${iacProvider ? `--iacProvider=${iacProvider} ` : ''}--ci=skip --aiAgents`;
+  `npx ${yes ? '-y ' : ''}create-nx-workspace@${nxVersion ?? TS_VERSIONS['create-nx-workspace']} ${workspace} --pm=${pm}  --preset=@aws/nx-plugin${nxPluginVersion ? `@${nxPluginVersion}` : ''} ${iacProvider ? `--iacProvider=${iacProvider} ` : ''}--ci=skip --analytics=false --aiAgents`;
 
 export const getDungeonAdventureElectroDbDependencies = () =>
   `electrodb@${TS_VERSIONS['electrodb']} @aws-sdk/client-dynamodb@${TS_VERSIONS['@aws-sdk/client-dynamodb']}`;
