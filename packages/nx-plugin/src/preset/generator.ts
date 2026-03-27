@@ -182,13 +182,28 @@ export const presetGenerator = async (
     },
   }));
 
-  addDependenciesToPackageJson(
-    tree,
-    {},
-    {
-      '@nx/workspace': readModulePackageJson('@nx/js').packageJson.version,
-    },
-  );
+  let nxJsVersion: string;
+  try {
+    nxJsVersion = readModulePackageJson('@nx/js').packageJson.version;
+  } catch {
+    // Fallback: read the nx version from the root package.json
+    const rootPkg = tree.read('package.json', 'utf-8');
+    const rootPkgJson = JSON.parse(rootPkg);
+    nxJsVersion =
+      rootPkgJson.devDependencies?.['nx'] ??
+      rootPkgJson.dependencies?.['nx'] ??
+      rootPkgJson.devDependencies?.['@nx/js'];
+  }
+
+  if (nxJsVersion) {
+    addDependenciesToPackageJson(
+      tree,
+      {},
+      {
+        '@nx/workspace': nxJsVersion,
+      },
+    );
+  }
 
   generateFiles(
     tree, // the virtual file system
@@ -212,6 +227,18 @@ export const presetGenerator = async (
       overwriteStrategy: OverwriteStrategy.Overwrite,
     },
   );
+
+  // Log the final package.json for debugging
+  const finalPkg = JSON.parse(tree.read('package.json', 'utf-8'));
+  for (const section of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'] as const) {
+    if (finalPkg[section]) {
+      for (const [name, version] of Object.entries(finalPkg[section])) {
+        if (typeof version !== 'string') {
+          console.warn(`WARNING: ${section}["${name}"] has non-string version: ${JSON.stringify(version)} (${typeof version})`);
+        }
+      }
+    }
+  }
 
   await addGeneratorMetricsIfApplicable(tree, [PRESET_GENERATOR_INFO]);
 
