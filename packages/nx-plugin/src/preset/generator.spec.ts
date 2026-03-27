@@ -56,6 +56,12 @@ describe('preset generator', () => {
     expect((await readAwsNxPluginConfig(tree)).iac.provider).toBe('CDK');
   });
 
+  it('should disable analytics in nx.json', async () => {
+    await presetGenerator(tree, { addTsPlugin: false, iacProvider: 'CDK' });
+
+    expect(readNxJson(tree).analytics).toBe(false);
+  });
+
   it('should register the TypeScript sync generators for compile targets', async () => {
     await presetGenerator(tree, { addTsPlugin: false, iacProvider: 'CDK' });
 
