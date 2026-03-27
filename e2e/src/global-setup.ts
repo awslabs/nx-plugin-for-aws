@@ -28,8 +28,19 @@ export default async function () {
       });
       console.info('Package published to local registry');
 
-      // Log platform info for debugging
-      console.info(`Platform: ${process.platform}, npm registry: ${process.env.npm_config_registry}`);
+      // Read the published package version and set NX_E2E_PRESET_VERSION
+      // This is needed because create-nx-workspace uses `npm view` to resolve
+      // the preset version, which may fail on Windows with a local registry
+      const distPkgJson = JSON.parse(
+        readFileSync(
+          join(__dirname, '../../dist/packages/nx-plugin/package.json'),
+          'utf-8',
+        ),
+      );
+      process.env.NX_E2E_PRESET_VERSION = distPkgJson.version;
+      console.info(
+        `Set NX_E2E_PRESET_VERSION=${process.env.NX_E2E_PRESET_VERSION}`,
+      );
     } catch (err) {
       console.error(`Package couldn't be published to local registry: ${err}`);
       throw err;
