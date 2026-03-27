@@ -133,13 +133,17 @@ export const presetGenerator = async (
   }
 
   // Write IaC provider to plugin config
+  console.log('[preset] ensureAwsNxPluginConfig...');
   await ensureAwsNxPluginConfig(tree);
+  console.log('[preset] updateAwsNxPluginConfig...');
   await updateAwsNxPluginConfig(tree, { iac: { provider: iacProvider } });
 
+  console.log('[preset] initGenerator...');
   await initGenerator(tree, {
     formatter: 'prettier',
     addTsPlugin: addTsPlugin ?? true,
   });
+  console.log('[preset] initGenerator done');
 
   tree.delete('apps/.gitkeep');
   tree.delete('libs/.gitkeep');
@@ -195,6 +199,7 @@ export const presetGenerator = async (
       rootPkgJson.devDependencies?.['@nx/js'];
   }
 
+  console.log(`[preset] nxJsVersion=${nxJsVersion}`);
   if (nxJsVersion) {
     addDependenciesToPackageJson(
       tree,
@@ -229,7 +234,10 @@ export const presetGenerator = async (
   );
 
   // Log the final package.json for debugging
+  console.log('[preset] checking final package.json...');
   const finalPkg = JSON.parse(tree.read('package.json', 'utf-8'));
+  console.log(`[preset] package.json deps: ${JSON.stringify(finalPkg.dependencies)}`);
+  console.log(`[preset] package.json devDeps: ${JSON.stringify(finalPkg.devDependencies)}`);
   for (const section of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'] as const) {
     if (finalPkg[section]) {
       for (const [name, version] of Object.entries(finalPkg[section])) {

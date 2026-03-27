@@ -28,36 +28,8 @@ export default async function () {
       });
       console.info('Package published to local registry');
 
-      // Verify create-nx-workspace works on Windows
-      if (process.platform === 'win32') {
-        try {
-          const tmpDir = join(__dirname, '../../tmp/verify-cnw');
-          if (existsSync(tmpDir)) rmSync(tmpDir, { force: true, recursive: true });
-          mkdirSync(tmpDir, { recursive: true });
-          // First test: create workspace with built-in preset (no custom preset)
-          console.info('Testing create-nx-workspace with apps preset...');
-          execSync(`npx -y create-nx-workspace@22.6.1 test-basic --pm=npm --preset=apps --ci=skip --interactive=false --skipGit`, {
-            encoding: 'utf-8',
-            env: process.env,
-            cwd: tmpDir,
-            stdio: 'inherit',
-          });
-          console.info('Basic workspace creation succeeded!');
-          // Second test: create workspace with our preset
-          console.info('Testing create-nx-workspace with @aws/nx-plugin preset...');
-          execSync(`npx -y create-nx-workspace@22.6.1 test-aws --pm=npm --preset=@aws/nx-plugin --iacProvider=CDK --ci=skip --analytics=false --interactive=false --skipGit`, {
-            encoding: 'utf-8',
-            env: process.env,
-            cwd: tmpDir,
-            stdio: 'inherit',
-          });
-          console.info('AWS preset workspace creation succeeded!');
-          rmSync(tmpDir, { force: true, recursive: true });
-        } catch (verifyErr) {
-          console.error(`Workspace creation verification failed: ${verifyErr}`);
-          // Don't throw - let the actual tests report failures
-        }
-      }
+      // Log platform info for debugging
+      console.info(`Platform: ${process.platform}, npm registry: ${process.env.npm_config_registry}`);
     } catch (err) {
       console.error(`Package couldn't be published to local registry: ${err}`);
       throw err;
