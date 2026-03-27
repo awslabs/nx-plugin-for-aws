@@ -16,7 +16,7 @@ export const runSmokeTest = async (
   onProjectCreate?: (projectRoot: string) => void,
 ) => {
   await runCLI(
-    `${buildCreateNxWorkspaceCommand(pkgMgr, 'e2e-test', 'CDK', true)} --interactive=false --skipGit --verbose`,
+    `${buildCreateNxWorkspaceCommand(pkgMgr, 'e2e-test', 'CDK', true)} --interactive=false --skipGit`,
     {
       cwd: dir,
       prefixWithPackageManagerCmd: false,
