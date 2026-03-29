@@ -1,0 +1,120 @@
+---
+title: "Cài đặt Windows"
+description: "Cách thiết lập Docker để xây dựng container Linux trên Windows."
+---
+
+import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import Snippet from '@components/snippet.astro';
+
+Một số generator trong Nx Plugin for AWS tạo ra các build target dựa trên Docker (ví dụ: cơ sở hạ tầng CDK với Lambda container images, biên dịch Smithy API model, và triển khai MCP server / Strands agent). Các target này xây dựng Docker images cho **Linux**, điều này yêu cầu một Linux Docker daemon.
+
+Trên macOS và Linux, điều này hoạt động ngay từ đầu. Trên Windows, Docker mặc định sử dụng **chế độ Windows container**, vì vậy cần thêm một bước thiết lập để cung cấp môi trường xây dựng Linux. Có hai lựa chọn:
+
+## Lựa chọn A: Docker Desktop (Được khuyến nghị)
+
+[Docker Desktop](https://www.docker.com/products/docker-desktop/) bao gồm một Linux VM được quản lý và xử lý việc xây dựng Linux container một cách minh bạch. Đây là cách đơn giản nhất cho phát triển cục bộ.
+
+<Steps>
+1. **Cài đặt Docker Desktop** từ [docker.com](https://www.docker.com/products/docker-desktop/).
+
+2. **Bật WSL 2 backend** (mặc định trên các bản cài đặt hiện đại):
+   - Mở Docker Desktop **Settings > General**
+   - Đảm bảo **Use the WSL 2 based engine** được chọn
+
+3. **Xác minh** bằng cách mở terminal và chạy:
+   ```bash
+   docker version
+   docker buildx ls
+   ```
+   Bạn sẽ thấy `OS/Arch: linux/amd64` trong phần server.
+</Steps>
+
+Vậy là xong — Docker Desktop quản lý Linux VM, Buildx, và hỗ trợ đa nền tảng cho bạn.
+
+## Lựa chọn B: Docker Engine trong WSL 2 (Không dùng Docker Desktop)
+
+Nếu bạn không muốn cài đặt Docker Desktop (ví dụ, do vấn đề giấy phép), bạn có thể cài đặt Docker Engine trực tiếp bên trong một bản phân phối Linux WSL 2 và sử dụng một wrapper script nhỏ để các công cụ phía Windows (như Nx) có thể gọi `docker` một cách minh bạch.
+
+### Yêu cầu trước
+
+- **Windows 10 phiên bản 2004+** hoặc **Windows 11**
+- **WSL 2** đã được bật (`wsl --install` nếu chưa có)
+
+### Cài đặt Ubuntu + Docker Engine
+
+<Steps>
+1. **Cài đặt một bản phân phối Ubuntu trong WSL 2:**
+
+   ```powershell
+   wsl --install Ubuntu-24.04 --no-launch
+   wsl --set-default Ubuntu-24.04
+   ```
+
+2. **Cài đặt Docker Engine bên trong WSL 2:**
+
+   Mở Ubuntu shell (`wsl -d Ubuntu-24.04`) và chạy:
+
+   ```bash
+   # Add Docker's official GPG key and repository
+   sudo apt-get update -qq
+   sudo apt-get install -y ca-certificates curl
+   sudo install -m 0755 -d /etc/apt/keyrings
+   sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+     -o /etc/apt/keyrings/docker.asc
+   sudo chmod a+r /etc/apt/keyrings/docker.asc
+   echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] \
+     https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
+     | sudo tee /etc/apt/sources.list.d/docker.list
+
+   # Install Docker Engine + Buildx
+   sudo apt-get update -qq
+   sudo apt-get install -y docker-ce docker-ce-cli containerd.io \
+     docker-buildx-plugin
+   ```
+
+3. **Khởi động Docker và tạo một Buildx builder:**
+
+   ```bash
+   sudo dockerd &>/var/log/dockerd.log &
+
+   # Wait for the daemon to be ready
+   until docker info &>/dev/null; do sleep 1; done
+
+   # Set up a Buildx builder for multi-platform builds
+   docker buildx create --name linux-builder --driver docker-container --use
+   docker buildx inspect --bootstrap --builder linux-builder
+   ```
+
+4. **Tạo một `docker.cmd` wrapper** để các công cụ phía Windows sử dụng WSL 2 daemon:
+
+   Lưu nội dung sau dưới dạng `C:\docker-wsl\docker.cmd` (hoặc bất kỳ thư mục nào bạn thêm vào `PATH` của mình):
+
+   ```bat
+   @echo off
+   for /f "usebackq tokens=*" %%i in (`wsl -d Ubuntu-24.04 wslpath "%CD%"`) do set WSL_CWD=%%i
+   if "%1"=="build" (
+     echo %* | findstr /i /c:"--output" >nul
+     if errorlevel 1 (
+       wsl -d Ubuntu-24.04 -u root --cd "%WSL_CWD%" -- env BUILDX_BUILDER=linux-builder docker %* --load
+     ) else (
+       wsl -d Ubuntu-24.04 -u root --cd "%WSL_CWD%" -- env BUILDX_BUILDER=linux-builder docker %*
+     )
+   ) else (
+     wsl -d Ubuntu-24.04 -u root --cd "%WSL_CWD%" -- docker %*
+   )
+   ```
+
+   Sau đó thêm `C:\docker-wsl` vào **phía trước** của `PATH` hệ thống để nó được ưu tiên hơn bất kỳ `docker.exe` hiện có nào.
+
+5. **Xác minh:**
+
+   ```powershell
+   docker version
+   docker buildx ls
+   ```
+</Steps>
+
+:::note
+Với Lựa chọn B, bạn cần khởi động Docker daemon bên trong WSL 2 mỗi khi khởi động lại. Bạn có thể tự động hóa điều này bằng cách thêm `sudo dockerd &>/dev/null &` vào WSL shell profile của mình, hoặc bằng cách tạo một Windows Task Scheduler entry.
+:::

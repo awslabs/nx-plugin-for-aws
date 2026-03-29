@@ -1,0 +1,120 @@
+---
+title: "Windows 设置"
+description: "如何在 Windows 上为 Linux 容器构建设置 Docker。"
+---
+
+import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import Snippet from '@components/snippet.astro';
+
+Nx Plugin for AWS 中的几个生成器会生成基于 Docker 的构建目标(例如,带有 Lambda 容器镜像的 CDK 基础设施、Smithy API 模型编译以及 MCP 服务器 / Strands 代理部署)。这些目标构建 **Linux** Docker 镜像,这需要 Linux Docker 守护进程。
+
+在 macOS 和 Linux 上开箱即用。在 Windows 上,Docker 默认使用 **Windows 容器模式**,因此需要额外的设置步骤来提供 Linux 构建环境。有两个选项:
+
+## 选项 A: Docker Desktop(推荐)
+
+[Docker Desktop](https://www.docker.com/products/docker-desktop/) 包含一个托管的 Linux 虚拟机,并透明地处理 Linux 容器构建。这是本地开发的最简单路径。
+
+<Steps>
+1. **安装 Docker Desktop**,从 [docker.com](https://www.docker.com/products/docker-desktop/) 下载。
+
+2. **启用 WSL 2 后端**(现代安装中的默认设置):
+   - 打开 Docker Desktop **Settings > General**
+   - 确保勾选了 **Use the WSL 2 based engine**
+
+3. **验证**,打开终端并运行:
+   ```bash
+   docker version
+   docker buildx ls
+   ```
+   您应该在服务器部分看到 `OS/Arch: linux/amd64`。
+</Steps>
+
+就是这样 — Docker Desktop 为您管理 Linux 虚拟机、Buildx 和多平台支持。
+
+## 选项 B: WSL 2 中的 Docker Engine(无需 Docker Desktop)
+
+如果您不想安装 Docker Desktop(例如,由于许可问题),您可以直接在 WSL 2 Linux 发行版中安装 Docker Engine,并使用一个小的包装脚本,以便 Windows 端工具(如 Nx)可以透明地调用 `docker`。
+
+### 前提条件
+
+- **Windows 10 版本 2004+** 或 **Windows 11**
+- 已启用 **WSL 2**(如果尚未启用,运行 `wsl --install`)
+
+### 安装 Ubuntu + Docker Engine
+
+<Steps>
+1. **在 WSL 2 中安装 Ubuntu 发行版:**
+
+   ```powershell
+   wsl --install Ubuntu-24.04 --no-launch
+   wsl --set-default Ubuntu-24.04
+   ```
+
+2. **在 WSL 2 中安装 Docker Engine:**
+
+   打开 Ubuntu shell(`wsl -d Ubuntu-24.04`)并运行:
+
+   ```bash
+   # Add Docker's official GPG key and repository
+   sudo apt-get update -qq
+   sudo apt-get install -y ca-certificates curl
+   sudo install -m 0755 -d /etc/apt/keyrings
+   sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+     -o /etc/apt/keyrings/docker.asc
+   sudo chmod a+r /etc/apt/keyrings/docker.asc
+   echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] \
+     https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
+     | sudo tee /etc/apt/sources.list.d/docker.list
+
+   # Install Docker Engine + Buildx
+   sudo apt-get update -qq
+   sudo apt-get install -y docker-ce docker-ce-cli containerd.io \
+     docker-buildx-plugin
+   ```
+
+3. **启动 Docker 并创建 Buildx 构建器:**
+
+   ```bash
+   sudo dockerd &>/var/log/dockerd.log &
+
+   # Wait for the daemon to be ready
+   until docker info &>/dev/null; do sleep 1; done
+
+   # Set up a Buildx builder for multi-platform builds
+   docker buildx create --name linux-builder --driver docker-container --use
+   docker buildx inspect --bootstrap --builder linux-builder
+   ```
+
+4. **创建 `docker.cmd` 包装器**,以便 Windows 端工具使用 WSL 2 守护进程:
+
+   将以下内容保存为 `C:\docker-wsl\docker.cmd`(或您添加到 `PATH` 的任何目录):
+
+   ```bat
+   @echo off
+   for /f "usebackq tokens=*" %%i in (`wsl -d Ubuntu-24.04 wslpath "%CD%"`) do set WSL_CWD=%%i
+   if "%1"=="build" (
+     echo %* | findstr /i /c:"--output" >nul
+     if errorlevel 1 (
+       wsl -d Ubuntu-24.04 -u root --cd "%WSL_CWD%" -- env BUILDX_BUILDER=linux-builder docker %* --load
+     ) else (
+       wsl -d Ubuntu-24.04 -u root --cd "%WSL_CWD%" -- env BUILDX_BUILDER=linux-builder docker %*
+     )
+   ) else (
+     wsl -d Ubuntu-24.04 -u root --cd "%WSL_CWD%" -- docker %*
+   )
+   ```
+
+   然后将 `C:\docker-wsl` 添加到系统 `PATH` 的**前面**,以便它优先于任何现有的 `docker.exe`。
+
+5. **验证:**
+
+   ```powershell
+   docker version
+   docker buildx ls
+   ```
+</Steps>
+
+:::note
+使用选项 B 时,您需要在每次重新启动后在 WSL 2 中启动 Docker 守护进程。您可以通过将 `sudo dockerd &>/dev/null &` 添加到 WSL shell 配置文件或创建 Windows 任务计划程序条目来自动执行此操作。
+:::

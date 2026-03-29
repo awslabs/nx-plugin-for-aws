@@ -1,0 +1,120 @@
+---
+title: "Windows セットアップ"
+description: "Windows で Linux コンテナビルド用の Docker をセットアップする方法。"
+---
+
+import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import Snippet from '@components/snippet.astro';
+
+Nx Plugin for AWSのいくつかのジェネレーターは、Dockerベースのビルドターゲットを生成します（例えば、Lambdaコンテナイメージを使用したCDKインフラストラクチャ、Smithy APIモデルのコンパイル、MCPサーバー / Strandsエージェントのデプロイメントなど）。これらのターゲットは**Linux** Dockerイメージをビルドするため、Linux Dockerデーモンが必要です。
+
+macOSとLinuxでは、これは最初から動作します。Windowsでは、Dockerはデフォルトで**Windowsコンテナモード**になっているため、Linuxビルド環境を提供するための追加のセットアップ手順が必要です。2つのオプションがあります:
+
+## オプションA: Docker Desktop（推奨）
+
+[Docker Desktop](https://www.docker.com/products/docker-desktop/)には、管理されたLinux VMが含まれており、Linuxコンテナのビルドを透過的に処理します。これは、ローカル開発において最もシンプルな方法です。
+
+<Steps>
+1. **Docker Desktopをインストール** [docker.com](https://www.docker.com/products/docker-desktop/)から。
+
+2. **WSL 2バックエンドを有効化**（最新のインストールではデフォルト）:
+   - Docker Desktop **Settings > General**を開く
+   - **Use the WSL 2 based engine**にチェックが入っていることを確認
+
+3. **確認** ターミナルを開いて次を実行:
+   ```bash
+   docker version
+   docker buildx ls
+   ```
+   サーバーセクションに`OS/Arch: linux/amd64`が表示されるはずです。
+</Steps>
+
+これで完了です — Docker DesktopがLinux VM、Buildx、マルチプラットフォームサポートを管理してくれます。
+
+## オプションB: WSL 2でのDocker Engine（Docker Desktopなし）
+
+Docker Desktopをインストールしたくない場合（例えば、ライセンスの理由で）、WSL 2 Linuxディストリビューション内に直接Docker Engineをインストールし、小さなラッパースクリプトを使用することで、Windows側のツール（Nxなど）が`docker`を透過的に呼び出せるようにすることができます。
+
+### 前提条件
+
+- **Windows 10 version 2004+** または **Windows 11**
+- **WSL 2** が有効化されていること（まだの場合は`wsl --install`）
+
+### Ubuntu + Docker Engineのインストール
+
+<Steps>
+1. **WSL 2にUbuntuディストリビューションをインストール:**
+
+   ```powershell
+   wsl --install Ubuntu-24.04 --no-launch
+   wsl --set-default Ubuntu-24.04
+   ```
+
+2. **WSL 2内にDocker Engineをインストール:**
+
+   Ubuntuシェル（`wsl -d Ubuntu-24.04`）を開いて実行:
+
+   ```bash
+   # Add Docker's official GPG key and repository
+   sudo apt-get update -qq
+   sudo apt-get install -y ca-certificates curl
+   sudo install -m 0755 -d /etc/apt/keyrings
+   sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+     -o /etc/apt/keyrings/docker.asc
+   sudo chmod a+r /etc/apt/keyrings/docker.asc
+   echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] \
+     https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
+     | sudo tee /etc/apt/sources.list.d/docker.list
+
+   # Install Docker Engine + Buildx
+   sudo apt-get update -qq
+   sudo apt-get install -y docker-ce docker-ce-cli containerd.io \
+     docker-buildx-plugin
+   ```
+
+3. **Dockerを起動してBuildxビルダーを作成:**
+
+   ```bash
+   sudo dockerd &>/var/log/dockerd.log &
+
+   # Wait for the daemon to be ready
+   until docker info &>/dev/null; do sleep 1; done
+
+   # Set up a Buildx builder for multi-platform builds
+   docker buildx create --name linux-builder --driver docker-container --use
+   docker buildx inspect --bootstrap --builder linux-builder
+   ```
+
+4. **`docker.cmd`ラッパーを作成** Windows側のツールがWSL 2デーモンを使用できるように:
+
+   以下を`C:\docker-wsl\docker.cmd`として保存（または`PATH`に追加する任意のディレクトリ）:
+
+   ```bat
+   @echo off
+   for /f "usebackq tokens=*" %%i in (`wsl -d Ubuntu-24.04 wslpath "%CD%"`) do set WSL_CWD=%%i
+   if "%1"=="build" (
+     echo %* | findstr /i /c:"--output" >nul
+     if errorlevel 1 (
+       wsl -d Ubuntu-24.04 -u root --cd "%WSL_CWD%" -- env BUILDX_BUILDER=linux-builder docker %* --load
+     ) else (
+       wsl -d Ubuntu-24.04 -u root --cd "%WSL_CWD%" -- env BUILDX_BUILDER=linux-builder docker %*
+     )
+   ) else (
+     wsl -d Ubuntu-24.04 -u root --cd "%WSL_CWD%" -- docker %*
+   )
+   ```
+
+   次に、`C:\docker-wsl`をシステム`PATH`の**先頭**に追加して、既存の`docker.exe`よりも優先されるようにします。
+
+5. **確認:**
+
+   ```powershell
+   docker version
+   docker buildx ls
+   ```
+</Steps>
+
+:::note
+オプションBでは、再起動するたびにWSL 2内でDockerデーモンを起動する必要があります。これは、WSLシェルプロファイルに`sudo dockerd &>/dev/null &`を追加するか、Windows タスクスケジューラエントリを作成することで自動化できます。
+:::
