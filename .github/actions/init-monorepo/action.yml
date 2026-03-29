@@ -106,11 +106,30 @@ runs:
         # Verify the wrapper reaches the Linux Docker daemon
         docker version
         docker buildx ls
-    - name: Set up terraform
+    - name: Set up terraform (non-Windows)
+      if: ${{ runner.os != 'Windows' }}
       uses: hashicorp/setup-terraform@v3
       with:
         terraform_version: '1.13.1'
         terraform_wrapper: false
+    - name: Set up terraform (Windows)
+      if: ${{ runner.os == 'Windows' }}
+      shell: pwsh
+      run: |
+        # Install terraform manually on Windows so it lands on a PATH that
+        # Nx's run-commands executor (cmd.exe subprocess) can always see.
+        # hashicorp/setup-terraform uses GITHUB_PATH which doesn't propagate
+        # reliably to Nx executor subprocesses on Windows.
+        $version = "1.13.1"
+        $tfDir = "C:\terraform"
+        New-Item -ItemType Directory -Path $tfDir -Force | Out-Null
+        $url = "https://releases.hashicorp.com/terraform/${version}/terraform_${version}_windows_amd64.zip"
+        $zip = "$env:RUNNER_TEMP\terraform.zip"
+        Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
+        Expand-Archive -Path $zip -DestinationPath $tfDir -Force
+        echo "$tfDir" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        $env:PATH = "$tfDir;$env:PATH"
+        terraform version
     - name: Get pnpm store directory
       id: pnpm-cache
       shell: bash

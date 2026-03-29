@@ -224,7 +224,7 @@ describe('terraformProjectGenerator', () => {
       const testTarget = projectConfig.targets['test'];
       expect(testTarget.executor).toBe('nx:run-commands');
       expect(testTarget.cache).toBe(true);
-      expect(testTarget.options.command).toContain('uvx checkov==');
+      expect(testTarget.options.command).toContain('uvx --from checkov==');
     });
   });
 
