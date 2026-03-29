@@ -61,45 +61,23 @@ runs:
         Write-Host "::endgroup::"
 
         Write-Host "::group::Installing Docker Engine in WSL2"
-        wsl -d Ubuntu-24.04 -u root -- bash -c '
-          set -e
-          export DEBIAN_FRONTEND=noninteractive
-          apt-get update -qq
-          apt-get install -y -qq ca-certificates curl > /dev/null 2>&1
-          install -m 0755 -d /etc/apt/keyrings
-          curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-          chmod a+r /etc/apt/keyrings/docker.asc
-          echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu noble stable" \
-            > /etc/apt/sources.list.d/docker.list
-          apt-get update -qq
-          apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin > /dev/null 2>&1
-          echo "Docker installed successfully"
-        '
+        wsl -d Ubuntu-24.04 -u root -- bash -c "export DEBIAN_FRONTEND=noninteractive && apt-get update -qq && apt-get install -y -qq ca-certificates curl > /dev/null 2>&1"
+        wsl -d Ubuntu-24.04 -u root -- bash -c "install -m 0755 -d /etc/apt/keyrings && curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc && chmod a+r /etc/apt/keyrings/docker.asc"
+        wsl -d Ubuntu-24.04 -u root -- bash -c "echo 'deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu noble stable' > /etc/apt/sources.list.d/docker.list"
+        wsl -d Ubuntu-24.04 -u root -- bash -c "apt-get update -qq && apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin > /dev/null 2>&1 && echo Docker installed successfully"
         Write-Host "::endgroup::"
 
         Write-Host "::group::Starting Docker daemon with QEMU + Buildx"
-        wsl -d Ubuntu-24.04 -u root -- bash -c '
-          set -e
-          nohup dockerd > /var/log/dockerd.log 2>&1 &
-          for i in $(seq 1 15); do docker info > /dev/null 2>&1 && break || sleep 1; done
-          docker info > /dev/null 2>&1 || { echo "dockerd failed to start"; cat /var/log/dockerd.log; exit 1; }
-
-          # QEMU for arm64 cross-compilation
-          docker run --rm --privileged tonistiigi/binfmt --install all
-
-          # Buildx builder with docker-container driver (full feature set)
-          docker buildx create --name linux-builder --driver docker-container --use
-          docker buildx inspect --bootstrap --builder linux-builder
-
-          docker version
-          docker buildx ls
-        '
+        # Use separate wsl invocations to avoid CRLF issues with multi-line bash scripts
+        wsl -d Ubuntu-24.04 -u root -- bash -c "nohup dockerd > /var/log/dockerd.log 2>&1 &"
+        wsl -d Ubuntu-24.04 -u root -- bash -c "for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do docker info > /dev/null 2>&1 && break || sleep 1; done"
+        wsl -d Ubuntu-24.04 -u root -- bash -c "docker info > /dev/null 2>&1 || { echo dockerd failed to start; cat /var/log/dockerd.log; exit 1; }"
+        wsl -d Ubuntu-24.04 -u root -- docker run --rm --privileged tonistiigi/binfmt --install all
+        wsl -d Ubuntu-24.04 -u root -- docker buildx create --name linux-builder --driver docker-container --use
+        wsl -d Ubuntu-24.04 -u root -- docker buildx inspect --bootstrap --builder linux-builder
+        wsl -d Ubuntu-24.04 -u root -- docker version
+        wsl -d Ubuntu-24.04 -u root -- docker buildx ls
         Write-Host "::endgroup::"
-    - name: Set up Docker Buildx with WSL2 backend (Windows)
-      if: ${{ runner.os == 'Windows' }}
-      uses: docker/setup-buildx-action@v3
-      with:
-        driver: docker
     - name: Create docker wrapper for WSL2 (Windows)
       if: ${{ runner.os == 'Windows' }}
       shell: pwsh
