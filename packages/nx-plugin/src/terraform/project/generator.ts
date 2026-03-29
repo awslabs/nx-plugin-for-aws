@@ -54,16 +54,25 @@ export async function terraformProjectGenerator(
   const outDirToRootRelativePath = relative(
     join(tree.root, lib.dir, 'src'),
     tree.root,
+  ).replace(/\\/g, '/');
+  const distDir = joinPathFragments(
+    outDirToRootRelativePath,
+    'dist',
+    '{projectRoot}',
   );
-  const distDir = join(outDirToRootRelativePath, 'dist', '{projectRoot}');
-  const tfDistDir = join(distDir, 'terraform');
-  const checkovReportJsonPath = join(distDir, 'checkov', 'checkov_report.json');
+  const tfDistDir = joinPathFragments(distDir, 'terraform');
+  const checkovReportJsonPath = joinPathFragments(
+    distDir,
+    'checkov',
+    'checkov_report.json',
+  );
 
   // Calculate relative path from current project to common/terraform/metrics
+  // Use forward slashes for terraform module source paths (even on Windows)
   const metricsModulePath = relative(
     join(tree.root, lib.dir, 'src'),
     join(tree.root, 'packages', SHARED_TERRAFORM_DIR, 'src', 'metrics'),
-  );
+  ).replace(/\\/g, '/');
 
   updateGitIgnore(tree, '.', (patterns) => [...patterns, '.terraform']);
 
