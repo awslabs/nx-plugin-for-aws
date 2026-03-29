@@ -46,71 +46,31 @@ runs:
     - name: Set up Docker Buildx
       if: ${{ runner.os != 'Windows' }}
       uses: docker/setup-buildx-action@v3
-    - name: Set up Linux Docker daemon in WSL2 (Windows)
+    - name: Set up WSL2 Docker for Linux builds (Windows)
       if: ${{ runner.os == 'Windows' }}
       shell: pwsh
       run: |
-        # The Windows runner has Docker in Windows-container mode.
-        # WSL2 is pre-installed (no distro). We install Ubuntu + Docker
-        # inside WSL2 to provide a Linux BuildKit daemon, then wire the
-        # Windows-side buildx to use it via the remote driver.
-
-        Write-Host "::group::Installing Ubuntu in WSL2"
+        # Windows runners only have Docker in Windows-container mode.
+        # Install Ubuntu + Docker Engine in WSL2 to build Linux images.
+        # See .github/scripts/setup-wsl-docker.sh for the full setup.
         wsl --install Ubuntu-24.04 --no-launch
         wsl --set-default Ubuntu-24.04
-        Write-Host "::endgroup::"
 
-        Write-Host "::group::Installing Docker Engine in WSL2"
-        wsl -d Ubuntu-24.04 -u root -- bash -c "export DEBIAN_FRONTEND=noninteractive && apt-get update -qq && apt-get install -y -qq ca-certificates curl > /dev/null 2>&1"
-        wsl -d Ubuntu-24.04 -u root -- bash -c "install -m 0755 -d /etc/apt/keyrings && curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc && chmod a+r /etc/apt/keyrings/docker.asc"
-        wsl -d Ubuntu-24.04 -u root -- bash -c "echo 'deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu noble stable' > /etc/apt/sources.list.d/docker.list"
-        wsl -d Ubuntu-24.04 -u root -- bash -c "apt-get update -qq && apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin > /dev/null 2>&1 && echo Docker installed successfully"
-        Write-Host "::endgroup::"
+        # Convert the setup script to LF line endings and run it in WSL2
+        $script = Get-Content "${{ github.workspace }}/.github/scripts/setup-wsl-docker.sh" -Raw
+        $lfScript = $script -replace "`r`n", "`n"
+        $tmpScript = "$env:RUNNER_TEMP/setup-wsl-docker.sh"
+        [System.IO.File]::WriteAllText($tmpScript, $lfScript)
+        $wslPath = wsl -d Ubuntu-24.04 wslpath ($tmpScript -replace '\\','/')
+        wsl -d Ubuntu-24.04 -u root -- bash $wslPath
 
-        Write-Host "::group::Starting Docker daemon with QEMU + Buildx"
-        # Use separate wsl invocations to avoid CRLF issues with multi-line bash scripts
-        # Configure Docker DNS to avoid WSL2 networking issues with npm/pip inside containers
-        wsl -d Ubuntu-24.04 -u root -- bash -c "mkdir -p /etc/docker && echo '{\"dns\":[\"8.8.8.8\",\"8.8.4.4\"]}' > /etc/docker/daemon.json"
-        wsl -d Ubuntu-24.04 -u root -- bash -c "nohup dockerd > /var/log/dockerd.log 2>&1 &"
-        wsl -d Ubuntu-24.04 -u root -- bash -c "for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do docker info > /dev/null 2>&1 && break || sleep 1; done"
-        wsl -d Ubuntu-24.04 -u root -- bash -c "docker info > /dev/null 2>&1 || { echo dockerd failed to start; cat /var/log/dockerd.log; exit 1; }"
-        wsl -d Ubuntu-24.04 -u root -- docker run --rm --privileged tonistiigi/binfmt --install all
-        wsl -d Ubuntu-24.04 -u root -- docker buildx create --name linux-builder --driver docker-container --use
-        wsl -d Ubuntu-24.04 -u root -- docker buildx inspect --bootstrap --builder linux-builder
-        wsl -d Ubuntu-24.04 -u root -- docker version
-        wsl -d Ubuntu-24.04 -u root -- docker buildx ls
-        Write-Host "::endgroup::"
-    - name: Create docker wrapper for WSL2 (Windows)
-      if: ${{ runner.os == 'Windows' }}
-      shell: pwsh
-      run: |
-        # Nx targets invoke `docker build …` on the Windows host.
-        # Create a wrapper that forwards every docker invocation to the
-        # WSL2 Linux daemon, so Linux builds (incl. --build-context,
-        # --platform linux/arm64) work transparently.
+        # Install docker.cmd wrapper that forwards to WSL2 Linux daemon
         $wrapperDir = "C:\docker-wsl"
         New-Item -ItemType Directory -Path $wrapperDir -Force | Out-Null
-        $wrapperContent = '@echo off' + "`r`n"
-        $wrapperContent += 'for /f "usebackq tokens=*" %%i in (`wsl -d Ubuntu-24.04 wslpath "%CD%"`) do set WSL_CWD=%%i' + "`r`n"
-        $wrapperContent += 'REM For docker build commands, use the linux-builder' + "`r`n"
-        $wrapperContent += 'REM Add --load unless --output is already specified (they conflict)' + "`r`n"
-        $wrapperContent += 'if "%1"=="build" (' + "`r`n"
-        $wrapperContent += '  set "DOCKER_ARGS=%*"' + "`r`n"
-        $wrapperContent += '  echo %* | findstr /i /c:"--output" >nul' + "`r`n"
-        $wrapperContent += '  if errorlevel 1 (' + "`r`n"
-        $wrapperContent += '    wsl -d Ubuntu-24.04 -u root --cd "%WSL_CWD%" -- env BUILDX_BUILDER=linux-builder docker %* --load' + "`r`n"
-        $wrapperContent += '  ) else (' + "`r`n"
-        $wrapperContent += '    wsl -d Ubuntu-24.04 -u root --cd "%WSL_CWD%" -- env BUILDX_BUILDER=linux-builder docker %*' + "`r`n"
-        $wrapperContent += '  )' + "`r`n"
-        $wrapperContent += ') else (' + "`r`n"
-        $wrapperContent += '  wsl -d Ubuntu-24.04 -u root --cd "%WSL_CWD%" -- docker %*' + "`r`n"
-        $wrapperContent += ')' + "`r`n"
-        Set-Content "$wrapperDir\docker.cmd" $wrapperContent -NoNewline
-        # Prepend to PATH so it shadows C:\Windows\System32\docker.exe
+        Copy-Item "${{ github.workspace }}/.github/scripts/docker-wsl.cmd" "$wrapperDir\docker.cmd"
         echo "$wrapperDir" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
         $env:PATH = "$wrapperDir;$env:PATH"
 
-        # Verify the wrapper reaches the Linux Docker daemon
         docker version
         docker buildx ls
     - name: Set up terraform (non-Windows)

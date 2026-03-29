@@ -145,6 +145,20 @@ export default defineConfig({
               },
             },
             {
+              label: 'Windows setup',
+              link: '/get_started/windows-setup',
+              translations: {
+                jp: 'Windows セットアップ',
+                ko: 'Windows 설정',
+                fr: 'Configuration Windows',
+                it: 'Configurazione Windows',
+                es: 'Configuración de Windows',
+                pt: 'Configuração do Windows',
+                zh: 'Windows 设置',
+                vi: 'Cài đặt Windows',
+              },
+            },
+            {
               label: 'Tutorials',
               translations: {
                 jp: 'チュートリアル',
