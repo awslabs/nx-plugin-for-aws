@@ -46,22 +46,81 @@ runs:
     - name: Set up Docker Buildx
       if: ${{ runner.os != 'Windows' }}
       uses: docker/setup-buildx-action@v3
-    - name: Set up Docker Buildx (Windows)
+    - name: Set up Linux Docker daemon in WSL2 (Windows)
+      if: ${{ runner.os == 'Windows' }}
+      shell: pwsh
+      run: |
+        # The Windows runner has Docker in Windows-container mode.
+        # WSL2 is pre-installed (no distro). We install Ubuntu + Docker
+        # inside WSL2 to provide a Linux BuildKit daemon, then wire the
+        # Windows-side buildx to use it via the remote driver.
+
+        Write-Host "::group::Installing Ubuntu in WSL2"
+        wsl --install Ubuntu-24.04 --no-launch
+        wsl --set-default Ubuntu-24.04
+        Write-Host "::endgroup::"
+
+        Write-Host "::group::Installing Docker Engine in WSL2"
+        wsl -d Ubuntu-24.04 -u root -- bash -c '
+          set -e
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update -qq
+          apt-get install -y -qq ca-certificates curl > /dev/null 2>&1
+          install -m 0755 -d /etc/apt/keyrings
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+          chmod a+r /etc/apt/keyrings/docker.asc
+          echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu noble stable" \
+            > /etc/apt/sources.list.d/docker.list
+          apt-get update -qq
+          apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin > /dev/null 2>&1
+          echo "Docker installed successfully"
+        '
+        Write-Host "::endgroup::"
+
+        Write-Host "::group::Starting Docker daemon with QEMU + Buildx"
+        wsl -d Ubuntu-24.04 -u root -- bash -c '
+          set -e
+          nohup dockerd > /var/log/dockerd.log 2>&1 &
+          for i in $(seq 1 15); do docker info > /dev/null 2>&1 && break || sleep 1; done
+          docker info > /dev/null 2>&1 || { echo "dockerd failed to start"; cat /var/log/dockerd.log; exit 1; }
+
+          # QEMU for arm64 cross-compilation
+          docker run --rm --privileged tonistiigi/binfmt --install all
+
+          # Buildx builder with docker-container driver (full feature set)
+          docker buildx create --name linux-builder --driver docker-container --use
+          docker buildx inspect --bootstrap --builder linux-builder
+
+          docker version
+          docker buildx ls
+        '
+        Write-Host "::endgroup::"
+    - name: Set up Docker Buildx with WSL2 backend (Windows)
       if: ${{ runner.os == 'Windows' }}
       uses: docker/setup-buildx-action@v3
       with:
         driver: docker
-    - name: Docker diagnostics (Windows)
+    - name: Create docker wrapper for WSL2 (Windows)
       if: ${{ runner.os == 'Windows' }}
       shell: pwsh
       run: |
-        Write-Host "=== docker version ==="
+        # Nx targets invoke `docker build …` on the Windows host.
+        # Create a wrapper that forwards every docker invocation to the
+        # WSL2 Linux daemon, so Linux builds (incl. --build-context,
+        # --platform linux/arm64) work transparently.
+        $wrapperDir = "C:\docker-wsl"
+        New-Item -ItemType Directory -Path $wrapperDir -Force | Out-Null
+        Set-Content "$wrapperDir\docker.cmd" @"
+@echo off
+for /f "usebackq tokens=*" %%i in (`wsl -d Ubuntu-24.04 wslpath "%CD%"`) do set WSL_CWD=%%i
+wsl -d Ubuntu-24.04 -u root --cd "%WSL_CWD%" -- docker %*
+"@
+        # Prepend to PATH so it shadows C:\Windows\System32\docker.exe
+        echo "$wrapperDir" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        $env:PATH = "$wrapperDir;$env:PATH"
+
+        # Verify the wrapper reaches the Linux Docker daemon
         docker version
-        Write-Host "=== docker info ==="
-        docker info
-        Write-Host "=== docker buildx version ==="
-        docker buildx version
-        Write-Host "=== docker buildx ls ==="
         docker buildx ls
     - name: Set up terraform
       if: ${{ runner.os != 'Windows' }}
