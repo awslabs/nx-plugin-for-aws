@@ -111,10 +111,36 @@ runs:
       with:
         terraform_version: '1.13.1'
         terraform_wrapper: false
-    - name: Pre-install checkov (Windows)
+    - name: Install checkov and terraform wrappers (Windows)
       if: ${{ runner.os == 'Windows' }}
-      shell: bash
-      run: uvx checkov==3.2.511 --version || true
+      shell: pwsh
+      run: |
+        # uvx on Windows can't resolve 'checkov' executable (lists it but
+        # fails to run). Install globally so 'checkov' is on PATH.
+        uv tool install checkov==3.2.511
+        checkov --version
+
+        # The Nx target runs 'uvx checkov==X.Y.Z ...' which fails on
+        # Windows. Create a uvx.cmd wrapper that intercepts checkov
+        # invocations and runs the globally installed version instead.
+        $wrapperDir = "C:\docker-wsl"
+        $uvxContent = '@echo off' + "`r`n"
+        $uvxContent += 'echo %1 | findstr /i "checkov" >nul' + "`r`n"
+        $uvxContent += 'if %errorlevel% equ 0 (' + "`r`n"
+        $uvxContent += '  REM Strip the first arg (checkov==X.Y.Z) and pass the rest to global checkov' + "`r`n"
+        $uvxContent += '  set "ARGS="' + "`r`n"
+        $uvxContent += '  shift' + "`r`n"
+        $uvxContent += '  :loop' + "`r`n"
+        $uvxContent += '  if "%~1"=="" goto endloop' + "`r`n"
+        $uvxContent += '  set "ARGS=%ARGS% %1"' + "`r`n"
+        $uvxContent += '  shift' + "`r`n"
+        $uvxContent += '  goto loop' + "`r`n"
+        $uvxContent += '  :endloop' + "`r`n"
+        $uvxContent += '  checkov %ARGS%' + "`r`n"
+        $uvxContent += ') else (' + "`r`n"
+        $uvxContent += '  uvx.exe %*' + "`r`n"
+        $uvxContent += ')' + "`r`n"
+        Set-Content "$wrapperDir\uvx.cmd" $uvxContent -NoNewline
     - name: Get pnpm store directory
       id: pnpm-cache
       shell: bash
