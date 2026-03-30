@@ -70,7 +70,7 @@ export const addTargetToServeLocal = async (
     await applyGritQLTransform(
       tree,
       runtimeConfigProvider,
-      `\`if ($cond) { $stmts }\` => raw\`if ($cond) {\n    $stmts\n    runtimeConfig.apis.${className} = '${options.url}';\n  }\` where { $cond <: contains \`'serve-local'\` }`,
+      `\`if ($cond) { $stmts }\` => raw\`if ($cond) {\n    $stmts\n    runtimeConfig.apis.${className} = '${options.url}';\n  }\` where { $cond <: contains \`'serve-local'\`, $stmts <: within \`const applyOverrides = $_\` }`,
     );
   }
 };
