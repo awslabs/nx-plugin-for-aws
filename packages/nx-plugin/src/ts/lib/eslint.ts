@@ -109,7 +109,7 @@ export const addIgnoresToEslintConfig = async (
     await applyGritQLTransform(
       tree,
       eslintConfigPath,
-      '`export default [$items]` where { $items += `, { ignores: [] }` }',
+      '`export default [$items]` where { $items += `{ ignores: [] }` }',
     );
   }
 
@@ -119,7 +119,7 @@ export const addIgnoresToEslintConfig = async (
     await applyGritQLTransform(
       tree,
       eslintConfigPath,
-      `or { \`ignores: []\` => \`ignores: ['${escaped}']\`, \`ignores: [$items]\` where { $items <: not contains \`'${escaped}'\`, $items += \`, '${escaped}'\` } }`,
+      `or { \`ignores: []\` => \`ignores: ['${escaped}']\`, \`ignores: [$items]\` where { $items <: not contains \`'${escaped}'\`, $items += \`'${escaped}'\` } }`,
     );
   }
 };
