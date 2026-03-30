@@ -54,46 +54,31 @@ export const addDestructuredImport = async (
   from: string,
 ) => {
   assertFilePath(tree, filePath);
-  const contents = tree.read(filePath)!.toString();
-  const escapedFrom = from.replace(/'/g, "\\'");
 
-  // Find existing import specifiers from this module using regex
-  const importRegex = new RegExp(
-    `import\\s*\\{([^}]*)\\}\\s*from\\s*['"]${from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"]`,
-  );
-  const match = contents.match(importRegex);
-  const existingSpecifiers = match
-    ? match[1].split(',').map((s) => s.trim()).filter(Boolean)
-    : [];
-  const existingNames = new Set(
-    existingSpecifiers.map((s) =>
-      s.includes(' as ') ? s.split(' as ')[1].trim() : s.trim(),
-    ),
+  // Check if there's an existing import from this module
+  const hasExistingImport = await hasGritQLMatch(
+    tree,
+    filePath,
+    `\`import { $_ } from '${from}'\``,
   );
 
-  // Filter out variables that are already imported
-  const newVariables = variableNames.filter(
-    (name) =>
-      !existingNames.has(
-        name.includes(' as ') ? name.split(' as ')[1] : name,
-      ),
-  );
-
-  if (newVariables.length === 0) {
-    return;
-  }
-
-  const specifiers = newVariables.join(', ');
-
-  if (match) {
-    // Existing import — add new specifiers using GritQL
-    await applyGritQLTransform(
-      tree,
-      filePath,
-      `\`import { $imports } from '${escapedFrom}'\` => \`import { $imports, ${specifiers} } from '${escapedFrom}'\``,
-    );
+  if (hasExistingImport) {
+    // For each new variable, use GritQL rewrite to add it if not already present
+    for (const variableName of variableNames) {
+      const localName = variableName.includes(' as ')
+        ? variableName.split(' as ')[1]
+        : variableName;
+      // Use rewrite (=>) which correctly handles comma-separated import specifier lists
+      await applyGritQLTransform(
+        tree,
+        filePath,
+        `\`import { $imports } from '${from}'\` => \`import { $imports, ${variableName} } from '${from}'\` where { $imports <: not contains \`${localName}\` }`,
+      );
+    }
   } else {
     // No existing import — prepend a new one
+    const specifiers = variableNames.join(', ');
+    const contents = tree.read(filePath)!.toString();
     tree.write(
       filePath,
       `import { ${specifiers} } from '${from}';\n${contents}`,
@@ -112,16 +97,19 @@ export const addSingleImport = async (
   from: string,
 ) => {
   assertFilePath(tree, filePath);
-  const contents = tree.read(filePath)!.toString();
 
-  // Check if default import already exists
-  const importPattern = new RegExp(
-    `import\\s+${variableName}\\s+from\\s*['"]${from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"]`,
+  // Check if default import already exists using GritQL
+  const alreadyImported = await hasGritQLMatch(
+    tree,
+    filePath,
+    `\`import ${variableName} from '${from}'\``,
   );
-  if (importPattern.test(contents)) {
+  if (alreadyImported) {
     return;
   }
 
+  // Prepend new import to file
+  const contents = tree.read(filePath)!.toString();
   tree.write(
     filePath,
     `import ${variableName} from "${from}";\n${contents}`,
@@ -139,14 +127,23 @@ export const addStarExport = async (
 ) => {
   const contents = tree.read(filePath)?.toString() ?? '';
 
-  // Check if already exported using simple string match (handles both quote styles)
-  const exportPattern = new RegExp(
-    `export\\s*\\*\\s*from\\s*['"]${from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"]`,
-  );
-  if (exportPattern.test(contents)) {
+  // For empty/non-existent files, just write the export
+  if (!contents.trim()) {
+    tree.write(filePath, `export * from "${from}";\n`);
     return;
   }
 
+  // Check if already exported using GritQL
+  const alreadyExported = await hasGritQLMatch(
+    tree,
+    filePath,
+    `\`export * from '${from}'\``,
+  );
+  if (alreadyExported) {
+    return;
+  }
+
+  // Prepend new export to file
   tree.write(filePath, `export * from "${from}";\n${contents}`);
 };
 
