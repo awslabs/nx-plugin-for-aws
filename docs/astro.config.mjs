@@ -145,6 +145,20 @@ export default defineConfig({
               },
             },
             {
+              label: 'Project Builder',
+              link: '/get_started/project-builder',
+              translations: {
+                jp: 'プロジェクトビルダー',
+                ko: '프로젝트 빌더',
+                fr: 'Constructeur de projet',
+                it: 'Costruttore di progetto',
+                es: 'Constructor de proyecto',
+                pt: 'Construtor de projeto',
+                zh: '项目构建器',
+                vi: 'Trình xây dựng dự án',
+              },
+            },
+            {
               label: 'Tutorials',
               translations: {
                 jp: 'チュートリアル',
