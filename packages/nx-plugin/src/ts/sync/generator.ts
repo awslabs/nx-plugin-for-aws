@@ -10,6 +10,7 @@ import {
   readJson,
   updateJson,
 } from '@nx/devkit';
+import { relative } from 'path';
 import { NxGeneratorInfo, getGeneratorInfo } from '../../utils/nx';
 import { formatFilesInSubtree } from '../../utils/format';
 import { SyncGeneratorResult } from 'nx/src/utils/sync-generators';
@@ -46,6 +47,7 @@ export const tsSyncGeneratorGenerator = async (
         tree,
         tsConfigPath,
         basePaths,
+        project.root,
       );
 
       if (updated) {
@@ -97,10 +99,25 @@ const arePathArraysEqual = (first: string[], second: string[]): boolean => {
   return first.every((value, index) => value === second[index]);
 };
 
+/**
+ * Rebase a path from the workspace root to a project root.
+ * e.g. "./packages/foo/src/index.ts" from project "packages/bar"
+ *      becomes "../../packages/foo/src/index.ts"
+ */
+const rebasePath = (pathValue: string, projectRoot: string): string => {
+  // Strip leading ./ if present
+  const normalized = pathValue.startsWith('./')
+    ? pathValue.slice(2)
+    : pathValue;
+  const relPrefix = relative(projectRoot, '.') || '.';
+  return joinPathFragments(relPrefix, normalized);
+};
+
 const syncPathsWithBase = (
   tree: Tree,
   tsConfigPath: string,
   basePaths: Record<string, string[]>,
+  projectRoot: string,
 ): { updated: boolean; changes: PathChange[] } => {
   const changes: PathChange[] = [];
 
@@ -116,18 +133,22 @@ const syncPathsWithBase = (
   };
   let updated = false;
 
-  // Add or update aliases that exist in the base config
+  // Add or update aliases that exist in the base config, rebasing paths
+  // relative to the project root since baseUrl is no longer set
   for (const [alias, baseValue] of Object.entries(basePaths)) {
+    const rebasedValue = (baseValue as string[]).map((p) =>
+      rebasePath(p, projectRoot),
+    );
     const existingValue = updatedAliases[alias];
     if (!existingValue) {
       changes.push({ alias, type: 'added' });
       updated = true;
-    } else if (!arePathArraysEqual(existingValue, baseValue)) {
+    } else if (!arePathArraysEqual(existingValue, rebasedValue)) {
       changes.push({ alias, type: 'updated' });
       updated = true;
     }
 
-    updatedAliases[alias] = baseValue;
+    updatedAliases[alias] = rebasedValue;
   }
 
   if (updated) {
