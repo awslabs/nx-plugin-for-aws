@@ -106,7 +106,7 @@ export const tsNxGeneratorGenerator = async (
     await applyGritQLTransform(
       tree,
       joinPathFragments('docs', 'astro.config.mjs'),
-      `\`items: [$items]\` where { $items <: contains \`'ts#project'\`, $items += \`, { label: '${name}', link: '/guides/${enhancedOptions.nameKebabCase}' }\` }`,
+      `\`items: [$items]\` where { $items <: within \`sidebar: [$_]\`, $items <: contains \`'ts#project'\`, $items += \`, { label: '${name}', link: '/guides/${enhancedOptions.nameKebabCase}' }\` }`,
     );
   } else {
     // Local generator in a project other than nx-plugin-for-aws
