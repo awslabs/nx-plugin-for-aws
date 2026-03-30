@@ -80,7 +80,7 @@ const addSharedShadcnEslintRules = async (
   await applyGritQLTransform(
     tree,
     eslintConfigPath,
-    "`export default [$items]` where { $items += `, { files: ['**/*.{ts,tsx,js,jsx}'], rules: { '@nx/enforce-module-boundaries': 'off' } }` }",
+    "`export default [$items]` => `export default [$items, { files: ['**/*.{ts,tsx,js,jsx}'], rules: { '@nx/enforce-module-boundaries': 'off' } }]`",
   );
 };
 
