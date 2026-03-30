@@ -51,7 +51,7 @@ export const addHookResultToRouterProviderContext = async (
   await applyGritQLTransform(
     tree,
     mainTsxPath,
-    `\`context: { $cprops }\` where { $cprops <: within \`createRouter($_)\`, $cprops <: not contains \`${contextProp}\`, $cprops += \`, ${contextProp}: undefined\` }`,
+    `or { \`context: {}\` => \`context: { ${contextProp}: undefined }\` where { $_ <: within \`createRouter($_)\` }, \`context: { $cprops }\` => \`context: { $cprops, ${contextProp}: undefined }\` where { $cprops <: within \`createRouter($_)\`, $cprops <: not contains \`${contextProp}\` } }`,
   );
 
   // 3. Add hook call to App component body
@@ -68,15 +68,10 @@ export const addHookResultToRouterProviderContext = async (
   );
 
   // 4. Add context prop to RouterProvider JSX element
+  // Handle: no context attr, empty context, or existing context props
   await applyGritQLTransform(
     tree,
     mainTsxPath,
-    `\`<RouterProvider $attrs context={{ $cprops }} />\` => \`<RouterProvider $attrs context={{ $cprops, ${contextProp} }} />\` where { $cprops <: not contains \`${contextProp}\` }`,
-  );
-  // If no context attribute exists, add it
-  await applyGritQLTransform(
-    tree,
-    mainTsxPath,
-    `\`<RouterProvider $attrs />\` => \`<RouterProvider $attrs context={{ ${contextProp} }} />\` where { $attrs <: not contains \`context\` }`,
+    `or { \`<RouterProvider $attrs context={{}} />\` => \`<RouterProvider $attrs context={{ ${contextProp} }} />\`, \`<RouterProvider $attrs context={{ $cprops }} />\` => \`<RouterProvider $attrs context={{ $cprops, ${contextProp} }} />\` where { $cprops <: not contains \`${contextProp}\` }, \`<RouterProvider $attrs />\` => \`<RouterProvider $attrs context={{ ${contextProp} }} />\` where { $attrs <: not contains \`context\` } }`,
   );
 };
