@@ -34,12 +34,22 @@ export const addHookResultToRouterProviderContext = async (
 
   await addDestructuredImport(tree, mainTsxPath, [hook], module);
 
-  // 1. Add property to RouterProviderContext type (handles both empty and non-empty, exported and non-exported)
-  await applyGritQLTransform(
-    tree,
-    mainTsxPath,
-    `or { \`type RouterProviderContext = {}\` => \`type RouterProviderContext = { ${contextProp}?: ReturnType<typeof ${hook}> }\`, \`type RouterProviderContext = { $props }\` => \`type RouterProviderContext = { $props; ${contextProp}?: ReturnType<typeof ${hook}> }\` where { $props <: not contains \`${contextProp}\` } }`,
+  // 1. Add property to RouterProviderContext type
+  const content = tree.read(mainTsxPath, 'utf-8')!;
+  const typeMatch = content.match(
+    /type RouterProviderContext\s*=\s*\{([^}]*)\}/,
   );
+  if (typeMatch && !typeMatch[1].includes(`${contextProp}?:`)) {
+    const existingBody = typeMatch[1].trim();
+    const newProp = `${contextProp}?: ReturnType<typeof ${hook}>`;
+    const newBody = existingBody
+      ? `${existingBody}\n  ${newProp};`
+      : `\n  ${newProp};\n`;
+    tree.write(
+      mainTsxPath,
+      content.replace(typeMatch[0], `type RouterProviderContext = {${newBody}}`),
+    );
+  }
 
   // 2. Add context property to createRouter config
   await applyGritQLTransform(
