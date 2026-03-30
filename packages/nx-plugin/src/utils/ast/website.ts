@@ -52,17 +52,66 @@ export const addHookResultToRouterProviderContext = async (
   }
 
   // 2. Add context property to createRouter config
-  await applyGritQLTransform(
-    tree,
-    mainTsxPath,
-    `\`createRouter({ $props })\` => \`createRouter({ $props, context: { ${contextProp}: undefined } })\` where { $props <: not contains \`context\` }`,
-  );
-  // If context already exists, add the new prop to it
-  await applyGritQLTransform(
-    tree,
-    mainTsxPath,
-    `or { \`context: {}\` => \`context: { ${contextProp}: undefined }\` where { $_ <: within \`createRouter($_)\` }, \`context: { $cprops }\` => \`context: { $cprops, ${contextProp}: undefined }\` where { $cprops <: within \`createRouter($_)\`, $cprops <: not contains \`${contextProp}\` } }`,
-  );
+  {
+    const src = tree.read(mainTsxPath, 'utf-8')!;
+    const createRouterIdx = src.indexOf('createRouter(');
+    if (createRouterIdx !== -1) {
+      // Extract content between createRouter({ and })
+      const openBrace = src.indexOf('{', createRouterIdx);
+      // Find matching close: track brace depth
+      let depth = 1;
+      let i = openBrace + 1;
+      while (i < src.length && depth > 0) {
+        if (src[i] === '{') depth++;
+        else if (src[i] === '}') depth--;
+        i++;
+      }
+      const closeBrace = i - 1;
+      const routerBody = src.slice(openBrace + 1, closeBrace);
+
+      if (!routerBody.includes('context')) {
+        // Add context property before closing brace, ensuring comma after previous property
+        const beforeClose = src.slice(0, closeBrace).trimEnd();
+        const needsComma =
+          beforeClose.length > 0 &&
+          !beforeClose.endsWith(',') &&
+          !beforeClose.endsWith('{');
+        tree.write(
+          mainTsxPath,
+          beforeClose +
+            (needsComma ? ',' : '') +
+            `\n  context: { ${contextProp}: undefined },\n` +
+            src.slice(closeBrace),
+        );
+      } else if (!routerBody.includes(contextProp)) {
+        // Add prop to existing context object within createRouter
+        const contextIdx = src.indexOf('context:', createRouterIdx);
+        if (contextIdx !== -1) {
+          const ctxOpenBrace = src.indexOf('{', contextIdx);
+          let ctxDepth = 1;
+          let j = ctxOpenBrace + 1;
+          while (j < src.length && ctxDepth > 0) {
+            if (src[j] === '{') ctxDepth++;
+            else if (src[j] === '}') ctxDepth--;
+            j++;
+          }
+          const ctxCloseBrace = j - 1;
+          const beforeCtxClose = src.slice(0, ctxCloseBrace).trimEnd();
+          const needsCtxComma =
+            beforeCtxClose.length > 0 &&
+            !beforeCtxClose.endsWith(',') &&
+            !beforeCtxClose.endsWith('{');
+          tree.write(
+            mainTsxPath,
+            beforeCtxClose +
+              (needsCtxComma ? ',' : '') +
+              ` ${contextProp}: undefined,\n    ` +
+              src.slice(ctxCloseBrace),
+          );
+        }
+      }
+    }
+  }
 
   // 3. Add hook call to App component body
   await applyGritQLTransform(
@@ -78,10 +127,35 @@ export const addHookResultToRouterProviderContext = async (
   );
 
   // 4. Add context prop to RouterProvider JSX element
-  // Handle: no context attr, empty context, or existing context props
-  await applyGritQLTransform(
-    tree,
-    mainTsxPath,
-    `or { \`<RouterProvider $attrs context={{}} />\` => \`<RouterProvider $attrs context={{ ${contextProp} }} />\`, \`<RouterProvider $attrs context={{ $cprops }} />\` => \`<RouterProvider $attrs context={{ $cprops, ${contextProp} }} />\` where { $cprops <: not contains \`${contextProp}\` }, \`<RouterProvider $attrs />\` => \`<RouterProvider $attrs context={{ ${contextProp} }} />\` where { $attrs <: not contains \`context\` } }`,
-  );
+  {
+    const src = tree.read(mainTsxPath, 'utf-8')!;
+    const rpMatch = src.match(/<RouterProvider([^/]*)\s*\/>/);
+    if (rpMatch && !rpMatch[1].includes(contextProp)) {
+      const attrs = rpMatch[1];
+      const contextAttrMatch = attrs.match(/context=\{\{([^}]*)\}\}/);
+      if (contextAttrMatch) {
+        // Existing context attribute — add prop
+        const existingProps = contextAttrMatch[1].trim();
+        const newProps = existingProps
+          ? `${existingProps}, ${contextProp}`
+          : contextProp;
+        tree.write(
+          mainTsxPath,
+          src.replace(
+            contextAttrMatch[0],
+            `context={{ ${newProps} }}`,
+          ),
+        );
+      } else {
+        // No context attribute — add it
+        tree.write(
+          mainTsxPath,
+          src.replace(
+            rpMatch[0],
+            `<RouterProvider${attrs} context={{ ${contextProp} }} />`,
+          ),
+        );
+      }
+    }
+  }
 };
