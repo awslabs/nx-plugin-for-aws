@@ -207,7 +207,7 @@ export const tsSmithyApiGenerator = async (
     ...patterns,
     'src/generated',
   ]);
-  addIgnoresToEslintConfig(
+  await addIgnoresToEslintConfig(
     tree,
     joinPathFragments(backendProjectConfig.root, 'eslint.config.mjs'),
     ['**/generated'],
