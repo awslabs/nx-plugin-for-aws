@@ -213,8 +213,6 @@ export const presetGenerator = async (
     },
   );
 
-  await addGeneratorMetricsIfApplicable(tree, [PRESET_GENERATOR_INFO]);
-
   await formatFilesInSubtree(tree);
   return () => {
     installPackagesTask(tree);

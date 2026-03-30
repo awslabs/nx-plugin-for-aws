@@ -14,6 +14,7 @@ import ts, {
   Node,
   Expression,
 } from 'typescript';
+import { QueryBuilder } from '@getgrit/gritql';
 
 const assertFilePath = (tree: Tree, filePath: string) => {
   if (!tree.exists(filePath)) {
@@ -429,4 +430,49 @@ export const hasExportDeclaration = (
       `TypeAliasDeclaration:has(ExportKeyword):has(Identifier[name="${identifierName}"])`,
     ).length > 0
   );
+};
+
+/**
+ * Apply a GritQL pattern to a file in the Nx tree.
+ */
+export const applyGritQLTransform = async (
+  tree: Tree,
+  filePath: string,
+  pattern: string,
+): Promise<boolean> => {
+  if (!tree.exists(filePath)) throw new Error(`No file at ${filePath}`);
+  const source = tree.read(filePath)!.toString();
+  const query = new QueryBuilder(pattern);
+  const result = await query.applyToFile({ path: filePath, content: source });
+  if (result && result.content !== source) {
+    tree.write(filePath, result.content);
+    return true;
+  }
+  return false;
+};
+
+/**
+ * Check whether a GritQL pattern matches anywhere in a file.
+ * Returns true if the pattern matches at least once.
+ */
+export const hasGritQLMatch = async (
+  tree: Tree,
+  filePath: string,
+  pattern: string,
+): Promise<boolean> => {
+  if (!tree.exists(filePath)) return false;
+  const source = tree.read(filePath)!.toString();
+  try {
+    // Use a metavariable rewrite to check for matches — $p is constrained to
+    // the caller's pattern and rewritten to itself, avoiding rendering the
+    // pattern string twice in the query.
+    const query = new QueryBuilder(`$p => $p where { $p <: ${pattern} }`);
+    const result = await query.applyToFile({
+      path: filePath,
+      content: source,
+    });
+    return result !== null;
+  } catch {
+    return false;
+  }
 };
