@@ -26,13 +26,12 @@ import { getNpmScope } from '../../../utils/npm-scope';
 import {
   addDestructuredImport,
   addStarExport,
-  replaceIfExists,
+  applyGritQLTransform,
 } from '../../../utils/ast';
 import {
   ensureTypeScriptAgentConnectionProject,
   AGENT_CONNECTION_PROJECT_DIR,
 } from '../../../utils/agent-connection/agent-connection';
-import ts, { factory, ArrayLiteralExpression, ArrowFunction, Expression } from 'typescript';
 
 export const TS_STRANDS_AGENT_MCP_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -109,100 +108,28 @@ export const tsStrandsAgentMcpConnectionGenerator = async (
       `:${npmScope}/agent-connection`,
     );
 
-    // Create: const <clientVarName> = await <ClientClassName>.create(sessionId);
-    const clientCreationStatement = factory.createVariableStatement(
-      undefined,
-      factory.createVariableDeclarationList(
-        [
-          factory.createVariableDeclaration(
-            clientVarName,
-            undefined,
-            undefined,
-            factory.createAwaitExpression(
-              factory.createCallExpression(
-                factory.createPropertyAccessExpression(
-                  factory.createIdentifier(clientClassName),
-                  'create',
-                ),
-                undefined,
-                [factory.createIdentifier('sessionId')],
-              ),
-            ),
-          ),
-        ],
-        2, // const
-      ),
-    );
+    const clientCreationStmt = `const ${clientVarName} = await ${clientClassName}.create(sessionId);`;
 
-    // Transform the arrow function that contains `new Agent` to have a block body
-    // with the client creation statement before the return
-    replaceIfExists(
+    // Transform the arrow function that contains `new Agent`:
+    // - Expression body: wrap in block with client creation and return
+    // - Block body: prepend client creation statement
+    await applyGritQLTransform(
       tree,
       agentFilePath,
-      'ArrowFunction:has(NewExpression[expression.name="Agent"])',
-      (node) => {
-        const arrow = node as ArrowFunction;
-
-        // Check if already transformed
-        if (arrow.getText().includes(clientClassName)) return node;
-
-        // If the body is an expression (not a block), wrap it in a block with return
-        if (!ts.isBlock(arrow.body)) {
-          return factory.updateArrowFunction(
-            arrow,
-            arrow.modifiers,
-            arrow.typeParameters,
-            arrow.parameters,
-            arrow.type,
-            arrow.equalsGreaterThanToken,
-            factory.createBlock(
-              [
-                clientCreationStatement,
-                factory.createReturnStatement(
-                  arrow.body as Expression,
-                ),
-              ],
-              true,
-            ),
-          );
-        }
-
-        // Body is already a block — insert before the statement containing `new Agent`
-        const b = arrow.body;
-        const agentStatementIndex = b.statements.findIndex((s) =>
-          s.getText().includes('new Agent('),
-        );
-        if (agentStatementIndex === -1) return node;
-
-        const newStatements = [...b.statements];
-        newStatements.splice(agentStatementIndex, 0, clientCreationStatement);
-        return factory.updateArrowFunction(
-          arrow,
-          arrow.modifiers,
-          arrow.typeParameters,
-          arrow.parameters,
-          arrow.type,
-          arrow.equalsGreaterThanToken,
-          factory.updateBlock(b, newStatements),
-        );
-      },
+      `or { \`async ($p) => new Agent($args)\` => raw\`async ($p) => {
+  ${clientCreationStmt}
+  return new Agent($args);
+}\` where { $program <: not contains \`${clientClassName}.create\` }, \`async ($p) => { $body }\` => raw\`async ($p) => {
+  ${clientCreationStmt}
+  $body
+}\` where { $body <: contains \`new Agent($_)\`, $program <: not contains \`${clientClassName}.create\` } }`,
     );
 
-    // Add client to the tools array: tools: [clientVarName, ...existing]
-    replaceIfExists(
+    // Prepend client to the tools array
+    await applyGritQLTransform(
       tree,
       agentFilePath,
-      'NewExpression[expression.name="Agent"] ObjectLiteralExpression PropertyAssignment[name.name="tools"] ArrayLiteralExpression',
-      (node) => {
-        const arr = node as ArrayLiteralExpression;
-        // Check if already added
-        if (arr.getText().includes(clientVarName)) return node;
-
-        return factory.updateArrayLiteralExpression(arr, [
-          factory.createIdentifier(clientVarName),
-          ...arr.elements,
-        ]);
-      },
+      `\`tools: [$items]\` => \`tools: [${clientVarName}, $items]\` where { $items <: within \`new Agent($_)\`, $items <: not contains \`${clientVarName}\` }`,
     );
   }
 
