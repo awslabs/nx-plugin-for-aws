@@ -15,10 +15,12 @@ import { kebabCase, toClassName } from '../../names';
 import { sortObjectKeys } from '../../object';
 import { updateGitIgnore } from '../../git';
 import runtimeConfigGenerator from '../../../ts/react-website/runtime-config/generator';
-import { query, replace } from '../../ast';
+import {
+  addSingleImport,
+  applyGritQLTransform,
+  hasGritQLMatch,
+} from '../../ast';
 import { addTargetToServeLocal } from '../../../connection/serve-local';
-import { JsxSelfClosingElement } from 'typescript';
-import { addSingleImport, createJsxElementFromIdentifier } from '../../ast';
 import { withVersions } from '../../versions';
 
 export interface AddOpenApiReactClientOptions {
@@ -197,50 +199,45 @@ export const addOpenApiReactClient = async (
   );
 
   // Add the query client provider if it doesn't exist already
-  const hasQueryClientProvider =
-    query(
+  if (
+    !(await hasGritQLMatch(
       tree,
       mainTsxPath,
-      'JsxOpeningElement[tagName.name="QueryClientProvider"]',
-    ).length > 0;
-
-  if (!hasQueryClientProvider) {
+      '`<QueryClientProvider>$_</QueryClientProvider>`',
+    ))
+  ) {
     await addSingleImport(
       tree,
       mainTsxPath,
       'QueryClientProvider',
       './components/QueryClientProvider',
     );
-    replace(
+    await applyGritQLTransform(
       tree,
       mainTsxPath,
-      'JsxSelfClosingElement[tagName.name="App"]',
-      (node: JsxSelfClosingElement) =>
-        createJsxElementFromIdentifier('QueryClientProvider', [node]),
+      '`<App />` => `<QueryClientProvider><App /></QueryClientProvider>`',
     );
   }
 
   // Add the api provider if it does not exist
   const providerName = `${apiNameClassName}Provider`;
-  const hasProvider =
-    query(
+  if (
+    !(await hasGritQLMatch(
       tree,
       mainTsxPath,
-      `JsxOpeningElement[tagName.name="${providerName}"]`,
-    ).length > 0;
-  if (!hasProvider) {
+      `\`<${providerName}>$_</${providerName}>\``,
+    ))
+  ) {
     await addSingleImport(
       tree,
       mainTsxPath,
       providerName,
       `./components/${providerName}`,
     );
-    replace(
+    await applyGritQLTransform(
       tree,
       mainTsxPath,
-      'JsxSelfClosingElement[tagName.name="App"]',
-      (node: JsxSelfClosingElement) =>
-        createJsxElementFromIdentifier(providerName, [node]),
+      `\`<App />\` => \`<${providerName}><App /></${providerName}>\``,
     );
   }
 

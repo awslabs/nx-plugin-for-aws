@@ -11,15 +11,13 @@ import {
   Tree,
 } from '@nx/devkit';
 import { ReactGeneratorSchema } from './schema';
-import { JsxSelfClosingElement } from 'typescript';
 import { runtimeConfigGenerator } from '../../ts/react-website/runtime-config/generator';
 import { toScopeAlias } from '../../utils/npm-scope';
 import { withVersions } from '../../utils/versions';
 import {
-  createJsxElementFromIdentifier,
-  replace,
   addSingleImport,
-  query,
+  applyGritQLTransform,
+  hasGritQLMatch,
 } from '../../utils/ast';
 import { toClassName } from '../../utils/names';
 import { formatFilesInSubtree } from '../../utils/format';
@@ -122,38 +120,33 @@ export async function reactGenerator(
     `./components/${clientProviderName}`,
   );
 
-  // Check if QueryClientProvider already exists
-  const hasQueryClientProvider =
-    query(
+  // Wrap <App /> in QueryClientProvider if not already present
+  if (
+    !(await hasGritQLMatch(
       tree,
       mainTsxPath,
-      'JsxOpeningElement[tagName.name="QueryClientProvider"]',
-    ).length > 0;
-
-  if (!hasQueryClientProvider) {
-    replace(
+      '`<QueryClientProvider>$_</QueryClientProvider>`',
+    ))
+  ) {
+    await applyGritQLTransform(
       tree,
       mainTsxPath,
-      'JsxSelfClosingElement[tagName.name="App"]',
-      (node: JsxSelfClosingElement) =>
-        createJsxElementFromIdentifier('QueryClientProvider', [node]),
+      '`<App />` => `<QueryClientProvider><App /></QueryClientProvider>`',
     );
   }
 
-  // Check if client provider already exists
-  const hasProvider =
-    query(
+  // Wrap <App /> in the tRPC client provider if not already present
+  if (
+    !(await hasGritQLMatch(
       tree,
       mainTsxPath,
-      `JsxOpeningElement[tagName.name="${clientProviderName}"]`,
-    ).length > 0;
-  if (!hasProvider) {
-    replace(
+      `\`<${clientProviderName}>$_</${clientProviderName}>\``,
+    ))
+  ) {
+    await applyGritQLTransform(
       tree,
       mainTsxPath,
-      'JsxSelfClosingElement[tagName.name="App"]',
-      (node: JsxSelfClosingElement) =>
-        createJsxElementFromIdentifier(clientProviderName, [node]),
+      `\`<App />\` => \`<${clientProviderName}><App /></${clientProviderName}>\``,
     );
   }
 
