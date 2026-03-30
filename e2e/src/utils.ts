@@ -4,6 +4,7 @@
  */
 import { execSync } from 'child_process';
 import { join } from 'path';
+import { tmpdir } from 'os';
 import { output, PackageManager } from '@nx/devkit';
 import { existsSync } from 'fs';
 import { backOff } from 'exponential-backoff';
@@ -109,7 +110,12 @@ function getYarnMajorVersion(path: string): string | undefined {
 }
 
 export function tmpProjPath() {
-  return '/tmp/nx-plugin-for-aws/e2e';
+  // Use a shorter path on Windows to avoid path length issues with deeply
+  // nested node_modules and Vite build output
+  if (process.platform === 'win32') {
+    return 'C:\\nxe2e';
+  }
+  return join(tmpdir(), 'nx-plugin-for-aws', 'e2e');
 }
 
 function getPackageManagerCommand({

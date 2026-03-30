@@ -5,7 +5,7 @@
 import { startLocalRegistry } from '@nx/js/plugins/jest/local-registry';
 import { join } from 'path';
 import { execSync } from 'child_process';
-import { existsSync, rmSync } from 'fs';
+import { existsSync, mkdirSync, rmSync, readFileSync } from 'fs';
 export default async function () {
   try {
     const registryPath = join(__dirname, '../../tmp');
@@ -27,6 +27,20 @@ export default async function () {
         cwd: join(__dirname, '../../dist/packages/nx-plugin'),
       });
       console.info('Package published to local registry');
+
+      // Read the published package version and set NX_E2E_PRESET_VERSION
+      // This is needed because create-nx-workspace uses `npm view` to resolve
+      // the preset version, which may fail on Windows with a local registry
+      const distPkgJson = JSON.parse(
+        readFileSync(
+          join(__dirname, '../../dist/packages/nx-plugin/package.json'),
+          'utf-8',
+        ),
+      );
+      process.env.NX_E2E_PRESET_VERSION = distPkgJson.version;
+      console.info(
+        `Set NX_E2E_PRESET_VERSION=${process.env.NX_E2E_PRESET_VERSION}`,
+      );
     } catch (err) {
       console.error(`Package couldn't be published to local registry: ${err}`);
       throw err;

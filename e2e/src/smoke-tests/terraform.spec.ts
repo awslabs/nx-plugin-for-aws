@@ -106,6 +106,7 @@ describe('smoke test - terraform', () => {
       `${opts.cwd}/aws-nx-plugin.config.mts`,
       readFileSync(
         join(__dirname, '../files/aws-nx-plugin.config.mts.template'),
+        'utf-8',
       ),
     );
 
