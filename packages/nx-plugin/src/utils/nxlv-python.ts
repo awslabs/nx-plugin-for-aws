@@ -143,19 +143,18 @@ interface UVProjectGeneratorSchema {
 const nxlvPythonPkgJson = require.resolve('@nxlv/python/package.json');
 const nxlvPythonRoot = path.dirname(nxlvPythonPkgJson);
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
 const uvProviderModule = require(
   path.join(nxlvPythonRoot, 'dist/provider/uv/provider'),
 );
-// eslint-disable-next-line @typescript-eslint/no-require-imports
+
 const loggerModule = require(
   path.join(nxlvPythonRoot, 'dist/executors/utils/logger'),
 );
-// eslint-disable-next-line @typescript-eslint/no-require-imports
+
 const migrateToSharedVenvModule = require(
   path.join(nxlvPythonRoot, 'dist/generators/migrate-to-shared-venv/generator'),
 );
-// eslint-disable-next-line @typescript-eslint/no-require-imports
+
 const uvProjectModule = require(
   path.join(nxlvPythonRoot, 'dist/generators/uv-project/generator'),
 );

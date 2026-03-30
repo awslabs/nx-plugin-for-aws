@@ -118,6 +118,7 @@ export class TypeScriptVerifier {
 
       throw new Error(
         `Could not find dependency ${dependency} in pnpm list output`,
+        { cause: error },
       );
     }
   };

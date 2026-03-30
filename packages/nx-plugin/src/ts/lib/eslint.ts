@@ -8,10 +8,16 @@ import {
   readNxJson,
   addDependenciesToPackageJson,
   updateProjectConfiguration,
+  updateJson,
 } from '@nx/devkit';
-import { withVersions } from '../../utils/versions';
+import { TS_VERSIONS, withVersions } from '../../utils/versions';
 import { factory, ArrayLiteralExpression, SyntaxKind } from 'typescript';
-import { addSingleImport, query, replace } from '../../utils/ast';
+import {
+  addDestructuredImport,
+  addSingleImport,
+  query,
+  replace,
+} from '../../utils/ast';
 import { ConfigureProjectOptions } from './types';
 import { readProjectConfigurationUnqualified } from '../../utils/nx';
 
@@ -47,8 +53,40 @@ export const configureEslint = async (
   addDependenciesToPackageJson(
     tree,
     {},
-    withVersions(['prettier', 'eslint-plugin-prettier', 'jsonc-eslint-parser']),
+    withVersions([
+      'eslint',
+      '@eslint/js',
+      'typescript-eslint',
+      'prettier',
+      'eslint-plugin-prettier',
+      'jsonc-eslint-parser',
+    ]),
   );
+
+  // Add overrides for ESLint 10 to handle npm's strict peer dependency resolution.
+  // Some ESLint plugins haven't updated their peer deps to include ESLint 10 yet.
+  const eslintVersion = TS_VERSIONS['eslint'];
+  updateJson(tree, 'package.json', (json) => ({
+    ...json,
+    // npm overrides
+    overrides: {
+      ...json.overrides,
+      eslint: eslintVersion,
+    },
+    // yarn resolutions
+    resolutions: {
+      ...json.resolutions,
+      eslint: eslintVersion,
+    },
+    // pnpm overrides
+    pnpm: {
+      ...json.pnpm,
+      overrides: {
+        ...json.pnpm?.overrides,
+        eslint: eslintVersion,
+      },
+    },
+  }));
 
   // Update or create eslint.config.mjs
   const eslintConfigPath = 'eslint.config.mjs';
@@ -105,6 +143,52 @@ export const configureEslint = async (
       },
     });
   }
+};
+
+/**
+ * Adds ignore patterns to the eslint config file
+ * @param tree - The file system tree
+ * @param eslintConfigPath - Path to the eslint config file
+ * @param ignorePatterns - Array of ignore patterns to add
+ */
+/**
+ * Wraps React ESLint configs with @eslint/compat's fixupConfigRules to ensure
+ * compatibility with ESLint 10. Some React ESLint plugins use deprecated APIs
+ * (e.g. context.getFilename()) that were removed in ESLint 10.
+ */
+export const fixupEslintReactConfig = async (
+  tree: Tree,
+  eslintConfigPath: string,
+): Promise<void> => {
+  if (!tree.exists(eslintConfigPath)) {
+    return;
+  }
+
+  const content = tree.read(eslintConfigPath, 'utf-8');
+
+  // Only apply if the config uses nx.configs['flat/react']
+  if (!content.includes("nx.configs['flat/react']")) {
+    return;
+  }
+
+  // Add the import for fixupConfigRules
+  await addDestructuredImport(
+    tree,
+    eslintConfigPath,
+    ['fixupConfigRules'],
+    '@eslint/compat',
+  );
+
+  // Wrap the React config spread with fixupConfigRules
+  const updated = tree
+    .read(eslintConfigPath, 'utf-8')
+    .replace(
+      "...nx.configs['flat/react']",
+      "...fixupConfigRules(nx.configs['flat/react'])",
+    );
+  tree.write(eslintConfigPath, updated);
+
+  addDependenciesToPackageJson(tree, {}, withVersions(['@eslint/compat']));
 };
 
 /**

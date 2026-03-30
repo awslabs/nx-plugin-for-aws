@@ -25,6 +25,7 @@ import { applicationGenerator } from '@nx/react';
 import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
 import { getNpmScopePrefix, toScopeAlias } from '../../../utils/npm-scope';
 import { configureTsProject } from '../../lib/ts-project-utils';
+import { fixupEslintReactConfig } from '../../lib/eslint';
 import { ITsDepVersion, withVersions } from '../../../utils/versions';
 import { getRelativePathToRoot } from '../../../utils/paths';
 import {
@@ -205,6 +206,12 @@ export async function tsReactWebsiteGenerator(
     dir: websiteContentPath,
     fullyQualifiedName,
   });
+
+  // Wrap React ESLint configs with @eslint/compat for ESLint 10 compatibility
+  await fixupEslintReactConfig(
+    tree,
+    joinPathFragments(websiteContentPath, 'eslint.config.mjs'),
+  );
 
   if (uxProvider === 'Shadcn') {
     await sharedShadcnGenerator(tree);
@@ -545,6 +552,12 @@ export async function tsReactWebsiteGenerator(
     'vite-tsconfig-paths',
     '@nx/react',
     '@vitest/ui',
+    // Override the React ESLint plugin versions pinned by @nx/react to ensure
+    // compatibility with ESLint 10
+    'eslint-plugin-import',
+    'eslint-plugin-jsx-a11y',
+    'eslint-plugin-react',
+    'eslint-plugin-react-hooks',
   ];
 
   const dependencies: ITsDepVersion[] = ['react', 'react-dom'];

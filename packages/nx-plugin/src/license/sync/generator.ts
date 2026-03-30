@@ -157,20 +157,15 @@ const loadHeaderContentLines = (
   config: LicenseHeaderConfig,
 ): string[] => {
   // Load the license header content
-  let headerContentLines = [];
   if ('lines' in config.content) {
-    headerContentLines = config.content.lines;
-  } else {
-    if (!tree.exists(config.content.filePath)) {
-      throw new Error(
-        `Could not find license header content file ${config.content.filePath}`,
-      );
-    }
-    headerContentLines = tree
-      .read(config.content.filePath, 'utf-8')
-      .split('\n');
+    return config.content.lines;
   }
-  return headerContentLines;
+  if (!tree.exists(config.content.filePath)) {
+    throw new Error(
+      `Could not find license header content file ${config.content.filePath}`,
+    );
+  }
+  return tree.read(config.content.filePath, 'utf-8').split('\n');
 };
 
 /**

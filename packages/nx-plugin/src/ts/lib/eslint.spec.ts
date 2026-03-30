@@ -259,6 +259,9 @@ export default [
       await configureEslint(tree, options);
 
       const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+      expect(packageJson.devDependencies).toHaveProperty('eslint');
+      expect(packageJson.devDependencies).toHaveProperty('@eslint/js');
+      expect(packageJson.devDependencies).toHaveProperty('typescript-eslint');
       expect(packageJson.devDependencies).toHaveProperty('prettier');
       expect(packageJson.devDependencies).toHaveProperty(
         'eslint-plugin-prettier',
