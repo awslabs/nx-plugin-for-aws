@@ -14,7 +14,7 @@ import tsProjectGenerator from '../ts/lib/generator';
 import { configureTsProject } from '../ts/lib/ts-project-utils';
 import { formatFilesInSubtree } from './format';
 import { getNpmScopePrefix, toScopeAlias } from './npm-scope';
-import { applyGritQLTransform, hasGritQLMatch } from './ast';
+import { hasGritQLMatch } from './ast';
 import {
   PACKAGES_DIR,
   SHARED_SHADCN_DIR,
@@ -77,11 +77,17 @@ const addSharedShadcnEslintRules = async (
     return;
   }
 
-  await applyGritQLTransform(
-    tree,
-    eslintConfigPath,
-    "`export default [$items]` => `export default [$items, { files: ['**/*.{ts,tsx,js,jsx}'], rules: { '@nx/enforce-module-boundaries': 'off' } }]`",
-  );
+  // Append rule config to the exports array using string manipulation
+  // (GritQL array rewrite produces double commas with trailing-comma elements)
+  const config = tree.read(eslintConfigPath, 'utf-8')!;
+  const lastBracket = config.lastIndexOf('];');
+  if (lastBracket !== -1) {
+    const ruleConfig = `  {\n    files: ['**/*.{ts,tsx,js,jsx}'],\n    rules: {\n      '@nx/enforce-module-boundaries': 'off',\n    },\n  },\n`;
+    tree.write(
+      eslintConfigPath,
+      config.slice(0, lastBracket) + ruleConfig + config.slice(lastBracket),
+    );
+  }
 };
 
 export async function sharedShadcnGenerator(tree: Tree) {
