@@ -505,18 +505,17 @@ if __name__ == "__main__":
 
 ```ts
 // common/constructs/src/app/agents/story-agent.ts
-import { Lazy, Names } from 'aws-cdk-lib';
+import { FileSystem, Lazy, Names } from 'aws-cdk-lib';
 import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import { Construct } from 'constructs';
-import { execSync } from 'child_process';
 import * as path from 'path';
-import * as url from 'url';
 import {
   AgentRuntimeArtifact,
   ProtocolType,
   Runtime,
   RuntimeProps,
 } from '@aws-cdk/aws-bedrock-agentcore-alpha';
+import { findWorkspaceRoot } from '../../../core/utils.js';
 
 export type StoryAgentProps = Omit<
   RuntimeProps,
@@ -530,14 +529,21 @@ export class StoryAgent extends Construct {
   constructor(scope: Construct, id: string, props?: StoryAgentProps) {
     super(scope, id);
 
+    const workspaceRoot = findWorkspaceRoot(__dirname);
+
     this.dockerImage = AgentRuntimeArtifact.fromAsset(
-      path.dirname(url.fileURLToPath(new URL(import.meta.url))),
+      path.join(workspaceRoot, 'packages/dungeon-adventure/story/src/agent'),
       {
         platform: Platform.LINUX_ARM64,
-        extraHash: execSync(
-          `docker inspect dungeon-adventure-story-agent:latest --format '{{.Id}}'`,
-          { encoding: 'utf-8' },
-        ).trim(),
+        buildContexts: {
+          workspace: workspaceRoot,
+        },
+        extraHash: FileSystem.fingerprint(
+          path.join(
+            workspaceRoot,
+            'dist/packages/dungeon-adventure/story/bundle/agent/story-agent',
+          ),
+        ),
       },
     );
 
@@ -554,9 +560,7 @@ export class StoryAgent extends Construct {
 }
 ```
 
-이 코드는 ECR에 에이전트 Docker 이미지를 업로드하고 AgentCore 런타임을 사용하여 호스팅하는 CDK `AgentRuntimeArtifact`를 구성합니다.
-
-추가 `Dockerfile`이 있는데, 이는 `story` 프로젝트의 Docker 이미지를 참조하여 Dockerfile과 에이전트 소스 코드를 함께 위치시킬 수 있도록 합니다.
+이 코드는 ECR에 에이전트 Docker 이미지를 업로드하고 AgentCore 런타임을 사용하여 호스팅하는 CDK `AgentRuntimeArtifact`를 구성합니다. CDK의 `buildContexts`를 사용하여 워크스페이스 루트를 참조하므로 Dockerfile을 에이전트 소스 코드와 함께 위치시킬 수 있습니다.
 
 </Drawer>
 

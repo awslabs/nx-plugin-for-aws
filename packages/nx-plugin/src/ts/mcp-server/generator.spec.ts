@@ -609,21 +609,12 @@ describe('ts#mcp-server generator', () => {
       iacProvider: 'CDK',
     });
 
-    expect(
-      tree.read(
-        'packages/common/constructs/src/app/mcp-servers/my-server/Dockerfile',
-        'utf-8',
-      ),
-    ).toContain('my-scope-my-server:latest');
-
-    // Check that the docker image tag is correctly generated in the MCP server construct
+    // Check that the CDK construct uses buildContexts
     const mcpServerConstruct = tree.read(
       'packages/common/constructs/src/app/mcp-servers/my-server/my-server.ts',
       'utf-8',
     );
-    expect(mcpServerConstruct).toContain(
-      'docker inspect my-scope-my-server:latest',
-    );
+    expect(mcpServerConstruct).toContain('buildContexts');
   });
 
   it('should match snapshot for BedrockAgentCoreRuntime generated constructs files', async () => {

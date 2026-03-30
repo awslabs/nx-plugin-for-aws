@@ -293,8 +293,8 @@ dev-dependencies = []
       'bundle-arm',
     );
 
-    // Check that build target depends on docker
-    expect(projectConfig.targets.build.dependsOn).toContain('docker');
+    // For CDK, build target should not depend on docker (CDK builds via buildContexts)
+    expect(projectConfig.targets.build.dependsOn).not.toContain('docker');
   });
 
   it('should generate strands agent with BedrockAgentCoreRuntime and custom name', async () => {
@@ -458,7 +458,7 @@ dev-dependencies = []
       'packages/common/constructs/src/app/agents/my-agent/my-agent.ts',
       'utf-8',
     );
-    expect(agentConstruct).toContain('docker inspect my-scope-my-agent:latest');
+    expect(agentConstruct).toContain('buildContexts');
   });
 
   it('should handle Python bundle target configuration for BedrockAgentCoreRuntime', async () => {
@@ -550,8 +550,8 @@ dev-dependencies = []
     expect(projectConfig.targets.docker).toBeDefined();
     expect(projectConfig.targets.docker.dependsOn).toContain(dockerTargetName);
 
-    // Check that build target depends on docker
-    expect(projectConfig.targets.build.dependsOn).toContain('docker');
+    // For CDK, build target should not depend on docker (CDK builds via buildContexts)
+    expect(projectConfig.targets.build.dependsOn).not.toContain('docker');
   });
 
   it('should match snapshot for generated files', async () => {

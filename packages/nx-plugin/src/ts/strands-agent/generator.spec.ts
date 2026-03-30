@@ -400,7 +400,7 @@ describe('ts#strands-agent generator', () => {
       'packages/common/constructs/src/app/agents/my-agent/my-agent.ts',
       'utf-8',
     );
-    expect(agentConstruct).toContain('docker inspect my-scope-my-agent:latest');
+    expect(agentConstruct).toContain('buildContexts');
   });
 
   it('should match snapshot for BedrockAgentCoreRuntime generated constructs files', async () => {

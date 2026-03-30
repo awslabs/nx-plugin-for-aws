@@ -505,18 +505,17 @@ if __name__ == "__main__":
 
 ```ts
 // common/constructs/src/app/agents/story-agent.ts
-import { Lazy, Names } from 'aws-cdk-lib';
+import { FileSystem, Lazy, Names } from 'aws-cdk-lib';
 import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import { Construct } from 'constructs';
-import { execSync } from 'child_process';
 import * as path from 'path';
-import * as url from 'url';
 import {
   AgentRuntimeArtifact,
   ProtocolType,
   Runtime,
   RuntimeProps,
 } from '@aws-cdk/aws-bedrock-agentcore-alpha';
+import { findWorkspaceRoot } from '../../../core/utils.js';
 
 export type StoryAgentProps = Omit<
   RuntimeProps,
@@ -530,14 +529,21 @@ export class StoryAgent extends Construct {
   constructor(scope: Construct, id: string, props?: StoryAgentProps) {
     super(scope, id);
 
+    const workspaceRoot = findWorkspaceRoot(__dirname);
+
     this.dockerImage = AgentRuntimeArtifact.fromAsset(
-      path.dirname(url.fileURLToPath(new URL(import.meta.url))),
+      path.join(workspaceRoot, 'packages/dungeon-adventure/story/src/agent'),
       {
         platform: Platform.LINUX_ARM64,
-        extraHash: execSync(
-          `docker inspect dungeon-adventure-story-agent:latest --format '{{.Id}}'`,
-          { encoding: 'utf-8' },
-        ).trim(),
+        buildContexts: {
+          workspace: workspaceRoot,
+        },
+        extraHash: FileSystem.fingerprint(
+          path.join(
+            workspaceRoot,
+            'dist/packages/dungeon-adventure/story/bundle/agent/story-agent',
+          ),
+        ),
       },
     );
 
@@ -554,9 +560,7 @@ export class StoryAgent extends Construct {
 }
 ```
 
-该配置使用 CDK 的 `AgentRuntimeArtifact` 将代理 Docker 镜像上传到 ECR,并通过 AgentCore Runtime 托管。
-
-您可能注意到额外的 `Dockerfile`,它引用了 `story` 项目的 Docker 镜像,允许我们将 Dockerfile 与代理源代码放在一起。
+该配置使用 CDK 的 `AgentRuntimeArtifact` 将代理 Docker 镜像上传到 ECR,并通过 AgentCore Runtime 托管。它使用 CDK 的 `buildContexts` 引用工作区根目录,允许 Dockerfile 与代理源代码放在一起。
 
 </Drawer>
 

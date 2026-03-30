@@ -29,6 +29,8 @@ export interface AddAgentCoreInfraProps {
   dockerImageTag: string;
   appDirectory: string;
   serverProtocol: 'MCP' | 'HTTP';
+  dockerfileDir: string;
+  bundleOutputDir: string;
 }
 
 const addAgentCoreInfra = async (
@@ -167,6 +169,8 @@ export interface AddMcpServerInfraProps {
   mcpServerNameKebabCase: string;
   projectName: string;
   dockerImageTag: string;
+  dockerfileDir: string;
+  bundleOutputDir: string;
 }
 
 /**
@@ -183,6 +187,8 @@ export const addMcpServerInfra = async (
     projectName: options.projectName,
     appDirectory: 'mcp-servers',
     serverProtocol: 'MCP',
+    dockerfileDir: options.dockerfileDir,
+    bundleOutputDir: options.bundleOutputDir,
     iacProvider: options.iacProvider,
   });
 };
@@ -192,6 +198,8 @@ export interface AddAgentInfraProps {
   agentNameKebabCase: string;
   projectName: string;
   dockerImageTag: string;
+  dockerfileDir: string;
+  bundleOutputDir: string;
 }
 
 /**
@@ -208,6 +216,8 @@ export const addAgentInfra = async (
     dockerImageTag: options.dockerImageTag,
     appDirectory: 'agents',
     serverProtocol: 'HTTP',
+    dockerfileDir: options.dockerfileDir,
+    bundleOutputDir: options.bundleOutputDir,
     iacProvider: options.iacProvider,
   });
 };

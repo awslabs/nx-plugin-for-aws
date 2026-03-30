@@ -1,7 +1,6 @@
-import { Lazy, Names } from 'aws-cdk-lib';
+import { FileSystem, Lazy, Names } from 'aws-cdk-lib';
 import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import { Construct } from 'constructs';
-import { execSync } from 'child_process';
 import * as path from 'path';
 import * as url from 'url';
 import {
@@ -11,6 +10,7 @@ import {
   RuntimeProps,
 } from '@aws-cdk/aws-bedrock-agentcore-alpha';
 import { RuntimeConfig } from '../../../core/runtime-config.js';
+import { findWorkspaceRoot } from '../../../core/utils.js';
 
 export type <%- nameClassName %>Props = Omit<
   RuntimeProps,
@@ -26,14 +26,20 @@ export class <%- nameClassName %> extends Construct {
 
     const rc = RuntimeConfig.ensure(this);
 
-    this.dockerImage = AgentRuntimeArtifact.fromAsset(
+    const workspaceRoot = findWorkspaceRoot(
       path.dirname(url.fileURLToPath(new URL(import.meta.url))),
+    );
+
+    this.dockerImage = AgentRuntimeArtifact.fromAsset(
+      path.join(workspaceRoot, '<%- dockerfileDir %>'),
       {
         platform: Platform.LINUX_ARM64,
-        extraHash: execSync(
-          `docker inspect <%- dockerImageTag %> --format '{{.Id}}'`,
-          { encoding: 'utf-8' },
-        ).trim(),
+        buildContexts: {
+          workspace: workspaceRoot,
+        },
+        extraHash: FileSystem.fingerprint(
+          path.join(workspaceRoot, '<%- bundleOutputDir %>'),
+        ),
       },
     );
 

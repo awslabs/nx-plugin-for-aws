@@ -131,9 +131,13 @@ export const pyStrandsAgentGenerator = async (
       { overwriteStrategy: OverwriteStrategy.KeepExisting },
     );
 
+    // Add shared constructs
+    const iacProvider = await resolveIacProvider(tree, options.iacProvider);
+    await sharedConstructsGenerator(tree, { iacProvider });
+
     const dockerTargetName = `${agentTargetPrefix}-docker`;
 
-    // Add a docker target specific to this MCP server
+    // Add a docker target specific to this agent
     project.targets[dockerTargetName] = {
       cache: true,
       executor: 'nx:run-commands',
@@ -147,17 +151,20 @@ export const pyStrandsAgentGenerator = async (
     };
 
     addDependencyToTargetIfNotPresent(project, 'docker', dockerTargetName);
-    addDependencyToTargetIfNotPresent(project, 'build', 'docker');
 
-    // Add shared constructs
-    const iacProvider = await resolveIacProvider(tree, options.iacProvider);
-    await sharedConstructsGenerator(tree, { iacProvider });
+    // For Terraform, the docker image must be pre-built before deploy.
+    // For CDK, the image is built via DockerImageAsset with buildContexts.
+    if (iacProvider !== 'CDK') {
+      addDependencyToTargetIfNotPresent(project, 'build', 'docker');
+    }
 
     // Add the construct to deploy the agent
     await addAgentInfra(tree, {
       agentNameKebabCase: name,
       agentNameClassName,
       dockerImageTag,
+      dockerfileDir: targetSourceDir,
+      bundleOutputDir,
       iacProvider,
       projectName: project.name,
     });

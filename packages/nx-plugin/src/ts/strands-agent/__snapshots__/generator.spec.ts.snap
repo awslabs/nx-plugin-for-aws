@@ -21,10 +21,9 @@ CMD [ "node", "--require", "@aws/aws-distro-opentelemetry-node-autoinstrumentati
 `;
 
 exports[`ts#strands-agent generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > agent-construct.ts 1`] = `
-"import { Lazy, Names } from 'aws-cdk-lib';
+"import { FileSystem, Lazy, Names } from 'aws-cdk-lib';
 import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import { Construct } from 'constructs';
-import { execSync } from 'child_process';
 import * as path from 'path';
 import * as url from 'url';
 import {
@@ -34,6 +33,7 @@ import {
   RuntimeProps,
 } from '@aws-cdk/aws-bedrock-agentcore-alpha';
 import { RuntimeConfig } from '../../../core/runtime-config.js';
+import { findWorkspaceRoot } from '../../../core/utils.js';
 
 export type SnapshotBedrockAgentProps = Omit<
   RuntimeProps,
@@ -49,14 +49,23 @@ export class SnapshotBedrockAgent extends Construct {
 
     const rc = RuntimeConfig.ensure(this);
 
-    this.dockerImage = AgentRuntimeArtifact.fromAsset(
+    const workspaceRoot = findWorkspaceRoot(
       path.dirname(url.fileURLToPath(new URL(import.meta.url))),
+    );
+
+    this.dockerImage = AgentRuntimeArtifact.fromAsset(
+      path.join(workspaceRoot, 'apps/test-project/src/snapshot-bedrock-agent'),
       {
         platform: Platform.LINUX_ARM64,
-        extraHash: execSync(
-          \`docker inspect proj-snapshot-bedrock-agent:latest --format '{{.Id}}'\`,
-          { encoding: 'utf-8' },
-        ).trim(),
+        buildContexts: {
+          workspace: workspaceRoot,
+        },
+        extraHash: FileSystem.fingerprint(
+          path.join(
+            workspaceRoot,
+            'dist/apps/test-project/bundle/agent/snapshot-bedrock-agent',
+          ),
+        ),
       },
     );
 
@@ -99,6 +108,7 @@ exports[`ts#strands-agent generator > should match snapshot for BedrockAgentCore
 "export * from './app.js';
 export * from './checkov.js';
 export * from './runtime-config.js';
+export * from './utils.js';
 "
 `;
 

@@ -508,10 +508,9 @@ This is the entrypoint for the agent, configured as a FastAPI application compat
 
 ```ts
 // common/constructs/src/app/agents/story-agent.ts
-import { Lazy, Names } from 'aws-cdk-lib';
+import { FileSystem, Lazy, Names } from 'aws-cdk-lib';
 import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import { Construct } from 'constructs';
-import { execSync } from 'child_process';
 import * as path from 'path';
 import * as url from 'url';
 import {
@@ -520,6 +519,7 @@ import {
   Runtime,
   RuntimeProps,
 } from '@aws-cdk/aws-bedrock-agentcore-alpha';
+import { findWorkspaceRoot } from '../../../core/utils.js';
 
 export type StoryAgentProps = Omit<
   RuntimeProps,
@@ -533,14 +533,23 @@ export class StoryAgent extends Construct {
   constructor(scope: Construct, id: string, props?: StoryAgentProps) {
     super(scope, id);
 
-    this.dockerImage = AgentRuntimeArtifact.fromAsset(
+    const workspaceRoot = findWorkspaceRoot(
       path.dirname(url.fileURLToPath(new URL(import.meta.url))),
+    );
+
+    this.dockerImage = AgentRuntimeArtifact.fromAsset(
+      path.join(workspaceRoot, 'packages/dungeon-adventure/story/src/agent'),
       {
         platform: Platform.LINUX_ARM64,
-        extraHash: execSync(
-          `docker inspect dungeon-adventure-story-agent:latest --format '{{.Id}}'`,
-          { encoding: 'utf-8' },
-        ).trim(),
+        buildContexts: {
+          workspace: workspaceRoot,
+        },
+        extraHash: FileSystem.fingerprint(
+          path.join(
+            workspaceRoot,
+            'dist/packages/dungeon-adventure/story/bundle/agent/story-agent',
+          ),
+        ),
       },
     );
 
@@ -557,9 +566,7 @@ export class StoryAgent extends Construct {
 }
 ```
 
-This configures a CDK `AgentRuntimeArtifact` which uploads your agent Docker image to ECR, and hosts it using AgentCore Runtime.
-
-You may notice an extra `Dockerfile`, that references the Docker image from the `story` project, allowing us to co-locate the Dockerfile and agent source code.
+This configures a CDK `AgentRuntimeArtifact` which uploads your agent Docker image to ECR, and hosts it using AgentCore Runtime. It uses CDK's `buildContexts` to reference the workspace root, allowing the Dockerfile to be co-located with the agent source code.
 
 </Drawer>
 

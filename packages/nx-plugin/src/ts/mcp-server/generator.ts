@@ -103,9 +103,7 @@ export const tsMcpServerGenerator = async (
       esm,
       distDir,
       adotVersion:
-        TS_VERSIONS[
-          '@aws/aws-distro-opentelemetry-node-autoinstrumentation'
-        ],
+        TS_VERSIONS['@aws/aws-distro-opentelemetry-node-autoinstrumentation'],
     },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
@@ -134,6 +132,10 @@ export const tsMcpServerGenerator = async (
       bundleOutputDir: joinPathFragments('mcp', name),
     });
 
+    // Add shared constructs
+    const iacProvider = await resolveIacProvider(tree, options.iacProvider);
+    await sharedConstructsGenerator(tree, { iacProvider });
+
     const dockerTargetName = `${mcpTargetPrefix}-docker`;
 
     project.targets[dockerTargetName] = {
@@ -146,11 +148,12 @@ export const tsMcpServerGenerator = async (
     };
 
     addDependencyToTargetIfNotPresent(project, 'docker', dockerTargetName);
-    addDependencyToTargetIfNotPresent(project, 'build', 'docker');
 
-    // Add shared constructs
-    const iacProvider = await resolveIacProvider(tree, options.iacProvider);
-    await sharedConstructsGenerator(tree, { iacProvider });
+    // For Terraform, the docker image must be pre-built before deploy.
+    // For CDK, the image is built via DockerImageAsset with buildContexts.
+    if (iacProvider !== 'CDK') {
+      addDependencyToTargetIfNotPresent(project, 'build', 'docker');
+    }
 
     // Add the construct to deploy the mcp server
     await addMcpServerInfra(tree, {
@@ -158,6 +161,8 @@ export const tsMcpServerGenerator = async (
       mcpServerNameClassName,
       projectName: project.name,
       dockerImageTag,
+      dockerfileDir: targetSourceDir,
+      bundleOutputDir: joinPathFragments(distDir, 'bundle', 'mcp', name),
       iacProvider,
     });
   } else {

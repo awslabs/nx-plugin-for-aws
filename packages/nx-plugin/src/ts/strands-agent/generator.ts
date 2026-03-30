@@ -94,12 +94,14 @@ export const tsStrandsAgentGenerator = async (
         distDir,
         name,
         adotVersion:
-          TS_VERSIONS[
-            '@aws/aws-distro-opentelemetry-node-autoinstrumentation'
-          ],
+          TS_VERSIONS['@aws/aws-distro-opentelemetry-node-autoinstrumentation'],
       },
       { overwriteStrategy: OverwriteStrategy.KeepExisting },
     );
+
+    // Add shared constructs
+    const iacProvider = await resolveIacProvider(tree, options.iacProvider);
+    await sharedConstructsGenerator(tree, { iacProvider });
 
     const dockerTargetName = `${agentTargetPrefix}-docker`;
 
@@ -113,17 +115,20 @@ export const tsStrandsAgentGenerator = async (
     };
 
     addDependencyToTargetIfNotPresent(project, 'docker', dockerTargetName);
-    addDependencyToTargetIfNotPresent(project, 'build', 'docker');
 
-    // Add shared constructs
-    const iacProvider = await resolveIacProvider(tree, options.iacProvider);
-    await sharedConstructsGenerator(tree, { iacProvider });
+    // For Terraform, the docker image must be pre-built before deploy.
+    // For CDK, the image is built via DockerImageAsset with buildContexts.
+    if (iacProvider !== 'CDK') {
+      addDependencyToTargetIfNotPresent(project, 'build', 'docker');
+    }
 
     await addAgentInfra(tree, {
       agentNameKebabCase: name,
       agentNameClassName,
       projectName: project.name,
       dockerImageTag,
+      dockerfileDir: targetSourceDir,
+      bundleOutputDir: joinPathFragments(distDir, 'bundle', 'agent', name),
       iacProvider,
     });
   }

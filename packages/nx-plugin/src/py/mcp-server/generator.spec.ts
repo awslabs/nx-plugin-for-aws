@@ -377,8 +377,8 @@ dev-dependencies = []
       'bundle-arm',
     );
 
-    // Check that build target depends on docker
-    expect(projectConfig.targets.build.dependsOn).toContain('docker');
+    // For CDK, build target should not depend on docker (CDK builds via buildContexts)
+    expect(projectConfig.targets.build.dependsOn).not.toContain('docker');
   });
 
   it('should generate MCP server with BedrockAgentCoreRuntime and custom name', async () => {
@@ -521,21 +521,12 @@ dev-dependencies = []
       iacProvider: 'CDK',
     });
 
-    expect(
-      tree.read(
-        'packages/common/constructs/src/app/mcp-servers/my-server/Dockerfile',
-        'utf-8',
-      ),
-    ).toContain('my-scope-my-server:latest');
-
-    // Check that the docker image tag is correctly generated in the MCP server construct
+    // Check that the CDK construct uses buildContexts
     const mcpServerConstruct = tree.read(
       'packages/common/constructs/src/app/mcp-servers/my-server/my-server.ts',
       'utf-8',
     );
-    expect(mcpServerConstruct).toContain(
-      'docker inspect my-scope-my-server:latest',
-    );
+    expect(mcpServerConstruct).toContain('buildContexts');
   });
 
   it('should match snapshot for BedrockAgentCoreRuntime generated constructs files', async () => {
@@ -676,8 +667,8 @@ dev-dependencies = []
     expect(projectConfig.targets.docker).toBeDefined();
     expect(projectConfig.targets.docker.dependsOn).toContain(dockerTargetName);
 
-    // Check that build target depends on docker
-    expect(projectConfig.targets.build.dependsOn).toContain('docker');
+    // For CDK, build target should not depend on docker (CDK builds via buildContexts)
+    expect(projectConfig.targets.build.dependsOn).not.toContain('docker');
   });
 
   it('should generate MCP server with Terraform provider and default name', async () => {

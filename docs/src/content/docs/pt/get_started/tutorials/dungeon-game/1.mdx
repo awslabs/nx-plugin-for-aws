@@ -508,18 +508,17 @@ Este é o ponto de entrada do agente, configurado como uma aplicação FastAPI c
 
 ```ts
 // common/constructs/src/app/agents/story-agent.ts
-import { Lazy, Names } from 'aws-cdk-lib';
+import { FileSystem, Lazy, Names } from 'aws-cdk-lib';
 import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import { Construct } from 'constructs';
-import { execSync } from 'child_process';
 import * as path from 'path';
-import * as url from 'url';
 import {
   AgentRuntimeArtifact,
   ProtocolType,
   Runtime,
   RuntimeProps,
 } from '@aws-cdk/aws-bedrock-agentcore-alpha';
+import { findWorkspaceRoot } from '../../../core/utils.js';
 
 export type StoryAgentProps = Omit<
   RuntimeProps,
@@ -533,14 +532,21 @@ export class StoryAgent extends Construct {
   constructor(scope: Construct, id: string, props?: StoryAgentProps) {
     super(scope, id);
 
+    const workspaceRoot = findWorkspaceRoot(__dirname);
+
     this.dockerImage = AgentRuntimeArtifact.fromAsset(
-      path.dirname(url.fileURLToPath(new URL(import.meta.url))),
+      path.join(workspaceRoot, 'packages/dungeon-adventure/story/src/agent'),
       {
         platform: Platform.LINUX_ARM64,
-        extraHash: execSync(
-          `docker inspect dungeon-adventure-story-agent:latest --format '{{.Id}}'`,
-          { encoding: 'utf-8' },
-        ).trim(),
+        buildContexts: {
+          workspace: workspaceRoot,
+        },
+        extraHash: FileSystem.fingerprint(
+          path.join(
+            workspaceRoot,
+            'dist/packages/dungeon-adventure/story/bundle/agent/story-agent',
+          ),
+        ),
       },
     );
 
@@ -557,9 +563,7 @@ export class StoryAgent extends Construct {
 }
 ```
 
-Isso configura um `AgentRuntimeArtifact` do CDK que envia sua imagem Docker do agente para o ECR e a hospeda usando o AgentCore Runtime.
-
-Você pode notar um `Dockerfile` extra, que referencia a imagem Docker do projeto `story`, permitindo que co-localizemos o Dockerfile e o código-fonte do agente.
+Isso configura um `AgentRuntimeArtifact` do CDK que envia sua imagem Docker do agente para o ECR e a hospeda usando o AgentCore Runtime. Ele usa `buildContexts` do CDK para referenciar a raiz do workspace, permitindo que o Dockerfile seja co-localizado com o código-fonte do agente.
 
 </Drawer>
 

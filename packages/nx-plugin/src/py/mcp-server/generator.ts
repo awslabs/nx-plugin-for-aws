@@ -121,6 +121,10 @@ export const pyMcpServerGenerator = async (
       { overwriteStrategy: OverwriteStrategy.KeepExisting },
     );
 
+    // Add shared constructs
+    const iacProvider = await resolveIacProvider(tree, options.iacProvider);
+    await sharedConstructsGenerator(tree, { iacProvider });
+
     const dockerTargetName = `${mcpTargetPrefix}-docker`;
 
     // Add a docker target specific to this MCP server
@@ -146,19 +150,19 @@ export const pyMcpServerGenerator = async (
       ],
     };
 
-    project.targets.build = {
-      ...project.targets.build,
-      dependsOn: [
-        ...(project.targets.build?.dependsOn ?? []).filter(
-          (t) => t !== 'docker',
-        ),
-        'docker',
-      ],
-    };
-
-    // Add shared constructs
-    const iacProvider = await resolveIacProvider(tree, options.iacProvider);
-    await sharedConstructsGenerator(tree, { iacProvider });
+    // For Terraform, the docker image must be pre-built before deploy.
+    // For CDK, the image is built via DockerImageAsset with buildContexts.
+    if (iacProvider !== 'CDK') {
+      project.targets.build = {
+        ...project.targets.build,
+        dependsOn: [
+          ...(project.targets.build?.dependsOn ?? []).filter(
+            (t) => t !== 'docker',
+          ),
+          'docker',
+        ],
+      };
+    }
 
     // Add the construct to deploy the mcp server
     await addMcpServerInfra(tree, {
@@ -166,6 +170,8 @@ export const pyMcpServerGenerator = async (
       mcpServerNameClassName,
       projectName: project.name,
       dockerImageTag,
+      dockerfileDir: targetSourceDir,
+      bundleOutputDir,
       iacProvider,
     });
   }
