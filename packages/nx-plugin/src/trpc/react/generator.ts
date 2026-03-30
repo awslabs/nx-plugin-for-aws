@@ -157,7 +157,7 @@ export async function reactGenerator(
     );
   }
 
-  addTargetToServeLocal(
+  await addTargetToServeLocal(
     tree,
     frontendProjectConfig.name,
     backendProjectConfig.name,

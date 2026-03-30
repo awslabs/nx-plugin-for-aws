@@ -9,10 +9,10 @@ import {
   OverwriteStrategy,
 } from '@nx/devkit';
 import { RuntimeConfigGeneratorSchema } from './schema';
-import { factory, JsxSelfClosingElement } from 'typescript';
+import { factory } from 'typescript';
 import { getNpmScopePrefix, toScopeAlias } from '../../../utils/npm-scope';
 import { formatFilesInSubtree } from '../../../utils/format';
-import { prependStatements, query, replaceIfExists } from '../../../utils/ast';
+import { prependStatements, applyGritQLTransform } from '../../../utils/ast';
 import {
   NxGeneratorInfo,
   addComponentGeneratorMetadata,
@@ -48,14 +48,7 @@ export async function runtimeConfigGenerator(
     'RuntimeConfig',
     'index.tsx',
   );
-  if (
-    tree.exists(runtimeConfigPath) ||
-    query(
-      tree,
-      mainTsxPath,
-      'JsxElement > JsxOpeningElement[name.text="RuntimeConfigProvider"]',
-    ).length > 0
-  ) {
+  if (tree.exists(runtimeConfigPath)) {
     console.debug('Runtime config already exists, skipping generation');
     return;
   }
@@ -83,35 +76,15 @@ export async function runtimeConfigGenerator(
     ),
     factory.createStringLiteral('./components/RuntimeConfig', true),
   );
-
   prependStatements(tree, mainTsxPath, [runtimeContextImport]);
 
-  let locatedTargetNode = false;
-  replaceIfExists(
+  const wrapped = await applyGritQLTransform(
     tree,
     mainTsxPath,
-    'JsxSelfClosingElement',
-    (node: JsxSelfClosingElement) => {
-      if (node.tagName.getText() !== 'App') {
-        return node;
-      } else {
-        locatedTargetNode = true;
-      }
-      return factory.createJsxElement(
-        factory.createJsxOpeningElement(
-          factory.createIdentifier('RuntimeConfigProvider'),
-          undefined,
-          factory.createJsxAttributes([]),
-        ),
-        [node],
-        factory.createJsxClosingElement(
-          factory.createIdentifier('RuntimeConfigProvider'),
-        ),
-      );
-    },
+    '`<App />` => `<RuntimeConfigProvider><App /></RuntimeConfigProvider>`',
   );
 
-  if (!locatedTargetNode) {
+  if (!wrapped) {
     throw new Error('Could not locate the App element in main.tsx');
   }
 
