@@ -10,12 +10,11 @@ import {
   Tree,
   updateJson,
 } from '@nx/devkit';
-import { ArrayLiteralExpression, Expression, factory } from 'typescript';
 import tsProjectGenerator from '../ts/lib/generator';
 import { configureTsProject } from '../ts/lib/ts-project-utils';
 import { formatFilesInSubtree } from './format';
 import { getNpmScopePrefix, toScopeAlias } from './npm-scope';
-import { jsonToAst, query, replace } from './ast';
+import { applyGritQLTransform, hasGritQLMatch } from './ast';
 import {
   PACKAGES_DIR,
   SHARED_SHADCN_DIR,
@@ -59,44 +58,29 @@ const ensureNpmrcIgnoresWorkspaceRoot = (tree: Tree): boolean => {
   return true;
 };
 
-const addSharedShadcnEslintRules = (
+const addSharedShadcnEslintRules = async (
   tree: Tree,
   eslintConfigPath: string,
-): void => {
+): Promise<void> => {
   if (!tree.exists(eslintConfigPath)) {
-    return;
-  }
-
-  const existingRule = query(
-    tree,
-    eslintConfigPath,
-    'PropertyAssignment:has(StringLiteral[value="@nx/enforce-module-boundaries"])',
-  );
-
-  if (existingRule.length > 0) {
     return;
   }
 
   // shadcn generates aliased imports from components.json, which conflict with our
   // relative-import lint rule. This rule is therefore disabled for common-shadcn.
-  // import { cn } from ':my-app/common-shadcn/lib/utils';
-
-  const ruleConfig = jsonToAst({
-    files: ['**/*.{ts,tsx,js,jsx}'],
-    rules: {
-      '@nx/enforce-module-boundaries': 'off',
-    },
-  }) as Expression;
-
-  replace(
+  const hasRule = await hasGritQLMatch(
     tree,
     eslintConfigPath,
-    'ExportAssignment > ArrayLiteralExpression',
-    (node: ArrayLiteralExpression) =>
-      factory.createArrayLiteralExpression(
-        [...node.elements, ruleConfig],
-        true,
-      ),
+    '`@nx/enforce-module-boundaries`',
+  );
+  if (hasRule) {
+    return;
+  }
+
+  await applyGritQLTransform(
+    tree,
+    eslintConfigPath,
+    "`export default [$items]` where { $items += `, { files: ['**/*.{ts,tsx,js,jsx}'], rules: { '@nx/enforce-module-boundaries': 'off' } }` }",
   );
 };
 
@@ -168,7 +152,7 @@ export async function sharedShadcnGenerator(tree: Tree) {
       }),
     );
 
-    addSharedShadcnEslintRules(tree, eslintConfigPath);
+    await addSharedShadcnEslintRules(tree, eslintConfigPath);
     addDependenciesToPackageJson(tree, withVersions([...SHADCN_DEPS]), {});
   }
 

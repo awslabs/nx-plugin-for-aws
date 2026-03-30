@@ -13,22 +13,14 @@ import {
 import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
 import { TsReactWebsiteAuthGeneratorSchema as TsReactWebsiteAuthGeneratorSchema } from './schema';
 import { runtimeConfigGenerator } from '../runtime-config/generator';
-import {
-  ArrowFunction,
-  Block,
-  factory,
-  JsxElement,
-  NodeFlags,
-  VariableDeclaration,
-} from 'typescript';
 import { withVersions } from '../../../utils/versions';
 import {
-  createJsxElement,
-  createJsxElementFromIdentifier,
   addDestructuredImport,
-  replace,
   addSingleImport,
+  applyGritQLTransform,
 } from '../../../utils/ast';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { formatFilesInSubtree } from '../../../utils/format';
 import {
   NxGeneratorInfo,
@@ -46,6 +38,9 @@ import {
   addShadcnAuthMenu,
 } from './utils';
 import { toProjectRelativePath } from '../../../utils/paths';
+
+const readGritPattern = (name: string): string =>
+  readFileSync(join(__dirname, 'grit', `${name}.grit`), 'utf-8').trim();
 
 export const COGNITO_AUTH_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -121,16 +116,10 @@ export async function tsReactWebsiteAuthGenerator(
   const uxProvider =
     (projectConfiguration.metadata as any)?.uxProvider ?? 'Cloudscape';
 
-  replace(
+  await applyGritQLTransform(
     tree,
     mainTsxPath,
-    'JsxElement[openingElement.tagName.name="RuntimeConfigProvider"]',
-    (node: JsxElement) =>
-      createJsxElement(
-        node.openingElement,
-        [createJsxElementFromIdentifier('CognitoAuth', node.children)],
-        node.closingElement,
-      ),
+    readGritPattern('cognito-auth-wrapper'),
   );
   // Update App Layout
   const appLayoutTsxPath = joinPathFragments(
@@ -146,82 +135,10 @@ export async function tsReactWebsiteAuthGenerator(
       ['useAuth'],
       'react-oidc-context',
     );
-    replace(
+    await applyGritQLTransform(
       tree,
       appLayoutTsxPath,
-      'VariableDeclaration',
-      (node: VariableDeclaration) => {
-        // Only process if this is the App component
-        if (node.name.getText() !== 'AppLayout') {
-          return node;
-        }
-        const arrowFunction = node.initializer as ArrowFunction;
-        const functionBody = arrowFunction.body as Block;
-        // Create our new declaration
-        const authDeclaration = factory.createVariableStatement(
-          undefined,
-          factory.createVariableDeclarationList(
-            [
-              factory.createVariableDeclaration(
-                factory.createObjectBindingPattern([
-                  factory.createBindingElement(
-                    undefined,
-                    undefined,
-                    factory.createIdentifier('user'),
-                    undefined,
-                  ),
-                  factory.createBindingElement(
-                    undefined,
-                    undefined,
-                    factory.createIdentifier('removeUser'),
-                    undefined,
-                  ),
-                  factory.createBindingElement(
-                    undefined,
-                    undefined,
-                    factory.createIdentifier('signoutRedirect'),
-                    undefined,
-                  ),
-                  factory.createBindingElement(
-                    undefined,
-                    undefined,
-                    factory.createIdentifier('clearStaleState'),
-                    undefined,
-                  ),
-                ]),
-                undefined,
-                undefined,
-                factory.createCallExpression(
-                  factory.createIdentifier('useAuth'),
-                  undefined,
-                  [],
-                ),
-              ),
-            ],
-            NodeFlags.Const,
-          ),
-        );
-        // Add as first statement
-        const newStatements = [authDeclaration, ...functionBody.statements];
-        // Create new arrow function with updated body
-        const newArrowFunction = factory.updateArrowFunction(
-          arrowFunction,
-          arrowFunction.modifiers,
-          arrowFunction.typeParameters,
-          arrowFunction.parameters,
-          arrowFunction.type,
-          arrowFunction.equalsGreaterThanToken,
-          factory.createBlock(newStatements, true),
-        );
-        // Update the variable declaration
-        return factory.updateVariableDeclaration(
-          node,
-          node.name,
-          node.exclamationToken,
-          node.type,
-          newArrowFunction,
-        );
-      },
+      readGritPattern('app-layout-use-auth'),
     );
     // TODO: update utils if they exist by appending to the array
     // Add a top-level navigation menu that shows the signed-in user's profile and actions
