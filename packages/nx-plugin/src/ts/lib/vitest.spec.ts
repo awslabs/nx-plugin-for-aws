@@ -18,8 +18,8 @@ describe('vitest utils', () => {
     });
   });
 
-  it('should configure vitest to pass with no tests', () => {
-    configureVitest(tree, {
+  it('should configure vitest to pass with no tests', async () => {
+    await configureVitest(tree, {
       dir: 'test',
       fullyQualifiedName: 'test',
     });
