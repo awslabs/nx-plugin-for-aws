@@ -71,16 +71,6 @@ describe('preset generator', () => {
     expect(syncGenerators).toContain(TS_SYNC_GENERATOR_NAME);
     expect(syncGenerators).toContain(NX_TYPESCRIPT_SYNC_GENERATOR);
   });
-
-  it('should allow-list gritql and nx postinstall scripts', async () => {
-    await presetGenerator(tree, { addTsPlugin: false, iacProvider: 'CDK' });
-
-    const packageJson = readJson(tree, 'package.json');
-    expect(packageJson.pnpm).toBeDefined();
-    expect(packageJson.pnpm.onlyBuiltDependencies).toBeDefined();
-    expect(packageJson.pnpm.onlyBuiltDependencies).toContain('nx');
-    expect(packageJson.pnpm.onlyBuiltDependencies).toContain('@getgrit/cli');
-  });
 });
 
 describe('isAmazonian', () => {

@@ -463,9 +463,10 @@ export const hasGritQLMatch = async (
   if (!tree.exists(filePath)) return false;
   const source = tree.read(filePath)!.toString();
   try {
-    // Use an identity rewrite to check for matches — if the pattern matches,
-    // applyToFile returns a result; otherwise it returns null.
-    const query = new QueryBuilder(`${pattern} => ${pattern}`);
+    // Use a metavariable rewrite to check for matches — $p is constrained to
+    // the caller's pattern and rewritten to itself, avoiding rendering the
+    // pattern string twice in the query.
+    const query = new QueryBuilder(`$p => $p where { $p <: ${pattern} }`);
     const result = await query.applyToFile({
       path: filePath,
       content: source,

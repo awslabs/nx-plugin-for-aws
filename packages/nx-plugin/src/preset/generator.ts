@@ -180,14 +180,6 @@ export const presetGenerator = async (
       'build:all': 'nx run-many --target build --all',
       'affected:all': 'nx affected --target build',
     },
-    pnpm: {
-      ...packageJson.pnpm,
-      onlyBuiltDependencies: [
-        ...(packageJson.pnpm?.onlyBuiltDependencies ?? []),
-        '@getgrit/cli',
-        'nx',
-      ],
-    },
   }));
 
   addDependenciesToPackageJson(
