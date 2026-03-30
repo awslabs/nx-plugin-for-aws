@@ -42,7 +42,11 @@ export default App;`;
     it('should add hook import when all required elements exist', async () => {
       tree.write('main.tsx', baseMainTsxContent);
 
-      await addHookResultToRouterProviderContext(tree, 'main.tsx', defaultProps);
+      await addHookResultToRouterProviderContext(
+        tree,
+        'main.tsx',
+        defaultProps,
+      );
 
       const updatedContent = tree.read('main.tsx', 'utf-8');
       expect(updatedContent).toContain('import { useAuth }');
@@ -52,7 +56,11 @@ export default App;`;
     it('should update RouterProviderContext interface to include new context property', async () => {
       tree.write('main.tsx', baseMainTsxContent);
 
-      await addHookResultToRouterProviderContext(tree, 'main.tsx', defaultProps);
+      await addHookResultToRouterProviderContext(
+        tree,
+        'main.tsx',
+        defaultProps,
+      );
 
       const updatedContent = tree.read('main.tsx', 'utf-8');
       expect(updatedContent).toContain('auth?: ReturnType<typeof useAuth>');
@@ -61,7 +69,11 @@ export default App;`;
     it('should preserve existing context properties in RouterProviderContext interface', async () => {
       tree.write('main.tsx', baseMainTsxContent);
 
-      await addHookResultToRouterProviderContext(tree, 'main.tsx', defaultProps);
+      await addHookResultToRouterProviderContext(
+        tree,
+        'main.tsx',
+        defaultProps,
+      );
 
       const updatedContent = tree.read('main.tsx', 'utf-8');
       expect(updatedContent).toContain('existingProp?: string');
@@ -76,7 +88,11 @@ export default App;`;
 
       tree.write('main.tsx', contentWithExistingAuth);
 
-      await addHookResultToRouterProviderContext(tree, 'main.tsx', defaultProps);
+      await addHookResultToRouterProviderContext(
+        tree,
+        'main.tsx',
+        defaultProps,
+      );
 
       const updatedContent = tree.read('main.tsx', 'utf-8');
       const authMatches = (updatedContent.match(/auth\?:/g) || []).length;
@@ -86,7 +102,11 @@ export default App;`;
     it('should update router context to include new context property', async () => {
       tree.write('main.tsx', baseMainTsxContent);
 
-      await addHookResultToRouterProviderContext(tree, 'main.tsx', defaultProps);
+      await addHookResultToRouterProviderContext(
+        tree,
+        'main.tsx',
+        defaultProps,
+      );
 
       const updatedContent = tree.read('main.tsx', 'utf-8');
       expect(updatedContent).toContain('auth: undefined');
@@ -95,7 +115,11 @@ export default App;`;
     it('should preserve existing context properties in router context object', async () => {
       tree.write('main.tsx', baseMainTsxContent);
 
-      await addHookResultToRouterProviderContext(tree, 'main.tsx', defaultProps);
+      await addHookResultToRouterProviderContext(
+        tree,
+        'main.tsx',
+        defaultProps,
+      );
 
       const updatedContent = tree.read('main.tsx', 'utf-8');
       expect(updatedContent).toContain('existingContext: undefined');
@@ -110,7 +134,11 @@ export default App;`;
 
       tree.write('main.tsx', expressionBodyContent);
 
-      await addHookResultToRouterProviderContext(tree, 'main.tsx', defaultProps);
+      await addHookResultToRouterProviderContext(
+        tree,
+        'main.tsx',
+        defaultProps,
+      );
 
       const updatedContent = tree.read('main.tsx', 'utf-8');
       expect(updatedContent).toContain('const auth = useAuth();');
@@ -119,7 +147,11 @@ export default App;`;
     it('should add hook call to App component when it has block body', async () => {
       tree.write('main.tsx', baseMainTsxContent);
 
-      await addHookResultToRouterProviderContext(tree, 'main.tsx', defaultProps);
+      await addHookResultToRouterProviderContext(
+        tree,
+        'main.tsx',
+        defaultProps,
+      );
 
       const updatedContent = tree.read('main.tsx', 'utf-8');
       expect(updatedContent).toContain('const auth = useAuth();');
@@ -133,7 +165,11 @@ export default App;`;
 
       tree.write('main.tsx', contentWithExistingHook);
 
-      await addHookResultToRouterProviderContext(tree, 'main.tsx', defaultProps);
+      await addHookResultToRouterProviderContext(
+        tree,
+        'main.tsx',
+        defaultProps,
+      );
 
       const updatedContent = tree.read('main.tsx', 'utf-8');
       const hookCallMatches = (
@@ -145,7 +181,11 @@ export default App;`;
     it('should update RouterProvider context prop to include new context property', async () => {
       tree.write('main.tsx', baseMainTsxContent);
 
-      await addHookResultToRouterProviderContext(tree, 'main.tsx', defaultProps);
+      await addHookResultToRouterProviderContext(
+        tree,
+        'main.tsx',
+        defaultProps,
+      );
 
       const updatedContent = tree.read('main.tsx', 'utf-8');
       expect(updatedContent).toContain(
@@ -156,7 +196,11 @@ export default App;`;
     it('should preserve existing context properties in RouterProvider context prop', async () => {
       tree.write('main.tsx', baseMainTsxContent);
 
-      await addHookResultToRouterProviderContext(tree, 'main.tsx', defaultProps);
+      await addHookResultToRouterProviderContext(
+        tree,
+        'main.tsx',
+        defaultProps,
+      );
 
       const updatedContent = tree.read('main.tsx', 'utf-8');
       expect(updatedContent).toContain("existingContext: 'value'");
@@ -171,7 +215,11 @@ export default App;`;
 
       tree.write('main.tsx', contentWithoutContext);
 
-      await addHookResultToRouterProviderContext(tree, 'main.tsx', defaultProps);
+      await addHookResultToRouterProviderContext(
+        tree,
+        'main.tsx',
+        defaultProps,
+      );
 
       const updatedContent = tree.read('main.tsx', 'utf-8');
       expect(updatedContent).toContain('context={{ auth }}');
@@ -185,7 +233,11 @@ export default App;`;
 
       tree.write('main.tsx', contentWithoutInterface);
 
-      await addHookResultToRouterProviderContext(tree, 'main.tsx', defaultProps);
+      await addHookResultToRouterProviderContext(
+        tree,
+        'main.tsx',
+        defaultProps,
+      );
 
       const updatedContent = tree.read('main.tsx', 'utf-8');
       // Should still add import but not make other changes
@@ -201,7 +253,11 @@ export default App;`;
 
       tree.write('main.tsx', contentWithoutRouter);
 
-      await addHookResultToRouterProviderContext(tree, 'main.tsx', defaultProps);
+      await addHookResultToRouterProviderContext(
+        tree,
+        'main.tsx',
+        defaultProps,
+      );
 
       const updatedContent = tree.read('main.tsx', 'utf-8');
       // Should still add import but not make other changes
@@ -217,7 +273,11 @@ export default App;`;
 
       tree.write('main.tsx', contentWithoutApp);
 
-      await addHookResultToRouterProviderContext(tree, 'main.tsx', defaultProps);
+      await addHookResultToRouterProviderContext(
+        tree,
+        'main.tsx',
+        defaultProps,
+      );
 
       const updatedContent = tree.read('main.tsx', 'utf-8');
 
@@ -233,7 +293,11 @@ export default App;`;
 
       tree.write('main.tsx', contentWithoutRouterProvider);
 
-      await addHookResultToRouterProviderContext(tree, 'main.tsx', defaultProps);
+      await addHookResultToRouterProviderContext(
+        tree,
+        'main.tsx',
+        defaultProps,
+      );
 
       const updatedContent = tree.read('main.tsx', 'utf-8');
 
@@ -283,7 +347,11 @@ export default App;`;
 
       tree.write('main.tsx', complexRouterContent);
 
-      await addHookResultToRouterProviderContext(tree, 'main.tsx', defaultProps);
+      await addHookResultToRouterProviderContext(
+        tree,
+        'main.tsx',
+        defaultProps,
+      );
 
       const updatedContent = tree.read('main.tsx', 'utf-8');
       expect(updatedContent).toContain('existingContext: undefined');
@@ -304,7 +372,11 @@ export default App;`;
 
       tree.write('main.tsx', complexContextContent);
 
-      await addHookResultToRouterProviderContext(tree, 'main.tsx', defaultProps);
+      await addHookResultToRouterProviderContext(
+        tree,
+        'main.tsx',
+        defaultProps,
+      );
 
       const updatedContent = tree.read('main.tsx', 'utf-8');
       expect(updatedContent).toContain("existingContext: 'value'");
@@ -327,7 +399,11 @@ export default App;`;
 
       tree.write('main.tsx', appWithStatementsContent);
 
-      await addHookResultToRouterProviderContext(tree, 'main.tsx', defaultProps);
+      await addHookResultToRouterProviderContext(
+        tree,
+        'main.tsx',
+        defaultProps,
+      );
 
       const updatedContent = tree.read('main.tsx', 'utf-8');
       expect(updatedContent).toContain('const auth = useAuth();');
@@ -359,7 +435,11 @@ export default App;`;
 
       tree.write('main.tsx', complexTypeContent);
 
-      await addHookResultToRouterProviderContext(tree, 'main.tsx', defaultProps);
+      await addHookResultToRouterProviderContext(
+        tree,
+        'main.tsx',
+        defaultProps,
+      );
 
       const updatedContent = tree.read('main.tsx', 'utf-8');
       expect(updatedContent).toContain('existingProp?: string');
