@@ -7,6 +7,7 @@ import { joinPathFragments, Tree } from '@nx/devkit';
 import type { UVPyprojectToml } from './nxlv-python';
 import { IPyDepVersion, withPyVersions } from './versions';
 import { parsePipRequirementsLine } from 'pip-requirements-js';
+import { updateToml } from './toml';
 
 /**
  * Add dependencies to a pyproject.toml file
@@ -87,4 +88,44 @@ export const uvxCommand = (
           .join(' ')} `
       : ''
   }${withPyVersions([dep])[0]}${args ? ` ${args}` : ''}`;
+};
+
+/**
+ * Add a workspace dependency from one Python project to another.
+ * Adds the dependency to [project].dependencies and [tool.uv.sources].
+ */
+export const addWorkspaceDependencyToPyProject = (
+  tree: Tree,
+  projectRoot: string,
+  dependencyPackageName: string,
+): void => {
+  const pyprojectPath = joinPathFragments(projectRoot, 'pyproject.toml');
+  if (!tree.exists(pyprojectPath)) {
+    return;
+  }
+
+  updateToml(tree, pyprojectPath, (toml: UVPyprojectToml) => {
+    // Add to [project].dependencies if not already present
+    const deps = toml.project?.dependencies ?? [];
+    if (
+      !deps.some(
+        (d) =>
+          d === dependencyPackageName ||
+          d.startsWith(`${dependencyPackageName}>=`) ||
+          d.startsWith(`${dependencyPackageName}==`),
+      )
+    ) {
+      toml.project.dependencies = [...deps, dependencyPackageName];
+    }
+
+    // Add to [tool.uv.sources] with workspace = true
+    toml.tool = toml.tool ?? {};
+    (toml.tool as any).uv = (toml.tool as any).uv ?? {};
+    (toml.tool as any).uv.sources = (toml.tool as any).uv.sources ?? {};
+    (toml.tool as any).uv.sources[dependencyPackageName] = {
+      workspace: true,
+    };
+
+    return toml;
+  });
 };

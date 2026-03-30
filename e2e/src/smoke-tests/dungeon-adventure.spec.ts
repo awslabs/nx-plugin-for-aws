@@ -102,6 +102,10 @@ describe('smoke test - dungeon-adventure', () => {
       opts,
     );
     await runCLI(
+      `generate @aws/nx-plugin:connection --sourceProject=story --targetProject=inventory --no-interactive`,
+      opts,
+    );
+    await runCLI(
       `generate @aws/nx-plugin:ts#infra --name=infra --no-interactive`,
       opts,
     );
