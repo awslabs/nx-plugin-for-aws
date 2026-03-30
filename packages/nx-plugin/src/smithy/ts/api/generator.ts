@@ -113,7 +113,7 @@ export const tsSmithyApiGenerator = async (
   await sharedConstructsGenerator(tree, {
     iacProvider,
   });
-  addApiGatewayInfra(tree, {
+  await addApiGatewayInfra(tree, {
     iacProvider,
     apiProjectName: backendFullyQualifiedName,
     apiNameClassName,

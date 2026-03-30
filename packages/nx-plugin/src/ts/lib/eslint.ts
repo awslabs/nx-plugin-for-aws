@@ -15,7 +15,7 @@ import { addSingleImport, query, replace } from '../../utils/ast';
 import { ConfigureProjectOptions } from './types';
 import { readProjectConfigurationUnqualified } from '../../utils/nx';
 
-export const configureEslint = (
+export const configureEslint = async (
   tree: Tree,
   options: ConfigureProjectOptions,
 ) => {
@@ -55,7 +55,7 @@ export const configureEslint = (
 
   if (tree.exists(eslintConfigPath)) {
     // Add import if it doesn't exist
-    addSingleImport(
+    await addSingleImport(
       tree,
       eslintConfigPath,
       'eslintPluginPrettierRecommended',

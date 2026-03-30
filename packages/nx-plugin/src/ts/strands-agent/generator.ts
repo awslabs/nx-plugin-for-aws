@@ -119,7 +119,7 @@ export const tsStrandsAgentGenerator = async (
     const iacProvider = await resolveIacProvider(tree, options.iacProvider);
     await sharedConstructsGenerator(tree, { iacProvider });
 
-    addAgentInfra(tree, {
+    await addAgentInfra(tree, {
       agentNameKebabCase: name,
       agentNameClassName,
       projectName: project.name,

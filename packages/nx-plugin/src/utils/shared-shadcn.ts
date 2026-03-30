@@ -145,7 +145,7 @@ export async function sharedShadcnGenerator(tree: Tree) {
       },
     );
 
-    configureTsProject(tree, {
+    await configureTsProject(tree, {
       dir: libraryRoot,
       fullyQualifiedName,
     });

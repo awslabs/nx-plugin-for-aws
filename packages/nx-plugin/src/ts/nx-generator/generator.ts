@@ -140,7 +140,7 @@ export const tsNxGeneratorGenerator = async (
 
     const indexPath = joinPathFragments(sourceRoot, 'index.ts');
     if (tree.exists(indexPath)) {
-      addStarExport(tree, indexPath, `./${generatorSubDir}/generator`);
+      await addStarExport(tree, indexPath, `./${generatorSubDir}/generator`);
     }
 
     addComponentGeneratorMetadata(

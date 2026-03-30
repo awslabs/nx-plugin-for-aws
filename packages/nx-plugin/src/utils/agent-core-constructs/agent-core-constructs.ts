@@ -31,13 +31,13 @@ export interface AddAgentCoreInfraProps {
   serverProtocol: 'MCP' | 'HTTP';
 }
 
-const addAgentCoreInfra = (
+const addAgentCoreInfra = async (
   tree: Tree,
   options: AddAgentCoreInfraProps & { iacProvider: IacProvider },
 ) => {
   switch (options.iacProvider) {
     case 'CDK':
-      addAgentCoreCDKInfra(tree, options);
+      await addAgentCoreCDKInfra(tree, options);
       break;
     case 'Terraform':
       addAgentCoreTerraformInfra(tree, options);
@@ -72,7 +72,7 @@ const addAgentCoreInfra = (
   );
 };
 
-const addAgentCoreCDKInfra = (tree: Tree, options: AddAgentCoreInfraProps) => {
+const addAgentCoreCDKInfra = async (tree: Tree, options: AddAgentCoreInfraProps) => {
   // Add dependency on bedrock agentcore alpha package
   addDependenciesToPackageJson(
     tree,
@@ -98,7 +98,7 @@ const addAgentCoreCDKInfra = (tree: Tree, options: AddAgentCoreInfraProps) => {
   );
 
   // Export app specific CDK construct
-  addStarExport(
+  await addStarExport(
     tree,
     joinPathFragments(
       PACKAGES_DIR,
@@ -110,7 +110,7 @@ const addAgentCoreCDKInfra = (tree: Tree, options: AddAgentCoreInfraProps) => {
     ),
     `./${options.nameKebabCase}/${options.nameKebabCase}.js`,
   );
-  addStarExport(
+  await addStarExport(
     tree,
     joinPathFragments(
       PACKAGES_DIR,
@@ -172,11 +172,11 @@ export interface AddMcpServerInfraProps {
 /**
  * Add an MCP server CDK construct
  */
-export const addMcpServerInfra = (
+export const addMcpServerInfra = async (
   tree: Tree,
   options: AddMcpServerInfraProps & IACProvider,
 ) => {
-  addAgentCoreInfra(tree, {
+  await addAgentCoreInfra(tree, {
     nameClassName: options.mcpServerNameClassName,
     nameKebabCase: options.mcpServerNameKebabCase,
     dockerImageTag: options.dockerImageTag,
@@ -197,11 +197,11 @@ export interface AddAgentInfraProps {
 /**
  * Add an MCP server CDK construct
  */
-export const addAgentInfra = (
+export const addAgentInfra = async (
   tree: Tree,
   options: AddAgentInfraProps & IACProvider,
 ) => {
-  addAgentCoreInfra(tree, {
+  await addAgentCoreInfra(tree, {
     nameClassName: options.agentNameClassName,
     nameKebabCase: options.agentNameKebabCase,
     projectName: options.projectName,

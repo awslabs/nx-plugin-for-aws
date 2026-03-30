@@ -81,7 +81,7 @@ export async function tsReactWebsiteAuthGenerator(
     iacProvider,
   });
 
-  addIdentityInfra(tree, {
+  await addIdentityInfra(tree, {
     iacProvider,
     allowSignup: options.allowSignup,
     cognitoDomain: options.cognitoDomain,
@@ -105,9 +105,9 @@ export async function tsReactWebsiteAuthGenerator(
 
   const mainTsxPath = joinPathFragments(srcRoot, 'main.tsx');
 
-  addSingleImport(tree, mainTsxPath, 'CognitoAuth', './components/CognitoAuth');
+  await addSingleImport(tree, mainTsxPath, 'CognitoAuth', './components/CognitoAuth');
 
-  addHookResultToRouterProviderContext(tree, mainTsxPath, {
+  await addHookResultToRouterProviderContext(tree, mainTsxPath, {
     hook: 'useAuth',
     module: 'react-oidc-context',
     contextProp: 'auth',
@@ -140,7 +140,7 @@ export async function tsReactWebsiteAuthGenerator(
     'index.tsx',
   );
   if (tree.exists(appLayoutTsxPath)) {
-    addDestructuredImport(
+    await addDestructuredImport(
       tree,
       appLayoutTsxPath,
       ['useAuth'],

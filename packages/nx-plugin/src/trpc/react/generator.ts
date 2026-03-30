@@ -107,7 +107,7 @@ export async function reactGenerator(
     frontendProjectConfig.sourceRoot,
     'main.tsx',
   );
-  addSingleImport(
+  await addSingleImport(
     tree,
     mainTsxPath,
     'QueryClientProvider',
@@ -115,7 +115,7 @@ export async function reactGenerator(
   );
 
   const clientProviderName = `${apiNameClassName}ClientProvider`;
-  addSingleImport(
+  await addSingleImport(
     tree,
     mainTsxPath,
     clientProviderName,

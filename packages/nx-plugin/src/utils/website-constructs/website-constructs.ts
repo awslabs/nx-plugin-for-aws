@@ -29,12 +29,12 @@ export interface AddWebsiteInfraOptions {
 /**
  * Add infrastructure for a static website
  */
-export const addWebsiteInfra = (
+export const addWebsiteInfra = async (
   tree: Tree,
   options: AddWebsiteInfraOptions & { iacProvider: IacProvider },
 ) => {
   if (options.iacProvider === 'CDK') {
-    addWebsiteCdkConstructs(tree, options);
+    await addWebsiteCdkConstructs(tree, options);
   } else if (options.iacProvider === 'Terraform') {
     addWebsiteTerraformModules(tree, options);
   } else {
@@ -66,7 +66,7 @@ export const addWebsiteInfra = (
   );
 };
 
-const addWebsiteCdkConstructs = (
+const addWebsiteCdkConstructs = async (
   tree: Tree,
   options: AddWebsiteInfraOptions,
 ) => {
@@ -90,7 +90,7 @@ const addWebsiteCdkConstructs = (
     },
   );
 
-  addStarExport(
+  await addStarExport(
     tree,
     joinPathFragments(
       PACKAGES_DIR,
@@ -101,7 +101,7 @@ const addWebsiteCdkConstructs = (
     ),
     './static-websites/index.js',
   );
-  addStarExport(
+  await addStarExport(
     tree,
     joinPathFragments(
       PACKAGES_DIR,
@@ -113,7 +113,7 @@ const addWebsiteCdkConstructs = (
     ),
     `./${options.websiteNameKebabCase}.js`,
   );
-  addStarExport(
+  await addStarExport(
     tree,
     joinPathFragments(
       PACKAGES_DIR,

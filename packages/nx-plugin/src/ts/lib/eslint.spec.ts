@@ -49,8 +49,8 @@ describe('eslint configuration', () => {
   });
 
   describe('configureEslint', () => {
-    it('should configure project with lint target including cache, inputs, fix and skip-lint configurations', () => {
-      configureEslint(tree, options);
+    it('should configure project with lint target including cache, inputs, fix and skip-lint configurations', async () => {
+      await configureEslint(tree, options);
 
       const projectConfig = readProjectConfiguration(tree, projectName);
       expect(projectConfig.targets?.lint).toBeDefined();
@@ -69,7 +69,7 @@ describe('eslint configuration', () => {
       });
     });
 
-    it('should not remove existing targets when adding lint', () => {
+    it('should not remove existing targets when adding lint', async () => {
       // Add an existing target first
       updateProjectConfiguration(tree, projectName, {
         root: `packages/${projectName}`,
@@ -80,7 +80,7 @@ describe('eslint configuration', () => {
         },
       });
 
-      configureEslint(tree, options);
+      await configureEslint(tree, options);
 
       const projectConfig = readProjectConfiguration(tree, projectName);
       expect(projectConfig.targets?.lint).toEqual({
@@ -101,10 +101,10 @@ describe('eslint configuration', () => {
       });
     });
 
-    it('should add namedInputs.eslint to nx.json when eslint.config.mjs exists', () => {
+    it('should add namedInputs.eslint to nx.json when eslint.config.mjs exists', async () => {
       tree.write('eslint.config.mjs', `export default [];`);
 
-      configureEslint(tree, options);
+      await configureEslint(tree, options);
 
       const nxJson = readNxJson(tree);
       expect(nxJson.targetDefaults?.['@nx/eslint:lint']).not.toBeDefined();
@@ -116,8 +116,8 @@ describe('eslint configuration', () => {
       ]);
     });
 
-    it('should skip eslint config when file does not exist', () => {
-      configureEslint(tree, options);
+    it('should skip eslint config when file does not exist', async () => {
+      await configureEslint(tree, options);
 
       expect(tree.exists('eslint.config.mjs')).toBeFalsy();
     });
@@ -129,8 +129,8 @@ describe('eslint configuration', () => {
       tree.write('eslint.config.mjs', `export default [];`);
     });
 
-    it('should add prettier plugin import and configuration', () => {
-      configureEslint(tree, options);
+    it('should add prettier plugin import and configuration', async () => {
+      await configureEslint(tree, options);
 
       const eslintConfig = tree.read('eslint.config.mjs', 'utf-8');
       expect(eslintConfig).toContain(
@@ -139,13 +139,13 @@ describe('eslint configuration', () => {
       expect(eslintConfig).toContain('eslintPluginPrettierRecommended');
     });
 
-    it('should not duplicate prettier plugin import', () => {
+    it('should not duplicate prettier plugin import', async () => {
       // Add prettier plugin first time
-      configureEslint(tree, options);
+      await configureEslint(tree, options);
       const firstConfig = tree.read('eslint.config.mjs', 'utf-8');
 
       // Add prettier plugin second time
-      configureEslint(tree, options);
+      await configureEslint(tree, options);
       const secondConfig = tree.read('eslint.config.mjs', 'utf-8');
 
       // Count occurrences of the import
@@ -155,15 +155,15 @@ describe('eslint configuration', () => {
       expect(importMatches).toHaveLength(1);
     });
 
-    it('should create ignores object when none exists', () => {
-      configureEslint(tree, options);
+    it('should create ignores object when none exists', async () => {
+      await configureEslint(tree, options);
 
       const eslintConfig = tree.read('eslint.config.mjs', 'utf-8');
       expect(eslintConfig).toContain('ignores');
       expect(eslintConfig).toContain('**/vite.config.*.timestamp*');
     });
 
-    it('should add to existing ignores array', () => {
+    it('should add to existing ignores array', async () => {
       // Create eslint config with existing ignores
       tree.write(
         'eslint.config.mjs',
@@ -174,14 +174,14 @@ describe('eslint configuration', () => {
 ];`,
       );
 
-      configureEslint(tree, options);
+      await configureEslint(tree, options);
 
       const eslintConfig = tree.read('eslint.config.mjs', 'utf-8');
       expect(eslintConfig).toContain('existing-pattern');
       expect(eslintConfig).toContain('**/vite.config.*.timestamp*');
     });
 
-    it('should not duplicate ignore patterns', () => {
+    it('should not duplicate ignore patterns', async () => {
       // Create eslint config with the same pattern already present
       tree.write(
         'eslint.config.mjs',
@@ -192,7 +192,7 @@ describe('eslint configuration', () => {
 ];`,
       );
 
-      configureEslint(tree, options);
+      await configureEslint(tree, options);
 
       const eslintConfig = tree.read('eslint.config.mjs', 'utf-8');
       // Count occurrences of the pattern
@@ -202,7 +202,7 @@ describe('eslint configuration', () => {
       expect(patternMatches).toHaveLength(1);
     });
 
-    it('should preserve non-string elements in ignores array', () => {
+    it('should preserve non-string elements in ignores array', async () => {
       // Create eslint config with mixed content in ignores
       tree.write(
         'eslint.config.mjs',
@@ -213,7 +213,7 @@ describe('eslint configuration', () => {
 ];`,
       );
 
-      configureEslint(tree, options);
+      await configureEslint(tree, options);
 
       const eslintConfig = tree.read('eslint.config.mjs', 'utf-8');
       expect(eslintConfig).toContain('existing-pattern');
@@ -222,7 +222,7 @@ describe('eslint configuration', () => {
       expect(eslintConfig).toContain('**/vite.config.*.timestamp*');
     });
 
-    it('should handle complex eslint config structure', () => {
+    it('should handle complex eslint config structure', async () => {
       // Create more complex eslint config
       tree.write(
         'eslint.config.mjs',
@@ -242,7 +242,7 @@ export default [
 ];`,
       );
 
-      configureEslint(tree, options);
+      await configureEslint(tree, options);
 
       const eslintConfig = tree.read('eslint.config.mjs', 'utf-8');
       expect(eslintConfig).toContain('eslintPluginPrettierRecommended');
@@ -255,8 +255,8 @@ export default [
   });
 
   describe('package.json dependencies', () => {
-    it('should add required dev dependencies', () => {
-      configureEslint(tree, options);
+    it('should add required dev dependencies', async () => {
+      await configureEslint(tree, options);
 
       const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
       expect(packageJson.devDependencies).toHaveProperty('prettier');
@@ -266,7 +266,7 @@ export default [
       expect(packageJson.devDependencies).toHaveProperty('jsonc-eslint-parser');
     });
 
-    it('should not overwrite existing dependencies', () => {
+    it('should not overwrite existing dependencies', async () => {
       // Set up package.json with existing dependencies
       tree.write(
         'package.json',
@@ -279,7 +279,7 @@ export default [
         }),
       );
 
-      configureEslint(tree, options);
+      await configureEslint(tree, options);
 
       const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
       expect(packageJson.devDependencies['existing-dep']).toBe('^1.0.0');

@@ -24,12 +24,12 @@ export interface AddIdentityInfraOptions {
 /**
  * Add infrastructure for a static website
  */
-export const addIdentityInfra = (
+export const addIdentityInfra = async (
   tree: Tree,
   options: AddIdentityInfraOptions & { iacProvider: IacProvider },
 ) => {
   if (options.iacProvider === 'CDK') {
-    addIdentityCdkConstructs(tree, options);
+    await addIdentityCdkConstructs(tree, options);
   } else if (options.iacProvider === 'Terraform') {
     addIdentityTerraformModules(tree, options);
   } else {
@@ -37,7 +37,7 @@ export const addIdentityInfra = (
   }
 };
 
-const addIdentityCdkConstructs = (
+const addIdentityCdkConstructs = async (
   tree: Tree,
   options: AddIdentityInfraOptions,
 ) => {
@@ -51,7 +51,7 @@ const addIdentityCdkConstructs = (
     },
   );
 
-  addStarExport(
+  await addStarExport(
     tree,
     joinPathFragments(
       PACKAGES_DIR,

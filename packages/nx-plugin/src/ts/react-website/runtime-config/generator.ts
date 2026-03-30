@@ -115,7 +115,7 @@ export async function runtimeConfigGenerator(
     throw new Error('Could not locate the App element in main.tsx');
   }
 
-  addHookResultToRouterProviderContext(tree, mainTsxPath, {
+  await addHookResultToRouterProviderContext(tree, mainTsxPath, {
     hook: 'useRuntimeConfig',
     module: './hooks/useRuntimeConfig',
     contextProp: 'runtimeConfig',

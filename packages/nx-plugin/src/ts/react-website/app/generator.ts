@@ -201,7 +201,7 @@ export async function tsReactWebsiteGenerator(
     },
   );
 
-  configureTsProject(tree, {
+  await configureTsProject(tree, {
     dir: websiteContentPath,
     fullyQualifiedName,
   });
@@ -214,7 +214,7 @@ export async function tsReactWebsiteGenerator(
     iacProvider,
   });
 
-  addWebsiteInfra(tree, {
+  await addWebsiteInfra(tree, {
     iacProvider,
     websiteProjectName: fullyQualifiedName,
     scopeAlias,
@@ -331,7 +331,7 @@ export async function tsReactWebsiteGenerator(
         overwriteStrategy: OverwriteStrategy.KeepExisting,
       },
     );
-    configureTsProject(tree, {
+    await configureTsProject(tree, {
       fullyQualifiedName: e2eFullyQualifiedName,
       dir: e2eRoot,
     });
@@ -341,17 +341,17 @@ export async function tsReactWebsiteGenerator(
   if (tree.exists(viteConfigPath)) {
     // Add Tanstack Router import if enabled
     if (enableTanstackRouter) {
-      addDestructuredImport(
+      await addDestructuredImport(
         tree,
         viteConfigPath,
         ['tanstackRouter'],
         '@tanstack/router-plugin/vite',
       );
 
-      addDestructuredImport(tree, viteConfigPath, ['resolve'], 'path');
+      await addDestructuredImport(tree, viteConfigPath, ['resolve'], 'path');
     }
 
-    addSingleImport(
+    await addSingleImport(
       tree,
       viteConfigPath,
       'tsconfigPaths',
@@ -360,7 +360,7 @@ export async function tsReactWebsiteGenerator(
 
     // Add TailwindCSS import if enabled
     if (enableTailwind) {
-      addSingleImport(tree, viteConfigPath, 'tailwindcss', '@tailwindcss/vite');
+      await addSingleImport(tree, viteConfigPath, 'tailwindcss', '@tailwindcss/vite');
     }
 
     replaceIfExists(
