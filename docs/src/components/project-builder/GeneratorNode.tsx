@@ -3,11 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useCallback } from 'react';
-import { Handle, Position, type NodeProps } from '@xyflow/react';
+import React from 'react';
+import { Handle, Position } from '@xyflow/react';
 import { getIcon } from './icons';
 import { getGeneratorById } from './generators';
-import type { GeneratorNodeData } from './types';
 
 interface GeneratorNodeComponentProps {
   generatorId: string;
@@ -29,6 +28,13 @@ const GeneratorNodeComponent: React.FC<GeneratorNodeComponentProps> = ({
   const generator = getGeneratorById(generatorId);
   if (!generator) return null;
 
+  const handleStyle = {
+    width: 10,
+    height: 10,
+    background: 'var(--sl-color-gray-4)',
+    border: '2px solid var(--sl-color-gray-3)',
+  };
+
   return (
     <div
       style={{
@@ -44,12 +50,7 @@ const GeneratorNodeComponent: React.FC<GeneratorNodeComponentProps> = ({
       <Handle
         type="target"
         position={Position.Left}
-        style={{
-          width: 10,
-          height: 10,
-          background: 'var(--sl-color-gray-4)',
-          border: '2px solid var(--sl-color-gray-3)',
-        }}
+        style={{ ...handleStyle, left: -5 }}
       />
 
       <div
@@ -164,12 +165,7 @@ const GeneratorNodeComponent: React.FC<GeneratorNodeComponentProps> = ({
       <Handle
         type="source"
         position={Position.Right}
-        style={{
-          width: 10,
-          height: 10,
-          background: 'var(--sl-color-gray-4)',
-          border: '2px solid var(--sl-color-gray-3)',
-        }}
+        style={{ ...handleStyle, right: -5 }}
       />
     </div>
   );

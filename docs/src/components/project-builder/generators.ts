@@ -4,6 +4,9 @@
  */
 
 import type { GeneratorDefinition, ValidConnection } from './types';
+import { TS_VERSIONS } from '../../../../packages/nx-plugin/src/utils/versions';
+
+export const NX_VERSION = TS_VERSIONS['create-nx-workspace'];
 
 export const GENERATORS: GeneratorDefinition[] = [
   {
@@ -92,7 +95,7 @@ export const GENERATORS: GeneratorDefinition[] = [
     description: 'TypeScript AI Agent (Strands)',
     category: 'ai',
     icon: 'strands',
-    iconColor: '#FF9900',
+    iconColor: '#3178C6',
     defaultName: 'agent',
     generatorId: 'ts#strands-agent',
     hostProjectGenerator: 'ts#project',
@@ -113,7 +116,7 @@ export const GENERATORS: GeneratorDefinition[] = [
     description: 'Python AI Agent (Strands)',
     category: 'ai',
     icon: 'strands',
-    iconColor: '#3776AB',
+    iconColor: '#FFD43B',
     defaultName: 'agent',
     generatorId: 'py#strands-agent',
     hostProjectGenerator: 'py#project',
@@ -134,7 +137,7 @@ export const GENERATORS: GeneratorDefinition[] = [
     description: 'TypeScript MCP Server',
     category: 'ai',
     icon: 'mcp',
-    iconColor: '#FF9900',
+    iconColor: '#3178C6',
     defaultName: 'mcp-server',
     generatorId: 'ts#mcp-server',
     hostProjectGenerator: 'ts#project',
@@ -155,7 +158,7 @@ export const GENERATORS: GeneratorDefinition[] = [
     description: 'Python MCP Server',
     category: 'ai',
     icon: 'mcp',
-    iconColor: '#3776AB',
+    iconColor: '#FFD43B',
     defaultName: 'mcp-server',
     generatorId: 'py#mcp-server',
     hostProjectGenerator: 'py#project',
@@ -180,6 +183,18 @@ export const GENERATORS: GeneratorDefinition[] = [
     defaultName: 'infra',
     generatorId: 'ts#infra',
     connectionType: 'ts#infra',
+    options: [],
+  },
+  {
+    id: 'terraform-project',
+    label: 'Terraform',
+    description: 'Terraform infrastructure project',
+    category: 'infra',
+    icon: 'terraform',
+    iconColor: '#7B42BC',
+    defaultName: 'infra',
+    generatorId: 'terraform#project',
+    connectionType: 'terraform#project',
     options: [],
   },
 ];
@@ -208,5 +223,21 @@ export const isConnectionValid = (
 ): boolean =>
   VALID_CONNECTIONS.some(
     (c) =>
-      c.source === sourceConnectionType && c.target === targetConnectionType,
+      (c.source === sourceConnectionType &&
+        c.target === targetConnectionType) ||
+      (c.source === targetConnectionType &&
+        c.target === sourceConnectionType),
   );
+
+/** Get the canonical direction for a valid connection pair */
+export const getCanonicalConnection = (
+  typeA: string,
+  typeB: string,
+): { source: string; target: string } | null => {
+  const match = VALID_CONNECTIONS.find(
+    (c) =>
+      (c.source === typeA && c.target === typeB) ||
+      (c.source === typeB && c.target === typeA),
+  );
+  return match ?? null;
+};

@@ -77,6 +77,12 @@ export const CdkIcon = ({ color = '#FF9900' }: { color?: string }) => (
   </svg>
 );
 
+export const TerraformIcon = ({ color = '#7B42BC' }: { color?: string }) => (
+  <svg viewBox="0 0 24 24" width={iconSize} height={iconSize} fill={color}>
+    <path d="M1 2.5v7l6.1 3.5V5.9L1 2.5zM8.3 6v7.1l6.1 3.5V9.5L8.3 6zM15.6 2.5v7.1l6.1-3.5V2.5l-6.1 3.5v-3.5zM8.3 14.3v7.1l6.1 3.5v-7.1l-6.1-3.5z" />
+  </svg>
+);
+
 const ICON_MAP: Record<string, React.FC<{ color?: string }>> = {
   react: ReactIcon,
   trpc: TrpcIcon,
@@ -85,6 +91,7 @@ const ICON_MAP: Record<string, React.FC<{ color?: string }>> = {
   strands: StrandsIcon,
   mcp: McpIcon,
   cdk: CdkIcon,
+  terraform: TerraformIcon,
 };
 
 export const getIcon = (

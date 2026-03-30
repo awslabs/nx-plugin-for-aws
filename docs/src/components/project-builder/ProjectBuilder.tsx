@@ -24,7 +24,11 @@ import GeneratorPanel from './GeneratorPanel';
 import GeneratorNodeComponent from './GeneratorNode';
 import CommandOutput from './CommandOutput';
 import GlobalSettings from './GlobalSettings';
-import { getGeneratorById, isConnectionValid } from './generators';
+import {
+  getGeneratorById,
+  isConnectionValid,
+  getCanonicalConnection,
+} from './generators';
 import type {
   GeneratorDefinition,
   GeneratorNodeData,
@@ -51,14 +55,17 @@ const generateUniqueName = (
 };
 
 /**
- * Wrapper node component that bridges ReactFlow node props to our component
+ * Wrapper node component that bridges ReactFlow node props to our component.
+ * Created once and remains stable to avoid ReactFlow remounting nodes.
  */
 const createNodeComponent = (
-  updateNodeData: (
-    id: string,
-    updater: (data: GeneratorNodeData) => GeneratorNodeData,
-  ) => void,
-  deleteNode: (id: string) => void,
+  updateNodeDataRef: React.MutableRefObject<
+    (
+      id: string,
+      updater: (data: GeneratorNodeData) => GeneratorNodeData,
+    ) => void
+  >,
+  deleteNodeRef: React.MutableRefObject<(id: string) => void>,
 ) => {
   const NodeComponent = ({
     id,
@@ -73,15 +80,15 @@ const createNodeComponent = (
         name={data.name}
         options={data.options}
         onNameChange={(name) =>
-          updateNodeData(id, (prev) => ({ ...prev, name }))
+          updateNodeDataRef.current(id, (prev) => ({ ...prev, name }))
         }
         onOptionChange={(key, value) =>
-          updateNodeData(id, (prev) => ({
+          updateNodeDataRef.current(id, (prev) => ({
             ...prev,
             options: { ...prev.options, [key]: value },
           }))
         }
-        onDelete={() => deleteNode(id)}
+        onDelete={() => deleteNodeRef.current(id)}
       />
     );
   };
@@ -120,18 +127,34 @@ const ProjectBuilder: React.FC = () => {
     [setNodes, setEdges],
   );
 
+  // Use refs so the node component stays stable (no remounting)
+  const updateNodeDataRef = useRef(updateNodeData);
+  updateNodeDataRef.current = updateNodeData;
+  const deleteNodeRef = useRef(deleteNode);
+  deleteNodeRef.current = deleteNode;
+
   const nodeTypes: NodeTypes = useMemo(
     () => ({
-      generator: createNodeComponent(updateNodeData, deleteNode),
+      generator: createNodeComponent(updateNodeDataRef, deleteNodeRef),
     }),
-    [updateNodeData, deleteNode],
+    [],
   );
 
-  const isValidConnection = useCallback(
+  // Use a ref to always have fresh nodes in connection validation
+  const nodesRef = useRef(nodes);
+  nodesRef.current = nodes;
+
+  const isValidConnectionCheck = useCallback(
     (connection: Connection | Edge) => {
-      const sourceNode = nodes.find((n) => n.id === connection.source);
-      const targetNode = nodes.find((n) => n.id === connection.target);
+      const currentNodes = nodesRef.current;
+      const sourceNode = currentNodes.find(
+        (n) => n.id === connection.source,
+      );
+      const targetNode = currentNodes.find(
+        (n) => n.id === connection.target,
+      );
       if (!sourceNode || !targetNode) return false;
+      if (sourceNode.id === targetNode.id) return false;
 
       const sourceGen = getGeneratorById(
         (sourceNode.data as GeneratorNodeData).generatorId,
@@ -146,16 +169,59 @@ const ProjectBuilder: React.FC = () => {
         targetGen.connectionType,
       );
     },
-    [nodes],
+    [],
   );
 
   const onConnect: OnConnect = useCallback(
     (connection) => {
-      if (!isValidConnection(connection)) return;
+      const currentNodes = nodesRef.current;
+      const sourceNode = currentNodes.find(
+        (n) => n.id === connection.source,
+      );
+      const targetNode = currentNodes.find(
+        (n) => n.id === connection.target,
+      );
+      if (!sourceNode || !targetNode) return;
+
+      const sourceGen = getGeneratorById(
+        (sourceNode.data as GeneratorNodeData).generatorId,
+      );
+      const targetGen = getGeneratorById(
+        (targetNode.data as GeneratorNodeData).generatorId,
+      );
+      if (!sourceGen || !targetGen) return;
+
+      if (
+        !isConnectionValid(
+          sourceGen.connectionType,
+          targetGen.connectionType,
+        )
+      )
+        return;
+
+      // Determine canonical direction and potentially swap source/target
+      const canonical = getCanonicalConnection(
+        sourceGen.connectionType,
+        targetGen.connectionType,
+      );
+      if (!canonical) return;
+
+      // If the user drew the edge backwards, swap source and target
+      const finalConnection =
+        canonical.source === sourceGen.connectionType
+          ? connection
+          : {
+              ...connection,
+              source: connection.target,
+              target: connection.source,
+              sourceHandle: connection.targetHandle,
+              targetHandle: connection.sourceHandle,
+            };
+
       setEdges((eds) =>
         addEdge(
           {
-            ...connection,
+            ...finalConnection,
             animated: true,
             style: { stroke: 'var(--sl-color-accent)' },
             markerEnd: {
@@ -167,35 +233,37 @@ const ProjectBuilder: React.FC = () => {
         ),
       );
     },
-    [setEdges, isValidConnection],
+    [setEdges],
   );
 
   const addGeneratorNode = useCallback(
     (gen: GeneratorDefinition, position?: { x: number; y: number }) => {
-      const id = getNextId();
-      const name = generateUniqueName(gen, nodes);
-      const defaults: Record<string, string> = {};
-      for (const opt of gen.options) {
-        defaults[opt.name] = opt.default;
-      }
+      setNodes((nds) => {
+        const id = getNextId();
+        const name = generateUniqueName(gen, nds);
+        const defaults: Record<string, string> = {};
+        for (const opt of gen.options) {
+          defaults[opt.name] = opt.default;
+        }
 
-      const newNode: Node = {
-        id,
-        type: 'generator',
-        position: position ?? {
-          x: 280 + Math.random() * 200,
-          y: 80 + Math.random() * 300,
-        },
-        data: {
-          generatorId: gen.id,
-          name,
-          options: defaults,
-        } satisfies GeneratorNodeData,
-      };
+        const newNode: Node = {
+          id,
+          type: 'generator',
+          position: position ?? {
+            x: 280 + Math.random() * 200,
+            y: 80 + Math.random() * 300,
+          },
+          data: {
+            generatorId: gen.id,
+            name,
+            options: defaults,
+          } satisfies GeneratorNodeData,
+        };
 
-      setNodes((nds) => [...nds, newNode]);
+        return [...nds, newNode];
+      });
     },
-    [nodes, setNodes],
+    [setNodes],
   );
 
   const onDrop = useCallback(
@@ -231,9 +299,7 @@ const ProjectBuilder: React.FC = () => {
       style={{
         display: 'flex',
         flexDirection: 'column',
-        height: '700px',
-        border: '1px solid var(--sl-color-gray-5)',
-        borderRadius: '8px',
+        height: 'calc(100vh - 64px)',
         overflow: 'hidden',
         background: 'var(--sl-color-bg)',
       }}
@@ -250,7 +316,7 @@ const ProjectBuilder: React.FC = () => {
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
-            isValidConnection={isValidConnection}
+            isValidConnection={isValidConnectionCheck}
             nodeTypes={nodeTypes}
             onDrop={onDrop}
             onDragOver={onDragOver}
@@ -266,17 +332,7 @@ const ProjectBuilder: React.FC = () => {
             }}
           >
             <Background color="var(--sl-color-gray-5)" gap={20} />
-            <Controls
-              style={
-                {
-                  button: {
-                    background: 'var(--sl-color-bg-nav)',
-                    color: 'var(--sl-color-white)',
-                    border: '1px solid var(--sl-color-gray-5)',
-                  },
-                } as any
-              }
-            />
+            <Controls />
           </ReactFlow>
         </div>
       </div>

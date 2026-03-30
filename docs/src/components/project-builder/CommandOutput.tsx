@@ -5,7 +5,11 @@
 
 import React, { useMemo, useState } from 'react';
 import type { Node, Edge } from '@xyflow/react';
-import { getGeneratorById, GENERATORS } from './generators';
+import {
+  getGeneratorById,
+  getCanonicalConnection,
+  NX_VERSION,
+} from './generators';
 import type { GeneratorNodeData, GlobalSettings } from './types';
 
 interface CommandOutputProps {
@@ -13,19 +17,6 @@ interface CommandOutputProps {
   edges: Edge[];
   settings: GlobalSettings;
 }
-
-const getExecCommand = (pm: string): string => {
-  switch (pm) {
-    case 'pnpm':
-      return 'pnpm dlx';
-    case 'yarn':
-      return 'npx -y';
-    case 'bun':
-      return 'bunx';
-    default:
-      return 'npx -y';
-  }
-};
 
 const getNxRunCommand = (pm: string): string => {
   switch (pm) {
@@ -49,18 +40,14 @@ export const buildCommand = (
     return '# Drag generators onto the canvas to get started';
 
   const lines: string[] = [];
-  const exec = getExecCommand(settings.packageManager);
   const nx = getNxRunCommand(settings.packageManager);
   const ws = settings.workspaceName || 'my-project';
 
-  // Create workspace
+  // Create workspace using the same format as buildCreateNxWorkspaceCommand
   lines.push(
-    `${exec} create-nx-workspace@latest ${ws} \\`,
-    `  --preset=@aws/nx-plugin \\`,
-    `  --pm=${settings.packageManager} \\`,
-    `  --iacProvider=${settings.iacProvider} \\`,
-    `  --nxCloud=skip \\`,
-    `  --no-interactive`,
+    `npx create-nx-workspace@${NX_VERSION} ${ws} --pm=${settings.packageManager} ` +
+      `--preset=@aws/nx-plugin --iacProvider=${settings.iacProvider} ` +
+      `--ci=skip --analytics=false --aiAgents`,
     ``,
     `cd ${ws}`,
   );
@@ -141,26 +128,45 @@ export const buildCommand = (
     const targetGen = getGeneratorById(targetData.generatorId);
     if (!sourceGen || !targetGen) continue;
 
+    // Use canonical direction for the connection
+    const canonical = getCanonicalConnection(
+      sourceGen.connectionType,
+      targetGen.connectionType,
+    );
+    if (!canonical) continue;
+
+    // Determine which node is the canonical source vs target
+    const isForward = canonical.source === sourceGen.connectionType;
+    const canonSourceNode = isForward ? sourceNode : targetNode;
+    const canonTargetNode = isForward ? targetNode : sourceNode;
+    const canonSourceData = canonSourceNode.data as GeneratorNodeData;
+    const canonTargetData = canonTargetNode.data as GeneratorNodeData;
+    const canonSourceGen = getGeneratorById(canonSourceData.generatorId)!;
+    const canonTargetGen = getGeneratorById(canonTargetData.generatorId)!;
+
     // Determine project names
-    const sourceName = sourceGen.hostProjectGenerator
-      ? (hostProjects.get(sourceNode.id) ?? `${sourceData.name}-project`)
-      : sourceData.name || sourceGen.defaultName;
-    const targetName = targetGen.hostProjectGenerator
-      ? (hostProjects.get(targetNode.id) ?? `${targetData.name}-project`)
-      : targetData.name || targetGen.defaultName;
+    const sourceName = canonSourceGen.hostProjectGenerator
+      ? (hostProjects.get(canonSourceNode.id) ??
+        `${canonSourceData.name}-project`)
+      : canonSourceData.name || canonSourceGen.defaultName;
+    const targetName = canonTargetGen.hostProjectGenerator
+      ? (hostProjects.get(canonTargetNode.id) ??
+        `${canonTargetData.name}-project`)
+      : canonTargetData.name || canonTargetGen.defaultName;
 
     // For agent -> MCP connections, specify components
     const needsComponents =
-      sourceGen.hostProjectGenerator || targetGen.hostProjectGenerator;
+      canonSourceGen.hostProjectGenerator ||
+      canonTargetGen.hostProjectGenerator;
 
     let connectionCmd = `${nx} g @aws/nx-plugin:connection --sourceProject=${sourceName} --targetProject=${targetName}`;
 
     if (needsComponents) {
-      if (sourceGen.hostProjectGenerator) {
-        connectionCmd += ` --sourceComponent=${sourceData.name || sourceGen.defaultName}`;
+      if (canonSourceGen.hostProjectGenerator) {
+        connectionCmd += ` --sourceComponent=${canonSourceData.name || canonSourceGen.defaultName}`;
       }
-      if (targetGen.hostProjectGenerator) {
-        connectionCmd += ` --targetComponent=${targetData.name || targetGen.defaultName}`;
+      if (canonTargetGen.hostProjectGenerator) {
+        connectionCmd += ` --targetComponent=${canonTargetData.name || canonTargetGen.defaultName}`;
       }
     }
 
@@ -190,7 +196,6 @@ const CommandOutput: React.FC<CommandOutputProps> = ({
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      // Fallback
       const area = document.createElement('textarea');
       area.value = command;
       document.body.appendChild(area);
