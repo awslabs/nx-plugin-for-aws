@@ -53,7 +53,6 @@ AIエージェントをツール付きで構築するためのPython [Strands Ag
         - init.py CORSとエラーハンドリングミドルウェアを備えたFastAPIアプリケーション設定
         - agent.py サンプルツール付きメインエージェント定義
         - main.py Bedrock AgentCore Runtime用エントリーポイント
-        - agentcore_mcp_client.py Bedrock AgentCore Runtime上のMCPサーバー呼び出し用クライアントファクトリ
         - Dockerfile エージェントホスティング用Dockerfile（`computeType`が`None`の場合は生成されない）
     - pyproject.toml Strands依存関係が追加された設定ファイル
     - project.json エージェントサーブターゲットが追加された設定ファイル
@@ -163,100 +162,13 @@ agent = Agent(model=bedrock_model)
 
 [StrandsエージェントにMCPサーバーのツールを追加](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/tools/mcp-tools/)できます。
 
-<Link path="/guides/py-mcp-server">`py#mcp-server`</Link>や<Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link>ジェネレーター（またはBedrock AgentCore Runtime上でホストされた他サーバー）で作成したMCPサーバーを利用する場合、`agentcore_mcp_client.py`にクライアントファクトリが生成されます。
+<Link path="/guides/py-mcp-server">`py#mcp-server`</Link>や<Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link>ジェネレーターで作成したMCPサーバーを利用する場合、<Link path="/guides/connection/py-strands-agent-mcp">`connection`ジェネレーター</Link>を使用できます。
 
-`agent.py`の`get_agent`メソッドを更新してMCPクライアントを作成しツールを追加できます。IAM（SigV4）認証の例：
+<RunGenerator generator="connection" />
 
-```python
-# agent.py
-import os
-from contextlib import contextmanager
+接続の設定方法の詳細については、<Link path="/guides/connection/py-strands-agent-mcp">`connection`ジェネレーターガイド</Link>を参照してください。
 
-import boto3
-from strands import Agent
-
-from .agentcore_mcp_client import AgentCoreMCPClient
-
-# リージョンと認証情報の取得
-region = os.environ["AWS_REGION"]
-boto_session = boto3.Session(region_name=region)
-credentials = boto_session.get_credentials()
-
-@contextmanager
-def get_agent(session_id: str):
-    mcp_client = AgentCoreMCPClient.with_iam_auth(
-        agent_runtime_arn=os.environ["MCP_AGENTCORE_RUNTIME_ARN"],
-        credentials=credentials,
-        region=region,
-        session_id=session_id,
-    )
-
-    with mcp_client:
-        mcp_tools = mcp_client.list_tools_sync()
-
-        yield Agent(
-            system_prompt="..."
-            tools=[*mcp_tools],
-        )
-```
-
-:::tip
-対象MCPサーバーがJWT認証を使用する場合、代わりに`AgentCoreMCPClient.with_jwt_auth`メソッドを使用できます。
-:::
-
-上記のIAM認証例では、インフラストラクチャで2つの設定が必要です。まず、MCPサーバーのAgentCore Runtime ARN用環境変数の追加、次にエージェントにMCPサーバー呼び出し権限の付与が必要です。以下のように実現できます：
-
-<Infrastructure>
-<Fragment slot="cdk">
-```ts {9, 13}
-import { MyProjectAgent, MyProjectMcpServer } from ':my-scope/common-constructs';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    const mcpServer = new MyProjectMcpServer(this, 'MyProjectMcpServer');
-
-    const agent = new MyProjectAgent(this, 'MyProjectAgent', {
-      environmentVariables: {
-        MCP_AGENTCORE_RUNTIME_ARN: mcpServer.agentCoreRuntime.agentRuntimeArn,
-      },
-    });
-
-    mcpServer.agentCoreRuntime.grantInvoke(agent.agentCoreRuntime);
-  }
-}
-```
-</Fragment>
-<Fragment slot="terraform">
-```terraform
-# MCPサーバー
-module "my_project_mcp_server" {
-  source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
-}
-
-# エージェント
-module "my_project_agent" {
-  source = "../../common/terraform/src/app/agents/my-project-agent"
-
-  env = {
-    MCP_AGENTCORE_RUNTIME_ARN = module.my_project_mcp_server.agent_core_runtime_arn
-  }
-
-  additional_iam_policy_statements = [
-    {
-      Effect = "Allow"
-      Action = [
-        "bedrock-agentcore:InvokeAgentRuntime"
-      ]
-      Resource = [
-        module.my_project_mcp_server.agent_core_runtime_arn,
-        "${module.my_project_mcp_server.agent_core_runtime_arn}/*"
-      ]
-    }
-  ]
-}
-```
-</Fragment>
-</Infrastructure>
+その他のMCPサーバーについては、[Strandsドキュメント](https://strandsagents.com/docs/user-guide/concepts/tools/mcp-tools/)を参照してください。
 
 ### 詳細
 

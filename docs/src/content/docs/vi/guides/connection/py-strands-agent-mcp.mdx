@@ -1,0 +1,151 @@
+---
+title: "Python Strands Agent tới MCP"
+description: "Kết nối Python Strands Agent với MCP server"
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+Trình tạo `connection` có thể kết nối <Link path="guides/py-strands-agent">Python Strands Agent</Link> của bạn với một MCP server (có thể là <Link path="guides/ts-mcp-server">TypeScript</Link> hoặc <Link path="guides/py-mcp-server">Python</Link>).
+
+Trình tạo thiết lập tất cả các kết nối cần thiết để agent của bạn có thể khám phá và gọi các công cụ của MCP server, cả khi triển khai lên AWS (thông qua Bedrock AgentCore) và khi chạy cục bộ.
+
+## Điều kiện tiên quyết
+
+Trước khi sử dụng trình tạo này, hãy đảm bảo bạn có:
+
+1. Một dự án Python với component <Link path="guides/py-strands-agent">Strands Agent</Link>
+2. Một dự án với component MCP server (có thể là <Link path="guides/ts-mcp-server">`ts#mcp-server`</Link> hoặc <Link path="guides/py-mcp-server">`py#mcp-server`</Link>)
+3. Cả hai component được tạo với `computeType: BedrockAgentCoreRuntime`
+
+## Cách sử dụng
+
+### Chạy trình tạo
+
+<RunGenerator generator="connection" />
+
+Chọn dự án agent của bạn làm nguồn và dự án MCP server của bạn làm đích. Nếu dự án của bạn chứa nhiều component, hãy chỉ định các tùy chọn `sourceComponent` và `targetComponent` để phân biệt.
+
+### Tùy chọn
+
+<GeneratorParameters generator="connection" />
+
+## Kết quả đầu ra của trình tạo
+
+Trình tạo tạo một dự án Python `agent_connection` được chia sẻ tại `packages/common/agent_connection/` (nếu chưa tồn tại). Các module client theo từng kết nối được tạo vào dự án được chia sẻ này:
+
+<FileTree>
+
+- packages/common/agent\_connection
+  - \<scope>\_agent\_connection
+    - \_\_init\_\_.py Xuất lại các client theo từng kết nối
+    - core
+      - agentcore\_mcp\_client.py Client MCP AgentCore cốt lõi
+    - app
+      - \<mcp\_server\_name>\_client.py Client theo từng kết nối cho mỗi MCP server
+
+</FileTree>
+
+Ngoài ra, trình tạo còn:
+- Chuyển đổi `agent.py` của agent để import và sử dụng các công cụ của MCP server thông qua một client dựa trên class
+- Thêm dự án `agent_connection` làm dependency workspace của dự án agent
+- Cập nhật target `serve-local` của agent để phụ thuộc vào target serve của MCP server
+
+## Sử dụng MCP Server đã kết nối
+
+Trình tạo chuyển đổi `agent.py` của agent để sử dụng các công cụ của MCP server:
+
+```python title="packages/my-project/my_module/agent/agent.py" {4,10-14}
+from contextlib import contextmanager
+from strands import Agent
+
+from my_scope_agent_connection import MyMcpServerClient
+
+@contextmanager
+def get_agent(session_id: str):
+    my_mcp_server = MyMcpServerClient.create(session_id=session_id)
+    with (
+        my_mcp_server,
+    ):
+        yield Agent(
+            system_prompt="...",
+            tools=[*my_mcp_server.list_tools_sync()],
+        )
+```
+
+Tham số `session_id` được truyền từ người gọi, đảm bảo tính nhất quán cho [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
+
+## Hạ tầng
+
+<Infrastructure>
+<Fragment slot="cdk">
+Sau khi chạy trình tạo kết nối, bạn cần cấp quyền cho agent để gọi MCP server:
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {12-13}
+const mcpServer = new MyMcpServer(this, 'MyMcpServer');
+const myAgent = new MyAgent(this, 'MyAgent');
+
+// Grant the agent access to bedrock models
+myAgent.agentCoreRuntime.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream'],
+    resources: ['arn:aws:bedrock:*:*:foundation-model/*', 'arn:aws:bedrock:*:*:inference-profile/*'],
+  }),
+);
+
+// Grant the agent permissions to invoke the MCP server
+mcpServer.agentCoreRuntime.grantInvoke(myAgent.agentCoreRuntime);
+```
+
+ARN runtime AgentCore của MCP server được tự động đăng ký trong namespace `connection` của <Link path="guides/runtime-config">Runtime Configuration</Link> bởi CDK construct được tạo, để agent có thể khám phá nó tại runtime.
+</Fragment>
+<Fragment slot="terraform">
+Sau khi chạy trình tạo kết nối, bạn cần cấp quyền cho agent để gọi MCP server trong cấu hình Terraform của bạn:
+
+```hcl title="packages/infra/src/main.tf" {12-24}
+module "inventory_mcp_server" {
+  source = "../../common/terraform/src/app/mcp-servers/inventory-mcp"
+}
+
+module "story_agent" {
+  source = "../../common/terraform/src/app/agents/story-agent"
+}
+
+# Grant the agent permissions to invoke the MCP server
+resource "aws_iam_policy" "agent_invoke_mcp" {
+  name = "AgentInvokeMcpPolicy"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = "bedrock-agentcore:InvokeAgent"
+      Resource = module.inventory_mcp_server.agent_core_runtime_arn
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "agent_invoke_mcp" {
+  role       = module.story_agent.agent_core_runtime_role_arn
+  policy_arn = aws_iam_policy.agent_invoke_mcp.arn
+}
+```
+
+ARN runtime AgentCore của MCP server được tự động đăng ký trong namespace `connection` của <Link path="guides/runtime-config">Runtime Configuration</Link> bởi module Terraform được tạo, để agent có thể khám phá nó tại runtime.
+</Fragment>
+</Infrastructure>
+
+## Phát triển cục bộ
+
+Trình tạo cấu hình target `serve-local` của agent để:
+1. Tự động khởi động (các) MCP server đã kết nối
+2. Đặt `SERVE_LOCAL=true` để client được tạo sử dụng truyền tải HTTP trực tiếp thay vì AgentCore
+
+Chạy agent cục bộ với:
+
+<NxCommands commands={["<agent-name>-serve-local <project-name>"]} />
+
+Điều này sẽ khởi động cả agent và tất cả các MCP server đã kết nối, với agent kết nối trực tiếp đến các MCP server thông qua HTTP trên các cổng cục bộ được chỉ định của chúng.

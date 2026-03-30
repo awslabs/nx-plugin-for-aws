@@ -1,0 +1,151 @@
+---
+title: "Python Strands Agent를 MCP에 연결"
+description: "Python Strands Agent를 MCP 서버에 연결"
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+`connection` 생성기는 <Link path="guides/py-strands-agent">Python Strands Agent</Link>를 MCP 서버(<Link path="guides/ts-mcp-server">TypeScript</Link> 또는 <Link path="guides/py-mcp-server">Python</Link>)에 연결할 수 있습니다.
+
+생성기는 에이전트가 AWS에 배포될 때(Bedrock AgentCore를 통해)와 로컬에서 실행될 때 모두 MCP 서버의 도구를 검색하고 호출할 수 있도록 필요한 모든 연결을 설정합니다.
+
+## 사전 요구 사항
+
+이 생성기를 사용하기 전에 다음 사항을 확인하세요:
+
+1. <Link path="guides/py-strands-agent">Strands Agent</Link> 컴포넌트가 있는 Python 프로젝트
+2. MCP 서버 컴포넌트가 있는 프로젝트(<Link path="guides/ts-mcp-server">`ts#mcp-server`</Link> 또는 <Link path="guides/py-mcp-server">`py#mcp-server`</Link>)
+3. `computeType: BedrockAgentCoreRuntime`으로 생성된 두 컴포넌트
+
+## 사용법
+
+### 생성기 실행
+
+<RunGenerator generator="connection" />
+
+에이전트 프로젝트를 소스로, MCP 서버 프로젝트를 대상으로 선택합니다. 프로젝트에 여러 컴포넌트가 포함된 경우 `sourceComponent` 및 `targetComponent` 옵션을 지정하여 명확하게 구분하세요.
+
+### 옵션
+
+<GeneratorParameters generator="connection" />
+
+## 생성기 출력
+
+생성기는 `packages/common/agent_connection/`에 공유 `agent_connection` Python 프로젝트를 생성합니다(아직 존재하지 않는 경우). 연결별 클라이언트 모듈이 이 공유 프로젝트에 생성됩니다:
+
+<FileTree>
+
+- packages/common/agent\_connection
+  - \<scope>\_agent\_connection
+    - \_\_init\_\_.py 연결별 클라이언트를 재내보냄
+    - core
+      - agentcore\_mcp\_client.py 핵심 AgentCore MCP 클라이언트
+    - app
+      - \<mcp\_server\_name>\_client.py 각 MCP 서버에 대한 연결별 클라이언트
+
+</FileTree>
+
+또한 생성기는:
+- 에이전트의 `agent.py`를 변환하여 클래스 기반 클라이언트를 통해 MCP 서버의 도구를 가져오고 사용합니다
+- 에이전트 프로젝트의 워크스페이스 종속성으로 `agent_connection` 프로젝트를 추가합니다
+- 에이전트의 `serve-local` 대상을 업데이트하여 MCP 서버의 serve 대상에 의존하도록 합니다
+
+## 연결된 MCP 서버 사용
+
+생성기는 에이전트의 `agent.py`를 변환하여 MCP 서버의 도구를 사용합니다:
+
+```python title="packages/my-project/my_module/agent/agent.py" {4,10-14}
+from contextlib import contextmanager
+from strands import Agent
+
+from my_scope_agent_connection import MyMcpServerClient
+
+@contextmanager
+def get_agent(session_id: str):
+    my_mcp_server = MyMcpServerClient.create(session_id=session_id)
+    with (
+        my_mcp_server,
+    ):
+        yield Agent(
+            system_prompt="...",
+            tools=[*my_mcp_server.list_tools_sync()],
+        )
+```
+
+`session_id` 매개변수는 호출자로부터 전달되어 [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html)의 일관성을 보장합니다.
+
+## 인프라
+
+<Infrastructure>
+<Fragment slot="cdk">
+연결 생성기를 실행한 후 에이전트에 MCP 서버를 호출할 수 있는 권한을 부여해야 합니다:
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {12-13}
+const mcpServer = new MyMcpServer(this, 'MyMcpServer');
+const myAgent = new MyAgent(this, 'MyAgent');
+
+// Grant the agent access to bedrock models
+myAgent.agentCoreRuntime.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream'],
+    resources: ['arn:aws:bedrock:*:*:foundation-model/*', 'arn:aws:bedrock:*:*:inference-profile/*'],
+  }),
+);
+
+// Grant the agent permissions to invoke the MCP server
+mcpServer.agentCoreRuntime.grantInvoke(myAgent.agentCoreRuntime);
+```
+
+MCP 서버의 AgentCore 런타임 ARN은 생성된 CDK 구성에 의해 <Link path="guides/runtime-config">Runtime Configuration</Link>의 `connection` 네임스페이스에 자동으로 등록되므로 에이전트가 런타임에 이를 검색할 수 있습니다.
+</Fragment>
+<Fragment slot="terraform">
+연결 생성기를 실행한 후 Terraform 구성에서 에이전트에 MCP 서버를 호출할 수 있는 권한을 부여해야 합니다:
+
+```hcl title="packages/infra/src/main.tf" {12-24}
+module "inventory_mcp_server" {
+  source = "../../common/terraform/src/app/mcp-servers/inventory-mcp"
+}
+
+module "story_agent" {
+  source = "../../common/terraform/src/app/agents/story-agent"
+}
+
+# Grant the agent permissions to invoke the MCP server
+resource "aws_iam_policy" "agent_invoke_mcp" {
+  name = "AgentInvokeMcpPolicy"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = "bedrock-agentcore:InvokeAgent"
+      Resource = module.inventory_mcp_server.agent_core_runtime_arn
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "agent_invoke_mcp" {
+  role       = module.story_agent.agent_core_runtime_role_arn
+  policy_arn = aws_iam_policy.agent_invoke_mcp.arn
+}
+```
+
+MCP 서버의 AgentCore 런타임 ARN은 생성된 Terraform 모듈에 의해 <Link path="guides/runtime-config">Runtime Configuration</Link>의 `connection` 네임스페이스에 자동으로 등록되므로 에이전트가 런타임에 이를 검색할 수 있습니다.
+</Fragment>
+</Infrastructure>
+
+## 로컬 개발
+
+생성기는 에이전트의 `serve-local` 대상을 다음과 같이 구성합니다:
+1. 연결된 MCP 서버를 자동으로 시작
+2. `SERVE_LOCAL=true`를 설정하여 생성된 클라이언트가 AgentCore 대신 직접 HTTP 전송을 사용하도록 함
+
+다음 명령으로 에이전트를 로컬에서 실행합니다:
+
+<NxCommands commands={["<agent-name>-serve-local <project-name>"]} />
+
+이렇게 하면 에이전트와 연결된 모든 MCP 서버가 시작되며, 에이전트는 할당된 로컬 포트에서 HTTP를 통해 MCP 서버에 직접 연결됩니다.
