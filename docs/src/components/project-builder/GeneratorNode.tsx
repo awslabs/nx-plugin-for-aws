@@ -6,7 +6,7 @@
 import React from 'react';
 import { Handle, Position } from '@xyflow/react';
 import { getIcon } from './icons';
-import { getGeneratorById } from './generators';
+import { getGeneratorById, VALID_CONNECTIONS } from './generators';
 
 interface GeneratorNodeComponentProps {
   generatorId: string;
@@ -16,6 +16,12 @@ interface GeneratorNodeComponentProps {
   onOptionChange: (key: string, value: string) => void;
   onDelete: () => void;
 }
+
+/** Check if a generator participates in any connection */
+const canConnect = (connectionType: string): boolean =>
+  VALID_CONNECTIONS.some(
+    (c) => c.source === connectionType || c.target === connectionType,
+  );
 
 const GeneratorNodeComponent: React.FC<GeneratorNodeComponentProps> = ({
   generatorId,
@@ -28,11 +34,15 @@ const GeneratorNodeComponent: React.FC<GeneratorNodeComponentProps> = ({
   const generator = getGeneratorById(generatorId);
   if (!generator) return null;
 
-  const handleStyle = {
-    width: 10,
-    height: 10,
-    background: 'var(--sl-color-gray-4)',
-    border: '2px solid var(--sl-color-gray-3)',
+  const showHandle = canConnect(generator.connectionType);
+
+  const handleStyle: React.CSSProperties = {
+    width: 12,
+    height: 12,
+    background: '#6366f1',
+    border: '2px solid #4f46e5',
+    right: -6,
+    top: '50%',
   };
 
   return (
@@ -47,11 +57,22 @@ const GeneratorNodeComponent: React.FC<GeneratorNodeComponentProps> = ({
         boxShadow: '0 1px 4px rgba(0,0,0,0.1)',
       }}
     >
-      <Handle
-        type="target"
-        position={Position.Left}
-        style={{ ...handleStyle, left: -5 }}
-      />
+      {showHandle && (
+        <>
+          <Handle
+            type="target"
+            position={Position.Right}
+            style={{ ...handleStyle, opacity: 0, pointerEvents: 'all' }}
+            id="connector"
+          />
+          <Handle
+            type="source"
+            position={Position.Right}
+            style={handleStyle}
+            id="connector"
+          />
+        </>
+      )}
 
       <div
         style={{
@@ -161,12 +182,6 @@ const GeneratorNodeComponent: React.FC<GeneratorNodeComponentProps> = ({
           </label>
         ))}
       </div>
-
-      <Handle
-        type="source"
-        position={Position.Right}
-        style={{ ...handleStyle, right: -5 }}
-      />
     </div>
   );
 };

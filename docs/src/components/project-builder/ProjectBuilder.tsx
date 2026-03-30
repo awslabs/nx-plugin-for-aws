@@ -35,6 +35,8 @@ import type {
   GlobalSettings as GlobalSettingsType,
 } from './types';
 
+const EDGE_COLOR = '#6366f1';
+
 let nodeIdCounter = 0;
 const getNextId = () => `gen-${++nodeIdCounter}`;
 
@@ -56,7 +58,7 @@ const generateUniqueName = (
 
 /**
  * Wrapper node component that bridges ReactFlow node props to our component.
- * Created once and remains stable to avoid ReactFlow remounting nodes.
+ * Uses refs so nodeTypes stays stable and ReactFlow doesn't remount nodes.
  */
 const createNodeComponent = (
   updateNodeDataRef: React.MutableRefObject<
@@ -206,27 +208,26 @@ const ProjectBuilder: React.FC = () => {
       );
       if (!canonical) return;
 
-      // If the user drew the edge backwards, swap source and target
-      const finalConnection =
-        canonical.source === sourceGen.connectionType
-          ? connection
-          : {
-              ...connection,
-              source: connection.target,
-              target: connection.source,
-              sourceHandle: connection.targetHandle,
-              targetHandle: connection.sourceHandle,
-            };
+      // Normalize: canonical source should be edge source
+      const isForward = canonical.source === sourceGen.connectionType;
+      const finalSource = isForward ? connection.source : connection.target;
+      const finalTarget = isForward ? connection.target : connection.source;
 
       setEdges((eds) =>
         addEdge(
           {
-            ...finalConnection,
+            id: `e-${finalSource}-${finalTarget}`,
+            source: finalSource,
+            target: finalTarget,
+            sourceHandle: 'connector',
+            targetHandle: 'connector',
             animated: true,
-            style: { stroke: 'var(--sl-color-accent)' },
+            style: { stroke: EDGE_COLOR, strokeWidth: 2 },
             markerEnd: {
               type: MarkerType.ArrowClosed,
-              color: 'var(--sl-color-accent)',
+              color: EDGE_COLOR,
+              width: 20,
+              height: 20,
             },
           },
           eds,
@@ -322,12 +323,15 @@ const ProjectBuilder: React.FC = () => {
             onDragOver={onDragOver}
             fitView
             proOptions={{ hideAttribution: true }}
+            connectionLineStyle={{ stroke: EDGE_COLOR, strokeWidth: 2 }}
             defaultEdgeOptions={{
               animated: true,
-              style: { stroke: 'var(--sl-color-accent)' },
+              style: { stroke: EDGE_COLOR, strokeWidth: 2 },
               markerEnd: {
                 type: MarkerType.ArrowClosed,
-                color: 'var(--sl-color-accent)',
+                color: EDGE_COLOR,
+                width: 20,
+                height: 20,
               },
             }}
           >
