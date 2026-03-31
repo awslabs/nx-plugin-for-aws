@@ -205,7 +205,8 @@ export default tsStrandsAgentReactConnectionGenerator;
 
 /**
  * Ensures a wildcard path entry exists in tsconfig.base.json for the given project,
- * allowing deep imports (e.g., `@scope/project/src/agent/router.js`).
+ * allowing deep imports (e.g., `:scope/project/src/agent/router.js`).
+ * Both the scope alias and npm package name forms are added.
  */
 function ensureWildcardPathEntry(
   tree: Tree,
@@ -217,18 +218,25 @@ function ensureWildcardPathEntry(
   );
   if (!tsconfigPath) return;
 
-  const wildcardKey = `${projectName}/*`;
   const wildcardValue = [`./${projectRoot}/*`];
+  const scopeAlias = toScopeAlias(projectName);
 
   updateJson(tree, tsconfigPath, (json) => {
     const paths = json.compilerOptions?.paths ?? {};
-    if (!paths[wildcardKey]) {
-      paths[wildcardKey] = wildcardValue;
-      json.compilerOptions = {
-        ...json.compilerOptions,
-        paths,
-      };
+    // Add wildcard for the scope alias (used by generated templates)
+    const scopeWildcardKey = `${scopeAlias}/*`;
+    if (!paths[scopeWildcardKey]) {
+      paths[scopeWildcardKey] = wildcardValue;
     }
+    // Also add wildcard for the npm package name
+    const npmWildcardKey = `${projectName}/*`;
+    if (!paths[npmWildcardKey]) {
+      paths[npmWildcardKey] = wildcardValue;
+    }
+    json.compilerOptions = {
+      ...json.compilerOptions,
+      paths,
+    };
     return json;
   });
 }
