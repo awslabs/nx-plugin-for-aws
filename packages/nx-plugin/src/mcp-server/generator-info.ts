@@ -75,11 +75,13 @@ export const fetchGuidePagesForGenerator = async (
   info: NxGeneratorInfo,
   generators: NxGeneratorInfo[],
   packageManager?: string,
+  snippetContentProvider?: SnippetContentProvider,
 ): Promise<string> => {
   return await fetchGuidePages(
     info.guidePages ?? [kebabCase(info.id)],
     generators,
     packageManager,
+    snippetContentProvider,
   );
 };
 
@@ -90,6 +92,7 @@ export const fetchGuidePages = async (
   guidePages: string[],
   generators: NxGeneratorInfo[],
   packageManager?: string,
+  snippetContentProvider?: SnippetContentProvider,
 ): Promise<string> => {
   const guides = await Promise.allSettled(
     guidePages.map(
@@ -104,11 +107,23 @@ export const fetchGuidePages = async (
   const fulfilled = guides.filter((result) => result.status === 'fulfilled');
   const processed = await Promise.all(
     fulfilled.map((result) =>
-      postProcessGuide(result.value, generators, packageManager),
+      postProcessGuide(
+        result.value,
+        generators,
+        packageManager,
+        snippetContentProvider,
+      ),
     ),
   );
   return processed.join('\n\n');
 };
+
+/**
+ * A function which retrieves snippet content given a snippet name.
+ */
+export type SnippetContentProvider = (
+  snippetName: string,
+) => Promise<string> | string;
 
 const SNIPPET_BASE_URL =
   'https://raw.githubusercontent.com/awslabs/nx-plugin-for-aws/refs/heads/main/docs/src/content/docs/en/snippets';
@@ -116,7 +131,9 @@ const SNIPPET_BASE_URL =
 /**
  * Fetch a snippet's content from github
  */
-export const fetchSnippet = async (snippetName: string): Promise<string> => {
+export const fetchSnippet: SnippetContentProvider = async (
+  snippetName: string,
+): Promise<string> => {
   try {
     const response = await fetch(`${SNIPPET_BASE_URL}/${snippetName}.mdx`);
     if (!response.ok) {
@@ -154,7 +171,10 @@ export const postProcessGuide = async (
   guide: string,
   generators: NxGeneratorInfo[],
   packageManager?: string,
+  snippetContentProvider?: SnippetContentProvider,
 ): Promise<string> => {
+  const getSnippetContent = snippetContentProvider ?? fetchSnippet;
+
   // Replace <Snippet /> with fetched snippet content
   // Use a regex that matches the full self-closing tag, allowing / in attribute values
   const snippetRegex = /<Snippet\s+((?:[^/]|\/(?!>))+)\s*\/>/g;
@@ -171,7 +191,7 @@ export const postProcessGuide = async (
           return { original: match[0], replacement: match[0] };
         }
         const snippetName = nameMatch[1];
-        const snippetContent = await fetchSnippet(snippetName);
+        const snippetContent = await getSnippetContent(snippetName);
         if (!snippetContent) {
           return { original: match[0], replacement: match[0] };
         }
@@ -180,6 +200,7 @@ export const postProcessGuide = async (
           snippetContent.trim(),
           generators,
           packageManager,
+          getSnippetContent,
         );
         return {
           original: match[0],

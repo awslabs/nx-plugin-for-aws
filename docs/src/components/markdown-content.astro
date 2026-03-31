@@ -1,0 +1,207 @@
+---
+/**
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+import Default from '@astrojs/starlight/components/MarkdownContent.astro';
+import { postProcessGuide } from '../../../packages/nx-plugin/src/mcp-server/generator-info';
+import type { NxGeneratorInfo } from '../../../packages/nx-plugin/src/utils/nx';
+import type { SnippetContentProvider } from '../../../packages/nx-plugin/src/mcp-server/generator-info';
+import GeneratorsJson from '../../../packages/nx-plugin/generators.json';
+import * as path from 'path';
+import * as fs from 'fs';
+
+const starlightRoute = Astro.locals.starlightRoute;
+const isSnippet = starlightRoute?.id?.includes('/snippets/');
+
+let resolvedMarkdown = '';
+
+if (!isSnippet && starlightRoute?.entry?.id) {
+  try {
+    // Read the raw MDX source for this page
+    // Use process.cwd() which is the docs directory during build
+    const docsContentDir = path.resolve(process.cwd(), 'src', 'content', 'docs');
+    const mdxPath = path.join(docsContentDir, `${starlightRoute.entry.id}.mdx`);
+    let rawMdx = '';
+    try {
+      rawMdx = fs.readFileSync(mdxPath, 'utf-8');
+    } catch {
+      // Try .md extension
+      const mdPath = path.join(docsContentDir, `${starlightRoute.entry.id}.md`);
+      try {
+        rawMdx = fs.readFileSync(mdPath, 'utf-8');
+      } catch {
+        // No source file found
+      }
+    }
+
+    if (rawMdx) {
+      // Build generator info from generators.json (same as the MCP server does)
+      const pluginDir = path.resolve(process.cwd(), '..', 'packages', 'nx-plugin');
+      const generators: NxGeneratorInfo[] = Object.entries(
+        (GeneratorsJson as any).generators,
+      ).map(([id, info]: [string, any]) => ({
+        id,
+        metric: info.metric,
+        resolvedFactoryPath: path.resolve(pluginDir, info.factory),
+        resolvedSchemaPath: path.resolve(pluginDir, info.schema),
+        description: info.description,
+        ...(info.hidden ? { hidden: info.hidden } : {}),
+        ...(info.guidePages ? { guidePages: info.guidePages } : {}),
+      }));
+
+      // Create a local filesystem snippet provider (reads from en locale)
+      const snippetsDir = path.join(docsContentDir, 'en', 'snippets');
+      const localSnippetProvider: SnippetContentProvider = (snippetName: string) => {
+        try {
+          return fs.readFileSync(path.join(snippetsDir, `${snippetName}.mdx`), 'utf-8');
+        } catch {
+          return '';
+        }
+      };
+
+      // Strip frontmatter from the raw MDX
+      const frontmatterEnd = rawMdx.match(/^---\n[\s\S]*?\n---\n/);
+      const bodyWithoutFrontmatter = frontmatterEnd
+        ? rawMdx.slice(frontmatterEnd[0].length)
+        : rawMdx;
+
+      // Strip import statements
+      const bodyWithoutImports = bodyWithoutFrontmatter
+        .replace(/^import\s+.*$\n?/gm, '')
+        .trim();
+
+      // Run the same resolution as the MCP server
+      const processed = await postProcessGuide(
+        bodyWithoutImports,
+        generators,
+        undefined,
+        localSnippetProvider,
+      );
+
+      // Strip snippet wrapper tags and frontmatter from inlined snippets
+      const cleanedMarkdown = processed
+        .replace(/<Snippet name="[^"]*">\n?/g, '')
+        .replace(/<\/Snippet>/g, '')
+        .replace(/^---\n[\s\S]*?\n---\n/gm, '');
+
+      // Add the page title
+      const title = starlightRoute.entry.data.title;
+      resolvedMarkdown = title ? `# ${title}\n\n${cleanedMarkdown.trim()}` : cleanedMarkdown.trim();
+    }
+  } catch {
+    // If anything fails, we just won't have the copy button
+  }
+}
+---
+
+<div class="sl-markdown-content-wrapper">
+  {resolvedMarkdown && (
+    <button
+      class="copy-markdown-btn"
+      type="button"
+      aria-label="Copy page as Markdown"
+      title="Copy page as Markdown"
+      data-markdown={resolvedMarkdown}
+    >
+      <svg class="copy-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+      </svg>
+      <svg class="check-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none">
+        <polyline points="20 6 9 17 4 12"></polyline>
+      </svg>
+      <span class="copy-label">Copy as Markdown</span>
+    </button>
+  )}
+  <Default><slot /></Default>
+</div>
+
+<script>
+  function initCopyButtons() {
+    document.querySelectorAll('.copy-markdown-btn').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const markdown = btn.getAttribute('data-markdown');
+        if (!markdown) return;
+
+        try {
+          await navigator.clipboard.writeText(markdown);
+        } catch {
+          // Fallback for older browsers
+          const textarea = document.createElement('textarea');
+          textarea.value = markdown;
+          textarea.style.position = 'fixed';
+          textarea.style.opacity = '0';
+          document.body.appendChild(textarea);
+          textarea.select();
+          document.execCommand('copy');
+          document.body.removeChild(textarea);
+        }
+
+        const copyIcon = btn.querySelector('.copy-icon') as HTMLElement;
+        const checkIcon = btn.querySelector('.check-icon') as HTMLElement;
+        const label = btn.querySelector('.copy-label') as HTMLElement;
+
+        if (copyIcon && checkIcon && label) {
+          copyIcon.style.display = 'none';
+          checkIcon.style.display = '';
+          label.textContent = 'Copied!';
+
+          setTimeout(() => {
+            copyIcon.style.display = '';
+            checkIcon.style.display = 'none';
+            label.textContent = 'Copy as Markdown';
+          }, 2000);
+        }
+      });
+    });
+  }
+
+  initCopyButtons();
+  document.addEventListener('astro:after-swap', initCopyButtons);
+</script>
+
+<style>
+  .sl-markdown-content-wrapper {
+    position: relative;
+  }
+
+  .copy-markdown-btn {
+    position: absolute;
+    top: 0;
+    right: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.25rem 0.625rem;
+    font-size: 0.75rem;
+    line-height: 1;
+    color: var(--sl-color-gray-3);
+    background: var(--sl-color-bg);
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.375rem;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 150ms ease, color 150ms ease, border-color 150ms ease;
+    z-index: 1;
+  }
+
+  .sl-markdown-content-wrapper:hover .copy-markdown-btn {
+    opacity: 1;
+  }
+
+  .copy-markdown-btn:hover {
+    color: var(--sl-color-white);
+    border-color: var(--sl-color-gray-3);
+  }
+
+  .copy-markdown-btn:focus-visible {
+    opacity: 1;
+    outline: 2px solid var(--sl-color-accent);
+    outline-offset: 2px;
+  }
+
+  .copy-markdown-btn svg {
+    flex-shrink: 0;
+  }
+</style>
