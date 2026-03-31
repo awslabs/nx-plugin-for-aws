@@ -40,17 +40,6 @@ export const readAwsNxPluginConfig = async (
 const PLACEHOLDER = '"__PLACEHOLDER__"';
 
 /**
- * Clean up double commas produced by GritQL's $props capture
- * (which includes trailing commas from the original source).
- */
-const fixDoubleCommas = (tree: Tree, filePath: string) => {
-  const content = tree.read(filePath)!.toString();
-  if (content.includes(',,')) {
-    tree.write(filePath, content.replace(/,,/g, ','));
-  }
-};
-
-/**
  * Use GritQL to set a top-level property in the export default object,
  * then substitute the placeholder with the JSON-serialized value.
  * Preserves all other properties (including JS expressions) untouched.
@@ -89,15 +78,14 @@ const setConfigProperty = async (
       `\`${key}: $old\` => \`${key}: ${PLACEHOLDER}\` where { $old <: ${within} }`,
     );
   } else {
-    // Add the new property — try satisfies variant first, then plain
+    // Add the new property using GritQL's += (accumulate) operator.
+    // For non-empty objects, += appends correctly without double commas.
+    // For empty objects, += fails so we fall back to a direct replacement.
     let added = await applyGritQL(
       tree,
       filePath,
-      `\`export default { $props } satisfies $type\` where { $props => \`$props, ${key}: ${PLACEHOLDER}\` }`,
+      `\`export default { $props } satisfies $type\` where { $props += \`, ${key}: ${PLACEHOLDER}\` }`,
     );
-    if (added) {
-      fixDoubleCommas(tree, filePath);
-    }
 
     if (!added) {
       added = await applyGritQL(
@@ -111,11 +99,8 @@ const setConfigProperty = async (
       added = await applyGritQL(
         tree,
         filePath,
-        `\`export default { $props }\` where { $props => \`$props, ${key}: ${PLACEHOLDER}\` }`,
+        `\`export default { $props }\` where { $props += \`, ${key}: ${PLACEHOLDER}\` }`,
       );
-      if (added) {
-        fixDoubleCommas(tree, filePath);
-      }
     }
 
     if (!added) {
