@@ -13,6 +13,7 @@ import { withVersions } from '../../utils/versions';
 import {
   addSingleImport,
   applyGritQLTransform,
+  applyGritQLAppend,
   hasGritQLMatch,
 } from '../../utils/ast';
 import { ConfigureProjectOptions } from './types';
@@ -116,27 +117,19 @@ export const addIgnoresToEslintConfig = async (
   // Add each ignore pattern if not already present
   for (const pattern of ignorePatterns) {
     const escaped = pattern.replace(/`/g, '\\`');
-    // Handle empty ignores array, then try += with fallback for single-element arrays
+    // Handle empty ignores array
     await applyGritQLTransform(
       tree,
       eslintConfigPath,
       `\`ignores: []\` => \`ignores: ['${escaped}']\``,
     );
-    const before = tree.read(eslintConfigPath, 'utf-8')!;
-    await applyGritQLTransform(
+    // Append to non-empty ignores array (with single-element fallback)
+    await applyGritQLAppend(
       tree,
       eslintConfigPath,
       `\`ignores: [$items]\` where { $items <: not contains \`'${escaped}'\`, $items += \`'${escaped}'\` }`,
+      `\`ignores: [$items]\` => \`ignores: [$items, '${escaped}']\` where { $items <: not contains \`'${escaped}'\` }`,
+      '`ignores: [$a, $b]`',
     );
-    // Verify += produced valid syntax by checking the array still parses with 2+ elements
-    // (single-element += concatenates without comma, producing a parse error)
-    if (!(await hasGritQLMatch(tree, eslintConfigPath, '`ignores: [$a, $b]`'))) {
-      tree.write(eslintConfigPath, before);
-      await applyGritQLTransform(
-        tree,
-        eslintConfigPath,
-        `\`ignores: [$items]\` => \`ignores: [$items, '${escaped}']\` where { $items <: not contains \`'${escaped}'\` }`,
-      );
-    }
   }
 };
