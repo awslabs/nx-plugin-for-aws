@@ -48,7 +48,9 @@ describe('cognito-auth generator', () => {
 
       export type RouterProviderContext = {}
 
-      const router = createRouter({ routeTree });
+      const router = createRouter({
+        routeTree,
+      });
 
       export function Main() {
 
