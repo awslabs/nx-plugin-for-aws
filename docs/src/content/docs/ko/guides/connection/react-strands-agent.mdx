@@ -1,0 +1,238 @@
+---
+title: "React에서 TypeScript Strands Agent로 연결"
+description: "React 웹사이트를 TypeScript Strands Agent에 연결"
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+
+Nx Plugin for AWS는 <Link path="guides/ts-strands-agent">TypeScript Strands Agent</Link>를 React 웹사이트와 빠르게 통합할 수 있는 제너레이터를 제공합니다. tRPC over WebSocket을 통해 에이전트에 연결하는 데 필요한 모든 구성을 설정하며, AWS IAM 및 Cognito 인증 지원을 포함합니다. 이 통합은 프론트엔드와 에이전트의 tRPC 라우터 간에 완전한 엔드투엔드 타입 안전성을 제공합니다.
+
+## 사전 요구 사항
+
+이 제너레이터를 사용하기 전에 다음을 준비해야 합니다:
+
+1. React 웹사이트 (<Link path="guides/react-website">`ts#react-website` 제너레이터</Link>를 사용하여 생성)
+2. TypeScript Strands Agent (<Link path="guides/ts-strands-agent">`ts#strands-agent` 제너레이터</Link>를 사용하여 생성)
+3. Cognito 또는 IAM 인증을 사용하는 에이전트에 연결하는 경우 <Link path="/guides/react-website-auth">`ts#react-website-auth` 제너레이터</Link>를 통해 추가된 Cognito Auth
+
+## 사용법
+
+### 제너레이터 실행
+
+<RunGenerator generator="connection" />
+
+React 웹사이트를 소스 프로젝트로, Strands Agent가 포함된 프로젝트를 대상 프로젝트로 선택하라는 메시지가 표시됩니다. 대상 프로젝트에 여러 컴포넌트(여러 에이전트 또는 다른 컴포넌트 유형 등)가 포함된 경우 명확히 구분하기 위해 `targetComponent`를 지정하라는 메시지가 표시됩니다.
+
+### 옵션
+
+<GeneratorParameters generator="connection" />
+
+## 제너레이터 출력
+
+제너레이터는 React 애플리케이션에 다음 구조를 생성합니다:
+
+<FileTree>
+
+- src
+  - components
+    - \<AgentName>AgentClientProvider.tsx tRPC WebSocket 클라이언트 및 에이전트의 tRPC 라우터에 대한 바인딩 설정
+    - QueryClientProvider.tsx TanStack React Query 클라이언트 프로바이더
+  - hooks
+    - useSigV4.tsx SigV4로 요청에 서명하기 위한 훅 (IAM 전용)
+    - use\<AgentName>Agent.tsx TanStack Query 통합을 위한 tRPC 옵션 프록시를 반환하는 훅
+    - use\<AgentName>AgentClient.tsx 직접 에이전트 호출을 위한 바닐라 tRPC 클라이언트를 반환하는 훅
+
+</FileTree>
+
+또한 필요한 종속성을 설치합니다:
+
+  - `@trpc/client`
+  - `@trpc/tanstack-react-query`
+  - `@tanstack/react-query`
+  - `aws4fetch` (IAM 인증 사용 시)
+
+## 작동 방식
+
+### WebSocket 연결
+
+생성된 클라이언트는 tRPC over WebSocket을 통해 Strands Agent에 연결됩니다. 에이전트는 WebSocket 엔드포인트를 통해 tRPC 라우터(스트리밍 에이전트 응답을 위한 `invoke` 구독 포함)를 노출합니다.
+
+- **배포됨**: 에이전트 런타임 ARN은 <Link path="guides/runtime-config">런타임 구성</Link>에서 로드됩니다. ARN은 Bedrock AgentCore Runtime WebSocket 프로토콜에 따라 WebSocket URL로 변환됩니다: `wss://bedrock-agentcore.<region>.amazonaws.com/runtimes/<encoded-arn>/ws`
+- **로컬 개발**: `serve-local`로 실행할 때 런타임 구성 재정의는 값을 로컬 `ws://` URL(예: `ws://localhost:8081/ws`)로 설정하고 클라이언트가 직접 연결합니다
+
+### 인증
+
+생성된 코드는 에이전트의 구성에 따라 인증을 처리합니다:
+
+- **IAM** (기본값): AWS SigV4 사전 서명된 URL을 사용하여 WebSocket 연결을 인증합니다. 자격 증명은 웹사이트의 인증으로 구성된 Cognito Identity Pool에서 가져옵니다
+- **Cognito**: [AgentCore WebSocket 인증 프로토콜](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html)에 따라 JWT 액세스 토큰을 base64url로 인코딩된 베어러 토큰으로 `Sec-WebSocket-Protocol` 헤더에 포함합니다
+- **인증 없음**: 인증 없이 직접 연결합니다 (로컬 개발에 적합)
+
+## 생성된 코드 사용하기
+
+### useSubscription으로 에이전트 응답 스트리밍
+
+가장 일반적인 사용 사례는 `invoke` 구독을 사용하여 에이전트의 응답을 스트리밍하는 것입니다:
+
+```tsx {1-2,7-22}
+import { useSubscription } from '@trpc/tanstack-react-query';
+import { useMyAgent } from './hooks/useMyAgentAgent';
+
+function ChatComponent() {
+  const trpc = useMyAgent();
+
+  const subscription = useSubscription(
+    trpc.invoke.subscriptionOptions(
+      { message: 'What can you help me with?' },
+      {
+        enabled: true,
+        onStarted: () => {
+          console.log('Agent started responding');
+        },
+        onData: (token) => {
+          console.log('Received token:', token);
+        },
+        onError: (error) => {
+          console.error('Agent error:', error);
+        },
+      },
+    ),
+  );
+
+  return (
+    <div>
+      <p>Status: {subscription.status}</p>
+      {subscription.data && <p>Latest token: {subscription.data}</p>}
+      {subscription.error && <p>Error: {subscription.error.message}</p>}
+    </div>
+  );
+}
+```
+
+### 바닐라 tRPC 클라이언트 사용
+
+`use<AgentName>AgentClient` 훅은 구독 수명 주기를 더 세밀하게 제어할 수 있도록 바닐라 tRPC 클라이언트에 대한 액세스를 제공합니다:
+
+```tsx {2,5,9-22,25}
+import { useState, useEffect } from 'react';
+import { useMyAgentClient } from './hooks/useMyAgentAgent';
+
+function ChatComponent() {
+  const client = useMyAgentClient();
+  const [messages, setMessages] = useState<string[]>([]);
+
+  const sendMessage = (message: string) => {
+    const subscription = client.invoke.subscribe(
+      { message },
+      {
+        onData: (token) => {
+          setMessages((prev) => [...prev, token]);
+        },
+        onComplete: () => {
+          console.log('Agent finished');
+        },
+        onError: (error) => {
+          console.error('Error:', error);
+        },
+      },
+    );
+
+    // Clean up when done
+    return () => subscription.unsubscribe();
+  };
+
+  return (
+    <div>
+      <button onClick={() => sendMessage('Hello!')}>Send</button>
+      <div>
+        {messages.map((msg, i) => (
+          <span key={i}>{msg}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+```
+
+### 채팅 인터페이스 구축
+
+생성된 클라이언트로 간단한 채팅 인터페이스를 구축하는 예제입니다:
+
+```tsx
+import { useState, useCallback } from 'react';
+import { useMyAgentClient } from './hooks/useMyAgentAgent';
+
+function Chat() {
+  const client = useMyAgentClient();
+  const [input, setInput] = useState('');
+  const [response, setResponse] = useState('');
+  const [isStreaming, setIsStreaming] = useState(false);
+
+  const handleSend = useCallback(() => {
+    if (!input.trim() || isStreaming) return;
+
+    setIsStreaming(true);
+    setResponse('');
+
+    client.invoke.subscribe(
+      { message: input },
+      {
+        onData: (token) => {
+          setResponse((prev) => prev + token);
+        },
+        onComplete: () => {
+          setIsStreaming(false);
+        },
+        onError: (error) => {
+          console.error(error);
+          setIsStreaming(false);
+        },
+      },
+    );
+
+    setInput('');
+  }, [client, input, isStreaming]);
+
+  return (
+    <div>
+      <div style={{ whiteSpace: 'pre-wrap' }}>{response}</div>
+      <input
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+        disabled={isStreaming}
+        placeholder="Ask the agent..."
+      />
+      <button onClick={handleSend} disabled={isStreaming}>
+        {isStreaming ? 'Streaming...' : 'Send'}
+      </button>
+    </div>
+  );
+}
+```
+
+## 로컬 개발
+
+연결 제너레이터는 `serve-local` 통합을 자동으로 구성합니다:
+
+1. `nx run <website>:serve-local`을 실행하면 에이전트의 로컬 서버도 시작됩니다
+2. 런타임 구성이 로컬 WebSocket URL(예: `ws://localhost:8081/ws`)을 가리키도록 재정의됩니다
+3. 클라이언트는 로컬 URL을 감지하고 인증 오버헤드 없이 직접 연결합니다
+
+즉, 단일 명령으로 에이전트 통합을 로컬에서 개발하고 테스트할 수 있습니다.
+
+## 타입 안전성
+
+이 통합은 완전한 엔드투엔드 타입 안전성을 제공합니다. IDE는 모든 에이전트 프로시저 호출에 대해 완전한 자동 완성 및 타입 검사를 제공합니다. 타입은 에이전트의 tRPC 라우터 정의에서 자동으로 추론되므로 에이전트의 API에 대한 모든 변경 사항이 프론트엔드 코드에 즉시 반영됩니다.
+
+## 추가 정보
+
+자세한 내용은 다음을 참조하세요:
+
+- <Link path="guides/ts-strands-agent">TypeScript Strands Agent 가이드</Link>
+- [tRPC WebSocket Client](https://trpc.io/docs/client/links/wsLink)
+- [tRPC TanStack React Query Integration](https://trpc.io/docs/client/tanstack-react-query)
+- [Bedrock AgentCore Runtime WebSocket](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html)
