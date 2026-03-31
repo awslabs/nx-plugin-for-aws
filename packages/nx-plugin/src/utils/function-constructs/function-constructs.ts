@@ -30,14 +30,14 @@ export interface AddLambdaFunctionConstructOptions {
 /**
  * Add infrastructure for a lambda function
  */
-export const addLambdaFunctionInfra = (
+export const addLambdaFunctionInfra = async (
   tree: Tree,
   options: AddLambdaFunctionConstructOptions & {
     iacProvider: IacProvider;
   },
 ) => {
   if (options.iacProvider === 'CDK') {
-    addLambdaFunctionCdkConstructs(tree, options);
+    await addLambdaFunctionCdkConstructs(tree, options);
   } else if (options.iacProvider === 'Terraform') {
     addLambdaFunctionTerraformModules(tree, options);
   } else {
@@ -69,7 +69,7 @@ export const addLambdaFunctionInfra = (
   );
 };
 
-const addLambdaFunctionCdkConstructs = (
+const addLambdaFunctionCdkConstructs = async (
   tree: Tree,
   options: AddLambdaFunctionConstructOptions,
 ) => {
@@ -94,7 +94,7 @@ const addLambdaFunctionCdkConstructs = (
   );
 
   // Export app specific CDK construct
-  addStarExport(
+  await addStarExport(
     tree,
     joinPathFragments(
       PACKAGES_DIR,
@@ -106,7 +106,7 @@ const addLambdaFunctionCdkConstructs = (
     ),
     `./${options.functionNameKebabCase}.js`,
   );
-  addStarExport(
+  await addStarExport(
     tree,
     joinPathFragments(
       PACKAGES_DIR,

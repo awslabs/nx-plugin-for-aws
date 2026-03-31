@@ -83,7 +83,7 @@ export const tsStrandsAgentMcpConnectionGenerator = async (
   );
 
   // Add re-export to index.ts
-  addStarExport(
+  await addStarExport(
     tree,
     joinPathFragments(AGENT_CONNECTION_PROJECT_DIR, 'src', 'index.ts'),
     `./app/${mcpServerKebabCase}-client.js`,
@@ -102,7 +102,7 @@ export const tsStrandsAgentMcpConnectionGenerator = async (
       mcpServerClassName.charAt(0).toLowerCase() + mcpServerClassName.slice(1);
 
     // Add import for the client
-    addDestructuredImport(
+    await addDestructuredImport(
       tree,
       agentFilePath,
       [clientClassName],

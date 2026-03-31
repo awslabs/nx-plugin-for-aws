@@ -38,11 +38,11 @@ describe('ast utils', () => {
   });
 
   describe('destructuredImport', () => {
-    it('should add new named imports', () => {
+    it('should add new named imports', async () => {
       const initialContent = `import { existingImport } from '@scope/package';`;
       tree.write('file.ts', initialContent);
 
-      addDestructuredImport(
+      await addDestructuredImport(
         tree,
         'file.ts',
         ['newImport1', 'newImport2'],
@@ -55,11 +55,11 @@ describe('ast utils', () => {
       );
     });
 
-    it('should handle aliased imports', () => {
+    it('should handle aliased imports', async () => {
       const initialContent = `import { existing } from '@scope/package';`;
       tree.write('file.ts', initialContent);
 
-      addDestructuredImport(
+      await addDestructuredImport(
         tree,
         'file.ts',
         ['original as alias'],
@@ -72,11 +72,11 @@ describe('ast utils', () => {
       );
     });
 
-    it('should not duplicate existing imports', () => {
+    it('should not duplicate existing imports', async () => {
       const initialContent = `import { existingImport } from '@scope/package';`;
       tree.write('file.ts', initialContent);
 
-      addDestructuredImport(
+      await addDestructuredImport(
         tree,
         'file.ts',
         ['existingImport'],
@@ -87,17 +87,17 @@ describe('ast utils', () => {
       expect(writtenContent).toBe(initialContent);
     });
 
-    it('should merge imports when called twice with different variables from same module', () => {
+    it('should merge imports when called twice with different variables from same module', async () => {
       const initialContent = `import { Agent } from '@strands-agents/sdk';`;
       tree.write('file.ts', initialContent);
 
-      addDestructuredImport(
+      await addDestructuredImport(
         tree,
         'file.ts',
         ['ClientA'],
         ':scope/agent-connection',
       );
-      addDestructuredImport(
+      await addDestructuredImport(
         tree,
         'file.ts',
         ['ClientB'],
@@ -117,24 +117,24 @@ describe('ast utils', () => {
       expect(importLines[0]).toContain('ClientB');
     });
 
-    it('should throw if file does not exist', () => {
-      expect(() =>
+    it('should throw if file does not exist', async () => {
+      await expect(
         addDestructuredImport(
           tree,
           'nonexistent.ts',
           ['import1'],
           '@scope/package',
         ),
-      ).toThrow('No file located at nonexistent.ts');
+      ).rejects.toThrow('No file located at nonexistent.ts');
     });
   });
 
   describe('singleImport', () => {
-    it('should add new default import', () => {
+    it('should add new default import', async () => {
       const initialContent = `// Some content`;
       tree.write('file.ts', initialContent);
 
-      addSingleImport(tree, 'file.ts', 'DefaultImport', '@scope/package');
+      await addSingleImport(tree, 'file.ts', 'DefaultImport', '@scope/package');
 
       const writtenContent = tree.read('file.ts', 'utf-8');
       expect(writtenContent).toMatch(
@@ -142,11 +142,11 @@ describe('ast utils', () => {
       );
     });
 
-    it('should not duplicate existing default import', () => {
+    it('should not duplicate existing default import', async () => {
       const initialContent = `import DefaultImport from '@scope/package';`;
       tree.write('file.ts', initialContent);
 
-      addSingleImport(tree, 'file.ts', 'DefaultImport', '@scope/package');
+      await addSingleImport(tree, 'file.ts', 'DefaultImport', '@scope/package');
 
       const writtenContent = tree.read('file.ts', 'utf-8');
       expect(writtenContent).toBe(initialContent);
@@ -154,28 +154,28 @@ describe('ast utils', () => {
   });
 
   describe('addStarExport', () => {
-    it('should add star export if none exists', () => {
+    it('should add star export if none exists', async () => {
       const initialContent = `// Some content`;
       tree.write('index.ts', initialContent);
 
-      addStarExport(tree, 'index.ts', './module');
+      await addStarExport(tree, 'index.ts', './module');
 
       const writtenContent = tree.read('index.ts', 'utf-8');
       expect(writtenContent).toContain('export * from "./module"');
     });
 
-    it('should not duplicate existing star export', () => {
+    it('should not duplicate existing star export', async () => {
       const initialContent = `export * from './module';`;
       tree.write('index.ts', initialContent);
 
-      addStarExport(tree, 'index.ts', './module');
+      await addStarExport(tree, 'index.ts', './module');
 
       const writtenContent = tree.read('index.ts', 'utf-8');
       expect(writtenContent).toBe(initialContent);
     });
 
-    it('should create file if it does not exist', () => {
-      addStarExport(tree, 'index.ts', './module');
+    it('should create file if it does not exist', async () => {
+      await addStarExport(tree, 'index.ts', './module');
 
       const writtenContent = tree.read('index.ts', 'utf-8');
       expect(writtenContent).toContain('export * from "./module"');
@@ -183,7 +183,7 @@ describe('ast utils', () => {
   });
 
   describe('replace', () => {
-    it('should replace matching nodes', () => {
+    it('should replace matching nodes', async () => {
       const initialContent = `const x = 5;`;
       tree.write('file.ts', initialContent);
 
@@ -195,7 +195,7 @@ describe('ast utils', () => {
       expect(writtenContent).toContain('const x = 10');
     });
 
-    it('should replace multiple matching nodes', () => {
+    it('should replace multiple matching nodes', async () => {
       const initialContent = `const a = 1;
 const b = 10000000;
 const c = 99999;
@@ -219,7 +219,7 @@ const f = 100;
 `);
     });
 
-    it('should preserve new lines', () => {
+    it('should preserve new lines', async () => {
       const initialContent = `const a = 1;
 const b = 10000000;
 
@@ -253,7 +253,7 @@ const f = 100;
 `);
     });
 
-    it('should handle transformers which mutate the given node', () => {
+    it('should handle transformers which mutate the given node', async () => {
       const initialContent = `const x = () => {};
 const y = () => {};`;
       tree.write('file.ts', initialContent);
@@ -308,7 +308,7 @@ const y = () => {
 };`);
     });
 
-    it('should replace only the parent node where nested updates are applied', () => {
+    it('should replace only the parent node where nested updates are applied', async () => {
       const initialContent = `const x = () => {
   const y = () => {};
 };
@@ -364,7 +364,7 @@ const y = () => {
 `);
     });
 
-    it('should handle nested replacements that return the node unchanged', () => {
+    it('should handle nested replacements that return the node unchanged', async () => {
       const initialContent = `const x = () => {
   const y = () => {};
 };
@@ -377,7 +377,7 @@ const y = () => {
       expect(writtenContent).toBe(initialContent);
     });
 
-    it('should handle nested replacements where a child node is changed', () => {
+    it('should handle nested replacements where a child node is changed', async () => {
       const initialContent = `const x = () => {
   const y = () => {
       const z = () => {
@@ -447,7 +447,7 @@ const y = () => {
 `);
     });
 
-    it('should throw if no matches found and errorIfNoMatches is true', () => {
+    it('should throw if no matches found and errorIfNoMatches is true', async () => {
       const initialContent = `const x = "string";`;
       tree.write('file.ts', initialContent);
 
@@ -458,7 +458,7 @@ const y = () => {
       ).toThrow();
     });
 
-    it('should not throw if no matches found and errorIfNoMatches is false', () => {
+    it('should not throw if no matches found and errorIfNoMatches is false', async () => {
       const initialContent = `const x = "string";`;
       tree.write('file.ts', initialContent);
 
@@ -479,7 +479,7 @@ const y = () => {
       ).not.toThrow();
     });
 
-    it('should not mess up existing formatting', () => {
+    it('should not mess up existing formatting', async () => {
       const initialContent = `import {
   awsLambdaRequestHandler,
   CreateAWSLambdaContextOptions,
@@ -542,7 +542,7 @@ export type AppRouter = typeof appRouter;
       expect(writtenContent).toContain(`foo`);
     });
 
-    it('should not duplicate comments', () => {
+    it('should not duplicate comments', async () => {
       const initialContent = `
 // some comment
 interface MyInterface {
@@ -585,7 +585,7 @@ interface MyInterface {
       );
     });
 
-    it('should not duplicate comments when replacing interface with preceding interface', () => {
+    it('should not duplicate comments when replacing interface with preceding interface', async () => {
       // This simulates what the file would look like with a prepended interface
       const contentWithPrependedInterface = `export interface FirstInterface {
     prop1: string;
@@ -634,7 +634,7 @@ export interface MyInterface {
   });
 
   describe('createJsxElementFromIdentifier', () => {
-    it('should create JSX element with given identifier and children', () => {
+    it('should create JSX element with given identifier and children', async () => {
       const element = createJsxElementFromIdentifier('div', [
         factory.createJsxText('Hello'),
       ]);
@@ -647,7 +647,7 @@ export interface MyInterface {
   });
 
   describe('createJsxElement', () => {
-    it('should create JSX element from parts', () => {
+    it('should create JSX element from parts', async () => {
       const opening = factory.createJsxOpeningElement(
         factory.createIdentifier('div'),
         undefined,
@@ -668,30 +668,30 @@ export interface MyInterface {
   });
 
   describe('jsonToAst', () => {
-    it('should handle null', () => {
+    it('should handle null', async () => {
       expect(jsonToAst(null)).toEqual(factory.createNull());
     });
 
-    it('should handle undefined', () => {
+    it('should handle undefined', async () => {
       expect(jsonToAst(undefined)).toEqual(
         factory.createIdentifier('undefined'),
       );
     });
 
-    it('should handle strings', () => {
+    it('should handle strings', async () => {
       expect(jsonToAst('test')).toEqual(factory.createStringLiteral('test'));
     });
 
-    it('should handle numbers', () => {
+    it('should handle numbers', async () => {
       expect(jsonToAst(42)).toEqual(factory.createNumericLiteral(42));
     });
 
-    it('should handle booleans', () => {
+    it('should handle booleans', async () => {
       expect(jsonToAst(true)).toEqual(factory.createTrue());
       expect(jsonToAst(false)).toEqual(factory.createFalse());
     });
 
-    it('should handle arrays', () => {
+    it('should handle arrays', async () => {
       const input = [1, 'test', true];
       const expected = factory.createArrayLiteralExpression([
         factory.createNumericLiteral(1),
@@ -701,7 +701,7 @@ export interface MyInterface {
       expect(jsonToAst(input)).toEqual(expected);
     });
 
-    it('should handle objects', () => {
+    it('should handle objects', async () => {
       const input = {
         number: 42,
         string: 'test',
@@ -740,7 +740,7 @@ export interface MyInterface {
       expect(jsonToAst(input)).toEqual(expected);
     });
 
-    it('should handle objects with string keys', () => {
+    it('should handle objects with string keys', async () => {
       const input = {
         'some/unsupported/syntax': 'test',
       };
@@ -753,24 +753,24 @@ export interface MyInterface {
       expect(jsonToAst(input)).toEqual(expected);
     });
 
-    it('should throw error for unsupported types', () => {
+    it('should throw error for unsupported types', async () => {
       const fn = () => console.log('function!');
       expect(() => jsonToAst(fn)).toThrow('Unsupported type: function');
     });
   });
 
   describe('hasExportDeclaration', () => {
-    it('should return true for exported type alias declarations', () => {
+    it('should return true for exported type alias declarations', async () => {
       const source = `export type MyType = string;`;
       expect(hasExportDeclaration(source, 'MyType')).toBe(true);
     });
 
-    it('should return false for non-exported type alias declarations', () => {
+    it('should return false for non-exported type alias declarations', async () => {
       const source = `type MyType = string;`;
       expect(hasExportDeclaration(source, 'MyType')).toBe(false);
     });
 
-    it('should return true for export declarations', () => {
+    it('should return true for export declarations', async () => {
       const source = `
         type MyType = string;
         export { MyType };
@@ -778,14 +778,14 @@ export interface MyInterface {
       expect(hasExportDeclaration(source, 'MyType')).toBe(true);
     });
 
-    it('should return false when type alias does not exist', () => {
+    it('should return false when type alias does not exist', async () => {
       const source = `type OtherType = string;`;
       expect(hasExportDeclaration(source, 'MyType')).toBe(false);
     });
   });
 
   describe('prependStatements', () => {
-    it('should prepend statements to the beginning of a file', () => {
+    it('should prepend statements to the beginning of a file', async () => {
       const initialContent = `const existing = 'value';
 console.log(existing);`;
       tree.write('file.ts', initialContent);
@@ -811,7 +811,7 @@ console.log(existing);`;
       );
     });
 
-    it('should prepend multiple statements in order', () => {
+    it('should prepend multiple statements in order', async () => {
       const initialContent = `const existing = 'value';`;
       tree.write('file.ts', initialContent);
 
@@ -850,7 +850,7 @@ console.log(existing);`;
       );
     });
 
-    it('should not duplicate comments when prepending statements', () => {
+    it('should not duplicate comments when prepending statements', async () => {
       const initialContent = `// some comment
 interface MyInterface {
     property: string;
@@ -886,7 +886,7 @@ interface MyInterface {
       );
     });
 
-    it('should handle empty file', () => {
+    it('should handle empty file', async () => {
       tree.write('empty.ts', '');
 
       const newStatement = factory.createVariableStatement(
@@ -907,7 +907,7 @@ interface MyInterface {
       expect(writtenContent).toContain('var newVar = "value";');
     });
 
-    it('should throw if file does not exist', () => {
+    it('should throw if file does not exist', async () => {
       const newStatement = factory.createVariableStatement(
         undefined,
         factory.createVariableDeclarationList([
@@ -927,7 +927,7 @@ interface MyInterface {
   });
 
   describe('appendStatements', () => {
-    it('should append statements to the end of a file', () => {
+    it('should append statements to the end of a file', async () => {
       const initialContent = `const existing = 'value';
 console.log(existing);`;
       tree.write('file.ts', initialContent);
@@ -953,7 +953,7 @@ console.log(existing);`;
       );
     });
 
-    it('should append multiple statements in order', () => {
+    it('should append multiple statements in order', async () => {
       const initialContent = `const existing = 'value';`;
       tree.write('file.ts', initialContent);
 
@@ -992,7 +992,7 @@ console.log(existing);`;
       );
     });
 
-    it('should preserve existing comments when appending statements', () => {
+    it('should preserve existing comments when appending statements', async () => {
       const initialContent = `// some comment
 interface MyInterface {
     property: string;
@@ -1028,7 +1028,7 @@ interface MyInterface {
       );
     });
 
-    it('should handle empty file', () => {
+    it('should handle empty file', async () => {
       tree.write('empty.ts', '');
 
       const newStatement = factory.createVariableStatement(
@@ -1049,7 +1049,7 @@ interface MyInterface {
       expect(writtenContent).toContain('var newVar = "value";');
     });
 
-    it('should throw if file does not exist', () => {
+    it('should throw if file does not exist', async () => {
       const newStatement = factory.createVariableStatement(
         undefined,
         factory.createVariableDeclarationList([

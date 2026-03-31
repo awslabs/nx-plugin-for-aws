@@ -154,7 +154,7 @@ export const pyStrandsAgentGenerator = async (
     await sharedConstructsGenerator(tree, { iacProvider });
 
     // Add the construct to deploy the agent
-    addAgentInfra(tree, {
+    await addAgentInfra(tree, {
       agentNameKebabCase: name,
       agentNameClassName,
       dockerImageTag,

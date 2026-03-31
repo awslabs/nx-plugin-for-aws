@@ -134,7 +134,7 @@ export const pyFastApiProjectGenerator = async (
   );
 
   // Add the CDK construct to deploy the FastAPI to shared constructs
-  addApiGatewayInfra(tree, {
+  await addApiGatewayInfra(tree, {
     apiProjectName: projectConfig.name,
     apiNameClassName,
     apiNameKebabCase,

@@ -47,7 +47,7 @@ export async function addShadcnAuthMenu(tree: Tree, appLayoutTsxPath: string) {
   );
 
   // Add useEffect, useRef, useState imports from react
-  addDestructuredImport(
+  await addDestructuredImport(
     tree,
     appLayoutTsxPath,
     ['useEffect', 'useRef', 'useState'],

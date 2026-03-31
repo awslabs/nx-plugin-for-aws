@@ -88,7 +88,7 @@ export async function tsTrpcApiGenerator(
     ...options,
   };
 
-  addApiGatewayInfra(tree, {
+  await addApiGatewayInfra(tree, {
     apiProjectName: backendProjectName,
     apiNameClassName,
     apiNameKebabCase,

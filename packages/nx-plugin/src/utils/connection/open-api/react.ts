@@ -205,7 +205,7 @@ export const addOpenApiReactClient = async (
     ).length > 0;
 
   if (!hasQueryClientProvider) {
-    addSingleImport(
+    await addSingleImport(
       tree,
       mainTsxPath,
       'QueryClientProvider',
@@ -229,7 +229,7 @@ export const addOpenApiReactClient = async (
       `JsxOpeningElement[tagName.name="${providerName}"]`,
     ).length > 0;
   if (!hasProvider) {
-    addSingleImport(
+    await addSingleImport(
       tree,
       mainTsxPath,
       providerName,

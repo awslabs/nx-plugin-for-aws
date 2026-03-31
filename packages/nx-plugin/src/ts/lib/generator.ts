@@ -95,7 +95,7 @@ export const tsProjectGenerator = async (
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
   );
-  configureTsProject(tree, {
+  await configureTsProject(tree, {
     dir,
     fullyQualifiedName,
   });

@@ -99,7 +99,7 @@ export const tsLambdaFunctionGenerator = async (
 
   const bundleOutputDir = joinPathFragments('lambda', lambdaFunctionKebabCase);
 
-  addLambdaFunctionInfra(tree, {
+  await addLambdaFunctionInfra(tree, {
     functionProjectName: projectConfig.name,
     functionNameClassName: constructFunctionClassName,
     functionNameKebabCase: constructFunctionNameKebabCase,

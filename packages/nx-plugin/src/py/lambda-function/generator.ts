@@ -140,7 +140,7 @@ export const pyLambdaFunctionGenerator = async (
   // Check if the project has a bundle target and if not add it
   const { bundleOutputDir } = addPythonBundleTarget(projectConfig);
 
-  addLambdaFunctionInfra(tree, {
+  await addLambdaFunctionInfra(tree, {
     functionProjectName: projectConfig.name,
     functionNameClassName: constructFunctionClassName,
     functionNameKebabCase: constructFunctionKebabCase,

@@ -49,12 +49,12 @@ export interface AddApiGatewayConstructOptions {
   auth: 'IAM' | 'Cognito' | 'None';
 }
 
-export const addApiGatewayInfra = (
+export const addApiGatewayInfra = async (
   tree: Tree,
   options: AddApiGatewayConstructOptions & { iacProvider: IacProvider },
 ) => {
   if (options.iacProvider === 'CDK') {
-    addApiGatewayCdkConstructs(tree, options);
+    await addApiGatewayCdkConstructs(tree, options);
   } else if (options.iacProvider === 'Terraform') {
     addApiGatewayTerraformModules(tree, options);
   } else {
@@ -89,7 +89,7 @@ export const addApiGatewayInfra = (
 /**
  * Add an API CDK construct, and update the Runtime Config type to export its url
  */
-const addApiGatewayCdkConstructs = (
+const addApiGatewayCdkConstructs = async (
   tree: Tree,
   options: AddApiGatewayConstructOptions,
 ) => {
@@ -143,7 +143,7 @@ const addApiGatewayCdkConstructs = (
   );
 
   // Export app specific CDK construct
-  addStarExport(
+  await addStarExport(
     tree,
     joinPathFragments(
       PACKAGES_DIR,
@@ -155,7 +155,7 @@ const addApiGatewayCdkConstructs = (
     ),
     `./${options.apiNameKebabCase}.js`,
   );
-  addStarExport(
+  await addStarExport(
     tree,
     joinPathFragments(
       PACKAGES_DIR,

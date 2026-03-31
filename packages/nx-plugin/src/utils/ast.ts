@@ -47,150 +47,104 @@ const createOrUpdateFile = (
   }
 };
 
-export const addDestructuredImport = (
+export const addDestructuredImport = async (
   tree: Tree,
   filePath: string,
   variableNames: string[],
   from: string,
 ) => {
-  updateFile(tree, filePath, (contents) => {
-    const sourceAst = ast(contents);
+  assertFilePath(tree, filePath);
 
-    // Check if any of the variables are already imported from the same module
-    const existingImports: ImportSpecifier[] = tsquery.query(
-      sourceAst,
-      `ImportDeclaration[moduleSpecifier.text="${from}"] ImportClause ImportSpecifier`,
-    );
+  // Check if there's an existing import from this module
+  const hasExistingImport = await hasGritQLMatch(
+    tree,
+    filePath,
+    `\`import { $_ } from '${from}'\``,
+  );
 
-    const existingVariables = new Set(
-      existingImports.map((node) => {
-        const importSpecifier = node as ImportSpecifier;
-        return importSpecifier.name.escapedText.toString();
-      }),
-    );
-
-    // Filter out variables that are already imported
-    const newVariables = variableNames.filter(
-      (name) =>
-        !existingVariables.has(
-          name.includes(' as ') ? name.split(' as ')[1] : name,
-        ),
-    );
-
-    if (newVariables.length === 0) {
-      return contents;
-    }
-
-    const newImportSpecifiers = newVariables.map((variableName) => {
-      const [name, alias] = variableName.split(' as ');
-      return factory.createImportSpecifier(
-        false,
-        alias ? factory.createIdentifier(name) : undefined,
-        factory.createIdentifier(alias || name),
-      );
-    });
-
-    // If there's an existing import from this module, replace it with an updated one
-    if (existingImports.length > 0) {
-      return applyTransform(
-        contents,
-        `ImportDeclaration[moduleSpecifier.text="${from}"]`,
-        (node) => {
-          const decl = node as ts.ImportDeclaration;
-          return factory.updateImportDeclaration(
-            decl,
-            decl.modifiers,
-            factory.createImportClause(
-              false,
-              undefined,
-              factory.createNamedImports([
-                ...existingImports,
-                ...newImportSpecifiers,
-              ]),
-            ),
-            decl.moduleSpecifier,
-            decl.attributes,
-          );
-        },
+  if (hasExistingImport) {
+    // For each new variable, use GritQL rewrite to add it if not already present
+    for (const variableName of variableNames) {
+      const localName = variableName.includes(' as ')
+        ? variableName.split(' as ')[1]
+        : variableName;
+      // Use rewrite (=>) which correctly handles comma-separated import specifier lists
+      await applyGritQLTransform(
+        tree,
+        filePath,
+        `\`import { $imports } from '${from}'\` => \`import { $imports, ${variableName} } from '${from}'\` where { $imports <: not contains \`${localName}\` }`,
       );
     }
-
+  } else {
     // No existing import — prepend a new one
-    const destructuredImport = factory.createImportDeclaration(
-      undefined,
-      factory.createImportClause(
-        false,
-        undefined,
-        factory.createNamedImports(newImportSpecifiers),
-      ),
-      factory.createStringLiteral(from, true),
+    const specifiers = variableNames.join(', ');
+    const contents = tree.read(filePath)!.toString();
+    tree.write(
+      filePath,
+      `import { ${specifiers} } from '${from}';\n${contents}`,
     );
-
-    return prependStatementsToCodeText(contents, [destructuredImport]);
-  });
+  }
 };
 
 /**
  * Adds an `import <variableName> from '<from>'; statement to the beginning of the file,
  * if it doesn't already exist
  */
-export const addSingleImport = (
+export const addSingleImport = async (
   tree: Tree,
   filePath: string,
   variableName: string,
   from: string,
 ) => {
-  updateFile(tree, filePath, (contents) => {
-    const sourceAst = ast(contents);
+  assertFilePath(tree, filePath);
 
-    // Check if the import already exists
-    const existingImports = tsquery.query(
-      sourceAst,
-      `ImportDeclaration[moduleSpecifier.text="${from}"] ImportClause > Identifier[text="${variableName}"]`,
-    );
+  // Check if default import already exists using GritQL
+  const alreadyImported = await hasGritQLMatch(
+    tree,
+    filePath,
+    `\`import ${variableName} from '${from}'\``,
+  );
+  if (alreadyImported) {
+    return;
+  }
 
-    if (existingImports.length > 0) {
-      return contents;
-    }
-
-    const importDeclaration = factory.createImportDeclaration(
-      undefined,
-      factory.createImportClause(
-        false,
-        factory.createIdentifier(variableName),
-        undefined,
-      ) as ImportClause,
-      factory.createStringLiteral(from),
-    );
-
-    return prependStatementsToCodeText(contents, [importDeclaration]);
-  });
+  // Prepend new import to file
+  const contents = tree.read(filePath)!.toString();
+  tree.write(
+    filePath,
+    `import ${variableName} from "${from}";\n${contents}`,
+  );
 };
 
 /**
  * Adds an `export * from '<from>'; statement to the given TypeScript file.
  * Note that this will create the file if it does not exist in the tree.
  */
-export const addStarExport = (tree: Tree, filePath: string, from: string) => {
-  createOrUpdateFile(tree, filePath, (contents) => {
-    const hasExport =
-      tsquery.query(
-        ast(contents ?? ''),
-        `ExportDeclaration StringLiteral[text="${from}"]`,
-      ).length > 0;
+export const addStarExport = async (
+  tree: Tree,
+  filePath: string,
+  from: string,
+) => {
+  const contents = tree.read(filePath)?.toString() ?? '';
 
-    if (!hasExport) {
-      const exportDeclaration = factory.createExportDeclaration(
-        undefined,
-        undefined,
-        undefined,
-        factory.createStringLiteral(from),
-      );
+  // For empty/non-existent files, just write the export
+  if (!contents.trim()) {
+    tree.write(filePath, `export * from "${from}";\n`);
+    return;
+  }
 
-      return prependStatementsToCodeText(contents ?? '', [exportDeclaration]);
-    }
-    return contents;
-  });
+  // Check if already exported using GritQL
+  const alreadyExported = await hasGritQLMatch(
+    tree,
+    filePath,
+    `\`export * from '${from}'\``,
+  );
+  if (alreadyExported) {
+    return;
+  }
+
+  // Prepend new export to file
+  tree.write(filePath, `export * from "${from}";\n${contents}`);
 };
 
 /**

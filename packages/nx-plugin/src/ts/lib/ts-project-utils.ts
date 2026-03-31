@@ -12,7 +12,7 @@ import { configureEslint } from './eslint';
 /**
  * Updates typescript projects
  */
-export const configureTsProject = (
+export const configureTsProject = async (
   tree: Tree,
   options: ConfigureProjectOptions,
 ) => {
@@ -90,6 +90,6 @@ export const configureTsProject = (
     tree.delete(join(options.dir, 'package.json'));
   }
 
-  configureEslint(tree, options);
+  await configureEslint(tree, options);
   configureVitest(tree, options);
 };

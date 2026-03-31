@@ -28,7 +28,7 @@ export interface AddHookResultToRouterProviderContextProps {
   contextProp: string; // eg. auth
 }
 
-export const addHookResultToRouterProviderContext = (
+export const addHookResultToRouterProviderContext = async (
   tree: Tree,
   mainTsxPath: string,
   { hook, module, contextProp }: AddHookResultToRouterProviderContextProps,
@@ -60,7 +60,7 @@ export const addHookResultToRouterProviderContext = (
     return;
   }
 
-  addDestructuredImport(tree, mainTsxPath, [hook], module);
+  await addDestructuredImport(tree, mainTsxPath, [hook], module);
 
   replace(
     tree,

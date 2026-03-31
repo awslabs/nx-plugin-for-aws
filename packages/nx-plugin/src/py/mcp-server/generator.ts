@@ -161,7 +161,7 @@ export const pyMcpServerGenerator = async (
     await sharedConstructsGenerator(tree, { iacProvider });
 
     // Add the construct to deploy the mcp server
-    addMcpServerInfra(tree, {
+    await addMcpServerInfra(tree, {
       mcpServerNameKebabCase: name,
       mcpServerNameClassName,
       projectName: project.name,
