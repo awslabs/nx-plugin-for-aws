@@ -3,8 +3,6 @@ title: "Nxジェネレータージェネレーター"
 description: "Nxジェネレーターを生成"
 ---
 
-
-
 import { FileTree } from '@astrojs/starlight/components';
 import RunGenerator from '@components/run-generator.astro';
 import NxCommands from '@components/nx-commands.astro';
@@ -294,25 +292,62 @@ generateFiles(
 );
 ```
 
-#### TypeScript AST操作
+#### GritQLによるコード変換
 
-`@aws/nx-plugin/sdk/utils/ast`の`tsAstReplace`を使用：
+ジェネレータ内でソースコードを宣言的に検索・変換するには[GritQL](https://docs.grit.io/)を使用できます。GritQLはTypeScript、JavaScript、Python、HCL（Terraform）など複数の言語をサポートしているため、スタック全体で同じパターン構文を使用できます。
+
+Nx Plugin for AWSは2つのヘルパーを公開しています：
+
+- `applyGritQL(tree, filePath, pattern)` — ファイルにGritQL書き換えパターンを適用し、変更が行われたかを示す`Promise<boolean>`を返します
+- `matchGritQL(tree, filePath, pattern)` — ファイル内のどこかでGritQLパターンがマッチするかをチェックし、`Promise<boolean>`を返します
 
 ```typescript
-import { tsAstReplace } from '@aws/nx-plugin/sdk/utils/ast';
-import * as ts from 'typescript';
+import { applyGritQL, matchGritQL } from '@aws/nx-plugin/sdk/utils/ast';
 
-// バージョン番号更新例
-tsAstReplace(
+// 関数呼び出しの置換
+await applyGritQL(
   tree,
-  'path/to/version.ts',
-  'VariableDeclaration:has(Identifier[name="VERSION"]) NumericLiteral',
-  (node: ts.NumericLiteral) =>
-    ts.factory.createNumericLiteral(Number(node.text) + 1));
+  'src/app.ts',
+  '`console.log($msg)` => `logger.info($msg)`',
+);
+
+// 配列に要素を追加（まだ存在しない場合のみ）
+await applyGritQL(
+  tree,
+  'src/plugins.ts',
+  '`plugins: [$items]` => `plugins: [$items, myPlugin()]` where { $items <: not contains `myPlugin` }',
+);
+
+// 変更前にパターンの存在をチェック
+if (!(await matchGritQL(tree, filePath, '`import { Auth } from "./auth"`'))) {
+  // インポートを追加
+}
 ```
 
+GritQLパターンはTypeScript以外のファイルでも動作します。他の言語を対象とするには、パターンの先頭に`language <name>`を付けます：
+
+```typescript
+// Python: print文をロギング呼び出しに置換
+await applyGritQL(
+  tree,
+  'src/handler.py',
+  'language python\n`print($msg)` => `logger.info($msg)`',
+);
+```
+
+GritQLパターンはバッククォートで区切られたコードスニペットと`$メタ変数`をワイルドカードとして使用します。書き換えには`=>`、条件には`where`句を使用します。
+
 :::tip
-セレクタのテストは[TSQuery Playground](https://tsquery-playground.firebaseapp.com/)で可能です。
+GritQLパターンは[GritQL Playground](https://docs.grit.io/playground)で試すことができます。また、GritQL CLIをローカルにインストールして、ファイルに対してパターンをテストすることもできます：
+
+```bash
+npm install -g @getgrit/cli
+grit apply '`console.log($msg)` => `logger.info($msg)`' --dry-run
+```
+:::
+
+:::tip
+ジェネレータの作成にAIコーディングエージェントを使用する場合は、[Context7 MCPサーバー](https://context7.com/)を追加して最新のドキュメントを提供してください。`gritql`と`docs.grit.io`を検索してGritQLパターン構文リファレンスを参照し、GritQL CLIへのアクセスを提供してパターンを直接テストできるようにプロンプトしてください。
 :::
 
 #### 依存関係の追加
@@ -378,13 +413,26 @@ export const myGenerator = async (tree: Tree, schema: MyGeneratorSchema) => {
 
 #### OpenAPIジェネレータ
 
-OpenAPIコード生成データの活用：
+TypeScriptクライアントとフックに使用するジェネレータを同様に使用・拡張できます：
+
+```ts
+import { openApiTsClientGenerator } from '@aws/nx-plugin/sdk/open-api';
+
+export const myGenerator = async (tree: Tree, schema: MyGeneratorSchema) => {
+  await openApiTsClientGenerator(tree, { ... });
+
+  // 追加ファイルをここに追加
+};
+```
+
+OpenAPI仕様の操作を反復処理し、独自のコード生成を実装できるデータ構造を構築するメソッドも公開しています：
 
 ```ts
 import { buildOpenApiCodeGenerationData } from '@aws/nx-plugin/sdk/open-api.js';
 
 export const myGenerator = async (tree: Tree, schema: MyGeneratorSchema) => {
   const data = await buildOpenApiCodeGenerationData(tree, 'path/to/spec.json');
+
   generateFiles(tree, 'templates', 'output', data);
 };
 ```
@@ -400,7 +448,7 @@ export const myOperationNames = [
 ];
 ```
 
-詳細な例は[GitHubリポジトリ](https://github.com/awslabs/nx-plugin-for-aws/)を参照。
+より複雑なテンプレート例は[GitHubのコードベース](https://github.com/awslabs/nx-plugin-for-aws/)を参照してください。
 
 ### ジェネレータの実行
 

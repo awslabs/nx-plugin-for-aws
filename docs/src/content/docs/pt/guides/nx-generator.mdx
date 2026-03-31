@@ -3,8 +3,6 @@ title: "Gerador de Gerador do Nx"
 description: "Gera um Gerador do Nx"
 ---
 
-
-
 import { FileTree } from '@astrojs/starlight/components';
 import RunGenerator from '@components/run-generator.astro';
 import NxCommands from '@components/nx-commands.astro';
@@ -114,7 +112,7 @@ Aqui está um exemplo simples com algumas opções básicas:
 }
 ```
 
-### Prompts Interativos (CLI)
+#### Prompts Interativos (CLI)
 
 Você pode personalizar os prompts exibidos ao executar seu generator via CLI adicionando a propriedade `x-prompt`:
 
@@ -136,7 +134,7 @@ Para opções booleanas, use um prompt sim/não:
 }
 ```
 
-### Seleções em Dropdown
+#### Seleções em Dropdown
 
 Para opções com um conjunto fixo de escolhas, use `enum` para permitir seleção entre as opções:
 
@@ -149,7 +147,7 @@ Para opções com um conjunto fixo de escolhas, use `enum` para permitir seleç�
 }
 ```
 
-### Dropdown de Seleção de Projeto
+#### Dropdown de Seleção de Projeto
 
 Um padrão comum é permitir seleção entre projetos existentes no workspace:
 
@@ -164,7 +162,7 @@ Um padrão comum é permitir seleção entre projetos existentes no workspace:
 
 A propriedade `x-dropdown: "projects"` instrui o Nx a preencher o dropdown com todos os projetos do workspace.
 
-### Argumentos Posicionais
+#### Argumentos Posicionais
 
 Você pode configurar opções para serem passadas como argumentos posicionais na linha de comando:
 
@@ -182,7 +180,7 @@ Você pode configurar opções para serem passadas como argumentos posicionais n
 
 Isso permite executar o generator como `nx g your-generator my-component` em vez de `nx g your-generator --name=my-component`.
 
-### Definindo Prioridades
+#### Definindo Prioridades
 
 Use a propriedade `x-priority` para indicar opções mais importantes:
 
@@ -196,7 +194,7 @@ Use a propriedade `x-priority` para indicar opções mais importantes:
 
 Opções podem ter prioridades `"important"` ou `"internal"`. Isso ajuda o Nx a ordenar propriedades na extensão VSCode e CLI do Nx.
 
-### Valores Padrão
+#### Valores Padrão
 
 Você pode fornecer valores padrão para opções:
 
@@ -208,11 +206,11 @@ Você pode fornecer valores padrão para opções:
 }
 ```
 
-### Mais Informações
+#### Mais Informações
 
 Para mais detalhes sobre esquemas, consulte a [documentação de Opções do Nx Generator](https://nx.dev/extending-nx/recipes/generator-options).
 
-### Tipos TypeScript com schema.d.ts
+#### Tipos TypeScript com schema.d.ts
 
 Junto com `schema.json`, o generator cria um arquivo `schema.d.ts` que fornece tipos TypeScript para as opções:
 
@@ -298,25 +296,62 @@ generateFiles(
 );
 ```
 
-#### Manipulação de AST (Abstract Syntax Tree) TypeScript
+#### Transformações de Código com GritQL
 
-Use `tsAstReplace` do Nx Plugin for AWS para modificar ASTs TypeScript:
+Você pode usar [GritQL](https://docs.grit.io/) para buscar e transformar código-fonte declarativamente em seus generators. GritQL suporta múltiplas linguagens incluindo TypeScript, JavaScript, Python, HCL (Terraform), e mais — então você pode usar a mesma sintaxe de padrões em toda sua stack.
+
+O Nx Plugin for AWS expõe dois helpers:
+
+- `applyGritQL(tree, filePath, pattern)` — aplica um padrão de reescrita GritQL a um arquivo e retorna `Promise<boolean>` indicando se mudanças foram feitas
+- `matchGritQL(tree, filePath, pattern)` — verifica se um padrão GritQL corresponde em algum lugar de um arquivo e retorna `Promise<boolean>`
 
 ```typescript
-import { tsAstReplace } from '@aws/nx-plugin/sdk/utils/ast';
-import * as ts from 'typescript';
+import { applyGritQL, matchGritQL } from '@aws/nx-plugin/sdk/utils/ast';
 
-// Exemplo: Incrementar versão
-tsAstReplace(
+// Substituir uma chamada de função
+await applyGritQL(
   tree,
-  'path/to/version.ts',
-  'VariableDeclaration:has(Identifier[name="VERSION"]) NumericLiteral',
-  (node: ts.NumericLiteral) =>
-    ts.factory.createNumericLiteral(Number(node.text) + 1));
+  'src/app.ts',
+  '`console.log($msg)` => `logger.info($msg)`',
+);
+
+// Adicionar um elemento a um array apenas se não estiver presente
+await applyGritQL(
+  tree,
+  'src/plugins.ts',
+  '`plugins: [$items]` => `plugins: [$items, myPlugin()]` where { $items <: not contains `myPlugin` }',
+);
+
+// Verificar se um padrão existe antes de fazer mudanças
+if (!(await matchGritQL(tree, filePath, '`import { Auth } from "./auth"`'))) {
+  // Adicionar o import
+}
 ```
 
+Padrões GritQL também funcionam em arquivos não-TypeScript. Prefixe seu padrão com `language <name>` para atingir outras linguagens:
+
+```typescript
+// Python: substituir declarações print por chamadas de logging
+await applyGritQL(
+  tree,
+  'src/handler.py',
+  'language python\n`print($msg)` => `logger.info($msg)`',
+);
+```
+
+Padrões GritQL usam trechos de código delimitados por crases com `$metavariables` como curingas. Use `=>` para reescritas e cláusulas `where` para condições.
+
 :::tip
-Teste seletores no [TSQuery Playground](https://tsquery-playground.firebaseapp.com/).
+Você pode testar padrões GritQL no [GritQL Playground](https://docs.grit.io/playground), ou instalar a CLI GritQL localmente para testar padrões contra seus arquivos:
+
+```bash
+npm install -g @getgrit/cli
+grit apply '`console.log($msg)` => `logger.info($msg)`' --dry-run
+```
+:::
+
+:::tip
+Se você usa um agente de codificação IA para ajudar a escrever generators, adicione o [Context7 MCP server](https://context7.com/) para fornecer documentação atualizada. Instrua-o a buscar `gritql` e `docs.grit.io` para referência de sintaxe de padrões GritQL, e forneça acesso à CLI GritQL para que possa testar padrões diretamente.
 :::
 
 #### Adicionando Dependências

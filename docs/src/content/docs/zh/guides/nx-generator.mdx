@@ -3,8 +3,6 @@ title: "Nx 生成器生成器"
 description: "生成 Nx 生成器"
 ---
 
-
-
 import { FileTree } from '@astrojs/starlight/components';
 import RunGenerator from '@components/run-generator.astro';
 import NxCommands from '@components/nx-commands.astro';
@@ -299,25 +297,62 @@ generateFiles(
 );
 ```
 
-#### TypeScript AST 操作
+#### 使用 GritQL 进行代码转换
 
-使用 Nx Plugin for AWS 的 `tsAstReplace` 方法修改 TypeScript 抽象语法树：
+可以使用 [GritQL](https://docs.grit.io/) 在生成器中声明式地搜索和转换源代码。GritQL 支持多种语言，包括 TypeScript、JavaScript、Python、HCL (Terraform) 等——因此您可以在整个技术栈中使用相同的模式语法。
+
+Nx Plugin for AWS 暴露了两个辅助函数：
+
+- `applyGritQL(tree, filePath, pattern)` — 对文件应用 GritQL 重写模式，返回 `Promise<boolean>` 指示是否进行了更改
+- `matchGritQL(tree, filePath, pattern)` — 检查 GritQL 模式是否在文件中匹配，返回 `Promise<boolean>`
 
 ```typescript
-import { tsAstReplace } from '@aws/nx-plugin/sdk/utils/ast';
-import * as ts from 'typescript';
+import { applyGritQL, matchGritQL } from '@aws/nx-plugin/sdk/utils/ast';
 
-// 示例：递增版本号
-tsAstReplace(
+// 替换函数调用
+await applyGritQL(
   tree,
-  'path/to/version.ts',
-  'VariableDeclaration:has(Identifier[name="VERSION"]) NumericLiteral',
-  (node: ts.NumericLiteral) =>
-    ts.factory.createNumericLiteral(Number(node.text) + 1));
+  'src/app.ts',
+  '`console.log($msg)` => `logger.info($msg)`',
+);
+
+// 仅在不存在时向数组添加元素
+await applyGritQL(
+  tree,
+  'src/plugins.ts',
+  '`plugins: [$items]` => `plugins: [$items, myPlugin()]` where { $items <: not contains `myPlugin` }',
+);
+
+// 在进行更改前检查模式是否存在
+if (!(await matchGritQL(tree, filePath, '`import { Auth } from "./auth"`'))) {
+  // 添加导入
+}
 ```
 
+GritQL 模式也适用于非 TypeScript 文件。在模式前加上 `language <name>` 以针对其他语言：
+
+```typescript
+// Python：将 print 语句替换为日志调用
+await applyGritQL(
+  tree,
+  'src/handler.py',
+  'language python\n`print($msg)` => `logger.info($msg)`',
+);
+```
+
+GritQL 模式使用反引号分隔的代码片段，`$元变量` 作为通配符。使用 `=>` 进行重写，使用 `where` 子句添加条件。
+
 :::tip
-可在 [TSQuery Playground](https://tsquery-playground.firebaseapp.com/) 在线测试选择器。
+您可以在 [GritQL Playground](https://docs.grit.io/playground) 中试用 GritQL 模式，或在本地安装 GritQL CLI 以针对您的文件测试模式：
+
+```bash
+npm install -g @getgrit/cli
+grit apply '`console.log($msg)` => `logger.info($msg)`' --dry-run
+```
+:::
+
+:::tip
+如果您使用 AI 编码代理帮助编写生成器，可添加 [Context7 MCP server](https://context7.com/) 为其提供最新文档。提示它查找 `gritql` 和 `docs.grit.io` 以获取 GritQL 模式语法参考，并提供 GritQL CLI 访问权限以便直接测试模式。
 :::
 
 #### 添加依赖
