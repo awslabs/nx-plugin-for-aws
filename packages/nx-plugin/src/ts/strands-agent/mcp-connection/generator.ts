@@ -26,7 +26,7 @@ import { getNpmScope } from '../../../utils/npm-scope';
 import {
   addDestructuredImport,
   addStarExport,
-  applyGritQLTransform,
+  applyGritQL,
 } from '../../../utils/ast';
 import {
   ensureTypeScriptAgentConnectionProject,
@@ -113,7 +113,7 @@ export const tsStrandsAgentMcpConnectionGenerator = async (
     // Transform the arrow function that contains `new Agent`:
     // - Expression body: wrap in block with client creation and return
     // - Block body: prepend client creation statement
-    await applyGritQLTransform(
+    await applyGritQL(
       tree,
       agentFilePath,
       `or { \`async ($p) => new Agent($args)\` => raw\`async ($p) => {
@@ -126,7 +126,7 @@ export const tsStrandsAgentMcpConnectionGenerator = async (
     );
 
     // Prepend client to the tools array
-    await applyGritQLTransform(
+    await applyGritQL(
       tree,
       agentFilePath,
       `\`tools: [$items]\` => \`tools: [${clientVarName}, $items]\` where { $items <: within \`new Agent($_)\`, $items <: not contains \`${clientVarName}\` }`,

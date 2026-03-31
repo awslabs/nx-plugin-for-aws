@@ -13,7 +13,7 @@ import pyProjectGenerator, {
   getPyProjectDetails,
 } from '../../py/project/generator';
 import { addDependenciesToPyProjectToml } from '../py';
-import { applyGritQLTransform, hasGritQLMatch } from '../ast';
+import { applyGritQL, matchGritQL } from '../ast';
 
 /** Prefix a GritQL pattern with `language python` */
 const py = (pattern: string) => `language python\n${pattern}`;
@@ -160,7 +160,7 @@ export async function addPythonReExport(
   importName: string,
 ): Promise<void> {
   // Check if already exported
-  if (await hasGritQLMatch(tree, initFilePath, `\`${importName}\``)) {
+  if (await matchGritQL(tree, initFilePath, `\`${importName}\``)) {
     return;
   }
 
@@ -168,7 +168,7 @@ export async function addPythonReExport(
   const allEntry = `"${importName}"`;
 
   // Try to append import after existing import using +=
-  const appendedImport = await applyGritQLTransform(
+  const appendedImport = await applyGritQL(
     tree,
     initFilePath,
     py(
@@ -181,7 +181,7 @@ export async function addPythonReExport(
 
   if (appendedImport) {
     // Also append to existing __all__
-    await applyGritQLTransform(
+    await applyGritQL(
       tree,
       initFilePath,
       py(`\`__all__ = [$items]\` where { $items += \`, ${allEntry}\` }`),
@@ -190,7 +190,7 @@ export async function addPythonReExport(
   }
 
   // No existing imports — first re-export. Try to anchor after docstring.
-  const anchoredImport = await applyGritQLTransform(
+  const anchoredImport = await applyGritQL(
     tree,
     initFilePath,
     py(

@@ -28,7 +28,7 @@ import {
   getGeneratorInfo,
 } from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { applyGritQLTransform } from '../../utils/ast';
+import { applyGritQL } from '../../utils/ast';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
@@ -209,7 +209,7 @@ export const tsProjectGenerator = async (
   });
 
   // change error to warn for the @nx/dependency-checks rule
-  await applyGritQLTransform(
+  await applyGritQL(
     tree,
     joinPathFragments(dir, 'eslint.config.mjs'),
     readGritPattern('eslint-dependency-checks-warn'),

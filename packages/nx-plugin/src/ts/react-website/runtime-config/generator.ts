@@ -11,11 +11,7 @@ import {
 import { RuntimeConfigGeneratorSchema } from './schema';
 import { getNpmScopePrefix, toScopeAlias } from '../../../utils/npm-scope';
 import { formatFilesInSubtree } from '../../../utils/format';
-import {
-  addSingleImport,
-  applyGritQLTransform,
-  hasGritQLMatch,
-} from '../../../utils/ast';
+import { addSingleImport, applyGritQL, matchGritQL } from '../../../utils/ast';
 import {
   NxGeneratorInfo,
   addComponentGeneratorMetadata,
@@ -72,7 +68,7 @@ export async function runtimeConfigGenerator(
   );
 
   // Only add RuntimeConfigProvider wrapper and import if not already present in JSX
-  const alreadyWrapped = await hasGritQLMatch(
+  const alreadyWrapped = await matchGritQL(
     tree,
     mainTsxPath,
     '`<RuntimeConfigProvider>$_</RuntimeConfigProvider>`',
@@ -85,7 +81,7 @@ export async function runtimeConfigGenerator(
       './components/RuntimeConfig',
     );
 
-    const wrapped = await applyGritQLTransform(
+    const wrapped = await applyGritQL(
       tree,
       mainTsxPath,
       '`<App />` => `<RuntimeConfigProvider><App /></RuntimeConfigProvider>`',

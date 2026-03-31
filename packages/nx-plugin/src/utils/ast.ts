@@ -56,7 +56,7 @@ export const addDestructuredImport = async (
   assertFilePath(tree, filePath);
 
   // Check if there's an existing import from this module
-  const hasExistingImport = await hasGritQLMatch(
+  const hasExistingImport = await matchGritQL(
     tree,
     filePath,
     `\`import { $_ } from '${from}'\``,
@@ -69,7 +69,7 @@ export const addDestructuredImport = async (
         ? variableName.split(' as ')[1]
         : variableName;
       // Use rewrite (=>) which correctly handles comma-separated import specifier lists
-      await applyGritQLTransform(
+      await applyGritQL(
         tree,
         filePath,
         `\`import { $imports } from '${from}'\` => \`import { $imports, ${variableName} } from '${from}'\` where { $imports <: not contains \`${localName}\` }`,
@@ -99,7 +99,7 @@ export const addSingleImport = async (
   assertFilePath(tree, filePath);
 
   // Check if default import already exists using GritQL
-  const alreadyImported = await hasGritQLMatch(
+  const alreadyImported = await matchGritQL(
     tree,
     filePath,
     `\`import ${variableName} from '${from}'\``,
@@ -110,10 +110,7 @@ export const addSingleImport = async (
 
   // Prepend new import to file
   const contents = tree.read(filePath)!.toString();
-  tree.write(
-    filePath,
-    `import ${variableName} from "${from}";\n${contents}`,
-  );
+  tree.write(filePath, `import ${variableName} from "${from}";\n${contents}`);
 };
 
 /**
@@ -134,7 +131,7 @@ export const addStarExport = async (
   }
 
   // Check if already exported using GritQL
-  const alreadyExported = await hasGritQLMatch(
+  const alreadyExported = await matchGritQL(
     tree,
     filePath,
     `\`export * from '${from}'\``,
@@ -389,7 +386,7 @@ export const hasExportDeclaration = (
 /**
  * Apply a GritQL pattern to a file in the Nx tree.
  */
-export const applyGritQLTransform = async (
+export const applyGritQL = async (
   tree: Tree,
   filePath: string,
   pattern: string,
@@ -409,7 +406,7 @@ export const applyGritQLTransform = async (
  * Check whether a GritQL pattern matches anywhere in a file.
  * Returns true if the pattern matches at least once.
  */
-export const hasGritQLMatch = async (
+export const matchGritQL = async (
   tree: Tree,
   filePath: string,
   pattern: string,
@@ -430,4 +427,3 @@ export const hasGritQLMatch = async (
     return false;
   }
 };
-

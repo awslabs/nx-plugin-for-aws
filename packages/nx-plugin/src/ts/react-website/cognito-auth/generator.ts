@@ -17,7 +17,7 @@ import { withVersions } from '../../../utils/versions';
 import {
   addDestructuredImport,
   addSingleImport,
-  applyGritQLTransform,
+  applyGritQL,
 } from '../../../utils/ast';
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -100,7 +100,12 @@ export async function tsReactWebsiteAuthGenerator(
 
   const mainTsxPath = joinPathFragments(srcRoot, 'main.tsx');
 
-  await addSingleImport(tree, mainTsxPath, 'CognitoAuth', './components/CognitoAuth');
+  await addSingleImport(
+    tree,
+    mainTsxPath,
+    'CognitoAuth',
+    './components/CognitoAuth',
+  );
 
   await addHookResultToRouterProviderContext(tree, mainTsxPath, {
     hook: 'useAuth',
@@ -116,11 +121,7 @@ export async function tsReactWebsiteAuthGenerator(
   const uxProvider =
     (projectConfiguration.metadata as any)?.uxProvider ?? 'Cloudscape';
 
-  await applyGritQLTransform(
-    tree,
-    mainTsxPath,
-    readGritPattern('cognito-auth-wrapper'),
-  );
+  await applyGritQL(tree, mainTsxPath, readGritPattern('cognito-auth-wrapper'));
   // Update App Layout
   const appLayoutTsxPath = joinPathFragments(
     srcRoot,
@@ -135,7 +136,7 @@ export async function tsReactWebsiteAuthGenerator(
       ['useAuth'],
       'react-oidc-context',
     );
-    await applyGritQLTransform(
+    await applyGritQL(
       tree,
       appLayoutTsxPath,
       readGritPattern('app-layout-use-auth'),

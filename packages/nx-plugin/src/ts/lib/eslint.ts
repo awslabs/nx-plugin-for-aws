@@ -10,7 +10,7 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { withVersions } from '../../utils/versions';
-import { addSingleImport, applyGritQLTransform } from '../../utils/ast';
+import { addSingleImport, applyGritQL } from '../../utils/ast';
 import { ConfigureProjectOptions } from './types';
 import { readProjectConfigurationUnqualified } from '../../utils/nx';
 
@@ -62,7 +62,7 @@ export const configureEslint = async (
     );
 
     // Prepend eslintPluginPrettierRecommended to the exports array if not present
-    await applyGritQLTransform(
+    await applyGritQL(
       tree,
       eslintConfigPath,
       'or { `export default []` => `export default [eslintPluginPrettierRecommended]`, `export default [$items]` => `export default [eslintPluginPrettierRecommended, $items]` where { $items <: not contains `eslintPluginPrettierRecommended` } }',
@@ -105,7 +105,7 @@ export const addIgnoresToEslintConfig = async (
     // 1. No ignores object → add { ignores: ['pattern'] } to the exports array
     // 2. Empty ignores: [] → rewrite to ignores: ['pattern']
     // 3. Non-empty ignores: [items] → append 'pattern' to existing items
-    await applyGritQLTransform(
+    await applyGritQL(
       tree,
       eslintConfigPath,
       `or {

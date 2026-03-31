@@ -14,11 +14,7 @@ import { ReactGeneratorSchema } from './schema';
 import { runtimeConfigGenerator } from '../../ts/react-website/runtime-config/generator';
 import { toScopeAlias } from '../../utils/npm-scope';
 import { withVersions } from '../../utils/versions';
-import {
-  addSingleImport,
-  applyGritQLTransform,
-  hasGritQLMatch,
-} from '../../utils/ast';
+import { addSingleImport, applyGritQL, matchGritQL } from '../../utils/ast';
 import { toClassName } from '../../utils/names';
 import { formatFilesInSubtree } from '../../utils/format';
 import {
@@ -122,13 +118,13 @@ export async function reactGenerator(
 
   // Wrap <App /> in QueryClientProvider if not already present
   if (
-    !(await hasGritQLMatch(
+    !(await matchGritQL(
       tree,
       mainTsxPath,
       '`<QueryClientProvider>$_</QueryClientProvider>`',
     ))
   ) {
-    await applyGritQLTransform(
+    await applyGritQL(
       tree,
       mainTsxPath,
       '`<App />` => `<QueryClientProvider><App /></QueryClientProvider>`',
@@ -137,13 +133,13 @@ export async function reactGenerator(
 
   // Wrap <App /> in the tRPC client provider if not already present
   if (
-    !(await hasGritQLMatch(
+    !(await matchGritQL(
       tree,
       mainTsxPath,
       `\`<${clientProviderName}>$_</${clientProviderName}>\``,
     ))
   ) {
-    await applyGritQLTransform(
+    await applyGritQL(
       tree,
       mainTsxPath,
       `\`<App />\` => \`<${clientProviderName}><App /></${clientProviderName}>\``,

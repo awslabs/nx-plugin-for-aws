@@ -10,7 +10,7 @@ import {
 } from '@nx/devkit';
 import { join } from 'path';
 import { ConfigureProjectOptions } from './types';
-import { applyGritQLTransform } from '../../utils/ast';
+import { applyGritQL } from '../../utils/ast';
 import { withVersions } from '../../utils/versions';
 import { readFileSync } from 'fs';
 
@@ -28,7 +28,7 @@ export const configureVitest = async (
   ].find((config) => tree.exists(config));
 
   if (configPath) {
-    await applyGritQLTransform(
+    await applyGritQL(
       tree,
       configPath,
       readGritPattern('vitest-pass-with-no-tests'),

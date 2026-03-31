@@ -30,7 +30,7 @@ import { kebabCase, toClassName, toKebabCase } from '../../../utils/names';
 import {
   addDestructuredImport,
   addSingleImport,
-  applyGritQLTransform,
+  applyGritQL,
 } from '../../../utils/ast';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { getPackageManagerDisplayCommands } from '../../../utils/pkg-manager';
@@ -355,7 +355,12 @@ export async function tsReactWebsiteGenerator(
 
     // Add TailwindCSS import if enabled
     if (enableTailwind) {
-      await addSingleImport(tree, viteConfigPath, 'tailwindcss', '@tailwindcss/vite');
+      await addSingleImport(
+        tree,
+        viteConfigPath,
+        'tailwindcss',
+        '@tailwindcss/vite',
+      );
     }
 
     // Update build.outDir
@@ -364,7 +369,7 @@ export async function tsReactWebsiteGenerator(
       'dist',
       websiteContentPath,
     );
-    await applyGritQLTransform(
+    await applyGritQL(
       tree,
       viteConfigPath,
       `\`build: { $bprops }\` where { $bprops <: contains \`outDir: $_\` => \`outDir: '${outDir}'\` }`,
@@ -373,7 +378,7 @@ export async function tsReactWebsiteGenerator(
     // Add plugins to the plugins array
     if (enableTanstackRouter) {
       // Prepend tanstackRouter (must be first plugin) — rewrite works for both single/multi-element
-      await applyGritQLTransform(
+      await applyGritQL(
         tree,
         viteConfigPath,
         "`plugins: [$items]` => `plugins: [tanstackRouter({ routesDirectory: resolve(__dirname, 'src/routes'), generatedRouteTree: resolve(__dirname, 'src/routeTree.gen.ts') }), $items]` where { $items <: within `defineConfig($_)`, $items <: not contains `tanstackRouter` }",
@@ -381,21 +386,21 @@ export async function tsReactWebsiteGenerator(
     }
 
     if (enableTailwind) {
-      await applyGritQLTransform(
+      await applyGritQL(
         tree,
         viteConfigPath,
         '`plugins: [$items]` => `plugins: [$items, tailwindcss()]` where { $items <: within `defineConfig($_)`, $items <: not some `tailwindcss()` }',
       );
     }
 
-    await applyGritQLTransform(
+    await applyGritQL(
       tree,
       viteConfigPath,
       '`plugins: [$items]` => `plugins: [$items, tsconfigPaths()]` where { $items <: within `defineConfig($_)`, $items <: not some `tsconfigPaths()` }',
     );
 
     // Add define: { global: {} } to the config (handles both callback and direct forms)
-    await applyGritQLTransform(
+    await applyGritQL(
       tree,
       viteConfigPath,
       'or { `defineConfig(() => ({ $props }))` where { $props <: not contains `define`, $props += `define: { global: {} }` }, `defineConfig({ $props })` where { $props <: not contains `define`, $props += `define: { global: {} }` } }',
