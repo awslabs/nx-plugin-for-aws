@@ -1,0 +1,237 @@
+---
+title: React to TypeScript Strands Agent
+description: Connect a React website to a TypeScript Strands Agent
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+
+Nx Plugin for AWS provides a generator to quickly integrate your <Link path="guides/ts-strands-agent">TypeScript Strands Agent</Link> with a React website. It sets up all necessary configuration for connecting to your agent via tRPC over WebSocket, including AWS IAM and Cognito authentication support. The integration provides full end-to-end type safety between your frontend and the agent's tRPC router.
+
+## Prerequisites
+
+Before using this generator, ensure you have:
+
+1. A React website (generated using the <Link path="guides/react-website">`ts#react-website` generator</Link>)
+2. A TypeScript Strands Agent (generated using the <Link path="guides/ts-strands-agent">`ts#strands-agent` generator</Link>)
+3. Cognito Auth added via the <Link path="/guides/react-website-auth">`ts#react-website-auth` generator</Link> if connecting an agent which uses Cognito or IAM auth
+
+## Usage
+
+### Run the Generator
+
+<RunGenerator generator="connection" />
+
+You will be prompted to select your React website as the source project and the project containing your Strands Agent as the target project. If your target project contains multiple components (such as multiple agents or other component types), you will be prompted to specify a `targetComponent` to disambiguate.
+
+### Options
+
+<GeneratorParameters generator="connection" />
+
+## Generator Output
+
+The generator creates the following structure in your React application:
+
+<FileTree>
+
+- src
+  - components
+    - \<AgentName>AgentClientProvider.tsx Sets up the tRPC WebSocket client and bindings to your agent's tRPC router
+    - QueryClientProvider.tsx TanStack React Query client provider
+  - hooks
+    - useSigV4.tsx Hook for signing requests with SigV4 (IAM only)
+    - use\<AgentName>Agent.tsx A hook returning the tRPC options proxy for TanStack Query integration
+    - use\<AgentName>AgentClient.tsx A hook returning the vanilla tRPC client for direct agent calls
+
+</FileTree>
+
+Additionally, it installs the required dependencies:
+
+  - `@trpc/client`
+  - `@trpc/tanstack-react-query`
+  - `@tanstack/react-query`
+  - `aws4fetch` (if using IAM auth)
+
+## How It Works
+
+### WebSocket Connection
+
+The generated client connects to your Strands Agent via tRPC over WebSocket. The agent exposes a tRPC router (including the `invoke` subscription for streaming agent responses) over a WebSocket endpoint.
+
+- **Deployed**: The agent runtime ARN is loaded from <Link path="guides/runtime-config">Runtime Configuration</Link>. The ARN is converted to a WebSocket URL following the Bedrock AgentCore Runtime WebSocket protocol: `wss://bedrock-agentcore.<region>.amazonaws.com/runtimes/<encoded-arn>/ws`
+- **Local development**: When running with `serve-local`, the runtime config override sets the value to a local `ws://` URL (e.g., `ws://localhost:8081/ws`), and the client connects directly
+
+### Authentication
+
+The generated code handles authentication depending on your agent's configuration:
+
+- **IAM** (default): Uses AWS SigV4 presigned URLs to authenticate the WebSocket connection. Credentials are obtained from the Cognito Identity Pool configured with your website's auth
+- **Cognito**: Embeds the JWT access token in the `Sec-WebSocket-Protocol` header as a base64url-encoded bearer token, following the [AgentCore WebSocket auth protocol](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html)
+- **No auth**: Connects directly without authentication (suitable for local development)
+
+## Using the Generated Code
+
+### Streaming Agent Responses with useSubscription
+
+The most common use case is streaming the agent's response using the `invoke` subscription:
+
+```tsx {1-2,7-22}
+import { useSubscription } from '@trpc/tanstack-react-query';
+import { useMyAgent } from './hooks/useMyAgentAgent';
+
+function ChatComponent() {
+  const trpc = useMyAgent();
+
+  const subscription = useSubscription(
+    trpc.invoke.subscriptionOptions(
+      { message: 'What can you help me with?' },
+      {
+        enabled: true,
+        onStarted: () => {
+          console.log('Agent started responding');
+        },
+        onData: (token) => {
+          console.log('Received token:', token);
+        },
+        onError: (error) => {
+          console.error('Agent error:', error);
+        },
+      },
+    ),
+  );
+
+  return (
+    <div>
+      <p>Status: {subscription.status}</p>
+      {subscription.data && <p>Latest token: {subscription.data}</p>}
+      {subscription.error && <p>Error: {subscription.error.message}</p>}
+    </div>
+  );
+}
+```
+
+### Using the Vanilla tRPC Client
+
+The `use<AgentName>AgentClient` hook provides access to the vanilla tRPC client for more control over the subscription lifecycle:
+
+```tsx {2,5,9-22,25}
+import { useState, useEffect } from 'react';
+import { useMyAgentClient } from './hooks/useMyAgentAgent';
+
+function ChatComponent() {
+  const client = useMyAgentClient();
+  const [messages, setMessages] = useState<string[]>([]);
+
+  const sendMessage = (message: string) => {
+    const subscription = client.invoke.subscribe(
+      { message },
+      {
+        onData: (token) => {
+          setMessages((prev) => [...prev, token]);
+        },
+        onComplete: () => {
+          console.log('Agent finished');
+        },
+        onError: (error) => {
+          console.error('Error:', error);
+        },
+      },
+    );
+
+    // Clean up when done
+    return () => subscription.unsubscribe();
+  };
+
+  return (
+    <div>
+      <button onClick={() => sendMessage('Hello!')}>Send</button>
+      <div>
+        {messages.map((msg, i) => (
+          <span key={i}>{msg}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+```
+
+### Building a Chat Interface
+
+Here is an example of building a simple chat interface with the generated client:
+
+```tsx
+import { useState, useCallback } from 'react';
+import { useMyAgentClient } from './hooks/useMyAgentAgent';
+
+function Chat() {
+  const client = useMyAgentClient();
+  const [input, setInput] = useState('');
+  const [response, setResponse] = useState('');
+  const [isStreaming, setIsStreaming] = useState(false);
+
+  const handleSend = useCallback(() => {
+    if (!input.trim() || isStreaming) return;
+
+    setIsStreaming(true);
+    setResponse('');
+
+    client.invoke.subscribe(
+      { message: input },
+      {
+        onData: (token) => {
+          setResponse((prev) => prev + token);
+        },
+        onComplete: () => {
+          setIsStreaming(false);
+        },
+        onError: (error) => {
+          console.error(error);
+          setIsStreaming(false);
+        },
+      },
+    );
+
+    setInput('');
+  }, [client, input, isStreaming]);
+
+  return (
+    <div>
+      <div style={{ whiteSpace: 'pre-wrap' }}>{response}</div>
+      <input
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+        disabled={isStreaming}
+        placeholder="Ask the agent..."
+      />
+      <button onClick={handleSend} disabled={isStreaming}>
+        {isStreaming ? 'Streaming...' : 'Send'}
+      </button>
+    </div>
+  );
+}
+```
+
+## Local Development
+
+The connection generator automatically configures `serve-local` integration:
+
+1. Running `nx run <website>:serve-local` will also start the agent's local server
+2. The runtime config is overridden to point to the local WebSocket URL (e.g., `ws://localhost:8081/ws`)
+3. The client detects the local URL and connects directly without authentication overhead
+
+This means you can develop and test your agent integration locally with a single command.
+
+## Type Safety
+
+The integration provides complete end-to-end type safety. Your IDE will provide full autocompletion and type checking for all agent procedure calls. The types are automatically inferred from your agent's tRPC router definition, ensuring that any changes to your agent's API are immediately reflected in your frontend code.
+
+## More Information
+
+For more information, please refer to:
+
+- <Link path="guides/ts-strands-agent">TypeScript Strands Agent Guide</Link>
+- [tRPC WebSocket Client](https://trpc.io/docs/client/links/wsLink)
+- [tRPC TanStack React Query Integration](https://trpc.io/docs/client/tanstack-react-query)
+- [Bedrock AgentCore Runtime WebSocket](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html)

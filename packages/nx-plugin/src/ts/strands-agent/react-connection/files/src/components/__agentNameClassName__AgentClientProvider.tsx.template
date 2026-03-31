@@ -1,0 +1,116 @@
+import type { AppRouter } from "<%- agentProjectAlias %>/<%- agentPath %>/router.js";
+import { useQueryClient } from "@tanstack/react-query";
+import { createTRPCOptionsProxy } from "@trpc/tanstack-react-query";
+import { createContext, FC, PropsWithChildren, useMemo } from "react";
+import { useRuntimeConfig } from "../hooks/useRuntimeConfig";
+import { TRPCClient, createTRPCClient, createWSClient, wsLink } from "@trpc/client";
+<%_ if (auth === 'IAM') { _%>
+import { useSigV4 } from "../hooks/useSigV4";
+<%_ } else if (auth === 'Cognito') { _%>
+import { useAuth } from "react-oidc-context";
+<%_ } _%>
+<%_ if (auth === 'Cognito') { _%>
+
+/**
+ * Utility to base64url-encode a string (for JWT in WebSocket protocol header)
+ */
+function base64UrlEncode(str: string): string {
+  return btoa(str)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=/g, '');
+}
+<%_ } _%>
+
+/**
+ * Build a WebSocket URL from a Bedrock AgentCore Runtime ARN
+ */
+function buildAgentCoreWsUrl(agentRuntimeArn: string): string {
+  const region = agentRuntimeArn.split(':')[3];
+  return `wss://bedrock-agentcore.${region}.amazonaws.com/runtimes/${encodeURIComponent(agentRuntimeArn)}/ws`;
+}
+
+export interface <%= agentNameClassName %>AgentTRPCContextValue {
+  optionsProxy: ReturnType<typeof createTRPCOptionsProxy<AppRouter>>;
+  client: TRPCClient<AppRouter>;
+}
+
+export const <%= agentNameClassName %>AgentTRPCContext = createContext<<%= agentNameClassName %>AgentTRPCContextValue | null>(null);
+
+export const <%= agentNameClassName %>AgentClientProvider: FC<PropsWithChildren> = ({
+  children,
+}) => {
+  const queryClient = useQueryClient();
+  const runtimeConfig = useRuntimeConfig();
+  const agentRuntimeValue = runtimeConfig.agentRuntimes.<%= agentNameClassName %>;
+  <%_ if (auth === 'IAM') { _%>
+  const sigv4Client = useSigV4();
+  <%_ } else if (auth === 'Cognito') { _%>
+  const auth = useAuth();
+  const accessToken = auth?.user?.access_token;
+  <%_ } _%>
+
+  const container = useMemo<<%= agentNameClassName %>AgentTRPCContextValue>(() => {
+    // Determine whether this is a local WebSocket URL or an ARN to convert
+    const isLocal = agentRuntimeValue.startsWith('ws://') || agentRuntimeValue.startsWith('wss://');
+    const wsUrl = isLocal ? agentRuntimeValue : buildAgentCoreWsUrl(agentRuntimeValue);
+
+    <%_ if (auth === 'IAM') { _%>
+    const wsClient = createWSClient({
+      url: isLocal
+        ? wsUrl
+        : async () => {
+            const signedRequest = await sigv4Client.sign(wsUrl, {
+              method: 'GET',
+              aws: { signQuery: true },
+            });
+            return signedRequest.url;
+          },
+    });
+    <%_ } else if (auth === 'Cognito') { _%>
+    const wsClient = createWSClient({
+      url: wsUrl,
+      ...(isLocal ? {} : {
+        WebSocket: class extends WebSocket {
+          constructor(url: string | URL, protocols?: string | string[]) {
+            const base64Token = base64UrlEncode(accessToken!);
+            const authProtocols = [
+              `base64UrlBearerAuthorization.${base64Token}`,
+              'base64UrlBearerAuthorization',
+            ];
+            const existingProtocols = protocols
+              ? Array.isArray(protocols)
+                ? protocols
+                : [protocols]
+              : [];
+            super(url, [...existingProtocols, ...authProtocols]);
+          }
+        },
+      }),
+    });
+    <%_ } else { _%>
+    const wsClient = createWSClient({
+      url: wsUrl,
+    });
+    <%_ } _%>
+
+    const client = createTRPCClient<AppRouter>({
+      links: [wsLink({ client: wsClient })],
+    });
+
+    const optionsProxy = createTRPCOptionsProxy<AppRouter>({
+      client,
+      queryClient,
+    });
+
+    return { optionsProxy, client };
+  }, [agentRuntimeValue, queryClient<% if (auth === 'IAM') { %>, sigv4Client<% } else if (auth === 'Cognito') { %>, accessToken<% } %>]);
+
+  return (
+    <<%= agentNameClassName %>AgentTRPCContext.Provider value={container}>
+      {children}
+    </<%= agentNameClassName %>AgentTRPCContext.Provider>
+  );
+};
+
+export default <%= agentNameClassName %>AgentClientProvider;
