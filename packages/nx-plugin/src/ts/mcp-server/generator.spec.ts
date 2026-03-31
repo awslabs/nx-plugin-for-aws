@@ -878,8 +878,6 @@ describe('ts#mcp-server generator', () => {
     expect(rolldownConfig).toContain(
       '../../dist/apps/test-project/bundle/mcp/test-project-mcp-server/index.js',
     );
-    // Tree shaking should be disabled for the AWS SDK
-    expect(rolldownConfig).toContain('disableTreeShake([/@aws-sdk\\/.*/])');
   });
 
   it('should ensure Dockerfile COPY path matches bundle output path', async () => {

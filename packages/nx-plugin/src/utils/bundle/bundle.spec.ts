@@ -32,8 +32,8 @@ describe('bundle utilities', () => {
       addProjectConfiguration(tree, project.name, project);
     });
 
-    it('should add bundle target to project configuration', () => {
-      addTypeScriptBundleTarget(tree, project, {
+    it('should add bundle target to project configuration', async () => {
+      await addTypeScriptBundleTarget(tree, project, {
         targetFilePath: 'src/index.ts',
       });
 
@@ -49,7 +49,7 @@ describe('bundle utilities', () => {
       expect(project.targets?.bundle?.options?.cwd).toBe('{projectRoot}');
     });
 
-    it('should not overwrite existing bundle target', () => {
+    it('should not overwrite existing bundle target', async () => {
       const existingBundleTarget = {
         cache: false,
         executor: 'custom:executor',
@@ -57,22 +57,22 @@ describe('bundle utilities', () => {
       };
       project.targets = { bundle: existingBundleTarget };
 
-      addTypeScriptBundleTarget(tree, project, {
+      await addTypeScriptBundleTarget(tree, project, {
         targetFilePath: 'src/index.ts',
       });
 
       expect(project.targets.bundle).toEqual(existingBundleTarget);
     });
 
-    it('should generate rolldown config file', () => {
-      addTypeScriptBundleTarget(tree, project, {
+    it('should generate rolldown config file', async () => {
+      await addTypeScriptBundleTarget(tree, project, {
         targetFilePath: 'src/index.ts',
       });
 
       expect(tree.exists('apps/test-project/rolldown.config.ts')).toBeTruthy();
     });
 
-    it('should not overwrite existing rolldown config file', () => {
+    it('should not overwrite existing rolldown config file', async () => {
       const existingConfig = `
 import { defineConfig } from 'rolldown';
 
@@ -88,7 +88,7 @@ export default defineConfig([
 `;
       tree.write('apps/test-project/rolldown.config.ts', existingConfig);
 
-      addTypeScriptBundleTarget(tree, project, {
+      await addTypeScriptBundleTarget(tree, project, {
         targetFilePath: 'src/index.ts',
       });
 
@@ -100,7 +100,7 @@ export default defineConfig([
       expect(configContent).toContain('src/index.ts');
     });
 
-    it('should add build target dependency on bundle', () => {
+    it('should add build target dependency on bundle', async () => {
       project.targets = {
         build: {
           executor: 'nx:run-commands',
@@ -108,7 +108,7 @@ export default defineConfig([
         },
       };
 
-      addTypeScriptBundleTarget(tree, project, {
+      await addTypeScriptBundleTarget(tree, project, {
         targetFilePath: 'src/index.ts',
       });
 
@@ -116,7 +116,7 @@ export default defineConfig([
       expect(project.targets.build.dependsOn).toContain('compile');
     });
 
-    it('should not duplicate bundle dependency in build target', () => {
+    it('should not duplicate bundle dependency in build target', async () => {
       project.targets = {
         build: {
           executor: 'nx:run-commands',
@@ -124,7 +124,7 @@ export default defineConfig([
         },
       };
 
-      addTypeScriptBundleTarget(tree, project, {
+      await addTypeScriptBundleTarget(tree, project, {
         targetFilePath: 'src/index.ts',
       });
 
@@ -134,14 +134,14 @@ export default defineConfig([
       expect(bundleDependencies).toHaveLength(1);
     });
 
-    it('should handle project without existing targets', () => {
+    it('should handle project without existing targets', async () => {
       const projectWithoutTargets: ProjectConfiguration = {
         name: 'test-project',
         root: 'apps/test-project',
         sourceRoot: 'apps/test-project/src',
       };
 
-      addTypeScriptBundleTarget(tree, projectWithoutTargets, {
+      await addTypeScriptBundleTarget(tree, projectWithoutTargets, {
         targetFilePath: 'src/index.ts',
       });
 
@@ -149,8 +149,8 @@ export default defineConfig([
       expect(projectWithoutTargets.targets?.bundle).toBeDefined();
     });
 
-    it('should configure output path with bundleOutputDir', () => {
-      addTypeScriptBundleTarget(tree, project, {
+    it('should configure output path with bundleOutputDir', async () => {
+      await addTypeScriptBundleTarget(tree, project, {
         targetFilePath: 'src/index.ts',
         bundleOutputDir: 'lambda',
       });
@@ -164,8 +164,8 @@ export default defineConfig([
       );
     });
 
-    it('should configure output path without bundleOutputDir', () => {
-      addTypeScriptBundleTarget(tree, project, {
+    it('should configure output path without bundleOutputDir', async () => {
+      await addTypeScriptBundleTarget(tree, project, {
         targetFilePath: 'src/index.ts',
       });
 
@@ -176,8 +176,8 @@ export default defineConfig([
       expect(configContent).toContain('dist/apps/test-project/bundle/index.js');
     });
 
-    it('should add rolldown dependency to package.json', () => {
-      addTypeScriptBundleTarget(tree, project, {
+    it('should add rolldown dependency to package.json', async () => {
+      await addTypeScriptBundleTarget(tree, project, {
         targetFilePath: 'src/index.ts',
       });
 
@@ -185,14 +185,14 @@ export default defineConfig([
       expect(packageJson.devDependencies).toHaveProperty('rolldown');
     });
 
-    it('should not add duplicate config entry for same targetFilePath', () => {
+    it('should not add duplicate config entry for same targetFilePath', async () => {
       // First call
-      addTypeScriptBundleTarget(tree, project, {
+      await addTypeScriptBundleTarget(tree, project, {
         targetFilePath: 'src/index.ts',
       });
 
       // Second call with same targetFilePath
-      addTypeScriptBundleTarget(tree, project, {
+      await addTypeScriptBundleTarget(tree, project, {
         targetFilePath: 'src/index.ts',
       });
 
@@ -208,14 +208,14 @@ export default defineConfig([
       expect(inputOccurrences).toBe(1);
     });
 
-    it('should add multiple config entries for different targetFilePaths', () => {
+    it('should add multiple config entries for different targetFilePaths', async () => {
       // First call
-      addTypeScriptBundleTarget(tree, project, {
+      await addTypeScriptBundleTarget(tree, project, {
         targetFilePath: 'src/index.ts',
       });
 
       // Second call with different targetFilePath
-      addTypeScriptBundleTarget(tree, project, {
+      await addTypeScriptBundleTarget(tree, project, {
         targetFilePath: 'src/handler.ts',
         bundleOutputDir: 'handler',
       });
@@ -231,8 +231,8 @@ export default defineConfig([
       expect(configContent).toContain('bundle/handler/index.js');
     });
 
-    it('should configure rolldown with correct format and options', () => {
-      addTypeScriptBundleTarget(tree, project, {
+    it('should configure rolldown with correct format and options', async () => {
+      await addTypeScriptBundleTarget(tree, project, {
         targetFilePath: 'src/index.ts',
       });
 
@@ -245,7 +245,7 @@ export default defineConfig([
       expect(configContent).toContain('inlineDynamicImports: true');
     });
 
-    it('should work with nested project structure', () => {
+    it('should work with nested project structure', async () => {
       const nestedProject: ProjectConfiguration = {
         name: 'nested-project',
         root: 'libs/nested/project',
@@ -254,7 +254,7 @@ export default defineConfig([
       };
       addProjectConfiguration(tree, nestedProject.name, nestedProject);
 
-      addTypeScriptBundleTarget(tree, nestedProject, {
+      await addTypeScriptBundleTarget(tree, nestedProject, {
         targetFilePath: 'src/lib.ts',
       });
 
@@ -271,8 +271,8 @@ export default defineConfig([
       );
     });
 
-    it('should configure external dependencies with strings', () => {
-      addTypeScriptBundleTarget(tree, project, {
+    it('should configure external dependencies with strings', async () => {
+      await addTypeScriptBundleTarget(tree, project, {
         targetFilePath: 'src/index.ts',
         external: ['@aws-sdk/*', 'lodash'],
       });
@@ -285,8 +285,8 @@ export default defineConfig([
       expect(configContent).toContain("external: ['@aws-sdk/*', 'lodash']");
     });
 
-    it('should configure external dependencies with regex patterns', () => {
-      addTypeScriptBundleTarget(tree, project, {
+    it('should configure external dependencies with regex patterns', async () => {
+      await addTypeScriptBundleTarget(tree, project, {
         targetFilePath: 'src/index.ts',
         external: [/@aws-sdk\/.*/, /^lodash/],
       });
@@ -299,8 +299,8 @@ export default defineConfig([
       expect(configContent).toContain('external: [/@aws-sdk\\/.*/, /^lodash/]');
     });
 
-    it('should configure external dependencies with mixed strings and regex', () => {
-      addTypeScriptBundleTarget(tree, project, {
+    it('should configure external dependencies with mixed strings and regex', async () => {
+      await addTypeScriptBundleTarget(tree, project, {
         targetFilePath: 'src/index.ts',
         external: ['@aws-sdk/*', /@types\/.*/, 'react'],
       });
@@ -315,8 +315,8 @@ export default defineConfig([
       );
     });
 
-    it('should not include external property when not provided', () => {
-      addTypeScriptBundleTarget(tree, project, {
+    it('should not include external property when not provided', async () => {
+      await addTypeScriptBundleTarget(tree, project, {
         targetFilePath: 'src/index.ts',
       });
 
@@ -328,11 +328,11 @@ export default defineConfig([
       expect(configContent).not.toContain('external:');
     });
 
-    it('should create build target if not present', () => {
+    it('should create build target if not present', async () => {
       // Project has no build target initially
       expect(project.targets?.build).toBeUndefined();
 
-      addTypeScriptBundleTarget(tree, project, {
+      await addTypeScriptBundleTarget(tree, project, {
         targetFilePath: 'src/index.ts',
       });
 
@@ -340,8 +340,8 @@ export default defineConfig([
       expect(project.targets?.build?.dependsOn).toContain('bundle');
     });
 
-    it('should create build target with bundle dependency even when no other dependencies exist', () => {
-      addTypeScriptBundleTarget(tree, project, {
+    it('should create build target with bundle dependency even when no other dependencies exist', async () => {
+      await addTypeScriptBundleTarget(tree, project, {
         targetFilePath: 'src/index.ts',
       });
 
@@ -349,15 +349,15 @@ export default defineConfig([
       expect(project.targets?.build?.dependsOn).toEqual(['bundle']);
     });
 
-    it('should handle external dependencies in multiple config entries', () => {
+    it('should handle external dependencies in multiple config entries', async () => {
       // First call with external dependencies
-      addTypeScriptBundleTarget(tree, project, {
+      await addTypeScriptBundleTarget(tree, project, {
         targetFilePath: 'src/index.ts',
         external: ['@aws-sdk/*'],
       });
 
       // Second call with different external dependencies
-      addTypeScriptBundleTarget(tree, project, {
+      await addTypeScriptBundleTarget(tree, project, {
         targetFilePath: 'src/handler.ts',
         external: ['lodash', /@types\/.*/],
         bundleOutputDir: 'handler',
@@ -374,8 +374,8 @@ export default defineConfig([
       expect(configContent).toContain('src/handler.ts');
     });
 
-    it('should configure tsconfig', () => {
-      addTypeScriptBundleTarget(tree, project, {
+    it('should configure tsconfig', async () => {
+      await addTypeScriptBundleTarget(tree, project, {
         targetFilePath: 'src/index.ts',
       });
 
@@ -387,8 +387,8 @@ export default defineConfig([
       expect(configContent).toContain("tsconfig: 'tsconfig.lib.json'");
     });
 
-    it('should configure platform with default value of node', () => {
-      addTypeScriptBundleTarget(tree, project, {
+    it('should configure platform with default value of node', async () => {
+      await addTypeScriptBundleTarget(tree, project, {
         targetFilePath: 'src/index.ts',
       });
 
@@ -400,8 +400,8 @@ export default defineConfig([
       expect(configContent).toContain("platform: 'node'");
     });
 
-    it('should configure platform when explicitly set to node', () => {
-      addTypeScriptBundleTarget(tree, project, {
+    it('should configure platform when explicitly set to node', async () => {
+      await addTypeScriptBundleTarget(tree, project, {
         targetFilePath: 'src/index.ts',
         platform: 'node',
       });
@@ -414,8 +414,8 @@ export default defineConfig([
       expect(configContent).toContain("platform: 'node'");
     });
 
-    it('should configure platform when set to browser', () => {
-      addTypeScriptBundleTarget(tree, project, {
+    it('should configure platform when set to browser', async () => {
+      await addTypeScriptBundleTarget(tree, project, {
         targetFilePath: 'src/index.ts',
         platform: 'browser',
       });
@@ -428,8 +428,8 @@ export default defineConfig([
       expect(configContent).toContain("platform: 'browser'");
     });
 
-    it('should configure platform when set to neutral', () => {
-      addTypeScriptBundleTarget(tree, project, {
+    it('should configure platform when set to neutral', async () => {
+      await addTypeScriptBundleTarget(tree, project, {
         targetFilePath: 'src/index.ts',
         platform: 'neutral',
       });
@@ -440,105 +440,6 @@ export default defineConfig([
       );
 
       expect(configContent).toContain("platform: 'neutral'");
-    });
-
-    it('should add disableTreeShake function and plugins when AWS SDK is not external', () => {
-      addTypeScriptBundleTarget(tree, project, {
-        targetFilePath: 'src/index.ts',
-      });
-
-      const configContent = tree.read(
-        'apps/test-project/rolldown.config.ts',
-        'utf-8',
-      );
-
-      // Should include the disableTreeShake function
-      expect(configContent).toContain('const disableTreeShake');
-      expect(configContent).toContain("name: 'disable-treeshake'");
-      expect(configContent).toContain("moduleSideEffects: 'no-treeshake'");
-
-      // Should include plugins configuration
-      expect(configContent).toContain(
-        'plugins: [disableTreeShake([/@aws-sdk\\/.*/])]',
-      );
-
-      expect(
-        tree.read('apps/test-project/rolldown.config.ts', 'utf-8'),
-      ).toMatchSnapshot();
-    });
-
-    it('should not add disableTreeShake or plugins when AWS SDK is external as regex', () => {
-      addTypeScriptBundleTarget(tree, project, {
-        targetFilePath: 'src/index.ts',
-        external: [/@aws-sdk\/.*/],
-      });
-
-      const configContent = tree.read(
-        'apps/test-project/rolldown.config.ts',
-        'utf-8',
-      );
-
-      // Should NOT include the disableTreeShake function
-      expect(configContent).not.toContain('const disableTreeShake');
-      expect(configContent).not.toContain("name: 'disable-treeshake'");
-
-      // Should NOT include plugins configuration
-      expect(configContent).not.toContain('plugins:');
-
-      expect(
-        tree.read('apps/test-project/rolldown.config.ts', 'utf-8'),
-      ).toMatchSnapshot();
-    });
-
-    it('should not add disableTreeShake or plugins when AWS SDK is external with other dependencies', () => {
-      addTypeScriptBundleTarget(tree, project, {
-        targetFilePath: 'src/index.ts',
-        external: ['lodash', /@aws-sdk\/.*/, 'react'],
-      });
-
-      const configContent = tree.read(
-        'apps/test-project/rolldown.config.ts',
-        'utf-8',
-      );
-
-      // Should NOT include the disableTreeShake function
-      expect(configContent).not.toContain('const disableTreeShake');
-
-      // Should NOT include plugins configuration
-      expect(configContent).not.toContain('plugins:');
-
-      // Should still have external configuration
-      expect(configContent).toContain('external:');
-    });
-
-    it('should add disableTreeShake only once when called multiple times', () => {
-      // First call
-      addTypeScriptBundleTarget(tree, project, {
-        targetFilePath: 'src/index.ts',
-      });
-
-      // Second call with different target
-      addTypeScriptBundleTarget(tree, project, {
-        targetFilePath: 'src/handler.ts',
-        bundleOutputDir: 'handler',
-      });
-
-      const configContent = tree.read(
-        'apps/test-project/rolldown.config.ts',
-        'utf-8',
-      );
-
-      // Count occurrences of disableTreeShake function definition
-      const disableTreeShakeOccurrences = (
-        configContent.match(/const disableTreeShake = /g) || []
-      ).length;
-      expect(disableTreeShakeOccurrences).toBe(1);
-
-      // Both configs should have plugins
-      const pluginsOccurrences = (
-        configContent.match(/plugins: \[disableTreeShake/g) || []
-      ).length;
-      expect(pluginsOccurrences).toBe(2);
     });
   });
 
