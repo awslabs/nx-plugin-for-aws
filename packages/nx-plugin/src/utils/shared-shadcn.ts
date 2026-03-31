@@ -164,7 +164,7 @@ export async function sharedShadcnGenerator(tree: Tree) {
       paths: {
         ...(json.compilerOptions?.paths ?? {}),
         [`${sharedShadcnAlias}/*`]: [
-          joinPathFragments(libraryRoot, 'src', '*'),
+          `./${joinPathFragments(libraryRoot, 'src', '*')}`,
         ],
       },
     },

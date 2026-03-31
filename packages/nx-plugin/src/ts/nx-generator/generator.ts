@@ -15,8 +15,7 @@ import { TsNxGeneratorGeneratorSchema } from './schema';
 import { kebabCase, pascalCase, snakeCase } from '../../utils/names';
 import camelCase from 'lodash.camelcase';
 import { getRelativePathToRootByDirectory } from '../../utils/paths';
-import { addStarExport, replace } from '../../utils/ast';
-import { ArrayLiteralExpression, factory } from 'typescript';
+import { addStarExport, applyGritQLTransform } from '../../utils/ast';
 import {
   addComponentGeneratorMetadata,
   getGeneratorInfo,
@@ -103,29 +102,11 @@ export const tsNxGeneratorGenerator = async (
       },
     );
 
-    // Update the docs config to add the page entry
-    replace(
+    // Update the docs config to add the page entry to the Generator guides sidebar section
+    await applyGritQLTransform(
       tree,
       joinPathFragments('docs', 'astro.config.mjs'),
-      'PropertyAssignment:has(Identifier[name="integrations"]) PropertyAssignment:has(Identifier[name="sidebar"]) ObjectLiteralExpression:has(PropertyAssignment:has(StringLiteral[value="Guides"])) PropertyAssignment:has(Identifier[name="items"]) > ArrayLiteralExpression',
-      (node: ArrayLiteralExpression) => {
-        return factory.createArrayLiteralExpression([
-          ...node.elements,
-          factory.createObjectLiteralExpression([
-            factory.createPropertyAssignment(
-              'label',
-              factory.createStringLiteral(name, true),
-            ),
-            factory.createPropertyAssignment(
-              'link',
-              factory.createStringLiteral(
-                `/guides/${enhancedOptions.nameKebabCase}`,
-                true,
-              ),
-            ),
-          ]),
-        ]);
-      },
+      `\`items: [$items]\` where { $items <: within \`sidebar: [$_]\`, $items <: contains \`'ts#project'\`, $items += \`, { label: '${name}', link: '/guides/${enhancedOptions.nameKebabCase}' }\` }`,
     );
   } else {
     // Local generator in a project other than nx-plugin-for-aws

@@ -35,6 +35,8 @@ export const configureTsProjectAsNxPlugin = (
   updateJson(tree, tsConfigPath, (tsConfig) => {
     tsConfig.compilerOptions ??= {};
     tsConfig.compilerOptions.module ??= 'commonjs';
+    // TypeScript 6 allows bundler + commonjs together, avoiding deprecated node/node10
+    tsConfig.compilerOptions.moduleResolution ??= 'bundler';
     return tsConfig;
   });
 
