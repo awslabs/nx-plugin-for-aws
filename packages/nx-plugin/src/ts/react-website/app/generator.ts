@@ -368,7 +368,7 @@ export async function tsReactWebsiteGenerator(
     await applyGritQLTransform(
       tree,
       viteConfigPath,
-      `\`outDir: $_\` => \`outDir: '${outDir}'\``,
+      `\`build: { $bprops }\` where { $bprops <: contains \`outDir: $_\` => \`outDir: '${outDir}'\` }`,
     );
 
     // Add plugins to the plugins array
@@ -376,7 +376,7 @@ export async function tsReactWebsiteGenerator(
       await applyGritQLTransform(
         tree,
         viteConfigPath,
-        "`plugins: [$items]` => `plugins: [tanstackRouter({ routesDirectory: resolve(__dirname, 'src/routes'), generatedRouteTree: resolve(__dirname, 'src/routeTree.gen.ts') }), $items]` where { $items <: not contains `tanstackRouter` }",
+        "`plugins: [$items]` => `plugins: [tanstackRouter({ routesDirectory: resolve(__dirname, 'src/routes'), generatedRouteTree: resolve(__dirname, 'src/routeTree.gen.ts') }), $items]` where { $items <: within `defineConfig($_)`, $items <: not contains `tanstackRouter` }",
       );
     }
 
@@ -386,14 +386,14 @@ export async function tsReactWebsiteGenerator(
       await applyGritQLTransform(
         tree,
         viteConfigPath,
-        '`plugins: [$items]` where { $items <: not contains `tailwindcss`, $items += `tailwindcss()` }',
+        '`plugins: [$items]` where { $items <: within `defineConfig($_)`, $items <: not contains `tailwindcss`, $items += `tailwindcss()` }',
       );
       if (!(await hasGritQLMatch(tree, viteConfigPath, '`tailwindcss()`'))) {
         tree.write(viteConfigPath, before1);
         await applyGritQLTransform(
           tree,
           viteConfigPath,
-          '`plugins: [$items]` => `plugins: [$items, tailwindcss()]` where { $items <: not contains `tailwindcss` }',
+          '`plugins: [$items]` => `plugins: [$items, tailwindcss()]` where { $items <: within `defineConfig($_)`, $items <: not contains `tailwindcss` }',
         );
       }
     }
@@ -403,7 +403,7 @@ export async function tsReactWebsiteGenerator(
       await applyGritQLTransform(
         tree,
         viteConfigPath,
-        '`plugins: [$items]` where { $items <: not contains `tsconfigPaths`, $items += `tsconfigPaths()` }',
+        '`plugins: [$items]` where { $items <: within `defineConfig($_)`, $items <: not contains `tsconfigPaths`, $items += `tsconfigPaths()` }',
       );
       if (
         !(await hasGritQLMatch(tree, viteConfigPath, '`tsconfigPaths()`'))
@@ -412,7 +412,7 @@ export async function tsReactWebsiteGenerator(
         await applyGritQLTransform(
           tree,
           viteConfigPath,
-          '`plugins: [$items]` => `plugins: [$items, tsconfigPaths()]` where { $items <: not contains `tsconfigPaths` }',
+          '`plugins: [$items]` => `plugins: [$items, tsconfigPaths()]` where { $items <: within `defineConfig($_)`, $items <: not contains `tsconfigPaths` }',
         );
       }
     }
