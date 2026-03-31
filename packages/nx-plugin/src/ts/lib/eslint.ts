@@ -128,7 +128,9 @@ export const addIgnoresToEslintConfig = async (
       eslintConfigPath,
       `\`ignores: [$items]\` where { $items <: not contains \`'${escaped}'\`, $items += \`'${escaped}'\` }`,
     );
-    if (!(await hasGritQLMatch(tree, eslintConfigPath, `\`'${escaped}'\``))) {
+    // Verify += produced valid syntax by checking the array still parses with 2+ elements
+    // (single-element += concatenates without comma, producing a parse error)
+    if (!(await hasGritQLMatch(tree, eslintConfigPath, '`ignores: [$a, $b]`'))) {
       tree.write(eslintConfigPath, before);
       await applyGritQLTransform(
         tree,
