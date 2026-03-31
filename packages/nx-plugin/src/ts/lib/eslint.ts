@@ -10,11 +10,7 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { withVersions } from '../../utils/versions';
-import {
-  addSingleImport,
-  applyGritQLTransform,
-  hasGritQLMatch,
-} from '../../utils/ast';
+import { addSingleImport, applyGritQLTransform } from '../../utils/ast';
 import { ConfigureProjectOptions } from './types';
 import { readProjectConfigurationUnqualified } from '../../utils/nx';
 
@@ -103,37 +99,25 @@ export const addIgnoresToEslintConfig = async (
   eslintConfigPath: string,
   ignorePatterns: string[],
 ): Promise<void> => {
-  // Add { ignores: [] } to the config array if no ignores object exists
-  // Check for any 'ignores:' property assignment in the file (specific enough for eslint configs)
-  const hasIgnores = await hasGritQLMatch(
-    tree,
-    eslintConfigPath,
-    '`ignores: $_`',
-  );
-  if (!hasIgnores) {
-    await applyGritQLTransform(
-      tree,
-      eslintConfigPath,
-      '`export default [$items]` where { $items += `{ ignores: [] }` }',
-    );
-  }
-
-  // Add each ignore pattern if not already present
   for (const pattern of ignorePatterns) {
     const escaped = pattern.replace(/`/g, '\\`');
-    // Handle empty ignores array separately (GritQL can't += on empty arrays)
+    // Single or{} per pattern handles all cases:
+    // 1. No ignores object → add { ignores: ['pattern'] } to the exports array
+    // 2. Empty ignores: [] → rewrite to ignores: ['pattern']
+    // 3. Non-empty ignores: [items] → append 'pattern' to existing items
     await applyGritQLTransform(
       tree,
       eslintConfigPath,
-      `\`ignores: []\` => \`ignores: ['${escaped}']\``,
-    );
-    // Append to non-empty ignores array via rewrite
-    // (safe because the array is always single-line at this point — our generators
-    // create it and formatFilesInSubtree runs once at the end)
-    await applyGritQLTransform(
-      tree,
-      eslintConfigPath,
-      `\`ignores: [$items]\` => \`ignores: [$items, '${escaped}']\` where { $items <: not some \`'${escaped}'\` }`,
+      `or {
+        \`export default [$items]\` where {
+          $items <: not some \`{ ignores: $_ }\`,
+          $items += \`{ ignores: ['${escaped}'] }\`
+        },
+        \`ignores: []\` => \`ignores: ['${escaped}']\`,
+        \`ignores: [$items]\` => \`ignores: [$items, '${escaped}']\` where {
+          $items <: not some \`'${escaped}'\`
+        }
+      }`,
     );
   }
 };
