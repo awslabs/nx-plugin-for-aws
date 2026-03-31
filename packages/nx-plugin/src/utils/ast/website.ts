@@ -65,13 +65,13 @@ ${contextProp}?: ReturnType<typeof ${hook}>\`
   );
 
   // If context already exists, add the new prop to it.
-  // Handle empty context: {} (GritQL can't += on empty objects).
-  // Note: no 'within' clause — GritQL can't derive range for empty objects within another node.
-  // 'context: {}' is specific enough to uniquely identify the createRouter context.
+  // Handle empty context: {} via nested contains => rewrite, scoped to createRouter.
   await applyGritQLTransform(
     tree,
     mainTsxPath,
-    `\`context: {}\` => \`context: { ${contextProp}: undefined }\``,
+    `\`createRouter({ $props })\` where {
+      $props <: contains \`context: {}\` => \`context: { ${contextProp}: undefined }\`
+    }`,
   );
   // Handle non-empty context via rewrite (the context object may be single-prop
   // from the first hook call, where += concatenates without comma)
