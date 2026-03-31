@@ -6,7 +6,7 @@
 import React from 'react';
 import { Handle, Position } from '@xyflow/react';
 import { getIcon } from './icons';
-import { getGeneratorById, VALID_CONNECTIONS } from './generators';
+import { getGeneratorById, isConnectionSource, isConnectionTarget } from './generators';
 
 interface GeneratorNodeComponentProps {
   generatorId: string;
@@ -17,11 +17,12 @@ interface GeneratorNodeComponentProps {
   onDelete: () => void;
 }
 
-/** Check if a generator participates in any connection */
-const canConnect = (connectionType: string): boolean =>
-  VALID_CONNECTIONS.some(
-    (c) => c.source === connectionType || c.target === connectionType,
-  );
+const handleStyle: React.CSSProperties = {
+  width: 12,
+  height: 12,
+  background: '#6366f1',
+  border: '2px solid #4f46e5',
+};
 
 const GeneratorNodeComponent: React.FC<GeneratorNodeComponentProps> = ({
   generatorId,
@@ -34,16 +35,8 @@ const GeneratorNodeComponent: React.FC<GeneratorNodeComponentProps> = ({
   const generator = getGeneratorById(generatorId);
   if (!generator) return null;
 
-  const showHandle = canConnect(generator.connectionType);
-
-  const handleStyle: React.CSSProperties = {
-    width: 12,
-    height: 12,
-    background: '#6366f1',
-    border: '2px solid #4f46e5',
-    right: -6,
-    top: '50%',
-  };
+  const canBeSource = isConnectionSource(generator.connectionType);
+  const canBeTarget = isConnectionTarget(generator.connectionType);
 
   return (
     <div
@@ -57,21 +50,8 @@ const GeneratorNodeComponent: React.FC<GeneratorNodeComponentProps> = ({
         boxShadow: '0 1px 4px rgba(0,0,0,0.1)',
       }}
     >
-      {showHandle && (
-        <>
-          <Handle
-            type="target"
-            position={Position.Right}
-            style={{ ...handleStyle, opacity: 0, pointerEvents: 'all' }}
-            id="connector"
-          />
-          <Handle
-            type="source"
-            position={Position.Right}
-            style={handleStyle}
-            id="connector"
-          />
-        </>
+      {canBeTarget && (
+        <Handle type="target" position={Position.Left} style={handleStyle} />
       )}
 
       <div
@@ -182,6 +162,10 @@ const GeneratorNodeComponent: React.FC<GeneratorNodeComponentProps> = ({
           </label>
         ))}
       </div>
+
+      {canBeSource && (
+        <Handle type="source" position={Position.Right} style={handleStyle} />
+      )}
     </div>
   );
 };

@@ -217,27 +217,20 @@ export const CATEGORY_LABELS: Record<string, string> = {
 export const getGeneratorById = (id: string): GeneratorDefinition | undefined =>
   GENERATORS.find((g) => g.id === id);
 
+/** Check if this connection type appears as a source in any valid connection */
+export const isConnectionSource = (connectionType: string): boolean =>
+  VALID_CONNECTIONS.some((c) => c.source === connectionType);
+
+/** Check if this connection type appears as a target in any valid connection */
+export const isConnectionTarget = (connectionType: string): boolean =>
+  VALID_CONNECTIONS.some((c) => c.target === connectionType);
+
+/** Check if a source->target connection is valid */
 export const isConnectionValid = (
   sourceConnectionType: string,
   targetConnectionType: string,
 ): boolean =>
   VALID_CONNECTIONS.some(
     (c) =>
-      (c.source === sourceConnectionType &&
-        c.target === targetConnectionType) ||
-      (c.source === targetConnectionType &&
-        c.target === sourceConnectionType),
+      c.source === sourceConnectionType && c.target === targetConnectionType,
   );
-
-/** Get the canonical direction for a valid connection pair */
-export const getCanonicalConnection = (
-  typeA: string,
-  typeB: string,
-): { source: string; target: string } | null => {
-  const match = VALID_CONNECTIONS.find(
-    (c) =>
-      (c.source === typeA && c.target === typeB) ||
-      (c.source === typeB && c.target === typeA),
-  );
-  return match ?? null;
-};

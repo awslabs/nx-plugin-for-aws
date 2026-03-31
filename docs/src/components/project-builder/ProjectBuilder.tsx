@@ -24,11 +24,7 @@ import GeneratorPanel from './GeneratorPanel';
 import GeneratorNodeComponent from './GeneratorNode';
 import CommandOutput from './CommandOutput';
 import GlobalSettings from './GlobalSettings';
-import {
-  getGeneratorById,
-  isConnectionValid,
-  getCanonicalConnection,
-} from './generators';
+import { getGeneratorById, isConnectionValid } from './generators';
 import type {
   GeneratorDefinition,
   GeneratorNodeData,
@@ -142,7 +138,7 @@ const ProjectBuilder: React.FC = () => {
     [],
   );
 
-  // Use a ref to always have fresh nodes in connection validation
+  // Ref for fresh nodes access in validation
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
 
@@ -174,65 +170,10 @@ const ProjectBuilder: React.FC = () => {
     [],
   );
 
+  // Follow the ReactFlow docs pattern exactly: pass connection to addEdge
   const onConnect: OnConnect = useCallback(
     (connection) => {
-      const currentNodes = nodesRef.current;
-      const sourceNode = currentNodes.find(
-        (n) => n.id === connection.source,
-      );
-      const targetNode = currentNodes.find(
-        (n) => n.id === connection.target,
-      );
-      if (!sourceNode || !targetNode) return;
-
-      const sourceGen = getGeneratorById(
-        (sourceNode.data as GeneratorNodeData).generatorId,
-      );
-      const targetGen = getGeneratorById(
-        (targetNode.data as GeneratorNodeData).generatorId,
-      );
-      if (!sourceGen || !targetGen) return;
-
-      if (
-        !isConnectionValid(
-          sourceGen.connectionType,
-          targetGen.connectionType,
-        )
-      )
-        return;
-
-      // Determine canonical direction and potentially swap source/target
-      const canonical = getCanonicalConnection(
-        sourceGen.connectionType,
-        targetGen.connectionType,
-      );
-      if (!canonical) return;
-
-      // Normalize: canonical source should be edge source
-      const isForward = canonical.source === sourceGen.connectionType;
-      const finalSource = isForward ? connection.source : connection.target;
-      const finalTarget = isForward ? connection.target : connection.source;
-
-      setEdges((eds) =>
-        addEdge(
-          {
-            id: `e-${finalSource}-${finalTarget}`,
-            source: finalSource,
-            target: finalTarget,
-            sourceHandle: 'connector',
-            targetHandle: 'connector',
-            animated: true,
-            style: { stroke: EDGE_COLOR, strokeWidth: 2 },
-            markerEnd: {
-              type: MarkerType.ArrowClosed,
-              color: EDGE_COLOR,
-              width: 20,
-              height: 20,
-            },
-          },
-          eds,
-        ),
-      );
+      setEdges((eds) => addEdge(connection, eds));
     },
     [setEdges],
   );

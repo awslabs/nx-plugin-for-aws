@@ -5,11 +5,7 @@
 
 import React, { useMemo, useState } from 'react';
 import type { Node, Edge } from '@xyflow/react';
-import {
-  getGeneratorById,
-  getCanonicalConnection,
-  NX_VERSION,
-} from './generators';
+import { getGeneratorById, NX_VERSION } from './generators';
 import type { GeneratorNodeData, GlobalSettings } from './types';
 
 interface CommandOutputProps {
@@ -117,6 +113,7 @@ export const buildCommand = (
   }
 
   // Generate connection commands
+  // Edges are already in the correct direction (source handle -> target handle)
   for (const edge of edges) {
     const sourceNode = nodes.find((n) => n.id === edge.source);
     const targetNode = nodes.find((n) => n.id === edge.target);
@@ -128,46 +125,22 @@ export const buildCommand = (
     const targetGen = getGeneratorById(targetData.generatorId);
     if (!sourceGen || !targetGen) continue;
 
-    // Use canonical direction for the connection
-    const canonical = getCanonicalConnection(
-      sourceGen.connectionType,
-      targetGen.connectionType,
-    );
-    if (!canonical) continue;
-
-    // Determine which node is the canonical source vs target
-    const isForward = canonical.source === sourceGen.connectionType;
-    const canonSourceNode = isForward ? sourceNode : targetNode;
-    const canonTargetNode = isForward ? targetNode : sourceNode;
-    const canonSourceData = canonSourceNode.data as GeneratorNodeData;
-    const canonTargetData = canonTargetNode.data as GeneratorNodeData;
-    const canonSourceGen = getGeneratorById(canonSourceData.generatorId)!;
-    const canonTargetGen = getGeneratorById(canonTargetData.generatorId)!;
-
     // Determine project names
-    const sourceName = canonSourceGen.hostProjectGenerator
-      ? (hostProjects.get(canonSourceNode.id) ??
-        `${canonSourceData.name}-project`)
-      : canonSourceData.name || canonSourceGen.defaultName;
-    const targetName = canonTargetGen.hostProjectGenerator
-      ? (hostProjects.get(canonTargetNode.id) ??
-        `${canonTargetData.name}-project`)
-      : canonTargetData.name || canonTargetGen.defaultName;
-
-    // For agent -> MCP connections, specify components
-    const needsComponents =
-      canonSourceGen.hostProjectGenerator ||
-      canonTargetGen.hostProjectGenerator;
+    const sourceName = sourceGen.hostProjectGenerator
+      ? (hostProjects.get(sourceNode.id) ?? `${sourceData.name}-project`)
+      : sourceData.name || sourceGen.defaultName;
+    const targetName = targetGen.hostProjectGenerator
+      ? (hostProjects.get(targetNode.id) ?? `${targetData.name}-project`)
+      : targetData.name || targetGen.defaultName;
 
     let connectionCmd = `${nx} g @aws/nx-plugin:connection --sourceProject=${sourceName} --targetProject=${targetName}`;
 
-    if (needsComponents) {
-      if (canonSourceGen.hostProjectGenerator) {
-        connectionCmd += ` --sourceComponent=${canonSourceData.name || canonSourceGen.defaultName}`;
-      }
-      if (canonTargetGen.hostProjectGenerator) {
-        connectionCmd += ` --targetComponent=${canonTargetData.name || canonTargetGen.defaultName}`;
-      }
+    // For agent -> MCP connections, specify components
+    if (sourceGen.hostProjectGenerator) {
+      connectionCmd += ` --sourceComponent=${sourceData.name || sourceGen.defaultName}`;
+    }
+    if (targetGen.hostProjectGenerator) {
+      connectionCmd += ` --targetComponent=${targetData.name || targetGen.defaultName}`;
     }
 
     connectionCmd += ' --no-interactive';
