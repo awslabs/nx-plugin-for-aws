@@ -116,10 +116,25 @@ export const addIgnoresToEslintConfig = async (
   // Add each ignore pattern if not already present
   for (const pattern of ignorePatterns) {
     const escaped = pattern.replace(/`/g, '\\`');
+    // Handle empty ignores array, then try += with fallback for single-element arrays
     await applyGritQLTransform(
       tree,
       eslintConfigPath,
-      `or { \`ignores: []\` => \`ignores: ['${escaped}']\`, \`ignores: [$items]\` where { $items <: not contains \`'${escaped}'\`, $items += \`'${escaped}'\` } }`,
+      `\`ignores: []\` => \`ignores: ['${escaped}']\``,
     );
+    const before = tree.read(eslintConfigPath, 'utf-8')!;
+    await applyGritQLTransform(
+      tree,
+      eslintConfigPath,
+      `\`ignores: [$items]\` where { $items <: not contains \`'${escaped}'\`, $items += \`'${escaped}'\` }`,
+    );
+    if (!(await hasGritQLMatch(tree, eslintConfigPath, `\`'${escaped}'\``))) {
+      tree.write(eslintConfigPath, before);
+      await applyGritQLTransform(
+        tree,
+        eslintConfigPath,
+        `\`ignores: [$items]\` => \`ignores: [$items, '${escaped}']\` where { $items <: not contains \`'${escaped}'\` }`,
+      );
+    }
   }
 };
