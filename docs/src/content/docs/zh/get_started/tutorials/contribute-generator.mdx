@@ -225,9 +225,9 @@ export default trpcProcedureGenerator;
 
 #### 将Procedure添加到Router
 
-需要读取并修改用户源码中的router文件。使用TypeScript AST操作工具来更新代码。
+需要读取并修改用户源码中的router文件。使用[GritQL](https://docs.grit.io/)声明式地搜索和转换源代码。`addDestructuredImport`辅助函数用于添加命名导入，`applyGritQL`应用GritQL模式将procedure添加到router的对象字面量中。
 
-```ts title="procedure/generator.ts" {6, 23-33}
+```ts title="procedure/generator.ts" {6, 23-36}
 import {
   generateFiles,
   joinPathFragments,
@@ -238,8 +238,7 @@ import { TrpcProcedureSchema } from './schema';
 import { formatFilesInSubtree } from '../../utils/format';
 import camelCase from 'lodash.camelcase';
 import kebabCase from 'lodash.kebabcase';
-import { destructuredImport, replace } from '../../utils/ast';
-import { factory, ObjectLiteralExpression } from 'typescript';
+import { addDestructuredImport, applyGritQL } from '../../utils/ast';
 
 export const trpcProcedureGenerator = async (
   tree: Tree,
@@ -263,22 +262,17 @@ export const trpcProcedureGenerator = async (
 
   const routerPath = joinPathFragments(projectConfig.sourceRoot, 'router.ts');
 
-  destructuredImport(
+  await addDestructuredImport(
     tree,
     routerPath,
     [procedureNameCamelCase],
     `./procedures/${procedureNameKebabCase}.js`,
   );
 
-  replace(
+  await applyGritQL(
     tree,
     routerPath,
-    'CallExpression[expression.name="router"] > ObjectLiteralExpression',
-    (node) =>
-      factory.createObjectLiteralExpression([
-        ...(node as ObjectLiteralExpression).properties,
-        factory.createShorthandPropertyAssignment(procedureNameCamelCase),
-      ]),
+    `\`router({ $props })\` => \`router({ $props, ${procedureNameCamelCase} })\` where { $props <: not contains \`${procedureNameCamelCase}\` }`,
   );
 
   await formatFilesInSubtree(tree);
@@ -288,7 +282,14 @@ export default trpcProcedureGenerator;
 ```
 
 :::tip
-上述代码中`replace`使用[tsquery](https://github.com/phenomnomnominal/tsquery)选择器定位`router`函数的参数。可以使用[tsquery playground](https://tsquery-playground.firebaseapp.com/)测试选择器。
+上述代码中，`applyGritQL`使用[GritQL](https://docs.grit.io/)模式查找`router({ ... })`调用并将新procedure添加到其对象字面量中。`where`子句确保幂等性——如果procedure已存在，则不进行更改。
+
+您可以在[GritQL Playground](https://docs.grit.io/playground)中测试GritQL模式，或安装GritQL CLI在本地测试模式：
+
+```bash
+npm install -g @getgrit/cli
+grit apply '`router({ $props })` => `router({ $props, myProcedure })`' --dry-run
+```
 :::
 
 编译生成器使其可用：

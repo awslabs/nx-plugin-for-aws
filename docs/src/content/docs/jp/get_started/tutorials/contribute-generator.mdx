@@ -223,9 +223,11 @@ export default trpcProcedureGenerator;
 
 #### ルーターへのプロシージャ登録
 
-TypeScript AST操作でソースコードを更新します。`replace`と`destructuredImport`ヘルパーを使用します。
+次に、ジェネレータで新しいプロシージャをルーターに接続します。これはユーザーのソースコードの読み取りと更新を意味します！
 
-```ts title="procedure/generator.ts" {6, 23-33}
+[GritQL](https://docs.grit.io/)を使用して、ソースコードを宣言的に検索・変換します。`addDestructuredImport`ヘルパーは名前付きインポートを追加し、`applyGritQL`はGritQLパターンを適用してルーターのオブジェクトリテラルにプロシージャを追加します。
+
+```ts title="procedure/generator.ts" {6, 23-36}
 import {
   generateFiles,
   joinPathFragments,
@@ -236,8 +238,7 @@ import { TrpcProcedureSchema } from './schema';
 import { formatFilesInSubtree } from '../../utils/format';
 import camelCase from 'lodash.camelcase';
 import kebabCase from 'lodash.kebabcase';
-import { destructuredImport, replace } from '../../utils/ast';
-import { factory, ObjectLiteralExpression } from 'typescript';
+import { addDestructuredImport, applyGritQL } from '../../utils/ast';
 
 export const trpcProcedureGenerator = async (
   tree: Tree,
@@ -261,22 +262,17 @@ export const trpcProcedureGenerator = async (
 
   const routerPath = joinPathFragments(projectConfig.sourceRoot, 'router.ts');
 
-  destructuredImport(
+  await addDestructuredImport(
     tree,
     routerPath,
     [procedureNameCamelCase],
     `./procedures/${procedureNameKebabCase}.js`,
   );
 
-  replace(
+  await applyGritQL(
     tree,
     routerPath,
-    'CallExpression[expression.name="router"] > ObjectLiteralExpression',
-    (node) =>
-      factory.createObjectLiteralExpression([
-        ...(node as ObjectLiteralExpression).properties,
-        factory.createShorthandPropertyAssignment(procedureNameCamelCase),
-      ]),
+    `\`router({ $props })\` => \`router({ $props, ${procedureNameCamelCase} })\` where { $props <: not contains \`${procedureNameCamelCase}\` }`,
   );
 
   await formatFilesInSubtree(tree);
@@ -286,7 +282,14 @@ export default trpcProcedureGenerator;
 ```
 
 :::tip
-`replace`では[tsquery](https://github.com/phenomnomnominal/tsquery)セレクタを使用して`router`関数の引数を検索します。[tsquery playground](https://tsquery-playground.firebaseapp.com/)でセレクタのテストが可能です。
+上記のコードスニペットで、`applyGritQL`は[GritQL](https://docs.grit.io/)パターンを使用して`router({ ... })`呼び出しを見つけ、そのオブジェクトリテラルに新しいプロシージャを追加します。`where`句は冪等性を保証します — プロシージャがすでに存在する場合は変更を行いません。
+
+GritQLパターンは[GritQL Playground](https://docs.grit.io/playground)で試すことができます。また、GritQL CLIをインストールしてローカルでパターンをテストすることもできます:
+
+```bash
+npm install -g @getgrit/cli
+grit apply '`router({ $props })` => `router({ $props, myProcedure })`' --dry-run
+```
 :::
 
 ジェネレータをコンパイルしてテスト準備:

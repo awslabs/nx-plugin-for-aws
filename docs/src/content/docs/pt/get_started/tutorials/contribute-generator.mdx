@@ -215,9 +215,11 @@ export default trpcProcedureGenerator;
 
 #### Adicionar o Procedimento ao Router
 
-Usamos manipulação de AST para atualizar o arquivo do router:
+Em seguida, queremos que o gerador conecte o novo procedimento ao router. Isso significa ler e atualizar o código-fonte do usuário!
 
-```ts title="procedure/generator.ts" {6, 23-33}
+Usamos [GritQL](https://docs.grit.io/) para buscar e transformar código-fonte de forma declarativa. O helper `addDestructuredImport` adiciona imports nomeados, e `applyGritQL` aplica um padrão GritQL para adicionar o procedimento ao objeto literal do router.
+
+```ts title="procedure/generator.ts" {6, 23-36}
 import {
   generateFiles,
   joinPathFragments,
@@ -228,8 +230,7 @@ import { TrpcProcedureSchema } from './schema';
 import { formatFilesInSubtree } from '../../utils/format';
 import camelCase from 'lodash.camelcase';
 import kebabCase from 'lodash.kebabcase';
-import { destructuredImport, replace } from '../../utils/ast';
-import { factory, ObjectLiteralExpression } from 'typescript';
+import { addDestructuredImport, applyGritQL } from '../../utils/ast';
 
 export const trpcProcedureGenerator = async (
   tree: Tree,
@@ -253,22 +254,17 @@ export const trpcProcedureGenerator = async (
 
   const routerPath = joinPathFragments(projectConfig.sourceRoot, 'router.ts');
 
-  destructuredImport(
+  await addDestructuredImport(
     tree,
     routerPath,
     [procedureNameCamelCase],
     `./procedures/${procedureNameKebabCase}.js`,
   );
 
-  replace(
+  await applyGritQL(
     tree,
     routerPath,
-    'CallExpression[expression.name="router"] > ObjectLiteralExpression',
-    (node) =>
-      factory.createObjectLiteralExpression([
-        ...(node as ObjectLiteralExpression).properties,
-        factory.createShorthandPropertyAssignment(procedureNameCamelCase),
-      ]),
+    `\`router({ $props })\` => \`router({ $props, ${procedureNameCamelCase} })\` where { $props <: not contains \`${procedureNameCamelCase}\` }`,
   );
 
   await formatFilesInSubtree(tree);
@@ -278,10 +274,17 @@ export default trpcProcedureGenerator;
 ```
 
 :::tip
-O `replace` usa seletores [tsquery](https://github.com/phenomnomnominal/tsquery) para encontrar elementos na AST. Use o [tsquery playground](https://tsquery-playground.firebaseapp.com/) para testar seletores.
+No trecho de código acima, `applyGritQL` usa um padrão [GritQL](https://docs.grit.io/) para encontrar a chamada `router({ ... })` e adicionar o novo procedimento ao seu objeto literal. A cláusula `where` garante idempotência — se o procedimento já estiver presente, nenhuma alteração é feita.
+
+Você pode experimentar padrões GritQL no [GritQL Playground](https://docs.grit.io/playground), ou instalar o CLI GritQL para testar padrões localmente:
+
+```bash
+npm install -g @getgrit/cli
+grit apply '`router({ $props })` => `router({ $props, myProcedure })`' --dry-run
+```
 :::
 
-Compile o gerador para testar:
+Agora que implementamos o gerador, vamos compilá-lo para garantir que esteja disponível para testarmos em nosso projeto:
 
 ```bash
 pnpm nx run @aws/nx-plugin:compile
@@ -289,19 +292,25 @@ pnpm nx run @aws/nx-plugin:compile
 
 ### Testar o Gerador
 
-#### Criar Projeto de Teste
+Para testar o gerador, vamos vincular nosso Nx Plugin for AWS local a uma base de código existente.
 
-Crie um novo workspace:
+#### Criar um Projeto de Teste com uma API tRPC
+
+:::note
+Se você completou o <Link path="get_started/tutorials/dungeon_game/overview">tutorial da aventura na masmorra</Link>, ou já tem outro workspace Nx existente que usa uma API tRPC, você pode pular esta etapa.
+:::
+
+Em um diretório separado, crie um novo workspace de teste:
 
 <CreateNxWorkspaceCommand workspace="trpc-generator-test" />
 
-Gere uma API tRPC:
+Em seguida, vamos gerar uma API tRPC para adicionar o procedimento:
 
 <RunGenerator generator="ts#trpc-api" requiredParameters={{apiName:"test-api"}} noInteractive />
 
-#### Vincular o Plugin Local
+#### Vincular nosso Nx Plugin for AWS local
 
-Vincule o `@aws/nx-plugin` local:
+Em sua base de código, vamos vincular nosso `@aws/nx-plugin` local:
 
 <LinkCommand
   dependency="@aws/nx-plugin"
@@ -310,43 +319,51 @@ Vincule o `@aws/nx-plugin` local:
 />
 
 :::note
-Use a versão compilada em `dist/packages/nx-plugin`.
+Observe acima que vinculamos ao plugin compilado em `dist/packages/nx-plugin` em vez do código-fonte.
 :::
 
-#### Executar o Gerador
+#### Executar o novo Gerador
 
-Execute o novo gerador:
+Vamos testar o novo gerador:
 
 <RunGenerator generator="ts#trpc-api#procedure" />
 
 :::note
-Se não aparecer no VSCode, atualize o workspace Nx:
+Se você não vir o novo gerador na lista no VSCode, pode ser necessário atualizar o workspace Nx:
 
 <NxCommands commands={['reset']} />
 :::
 
+Se bem-sucedido, devemos ter gerado um novo procedimento e adicionado o procedimento ao nosso router em `router.ts`.
+
 ### Exercícios
 
-Sugestões para aprimorar o gerador:
+Se você chegou até aqui e ainda tem algum tempo para experimentar com geradores Nx, aqui estão algumas sugestões de recursos para adicionar ao gerador de procedimentos:
 
 #### 1. Operações Aninhadas
-- Aceitar notação com pontos para `procedure` (ex: `games.query`)
-- Gerar procedimentos com nomes baseados na notação invertida
-- Criar routers aninhados
+
+Tente atualizar o gerador para suportar routers aninhados:
+
+- Aceitando notação com pontos para a entrada `procedure` (ex: `games.query`)
+- Gerando um procedimento com um nome baseado na notação invertida (ex: `queryGames`)
+- Adicionando o router aninhado apropriado (ou atualizando-o se já existir!)
 
 #### 2. Validação
-- Impedir seleção de projetos não-tRPC
-- Ver exemplos no gerador `connection`
+
+Nosso gerador deve se defender contra possíveis problemas, como um usuário selecionando um `project` que não é uma API tRPC. Dê uma olhada no gerador `connection` para um exemplo disso.
 
 #### 3. Testes Unitários
-1. Criar workspace vazio com `createTreeUsingTsSolutionSetup()`
-2. Adicionar arquivos pré-existentes
-3. Executar gerador
-4. Validar alterações
 
-#### 4. Testes End-to-End
-- Atualizar smoke tests para incluir o novo gerador
-- Verificar se a build continua funcionando
+Escreva alguns testes unitários para o gerador. Eles são bastante diretos de implementar, e a maioria segue o fluxo geral:
+
+1. Criar um workspace tree vazio usando `createTreeUsingTsSolutionSetup()`
+2. Adicionar quaisquer arquivos que já devem existir na tree (ex: `project.json` e `src/router.ts` para um backend tRPC)
+3. Executar o gerador em teste
+4. Validar que as alterações esperadas foram feitas na tree
+
+#### 4. Testes End to End
+
+Atualmente, temos um único "smoke test" que executa todos os geradores e garante que a build seja bem-sucedida. Isso deve ser atualizado para incluir o novo gerador.
 
 ### Orientação Geral para Acelerar Contribuições
 

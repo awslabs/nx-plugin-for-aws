@@ -229,9 +229,9 @@ Nous appelons aussi `formatFilesInSubtree` à la fin du générateur, ce qui gar
 
 Ensuite, nous voulons que le générateur connecte la nouvelle procédure au routeur. Cela implique de lire et modifier le code source de l'utilisateur !
 
-Nous utilisons la manipulation d'AST TypeScript pour mettre à jour les parties pertinentes du fichier source. Il existe des helpers appelés `replace` et `destructuredImport` pour faciliter cela.
+Nous utilisons [GritQL](https://docs.grit.io/) pour rechercher et transformer déclarativement le code source. Le helper `addDestructuredImport` ajoute des imports nommés, et `applyGritQL` applique un pattern GritQL pour ajouter la procédure au littéral d'objet du routeur.
 
-```ts title="procedure/generator.ts" {6, 23-33}
+```ts title="procedure/generator.ts" {6, 23-36}
 import {
   generateFiles,
   joinPathFragments,
@@ -242,8 +242,7 @@ import { TrpcProcedureSchema } from './schema';
 import { formatFilesInSubtree } from '../../utils/format';
 import camelCase from 'lodash.camelcase';
 import kebabCase from 'lodash.kebabcase';
-import { destructuredImport, replace } from '../../utils/ast';
-import { factory, ObjectLiteralExpression } from 'typescript';
+import { addDestructuredImport, applyGritQL } from '../../utils/ast';
 
 export const trpcProcedureGenerator = async (
   tree: Tree,
@@ -267,22 +266,17 @@ export const trpcProcedureGenerator = async (
 
   const routerPath = joinPathFragments(projectConfig.sourceRoot, 'router.ts');
 
-  destructuredImport(
+  await addDestructuredImport(
     tree,
     routerPath,
     [procedureNameCamelCase],
     `./procedures/${procedureNameKebabCase}.js`,
   );
 
-  replace(
+  await applyGritQL(
     tree,
     routerPath,
-    'CallExpression[expression.name="router"] > ObjectLiteralExpression',
-    (node) =>
-      factory.createObjectLiteralExpression([
-        ...(node as ObjectLiteralExpression).properties,
-        factory.createShorthandPropertyAssignment(procedureNameCamelCase),
-      ]),
+    `\`router({ $props })\` => \`router({ $props, ${procedureNameCamelCase} })\` where { $props <: not contains \`${procedureNameCamelCase}\` }`,
   );
 
   await formatFilesInSubtree(tree);
@@ -292,9 +286,14 @@ export default trpcProcedureGenerator;
 ```
 
 :::tip
-Dans l'extrait de code ci-dessus, `replace` utilise un sélecteur [tsquery](https://github.com/phenomnomnominal/tsquery) pour trouver l'argument ajouté à la fonction `router`.
+Dans l'extrait de code ci-dessus, `applyGritQL` utilise un pattern [GritQL](https://docs.grit.io/) pour trouver l'appel `router({ ... })` et ajouter la nouvelle procédure à son littéral d'objet. La clause `where` garantit l'idempotence — si la procédure est déjà présente, aucune modification n'est effectuée.
 
-Vous pouvez utiliser le [tsquery playground](https://tsquery-playground.firebaseapp.com/) comme outil utile pour tester différents sélecteurs.
+Vous pouvez essayer des patterns GritQL dans le [GritQL Playground](https://docs.grit.io/playground), ou installer le CLI GritQL pour tester les patterns localement :
+
+```bash
+npm install -g @getgrit/cli
+grit apply '`router({ $props })` => `router({ $props, myProcedure })`' --dry-run
+```
 :::
 
 Maintenant que nous avons implémenté le générateur, compilons-le pour qu'il soit disponible pour le tester dans notre projet d'aventure donjon.
