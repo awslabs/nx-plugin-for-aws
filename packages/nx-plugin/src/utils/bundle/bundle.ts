@@ -13,9 +13,7 @@ import {
   Tree,
 } from '@nx/devkit';
 import { withVersions } from '../versions';
-import { query, replace } from '../ast';
-import { ArrayLiteralExpression, factory } from 'typescript';
-import { StringLiteral } from '@phenomnomnominal/tsquery';
+import { applyGritQL } from '../ast';
 import { getRelativePathToRoot } from '../paths';
 import { addDependencyToTargetIfNotPresent } from '../nx';
 
@@ -124,7 +122,7 @@ export interface AddTypeScriptBundleTargetOptions {
 /**
  * Add a TypeScript bundle target using rolldown
  */
-export const addTypeScriptBundleTarget = (
+export const addTypeScriptBundleTarget = async (
   tree: Tree,
   project: ProjectConfiguration,
   opts: AddTypeScriptBundleTargetOptions,
@@ -162,91 +160,57 @@ export const addTypeScriptBundleTarget = (
     'rolldown.config.ts',
   );
 
-  const rolldownConfigArraySelector =
-    'CallExpression:has(Identifier[name="defineConfig"]) > ArrayLiteralExpression';
+  const outputFile = joinPathFragments(
+    getRelativePathToRoot(tree, project.name),
+    'dist',
+    project.root,
+    'bundle',
+    opts.bundleOutputDir ?? '.',
+    'index.js',
+  );
 
-  // Check whether we already have a config entry with input set to targetFilePath
-  if (
-    query(
+  const external = opts.external?.length
+    ? opts.external
+        .map((ext) =>
+          typeof ext === 'string' ? `'${ext}'` : `/${ext.source}/`,
+        )
+        .join(', ')
+    : '';
+
+  const entry = `{
+    tsconfig: 'tsconfig.lib.json',
+    input: '${opts.targetFilePath}',
+    output: { file: '${outputFile}', format: 'cjs', inlineDynamicImports: true },
+    platform: '${opts.platform ?? 'node'}',
+    ${external ? `external: [${external}],` : ''}
+  }`;
+
+  // Use GritQL to append the config entry to the defineConfig array.
+  // First try the non-empty array case using the accumulate (+=) operator,
+  // with an idempotency guard that checks the input path is not already present.
+  const appended = await applyGritQL(
+    tree,
+    rolldownConfigPath,
+    `\`defineConfig([$items])\` where { $items <: not contains \`'${opts.targetFilePath}'\`, $items += ", ${entry}" }`,
+  );
+
+  if (!appended) {
+    // Empty array — GritQL's += cannot accumulate into an empty list, so we
+    // first insert a placeholder to make the array non-empty, then replace
+    // the placeholder with the real entry via += (which handles regex
+    // literals that are invalid inside GritQL backtick snippets).
+    const inserted = await applyGritQL(
       tree,
       rolldownConfigPath,
-      `${rolldownConfigArraySelector} PropertyAssignment:has(Identifier[name="input"]):has(StringLiteral[value="${opts.targetFilePath}"])`,
-    ).length === 0
-  ) {
-    // We don't have one, so append it
-    replace(
-      tree,
-      rolldownConfigPath,
-      rolldownConfigArraySelector,
-      (node: ArrayLiteralExpression) => {
-        return factory.createArrayLiteralExpression([
-          ...node.elements,
-          factory.createObjectLiteralExpression(
-            [
-              factory.createPropertyAssignment(
-                factory.createIdentifier('tsconfig'),
-                factory.createStringLiteral('tsconfig.lib.json', true),
-              ),
-              factory.createPropertyAssignment(
-                factory.createIdentifier('input'),
-                factory.createStringLiteral(opts.targetFilePath, true),
-              ),
-              factory.createPropertyAssignment(
-                factory.createIdentifier('output'),
-                factory.createObjectLiteralExpression(
-                  [
-                    factory.createPropertyAssignment(
-                      factory.createIdentifier('file'),
-                      factory.createStringLiteral(
-                        joinPathFragments(
-                          getRelativePathToRoot(tree, project.name),
-                          'dist',
-                          project.root,
-                          'bundle',
-                          opts.bundleOutputDir ?? '.',
-                          'index.js',
-                        ),
-                        true,
-                      ),
-                    ),
-                    factory.createPropertyAssignment(
-                      factory.createIdentifier('format'),
-                      factory.createStringLiteral('cjs', true),
-                    ),
-                    factory.createPropertyAssignment(
-                      factory.createIdentifier('inlineDynamicImports'),
-                      factory.createTrue(),
-                    ),
-                  ],
-                  true,
-                ),
-              ),
-              factory.createPropertyAssignment(
-                factory.createIdentifier('platform'),
-                factory.createStringLiteral(opts.platform ?? 'node', true),
-              ),
-              ...(opts.external
-                ? [
-                    factory.createPropertyAssignment(
-                      factory.createIdentifier('external'),
-                      factory.createArrayLiteralExpression(
-                        opts.external.map((ext) =>
-                          typeof ext === 'string'
-                            ? factory.createStringLiteral(ext, true)
-                            : factory.createRegularExpressionLiteral(
-                                `/${ext.source}/`,
-                              ),
-                        ),
-                      ),
-                    ),
-                  ]
-                : []),
-            ],
-            true,
-          ),
-        ]);
-      },
+      `\`defineConfig([])\` => \`defineConfig([__PLACEHOLDER__])\``,
     );
+    if (inserted) {
+      await applyGritQL(
+        tree,
+        rolldownConfigPath,
+        `\`defineConfig([$items])\` where { $items <: \`__PLACEHOLDER__\` => ., $items += "${entry}" }`,
+      );
+    }
   }
 
   addDependenciesToPackageJson(tree, {}, withVersions(['rolldown']));

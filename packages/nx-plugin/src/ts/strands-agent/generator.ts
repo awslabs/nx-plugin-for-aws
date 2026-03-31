@@ -80,7 +80,7 @@ export const tsStrandsAgentGenerator = async (
     const dockerImageTag = `${getNpmScope(tree)}-${name}:latest`;
 
     // Add bundle target
-    addTypeScriptBundleTarget(tree, project, {
+    await addTypeScriptBundleTarget(tree, project, {
       targetFilePath: `${targetSourceDirRelativeToProjectRoot}/index.ts`,
       bundleOutputDir: joinPathFragments('agent', name),
     });
@@ -94,9 +94,7 @@ export const tsStrandsAgentGenerator = async (
         distDir,
         name,
         adotVersion:
-          TS_VERSIONS[
-            '@aws/aws-distro-opentelemetry-node-autoinstrumentation'
-          ],
+          TS_VERSIONS['@aws/aws-distro-opentelemetry-node-autoinstrumentation'],
       },
       { overwriteStrategy: OverwriteStrategy.KeepExisting },
     );

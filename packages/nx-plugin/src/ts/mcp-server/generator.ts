@@ -103,9 +103,7 @@ export const tsMcpServerGenerator = async (
       esm,
       distDir,
       adotVersion:
-        TS_VERSIONS[
-          '@aws/aws-distro-opentelemetry-node-autoinstrumentation'
-        ],
+        TS_VERSIONS['@aws/aws-distro-opentelemetry-node-autoinstrumentation'],
     },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
@@ -129,7 +127,7 @@ export const tsMcpServerGenerator = async (
     const dockerImageTag = `${getNpmScope(tree)}-${name}:latest`;
 
     // Add bundle target
-    addTypeScriptBundleTarget(tree, project, {
+    await addTypeScriptBundleTarget(tree, project, {
       targetFilePath: `${targetSourceDirRelativeToProjectRoot}/http.ts`,
       bundleOutputDir: joinPathFragments('mcp', name),
     });

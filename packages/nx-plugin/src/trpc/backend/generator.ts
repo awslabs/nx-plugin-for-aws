@@ -122,7 +122,7 @@ export async function tsTrpcApiGenerator(
     continuous: true,
   };
 
-  addTypeScriptBundleTarget(tree, projectConfig, {
+  await addTypeScriptBundleTarget(tree, projectConfig, {
     targetFilePath: 'src/handler.ts',
     external: [/@aws-sdk\/.*/], // lambda runtime provides aws sdk
   });
