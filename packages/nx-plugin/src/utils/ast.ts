@@ -430,3 +430,31 @@ export const hasGritQLMatch = async (
     return false;
   }
 };
+
+/**
+ * Append an item to a comma-separated list (array elements, object properties, etc.)
+ * using GritQL +=. Handles the single-element edge case where += concatenates without
+ * a comma by falling back to a rewrite (=>) pattern.
+ *
+ * @param plusPattern  - GritQL pattern using += to append (correct for 2+ elements)
+ * @param rewritePattern - GritQL rewrite pattern as fallback (correct for single element)
+ * @param verifyPattern - GritQL pattern to verify the item was properly added
+ */
+export const applyGritQLAppend = async (
+  tree: Tree,
+  filePath: string,
+  plusPattern: string,
+  rewritePattern: string,
+  verifyPattern: string,
+): Promise<boolean> => {
+  const before = tree.read(filePath)!.toString();
+  const changed = await applyGritQLTransform(tree, filePath, plusPattern);
+  if (!changed) return false;
+  const ok = await hasGritQLMatch(tree, filePath, verifyPattern);
+  if (!ok) {
+    // += concatenated without comma (single-element edge case) — retry with rewrite
+    tree.write(filePath, before);
+    return applyGritQLTransform(tree, filePath, rewritePattern);
+  }
+  return true;
+};
