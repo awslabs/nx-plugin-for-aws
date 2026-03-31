@@ -31,7 +31,6 @@ import {
   addDestructuredImport,
   addSingleImport,
   applyGritQLTransform,
-  applyGritQLAppend,
 } from '../../../utils/ast';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { getPackageManagerDisplayCommands } from '../../../utils/pkg-manager';
@@ -382,21 +381,17 @@ export async function tsReactWebsiteGenerator(
     }
 
     if (enableTailwind) {
-      await applyGritQLAppend(
+      await applyGritQLTransform(
         tree,
         viteConfigPath,
-        '`plugins: [$items]` where { $items <: within `defineConfig($_)`, $items <: not contains `tailwindcss`, $items += `tailwindcss()` }',
-        '`plugins: [$items]` => `plugins: [$items, tailwindcss()]` where { $items <: within `defineConfig($_)`, $items <: not contains `tailwindcss` }',
-        '`tailwindcss()`',
+        '`plugins: [$items]` where { $items <: within `defineConfig($_)`, $items <: not some `tailwindcss()`, $items += `tailwindcss()` }',
       );
     }
 
-    await applyGritQLAppend(
+    await applyGritQLTransform(
       tree,
       viteConfigPath,
-      '`plugins: [$items]` where { $items <: within `defineConfig($_)`, $items <: not contains `tsconfigPaths`, $items += `tsconfigPaths()` }',
-      '`plugins: [$items]` => `plugins: [$items, tsconfigPaths()]` where { $items <: within `defineConfig($_)`, $items <: not contains `tsconfigPaths` }',
-      '`tsconfigPaths()`',
+      '`plugins: [$items]` where { $items <: within `defineConfig($_)`, $items <: not some `tsconfigPaths()`, $items += `tsconfigPaths()` }',
     );
 
     // Add define: { global: {} } to the config (handles both callback and direct forms)
