@@ -13,7 +13,6 @@ import { withVersions } from '../../utils/versions';
 import {
   addSingleImport,
   applyGritQLTransform,
-  applyGritQLAppend,
   hasGritQLMatch,
 } from '../../utils/ast';
 import { ConfigureProjectOptions } from './types';
@@ -105,7 +104,12 @@ export const addIgnoresToEslintConfig = async (
   ignorePatterns: string[],
 ): Promise<void> => {
   // Add { ignores: [] } to the config array if no ignores object exists
-  const hasIgnores = await hasGritQLMatch(tree, eslintConfigPath, '`ignores`');
+  // Check for any 'ignores:' property assignment in the file (specific enough for eslint configs)
+  const hasIgnores = await hasGritQLMatch(
+    tree,
+    eslintConfigPath,
+    '`ignores: $_`',
+  );
   if (!hasIgnores) {
     await applyGritQLTransform(
       tree,
@@ -117,19 +121,16 @@ export const addIgnoresToEslintConfig = async (
   // Add each ignore pattern if not already present
   for (const pattern of ignorePatterns) {
     const escaped = pattern.replace(/`/g, '\\`');
-    // Handle empty ignores array
+    // Handle empty ignores array, then append to non-empty via +=
     await applyGritQLTransform(
       tree,
       eslintConfigPath,
       `\`ignores: []\` => \`ignores: ['${escaped}']\``,
     );
-    // Append to non-empty ignores array (with single-element fallback)
-    await applyGritQLAppend(
+    await applyGritQLTransform(
       tree,
       eslintConfigPath,
-      `\`ignores: [$items]\` where { $items <: not contains \`'${escaped}'\`, $items += \`'${escaped}'\` }`,
-      `\`ignores: [$items]\` => \`ignores: [$items, '${escaped}']\` where { $items <: not contains \`'${escaped}'\` }`,
-      '`ignores: [$a, $b]`',
+      `\`ignores: [$items]\` where { $items <: not some \`'${escaped}'\`, $items += \`'${escaped}'\` }`,
     );
   }
 };
