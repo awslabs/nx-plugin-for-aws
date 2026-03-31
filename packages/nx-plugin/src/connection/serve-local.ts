@@ -7,8 +7,7 @@ import {
   Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { replaceIfExists } from '../utils/ast';
-import { Block, factory } from 'typescript';
+import { applyGritQLTransform } from '../utils/ast';
 import { readProjectConfigurationUnqualified } from '../utils/nx';
 import { toClassName } from '../utils/names';
 
@@ -22,7 +21,7 @@ export interface ServeLocalOptions {
  * Adds the given target project to the source project's serve-local target
  * Updates the runtime config provider (if it exists)
  */
-export const addTargetToServeLocal = (
+export const addTargetToServeLocal = async (
   tree: Tree,
   sourceProjectName: string,
   targetProjectName: string,
@@ -67,26 +66,11 @@ export const addTargetToServeLocal = (
     'index.tsx',
   );
   if (tree.exists(runtimeConfigProvider)) {
-    replaceIfExists(
+    const className = toClassName(options.apiName);
+    await applyGritQLTransform(
       tree,
       runtimeConfigProvider,
-      'VariableDeclaration[name.name="applyOverrides"] IfStatement:has(StringLiteral[text="serve-local"]) Block',
-      (block: Block) =>
-        factory.createBlock([
-          ...block.statements,
-          factory.createExpressionStatement(
-            factory.createAssignment(
-              factory.createPropertyAccessExpression(
-                factory.createPropertyAccessExpression(
-                  factory.createIdentifier('runtimeConfig'),
-                  'apis',
-                ),
-                toClassName(options.apiName),
-              ),
-              factory.createStringLiteral(options.url, true),
-            ),
-          ),
-        ]),
+      `\`if ($cond) { $stmts }\` => raw\`if ($cond) {\n    $stmts\n    runtimeConfig.apis.${className} = '${options.url}';\n  }\` where { $cond <: contains \`'serve-local'\`, $stmts <: within \`const applyOverrides = $_\` }`,
     );
   }
 };

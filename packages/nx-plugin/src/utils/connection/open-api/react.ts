@@ -245,7 +245,7 @@ export const addOpenApiReactClient = async (
   }
 
   // Update serve-local on the website to use our local server
-  addTargetToServeLocal(
+  await addTargetToServeLocal(
     tree,
     frontendProjectConfig.name,
     backendProjectConfig.name,

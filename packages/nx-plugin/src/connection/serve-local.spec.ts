@@ -19,7 +19,7 @@ describe('serve-local', () => {
       url: 'http://localhost:3001',
     };
 
-    it('should add target dependency when both projects have required targets', () => {
+    it('should add target dependency when both projects have required targets', async () => {
       // Setup source project with serve-local target
       tree.write(
         'apps/frontend/project.json',
@@ -53,7 +53,7 @@ describe('serve-local', () => {
         }),
       );
 
-      addTargetToServeLocal(tree, 'frontend', 'backend', options);
+      await addTargetToServeLocal(tree, 'frontend', 'backend', options);
 
       const updatedProject = JSON.parse(
         tree.read('apps/frontend/project.json', 'utf-8'),
@@ -67,7 +67,7 @@ describe('serve-local', () => {
       ]);
     });
 
-    it('should append to existing dependsOn array', () => {
+    it('should append to existing dependsOn array', async () => {
       // Setup source project with serve-local target that already has dependencies
       tree.write(
         'apps/frontend/project.json',
@@ -107,7 +107,7 @@ describe('serve-local', () => {
         }),
       );
 
-      addTargetToServeLocal(tree, 'frontend', 'backend', options);
+      await addTargetToServeLocal(tree, 'frontend', 'backend', options);
 
       const updatedProject = JSON.parse(
         tree.read('apps/frontend/project.json', 'utf-8'),
@@ -125,7 +125,7 @@ describe('serve-local', () => {
       ]);
     });
 
-    it('should not modify project when target project lacks continuous serve target', () => {
+    it('should not modify project when target project lacks continuous serve target', async () => {
       // Setup source project with serve-local target
       tree.write(
         'apps/frontend/project.json',
@@ -161,13 +161,13 @@ describe('serve-local', () => {
 
       const originalProject = tree.read('apps/frontend/project.json', 'utf-8');
 
-      addTargetToServeLocal(tree, 'frontend', 'backend', options);
+      await addTargetToServeLocal(tree, 'frontend', 'backend', options);
 
       const updatedProject = tree.read('apps/frontend/project.json', 'utf-8');
       expect(updatedProject).toBe(originalProject);
     });
 
-    it('should not modify project when target project has no serve target', () => {
+    it('should not modify project when target project has no serve target', async () => {
       // Setup source project with serve-local target
       tree.write(
         'apps/frontend/project.json',
@@ -202,13 +202,13 @@ describe('serve-local', () => {
 
       const originalProject = tree.read('apps/frontend/project.json', 'utf-8');
 
-      addTargetToServeLocal(tree, 'frontend', 'backend', options);
+      await addTargetToServeLocal(tree, 'frontend', 'backend', options);
 
       const updatedProject = tree.read('apps/frontend/project.json', 'utf-8');
       expect(updatedProject).toBe(originalProject);
     });
 
-    it('should not modify project when source project has no serve-local target', () => {
+    it('should not modify project when source project has no serve-local target', async () => {
       // Setup source project without serve-local target
       tree.write(
         'apps/frontend/project.json',
@@ -244,13 +244,13 @@ describe('serve-local', () => {
 
       const originalProject = tree.read('apps/frontend/project.json', 'utf-8');
 
-      addTargetToServeLocal(tree, 'frontend', 'backend', options);
+      await addTargetToServeLocal(tree, 'frontend', 'backend', options);
 
       const updatedProject = tree.read('apps/frontend/project.json', 'utf-8');
       expect(updatedProject).toBe(originalProject);
     });
 
-    it('should modify runtime config when file exists', () => {
+    it('should modify runtime config when file exists', async () => {
       // Setup source project with serve-local target
       tree.write(
         'apps/frontend/project.json',
@@ -297,7 +297,7 @@ const applyOverrides = (runtimeConfig: IRuntimeConfig) => {
 `,
       );
 
-      addTargetToServeLocal(tree, 'frontend', 'backend', options);
+      await addTargetToServeLocal(tree, 'frontend', 'backend', options);
 
       const updatedRuntimeConfig = tree.read(
         'apps/frontend/src/components/RuntimeConfig/index.tsx',
@@ -310,7 +310,7 @@ const applyOverrides = (runtimeConfig: IRuntimeConfig) => {
       );
     });
 
-    it('should not modify runtime config when file does not exist', () => {
+    it('should not modify runtime config when file does not exist', async () => {
       // Setup source project with serve-local target
       tree.write(
         'apps/frontend/project.json',
@@ -345,9 +345,9 @@ const applyOverrides = (runtimeConfig: IRuntimeConfig) => {
       );
 
       // Don't create runtime config file
-      expect(() => {
-        addTargetToServeLocal(tree, 'frontend', 'backend', options);
-      }).not.toThrow();
+      await expect(
+        addTargetToServeLocal(tree, 'frontend', 'backend', options),
+      ).resolves.not.toThrow();
 
       // Verify runtime config file was not created
       expect(
@@ -355,7 +355,7 @@ const applyOverrides = (runtimeConfig: IRuntimeConfig) => {
       ).toBe(false);
     });
 
-    it('should handle missing targets object gracefully', () => {
+    it('should handle missing targets object gracefully', async () => {
       // Setup source project without targets
       tree.write(
         'apps/frontend/project.json',
@@ -385,13 +385,13 @@ const applyOverrides = (runtimeConfig: IRuntimeConfig) => {
 
       const originalProject = tree.read('apps/frontend/project.json', 'utf-8');
 
-      addTargetToServeLocal(tree, 'frontend', 'backend', options);
+      await addTargetToServeLocal(tree, 'frontend', 'backend', options);
 
       const updatedProject = tree.read('apps/frontend/project.json', 'utf-8');
       expect(updatedProject).toBe(originalProject);
     });
 
-    it('should handle target project with missing targets object', () => {
+    it('should handle target project with missing targets object', async () => {
       // Setup source project with serve-local target
       tree.write(
         'apps/frontend/project.json',
@@ -420,7 +420,7 @@ const applyOverrides = (runtimeConfig: IRuntimeConfig) => {
 
       const originalProject = tree.read('apps/frontend/project.json', 'utf-8');
 
-      addTargetToServeLocal(tree, 'frontend', 'backend', options);
+      await addTargetToServeLocal(tree, 'frontend', 'backend', options);
 
       const updatedProject = tree.read('apps/frontend/project.json', 'utf-8');
       expect(updatedProject).toBe(originalProject);
