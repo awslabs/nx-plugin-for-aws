@@ -4,7 +4,7 @@
  */
 import { generateFiles, joinPathFragments, Tree } from '@nx/devkit';
 import { AwsNxPluginConfig } from '.';
-import { applyGritQL } from '../ast';
+import { applyGritQL, matchGritQL } from '../ast';
 import { formatFilesInSubtree } from '../format';
 import { importTypeScriptModule } from '../js';
 
@@ -37,9 +37,105 @@ export const readAwsNxPluginConfig = async (
   return await importTypeScriptModule(configTs);
 };
 
+const PLACEHOLDER = '"__PLACEHOLDER__"';
+
+/**
+ * Clean up double commas produced by GritQL's $props capture
+ * (which includes trailing commas from the original source).
+ */
+const fixDoubleCommas = (tree: Tree, filePath: string) => {
+  const content = tree.read(filePath)!.toString();
+  if (content.includes(',,')) {
+    tree.write(filePath, content.replace(/,,/g, ','));
+  }
+};
+
+/**
+ * Use GritQL to set a top-level property in the export default object,
+ * then substitute the placeholder with the JSON-serialized value.
+ * Preserves all other properties (including JS expressions) untouched.
+ */
+const setConfigProperty = async (
+  tree: Tree,
+  filePath: string,
+  key: string,
+  value: unknown,
+): Promise<void> => {
+  const json = JSON.stringify(value);
+
+  // Check if the property already exists using a named metavariable
+  // to avoid ambiguity with anonymous $_ in nested where clauses
+  const existsInSatisfies = await matchGritQL(
+    tree,
+    filePath,
+    `\`${key}: $val\` where { $val <: within \`export default $_ satisfies $_\` }`,
+  );
+  const existsInPlain =
+    !existsInSatisfies &&
+    (await matchGritQL(
+      tree,
+      filePath,
+      `\`${key}: $val\` where { $val <: within \`export default $_\` }`,
+    ));
+
+  if (existsInSatisfies || existsInPlain) {
+    // Replace only this property's value, scoped to the export default
+    const within = existsInSatisfies
+      ? `within \`export default $_ satisfies $_\``
+      : `within \`export default $_\``;
+    await applyGritQL(
+      tree,
+      filePath,
+      `\`${key}: $old\` => \`${key}: ${PLACEHOLDER}\` where { $old <: ${within} }`,
+    );
+  } else {
+    // Add the new property — try satisfies variant first, then plain
+    let added = await applyGritQL(
+      tree,
+      filePath,
+      `\`export default { $props } satisfies $type\` where { $props => \`$props, ${key}: ${PLACEHOLDER}\` }`,
+    );
+    if (added) {
+      fixDoubleCommas(tree, filePath);
+    }
+
+    if (!added) {
+      added = await applyGritQL(
+        tree,
+        filePath,
+        `\`export default { } satisfies $type\` => \`export default { ${key}: ${PLACEHOLDER} } satisfies $type\``,
+      );
+    }
+
+    if (!added) {
+      added = await applyGritQL(
+        tree,
+        filePath,
+        `\`export default { $props }\` where { $props => \`$props, ${key}: ${PLACEHOLDER}\` }`,
+      );
+      if (added) {
+        fixDoubleCommas(tree, filePath);
+      }
+    }
+
+    if (!added) {
+      await applyGritQL(
+        tree,
+        filePath,
+        `\`export default { }\` => \`export default { ${key}: ${PLACEHOLDER} }\``,
+      );
+    }
+  }
+
+  // Substitute the placeholder with the actual JSON value
+  const content = tree.read(filePath)!.toString();
+  tree.write(filePath, content.replace(PLACEHOLDER, json));
+};
+
 /**
  * Update the aws nx plugin config file.
- * Undefined top level keys in the config update will be untouched, otherwise config is replaced
+ * Only the specified top-level keys are replaced; all other properties
+ * (including those containing JS expressions) are left untouched in source.
  */
 export const updateAwsNxPluginConfig = async (
   tree: Tree,
@@ -47,37 +143,10 @@ export const updateAwsNxPluginConfig = async (
 ): Promise<void> => {
   const filePath = AWS_NX_PLUGIN_CONFIG_FILE_NAME;
 
-  // Read the current config to merge with the update
-  const existingConfig = (await readAwsNxPluginConfig(tree)) ?? {};
-  const mergedConfig: Record<string, unknown> = { ...existingConfig };
   for (const [key, value] of Object.entries(configUpdate)) {
-    mergedConfig[key] = value;
+    await setConfigProperty(tree, filePath, key, value);
   }
 
-  // Use GritQL to replace the export default object with a JSON placeholder,
-  // then substitute with the actual JSON. This avoids GritQL interpreting
-  // escape sequences in the replacement text. Prettier handles final formatting.
-  const placeholder = '"__PLACEHOLDER__"';
-  const json = JSON.stringify(mergedConfig);
-
-  // Try with `satisfies` first, then fall back to plain `export default`.
-  const applied = await applyGritQL(
-    tree,
-    filePath,
-    `\`export default $obj satisfies $type\` => \`export default ${placeholder} satisfies $type\``,
-  );
-  if (!applied) {
-    await applyGritQL(
-      tree,
-      filePath,
-      `\`export default $obj\` => \`export default ${placeholder}\``,
-    );
-  }
-
-  // Replace the placeholder string with the actual JSON object
-  const content = tree.read(filePath)!.toString();
-  tree.write(filePath, content.replace(placeholder, json));
-
-  // Prettier formats the JSON object into properly indented TypeScript
+  // Prettier formats the result into properly indented TypeScript
   await formatFilesInSubtree(tree, filePath);
 };
