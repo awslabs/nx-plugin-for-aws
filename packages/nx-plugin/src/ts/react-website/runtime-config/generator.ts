@@ -9,10 +9,13 @@ import {
   OverwriteStrategy,
 } from '@nx/devkit';
 import { RuntimeConfigGeneratorSchema } from './schema';
-import { factory } from 'typescript';
 import { getNpmScopePrefix, toScopeAlias } from '../../../utils/npm-scope';
 import { formatFilesInSubtree } from '../../../utils/format';
-import { prependStatements, applyGritQLTransform } from '../../../utils/ast';
+import {
+  addSingleImport,
+  applyGritQLTransform,
+  hasGritQLMatch,
+} from '../../../utils/ast';
 import {
   NxGeneratorInfo,
   addComponentGeneratorMetadata,
@@ -67,25 +70,30 @@ export async function runtimeConfigGenerator(
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
   );
-  const runtimeContextImport = factory.createImportDeclaration(
-    undefined,
-    factory.createImportClause(
-      false,
-      factory.createIdentifier('RuntimeConfigProvider'),
-      undefined,
-    ),
-    factory.createStringLiteral('./components/RuntimeConfig', true),
-  );
-  prependStatements(tree, mainTsxPath, [runtimeContextImport]);
 
-  const wrapped = await applyGritQLTransform(
+  // Only add RuntimeConfigProvider wrapper and import if not already present in JSX
+  const alreadyWrapped = await hasGritQLMatch(
     tree,
     mainTsxPath,
-    '`<App />` => `<RuntimeConfigProvider><App /></RuntimeConfigProvider>`',
+    '`<RuntimeConfigProvider>$_</RuntimeConfigProvider>`',
   );
+  if (!alreadyWrapped) {
+    await addSingleImport(
+      tree,
+      mainTsxPath,
+      'RuntimeConfigProvider',
+      './components/RuntimeConfig',
+    );
 
-  if (!wrapped) {
-    throw new Error('Could not locate the App element in main.tsx');
+    const wrapped = await applyGritQLTransform(
+      tree,
+      mainTsxPath,
+      '`<App />` => `<RuntimeConfigProvider><App /></RuntimeConfigProvider>`',
+    );
+
+    if (!wrapped) {
+      throw new Error('Could not locate the App element in main.tsx');
+    }
   }
 
   await addHookResultToRouterProviderContext(tree, mainTsxPath, {
