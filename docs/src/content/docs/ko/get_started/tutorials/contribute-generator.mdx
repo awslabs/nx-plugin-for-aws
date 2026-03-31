@@ -229,9 +229,9 @@ export default trpcProcedureGenerator;
 
 다음으로 제너레이터가 새 프로시저를 라우터에 연결하도록 합니다. 이는 사용자의 소스 코드를 읽고 업데이트하는 것을 의미합니다!
 
-TypeScript AST 조작을 사용하여 타입스크립트 소스 파일의 관련 부분을 업데이트합니다. 이를 조금 더 쉽게 만들기 위해 `replace`와 `destructuredImport`라는 헬퍼가 있습니다.
+[GritQL](https://docs.grit.io/)을 사용하여 선언적으로 소스 코드를 검색하고 변환합니다. `addDestructuredImport` 헬퍼는 명명된 임포트를 추가하고, `applyGritQL`은 GritQL 패턴을 적용하여 라우터의 객체 리터럴에 프로시저를 추가합니다.
 
-```ts title="procedure/generator.ts" {6, 23-33}
+```ts title="procedure/generator.ts" {6, 23-36}
 import {
   generateFiles,
   joinPathFragments,
@@ -242,8 +242,7 @@ import { TrpcProcedureSchema } from './schema';
 import { formatFilesInSubtree } from '../../utils/format';
 import camelCase from 'lodash.camelcase';
 import kebabCase from 'lodash.kebabcase';
-import { destructuredImport, replace } from '../../utils/ast';
-import { factory, ObjectLiteralExpression } from 'typescript';
+import { addDestructuredImport, applyGritQL } from '../../utils/ast';
 
 export const trpcProcedureGenerator = async (
   tree: Tree,
@@ -267,22 +266,17 @@ export const trpcProcedureGenerator = async (
 
   const routerPath = joinPathFragments(projectConfig.sourceRoot, 'router.ts');
 
-  destructuredImport(
+  await addDestructuredImport(
     tree,
     routerPath,
     [procedureNameCamelCase],
     `./procedures/${procedureNameKebabCase}.js`,
   );
 
-  replace(
+  await applyGritQL(
     tree,
     routerPath,
-    'CallExpression[expression.name="router"] > ObjectLiteralExpression',
-    (node) =>
-      factory.createObjectLiteralExpression([
-        ...(node as ObjectLiteralExpression).properties,
-        factory.createShorthandPropertyAssignment(procedureNameCamelCase),
-      ]),
+    `\`router({ $props })\` => \`router({ $props, ${procedureNameCamelCase} })\` where { $props <: not contains \`${procedureNameCamelCase}\` }`,
   );
 
   await formatFilesInSubtree(tree);
@@ -292,9 +286,14 @@ export default trpcProcedureGenerator;
 ```
 
 :::tip
-위 코드 스니펫에서 `replace`는 [tsquery](https://github.com/phenomnomnominal/tsquery) 셀렉터를 사용하여 `router` 함수에 추가된 인자를 찾습니다.
+위 코드 스니펫에서 `applyGritQL`은 [GritQL](https://docs.grit.io/) 패턴을 사용하여 `router({ ... })` 호출을 찾고 새 프로시저를 객체 리터럴에 추가합니다. `where` 절은 멱등성을 보장합니다 — 프로시저가 이미 존재하면 변경이 이루어지지 않습니다.
 
-다양한 셀렉터를 테스트하는 유용한 도구로 [tsquery 플레이그라운드](https://tsquery-playground.firebaseapp.com/)를 사용할 수 있습니다.
+[GritQL Playground](https://docs.grit.io/playground)에서 GritQL 패턴을 시험해 볼 수 있으며, GritQL CLI를 설치하여 로컬에서 패턴을 테스트할 수도 있습니다:
+
+```bash
+npm install -g @getgrit/cli
+grit apply '`router({ $props })` => `router({ $props, myProcedure })`' --dry-run
+```
 :::
 
 제너레이터 구현을 완료했으니, 던전 어드벤처 프로젝트에서 테스트할 수 있도록 컴파일합니다.
