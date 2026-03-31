@@ -92,5 +92,5 @@ export const configureTsProject = async (
   }
 
   await configureEslint(tree, options);
-  configureVitest(tree, options);
+  await configureVitest(tree, options);
 };

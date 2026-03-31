@@ -28,8 +28,12 @@ import {
   getGeneratorInfo,
 } from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { replace } from '../../utils/ast';
-import { ArrayLiteralExpression, factory } from 'typescript';
+import { applyGritQLTransform } from '../../utils/ast';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+
+const readGritPattern = (name: string): string =>
+  readFileSync(join(__dirname, 'grit', `${name}.grit`), 'utf-8').trim();
 
 export const TS_LIB_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -205,16 +209,10 @@ export const tsProjectGenerator = async (
   });
 
   // change error to warn for the @nx/dependency-checks rule
-  replace(
+  await applyGritQLTransform(
     tree,
     joinPathFragments(dir, 'eslint.config.mjs'),
-    'PropertyAssignment:has(Identifier[name="rules"]) ObjectLiteralExpression PropertyAssignment:has(StringLiteral[value="@nx/dependency-checks"]) ArrayLiteralExpression:has(StringLiteral[value="error"])',
-    (node: ArrayLiteralExpression) => {
-      return factory.createArrayLiteralExpression([
-        factory.createStringLiteral('warn'),
-        ...node.elements.slice(1),
-      ]);
-    },
+    readGritPattern('eslint-dependency-checks-warn'),
   );
 
   await addGeneratorMetricsIfApplicable(tree, [TS_LIB_GENERATOR_INFO]);

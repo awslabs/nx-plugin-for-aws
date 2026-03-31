@@ -9,12 +9,15 @@ import {
   updateNxJson,
 } from '@nx/devkit';
 import { join } from 'path';
-import ts, { factory, ObjectLiteralExpression } from 'typescript';
 import { ConfigureProjectOptions } from './types';
-import { replaceIfExists } from '../../utils/ast';
+import { applyGritQLTransform } from '../../utils/ast';
 import { withVersions } from '../../utils/versions';
+import { readFileSync } from 'fs';
 
-export const configureVitest = (
+const readGritPattern = (name: string): string =>
+  readFileSync(join(__dirname, 'grit', `${name}.grit`), 'utf-8').trim();
+
+export const configureVitest = async (
   tree: Tree,
   options: ConfigureProjectOptions,
 ) => {
@@ -25,29 +28,10 @@ export const configureVitest = (
   ].find((config) => tree.exists(config));
 
   if (configPath) {
-    replaceIfExists(
+    await applyGritQLTransform(
       tree,
       configPath,
-      'CallExpression:has(Identifier[name="defineConfig"]) PropertyAssignment:has(Identifier[name="test"]) ObjectLiteralExpression',
-      (node: ObjectLiteralExpression) => {
-        // Check if passWithNoTests already exists
-        const hasPassWithNoTests = node.properties.some(
-          (p) =>
-            ts.isPropertyAssignment(p) &&
-            ts.isIdentifier(p.name) &&
-            p.name.text === 'passWithNoTests',
-        );
-        if (!hasPassWithNoTests) {
-          return factory.createObjectLiteralExpression([
-            ...node.properties,
-            factory.createPropertyAssignment(
-              'passWithNoTests',
-              factory.createTrue(),
-            ),
-          ]);
-        }
-        return node;
-      },
+      readGritPattern('vitest-pass-with-no-tests'),
     );
 
     const nxJson = readNxJson(tree);
