@@ -113,8 +113,11 @@ export const addIgnoresToEslintConfig = async (
           $items <: not some \`{ ignores: $_ }\`,
           $items += \`{ ignores: ['${escaped}'] }\`
         },
-        \`ignores: []\` => \`ignores: ['${escaped}']\`,
+        \`export default [$items]\` where {
+          $items <: contains \`ignores: []\` => \`ignores: ['${escaped}']\`
+        },
         \`ignores: [$items]\` => \`ignores: [$items, '${escaped}']\` where {
+          $items <: within \`export default [$_]\`,
           $items <: not some \`'${escaped}'\`
         }
       }`,
