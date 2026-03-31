@@ -2,11 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import {
-  addDestructuredImport,
-  applyGritQLTransform,
-  hasGritQLMatch,
-} from '../ast';
+import { addDestructuredImport, applyGritQL, matchGritQL } from '../ast';
 import { Tree } from '@nx/devkit';
 
 export interface AddHookResultToRouterProviderContextProps {
@@ -22,10 +18,10 @@ export const addHookResultToRouterProviderContext = async (
 ) => {
   // All 4 patterns must exist for this transform to apply
   const checks = await Promise.all([
-    hasGritQLMatch(tree, mainTsxPath, '`RouterProviderContext`'),
-    hasGritQLMatch(tree, mainTsxPath, '`createRouter($_)`'),
-    hasGritQLMatch(tree, mainTsxPath, '`const App = $_`'),
-    hasGritQLMatch(tree, mainTsxPath, '`<RouterProvider $_ />`'),
+    matchGritQL(tree, mainTsxPath, '`RouterProviderContext`'),
+    matchGritQL(tree, mainTsxPath, '`createRouter($_)`'),
+    matchGritQL(tree, mainTsxPath, '`const App = $_`'),
+    matchGritQL(tree, mainTsxPath, '`<RouterProvider $_ />`'),
   ]);
 
   if (checks.some((c) => !c)) {
@@ -37,7 +33,7 @@ export const addHookResultToRouterProviderContext = async (
   // 1. Add property to RouterProviderContext type
   //    'some' checks direct members only (not nested), so a nested 'auth' won't block adding a top-level one.
   //    Type members use ; as terminators, so += with leading \n handles separation.
-  await applyGritQLTransform(
+  await applyGritQL(
     tree,
     mainTsxPath,
     `or {
@@ -55,7 +51,7 @@ ${contextProp}?: ReturnType<typeof ${hook}>\`
   // 2. Add context property to createRouter config
   //    'some' checks direct properties of the createRouter argument object only.
   //    Use += for multi-prop objects, => rewrite for single-prop.
-  await applyGritQLTransform(
+  await applyGritQL(
     tree,
     mainTsxPath,
     `\`createRouter({ $props })\` where {
@@ -66,7 +62,7 @@ ${contextProp}?: ReturnType<typeof ${hook}>\`
 
   // If context already exists, add the new prop to it.
   // Handle empty context: {} via nested contains => rewrite, scoped to createRouter.
-  await applyGritQLTransform(
+  await applyGritQL(
     tree,
     mainTsxPath,
     `\`createRouter({ $props })\` where {
@@ -75,7 +71,7 @@ ${contextProp}?: ReturnType<typeof ${hook}>\`
   );
   // Handle non-empty context via rewrite (the context object may be single-prop
   // from the first hook call, where += concatenates without comma)
-  await applyGritQLTransform(
+  await applyGritQL(
     tree,
     mainTsxPath,
     `\`context: { $cprops }\` => \`context: { $cprops, ${contextProp}: undefined }\` where {
@@ -87,7 +83,7 @@ ${contextProp}?: ReturnType<typeof ${hook}>\`
   // 3. Add hook call to App component body
   //    Block body: 'some' checks direct statements.
   //    Expression body: 'contains' to also prevent matching block bodies.
-  await applyGritQLTransform(
+  await applyGritQL(
     tree,
     mainTsxPath,
     `or {
@@ -104,7 +100,7 @@ ${contextProp}?: ReturnType<typeof ${hook}>\`
 
   // 4. Add context prop to RouterProvider JSX element
   //    'some' checks direct JSX attributes only.
-  await applyGritQLTransform(
+  await applyGritQL(
     tree,
     mainTsxPath,
     `or {

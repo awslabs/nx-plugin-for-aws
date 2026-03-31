@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { Tree, joinPathFragments } from '@nx/devkit';
-import { applyGritQLTransform } from './ast';
+import { applyGritQL } from './ast';
 import { formatFilesInSubtree } from './format';
 import { NxGeneratorInfo, getPackageVersion } from './nx';
 import {
@@ -48,7 +48,7 @@ export const addGeneratorMetricsIfApplicable = async (
   // Handle CDK metrics
   if (tree.exists(METRICS_ASPECT_FILE_PATH)) {
     // Update the id
-    await applyGritQLTransform(
+    await applyGritQL(
       tree,
       METRICS_ASPECT_FILE_PATH,
       `\`const id = $old\` => \`const id = '${METRIC_ID}'\`` +
@@ -56,7 +56,7 @@ export const addGeneratorMetricsIfApplicable = async (
     );
 
     // Update the version
-    await applyGritQLTransform(
+    await applyGritQL(
       tree,
       METRICS_ASPECT_FILE_PATH,
       `\`const version = $old\` => \`const version = '${getPackageVersion()}'\`` +
@@ -65,7 +65,7 @@ export const addGeneratorMetricsIfApplicable = async (
 
     // Add each generator as a tag
     for (const info of generatorInfo) {
-      await applyGritQLTransform(
+      await applyGritQL(
         tree,
         METRICS_ASPECT_FILE_PATH,
         `\`const tags: string[] = $old\`` +
@@ -93,14 +93,14 @@ const updateTerraformMetrics = async (
   generatorInfo: NxGeneratorInfo[],
 ) => {
   // Update metric_id
-  await applyGritQLTransform(
+  await applyGritQL(
     tree,
     TERRAFORM_METRICS_FILE_PATH,
     `\`metric_id = $old\` => \`metric_id = "${METRIC_ID}"\``,
   );
 
   // Update metric_version
-  await applyGritQLTransform(
+  await applyGritQL(
     tree,
     TERRAFORM_METRICS_FILE_PATH,
     `\`metric_version = $old\` => \`metric_version = "${getPackageVersion()}"\``,
@@ -108,7 +108,7 @@ const updateTerraformMetrics = async (
 
   // Update metric_tags
   for (const info of generatorInfo) {
-    await applyGritQLTransform(
+    await applyGritQL(
       tree,
       TERRAFORM_METRICS_FILE_PATH,
       `or { \`metric_tags = []\` => \`metric_tags = ["${info.metric}"]\`,` +

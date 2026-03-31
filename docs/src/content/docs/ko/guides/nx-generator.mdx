@@ -3,8 +3,6 @@ title: "Nx 생성기 생성기"
 description: "Nx 생성기를 생성합니다"
 ---
 
-
-
 import { FileTree } from '@astrojs/starlight/components';
 import RunGenerator from '@components/run-generator.astro';
 import NxCommands from '@components/nx-commands.astro';
@@ -299,25 +297,62 @@ generateFiles(
 );
 ```
 
-#### TypeScript AST 조작
+#### GritQL을 사용한 코드 변환
 
-AWS용 Nx 플러그인이 제공하는 `tsAstReplace` 메서드를 사용하여 TypeScript 추상 구문 트리의 일부를 교체할 수 있습니다.
+[GritQL](https://docs.grit.io/)을 사용하여 제너레이터에서 소스 코드를 선언적으로 검색하고 변환할 수 있습니다. GritQL은 TypeScript, JavaScript, Python, HCL (Terraform) 등 여러 언어를 지원하므로 전체 스택에서 동일한 패턴 구문을 사용할 수 있습니다.
+
+AWS용 Nx 플러그인은 두 가지 헬퍼를 제공합니다:
+
+- `applyGritQL(tree, filePath, pattern)` — 파일에 GritQL 재작성 패턴을 적용하고 변경 여부를 나타내는 `Promise<boolean>`을 반환합니다
+- `matchGritQL(tree, filePath, pattern)` — 파일 내 어디에서든 GritQL 패턴이 일치하는지 확인하고 `Promise<boolean>`을 반환합니다
 
 ```typescript
-import { tsAstReplace } from '@aws/nx-plugin/sdk/utils/ast';
-import * as ts from 'typescript';
+import { applyGritQL, matchGritQL } from '@aws/nx-plugin/sdk/utils/ast';
 
-// 예시: 파일 내 버전 번호 증가
-tsAstReplace(
+// 함수 호출 교체
+await applyGritQL(
   tree,
-  'path/to/version.ts',
-  'VariableDeclaration:has(Identifier[name="VERSION"]) NumericLiteral',
-  (node: ts.NumericLiteral) =>
-    ts.factory.createNumericLiteral(Number(node.text) + 1));
+  'src/app.ts',
+  '`console.log($msg)` => `logger.info($msg)`',
+);
+
+// 배열에 요소가 없는 경우에만 추가
+await applyGritQL(
+  tree,
+  'src/plugins.ts',
+  '`plugins: [$items]` => `plugins: [$items, myPlugin()]` where { $items <: not contains `myPlugin` }',
+);
+
+// 변경 전 패턴 존재 여부 확인
+if (!(await matchGritQL(tree, filePath, '`import { Auth } from "./auth"`'))) {
+  // import 추가
+}
 ```
 
+GritQL 패턴은 TypeScript가 아닌 파일에서도 작동합니다. 다른 언어를 대상으로 하려면 패턴 앞에 `language <name>`을 붙이세요:
+
+```typescript
+// Python: print 문을 logging 호출로 교체
+await applyGritQL(
+  tree,
+  'src/handler.py',
+  'language python\n`print($msg)` => `logger.info($msg)`',
+);
+```
+
+GritQL 패턴은 백틱으로 구분된 코드 스니펫과 와일드카드로 사용되는 `$메타변수`를 사용합니다. 재작성에는 `=>`를, 조건에는 `where` 절을 사용하세요.
+
 :::tip
-[TSQuery Playground](https://tsquery-playground.firebaseapp.com/)에서 셀렉터를 테스트해 볼 수 있습니다.
+[GritQL Playground](https://docs.grit.io/playground)에서 GritQL 패턴을 테스트하거나, GritQL CLI를 로컬에 설치하여 파일에 대해 패턴을 테스트할 수 있습니다:
+
+```bash
+npm install -g @getgrit/cli
+grit apply '`console.log($msg)` => `logger.info($msg)`' --dry-run
+```
+:::
+
+:::tip
+AI 코딩 에이전트를 사용하여 제너레이터 작성을 돕는다면, [Context7 MCP server](https://context7.com/)를 추가하여 최신 문서를 제공하세요. `gritql`과 `docs.grit.io`를 조회하여 GritQL 패턴 구문 참조를 얻고, GritQL CLI에 대한 액세스를 제공하여 패턴을 직접 테스트할 수 있도록 프롬프트하세요.
 :::
 
 #### 의존성 추가

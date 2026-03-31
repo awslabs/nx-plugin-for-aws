@@ -7,7 +7,7 @@ import {
   Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { applyGritQLTransform } from '../utils/ast';
+import { applyGritQL } from '../utils/ast';
 import { readProjectConfigurationUnqualified } from '../utils/nx';
 import { toClassName } from '../utils/names';
 
@@ -67,7 +67,7 @@ export const addTargetToServeLocal = async (
   );
   if (tree.exists(runtimeConfigProvider)) {
     const className = toClassName(options.apiName);
-    await applyGritQLTransform(
+    await applyGritQL(
       tree,
       runtimeConfigProvider,
       `\`if ($cond) { $stmts }\` => raw\`if ($cond) {\n    $stmts\n    runtimeConfig.apis.${className} = '${options.url}';\n  }\` where { $cond <: contains \`'serve-local'\`, $stmts <: within \`const applyOverrides = $_\` }`,

@@ -297,25 +297,62 @@ generateFiles(
 );
 ```
 
-#### Thao tác AST TypeScript (Abstract Syntax Tree)
+#### Biến đổi Code với GritQL
 
-Bạn có thể sử dụng phương thức `tsAstReplace` được cung cấp bởi Nx Plugin for AWS để thay thế các phần của một abstract syntax tree TypeScript.
+Bạn có thể sử dụng [GritQL](https://docs.grit.io/) để tìm kiếm và biến đổi mã nguồn một cách khai báo trong các generator của bạn. GritQL hỗ trợ nhiều ngôn ngữ bao gồm TypeScript, JavaScript, Python, HCL (Terraform), và nhiều hơn nữa — vì vậy bạn có thể sử dụng cùng một cú pháp pattern trên toàn bộ stack của mình.
+
+Nx Plugin for AWS cung cấp hai helper:
+
+- `applyGritQL(tree, filePath, pattern)` — áp dụng một pattern viết lại GritQL vào một tệp và trả về `Promise<boolean>` cho biết liệu có thay đổi nào được thực hiện hay không
+- `matchGritQL(tree, filePath, pattern)` — kiểm tra xem một pattern GritQL có khớp ở bất kỳ đâu trong tệp hay không và trả về `Promise<boolean>`
 
 ```typescript
-import { tsAstReplace } from '@aws/nx-plugin/sdk/utils/ast';
-import * as ts from 'typescript';
+import { applyGritQL, matchGritQL } from '@aws/nx-plugin/sdk/utils/ast';
 
-// Ví dụ: Tăng số phiên bản trong một tệp
-tsAstReplace(
+// Thay thế một lời gọi hàm
+await applyGritQL(
   tree,
-  'path/to/version.ts',
-  'VariableDeclaration:has(Identifier[name="VERSION"]) NumericLiteral',
-  (node: ts.NumericLiteral) =>
-    ts.factory.createNumericLiteral(Number(node.text) + 1));
+  'src/app.ts',
+  '`console.log($msg)` => `logger.info($msg)`',
+);
+
+// Thêm một phần tử vào mảng chỉ khi chưa có
+await applyGritQL(
+  tree,
+  'src/plugins.ts',
+  '`plugins: [$items]` => `plugins: [$items, myPlugin()]` where { $items <: not contains `myPlugin` }',
+);
+
+// Kiểm tra xem một pattern có tồn tại trước khi thực hiện thay đổi
+if (!(await matchGritQL(tree, filePath, '`import { Auth } from "./auth"`'))) {
+  // Thêm import
+}
 ```
 
+Các pattern GritQL cũng hoạt động trên các tệp không phải TypeScript. Thêm tiền tố `language <name>` vào pattern của bạn để nhắm đến các ngôn ngữ khác:
+
+```typescript
+// Python: thay thế các câu lệnh print bằng các lời gọi logging
+await applyGritQL(
+  tree,
+  'src/handler.py',
+  'language python\n`print($msg)` => `logger.info($msg)`',
+);
+```
+
+Các pattern GritQL sử dụng các đoạn mã được phân tách bằng backtick với `$metavariables` làm ký tự đại diện. Sử dụng `=>` cho việc viết lại và các mệnh đề `where` cho các điều kiện.
+
 :::tip
-Bạn có thể thử nghiệm các selector trực tuyến trong [TSQuery Playground](https://tsquery-playground.firebaseapp.com/).
+Bạn có thể thử nghiệm các pattern GritQL trong [GritQL Playground](https://docs.grit.io/playground), hoặc cài đặt GritQL CLI cục bộ để kiểm tra các pattern với các tệp của bạn:
+
+```bash
+npm install -g @getgrit/cli
+grit apply '`console.log($msg)` => `logger.info($msg)`' --dry-run
+```
+:::
+
+:::tip
+Nếu bạn sử dụng một AI coding agent để giúp viết generators, hãy thêm [Context7 MCP server](https://context7.com/) để cung cấp cho nó tài liệu cập nhật. Nhắc nó tra cứu `gritql` và `docs.grit.io` để tham khảo cú pháp pattern GritQL, và cung cấp quyền truy cập vào GritQL CLI để nó có thể kiểm tra các pattern trực tiếp.
 :::
 
 #### Thêm Dependencies

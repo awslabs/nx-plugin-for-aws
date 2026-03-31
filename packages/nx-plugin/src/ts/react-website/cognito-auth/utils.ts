@@ -3,10 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { Tree } from '@nx/devkit';
-import {
-  addDestructuredImport,
-  applyGritQLTransform,
-} from '../../../utils/ast';
+import { addDestructuredImport, applyGritQL } from '../../../utils/ast';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
@@ -15,11 +12,7 @@ const readGritPattern = (name: string): string =>
 
 // Adds a user greeting and sign-out button to the default AppLayout header when using the None UX provider.
 export async function addNoneAuthMenu(tree: Tree, appLayoutTsxPath: string) {
-  await applyGritQLTransform(
-    tree,
-    appLayoutTsxPath,
-    readGritPattern('none-auth-menu'),
-  );
+  await applyGritQL(tree, appLayoutTsxPath, readGritPattern('none-auth-menu'));
 }
 
 // Adds a top navigation dropdown with sign-out when using the Cloudscape UX provider.
@@ -27,7 +20,7 @@ export async function addCloudscapeAuthMenu(
   tree: Tree,
   appLayoutTsxPath: string,
 ) {
-  await applyGritQLTransform(
+  await applyGritQL(
     tree,
     appLayoutTsxPath,
     readGritPattern('cloudscape-auth-menu'),
@@ -40,7 +33,7 @@ export async function addShadcnAuthMenu(tree: Tree, appLayoutTsxPath: string) {
   }
 
   // Prepend state declarations to the AppLayout component body
-  await applyGritQLTransform(
+  await applyGritQL(
     tree,
     appLayoutTsxPath,
     readGritPattern('shadcn-state-declarations'),
@@ -55,7 +48,7 @@ export async function addShadcnAuthMenu(tree: Tree, appLayoutTsxPath: string) {
   );
 
   // Append the auth menu to the header element
-  await applyGritQLTransform(
+  await applyGritQL(
     tree,
     appLayoutTsxPath,
     readGritPattern('shadcn-auth-menu'),

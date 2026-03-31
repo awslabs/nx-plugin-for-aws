@@ -31,7 +31,7 @@ import {
   getPythonAgentConnectionPackageName,
   addPythonReExport,
 } from '../../../utils/agent-connection/agent-connection';
-import { applyGritQLTransform, hasGritQLMatch } from '../../../utils/ast';
+import { applyGritQL, matchGritQL } from '../../../utils/ast';
 
 /** Prefix a GritQL pattern with `language python` */
 const py = (pattern: string) => `language python\n${pattern}`;
@@ -189,12 +189,12 @@ const addImportToAgentFile = async (
   agentConnectionModuleName: string,
   clientClassName: string,
 ): Promise<void> => {
-  if (await hasGritQLMatch(tree, filePath, `\`${clientClassName}\``)) {
+  if (await matchGritQL(tree, filePath, `\`${clientClassName}\``)) {
     return;
   }
 
   // Try to append to existing import from the same module using +=
-  const appended = await applyGritQLTransform(
+  const appended = await applyGritQL(
     tree,
     filePath,
     py(
@@ -205,7 +205,7 @@ const addImportToAgentFile = async (
   if (!appended) {
     // No existing import — add a new one after the first import.
     // Ruff will sort it into the correct position.
-    await applyGritQLTransform(
+    await applyGritQL(
       tree,
       filePath,
       py(
@@ -226,16 +226,12 @@ const addMcpToolsToAgent = async (
   clientVarName: string,
 ): Promise<void> => {
   if (
-    await hasGritQLMatch(
-      tree,
-      filePath,
-      `\`${clientVarName}.list_tools_sync()\``,
-    )
+    await matchGritQL(tree, filePath, `\`${clientVarName}.list_tools_sync()\``)
   ) {
     return;
   }
 
-  await applyGritQLTransform(
+  await applyGritQL(
     tree,
     filePath,
     py(`\`tools=$old\` where {
@@ -262,15 +258,13 @@ const addMcpClientToGetAgent = async (
   clientClassName: string,
   clientVarName: string,
 ): Promise<void> => {
-  if (
-    await hasGritQLMatch(tree, filePath, `\`${clientClassName}.create($_)\``)
-  ) {
+  if (await matchGritQL(tree, filePath, `\`${clientClassName}.create($_)\``)) {
     return;
   }
 
   // Try the "add to existing with block" pattern first.
   // If it succeeds, there was already a with block from a previous connection.
-  const addedToWith = await applyGritQLTransform(
+  const addedToWith = await applyGritQL(
     tree,
     filePath,
     py(`\`with ($items,): $body\` where {
@@ -281,7 +275,7 @@ const addMcpClientToGetAgent = async (
 
   if (addedToWith) {
     // Subsequent connection — also add creation line after the existing one
-    await applyGritQLTransform(
+    await applyGritQL(
       tree,
       filePath,
       py(`\`$var = $cls.create(session_id=session_id)\` as $stmt where {
@@ -295,7 +289,7 @@ const addMcpClientToGetAgent = async (
   // First connection — rewrite the function body to include client creation
   // and wrap $body in a with block. GritQL handles indentation correctly
   // when the replacement is structured as a proper Python function body.
-  await applyGritQLTransform(
+  await applyGritQL(
     tree,
     filePath,
     py(`\`def get_agent($params):

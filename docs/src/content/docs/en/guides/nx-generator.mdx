@@ -297,25 +297,62 @@ generateFiles(
 );
 ```
 
-#### TypeScript AST (Abstract Syntax Tree) Manipulation
+#### Code Transforms with GritQL
 
-You can use the `tsAstReplace` method exposed by the Nx Plugin for AWS to replace parts of a TypeScript abstract syntax tree.
+You can use [GritQL](https://docs.grit.io/) to declaratively search and transform source code in your generators. GritQL supports multiple languages including TypeScript, JavaScript, Python, HCL (Terraform), and more — so you can use the same pattern syntax across your entire stack.
+
+The Nx Plugin for AWS exposes two helpers:
+
+- `applyGritQL(tree, filePath, pattern)` — applies a GritQL rewrite pattern to a file and returns `Promise<boolean>` indicating whether changes were made
+- `matchGritQL(tree, filePath, pattern)` — checks whether a GritQL pattern matches anywhere in a file and returns `Promise<boolean>`
 
 ```typescript
-import { tsAstReplace } from '@aws/nx-plugin/sdk/utils/ast';
-import * as ts from 'typescript';
+import { applyGritQL, matchGritQL } from '@aws/nx-plugin/sdk/utils/ast';
 
-// Example: Increment version number in a file
-tsAstReplace(
+// Replace a function call
+await applyGritQL(
   tree,
-  'path/to/version.ts',
-  'VariableDeclaration:has(Identifier[name="VERSION"]) NumericLiteral',
-  (node: ts.NumericLiteral) =>
-    ts.factory.createNumericLiteral(Number(node.text) + 1));
+  'src/app.ts',
+  '`console.log($msg)` => `logger.info($msg)`',
+);
+
+// Add an element to an array only if not already present
+await applyGritQL(
+  tree,
+  'src/plugins.ts',
+  '`plugins: [$items]` => `plugins: [$items, myPlugin()]` where { $items <: not contains `myPlugin` }',
+);
+
+// Check if a pattern exists before making changes
+if (!(await matchGritQL(tree, filePath, '`import { Auth } from "./auth"`'))) {
+  // Add the import
+}
 ```
 
+GritQL patterns also work on non-TypeScript files. Prefix your pattern with `language <name>` to target other languages:
+
+```typescript
+// Python: replace print statements with logging calls
+await applyGritQL(
+  tree,
+  'src/handler.py',
+  'language python\n`print($msg)` => `logger.info($msg)`',
+);
+```
+
+GritQL patterns use backtick-delimited code snippets with `$metavariables` as wildcards. Use `=>` for rewrites and `where` clauses for conditions.
+
 :::tip
-You can test out selectors online in the [TSQuery Playground](https://tsquery-playground.firebaseapp.com/).
+You can try out GritQL patterns in the [GritQL Playground](https://docs.grit.io/playground), or install the GritQL CLI locally to test patterns against your files:
+
+```bash
+npm install -g @getgrit/cli
+grit apply '`console.log($msg)` => `logger.info($msg)`' --dry-run
+```
+:::
+
+:::tip
+If you use an AI coding agent to help write generators, add the [Context7 MCP server](https://context7.com/) to give it up-to-date documentation. Prompt it to look up `gritql` and `docs.grit.io` for GritQL pattern syntax reference, and provide access to the GritQL CLI so it can test patterns directly.
 :::
 
 #### Adding Dependencies

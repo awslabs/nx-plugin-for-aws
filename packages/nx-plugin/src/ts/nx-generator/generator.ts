@@ -15,7 +15,7 @@ import { TsNxGeneratorGeneratorSchema } from './schema';
 import { kebabCase, pascalCase, snakeCase } from '../../utils/names';
 import camelCase from 'lodash.camelcase';
 import { getRelativePathToRootByDirectory } from '../../utils/paths';
-import { addStarExport, applyGritQLTransform } from '../../utils/ast';
+import { addStarExport, applyGritQL } from '../../utils/ast';
 import {
   addComponentGeneratorMetadata,
   getGeneratorInfo,
@@ -103,7 +103,7 @@ export const tsNxGeneratorGenerator = async (
     );
 
     // Update the docs config to add the page entry to the Generator guides sidebar section
-    await applyGritQLTransform(
+    await applyGritQL(
       tree,
       joinPathFragments('docs', 'astro.config.mjs'),
       `\`items: [$items]\` where { $items <: within \`sidebar: [$_]\`, $items <: contains \`'ts#project'\`, $items += \`, { label: '${name}', link: '/guides/${enhancedOptions.nameKebabCase}' }\` }`,

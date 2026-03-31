@@ -15,11 +15,7 @@ import { kebabCase, toClassName } from '../../names';
 import { sortObjectKeys } from '../../object';
 import { updateGitIgnore } from '../../git';
 import runtimeConfigGenerator from '../../../ts/react-website/runtime-config/generator';
-import {
-  addSingleImport,
-  applyGritQLTransform,
-  hasGritQLMatch,
-} from '../../ast';
+import { addSingleImport, applyGritQL, matchGritQL } from '../../ast';
 import { addTargetToServeLocal } from '../../../connection/serve-local';
 import { withVersions } from '../../versions';
 
@@ -200,7 +196,7 @@ export const addOpenApiReactClient = async (
 
   // Add the query client provider if it doesn't exist already
   if (
-    !(await hasGritQLMatch(
+    !(await matchGritQL(
       tree,
       mainTsxPath,
       '`<QueryClientProvider>$_</QueryClientProvider>`',
@@ -212,7 +208,7 @@ export const addOpenApiReactClient = async (
       'QueryClientProvider',
       './components/QueryClientProvider',
     );
-    await applyGritQLTransform(
+    await applyGritQL(
       tree,
       mainTsxPath,
       '`<App />` => `<QueryClientProvider><App /></QueryClientProvider>`',
@@ -222,7 +218,7 @@ export const addOpenApiReactClient = async (
   // Add the api provider if it does not exist
   const providerName = `${apiNameClassName}Provider`;
   if (
-    !(await hasGritQLMatch(
+    !(await matchGritQL(
       tree,
       mainTsxPath,
       `\`<${providerName}>$_</${providerName}>\``,
@@ -234,7 +230,7 @@ export const addOpenApiReactClient = async (
       providerName,
       `./components/${providerName}`,
     );
-    await applyGritQLTransform(
+    await applyGritQL(
       tree,
       mainTsxPath,
       `\`<App />\` => \`<${providerName}><App /></${providerName}>\``,

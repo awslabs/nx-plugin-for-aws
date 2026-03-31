@@ -14,7 +14,7 @@ import tsProjectGenerator from '../ts/lib/generator';
 import { configureTsProject } from '../ts/lib/ts-project-utils';
 import { formatFilesInSubtree } from './format';
 import { getNpmScopePrefix, toScopeAlias } from './npm-scope';
-import { applyGritQLTransform, hasGritQLMatch } from './ast';
+import { applyGritQL, matchGritQL } from './ast';
 import {
   PACKAGES_DIR,
   SHARED_SHADCN_DIR,
@@ -68,7 +68,7 @@ const addSharedShadcnEslintRules = async (
 
   // shadcn generates aliased imports from components.json, which conflict with our
   // relative-import lint rule. This rule is therefore disabled for common-shadcn.
-  const hasRule = await hasGritQLMatch(
+  const hasRule = await matchGritQL(
     tree,
     eslintConfigPath,
     '`@nx/enforce-module-boundaries`',
@@ -78,7 +78,7 @@ const addSharedShadcnEslintRules = async (
   }
 
   // Append rule config to the exports array (no leading comma — GritQL handles it)
-  await applyGritQLTransform(
+  await applyGritQL(
     tree,
     eslintConfigPath,
     "`export default [$items]` where { $items += `{ files: ['**/*.{ts,tsx,js,jsx}'], rules: { '@nx/enforce-module-boundaries': 'off' } }` }",

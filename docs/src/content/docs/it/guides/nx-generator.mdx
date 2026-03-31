@@ -3,8 +3,6 @@ title: "Generatore di Generatori Nx"
 description: "Genera un Generatore Nx"
 ---
 
-
-
 import { FileTree } from '@astrojs/starlight/components';
 import RunGenerator from '@components/run-generator.astro';
 import NxCommands from '@components/nx-commands.astro';
@@ -298,25 +296,62 @@ generateFiles(
 );
 ```
 
-#### Manipolazione AST (Abstract Syntax Tree) TypeScript
+#### Trasformazioni di Codice con GritQL
 
-Puoi usare il metodo `tsAstReplace` esposto dal Nx Plugin for AWS per sostituire parti di un abstract syntax tree TypeScript.
+Puoi utilizzare [GritQL](https://docs.grit.io/) per cercare e trasformare in modo dichiarativo il codice sorgente nei tuoi generatori. GritQL supporta più linguaggi tra cui TypeScript, JavaScript, Python, HCL (Terraform) e altri — così puoi utilizzare la stessa sintassi di pattern su tutto il tuo stack.
+
+Il Nx Plugin for AWS espone due helper:
+
+- `applyGritQL(tree, filePath, pattern)` — applica un pattern di riscrittura GritQL a un file e restituisce `Promise<boolean>` che indica se sono state apportate modifiche
+- `matchGritQL(tree, filePath, pattern)` — verifica se un pattern GritQL corrisponde in qualsiasi punto del file e restituisce `Promise<boolean>`
 
 ```typescript
-import { tsAstReplace } from '@aws/nx-plugin/sdk/utils/ast';
-import * as ts from 'typescript';
+import { applyGritQL, matchGritQL } from '@aws/nx-plugin/sdk/utils/ast';
 
-// Esempio: Incrementa numero versione in un file
-tsAstReplace(
+// Sostituisci una chiamata di funzione
+await applyGritQL(
   tree,
-  'path/to/version.ts',
-  'VariableDeclaration:has(Identifier[name="VERSION"]) NumericLiteral',
-  (node: ts.NumericLiteral) =>
-    ts.factory.createNumericLiteral(Number(node.text) + 1));
+  'src/app.ts',
+  '`console.log($msg)` => `logger.info($msg)`',
+);
+
+// Aggiungi un elemento a un array solo se non già presente
+await applyGritQL(
+  tree,
+  'src/plugins.ts',
+  '`plugins: [$items]` => `plugins: [$items, myPlugin()]` where { $items <: not contains `myPlugin` }',
+);
+
+// Verifica se un pattern esiste prima di apportare modifiche
+if (!(await matchGritQL(tree, filePath, '`import { Auth } from "./auth"`'))) {
+  // Aggiungi l'import
+}
 ```
 
+I pattern GritQL funzionano anche su file non-TypeScript. Prefissa il tuo pattern con `language <name>` per indirizzare altri linguaggi:
+
+```typescript
+// Python: sostituisci statement print con chiamate logging
+await applyGritQL(
+  tree,
+  'src/handler.py',
+  'language python\n`print($msg)` => `logger.info($msg)`',
+);
+```
+
+I pattern GritQL utilizzano snippet di codice delimitati da backtick con `$metavariables` come wildcards. Usa `=>` per le riscritture e clausole `where` per le condizioni.
+
 :::tip
-Puoi testare i selettori online nel [TSQuery Playground](https://tsquery-playground.firebaseapp.com/).
+Puoi provare i pattern GritQL nel [GritQL Playground](https://docs.grit.io/playground), oppure installare la CLI GritQL localmente per testare i pattern sui tuoi file:
+
+```bash
+npm install -g @getgrit/cli
+grit apply '`console.log($msg)` => `logger.info($msg)`' --dry-run
+```
+:::
+
+:::tip
+Se utilizzi un agente di codifica AI per aiutarti a scrivere generatori, aggiungi il [server MCP Context7](https://context7.com/) per fornirgli documentazione aggiornata. Chiedigli di cercare `gritql` e `docs.grit.io` per il riferimento alla sintassi dei pattern GritQL, e fornisci accesso alla CLI GritQL in modo che possa testare i pattern direttamente.
 :::
 
 #### Aggiunta Dipendenze
