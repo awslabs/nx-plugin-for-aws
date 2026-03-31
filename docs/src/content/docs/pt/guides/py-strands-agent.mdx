@@ -53,7 +53,6 @@ O gerador adicionará os seguintes arquivos ao seu projeto Python existente:
         - init.py Configuração da aplicação FastAPI com middleware CORS e tratamento de erros
         - agent.py Definição principal do agente com ferramentas de exemplo
         - main.py Ponto de entrada para Bedrock AgentCore Runtime
-        - agentcore_mcp_client.py Fábrica de clientes útil para invocar servidores MCP também hospedados no Bedrock AgentCore Runtime
         - Dockerfile Ponto de entrada para hospedar seu agente (excluído quando `computeType` é `None`)
     - pyproject.toml Atualizado com dependências do Strands
     - project.json Atualizado com alvos de serviço do agente
@@ -163,100 +162,13 @@ agent = Agent(model=bedrock_model)
 
 Você pode [adicionar ferramentas de servidores MCP](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/tools/mcp-tools/) ao seu agente Strands.
 
-Para consumir servidores MCP criados usando os geradores <Link path="/guides/py-mcp-server">`py#mcp-server`</Link> ou <Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link> (ou outros hospedados no Bedrock AgentCore Runtime), uma fábrica de clientes é gerada para você em `agentcore_mcp_client.py`.
+Para consumir servidores MCP criados usando os geradores <Link path="/guides/py-mcp-server">`py#mcp-server`</Link> ou <Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link>, você pode usar o <Link path="/guides/connection/py-strands-agent-mcp">gerador `connection`</Link>.
 
-Você pode atualizar seu método `get_agent` em `agent.py` para criar clientes MCP e adicionar ferramentas. O exemplo abaixo mostra como fazer isso com autenticação IAM (SigV4):
+<RunGenerator generator="connection" />
 
-```python
-# agent.py
-import os
-from contextlib import contextmanager
+Consulte o <Link path="/guides/connection/py-strands-agent-mcp">guia do gerador `connection`</Link> para detalhes sobre como a conexão é configurada.
 
-import boto3
-from strands import Agent
-
-from .agentcore_mcp_client import AgentCoreMCPClient
-
-# Obtain the region an credentials
-region = os.environ["AWS_REGION"]
-boto_session = boto3.Session(region_name=region)
-credentials = boto_session.get_credentials()
-
-@contextmanager
-def get_agent(session_id: str):
-    mcp_client = AgentCoreMCPClient.with_iam_auth(
-        agent_runtime_arn=os.environ["MCP_AGENTCORE_RUNTIME_ARN"],
-        credentials=credentials,
-        region=region,
-        session_id=session_id,
-    )
-
-    with mcp_client:
-        mcp_tools = mcp_client.list_tools_sync()
-
-        yield Agent(
-            system_prompt="..."
-            tools=[*mcp_tools],
-        )
-```
-
-:::tip
-Se seu servidor MCP alvo usa autenticação JWT, você pode usar o método `AgentCoreMCPClient.with_jwt_auth` para criar o cliente.
-:::
-
-Com o exemplo de autenticação IAM acima, precisamos configurar duas coisas em nossa infraestrutura. Primeiro, adicionar a variável de ambiente que nosso agente consome para a ARN do AgentCore Runtime do servidor MCP, e segundo, conceder permissões ao nosso agente para invocar o servidor MCP. Isso pode ser feito da seguinte forma:
-
-<Infrastructure>
-<Fragment slot="cdk">
-```ts {9, 13}
-import { MyProjectAgent, MyProjectMcpServer } from ':my-scope/common-constructs';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    const mcpServer = new MyProjectMcpServer(this, 'MyProjectMcpServer');
-
-    const agent = new MyProjectAgent(this, 'MyProjectAgent', {
-      environmentVariables: {
-        MCP_AGENTCORE_RUNTIME_ARN: mcpServer.agentCoreRuntime.agentRuntimeArn,
-      },
-    });
-
-    mcpServer.agentCoreRuntime.grantInvoke(agent.agentCoreRuntime);
-  }
-}
-```
-</Fragment>
-<Fragment slot="terraform">
-```terraform
-# MCP Server
-module "my_project_mcp_server" {
-  source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
-}
-
-# Agent
-module "my_project_agent" {
-  source = "../../common/terraform/src/app/agents/my-project-agent"
-
-  env = {
-    MCP_AGENTCORE_RUNTIME_ARN = module.my_project_mcp_server.agent_core_runtime_arn
-  }
-
-  additional_iam_policy_statements = [
-    {
-      Effect = "Allow"
-      Action = [
-        "bedrock-agentcore:InvokeAgentRuntime"
-      ]
-      Resource = [
-        module.my_project_mcp_server.agent_core_runtime_arn,
-        "${module.my_project_mcp_server.agent_core_runtime_arn}/*"
-      ]
-    }
-  ]
-}
-```
-</Fragment>
-</Infrastructure>
+Para outros servidores MCP, consulte a [Documentação do Strands](https://strandsagents.com/docs/user-guide/concepts/tools/mcp-tools/).
 
 ### Mais
 

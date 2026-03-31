@@ -1,38 +1,15 @@
-import os
 from contextlib import contextmanager
 
-import boto3
-from aws_lambda_powertools.utilities import parameters
+from dungeon_adventure_agent_connection import InventoryMcpServerClient
 from strands import Agent
-
-from .agentcore_mcp_client import AgentCoreMCPClient
-
-# Obtain the region and credentials
-region = os.environ["AWS_REGION"]
-boto_session = boto3.Session(region_name=region)
-credentials = boto_session.get_credentials()
-
-
-def _get_inventory_mcp_arn() -> str:
-    """Resolve the Inventory MCP server ARN from runtime config (AppConfig)."""
-    config = parameters.get_app_config(
-        name="connection",
-        environment="default",
-        application=os.environ["RUNTIME_CONFIG_APP_ID"],
-        transform="json",
-    )
-    return config["agentRuntimes"]["InventoryMcpServer"]
 
 
 @contextmanager
 def get_agent(player_name: str, genre: str, session_id: str):
-    mcp_client = AgentCoreMCPClient.with_iam_auth(
-        agent_runtime_arn=_get_inventory_mcp_arn(),
-        credentials=credentials,
-        region=region,
-        session_id=session_id,
-    )
-    with mcp_client:
+    inventory_mcp_server = InventoryMcpServerClient.create(session_id=session_id)
+    with (
+        inventory_mcp_server,
+    ):
         yield Agent(
             system_prompt=f"""
 You are running a text adventure game in the genre <genre>{genre}</genre> for player <player>{player_name}</player>.
@@ -44,5 +21,5 @@ Ensure you specify a suitable emoji when adding items if available.
 When starting a game, populate the inventory with a few initial items. Items should be a key part of the narrative.
 Keep responses under 100 words.
 """,
-            tools=[*mcp_client.list_tools_sync()],
+            tools=[*inventory_mcp_server.list_tools_sync()],
         )

@@ -1,0 +1,151 @@
+---
+title: "Python Strands Agent para MCP"
+description: "Conectar um Python Strands Agent a um servidor MCP"
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+O gerador `connection` pode conectar seu <Link path="guides/py-strands-agent">Python Strands Agent</Link> a um servidor MCP (seja <Link path="guides/ts-mcp-server">TypeScript</Link> ou <Link path="guides/py-mcp-server">Python</Link>).
+
+O gerador configura toda a conexão necessária para que seu agente possa descobrir e invocar as ferramentas do servidor MCP, tanto quando implantado na AWS (via Bedrock AgentCore) quanto quando executado localmente.
+
+## Pré-requisitos
+
+Antes de usar este gerador, certifique-se de ter:
+
+1. Um projeto Python com um componente <Link path="guides/py-strands-agent">Strands Agent</Link>
+2. Um projeto com um componente de servidor MCP (seja <Link path="guides/ts-mcp-server">`ts#mcp-server`</Link> ou <Link path="guides/py-mcp-server">`py#mcp-server`</Link>)
+3. Ambos os componentes criados com `computeType: BedrockAgentCoreRuntime`
+
+## Uso
+
+### Execute o Gerador
+
+<RunGenerator generator="connection" />
+
+Selecione seu projeto de agente como origem e seu projeto de servidor MCP como destino. Se seus projetos contiverem múltiplos componentes, especifique as opções `sourceComponent` e `targetComponent` para desambiguar.
+
+### Opções
+
+<GeneratorParameters generator="connection" />
+
+## Saída do Gerador
+
+O gerador cria um projeto Python compartilhado `agent_connection` em `packages/common/agent_connection/` (se ainda não existir). Módulos de cliente por conexão são gerados neste projeto compartilhado:
+
+<FileTree>
+
+- packages/common/agent\_connection
+  - \<scope>\_agent\_connection
+    - \_\_init\_\_.py Re-exporta clientes por conexão
+    - core
+      - agentcore\_mcp\_client.py Cliente MCP AgentCore principal
+    - app
+      - \<mcp\_server\_name>\_client.py Cliente por conexão para cada servidor MCP
+
+</FileTree>
+
+Além disso, o gerador:
+- Transforma o `agent.py` do seu agente para importar e usar as ferramentas do servidor MCP via um cliente baseado em classe
+- Adiciona o projeto `agent_connection` como uma dependência de workspace do seu projeto de agente
+- Atualiza o target `serve-local` do agente para depender do target serve do servidor MCP
+
+## Usando o Servidor MCP Conectado
+
+O gerador transforma o `agent.py` do seu agente para usar as ferramentas do servidor MCP:
+
+```python title="packages/my-project/my_module/agent/agent.py" {4,10-14}
+from contextlib import contextmanager
+from strands import Agent
+
+from my_scope_agent_connection import MyMcpServerClient
+
+@contextmanager
+def get_agent(session_id: str):
+    my_mcp_server = MyMcpServerClient.create(session_id=session_id)
+    with (
+        my_mcp_server,
+    ):
+        yield Agent(
+            system_prompt="...",
+            tools=[*my_mcp_server.list_tools_sync()],
+        )
+```
+
+O parâmetro `session_id` é propagado a partir do chamador, garantindo consistência para [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
+
+## Infraestrutura
+
+<Infrastructure>
+<Fragment slot="cdk">
+Após executar o gerador de conexão, você precisa conceder ao agente permissão para invocar o servidor MCP:
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {12-13}
+const mcpServer = new MyMcpServer(this, 'MyMcpServer');
+const myAgent = new MyAgent(this, 'MyAgent');
+
+// Grant the agent access to bedrock models
+myAgent.agentCoreRuntime.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream'],
+    resources: ['arn:aws:bedrock:*:*:foundation-model/*', 'arn:aws:bedrock:*:*:inference-profile/*'],
+  }),
+);
+
+// Grant the agent permissions to invoke the MCP server
+mcpServer.agentCoreRuntime.grantInvoke(myAgent.agentCoreRuntime);
+```
+
+O ARN do runtime AgentCore do servidor MCP é automaticamente registrado no namespace `connection` da <Link path="guides/runtime-config">Configuração de Runtime</Link> pelo construtor CDK gerado, para que o agente possa descobri-lo em tempo de execução.
+</Fragment>
+<Fragment slot="terraform">
+Após executar o gerador de conexão, você precisa conceder ao agente permissão para invocar o servidor MCP na sua configuração Terraform:
+
+```hcl title="packages/infra/src/main.tf" {12-24}
+module "inventory_mcp_server" {
+  source = "../../common/terraform/src/app/mcp-servers/inventory-mcp"
+}
+
+module "story_agent" {
+  source = "../../common/terraform/src/app/agents/story-agent"
+}
+
+# Grant the agent permissions to invoke the MCP server
+resource "aws_iam_policy" "agent_invoke_mcp" {
+  name = "AgentInvokeMcpPolicy"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = "bedrock-agentcore:InvokeAgent"
+      Resource = module.inventory_mcp_server.agent_core_runtime_arn
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "agent_invoke_mcp" {
+  role       = module.story_agent.agent_core_runtime_role_arn
+  policy_arn = aws_iam_policy.agent_invoke_mcp.arn
+}
+```
+
+O ARN do runtime AgentCore do servidor MCP é automaticamente registrado no namespace `connection` da <Link path="guides/runtime-config">Configuração de Runtime</Link> pelo módulo Terraform gerado, para que o agente possa descobri-lo em tempo de execução.
+</Fragment>
+</Infrastructure>
+
+## Desenvolvimento Local
+
+O gerador configura o target `serve-local` do agente para:
+1. Iniciar o(s) servidor(es) MCP conectado(s) automaticamente
+2. Definir `SERVE_LOCAL=true` para que o cliente gerado use transporte HTTP direto em vez de AgentCore
+
+Execute o agente localmente com:
+
+<NxCommands commands={["<agent-name>-serve-local <project-name>"]} />
+
+Isso iniciará tanto o agente quanto todos os servidores MCP conectados, com o agente se conectando aos servidores MCP diretamente via HTTP em suas portas locais atribuídas.

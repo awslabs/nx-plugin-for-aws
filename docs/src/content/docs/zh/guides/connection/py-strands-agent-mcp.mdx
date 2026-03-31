@@ -1,0 +1,151 @@
+---
+title: "Python Strands Agent 到 MCP"
+description: "将 Python Strands Agent 连接到 MCP 服务器"
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+`connection` 生成器可以将您的 <Link path="guides/py-strands-agent">Python Strands Agent</Link> 连接到 MCP 服务器(可以是 <Link path="guides/ts-mcp-server">TypeScript</Link> 或 <Link path="guides/py-mcp-server">Python</Link>)。
+
+该生成器会设置所有必要的配置,使您的代理能够发现和调用 MCP 服务器的工具,无论是部署到 AWS(通过 Bedrock AgentCore)还是在本地运行时都可以。
+
+## 前提条件
+
+在使用此生成器之前,请确保您具备:
+
+1. 一个包含 <Link path="guides/py-strands-agent">Strands Agent</Link> 组件的 Python 项目
+2. 一个包含 MCP 服务器组件的项目(可以是 <Link path="guides/ts-mcp-server">`ts#mcp-server`</Link> 或 <Link path="guides/py-mcp-server">`py#mcp-server`</Link>)
+3. 两个组件都使用 `computeType: BedrockAgentCoreRuntime` 创建
+
+## 使用方法
+
+### 运行生成器
+
+<RunGenerator generator="connection" />
+
+选择您的代理项目作为源,选择您的 MCP 服务器项目作为目标。如果您的项目包含多个组件,请指定 `sourceComponent` 和 `targetComponent` 选项以消除歧义。
+
+### 选项
+
+<GeneratorParameters generator="connection" />
+
+## 生成器输出
+
+生成器会在 `packages/common/agent_connection/` 创建一个共享的 `agent_connection` Python 项目(如果尚不存在)。每个连接的客户端模块都会生成到这个共享项目中:
+
+<FileTree>
+
+- packages/common/agent\_connection
+  - \<scope>\_agent\_connection
+    - \_\_init\_\_.py 重新导出每个连接的客户端
+    - core
+      - agentcore\_mcp\_client.py 核心 AgentCore MCP 客户端
+    - app
+      - \<mcp\_server\_name>\_client.py 每个 MCP 服务器的专用连接客户端
+
+</FileTree>
+
+此外,生成器还会:
+- 转换您的代理的 `agent.py`,通过基于类的客户端导入和使用 MCP 服务器的工具
+- 将 `agent_connection` 项目添加为您的代理项目的工作区依赖项
+- 更新代理的 `serve-local` 目标,使其依赖于 MCP 服务器的服务目标
+
+## 使用已连接的 MCP 服务器
+
+生成器会转换您的代理的 `agent.py` 以使用 MCP 服务器的工具:
+
+```python title="packages/my-project/my_module/agent/agent.py" {4,10-14}
+from contextlib import contextmanager
+from strands import Agent
+
+from my_scope_agent_connection import MyMcpServerClient
+
+@contextmanager
+def get_agent(session_id: str):
+    my_mcp_server = MyMcpServerClient.create(session_id=session_id)
+    with (
+        my_mcp_server,
+    ):
+        yield Agent(
+            system_prompt="...",
+            tools=[*my_mcp_server.list_tools_sync()],
+        )
+```
+
+`session_id` 参数从调用方传递,确保 [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html) 的一致性。
+
+## 基础设施
+
+<Infrastructure>
+<Fragment slot="cdk">
+运行连接生成器后,您需要授予代理调用 MCP 服务器的权限:
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {12-13}
+const mcpServer = new MyMcpServer(this, 'MyMcpServer');
+const myAgent = new MyAgent(this, 'MyAgent');
+
+// Grant the agent access to bedrock models
+myAgent.agentCoreRuntime.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream'],
+    resources: ['arn:aws:bedrock:*:*:foundation-model/*', 'arn:aws:bedrock:*:*:inference-profile/*'],
+  }),
+);
+
+// Grant the agent permissions to invoke the MCP server
+mcpServer.agentCoreRuntime.grantInvoke(myAgent.agentCoreRuntime);
+```
+
+MCP 服务器的 AgentCore 运行时 ARN 会由生成的 CDK 构造自动注册到 <Link path="guides/runtime-config">运行时配置</Link> 的 `connection` 命名空间中,因此代理可以在运行时发现它。
+</Fragment>
+<Fragment slot="terraform">
+运行连接生成器后,您需要在 Terraform 配置中授予代理调用 MCP 服务器的权限:
+
+```hcl title="packages/infra/src/main.tf" {12-24}
+module "inventory_mcp_server" {
+  source = "../../common/terraform/src/app/mcp-servers/inventory-mcp"
+}
+
+module "story_agent" {
+  source = "../../common/terraform/src/app/agents/story-agent"
+}
+
+# Grant the agent permissions to invoke the MCP server
+resource "aws_iam_policy" "agent_invoke_mcp" {
+  name = "AgentInvokeMcpPolicy"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = "bedrock-agentcore:InvokeAgent"
+      Resource = module.inventory_mcp_server.agent_core_runtime_arn
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "agent_invoke_mcp" {
+  role       = module.story_agent.agent_core_runtime_role_arn
+  policy_arn = aws_iam_policy.agent_invoke_mcp.arn
+}
+```
+
+MCP 服务器的 AgentCore 运行时 ARN 会由生成的 Terraform 模块自动注册到 <Link path="guides/runtime-config">运行时配置</Link> 的 `connection` 命名空间中,因此代理可以在运行时发现它。
+</Fragment>
+</Infrastructure>
+
+## 本地开发
+
+生成器会配置代理的 `serve-local` 目标以:
+1. 自动启动已连接的 MCP 服务器
+2. 设置 `SERVE_LOCAL=true`,使生成的客户端使用直接 HTTP 传输而不是 AgentCore
+
+使用以下命令在本地运行代理:
+
+<NxCommands commands={["<agent-name>-serve-local <project-name>"]} />
+
+这将同时启动代理和所有已连接的 MCP 服务器,代理将通过 HTTP 直接连接到分配的本地端口上的 MCP 服务器。

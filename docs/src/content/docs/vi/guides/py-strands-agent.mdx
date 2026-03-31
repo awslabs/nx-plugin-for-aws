@@ -53,7 +53,6 @@ Generator sẽ thêm các file sau vào Python project hiện có của bạn:
         - init.py Thiết lập ứng dụng FastAPI với CORS và middleware xử lý lỗi
         - agent.py Định nghĩa agent chính với các công cụ mẫu
         - main.py Entry point cho Bedrock AgentCore Runtime
-        - agentcore_mcp_client.py Client factory hữu ích để gọi các MCP server cũng được host trên Bedrock AgentCore runtime
         - Dockerfile Entry point để host agent của bạn (bị loại trừ khi `computeType` được đặt thành `None`)
     - pyproject.toml Được cập nhật với các dependencies của Strands
     - project.json Được cập nhật với các target serve agent
@@ -163,100 +162,13 @@ agent = Agent(model=bedrock_model)
 
 Bạn có thể [thêm các công cụ từ MCP servers](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/tools/mcp-tools/) vào Strands agent của bạn.
 
-Để sử dụng các MCP Server mà bạn đã tạo bằng generator <Link path="/guides/py-mcp-server">`py#mcp-server`</Link> hoặc <Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link> (hoặc các server khác được host trên Bedrock AgentCore Runtime), một client factory được tạo cho bạn trong `agentcore_mcp_client.py`.
+Để sử dụng các MCP Server mà bạn đã tạo bằng generator <Link path="/guides/py-mcp-server">`py#mcp-server`</Link> hoặc <Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link>, bạn có thể sử dụng <Link path="/guides/connection/py-strands-agent-mcp">`connection` generator</Link>.
 
-Bạn có thể cập nhật phương thức `get_agent` trong `agent.py` để tạo các MCP client và thêm công cụ. Ví dụ sau đây cho thấy cách thực hiện điều này với xác thực IAM (SigV4):
+<RunGenerator generator="connection" />
 
-```python
-# agent.py
-import os
-from contextlib import contextmanager
+Tham khảo <Link path="/guides/connection/py-strands-agent-mcp">hướng dẫn `connection` generator</Link> để biết chi tiết về cách thiết lập kết nối.
 
-import boto3
-from strands import Agent
-
-from .agentcore_mcp_client import AgentCoreMCPClient
-
-# Obtain the region an credentials
-region = os.environ["AWS_REGION"]
-boto_session = boto3.Session(region_name=region)
-credentials = boto_session.get_credentials()
-
-@contextmanager
-def get_agent(session_id: str):
-    mcp_client = AgentCoreMCPClient.with_iam_auth(
-        agent_runtime_arn=os.environ["MCP_AGENTCORE_RUNTIME_ARN"],
-        credentials=credentials,
-        region=region,
-        session_id=session_id,
-    )
-
-    with mcp_client:
-        mcp_tools = mcp_client.list_tools_sync()
-
-        yield Agent(
-            system_prompt="..."
-            tools=[*mcp_tools],
-        )
-```
-
-:::tip
-Nếu MCP server đích của bạn sử dụng xác thực JWT, bạn có thể sử dụng phương thức `AgentCoreMCPClient.with_jwt_auth` để tạo client thay thế.
-:::
-
-Với ví dụ xác thực IAM ở trên, chúng ta cần cấu hình hai thứ trong hạ tầng của mình. Thứ nhất, chúng ta cần thêm biến môi trường mà agent của chúng ta đang sử dụng cho ARN của AgentCore Runtime của MCP server, và thứ hai chúng ta cần cấp quyền cho agent của chúng ta để gọi MCP server. Điều này có thể đạt được như sau:
-
-<Infrastructure>
-<Fragment slot="cdk">
-```ts {9, 13}
-import { MyProjectAgent, MyProjectMcpServer } from ':my-scope/common-constructs';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    const mcpServer = new MyProjectMcpServer(this, 'MyProjectMcpServer');
-
-    const agent = new MyProjectAgent(this, 'MyProjectAgent', {
-      environmentVariables: {
-        MCP_AGENTCORE_RUNTIME_ARN: mcpServer.agentCoreRuntime.agentRuntimeArn,
-      },
-    });
-
-    mcpServer.agentCoreRuntime.grantInvoke(agent.agentCoreRuntime);
-  }
-}
-```
-</Fragment>
-<Fragment slot="terraform">
-```terraform
-# MCP Server
-module "my_project_mcp_server" {
-  source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
-}
-
-# Agent
-module "my_project_agent" {
-  source = "../../common/terraform/src/app/agents/my-project-agent"
-
-  env = {
-    MCP_AGENTCORE_RUNTIME_ARN = module.my_project_mcp_server.agent_core_runtime_arn
-  }
-
-  additional_iam_policy_statements = [
-    {
-      Effect = "Allow"
-      Action = [
-        "bedrock-agentcore:InvokeAgentRuntime"
-      ]
-      Resource = [
-        module.my_project_mcp_server.agent_core_runtime_arn,
-        "${module.my_project_mcp_server.agent_core_runtime_arn}/*"
-      ]
-    }
-  ]
-}
-```
-</Fragment>
-</Infrastructure>
+Đối với các MCP server khác, vui lòng tham khảo [Tài liệu Strands](https://strandsagents.com/docs/user-guide/concepts/tools/mcp-tools/).
 
 ### Thêm nữa
 

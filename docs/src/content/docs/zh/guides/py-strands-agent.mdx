@@ -53,7 +53,6 @@ import Drawer from '@components/drawer.astro';
         - init.py 配置CORS和错误处理中间件的FastAPI应用设置
         - agent.py 主智能体定义（含示例工具）
         - main.py Bedrock AgentCore Runtime入口点
-        - agentcore_mcp_client.py 用于调用MCP服务的客户端工厂
         - Dockerfile 智能体托管入口文件（当`computeType`设为`None`时不生成）
     - pyproject.toml 更新Strands依赖
     - project.json 更新服务目标配置
@@ -163,100 +162,13 @@ agent = Agent(model=bedrock_model)
 
 可通过[添加MCP服务工具](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/tools/mcp-tools/)扩展智能体功能。
 
-对于使用<Link path="/guides/py-mcp-server">`py#mcp-server`</Link>或<Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link>生成器创建的MCP服务（或部署在Bedrock AgentCore Runtime的其他服务），生成器会在`agentcore_mcp_client.py`中创建客户端工厂。
+对于使用<Link path="/guides/py-mcp-server">`py#mcp-server`</Link>或<Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link>生成器创建的MCP服务，可以使用<Link path="/guides/connection/py-strands-agent-mcp">`connection`生成器</Link>。
 
-在`agent.py`中更新`get_agent`方法以创建MCP客户端并添加工具。以下示例展示使用IAM（SigV4）认证：
+<RunGenerator generator="connection" />
 
-```python
-# agent.py
-import os
-from contextlib import contextmanager
+关于连接设置的详细信息，请参考<Link path="/guides/connection/py-strands-agent-mcp">`connection`生成器指南</Link>。
 
-import boto3
-from strands import Agent
-
-from .agentcore_mcp_client import AgentCoreMCPClient
-
-# 获取区域和凭证
-region = os.environ["AWS_REGION"]
-boto_session = boto3.Session(region_name=region)
-credentials = boto_session.get_credentials()
-
-@contextmanager
-def get_agent(session_id: str):
-    mcp_client = AgentCoreMCPClient.with_iam_auth(
-        agent_runtime_arn=os.environ["MCP_AGENTCORE_RUNTIME_ARN"],
-        credentials=credentials,
-        region=region,
-        session_id=session_id,
-    )
-
-    with mcp_client:
-        mcp_tools = mcp_client.list_tools_sync()
-
-        yield Agent(
-            system_prompt="..."
-            tools=[*mcp_tools],
-        )
-```
-
-:::tip
-若目标MCP服务使用JWT认证，可使用`AgentCoreMCPClient.with_jwt_auth`方法创建客户端。
-:::
-
-上述IAM认证示例需在基础设施中配置两点：添加MCP服务AgentCore Runtime ARN环境变量，并授予智能体调用权限：
-
-<Infrastructure>
-<Fragment slot="cdk">
-```ts {9, 13}
-import { MyProjectAgent, MyProjectMcpServer } from ':my-scope/common-constructs';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    const mcpServer = new MyProjectMcpServer(this, 'MyProjectMcpServer');
-
-    const agent = new MyProjectAgent(this, 'MyProjectAgent', {
-      environmentVariables: {
-        MCP_AGENTCORE_RUNTIME_ARN: mcpServer.agentCoreRuntime.agentRuntimeArn,
-      },
-    });
-
-    mcpServer.agentCoreRuntime.grantInvoke(agent.agentCoreRuntime);
-  }
-}
-```
-</Fragment>
-<Fragment slot="terraform">
-```terraform
-# MCP服务
-module "my_project_mcp_server" {
-  source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
-}
-
-# 智能体
-module "my_project_agent" {
-  source = "../../common/terraform/src/app/agents/my-project-agent"
-
-  env = {
-    MCP_AGENTCORE_RUNTIME_ARN = module.my_project_mcp_server.agent_core_runtime_arn
-  }
-
-  additional_iam_policy_statements = [
-    {
-      Effect = "Allow"
-      Action = [
-        "bedrock-agentcore:InvokeAgentRuntime"
-      ]
-      Resource = [
-        module.my_project_mcp_server.agent_core_runtime_arn,
-        "${module.my_project_mcp_server.agent_core_runtime_arn}/*"
-      ]
-    }
-  ]
-}
-```
-</Fragment>
-</Infrastructure>
+对于其他MCP服务，请参考[Strands文档](https://strandsagents.com/docs/user-guide/concepts/tools/mcp-tools/)。
 
 ### 更多信息
 
