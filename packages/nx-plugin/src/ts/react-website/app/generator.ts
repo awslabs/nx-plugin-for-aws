@@ -14,12 +14,7 @@ import {
   OverwriteStrategy,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import {
-  factory,
-  ObjectLiteralExpression,
-  isPropertyAssignment,
-  ArrayLiteralExpression,
-} from 'typescript';
+// typescript factory imports removed — now using GritQL for vite config transforms
 import { TsReactWebsiteGeneratorSchema } from './schema';
 import { applicationGenerator } from '@nx/react';
 import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
@@ -34,8 +29,8 @@ import {
 import { kebabCase, toClassName, toKebabCase } from '../../../utils/names';
 import {
   addDestructuredImport,
-  replaceIfExists,
   addSingleImport,
+  applyGritQLTransform,
 } from '../../../utils/ast';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { getPackageManagerDisplayCommands } from '../../../utils/pkg-manager';
@@ -363,134 +358,47 @@ export async function tsReactWebsiteGenerator(
       await addSingleImport(tree, viteConfigPath, 'tailwindcss', '@tailwindcss/vite');
     }
 
-    replaceIfExists(
+    // Update build.outDir
+    const outDir = joinPathFragments(
+      getRelativePathToRoot(tree, fullyQualifiedName),
+      'dist',
+      websiteContentPath,
+    );
+    await applyGritQLTransform(
       tree,
       viteConfigPath,
-      'ObjectLiteralExpression',
-      (node: ObjectLiteralExpression) => {
-        const updatedProperties = node.properties.map((prop) => {
-          if (isPropertyAssignment(prop) && prop.name.getText() === 'build') {
-            const buildConfig = prop.initializer as ObjectLiteralExpression;
-            return factory.createPropertyAssignment(
-              'build',
-              factory.createObjectLiteralExpression(
-                buildConfig.properties.map((buildProp) => {
-                  if (
-                    isPropertyAssignment(buildProp) &&
-                    buildProp.name.getText() === 'outDir'
-                  ) {
-                    return factory.createPropertyAssignment(
-                      'outDir',
-                      factory.createStringLiteral(
-                        joinPathFragments(
-                          getRelativePathToRoot(tree, fullyQualifiedName),
-                          'dist',
-                          websiteContentPath,
-                        ),
-                      ),
-                    );
-                  }
-                  return buildProp;
-                }),
-                true,
-              ),
-            );
-          } else if (
-            isPropertyAssignment(prop) &&
-            prop.name.getText() === 'plugins'
-          ) {
-            const pluginsConfig = prop.initializer as ArrayLiteralExpression;
-            const pluginsArray = [...pluginsConfig.elements];
-
-            if (enableTanstackRouter) {
-              pluginsArray.unshift(
-                factory.createCallExpression(
-                  factory.createIdentifier('tanstackRouter'),
-                  undefined,
-                  [
-                    factory.createObjectLiteralExpression([
-                      factory.createPropertyAssignment(
-                        factory.createIdentifier('routesDirectory'),
-                        factory.createCallExpression(
-                          factory.createIdentifier('resolve'),
-                          undefined,
-                          [
-                            factory.createIdentifier('__dirname'),
-                            factory.createStringLiteral('src/routes'),
-                          ],
-                        ),
-                      ),
-                      factory.createPropertyAssignment(
-                        factory.createIdentifier('generatedRouteTree'),
-                        factory.createCallExpression(
-                          factory.createIdentifier('resolve'),
-                          undefined,
-                          [
-                            factory.createIdentifier('__dirname'),
-                            factory.createStringLiteral('src/routeTree.gen.ts'),
-                          ],
-                        ),
-                      ),
-                    ]),
-                  ],
-                ),
-              );
-            }
-
-            // Add TailwindCSS plugin if enabled
-            if (enableTailwind) {
-              pluginsArray.push(
-                factory.createCallExpression(
-                  factory.createIdentifier('tailwindcss'),
-                  undefined,
-                  [],
-                ),
-              );
-            }
-
-            pluginsArray.push(
-              factory.createCallExpression(
-                factory.createIdentifier('tsconfigPaths'),
-                undefined,
-                [],
-              ),
-            );
-
-            return factory.createPropertyAssignment(
-              'plugins',
-              factory.createArrayLiteralExpression(pluginsArray, true),
-            );
-          }
-          return prop;
-        });
-        return factory.createObjectLiteralExpression(updatedProperties, true);
-      },
+      `\`build: { $bprops }\` where { $bprops <: contains \`outDir: $_\` => \`outDir: '${outDir}'\` }`,
     );
 
-    replaceIfExists(
+    // Add plugins to the plugins array
+    if (enableTanstackRouter) {
+      // Prepend tanstackRouter (must be first plugin) — rewrite works for both single/multi-element
+      await applyGritQLTransform(
+        tree,
+        viteConfigPath,
+        "`plugins: [$items]` => `plugins: [tanstackRouter({ routesDirectory: resolve(__dirname, 'src/routes'), generatedRouteTree: resolve(__dirname, 'src/routeTree.gen.ts') }), $items]` where { $items <: within `defineConfig($_)`, $items <: not contains `tanstackRouter` }",
+      );
+    }
+
+    if (enableTailwind) {
+      await applyGritQLTransform(
+        tree,
+        viteConfigPath,
+        '`plugins: [$items]` => `plugins: [$items, tailwindcss()]` where { $items <: within `defineConfig($_)`, $items <: not some `tailwindcss()` }',
+      );
+    }
+
+    await applyGritQLTransform(
       tree,
       viteConfigPath,
-      'ObjectLiteralExpression',
-      (node: ObjectLiteralExpression) => {
-        return factory.createObjectLiteralExpression(
-          [
-            factory.createPropertyAssignment(
-              'define',
-              factory.createObjectLiteralExpression(
-                [
-                  factory.createPropertyAssignment(
-                    'global',
-                    factory.createObjectLiteralExpression(),
-                  ),
-                ],
-                true,
-              ),
-            ),
-            ...node.properties,
-          ],
-          true,
-        );
-      },
+      '`plugins: [$items]` => `plugins: [$items, tsconfigPaths()]` where { $items <: within `defineConfig($_)`, $items <: not some `tsconfigPaths()` }',
+    );
+
+    // Add define: { global: {} } to the config (handles both callback and direct forms)
+    await applyGritQLTransform(
+      tree,
+      viteConfigPath,
+      'or { `defineConfig(() => ({ $props }))` where { $props <: not contains `define`, $props += `define: { global: {} }` }, `defineConfig({ $props })` where { $props <: not contains `define`, $props += `define: { global: {} }` } }',
     );
   }
 
