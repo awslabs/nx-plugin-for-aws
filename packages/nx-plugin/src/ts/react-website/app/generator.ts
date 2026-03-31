@@ -384,14 +384,14 @@ export async function tsReactWebsiteGenerator(
       await applyGritQLTransform(
         tree,
         viteConfigPath,
-        '`plugins: [$items]` where { $items <: within `defineConfig($_)`, $items <: not some `tailwindcss()`, $items += `tailwindcss()` }',
+        '`plugins: [$items]` => `plugins: [$items, tailwindcss()]` where { $items <: within `defineConfig($_)`, $items <: not some `tailwindcss()` }',
       );
     }
 
     await applyGritQLTransform(
       tree,
       viteConfigPath,
-      '`plugins: [$items]` where { $items <: within `defineConfig($_)`, $items <: not some `tsconfigPaths()`, $items += `tsconfigPaths()` }',
+      '`plugins: [$items]` => `plugins: [$items, tsconfigPaths()]` where { $items <: within `defineConfig($_)`, $items <: not some `tsconfigPaths()` }',
     );
 
     // Add define: { global: {} } to the config (handles both callback and direct forms)
