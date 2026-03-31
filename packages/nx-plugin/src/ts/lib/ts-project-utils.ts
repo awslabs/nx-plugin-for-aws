@@ -50,7 +50,8 @@ export const configureTsProject = async (
     ...tsConfig,
     compilerOptions: {
       ...tsConfig.compilerOptions,
-      baseUrl: '.',
+      // baseUrl is deprecated in TypeScript 6 — use ./ prefix in paths instead
+      baseUrl: undefined,
       rootDir: '.',
       paths: {
         // Remove any path aliases for this project with the npm scope prefix (eg remove @foo/bar)
@@ -61,7 +62,7 @@ export const configureTsProject = async (
         ),
         // Add aliases which begin with colon (eg :foo/bar) to avoid sniping attacks
         [toScopeAlias(options.fullyQualifiedName)]: [
-          joinPathFragments(options.dir, 'src', 'index.ts'),
+          `./${joinPathFragments(options.dir, 'src', 'index.ts')}`,
         ],
       },
     },

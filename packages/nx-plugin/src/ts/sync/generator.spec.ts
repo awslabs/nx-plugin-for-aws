@@ -58,16 +58,16 @@ describe('ts-sync generator', () => {
       readJson<Record<string, any>>(tree, 'packages/proj/tsconfig.json')
         .compilerOptions.paths,
     ).toEqual({
-      ':shared': ['packages/shared/src/index.ts'],
-      '@shared/*': ['packages/shared/src/*'],
+      ':shared': ['../../packages/shared/src/index.ts'],
+      '@shared/*': ['../../packages/shared/src/*'],
       '@local/*': ['src/*'],
     });
     expect(
       readJson<Record<string, any>>(tree, 'packages/proj/tsconfig.lib.json')
         .compilerOptions.paths,
     ).toEqual({
-      ':shared': ['packages/shared/src/index.ts'],
-      '@shared/*': ['packages/shared/src/*'],
+      ':shared': ['../../packages/shared/src/index.ts'],
+      '@shared/*': ['../../packages/shared/src/*'],
       '@local/*': ['src/*'],
     });
     expect(
@@ -130,8 +130,8 @@ describe('ts-sync generator', () => {
     const projectTsConfig = {
       compilerOptions: {
         paths: {
-          ':shared': ['packages/shared/src/index.ts'],
-          '@shared/*': ['packages/shared/src/*'],
+          ':shared': ['../../packages/shared/src/index.ts'],
+          '@shared/*': ['../../packages/shared/src/*'],
           '@local/*': ['src/*'],
         },
       },
@@ -179,7 +179,7 @@ describe('ts-sync generator', () => {
       readJson<Record<string, any>>(tree, 'packages/proj/tsconfig.json')
         .compilerOptions.paths,
     ).toEqual({
-      ':shared': ['packages/shared/src/main.ts'],
+      ':shared': ['../../packages/shared/src/main.ts'],
     });
     expect(result).toHaveProperty('outOfSyncMessage');
     expect((result as any).outOfSyncMessage).toContain(':shared (updated)');

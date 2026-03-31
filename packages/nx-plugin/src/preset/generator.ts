@@ -19,6 +19,7 @@ import { NxGeneratorInfo, getGeneratorInfo } from '../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../utils/metrics';
 import { formatFilesInSubtree } from '../utils/format';
 import { getPackageManagerDisplayCommands } from '../utils/pkg-manager';
+import { withVersions } from '../utils/versions';
 import { initGenerator } from '@nx/js';
 import { readModulePackageJson } from 'nx/src/utils/package-json';
 import { getNpmScope } from '../utils/npm-scope';
@@ -187,6 +188,8 @@ export const presetGenerator = async (
     {},
     {
       '@nx/workspace': readModulePackageJson('@nx/js').packageJson.version,
+      // Pin TypeScript 6 and a compatible typescript-eslint version
+      ...withVersions(['typescript', 'typescript-eslint']),
     },
   );
 
