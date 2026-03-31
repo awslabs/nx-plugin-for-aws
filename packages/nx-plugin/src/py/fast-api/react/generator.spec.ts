@@ -8,7 +8,7 @@ import {
   fastApiReactGenerator,
 } from './generator';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
-import { query } from '../../../utils/ast';
+import { matchGritQL } from '../../../utils/ast';
 import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
 import { expectHasMetricTags } from '../../../utils/metrics.spec';
 import { tsReactWebsiteGenerator } from '../../../ts/react-website/app/generator';
@@ -213,20 +213,20 @@ export function Main() {
     });
 
     expect(
-      query(
+      await matchGritQL(
         tree,
         'apps/frontend/src/main.tsx',
-        'JsxOpeningElement[tagName.name="QueryClientProvider"]',
+        '`<QueryClientProvider $_>$_</QueryClientProvider>`',
       ),
-    ).toHaveLength(1);
+    ).toBe(true);
 
     expect(
-      query(
+      await matchGritQL(
         tree,
         'apps/frontend/src/main.tsx',
-        'JsxOpeningElement[tagName.name="TestApiProvider"]',
+        '`<TestApiProvider $_>$_</TestApiProvider>`',
       ),
-    ).toHaveLength(1);
+    ).toBe(true);
 
     expect(tree.read('apps/frontend/src/main.tsx', 'utf-8')).toMatchSnapshot(
       'main.tsx',
@@ -247,21 +247,21 @@ export function Main() {
 
     // Check that there is still only a single QueryClientProvider
     expect(
-      query(
+      await matchGritQL(
         tree,
         'apps/frontend/src/main.tsx',
-        'JsxOpeningElement[tagName.name="QueryClientProvider"]',
+        '`<QueryClientProvider $_>$_</QueryClientProvider>`',
       ),
-    ).toHaveLength(1);
+    ).toBe(true);
 
     // Check that there is still only a single TestApiProvider
     expect(
-      query(
+      await matchGritQL(
         tree,
         'apps/frontend/src/main.tsx',
-        'JsxOpeningElement[tagName.name="TestApiProvider"]',
+        '`<TestApiProvider $_>$_</TestApiProvider>`',
       ),
-    ).toHaveLength(1);
+    ).toBe(true);
   });
 
   it('should handle IAM auth option', async () => {

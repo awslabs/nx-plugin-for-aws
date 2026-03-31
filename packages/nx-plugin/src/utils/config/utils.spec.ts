@@ -99,4 +99,82 @@ describe('config utils', () => {
       ).lines[0],
     ).toBe('Test Copyright Header');
   });
+
+  it('should snapshot simple iac config', async () => {
+    await updateAwsNxPluginConfig(tree, {
+      iac: { provider: 'CDK' },
+    });
+
+    expect(
+      tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8'),
+    ).toMatchSnapshot();
+  });
+
+  it('should snapshot config with tags', async () => {
+    await updateAwsNxPluginConfig(tree, {
+      tags: ['tag1', 'tag2', 'tag3'],
+    });
+
+    expect(
+      tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8'),
+    ).toMatchSnapshot();
+  });
+
+  it('should snapshot merged config with multiple keys', async () => {
+    await updateAwsNxPluginConfig(tree, {
+      iac: { provider: 'CDK' },
+    });
+    await updateAwsNxPluginConfig(tree, {
+      tags: ['tag1'],
+    });
+
+    expect(
+      tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8'),
+    ).toMatchSnapshot();
+
+    const config = await readAwsNxPluginConfig(tree);
+    expect(config.iac.provider).toBe('CDK');
+    expect(config.tags).toEqual(['tag1']);
+  });
+
+  it('should handle config with special characters in values', async () => {
+    await updateAwsNxPluginConfig(tree, {
+      license: {
+        header: {
+          content: { lines: ['Copyright "Foo" Inc.'] },
+          format: {
+            '**/*.{js,ts,jsx,tsx}': {
+              blockStart: '/**',
+              lineStart: ' * ',
+              blockEnd: ' */',
+            },
+          },
+        },
+      },
+    });
+
+    expect(
+      tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8'),
+    ).toMatchSnapshot();
+
+    const config = await readAwsNxPluginConfig(tree);
+    expect(
+      (config.license.header.content as LicenseLinesContent).lines[0],
+    ).toBe('Copyright "Foo" Inc.');
+  });
+
+  it('should handle config without satisfies clause', async () => {
+    tree.write(AWS_NX_PLUGIN_CONFIG_FILE_NAME, `export default {}`);
+
+    await updateAwsNxPluginConfig(tree, {
+      iac: { provider: 'CDK' },
+    });
+
+    expect(
+      tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8'),
+    ).toMatchSnapshot();
+
+    const config = await readAwsNxPluginConfig(tree);
+    expect(config.iac.provider).toBe('CDK');
+  });
 });

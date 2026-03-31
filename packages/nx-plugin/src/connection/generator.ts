@@ -119,7 +119,7 @@ export const connectionGenerator = async (
   tree: Tree,
   options: ConnectionGeneratorSchema,
 ) => {
-  const resolved = resolveConnection(tree, options);
+  const resolved = await resolveConnection(tree, options);
 
   const connectionKey =
     `${resolved.connection.source} -> ${resolved.connection.target}` as ConnectionKey;
@@ -173,11 +173,11 @@ interface ConnectionMatch {
  * - The project-level type (if it's a supported type)
  * - Each component's generator id as a candidate type
  */
-const gatherCandidates = (
+const gatherCandidates = async (
   tree: Tree,
   projectConfig: ProjectConfiguration,
-): ConnectionCandidate[] => {
-  const projectType = determineProjectTypeFromConfig(tree, projectConfig);
+): Promise<ConnectionCandidate[]> => {
+  const projectType = await determineProjectTypeFromConfig(tree, projectConfig);
   const components: ComponentMetadata[] =
     (projectConfig.metadata as any)?.components ?? [];
 
@@ -238,11 +238,11 @@ const filterConnectionCandidatesForComponentReference = (
 /**
  * Resolve the connection to use, considering source/target projects and components.
  */
-export const resolveConnection = (
+export const resolveConnection = async (
   tree: Tree,
   options: ConnectionGeneratorSchema,
   supportedConnections: readonly Connection[] = SUPPORTED_CONNECTIONS,
-): ResolvedConnection => {
+): Promise<ResolvedConnection> => {
   const sourceConfig = readProjectConfigurationUnqualified(
     tree,
     options.sourceProject,
@@ -260,14 +260,14 @@ export const resolveConnection = (
   const sourceCandidates = filterConnectionCandidatesForComponentReference(
     options.sourceComponent,
     sourceConfig,
-    gatherCandidates(tree, sourceConfig),
+    await gatherCandidates(tree, sourceConfig),
     supportedConnections,
     'source',
   );
   const targetCandidates = filterConnectionCandidatesForComponentReference(
     options.targetComponent,
     targetConfig,
-    gatherCandidates(tree, targetConfig),
+    await gatherCandidates(tree, targetConfig),
     supportedConnections,
     'target',
   );
@@ -328,28 +328,28 @@ export const resolveConnection = (
 /**
  * Determine whether the given project is of a known project type
  */
-export const determineProjectType = (
+export const determineProjectType = async (
   tree: Tree,
   projectName: string,
-): ProjectType | undefined => {
+): Promise<ProjectType | undefined> => {
   const projectConfiguration = readProjectConfigurationUnqualified(
     tree,
     projectName,
   );
-  return determineProjectTypeFromConfig(tree, projectConfiguration);
+  return await determineProjectTypeFromConfig(tree, projectConfiguration);
 };
 
 /**
  * Determine whether the given project configuration is of a known project type
  */
-const determineProjectTypeFromConfig = (
+const determineProjectTypeFromConfig = async (
   tree: Tree,
   projectConfiguration: ProjectConfiguration,
-): ProjectType | undefined => {
+): Promise<ProjectType | undefined> => {
   // NB: if adding new checks, ensure these go from most to least specific
   // eg. react website is more specific than typescript project
 
-  if (isTrpcApi(tree, projectConfiguration)) {
+  if (await isTrpcApi(tree, projectConfiguration)) {
     return 'ts#trpc-api';
   }
 
@@ -372,10 +372,10 @@ const sourceRoot = (projectConfiguration: ProjectConfiguration) =>
   projectConfiguration.sourceRoot ??
   joinPathFragments(projectConfiguration.root, 'src');
 
-const isTrpcApi = (
+const isTrpcApi = async (
   tree: Tree,
   projectConfiguration: ProjectConfiguration,
-): boolean => {
+): Promise<boolean> => {
   // If the project.json says it's a trpc api, there's no need for introspection
   if ((projectConfiguration.metadata as any)?.apiType === 'trpc') {
     return true;
@@ -391,7 +391,7 @@ const isTrpcApi = (
   }
 
   // If the index file exports an AppRouter, it's a trpc api
-  if (hasExportDeclaration(indexTs, 'AppRouter')) {
+  if (await hasExportDeclaration(indexTs, 'AppRouter')) {
     return true;
   }
 
@@ -414,7 +414,7 @@ const isTrpcApi = (
     return false;
   }
 
-  if (hasExportDeclaration(trpcRouter, 'AppRouter')) {
+  if (await hasExportDeclaration(trpcRouter, 'AppRouter')) {
     return true;
   }
 

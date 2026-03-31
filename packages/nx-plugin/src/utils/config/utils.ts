@@ -38,36 +38,6 @@ export const readAwsNxPluginConfig = async (
 };
 
 /**
- * Serialize a JSON-compatible value to a TypeScript source code string.
- */
-const jsonToCodeString = (obj: unknown): string => {
-  if (obj === null) return 'null';
-  if (obj === undefined) return 'undefined';
-  if (typeof obj === 'string') {
-    const escaped = obj
-      .replace(/\\/g, '\\\\')
-      .replace(/'/g, "\\'")
-      .replace(/\n/g, '\\n')
-      .replace(/\r/g, '\\r')
-      .replace(/\t/g, '\\t');
-    return `'${escaped}'`;
-  }
-  if (typeof obj === 'number' || typeof obj === 'boolean') return String(obj);
-  if (Array.isArray(obj)) {
-    return `[${obj.map(jsonToCodeString).join(', ')}]`;
-  }
-  if (typeof obj === 'object') {
-    const entries = Object.entries(obj).map(([key, value]) => {
-      const isValidIdentifier = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(key);
-      const keyStr = isValidIdentifier ? key : jsonToCodeString(key);
-      return `${keyStr}: ${jsonToCodeString(value)}`;
-    });
-    return `{ ${entries.join(', ')} }`;
-  }
-  throw new Error(`Unsupported type: ${typeof obj}`);
-};
-
-/**
  * Update the aws nx plugin config file.
  * Undefined top level keys in the config update will be untouched, otherwise config is replaced
  */
@@ -84,13 +54,11 @@ export const updateAwsNxPluginConfig = async (
     mergedConfig[key] = value;
   }
 
-  // Build the merged object as a TypeScript source string
-  const mergedStr = jsonToCodeString(mergedConfig);
-
-  // Use GritQL to replace the export default object with a placeholder,
-  // then substitute the placeholder with the actual serialized config.
-  // This avoids GritQL interpreting escape sequences in the replacement text.
-  const placeholder = '__GRITQL_CONFIG_PLACEHOLDER__';
+  // Use GritQL to replace the export default object with a JSON placeholder,
+  // then substitute with the actual JSON. This avoids GritQL interpreting
+  // escape sequences in the replacement text. Prettier handles final formatting.
+  const placeholder = '"__PLACEHOLDER__"';
+  const json = JSON.stringify(mergedConfig);
 
   // Try with `satisfies` first, then fall back to plain `export default`.
   const applied = await applyGritQL(
@@ -106,10 +74,10 @@ export const updateAwsNxPluginConfig = async (
     );
   }
 
-  // Substitute the placeholder with the actual config object
+  // Replace the placeholder string with the actual JSON object
   const content = tree.read(filePath)!.toString();
-  tree.write(filePath, content.replace(placeholder, mergedStr));
+  tree.write(filePath, content.replace(placeholder, json));
 
-  // Format the config nicely after an update
+  // Prettier formats the JSON object into properly indented TypeScript
   await formatFilesInSubtree(tree, filePath);
 };
