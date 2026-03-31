@@ -297,25 +297,45 @@ generateFiles(
 );
 ```
 
-#### TypeScript AST (Abstract Syntax Tree) Manipulation
+#### Code Transforms with GritQL
 
-You can use the `tsAstReplace` method exposed by the Nx Plugin for AWS to replace parts of a TypeScript abstract syntax tree.
+You can use [GritQL](https://docs.grit.io/) to declaratively search and transform source code in your generators. The Nx Plugin for AWS exposes two helpers:
+
+- `applyGritQL(tree, filePath, pattern)` — applies a GritQL rewrite pattern to a file and returns `Promise<boolean>` indicating whether changes were made
+- `matchesGritQL(tree, filePath, pattern)` — checks whether a GritQL pattern matches anywhere in a file and returns `Promise<boolean>`
 
 ```typescript
-import { tsAstReplace } from '@aws/nx-plugin/sdk/utils/ast';
-import * as ts from 'typescript';
+import { applyGritQL, matchesGritQL } from '@aws/nx-plugin/sdk/utils/ast';
 
-// Example: Increment version number in a file
-tsAstReplace(
+// Replace a function call
+await applyGritQL(
   tree,
-  'path/to/version.ts',
-  'VariableDeclaration:has(Identifier[name="VERSION"]) NumericLiteral',
-  (node: ts.NumericLiteral) =>
-    ts.factory.createNumericLiteral(Number(node.text) + 1));
+  'src/app.ts',
+  '`console.log($msg)` => `logger.info($msg)`',
+);
+
+// Add an element to an array only if not already present
+await applyGritQL(
+  tree,
+  'src/plugins.ts',
+  '`plugins: [$items]` => `plugins: [$items, myPlugin()]` where { $items <: not contains `myPlugin` }',
+);
+
+// Check if a pattern exists before making changes
+if (!(await matchesGritQL(tree, filePath, '`import { Auth } from "./auth"`'))) {
+  // Add the import
+}
 ```
 
+GritQL patterns use backtick-delimited code snippets with `$metavariables` as wildcards. Use `=>` for rewrites and `where` clauses for conditions. Patterns work across TypeScript, JavaScript, Python, HCL, and other languages.
+
 :::tip
-You can test out selectors online in the [TSQuery Playground](https://tsquery-playground.firebaseapp.com/).
+You can try out GritQL patterns in the [GritQL Playground](https://docs.grit.io/playground), or install the GritQL CLI locally to test patterns against your files:
+
+```bash
+curl -fsSL https://docs.grit.io/install | bash
+grit apply '`console.log($msg)` => `logger.info($msg)`' --dry-run
+```
 :::
 
 #### Adding Dependencies
