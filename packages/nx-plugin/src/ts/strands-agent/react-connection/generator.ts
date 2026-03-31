@@ -9,6 +9,7 @@ import {
   joinPathFragments,
   OverwriteStrategy,
   Tree,
+  updateJson,
 } from '@nx/devkit';
 import { TsStrandsAgentReactConnectionSchema } from './schema';
 import { runtimeConfigGenerator } from '../../react-website/runtime-config/generator';
@@ -54,6 +55,14 @@ export async function tsStrandsAgentReactConnectionGenerator(
   const auth = targetComponent?.auth ?? metadata?.auth ?? 'IAM';
   const agentProjectAlias = toScopeAlias(agentProjectConfig.name);
   const agentPath = targetComponent?.path ?? 'src/agent';
+
+  // Ensure the agent project has a wildcard path entry in tsconfig.base.json
+  // so that deep imports (e.g., for the router type) resolve correctly
+  ensureWildcardPathEntry(
+    tree,
+    agentProjectConfig.name,
+    agentProjectConfig.root,
+  );
 
   generateFiles(
     tree,
@@ -193,3 +202,33 @@ export async function tsStrandsAgentReactConnectionGenerator(
   };
 }
 export default tsStrandsAgentReactConnectionGenerator;
+
+/**
+ * Ensures a wildcard path entry exists in tsconfig.base.json for the given project,
+ * allowing deep imports (e.g., `@scope/project/src/agent/router.js`).
+ */
+function ensureWildcardPathEntry(
+  tree: Tree,
+  projectName: string,
+  projectRoot: string,
+) {
+  const tsconfigPath = ['tsconfig.base.json', 'tsconfig.json'].find((p) =>
+    tree.exists(p),
+  );
+  if (!tsconfigPath) return;
+
+  const wildcardKey = `${projectName}/*`;
+  const wildcardValue = [`./${projectRoot}/*`];
+
+  updateJson(tree, tsconfigPath, (json) => {
+    const paths = json.compilerOptions?.paths ?? {};
+    if (!paths[wildcardKey]) {
+      paths[wildcardKey] = wildcardValue;
+      json.compilerOptions = {
+        ...json.compilerOptions,
+        paths,
+      };
+    }
+    return json;
+  });
+}
