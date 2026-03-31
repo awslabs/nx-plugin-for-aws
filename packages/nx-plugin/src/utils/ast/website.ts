@@ -5,6 +5,7 @@
 import {
   addDestructuredImport,
   applyGritQLTransform,
+  applyGritQLAppend,
   hasGritQLMatch,
 } from '../ast';
 import { Tree } from '@nx/devkit';
@@ -14,31 +15,6 @@ export interface AddHookResultToRouterProviderContextProps {
   module: string; // eg. react-oidc-context
   contextProp: string; // eg. auth
 }
-
-/**
- * Appends a property to an object matched by a GritQL pattern.
- * Uses += (correct for multi-property objects) with a fallback rewrite
- * for single-property objects where += concatenates without a comma.
- *
- * @param plusPattern - GritQL pattern for += approach, e.g. `\`createRouter({ $props })\` where { $props <: not contains \`name\`, $props += \`name: value\` }`
- * @param rewritePattern - GritQL pattern for rewrite fallback
- * @param verifyPattern - GritQL pattern to verify the property was added correctly
- */
-const addObjectPropWithFallback = async (
-  tree: Tree,
-  filePath: string,
-  plusPattern: string,
-  rewritePattern: string,
-  verifyPattern: string,
-) => {
-  const before = tree.read(filePath)!.toString();
-  await applyGritQLTransform(tree, filePath, plusPattern);
-  const ok = await hasGritQLMatch(tree, filePath, verifyPattern);
-  if (!ok) {
-    tree.write(filePath, before);
-    await applyGritQLTransform(tree, filePath, rewritePattern);
-  }
-};
 
 export const addHookResultToRouterProviderContext = async (
   tree: Tree,
@@ -77,7 +53,7 @@ ${contextProp}?: ReturnType<typeof ${hook}>\`
   );
 
   // 2. Add context property to createRouter config
-  await addObjectPropWithFallback(
+  await applyGritQLAppend(
     tree,
     mainTsxPath,
     `\`createRouter({ $props })\` where { $props <: not contains \`context\`, $props += \`context: { ${contextProp}: undefined }\` }`,
@@ -92,7 +68,7 @@ ${contextProp}?: ReturnType<typeof ${hook}>\`
     `\`context: {}\` => \`context: { ${contextProp}: undefined }\``,
   );
   // Handle non-empty context via += with fallback
-  await addObjectPropWithFallback(
+  await applyGritQLAppend(
     tree,
     mainTsxPath,
     `\`context: { $cprops }\` where { $cprops <: within \`createRouter($_)\`, $cprops <: not contains \`${contextProp}\`, $cprops += \`${contextProp}: undefined\` }`,
