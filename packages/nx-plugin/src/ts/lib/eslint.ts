@@ -10,8 +10,7 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { withVersions } from '../../utils/versions';
-import { factory, ArrayLiteralExpression, SyntaxKind } from 'typescript';
-import { addSingleImport, query, replace } from '../../utils/ast';
+import { addSingleImport, applyGritQLTransform } from '../../utils/ast';
 import { ConfigureProjectOptions } from './types';
 import { readProjectConfigurationUnqualified } from '../../utils/nx';
 
@@ -62,33 +61,15 @@ export const configureEslint = async (
       'eslint-plugin-prettier/recommended',
     );
 
-    // Check if eslintPluginPrettierRecommended exists in exports array
-    const existingPlugin = query(
+    // Prepend eslintPluginPrettierRecommended to the exports array if not present
+    await applyGritQLTransform(
       tree,
       eslintConfigPath,
-      'ExportAssignment > ArrayLiteralExpression Identifier[name="eslintPluginPrettierRecommended"]',
+      'or { `export default []` => `export default [eslintPluginPrettierRecommended]`, `export default [$items]` => `export default [eslintPluginPrettierRecommended, $items]` where { $items <: not contains `eslintPluginPrettierRecommended` } }',
     );
 
-    // Add eslintPluginPrettierRecommended to array if it doesn't exist
-    if (existingPlugin.length === 0) {
-      replace(
-        tree,
-        eslintConfigPath,
-        'ExportAssignment > ArrayLiteralExpression',
-        (node: ArrayLiteralExpression) => {
-          return factory.createArrayLiteralExpression(
-            [
-              factory.createIdentifier('eslintPluginPrettierRecommended'),
-              ...node.elements,
-            ],
-            true,
-          );
-        },
-      );
-    }
-
     // Add ignore patterns to eslint config
-    addIgnoresToEslintConfig(tree, eslintConfigPath, [
+    await addIgnoresToEslintConfig(tree, eslintConfigPath, [
       '**/vite.config.*.timestamp*',
     ]);
 
@@ -113,66 +94,33 @@ export const configureEslint = async (
  * @param eslintConfigPath - Path to the eslint config file
  * @param ignorePatterns - Array of ignore patterns to add
  */
-export const addIgnoresToEslintConfig = (
+export const addIgnoresToEslintConfig = async (
   tree: Tree,
   eslintConfigPath: string,
   ignorePatterns: string[],
-): void => {
-  // Check if there's an object literal with "ignores" as the key
-  const existingIgnores = query(
-    tree,
-    eslintConfigPath,
-    'ExportAssignment > ArrayLiteralExpression ObjectLiteralExpression > PropertyAssignment[name.text="ignores"]',
-  );
-
-  // If there isn't, append one to the config with an empty list
-  if (existingIgnores.length === 0) {
-    replace(
+): Promise<void> => {
+  for (const pattern of ignorePatterns) {
+    const escaped = pattern.replace(/`/g, '\\`');
+    // Single or{} per pattern handles all cases:
+    // 1. No ignores object → add { ignores: ['pattern'] } to the exports array
+    // 2. Empty ignores: [] → rewrite to ignores: ['pattern']
+    // 3. Non-empty ignores: [items] → append 'pattern' to existing items
+    await applyGritQLTransform(
       tree,
       eslintConfigPath,
-      'ExportAssignment > ArrayLiteralExpression',
-      (node: ArrayLiteralExpression) => {
-        return factory.createArrayLiteralExpression(
-          [
-            ...node.elements,
-            factory.createObjectLiteralExpression(
-              [
-                factory.createPropertyAssignment(
-                  factory.createIdentifier('ignores'),
-                  factory.createArrayLiteralExpression([], true),
-                ),
-              ],
-              true,
-            ),
-          ],
-          true,
-        );
-      },
+      `or {
+        \`export default [$items]\` where {
+          $items <: not some \`{ ignores: $_ }\`,
+          $items += \`{ ignores: ['${escaped}'] }\`
+        },
+        \`export default [$items]\` where {
+          $items <: contains \`ignores: []\` => \`ignores: ['${escaped}']\`
+        },
+        \`ignores: [$items]\` => \`ignores: [$items, '${escaped}']\` where {
+          $items <: within \`export default [$_]\`,
+          $items <: not some \`'${escaped}'\`
+        }
+      }`,
     );
   }
-
-  // Create set of ignore patterns for filtering
-  const ignorePatternSet = new Set(ignorePatterns);
-
-  // Call replace on the ignores array
-  replace(
-    tree,
-    eslintConfigPath,
-    'ExportAssignment > ArrayLiteralExpression ObjectLiteralExpression > PropertyAssignment[name.text="ignores"] > ArrayLiteralExpression',
-    (node: ArrayLiteralExpression) => {
-      return factory.createArrayLiteralExpression(
-        [
-          ...node.elements.filter(
-            (p) =>
-              p.kind !== SyntaxKind.StringLiteral ||
-              !ignorePatternSet.has(p.getText().slice(1, -1)), // remove quotes
-          ),
-          ...ignorePatterns.map((pattern) =>
-            factory.createStringLiteral(pattern),
-          ),
-        ],
-        true,
-      );
-    },
-  );
 };
