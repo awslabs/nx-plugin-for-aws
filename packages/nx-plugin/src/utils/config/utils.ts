@@ -4,9 +4,7 @@
  */
 import { generateFiles, joinPathFragments, Tree } from '@nx/devkit';
 import { AwsNxPluginConfig } from '.';
-import * as ts from 'typescript';
-import { jsonToAst, replace } from '../ast';
-import { factory } from 'typescript';
+import { applyGritQL, matchGritQL } from '../ast';
 import { formatFilesInSubtree } from '../format';
 import { importTypeScriptModule } from '../js';
 
@@ -39,53 +37,101 @@ export const readAwsNxPluginConfig = async (
   return await importTypeScriptModule(configTs);
 };
 
+const PLACEHOLDER = '"__PLACEHOLDER__"';
+
+/**
+ * Use GritQL to set a top-level property in the export default object,
+ * then substitute the placeholder with the JSON-serialized value.
+ * Preserves all other properties (including JS expressions) untouched.
+ */
+const setConfigProperty = async (
+  tree: Tree,
+  filePath: string,
+  key: string,
+  value: unknown,
+): Promise<void> => {
+  const json = JSON.stringify(value);
+
+  // Check if the property already exists using a named metavariable
+  // to avoid ambiguity with anonymous $_ in nested where clauses
+  const existsInSatisfies = await matchGritQL(
+    tree,
+    filePath,
+    `\`${key}: $val\` where { $val <: within \`export default $_ satisfies $_\` }`,
+  );
+  const existsInPlain =
+    !existsInSatisfies &&
+    (await matchGritQL(
+      tree,
+      filePath,
+      `\`${key}: $val\` where { $val <: within \`export default $_\` }`,
+    ));
+
+  if (existsInSatisfies || existsInPlain) {
+    // Replace only this property's value, scoped to the export default
+    const within = existsInSatisfies
+      ? `within \`export default $_ satisfies $_\``
+      : `within \`export default $_\``;
+    await applyGritQL(
+      tree,
+      filePath,
+      `\`${key}: $old\` => \`${key}: ${PLACEHOLDER}\` where { $old <: ${within} }`,
+    );
+  } else {
+    // Add the new property using GritQL's += (accumulate) operator.
+    // For non-empty objects, += appends correctly without double commas.
+    // For empty objects, += fails so we fall back to a direct replacement.
+    let added = await applyGritQL(
+      tree,
+      filePath,
+      `\`export default { $props } satisfies $type\` where { $props += \`, ${key}: ${PLACEHOLDER}\` }`,
+    );
+
+    if (!added) {
+      added = await applyGritQL(
+        tree,
+        filePath,
+        `\`export default { } satisfies $type\` => \`export default { ${key}: ${PLACEHOLDER} } satisfies $type\``,
+      );
+    }
+
+    if (!added) {
+      added = await applyGritQL(
+        tree,
+        filePath,
+        `\`export default { $props }\` where { $props += \`, ${key}: ${PLACEHOLDER}\` }`,
+      );
+    }
+
+    if (!added) {
+      await applyGritQL(
+        tree,
+        filePath,
+        `\`export default { }\` => \`export default { ${key}: ${PLACEHOLDER} }\``,
+      );
+    }
+  }
+
+  // Substitute the placeholder with the actual JSON value
+  const content = tree.read(filePath)!.toString();
+  tree.write(filePath, content.replace(PLACEHOLDER, json));
+};
+
 /**
  * Update the aws nx plugin config file.
- * Undefined top level keys in the config update will be untouched, otherwise config is replaced
+ * Only the specified top-level keys are replaced; all other properties
+ * (including those containing JS expressions) are left untouched in source.
  */
 export const updateAwsNxPluginConfig = async (
   tree: Tree,
   configUpdate: Partial<AwsNxPluginConfig>,
 ): Promise<void> => {
-  // Replace the default export
-  replace(
-    tree,
-    AWS_NX_PLUGIN_CONFIG_FILE_NAME,
-    'ExportAssignment ObjectLiteralExpression',
-    (node) => {
-      const existingObj = node as ts.ObjectLiteralExpression;
+  const filePath = AWS_NX_PLUGIN_CONFIG_FILE_NAME;
 
-      const existingProps = new Map<string, ts.PropertyAssignment>();
-      existingObj.properties.forEach((prop) => {
-        if (ts.isPropertyAssignment(prop)) {
-          existingProps.set(prop.name.getText(), prop);
-        }
-      });
+  for (const [key, value] of Object.entries(configUpdate)) {
+    await setConfigProperty(tree, filePath, key, value);
+  }
 
-      const properties: ts.PropertyAssignment[] = [];
-
-      for (const [key, value] of Object.entries(configUpdate)) {
-        properties.push(
-          factory.createPropertyAssignment(
-            key,
-            jsonToAst(value) as ts.Expression,
-          ),
-        );
-      }
-
-      existingObj.properties.forEach((prop) => {
-        if (ts.isPropertyAssignment(prop)) {
-          const name = prop.name.getText();
-          if (configUpdate[name] === undefined) {
-            properties.push(prop);
-          }
-        }
-      });
-
-      return factory.createObjectLiteralExpression(properties, true);
-    },
-  );
-
-  // Format the config nicely after an update
-  await formatFilesInSubtree(tree, AWS_NX_PLUGIN_CONFIG_FILE_NAME);
+  // Prettier formats the result into properly indented TypeScript
+  await formatFilesInSubtree(tree, filePath);
 };

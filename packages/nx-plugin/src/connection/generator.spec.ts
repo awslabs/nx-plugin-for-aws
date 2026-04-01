@@ -194,10 +194,10 @@ describe('connection generator', () => {
 
   describe('resolveConnection', () => {
     describe('project-level connections (no components)', () => {
-      it('should resolve react -> trpc', () => {
+      it('should resolve react -> trpc', async () => {
         setupReactProject();
         setupTrpcProject();
-        const result = resolveConnection(tree, {
+        const result = await resolveConnection(tree, {
           sourceProject: 'frontend',
           targetProject: 'api',
         });
@@ -209,10 +209,10 @@ describe('connection generator', () => {
         expect(result.targetComponent).toBeUndefined();
       });
 
-      it('should resolve react -> fast-api', () => {
+      it('should resolve react -> fast-api', async () => {
         setupReactProject();
         setupFastApiProject();
-        const result = resolveConnection(tree, {
+        const result = await resolveConnection(tree, {
           sourceProject: 'frontend',
           targetProject: 'api',
         });
@@ -222,10 +222,10 @@ describe('connection generator', () => {
         });
       });
 
-      it('should resolve react -> smithy', () => {
+      it('should resolve react -> smithy', async () => {
         setupReactProject();
         setupSmithyProject();
-        const result = resolveConnection(tree, {
+        const result = await resolveConnection(tree, {
           sourceProject: 'frontend',
           targetProject: 'api-model',
         });
@@ -235,50 +235,52 @@ describe('connection generator', () => {
         });
       });
 
-      it('should throw for unsupported connection (trpc -> trpc)', () => {
+      it('should throw for unsupported connection (trpc -> trpc)', async () => {
         setupTrpcProject('api1');
         setupTrpcProject('api2');
-        expect(() =>
+        await expect(
           resolveConnection(tree, {
             sourceProject: 'api1',
             targetProject: 'api2',
           }),
-        ).toThrow(/does not support a connection from api1.*to api2/);
+        ).rejects.toThrow(/does not support a connection from api1.*to api2/);
       });
 
-      it('should throw for unknown source', () => {
+      it('should throw for unknown source', async () => {
         setupUnknownProject();
         setupTrpcProject();
-        expect(() =>
+        await expect(
           resolveConnection(tree, {
             sourceProject: 'unknown',
             targetProject: 'api',
           }),
-        ).toThrow(/does not support a connection from unknown.*to api/);
+        ).rejects.toThrow(/does not support a connection from unknown.*to api/);
       });
 
-      it('should throw for unknown target', () => {
+      it('should throw for unknown target', async () => {
         setupReactProject();
         setupUnknownProject();
-        expect(() =>
+        await expect(
           resolveConnection(tree, {
             sourceProject: 'frontend',
             targetProject: 'unknown',
           }),
-        ).toThrow(/does not support a connection from frontend.*to unknown/);
+        ).rejects.toThrow(
+          /does not support a connection from frontend.*to unknown/,
+        );
       });
 
-      it('should throw for both unknown', () => {
+      it('should throw for both unknown', async () => {
         setupUnknownProject('u1');
         setupUnknownProject('u2');
-        expect(() =>
+        await expect(
           resolveConnection(tree, { sourceProject: 'u1', targetProject: 'u2' }),
-        ).toThrow(/does not support a connection from u1.*to u2/);
+        ).rejects.toThrow(/does not support a connection from u1.*to u2/);
       });
     });
 
     describe('with non-connection-participating components', () => {
-      it('should resolve project-level connection when source has non-participating components', () => {
+      it('should resolve project-level connection when source has non-participating components', async () => {
         setupReactProject('frontend', [
           {
             generator: 'ts#runtime-config',
@@ -287,7 +289,7 @@ describe('connection generator', () => {
           { generator: 'ts#cognito-auth', path: 'src/components/CognitoAuth' },
         ]);
         setupTrpcProject();
-        const result = resolveConnection(tree, {
+        const result = await resolveConnection(tree, {
           sourceProject: 'frontend',
           targetProject: 'api',
         });
@@ -298,7 +300,7 @@ describe('connection generator', () => {
         expect(result.sourceComponent).toBeUndefined();
       });
 
-      it('should resolve project-level connection when target has non-participating components', () => {
+      it('should resolve project-level connection when target has non-participating components', async () => {
         setupReactProject();
         setupTrpcProject('api', [
           {
@@ -307,7 +309,7 @@ describe('connection generator', () => {
             name: 'handler',
           },
         ]);
-        const result = resolveConnection(tree, {
+        const result = await resolveConnection(tree, {
           sourceProject: 'frontend',
           targetProject: 'api',
         });
@@ -318,14 +320,14 @@ describe('connection generator', () => {
         expect(result.targetComponent).toBeUndefined();
       });
 
-      it('should resolve when both sides have non-participating components', () => {
+      it('should resolve when both sides have non-participating components', async () => {
         setupReactProject('frontend', [
           { generator: 'ts#runtime-config', path: 'src/rc' },
         ]);
         setupTrpcProject('api', [
           { generator: 'ts#lambda-function', path: 'src/h.ts', name: 'h' },
         ]);
-        const result = resolveConnection(tree, {
+        const result = await resolveConnection(tree, {
           sourceProject: 'frontend',
           targetProject: 'api',
         });
@@ -342,14 +344,14 @@ describe('connection generator', () => {
         { source: 'comp-src', target: 'comp-tgt' },
       ];
 
-      it('should resolve component-level connection', () => {
+      it('should resolve component-level connection', async () => {
         setupUnknownProject('src', [
           { generator: 'comp-src', path: 'src/c', name: 'cs' },
         ]);
         setupUnknownProject('tgt', [
           { generator: 'comp-tgt', path: 'src/c', name: 'ct' },
         ]);
-        const result = resolveConnection(
+        const result = await resolveConnection(
           tree,
           { sourceProject: 'src', targetProject: 'tgt' },
           customConnections,
@@ -370,23 +372,23 @@ describe('connection generator', () => {
         });
       });
 
-      it('should throw when multiple connections match (ambiguous)', () => {
+      it('should throw when multiple connections match (ambiguous)', async () => {
         setupReactProject('src', [
           { generator: 'comp-src', path: 'src/c', name: 'cs' },
         ]);
         setupTrpcProject('tgt', [
           { generator: 'comp-tgt', path: 'src/c', name: 'ct' },
         ]);
-        expect(() =>
+        await expect(
           resolveConnection(
             tree,
             { sourceProject: 'src', targetProject: 'tgt' },
             customConnections,
           ),
-        ).toThrow(/Ambiguous connection from src to tgt/);
+        ).rejects.toThrow(/Ambiguous connection from src to tgt/);
       });
 
-      it('should resolve when only one component connection matches among multiple components', () => {
+      it('should resolve when only one component connection matches among multiple components', async () => {
         setupUnknownProject('src', [
           { generator: 'comp-src', path: 'src/c', name: 'cs' },
           { generator: 'other', path: 'src/o', name: 'other' },
@@ -394,7 +396,7 @@ describe('connection generator', () => {
         setupUnknownProject('tgt', [
           { generator: 'comp-tgt', path: 'src/c', name: 'ct' },
         ]);
-        const result = resolveConnection(
+        const result = await resolveConnection(
           tree,
           { sourceProject: 'src', targetProject: 'tgt' },
           customConnections,
@@ -408,153 +410,165 @@ describe('connection generator', () => {
     });
 
     describe('sourceComponent validation', () => {
-      it('should throw when not found (no components)', () => {
+      it('should throw when not found (no components)', async () => {
         setupReactProject();
         setupTrpcProject();
-        expect(() =>
+        await expect(
           resolveConnection(tree, {
             sourceProject: 'frontend',
             targetProject: 'api',
             sourceComponent: 'x',
           }),
-        ).toThrow(
+        ).rejects.toThrow(
           "Component 'x' not found in source project frontend. Available components: none",
         );
       });
 
-      it('should throw with available components listed', () => {
+      it('should throw with available components listed', async () => {
         setupReactProject('frontend', [
           { generator: 'g1', path: 'p1', name: 'comp-a' },
           { generator: 'g2', path: 'p2', name: 'comp-b' },
         ]);
         setupTrpcProject();
-        expect(() =>
+        await expect(
           resolveConnection(tree, {
             sourceProject: 'frontend',
             targetProject: 'api',
             sourceComponent: 'x',
           }),
-        ).toThrow(
+        ).rejects.toThrow(
           "Component 'x' not found in source project frontend. Available components: comp-a, comp-b",
         );
       });
 
-      it('should succeed when found by name', () => {
+      it('should succeed when found by name', async () => {
         setupReactProject('frontend', [
           { generator: 'g', path: 'p', name: 'rc' },
         ]);
         setupTrpcProject();
         expect(
-          resolveConnection(tree, {
-            sourceProject: 'frontend',
-            targetProject: 'api',
-            sourceComponent: 'rc',
-          }).connection,
+          (
+            await resolveConnection(tree, {
+              sourceProject: 'frontend',
+              targetProject: 'api',
+              sourceComponent: 'rc',
+            })
+          ).connection,
         ).toEqual({ source: 'react', target: 'ts#trpc-api' });
       });
 
-      it('should succeed when found by path', () => {
+      it('should succeed when found by path', async () => {
         setupReactProject('frontend', [{ generator: 'g', path: 'src/rc' }]);
         setupTrpcProject();
         expect(
-          resolveConnection(tree, {
-            sourceProject: 'frontend',
-            targetProject: 'api',
-            sourceComponent: 'src/rc',
-          }).connection,
+          (
+            await resolveConnection(tree, {
+              sourceProject: 'frontend',
+              targetProject: 'api',
+              sourceComponent: 'src/rc',
+            })
+          ).connection,
         ).toEqual({ source: 'react', target: 'ts#trpc-api' });
       });
 
-      it('should succeed when found by generator', () => {
+      it('should succeed when found by generator', async () => {
         setupReactProject('frontend', [{ generator: 'ts#rc', path: 'p' }]);
         setupTrpcProject();
         expect(
-          resolveConnection(tree, {
-            sourceProject: 'frontend',
-            targetProject: 'api',
-            sourceComponent: 'ts#rc',
-          }).connection,
+          (
+            await resolveConnection(tree, {
+              sourceProject: 'frontend',
+              targetProject: 'api',
+              sourceComponent: 'ts#rc',
+            })
+          ).connection,
         ).toEqual({ source: 'react', target: 'ts#trpc-api' });
       });
     });
 
     describe('targetComponent validation', () => {
-      it('should throw when not found (no components)', () => {
+      it('should throw when not found (no components)', async () => {
         setupReactProject();
         setupTrpcProject();
-        expect(() =>
+        await expect(
           resolveConnection(tree, {
             sourceProject: 'frontend',
             targetProject: 'api',
             targetComponent: 'x',
           }),
-        ).toThrow(
+        ).rejects.toThrow(
           "Component 'x' not found in target project api. Available components: none",
         );
       });
 
-      it('should throw with available components listed', () => {
+      it('should throw with available components listed', async () => {
         setupReactProject();
         setupTrpcProject('api', [
           { generator: 'g', path: 'p', name: 'handler' },
         ]);
-        expect(() =>
+        await expect(
           resolveConnection(tree, {
             sourceProject: 'frontend',
             targetProject: 'api',
             targetComponent: 'x',
           }),
-        ).toThrow(
+        ).rejects.toThrow(
           "Component 'x' not found in target project api. Available components: handler",
         );
       });
 
-      it('should succeed when found by name', () => {
+      it('should succeed when found by name', async () => {
         setupReactProject();
         setupTrpcProject('api', [{ generator: 'g', path: 'p', name: 'h' }]);
         expect(
-          resolveConnection(tree, {
-            sourceProject: 'frontend',
-            targetProject: 'api',
-            targetComponent: 'h',
-          }).connection,
+          (
+            await resolveConnection(tree, {
+              sourceProject: 'frontend',
+              targetProject: 'api',
+              targetComponent: 'h',
+            })
+          ).connection,
         ).toEqual({ source: 'react', target: 'ts#trpc-api' });
       });
 
-      it('should succeed when found by path', () => {
+      it('should succeed when found by path', async () => {
         setupReactProject();
         setupTrpcProject('api', [
           { generator: 'g', path: 'src/h.ts', name: 'h' },
         ]);
         expect(
-          resolveConnection(tree, {
-            sourceProject: 'frontend',
-            targetProject: 'api',
-            targetComponent: 'src/h.ts',
-          }).connection,
+          (
+            await resolveConnection(tree, {
+              sourceProject: 'frontend',
+              targetProject: 'api',
+              targetComponent: 'src/h.ts',
+            })
+          ).connection,
         ).toEqual({ source: 'react', target: 'ts#trpc-api' });
       });
 
-      it('should succeed when found by generator', () => {
+      it('should succeed when found by generator', async () => {
         setupReactProject();
         setupTrpcProject('api', [{ generator: 'ts#lf', path: 'p', name: 'h' }]);
         expect(
-          resolveConnection(tree, {
-            sourceProject: 'frontend',
-            targetProject: 'api',
-            targetComponent: 'ts#lf',
-          }).connection,
+          (
+            await resolveConnection(tree, {
+              sourceProject: 'frontend',
+              targetProject: 'api',
+              targetComponent: 'ts#lf',
+            })
+          ).connection,
         ).toEqual({ source: 'react', target: 'ts#trpc-api' });
       });
     });
 
     describe('both sourceComponent and targetComponent', () => {
-      it('should succeed when both found', () => {
+      it('should succeed when both found', async () => {
         setupReactProject('frontend', [
           { generator: 'g1', path: 'p1', name: 'sc' },
         ]);
         setupTrpcProject('api', [{ generator: 'g2', path: 'p2', name: 'tc' }]);
-        const result = resolveConnection(tree, {
+        const result = await resolveConnection(tree, {
           sourceProject: 'frontend',
           targetProject: 'api',
           sourceComponent: 'sc',
@@ -566,60 +580,62 @@ describe('connection generator', () => {
         });
       });
 
-      it('should throw when sourceComponent not found', () => {
+      it('should throw when sourceComponent not found', async () => {
         setupReactProject();
         setupTrpcProject('api', [{ generator: 'g', path: 'p', name: 'tc' }]);
-        expect(() =>
+        await expect(
           resolveConnection(tree, {
             sourceProject: 'frontend',
             targetProject: 'api',
             sourceComponent: 'missing',
             targetComponent: 'tc',
           }),
-        ).toThrow(/Component 'missing' not found in source project/);
+        ).rejects.toThrow(/Component 'missing' not found in source project/);
       });
 
-      it('should throw when targetComponent not found', () => {
+      it('should throw when targetComponent not found', async () => {
         setupReactProject('frontend', [
           { generator: 'g', path: 'p', name: 'sc' },
         ]);
         setupTrpcProject();
-        expect(() =>
+        await expect(
           resolveConnection(tree, {
             sourceProject: 'frontend',
             targetProject: 'api',
             sourceComponent: 'sc',
             targetComponent: 'missing',
           }),
-        ).toThrow(/Component 'missing' not found in target project/);
+        ).rejects.toThrow(/Component 'missing' not found in target project/);
       });
     });
 
     describe('custom supported connections parameter', () => {
-      it('should use custom list', () => {
+      it('should use custom list', async () => {
         setupReactProject();
         setupTrpcProject();
         // Default works
         expect(
-          resolveConnection(tree, {
-            sourceProject: 'frontend',
-            targetProject: 'api',
-          }).connection,
+          (
+            await resolveConnection(tree, {
+              sourceProject: 'frontend',
+              targetProject: 'api',
+            })
+          ).connection,
         ).toEqual({ source: 'react', target: 'ts#trpc-api' });
         // Empty list fails
-        expect(() =>
+        await expect(
           resolveConnection(
             tree,
             { sourceProject: 'frontend', targetProject: 'api' },
             [],
           ),
-        ).toThrow(/does not support a connection/);
+        ).rejects.toThrow(/does not support a connection/);
       });
 
-      it('should support custom connection types', () => {
+      it('should support custom connection types', async () => {
         setupUnknownProject('s', [{ generator: 'cs', path: 'p', name: 'c' }]);
         setupUnknownProject('t', [{ generator: 'ct', path: 'p', name: 'c' }]);
-        const result = resolveConnection(
+        const result = await resolveConnection(
           tree,
           { sourceProject: 's', targetProject: 't' },
           [{ source: 'cs', target: 'ct' }],
@@ -631,10 +647,10 @@ describe('connection generator', () => {
     });
 
     describe('resolved component metadata', () => {
-      it('should return undefined components for project-level connection', () => {
+      it('should return undefined components for project-level connection', async () => {
         setupReactProject();
         setupTrpcProject();
-        const result = resolveConnection(tree, {
+        const result = await resolveConnection(tree, {
           sourceProject: 'frontend',
           targetProject: 'api',
         });
@@ -642,14 +658,14 @@ describe('connection generator', () => {
         expect(result.targetComponent).toBeUndefined();
       });
 
-      it('should return component metadata with additional fields', () => {
+      it('should return component metadata with additional fields', async () => {
         setupUnknownProject('s', [
           { generator: 'cs', path: 'src/c', name: 'n', port: 8080 },
         ]);
         setupUnknownProject('t', [
           { generator: 'ct', path: 'src/c', name: 'n' },
         ]);
-        const result = resolveConnection(
+        const result = await resolveConnection(
           tree,
           { sourceProject: 's', targetProject: 't' },
           [{ source: 'cs', target: 'ct' }],
@@ -669,50 +685,52 @@ describe('connection generator', () => {
     });
 
     describe('error message quality', () => {
-      it('should include project types in unsupported error', () => {
+      it('should include project types in unsupported error', async () => {
         setupTrpcProject('a1');
         setupFastApiProject('a2');
-        expect(() =>
+        await expect(
           resolveConnection(tree, { sourceProject: 'a1', targetProject: 'a2' }),
-        ).toThrow(
+        ).rejects.toThrow(
           'This generator does not support a connection from a1 (ts#trpc-api) to a2 (py#fast-api)',
         );
       });
 
-      it('should include component types in unsupported error', () => {
+      it('should include component types in unsupported error', async () => {
         setupUnknownProject('s', [{ generator: 'ga', path: 'p', name: 'a' }]);
         setupUnknownProject('t', [{ generator: 'gb', path: 'p', name: 'b' }]);
-        expect(() =>
+        await expect(
           resolveConnection(tree, { sourceProject: 's', targetProject: 't' }),
-        ).toThrow(
+        ).rejects.toThrow(
           'This generator does not support a connection from s (ga) to t (gb)',
         );
       });
 
-      it('should list all connections in ambiguity error', () => {
+      it('should list all connections in ambiguity error', async () => {
         setupReactProject('s', [{ generator: 'cs', path: 'p', name: 'c' }]);
         setupTrpcProject('t', [{ generator: 'ct', path: 'p', name: 'c' }]);
-        expect(() =>
+        await expect(
           resolveConnection(tree, { sourceProject: 's', targetProject: 't' }, [
             { source: 'react', target: 'ts#trpc-api' },
             { source: 'cs', target: 'ct' },
           ]),
-        ).toThrow(/Ambiguous.*react -> ts#trpc-api.*c \(cs\) -> c \(ct\)/);
+        ).rejects.toThrow(
+          /Ambiguous.*react -> ts#trpc-api.*c \(cs\) -> c \(ct\)/,
+        );
       });
 
-      it('should list available components when not found', () => {
+      it('should list available components when not found', async () => {
         setupReactProject('frontend', [
           { generator: 'g1', path: 'p1' },
           { generator: 'g2', path: 'p2', name: 'named' },
         ]);
         setupTrpcProject();
-        expect(() =>
+        await expect(
           resolveConnection(tree, {
             sourceProject: 'frontend',
             targetProject: 'api',
             sourceComponent: 'x',
           }),
-        ).toThrow(
+        ).rejects.toThrow(
           "Component 'x' not found in source project frontend. Available components: g1, named",
         );
       });
@@ -720,26 +738,26 @@ describe('connection generator', () => {
   });
 
   describe('determineProjectType', () => {
-    it('should identify py#fast-api by metadata', () => {
+    it('should identify py#fast-api by metadata', async () => {
       setupFastApiProject('api');
-      expect(determineProjectType(tree, 'api')).toBe('py#fast-api');
+      expect(await determineProjectType(tree, 'api')).toBe('py#fast-api');
     });
 
-    it('should identify py#fast-api by pyproject.toml', () => {
+    it('should identify py#fast-api by pyproject.toml', async () => {
       setupUnknownProject('api');
       tree.write(
         'apps/api/pyproject.toml',
         `[project]\ndependencies = ["fastapi"]`,
       );
-      expect(determineProjectType(tree, 'api')).toBe('py#fast-api');
+      expect(await determineProjectType(tree, 'api')).toBe('py#fast-api');
     });
 
-    it('should identify ts#trpc-api by metadata', () => {
+    it('should identify ts#trpc-api by metadata', async () => {
       setupTrpcProject();
-      expect(determineProjectType(tree, 'api')).toBe('ts#trpc-api');
+      expect(await determineProjectType(tree, 'api')).toBe('ts#trpc-api');
     });
 
-    it('should allow unqualified project name', () => {
+    it('should allow unqualified project name', async () => {
       updateJson(tree, 'package.json', (p) => ({
         ...p,
         name: '@scope/source',
@@ -752,42 +770,42 @@ describe('connection generator', () => {
           metadata: { apiType: 'trpc' },
         }),
       );
-      expect(determineProjectType(tree, 'api')).toBe('ts#trpc-api');
+      expect(await determineProjectType(tree, 'api')).toBe('ts#trpc-api');
     });
 
-    it('should identify ts#trpc-api by AppRouter in index.ts', () => {
+    it('should identify ts#trpc-api by AppRouter in index.ts', async () => {
       setupUnknownProject('api');
       tree.write(
         'apps/api/src/index.ts',
         'export type { AppRouter } from "./router";',
       );
       tree.write('apps/api/src/router.ts', 'export type AppRouter = any;');
-      expect(determineProjectType(tree, 'api')).toBe('ts#trpc-api');
+      expect(await determineProjectType(tree, 'api')).toBe('ts#trpc-api');
     });
 
-    it('should identify ts#trpc-api by AppRouter in router.ts', () => {
+    it('should identify ts#trpc-api by AppRouter in router.ts', async () => {
       setupUnknownProject('api');
       tree.write('apps/api/src/index.ts', '');
       tree.write('apps/api/src/router.ts', 'export type AppRouter = any;');
-      expect(determineProjectType(tree, 'api')).toBe('ts#trpc-api');
+      expect(await determineProjectType(tree, 'api')).toBe('ts#trpc-api');
     });
 
-    it('should identify ts#trpc-api by AppRouter in lambdas/router.ts', () => {
+    it('should identify ts#trpc-api by AppRouter in lambdas/router.ts', async () => {
       setupUnknownProject('api');
       tree.write('apps/api/src/index.ts', '');
       tree.write(
         'apps/api/src/lambdas/router.ts',
         'export type AppRouter = any;',
       );
-      expect(determineProjectType(tree, 'api')).toBe('ts#trpc-api');
+      expect(await determineProjectType(tree, 'api')).toBe('ts#trpc-api');
     });
 
-    it('should identify react by main.tsx', () => {
+    it('should identify react by main.tsx', async () => {
       setupReactProject();
-      expect(determineProjectType(tree, 'frontend')).toBe('react');
+      expect(await determineProjectType(tree, 'frontend')).toBe('react');
     });
 
-    it('should identify react using sourceRoot', () => {
+    it('should identify react using sourceRoot', async () => {
       tree.write(
         'apps/frontend/project.json',
         JSON.stringify({
@@ -797,15 +815,15 @@ describe('connection generator', () => {
         }),
       );
       tree.write('apps/frontend/source/main.tsx', '');
-      expect(determineProjectType(tree, 'frontend')).toBe('react');
+      expect(await determineProjectType(tree, 'frontend')).toBe('react');
     });
 
-    it('should identify smithy (model project)', () => {
+    it('should identify smithy (model project)', async () => {
       setupSmithyProject();
-      expect(determineProjectType(tree, 'api-model')).toBe('smithy');
+      expect(await determineProjectType(tree, 'api-model')).toBe('smithy');
     });
 
-    it('should identify smithy (backend project)', () => {
+    it('should identify smithy (backend project)', async () => {
       tree.write(
         'apps/api-backend/project.json',
         JSON.stringify({
@@ -814,12 +832,12 @@ describe('connection generator', () => {
           metadata: { generator: 'ts#smithy-api' },
         }),
       );
-      expect(determineProjectType(tree, 'api-backend')).toBe('smithy');
+      expect(await determineProjectType(tree, 'api-backend')).toBe('smithy');
     });
 
-    it('should return undefined for unknown', () => {
+    it('should return undefined for unknown', async () => {
       setupUnknownProject();
-      expect(determineProjectType(tree, 'unknown')).toBeUndefined();
+      expect(await determineProjectType(tree, 'unknown')).toBeUndefined();
     });
   });
 
@@ -968,7 +986,7 @@ describe('connection generator', () => {
       { source: 'comp-src', target: 'comp-tgt' },
     ];
 
-    it('should return source component metadata when source matches via component (connection participant)', () => {
+    it('should return source component metadata when source matches via component (connection participant)', async () => {
       // Source has no project-level type, only a component that IS a connection participant
       setupUnknownProject('source', [
         { generator: 'comp-src', path: 'src/comp', name: 'my-comp' },
@@ -977,7 +995,7 @@ describe('connection generator', () => {
         { generator: 'comp-tgt', path: 'src/comp', name: 'tgt-comp' },
       ]);
 
-      const result = resolveConnection(
+      const result = await resolveConnection(
         tree,
         {
           sourceProject: 'source',
@@ -995,7 +1013,7 @@ describe('connection generator', () => {
       expect(result.targetComponent?.name).toBe('tgt-comp');
     });
 
-    it('should return target component metadata when target matches via component (connection participant)', () => {
+    it('should return target component metadata when target matches via component (connection participant)', async () => {
       setupUnknownProject('source', [
         { generator: 'comp-src', path: 'src/comp', name: 'src-comp' },
       ]);
@@ -1003,7 +1021,7 @@ describe('connection generator', () => {
         { generator: 'comp-tgt', path: 'src/comp', name: 'my-tgt' },
       ]);
 
-      const result = resolveConnection(
+      const result = await resolveConnection(
         tree,
         {
           sourceProject: 'source',
@@ -1020,7 +1038,7 @@ describe('connection generator', () => {
       expect(result.targetComponent?.name).toBe('my-tgt');
     });
 
-    it('should throw when multiple components of same generator type produce multiple matches', () => {
+    it('should throw when multiple components of same generator type produce multiple matches', async () => {
       // Two comp-src components on source side, one comp-tgt on target
       // This produces 2 matches (one per source component)
       setupUnknownProject('source', [
@@ -1031,16 +1049,16 @@ describe('connection generator', () => {
         { generator: 'comp-tgt', path: 'src/c', name: 'comp-c' },
       ]);
 
-      expect(() =>
+      await expect(
         resolveConnection(
           tree,
           { sourceProject: 'source', targetProject: 'target' },
           customConnections,
         ),
-      ).toThrow(/Ambiguous connection from source to target/);
+      ).rejects.toThrow(/Ambiguous connection from source to target/);
     });
 
-    it('should disambiguate when sourceComponent and targetComponent are specified with multiple same-type components', () => {
+    it('should disambiguate when sourceComponent and targetComponent are specified with multiple same-type components', async () => {
       // Reproduces the smoke test scenario: project has 2 agents and 2 MCP servers
       const connections: Connection[] = [
         { source: 'ts#strands-agent', target: 'ts#mcp-server' },
@@ -1066,16 +1084,16 @@ describe('connection generator', () => {
       ]);
 
       // Without specifying components: ambiguous (2 agents × 2 MCP servers = 4 matches)
-      expect(() =>
+      await expect(
         resolveConnection(
           tree,
           { sourceProject: 'ts-project', targetProject: 'ts-project' },
           connections,
         ),
-      ).toThrow(/Ambiguous/);
+      ).rejects.toThrow(/Ambiguous/);
 
       // With sourceComponent and targetComponent: resolves to the specific pair
-      const result = resolveConnection(
+      const result = await resolveConnection(
         tree,
         {
           sourceProject: 'ts-project',
@@ -1093,7 +1111,7 @@ describe('connection generator', () => {
       expect(result.targetComponent?.name).toBe('hosted-mcp-server');
     });
 
-    it('should include component names in ambiguity error message', () => {
+    it('should include component names in ambiguity error message', async () => {
       const connections: Connection[] = [
         { source: 'comp-src', target: 'comp-tgt' },
       ];
@@ -1106,53 +1124,53 @@ describe('connection generator', () => {
         { generator: 'comp-tgt', path: 'src/c', name: 'gamma' },
       ]);
 
-      expect(() =>
+      await expect(
         resolveConnection(
           tree,
           { sourceProject: 'source', targetProject: 'target' },
           connections,
         ),
-      ).toThrow(
+      ).rejects.toThrow(
         /alpha \(comp-src\) -> gamma \(comp-tgt\).*beta \(comp-src\) -> gamma \(comp-tgt\)/,
       );
     });
 
-    it('should throw when no candidates exist on either side (empty project)', () => {
+    it('should throw when no candidates exist on either side (empty project)', async () => {
       setupUnknownProject('empty1');
       setupUnknownProject('empty2');
 
-      expect(() =>
+      await expect(
         resolveConnection(tree, {
           sourceProject: 'empty1',
           targetProject: 'empty2',
         }),
-      ).toThrow(/does not support a connection from empty1 to empty2/);
+      ).rejects.toThrow(/does not support a connection from empty1 to empty2/);
     });
 
-    it('should throw when component is a connection participant but other side has no match', () => {
+    it('should throw when component is a connection participant but other side has no match', async () => {
       setupUnknownProject('source', [
         { generator: 'comp-src', path: 'src/comp', name: 'my-comp' },
       ]);
       // Target has no comp-tgt component
       setupUnknownProject('target');
 
-      expect(() =>
+      await expect(
         resolveConnection(
           tree,
           { sourceProject: 'source', targetProject: 'target' },
           customConnections,
         ),
-      ).toThrow(/does not support a connection from source.*to target/);
+      ).rejects.toThrow(/does not support a connection from source.*to target/);
     });
 
-    it('should resolve mixed: project-level source + component-level target', () => {
+    it('should resolve mixed: project-level source + component-level target', async () => {
       // Source is react (project-level), target matches via component
       setupReactProject('source');
       setupUnknownProject('target', [
         { generator: 'ts#trpc-api', path: 'src/api', name: 'api-comp' },
       ]);
 
-      const result = resolveConnection(tree, {
+      const result = await resolveConnection(tree, {
         sourceProject: 'source',
         targetProject: 'target',
       });
@@ -1165,14 +1183,14 @@ describe('connection generator', () => {
       expect(result.targetComponent?.name).toBe('api-comp');
     });
 
-    it('should resolve mixed: component-level source + project-level target', () => {
+    it('should resolve mixed: component-level source + project-level target', async () => {
       // Source matches via component, target is trpc (project-level)
       setupUnknownProject('source', [
         { generator: 'react', path: 'src/app', name: 'react-app' },
       ]);
       setupTrpcProject('target');
 
-      const result = resolveConnection(tree, {
+      const result = await resolveConnection(tree, {
         sourceProject: 'source',
         targetProject: 'target',
       });
@@ -1185,21 +1203,23 @@ describe('connection generator', () => {
       expect(result.targetComponent).toBeUndefined();
     });
 
-    it('should handle sourceComponent specified for a project with only project-level type', () => {
+    it('should handle sourceComponent specified for a project with only project-level type', async () => {
       // Source is react but has no components - specifying sourceComponent should fail
       setupReactProject();
       setupTrpcProject();
 
-      expect(() =>
+      await expect(
         resolveConnection(tree, {
           sourceProject: 'frontend',
           targetProject: 'api',
           sourceComponent: 'anything',
         }),
-      ).toThrow(/Component 'anything' not found in source project frontend/);
+      ).rejects.toThrow(
+        /Component 'anything' not found in source project frontend/,
+      );
     });
 
-    it('should handle project with metadata but no components array', () => {
+    it('should handle project with metadata but no components array', async () => {
       tree.write(
         'apps/proj/project.json',
         JSON.stringify({
@@ -1210,18 +1230,18 @@ describe('connection generator', () => {
       );
       setupTrpcProject();
 
-      expect(() =>
+      await expect(
         resolveConnection(tree, {
           sourceProject: 'proj',
           targetProject: 'api',
           sourceComponent: 'anything',
         }),
-      ).toThrow(
+      ).rejects.toThrow(
         /Component 'anything' not found in source project proj. Available components: none/,
       );
     });
 
-    it('should handle component with no name (falls back to generator in available list)', () => {
+    it('should handle component with no name (falls back to generator in available list)', async () => {
       setupReactProject('frontend', [
         {
           generator: 'ts#runtime-config',
@@ -1230,18 +1250,18 @@ describe('connection generator', () => {
       ]);
       setupTrpcProject();
 
-      expect(() =>
+      await expect(
         resolveConnection(tree, {
           sourceProject: 'frontend',
           targetProject: 'api',
           sourceComponent: 'missing',
         }),
-      ).toThrow(
+      ).rejects.toThrow(
         "Component 'missing' not found in source project frontend. Available components: ts#runtime-config",
       );
     });
 
-    it('should disambiguate with sourceComponent when multiple connections match', () => {
+    it('should disambiguate with sourceComponent when multiple connections match', async () => {
       const connections: Connection[] = [
         { source: 'react', target: 'ts#trpc-api' },
         { source: 'comp-src', target: 'comp-tgt' },
@@ -1257,16 +1277,16 @@ describe('connection generator', () => {
       ]);
 
       // Without component: ambiguous
-      expect(() =>
+      await expect(
         resolveConnection(
           tree,
           { sourceProject: 'source', targetProject: 'target' },
           connections,
         ),
-      ).toThrow(/Ambiguous/);
+      ).rejects.toThrow(/Ambiguous/);
 
       // With sourceComponent: narrows to comp-src, resolves comp-src -> comp-tgt
-      const result = resolveConnection(
+      const result = await resolveConnection(
         tree,
         {
           sourceProject: 'source',
@@ -1282,7 +1302,7 @@ describe('connection generator', () => {
       expect(result.sourceComponent?.name).toBe('my-comp');
     });
 
-    it('should disambiguate with targetComponent when multiple connections match', () => {
+    it('should disambiguate with targetComponent when multiple connections match', async () => {
       const connections: Connection[] = [
         { source: 'react', target: 'ts#trpc-api' },
         { source: 'comp-src', target: 'comp-tgt' },
@@ -1296,7 +1316,7 @@ describe('connection generator', () => {
       ]);
 
       // With targetComponent: narrows to comp-tgt, resolves comp-src -> comp-tgt
-      const result = resolveConnection(
+      const result = await resolveConnection(
         tree,
         {
           sourceProject: 'source',
@@ -1312,7 +1332,7 @@ describe('connection generator', () => {
       expect(result.targetComponent?.name).toBe('tgt-comp');
     });
 
-    it('should disambiguate with both sourceComponent and targetComponent', () => {
+    it('should disambiguate with both sourceComponent and targetComponent', async () => {
       const connections: Connection[] = [
         { source: 'react', target: 'ts#trpc-api' },
         { source: 'comp-src', target: 'comp-tgt' },
@@ -1325,7 +1345,7 @@ describe('connection generator', () => {
         { generator: 'comp-tgt', path: 'src/comp', name: 'tgt-comp' },
       ]);
 
-      const result = resolveConnection(
+      const result = await resolveConnection(
         tree,
         {
           sourceProject: 'source',
@@ -1343,7 +1363,7 @@ describe('connection generator', () => {
       expect(result.targetComponent?.name).toBe('tgt-comp');
     });
 
-    it('should fall back to all candidates when specified component has no matching candidates', () => {
+    it('should fall back to all candidates when specified component has no matching candidates', async () => {
       // Source is react with a non-participating component
       // Specifying the non-participating component should still resolve via project-level
       setupReactProject('frontend', [
@@ -1351,7 +1371,7 @@ describe('connection generator', () => {
       ]);
       setupTrpcProject();
 
-      const result = resolveConnection(tree, {
+      const result = await resolveConnection(tree, {
         sourceProject: 'frontend',
         targetProject: 'api',
         sourceComponent: 'rc',
@@ -1362,7 +1382,7 @@ describe('connection generator', () => {
       });
     });
 
-    it('should disambiguate to project-level connection with "." sentinel on source', () => {
+    it('should disambiguate to project-level connection with "." sentinel on source', async () => {
       const connections: Connection[] = [
         { source: 'react', target: 'ts#trpc-api' },
         { source: 'comp-src', target: 'comp-tgt' },
@@ -1376,16 +1396,16 @@ describe('connection generator', () => {
       ]);
 
       // Without sentinel: ambiguous
-      expect(() =>
+      await expect(
         resolveConnection(
           tree,
           { sourceProject: 'source', targetProject: 'target' },
           connections,
         ),
-      ).toThrow(/Ambiguous/);
+      ).rejects.toThrow(/Ambiguous/);
 
       // With "." on source: narrows to project-level, resolves react -> ts#trpc-api
-      const result = resolveConnection(
+      const result = await resolveConnection(
         tree,
         {
           sourceProject: 'source',
@@ -1401,7 +1421,7 @@ describe('connection generator', () => {
       expect(result.sourceComponent).toBeUndefined();
     });
 
-    it('should disambiguate to project-level connection with "." sentinel on target', () => {
+    it('should disambiguate to project-level connection with "." sentinel on target', async () => {
       const connections: Connection[] = [
         { source: 'react', target: 'ts#trpc-api' },
         { source: 'comp-src', target: 'comp-tgt' },
@@ -1415,7 +1435,7 @@ describe('connection generator', () => {
       ]);
 
       // With "." on target: narrows target to project-level only
-      const result = resolveConnection(
+      const result = await resolveConnection(
         tree,
         {
           sourceProject: 'source',
@@ -1431,7 +1451,7 @@ describe('connection generator', () => {
       expect(result.targetComponent).toBeUndefined();
     });
 
-    it('should disambiguate with "." on both sides', () => {
+    it('should disambiguate with "." on both sides', async () => {
       const connections: Connection[] = [
         { source: 'react', target: 'ts#trpc-api' },
         { source: 'comp-src', target: 'comp-tgt' },
@@ -1444,7 +1464,7 @@ describe('connection generator', () => {
         { generator: 'comp-tgt', path: 'src/comp', name: 'tgt-comp' },
       ]);
 
-      const result = resolveConnection(
+      const result = await resolveConnection(
         tree,
         {
           sourceProject: 'source',
@@ -1462,7 +1482,7 @@ describe('connection generator', () => {
       expect(result.targetComponent).toBeUndefined();
     });
 
-    it('should throw when "." is used but project has no project-level type', () => {
+    it('should throw when "." is used but project has no project-level type', async () => {
       setupUnknownProject('source', [
         { generator: 'comp-src', path: 'src/comp', name: 'my-comp' },
       ]);
@@ -1470,7 +1490,7 @@ describe('connection generator', () => {
         { generator: 'comp-tgt', path: 'src/comp', name: 'tgt-comp' },
       ]);
 
-      expect(() =>
+      await expect(
         resolveConnection(
           tree,
           {
@@ -1480,12 +1500,12 @@ describe('connection generator', () => {
           },
           [{ source: 'comp-src', target: 'comp-tgt' }],
         ),
-      ).toThrow(/does not support a connection/);
+      ).rejects.toThrow(/does not support a connection/);
     });
   });
 
   describe('side-aware component filtering', () => {
-    it('should not narrow source candidates when component generator only appears as target in connections', () => {
+    it('should not narrow source candidates when component generator only appears as target in connections', async () => {
       tree.write('apps/source/src/main.tsx', '');
       tree.write(
         'apps/source/project.json',
@@ -1503,7 +1523,7 @@ describe('connection generator', () => {
         { generator: 'comp-tgt', path: 'src/comp', name: 'tgt-comp' },
       ]);
 
-      const result = resolveConnection(
+      const result = await resolveConnection(
         tree,
         {
           sourceProject: 'source',
@@ -1518,7 +1538,7 @@ describe('connection generator', () => {
       });
     });
 
-    it('should not narrow target candidates when component generator only appears as source in connections', () => {
+    it('should not narrow target candidates when component generator only appears as source in connections', async () => {
       setupUnknownProject('source', [
         { generator: 'comp-src', path: 'src/comp', name: 'src-comp' },
       ]);
@@ -1536,7 +1556,7 @@ describe('connection generator', () => {
         }),
       );
 
-      const result = resolveConnection(
+      const result = await resolveConnection(
         tree,
         {
           sourceProject: 'source',
@@ -1551,7 +1571,7 @@ describe('connection generator', () => {
       });
     });
 
-    it('should narrow source candidates when component generator appears as source in connections', () => {
+    it('should narrow source candidates when component generator appears as source in connections', async () => {
       tree.write('apps/source/src/main.tsx', '');
       tree.write(
         'apps/source/project.json',
@@ -1569,7 +1589,7 @@ describe('connection generator', () => {
         { generator: 'some-target', path: 'src/t', name: 'tgt' },
       ]);
 
-      const result = resolveConnection(
+      const result = await resolveConnection(
         tree,
         {
           sourceProject: 'source',
@@ -1588,7 +1608,7 @@ describe('connection generator', () => {
       expect(result.sourceComponent?.name).toBe('my-comp');
     });
 
-    it('should narrow target candidates when component generator appears as target in connections', () => {
+    it('should narrow target candidates when component generator appears as target in connections', async () => {
       setupUnknownProject('source', [
         { generator: 'some-source', path: 'src/s', name: 'src' },
       ]);
@@ -1606,7 +1626,7 @@ describe('connection generator', () => {
         }),
       );
 
-      const result = resolveConnection(
+      const result = await resolveConnection(
         tree,
         {
           sourceProject: 'source',

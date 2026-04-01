@@ -11,7 +11,7 @@ import {
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
-import { query } from '../../utils/ast';
+import { matchGritQL } from '../../utils/ast';
 import { SMITHY_PROJECT_GENERATOR_INFO } from '../project/generator';
 import { TS_SMITHY_API_GENERATOR_INFO } from '../ts/api/generator';
 import { tsReactWebsiteGenerator } from '../../ts/react-website/app/generator';
@@ -205,20 +205,20 @@ export function Main() {
       });
 
       expect(
-        query(
+        await matchGritQL(
           tree,
           'apps/frontend/src/main.tsx',
-          'JsxOpeningElement[tagName.name="QueryClientProvider"]',
+          '`<QueryClientProvider $_>$_</QueryClientProvider>`',
         ),
-      ).toHaveLength(1);
+      ).toBe(true);
 
       expect(
-        query(
+        await matchGritQL(
           tree,
           'apps/frontend/src/main.tsx',
-          'JsxOpeningElement[tagName.name="TestApiProvider"]',
+          '`<TestApiProvider $_>$_</TestApiProvider>`',
         ),
-      ).toHaveLength(1);
+      ).toBe(true);
 
       expect(tree.read('apps/frontend/src/main.tsx', 'utf-8')).toMatchSnapshot(
         'main.tsx',
@@ -239,21 +239,21 @@ export function Main() {
 
       // Check that there is still only a single QueryClientProvider
       expect(
-        query(
+        await matchGritQL(
           tree,
           'apps/frontend/src/main.tsx',
-          'JsxOpeningElement[tagName.name="QueryClientProvider"]',
+          '`<QueryClientProvider $_>$_</QueryClientProvider>`',
         ),
-      ).toHaveLength(1);
+      ).toBe(true);
 
       // Check that there is still only a single TestApiProvider
       expect(
-        query(
+        await matchGritQL(
           tree,
           'apps/frontend/src/main.tsx',
-          'JsxOpeningElement[tagName.name="TestApiProvider"]',
+          '`<TestApiProvider $_>$_</TestApiProvider>`',
         ),
-      ).toHaveLength(1);
+      ).toBe(true);
     });
 
     it('should add generated client to .gitignore', async () => {
@@ -1047,20 +1047,20 @@ export function Main() {
 
       // Verify that providers were added to main.tsx
       expect(
-        query(
+        await matchGritQL(
           tree,
           'frontend/src/main.tsx',
-          'JsxOpeningElement[tagName.name="QueryClientProvider"]',
+          '`<QueryClientProvider $_>$_</QueryClientProvider>`',
         ),
-      ).toHaveLength(1);
+      ).toBe(true);
 
       expect(
-        query(
+        await matchGritQL(
           tree,
           'frontend/src/main.tsx',
-          'JsxOpeningElement[tagName.name="TestApiProvider"]',
+          '`<TestApiProvider $_>$_</TestApiProvider>`',
         ),
-      ).toHaveLength(1);
+      ).toBe(true);
 
       // Verify that the model project exists
       expect(tree.exists('test-api/model/project.json')).toBeTruthy();
