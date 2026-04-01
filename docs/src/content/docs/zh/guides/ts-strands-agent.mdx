@@ -254,7 +254,7 @@ client.invoke.subscribe({ message: 'what is 1 plus 1?' }, { onData: console.log 
 生成的 `client.ts` 文件包含一个类型安全的客户端工厂,可用于调用已部署的代理。
 
 :::caution
-客户端工厂在 WebSocket 握手中使用 HTTP 头来验证对 Bedrock AgentCore Runtime 的请求。这在浏览器中不可能实现,因此此客户端不适合浏览器环境。有关从浏览器调用的详细信息,请参阅下面的"浏览器"部分。
+客户端工厂在 WebSocket 握手中使用 HTTP 头来验证对 Bedrock AgentCore Runtime 的请求。这在浏览器中不可能实现,因此此客户端不适合浏览器环境。有关从浏览器调用的详细信息,请参阅下面的"浏览器 / React 网站"部分。
 :::
 
 ##### IAM 身份验证
@@ -318,146 +318,10 @@ const jwtClient = AgentClient.withJwtAuth({
 });
 ```
 
-#### 浏览器
+#### 浏览器 / React 网站
 
-浏览器中的 WebSocket 不支持指定头(除了 `Sec-WebSocket-Protocol`),因此 `client.ts` 中生成的客户端工厂无法在浏览器中使用(这实际上会导致编译错误,因为 `WebSocket` 构造函数不像在 NodeJS 中那样接受头)。
-
-##### JWT / Cognito 身份验证
-
-Bedrock AgentCore Runtime 支持[从浏览器进行 OAuth/JWT 身份验证](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html#:~:text=Browser%20JavaScript%20client%20with%20OAuth),方法是在 WebSocket 握手期间接受嵌入在 `Sec-WebSocket-Protocol` 头中的 bearer 令牌。令牌必须进行 base64url 编码,并以 `base64UrlBearerAuthorization.` 为前缀,后跟哨兵子协议 `base64UrlBearerAuthorization`。
-
-以下示例显示如何在 React 应用程序中使用 Cognito 身份验证创建 tRPC 客户端:
-
-```typescript
-import { createTRPCClient, createWSClient, wsLink } from '@trpc/client';
-import { useAuth } from 'react-oidc-context';
-import type { AppRouter } from './your-agent/router';
-
-// Helper to base64url-encode a string
-function base64UrlEncode(str: string): string {
-  return btoa(str)
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=/g, '');
-}
-
-// Build a WebSocket URL with the bearer token in Sec-WebSocket-Protocol
-function buildAgentCoreWsUrl(
-  agentRuntimeArn: string,
-  region: string = 'us-west-2',
-): string {
-  return `wss://bedrock-agentcore.${region}.amazonaws.com/runtimes/${agentRuntimeArn}/ws`;
-}
-
-// Inside your React component or hook:
-const auth = useAuth();
-const accessToken = auth.user?.access_token;
-
-const agentRuntimeArn = 'arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/my-agent';
-
-const wsClient = createWSClient({
-  url: buildAgentCoreWsUrl(agentRuntimeArn),
-  WebSocket: class extends WebSocket {
-    constructor(url: string | URL, protocols?: string | string[]) {
-      const base64Token = base64UrlEncode(accessToken!);
-      const authProtocols = [
-        `base64UrlBearerAuthorization.${base64Token}`,
-        'base64UrlBearerAuthorization',
-      ];
-      // Merge any existing protocols with the auth protocols
-      const existingProtocols = protocols
-        ? Array.isArray(protocols)
-          ? protocols
-          : [protocols]
-        : [];
-      super(url, [...existingProtocols, ...authProtocols]);
-    }
-  },
-});
-
-const trpcClient = createTRPCClient<AppRouter>({
-  links: [wsLink({ client: wsClient })],
-});
-
-// Invoke the agent
-trpcClient.invoke.subscribe({ message: 'what is 1 plus 1?' }, {
-  onData: (message) => console.log(message),
-});
-```
-
-:::note
-上述示例使用 [`react-oidc-context`](https://github.com/authts/react-oidc-context) 来获取访问令牌,这与 <Link path="/guides/react-website-auth">`ts#react-website#auth` 生成器</Link>使用的库相同。您可以从任何 OAuth/OIDC 提供商获取令牌。
-:::
-
-##### IAM 身份验证
-
-要从浏览器调用您的代理,您需要使用 AWS SigV4 创建预签名的 WebSocket URL。
-
-以下示例显示了获取凭证、创建预签名 URL 和调用代理的端到端流程:
-
-```typescript
-import { createTRPCClient, createWSClient, wsLink } from '@trpc/client';
-import { AwsClient } from 'aws4fetch';
-import { CognitoIdentityClient } from '@aws-sdk/client-cognito-identity';
-import { fromCognitoIdentityPool } from '@aws-sdk/credential-provider-cognito-identity';
-import type { AppRouter } from './your-agent/router';
-
-// Build a presigned WebSocket URL
-async function buildSignedUrl(
-  agentRuntimeArn: string,
-  idToken: string,
-  region: string = 'us-west-2'
-): Promise<string> {
-  // Get credentials from a Cognito Identity Pool (or other source)
-  const credentials = fromCognitoIdentityPool({
-    client: new CognitoIdentityClient({ region }),
-    identityPoolId: 'us-west-2:xxxxx',
-    logins: {
-      [`cognito-idp.${region}.amazonaws.com/us-west-2_xxxxx`]: idToken,
-    },
-  });
-
-  const cognitoIdentity = new CognitoIdentityClient({ credentials });
-  const credential = await cognitoIdentity.config.credentials();
-
-  // Create AWS SigV4 client
-  const awsClient = new AwsClient({
-    ...credential,
-    service: 'bedrock-agentcore',
-  });
-
-  // Build WebSocket URL from ARN
-  const wsUrl = `wss://bedrock-agentcore.${region}.amazonaws.com/runtimes/${encodeURIComponent(agentRuntimeArn)}/ws`;
-
-  // Create presigned URL
-  const signedRequest = await awsClient.sign(wsUrl, {
-    method: 'GET',
-    aws: { signQuery: true },
-  });
-
-  return signedRequest.url;
-}
-
-// Create tRPC client with presigned WebSocket URL
-const agentRuntimeArn = 'arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/my-agent';
-const idToken = '<your-id-token>';
-
-const wsClient = createWSClient({
-  url: async () => buildSignedUrl(agentRuntimeArn, idToken),
-});
-
-const trpcClient = createTRPCClient<AppRouter>({
-  links: [wsLink({ client: wsClient })],
-});
-
-// Invoke the agent
-trpcClient.invoke.subscribe({ message: 'what is 1 plus 1?' }, {
-  onData: (message) => console.log(message),
-});
-```
-
-:::tip
-为了简化设置,请使用 <Link path="/guides/connection/react-strands-agent">连接生成器</Link>将您的 React 网站连接到 Strands Agent,它会自动设置带有正确身份验证的 tRPC WebSocket 客户端。
+要从 React 网站调用您的 Strands Agent,您可以使用 <Link path="/guides/connection/react-ts-strands-agent">`connection` 生成器</Link>,它会自动设置带有正确身份验证(IAM 或 Cognito)的 tRPC WebSocket 客户端。
 
 <RunGenerator generator="connection" />
-:::
+
+有关如何设置连接的详细信息,请参阅 <Link path="/guides/connection/react-ts-strands-agent">`connection` 生成器指南</Link>。
