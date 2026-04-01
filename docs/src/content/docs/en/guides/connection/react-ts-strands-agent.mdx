@@ -41,8 +41,7 @@ The generator creates the following structure in your React application:
     - QueryClientProvider.tsx TanStack React Query client provider
   - hooks
     - useSigV4.tsx Hook for signing requests with SigV4 (IAM only)
-    - use\<AgentName>Agent.tsx A hook returning the tRPC options proxy for TanStack Query integration
-    - use\<AgentName>AgentClient.tsx A hook returning the vanilla tRPC client for direct agent calls
+    - use\<AgentName>Agent.tsx Hooks returning the tRPC options proxy and vanilla tRPC client
 
 </FileTree>
 
@@ -66,22 +65,21 @@ The generated client connects to your Strands Agent via tRPC over WebSocket. The
 
 The generated code handles authentication depending on your agent's configuration:
 
-- **IAM** (default): Uses AWS SigV4 presigned URLs to authenticate the WebSocket connection. Credentials are obtained from the Cognito Identity Pool configured with your website's auth
+- **IAM** (default): Uses AWS SigV4 presigned URLs to authenticate the WebSocket connection. Credentials are obtained from the Cognito Identity Pool configured with your website's auth. In `serve-local` mode, signing is automatically skipped when Cognito is not configured
 - **Cognito**: Embeds the JWT access token in the `Sec-WebSocket-Protocol` header as a base64url-encoded bearer token, following the [AgentCore WebSocket auth protocol](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html)
-- **No auth**: Connects directly without authentication (suitable for local development)
 
 ## Using the Generated Code
 
 ### Streaming Agent Responses with useSubscription
 
-The most common use case is streaming the agent's response using the `invoke` subscription:
+The most common use case is streaming the agent's response using the `invoke` subscription with the `use<AgentName>Agent` hook, which returns a [tRPC options proxy](https://trpc.io/docs/client/tanstack-react-query) for use with TanStack Query:
 
 ```tsx {1-2,7-22}
 import { useSubscription } from '@trpc/tanstack-react-query';
-import { useMyAgent } from './hooks/useMyAgentAgent';
+import { useMyAgentAgent } from './hooks/useMyAgentAgent';
 
 function ChatComponent() {
-  const trpc = useMyAgent();
+  const trpc = useMyAgentAgent();
 
   const subscription = useSubscription(
     trpc.invoke.subscriptionOptions(
@@ -111,16 +109,20 @@ function ChatComponent() {
 }
 ```
 
+:::note
+For more details on the tRPC options proxy and TanStack Query integration, see the [tRPC TanStack React Query documentation](https://trpc.io/docs/client/tanstack-react-query).
+:::
+
 ### Using the Vanilla tRPC Client
 
-The `use<AgentName>AgentClient` hook provides access to the vanilla tRPC client for more control over the subscription lifecycle:
+The `use<AgentName>AgentClient` hook provides access to the [vanilla tRPC client](https://trpc.io/docs/client/vanilla) for more control over the subscription lifecycle:
 
 ```tsx {2,5,9-22,25}
-import { useState, useEffect } from 'react';
-import { useMyAgentClient } from './hooks/useMyAgentAgent';
+import { useState } from 'react';
+import { useMyAgentAgentClient } from './hooks/useMyAgentAgent';
 
 function ChatComponent() {
-  const client = useMyAgentClient();
+  const client = useMyAgentAgentClient();
   const [messages, setMessages] = useState<string[]>([]);
 
   const sendMessage = (message: string) => {
@@ -156,62 +158,9 @@ function ChatComponent() {
 }
 ```
 
-### Building a Chat Interface
-
-Here is an example of building a simple chat interface with the generated client:
-
-```tsx
-import { useState, useCallback } from 'react';
-import { useMyAgentClient } from './hooks/useMyAgentAgent';
-
-function Chat() {
-  const client = useMyAgentClient();
-  const [input, setInput] = useState('');
-  const [response, setResponse] = useState('');
-  const [isStreaming, setIsStreaming] = useState(false);
-
-  const handleSend = useCallback(() => {
-    if (!input.trim() || isStreaming) return;
-
-    setIsStreaming(true);
-    setResponse('');
-
-    client.invoke.subscribe(
-      { message: input },
-      {
-        onData: (token) => {
-          setResponse((prev) => prev + token);
-        },
-        onComplete: () => {
-          setIsStreaming(false);
-        },
-        onError: (error) => {
-          console.error(error);
-          setIsStreaming(false);
-        },
-      },
-    );
-
-    setInput('');
-  }, [client, input, isStreaming]);
-
-  return (
-    <div>
-      <div style={{ whiteSpace: 'pre-wrap' }}>{response}</div>
-      <input
-        value={input}
-        onChange={(e) => setInput(e.target.value)}
-        onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-        disabled={isStreaming}
-        placeholder="Ask the agent..."
-      />
-      <button onClick={handleSend} disabled={isStreaming}>
-        {isStreaming ? 'Streaming...' : 'Send'}
-      </button>
-    </div>
-  );
-}
-```
+:::note
+For more details on the vanilla tRPC client, see the [tRPC Vanilla Client documentation](https://trpc.io/docs/client/vanilla).
+:::
 
 ## Local Development
 
@@ -219,7 +168,7 @@ The connection generator automatically configures `serve-local` integration:
 
 1. Running `nx run <website>:serve-local` will also start the agent's local server
 2. The runtime config is overridden to point to the local WebSocket URL (e.g., `ws://localhost:8081/ws`)
-3. The client detects the local URL and connects directly without authentication overhead
+3. For IAM auth, request signing is automatically skipped in `serve-local` mode when Cognito is not configured
 
 This means you can develop and test your agent integration locally with a single command.
 
