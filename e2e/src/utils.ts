@@ -160,18 +160,11 @@ function logError(message: string, body?: string) {
   process.stdout.write('\n');
 }
 
-export const buildCreateNxWorkspaceCommand = (
-  pm: string,
-  workspace: string,
-  iacProvider?: 'CDK' | 'Terraform',
-  yes = false,
-  nxVersion: string = undefined,
-  nxPluginVersion: string = undefined,
-) =>
-  `npx ${yes ? '-y ' : ''}create-nx-workspace@${nxVersion ?? TS_VERSIONS['create-nx-workspace']} ${workspace} --pm=${pm}  --preset=@aws/nx-plugin${nxPluginVersion ? `@${nxPluginVersion}` : ''} ${iacProvider ? `--iacProvider=${iacProvider} ` : ''}--ci=skip --analytics=false --aiAgents`;
+// eslint-disable-next-line
+export {
+  buildCreateNxWorkspaceCommand,
+  buildPackageManagerShortCommand,
+} from '../../packages/nx-plugin/src/utils/commands';
 
 export const getDungeonAdventureElectroDbDependencies = () =>
   `electrodb@${TS_VERSIONS['electrodb']} @aws-sdk/client-dynamodb@${TS_VERSIONS['@aws-sdk/client-dynamodb']}`;
-
-export const buildPackageManagerShortCommand = (pm: string, command: string) =>
-  pm === 'npm' ? `npm run ${command}` : `${pm} ${command}`;

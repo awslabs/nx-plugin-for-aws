@@ -9,47 +9,22 @@ import {
   Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import GeneratorsJson from '../../generators.json';
 import PackageJson from '../../package.json';
 import * as path from 'path';
 import { getNpmScope, getNpmScopePrefix } from './npm-scope';
 import { toSnakeCase } from './names';
+import { buildGeneratorInfoList, type GeneratorInfo } from './generators';
 
-export interface NxGeneratorInfo {
-  readonly id: string;
-  readonly metric: string;
-  readonly resolvedFactoryPath: string;
-  readonly resolvedSchemaPath: string;
-  readonly hidden?: boolean;
-  readonly description: string;
-  readonly guidePages?: string[];
-}
+export type NxGeneratorInfo = GeneratorInfo;
+export { buildGeneratorInfoList } from './generators';
 
-const GENERATORS: NxGeneratorInfo[] = Object.entries(
-  GeneratorsJson.generators,
-).map(([id, info]) => ({
-  id,
-  metric: info.metric,
-  resolvedFactoryPath: path.resolve(__dirname, '..', '..', info.factory),
-  resolvedSchemaPath: path.resolve(__dirname, '..', '..', info.schema),
-  description: info.description,
-  ...('hidden' in info && info.hidden
-    ? {
-        hidden: info.hidden,
-      }
-    : {}),
-  ...('guidePages' in info && info.guidePages
-    ? {
-        guidePages: info.guidePages,
-      }
-    : {}),
-}));
+const GENERATORS = buildGeneratorInfoList(path.resolve(__dirname, '..', '..'));
 
 /**
  * List Nx Plugin for AWS generators
  * @param includeHidden include hidden generators (default false)
  */
-export const listGenerators = (includeHidden = false): NxGeneratorInfo[] =>
+export const listGenerators = (includeHidden = false) =>
   GENERATORS.filter((g) => includeHidden || !g.hidden);
 
 /**

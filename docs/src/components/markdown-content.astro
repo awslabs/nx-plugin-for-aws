@@ -1,0 +1,97 @@
+---
+/**
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+import Default from '@astrojs/starlight/components/MarkdownContent.astro';
+import { postProcessGuide } from '../../../packages/nx-plugin/src/mcp-server/generator-info';
+import type { SnippetContentProvider } from '../../../packages/nx-plugin/src/mcp-server/generator-info';
+import { buildGeneratorInfoList } from '../../../packages/nx-plugin/src/utils/generators';
+import * as path from 'path';
+import * as fs from 'fs';
+
+const starlightRoute = Astro.locals.starlightRoute;
+const isSnippet = starlightRoute?.id?.includes('/snippets/');
+
+let resolvedMarkdown = '';
+
+if (!isSnippet && starlightRoute?.entry?.id) {
+  try {
+    // Resolve the docs source directory.
+    // In both build and dev, the astro config 'cwd' option is set to 'docs',
+    // but process.cwd() may point to the repo root. Try both.
+    let docsDir = process.cwd();
+    if (!fs.existsSync(path.join(docsDir, 'src', 'content', 'docs'))) {
+      docsDir = path.join(docsDir, 'docs');
+    }
+    const docsContentDir = path.join(docsDir, 'src', 'content', 'docs');
+    const mdxPath = path.join(docsContentDir, `${starlightRoute.entry.id}.mdx`);
+    let rawMdx = '';
+    try {
+      rawMdx = fs.readFileSync(mdxPath, 'utf-8');
+    } catch {
+      try {
+        rawMdx = fs.readFileSync(mdxPath.replace(/\.mdx$/, '.md'), 'utf-8');
+      } catch {
+        // No source file found
+      }
+    }
+
+    if (rawMdx) {
+      const pluginDir = path.resolve(docsDir, '..', 'packages', 'nx-plugin');
+      const generators = buildGeneratorInfoList(pluginDir);
+
+      // Strip frontmatter and imports from MDX content
+      const stripMdxPreamble = (content: string) =>
+        content
+          .replace(/^---\n[\s\S]*?\n---\n/, '')
+          .replace(/^import\s+.*$\n?/gm, '')
+          .trim();
+
+      // Create a local filesystem snippet provider (reads from en locale)
+      const snippetsDir = path.join(docsContentDir, 'en', 'snippets');
+      const localSnippetProvider: SnippetContentProvider = (snippetName: string) => {
+        try {
+          const raw = fs.readFileSync(path.join(snippetsDir, `${snippetName}.mdx`), 'utf-8');
+          return stripMdxPreamble(raw);
+        } catch {
+          return '';
+        }
+      };
+
+      // Strip frontmatter
+      const frontmatterEnd = rawMdx.match(/^---\n[\s\S]*?\n---\n/);
+      const bodyWithoutFrontmatter = frontmatterEnd
+        ? rawMdx.slice(frontmatterEnd[0].length)
+        : rawMdx;
+
+      // Strip import statements
+      const bodyWithoutImports = bodyWithoutFrontmatter
+        .replace(/^import\s+.*$\n?/gm, '')
+        .trim();
+
+      // Run the same resolution as the MCP server
+      const processed = await postProcessGuide(
+        bodyWithoutImports,
+        generators,
+        undefined,
+        localSnippetProvider,
+      );
+
+      // Strip snippet wrapper tags
+      const cleanedMarkdown = processed
+        .replace(/<Snippet name="[^"]*">\n?/g, '')
+        .replace(/<\/Snippet>/g, '');
+
+      // Add the page title
+      const title = starlightRoute.entry.data.title;
+      resolvedMarkdown = title ? `# ${title}\n\n${cleanedMarkdown.trim()}` : cleanedMarkdown.trim();
+    }
+  } catch {
+    // If anything fails, we just won't have the copy button
+  }
+}
+---
+
+{resolvedMarkdown && <div data-copy-markdown={resolvedMarkdown} style="display:none" />}
+<Default><slot /></Default>
