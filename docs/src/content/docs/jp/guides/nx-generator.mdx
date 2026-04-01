@@ -10,7 +10,7 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 import Drawer from '@components/drawer.astro';
 import Link from '@components/link.astro';
 
-TypeScriptプロジェクトに[Nx Generator](https://nx.dev/extending-nx/recipes/local-generators)を追加し、コンポーネントのスキャフォールディングや特定のプロジェクト構造の強制など、反復的なタスクの自動化を支援します。
+TypeScriptプロジェクトに[Nx Generator](https://nx.dev/recipes/generators/local-generators)を追加し、コンポーネントのスキャフォールディングや特定のプロジェクト構造の強制など、反復的なタスクの自動化を支援します。
 
 ## 使用方法
 
@@ -287,6 +287,7 @@ generateFiles(
   {
     name: options.name,
     nameCamelCase: camelCase(options.name),
+    nameKebabCase: kebabCase(options.name),
     // 追加変数
   },
 );
@@ -392,7 +393,10 @@ const packageJson = readJson(tree, 'package.json');
 
 // JSON更新
 updateJson(tree, 'tsconfig.json', (json) => {
-  json.compilerOptions.strict = true;
+  json.compilerOptions = {
+    ...json.compilerOptions,
+    strict: true,
+  };
   return json;
 });
 ```
@@ -433,7 +437,12 @@ import { buildOpenApiCodeGenerationData } from '@aws/nx-plugin/sdk/open-api.js';
 export const myGenerator = async (tree: Tree, schema: MyGeneratorSchema) => {
   const data = await buildOpenApiCodeGenerationData(tree, 'path/to/spec.json');
 
-  generateFiles(tree, 'templates', 'output', data);
+  generateFiles(
+    tree,
+    joinPathFragments(__dirname, 'files'), // テンプレートディレクトリ
+    'path/to/output', // 出力ディレクトリ
+    data,
+  );
 };
 ```
 
@@ -475,13 +484,46 @@ describe('your generator', () => {
 
   beforeEach(() => {
     tree = createTreeWithEmptyWorkspace();
-    tree.write('project.json', JSON.stringify({ name: 'test-project' }));
+
+    tree.write(
+      'project.json',
+      JSON.stringify({
+        name: 'test-project',
+        sourceRoot: 'src',
+      }),
+    );
+
+    tree.write('src/existing-file.ts', 'export const existing = true;');
   });
 
   it('should generate expected files', async () => {
-    await yourGenerator(tree, { name: 'test' });
+    await yourGenerator(tree, {
+      name: 'test',
+    });
+
     expect(tree.exists('src/test/file.ts')).toBeTruthy();
+
+    const content = tree.read('src/test/file.ts', 'utf-8');
+    expect(content).toContain('export const test');
+
     expect(tree.read('src/test/file.ts', 'utf-8')).toMatchSnapshot();
+  });
+
+  it('should update existing files', async () => {
+    await yourGenerator(tree, {
+      name: 'test',
+    });
+
+    const content = tree.read('src/existing-file.ts', 'utf-8');
+    expect(content).toContain('import { test } from');
+  });
+
+  it('should handle errors', async () => {
+    await expect(
+      yourGenerator(tree, {
+        name: 'invalid',
+      }),
+    ).rejects.toThrow('Expected error message');
   });
 });
 ```
@@ -509,6 +551,8 @@ describe('your generator', () => {
     - \<name>.mdx ドキュメント
   - packages/nx-plugin/generators.json ジェネレータ定義更新
 </FileTree>
+
+ジェネレータの実装を開始できます。
 
 :::tip
 Nx Plugin for AWSへの貢献に関する詳細ガイドは<Link path="get_started/tutorials/contribute-generator">こちらのチュートリアル</Link>を参照。

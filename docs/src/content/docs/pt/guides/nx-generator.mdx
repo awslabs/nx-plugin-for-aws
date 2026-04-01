@@ -10,7 +10,7 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 import Drawer from '@components/drawer.astro';
 import Link from '@components/link.astro';
 
-Adiciona um [Nx Generator](https://nx.dev/extending-nx/recipes/local-generators) a um projeto TypeScript para ajudar a automatizar tarefas repetitivas como criação de componentes ou imposição de estruturas de projeto específicas.
+Adiciona um [Nx Generator](https://nx.dev/recipes/generators/local-generators) a um projeto TypeScript para ajudar a automatizar tarefas repetitivas como criação de componentes ou imposição de estruturas de projeto específicas.
 
 ## Utilização
 
@@ -292,6 +292,7 @@ generateFiles(
     name: options.name,
     nameCamelCase: camelCase(options.name),
     nameKebabCase: kebabCase(options.name),
+    // Adicione mais variáveis conforme necessário
   },
 );
 ```
@@ -372,12 +373,12 @@ addDependenciesToPackageJson(
 ```
 
 :::note
-Para instalar dependências após a geração:
+Se você adicionar dependências a um package.json, pode instalá-las para o usuário como parte do callback do generator:
 
 ```ts
 import { installPackagesTask } from '@nx/devkit';
 
-// Retorne um callback para instalar pacotes
+// Generators retornam um callback que pode executar tarefas pós-geração, como instalar dependências
 return () => {
   installPackagesTask(tree);
 };
@@ -413,7 +414,7 @@ updateJson(tree, 'tsconfig.json', (json) => {
 
 #### Estendendo Generators do Nx Plugin for AWS
 
-Você pode importar e estender generators existentes:
+Você pode importar generators do Nx Plugin for AWS e estendê-los ou compô-los como desejar, por exemplo, você pode querer criar um generator que se baseia em um projeto TypeScript:
 
 ```ts
 import { tsProjectGenerator } from '@aws/nx-plugin/sdk/ts';
@@ -421,15 +422,17 @@ import { tsProjectGenerator } from '@aws/nx-plugin/sdk/ts';
 export const myGenerator = async (tree: Tree, schema: MyGeneratorSchema) => {
   const callback = await tsProjectGenerator(tree, { ... });
 
-  // Estender o generator aqui
+  // Estender o generator de projeto TypeScript aqui
 
+  // Retornar o callback para garantir que dependências sejam instaladas.
+  // Você pode envolver o callback se desejar realizar operações adicionais no callback do generator.
   return callback;
 };
 ```
 
 #### Generators OpenAPI
 
-Você pode usar generators para clientes TypeScript e hooks:
+Você pode usar e estender os generators que usamos para clientes TypeScript e hooks de forma similar ao acima:
 
 ```ts
 import { openApiTsClientGenerator } from '@aws/nx-plugin/sdk/open-api';
@@ -437,11 +440,11 @@ import { openApiTsClientGenerator } from '@aws/nx-plugin/sdk/open-api';
 export const myGenerator = async (tree: Tree, schema: MyGeneratorSchema) => {
   await openApiTsClientGenerator(tree, { ... });
 
-  // Adicionar arquivos extras
+  // Adicionar arquivos extras aqui
 };
 ```
 
-Também expomos métodos para iterar sobre operações OpenAPI:
+Também expomos um método que permite construir uma estrutura de dados que pode ser usada para iterar sobre operações em uma especificação OpenAPI e assim instrumentar sua própria geração de código, por exemplo:
 
 ```ts
 import { buildOpenApiCodeGenerationData } from '@aws/nx-plugin/sdk/open-api.js';
@@ -451,14 +454,14 @@ export const myGenerator = async (tree: Tree, schema: MyGeneratorSchema) => {
 
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files'),
-    'path/to/output',
+    joinPathFragments(__dirname, 'files'), // Diretório do template
+    'path/to/output', // Diretório de saída
     data,
   );
 };
 ```
 
-Exemplo de template EJS:
+O que permite escrever templates como:
 
 ```ejs
 // files/my-operations.ts.template
@@ -469,7 +472,7 @@ export const myOperationNames = [
 ];
 ```
 
-Consulte o [repositório no GitHub](https://github.com/awslabs/nx-plugin-for-aws/) para exemplos complexos.
+Consulte o [repositório no GitHub](https://github.com/awslabs/nx-plugin-for-aws/) para exemplos de templates mais complexos.
 
 ### Executando Seu Generator
 
@@ -485,7 +488,7 @@ Se o generator não aparecer na UI do VSCode, atualize o workspace Nx com:
 
 ### Testando Seu Generator
 
-Testes unitários seguem este padrão:
+Testes unitários para generators são diretos de implementar. Aqui está um padrão típico:
 
 ```typescript
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
@@ -495,13 +498,59 @@ describe('your generator', () => {
   let tree;
 
   beforeEach(() => {
+    // Criar uma tree de workspace vazia
     tree = createTreeWithEmptyWorkspace();
-    tree.write('project.json', JSON.stringify({ name: 'test-project' }));
+
+    // Adicionar quaisquer arquivos que já devem existir na tree
+    tree.write(
+      'project.json',
+      JSON.stringify({
+        name: 'test-project',
+        sourceRoot: 'src',
+      }),
+    );
+
+    tree.write('src/existing-file.ts', 'export const existing = true;');
   });
 
-  it('should generate files', async () => {
-    await yourGenerator(tree, { name: 'test' });
+  it('should generate expected files', async () => {
+    // Executar o generator
+    await yourGenerator(tree, {
+      name: 'test',
+      // Adicionar outras opções obrigatórias
+    });
+
+    // Verificar que arquivos foram criados
     expect(tree.exists('src/test/file.ts')).toBeTruthy();
+
+    // Verificar conteúdo do arquivo
+    const content = tree.read('src/test/file.ts', 'utf-8');
+    expect(content).toContain('export const test');
+
+    // Você também pode usar snapshots
+    expect(tree.read('src/test/file.ts', 'utf-8')).toMatchSnapshot();
+  });
+
+  it('should update existing files', async () => {
+    // Executar o generator
+    await yourGenerator(tree, {
+      name: 'test',
+      // Adicionar outras opções obrigatórias
+    });
+
+    // Verificar que arquivos existentes foram atualizados
+    const content = tree.read('src/existing-file.ts', 'utf-8');
+    expect(content).toContain('import { test } from');
+  });
+
+  it('should handle errors', async () => {
+    // Esperar que o generator lance um erro em certas condições
+    await expect(
+      yourGenerator(tree, {
+        name: 'invalid',
+        // Adicionar opções que devem causar erro
+      }),
+    ).rejects.toThrow('Expected error message');
   });
 });
 ```
@@ -509,25 +558,30 @@ describe('your generator', () => {
 Pontos-chave para testes:
 
 - Use `createTreeWithEmptyWorkspace()` para sistema de arquivos virtual
+- Configure arquivos pré-requisitos antes de executar o generator
 - Teste criação e atualização de arquivos
 - Use snapshots para conteúdo complexo
-- Teste condições de erro
+- Teste condições de erro para garantir que seu generator falhe graciosamente
 
 ## Contribuindo com Generators para @aws/nx-plugin
 
-Use `ts#nx-generator` para criar generators dentro de `@aws/nx-plugin`. No nosso repositório, ele gera:
+Você também pode usar `ts#nx-generator` para criar generators dentro de `@aws/nx-plugin`.
+
+Quando este generator é executado em nosso repositório, ele gera os seguintes arquivos:
 
 <FileTree>
   - packages/nx-plugin/src/\<name>/
-    - schema.json
-    - schema.d.ts
-    - generator.ts
-    - generator.spec.ts
+    - schema.json Esquema para entrada do generator
+    - schema.d.ts Tipos TypeScript para o esquema
+    - generator.ts Implementação do generator
+    - generator.spec.ts Testes para o generator
   - docs/src/content/docs/guides/
-    - \<name>.mdx
-  - packages/nx-plugin/generators.json Atualizado
+    - \<name>.mdx Página de documentação para seu generator
+  - packages/nx-plugin/generators.json Atualizado para incluir seu generator
 </FileTree>
 
+Você pode então começar a implementar seu generator.
+
 :::tip
-Para um guia detalhado sobre contribuição, consulte o <Link path="get_started/tutorials/contribute-generator">tutorial aqui</Link>.
+Para um guia detalhado sobre contribuição para o Nx Plugin for AWS, consulte o <Link path="get_started/tutorials/contribute-generator">tutorial aqui</Link>.
 :::
