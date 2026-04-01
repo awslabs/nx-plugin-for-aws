@@ -13,9 +13,9 @@ import PackageJson from '../../package.json';
 import * as path from 'path';
 import { getNpmScope, getNpmScopePrefix } from './npm-scope';
 import { toSnakeCase } from './names';
-import { buildGeneratorInfoList } from './generators';
+import { buildGeneratorInfoList, type GeneratorInfo } from './generators';
 
-export type { GeneratorInfo as NxGeneratorInfo } from './generators';
+export type NxGeneratorInfo = GeneratorInfo;
 export { buildGeneratorInfoList } from './generators';
 
 const GENERATORS = buildGeneratorInfoList(path.resolve(__dirname, '..', '..'));
