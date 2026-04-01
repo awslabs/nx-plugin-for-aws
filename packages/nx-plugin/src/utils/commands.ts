@@ -28,13 +28,23 @@ export const buildCreateNxWorkspaceCommand = (
   pm: string,
   workspace: string,
   iacProvider?: 'CDK' | 'Terraform',
+  yes = false,
   nxVersion?: string,
   nxPluginVersion?: string,
+  extraArgs?: string,
 ) =>
-  `npx -y create-nx-workspace${nxVersion ? `@${nxVersion}` : ''} ${workspace} --pm=${pm} --preset=@aws/nx-plugin${nxPluginVersion ? `@${nxPluginVersion}` : ''}${iacProvider ? ` --iacProvider=${iacProvider}` : ''} --ci=skip`;
+  `npx ${yes ? '-y ' : ''}create-nx-workspace${nxVersion ? `@${nxVersion}` : ''} ${workspace} --pm=${pm} --preset=@aws/nx-plugin${nxPluginVersion ? `@${nxPluginVersion}` : ''}${iacProvider ? ` --iacProvider=${iacProvider}` : ''} --ci=skip${extraArgs ? ` ${extraArgs}` : ''}`;
 
 /**
  * Build a short package manager command (e.g. pnpm build, npm run build)
  */
 export const buildPackageManagerShortCommand = (pm: string, command: string) =>
   pm === 'npm' ? `npm run ${command}` : `${pm} ${command}`;
+
+/**
+ * Build a package manager exec command (e.g. pnpm cmd, npx cmd, bunx cmd)
+ */
+export const buildPackageManagerExecCommand = (pm: string, command: string) => {
+  const prefix = { npm: 'npx', bun: 'bunx' }[pm] ?? pm;
+  return `${prefix} ${command}`;
+};

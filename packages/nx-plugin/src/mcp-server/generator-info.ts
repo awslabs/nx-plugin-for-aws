@@ -6,6 +6,7 @@ import { kebabCase } from '../utils/names';
 import {
   buildCreateNxWorkspaceCommand,
   buildInstallCommand,
+  buildPackageManagerExecCommand,
   buildPackageManagerShortCommand,
 } from '../utils/commands';
 import { NxGeneratorInfo } from '../utils/nx';
@@ -341,8 +342,7 @@ export const postProcessGuide = async (
             .replaceAll('__ESCAPED_SINGLE_QUOTE__', "\\'"),
         );
         const pm = packageManager ?? 'pnpm';
-        const prefix = { npm: 'npx', bun: 'bunx' }[pm as string] ?? pm;
-        return `\`\`\`bash\n${commands.map((command: string) => `${prefix} ${command}`).join('\n')}\n\`\`\``;
+        return `\`\`\`bash\n${commands.map((command: string) => buildPackageManagerExecCommand(pm, command)).join('\n')}\n\`\`\``;
       } catch {
         return match;
       }
