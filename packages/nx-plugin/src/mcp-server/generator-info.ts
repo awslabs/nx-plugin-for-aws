@@ -3,6 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { kebabCase } from '../utils/names';
+import {
+  buildCreateNxWorkspaceCommand,
+  buildInstallCommand,
+  buildPackageManagerShortCommand,
+} from '../utils/commands';
 import { NxGeneratorInfo } from '../utils/nx';
 import fs from 'fs';
 
@@ -234,7 +239,7 @@ export const postProcessGuide = async (
 
   // Replace <RunGenerator /> with renderGeneratorCommand
   processedGuide = processedGuide.replace(
-    /<RunGenerator\s+([^/>]+)\s*\/>/g,
+    /<RunGenerator\s+((?:[^/]|\/(?!>))+)\s*\/>/g,
     (match, attributes) => {
       // Extract generator parameter
       const generatorMatch = attributes.match(/generator=["']([^"']+)["']/);
@@ -256,7 +261,7 @@ export const postProcessGuide = async (
 
   // Replace <GeneratorParameters /> with renderSchema
   processedGuide = processedGuide.replace(
-    /<GeneratorParameters\s+([^/>]+)\s*\/>/g,
+    /<GeneratorParameters\s+((?:[^/]|\/(?!>))+)\s*\/>/g,
     (match, attributes) => {
       // Extract generator parameter
       const generatorMatch = attributes.match(/generator=["']([^"']+)["']/);
@@ -273,6 +278,74 @@ export const postProcessGuide = async (
       }
 
       return renderSchema(info.schema);
+    },
+  );
+
+  // Replace <CreateNxWorkspaceCommand /> with npx create-nx-workspace command
+  processedGuide = processedGuide.replace(
+    /<CreateNxWorkspaceCommand\s+((?:[^/]|\/(?!>))+)\s*\/>/g,
+    (match, attributes) => {
+      const workspaceMatch = attributes.match(/workspace=["']([^"']+)["']/);
+      if (!workspaceMatch) return match;
+      const workspace = workspaceMatch[1];
+      const iacMatch = attributes.match(/iacProvider=["']([^"']+)["']/);
+      const iacProvider = iacMatch
+        ? (iacMatch[1] as 'CDK' | 'Terraform')
+        : undefined;
+      const pm = packageManager ?? 'pnpm';
+      return `\`\`\`bash\n${buildCreateNxWorkspaceCommand(pm, workspace, iacProvider)}\n\`\`\``;
+    },
+  );
+
+  // Replace <InstallCommand /> with install command
+  processedGuide = processedGuide.replace(
+    /<InstallCommand\s+((?:[^/]|\/(?!>))+)\s*\/>/g,
+    (match, attributes) => {
+      const pkgMatch = attributes.match(/pkg=(?:["']([^"']+)["']|\{([^}]+)\})/);
+      if (!pkgMatch) return match;
+      const pkg = pkgMatch[1] || pkgMatch[2];
+      const isDev = /dev/.test(attributes);
+      const pm = packageManager ?? 'pnpm';
+      return `\`\`\`bash\n${buildInstallCommand(pm, pkg, isDev)}\n\`\`\``;
+    },
+  );
+
+  // Replace <PackageManagerShortCommand /> with short command
+  processedGuide = processedGuide.replace(
+    /<PackageManagerShortCommand\s+commands={([^}]+)}\s*\/>/g,
+    (match, commandsMatch) => {
+      try {
+        const commands = JSON.parse(
+          commandsMatch
+            .replaceAll("\\'", '__ESCAPED_SINGLE_QUOTE__')
+            .replaceAll("'", '"')
+            .replaceAll('__ESCAPED_SINGLE_QUOTE__', "\\'"),
+        );
+        const pm = packageManager ?? 'pnpm';
+        return `\`\`\`bash\n${commands.map((command: string) => buildPackageManagerShortCommand(pm, command)).join('\n')}\n\`\`\``;
+      } catch {
+        return match;
+      }
+    },
+  );
+
+  // Replace <PackageManagerExecCommand /> with exec command
+  processedGuide = processedGuide.replace(
+    /<PackageManagerExecCommand\s+commands={([^}]+)}\s*\/>/g,
+    (match, commandsMatch) => {
+      try {
+        const commands = JSON.parse(
+          commandsMatch
+            .replaceAll("\\'", '__ESCAPED_SINGLE_QUOTE__')
+            .replaceAll("'", '"')
+            .replaceAll('__ESCAPED_SINGLE_QUOTE__', "\\'"),
+        );
+        const pm = packageManager ?? 'pnpm';
+        const prefix = { npm: 'npx', bun: 'bunx' }[pm as string] ?? pm;
+        return `\`\`\`bash\n${commands.map((command: string) => `${prefix} ${command}`).join('\n')}\n\`\`\``;
+      } catch {
+        return match;
+      }
     },
   );
 

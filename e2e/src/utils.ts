@@ -160,6 +160,9 @@ function logError(message: string, body?: string) {
   process.stdout.write('\n');
 }
 
+// eslint-disable-next-line
+export { buildPackageManagerShortCommand } from '../../packages/nx-plugin/src/utils/commands';
+
 export const buildCreateNxWorkspaceCommand = (
   pm: string,
   workspace: string,
@@ -172,6 +175,3 @@ export const buildCreateNxWorkspaceCommand = (
 
 export const getDungeonAdventureElectroDbDependencies = () =>
   `electrodb@${TS_VERSIONS['electrodb']} @aws-sdk/client-dynamodb@${TS_VERSIONS['@aws-sdk/client-dynamodb']}`;
-
-export const buildPackageManagerShortCommand = (pm: string, command: string) =>
-  pm === 'npm' ? `npm run ${command}` : `${pm} ${command}`;
