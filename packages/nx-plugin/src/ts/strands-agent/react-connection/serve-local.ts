@@ -39,27 +39,28 @@ export const addStrandsAgentTargetToServeLocal = async (
     targetProjectName,
   );
 
-  // Determine the serve target name for the agent component
-  const agentServeTargetName = options.targetComponent?.name
-    ? `${options.targetComponent.name}-serve`
-    : 'agent-serve';
+  // Determine the serve-local target name for the agent component
+  const agentServeLocalTargetName = options.targetComponent?.name
+    ? `${options.targetComponent.name}-serve-local`
+    : 'agent-serve-local';
 
-  // Target project must have the agent serve target which is continuous
+  // Target project must have the agent serve-local target which is continuous
   if (
     !(
-      targetProject.targets?.[agentServeTargetName]?.continuous &&
+      targetProject.targets?.[agentServeLocalTargetName]?.continuous &&
       sourceProject.targets?.['serve-local']
     )
   ) {
     return;
   }
 
-  // Add a dependency on the agent serve target
+  // Add a dependency on the agent serve-local target (so that the agent's
+  // own serve-local dependencies, such as MCP servers, are also started)
   sourceProject.targets['serve-local'].dependsOn = [
     ...(sourceProject.targets['serve-local'].dependsOn ?? []),
     {
       projects: [targetProject.name],
-      target: agentServeTargetName,
+      target: agentServeLocalTargetName,
     },
   ];
   updateProjectConfiguration(tree, sourceProject.name, sourceProject);

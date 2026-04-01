@@ -336,10 +336,10 @@ describe('ts strands agent react connection with real projects', () => {
       tree.read('frontend/project.json', 'utf-8'),
     );
 
-    // Verify that serve-local target now depends on agent serve target
+    // Verify that serve-local target now depends on agent serve-local target
     expect(frontendProject.targets['serve-local'].dependsOn).toContainEqual({
       projects: ['@proj/agent-project'],
-      target: 'agent-serve',
+      target: 'agent-serve-local',
     });
 
     // Verify that the runtime config was created and modified
