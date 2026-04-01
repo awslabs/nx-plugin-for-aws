@@ -16,16 +16,7 @@ import fs from 'fs';
  * Build a command to run nx
  */
 export const buildNxCommand = (command: string, pm?: string) =>
-  `${
-    pm
-      ? `${
-          {
-            npm: 'npx',
-            bun: 'bunx',
-          }[pm] ?? pm
-        } `
-      : ''
-  }nx ${command}`;
+  pm ? buildPackageManagerExecCommand(pm, `nx ${command}`) : `nx ${command}`;
 
 const renderSchema = (schema: any) =>
   Object.entries(schema.properties)

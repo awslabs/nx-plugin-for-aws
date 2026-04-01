@@ -161,29 +161,10 @@ function logError(message: string, body?: string) {
 }
 
 // eslint-disable-next-line
-import {
-  buildCreateNxWorkspaceCommand as _buildCreateNxWorkspaceCommand,
+export {
+  buildCreateNxWorkspaceCommand,
   buildPackageManagerShortCommand,
 } from '../../packages/nx-plugin/src/utils/commands';
-export { buildPackageManagerShortCommand };
-
-export const buildCreateNxWorkspaceCommand = (
-  pm: string,
-  workspace: string,
-  iacProvider?: 'CDK' | 'Terraform',
-  yes = false,
-  nxVersion: string = undefined,
-  nxPluginVersion: string = undefined,
-) =>
-  _buildCreateNxWorkspaceCommand(
-    pm,
-    workspace,
-    iacProvider,
-    yes,
-    nxVersion ?? TS_VERSIONS['create-nx-workspace'],
-    nxPluginVersion,
-    '--analytics=false --aiAgents',
-  );
 
 export const getDungeonAdventureElectroDbDependencies = () =>
   `electrodb@${TS_VERSIONS['electrodb']} @aws-sdk/client-dynamodb@${TS_VERSIONS['@aws-sdk/client-dynamodb']}`;
