@@ -11,7 +11,6 @@ import {
   Tree,
   updateJson,
 } from '@nx/devkit';
-import { TsStrandsAgentReactConnectionSchema } from './schema';
 import { runtimeConfigGenerator } from '../../react-website/runtime-config/generator';
 import { toScopeAlias } from '../../../utils/npm-scope';
 import { withVersions } from '../../../utils/versions';
