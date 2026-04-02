@@ -29,7 +29,7 @@ import { TS_VERSIONS, withVersions } from '../../utils/versions';
 import { kebabCase, toClassName } from '../../utils/names';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { addMcpServerInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
-import { addIdentityInfra } from '../../utils/identity-constructs/identity-constructs';
+
 import { getNpmScope } from '../../utils/npm-scope';
 import { resolveIacProvider } from '../../utils/iac';
 import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
@@ -151,14 +151,6 @@ export const tsMcpServerGenerator = async (
     // Add shared constructs
     const iacProvider = await resolveIacProvider(tree, options.iacProvider);
     await sharedConstructsGenerator(tree, { iacProvider });
-
-    if (auth === 'Cognito') {
-      addIdentityInfra(tree, {
-        iacProvider,
-        allowSignup: false,
-        cognitoDomain: name,
-      });
-    }
 
     // Add the construct to deploy the mcp server
     await addMcpServerInfra(tree, {

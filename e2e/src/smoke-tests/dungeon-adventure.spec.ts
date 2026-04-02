@@ -77,7 +77,7 @@ describe('smoke test - dungeon-adventure', () => {
       opts,
     );
     await runCLI(
-      `generate @aws/nx-plugin:py#strands-agent --project=story --no-interactive`,
+      `generate @aws/nx-plugin:py#strands-agent --project=story --auth=Cognito --no-interactive`,
       opts,
     );
     await runCLI(

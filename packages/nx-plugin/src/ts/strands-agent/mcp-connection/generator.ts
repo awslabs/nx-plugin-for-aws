@@ -58,6 +58,12 @@ export const tsStrandsAgentMcpConnectionGenerator = async (
     );
   }
 
+  if (mcpComponent.auth && mcpComponent.auth !== 'IAM') {
+    throw new Error(
+      `MCP server connection currently only supports IAM authentication, but '${mcpComponent.name}' uses '${mcpComponent.auth}' authentication.`,
+    );
+  }
+
   const mcpComponentName = mcpComponent.name ?? 'mcp-server';
   const mcpServerClassName = mcpComponent.rc as string;
   const mcpServerKebabCase = kebabCase(mcpServerClassName);
