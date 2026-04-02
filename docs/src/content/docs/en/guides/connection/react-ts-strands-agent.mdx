@@ -15,7 +15,7 @@ Before using this generator, ensure you have:
 
 1. A React website (generated using the <Link path="guides/react-website">`ts#react-website` generator</Link>)
 2. A TypeScript Strands Agent (generated using the <Link path="guides/ts-strands-agent">`ts#strands-agent` generator</Link>)
-3. Cognito Auth added via the <Link path="/guides/react-website-auth">`ts#react-website-auth` generator</Link> if connecting an agent which uses Cognito or IAM auth
+3. Cognito Auth added via the <Link path="/guides/react-website-auth">`ts#react-website-auth` generator</Link>
 
 ## Usage
 
@@ -68,11 +68,14 @@ The generated code handles authentication depending on your agent's configuratio
 - **IAM** (default): Uses AWS SigV4 presigned URLs to authenticate the WebSocket connection. Credentials are obtained from the Cognito Identity Pool configured with your website's auth. In `serve-local` mode, signing is automatically skipped when <Link path="guides/react-website#runtime-configuration">`runtime-config.json`</Link> is not present
 - **Cognito**: Embeds the JWT access token in the `Sec-WebSocket-Protocol` header as a base64url-encoded bearer token, following the [AgentCore WebSocket auth protocol](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html)
 
-:::note
-For IAM auth, the Cognito Identity Pool's authenticated role must have the `bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream` permission to invoke agents via WebSocket. The CDK `grantInvoke` method does not yet include this permission automatically (see [aws-cdk#37495](https://github.com/aws/aws-cdk/issues/37495)), so you will need to add it explicitly in your infrastructure stack:
 
-```typescript
-import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
+## Infrastructure
+
+If your agent uses IAM auth, the Cognito Identity Pool's authenticated role must have the `bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream` permission to invoke agents via WebSocket:
+
+```ts
+const identity = new UserIdentity(this, 'Identity');
+const myAgent = new MyAgent(this, 'MyAgent');
 
 identity.identityPool.authenticatedRole.addToPrincipalPolicy(
   new PolicyStatement({
@@ -81,11 +84,16 @@ identity.identityPool.authenticatedRole.addToPrincipalPolicy(
   }),
 );
 ```
+
+:::note
+At the time of writing, the agent core runtime's `grantInvoke` method does not yet include this permission automatically (see [aws-cdk#37495](https://github.com/aws/aws-cdk/issues/37495)).
 :::
+
+If your agent uses Cognito auth, you do not need to define any additional infrastructure to connect your website to your agent.
 
 ## Using the Generated Code
 
-### Streaming Agent Responses with useSubscription
+### Using TanStack Query
 
 The most common use case is streaming the agent's response using the `invoke` subscription with the `use<AgentName>Agent` hook, which returns a [tRPC options proxy](https://trpc.io/docs/client/tanstack-react-query) for use with TanStack Query:
 
@@ -179,13 +187,15 @@ For more details on the vanilla tRPC client, see the [tRPC Vanilla Client docume
 
 ## Local Development
 
-The connection generator automatically configures `serve-local` integration:
+The connection generator automatically configures `serve-local` integration for your react website:
 
 1. Running `nx run <website>:serve-local` will also start the agent's local server
 2. The runtime config is overridden to point to the local WebSocket URL (e.g., `ws://localhost:8081/ws`)
-3. For IAM auth, request signing is automatically skipped in `serve-local` mode when <Link path="guides/react-website#runtime-configuration">`runtime-config.json`</Link> is not present
+3. Like with connected APIs, authentication is skipped in `serve-local` mode when <Link path="guides/react-website#runtime-configuration">`runtime-config.json`</Link> is not present
 
-This means you can develop and test your agent integration locally with a single command.
+:::tip[Hot Reloading]
+The website and connected agent will hot-reload, enabling you to quickly iterate on both together without deploying to AWS.
+:::
 
 ## Type Safety
 
