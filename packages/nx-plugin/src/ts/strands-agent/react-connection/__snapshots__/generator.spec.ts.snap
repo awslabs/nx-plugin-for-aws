@@ -1,0 +1,376 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ts strands agent react connection generator > should generate strands agent react connection files > TestAgentAgentClientProvider.tsx 1`] = `
+"import type { AppRouter } from 'agent-project/src/agent/router.js';
+import { useQueryClient } from '@tanstack/react-query';
+import { createTRPCOptionsProxy } from '@trpc/tanstack-react-query';
+import { createContext, FC, PropsWithChildren, useMemo } from 'react';
+import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
+import {
+  TRPCClient,
+  createTRPCClient,
+  createWSClient,
+  wsLink,
+} from '@trpc/client';
+import { useSigV4 } from '../hooks/useSigV4';
+
+/**
+ * Build a WebSocket URL from a Bedrock AgentCore Runtime ARN
+ */
+function buildAgentCoreWsUrl(agentRuntimeArn: string): string {
+  const region = agentRuntimeArn.split(':')[3];
+  return \`wss://bedrock-agentcore.\${region}.amazonaws.com/runtimes/\${encodeURIComponent(agentRuntimeArn)}/ws\`;
+}
+
+export interface TestAgentAgentTRPCContextValue {
+  optionsProxy: ReturnType<typeof createTRPCOptionsProxy<AppRouter>>;
+  client: TRPCClient<AppRouter>;
+}
+
+export const TestAgentAgentTRPCContext =
+  createContext<TestAgentAgentTRPCContextValue | null>(null);
+
+export const TestAgentAgentClientProvider: FC<PropsWithChildren> = ({
+  children,
+}) => {
+  const queryClient = useQueryClient();
+  const runtimeConfig = useRuntimeConfig();
+  const agentRuntimeValue = runtimeConfig.agentRuntimes.TestAgent;
+  const sigv4Client = useSigV4();
+
+  const container = useMemo<TestAgentAgentTRPCContextValue>(() => {
+    // If the value is an ARN, convert it to a WebSocket URL
+    const wsUrl = agentRuntimeValue.startsWith('arn:')
+      ? buildAgentCoreWsUrl(agentRuntimeValue)
+      : agentRuntimeValue;
+
+    const wsClient = createWSClient({
+      url: async () => {
+        const signedRequest = await sigv4Client.sign(wsUrl, {
+          method: 'GET',
+          aws: { signQuery: true },
+        });
+        return signedRequest.url;
+      },
+    });
+
+    const client = createTRPCClient<AppRouter>({
+      links: [wsLink({ client: wsClient })],
+    });
+
+    const optionsProxy = createTRPCOptionsProxy<AppRouter>({
+      client,
+      queryClient,
+    });
+
+    return { optionsProxy, client };
+  }, [agentRuntimeValue, queryClient, sigv4Client]);
+
+  return (
+    <TestAgentAgentTRPCContext.Provider value={container}>
+      {children}
+    </TestAgentAgentTRPCContext.Provider>
+  );
+};
+
+export default TestAgentAgentClientProvider;
+"
+`;
+
+exports[`ts strands agent react connection generator > should generate strands agent react connection files > useTestAgentAgent.tsx 1`] = `
+"import { useContext } from 'react';
+import {
+  TestAgentAgentTRPCContext,
+  type TestAgentAgentTRPCContextValue,
+} from '../components/TestAgentAgentClientProvider';
+
+export const useTestAgentAgent =
+  (): TestAgentAgentTRPCContextValue['optionsProxy'] => {
+    const container = useContext(TestAgentAgentTRPCContext);
+    if (!container) {
+      throw new Error(
+        'useTestAgentAgent must be used within TestAgentAgentClientProvider',
+      );
+    }
+    return container.optionsProxy;
+  };
+
+export const useTestAgentAgentClient =
+  (): TestAgentAgentTRPCContextValue['client'] => {
+    const container = useContext(TestAgentAgentTRPCContext);
+    if (!container) {
+      throw new Error(
+        'useTestAgentAgentClient must be used within TestAgentAgentClientProvider',
+      );
+    }
+    return container.client;
+  };
+"
+`;
+
+exports[`ts strands agent react connection generator > should handle Cognito auth option > TestAgentAgentClientProvider-Cognito.tsx 1`] = `
+"import type { AppRouter } from 'agent-project/src/agent/router.js';
+import { useQueryClient } from '@tanstack/react-query';
+import { createTRPCOptionsProxy } from '@trpc/tanstack-react-query';
+import { createContext, FC, PropsWithChildren, useMemo } from 'react';
+import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
+import {
+  TRPCClient,
+  createTRPCClient,
+  createWSClient,
+  wsLink,
+} from '@trpc/client';
+import { useAuth } from 'react-oidc-context';
+
+/**
+ * Utility to base64url-encode a string (for JWT in WebSocket protocol header)
+ */
+function base64UrlEncode(str: string): string {
+  return btoa(str).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=/g, '');
+}
+
+/**
+ * Build a WebSocket URL from a Bedrock AgentCore Runtime ARN
+ */
+function buildAgentCoreWsUrl(agentRuntimeArn: string): string {
+  const region = agentRuntimeArn.split(':')[3];
+  return \`wss://bedrock-agentcore.\${region}.amazonaws.com/runtimes/\${encodeURIComponent(agentRuntimeArn)}/ws\`;
+}
+
+export interface TestAgentAgentTRPCContextValue {
+  optionsProxy: ReturnType<typeof createTRPCOptionsProxy<AppRouter>>;
+  client: TRPCClient<AppRouter>;
+}
+
+export const TestAgentAgentTRPCContext =
+  createContext<TestAgentAgentTRPCContextValue | null>(null);
+
+export const TestAgentAgentClientProvider: FC<PropsWithChildren> = ({
+  children,
+}) => {
+  const queryClient = useQueryClient();
+  const runtimeConfig = useRuntimeConfig();
+  const agentRuntimeValue = runtimeConfig.agentRuntimes.TestAgent;
+  const auth = useAuth();
+  const accessToken = auth?.user?.access_token;
+
+  const container = useMemo<TestAgentAgentTRPCContextValue>(() => {
+    // If the value is an ARN, convert it to a WebSocket URL
+    const wsUrl = agentRuntimeValue.startsWith('arn:')
+      ? buildAgentCoreWsUrl(agentRuntimeValue)
+      : agentRuntimeValue;
+
+    const wsClient = createWSClient({
+      url: wsUrl,
+      WebSocket: class extends WebSocket {
+        constructor(url: string | URL, protocols?: string | string[]) {
+          const existingProtocols = protocols
+            ? Array.isArray(protocols)
+              ? protocols
+              : [protocols]
+            : [];
+          if (accessToken) {
+            const base64Token = base64UrlEncode(accessToken);
+            super(url, [
+              ...existingProtocols,
+              \`base64UrlBearerAuthorization.\${base64Token}\`,
+              'base64UrlBearerAuthorization',
+            ]);
+          } else {
+            super(url, existingProtocols);
+          }
+        }
+      },
+    });
+
+    const client = createTRPCClient<AppRouter>({
+      links: [wsLink({ client: wsClient })],
+    });
+
+    const optionsProxy = createTRPCOptionsProxy<AppRouter>({
+      client,
+      queryClient,
+    });
+
+    return { optionsProxy, client };
+  }, [agentRuntimeValue, queryClient, accessToken]);
+
+  return (
+    <TestAgentAgentTRPCContext.Provider value={container}>
+      {children}
+    </TestAgentAgentTRPCContext.Provider>
+  );
+};
+
+export default TestAgentAgentClientProvider;
+"
+`;
+
+exports[`ts strands agent react connection generator > should handle IAM auth option > TestAgentAgentClientProvider-IAM.tsx 1`] = `
+"import type { AppRouter } from 'agent-project/src/agent/router.js';
+import { useQueryClient } from '@tanstack/react-query';
+import { createTRPCOptionsProxy } from '@trpc/tanstack-react-query';
+import { createContext, FC, PropsWithChildren, useMemo } from 'react';
+import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
+import {
+  TRPCClient,
+  createTRPCClient,
+  createWSClient,
+  wsLink,
+} from '@trpc/client';
+import { useSigV4 } from '../hooks/useSigV4';
+
+/**
+ * Build a WebSocket URL from a Bedrock AgentCore Runtime ARN
+ */
+function buildAgentCoreWsUrl(agentRuntimeArn: string): string {
+  const region = agentRuntimeArn.split(':')[3];
+  return \`wss://bedrock-agentcore.\${region}.amazonaws.com/runtimes/\${encodeURIComponent(agentRuntimeArn)}/ws\`;
+}
+
+export interface TestAgentAgentTRPCContextValue {
+  optionsProxy: ReturnType<typeof createTRPCOptionsProxy<AppRouter>>;
+  client: TRPCClient<AppRouter>;
+}
+
+export const TestAgentAgentTRPCContext =
+  createContext<TestAgentAgentTRPCContextValue | null>(null);
+
+export const TestAgentAgentClientProvider: FC<PropsWithChildren> = ({
+  children,
+}) => {
+  const queryClient = useQueryClient();
+  const runtimeConfig = useRuntimeConfig();
+  const agentRuntimeValue = runtimeConfig.agentRuntimes.TestAgent;
+  const sigv4Client = useSigV4();
+
+  const container = useMemo<TestAgentAgentTRPCContextValue>(() => {
+    // If the value is an ARN, convert it to a WebSocket URL
+    const wsUrl = agentRuntimeValue.startsWith('arn:')
+      ? buildAgentCoreWsUrl(agentRuntimeValue)
+      : agentRuntimeValue;
+
+    const wsClient = createWSClient({
+      url: async () => {
+        const signedRequest = await sigv4Client.sign(wsUrl, {
+          method: 'GET',
+          aws: { signQuery: true },
+        });
+        return signedRequest.url;
+      },
+    });
+
+    const client = createTRPCClient<AppRouter>({
+      links: [wsLink({ client: wsClient })],
+    });
+
+    const optionsProxy = createTRPCOptionsProxy<AppRouter>({
+      client,
+      queryClient,
+    });
+
+    return { optionsProxy, client };
+  }, [agentRuntimeValue, queryClient, sigv4Client]);
+
+  return (
+    <TestAgentAgentTRPCContext.Provider value={container}>
+      {children}
+    </TestAgentAgentTRPCContext.Provider>
+  );
+};
+
+export default TestAgentAgentClientProvider;
+"
+`;
+
+exports[`ts strands agent react connection generator > should handle no auth option > TestAgentAgentClientProvider-NoAuth.tsx 1`] = `
+"import type { AppRouter } from 'agent-project/src/agent/router.js';
+import { useQueryClient } from '@tanstack/react-query';
+import { createTRPCOptionsProxy } from '@trpc/tanstack-react-query';
+import { createContext, FC, PropsWithChildren, useMemo } from 'react';
+import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
+import {
+  TRPCClient,
+  createTRPCClient,
+  createWSClient,
+  wsLink,
+} from '@trpc/client';
+
+/**
+ * Build a WebSocket URL from a Bedrock AgentCore Runtime ARN
+ */
+function buildAgentCoreWsUrl(agentRuntimeArn: string): string {
+  const region = agentRuntimeArn.split(':')[3];
+  return \`wss://bedrock-agentcore.\${region}.amazonaws.com/runtimes/\${encodeURIComponent(agentRuntimeArn)}/ws\`;
+}
+
+export interface TestAgentAgentTRPCContextValue {
+  optionsProxy: ReturnType<typeof createTRPCOptionsProxy<AppRouter>>;
+  client: TRPCClient<AppRouter>;
+}
+
+export const TestAgentAgentTRPCContext =
+  createContext<TestAgentAgentTRPCContextValue | null>(null);
+
+export const TestAgentAgentClientProvider: FC<PropsWithChildren> = ({
+  children,
+}) => {
+  const queryClient = useQueryClient();
+  const runtimeConfig = useRuntimeConfig();
+  const agentRuntimeValue = runtimeConfig.agentRuntimes.TestAgent;
+
+  const container = useMemo<TestAgentAgentTRPCContextValue>(() => {
+    // If the value is an ARN, convert it to a WebSocket URL
+    const wsUrl = agentRuntimeValue.startsWith('arn:')
+      ? buildAgentCoreWsUrl(agentRuntimeValue)
+      : agentRuntimeValue;
+
+    const wsClient = createWSClient({
+      url: wsUrl,
+    });
+
+    const client = createTRPCClient<AppRouter>({
+      links: [wsLink({ client: wsClient })],
+    });
+
+    const optionsProxy = createTRPCOptionsProxy<AppRouter>({
+      client,
+      queryClient,
+    });
+
+    return { optionsProxy, client };
+  }, [agentRuntimeValue, queryClient]);
+
+  return (
+    <TestAgentAgentTRPCContext.Provider value={container}>
+      {children}
+    </TestAgentAgentTRPCContext.Provider>
+  );
+};
+
+export default TestAgentAgentClientProvider;
+"
+`;
+
+exports[`ts strands agent react connection generator > should modify main.tsx correctly > main.tsx 1`] = `
+"import TestAgentAgentClientProvider from './components/TestAgentAgentClientProvider';
+import QueryClientProvider from './components/QueryClientProvider';
+import RuntimeConfigProvider from './components/RuntimeConfig';
+
+import { RouterProvider } from '@tanstack/react-router';
+
+const App = () => <RouterProvider router={router} />;
+
+export function Main() {
+  return (
+    <RuntimeConfigProvider>
+      <QueryClientProvider>
+        <TestAgentAgentClientProvider>
+          <App />
+        </TestAgentAgentClientProvider>
+      </QueryClientProvider>
+    </RuntimeConfigProvider>
+  );
+}
+"
+`;

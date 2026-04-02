@@ -254,7 +254,7 @@ Esegui con `tsx` come modo rapido per testare il tuo agente.
 Il file `client.ts` generato include una factory del client type-safe che può essere utilizzata per invocare il tuo agente distribuito.
 
 :::caution
-La factory del client utilizza le intestazioni HTTP nell'handshake WebSocket per autenticare le richieste a Bedrock AgentCore Runtime. Questo non è possibile in un browser e pertanto questo client non è adatto per ambienti browser. Fai riferimento alla sezione "Browser" di seguito per i dettagli sull'invocazione da un browser.
+La factory del client utilizza le intestazioni HTTP nell'handshake WebSocket per autenticare le richieste a Bedrock AgentCore Runtime. Questo non è possibile in un browser e pertanto questo client non è adatto per ambienti browser. Fai riferimento alla sezione "Browser / Sito Web React" di seguito per i dettagli sull'invocazione da un browser.
 :::
 
 ##### Autenticazione IAM
@@ -318,144 +318,10 @@ const jwtClient = AgentClient.withJwtAuth({
 });
 ```
 
-#### Browser
+#### Browser / Sito Web React
 
-I WebSocket nel browser non supportano la specifica delle intestazioni (diverse da `Sec-WebSocket-Protocol`) e pertanto la factory del client generata in `client.ts` non può essere utilizzata in un browser (questo comporterà effettivamente un errore di compilazione poiché il costruttore `WebSocket` non accetta intestazioni come fa in NodeJS).
+Per invocare il tuo Strands Agent da un sito web React, puoi utilizzare il <Link path="/guides/connection/react-ts-strands-agent">generatore `connection`</Link>, che configura automaticamente un client tRPC WebSocket con l'autenticazione corretta (IAM o Cognito).
 
-##### Autenticazione JWT / Cognito
+<RunGenerator generator="connection" />
 
-Bedrock AgentCore Runtime supporta [l'autenticazione OAuth/JWT dai browser](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html#:~:text=Browser%20JavaScript%20client%20with%20OAuth) accettando il bearer token incorporato nell'intestazione `Sec-WebSocket-Protocol` durante l'handshake WebSocket. Il token deve essere codificato in base64url e preceduto da `base64UrlBearerAuthorization.`, seguito dal subprotocollo sentinella `base64UrlBearerAuthorization`.
-
-L'esempio seguente mostra come creare un client tRPC in un'applicazione React utilizzando l'autenticazione Cognito:
-
-```typescript
-import { createTRPCClient, createWSClient, wsLink } from '@trpc/client';
-import { useAuth } from 'react-oidc-context';
-import type { AppRouter } from './your-agent/router';
-
-// Helper to base64url-encode a string
-function base64UrlEncode(str: string): string {
-  return btoa(str)
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=/g, '');
-}
-
-// Build a WebSocket URL with the bearer token in Sec-WebSocket-Protocol
-function buildAgentCoreWsUrl(
-  agentRuntimeArn: string,
-  region: string = 'us-west-2',
-): string {
-  return `wss://bedrock-agentcore.${region}.amazonaws.com/runtimes/${agentRuntimeArn}/ws`;
-}
-
-// Inside your React component or hook:
-const auth = useAuth();
-const accessToken = auth.user?.access_token;
-
-const agentRuntimeArn = 'arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/my-agent';
-
-const wsClient = createWSClient({
-  url: buildAgentCoreWsUrl(agentRuntimeArn),
-  WebSocket: class extends WebSocket {
-    constructor(url: string | URL, protocols?: string | string[]) {
-      const base64Token = base64UrlEncode(accessToken!);
-      const authProtocols = [
-        `base64UrlBearerAuthorization.${base64Token}`,
-        'base64UrlBearerAuthorization',
-      ];
-      // Merge any existing protocols with the auth protocols
-      const existingProtocols = protocols
-        ? Array.isArray(protocols)
-          ? protocols
-          : [protocols]
-        : [];
-      super(url, [...existingProtocols, ...authProtocols]);
-    }
-  },
-});
-
-const trpcClient = createTRPCClient<AppRouter>({
-  links: [wsLink({ client: wsClient })],
-});
-
-// Invoke the agent
-trpcClient.invoke.subscribe({ message: 'what is 1 plus 1?' }, {
-  onData: (message) => console.log(message),
-});
-```
-
-:::note
-L'esempio sopra utilizza [`react-oidc-context`](https://github.com/authts/react-oidc-context) per ottenere il token di accesso, che è la stessa libreria utilizzata dal <Link path="/guides/react-website-auth">generatore `ts#react-website#auth`</Link>. Puoi ottenere il token da qualsiasi provider OAuth/OIDC.
-:::
-
-##### Autenticazione IAM
-
-Per invocare il tuo agente da un browser, devi creare un URL WebSocket prefirmato utilizzando AWS SigV4.
-
-L'esempio seguente mostra un flusso end-to-end per ottenere le credenziali, creare un URL prefirmato e invocare l'agente:
-
-```typescript
-import { createTRPCClient, createWSClient, wsLink } from '@trpc/client';
-import { AwsClient } from 'aws4fetch';
-import { CognitoIdentityClient } from '@aws-sdk/client-cognito-identity';
-import { fromCognitoIdentityPool } from '@aws-sdk/credential-provider-cognito-identity';
-import type { AppRouter } from './your-agent/router';
-
-// Build a presigned WebSocket URL
-async function buildSignedUrl(
-  agentRuntimeArn: string,
-  idToken: string,
-  region: string = 'us-west-2'
-): Promise<string> {
-  // Get credentials from a Cognito Identity Pool (or other source)
-  const credentials = fromCognitoIdentityPool({
-    client: new CognitoIdentityClient({ region }),
-    identityPoolId: 'us-west-2:xxxxx',
-    logins: {
-      [`cognito-idp.${region}.amazonaws.com/us-west-2_xxxxx`]: idToken,
-    },
-  });
-
-  const cognitoIdentity = new CognitoIdentityClient({ credentials });
-  const credential = await cognitoIdentity.config.credentials();
-
-  // Create AWS SigV4 client
-  const awsClient = new AwsClient({
-    ...credential,
-    service: 'bedrock-agentcore',
-  });
-
-  // Build WebSocket URL from ARN
-  const wsUrl = `wss://bedrock-agentcore.${region}.amazonaws.com/runtimes/${encodeURIComponent(agentRuntimeArn)}/ws`;
-
-  // Create presigned URL
-  const signedRequest = await awsClient.sign(wsUrl, {
-    method: 'GET',
-    aws: { signQuery: true },
-  });
-
-  return signedRequest.url;
-}
-
-// Create tRPC client with presigned WebSocket URL
-const agentRuntimeArn = 'arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/my-agent';
-const idToken = '<your-id-token>';
-
-const wsClient = createWSClient({
-  url: async () => buildSignedUrl(agentRuntimeArn, idToken),
-});
-
-const trpcClient = createTRPCClient<AppRouter>({
-  links: [wsLink({ client: wsClient })],
-});
-
-// Invoke the agent
-trpcClient.invoke.subscribe({ message: 'what is 1 plus 1?' }, {
-  onData: (message) => console.log(message),
-});
-```
-
-:::tip
-Se desideri un'esperienza simile al <Link path="/guides/connection">generatore di connessione</Link> per gli agenti, metti +1 a [questa issue di GitHub](https://github.com/awslabs/nx-plugin-for-aws/issues/326).
-:::
+Fai riferimento alla <Link path="/guides/connection/react-ts-strands-agent">guida del generatore `connection`</Link> per i dettagli su come viene configurata la connessione.

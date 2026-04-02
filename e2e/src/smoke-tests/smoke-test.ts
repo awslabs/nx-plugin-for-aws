@@ -145,6 +145,12 @@ export const runSmokeTest = async (
     opts,
   );
 
+  // Connect the React website to the TS strands agent
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=@e2e-test/website --targetProject=ts-project --targetComponent=agent --no-interactive`,
+    opts,
+  );
+
   await runCLI(`generate @aws/nx-plugin:license --no-interactive`, opts);
 
   await runCLI(

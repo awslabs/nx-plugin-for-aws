@@ -1,0 +1,212 @@
+---
+title: "React から TypeScript Strands Agent への接続"
+description: "React ウェブサイトを TypeScript Strands Agent に接続する"
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+
+Nx Plugin for AWSは、<Link path="guides/ts-strands-agent">TypeScript Strands Agent</Link>とReactウェブサイトを素早く統合するためのジェネレーターを提供します。このジェネレーターは、tRPC over WebSocketを介してエージェントに接続するために必要なすべての設定を行い、AWS IAMとCognito認証のサポートを含みます。この統合により、フロントエンドとエージェントのtRPCルーター間で完全なエンドツーエンドの型安全性が提供されます。
+
+## 前提条件
+
+このジェネレーターを使用する前に、以下が必要です:
+
+1. Reactウェブサイト(<Link path="guides/react-website">`ts#react-website` ジェネレーター</Link>を使用して生成)
+2. TypeScript Strands Agent(<Link path="guides/ts-strands-agent">`ts#strands-agent` ジェネレーター</Link>を使用して生成)
+3. <Link path="/guides/react-website-auth">`ts#react-website-auth` ジェネレーター</Link>を介して追加されたCognito Auth
+
+## 使用方法
+
+### ジェネレーターの実行
+
+<RunGenerator generator="connection" />
+
+Reactウェブサイトをソースプロジェクトとして、Strands Agentを含むプロジェクトをターゲットプロジェクトとして選択するよう求められます。ターゲットプロジェクトに複数のコンポーネント(複数のエージェントや他のコンポーネントタイプなど)が含まれている場合は、曖昧さを解消するために`targetComponent`を指定するよう求められます。
+
+### オプション
+
+<GeneratorParameters generator="connection" />
+
+## ジェネレーターの出力
+
+ジェネレーターは、Reactアプリケーション内に以下の構造を作成します:
+
+<FileTree>
+
+- src
+  - components
+    - \<AgentName>AgentClientProvider.tsx tRPC WebSocketクライアントとエージェントのtRPCルーターへのバインディングを設定
+    - QueryClientProvider.tsx TanStack React Queryクライアントプロバイダー
+  - hooks
+    - useSigV4.tsx SigV4でリクエストに署名するためのフック(IAMのみ)
+    - use\<AgentName>Agent.tsx tRPCオプションプロキシとバニラtRPCクライアントを返すフック
+
+</FileTree>
+
+さらに、必要な依存関係をインストールします:
+
+  - `@trpc/client`
+  - `@trpc/tanstack-react-query`
+  - `@tanstack/react-query`
+  - `aws4fetch`(IAM認証を使用する場合)
+
+## 仕組み
+
+### WebSocket接続
+
+生成されたクライアントは、tRPC over WebSocketを介してStrands Agentに接続します。エージェントは、WebSocketエンドポイント上でtRPCルーター(エージェントレスポンスをストリーミングするための`invoke`サブスクリプションを含む)を公開します。
+
+- **デプロイ時**: エージェントランタイムARNは<Link path="guides/runtime-config">ランタイム設定</Link>から読み込まれます。ARNは、Bedrock AgentCore Runtime WebSocketプロトコルに従ってWebSocket URLに変換されます: `wss://bedrock-agentcore.<region>.amazonaws.com/runtimes/<encoded-arn>/ws`
+- **ローカル開発**: `serve-local`で実行する場合、ランタイム設定のオーバーライドによって値がローカルの`ws://` URL(例: `ws://localhost:8081/ws`)に設定され、クライアントは直接接続します
+
+### 認証
+
+生成されたコードは、エージェントの設定に応じて認証を処理します:
+
+- **IAM**(デフォルト): AWS SigV4事前署名URLを使用してWebSocket接続を認証します。認証情報は、ウェブサイトの認証で設定されたCognito Identity Poolから取得されます。`serve-local`モードでは、<Link path="guides/react-website#runtime-configuration">`runtime-config.json`</Link>が存在しない場合、署名は自動的にスキップされます
+- **Cognito**: JWTアクセストークンを`Sec-WebSocket-Protocol`ヘッダーにbase64urlエンコードされたベアラートークンとして埋め込みます。これは[AgentCore WebSocket認証プロトコル](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html)に従います
+
+
+## インフラストラクチャ
+
+エージェントがIAM認証を使用する場合、Cognito Identity Poolの認証済みロールは、WebSocket経由でエージェントを呼び出すために`bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream`権限を持つ必要があります:
+
+```ts
+const identity = new UserIdentity(this, 'Identity');
+const myAgent = new MyAgent(this, 'MyAgent');
+
+identity.identityPool.authenticatedRole.addToPrincipalPolicy(
+  new PolicyStatement({
+    actions: ['bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream'],
+    resources: [myAgent.agentCoreRuntime.agentRuntimeArn],
+  }),
+);
+```
+
+:::note
+本稿執筆時点では、エージェントコアランタイムの`grantInvoke`メソッドは、この権限をまだ自動的に含んでいません([aws-cdk#37495](https://github.com/aws/aws-cdk/issues/37495)を参照)。
+:::
+
+エージェントがCognito認証を使用する場合、ウェブサイトをエージェントに接続するために追加のインフラストラクチャを定義する必要はありません。
+
+## 生成されたコードの使用
+
+### TanStack Queryの使用
+
+最も一般的な使用例は、`use<AgentName>Agent`フックと`invoke`サブスクリプションを使用してエージェントのレスポンスをストリーミングすることです。このフックは、TanStack Queryで使用するための[tRPCオプションプロキシ](https://trpc.io/docs/client/tanstack-react-query)を返します:
+
+```tsx {1-2,7-22}
+import { useSubscription } from '@trpc/tanstack-react-query';
+import { useMyAgentAgent } from './hooks/useMyAgentAgent';
+
+function ChatComponent() {
+  const trpc = useMyAgentAgent();
+
+  const subscription = useSubscription(
+    trpc.invoke.subscriptionOptions(
+      { message: 'What can you help me with?' },
+      {
+        enabled: true,
+        onStarted: () => {
+          console.log('Agent started responding');
+        },
+        onData: (token) => {
+          console.log('Received token:', token);
+        },
+        onError: (error) => {
+          console.error('Agent error:', error);
+        },
+      },
+    ),
+  );
+
+  return (
+    <div>
+      <p>Status: {subscription.status}</p>
+      {subscription.data && <p>Latest token: {subscription.data}</p>}
+      {subscription.error && <p>Error: {subscription.error.message}</p>}
+    </div>
+  );
+}
+```
+
+:::note
+tRPCオプションプロキシとTanStack Query統合の詳細については、[tRPC TanStack React Queryドキュメント](https://trpc.io/docs/client/tanstack-react-query)を参照してください。
+:::
+
+### バニラtRPCクライアントの使用
+
+`use<AgentName>AgentClient`フックは、サブスクリプションのライフサイクルをより細かく制御するための[バニラtRPCクライアント](https://trpc.io/docs/client/vanilla)へのアクセスを提供します:
+
+```tsx {2,5,9-22,25}
+import { useState } from 'react';
+import { useMyAgentAgentClient } from './hooks/useMyAgentAgent';
+
+function ChatComponent() {
+  const client = useMyAgentAgentClient();
+  const [messages, setMessages] = useState<string[]>([]);
+
+  const sendMessage = (message: string) => {
+    const subscription = client.invoke.subscribe(
+      { message },
+      {
+        onData: (token) => {
+          setMessages((prev) => [...prev, token]);
+        },
+        onComplete: () => {
+          console.log('Agent finished');
+        },
+        onError: (error) => {
+          console.error('Error:', error);
+        },
+      },
+    );
+
+    // Clean up when done
+    return () => subscription.unsubscribe();
+  };
+
+  return (
+    <div>
+      <button onClick={() => sendMessage('Hello!')}>Send</button>
+      <div>
+        {messages.map((msg, i) => (
+          <span key={i}>{msg}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+```
+
+:::note
+バニラtRPCクライアントの詳細については、[tRPC Vanilla Clientドキュメント](https://trpc.io/docs/client/vanilla)を参照してください。
+:::
+
+## ローカル開発
+
+接続ジェネレーターは、Reactウェブサイトの`serve-local`統合を自動的に設定します:
+
+1. `nx run <website>:serve-local`を実行すると、エージェントのローカルサーバーも起動します
+2. ランタイム設定はローカルのWebSocket URL(例: `ws://localhost:8081/ws`)を指すようにオーバーライドされます
+3. 接続されたAPIと同様に、<Link path="guides/react-website#runtime-configuration">`runtime-config.json`</Link>が存在しない場合、`serve-local`モードでは認証がスキップされます
+
+:::tip[ホットリロード]
+ウェブサイトと接続されたエージェントはホットリロードされるため、AWSにデプロイすることなく両方を素早く反復開発できます。
+:::
+
+## 型安全性
+
+この統合は完全なエンドツーエンドの型安全性を提供します。IDEは、すべてのエージェントプロシージャコールに対して完全な自動補完と型チェックを提供します。型はエージェントのtRPCルーター定義から自動的に推論されるため、エージェントのAPIに対する変更がフロントエンドコードに即座に反映されます。
+
+## 詳細情報
+
+詳細については、以下を参照してください:
+
+- <Link path="guides/ts-strands-agent">TypeScript Strands Agentガイド</Link>
+- [tRPC WebSocket Client](https://trpc.io/docs/client/links/wsLink)
+- [tRPC TanStack React Query Integration](https://trpc.io/docs/client/tanstack-react-query)
+- [Bedrock AgentCore Runtime WebSocket](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html)
