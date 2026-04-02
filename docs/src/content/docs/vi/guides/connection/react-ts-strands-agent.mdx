@@ -16,7 +16,7 @@ Trước khi sử dụng generator này, hãy đảm bảo bạn có:
 
 1. Một trang web React (được tạo bằng <Link path="guides/react-website">`ts#react-website` generator</Link>)
 2. Một TypeScript Strands Agent (được tạo bằng <Link path="guides/ts-strands-agent">`ts#strands-agent` generator</Link>)
-3. Cognito Auth được thêm thông qua <Link path="/guides/react-website-auth">`ts#react-website-auth` generator</Link> nếu kết nối một agent sử dụng xác thực Cognito hoặc IAM
+3. Cognito Auth được thêm thông qua <Link path="/guides/react-website-auth">`ts#react-website-auth` generator</Link>
 
 ## Cách Sử Dụng
 
@@ -69,11 +69,14 @@ Code được tạo xử lý xác thực tùy thuộc vào cấu hình của age
 - **IAM** (mặc định): Sử dụng AWS SigV4 presigned URLs để xác thực kết nối WebSocket. Credentials được lấy từ Cognito Identity Pool được cấu hình với xác thực của trang web của bạn. Trong chế độ `serve-local`, việc ký được tự động bỏ qua khi <Link path="guides/react-website#runtime-configuration">`runtime-config.json`</Link> không có mặt
 - **Cognito**: Nhúng JWT access token trong header `Sec-WebSocket-Protocol` dưới dạng bearer token được mã hóa base64url, tuân theo [giao thức xác thực AgentCore WebSocket](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html)
 
-:::note
-Đối với xác thực IAM, authenticated role của Cognito Identity Pool phải có quyền `bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream` để gọi các agent qua WebSocket. Phương thức `grantInvoke` của CDK chưa tự động bao gồm quyền này (xem [aws-cdk#37495](https://github.com/aws/aws-cdk/issues/37495)), vì vậy bạn sẽ cần thêm nó một cách rõ ràng trong infrastructure stack của bạn:
 
-```typescript
-import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
+## Infrastructure
+
+Nếu agent của bạn sử dụng xác thực IAM, authenticated role của Cognito Identity Pool phải có quyền `bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream` để gọi các agent qua WebSocket:
+
+```ts
+const identity = new UserIdentity(this, 'Identity');
+const myAgent = new MyAgent(this, 'MyAgent');
 
 identity.identityPool.authenticatedRole.addToPrincipalPolicy(
   new PolicyStatement({
@@ -82,11 +85,16 @@ identity.identityPool.authenticatedRole.addToPrincipalPolicy(
   }),
 );
 ```
+
+:::note
+Tại thời điểm viết bài này, phương thức `grantInvoke` của agent core runtime chưa tự động bao gồm quyền này (xem [aws-cdk#37495](https://github.com/aws/aws-cdk/issues/37495)).
 :::
+
+Nếu agent của bạn sử dụng xác thực Cognito, bạn không cần định nghĩa bất kỳ infrastructure bổ sung nào để kết nối trang web của bạn với agent của bạn.
 
 ## Sử Dụng Code Được Tạo
 
-### Streaming Phản Hồi Agent với useSubscription
+### Sử Dụng TanStack Query
 
 Trường hợp sử dụng phổ biến nhất là streaming phản hồi của agent bằng cách sử dụng subscription `invoke` với hook `use<AgentName>Agent`, hook này trả về một [tRPC options proxy](https://trpc.io/docs/client/tanstack-react-query) để sử dụng với TanStack Query:
 
@@ -180,13 +188,15 @@ function ChatComponent() {
 
 ## Phát Triển Cục Bộ
 
-Connection generator tự động cấu hình tích hợp `serve-local`:
+Connection generator tự động cấu hình tích hợp `serve-local` cho trang web react của bạn:
 
 1. Chạy `nx run <website>:serve-local` cũng sẽ khởi động local server của agent
 2. Runtime config được ghi đè để trỏ đến WebSocket URL cục bộ (ví dụ: `ws://localhost:8081/ws`)
-3. Đối với xác thực IAM, việc ký request được tự động bỏ qua trong chế độ `serve-local` khi <Link path="guides/react-website#runtime-configuration">`runtime-config.json`</Link> không có mặt
+3. Giống như với các API được kết nối, xác thực được bỏ qua trong chế độ `serve-local` khi <Link path="guides/react-website#runtime-configuration">`runtime-config.json`</Link> không có mặt
 
-Điều này có nghĩa là bạn có thể phát triển và kiểm tra tích hợp agent của mình cục bộ chỉ với một lệnh duy nhất.
+:::tip[Hot Reloading]
+Trang web và agent được kết nối sẽ hot-reload, cho phép bạn nhanh chóng lặp lại trên cả hai cùng nhau mà không cần triển khai lên AWS.
+:::
 
 ## Type Safety
 

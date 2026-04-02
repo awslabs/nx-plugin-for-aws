@@ -16,7 +16,7 @@ Avant d'utiliser ce générateur, assurez-vous d'avoir :
 
 1. Un site web React (généré en utilisant le <Link path="guides/react-website">générateur `ts#react-website`</Link>)
 2. Un TypeScript Strands Agent (généré en utilisant le <Link path="guides/ts-strands-agent">générateur `ts#strands-agent`</Link>)
-3. Cognito Auth ajouté via le <Link path="/guides/react-website-auth">générateur `ts#react-website-auth`</Link> si vous connectez un agent qui utilise l'authentification Cognito ou IAM
+3. Cognito Auth ajouté via le <Link path="/guides/react-website-auth">générateur `ts#react-website-auth`</Link>
 
 ## Utilisation
 
@@ -69,11 +69,14 @@ Le code généré gère l'authentification en fonction de la configuration de vo
 - **IAM** (par défaut) : Utilise les URL présignées AWS SigV4 pour authentifier la connexion WebSocket. Les identifiants sont obtenus à partir du pool d'identités Cognito configuré avec l'authentification de votre site web. En mode `serve-local`, la signature est automatiquement ignorée lorsque <Link path="guides/react-website#runtime-configuration">`runtime-config.json`</Link> n'est pas présent
 - **Cognito** : Intègre le jeton d'accès JWT dans l'en-tête `Sec-WebSocket-Protocol` en tant que jeton bearer encodé en base64url, suivant le [protocole d'authentification WebSocket AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html)
 
-:::note
-Pour l'authentification IAM, le rôle authentifié du pool d'identités Cognito doit avoir la permission `bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream` pour invoquer les agents via WebSocket. La méthode CDK `grantInvoke` n'inclut pas encore cette permission automatiquement (voir [aws-cdk#37495](https://github.com/aws/aws-cdk/issues/37495)), vous devrez donc l'ajouter explicitement dans votre stack d'infrastructure :
 
-```typescript
-import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
+## Infrastructure
+
+Si votre agent utilise l'authentification IAM, le rôle authentifié du pool d'identités Cognito doit avoir la permission `bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream` pour invoquer les agents via WebSocket :
+
+```ts
+const identity = new UserIdentity(this, 'Identity');
+const myAgent = new MyAgent(this, 'MyAgent');
 
 identity.identityPool.authenticatedRole.addToPrincipalPolicy(
   new PolicyStatement({
@@ -82,11 +85,16 @@ identity.identityPool.authenticatedRole.addToPrincipalPolicy(
   }),
 );
 ```
+
+:::note
+Au moment de la rédaction, la méthode `grantInvoke` du runtime de l'agent core n'inclut pas encore cette permission automatiquement (voir [aws-cdk#37495](https://github.com/aws/aws-cdk/issues/37495)).
 :::
+
+Si votre agent utilise l'authentification Cognito, vous n'avez pas besoin de définir d'infrastructure supplémentaire pour connecter votre site web à votre agent.
 
 ## Utilisation du code généré
 
-### Streaming des réponses de l'agent avec useSubscription
+### Utilisation de TanStack Query
 
 Le cas d'utilisation le plus courant est le streaming de la réponse de l'agent en utilisant la souscription `invoke` avec le hook `use<AgentName>Agent`, qui retourne un [proxy d'options tRPC](https://trpc.io/docs/client/tanstack-react-query) pour une utilisation avec TanStack Query :
 
@@ -180,13 +188,15 @@ Pour plus de détails sur le client tRPC vanilla, consultez la [documentation du
 
 ## Développement local
 
-Le générateur de connexion configure automatiquement l'intégration `serve-local` :
+Le générateur de connexion configure automatiquement l'intégration `serve-local` pour votre site web react :
 
 1. L'exécution de `nx run <website>:serve-local` démarrera également le serveur local de l'agent
 2. La configuration du runtime est remplacée pour pointer vers l'URL WebSocket locale (par exemple, `ws://localhost:8081/ws`)
-3. Pour l'authentification IAM, la signature de requête est automatiquement ignorée en mode `serve-local` lorsque <Link path="guides/react-website#runtime-configuration">`runtime-config.json`</Link> n'est pas présent
+3. Comme avec les API connectées, l'authentification est ignorée en mode `serve-local` lorsque <Link path="guides/react-website#runtime-configuration">`runtime-config.json`</Link> n'est pas présent
 
-Cela signifie que vous pouvez développer et tester votre intégration d'agent localement avec une seule commande.
+:::tip[Rechargement à chaud]
+Le site web et l'agent connecté se rechargeront à chaud, vous permettant d'itérer rapidement sur les deux ensemble sans déployer sur AWS.
+:::
 
 ## Sécurité des types
 

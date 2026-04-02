@@ -16,7 +16,7 @@ Prima di utilizzare questo generatore, assicurati di avere:
 
 1. Un sito web React (generato utilizzando il <Link path="guides/react-website">generatore `ts#react-website`</Link>)
 2. Un TypeScript Strands Agent (generato utilizzando il <Link path="guides/ts-strands-agent">generatore `ts#strands-agent`</Link>)
-3. Cognito Auth aggiunto tramite il <Link path="/guides/react-website-auth">generatore `ts#react-website-auth`</Link> se si connette un agente che utilizza l'autenticazione Cognito o IAM
+3. Cognito Auth aggiunto tramite il <Link path="/guides/react-website-auth">generatore `ts#react-website-auth`</Link>
 
 ## Utilizzo
 
@@ -69,11 +69,14 @@ Il codice generato gestisce l'autenticazione in base alla configurazione del tuo
 - **IAM** (predefinito): Utilizza URL pre-firmati AWS SigV4 per autenticare la connessione WebSocket. Le credenziali vengono ottenute dal Cognito Identity Pool configurato con l'autenticazione del tuo sito web. In modalità `serve-local`, la firma viene automaticamente saltata quando <Link path="guides/react-website#runtime-configuration">`runtime-config.json`</Link> non è presente
 - **Cognito**: Incorpora il token di accesso JWT nell'header `Sec-WebSocket-Protocol` come token bearer codificato in base64url, seguendo il [protocollo di autenticazione WebSocket di AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html)
 
-:::note
-Per l'autenticazione IAM, il ruolo autenticato del Cognito Identity Pool deve avere il permesso `bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream` per invocare gli agenti tramite WebSocket. Il metodo CDK `grantInvoke` non include ancora questo permesso automaticamente (vedi [aws-cdk#37495](https://github.com/aws/aws-cdk/issues/37495)), quindi dovrai aggiungerlo esplicitamente nel tuo stack di infrastruttura:
 
-```typescript
-import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
+## Infrastruttura
+
+Se il tuo agente utilizza l'autenticazione IAM, il ruolo autenticato del Cognito Identity Pool deve avere il permesso `bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream` per invocare gli agenti tramite WebSocket:
+
+```ts
+const identity = new UserIdentity(this, 'Identity');
+const myAgent = new MyAgent(this, 'MyAgent');
 
 identity.identityPool.authenticatedRole.addToPrincipalPolicy(
   new PolicyStatement({
@@ -82,11 +85,16 @@ identity.identityPool.authenticatedRole.addToPrincipalPolicy(
   }),
 );
 ```
+
+:::note
+Al momento della stesura, il metodo `grantInvoke` del runtime dell'agent core non include ancora questo permesso automaticamente (vedi [aws-cdk#37495](https://github.com/aws/aws-cdk/issues/37495)).
 :::
+
+Se il tuo agente utilizza l'autenticazione Cognito, non è necessario definire alcuna infrastruttura aggiuntiva per connettere il tuo sito web al tuo agente.
 
 ## Utilizzare il Codice Generato
 
-### Streaming delle Risposte dell'Agente con useSubscription
+### Utilizzare TanStack Query
 
 Il caso d'uso più comune è lo streaming della risposta dell'agente utilizzando la subscription `invoke` con l'hook `use<AgentName>Agent`, che restituisce un [proxy delle opzioni tRPC](https://trpc.io/docs/client/tanstack-react-query) per l'uso con TanStack Query:
 
@@ -180,13 +188,15 @@ Per maggiori dettagli sul client tRPC vanilla, consulta la [documentazione del C
 
 ## Sviluppo Locale
 
-Il generatore di connessione configura automaticamente l'integrazione con `serve-local`:
+Il generatore di connessione configura automaticamente l'integrazione con `serve-local` per il tuo sito web react:
 
 1. L'esecuzione di `nx run <website>:serve-local` avvierà anche il server locale dell'agente
 2. La configurazione runtime viene sovrascritta per puntare all'URL WebSocket locale (ad es., `ws://localhost:8081/ws`)
-3. Per l'autenticazione IAM, la firma delle richieste viene automaticamente saltata in modalità `serve-local` quando <Link path="guides/react-website#runtime-configuration">`runtime-config.json`</Link> non è presente
+3. Come con le API connesse, l'autenticazione viene saltata in modalità `serve-local` quando <Link path="guides/react-website#runtime-configuration">`runtime-config.json`</Link> non è presente
 
-Questo significa che puoi sviluppare e testare l'integrazione del tuo agente localmente con un singolo comando.
+:::tip[Hot Reloading]
+Il sito web e l'agente connesso effettueranno l'hot-reload, permettendoti di iterare rapidamente su entrambi insieme senza distribuire su AWS.
+:::
 
 ## Type Safety
 
