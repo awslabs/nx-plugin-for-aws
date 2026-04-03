@@ -86,6 +86,8 @@ ERROR: Cannot connect to the Docker daemon at unix://path/to/docker.sock.
 
 ### 認証
 
+ジェネレーターは、Strands Agentの認証を設定するための`auth`オプションを提供します。エージェントを生成する際に、`IAM`(デフォルト)または`Cognito`認証を選択できます。
+
 #### IAM
 
 デフォルトでは、Strands AgentはIAM認証を使用して保護されます。引数なしで単純にデプロイしてください:
@@ -102,7 +104,7 @@ export class ExampleStack extends Stack {
 }
 ```
 
-`grantInvoke`メソッドを使用して、Bedrock AgentCore Runtime上でエージェントを呼び出すアクセス権を付与できます。例:
+`grantInvokeAccess`メソッドを使用して、Bedrock AgentCore Runtime上でエージェントを呼び出すアクセス権を付与できます。例:
 
 ```ts {8}
 import { MyProjectAgent } from ':my-scope/common-constructs';
@@ -112,7 +114,7 @@ export class ExampleStack extends Stack {
     const agent = new MyProjectAgent(this, 'MyProjectAgent');
     const lambdaFunction = new Function(this, ...);
 
-    agent.agentCoreRuntime.grantInvoke(lambdaFunction);
+    agent.grantInvokeAccess(lambdaFunction);
   }
 }
 ```
@@ -143,87 +145,48 @@ module "my_project_agent" {
 </Fragment>
 </Infrastructure>
 
-#### Cognito JWT認証
+#### Cognito認証
 
-以下は、エージェントのCognito認証を設定する方法を示しています。
+`Cognito`認証を選択すると、ジェネレーターは自動的に`UserIdentity`コンストラクトを作成し、Cognito認証を使用するようにエージェントを設定します。
 
 <Infrastructure>
 <Fragment slot="cdk">
-Cognitoを使用してJWT認証を設定するには、`RuntimeAuthorizerConfiguration.usingCognito()`ファクトリメソッドを使用します:
+生成されたコンストラクトは、Cognito認証を設定する`identity`プロパティを受け入れます:
 
-```ts {14-17}
-import { MyProjectAgent } from ':my-scope/common-constructs';
-import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
+```ts {8}
+import { MyProjectAgent, UserIdentity } from ':my-scope/common-constructs';
 
 export class ExampleStack extends Stack {
   constructor(scope: Construct, id: string) {
-    const userPool = new UserPool(this, 'UserPool');
-    const client = userPool.addClient('Client', {
-      authFlows: {
-        userPassword: true,
-      },
-    });
+    const identity = new UserIdentity(this, 'Identity');
 
     new MyProjectAgent(this, 'MyProjectAgent', {
-      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingCognito(
-        userPool,
-        [client],
-      ),
+      identity,
     });
   }
 }
 ```
 
-または、独自のOIDCプロバイダーを使用したカスタムJWT認証の場合は、`RuntimeAuthorizerConfiguration.usingJWT()`を使用します:
-
-```ts {7-11}
-import { MyProjectAgent } from ':my-scope/common-constructs';
-import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    new MyProjectAgent(this, 'MyProjectAgent', {
-      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingJWT(
-        'https://example.com/.well-known/openid-configuration',
-        ['client1', 'client2'], // Allowed Client IDs (optional)
-        ['audience1'],          // Allowed Audiences (optional)
-      ),
-    });
-  }
-}
-```
+`UserIdentity`コンストラクトは、<Link path="/guides/react-website-auth">`ts#react-website#auth`ジェネレーター</Link>を使用して生成するか、独自のCDK `UserPool`と`UserPoolClient`を作成できます。
 </Fragment>
 <Fragment slot="terraform">
-JWT認証を設定するには、エージェントモジュールを編集して、次のように`authorizer_configuration`変数を設定します:
+生成されたモジュールは、Cognito認証用の`user_pool_id`と`user_pool_client_ids`変数を受け入れます:
 
-```terraform {18-23}
-# packages/common/terraform/src/app/agents/my-project-agent/my-project-agent.tf
-
-data "aws_region" "current" {}
-
-locals {
-  aws_region = data.aws_region.current.id
-
-  # Replace with your user pool and client ids or expose as variables
-  user_pool_id = "xxx"
-  user_pool_client_ids = ["yyy"]
+```terraform
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
 }
 
-module "agent_core_runtime" {
-  source = "../../../core/agent-core"
-  agent_runtime_name = "MyProjectAgent"
-  docker_image_tag = "my-scope-my-project-agent:latest"
-  server_protocol = "HTTP"
-  authorizer_configuration = {
-    custom_jwt_authorizer = {
-      discovery_url = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration"
-      allowed_clients = local.user_pool_client_ids
-    }
-  }
-  env = var.env
-  additional_iam_policy_statements = var.additional_iam_policy_statements
-  tags = var.tags
+module "my_project_agent" {
+  source = "../../common/terraform/src/app/agents/my-project-agent"
+
+  user_pool_id         = module.user_identity.user_pool_id
+  user_pool_client_ids = [module.user_identity.user_pool_client_id]
 }
 ```
 </Fragment>
 </Infrastructure>
+
+:::note
+Cognito以外のOIDCプロバイダーを使用したカスタムJWT認証が必要な場合は、エージェント用に生成されたCDKコンストラクトまたはTerraformモジュールを直接変更できます。なお、接続ジェネレーターは`IAM`または`Cognito`認証のみをサポートします。
+:::

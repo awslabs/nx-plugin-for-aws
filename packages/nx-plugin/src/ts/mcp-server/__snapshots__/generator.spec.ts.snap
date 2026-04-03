@@ -25,11 +25,15 @@ import {
   Runtime,
   RuntimeProps,
 } from '@aws-cdk/aws-bedrock-agentcore-alpha';
+import { IGrantable } from 'aws-cdk-lib/aws-iam';
 import { RuntimeConfig } from '../../../core/runtime-config.js';
 
 export type SnapshotBedrockServerProps = Omit<
   RuntimeProps,
-  'runtimeName' | 'protocolConfiguration' | 'agentRuntimeArtifact'
+  | 'runtimeName'
+  | 'protocolConfiguration'
+  | 'agentRuntimeArtifact'
+  | 'authorizerConfiguration'
 >;
 
 export class SnapshotBedrockServer extends Construct {
@@ -76,6 +80,15 @@ export class SnapshotBedrockServer extends Construct {
       ...rc.get('connection').agentRuntimes,
       SnapshotBedrockServer: this.agentCoreRuntime.agentRuntimeArn,
     });
+  }
+
+  /**
+   * Grants IAM permissions to invoke this agent runtime.
+   *
+   * @param grantee - The IAM principal to grant permissions to
+   */
+  public grantInvokeAccess(grantee: IGrantable) {
+    this.agentCoreRuntime.grantInvoke(grantee);
   }
 }
 "
@@ -491,12 +504,6 @@ module "agent_core_runtime" {
   agent_runtime_name = "TerraformSnapshotServer"
   docker_image_tag = "proj-terraform-snapshot-server:latest"
   server_protocol = "MCP"
-#  authorizer_configuration = {
-#    custom_jwt_authorizer = {
-#      discovery_url = "https://xxx/.well-known/openid-configuration"
-#      allowed_clients = [ "xxx" ]
-#    }
-#  }
 
   env = merge({
     RUNTIME_CONFIG_APP_ID = module.appconfig.application_id

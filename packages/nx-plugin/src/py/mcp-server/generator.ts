@@ -25,6 +25,7 @@ import { kebabCase, toClassName, toSnakeCase } from '../../utils/names';
 import { addDependenciesToPyProjectToml } from '../../utils/py';
 import { getNpmScope } from '../../utils/npm-scope';
 import { addMcpServerInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
+
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { addPythonBundleTarget } from '../../utils/bundle/bundle';
 import { withVersions } from '../../utils/versions';
@@ -75,6 +76,7 @@ export const pyMcpServerGenerator = async (
   );
 
   const computeType = options.computeType ?? 'BedrockAgentCoreRuntime';
+  const auth = options.auth ?? 'IAM';
 
   // Generate example server
   generateFiles(
@@ -167,6 +169,7 @@ export const pyMcpServerGenerator = async (
       projectName: project.name,
       dockerImageTag,
       iacProvider,
+      auth,
     });
   }
 
@@ -240,6 +243,7 @@ export const pyMcpServerGenerator = async (
     {
       port: localDevPort,
       rc: mcpServerNameClassName,
+      auth,
     },
   );
 

@@ -16,7 +16,7 @@ Tạo một Python [Strands Agent](https://strandsagents.com/) để xây dựng
 
 ## Strands là gì?
 
-[Strands](https://strandsagents.com/latest/documentation/docs/) là một framework Python nhẹ, sẵn sàng cho production để xây dựng các AI agent. Các tính năng chính bao gồm:
+[Strands](https://strandsagents.com/docs/user-guide/quickstart/overview/) là một framework Python nhẹ, sẵn sàng cho production để xây dựng các AI agent. Các tính năng chính bao gồm:
 
 - **Nhẹ và có thể tùy chỉnh**: Vòng lặp agent đơn giản không cản trở bạn
 - **Sẵn sàng cho production**: Khả năng quan sát đầy đủ, theo dõi và các tùy chọn triển khai cho quy mô lớn
@@ -142,7 +142,7 @@ agent = Agent(
 
 ### Cấu hình Model
 
-Mặc định, các Strands agent sử dụng Claude 4 Sonnet, nhưng bạn có thể tùy chỉnh model provider. Xem [tài liệu Strands về model providers](https://strandsagents.com/latest/documentation/docs/user-guide/quickstart/#model-providers) để biết các tùy chọn cấu hình:
+Mặc định, các Strands agent sử dụng Claude 4 Sonnet, nhưng bạn có thể tùy chỉnh model provider. Xem [tài liệu Strands về model providers](https://strandsagents.com/docs/user-guide/concepts/model-providers/) để biết các tùy chọn cấu hình:
 
 ```python
 from strands import Agent
@@ -160,7 +160,7 @@ agent = Agent(model=bedrock_model)
 
 ### Sử dụng MCP Servers
 
-Bạn có thể [thêm các công cụ từ MCP servers](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/tools/mcp-tools/) vào Strands agent của bạn.
+Bạn có thể [thêm các công cụ từ MCP servers](https://strandsagents.com/docs/user-guide/concepts/tools/mcp-tools/) vào Strands agent của bạn.
 
 Để sử dụng các MCP Server mà bạn đã tạo bằng generator <Link path="/guides/py-mcp-server">`py#mcp-server`</Link> hoặc <Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link>, bạn có thể sử dụng <Link path="/guides/connection/py-strands-agent-mcp">`connection` generator</Link>.
 
@@ -172,7 +172,7 @@ Tham khảo <Link path="/guides/connection/py-strands-agent-mcp">hướng dẫn 
 
 ### Thêm nữa
 
-Để có hướng dẫn chuyên sâu hơn về viết Strands agent, hãy tham khảo [tài liệu Strands](https://strandsagents.com/latest/documentation/docs/).
+Để có hướng dẫn chuyên sâu hơn về viết Strands agent, hãy tham khảo [tài liệu Strands](https://strandsagents.com/docs/user-guide/quickstart/overview/).
 
 ## FastAPI Server
 
@@ -285,150 +285,6 @@ Một target `docker` cụ thể cho Strands Agent của bạn cũng được th
 :::tip
 Docker image được build bằng một tag (ví dụ `my-scope-my-project-agent:latest`), được tham chiếu bởi hạ tầng CDK hoặc Terraform của bạn, cho phép `Dockerfile` của bạn được đặt cùng với Strands Agent project của bạn.
 :::
-
-### Xác thực
-
-#### IAM
-
-Mặc định, Strands Agent của bạn sẽ được bảo mật bằng xác thực IAM, chỉ cần triển khai nó mà không có bất kỳ tham số nào:
-
-<Infrastructure>
-<Fragment slot="cdk">
-```ts {5}
-import { MyProjectAgent } from ':my-scope/common-constructs';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    new MyProjectAgent(this, 'MyProjectAgent');
-  }
-}
-```
-
-Bạn có thể cấp quyền truy cập để gọi agent của bạn trên Bedrock AgentCore Runtime bằng phương thức `grantInvoke`, ví dụ:
-
-```ts {8}
-import { MyProjectAgent } from ':my-scope/common-constructs';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    const agent = new MyProjectAgent(this, 'MyProjectAgent');
-    const lambdaFunction = new Function(this, ...);
-
-    agent.agentCoreRuntime.grantInvoke(lambdaFunction);
-  }
-}
-```
-</Fragment>
-<Fragment slot="terraform">
-```terraform
-# Agent
-module "my_project_agent" {
-  # Relative path to the generated module in the common/terraform project
-  source = "../../common/terraform/src/app/agents/my-project-agent"
-}
-```
-
-Để cấp quyền truy cập gọi agent của bạn, bạn sẽ cần thêm một policy như sau, tham chiếu đến output `module.my_project_agent.agent_core_runtime_arn`:
-
-```terraform
-{
-  Effect = "Allow"
-  Action = [
-    "bedrock-agentcore:InvokeAgentRuntime"
-  ]
-  Resource = [
-    module.my_project_agent.agent_core_runtime_arn,
-    "${module.my_project_agent.agent_core_runtime_arn}/*"
-  ]
-}
-```
-</Fragment>
-</Infrastructure>
-
-#### Cognito JWT Authentication
-
-Dưới đây minh họa cách cấu hình xác thực Cognito cho agent của bạn.
-
-<Infrastructure>
-<Fragment slot="cdk">
-Để cấu hình xác thực JWT sử dụng Cognito, hãy dùng factory method `RuntimeAuthorizerConfiguration.usingCognito()`:
-
-```ts {13-16}
-import { MyProjectAgent } from ':my-scope/common-constructs';
-import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    const userPool = new UserPool(this, 'UserPool');
-    const client = userPool.addClient('Client', {
-      authFlows: {
-        userPassword: true,
-      },
-    });
-
-    new MyProjectAgent(this, 'MyProjectAgent', {
-      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingCognito(
-        userPool,
-        [client],
-      ),
-    });
-  }
-}
-```
-
-Ngoài ra, để xác thực JWT tùy chỉnh với OIDC provider của riêng bạn, hãy sử dụng `RuntimeAuthorizerConfiguration.usingJWT()`:
-
-```ts {6-10}
-import { MyProjectAgent } from ':my-scope/common-constructs';
-import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    new MyProjectAgent(this, 'MyProjectAgent', {
-      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingJWT(
-        'https://example.com/.well-known/openid-configuration',
-        ['client1', 'client2'], // Allowed Client IDs (optional)
-        ['audience1'],          // Allowed Audiences (optional)
-      ),
-    });
-  }
-}
-```
-</Fragment>
-<Fragment slot="terraform">
-Để cấu hình xác thực JWT, bạn có thể chỉnh sửa agent module của bạn để cấu hình biến `authorizer_configuration` như sau:
-
-```terraform {18-23}
-# packages/common/terraform/src/app/agents/my-project-agent/my-project-agent.tf
-
-data "aws_region" "current" {}
-
-locals {
-  aws_region = data.aws_region.current.id
-
-  # Replace with your user pool and client ids or expose as variables
-  user_pool_id = "xxx"
-  user_pool_client_ids = ["yyy"]
-}
-
-module "agent_core_runtime" {
-  source = "../../../core/agent-core"
-  agent_runtime_name = "MyProjectAgent"
-  docker_image_tag = "my-scope-my-project-agent:latest"
-  server_protocol = "HTTP"
-  authorizer_configuration = {
-    custom_jwt_authorizer = {
-      discovery_url = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration"
-      allowed_clients = local.user_pool_client_ids
-    }
-  }
-  env = var.env
-  additional_iam_policy_statements = var.additional_iam_policy_statements
-  tags = var.tags
-}
-```
-</Fragment>
-</Infrastructure>
 
 ### Khả năng quan sát
 

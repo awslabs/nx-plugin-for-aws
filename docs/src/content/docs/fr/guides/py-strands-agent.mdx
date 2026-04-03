@@ -16,7 +16,7 @@ Générer un agent [Strands Agent](https://strandsagents.com/) en Python pour cr
 
 ## Qu'est-ce que Strands ?
 
-[Strands](https://strandsagents.com/latest/documentation/docs/) est un framework Python léger et prêt pour la production permettant de créer des agents IA. Principales fonctionnalités :
+[Strands](https://strandsagents.com/docs/user-guide/quickstart/overview/) est un framework Python léger et prêt pour la production permettant de créer des agents IA. Principales fonctionnalités :
 
 - **Léger et personnalisable** : Boucle d'agent simple qui reste discrète
 - **Prêt pour la production** : Observabilité complète, traçage et options de déploiement évolutives
@@ -142,7 +142,7 @@ agent = Agent(
 
 ### Configuration du modèle
 
-Par défaut, les agents Strands utilisent Claude 4 Sonnet, mais vous pouvez personnaliser le fournisseur de modèle. Consultez la [documentation Strands sur les fournisseurs de modèles](https://strandsagents.com/latest/documentation/docs/user-guide/quickstart/#model-providers) pour les options de configuration :
+Par défaut, les agents Strands utilisent Claude 4 Sonnet, mais vous pouvez personnaliser le fournisseur de modèle. Consultez la [documentation Strands sur les fournisseurs de modèles](https://strandsagents.com/docs/user-guide/concepts/model-providers/) pour les options de configuration :
 
 ```python
 from strands import Agent
@@ -160,7 +160,7 @@ agent = Agent(model=bedrock_model)
 
 ### Utilisation des serveurs MCP
 
-Vous pouvez [ajouter des outils depuis des serveurs MCP](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/tools/mcp-tools/) à votre agent Strands.
+Vous pouvez [ajouter des outils depuis des serveurs MCP](https://strandsagents.com/docs/user-guide/concepts/tools/mcp-tools/) à votre agent Strands.
 
 Pour utiliser des serveurs MCP créés avec les générateurs <Link path="/guides/py-mcp-server">`py#mcp-server`</Link> ou <Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link>, vous pouvez utiliser le <Link path="/guides/connection/py-strands-agent-mcp">générateur `connection`</Link>.
 
@@ -172,7 +172,7 @@ Pour d'autres serveurs MCP, veuillez consulter la [documentation Strands](https:
 
 ### Pour aller plus loin
 
-Pour un guide plus détaillé sur l'écriture d'agents Strands, consultez la [documentation Strands](https://strandsagents.com/latest/documentation/docs/).
+Pour un guide plus détaillé sur l'écriture d'agents Strands, consultez la [documentation Strands](https://strandsagents.com/docs/user-guide/quickstart/overview/).
 
 ## Serveur FastAPI
 
@@ -286,155 +286,11 @@ Une cible `docker` spécifique à votre agent Strands est également ajoutée, q
 L'image Docker est construite avec un tag (ex: `my-scope-my-project-agent:latest`), référencé par votre infrastructure CDK ou Terraform, permettant à votre `Dockerfile` d'être co-localisé avec votre projet d'agent Strands.
 :::
 
-### Authentification
-
-#### IAM
-
-Par défaut, votre agent Strands sera sécurisé via l'authentification IAM. Déployez-le simplement sans arguments :
-
-<Infrastructure>
-<Fragment slot="cdk">
-```ts {5}
-import { MyProjectAgent } from ':my-scope/common-constructs';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    new MyProjectAgent(this, 'MyProjectAgent');
-  }
-}
-```
-
-Vous pouvez accorder l'accès à votre agent sur Bedrock AgentCore Runtime via la méthode `grantInvoke`, par exemple :
-
-```ts {8}
-import { MyProjectAgent } from ':my-scope/common-constructs';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    const agent = new MyProjectAgent(this, 'MyProjectAgent');
-    const lambdaFunction = new Function(this, ...);
-
-    agent.agentCoreRuntime.grantInvoke(lambdaFunction);
-  }
-}
-```
-</Fragment>
-<Fragment slot="terraform">
-```terraform
-# Agent
-module "my_project_agent" {
-  # Chemin relatif vers le module généré dans le projet common/terraform
-  source = "../../common/terraform/src/app/agents/my-project-agent"
-}
-```
-
-Pour accorder l'accès à votre agent, ajoutez une politique IAM référençant la sortie `module.my_project_agent.agent_core_runtime_arn` :
-
-```terraform
-{
-  Effect = "Allow"
-  Action = [
-    "bedrock-agentcore:InvokeAgentRuntime"
-  ]
-  Resource = [
-    module.my_project_agent.agent_core_runtime_arn,
-    "${module.my_project_agent.agent_core_runtime_arn}/*"
-  ]
-}
-```
-</Fragment>
-</Infrastructure>
-
-#### Authentification Cognito JWT
-
-L'exemple suivant montre comment configurer l'authentification Cognito pour votre agent.
-
-<Infrastructure>
-<Fragment slot="cdk">
-Pour configurer l'authentification JWT avec Cognito, utilisez la méthode factory `RuntimeAuthorizerConfiguration.usingCognito()` :
-
-```ts {13-16}
-import { MyProjectAgent } from ':my-scope/common-constructs';
-import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    const userPool = new UserPool(this, 'UserPool');
-    const client = userPool.addClient('Client', {
-      authFlows: {
-        userPassword: true,
-      },
-    });
-
-    new MyProjectAgent(this, 'MyProjectAgent', {
-      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingCognito(
-        userPool,
-        [client],
-      ),
-    });
-  }
-}
-```
-
-Alternativement, pour une authentification JWT personnalisée avec votre propre fournisseur OIDC, utilisez `RuntimeAuthorizerConfiguration.usingJWT()` :
-
-```ts {6-10}
-import { MyProjectAgent } from ':my-scope/common-constructs';
-import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    new MyProjectAgent(this, 'MyProjectAgent', {
-      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingJWT(
-        'https://example.com/.well-known/openid-configuration',
-        ['client1', 'client2'], // IDs clients autorisés (optionnel)
-        ['audience1'],          // Audiences autorisées (optionnel)
-      ),
-    });
-  }
-}
-```
-</Fragment>
-<Fragment slot="terraform">
-Pour configurer l'authentification JWT, modifiez votre module agent pour configurer la variable `authorizer_configuration` comme suit :
-
-```terraform {18-23}
-# packages/common/terraform/src/app/agents/my-project-agent/my-project-agent.tf
-
-data "aws_region" "current" {}
-
-locals {
-  aws_region = data.aws_region.current.id
-
-  # Remplacez par vos IDs de user pool/client ou exposez-les comme variables
-  user_pool_id = "xxx"
-  user_pool_client_ids = ["yyy"]
-}
-
-module "agent_core_runtime" {
-  source = "../../../core/agent-core"
-  agent_runtime_name = "MyProjectAgent"
-  docker_image_tag = "my-scope-my-project-agent:latest"
-  server_protocol = "HTTP"
-  authorizer_configuration = {
-    custom_jwt_authorizer = {
-      discovery_url = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration"
-      allowed_clients = local.user_pool_client_ids
-    }
-  }
-  env = var.env
-  additional_iam_policy_statements = var.additional_iam_policy_statements
-  tags = var.tags
-}
-```
-</Fragment>
-</Infrastructure>
-
 ### Observabilité
 
 Votre agent est automatiquement configuré avec l'observabilité via [AWS Distro for Open Telemetry](https://aws.amazon.com/otel/) (ADOT), via l'auto-instrumentation dans votre `Dockerfile`.
 
-Vous pouvez trouver les traces dans la console CloudWatch en sélectionnant "GenAI Observability". Notez que pour voir les traces, vous devez activer [Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search.html).
+Vous pouvez trouver les traces dans la console CloudWatch en sélectionnant "GenAI Observability" dans le menu. Notez que pour voir les traces, vous devez activer [Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search.html).
 
 Pour plus de détails, consultez la [documentation AgentCore sur l'observabilité](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html).
 

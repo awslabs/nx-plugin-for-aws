@@ -27,6 +27,7 @@ import {
   addDependenciesToPyProjectToml,
 } from '../../utils/py';
 import { addAgentInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
+
 import { addPythonBundleTarget } from '../../utils/bundle/bundle';
 import { getNpmScope } from '../../utils/npm-scope';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
@@ -77,6 +78,7 @@ export const pyStrandsAgentGenerator = async (
   );
 
   const computeType = options.computeType ?? 'BedrockAgentCoreRuntime';
+  const auth = options.auth ?? 'IAM';
 
   // Generate example agent
   generateFiles(
@@ -160,6 +162,7 @@ export const pyStrandsAgentGenerator = async (
       dockerImageTag,
       iacProvider,
       projectName: project.name,
+      auth,
     });
   }
 
@@ -207,6 +210,7 @@ export const pyStrandsAgentGenerator = async (
     {
       port: localDevPort,
       rc: agentNameClassName,
+      auth,
     },
   );
 

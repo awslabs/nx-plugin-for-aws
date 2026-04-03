@@ -29,6 +29,7 @@ import { TS_VERSIONS, withVersions } from '../../utils/versions';
 import { kebabCase, toClassName } from '../../utils/names';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { addMcpServerInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
+
 import { getNpmScope } from '../../utils/npm-scope';
 import { resolveIacProvider } from '../../utils/iac';
 import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
@@ -65,6 +66,7 @@ export const tsMcpServerGenerator = async (
   const distDir = joinPathFragments('dist', project.root);
 
   const computeType = options.computeType ?? 'BedrockAgentCoreRuntime';
+  const auth = options.auth ?? 'IAM';
 
   // Create a package.json if one doesn't exist, since we want to add the server as a bin target
   const projectPackageJsonPath = joinPathFragments(
@@ -157,6 +159,7 @@ export const tsMcpServerGenerator = async (
       projectName: project.name,
       dockerImageTag,
       iacProvider,
+      auth,
     });
   } else {
     // No Dockerfile needed for non-hosted MCP
@@ -226,6 +229,7 @@ export const tsMcpServerGenerator = async (
     {
       port: localDevPort,
       rc: mcpServerNameClassName,
+      auth,
     },
   );
 

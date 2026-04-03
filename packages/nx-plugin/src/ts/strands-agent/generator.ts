@@ -29,6 +29,7 @@ import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
 import { resolveIacProvider } from '../../utils/iac';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { addAgentInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
+
 import { assignPort } from '../../utils/port';
 
 export const TS_STRANDS_AGENT_GENERATOR_INFO: NxGeneratorInfo =
@@ -62,6 +63,7 @@ export const tsStrandsAgentGenerator = async (
   const distDir = joinPathFragments('dist', project.root);
 
   const computeType = options.computeType ?? 'BedrockAgentCoreRuntime';
+  const auth = options.auth ?? 'IAM';
 
   // Generate example agent
   generateFiles(
@@ -123,6 +125,7 @@ export const tsStrandsAgentGenerator = async (
       projectName: project.name,
       dockerImageTag,
       iacProvider,
+      auth,
     });
   }
 
@@ -186,7 +189,7 @@ export const tsStrandsAgentGenerator = async (
     TS_STRANDS_AGENT_GENERATOR_INFO,
     targetSourceDirRelativeToProjectRoot,
     agentTargetPrefix,
-    { port: localDevPort, rc: agentNameClassName },
+    { port: localDevPort, rc: agentNameClassName, auth },
   );
 
   await addGeneratorMetricsIfApplicable(tree, [

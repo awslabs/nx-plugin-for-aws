@@ -86,6 +86,8 @@ ERROR: Cannot connect to the Docker daemon at unix://path/to/docker.sock.
 
 ### 身份验证
 
+生成器提供了一个 `auth` 选项来配置 Strands Agent 的身份验证。您可以在生成代理时选择 `IAM`（默认）或 `Cognito` 身份验证。
+
 #### IAM
 
 默认情况下，您的 Strands Agent 将使用 IAM 身份验证进行保护，只需在不带任何参数的情况下部署它：
@@ -102,7 +104,7 @@ export class ExampleStack extends Stack {
 }
 ```
 
-您可以使用 `grantInvoke` 方法授予调用 Bedrock AgentCore Runtime 上代理的访问权限，例如：
+您可以使用 `grantInvokeAccess` 方法授予调用 Bedrock AgentCore Runtime 上代理的访问权限，例如：
 
 ```ts {8}
 import { MyProjectAgent } from ':my-scope/common-constructs';
@@ -112,7 +114,7 @@ export class ExampleStack extends Stack {
     const agent = new MyProjectAgent(this, 'MyProjectAgent');
     const lambdaFunction = new Function(this, ...);
 
-    agent.agentCoreRuntime.grantInvoke(lambdaFunction);
+    agent.grantInvokeAccess(lambdaFunction);
   }
 }
 ```
@@ -143,87 +145,48 @@ module "my_project_agent" {
 </Fragment>
 </Infrastructure>
 
-#### Cognito JWT 身份验证
+#### Cognito 身份验证
 
-以下演示了如何为您的代理配置 Cognito 身份验证。
+当您选择 `Cognito` 身份验证时，生成器会自动创建 `UserIdentity` 构造并配置代理使用 Cognito 进行身份验证。
 
 <Infrastructure>
 <Fragment slot="cdk">
-要使用 Cognito 配置 JWT 身份验证，请使用 `RuntimeAuthorizerConfiguration.usingCognito()` 工厂方法：
+生成的构造接受一个 `identity` 属性来配置 Cognito 身份验证：
 
-```ts {14-17}
-import { MyProjectAgent } from ':my-scope/common-constructs';
-import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
+```ts {8}
+import { MyProjectAgent, UserIdentity } from ':my-scope/common-constructs';
 
 export class ExampleStack extends Stack {
   constructor(scope: Construct, id: string) {
-    const userPool = new UserPool(this, 'UserPool');
-    const client = userPool.addClient('Client', {
-      authFlows: {
-        userPassword: true,
-      },
-    });
+    const identity = new UserIdentity(this, 'Identity');
 
     new MyProjectAgent(this, 'MyProjectAgent', {
-      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingCognito(
-        userPool,
-        [client],
-      ),
+      identity,
     });
   }
 }
 ```
 
-或者，对于使用您自己的 OIDC 提供商的自定义 JWT 身份验证，请使用 `RuntimeAuthorizerConfiguration.usingJWT()`：
-
-```ts {7-11}
-import { MyProjectAgent } from ':my-scope/common-constructs';
-import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    new MyProjectAgent(this, 'MyProjectAgent', {
-      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingJWT(
-        'https://example.com/.well-known/openid-configuration',
-        ['client1', 'client2'], // Allowed Client IDs (optional)
-        ['audience1'],          // Allowed Audiences (optional)
-      ),
-    });
-  }
-}
-```
+`UserIdentity` 构造可以使用 <Link path="/guides/react-website-auth">`ts#react-website#auth` 生成器</Link>生成，或者您可以创建自己的 CDK `UserPool` 和 `UserPoolClient`。
 </Fragment>
 <Fragment slot="terraform">
-要配置 JWT 身份验证，您可以编辑代理模块以配置 `authorizer_configuration` 变量，如下所示：
+生成的模块接受 `user_pool_id` 和 `user_pool_client_ids` 变量用于 Cognito 身份验证：
 
-```terraform {18-23}
-# packages/common/terraform/src/app/agents/my-project-agent/my-project-agent.tf
-
-data "aws_region" "current" {}
-
-locals {
-  aws_region = data.aws_region.current.id
-
-  # Replace with your user pool and client ids or expose as variables
-  user_pool_id = "xxx"
-  user_pool_client_ids = ["yyy"]
+```terraform
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
 }
 
-module "agent_core_runtime" {
-  source = "../../../core/agent-core"
-  agent_runtime_name = "MyProjectAgent"
-  docker_image_tag = "my-scope-my-project-agent:latest"
-  server_protocol = "HTTP"
-  authorizer_configuration = {
-    custom_jwt_authorizer = {
-      discovery_url = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration"
-      allowed_clients = local.user_pool_client_ids
-    }
-  }
-  env = var.env
-  additional_iam_policy_statements = var.additional_iam_policy_statements
-  tags = var.tags
+module "my_project_agent" {
+  source = "../../common/terraform/src/app/agents/my-project-agent"
+
+  user_pool_id         = module.user_identity.user_pool_id
+  user_pool_client_ids = [module.user_identity.user_pool_client_id]
 }
 ```
 </Fragment>
 </Infrastructure>
+
+:::note
+如果您需要使用非 Cognito OIDC 提供商的自定义 JWT 身份验证，您可以直接修改为您的代理生成的 CDK 构造或 Terraform 模块。请注意，连接生成器仅支持 `IAM` 或 `Cognito` 身份验证。
+:::
