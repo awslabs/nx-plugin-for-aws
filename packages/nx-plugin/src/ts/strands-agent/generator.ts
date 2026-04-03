@@ -189,7 +189,7 @@ export const tsStrandsAgentGenerator = async (
     TS_STRANDS_AGENT_GENERATOR_INFO,
     targetSourceDirRelativeToProjectRoot,
     agentTargetPrefix,
-    { port: localDevPort, auth },
+    { port: localDevPort, rc: agentNameClassName, auth },
   );
 
   await addGeneratorMetricsIfApplicable(tree, [

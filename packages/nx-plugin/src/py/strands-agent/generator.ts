@@ -209,6 +209,7 @@ export const pyStrandsAgentGenerator = async (
     agentTargetPrefix,
     {
       port: localDevPort,
+      rc: agentNameClassName,
       auth,
     },
   );

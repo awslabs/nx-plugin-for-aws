@@ -242,6 +242,7 @@ export const pyMcpServerGenerator = async (
     mcpTargetPrefix,
     {
       port: localDevPort,
+      rc: mcpServerNameClassName,
       auth,
     },
   );

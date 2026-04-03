@@ -228,6 +228,7 @@ export const tsMcpServerGenerator = async (
     mcpTargetPrefix,
     {
       port: localDevPort,
+      rc: mcpServerNameClassName,
       auth,
     },
   );
