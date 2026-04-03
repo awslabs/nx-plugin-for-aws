@@ -55,6 +55,8 @@ ERROR: Cannot connect to the Docker daemon at unix://path/to/docker.sock.
 
 ### 認証
 
+ジェネレーターは、MCPサーバーの認証を設定するための`auth`オプションを提供します。MCPサーバー生成時に`IAM`（デフォルト）または`Cognito`認証を選択できます。
+
 #### IAM
 
 デフォルトではMCPサーバーはIAM認証で保護されます。引数なしでデプロイできます：
@@ -71,7 +73,7 @@ export class ExampleStack extends Stack {
 }
 ```
 
-`grantInvoke`メソッドを使用してBedrock AgentCore Runtime上のMCPサーバー起動権限を付与できます。例：<Link path="/guides/py-strands-agent">`py#strands-agent`</Link>ジェネレーターで作成したエージェントにMCPサーバー呼び出し権限を付与：
+`grantInvokeAccess`メソッドを使用してBedrock AgentCore Runtime上のMCPサーバー起動権限を付与できます。例：<Link path="/guides/py-strands-agent">`py#strands-agent`</Link>ジェネレーターで作成したエージェントにMCPサーバー呼び出し権限を付与：
 
 ```ts {8}
 import { MyProjectAgent, MyProjectMcpServer } from ':my-scope/common-constructs';
@@ -81,7 +83,7 @@ export class ExampleStack extends Stack {
     const agent = new MyProjectAgent(this, 'MyProjectAgent');
     const mcpServer = new MyProjectMcpServer(this, 'MyProjectMcpServer');
 
-    mcpServer.agentCoreRuntime.grantInvoke(agent.agentCoreRuntime);
+    mcpServer.grantInvokeAccess(agent.agentCoreRuntime);
   }
 }
 ```
@@ -95,7 +97,7 @@ module "my_project_mcp_server" {
 }
 ```
 
-起動権限を付与するには、`module.my_project_mcp_server.agent_core_runtime_arn`出力を参照するポリシーを追加：
+MCPサーバーの起動権限を付与するには、`module.my_project_mcp_server.agent_core_runtime_arn`出力を参照するポリシーを追加：
 
 ```terraform
 {
@@ -112,87 +114,48 @@ module "my_project_mcp_server" {
 </Fragment>
 </Infrastructure>
 
-#### Cognito JWT認証
+#### Cognito認証
 
-以下はエージェント用にCognito認証を設定する方法を示します。
+`Cognito`認証を選択すると、ジェネレーターは自動的に`UserIdentity`コンストラクトを作成し、Cognito認証を使用するようにMCPサーバーを設定します。
 
 <Infrastructure>
 <Fragment slot="cdk">
-CognitoでJWT認証を設定するには、`RuntimeAuthorizerConfiguration.usingCognito()`ファクトリーメソッドを使用します：
+生成されたコンストラクトは、Cognito認証を設定する`identity`プロパティを受け入れます：
 
-```ts {14-17}
-import { MyProjectMcpServer } from ':my-scope/common-constructs';
-import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
+```ts {8}
+import { MyProjectMcpServer, UserIdentity } from ':my-scope/common-constructs';
 
 export class ExampleStack extends Stack {
   constructor(scope: Construct, id: string) {
-    const userPool = new UserPool(this, 'UserPool');
-    const client = userPool.addClient('Client', {
-      authFlows: {
-        userPassword: true,
-      },
-    });
+    const identity = new UserIdentity(this, 'Identity');
 
     new MyProjectMcpServer(this, 'MyProjectMcpServer', {
-      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingCognito(
-        userPool,
-        [client],
-      ),
+      identity,
     });
   }
 }
 ```
 
-または、独自のOIDCプロバイダーでカスタムJWT認証を行う場合は、`RuntimeAuthorizerConfiguration.usingJWT()`を使用します：
-
-```ts {6-10}
-import { MyProjectMcpServer } from ':my-scope/common-constructs';
-import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    new MyProjectMcpServer(this, 'MyProjectMcpServer', {
-      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingJWT(
-        'https://example.com/.well-known/openid-configuration',
-        ['client1', 'client2'], // 許可されたクライアントID（オプション）
-        ['audience1'],          // 許可されたオーディエンス（オプション）
-      ),
-    });
-  }
-}
-```
+`UserIdentity`コンストラクトは<Link path="/guides/react-website-auth">`ts#react-website#auth`ジェネレーター</Link>を使用して生成できます。また、独自のCDK `UserPool`と`UserPoolClient`を作成することもできます。
 </Fragment>
 <Fragment slot="terraform">
-JWT認証を設定するには、MCPサーバーモジュールの`authorizer_configuration`変数を以下のように設定：
+生成されたモジュールは、Cognito認証用に`user_pool_id`と`user_pool_client_ids`変数を受け入れます：
 
-```terraform {18-23}
-# packages/common/terraform/src/app/mcp-servers/my-project-mcp-server/my-project-mcp-server.tf
-
-data "aws_region" "current" {}
-
-locals {
-  aws_region = data.aws_region.current.id
-
-  # ユーザープールIDとクライアントIDに置き換え、または変数として公開
-  user_pool_id = "xxx"
-  user_pool_client_ids = ["yyy"]
+```terraform
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
 }
 
-module "agent_core_runtime" {
-  source = "../../../core/agent-core"
-  agent_runtime_name = "MyProjectMcpServer"
-  docker_image_tag = "my-scope-my-project-mcp-server:latest"
-  server_protocol = "MCP"
-  authorizer_configuration = {
-    custom_jwt_authorizer = {
-      discovery_url = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration"
-      allowed_clients = local.user_pool_client_ids
-    }
-  }
-  env = var.env
-  additional_iam_policy_statements = var.additional_iam_policy_statements
-  tags = var.tags
+module "my_project_mcp_server" {
+  source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
+
+  user_pool_id         = module.user_identity.user_pool_id
+  user_pool_client_ids = [module.user_identity.user_pool_client_id]
 }
 ```
 </Fragment>
 </Infrastructure>
+
+:::note
+Cognito以外のOIDCプロバイダーでカスタムJWT認証が必要な場合は、MCPサーバー用に生成されたCDKコンストラクトまたはTerraformモジュールを直接変更できます。ただし、接続ジェネレーターは`IAM`または`Cognito`認証のみをサポートすることに注意してください。
+:::

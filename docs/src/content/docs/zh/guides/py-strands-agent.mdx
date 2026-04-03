@@ -16,7 +16,7 @@ import Drawer from '@components/drawer.astro';
 
 ## 什么是Strands？
 
-[Strands](https://strandsagents.com/latest/documentation/docs/)是一个轻量级、生产就绪的Python框架，用于构建AI智能体。主要特性包括：
+[Strands](https://strandsagents.com/docs/user-guide/quickstart/overview/)是一个轻量级、生产就绪的Python框架，用于构建AI智能体。主要特性包括：
 
 - **轻量且可定制**：简洁的智能体循环设计，不干扰开发
 - **生产就绪**：完整的可观测性、追踪和规模化部署选项
@@ -142,7 +142,7 @@ agent = Agent(
 
 ### 模型配置
 
-默认使用Claude 4 Sonnet模型，可自定义模型供应商。参考[Strands模型供应商文档](https://strandsagents.com/latest/documentation/docs/user-guide/quickstart/#model-providers)进行配置：
+默认使用Claude 4 Sonnet模型，可自定义模型供应商。参考[Strands模型供应商文档](https://strandsagents.com/docs/user-guide/concepts/model-providers/)进行配置：
 
 ```python
 from strands import Agent
@@ -160,7 +160,7 @@ agent = Agent(model=bedrock_model)
 
 ### 使用MCP服务
 
-可通过[添加MCP服务工具](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/tools/mcp-tools/)扩展智能体功能。
+可通过[添加MCP服务工具](https://strandsagents.com/docs/user-guide/concepts/tools/mcp-tools/)扩展智能体功能。
 
 对于使用<Link path="/guides/py-mcp-server">`py#mcp-server`</Link>或<Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link>生成器创建的MCP服务，可以使用<Link path="/guides/connection/py-strands-agent-mcp">`connection`生成器</Link>。
 
@@ -172,7 +172,7 @@ agent = Agent(model=bedrock_model)
 
 ### 更多信息
 
-深入指南请参考[Strands官方文档](https://strandsagents.com/latest/documentation/docs/)。
+深入指南请参考[Strands官方文档](https://strandsagents.com/docs/user-guide/quickstart/overview/)。
 
 ## FastAPI服务器
 
@@ -283,150 +283,6 @@ SDK功能详情请参阅[文档](https://aws.github.io/bedrock-agentcore-starter
 :::tip
 Docker镜像使用特定标签（如`my-scope-my-project-agent:latest`），与CDK/Terraform基础设施关联，确保Dockerfile与项目位置一致。
 :::
-
-### 认证配置
-
-#### IAM认证
-
-默认使用IAM认证，直接部署即可：
-
-<Infrastructure>
-<Fragment slot="cdk">
-```ts {5}
-import { MyProjectAgent } from ':my-scope/common-constructs';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    new MyProjectAgent(this, 'MyProjectAgent');
-  }
-}
-```
-
-可使用`grantInvoke`方法授权调用Bedrock AgentCore Runtime上的智能体，例如：
-
-```ts {8}
-import { MyProjectAgent } from ':my-scope/common-constructs';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    const agent = new MyProjectAgent(this, 'MyProjectAgent');
-    const lambdaFunction = new Function(this, ...);
-
-    agent.agentCoreRuntime.grantInvoke(lambdaFunction);
-  }
-}
-```
-</Fragment>
-<Fragment slot="terraform">
-```terraform
-# 智能体
-module "my_project_agent" {
-  # common/terraform项目中生成模块的相对路径
-  source = "../../common/terraform/src/app/agents/my-project-agent"
-}
-```
-
-要授予调用智能体的权限，需添加如下策略，引用`module.my_project_agent.agent_core_runtime_arn`输出：
-
-```terraform
-{
-  Effect = "Allow"
-  Action = [
-    "bedrock-agentcore:InvokeAgentRuntime"
-  ]
-  Resource = [
-    module.my_project_agent.agent_core_runtime_arn,
-    "${module.my_project_agent.agent_core_runtime_arn}/*"
-  ]
-}
-```
-</Fragment>
-</Infrastructure>
-
-#### Cognito JWT认证
-
-以下演示如何配置Cognito认证：
-
-<Infrastructure>
-<Fragment slot="cdk">
-使用Cognito配置JWT认证时，使用`RuntimeAuthorizerConfiguration.usingCognito()`工厂方法：
-
-```ts {13-16}
-import { MyProjectAgent } from ':my-scope/common-constructs';
-import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    const userPool = new UserPool(this, 'UserPool');
-    const client = userPool.addClient('Client', {
-      authFlows: {
-        userPassword: true,
-      },
-    });
-
-    new MyProjectAgent(this, 'MyProjectAgent', {
-      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingCognito(
-        userPool,
-        [client],
-      ),
-    });
-  }
-}
-```
-
-或者，对于使用自有OIDC提供商的自定义JWT认证，使用`RuntimeAuthorizerConfiguration.usingJWT()`：
-
-```ts {6-10}
-import { MyProjectAgent } from ':my-scope/common-constructs';
-import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    new MyProjectAgent(this, 'MyProjectAgent', {
-      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingJWT(
-        'https://example.com/.well-known/openid-configuration',
-        ['client1', 'client2'], // 允许的客户端ID（可选）
-        ['audience1'],          // 允许的受众（可选）
-      ),
-    });
-  }
-}
-```
-</Fragment>
-<Fragment slot="terraform">
-配置JWT认证时，可编辑智能体模块配置`authorizer_configuration`变量：
-
-```terraform {18-23}
-# packages/common/terraform/src/app/agents/my-project-agent/my-project-agent.tf
-
-data "aws_region" "current" {}
-
-locals {
-  aws_region = data.aws_region.current.id
-
-  # 替换为您的用户池和客户端ID或作为变量暴露
-  user_pool_id = "xxx"
-  user_pool_client_ids = ["yyy"]
-}
-
-module "agent_core_runtime" {
-  source = "../../../core/agent-core"
-  agent_runtime_name = "MyProjectAgent"
-  docker_image_tag = "my-scope-my-project-agent:latest"
-  server_protocol = "HTTP"
-  authorizer_configuration = {
-    custom_jwt_authorizer = {
-      discovery_url = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration"
-      allowed_clients = local.user_pool_client_ids
-    }
-  }
-  env = var.env
-  additional_iam_policy_statements = var.additional_iam_policy_statements
-  tags = var.tags
-}
-```
-</Fragment>
-</Infrastructure>
 
 ### 可观测性
 

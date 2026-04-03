@@ -55,6 +55,8 @@ ERROR: Cannot connect to the Docker daemon at unix://path/to/docker.sock.
 
 ### Autenticação
 
+O gerador fornece uma opção `auth` para configurar a autenticação do seu servidor MCP. Você pode escolher entre autenticação `IAM` (padrão) ou `Cognito` ao gerar seu servidor MCP.
+
 #### IAM
 
 Por padrão, seu servidor MCP será protegido usando autenticação IAM. Basta implantá-lo sem argumentos adicionais:
@@ -71,7 +73,7 @@ export class ExampleStack extends Stack {
 }
 ```
 
-Você pode conceder acesso para invocar seu MCP no Bedrock AgentCore Runtime usando o método `grantInvoke`. Por exemplo, você pode permitir que um agent gerado com o gerador <Link path="/guides/py-strands-agent">`py#strands-agent`</Link> chame seu servidor MCP:
+Você pode conceder acesso para invocar seu servidor MCP no Bedrock AgentCore Runtime usando o método `grantInvokeAccess`. Por exemplo, você pode permitir que um agent gerado com o gerador <Link path="/guides/py-strands-agent">`py#strands-agent`</Link> chame seu servidor MCP:
 
 ```ts {8}
 import { MyProjectAgent, MyProjectMcpServer } from ':my-scope/common-constructs';
@@ -81,7 +83,7 @@ export class ExampleStack extends Stack {
     const agent = new MyProjectAgent(this, 'MyProjectAgent');
     const mcpServer = new MyProjectMcpServer(this, 'MyProjectMcpServer');
 
-    mcpServer.agentCoreRuntime.grantInvoke(agent.agentCoreRuntime);
+    mcpServer.grantInvokeAccess(agent.agentCoreRuntime);
   }
 }
 ```
@@ -95,7 +97,7 @@ module "my_project_mcp_server" {
 }
 ```
 
-Para conceder acesso de invocação, você precisará adicionar uma política como a seguinte, referenciando a saída `module.my_project_mcp_server.agent_core_runtime_arn`:
+Para conceder acesso para invocar seu servidor MCP, você precisará adicionar uma política como a seguinte, referenciando a saída `module.my_project_mcp_server.agent_core_runtime_arn`:
 
 ```terraform
 {
@@ -112,87 +114,48 @@ Para conceder acesso de invocação, você precisará adicionar uma política co
 </Fragment>
 </Infrastructure>
 
-#### Autenticação Cognito JWT
+#### Autenticação Cognito
 
-O exemplo abaixo demonstra como configurar autenticação Cognito para seu servidor.
+Quando você seleciona autenticação `Cognito`, o gerador cria automaticamente o construto `UserIdentity` e configura o servidor MCP para usar Cognito para autenticação.
 
 <Infrastructure>
 <Fragment slot="cdk">
-Para configurar autenticação JWT usando Cognito, use o método factory `RuntimeAuthorizerConfiguration.usingCognito()`:
+O construto gerado aceita uma propriedade `identity` que configura a autenticação Cognito:
 
-```ts {14-17}
-import { MyProjectMcpServer } from ':my-scope/common-constructs';
-import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
+```ts {8}
+import { MyProjectMcpServer, UserIdentity } from ':my-scope/common-constructs';
 
 export class ExampleStack extends Stack {
   constructor(scope: Construct, id: string) {
-    const userPool = new UserPool(this, 'UserPool');
-    const client = userPool.addClient('Client', {
-      authFlows: {
-        userPassword: true,
-      },
-    });
+    const identity = new UserIdentity(this, 'Identity');
 
     new MyProjectMcpServer(this, 'MyProjectMcpServer', {
-      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingCognito(
-        userPool,
-        [client],
-      ),
+      identity,
     });
   }
 }
 ```
 
-Alternativamente, para autenticação JWT personalizada com seu próprio provedor OIDC, use `RuntimeAuthorizerConfiguration.usingJWT()`:
-
-```ts {6-10}
-import { MyProjectMcpServer } from ':my-scope/common-constructs';
-import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    new MyProjectMcpServer(this, 'MyProjectMcpServer', {
-      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingJWT(
-        'https://example.com/.well-known/openid-configuration',
-        ['client1', 'client2'], // IDs de Cliente Permitidos (opcional)
-        ['audience1'],          // Audiências Permitidas (opcional)
-      ),
-    });
-  }
-}
-```
+O construto `UserIdentity` pode ser gerado usando o <Link path="/guides/react-website-auth">gerador `ts#react-website#auth`</Link>, ou você pode criar seu próprio CDK `UserPool` e `UserPoolClient`.
 </Fragment>
 <Fragment slot="terraform">
-Para configurar autenticação JWT, você pode editar seu módulo do Servidor MCP para configurar a variável `authorizer_configuration` da seguinte forma:
+O módulo gerado aceita as variáveis `user_pool_id` e `user_pool_client_ids` para autenticação Cognito:
 
-```terraform {18-23}
-# packages/common/terraform/src/app/mcp-servers/my-project-mcp-server/my-project-mcp-server.tf
-
-data "aws_region" "current" {}
-
-locals {
-  aws_region = data.aws_region.current.id
-
-  # Substitua pelos IDs do seu user pool e client ou exponha como variáveis
-  user_pool_id = "xxx"
-  user_pool_client_ids = ["yyy"]
+```terraform
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
 }
 
-module "agent_core_runtime" {
-  source = "../../../core/agent-core"
-  agent_runtime_name = "MyProjectMcpServer"
-  docker_image_tag = "my-scope-my-project-mcp-server:latest"
-  server_protocol = "MCP"
-  authorizer_configuration = {
-    custom_jwt_authorizer = {
-      discovery_url = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration"
-      allowed_clients = local.user_pool_client_ids
-    }
-  }
-  env = var.env
-  additional_iam_policy_statements = var.additional_iam_policy_statements
-  tags = var.tags
+module "my_project_mcp_server" {
+  source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
+
+  user_pool_id         = module.user_identity.user_pool_id
+  user_pool_client_ids = [module.user_identity.user_pool_client_id]
 }
 ```
 </Fragment>
 </Infrastructure>
+
+:::note
+Se você precisar de autenticação JWT personalizada com um provedor OIDC que não seja Cognito, você pode modificar o construto CDK gerado ou o módulo Terraform para seu servidor MCP diretamente. Observe que o gerador de conexão suportará apenas autenticação `IAM` ou `Cognito`.
+:::

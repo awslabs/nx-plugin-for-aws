@@ -16,11 +16,11 @@ Genera un [Agente Strands](https://strandsagents.com/) in Python per costruire a
 
 ## Cos'è Strands?
 
-[Strands](https://strandsagents.com/latest/documentation/docs/) è un framework Python leggero e pronto per la produzione per costruire agenti AI. Caratteristiche principali:
+[Strands](https://strandsagents.com/docs/user-guide/quickstart/overview/) è un framework Python leggero e pronto per la produzione per costruire agenti AI. Caratteristiche principali:
 
 - **Leggero e personalizzabile**: Ciclo agenti semplice che non ostacola il lavoro
 - **Pronto per la produzione**: Osservabilità completa, tracciamento e opzioni di distribuzione scalabili
-- **Agnostico su modelli e provider**: Supporta molti modelli diversi da vari provider  
+- **Agnostico su modelli e provider**: Supporta molti modelli diversi da vari provider
 - **Strumenti della community**: Set potente di strumenti contribuiti dalla community
 - **Supporto multi-agente**: Tecniche avanzate come team di agenti e agenti autonomi
 - **Modalità interattive flessibili**: Supporto conversazionale, streaming e non-streaming
@@ -142,7 +142,7 @@ agent = Agent(
 
 ### Configurazione del Modello
 
-Di default, gli agenti Strands usano Claude 4 Sonnet, ma puoi personalizzare il provider del modello. Vedi la [documentazione Strands sui provider di modelli](https://strandsagents.com/latest/documentation/docs/user-guide/quickstart/#model-providers) per le opzioni di configurazione:
+Di default, gli agenti Strands usano Claude 4 Sonnet, ma puoi personalizzare il provider del modello. Vedi la [documentazione Strands sui provider di modelli](https://strandsagents.com/docs/user-guide/concepts/model-providers/) per le opzioni di configurazione:
 
 ```python
 from strands import Agent
@@ -160,7 +160,7 @@ agent = Agent(model=bedrock_model)
 
 ### Utilizzare Server MCP
 
-Puoi [aggiungere strumenti da server MCP](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/tools/mcp-tools/) al tuo agente Strands.
+Puoi [aggiungere strumenti da server MCP](https://strandsagents.com/docs/user-guide/concepts/tools/mcp-tools/) al tuo agente Strands.
 
 Per utilizzare server MCP creati con i generatori <Link path="/guides/py-mcp-server">`py#mcp-server`</Link> o <Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link> puoi utilizzare il <Link path="/guides/connection/py-strands-agent-mcp">generatore `connection`</Link>.
 
@@ -172,7 +172,7 @@ Per altri server MCP, consulta la [Documentazione Strands](https://strandsagents
 
 ### Approfondimenti
 
-Per una guida più dettagliata sulla scrittura di agenti Strands, consulta la [documentazione Strands](https://strandsagents.com/latest/documentation/docs/).
+Per una guida più dettagliata sulla scrittura di agenti Strands, consulta la [documentazione Strands](https://strandsagents.com/docs/user-guide/quickstart/overview/).
 
 ## Server FastAPI
 
@@ -285,150 +285,6 @@ Viene anche aggiunto un target `docker` specifico per il tuo Strands Agent, che:
 :::tip
 L'immagine docker è costruita usando un tag (ad esempio `my-scope-my-project-agent:latest`), referenziato dalla tua infrastruttura CDK o Terraform, permettendo al tuo `Dockerfile` di essere co-locato con il progetto Strands Agent.
 :::
-
-### Autenticazione
-
-#### IAM
-
-Di default, il tuo Strands Agent sarà protetto con autenticazione IAM, distribuiscilo semplicemente senza argomenti:
-
-<Infrastructure>
-<Fragment slot="cdk">
-```ts {5}
-import { MyProjectAgent } from ':my-scope/common-constructs';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    new MyProjectAgent(this, 'MyProjectAgent');
-  }
-}
-```
-
-Puoi concedere l'accesso per invocare il tuo agente su Bedrock AgentCore Runtime usando il metodo `grantInvoke`, ad esempio:
-
-```ts {8}
-import { MyProjectAgent } from ':my-scope/common-constructs';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    const agent = new MyProjectAgent(this, 'MyProjectAgent');
-    const lambdaFunction = new Function(this, ...);
-
-    agent.agentCoreRuntime.grantInvoke(lambdaFunction);
-  }
-}
-```
-</Fragment>
-<Fragment slot="terraform">
-```terraform
-# Agent
-module "my_project_agent" {
-  # Percorso relativo al modulo generato nel progetto common/terraform
-  source = "../../common/terraform/src/app/agents/my-project-agent"
-}
-```
-
-Per concedere l'accesso a invocare il tuo agente, dovrai aggiungere una policy come la seguente, referenziando l'output `module.my_project_agent.agent_core_runtime_arn`:
-
-```terraform
-{
-  Effect = "Allow"
-  Action = [
-    "bedrock-agentcore:InvokeAgentRuntime"
-  ]
-  Resource = [
-    module.my_project_agent.agent_core_runtime_arn,
-    "${module.my_project_agent.agent_core_runtime_arn}/*"
-  ]
-}
-```
-</Fragment>
-</Infrastructure>
-
-#### Autenticazione JWT con Cognito
-
-Quanto segue dimostra come configurare l'autenticazione Cognito per il tuo agente.
-
-<Infrastructure>
-<Fragment slot="cdk">
-Per configurare l'autenticazione JWT usando Cognito, usa il metodo factory `RuntimeAuthorizerConfiguration.usingCognito()`:
-
-```ts {13-16}
-import { MyProjectAgent } from ':my-scope/common-constructs';
-import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    const userPool = new UserPool(this, 'UserPool');
-    const client = userPool.addClient('Client', {
-      authFlows: {
-        userPassword: true,
-      },
-    });
-
-    new MyProjectAgent(this, 'MyProjectAgent', {
-      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingCognito(
-        userPool,
-        [client],
-      ),
-    });
-  }
-}
-```
-
-In alternativa, per l'autenticazione JWT personalizzata con il tuo provider OIDC, usa `RuntimeAuthorizerConfiguration.usingJWT()`:
-
-```ts {6-10}
-import { MyProjectAgent } from ':my-scope/common-constructs';
-import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    new MyProjectAgent(this, 'MyProjectAgent', {
-      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingJWT(
-        'https://example.com/.well-known/openid-configuration',
-        ['client1', 'client2'], // ID Client Consentiti (opzionale)
-        ['audience1'],          // Audience Consentite (opzionale)
-      ),
-    });
-  }
-}
-```
-</Fragment>
-<Fragment slot="terraform">
-Per configurare l'autenticazione JWT, puoi modificare il tuo modulo agent per configurare la variabile `authorizer_configuration` come segue:
-
-```terraform {18-23}
-# packages/common/terraform/src/app/agents/my-project-agent/my-project-agent.tf
-
-data "aws_region" "current" {}
-
-locals {
-  aws_region = data.aws_region.current.id
-
-  # Sostituisci con i tuoi ID user pool e client o esponili come variabili
-  user_pool_id = "xxx"
-  user_pool_client_ids = ["yyy"]
-}
-
-module "agent_core_runtime" {
-  source = "../../../core/agent-core"
-  agent_runtime_name = "MyProjectAgent"
-  docker_image_tag = "my-scope-my-project-agent:latest"
-  server_protocol = "HTTP"
-  authorizer_configuration = {
-    custom_jwt_authorizer = {
-      discovery_url = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration"
-      allowed_clients = local.user_pool_client_ids
-    }
-  }
-  env = var.env
-  additional_iam_policy_statements = var.additional_iam_policy_statements
-  tags = var.tags
-}
-```
-</Fragment>
-</Infrastructure>
 
 ### Osservabilità
 

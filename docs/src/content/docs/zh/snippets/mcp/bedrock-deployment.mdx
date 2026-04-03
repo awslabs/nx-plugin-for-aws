@@ -55,6 +55,8 @@ ERROR: Cannot connect to the Docker daemon at unix://path/to/docker.sock.
 
 ### 认证
 
+生成器提供了 `auth` 选项来为您的 MCP 服务器配置认证。在生成 MCP 服务器时，您可以在 `IAM`（默认）或 `Cognito` 认证之间进行选择。
+
 #### IAM 认证
 
 默认情况下，您的 MCP 服务器将使用 IAM 认证进行保护，直接部署时无需额外参数：
@@ -71,7 +73,7 @@ export class ExampleStack extends Stack {
 }
 ```
 
-您可以使用 `grantInvoke` 方法授予调用 Bedrock AgentCore Runtime 上 MCP 的权限。例如，您可能希望允许通过 <Link path="/guides/py-strands-agent">`py#strands-agent`</Link> 生成器创建的代理调用您的 MCP 服务器：
+您可以使用 `grantInvokeAccess` 方法授予调用 Bedrock AgentCore Runtime 上 MCP 服务器的权限。例如，您可能希望允许通过 <Link path="/guides/py-strands-agent">`py#strands-agent`</Link> 生成器创建的代理调用您的 MCP 服务器：
 
 ```ts {8}
 import { MyProjectAgent, MyProjectMcpServer } from ':my-scope/common-constructs';
@@ -81,7 +83,7 @@ export class ExampleStack extends Stack {
     const agent = new MyProjectAgent(this, 'MyProjectAgent');
     const mcpServer = new MyProjectMcpServer(this, 'MyProjectMcpServer');
 
-    mcpServer.agentCoreRuntime.grantInvoke(agent.agentCoreRuntime);
+    mcpServer.grantInvokeAccess(agent.agentCoreRuntime);
   }
 }
 ```
@@ -95,7 +97,7 @@ module "my_project_mcp_server" {
 }
 ```
 
-要授予调用权限，您需要添加如下策略，并引用 `module.my_project_mcp_server.agent_core_runtime_arn` 输出值：
+要授予调用 MCP 服务器的权限，您需要添加如下策略，并引用 `module.my_project_mcp_server.agent_core_runtime_arn` 输出值：
 
 ```terraform
 {
@@ -112,87 +114,48 @@ module "my_project_mcp_server" {
 </Fragment>
 </Infrastructure>
 
-#### Cognito JWT 认证
+#### Cognito 认证
 
-以下演示如何为代理配置 Cognito 认证。
+当您选择 `Cognito` 认证时，生成器会自动创建 `UserIdentity` 构造并配置 MCP 服务器使用 Cognito 进行认证。
 
 <Infrastructure>
 <Fragment slot="cdk">
-要使用 Cognito 配置 JWT 认证，请使用 `RuntimeAuthorizerConfiguration.usingCognito()` 工厂方法：
+生成的构造接受一个 `identity` 属性来配置 Cognito 认证：
 
-```ts {14-17}
-import { MyProjectMcpServer } from ':my-scope/common-constructs';
-import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
+```ts {8}
+import { MyProjectMcpServer, UserIdentity } from ':my-scope/common-constructs';
 
 export class ExampleStack extends Stack {
   constructor(scope: Construct, id: string) {
-    const userPool = new UserPool(this, 'UserPool');
-    const client = userPool.addClient('Client', {
-      authFlows: {
-        userPassword: true,
-      },
-    });
+    const identity = new UserIdentity(this, 'Identity');
 
     new MyProjectMcpServer(this, 'MyProjectMcpServer', {
-      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingCognito(
-        userPool,
-        [client],
-      ),
+      identity,
     });
   }
 }
 ```
 
-或者，对于使用您自己的 OIDC 提供商的自定义 JWT 认证，请使用 `RuntimeAuthorizerConfiguration.usingJWT()`：
-
-```ts {6-10}
-import { MyProjectMcpServer } from ':my-scope/common-constructs';
-import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    new MyProjectMcpServer(this, 'MyProjectMcpServer', {
-      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingJWT(
-        'https://example.com/.well-known/openid-configuration',
-        ['client1', 'client2'], // 允许的客户端 ID（可选）
-        ['audience1'],          // 允许的受众（可选）
-      ),
-    });
-  }
-}
-```
+`UserIdentity` 构造可以使用 <Link path="/guides/react-website-auth">`ts#react-website#auth` 生成器</Link>生成，或者您可以创建自己的 CDK `UserPool` 和 `UserPoolClient`。
 </Fragment>
 <Fragment slot="terraform">
-要配置 JWT 认证，您可以编辑 MCP 服务器模块来配置 `authorizer_configuration` 变量：
+生成的模块接受 `user_pool_id` 和 `user_pool_client_ids` 变量用于 Cognito 认证：
 
-```terraform {18-23}
-# packages/common/terraform/src/app/mcp-servers/my-project-mcp-server/my-project-mcp-server.tf
-
-data "aws_region" "current" {}
-
-locals {
-  aws_region = data.aws_region.current.id
-
-  # 替换为您的用户池和客户端 ID，或通过变量暴露
-  user_pool_id = "xxx"
-  user_pool_client_ids = ["yyy"]
+```terraform
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
 }
 
-module "agent_core_runtime" {
-  source = "../../../core/agent-core"
-  agent_runtime_name = "MyProjectMcpServer"
-  docker_image_tag = "my-scope-my-project-mcp-server:latest"
-  server_protocol = "MCP"
-  authorizer_configuration = {
-    custom_jwt_authorizer = {
-      discovery_url = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration"
-      allowed_clients = local.user_pool_client_ids
-    }
-  }
-  env = var.env
-  additional_iam_policy_statements = var.additional_iam_policy_statements
-  tags = var.tags
+module "my_project_mcp_server" {
+  source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
+
+  user_pool_id         = module.user_identity.user_pool_id
+  user_pool_client_ids = [module.user_identity.user_pool_client_id]
 }
 ```
 </Fragment>
 </Infrastructure>
+
+:::note
+如果您需要使用非 Cognito OIDC 提供商的自定义 JWT 认证，您可以直接修改为 MCP 服务器生成的 CDK 构造或 Terraform 模块。请注意，连接生成器仅支持 `IAM` 或 `Cognito` 认证。
+:::

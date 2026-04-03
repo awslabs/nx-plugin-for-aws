@@ -55,6 +55,8 @@ ERROR: Cannot connect to the Docker daemon at unix://path/to/docker.sock.
 
 ### Xác thực
 
+Trình tạo cung cấp tùy chọn `auth` để cấu hình xác thực cho MCP server của bạn. Bạn có thể chọn giữa xác thực `IAM` (mặc định) hoặc `Cognito` khi tạo MCP server của mình.
+
 #### IAM
 
 Theo mặc định, MCP server của bạn sẽ được bảo mật bằng xác thực IAM, chỉ cần triển khai nó mà không cần tham số nào:
@@ -71,7 +73,7 @@ export class ExampleStack extends Stack {
 }
 ```
 
-Bạn có thể cấp quyền truy cập để gọi MCP của mình trên Bedrock AgentCore Runtime bằng phương thức `grantInvoke`. Ví dụ, bạn có thể muốn một agent được tạo bằng trình tạo <Link path="/guides/py-strands-agent">`py#strands-agent`</Link> gọi MCP server của bạn:
+Bạn có thể cấp quyền truy cập để gọi MCP server của mình trên Bedrock AgentCore Runtime bằng phương thức `grantInvokeAccess`. Ví dụ, bạn có thể muốn một agent được tạo bằng trình tạo <Link path="/guides/py-strands-agent">`py#strands-agent`</Link> gọi MCP server của bạn:
 
 ```ts {8}
 import { MyProjectAgent, MyProjectMcpServer } from ':my-scope/common-constructs';
@@ -81,7 +83,7 @@ export class ExampleStack extends Stack {
     const agent = new MyProjectAgent(this, 'MyProjectAgent');
     const mcpServer = new MyProjectMcpServer(this, 'MyProjectMcpServer');
 
-    mcpServer.agentCoreRuntime.grantInvoke(agent.agentCoreRuntime);
+    mcpServer.grantInvokeAccess(agent.agentCoreRuntime);
   }
 }
 ```
@@ -95,7 +97,7 @@ module "my_project_mcp_server" {
 }
 ```
 
-Để cấp quyền truy cập gọi agent của bạn, bạn sẽ cần thêm một policy như sau, tham chiếu đến output `module.my_project_mcp_server.agent_core_runtime_arn`:
+Để cấp quyền truy cập gọi MCP server của bạn, bạn sẽ cần thêm một policy như sau, tham chiếu đến output `module.my_project_mcp_server.agent_core_runtime_arn`:
 
 ```terraform
 {
@@ -112,87 +114,48 @@ module "my_project_mcp_server" {
 </Fragment>
 </Infrastructure>
 
-#### Xác thực Cognito JWT
+#### Xác thực Cognito
 
-Phần dưới đây minh họa cách cấu hình xác thực Cognito cho agent của bạn.
+Khi bạn chọn xác thực `Cognito`, trình tạo sẽ tự động tạo construct `UserIdentity` và cấu hình MCP server để sử dụng Cognito cho xác thực.
 
 <Infrastructure>
 <Fragment slot="cdk">
-Để cấu hình xác thực JWT sử dụng Cognito, sử dụng phương thức factory `RuntimeAuthorizerConfiguration.usingCognito()`:
+Construct được tạo chấp nhận prop `identity` để cấu hình xác thực Cognito:
 
-```ts {14-17}
-import { MyProjectMcpServer } from ':my-scope/common-constructs';
-import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
+```ts {8}
+import { MyProjectMcpServer, UserIdentity } from ':my-scope/common-constructs';
 
 export class ExampleStack extends Stack {
   constructor(scope: Construct, id: string) {
-    const userPool = new UserPool(this, 'UserPool');
-    const client = userPool.addClient('Client', {
-      authFlows: {
-        userPassword: true,
-      },
-    });
+    const identity = new UserIdentity(this, 'Identity');
 
     new MyProjectMcpServer(this, 'MyProjectMcpServer', {
-      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingCognito(
-        userPool,
-        [client],
-      ),
+      identity,
     });
   }
 }
 ```
 
-Ngoài ra, để xác thực JWT tùy chỉnh với OIDC provider của riêng bạn, sử dụng `RuntimeAuthorizerConfiguration.usingJWT()`:
-
-```ts {6-10}
-import { MyProjectMcpServer } from ':my-scope/common-constructs';
-import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    new MyProjectMcpServer(this, 'MyProjectMcpServer', {
-      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingJWT(
-        'https://example.com/.well-known/openid-configuration',
-        ['client1', 'client2'], // Allowed Client IDs (tùy chọn)
-        ['audience1'],          // Allowed Audiences (tùy chọn)
-      ),
-    });
-  }
-}
-```
+Construct `UserIdentity` có thể được tạo bằng <Link path="/guides/react-website-auth">trình tạo `ts#react-website#auth`</Link>, hoặc bạn có thể tự tạo CDK `UserPool` và `UserPoolClient` của riêng mình.
 </Fragment>
 <Fragment slot="terraform">
-Để cấu hình xác thực JWT, bạn có thể chỉnh sửa MCP Server module của mình để cấu hình biến `authorizer_configuration` như sau:
+Module được tạo chấp nhận các biến `user_pool_id` và `user_pool_client_ids` cho xác thực Cognito:
 
-```terraform {18-23}
-# packages/common/terraform/src/app/mcp-servers/my-project-mcp-server/my-project-mcp-server.tf
-
-data "aws_region" "current" {}
-
-locals {
-  aws_region = data.aws_region.current.id
-
-  # Thay thế bằng user pool và client ids của bạn hoặc expose dưới dạng biến
-  user_pool_id = "xxx"
-  user_pool_client_ids = ["yyy"]
+```terraform
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
 }
 
-module "agent_core_runtime" {
-  source = "../../../core/agent-core"
-  agent_runtime_name = "MyProjectMcpServer"
-  docker_image_tag = "my-scope-my-project-mcp-server:latest"
-  server_protocol = "MCP"
-  authorizer_configuration = {
-    custom_jwt_authorizer = {
-      discovery_url = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration"
-      allowed_clients = local.user_pool_client_ids
-    }
-  }
-  env = var.env
-  additional_iam_policy_statements = var.additional_iam_policy_statements
-  tags = var.tags
+module "my_project_mcp_server" {
+  source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
+
+  user_pool_id         = module.user_identity.user_pool_id
+  user_pool_client_ids = [module.user_identity.user_pool_client_id]
 }
 ```
 </Fragment>
 </Infrastructure>
+
+:::note
+Nếu bạn cần xác thực JWT tùy chỉnh với OIDC provider không phải Cognito, bạn có thể chỉnh sửa trực tiếp CDK construct hoặc Terraform module được tạo cho MCP server của mình. Lưu ý rằng trình tạo kết nối sẽ chỉ hỗ trợ xác thực `IAM` hoặc `Cognito`.
+:::

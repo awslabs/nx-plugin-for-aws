@@ -86,6 +86,8 @@ ERROR: Cannot connect to the Docker daemon at unix://path/to/docker.sock.
 
 ### Xác thực
 
+Trình tạo cung cấp tùy chọn `auth` để cấu hình xác thực cho Strands Agent của bạn. Bạn có thể chọn giữa xác thực `IAM` (mặc định) hoặc `Cognito` khi tạo agent của mình.
+
 #### IAM
 
 Theo mặc định, Strands Agent của bạn sẽ được bảo mật bằng xác thực IAM, chỉ cần triển khai nó mà không cần bất kỳ tham số nào:
@@ -102,7 +104,7 @@ export class ExampleStack extends Stack {
 }
 ```
 
-Bạn có thể cấp quyền truy cập để gọi agent của mình trên Bedrock AgentCore Runtime bằng phương thức `grantInvoke`, ví dụ:
+Bạn có thể cấp quyền truy cập để gọi agent của mình trên Bedrock AgentCore Runtime bằng phương thức `grantInvokeAccess`, ví dụ:
 
 ```ts {8}
 import { MyProjectAgent } from ':my-scope/common-constructs';
@@ -112,7 +114,7 @@ export class ExampleStack extends Stack {
     const agent = new MyProjectAgent(this, 'MyProjectAgent');
     const lambdaFunction = new Function(this, ...);
 
-    agent.agentCoreRuntime.grantInvoke(lambdaFunction);
+    agent.grantInvokeAccess(lambdaFunction);
   }
 }
 ```
@@ -143,87 +145,48 @@ module "my_project_agent" {
 </Fragment>
 </Infrastructure>
 
-#### Xác thực Cognito JWT
+#### Xác thực Cognito
 
-Dưới đây minh họa cách cấu hình xác thực Cognito cho agent của bạn.
+Khi bạn chọn xác thực `Cognito`, trình tạo sẽ tự động tạo construct `UserIdentity` và cấu hình agent để sử dụng Cognito cho xác thực.
 
 <Infrastructure>
 <Fragment slot="cdk">
-Để cấu hình xác thực JWT sử dụng Cognito, hãy sử dụng phương thức factory `RuntimeAuthorizerConfiguration.usingCognito()`:
+Construct được tạo ra chấp nhận một prop `identity` để cấu hình xác thực Cognito:
 
-```ts {14-17}
-import { MyProjectAgent } from ':my-scope/common-constructs';
-import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
+```ts {8}
+import { MyProjectAgent, UserIdentity } from ':my-scope/common-constructs';
 
 export class ExampleStack extends Stack {
   constructor(scope: Construct, id: string) {
-    const userPool = new UserPool(this, 'UserPool');
-    const client = userPool.addClient('Client', {
-      authFlows: {
-        userPassword: true,
-      },
-    });
+    const identity = new UserIdentity(this, 'Identity');
 
     new MyProjectAgent(this, 'MyProjectAgent', {
-      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingCognito(
-        userPool,
-        [client],
-      ),
+      identity,
     });
   }
 }
 ```
 
-Ngoài ra, để xác thực JWT tùy chỉnh với nhà cung cấp OIDC của riêng bạn, hãy sử dụng `RuntimeAuthorizerConfiguration.usingJWT()`:
-
-```ts {7-11}
-import { MyProjectAgent } from ':my-scope/common-constructs';
-import { RuntimeAuthorizerConfiguration } from '@aws-cdk/aws-bedrock-agentcore-alpha';
-
-export class ExampleStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    new MyProjectAgent(this, 'MyProjectAgent', {
-      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingJWT(
-        'https://example.com/.well-known/openid-configuration',
-        ['client1', 'client2'], // Allowed Client IDs (optional)
-        ['audience1'],          // Allowed Audiences (optional)
-      ),
-    });
-  }
-}
-```
+Construct `UserIdentity` có thể được tạo bằng <Link path="/guides/react-website-auth">trình tạo `ts#react-website#auth`</Link>, hoặc bạn có thể tạo `UserPool` và `UserPoolClient` CDK của riêng mình.
 </Fragment>
 <Fragment slot="terraform">
-Để cấu hình xác thực JWT, bạn có thể chỉnh sửa module agent của mình để cấu hình biến `authorizer_configuration` như sau:
+Module được tạo ra chấp nhận các biến `user_pool_id` và `user_pool_client_ids` cho xác thực Cognito:
 
-```terraform {18-23}
-# packages/common/terraform/src/app/agents/my-project-agent/my-project-agent.tf
-
-data "aws_region" "current" {}
-
-locals {
-  aws_region = data.aws_region.current.id
-
-  # Replace with your user pool and client ids or expose as variables
-  user_pool_id = "xxx"
-  user_pool_client_ids = ["yyy"]
+```terraform
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
 }
 
-module "agent_core_runtime" {
-  source = "../../../core/agent-core"
-  agent_runtime_name = "MyProjectAgent"
-  docker_image_tag = "my-scope-my-project-agent:latest"
-  server_protocol = "HTTP"
-  authorizer_configuration = {
-    custom_jwt_authorizer = {
-      discovery_url = "https://cognito-idp.${local.aws_region}.amazonaws.com/${local.user_pool_id}/.well-known/openid-configuration"
-      allowed_clients = local.user_pool_client_ids
-    }
-  }
-  env = var.env
-  additional_iam_policy_statements = var.additional_iam_policy_statements
-  tags = var.tags
+module "my_project_agent" {
+  source = "../../common/terraform/src/app/agents/my-project-agent"
+
+  user_pool_id         = module.user_identity.user_pool_id
+  user_pool_client_ids = [module.user_identity.user_pool_client_id]
 }
 ```
 </Fragment>
 </Infrastructure>
+
+:::note
+Nếu bạn yêu cầu xác thực JWT tùy chỉnh với nhà cung cấp OIDC không phải Cognito, bạn có thể chỉnh sửa trực tiếp CDK construct hoặc module Terraform được tạo cho agent của mình. Lưu ý rằng trình tạo kết nối sẽ chỉ hỗ trợ xác thực `IAM` hoặc `Cognito`.
+:::
