@@ -1,0 +1,73 @@
+import * as url from 'url';
+import { Duration } from 'aws-cdk-lib';
+import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import * as ec2 from 'aws-cdk-lib/aws-ec2';
+import {
+  Architecture,
+  DockerImageCode,
+  DockerImageFunction,
+  Tracing,
+} from 'aws-cdk-lib/aws-lambda';
+import { Construct } from 'constructs';
+import {
+  AuroraDatabase,
+  AuroraDatabaseEngines,
+  AuroraDatabaseProps,
+} from '../../core/rdb/aurora.js';
+import { Trigger } from 'aws-cdk-lib/triggers';
+
+export type <%= nameClassName %>Props = Omit<AuroraDatabaseProps, 'engine'>;
+
+/**
+ * CDK construct that provisions an Aurora Serverless v2 cluster.
+ */
+export class <%= nameClassName %> extends AuroraDatabase {
+  constructor(scope: Construct, id: string, props: <%= nameClassName %>Props) {
+    const { databaseName = '<%= databaseName %>', vpc, ...restProps } = props;
+
+    super(scope, id, <AuroraDatabaseProps>{
+      ...restProps,
+      vpc,
+      databaseName,
+      engine: AuroraDatabaseEngines.<%= engine %>({
+        databaseUser: '<%= databaseUser %>',
+      }),
+    });
+
+    const migrationHandler = new DockerImageFunction(this, 'MigrationHandler', {
+      code: DockerImageCode.fromImageAsset(
+        url.fileURLToPath(
+          new URL(
+            '../../../../../../<%- migrationBundlePathFromRoot %>',
+            import.meta.url,
+          ),
+        ),
+        {
+          platform: Platform.LINUX_ARM64,
+        },
+      ),
+      memorySize: 1024,
+      timeout: Duration.minutes(5),
+      tracing: Tracing.ACTIVE,
+      vpc,
+      vpcSubnets: {
+        subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
+      },
+      environment: {
+        DATABASE_URL: this.databaseUrl,
+      },
+      architecture: Architecture.ARM_64,
+    });
+
+    this.allowDefaultPortFrom(
+      migrationHandler,
+      'Allow the migration handler to connect to the database',
+    );
+
+    const trigger = new Trigger(this, 'MigrationTrigger', {
+      handler: migrationHandler,
+    });
+    // make sure migration is executed after the database cluster is available.
+    trigger.node.addDependency(this.cluster);
+  }
+}

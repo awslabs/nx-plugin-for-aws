@@ -403,6 +403,7 @@ export default defineConfig({
               label: 'license',
               link: '/guides/license',
             },
+            { label: 'ts#rdb', link: '/guides/ts-rdb' },
           ],
         },
         {

@@ -1,0 +1,301 @@
+# Core Aurora module
+# This module creates an Aurora cluster, a generated admin secret, and a
+# security group that can be reused by consuming infrastructure modules.
+
+terraform {
+  required_version = ">= 1.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 6.33"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
+  }
+}
+
+data "aws_iam_policy" "enhanced_monitoring" {
+  arn = "arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
+}
+
+variable "name" {
+  description = "Base name applied to Aurora resources."
+  type        = string
+}
+
+variable "vpc_id" {
+  description = "VPC where the Aurora cluster will be deployed."
+  type        = string
+}
+
+variable "subnet_ids" {
+  description = "Private subnet IDs used by the Aurora DB subnet group."
+  type        = list(string)
+}
+
+variable "engine" {
+  description = "Aurora engine to use."
+  type        = string
+  default     = "aurora-postgresql"
+
+  validation {
+    condition     = contains(["aurora-postgresql", "aurora-mysql"], var.engine)
+    error_message = "engine must be aurora-postgresql or aurora-mysql."
+  }
+}
+
+variable "engine_version" {
+  description = "Aurora engine version."
+  type        = string
+  default     = null
+}
+
+variable "database_name" {
+  description = "Initial database created in the cluster."
+  type        = string
+  default     = null
+}
+
+variable "database_user" {
+  description = "Admin username stored in the generated Secrets Manager secret."
+  type        = string
+}
+
+variable "port" {
+  description = "Database port for the selected Aurora engine."
+  type        = number
+  default     = null
+}
+
+variable "serverless_min_capacity" {
+  description = "Minimum Aurora Serverless v2 ACUs."
+  type        = number
+  default     = 0.5
+}
+
+variable "serverless_max_capacity" {
+  description = "Maximum Aurora Serverless v2 ACUs."
+  type        = number
+  default     = 4
+}
+
+variable "instance_count" {
+  description = "Number of Aurora instances to create."
+  type        = number
+  default     = 1
+}
+
+variable "deletion_protection" {
+  description = "Whether deletion protection is enabled."
+  type        = bool
+  default     = true
+}
+
+variable "skip_final_snapshot" {
+  description = "Whether to skip the final snapshot on deletion."
+  type        = bool
+  default     = false
+}
+
+variable "allowed_security_group_ids" {
+  description = "Security group IDs allowed to connect to the cluster."
+  type        = list(string)
+  default     = []
+}
+
+variable "tags" {
+  description = "Tags to apply to all resources."
+  type        = map(string)
+  default     = {}
+}
+
+locals {
+  default_port              = var.engine == "aurora-mysql" ? 3306 : 5432
+  database_url_scheme       = var.engine == "aurora-mysql" ? "mysql" : "postgresql"
+  database_url_query_string = var.engine == "aurora-postgresql" ? "pool_timeout=20&connect_timeout=20&sslmode=no-verify" : ""
+}
+
+resource "aws_kms_key" "database" {
+  description         = "KMS key for Aurora cluster ${var.name}"
+  enable_key_rotation = true
+
+  tags = merge(var.tags, {
+    Name = "${var.name}-aurora"
+  })
+}
+
+resource "aws_iam_role" "enhanced_monitoring" {
+  name_prefix = "${var.name}-aurora-monitoring-"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "monitoring.rds.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = merge(var.tags, {
+    Name = "${var.name}-aurora-monitoring"
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "enhanced_monitoring" {
+  role       = aws_iam_role.enhanced_monitoring.name
+  policy_arn = data.aws_iam_policy.enhanced_monitoring.arn
+}
+
+resource "aws_security_group" "database" {
+  name_prefix = "${var.name}-aurora-"
+  description = "Security group for Aurora cluster ${var.name}"
+  vpc_id      = var.vpc_id
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(var.tags, {
+    Name = "${var.name}-aurora"
+  })
+}
+
+resource "aws_vpc_security_group_ingress_rule" "allowed" {
+  for_each = toset(var.allowed_security_group_ids)
+
+  security_group_id            = aws_security_group.database.id
+  referenced_security_group_id = each.value
+  from_port                    = coalesce(var.port, local.default_port)
+  to_port                      = coalesce(var.port, local.default_port)
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_db_subnet_group" "database" {
+  name       = "${var.name}-aurora"
+  subnet_ids = var.subnet_ids
+
+  tags = merge(var.tags, {
+    Name = "${var.name}-aurora"
+  })
+}
+
+resource "random_password" "master_password" {
+  length           = 32
+  special          = true
+  override_special = "!#$%&*()-_=+[]{}<>:?"
+}
+
+resource "aws_secretsmanager_secret" "credentials" {
+  name_prefix = "${var.name}-aurora-credentials-"
+  kms_key_id  = aws_kms_key.database.arn
+
+  tags = merge(var.tags, {
+    Name = "${var.name}-aurora-credentials"
+  })
+}
+
+resource "aws_secretsmanager_secret_version" "credentials" {
+  secret_id = aws_secretsmanager_secret.credentials.id
+  secret_string = jsonencode({
+    username = var.database_user
+    password = random_password.master_password.result
+  })
+}
+
+resource "aws_rds_cluster" "database" {
+  cluster_identifier                  = "${var.name}-aurora"
+  engine                              = var.engine
+  engine_version                      = var.engine_version
+  database_name                       = var.database_name
+  master_username                     = var.database_user
+  master_password                     = random_password.master_password.result
+  db_subnet_group_name                = aws_db_subnet_group.database.name
+  vpc_security_group_ids              = [aws_security_group.database.id]
+  port                                = coalesce(var.port, local.default_port)
+  storage_encrypted                   = true
+  kms_key_id                          = aws_kms_key.database.arn
+  deletion_protection                 = var.deletion_protection
+  skip_final_snapshot                 = var.skip_final_snapshot
+  iam_database_authentication_enabled = false
+  monitoring_interval                 = 5
+  monitoring_role_arn                 = aws_iam_role.enhanced_monitoring.arn
+
+  serverlessv2_scaling_configuration {
+    min_capacity = var.serverless_min_capacity
+    max_capacity = var.serverless_max_capacity
+  }
+
+  tags = merge(var.tags, {
+    Name = "${var.name}-aurora"
+  })
+}
+
+resource "aws_rds_cluster_instance" "database" {
+  count = var.instance_count
+
+  identifier           = "${var.name}-aurora-${count.index + 1}"
+  cluster_identifier   = aws_rds_cluster.database.id
+  instance_class       = "db.serverless"
+  engine               = aws_rds_cluster.database.engine
+  engine_version       = aws_rds_cluster.database.engine_version
+  db_subnet_group_name = aws_db_subnet_group.database.name
+
+  tags = merge(var.tags, {
+    Name = "${var.name}-aurora-${count.index + 1}"
+  })
+}
+
+output "cluster_arn" {
+  description = "ARN of the Aurora cluster."
+  value       = aws_rds_cluster.database.arn
+}
+
+output "cluster_endpoint" {
+  description = "Writer endpoint of the Aurora cluster."
+  value       = aws_rds_cluster.database.endpoint
+}
+
+output "reader_endpoint" {
+  description = "Reader endpoint of the Aurora cluster."
+  value       = aws_rds_cluster.database.reader_endpoint
+}
+
+output "cluster_port" {
+  description = "Port exposed by the Aurora cluster."
+  value       = aws_rds_cluster.database.port
+}
+
+output "security_group_id" {
+  description = "Security group protecting the Aurora cluster."
+  value       = aws_security_group.database.id
+}
+
+output "secret_arn" {
+  description = "ARN of the generated admin credentials secret."
+  value       = aws_secretsmanager_secret.credentials.arn
+}
+
+output "database_url" {
+  description = "Database connection URL composed from the generated secret."
+  value = format(
+    "%s://%s:%s@%s:%s%s%s",
+    local.database_url_scheme,
+    jsondecode(aws_secretsmanager_secret_version.credentials.secret_string).username,
+    jsondecode(aws_secretsmanager_secret_version.credentials.secret_string).password,
+    aws_rds_cluster.database.endpoint,
+    aws_rds_cluster.database.port,
+    var.database_name != null ? "/${var.database_name}" : "",
+    local.database_url_query_string != "" ? "?${local.database_url_query_string}" : "",
+  )
+  sensitive = true
+}

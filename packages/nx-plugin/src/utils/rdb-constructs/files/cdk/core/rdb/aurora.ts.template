@@ -1,0 +1,237 @@
+import { Duration } from 'aws-cdk-lib';
+import {
+  IConnectable,
+  ISecurityGroup,
+  IVpc,
+  SecurityGroup,
+} from 'aws-cdk-lib/aws-ec2';
+import { IGrantable } from 'aws-cdk-lib/aws-iam';
+import { Key } from 'aws-cdk-lib/aws-kms';
+import {
+  AuroraMysqlEngineVersion,
+  AuroraPostgresEngineVersion,
+  ClusterInstance,
+  Credentials,
+  DatabaseCluster,
+  DatabaseClusterEngine,
+  DatabaseClusterProps,
+  IClusterEngine,
+  IClusterInstance,
+} from 'aws-cdk-lib/aws-rds';
+import { ISecret } from 'aws-cdk-lib/aws-secretsmanager';
+import { Construct } from 'constructs';
+import { suppressRules } from '../checkov.js';
+
+export type AuroraDatabaseEngineVersion =
+  | AuroraMysqlEngineVersion
+  | AuroraPostgresEngineVersion;
+
+export interface AuroraDatabaseEngine {
+  /**
+   * Default Aurora engine version used when one is not explicitly provided.
+   */
+  readonly defaultVersion: AuroraDatabaseEngineVersion;
+
+  /**
+   * Default admin username used when generating credentials.
+   */
+  readonly databaseUser: string;
+
+  /**
+   * Connection string scheme used when generating the database URL.
+   */
+  readonly databaseUrlScheme: string;
+
+  /**
+   * Default query parameters appended to the generated database URL.
+   */
+  readonly defaultDatabaseUrlParameters?: Readonly<Record<string, string>>;
+
+  /**
+   * Builds the CDK cluster engine for the provided engine version.
+   */
+  clusterEngine(version: AuroraDatabaseEngineVersion): IClusterEngine;
+}
+
+export class AuroraDatabaseEngines {
+  public static mysql({
+    databaseUser,
+    defaultVersion = AuroraMysqlEngineVersion.VER_3_12_0,
+  }: {
+    databaseUser: string;
+    defaultVersion?: AuroraMysqlEngineVersion;
+  }): AuroraDatabaseEngine {
+    return {
+      defaultVersion,
+      databaseUser,
+      databaseUrlScheme: 'mysql',
+      clusterEngine: (version) =>
+        DatabaseClusterEngine.auroraMysql({
+          version: version as AuroraMysqlEngineVersion,
+        }),
+    };
+  }
+
+  public static postgres({
+    databaseUser,
+    defaultVersion = AuroraPostgresEngineVersion.VER_17_7,
+  }: {
+    databaseUser: string;
+    defaultVersion?: AuroraPostgresEngineVersion;
+  }): AuroraDatabaseEngine {
+    return {
+      defaultVersion,
+      databaseUser,
+      databaseUrlScheme: 'postgresql',
+      defaultDatabaseUrlParameters: {
+        pool_timeout: '20',
+        connect_timeout: '20',
+        sslmode: 'no-verify',
+      },
+      clusterEngine: (version) =>
+        DatabaseClusterEngine.auroraPostgres({
+          version: version as AuroraPostgresEngineVersion,
+        }),
+    };
+  }
+}
+
+export interface AuroraDatabaseProps extends Omit<
+  DatabaseClusterProps,
+  'credentials' | 'defaultDatabaseName' | 'engine' | 'readers' | 'writer'
+> {
+  /**
+   * VPC where the Aurora cluster will be deployed.
+   */
+  readonly vpc: IVpc;
+
+  /**
+   * Aurora engine preset used to build the cluster.
+   */
+  readonly engine: AuroraDatabaseEngine;
+
+  /**
+   * The engine version to deploy.
+   *
+   * @default - engine.defaultVersion
+   */
+  readonly engineVersion?: AuroraDatabaseEngineVersion;
+
+  /**
+   * The initial database created in the cluster.
+   */
+  readonly databaseName?: string;
+
+  /**
+   * Additional query parameters appended to the generated database URL.
+   *
+   * Values override any engine defaults with the same key.
+   */
+  readonly databaseUrlQueryParameters?: Readonly<Record<string, string>>;
+
+  /**
+   * The cluster writer instance.
+   *
+   * @default - a single Aurora Serverless v2 writer
+   */
+  readonly writer?: IClusterInstance;
+
+  /**
+   * Optional cluster reader instances.
+   *
+   * @default - no additional readers
+   */
+  readonly readers?: IClusterInstance[];
+}
+
+/**
+ * Reusable Aurora database construct that supports different Aurora engines
+ * through typed engine presets.
+ */
+export class AuroraDatabase extends Construct {
+  public readonly cluster: DatabaseCluster;
+  public readonly databaseUrl: string;
+  public readonly secret: ISecret;
+  public readonly securityGroup: ISecurityGroup;
+  public readonly securityGroups: readonly ISecurityGroup[];
+
+  constructor(
+    scope: Construct,
+    id: string,
+    {
+      databaseName,
+      databaseUrlQueryParameters,
+      engine,
+      engineVersion,
+      readers,
+      securityGroups,
+      vpc,
+      writer,
+      ...clusterProps
+    }: AuroraDatabaseProps,
+  ) {
+    super(scope, id);
+
+    const securityGroup =
+      securityGroups?.[0] ??
+      new SecurityGroup(this, 'SecurityGroup', {
+        vpc,
+        description: 'Security group for the Aurora database cluster',
+        allowAllOutbound: true,
+      });
+
+    const key = new Key(this, 'EncryptionKey', {
+      enableKeyRotation: true,
+    });
+    this.cluster = new DatabaseCluster(this, 'DatabaseCluster', {
+      ...clusterProps,
+      vpc,
+      engine: engine.clusterEngine(engineVersion ?? engine.defaultVersion),
+      credentials: Credentials.fromGeneratedSecret(engine.databaseUser, {
+        encryptionKey: key,
+      }),
+      monitoringInterval: Duration.seconds(5),
+      defaultDatabaseName: databaseName,
+      writer: writer ?? ClusterInstance.serverlessV2('writer'),
+      readers,
+      securityGroups,
+      storageEncrypted: true,
+      storageEncryptionKey: key,
+    });
+
+    suppressRules(
+      this.cluster,
+      ['CKV_AWS_162'],
+      'IAM authentication is disabled because ORM frameworks use Secrets Manager credentials',
+    );
+
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    this.secret = this.cluster.secret!;
+    this.securityGroup = securityGroup;
+    this.securityGroups = securityGroups ?? [securityGroup];
+
+    const queryParameters = new URLSearchParams({
+      ...engine.defaultDatabaseUrlParameters,
+      ...databaseUrlQueryParameters,
+    });
+    const queryString = queryParameters.toString();
+    const databasePath = databaseName ? `/${databaseName}` : '';
+
+    this.databaseUrl =
+      `${engine.databaseUrlScheme}://` +
+      `${this.secret.secretValueFromJson('username').unsafeUnwrap()}` +
+      `:${this.secret.secretValueFromJson('password').unsafeUnwrap()}` +
+      `@${this.cluster.clusterEndpoint.hostname}` +
+      `:${this.cluster.clusterEndpoint.port}` +
+      `${databasePath}` +
+      (queryString ? `?${queryString}` : '');
+  }
+
+  public allowDefaultPortFrom(other: IConnectable, description?: string): void {
+    this.cluster.connections.allowDefaultPortFrom(other, description);
+  }
+
+  public grantSecretRead(grantee: IGrantable) {
+    return this.secret.grantRead(grantee);
+  }
+}
