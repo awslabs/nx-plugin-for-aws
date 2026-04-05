@@ -1,0 +1,346 @@
+terraform {
+  required_version = ">= 1.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 6.33"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
+  }
+}
+
+variable "vpc_id" {
+  description = "VPC where the Aurora cluster will be deployed."
+  type        = string
+}
+
+variable "subnet_ids" {
+  description = "Private subnet IDs used by the Aurora DB subnet group and migration Lambda."
+  type        = list(string)
+}
+
+variable "engine_version" {
+  description = "Aurora engine version."
+  type        = string
+  default     = null
+}
+
+variable "database_url_query_parameters" {
+  description = "Additional query parameters appended to the generated database URL."
+  type        = map(string)
+  default     = {}
+}
+
+variable "port" {
+  description = "Database port for the selected Aurora engine."
+  type        = number
+  default     = null
+}
+
+variable "serverless_min_capacity" {
+  description = "Minimum Aurora Serverless v2 ACUs."
+  type        = number
+  default     = 0.5
+}
+
+variable "serverless_max_capacity" {
+  description = "Maximum Aurora Serverless v2 ACUs."
+  type        = number
+  default     = 4
+}
+
+variable "instance_count" {
+  description = "Number of Aurora instances to create."
+  type        = number
+  default     = 1
+}
+
+variable "deletion_protection" {
+  description = "Whether deletion protection is enabled."
+  type        = bool
+  default     = true
+}
+
+variable "skip_final_snapshot" {
+  description = "Whether to skip the final snapshot on deletion."
+  type        = bool
+  default     = false
+}
+
+variable "tags" {
+  description = "Tags to apply to all resources."
+  type        = map(string)
+  default     = {}
+}
+
+data "aws_region" "current" {}
+data "aws_caller_identity" "current" {}
+
+resource "random_string" "suffix" {
+  length  = 8
+  special = false
+  upper   = false
+}
+
+locals {
+  migration_bundle_path = "${path.module}/../../../../../../../<%- migrationBundlePathFromRoot %>"
+  migration_bundle_hash = sha256(join("", [
+    for file in sort(fileset(local.migration_bundle_path, "**")) :
+    "${file}:${filesha256("${local.migration_bundle_path}/${file}")}"
+  ]))
+  migration_function_name = "<%= nameKebabCase %>-migration-${random_string.suffix.result}"
+}
+
+module "aurora" {
+  source = "../../../core/rdb/aurora"
+
+  name                    = "<%= nameKebabCase %>"
+  vpc_id                  = var.vpc_id
+  subnet_ids              = var.subnet_ids
+  engine                  = "aurora-<%= engine %>"
+  engine_version          = var.engine_version
+  database_name           = "<%= databaseName %>"
+  database_user           = "<%= databaseUser %>"
+  database_url_query_parameters = var.database_url_query_parameters
+  port                    = var.port
+  serverless_min_capacity = var.serverless_min_capacity
+  serverless_max_capacity = var.serverless_max_capacity
+  instance_count          = var.instance_count
+  deletion_protection     = var.deletion_protection
+  skip_final_snapshot     = var.skip_final_snapshot
+  tags                    = var.tags
+}
+
+resource "aws_ecr_repository" "migration_handler" {
+  #checkov:skip=CKV_AWS_136:AES256 encryption is sufficient for ECR repositories
+  name                 = "<%= nameKebabCase %>-migration-${random_string.suffix.result}"
+  image_tag_mutability = "MUTABLE"
+  force_delete         = true
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  tags = var.tags
+}
+
+resource "aws_ecr_repository_policy" "migration_handler" {
+  repository = aws_ecr_repository.migration_handler.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowPushPull"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+        }
+        Action = [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:CompleteLayerUpload",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:InitiateLayerUpload",
+          "ecr:PutImage",
+          "ecr:UploadLayerPart"
+        ]
+      },
+      {
+        Sid    = "AllowLambdaPull"
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+        Action = [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:BatchGetImage",
+          "ecr:GetDownloadUrlForLayer"
+        ]
+      }
+    ]
+  })
+}
+
+resource "null_resource" "docker_publish" {
+  triggers = {
+    bundle_hash    = local.migration_bundle_hash
+    repository_url = aws_ecr_repository.migration_handler.repository_url
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      aws ecr get-login-password --region ${data.aws_region.current.name} | docker login --username AWS --password-stdin ${self.triggers.repository_url}
+      docker build --platform linux/arm64 -t ${self.triggers.repository_url}:${self.triggers.bundle_hash} ${local.migration_bundle_path}
+      docker push ${self.triggers.repository_url}:${self.triggers.bundle_hash}
+    EOT
+  }
+
+  depends_on = [aws_ecr_repository_policy.migration_handler]
+}
+
+resource "aws_iam_role" "migration_handler" {
+  name = "<%= nameClassName %>MigrationHandlerRole-${random_string.suffix.result}"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_iam_role_policy_attachment" "migration_handler_basic_execution" {
+  role       = aws_iam_role.migration_handler.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy_attachment" "migration_handler_vpc_access" {
+  role       = aws_iam_role.migration_handler.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+}
+
+resource "aws_iam_role_policy_attachment" "migration_handler_xray" {
+  role       = aws_iam_role.migration_handler.name
+  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+}
+
+resource "aws_cloudwatch_log_group" "migration_handler" {
+  #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
+  #checkov:skip=CKV_AWS_338:Log retention set to forever
+  #checkov:skip=CKV_AWS_66:Log retention set to forever
+  name = "/aws/lambda/${local.migration_function_name}"
+  tags = var.tags
+}
+
+resource "aws_security_group" "migration_handler" {
+  name_prefix = "<%= nameKebabCase %>-migration-"
+  description = "Security group for the migration Lambda function"
+  vpc_id      = var.vpc_id
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = var.tags
+}
+
+resource "aws_vpc_security_group_ingress_rule" "migration_handler_to_database" {
+  security_group_id            = module.aurora.security_group_id
+  referenced_security_group_id = aws_security_group.migration_handler.id
+  from_port                    = module.aurora.cluster_port
+  to_port                      = module.aurora.cluster_port
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_lambda_function" "migration_handler" {
+  #checkov:skip=CKV_AWS_116:Dead Letter Queue not required for the migration handler
+  #checkov:skip=CKV_AWS_115:Concurrent execution limit not required for the migration handler
+  #checkov:skip=CKV_AWS_173:Lambda environment variables encrypted by managed key
+  package_type  = "Image"
+  function_name = local.migration_function_name
+  role          = aws_iam_role.migration_handler.arn
+  image_uri     = "${aws_ecr_repository.migration_handler.repository_url}:${local.migration_bundle_hash}"
+  memory_size   = 1024
+  timeout       = 300
+  architectures = ["arm64"]
+
+  tracing_config {
+    mode = "Active"
+  }
+
+  vpc_config {
+    subnet_ids         = var.subnet_ids
+    security_group_ids = [aws_security_group.migration_handler.id]
+  }
+
+  environment {
+    variables = {
+      DATABASE_URL = module.aurora.database_url
+    }
+  }
+
+  tags = var.tags
+
+  depends_on = [
+    null_resource.docker_publish,
+    aws_iam_role_policy_attachment.migration_handler_basic_execution,
+    aws_iam_role_policy_attachment.migration_handler_vpc_access,
+    aws_iam_role_policy_attachment.migration_handler_xray,
+    aws_cloudwatch_log_group.migration_handler,
+    aws_vpc_security_group_ingress_rule.migration_handler_to_database
+  ]
+}
+
+resource "null_resource" "migration_trigger" {
+  triggers = {
+    bundle_hash   = local.migration_bundle_hash
+    cluster_arn   = module.aurora.cluster_arn
+    function_name = aws_lambda_function.migration_handler.function_name
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      output_file=$(mktemp)
+      response=$(aws lambda invoke \
+        --region ${data.aws_region.current.name} \
+        --function-name ${self.triggers.function_name} \
+        --cli-binary-format raw-in-base64-out \
+        "$output_file")
+      cat "$output_file"
+      echo "$response"
+      if echo "$response" | grep -q '"FunctionError"'; then
+        rm -f "$output_file"
+        exit 1
+      fi
+      rm -f "$output_file"
+    EOT
+  }
+
+  depends_on = [aws_lambda_function.migration_handler, module.aurora]
+}
+
+output "cluster_arn" {
+  description = "ARN of the Aurora cluster."
+  value       = module.aurora.cluster_arn
+}
+
+output "cluster_endpoint" {
+  description = "Writer endpoint of the Aurora cluster."
+  value       = module.aurora.cluster_endpoint
+}
+
+output "reader_endpoint" {
+  description = "Reader endpoint of the Aurora cluster."
+  value       = module.aurora.reader_endpoint
+}
+
+output "cluster_port" {
+  description = "Port exposed by the Aurora cluster."
+  value       = module.aurora.cluster_port
+}
+
+output "secret_arn" {
+  description = "ARN of the generated admin credentials secret."
+  value       = module.aurora.secret_arn
+}
+
+output "database_url" {
+  description = "Database connection URL composed from the generated secret."
+  value       = module.aurora.database_url
+  sensitive   = true
+}

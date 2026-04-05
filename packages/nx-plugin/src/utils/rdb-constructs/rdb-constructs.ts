@@ -16,7 +16,7 @@ import {
 import { addStarExport } from '../ast';
 import { IacProvider } from '../iac';
 
-export interface AddRdbCdkConstructsOptions {
+export interface AddRdbConstructOptions {
   nameClassName: string;
   nameKebabCase: string;
   databaseName: string;
@@ -27,12 +27,12 @@ export interface AddRdbCdkConstructsOptions {
 
 export const addRdbInfra = async (
   tree: Tree,
-  options: { iacProvider: IacProvider },
+  options: AddRdbConstructOptions & { iacProvider: IacProvider },
 ) => {
   if (options.iacProvider === 'CDK') {
-    throw new Error('CDK Rdb infra requires construct options');
+    await addRdbCdkConstructs(tree, options);
   } else if (options.iacProvider === 'Terraform') {
-    addRdbTerraformModules(tree);
+    addRdbTerraformModules(tree, options);
   } else {
     throw new Error(`Unsupported iacProvider ${options.iacProvider}`);
   }
@@ -40,7 +40,7 @@ export const addRdbInfra = async (
 
 export const addRdbCdkConstructs = async (
   tree: Tree,
-  options: AddRdbCdkConstructsOptions,
+  options: AddRdbConstructOptions,
 ) => {
   generateFiles(
     tree,
@@ -104,12 +104,25 @@ export const addRdbCdkConstructs = async (
   );
 };
 
-export const addRdbTerraformModules = (tree: Tree) => {
+export const addRdbTerraformModules = (
+  tree: Tree,
+  options: AddRdbConstructOptions,
+) => {
   generateFiles(
     tree,
     joinPathFragments(__dirname, 'files', 'terraform', 'core', 'rdb'),
     joinPathFragments(PACKAGES_DIR, SHARED_TERRAFORM_DIR, 'src', 'core', 'rdb'),
     {},
+    {
+      overwriteStrategy: OverwriteStrategy.KeepExisting,
+    },
+  );
+
+  generateFiles(
+    tree,
+    joinPathFragments(__dirname, 'files', 'terraform', 'app', 'dbs'),
+    joinPathFragments(PACKAGES_DIR, SHARED_TERRAFORM_DIR, 'src', 'app', 'dbs'),
+    options,
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },

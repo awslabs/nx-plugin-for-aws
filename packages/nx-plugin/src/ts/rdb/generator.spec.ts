@@ -69,9 +69,10 @@ describe('ts#rdb generator', () => {
     ).toContain('export class Db');
     expect(
       tree.read('packages/common/constructs/src/app/dbs/db.ts', 'utf-8'),
-    ).toContain(
-      "const { databaseName = 'databaseName', vpc, ...restProps } = props;",
-    );
+    ).toContain('const { writer, vpc, ...restProps } = props;');
+    expect(
+      tree.read('packages/common/constructs/src/app/dbs/db.ts', 'utf-8'),
+    ).toContain("databaseName: 'databaseName'");
     expect(
       tree.read('packages/common/constructs/src/app/dbs/db.ts', 'utf-8'),
     ).toContain("databaseUser: 'databaseUser'");
@@ -152,7 +153,7 @@ describe('ts#rdb generator', () => {
     });
     expect(projectConfig.targets.generate).toEqual({
       executor: 'nx:run-commands',
-      outputs: ['{workspaceRoot}/dist/{projectRoot}/tsc'],
+      outputs: ['{projectRoot}/generated/prisma'],
       options: {
         command: 'prisma generate',
         cwd: '{projectRoot}',
