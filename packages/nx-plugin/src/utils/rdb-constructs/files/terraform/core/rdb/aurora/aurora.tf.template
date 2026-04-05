@@ -1,6 +1,5 @@
 # Core Aurora module
-# This module creates an Aurora cluster, a generated admin secret, and a
-# security group that can be reused by consuming infrastructure modules.
+# This module creates an Aurora cluster and a generated admin secret.
 
 terraform {
   required_version = ">= 1.0"
@@ -56,12 +55,17 @@ variable "engine_version" {
 variable "database_name" {
   description = "Initial database created in the cluster."
   type        = string
-  default     = null
 }
 
 variable "database_user" {
   description = "Admin username stored in the generated Secrets Manager secret."
   type        = string
+}
+
+variable "database_url_query_parameters" {
+  description = "Additional query parameters appended to the generated database URL."
+  type        = map(string)
+  default     = {}
 }
 
 variable "port" {
@@ -100,12 +104,6 @@ variable "skip_final_snapshot" {
   default     = false
 }
 
-variable "allowed_security_group_ids" {
-  description = "Security group IDs allowed to connect to the cluster."
-  type        = list(string)
-  default     = []
-}
-
 variable "tags" {
   description = "Tags to apply to all resources."
   type        = map(string)
@@ -113,9 +111,22 @@ variable "tags" {
 }
 
 locals {
-  default_port              = var.engine == "aurora-mysql" ? 3306 : 5432
-  database_url_scheme       = var.engine == "aurora-mysql" ? "mysql" : "postgresql"
-  database_url_query_string = var.engine == "aurora-postgresql" ? "pool_timeout=20&connect_timeout=20&sslmode=no-verify" : ""
+  default_port                   = var.engine == "aurora-mysql" ? 3306 : 5432
+  default_engine_version         = var.engine == "aurora-mysql" ? "8.0.mysql_aurora.3.12.0" : "17.7"
+  database_url_scheme            = var.engine == "aurora-mysql" ? "mysql" : "postgresql"
+  default_database_url_parameters = var.engine == "aurora-postgresql" ? {
+    pool_timeout    = "20"
+    connect_timeout = "20"
+    sslmode         = "no-verify"
+  } : {}
+  database_url_parameters = merge(
+    local.default_database_url_parameters,
+    var.database_url_query_parameters,
+  )
+  database_url_query_string = join("&", [
+    for key in sort(keys(local.database_url_parameters)) :
+    "${urlencode(key)}=${urlencode(local.database_url_parameters[key])}"
+  ])
 }
 
 resource "aws_kms_key" "database" {
@@ -170,16 +181,6 @@ resource "aws_security_group" "database" {
   })
 }
 
-resource "aws_vpc_security_group_ingress_rule" "allowed" {
-  for_each = toset(var.allowed_security_group_ids)
-
-  security_group_id            = aws_security_group.database.id
-  referenced_security_group_id = each.value
-  from_port                    = coalesce(var.port, local.default_port)
-  to_port                      = coalesce(var.port, local.default_port)
-  ip_protocol                  = "tcp"
-}
-
 resource "aws_db_subnet_group" "database" {
   name       = "${var.name}-aurora"
   subnet_ids = var.subnet_ids
@@ -215,7 +216,7 @@ resource "aws_secretsmanager_secret_version" "credentials" {
 resource "aws_rds_cluster" "database" {
   cluster_identifier                  = "${var.name}-aurora"
   engine                              = var.engine
-  engine_version                      = var.engine_version
+  engine_version                      = coalesce(var.engine_version, local.default_engine_version)
   database_name                       = var.database_name
   master_username                     = var.database_user
   master_password                     = random_password.master_password.result
@@ -294,7 +295,7 @@ output "database_url" {
     jsondecode(aws_secretsmanager_secret_version.credentials.secret_string).password,
     aws_rds_cluster.database.endpoint,
     aws_rds_cluster.database.port,
-    var.database_name != null ? "/${var.database_name}" : "",
+    "/${var.database_name}",
     local.database_url_query_string != "" ? "?${local.database_url_query_string}" : "",
   )
   sensitive = true

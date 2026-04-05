@@ -1,22 +1,15 @@
 import { Duration } from 'aws-cdk-lib';
-import {
-  IConnectable,
-  ISecurityGroup,
-  IVpc,
-  SecurityGroup,
-} from 'aws-cdk-lib/aws-ec2';
+import { IConnectable, IVpc } from 'aws-cdk-lib/aws-ec2';
 import { IGrantable } from 'aws-cdk-lib/aws-iam';
 import { Key } from 'aws-cdk-lib/aws-kms';
 import {
   AuroraMysqlEngineVersion,
   AuroraPostgresEngineVersion,
-  ClusterInstance,
   Credentials,
   DatabaseCluster,
   DatabaseClusterEngine,
   DatabaseClusterProps,
   IClusterEngine,
-  IClusterInstance,
 } from 'aws-cdk-lib/aws-rds';
 import { ISecret } from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
@@ -31,11 +24,6 @@ export interface AuroraDatabaseEngine {
    * Default Aurora engine version used when one is not explicitly provided.
    */
   readonly defaultVersion: AuroraDatabaseEngineVersion;
-
-  /**
-   * Default admin username used when generating credentials.
-   */
-  readonly databaseUser: string;
 
   /**
    * Connection string scheme used when generating the database URL.
@@ -55,15 +43,12 @@ export interface AuroraDatabaseEngine {
 
 export class AuroraDatabaseEngines {
   public static mysql({
-    databaseUser,
     defaultVersion = AuroraMysqlEngineVersion.VER_3_12_0,
   }: {
-    databaseUser: string;
     defaultVersion?: AuroraMysqlEngineVersion;
   }): AuroraDatabaseEngine {
     return {
       defaultVersion,
-      databaseUser,
       databaseUrlScheme: 'mysql',
       clusterEngine: (version) =>
         DatabaseClusterEngine.auroraMysql({
@@ -73,15 +58,12 @@ export class AuroraDatabaseEngines {
   }
 
   public static postgres({
-    databaseUser,
     defaultVersion = AuroraPostgresEngineVersion.VER_17_7,
   }: {
-    databaseUser: string;
     defaultVersion?: AuroraPostgresEngineVersion;
   }): AuroraDatabaseEngine {
     return {
       defaultVersion,
-      databaseUser,
       databaseUrlScheme: 'postgresql',
       defaultDatabaseUrlParameters: {
         pool_timeout: '20',
@@ -98,7 +80,7 @@ export class AuroraDatabaseEngines {
 
 export interface AuroraDatabaseProps extends Omit<
   DatabaseClusterProps,
-  'credentials' | 'defaultDatabaseName' | 'engine' | 'readers' | 'writer'
+  'credentials' | 'defaultDatabaseName' | 'engine'
 > {
   /**
    * VPC where the Aurora cluster will be deployed.
@@ -118,9 +100,14 @@ export interface AuroraDatabaseProps extends Omit<
   readonly engineVersion?: AuroraDatabaseEngineVersion;
 
   /**
+   * Admin username used when generating credentials.
+   */
+  readonly databaseUser: string;
+
+  /**
    * The initial database created in the cluster.
    */
-  readonly databaseName?: string;
+  readonly databaseName: string;
 
   /**
    * Additional query parameters appended to the generated database URL.
@@ -128,20 +115,6 @@ export interface AuroraDatabaseProps extends Omit<
    * Values override any engine defaults with the same key.
    */
   readonly databaseUrlQueryParameters?: Readonly<Record<string, string>>;
-
-  /**
-   * The cluster writer instance.
-   *
-   * @default - a single Aurora Serverless v2 writer
-   */
-  readonly writer?: IClusterInstance;
-
-  /**
-   * Optional cluster reader instances.
-   *
-   * @default - no additional readers
-   */
-  readonly readers?: IClusterInstance[];
 }
 
 /**
@@ -152,49 +125,32 @@ export class AuroraDatabase extends Construct {
   public readonly cluster: DatabaseCluster;
   public readonly databaseUrl: string;
   public readonly secret: ISecret;
-  public readonly securityGroup: ISecurityGroup;
-  public readonly securityGroups: readonly ISecurityGroup[];
 
   constructor(
     scope: Construct,
     id: string,
     {
+      databaseUser,
       databaseName,
       databaseUrlQueryParameters,
       engine,
       engineVersion,
-      readers,
-      securityGroups,
-      vpc,
-      writer,
       ...clusterProps
     }: AuroraDatabaseProps,
   ) {
     super(scope, id);
-
-    const securityGroup =
-      securityGroups?.[0] ??
-      new SecurityGroup(this, 'SecurityGroup', {
-        vpc,
-        description: 'Security group for the Aurora database cluster',
-        allowAllOutbound: true,
-      });
 
     const key = new Key(this, 'EncryptionKey', {
       enableKeyRotation: true,
     });
     this.cluster = new DatabaseCluster(this, 'DatabaseCluster', {
       ...clusterProps,
-      vpc,
       engine: engine.clusterEngine(engineVersion ?? engine.defaultVersion),
-      credentials: Credentials.fromGeneratedSecret(engine.databaseUser, {
+      credentials: Credentials.fromGeneratedSecret(databaseUser, {
         encryptionKey: key,
       }),
       monitoringInterval: Duration.seconds(5),
       defaultDatabaseName: databaseName,
-      writer: writer ?? ClusterInstance.serverlessV2('writer'),
-      readers,
-      securityGroups,
       storageEncrypted: true,
       storageEncryptionKey: key,
     });
@@ -207,15 +163,12 @@ export class AuroraDatabase extends Construct {
 
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     this.secret = this.cluster.secret!;
-    this.securityGroup = securityGroup;
-    this.securityGroups = securityGroups ?? [securityGroup];
 
     const queryParameters = new URLSearchParams({
       ...engine.defaultDatabaseUrlParameters,
       ...databaseUrlQueryParameters,
     });
     const queryString = queryParameters.toString();
-    const databasePath = databaseName ? `/${databaseName}` : '';
 
     this.databaseUrl =
       `${engine.databaseUrlScheme}://` +
@@ -223,7 +176,7 @@ export class AuroraDatabase extends Construct {
       `:${this.secret.secretValueFromJson('password').unsafeUnwrap()}` +
       `@${this.cluster.clusterEndpoint.hostname}` +
       `:${this.cluster.clusterEndpoint.port}` +
-      `${databasePath}` +
+      `/${databaseName}` +
       (queryString ? `?${queryString}` : '');
   }
 
