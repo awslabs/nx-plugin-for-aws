@@ -15,7 +15,7 @@ import { kebabCase, toClassName } from '../../names';
 import { sortObjectKeys } from '../../object';
 import { updateGitIgnore } from '../../git';
 import runtimeConfigGenerator from '../../../ts/react-website/runtime-config/generator';
-import { addSingleImport, applyGritQL, matchGritQL } from '../../ast';
+import { addSingleImport, applyGritQL } from '../../ast';
 import { addTargetToServeLocal } from '../../../connection/serve-local';
 import { withVersions } from '../../versions';
 
@@ -210,47 +210,31 @@ export const addOpenApiReactClient = async (
   );
 
   // Add the query client provider if it doesn't exist already
-  if (
-    !(await matchGritQL(
-      tree,
-      mainTsxPath,
-      '`<QueryClientProvider>$_</QueryClientProvider>`',
-    ))
-  ) {
-    await addSingleImport(
-      tree,
-      mainTsxPath,
-      'QueryClientProvider',
-      './components/QueryClientProvider',
-    );
-    await applyGritQL(
-      tree,
-      mainTsxPath,
-      '`<App />` => `<QueryClientProvider><App /></QueryClientProvider>`',
-    );
-  }
+  await addSingleImport(
+    tree,
+    mainTsxPath,
+    'QueryClientProvider',
+    './components/QueryClientProvider',
+  );
+  await applyGritQL(
+    tree,
+    mainTsxPath,
+    '`<App />` => `<QueryClientProvider><App /></QueryClientProvider>` where { $program <: not contains `<QueryClientProvider>$_</QueryClientProvider>` }',
+  );
 
   // Add the api provider if it does not exist
   const providerName = `${apiNameClassName}Provider`;
-  if (
-    !(await matchGritQL(
-      tree,
-      mainTsxPath,
-      `\`<${providerName}>$_</${providerName}>\``,
-    ))
-  ) {
-    await addSingleImport(
-      tree,
-      mainTsxPath,
-      providerName,
-      `./components/${providerName}`,
-    );
-    await applyGritQL(
-      tree,
-      mainTsxPath,
-      `\`<App />\` => \`<${providerName}><App /></${providerName}>\``,
-    );
-  }
+  await addSingleImport(
+    tree,
+    mainTsxPath,
+    providerName,
+    `./components/${providerName}`,
+  );
+  await applyGritQL(
+    tree,
+    mainTsxPath,
+    `\`<App />\` => \`<${providerName}><App /></${providerName}>\` where { $program <: not contains \`<${providerName}>$_</${providerName}>\` }`,
+  );
 
   // Update serve-local on the website to use our local server.
   // Callers that handle serve-local separately (e.g. agent connections) set skipServeLocal.
