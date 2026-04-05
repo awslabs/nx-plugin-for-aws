@@ -194,9 +194,11 @@ describe('ts#rdb generator', () => {
     expect(prismaFile).toContain(
       "import { PrismaMariaDb } from '@prisma/adapter-mariadb';",
     );
-    expect(prismaFile).toContain(
-      'connectionString: `${process.env.DATABASE_URL}`',
-    );
+    expect(prismaFile).toContain('host: process.env.DATABASE_HOST');
+    expect(prismaFile).toContain('user: process.env.DATABASE_USER');
+    expect(prismaFile).toContain('password: process.env.DATABASE_PASSWORD');
+    expect(prismaFile).toContain('database: process.env.DATABASE_NAME');
+    expect(prismaFile).toContain('connectionLimit: 5');
     expect(prismaSchema).toContain('provider = "mysql"');
   });
 
