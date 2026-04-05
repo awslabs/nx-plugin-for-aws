@@ -13,9 +13,7 @@ import {
   RuntimeAuthorizerConfiguration,
 <%_ } _%>
 } from '@aws-cdk/aws-bedrock-agentcore-alpha';
-<%_ if (auth === 'IAM') { _%>
-import { IGrantable } from 'aws-cdk-lib/aws-iam';
-<%_ } _%>
+import { IGrantable, IPrincipal<%_ if (auth === 'IAM') { _%>, Grant<%_ } _%> } from 'aws-cdk-lib/aws-iam';
 <%_ if (auth === 'Cognito') { _%>
 import { IUserPool, IUserPoolClient } from 'aws-cdk-lib/aws-cognito';
 <%_ } _%>
@@ -47,7 +45,7 @@ export type <%- nameClassName %>Props = Omit<
 };
 <%_ } _%>
 
-export class <%- nameClassName %> extends Construct {
+export class <%- nameClassName %> extends Construct implements IGrantable {
   public readonly dockerImage: AgentRuntimeArtifact;
   public readonly agentCoreRuntime: Runtime;
 
@@ -104,6 +102,13 @@ export class <%- nameClassName %> extends Construct {
       <%- nameClassName %>: this.agentCoreRuntime.agentRuntimeArn,
     });
   }
+
+  /**
+   * The principal to grant permissions to.
+   */
+  public get grantPrincipal(): IPrincipal {
+    return this.agentCoreRuntime.grantPrincipal;
+  }
 <%_ if (auth === 'IAM') { _%>
 
   /**
@@ -113,6 +118,15 @@ export class <%- nameClassName %> extends Construct {
    */
   public grantInvokeAccess(grantee: IGrantable) {
     this.agentCoreRuntime.grantInvoke(grantee);
+
+    Grant.addToPrincipal({
+      grantee,
+      actions: ['bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream'],
+      resourceArns: [
+        this.agentCoreRuntime.agentRuntimeArn,
+        `${this.agentCoreRuntime.agentRuntimeArn}/*`,
+      ],
+    });
   }
 <%_ } _%>
 }

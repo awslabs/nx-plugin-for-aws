@@ -33,7 +33,7 @@ import {
   Runtime,
   RuntimeProps,
 } from '@aws-cdk/aws-bedrock-agentcore-alpha';
-import { IGrantable } from 'aws-cdk-lib/aws-iam';
+import { IGrantable, IPrincipal, Grant } from 'aws-cdk-lib/aws-iam';
 import { RuntimeConfig } from '../../../core/runtime-config.js';
 
 export type SnapshotBedrockAgentProps = Omit<
@@ -44,7 +44,7 @@ export type SnapshotBedrockAgentProps = Omit<
   | 'authorizerConfiguration'
 >;
 
-export class SnapshotBedrockAgent extends Construct {
+export class SnapshotBedrockAgent extends Construct implements IGrantable {
   public readonly dockerImage: AgentRuntimeArtifact;
   public readonly agentCoreRuntime: Runtime;
 
@@ -87,12 +87,28 @@ export class SnapshotBedrockAgent extends Construct {
   }
 
   /**
+   * The principal to grant permissions to.
+   */
+  public get grantPrincipal(): IPrincipal {
+    return this.agentCoreRuntime.grantPrincipal;
+  }
+
+  /**
    * Grants IAM permissions to invoke this agent runtime.
    *
    * @param grantee - The IAM principal to grant permissions to
    */
   public grantInvokeAccess(grantee: IGrantable) {
     this.agentCoreRuntime.grantInvoke(grantee);
+
+    Grant.addToPrincipal({
+      grantee,
+      actions: ['bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream'],
+      resourceArns: [
+        this.agentCoreRuntime.agentRuntimeArn,
+        \`\${this.agentCoreRuntime.agentRuntimeArn}/*\`,
+      ],
+    });
   }
 }
 "
