@@ -1,0 +1,558 @@
+---
+title: "关系型数据库"
+description: "创建关系型数据库项目"
+---
+
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
+
+此生成器创建一个由 [Amazon Aurora](https://aws.amazon.com/rds/aurora/) 支持的新关系数据库项目。它生成使用 AWS CDK 或 Terraform 配置数据库所需的应用程序代码和基础设施,支持 Aurora PostgreSQL 和 Aurora MySQL。
+
+生成的基础设施包括一个可重用的 Aurora 构造以及一个特定于应用程序的数据库构造。对于 CDK 项目,生成的构造还包括一个迁移处理程序,在集群创建后运行数据库迁移,帮助您在部署过程中引导架构。
+
+## 用法
+
+### 生成关系数据库
+
+您可以通过两种方式生成新的关系数据库项目:
+
+<RunGenerator generator="ts#rdb" />
+
+### 选项
+
+<GeneratorParameters generator="ts#rdb" />
+
+## 生成器输出
+
+生成器将在 `<directory>/<name>` 目录中创建以下项目结构:
+
+<FileTree>
+  - lib
+    - prisma.ts 用于连接数据库的 Prisma 客户端设置
+  - prisma
+    - schema.prisma Prisma 架构和示例模型
+  - src
+    - index.ts 项目入口点
+    - migration-handler.ts 用于在部署期间运行数据库迁移的 Lambda 处理程序
+  - Dockerfile 迁移处理程序的容器镜像定义
+  - project.json 项目配置和构建目标
+  - prisma.config.ts Prisma CLI 的配置
+  - tsconfig.json 源代码和测试的基础 TypeScript 配置
+  - tsconfig.lib.json 源代码的 TypeScript 配置
+  - tsconfig.spec.json 测试的 TypeScript 配置
+  - eslint.config.mjs ESLint 的配置
+</FileTree>
+
+### 基础设施
+
+<Snippet name="shared-constructs" />
+
+<Infrastructure>
+  <Fragment slot="cdk">
+    <FileTree>
+      - packages/common/constructs/src
+        - app
+          - dbs
+            - \<name>.ts 特定于您的数据库的基础设施
+        - core
+          - rdb
+            - aurora.ts 通用 Aurora 数据库构造
+    </FileTree>
+  </Fragment>
+  <Fragment slot="terraform">
+    <FileTree>
+      - packages/common/terraform/src
+        - app
+          - dbs
+            - \<name>
+              - \<name>.tf 特定于您的数据库的模块
+        - core
+          - rdb
+            - aurora
+              - aurora.tf 通用 Aurora 模块
+    </FileTree>
+  </Fragment>
+</Infrastructure>
+
+## 实现您的数据库
+
+### 数据建模
+
+生成的项目使用 [Prisma ORM](https://www.prisma.io/docs/orm) 来定义数据库架构并生成类型安全的客户端。您可以在 `prisma/schema.prisma` 中对表、关系和字段类型进行建模,然后使用 Prisma 生成客户端并为数据库创建迁移。
+
+有关如何使用 Prisma 定义模型的更多详细信息,请参阅官方指南 [使用 Prisma ORM 进行数据建模](https://www.prisma.io/docs/orm/core-concepts/data-modeling#data-modeling-with-prisma-orm)。
+
+例如,`User` 模型在 Prisma 架构中的表示如下:
+
+```ts title="packages/postgres/prisma/schema.prisma"
+model User {
+  id          Int      @id @default(autoincrement()) 
+  firstName   String
+  lastName    String
+}
+```
+
+### 数据迁移
+
+在生成 Prisma 迁移文件时,Prisma Migrate 需要访问影子数据库。这在迁移生成期间用于将您的 Prisma 架构与数据库的当前状态进行比较,并确定需要创建的 SQL 更改。
+
+有关为什么需要这样做以及 Prisma 如何使用它的更多详细信息,请参阅 Prisma 文档中的[影子数据库](https://www.prisma.io/docs/orm/prisma-migrate/understanding-prisma-migrate/shadow-database)。
+
+:::note[从包目录运行 Prisma]
+使用 Prisma CLI 时,从生成的数据库包目录运行命令,例如 `packages/postgres`,这样 Prisma 可以找到 `prisma/schema.prisma` 和 `prisma.config.ts`。
+:::
+
+要在本地生成迁移,您可以将 Prisma 指向本地数据库实例。首先导出 `DATABASE_URL`,以便 Prisma 可以连接到您的数据库:
+
+```bash
+export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/myapp"
+```
+
+然后创建迁移文件而不应用它们:
+
+<Tabs>
+  <TabItem label="npm" icon="seti:npm">
+
+```bash
+npx prisma migrate dev --create-only
+```
+
+  </TabItem>
+  <TabItem label="pnpm" icon="seti:pnpm">
+
+```bash
+pnpm prisma migrate dev --create-only
+```
+
+  </TabItem>
+  <TabItem label="yarn" icon="seti:yarn">
+
+```bash
+yarn prisma migrate dev --create-only
+```
+
+  </TabItem>
+  <TabItem label="bun" icon="seti:bun">
+
+```bash
+bunx --bun prisma migrate dev --create-only
+```
+
+  </TabItem>
+</Tabs>
+
+运行 `prisma migrate dev --create-only` 将通过在每次架构更改需要新迁移时生成新的迁移文件夹来保持 `prisma/migrations` 目录的最新状态。
+
+您的 Prisma 目录将如下所示:
+
+<FileTree>
+  - prisma
+    - migrations
+      - 20260405013911_initial_migrations
+        - migration.sql
+      - migration_lock.toml
+    - schema.prisma
+</FileTree>
+
+要将这些迁移应用到 `DATABASE_URL` 指向的本地数据库,您可以运行:
+
+<Tabs>
+  <TabItem label="npm" icon="seti:npm">
+
+```bash
+npx prisma migrate deploy
+```
+
+  </TabItem>
+  <TabItem label="pnpm" icon="seti:pnpm">
+
+```bash
+pnpm prisma migrate deploy
+```
+
+  </TabItem>
+  <TabItem label="yarn" icon="seti:yarn">
+
+```bash
+yarn prisma migrate deploy
+```
+
+  </TabItem>
+  <TabItem label="bun" icon="seti:bun">
+
+```bash
+bunx --bun prisma migrate deploy
+```
+
+  </TabItem>
+</Tabs>
+
+:::note[自动 AWS 迁移]
+对于部署到 AWS,您无需手动运行 `prisma migrate deploy`。生成的迁移处理程序会在部署期间自动应用您的迁移,只要 `prisma/migrations` 目录是最新的。
+:::
+
+
+### 生成的数据库客户端
+
+生成器会自动配置 `generate` 目标,以便在构建项目时生成类型安全的 TypeScript Prisma 客户端。
+
+生成的客户端结构如下:
+
+<FileTree>
+  - generated
+    - prisma
+      - internal
+      - models
+      - browser.ts
+      - client.ts
+      - commonInputTypes.ts
+      - enums.ts
+      - models.ts
+</FileTree>
+
+生成的客户端通过 `lib/prisma.ts` 使用,该文件配置适当的 Prisma 适配器并导出一个即用的 `prisma` 客户端实例:
+
+```ts title="packages/postgres/lib/prisma.ts"
+import { PrismaPg } from '@prisma/adapter-pg';
+import { PrismaClient } from '../generated/prisma/client.js';
+
+const adapter = new PrismaPg({
+  connectionString: `${process.env.DATABASE_URL}`,
+});
+const prisma = new PrismaClient({ adapter });
+
+export { prisma };
+```
+
+然后,您可以在工作区中的其他项目中使用导出的 `prisma` 客户端,例如 `tRPC` API:
+
+```ts title="packages/api/src/procedures/list-user.ts"
+import { prisma } from ':aws-nx-poc/postgres';
+import { publicProcedure } from '../init.js';
+import {
+  ListUserOutputSchema,
+} from '../schema/index.js';
+
+export const listUser = publicProcedure
+  .output(ListUserOutputSchema)
+  .query(async () => {
+    const users = await prisma.user.findMany({
+      orderBy: { id: 'asc' },
+    });
+
+    return { users };
+  });
+```
+
+## 部署您的数据库
+
+### 基础设施
+
+关系数据库生成器根据您选择的 `iacProvider` 创建 CDK 或 Terraform 基础设施即代码。您可以使用它来部署数据库。
+
+<Infrastructure>
+<Fragment slot="cdk">
+用于部署数据库的 CDK 构造在 `common/constructs` 文件夹中创建。您可以在 CDK 应用程序中使用它,例如:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { Postgres } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    const vpc = new Vpc(this, 'Vpc', {
+      subnetConfiguration: [
+        {
+          name: 'private_isolated',
+          subnetType: SubnetType.PRIVATE_ISOLATED,
+        },
+      ],
+    });
+
+    const db = new Postgres(this, 'Db', {
+      vpc,
+      vpcSubnets: {
+        subnetType: SubnetType.PRIVATE_ISOLATED,
+      }
+    });
+  }
+}
+```
+
+这会在您的 VPC 中配置一个 Aurora 集群,以及生成的凭证密钥和迁移处理程序。数据库通常应部署到私有隔离子网中,以便无法从公共互联网直接访问。
+
+如果您需要自定义集群拓扑,可以在实例化构造时覆盖 Aurora 集群属性,例如 `writer` 和 `readers`。
+</Fragment>
+<Fragment slot="terraform">
+用于部署数据库的 Terraform 模块在 `common/terraform` 文件夹中创建。您可以在 Terraform 配置中使用它:
+
+```hcl title="packages/infra/src/main.tf"
+module "postgres" {
+  source = "../../common/terraform/src/app/dbs/postgres"
+
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.private_isolated_subnet_ids
+
+  tags = local.common_tags
+}
+```
+
+这会配置一个 Aurora 集群、生成的凭证密钥、迁移 Lambda 函数以及发布和运行迁移容器镜像所需的支持资源。
+
+如果您需要自定义集群拓扑或大小,可以覆盖模块输入,例如 `instance_count`、`serverless_min_capacity`、`serverless_max_capacity`、`engine_version` 和 `port`。
+</Fragment>
+</Infrastructure>
+
+### 授予访问权限
+
+要允许您的 API 连接到数据库,请将 API 部署到与数据库相同的 VPC 中。然后,您可以向 API 提供数据库连接字符串,并允许 API 处理程序连接到数据库端口。
+
+:::note[Prisma 环境变量]
+当使用 PostgreSQL 与 Prisma 时,生成的客户端需要 `DATABASE_URL`。
+
+当使用 MySQL 与 Prisma 时,生成的客户端需要 `DATABASE_HOST`、`DATABASE_USER`、`DATABASE_PASSWORD` 和 `DATABASE_NAME`,如 `lib/prisma.ts` 中配置的那样。
+:::
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const api = new Api(this, 'Api', {
+  integrations: Api.defaultIntegrations(this)
+    .withDefaultOptions({
+      vpc,
+      vpcSubnets: {
+        subnetType: SubnetType.PRIVATE_ISOLATED,
+      },
+      environment: {
+        DATABASE_URL: db.databaseUrl,
+      },
+    })
+    .build(),
+});
+
+Object.entries(api.integrations).forEach(([operation, integration]) => {
+  db.allowDefaultPortFrom(
+    integration.handler,
+    `Allow ${operation} to connect to the database`,
+  );
+});
+```
+
+这确保每个 API Lambda 函数在与数据库相同的 VPC 内运行,并明确允许连接到数据库的默认端口。
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "api" {
+  source = "../../common/terraform/src/app/apis/api"
+
+  subnet_ids = module.vpc.private_isolated_subnet_ids
+
+  env = {
+    DATABASE_URL = module.postgres.database_url
+  }
+
+  tags = local.common_tags
+}
+
+resource "aws_vpc_security_group_ingress_rule" "api_to_postgres" {
+  security_group_id            = module.postgres.security_group_id
+  referenced_security_group_id = module.api.default_security_group_id
+  from_port                    = module.postgres.cluster_port
+  to_port                      = module.postgres.cluster_port
+  ip_protocol                  = "tcp"
+}
+```
+
+这配置 API 在与数据库相同的 VPC 中运行,将生成的 `DATABASE_URL` 传递给 API,并明确允许从 API 安全组到数据库安全组的数据库端口流量。
+</Fragment>
+</Infrastructure>
+
+## 自定义您的数据库架构
+
+生成的数据库构造公开了底层 Aurora 配置,以便您可以使其适应您的工作负载。
+
+### 覆盖写入器
+
+<Infrastructure>
+<Fragment slot="cdk">
+在 CDK 中,如果您想更改主 Aurora 实例的配置方式,可以覆盖默认的写入器实例:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const db = new Postgres(this, 'Db', {
+  vpc,
+  vpcSubnets: {
+    subnetType: SubnetType.PRIVATE_ISOLATED,
+  },
+  writer: ClusterInstance.serverlessV2('writer'),
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+在 Terraform 中,Aurora 实例通过模块输入进行管理,而不是单独的 `writer` 和 `readers` 定义。生成的模块始终为您配置主实例,您可以使用输入(例如 `instance_count`、`engine_version` 和无服务器容量设置)来自定义集群:
+
+```hcl title="packages/infra/src/main.tf"
+module "postgres" {
+  source = "../../common/terraform/src/app/dbs/postgres"
+
+  vpc_id                  = module.vpc.vpc_id
+  subnet_ids              = module.vpc.private_isolated_subnet_ids
+  instance_count          = 1
+  serverless_min_capacity = 0.5
+  serverless_max_capacity = 8
+
+  tags = local.common_tags
+}
+```
+</Fragment>
+</Infrastructure>
+
+### 添加读取器
+
+<Infrastructure>
+<Fragment slot="cdk">
+如果您的工作负载需要读取扩展,可以在 CDK 中使用 `readers` 属性添加读取器实例:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const db = new Postgres(this, 'Db', {
+  vpc,
+  vpcSubnets: {
+    subnetType: SubnetType.PRIVATE_ISOLATED,
+  },
+  readers: [ClusterInstance.serverlessV2('reader')],
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+在 Terraform 中,等效的控制是 `instance_count`,它确定创建多少个 Aurora 实例:
+
+```hcl title="packages/infra/src/main.tf"
+module "postgres" {
+  source = "../../common/terraform/src/app/dbs/postgres"
+
+  vpc_id         = module.vpc.vpc_id
+  subnet_ids     = module.vpc.private_isolated_subnet_ids
+  instance_count = 2
+
+  tags = local.common_tags
+}
+```
+</Fragment>
+</Infrastructure>
+
+### 配置无服务器容量
+
+您可以控制 Aurora Serverless v2 扩展限制以匹配您的工作负载。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const db = new Postgres(this, 'Db', {
+  vpc,
+  vpcSubnets: {
+    subnetType: SubnetType.PRIVATE_ISOLATED,
+  },
+  serverlessV2MinCapacity: 0.5,
+  serverlessV2MaxCapacity: 8,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "postgres" {
+  source = "../../common/terraform/src/app/dbs/postgres"
+
+  vpc_id                  = module.vpc.vpc_id
+  subnet_ids              = module.vpc.private_isolated_subnet_ids
+  serverless_min_capacity = 0.5
+  serverless_max_capacity = 8
+
+  tags = local.common_tags
+}
+```
+</Fragment>
+</Infrastructure>
+
+### 固定引擎版本
+
+如果您想使用特定的 Aurora 引擎版本,可以明确固定它,而不是依赖默认版本。
+
+<Infrastructure>
+<Fragment slot="cdk">
+在 CDK 中,将 `engineVersion` 传递给生成的构造:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const db = new Postgres(this, 'Db', {
+  vpc,
+  vpcSubnets: {
+    subnetType: SubnetType.PRIVATE_ISOLATED,
+  },
+  engineVersion: AuroraPostgresEngineVersion.VER_17_7,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+在 Terraform 中,使用 `engine_version`:
+
+```hcl title="packages/infra/src/main.tf"
+module "postgres" {
+  source = "../../common/terraform/src/app/dbs/postgres"
+
+  vpc_id         = module.vpc.vpc_id
+  subnet_ids     = module.vpc.private_isolated_subnet_ids
+  engine_version = "17.7"
+
+  tags = local.common_tags
+}
+```
+</Fragment>
+</Infrastructure>
+
+### 选择子网和生命周期选项
+
+您还可以自定义数据库的部署位置以及删除时的行为方式。
+
+<Infrastructure>
+<Fragment slot="cdk">
+使用 `vpcSubnets` 控制数据库放置到哪些子网中,使用与生命周期相关的属性(例如 `deletionProtection` 和 `removalPolicy`)来控制删除行为:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RemovalPolicy } from 'aws-cdk-lib';
+
+const db = new Postgres(this, 'Db', {
+  vpc,
+  vpcSubnets: {
+    subnetType: SubnetType.PRIVATE_ISOLATED,
+  },
+  deletionProtection: true,
+  removalPolicy: RemovalPolicy.SNAPSHOT,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+使用 `subnet_ids` 控制数据库和迁移 Lambda 的部署位置。
+
+```hcl title="packages/infra/src/main.tf"
+module "postgres" {
+  source = "../../common/terraform/src/app/dbs/postgres"
+
+  vpc_id              = module.vpc.vpc_id
+  subnet_ids          = module.vpc.private_isolated_subnet_ids
+  deletion_protection = true
+  skip_final_snapshot = false
+  port                = 5432
+
+  tags = local.common_tags
+}
+```
+
+您可以使用 `deletion_protection` 来防止意外删除,使用 `skip_final_snapshot` 来控制删除时的快照行为,使用 `port` 来覆盖默认引擎端口。
+</Fragment>
+</Infrastructure>
