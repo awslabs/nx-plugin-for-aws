@@ -40,6 +40,7 @@ describe('ts#rdb generator', () => {
     databaseUser: 'databaseUser',
     databaseName: 'databaseName',
     ormFramework: 'Prisma' as const,
+    iacProvider: 'CDK' as const,
   };
 
   it('should generate the aurora shared construct', async () => {
@@ -200,6 +201,32 @@ describe('ts#rdb generator', () => {
     expect(prismaFile).toContain('database: process.env.DATABASE_NAME');
     expect(prismaFile).toContain('connectionLimit: 5');
     expect(prismaSchema).toContain('provider = "mysql"');
+  });
+
+  it('should generate terraform modules when iacProvider is Terraform', async () => {
+    await tsRdbGenerator(tree, {
+      ...defaultOptions,
+      iacProvider: 'Terraform',
+    });
+
+    expect(
+      tree.exists('packages/common/terraform/src/core/rdb/aurora/aurora.tf'),
+    ).toBeTruthy();
+    expect(
+      tree.exists('packages/common/terraform/src/app/dbs/db/db.tf'),
+    ).toBeTruthy();
+    expect(
+      tree.read(
+        'packages/common/terraform/src/app/dbs/db/db.tf',
+        'utf-8',
+      ),
+    ).toContain('source = "../../../core/rdb/aurora"');
+    expect(
+      tree.read(
+        'packages/common/terraform/src/app/dbs/db/db.tf',
+        'utf-8',
+      ),
+    ).toContain('../../../../../../../dist/packages/db/bundle/migration');
   });
 
   it('should keep an existing aurora shared construct', async () => {
