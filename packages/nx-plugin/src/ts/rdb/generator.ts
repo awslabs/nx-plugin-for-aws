@@ -22,7 +22,7 @@ import {
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { formatFilesInSubtree } from '../../utils/format';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
-import { addRdbCdkConstructs } from '../../utils/rdb-constructs/rdb-constructs';
+import { addRdbInfra } from '../../utils/rdb-constructs/rdb-constructs';
 import { toClassName, toKebabCase } from '../../utils/names';
 import { FsCommands } from '../../utils/fs';
 import { getRelativePathToRootByDirectory } from '../../utils/paths';
@@ -30,6 +30,7 @@ import tsProjectGenerator, { getTsLibDetails } from '../lib/generator';
 import { addIgnoresToEslintConfig } from '../lib/eslint';
 import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
 import { TS_VERSIONS, withVersions } from '../../utils/versions';
+import { resolveIacProvider } from '../../utils/iac';
 
 export const TS_RDB_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -39,6 +40,7 @@ export const tsRdbGenerator = async (
   options: TsRdbGeneratorSchema,
 ): Promise<GeneratorCallback> => {
   const nameKebabCase = toKebabCase(options.name) ?? options.name;
+  const iacProvider = await resolveIacProvider(tree, options.iacProvider);
   const { fullyQualifiedName, dir } = getTsLibDetails(tree, {
     name: options.name,
     directory: options.directory,
@@ -127,8 +129,9 @@ export const tsRdbGenerator = async (
   addDependencyToTargetIfNotPresent(projectConfig, 'compile', 'generate');
   updateProjectConfiguration(tree, fullyQualifiedName, projectConfig);
 
-  await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
-  await addRdbCdkConstructs(tree, {
+  await sharedConstructsGenerator(tree, { iacProvider });
+  await addRdbInfra(tree, {
+    iacProvider,
     nameClassName: toClassName(options.name),
     nameKebabCase,
     databaseName: options.databaseName,

@@ -311,6 +311,7 @@ export default defineConfig({
           items: [
             { label: 'ts#project', link: '/guides/typescript-project' },
             { label: 'ts#infra', link: '/guides/typescript-infrastructure' },
+            { label: 'ts#rdb', link: '/guides/ts-rdb' },
             { label: 'ts#trpc-api', link: '/guides/trpc' },
             { label: 'ts#smithy-api', link: '/guides/ts-smithy-api' },
             {
@@ -403,7 +404,6 @@ export default defineConfig({
               label: 'license',
               link: '/guides/license',
             },
-            { label: 'ts#rdb', link: '/guides/ts-rdb' },
           ],
         },
         {
