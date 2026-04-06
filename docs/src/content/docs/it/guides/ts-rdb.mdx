@@ -1,0 +1,558 @@
+---
+title: "Database Relazionale"
+description: "Crea un progetto di database relazionale"
+---
+
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
+
+Questo generatore crea un nuovo progetto di database relazionale basato su [Amazon Aurora](https://aws.amazon.com/rds/aurora/). Genera il codice applicativo e l'infrastruttura necessaria per effettuare il provisioning di un database utilizzando AWS CDK o Terraform, con supporto per Aurora PostgreSQL e Aurora MySQL.
+
+L'infrastruttura generata include un costrutto Aurora riutilizzabile insieme a un costrutto di database specifico per l'applicazione. Per i progetti CDK, il costrutto generato include anche un gestore delle migrazioni che esegue le migrazioni del database dopo la creazione del cluster, aiutandoti a inizializzare il tuo schema come parte del deployment.
+
+## Utilizzo
+
+### Generare un Database Relazionale
+
+Puoi generare un nuovo progetto di database relazionale in due modi:
+
+<RunGenerator generator="ts#rdb" />
+
+### Opzioni
+
+<GeneratorParameters generator="ts#rdb" />
+
+## Output del Generatore
+
+Il generatore creerà la seguente struttura di progetto nella directory `<directory>/<name>`:
+
+<FileTree>
+  - lib
+    - prisma.ts Configurazione del client Prisma per la connessione al database
+  - prisma
+    - schema.prisma Schema Prisma e modello di esempio
+  - src
+    - index.ts Punto di ingresso del progetto
+    - migration-handler.ts Gestore Lambda utilizzato per eseguire le migrazioni del database durante il deployment
+  - Dockerfile Definizione dell'immagine container per il gestore delle migrazioni
+  - project.json Configurazione del progetto e target di build
+  - prisma.config.ts Configurazione per la CLI di Prisma
+  - tsconfig.json Configurazione TypeScript di base per sorgenti e test
+  - tsconfig.lib.json Configurazione TypeScript per il codice sorgente
+  - tsconfig.spec.json Configurazione TypeScript per i test
+  - eslint.config.mjs Configurazione per ESLint
+</FileTree>
+
+### Infrastruttura
+
+<Snippet name="shared-constructs" />
+
+<Infrastructure>
+  <Fragment slot="cdk">
+    <FileTree>
+      - packages/common/constructs/src
+        - app
+          - dbs
+            - \<name>.ts Infrastruttura specifica per il tuo database
+        - core
+          - rdb
+            - aurora.ts Costrutto generico del database Aurora
+    </FileTree>
+  </Fragment>
+  <Fragment slot="terraform">
+    <FileTree>
+      - packages/common/terraform/src
+        - app
+          - dbs
+            - \<name>
+              - \<name>.tf Modulo specifico per il tuo database
+        - core
+          - rdb
+            - aurora
+              - aurora.tf Modulo generico Aurora
+    </FileTree>
+  </Fragment>
+</Infrastructure>
+
+## Implementazione del Database
+
+### Modellazione dei Dati
+
+Il progetto generato utilizza [Prisma ORM](https://www.prisma.io/docs/orm) per definire lo schema del database e generare un client type-safe. Puoi modellare le tue tabelle, relazioni e tipi di campo in `prisma/schema.prisma`, quindi utilizzare Prisma per generare il client e creare migrazioni per il tuo database.
+
+Per maggiori dettagli su come definire i modelli con Prisma, consulta la guida ufficiale sulla [modellazione dei dati con Prisma ORM](https://www.prisma.io/docs/orm/core-concepts/data-modeling#data-modeling-with-prisma-orm).
+
+Come esempio, un modello `User` sarebbe rappresentato come segue nello schema Prisma:
+
+```ts title="packages/postgres/prisma/schema.prisma"
+model User {
+  id          Int      @id @default(autoincrement()) 
+  firstName   String
+  lastName    String
+}
+```
+
+### Migrazione dei Dati
+
+Quando si generano i file di migrazione Prisma, Prisma Migrate richiede l'accesso a un database shadow. Questo viene utilizzato durante la generazione della migrazione per confrontare il tuo schema Prisma con lo stato attuale del database e determinare le modifiche SQL che devono essere create.
+
+Per maggiori dettagli sul perché questo è richiesto e su come Prisma lo utilizza, consulta la documentazione di Prisma sui [database shadow](https://www.prisma.io/docs/orm/prisma-migrate/understanding-prisma-migrate/shadow-database).
+
+:::note[Esegui Prisma dalla Directory del Package]
+Quando utilizzi la CLI di Prisma, esegui i comandi dalla directory del package del database generato, ad esempio `packages/postgres`, in modo che Prisma possa trovare `prisma/schema.prisma` e `prisma.config.ts`.
+:::
+
+Per generare le migrazioni localmente, puoi puntare Prisma a un'istanza di database locale. Prima esporta `DATABASE_URL` in modo che Prisma possa connettersi al tuo database:
+
+```bash
+export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/myapp"
+```
+
+Quindi crea i file di migrazione senza applicarli:
+
+<Tabs>
+  <TabItem label="npm" icon="seti:npm">
+
+```bash
+npx prisma migrate dev --create-only
+```
+
+  </TabItem>
+  <TabItem label="pnpm" icon="seti:pnpm">
+
+```bash
+pnpm prisma migrate dev --create-only
+```
+
+  </TabItem>
+  <TabItem label="yarn" icon="seti:yarn">
+
+```bash
+yarn prisma migrate dev --create-only
+```
+
+  </TabItem>
+  <TabItem label="bun" icon="seti:bun">
+
+```bash
+bunx --bun prisma migrate dev --create-only
+```
+
+  </TabItem>
+</Tabs>
+
+Eseguire `prisma migrate dev --create-only` manterrà aggiornata la directory `prisma/migrations` generando una nuova cartella di migrazione ogni volta che le modifiche allo schema richiedono una nuova migrazione.
+
+La tua directory Prisma apparirà quindi così:
+
+<FileTree>
+  - prisma
+    - migrations
+      - 20260405013911_initial_migrations
+        - migration.sql
+      - migration_lock.toml
+    - schema.prisma
+</FileTree>
+
+Per applicare queste migrazioni al database locale a cui punta `DATABASE_URL`, puoi eseguire:
+
+<Tabs>
+  <TabItem label="npm" icon="seti:npm">
+
+```bash
+npx prisma migrate deploy
+```
+
+  </TabItem>
+  <TabItem label="pnpm" icon="seti:pnpm">
+
+```bash
+pnpm prisma migrate deploy
+```
+
+  </TabItem>
+  <TabItem label="yarn" icon="seti:yarn">
+
+```bash
+yarn prisma migrate deploy
+```
+
+  </TabItem>
+  <TabItem label="bun" icon="seti:bun">
+
+```bash
+bunx --bun prisma migrate deploy
+```
+
+  </TabItem>
+</Tabs>
+
+:::note[Migrazioni AWS Automatiche]
+Per i deployment su AWS, non è necessario eseguire `prisma migrate deploy` manualmente. Il gestore delle migrazioni generato applica automaticamente le tue migrazioni durante il deployment, purché la directory `prisma/migrations` sia aggiornata.
+:::
+
+
+### Client Database Generato
+
+Il generatore configura automaticamente il target `generate` per generare il client Prisma TypeScript type-safe ogni volta che costruisci il progetto.
+
+Il client generato è strutturato come segue:
+
+<FileTree>
+  - generated
+    - prisma
+      - internal
+      - models
+      - browser.ts
+      - client.ts
+      - commonInputTypes.ts
+      - enums.ts
+      - models.ts
+</FileTree>
+
+Il client generato viene utilizzato tramite `lib/prisma.ts`, che configura l'adattatore Prisma appropriato ed esporta un'istanza del client `prisma` pronta all'uso:
+
+```ts title="packages/postgres/lib/prisma.ts"
+import { PrismaPg } from '@prisma/adapter-pg';
+import { PrismaClient } from '../generated/prisma/client.js';
+
+const adapter = new PrismaPg({
+  connectionString: `${process.env.DATABASE_URL}`,
+});
+const prisma = new PrismaClient({ adapter });
+
+export { prisma };
+```
+
+Puoi quindi utilizzare il client `prisma` esportato in altri progetti nel tuo workspace, come un'API `tRPC`:
+
+```ts title="packages/api/src/procedures/list-user.ts"
+import { prisma } from ':aws-nx-poc/postgres';
+import { publicProcedure } from '../init.js';
+import {
+  ListUserOutputSchema,
+} from '../schema/index.js';
+
+export const listUser = publicProcedure
+  .output(ListUserOutputSchema)
+  .query(async () => {
+    const users = await prisma.user.findMany({
+      orderBy: { id: 'asc' },
+    });
+
+    return { users };
+  });
+```
+
+## Deployment del Database
+
+### Infrastruttura
+
+Il generatore di database relazionale crea infrastruttura come codice CDK o Terraform in base al tuo `iacProvider` selezionato. Puoi utilizzarlo per effettuare il deployment del tuo database.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Il costrutto CDK per il deployment del tuo database viene creato nella cartella `common/constructs`. Puoi utilizzarlo in un'applicazione CDK, ad esempio:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { Postgres } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    const vpc = new Vpc(this, 'Vpc', {
+      subnetConfiguration: [
+        {
+          name: 'private_isolated',
+          subnetType: SubnetType.PRIVATE_ISOLATED,
+        },
+      ],
+    });
+
+    const db = new Postgres(this, 'Db', {
+      vpc,
+      vpcSubnets: {
+        subnetType: SubnetType.PRIVATE_ISOLATED,
+      }
+    });
+  }
+}
+```
+
+Questo effettua il provisioning di un cluster Aurora nel tuo VPC, insieme al secret delle credenziali generato e al gestore delle migrazioni. Il database dovrebbe tipicamente essere deployato in subnet isolate private in modo che non sia direttamente accessibile da Internet pubblico.
+
+Se hai bisogno di personalizzare la topologia del cluster, puoi sovrascrivere le proprietà del cluster Aurora come `writer` e `readers` durante l'istanziazione del costrutto.
+</Fragment>
+<Fragment slot="terraform">
+Il modulo Terraform per il deployment del tuo database viene creato nella cartella `common/terraform`. Puoi utilizzarlo in una configurazione Terraform:
+
+```hcl title="packages/infra/src/main.tf"
+module "postgres" {
+  source = "../../common/terraform/src/app/dbs/postgres"
+
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.private_isolated_subnet_ids
+
+  tags = local.common_tags
+}
+```
+
+Questo effettua il provisioning di un cluster Aurora, del secret delle credenziali generato, della funzione Lambda di migrazione e delle risorse di supporto necessarie per pubblicare ed eseguire l'immagine container di migrazione.
+
+Se hai bisogno di personalizzare la topologia o il dimensionamento del cluster, puoi sovrascrivere gli input del modulo come `instance_count`, `serverless_min_capacity`, `serverless_max_capacity`, `engine_version` e `port`.
+</Fragment>
+</Infrastructure>
+
+### Concessione dell'Accesso
+
+Per consentire alla tua API di connettersi al database, deploya l'API nello stesso VPC del database. Puoi quindi fornire la stringa di connessione del database all'API e consentire ai gestori dell'API di connettersi alla porta del database.
+
+:::note[Variabili d'Ambiente Prisma]
+Quando si utilizza PostgreSQL con Prisma, il client generato si aspetta `DATABASE_URL`.
+
+Quando si utilizza MySQL con Prisma, il client generato si aspetta `DATABASE_HOST`, `DATABASE_USER`, `DATABASE_PASSWORD` e `DATABASE_NAME`, come configurato in `lib/prisma.ts`.
+:::
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const api = new Api(this, 'Api', {
+  integrations: Api.defaultIntegrations(this)
+    .withDefaultOptions({
+      vpc,
+      vpcSubnets: {
+        subnetType: SubnetType.PRIVATE_ISOLATED,
+      },
+      environment: {
+        DATABASE_URL: db.databaseUrl,
+      },
+    })
+    .build(),
+});
+
+Object.entries(api.integrations).forEach(([operation, integration]) => {
+  db.allowDefaultPortFrom(
+    integration.handler,
+    `Allow ${operation} to connect to the database`,
+  );
+});
+```
+
+Questo garantisce che ogni funzione Lambda dell'API venga eseguita all'interno dello stesso VPC del database e sia esplicitamente autorizzata a connettersi al database sulla sua porta predefinita.
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "api" {
+  source = "../../common/terraform/src/app/apis/api"
+
+  subnet_ids = module.vpc.private_isolated_subnet_ids
+
+  env = {
+    DATABASE_URL = module.postgres.database_url
+  }
+
+  tags = local.common_tags
+}
+
+resource "aws_vpc_security_group_ingress_rule" "api_to_postgres" {
+  security_group_id            = module.postgres.security_group_id
+  referenced_security_group_id = module.api.default_security_group_id
+  from_port                    = module.postgres.cluster_port
+  to_port                      = module.postgres.cluster_port
+  ip_protocol                  = "tcp"
+}
+```
+
+Questo configura l'API per essere eseguita nello stesso VPC del database, passa il `DATABASE_URL` generato all'API e consente esplicitamente il traffico dal security group dell'API al security group del database sulla porta del database.
+</Fragment>
+</Infrastructure>
+
+## Personalizzazione dell'Architettura del Database
+
+Il costrutto del database generato espone la configurazione Aurora sottostante in modo da poterla adattare al tuo carico di lavoro.
+
+### Override del Writer
+
+<Infrastructure>
+<Fragment slot="cdk">
+In CDK, puoi sovrascrivere l'istanza writer predefinita se desideri modificare il modo in cui viene effettuato il provisioning dell'istanza Aurora primaria:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const db = new Postgres(this, 'Db', {
+  vpc,
+  vpcSubnets: {
+    subnetType: SubnetType.PRIVATE_ISOLATED,
+  },
+  writer: ClusterInstance.serverlessV2('writer'),
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+In Terraform, le istanze Aurora sono gestite tramite input del modulo piuttosto che definizioni separate di `writer` e `readers`. Il modulo generato effettua sempre il provisioning dell'istanza primaria per te, e personalizzi il cluster attorno ad essa utilizzando input come `instance_count`, `engine_version` e le impostazioni di capacità serverless:
+
+```hcl title="packages/infra/src/main.tf"
+module "postgres" {
+  source = "../../common/terraform/src/app/dbs/postgres"
+
+  vpc_id                  = module.vpc.vpc_id
+  subnet_ids              = module.vpc.private_isolated_subnet_ids
+  instance_count          = 1
+  serverless_min_capacity = 0.5
+  serverless_max_capacity = 8
+
+  tags = local.common_tags
+}
+```
+</Fragment>
+</Infrastructure>
+
+### Aggiunta di Reader
+
+<Infrastructure>
+<Fragment slot="cdk">
+Se il tuo carico di lavoro richiede scalabilità in lettura, puoi aggiungere istanze reader in CDK utilizzando la proprietà `readers`:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const db = new Postgres(this, 'Db', {
+  vpc,
+  vpcSubnets: {
+    subnetType: SubnetType.PRIVATE_ISOLATED,
+  },
+  readers: [ClusterInstance.serverlessV2('reader')],
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+In Terraform, il controllo equivalente è `instance_count`, che determina quante istanze Aurora vengono create:
+
+```hcl title="packages/infra/src/main.tf"
+module "postgres" {
+  source = "../../common/terraform/src/app/dbs/postgres"
+
+  vpc_id         = module.vpc.vpc_id
+  subnet_ids     = module.vpc.private_isolated_subnet_ids
+  instance_count = 2
+
+  tags = local.common_tags
+}
+```
+</Fragment>
+</Infrastructure>
+
+### Configurazione della Capacità Serverless
+
+Puoi controllare i limiti di scaling di Aurora Serverless v2 per adattarli al tuo carico di lavoro.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const db = new Postgres(this, 'Db', {
+  vpc,
+  vpcSubnets: {
+    subnetType: SubnetType.PRIVATE_ISOLATED,
+  },
+  serverlessV2MinCapacity: 0.5,
+  serverlessV2MaxCapacity: 8,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "postgres" {
+  source = "../../common/terraform/src/app/dbs/postgres"
+
+  vpc_id                  = module.vpc.vpc_id
+  subnet_ids              = module.vpc.private_isolated_subnet_ids
+  serverless_min_capacity = 0.5
+  serverless_max_capacity = 8
+
+  tags = local.common_tags
+}
+```
+</Fragment>
+</Infrastructure>
+
+### Fissaggio della Versione del Motore
+
+Se desideri utilizzare una versione specifica del motore Aurora, puoi fissarla esplicitamente invece di affidarti a quella predefinita.
+
+<Infrastructure>
+<Fragment slot="cdk">
+In CDK, passa `engineVersion` al costrutto generato:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const db = new Postgres(this, 'Db', {
+  vpc,
+  vpcSubnets: {
+    subnetType: SubnetType.PRIVATE_ISOLATED,
+  },
+  engineVersion: AuroraPostgresEngineVersion.VER_17_7,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+In Terraform, utilizza `engine_version`:
+
+```hcl title="packages/infra/src/main.tf"
+module "postgres" {
+  source = "../../common/terraform/src/app/dbs/postgres"
+
+  vpc_id         = module.vpc.vpc_id
+  subnet_ids     = module.vpc.private_isolated_subnet_ids
+  engine_version = "17.7"
+
+  tags = local.common_tags
+}
+```
+</Fragment>
+</Infrastructure>
+
+### Selezione di Subnet e Opzioni del Ciclo di Vita
+
+Puoi anche personalizzare dove viene deployato il database e come si comporta durante l'eliminazione.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Utilizza `vpcSubnets` per controllare in quali subnet viene posizionato il database, e proprietà relative al ciclo di vita come `deletionProtection` e `removalPolicy` per controllare il comportamento di eliminazione:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RemovalPolicy } from 'aws-cdk-lib';
+
+const db = new Postgres(this, 'Db', {
+  vpc,
+  vpcSubnets: {
+    subnetType: SubnetType.PRIVATE_ISOLATED,
+  },
+  deletionProtection: true,
+  removalPolicy: RemovalPolicy.SNAPSHOT,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+Utilizza `subnet_ids` per controllare dove vengono deployati il database e la Lambda di migrazione.
+
+```hcl title="packages/infra/src/main.tf"
+module "postgres" {
+  source = "../../common/terraform/src/app/dbs/postgres"
+
+  vpc_id              = module.vpc.vpc_id
+  subnet_ids          = module.vpc.private_isolated_subnet_ids
+  deletion_protection = true
+  skip_final_snapshot = false
+  port                = 5432
+
+  tags = local.common_tags
+}
+```
+
+Puoi utilizzare `deletion_protection` per prevenire l'eliminazione accidentale, `skip_final_snapshot` per controllare il comportamento degli snapshot durante l'eliminazione, e `port` per sovrascrivere la porta predefinita del motore.
+</Fragment>
+</Infrastructure>

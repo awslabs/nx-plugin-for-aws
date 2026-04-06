@@ -1,0 +1,558 @@
+---
+title: "관계형 데이터베이스"
+description: "관계형 데이터베이스 프로젝트 생성"
+---
+
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
+
+이 생성기는 [Amazon Aurora](https://aws.amazon.com/rds/aurora/)를 기반으로 하는 새로운 관계형 데이터베이스 프로젝트를 생성합니다. AWS CDK 또는 Terraform을 사용하여 데이터베이스를 프로비저닝하는 데 필요한 애플리케이션 코드와 인프라를 생성하며, Aurora PostgreSQL 및 Aurora MySQL을 지원합니다.
+
+생성된 인프라에는 재사용 가능한 Aurora 구성 요소와 애플리케이션별 데이터베이스 구성 요소가 포함됩니다. CDK 프로젝트의 경우, 생성된 구성 요소에는 클러스터 생성 후 데이터베이스 마이그레이션을 실행하는 마이그레이션 핸들러도 포함되어 있어 배포의 일부로 스키마를 부트스트랩하는 데 도움이 됩니다.
+
+## 사용법
+
+### 관계형 데이터베이스 생성
+
+새로운 관계형 데이터베이스 프로젝트는 두 가지 방법으로 생성할 수 있습니다:
+
+<RunGenerator generator="ts#rdb" />
+
+### 옵션
+
+<GeneratorParameters generator="ts#rdb" />
+
+## 생성기 출력
+
+생성기는 `<directory>/<name>` 디렉토리에 다음과 같은 프로젝트 구조를 생성합니다:
+
+<FileTree>
+  - lib
+    - prisma.ts 데이터베이스 연결을 위한 Prisma 클라이언트 설정
+  - prisma
+    - schema.prisma Prisma 스키마 및 예제 모델
+  - src
+    - index.ts 프로젝트 진입점
+    - migration-handler.ts 배포 중 데이터베이스 마이그레이션을 실행하는 데 사용되는 Lambda 핸들러
+  - Dockerfile 마이그레이션 핸들러를 위한 컨테이너 이미지 정의
+  - project.json 프로젝트 구성 및 빌드 타겟
+  - prisma.config.ts Prisma CLI 구성
+  - tsconfig.json 소스 및 테스트를 위한 기본 TypeScript 구성
+  - tsconfig.lib.json 소스 코드를 위한 TypeScript 구성
+  - tsconfig.spec.json 테스트를 위한 TypeScript 구성
+  - eslint.config.mjs ESLint 구성
+</FileTree>
+
+### 인프라
+
+<Snippet name="shared-constructs" />
+
+<Infrastructure>
+  <Fragment slot="cdk">
+    <FileTree>
+      - packages/common/constructs/src
+        - app
+          - dbs
+            - \<name>.ts 데이터베이스에 특정한 인프라
+        - core
+          - rdb
+            - aurora.ts 범용 Aurora 데이터베이스 구성 요소
+    </FileTree>
+  </Fragment>
+  <Fragment slot="terraform">
+    <FileTree>
+      - packages/common/terraform/src
+        - app
+          - dbs
+            - \<name>
+              - \<name>.tf 데이터베이스에 특정한 모듈
+        - core
+          - rdb
+            - aurora
+              - aurora.tf 범용 Aurora 모듈
+    </FileTree>
+  </Fragment>
+</Infrastructure>
+
+## 데이터베이스 구현
+
+### 데이터 모델링
+
+생성된 프로젝트는 데이터베이스 스키마를 정의하고 타입 안전 클라이언트를 생성하기 위해 [Prisma ORM](https://www.prisma.io/docs/orm)을 사용합니다. `prisma/schema.prisma`에서 테이블, 관계 및 필드 타입을 모델링한 다음 Prisma를 사용하여 클라이언트를 생성하고 데이터베이스에 대한 마이그레이션을 생성할 수 있습니다.
+
+Prisma로 모델을 정의하는 방법에 대한 자세한 내용은 [data modeling with Prisma ORM](https://www.prisma.io/docs/orm/core-concepts/data-modeling#data-modeling-with-prisma-orm) 공식 가이드를 참조하세요.
+
+예를 들어, `User` 모델은 Prisma 스키마에서 다음과 같이 표현됩니다:
+
+```ts title="packages/postgres/prisma/schema.prisma"
+model User {
+  id          Int      @id @default(autoincrement()) 
+  firstName   String
+  lastName    String
+}
+```
+
+### 데이터 마이그레이션
+
+Prisma 마이그레이션 파일을 생성할 때 Prisma Migrate는 섀도우 데이터베이스에 대한 액세스가 필요합니다. 이는 마이그레이션 생성 중에 Prisma 스키마를 데이터베이스의 현재 상태와 비교하고 생성해야 하는 SQL 변경 사항을 결정하는 데 사용됩니다.
+
+이것이 필요한 이유와 Prisma가 이를 사용하는 방법에 대한 자세한 내용은 [shadow databases](https://www.prisma.io/docs/orm/prisma-migrate/understanding-prisma-migrate/shadow-database)에 대한 Prisma 문서를 참조하세요.
+
+:::note[패키지 디렉토리에서 Prisma 실행]
+Prisma CLI를 사용할 때는 생성된 데이터베이스 패키지 디렉토리(예: `packages/postgres`)에서 명령을 실행하여 Prisma가 `prisma/schema.prisma` 및 `prisma.config.ts`를 찾을 수 있도록 하세요.
+:::
+
+로컬에서 마이그레이션을 생성하려면 Prisma를 로컬 데이터베이스 인스턴스로 지정할 수 있습니다. 먼저 Prisma가 데이터베이스에 연결할 수 있도록 `DATABASE_URL`을 내보냅니다:
+
+```bash
+export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/myapp"
+```
+
+그런 다음 적용하지 않고 마이그레이션 파일을 생성합니다:
+
+<Tabs>
+  <TabItem label="npm" icon="seti:npm">
+
+```bash
+npx prisma migrate dev --create-only
+```
+
+  </TabItem>
+  <TabItem label="pnpm" icon="seti:pnpm">
+
+```bash
+pnpm prisma migrate dev --create-only
+```
+
+  </TabItem>
+  <TabItem label="yarn" icon="seti:yarn">
+
+```bash
+yarn prisma migrate dev --create-only
+```
+
+  </TabItem>
+  <TabItem label="bun" icon="seti:bun">
+
+```bash
+bunx --bun prisma migrate dev --create-only
+```
+
+  </TabItem>
+</Tabs>
+
+`prisma migrate dev --create-only`를 실행하면 스키마 변경이 새로운 마이그레이션을 필요로 할 때마다 새 마이그레이션 폴더를 생성하여 `prisma/migrations` 디렉토리를 최신 상태로 유지합니다.
+
+그러면 Prisma 디렉토리는 다음과 같이 보일 것입니다:
+
+<FileTree>
+  - prisma
+    - migrations
+      - 20260405013911_initial_migrations
+        - migration.sql
+      - migration_lock.toml
+    - schema.prisma
+</FileTree>
+
+`DATABASE_URL`이 가리키는 로컬 데이터베이스에 이러한 마이그레이션을 적용하려면 다음을 실행할 수 있습니다:
+
+<Tabs>
+  <TabItem label="npm" icon="seti:npm">
+
+```bash
+npx prisma migrate deploy
+```
+
+  </TabItem>
+  <TabItem label="pnpm" icon="seti:pnpm">
+
+```bash
+pnpm prisma migrate deploy
+```
+
+  </TabItem>
+  <TabItem label="yarn" icon="seti:yarn">
+
+```bash
+yarn prisma migrate deploy
+```
+
+  </TabItem>
+  <TabItem label="bun" icon="seti:bun">
+
+```bash
+bunx --bun prisma migrate deploy
+```
+
+  </TabItem>
+</Tabs>
+
+:::note[자동 AWS 마이그레이션]
+AWS에 배포하는 경우 `prisma migrate deploy`를 수동으로 실행할 필요가 없습니다. 생성된 마이그레이션 핸들러는 `prisma/migrations` 디렉토리가 최신 상태인 한 배포 중에 자동으로 마이그레이션을 적용합니다.
+:::
+
+
+### 생성된 데이터베이스 클라이언트
+
+생성기는 프로젝트를 빌드할 때마다 타입 안전 TypeScript Prisma 클라이언트를 생성하도록 `generate` 타겟을 자동으로 구성합니다.
+
+생성된 클라이언트는 다음과 같이 구조화됩니다:
+
+<FileTree>
+  - generated
+    - prisma
+      - internal
+      - models
+      - browser.ts
+      - client.ts
+      - commonInputTypes.ts
+      - enums.ts
+      - models.ts
+</FileTree>
+
+생성된 클라이언트는 적절한 Prisma 어댑터를 구성하고 바로 사용할 수 있는 `prisma` 클라이언트 인스턴스를 내보내는 `lib/prisma.ts`를 통해 사용됩니다:
+
+```ts title="packages/postgres/lib/prisma.ts"
+import { PrismaPg } from '@prisma/adapter-pg';
+import { PrismaClient } from '../generated/prisma/client.js';
+
+const adapter = new PrismaPg({
+  connectionString: `${process.env.DATABASE_URL}`,
+});
+const prisma = new PrismaClient({ adapter });
+
+export { prisma };
+```
+
+그런 다음 `tRPC` API와 같은 워크스페이스의 다른 프로젝트에서 내보낸 `prisma` 클라이언트를 사용할 수 있습니다:
+
+```ts title="packages/api/src/procedures/list-user.ts"
+import { prisma } from ':aws-nx-poc/postgres';
+import { publicProcedure } from '../init.js';
+import {
+  ListUserOutputSchema,
+} from '../schema/index.js';
+
+export const listUser = publicProcedure
+  .output(ListUserOutputSchema)
+  .query(async () => {
+    const users = await prisma.user.findMany({
+      orderBy: { id: 'asc' },
+    });
+
+    return { users };
+  });
+```
+
+## 데이터베이스 배포
+
+### 인프라
+
+관계형 데이터베이스 생성기는 선택한 `iacProvider`에 따라 CDK 또는 Terraform 인프라 코드를 생성합니다. 이를 사용하여 데이터베이스를 배포할 수 있습니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+데이터베이스를 배포하기 위한 CDK 구성 요소는 `common/constructs` 폴더에 생성됩니다. 이를 CDK 애플리케이션에서 사용할 수 있습니다. 예를 들어:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { Postgres } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    const vpc = new Vpc(this, 'Vpc', {
+      subnetConfiguration: [
+        {
+          name: 'private_isolated',
+          subnetType: SubnetType.PRIVATE_ISOLATED,
+        },
+      ],
+    });
+
+    const db = new Postgres(this, 'Db', {
+      vpc,
+      vpcSubnets: {
+        subnetType: SubnetType.PRIVATE_ISOLATED,
+      }
+    });
+  }
+}
+```
+
+이것은 생성된 자격 증명 시크릿 및 마이그레이션 핸들러와 함께 VPC에 Aurora 클러스터를 프로비저닝합니다. 데이터베이스는 일반적으로 공용 인터넷에서 직접 액세스할 수 없도록 프라이빗 격리 서브넷에 배포되어야 합니다.
+
+클러스터 토폴로지를 사용자 정의해야 하는 경우 구성 요소를 인스턴스화할 때 `writer` 및 `readers`와 같은 Aurora 클러스터 속성을 재정의할 수 있습니다.
+</Fragment>
+<Fragment slot="terraform">
+데이터베이스를 배포하기 위한 Terraform 모듈은 `common/terraform` 폴더에 생성됩니다. 이를 Terraform 구성에서 사용할 수 있습니다:
+
+```hcl title="packages/infra/src/main.tf"
+module "postgres" {
+  source = "../../common/terraform/src/app/dbs/postgres"
+
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.private_isolated_subnet_ids
+
+  tags = local.common_tags
+}
+```
+
+이것은 Aurora 클러스터, 생성된 자격 증명 시크릿, 마이그레이션 Lambda 함수 및 마이그레이션 컨테이너 이미지를 게시하고 실행하는 데 필요한 지원 리소스를 프로비저닝합니다.
+
+클러스터 토폴로지 또는 크기를 사용자 정의해야 하는 경우 `instance_count`, `serverless_min_capacity`, `serverless_max_capacity`, `engine_version` 및 `port`와 같은 모듈 입력을 재정의할 수 있습니다.
+</Fragment>
+</Infrastructure>
+
+### 액세스 권한 부여
+
+API가 데이터베이스에 연결할 수 있도록 하려면 API를 데이터베이스와 동일한 VPC에 배포하세요. 그런 다음 데이터베이스 연결 문자열을 API에 제공하고 API 핸들러가 데이터베이스 포트에 연결할 수 있도록 허용할 수 있습니다.
+
+:::note[Prisma 환경 변수]
+Prisma와 함께 PostgreSQL을 사용할 때 생성된 클라이언트는 `DATABASE_URL`을 기대합니다.
+
+Prisma와 함께 MySQL을 사용할 때 생성된 클라이언트는 `lib/prisma.ts`에 구성된 대로 `DATABASE_HOST`, `DATABASE_USER`, `DATABASE_PASSWORD` 및 `DATABASE_NAME`을 기대합니다.
+:::
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const api = new Api(this, 'Api', {
+  integrations: Api.defaultIntegrations(this)
+    .withDefaultOptions({
+      vpc,
+      vpcSubnets: {
+        subnetType: SubnetType.PRIVATE_ISOLATED,
+      },
+      environment: {
+        DATABASE_URL: db.databaseUrl,
+      },
+    })
+    .build(),
+});
+
+Object.entries(api.integrations).forEach(([operation, integration]) => {
+  db.allowDefaultPortFrom(
+    integration.handler,
+    `Allow ${operation} to connect to the database`,
+  );
+});
+```
+
+이렇게 하면 각 API Lambda 함수가 데이터베이스와 동일한 VPC 내에서 실행되고 기본 포트에서 데이터베이스에 연결할 수 있도록 명시적으로 허용됩니다.
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "api" {
+  source = "../../common/terraform/src/app/apis/api"
+
+  subnet_ids = module.vpc.private_isolated_subnet_ids
+
+  env = {
+    DATABASE_URL = module.postgres.database_url
+  }
+
+  tags = local.common_tags
+}
+
+resource "aws_vpc_security_group_ingress_rule" "api_to_postgres" {
+  security_group_id            = module.postgres.security_group_id
+  referenced_security_group_id = module.api.default_security_group_id
+  from_port                    = module.postgres.cluster_port
+  to_port                      = module.postgres.cluster_port
+  ip_protocol                  = "tcp"
+}
+```
+
+이것은 API가 데이터베이스와 동일한 VPC에서 실행되도록 구성하고, 생성된 `DATABASE_URL`을 API에 전달하며, API 보안 그룹에서 데이터베이스 보안 그룹으로 데이터베이스 포트의 트래픽을 명시적으로 허용합니다.
+</Fragment>
+</Infrastructure>
+
+## 데이터베이스 아키텍처 사용자 정의
+
+생성된 데이터베이스 구성 요소는 워크로드에 맞게 조정할 수 있도록 기본 Aurora 구성을 노출합니다.
+
+### Writer 재정의
+
+<Infrastructure>
+<Fragment slot="cdk">
+CDK에서는 기본 Aurora 인스턴스가 프로비저닝되는 방식을 변경하려는 경우 기본 writer 인스턴스를 재정의할 수 있습니다:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const db = new Postgres(this, 'Db', {
+  vpc,
+  vpcSubnets: {
+    subnetType: SubnetType.PRIVATE_ISOLATED,
+  },
+  writer: ClusterInstance.serverlessV2('writer'),
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+Terraform에서는 Aurora 인스턴스가 별도의 `writer` 및 `readers` 정의가 아닌 모듈 입력을 통해 관리됩니다. 생성된 모듈은 항상 기본 인스턴스를 프로비저닝하며, `instance_count`, `engine_version` 및 서버리스 용량 설정과 같은 입력을 사용하여 클러스터를 사용자 정의할 수 있습니다:
+
+```hcl title="packages/infra/src/main.tf"
+module "postgres" {
+  source = "../../common/terraform/src/app/dbs/postgres"
+
+  vpc_id                  = module.vpc.vpc_id
+  subnet_ids              = module.vpc.private_isolated_subnet_ids
+  instance_count          = 1
+  serverless_min_capacity = 0.5
+  serverless_max_capacity = 8
+
+  tags = local.common_tags
+}
+```
+</Fragment>
+</Infrastructure>
+
+### Reader 추가
+
+<Infrastructure>
+<Fragment slot="cdk">
+워크로드에 읽기 확장이 필요한 경우 CDK에서 `readers` 속성을 사용하여 reader 인스턴스를 추가할 수 있습니다:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const db = new Postgres(this, 'Db', {
+  vpc,
+  vpcSubnets: {
+    subnetType: SubnetType.PRIVATE_ISOLATED,
+  },
+  readers: [ClusterInstance.serverlessV2('reader')],
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+Terraform에서 동등한 제어는 생성되는 Aurora 인스턴스 수를 결정하는 `instance_count`입니다:
+
+```hcl title="packages/infra/src/main.tf"
+module "postgres" {
+  source = "../../common/terraform/src/app/dbs/postgres"
+
+  vpc_id         = module.vpc.vpc_id
+  subnet_ids     = module.vpc.private_isolated_subnet_ids
+  instance_count = 2
+
+  tags = local.common_tags
+}
+```
+</Fragment>
+</Infrastructure>
+
+### 서버리스 용량 구성
+
+워크로드에 맞게 Aurora Serverless v2 확장 제한을 제어할 수 있습니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const db = new Postgres(this, 'Db', {
+  vpc,
+  vpcSubnets: {
+    subnetType: SubnetType.PRIVATE_ISOLATED,
+  },
+  serverlessV2MinCapacity: 0.5,
+  serverlessV2MaxCapacity: 8,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "postgres" {
+  source = "../../common/terraform/src/app/dbs/postgres"
+
+  vpc_id                  = module.vpc.vpc_id
+  subnet_ids              = module.vpc.private_isolated_subnet_ids
+  serverless_min_capacity = 0.5
+  serverless_max_capacity = 8
+
+  tags = local.common_tags
+}
+```
+</Fragment>
+</Infrastructure>
+
+### 엔진 버전 고정
+
+특정 Aurora 엔진 버전을 사용하려는 경우 기본값에 의존하지 않고 명시적으로 고정할 수 있습니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+CDK에서는 생성된 구성 요소에 `engineVersion`을 전달합니다:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const db = new Postgres(this, 'Db', {
+  vpc,
+  vpcSubnets: {
+    subnetType: SubnetType.PRIVATE_ISOLATED,
+  },
+  engineVersion: AuroraPostgresEngineVersion.VER_17_7,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+Terraform에서는 `engine_version`을 사용합니다:
+
+```hcl title="packages/infra/src/main.tf"
+module "postgres" {
+  source = "../../common/terraform/src/app/dbs/postgres"
+
+  vpc_id         = module.vpc.vpc_id
+  subnet_ids     = module.vpc.private_isolated_subnet_ids
+  engine_version = "17.7"
+
+  tags = local.common_tags
+}
+```
+</Fragment>
+</Infrastructure>
+
+### 서브넷 및 수명 주기 옵션 선택
+
+데이터베이스가 배포되는 위치와 삭제 시 동작 방식도 사용자 정의할 수 있습니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+`vpcSubnets`을 사용하여 데이터베이스가 배치되는 서브넷을 제어하고, `deletionProtection` 및 `removalPolicy`와 같은 수명 주기 관련 속성을 사용하여 삭제 동작을 제어합니다:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RemovalPolicy } from 'aws-cdk-lib';
+
+const db = new Postgres(this, 'Db', {
+  vpc,
+  vpcSubnets: {
+    subnetType: SubnetType.PRIVATE_ISOLATED,
+  },
+  deletionProtection: true,
+  removalPolicy: RemovalPolicy.SNAPSHOT,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+`subnet_ids`를 사용하여 데이터베이스 및 마이그레이션 Lambda가 배포되는 위치를 제어합니다.
+
+```hcl title="packages/infra/src/main.tf"
+module "postgres" {
+  source = "../../common/terraform/src/app/dbs/postgres"
+
+  vpc_id              = module.vpc.vpc_id
+  subnet_ids          = module.vpc.private_isolated_subnet_ids
+  deletion_protection = true
+  skip_final_snapshot = false
+  port                = 5432
+
+  tags = local.common_tags
+}
+```
+
+`deletion_protection`을 사용하여 실수로 인한 삭제를 방지하고, `skip_final_snapshot`을 사용하여 삭제 시 스냅샷 동작을 제어하며, `port`를 사용하여 기본 엔진 포트를 재정의할 수 있습니다.
+</Fragment>
+</Infrastructure>
