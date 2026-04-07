@@ -1,5 +1,679 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`trpc backend generator > EcsFargate computeType > should generate bundle target with correct rolldown config > rolldown.config.ts 1`] = `
+"import { defineConfig } from 'rolldown';
+
+// Disables tree-shaking for the given module patterns
+const disableTreeShake = (patterns: RegExp[]) => ({
+  name: 'disable-treeshake',
+  transform: (code, id) => {
+    if (patterns.some((p) => p.test(id))) {
+      return { code, map: null, moduleSideEffects: 'no-treeshake' };
+    }
+    return null;
+  },
+});
+
+export default defineConfig([
+  {
+    tsconfig: 'tsconfig.lib.json',
+    input: 'src/server.ts',
+    output: {
+      file: '../../dist/packages/demo-ecs-api/bundle/index.js',
+      format: 'cjs',
+      inlineDynamicImports: true,
+    },
+    platform: 'node',
+    plugins: [disableTreeShake([/@aws-sdk\\/.*/])],
+  },
+]);
+"
+`;
+
+exports[`trpc backend generator > EcsFargate computeType > should generate the project > apps/test-api/Dockerfile 1`] = `
+"FROM node:22-slim AS base
+WORKDIR /app
+
+COPY dist/apps/test-api/bundle/index.js ./index.js
+
+EXPOSE 3000
+
+CMD ["node", "index.js"]
+"
+`;
+
+exports[`trpc backend generator > EcsFargate computeType > should generate the project > apps/test-api/src/index.ts 1`] = `
+"export type { AppRouter } from './router.js';
+export { appRouter } from './router.js';
+export * from './schema/index.js';
+"
+`;
+
+exports[`trpc backend generator > EcsFargate computeType > should generate the project > apps/test-api/src/init.ts 1`] = `
+"import { initTRPC } from '@trpc/server';
+
+export const t = initTRPC.create();
+
+export const publicProcedure = t.procedure;
+"
+`;
+
+exports[`trpc backend generator > EcsFargate computeType > should generate the project > apps/test-api/src/local-server.ts 1`] = `
+"import Fastify from 'fastify';
+import { fastifyTRPCPlugin } from '@trpc/server/adapters/fastify';
+import { appRouter } from './router.js';
+
+const PORT = 3000;
+
+const server = Fastify({ logger: true });
+
+// Enable CORS for local development
+server.addHook('onRequest', async (request, reply) => {
+  reply.header('Access-Control-Allow-Origin', '*');
+  reply.header('Access-Control-Allow-Methods', '*');
+  reply.header('Access-Control-Allow-Headers', '*');
+  if (request.method === 'OPTIONS') {
+    return reply.status(204).send();
+  }
+});
+
+void server.register(fastifyTRPCPlugin, {
+  prefix: '/trpc',
+  trpcOptions: { router: appRouter },
+});
+
+server.get('/health', async () => ({ status: 'ok' }));
+
+const start = async () => {
+  await server.listen({ port: PORT, host: '0.0.0.0' });
+};
+
+void start();
+"
+`;
+
+exports[`trpc backend generator > EcsFargate computeType > should generate the project > apps/test-api/src/procedures/echo.ts 1`] = `
+"import { publicProcedure } from '../init.js';
+import { EchoInputSchema, EchoOutputSchema } from '../schema/index.js';
+
+export const echo = publicProcedure
+  .input(EchoInputSchema)
+  .output(EchoOutputSchema)
+  .query((opts) => ({ result: opts.input.message }));
+"
+`;
+
+exports[`trpc backend generator > EcsFargate computeType > should generate the project > apps/test-api/src/router.ts 1`] = `
+"import { echo } from './procedures/echo.js';
+import { t } from './init.js';
+
+export const router = t.router;
+
+export const appRouter = router({
+  echo,
+});
+
+export type AppRouter = typeof appRouter;
+"
+`;
+
+exports[`trpc backend generator > EcsFargate computeType > should generate the project > apps/test-api/src/schema/echo.ts 1`] = `
+"import { z } from 'zod';
+
+export const EchoInputSchema = z.object({
+  message: z.string(),
+});
+
+export type IEchoInput = z.TypeOf<typeof EchoInputSchema>;
+
+export const EchoOutputSchema = z.object({
+  result: z.string(),
+});
+
+export type IEchoOutput = z.TypeOf<typeof EchoOutputSchema>;
+"
+`;
+
+exports[`trpc backend generator > EcsFargate computeType > should generate the project > apps/test-api/src/schema/index.ts 1`] = `
+"export * from './echo.js';
+"
+`;
+
+exports[`trpc backend generator > EcsFargate computeType > should generate the project > apps/test-api/src/server.ts 1`] = `
+"import Fastify from 'fastify';
+import { fastifyTRPCPlugin } from '@trpc/server/adapters/fastify';
+import { appRouter } from './router.js';
+
+const PORT = 3000;
+
+const server = Fastify({ logger: true });
+
+void server.register(fastifyTRPCPlugin, {
+  prefix: '/trpc',
+  trpcOptions: { router: appRouter },
+});
+
+server.get('/health', async () => ({ status: 'ok' }));
+
+const start = async () => {
+  await server.listen({ port: PORT, host: '0.0.0.0' });
+};
+
+void start();
+"
+`;
+
+exports[`trpc backend generator > EcsFargate computeType > should generate with Cognito auth > packages/common/constructs/src/app/ecs-apis/test-api.ts 1`] = `
+"import { Construct } from 'constructs';
+import * as url from 'url';
+import { EcsApi, type EcsApiProps } from '../../core/ecs/ecs-api.js';
+import { HttpUserPoolAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
+import { IUserPool, IUserPoolClient } from 'aws-cdk-lib/aws-cognito';
+
+/**
+ * Properties for creating a TestApi ECS API
+ */
+export interface TestApiProps extends Partial<
+  Pick<
+    EcsApiProps,
+    'vpc' | 'cpu' | 'memoryLimitMiB' | 'desiredCount' | 'environment'
+  >
+> {
+  /**
+   * Identity details for Cognito Authentication
+   */
+  readonly identity: {
+    readonly userPool: IUserPool;
+    readonly userPoolClient: IUserPoolClient;
+  };
+}
+
+/**
+ * A CDK construct that creates an ECS Fargate service for TestApi
+ * fronted by API Gateway HTTP API with VPC Link.
+ */
+export class TestApi extends EcsApi {
+  constructor(scope: Construct, id: string, props: TestApiProps = {}) {
+    super(scope, id, {
+      apiName: 'TestApi',
+      dockerContextPath: url.fileURLToPath(
+        new URL('../../../../../../', import.meta.url),
+      ),
+      dockerfilePath: 'apps/test-api/Dockerfile',
+      dockerExclude: [
+        '**/node_modules',
+        '**/.nx',
+        '**/src',
+        '**/.git',
+        '**/cdk.out',
+      ],
+      containerPort: 3000,
+      authorizer: new HttpUserPoolAuthorizer(
+        'TestApiAuthorizer',
+        props.identity!.userPool,
+        {
+          userPoolClients: [props.identity!.userPoolClient],
+        },
+      ),
+      ...props,
+    });
+  }
+}
+"
+`;
+
+exports[`trpc backend generator > EcsFargate computeType > should generate with IAM auth > packages/common/constructs/src/app/ecs-apis/test-api.ts 1`] = `
+"import { Construct } from 'constructs';
+import * as url from 'url';
+import { EcsApi, type EcsApiProps } from '../../core/ecs/ecs-api.js';
+import { HttpIamAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
+import { Grant, IGrantable } from 'aws-cdk-lib/aws-iam';
+
+/**
+ * Properties for creating a TestApi ECS API
+ */
+export type TestApiProps = Partial<
+  Pick<
+    EcsApiProps,
+    'vpc' | 'cpu' | 'memoryLimitMiB' | 'desiredCount' | 'environment'
+  >
+>;
+
+/**
+ * A CDK construct that creates an ECS Fargate service for TestApi
+ * fronted by API Gateway HTTP API with VPC Link.
+ */
+export class TestApi extends EcsApi {
+  constructor(scope: Construct, id: string, props: TestApiProps = {}) {
+    super(scope, id, {
+      apiName: 'TestApi',
+      dockerContextPath: url.fileURLToPath(
+        new URL('../../../../../../', import.meta.url),
+      ),
+      dockerfilePath: 'apps/test-api/Dockerfile',
+      dockerExclude: [
+        '**/node_modules',
+        '**/.nx',
+        '**/src',
+        '**/.git',
+        '**/cdk.out',
+      ],
+      containerPort: 3000,
+      authorizer: new HttpIamAuthorizer(),
+      ...props,
+    });
+  }
+
+  /**
+   * Grants IAM permissions to invoke any method on this API.
+   */
+  public grantInvokeAccess(grantee: IGrantable) {
+    Grant.addToPrincipal({
+      grantee,
+      actions: ['execute-api:Invoke'],
+      resourceArns: [this.api.arnForExecuteApi('*', '/*', '*')],
+    });
+  }
+}
+"
+`;
+
+exports[`trpc backend generator > EcsFargate computeType > should generate with no auth > packages/common/constructs/src/app/ecs-apis/test-api.ts 1`] = `
+"import { Construct } from 'constructs';
+import * as url from 'url';
+import { EcsApi, type EcsApiProps } from '../../core/ecs/ecs-api.js';
+import { HttpNoneAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2';
+
+/**
+ * Properties for creating a TestApi ECS API
+ */
+export type TestApiProps = Partial<
+  Pick<
+    EcsApiProps,
+    'vpc' | 'cpu' | 'memoryLimitMiB' | 'desiredCount' | 'environment'
+  >
+>;
+
+/**
+ * A CDK construct that creates an ECS Fargate service for TestApi
+ * fronted by API Gateway HTTP API with VPC Link.
+ */
+export class TestApi extends EcsApi {
+  constructor(scope: Construct, id: string, props: TestApiProps = {}) {
+    super(scope, id, {
+      apiName: 'TestApi',
+      dockerContextPath: url.fileURLToPath(
+        new URL('../../../../../../', import.meta.url),
+      ),
+      dockerfilePath: 'apps/test-api/Dockerfile',
+      dockerExclude: [
+        '**/node_modules',
+        '**/.nx',
+        '**/src',
+        '**/.git',
+        '**/cdk.out',
+      ],
+      containerPort: 3000,
+      authorizer: new HttpNoneAuthorizer(),
+      ...props,
+    });
+  }
+}
+"
+`;
+
+exports[`trpc backend generator > EcsFargate computeType > should snapshot the core ECS construct > ecs-api.ts 1`] = `
+"import { Construct } from 'constructs';
+import { CfnOutput, Duration, RemovalPolicy } from 'aws-cdk-lib';
+import {
+  Vpc,
+  SubnetType,
+  SecurityGroup,
+  Port,
+  IVpc,
+} from 'aws-cdk-lib/aws-ec2';
+import {
+  Cluster,
+  ContainerImage,
+  ContainerInsights,
+  CpuArchitecture,
+  FargateService,
+  FargateTaskDefinition,
+  LogDrivers,
+  OperatingSystemFamily,
+  Protocol,
+} from 'aws-cdk-lib/aws-ecs';
+import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import {
+  ApplicationLoadBalancer,
+  ApplicationProtocol,
+  ApplicationTargetGroup,
+  TargetType,
+} from 'aws-cdk-lib/aws-elasticloadbalancingv2';
+import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
+import {
+  HttpApi as _HttpApi,
+  HttpMethod,
+  HttpStage,
+  CorsHttpMethod,
+  CfnApi,
+  IHttpRouteAuthorizer,
+  LogGroupLogDestination,
+} from 'aws-cdk-lib/aws-apigatewayv2';
+import { HttpAlbIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
+import { VpcLink } from 'aws-cdk-lib/aws-apigatewayv2';
+import { RuntimeConfig } from '../runtime-config.js';
+import { suppressRules } from '../checkov.js';
+
+/**
+ * Properties for creating an EcsApi construct
+ */
+export interface EcsApiProps {
+  /**
+   * Unique name for the API
+   */
+  readonly apiName: string;
+
+  /**
+   * Path to the Docker build context directory
+   */
+  readonly dockerContextPath: string;
+
+  /**
+   * Path to the Dockerfile relative to the Docker build context
+   */
+  readonly dockerfilePath?: string;
+
+  /**
+   * Glob patterns to exclude from the Docker build context
+   */
+  readonly dockerExclude?: string[];
+
+  /**
+   * Container port the application listens on
+   */
+  readonly containerPort: number;
+
+  /**
+   * Optional VPC to deploy into. If not provided, a new VPC is created.
+   */
+  readonly vpc?: IVpc;
+
+  /**
+   * Optional CPU units for the Fargate task (default: 256)
+   */
+  readonly cpu?: number;
+
+  /**
+   * Optional memory in MiB for the Fargate task (default: 512)
+   */
+  readonly memoryLimitMiB?: number;
+
+  /**
+   * Optional desired count of tasks (default: 1)
+   */
+  readonly desiredCount?: number;
+
+  /**
+   * Optional environment variables for the container
+   */
+  readonly environment?: Record<string, string>;
+
+  /**
+   * Optional authorizer for the API routes
+   */
+  readonly authorizer?: IHttpRouteAuthorizer;
+}
+
+/**
+ * A CDK construct that creates an ECS Fargate service fronted by
+ * an internal ALB and API Gateway HTTP API via VPC Link.
+ */
+export class EcsApi extends Construct {
+  /** The API Gateway HTTP API */
+  public readonly api: _HttpApi;
+
+  /** The default stage of the HTTP API */
+  public readonly defaultStage: HttpStage;
+
+  /** The ECS Fargate service */
+  public readonly service: FargateService;
+
+  /** The VPC */
+  public readonly vpc: IVpc;
+
+  /** The internal ALB */
+  public readonly loadBalancer: ApplicationLoadBalancer;
+
+  constructor(scope: Construct, id: string, props: EcsApiProps) {
+    super(scope, id);
+
+    // VPC
+    this.vpc =
+      props.vpc ??
+      new Vpc(this, 'Vpc', {
+        maxAzs: 2,
+        natGateways: 1,
+      });
+
+    // ECS Cluster
+    const cluster = new Cluster(this, 'Cluster', {
+      vpc: this.vpc,
+      containerInsightsV2: ContainerInsights.ENHANCED,
+    });
+
+    // Task Definition
+    const taskDefinition = new FargateTaskDefinition(this, 'TaskDef', {
+      cpu: props.cpu ?? 256,
+      memoryLimitMiB: props.memoryLimitMiB ?? 512,
+      runtimePlatform: {
+        cpuArchitecture: CpuArchitecture.ARM64,
+        operatingSystemFamily: OperatingSystemFamily.LINUX,
+      },
+    });
+
+    const logGroup = new LogGroup(this, 'LogGroup', {
+      retention: RetentionDays.ONE_WEEK,
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+    suppressRules(
+      logGroup,
+      ['CKV_AWS_158'],
+      'Using default CloudWatch log encryption',
+    );
+
+    taskDefinition.addContainer('AppContainer', {
+      image: ContainerImage.fromAsset(props.dockerContextPath, {
+        file: props.dockerfilePath,
+        exclude: props.dockerExclude,
+        platform: Platform.LINUX_ARM64,
+      }),
+      portMappings: [
+        { containerPort: props.containerPort, protocol: Protocol.TCP },
+      ],
+      logging: LogDrivers.awsLogs({
+        streamPrefix: props.apiName,
+        logGroup,
+      }),
+      environment: props.environment,
+    });
+
+    // Security Groups
+    const albSg = new SecurityGroup(this, 'AlbSg', {
+      vpc: this.vpc,
+      allowAllOutbound: true,
+    });
+    suppressRules(
+      albSg,
+      ['CKV_AWS_260'],
+      'Internal ALB only accessible via VPC Link from API Gateway',
+    );
+
+    const serviceSg = new SecurityGroup(this, 'ServiceSg', {
+      vpc: this.vpc,
+      allowAllOutbound: true,
+    });
+    serviceSg.addIngressRule(
+      albSg,
+      Port.tcp(props.containerPort),
+      'Allow ALB to reach container',
+    );
+
+    // Fargate Service
+    this.service = new FargateService(this, 'Service', {
+      cluster,
+      taskDefinition,
+      desiredCount: props.desiredCount ?? 1,
+      assignPublicIp: false,
+      securityGroups: [serviceSg],
+      vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+    });
+
+    // Internal ALB
+    this.loadBalancer = new ApplicationLoadBalancer(this, 'Alb', {
+      vpc: this.vpc,
+      internetFacing: false,
+      securityGroup: albSg,
+    });
+    suppressRules(
+      this.loadBalancer,
+      ['CKV_AWS_91'],
+      'ALB access logging not required for internal ALB',
+    );
+    suppressRules(
+      this.loadBalancer,
+      ['CKV_AWS_131'],
+      'Drop invalid headers not required for internal ALB',
+    );
+
+    const targetGroup = new ApplicationTargetGroup(this, 'TargetGroup', {
+      vpc: this.vpc,
+      port: props.containerPort,
+      protocol: ApplicationProtocol.HTTP,
+      targetType: TargetType.IP,
+      healthCheck: {
+        path: '/health',
+        interval: Duration.seconds(30),
+      },
+    });
+    this.service.attachToApplicationTargetGroup(targetGroup);
+
+    const httpListener = this.loadBalancer.addListener('HttpListener', {
+      port: 80,
+      defaultTargetGroups: [targetGroup],
+    });
+    suppressRules(
+      httpListener,
+      ['CKV_AWS_2', 'CKV_AWS_103'],
+      'Internal ALB does not require HTTPS - traffic is within VPC via VPC Link',
+    );
+
+    // VPC Link + API Gateway HTTP API
+    const vpcLink = new VpcLink(this, 'VpcLink', {
+      vpc: this.vpc,
+      subnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+      securityGroups: [albSg],
+    });
+
+    this.api = new _HttpApi(this, 'Api', {
+      createDefaultStage: false,
+      corsPreflight: {
+        allowOrigins: ['*'],
+        allowMethods: [CorsHttpMethod.ANY],
+        allowHeaders: [
+          'authorization',
+          'content-type',
+          'x-amz-content-sha256',
+          'x-amz-date',
+          'x-amz-security-token',
+        ],
+      },
+    });
+
+    const accessLogGroup = new LogGroup(this, 'ApiAccessLogs', {
+      retention: RetentionDays.ONE_WEEK,
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+    suppressRules(
+      accessLogGroup,
+      ['CKV_AWS_158'],
+      'Using default CloudWatch log encryption',
+    );
+
+    this.defaultStage = new HttpStage(this, 'DefaultStage', {
+      httpApi: this.api,
+      autoDeploy: true,
+      accessLogSettings: {
+        destination: new LogGroupLogDestination(accessLogGroup),
+      },
+    });
+
+    const albIntegration = new HttpAlbIntegration(
+      'AlbIntegration',
+      this.loadBalancer.listeners[0],
+      { vpcLink },
+    );
+
+    this.api.addRoutes({
+      path: '/{proxy+}',
+      methods: [
+        HttpMethod.GET,
+        HttpMethod.POST,
+        HttpMethod.PUT,
+        HttpMethod.PATCH,
+        HttpMethod.DELETE,
+        HttpMethod.HEAD,
+      ],
+      integration: albIntegration,
+      ...(props.authorizer ? { authorizer: props.authorizer } : {}),
+    });
+
+    new CfnOutput(this, \`\${props.apiName}Url\`, {
+      value: this.defaultStage.url!,
+    });
+
+    // Register the API URL in runtime configuration
+    const rc = RuntimeConfig.ensure(this);
+    rc.set('connection', 'apis', {
+      ...rc.get('connection').apis,
+      [props.apiName]: this.defaultStage.url!,
+    });
+  }
+
+  /**
+   * Return the API url
+   */
+  public get url() {
+    return this.defaultStage.url;
+  }
+
+  /**
+   * Restricts CORS to the provided origins
+   */
+  public restrictCorsTo(...origins: string[]) {
+    const cfnApi = this.api.node.defaultChild;
+    if (!(cfnApi instanceof CfnApi)) {
+      throw new Error(
+        'Unable to configure CORS: API default child is not a CfnApi instance',
+      );
+    }
+
+    cfnApi.corsConfiguration = {
+      allowOrigins: origins,
+      allowMethods: [CorsHttpMethod.ANY],
+      allowHeaders: [
+        'authorization',
+        'content-type',
+        'x-amz-content-sha256',
+        'x-amz-date',
+        'x-amz-security-token',
+      ],
+    };
+  }
+}
+"
+`;
+
 exports[`trpc backend generator > should generate the project > apps/test-api/src/client/index.ts 1`] = `
 "import { createTRPCClient, httpLink, HTTPLinkOptions } from '@trpc/client';
 import { AwsClient } from 'aws4fetch';

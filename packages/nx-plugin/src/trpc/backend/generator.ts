@@ -29,6 +29,7 @@ import {
 } from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { addApiGatewayInfra } from '../../utils/api-constructs/api-constructs';
+import { addEcsInfra } from '../../utils/ecs-constructs/ecs-constructs';
 import { assignPort } from '../../utils/port';
 import { resolveIacProvider } from '../../utils/iac';
 import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
@@ -41,7 +42,11 @@ const VALID_TRPC_INTEGRATION_PERMUTATIONS = new Set([
   'ServerlessApiGatewayRestApi::shared',
   'ServerlessApiGatewayHttpApi::isolated',
   'ServerlessApiGatewayHttpApi::shared',
+  'EcsFargate::isolated',
 ]);
+
+const isEcsFargate = (options: TsTrpcApiGeneratorSchema) =>
+  options.computeType === 'EcsFargate';
 
 export async function tsTrpcApiGenerator(
   tree: Tree,
@@ -74,7 +79,8 @@ export async function tsTrpcApiGenerator(
   );
   const backendRoot = projectConfig.root;
 
-  const port = assignPort(tree, projectConfig, 2022);
+  const defaultPort = isEcsFargate(options) ? 3000 : 2022;
+  const port = assignPort(tree, projectConfig, defaultPort);
 
   const enhancedOptions = {
     backendProjectName,
@@ -83,26 +89,41 @@ export async function tsTrpcApiGenerator(
     apiNameClassName,
     backendRoot,
     pkgMgrCmd: getPackageManagerDisplayCommands().exec,
-    apiGatewayEventType: getApiGatewayEventType(options),
+    apiGatewayEventType: isEcsFargate(options)
+      ? undefined
+      : getApiGatewayEventType(options),
     port,
     ...options,
   };
 
-  await addApiGatewayInfra(tree, {
-    apiProjectName: backendProjectName,
-    apiNameClassName,
-    apiNameKebabCase,
-    constructType:
-      options.computeType === 'ServerlessApiGatewayHttpApi' ? 'http' : 'rest',
-    backend: {
-      type: 'trpc',
-      projectAlias: enhancedOptions.backendProjectAlias,
-      bundleOutputDir: joinPathFragments('dist', backendRoot, 'bundle'),
-      integrationPattern: getIntegrationPattern(options),
-    },
-    auth: options.auth,
-    iacProvider,
-  });
+  if (isEcsFargate(options)) {
+    addEcsInfra(tree, {
+      apiProjectName: backendProjectName,
+      apiNameClassName,
+      apiNameKebabCase,
+      backendProjectAlias: enhancedOptions.backendProjectAlias,
+      backendRoot,
+      port,
+      auth: options.auth,
+      iacProvider,
+    });
+  } else {
+    await addApiGatewayInfra(tree, {
+      apiProjectName: backendProjectName,
+      apiNameClassName,
+      apiNameKebabCase,
+      constructType:
+        options.computeType === 'ServerlessApiGatewayHttpApi' ? 'http' : 'rest',
+      backend: {
+        type: 'trpc',
+        projectAlias: enhancedOptions.backendProjectAlias,
+        bundleOutputDir: joinPathFragments('dist', backendRoot, 'bundle'),
+        integrationPattern: getIntegrationPattern(options),
+      },
+      auth: options.auth,
+      iacProvider,
+    });
+  }
 
   projectConfig.metadata = {
     ...projectConfig.metadata,
@@ -110,7 +131,9 @@ export async function tsTrpcApiGenerator(
     apiType: 'trpc',
     auth: options.auth,
     computeType: options.computeType,
-    integrationPattern: getIntegrationPattern(options),
+    ...(isEcsFargate(options)
+      ? { port }
+      : { integrationPattern: getIntegrationPattern(options) }),
   } as unknown;
 
   projectConfig.targets.serve = {
@@ -122,10 +145,16 @@ export async function tsTrpcApiGenerator(
     continuous: true,
   };
 
-  await addTypeScriptBundleTarget(tree, projectConfig, {
-    targetFilePath: 'src/handler.ts',
-    external: [/@aws-sdk\/.*/], // lambda runtime provides aws sdk
-  });
+  if (isEcsFargate(options)) {
+    await addTypeScriptBundleTarget(tree, projectConfig, {
+      targetFilePath: 'src/server.ts',
+    });
+  } else {
+    await addTypeScriptBundleTarget(tree, projectConfig, {
+      targetFilePath: 'src/handler.ts',
+      external: [/@aws-sdk\/.*/], // lambda runtime provides aws sdk
+    });
+  }
 
   addDependencyToTargetIfNotPresent(projectConfig, 'build', 'bundle');
 
@@ -133,15 +162,29 @@ export async function tsTrpcApiGenerator(
 
   updateProjectConfiguration(tree, projectConfig.name, projectConfig);
 
-  generateFiles(
-    tree,
-    joinPathFragments(__dirname, 'files'),
-    backendRoot,
-    enhancedOptions,
-    {
-      overwriteStrategy: OverwriteStrategy.Overwrite,
-    },
-  );
+  if (isEcsFargate(options)) {
+    // Generate ECS-specific template files
+    generateFiles(
+      tree,
+      joinPathFragments(__dirname, 'files-ecs'),
+      backendRoot,
+      enhancedOptions,
+      {
+        overwriteStrategy: OverwriteStrategy.Overwrite,
+      },
+    );
+  } else {
+    // Generate Lambda-specific template files
+    generateFiles(
+      tree,
+      joinPathFragments(__dirname, 'files'),
+      backendRoot,
+      enhancedOptions,
+      {
+        overwriteStrategy: OverwriteStrategy.Overwrite,
+      },
+    );
+  }
 
   // Generate shared tRPC template files (router, procedures, schema)
   generateFiles(
@@ -156,30 +199,38 @@ export async function tsTrpcApiGenerator(
 
   tree.delete(joinPathFragments(backendRoot, 'src', 'lib'));
 
-  // Remove streaming schema helper for HTTP APIs (API Gateway HTTP API doesn't support streaming)
+  // Remove streaming schema helper for HTTP APIs and ECS (API Gateway HTTP API doesn't support streaming)
   if (options.computeType !== 'ServerlessApiGatewayRestApi') {
     tree.delete(
       joinPathFragments(backendRoot, 'src', 'schema', 'z-async-iterable.ts'),
     );
   }
 
-  addDependenciesToPackageJson(
-    tree,
-    withVersions([
-      'aws-xray-sdk-core',
-      'zod',
-      '@aws-lambda-powertools/logger',
-      '@aws-lambda-powertools/metrics',
-      '@aws-lambda-powertools/parameters',
-      '@aws-lambda-powertools/tracer',
-      '@aws-sdk/client-appconfigdata',
-      '@trpc/server',
-      '@trpc/client',
-      'aws4fetch',
-      '@aws-sdk/credential-providers',
-    ]),
-    withVersions(['@types/aws-lambda', 'tsx', 'cors', '@types/cors']),
-  );
+  if (isEcsFargate(options)) {
+    addDependenciesToPackageJson(
+      tree,
+      withVersions(['zod', '@trpc/server', '@trpc/client', 'fastify']),
+      withVersions(['tsx']),
+    );
+  } else {
+    addDependenciesToPackageJson(
+      tree,
+      withVersions([
+        'aws-xray-sdk-core',
+        'zod',
+        '@aws-lambda-powertools/logger',
+        '@aws-lambda-powertools/metrics',
+        '@aws-lambda-powertools/parameters',
+        '@aws-lambda-powertools/tracer',
+        '@aws-sdk/client-appconfigdata',
+        '@trpc/server',
+        '@trpc/client',
+        'aws4fetch',
+        '@aws-sdk/credential-providers',
+      ]),
+      withVersions(['@types/aws-lambda', 'tsx', 'cors', '@types/cors']),
+    );
+  }
   tree.delete(joinPathFragments(backendRoot, 'package.json'));
 
   addGeneratorMetadata(tree, backendName, TRPC_BACKEND_GENERATOR_INFO);

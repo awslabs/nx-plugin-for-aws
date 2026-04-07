@@ -9,7 +9,6 @@ import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
 import { tsReactWebsiteGenerator } from '../../ts/react-website/app/generator';
 import { tsTrpcApiGenerator } from '../backend/generator';
-import { tsEcsTrpcApiGenerator } from '../../ecs/trpc/generator';
 
 describe('trpc react generator', () => {
   let tree: Tree;
@@ -323,7 +322,8 @@ describe('ECS tRPC API', () => {
         sourceRoot: 'apps/backend/src',
         metadata: {
           apiName: 'TestApi',
-          apiType: 'ecs-trpc',
+          apiType: 'trpc',
+          computeType: 'EcsFargate',
           auth: 'None',
           port: 3000,
         },
@@ -613,9 +613,10 @@ describe('trpc react generator with real ECS tRPC project', () => {
 
   it('should generate client provider with trpc url suffix when using real ECS tRPC generator', async () => {
     // Generate an ECS tRPC backend using the real generator
-    await tsEcsTrpcApiGenerator(tree, {
+    await tsTrpcApiGenerator(tree, {
       name: 'DemoEcsApi',
       directory: 'packages',
+      computeType: 'EcsFargate',
       auth: 'IAM',
       iacProvider: 'CDK',
     });
