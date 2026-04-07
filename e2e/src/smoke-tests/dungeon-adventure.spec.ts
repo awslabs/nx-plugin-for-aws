@@ -106,6 +106,10 @@ describe('smoke test - dungeon-adventure', () => {
       opts,
     );
     await runCLI(
+      `generate @aws/nx-plugin:connection --sourceProject=@dungeon-adventure/game-ui --targetProject=story --no-interactive`,
+      opts,
+    );
+    await runCLI(
       `generate @aws/nx-plugin:ts#infra --name=infra --no-interactive`,
       opts,
     );
@@ -375,18 +379,6 @@ describe('smoke test - dungeon-adventure', () => {
       `${opts.cwd}/packages/game-ui/src/styles.css`,
       readFileSync(
         join(__dirname, '../files/dungeon-adventure/4/styles.css.template'),
-        'utf-8',
-      ),
-    );
-
-    // Add hook
-    writeFileSync(
-      `${opts.cwd}/packages/game-ui/src/hooks/useStoryAgent.tsx`,
-      readFileSync(
-        join(
-          __dirname,
-          '../files/dungeon-adventure/4/hooks/useStoryAgent.tsx.template',
-        ),
         'utf-8',
       ),
     );
