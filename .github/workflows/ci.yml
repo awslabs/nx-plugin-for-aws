@@ -89,9 +89,36 @@ jobs:
           aws-region: us-west-2
       - name: Smoke Test - ${{ matrix.smoke_test }}
         run: pnpm nx run @aws/nx-plugin-e2e:test -t "smoke test - ${{ matrix.smoke_test }}"
+  smoke_tests_windows:
+    name: Windows Smoke Tests - ${{matrix.smoke_test}}
+    runs-on: windows-latest
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        smoke_test:
+          - pnpm
+          - dungeon-adventure
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Download build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: build-artifact
+          path: dist
+      - uses: ./.github/actions/init-monorepo
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.DEPLOY_INTEG_TESTS_ROLE_ARN }}
+          aws-region: us-west-2
+      - name: Windows Smoke Test - ${{ matrix.smoke_test }}
+        run: pnpm nx run @aws/nx-plugin-e2e:test -t "smoke test - ${{ matrix.smoke_test }}"
   release:
     name: Release
-    needs: [build, smoke_tests]
+    needs: [build, smoke_tests, smoke_tests_windows]
     runs-on: ubuntu-22.04
     outputs:
       latest_commit: ${{ steps.git_remote.outputs.latest_commit }}

@@ -78,7 +78,7 @@ export const uvxCommand = (
   args?: string,
   withDeps?: UvxWithDep[],
 ): string => {
-  return `uvx ${
+  return `uvx --from ${withPyVersions([dep])[0]} ${
     withDeps
       ? `${withDeps
           .map(
@@ -87,7 +87,7 @@ export const uvxCommand = (
           )
           .join(' ')} `
       : ''
-  }${withPyVersions([dep])[0]}${args ? ` ${args}` : ''}`;
+  }${dep}${args ? ` ${args}` : ''}`;
 };
 
 /**

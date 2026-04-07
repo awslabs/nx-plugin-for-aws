@@ -161,7 +161,7 @@ describe('infra generator', () => {
       outputs: ['{workspaceRoot}/dist/{projectRoot}/checkov'],
       dependsOn: ['synth'],
       options: {
-        command: expect.stringContaining('uvx checkov=='),
+        command: expect.stringContaining('uvx --from checkov=='),
       },
     });
 
