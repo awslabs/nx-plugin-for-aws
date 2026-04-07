@@ -1,0 +1,162 @@
+---
+title: "React 到 Python Strands Agent"
+description: "将 React 网站连接到 Python Strands Agent"
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+
+Nx Plugin for AWS 提供了一个生成器，可以快速将您的 <Link path="guides/py-strands-agent">Python Strands Agent</Link> 与 React 网站集成。它会设置所有必要的配置，通过类型安全的 OpenAPI 生成客户端连接到您的代理，包括 AWS IAM 和 Cognito 身份验证支持。
+
+## 前置条件
+
+在使用此生成器之前，请确保您拥有：
+
+1. 一个 React 网站（使用 <Link path="guides/react-website">`ts#react-website` 生成器</Link>生成）
+2. 一个 Python Strands Agent（使用 <Link path="guides/py-strands-agent">`py#strands-agent` 生成器</Link>生成）
+3. 通过 <Link path="/guides/react-website-auth">`ts#react-website-auth` 生成器</Link>添加的 Cognito Auth
+
+## 使用方法
+
+### 运行生成器
+
+<RunGenerator generator="connection" />
+
+系统将提示您选择 React 网站作为源项目，选择包含 Python Strands Agent 的项目作为目标项目。如果您的目标项目包含多个组件（例如多个代理或其他组件类型），系统将提示您指定 `targetComponent` 以消除歧义。
+
+### 选项
+
+<GeneratorParameters generator="connection" />
+
+## 生成器输出
+
+生成器在您的 Python Strands Agent 项目中创建以下内容：
+
+<FileTree>
+
+- scripts
+  - \<agent_name>_openapi.py 从代理的 FastAPI 应用生成 OpenAPI 规范的脚本
+- project.json 添加了一个新的 `<agent-name>-openapi` 目标
+
+</FileTree>
+
+生成器在您的 React 应用程序中创建以下结构：
+
+<FileTree>
+
+- src
+  - components
+    - \<AgentName>Provider.tsx OpenAPI 客户端的提供者
+    - QueryClientProvider.tsx TanStack React Query 客户端提供者
+  - hooks
+    - useSigV4.tsx 用于使用 SigV4 签名请求的 Hook（仅限 IAM）
+    - use\<AgentName>.tsx 返回代理 API 的 TanStack Query 选项代理的 Hook
+    - use\<AgentName>Client.tsx 返回原始 API 客户端的 Hook
+  - generated
+    - \<agent-name>
+      - types.gen.ts 从代理的 Pydantic 模型生成的类型
+      - client.gen.ts 用于调用代理 API 的类型安全客户端
+      - options-proxy.gen.ts 用于与代理交互的 TanStack Query hooks 选项
+- project.json 添加了用于客户端生成和监视更改的目标
+- .gitignore 默认情况下忽略生成的客户端文件
+
+</FileTree>
+
+## 工作原理
+
+### OpenAPI 客户端生成
+
+在构建时，会内省 Python Strands Agent 的 FastAPI 应用以生成 OpenAPI 规范。然后使用此规范生成带有 TanStack Query hooks 的类型安全 TypeScript 客户端，遵循与 <Link path="guides/connection/react-fastapi">React 到 FastAPI 连接</Link>相同的模式。
+
+每个代理都有自己作用域的 OpenAPI 脚本（例如 `scripts/agent_openapi.py`），以便具有多个代理的项目可以生成各自的规范。
+
+### 身份验证
+
+生成的代码根据您的代理配置处理身份验证：
+
+- **IAM**（默认）：使用 AWS SigV4 签名 HTTP 请求。凭证从配置了网站身份验证的 Cognito Identity Pool 获取
+- **Cognito**：在 Authorization 标头中嵌入 JWT 访问令牌
+- **None**：无身份验证
+
+## 使用生成的代码
+
+### 使用 API Hook
+
+`use<AgentName>` hook 提供用于调用代理 API 端点的 TanStack Query 选项：
+
+```tsx
+import { useMutation } from '@tanstack/react-query';
+import { useAgentProjectAgent } from './hooks/useAgentProjectAgent';
+
+function ChatComponent() {
+  const api = useAgentProjectAgent();
+
+  const invoke = useMutation(api.invoke.mutationOptions());
+
+  const handleSend = (message: string) => {
+    invoke.mutate({
+      prompt: message,
+      session_id: 'my-session',
+    });
+  };
+
+  return (
+    <div>
+      <button onClick={() => handleSend('Hello!')}>Send</button>
+      {invoke.isPending && <p>Agent is thinking...</p>}
+      {invoke.data && <p>Response received</p>}
+    </div>
+  );
+}
+```
+
+### 使用原始客户端
+
+`use<AgentName>Client` hook 提供对 API 客户端的直接访问：
+
+```tsx
+import { useAgentProjectAgentClient } from './hooks/useAgentProjectAgentClient';
+
+function ChatComponent() {
+  const client = useAgentProjectAgentClient();
+
+  const handleSend = async (message: string) => {
+    const response = await client.invoke({
+      prompt: message,
+      session_id: 'my-session',
+    });
+    console.log('Response:', response);
+  };
+
+  return <button onClick={() => handleSend('Hello!')}>Send</button>;
+}
+```
+
+## 本地开发
+
+连接生成器会自动配置 `serve-local` 集成：
+
+1. 运行 `nx serve-local <website>` 也会启动代理的本地 FastAPI 服务器
+2. 运行时配置被覆盖以指向本地 HTTP URL（例如 `http://localhost:8081/`）
+3. 当代理的 API 发生变化时，TypeScript 客户端会自动重新生成
+
+<NxCommands commands={['serve-local <WebsiteProject>']} />
+
+:::tip[热重载]
+网站和连接的代理将热重载，使您能够快速迭代两者，而无需部署到 AWS。
+:::
+
+## 基础设施
+
+如果您的代理使用 IAM 身份验证，则必须授予 Cognito Identity Pool 的已验证角色调用代理的权限。请参阅代理的基础设施构造以获取适当的 `grantInvokeAccess` 方法。
+
+## 更多信息
+
+有关更多信息，请参阅：
+
+- <Link path="guides/py-strands-agent">Python Strands Agent 指南</Link>
+- <Link path="guides/connection/react-fastapi">React 到 FastAPI 连接指南</Link>
+- [TanStack Query Documentation](https://tanstack.com/query/v5)
