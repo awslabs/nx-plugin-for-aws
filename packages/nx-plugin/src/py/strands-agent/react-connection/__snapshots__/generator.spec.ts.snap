@@ -1,0 +1,203 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`py strands agent react connection generator > should generate OpenAPI spec script scoped to the agent > agent_openapi.py 1`] = `
+"from agent_project.agent.main import app
+import json
+import os
+import sys
+
+os.makedirs(os.path.dirname(sys.argv[1]), exist_ok=True)
+with open(sys.argv[1], "w") as f:
+    json.dump(app.openapi(), f)
+"
+`;
+
+exports[`py strands agent react connection generator > should generate provider component > TestAgentProvider.tsx 1`] = `
+"import { createContext, FC, PropsWithChildren, useMemo } from 'react';
+import { TestAgent } from '../generated/test-agent/client.gen';
+import { TestAgentOptionsProxy } from '../generated/test-agent/options-proxy.gen';
+import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
+import { useSigV4 } from '../hooks/useSigV4';
+
+export const TestAgentContext = createContext<
+  TestAgentOptionsProxy | undefined
+>(undefined);
+
+export const TestAgentClientContext = createContext<TestAgent | undefined>(
+  undefined,
+);
+
+const useCreateTestAgentClient = (): TestAgent => {
+  const runtimeConfig = useRuntimeConfig();
+  const apiUrl = runtimeConfig.apis.TestAgent;
+  const sigv4Client = useSigV4();
+  return useMemo(
+    () =>
+      new TestAgent({
+        url: apiUrl,
+        fetch: sigv4Client.fetch,
+      }),
+    [apiUrl, sigv4Client],
+  );
+};
+
+export const TestAgentProvider: FC<PropsWithChildren> = ({ children }) => {
+  const client = useCreateTestAgentClient();
+  const optionsProxy = useMemo(
+    () => new TestAgentOptionsProxy({ client }),
+    [client],
+  );
+
+  return (
+    <TestAgentClientContext.Provider value={client}>
+      <TestAgentContext.Provider value={optionsProxy}>
+        {children}
+      </TestAgentContext.Provider>
+    </TestAgentClientContext.Provider>
+  );
+};
+
+export default TestAgentProvider;
+"
+`;
+
+exports[`py strands agent react connection generator > should handle Cognito auth option > TestAgentProvider-Cognito.tsx 1`] = `
+"import { createContext, FC, PropsWithChildren, useMemo } from 'react';
+import { TestAgent } from '../generated/test-agent/client.gen';
+import { TestAgentOptionsProxy } from '../generated/test-agent/options-proxy.gen';
+import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
+import { useAuth } from 'react-oidc-context';
+
+export const TestAgentContext = createContext<
+  TestAgentOptionsProxy | undefined
+>(undefined);
+
+export const TestAgentClientContext = createContext<TestAgent | undefined>(
+  undefined,
+);
+
+const useCreateTestAgentClient = (): TestAgent => {
+  const runtimeConfig = useRuntimeConfig();
+  const apiUrl = runtimeConfig.apis.TestAgent;
+  const auth = useAuth();
+  const user = auth?.user;
+  const cognitoClient: typeof fetch = (url, init) => {
+    const headers = { Authorization: \`Bearer \${user?.id_token}\` };
+    const existingHeaders = init?.headers;
+
+    return fetch(url, {
+      ...init,
+      headers: !existingHeaders
+        ? headers
+        : existingHeaders instanceof Headers
+          ? (() => {
+              const h = new Headers(existingHeaders);
+              Object.entries(headers).forEach(([k, v]) => h.append(k, v));
+              return h;
+            })()
+          : Array.isArray(existingHeaders)
+            ? [...existingHeaders, ...Object.entries(headers)]
+            : { ...existingHeaders, ...headers },
+    });
+  };
+  return useMemo(
+    () =>
+      new TestAgent({
+        url: apiUrl,
+        fetch: cognitoClient,
+      }),
+    [apiUrl, cognitoClient],
+  );
+};
+
+export const TestAgentProvider: FC<PropsWithChildren> = ({ children }) => {
+  const client = useCreateTestAgentClient();
+  const optionsProxy = useMemo(
+    () => new TestAgentOptionsProxy({ client }),
+    [client],
+  );
+
+  return (
+    <TestAgentClientContext.Provider value={client}>
+      <TestAgentContext.Provider value={optionsProxy}>
+        {children}
+      </TestAgentContext.Provider>
+    </TestAgentClientContext.Provider>
+  );
+};
+
+export default TestAgentProvider;
+"
+`;
+
+exports[`py strands agent react connection generator > should handle IAM auth option > TestAgentProvider-IAM.tsx 1`] = `
+"import { createContext, FC, PropsWithChildren, useMemo } from 'react';
+import { TestAgent } from '../generated/test-agent/client.gen';
+import { TestAgentOptionsProxy } from '../generated/test-agent/options-proxy.gen';
+import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
+import { useSigV4 } from '../hooks/useSigV4';
+
+export const TestAgentContext = createContext<
+  TestAgentOptionsProxy | undefined
+>(undefined);
+
+export const TestAgentClientContext = createContext<TestAgent | undefined>(
+  undefined,
+);
+
+const useCreateTestAgentClient = (): TestAgent => {
+  const runtimeConfig = useRuntimeConfig();
+  const apiUrl = runtimeConfig.apis.TestAgent;
+  const sigv4Client = useSigV4();
+  return useMemo(
+    () =>
+      new TestAgent({
+        url: apiUrl,
+        fetch: sigv4Client.fetch,
+      }),
+    [apiUrl, sigv4Client],
+  );
+};
+
+export const TestAgentProvider: FC<PropsWithChildren> = ({ children }) => {
+  const client = useCreateTestAgentClient();
+  const optionsProxy = useMemo(
+    () => new TestAgentOptionsProxy({ client }),
+    [client],
+  );
+
+  return (
+    <TestAgentClientContext.Provider value={client}>
+      <TestAgentContext.Provider value={optionsProxy}>
+        {children}
+      </TestAgentContext.Provider>
+    </TestAgentClientContext.Provider>
+  );
+};
+
+export default TestAgentProvider;
+"
+`;
+
+exports[`py strands agent react connection generator > should instrument providers in main.tsx > main.tsx 1`] = `
+"import TestAgentProvider from './components/TestAgentProvider';
+import QueryClientProvider from './components/QueryClientProvider';
+import RuntimeConfigProvider from './components/RuntimeConfig';
+
+import { RouterProvider } from '@tanstack/react-router';
+
+const App = () => <RouterProvider router={router} />;
+
+export function Main() {
+  return (
+    <RuntimeConfigProvider>
+      <QueryClientProvider>
+        <TestAgentProvider>
+          <App />
+        </TestAgentProvider>
+      </QueryClientProvider>
+    </RuntimeConfigProvider>
+  );
+}
+"
+`;

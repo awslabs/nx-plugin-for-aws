@@ -1,0 +1,161 @@
+---
+title: React to Python Strands Agent
+description: Connect a React website to a Python Strands Agent
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+
+Nx Plugin for AWS provides a generator to quickly integrate your <Link path="guides/py-strands-agent">Python Strands Agent</Link> with a React website. It sets up all necessary configuration for connecting to your agent via a type-safe OpenAPI-generated client, including AWS IAM and Cognito authentication support.
+
+## Prerequisites
+
+Before using this generator, ensure you have:
+
+1. A React website (generated using the <Link path="guides/react-website">`ts#react-website` generator</Link>)
+2. A Python Strands Agent (generated using the <Link path="guides/py-strands-agent">`py#strands-agent` generator</Link>)
+3. Cognito Auth added via the <Link path="/guides/react-website-auth">`ts#react-website-auth` generator</Link>
+
+## Usage
+
+### Run the Generator
+
+<RunGenerator generator="connection" />
+
+You will be prompted to select your React website as the source project and the project containing your Python Strands Agent as the target project. If your target project contains multiple components (such as multiple agents or other component types), you will be prompted to specify a `targetComponent` to disambiguate.
+
+### Options
+
+<GeneratorParameters generator="connection" />
+
+## Generator Output
+
+The generator creates the following in your Python Strands Agent project:
+
+<FileTree>
+
+- scripts
+  - \<agent_name>_openapi.py Script to generate an OpenAPI specification from the agent's FastAPI app
+- project.json A new `<agent-name>-openapi` target is added
+
+</FileTree>
+
+The generator creates the following structure in your React application:
+
+<FileTree>
+
+- src
+  - components
+    - \<AgentName>Provider.tsx Provider for the OpenAPI client
+    - QueryClientProvider.tsx TanStack React Query client provider
+  - hooks
+    - useSigV4.tsx Hook for signing requests with SigV4 (IAM only)
+    - use\<AgentName>.tsx Hook returning the TanStack Query options proxy for your agent's API
+    - use\<AgentName>Client.tsx Hook returning the vanilla API client
+  - generated
+    - \<agent-name>
+      - types.gen.ts Generated types from the agent's Pydantic models
+      - client.gen.ts Type-safe client for calling your agent's API
+      - options-proxy.gen.ts TanStack Query hooks options for interacting with your agent
+- project.json Targets added for client generation and watching for changes
+- .gitignore The generated client files are ignored by default
+
+</FileTree>
+
+## How It Works
+
+### OpenAPI Client Generation
+
+At build time, the Python Strands Agent's FastAPI app is introspected to generate an OpenAPI specification. This spec is then used to generate a type-safe TypeScript client with TanStack Query hooks, following the same pattern as the <Link path="guides/connection/react-fastapi">React to FastAPI connection</Link>.
+
+Each agent gets its own scoped OpenAPI script (e.g., `scripts/agent_openapi.py`) so that projects with multiple agents can generate individual specs.
+
+### Authentication
+
+The generated code handles authentication depending on your agent's configuration:
+
+- **IAM** (default): Uses AWS SigV4 to sign HTTP requests. Credentials are obtained from the Cognito Identity Pool configured with your website's auth
+- **Cognito**: Embeds the JWT access token in an Authorization header
+- **None**: No authentication
+
+## Using the Generated Code
+
+### Using the API Hook
+
+The `use<AgentName>` hook provides TanStack Query options for calling your agent's API endpoints:
+
+```tsx
+import { useMutation } from '@tanstack/react-query';
+import { useAgentProjectAgent } from './hooks/useAgentProjectAgent';
+
+function ChatComponent() {
+  const api = useAgentProjectAgent();
+
+  const invoke = useMutation(api.invoke.mutationOptions());
+
+  const handleSend = (message: string) => {
+    invoke.mutate({
+      prompt: message,
+      session_id: 'my-session',
+    });
+  };
+
+  return (
+    <div>
+      <button onClick={() => handleSend('Hello!')}>Send</button>
+      {invoke.isPending && <p>Agent is thinking...</p>}
+      {invoke.data && <p>Response received</p>}
+    </div>
+  );
+}
+```
+
+### Using the Vanilla Client
+
+The `use<AgentName>Client` hook provides direct access to the API client:
+
+```tsx
+import { useAgentProjectAgentClient } from './hooks/useAgentProjectAgentClient';
+
+function ChatComponent() {
+  const client = useAgentProjectAgentClient();
+
+  const handleSend = async (message: string) => {
+    const response = await client.invoke({
+      prompt: message,
+      session_id: 'my-session',
+    });
+    console.log('Response:', response);
+  };
+
+  return <button onClick={() => handleSend('Hello!')}>Send</button>;
+}
+```
+
+## Local Development
+
+The connection generator automatically configures `serve-local` integration:
+
+1. Running `nx serve-local <website>` will also start the agent's local FastAPI server
+2. The runtime config is overridden to point to the local HTTP URL (e.g., `http://localhost:8081/`)
+3. The TypeScript client is automatically regenerated when the agent's API changes
+
+<NxCommands commands={['serve-local <WebsiteProject>']} />
+
+:::tip[Hot Reloading]
+The website and connected agent will hot-reload, enabling you to quickly iterate on both together without deploying to AWS.
+:::
+
+## Infrastructure
+
+If your agent uses IAM auth, the Cognito Identity Pool's authenticated role must be granted permission to invoke the agent. Refer to your agent's infrastructure construct for the appropriate `grantInvokeAccess` method.
+
+## More Information
+
+For more information, please refer to:
+
+- <Link path="guides/py-strands-agent">Python Strands Agent Guide</Link>
+- <Link path="guides/connection/react-fastapi">React to FastAPI Connection Guide</Link>
+- [TanStack Query Documentation](https://tanstack.com/query/v5)
