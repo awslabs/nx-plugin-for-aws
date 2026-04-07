@@ -87,18 +87,28 @@ The generated code handles authentication depending on your agent's configuratio
 The `use<AgentName>` hook provides TanStack Query options for calling your agent's API endpoints:
 
 ```tsx
+import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { useAgentProjectAgent } from './hooks/useAgentProjectAgent';
+import { useMyAgent } from '../hooks/useMyAgent';
+import type { StreamChunk } from '../generated/my-agent/types.gen';
 
 function ChatComponent() {
-  const api = useAgentProjectAgent();
+  const api = useMyAgent();
+  const [chunks, setChunks] = useState<StreamChunk[]>([]);
 
-  const invoke = useMutation(api.invoke.mutationOptions());
+  const invoke = useMutation(api.invoke.mutationOptions({
+    onSuccess: async (stream) => {
+      setChunks([]);
+      for await (const chunk of stream) {
+        setChunks((prev) => [...prev, chunk]);
+      }
+    },
+  }));
 
   const handleSend = (message: string) => {
     invoke.mutate({
       prompt: message,
-      session_id: 'my-session',
+      sessionId: 'my-session',
     });
   };
 
@@ -106,7 +116,9 @@ function ChatComponent() {
     <div>
       <button onClick={() => handleSend('Hello!')}>Send</button>
       {invoke.isPending && <p>Agent is thinking...</p>}
-      {invoke.data && <p>Response received</p>}
+      {chunks.map((chunk, i) => (
+        <span key={i}>{chunk.content}</span>
+      ))}
     </div>
   );
 }
@@ -117,20 +129,32 @@ function ChatComponent() {
 The `use<AgentName>Client` hook provides direct access to the API client:
 
 ```tsx
-import { useAgentProjectAgentClient } from './hooks/useAgentProjectAgentClient';
+import { useState } from 'react';
+import { useMyAgentClient } from '../hooks/useMyAgentClient';
+import type { StreamChunk } from '../generated/my-agent/types.gen';
 
 function ChatComponent() {
-  const client = useAgentProjectAgentClient();
+  const client = useMyAgentClient();
+  const [chunks, setChunks] = useState<StreamChunk[]>([]);
 
   const handleSend = async (message: string) => {
-    const response = await client.invoke({
+    setChunks([]);
+    for await (const chunk of client.invoke({
       prompt: message,
-      session_id: 'my-session',
-    });
-    console.log('Response:', response);
+      sessionId: 'my-session',
+    })) {
+      setChunks((prev) => [...prev, chunk]);
+    }
   };
 
-  return <button onClick={() => handleSend('Hello!')}>Send</button>;
+  return (
+    <div>
+      <button onClick={() => handleSend('Hello!')}>Send</button>
+      {chunks.map((chunk, i) => (
+        <span key={i}>{chunk.content}</span>
+      ))}
+    </div>
+  );
 }
 ```
 
