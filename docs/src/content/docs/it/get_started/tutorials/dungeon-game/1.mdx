@@ -54,7 +54,7 @@ Questo configurerà un monorepo NX all'interno della directory `dungeon-adventur
 
 Ora possiamo iniziare a creare i diversi sotto-progetti utilizzando `@aws/nx-plugin`.
 
-<Aside type="tip">È una best practice assicurarsi che tutti i file non staged siano committati in Git prima di eseguire qualsiasi generatore. Questo permette di visualizzare le modifiche dopo l'esecuzione tramite `git diff`.</Aside>
+<Aside type="tip" title="Committa spesso">È una best practice assicurarsi che tutti i file non staged siano committati in Git prima di eseguire qualsiasi generatore. Questo permette di visualizzare le modifiche dopo l'esecuzione tramite `git diff`.</Aside>
 
 ## Task 2: Creare una Game API
 
@@ -454,8 +454,11 @@ Questo crea un agente Strands di esempio e definisce uno strumento di addizione.
 
 ```python
 # agent/main.py
+import uuid
+
 import uvicorn
 from bedrock_agentcore.runtime.models import PingStatus
+from fastapi import Header
 from pydantic import BaseModel
 
 from .agent import get_agent
@@ -463,18 +466,17 @@ from .init import JsonStreamingResponse, app
 
 
 class InvokeInput(BaseModel):
-    prompt: str
-    session_id: str
+    message: str
 
 
 class StreamChunk(BaseModel):
     content: str
 
 
-async def handle_invoke(input: InvokeInput):
+async def handle_invoke(input: InvokeInput, session_id: str):
     """Handler di streaming per l'invocazione dell'agente"""
-    with get_agent(session_id=input.session_id) as agent:
-        stream = agent.stream_async(input.prompt)
+    with get_agent(session_id=session_id) as agent:
+        stream = agent.stream_async(input.message)
         async for event in stream:
             print(event)
             text = event.get("event", {}).get("contentBlockDelta", {}).get("delta", {}).get("text")
@@ -489,9 +491,13 @@ async def handle_invoke(input: InvokeInput):
     response_class=JsonStreamingResponse,
     responses={200: JsonStreamingResponse.openapi_response(StreamChunk, "Stream of agent response chunks")},
 )
-async def invoke(input: InvokeInput) -> JsonStreamingResponse:
+async def invoke(
+    input: InvokeInput,
+    x_amzn_bedrock_agentcore_runtime_session_id: str | None = Header(default=None),
+) -> JsonStreamingResponse:
     """Entry point per l'invocazione dell'agente"""
-    return JsonStreamingResponse(handle_invoke(input))
+    session_id = x_amzn_bedrock_agentcore_runtime_session_id or str(uuid.uuid4())
+    return JsonStreamingResponse(handle_invoke(input, session_id))
 
 
 @app.get("/ping")
@@ -1096,7 +1102,7 @@ new ApplicationStage(app, 'dungeon-adventure-infra-sandbox', {
 app.synth();
 ```
 
-<Aside type="tip">Se vedi un errore di import nel tuo IDE, è perché il progetto infrastruttura non ha ancora un riferimento TypeScript configurato nel `tsconfig.json`. Nx è stato [configurato](https://nx.dev/nx-api/js/generators/typescript-sync) per creare questi riferimenti *dinamicamente* ogni volta che viene eseguita una build/compilazione o se esegui manualmente il comando `nx sync`. Per maggiori informazioni consulta la <Link path="guides/typescript-project#importing-your-library-code-in-other-projects">guida TypeScript</Link>.</Aside>
+<Aside type="tip" title="Correggere errori di import">Se vedi un errore di import nel tuo IDE, è perché il progetto infrastruttura non ha ancora un riferimento TypeScript configurato nel `tsconfig.json`. Nx è stato [configurato](https://nx.dev/nx-api/js/generators/typescript-sync) per creare questi riferimenti *dinamicamente* ogni volta che viene eseguita una build/compilazione o se esegui manualmente il comando `nx sync`. Per maggiori informazioni consulta la <Link path="guides/typescript-project#importing-your-library-code-in-other-projects">guida TypeScript</Link>.</Aside>
 
 Questo è l'entry point per l'applicazione CDK.
 

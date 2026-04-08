@@ -54,7 +54,7 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 이제 `@aws/nx-plugin`을 사용하여 다양한 하위 프로젝트 생성을 시작할 수 있습니다.
 
-<Aside type="tip">생성기를 실행하기 전에 Git에 커밋되지 않은 모든 파일을 커밋하는 것이 모범 사례입니다. 이렇게 하면 생성기 실행 후 `git diff`를 통해 변경 사항을 확인할 수 있습니다.</Aside>
+<Aside type="tip" title="자주 커밋하기">생성기를 실행하기 전에 Git에 커밋되지 않은 모든 파일을 커밋하는 것이 모범 사례입니다. 이렇게 하면 생성기 실행 후 `git diff`를 통해 변경 사항을 확인할 수 있습니다.</Aside>
 
 ## 작업 2: Game API 생성
 
@@ -451,8 +451,11 @@ Refer to tools as your 'spellbook'.
 
 ```python
 # agent/main.py
+import uuid
+
 import uvicorn
 from bedrock_agentcore.runtime.models import PingStatus
+from fastapi import Header
 from pydantic import BaseModel
 
 from .agent import get_agent
@@ -460,18 +463,17 @@ from .init import JsonStreamingResponse, app
 
 
 class InvokeInput(BaseModel):
-    prompt: str
-    session_id: str
+    message: str
 
 
 class StreamChunk(BaseModel):
     content: str
 
 
-async def handle_invoke(input: InvokeInput):
+async def handle_invoke(input: InvokeInput, session_id: str):
     """에이전트 호출용 스트리밍 핸들러"""
-    with get_agent(session_id=input.session_id) as agent:
-        stream = agent.stream_async(input.prompt)
+    with get_agent(session_id=session_id) as agent:
+        stream = agent.stream_async(input.message)
         async for event in stream:
             print(event)
             text = event.get("event", {}).get("contentBlockDelta", {}).get("delta", {}).get("text")
@@ -486,9 +488,13 @@ async def handle_invoke(input: InvokeInput):
     response_class=JsonStreamingResponse,
     responses={200: JsonStreamingResponse.openapi_response(StreamChunk, "Stream of agent response chunks")},
 )
-async def invoke(input: InvokeInput) -> JsonStreamingResponse:
+async def invoke(
+    input: InvokeInput,
+    x_amzn_bedrock_agentcore_runtime_session_id: str | None = Header(default=None),
+) -> JsonStreamingResponse:
     """에이전트 호출 진입점"""
-    return JsonStreamingResponse(handle_invoke(input))
+    session_id = x_amzn_bedrock_agentcore_runtime_session_id or str(uuid.uuid4())
+    return JsonStreamingResponse(handle_invoke(input, session_id))
 
 
 @app.get("/ping")
@@ -915,7 +921,7 @@ export const useGameApiClient = () => {
 이 훅은 GameApi 호출을 위한 tRPC 클라이언트에 대한 액세스를 제공합니다. tRPC API 호출 예제는 <Link path="guides/connection/react-trpc#using-the-generated-code">tRPC 훅 사용 가이드</Link>를 참조하세요.
 
 <Aside title="타입 안전 훅">
-`useGameApi` 훅은 tRPC의 [TypeScript 추론](https://trpc.io/docs/concepts) 덕분에 변경 사항이 반영되기 위해 빌드가 필요하지 않습니다. 이를 통해 개발자는 프론트엔드에 즉시 반영되는 백엔드 변경을 수행할 수 있습니다.
+`useGameApi` 훅은 `useStoryApi` 훅과 달리 tRPC의 [TypeScript 추론](https://trpc.io/docs/concepts) 덕분에 변경 사항이 반영되기 위해 빌드가 필요하지 않습니다. 이를 통해 개발자는 프론트엔드에 즉시 반영되는 백엔드 변경을 수행할 수 있습니다.
 </Aside>
 
 ```diff lang="tsx"
@@ -1093,7 +1099,7 @@ new ApplicationStage(app, 'dungeon-adventure-infra-sandbox', {
 app.synth();
 ```
 
-<Aside type="tip">IDE 내에서 가져오기 오류가 표시되면 인프라 프로젝트의 `tsconfig.json`에 TypeScript 참조가 아직 설정되지 않았기 때문입니다. Nx는 빌드/컴파일 실행 시 또는 `nx sync` 명령을 수동으로 실행할 때 이러한 참조를 *동적으로* 생성하도록 [구성](https://nx.dev/nx-api/js/generators/typescript-sync)되어 있습니다. 자세한 내용은 <Link path="guides/typescript-project#importing-your-library-code-in-other-projects">TypeScript 가이드</Link>를 참조하세요.</Aside>
+<Aside type="tip" title="가져오기 오류 수정">IDE 내에서 가져오기 오류가 표시되면 인프라 프로젝트의 `tsconfig.json`에 TypeScript 참조가 아직 설정되지 않았기 때문입니다. Nx는 빌드/컴파일 실행 시 또는 `nx sync` 명령을 수동으로 실행할 때 이러한 참조를 *동적으로* 생성하도록 [구성](https://nx.dev/nx-api/js/generators/typescript-sync)되어 있습니다. 자세한 내용은 <Link path="guides/typescript-project#importing-your-library-code-in-other-projects">TypeScript 가이드</Link>를 참조하세요.</Aside>
 
 이 코드는 CDK 애플리케이션의 진입점입니다.
 
