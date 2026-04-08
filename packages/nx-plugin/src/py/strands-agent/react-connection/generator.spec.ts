@@ -436,8 +436,8 @@ describe(
         'utf-8',
       );
 
-      // Verify that the runtime config includes the API override
-      expect(runtimeConfigContent).toContain('runtimeConfig.apis.');
+      // Verify that the runtime config includes the agent runtime override
+      expect(runtimeConfigContent).toContain('runtimeConfig.agentRuntimes.');
       expect(runtimeConfigContent).toContain('http://localhost:');
 
       // Re-read agent project config after connection generator ran

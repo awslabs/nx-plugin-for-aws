@@ -112,6 +112,7 @@ export const pyStrandsAgentReactConnectionGenerator = async (
     specBuildTargetName: `${agentProjectConfig.name}:${openApiTargetName}`,
     auth,
     port: agentPort,
+    isAgentRuntime: true,
   });
 
   // Add serve-local integration using the agent's serve-local target

@@ -52,6 +52,12 @@ export interface AddOpenApiReactClientOptions {
    * Port on which the backend project's local server listens
    */
   port: number;
+  /**
+   * When true, the generated provider reads from runtimeConfig.agentRuntimes
+   * and converts Bedrock AgentCore Runtime ARNs to HTTP URLs.
+   * When false (default), reads from runtimeConfig.apis directly.
+   */
+  isAgentRuntime?: boolean;
 }
 
 /**
@@ -68,6 +74,7 @@ export const addOpenApiReactClient = async (
     specBuildTargetName,
     auth,
     port,
+    isAgentRuntime = false,
   }: AddOpenApiReactClientOptions,
 ) => {
   const clientGenTarget = `generate:${kebabCase(apiName)}-client`;
@@ -185,6 +192,7 @@ export const addOpenApiReactClient = async (
       apiName,
       apiNameClassName,
       generatedClientDir,
+      isAgentRuntime,
     },
   );
 

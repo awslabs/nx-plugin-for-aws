@@ -37,7 +37,7 @@ export const addPyStrandsAgentTargetToServeLocal = async (
     agentNameClassName: options.agentNameClassName,
     port: options.port,
     targetComponent: options.targetComponent,
-    runtimeConfigNamespace: 'apis',
+    runtimeConfigNamespace: 'agentRuntimes',
     localUrl: `http://localhost:${options.port}/`,
     additionalDependencyTargets: [clientGenTarget, clientGenWatchTarget],
     // Remove any existing serve-local dep added by addOpenApiReactClient's
