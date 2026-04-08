@@ -455,11 +455,13 @@ import uuid
 
 import uvicorn
 from bedrock_agentcore.runtime.models import PingStatus
-from fastapi import Header
+from fastapi import Request
 from pydantic import BaseModel
 
 from .agent import get_agent
 from .init import JsonStreamingResponse, app
+
+SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
 
 
 class InvokeInput(BaseModel):
@@ -488,12 +490,9 @@ async def handle_invoke(input: InvokeInput, session_id: str):
     response_class=JsonStreamingResponse,
     responses={200: JsonStreamingResponse.openapi_response(StreamChunk, "Stream of agent response chunks")},
 )
-async def invoke(
-    input: InvokeInput,
-    x_amzn_bedrock_agentcore_runtime_session_id: str | None = Header(default=None),
-) -> JsonStreamingResponse:
+async def invoke(input: InvokeInput, request: Request) -> JsonStreamingResponse:
     """代理调用的入口点"""
-    session_id = x_amzn_bedrock_agentcore_runtime_session_id or str(uuid.uuid4())
+    session_id = request.headers.get(SESSION_ID_HEADER) or str(uuid.uuid4())
     return JsonStreamingResponse(handle_invoke(input, session_id))
 
 
