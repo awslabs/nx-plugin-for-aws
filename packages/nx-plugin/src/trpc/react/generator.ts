@@ -14,7 +14,7 @@ import { ReactGeneratorSchema } from './schema';
 import { runtimeConfigGenerator } from '../../ts/react-website/runtime-config/generator';
 import { toScopeAlias } from '../../utils/npm-scope';
 import { withVersions } from '../../utils/versions';
-import { addSingleImport, applyGritQL, matchGritQL } from '../../utils/ast';
+import { addSingleImport, applyGritQL } from '../../utils/ast';
 import { toClassName } from '../../utils/names';
 import { formatFilesInSubtree } from '../../utils/format';
 import {
@@ -117,34 +117,18 @@ export async function reactGenerator(
   );
 
   // Wrap <App /> in QueryClientProvider if not already present
-  if (
-    !(await matchGritQL(
-      tree,
-      mainTsxPath,
-      '`<QueryClientProvider>$_</QueryClientProvider>`',
-    ))
-  ) {
-    await applyGritQL(
-      tree,
-      mainTsxPath,
-      '`<App />` => `<QueryClientProvider><App /></QueryClientProvider>`',
-    );
-  }
+  await applyGritQL(
+    tree,
+    mainTsxPath,
+    '`<App />` => `<QueryClientProvider><App /></QueryClientProvider>` where { $program <: not contains `<QueryClientProvider>$_</QueryClientProvider>` }',
+  );
 
   // Wrap <App /> in the tRPC client provider if not already present
-  if (
-    !(await matchGritQL(
-      tree,
-      mainTsxPath,
-      `\`<${clientProviderName}>$_</${clientProviderName}>\``,
-    ))
-  ) {
-    await applyGritQL(
-      tree,
-      mainTsxPath,
-      `\`<App />\` => \`<${clientProviderName}><App /></${clientProviderName}>\``,
-    );
-  }
+  await applyGritQL(
+    tree,
+    mainTsxPath,
+    `\`<App />\` => \`<${clientProviderName}><App /></${clientProviderName}>\` where { $program <: not contains \`<${clientProviderName}>$_</${clientProviderName}>\` }`,
+  );
 
   await addTargetToServeLocal(
     tree,
