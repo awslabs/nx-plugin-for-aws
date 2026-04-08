@@ -18,8 +18,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { execSync } from 'child_process';
 import { flushChanges, FsTree } from 'nx/src/generators/tree';
-import { replace } from '../packages/nx-plugin/src/utils/ast';
-import { factory } from 'typescript';
+import { applyGritQL } from '../packages/nx-plugin/src/utils/ast';
 import {
   parsePipRequirementsLine,
   ProjectNameRequirement,
@@ -163,13 +162,13 @@ const getUpdatedPythonVersions = (tmpDir: string): Record<string, string> => {
  * @param versionConstantName - Name of the constant in the file (e.g., 'TS_VERSIONS')
  * @returns Array of version changes
  */
-const applyUpdatedVersions = (
+const applyUpdatedVersions = async (
   tree: FsTree,
   currentVersions: Record<string, string>,
   updatedVersions: Record<string, string>,
   versionsFilePath: string,
-  versionConstantName: string,
-): VersionChange[] => {
+  _versionConstantName: string,
+): Promise<VersionChange[]> => {
   const changes: VersionChange[] = [];
 
   // Loop over versions dictionary, updating each version
@@ -181,24 +180,16 @@ const applyUpdatedVersions = (
     if (oldVersion !== newVersion) {
       changes.push({ name: depName, oldVersion, newVersion });
 
-      // Find the property assignment for this dependency
-      // Match both identifier keys (e.g., boto3) and string literal keys (e.g., 'strands-agents')
-      const selector = `VariableStatement:has(Identifier[name="${versionConstantName}"]) ObjectLiteralExpression PropertyAssignment:has(Identifier[text="${depName}"], StringLiteral[value="${depName}"])`;
+      // Use GritQL to rewrite the property value.
+      // Keys are either bare identifiers (e.g. boto3) or string literals (e.g. '@aws-sdk/client-dynamodb')
+      // depending on whether the name is a valid JS identifier.
+      const isIdentifier = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(depName);
+      const pattern = isIdentifier
+        ? `\`${depName}: '${oldVersion}'\` => \`${depName}: '${newVersion}'\``
+        : `\`'${depName}': '${oldVersion}'\` => \`'${depName}': '${newVersion}'\``;
 
       try {
-        replace(
-          tree,
-          versionsFilePath,
-          selector,
-          () => {
-            // Replace the string literal value with the new version
-            return factory.createPropertyAssignment(
-              factory.createStringLiteral(depName, true),
-              factory.createStringLiteral(newVersion, true),
-            );
-          },
-          false, // Don't error if no matches
-        );
+        await applyGritQL(tree, versionsFilePath, pattern);
         console.log(`Updated ${depName} to ${newVersion}`);
       } catch (error) {
         console.warn(`Could not update ${depName}:`, error);
@@ -269,7 +260,7 @@ const main = async () => {
     const updatedTsVersions = getUpdatedTypeScriptVersions(tmpDir);
 
     // Apply updated TypeScript versions to the versions file
-    const tsChanges = applyUpdatedVersions(
+    const tsChanges = await applyUpdatedVersions(
       tree,
       TS_VERSIONS,
       updatedTsVersions,
@@ -281,7 +272,7 @@ const main = async () => {
     const updatedPyVersions = getUpdatedPythonVersions(tmpDir);
 
     // Apply updated Python versions to the versions file
-    const pyChanges = applyUpdatedVersions(
+    const pyChanges = await applyUpdatedVersions(
       tree,
       PY_VERSIONS,
       updatedPyVersions,
