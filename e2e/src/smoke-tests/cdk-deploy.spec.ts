@@ -109,11 +109,12 @@ async function invokeAgentCoreAgent(
   const response = await aws.fetch(agentUrl, {
     method: 'POST',
     body: JSON.stringify({
-      prompt: 'what is 3 + 5 - 2?',
-      session_id: 'abcdefghijklmnopqrstuvwxyz0123456789',
+      message: 'what is 3 + 5 - 2?',
     }),
     headers: {
       'Content-Type': 'application/json',
+      'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id':
+        'abcdefghijklmnopqrstuvwxyz0123456789',
     },
   });
 

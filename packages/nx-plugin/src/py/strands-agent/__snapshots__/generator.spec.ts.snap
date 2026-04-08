@@ -610,27 +610,31 @@ Refer to tools as your 'spellbook'.
 `;
 
 exports[`py#strands-agent generator > should match snapshot for generated files > strands-agent-main.py 1`] = `
-"import uvicorn
+"import uuid
+
+import uvicorn
 from bedrock_agentcore.runtime.models import PingStatus
+from fastapi import Request
 from pydantic import BaseModel
 
 from .agent import get_agent
 from .init import JsonStreamingResponse, app
 
+SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
+
 
 class InvokeInput(BaseModel):
-    prompt: str
-    session_id: str
+    message: str
 
 
 class StreamChunk(BaseModel):
     content: str
 
 
-async def handle_invoke(input: InvokeInput):
+async def handle_invoke(input: InvokeInput, session_id: str):
     """Streaming handler for agent invocation"""
-    with get_agent(session_id=input.session_id) as agent:
-        stream = agent.stream_async(input.prompt)
+    with get_agent(session_id=session_id) as agent:
+        stream = agent.stream_async(input.message)
         async for event in stream:
             print(event)
             text = (
@@ -654,9 +658,10 @@ async def handle_invoke(input: InvokeInput):
         )
     },
 )
-async def invoke(input: InvokeInput) -> JsonStreamingResponse:
+async def invoke(input: InvokeInput, request: Request) -> JsonStreamingResponse:
     """Entry point for agent invocation"""
-    return JsonStreamingResponse(handle_invoke(input))
+    session_id = request.headers.get(SESSION_ID_HEADER) or str(uuid.uuid4())
+    return JsonStreamingResponse(handle_invoke(input, session_id))
 
 
 @app.get("/ping")
