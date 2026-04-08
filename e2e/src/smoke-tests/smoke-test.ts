@@ -145,9 +145,21 @@ export const runSmokeTest = async (
     opts,
   );
 
+  // Connect the Python strands agent to the Python MCP server
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=my-agent --targetProject=py_project --targetComponent=my-mcp-server --no-interactive`,
+    opts,
+  );
+
   // Connect the React website to the TS strands agent
   await runCLI(
     `generate @aws/nx-plugin:connection --sourceProject=@e2e-test/website --targetProject=ts-project --targetComponent=agent --no-interactive`,
+    opts,
+  );
+
+  // Connect the React website to the Python strands agent
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=@e2e-test/website --targetProject=py_project --targetComponent=my-agent --no-interactive`,
     opts,
   );
 
