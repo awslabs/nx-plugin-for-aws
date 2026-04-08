@@ -18,6 +18,7 @@ import smithyReactConnectionGenerator from '../smithy/react-connection/generator
 import tsStrandsAgentMcpConnectionGenerator from '../ts/strands-agent/mcp-connection/generator';
 import tsStrandsAgentReactConnectionGenerator from '../ts/strands-agent/react-connection/generator';
 import pyStrandsAgentMcpConnectionGenerator from '../py/strands-agent/mcp-connection/generator';
+import pyStrandsAgentReactConnectionGenerator from '../py/strands-agent/react-connection/generator';
 
 /**
  * List of supported source and target project types for connections.
@@ -60,6 +61,7 @@ const SUPPORTED_CONNECTIONS = [
   { source: 'react', target: 'py#fast-api' },
   { source: 'react', target: 'smithy' },
   { source: 'react', target: 'ts#strands-agent' },
+  { source: 'react', target: 'py#strands-agent' },
   { source: 'ts#strands-agent', target: 'ts#mcp-server' },
   { source: 'ts#strands-agent', target: 'py#mcp-server' },
   { source: 'py#strands-agent', target: 'ts#mcp-server' },
@@ -103,6 +105,8 @@ const CONNECTION_GENERATORS = {
     }),
   'react -> ts#strands-agent': (tree, options) =>
     tsStrandsAgentReactConnectionGenerator(tree, options),
+  'react -> py#strands-agent': (tree, options) =>
+    pyStrandsAgentReactConnectionGenerator(tree, options),
   'ts#strands-agent -> ts#mcp-server': (tree, options) =>
     tsStrandsAgentMcpConnectionGenerator(tree, options),
   'ts#strands-agent -> py#mcp-server': (tree, options) =>

@@ -1,0 +1,186 @@
+---
+title: "React para Agente Python Strands"
+description: "Conecte um site React a um Agente Python Strands"
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+
+O Nx Plugin for AWS fornece um gerador para integrar rapidamente seu <Link path="guides/py-strands-agent">Python Strands Agent</Link> com um site React. Ele configura toda a configuração necessária para conectar ao seu agente por meio de um cliente gerado pelo OpenAPI com segurança de tipo, incluindo suporte para autenticação AWS IAM e Cognito.
+
+## Pré-requisitos
+
+Antes de usar este gerador, certifique-se de ter:
+
+1. Um site React (gerado usando o <Link path="guides/react-website">gerador `ts#react-website`</Link>)
+2. Um Python Strands Agent (gerado usando o <Link path="guides/py-strands-agent">gerador `py#strands-agent`</Link>)
+3. Cognito Auth adicionado via o <Link path="/guides/react-website-auth">gerador `ts#react-website-auth`</Link>
+
+## Uso
+
+### Executar o Gerador
+
+<RunGenerator generator="connection" />
+
+Você será solicitado a selecionar seu site React como o projeto de origem e o projeto contendo seu Python Strands Agent como o projeto de destino. Se o seu projeto de destino contiver vários componentes (como vários agentes ou outros tipos de componentes), você será solicitado a especificar um `targetComponent` para desambiguar.
+
+### Opções
+
+<GeneratorParameters generator="connection" />
+
+## Saída do Gerador
+
+O gerador cria o seguinte no seu projeto Python Strands Agent:
+
+<FileTree>
+
+- scripts
+  - \<agent_name>_openapi.py Script para gerar uma especificação OpenAPI a partir do aplicativo FastAPI do agente
+- project.json Um novo destino `<agent-name>-openapi` é adicionado
+
+</FileTree>
+
+O gerador cria a seguinte estrutura na sua aplicação React:
+
+<FileTree>
+
+- src
+  - components
+    - \<AgentName>Provider.tsx Provedor para o cliente OpenAPI
+    - QueryClientProvider.tsx Provedor de cliente TanStack React Query
+  - hooks
+    - useSigV4.tsx Hook para assinar solicitações com SigV4 (somente IAM)
+    - use\<AgentName>.tsx Hook retornando o proxy de opções TanStack Query para a API do seu agente
+    - use\<AgentName>Client.tsx Hook retornando o cliente de API vanilla
+  - generated
+    - \<agent-name>
+      - types.gen.ts Tipos gerados a partir dos modelos Pydantic do agente
+      - client.gen.ts Cliente com segurança de tipo para chamar a API do seu agente
+      - options-proxy.gen.ts Opções de hooks TanStack Query para interagir com seu agente
+- project.json Destinos adicionados para geração de cliente e observação de mudanças
+- .gitignore Os arquivos de cliente gerados são ignorados por padrão
+
+</FileTree>
+
+## Como Funciona
+
+### Geração de Cliente OpenAPI
+
+No momento da compilação, o aplicativo FastAPI do Python Strands Agent é introspeccionado para gerar uma especificação OpenAPI. Esta especificação é então usada para gerar um cliente TypeScript com segurança de tipo com hooks TanStack Query, seguindo o mesmo padrão da <Link path="guides/connection/react-fastapi">conexão React to FastAPI</Link>.
+
+Cada agente obtém seu próprio script OpenAPI com escopo definido (por exemplo, `scripts/agent_openapi.py`) para que projetos com vários agentes possam gerar especificações individuais.
+
+### Autenticação
+
+O código gerado lida com a autenticação dependendo da configuração do seu agente:
+
+- **IAM** (padrão): Usa AWS SigV4 para assinar solicitações HTTP. As credenciais são obtidas do Cognito Identity Pool configurado com a autenticação do seu site
+- **Cognito**: Incorpora o token de acesso JWT em um cabeçalho de Autorização
+- **None**: Sem autenticação
+
+## Usando o Código Gerado
+
+### Usando o Hook da API
+
+O hook `use<AgentName>` fornece opções TanStack Query para chamar os endpoints da API do seu agente:
+
+```tsx
+import { useState } from 'react';
+import { useMutation } from '@tanstack/react-query';
+import { useMyAgent } from '../hooks/useMyAgent';
+import type { StreamChunk } from '../generated/my-agent/types.gen';
+
+function ChatComponent() {
+  const api = useMyAgent();
+  const [chunks, setChunks] = useState<StreamChunk[]>([]);
+
+  const invoke = useMutation(api.invoke.mutationOptions({
+    onSuccess: async (stream) => {
+      setChunks([]);
+      for await (const chunk of stream) {
+        setChunks((prev) => [...prev, chunk]);
+      }
+    },
+  }));
+
+  const handleSend = (message: string) => {
+    invoke.mutate({
+      prompt: message,
+      sessionId: 'my-session',
+    });
+  };
+
+  return (
+    <div>
+      <button onClick={() => handleSend('Hello!')}>Send</button>
+      {invoke.isPending && <p>Agent is thinking...</p>}
+      {chunks.map((chunk, i) => (
+        <span key={i}>{chunk.content}</span>
+      ))}
+    </div>
+  );
+}
+```
+
+### Usando o Cliente Vanilla
+
+O hook `use<AgentName>Client` fornece acesso direto ao cliente da API:
+
+```tsx
+import { useState } from 'react';
+import { useMyAgentClient } from '../hooks/useMyAgentClient';
+import type { StreamChunk } from '../generated/my-agent/types.gen';
+
+function ChatComponent() {
+  const client = useMyAgentClient();
+  const [chunks, setChunks] = useState<StreamChunk[]>([]);
+
+  const handleSend = async (message: string) => {
+    setChunks([]);
+    for await (const chunk of client.invoke({
+      prompt: message,
+      sessionId: 'my-session',
+    })) {
+      setChunks((prev) => [...prev, chunk]);
+    }
+  };
+
+  return (
+    <div>
+      <button onClick={() => handleSend('Hello!')}>Send</button>
+      {chunks.map((chunk, i) => (
+        <span key={i}>{chunk.content}</span>
+      ))}
+    </div>
+  );
+}
+```
+
+## Desenvolvimento Local
+
+O gerador de conexão configura automaticamente a integração `serve-local`:
+
+1. Executar `nx serve-local <website>` também iniciará o servidor FastAPI local do agente
+2. A configuração de tempo de execução é substituída para apontar para a URL HTTP local (por exemplo, `http://localhost:8081/`)
+3. O cliente TypeScript é regenerado automaticamente quando a API do agente muda
+
+<NxCommands commands={['serve-local <WebsiteProject>']} />
+
+:::tip[Hot Reloading]
+O site e o agente conectado farão hot-reload, permitindo que você itere rapidamente em ambos juntos sem implantar na AWS.
+:::
+
+## Infraestrutura
+
+Se o seu agente usa autenticação IAM, a função autenticada do Cognito Identity Pool deve receber permissão para invocar o agente. Consulte a construção de infraestrutura do seu agente para o método `grantInvokeAccess` apropriado.
+
+## Mais Informações
+
+Para mais informações, consulte:
+
+- <Link path="guides/py-strands-agent">Guia do Python Strands Agent</Link>
+- <Link path="guides/connection/react-fastapi">Guia de Conexão React to FastAPI</Link>
+- [TanStack Query Documentation](https://tanstack.com/query/v5)

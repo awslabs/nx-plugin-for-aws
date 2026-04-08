@@ -52,6 +52,18 @@ export interface AddOpenApiReactClientOptions {
    * Port on which the backend project's local server listens
    */
   port: number;
+  /**
+   * When true, the generated provider reads from runtimeConfig.agentRuntimes
+   * and converts Bedrock AgentCore Runtime ARNs to HTTP URLs.
+   * When false (default), reads from runtimeConfig.apis directly.
+   */
+  isAgentRuntime?: boolean;
+  /**
+   * When true, skips the serve-local setup. Use this when the caller
+   * handles serve-local configuration separately (e.g. agent connections
+   * that use a component-specific serve-local target instead of 'serve').
+   */
+  skipServeLocal?: boolean;
 }
 
 /**
@@ -68,6 +80,8 @@ export const addOpenApiReactClient = async (
     specBuildTargetName,
     auth,
     port,
+    isAgentRuntime = false,
+    skipServeLocal = false,
   }: AddOpenApiReactClientOptions,
 ) => {
   const clientGenTarget = `generate:${kebabCase(apiName)}-client`;
@@ -185,6 +199,7 @@ export const addOpenApiReactClient = async (
       apiName,
       apiNameClassName,
       generatedClientDir,
+      isAgentRuntime,
     },
   );
 
@@ -237,21 +252,24 @@ export const addOpenApiReactClient = async (
     );
   }
 
-  // Update serve-local on the website to use our local server
-  await addTargetToServeLocal(
-    tree,
-    frontendProjectConfig.name,
-    backendProjectConfig.name,
-    {
-      url: `http://localhost:${port}/`,
-      apiName,
-      // Additionally add a dependency on the generate watch command to ensure that local
-      // API changes that affect the client are also reloaded.
-      // We include a dependency on the generate target as watch ONLY triggers on a change,
-      // and we need to ensure the client is generated the first time if not already present.
-      additionalDependencyTargets: [clientGenTarget, clientGenWatchTarget],
-    },
-  );
+  // Update serve-local on the website to use our local server.
+  // Callers that handle serve-local separately (e.g. agent connections) set skipServeLocal.
+  if (!skipServeLocal) {
+    await addTargetToServeLocal(
+      tree,
+      frontendProjectConfig.name,
+      backendProjectConfig.name,
+      {
+        url: `http://localhost:${port}/`,
+        apiName,
+        // Additionally add a dependency on the generate watch command to ensure that local
+        // API changes that affect the client are also reloaded.
+        // We include a dependency on the generate target as watch ONLY triggers on a change,
+        // and we need to ensure the client is generated the first time if not already present.
+        additionalDependencyTargets: [clientGenTarget, clientGenWatchTarget],
+      },
+    );
+  }
 
   addDependenciesToPackageJson(
     tree,
