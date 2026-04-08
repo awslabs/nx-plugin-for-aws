@@ -12,7 +12,6 @@ __all__ = ["InventoryMcpClient"]
 exports[`py#strands-agent#mcp-connection generator > should match snapshot for generated files > agentcore_mcp_client.py 1`] = `
 "import hashlib
 from collections.abc import Generator
-from typing import Any
 
 import boto3
 import httpx
@@ -23,17 +22,26 @@ from strands.tools.mcp.mcp_client import MCPClient
 
 
 class SigV4HTTPXAuth(httpx.Auth):
-    """HTTPX Auth class that signs requests with AWS SigV4."""
+    """HTTPX Auth class that signs requests with AWS SigV4.
 
-    def __init__(self, credentials: Any, region: str):
-        self.credentials = credentials
+    Credentials are resolved per-request to support workload identity
+    and other temporary credential providers in Agent Core containers.
+    """
+
+    def __init__(self, region: str):
         self.service = "bedrock-agentcore"
         self.region = region
-        self.signer = SigV4Auth(credentials, self.service, region)
 
     def auth_flow(
         self, request: httpx.Request
     ) -> Generator[httpx.Request, httpx.Response, None]:
+        credentials = (
+            boto3.Session(region_name=self.region)
+            .get_credentials()
+            .get_frozen_credentials()
+        )
+        signer = SigV4Auth(credentials, self.service, self.region)
+
         headers = dict(request.headers)
 
         headers.pop("connection", None)
@@ -48,7 +56,7 @@ class SigV4HTTPXAuth(httpx.Auth):
             headers=headers,
         )
 
-        self.signer.add_auth(aws_request)
+        signer.add_auth(aws_request)
 
         request.headers.clear()
         request.headers.update(dict(aws_request.headers))
@@ -95,16 +103,14 @@ class AgentCoreMCPClient:
     def with_iam_auth(agent_runtime_arn: str, session_id: str) -> MCPClient:
         """Create an MCP client with IAM (SigV4) authentication.
 
-        Region and credentials are derived automatically from the ARN
-        and the default credential provider chain.
+        Region is derived from the ARN. Credentials are resolved
+        per-request from the default credential provider chain.
         """
         region, _ = AgentCoreMCPClient._build_url(agent_runtime_arn)
-        boto_session = boto3.Session(region_name=region)
-        credentials = boto_session.get_credentials()
         return AgentCoreMCPClient._create(
             agent_runtime_arn=agent_runtime_arn,
             session_id=session_id,
-            auth_handler=SigV4HTTPXAuth(credentials, region),
+            auth_handler=SigV4HTTPXAuth(region),
         )
 
     @staticmethod
