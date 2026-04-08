@@ -99,9 +99,7 @@ export const pyStrandsAgentReactConnectionGenerator = async (
   });
 
   // Use the shared OpenAPI react client utility for hooks, providers, and build targets.
-  // Note: addOpenApiReactClient calls addTargetToServeLocal internally, but it will be
-  // a no-op since py strands agents don't have a "serve" target. We handle serve-local
-  // separately below using the agent-specific serve-local target.
+  // Serve-local is handled separately below using the agent-specific serve-local target.
   const apiName = agentNameClassName;
   await addOpenApiReactClient(tree, {
     apiName,
@@ -113,6 +111,7 @@ export const pyStrandsAgentReactConnectionGenerator = async (
     auth,
     port: agentPort,
     isAgentRuntime: true,
+    skipServeLocal: true,
   });
 
   // Add serve-local integration using the agent's serve-local target

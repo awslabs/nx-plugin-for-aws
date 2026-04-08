@@ -30,11 +30,6 @@ export interface AgentServeLocalOptions {
    * Additional targets to add as serve-local dependencies.
    */
   additionalDependencyTargets?: string[];
-  /**
-   * Optional filter to remove existing serve-local dependencies before
-   * adding the new ones.
-   */
-  filterExistingDeps?: (dep: any) => boolean;
 }
 
 /**
@@ -75,14 +70,10 @@ export const addAgentTargetToServeLocal = async (
     return;
   }
 
-  const existingDeps = (
-    sourceProject.targets['serve-local'].dependsOn ?? []
-  ).filter(options.filterExistingDeps ?? (() => true));
-
   // Add a dependency on the agent serve-local target (so that the agent's
   // own serve-local dependencies, such as MCP servers, are also started)
   sourceProject.targets['serve-local'].dependsOn = [
-    ...existingDeps,
+    ...(sourceProject.targets['serve-local'].dependsOn ?? []),
     {
       projects: [targetProject.name],
       target: agentServeLocalTargetName,

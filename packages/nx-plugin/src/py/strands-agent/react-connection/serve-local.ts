@@ -3,10 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { Tree } from '@nx/devkit';
-import {
-  addAgentTargetToServeLocal,
-  AgentServeLocalOptions,
-} from '../../../connection/agent-serve-local';
+import { addAgentTargetToServeLocal } from '../../../connection/agent-serve-local';
 import { ComponentMetadata } from '../../../utils/nx';
 import { kebabCase } from '../../../utils/names';
 
@@ -29,31 +26,15 @@ export const addPyStrandsAgentTargetToServeLocal = async (
   targetProjectName: string,
   options: PyStrandsAgentServeLocalOptions,
 ) => {
-  // Determine the client generation target names
   const clientGenTarget = `generate:${kebabCase(options.agentNameClassName)}-client`;
   const clientGenWatchTarget = `watch-${clientGenTarget}`;
 
-  const agentOptions: AgentServeLocalOptions = {
+  await addAgentTargetToServeLocal(tree, sourceProjectName, targetProjectName, {
     agentNameClassName: options.agentNameClassName,
     port: options.port,
     targetComponent: options.targetComponent,
     runtimeConfigNamespace: 'agentRuntimes',
     localUrl: `http://localhost:${options.port}/`,
     additionalDependencyTargets: [clientGenTarget, clientGenWatchTarget],
-    // Remove any existing serve-local dep added by addOpenApiReactClient's
-    // addTargetToServeLocal (which won't match the agent target format)
-    filterExistingDeps: (dep: any) =>
-      !(
-        typeof dep === 'object' &&
-        dep.target === 'serve' &&
-        dep.projects?.includes(targetProjectName)
-      ),
-  };
-
-  await addAgentTargetToServeLocal(
-    tree,
-    sourceProjectName,
-    targetProjectName,
-    agentOptions,
-  );
+  });
 };
