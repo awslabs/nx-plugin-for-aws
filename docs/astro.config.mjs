@@ -365,8 +365,16 @@ export default defineConfig({
                   link: '/guides/connection/react-smithy',
                 },
                 {
+                  label: 'React → Python Strands Agent',
+                  link: '/guides/connection/react-py-strands-agent',
+                },
+                {
                   label: 'React → TypeScript Strands Agent',
                   link: '/guides/connection/react-ts-strands-agent',
+                },
+                {
+                  label: 'Python Strands Agent → MCP Server',
+                  link: '/guides/connection/py-strands-agent-mcp',
                 },
                 {
                   label: 'TypeScript Strands Agent → MCP Server',
