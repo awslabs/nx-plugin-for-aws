@@ -466,7 +466,7 @@ export default defineConfig([
       expect(project.targets?.['bundle-x86']?.dependsOn).toContain('compile');
 
       const commands = project.targets?.['bundle-x86']?.options?.commands;
-      expect(commands[1]).toContain('--python-platform x86_64-manylinux2014');
+      expect(commands[1]).toContain('--python-platform x86_64-manylinux_2_28');
 
       // Should also create a generic bundle target that depends on bundle-x86
       expect(project.targets?.bundle).toBeDefined();
@@ -475,13 +475,13 @@ export default defineConfig([
 
     it('should add python bundle target with custom platform', () => {
       addPythonBundleTarget(project, {
-        pythonPlatform: 'aarch64-manylinux2014',
+        pythonPlatform: 'aarch64-manylinux_2_28',
       });
 
       // Should create bundle-arm target for ARM platform
       expect(project.targets?.['bundle-arm']).toBeDefined();
       const commands = project.targets?.['bundle-arm']?.options?.commands;
-      expect(commands[1]).toContain('--python-platform aarch64-manylinux2014');
+      expect(commands[1]).toContain('--python-platform aarch64-manylinux_2_28');
 
       // Should also create a generic bundle target that depends on bundle-arm
       expect(project.targets?.bundle).toBeDefined();
@@ -528,7 +528,7 @@ export default defineConfig([
 
     it('should create generic bundle target that depends on architecture-specific target', () => {
       addPythonBundleTarget(project, {
-        pythonPlatform: 'x86_64-manylinux2014',
+        pythonPlatform: 'x86_64-manylinux_2_28',
       });
 
       // Should create bundle-x86 target
@@ -542,12 +542,12 @@ export default defineConfig([
     it('should support adding both platform bundle targets to the same project', () => {
       // Add x86 bundle target
       addPythonBundleTarget(project, {
-        pythonPlatform: 'x86_64-manylinux2014',
+        pythonPlatform: 'x86_64-manylinux_2_28',
       });
 
       // Add ARM bundle target
       addPythonBundleTarget(project, {
-        pythonPlatform: 'aarch64-manylinux2014',
+        pythonPlatform: 'aarch64-manylinux_2_28',
       });
 
       // Should have both architecture-specific targets
@@ -564,10 +564,10 @@ export default defineConfig([
       const armCommands = project.targets?.['bundle-arm']?.options?.commands;
 
       expect(x86Commands[1]).toContain(
-        '--python-platform x86_64-manylinux2014',
+        '--python-platform x86_64-manylinux_2_28',
       );
       expect(armCommands[1]).toContain(
-        '--python-platform aarch64-manylinux2014',
+        '--python-platform aarch64-manylinux_2_28',
       );
 
       // Verify each has correct output path

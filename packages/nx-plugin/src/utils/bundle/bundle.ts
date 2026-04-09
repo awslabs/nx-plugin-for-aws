@@ -20,9 +20,9 @@ import { addDependencyToTargetIfNotPresent } from '../nx';
 export interface AddPythonBundleTargetOptions {
   /**
    * Python platform
-   * @default x86_64-manylinux2014
+   * @default x86_64-manylinux_2_28
    */
-  pythonPlatform?: 'x86_64-manylinux2014' | 'aarch64-manylinux2014';
+  pythonPlatform?: 'x86_64-manylinux_2_28' | 'aarch64-manylinux_2_28';
 }
 
 interface CreatePythonBundleTargetOptions extends Required<AddPythonBundleTargetOptions> {
@@ -70,9 +70,9 @@ export const addPythonBundleTarget = (
     project.targets = {};
   }
 
-  const pythonPlatform = opts?.pythonPlatform ?? 'x86_64-manylinux2014';
+  const pythonPlatform = opts?.pythonPlatform ?? 'x86_64-manylinux_2_28';
   const bundleTargetName =
-    pythonPlatform === 'aarch64-manylinux2014' ? 'bundle-arm' : 'bundle-x86';
+    pythonPlatform === 'aarch64-manylinux_2_28' ? 'bundle-arm' : 'bundle-x86';
 
   if (!project.targets?.[bundleTargetName]) {
     project.targets[bundleTargetName] = {
