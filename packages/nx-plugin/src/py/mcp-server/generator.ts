@@ -107,7 +107,7 @@ export const pyMcpServerGenerator = async (
     const { bundleTargetName, bundleOutputDir } = addPythonBundleTarget(
       project,
       {
-        pythonPlatform: 'aarch64-manylinux2014',
+        pythonPlatform: 'aarch64-manylinux_2_28',
       },
     );
 
