@@ -5,20 +5,37 @@ on:
     types:
       - published
 
+permissions:
+  id-token: write # Required for OIDC
+
 jobs:
   slack-notification:
     name: Share recent changes with a channel
     runs-on: ubuntu-latest
     steps:
-      - name: Send release notification
-        uses: slackapi/slack-github-action@v3.0.1
+      - name: Checkout repository
+        uses: actions/checkout@v6
+      - name: Use PNPM 10.x
+        uses: pnpm/action-setup@v4
         with:
-          webhook: ${{ secrets.SLACK_WEBHOOK_RELEASE_URL }}
-          webhook-type: webhook-trigger
-          payload: |
-            {
-              "name": ${{ toJSON(github.event.release.name) }},
-              "version": "${{ github.event.release.tag_name }}",
-              "body": ${{ toJSON(github.event.release.body) }},
-              "url": "${{ github.event.release.html_url }}"
-            }
+          version: 10
+      - name: Use Node.js 22.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+      - name: Install dependencies
+        run: pnpm i --frozen-lockfile --prefer-offline
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_TRANSLATE_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_TRANSLATE_AWS_REGION || 'us-west-2' }}
+      - name: Generate headline and send notification
+        run: pnpm tsx ./scripts/send-slack-release-notification.ts
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_RELEASE_URL }}
+          RELEASE_NAME: ${{ github.event.release.name }}
+          RELEASE_VERSION: ${{ github.event.release.tag_name }}
+          RELEASE_BODY: ${{ github.event.release.body }}
+          RELEASE_URL: ${{ github.event.release.html_url }}
