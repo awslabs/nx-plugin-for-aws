@@ -30,10 +30,10 @@ describe('smoke test - smithy-api', () => {
     const projectRoot = `${targetDir}/smithy`;
     const opts = { cwd: projectRoot, env: { NX_DAEMON: 'false' } };
 
-    await runCLI(
-      `generate @aws/nx-plugin:ts#smithy-api --name=smithy-isolated --integrationPattern=isolated --no-interactive`,
-      opts,
-    );
+    // Test the shared integration pattern for Smithy APIs.
+    // The isolated pattern is already covered by the main smoke tests (pnpm, npm, etc.)
+    // and the terraform smoke test. We only generate a single Smithy API here to avoid
+    // Docker build cache mount contention when multiple Smithy model builds run concurrently.
     await runCLI(
       `generate @aws/nx-plugin:ts#smithy-api --name=smithy-shared --integrationPattern=shared --no-interactive`,
       opts,
@@ -49,10 +49,6 @@ describe('smoke test - smithy-api', () => {
       opts,
     );
 
-    await runCLI(
-      `generate @aws/nx-plugin:connection --sourceProject=website --targetProject=smithy-isolated --no-interactive`,
-      opts,
-    );
     await runCLI(
       `generate @aws/nx-plugin:connection --sourceProject=website --targetProject=smithy-shared --no-interactive`,
       opts,
