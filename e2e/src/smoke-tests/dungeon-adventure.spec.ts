@@ -43,7 +43,7 @@ const expectFileMatchesOldTemplate = (
  * This test runs through the dungeon adventure tutorial from the docs
  */
 describe('smoke test - dungeon-adventure', () => {
-  const pkgMgr = process.platform === 'win32' ? 'npm' : 'pnpm';
+  const pkgMgr = 'pnpm';
   const targetDir = `${tmpProjPath()}/dungeon-adventure-${pkgMgr}`;
 
   beforeEach(() => {
