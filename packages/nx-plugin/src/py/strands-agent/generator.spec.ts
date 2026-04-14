@@ -288,6 +288,7 @@ dev-dependencies = []
       'rimraf dist/apps/test-project/docker/test-project-agent',
       'ncp dist/apps/test-project/bundle-arm dist/apps/test-project/docker/test-project-agent',
       'ncp apps/test-project/proj_test_project/agent/Dockerfile dist/apps/test-project/docker/test-project-agent/Dockerfile',
+      'docker build --platform linux/arm64 -t proj-test-project-agent:latest dist/apps/test-project/docker/test-project-agent',
     ]);
     expect(projectConfig.targets['agent-docker'].options.parallel).toBe(false);
 

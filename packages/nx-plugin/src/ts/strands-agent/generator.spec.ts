@@ -301,9 +301,11 @@ describe('ts#strands-agent generator', () => {
 
     // Check that docker target was added
     expect(projectConfig.targets['agent-docker']).toBeDefined();
-    expect(projectConfig.targets['agent-docker'].options.command).toBe(
-      `ncp apps/test-project/src/agent/Dockerfile dist/apps/test-project/bundle/agent/test-project-agent/Dockerfile`,
-    );
+    expect(projectConfig.targets['agent-docker'].options.commands).toEqual([
+      'ncp apps/test-project/src/agent/Dockerfile dist/apps/test-project/bundle/agent/test-project-agent/Dockerfile',
+      'docker build --platform linux/arm64 -t proj-test-project-agent:latest dist/apps/test-project/bundle/agent/test-project-agent',
+    ]);
+    expect(projectConfig.targets['agent-docker'].options.parallel).toBe(false);
     expect(projectConfig.targets['agent-docker'].dependsOn).toEqual(['bundle']);
   });
 

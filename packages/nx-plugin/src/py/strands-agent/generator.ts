@@ -157,7 +157,7 @@ export const pyStrandsAgentGenerator = async (
     );
     const dockerTargetName = `${agentTargetPrefix}-docker`;
 
-    // Add a docker target that prepares the docker context (copies Dockerfile + bundle)
+    // Add a docker target that prepares the docker context and builds the image
     const fs = new FsCommands(tree);
     project.targets[dockerTargetName] = {
       cache: true,
@@ -170,6 +170,7 @@ export const pyStrandsAgentGenerator = async (
             `${targetSourceDir}/Dockerfile`,
             `${dockerOutputDir}/Dockerfile`,
           ),
+          `docker build --platform linux/arm64 -t ${dockerImageTag} ${dockerOutputDir}`,
         ],
         parallel: false,
       },

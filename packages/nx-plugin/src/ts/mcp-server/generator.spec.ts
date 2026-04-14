@@ -447,8 +447,14 @@ describe('ts#mcp-server generator', () => {
 
     // Check that docker target was added
     expect(projectConfig.targets['mcp-server-docker']).toBeDefined();
-    expect(projectConfig.targets['mcp-server-docker'].options.command).toBe(
-      `ncp apps/test-project/src/mcp-server/Dockerfile dist/apps/test-project/bundle/mcp/test-project-mcp-server/Dockerfile`,
+    expect(projectConfig.targets['mcp-server-docker'].options.commands).toEqual(
+      [
+        'ncp apps/test-project/src/mcp-server/Dockerfile dist/apps/test-project/bundle/mcp/test-project-mcp-server/Dockerfile',
+        'docker build --platform linux/arm64 -t proj-test-project-mcp-server:latest dist/apps/test-project/bundle/mcp/test-project-mcp-server',
+      ],
+    );
+    expect(projectConfig.targets['mcp-server-docker'].options.parallel).toBe(
+      false,
     );
     expect(projectConfig.targets['mcp-server-docker'].dependsOn).toEqual([
       'bundle',

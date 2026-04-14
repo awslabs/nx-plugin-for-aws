@@ -371,6 +371,7 @@ dev-dependencies = []
         'rimraf dist/apps/test-project/docker/test-project-mcp-server',
         'ncp dist/apps/test-project/bundle-arm dist/apps/test-project/docker/test-project-mcp-server',
         'ncp apps/test-project/proj_test_project/mcp_server/Dockerfile dist/apps/test-project/docker/test-project-mcp-server/Dockerfile',
+        'docker build --platform linux/arm64 -t proj-test-project-mcp-server:latest dist/apps/test-project/docker/test-project-mcp-server',
       ],
     );
     expect(projectConfig.targets['mcp-server-docker'].options.parallel).toBe(

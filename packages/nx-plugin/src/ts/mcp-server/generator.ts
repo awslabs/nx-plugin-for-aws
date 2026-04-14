@@ -149,10 +149,14 @@ export const tsMcpServerGenerator = async (
       cache: true,
       executor: 'nx:run-commands',
       options: {
-        command: fs.cp(
-          `${targetSourceDir}/Dockerfile`,
-          `${dockerOutputDir}/Dockerfile`,
-        ),
+        commands: [
+          fs.cp(
+            `${targetSourceDir}/Dockerfile`,
+            `${dockerOutputDir}/Dockerfile`,
+          ),
+          `docker build --platform linux/arm64 -t ${dockerImageTag} ${dockerOutputDir}`,
+        ],
+        parallel: false,
       },
       dependsOn: ['bundle'],
     };
