@@ -448,7 +448,7 @@ describe('ts#mcp-server generator', () => {
     // Check that docker target was added
     expect(projectConfig.targets['mcp-server-docker']).toBeDefined();
     expect(projectConfig.targets['mcp-server-docker'].options.command).toBe(
-      `node -e "require('fs').cpSync('apps/test-project/src/mcp-server/Dockerfile','dist/apps/test-project/bundle/mcp/test-project-mcp-server/Dockerfile')"`,
+      `ncp apps/test-project/src/mcp-server/Dockerfile dist/apps/test-project/bundle/mcp/test-project-mcp-server/Dockerfile`,
     );
     expect(projectConfig.targets['mcp-server-docker'].dependsOn).toEqual([
       'bundle',

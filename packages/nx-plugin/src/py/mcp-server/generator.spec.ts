@@ -366,8 +366,15 @@ dev-dependencies = []
     expect(projectConfig.targets['mcp-server-docker'].executor).toBe(
       'nx:run-commands',
     );
-    expect(projectConfig.targets['mcp-server-docker'].options.command).toBe(
-      `node -e "const fs=require('fs');const p=require('path');fs.rmSync('dist/apps/test-project/docker/test-project-mcp-server',{recursive:true,force:true});fs.cpSync('dist/apps/test-project/bundle-arm','dist/apps/test-project/docker/test-project-mcp-server',{recursive:true});fs.copyFileSync(p.join('apps/test-project/proj_test_project/mcp_server','Dockerfile'),p.join('dist/apps/test-project/docker/test-project-mcp-server','Dockerfile'))"`,
+    expect(projectConfig.targets['mcp-server-docker'].options.commands).toEqual(
+      [
+        'rimraf dist/apps/test-project/docker/test-project-mcp-server',
+        'ncp dist/apps/test-project/bundle-arm dist/apps/test-project/docker/test-project-mcp-server',
+        'ncp apps/test-project/proj_test_project/mcp_server/Dockerfile dist/apps/test-project/docker/test-project-mcp-server/Dockerfile',
+      ],
+    );
+    expect(projectConfig.targets['mcp-server-docker'].options.parallel).toBe(
+      false,
     );
 
     // Check that docker target depends on bundle-arm

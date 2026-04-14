@@ -302,7 +302,7 @@ describe('ts#strands-agent generator', () => {
     // Check that docker target was added
     expect(projectConfig.targets['agent-docker']).toBeDefined();
     expect(projectConfig.targets['agent-docker'].options.command).toBe(
-      `node -e "require('fs').cpSync('apps/test-project/src/agent/Dockerfile','dist/apps/test-project/bundle/agent/test-project-agent/Dockerfile')"`,
+      `ncp apps/test-project/src/agent/Dockerfile dist/apps/test-project/bundle/agent/test-project-agent/Dockerfile`,
     );
     expect(projectConfig.targets['agent-docker'].dependsOn).toEqual(['bundle']);
   });

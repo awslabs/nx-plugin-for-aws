@@ -31,6 +31,7 @@ import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { addAgentInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
 
 import { assignPort } from '../../utils/port';
+import { FsCommands } from '../../utils/fs';
 
 export const TS_STRANDS_AGENT_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -123,11 +124,15 @@ export const tsStrandsAgentGenerator = async (
     );
     const dockerTargetName = `${agentTargetPrefix}-docker`;
 
+    const fs = new FsCommands(tree);
     project.targets[dockerTargetName] = {
       cache: true,
       executor: 'nx:run-commands',
       options: {
-        command: `node -e "require('fs').cpSync('${targetSourceDir}/Dockerfile','${dockerOutputDir}/Dockerfile')"`,
+        command: fs.cp(
+          `${targetSourceDir}/Dockerfile`,
+          `${dockerOutputDir}/Dockerfile`,
+        ),
       },
       dependsOn: ['bundle'],
     };

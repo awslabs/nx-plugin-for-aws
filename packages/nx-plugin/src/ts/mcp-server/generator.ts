@@ -34,6 +34,7 @@ import { getNpmScope } from '../../utils/npm-scope';
 import { resolveIacProvider } from '../../utils/iac';
 import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
 import { assignPort } from '../../utils/port';
+import { FsCommands } from '../../utils/fs';
 
 export const TS_MCP_SERVER_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -143,11 +144,15 @@ export const tsMcpServerGenerator = async (
     );
     const dockerTargetName = `${mcpTargetPrefix}-docker`;
 
+    const fs = new FsCommands(tree);
     project.targets[dockerTargetName] = {
       cache: true,
       executor: 'nx:run-commands',
       options: {
-        command: `node -e "require('fs').cpSync('${targetSourceDir}/Dockerfile','${dockerOutputDir}/Dockerfile')"`,
+        command: fs.cp(
+          `${targetSourceDir}/Dockerfile`,
+          `${dockerOutputDir}/Dockerfile`,
+        ),
       },
       dependsOn: ['bundle'],
     };

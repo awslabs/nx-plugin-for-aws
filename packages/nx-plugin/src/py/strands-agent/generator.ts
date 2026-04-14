@@ -29,6 +29,7 @@ import {
 import { addAgentInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
 
 import { addPythonBundleTarget } from '../../utils/bundle/bundle';
+import { FsCommands } from '../../utils/fs';
 import { getNpmScope } from '../../utils/npm-scope';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { Logger, UVProvider } from '../../utils/nxlv-python';
@@ -157,11 +158,20 @@ export const pyStrandsAgentGenerator = async (
     const dockerTargetName = `${agentTargetPrefix}-docker`;
 
     // Add a docker target that prepares the docker context (copies Dockerfile + bundle)
+    const fs = new FsCommands(tree);
     project.targets[dockerTargetName] = {
       cache: true,
       executor: 'nx:run-commands',
       options: {
-        command: `node -e "const fs=require('fs');const p=require('path');fs.rmSync('${dockerOutputDir}',{recursive:true,force:true});fs.cpSync('${bundleOutputDir}','${dockerOutputDir}',{recursive:true});fs.copyFileSync(p.join('${targetSourceDir}','Dockerfile'),p.join('${dockerOutputDir}','Dockerfile'))"`,
+        commands: [
+          fs.rm(dockerOutputDir),
+          fs.cp(bundleOutputDir, dockerOutputDir),
+          fs.cp(
+            `${targetSourceDir}/Dockerfile`,
+            `${dockerOutputDir}/Dockerfile`,
+          ),
+        ],
+        parallel: false,
       },
       dependsOn: [bundleTargetName],
     };

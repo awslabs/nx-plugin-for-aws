@@ -284,9 +284,12 @@ dev-dependencies = []
     expect(projectConfig.targets['agent-docker'].executor).toBe(
       'nx:run-commands',
     );
-    expect(projectConfig.targets['agent-docker'].options.command).toBe(
-      `node -e "const fs=require('fs');const p=require('path');fs.rmSync('dist/apps/test-project/docker/test-project-agent',{recursive:true,force:true});fs.cpSync('dist/apps/test-project/bundle-arm','dist/apps/test-project/docker/test-project-agent',{recursive:true});fs.copyFileSync(p.join('apps/test-project/proj_test_project/agent','Dockerfile'),p.join('dist/apps/test-project/docker/test-project-agent','Dockerfile'))"`,
-    );
+    expect(projectConfig.targets['agent-docker'].options.commands).toEqual([
+      'rimraf dist/apps/test-project/docker/test-project-agent',
+      'ncp dist/apps/test-project/bundle-arm dist/apps/test-project/docker/test-project-agent',
+      'ncp apps/test-project/proj_test_project/agent/Dockerfile dist/apps/test-project/docker/test-project-agent/Dockerfile',
+    ]);
+    expect(projectConfig.targets['agent-docker'].options.parallel).toBe(false);
 
     // Check that docker target depends on bundle-arm
     expect(projectConfig.targets['agent-docker'].dependsOn).toContain(
@@ -700,10 +703,10 @@ dev-dependencies = []
       tree.read('apps/my-dotted-project/project.json', 'utf-8'),
     );
 
-    // Check that docker command uses correct image tag
-    expect(projectConfig.targets['agent-docker'].options.command).toContain(
-      'project-agent',
-    );
+    // Check that docker command uses correct paths
+    expect(
+      projectConfig.targets['agent-docker'].options.commands.join(' '),
+    ).toContain('project-agent');
   });
 
   it('should add CDK dependencies for BedrockAgentCoreRuntime', async () => {
