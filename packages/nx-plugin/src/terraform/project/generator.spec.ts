@@ -47,6 +47,7 @@ describe('terraformProjectGenerator', () => {
       expect(projectConfig.targets).toHaveProperty('apply');
       expect(projectConfig.targets).toHaveProperty('bootstrap');
       expect(projectConfig.targets).toHaveProperty('bootstrap-destroy');
+      expect(projectConfig.targets).toHaveProperty('deploy');
       expect(projectConfig.targets).toHaveProperty('destroy');
       expect(projectConfig.targets).toHaveProperty('init');
       expect(projectConfig.targets).toHaveProperty('plan');
@@ -75,6 +76,18 @@ describe('terraformProjectGenerator', () => {
       expect(applyTarget.configurations.dev.command).toContain('dev.tfplan');
       expect(applyTarget.options.cwd).toBe('{projectRoot}/src');
       expect(applyTarget.dependsOn).toEqual(['plan']);
+    });
+
+    it('should configure deploy target as alias for apply', async () => {
+      await terraformProjectGenerator(tree, applicationSchema);
+
+      const projectConfig = readProjectConfiguration(
+        tree,
+        '@proj/my-terraform-project',
+      );
+      const deployTarget = projectConfig.targets['deploy'];
+
+      expect(deployTarget.dependsOn).toEqual(['apply']);
     });
 
     it('should configure bootstrap target correctly', async () => {
@@ -192,6 +205,7 @@ describe('terraformProjectGenerator', () => {
       expect(projectConfig.targets).not.toHaveProperty('apply');
       expect(projectConfig.targets).not.toHaveProperty('bootstrap');
       expect(projectConfig.targets).not.toHaveProperty('bootstrap-destroy');
+      expect(projectConfig.targets).not.toHaveProperty('deploy');
       expect(projectConfig.targets).not.toHaveProperty('destroy');
       expect(projectConfig.targets).not.toHaveProperty('plan');
       expect(projectConfig.targets).not.toHaveProperty('output');

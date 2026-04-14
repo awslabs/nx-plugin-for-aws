@@ -118,6 +118,9 @@ export async function terraformProjectGenerator(
     build: {
       dependsOn: ['fmt', 'test', `${sharedTfProjectName}:build`],
     },
+    deploy: {
+      dependsOn: ['apply'],
+    },
     destroy: {
       executor: 'nx:run-commands',
       defaultConfiguration: 'dev',
