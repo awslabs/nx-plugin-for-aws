@@ -147,7 +147,7 @@ export const tsMcpServerGenerator = async (
       cache: true,
       executor: 'nx:run-commands',
       options: {
-        command: `cp ${targetSourceDir}/Dockerfile ${dockerOutputDir}/Dockerfile`,
+        command: `node -e "require('fs').cpSync('${targetSourceDir}/Dockerfile','${dockerOutputDir}/Dockerfile')"`,
       },
       dependsOn: ['bundle'],
     };

@@ -136,7 +136,7 @@ export const pyMcpServerGenerator = async (
       cache: true,
       executor: 'nx:run-commands',
       options: {
-        command: `rm -rf ${dockerOutputDir} && mkdir -p ${dockerOutputDir} && cp -rl ${bundleOutputDir}/* ${dockerOutputDir}/ && cp ${targetSourceDir}/Dockerfile ${dockerOutputDir}/Dockerfile`,
+        command: `node -e "const fs=require('fs');const p=require('path');fs.rmSync('${dockerOutputDir}',{recursive:true,force:true});fs.cpSync('${bundleOutputDir}','${dockerOutputDir}',{recursive:true});fs.copyFileSync(p.join('${targetSourceDir}','Dockerfile'),p.join('${dockerOutputDir}','Dockerfile'))"`,
       },
       dependsOn: [bundleTargetName],
     };

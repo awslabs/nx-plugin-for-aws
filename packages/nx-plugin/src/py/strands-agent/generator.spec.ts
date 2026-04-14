@@ -285,7 +285,7 @@ dev-dependencies = []
       'nx:run-commands',
     );
     expect(projectConfig.targets['agent-docker'].options.command).toBe(
-      'rm -rf dist/apps/test-project/docker/test-project-agent && mkdir -p dist/apps/test-project/docker/test-project-agent && cp -rl dist/apps/test-project/bundle-arm/* dist/apps/test-project/docker/test-project-agent/ && cp apps/test-project/proj_test_project/agent/Dockerfile dist/apps/test-project/docker/test-project-agent/Dockerfile',
+      `node -e "const fs=require('fs');const p=require('path');fs.rmSync('dist/apps/test-project/docker/test-project-agent',{recursive:true,force:true});fs.cpSync('dist/apps/test-project/bundle-arm','dist/apps/test-project/docker/test-project-agent',{recursive:true});fs.copyFileSync(p.join('apps/test-project/proj_test_project/agent','Dockerfile'),p.join('dist/apps/test-project/docker/test-project-agent','Dockerfile'))"`,
     );
 
     // Check that docker target depends on bundle-arm
