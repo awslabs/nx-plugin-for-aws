@@ -286,6 +286,7 @@ dev-dependencies = []
     );
     expect(projectConfig.targets['agent-docker'].options.commands).toEqual([
       'rimraf dist/apps/test-project/docker/test-project-agent',
+      'make-dir dist/apps/test-project/docker/test-project-agent',
       'ncp dist/apps/test-project/bundle-arm dist/apps/test-project/docker/test-project-agent',
       'ncp apps/test-project/proj_test_project/agent/Dockerfile dist/apps/test-project/docker/test-project-agent/Dockerfile',
       'docker build --platform linux/arm64 -t proj-test-project-agent:latest dist/apps/test-project/docker/test-project-agent',

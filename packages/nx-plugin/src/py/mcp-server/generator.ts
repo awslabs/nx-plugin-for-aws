@@ -140,6 +140,7 @@ export const pyMcpServerGenerator = async (
       options: {
         commands: [
           fs.rm(dockerOutputDir),
+          fs.mkdir(dockerOutputDir),
           fs.cp(bundleOutputDir, dockerOutputDir),
           fs.cp(
             `${targetSourceDir}/Dockerfile`,
