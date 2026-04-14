@@ -28,6 +28,13 @@ export default async function () {
       });
       console.info('Package published to local registry');
 
+      console.info('Publishing @aws/nx-plugin-mcp to local registry');
+      execSync(`npm publish`, {
+        env: process.env,
+        cwd: join(__dirname, '../../dist/packages/nx-plugin-mcp'),
+      });
+      console.info('@aws/nx-plugin-mcp published to local registry');
+
       // Read the published package version and set NX_E2E_PRESET_VERSION
       // This is needed because create-nx-workspace uses `npm view` to resolve
       // the preset version, which may fail on Windows with a local registry

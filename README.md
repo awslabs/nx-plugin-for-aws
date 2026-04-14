@@ -97,7 +97,7 @@ Example configuration for Amazon Q CLI MCP (`~/.aws/amazonq/mcp.json`):
   "mcpServers": {
     "aws-nx-mcp": {
       "command": "npx",
-      "args": ["-y", "-p", "@aws/nx-plugin", "aws-nx-mcp"]
+      "args": ["-y", "@aws/nx-plugin-mcp"]
     }
   }
 }

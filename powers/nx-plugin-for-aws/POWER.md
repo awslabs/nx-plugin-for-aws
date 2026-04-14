@@ -150,7 +150,7 @@ Add capabilities to existing projects:
 **Solution:**
 
 1. Verify Node.js and npm are installed: `node --version && npm --version`
-2. Try running manually: `npx -y -p @aws/nx-plugin aws-nx-mcp`
+2. Try running manually: `npx -y @aws/nx-plugin-mcp`
 3. If you get `ENOENT npx`, use the full path: replace `npx` with the output of `which npx`
 4. Restart Kiro and try again
 
