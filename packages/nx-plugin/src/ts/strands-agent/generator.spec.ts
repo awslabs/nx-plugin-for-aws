@@ -302,7 +302,7 @@ describe('ts#strands-agent generator', () => {
     // Check that docker target was added
     expect(projectConfig.targets['agent-docker']).toBeDefined();
     expect(projectConfig.targets['agent-docker'].options.command).toBe(
-      'docker build --platform linux/arm64 -t proj-test-project-agent:latest apps/test-project/src/agent --build-context workspace=.',
+      'cp apps/test-project/src/agent/Dockerfile dist/apps/test-project/bundle/agent/test-project-agent/Dockerfile',
     );
     expect(projectConfig.targets['agent-docker'].dependsOn).toEqual(['bundle']);
   });
@@ -400,7 +400,7 @@ describe('ts#strands-agent generator', () => {
       'packages/common/constructs/src/app/agents/my-agent/my-agent.ts',
       'utf-8',
     );
-    expect(agentConstruct).toContain('docker inspect my-scope-my-agent:latest');
+    expect(agentConstruct).toContain('findWorkspaceRoot');
   });
 
   it('should match snapshot for BedrockAgentCoreRuntime generated constructs files', async () => {
@@ -647,9 +647,7 @@ describe('ts#strands-agent generator', () => {
       'apps/test-project/src/path-test-agent/Dockerfile',
       'utf-8',
     );
-    expect(dockerfile).toContain(
-      'COPY --from=workspace dist/apps/test-project/bundle/agent/path-test-agent/index.js /app',
-    );
+    expect(dockerfile).toContain('COPY index.js /app');
 
     // Check rolldown config output path matches
     const rolldownConfig = tree.read(

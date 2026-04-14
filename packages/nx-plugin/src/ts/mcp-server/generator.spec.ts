@@ -448,7 +448,7 @@ describe('ts#mcp-server generator', () => {
     // Check that docker target was added
     expect(projectConfig.targets['mcp-server-docker']).toBeDefined();
     expect(projectConfig.targets['mcp-server-docker'].options.command).toBe(
-      'docker build --platform linux/arm64 -t proj-test-project-mcp-server:latest apps/test-project/src/mcp-server --build-context workspace=.',
+      'cp apps/test-project/src/mcp-server/Dockerfile dist/apps/test-project/bundle/mcp/test-project-mcp-server/Dockerfile',
     );
     expect(projectConfig.targets['mcp-server-docker'].dependsOn).toEqual([
       'bundle',
@@ -609,21 +609,12 @@ describe('ts#mcp-server generator', () => {
       iacProvider: 'CDK',
     });
 
-    expect(
-      tree.read(
-        'packages/common/constructs/src/app/mcp-servers/my-server/Dockerfile',
-        'utf-8',
-      ),
-    ).toContain('my-scope-my-server:latest');
-
-    // Check that the docker image tag is correctly generated in the MCP server construct
+    // Check that the MCP server construct uses findWorkspaceRoot to locate the bundle
     const mcpServerConstruct = tree.read(
       'packages/common/constructs/src/app/mcp-servers/my-server/my-server.ts',
       'utf-8',
     );
-    expect(mcpServerConstruct).toContain(
-      'docker inspect my-scope-my-server:latest',
-    );
+    expect(mcpServerConstruct).toContain('findWorkspaceRoot');
   });
 
   it('should match snapshot for BedrockAgentCoreRuntime generated constructs files', async () => {
@@ -893,9 +884,7 @@ describe('ts#mcp-server generator', () => {
       'apps/test-project/src/path-test-server/Dockerfile',
       'utf-8',
     );
-    expect(dockerfile).toContain(
-      'COPY --from=workspace dist/apps/test-project/bundle/mcp/path-test-server/index.js /app',
-    );
+    expect(dockerfile).toContain('COPY index.js /app');
 
     // Check rolldown config output path matches
     const rolldownConfig = tree.read(

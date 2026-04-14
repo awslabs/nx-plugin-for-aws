@@ -148,17 +148,20 @@ export const pyStrandsAgentGenerator = async (
       { overwriteStrategy: OverwriteStrategy.KeepExisting },
     );
 
+    const dockerOutputDir = joinPathFragments(
+      'dist',
+      project.root,
+      'docker',
+      name,
+    );
     const dockerTargetName = `${agentTargetPrefix}-docker`;
 
-    // Add a docker target specific to this agent
+    // Add a docker target that prepares the docker context (copies Dockerfile + bundle)
     project.targets[dockerTargetName] = {
       cache: true,
       executor: 'nx:run-commands',
       options: {
-        commands: [
-          `docker build --platform linux/arm64 -t ${dockerImageTag} ${targetSourceDir} --build-context workspace=.`,
-        ],
-        parallel: false,
+        command: `rm -rf ${dockerOutputDir} && mkdir -p ${dockerOutputDir} && cp -rl ${bundleOutputDir}/* ${dockerOutputDir}/ && cp ${targetSourceDir}/Dockerfile ${dockerOutputDir}/Dockerfile`,
       },
       dependsOn: [bundleTargetName],
     };
@@ -175,6 +178,7 @@ export const pyStrandsAgentGenerator = async (
       agentNameKebabCase: name,
       agentNameClassName,
       dockerImageTag,
+      dockerOutputDir,
       iacProvider,
       projectName: project.name,
       auth,

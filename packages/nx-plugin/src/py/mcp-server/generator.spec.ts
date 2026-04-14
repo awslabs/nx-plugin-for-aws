@@ -366,10 +366,8 @@ dev-dependencies = []
     expect(projectConfig.targets['mcp-server-docker'].executor).toBe(
       'nx:run-commands',
     );
-    expect(projectConfig.targets['mcp-server-docker'].options.commands).toEqual(
-      [
-        'docker build --platform linux/arm64 -t proj-test-project-mcp-server:latest apps/test-project/proj_test_project/mcp_server --build-context workspace=.',
-      ],
+    expect(projectConfig.targets['mcp-server-docker'].options.command).toBe(
+      'rm -rf dist/apps/test-project/docker/test-project-mcp-server && mkdir -p dist/apps/test-project/docker/test-project-mcp-server && cp -rl dist/apps/test-project/bundle-arm/* dist/apps/test-project/docker/test-project-mcp-server/ && cp apps/test-project/proj_test_project/mcp_server/Dockerfile dist/apps/test-project/docker/test-project-mcp-server/Dockerfile',
     );
 
     // Check that docker target depends on bundle-arm
@@ -521,21 +519,12 @@ dev-dependencies = []
       iacProvider: 'CDK',
     });
 
-    expect(
-      tree.read(
-        'packages/common/constructs/src/app/mcp-servers/my-server/Dockerfile',
-        'utf-8',
-      ),
-    ).toContain('my-scope-my-server:latest');
-
-    // Check that the docker image tag is correctly generated in the MCP server construct
+    // Check that the MCP server construct uses findWorkspaceRoot to locate the bundle
     const mcpServerConstruct = tree.read(
       'packages/common/constructs/src/app/mcp-servers/my-server/my-server.ts',
       'utf-8',
     );
-    expect(mcpServerConstruct).toContain(
-      'docker inspect my-scope-my-server:latest',
-    );
+    expect(mcpServerConstruct).toContain('findWorkspaceRoot');
   });
 
   it('should match snapshot for BedrockAgentCoreRuntime generated constructs files', async () => {

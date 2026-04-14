@@ -284,9 +284,9 @@ dev-dependencies = []
     expect(projectConfig.targets['agent-docker'].executor).toBe(
       'nx:run-commands',
     );
-    expect(projectConfig.targets['agent-docker'].options.commands).toEqual([
-      'docker build --platform linux/arm64 -t proj-test-project-agent:latest apps/test-project/proj_test_project/agent --build-context workspace=.',
-    ]);
+    expect(projectConfig.targets['agent-docker'].options.command).toBe(
+      'rm -rf dist/apps/test-project/docker/test-project-agent && mkdir -p dist/apps/test-project/docker/test-project-agent && cp -rl dist/apps/test-project/bundle-arm/* dist/apps/test-project/docker/test-project-agent/ && cp apps/test-project/proj_test_project/agent/Dockerfile dist/apps/test-project/docker/test-project-agent/Dockerfile',
+    );
 
     // Check that docker target depends on bundle-arm
     expect(projectConfig.targets['agent-docker'].dependsOn).toContain(
@@ -458,7 +458,7 @@ dev-dependencies = []
       'packages/common/constructs/src/app/agents/my-agent/my-agent.ts',
       'utf-8',
     );
-    expect(agentConstruct).toContain('docker inspect my-scope-my-agent:latest');
+    expect(agentConstruct).toContain('findWorkspaceRoot');
   });
 
   it('should handle Python bundle target configuration for BedrockAgentCoreRuntime', async () => {
@@ -701,8 +701,8 @@ dev-dependencies = []
     );
 
     // Check that docker command uses correct image tag
-    expect(projectConfig.targets['agent-docker'].options.commands[0]).toContain(
-      'proj-project-agent:latest',
+    expect(projectConfig.targets['agent-docker'].options.command).toContain(
+      'project-agent',
     );
   });
 

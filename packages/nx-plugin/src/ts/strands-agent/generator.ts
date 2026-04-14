@@ -114,13 +114,20 @@ export const tsStrandsAgentGenerator = async (
       { overwriteStrategy: OverwriteStrategy.KeepExisting },
     );
 
+    const dockerOutputDir = joinPathFragments(
+      'dist',
+      project.root,
+      'bundle',
+      'agent',
+      name,
+    );
     const dockerTargetName = `${agentTargetPrefix}-docker`;
 
     project.targets[dockerTargetName] = {
       cache: true,
       executor: 'nx:run-commands',
       options: {
-        command: `docker build --platform linux/arm64 -t ${dockerImageTag} ${targetSourceDir} --build-context workspace=.`,
+        command: `cp ${targetSourceDir}/Dockerfile ${dockerOutputDir}/Dockerfile`,
       },
       dependsOn: ['bundle'],
     };
@@ -137,6 +144,7 @@ export const tsStrandsAgentGenerator = async (
       agentNameClassName,
       projectName: project.name,
       dockerImageTag,
+      dockerOutputDir,
       iacProvider,
       auth,
       serverProtocol: protocol,

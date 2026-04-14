@@ -134,13 +134,20 @@ export const tsMcpServerGenerator = async (
       bundleOutputDir: joinPathFragments('mcp', name),
     });
 
+    const dockerOutputDir = joinPathFragments(
+      'dist',
+      project.root,
+      'bundle',
+      'mcp',
+      name,
+    );
     const dockerTargetName = `${mcpTargetPrefix}-docker`;
 
     project.targets[dockerTargetName] = {
       cache: true,
       executor: 'nx:run-commands',
       options: {
-        command: `docker build --platform linux/arm64 -t ${dockerImageTag} ${targetSourceDir} --build-context workspace=.`,
+        command: `cp ${targetSourceDir}/Dockerfile ${dockerOutputDir}/Dockerfile`,
       },
       dependsOn: ['bundle'],
     };
@@ -158,6 +165,7 @@ export const tsMcpServerGenerator = async (
       mcpServerNameClassName,
       projectName: project.name,
       dockerImageTag,
+      dockerOutputDir,
       iacProvider,
       auth,
     });
