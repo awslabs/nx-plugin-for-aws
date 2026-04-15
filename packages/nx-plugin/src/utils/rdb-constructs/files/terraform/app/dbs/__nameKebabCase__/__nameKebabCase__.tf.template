@@ -2,6 +2,10 @@ terraform {
   required_version = ">= 1.0"
 
   required_providers {
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.5"
+    }
     aws = {
       source  = "hashicorp/aws"
       version = "~> 6.33"
@@ -92,27 +96,61 @@ locals {
     for file in sort(fileset(local.migration_bundle_path, "**")) :
     "${file}:${filesha256("${local.migration_bundle_path}/${file}")}"
   ]))
+  create_db_user_bundle_path = "${path.module}/../../../../../../../<%- createDbUserBundlePathFromRoot %>"
   migration_function_name = "<%= nameKebabCase %>-migration-${random_string.suffix.result}"
+  create_db_user_function_name = "<%= nameKebabCase %>-create-db-user-${random_string.suffix.result}"
+  database_runtime_user = "db_${random_string.suffix.result}"
 }
 
 module "aurora" {
   source = "../../../core/rdb/aurora"
 
-  name                    = "<%= nameKebabCase %>"
-  vpc_id                  = var.vpc_id
-  subnet_ids              = var.subnet_ids
-  engine                  = "aurora-<%= engine %>"
-  engine_version          = var.engine_version
-  database_name           = "<%= databaseName %>"
-  database_user           = "<%= databaseUser %>"
+  name               = "<%= nameKebabCase %>"
+  vpc_id             = var.vpc_id
+  subnet_ids         = var.subnet_ids
+  engine             = "<%= engine === 'mysql' ? 'aurora-mysql' : 'aurora-postgresql' %>"
+  engine_version     = var.engine_version
+  database_name      = "<%= databaseName %>"
+  admin_user         = "<%= adminUser %>"
   database_url_query_parameters = var.database_url_query_parameters
-  port                    = var.port
+  port               = var.port
   serverless_min_capacity = var.serverless_min_capacity
   serverless_max_capacity = var.serverless_max_capacity
-  instance_count          = var.instance_count
-  deletion_protection     = var.deletion_protection
-  skip_final_snapshot     = var.skip_final_snapshot
-  tags                    = var.tags
+  instance_count     = var.instance_count
+  deletion_protection = var.deletion_protection
+  skip_final_snapshot = var.skip_final_snapshot
+  tags               = var.tags
+}
+
+data "archive_file" "create_db_user_zip" {
+  type        = "zip"
+  source_dir  = local.create_db_user_bundle_path
+  output_path = "${path.module}/../../../../../../../dist/packages/common/terraform/dbs/<%= nameKebabCase %>/create-db-user.zip"
+}
+
+module "add_rdb_to_runtime_config" {
+  source = "../../../core/runtime-config/entry"
+
+  namespace = "connection"
+  key       = "rdbs"
+  value = {
+    "<%= nameClassName %>" = {
+      hostname  = module.aurora.cluster_endpoint
+      port      = module.aurora.cluster_port
+      database  = module.aurora.database_name
+      adminUser = module.aurora.admin_user
+      dbUser    = local.database_runtime_user
+      region    = data.aws_region.current.name
+    }
+  }
+}
+
+module "appconfig" {
+  source = "../../../core/runtime-config/appconfig"
+
+  application_name = "<%= nameClassName %>-runtime-config"
+
+  depends_on = [module.add_rdb_to_runtime_config]
 }
 
 resource "aws_ecr_repository" "migration_handler" {
@@ -216,11 +254,113 @@ resource "aws_iam_role_policy_attachment" "migration_handler_xray" {
   policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
 }
 
+resource "aws_iam_role_policy" "migration_handler_access" {
+  role = aws_iam_role.migration_handler.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+<%_ if (engine === 'mysql') { _%>
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue"
+        ]
+        Resource = [module.aurora.secret_arn]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt"
+        ]
+        Resource = [module.aurora.kms_key_arn]
+      }
+<%_ } else { _%>
+      {
+        Effect = "Allow"
+        Action = [
+          "rds-db:connect"
+        ]
+        Resource = [
+          "arn:aws:rds-db:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:dbuser:${module.aurora.cluster_resource_id}/${local.database_runtime_user}"
+        ]
+      }
+<%_ } _%>
+    ]
+  })
+}
+
+resource "aws_iam_role" "create_db_user" {
+  name = "<%= nameClassName %>CreateDbUserRole-${random_string.suffix.result}"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_iam_role_policy_attachment" "create_db_user_basic_execution" {
+  role       = aws_iam_role.create_db_user.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy_attachment" "create_db_user_vpc_access" {
+  role       = aws_iam_role.create_db_user.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+}
+
+resource "aws_iam_role_policy_attachment" "create_db_user_xray" {
+  role       = aws_iam_role.create_db_user.name
+  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+}
+
+resource "aws_iam_role_policy" "create_db_user_secret_access" {
+  role = aws_iam_role.create_db_user.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue"
+        ]
+        Resource = [module.aurora.secret_arn]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt"
+        ]
+        Resource = [module.aurora.kms_key_arn]
+      }
+    ]
+  })
+}
+
 resource "aws_cloudwatch_log_group" "migration_handler" {
   #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
   #checkov:skip=CKV_AWS_338:Log retention set to forever
   #checkov:skip=CKV_AWS_66:Log retention set to forever
   name = "/aws/lambda/${local.migration_function_name}"
+  tags = var.tags
+}
+
+resource "aws_cloudwatch_log_group" "create_db_user" {
+  #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
+  #checkov:skip=CKV_AWS_338:Log retention set to forever
+  #checkov:skip=CKV_AWS_66:Log retention set to forever
+  name = "/aws/lambda/${local.create_db_user_function_name}"
   tags = var.tags
 }
 
@@ -239,12 +379,106 @@ resource "aws_security_group" "migration_handler" {
   tags = var.tags
 }
 
+resource "aws_security_group" "create_db_user" {
+  name_prefix = "<%= nameKebabCase %>-create-db-user-"
+  description = "Security group for the create-db-user Lambda function"
+  vpc_id      = var.vpc_id
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = var.tags
+}
+
 resource "aws_vpc_security_group_ingress_rule" "migration_handler_to_database" {
   security_group_id            = module.aurora.security_group_id
   referenced_security_group_id = aws_security_group.migration_handler.id
   from_port                    = module.aurora.cluster_port
   to_port                      = module.aurora.cluster_port
   ip_protocol                  = "tcp"
+}
+
+resource "aws_vpc_security_group_ingress_rule" "create_db_user_to_database" {
+  security_group_id            = module.aurora.security_group_id
+  referenced_security_group_id = aws_security_group.create_db_user.id
+  from_port                    = module.aurora.cluster_port
+  to_port                      = module.aurora.cluster_port
+  ip_protocol                  = "tcp"
+}
+
+resource "aws_lambda_function" "create_db_user" {
+  #checkov:skip=CKV_AWS_116:Dead Letter Queue not required for the create-db-user handler
+  #checkov:skip=CKV_AWS_115:Concurrent execution limit not required for the create-db-user handler
+  #checkov:skip=CKV_AWS_173:Lambda environment variables encrypted by managed key
+  filename         = data.archive_file.create_db_user_zip.output_path
+  function_name    = local.create_db_user_function_name
+  role             = aws_iam_role.create_db_user.arn
+  handler          = "index.handler"
+  source_code_hash = data.archive_file.create_db_user_zip.output_base64sha256
+  runtime          = "nodejs22.x"
+  timeout          = 60
+  architectures    = ["arm64"]
+
+  tracing_config {
+    mode = "Active"
+  }
+
+  vpc_config {
+    subnet_ids         = var.subnet_ids
+    security_group_ids = [aws_security_group.create_db_user.id]
+  }
+
+  environment {
+    variables = {
+      DATABASE_SECRET_ARN = module.aurora.secret_arn
+      NODE_EXTRA_CA_CERTS = "/var/runtime/ca-cert.pem"
+    }
+  }
+
+  tags = var.tags
+
+  depends_on = [
+    aws_iam_role_policy_attachment.create_db_user_basic_execution,
+    aws_iam_role_policy_attachment.create_db_user_vpc_access,
+    aws_iam_role_policy_attachment.create_db_user_xray,
+    aws_iam_role_policy.create_db_user_secret_access,
+    aws_cloudwatch_log_group.create_db_user,
+    aws_vpc_security_group_ingress_rule.create_db_user_to_database
+  ]
+}
+
+resource "null_resource" "create_db_user_trigger" {
+  triggers = {
+    cluster_arn   = module.aurora.cluster_arn
+    function_name = aws_lambda_function.create_db_user.function_name
+    db_user       = local.database_runtime_user
+    bundle_hash   = data.archive_file.create_db_user_zip.output_base64sha256
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      output_file=$(mktemp)
+      response=$(aws lambda invoke \
+        --region ${data.aws_region.current.name} \
+        --function-name ${self.triggers.function_name} \
+        --cli-binary-format raw-in-base64-out \
+        --payload '{"RequestType":"Create","PhysicalResourceId":"db-user:${self.triggers.db_user}"}' \
+        "$output_file")
+      cat "$output_file"
+      echo "$response"
+      if echo "$response" | grep -q '"FunctionError"'; then
+        rm -f "$output_file"
+        exit 1
+      fi
+      rm -f "$output_file"
+    EOT
+  }
+
+  depends_on = [aws_lambda_function.create_db_user, module.aurora]
 }
 
 resource "aws_lambda_function" "migration_handler" {
@@ -270,7 +504,14 @@ resource "aws_lambda_function" "migration_handler" {
 
   environment {
     variables = {
-      DATABASE_URL = module.aurora.database_url
+<%_ if (engine === 'mysql') { _%>
+      DATABASE_SECRET_ARN = module.aurora.secret_arn
+<%_ } else { _%>
+      HOSTNAME = module.aurora.cluster_endpoint
+      DATABASE = module.aurora.database_name
+      PORT     = tostring(module.aurora.cluster_port)
+      DBUSER   = local.database_runtime_user
+<%_ } _%>
     }
   }
 
@@ -281,6 +522,7 @@ resource "aws_lambda_function" "migration_handler" {
     aws_iam_role_policy_attachment.migration_handler_basic_execution,
     aws_iam_role_policy_attachment.migration_handler_vpc_access,
     aws_iam_role_policy_attachment.migration_handler_xray,
+    aws_iam_role_policy.migration_handler_access,
     aws_cloudwatch_log_group.migration_handler,
     aws_vpc_security_group_ingress_rule.migration_handler_to_database
   ]
@@ -291,6 +533,9 @@ resource "null_resource" "migration_trigger" {
     bundle_hash   = local.migration_bundle_hash
     cluster_arn   = module.aurora.cluster_arn
     function_name = aws_lambda_function.migration_handler.function_name
+<%_ if (engine !== 'mysql') { _%>
+    db_user       = local.database_runtime_user
+<%_ } _%>
   }
 
   provisioner "local-exec" {
@@ -311,7 +556,11 @@ resource "null_resource" "migration_trigger" {
     EOT
   }
 
-  depends_on = [aws_lambda_function.migration_handler, module.aurora]
+  depends_on = [
+    aws_lambda_function.migration_handler,
+    module.aurora,
+    null_resource.create_db_user_trigger
+  ]
 }
 
 output "cluster_arn" {
@@ -339,8 +588,12 @@ output "secret_arn" {
   value       = module.aurora.secret_arn
 }
 
-output "database_url" {
-  description = "Database connection URL composed from the generated secret."
-  value       = module.aurora.database_url
-  sensitive   = true
+output "database_runtime_user" {
+  description = "Application database user created for IAM-authenticated access."
+  value       = local.database_runtime_user
+}
+
+output "appconfig_application_id" {
+  description = "AppConfig Application ID for runtime config."
+  value       = module.appconfig.application_id
 }

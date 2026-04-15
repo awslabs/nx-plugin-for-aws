@@ -19,10 +19,12 @@ import { IacProvider } from '../iac';
 export interface AddRdbConstructOptions {
   nameClassName: string;
   nameKebabCase: string;
+  databasePackageAlias: string;
   databaseName: string;
-  databaseUser: string;
+  adminUser: string;
   engine: 'postgres' | 'mysql';
   migrationBundlePathFromRoot: string;
+  createDbUserBundlePathFromRoot: string;
 }
 
 export const addRdbInfra = async (
@@ -52,7 +54,7 @@ export const addRdbCdkConstructs = async (
       'core',
       'rdb',
     ),
-    {},
+    options,
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },

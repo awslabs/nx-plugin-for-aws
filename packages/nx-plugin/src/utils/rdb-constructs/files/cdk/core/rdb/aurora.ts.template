@@ -1,19 +1,35 @@
-import { Duration } from 'aws-cdk-lib';
-import { IConnectable, IVpc } from 'aws-cdk-lib/aws-ec2';
-import { IGrantable } from 'aws-cdk-lib/aws-iam';
+import { Duration, Stack } from 'aws-cdk-lib';
+import { CustomResource } from 'aws-cdk-lib';
+import { IConnectable, IVpc, Port, SubnetType } from 'aws-cdk-lib/aws-ec2';
+import { IGrantable, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import { Key } from 'aws-cdk-lib/aws-kms';
+import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import {
+  Architecture,
+  Code,
+  DockerImageCode,
+  DockerImageFunction,
+  Function,
+  Runtime,
+  Tracing,
+} from 'aws-cdk-lib/aws-lambda';
 import {
   AuroraMysqlEngineVersion,
   AuroraPostgresEngineVersion,
+  ClusterInstance,
   Credentials,
   DatabaseCluster,
   DatabaseClusterEngine,
   DatabaseClusterProps,
+  DatabaseProxy,
+  DefaultAuthScheme,
   IClusterEngine,
 } from 'aws-cdk-lib/aws-rds';
-import { ISecret } from 'aws-cdk-lib/aws-secretsmanager';
+import { Provider } from 'aws-cdk-lib/custom-resources';
+import { Trigger } from 'aws-cdk-lib/triggers';
 import { Construct } from 'constructs';
-import { suppressRules } from '../checkov.js';
+import { fileURLToPath } from 'url';
+import { RuntimeConfig } from '../runtime-config.js';
 
 export type AuroraDatabaseEngineVersion =
   | AuroraMysqlEngineVersion
@@ -24,16 +40,6 @@ export interface AuroraDatabaseEngine {
    * Default Aurora engine version used when one is not explicitly provided.
    */
   readonly defaultVersion: AuroraDatabaseEngineVersion;
-
-  /**
-   * Connection string scheme used when generating the database URL.
-   */
-  readonly databaseUrlScheme: string;
-
-  /**
-   * Default query parameters appended to the generated database URL.
-   */
-  readonly defaultDatabaseUrlParameters?: Readonly<Record<string, string>>;
 
   /**
    * Builds the CDK cluster engine for the provided engine version.
@@ -49,7 +55,6 @@ export class AuroraDatabaseEngines {
   }): AuroraDatabaseEngine {
     return {
       defaultVersion,
-      databaseUrlScheme: 'mysql',
       clusterEngine: (version) =>
         DatabaseClusterEngine.auroraMysql({
           version: version as AuroraMysqlEngineVersion,
@@ -64,12 +69,6 @@ export class AuroraDatabaseEngines {
   }): AuroraDatabaseEngine {
     return {
       defaultVersion,
-      databaseUrlScheme: 'postgresql',
-      defaultDatabaseUrlParameters: {
-        pool_timeout: '20',
-        connect_timeout: '20',
-        sslmode: 'no-verify',
-      },
       clusterEngine: (version) =>
         DatabaseClusterEngine.auroraPostgres({
           version: version as AuroraPostgresEngineVersion,
@@ -80,7 +79,12 @@ export class AuroraDatabaseEngines {
 
 export interface AuroraDatabaseProps extends Omit<
   DatabaseClusterProps,
-  'credentials' | 'defaultDatabaseName' | 'engine'
+  | 'credentials'
+  | 'defaultDatabaseName'
+  | 'engine'
+  | 'iamAuthentication'
+  | 'instanceProps'
+  | 'writer'
 > {
   /**
    * VPC where the Aurora cluster will be deployed.
@@ -102,7 +106,7 @@ export interface AuroraDatabaseProps extends Omit<
   /**
    * Admin username used when generating credentials.
    */
-  readonly databaseUser: string;
+  readonly adminUser: string;
 
   /**
    * The initial database created in the cluster.
@@ -110,33 +114,56 @@ export interface AuroraDatabaseProps extends Omit<
   readonly databaseName: string;
 
   /**
-   * Additional query parameters appended to the generated database URL.
-   *
-   * Values override any engine defaults with the same key.
+   * RuntimeConfig key used under the `database` namespace.
    */
-  readonly databaseUrlQueryParameters?: Readonly<Record<string, string>>;
+  readonly runtimeConfigKey: string;
+
+  /**
+   * Migration bundle used to create a migration handler Lambda.
+   */
+  readonly migrationBundlePath: string;
+
+  /**
+   * Bundle used to create or reconcile the application database user.
+   */
+  readonly createDbUserBundlePath: string;
+
+  /**
+   * Writer instance for the Aurora cluster.
+   */
+  readonly writer?: DatabaseClusterProps['writer'];
+
+  /**
+   * Whether to provision an RDS Proxy in front of the Aurora cluster.
+   *
+   * @default true
+   */
+  readonly enableRdsProxy?: boolean;
 }
 
 /**
  * Reusable Aurora database construct that supports different Aurora engines
  * through typed engine presets.
  */
-export class AuroraDatabase extends Construct {
+export abstract class AuroraDatabase extends Construct {
   public readonly cluster: DatabaseCluster;
-  public readonly databaseHost: string;
-  public readonly databaseName: string;
-  public readonly databasePassword: string;
-  public readonly databaseUser: string;
-  public readonly databaseUrl: string;
-  public readonly secret: ISecret;
+  public readonly proxy?: DatabaseProxy;
+  private readonly adminUser: string;
+  private readonly dbUser: string;
 
   constructor(
     scope: Construct,
     id: string,
     {
-      databaseUser,
+      vpc,
+      adminUser,
       databaseName,
-      databaseUrlQueryParameters,
+      runtimeConfigKey,
+      migrationBundlePath,
+      createDbUserBundlePath,
+      vpcSubnets,
+      writer,
+      enableRdsProxy = true,
       engine,
       engineVersion,
       ...clusterProps
@@ -144,56 +171,171 @@ export class AuroraDatabase extends Construct {
   ) {
     super(scope, id);
 
-    const key = new Key(this, 'EncryptionKey', {
-      enableKeyRotation: true,
-    });
+    this.adminUser = adminUser;
+
+    const key = new Key(this, 'EncryptionKey', { enableKeyRotation: true });
     this.cluster = new DatabaseCluster(this, 'DatabaseCluster', {
       ...clusterProps,
+      vpc,
+      vpcSubnets,
       engine: engine.clusterEngine(engineVersion ?? engine.defaultVersion),
-      credentials: Credentials.fromGeneratedSecret(databaseUser, {
+      writer: writer ?? ClusterInstance.serverlessV2('writer'),
+      credentials: Credentials.fromGeneratedSecret(adminUser, {
         encryptionKey: key,
       }),
+      iamAuthentication: true,
       monitoringInterval: Duration.seconds(5),
       defaultDatabaseName: databaseName,
       storageEncrypted: true,
       storageEncryptionKey: key,
     });
 
-    suppressRules(
-      this.cluster,
-      ['CKV_AWS_162'],
-      'IAM authentication is disabled because ORM frameworks use Secrets Manager credentials',
-    );
+    const proxyRole = enableRdsProxy
+      ? new Role(this, 'DatabaseProxyRole', {
+          assumedBy: new ServicePrincipal('rds.amazonaws.com'),
+        })
+      : undefined;
 
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    this.secret = this.cluster.secret!;
-    this.databaseHost = this.cluster.clusterEndpoint.hostname;
-    this.databaseName = databaseName;
-    this.databasePassword =
-      this.secret.secretValueFromJson('password').unsafeUnwrap();
-    this.databaseUser = this.secret.secretValueFromJson('username').unsafeUnwrap();
+    if (enableRdsProxy) {
+      this.proxy = this.cluster.addProxy('DatabaseProxy', {
+        vpc,
+        vpcSubnets,
+        defaultAuthScheme: DefaultAuthScheme.IAM_AUTH,
+        role: proxyRole,
+      });
+    }
 
-    const queryParameters = new URLSearchParams({
-      ...engine.defaultDatabaseUrlParameters,
-      ...databaseUrlQueryParameters,
+    const databaseHostname =
+      this.proxy?.endpoint ?? this.cluster.clusterEndpoint.hostname;
+    const databasePort = this.cluster.clusterEndpoint.port;
+
+    const createDbUserHandler = new Function(this, 'CreateDbUserHandler', {
+      code: Code.fromAsset(
+        fileURLToPath(new URL(createDbUserBundlePath, import.meta.url)),
+      ),
+      handler: 'index.handler',
+      runtime: Runtime.NODEJS_LATEST,
+      timeout: Duration.minutes(1),
+      tracing: Tracing.ACTIVE,
+      vpc,
+      vpcSubnets: {
+        subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+      },
+      environment: {
+        DATABASE_SECRET_ARN: this.cluster.secret!.secretArn,
+        NODE_EXTRA_CA_CERTS: '/var/runtime/ca-cert.pem',
+      },
+      architecture: Architecture.ARM_64,
     });
-    const queryString = queryParameters.toString();
 
-    this.databaseUrl =
-      `${engine.databaseUrlScheme}://` +
-      `${this.databaseUser}` +
-      `:${this.databasePassword}` +
-      `@${this.databaseHost}` +
-      `:${this.cluster.clusterEndpoint.port}` +
-      `/${this.databaseName}` +
-      (queryString ? `?${queryString}` : '');
+    this.cluster.connections.allowDefaultPortFrom(
+      createDbUserHandler,
+      'Allow the create-db-user handler to connect to the database',
+    );
+    this.grantSecretRead(createDbUserHandler);
+
+    const createDbUserProvider = new Provider(this, 'CreateDbUserProvider', {
+      onEventHandler: createDbUserHandler,
+    });
+
+    const createDbUserResource = new CustomResource(
+      this,
+      'CreateDbUserResource',
+      {
+        serviceToken: createDbUserProvider.serviceToken,
+        properties: {
+          clusterIdentifier: this.cluster.clusterIdentifier,
+        },
+      },
+    );
+    createDbUserResource.node.addDependency(this.cluster);
+    this.dbUser = createDbUserResource.getAttString('dbUser');
+    if (this.proxy && proxyRole) {
+      this.cluster.grantConnect(proxyRole, this.dbUser);
+    }
+
+    const rc = RuntimeConfig.ensure(this);
+    rc.set('database', runtimeConfigKey, {
+      hostname: databaseHostname,
+      port: databasePort,
+      database: databaseName,
+      adminUser: this.adminUser,
+      dbUser: this.dbUser,
+      region: Stack.of(this).region,
+    });
+
+    const migrationHandler = new DockerImageFunction(this, 'MigrationHandler', {
+      code: DockerImageCode.fromImageAsset(
+        fileURLToPath(new URL(migrationBundlePath, import.meta.url)),
+        {
+          platform: Platform.LINUX_ARM64,
+          buildArgs: {
+            AWS_REGION: Stack.of(this).region,
+          },
+        },
+      ),
+      memorySize: 1024,
+      timeout: Duration.minutes(5),
+      tracing: Tracing.ACTIVE,
+      vpc,
+<%_ if (engine === 'mysql') { _%>
+      environment: {
+        DATABASE_SECRET_ARN: this.cluster.secret!.secretArn,
+      },
+<%_ } else { _%>
+      // Setting environment vars here so that migrationHandler does not have to make a call to AppConfig.
+      // This is internal to the construct so maybe it is ok?
+      environment: {
+        HOSTNAME: databaseHostname,
+        DATABASE: databaseName,
+        PORT: databasePort.toString(),
+        DBUSER: this.dbUser,
+      },
+<%_ } _%>
+      architecture: Architecture.ARM_64,
+    });
+
+<%_ if (engine === 'mysql') { _%>
+    this.cluster.connections.allowDefaultPortFrom(
+      migrationHandler,
+      'Allow the migration handler to connect to the database',
+    );
+    this.grantSecretRead(migrationHandler);
+<%_ } else { _%>
+    this.allowDefaultPortFrom(
+      migrationHandler,
+      'Allow the migration handler to connect to the database',
+    );
+    this.grantConnect(migrationHandler);
+<%_ } _%>
+
+    const trigger = new Trigger(this, 'MigrationTrigger', {
+      handler: migrationHandler,
+    });
+    trigger.node.addDependency(createDbUserResource);
   }
 
   public allowDefaultPortFrom(other: IConnectable, description?: string): void {
-    this.cluster.connections.allowDefaultPortFrom(other, description);
+    if (this.proxy) {
+      this.proxy.connections.allowFrom(
+        other,
+        Port.tcp(this.cluster.clusterEndpoint.port),
+        description,
+      );
+    } else {
+      this.cluster.connections.allowDefaultPortFrom(other, description);
+    }
   }
 
   public grantSecretRead(grantee: IGrantable) {
-    return this.secret.grantRead(grantee);
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    const secret = this.cluster.secret!;
+    return secret.grantRead(grantee);
+  }
+
+  public grantConnect(grantee: IGrantable) {
+    return this.proxy
+      ? this.proxy.grantConnect(grantee, this.dbUser)
+      : this.cluster.grantConnect(grantee, this.dbUser);
   }
 }

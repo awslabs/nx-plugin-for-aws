@@ -1,37 +1,46 @@
 import { execFile } from 'node:child_process';
-import path from 'node:path';
+import { promisify } from 'node:util';
+<%_ if (engine === 'MySQL') { _%>
+import { getDatabaseSecret } from './utils.js';
+<%_ } else { _%>
+import { Signer } from '@aws-sdk/rds-signer';
+<%_ } _%>
 
 export const handler = async () => {
-  const schemaPath = path.join(__dirname, 'prisma', 'schema.prisma');
-  const prismaCliPath = path.join(
-    __dirname,
-    'node_modules',
-    'prisma',
-    'build',
-    'index.js',
-  );
+<%_ if (engine === 'MySQL') { _%>
+  const { host, port, dbname, username, password } = await getDatabaseSecret();
 
-  await new Promise<void>((resolve, reject) => {
-    execFile(
-      process.execPath,
-      [prismaCliPath, 'migrate', 'deploy', '--schema', schemaPath],
-      { cwd: __dirname },
-      (error, stdout, stderr) => {
-        if (stdout) {
-          console.log(stdout);
-        }
+  const databaseUrl =
+    `mysql://${encodeURIComponent(username)}` +
+    `:${encodeURIComponent(password)}` +
+    `@${host}:${port}/${dbname}` +
+    `?sslaccept=strict`;
+<%_ } else { _%>
+  const hostname = process.env.HOSTNAME!;
+  const port = process.env.PORT!;
+  const database = process.env.DATABASE!;
+  const dbUser = process.env.DBUSER!;
+  const region = process.env.AWS_REGION!;
 
-        if (stderr) {
-          console.error(stderr);
-        }
+  const iamAuthToken = await new Signer({
+    hostname,
+    port: Number(port),
+    region,
+    username: dbUser,
+  }).getAuthToken();
 
-        if (error) {
-          reject(error);
-          return;
-        }
+  const databaseUrl =
+    `postgresql://${encodeURIComponent(dbUser)}` +
+    `:${encodeURIComponent(iamAuthToken)}` +
+    `@${hostname}:${port}/${database}` +
+    `?sslmode=require`;
+<%_ } _%>
 
-        resolve();
-      },
-    );
+  await promisify(execFile)('npx', ['prisma', 'migrate', 'deploy'], {
+    cwd: __dirname,
+    env: {
+      ...process.env,
+      DATABASE_URL: databaseUrl,
+    },
   });
 };

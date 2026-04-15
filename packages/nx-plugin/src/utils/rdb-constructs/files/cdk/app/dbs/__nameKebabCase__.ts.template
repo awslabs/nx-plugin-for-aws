@@ -1,25 +1,19 @@
-import * as url from 'url';
-import { Duration } from 'aws-cdk-lib';
-import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
-import {
-  Architecture,
-  DockerImageCode,
-  DockerImageFunction,
-  Tracing,
-} from 'aws-cdk-lib/aws-lambda';
-import { ClusterInstance } from 'aws-cdk-lib/aws-rds';
 import { Construct } from 'constructs';
+import { DB_PACKAGE_NAME } from '<%= databasePackageAlias %>';
 import {
   AuroraDatabase,
   AuroraDatabaseEngines,
   AuroraDatabaseProps,
 } from '../../core/rdb/aurora.js';
-import { Trigger } from 'aws-cdk-lib/triggers';
-import { SubnetType } from 'aws-cdk-lib/aws-ec2';
 
 export type <%= nameClassName %>Props = Omit<
   AuroraDatabaseProps,
-  'databaseName' | 'databaseUser' | 'engine'
+  | 'databaseName'
+  | 'adminUser'
+  | 'createDbUserBundlePath'
+  | 'engine'
+  | 'runtimeConfigKey'
+  | 'migrationBundlePath'
 >;
 
 /**
@@ -27,51 +21,16 @@ export type <%= nameClassName %>Props = Omit<
  */
 export class <%= nameClassName %> extends AuroraDatabase {
   constructor(scope: Construct, id: string, props: <%= nameClassName %>Props) {
-    const { writer, vpc, ...restProps } = props;
-
     super(scope, id, {
-      ...restProps,
-      vpc,
+      ...props,
       databaseName: '<%= databaseName %>',
-      databaseUser: '<%= databaseUser %>',
-      writer: writer ?? ClusterInstance.serverlessV2('writer'),
+      adminUser: '<%= adminUser %>',
+      runtimeConfigKey: DB_PACKAGE_NAME,
+      migrationBundlePath:
+        '../../../../../../<%- migrationBundlePathFromRoot %>',
+      createDbUserBundlePath:
+        '../../../../../../<%- createDbUserBundlePathFromRoot %>',
       engine: AuroraDatabaseEngines.<%= engine %>({}),
     });
-
-    const migrationHandler = new DockerImageFunction(this, 'MigrationHandler', {
-      code: DockerImageCode.fromImageAsset(
-        url.fileURLToPath(
-          new URL(
-            '../../../../../../<%- migrationBundlePathFromRoot %>',
-            import.meta.url,
-          ),
-        ),
-        {
-          platform: Platform.LINUX_ARM64,
-        },
-      ),
-      memorySize: 1024,
-      timeout: Duration.minutes(5),
-      tracing: Tracing.ACTIVE,
-      vpc,
-      vpcSubnets: {
-        subnetType: SubnetType.PRIVATE_ISOLATED,
-      },
-      environment: {
-        DATABASE_URL: this.databaseUrl,
-      },
-      architecture: Architecture.ARM_64,
-    });
-
-    this.allowDefaultPortFrom(
-      migrationHandler,
-      'Allow the migration handler to connect to the database',
-    );
-
-    const trigger = new Trigger(this, 'MigrationTrigger', {
-      handler: migrationHandler,
-    });
-    // make sure migration is executed after the database cluster is available.
-    trigger.node.addDependency(this.cluster);
   }
 }

@@ -31,6 +31,8 @@ import { addIgnoresToEslintConfig } from '../lib/eslint';
 import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
 import { TS_VERSIONS, withVersions } from '../../utils/versions';
 import { resolveIacProvider } from '../../utils/iac';
+import { toScopeAlias } from '../../utils/npm-scope';
+import { updateGitIgnore } from '../../utils/git';
 
 export const TS_RDB_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -40,6 +42,7 @@ export const tsRdbGenerator = async (
   options: TsRdbGeneratorSchema,
 ): Promise<GeneratorCallback> => {
   const nameKebabCase = toKebabCase(options.name) ?? options.name;
+  const nameClassName = toClassName(options.name);
   const iacProvider = await resolveIacProvider(tree, options.iacProvider);
   const { fullyQualifiedName, dir } = getTsLibDetails(tree, {
     name: options.name,
@@ -53,7 +56,7 @@ export const tsRdbGenerator = async (
 
   updateJson(tree, joinPathFragments(dir, 'tsconfig.lib.json'), (tsConfig) => ({
     ...tsConfig,
-    include: ['src/**/*.ts', 'lib/**/*.ts', 'generated/prisma/**/*.ts'],
+    include: ['src/**/*.ts', 'generated/prisma/**/*.ts'],
   }));
   await addIgnoresToEslintConfig(
     tree,
@@ -63,6 +66,9 @@ export const tsRdbGenerator = async (
 
   const templateOptions = {
     engine: options.engine,
+    runtimeConfigKey: nameClassName,
+    databasePackageAlias: toScopeAlias(fullyQualifiedName),
+    databaseProvider: options.engine === 'MySQL' ? 'mysql' : 'postgresql',
     prismaVersion: TS_VERSIONS.prisma,
     prismaAdapterPackage:
       options.engine === 'MySQL'
@@ -78,6 +84,7 @@ export const tsRdbGenerator = async (
     dir,
     templateOptions,
   );
+  updateGitIgnore(tree, dir, (patterns) => [...patterns, 'generated/prisma']);
 
   const projectConfig = readProjectConfiguration(tree, fullyQualifiedName);
   const relativePathToRoot = getRelativePathToRootByDirectory(
@@ -87,6 +94,10 @@ export const tsRdbGenerator = async (
   await addTypeScriptBundleTarget(tree, projectConfig, {
     targetFilePath: 'src/migration-handler.ts',
     bundleOutputDir: 'migration',
+  });
+  await addTypeScriptBundleTarget(tree, projectConfig, {
+    targetFilePath: 'src/create-db-user-handler.ts',
+    bundleOutputDir: 'create-db-user',
   });
   projectConfig.targets['bundle-migration'] = {
     cache: true,
@@ -132,10 +143,11 @@ export const tsRdbGenerator = async (
   await sharedConstructsGenerator(tree, { iacProvider });
   await addRdbInfra(tree, {
     iacProvider,
-    nameClassName: toClassName(options.name),
+    nameClassName,
     nameKebabCase,
+    databasePackageAlias: toScopeAlias(fullyQualifiedName),
     databaseName: options.databaseName,
-    databaseUser: options.databaseUser,
+    adminUser: options.databaseUser,
     engine: options.engine === 'MySQL' ? 'mysql' : 'postgres',
     migrationBundlePathFromRoot: joinPathFragments(
       'dist',
@@ -143,17 +155,39 @@ export const tsRdbGenerator = async (
       'bundle',
       'migration',
     ),
+    createDbUserBundlePathFromRoot: joinPathFragments(
+      'dist',
+      projectConfig.root,
+      'bundle',
+      'create-db-user',
+    ),
   });
 
   const runtimeDependencies =
     options.engine === 'MySQL'
-      ? withVersions(['@prisma/client', '@prisma/adapter-mariadb'])
-      : withVersions(['@prisma/client', '@prisma/adapter-pg', 'pg']);
+      ? withVersions([
+          '@aws-lambda-powertools/parameters',
+          '@aws-sdk/client-secrets-manager',
+          '@aws-sdk/rds-signer',
+          '@prisma/client',
+          '@prisma/adapter-mariadb',
+          'mariadb',
+        ])
+      : withVersions([
+          '@aws-lambda-powertools/parameters',
+          '@aws-sdk/client-secrets-manager',
+          '@aws-sdk/rds-signer',
+          '@prisma/client',
+          '@prisma/adapter-pg',
+          'pg',
+        ]);
 
   addDependenciesToPackageJson(
     tree,
     runtimeDependencies,
-    withVersions(['prisma']),
+    options.engine === 'MySQL'
+      ? withVersions(['prisma'])
+      : withVersions(['prisma', '@types/pg']),
   );
 
   await addGeneratorMetricsIfApplicable(tree, [TS_RDB_GENERATOR_INFO]);
