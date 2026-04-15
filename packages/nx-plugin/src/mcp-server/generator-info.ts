@@ -9,7 +9,7 @@ import {
   buildPackageManagerExecCommand,
   buildPackageManagerShortCommand,
 } from '../utils/commands';
-import { NxGeneratorInfo } from '../utils/nx';
+import { NxGeneratorInfo } from '../utils/generators';
 import fs from 'fs';
 
 /**

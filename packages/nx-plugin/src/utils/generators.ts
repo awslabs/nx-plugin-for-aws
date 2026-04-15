@@ -16,6 +16,11 @@ export interface GeneratorInfo {
 }
 
 /**
+ * Alias for GeneratorInfo used by MCP server and generators
+ */
+export type NxGeneratorInfo = GeneratorInfo;
+
+/**
  * Build the list of generator info, resolving schema/factory paths relative to the given base directory.
  */
 export const buildGeneratorInfoList = (baseDir: string): GeneratorInfo[] =>

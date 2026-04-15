@@ -5,7 +5,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { PackageManagerSchema } from '../schema';
-import { IAC_PROVIDERS } from '../../utils/iac';
+import { IAC_PROVIDERS } from '../../utils/iac-providers';
 import { TS_VERSIONS } from '../../utils/versions';
 
 /**

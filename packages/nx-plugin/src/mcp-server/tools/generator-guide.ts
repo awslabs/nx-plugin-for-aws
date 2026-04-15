@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { NxGeneratorInfo } from '../../utils/nx';
+import { NxGeneratorInfo } from '../../utils/generators';
 import { z } from 'zod';
 import {
   renderGeneratorInfo,

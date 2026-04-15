@@ -5,7 +5,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { PackageManagerSchema } from '../schema';
 import { renderGeneratorInfo } from '../generator-info';
-import { NxGeneratorInfo } from '../../utils/nx';
+import { NxGeneratorInfo } from '../../utils/generators';
 
 /**
  * Adds a tool which lists details about the available generators
