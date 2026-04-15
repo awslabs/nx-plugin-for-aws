@@ -13,10 +13,10 @@ import PackageJson from '../../package.json';
 import * as path from 'path';
 import { getNpmScope, getNpmScopePrefix } from './npm-scope';
 import { toSnakeCase } from './names';
-import { buildGeneratorInfoList, type GeneratorInfo } from './generators';
 
-export type NxGeneratorInfo = GeneratorInfo;
+export type { NxGeneratorInfo, GeneratorInfo } from './generators';
 export { buildGeneratorInfoList } from './generators';
+import { buildGeneratorInfoList, type GeneratorInfo } from './generators';
 
 const GENERATORS = buildGeneratorInfoList(path.resolve(__dirname, '..', '..'));
 
@@ -30,9 +30,7 @@ export const listGenerators = (includeHidden = false) =>
 /**
  * Return generator information. Call this from a generator method with __filename
  */
-export const getGeneratorInfo = (
-  generatorFileName: string,
-): NxGeneratorInfo => {
+export const getGeneratorInfo = (generatorFileName: string): GeneratorInfo => {
   const { dir, name } = path.parse(path.resolve(generatorFileName));
   const resolvedFactoryPath = path.join(dir, name);
   return GENERATORS.find(
@@ -75,7 +73,7 @@ export const readProjectConfigurationUnqualified = (
 export const addGeneratorMetadata = (
   tree: Tree,
   projectName: string,
-  info: NxGeneratorInfo,
+  info: { id: string },
   additionalMetadata?: { [key: string]: any },
 ) => {
   const config = readProjectConfigurationUnqualified(tree, projectName);
@@ -105,7 +103,7 @@ export interface ComponentMetadata {
 export const addComponentGeneratorMetadata = (
   tree: Tree,
   projectName: string,
-  info: NxGeneratorInfo,
+  info: { id: string },
   componentPath: string,
   componentName?: string,
   additionalMetadata?: { [key: string]: any },
