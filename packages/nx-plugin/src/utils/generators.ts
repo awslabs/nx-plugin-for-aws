@@ -37,12 +37,3 @@ export const buildGeneratorInfoList = (baseDir: string): GeneratorInfo[] =>
         : {}),
     }),
   );
-
-const GENERATORS = buildGeneratorInfoList(path.resolve(__dirname, '..', '..'));
-
-/**
- * List Nx Plugin for AWS generators
- * @param includeHidden include hidden generators (default false)
- */
-export const listGenerators = (includeHidden = false) =>
-  GENERATORS.filter((g) => includeHidden || !g.hidden);

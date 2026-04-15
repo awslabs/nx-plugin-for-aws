@@ -15,17 +15,25 @@ import { getNpmScope, getNpmScopePrefix } from './npm-scope';
 import { toSnakeCase } from './names';
 
 export type { NxGeneratorInfo, GeneratorInfo } from './generators';
-export { buildGeneratorInfoList, listGenerators } from './generators';
-import { listGenerators as _listGenerators } from './generators';
+export { buildGeneratorInfoList } from './generators';
+import { buildGeneratorInfoList, type GeneratorInfo } from './generators';
+
+const GENERATORS = buildGeneratorInfoList(path.resolve(__dirname, '..', '..'));
+
+/**
+ * List Nx Plugin for AWS generators
+ * @param includeHidden include hidden generators (default false)
+ */
+export const listGenerators = (includeHidden = false) =>
+  GENERATORS.filter((g) => includeHidden || !g.hidden);
 
 /**
  * Return generator information. Call this from a generator method with __filename
  */
-export const getGeneratorInfo = (generatorFileName: string) => {
-  const generators = _listGenerators(true);
+export const getGeneratorInfo = (generatorFileName: string): GeneratorInfo => {
   const { dir, name } = path.parse(path.resolve(generatorFileName));
   const resolvedFactoryPath = path.join(dir, name);
-  return generators.find(
+  return GENERATORS.find(
     (generatorInfo) =>
       generatorInfo.resolvedFactoryPath === resolvedFactoryPath,
   );
