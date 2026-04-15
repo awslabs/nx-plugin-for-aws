@@ -2,8 +2,6 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { TS_VERSIONS } from './versions';
-
 /**
  * Display-friendly command prefixes for each package manager.
  *
@@ -18,16 +16,18 @@ export interface PackageManagerDisplayCommands {
   exec: string;
   /** Prefix for running package.json scripts: `npm run`, pnpm, yarn, bun */
   run: string;
+  /** Prefix for `create` commands: `npm create`, `pnpm create`, etc. */
+  create: string;
 }
 
 export const PACKAGE_MANAGER_COMMANDS: Record<
   string,
   PackageManagerDisplayCommands
 > = {
-  npm: { exec: 'npx', run: 'npm run' },
-  pnpm: { exec: 'pnpm', run: 'pnpm' },
-  yarn: { exec: 'yarn', run: 'yarn' },
-  bun: { exec: 'bunx', run: 'bun' },
+  npm: { exec: 'npx', run: 'npm run', create: 'npm create' },
+  pnpm: { exec: 'pnpm', run: 'pnpm', create: 'pnpm create' },
+  yarn: { exec: 'yarn', run: 'yarn', create: 'yarn create' },
+  bun: { exec: 'bunx', run: 'bun', create: 'bun create' },
 };
 
 /**
@@ -68,15 +68,30 @@ export const buildInstallCommand = (pm: string, pkg: string, dev: boolean) => {
 };
 
 /**
- * Build a create-nx-workspace command.
- * Defaults to the pinned create-nx-workspace version from TS_VERSIONS.
+ * Build a command to create a new workspace using @aws/create-nx-workspace.
+ *
+ * Uses the `create` shorthand for each package manager:
+ *   npm create @aws/nx-workspace my-project
+ *   pnpm create @aws/nx-workspace my-project
+ *   yarn create @aws/nx-workspace my-project
+ *   bun create @aws/nx-workspace my-project
+ *
+ * The package manager is auto-detected by @aws/create-nx-workspace from the
+ * invoking command, so --pm is not needed.
  */
 export const buildCreateNxWorkspaceCommand = (
   pm: string,
   workspace: string,
   iacProvider?: 'CDK' | 'Terraform',
-  yes = false,
-  nxVersion: string = TS_VERSIONS['create-nx-workspace'],
-  nxPluginVersion?: string,
-) =>
-  `npx ${yes ? '-y ' : ''}create-nx-workspace@${nxVersion} ${workspace} --pm=${pm} --preset=@aws/nx-plugin${nxPluginVersion ? `@${nxPluginVersion}` : ''}${iacProvider ? ` --iacProvider=${iacProvider}` : ''} --ci=skip --analytics=false --aiAgents`;
+) => {
+  const createPrefix = PACKAGE_MANAGER_COMMANDS[pm]?.create ?? `${pm} create`;
+  const parts = [
+    createPrefix,
+    '@aws/nx-workspace',
+    // npm requires '--' to stop interpreting subsequent flags as npm config
+    ...(pm === 'npm' ? ['--'] : []),
+    workspace,
+    ...(iacProvider ? [`--iacProvider=${iacProvider}`] : []),
+  ];
+  return parts.join(' ');
+};

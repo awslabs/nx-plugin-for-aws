@@ -36,18 +36,32 @@ export default async function () {
         env: process.env,
         cwd: join(__dirname, '../../dist/packages/nx-plugin'),
       });
-      console.info('Package published to local registry');
+      console.info('@aws/nx-plugin published to local registry');
+    } catch (err) {
+      console.error(
+        `@aws/nx-plugin couldn't be published to local registry: ${err}`,
+      );
+      throw err;
+    }
 
-      console.info('Publishing @aws/nx-plugin-mcp to local registry');
-      execSync(`npm publish --tag e2e`, {
-        env: process.env,
-        cwd: join(__dirname, '../../dist/packages/nx-plugin-mcp'),
-      });
-      console.info('@aws/nx-plugin-mcp published to local registry');
+    console.info('Publishing @aws/nx-plugin-mcp to local registry');
+    execSync(`npm publish --tag e2e`, {
+      env: process.env,
+      cwd: join(__dirname, '../../dist/packages/nx-plugin-mcp'),
+    });
+    console.info('@aws/nx-plugin-mcp published to local registry');
 
-      // Read the published package version and set NX_E2E_PRESET_VERSION
-      // This is needed because create-nx-workspace uses `npm view` to resolve
-      // the preset version, which may fail on Windows with a local registry
+    console.info('Publishing @aws/create-nx-workspace to local registry');
+    execSync(`npm publish --tag e2e`, {
+      env: process.env,
+      cwd: join(__dirname, '../../dist/packages/create-nx-workspace'),
+    });
+    console.info('@aws/create-nx-workspace published to local registry');
+
+    // Read the published package version and set NX_E2E_PRESET_VERSION
+    // This is needed because create-nx-workspace uses `npm view` to resolve
+    // the preset version, which may fail on Windows with a local registry
+    try {
       const distPkgJson = JSON.parse(
         readFileSync(
           join(__dirname, '../../dist/packages/nx-plugin/package.json'),
@@ -59,7 +73,7 @@ export default async function () {
         `Set NX_E2E_PRESET_VERSION=${process.env.NX_E2E_PRESET_VERSION}`,
       );
     } catch (err) {
-      console.error(`Package couldn't be published to local registry: ${err}`);
+      console.error(`Failed to read published package version: ${err}`);
       throw err;
     }
   } catch (err) {
