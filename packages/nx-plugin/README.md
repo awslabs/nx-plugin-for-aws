@@ -1,6 +1,6 @@
 <div align="center">
   <h1>Nx Plugin for AWS</h1>
-  <h3>Build full-stack AWS apps in minutes, not days</h3>
+  <h3>Build full-stack AWS apps in minutes</h3>
   <a href="https://opensource.org/licenses/Apache-2.0">
     <img
       src="https://img.shields.io/badge/License-Apache%202.0-yellowgreen.svg"
@@ -26,41 +26,11 @@
 
 ---
 
-**@aws/nx-plugin** is a collection of code generators that scaffold full-stack, production-ready AWS applications inside an [Nx](https://nx.dev) monorepo. Every generator produces best-practice application code **and** the infrastructure to deploy it — type-safe, locally runnable, and ready for `cdk deploy`. No boilerplate, no glue code, no guesswork.
+**@aws/nx-plugin** is a collection of code generators that scaffold full-stack, production-ready AWS applications inside an [Nx](https://nx.dev) monorepo. Every generator produces best-practice application code **and** the infrastructure to deploy it — type-safe, locally runnable, and ready for `cdk deploy`.
 
 ## Quick Start
 
-Create a workspace and start adding components — zero configuration required:
-
-```bash
-# 1. Create a new workspace
-pnpm create @aws/nx-workspace my-project
-cd my-project
-
-# 2. Add a tRPC API
-pnpm nx g @aws/nx-plugin:ts#trpc-api
-
-# 3. Add a Strands AI agent (Python)
-pnpm nx g @aws/nx-plugin:py#strands-agent
-
-# 4. Add a React website
-pnpm nx g @aws/nx-plugin:ts#react-website
-
-# 5. Add authentication to your website
-pnpm nx g @aws/nx-plugin:ts#react-website#auth
-
-# 6. Connect your frontend to your API
-pnpm nx g @aws/nx-plugin:connection
-
-# 7. Add CDK infrastructure to deploy it all
-pnpm nx g @aws/nx-plugin:ts#infra
-```
-
-Each generator is interactive — just run it with no arguments and follow the prompts. That's it.
-
-> See the full [Quick Start guide](https://awslabs.github.io/nx-plugin-for-aws/en/get_started/quick-start) and [Dungeon Adventure tutorial](https://awslabs.github.io/nx-plugin-for-aws/en/get_started/tutorials/dungeon-game/overview/) for a deeper walkthrough.
-
-## Quick Start with AI
+### Build with AI
 
 Add the MCP server to your AI assistant and let it build for you.
 
@@ -84,6 +54,36 @@ Then just ask:
 > *"Use the Nx Plugin for AWS to build a full-stack app with a React website, a tRPC API, Cognito auth, and CDK infrastructure."*
 
 Your AI assistant will use the MCP tools to scaffold, connect, and configure everything. See the [Building with AI guide](https://awslabs.github.io/nx-plugin-for-aws/en/get_started/building-with-ai/) for more details.
+
+### Build with the CLI
+
+Create a workspace and start adding components — zero configuration required:
+
+```bash
+# Create a new workspace
+pnpm create @aws/nx-workspace my-project
+cd my-project
+
+# Add a tRPC API
+pnpm nx g @aws/nx-plugin:ts#trpc-api
+
+# Add a Strands AI agent (Python)
+pnpm nx g @aws/nx-plugin:py#strands-agent
+
+# Add a React website
+pnpm nx g @aws/nx-plugin:ts#react-website
+
+# Add authentication to your website
+pnpm nx g @aws/nx-plugin:ts#react-website#auth
+
+# Connect your website to your API and agent
+pnpm nx g @aws/nx-plugin:connection
+
+# Add CDK infrastructure to deploy it all (or choose Terraform)
+pnpm nx g @aws/nx-plugin:ts#infra
+```
+
+> See the full [Quick Start guide](https://awslabs.github.io/nx-plugin-for-aws/en/get_started/quick-start) and [Dungeon Adventure tutorial](https://awslabs.github.io/nx-plugin-for-aws/en/get_started/tutorials/dungeon-game/overview/) for a deeper walkthrough.
 
 ## Available Generators
 

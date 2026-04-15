@@ -1,6 +1,6 @@
 <div align="center">
-  <h1>Nx Plugin for AWS - @aws/nx-plugin</h1>
-  <h3>Rapidly scaffold and build projects on AWS</h3>
+  <h1>Nx Plugin for AWS</h1>
+  <h3>Build full-stack AWS apps in minutes</h3>
   <a href="https://opensource.org/licenses/Apache-2.0">
     <img
       src="https://img.shields.io/badge/License-Apache%202.0-yellowgreen.svg"
@@ -9,12 +9,6 @@
   </a>
   <a href="https://codecov.io/gh/awslabs/nx-plugin-for-aws">
     <img src="https://codecov.io/gh/awslabs/nx-plugin-for-aws/graph/badge.svg?token=X27pgFfxuQ" />
-  </a>
-  <a href="https://gitpod.io/new/?workspaceClass=g1-large#https://github.com/awslabs/nx-plugin-for-aws">
-    <img
-      src="https://img.shields.io/badge/Gitpod-ready--to--code-blue?logo=gitpod"
-      alt="Gitpod ready-to-code"
-    />
   </a>
   <a href="https://github.com/awslabs/nx-plugin-for-aws/actions/workflows/ci.yml">
     <img
@@ -28,69 +22,19 @@
       alt="Commit activity"
     />
   </a>
-  <br />
-  <br />
-  <figure>
-    <img src="docs/src/content/docs/assets/website-generator.gif" alt="Demo" />
-  </figure>
-  <br />
-  👉 See full documentation on <a href="https://awslabs.github.io/nx-plugin-for-aws">https://awslabs.github.io/nx-plugin-for-aws</a> 👈
 </div>
 
-## Intro
+---
 
-[@aws/nx-plugin](https://github.com/awslabs/nx-plugin-for-aws) is a collection of generators to help you build cloud-native applications with AWS.
+**@aws/nx-plugin** is a collection of code generators that scaffold full-stack, production-ready AWS applications inside an [Nx](https://nx.dev) monorepo. Every generator produces best-practice application code **and** the infrastructure to deploy it — type-safe, locally runnable, and ready for `cdk deploy`.
 
-## Key Features
+## Quick Start
 
-- **Declarative**: Generate code that follows best practices for AWS cloud development.
-- **End-to-end**: Generate application code and CDK/Terraform infrastructure to deploy to AWS.
-- **Component-Based**: Add components to your project as needed, from React websites to serverless APIs using either the CLI or UI.
-- **Learn Once, Use Anywhere**: Consistent patterns across different AWS services and application types.
-- **Open for modification**: All code generated is your code and can be edited as you see fit.
-- **Type safety**: Type-safety is employed to support IDE completions and reduce the number of runtime errors encountered.
-- **Local-first**: Iterate quickly by developing locally before deploying to AWS.
-- **Minimal dependencies**: Getting up and running is simple and only requires langugage level global dependencies.
+### Build with AI
 
-## Available Generators
+Add the MCP server to your AI assistant and let it build for you.
 
-- `ts#project` - Generate a new TypeScript library.
-- `ts#infra` - Generate a Typescript AWS CDK infrastructure project for your application.
-- `ts#react-website` - Generate a new React based web application using Vite.
-- `ts#react-website#auth` - Add AWS Cognito authentication to your React website.
-- `ts#trpc-api` - Generate a tRPC backend service with Amazon API Gateway/AWS Lambda integrations and [AWS Powertools](https://github.com/aws-powertools/powertools-lambda-typescript) pre-configured.
-- `ts#nx-generator` - Add an [Nx Generator](https://nx.dev/features/generate-code) to a TypeScript project.
-- `ts#mcp-server` - Add a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server to a TypeScript project.
-- `ts#strands-agent` - Add a [Strands Agent](https://strandsagents.com/) to a TypeScript project.
-- `ts#lambda-function` - Generate a TypeScript lambda function with optional type-safe event sources.
-- `terraform#project` - Generate a new Terraform project.
-- `py#project` - Generate a uv based Python project.
-- `py#fast-api` - Generate a FastAPI backend service with [AWS Powertools](https://github.com/aws-powertools/powertools-lambda-python) pre-configured.
-- `py#lambda-function` - Add a lambda function to an existing python project with optional type-safe event sources.
-- `py#mcp-server` - Add a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server to a Python project.
-- `py#strands-agent` Add a [Strands Agent](https://strandsagents.com/) to a Python project.
-- `connection` - Connect projects together (e.g. frontend to backend APIs).
-- `license` - Automatically manage LICENSE files and source code headers in your workspace.
-
-## Getting started
-
-@aws/nx-plugin has been designed for gradual adoption from the start, and **you can use as little or as much of it as you need**.
-
-Follow the [Quick Start](https://awslabs.github.io/nx-plugin-for-aws/en/get_started/quick-start) guide to create a workspace and add projects.
-
-### Additional resources
-
-- [Build a Dungeon Adventure Game](https://awslabs.github.io/nx-plugin-for-aws/en/get_started/tutorials/dungeon-game/overview/) to get an in-depth guided tutorial on how to use the @aws/nx-plugin.
-- [Add @aws/nx-plugin to your existing project](https://awslabs.github.io/nx-plugin-for-aws/en/get_started/tutorials/existing-project/)
-
-## MCP Server Installation and Setup
-
-This package additionally provides an MCP server to help AI assistants use the Nx Plugin for AWS.
-
-1. Ensure you have `node` and `npm` installed ([see here](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm))
-2. Add the server to your MCP client configuration
-
-Example configuration for Amazon Q CLI MCP (`~/.aws/amazonq/mcp.json`):
+**MCP configuration** (e.g. `~/.aws/amazonq/mcp.json`, VS Code `mcp.json`, etc.):
 
 ```json
 {
@@ -103,9 +47,65 @@ Example configuration for Amazon Q CLI MCP (`~/.aws/amazonq/mcp.json`):
 }
 ```
 
-If you have issues such as `ENOENT npx`, replace the command with `/full/path/to/npx` (use `which npx` to find this).
+> If you hit `ENOENT npx`, replace `"npx"` with the full path (run `which npx` to find it).
 
-For more details, [take a look at the guide here](https://awslabs.github.io/nx-plugin-for-aws/en/get_started/building-with-ai/)
+Then just ask:
+
+> *"Use the Nx Plugin for AWS to build a full-stack app with a React website, a tRPC API, Cognito auth, and CDK infrastructure."*
+
+Your AI assistant will use the MCP tools to scaffold, connect, and configure everything. See the [Building with AI guide](https://awslabs.github.io/nx-plugin-for-aws/en/get_started/building-with-ai/) for more details.
+
+### Build with the CLI
+
+Create a workspace and start adding components — zero configuration required:
+
+```bash
+# Create a new workspace
+pnpm create @aws/nx-workspace my-project
+cd my-project
+
+# Add a tRPC API
+pnpm nx g @aws/nx-plugin:ts#trpc-api
+
+# Add a Strands AI agent (Python)
+pnpm nx g @aws/nx-plugin:py#strands-agent
+
+# Add a React website
+pnpm nx g @aws/nx-plugin:ts#react-website
+
+# Add authentication to your website
+pnpm nx g @aws/nx-plugin:ts#react-website#auth
+
+# Connect your website to your API and agent
+pnpm nx g @aws/nx-plugin:connection
+
+# Add CDK infrastructure to deploy it all (or choose Terraform)
+pnpm nx g @aws/nx-plugin:ts#infra
+```
+
+> See the full [Quick Start guide](https://awslabs.github.io/nx-plugin-for-aws/en/get_started/quick-start) and [Dungeon Adventure tutorial](https://awslabs.github.io/nx-plugin-for-aws/en/get_started/tutorials/dungeon-game/overview/) for a deeper walkthrough.
+
+## Available Generators
+
+| Generator | Description |
+|---|---|
+| `ts#project` | TypeScript library |
+| `ts#trpc-api` | tRPC API with API Gateway + Lambda + [Powertools](https://github.com/aws-powertools/powertools-lambda-typescript) |
+| `ts#react-website` | React app (Vite) |
+| `ts#react-website#auth` | Add Cognito auth to a React website |
+| `ts#infra` | AWS CDK infrastructure project |
+| `ts#lambda-function` | TypeScript Lambda with type-safe event sources |
+| `ts#mcp-server` | MCP server (TypeScript) |
+| `ts#strands-agent` | [Strands Agent](https://strandsagents.com/) (TypeScript) |
+| `ts#nx-generator` | Nx generator scaffold |
+| `py#project` | Python project (uv) |
+| `py#fast-api` | FastAPI with API Gateway + Lambda + [Powertools](https://github.com/aws-powertools/powertools-lambda-python) |
+| `py#lambda-function` | Python Lambda with type-safe event sources |
+| `py#mcp-server` | MCP server (Python) |
+| `py#strands-agent` | [Strands Agent](https://strandsagents.com/) (Python) |
+| `connection` | Connect projects together (e.g. frontend to API) |
+| `terraform#project` | Terraform project |
+| `license` | Manage LICENSE files and source headers |
 
 ## Community
 
@@ -113,9 +113,7 @@ Join us on Slack in the [#nx-plugin-for-aws](https://cdk-dev.slack.com/archives/
 
 ## Contributing
 
-The main purpose of this repository is to continue evolving @aws/nx-plugin, making it faster and easier to use. Development happens in the open on GitHub, and we are grateful to the community for contributing bugfixes and improvements.
-
-Read our [Contributing Guide](/CONTRIBUTING.md) to learn about our development process, how to propose bugfixes and improvements, and how to build and test your changes to @aws/nx-plugin.
+Read our [Contributing Guide](/CONTRIBUTING.md) to learn about our development process, how to propose bugfixes and improvements, and how to build and test your changes.
 
 ## Code of Conduct
 
