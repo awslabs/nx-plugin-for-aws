@@ -34,6 +34,10 @@
 
 Add the MCP server to your AI assistant and let it build for you.
 
+```bash
+npx -y @aws/nx-plugin-mcp
+```
+
 <details>
 <summary><strong>Kiro</strong></summary>
 
