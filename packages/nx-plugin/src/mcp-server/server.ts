@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { listGenerators } from '../utils/nx';
+import { listGenerators } from '../utils/generators';
 import { addCreateWorkspaceCommandTool } from './tools/create-workspace-command';
 import { addListGeneratorsTool } from './tools/list-generators';
 import { addGeneratorGuideTool } from './tools/generator-guide';

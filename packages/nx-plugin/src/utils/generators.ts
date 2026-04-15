@@ -16,6 +16,11 @@ export interface GeneratorInfo {
 }
 
 /**
+ * Alias for GeneratorInfo used by MCP server and generators
+ */
+export type NxGeneratorInfo = GeneratorInfo;
+
+/**
  * Build the list of generator info, resolving schema/factory paths relative to the given base directory.
  */
 export const buildGeneratorInfoList = (baseDir: string): GeneratorInfo[] =>
@@ -32,3 +37,12 @@ export const buildGeneratorInfoList = (baseDir: string): GeneratorInfo[] =>
         : {}),
     }),
   );
+
+const GENERATORS = buildGeneratorInfoList(path.resolve(__dirname, '..', '..'));
+
+/**
+ * List Nx Plugin for AWS generators
+ * @param includeHidden include hidden generators (default false)
+ */
+export const listGenerators = (includeHidden = false) =>
+  GENERATORS.filter((g) => includeHidden || !g.hidden);

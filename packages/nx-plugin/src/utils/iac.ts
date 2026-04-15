@@ -8,11 +8,12 @@ import {
   readAwsNxPluginConfig,
 } from './config/utils';
 
-export const IAC_PROVIDERS = ['CDK', 'Terraform'] as const;
-
-export type IacProvider = (typeof IAC_PROVIDERS)[number];
-
-export type IacProviderOption = IacProvider | 'Inherit';
+export {
+  IAC_PROVIDERS,
+  type IacProvider,
+  type IacProviderOption,
+} from './iac-providers';
+import { IAC_PROVIDERS } from './iac-providers';
 
 /**
  * Configuration for infrastructure as code
@@ -21,7 +22,7 @@ export interface IacConfig {
   /**
    * Default provider for infrastructure as code
    */
-  provider: IacProvider;
+  provider: (typeof IAC_PROVIDERS)[number];
 }
 
 /**
@@ -29,8 +30,8 @@ export interface IacConfig {
  */
 export const resolveIacProvider = async (
   tree: Tree,
-  iacProviderOption: IacProviderOption,
-): Promise<IacProvider> => {
+  iacProviderOption: 'CDK' | 'Terraform' | 'Inherit',
+): Promise<(typeof IAC_PROVIDERS)[number]> => {
   if (iacProviderOption === 'Inherit') {
     const pluginConfig = await readAwsNxPluginConfig(tree);
 
