@@ -26,7 +26,7 @@
 
 ---
 
-**@aws/nx-plugin** is a collection of code generators that scaffold full-stack, production-ready AWS applications inside an [Nx](https://nx.dev) monorepo. Every generator produces best-practice application code **and** the infrastructure to deploy it — type-safe, locally runnable, and ready for `cdk deploy`.
+**@aws/nx-plugin** is a collection of code generators that scaffold full-stack, production-ready AWS applications inside an [Nx](https://nx.dev) monorepo. Every generator produces best-practice application code **and** the infrastructure to deploy it — type-safe, locally runnable, and ready to deploy.
 
 ## Quick Start
 
@@ -34,12 +34,22 @@
 
 Add the MCP server to your AI assistant and let it build for you.
 
-**MCP configuration** (e.g. `~/.aws/amazonq/mcp.json`, VS Code `mcp.json`, etc.):
+<details>
+<summary><strong>Kiro</strong></summary>
+
+Install the [Kiro Power](https://kiro.dev/docs/powers/) for the best experience — no manual MCP configuration needed:
+
+1. Open the Kiro Powers panel from the sidebar
+2. Click `+` to add a custom power
+3. Paste: `https://github.com/awslabs/nx-plugin-for-aws/tree/main/powers/nx-plugin-for-aws`
+4. Click install
+
+Or add the MCP server manually in `.kiro/mcp.json`:
 
 ```json
 {
   "mcpServers": {
-    "aws-nx-mcp": {
+    "nx-plugin-for-aws": {
       "command": "npx",
       "args": ["-y", "@aws/nx-plugin-mcp"]
     }
@@ -47,11 +57,69 @@ Add the MCP server to your AI assistant and let it build for you.
 }
 ```
 
-> If you hit `ENOENT npx`, replace `"npx"` with the full path (run `which npx` to find it).
+</details>
+
+<details>
+<summary><strong>Claude Code</strong></summary>
+
+```bash
+claude mcp add nx-plugin-for-aws -- npx -y @aws/nx-plugin-mcp
+```
+
+</details>
+
+<details>
+<summary><strong>Cursor</strong></summary>
+
+Add to `~/.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "nx-plugin-for-aws": {
+      "command": "npx",
+      "args": ["-y", "@aws/nx-plugin-mcp"]
+    }
+  }
+}
+```
+
+</details>
+
+<details>
+<summary><strong>Codex</strong></summary>
+
+Add to `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.nx-plugin-for-aws]
+command = "npx"
+args = ["-y", "@aws/nx-plugin-mcp"]
+```
+
+</details>
+
+<details>
+<summary><strong>Other assistants</strong></summary>
+
+Most MCP-compatible assistants use a JSON configuration file. Add the following entry:
+
+```json
+{
+  "mcpServers": {
+    "nx-plugin-for-aws": {
+      "command": "npx",
+      "args": ["-y", "@aws/nx-plugin-mcp"]
+    }
+  }
+}
+```
+
+</details>
 
 Then just ask:
 
-> *"Use the Nx Plugin for AWS to build a full-stack app with a React website, a tRPC API, Cognito auth, and CDK infrastructure."*
+> _"Use the Nx Plugin for AWS to build a full-stack app with a React website, a tRPC API, Cognito auth, and CDK infrastructure."_
 
 Your AI assistant will use the MCP tools to scaffold, connect, and configure everything. See the [Building with AI guide](https://awslabs.github.io/nx-plugin-for-aws/en/get_started/building-with-ai/) for more details.
 
@@ -87,25 +155,25 @@ pnpm nx g @aws/nx-plugin:ts#infra
 
 ## Available Generators
 
-| Generator | Description |
-|---|---|
-| `ts#project` | TypeScript library |
-| `ts#trpc-api` | tRPC API with API Gateway + Lambda + [Powertools](https://github.com/aws-powertools/powertools-lambda-typescript) |
-| `ts#react-website` | React app (Vite) |
-| `ts#react-website#auth` | Add Cognito auth to a React website |
-| `ts#infra` | AWS CDK infrastructure project |
-| `ts#lambda-function` | TypeScript Lambda with type-safe event sources |
-| `ts#mcp-server` | MCP server (TypeScript) |
-| `ts#strands-agent` | [Strands Agent](https://strandsagents.com/) (TypeScript) |
-| `ts#nx-generator` | Nx generator scaffold |
-| `py#project` | Python project (uv) |
-| `py#fast-api` | FastAPI with API Gateway + Lambda + [Powertools](https://github.com/aws-powertools/powertools-lambda-python) |
-| `py#lambda-function` | Python Lambda with type-safe event sources |
-| `py#mcp-server` | MCP server (Python) |
-| `py#strands-agent` | [Strands Agent](https://strandsagents.com/) (Python) |
-| `connection` | Connect projects together (e.g. frontend to API) |
-| `terraform#project` | Terraform project |
-| `license` | Manage LICENSE files and source headers |
+| Generator               | Description                                                                                                       |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `ts#project`            | TypeScript library                                                                                                |
+| `ts#trpc-api`           | tRPC API with API Gateway + Lambda + [Powertools](https://github.com/aws-powertools/powertools-lambda-typescript) |
+| `ts#react-website`      | React app (Vite)                                                                                                  |
+| `ts#react-website#auth` | Add Cognito auth to a React website                                                                               |
+| `ts#infra`              | AWS CDK infrastructure project                                                                                    |
+| `ts#lambda-function`    | TypeScript Lambda with type-safe event sources                                                                    |
+| `ts#mcp-server`         | MCP server (TypeScript)                                                                                           |
+| `ts#strands-agent`      | [Strands Agent](https://strandsagents.com/) (TypeScript)                                                          |
+| `ts#nx-generator`       | Nx generator scaffold                                                                                             |
+| `py#project`            | Python project (uv)                                                                                               |
+| `py#fast-api`           | FastAPI with API Gateway + Lambda + [Powertools](https://github.com/aws-powertools/powertools-lambda-python)      |
+| `py#lambda-function`    | Python Lambda with type-safe event sources                                                                        |
+| `py#mcp-server`         | MCP server (Python)                                                                                               |
+| `py#strands-agent`      | [Strands Agent](https://strandsagents.com/) (Python)                                                              |
+| `connection`            | Connect projects together (e.g. frontend to API)                                                                  |
+| `terraform#project`     | Terraform project                                                                                                 |
+| `license`               | Manage LICENSE files and source headers                                                                           |
 
 ## Community
 
