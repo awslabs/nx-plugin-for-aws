@@ -4,7 +4,6 @@
  */
 import { PackageManager } from '@nx/devkit';
 import { buildCreateNxWorkspaceCommand, runCLI, tmpProjPath } from '../utils';
-import { execSync } from 'child_process';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { ensureDirSync } from 'fs-extra';
 import { join } from 'path';
@@ -16,7 +15,7 @@ export const runSmokeTest = async (
   onProjectCreate?: (projectRoot: string) => void,
 ) => {
   await runCLI(
-    `${buildCreateNxWorkspaceCommand(pkgMgr, 'e2e-test', 'CDK', true)} --interactive=false --skipGit`,
+    `${buildCreateNxWorkspaceCommand(pkgMgr, 'e2e-test', 'CDK')} --interactive=false --skipGit`,
     {
       cwd: dir,
       prefixWithPackageManagerCmd: false,

@@ -22,7 +22,7 @@ describe('smoke test - license-sync', () => {
 
   it('should apply license headers to ts and py source files via sync', async () => {
     await runCLI(
-      `${buildCreateNxWorkspaceCommand(pkgMgr, 'license-test', 'CDK', true)} --interactive=false --skipGit`,
+      `${buildCreateNxWorkspaceCommand(pkgMgr, 'license-test', 'CDK')} --interactive=false --skipGit`,
       {
         cwd: targetDir,
         prefixWithPackageManagerCmd: false,
