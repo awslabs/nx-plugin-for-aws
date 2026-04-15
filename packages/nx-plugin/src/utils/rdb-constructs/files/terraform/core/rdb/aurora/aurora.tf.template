@@ -57,7 +57,7 @@ variable "database_name" {
   type        = string
 }
 
-variable "database_user" {
+variable "admin_user" {
   description = "Admin username stored in the generated Secrets Manager secret."
   type        = string
 }
@@ -208,7 +208,7 @@ resource "aws_secretsmanager_secret" "credentials" {
 resource "aws_secretsmanager_secret_version" "credentials" {
   secret_id = aws_secretsmanager_secret.credentials.id
   secret_string = jsonencode({
-    username = var.database_user
+    username = var.admin_user
     password = random_password.master_password.result
   })
 }
@@ -218,7 +218,7 @@ resource "aws_rds_cluster" "database" {
   engine                              = var.engine
   engine_version                      = coalesce(var.engine_version, local.default_engine_version)
   database_name                       = var.database_name
-  master_username                     = var.database_user
+  master_username                     = var.admin_user
   master_password                     = random_password.master_password.result
   db_subnet_group_name                = aws_db_subnet_group.database.name
   vpc_security_group_ids              = [aws_security_group.database.id]
@@ -227,7 +227,7 @@ resource "aws_rds_cluster" "database" {
   kms_key_id                          = aws_kms_key.database.arn
   deletion_protection                 = var.deletion_protection
   skip_final_snapshot                 = var.skip_final_snapshot
-  iam_database_authentication_enabled = false
+  iam_database_authentication_enabled = true
   monitoring_interval                 = 5
   monitoring_role_arn                 = aws_iam_role.enhanced_monitoring.arn
 
@@ -261,6 +261,11 @@ output "cluster_arn" {
   value       = aws_rds_cluster.database.arn
 }
 
+output "cluster_resource_id" {
+  description = "Resource ID of the Aurora cluster used for IAM database authentication."
+  value       = aws_rds_cluster.database.cluster_resource_id
+}
+
 output "cluster_endpoint" {
   description = "Writer endpoint of the Aurora cluster."
   value       = aws_rds_cluster.database.endpoint
@@ -286,6 +291,11 @@ output "secret_arn" {
   value       = aws_secretsmanager_secret.credentials.arn
 }
 
+output "kms_key_arn" {
+  description = "ARN of the KMS key protecting Aurora and the generated secret."
+  value       = aws_kms_key.database.arn
+}
+
 output "database_host" {
   description = "Hostname of the Aurora cluster writer endpoint."
   value       = aws_rds_cluster.database.endpoint
@@ -302,8 +312,8 @@ output "database_password" {
   sensitive   = true
 }
 
-output "database_user" {
-  description = "Database username stored in the generated secret."
+output "admin_user" {
+  description = "Admin username stored in the generated secret."
   value       = jsondecode(aws_secretsmanager_secret_version.credentials.secret_string).username
 }
 
