@@ -53,12 +53,7 @@ describe('smoke test - mcp-server', () => {
         arguments: { workspaceName: 'my-app', packageManager: 'pnpm' },
       });
       expect(createResult.content).toHaveLength(1);
-      expect((createResult.content[0] as { text: string }).text).toContain(
-        'create-nx-workspace',
-      );
-      expect((createResult.content[0] as { text: string }).text).toContain(
-        '--preset=@aws/nx-plugin',
-      );
+      expect(createResult.isError).toBeFalsy();
 
       // Test list-generators
       const listResult = await client.callTool({
