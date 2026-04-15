@@ -8,10 +8,21 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 
 describe('smoke test - mcp-server', () => {
   it('should start the MCP server and respond to tool calls', async () => {
-    // Start the MCP server using the exact command from the docs
+    // Start the MCP server using the exact command from the docs:
+    //   npx -y @aws/nx-plugin-mcp
+    // In e2e, the package is published to a local verdaccio registry
+    // so we pass --registry to ensure npx fetches from it.
+    const registry = process.env.npm_config_registry;
     const transport = new StdioClientTransport({
       command: 'npx',
-      args: ['-y', '@aws/nx-plugin-mcp'],
+      args: [
+        '-y',
+        ...(registry ? [`--registry=${registry}`] : []),
+        '@aws/nx-plugin-mcp',
+      ],
+      env: {
+        ...process.env,
+      },
     });
 
     const client = new Client({
