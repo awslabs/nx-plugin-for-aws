@@ -22,7 +22,7 @@ const renderSchema = (schema: any) =>
   Object.entries(schema.properties)
     .map(
       ([parameter, parameterSchema]: [string, any]) =>
-        `- ${parameter} [type: ${parameterSchema.type}]${(schema.required ?? []).includes(parameter) ? ` (required)` : ''} ${parameterSchema.description}`,
+        `- ${parameter} [type: ${parameterSchema.type}]${parameterSchema.enum ? ` [options: ${parameterSchema.enum.join(', ')}]` : ''}${(schema.required ?? []).includes(parameter) ? ` (required)` : ''} ${parameterSchema.description}`,
     )
     .join('\n');
 

@@ -26,6 +26,11 @@ describe('postProcessGuide', () => {
             type: 'string',
             description: 'The name of the project',
           },
+          auth: {
+            type: 'string',
+            enum: ['IAM', 'Cognito', 'None'],
+            description: 'The auth method to use',
+          },
           directory: {
             type: 'string',
             description: 'The directory to create the project in',
@@ -171,6 +176,7 @@ Here are the parameters for the generator:
 # Test Guide
 Here are the parameters for the generator:
 - name [type: string] (required) The name of the project
+- auth [type: string] [options: IAM, Cognito, None] The auth method to use
 - directory [type: string] The directory to create the project in
 `;
 
@@ -227,6 +233,7 @@ bunx nx g @aws/nx-plugin:test-generator --no-interactive --name=<name>
 
 Here are the parameters for the generator:
 - name [type: string] (required) The name of the project
+- auth [type: string] [options: IAM, Cognito, None] The auth method to use
 - directory [type: string] The directory to create the project in
 `;
 
