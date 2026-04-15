@@ -12,7 +12,7 @@ export default defineConfig({
   input: path.resolve(__dirname, 'src/index.ts'),
   output: {
     dir: path.resolve(__dirname, '../../dist/packages/nx-plugin-mcp/bin'),
-    entryFileNames: 'aws-nx-mcp.cjs',
+    entryFileNames: 'aws-nx-mcp.js',
     format: 'cjs',
   },
   platform: 'node',

@@ -29,7 +29,7 @@ export default async function () {
       console.info('Package published to local registry');
 
       console.info('Publishing @aws/nx-plugin-mcp to local registry');
-      execSync(`npm publish`, {
+      execSync(`npm publish --tag e2e`, {
         env: process.env,
         cwd: join(__dirname, '../../dist/packages/nx-plugin-mcp'),
       });

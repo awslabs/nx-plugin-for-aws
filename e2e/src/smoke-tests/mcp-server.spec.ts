@@ -13,12 +13,13 @@ describe('smoke test - mcp-server', () => {
     // In e2e, the package is published to a local verdaccio registry
     // so we pass --registry to ensure npx fetches from it.
     const registry = process.env.npm_config_registry;
+    const version = process.env.NX_E2E_PRESET_VERSION ?? 'latest';
     const transport = new StdioClientTransport({
       command: 'npx',
       args: [
         '-y',
         ...(registry ? [`--registry=${registry}`] : []),
-        '@aws/nx-plugin-mcp',
+        `@aws/nx-plugin-mcp@${version}`,
       ],
       env: {
         ...process.env,
