@@ -66,6 +66,7 @@ export const TS_VERSIONS = {
   '@typescript-eslint/parser': '8.58.1',
   'eslint-plugin-prettier': '5.5.5',
   express: '5.2.1',
+  fastify: '5.3.3',
   'jsonc-eslint-parser': '3.1.0',
   'typescript-eslint': '8.58.1',
   'make-dir-cli': '4.0.0',

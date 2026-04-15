@@ -1,0 +1,258 @@
+---
+title: ECS tRPC
+description: Reference documentation for ECS tRPC
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Snippet from '@components/snippet.astro';
+
+[tRPC](https://trpc.io/) is a framework for building APIs in TypeScript with end-to-end type safety. Using tRPC, updates to API operation inputs and outputs are immediately reflected in client code and are visible in your IDE without the need to rebuild your project.
+
+The ECS tRPC API generator creates a new tRPC API deployed as a containerised [AWS ECS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html) service, fronted by an [API Gateway HTTP API](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) via a VPC Link. The generated backend uses [Fastify](https://fastify.dev/) as the HTTP server and includes schema validation using [Zod](https://zod.dev/).
+
+:::tip
+ECS Fargate is a good fit when your API has long-running requests, needs consistent low-latency responses without cold starts, or has steady traffic patterns that benefit from always-on compute. If your API is lightweight, has variable or bursty traffic, and can tolerate occasional cold starts, a serverless Lambda deployment may be simpler and more cost-effective. See the <Link path="/guides/trpc">`ts#trpc-api` Lambda guide</Link> for the Lambda-based alternative.
+:::
+
+## Usage
+
+### Generate an ECS tRPC API
+
+You can generate a new ECS tRPC API in two ways:
+
+<RunGenerator generator="ts#trpc-api" />
+
+Select `EcsFargate` as the `computeType` when prompted.
+
+### Options
+
+<GeneratorParameters generator="ts#trpc-api" />
+
+## Generator Output
+
+The generator will create the following project structure in the `<directory>/<api-name>` directory:
+
+<FileTree>
+  - src
+    - init.ts Backend tRPC initialisation
+    - server.ts Fastify server entrypoint
+    - local-server.ts Fastify server entrypoint for local development with CORS enabled
+    - router.ts tRPC router definition
+    - index.ts Exports for the router and schemas
+    - schema Schema definitions using Zod
+      - echo.ts Example definitions for the input and output of the "echo" procedure
+      - index.ts Schema barrel export
+    - procedures Procedures (or operations) exposed by your API
+      - echo.ts Example procedure
+  - Dockerfile Dockerfile for building the container image
+  - tsconfig.json TypeScript configuration
+  - project.json Project configuration and build targets
+</FileTree>
+
+### Infrastructure
+
+<Snippet name="shared-constructs" />
+
+For deploying your API, the following files are generated:
+
+<FileTree>
+  - packages/common/constructs/src
+    - app
+      - ecs-apis
+        - \<project-name>.ts CDK construct for deploying your ECS API
+    - core
+      - ecs
+        - ecs-api.ts Core CDK construct for ECS Fargate services fronted by API Gateway
+      - api
+        - http-api.ts CDK construct for the API Gateway HTTP API
+        - utils.ts Utilities for the API constructs
+</FileTree>
+
+## Implementing your ECS tRPC API
+
+At a high-level, tRPC APIs consist of a router which delegates requests to specific procedures. Each procedure has an input and output, defined as a Zod schema. The ECS variant runs your tRPC router inside a Fastify HTTP server, packaged as a Docker container.
+
+### Schema
+
+<Snippet name="trpc/schema" />
+
+### Router and Procedures
+
+Your tRPC router is defined in `src/router.ts`, which registers all procedures. The Fastify server entry point is in `src/server.ts`, which registers the tRPC router as a Fastify plugin and exposes a `/health` endpoint for load balancer health checks.
+
+<Snippet name="trpc/echo-procedure" />
+
+### Fastify Server
+
+The `src/server.ts` file sets up a [Fastify](https://fastify.dev/) HTTP server that hosts your tRPC router. It registers the tRPC adapter as a Fastify plugin under the `/trpc` prefix and exposes a `/health` endpoint used by the Application Load Balancer for health checks.
+
+```ts
+import Fastify from 'fastify';
+import { fastifyTRPCPlugin } from '@trpc/server/adapters/fastify';
+import { appRouter } from './router.js';
+
+const server = Fastify({ logger: true });
+
+void server.register(fastifyTRPCPlugin, {
+  prefix: '/trpc',
+  trpcOptions: { router: appRouter },
+});
+
+server.get('/health', async () => ({ status: 'ok' }));
+```
+
+## Customising your ECS tRPC API
+
+### Errors
+
+<Snippet name="trpc/errors" />
+
+### Organising Your Operations
+
+<Snippet name="trpc/organising-operations" />
+
+### Implementing Custom Middleware
+
+You can add additional values to the context provided to procedures by implementing middleware in `src/init.ts`.
+
+As an example, let's implement some middleware to add request logging:
+
+```ts
+import { initTRPC } from '@trpc/server';
+
+export const t = initTRPC.create();
+
+const loggerMiddleware = t.middleware(async (opts) => {
+  const start = Date.now();
+  const result = await opts.next();
+  const duration = Date.now() - start;
+  console.log(`${opts.type} ${opts.path} - ${duration}ms`);
+  return result;
+});
+
+export const publicProcedure = t.procedure.use(loggerMiddleware);
+```
+
+## Deploying your ECS tRPC API
+
+The ECS tRPC API generator creates CDK infrastructure as code. You can use this to deploy your API.
+
+:::note
+ECS infrastructure is currently only supported with CDK.
+:::
+
+The CDK construct for deploying your API is in the `common/constructs` folder. You can consume this in a CDK application, for example:
+
+```ts {6-8}
+import { MyApi } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+   constructor(scope: Construct, id: string) {
+      // Add the api to your stack
+      const api = new MyApi(this, 'MyApi');
+   }
+}
+```
+
+This sets up your API infrastructure, including:
+
+- A VPC with private subnets
+- An ECS Fargate cluster and service running your containerised API
+- An internal Application Load Balancer
+- An API Gateway HTTP API connected to the ALB via a VPC Link
+- CloudWatch log groups for the container and API access logs
+- Authentication based on your chosen `auth` method
+
+You can customise the construct by passing optional properties:
+
+```ts
+const api = new MyApi(this, 'MyApi', {
+  cpu: 512,
+  memoryLimitMiB: 1024,
+  desiredCount: 2,
+  environment: {
+    MY_ENV_VAR: 'my-value',
+  },
+});
+```
+
+:::note
+If you selected to use `Cognito` authentication, you will need to supply the `identity` property to the API construct:
+
+```ts {9-12}
+import { MyApi, UserIdentity } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const identity = new UserIdentity(this, 'Identity');
+
+    const api = new MyApi(this, 'MyApi', {
+      identity: {
+        userPool: identity.userPool,
+        userPoolClient: identity.userPoolClient,
+      },
+    });
+  }
+}
+```
+
+The `UserIdentity` construct can be generated using the <Link path="/guides/react-website-auth">`ts#react-website-auth` generator</Link>
+:::
+
+### Granting Access (IAM Only)
+
+If you selected to use `IAM` authentication, you can grant access to your API:
+
+```ts
+api.grantInvokeAccess(myIdentityPool.authenticatedRole);
+```
+
+### CORS Configuration
+
+By default, the API allows all origins. You can restrict CORS to specific origins:
+
+```ts
+api.restrictCorsTo('https://myapp.com', 'https://staging.myapp.com');
+```
+
+### Bundle Target
+
+<Snippet name="ts-bundle" />
+
+## Local Development Server
+
+You can use the `serve` target to run a local development server for your API:
+
+<NxCommands commands={['run @my-scope/my-api:serve']} />
+
+This starts a local development server using `tsx --watch`, which automatically reloads when you make changes to your source code. The entry point for the local server is `src/local-server.ts`.
+
+## Invoking your ECS tRPC API
+
+You can create a tRPC client to invoke your API in a type-safe manner. If you are calling your tRPC API from another backend, you can use the client exported from your API package:
+
+```ts
+import { createTRPCClient, httpBatchLink } from '@trpc/client';
+import type { AppRouter } from ':my-scope/my-api';
+
+const client = createTRPCClient<AppRouter>({
+  links: [
+    httpBatchLink({
+      url: 'https://my-api-url.example.com/trpc',
+    }),
+  ],
+});
+
+await client.echo.query({ message: 'Hello world!' });
+```
+
+If you are calling your API from a React website, consider using the <Link path="guides/connection/react-trpc">Connection</Link> generator to configure the client.
+
+## More Information
+
+For more information about tRPC, please refer to the [tRPC documentation](https://trpc.io/docs).
+
+For more information about ECS Fargate, please refer to the [AWS ECS documentation](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html).

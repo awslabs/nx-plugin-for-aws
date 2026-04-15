@@ -1,0 +1,73 @@
+import { Construct } from 'constructs';
+import * as url from 'url';
+import { EcsApi, type EcsApiProps } from '../../core/ecs/ecs-api.js';
+<%_ if (auth === 'IAM') { _%>
+import { HttpIamAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
+import { Grant, IGrantable } from 'aws-cdk-lib/aws-iam';
+<%_ } else if (auth === 'Cognito') { _%>
+import { HttpUserPoolAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
+import { IUserPool, IUserPoolClient } from 'aws-cdk-lib/aws-cognito';
+<%_ } else { _%>
+import { HttpNoneAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2';
+<%_ } _%>
+
+<%_ if (auth === 'Cognito') { _%>
+/**
+ * Properties for creating a <%= apiNameClassName %> ECS API
+ */
+export interface <%= apiNameClassName %>Props extends Partial<Pick<EcsApiProps, 'vpc' | 'cpu' | 'memoryLimitMiB' | 'desiredCount' | 'environment'>> {
+  /**
+   * Identity details for Cognito Authentication
+   */
+  readonly identity: {
+    readonly userPool: IUserPool;
+    readonly userPoolClient: IUserPoolClient;
+  };
+}
+<%_ } else { _%>
+/**
+ * Properties for creating a <%= apiNameClassName %> ECS API
+ */
+export type <%= apiNameClassName %>Props = Partial<Pick<EcsApiProps, 'vpc' | 'cpu' | 'memoryLimitMiB' | 'desiredCount' | 'environment'>>;
+<%_ } _%>
+
+/**
+ * A CDK construct that creates an ECS Fargate service for <%= apiNameClassName %>
+ * fronted by API Gateway HTTP API with VPC Link.
+ */
+export class <%= apiNameClassName %> extends EcsApi {
+  constructor(scope: Construct, id: string, props: <%= apiNameClassName %>Props = {}) {
+    super(scope, id, {
+      apiName: '<%= apiNameClassName %>',
+      dockerContextPath: url.fileURLToPath(
+        new URL('../../../../../../', import.meta.url),
+      ),
+      dockerfilePath: '<%= backendRoot %>/Dockerfile',
+      dockerExclude: ['**/node_modules', '**/.nx', '**/src', '**/.git', '**/cdk.out'],
+      containerPort: <%= port %>,
+      <%_ if (auth === 'IAM') { _%>
+      authorizer: new HttpIamAuthorizer(),
+      <%_ } else if (auth === 'Cognito') { _%>
+      authorizer: new HttpUserPoolAuthorizer('<%= apiNameClassName %>Authorizer', props.identity!.userPool, {
+        userPoolClients: [props.identity!.userPoolClient],
+      }),
+      <%_ } else { _%>
+      authorizer: new HttpNoneAuthorizer(),
+      <%_ } _%>
+      ...props,
+    });
+  }
+  <%_ if (auth === 'IAM') { _%>
+
+  /**
+   * Grants IAM permissions to invoke any method on this API.
+   */
+  public grantInvokeAccess(grantee: IGrantable) {
+    Grant.addToPrincipal({
+      grantee,
+      actions: ['execute-api:Invoke'],
+      resourceArns: [this.api.arnForExecuteApi('*', '/*', '*')],
+    });
+  }
+  <%_ } _%>
+}

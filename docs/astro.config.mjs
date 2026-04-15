@@ -308,6 +308,7 @@ export default defineConfig({
             { label: 'ts#project', link: '/guides/typescript-project' },
             { label: 'ts#infra', link: '/guides/typescript-infrastructure' },
             { label: 'ts#trpc-api', link: '/guides/trpc' },
+            { label: 'ts#trpc-api (ECS)', link: '/guides/ecs-trpc' },
             { label: 'ts#smithy-api', link: '/guides/ts-smithy-api' },
             {
               label: 'ts#react-website',

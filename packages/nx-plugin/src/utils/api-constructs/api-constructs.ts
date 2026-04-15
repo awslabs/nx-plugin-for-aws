@@ -87,13 +87,11 @@ export const addApiGatewayInfra = async (
 };
 
 /**
- * Add an API CDK construct, and update the Runtime Config type to export its url
+ * Generate core API CDK files (utils, trpc, http, rest) into the shared constructs directory.
+ * Shared between API Gateway and ECS constructs.
  */
-const addApiGatewayCdkConstructs = async (
-  tree: Tree,
-  options: AddApiGatewayConstructOptions,
-) => {
-  const generateCoreApiFile = (name: string) => {
+export const generateCoreApiCdkFiles = (tree: Tree, names: string[]) => {
+  for (const name of names) {
     generateFiles(
       tree,
       joinPathFragments(__dirname, 'files', 'cdk', 'core', 'api', name),
@@ -109,14 +107,22 @@ const addApiGatewayCdkConstructs = async (
         overwriteStrategy: OverwriteStrategy.KeepExisting,
       },
     );
-  };
-
-  // Generate relevant core CDK construct and utilities
-  generateCoreApiFile(options.constructType);
-  generateCoreApiFile('utils');
-  if (options.backend.type === 'trpc') {
-    generateCoreApiFile('trpc');
   }
+};
+
+/**
+ * Add an API CDK construct, and update the Runtime Config type to export its url
+ */
+const addApiGatewayCdkConstructs = async (
+  tree: Tree,
+  options: AddApiGatewayConstructOptions,
+) => {
+  // Generate relevant core CDK construct and utilities
+  generateCoreApiCdkFiles(tree, [
+    options.constructType,
+    'utils',
+    ...(options.backend.type === 'trpc' ? ['trpc'] : []),
+  ]);
 
   // Generate app specific CDK construct
   generateFiles(

@@ -1,0 +1,348 @@
+import { Construct } from 'constructs';
+import { CfnOutput, Duration, RemovalPolicy } from 'aws-cdk-lib';
+import {
+  Vpc,
+  SubnetType,
+  SecurityGroup,
+  Port,
+  IVpc,
+} from 'aws-cdk-lib/aws-ec2';
+import {
+  Cluster,
+  ContainerImage,
+  ContainerInsights,
+  CpuArchitecture,
+  FargateService,
+  FargateTaskDefinition,
+  LogDrivers,
+  OperatingSystemFamily,
+  Protocol,
+} from 'aws-cdk-lib/aws-ecs';
+import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import {
+  ApplicationLoadBalancer,
+  ApplicationProtocol,
+  ApplicationTargetGroup,
+  TargetType,
+} from 'aws-cdk-lib/aws-elasticloadbalancingv2';
+import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
+import {
+  HttpApi as _HttpApi,
+  HttpMethod,
+  HttpStage,
+  CorsHttpMethod,
+  CfnApi,
+  IHttpRouteAuthorizer,
+  LogGroupLogDestination,
+} from 'aws-cdk-lib/aws-apigatewayv2';
+import { HttpAlbIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
+import { VpcLink } from 'aws-cdk-lib/aws-apigatewayv2';
+import { RuntimeConfig } from '../runtime-config.js';
+import { suppressRules } from '../checkov.js';
+
+/**
+ * Properties for creating an EcsApi construct
+ */
+export interface EcsApiProps {
+  /**
+   * Unique name for the API
+   */
+  readonly apiName: string;
+
+  /**
+   * Path to the Docker build context directory
+   */
+  readonly dockerContextPath: string;
+
+  /**
+   * Path to the Dockerfile relative to the Docker build context
+   */
+  readonly dockerfilePath?: string;
+
+  /**
+   * Glob patterns to exclude from the Docker build context
+   */
+  readonly dockerExclude?: string[];
+
+  /**
+   * Container port the application listens on
+   */
+  readonly containerPort: number;
+
+  /**
+   * Optional VPC to deploy into. If not provided, a new VPC is created.
+   */
+  readonly vpc?: IVpc;
+
+  /**
+   * Optional CPU units for the Fargate task (default: 256)
+   */
+  readonly cpu?: number;
+
+  /**
+   * Optional memory in MiB for the Fargate task (default: 512)
+   */
+  readonly memoryLimitMiB?: number;
+
+  /**
+   * Optional desired count of tasks (default: 1)
+   */
+  readonly desiredCount?: number;
+
+  /**
+   * Optional environment variables for the container
+   */
+  readonly environment?: Record<string, string>;
+
+  /**
+   * Optional authorizer for the API routes
+   */
+  readonly authorizer?: IHttpRouteAuthorizer;
+}
+
+/**
+ * A CDK construct that creates an ECS Fargate service fronted by
+ * an internal ALB and API Gateway HTTP API via VPC Link.
+ */
+export class EcsApi extends Construct {
+  /** The API Gateway HTTP API */
+  public readonly api: _HttpApi;
+
+  /** The default stage of the HTTP API */
+  public readonly defaultStage: HttpStage;
+
+  /** The ECS Fargate service */
+  public readonly service: FargateService;
+
+  /** The VPC */
+  public readonly vpc: IVpc;
+
+  /** The internal ALB */
+  public readonly loadBalancer: ApplicationLoadBalancer;
+
+  constructor(scope: Construct, id: string, props: EcsApiProps) {
+    super(scope, id);
+
+    // VPC
+    this.vpc =
+      props.vpc ??
+      new Vpc(this, 'Vpc', {
+        maxAzs: 2,
+        natGateways: 1,
+      });
+
+    // ECS Cluster
+    const cluster = new Cluster(this, 'Cluster', {
+      vpc: this.vpc,
+      containerInsightsV2: ContainerInsights.ENHANCED,
+    });
+
+    // Task Definition
+    const taskDefinition = new FargateTaskDefinition(this, 'TaskDef', {
+      cpu: props.cpu ?? 256,
+      memoryLimitMiB: props.memoryLimitMiB ?? 512,
+      runtimePlatform: {
+        cpuArchitecture: CpuArchitecture.ARM64,
+        operatingSystemFamily: OperatingSystemFamily.LINUX,
+      },
+    });
+
+    const logGroup = new LogGroup(this, 'LogGroup', {
+      retention: RetentionDays.ONE_WEEK,
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+    suppressRules(
+      logGroup,
+      ['CKV_AWS_158'],
+      'Using default CloudWatch log encryption',
+    );
+
+    taskDefinition.addContainer('AppContainer', {
+      image: ContainerImage.fromAsset(props.dockerContextPath, {
+        file: props.dockerfilePath,
+        exclude: props.dockerExclude,
+        platform: Platform.LINUX_ARM64,
+      }),
+      portMappings: [
+        { containerPort: props.containerPort, protocol: Protocol.TCP },
+      ],
+      logging: LogDrivers.awsLogs({
+        streamPrefix: props.apiName,
+        logGroup,
+      }),
+      environment: props.environment,
+    });
+
+    // Security Groups
+    const albSg = new SecurityGroup(this, 'AlbSg', {
+      vpc: this.vpc,
+      allowAllOutbound: true,
+    });
+    suppressRules(
+      albSg,
+      ['CKV_AWS_260'],
+      'Internal ALB only accessible via VPC Link from API Gateway',
+    );
+
+    const serviceSg = new SecurityGroup(this, 'ServiceSg', {
+      vpc: this.vpc,
+      allowAllOutbound: true,
+    });
+    serviceSg.addIngressRule(
+      albSg,
+      Port.tcp(props.containerPort),
+      'Allow ALB to reach container',
+    );
+
+    // Fargate Service
+    this.service = new FargateService(this, 'Service', {
+      cluster,
+      taskDefinition,
+      desiredCount: props.desiredCount ?? 1,
+      assignPublicIp: false,
+      securityGroups: [serviceSg],
+      vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+    });
+
+    // Internal ALB
+    this.loadBalancer = new ApplicationLoadBalancer(this, 'Alb', {
+      vpc: this.vpc,
+      internetFacing: false,
+      securityGroup: albSg,
+    });
+    suppressRules(
+      this.loadBalancer,
+      ['CKV_AWS_91'],
+      'ALB access logging not required for internal ALB',
+    );
+    suppressRules(
+      this.loadBalancer,
+      ['CKV_AWS_131'],
+      'Drop invalid headers not required for internal ALB',
+    );
+
+    const targetGroup = new ApplicationTargetGroup(this, 'TargetGroup', {
+      vpc: this.vpc,
+      port: props.containerPort,
+      protocol: ApplicationProtocol.HTTP,
+      targetType: TargetType.IP,
+      healthCheck: {
+        path: '/health',
+        interval: Duration.seconds(30),
+      },
+    });
+    this.service.attachToApplicationTargetGroup(targetGroup);
+
+    const httpListener = this.loadBalancer.addListener('HttpListener', {
+      port: 80,
+      defaultTargetGroups: [targetGroup],
+    });
+    suppressRules(
+      httpListener,
+      ['CKV_AWS_2', 'CKV_AWS_103'],
+      'Internal ALB does not require HTTPS - traffic is within VPC via VPC Link',
+    );
+
+    // VPC Link + API Gateway HTTP API
+    const vpcLink = new VpcLink(this, 'VpcLink', {
+      vpc: this.vpc,
+      subnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+      securityGroups: [albSg],
+    });
+
+    this.api = new _HttpApi(this, 'Api', {
+      createDefaultStage: false,
+      corsPreflight: {
+        allowOrigins: ['*'],
+        allowMethods: [CorsHttpMethod.ANY],
+        allowHeaders: [
+          'authorization',
+          'content-type',
+          'x-amz-content-sha256',
+          'x-amz-date',
+          'x-amz-security-token',
+        ],
+      },
+    });
+
+    const accessLogGroup = new LogGroup(this, 'ApiAccessLogs', {
+      retention: RetentionDays.ONE_WEEK,
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+    suppressRules(
+      accessLogGroup,
+      ['CKV_AWS_158'],
+      'Using default CloudWatch log encryption',
+    );
+
+    this.defaultStage = new HttpStage(this, 'DefaultStage', {
+      httpApi: this.api,
+      autoDeploy: true,
+      accessLogSettings: {
+        destination: new LogGroupLogDestination(accessLogGroup),
+      },
+    });
+
+    const albIntegration = new HttpAlbIntegration(
+      'AlbIntegration',
+      this.loadBalancer.listeners[0],
+      { vpcLink },
+    );
+
+    this.api.addRoutes({
+      path: '/{proxy+}',
+      methods: [
+        HttpMethod.GET,
+        HttpMethod.POST,
+        HttpMethod.PUT,
+        HttpMethod.PATCH,
+        HttpMethod.DELETE,
+        HttpMethod.HEAD,
+      ],
+      integration: albIntegration,
+      ...(props.authorizer ? { authorizer: props.authorizer } : {}),
+    });
+
+    new CfnOutput(this, `${props.apiName}Url`, {
+      value: this.defaultStage.url!,
+    });
+
+    // Register the API URL in runtime configuration
+    const rc = RuntimeConfig.ensure(this);
+    rc.set('connection', 'apis', {
+      ...rc.get('connection').apis,
+      [props.apiName]: this.defaultStage.url!,
+    });
+  }
+
+  /**
+   * Return the API url
+   */
+  public get url() {
+    return this.defaultStage.url;
+  }
+
+  /**
+   * Restricts CORS to the provided origins
+   */
+  public restrictCorsTo(...origins: string[]) {
+    const cfnApi = this.api.node.defaultChild;
+    if (!(cfnApi instanceof CfnApi)) {
+      throw new Error(
+        'Unable to configure CORS: API default child is not a CfnApi instance',
+      );
+    }
+
+    cfnApi.corsConfiguration = {
+      allowOrigins: origins,
+      allowMethods: [CorsHttpMethod.ANY],
+      allowHeaders: [
+        'authorization',
+        'content-type',
+        'x-amz-content-sha256',
+        'x-amz-date',
+        'x-amz-security-token',
+      ],
+    };
+  }
+}

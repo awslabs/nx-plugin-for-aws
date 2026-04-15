@@ -301,6 +301,112 @@ export function Main() {
   });
 });
 
+describe('ECS tRPC API', () => {
+  let tree: Tree;
+
+  beforeEach(() => {
+    tree = createTreeUsingTsSolutionSetup();
+    tree.write(
+      'apps/frontend/project.json',
+      JSON.stringify({
+        name: 'frontend',
+        root: 'apps/frontend',
+        sourceRoot: 'apps/frontend/src',
+      }),
+    );
+    tree.write(
+      'apps/backend/project.json',
+      JSON.stringify({
+        name: 'backend',
+        root: 'apps/backend',
+        sourceRoot: 'apps/backend/src',
+        metadata: {
+          apiName: 'TestApi',
+          apiType: 'trpc',
+          computeType: 'EcsFargate',
+          auth: 'None',
+          port: 3000,
+        },
+      }),
+    );
+    tree.write(
+      'apps/frontend/src/main.tsx',
+      `
+import { RouterProvider } from '@tanstack/react-router';
+
+const App = () => <RouterProvider router={router} />;
+
+export function Main() {
+  return <App />;
+}
+`,
+    );
+  });
+
+  it('should generate client provider for ECS', async () => {
+    await reactGenerator(tree, {
+      frontendProjectName: 'frontend',
+      backendProjectName: 'backend',
+    });
+
+    const clientProvider = tree.read(
+      'apps/frontend/src/components/TestApiClientProvider.tsx',
+      'utf-8',
+    );
+
+    expect(clientProvider).toContain('url: `${apiUrl}trpc`');
+    expect(clientProvider).toMatchSnapshot('TestApiClientProvider-ECS.tsx');
+  });
+
+  it('should generate client provider for ECS with IAM auth', async () => {
+    updateJson(tree, 'apps/backend/project.json', (config) => ({
+      ...config,
+      metadata: {
+        ...config.metadata,
+        auth: 'IAM',
+      },
+    }));
+
+    await reactGenerator(tree, {
+      frontendProjectName: 'frontend',
+      backendProjectName: 'backend',
+    });
+
+    const clientProvider = tree.read(
+      'apps/frontend/src/components/TestApiClientProvider.tsx',
+      'utf-8',
+    );
+
+    expect(clientProvider).toContain('url: `${apiUrl}trpc`');
+    expect(clientProvider).toMatchSnapshot('TestApiClientProvider-ECS-IAM.tsx');
+  });
+
+  it('should generate client provider for ECS with Cognito auth', async () => {
+    updateJson(tree, 'apps/backend/project.json', (config) => ({
+      ...config,
+      metadata: {
+        ...config.metadata,
+        auth: 'Cognito',
+      },
+    }));
+
+    await reactGenerator(tree, {
+      frontendProjectName: 'frontend',
+      backendProjectName: 'backend',
+    });
+
+    const clientProvider = tree.read(
+      'apps/frontend/src/components/TestApiClientProvider.tsx',
+      'utf-8',
+    );
+
+    expect(clientProvider).toContain('url: `${apiUrl}trpc`');
+    expect(clientProvider).toMatchSnapshot(
+      'TestApiClientProvider-ECS-Cognito.tsx',
+    );
+  });
+});
+
 describe('trpc react generator with unqualified names', () => {
   let tree: Tree;
 
@@ -488,5 +594,44 @@ describe('trpc react generator with real react and trpc projects', () => {
     expect(runtimeConfigContent).toContain('http://localhost:2022/');
     expect(runtimeConfigContent).toContain('runtimeConfig.apis.SecondApi');
     expect(runtimeConfigContent).toContain('http://localhost:2023/');
+  });
+});
+
+describe('trpc react generator with real ECS tRPC project', () => {
+  let tree: Tree;
+
+  beforeEach(async () => {
+    tree = createTreeUsingTsSolutionSetup();
+
+    // Generate a React website
+    await tsReactWebsiteGenerator(tree, {
+      name: 'frontend',
+      skipInstall: true,
+      iacProvider: 'CDK',
+    });
+  });
+
+  it('should generate client provider with trpc url suffix when using real ECS tRPC generator', async () => {
+    // Generate an ECS tRPC backend using the real generator
+    await tsTrpcApiGenerator(tree, {
+      name: 'DemoEcsApi',
+      directory: 'packages',
+      computeType: 'EcsFargate',
+      auth: 'IAM',
+      iacProvider: 'CDK',
+    });
+
+    // Connect the frontend to the ECS tRPC backend
+    await reactGenerator(tree, {
+      frontendProjectName: 'frontend',
+      backendProjectName: 'demo-ecs-api',
+    });
+
+    const clientProvider = tree.read(
+      'frontend/src/components/DemoEcsApiClientProvider.tsx',
+      'utf-8',
+    );
+
+    expect(clientProvider).toContain('url: `${apiUrl}trpc`');
   });
 });
