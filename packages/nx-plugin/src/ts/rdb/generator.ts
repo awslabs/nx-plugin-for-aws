@@ -167,6 +167,7 @@ export const tsRdbGenerator = async (
     options.engine === 'MySQL'
       ? withVersions([
           '@aws-lambda-powertools/parameters',
+          '@aws-sdk/client-appconfigdata',
           '@aws-sdk/client-secrets-manager',
           '@aws-sdk/rds-signer',
           '@prisma/client',
@@ -175,6 +176,7 @@ export const tsRdbGenerator = async (
         ])
       : withVersions([
           '@aws-lambda-powertools/parameters',
+          '@aws-sdk/client-appconfigdata',
           '@aws-sdk/client-secrets-manager',
           '@aws-sdk/rds-signer',
           '@prisma/client',
@@ -186,8 +188,8 @@ export const tsRdbGenerator = async (
     tree,
     runtimeDependencies,
     options.engine === 'MySQL'
-      ? withVersions(['prisma'])
-      : withVersions(['prisma', '@types/pg']),
+      ? withVersions(['prisma', '@types/aws-lambda'])
+      : withVersions(['prisma', '@types/pg', '@types/aws-lambda']),
   );
 
   await addGeneratorMetricsIfApplicable(tree, [TS_RDB_GENERATOR_INFO]);

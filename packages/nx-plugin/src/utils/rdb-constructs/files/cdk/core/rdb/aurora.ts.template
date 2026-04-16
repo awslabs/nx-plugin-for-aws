@@ -1,4 +1,4 @@
-import { Duration, Stack } from 'aws-cdk-lib';
+import { CfnOutput, Duration, Stack } from 'aws-cdk-lib';
 import { CustomResource } from 'aws-cdk-lib';
 import { IConnectable, IVpc, Port, SubnetType } from 'aws-cdk-lib/aws-ec2';
 import { IGrantable, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
@@ -283,8 +283,6 @@ export abstract class AuroraDatabase extends Construct {
         DATABASE_SECRET_ARN: this.cluster.secret!.secretArn,
       },
 <%_ } else { _%>
-      // Setting environment vars here so that migrationHandler does not have to make a call to AppConfig.
-      // This is internal to the construct so maybe it is ok?
       environment: {
         HOSTNAME: databaseHostname,
         DATABASE: databaseName,
@@ -313,6 +311,16 @@ export abstract class AuroraDatabase extends Construct {
       handler: migrationHandler,
     });
     trigger.node.addDependency(createDbUserResource);
+
+    new CfnOutput(this, 'ClusterEndpoint', {
+      value: this.cluster.clusterEndpoint.hostname,
+    });
+
+    if (this.proxy?.endpoint) {
+      new CfnOutput(this, 'ProxyEndpoint', {
+        value: this.proxy?.endpoint,
+      });
+    }
   }
 
   public allowDefaultPortFrom(other: IConnectable, description?: string): void {

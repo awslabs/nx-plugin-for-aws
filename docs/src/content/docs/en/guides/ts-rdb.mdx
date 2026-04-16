@@ -107,10 +107,10 @@ For more details on why this is required and how Prisma uses it, refer to the Pr
 When using the Prisma CLI, run the commands from your generated database package directory, for example `packages/postgres`, so Prisma can find `prisma/schema.prisma` and `prisma.config.ts`.
 :::
 
-To generate migrations locally, you can point Prisma at a local database instance. First export `DATABASE_URL` so Prisma can connect to your database:
+To generate migrations locally, you can point Prisma at a development database instance. First export `DATABASE_URL` so Prisma can connect to your database:
 
 ```bash
-export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/myapp"
+export DATABASE_URL="postgresql://username:password@hostname:5432/dbname"
 ```
 
 Then create the migration files without applying them:
@@ -197,7 +197,7 @@ For deployments to AWS, you do not need to run `prisma migrate deploy` manually.
 :::
 
 
-### Generated Database Client
+### Generating Database Client
 
 The generator automatically configures the `generate` target to generate the type-safe TypeScript Prisma client whenever you build the project.
 
@@ -219,7 +219,7 @@ The generated Prisma client is written to `generated/prisma`, and that folder is
 
 The runtime wrapper lives in `src/prisma.ts`. It exports:
 
-- `DB_PACKAGE_NAME`, the key used under `connection.rdbs` in runtime config
+- `DB_PACKAGE_NAME`, the key used under the `database` runtime config namespace in AWS AppConfig
 - `getPrisma()`, which loads the database connection settings from AWS AppConfig and creates a Prisma client using IAM authentication
 
 You can then use `getPrisma()` in other projects in your workspace, such as a `tRPC` API:
@@ -263,6 +263,14 @@ export class ApplicationStack extends Stack {
     const vpc = new Vpc(this, 'Vpc', {
       subnetConfiguration: [
         {
+          name: 'public',
+          subnetType: SubnetType.PUBLIC,
+        },
+        {
+          name: 'private_with_egress',
+          subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+        },
+        {
           name: 'private_isolated',
           subnetType: SubnetType.PRIVATE_ISOLATED,
         },
@@ -279,7 +287,7 @@ export class ApplicationStack extends Stack {
 }
 ```
 
-This provisions an Aurora cluster in your VPC, along with the generated admin credentials secret, the application database user custom resource, runtime config registration, and the migration handler. The database should typically be deployed into private isolated subnets so that it is not directly accessible from the public internet.
+This provisions an Aurora cluster and an RDS Proxy in your VPC, along with the generated admin credentials secret, the application database user custom resource, runtime config registration, and the migration handler. The database should typically be deployed into private isolated subnets so that it is not directly accessible from the public internet.
 
 If you need to customise the cluster topology, you can override Aurora cluster properties such as `writer` and `readers` when instantiating the construct.
 </Fragment>
@@ -297,7 +305,7 @@ module "postgres" {
 }
 ```
 
-This provisions an Aurora cluster, the generated admin credentials secret, the create-db-user Lambda function, runtime config registration in AWS AppConfig, the migration Lambda function, and the supporting resources needed to publish and run the migration container image.
+This provisions an Aurora cluster with RDS Proxy, the generated admin credentials secret, the create-db-user Lambda function, runtime config registration in AWS AppConfig, the migration Lambda function, and the supporting resources needed to publish and run the migration container image.
 
 If you need to customise the cluster topology or sizing, you can override module inputs such as `instance_count`, `serverless_min_capacity`, `serverless_max_capacity`, `engine_version` and `port`.
 </Fragment>
@@ -305,12 +313,12 @@ If you need to customise the cluster topology or sizing, you can override module
 
 ### Granting Access
 
-To allow Lambda-based application code to use the generated Prisma client in AWS, deploy it into the same VPC as the database, pass `RUNTIME_CONFIG_APP_ID`, grant permission to read runtime config from AWS AppConfig, allow network access to the database port, and grant IAM database connect permissions for the generated runtime user.
+To allow Lambda-based application code to use the generated Prisma client in AWS, deploy it into the same VPC as the database, allow network access to the database port, and grant IAM database connect permissions for the generated runtime user.
 
-:::note[Local Prisma CLI vs Deployed Runtime]
-Prisma CLI commands such as `prisma migrate dev` and `prisma migrate deploy` still use `DATABASE_URL` when you run them locally.
+:::note[Prisma CLI vs Runtime Client]
+Prisma CLI commands such as `prisma migrate dev` and `prisma migrate deploy` read `DATABASE_URL` from the environment variables.
 
-The generated runtime client in `src/prisma.ts` does not read `DATABASE_URL`. It loads `connection.rdbs[DB_PACKAGE_NAME]` from AWS AppConfig using `RUNTIME_CONFIG_APP_ID` and connects to Aurora using IAM authentication.
+The generated runtime client in `src/prisma.ts` does not read `DATABASE_URL`. It loads `database[DB_PACKAGE_NAME]` from AWS AppConfig and connects to Aurora using IAM authentication.
 :::
 
 <Infrastructure>
@@ -326,17 +334,16 @@ const api = new Api(this, 'Api', {
     .withDefaultOptions({
       vpc,
       vpcSubnets: {
-        subnetType: SubnetType.PRIVATE_ISOLATED,
+        subnetType: SubnetType.PRIVATE_WITH_EGRESS,
       },
       environment: {
-        RUNTIME_CONFIG_APP_ID: runtimeConfig.appConfigApplicationId,
+        NODE_EXTRA_CA_CERTS: '/var/runtime/ca-cert.pem',
       },
     })
     .build(),
 });
 
 Object.entries(api.integrations).forEach(([operation, integration]) => {
-  runtimeConfig.grantReadAppConfig(integration.handler);
   db.allowDefaultPortFrom(
     integration.handler,
     `Allow ${operation} to connect to the database`,
@@ -353,7 +360,7 @@ The generated Terraform database module exposes `appconfig_application_id`, `clu
 When wiring your own Terraform-managed Lambda or API to the generated database:
 
 - run the compute in the same VPC and private subnets as the database
-- pass `RUNTIME_CONFIG_APP_ID = module.postgres.appconfig_application_id`
+- expose the AppConfig application ID from `module.postgres.appconfig_application_id` to your compute environment
 - grant AppConfig read permissions to the compute role
 - grant `rds-db:connect` for the generated runtime user `module.postgres.database_runtime_user`
 - allow network access to the Aurora port exposed as `module.postgres.cluster_port`
@@ -361,6 +368,25 @@ When wiring your own Terraform-managed Lambda or API to the generated database:
 The `rds-db:connect` resource ARN also needs the Aurora cluster resource ID, so expose that from your Terraform modules when custom compute needs direct database access.
 </Fragment>
 </Infrastructure>
+
+### SSL/TLS requirements
+
+When running Lambda functions against Aurora, you must configure the runtime to loads additional CA certificates. In CDK, that can be done by adding:
+
+```ts
+const api = new Api(this, 'Api', {
+  integrations: Api.defaultIntegrations(this)
+    .withDefaultOptions({
+      ...
+      environment: {
+        NODE_EXTRA_CA_CERTS: '/var/runtime/ca-cert.pem',
+      },
+    })
+    .build(),
+});
+```
+
+This is required for Lambda to validate TLS connections to Aurora RDS. For more details, see the AWS Lambda RDS documentation: https://docs.aws.amazon.com/lambda/latest/dg/services-rds.html
 
 ## Customising your Database Architecture
 

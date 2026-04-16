@@ -73,15 +73,18 @@ const ensureDatabaseUser = async (dbUser: string): Promise<void> => {
   await client.connect();
 
   try {
+    await client.query('BEGIN');
+    
+    const roleExists = await client.query(
+      'SELECT 1 FROM pg_roles WHERE rolname = $1',
+      [dbUser],
+    );
+    if (roleExists.rowCount === 0) {
+      await client.query(`CREATE ROLE ${quotedDbUser} WITH LOGIN;`);
+    }
+
     await client.query(
-      `DO $$
-      BEGIN
-        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1) THEN
-          CREATE ROLE ${quotedDbUser} WITH LOGIN;
-        END IF;
-      END
-      $$;
-      ALTER ROLE ${quotedDbUser} WITH LOGIN;
+      `ALTER ROLE ${quotedDbUser} WITH LOGIN;
       GRANT ALL PRIVILEGES ON DATABASE ${quotedDbName} TO ${quotedDbUser};
       GRANT USAGE, CREATE ON SCHEMA public TO ${quotedDbUser};
       GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO ${quotedDbUser};
@@ -91,8 +94,12 @@ const ensureDatabaseUser = async (dbUser: string): Promise<void> => {
       ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON SEQUENCES TO ${quotedDbUser};
       ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON FUNCTIONS TO ${quotedDbUser};
       GRANT rds_iam TO ${quotedDbUser};`,
-      [dbUser],
     );
+
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
   } finally {
     await client.end();
   }

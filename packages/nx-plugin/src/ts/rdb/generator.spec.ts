@@ -118,7 +118,7 @@ describe('ts#rdb generator', () => {
       "await promisify(execFile)('npx', ['prisma', 'migrate', 'deploy'],",
     );
     expect(migrationHandler).toContain('DATABASE_URL: databaseUrl');
-    expect(migrationHandler).toContain('?sslmode=require');
+    expect(migrationHandler).toContain('?sslaccept=strict');
     expect(createDbUserHandler).toContain(
       "import { Client, escapeIdentifier } from 'pg';",
     );
@@ -133,10 +133,10 @@ describe('ts#rdb generator', () => {
       "import { defineConfig } from 'prisma/config';",
     );
     expect(tree.read('packages/db/prisma/schema.prisma', 'utf-8')).toContain(
-      'model User',
+      'model ExampleTable',
     );
     expect(tree.read('packages/db/prisma/schema.prisma', 'utf-8')).toContain(
-      'firstName   String',
+      'column1     String',
     );
     expect(tree.read('packages/db/prisma/schema.prisma', 'utf-8')).toContain(
       'provider = "postgresql"',
@@ -235,6 +235,9 @@ describe('ts#rdb generator', () => {
     expect(packageJson.dependencies['@aws-lambda-powertools/parameters']).toBe(
       '2.32.0',
     );
+    expect(packageJson.dependencies['@aws-sdk/client-appconfigdata']).toBe(
+      '3.1029.0',
+    );
     expect(packageJson.dependencies['@aws-sdk/client-secrets-manager']).toBe(
       '3.1030.0',
     );
@@ -244,7 +247,8 @@ describe('ts#rdb generator', () => {
     expect(packageJson.dependencies.pg).toBe('8.20.0');
     expect(packageJson.dependencies.mariadb).toBeUndefined();
     expect(packageJson.dependencies['@prisma/adapter-mariadb']).toBeUndefined();
-    expect(packageJson.devDependencies['@types/pg']).toBe('8.15.6');
+    expect(packageJson.devDependencies['@types/aws-lambda']).toBe('8.10.161');
+    expect(packageJson.devDependencies['@types/pg']).toBe('8.20.0');
     expect(packageJson.devDependencies.prisma).toBe('7.6.0');
     expect(packageJson.devDependencies.ncp).toBe('2.0.0');
     expect(packageJson.devDependencies.rimraf).toBe('6.1.3');
@@ -276,6 +280,9 @@ describe('ts#rdb generator', () => {
     expect(packageJson.dependencies['@aws-lambda-powertools/parameters']).toBe(
       '2.32.0',
     );
+    expect(packageJson.dependencies['@aws-sdk/client-appconfigdata']).toBe(
+      '3.1029.0',
+    );
     expect(packageJson.dependencies['@aws-sdk/client-secrets-manager']).toBe(
       '3.1030.0',
     );
@@ -285,6 +292,7 @@ describe('ts#rdb generator', () => {
     expect(packageJson.dependencies.mariadb).toBe('3.5.2');
     expect(packageJson.dependencies['@prisma/adapter-pg']).toBeUndefined();
     expect(packageJson.dependencies.pg).toBeUndefined();
+    expect(packageJson.devDependencies['@types/aws-lambda']).toBe('8.10.161');
     expect(packageJson.devDependencies['@types/pg']).toBeUndefined();
     expect(packageJson.devDependencies.prisma).toBe('7.6.0');
     expect(packageJson.devDependencies.ncp).toBe('2.0.0');
