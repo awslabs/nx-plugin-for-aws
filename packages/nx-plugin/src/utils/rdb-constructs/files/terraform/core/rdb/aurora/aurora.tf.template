@@ -256,6 +256,75 @@ resource "aws_rds_cluster_instance" "database" {
   })
 }
 
+resource "aws_iam_role" "proxy" {
+  name_prefix = "${var.name}-aurora-proxy-"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "rds.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = merge(var.tags, {
+    Name = "${var.name}-aurora-proxy"
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "proxy" {
+  role       = aws_iam_role.proxy.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonRDSProxyServiceRolePolicy"
+}
+
+resource "aws_security_group" "proxy" {
+  name_prefix = "${var.name}-aurora-proxy-"
+  description = "Security group for Aurora proxy ${var.name}"
+  vpc_id      = var.vpc_id
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(var.tags, {
+    Name = "${var.name}-aurora-proxy"
+  })
+}
+
+resource "aws_db_proxy" "aurora" {
+  name                   = "${var.name}-proxy"
+  engine_family          = var.engine == "aurora-mysql" ? "MYSQL" : "POSTGRESQL"
+  role_arn               = aws_iam_role.proxy.arn
+  vpc_subnet_ids         = var.subnet_ids
+  vpc_security_group_ids = [aws_security_group.proxy.id]
+  require_tls            = true
+
+  auth {
+    auth_scheme = "SECRETS"
+    secret_arn  = aws_secretsmanager_secret.credentials.arn
+    iam_auth    = "REQUIRED"
+  }
+}
+
+resource "aws_db_proxy_target_group" "default" {
+  db_proxy_name = aws_db_proxy.aurora.name
+  name          = "default"
+}
+
+resource "aws_db_proxy_target" "default" {
+  db_proxy_name      = aws_db_proxy.aurora.name
+  target_group_name  = aws_db_proxy_target_group.default.name
+  rds_resource_id    = aws_rds_cluster.database.resource_id
+}
+
 output "cluster_arn" {
   description = "ARN of the Aurora cluster."
   value       = aws_rds_cluster.database.arn
@@ -267,8 +336,8 @@ output "cluster_resource_id" {
 }
 
 output "cluster_endpoint" {
-  description = "Writer endpoint of the Aurora cluster."
-  value       = aws_rds_cluster.database.endpoint
+  description = "Writer endpoint of the Aurora cluster or proxy."
+  value       = aws_db_proxy.aurora.endpoint
 }
 
 output "reader_endpoint" {
@@ -282,8 +351,8 @@ output "cluster_port" {
 }
 
 output "security_group_id" {
-  description = "Security group protecting the Aurora cluster."
-  value       = aws_security_group.database.id
+  description = "Security group protecting the Aurora proxy."
+  value       = aws_security_group.proxy.id
 }
 
 output "secret_arn" {
@@ -297,8 +366,8 @@ output "kms_key_arn" {
 }
 
 output "database_host" {
-  description = "Hostname of the Aurora cluster writer endpoint."
-  value       = aws_rds_cluster.database.endpoint
+  description = "Hostname of the Aurora cluster writer endpoint or proxy endpoint."
+  value       = aws_db_proxy.aurora.endpoint
 }
 
 output "database_name" {
@@ -324,7 +393,7 @@ output "database_url" {
     local.database_url_scheme,
     jsondecode(aws_secretsmanager_secret_version.credentials.secret_string).username,
     jsondecode(aws_secretsmanager_secret_version.credentials.secret_string).password,
-    aws_rds_cluster.database.endpoint,
+    aws_db_proxy.aurora.endpoint,
     aws_rds_cluster.database.port,
     "/${var.database_name}",
     local.database_url_query_string != "" ? "?${local.database_url_query_string}" : "",

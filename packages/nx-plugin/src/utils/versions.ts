@@ -51,7 +51,7 @@ export const TS_VERSIONS = {
   '@types/node': '25.6.0',
   '@types/aws-lambda': '8.10.161',
   '@types/cors': '2.8.19',
-  '@types/pg': '8.15.6',
+  '@types/pg': '8.20.0',
   '@types/ws': '8.18.1',
   '@types/express': '5.0.6',
   '@smithy/node-http-handler': '4.5.2',
