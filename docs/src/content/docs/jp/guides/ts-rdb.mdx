@@ -9,9 +9,15 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 import Infrastructure from '@components/infrastructure.astro';
 import Snippet from '@components/snippet.astro';
 
-このジェネレーターは、[Amazon Aurora](https://aws.amazon.com/rds/aurora/)を基盤とする新しいリレーショナルデータベースプロジェクトを作成します。AWS CDKまたはTerraformを使用してデータベースをプロビジョニングするために必要なアプリケーションコードとインフラストラクチャを生成し、Aurora PostgreSQLとAurora MySQLをサポートします。
+このジェネレーターは、[Amazon Aurora](https://aws.amazon.com/rds/aurora/) PostgreSQLを基盤とする新しいリレーショナルデータベースプロジェクトを作成します。AWS CDKまたはTerraformを使用してデータベースをプロビジョニングおよび管理するために必要なアプリケーションコードとインフラストラクチャを生成します。
 
-生成されるインフラストラクチャには、再利用可能なAuroraコンストラクトと、アプリケーション固有のデータベースコンストラクトが含まれます。CDKプロジェクトの場合、生成されたコンストラクトには、クラスター作成後にデータベースマイグレーションを実行するマイグレーションハンドラーも含まれており、デプロイの一部としてスキーマをブートストラップするのに役立ちます。
+生成されるインフラストラクチャには、以下が含まれます:
+
+- 再利用可能なAuroraコンストラクトまたはモジュール
+- アプリケーション固有のデータベースコンストラクトまたはモジュール
+- IAM認証されたアプリケーションデータベースユーザーハンドラー
+- AWS AppConfigへのランタイム設定の登録
+- Prismaマイグレーションの自動デプロイ用マイグレーションハンドラー
 
 ## 使用方法
 
@@ -30,13 +36,15 @@ import Snippet from '@components/snippet.astro';
 ジェネレーターは、`<directory>/<name>`ディレクトリに以下のプロジェクト構造を作成します:
 
 <FileTree>
-  - lib
-    - prisma.ts データベースに接続するためのPrismaクライアントのセットアップ
   - prisma
     - schema.prisma Prismaスキーマとサンプルモデル
   - src
     - index.ts プロジェクトのエントリーポイント
+    - prisma.ts Prismaランタイムクライアントラッパー
+    - utils.ts ランタイム設定とシークレットヘルパー
+    - create-db-user-handler.ts デプロイ時にアプリケーションデータベースユーザーを作成するために使用されるLambdaハンドラー
     - migration-handler.ts デプロイ時にデータベースマイグレーションを実行するために使用されるLambdaハンドラー
+  - .gitignore 生成されたPrismaクライアント出力を含むGit ignoreエントリ
   - Dockerfile マイグレーションハンドラーのコンテナイメージ定義
   - project.json プロジェクト設定とビルドターゲット
   - prisma.config.ts Prisma CLIの設定
@@ -81,11 +89,9 @@ import Snippet from '@components/snippet.astro';
 
 ### データモデリング
 
-生成されたプロジェクトは、データベーススキーマの定義と型安全なクライアントの生成に[Prisma ORM](https://www.prisma.io/docs/orm)を使用します。`prisma/schema.prisma`でテーブル、リレーション、フィールドタイプをモデル化し、Prismaを使用してクライアントを生成し、データベースのマイグレーションを作成できます。
+生成されたプロジェクトは、データベーススキーマの定義と型安全なクライアントの生成に[Prisma ORM](https://www.prisma.io/docs/orm)を使用します。`prisma/schema.prisma`でテーブル、リレーション、フィールドタイプをモデル化します。
 
-Prismaでモデルを定義する方法の詳細については、[Prisma ORMによるデータモデリング](https://www.prisma.io/docs/orm/core-concepts/data-modeling#data-modeling-with-prisma-orm)の公式ガイドを参照してください。
-
-例として、`User`モデルは、Prismaスキーマで次のように表現されます:
+`User`モデルの例:
 
 ```ts title="packages/postgres/prisma/schema.prisma"
 model User {
@@ -95,20 +101,87 @@ model User {
 }
 ```
 
-### データマイグレーション
+詳細については、公式の[Prismaデータモデリングガイド](https://www.prisma.io/docs/orm/core-concepts/data-modeling#data-modeling-with-prisma-orm)を参照してください。
 
-Prismaマイグレーションファイルを生成する際、Prisma Migrateはシャドウデータベースへのアクセスを必要とします。これは、マイグレーション生成中にPrismaスキーマをデータベースの現在の状態と比較し、作成する必要があるSQL変更を決定するために使用されます。
+### データベースクライアントの生成
 
-これが必要な理由とPrismaがどのように使用するかの詳細については、[シャドウデータベース](https://www.prisma.io/docs/orm/prisma-migrate/understanding-prisma-migrate/shadow-database)に関するPrismaドキュメントを参照してください。
+ジェネレーターは、プロジェクトをビルドするたびに型安全なTypeScript Prismaクライアントを作成するように`generate`ターゲットを自動的に構成します。クライアントは`generated/prisma`に書き込まれます(`.gitignore`に追加されます)。
+
+また、いつでも手動でクライアントを生成できます:
+
+<Tabs>
+  <TabItem label="npm" icon="seti:npm">
+
+```bash
+npm run nx generate <your-db-package-name>
+```
+
+  </TabItem>
+  <TabItem label="pnpm" icon="seti:pnpm">
+
+```bash
+pnpm nx generate <your-db-package-name>
+```
+
+  </TabItem>
+  <TabItem label="yarn" icon="seti:yarn">
+
+```bash
+yarn nx generate <your-db-package-name>
+```
+
+  </TabItem>
+  <TabItem label="bun" icon="seti:bun">
+
+```bash
+bun nx generate <your-db-package-name>
+```
+
+  </TabItem>
+</Tabs>
+
+`src/prisma.ts`のランタイムラッパーは以下をエクスポートします:
+
+- `DB_PACKAGE_NAME` - AWS AppConfigの`database`ランタイム設定名前空間で使用されるキー
+- `getPrisma()` - AWS AppConfigからデータベース接続設定を読み込み、IAM認証を使用してPrismaクライアントを作成します
+
+クライアントは自動的に以下を行います:
+- `RUNTIME_CONFIG_APP_ID`環境変数を使用してAWS AppConfigからデータベース設定を取得
+- IAM認証用にAWS RDS Signerを介して一時的な認証トークンを生成
+- 証明書検証を使用してSSL/TLS接続を管理
+- 永続的なデータベース接続プールを通じて接続プーリングを処理
+
+tRPC APIでの使用例:
+
+```ts title="packages/api/src/procedures/list-user.ts"
+import { getPrisma } from ':aws-nx-poc/postgres';
+import { publicProcedure } from '../init.js';
+import { ListUserOutputSchema } from '../schema/index.js';
+
+export const listUser = publicProcedure
+  .output(ListUserOutputSchema)
+  .query(async () => {
+    const prisma = await getPrisma();
+    const users = await prisma.user.findMany({
+      orderBy: { id: 'asc' },
+    });
+
+    return { users };
+  });
+```
+
+### マイグレーションの作成
 
 :::note[パッケージディレクトリからPrismaを実行]
 Prisma CLIを使用する場合は、生成されたデータベースパッケージディレクトリ(例: `packages/postgres`)からコマンドを実行してください。そうすることで、Prismaが`prisma/schema.prisma`と`prisma.config.ts`を見つけることができます。
 :::
 
-ローカルでマイグレーションを生成するには、Prismaをローカルデータベースインスタンスに向けることができます。まず、Prismaがデータベースに接続できるように`DATABASE_URL`をエクスポートします:
+Prisma Migrateは、スキーマを現在のデータベース状態と比較してSQL変更を生成するために[シャドウデータベース](https://www.prisma.io/docs/orm/prisma-migrate/understanding-prisma-migrate/shadow-database)を必要とします。
+
+ローカルでマイグレーションを生成するには、`DATABASE_URL`をエクスポートしてPrismaを開発データベースに向けます:
 
 ```bash
-export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/myapp"
+export DATABASE_URL="postgresql://username:password@hostname:5432/dbname"
 ```
 
 次に、マイグレーションファイルを適用せずに作成します:
@@ -144,9 +217,7 @@ bunx --bun prisma migrate dev --create-only
   </TabItem>
 </Tabs>
 
-`prisma migrate dev --create-only`を実行すると、スキーマの変更が新しいマイグレーションを必要とするたびに新しいマイグレーションフォルダを生成することで、`prisma/migrations`ディレクトリを最新の状態に保ちます。
-
-Prismaディレクトリは次のようになります:
+これにより、スキーマが変更されるたびに`prisma/migrations`に新しいマイグレーションフォルダが生成されます:
 
 <FileTree>
   - prisma
@@ -157,7 +228,7 @@ Prismaディレクトリは次のようになります:
     - schema.prisma
 </FileTree>
 
-これらのマイグレーションを`DATABASE_URL`が指しているローカルデータベースに適用するには、次を実行できます:
+ローカルデータベースにマイグレーションを適用するには:
 
 <Tabs>
   <TabItem label="npm" icon="seti:npm">
@@ -191,71 +262,16 @@ bunx --bun prisma migrate deploy
 </Tabs>
 
 :::note[AWSでの自動マイグレーション]
-AWSへのデプロイの場合、`prisma migrate deploy`を手動で実行する必要はありません。生成されたマイグレーションハンドラーは、`prisma/migrations`ディレクトリが最新である限り、デプロイ中にマイグレーションを自動的に適用します。
+AWSへのデプロイの場合、`prisma migrate deploy`を手動で実行する必要はありません。生成されたインフラストラクチャは、デプロイ中にアプリケーションデータベースユーザーを自動的に作成し、マイグレーションを実行します。
 :::
 
+## AWSへのデプロイ
 
-### 生成されたデータベースクライアント
-
-ジェネレーターは、プロジェクトをビルドするたびに型安全なTypeScript Prismaクライアントを生成するように`generate`ターゲットを自動的に構成します。
-
-生成されたクライアントは次のように構造化されています:
-
-<FileTree>
-  - generated
-    - prisma
-      - internal
-      - models
-      - browser.ts
-      - client.ts
-      - commonInputTypes.ts
-      - enums.ts
-      - models.ts
-</FileTree>
-
-生成されたクライアントは`lib/prisma.ts`を介して使用され、適切なPrismaアダプターを構成し、すぐに使用できる`prisma`クライアントインスタンスをエクスポートします:
-
-```ts title="packages/postgres/lib/prisma.ts"
-import { PrismaPg } from '@prisma/adapter-pg';
-import { PrismaClient } from '../generated/prisma/client.js';
-
-const adapter = new PrismaPg({
-  connectionString: `${process.env.DATABASE_URL}`,
-});
-const prisma = new PrismaClient({ adapter });
-
-export { prisma };
-```
-
-その後、エクスポートされた`prisma`クライアントをワークスペース内の他のプロジェクト(例: `tRPC` API)で使用できます:
-
-```ts title="packages/api/src/procedures/list-user.ts"
-import { prisma } from ':aws-nx-poc/postgres';
-import { publicProcedure } from '../init.js';
-import {
-  ListUserOutputSchema,
-} from '../schema/index.js';
-
-export const listUser = publicProcedure
-  .output(ListUserOutputSchema)
-  .query(async () => {
-    const users = await prisma.user.findMany({
-      orderBy: { id: 'asc' },
-    });
-
-    return { users };
-  });
-```
-
-## データベースのデプロイ
-
-### インフラストラクチャ
-
-リレーショナルデータベースジェネレーターは、選択した`iacProvider`に基づいてCDKまたはTerraformのInfrastructure as Codeを作成します。これを使用してデータベースをデプロイできます。
+リレーショナルデータベースジェネレーターは、選択した`iacProvider`に基づいてCDKまたはTerraformのインフラストラクチャを作成します。
 
 <Infrastructure>
 <Fragment slot="cdk">
-データベースをデプロイするためのCDKコンストラクトは、`common/constructs`フォルダに作成されます。これをCDKアプリケーションで使用できます。例:
+CDKコンストラクトは`common/constructs`に作成されます。使用例:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
 import { Postgres } from ':my-scope/common-constructs';
@@ -266,6 +282,14 @@ export class ApplicationStack extends Stack {
 
     const vpc = new Vpc(this, 'Vpc', {
       subnetConfiguration: [
+        {
+          name: 'public',
+          subnetType: SubnetType.PUBLIC,
+        },
+        {
+          name: 'private_with_egress',
+          subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+        },
         {
           name: 'private_isolated',
           subnetType: SubnetType.PRIVATE_ISOLATED,
@@ -283,12 +307,14 @@ export class ApplicationStack extends Stack {
 }
 ```
 
-これにより、VPC内にAuroraクラスターが、生成された認証情報シークレットとマイグレーションハンドラーと共にプロビジョニングされます。データベースは通常、パブリックインターネットから直接アクセスできないように、プライベート分離サブネットにデプロイする必要があります。
+これにより、RDS Proxy、管理者認証情報、アプリケーションデータベースユーザー、ランタイム設定の登録、マイグレーションハンドラーを備えたAuroraクラスターがプロビジョニングされます。直接的なインターネットアクセスを防ぐために、プライベート分離サブネットにデプロイしてください。
 
-クラスタートポロジをカスタマイズする必要がある場合は、コンストラクトをインスタンス化する際に`writer`や`readers`などのAuroraクラスタープロパティをオーバーライドできます。
+生成されたインフラストラクチャは、2つのデータベースユーザーを作成します:
+- **管理者ユーザー** - クラスターのプロビジョニング時に作成され、認証情報はAWS Secrets Managerに保存されます
+- **アプリケーションユーザー** - Lambda カスタムリソースを介して作成され、IAM認証が有効化され、アプリケーションデータベースに対する完全な権限を持ちます
 </Fragment>
 <Fragment slot="terraform">
-データベースをデプロイするためのTerraformモジュールは、`common/terraform`フォルダに作成されます。これをTerraform構成で使用できます:
+Terraformモジュールは`common/terraform`に作成されます。使用例:
 
 ```hcl title="packages/infra/src/main.tf"
 module "postgres" {
@@ -301,35 +327,49 @@ module "postgres" {
 }
 ```
 
-これにより、Auroraクラスター、生成された認証情報シークレット、マイグレーションLambda関数、およびマイグレーションコンテナイメージの公開と実行に必要なサポートリソースがプロビジョニングされます。
+これにより、RDS Proxy、管理者認証情報、create-db-user Lambda、ランタイム設定の登録、マイグレーションLambda、コンテナレジストリリソースを備えたAuroraクラスターがプロビジョニングされます。
 
-クラスタートポロジまたはサイジングをカスタマイズする必要がある場合は、`instance_count`、`serverless_min_capacity`、`serverless_max_capacity`、`engine_version`、`port`などのモジュール入力をオーバーライドできます。
+生成されたインフラストラクチャは、2つのデータベースユーザーを作成します:
+- **管理者ユーザー** - クラスターのプロビジョニング時に作成され、認証情報はAWS Secrets Managerに保存されます
+- **アプリケーションユーザー** - Lambda関数を介して作成され、IAM認証が有効化され、アプリケーションデータベースに対する完全な権限を持ちます
 </Fragment>
 </Infrastructure>
 
-### アクセスの許可
+### Lambda関数の接続
 
-APIがデータベースに接続できるようにするには、APIをデータベースと同じVPCにデプロイします。その後、データベース接続文字列をAPIに提供し、APIハンドラーがデータベースポートに接続できるようにします。
+Lambda関数からPrismaクライアントを使用するには、以下の要件が満たされていることを確認してください:
 
-:::note[Prisma環境変数]
-PrismaでPostgreSQLを使用する場合、生成されたクライアントは`DATABASE_URL`を期待します。
+1. データベースと同じVPCに関数をデプロイする
+2. データベースポートへのネットワークアクセスを許可する
+3. 生成されたランタイムユーザーにIAM `rds-db:connect`権限を付与する
+4. 必要な環境変数を設定する:
+   - `NODE_EXTRA_CA_CERTS=/var/runtime/ca-cert.pem` (TLS検証に必要)
+   - `RUNTIME_CONFIG_APP_ID` (生成されたインフラストラクチャによって自動的に設定)
+   - `AWS_REGION` (Lambda実行環境で自動的に設定)
 
-PrismaでMySQLを使用する場合、生成されたクライアントは`DATABASE_HOST`、`DATABASE_USER`、`DATABASE_PASSWORD`、`DATABASE_NAME`を期待します。これは`lib/prisma.ts`で構成されています。
+:::note[Prisma CLI vs ランタイムクライアント]
+**Prisma CLI**コマンド(`prisma migrate dev`、`prisma migrate deploy`)は、環境変数から`DATABASE_URL`を読み取ります。
+
+**ランタイムクライアント**(`src/prisma.ts`)は、AWS AppConfigから接続設定を読み込み、IAM認証を使用します。
 :::
 
 <Infrastructure>
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RuntimeConfig } from ':my-scope/common-constructs';
+
+const runtimeConfig = RuntimeConfig.ensure(this);
+
 const api = new Api(this, 'Api', {
   integrations: Api.defaultIntegrations(this)
     .withDefaultOptions({
       vpc,
       vpcSubnets: {
-        subnetType: SubnetType.PRIVATE_ISOLATED,
+        subnetType: SubnetType.PRIVATE_WITH_EGRESS,
       },
       environment: {
-        DATABASE_URL: db.databaseUrl,
+        NODE_EXTRA_CA_CERTS: '/var/runtime/ca-cert.pem',
       },
     })
     .build(),
@@ -340,124 +380,103 @@ Object.entries(api.integrations).forEach(([operation, integration]) => {
     integration.handler,
     `Allow ${operation} to connect to the database`,
   );
+  db.grantConnect(integration.handler);
 });
 ```
 
-これにより、各API Lambda関数がデータベースと同じVPC内で実行され、デフォルトポートでデータベースに接続することが明示的に許可されます。
+これにより、各API Lambda関数が同じVPCで実行され、AppConfigからランタイム設定を読み取り、IAM認証を使用してデータベースに接続するように構成されます。
+</Fragment>
+<Fragment slot="terraform">
+Lambda関数をデータベースに接続する場合は、以下のモジュール出力を使用してください:
+
+- `appconfig_application_id` - コンピュート環境に公開
+- `cluster_port` - ネットワークアクセスを許可
+- `database_runtime_user` - `rds-db:connect`権限を付与
+
+コンピュートが同じVPCとプライベートサブネットで実行されることを確認し、コンピュートロールにAppConfig読み取り権限を付与してください。
+</Fragment>
+</Infrastructure>
+
+### RDS Proxy
+
+生成されたインフラストラクチャには、デフォルトでRDS Proxyが含まれており、アプリケーションとAuroraクラスターの間に配置されます。RDS Proxyは、いくつかの利点を提供します:
+
+- **接続プーリング** - アプリケーションインスタンス間で共有できるデータベース接続のプールを維持し、新しい接続を確立するオーバーヘッドを削減します
+- **接続の回復力** - Auroraインスタンスの交換やメンテナンス中のフェイルオーバーと再接続を自動的に処理します
+- **IAM認証** - IAMベースのデータベース認証をサポートし、アプリケーションコードでデータベース認証情報を管理する必要がなくなります
+- **セキュリティの向上** - すべての接続にTLS暗号化を強制します
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+デフォルトでは、RDS Proxyが有効になっています。生成されたランタイムクライアント(`getPrisma()`)は、プロキシエンドポイントを介して自動的に接続します。必要に応じて無効にできます:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const db = new Postgres(this, 'Db', {
+  ...
+  enableRdsProxy: false,
+});
+```
+
+RDS Proxyが無効になっている場合、アプリケーションはAuroraクラスターエンドポイントに直接接続します。
 </Fragment>
 <Fragment slot="terraform">
 
+デフォルトでは、RDS Proxyが有効になっています。生成されたランタイムクライアント(`getPrisma()`)は、プロキシエンドポイントを介して自動的に接続します。必要に応じて無効にできます:
+
 ```hcl title="packages/infra/src/main.tf"
-module "api" {
-  source = "../../common/terraform/src/app/apis/api"
-
-  subnet_ids = module.vpc.private_isolated_subnet_ids
-
-  env = {
-    DATABASE_URL = module.postgres.database_url
-  }
-
-  tags = local.common_tags
-}
-
-resource "aws_vpc_security_group_ingress_rule" "api_to_postgres" {
-  security_group_id            = module.postgres.security_group_id
-  referenced_security_group_id = module.api.default_security_group_id
-  from_port                    = module.postgres.cluster_port
-  to_port                      = module.postgres.cluster_port
-  ip_protocol                  = "tcp"
+module "postgres" {
+  source = "../../common/terraform/src/app/dbs/postgres"
+  ...
+  enable_rds_proxy = false
 }
 ```
 
-これにより、APIがデータベースと同じVPCで実行されるように構成され、生成された`DATABASE_URL`がAPIに渡され、データベースポート上でAPIセキュリティグループからデータベースセキュリティグループへのトラフィックが明示的に許可されます。
+RDS Proxyが無効になっている場合、アプリケーションはAuroraクラスターエンドポイントに直接接続します。プロキシは、TLS暗号化を要求し、IAM認証を使用するように構成されています。
 </Fragment>
 </Infrastructure>
 
 ## データベースアーキテクチャのカスタマイズ
 
-生成されたデータベースコンストラクトは、基盤となるAurora構成を公開しているため、ワークロードに適応させることができます。
+生成されたインフラストラクチャは、ワークロードの要件に合わせてカスタマイズできます。以下の例は、利用可能な一般的なカスタマイズオプションのいくつかを示しています。
 
-### Writerのオーバーライド
+### クラスターインスタンス
+
+Auroraクラスターのwriterおよびreaderインスタンスを構成します。
 
 <Infrastructure>
 <Fragment slot="cdk">
-CDKでは、プライマリAuroraインスタンスのプロビジョニング方法を変更したい場合、デフォルトのwriterインスタンスをオーバーライドできます:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
 const db = new Postgres(this, 'Db', {
-  vpc,
-  vpcSubnets: {
-    subnetType: SubnetType.PRIVATE_ISOLATED,
-  },
+  ...
   writer: ClusterInstance.serverlessV2('writer'),
-});
-```
-</Fragment>
-<Fragment slot="terraform">
-Terraformでは、Auroraインスタンスは個別の`writer`と`readers`の定義ではなく、モジュール入力を通じて管理されます。生成されたモジュールは常にプライマリインスタンスをプロビジョニングし、`instance_count`、`engine_version`、サーバーレスキャパシティ設定などの入力を使用してクラスターをカスタマイズします:
-
-```hcl title="packages/infra/src/main.tf"
-module "postgres" {
-  source = "../../common/terraform/src/app/dbs/postgres"
-
-  vpc_id                  = module.vpc.vpc_id
-  subnet_ids              = module.vpc.private_isolated_subnet_ids
-  instance_count          = 1
-  serverless_min_capacity = 0.5
-  serverless_max_capacity = 8
-
-  tags = local.common_tags
-}
-```
-</Fragment>
-</Infrastructure>
-
-### Readerの追加
-
-<Infrastructure>
-<Fragment slot="cdk">
-ワークロードに読み取りスケーリングが必要な場合、CDKで`readers`プロパティを使用してreaderインスタンスを追加できます:
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-const db = new Postgres(this, 'Db', {
-  vpc,
-  vpcSubnets: {
-    subnetType: SubnetType.PRIVATE_ISOLATED,
-  },
   readers: [ClusterInstance.serverlessV2('reader')],
 });
 ```
 </Fragment>
 <Fragment slot="terraform">
-Terraformでは、同等の制御は`instance_count`で、作成されるAuroraインスタンスの数を決定します:
 
 ```hcl title="packages/infra/src/main.tf"
 module "postgres" {
   source = "../../common/terraform/src/app/dbs/postgres"
-
-  vpc_id         = module.vpc.vpc_id
-  subnet_ids     = module.vpc.private_isolated_subnet_ids
-  instance_count = 2
-
-  tags = local.common_tags
+  ...
+  instance_count = 2  # 1 writer + 1 reader
 }
 ```
 </Fragment>
 </Infrastructure>
 
-### サーバーレスキャパシティの構成
+### サーバーレスキャパシティ
 
-ワークロードに合わせてAurora Serverless v2のスケーリング制限を制御できます。
+ワークロードに合わせてAurora Serverless v2のスケーリング制限を制御します。
 
 <Infrastructure>
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
 const db = new Postgres(this, 'Db', {
-  vpc,
-  vpcSubnets: {
-    subnetType: SubnetType.PRIVATE_ISOLATED,
-  },
+  ...
   serverlessV2MinCapacity: 0.5,
   serverlessV2MaxCapacity: 8,
 });
@@ -468,91 +487,66 @@ const db = new Postgres(this, 'Db', {
 ```hcl title="packages/infra/src/main.tf"
 module "postgres" {
   source = "../../common/terraform/src/app/dbs/postgres"
-
-  vpc_id                  = module.vpc.vpc_id
-  subnet_ids              = module.vpc.private_isolated_subnet_ids
+  ...
   serverless_min_capacity = 0.5
   serverless_max_capacity = 8
-
-  tags = local.common_tags
 }
 ```
 </Fragment>
 </Infrastructure>
 
-### エンジンバージョンの固定
+### エンジンバージョン
 
-特定のAuroraエンジンバージョンを使用したい場合は、デフォルトに依存するのではなく、明示的に固定できます。
+特定のAurora PostgreSQLエンジンバージョンを固定します。
 
 <Infrastructure>
 <Fragment slot="cdk">
-CDKでは、生成されたコンストラクトに`engineVersion`を渡します:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
 const db = new Postgres(this, 'Db', {
-  vpc,
-  vpcSubnets: {
-    subnetType: SubnetType.PRIVATE_ISOLATED,
-  },
+  ...
   engineVersion: AuroraPostgresEngineVersion.VER_17_7,
 });
 ```
 </Fragment>
 <Fragment slot="terraform">
-Terraformでは、`engine_version`を使用します:
 
 ```hcl title="packages/infra/src/main.tf"
 module "postgres" {
   source = "../../common/terraform/src/app/dbs/postgres"
-
-  vpc_id         = module.vpc.vpc_id
-  subnet_ids     = module.vpc.private_isolated_subnet_ids
+  ...
   engine_version = "17.7"
-
-  tags = local.common_tags
 }
 ```
 </Fragment>
 </Infrastructure>
 
-### サブネットとライフサイクルオプションの選択
+### 削除保護
 
-データベースのデプロイ場所と削除時の動作もカスタマイズできます。
+誤削除を防ぐためのライフサイクル設定を構成します。
 
 <Infrastructure>
 <Fragment slot="cdk">
-`vpcSubnets`を使用してデータベースを配置するサブネットを制御し、`deletionProtection`や`removalPolicy`などのライフサイクル関連のプロパティを使用して削除動作を制御します:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
 import { RemovalPolicy } from 'aws-cdk-lib';
 
 const db = new Postgres(this, 'Db', {
-  vpc,
-  vpcSubnets: {
-    subnetType: SubnetType.PRIVATE_ISOLATED,
-  },
+  ...
   deletionProtection: true,
   removalPolicy: RemovalPolicy.SNAPSHOT,
 });
 ```
 </Fragment>
 <Fragment slot="terraform">
-`subnet_ids`を使用して、データベースとマイグレーションLambdaのデプロイ場所を制御します。
 
 ```hcl title="packages/infra/src/main.tf"
 module "postgres" {
   source = "../../common/terraform/src/app/dbs/postgres"
-
-  vpc_id              = module.vpc.vpc_id
-  subnet_ids          = module.vpc.private_isolated_subnet_ids
+  ...
   deletion_protection = true
   skip_final_snapshot = false
-  port                = 5432
-
-  tags = local.common_tags
 }
 ```
-
-`deletion_protection`を使用して誤削除を防ぎ、`skip_final_snapshot`を使用して削除時のスナップショット動作を制御し、`port`を使用してデフォルトのエンジンポートをオーバーライドできます。
 </Fragment>
 </Infrastructure>
