@@ -75,6 +75,12 @@ variable "skip_final_snapshot" {
   default     = false
 }
 
+variable "enable_rds_proxy" {
+  description = "Whether to provision an RDS Proxy in front of the Aurora cluster."
+  type        = bool
+  default     = true
+}
+
 variable "tags" {
   description = "Tags to apply to all resources."
   type        = map(string)
@@ -105,21 +111,22 @@ locals {
 module "aurora" {
   source = "../../../core/rdb/aurora"
 
-  name               = "<%= nameKebabCase %>"
-  vpc_id             = var.vpc_id
-  subnet_ids         = var.subnet_ids
-  engine             = "<%= engine === 'mysql' ? 'aurora-mysql' : 'aurora-postgresql' %>"
-  engine_version     = var.engine_version
-  database_name      = "<%= databaseName %>"
-  admin_user         = "<%= adminUser %>"
-  database_url_query_parameters = var.database_url_query_parameters
-  port               = var.port
-  serverless_min_capacity = var.serverless_min_capacity
-  serverless_max_capacity = var.serverless_max_capacity
-  instance_count     = var.instance_count
-  deletion_protection = var.deletion_protection
-  skip_final_snapshot = var.skip_final_snapshot
-  tags               = var.tags
+  name                            = "<%= nameKebabCase %>"
+  vpc_id                          = var.vpc_id
+  subnet_ids                      = var.subnet_ids
+  engine                          = "<%= engine === 'mysql' ? 'aurora-mysql' : 'aurora-postgresql' %>"
+  engine_version                  = var.engine_version
+  database_name                   = "<%= databaseName %>"
+  admin_user                      = "<%= adminUser %>"
+  database_url_query_parameters   = var.database_url_query_parameters
+  port                            = var.port
+  serverless_min_capacity         = var.serverless_min_capacity
+  serverless_max_capacity         = var.serverless_max_capacity
+  instance_count                  = var.instance_count
+  deletion_protection             = var.deletion_protection
+  skip_final_snapshot             = var.skip_final_snapshot
+  enable_rds_proxy                = var.enable_rds_proxy
+  tags                            = var.tags
 }
 
 data "archive_file" "create_db_user_zip" {
@@ -131,17 +138,15 @@ data "archive_file" "create_db_user_zip" {
 module "add_rdb_to_runtime_config" {
   source = "../../../core/runtime-config/entry"
 
-  namespace = "connection"
-  key       = "rdbs"
+  namespace = "database"
+  key       = "<%= nameClassName %>"
   value = {
-    "<%= nameClassName %>" = {
-      hostname  = module.aurora.cluster_endpoint
-      port      = module.aurora.cluster_port
-      database  = module.aurora.database_name
-      adminUser = module.aurora.admin_user
-      dbUser    = local.database_runtime_user
-      region    = data.aws_region.current.name
-    }
+    hostname  = module.aurora.cluster_endpoint
+    port      = module.aurora.cluster_port
+    database  = module.aurora.database_name
+    adminUser = module.aurora.admin_user
+    dbUser    = local.database_runtime_user
+    region    = data.aws_region.current.name
   }
 }
 
