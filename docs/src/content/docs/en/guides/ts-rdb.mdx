@@ -9,9 +9,15 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 import Infrastructure from '@components/infrastructure.astro';
 import Snippet from '@components/snippet.astro';
 
-This generator creates a new relational database project backed by [Amazon Aurora](https://aws.amazon.com/rds/aurora/). It generates the application code and infrastructure needed to provision a database using AWS CDK or Terraform, with support for Aurora PostgreSQL and Aurora MySQL.
+This generator creates a new relational database project backed by [Amazon Aurora](https://aws.amazon.com/rds/aurora/) PostgreSQL. It generates the application code and infrastructure needed to provision and manage a database using AWS CDK or Terraform.
 
-The generated infrastructure includes a reusable Aurora construct or module, an application-specific database construct or module, a handler that creates an IAM-authenticated application database user, runtime configuration registration in AWS AppConfig, and a migration handler that applies your Prisma migrations during deployment.
+The generated infrastructure includes:
+
+- Reusable Aurora construct or module
+- Application-specific database construct or module  
+- IAM-authenticated application database user handler
+- Runtime configuration registration in AWS AppConfig
+- Migration handler for automatic Prisma migration deployment
 
 ## Usage
 
@@ -83,11 +89,9 @@ The generator will create the following project structure in the `<directory>/<n
 
 ### Data Modelling
 
-The generated project uses [Prisma ORM](https://www.prisma.io/docs/orm) for defining your database schema and generating a type-safe client. You can model your tables, relations and field types in `prisma/schema.prisma`, then use Prisma to generate the client and create migrations for your database.
+The generated project uses [Prisma ORM](https://www.prisma.io/docs/orm) to define your database schema and generate a type-safe client. Model your tables, relations, and field types in `prisma/schema.prisma`.
 
-For more details on how to define models with Prisma, refer to the official guide on [data modeling with Prisma ORM](https://www.prisma.io/docs/orm/core-concepts/data-modeling#data-modeling-with-prisma-orm).
-
-As an example, a `User` model would be represented as follows in the Prisma schema:
+Example `User` model:
 
 ```ts title="packages/postgres/prisma/schema.prisma"
 model User {
@@ -97,17 +101,84 @@ model User {
 }
 ```
 
-### Data Migration
+For more details, see the official [Prisma data modelling guide](https://www.prisma.io/docs/orm/core-concepts/data-modeling#data-modeling-with-prisma-orm).
 
-When generating Prisma migration files, Prisma Migrate requires access to a shadow database. This is used during migration generation to compare your Prisma schema with the current state of the database and determine the SQL changes that need to be created.
+### Generating the Database Client
 
-For more details on why this is required and how Prisma uses it, refer to the Prisma documentation on [shadow databases](https://www.prisma.io/docs/orm/prisma-migrate/understanding-prisma-migrate/shadow-database).
+The generator automatically configures the `generate` target to create a type-safe TypeScript Prisma client whenever you build the project. The client is written to `generated/prisma` (added to `.gitignore`).
+
+You can also manually generate the client at any time:
+
+<Tabs>
+  <TabItem label="npm" icon="seti:npm">
+
+```bash
+npm run nx generate <your-db-package-name>
+```
+
+  </TabItem>
+  <TabItem label="pnpm" icon="seti:pnpm">
+
+```bash
+pnpm nx generate <your-db-package-name>
+```
+
+  </TabItem>
+  <TabItem label="yarn" icon="seti:yarn">
+
+```bash
+yarn nx generate <your-db-package-name>
+```
+
+  </TabItem>
+  <TabItem label="bun" icon="seti:bun">
+
+```bash
+bun nx generate <your-db-package-name>
+```
+
+  </TabItem>
+</Tabs>
+
+The runtime wrapper in `src/prisma.ts` exports:
+
+- `DB_PACKAGE_NAME` - the key used under the `database` runtime config namespace in AWS AppConfig
+- `getPrisma()` - loads database connection settings from AWS AppConfig and creates a Prisma client using IAM authentication
+
+The client automatically:
+- Retrieves database configuration from AWS AppConfig using `RUNTIME_CONFIG_APP_ID` environment variable
+- Generates temporary authentication tokens via AWS RDS Signer for IAM authentication
+- Manages SSL/TLS connections with certificate validation
+- Handles connection pooling through persistent database connection pools
+
+Example usage in a tRPC API:
+
+```ts title="packages/api/src/procedures/list-user.ts"
+import { getPrisma } from ':aws-nx-poc/postgres';
+import { publicProcedure } from '../init.js';
+import { ListUserOutputSchema } from '../schema/index.js';
+
+export const listUser = publicProcedure
+  .output(ListUserOutputSchema)
+  .query(async () => {
+    const prisma = await getPrisma();
+    const users = await prisma.user.findMany({
+      orderBy: { id: 'asc' },
+    });
+
+    return { users };
+  });
+```
+
+### Creating Migrations
 
 :::note[Run Prisma from the Package Directory]
-When using the Prisma CLI, run the commands from your generated database package directory, for example `packages/postgres`, so Prisma can find `prisma/schema.prisma` and `prisma.config.ts`.
+When using the Prisma CLI, run commands from your generated database package directory (e.g., `packages/postgres`) so Prisma can find `prisma/schema.prisma` and `prisma.config.ts`.
 :::
 
-To generate migrations locally, you can point Prisma at a development database instance. First export `DATABASE_URL` so Prisma can connect to your database:
+Prisma Migrate requires a [shadow database](https://www.prisma.io/docs/orm/prisma-migrate/understanding-prisma-migrate/shadow-database) to compare your schema with the current database state and generate SQL changes.
+
+To generate migrations locally, point Prisma at a development database by exporting `DATABASE_URL`:
 
 ```bash
 export DATABASE_URL="postgresql://username:password@hostname:5432/dbname"
@@ -146,9 +217,7 @@ bunx --bun prisma migrate dev --create-only
   </TabItem>
 </Tabs>
 
-Running `prisma migrate dev --create-only` will keep the `prisma/migrations` directory up to date by generating a new migration folder each time your schema changes require a new migration.
-
-Your Prisma directory will then look something like this:
+This generates a new migration folder in `prisma/migrations` each time your schema changes:
 
 <FileTree>
   - prisma
@@ -159,7 +228,7 @@ Your Prisma directory will then look something like this:
     - schema.prisma
 </FileTree>
 
-To apply these migrations to the local database that `DATABASE_URL` is pointing to, you can run:
+To apply migrations to your local database:
 
 <Tabs>
   <TabItem label="npm" icon="seti:npm">
@@ -193,65 +262,16 @@ bunx --bun prisma migrate deploy
 </Tabs>
 
 :::note[Automatic AWS Migrations]
-For deployments to AWS, you do not need to run `prisma migrate deploy` manually. The generated infrastructure creates the application database user first, then runs your migrations automatically during deployment, as long as the `prisma/migrations` directory is up to date.
+For AWS deployments, you don't need to run `prisma migrate deploy` manually. The generated infrastructure automatically creates the application database user and runs migrations during deployment.
 :::
 
+## Deploying to AWS
 
-### Generating Database Client
-
-The generator automatically configures the `generate` target to generate the type-safe TypeScript Prisma client whenever you build the project.
-
-The generated client is structured as follows:
-
-<FileTree>
-  - generated
-    - prisma
-      - internal
-      - models
-      - browser.ts
-      - client.ts
-      - commonInputTypes.ts
-      - enums.ts
-      - models.ts
-</FileTree>
-
-The generated Prisma client is written to `generated/prisma`, and that folder is added to `.gitignore` in generated projects.
-
-The runtime wrapper lives in `src/prisma.ts`. It exports:
-
-- `DB_PACKAGE_NAME`, the key used under the `database` runtime config namespace in AWS AppConfig
-- `getPrisma()`, which loads the database connection settings from AWS AppConfig and creates a Prisma client using IAM authentication
-
-You can then use `getPrisma()` in other projects in your workspace, such as a `tRPC` API:
-
-```ts title="packages/api/src/procedures/list-user.ts"
-import { getPrisma } from ':aws-nx-poc/postgres';
-import { publicProcedure } from '../init.js';
-import {
-  ListUserOutputSchema,
-} from '../schema/index.js';
-
-export const listUser = publicProcedure
-  .output(ListUserOutputSchema)
-  .query(async () => {
-    const prisma = await getPrisma();
-    const users = await prisma.user.findMany({
-      orderBy: { id: 'asc' },
-    });
-
-    return { users };
-  });
-```
-
-## Deploying your Database
-
-### Infrastructure
-
-The relational database generator creates CDK or Terraform infrastructure as code based on your selected `iacProvider`. You can use this to deploy your database.
+The relational database generator creates CDK or Terraform infrastructure based on your selected `iacProvider`.
 
 <Infrastructure>
 <Fragment slot="cdk">
-The CDK construct for deploying your database is created in the `common/constructs` folder. You can consume this in a CDK application, for example:
+The CDK construct is created in `common/constructs`. Example usage:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
 import { Postgres } from ':my-scope/common-constructs';
@@ -287,12 +307,14 @@ export class ApplicationStack extends Stack {
 }
 ```
 
-This provisions an Aurora cluster and an RDS Proxy in your VPC, along with the generated admin credentials secret, the application database user custom resource, runtime config registration, and the migration handler. The database should typically be deployed into private isolated subnets so that it is not directly accessible from the public internet.
+This provisions an Aurora cluster with RDS Proxy, admin credentials, application database user, runtime config registration, and migration handler. Deploy into private isolated subnets to prevent direct internet access.
 
-If you need to customise the cluster topology, you can override Aurora cluster properties such as `writer` and `readers` when instantiating the construct.
+The generated infrastructure creates two database users:
+- **Admin user** - Created during cluster provisioning with credentials stored in AWS Secrets Manager
+- **Application user** - Created via a Lambda custom resource with IAM authentication enabled and full privileges on the application database
 </Fragment>
 <Fragment slot="terraform">
-The Terraform module for deploying your database is created in the `common/terraform` folder. You can use this in a Terraform configuration:
+The Terraform module is created in `common/terraform`. Example usage:
 
 ```hcl title="packages/infra/src/main.tf"
 module "postgres" {
@@ -305,20 +327,30 @@ module "postgres" {
 }
 ```
 
-This provisions an Aurora cluster with RDS Proxy, the generated admin credentials secret, the create-db-user Lambda function, runtime config registration in AWS AppConfig, the migration Lambda function, and the supporting resources needed to publish and run the migration container image.
+This provisions an Aurora cluster with RDS Proxy, admin credentials, create-db-user Lambda, runtime config registration, migration Lambda, and container registry resources.
 
-If you need to customise the cluster topology or sizing, you can override module inputs such as `instance_count`, `serverless_min_capacity`, `serverless_max_capacity`, `engine_version` and `port`.
+The generated infrastructure creates two database users:
+- **Admin user** - Created during cluster provisioning with credentials stored in AWS Secrets Manager
+- **Application user** - Created via a Lambda function with IAM authentication enabled and full privileges on the application database
 </Fragment>
 </Infrastructure>
 
-### Granting Access
+### Connecting Lambda Functions
 
-To allow Lambda-based application code to use the generated Prisma client in AWS, deploy it into the same VPC as the database, allow network access to the database port, and grant IAM database connect permissions for the generated runtime user.
+To use the Prisma client from Lambda functions, ensure the following requirements are met:
+
+1. Deploy functions in the same VPC as the database
+2. Allow network access to the database port
+3. Grant IAM `rds-db:connect` permissions for the generated runtime user
+4. Set required environment variables:
+   - `NODE_EXTRA_CA_CERTS=/var/runtime/ca-cert.pem` (required for TLS validation)
+   - `RUNTIME_CONFIG_APP_ID` (set automatically by the generated infrastructure)
+   - `AWS_REGION` (set automatically in Lambda execution environment)
 
 :::note[Prisma CLI vs Runtime Client]
-Prisma CLI commands such as `prisma migrate dev` and `prisma migrate deploy` read `DATABASE_URL` from the environment variables.
+**Prisma CLI** commands (`prisma migrate dev`, `prisma migrate deploy`) read `DATABASE_URL` from environment variables.
 
-The generated runtime client in `src/prisma.ts` does not read `DATABASE_URL`. It loads `database[DB_PACKAGE_NAME]` from AWS AppConfig and connects to Aurora using IAM authentication.
+**Runtime client** (`src/prisma.ts`) loads connection settings from AWS AppConfig and uses IAM authentication.
 :::
 
 <Infrastructure>
@@ -352,127 +384,99 @@ Object.entries(api.integrations).forEach(([operation, integration]) => {
 });
 ```
 
-This ensures that each API Lambda function runs inside the same VPC as the database, can read the runtime configuration from AWS AppConfig, and is explicitly allowed to connect to the database using the generated IAM database user.
+This configures each API Lambda function to run in the same VPC, read runtime config from AppConfig, and connect to the database using IAM authentication.
 </Fragment>
 <Fragment slot="terraform">
-The generated Terraform database module exposes `appconfig_application_id`, `cluster_port` and `database_runtime_user` for custom consumers.
+When connecting Lambda functions to the database, use these module outputs:
 
-When wiring your own Terraform-managed Lambda or API to the generated database:
+- `appconfig_application_id` - expose to compute environment
+- `cluster_port` - allow network access
+- `database_runtime_user` - grant `rds-db:connect` permission
 
-- run the compute in the same VPC and private subnets as the database
-- expose the AppConfig application ID from `module.postgres.appconfig_application_id` to your compute environment
-- grant AppConfig read permissions to the compute role
-- grant `rds-db:connect` for the generated runtime user `module.postgres.database_runtime_user`
-- allow network access to the Aurora port exposed as `module.postgres.cluster_port`
-
-The `rds-db:connect` resource ARN also needs the Aurora cluster resource ID, so expose that from your Terraform modules when custom compute needs direct database access.
+Ensure compute runs in the same VPC and private subnets, and grant AppConfig read permissions to the compute role.
 </Fragment>
 </Infrastructure>
 
-### SSL/TLS requirements
+### RDS Proxy
 
-When running Lambda functions against Aurora, you must configure the runtime to loads additional CA certificates. In CDK, that can be done by adding:
+The generated infrastructure includes an RDS Proxy by default, which sits between your application and the Aurora cluster. RDS Proxy provides several benefits:
 
-```ts
-const api = new Api(this, 'Api', {
-  integrations: Api.defaultIntegrations(this)
-    .withDefaultOptions({
-      ...
-      environment: {
-        NODE_EXTRA_CA_CERTS: '/var/runtime/ca-cert.pem',
-      },
-    })
-    .build(),
-});
-```
-
-This is required for Lambda to validate TLS connections to Aurora RDS. For more details, see the AWS Lambda RDS documentation: https://docs.aws.amazon.com/lambda/latest/dg/services-rds.html
-
-## Customising your Database Architecture
-
-The generated database construct exposes the underlying Aurora configuration so you can adapt it to your workload.
-
-### Overriding the Writer
+- **Connection pooling** - Maintains a pool of database connections that can be shared across application instances, reducing the overhead of establishing new connections
+- **Connection resilience** - Automatically handles failovers and reconnects during Aurora instance replacements or maintenance
+- **IAM authentication** - Supports IAM-based database authentication, eliminating the need to manage database credentials in your application code
+- **Improved security** - Enforces TLS encryption for all connections
 
 <Infrastructure>
 <Fragment slot="cdk">
-In CDK, you can override the default writer instance if you want to change how the primary Aurora instance is provisioned:
+
+By default, RDS Proxy is enabled. The generated runtime client (`getPrisma()`) automatically connects through the proxy endpoint. You can disable it if needed:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
 const db = new Postgres(this, 'Db', {
-  vpc,
-  vpcSubnets: {
-    subnetType: SubnetType.PRIVATE_ISOLATED,
-  },
-  writer: ClusterInstance.serverlessV2('writer'),
+  ...
+  enableRdsProxy: false,
 });
 ```
+
+When RDS Proxy is disabled, your application connects directly to the Aurora cluster endpoint.
 </Fragment>
 <Fragment slot="terraform">
-In Terraform, Aurora instances are managed through module inputs rather than separate `writer` and `readers` definitions. The generated module always provisions the primary instance for you, and you customise the cluster around it using inputs such as `instance_count`, `engine_version` and the serverless capacity settings:
+
+By default, RDS Proxy is enabled. The generated runtime client (`getPrisma()`) automatically connects through the proxy endpoint. You can disable it if needed:
 
 ```hcl title="packages/infra/src/main.tf"
 module "postgres" {
   source = "../../common/terraform/src/app/dbs/postgres"
-
-  vpc_id                  = module.vpc.vpc_id
-  subnet_ids              = module.vpc.private_isolated_subnet_ids
-  instance_count          = 1
-  serverless_min_capacity = 0.5
-  serverless_max_capacity = 8
-
-  tags = local.common_tags
+  ...
+  enable_rds_proxy = false
 }
 ```
+
+When RDS Proxy is disabled, your application connects directly to the Aurora cluster endpoint. The proxy is configured to require TLS encryption and use IAM authentication.
 </Fragment>
 </Infrastructure>
 
-### Adding Readers
+## Customising Database Architecture
+
+The generated infrastructure can be customised to match your workload requirements. The following examples demonstrate a few common customisation options available.
+
+### Cluster Instances
+
+Configure the writer and reader instances for your Aurora cluster.
 
 <Infrastructure>
 <Fragment slot="cdk">
-If your workload needs read scaling, you can add reader instances in CDK using the `readers` property:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
 const db = new Postgres(this, 'Db', {
-  vpc,
-  vpcSubnets: {
-    subnetType: SubnetType.PRIVATE_ISOLATED,
-  },
+  ...
+  writer: ClusterInstance.serverlessV2('writer'),
   readers: [ClusterInstance.serverlessV2('reader')],
 });
 ```
 </Fragment>
 <Fragment slot="terraform">
-In Terraform, the equivalent control is `instance_count`, which determines how many Aurora instances are created:
 
 ```hcl title="packages/infra/src/main.tf"
 module "postgres" {
   source = "../../common/terraform/src/app/dbs/postgres"
-
-  vpc_id         = module.vpc.vpc_id
-  subnet_ids     = module.vpc.private_isolated_subnet_ids
-  instance_count = 2
-
-  tags = local.common_tags
+  ...
+  instance_count = 2  # 1 writer + 1 reader
 }
 ```
 </Fragment>
 </Infrastructure>
 
-### Configuring Serverless Capacity
+### Serverless Capacity
 
-You can control Aurora Serverless v2 scaling limits to match your workload.
+Control Aurora Serverless v2 scaling limits to match your workload.
 
 <Infrastructure>
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
 const db = new Postgres(this, 'Db', {
-  vpc,
-  vpcSubnets: {
-    subnetType: SubnetType.PRIVATE_ISOLATED,
-  },
+  ...
   serverlessV2MinCapacity: 0.5,
   serverlessV2MaxCapacity: 8,
 });
@@ -483,91 +487,66 @@ const db = new Postgres(this, 'Db', {
 ```hcl title="packages/infra/src/main.tf"
 module "postgres" {
   source = "../../common/terraform/src/app/dbs/postgres"
-
-  vpc_id                  = module.vpc.vpc_id
-  subnet_ids              = module.vpc.private_isolated_subnet_ids
+  ...
   serverless_min_capacity = 0.5
   serverless_max_capacity = 8
-
-  tags = local.common_tags
 }
 ```
 </Fragment>
 </Infrastructure>
 
-### Pinning the Engine Version
+### Engine Version
 
-If you want to use a specific Aurora engine version, you can pin it explicitly rather than relying on the default.
+Pin a specific Aurora PostgreSQL engine version.
 
 <Infrastructure>
 <Fragment slot="cdk">
-In CDK, pass `engineVersion` to the generated construct:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
 const db = new Postgres(this, 'Db', {
-  vpc,
-  vpcSubnets: {
-    subnetType: SubnetType.PRIVATE_ISOLATED,
-  },
+  ...
   engineVersion: AuroraPostgresEngineVersion.VER_17_7,
 });
 ```
 </Fragment>
 <Fragment slot="terraform">
-In Terraform, use `engine_version`:
 
 ```hcl title="packages/infra/src/main.tf"
 module "postgres" {
   source = "../../common/terraform/src/app/dbs/postgres"
-
-  vpc_id         = module.vpc.vpc_id
-  subnet_ids     = module.vpc.private_isolated_subnet_ids
+  ...
   engine_version = "17.7"
-
-  tags = local.common_tags
 }
 ```
 </Fragment>
 </Infrastructure>
 
-### Selecting Subnets and Lifecycle Options
+### Deletion Protection
 
-You can also customise where the database is deployed and how it behaves during deletion.
+Configure lifecycle settings to protect against accidental deletion.
 
 <Infrastructure>
 <Fragment slot="cdk">
-Use `vpcSubnets` to control which subnets the database is placed into, and lifecycle-related properties such as `deletionProtection` and `removalPolicy` to control deletion behaviour:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
 import { RemovalPolicy } from 'aws-cdk-lib';
 
 const db = new Postgres(this, 'Db', {
-  vpc,
-  vpcSubnets: {
-    subnetType: SubnetType.PRIVATE_ISOLATED,
-  },
+  ...
   deletionProtection: true,
   removalPolicy: RemovalPolicy.SNAPSHOT,
 });
 ```
 </Fragment>
 <Fragment slot="terraform">
-Use `subnet_ids` to control where the database and migration Lambda are deployed.
 
 ```hcl title="packages/infra/src/main.tf"
 module "postgres" {
   source = "../../common/terraform/src/app/dbs/postgres"
-
-  vpc_id              = module.vpc.vpc_id
-  subnet_ids          = module.vpc.private_isolated_subnet_ids
+  ...
   deletion_protection = true
   skip_final_snapshot = false
-  port                = 5432
-
-  tags = local.common_tags
 }
 ```
-
-You can use `deletion_protection` to prevent accidental deletion, `skip_final_snapshot` to control snapshot behaviour on deletion, and `port` to override the default engine port.
 </Fragment>
 </Infrastructure>

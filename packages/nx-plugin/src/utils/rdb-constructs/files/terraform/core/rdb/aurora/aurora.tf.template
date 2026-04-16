@@ -104,6 +104,12 @@ variable "skip_final_snapshot" {
   default     = false
 }
 
+variable "enable_rds_proxy" {
+  description = "Whether to provision an RDS Proxy in front of the Aurora cluster."
+  type        = bool
+  default     = true
+}
+
 variable "tags" {
   description = "Tags to apply to all resources."
   type        = map(string)
@@ -257,6 +263,8 @@ resource "aws_rds_cluster_instance" "database" {
 }
 
 resource "aws_iam_role" "proxy" {
+  count = var.enable_rds_proxy ? 1 : 0
+
   name_prefix = "${var.name}-aurora-proxy-"
 
   assume_role_policy = jsonencode({
@@ -278,11 +286,15 @@ resource "aws_iam_role" "proxy" {
 }
 
 resource "aws_iam_role_policy_attachment" "proxy" {
-  role       = aws_iam_role.proxy.name
+  count = var.enable_rds_proxy ? 1 : 0
+
+  role       = aws_iam_role.proxy[0].name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonRDSProxyServiceRolePolicy"
 }
 
 resource "aws_security_group" "proxy" {
+  count = var.enable_rds_proxy ? 1 : 0
+
   name_prefix = "${var.name}-aurora-proxy-"
   description = "Security group for Aurora proxy ${var.name}"
   vpc_id      = var.vpc_id
@@ -300,11 +312,13 @@ resource "aws_security_group" "proxy" {
 }
 
 resource "aws_db_proxy" "aurora" {
+  count = var.enable_rds_proxy ? 1 : 0
+
   name                   = "${var.name}-proxy"
   engine_family          = var.engine == "aurora-mysql" ? "MYSQL" : "POSTGRESQL"
-  role_arn               = aws_iam_role.proxy.arn
+  role_arn               = aws_iam_role.proxy[0].arn
   vpc_subnet_ids         = var.subnet_ids
-  vpc_security_group_ids = [aws_security_group.proxy.id]
+  vpc_security_group_ids = [aws_security_group.proxy[0].id]
   require_tls            = true
 
   auth {
@@ -315,13 +329,17 @@ resource "aws_db_proxy" "aurora" {
 }
 
 resource "aws_db_proxy_target_group" "default" {
-  db_proxy_name = aws_db_proxy.aurora.name
+  count = var.enable_rds_proxy ? 1 : 0
+
+  db_proxy_name = aws_db_proxy.aurora[0].name
   name          = "default"
 }
 
 resource "aws_db_proxy_target" "default" {
-  db_proxy_name      = aws_db_proxy.aurora.name
-  target_group_name  = aws_db_proxy_target_group.default.name
+  count = var.enable_rds_proxy ? 1 : 0
+
+  db_proxy_name      = aws_db_proxy.aurora[0].name
+  target_group_name  = aws_db_proxy_target_group.default[0].name
   rds_resource_id    = aws_rds_cluster.database.resource_id
 }
 
@@ -337,7 +355,7 @@ output "cluster_resource_id" {
 
 output "cluster_endpoint" {
   description = "Writer endpoint of the Aurora cluster or proxy."
-  value       = aws_db_proxy.aurora.endpoint
+  value       = var.enable_rds_proxy ? aws_db_proxy.aurora[0].endpoint : aws_rds_cluster.database.endpoint
 }
 
 output "reader_endpoint" {
@@ -351,8 +369,8 @@ output "cluster_port" {
 }
 
 output "security_group_id" {
-  description = "Security group protecting the Aurora proxy."
-  value       = aws_security_group.proxy.id
+  description = "Security group protecting the Aurora proxy or cluster."
+  value       = var.enable_rds_proxy ? aws_security_group.proxy[0].id : aws_security_group.database.id
 }
 
 output "secret_arn" {
@@ -367,7 +385,7 @@ output "kms_key_arn" {
 
 output "database_host" {
   description = "Hostname of the Aurora cluster writer endpoint or proxy endpoint."
-  value       = aws_db_proxy.aurora.endpoint
+  value       = var.enable_rds_proxy ? aws_db_proxy.aurora[0].endpoint : aws_rds_cluster.database.endpoint
 }
 
 output "database_name" {
@@ -393,7 +411,7 @@ output "database_url" {
     local.database_url_scheme,
     jsondecode(aws_secretsmanager_secret_version.credentials.secret_string).username,
     jsondecode(aws_secretsmanager_secret_version.credentials.secret_string).password,
-    aws_db_proxy.aurora.endpoint,
+    var.enable_rds_proxy ? aws_db_proxy.aurora[0].endpoint : aws_rds_cluster.database.endpoint,
     aws_rds_cluster.database.port,
     "/${var.database_name}",
     local.database_url_query_string != "" ? "?${local.database_url_query_string}" : "",

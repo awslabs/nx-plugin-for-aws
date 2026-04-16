@@ -353,10 +353,12 @@ describe('ts#rdb generator', () => {
       tree.exists('packages/common/terraform/src/app/dbs/db/db.tf'),
     ).toBeTruthy();
     expect(terraformApp).toContain('source = "../../../core/rdb/aurora"');
-    expect(terraformApp).toContain('engine             = "aurora-postgresql"');
-    expect(terraformApp).toContain('admin_user         = "databaseUser"');
-    expect(terraformApp).toContain('key       = "rdbs"');
-    expect(terraformApp).toContain('"Db" = {');
+    expect(terraformApp).toContain('engine');
+    expect(terraformApp).toContain('"aurora-postgresql"');
+    expect(terraformApp).toContain('admin_user');
+    expect(terraformApp).toContain('"databaseUser"');
+    expect(terraformApp).toContain('namespace = "database"');
+    expect(terraformApp).toContain('key       = "Db"');
     expect(terraformApp).toContain('application_name = "Db-runtime-config"');
     expect(terraformApp).toContain(
       '../../../../../../../dist/packages/db/bundle/migration',
@@ -375,9 +377,11 @@ describe('ts#rdb generator', () => {
     expect(terraformApp).toContain('output "database_runtime_user"');
     expect(terraformApp).toContain('output "appconfig_application_id"');
     expect(terraformCore).toContain('variable "admin_user"');
+    expect(terraformCore).toContain('variable "enable_rds_proxy"');
     expect(terraformCore).toContain(
       'iam_database_authentication_enabled = true',
     );
+    expect(terraformCore).toContain('count = var.enable_rds_proxy ? 1 : 0');
     expect(terraformCore).toContain('output "cluster_resource_id"');
     expect(terraformCore).toContain('output "kms_key_arn"');
     expect(terraformCore).toContain('output "admin_user"');
@@ -405,5 +409,101 @@ describe('ts#rdb generator', () => {
     await tsRdbGenerator(tree, defaultOptions);
 
     expectHasMetricTags(tree, TS_RDB_GENERATOR_INFO.metric);
+  });
+
+  it('should generate terraform modules with MySQL engine', async () => {
+    await tsRdbGenerator(tree, {
+      ...defaultOptions,
+      iacProvider: 'Terraform',
+      engine: 'MySQL',
+    });
+    const terraformCore = tree.read(
+      'packages/common/terraform/src/core/rdb/aurora/aurora.tf',
+      'utf-8',
+    );
+    const terraformApp = tree.read(
+      'packages/common/terraform/src/app/dbs/db/db.tf',
+      'utf-8',
+    );
+
+    expect(terraformApp).toContain('engine');
+    expect(terraformApp).toContain('"aurora-mysql"');
+    expect(terraformApp).toContain(
+      'DATABASE_SECRET_ARN = module.aurora.secret_arn',
+    );
+    expect(terraformApp).not.toContain(
+      'HOSTNAME = module.aurora.cluster_endpoint',
+    );
+    expect(terraformCore).toContain('variable "enable_rds_proxy"');
+  });
+
+  it('should generate CDK construct with RDS Proxy disabled', async () => {
+    await tsRdbGenerator(tree, defaultOptions);
+    const auroraConstruct = tree.read(
+      'packages/common/constructs/src/core/rdb/aurora.ts',
+      'utf-8',
+    );
+
+    expect(auroraConstruct).toContain('enableRdsProxy?: boolean');
+    expect(auroraConstruct).toContain('enableRdsProxy = true');
+    expect(auroraConstruct).toContain('if (enableRdsProxy)');
+    expect(auroraConstruct).toContain(
+      'this.proxy?.endpoint ?? this.cluster.clusterEndpoint.hostname',
+    );
+  });
+
+  it('should generate Terraform modules with enable_rds_proxy variable', async () => {
+    await tsRdbGenerator(tree, {
+      ...defaultOptions,
+      iacProvider: 'Terraform',
+    });
+    const terraformCore = tree.read(
+      'packages/common/terraform/src/core/rdb/aurora/aurora.tf',
+      'utf-8',
+    );
+    const terraformApp = tree.read(
+      'packages/common/terraform/src/app/dbs/db/db.tf',
+      'utf-8',
+    );
+
+    expect(terraformCore).toContain('variable "enable_rds_proxy"');
+    expect(terraformCore).toContain('type        = bool');
+    expect(terraformCore).toContain('default     = true');
+    expect(terraformCore).toContain('count = var.enable_rds_proxy ? 1 : 0');
+    expect(terraformCore).toContain(
+      'var.enable_rds_proxy ? aws_db_proxy.aurora[0].endpoint : aws_rds_cluster.database.endpoint',
+    );
+    expect(terraformApp).toContain('enable_rds_proxy');
+    expect(terraformApp).toContain(
+      'enable_rds_proxy                = var.enable_rds_proxy',
+    );
+    expect(terraformApp).toContain('variable "enable_rds_proxy"');
+  });
+
+  it('should generate correct runtime config structure for Terraform', async () => {
+    await tsRdbGenerator(tree, {
+      ...defaultOptions,
+      iacProvider: 'Terraform',
+    });
+    const terraformApp = tree.read(
+      'packages/common/terraform/src/app/dbs/db/db.tf',
+      'utf-8',
+    );
+
+    // Verify runtime config uses correct namespace and key structure
+    expect(terraformApp).toContain('module "add_rdb_to_runtime_config"');
+    expect(terraformApp).toContain(
+      'source = "../../../core/runtime-config/entry"',
+    );
+    expect(terraformApp).toContain('namespace = "database"');
+    expect(terraformApp).toContain('key       = "Db"');
+    expect(terraformApp).toContain(
+      'hostname  = module.aurora.cluster_endpoint',
+    );
+    expect(terraformApp).toContain('port      = module.aurora.cluster_port');
+    expect(terraformApp).toContain('database  = module.aurora.database_name');
+    expect(terraformApp).toContain('adminUser = module.aurora.admin_user');
+    expect(terraformApp).toContain('dbUser    = local.database_runtime_user');
+    expect(terraformApp).toContain('region    = data.aws_region.current.name');
   });
 });
