@@ -135,6 +135,7 @@ export const PY_VERSIONS = {
   'fastapi[standard]': '==0.136.1',
   httpx: '==0.28.1',
   mcp: '==1.27.0',
+  pydantic: '==2.13.2',
   'pip-check-updates': '==0.28.0',
   'strands-agents': '==1.37.0',
   'strands-agents[a2a]': '==1.37.0',

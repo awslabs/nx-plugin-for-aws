@@ -3,7 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { describe, it, expect } from 'vitest';
-import { toTypeScriptType, toPythonType, toPythonName } from './languages';
+import {
+  toTypeScriptType,
+  toPythonType,
+  toPythonAnnotation,
+  toPythonName,
+} from './languages';
 import { Model } from './types';
 
 const createModel = (partial: Partial<Model>): Model => ({
@@ -93,7 +98,7 @@ describe('languages', () => {
 
       expect(toPythonType(stringModel)).toBe('str');
       expect(toPythonType(boolModel)).toBe('bool');
-      expect(toPythonType(anyModel)).toBe('object');
+      expect(toPythonType(anyModel)).toBe('Any');
     });
 
     it('should handle date formats', () => {
@@ -108,8 +113,8 @@ describe('languages', () => {
         export: 'generic',
       });
 
-      expect(toPythonType(dateModel)).toBe('date');
-      expect(toPythonType(dateTimeModel)).toBe('datetime');
+      expect(toPythonType(dateModel)).toBe('datetime.date');
+      expect(toPythonType(dateTimeModel)).toBe('datetime.datetime');
     });
 
     it('should handle number types', () => {
@@ -140,7 +145,7 @@ describe('languages', () => {
         export: 'array',
         link: createModel({ type: 'string', export: 'generic' }),
       });
-      expect(toPythonType(model)).toBe('List[str]');
+      expect(toPythonType(model)).toBe('list[str]');
     });
 
     it('should handle dictionary types', () => {
@@ -149,7 +154,40 @@ describe('languages', () => {
         export: 'dictionary',
         link: createModel({ type: 'string', export: 'generic' }),
       });
-      expect(toPythonType(model)).toBe('Dict[str, str]');
+      expect(toPythonType(model)).toBe('dict[str, str]');
+    });
+  });
+
+  describe('toPythonAnnotation', () => {
+    it('returns bare types for built-ins', () => {
+      expect(
+        toPythonAnnotation(createModel({ type: 'string', export: 'generic' })),
+      ).toBe('str');
+      expect(
+        toPythonAnnotation(createModel({ type: 'integer', export: 'generic' })),
+      ).toBe('int');
+    });
+
+    it('forward-refs user-defined model names', () => {
+      expect(
+        toPythonAnnotation(createModel({ type: 'Pet', export: 'reference' })),
+      ).toBe('"Pet"');
+    });
+
+    it('forward-refs nested model references in collections', () => {
+      const listOfPets = createModel({
+        type: 'Pet',
+        export: 'array',
+        link: createModel({ type: 'Pet', export: 'reference' }),
+      });
+      expect(toPythonAnnotation(listOfPets)).toBe('list["Pet"]');
+
+      const dictOfPets = createModel({
+        type: 'Pet',
+        export: 'dictionary',
+        link: createModel({ type: 'Pet', export: 'reference' }),
+      });
+      expect(toPythonAnnotation(dictOfPets)).toBe('dict[str, "Pet"]');
     });
   });
 

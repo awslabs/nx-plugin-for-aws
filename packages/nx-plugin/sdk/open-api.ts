@@ -14,3 +14,11 @@ export type { OpenApiTsHooksGeneratorSchema } from '../src/open-api/ts-hooks/sch
 
 export { openApiTsMetadataGenerator } from '../src/open-api/ts-metadata/generator';
 export type { OpenApiTsMetadataGeneratorSchema } from '../src/open-api/ts-metadata/schema';
+
+export {
+  openApiPyClientGenerator,
+  buildOpenApiPyCodeGenerationData,
+  OPEN_API_PY_CLIENT_PYTHON_DEPS,
+  OPEN_API_PY_CLIENT_PYTHON_DEP_SPECS,
+} from '../src/open-api/py-client/generator';
+export type { OpenApiPyClientGeneratorSchema } from '../src/open-api/py-client/schema';
