@@ -12,11 +12,11 @@ import Infrastructure from '@components/infrastructure.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import PackageManagerExecCommand from '@components/package-manager-exec-command.astro';
 
-生成一个 TypeScript [Strands Agent](https://strandsagents.com/) 用于构建带有工具的 AI 代理,并可选择将其部署到 [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/)。该生成器使用基于 WebSocket 的 [tRPC](https://trpc.io/) 来利用 [AgentCore 的双向流支持](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html),实现实时、类型安全的通信。
+生成一个 TypeScript [Strands Agent](https://strandsagents.com/) 用于构建带有工具的 AI 代理,并可选择将其部署到 [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/)。默认情况下,该生成器使用基于 WebSocket 的 [tRPC](https://trpc.io/) 来利用 [AgentCore 的双向流支持](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html),实现实时、类型安全的通信。或者,您可以选择 [Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) 协议,以实现与其他 A2A 兼容代理的互操作性。
 
 ## 什么是 Strands?
 
-[Strands](https://strandsagents.com/latest/documentation/docs/) 是一个用于构建 AI 代理的轻量级框架。主要特性包括:
+[Strands](https://strandsagents.com/docs/user-guide/quickstart/overview/) 是一个用于构建 AI 代理的轻量级框架。主要特性包括:
 
 - **轻量且可定制**: 简单的代理循环,不会妨碍您的工作
 - **生产就绪**: 完整的可观测性、追踪和大规模部署选项
@@ -43,13 +43,15 @@ import PackageManagerExecCommand from '@components/package-manager-exec-command.
 
 ## 生成器输出
 
-生成器将向您现有的 TypeScript 项目添加以下文件:
+生成器将向您现有的 TypeScript 项目添加以下文件。生成的文件取决于选择的 `protocol`:
+
+### HTTP 协议(默认)
 
 <FileTree>
   - your-project/
     - src/
       - agent/ (如果指定,则为自定义名称)
-        - index.ts Bedrock AgentCore Runtime 的入口点
+        - index.ts Bedrock AgentCore Runtime 的入口点(tRPC/WebSocket 服务器)
         - init.ts tRPC 初始化
         - router.ts 带有代理过程的 tRPC 路由器
         - agent.ts 带有示例工具的主代理定义
@@ -57,6 +59,21 @@ import PackageManagerExecCommand from '@components/package-manager-exec-command.
         - agent-core-trpc-client.ts 用于连接到 AgentCore Runtime 上的代理的客户端工厂
         - Dockerfile 托管代理的入口点(当 `computeType` 设置为 `None` 时排除)
     - package.json 已更新 Strands 依赖项
+    - project.json 已更新代理服务目标
+</FileTree>
+
+### A2A 协议
+
+当 `protocol` 设置为 `A2A` 时,入口点使用 [Strands A2A Express Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent) 而不是 tRPC:
+
+<FileTree>
+  - your-project/
+    - src/
+      - agent/ (如果指定,则为自定义名称)
+        - index.ts A2A Express 服务器入口点
+        - agent.ts 带有示例工具的主代理定义
+        - Dockerfile 托管代理的入口点(当 `computeType` 设置为 `None` 时排除)
+    - package.json 已更新 Strands 和 Express 依赖项
     - project.json 已更新代理服务目标
 </FileTree>
 
@@ -97,7 +114,16 @@ import PackageManagerExecCommand from '@components/package-manager-exec-command.
 
 ## 使用您的 Strands Agent
 
-### 基于 WebSocket 的 tRPC
+### 协议
+
+您的代理的服务器协议决定了它如何通信。您可以在以下选项之间进行选择:
+
+- **HTTP**(默认): 使用基于 WebSocket 的 [tRPC](https://trpc.io/) 进行实时、类型安全的通信。最适合自定义客户端集成和对代理 API 的细粒度控制。
+- **A2A**: 使用 [Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) 协议进行标准化的代理间通信。当您的代理需要被其他 A2A 兼容代理发现和调用时最适合。
+
+协议在 CDK/Terraform 基础设施中设置,应用程序代码会相应生成。
+
+### 基于 WebSocket 的 tRPC(HTTP 协议)
 
 TypeScript Strands Agent 使用基于 WebSocket 的 [tRPC](https://trpc.io/),利用 [AgentCore 的双向流支持](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html) 在客户端和您的代理之间实现实时、类型安全的通信。
 
@@ -164,7 +190,7 @@ agent = new Agent({ model: openaiModel });
 response = await agent.invoke('What can you help me with?');
 ```
 
-有关更多配置选项,请参阅 [Strands 关于模型提供商的文档](https://strandsagents.com/latest/documentation/docs/user-guide/quickstart/#model-providers)。
+有关更多配置选项,请参阅 [Strands 关于模型提供商的文档](https://strandsagents.com/docs/user-guide/concepts/model-providers/)。
 
 ### 使用 MCP 服务器
 
@@ -180,7 +206,13 @@ response = await agent.invoke('What can you help me with?');
 
 ### 更多
 
-有关编写 Strands 代理的更深入指南,请参阅 [Strands 文档](https://strandsagents.com/latest/documentation/docs/)。
+有关编写 Strands 代理的更深入指南,请参阅 [Strands 文档](https://strandsagents.com/docs/user-guide/quickstart/overview/)。
+
+## A2A 服务器(A2A 协议)
+
+当 `protocol=A2A` 时,生成的 `index.ts` 将 [Strands A2A Express Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent) 挂载到 Express 应用上,因此生成的代理会公开 A2A 协议端点以及 `/ping` 健康检查。当部署到 AgentCore 时,入口点会从 AppConfig 解析运行时的公共 ARN,并在代理卡中进行公告。
+
+大多数用户不需要修改此文件 — 编辑 `agent.ts` 来更改工具或系统提示。A2A 代理监听端口 `9000`(而 HTTP 为 `8080`),生成的 Dockerfile 和基础设施已经为此进行了配置。
 
 ## 运行您的 Strands Agent
 
@@ -254,7 +286,7 @@ client.invoke.subscribe({ message: 'what is 1 plus 1?' }, { onData: console.log 
 生成的 `client.ts` 文件包含一个类型安全的客户端工厂,可用于调用已部署的代理。
 
 :::caution[HTTP头认证]
-客户端工厂在 WebSocket 握手中使用 HTTP 头来验证对 Bedrock AgentCore Runtime 的请求。这在浏览器中不可能实现,因此此客户端不适合浏览器环境。有关从浏览器调用的详细信息,请参阅下面的"浏览器 / React 网站"部分。
+客户端工厂在 WebSocket 握手中使用 HTTP 头来验证对 Bedrock AgentCore Runtime 的请求。这在浏览器中不可能实现,因此此客户端不适合浏览器环境。有关从浏览器调用的详细信息,请参阅下面的"浏览器"部分。
 :::
 
 ##### IAM 身份验证
@@ -325,3 +357,86 @@ const jwtClient = AgentClient.withJwtAuth({
 <RunGenerator generator="connection" />
 
 有关如何设置连接的详细信息,请参阅 <Link path="/guides/connection/react-ts-strands-agent">`connection` 生成器指南</Link>。
+
+### 调用 A2A 代理
+
+Strands SDK 的 `A2AAgent` 包装了远程 A2A 端点,因此您可以像调用本地 `Agent` 一样调用它。`invoke` 解析为 `AgentResult`;对其调用 `.toString()` 会连接远程代理回复中的文本块。
+
+```typescript
+import { A2AAgent } from '@strands-agents/sdk/a2a';
+
+const remote = new A2AAgent({ url: 'http://localhost:9000' });
+const result = await remote.invoke('Hello, remote agent!');
+const reply = result.toString();
+```
+
+#### 使用 IAM 身份验证在 AgentCore 上调用
+
+对 AgentCore 上已部署的 A2A 代理的请求(包括代理卡获取)必须进行 SigV4 签名。向 `A2AAgent` 传递一个 `clientFactory`,该工厂对卡解析器和 JSON-RPC 传输都使用 SigV4 签名的 fetch:
+
+```typescript
+import {
+  ClientFactory,
+  ClientFactoryOptions,
+  DefaultAgentCardResolver,
+  JsonRpcTransportFactory,
+} from '@a2a-js/sdk/client';
+import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
+import { A2AAgent } from '@strands-agents/sdk/a2a';
+import { AwsClient } from 'aws4fetch';
+
+const arn = '<your-agent-runtime-arn>';
+const region = arn.split(':')[3];
+const url = `https://bedrock-agentcore.${region}.amazonaws.com/runtimes/${encodeURIComponent(arn)}/invocations/`;
+
+const creds = fromNodeProviderChain();
+const sigv4Fetch: typeof fetch = async (...args) =>
+  new AwsClient({ ...(await creds()), service: 'bedrock-agentcore', region }).fetch(...args);
+
+const clientFactory = new ClientFactory({
+  ...ClientFactoryOptions.default,
+  transports: [new JsonRpcTransportFactory({ fetchImpl: sigv4Fetch })],
+  cardResolver: new DefaultAgentCardResolver({ fetchImpl: sigv4Fetch }),
+});
+
+const remote = new A2AAgent({ url, clientFactory });
+const result = await remote.invoke('Hello, remote agent!');
+const reply = result.toString();
+```
+
+:::note[IAM 权限]
+调用者的 IAM 角色需要对目标运行时 ARN 拥有 `bedrock-agentcore:InvokeAgentRuntime` 和 `bedrock-agentcore:GetAgentCard` 两个权限。生成的构造的 `grantInvokeAccess` 辅助方法会授予这两个权限。
+:::
+
+:::note[额外依赖项]
+上面的 SigV4 客户端示例需要 `@a2a-js/sdk`、`aws4fetch` 和 `@aws-sdk/credential-providers`。在运行示例之前将它们添加到您的 `package.json` 中。
+:::
+
+#### 将 A2A 代理用作工具
+
+`A2AAgent` 实现了与本地 `Agent` 相同的 `InvokableAgent` 接口,因此您可以将其包装在 Strands `tool` 中并交给另一个代理。这就是生成的 HTTP/tRPC 代理模板如何委托给远程 A2A 代理:
+
+```typescript
+import { Agent, tool } from '@strands-agents/sdk';
+import { z } from 'zod';
+
+const remote = /* A2AAgent built with clientFactory as above */;
+
+const askRemote = tool({
+  name: 'askRemoteAgent',
+  description: 'Delegate a question to the remote A2A agent and return its reply.',
+  inputSchema: z.object({ prompt: z.string() }),
+  callback: async ({ prompt }) => (await remote.invoke(prompt)).toString(),
+});
+
+const agent = new Agent({
+  systemPrompt: 'Delegate to askRemoteAgent when appropriate.',
+  tools: [askRemote],
+});
+```
+
+在您的 CDK 堆栈中,授予宿主代理对远程代理的调用访问权限 — 这会连接 A2A 客户端需要的两个 IAM 操作:
+
+```typescript
+remoteAgent.grantInvokeAccess(hostAgent);
+```

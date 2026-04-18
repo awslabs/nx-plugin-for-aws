@@ -12,7 +12,7 @@ import Infrastructure from '@components/infrastructure.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import Drawer from '@components/drawer.astro';
 
-生成一个用于构建AI智能体工具的Python [Strands Agent](https://strandsagents.com/)，并可选部署到[Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/)。
+生成一个用于构建AI智能体工具的Python [Strands Agent](https://strandsagents.com/)，并可选部署到[Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/)。默认情况下，生成器使用[FastAPI](https://fastapi.tiangolo.com/)暴露HTTP服务器。或者，您可以选择[Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html)协议，以实现与其他A2A兼容智能体的互操作性。
 
 ## 什么是Strands？
 
@@ -43,7 +43,9 @@ import Drawer from '@components/drawer.astro';
 
 ## 生成器输出
 
-生成器将在现有Python项目中添加以下文件：
+生成器将在现有Python项目中添加以下文件。生成的文件取决于所选的`protocol`：
+
+### HTTP协议（默认）
 
 <FileTree>
   - your-project/
@@ -52,7 +54,23 @@ import Drawer from '@components/drawer.astro';
         - \_\_init\_\_.py Python包初始化文件
         - init.py 配置CORS和错误处理中间件的FastAPI应用设置
         - agent.py 主智能体定义（含示例工具）
-        - main.py Bedrock AgentCore Runtime入口点
+        - main.py Bedrock AgentCore Runtime的FastAPI入口点
+        - Dockerfile 智能体托管入口文件（当`computeType`设为`None`时不生成）
+    - pyproject.toml 更新Strands依赖
+    - project.json 更新服务目标配置
+</FileTree>
+
+### A2A协议
+
+当`protocol`设为`A2A`时，入口点使用[Strands A2A Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent)而非FastAPI：
+
+<FileTree>
+  - your-project/
+    - your_module/
+      - agent/ (可自定义名称)
+        - \_\_init\_\_.py Python包初始化文件
+        - agent.py 主智能体定义（含示例工具）
+        - main.py A2A服务器入口点
         - Dockerfile 智能体托管入口文件（当`computeType`设为`None`时不生成）
     - pyproject.toml 更新Strands依赖
     - project.json 更新服务目标配置
@@ -174,11 +192,18 @@ agent = Agent(model=bedrock_model)
 
 深入指南请参考[Strands官方文档](https://strandsagents.com/docs/user-guide/quickstart/overview/)。
 
-## FastAPI服务器
+## 协议
 
-生成器使用[FastAPI](https://fastapi.tiangolo.com/)为Strands智能体创建HTTP服务器。FastAPI提供了一个现代、高性能的Python API构建框架，具有自动API文档生成和类型验证功能。
+智能体的服务器协议决定其通信方式。两种选项都由[FastAPI](https://fastapi.tiangolo.com/)提供服务——区别在于入口点：
 
-生成的服务器包含：
+- **HTTP**（默认）：标准FastAPI服务器，带有自定义`/invocations`端点、CORS和流式传输。最适合自定义客户端集成。
+- **A2A**：将[Strands A2A Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent)挂载到FastAPI应用上。最适合需要被其他A2A兼容智能体发现和调用的场景。
+
+两种协议都暴露`/ping`端点以满足AgentCore运行时健康检查契约。A2A智能体监听端口`9000`（HTTP为`8080`）；生成的Dockerfile和基础设施已为您配置。
+
+## FastAPI服务器（HTTP协议）
+
+生成的HTTP服务器包含：
 - 配置CORS中间件的FastAPI应用
 - 错误处理中间件
 - OpenAPI模式生成
@@ -257,6 +282,12 @@ SDK功能详情请参阅[文档](https://aws.github.io/bedrock-agentcore-starter
 :::note[基础设施即代码]
 由于生成器提供CDK或Terraform基础设施来管理部署，无需使用文档中提到的`bedrock-agentcore-starter-toolkit`进行部署。
 :::
+
+## A2A服务器（A2A协议）
+
+当`protocol=A2A`时，生成的`main.py`将`A2AServer.to_fastapi_app()`挂载到父FastAPI应用上，该应用同时暴露`/ping`端点。部署到AgentCore时，入口点会从AppConfig解析运行时的公共ARN，并在智能体卡片中发布。
+
+大多数用户无需修改此文件——编辑`agent.py`即可更改工具或系统提示。A2A服务器从`Agent`构造函数的`name`和`description`填充智能体卡片（`/.well-known/agent-card.json`）。
 
 ## 运行Strands智能体
 
@@ -359,3 +390,96 @@ aws cognito-idp admin-initiate-auth \
 <RunGenerator generator="connection" />
 
 关于连接设置的详细信息，请参考<Link path="/guides/connection/react-py-strands-agent">`connection`生成器指南</Link>。
+
+### 调用A2A智能体
+
+Strands SDK的`A2AAgent`封装了远程A2A端点，使您可以像调用本地`Agent`一样调用它。
+
+```python
+from strands.agent.a2a_agent import A2AAgent
+
+remote = A2AAgent(endpoint="http://127.0.0.1:9000")
+result = await remote.invoke_async("Hello, remote agent!")
+```
+
+#### 在AgentCore上使用IAM认证调用
+
+对已部署到AgentCore的A2A智能体的请求（包括智能体卡片获取）必须使用SigV4签名。向`A2AAgent`传递一个`client_config`，其中包含使用SigV4认证流的`httpx.AsyncClient`：
+
+```python
+import hashlib
+from urllib.parse import quote
+
+import httpx
+from a2a.client import ClientConfig
+from botocore.auth import SigV4Auth
+from botocore.awsrequest import AWSRequest
+from botocore.session import Session
+from strands.agent.a2a_agent import A2AAgent
+
+
+class SigV4HTTPXAuth(httpx.Auth):
+    requires_request_body = True
+
+    def __init__(self, region: str):
+        creds = Session().get_credentials().get_frozen_credentials()
+        self.signer = SigV4Auth(creds, "bedrock-agentcore", region)
+
+    def auth_flow(self, request: httpx.Request):
+        headers = dict(request.headers)
+        headers.pop("connection", None)
+        headers["x-amz-content-sha256"] = hashlib.sha256(request.content or b"").hexdigest()
+        aws_request = AWSRequest(method=request.method, url=str(request.url), data=request.content, headers=headers)
+        self.signer.add_auth(aws_request)
+        request.headers.clear()
+        request.headers.update(dict(aws_request.headers))
+        yield request
+
+
+arn = "<your-agent-runtime-arn>"
+region = arn.split(":")[3]
+endpoint = f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/{quote(arn, safe='')}/invocations/"
+
+auth_client = httpx.AsyncClient(auth=SigV4HTTPXAuth(region), timeout=300)
+remote = A2AAgent(endpoint=endpoint, client_config=ClientConfig(httpx_client=auth_client))
+result = await remote.invoke_async("Hello, remote agent!")
+```
+
+:::note[IAM权限]
+调用者的IAM角色需要对目标运行时ARN具有`bedrock-agentcore:InvokeAgentRuntime`和`bedrock-agentcore:GetAgentCard`权限。生成的构造的`grantInvokeAccess`辅助方法会同时授予这两个权限。
+:::
+
+:::note[额外依赖]
+A2A生成器会为您添加`strands-agents[a2a]`。如果您要将A2A客户端代码添加到HTTP智能体，请在`pyproject.toml`中添加`strands-agents[a2a]`和`httpx`。
+:::
+
+#### 将A2A智能体用作工具
+
+`A2AAgent`像本地`Agent`一样继承自`AgentBase`，因此您可以将其包装在`@tool`中并交给另一个智能体：
+
+```python
+from strands import Agent, tool
+
+remote = # 使用上述client_config构建的A2AAgent
+
+async def ask_remote_agent(prompt: str) -> str:
+    """将问题委托给远程A2A智能体并返回其回复。"""
+    result = await remote.invoke_async(prompt)
+    return str(result)
+
+ask_remote = tool(
+    name="ask_remote_agent",
+    description="将问题委托给远程A2A智能体并返回其回复。",
+)(ask_remote_agent)
+
+agent = Agent(
+    system_prompt="在适当时委托给ask_remote_agent。",
+    tools=[ask_remote],
+)
+```
+
+在CDK堆栈中，授予宿主智能体对远程智能体的调用访问权——这会配置A2A客户端所需的两个IAM操作：
+
+```typescript
+remoteAgent.grantInvokeAccess(hostAgent);
+```
