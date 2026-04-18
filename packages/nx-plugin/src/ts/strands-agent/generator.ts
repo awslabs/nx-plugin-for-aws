@@ -66,6 +66,14 @@ export const tsStrandsAgentGenerator = async (
   const auth = options.auth ?? 'IAM';
   const protocol = options.protocol ?? 'HTTP';
 
+  if (protocol === 'AG-UI') {
+    throw new Error(
+      `The AG-UI protocol is not yet supported for TypeScript Strands Agents. ` +
+        `Use a Python Strands Agent with protocol='AG-UI' instead, or choose 'HTTP' or 'A2A' for TypeScript. ` +
+        `Track TypeScript support at https://github.com/strands-agents/sdk-typescript/issues/347`,
+    );
+  }
+
   const templateContext = {
     name,
     agentNameClassName,

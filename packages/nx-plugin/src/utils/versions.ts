@@ -28,6 +28,9 @@ export const TS_VERSIONS = {
   'create-nx-workspace': '22.6.5',
   '@modelcontextprotocol/sdk': '1.29.0',
   '@modelcontextprotocol/inspector': '0.19.0',
+  '@ag-ui/client': '0.0.48',
+  '@copilotkit/react-core': '1.54.1',
+  '@copilotkit/react-ui': '1.54.1',
   '@strands-agents/sdk': '1.0.0-rc.4',
   '@tanstack/react-router': '1.168.17',
   '@tanstack/router-plugin': '1.167.16',
@@ -106,6 +109,8 @@ export const withVersions = (deps: ITsDepVersion[]) =>
  * Versions for Python dependencies added by generators
  */
 export const PY_VERSIONS = {
+  'ag-ui-protocol': '==0.1.15',
+  'ag-ui-strands': '==0.1.3',
   'aws-lambda-powertools': '==3.27.0',
   'aws-lambda-powertools[tracer]': '==3.27.0',
   'aws-lambda-powertools[parser]': '==3.27.0',
