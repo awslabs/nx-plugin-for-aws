@@ -90,7 +90,6 @@ export const TS_VERSIONS = {
   vite: '8.0.8',
   typescript: '6.0.2',
   vitest: '4.1.4',
-  'vite-tsconfig-paths': '6.1.1',
   zod: '4.3.6',
   ws: '8.20.0',
 } as const;

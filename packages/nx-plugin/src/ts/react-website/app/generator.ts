@@ -346,13 +346,6 @@ export async function tsReactWebsiteGenerator(
       await addDestructuredImport(tree, viteConfigPath, ['resolve'], 'path');
     }
 
-    await addSingleImport(
-      tree,
-      viteConfigPath,
-      'tsconfigPaths',
-      'vite-tsconfig-paths',
-    );
-
     // Add TailwindCSS import if enabled
     if (enableTailwind) {
       await addSingleImport(
@@ -393,10 +386,11 @@ export async function tsReactWebsiteGenerator(
       );
     }
 
+    // Use Vite's native tsconfig paths resolution (replaces vite-tsconfig-paths)
     await applyGritQL(
       tree,
       viteConfigPath,
-      '`plugins: [$items]` => `plugins: [$items, tsconfigPaths()]` where { $items <: within `defineConfig($_)`, $items <: not some `tsconfigPaths()` }',
+      'or { `defineConfig(() => ({ $props }))` where { $props <: not some `resolve: $_`, $props += `resolve: { tsconfigPaths: true }` }, `defineConfig({ $props })` where { $props <: not some `resolve: $_`, $props += `resolve: { tsconfigPaths: true }` } }',
     );
 
     // Add define: { global: {} } to the config (handles both callback and direct forms)
@@ -454,11 +448,7 @@ export async function tsReactWebsiteGenerator(
     }),
   );
 
-  const devDependencies: ITsDepVersion[] = [
-    'vite-tsconfig-paths',
-    '@nx/react',
-    '@vitest/ui',
-  ];
+  const devDependencies: ITsDepVersion[] = ['@nx/react', '@vitest/ui'];
 
   const dependencies: ITsDepVersion[] = ['react', 'react-dom'];
 
