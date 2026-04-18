@@ -154,7 +154,7 @@ export const tsStrandsAgentGenerator = async (
       '@aws-lambda-powertools/parameters',
       '@modelcontextprotocol/sdk',
       ...(protocol === 'A2A'
-        ? (['express'] as const)
+        ? (['express', '@a2a-js/sdk'] as const)
         : ([
             '@trpc/server',
             '@trpc/client',
