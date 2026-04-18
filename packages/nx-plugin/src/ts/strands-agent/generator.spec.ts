@@ -844,10 +844,14 @@ describe('ts#strands-agent generator', () => {
     expect(indexContent).toContain('A2AExpressServer');
     expect(indexContent).not.toContain('tRPC');
 
-    // Check dependencies include express
+    // Check dependencies include express and @a2a-js/sdk
     const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
     expect(rootPackageJson.dependencies['express']).toBeDefined();
     expect(rootPackageJson.devDependencies['@types/express']).toBeDefined();
+    // @a2a-js/sdk must be a direct dependency so it lands in node_modules
+    // for local dev AND is bundled into the Docker image (the Strands SDK's
+    // a2a/express-server module statically imports it via peer dependency).
+    expect(rootPackageJson.dependencies['@a2a-js/sdk']).toBeDefined();
 
     // HTTP-specific deps should not be present
     expect(rootPackageJson.dependencies['@trpc/server']).toBeUndefined();

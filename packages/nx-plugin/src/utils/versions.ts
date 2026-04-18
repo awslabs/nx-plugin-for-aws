@@ -7,6 +7,7 @@
  * Versons for TypeScript dependencies added by generators
  */
 export const TS_VERSIONS = {
+  '@a2a-js/sdk': '0.3.13',
   '@aws/aws-distro-opentelemetry-node-autoinstrumentation': '0.10.0',
   '@aws-sdk/client-dynamodb': '3.1029.0',
   '@aws-sdk/client-sts': '3.1029.0',
