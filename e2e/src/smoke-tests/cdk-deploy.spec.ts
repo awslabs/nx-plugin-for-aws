@@ -15,7 +15,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 // @ts-expect-error no types for virtual module
-import { AgentCoreTrpcClient } from 'virtual:ts-template/ts/strands-agent/files/app/agent-core-trpc-client';
+import { AgentCoreTrpcClient } from 'virtual:ts-template/ts/strands-agent/files/http/agent-core-trpc-client';
 
 /**
  * Helper function to create an AWS client with SigV4 signing
@@ -184,6 +184,78 @@ async function invokeTrpcAgentCoreAgent(
   expect(response).not.toHaveLength(0);
 }
 
+/**
+ * Helper function to invoke an A2A server via Bedrock AgentCore Runtime.
+ *
+ * Uses the A2A SDK's `ClientFactory` with a SigV4-signing fetch for both the
+ * agent card resolver and the JSON-RPC transport — this exercises the same
+ * code path that `A2AAgent.clientFactory` uses inside generated agents.
+ */
+async function invokeAgentCoreA2a(
+  arn: string,
+  agentName: string,
+): Promise<void> {
+  // Lazy imports so these SDKs are only required in tests that need them
+  const {
+    ClientFactory,
+    ClientFactoryOptions,
+    DefaultAgentCardResolver,
+    JsonRpcTransportFactory,
+  } = await import('@a2a-js/sdk/client');
+
+  console.log(`Testing ${agentName} with ARN ${arn}`);
+
+  const region = process.env.AWS_REGION || 'us-west-2';
+  const encodedArn = encodeURIComponent(arn);
+  // AgentCore mounts A2A at the /invocations/ root (trailing slash matters).
+  const baseUrl = `https://bedrock-agentcore.${region}.amazonaws.com/runtimes/${encodedArn}/invocations/`;
+  const sessionId = 'abcdefghijklmnopqrstuvwxyz0123456789';
+
+  const credentials = await fromNodeProviderChain()();
+  const awsClient = new AwsClient({
+    accessKeyId: credentials.accessKeyId,
+    secretAccessKey: credentials.secretAccessKey,
+    sessionToken: credentials.sessionToken,
+    service: 'bedrock-agentcore',
+    region,
+  });
+  const sigv4Fetch: typeof fetch = async (input, init) => {
+    const headers = new Headers(init?.headers);
+    if (!headers.has('X-Amzn-Bedrock-AgentCore-Runtime-Session-Id')) {
+      headers.set('X-Amzn-Bedrock-AgentCore-Runtime-Session-Id', sessionId);
+    }
+    return awsClient.fetch(input, { ...init, headers });
+  };
+
+  // NB: `cardResolver` must be passed to the ClientFactory directly —
+  // `ClientFactoryOptions.createFrom` does not thread it through.
+  const factory = new ClientFactory({
+    ...ClientFactoryOptions.default,
+    transports: [new JsonRpcTransportFactory({ fetchImpl: sigv4Fetch })],
+    cardResolver: new DefaultAgentCardResolver({ fetchImpl: sigv4Fetch }),
+  });
+
+  const client = await factory.createFromUrl(baseUrl);
+  const card = await client.getAgentCard();
+  expect(typeof card.name).toBe('string');
+  console.log(`${agentName} agent card:`, card.name);
+
+  const stream = client.sendMessage({
+    kind: 'message',
+    role: 'user',
+    parts: [{ kind: 'text', text: 'hello' }],
+    messageId: crypto.randomUUID(),
+  });
+
+  let events = 0;
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  for await (const _event of stream) {
+    events++;
+  }
+  expect(events).toBeGreaterThan(0);
+  console.log(`Successfully invoked ${agentName} (${events} events)`);
+}
+
 async function invokeLambda(arn: string, lambdaName: string) {
   const lambda = new Lambda();
   console.log('Invoking lambda', lambdaName, 'with arn', arn);
@@ -340,6 +412,14 @@ describe('smoke test - cdk-deploy', () => {
         findOutput('TsStrandsAgentArn'),
         'TypeScript Strands Agent',
       );
+
+      // A2A agents — invoke via the A2A JSON-RPC message/send method over
+      // SigV4 against the AgentCore runtime URL.
+      await invokeAgentCoreA2a(
+        findOutput('TsA2aAgentArn'),
+        'TypeScript A2A Agent',
+      );
+      await invokeAgentCoreA2a(findOutput('PyA2aAgentArn'), 'Python A2A Agent');
 
       // Lambda functions
       await invokeLambda(findOutput('PyFunctionArn'), 'Python Function');

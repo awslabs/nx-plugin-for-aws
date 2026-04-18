@@ -828,6 +828,92 @@ describe('ts#strands-agent generator', () => {
     );
   });
 
+  it('should generate A2A agent with protocol option', async () => {
+    await tsStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      protocol: 'A2A',
+      computeType: 'None',
+      iacProvider: 'CDK',
+    });
+
+    // Check that A2A-specific index.ts was generated (overwrites the HTTP one)
+    const indexContent = tree.read(
+      'apps/test-project/src/agent/index.ts',
+      'utf-8',
+    );
+    expect(indexContent).toContain('A2AExpressServer');
+    expect(indexContent).not.toContain('tRPC');
+
+    // Check dependencies include express
+    const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+    expect(rootPackageJson.dependencies['express']).toBeDefined();
+    expect(rootPackageJson.devDependencies['@types/express']).toBeDefined();
+
+    // HTTP-specific deps should not be present
+    expect(rootPackageJson.dependencies['@trpc/server']).toBeUndefined();
+    expect(rootPackageJson.dependencies['ws']).toBeUndefined();
+    expect(rootPackageJson.dependencies['cors']).toBeUndefined();
+  });
+
+  it('should include protocol in component metadata for A2A', async () => {
+    await tsStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      protocol: 'A2A',
+      computeType: 'None',
+      iacProvider: 'CDK',
+    });
+
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+
+    expect(projectConfig.metadata.components[0].protocol).toBe('A2A');
+  });
+
+  it('should include protocol in component metadata for HTTP (default)', async () => {
+    await tsStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      computeType: 'None',
+      iacProvider: 'CDK',
+    });
+
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+
+    expect(projectConfig.metadata.components[0].protocol).toBe('HTTP');
+  });
+
+  it('should pass A2A protocol to CDK infrastructure', async () => {
+    await tsStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      protocol: 'A2A',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
+    });
+
+    const agentConstruct = tree.read(
+      'packages/common/constructs/src/app/agents/test-project-agent/test-project-agent.ts',
+      'utf-8',
+    );
+    expect(agentConstruct).toContain('ProtocolType.A2A');
+    expect(agentConstruct).toContain('bedrock-agentcore:GetAgentCard');
+  });
+
+  it('should not grant GetAgentCard for HTTP protocol', async () => {
+    await tsStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
+    });
+
+    const agentConstruct = tree.read(
+      'packages/common/constructs/src/app/agents/test-project-agent/test-project-agent.ts',
+      'utf-8',
+    );
+    expect(agentConstruct).not.toContain('bedrock-agentcore:GetAgentCard');
+  });
+
   it('should use default name when empty string is provided', async () => {
     await tsStrandsAgentGenerator(tree, {
       project: 'test-project',

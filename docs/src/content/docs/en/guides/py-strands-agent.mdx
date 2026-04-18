@@ -12,7 +12,7 @@ import Infrastructure from '@components/infrastructure.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import Drawer from '@components/drawer.astro';
 
-Generate a Python [Strands Agent](https://strandsagents.com/) for building AI agents with tools, and optionally deploy it to [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/).
+Generate a Python [Strands Agent](https://strandsagents.com/) for building AI agents with tools, and optionally deploy it to [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/). By default, the generator uses [FastAPI](https://fastapi.tiangolo.com/) to expose an HTTP server. Alternatively, you can choose the [Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) protocol for interoperability with other A2A-compatible agents.
 
 ## What is Strands?
 
@@ -43,7 +43,9 @@ First use the <Link path="/guides/python-project">`py#project`</Link> generator 
 
 ## Generator Output
 
-The generator will add the following files to your existing Python project:
+The generator will add the following files to your existing Python project. The files generated depend on the chosen `protocol`:
+
+### HTTP Protocol (default)
 
 <FileTree>
   - your-project/
@@ -52,7 +54,23 @@ The generator will add the following files to your existing Python project:
         - \_\_init\_\_.py Python package initialization
         - init.py FastAPI application setup with CORS and error handling middleware
         - agent.py Main agent definition with sample tools
-        - main.py Entry point for Bedrock AgentCore Runtime
+        - main.py FastAPI entry point for Bedrock AgentCore Runtime
+        - Dockerfile Entry point for hosting your agent (excluded when `computeType` is set to `None`)
+    - pyproject.toml Updated with Strands dependencies
+    - project.json Updated with agent serve targets
+</FileTree>
+
+### A2A Protocol
+
+When `protocol` is set to `A2A`, the entry point uses the [Strands A2A Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent) instead of FastAPI:
+
+<FileTree>
+  - your-project/
+    - your_module/
+      - agent/ (or custom name if specified)
+        - \_\_init\_\_.py Python package initialization
+        - agent.py Main agent definition with sample tools
+        - main.py A2A server entry point
         - Dockerfile Entry point for hosting your agent (excluded when `computeType` is set to `None`)
     - pyproject.toml Updated with Strands dependencies
     - project.json Updated with agent serve targets
@@ -174,11 +192,18 @@ For other MCP servers, please refer to the [Strands Documentation](https://stran
 
 For a more in-depth guide to writing Strands agents, refer to the [Strands documentation](https://strandsagents.com/docs/user-guide/quickstart/overview/).
 
-## FastAPI Server
+## Protocol
 
-The generator uses [FastAPI](https://fastapi.tiangolo.com/) to create the HTTP server for your Strands Agent. FastAPI provides a modern, fast web framework for building APIs with Python, with automatic API documentation and type validation.
+Your agent's server protocol determines how it communicates. Both options are served by [FastAPI](https://fastapi.tiangolo.com/) — the entry point differs:
 
-The generated server includes:
+- **HTTP** (default): A standard FastAPI server with a custom `/invocations` endpoint, CORS, and streaming. Best for custom client integrations.
+- **A2A**: The [Strands A2A Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent) mounted onto a FastAPI app. Best when your agent needs to be discoverable and invokable by other A2A-compatible agents.
+
+Both protocols expose `/ping` for the AgentCore runtime health check contract. A2A agents listen on port `9000` (vs `8080` for HTTP); the generated Dockerfile and infrastructure are configured for you.
+
+## FastAPI Server (HTTP protocol)
+
+The generated HTTP server includes:
 - FastAPI application setup with CORS middleware
 - Error handling middleware
 - OpenAPI schema generation
@@ -257,6 +282,12 @@ You can find more details about the SDK's capabilities in the [documentation her
 :::note[Infrastructure as Code]
 Since the generator vends CDK or Terraform infrastructure which manages deploying your agent, you do not need to utilise the `bedrock-agentcore-starter-toolkit` which the docs mention for deploying your agent.
 :::
+
+## A2A Server (A2A protocol)
+
+When `protocol=A2A`, the generated `main.py` mounts `A2AServer.to_fastapi_app()` onto a parent FastAPI app that also exposes `/ping`. When deployed to AgentCore, the entry point resolves the runtime's public ARN from AppConfig and advertises it in the agent card.
+
+Most users will not need to modify this file — edit `agent.py` to change tools or the system prompt. The A2A server populates the agent card (`/.well-known/agent-card.json`) from the `Agent` constructor's `name` and `description`.
 
 ## Running Your Strands Agent
 
@@ -361,3 +392,96 @@ For invoking your Strands Agent from a React website, you can make use of the <L
 <RunGenerator generator="connection" />
 
 Refer to the <Link path="/guides/connection/react-py-strands-agent">`connection` generator guide</Link> for details about how the connection is set up.
+
+### Invoking an A2A Agent
+
+The Strands SDK's `A2AAgent` wraps a remote A2A endpoint so you can call it like a local `Agent`.
+
+```python
+from strands.agent.a2a_agent import A2AAgent
+
+remote = A2AAgent(endpoint="http://127.0.0.1:9000")
+result = await remote.invoke_async("Hello, remote agent!")
+```
+
+#### Invoking on AgentCore with IAM Authentication
+
+Requests to a deployed A2A agent on AgentCore (including the agent card fetch) must be SigV4-signed. Pass a `client_config` to `A2AAgent` with an `httpx.AsyncClient` that uses a SigV4 auth flow:
+
+```python
+import hashlib
+from urllib.parse import quote
+
+import httpx
+from a2a.client import ClientConfig
+from botocore.auth import SigV4Auth
+from botocore.awsrequest import AWSRequest
+from botocore.session import Session
+from strands.agent.a2a_agent import A2AAgent
+
+
+class SigV4HTTPXAuth(httpx.Auth):
+    requires_request_body = True
+
+    def __init__(self, region: str):
+        creds = Session().get_credentials().get_frozen_credentials()
+        self.signer = SigV4Auth(creds, "bedrock-agentcore", region)
+
+    def auth_flow(self, request: httpx.Request):
+        headers = dict(request.headers)
+        headers.pop("connection", None)
+        headers["x-amz-content-sha256"] = hashlib.sha256(request.content or b"").hexdigest()
+        aws_request = AWSRequest(method=request.method, url=str(request.url), data=request.content, headers=headers)
+        self.signer.add_auth(aws_request)
+        request.headers.clear()
+        request.headers.update(dict(aws_request.headers))
+        yield request
+
+
+arn = "<your-agent-runtime-arn>"
+region = arn.split(":")[3]
+endpoint = f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/{quote(arn, safe='')}/invocations/"
+
+auth_client = httpx.AsyncClient(auth=SigV4HTTPXAuth(region), timeout=300)
+remote = A2AAgent(endpoint=endpoint, client_config=ClientConfig(httpx_client=auth_client))
+result = await remote.invoke_async("Hello, remote agent!")
+```
+
+:::note[IAM Permissions]
+The caller's IAM role needs both `bedrock-agentcore:InvokeAgentRuntime` and `bedrock-agentcore:GetAgentCard` on the target runtime ARN. The generated construct's `grantInvokeAccess` helper grants both.
+:::
+
+:::note[Extra dependency]
+The A2A generator adds `strands-agents[a2a]` for you. If you're adding the A2A client code to an HTTP agent, add `strands-agents[a2a]` and `httpx` to your `pyproject.toml`.
+:::
+
+#### Using an A2A Agent as a Tool
+
+`A2AAgent` inherits from `AgentBase` like a local `Agent`, so you can wrap it in a `@tool` and hand it to another agent:
+
+```python
+from strands import Agent, tool
+
+remote = # A2AAgent built with client_config as above
+
+async def ask_remote_agent(prompt: str) -> str:
+    """Delegate a question to the remote A2A agent and return its reply."""
+    result = await remote.invoke_async(prompt)
+    return str(result)
+
+ask_remote = tool(
+    name="ask_remote_agent",
+    description="Delegate a question to the remote A2A agent and return its reply.",
+)(ask_remote_agent)
+
+agent = Agent(
+    system_prompt="Delegate to ask_remote_agent when appropriate.",
+    tools=[ask_remote],
+)
+```
+
+In your CDK stack, grant the host agent invoke access to the remote agent — this wires up both IAM actions the A2A client needs:
+
+```typescript
+remoteAgent.grantInvokeAccess(hostAgent);
+```

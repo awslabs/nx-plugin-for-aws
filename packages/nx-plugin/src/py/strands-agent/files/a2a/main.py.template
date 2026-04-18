@@ -1,0 +1,33 @@
+import logging
+import os
+
+from fastapi import FastAPI
+from strands.multiagent.a2a import A2AServer
+
+from .agent import get_agent
+
+logging.basicConfig(level=logging.INFO)
+
+PORT = int(os.environ.get("PORT", "9000"))
+
+RUNTIME_URL = os.environ.get("AGENTCORE_RUNTIME_URL", f"http://localhost:{PORT}/")
+
+_agent_ctx = get_agent(session_id="default")
+_agent = _agent_ctx.__enter__()
+
+a2a_server = A2AServer(
+    agent=_agent,
+    port=PORT,
+    http_url=RUNTIME_URL,
+    serve_at_root=True,
+)
+
+app = FastAPI()
+
+
+@app.get("/ping")
+def ping() -> dict[str, str]:
+    return {"status": "Healthy"}
+
+
+app.mount("/", a2a_server.to_fastapi_app())
