@@ -27,7 +27,7 @@ export const TS_VERSIONS = {
   'create-nx-workspace': '22.6.5',
   '@modelcontextprotocol/sdk': '1.29.0',
   '@modelcontextprotocol/inspector': '0.19.0',
-  '@strands-agents/sdk': '0.7.0',
+  '@strands-agents/sdk': '1.0.0-rc.4',
   '@tanstack/react-router': '1.168.17',
   '@tanstack/router-plugin': '1.167.16',
   '@tanstack/router-generator': '1.166.28',
@@ -116,7 +116,8 @@ export const PY_VERSIONS = {
   'fastapi[standard]': '==0.135.3',
   mcp: '==1.27.0',
   'pip-check-updates': '==0.28.0',
-  'strands-agents': '==1.35.0',
+  'strands-agents': '==1.36.0',
+  'strands-agents[a2a]': '==1.36.0',
   'strands-agents-tools': '==0.4.1',
   uvicorn: '==0.44.0',
 } as const;

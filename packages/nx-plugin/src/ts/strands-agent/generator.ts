@@ -64,17 +64,29 @@ export const tsStrandsAgentGenerator = async (
 
   const computeType = options.computeType ?? 'BedrockAgentCoreRuntime';
   const auth = options.auth ?? 'IAM';
+  const protocol = options.protocol ?? 'HTTP';
 
-  // Generate example agent
+  const templateContext = {
+    name,
+    agentNameClassName,
+    distDir,
+  };
+
+  // Generate common files shared by both protocols
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'app'),
+    joinPathFragments(__dirname, 'files', 'common'),
     targetSourceDir,
-    {
-      name,
-      agentNameClassName,
-      distDir,
-    },
+    templateContext,
+    { overwriteStrategy: OverwriteStrategy.KeepExisting },
+  );
+
+  // Generate protocol-specific files
+  generateFiles(
+    tree,
+    joinPathFragments(__dirname, 'files', protocol.toLowerCase()),
+    targetSourceDir,
+    templateContext,
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
@@ -95,6 +107,7 @@ export const tsStrandsAgentGenerator = async (
       {
         distDir,
         name,
+        protocol,
         adotVersion:
           TS_VERSIONS['@aws/aws-distro-opentelemetry-node-autoinstrumentation'],
       },
@@ -126,6 +139,7 @@ export const tsStrandsAgentGenerator = async (
       dockerImageTag,
       iacProvider,
       auth,
+      serverProtocol: protocol,
     });
   }
 
@@ -133,25 +147,35 @@ export const tsStrandsAgentGenerator = async (
   addDependenciesToPackageJson(
     tree,
     withVersions([
-      '@trpc/server',
-      '@trpc/client',
       'zod',
       '@strands-agents/sdk',
-      'ws',
-      'cors',
       '@aws-sdk/credential-providers',
       '@aws-sdk/client-appconfigdata',
       '@aws-lambda-powertools/parameters',
-      'aws4fetch',
       '@modelcontextprotocol/sdk',
+      ...(protocol === 'A2A'
+        ? (['express'] as const)
+        : ([
+            '@trpc/server',
+            '@trpc/client',
+            'ws',
+            'cors',
+            'aws4fetch',
+          ] as const)),
     ]),
-    withVersions(['tsx', '@types/ws', '@types/cors', '@types/node']),
+    withVersions([
+      'tsx',
+      '@types/node',
+      ...(protocol === 'A2A'
+        ? (['@types/express'] as const)
+        : (['@types/ws', '@types/cors'] as const)),
+    ]),
   );
 
-  // NB: we assign the local dev port from 8081 as 8080 is used by vscode server, and so conflicts
-  // for those working on remote dev envirionments. The deployed agent in agentcore still runs on
-  // 8080 as per the agentcore contract.
-  const localDevPort = assignPort(tree, project, 8081);
+  // A2A servers use port 9000 as per the Strands A2A SDK default and AgentCore A2A contract.
+  // HTTP agents use port 8081+ to avoid conflict with VS Code server on 8080.
+  const localDevPortStart = protocol === 'A2A' ? 9000 : 8081;
+  const localDevPort = assignPort(tree, project, localDevPortStart);
 
   updateProjectConfiguration(tree, project.name, {
     ...project,
@@ -189,7 +213,7 @@ export const tsStrandsAgentGenerator = async (
     TS_STRANDS_AGENT_GENERATOR_INFO,
     targetSourceDirRelativeToProjectRoot,
     agentTargetPrefix,
-    { port: localDevPort, rc: agentNameClassName, auth },
+    { port: localDevPort, rc: agentNameClassName, auth, protocol },
   );
 
   await addGeneratorMetricsIfApplicable(tree, [

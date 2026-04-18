@@ -12,11 +12,11 @@ import Infrastructure from '@components/infrastructure.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import PackageManagerExecCommand from '@components/package-manager-exec-command.astro';
 
-TypeScript [Strands Agent](https://strandsagents.com/) を生成し、ツールを使用したAIエージェントを構築します。オプションで [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/) にデプロイできます。このジェネレーターは、WebSocket 上の [tRPC](https://trpc.io/) を使用して、[AgentCore の双方向ストリーミングサポート](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html)を活用し、リアルタイムで型安全な通信を実現します。
+TypeScript [Strands Agent](https://strandsagents.com/) を生成し、ツールを使用したAIエージェントを構築します。オプションで [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/) にデプロイできます。デフォルトでは、このジェネレーターは WebSocket 上の [tRPC](https://trpc.io/) を使用して、[AgentCore の双方向ストリーミングサポート](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html)を活用し、リアルタイムで型安全な通信を実現します。または、他の A2A 互換エージェントとの相互運用性のために [Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) プロトコルを選択することもできます。
 
 ## Strands とは?
 
-[Strands](https://strandsagents.com/latest/documentation/docs/) は、AIエージェントを構築するための軽量なフレームワークです。主な機能は次のとおりです:
+[Strands](https://strandsagents.com/docs/user-guide/quickstart/overview/) は、AIエージェントを構築するための軽量なフレームワークです。主な機能は次のとおりです:
 
 - **軽量でカスタマイズ可能**: シンプルなエージェントループで邪魔にならない
 - **本番環境対応**: 完全な可観測性、トレーシング、スケールのためのデプロイオプション
@@ -43,13 +43,15 @@ TypeScript Strands Agent は2つの方法で生成できます:
 
 ## ジェネレーター出力
 
-ジェネレーターは、既存の TypeScript プロジェクトに次のファイルを追加します:
+ジェネレーターは、既存の TypeScript プロジェクトに次のファイルを追加します。生成されるファイルは、選択した `protocol` によって異なります:
+
+### HTTP プロトコル (デフォルト)
 
 <FileTree>
   - your-project/
     - src/
       - agent/ (指定した場合はカスタム名)
-        - index.ts Bedrock AgentCore Runtime のエントリーポイント
+        - index.ts Bedrock AgentCore Runtime のエントリーポイント (tRPC/WebSocket サーバー)
         - init.ts tRPC の初期化
         - router.ts エージェントプロシージャを含む tRPC ルーター
         - agent.ts サンプルツールを含むメインエージェント定義
@@ -57,6 +59,21 @@ TypeScript Strands Agent は2つの方法で生成できます:
         - agent-core-trpc-client.ts AgentCore Runtime 上のエージェントに接続するためのクライアントファクトリー
         - Dockerfile エージェントをホストするためのエントリーポイント (`computeType` が `None` に設定されている場合は除外)
     - package.json Strands 依存関係で更新
+    - project.json エージェント serve ターゲットで更新
+</FileTree>
+
+### A2A プロトコル
+
+`protocol` が `A2A` に設定されている場合、エントリーポイントは tRPC の代わりに [Strands A2A Express Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent) を使用します:
+
+<FileTree>
+  - your-project/
+    - src/
+      - agent/ (指定した場合はカスタム名)
+        - index.ts A2A Express サーバーのエントリーポイント
+        - agent.ts サンプルツールを含むメインエージェント定義
+        - Dockerfile エージェントをホストするためのエントリーポイント (`computeType` が `None` に設定されている場合は除外)
+    - package.json Strands と Express 依存関係で更新
     - project.json エージェント serve ターゲットで更新
 </FileTree>
 
@@ -97,7 +114,16 @@ Strands Agent をデプロイするために、次のファイルが生成され
 
 ## Strands Agent の操作
 
-### WebSocket 上の tRPC
+### プロトコル
+
+エージェントのサーバープロトコルは、通信方法を決定します。次のいずれかを選択できます:
+
+- **HTTP** (デフォルト): WebSocket 上の [tRPC](https://trpc.io/) を使用して、リアルタイムで型安全な通信を実現します。カスタムクライアント統合やエージェントの API の細かい制御に最適です。
+- **A2A**: 標準化されたエージェント間通信のために [Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) プロトコルを使用します。エージェントが他の A2A 互換エージェントによって検出可能で呼び出し可能である必要がある場合に最適です。
+
+プロトコルは CDK/Terraform インフラストラクチャで設定され、アプリケーションコードはそれに応じて生成されます。
+
+### tRPC over WebSocket (HTTP プロトコル)
 
 TypeScript Strands Agent は、WebSocket 上の [tRPC](https://trpc.io/) を使用し、[AgentCore の双方向ストリーミングサポート](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html)を活用して、クライアントとエージェント間のリアルタイムで型安全な通信を実現します。
 
@@ -164,7 +190,7 @@ agent = new Agent({ model: openaiModel });
 response = await agent.invoke('What can you help me with?');
 ```
 
-詳細な設定オプションについては、[モデルプロバイダーに関する Strands ドキュメント](https://strandsagents.com/latest/documentation/docs/user-guide/quickstart/#model-providers)を参照してください。
+詳細な設定オプションについては、[モデルプロバイダーに関する Strands ドキュメント](https://strandsagents.com/docs/user-guide/concepts/model-providers/)を参照してください。
 
 ### MCP サーバーの使用
 
@@ -180,7 +206,13 @@ Strands エージェントに [MCP サーバーからツールを追加](https:/
 
 ### その他
 
-Strands エージェントの作成に関する詳細なガイドについては、[Strands ドキュメント](https://strandsagents.com/latest/documentation/docs/)を参照してください。
+Strands エージェントの作成に関する詳細なガイドについては、[Strands ドキュメント](https://strandsagents.com/docs/user-guide/quickstart/overview/)を参照してください。
+
+## A2A サーバー (A2A プロトコル)
+
+`protocol=A2A` の場合、生成された `index.ts` は [Strands A2A Express Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent) を Express アプリにマウントするため、生成されたエージェントは A2A プロトコルエンドポイントを `/ping` ヘルスチェックと共に公開します。AgentCore にデプロイされると、エントリーポイントは AppConfig からランタイムのパブリック ARN を解決し、それをエージェントカードでアドバタイズします。
+
+ほとんどのユーザーはこのファイルを変更する必要はありません — ツールやシステムプロンプトを変更するには `agent.ts` を編集してください。A2A エージェントはポート `9000` (HTTP の `8080` に対して) でリッスンしますが、生成された Dockerfile とインフラストラクチャはすでにこれに対応しています。
 
 ## Strands Agent の実行
 
@@ -254,7 +286,7 @@ client.invoke.subscribe({ message: 'what is 1 plus 1?' }, { onData: console.log 
 生成された `client.ts` ファイルには、デプロイされたエージェントを呼び出すために使用できる型安全なクライアントファクトリーが含まれています。
 
 :::caution[HTTPヘッダー認証]
-クライアントファクトリーは、WebSocket ハンドシェイクで HTTP ヘッダーを使用して、Bedrock AgentCore Runtime へのリクエストを認証します。これはブラウザでは不可能であるため、このクライアントはブラウザ環境には適していません。ブラウザからの呼び出しの詳細については、以下の「ブラウザ / React ウェブサイト」セクションを参照してください。
+クライアントファクトリーは、WebSocket ハンドシェイクで HTTP ヘッダーを使用して、Bedrock AgentCore Runtime へのリクエストを認証します。これはブラウザでは不可能であるため、このクライアントはブラウザ環境には適していません。ブラウザからの呼び出しの詳細については、以下の「ブラウザ」セクションを参照してください。
 :::
 
 ##### IAM 認証
@@ -325,3 +357,86 @@ React ウェブサイトから Strands Agent を呼び出す場合は、<Link pa
 <RunGenerator generator="connection" />
 
 接続の設定方法の詳細については、<Link path="/guides/connection/react-ts-strands-agent">`connection` ジェネレーターガイド</Link>を参照してください。
+
+### A2A エージェントの呼び出し
+
+Strands SDK の `A2AAgent` は、リモート A2A エンドポイントをラップするため、ローカルの `Agent` のように呼び出すことができます。`invoke` は `AgentResult` に解決され、`.toString()` を呼び出すと、リモートエージェントの応答からテキストブロックが結合されます。
+
+```typescript
+import { A2AAgent } from '@strands-agents/sdk/a2a';
+
+const remote = new A2AAgent({ url: 'http://localhost:9000' });
+const result = await remote.invoke('Hello, remote agent!');
+const reply = result.toString();
+```
+
+#### IAM 認証を使用した AgentCore での呼び出し
+
+AgentCore にデプロイされた A2A エージェントへのリクエスト (エージェントカードの取得を含む) は、SigV4 署名が必要です。カードリゾルバーと JSON-RPC トランスポートの両方に SigV4 署名 fetch を使用する `clientFactory` を `A2AAgent` に渡します:
+
+```typescript
+import {
+  ClientFactory,
+  ClientFactoryOptions,
+  DefaultAgentCardResolver,
+  JsonRpcTransportFactory,
+} from '@a2a-js/sdk/client';
+import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
+import { A2AAgent } from '@strands-agents/sdk/a2a';
+import { AwsClient } from 'aws4fetch';
+
+const arn = '<your-agent-runtime-arn>';
+const region = arn.split(':')[3];
+const url = `https://bedrock-agentcore.${region}.amazonaws.com/runtimes/${encodeURIComponent(arn)}/invocations/`;
+
+const creds = fromNodeProviderChain();
+const sigv4Fetch: typeof fetch = async (...args) =>
+  new AwsClient({ ...(await creds()), service: 'bedrock-agentcore', region }).fetch(...args);
+
+const clientFactory = new ClientFactory({
+  ...ClientFactoryOptions.default,
+  transports: [new JsonRpcTransportFactory({ fetchImpl: sigv4Fetch })],
+  cardResolver: new DefaultAgentCardResolver({ fetchImpl: sigv4Fetch }),
+});
+
+const remote = new A2AAgent({ url, clientFactory });
+const result = await remote.invoke('Hello, remote agent!');
+const reply = result.toString();
+```
+
+:::note[IAM 権限]
+呼び出し側の IAM ロールには、ターゲットランタイム ARN に対して `bedrock-agentcore:InvokeAgentRuntime` と `bedrock-agentcore:GetAgentCard` の両方が必要です。生成されたコンストラクトの `grantInvokeAccess` ヘルパーは両方を付与します。
+:::
+
+:::note[追加の依存関係]
+上記の SigV4 クライアントの例では、`@a2a-js/sdk`、`aws4fetch`、および `@aws-sdk/credential-providers` が必要です。例を実行する前に、これらを `package.json` に追加してください。
+:::
+
+#### A2A エージェントをツールとして使用
+
+`A2AAgent` はローカルの `Agent` と同じ `InvokableAgent` インターフェースを実装しているため、Strands `tool` でラップして別のエージェントに渡すことができます。これは、生成された HTTP/tRPC エージェントテンプレートがリモート A2A エージェントに委任する方法です:
+
+```typescript
+import { Agent, tool } from '@strands-agents/sdk';
+import { z } from 'zod';
+
+const remote = /* 上記のように clientFactory で構築された A2AAgent */;
+
+const askRemote = tool({
+  name: 'askRemoteAgent',
+  description: 'Delegate a question to the remote A2A agent and return its reply.',
+  inputSchema: z.object({ prompt: z.string() }),
+  callback: async ({ prompt }) => (await remote.invoke(prompt)).toString(),
+});
+
+const agent = new Agent({
+  systemPrompt: 'Delegate to askRemoteAgent when appropriate.',
+  tools: [askRemote],
+});
+```
+
+CDK スタックで、ホストエージェントにリモートエージェントへの呼び出しアクセスを付与します — これにより、A2A クライアントが必要とする両方の IAM アクションが設定されます:
+
+```typescript
+remoteAgent.grantInvokeAccess(hostAgent);
+```

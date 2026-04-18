@@ -55,6 +55,13 @@ export async function tsStrandsAgentReactConnectionGenerator(
   const agentProjectAlias = toScopeAlias(agentProjectConfig.name);
   const agentPath = targetComponent?.path ?? 'src/agent';
 
+  if (targetComponent?.protocol === 'A2A') {
+    throw new Error(
+      `Cannot connect a React website to an A2A agent. ` +
+        `Consider generating an agent with the HTTP protocol instead.`,
+    );
+  }
+
   // Ensure the agent project has a wildcard path entry in tsconfig.base.json
   // so that deep imports (e.g., for the router type) resolve correctly
   ensureWildcardPathEntry(

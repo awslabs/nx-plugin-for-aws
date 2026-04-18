@@ -1007,6 +1007,97 @@ dev-dependencies = []
     expect(projectConfig.metadata.components[0].port).toBeDefined();
   });
 
+  it('should generate A2A agent with protocol option', async () => {
+    await pyStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      protocol: 'A2A',
+      computeType: 'None',
+      iacProvider: 'CDK',
+    });
+
+    // Check that A2A-specific main.py was generated
+    const mainContent = tree.read(
+      'apps/test-project/proj_test_project/agent/main.py',
+      'utf-8',
+    );
+    expect(mainContent).toContain('A2AServer');
+    expect(mainContent).toContain('to_fastapi_app');
+    expect(mainContent).toContain('AGENTCORE_RUNTIME_URL');
+    expect(mainContent).toContain('http_url');
+
+    // A2A should not generate init.py (HTTP-only)
+    expect(
+      tree.exists('apps/test-project/proj_test_project/agent/init.py'),
+    ).toBeFalsy();
+
+    // Check serve command uses fastapi dev (for hot reload via to_fastapi_app)
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+    expect(projectConfig.targets['agent-serve'].options.commands[0]).toContain(
+      'uv run fastapi dev',
+    );
+  });
+
+  it('should include protocol in component metadata for A2A', async () => {
+    await pyStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      protocol: 'A2A',
+      computeType: 'None',
+      iacProvider: 'CDK',
+    });
+
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+
+    expect(projectConfig.metadata.components[0].protocol).toBe('A2A');
+  });
+
+  it('should include protocol in component metadata for HTTP (default)', async () => {
+    await pyStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      computeType: 'None',
+      iacProvider: 'CDK',
+    });
+
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+
+    expect(projectConfig.metadata.components[0].protocol).toBe('HTTP');
+  });
+
+  it('should pass A2A protocol to CDK infrastructure', async () => {
+    await pyStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      protocol: 'A2A',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
+    });
+
+    const agentConstruct = tree.read(
+      'packages/common/constructs/src/app/agents/test-project-agent/test-project-agent.ts',
+      'utf-8',
+    );
+    expect(agentConstruct).toContain('ProtocolType.A2A');
+    expect(agentConstruct).toContain('bedrock-agentcore:GetAgentCard');
+  });
+
+  it('should not grant GetAgentCard for HTTP protocol', async () => {
+    await pyStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
+    });
+
+    const agentConstruct = tree.read(
+      'packages/common/constructs/src/app/agents/test-project-agent/test-project-agent.ts',
+      'utf-8',
+    );
+    expect(agentConstruct).not.toContain('bedrock-agentcore:GetAgentCard');
+  });
+
   it('should use default name when empty string is provided', async () => {
     await pyStrandsAgentGenerator(tree, {
       project: 'test-project',

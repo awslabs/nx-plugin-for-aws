@@ -289,6 +289,24 @@ export function Main() {
       TS_STRANDS_AGENT_REACT_CONNECTION_GENERATOR_INFO.metric,
     );
   });
+
+  it('should throw when target agent uses the A2A protocol', async () => {
+    await expect(
+      tsStrandsAgentReactConnectionGenerator(tree, {
+        sourceProject: 'frontend',
+        targetProject: 'agent-project',
+        targetComponent: {
+          generator: 'ts#strands-agent',
+          name: 'agent',
+          path: 'src/agent',
+          port: 9000,
+          rc: 'TestAgent',
+          auth: 'IAM',
+          protocol: 'A2A',
+        },
+      }),
+    ).rejects.toThrow(/A2A/);
+  });
 });
 
 describe('ts strands agent react connection with real projects', () => {

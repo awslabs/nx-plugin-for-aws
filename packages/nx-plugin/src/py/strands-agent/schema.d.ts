@@ -6,6 +6,7 @@
 import { IacProviderOption } from '../../utils/iac';
 
 export type PyStrandsAgentComputeType = 'BedrockAgentCoreRuntime' | 'None';
+export type StrandsAgentProtocol = 'HTTP' | 'A2A';
 
 export type PyStrandsAgentAuth = 'IAM' | 'Cognito';
 
@@ -14,5 +15,6 @@ export interface PyStrandsAgentGeneratorSchema {
   name?: string;
   computeType?: PyStrandsAgentComputeType;
   auth?: PyStrandsAgentAuth;
+  protocol?: StrandsAgentProtocol;
   iacProvider: IacProviderOption;
 }

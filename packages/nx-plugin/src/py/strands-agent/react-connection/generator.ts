@@ -50,6 +50,13 @@ export const pyStrandsAgentReactConnectionGenerator = async (
   const agentPort = targetComponent?.port ?? metadata?.ports?.[0] ?? 8081;
   const auth = targetComponent?.auth ?? metadata?.auth ?? 'IAM';
 
+  if (targetComponent?.protocol === 'A2A') {
+    throw new Error(
+      `Cannot connect a React website to an A2A agent. ` +
+        `Consider generating an agent with the HTTP protocol instead.`,
+    );
+  }
+
   // Determine the module name from the project source root
   const moduleName = getModuleName(agentProjectConfig);
   const agentNameSnakeCase = toSnakeCase(agentName);

@@ -368,6 +368,24 @@ export function Main() {
       PY_STRANDS_AGENT_REACT_CONNECTION_GENERATOR_INFO.metric,
     );
   });
+
+  it('should throw when target agent uses the A2A protocol', async () => {
+    await expect(
+      pyStrandsAgentReactConnectionGenerator(tree, {
+        sourceProject: 'frontend',
+        targetProject: 'agent-project',
+        targetComponent: {
+          generator: 'py#strands-agent',
+          name: 'agent',
+          path: 'agent_project/agent',
+          port: 9000,
+          rc: 'TestAgent',
+          auth: 'IAM',
+          protocol: 'A2A',
+        },
+      }),
+    ).rejects.toThrow(/A2A/);
+  });
 });
 
 describe(

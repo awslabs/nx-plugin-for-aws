@@ -79,18 +79,30 @@ export const pyStrandsAgentGenerator = async (
 
   const computeType = options.computeType ?? 'BedrockAgentCoreRuntime';
   const auth = options.auth ?? 'IAM';
+  const protocol = options.protocol ?? 'HTTP';
 
-  // Generate example agent
+  const templateContext = {
+    name,
+    agentNameSnakeCase,
+    agentNameClassName,
+    moduleName,
+  };
+
+  // Generate common files shared by both protocols
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'app'),
+    joinPathFragments(__dirname, 'files', 'common'),
     targetSourceDir,
-    {
-      name,
-      agentNameSnakeCase,
-      agentNameClassName,
-      moduleName,
-    },
+    templateContext,
+    { overwriteStrategy: OverwriteStrategy.KeepExisting },
+  );
+
+  // Generate protocol-specific files
+  generateFiles(
+    tree,
+    joinPathFragments(__dirname, 'files', protocol.toLowerCase()),
+    targetSourceDir,
+    templateContext,
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
@@ -98,10 +110,12 @@ export const pyStrandsAgentGenerator = async (
     'aws-lambda-powertools',
     'aws-opentelemetry-distro',
     'bedrock-agentcore',
-    'fastapi',
     'boto3',
+    'fastapi',
     'mcp',
-    'strands-agents',
+    ...(protocol === 'A2A'
+      ? (['strands-agents[a2a]'] as const)
+      : (['strands-agents'] as const)),
     'strands-agents-tools',
     'uvicorn',
   ]);
@@ -129,13 +143,14 @@ export const pyStrandsAgentGenerator = async (
         agentNameSnakeCase,
         moduleName,
         bundleOutputDir,
+        protocol,
       },
       { overwriteStrategy: OverwriteStrategy.KeepExisting },
     );
 
     const dockerTargetName = `${agentTargetPrefix}-docker`;
 
-    // Add a docker target specific to this MCP server
+    // Add a docker target specific to this agent
     project.targets[dockerTargetName] = {
       cache: true,
       executor: 'nx:run-commands',
@@ -163,13 +178,19 @@ export const pyStrandsAgentGenerator = async (
       iacProvider,
       projectName: project.name,
       auth,
+      serverProtocol: protocol,
     });
   }
 
-  // NB: we assign the local dev port from 8081 as 8080 is used by vscode server, and so conflicts
-  // for those working on remote dev envirionments. The deployed agent in agentcore still runs on
-  // 8080 as per the agentcore contract.
-  const localDevPort = assignPort(tree, project, 8081);
+  // A2A servers use port 9000 as per the Strands A2A SDK default and AgentCore A2A contract.
+  // HTTP agents use port 8081+ to avoid conflict with VS Code server on 8080.
+  const localDevPortStart = protocol === 'A2A' ? 9000 : 8081;
+  const localDevPort = assignPort(tree, project, localDevPortStart);
+
+  // Both protocols use fastapi dev for hot reload:
+  // - HTTP: FastAPI app directly defined in init.py
+  // - A2A: A2AServer.to_fastapi_app() creates a FastAPI app in main.py
+  const serveCommand = `uv run fastapi dev ${moduleName}/${agentNameSnakeCase}/main.py --port ${localDevPort}`;
 
   updateProjectConfiguration(tree, project.name, {
     ...project,
@@ -178,21 +199,21 @@ export const pyStrandsAgentGenerator = async (
       [`${agentTargetPrefix}-serve`]: {
         executor: 'nx:run-commands',
         options: {
-          commands: [
-            `uv run fastapi dev ${moduleName}/${agentNameSnakeCase}/main.py --port ${localDevPort}`,
-          ],
+          commands: [serveCommand],
           cwd: '{projectRoot}',
+          env: {
+            PORT: `${localDevPort}`,
+          },
         },
         continuous: true,
       },
       [`${agentTargetPrefix}-serve-local`]: {
         executor: 'nx:run-commands',
         options: {
-          commands: [
-            `uv run fastapi dev ${moduleName}/${agentNameSnakeCase}/main.py --port ${localDevPort}`,
-          ],
+          commands: [serveCommand],
           cwd: '{projectRoot}',
           env: {
+            PORT: `${localDevPort}`,
             SERVE_LOCAL: 'true',
           },
         },
@@ -211,6 +232,7 @@ export const pyStrandsAgentGenerator = async (
       port: localDevPort,
       rc: agentNameClassName,
       auth,
+      protocol,
     },
   );
 

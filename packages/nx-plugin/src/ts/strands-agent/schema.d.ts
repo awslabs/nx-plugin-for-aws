@@ -6,6 +6,7 @@
 import { IacProviderOption } from '../../utils/iac';
 
 export type TsStrandsAgentComputeType = 'BedrockAgentCoreRuntime' | 'None';
+export type StrandsAgentProtocol = 'HTTP' | 'A2A';
 
 export type TsStrandsAgentAuth = 'IAM' | 'Cognito';
 
@@ -14,5 +15,6 @@ export interface TsStrandsAgentGeneratorSchema {
   name?: string;
   computeType?: TsStrandsAgentComputeType;
   auth?: TsStrandsAgentAuth;
+  protocol?: StrandsAgentProtocol;
   iacProvider: IacProviderOption;
 }

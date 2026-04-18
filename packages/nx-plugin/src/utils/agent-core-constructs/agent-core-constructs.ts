@@ -30,7 +30,7 @@ export interface AddAgentCoreInfraProps {
   projectName: string;
   dockerImageTag: string;
   appDirectory: string;
-  serverProtocol: 'MCP' | 'HTTP';
+  serverProtocol: 'MCP' | 'HTTP' | 'A2A';
   auth: AgentCoreAuth;
 }
 
@@ -75,7 +75,10 @@ const addAgentCoreInfra = async (
   );
 };
 
-const addAgentCoreCDKInfra = async (tree: Tree, options: AddAgentCoreInfraProps) => {
+const addAgentCoreCDKInfra = async (
+  tree: Tree,
+  options: AddAgentCoreInfraProps,
+) => {
   // Add dependency on bedrock agentcore alpha package
   addDependenciesToPackageJson(
     tree,
@@ -198,10 +201,11 @@ export interface AddAgentInfraProps {
   projectName: string;
   dockerImageTag: string;
   auth: AgentCoreAuth;
+  serverProtocol?: 'HTTP' | 'A2A';
 }
 
 /**
- * Add an MCP server CDK construct
+ * Add an agent CDK construct
  */
 export const addAgentInfra = async (
   tree: Tree,
@@ -213,7 +217,7 @@ export const addAgentInfra = async (
     projectName: options.projectName,
     dockerImageTag: options.dockerImageTag,
     appDirectory: 'agents',
-    serverProtocol: 'HTTP',
+    serverProtocol: options.serverProtocol ?? 'HTTP',
     iacProvider: options.iacProvider,
     auth: options.auth,
   });

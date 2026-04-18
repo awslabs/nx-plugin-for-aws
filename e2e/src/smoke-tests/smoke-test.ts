@@ -121,6 +121,24 @@ export const runSmokeTest = async (
     `generate @aws/nx-plugin:ts#strands-agent --project=ts-project --computeType=BedrockAgentCoreRuntime --no-interactive`,
     opts,
   );
+  // Generate A2A protocol agents for both TypeScript and Python.
+  await runCLI(
+    `generate @aws/nx-plugin:ts#strands-agent --project=ts-project --name=my-ts-a2a-agent --protocol=A2A --computeType=BedrockAgentCoreRuntime --no-interactive`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:py#strands-agent --project=py_project --name=my-py-a2a-agent --protocol=A2A --computeType=BedrockAgentCoreRuntime --no-interactive`,
+    opts,
+  );
+  // Cognito-auth variants to cover the A2A + Cognito permutation for schema/build coverage.
+  await runCLI(
+    `generate @aws/nx-plugin:ts#strands-agent --project=ts-project --name=my-ts-a2a-agent-cognito --protocol=A2A --auth=Cognito --computeType=BedrockAgentCoreRuntime --no-interactive`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:py#strands-agent --project=py_project --name=my-py-a2a-agent-cognito --protocol=A2A --auth=Cognito --computeType=BedrockAgentCoreRuntime --no-interactive`,
+    opts,
+  );
   await runCLI(
     `generate @aws/nx-plugin:connection --sourceProject=website --targetProject=py_api --no-interactive`,
     opts,
