@@ -35,7 +35,7 @@
 Add the MCP server to your AI assistant and let it build for you.
 
 ```bash
-npx -y @aws/nx-plugin-mcp
+claude mcp add nx-plugin-for-aws -- npx -y @aws/nx-plugin-mcp
 ```
 
 <details>
