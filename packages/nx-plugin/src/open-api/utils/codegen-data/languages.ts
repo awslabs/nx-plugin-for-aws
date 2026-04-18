@@ -84,15 +84,42 @@ export const toTypeScriptModelName = (name: string): string => {
     : candidateName;
 };
 
+/** Set of Python types that are built-ins and do not need forward-ref quoting. */
+const PYTHON_BUILTIN_TYPES = new Set([
+  'str',
+  'int',
+  'float',
+  'bool',
+  'bytes',
+  'None',
+  'Any',
+  'datetime.date',
+  'datetime.datetime',
+]);
+
+/**
+ * Returns true if the given python type name is a built-in (not a user-defined
+ * model).
+ */
+export const isPythonBuiltin = (type: string): boolean => {
+  if (!type) return true;
+  if (PYTHON_BUILTIN_TYPES.has(type)) return true;
+  if (type.startsWith('list[') || type.startsWith('dict[')) return true;
+  if (type.startsWith('Optional[') || type.startsWith('Union[')) return true;
+  return false;
+};
+
 const toPythonPrimitive = (property: Model): string => {
   if (property.type === 'string' && property.format === 'date') {
-    return 'date';
+    return 'datetime.date';
   } else if (property.type === 'string' && property.format === 'date-time') {
-    return 'datetime';
-  } else if (property.type === 'any') {
-    return 'object';
+    return 'datetime.datetime';
+  } else if (property.type === 'any' || property.type === 'unknown') {
+    return 'Any';
   } else if (property.type === 'binary') {
-    return 'bytearray';
+    return 'bytes';
+  } else if (property.type === 'null' || property.type === 'void') {
+    return 'None';
   } else if (property.type === 'number') {
     if ((property as any).openapiType === 'integer') {
       return 'int';
@@ -107,6 +134,8 @@ const toPythonPrimitive = (property: Model): string => {
       default:
         return 'float';
     }
+  } else if (property.type === 'integer') {
+    return 'int';
   } else if (property.type === 'boolean') {
     return 'bool';
   } else if (property.type === 'string') {
@@ -116,8 +145,32 @@ const toPythonPrimitive = (property: Model): string => {
 };
 
 /**
- * Return the python type for a given property
+ * Return the idiomatic Python type for a given property.
+ *
+ * Uses PEP-585 lower-case generics (`list[...]`, `dict[str, ...]`), fully-
+ * qualified stdlib types (`datetime.date`, `datetime.datetime`), and `bytes`
+ * for binary payloads.  Model references are returned as bare class names —
+ * callers that emit the type inside a class body (where the class isn't yet
+ * defined) should use `toPythonAnnotation` instead to get forward-ref quoting.
  */
+/**
+ * Resolve the element type of a collection model.  Prefers the link's
+ * already-computed `pythonType` if the link was mutated first, since
+ * model mutation order isn't guaranteed to walk links before their
+ * parents.
+ */
+const collectionElementType = (
+  property: Model,
+  link: Model | undefined,
+): string => {
+  if (link && link.export !== 'enum') {
+    const precomputed = (link as any).pythonType as string | undefined;
+    if (precomputed) return precomputed;
+    return toPythonType(link);
+  }
+  return toPythonPrimitive({ ...property, type: property.type } as Model);
+};
+
 export const toPythonType = (property: Model): string => {
   const propertyLink = flattenModelLink(property.link);
   switch (property.export) {
@@ -125,9 +178,9 @@ export const toPythonType = (property: Model): string => {
     case 'reference':
       return toPythonPrimitive(property);
     case 'array':
-      return `List[${propertyLink && propertyLink.export !== 'enum' ? toPythonType(propertyLink) : property.type}]`;
+      return `list[${collectionElementType(property, propertyLink)}]`;
     case 'dictionary':
-      return `Dict[str, ${propertyLink && propertyLink.export !== 'enum' ? toPythonType(propertyLink) : property.type}]`;
+      return `dict[str, ${collectionElementType(property, propertyLink)}]`;
     case 'one-of':
     case 'any-of':
     case 'all-of':
@@ -139,6 +192,71 @@ export const toPythonType = (property: Model): string => {
       }
       return property.type;
   }
+};
+
+/**
+ * Prefix every user-defined (non-builtin) name in a python type string with
+ * the given namespace (e.g. `"types_gen."`) so the caller can reference
+ * model references through a single import.  Walks nested `list[...]`,
+ * `dict[str, ...]`, `Optional[...]` and `Union[...]` structures.
+ *
+ * Example: `qualifyPythonType('list[Pet]', 'types_gen.')` → `'list[types_gen.Pet]'`.
+ */
+export const qualifyPythonType = (
+  type: string | undefined,
+  prefix: string,
+): string => {
+  if (!type) return 'Any';
+  if (PYTHON_BUILTIN_TYPES.has(type)) return type;
+  const list = /^list\[(.*)\]$/s.exec(type);
+  if (list) return `list[${qualifyPythonType(list[1], prefix)}]`;
+  const dict = /^dict\[str, (.*)\]$/s.exec(type);
+  if (dict) return `dict[str, ${qualifyPythonType(dict[1], prefix)}]`;
+  if (type.startsWith('Optional[') || type.startsWith('Union[')) return type;
+  return `${prefix}${type}`;
+};
+
+/**
+ * Same as `toPythonType`, but wraps user-defined (non-builtin) types in
+ * forward-ref string quotes so they can be used inside class bodies before
+ * the referenced class is defined.  Collections recursively forward-quote.
+ */
+export const toPythonAnnotation = (property: Model): string => {
+  const render = (p: Model): string => {
+    const link = flattenModelLink(p.link);
+    switch (p.export) {
+      case 'generic':
+      case 'reference': {
+        const rendered = toPythonPrimitive(p);
+        return isPythonBuiltin(rendered) ? rendered : `"${rendered}"`;
+      }
+      case 'array': {
+        const inner =
+          link && link.export !== 'enum'
+            ? render(link)
+            : toPythonPrimitive(p as Model);
+        return `list[${inner}]`;
+      }
+      case 'dictionary': {
+        const inner =
+          link && link.export !== 'enum'
+            ? render(link)
+            : toPythonPrimitive(p as Model);
+        return `dict[str, ${inner}]`;
+      }
+      case 'one-of':
+      case 'any-of':
+      case 'all-of':
+        return `"${p.name}"`;
+      default:
+        if (p.type === 'unknown' || p.type === 'any') return 'Any';
+        if (PRIMITIVE_TYPES.has(p.type)) {
+          return toPythonPrimitive(p);
+        }
+        return isPythonBuiltin(p.type) ? p.type : `"${p.type}"`;
+    }
+  };
+  return render(property);
 };
 
 // @see https://github.com/OpenAPITools/openapi-generator/blob/e2a62ace74de361bef6338b7fa37da8577242aef/modules/openapi-generator/src/main/java/org/openapitools/codegen/languages/AbstractPythonCodegen.java#L106

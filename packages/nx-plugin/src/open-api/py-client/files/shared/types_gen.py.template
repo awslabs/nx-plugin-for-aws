@@ -1,0 +1,206 @@
+<%_
+const pyEnumValue = (member) => {
+  if (typeof member.value === 'string') return `"${member.value.replace(/"/g, '\\"')}"`;
+  if (member.value === null) return 'None';
+  return String(member.value);
+};
+const fieldAnnotation = (prop) => {
+  let base;
+  if (prop.isEnum && Array.isArray(prop.enum) && prop.enum.length > 0) {
+    base = `Literal[${prop.enum.map(pyEnumValue).join(', ')}]`;
+  } else {
+    base = prop.pythonAnnotation || prop.pythonType || 'Any';
+  }
+  if (!prop.isRequired || prop.isNullable) return `Optional[${base}]`;
+  return base;
+};
+const stripQuotes = (t) => (t || '').replace(/^"(.*)"$/, '$1');
+
+/**
+ * Render a pydantic `Field(...)` call for a model property — alias, default,
+ * description, deprecated, frozen.  Returns null when no Field(...) is needed
+ * so the template can emit a bare `name: T` or `name: T = None`.
+ */
+const fieldCallFor = (property) => {
+  const snake = property.pythonName || property.name;
+  const aliasNeeded = snake !== property.name;
+  const args = [];
+  const needsDefault = !property.isRequired || property.isNullable;
+  if (needsDefault) args.push('default=None');
+  if (aliasNeeded) args.push(`alias="${property.name}"`);
+  if (property.description) {
+    const desc = property.description.replace(/"/g, "'").replace(/\n/g, ' ');
+    args.push(`description="${desc}"`);
+  }
+  if (property.isReadOnly) args.push('frozen=True');
+  if (property.deprecated) args.push('deprecated=True');
+  // Only emit Field(...) if something beyond a bare type annotation is needed.
+  if (args.length === 0) return null;
+  // If the only argument is default=None and there is no alias/desc/frozen/deprecated,
+  // prefer the shorter `= None` form.
+  if (args.length === 1 && args[0] === 'default=None') return null;
+  return `Field(${args.join(', ')})`;
+};
+
+const renderProperty = (property) => {
+  const snake = property.pythonName || property.name;
+  const typeAnnotation = fieldAnnotation(property);
+  const fieldCall = fieldCallFor(property);
+  const needsDefault = !property.isRequired || property.isNullable;
+  if (fieldCall) {
+    return `    ${snake}: ${typeAnnotation} = ${fieldCall}`;
+  }
+  if (needsDefault) {
+    return `    ${snake}: ${typeAnnotation} = None`;
+  }
+  return `    ${snake}: ${typeAnnotation}`;
+};
+_%>
+"""Types for <%- className %> — AUTO-GENERATED, do not edit."""
+
+from __future__ import annotations
+
+import datetime
+from typing import Any, Literal, Never, Optional, TypedDict, Union
+
+from pydantic import BaseModel, ConfigDict, Field
+
+<%_ models.forEach((model) => {
+  if (model.isInlinedByAllOf) return;
+  const isComposite = model.export === 'one-of' || model.export === 'any-of' || model.export === 'all-of';
+  const isEnum = model.export === 'enum';
+  const isDictionary = model.export === 'dictionary';
+  const isArray = model.export === 'array';
+_%>
+
+<%_ if (isEnum) { _%>
+<%- model.typescriptName %> = Literal[<%_ model.enum.forEach((m, i) => { _%><%- i > 0 ? ', ' : '' %><%- pyEnumValue(m) %><%_ }); _%>]
+<%_ if (model.description || model.deprecated) { _%>
+"""<%- (model.description || '').replace(/"/g, "'") %><%- model.deprecated ? ' (deprecated)' : '' %>"""
+<%_ } _%>
+<%_ } else if (isComposite) { _%>
+<%_ if (model.export === 'all-of') {
+  const flattened = [];
+  const seen = new Set();
+  for (const c of (model.composedModels || [])) {
+    for (const p of (c.properties || [])) {
+      if (seen.has(p.name)) continue;
+      seen.add(p.name);
+      flattened.push(p);
+    }
+  }
+_%>
+class <%- model.typescriptName %>(BaseModel):
+<%_ if (model.description || model.deprecated) { _%>
+    """<%- (model.description || '').replace(/"/g, "'") %><%- model.deprecated ? ' (deprecated)' : '' %>"""
+<%_ } _%>
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+<%_ if (flattened.length === 0) { _%>
+    pass
+<%_ } _%>
+<%_ flattened.forEach((property) => { _%>
+<%- renderProperty(property) %>
+<%_ }); _%>
+<%_ } else { _%>
+<%- model.typescriptName %> = Union[<%_ model.properties.forEach((p, i) => { _%><%- i > 0 ? ', ' : '' %><%- p.pythonAnnotation || p.pythonType || 'Any' %><%_ }); _%>]
+<%_ if (model.description || model.deprecated) { _%>
+"""<%- (model.description || '').replace(/"/g, "'") %><%- model.deprecated ? ' (deprecated)' : '' %>"""
+<%_ } _%>
+<%_ } _%>
+<%_ } else if (isDictionary) { _%>
+<%- model.typescriptName %> = <%- model.pythonAnnotation || model.pythonType %>
+<%_ if (model.description || model.deprecated) { _%>
+"""<%- (model.description || '').replace(/"/g, "'") %><%- model.deprecated ? ' (deprecated)' : '' %>"""
+<%_ } _%>
+<%_ } else if (isArray) { _%>
+<%- model.typescriptName %> = <%- model.pythonAnnotation || model.pythonType %>
+<%_ if (model.description || model.deprecated) { _%>
+"""<%- (model.description || '').replace(/"/g, "'") %><%- model.deprecated ? ' (deprecated)' : '' %>"""
+<%_ } _%>
+<%_ } else { _%>
+class <%- model.typescriptName %>(BaseModel):
+<%_ if (model.description || model.deprecated) { _%>
+    """<%- (model.description || '').replace(/"/g, "'") %><%- model.deprecated ? ' (deprecated)' : '' %>"""
+<%_ } _%>
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+<%_ if ((model.properties || []).length === 0 && !model.hasAdditionalProperties) { _%>
+    pass
+<%_ } _%>
+<%_ (model.properties || []).forEach((property) => { _%>
+<%- renderProperty(property) %>
+<%_ }); _%>
+<%_ } _%>
+<%_ }); _%>
+<%_ // ────── Per-operation request TypedDicts ────── _%>
+<%_ allOperations.forEach((op) => { _%>
+<%_ if (op.parameters && op.parameters.length > 0) { _%>
+<%_ const required = op.parameters.filter(p => p.isRequired); _%>
+<%_ const optional = op.parameters.filter(p => !p.isRequired); _%>
+<%_ if (required.length > 0 && optional.length === 0) { _%>
+
+class <%- op.requestTypeName %>(TypedDict):
+<%_ if (op.description || op.summary) { _%>
+    """<%- (op.description || op.summary).replace(/"/g, "'") %>"""
+<%_ } _%>
+<%_ op.parameters.forEach((p) => { _%>
+    <%- p.pythonName %>: <%- p.pythonAnnotation || p.pythonType || 'Any' %>
+<%_ }); _%>
+<%_ } else if (required.length === 0) { _%>
+
+class <%- op.requestTypeName %>(TypedDict, total=False):
+<%_ if (op.description || op.summary) { _%>
+    """<%- (op.description || op.summary).replace(/"/g, "'") %>"""
+<%_ } _%>
+<%_ op.parameters.forEach((p) => { _%>
+    <%- p.pythonName %>: <%- p.pythonAnnotation || p.pythonType || 'Any' %>
+<%_ }); _%>
+<%_ } else { _%>
+
+class <%- op.requestTypeName %>Required(TypedDict):
+<%_ required.forEach((p) => { _%>
+    <%- p.pythonName %>: <%- p.pythonAnnotation || p.pythonType || 'Any' %>
+<%_ }); _%>
+
+
+class <%- op.requestTypeName %>(<%- op.requestTypeName %>Required, total=False):
+<%_ if (op.description || op.summary) { _%>
+    """<%- (op.description || op.summary).replace(/"/g, "'") %>"""
+<%_ } _%>
+<%_ optional.forEach((p) => { _%>
+    <%- p.pythonName %>: <%- p.pythonAnnotation || p.pythonType || 'Any' %>
+<%_ }); _%>
+<%_ } _%>
+<%_ } _%>
+<%_ }); _%>
+<%_ // ────── Per-operation error taxonomy ────── _%>
+<%_ allOperations.forEach((op) => {
+  const shape = op.errorShape;
+  if (!shape || shape.entries.length === 0) {
+_%>
+
+<%- op.operationIdPascalCase %>Error = Never
+<%_
+  } else {
+_%>
+<%_ shape.entries.forEach((entry) => {
+  // Inside types_gen.py the error type is defined locally; strip the client
+  // module's `types_gen.` prefix the response model's pythonClientType carries.
+  const payloadType = entry.responseModel.type === 'void'
+    ? 'None'
+    : (entry.responseModel.pythonClientType || 'Any').replace(/\btypes_gen\./g, '');
+_%>
+
+class <%- entry.className %>(BaseModel):
+    """Error wrapper for <%- op.operationIdPascalCase %> status <%- entry.code %>."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    status: <%- entry.statusAnnotation %>
+    error: <%- payloadType %>
+<%_ }); _%>
+
+<%- op.operationIdPascalCase %>Error = <% if (shape.entries.length === 1) { %><%- shape.entries[0].className %><% } else { %>Union[<%_ shape.entries.forEach((e, i) => { _%><%- i > 0 ? ', ' : '' %><%- e.className %><%_ }); _%>]<% } %>
+<%_ } _%>
+<%_ }); _%>
