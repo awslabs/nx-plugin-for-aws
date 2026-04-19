@@ -482,5 +482,16 @@ class MyClass implements SomeInterface {
       expect(await matchGritQL(tree, 'file.ts', '`SomeInterface`')).toBe(true);
       expect(await matchGritQL(tree, 'file.ts', '`OtherClass`')).toBe(false);
     });
+
+    it('should support patterns prefixed with a language header', async () => {
+      tree.write('file.py', `def greet():\n    print("hello")\n`);
+
+      expect(
+        await matchGritQL(tree, 'file.py', 'language python\n`print($msg)`'),
+      ).toBe(true);
+      expect(
+        await matchGritQL(tree, 'file.py', 'language python\n`unused($msg)`'),
+      ).toBe(false);
+    });
   });
 });

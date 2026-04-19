@@ -160,6 +160,10 @@ export const applyGritQL = async (
 /**
  * Check whether a GritQL pattern matches anywhere in a file.
  * Returns true if the pattern matches at least once.
+ *
+ * Accepts raw GritQL, including patterns that start with a `language <name>`
+ * header (e.g. `language python\n\`print($_)\``) — the pattern is passed
+ * straight through to QueryBuilder without any wrapping rewrite.
  */
 export const matchGritQL = async (
   tree: Tree,
@@ -168,17 +172,16 @@ export const matchGritQL = async (
 ): Promise<boolean> => {
   if (!tree.exists(filePath)) return false;
   const source = tree.read(filePath)!.toString();
+  let matched = false;
   try {
-    // Use a metavariable rewrite to check for matches — $p is constrained to
-    // the caller's pattern and rewritten to itself, avoiding rendering the
-    // pattern string twice in the query.
-    const query = new QueryBuilder(`$p => $p where { $p <: ${pattern} }`);
-    const result = await query.applyToFile({
-      path: filePath,
-      content: source,
+    const query = new QueryBuilder(pattern);
+    query.filter(() => {
+      matched = true;
+      return true;
     });
-    return result !== null;
+    await query.applyToFile({ path: filePath, content: source });
   } catch {
     return false;
   }
+  return matched;
 };
