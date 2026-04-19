@@ -14,12 +14,12 @@ export default async function () {
       rmSync(registryPath, { force: true, recursive: true });
     }
 
-    // Configure package manager retry settings to handle transient registry failures.
-    // npm and pnpm both respect npm_config_* environment variables.
-    process.env.npm_config_fetch_retries = '5';
-    process.env.npm_config_fetch_retry_mintimeout = '15000';
-    process.env.npm_config_fetch_retry_maxtimeout = '90000';
-    // Yarn berry
+    // Yarn and bun both retry on any non-2xx response, so bumping these helps
+    // smooth over transient 5xx/timeouts from the Verdaccio uplink.
+    // pnpm/npm do NOT retry 404s (see pnpm/network/fetch/src/fetch.ts — only
+    // 500–599, 408, 409, 420, 429 are retried), so there's no equivalent knob
+    // to set for them; that failure mode is addressed at the Verdaccio layer
+    // in .verdaccio/config.yml.
     process.env.YARN_HTTP_RETRY = '5';
     process.env.YARN_HTTP_TIMEOUT = '90000';
 
