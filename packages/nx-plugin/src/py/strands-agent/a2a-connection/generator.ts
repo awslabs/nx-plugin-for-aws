@@ -11,7 +11,7 @@ import {
   joinPathFragments,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { PyStrandsAgentMcpConnectionGeneratorSchema } from './schema';
+import { PyStrandsAgentA2aConnectionGeneratorSchema } from './schema';
 import {
   NxGeneratorInfo,
   getGeneratorInfo,
@@ -41,12 +41,12 @@ import {
 /** Prefix a GritQL pattern with `language python` */
 const py = (pattern: string) => `language python\n${pattern}`;
 
-export const PY_STRANDS_AGENT_MCP_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
+export const PY_STRANDS_AGENT_A2A_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
 
-export const pyStrandsAgentMcpConnectionGenerator = async (
+export const pyStrandsAgentA2aConnectionGenerator = async (
   tree: Tree,
-  options: PyStrandsAgentMcpConnectionGeneratorSchema,
+  options: PyStrandsAgentA2aConnectionGeneratorSchema,
 ): Promise<GeneratorCallback> => {
   const sourceProject = readProjectConfigurationUnqualified(
     tree,
@@ -58,41 +58,46 @@ export const pyStrandsAgentMcpConnectionGenerator = async (
   );
 
   const agentComponent = options.sourceComponent;
-  const mcpComponent = options.targetComponent;
+  const targetAgentComponent = options.targetComponent;
 
-  if (!agentComponent || !mcpComponent) {
+  if (!agentComponent || !targetAgentComponent) {
     throw new Error(
-      'Both sourceComponent and targetComponent must be provided for py#strands-agent -> mcp connections',
+      'Both sourceComponent and targetComponent must be provided for py#strands-agent -> a2a connections',
     );
   }
 
-  if (mcpComponent.auth && mcpComponent.auth !== 'IAM') {
+  if (targetAgentComponent.protocol !== 'A2A') {
     throw new Error(
-      `MCP server connection currently only supports IAM authentication, but '${mcpComponent.name}' uses '${mcpComponent.auth}' authentication.`,
+      `Target agent '${targetAgentComponent.name}' uses the ${targetAgentComponent.protocol ?? 'HTTP'} protocol — only A2A agents can be connected as tools.`,
     );
   }
 
-  const mcpComponentName = mcpComponent.name ?? 'mcp-server';
-  const mcpServerClassName = mcpComponent.rc as string;
-  const mcpServerSnakeCase = snakeCase(mcpServerClassName);
-  const mcpServerPort = mcpComponent.port ?? 8000;
+  if (targetAgentComponent.auth && targetAgentComponent.auth !== 'IAM') {
+    throw new Error(
+      `A2A agent connection currently only supports IAM authentication, but '${targetAgentComponent.name}' uses '${targetAgentComponent.auth}' authentication.`,
+    );
+  }
+
+  const targetAgentComponentName = targetAgentComponent.name ?? 'agent';
+  const targetAgentClassName = targetAgentComponent.rc as string;
+  const targetAgentSnakeCase = snakeCase(targetAgentClassName);
+  const targetAgentPort = targetAgentComponent.port ?? 9000;
 
   // 1. Ensure the shared Python agent-connection project exists + has the
-  //    MCP core client and its shared SigV4 auth helper.
+  //    A2A core client and its shared SigV4 auth helper.
   await ensurePythonAgentConnectionProject(tree);
   addPythonCoreClient(tree, 'auth');
-  addPythonCoreClient(tree, 'mcp');
+  addPythonCoreClient(tree, 'a2a');
 
   const agentConnectionProjectDir = getPythonAgentConnectionProjectDir(tree);
   const agentConnectionModuleName = getPythonAgentConnectionModuleName(tree);
   const agentConnectionPackageName = getPythonAgentConnectionPackageName(tree);
 
-  // Python deps required by the MCP core client + shared auth helper.
+  // Python deps required by the A2A core client + shared auth helper.
   addDependenciesToPyProjectToml(tree, agentConnectionProjectDir, [
     'boto3',
     'httpx',
-    'mcp',
-    'strands-agents',
+    'strands-agents[a2a]',
   ]);
 
   // 2. Generate the per-connection client into the shared agent-connection project
@@ -106,9 +111,9 @@ export const pyStrandsAgentMcpConnectionGenerator = async (
     joinPathFragments(__dirname, 'files', 'agent-connection', 'app'),
     appDir,
     {
-      mcpServerSnakeCase,
-      mcpServerClassName,
-      mcpServerPort,
+      targetAgentSnakeCase,
+      targetAgentClassName,
+      targetAgentPort,
       agentConnectionModuleName,
     },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
@@ -129,11 +134,11 @@ export const pyStrandsAgentMcpConnectionGenerator = async (
   await addPythonReExport(
     tree,
     moduleInitPath,
-    `.app.${mcpServerSnakeCase}_client`,
-    `${mcpServerClassName}Client`,
+    `.app.${targetAgentSnakeCase}_client`,
+    `${targetAgentClassName}Client`,
   );
 
-  // 3. Transform agent.py to add MCP client import and usage
+  // 3. Transform agent.py to add the A2A client import + wrap it as a tool
   const agentSourceDir = joinPathFragments(
     sourceProject.root,
     agentComponent.path ?? 'src',
@@ -141,8 +146,9 @@ export const pyStrandsAgentMcpConnectionGenerator = async (
   const agentFilePath = joinPathFragments(agentSourceDir, 'agent.py');
 
   if (tree.exists(agentFilePath)) {
-    const clientClassName = `${mcpServerClassName}Client`;
-    const clientVarName = mcpServerSnakeCase;
+    const clientClassName = `${targetAgentClassName}Client`;
+    const clientVarName = targetAgentSnakeCase;
+    const toolName = `ask_${targetAgentSnakeCase}`;
 
     await addImportToAgentFile(
       tree,
@@ -150,12 +156,14 @@ export const pyStrandsAgentMcpConnectionGenerator = async (
       agentConnectionModuleName,
       clientClassName,
     );
-    await addMcpToolsToAgent(tree, agentFilePath, clientVarName);
-    await addMcpClientToGetAgent(
+    await addToolToAgent(tree, agentFilePath, toolName);
+    await addClientToolToGetAgent(
       tree,
       agentFilePath,
       clientClassName,
       clientVarName,
+      toolName,
+      targetAgentClassName,
     );
   }
 
@@ -166,10 +174,10 @@ export const pyStrandsAgentMcpConnectionGenerator = async (
     agentConnectionPackageName,
   );
 
-  // 5. Set up serve-local target dependencies
+  // 5. Set up serve-local target dependencies — chain onto the target agent
   const agentName = agentComponent.name ?? 'agent';
   const serveLocalTargetName = `${agentName}-serve-local`;
-  const mcpServeLocalTargetName = `${mcpComponentName}-serve-local`;
+  const targetServeLocalTargetName = `${targetAgentComponentName}-serve-local`;
 
   if (sourceProject.targets?.[serveLocalTargetName]) {
     const target = sourceProject.targets[serveLocalTargetName];
@@ -177,14 +185,14 @@ export const pyStrandsAgentMcpConnectionGenerator = async (
       ...(target.dependsOn ?? []),
       {
         projects: [targetProject.name],
-        target: mcpServeLocalTargetName,
+        target: targetServeLocalTargetName,
       },
     ];
     updateProjectConfiguration(tree, sourceProject.name, sourceProject);
   }
 
   await addGeneratorMetricsIfApplicable(tree, [
-    PY_STRANDS_AGENT_MCP_CONNECTION_GENERATOR_INFO,
+    PY_STRANDS_AGENT_A2A_CONNECTION_GENERATOR_INFO,
   ]);
 
   await formatFilesInSubtree(tree);
@@ -194,11 +202,9 @@ export const pyStrandsAgentMcpConnectionGenerator = async (
 };
 
 /**
- * Add an import for the MCP client class to agent.py.
- *
- * Delegates to the shared `addPythonDestructuredImport` helper which either
- * appends to an existing `from <module> import ...` line or prepends a new
- * import statement (ruff sorts imports on the next format pass).
+ * Add imports to agent.py:
+ *  - `tool` from `strands`
+ *  - the per-connection client class from the shared agent-connection module
  */
 const addImportToAgentFile = async (
   tree: Tree,
@@ -206,6 +212,7 @@ const addImportToAgentFile = async (
   agentConnectionModuleName: string,
   clientClassName: string,
 ): Promise<void> => {
+  await addPythonDestructuredImport(tree, filePath, ['tool'], 'strands');
   await addPythonDestructuredImport(
     tree,
     filePath,
@@ -215,93 +222,76 @@ const addImportToAgentFile = async (
 };
 
 /**
- * Add MCP tools to the Agent's tools array using GritQL.
- * Appends `*<clientVarName>.list_tools_sync()` to the tools list.
- * Handles both empty and non-empty arrays using if/else.
+ * Add the A2A tool to the Agent's tools array using GritQL.
+ *
+ * Scoped via `$old <: within \`yield Agent($_)\`` so unrelated `tools=`
+ * keyword arguments elsewhere in the file are not touched.
  */
-const addMcpToolsToAgent = async (
+const addToolToAgent = async (
   tree: Tree,
   filePath: string,
-  clientVarName: string,
+  toolName: string,
 ): Promise<void> => {
-  if (
-    await matchGritQL(tree, filePath, `\`${clientVarName}.list_tools_sync()\``)
-  ) {
-    return;
-  }
-
   await applyGritQL(
     tree,
     filePath,
     py(`\`tools=$old\` where {
-  $old <: not contains \`${clientVarName}\`,
+  $old <: within \`yield Agent($_)\`,
+  $old <: not contains \`${toolName}\`,
   if ($old <: \`[]\`) {
-    $old => \`[*${clientVarName}.list_tools_sync()]\`
+    $old => \`[${toolName}]\`
   } else {
-    $old <: \`[$items]\` where { $items += \`, *${clientVarName}.list_tools_sync()\` }
+    $old <: \`[$items]\` where { $items += \`, ${toolName}\` }
   }
 }`),
   );
 };
 
 /**
- * Add MCP client creation and with-block wrapping to the get_agent function
- * using GritQL transforms.
+ * Wrap the get_agent body so the remote A2A client is created and exposed
+ * as a `@tool`-decorated closure before yielding the Agent.
  *
- * First connection: Rewrites `def get_agent` to wrap $body in a with block.
- * Subsequent connections: Uses += to add to existing with items and creation lines.
+ * Unlike MCP clients, A2A clients aren't context managers — we don't need
+ * a `with` block around them. Creation + tool definition happen at the
+ * top of the function body.
  */
-const addMcpClientToGetAgent = async (
+const addClientToolToGetAgent = async (
   tree: Tree,
   filePath: string,
   clientClassName: string,
   clientVarName: string,
+  toolName: string,
+  targetAgentClassName: string,
 ): Promise<void> => {
-  if (await matchGritQL(tree, filePath, `\`${clientClassName}.create($_)\``)) {
+  if (await matchGritQL(tree, filePath, `\`${clientClassName}.create\``)) {
     return;
   }
 
-  // Try the "add to existing with block" pattern first.
-  // If it succeeds, there was already a with block from a previous connection.
-  const addedToWith = await applyGritQL(
-    tree,
-    filePath,
-    py(`\`with ($items,): $body\` where {
-  $items <: not contains \`${clientVarName}\`,
-  $items += \`, ${clientVarName}\`
-}`),
-  );
+  // The tool function we'll insert. Strands tools in Python are just
+  // @tool-decorated callables, so we define them inline in get_agent.
+  // A2AAgent is directly callable (syncs over invoke_async internally).
+  const toolBlock = `${clientVarName} = ${clientClassName}.create(session_id=session_id)
 
-  if (addedToWith) {
-    // Subsequent connection — also add creation line after the existing one
-    await applyGritQL(
-      tree,
-      filePath,
-      py(`\`$var = $cls.create(session_id=session_id)\` as $stmt where {
-  $program <: not contains \`${clientClassName}.create\`,
-  $stmt += \`\n${clientVarName} = ${clientClassName}.create(session_id=session_id)\`
-}`),
-    );
-    return;
-  }
+    @tool
+    def ${toolName}(prompt: str) -> str:
+        """Delegate a question to the remote ${targetAgentClassName} A2A agent and return its reply."""
+        return str(${clientVarName}(prompt))
+`;
 
-  // First connection — rewrite the function body to include client creation
-  // and wrap $body in a with block. GritQL handles indentation correctly
-  // when the replacement is structured as a proper Python function body.
+  // Prepend client creation + tool definition to the function body.
+  // This works whether or not a prior MCP `with` block is present since we
+  // insert before any existing statements.
   await applyGritQL(
     tree,
     filePath,
     py(`\`def get_agent($params):
     $body\` where {
   $body <: contains \`yield Agent($_)\`,
-  $body <: not contains \`with ($_, ): $_\`
+  $body <: not contains \`${clientClassName}.create\`
 } => \`def get_agent($params):
-    ${clientVarName} = ${clientClassName}.create(session_id=session_id)
-    with (
-        ${clientVarName},
-    ):
-        $body\``),
+    ${toolBlock}
+    $body\``),
   );
 };
 
-export default pyStrandsAgentMcpConnectionGenerator;
+export default pyStrandsAgentA2aConnectionGenerator;

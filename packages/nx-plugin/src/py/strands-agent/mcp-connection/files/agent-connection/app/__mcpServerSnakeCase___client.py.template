@@ -1,11 +1,12 @@
 import os
 
-from aws_lambda_powertools.utilities import parameters
-from botocore.config import Config
 from mcp.client.streamable_http import streamablehttp_client
 from strands.tools.mcp.mcp_client import MCPClient
 
 from <%- agentConnectionModuleName %>.core.agentcore_mcp_client import AgentCoreMCPClient
+from <%- agentConnectionModuleName %>.core.runtime_config import (
+    get_connected_agent_runtime_arn,
+)
 
 
 class <%- mcpServerClassName %>Client:
@@ -23,23 +24,7 @@ class <%- mcpServerClassName %>Client:
         if os.environ.get("SERVE_LOCAL") == "true":
             return MCPClient(lambda: streamablehttp_client("http://localhost:<%- mcpServerPort %>/mcp"))
 
-        arn = <%- mcpServerClassName %>Client._get_arn()
         return AgentCoreMCPClient.with_iam_auth(
-            agent_runtime_arn=arn,
+            agent_runtime_arn=get_connected_agent_runtime_arn("<%- mcpServerClassName %>"),
             session_id=session_id,
         )
-
-    @staticmethod
-    def _get_arn() -> str:
-        """Resolve the <%- mcpServerClassName %> ARN from runtime config (AppConfig)."""
-        region = os.environ.get("AWS_REGION", os.environ.get("AWS_DEFAULT_REGION"))
-        provider_kwargs = {}
-        if region:
-            provider_kwargs["config"] = Config(region_name=region)
-        provider = parameters.AppConfigProvider(
-            environment="default",
-            application=os.environ["RUNTIME_CONFIG_APP_ID"],
-            **provider_kwargs,
-        )
-        config = provider.get("connection", transform="json")
-        return config["agentRuntimes"]["<%- mcpServerClassName %>"]

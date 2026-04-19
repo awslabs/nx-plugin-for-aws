@@ -51,6 +51,69 @@ export const addDestructuredImport = async (
 };
 
 /**
+ * Ensure a Python `from <module> import <name1>, <name2>, ...` statement
+ * exists in the given file. If the module already has a `from <module> import`
+ * line, any missing names are appended; otherwise a fresh import statement is
+ * prepended to the file (ruff's import sorter will reorder it into place on
+ * the next format pass).
+ *
+ * We try to append first (which only succeeds if an import-from for the
+ * module already exists AND the name isn't yet in the list). If nothing
+ * was rewritten after trying every requested name, we fall back to checking
+ * whether the module is imported at all; if not, we prepend a fresh
+ * `from <module> import ...` line.
+ */
+export const addPythonDestructuredImport = async (
+  tree: Tree,
+  filePath: string,
+  variableNames: string[],
+  from: string,
+) => {
+  assertFilePath(tree, filePath);
+
+  // Determine whether there's any `from <module> import ...` line in the file.
+  // We detect this by attempting a no-op transformation — the file is unchanged,
+  // but a successful match tells us the line exists.
+  const beforeContents = tree.read(filePath)!.toString();
+  let moduleAlreadyImported = false;
+  for (const variableName of variableNames) {
+    // Appends the name if the import-from exists and the name isn't already there.
+    const appended = await applyGritQL(
+      tree,
+      filePath,
+      `language python\n\`from ${from} import $names\` where { $names <: not contains \`${variableName}\`, $names += \`, ${variableName}\` }`,
+    );
+    if (appended) {
+      moduleAlreadyImported = true;
+    }
+  }
+
+  // If the append succeeded for at least one name, we know the module line
+  // exists; we're done. If nothing was appended we need to distinguish
+  // between "module not imported" (need to add a new line) and "module
+  // imported but all names already present" (no-op).
+  if (moduleAlreadyImported) {
+    return;
+  }
+
+  const allAlreadyPresent = await matchGritQL(
+    tree,
+    filePath,
+    `language python\n\`from ${from} import $names\` where { ${variableNames
+      .map((n) => `$names <: contains \`${n}\``)
+      .join(', ')} }`,
+  );
+  if (allAlreadyPresent) {
+    return;
+  }
+
+  // No existing `from <module> import` line — prepend one. Ruff's import
+  // sorter will place it in the right group on the next formatter pass.
+  const specifiers = variableNames.join(', ');
+  tree.write(filePath, `from ${from} import ${specifiers}\n${beforeContents}`);
+};
+
+/**
  * Adds an `import <variableName> from '<from>'; statement to the beginning of the file,
  * if it doesn't already exist
  */

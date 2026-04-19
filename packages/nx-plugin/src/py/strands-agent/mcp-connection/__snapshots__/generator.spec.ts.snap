@@ -10,50 +10,12 @@ __all__ = ["InventoryMcpClient"]
 `;
 
 exports[`py#strands-agent#mcp-connection generator > should match snapshot for generated files > agentcore_mcp_client.py 1`] = `
-"import hashlib
-from collections.abc import Generator
-from typing import Any
-
-import boto3
+"import boto3
 import httpx
-from botocore.auth import SigV4Auth
-from botocore.awsrequest import AWSRequest
 from mcp.client.streamable_http import streamablehttp_client
 from strands.tools.mcp.mcp_client import MCPClient
 
-
-class SigV4HTTPXAuth(httpx.Auth):
-    """HTTPX Auth class that signs requests with AWS SigV4."""
-
-    def __init__(self, credentials: Any, region: str):
-        self.credentials = credentials
-        self.service = "bedrock-agentcore"
-        self.region = region
-        self.signer = SigV4Auth(credentials, self.service, region)
-
-    def auth_flow(
-        self, request: httpx.Request
-    ) -> Generator[httpx.Request, httpx.Response, None]:
-        headers = dict(request.headers)
-
-        headers.pop("connection", None)
-        headers["x-amz-content-sha256"] = hashlib.sha256(
-            request.content if request.content else b""
-        ).hexdigest()
-
-        aws_request = AWSRequest(
-            method=request.method,
-            url=str(request.url),
-            data=request.content,
-            headers=headers,
-        )
-
-        self.signer.add_auth(aws_request)
-
-        request.headers.clear()
-        request.headers.update(dict(aws_request.headers))
-
-        yield request
+from .auth import SigV4HTTPXAuth
 
 
 class AgentCoreMCPClient:
@@ -104,7 +66,7 @@ class AgentCoreMCPClient:
         return AgentCoreMCPClient._create(
             agent_runtime_arn=agent_runtime_arn,
             session_id=session_id,
-            auth_handler=SigV4HTTPXAuth(credentials, region),
+            auth_handler=SigV4HTTPXAuth(credentials, "bedrock-agentcore", region),
         )
 
     @staticmethod
@@ -132,12 +94,13 @@ class AgentCoreMCPClient:
 exports[`py#strands-agent#mcp-connection generator > should match snapshot for generated files > inventory_mcp_client.py 1`] = `
 "import os
 
-from aws_lambda_powertools.utilities import parameters
-from botocore.config import Config
 from mcp.client.streamable_http import streamablehttp_client
 from strands.tools.mcp.mcp_client import MCPClient
 
 from proj_agent_connection.core.agentcore_mcp_client import AgentCoreMCPClient
+from proj_agent_connection.core.runtime_config import (
+    get_connected_agent_runtime_arn,
+)
 
 
 class InventoryMcpClient:
@@ -155,33 +118,16 @@ class InventoryMcpClient:
         if os.environ.get("SERVE_LOCAL") == "true":
             return MCPClient(lambda: streamablehttp_client("http://localhost:8082/mcp"))
 
-        arn = InventoryMcpClient._get_arn()
         return AgentCoreMCPClient.with_iam_auth(
-            agent_runtime_arn=arn,
+            agent_runtime_arn=get_connected_agent_runtime_arn("InventoryMcp"),
             session_id=session_id,
         )
-
-    @staticmethod
-    def _get_arn() -> str:
-        """Resolve the InventoryMcp ARN from runtime config (AppConfig)."""
-        region = os.environ.get("AWS_REGION", os.environ.get("AWS_DEFAULT_REGION"))
-        provider_kwargs = {}
-        if region:
-            provider_kwargs["config"] = Config(region_name=region)
-        provider = parameters.AppConfigProvider(
-            environment="default",
-            application=os.environ["RUNTIME_CONFIG_APP_ID"],
-            **provider_kwargs,
-        )
-        config = provider.get("connection", transform="json")
-        return config["agentRuntimes"]["InventoryMcp"]
 "
 `;
 
 exports[`py#strands-agent#mcp-connection generator > should match snapshot for generated files > transformed-agent.py 1`] = `
-"from contextlib import contextmanager
-
-from proj_agent_connection import InventoryMcpClient
+"from proj_agent_connection import InventoryMcpClient
+from contextlib import contextmanager
 
 from strands import Agent, tool
 from strands_tools import current_time

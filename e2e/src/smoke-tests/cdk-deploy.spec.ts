@@ -100,7 +100,8 @@ async function invokeAgentCoreMcp(arn: string, mcpName: string): Promise<void> {
 async function invokeAgentCoreAgent(
   arn: string,
   agentName: string,
-): Promise<void> {
+  message = 'what is 3 + 5 - 2?',
+): Promise<string> {
   const aws = await createAwsClient('bedrock-agentcore');
   console.log(`Testing ${agentName} with ARN ${arn}`);
 
@@ -108,9 +109,7 @@ async function invokeAgentCoreAgent(
 
   const response = await aws.fetch(agentUrl, {
     method: 'POST',
-    body: JSON.stringify({
-      message: 'what is 3 + 5 - 2?',
-    }),
+    body: JSON.stringify({ message }),
     headers: {
       'Content-Type': 'application/json',
       'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id':
@@ -148,12 +147,14 @@ async function invokeAgentCoreAgent(
   expect(chunks.length).toBeGreaterThan(0);
   expect(chunks.every((c) => typeof c.content === 'string')).toBe(true);
   console.log(`Successfully invoked ${agentName}`);
+  return chunks.map((c) => c.content).join('');
 }
 
 async function invokeTrpcAgentCoreAgent(
   arn: string,
   agentName: string,
-): Promise<void> {
+  message = 'what is 3 * 5 / 4?',
+): Promise<string> {
   console.log(`Testing ${agentName} with ARN ${arn}`);
 
   // Dogfood our vended client
@@ -162,14 +163,12 @@ async function invokeTrpcAgentCoreAgent(
   });
 
   // Wait for any data, or an error
-  const response = await new Promise((resolve, reject) => {
+  const response = await new Promise<string>((resolve, reject) => {
     let responseMessage = '';
 
     // NB the trpc api is generated code so we don't have a type-safe trpc client here
     (client.invoke as any).subscribe(
-      {
-        message: 'what is 3 * 5 / 4?',
-      },
+      { message },
       {
         onData: (chunk: string) => {
           console.log(chunk);
@@ -182,6 +181,7 @@ async function invokeTrpcAgentCoreAgent(
   });
   console.log('Agent Response', response);
   expect(response).not.toHaveLength(0);
+  return response;
 }
 
 /**
@@ -424,6 +424,34 @@ describe('smoke test - cdk-deploy', () => {
         'TypeScript A2A Agent',
       );
       await invokeAgentCoreA2a(findOutput('PyA2aAgentArn'), 'Python A2A Agent');
+
+      // A2A connection generators — the HTTP host agents have vended A2A
+      // clients for each A2A target, and the Agent tools array has the
+      // generated delegate tools. Prompt the host to invoke each delegate
+      // and assert it succeeds (proving the a2a-connection code path works
+      // end-to-end on AgentCore with SigV4 between two deployed agents).
+      // Tool names follow the generator's convention: `ask<TargetClassName>`
+      // for TS, `ask_<target_snake_case>` for Python.
+      await invokeTrpcAgentCoreAgent(
+        findOutput('TsStrandsAgentArn'),
+        'TS Agent -> TS A2A (via askMyTsA2aAgent)',
+        'Use the askMyTsA2aAgent tool to ask the remote agent what 5 * 4 is. Return just the answer.',
+      );
+      await invokeTrpcAgentCoreAgent(
+        findOutput('TsStrandsAgentArn'),
+        'TS Agent -> PY A2A (via askMyPyA2aAgent)',
+        'Use the askMyPyA2aAgent tool to ask the remote agent what 11 + 2 is. Return just the answer.',
+      );
+      await invokeAgentCoreAgent(
+        findOutput('StrandsAgentArn'),
+        'PY Agent -> TS A2A (via ask_my_ts_a2a_agent)',
+        'Use the ask_my_ts_a2a_agent tool to ask the remote agent what 9 - 3 is. Return just the answer.',
+      );
+      await invokeAgentCoreAgent(
+        findOutput('StrandsAgentArn'),
+        'PY Agent -> PY A2A (via ask_my_py_a2a_agent)',
+        'Use the ask_my_py_a2a_agent tool to ask the remote agent what 7 + 8 is. Return just the answer.',
+      );
 
       // Lambda functions
       await invokeLambda(findOutput('PyFunctionArn'), 'Python Function');

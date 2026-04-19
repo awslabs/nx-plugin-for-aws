@@ -1,0 +1,134 @@
+import {
+  ClientFactory,
+  ClientFactoryOptions,
+  DefaultAgentCardResolver,
+  JsonRpcTransportFactory,
+} from '@a2a-js/sdk/client';
+import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
+import { A2AAgent } from '@strands-agents/sdk/a2a';
+import { AwsClient } from 'aws4fetch';
+
+/**
+ * Common options for creating an AgentCore A2A client
+ */
+export interface AgentCoreA2aClientOptions {
+  /**
+   * The ARN of the Bedrock AgentCore Runtime to connect to
+   */
+  agentRuntimeArn: string;
+  /**
+   * Session ID to include in request headers.
+   */
+  sessionId?: string;
+  /**
+   * Optional description for the remote agent.
+   */
+  description?: string;
+  /**
+   * Optional friendly name for the remote agent.
+   */
+  name?: string;
+}
+
+/**
+ * Options for creating an AgentCore A2A client with IAM authentication
+ */
+export interface AgentCoreA2aClientIamOptions
+  extends AgentCoreA2aClientOptions {
+  /**
+   * Optional AWS credential provider. If not provided, uses the default
+   * credential provider chain from the AWS SDK.
+   */
+  credentialProvider?: ReturnType<typeof fromNodeProviderChain>;
+}
+
+/**
+ * Options for creating an AgentCore A2A client with JWT authentication
+ */
+export interface AgentCoreA2aClientJwtOptions
+  extends AgentCoreA2aClientOptions {
+  /**
+   * A function which returns the JWT access token used to authenticate
+   */
+  accessTokenProvider: () => Promise<string>;
+}
+
+/**
+ * Factory for clients to call A2A agents hosted on Bedrock AgentCore Runtime
+ */
+export class AgentCoreA2aClient {
+  /**
+   * Construct the A2A invocations URL for an AgentCore runtime ARN and extract the region.
+   * ARN format: arn:partition:service:region:account-id:resource
+   * A2A on AgentCore is mounted at `/invocations/` (trailing slash matters).
+   */
+  private static buildUrl(agentRuntimeArn: string): {
+    region: string;
+    url: string;
+  } {
+    const region = agentRuntimeArn.split(':')[3];
+    const url = `https://bedrock-agentcore.${region}.amazonaws.com/runtimes/${encodeURIComponent(agentRuntimeArn)}/invocations/`;
+    return { region, url };
+  }
+
+  /**
+   * Build a Strands `A2AAgent` for a URL plus a fetch that is already
+   * authenticated (SigV4-signing or Bearer-adding).
+   */
+  private static build(
+    url: string,
+    authFetch: typeof fetch,
+    options: Pick<AgentCoreA2aClientOptions, 'name' | 'description'>,
+  ): A2AAgent {
+    const clientFactory = new ClientFactory({
+      ...ClientFactoryOptions.default,
+      transports: [new JsonRpcTransportFactory({ fetchImpl: authFetch })],
+      cardResolver: new DefaultAgentCardResolver({ fetchImpl: authFetch }),
+    });
+
+    return new A2AAgent({
+      url,
+      clientFactory,
+      ...(options.name ? { name: options.name } : {}),
+      ...(options.description ? { description: options.description } : {}),
+    });
+  }
+
+  /**
+   * Create an `A2AAgent` with IAM (SigV4) authentication.
+   */
+  static withIamAuth(options: AgentCoreA2aClientIamOptions): A2AAgent {
+    const credentialProvider =
+      options.credentialProvider ?? fromNodeProviderChain();
+    const { region, url } = AgentCoreA2aClient.buildUrl(options.agentRuntimeArn);
+
+    const sigv4Fetch: typeof fetch = async (...args) => {
+      const credentials = await credentialProvider();
+      const client = new AwsClient({
+        ...credentials,
+        service: 'bedrock-agentcore',
+        region,
+      });
+      return client.fetch(...args);
+    };
+
+    return AgentCoreA2aClient.build(url, sigv4Fetch, options);
+  }
+
+  /**
+   * Create an `A2AAgent` with JWT authentication.
+   */
+  static withJwtAuth(options: AgentCoreA2aClientJwtOptions): A2AAgent {
+    const { accessTokenProvider } = options;
+    const { url } = AgentCoreA2aClient.buildUrl(options.agentRuntimeArn);
+
+    const bearerFetch: typeof fetch = async (input, init) => {
+      const token = await accessTokenProvider();
+      const headers = new Headers(init?.headers);
+      headers.set('Authorization', `Bearer ${token}`);
+      return fetch(input, { ...init, headers });
+    };
+
+    return AgentCoreA2aClient.build(url, bearerFetch, options);
+  }
+}
