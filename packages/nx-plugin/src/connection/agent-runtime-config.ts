@@ -4,27 +4,19 @@
  */
 import { joinPathFragments, Tree } from '@nx/devkit';
 import { applyGritQL } from '../utils/ast';
-import { kebabCase } from '../utils/names';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
+  SHARED_TERRAFORM_DIR,
 } from '../utils/shared-constructs-constants';
 
 /**
- * Patches the generated agent-core CDK construct to additionally register
- * the agent's runtime ARN under the 'connection' namespace, making it
- * available in the static website's runtime-config.json.
+ * Register the agent's runtime ARN in the 'connection' namespace so it is
+ * published to the website's runtime-config.json. Patches the generated CDK
+ * and Terraform constructs in-place; idempotent.
  *
- * The construct is generated once by the agent generator and typically not
- * modified by users, so the AST transform is stable. The construct
- * unconditionally registers the ARN under the 'agentcore' namespace; this
- * function adds a sibling `rc.set('connection', ...)` call.
- *
- * Note: the 'connection' namespace is stage-scoped by the RuntimeConfig
- * singleton — every StaticWebsite in the same stage will therefore see this
- * agent's ARN in its runtime-config.json, not just the website the user
- * connected. If we later need per-website filtering we'll need to re-introduce
- * an allow-list on the StaticWebsite construct.
+ * Note: the 'connection' namespace is stage-scoped — every StaticWebsite in
+ * the stage will see this ARN, not just the one the user connected.
  */
 export const addAgentRuntimeToConnectionNamespace = async (
   tree: Tree,
@@ -35,7 +27,7 @@ export const addAgentRuntimeToConnectionNamespace = async (
     agentNameClassName: string;
   },
 ) => {
-  const constructFilePath = joinPathFragments(
+  const cdkConstructPath = joinPathFragments(
     PACKAGES_DIR,
     SHARED_CONSTRUCTS_DIR,
     'src',
@@ -44,31 +36,47 @@ export const addAgentRuntimeToConnectionNamespace = async (
     options.agentNameKebabCase,
     `${options.agentNameKebabCase}.ts`,
   );
-
-  if (!tree.exists(constructFilePath)) {
-    return;
-  }
-
-  // Append a sibling `rc.set('connection', ...)` call right after the existing
-  // `rc.set('agentcore', 'agentRuntimes', ...)` call. Guarded against
-  // double-application via a `not contains` constraint on the program.
-  await applyGritQL(
-    tree,
-    constructFilePath,
-    `\`rc.set('agentcore', 'agentRuntimes', $args);\` => raw\`rc.set('agentcore', 'agentRuntimes', $args);
+  if (tree.exists(cdkConstructPath)) {
+    await applyGritQL(
+      tree,
+      cdkConstructPath,
+      `\`rc.set('agentcore', 'agentRuntimes', $args);\` => raw\`rc.set('agentcore', 'agentRuntimes', $args);
 
     rc.set('connection', 'agentRuntimes', {
       ...rc.get('connection').agentRuntimes,
       ${options.agentNameClassName}: this.agentCoreRuntime.agentRuntimeArn,
     });\` where { $program <: not contains \`rc.set('connection', 'agentRuntimes', $_)\` }`,
-  );
-};
+    );
+  }
 
-/**
- * Derive the construct directory (kebab-case) from the agent's class name.
- * Mirrors the `name = kebabCase(options.name || defaultName)` -> `agentNameClassName = toClassName(name)`
- * transformation used by the agent generators.
- */
-export const agentConstructDirFromClassName = (
-  agentNameClassName: string,
-): string => kebabCase(agentNameClassName);
+  const terraformConstructPath = joinPathFragments(
+    PACKAGES_DIR,
+    SHARED_TERRAFORM_DIR,
+    'src',
+    'app',
+    'agents',
+    options.agentNameKebabCase,
+    `${options.agentNameKebabCase}.tf`,
+  );
+  if (tree.exists(terraformConstructPath)) {
+    const source = tree.read(terraformConstructPath, 'utf-8')!;
+    if (!source.includes('add_agent_runtime_to_connection_runtime_config')) {
+      tree.write(
+        terraformConstructPath,
+        `${source.trimEnd()}
+
+# Also expose the agent runtime ARN to the frontend via the 'connection' namespace
+module "add_agent_runtime_to_connection_runtime_config" {
+  source = "../../../core/runtime-config/entry"
+
+  namespace = "connection"
+  key       = "agentRuntimes"
+  value     = { "${options.agentNameClassName}" = module.agent_core_runtime.agent_core_runtime_arn }
+
+  depends_on = [module.agent_core_runtime]
+}
+`,
+      );
+    }
+  }
+};
