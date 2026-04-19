@@ -6,9 +6,22 @@ uplinks:
   npmjs:
     url: https://registry.npmjs.org/
     maxage: 60m
-    timeout: 60s
-    max_fails: 20
-    fail_timeout: 1m
+    timeout: 120s
+    # Effectively disable the per-uplink circuit breaker. Without this, a
+    # transient burst of ECONNRESET/ETIMEDOUT/5xx from npmjs trips the breaker
+    # and Verdaccio then returns 404 for any uncached package until fail_timeout
+    # elapses — which pnpm treats as terminal (it does not retry 404s).
+    max_fails: 1000
+    fail_timeout: 1s
+    # Reuse TCP connections to npmjs so the concurrent install burst doesn't
+    # open hundreds of short-lived sockets (the main source of transient errors).
+    agent_options:
+      keepAlive: true
+      maxSockets: 40
+      maxFreeSockets: 10
+
+server:
+  keepAliveTimeout: 60
 
 packages:
   '@aws/nx-plugin':
