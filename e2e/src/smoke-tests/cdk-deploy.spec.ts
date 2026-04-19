@@ -242,10 +242,12 @@ async function invokeAgentCoreA2a(
   console.log(`${agentName} agent card:`, card.name);
 
   const stream = client.sendMessageStream({
-    kind: 'message',
-    role: 'user',
-    parts: [{ kind: 'text', text: 'hello' }],
-    messageId: crypto.randomUUID(),
+    message: {
+      kind: 'message',
+      role: 'user',
+      parts: [{ kind: 'text', text: 'hello' }],
+      messageId: crypto.randomUUID(),
+    },
   });
 
   let events = 0;
