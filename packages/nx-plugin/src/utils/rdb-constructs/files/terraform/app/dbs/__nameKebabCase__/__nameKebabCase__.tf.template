@@ -129,6 +129,25 @@ module "aurora" {
   tags                            = var.tags
 }
 
+resource "aws_iam_role_policy" "proxy_db_user_connect" {
+  count = var.enable_rds_proxy ? 1 : 0
+
+  role = module.aurora.proxy_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = ["rds-db:connect"]
+        Resource = [
+          "arn:aws:rds-db:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:dbuser:${module.aurora.cluster_resource_id}/${local.database_runtime_user}"
+        ]
+      }
+    ]
+  })
+}
+
 data "archive_file" "create_db_user_zip" {
   type        = "zip"
   source_dir  = local.create_db_user_bundle_path
@@ -217,7 +236,7 @@ resource "null_resource" "docker_publish" {
   provisioner "local-exec" {
     command = <<-EOT
       aws ecr get-login-password --region ${data.aws_region.current.name} | docker login --username AWS --password-stdin ${self.triggers.repository_url}
-      docker build --platform linux/arm64 -t ${self.triggers.repository_url}:${self.triggers.bundle_hash} ${local.migration_bundle_path}
+      docker build --platform linux/arm64 --build-arg AWS_REGION=${data.aws_region.current.name} -t ${self.triggers.repository_url}:${self.triggers.bundle_hash} ${local.migration_bundle_path}
       docker push ${self.triggers.repository_url}:${self.triggers.bundle_hash}
     EOT
   }
@@ -400,7 +419,11 @@ resource "aws_security_group" "create_db_user" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "migration_handler_to_database" {
+<%_ if (engine === 'mysql') { _%>
+  security_group_id            = module.aurora.database_security_group_id
+<%_ } else { _%>
   security_group_id            = module.aurora.security_group_id
+<%_ } _%>
   referenced_security_group_id = aws_security_group.migration_handler.id
   from_port                    = module.aurora.cluster_port
   to_port                      = module.aurora.cluster_port
@@ -408,7 +431,7 @@ resource "aws_vpc_security_group_ingress_rule" "migration_handler_to_database" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "create_db_user_to_database" {
-  security_group_id            = module.aurora.security_group_id
+  security_group_id            = module.aurora.database_security_group_id
   referenced_security_group_id = aws_security_group.create_db_user.id
   from_port                    = module.aurora.cluster_port
   to_port                      = module.aurora.cluster_port
