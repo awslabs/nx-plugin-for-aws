@@ -83,33 +83,18 @@ export class AgentCoreMcpClient {
     const {
       url,
       sessionId = randomUUID(),
-      buildHeaders = async () => ({}),
+      buildHeaders = async (): Promise<Record<string, string>> => ({}),
       fetch: customFetch,
     } = options;
 
     // Create a custom fetch that adds required headers
     const fetchWithHeaders: typeof fetch = async (input, init) => {
-      const headers = {
-        'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id': sessionId,
-        ...(await buildHeaders()),
-      };
-      const existingHeaders = init?.headers;
-
-      const mergedInit = {
-        ...init,
-        headers: !existingHeaders
-          ? headers
-          : existingHeaders instanceof Headers
-            ? (() => {
-                const h = new Headers(existingHeaders);
-                Object.entries(headers).forEach(([k, v]) => h.append(k, v));
-                return h;
-              })()
-            : Array.isArray(existingHeaders)
-              ? [...existingHeaders, ...Object.entries(headers)]
-              : { ...existingHeaders, ...headers },
-      };
-      return (customFetch || fetch)(input, mergedInit);
+      const headers = new Headers(init?.headers);
+      headers.set('X-Amzn-Bedrock-AgentCore-Runtime-Session-Id', sessionId);
+      for (const [k, v] of Object.entries(await buildHeaders())) {
+        headers.set(k, v);
+      }
+      return (customFetch || fetch)(input, { ...init, headers });
     };
 
     // Create the transport
