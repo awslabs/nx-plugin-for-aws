@@ -240,7 +240,11 @@ async function invokeAgentCoreA2a(
   expect(typeof card.name).toBe('string');
   console.log(`${agentName} agent card:`, card.name);
 
-  const stream = client.sendMessage({
+  // Use sendMessageStream (not sendMessage) so the test can break on the
+  // first SSE event. sendMessage is blocking and would wait for the full
+  // agent response, which routinely exceeds SigV4's 5-minute signature
+  // validity window on cold-started AgentCore runtimes.
+  const stream = client.sendMessageStream({
     kind: 'message',
     role: 'user',
     parts: [{ kind: 'text', text: 'hello' }],
@@ -251,6 +255,8 @@ async function invokeAgentCoreA2a(
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   for await (const _event of stream) {
     events++;
+    // One event is enough to prove the agent is reachable end-to-end.
+    break;
   }
   expect(events).toBeGreaterThan(0);
   console.log(`Successfully invoked ${agentName} (${events} events)`);
