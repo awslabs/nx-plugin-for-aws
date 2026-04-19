@@ -1,13 +1,3 @@
-# Verdaccio is scoped to only handle @aws/* packages. Every other package is
-# fetched directly from npmjs (see e2e/src/global-setup.ts for the per-
-# package-manager scoped registry config). This dramatically reduces the
-# concurrent uplink volume that previously manifested as ERR_PNPM_FETCH_404
-# flakiness.
-#
-# Within the @aws scope, three local packages (nx-plugin, nx-plugin-mcp,
-# create-nx-workspace) are served from local storage. Any other @aws/*
-# package (e.g. @aws/lambda-invoke-store) is proxied to npmjs.
-
 storage: ../tmp/local-registry/storage
 
 uplinks:
@@ -15,13 +5,8 @@ uplinks:
     url: https://registry.npmjs.org/
     maxage: 60m
     timeout: 120s
-    # Effectively disable the per-uplink circuit breaker — the smaller @aws/*
-    # proxy volume makes a trip unlikely, but we still want to avoid the
-    # failure mode where one transient 5xx causes subsequent 404s for
-    # uncached packages.
     max_fails: 1000
     fail_timeout: 1s
-    # Reuse TCP connections to npmjs.
     agent_options:
       keepAlive: true
       maxSockets: 40
@@ -30,9 +15,10 @@ uplinks:
 server:
   keepAliveTimeout: 60
 
+# Package managers are configured (see e2e/src/global-setup.ts) to route only
+# @aws/* to this registry; everything else goes to npmjs. Verdaccio serves the
+# three local packages from storage and proxies any other @aws/* through npmjs.
 packages:
-  # Our three local packages are served only from local storage — never
-  # proxied — so a version mismatch or uplink hiccup can never shadow them.
   '@aws/nx-plugin':
     access: $all
     publish: $all
@@ -45,16 +31,11 @@ packages:
     access: $all
     publish: $all
     unpublish: $all
-  # Other @aws/* packages that the install pulls in (e.g. @aws/lambda-invoke-store)
-  # are proxied to npmjs. This is a small set, so the uplink is rarely exercised.
   '@aws/*':
     access: $all
     publish: $all
     unpublish: $all
     proxy: npmjs
-  # Catch-all: if a client ever asks Verdaccio for a non-@aws package (due to
-  # misconfigured scoped registry on its end), transparently proxy to npmjs
-  # rather than 404.
   '**':
     access: $all
     publish: $all

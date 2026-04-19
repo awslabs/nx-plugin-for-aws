@@ -17,7 +17,6 @@ import { homedir } from 'os';
 const PUBLIC_REGISTRY = 'https://registry.npmjs.org/';
 const VERDACCIO_AUTH_TOKEN = 'secretVerdaccioToken';
 
-// Files written at user level during setup; restored in teardown.
 const USER_BUNFIG_PATH = join(homedir(), '.bunfig.toml');
 const USER_YARNRC_PATH = join(homedir(), '.yarnrc.yml');
 const BACKUP_SUFFIX = '.e2e-backup';
@@ -46,9 +45,6 @@ export default async function () {
       rmSync(registryPath, { force: true, recursive: true });
     }
 
-    // Yarn and bun both retry on any non-2xx response, so bumping these helps
-    // smooth over transient 5xx/timeouts from the Verdaccio uplink (used only
-    // for the small @aws/* surface — see scoping below).
     process.env.YARN_HTTP_RETRY = '5';
     process.env.YARN_HTTP_TIMEOUT = '90000';
 
@@ -60,10 +56,10 @@ export default async function () {
     });
     console.info('Local registry started!');
 
-    // `startLocalRegistry` set npm_config_registry / BUN_CONFIG_REGISTRY /
-    // YARN_REGISTRY / YARN_NPM_REGISTRY_SERVER to the local verdaccio URL, and
-    // configured npm auth for that port. Capture the URL before we override
-    // and re-export it so smoke-test specs can reference it.
+    // startLocalRegistry points the default registry of every pkg manager at
+    // the local verdaccio. Capture that URL, then swap each default back to
+    // npmjs with a scope-only override for @aws/* so only our published
+    // packages hit verdaccio.
     const localRegistry = process.env.npm_config_registry;
     if (!localRegistry) {
       throw new Error(
@@ -72,26 +68,17 @@ export default async function () {
     }
     process.env.NX_E2E_LOCAL_REGISTRY = localRegistry;
 
-    // Verdaccio is used only for the @aws/* scope. Every other package is
-    // fetched directly from npmjs. This dramatically reduces Verdaccio's
-    // uplink volume and eliminates the flakiness that came with it (transient
-    // upstream errors manifesting as ERR_PNPM_FETCH_404 from localhost:4873).
-    // Override the default registry back to npmjs and attach scope-specific
-    // config so only @aws/* is routed to Verdaccio.
     process.env.npm_config_registry = PUBLIC_REGISTRY;
     process.env.BUN_CONFIG_REGISTRY = PUBLIC_REGISTRY;
     process.env.YARN_REGISTRY = PUBLIC_REGISTRY;
     process.env.YARN_NPM_REGISTRY_SERVER = PUBLIC_REGISTRY;
 
-    // npm / pnpm / yarn-classic all read scoped registry config from the user
-    // .npmrc. `npm config set` persists to ~/.npmrc, so every subprocess picks
-    // it up regardless of cwd.
+    // npm / pnpm / yarn-classic read scope config from user ~/.npmrc.
     execSync(`npm config set @aws:registry ${localRegistry}`, {
       windowsHide: true,
     });
 
-    // Yarn berry doesn't support object-valued config via env vars, so write
-    // a user-level .yarnrc.yml with an npmScopes entry for @aws.
+    // Yarn berry can't set object-valued config (npmScopes) via env vars.
     backupIfExists(USER_YARNRC_PATH);
     writeFileSync(
       USER_YARNRC_PATH,
@@ -108,11 +95,8 @@ export default async function () {
       { encoding: 'utf-8' },
     );
 
-    // Bun reads bunfig.toml; install.scopes maps scope → registry. Write a
-    // user-level bunfig.toml so `bun create @aws/nx-workspace` (which runs
-    // outside any test project) resolves the scoped package correctly. The
-    // install.cache.disable setting also applies to subsequent project-level
-    // bun installs, so there's no need for a per-project bunfig.toml.
+    // Bun only reads config from bunfig.toml. User-level covers both the
+    // out-of-workspace `bun create` step and subsequent project installs.
     backupIfExists(USER_BUNFIG_PATH);
     writeFileSync(
       USER_BUNFIG_PATH,
@@ -131,8 +115,7 @@ export default async function () {
       { encoding: 'utf-8' },
     );
 
-    // Publishes must explicitly target Verdaccio since the default registry
-    // is now npmjs.
+    // Publishes need an explicit --registry because the default is now npmjs.
     const publishRegistryFlag = `--registry ${localRegistry}`;
 
     console.info('Publishing @aws/nx-plugin to local registry');
@@ -163,9 +146,8 @@ export default async function () {
     });
     console.info('@aws/create-nx-workspace published to local registry');
 
-    // Read the published package version and set NX_E2E_PRESET_VERSION
-    // This is needed because create-nx-workspace uses `npm view` to resolve
-    // the preset version, which may fail on Windows with a local registry
+    // create-nx-workspace uses `npm view` to resolve the preset version,
+    // which may fail on Windows with a local registry.
     try {
       const distPkgJson = JSON.parse(
         readFileSync(
