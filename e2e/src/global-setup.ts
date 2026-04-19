@@ -39,6 +39,15 @@ const restoreBackup = (path: string) => {
 
 export default async function () {
   try {
+    // On shared Windows runners the verdaccio storage outlives the process
+    // and `clearStorage: true` below doesn't fully reset it, so publishes
+    // on the next run hit "409 Conflict: already present". Wipe first.
+    const registryPath = join(__dirname, '../../tmp');
+    if (existsSync(registryPath)) {
+      console.info('Cleaning up old registry store...');
+      rmSync(registryPath, { force: true, recursive: true });
+    }
+
     console.info('Starting local registry...');
     global.teardown = await startLocalRegistry({
       localRegistryTarget: '@aws/nx-plugin-source:local-registry',
