@@ -5,11 +5,27 @@
 import { writeFileSync } from 'fs';
 import { smokeTest } from './smoke-test';
 
+// The local verdaccio URL is set in global-setup.ts. It's the scoped registry
+// only for @aws/* packages; everything else goes to npmjs.
+const LOCAL_REGISTRY = process.env.NX_E2E_LOCAL_REGISTRY;
+
 smokeTest('bun', (projectRoot) => {
-  // Write bunfig.toml to configure bun to use the local registry and disable caching
+  // Scope bun to the local verdaccio only for @aws/* packages so the rest of
+  // the install goes straight to npmjs (matching the other smoke tests).
+  // Disable the install cache so we don't reuse stale tarballs across runs.
   writeFileSync(
     `${projectRoot}/bunfig.toml`,
-    `[install]\nregistry = "${process.env.npm_config_registry}"\nretry = 5\n\n[install.cache]\ndisable = true\ndisableManifest = true`,
+    [
+      `[install]`,
+      `registry = "https://registry.npmjs.org/"`,
+      ``,
+      `[install.scopes]`,
+      `"@aws" = { url = "${LOCAL_REGISTRY}", token = "secretVerdaccioToken" }`,
+      ``,
+      `[install.cache]`,
+      `disable = true`,
+      `disableManifest = true`,
+    ].join('\n'),
     { encoding: 'utf-8' },
   );
 });

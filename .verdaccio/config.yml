@@ -1,20 +1,27 @@
-# path to a directory with all packages
+# Verdaccio is scoped to only handle @aws/* packages. Every other package is
+# fetched directly from npmjs (see e2e/src/global-setup.ts for the per-
+# package-manager scoped registry config). This dramatically reduces the
+# concurrent uplink volume that previously manifested as ERR_PNPM_FETCH_404
+# flakiness.
+#
+# Within the @aws scope, three local packages (nx-plugin, nx-plugin-mcp,
+# create-nx-workspace) are served from local storage. Any other @aws/*
+# package (e.g. @aws/lambda-invoke-store) is proxied to npmjs.
+
 storage: ../tmp/local-registry/storage
 
-# a list of other known repositories we can talk to
 uplinks:
   npmjs:
     url: https://registry.npmjs.org/
     maxage: 60m
     timeout: 120s
-    # Effectively disable the per-uplink circuit breaker. Without this, a
-    # transient burst of ECONNRESET/ETIMEDOUT/5xx from npmjs trips the breaker
-    # and Verdaccio then returns 404 for any uncached package until fail_timeout
-    # elapses — which pnpm treats as terminal (it does not retry 404s).
+    # Effectively disable the per-uplink circuit breaker — the smaller @aws/*
+    # proxy volume makes a trip unlikely, but we still want to avoid the
+    # failure mode where one transient 5xx causes subsequent 404s for
+    # uncached packages.
     max_fails: 1000
     fail_timeout: 1s
-    # Reuse TCP connections to npmjs so the concurrent install burst doesn't
-    # open hundreds of short-lived sockets (the main source of transient errors).
+    # Reuse TCP connections to npmjs.
     agent_options:
       keepAlive: true
       maxSockets: 40
@@ -24,26 +31,39 @@ server:
   keepAliveTimeout: 60
 
 packages:
+  # Our three local packages are served only from local storage — never
+  # proxied — so a version mismatch or uplink hiccup can never shadow them.
   '@aws/nx-plugin':
-    # give all users (including non-authenticated users) full access
-    # because it is a local registry
     access: $all
     publish: $all
     unpublish: $all
+  '@aws/nx-plugin-mcp':
+    access: $all
+    publish: $all
+    unpublish: $all
+  '@aws/create-nx-workspace':
+    access: $all
+    publish: $all
+    unpublish: $all
+  # Other @aws/* packages that the install pulls in (e.g. @aws/lambda-invoke-store)
+  # are proxied to npmjs. This is a small set, so the uplink is rarely exercised.
+  '@aws/*':
+    access: $all
+    publish: $all
+    unpublish: $all
+    proxy: npmjs
+  # Reject anything else explicitly — if a client asks verdaccio for a non-@aws
+  # package it means the scoped registry config is wrong; fail loudly rather
+  # than silently falling through to an uplink.
   '**':
-    # give all users (including non-authenticated users) full access
-    # because it is a local registry
     access: $all
     publish: $all
     unpublish: $all
 
-    # if package is not available locally, proxy requests to npm registry
-    proxy: npmjs
-# log settings
 log:
   type: stdout
   format: pretty
   level: warn
 
 publish:
-  allow_offline: true # set offline to true to allow publish offline
+  allow_offline: true
