@@ -110,7 +110,9 @@ export default async function () {
 
     // Bun reads bunfig.toml; install.scopes maps scope → registry. Write a
     // user-level bunfig.toml so `bun create @aws/nx-workspace` (which runs
-    // outside any test project) resolves the scoped package correctly.
+    // outside any test project) resolves the scoped package correctly. The
+    // install.cache.disable setting also applies to subsequent project-level
+    // bun installs, so there's no need for a per-project bunfig.toml.
     backupIfExists(USER_BUNFIG_PATH);
     writeFileSync(
       USER_BUNFIG_PATH,
@@ -120,6 +122,10 @@ export default async function () {
         ``,
         `[install.scopes]`,
         `"@aws" = { url = "${localRegistry}", token = "${VERDACCIO_AUTH_TOKEN}" }`,
+        ``,
+        `[install.cache]`,
+        `disable = true`,
+        `disableManifest = true`,
         ``,
       ].join('\n'),
       { encoding: 'utf-8' },
