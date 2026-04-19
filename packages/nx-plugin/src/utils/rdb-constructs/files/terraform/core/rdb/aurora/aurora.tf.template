@@ -292,6 +292,23 @@ resource "aws_iam_role_policy_attachment" "proxy" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonRDSProxyServiceRolePolicy"
 }
 
+resource "aws_iam_role_policy" "proxy_secret_access" {
+  count = var.enable_rds_proxy ? 1 : 0
+
+  role = aws_iam_role.proxy[0].name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["secretsmanager:GetSecretValue"]
+        Resource = [aws_secretsmanager_secret.credentials.arn]
+      }
+    ]
+  })
+}
+
 resource "aws_security_group" "proxy" {
   count = var.enable_rds_proxy ? 1 : 0
 
@@ -343,6 +360,16 @@ resource "aws_db_proxy_target" "default" {
   rds_resource_id    = aws_rds_cluster.database.resource_id
 }
 
+resource "aws_vpc_security_group_ingress_rule" "proxy_to_database" {
+  count = var.enable_rds_proxy ? 1 : 0
+
+  security_group_id            = aws_security_group.database.id
+  referenced_security_group_id = aws_security_group.proxy[0].id
+  from_port                    = coalesce(var.port, local.default_port)
+  to_port                      = coalesce(var.port, local.default_port)
+  ip_protocol                  = "tcp"
+}
+
 output "cluster_arn" {
   description = "ARN of the Aurora cluster."
   value       = aws_rds_cluster.database.arn
@@ -371,6 +398,16 @@ output "cluster_port" {
 output "security_group_id" {
   description = "Security group protecting the Aurora proxy or cluster."
   value       = var.enable_rds_proxy ? aws_security_group.proxy[0].id : aws_security_group.database.id
+}
+
+output "database_security_group_id" {
+  description = "Security group protecting the Aurora cluster directly."
+  value       = aws_security_group.database.id
+}
+
+output "proxy_role_name" {
+  description = "Name of the IAM role used by the RDS Proxy, or null if proxy is disabled."
+  value       = var.enable_rds_proxy ? aws_iam_role.proxy[0].name : null
 }
 
 output "secret_arn" {

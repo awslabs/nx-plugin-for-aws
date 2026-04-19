@@ -75,6 +75,9 @@ describe('ts#rdb generator', () => {
     ).toBeTruthy();
     expect(tree.exists('packages/db/prisma.config.ts')).toBeTruthy();
     expect(tree.exists('packages/db/prisma/schema.prisma')).toBeTruthy();
+    expect(
+      tree.exists('packages/db/prisma/schema/example.prisma'),
+    ).toBeTruthy();
     expect(tree.exists('packages/db/src/index.ts')).toBeTruthy();
     expect(tree.exists('packages/db/Dockerfile')).toBeTruthy();
     expect(tree.exists('packages/db/.gitignore')).toBeTruthy();
@@ -132,12 +135,12 @@ describe('ts#rdb generator', () => {
     expect(tree.read('packages/db/prisma.config.ts', 'utf-8')).toContain(
       "import { defineConfig } from 'prisma/config';",
     );
-    expect(tree.read('packages/db/prisma/schema.prisma', 'utf-8')).toContain(
-      'model ExampleTable',
-    );
-    expect(tree.read('packages/db/prisma/schema.prisma', 'utf-8')).toContain(
-      'column1     String',
-    );
+    expect(
+      tree.read('packages/db/prisma/schema/example.prisma', 'utf-8'),
+    ).toContain('model ExampleTable');
+    expect(
+      tree.read('packages/db/prisma/schema/example.prisma', 'utf-8'),
+    ).toContain('column1     String');
     expect(tree.read('packages/db/prisma/schema.prisma', 'utf-8')).toContain(
       'provider = "postgresql"',
     );
@@ -385,6 +388,14 @@ describe('ts#rdb generator', () => {
     expect(terraformCore).toContain('output "cluster_resource_id"');
     expect(terraformCore).toContain('output "kms_key_arn"');
     expect(terraformCore).toContain('output "admin_user"');
+    expect(terraformCore).toContain('output "database_security_group_id"');
+    expect(terraformCore).toContain('output "proxy_role_name"');
+    expect(terraformCore).toContain('"secretsmanager:GetSecretValue"');
+    expect(terraformCore).toContain('proxy_to_database');
+    expect(terraformApp).toContain('--build-arg AWS_REGION=');
+    expect(terraformApp).toContain('module.aurora.proxy_role_name');
+    expect(terraformApp).toContain('module.aurora.database_security_group_id');
+    expect(terraformApp).toContain('module.aurora.security_group_id');
   });
 
   it('should keep an existing aurora shared construct', async () => {
@@ -435,6 +446,9 @@ describe('ts#rdb generator', () => {
       'HOSTNAME = module.aurora.cluster_endpoint',
     );
     expect(terraformCore).toContain('variable "enable_rds_proxy"');
+    expect(terraformApp).toContain('--build-arg AWS_REGION=');
+    expect(terraformApp).toContain('module.aurora.database_security_group_id');
+    expect(terraformApp).not.toContain('module.aurora.security_group_id');
   });
 
   it('should generate CDK construct with RDS Proxy disabled', async () => {
@@ -478,6 +492,10 @@ describe('ts#rdb generator', () => {
       'enable_rds_proxy                = var.enable_rds_proxy',
     );
     expect(terraformApp).toContain('variable "enable_rds_proxy"');
+    expect(terraformApp).toContain('module.aurora.proxy_role_name');
+    expect(terraformCore).toContain('"secretsmanager:GetSecretValue"');
+    expect(terraformCore).toContain('proxy_to_database');
+    expect(terraformCore).toContain('output "proxy_role_name"');
   });
 
   it('should generate correct runtime config structure for Terraform', async () => {
