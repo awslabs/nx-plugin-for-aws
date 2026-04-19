@@ -39,15 +39,6 @@ const restoreBackup = (path: string) => {
 
 export default async function () {
   try {
-    const registryPath = join(__dirname, '../../tmp');
-    if (existsSync(registryPath)) {
-      console.info('Cleaning up old registry store...');
-      rmSync(registryPath, { force: true, recursive: true });
-    }
-
-    process.env.YARN_HTTP_RETRY = '5';
-    process.env.YARN_HTTP_TIMEOUT = '90000';
-
     console.info('Starting local registry...');
     global.teardown = await startLocalRegistry({
       localRegistryTarget: '@aws/nx-plugin-source:local-registry',
@@ -66,7 +57,6 @@ export default async function () {
         'startLocalRegistry did not set npm_config_registry — cannot continue',
       );
     }
-    process.env.NX_E2E_LOCAL_REGISTRY = localRegistry;
 
     process.env.npm_config_registry = PUBLIC_REGISTRY;
     process.env.BUN_CONFIG_REGISTRY = PUBLIC_REGISTRY;
