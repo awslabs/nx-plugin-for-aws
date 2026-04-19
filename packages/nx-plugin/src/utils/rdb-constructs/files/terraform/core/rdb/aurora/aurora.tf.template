@@ -16,6 +16,9 @@ terraform {
   }
 }
 
+data "aws_caller_identity" "current" {}
+data "aws_partition" "current" {}
+
 data "aws_iam_policy" "enhanced_monitoring" {
   arn = "arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
 }
@@ -119,6 +122,8 @@ variable "tags" {
 locals {
   default_port                   = var.engine == "aurora-mysql" ? 3306 : 5432
   default_engine_version         = var.engine == "aurora-mysql" ? "8.0.mysql_aurora.3.12.0" : "17.7"
+  cloudwatch_log_exports         = var.engine == "aurora-mysql" ? ["audit", "error", "general", "slowquery"] : ["postgresql"]
+  parameter_group_family         = var.engine == "aurora-mysql" ? "aurora-mysql8.0" : "aurora-postgresql${split(".", coalesce(var.engine_version, local.default_engine_version))[0]}"
   database_url_scheme            = var.engine == "aurora-mysql" ? "mysql" : "postgresql"
   default_database_url_parameters = var.engine == "aurora-postgresql" ? {
     pool_timeout    = "20"
@@ -135,9 +140,56 @@ locals {
   ])
 }
 
+resource "aws_rds_cluster_parameter_group" "database" {
+  name_prefix = "${var.name}-"
+  family      = local.parameter_group_family
+  description = "Parameter group for ${var.name} Aurora cluster"
+
+  dynamic "parameter" {
+    for_each = var.engine == "aurora-postgresql" ? [1] : []
+    content {
+      name  = "log_statement"
+      value = "all"
+    }
+  }
+
+  tags = var.tags
+}
+
 resource "aws_kms_key" "database" {
   description         = "KMS key for Aurora cluster ${var.name}"
   enable_key_rotation = true
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "EnableRootAccess"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:root"
+        }
+        Action   = "kms:*"
+        Resource = "*"
+      },
+      {
+        Sid    = "AllowRDSService"
+        Effect = "Allow"
+        Principal = {
+          Service = "rds.amazonaws.com"
+        }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey",
+          "kms:CreateGrant"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
 
   tags = merge(var.tags, {
     Name = "${var.name}-aurora"
@@ -203,6 +255,7 @@ resource "random_password" "master_password" {
 }
 
 resource "aws_secretsmanager_secret" "credentials" {
+  #checkov:skip=CKV2_AWS_57:Secret rotation requires a VPC-hosted rotation Lambda; configure rotation post-deployment based on your network topology
   name_prefix = "${var.name}-aurora-credentials-"
   kms_key_id  = aws_kms_key.database.arn
 
@@ -227,6 +280,7 @@ resource "aws_rds_cluster" "database" {
   master_username                     = var.admin_user
   master_password                     = random_password.master_password.result
   db_subnet_group_name                = aws_db_subnet_group.database.name
+  db_cluster_parameter_group_name     = aws_rds_cluster_parameter_group.database.name
   vpc_security_group_ids              = [aws_security_group.database.id]
   port                                = coalesce(var.port, local.default_port)
   storage_encrypted                   = true
@@ -236,6 +290,8 @@ resource "aws_rds_cluster" "database" {
   iam_database_authentication_enabled = true
   monitoring_interval                 = 5
   monitoring_role_arn                 = aws_iam_role.enhanced_monitoring.arn
+  copy_tags_to_snapshot               = true
+  enabled_cloudwatch_logs_exports     = local.cloudwatch_log_exports
 
   serverlessv2_scaling_configuration {
     min_capacity = var.serverless_min_capacity
@@ -256,6 +312,13 @@ resource "aws_rds_cluster_instance" "database" {
   engine               = aws_rds_cluster.database.engine
   engine_version       = aws_rds_cluster.database.engine_version
   db_subnet_group_name = aws_db_subnet_group.database.name
+
+  auto_minor_version_upgrade            = true
+  monitoring_interval                   = 5
+  monitoring_role_arn                   = aws_iam_role.enhanced_monitoring.arn
+  performance_insights_enabled          = true
+  performance_insights_kms_key_id       = aws_kms_key.database.arn
+  performance_insights_retention_period = 7
 
   tags = merge(var.tags, {
     Name = "${var.name}-aurora-${count.index + 1}"
@@ -310,6 +373,7 @@ resource "aws_iam_role_policy" "proxy_secret_access" {
 }
 
 resource "aws_security_group" "proxy" {
+  #checkov:skip=CKV2_AWS_5:Security group is attached to aws_db_proxy.aurora; Checkov cannot resolve count-conditional cross-resource references
   count = var.enable_rds_proxy ? 1 : 0
 
   name_prefix = "${var.name}-aurora-proxy-"
@@ -368,6 +432,62 @@ resource "aws_vpc_security_group_ingress_rule" "proxy_to_database" {
   from_port                    = coalesce(var.port, local.default_port)
   to_port                      = coalesce(var.port, local.default_port)
   ip_protocol                  = "tcp"
+}
+
+data "aws_iam_policy" "backup" {
+  arn = "arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup"
+}
+
+resource "aws_iam_role" "backup" {
+  name_prefix = "${var.name}-backup-"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect    = "Allow"
+        Principal = { Service = "backup.amazonaws.com" }
+        Action    = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_iam_role_policy_attachment" "backup" {
+  role       = aws_iam_role.backup.name
+  policy_arn = data.aws_iam_policy.backup.arn
+}
+
+resource "aws_backup_vault" "database" {
+  name        = "${var.name}-aurora-backup"
+  kms_key_arn = aws_kms_key.database.arn
+  tags        = var.tags
+}
+
+resource "aws_backup_plan" "database" {
+  name = "${var.name}-aurora-backup"
+
+  rule {
+    rule_name         = "daily-backup"
+    target_vault_name = aws_backup_vault.database.name
+    schedule          = "cron(0 5 ? * * *)"
+
+    lifecycle {
+      delete_after = 35
+    }
+  }
+
+  tags = var.tags
+}
+
+resource "aws_backup_selection" "database" {
+  name         = "${var.name}-aurora"
+  plan_id      = aws_backup_plan.database.id
+  iam_role_arn = aws_iam_role.backup.arn
+
+  resources = [aws_rds_cluster.database.arn]
 }
 
 output "cluster_arn" {
@@ -444,7 +564,7 @@ output "admin_user" {
 output "database_url" {
   description = "Database connection URL composed from the generated secret."
   value = format(
-    "%s://%s:%s@%s:%s%s%s",
+    "%s://%s:%s@%s:%s%s%s", #checkov:skip=CKV_SECRET_4:Format string template, not a hardcoded credential
     local.database_url_scheme,
     jsondecode(aws_secretsmanager_secret_version.credentials.secret_string).username,
     jsondecode(aws_secretsmanager_secret_version.credentials.secret_string).password,

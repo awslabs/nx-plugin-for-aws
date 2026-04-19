@@ -180,7 +180,7 @@ module "appconfig" {
 resource "aws_ecr_repository" "migration_handler" {
   #checkov:skip=CKV_AWS_136:AES256 encryption is sufficient for ECR repositories
   name                 = "<%= nameKebabCase %>-migration-${random_string.suffix.result}"
-  image_tag_mutability = "MUTABLE"
+  image_tag_mutability = "IMMUTABLE"
   force_delete         = true
 
   image_scanning_configuration {
@@ -392,30 +392,55 @@ resource "aws_security_group" "migration_handler" {
   name_prefix = "<%= nameKebabCase %>-migration-"
   description = "Security group for the migration Lambda function"
   vpc_id      = var.vpc_id
+  tags        = var.tags
+}
 
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+resource "aws_vpc_security_group_egress_rule" "migration_handler_to_database" {
+<%_ if (engine === 'mysql') { _%>
+  security_group_id            = aws_security_group.migration_handler.id
+  referenced_security_group_id = module.aurora.database_security_group_id
+<%_ } else { _%>
+  security_group_id            = aws_security_group.migration_handler.id
+  referenced_security_group_id = module.aurora.security_group_id
+<%_ } _%>
+  from_port   = module.aurora.cluster_port
+  to_port     = module.aurora.cluster_port
+  ip_protocol = "tcp"
+  description = "Allow outbound traffic to Aurora on database port"
+}
 
-  tags = var.tags
+resource "aws_vpc_security_group_egress_rule" "migration_handler_https" {
+  security_group_id = aws_security_group.migration_handler.id
+  cidr_ipv4         = "0.0.0.0/0"
+  from_port         = 443
+  to_port           = 443
+  ip_protocol       = "tcp"
+  description       = "Allow outbound HTTPS to AWS service endpoints"
 }
 
 resource "aws_security_group" "create_db_user" {
   name_prefix = "<%= nameKebabCase %>-create-db-user-"
   description = "Security group for the create-db-user Lambda function"
   vpc_id      = var.vpc_id
+  tags        = var.tags
+}
 
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+resource "aws_vpc_security_group_egress_rule" "create_db_user_to_database" {
+  security_group_id            = aws_security_group.create_db_user.id
+  referenced_security_group_id = module.aurora.database_security_group_id
+  from_port                    = module.aurora.cluster_port
+  to_port                      = module.aurora.cluster_port
+  ip_protocol                  = "tcp"
+  description                  = "Allow outbound traffic to Aurora on database port"
+}
 
-  tags = var.tags
+resource "aws_vpc_security_group_egress_rule" "create_db_user_https" {
+  security_group_id = aws_security_group.create_db_user.id
+  cidr_ipv4         = "0.0.0.0/0"
+  from_port         = 443
+  to_port           = 443
+  ip_protocol       = "tcp"
+  description       = "Allow outbound HTTPS to AWS service endpoints"
 }
 
 resource "aws_vpc_security_group_ingress_rule" "migration_handler_to_database" {
@@ -428,6 +453,7 @@ resource "aws_vpc_security_group_ingress_rule" "migration_handler_to_database" {
   from_port                    = module.aurora.cluster_port
   to_port                      = module.aurora.cluster_port
   ip_protocol                  = "tcp"
+  description                  = "Allow inbound traffic from migration Lambda on database port"
 }
 
 resource "aws_vpc_security_group_ingress_rule" "create_db_user_to_database" {
@@ -436,12 +462,14 @@ resource "aws_vpc_security_group_ingress_rule" "create_db_user_to_database" {
   from_port                    = module.aurora.cluster_port
   to_port                      = module.aurora.cluster_port
   ip_protocol                  = "tcp"
+  description                  = "Allow inbound traffic from create-db-user Lambda on database port"
 }
 
 resource "aws_lambda_function" "create_db_user" {
   #checkov:skip=CKV_AWS_116:Dead Letter Queue not required for the create-db-user handler
   #checkov:skip=CKV_AWS_115:Concurrent execution limit not required for the create-db-user handler
   #checkov:skip=CKV_AWS_173:Lambda environment variables encrypted by managed key
+  #checkov:skip=CKV_AWS_272:Code signing not configured as deployment packages are built and deployed within the same pipeline
   filename         = data.archive_file.create_db_user_zip.output_path
   function_name    = local.create_db_user_function_name
   role             = aws_iam_role.create_db_user.arn
@@ -513,6 +541,7 @@ resource "aws_lambda_function" "migration_handler" {
   #checkov:skip=CKV_AWS_116:Dead Letter Queue not required for the migration handler
   #checkov:skip=CKV_AWS_115:Concurrent execution limit not required for the migration handler
   #checkov:skip=CKV_AWS_173:Lambda environment variables encrypted by managed key
+  #checkov:skip=CKV_AWS_272:Code signing does not apply to container image Lambda functions
   package_type  = "Image"
   function_name = local.migration_function_name
   role          = aws_iam_role.migration_handler.arn
