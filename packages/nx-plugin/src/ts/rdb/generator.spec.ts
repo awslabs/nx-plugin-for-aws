@@ -111,6 +111,7 @@ describe('ts#rdb generator', () => {
     expect(prismaFile).toContain("export const DB_PACKAGE_NAME = 'Db';");
     expect(prismaFile).toContain('password: async () => {');
     expect(prismaFile).toContain('await getDatabaseConfig(DB_PACKAGE_NAME)');
+    expect(prismaFile).toContain('allowExitOnIdle: true,');
     expect(migrationHandler).toContain(
       "import { Signer } from '@aws-sdk/rds-signer';",
     );
