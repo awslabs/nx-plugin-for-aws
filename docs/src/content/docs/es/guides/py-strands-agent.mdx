@@ -12,7 +12,7 @@ import Infrastructure from '@components/infrastructure.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import Drawer from '@components/drawer.astro';
 
-Genera un [Agente Strands](https://strandsagents.com/) en Python para construir agentes de IA con herramientas, y opcionalmente desplegarlo en [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/). Por defecto, el generador usa [FastAPI](https://fastapi.tiangolo.com/) para exponer un servidor HTTP. Alternativamente, puedes elegir el protocolo [Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) para interoperabilidad con otros agentes compatibles con A2A.
+Genera un [Agente Strands](https://strandsagents.com/) en Python para construir agentes de IA con herramientas, y opcionalmente desplegarlo en [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/). Por defecto, el generador usa [FastAPI](https://fastapi.tiangolo.com/) para exponer un servidor HTTP. Alternativamente, puedes elegir el protocolo [Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) para interoperabilidad con otros agentes compatibles con A2A, o el protocolo [AG-UI](https://docs.ag-ui.com/) para integración directa con el frontend mediante [CopilotKit](https://docs.copilotkit.ai/aws-strands).
 
 ## ¿Qué es Strands?
 
@@ -75,6 +75,26 @@ Cuando `protocol` se establece en `A2A`, el punto de entrada usa el [Strands A2A
     - pyproject.toml Actualizado con dependencias de Strands
     - project.json Actualizado con objetivos de servicio del agente
 </FileTree>
+
+### Protocolo AG-UI
+
+Cuando `protocol` se establece en `AG-UI`, el punto de entrada usa la integración [ag-ui-strands](https://docs.ag-ui.com/), que expone tu agente mediante el protocolo AG-UI para integración directa con el frontend usando [CopilotKit](https://docs.copilotkit.ai/aws-strands):
+
+<FileTree>
+  - your-project/
+    - your_module/
+      - agent/ (o nombre personalizado si se especifica)
+        - \_\_init\_\_.py Inicialización del paquete Python
+        - agent.py Definición principal del agente con herramientas de ejemplo
+        - main.py Punto de entrada del servidor AG-UI usando ag-ui-strands
+        - Dockerfile Punto de entrada para alojar tu agente (excluido cuando `computeType` es `None`)
+    - pyproject.toml Actualizado con dependencias de Strands y AG-UI
+    - project.json Actualizado con objetivos de servicio del agente
+</FileTree>
+
+:::tip[Conectar a un sitio web React]
+Los agentes AG-UI pueden conectarse a un frontend React usando el <Link path="/guides/connection/react-agui">generador de conexión `react` → agente AG-UI</Link>, que configurará los componentes de [CopilotKit](https://docs.copilotkit.ai/aws-strands) para una experiencia de chat enriquecida.
+:::
 
 ### Infraestructura
 
@@ -194,12 +214,13 @@ Para una guía detallada sobre cómo escribir agentes Strands, consulta la [docu
 
 ## Protocolo
 
-El protocolo de servidor de tu agente determina cómo se comunica. Ambas opciones son servidas por [FastAPI](https://fastapi.tiangolo.com/) — el punto de entrada difiere:
+El protocolo de servidor de tu agente determina cómo se comunica. Todas las opciones son servidas por [FastAPI](https://fastapi.tiangolo.com/) — el punto de entrada difiere:
 
 - **HTTP** (por defecto): Un servidor FastAPI estándar con un endpoint personalizado `/invocations`, CORS y streaming. Mejor para integraciones de clientes personalizados.
 - **A2A**: El [Strands A2A Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent) montado sobre una aplicación FastAPI. Mejor cuando tu agente necesita ser descubrible e invocable por otros agentes compatibles con A2A.
+- **AG-UI**: La integración [ag-ui-strands](https://docs.ag-ui.com/), que expone el [protocolo AG-UI](https://docs.ag-ui.com/) mediante SSE. Mejor para integración directa con el frontend usando [CopilotKit](https://docs.copilotkit.ai/aws-strands) en un sitio web React.
 
-Ambos protocolos exponen `/ping` para el contrato de verificación de salud del runtime de AgentCore. Los agentes A2A escuchan en el puerto `9000` (vs `8080` para HTTP); el Dockerfile y la infraestructura generados están configurados para ti.
+Todos los protocolos exponen `/ping` para el contrato de verificación de salud del runtime de AgentCore. Los agentes A2A escuchan en el puerto `9000`; los agentes HTTP y AG-UI escuchan en el puerto `8080`. El Dockerfile y la infraestructura generados están configurados para ti.
 
 ## Servidor FastAPI (protocolo HTTP)
 
@@ -288,6 +309,16 @@ Como el generador provee infraestructura CDK/Terraform para desplegar tu agente,
 Cuando `protocol=A2A`, el `main.py` generado monta `A2AServer.to_fastapi_app()` sobre una aplicación FastAPI padre que también expone `/ping`. Cuando se despliega en AgentCore, el punto de entrada resuelve el ARN público del runtime desde AppConfig y lo anuncia en la tarjeta del agente.
 
 La mayoría de los usuarios no necesitarán modificar este archivo — edita `agent.py` para cambiar herramientas o el prompt del sistema. El servidor A2A puebla la tarjeta del agente (`/.well-known/agent-card.json`) desde el `name` y `description` del constructor `Agent`.
+
+## Servidor AG-UI (protocolo AG-UI)
+
+Cuando `protocol=AG-UI`, el `main.py` generado envuelve tu `Agent` de Strands en un `ag_ui_strands.StrandsAgent` y crea una aplicación FastAPI mediante `create_strands_app()`. La aplicación resultante expone un único endpoint POST que transmite eventos de [AG-UI](https://docs.ag-ui.com/) mediante Server-Sent Events (SSE), así como `/ping` para la verificación de salud del runtime de AgentCore.
+
+La mayoría de los usuarios no necesitarán modificar este archivo — edita `agent.py` para cambiar herramientas o el prompt del sistema.
+
+:::tip[Conectar a un sitio web React]
+Los agentes AG-UI están diseñados para ser consumidos directamente por un frontend. Usa el <Link path="/guides/connection/react-agui">generador de conexión `react` → agente AG-UI</Link> para conectar tu sitio web React al agente con un proveedor de [CopilotKit](https://docs.copilotkit.ai/aws-strands) y un cliente [AG-UI HttpAgent](https://docs.ag-ui.com/).
+:::
 
 ## Ejecutando tu Agente Strands
 

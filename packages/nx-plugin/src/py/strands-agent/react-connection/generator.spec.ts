@@ -469,5 +469,375 @@ describe(
       const openApiScriptPath = `${agentProjectConfig.root}/scripts/agent_openapi.py`;
       expect(tree.exists(openApiScriptPath)).toBeTruthy();
     });
+
+    it('should configure AG-UI (CopilotKit) integration for AG-UI protocol agents', async () => {
+      // Generate a py project for the agent
+      await pyProjectGenerator(tree, {
+        name: 'agent-project',
+        projectType: 'application',
+      });
+
+      // Generate a py strands agent with AG-UI protocol
+      await pyStrandsAgentGenerator(tree, {
+        project: 'agent_project',
+        computeType: 'None',
+        protocol: 'AG-UI',
+      });
+
+      const agentProjectConfig = readProjectConfiguration(
+        tree,
+        'proj.agent_project',
+      );
+      const agentComponent = (agentProjectConfig.metadata as any)
+        ?.components?.[0];
+
+      await pyStrandsAgentReactConnectionGenerator(tree, {
+        sourceProject: 'frontend',
+        targetProject: 'agent_project',
+        targetComponent: agentComponent,
+      });
+
+      const agentNameClassName = agentComponent.rc;
+
+      // AG-UI creates a single shared AguiProvider and a per-agent hook
+      expect(
+        tree.exists('frontend/src/components/AguiProvider.tsx'),
+      ).toBeTruthy();
+      expect(
+        tree.exists(`frontend/src/hooks/useAgui${agentNameClassName}.tsx`),
+      ).toBeTruthy();
+
+      // AG-UI should NOT generate OpenAPI scripts / hooks
+      expect(
+        tree.exists(`${agentProjectConfig.root}/scripts/agent_openapi.py`),
+      ).toBeFalsy();
+
+      // main.tsx should wrap <App /> with the shared AguiProvider
+      expect(
+        await matchGritQL(
+          tree,
+          'frontend/src/main.tsx',
+          '`<AguiProvider>$_</AguiProvider>`',
+        ),
+      ).toBe(true);
+
+      // AguiProvider should call the agent's hook and spread it into selfManagedAgents
+      const providerSrc = tree.read(
+        'frontend/src/components/AguiProvider.tsx',
+        'utf-8',
+      ) as string;
+      expect(providerSrc).toContain(`useAgui${agentNameClassName}`);
+
+      // CopilotKit + AG-UI client deps should be added to the root package.json.
+      // @copilotkit/react-core v2 ships both the provider and the chat
+      // components, so we don't need @copilotkit/react-ui.
+      const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+      expect(packageJson.dependencies['@copilotkit/react-core']).toBeDefined();
+      expect(packageJson.dependencies['@ag-ui/client']).toBeDefined();
+      expect(packageJson.dependencies['@copilotkit/react-ui']).toBeUndefined();
+
+      // serve-local should be wired up for the agent's continuous target
+      const frontendProject = readProjectConfiguration(tree, '@proj/frontend');
+      expect(frontendProject.targets['serve-local'].dependsOn).toContainEqual({
+        projects: expect.arrayContaining([
+          expect.stringContaining('agent_project'),
+        ]),
+        target: 'agent-serve-local',
+      });
+    });
   },
 );
+
+describe('py strands agent react connection generator - AG-UI protocol', () => {
+  let tree: Tree;
+
+  beforeEach(() => {
+    tree = createTreeUsingTsSolutionSetup();
+    tree.write(
+      'apps/frontend/project.json',
+      JSON.stringify({
+        name: 'frontend',
+        root: 'apps/frontend',
+        sourceRoot: 'apps/frontend/src',
+      }),
+    );
+    tree.write(
+      'apps/agent-project/project.json',
+      JSON.stringify({
+        name: 'agent-project',
+        root: 'apps/agent-project',
+        sourceRoot: 'apps/agent-project/agent_project',
+        metadata: {
+          components: [
+            {
+              generator: 'py#strands-agent',
+              name: 'agent',
+              path: 'agent_project/agent',
+              port: 8081,
+              rc: 'TestAgent',
+              auth: 'IAM',
+              protocol: 'AG-UI',
+            },
+          ],
+        },
+      }),
+    );
+    tree.write(
+      'apps/frontend/src/main.tsx',
+      `
+import { RouterProvider } from '@tanstack/react-router';
+
+const App = () => <RouterProvider router={router} />;
+
+export function Main() {
+  return <App />;
+}
+`,
+    );
+  });
+
+  it('should generate a shared AguiProvider and a per-agent hook for AG-UI agents', async () => {
+    await pyStrandsAgentReactConnectionGenerator(tree, {
+      sourceProject: 'frontend',
+      targetProject: 'agent-project',
+      targetComponent: {
+        generator: 'py#strands-agent',
+        name: 'agent',
+        path: 'agent_project/agent',
+        port: 8081,
+        rc: 'TestAgent',
+        auth: 'IAM',
+        protocol: 'AG-UI',
+      },
+    });
+
+    // Shared provider — only one of these, ever
+    expect(
+      tree.exists('apps/frontend/src/components/AguiProvider.tsx'),
+    ).toBeTruthy();
+    expect(
+      tree.read('apps/frontend/src/components/AguiProvider.tsx', 'utf-8'),
+    ).toMatchSnapshot('AguiProvider.tsx');
+
+    // Per-agent hook
+    expect(
+      tree.exists('apps/frontend/src/hooks/useAguiTestAgent.tsx'),
+    ).toBeTruthy();
+    expect(
+      tree.read('apps/frontend/src/hooks/useAguiTestAgent.tsx', 'utf-8'),
+    ).toMatchSnapshot('useAguiTestAgent.tsx');
+
+    // Provider calls the per-agent hook
+    const providerSrc = tree.read(
+      'apps/frontend/src/components/AguiProvider.tsx',
+      'utf-8',
+    ) as string;
+    expect(providerSrc).toContain(`useAguiTestAgent`);
+
+    // AG-UI does NOT generate the OpenAPI-based provider/hooks
+    expect(
+      tree.exists('apps/frontend/src/components/TestAgentProvider.tsx'),
+    ).toBeFalsy();
+    expect(
+      tree.exists('apps/agent-project/scripts/agent_openapi.py'),
+    ).toBeFalsy();
+  });
+
+  it('should wrap <App /> in the shared AguiProvider in main.tsx', async () => {
+    await pyStrandsAgentReactConnectionGenerator(tree, {
+      sourceProject: 'frontend',
+      targetProject: 'agent-project',
+      targetComponent: {
+        generator: 'py#strands-agent',
+        name: 'agent',
+        path: 'agent_project/agent',
+        port: 8081,
+        rc: 'TestAgent',
+        auth: 'IAM',
+        protocol: 'AG-UI',
+      },
+    });
+
+    expect(
+      await matchGritQL(
+        tree,
+        'apps/frontend/src/main.tsx',
+        '`<AguiProvider>$_</AguiProvider>`',
+      ),
+    ).toBe(true);
+  });
+
+  it('should add CopilotKit and AG-UI client dependencies for AG-UI agents', async () => {
+    await pyStrandsAgentReactConnectionGenerator(tree, {
+      sourceProject: 'frontend',
+      targetProject: 'agent-project',
+      targetComponent: {
+        generator: 'py#strands-agent',
+        name: 'agent',
+        path: 'agent_project/agent',
+        port: 8081,
+        rc: 'TestAgent',
+        auth: 'Cognito',
+        protocol: 'AG-UI',
+      },
+    });
+
+    const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+    expect(packageJson.dependencies['@copilotkit/react-core']).toBeDefined();
+    expect(packageJson.dependencies['@ag-ui/client']).toBeDefined();
+    expect(packageJson.dependencies['react-oidc-context']).toBeDefined();
+    expect(packageJson.dependencies['@copilotkit/react-ui']).toBeUndefined();
+  });
+
+  it('should generate SigV4 hook for AG-UI agents with IAM auth', async () => {
+    await pyStrandsAgentReactConnectionGenerator(tree, {
+      sourceProject: 'frontend',
+      targetProject: 'agent-project',
+      targetComponent: {
+        generator: 'py#strands-agent',
+        name: 'agent',
+        path: 'agent_project/agent',
+        port: 8081,
+        rc: 'TestAgent',
+        auth: 'IAM',
+        protocol: 'AG-UI',
+      },
+    });
+
+    expect(tree.exists('apps/frontend/src/hooks/useSigV4.tsx')).toBeTruthy();
+  });
+
+  it('should register multiple AG-UI agents in the shared AguiProvider', async () => {
+    // Mock a second agent-project so we can "connect" two agents
+    tree.write(
+      'apps/second-agent/project.json',
+      JSON.stringify({
+        name: 'second-agent',
+        root: 'apps/second-agent',
+        sourceRoot: 'apps/second-agent/second_agent',
+        metadata: {
+          components: [
+            {
+              generator: 'py#strands-agent',
+              name: 'second',
+              path: 'second_agent/second',
+              port: 8082,
+              rc: 'ResearchAgent',
+              auth: 'Cognito',
+              protocol: 'AG-UI',
+            },
+          ],
+        },
+      }),
+    );
+
+    // First connection: TestAgent (IAM)
+    await pyStrandsAgentReactConnectionGenerator(tree, {
+      sourceProject: 'frontend',
+      targetProject: 'agent-project',
+      targetComponent: {
+        generator: 'py#strands-agent',
+        name: 'agent',
+        path: 'agent_project/agent',
+        port: 8081,
+        rc: 'TestAgent',
+        auth: 'IAM',
+        protocol: 'AG-UI',
+      },
+    });
+
+    // Second connection: ResearchAgent (Cognito)
+    await pyStrandsAgentReactConnectionGenerator(tree, {
+      sourceProject: 'frontend',
+      targetProject: 'second-agent',
+      targetComponent: {
+        generator: 'py#strands-agent',
+        name: 'second',
+        path: 'second_agent/second',
+        port: 8082,
+        rc: 'ResearchAgent',
+        auth: 'Cognito',
+        protocol: 'AG-UI',
+      },
+    });
+
+    // Both per-agent hooks exist
+    expect(
+      tree.exists('apps/frontend/src/hooks/useAguiTestAgent.tsx'),
+    ).toBeTruthy();
+    expect(
+      tree.exists('apps/frontend/src/hooks/useAguiResearchAgent.tsx'),
+    ).toBeTruthy();
+
+    // Provider calls both hooks and spreads both into selfManagedAgents
+    const providerSrc = tree.read(
+      'apps/frontend/src/components/AguiProvider.tsx',
+      'utf-8',
+    ) as string;
+    expect(providerSrc).toContain('useAguiTestAgent');
+    expect(providerSrc).toContain('useAguiResearchAgent');
+    expect(providerSrc).toContain('...testAgentAgents');
+    expect(providerSrc).toContain('...researchAgentAgents');
+    // Snapshot the two-agent provider so we can eyeball the AST-patched output
+    expect(providerSrc).toMatchSnapshot('AguiProvider-multi-agent.tsx');
+
+    // main.tsx only has ONE AguiProvider wrapping <App />
+    const mainSrc = tree.read('apps/frontend/src/main.tsx', 'utf-8') as string;
+    expect(mainSrc.match(/<AguiProvider>/g)?.length).toBe(1);
+  });
+
+  it('should be idempotent when the same connection is re-run', async () => {
+    const run = () =>
+      pyStrandsAgentReactConnectionGenerator(tree, {
+        sourceProject: 'frontend',
+        targetProject: 'agent-project',
+        targetComponent: {
+          generator: 'py#strands-agent',
+          name: 'agent',
+          path: 'agent_project/agent',
+          port: 8081,
+          rc: 'TestAgent',
+          auth: 'IAM',
+          protocol: 'AG-UI',
+        },
+      });
+
+    await run();
+    const providerFirst = tree.read(
+      'apps/frontend/src/components/AguiProvider.tsx',
+      'utf-8',
+    ) as string;
+    const mainFirst = tree.read(
+      'apps/frontend/src/main.tsx',
+      'utf-8',
+    ) as string;
+
+    await run();
+    const providerSecond = tree.read(
+      'apps/frontend/src/components/AguiProvider.tsx',
+      'utf-8',
+    ) as string;
+    const mainSecond = tree.read(
+      'apps/frontend/src/main.tsx',
+      'utf-8',
+    ) as string;
+
+    // Re-running with the same agent produces byte-identical output
+    expect(providerSecond).toBe(providerFirst);
+    // main.tsx still has exactly one AguiProvider wrapper
+    expect(mainSecond.match(/<AguiProvider>/g)?.length).toBe(1);
+    // And the second import of AguiProvider is not duplicated
+    expect(
+      (
+        mainSecond.match(
+          /import AguiProvider from '\.\/components\/AguiProvider';/g,
+        ) || []
+      ).length +
+        (mainSecond.match(/from '\.\/components\/AguiProvider'/g) || []).length,
+    ).toBeGreaterThan(0);
+    // Sanity: no duplicate imports of the hook either
+    expect((providerSecond.match(/useAguiTestAgent/g) || []).length).toBe(
+      providerFirst.match(/useAguiTestAgent/g)?.length,
+    );
+  });
+});

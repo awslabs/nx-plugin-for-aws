@@ -12,7 +12,7 @@ import Infrastructure from '@components/infrastructure.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import Drawer from '@components/drawer.astro';
 
-도구를 갖춘 AI 에이전트를 구축하고 선택적으로 [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/)에 배포할 수 있는 Python [Strands Agent](https://strandsagents.com/)를 생성합니다. 기본적으로 생성기는 [FastAPI](https://fastapi.tiangolo.com/)를 사용하여 HTTP 서버를 노출합니다. 또는 다른 A2A 호환 에이전트와의 상호 운용성을 위해 [Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) 프로토콜을 선택할 수 있습니다.
+도구를 갖춘 AI 에이전트를 구축하고 선택적으로 [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/)에 배포할 수 있는 Python [Strands Agent](https://strandsagents.com/)를 생성합니다. 기본적으로 생성기는 [FastAPI](https://fastapi.tiangolo.com/)를 사용하여 HTTP 서버를 노출합니다. 또는 다른 A2A 호환 에이전트와의 상호 운용성을 위해 [Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) 프로토콜을 선택하거나, [CopilotKit](https://docs.copilotkit.ai/aws-strands)을 통한 직접적인 프론트엔드 통합을 위해 [AG-UI](https://docs.ag-ui.com/) 프로토콜을 선택할 수 있습니다.
 
 ## Strands란?
 
@@ -75,6 +75,26 @@ import Drawer from '@components/drawer.astro';
     - pyproject.toml Strands 종속성으로 업데이트
     - project.json 에이전트 서빙 타겟으로 업데이트
 </FileTree>
+
+### AG-UI 프로토콜
+
+`protocol`이 `AG-UI`로 설정되면 진입점은 [ag-ui-strands](https://docs.ag-ui.com/) 통합을 사용하며, [CopilotKit](https://docs.copilotkit.ai/aws-strands)과의 직접적인 프론트엔드 통합을 위해 AG-UI 프로토콜을 통해 에이전트를 노출합니다:
+
+<FileTree>
+  - your-project/
+    - your_module/
+      - agent/ (지정한 경우 사용자 정의 이름 사용)
+        - \_\_init\_\_.py 파이썬 패키지 초기화
+        - agent.py 샘플 도구가 포함된 주요 에이전트 정의
+        - main.py ag-ui-strands를 사용하는 AG-UI 서버 진입점
+        - Dockerfile 에이전트 호스팅용 진입점 (`computeType`이 `None`으로 설정된 경우 제외)
+    - pyproject.toml Strands 및 AG-UI 종속성으로 업데이트
+    - project.json 에이전트 서빙 타겟으로 업데이트
+</FileTree>
+
+:::tip[React 웹사이트에 연결]
+AG-UI 에이전트는 <Link path="/guides/connection/react-agui">`react` → AG-UI agent connection generator</Link>를 사용하여 React 프론트엔드에 연결할 수 있으며, 풍부한 채팅 경험을 위한 [CopilotKit](https://docs.copilotkit.ai/aws-strands) 컴포넌트를 설정합니다.
+:::
 
 ### 인프라
 
@@ -194,12 +214,13 @@ Strands 에이전트 작성에 대한 심층 가이드는 [Strands 문서](https
 
 ## 프로토콜
 
-에이전트의 서버 프로토콜은 통신 방식을 결정합니다. 두 옵션 모두 [FastAPI](https://fastapi.tiangolo.com/)에서 제공되며 진입점이 다릅니다:
+에이전트의 서버 프로토콜은 통신 방식을 결정합니다. 모든 옵션은 [FastAPI](https://fastapi.tiangolo.com/)에서 제공되며 진입점이 다릅니다:
 
 - **HTTP** (기본값): 사용자 정의 `/invocations` 엔드포인트, CORS 및 스트리밍이 포함된 표준 FastAPI 서버. 사용자 정의 클라이언트 통합에 최적.
 - **A2A**: FastAPI 앱에 마운트된 [Strands A2A Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent). 에이전트가 다른 A2A 호환 에이전트에 의해 검색 및 호출 가능해야 할 때 최적.
+- **AG-UI**: SSE를 통해 [AG-UI 프로토콜](https://docs.ag-ui.com/)을 노출하는 [ag-ui-strands](https://docs.ag-ui.com/) 통합. React 웹사이트에서 [CopilotKit](https://docs.copilotkit.ai/aws-strands)과의 직접적인 프론트엔드 통합에 최적.
 
-두 프로토콜 모두 AgentCore 런타임 헬스 체크 계약을 위해 `/ping`을 노출합니다. A2A 에이전트는 포트 `9000`(HTTP의 경우 `8080`)에서 수신하며, 생성된 Dockerfile 및 인프라가 자동으로 구성됩니다.
+모든 프로토콜은 AgentCore 런타임 헬스 체크 계약을 위해 `/ping`을 노출합니다. A2A 에이전트는 포트 `9000`에서 수신하고, HTTP 및 AG-UI 에이전트는 포트 `8080`에서 수신합니다. 생성된 Dockerfile 및 인프라가 자동으로 구성됩니다.
 
 ## FastAPI 서버 (HTTP 프로토콜)
 
@@ -288,6 +309,16 @@ SDK 기능에 대한 자세한 내용은 [문서](https://aws.github.io/bedrock-
 `protocol=A2A`인 경우 생성된 `main.py`는 `/ping`도 노출하는 상위 FastAPI 앱에 `A2AServer.to_fastapi_app()`을 마운트합니다. AgentCore에 배포되면 진입점은 AppConfig에서 런타임의 공개 ARN을 확인하고 에이전트 카드에 광고합니다.
 
 대부분의 사용자는 이 파일을 수정할 필요가 없습니다 — 도구나 시스템 프롬프트를 변경하려면 `agent.py`를 편집하세요. A2A 서버는 `Agent` 생성자의 `name` 및 `description`에서 에이전트 카드(`/.well-known/agent-card.json`)를 채웁니다.
+
+## AG-UI 서버 (AG-UI 프로토콜)
+
+`protocol=AG-UI`인 경우 생성된 `main.py`는 Strands `Agent`를 `ag_ui_strands.StrandsAgent`로 래핑하고 `create_strands_app()`을 통해 FastAPI 앱을 생성합니다. 결과 앱은 Server-Sent Events(SSE)를 통해 [AG-UI](https://docs.ag-ui.com/) 이벤트를 스트리밍하는 단일 POST 엔드포인트와 AgentCore 런타임 헬스 체크를 위한 `/ping`을 노출합니다.
+
+대부분의 사용자는 이 파일을 수정할 필요가 없습니다 — 도구나 시스템 프롬프트를 변경하려면 `agent.py`를 편집하세요.
+
+:::tip[React 웹사이트에 연결]
+AG-UI 에이전트는 프론트엔드에서 직접 사용되도록 설계되었습니다. <Link path="/guides/connection/react-agui">`react` → AG-UI agent connection generator</Link>를 사용하여 [CopilotKit](https://docs.copilotkit.ai/aws-strands) 프로바이더와 [AG-UI HttpAgent](https://docs.ag-ui.com/) 클라이언트로 React 웹사이트를 에이전트에 연결하세요.
+:::
 
 ## Strands 에이전트 실행
 

@@ -12,7 +12,7 @@ import Infrastructure from '@components/infrastructure.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import Drawer from '@components/drawer.astro';
 
-生成一个用于构建AI智能体工具的Python [Strands Agent](https://strandsagents.com/)，并可选部署到[Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/)。默认情况下，生成器使用[FastAPI](https://fastapi.tiangolo.com/)暴露HTTP服务器。或者，您可以选择[Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html)协议，以实现与其他A2A兼容智能体的互操作性。
+生成一个用于构建AI智能体工具的Python [Strands Agent](https://strandsagents.com/)，并可选部署到[Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/)。默认情况下，生成器使用[FastAPI](https://fastapi.tiangolo.com/)暴露HTTP服务器。或者，您可以选择[Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html)协议，以实现与其他A2A兼容智能体的互操作性，或选择[AG-UI](https://docs.ag-ui.com/)协议，通过[CopilotKit](https://docs.copilotkit.ai/aws-strands)直接集成前端。
 
 ## 什么是Strands？
 
@@ -75,6 +75,26 @@ import Drawer from '@components/drawer.astro';
     - pyproject.toml 更新Strands依赖
     - project.json 更新服务目标配置
 </FileTree>
+
+### AG-UI协议
+
+当`protocol`设为`AG-UI`时，入口点使用[ag-ui-strands](https://docs.ag-ui.com/)集成，通过AG-UI协议暴露智能体，以便直接与[CopilotKit](https://docs.copilotkit.ai/aws-strands)进行前端集成：
+
+<FileTree>
+  - your-project/
+    - your_module/
+      - agent/ (可自定义名称)
+        - \_\_init\_\_.py Python包初始化文件
+        - agent.py 主智能体定义（含示例工具）
+        - main.py 使用ag-ui-strands的AG-UI服务器入口点
+        - Dockerfile 智能体托管入口文件（当`computeType`设为`None`时不生成）
+    - pyproject.toml 更新Strands和AG-UI依赖
+    - project.json 更新服务目标配置
+</FileTree>
+
+:::tip[连接到React网站]
+AG-UI智能体可以使用<Link path="/guides/connection/react-agui">`react` → AG-UI智能体连接生成器</Link>连接到React前端，该生成器将设置[CopilotKit](https://docs.copilotkit.ai/aws-strands)组件以提供丰富的聊天体验。
+:::
 
 ### 基础设施
 
@@ -194,12 +214,13 @@ agent = Agent(model=bedrock_model)
 
 ## 协议
 
-智能体的服务器协议决定其通信方式。两种选项都由[FastAPI](https://fastapi.tiangolo.com/)提供服务——区别在于入口点：
+智能体的服务器协议决定其通信方式。所有选项都由[FastAPI](https://fastapi.tiangolo.com/)提供服务——区别在于入口点：
 
 - **HTTP**（默认）：标准FastAPI服务器，带有自定义`/invocations`端点、CORS和流式传输。最适合自定义客户端集成。
 - **A2A**：将[Strands A2A Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent)挂载到FastAPI应用上。最适合需要被其他A2A兼容智能体发现和调用的场景。
+- **AG-UI**：[ag-ui-strands](https://docs.ag-ui.com/)集成，通过SSE暴露[AG-UI协议](https://docs.ag-ui.com/)。最适合在React网站中通过[CopilotKit](https://docs.copilotkit.ai/aws-strands)直接集成前端。
 
-两种协议都暴露`/ping`端点以满足AgentCore运行时健康检查契约。A2A智能体监听端口`9000`（HTTP为`8080`）；生成的Dockerfile和基础设施已为您配置。
+所有协议都暴露`/ping`端点以满足AgentCore运行时健康检查契约。A2A智能体监听端口`9000`；HTTP和AG-UI智能体监听端口`8080`。生成的Dockerfile和基础设施已为您配置。
 
 ## FastAPI服务器（HTTP协议）
 
@@ -288,6 +309,16 @@ SDK功能详情请参阅[文档](https://aws.github.io/bedrock-agentcore-starter
 当`protocol=A2A`时，生成的`main.py`将`A2AServer.to_fastapi_app()`挂载到父FastAPI应用上，该应用同时暴露`/ping`端点。部署到AgentCore时，入口点会从AppConfig解析运行时的公共ARN，并在智能体卡片中发布。
 
 大多数用户无需修改此文件——编辑`agent.py`即可更改工具或系统提示。A2A服务器从`Agent`构造函数的`name`和`description`填充智能体卡片（`/.well-known/agent-card.json`）。
+
+## AG-UI服务器（AG-UI协议）
+
+当`protocol=AG-UI`时，生成的`main.py`将您的Strands `Agent`包装在`ag_ui_strands.StrandsAgent`中，并通过`create_strands_app()`创建FastAPI应用。生成的应用暴露一个POST端点，通过Server-Sent Events (SSE)流式传输[AG-UI](https://docs.ag-ui.com/)事件，以及用于AgentCore运行时健康检查的`/ping`端点。
+
+大多数用户无需修改此文件——编辑`agent.py`即可更改工具或系统提示。
+
+:::tip[连接到React网站]
+AG-UI智能体设计为可直接被前端使用。使用<Link path="/guides/connection/react-agui">`react` → AG-UI智能体连接生成器</Link>，通过[CopilotKit](https://docs.copilotkit.ai/aws-strands)提供器和[AG-UI HttpAgent](https://docs.ag-ui.com/)客户端将您的React网站连接到智能体。
+:::
 
 ## 运行Strands智能体
 
