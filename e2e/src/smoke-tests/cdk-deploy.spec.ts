@@ -211,15 +211,20 @@ async function invokeAgentCoreA2a(
   const baseUrl = `https://bedrock-agentcore.${region}.amazonaws.com/runtimes/${encodedArn}/invocations/`;
   const sessionId = 'abcdefghijklmnopqrstuvwxyz0123456789';
 
-  const credentials = await fromNodeProviderChain()();
-  const awsClient = new AwsClient({
-    accessKeyId: credentials.accessKeyId,
-    secretAccessKey: credentials.secretAccessKey,
-    sessionToken: credentials.sessionToken,
-    service: 'bedrock-agentcore',
-    region,
-  });
+  // Fetch fresh credentials inside the fetch implementation so every
+  // request signs with current credentials (and a current signature
+  // timestamp via a newly-constructed AwsClient). The provider memoizes
+  // and auto-refreshes on expiry, so this is cheap on the hot path.
+  const credentialsProvider = fromNodeProviderChain();
   const sigv4Fetch: typeof fetch = async (input, init) => {
+    const credentials = await credentialsProvider();
+    const awsClient = new AwsClient({
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      sessionToken: credentials.sessionToken,
+      service: 'bedrock-agentcore',
+      region,
+    });
     const headers = new Headers(init?.headers);
     if (!headers.has('X-Amzn-Bedrock-AgentCore-Runtime-Session-Id')) {
       headers.set('X-Amzn-Bedrock-AgentCore-Runtime-Session-Id', sessionId);
