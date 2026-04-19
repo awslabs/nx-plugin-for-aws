@@ -20,7 +20,8 @@ import {
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { addOpenApiReactClient } from '../../../utils/connection/open-api/react';
 import { ResolvedConnectionOptions } from '../../../connection/generator';
-import { toClassName, toSnakeCase } from '../../../utils/names';
+import { addAgentRuntimeToConnectionNamespace } from '../../../connection/agent-runtime-config';
+import { kebabCase, toClassName, toSnakeCase } from '../../../utils/names';
 import { sortObjectKeys } from '../../../utils/object';
 import { addPyStrandsAgentTargetToServeLocal } from './serve-local';
 
@@ -133,6 +134,14 @@ export const pyStrandsAgentReactConnectionGenerator = async (
       targetComponent,
     },
   );
+
+  // Expose the agent's runtime ARN to the frontend via the 'connection'
+  // namespace (which is published to runtime-config.json). The agent construct
+  // itself only registers to the 'agentcore' namespace by default.
+  await addAgentRuntimeToConnectionNamespace(tree, {
+    agentNameKebabCase: kebabCase(agentNameClassName),
+    agentNameClassName,
+  });
 
   await addGeneratorMetricsIfApplicable(tree, [
     PY_STRANDS_AGENT_REACT_CONNECTION_GENERATOR_INFO,

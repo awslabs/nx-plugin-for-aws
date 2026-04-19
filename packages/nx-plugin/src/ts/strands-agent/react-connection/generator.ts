@@ -15,7 +15,7 @@ import { runtimeConfigGenerator } from '../../react-website/runtime-config/gener
 import { toScopeAlias } from '../../../utils/npm-scope';
 import { withVersions } from '../../../utils/versions';
 import { addSingleImport, applyGritQL } from '../../../utils/ast';
-import { toClassName } from '../../../utils/names';
+import { kebabCase, toClassName } from '../../../utils/names';
 import { formatFilesInSubtree } from '../../../utils/format';
 import {
   ComponentMetadata,
@@ -26,6 +26,7 @@ import {
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { addStrandsAgentTargetToServeLocal } from './serve-local';
 import { ResolvedConnectionOptions } from '../../../connection/generator';
+import { addAgentRuntimeToConnectionNamespace } from '../../../connection/agent-runtime-config';
 
 export const TS_STRANDS_AGENT_REACT_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -161,6 +162,14 @@ export async function tsStrandsAgentReactConnectionGenerator(
       targetComponent,
     },
   );
+
+  // Expose the agent's runtime ARN to the frontend via the 'connection'
+  // namespace (which is published to runtime-config.json). The agent construct
+  // itself only registers to the 'agentcore' namespace by default.
+  await addAgentRuntimeToConnectionNamespace(tree, {
+    agentNameKebabCase: kebabCase(agentNameClassName),
+    agentNameClassName,
+  });
 
   addDependenciesToPackageJson(
     tree,
