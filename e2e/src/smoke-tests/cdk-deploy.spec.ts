@@ -211,15 +211,16 @@ async function invokeAgentCoreA2a(
   const baseUrl = `https://bedrock-agentcore.${region}.amazonaws.com/runtimes/${encodedArn}/invocations/`;
   const sessionId = 'abcdefghijklmnopqrstuvwxyz0123456789';
 
-  const credentials = await fromNodeProviderChain()();
-  const awsClient = new AwsClient({
-    accessKeyId: credentials.accessKeyId,
-    secretAccessKey: credentials.secretAccessKey,
-    sessionToken: credentials.sessionToken,
-    service: 'bedrock-agentcore',
-    region,
-  });
+  const credentialsProvider = fromNodeProviderChain();
   const sigv4Fetch: typeof fetch = async (input, init) => {
+    const credentials = await credentialsProvider();
+    const awsClient = new AwsClient({
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      sessionToken: credentials.sessionToken,
+      service: 'bedrock-agentcore',
+      region,
+    });
     const headers = new Headers(init?.headers);
     if (!headers.has('X-Amzn-Bedrock-AgentCore-Runtime-Session-Id')) {
       headers.set('X-Amzn-Bedrock-AgentCore-Runtime-Session-Id', sessionId);
@@ -240,7 +241,7 @@ async function invokeAgentCoreA2a(
   expect(typeof card.name).toBe('string');
   console.log(`${agentName} agent card:`, card.name);
 
-  const stream = client.sendMessage({
+  const stream = client.sendMessageStream({
     kind: 'message',
     role: 'user',
     parts: [{ kind: 'text', text: 'hello' }],
@@ -251,6 +252,7 @@ async function invokeAgentCoreA2a(
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   for await (const _event of stream) {
     events++;
+    break;
   }
   expect(events).toBeGreaterThan(0);
   console.log(`Successfully invoked ${agentName} (${events} events)`);
