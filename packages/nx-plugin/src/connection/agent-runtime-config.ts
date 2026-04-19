@@ -3,12 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { joinPathFragments, Tree } from '@nx/devkit';
-import { applyGritQL } from '../utils/ast';
+import { applyGritQL, matchGritQL } from '../utils/ast';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
   SHARED_TERRAFORM_DIR,
 } from '../utils/shared-constructs-constants';
+
+const CONNECTION_TF_MODULE_NAME =
+  'add_agent_runtime_to_connection_runtime_config';
 
 /**
  * Register the agent's runtime ARN in the 'connection' namespace so it is
@@ -59,14 +62,19 @@ export const addAgentRuntimeToConnectionNamespace = async (
     `${options.agentNameKebabCase}.tf`,
   );
   if (tree.exists(terraformConstructPath)) {
-    const source = tree.read(terraformConstructPath, 'utf-8')!;
-    if (!source.includes('add_agent_runtime_to_connection_runtime_config')) {
+    const alreadyPatched = await matchGritQL(
+      tree,
+      terraformConstructPath,
+      `language hcl\n\`module "${CONNECTION_TF_MODULE_NAME}" { $_ }\``,
+    );
+    if (!alreadyPatched) {
+      const source = tree.read(terraformConstructPath, 'utf-8')!;
       tree.write(
         terraformConstructPath,
         `${source.trimEnd()}
 
 # Also expose the agent runtime ARN to the frontend via the 'connection' namespace
-module "add_agent_runtime_to_connection_runtime_config" {
+module "${CONNECTION_TF_MODULE_NAME}" {
   source = "../../../core/runtime-config/entry"
 
   namespace = "connection"
