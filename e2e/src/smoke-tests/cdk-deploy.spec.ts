@@ -211,10 +211,6 @@ async function invokeAgentCoreA2a(
   const baseUrl = `https://bedrock-agentcore.${region}.amazonaws.com/runtimes/${encodedArn}/invocations/`;
   const sessionId = 'abcdefghijklmnopqrstuvwxyz0123456789';
 
-  // Fetch fresh credentials inside the fetch implementation so every
-  // request signs with current credentials (and a current signature
-  // timestamp via a newly-constructed AwsClient). The provider memoizes
-  // and auto-refreshes on expiry, so this is cheap on the hot path.
   const credentialsProvider = fromNodeProviderChain();
   const sigv4Fetch: typeof fetch = async (input, init) => {
     const credentials = await credentialsProvider();
@@ -245,10 +241,6 @@ async function invokeAgentCoreA2a(
   expect(typeof card.name).toBe('string');
   console.log(`${agentName} agent card:`, card.name);
 
-  // Use sendMessageStream (not sendMessage) so the test can break on the
-  // first SSE event. sendMessage is blocking and would wait for the full
-  // agent response, which routinely exceeds SigV4's 5-minute signature
-  // validity window on cold-started AgentCore runtimes.
   const stream = client.sendMessageStream({
     kind: 'message',
     role: 'user',
@@ -260,7 +252,6 @@ async function invokeAgentCoreA2a(
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   for await (const _event of stream) {
     events++;
-    // One event is enough to prove the agent is reachable end-to-end.
     break;
   }
   expect(events).toBeGreaterThan(0);
