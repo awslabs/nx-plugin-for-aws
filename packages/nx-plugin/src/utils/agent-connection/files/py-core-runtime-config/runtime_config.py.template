@@ -1,0 +1,44 @@
+import os
+
+from aws_lambda_powertools.utilities import parameters
+from botocore.config import Config
+
+
+def _get_connection_runtime_config() -> dict:
+    """Read the runtime-config ``connection`` namespace from AppConfig.
+
+    ``RUNTIME_CONFIG_APP_ID`` is set on the AgentCore runtime by the generated
+    CDK/Terraform construct for this project.
+    """
+    application = os.environ.get("RUNTIME_CONFIG_APP_ID")
+    if not application:
+        raise RuntimeError(
+            "RUNTIME_CONFIG_APP_ID is not set — cannot resolve connected agent ARNs from AppConfig."
+        )
+    region = os.environ.get("AWS_REGION", os.environ.get("AWS_DEFAULT_REGION"))
+    provider_kwargs = {}
+    if region:
+        provider_kwargs["config"] = Config(region_name=region)
+    provider = parameters.AppConfigProvider(
+        environment="default",
+        application=application,
+        **provider_kwargs,
+    )
+    return provider.get("connection", transform="json")
+
+
+def get_connected_agent_runtime_arn(name: str) -> str:
+    """Resolve the AgentCore runtime ARN for a connected agent or MCP server
+    from this project's runtime configuration.
+
+    ``name`` must match the class name of the target construct
+    (e.g. ``MyAgent``, ``InventoryMcpServer``).
+    """
+    config = _get_connection_runtime_config()
+    agent_runtimes = config.get("agentRuntimes", {}) if config else {}
+    arn = agent_runtimes.get(name)
+    if not arn:
+        raise RuntimeError(
+            f"No connected agent runtime named '{name}' found in runtime configuration."
+        )
+    return arn

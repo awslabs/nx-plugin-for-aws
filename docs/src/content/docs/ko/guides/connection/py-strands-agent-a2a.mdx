@@ -1,0 +1,101 @@
+---
+title: "Python Strands Agent에서 A2A Agent로"
+description: "Python Strands Agent를 원격 A2A 에이전트에 연결"
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Snippet from '@components/snippet.astro';
+
+`connection` 생성기는 <Link path="guides/py-strands-agent">Python Strands Agent</Link>를 원격 [A2A](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) 에이전트(<Link path="guides/ts-strands-agent">TypeScript</Link> 또는 <Link path="guides/py-strands-agent">Python</Link>)에 연결하여, 에이전트가 다른 에이전트를 도구로 위임할 수 있도록 합니다.
+
+생성기는 에이전트가 원격 A2A 에이전트를 발견하고 호출할 수 있도록 필요한 모든 배선을 설정하며, AWS에 배포된 경우(Bedrock AgentCore를 통해)와 로컬에서 실행되는 경우 모두 작동합니다.
+
+## 전제 조건
+
+이 생성기를 사용하기 전에 다음을 준비해야 합니다:
+
+1. <Link path="guides/py-strands-agent">Strands Agent</Link> 컴포넌트가 있는 Python 프로젝트 (모든 프로토콜)
+2. `--protocol=A2A` 및 `--auth=IAM`으로 생성된 Strands Agent 컴포넌트가 있는 프로젝트 (<Link path="guides/ts-strands-agent">`ts#strands-agent`</Link> 또는 <Link path="guides/py-strands-agent">`py#strands-agent`</Link>)
+3. `computeType: BedrockAgentCoreRuntime`으로 생성된 두 컴포넌트
+
+## 사용법
+
+### 생성기 실행
+
+<RunGenerator generator="connection" />
+
+호스트 에이전트 프로젝트를 소스로 선택하고 A2A 에이전트 프로젝트를 대상으로 선택합니다. 프로젝트에 여러 컴포넌트가 포함된 경우 `sourceComponent` 및 `targetComponent` 옵션을 지정하여 명확히 구분합니다.
+
+### 옵션
+
+<GeneratorParameters generator="connection" />
+
+## 생성기 출력
+
+생성기는 `packages/common/agent_connection/`에 공유 `agent_connection` Python 프로젝트를 생성합니다(아직 존재하지 않는 경우). 연결별 클라이언트 모듈이 이 공유 프로젝트에 생성됩니다:
+
+<FileTree>
+
+- packages/common/agent\_connection
+  - \<scope>\_agent\_connection
+    - \_\_init\_\_.py 연결별 클라이언트 재내보내기
+    - core
+      - agentcore\_a2a\_client.py SigV4 인증을 사용하는 코어 AgentCore A2A 클라이언트
+    - app
+      - \<target\_agent\_name>\_client.py 각 A2A 에이전트에 대한 연결별 클라이언트
+
+</FileTree>
+
+또한 생성기는:
+- 에이전트의 `agent.py`를 변환하여 원격 A2A 에이전트를 `@tool`을 사용하여 도구로 등록합니다
+- `agent_connection` 프로젝트를 에이전트 프로젝트의 워크스페이스 의존성으로 추가합니다
+- 에이전트의 `serve-local` 대상을 대상 에이전트의 `serve-local` 대상에 의존하도록 업데이트합니다
+
+## 연결된 A2A 에이전트 사용
+
+생성기는 에이전트의 `agent.py`를 변환하여 원격 A2A 에이전트를 도구로 래핑합니다:
+
+```python title="packages/my-project/my_module/agent/agent.py" {4,9-15,21}
+from contextlib import contextmanager
+from strands import Agent, tool
+
+from my_scope_agent_connection import RemoteAgentClient
+
+@contextmanager
+def get_agent(session_id: str):
+    remote_agent = RemoteAgentClient.create(session_id=session_id)
+
+    @tool
+    def ask_remote_agent(prompt: str) -> str:
+        """Delegate a question to the remote RemoteAgent A2A agent and return its reply."""
+        return str(remote_agent(prompt))
+
+    yield Agent(
+        system_prompt="...",
+        tools=[ask_remote_agent],
+    )
+```
+
+`session_id` 매개변수는 호출자로부터 전달되어 [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html)의 일관성을 보장합니다.
+
+내부적으로 `RemoteAgentClient.create(session_id=...)`는 AWS에 배포된 경우 SigV4로 요청에 서명하는 `httpx.AsyncClient`로 구성된 Strands `A2AAgent`를 반환하고, `SERVE_LOCAL=true`인 경우 일반 `http://localhost:<port>/` 엔드포인트를 사용합니다.
+
+## 인프라
+
+<Snippet name="connection/a2a-infrastructure" parentHeading="Infrastructure" />
+
+## 로컬 개발
+
+생성기는 호스트 에이전트의 `serve-local` 대상을 다음과 같이 구성합니다:
+1. 연결된 A2A 에이전트를 자동으로 시작
+2. `SERVE_LOCAL=true`를 설정하여 생성된 클라이언트가 AgentCore 대신 `http://localhost:<port>/`에 직접 연결
+
+다음 명령으로 에이전트를 로컬에서 실행합니다:
+
+<NxCommands commands={["<agent-name>-serve-local <project-name>"]} />
+
+이렇게 하면 호스트 에이전트와 연결된 모든 A2A 에이전트가 시작되며, 호스트 에이전트는 할당된 로컬 포트에서 일반 HTTP를 통해 원격 에이전트를 호출합니다.

@@ -64,8 +64,26 @@ export function getPythonAgentConnectionPackageName(tree: Tree): string {
 }
 
 /**
- * Ensure the shared TypeScript agent-connection project exists.
- * Creates the project with the core AgentCoreMcpClient if it doesn't exist.
+ * Directories (relative to this file) holding per-protocol core client
+ * template files. Per-connection generators select which set to emit so
+ * the MCP connection doesn't pull in the A2A client (or vice versa).
+ */
+export const TS_CORE_TEMPLATES = {
+  mcp: 'core-mcp',
+  a2a: 'core-a2a',
+} as const;
+
+export const PY_CORE_TEMPLATES = {
+  mcp: 'py-core-mcp',
+  a2a: 'py-core-a2a',
+  /** Shared SigV4 `httpx.Auth` used by both MCP and A2A clients. */
+  auth: 'py-core-auth',
+} as const;
+
+/**
+ * Ensure the shared TypeScript agent-connection project exists and has the
+ * shared core helpers (runtime-config loader). Per-connection generators
+ * are responsible for emitting their own per-protocol core client templates.
  */
 export async function ensureTypeScriptAgentConnectionProject(
   tree: Tree,
@@ -74,20 +92,36 @@ export async function ensureTypeScriptAgentConnectionProject(
     AGENT_CONNECTION_PROJECT_DIR,
     'project.json',
   );
-  if (tree.exists(projectJsonPath)) {
-    return; // Already exists
+  if (!tree.exists(projectJsonPath)) {
+    await tsProjectGenerator(tree, {
+      name: AGENT_CONNECTION_DIR,
+      directory: joinPathFragments(PACKAGES_DIR, COMMON_DIR),
+    });
   }
 
-  // Create the TS project
-  await tsProjectGenerator(tree, {
-    name: AGENT_CONNECTION_DIR,
-    directory: joinPathFragments(PACKAGES_DIR, COMMON_DIR),
-  });
-
-  // Generate the core files (agentcore-mcp-client.ts)
+  // Shared core helpers — emitted regardless of which per-protocol core
+  // client the caller needs, so both MCP and A2A clients can import from them.
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files', 'core'),
+    joinPathFragments(__dirname, 'files', 'core-runtime-config'),
+    joinPathFragments(AGENT_CONNECTION_PROJECT_DIR, 'src', 'core'),
+    {},
+    { overwriteStrategy: OverwriteStrategy.KeepExisting },
+  );
+}
+
+/**
+ * Emit one of the TypeScript core client templates (mcp or a2a) into the
+ * agent-connection project's `src/core/` directory. Safe to call multiple
+ * times — `KeepExisting` preserves customised files.
+ */
+export function addTypeScriptCoreClient(
+  tree: Tree,
+  kind: keyof typeof TS_CORE_TEMPLATES,
+): void {
+  generateFiles(
+    tree,
+    joinPathFragments(__dirname, 'files', TS_CORE_TEMPLATES[kind]),
     joinPathFragments(AGENT_CONNECTION_PROJECT_DIR, 'src', 'core'),
     {},
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
@@ -96,7 +130,8 @@ export async function ensureTypeScriptAgentConnectionProject(
 
 /**
  * Ensure the shared Python agent-connection project exists.
- * Creates the project with the core AgentCoreMCPClient if it doesn't exist.
+ * Only creates the project shell — per-connection generators are responsible
+ * for emitting their own core client templates.
  */
 export async function ensurePythonAgentConnectionProject(
   tree: Tree,
@@ -105,37 +140,19 @@ export async function ensurePythonAgentConnectionProject(
   const moduleName = getPythonAgentConnectionModuleName(tree);
   const projectJsonPath = joinPathFragments(projectDir, 'project.json');
 
-  if (tree.exists(projectJsonPath)) {
-    return; // Already exists
+  if (!tree.exists(projectJsonPath)) {
+    // Create the Python project using the standard py#project generator
+    await pyProjectGenerator(tree, {
+      name: PY_AGENT_CONNECTION_NAME,
+      directory: joinPathFragments(PACKAGES_DIR, COMMON_DIR),
+      projectType: 'library',
+    });
   }
-
-  // Create the Python project using the standard py#project generator
-  await pyProjectGenerator(tree, {
-    name: PY_AGENT_CONNECTION_NAME,
-    directory: joinPathFragments(PACKAGES_DIR, COMMON_DIR),
-    projectType: 'library',
-  });
-
-  // Add dependencies needed by the core agentcore_mcp_client
-  addDependenciesToPyProjectToml(tree, projectDir, [
-    'boto3',
-    'mcp',
-    'strands-agents',
-  ]);
 
   const moduleDir = joinPathFragments(projectDir, moduleName);
 
-  // Generate the core files (agentcore_mcp_client.py)
-  const coreDir = joinPathFragments(moduleDir, 'core');
-  generateFiles(
-    tree,
-    joinPathFragments(__dirname, 'files', 'py-core'),
-    coreDir,
-    {},
-    { overwriteStrategy: OverwriteStrategy.KeepExisting },
-  );
-
   // Ensure core/__init__.py exists
+  const coreDir = joinPathFragments(moduleDir, 'core');
   if (!tree.exists(joinPathFragments(coreDir, '__init__.py'))) {
     tree.write(joinPathFragments(coreDir, '__init__.py'), '');
   }
@@ -145,6 +162,39 @@ export async function ensurePythonAgentConnectionProject(
   if (!tree.exists(appInitPath)) {
     tree.write(appInitPath, '');
   }
+
+  // Shared core helpers — emitted regardless of which per-protocol core
+  // client the caller needs, so both MCP and A2A clients can import them.
+  generateFiles(
+    tree,
+    joinPathFragments(__dirname, 'files', 'py-core-runtime-config'),
+    coreDir,
+    {},
+    { overwriteStrategy: OverwriteStrategy.KeepExisting },
+  );
+
+  // Shared core helpers depend on aws-lambda-powertools for AppConfig access.
+  addDependenciesToPyProjectToml(tree, projectDir, ['aws-lambda-powertools']);
+}
+
+/**
+ * Emit a Python core client template (mcp / a2a / shared auth) into the
+ * agent-connection project's core directory.
+ */
+export function addPythonCoreClient(
+  tree: Tree,
+  kind: keyof typeof PY_CORE_TEMPLATES,
+): void {
+  const projectDir = getPythonAgentConnectionProjectDir(tree);
+  const moduleName = getPythonAgentConnectionModuleName(tree);
+  const coreDir = joinPathFragments(projectDir, moduleName, 'core');
+  generateFiles(
+    tree,
+    joinPathFragments(__dirname, 'files', PY_CORE_TEMPLATES[kind]),
+    coreDir,
+    {},
+    { overwriteStrategy: OverwriteStrategy.KeepExisting },
+  );
 }
 
 /**

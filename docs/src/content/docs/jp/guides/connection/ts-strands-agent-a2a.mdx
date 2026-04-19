@@ -1,0 +1,102 @@
+---
+title: "TypeScript Strands Agent から A2A Agent への接続"
+description: "TypeScript Strands Agent をリモート A2A エージェントに接続する"
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Snippet from '@components/snippet.astro';
+
+`connection` ジェネレーターは、<Link path="guides/ts-strands-agent">TypeScript Strands Agent</Link> をリモートの [A2A](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) エージェント(<Link path="guides/ts-strands-agent">TypeScript</Link> または <Link path="guides/py-strands-agent">Python</Link>)に接続し、エージェントが別のエージェントにツールとして委譲できるようにします。
+
+このジェネレーターは、AWS にデプロイされた場合(Bedrock AgentCore 経由)とローカルで実行される場合の両方で、エージェントがリモート A2A エージェントを検出して呼び出すために必要なすべての配線を設定します。
+
+## 前提条件
+
+このジェネレーターを使用する前に、以下を確認してください:
+
+1. <Link path="guides/ts-strands-agent">Strands Agent</Link> コンポーネント(任意のプロトコル)を持つ TypeScript プロジェクト
+2. `--protocol=A2A` および `--auth=IAM` で生成された Strands Agent コンポーネントを持つプロジェクト(<Link path="guides/ts-strands-agent">`ts#strands-agent`</Link> または <Link path="guides/py-strands-agent">`py#strands-agent`</Link> のいずれか)
+3. 両方のコンポーネントが `computeType: BedrockAgentCoreRuntime` で作成されていること
+
+## 使用方法
+
+### ジェネレーターの実行
+
+<RunGenerator generator="connection" />
+
+ホストエージェントプロジェクトをソースとして、A2A エージェントプロジェクトをターゲットとして選択します。プロジェクトに複数のコンポーネントが含まれている場合は、`sourceComponent` および `targetComponent` オプションを指定して明確にします。
+
+### オプション
+
+<GeneratorParameters generator="connection" />
+
+## ジェネレーターの出力
+
+ジェネレーターは共有の `agent-connection` パッケージを作成し、エージェントコードを変更します:
+
+<FileTree>
+
+- packages/common/agent-connection
+  - src
+    - app
+      - \<target-agent-name>-client.ts 接続された A2A エージェント用の高レベルクライアント
+    - core
+      - agentcore-a2a-client.ts SigV4 認証を使用した低レベル AgentCore A2A クライアント
+    - index.ts すべてのクライアントをエクスポート
+  - project.json
+  - tsconfig.json
+
+</FileTree>
+
+さらに、以下を実行します:
+- エージェントの `agent.ts` を変換して、リモート A2A エージェントを Strands `tool` として登録
+- エージェントの `serve-local` ターゲットを更新して、ターゲットエージェントの `serve-local` ターゲットに依存するように設定
+- 必要な依存関係をインストール
+
+## 接続された A2A エージェントの使用
+
+ジェネレーターはエージェントの `agent.ts` を変換して、リモート A2A エージェントをツールとしてラップします:
+
+```ts title="packages/example/src/my-agent/agent.ts" {2,5-11,14}
+import { Agent, tool } from '@strands-agents/sdk';
+import { RemoteAgentClient } from ':my-scope/agent-connection';
+import { z } from 'zod';
+
+export const getAgent = async (sessionId: string) => {
+  const remoteAgent = await RemoteAgentClient.create(sessionId);
+  const remoteAgentTool = tool({
+    name: 'askRemoteAgent',
+    description: 'Delegate a question to the remote RemoteAgent A2A agent and return its reply.',
+    inputSchema: z.object({ prompt: z.string() }),
+    callback: async ({ prompt }) => (await remoteAgent.invoke(prompt)).toString(),
+  });
+  return new Agent({
+    systemPrompt: '...',
+    tools: [remoteAgentTool],
+  });
+};
+```
+
+`sessionId` パラメータは呼び出し元から渡され、[Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html) の一貫性を確保します。
+
+内部的には、`RemoteAgentClient.create(sessionId)` は、AWS にデプロイされた場合は SigV4 署名する `clientFactory` で構成された Strands `A2AAgent` を返し、`SERVE_LOCAL=true` の場合はプレーンな `http://localhost:<port>/` エンドポイントを返します。
+
+## インフラストラクチャ
+
+<Snippet name="connection/a2a-infrastructure" parentHeading="Infrastructure" />
+
+## ローカル開発
+
+ジェネレーターは、ホストエージェントの `serve-local` ターゲットを次のように構成します:
+1. 接続された A2A エージェントを自動的に起動
+2. `SERVE_LOCAL=true` を設定して、生成されたクライアントが AgentCore の代わりに `http://localhost:<port>/` に直接接続するようにする
+
+エージェントをローカルで実行するには:
+
+<NxCommands commands={["<agent-name>-serve-local <project-name>"]} />
+
+これにより、ホストエージェントとすべての接続された A2A エージェントが起動され、ホストエージェントは割り当てられたローカルポートでプレーン HTTP を介してリモートエージェントを呼び出します。

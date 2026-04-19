@@ -26,12 +26,17 @@ import {
 } from '../../../utils/py';
 import {
   ensurePythonAgentConnectionProject,
+  addPythonCoreClient,
   getPythonAgentConnectionProjectDir,
   getPythonAgentConnectionModuleName,
   getPythonAgentConnectionPackageName,
   addPythonReExport,
 } from '../../../utils/agent-connection/agent-connection';
-import { applyGritQL, matchGritQL } from '../../../utils/ast';
+import {
+  addPythonDestructuredImport,
+  applyGritQL,
+  matchGritQL,
+} from '../../../utils/ast';
 
 /** Prefix a GritQL pattern with `language python` */
 const py = (pattern: string) => `language python\n${pattern}`;
@@ -72,12 +77,23 @@ export const pyStrandsAgentMcpConnectionGenerator = async (
   const mcpServerSnakeCase = snakeCase(mcpServerClassName);
   const mcpServerPort = mcpComponent.port ?? 8000;
 
-  // 1. Ensure the shared Python agent-connection project exists
+  // 1. Ensure the shared Python agent-connection project exists + has the
+  //    MCP core client and its shared SigV4 auth helper.
   await ensurePythonAgentConnectionProject(tree);
+  addPythonCoreClient(tree, 'auth');
+  addPythonCoreClient(tree, 'mcp');
 
   const agentConnectionProjectDir = getPythonAgentConnectionProjectDir(tree);
   const agentConnectionModuleName = getPythonAgentConnectionModuleName(tree);
   const agentConnectionPackageName = getPythonAgentConnectionPackageName(tree);
+
+  // Python deps required by the MCP core client + shared auth helper.
+  addDependenciesToPyProjectToml(tree, agentConnectionProjectDir, [
+    'boto3',
+    'httpx',
+    'mcp',
+    'strands-agents',
+  ]);
 
   // 2. Generate the per-connection client into the shared agent-connection project
   const appDir = joinPathFragments(
@@ -116,11 +132,6 @@ export const pyStrandsAgentMcpConnectionGenerator = async (
     `.app.${mcpServerSnakeCase}_client`,
     `${mcpServerClassName}Client`,
   );
-
-  // Add aws-lambda-powertools dependency to the agent-connection project
-  addDependenciesToPyProjectToml(tree, agentConnectionProjectDir, [
-    'aws-lambda-powertools',
-  ]);
 
   // 3. Transform agent.py to add MCP client import and usage
   const agentSourceDir = joinPathFragments(
@@ -183,11 +194,11 @@ export const pyStrandsAgentMcpConnectionGenerator = async (
 };
 
 /**
- * Add an import for the MCP client class to agent.py using GritQL.
+ * Add an import for the MCP client class to agent.py.
  *
- * If the agent-connection module is already imported, appends the new client
- * using +=. Otherwise adds a new import statement after contextlib.
- * Ruff will sort imports correctly when formatFilesInSubtree runs.
+ * Delegates to the shared `addPythonDestructuredImport` helper which either
+ * appends to an existing `from <module> import ...` line or prepends a new
+ * import statement (ruff sorts imports on the next format pass).
  */
 const addImportToAgentFile = async (
   tree: Tree,
@@ -195,30 +206,12 @@ const addImportToAgentFile = async (
   agentConnectionModuleName: string,
   clientClassName: string,
 ): Promise<void> => {
-  if (await matchGritQL(tree, filePath, `\`${clientClassName}\``)) {
-    return;
-  }
-
-  // Try to append to existing import from the same module using +=
-  const appended = await applyGritQL(
+  await addPythonDestructuredImport(
     tree,
     filePath,
-    py(
-      `\`from ${agentConnectionModuleName} import $names\` where { $names += \`, ${clientClassName}\` }`,
-    ),
+    [clientClassName],
+    agentConnectionModuleName,
   );
-
-  if (!appended) {
-    // No existing import — add a new one after the first import.
-    // Ruff will sort it into the correct position.
-    await applyGritQL(
-      tree,
-      filePath,
-      py(
-        `\`from contextlib import contextmanager\` as $imp => \`$imp\nfrom ${agentConnectionModuleName} import ${clientClassName}\``,
-      ),
-    );
-  }
 };
 
 /**

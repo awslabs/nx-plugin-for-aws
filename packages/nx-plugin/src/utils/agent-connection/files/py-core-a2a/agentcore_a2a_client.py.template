@@ -1,0 +1,91 @@
+from collections.abc import Callable
+from urllib.parse import quote
+
+import boto3
+import httpx
+from a2a.client import ClientConfig
+from strands.agent.a2a_agent import A2AAgent
+
+from .auth import SigV4HTTPXAuth
+
+
+class AgentCoreA2aClient:
+    """Factory for clients to call A2A agents hosted on Bedrock AgentCore Runtime."""
+
+    @staticmethod
+    def _build_url(agent_runtime_arn: str) -> tuple[str, str]:
+        """Extract region from ARN and construct the A2A invocations URL.
+
+        ARN format: arn:partition:service:region:account-id:resource
+        A2A on AgentCore is mounted at `/invocations/` (trailing slash matters).
+        """
+        region = agent_runtime_arn.split(":")[3]
+        encoded_arn = quote(agent_runtime_arn, safe="")
+        url = f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/{encoded_arn}/invocations/"
+        return region, url
+
+    @staticmethod
+    def _build(
+        url: str,
+        auth: httpx.Auth | None,
+        headers: dict | None,
+        *,
+        name: str | None,
+        description: str | None,
+    ) -> A2AAgent:
+        httpx_client = httpx.AsyncClient(
+            auth=auth,
+            headers=headers or {},
+            timeout=120,
+        )
+        client_config = ClientConfig(httpx_client=httpx_client, streaming=False)
+        kwargs: dict = {"endpoint": url, "client_config": client_config}
+        if name:
+            kwargs["name"] = name
+        if description:
+            kwargs["description"] = description
+        return A2AAgent(**kwargs)
+
+    @staticmethod
+    def with_iam_auth(
+        agent_runtime_arn: str,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        session_id: str | None = None,
+    ) -> A2AAgent:
+        """Create an `A2AAgent` with IAM (SigV4) authentication."""
+        region, url = AgentCoreA2aClient._build_url(agent_runtime_arn)
+        credentials = boto3.Session(region_name=region).get_credentials()
+        headers = {}
+        if session_id:
+            headers["X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"] = session_id
+        return AgentCoreA2aClient._build(
+            url,
+            SigV4HTTPXAuth(credentials, "bedrock-agentcore", region),
+            headers,
+            name=name,
+            description=description,
+        )
+
+    @staticmethod
+    def with_jwt_auth(
+        agent_runtime_arn: str,
+        access_token_provider: Callable[[], str],
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        session_id: str | None = None,
+    ) -> A2AAgent:
+        """Create an `A2AAgent` with JWT Bearer authentication."""
+        _, url = AgentCoreA2aClient._build_url(agent_runtime_arn)
+        headers = {"Authorization": f"Bearer {access_token_provider()}"}
+        if session_id:
+            headers["X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"] = session_id
+        return AgentCoreA2aClient._build(
+            url,
+            None,
+            headers,
+            name=name,
+            description=description,
+        )

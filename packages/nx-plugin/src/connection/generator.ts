@@ -17,8 +17,10 @@ import { TS_SMITHY_API_GENERATOR_INFO } from '../smithy/ts/api/generator';
 import smithyReactConnectionGenerator from '../smithy/react-connection/generator';
 import tsStrandsAgentMcpConnectionGenerator from '../ts/strands-agent/mcp-connection/generator';
 import tsStrandsAgentReactConnectionGenerator from '../ts/strands-agent/react-connection/generator';
+import tsStrandsAgentA2aConnectionGenerator from '../ts/strands-agent/a2a-connection/generator';
 import pyStrandsAgentMcpConnectionGenerator from '../py/strands-agent/mcp-connection/generator';
 import pyStrandsAgentReactConnectionGenerator from '../py/strands-agent/react-connection/generator';
+import pyStrandsAgentA2aConnectionGenerator from '../py/strands-agent/a2a-connection/generator';
 
 /**
  * List of supported source and target project types for connections.
@@ -66,6 +68,10 @@ const SUPPORTED_CONNECTIONS = [
   { source: 'ts#strands-agent', target: 'py#mcp-server' },
   { source: 'py#strands-agent', target: 'ts#mcp-server' },
   { source: 'py#strands-agent', target: 'py#mcp-server' },
+  { source: 'ts#strands-agent', target: 'ts#strands-agent' },
+  { source: 'ts#strands-agent', target: 'py#strands-agent' },
+  { source: 'py#strands-agent', target: 'ts#strands-agent' },
+  { source: 'py#strands-agent', target: 'py#strands-agent' },
 ] as const satisfies readonly Connection[];
 
 type ConnectionKey = (typeof SUPPORTED_CONNECTIONS)[number] extends infer C
@@ -115,6 +121,14 @@ const CONNECTION_GENERATORS = {
     pyStrandsAgentMcpConnectionGenerator(tree, options),
   'py#strands-agent -> py#mcp-server': (tree, options) =>
     pyStrandsAgentMcpConnectionGenerator(tree, options),
+  'ts#strands-agent -> ts#strands-agent': (tree, options) =>
+    tsStrandsAgentA2aConnectionGenerator(tree, options),
+  'ts#strands-agent -> py#strands-agent': (tree, options) =>
+    tsStrandsAgentA2aConnectionGenerator(tree, options),
+  'py#strands-agent -> ts#strands-agent': (tree, options) =>
+    pyStrandsAgentA2aConnectionGenerator(tree, options),
+  'py#strands-agent -> py#strands-agent': (tree, options) =>
+    pyStrandsAgentA2aConnectionGenerator(tree, options),
 } satisfies Record<
   ConnectionKey,
   (tree: Tree, options: ResolvedConnectionOptions) => Promise<any>

@@ -358,85 +358,10 @@ Para invocar tu Strands Agent desde un sitio web React, puedes hacer uso del <Li
 
 Consulta la <Link path="/guides/connection/react-ts-strands-agent">guía del generador `connection`</Link> para detalles sobre cómo se configura la conexión.
 
-### Invocar un Agente A2A
+### Invocar un Agente A2A como Herramienta
 
-El `A2AAgent` del SDK de Strands envuelve un endpoint A2A remoto para que puedas invocarlo como un `Agent` local. `invoke` resuelve a un `AgentResult`; llamar a `.toString()` en él une los bloques de texto de la respuesta del agente remoto.
+Para delegar trabajo desde este agente a un agente A2A remoto (ya sea <Link path="/guides/ts-strands-agent">TypeScript</Link> o <Link path="/guides/py-strands-agent">Python</Link>), usa el <Link path="/guides/connection/ts-strands-agent-a2a">generador `connection`</Link>. Este provee un cliente autenticado con SigV4 para el agente objetivo y transforma mediante AST el `agent.ts` de este agente para registrar el agente A2A remoto como una `tool` de Strands.
 
-```typescript
-import { A2AAgent } from '@strands-agents/sdk/a2a';
+<RunGenerator generator="connection" />
 
-const remote = new A2AAgent({ url: 'http://localhost:9000' });
-const result = await remote.invoke('Hello, remote agent!');
-const reply = result.toString();
-```
-
-#### Invocar en AgentCore con Autenticación IAM
-
-Las solicitudes a un agente A2A desplegado en AgentCore (incluyendo la obtención de la tarjeta del agente) deben estar firmadas con SigV4. Pasa un `clientFactory` a `A2AAgent` que use un fetch con firma SigV4 tanto para el resolvedor de tarjetas como para el transporte JSON-RPC:
-
-```typescript
-import {
-  ClientFactory,
-  ClientFactoryOptions,
-  DefaultAgentCardResolver,
-  JsonRpcTransportFactory,
-} from '@a2a-js/sdk/client';
-import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
-import { A2AAgent } from '@strands-agents/sdk/a2a';
-import { AwsClient } from 'aws4fetch';
-
-const arn = '<your-agent-runtime-arn>';
-const region = arn.split(':')[3];
-const url = `https://bedrock-agentcore.${region}.amazonaws.com/runtimes/${encodeURIComponent(arn)}/invocations/`;
-
-const creds = fromNodeProviderChain();
-const sigv4Fetch: typeof fetch = async (...args) =>
-  new AwsClient({ ...(await creds()), service: 'bedrock-agentcore', region }).fetch(...args);
-
-const clientFactory = new ClientFactory({
-  ...ClientFactoryOptions.default,
-  transports: [new JsonRpcTransportFactory({ fetchImpl: sigv4Fetch })],
-  cardResolver: new DefaultAgentCardResolver({ fetchImpl: sigv4Fetch }),
-});
-
-const remote = new A2AAgent({ url, clientFactory });
-const result = await remote.invoke('Hello, remote agent!');
-const reply = result.toString();
-```
-
-:::note[Permisos IAM]
-El rol IAM del invocador necesita tanto `bedrock-agentcore:InvokeAgentRuntime` como `bedrock-agentcore:GetAgentCard` en el ARN del runtime de destino. El helper `grantInvokeAccess` del constructo generado otorga ambos.
-:::
-
-:::note[Dependencias adicionales]
-El ejemplo del cliente SigV4 anterior requiere `@a2a-js/sdk`, `aws4fetch` y `@aws-sdk/credential-providers`. Agrégalos a tu `package.json` antes de ejecutar el ejemplo.
-:::
-
-#### Usar un Agente A2A como Herramienta
-
-`A2AAgent` implementa la misma interfaz `InvokableAgent` que un `Agent` local, por lo que puedes envolverlo en una `tool` de Strands y pasarlo a otro agente. Así es como la plantilla del agente HTTP/tRPC generado delega a un agente A2A remoto:
-
-```typescript
-import { Agent, tool } from '@strands-agents/sdk';
-import { z } from 'zod';
-
-const remote = /* A2AAgent construido con clientFactory como arriba */;
-
-const askRemote = tool({
-  name: 'askRemoteAgent',
-  description: 'Delegate a question to the remote A2A agent and return its reply.',
-  inputSchema: z.object({ prompt: z.string() }),
-  callback: async ({ prompt }) => (await remote.invoke(prompt)).toString(),
-});
-
-const agent = new Agent({
-  systemPrompt: 'Delegate to askRemoteAgent when appropriate.',
-  tools: [askRemote],
-});
-```
-
-En tu stack CDK, otorga al agente host acceso de invocación al agente remoto — esto conecta ambas acciones IAM que el cliente A2A necesita:
-
-```typescript
-remoteAgent.grantInvokeAccess(hostAgent);
-```
+Consulta la <Link path="/guides/connection/ts-strands-agent-a2a">guía del generador `connection`</Link> para detalles sobre cómo se configura la conexión.

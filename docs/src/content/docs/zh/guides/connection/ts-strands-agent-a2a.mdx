@@ -1,0 +1,102 @@
+---
+title: "TypeScript Strands Agent 到 A2A Agent"
+description: "将 TypeScript Strands Agent 连接到远程 A2A agent"
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Snippet from '@components/snippet.astro';
+
+`connection` 生成器可以将您的 <Link path="guides/ts-strands-agent">TypeScript Strands Agent</Link> 连接到远程 [A2A](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) 代理 — 可以是 <Link path="guides/ts-strands-agent">TypeScript</Link> 或 <Link path="guides/py-strands-agent">Python</Link> — 这样您的代理就可以将任务委托给另一个代理作为工具使用。
+
+该生成器会设置所有必要的配置,使您的代理能够发现并调用远程 A2A 代理,无论是部署到 AWS(通过 Bedrock AgentCore)还是在本地运行时都可以。
+
+## 前提条件
+
+在使用此生成器之前,请确保您具备:
+
+1. 一个包含 <Link path="guides/ts-strands-agent">Strands Agent</Link> 组件的 TypeScript 项目(任何协议)
+2. 一个使用 `--protocol=A2A` 和 `--auth=IAM` 生成的 Strands Agent 组件项目(可以是 <Link path="guides/ts-strands-agent">`ts#strands-agent`</Link> 或 <Link path="guides/py-strands-agent">`py#strands-agent`</Link>)
+3. 两个组件都使用 `computeType: BedrockAgentCoreRuntime` 创建
+
+## 用法
+
+### 运行生成器
+
+<RunGenerator generator="connection" />
+
+选择您的宿主代理项目作为源,选择您的 A2A 代理项目作为目标。如果您的项目包含多个组件,请指定 `sourceComponent` 和 `targetComponent` 选项以消除歧义。
+
+### 选项
+
+<GeneratorParameters generator="connection" />
+
+## 生成器输出
+
+生成器会创建一个共享的 `agent-connection` 包并修改您的代理代码:
+
+<FileTree>
+
+- packages/common/agent-connection
+  - src
+    - app
+      - \<target-agent-name>-client.ts 连接的 A2A 代理的高级客户端
+    - core
+      - agentcore-a2a-client.ts 带有 SigV4 身份验证的低级 AgentCore A2A 客户端
+    - index.ts 导出所有客户端
+  - project.json
+  - tsconfig.json
+
+</FileTree>
+
+此外,它还会:
+- 转换您代理的 `agent.ts` 以将远程 A2A 代理注册为 Strands `tool`
+- 更新代理的 `serve-local` 目标以依赖于目标代理的 `serve-local` 目标
+- 安装所需的依赖项
+
+## 使用连接的 A2A 代理
+
+生成器会转换您代理的 `agent.ts` 以将远程 A2A 代理包装为工具:
+
+```ts title="packages/example/src/my-agent/agent.ts" {2,5-11,14}
+import { Agent, tool } from '@strands-agents/sdk';
+import { RemoteAgentClient } from ':my-scope/agent-connection';
+import { z } from 'zod';
+
+export const getAgent = async (sessionId: string) => {
+  const remoteAgent = await RemoteAgentClient.create(sessionId);
+  const remoteAgentTool = tool({
+    name: 'askRemoteAgent',
+    description: 'Delegate a question to the remote RemoteAgent A2A agent and return its reply.',
+    inputSchema: z.object({ prompt: z.string() }),
+    callback: async ({ prompt }) => (await remoteAgent.invoke(prompt)).toString(),
+  });
+  return new Agent({
+    systemPrompt: '...',
+    tools: [remoteAgentTool],
+  });
+};
+```
+
+`sessionId` 参数从调用者传递过来,确保 [Bedrock AgentCore 可观测性](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html)的一致性。
+
+在底层,`RemoteAgentClient.create(sessionId)` 返回一个配置了 SigV4 签名 `clientFactory` 的 Strands `A2AAgent`(当部署到 AWS 时),以及一个普通的 `http://localhost:<port>/` 端点(当 `SERVE_LOCAL=true` 时)。
+
+## 基础设施
+
+<Snippet name="connection/a2a-infrastructure" parentHeading="Infrastructure" />
+
+## 本地开发
+
+生成器会配置宿主代理的 `serve-local` 目标以:
+1. 自动启动连接的 A2A 代理
+2. 设置 `SERVE_LOCAL=true`,使生成的客户端直接连接到 `http://localhost:<port>/` 而不是 AgentCore
+
+使用以下命令在本地运行代理:
+
+<NxCommands commands={["<agent-name>-serve-local <project-name>"]} />
+
+这将同时启动宿主代理和所有连接的 A2A 代理,宿主代理通过分配的本地端口使用普通 HTTP 调用远程代理。

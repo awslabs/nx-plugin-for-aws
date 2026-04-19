@@ -1,0 +1,102 @@
+---
+title: "TypeScript Strands Agent a A2A Agent"
+description: "Connetti un TypeScript Strands Agent a un A2A agent remoto"
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Snippet from '@components/snippet.astro';
+
+Il generatore `connection` può connettere il tuo <Link path="guides/ts-strands-agent">TypeScript Strands Agent</Link> a un agente [A2A](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) remoto — sia <Link path="guides/ts-strands-agent">TypeScript</Link> che <Link path="guides/py-strands-agent">Python</Link> — in modo che il tuo agente possa delegare a un altro agente come strumento.
+
+Il generatore configura tutto il cablaggio necessario in modo che il tuo agente possa scoprire e invocare l'agente A2A remoto, sia quando è distribuito su AWS (tramite Bedrock AgentCore) che quando viene eseguito localmente.
+
+## Prerequisiti
+
+Prima di utilizzare questo generatore, assicurati di avere:
+
+1. Un progetto TypeScript con un componente <Link path="guides/ts-strands-agent">Strands Agent</Link> (qualsiasi protocollo)
+2. Un progetto con un componente Strands Agent generato con `--protocol=A2A` e `--auth=IAM` (sia <Link path="guides/ts-strands-agent">`ts#strands-agent`</Link> che <Link path="guides/py-strands-agent">`py#strands-agent`</Link>)
+3. Entrambi i componenti creati con `computeType: BedrockAgentCoreRuntime`
+
+## Utilizzo
+
+### Eseguire il Generatore
+
+<RunGenerator generator="connection" />
+
+Seleziona il progetto dell'agente host come origine e il progetto dell'agente A2A come destinazione. Se i tuoi progetti contengono più componenti, specifica le opzioni `sourceComponent` e `targetComponent` per disambiguare.
+
+### Opzioni
+
+<GeneratorParameters generator="connection" />
+
+## Output del Generatore
+
+Il generatore crea un pacchetto condiviso `agent-connection` e modifica il codice del tuo agente:
+
+<FileTree>
+
+- packages/common/agent-connection
+  - src
+    - app
+      - \<target-agent-name>-client.ts Client di alto livello per l'agente A2A connesso
+    - core
+      - agentcore-a2a-client.ts Client AgentCore A2A di basso livello con autenticazione SigV4
+    - index.ts Esporta tutti i client
+  - project.json
+  - tsconfig.json
+
+</FileTree>
+
+Inoltre:
+- Trasforma il file `agent.ts` del tuo agente per registrare l'agente A2A remoto come `tool` di Strands
+- Aggiorna il target `serve-local` dell'agente per dipendere dal target `serve-local` dell'agente di destinazione
+- Installa le dipendenze richieste
+
+## Utilizzo dell'Agente A2A Connesso
+
+Il generatore trasforma il file `agent.ts` del tuo agente per avvolgere l'agente A2A remoto come strumento:
+
+```ts title="packages/example/src/my-agent/agent.ts" {2,5-11,14}
+import { Agent, tool } from '@strands-agents/sdk';
+import { RemoteAgentClient } from ':my-scope/agent-connection';
+import { z } from 'zod';
+
+export const getAgent = async (sessionId: string) => {
+  const remoteAgent = await RemoteAgentClient.create(sessionId);
+  const remoteAgentTool = tool({
+    name: 'askRemoteAgent',
+    description: 'Delegate a question to the remote RemoteAgent A2A agent and return its reply.',
+    inputSchema: z.object({ prompt: z.string() }),
+    callback: async ({ prompt }) => (await remoteAgent.invoke(prompt)).toString(),
+  });
+  return new Agent({
+    systemPrompt: '...',
+    tools: [remoteAgentTool],
+  });
+};
+```
+
+Il parametro `sessionId` viene passato dal chiamante, garantendo coerenza per [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
+
+Internamente, `RemoteAgentClient.create(sessionId)` restituisce un `A2AAgent` di Strands configurato con un `clientFactory` che firma con SigV4 quando distribuito su AWS, e un endpoint semplice `http://localhost:<port>/` quando `SERVE_LOCAL=true`.
+
+## Infrastruttura
+
+<Snippet name="connection/a2a-infrastructure" parentHeading="Infrastructure" />
+
+## Sviluppo Locale
+
+Il generatore configura il target `serve-local` dell'agente host per:
+1. Avviare automaticamente gli agenti A2A connessi
+2. Impostare `SERVE_LOCAL=true` in modo che il client generato si connetta direttamente a `http://localhost:<port>/` invece di AgentCore
+
+Esegui l'agente localmente con:
+
+<NxCommands commands={["<agent-name>-serve-local <project-name>"]} />
+
+Questo avvierà sia l'agente host che tutti gli agenti A2A connessi, con l'agente host che chiama gli agenti remoti tramite HTTP semplice sulle loro porte locali assegnate.

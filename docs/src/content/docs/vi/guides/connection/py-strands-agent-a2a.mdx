@@ -1,0 +1,101 @@
+---
+title: "Python Strands Agent tới A2A Agent"
+description: "Kết nối Python Strands Agent với một A2A agent từ xa"
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Snippet from '@components/snippet.astro';
+
+Trình tạo `connection` có thể kết nối <Link path="guides/py-strands-agent">Python Strands Agent</Link> của bạn với một agent [A2A](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) từ xa — có thể là <Link path="guides/ts-strands-agent">TypeScript</Link> hoặc <Link path="guides/py-strands-agent">Python</Link> — để agent của bạn có thể ủy quyền cho một agent khác như một công cụ.
+
+Trình tạo thiết lập tất cả các kết nối cần thiết để agent của bạn có thể khám phá và gọi agent A2A từ xa, cả khi triển khai lên AWS (thông qua Bedrock AgentCore) và khi chạy cục bộ.
+
+## Điều kiện tiên quyết
+
+Trước khi sử dụng trình tạo này, hãy đảm bảo bạn có:
+
+1. Một dự án Python với component <Link path="guides/py-strands-agent">Strands Agent</Link> (bất kỳ giao thức nào)
+2. Một dự án với component Strands Agent được tạo với `--protocol=A2A` và `--auth=IAM` (có thể là <Link path="guides/ts-strands-agent">`ts#strands-agent`</Link> hoặc <Link path="guides/py-strands-agent">`py#strands-agent`</Link>)
+3. Cả hai component được tạo với `computeType: BedrockAgentCoreRuntime`
+
+## Cách sử dụng
+
+### Chạy Trình tạo
+
+<RunGenerator generator="connection" />
+
+Chọn dự án agent chủ của bạn làm nguồn và dự án agent A2A của bạn làm đích. Nếu các dự án của bạn chứa nhiều component, hãy chỉ định các tùy chọn `sourceComponent` và `targetComponent` để phân biệt.
+
+### Tùy chọn
+
+<GeneratorParameters generator="connection" />
+
+## Kết quả đầu ra của Trình tạo
+
+Trình tạo tạo một dự án Python `agent_connection` được chia sẻ tại `packages/common/agent_connection/` (nếu nó chưa tồn tại). Các module client theo từng kết nối được tạo vào dự án chia sẻ này:
+
+<FileTree>
+
+- packages/common/agent\_connection
+  - \<scope>\_agent\_connection
+    - \_\_init\_\_.py Xuất lại các client theo từng kết nối
+    - core
+      - agentcore\_a2a\_client.py Client A2A AgentCore cốt lõi với xác thực SigV4
+    - app
+      - \<target\_agent\_name>\_client.py Client theo từng kết nối cho mỗi agent A2A
+
+</FileTree>
+
+Ngoài ra, trình tạo:
+- Chuyển đổi `agent.py` của agent của bạn để đăng ký agent A2A từ xa như một công cụ sử dụng `@tool`
+- Thêm dự án `agent_connection` như một dependency workspace của dự án agent của bạn
+- Cập nhật target `serve-local` của agent để phụ thuộc vào target `serve-local` của agent đích
+
+## Sử dụng Agent A2A đã kết nối
+
+Trình tạo chuyển đổi `agent.py` của agent của bạn để bọc agent A2A từ xa như một công cụ:
+
+```python title="packages/my-project/my_module/agent/agent.py" {4,9-15,21}
+from contextlib import contextmanager
+from strands import Agent, tool
+
+from my_scope_agent_connection import RemoteAgentClient
+
+@contextmanager
+def get_agent(session_id: str):
+    remote_agent = RemoteAgentClient.create(session_id=session_id)
+
+    @tool
+    def ask_remote_agent(prompt: str) -> str:
+        """Delegate a question to the remote RemoteAgent A2A agent and return its reply."""
+        return str(remote_agent(prompt))
+
+    yield Agent(
+        system_prompt="...",
+        tools=[ask_remote_agent],
+    )
+```
+
+Tham số `session_id` được truyền qua từ người gọi, đảm bảo tính nhất quán cho [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
+
+Bên trong, `RemoteAgentClient.create(session_id=...)` trả về một Strands `A2AAgent` được cấu hình với một `httpx.AsyncClient` ký các yêu cầu bằng SigV4 khi triển khai lên AWS, và một endpoint `http://localhost:<port>/` đơn giản khi `SERVE_LOCAL=true`.
+
+## Hạ tầng
+
+<Snippet name="connection/a2a-infrastructure" parentHeading="Infrastructure" />
+
+## Phát triển cục bộ
+
+Trình tạo cấu hình target `serve-local` của agent chủ để:
+1. Tự động khởi động (các) agent A2A đã kết nối
+2. Đặt `SERVE_LOCAL=true` để client được tạo kết nối trực tiếp đến `http://localhost:<port>/` thay vì AgentCore
+
+Chạy agent cục bộ với:
+
+<NxCommands commands={["<agent-name>-serve-local <project-name>"]} />
+
+Điều này sẽ khởi động cả agent chủ và tất cả các agent A2A đã kết nối, với agent chủ gọi các agent từ xa qua HTTP đơn giản trên các cổng cục bộ được chỉ định của chúng.

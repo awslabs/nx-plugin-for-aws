@@ -393,95 +393,10 @@ aws cognito-idp admin-initiate-auth \
 
 Tham khảo <Link path="/guides/connection/react-py-strands-agent">hướng dẫn `connection` generator</Link> để biết chi tiết về cách thiết lập kết nối.
 
-### Gọi một A2A Agent
+### Gọi một A2A Agent như một Tool
 
-`A2AAgent` của Strands SDK bao bọc một endpoint A2A từ xa để bạn có thể gọi nó như một `Agent` local.
+Để ủy thác công việc từ agent này sang một A2A agent từ xa (có thể là <Link path="/guides/ts-strands-agent">TypeScript</Link> hoặc <Link path="/guides/py-strands-agent">Python</Link>), hãy sử dụng <Link path="/guides/connection/py-strands-agent-a2a">`connection` generator</Link>. Nó cung cấp một client được xác thực SigV4 cho agent đích và AST-transform file `agent.py` của agent này để đăng ký A2A agent từ xa như một delegate được trang trí bằng `@tool`.
 
-```python
-from strands.agent.a2a_agent import A2AAgent
+<RunGenerator generator="connection" />
 
-remote = A2AAgent(endpoint="http://127.0.0.1:9000")
-result = await remote.invoke_async("Hello, remote agent!")
-```
-
-#### Gọi trên AgentCore với Xác thực IAM
-
-Các request tới một A2A agent đã triển khai trên AgentCore (bao gồm cả việc lấy agent card) phải được ký SigV4. Truyền một `client_config` cho `A2AAgent` với một `httpx.AsyncClient` sử dụng luồng xác thực SigV4:
-
-```python
-import hashlib
-from urllib.parse import quote
-
-import httpx
-from a2a.client import ClientConfig
-from botocore.auth import SigV4Auth
-from botocore.awsrequest import AWSRequest
-from botocore.session import Session
-from strands.agent.a2a_agent import A2AAgent
-
-
-class SigV4HTTPXAuth(httpx.Auth):
-    requires_request_body = True
-
-    def __init__(self, region: str):
-        creds = Session().get_credentials().get_frozen_credentials()
-        self.signer = SigV4Auth(creds, "bedrock-agentcore", region)
-
-    def auth_flow(self, request: httpx.Request):
-        headers = dict(request.headers)
-        headers.pop("connection", None)
-        headers["x-amz-content-sha256"] = hashlib.sha256(request.content or b"").hexdigest()
-        aws_request = AWSRequest(method=request.method, url=str(request.url), data=request.content, headers=headers)
-        self.signer.add_auth(aws_request)
-        request.headers.clear()
-        request.headers.update(dict(aws_request.headers))
-        yield request
-
-
-arn = "<your-agent-runtime-arn>"
-region = arn.split(":")[3]
-endpoint = f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/{quote(arn, safe='')}/invocations/"
-
-auth_client = httpx.AsyncClient(auth=SigV4HTTPXAuth(region), timeout=300)
-remote = A2AAgent(endpoint=endpoint, client_config=ClientConfig(httpx_client=auth_client))
-result = await remote.invoke_async("Hello, remote agent!")
-```
-
-:::note[Quyền IAM]
-IAM role của caller cần cả `bedrock-agentcore:InvokeAgentRuntime` và `bedrock-agentcore:GetAgentCard` trên ARN runtime đích. Helper `grantInvokeAccess` của construct được tạo cấp cả hai.
-:::
-
-:::note[Dependency bổ sung]
-A2A generator thêm `strands-agents[a2a]` cho bạn. Nếu bạn đang thêm mã A2A client vào một HTTP agent, hãy thêm `strands-agents[a2a]` và `httpx` vào `pyproject.toml` của bạn.
-:::
-
-#### Sử dụng A2A Agent như một Tool
-
-`A2AAgent` kế thừa từ `AgentBase` giống như một `Agent` local, vì vậy bạn có thể bao bọc nó trong một `@tool` và đưa nó cho một agent khác:
-
-```python
-from strands import Agent, tool
-
-remote = # A2AAgent built with client_config as above
-
-async def ask_remote_agent(prompt: str) -> str:
-    """Delegate a question to the remote A2A agent and return its reply."""
-    result = await remote.invoke_async(prompt)
-    return str(result)
-
-ask_remote = tool(
-    name="ask_remote_agent",
-    description="Delegate a question to the remote A2A agent and return its reply.",
-)(ask_remote_agent)
-
-agent = Agent(
-    system_prompt="Delegate to ask_remote_agent when appropriate.",
-    tools=[ask_remote],
-)
-```
-
-Trong CDK stack của bạn, cấp quyền truy cập invoke cho host agent tới remote agent — điều này thiết lập cả hai IAM action mà A2A client cần:
-
-```typescript
-remoteAgent.grantInvokeAccess(hostAgent);
-```
+Tham khảo <Link path="/guides/connection/py-strands-agent-a2a">hướng dẫn `connection` generator</Link> để biết chi tiết về cách thiết lập kết nối.

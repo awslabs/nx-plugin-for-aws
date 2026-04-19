@@ -391,95 +391,10 @@ aws cognito-idp admin-initiate-auth \
 
 关于连接设置的详细信息，请参考<Link path="/guides/connection/react-py-strands-agent">`connection`生成器指南</Link>。
 
-### 调用A2A智能体
+### 将A2A智能体作为工具调用
 
-Strands SDK的`A2AAgent`封装了远程A2A端点，使您可以像调用本地`Agent`一样调用它。
+要将工作从此智能体委托给远程A2A智能体（<Link path="/guides/ts-strands-agent">TypeScript</Link>或<Link path="/guides/py-strands-agent">Python</Link>），请使用<Link path="/guides/connection/py-strands-agent-a2a">`connection`生成器</Link>。它为目标智能体提供SigV4认证的客户端，并对此智能体的`agent.py`进行AST转换，将远程A2A智能体注册为`@tool`装饰的委托。
 
-```python
-from strands.agent.a2a_agent import A2AAgent
+<RunGenerator generator="connection" />
 
-remote = A2AAgent(endpoint="http://127.0.0.1:9000")
-result = await remote.invoke_async("Hello, remote agent!")
-```
-
-#### 在AgentCore上使用IAM认证调用
-
-对已部署到AgentCore的A2A智能体的请求（包括智能体卡片获取）必须使用SigV4签名。向`A2AAgent`传递一个`client_config`，其中包含使用SigV4认证流的`httpx.AsyncClient`：
-
-```python
-import hashlib
-from urllib.parse import quote
-
-import httpx
-from a2a.client import ClientConfig
-from botocore.auth import SigV4Auth
-from botocore.awsrequest import AWSRequest
-from botocore.session import Session
-from strands.agent.a2a_agent import A2AAgent
-
-
-class SigV4HTTPXAuth(httpx.Auth):
-    requires_request_body = True
-
-    def __init__(self, region: str):
-        creds = Session().get_credentials().get_frozen_credentials()
-        self.signer = SigV4Auth(creds, "bedrock-agentcore", region)
-
-    def auth_flow(self, request: httpx.Request):
-        headers = dict(request.headers)
-        headers.pop("connection", None)
-        headers["x-amz-content-sha256"] = hashlib.sha256(request.content or b"").hexdigest()
-        aws_request = AWSRequest(method=request.method, url=str(request.url), data=request.content, headers=headers)
-        self.signer.add_auth(aws_request)
-        request.headers.clear()
-        request.headers.update(dict(aws_request.headers))
-        yield request
-
-
-arn = "<your-agent-runtime-arn>"
-region = arn.split(":")[3]
-endpoint = f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/{quote(arn, safe='')}/invocations/"
-
-auth_client = httpx.AsyncClient(auth=SigV4HTTPXAuth(region), timeout=300)
-remote = A2AAgent(endpoint=endpoint, client_config=ClientConfig(httpx_client=auth_client))
-result = await remote.invoke_async("Hello, remote agent!")
-```
-
-:::note[IAM权限]
-调用者的IAM角色需要对目标运行时ARN具有`bedrock-agentcore:InvokeAgentRuntime`和`bedrock-agentcore:GetAgentCard`权限。生成的构造的`grantInvokeAccess`辅助方法会同时授予这两个权限。
-:::
-
-:::note[额外依赖]
-A2A生成器会为您添加`strands-agents[a2a]`。如果您要将A2A客户端代码添加到HTTP智能体，请在`pyproject.toml`中添加`strands-agents[a2a]`和`httpx`。
-:::
-
-#### 将A2A智能体用作工具
-
-`A2AAgent`像本地`Agent`一样继承自`AgentBase`，因此您可以将其包装在`@tool`中并交给另一个智能体：
-
-```python
-from strands import Agent, tool
-
-remote = # 使用上述client_config构建的A2AAgent
-
-async def ask_remote_agent(prompt: str) -> str:
-    """将问题委托给远程A2A智能体并返回其回复。"""
-    result = await remote.invoke_async(prompt)
-    return str(result)
-
-ask_remote = tool(
-    name="ask_remote_agent",
-    description="将问题委托给远程A2A智能体并返回其回复。",
-)(ask_remote_agent)
-
-agent = Agent(
-    system_prompt="在适当时委托给ask_remote_agent。",
-    tools=[ask_remote],
-)
-```
-
-在CDK堆栈中，授予宿主智能体对远程智能体的调用访问权——这会配置A2A客户端所需的两个IAM操作：
-
-```typescript
-remoteAgent.grantInvokeAccess(hostAgent);
-```
+关于连接设置的详细信息，请参考<Link path="/guides/connection/py-strands-agent-a2a">`connection`生成器指南</Link>。

@@ -1,0 +1,58 @@
+---
+title: "Infraestrutura de Conexão A2A"
+---
+
+import Link from '@components/link.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+Após executar o gerador de conexão, você precisa conceder ao agente host permissão para invocar o agente A2A remoto.
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts title="packages/infra/src/stacks/application-stack.ts" {5}
+const remoteAgent = new RemoteAgent(this, 'RemoteAgent');
+const myAgent = new MyAgent(this, 'MyAgent');
+
+// Grant the host agent permission to invoke the remote A2A agent
+remoteAgent.grantInvokeAccess(myAgent);
+```
+
+`grantInvokeAccess` em um agente A2A configura tanto `bedrock-agentcore:InvokeAgentRuntime` quanto `bedrock-agentcore:GetAgentCard` — o cliente A2A precisa de ambos para buscar o cartão do agente e enviar mensagens.
+
+O ARN do runtime AgentCore do agente remoto é automaticamente registrado no namespace `connection` da <Link path="guides/runtime-config">Runtime Configuration</Link> pelo construto CDK gerado, para que o agente host possa descobri-lo em tempo de execução.
+</Fragment>
+<Fragment slot="terraform">
+```hcl title="packages/infra/src/main.tf"
+module "remote_agent" {
+  source = "../../common/terraform/src/app/agents/remote-agent"
+}
+
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+}
+
+# Grant the host agent permission to invoke the remote A2A agent
+resource "aws_iam_policy" "agent_invoke_a2a" {
+  name = "AgentInvokeA2aPolicy"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "bedrock-agentcore:InvokeAgentRuntime",
+        "bedrock-agentcore:GetAgentCard",
+      ]
+      Resource = module.remote_agent.agent_core_runtime_arn
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "agent_invoke_a2a" {
+  role       = module.my_agent.agent_core_runtime_role_arn
+  policy_arn = aws_iam_policy.agent_invoke_a2a.arn
+}
+```
+
+O ARN do runtime AgentCore do agente remoto é automaticamente registrado no namespace `connection` da <Link path="guides/runtime-config">Runtime Configuration</Link> pelo módulo Terraform gerado, para que o agente host possa descobri-lo em tempo de execução.
+</Fragment>
+</Infrastructure>

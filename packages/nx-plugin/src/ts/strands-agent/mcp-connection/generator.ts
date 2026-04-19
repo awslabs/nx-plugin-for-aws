@@ -30,6 +30,7 @@ import {
 } from '../../../utils/ast';
 import {
   ensureTypeScriptAgentConnectionProject,
+  addTypeScriptCoreClient,
   AGENT_CONNECTION_PROJECT_DIR,
 } from '../../../utils/agent-connection/agent-connection';
 
@@ -71,8 +72,9 @@ export const tsStrandsAgentMcpConnectionGenerator = async (
 
   const npmScope = getNpmScope(tree);
 
-  // 1. Ensure the shared agent-connection project exists
+  // 1. Ensure the shared agent-connection project exists + has the MCP core client
   await ensureTypeScriptAgentConnectionProject(tree);
+  addTypeScriptCoreClient(tree, 'mcp');
 
   // 2. Generate the per-connection <Name>Client into app/
   generateFiles(
@@ -156,11 +158,12 @@ export const tsStrandsAgentMcpConnectionGenerator = async (
     updateProjectConfiguration(tree, sourceProject.name, sourceProject);
   }
 
-  // 5. Add dependencies
+  // 5. Add dependencies required by the MCP core client + vended client
   addDependenciesToPackageJson(
     tree,
     withVersions([
       '@modelcontextprotocol/sdk',
+      '@strands-agents/sdk',
       '@aws-lambda-powertools/parameters',
       '@aws-sdk/client-appconfigdata',
       'aws4fetch',

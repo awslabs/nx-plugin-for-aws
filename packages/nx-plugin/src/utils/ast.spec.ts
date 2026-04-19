@@ -7,6 +7,7 @@ import { Tree } from '@nx/devkit';
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
 import {
   addDestructuredImport,
+  addPythonDestructuredImport,
   addSingleImport,
   addStarExport,
   hasExportDeclaration,
@@ -492,6 +493,128 @@ class MyClass implements SomeInterface {
       expect(
         await matchGritQL(tree, 'file.py', 'language python\n`unused($msg)`'),
       ).toBe(false);
+    });
+  });
+
+  describe('addPythonDestructuredImport', () => {
+    it('should prepend a new import when the module is not imported yet', async () => {
+      tree.write('file.py', 'x = 1\n');
+
+      await addPythonDestructuredImport(tree, 'file.py', ['foo'], 'mymod');
+
+      const written = tree.read('file.py', 'utf-8')!;
+      expect(written).toBe('from mymod import foo\nx = 1\n');
+    });
+
+    it('should append to an existing single-name import from the same module', async () => {
+      tree.write('file.py', 'from mymod import existing\nx = 1\n');
+
+      await addPythonDestructuredImport(tree, 'file.py', ['newer'], 'mymod');
+
+      const written = tree.read('file.py', 'utf-8')!;
+      expect(written).toMatch(/from mymod import existing, newer/);
+      // No second `from mymod import` line
+      expect(written.match(/from mymod import /g)).toHaveLength(1);
+    });
+
+    it('should append to an existing multi-name import from the same module', async () => {
+      tree.write('file.py', 'from mymod import a, b\nx = 1\n');
+
+      await addPythonDestructuredImport(tree, 'file.py', ['c'], 'mymod');
+
+      const written = tree.read('file.py', 'utf-8')!;
+      expect(written).toMatch(/from mymod import a, b, c/);
+      expect(written.match(/from mymod import /g)).toHaveLength(1);
+    });
+
+    it('should be a no-op when the name is already imported', async () => {
+      const initial = 'from mymod import foo\nx = 1\n';
+      tree.write('file.py', initial);
+
+      await addPythonDestructuredImport(tree, 'file.py', ['foo'], 'mymod');
+
+      expect(tree.read('file.py', 'utf-8')).toBe(initial);
+    });
+
+    it('should be a no-op when all requested names are already imported', async () => {
+      const initial = 'from mymod import foo, bar, baz\nx = 1\n';
+      tree.write('file.py', initial);
+
+      await addPythonDestructuredImport(
+        tree,
+        'file.py',
+        ['foo', 'bar'],
+        'mymod',
+      );
+
+      expect(tree.read('file.py', 'utf-8')).toBe(initial);
+    });
+
+    it('should append only the missing names when some are already imported', async () => {
+      tree.write('file.py', 'from mymod import foo\nx = 1\n');
+
+      await addPythonDestructuredImport(
+        tree,
+        'file.py',
+        ['foo', 'bar', 'baz'],
+        'mymod',
+      );
+
+      const written = tree.read('file.py', 'utf-8')!;
+      expect(written).toMatch(/from mymod import foo, bar, baz/);
+      // `foo` appears exactly once in the import list
+      const line = written
+        .split('\n')
+        .find((l) => l.startsWith('from mymod import'));
+      expect(line).toBeDefined();
+      expect((line!.match(/\bfoo\b/g) ?? []).length).toBe(1);
+    });
+
+    it('should not conflate different modules whose names share a prefix', async () => {
+      tree.write('file.py', 'from mymod_tools import helper\nx = 1\n');
+
+      await addPythonDestructuredImport(tree, 'file.py', ['foo'], 'mymod');
+
+      const written = tree.read('file.py', 'utf-8')!;
+      // New import added as a separate line; the `mymod_tools` line is unchanged.
+      expect(written).toContain('from mymod_tools import helper');
+      expect(written).toContain('from mymod import foo');
+    });
+
+    it('should be idempotent across repeated calls', async () => {
+      tree.write('file.py', 'x = 1\n');
+
+      await addPythonDestructuredImport(tree, 'file.py', ['foo'], 'mymod');
+      await addPythonDestructuredImport(tree, 'file.py', ['foo'], 'mymod');
+      await addPythonDestructuredImport(tree, 'file.py', ['foo'], 'mymod');
+
+      const written = tree.read('file.py', 'utf-8')!;
+      expect(written.match(/from mymod import /g)).toHaveLength(1);
+      const line = written
+        .split('\n')
+        .find((l) => l.startsWith('from mymod import'));
+      expect((line!.match(/\bfoo\b/g) ?? []).length).toBe(1);
+    });
+
+    it('should preserve the rest of the file when prepending', async () => {
+      tree.write(
+        'file.py',
+        `"""Module docstring."""
+from contextlib import contextmanager
+
+
+def hello() -> str:
+    return "hi"
+`,
+      );
+
+      await addPythonDestructuredImport(tree, 'file.py', ['foo'], 'mymod');
+
+      const written = tree.read('file.py', 'utf-8')!;
+      expect(written).toContain('"""Module docstring."""');
+      expect(written).toContain('from contextlib import contextmanager');
+      expect(written).toContain('def hello() -> str:');
+      expect(written).toContain('from mymod import foo');
     });
   });
 });
