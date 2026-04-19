@@ -393,95 +393,10 @@ Para invocar seu Agente Strands a partir de um website React, você pode usar o 
 
 Consulte o <Link path="/guides/connection/react-py-strands-agent">guia do gerador `connection`</Link> para detalhes sobre como a conexão é configurada.
 
-### Invocando um Agente A2A
+### Invocando um Agente A2A como Ferramenta
 
-O `A2AAgent` do SDK Strands encapsula um endpoint A2A remoto para que você possa chamá-lo como um `Agent` local.
+Para delegar trabalho deste agente para um agente A2A remoto (seja <Link path="/guides/ts-strands-agent">TypeScript</Link> ou <Link path="/guides/py-strands-agent">Python</Link>), use o <Link path="/guides/connection/py-strands-agent-a2a">gerador `connection`</Link>. Ele fornece um cliente autenticado com SigV4 para o agente alvo e transforma via AST o `agent.py` deste agente para registrar o agente A2A remoto como um delegado decorado com `@tool`.
 
-```python
-from strands.agent.a2a_agent import A2AAgent
+<RunGenerator generator="connection" />
 
-remote = A2AAgent(endpoint="http://127.0.0.1:9000")
-result = await remote.invoke_async("Hello, remote agent!")
-```
-
-#### Invocando no AgentCore com Autenticação IAM
-
-Requisições para um agente A2A implantado no AgentCore (incluindo a busca do cartão do agente) devem ser assinadas com SigV4. Passe um `client_config` para `A2AAgent` com um `httpx.AsyncClient` que usa um fluxo de autenticação SigV4:
-
-```python
-import hashlib
-from urllib.parse import quote
-
-import httpx
-from a2a.client import ClientConfig
-from botocore.auth import SigV4Auth
-from botocore.awsrequest import AWSRequest
-from botocore.session import Session
-from strands.agent.a2a_agent import A2AAgent
-
-
-class SigV4HTTPXAuth(httpx.Auth):
-    requires_request_body = True
-
-    def __init__(self, region: str):
-        creds = Session().get_credentials().get_frozen_credentials()
-        self.signer = SigV4Auth(creds, "bedrock-agentcore", region)
-
-    def auth_flow(self, request: httpx.Request):
-        headers = dict(request.headers)
-        headers.pop("connection", None)
-        headers["x-amz-content-sha256"] = hashlib.sha256(request.content or b"").hexdigest()
-        aws_request = AWSRequest(method=request.method, url=str(request.url), data=request.content, headers=headers)
-        self.signer.add_auth(aws_request)
-        request.headers.clear()
-        request.headers.update(dict(aws_request.headers))
-        yield request
-
-
-arn = "<your-agent-runtime-arn>"
-region = arn.split(":")[3]
-endpoint = f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/{quote(arn, safe='')}/invocations/"
-
-auth_client = httpx.AsyncClient(auth=SigV4HTTPXAuth(region), timeout=300)
-remote = A2AAgent(endpoint=endpoint, client_config=ClientConfig(httpx_client=auth_client))
-result = await remote.invoke_async("Hello, remote agent!")
-```
-
-:::note[Permissões IAM]
-A role IAM do chamador precisa de ambas as permissões `bedrock-agentcore:InvokeAgentRuntime` e `bedrock-agentcore:GetAgentCard` no ARN do runtime alvo. O helper `grantInvokeAccess` do construct gerado concede ambas.
-:::
-
-:::note[Dependência extra]
-O gerador A2A adiciona `strands-agents[a2a]` para você. Se você estiver adicionando o código do cliente A2A a um agente HTTP, adicione `strands-agents[a2a]` e `httpx` ao seu `pyproject.toml`.
-:::
-
-#### Usando um Agente A2A como Ferramenta
-
-`A2AAgent` herda de `AgentBase` como um `Agent` local, então você pode encapsulá-lo em um `@tool` e passá-lo para outro agente:
-
-```python
-from strands import Agent, tool
-
-remote = # A2AAgent construído com client_config como acima
-
-async def ask_remote_agent(prompt: str) -> str:
-    """Delegate a question to the remote A2A agent and return its reply."""
-    result = await remote.invoke_async(prompt)
-    return str(result)
-
-ask_remote = tool(
-    name="ask_remote_agent",
-    description="Delegate a question to the remote A2A agent and return its reply.",
-)(ask_remote_agent)
-
-agent = Agent(
-    system_prompt="Delegate to ask_remote_agent when appropriate.",
-    tools=[ask_remote],
-)
-```
-
-Na sua stack CDK, conceda ao agente host acesso de invocação ao agente remoto — isso configura ambas as ações IAM que o cliente A2A precisa:
-
-```typescript
-remoteAgent.grantInvokeAccess(hostAgent);
-```
+Consulte o <Link path="/guides/connection/py-strands-agent-a2a">guia do gerador `connection`</Link> para detalhes sobre como a conexão é configurada.

@@ -1,0 +1,101 @@
+---
+title: "Agent Python Strands vers Agent A2A"
+description: "Connecter un Agent Python Strands à un agent A2A distant"
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Snippet from '@components/snippet.astro';
+
+Le générateur `connection` peut connecter votre <Link path="guides/py-strands-agent">Agent Strands Python</Link> à un agent [A2A](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) distant — soit <Link path="guides/ts-strands-agent">TypeScript</Link> soit <Link path="guides/py-strands-agent">Python</Link> — afin que votre agent puisse déléguer à un autre agent en tant qu'outil.
+
+Le générateur configure tout le câblage nécessaire pour que votre agent puisse découvrir et invoquer l'agent A2A distant, à la fois lorsqu'il est déployé sur AWS (via Bedrock AgentCore) et lorsqu'il s'exécute localement.
+
+## Prérequis
+
+Avant d'utiliser ce générateur, assurez-vous d'avoir :
+
+1. Un projet Python avec un composant <Link path="guides/py-strands-agent">Strands Agent</Link> (n'importe quel protocole)
+2. Un projet avec un composant Strands Agent généré avec `--protocol=A2A` et `--auth=IAM` (soit <Link path="guides/ts-strands-agent">`ts#strands-agent`</Link> soit <Link path="guides/py-strands-agent">`py#strands-agent`</Link>)
+3. Les deux composants créés avec `computeType: BedrockAgentCoreRuntime`
+
+## Utilisation
+
+### Exécuter le générateur
+
+<RunGenerator generator="connection" />
+
+Sélectionnez votre projet d'agent hôte comme source et votre projet d'agent A2A comme cible. Si vos projets contiennent plusieurs composants, spécifiez les options `sourceComponent` et `targetComponent` pour lever l'ambiguïté.
+
+### Options
+
+<GeneratorParameters generator="connection" />
+
+## Sortie du générateur
+
+Le générateur crée un projet Python partagé `agent_connection` dans `packages/common/agent_connection/` (s'il n'existe pas déjà). Les modules clients par connexion sont générés dans ce projet partagé :
+
+<FileTree>
+
+- packages/common/agent\_connection
+  - \<scope>\_agent\_connection
+    - \_\_init\_\_.py Ré-exporte les clients par connexion
+    - core
+      - agentcore\_a2a\_client.py Client A2A AgentCore de base avec authentification SigV4
+    - app
+      - \<target\_agent\_name>\_client.py Client par connexion pour chaque agent A2A
+
+</FileTree>
+
+De plus, le générateur :
+- Transforme le fichier `agent.py` de votre agent pour enregistrer l'agent A2A distant comme outil en utilisant `@tool`
+- Ajoute le projet `agent_connection` comme dépendance d'espace de travail de votre projet d'agent
+- Met à jour la cible `serve-local` de l'agent pour dépendre de la cible `serve-local` de l'agent cible
+
+## Utilisation de l'agent A2A connecté
+
+Le générateur transforme le fichier `agent.py` de votre agent pour encapsuler l'agent A2A distant en tant qu'outil :
+
+```python title="packages/my-project/my_module/agent/agent.py" {4,9-15,21}
+from contextlib import contextmanager
+from strands import Agent, tool
+
+from my_scope_agent_connection import RemoteAgentClient
+
+@contextmanager
+def get_agent(session_id: str):
+    remote_agent = RemoteAgentClient.create(session_id=session_id)
+
+    @tool
+    def ask_remote_agent(prompt: str) -> str:
+        """Delegate a question to the remote RemoteAgent A2A agent and return its reply."""
+        return str(remote_agent(prompt))
+
+    yield Agent(
+        system_prompt="...",
+        tools=[ask_remote_agent],
+    )
+```
+
+Le paramètre `session_id` est transmis depuis l'appelant, garantissant la cohérence pour [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
+
+En interne, `RemoteAgentClient.create(session_id=...)` retourne un `A2AAgent` Strands configuré avec un `httpx.AsyncClient` qui signe les requêtes avec SigV4 lorsqu'il est déployé sur AWS, et un point de terminaison `http://localhost:<port>/` simple lorsque `SERVE_LOCAL=true`.
+
+## Infrastructure
+
+<Snippet name="connection/a2a-infrastructure" parentHeading="Infrastructure" />
+
+## Développement local
+
+Le générateur configure la cible `serve-local` de l'agent hôte pour :
+1. Démarrer automatiquement le(s) agent(s) A2A connecté(s)
+2. Définir `SERVE_LOCAL=true` afin que le client généré se connecte directement à `http://localhost:<port>/` au lieu d'AgentCore
+
+Exécutez l'agent localement avec :
+
+<NxCommands commands={["<agent-name>-serve-local <project-name>"]} />
+
+Cela démarrera à la fois l'agent hôte et tous les agents A2A connectés, l'agent hôte appelant les agents distants via HTTP simple sur leurs ports locaux assignés.

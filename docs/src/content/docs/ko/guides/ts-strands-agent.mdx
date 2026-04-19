@@ -358,85 +358,10 @@ React 웹사이트에서 Strands Agent를 호출하려면 <Link path="/guides/co
 
 연결 설정 방법에 대한 자세한 내용은 <Link path="/guides/connection/react-ts-strands-agent">`connection` 생성기 가이드</Link>를 참조하세요.
 
-### A2A 에이전트 호출
+### A2A 에이전트를 도구로 호출
 
-Strands SDK의 `A2AAgent`는 원격 A2A 엔드포인트를 래핑하여 로컬 `Agent`처럼 호출할 수 있도록 합니다. `invoke`는 `AgentResult`로 해석되며, 여기에 `.toString()`을 호출하면 원격 에이전트의 응답에서 텍스트 블록을 결합합니다.
+이 에이전트에서 원격 A2A 에이전트(<Link path="/guides/ts-strands-agent">TypeScript</Link> 또는 <Link path="/guides/py-strands-agent">Python</Link>)로 작업을 위임하려면 <Link path="/guides/connection/ts-strands-agent-a2a">`connection` 생성기</Link>를 사용하세요. 이는 대상 에이전트에 대한 SigV4 인증 클라이언트를 제공하고 이 에이전트의 `agent.ts`를 AST 변환하여 원격 A2A 에이전트를 Strands `tool`로 등록합니다.
 
-```typescript
-import { A2AAgent } from '@strands-agents/sdk/a2a';
+<RunGenerator generator="connection" />
 
-const remote = new A2AAgent({ url: 'http://localhost:9000' });
-const result = await remote.invoke('Hello, remote agent!');
-const reply = result.toString();
-```
-
-#### IAM 인증으로 AgentCore에서 호출
-
-AgentCore에 배포된 A2A 에이전트에 대한 요청(에이전트 카드 가져오기 포함)은 SigV4 서명이 필요합니다. 카드 리졸버와 JSON-RPC 전송 모두에 대해 SigV4 서명 fetch를 사용하는 `clientFactory`를 `A2AAgent`에 전달하세요:
-
-```typescript
-import {
-  ClientFactory,
-  ClientFactoryOptions,
-  DefaultAgentCardResolver,
-  JsonRpcTransportFactory,
-} from '@a2a-js/sdk/client';
-import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
-import { A2AAgent } from '@strands-agents/sdk/a2a';
-import { AwsClient } from 'aws4fetch';
-
-const arn = '<your-agent-runtime-arn>';
-const region = arn.split(':')[3];
-const url = `https://bedrock-agentcore.${region}.amazonaws.com/runtimes/${encodeURIComponent(arn)}/invocations/`;
-
-const creds = fromNodeProviderChain();
-const sigv4Fetch: typeof fetch = async (...args) =>
-  new AwsClient({ ...(await creds()), service: 'bedrock-agentcore', region }).fetch(...args);
-
-const clientFactory = new ClientFactory({
-  ...ClientFactoryOptions.default,
-  transports: [new JsonRpcTransportFactory({ fetchImpl: sigv4Fetch })],
-  cardResolver: new DefaultAgentCardResolver({ fetchImpl: sigv4Fetch }),
-});
-
-const remote = new A2AAgent({ url, clientFactory });
-const result = await remote.invoke('Hello, remote agent!');
-const reply = result.toString();
-```
-
-:::note[IAM 권한]
-호출자의 IAM 역할에는 대상 런타임 ARN에 대한 `bedrock-agentcore:InvokeAgentRuntime` 및 `bedrock-agentcore:GetAgentCard` 권한이 모두 필요합니다. 생성된 구성의 `grantInvokeAccess` 헬퍼는 두 권한을 모두 부여합니다.
-:::
-
-:::note[추가 종속성]
-위의 SigV4 클라이언트 예제에는 `@a2a-js/sdk`, `aws4fetch` 및 `@aws-sdk/credential-providers`가 필요합니다. 예제를 실행하기 전에 `package.json`에 추가하세요.
-:::
-
-#### A2A 에이전트를 도구로 사용
-
-`A2AAgent`는 로컬 `Agent`와 동일한 `InvokableAgent` 인터페이스를 구현하므로, Strands `tool`로 래핑하여 다른 에이전트에 전달할 수 있습니다. 생성된 HTTP/tRPC 에이전트 템플릿이 원격 A2A 에이전트에 위임하는 방식입니다:
-
-```typescript
-import { Agent, tool } from '@strands-agents/sdk';
-import { z } from 'zod';
-
-const remote = /* A2AAgent built with clientFactory as above */;
-
-const askRemote = tool({
-  name: 'askRemoteAgent',
-  description: 'Delegate a question to the remote A2A agent and return its reply.',
-  inputSchema: z.object({ prompt: z.string() }),
-  callback: async ({ prompt }) => (await remote.invoke(prompt)).toString(),
-});
-
-const agent = new Agent({
-  systemPrompt: 'Delegate to askRemoteAgent when appropriate.',
-  tools: [askRemote],
-});
-```
-
-CDK 스택에서 호스트 에이전트에 원격 에이전트에 대한 호출 액세스 권한을 부여하세요 — 이는 A2A 클라이언트에 필요한 두 IAM 작업을 모두 연결합니다:
-
-```typescript
-remoteAgent.grantInvokeAccess(hostAgent);
-```
+연결 설정 방법에 대한 자세한 내용은 <Link path="/guides/connection/ts-strands-agent-a2a">`connection` 생성기 가이드</Link>를 참조하세요.

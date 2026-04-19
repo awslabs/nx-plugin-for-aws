@@ -1,0 +1,58 @@
+---
+title: "A2A 连接基础设施"
+---
+
+import Link from '@components/link.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+运行连接生成器后,您需要授予宿主代理调用远程 A2A 代理的权限。
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts title="packages/infra/src/stacks/application-stack.ts" {5}
+const remoteAgent = new RemoteAgent(this, 'RemoteAgent');
+const myAgent = new MyAgent(this, 'MyAgent');
+
+// Grant the host agent permission to invoke the remote A2A agent
+remoteAgent.grantInvokeAccess(myAgent);
+```
+
+A2A 代理上的 `grantInvokeAccess` 会同时配置 `bedrock-agentcore:InvokeAgentRuntime` 和 `bedrock-agentcore:GetAgentCard` — A2A 客户端需要这两者来获取代理卡片并发送消息。
+
+远程代理的 AgentCore 运行时 ARN 会由生成的 CDK 构造自动注册到<Link path="guides/runtime-config">运行时配置</Link>的 `connection` 命名空间中,以便宿主代理可以在运行时发现它。
+</Fragment>
+<Fragment slot="terraform">
+```hcl title="packages/infra/src/main.tf"
+module "remote_agent" {
+  source = "../../common/terraform/src/app/agents/remote-agent"
+}
+
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+}
+
+# Grant the host agent permission to invoke the remote A2A agent
+resource "aws_iam_policy" "agent_invoke_a2a" {
+  name = "AgentInvokeA2aPolicy"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "bedrock-agentcore:InvokeAgentRuntime",
+        "bedrock-agentcore:GetAgentCard",
+      ]
+      Resource = module.remote_agent.agent_core_runtime_arn
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "agent_invoke_a2a" {
+  role       = module.my_agent.agent_core_runtime_role_arn
+  policy_arn = aws_iam_policy.agent_invoke_a2a.arn
+}
+```
+
+远程代理的 AgentCore 运行时 ARN 会由生成的 Terraform 模块自动注册到<Link path="guides/runtime-config">运行时配置</Link>的 `connection` 命名空间中,以便宿主代理可以在运行时发现它。
+</Fragment>
+</Infrastructure>

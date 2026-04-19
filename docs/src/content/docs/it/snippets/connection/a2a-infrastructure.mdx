@@ -1,0 +1,58 @@
+---
+title: "Infrastruttura di Connessione A2A"
+---
+
+import Link from '@components/link.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+Dopo aver eseguito il generatore di connessioni, è necessario concedere all'agente host il permesso di invocare l'agente A2A remoto.
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts title="packages/infra/src/stacks/application-stack.ts" {5}
+const remoteAgent = new RemoteAgent(this, 'RemoteAgent');
+const myAgent = new MyAgent(this, 'MyAgent');
+
+// Grant the host agent permission to invoke the remote A2A agent
+remoteAgent.grantInvokeAccess(myAgent);
+```
+
+`grantInvokeAccess` su un agente A2A configura sia `bedrock-agentcore:InvokeAgentRuntime` che `bedrock-agentcore:GetAgentCard` — il client A2A ha bisogno di entrambi per recuperare la scheda dell'agente e inviare messaggi.
+
+L'ARN del runtime AgentCore dell'agente remoto viene automaticamente registrato nel namespace `connection` della <Link path="guides/runtime-config">Runtime Configuration</Link> dal costrutto CDK generato, in modo che l'agente host possa scoprirlo a runtime.
+</Fragment>
+<Fragment slot="terraform">
+```hcl title="packages/infra/src/main.tf"
+module "remote_agent" {
+  source = "../../common/terraform/src/app/agents/remote-agent"
+}
+
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+}
+
+# Grant the host agent permission to invoke the remote A2A agent
+resource "aws_iam_policy" "agent_invoke_a2a" {
+  name = "AgentInvokeA2aPolicy"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "bedrock-agentcore:InvokeAgentRuntime",
+        "bedrock-agentcore:GetAgentCard",
+      ]
+      Resource = module.remote_agent.agent_core_runtime_arn
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "agent_invoke_a2a" {
+  role       = module.my_agent.agent_core_runtime_role_arn
+  policy_arn = aws_iam_policy.agent_invoke_a2a.arn
+}
+```
+
+L'ARN del runtime AgentCore dell'agente remoto viene automaticamente registrato nel namespace `connection` della <Link path="guides/runtime-config">Runtime Configuration</Link> dal modulo Terraform generato, in modo che l'agente host possa scoprirlo a runtime.
+</Fragment>
+</Infrastructure>

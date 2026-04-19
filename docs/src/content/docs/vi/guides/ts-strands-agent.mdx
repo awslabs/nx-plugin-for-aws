@@ -358,85 +358,10 @@ const jwtClient = AgentClient.withJwtAuth({
 
 Tham khảo <Link path="/guides/connection/react-ts-strands-agent">hướng dẫn `connection` generator</Link> để biết chi tiết về cách thiết lập kết nối.
 
-### Gọi một A2A Agent
+### Gọi một A2A Agent như một Công cụ
 
-`A2AAgent` của Strands SDK bao bọc một endpoint A2A từ xa để bạn có thể gọi nó như một `Agent` local. `invoke` resolve thành một `AgentResult`; gọi `.toString()` trên nó sẽ nối các text block từ reply của remote agent.
+Để ủy quyền công việc từ agent này cho một remote A2A agent (có thể là <Link path="/guides/ts-strands-agent">TypeScript</Link> hoặc <Link path="/guides/py-strands-agent">Python</Link>), sử dụng <Link path="/guides/connection/ts-strands-agent-a2a">`connection` generator</Link>. Nó cung cấp một client được xác thực SigV4 cho target agent và AST-transform file `agent.ts` của agent này để đăng ký remote A2A agent như một `tool` của Strands.
 
-```typescript
-import { A2AAgent } from '@strands-agents/sdk/a2a';
+<RunGenerator generator="connection" />
 
-const remote = new A2AAgent({ url: 'http://localhost:9000' });
-const result = await remote.invoke('Hello, remote agent!');
-const reply = result.toString();
-```
-
-#### Gọi trên AgentCore với Xác thực IAM
-
-Các request đến một A2A agent đã triển khai trên AgentCore (bao gồm cả việc fetch agent card) phải được ký SigV4. Truyền một `clientFactory` vào `A2AAgent` sử dụng fetch ký SigV4 cho cả card resolver và JSON-RPC transport:
-
-```typescript
-import {
-  ClientFactory,
-  ClientFactoryOptions,
-  DefaultAgentCardResolver,
-  JsonRpcTransportFactory,
-} from '@a2a-js/sdk/client';
-import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
-import { A2AAgent } from '@strands-agents/sdk/a2a';
-import { AwsClient } from 'aws4fetch';
-
-const arn = '<your-agent-runtime-arn>';
-const region = arn.split(':')[3];
-const url = `https://bedrock-agentcore.${region}.amazonaws.com/runtimes/${encodeURIComponent(arn)}/invocations/`;
-
-const creds = fromNodeProviderChain();
-const sigv4Fetch: typeof fetch = async (...args) =>
-  new AwsClient({ ...(await creds()), service: 'bedrock-agentcore', region }).fetch(...args);
-
-const clientFactory = new ClientFactory({
-  ...ClientFactoryOptions.default,
-  transports: [new JsonRpcTransportFactory({ fetchImpl: sigv4Fetch })],
-  cardResolver: new DefaultAgentCardResolver({ fetchImpl: sigv4Fetch }),
-});
-
-const remote = new A2AAgent({ url, clientFactory });
-const result = await remote.invoke('Hello, remote agent!');
-const reply = result.toString();
-```
-
-:::note[Quyền IAM]
-IAM role của người gọi cần cả `bedrock-agentcore:InvokeAgentRuntime` và `bedrock-agentcore:GetAgentCard` trên ARN runtime đích. Helper `grantInvokeAccess` của construct được tạo ra cấp cả hai quyền.
-:::
-
-:::note[Dependency bổ sung]
-Ví dụ SigV4 client ở trên yêu cầu `@a2a-js/sdk`, `aws4fetch`, và `@aws-sdk/credential-providers`. Thêm chúng vào `package.json` của bạn trước khi chạy ví dụ.
-:::
-
-#### Sử dụng một A2A Agent như một Công cụ
-
-`A2AAgent` triển khai cùng interface `InvokableAgent` như một `Agent` local, vì vậy bạn có thể bao bọc nó trong một `tool` của Strands và đưa nó cho một agent khác. Đây là cách template HTTP/tRPC agent được tạo ra ủy quyền cho một remote A2A agent:
-
-```typescript
-import { Agent, tool } from '@strands-agents/sdk';
-import { z } from 'zod';
-
-const remote = /* A2AAgent built with clientFactory as above */;
-
-const askRemote = tool({
-  name: 'askRemoteAgent',
-  description: 'Delegate a question to the remote A2A agent and return its reply.',
-  inputSchema: z.object({ prompt: z.string() }),
-  callback: async ({ prompt }) => (await remote.invoke(prompt)).toString(),
-});
-
-const agent = new Agent({
-  systemPrompt: 'Delegate to askRemoteAgent when appropriate.',
-  tools: [askRemote],
-});
-```
-
-Trong CDK stack của bạn, cấp quyền invoke access cho host agent đến remote agent — điều này kết nối cả hai IAM action mà A2A client cần:
-
-```typescript
-remoteAgent.grantInvokeAccess(hostAgent);
-```
+Tham khảo <Link path="/guides/connection/ts-strands-agent-a2a">hướng dẫn `connection` generator</Link> để biết chi tiết về cách thiết lập kết nối.
