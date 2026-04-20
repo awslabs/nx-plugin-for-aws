@@ -510,19 +510,30 @@ describe('openApiPyClientGenerator - type-safety parity matrix', () => {
         JSON.stringify({
           include: ['usage.py'],
           extraPaths: ['.'],
-          venvPath: '/tmp/typecheck-probe',
-          venv: '.venv',
           typeCheckingMode: 'standard',
         }),
       );
 
-      // Run pyright.  It exits non-zero when there are diagnostics, so we
-      // ignore the exit code and parse the JSON output.
+      // Run pyright through `uv run --with pyright` so the test does not
+      // depend on any pre-provisioned venv.  Pyright exits non-zero when
+      // there are diagnostics, so we ignore the exit code and parse the
+      // JSON output.
       let stdout = '';
       try {
         const result = await execFileP(
-          '/tmp/typecheck-probe/.venv/bin/pyright',
-          ['--outputjson', 'usage.py'],
+          'uv',
+          [
+            'run',
+            '--with',
+            'pyright==1.1.405',
+            '--with',
+            'pydantic',
+            '--with',
+            'httpx',
+            'pyright',
+            '--outputjson',
+            'usage.py',
+          ],
           { cwd: tmp, maxBuffer: 16 * 1024 * 1024 },
         );
         stdout = result.stdout;
@@ -530,6 +541,11 @@ describe('openApiPyClientGenerator - type-safety parity matrix', () => {
         stdout = err.stdout ?? '';
       }
 
+      if (!stdout) {
+        throw new Error(
+          'pyright produced no output — is uv available on PATH?',
+        );
+      }
       const report = JSON.parse(stdout);
       const diagnostics = (report.generalDiagnostics ?? []) as Array<{
         severity: string;
