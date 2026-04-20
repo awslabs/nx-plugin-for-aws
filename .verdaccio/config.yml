@@ -1,20 +1,12 @@
-# path to a directory with all packages
 storage: ../tmp/local-registry/storage
 
-# a list of other known repositories we can talk to
 uplinks:
   npmjs:
     url: https://registry.npmjs.org/
     maxage: 60m
     timeout: 120s
-    # Effectively disable the per-uplink circuit breaker. Without this, a
-    # transient burst of ECONNRESET/ETIMEDOUT/5xx from npmjs trips the breaker
-    # and Verdaccio then returns 404 for any uncached package until fail_timeout
-    # elapses — which pnpm treats as terminal (it does not retry 404s).
     max_fails: 1000
     fail_timeout: 1s
-    # Reuse TCP connections to npmjs so the concurrent install burst doesn't
-    # open hundreds of short-lived sockets (the main source of transient errors).
     agent_options:
       keepAlive: true
       maxSockets: 40
@@ -23,27 +15,36 @@ uplinks:
 server:
   keepAliveTimeout: 60
 
+# Package managers are configured (see e2e/src/global-setup.ts) to route only
+# @aws/* to this registry; everything else goes to npmjs. The three local
+# packages MUST NOT proxy to npmjs, because our workspace version (0.0.0)
+# collides with an early public release also tagged 0.0.0 — if verdaccio
+# merges upstream metadata, the republish fails with 409 Conflict.
 packages:
   '@aws/nx-plugin':
-    # give all users (including non-authenticated users) full access
-    # because it is a local registry
     access: $all
     publish: $all
     unpublish: $all
-  '**':
-    # give all users (including non-authenticated users) full access
-    # because it is a local registry
+  '@aws/nx-plugin-mcp':
     access: $all
     publish: $all
     unpublish: $all
-
-    # if package is not available locally, proxy requests to npm registry
+  '@aws/create-nx-workspace':
+    access: $all
+    publish: $all
+    unpublish: $all
+  '@aws/*':
+    access: $all
+    publish: $all
+    unpublish: $all
     proxy: npmjs
-# log settings
+  '**':
+    access: $all
+    publish: $all
+    unpublish: $all
+    proxy: npmjs
+
 log:
   type: stdout
   format: pretty
   level: warn
-
-publish:
-  allow_offline: true # set offline to true to allow publish offline
