@@ -153,20 +153,48 @@ const toPythonPrimitive = (property: Model): string => {
  * callers that emit the type inside a class body (where the class isn't yet
  * defined) should use `toPythonAnnotation` instead to get forward-ref quoting.
  */
+/** Render an enum's values as a Python `Literal[...]` expression. */
+const toPythonEnumLiteral = (property: Model): string => {
+  const members = (property as any).enum as
+    | Array<{ value: string | number | boolean | null }>
+    | undefined;
+  if (!members || members.length === 0) return toPythonPrimitive(property);
+  const rendered = members
+    .map((m) => {
+      if (typeof m.value === 'string')
+        return `"${m.value.replace(/"/g, '\\"')}"`;
+      if (m.value === null) return 'None';
+      return String(m.value);
+    })
+    .join(', ');
+  return `Literal[${rendered}]`;
+};
+
 /**
  * Resolve the element type of a collection model.  Prefers the link's
  * already-computed `pythonType` if the link was mutated first, since
  * model mutation order isn't guaranteed to walk links before their
  * parents.
+ *
+ * When the element itself is an enum (anonymous or referenced) the type is
+ * rendered as a `Literal[...]` so callers can't pass arbitrary values.
  */
 const collectionElementType = (
   property: Model,
   link: Model | undefined,
 ): string => {
-  if (link && link.export !== 'enum') {
+  if (link && link.export === 'enum') {
+    return toPythonEnumLiteral(link);
+  }
+  if (link) {
     const precomputed = (link as any).pythonType as string | undefined;
     if (precomputed) return precomputed;
     return toPythonType(link);
+  }
+  // When no link is available but the collection itself carries enum members
+  // (inline enum array/dict), render them as Literal too.
+  if ((property as any).isEnum && (property as any).enum?.length > 0) {
+    return toPythonEnumLiteral(property);
   }
   return toPythonPrimitive({ ...property, type: property.type } as Model);
 };
@@ -212,7 +240,13 @@ export const qualifyPythonType = (
   if (list) return `list[${qualifyPythonType(list[1], prefix)}]`;
   const dict = /^dict\[str, (.*)\]$/s.exec(type);
   if (dict) return `dict[str, ${qualifyPythonType(dict[1], prefix)}]`;
-  if (type.startsWith('Optional[') || type.startsWith('Union[')) return type;
+  if (
+    type.startsWith('Optional[') ||
+    type.startsWith('Union[') ||
+    type.startsWith('Literal[')
+  ) {
+    return type;
+  }
   return `${prefix}${type}`;
 };
 
@@ -232,16 +266,24 @@ export const toPythonAnnotation = (property: Model): string => {
       }
       case 'array': {
         const inner =
-          link && link.export !== 'enum'
-            ? render(link)
-            : toPythonPrimitive(p as Model);
+          link && link.export === 'enum'
+            ? toPythonEnumLiteral(link)
+            : link
+              ? render(link)
+              : (p as any).isEnum
+                ? toPythonEnumLiteral(p)
+                : toPythonPrimitive(p as Model);
         return `list[${inner}]`;
       }
       case 'dictionary': {
         const inner =
-          link && link.export !== 'enum'
-            ? render(link)
-            : toPythonPrimitive(p as Model);
+          link && link.export === 'enum'
+            ? toPythonEnumLiteral(link)
+            : link
+              ? render(link)
+              : (p as any).isEnum
+                ? toPythonEnumLiteral(p)
+                : toPythonPrimitive(p as Model);
         return `dict[str, ${inner}]`;
       }
       case 'one-of':
