@@ -33,7 +33,12 @@ import {
   Runtime,
   RuntimeProps,
 } from '@aws-cdk/aws-bedrock-agentcore-alpha';
-import { IGrantable, IPrincipal, Grant } from 'aws-cdk-lib/aws-iam';
+import {
+  PolicyStatement,
+  IGrantable,
+  IPrincipal,
+  Grant,
+} from 'aws-cdk-lib/aws-iam';
 import { RuntimeConfig } from '../../../core/runtime-config.js';
 
 export type SnapshotBedrockAgentProps = Omit<
@@ -77,6 +82,20 @@ export class SnapshotBedrockAgent extends Construct implements IGrantable {
         ...props?.environmentVariables,
       },
     });
+
+    // Grant access for the agent to invoke bedrock models
+    this.agentCoreRuntime.addToRolePolicy(
+      new PolicyStatement({
+        actions: [
+          'bedrock:InvokeModel',
+          'bedrock:InvokeModelWithResponseStream',
+        ],
+        resources: [
+          'arn:aws:bedrock:*:*:foundation-model/*',
+          'arn:aws:bedrock:*:*:inference-profile/*',
+        ],
+      }),
+    );
 
     rc.grantReadAppConfig(this.agentCoreRuntime);
 
@@ -177,6 +196,18 @@ module "agent_core_runtime" {
         "appconfig:GetLatestConfiguration"
       ]
       Resource = ["\${module.appconfig.application_arn}/*"]
+    },
+    # Grant access for the agent to invoke bedrock models
+    {
+      Effect = "Allow"
+      Action = [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream"
+      ]
+      Resource = [
+        "arn:aws:bedrock:*:*:foundation-model/*",
+        "arn:aws:bedrock:*:*:inference-profile/*"
+      ]
     }
   ], var.additional_iam_policy_statements)
   tags = var.tags
