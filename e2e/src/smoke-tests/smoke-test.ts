@@ -50,6 +50,10 @@ export const runSmokeTest = async (
     opts,
   );
   await runCLI(
+    `generate @aws/nx-plugin:ts#astro-docs --name=docs-site --no-interactive`,
+    opts,
+  );
+  await runCLI(
     `generate @aws/nx-plugin:ts#trpc-api --name=my-api --computeType=ServerlessApiGatewayRestApi --no-interactive`,
     opts,
   );

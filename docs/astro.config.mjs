@@ -317,6 +317,7 @@ export default defineConfig({
               label: 'ts#react-website#auth',
               link: '/guides/react-website-auth',
             },
+            { label: 'ts#astro-docs', link: '/guides/astro-docs' },
             { label: 'ts#lambda-function', link: '/guides/ts-lambda-function' },
             { label: 'ts#nx-plugin', link: '/guides/ts-nx-plugin' },
             { label: 'ts#nx-generator', link: '/guides/nx-generator' },

@@ -1,21 +1,17 @@
 /**
- * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
- * SPDX-License-Identifier: Apache-2.0
- */
-
-/**
- * Translate documentation files using a Strands agent powered by Claude on AWS Bedrock.
+ * Translate documentation files using a Strands agent powered by Claude on
+ * Amazon Bedrock.
  *
  * Configuration lives in ./translate.config.json (sibling to this file).
- * Run from the repo root:
+ * Run from the project root:
  *
- *   pnpm tsx ./scripts/translate.ts --all
- *   pnpm tsx ./scripts/translate.ts                # only files changed since last translate commit
+ *   <%= pkgMgrCmd %> nx translate <%= fullyQualifiedName %> -- --all
+ *   <%= pkgMgrCmd %> nx translate <%= fullyQualifiedName %>            # only files changed since last translate commit
  *
- * The driver gathers the set of changed source docs + their git diffs and
- * spawns one Strands agent per (file × target language). Each agent has the
- * built-in `fileEditor` tool available to read sources, read any existing
- * translation, and write the translated file itself.
+ * The driver gathers the set of changed source docs + their git diffs and hands
+ * them to an agent that has read/write access (scoped to the docs directory)
+ * via a wrapped version of the built-in `fileEditor` tool. The agent decides
+ * how to translate each file and writes the output itself.
  */
 import { Command } from 'commander';
 import fs from 'fs-extra';
@@ -46,18 +42,6 @@ interface TranslateConfig {
    * Defaults to "docs: update translations".
    */
   translationCommitMessage?: string;
-  /**
-   * Optional repo-only extension: keep per-generator schema property descriptions
-   * translated in `schemaTranslations.outputFile`. Set to `null` / omit to disable.
-   */
-  schemaTranslations?: {
-    /** Path to the Nx plugin generators.json, relative to the repo root. */
-    generatorsJson: string;
-    /** Where to write the translations file, relative to the repo root. */
-    outputFile: string;
-    /** Path to the nx-plugin package, relative to the repo root (used to resolve schema paths). */
-    nxPluginRoot: string;
-  };
 }
 
 const PROJECT_ROOT = path.resolve(__dirname, '..');
@@ -117,7 +101,8 @@ const log = {
   info: (m: string) => console.log(`[translate] ${m}`),
   warn: (m: string) => console.warn(`[translate] ${m}`),
   error: (m: string) => console.error(`[translate] ERROR ${m}`),
-  verbose: (m: string) => options.verbose && console.log(`[translate] ${m}`),
+  verbose: (m: string) =>
+    options.verbose && console.log(`[translate] ${m}`),
 };
 
 /**
@@ -125,8 +110,12 @@ const log = {
  */
 async function getFilesToTranslate(): Promise<FileToTranslate[]> {
   const sourceLangRoot = `${DOCS_DIR}/${config.sourceLanguage}`;
-  const includePatterns = config.include.map((p) => `${sourceLangRoot}/${p}`);
-  const ignorePatterns = config.exclude.map((p) => `${sourceLangRoot}/${p}`);
+  const includePatterns = config.include.map(
+    (p) => `${sourceLangRoot}/${p}`,
+  );
+  const ignorePatterns = config.exclude.map(
+    (p) => `${sourceLangRoot}/${p}`,
+  );
 
   if (options.all) {
     log.info('Translating all source documentation files');
@@ -156,7 +145,9 @@ async function getFilesToTranslate(): Promise<FileToTranslate[]> {
   try {
     await git.raw(['rev-parse', '--verify', mainBranch]);
   } catch {
-    log.warn(`Could not find "${mainBranch}"; falling back to --all behaviour`);
+    log.warn(
+      `Could not find "${mainBranch}"; falling back to --all behaviour`,
+    );
     options.all = true;
     return getFilesToTranslate();
   }
@@ -170,7 +161,9 @@ async function getFilesToTranslate(): Promise<FileToTranslate[]> {
   ).all.filter((c) => c.message.includes(TRANSLATION_COMMIT_MESSAGE));
 
   const baseCommit =
-    translationCommits.length > 0 ? translationCommits[0].hash : mergeBase;
+    translationCommits.length > 0
+      ? translationCommits[0].hash
+      : mergeBase;
 
   log.info(
     translationCommits.length > 0
@@ -179,7 +172,11 @@ async function getFilesToTranslate(): Promise<FileToTranslate[]> {
   );
 
   const diffNames = (
-    await git.diff([`${baseCommit}..HEAD`, '--name-only', '--diff-filter=d'])
+    await git.diff([
+      `${baseCommit}..HEAD`,
+      '--name-only',
+      '--diff-filter=d',
+    ])
   )
     .split('\n')
     .filter(Boolean);
@@ -187,9 +184,9 @@ async function getFilesToTranslate(): Promise<FileToTranslate[]> {
   const { files: uncommitted } = await git.status();
   const uncommittedNames = uncommitted.map((f) => f.path);
 
-  const allCandidates = [...new Set([...diffNames, ...uncommittedNames])].map(
-    (p) => path.resolve(process.cwd(), p),
-  );
+  const allCandidates = [
+    ...new Set([...diffNames, ...uncommittedNames]),
+  ].map((p) => path.resolve(process.cwd(), p));
 
   // Filter to files inside the source language dir that match include/exclude
   const includedGlob = await glob(includePatterns, {
@@ -257,7 +254,10 @@ Translation rules:
 When the translated file has been written, reply with a one-line summary and stop.`;
 }
 
-function buildUserPrompt(file: FileToTranslate, targetLang: string): string {
+function buildUserPrompt(
+  file: FileToTranslate,
+  targetLang: string,
+): string {
   const targetLangRoot = path.join(DOCS_DIR, targetLang);
   const targetAbsPath = path.join(targetLangRoot, file.relativePath);
   const existingTranslationExists = fs.existsSync(targetAbsPath);
@@ -290,7 +290,11 @@ async function translateFileForLanguage(
   file: FileToTranslate,
   targetLang: string,
 ): Promise<void> {
-  const targetAbsPath = path.join(DOCS_DIR, targetLang, file.relativePath);
+  const targetAbsPath = path.join(
+    DOCS_DIR,
+    targetLang,
+    file.relativePath,
+  );
   const beforeMtimeMs = fs.existsSync(targetAbsPath)
     ? (await fs.stat(targetAbsPath)).mtimeMs
     : 0;
@@ -351,268 +355,6 @@ async function runWithConcurrency<T>(
   return results;
 }
 
-// -----------------------------------------------------------------------------
-// Schema-translations (repo-only extension)
-//
-// Keeps `docs/src/i18n/schema-translations.json` in sync with each generator's
-// `schema.json` property descriptions. The docs site reads that file to render
-// translated parameter tables on generator guides.
-// -----------------------------------------------------------------------------
-
-type SchemaTranslations = Record<
-  string,
-  Record<string, Record<string, string>>
->;
-
-interface GeneratorsJson {
-  generators: Record<
-    string,
-    { schema: string; description?: string; hidden?: boolean }
-  >;
-}
-
-/**
- * Walk every generator's schema.json and collect English descriptions keyed by
- * `generator -> property -> description`.
- */
-function extractSchemaDescriptions(): Record<string, Record<string, string>> {
-  const cfg = config.schemaTranslations!;
-  const generatorsJson: GeneratorsJson = JSON.parse(
-    fs.readFileSync(path.resolve(PROJECT_ROOT, cfg.generatorsJson), 'utf-8'),
-  );
-  const nxPluginRoot = path.resolve(PROJECT_ROOT, cfg.nxPluginRoot);
-  const result: Record<string, Record<string, string>> = {};
-
-  for (const [name, gen] of Object.entries(generatorsJson.generators)) {
-    // gen.schema is of the form "./src/foo/schema.json" relative to nxPluginRoot
-    const schemaPath = path.resolve(nxPluginRoot, gen.schema);
-    try {
-      const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf-8'));
-      if (schema.properties) {
-        const props: Record<string, string> = {};
-        for (const [prop, def] of Object.entries(
-          schema.properties as Record<string, { description?: string }>,
-        )) {
-          if (def.description) {
-            props[prop] = def.description;
-          }
-        }
-        if (Object.keys(props).length > 0) {
-          result[name] = props;
-        }
-      }
-    } catch {
-      log.verbose(`Could not read schema for generator ${name}`);
-    }
-  }
-
-  return result;
-}
-
-/**
- * Translate a batch of schema descriptions for a single generator to a single
- * target language using a Strands agent without tools.
- */
-async function translateSchemaDescriptionBatch(
-  generator: string,
-  properties: Record<string, string>,
-  targetLang: string,
-): Promise<Record<string, string>> {
-  const agent = new Agent({
-    model: new BedrockModel({
-      modelId: config.modelId,
-      region: process.env.AWS_REGION ?? config.awsRegion,
-      maxTokens: 4096,
-      temperature: 0.1,
-    }),
-    systemPrompt: `You are an expert technical-documentation translator. You will be given a JSON object whose values are English descriptions of Nx-generator CLI parameters. Translate each value into the target locale \`${targetLang}\`, keeping the same keys and returning ONLY a valid JSON object with the same shape.
-
-Rules:
-- Translate prose naturally.
-- DO NOT translate technical terms, acronyms, product and service names (e.g. API, CDK, Lambda, MCP, Cognito, IAM, TypeScript, Python, React, Smithy, FastAPI, tRPC, Terraform, Nx, AWS, S3, CloudFront).
-- Preserve any backticked \`identifiers\` or quoted 'values' verbatim.
-- Output ONLY the JSON object — no prose, no fences, no comments.`,
-    tools: [],
-    printer: false,
-  });
-
-  const prompt = `Translate the values of this JSON object to locale \`${targetLang}\` (generator: ${generator}). Return ONLY the translated JSON object.\n\n${JSON.stringify(properties, null, 2)}`;
-  const result = await agent.invoke(prompt);
-
-  // Extract final assistant text
-  const rawText = (() => {
-    const msg = result.lastMessage;
-    if (!msg) return '';
-    // Message content is an array of ContentBlock; pull text blocks.
-    const blocks = (msg as { content?: unknown[] }).content ?? [];
-    return blocks
-      .map((b) => {
-        if (typeof b === 'object' && b !== null && 'text' in b) {
-          return (b as { text: string }).text;
-        }
-        return '';
-      })
-      .join('');
-  })();
-
-  // Strip optional ``` fences the model might add despite the instruction.
-  const cleaned = rawText
-    .trim()
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/```$/, '')
-    .trim();
-
-  try {
-    const parsed = JSON.parse(cleaned);
-    if (typeof parsed !== 'object' || parsed === null) {
-      throw new Error('not an object');
-    }
-    // Only keep keys that were requested — defend against hallucinated keys.
-    const out: Record<string, string> = {};
-    for (const key of Object.keys(properties)) {
-      if (typeof parsed[key] === 'string') {
-        out[key] = parsed[key];
-      }
-    }
-    return out;
-  } catch (err) {
-    log.warn(
-      `schema-translations: could not parse response for ${generator} → ${targetLang}: ${err instanceof Error ? err.message : String(err)}`,
-    );
-    return {};
-  }
-}
-
-/**
- * Update schema-translations.json for the given target languages.
- * Adds missing entries, re-translates entries whose English text changed, and
- * prunes generators/properties that no longer exist.
- */
-async function updateSchemaTranslations(
-  targetLanguages: string[],
-): Promise<void> {
-  const cfg = config.schemaTranslations;
-  if (!cfg) return;
-
-  const outputPath = path.resolve(PROJECT_ROOT, cfg.outputFile);
-  const current = extractSchemaDescriptions();
-
-  let existing: SchemaTranslations = {};
-  if (fs.existsSync(outputPath)) {
-    try {
-      existing = JSON.parse(fs.readFileSync(outputPath, 'utf-8'));
-    } catch {
-      existing = {};
-    }
-  }
-
-  // Find work to do: any (generator, property) where English changed or
-  // any target language is missing.
-  type WorkItem = {
-    generator: string;
-    properties: Record<string, string>;
-    targetLang: string;
-  };
-  const work: WorkItem[] = [];
-  for (const [generator, props] of Object.entries(current)) {
-    for (const targetLang of targetLanguages) {
-      const todo: Record<string, string> = {};
-      for (const [prop, description] of Object.entries(props)) {
-        const englishChanged =
-          existing?.[generator]?.[prop]?.en !== description;
-        const missingLang = !existing?.[generator]?.[prop]?.[targetLang];
-        if (englishChanged || missingLang) {
-          todo[prop] = description;
-        }
-      }
-      if (Object.keys(todo).length > 0) {
-        work.push({ generator, properties: todo, targetLang });
-      }
-    }
-  }
-
-  // Always record the current English so we can detect future changes.
-  const updated: SchemaTranslations = { ...existing };
-  for (const [generator, props] of Object.entries(current)) {
-    updated[generator] = updated[generator] ?? {};
-    for (const [prop, description] of Object.entries(props)) {
-      updated[generator][prop] = updated[generator][prop] ?? {};
-      updated[generator][prop].en = description;
-    }
-  }
-
-  if (work.length === 0) {
-    // Still prune and rewrite (pruning may be the only change)
-    pruneAndWrite(updated, current, outputPath);
-    log.info('schema-translations: no changes needed');
-    return;
-  }
-
-  log.info(
-    `schema-translations: translating ${work.length} generator/locale batch(es)`,
-  );
-
-  if (options.dryRun) {
-    for (const w of work) {
-      log.info(
-        `  [dry-run] would translate ${w.generator} (${Object.keys(w.properties).length} props) → ${w.targetLang}`,
-      );
-    }
-    return;
-  }
-
-  const concurrency = Math.max(1, config.concurrency ?? 5);
-  const tasks = work.map((w) => async () => {
-    log.verbose(
-      `  schema ${w.generator} → ${w.targetLang} (${Object.keys(w.properties).length} props)`,
-    );
-    const translations = await translateSchemaDescriptionBatch(
-      w.generator,
-      w.properties,
-      w.targetLang,
-    );
-    updated[w.generator] = updated[w.generator] ?? {};
-    for (const [prop, value] of Object.entries(translations)) {
-      updated[w.generator][prop] = updated[w.generator][prop] ?? {};
-      updated[w.generator][prop][w.targetLang] = value;
-    }
-  });
-
-  await runWithConcurrency(tasks, concurrency);
-
-  pruneAndWrite(updated, current, outputPath);
-  log.info(`schema-translations: wrote ${outputPath}`);
-}
-
-/**
- * Remove generators/properties from `translations` that no longer exist in the
- * current generator set, then write the file. Keeps output sorted for stable
- * diffs.
- */
-function pruneAndWrite(
-  translations: SchemaTranslations,
-  current: Record<string, Record<string, string>>,
-  outputPath: string,
-): void {
-  for (const generator of Object.keys(translations)) {
-    if (!current[generator]) {
-      delete translations[generator];
-      continue;
-    }
-    for (const prop of Object.keys(translations[generator])) {
-      if (!(prop in current[generator])) {
-        delete translations[generator][prop];
-      }
-    }
-  }
-
-  fs.writeFileSync(
-    outputPath,
-    JSON.stringify(translations, null, 2) + '\n',
-    'utf-8',
-  );
-}
-
 async function main() {
   const requestedLanguages: string[] = options.languages
     ? options.languages
@@ -633,20 +375,18 @@ async function main() {
   log.info(`Source: ${config.sourceLanguage}`);
   log.info(`Targets: ${targetLanguages.join(', ')}`);
 
-  // Keep the generator-schema descriptions in sync first. This is independent
-  // of docs-file changes and cheap to check (no-op when already up to date).
-  await updateSchemaTranslations(targetLanguages);
-
   const files = await getFilesToTranslate();
 
   if (files.length === 0) {
-    log.info('No documentation files to translate.');
+    log.info('Nothing to translate.');
     return;
   }
 
   log.info(`Files to translate: ${files.length}`);
   for (const f of files) {
-    log.verbose(`  - ${f.relativePath}${f.diff ? ' (changed)' : ' (full)'}`);
+    log.verbose(
+      `  - ${f.relativePath}${f.diff ? ' (changed)' : ' (full)'}`,
+    );
   }
 
   if (options.dryRun) {
