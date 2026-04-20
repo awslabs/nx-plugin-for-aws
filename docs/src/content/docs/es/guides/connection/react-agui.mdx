@@ -8,6 +8,7 @@ import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import NxCommands from '@components/nx-commands.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
+import Snippet from '@components/snippet.astro';
 
 Nx Plugin for AWS proporciona un generador para conectar un sitio web React a un Strands Agent que expone el [protocolo AG-UI](https://docs.ag-ui.com/). Configura [CopilotKit](https://docs.copilotkit.ai/aws-strands) con un `HttpAgent` de [`@ag-ui/client`](https://docs.ag-ui.com/) en tu sitio web, con soporte para autenticación AWS IAM y Cognito.
 
@@ -43,14 +44,14 @@ El generador crea un componente `AguiProvider` **único compartido** y un hook p
 
 - src
   - components
-    - AguiProvider.tsx Único `CopilotKitProvider` para cada agente AG-UI. Regenerado en cada conexión para que su registro `selfManagedAgents` siempre coincida con el conjunto de hooks a continuación.
+    - AguiProvider.tsx Único `CopilotKitProvider` para cada agente AG-UI. Creado en la primera ejecución de `connection` y actualizado en ejecuciones posteriores para registrar cada nuevo agente.
   - hooks
     - useAgui\<AgentName>.tsx Registra un agente AG-UI. Un archivo por ejecución de `connection`.
     - useSigV4.tsx Firma SigV4 (solo IAM)
 
 </FileTree>
 
-Ejecutar `connection` por segunda vez para un agente diferente **agrega un nuevo hook `useAgui<AgentName>.tsx`** y reescribe `AguiProvider.tsx` para registrar ambos hooks. `main.tsx` mantiene su único wrapper `<AguiProvider>` — nunca terminas con proveedores anidados.
+Ejecutar `connection` por segunda vez para un agente diferente **agrega un nuevo hook `useAgui<AgentName>.tsx`** y actualiza `AguiProvider.tsx` para registrar ambos hooks — cualquier edición personalizada que hayas hecho al proveedor se conserva. `main.tsx` mantiene su único wrapper `<AguiProvider>` — nunca terminas con proveedores anidados.
 
 Las siguientes dependencias se agregan al `package.json` raíz:
 
@@ -86,13 +87,16 @@ El código generado maneja la autenticación según la configuración de tu agen
 
 - **IAM** (predeterminado): usa solicitudes HTTP firmadas con AWS SigV4. Las credenciales se obtienen del Cognito Identity Pool configurado con la autenticación de tu sitio web.
 - **Cognito**: incrusta el token de acceso JWT en el encabezado `Authorization` como un token Bearer.
-- **None**: sin autenticación (útil para desarrollo local).
+
+## Infraestructura
+
+<Snippet name="connection/react-agent-infrastructure" parentHeading="Infrastructure" />
 
 ## Uso del código generado
 
 ### Agregar una interfaz de chat
 
-Cada agente se registra bajo su `agentName` (no `"default"`), así que pasa `agentId` en el componente de chat para elegir con qué agente habla el chat:
+Instancia componentes de CopilotKit con `agentId` para seleccionar qué agente usar. El id es el nombre del agente — el mismo que elegiste cuando ejecutaste el <Link path="guides/py-strands-agent">generador `py#strands-agent`</Link> — y también puedes encontrarlo en el archivo de hook generado (por ejemplo, la clave devuelta desde `packages/web/src/hooks/useAgui<AgentName>.tsx`):
 
 ```tsx
 import { CopilotChat } from '@copilotkit/react-core/v2';
@@ -100,7 +104,7 @@ import { CopilotChat } from '@copilotkit/react-core/v2';
 function ChatPage() {
   return (
     <CopilotChat
-      agentId="agent" // coincide con el nombre del agente de py#strands-agent
+      agentId="agent"
       labels={{
         welcomeMessageText: 'How can I help you today?',
         chatInputPlaceholder: 'Ask me anything...',
@@ -110,57 +114,14 @@ function ChatPage() {
 }
 ```
 
-### Usar una barra lateral o ventana emergente
-
-```tsx
-import { CopilotSidebar } from '@copilotkit/react-core/v2';
-
-function App() {
-  return (
-    <div>
-      <YourMainContent />
-      <CopilotSidebar agentId="agent" />
-    </div>
-  );
-}
-```
-
 ### Conectar múltiples agentes AG-UI
 
-Ejecuta el generador `connection` una vez por agente. El generador agrega un nuevo hook `useAgui<AgentName>` y regenera `AguiProvider.tsx` para registrar cada hook:
-
-```tsx
-// Generated AguiProvider.tsx (two-agent example)
-export const AguiProvider: FC<PropsWithChildren> = ({ children }) => {
-  const researchAgentAgents = useAguiResearchAgent();
-  const storyAgentAgents = useAguiStoryAgent();
-
-  const selfManagedAgents = useMemo<Record<string, AbstractAgent>>(
-    () => ({
-      ...researchAgentAgents,
-      ...storyAgentAgents,
-    }),
-    [researchAgentAgents, storyAgentAgents],
-  );
-
-  return (
-    <CopilotKitProvider selfManagedAgents={selfManagedAgents}>
-      {children}
-    </CopilotKitProvider>
-  );
-};
-```
-
-Todos los agentes son visibles desde cualquier lugar en la aplicación — enruta cada chat con `agentId`:
+Ejecuta el generador `connection` una vez por agente. Todos los agentes registrados a través del `AguiProvider` compartido son visibles desde cualquier lugar en la aplicación — instancia un componente de CopilotKit con un `agentId` diferente para enrutar cada chat al agente que desees:
 
 ```tsx
 <CopilotChat agentId="story" />    {/* talks to StoryAgent */}
 <CopilotChat agentId="research" /> {/* talks to ResearchAgent */}
 ```
-
-:::caution[AguiProvider se regenera]
-`AguiProvider.tsx` se sobrescribe cada vez que ejecutas el generador. Si necesitas agregar lógica personalizada, envuelve `<AguiProvider>` en tu propio componente en lugar de editar el archivo generado.
-:::
 
 ## Personalizar la apariencia
 
@@ -183,19 +144,6 @@ Todos los agentes son visibles desde cualquier lugar en la aplicación — enrut
   }}
 />
 ```
-
-### Slots de nivel superior
-
-Los slots raíz disponibles en `<CopilotChat />`, `<CopilotSidebar />` y `<CopilotPopup />`:
-
-- `messageView` — contenedor de lista de mensajes
-- `scrollView` — contenedor de desplazamiento
-- `input` — entrada de texto + controles de envío
-- `suggestionView` — píldoras de sugerencias
-- `welcomeScreen` — interfaz de usuario de estado vacío mostrada antes del primer mensaje
-- `labels` — mensaje de bienvenida, marcador de posición, etc.
-
-La barra lateral y la ventana emergente además exponen `header` y `toggleButton`.
 
 ### Reemplazar un slot con un componente personalizado
 
@@ -229,17 +177,6 @@ Las sobrescrituras más profundas siguen la misma forma — por ejemplo, reempla
 />
 ```
 
-### Reemplazar toda la vista de chat
-
-Para una superficie de chat completamente personalizada, pasa un className (o componente) al slot `chatView`:
-
-```tsx
-<CopilotChat
-  agentId="agent"
-  chatView="bg-gray-50 rounded-xl shadow-lg"
-/>
-```
-
 ## Desarrollo local
 
 El generador de conexión configura automáticamente la integración con `serve-local`:
@@ -253,10 +190,6 @@ El generador de conexión configura automáticamente la integración con `serve-
 :::tip[Recarga en caliente]
 El sitio web y el agente conectado se recargan en caliente juntos, lo que te permite iterar rápidamente en ambos lados sin desplegar en AWS.
 :::
-
-## Infraestructura
-
-Si tu agente usa autenticación IAM, el rol autenticado del Cognito Identity Pool debe recibir permiso para invocar el agente. Consulta el constructo de infraestructura de tu agente para el método `grantInvokeAccess` apropiado.
 
 ## Más información
 

@@ -1,0 +1,59 @@
+---
+title: "Infrastructure de connexion React vers Agent"
+---
+
+import Link from '@components/link.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+Si votre agent utilise l'authentification IAM, le rôle authentifié du pool d'identités Cognito doit se voir accorder la permission d'invoquer l'agent.
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts title="packages/infra/src/stacks/application-stack.ts" {5}
+const identity = new UserIdentity(this, 'Identity');
+const myAgent = new MyAgent(this, 'MyAgent');
+
+// Grant the authenticated Cognito role permission to invoke the agent
+myAgent.grantInvokeAccess(identity.identityPool.authenticatedRole);
+```
+
+`grantInvokeAccess` configure toutes les actions d'invocation AgentCore (`InvokeAgentRuntime`, `InvokeAgentRuntimeWithWebSocketStream`) sur l'ARN d'exécution de l'agent.
+</Fragment>
+<Fragment slot="terraform">
+```hcl title="packages/infra/src/main.tf"
+module "identity" {
+  source = "../../common/terraform/src/core/user-identity"
+}
+
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+}
+
+# Grant the authenticated Cognito role permission to invoke the agent
+resource "aws_iam_policy" "invoke_my_agent" {
+  name = "InvokeMyAgentPolicy"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "bedrock-agentcore:InvokeAgentRuntime",
+        "bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream",
+      ]
+      Resource = [
+        module.my_agent.agent_core_runtime_arn,
+        "${module.my_agent.agent_core_runtime_arn}/*",
+      ]
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "invoke_my_agent" {
+  role       = module.identity.authenticated_role_name
+  policy_arn = aws_iam_policy.invoke_my_agent.arn
+}
+```
+</Fragment>
+</Infrastructure>
+
+Si votre agent utilise l'authentification Cognito, vous n'avez pas besoin de définir d'infrastructure supplémentaire pour connecter votre site web à votre agent.

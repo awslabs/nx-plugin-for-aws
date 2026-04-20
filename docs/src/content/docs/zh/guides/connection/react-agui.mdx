@@ -8,6 +8,7 @@ import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import NxCommands from '@components/nx-commands.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
+import Snippet from '@components/snippet.astro';
 
 Nx Plugin for AWS 提供了一个生成器，用于将 React 网站连接到公开 [AG-UI 协议](https://docs.ag-ui.com/)的 Strands Agent。它在您的网站上将 [CopilotKit](https://docs.copilotkit.ai/aws-strands) 与 [`@ag-ui/client`](https://docs.ag-ui.com/) `HttpAgent` 连接起来，并支持 AWS IAM 和 Cognito 身份验证。
 
@@ -43,14 +44,14 @@ AG-UI 尚不支持 TypeScript Strands Agents。请参阅 [strands-agents/sdk-typ
 
 - src
   - components
-    - AguiProvider.tsx 为每个 AG-UI 代理提供单一的 `CopilotKitProvider`。在每次连接时重新生成，以便其 `selfManagedAgents` 注册表始终与下面的钩子集匹配。
+    - AguiProvider.tsx 为每个 AG-UI 代理提供单一的 `CopilotKitProvider`。在第一次运行 `connection` 时创建，并在后续运行时更新以注册每个新代理。
   - hooks
     - useAgui\<AgentName>.tsx 注册一个 AG-UI 代理。每次运行 `connection` 生成一个文件。
     - useSigV4.tsx SigV4 签名（仅 IAM）
 
 </FileTree>
 
-第二次为不同的代理运行 `connection` 会**添加一个新的 `useAgui<AgentName>.tsx` 钩子**，并重写 `AguiProvider.tsx` 以注册两个钩子。`main.tsx` 保持其单一的 `<AguiProvider>` 包装器——您永远不会出现嵌套的提供者。
+第二次为不同的代理运行 `connection` 会**添加一个新的 `useAgui<AgentName>.tsx` 钩子**并更新 `AguiProvider.tsx` 以注册两个钩子——您对提供者所做的任何自定义编辑都会被保留。`main.tsx` 保持其单一的 `<AguiProvider>` 包装器——您永远不会出现嵌套的提供者。
 
 以下依赖项被添加到根 `package.json`：
 
@@ -86,13 +87,16 @@ AG-UI 尚不支持 TypeScript Strands Agents。请参阅 [strands-agents/sdk-typ
 
 - **IAM**（默认）：使用 AWS SigV4 签名的 HTTP 请求。凭证从配置了您网站身份验证的 Cognito Identity Pool 获取。
 - **Cognito**：将 JWT 访问令牌作为 Bearer 令牌嵌入 `Authorization` 标头中。
-- **None**：无身份验证（对本地开发很有用）。
+
+## 基础设施
+
+<Snippet name="connection/react-agent-infrastructure" parentHeading="Infrastructure" />
 
 ## 使用生成的代码
 
 ### 添加聊天界面
 
-每个代理都注册在其 `agentName` 下（而不是 `"default"`），因此在聊天组件上传递 `agentId` 以选择聊天与哪个代理对话：
+使用 `agentId` 实例化 CopilotKit 组件以选择要使用的代理。该 id 是代理的名称——与您运行 <Link path="guides/py-strands-agent">`py#strands-agent` 生成器</Link>时选择的名称相同——您也可以在生成的钩子文件中找到它（例如从 `packages/web/src/hooks/useAgui<AgentName>.tsx` 返回的键）：
 
 ```tsx
 import { CopilotChat } from '@copilotkit/react-core/v2';
@@ -100,7 +104,7 @@ import { CopilotChat } from '@copilotkit/react-core/v2';
 function ChatPage() {
   return (
     <CopilotChat
-      agentId="agent" // matches the agent's name from py#strands-agent
+      agentId="agent"
       labels={{
         welcomeMessageText: 'How can I help you today?',
         chatInputPlaceholder: 'Ask me anything...',
@@ -110,57 +114,14 @@ function ChatPage() {
 }
 ```
 
-### 使用侧边栏或弹窗
-
-```tsx
-import { CopilotSidebar } from '@copilotkit/react-core/v2';
-
-function App() {
-  return (
-    <div>
-      <YourMainContent />
-      <CopilotSidebar agentId="agent" />
-    </div>
-  );
-}
-```
-
 ### 连接多个 AG-UI 代理
 
-为每个代理运行一次 `connection` 生成器。生成器添加一个新的 `useAgui<AgentName>` 钩子，并重新生成 `AguiProvider.tsx` 以注册每个钩子：
-
-```tsx
-// Generated AguiProvider.tsx (two-agent example)
-export const AguiProvider: FC<PropsWithChildren> = ({ children }) => {
-  const researchAgentAgents = useAguiResearchAgent();
-  const storyAgentAgents = useAguiStoryAgent();
-
-  const selfManagedAgents = useMemo<Record<string, AbstractAgent>>(
-    () => ({
-      ...researchAgentAgents,
-      ...storyAgentAgents,
-    }),
-    [researchAgentAgents, storyAgentAgents],
-  );
-
-  return (
-    <CopilotKitProvider selfManagedAgents={selfManagedAgents}>
-      {children}
-    </CopilotKitProvider>
-  );
-};
-```
-
-所有代理都可以从应用程序的任何地方看到——使用 `agentId` 路由每个聊天：
+为每个代理运行一次 `connection` 生成器。通过共享的 `AguiProvider` 注册的每个代理都可以从应用程序的任何地方看到——使用不同的 `agentId` 实例化 CopilotKit 组件，将每个聊天路由到您想要的代理：
 
 ```tsx
 <CopilotChat agentId="story" />    {/* talks to StoryAgent */}
 <CopilotChat agentId="research" /> {/* talks to ResearchAgent */}
 ```
-
-:::caution[AguiProvider 会被重新生成]
-每次运行生成器时，`AguiProvider.tsx` 都会被覆盖。如果您需要添加自定义逻辑，请将 `<AguiProvider>` 包装在您自己的组件中，而不是编辑生成的文件。
-:::
 
 ## 自定义外观和感觉
 
@@ -183,19 +144,6 @@ export const AguiProvider: FC<PropsWithChildren> = ({ children }) => {
   }}
 />
 ```
-
-### 顶级插槽
-
-`<CopilotChat />`、`<CopilotSidebar />` 和 `<CopilotPopup />` 上可用的根插槽：
-
-- `messageView` — 消息列表容器
-- `scrollView` — 滚动容器
-- `input` — 文本输入 + 发送控件
-- `suggestionView` — 建议按钮
-- `welcomeScreen` — 在第一条消息之前显示的空状态 UI
-- `labels` — 欢迎消息、占位符等
-
-侧边栏和弹窗还额外公开 `header` 和 `toggleButton`。
 
 ### 用自定义组件替换插槽
 
@@ -229,17 +177,6 @@ const MySendButton: React.FC<{ onClick: () => void }> = ({ onClick }) => (
 />
 ```
 
-### 替换整个聊天视图
-
-对于完全自定义的聊天界面，将 className（或组件）传递给 `chatView` 插槽：
-
-```tsx
-<CopilotChat
-  agentId="agent"
-  chatView="bg-gray-50 rounded-xl shadow-lg"
-/>
-```
-
 ## 本地开发
 
 连接生成器自动配置 `serve-local` 集成：
@@ -253,10 +190,6 @@ const MySendButton: React.FC<{ onClick: () => void }> = ({ onClick }) => (
 :::tip[热重载]
 网站和连接的代理一起热重载，使您能够快速迭代双方而无需部署到 AWS。
 :::
-
-## 基础设施
-
-如果您的代理使用 IAM 身份验证，则必须授予 Cognito Identity Pool 的已认证角色调用代理的权限。请参阅您代理的基础设施构造以获取适当的 `grantInvokeAccess` 方法。
 
 ## 更多信息
 
