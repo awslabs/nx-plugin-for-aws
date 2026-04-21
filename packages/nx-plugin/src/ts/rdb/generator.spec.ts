@@ -76,7 +76,7 @@ describe('ts#rdb generator', () => {
     expect(tree.exists('packages/db/prisma.config.ts')).toBeTruthy();
     expect(tree.exists('packages/db/prisma/schema.prisma')).toBeTruthy();
     expect(
-      tree.exists('packages/db/prisma/schema/example.prisma'),
+      tree.exists('packages/db/prisma/models/example.prisma'),
     ).toBeTruthy();
     expect(tree.exists('packages/db/src/index.ts')).toBeTruthy();
     expect(tree.exists('packages/db/Dockerfile')).toBeTruthy();
@@ -137,10 +137,10 @@ describe('ts#rdb generator', () => {
       "import { defineConfig } from 'prisma/config';",
     );
     expect(
-      tree.read('packages/db/prisma/schema/example.prisma', 'utf-8'),
+      tree.read('packages/db/prisma/models/example.prisma', 'utf-8'),
     ).toContain('model ExampleTable');
     expect(
-      tree.read('packages/db/prisma/schema/example.prisma', 'utf-8'),
+      tree.read('packages/db/prisma/models/example.prisma', 'utf-8'),
     ).toContain('column1     String');
     expect(tree.read('packages/db/prisma/schema.prisma', 'utf-8')).toContain(
       'provider = "postgresql"',
@@ -155,7 +155,7 @@ describe('ts#rdb generator', () => {
       'ARG AWS_REGION',
     );
     expect(tree.read('packages/db/Dockerfile', 'utf-8')).toContain(
-      'RUN npm install prisma@7.6.0',
+      'RUN npm install prisma@7.7.0',
     );
     expect(tree.read('packages/db/.gitignore', 'utf-8')).toContain(
       'generated/prisma',
@@ -246,14 +246,14 @@ describe('ts#rdb generator', () => {
       '3.1030.0',
     );
     expect(packageJson.dependencies['@aws-sdk/rds-signer']).toBe('3.1030.0');
-    expect(packageJson.dependencies['@prisma/adapter-pg']).toBe('7.6.0');
-    expect(packageJson.dependencies['@prisma/client']).toBe('7.6.0');
+    expect(packageJson.dependencies['@prisma/adapter-pg']).toBe('7.7.0');
+    expect(packageJson.dependencies['@prisma/client']).toBe('7.7.0');
     expect(packageJson.dependencies.pg).toBe('8.20.0');
     expect(packageJson.dependencies.mariadb).toBeUndefined();
     expect(packageJson.dependencies['@prisma/adapter-mariadb']).toBeUndefined();
     expect(packageJson.devDependencies['@types/aws-lambda']).toBe('8.10.161');
     expect(packageJson.devDependencies['@types/pg']).toBe('8.20.0');
-    expect(packageJson.devDependencies.prisma).toBe('7.6.0');
+    expect(packageJson.devDependencies.prisma).toBe('7.7.0');
     expect(packageJson.devDependencies.ncp).toBe('2.0.0');
     expect(packageJson.devDependencies.rimraf).toBe('6.1.3');
     expect(packageJson.devDependencies['make-dir-cli']).toBe('4.0.0');
@@ -278,7 +278,6 @@ describe('ts#rdb generator', () => {
       'packages/db/src/create-db-user-handler.ts',
       'utf-8',
     );
-    const utilsFile = tree.read('packages/db/src/utils.ts', 'utf-8');
     const prismaSchema = tree.read('packages/db/prisma/schema.prisma', 'utf-8');
 
     expect(packageJson.dependencies['@aws-lambda-powertools/parameters']).toBe(
@@ -291,14 +290,14 @@ describe('ts#rdb generator', () => {
       '3.1030.0',
     );
     expect(packageJson.dependencies['@aws-sdk/rds-signer']).toBe('3.1030.0');
-    expect(packageJson.dependencies['@prisma/adapter-mariadb']).toBe('7.6.0');
-    expect(packageJson.dependencies['@prisma/client']).toBe('7.6.0');
+    expect(packageJson.dependencies['@prisma/adapter-mariadb']).toBe('7.7.0');
+    expect(packageJson.dependencies['@prisma/client']).toBe('7.7.0');
     expect(packageJson.dependencies.mariadb).toBe('3.5.2');
     expect(packageJson.dependencies['@prisma/adapter-pg']).toBeUndefined();
     expect(packageJson.dependencies.pg).toBeUndefined();
     expect(packageJson.devDependencies['@types/aws-lambda']).toBe('8.10.161');
     expect(packageJson.devDependencies['@types/pg']).toBeUndefined();
-    expect(packageJson.devDependencies.prisma).toBe('7.6.0');
+    expect(packageJson.devDependencies.prisma).toBe('7.7.0');
     expect(packageJson.devDependencies.ncp).toBe('2.0.0');
     expect(packageJson.devDependencies.rimraf).toBe('6.1.3');
     expect(packageJson.devDependencies['make-dir-cli']).toBe('4.0.0');
@@ -391,12 +390,16 @@ describe('ts#rdb generator', () => {
     expect(terraformCore).toContain('output "admin_user"');
     expect(terraformCore).toContain('output "database_security_group_id"');
     expect(terraformCore).toContain('output "proxy_role_name"');
-    expect(terraformCore).toContain('"secretsmanager:GetSecretValue"');
     expect(terraformCore).toContain('proxy_to_database');
+    expect(terraformCore).toContain('null_resource" "proxy_target_ready"');
+    expect(terraformCore).toContain('output "database_ready"');
     expect(terraformApp).toContain('--build-arg AWS_REGION=');
     expect(terraformApp).toContain('module.aurora.proxy_role_name');
     expect(terraformApp).toContain('module.aurora.database_security_group_id');
     expect(terraformApp).toContain('module.aurora.security_group_id');
+    expect(terraformApp).toContain(
+      'database_ready = module.aurora.database_ready',
+    );
   });
 
   it('should keep an existing aurora shared construct', async () => {
@@ -448,8 +451,12 @@ describe('ts#rdb generator', () => {
     );
     expect(terraformCore).toContain('variable "enable_rds_proxy"');
     expect(terraformApp).toContain('--build-arg AWS_REGION=');
-    expect(terraformApp).toContain('module.aurora.database_security_group_id');
-    expect(terraformApp).not.toContain('module.aurora.security_group_id');
+    expect(terraformApp).toContain(
+      'referenced_security_group_id = module.aurora.database_security_group_id',
+    );
+    expect(terraformApp).not.toContain(
+      'referenced_security_group_id = module.aurora.security_group_id',
+    );
   });
 
   it('should generate CDK construct with RDS Proxy disabled', async () => {
@@ -494,9 +501,13 @@ describe('ts#rdb generator', () => {
     );
     expect(terraformApp).toContain('variable "enable_rds_proxy"');
     expect(terraformApp).toContain('module.aurora.proxy_role_name');
-    expect(terraformCore).toContain('"secretsmanager:GetSecretValue"');
     expect(terraformCore).toContain('proxy_to_database');
+    expect(terraformCore).toContain('null_resource" "proxy_target_ready"');
+    expect(terraformCore).toContain('output "database_ready"');
     expect(terraformCore).toContain('output "proxy_role_name"');
+    expect(terraformApp).toContain(
+      'database_ready = module.aurora.database_ready',
+    );
   });
 
   it('should generate correct runtime config structure for Terraform', async () => {
@@ -523,6 +534,8 @@ describe('ts#rdb generator', () => {
     expect(terraformApp).toContain('database  = module.aurora.database_name');
     expect(terraformApp).toContain('adminUser = module.aurora.admin_user');
     expect(terraformApp).toContain('dbUser    = local.database_runtime_user');
-    expect(terraformApp).toContain('region    = data.aws_region.current.name');
+    expect(terraformApp).toContain(
+      'region    = data.aws_region.current.region',
+    );
   });
 });

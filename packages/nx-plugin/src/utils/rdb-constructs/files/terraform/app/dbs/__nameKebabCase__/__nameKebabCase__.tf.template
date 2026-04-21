@@ -22,8 +22,8 @@ variable "vpc_id" {
   type        = string
 }
 
-variable "subnet_ids" {
-  description = "Private subnet IDs used by the Aurora DB subnet group and migration Lambda."
+variable "private_subnet_ids" {
+  description = "Private subnet IDs used by Aurora, RDS Proxy, and database Lambda functions. These subnets must have outbound egress to AWS service endpoints for the create-db-user and migration Lambdas."
   type        = list(string)
 }
 
@@ -31,12 +31,6 @@ variable "engine_version" {
   description = "Aurora engine version."
   type        = string
   default     = null
-}
-
-variable "database_url_query_parameters" {
-  description = "Additional query parameters appended to the generated database URL."
-  type        = map(string)
-  default     = {}
 }
 
 variable "port" {
@@ -110,15 +104,14 @@ locals {
 
 module "aurora" {
   source = "../../../core/rdb/aurora"
-
+  #checkov:skip=CKV_AWS_139:Deletion protection is enabled but checkov is unable to detect it correctly
   name                            = "<%= nameKebabCase %>"
   vpc_id                          = var.vpc_id
-  subnet_ids                      = var.subnet_ids
+  private_subnet_ids              = var.private_subnet_ids
   engine                          = "<%= engine === 'mysql' ? 'aurora-mysql' : 'aurora-postgresql' %>"
   engine_version                  = var.engine_version
   database_name                   = "<%= databaseName %>"
   admin_user                      = "<%= adminUser %>"
-  database_url_query_parameters   = var.database_url_query_parameters
   port                            = var.port
   serverless_min_capacity         = var.serverless_min_capacity
   serverless_max_capacity         = var.serverless_max_capacity
@@ -141,7 +134,7 @@ resource "aws_iam_role_policy" "proxy_db_user_connect" {
         Effect = "Allow"
         Action = ["rds-db:connect"]
         Resource = [
-          "arn:aws:rds-db:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:dbuser:${module.aurora.cluster_resource_id}/${local.database_runtime_user}"
+          "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.aurora.cluster_resource_id}/${local.database_runtime_user}"
         ]
       }
     ]
@@ -165,7 +158,7 @@ module "add_rdb_to_runtime_config" {
     database  = module.aurora.database_name
     adminUser = module.aurora.admin_user
     dbUser    = local.database_runtime_user
-    region    = data.aws_region.current.name
+    region    = data.aws_region.current.region
   }
 }
 
@@ -235,8 +228,8 @@ resource "null_resource" "docker_publish" {
 
   provisioner "local-exec" {
     command = <<-EOT
-      aws ecr get-login-password --region ${data.aws_region.current.name} | docker login --username AWS --password-stdin ${self.triggers.repository_url}
-      docker build --platform linux/arm64 --build-arg AWS_REGION=${data.aws_region.current.name} -t ${self.triggers.repository_url}:${self.triggers.bundle_hash} ${local.migration_bundle_path}
+      aws ecr get-login-password --region ${data.aws_region.current.region} | docker login --username AWS --password-stdin ${self.triggers.repository_url}
+      docker build --platform linux/arm64 --provenance=false --build-arg AWS_REGION=${data.aws_region.current.region} -t ${self.triggers.repository_url}:${self.triggers.bundle_hash} ${local.migration_bundle_path}
       docker push ${self.triggers.repository_url}:${self.triggers.bundle_hash}
     EOT
   }
@@ -306,7 +299,7 @@ resource "aws_iam_role_policy" "migration_handler_access" {
           "rds-db:connect"
         ]
         Resource = [
-          "arn:aws:rds-db:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:dbuser:${module.aurora.cluster_resource_id}/${local.database_runtime_user}"
+          "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${var.enable_rds_proxy ? module.aurora.proxy_resource_id : module.aurora.cluster_resource_id}/${local.database_runtime_user}"
         ]
       }
 <%_ } _%>
@@ -484,7 +477,7 @@ resource "aws_lambda_function" "create_db_user" {
   }
 
   vpc_config {
-    subnet_ids         = var.subnet_ids
+    subnet_ids         = var.private_subnet_ids
     security_group_ids = [aws_security_group.create_db_user.id]
   }
 
@@ -519,7 +512,7 @@ resource "null_resource" "create_db_user_trigger" {
     command = <<-EOT
       output_file=$(mktemp)
       response=$(aws lambda invoke \
-        --region ${data.aws_region.current.name} \
+        --region ${data.aws_region.current.region} \
         --function-name ${self.triggers.function_name} \
         --cli-binary-format raw-in-base64-out \
         --payload '{"RequestType":"Create","PhysicalResourceId":"db-user:${self.triggers.db_user}"}' \
@@ -555,7 +548,7 @@ resource "aws_lambda_function" "migration_handler" {
   }
 
   vpc_config {
-    subnet_ids         = var.subnet_ids
+    subnet_ids         = var.private_subnet_ids
     security_group_ids = [aws_security_group.migration_handler.id]
   }
 
@@ -587,11 +580,12 @@ resource "aws_lambda_function" "migration_handler" {
 
 resource "null_resource" "migration_trigger" {
   triggers = {
-    bundle_hash   = local.migration_bundle_hash
-    cluster_arn   = module.aurora.cluster_arn
-    function_name = aws_lambda_function.migration_handler.function_name
+    bundle_hash    = local.migration_bundle_hash
+    cluster_arn    = module.aurora.cluster_arn
+    database_ready = module.aurora.database_ready
+    function_name  = aws_lambda_function.migration_handler.function_name
 <%_ if (engine !== 'mysql') { _%>
-    db_user       = local.database_runtime_user
+    db_user        = local.database_runtime_user
 <%_ } _%>
   }
 
@@ -599,7 +593,7 @@ resource "null_resource" "migration_trigger" {
     command = <<-EOT
       output_file=$(mktemp)
       response=$(aws lambda invoke \
-        --region ${data.aws_region.current.name} \
+        --region ${data.aws_region.current.region} \
         --function-name ${self.triggers.function_name} \
         --cli-binary-format raw-in-base64-out \
         "$output_file")
@@ -616,8 +610,34 @@ resource "null_resource" "migration_trigger" {
   depends_on = [
     aws_lambda_function.migration_handler,
     module.aurora,
-    null_resource.create_db_user_trigger
+    null_resource.create_db_user_trigger,
+    aws_iam_role_policy.proxy_db_user_connect
   ]
+}
+
+output "security_group_id" {
+  description = "Security group ID to allow inbound connections to the database (proxy SG if RDS Proxy is enabled, otherwise DB SG)."
+  value       = module.aurora.security_group_id
+}
+
+output "database_security_group_id" {
+  description = "Security group ID of the Aurora cluster directly, used for direct DB access rules (e.g. when RDS Proxy is disabled)."
+  value       = module.aurora.database_security_group_id
+}
+
+output "cluster_resource_id" {
+  description = "Resource ID of the Aurora cluster, used for IAM rds-db:connect policies."
+  value       = module.aurora.cluster_resource_id
+}
+
+output "proxy_resource_id" {
+  description = "Resource identifier of the RDS Proxy (prx-XXXX), used for IAM rds-db:connect policies when connecting through the proxy. Null if RDS Proxy is disabled."
+  value       = module.aurora.proxy_resource_id
+}
+
+output "kms_key_arn" {
+  description = "ARN of the KMS key protecting Aurora and the admin credentials secret, used to grant decrypt access alongside secret_arn."
+  value       = module.aurora.kms_key_arn
 }
 
 output "cluster_arn" {
