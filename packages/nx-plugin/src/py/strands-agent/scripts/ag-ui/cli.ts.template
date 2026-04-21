@@ -1,0 +1,120 @@
+/**
+ * Interactive CLI for <%- agentNameClassName %> (AG-UI protocol).
+ *
+ * In local mode (default) connects to `http://localhost:<%- localDevPort %>/invocations`.
+ *
+ * In deployed mode — set `RUNTIME_CONFIG_APP_ID` to the AppConfig application
+ * ID and the CLI will resolve the agent runtime ARN and invoke the remote
+ * AG-UI endpoint on Bedrock AgentCore Runtime.
+<% if (auth === 'Cognito') { -%>
+ *
+ * Pass `--accessToken <JWT>` for Cognito-authenticated agents.
+<% } -%>
+ */
+import { randomUUID } from 'node:crypto';
+import { HttpAgent } from '@ag-ui/client';
+import type { RunAgentInput } from '@ag-ui/client';
+import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
+import { AwsClient } from 'aws4fetch';
+import {
+  getConnectedAgentRuntimeArn,
+  runCliChat,
+  getCliArg,
+} from ':<%= npmScope %>/agent-connection';
+
+const SESSION_ID_HEADER = 'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id';
+
+const buildAgentCoreUrl = (agentRuntimeArn: string) => {
+  const region = agentRuntimeArn.split(':')[3];
+  const url = `https://bedrock-agentcore.${region}.amazonaws.com/runtimes/${encodeURIComponent(agentRuntimeArn)}/invocations?qualifier=DEFAULT`;
+  return { region, url };
+};
+
+// The AG-UI HttpAgent uses the global `fetch`. In deployed mode we need
+// to sign requests, so we subclass HttpAgent and swap in our own fetch.
+class CliHttpAgent extends HttpAgent {
+  constructor(
+    config: ConstructorParameters<typeof HttpAgent>[0],
+    private readonly authFetch: typeof fetch,
+    private readonly sessionId: string,
+  ) {
+    super(config);
+  }
+
+  protected override requestInit(input: RunAgentInput): RequestInit {
+    const init = super.requestInit(input);
+    const headers = new Headers(init.headers);
+    headers.set(SESSION_ID_HEADER, this.sessionId);
+    return { ...init, headers };
+  }
+
+  override run(input: RunAgentInput) {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = this.authFetch;
+    try {
+      return super.run(input);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }
+
+  override clone(): CliHttpAgent {
+    const cloned = super.clone() as CliHttpAgent;
+    (cloned as any).authFetch = this.authFetch;
+    (cloned as any).sessionId = this.sessionId;
+    return cloned;
+  }
+}
+
+const main = async () => {
+  const port = process.env.PORT ?? '<%- localDevPort %>';
+  const appId = process.env.RUNTIME_CONFIG_APP_ID;
+  const sessionId = randomUUID().replaceAll('-', '').padEnd(33, '0');
+
+  let agent: HttpAgent;
+  if (appId) {
+    const arn = await getConnectedAgentRuntimeArn('<%- agentNameClassName %>');
+    const { region, url } = buildAgentCoreUrl(arn);
+<% if (auth === 'Cognito') { -%>
+    const token = getCliArg('accessToken');
+    if (!token) {
+      throw new Error(
+        'Cognito agents require `--accessToken <JWT>` to be passed to the CLI.',
+      );
+    }
+    const authFetch: typeof fetch = async (input, init) => {
+      const headers = new Headers(init?.headers);
+      headers.set('Authorization', `Bearer ${token}`);
+      return fetch(input, { ...init, headers });
+    };
+<% } else { -%>
+    const credentialProvider = fromNodeProviderChain();
+    const authFetch: typeof fetch = async (input, init) => {
+      const credentials = await credentialProvider();
+      const aws = new AwsClient({
+        ...credentials,
+        service: 'bedrock-agentcore',
+        region,
+      });
+      return aws.fetch(input, init);
+    };
+<% } -%>
+    agent = new CliHttpAgent({ url }, authFetch, sessionId);
+  } else {
+    agent = new HttpAgent({ url: `http://localhost:${port}/invocations` });
+  }
+
+  await runCliChat(async (message) => {
+    agent.addMessage({ id: randomUUID(), role: 'user', content: message });
+    await agent.runAgent(
+      {},
+      {
+        onTextMessageContentEvent: ({ event }) => {
+          process.stdout.write(event.content);
+        },
+      },
+    );
+  });
+};
+
+void main();

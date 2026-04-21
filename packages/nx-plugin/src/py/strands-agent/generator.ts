@@ -6,6 +6,7 @@ import {
   GeneratorCallback,
   OverwriteStrategy,
   Tree,
+  addDependenciesToPackageJson,
   generateFiles,
   installPackagesTask,
   joinPathFragments,
@@ -36,6 +37,8 @@ import { Logger, UVProvider } from '../../utils/nxlv-python';
 import { resolveIacProvider } from '../../utils/iac';
 import { assignPort } from '../../utils/port';
 import { toProjectRelativePath } from '../../utils/paths';
+import { withVersions } from '../../utils/versions';
+import { ensureTypeScriptAgentConnectionProject } from '../../utils/agent-connection/agent-connection';
 
 export const PY_STRANDS_AGENT_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -106,6 +109,11 @@ export const pyStrandsAgentGenerator = async (
     templateContext,
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
+
+  // Ensure the shared TS agent-connection project exists — every Python
+  // agent vends a TypeScript CLI that imports runCliChat / getCliArg /
+  // getConnectedAgentRuntimeArn from it.
+  await ensureTypeScriptAgentConnectionProject(tree);
 
   addDependenciesToPyProjectToml(tree, project.root, [
     'aws-lambda-powertools',
@@ -208,6 +216,43 @@ export const pyStrandsAgentGenerator = async (
   const localDevPortStart = protocol === 'A2A' ? 9000 : 8081;
   const localDevPort = assignPort(tree, project, localDevPortStart);
 
+  // Emit the per-protocol interactive CLI under scripts/<agent>/cli.ts.
+  // All Python agents ship a TypeScript CLI so we get the same UX as
+  // TypeScript agents without requiring Python-specific client plumbing.
+  const scriptsDir = joinPathFragments(
+    project.root,
+    'scripts',
+    agentTargetPrefix,
+  );
+  generateFiles(
+    tree,
+    joinPathFragments(__dirname, 'scripts', protocol.toLowerCase()),
+    scriptsDir,
+    {
+      npmScope: getNpmScope(tree),
+      agentNameClassName,
+      localDevPort,
+      auth,
+    },
+    { overwriteStrategy: OverwriteStrategy.KeepExisting },
+  );
+
+  // The CLI is TypeScript — add the minimal deps it needs for http/a2a/ag-ui.
+  addDependenciesToPackageJson(
+    tree,
+    withVersions([
+      '@aws-lambda-powertools/parameters',
+      '@aws-sdk/client-appconfigdata',
+      '@aws-sdk/credential-providers',
+      'aws4fetch',
+      ...(protocol === 'A2A' ? (['@a2a-js/sdk'] as const) : ([] as const)),
+      ...(protocol === 'AG-UI'
+        ? (['@ag-ui/client', 'rxjs'] as const)
+        : ([] as const)),
+    ]),
+    withVersions(['tsx', '@types/node']),
+  );
+
   // All protocols use fastapi dev for hot reload:
   // - HTTP: FastAPI app directly defined in init.py
   // - A2A: A2AServer.to_fastapi_app() creates a FastAPI app in main.py
@@ -240,6 +285,16 @@ export const pyStrandsAgentGenerator = async (
           },
         },
         continuous: true,
+      },
+      [`${agentTargetPrefix}-invoke`]: {
+        executor: 'nx:run-commands',
+        options: {
+          commands: [`tsx ./scripts/${agentTargetPrefix}/cli.ts`],
+          cwd: '{projectRoot}',
+          env: {
+            PORT: `${localDevPort}`,
+          },
+        },
       },
     },
   });

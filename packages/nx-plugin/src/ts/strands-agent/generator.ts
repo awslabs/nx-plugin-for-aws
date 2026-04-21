@@ -32,6 +32,7 @@ import { addAgentInfra } from '../../utils/agent-core-constructs/agent-core-cons
 
 import { assignPort } from '../../utils/port';
 import { FsCommands } from '../../utils/fs';
+import { ensureTypeScriptAgentConnectionProject } from '../../utils/agent-connection/agent-connection';
 
 export const TS_STRANDS_AGENT_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -98,6 +99,10 @@ export const tsStrandsAgentGenerator = async (
     templateContext,
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
+
+  // Ensure the shared agent-connection project exists so the CLI script
+  // can import `runCliChat` / `getConnectedAgentRuntimeArn` from it.
+  await ensureTypeScriptAgentConnectionProject(tree);
 
   if (computeType === 'BedrockAgentCoreRuntime') {
     const dockerImageTag = `${getNpmScope(tree)}-${name}:latest`;
@@ -202,6 +207,29 @@ export const tsStrandsAgentGenerator = async (
   const localDevPortStart = protocol === 'A2A' ? 9000 : 8081;
   const localDevPort = assignPort(tree, project, localDevPortStart);
 
+  // Emit the per-protocol interactive CLI under scripts/<agent>/cli.ts.
+  // The CLI connects to the locally-running agent by default, or to the
+  // deployed agent when RUNTIME_CONFIG_APP_ID is set.
+  const scriptsDir = joinPathFragments(
+    project.root,
+    'scripts',
+    agentTargetPrefix,
+  );
+  const relativeAgentImport = `../../${targetSourceDirRelativeToProjectRoot}`;
+  generateFiles(
+    tree,
+    joinPathFragments(__dirname, 'scripts', protocol.toLowerCase()),
+    scriptsDir,
+    {
+      npmScope: getNpmScope(tree),
+      agentNameClassName,
+      localDevPort,
+      auth,
+      relativeAgentImport,
+    },
+    { overwriteStrategy: OverwriteStrategy.KeepExisting },
+  );
+
   updateProjectConfiguration(tree, project.name, {
     ...project,
     targets: {
@@ -228,6 +256,16 @@ export const tsStrandsAgentGenerator = async (
           },
         },
         continuous: true,
+      },
+      [`${agentTargetPrefix}-invoke`]: {
+        executor: 'nx:run-commands',
+        options: {
+          commands: [`tsx ./scripts/${agentTargetPrefix}/cli.ts`],
+          cwd: '{projectRoot}',
+          env: {
+            PORT: `${localDevPort}`,
+          },
+        },
       },
     },
   });

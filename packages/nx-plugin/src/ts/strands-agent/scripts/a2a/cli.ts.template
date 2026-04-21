@@ -1,0 +1,100 @@
+/**
+ * Interactive CLI for <%- agentNameClassName %> (A2A protocol).
+ *
+ * In local mode (default) connects to `http://localhost:<%- localDevPort %>/`.
+ *
+ * In deployed mode — set `RUNTIME_CONFIG_APP_ID` to the AppConfig application
+ * ID and the CLI will resolve the agent runtime ARN and invoke the remote
+ * A2A endpoint on Bedrock AgentCore Runtime using SigV4-signed requests.
+ */
+import { randomUUID } from 'node:crypto';
+import {
+  ClientFactory,
+  ClientFactoryOptions,
+  DefaultAgentCardResolver,
+  JsonRpcTransportFactory,
+} from '@a2a-js/sdk/client';
+import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
+import { AwsClient } from 'aws4fetch';
+import {
+  getConnectedAgentRuntimeArn,
+  runCliChat,
+} from ':<%= npmScope %>/agent-connection';
+
+const buildAgentCoreUrl = (agentRuntimeArn: string) => {
+  const region = agentRuntimeArn.split(':')[3];
+  const url = `https://bedrock-agentcore.${region}.amazonaws.com/runtimes/${encodeURIComponent(agentRuntimeArn)}/invocations/`;
+  return { region, url };
+};
+
+const buildSigV4Fetch = (region: string, sessionId: string): typeof fetch => {
+  const credentialProvider = fromNodeProviderChain();
+  return async (input, init) => {
+    const credentials = await credentialProvider();
+    const aws = new AwsClient({
+      ...credentials,
+      service: 'bedrock-agentcore',
+      region,
+    });
+    const headers = new Headers(init?.headers);
+    if (!headers.has('X-Amzn-Bedrock-AgentCore-Runtime-Session-Id')) {
+      headers.set('X-Amzn-Bedrock-AgentCore-Runtime-Session-Id', sessionId);
+    }
+    return aws.fetch(input, { ...init, headers });
+  };
+};
+
+const main = async () => {
+  const port = process.env.PORT ?? '<%- localDevPort %>';
+  const appId = process.env.RUNTIME_CONFIG_APP_ID;
+  // AgentCore session IDs must be at least 33 characters.
+  const sessionId = randomUUID().replaceAll('-', '').padEnd(33, '0');
+
+  let factory: ClientFactory;
+  let url: string;
+
+  if (appId) {
+    const arn = await getConnectedAgentRuntimeArn('<%- agentNameClassName %>');
+    const built = buildAgentCoreUrl(arn);
+    url = built.url;
+    const sigv4Fetch = buildSigV4Fetch(built.region, sessionId);
+    factory = new ClientFactory({
+      ...ClientFactoryOptions.default,
+      transports: [new JsonRpcTransportFactory({ fetchImpl: sigv4Fetch })],
+      cardResolver: new DefaultAgentCardResolver({ fetchImpl: sigv4Fetch }),
+    });
+  } else {
+    url = `http://localhost:${port}/`;
+    factory = new ClientFactory(ClientFactoryOptions.default);
+  }
+
+  const client = await factory.createFromUrl(url);
+
+  await runCliChat(async (message) => {
+    const stream = client.sendMessageStream({
+      message: {
+        kind: 'message',
+        role: 'user',
+        parts: [{ kind: 'text', text: message }],
+        messageId: randomUUID(),
+      },
+    });
+    for await (const event of stream) {
+      // Task status updates carry the agent's textual reply as part of the
+      // message parts. Emit any text we see as it streams in.
+      const anyEvent = event as any;
+      const parts =
+        anyEvent?.status?.message?.parts ??
+        anyEvent?.artifact?.parts ??
+        anyEvent?.message?.parts ??
+        [];
+      for (const part of parts) {
+        if (part.kind === 'text' && typeof part.text === 'string') {
+          process.stdout.write(part.text);
+        }
+      }
+    }
+  });
+};
+
+void main();

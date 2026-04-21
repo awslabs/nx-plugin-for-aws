@@ -13,7 +13,7 @@ import pyProjectGenerator, {
   getPyProjectDetails,
 } from '../../py/project/generator';
 import { addDependenciesToPyProjectToml } from '../py';
-import { applyGritQL, matchGritQL } from '../ast';
+import { applyGritQL, matchGritQL, addStarExport } from '../ast';
 
 /** Prefix a GritQL pattern with `language python` */
 const py = (pattern: string) => `language python\n${pattern}`;
@@ -108,6 +108,28 @@ export async function ensureTypeScriptAgentConnectionProject(
     {},
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
+
+  // CLI helpers — used by the generated `<agent>-invoke` script of each
+  // agent project. Emitted unconditionally so every agent has access to
+  // the same interactive chat loop.
+  generateFiles(
+    tree,
+    joinPathFragments(__dirname, 'files', 'core-cli'),
+    joinPathFragments(AGENT_CONNECTION_PROJECT_DIR, 'src', 'core'),
+    {},
+    { overwriteStrategy: OverwriteStrategy.KeepExisting },
+  );
+
+  // Re-export the shared CLI helpers + runtime-config loader from the
+  // package root so that per-project CLI scripts can import them via
+  // `:<scope>/agent-connection` without reaching into internal paths.
+  const indexPath = joinPathFragments(
+    AGENT_CONNECTION_PROJECT_DIR,
+    'src',
+    'index.ts',
+  );
+  await addStarExport(tree, indexPath, './core/cli-chat.js');
+  await addStarExport(tree, indexPath, './core/runtime-config.js');
 }
 
 /**
