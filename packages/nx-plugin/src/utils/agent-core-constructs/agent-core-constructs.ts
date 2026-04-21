@@ -29,6 +29,7 @@ export interface AddAgentCoreInfraProps {
   nameKebabCase: string;
   projectName: string;
   dockerImageTag: string;
+  dockerOutputDir: string;
   appDirectory: string;
   serverProtocol: 'MCP' | 'HTTP' | 'A2A';
   auth: AgentCoreAuth;
@@ -173,6 +174,7 @@ export interface AddMcpServerInfraProps {
   mcpServerNameKebabCase: string;
   projectName: string;
   dockerImageTag: string;
+  dockerOutputDir: string;
   auth: AgentCoreAuth;
 }
 
@@ -187,6 +189,7 @@ export const addMcpServerInfra = async (
     nameClassName: options.mcpServerNameClassName,
     nameKebabCase: options.mcpServerNameKebabCase,
     dockerImageTag: options.dockerImageTag,
+    dockerOutputDir: options.dockerOutputDir,
     projectName: options.projectName,
     appDirectory: 'mcp-servers',
     serverProtocol: 'MCP',
@@ -200,6 +203,7 @@ export interface AddAgentInfraProps {
   agentNameKebabCase: string;
   projectName: string;
   dockerImageTag: string;
+  dockerOutputDir: string;
   auth: AgentCoreAuth;
   serverProtocol?: 'HTTP' | 'A2A';
 }
@@ -216,6 +220,7 @@ export const addAgentInfra = async (
     nameKebabCase: options.agentNameKebabCase,
     projectName: options.projectName,
     dockerImageTag: options.dockerImageTag,
+    dockerOutputDir: options.dockerOutputDir,
     appDirectory: 'agents',
     serverProtocol: options.serverProtocol ?? 'HTTP',
     iacProvider: options.iacProvider,

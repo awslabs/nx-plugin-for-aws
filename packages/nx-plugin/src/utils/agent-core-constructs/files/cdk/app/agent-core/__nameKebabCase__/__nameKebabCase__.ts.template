@@ -1,7 +1,6 @@
 import { Lazy, Names } from 'aws-cdk-lib';
 import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import { Construct } from 'constructs';
-import { execSync } from 'child_process';
 import * as path from 'path';
 import * as url from 'url';
 import {
@@ -18,6 +17,7 @@ import { <%_ if (serverProtocol !== 'MCP') { _%>PolicyStatement, <%_ } _%>IGrant
 import { IUserPool, IUserPoolClient } from 'aws-cdk-lib/aws-cognito';
 <%_ } _%>
 import { RuntimeConfig } from '../../../core/runtime-config.js';
+import { findWorkspaceRoot } from '../../../core/workspace.js';
 
 <%_ if (auth === 'IAM') { _%>
 export type <%- nameClassName %>Props = Omit<
@@ -54,16 +54,15 @@ export class <%- nameClassName %> extends Construct implements IGrantable {
 
     const rc = RuntimeConfig.ensure(this);
 
-    this.dockerImage = AgentRuntimeArtifact.fromAsset(
-      path.dirname(url.fileURLToPath(new URL(import.meta.url))),
-      {
-        platform: Platform.LINUX_ARM64,
-        extraHash: execSync(
-          `docker inspect <%- dockerImageTag %> --format '{{.Id}}'`,
-          { encoding: 'utf-8' },
-        ).trim(),
-      },
+    // Resolve the bundle output directory containing the Dockerfile and built artifacts
+    const bundleDir = path.join(
+      findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
+      '<%- dockerOutputDir %>',
     );
+
+    this.dockerImage = AgentRuntimeArtifact.fromAsset(bundleDir, {
+      platform: Platform.LINUX_ARM64,
+    });
 
 <%_ if (auth === 'Cognito') { _%>
     const { identity, ...restProps } = props;

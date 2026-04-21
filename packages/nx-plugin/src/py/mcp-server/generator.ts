@@ -28,6 +28,7 @@ import { addMcpServerInfra } from '../../utils/agent-core-constructs/agent-core-
 
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { addPythonBundleTarget } from '../../utils/bundle/bundle';
+import { FsCommands } from '../../utils/fs';
 import { withVersions } from '../../utils/versions';
 import { Logger, UVProvider } from '../../utils/nxlv-python';
 import { resolveIacProvider } from '../../utils/iac';
@@ -123,15 +124,29 @@ export const pyMcpServerGenerator = async (
       { overwriteStrategy: OverwriteStrategy.KeepExisting },
     );
 
+    const dockerOutputDir = joinPathFragments(
+      'dist',
+      project.root,
+      'docker',
+      name,
+    );
     const dockerTargetName = `${mcpTargetPrefix}-docker`;
 
-    // Add a docker target specific to this MCP server
+    // Add a docker target that prepares the docker context and builds the image
+    const fs = new FsCommands(tree);
     project.targets[dockerTargetName] = {
       cache: true,
       executor: 'nx:run-commands',
       options: {
         commands: [
-          `docker build --platform linux/arm64 -t ${dockerImageTag} ${targetSourceDir} --build-context workspace=.`,
+          fs.rm(dockerOutputDir),
+          fs.mkdir(dockerOutputDir),
+          fs.cp(bundleOutputDir, dockerOutputDir),
+          fs.cp(
+            `${targetSourceDir}/Dockerfile`,
+            `${dockerOutputDir}/Dockerfile`,
+          ),
+          `docker build --platform linux/arm64 -t ${dockerImageTag} ${dockerOutputDir}`,
         ],
         parallel: false,
       },
@@ -168,6 +183,7 @@ export const pyMcpServerGenerator = async (
       mcpServerNameClassName,
       projectName: project.name,
       dockerImageTag,
+      dockerOutputDir,
       iacProvider,
       auth,
     });

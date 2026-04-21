@@ -34,6 +34,7 @@ import { getNpmScope } from '../../utils/npm-scope';
 import { resolveIacProvider } from '../../utils/iac';
 import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
 import { assignPort } from '../../utils/port';
+import { FsCommands } from '../../utils/fs';
 
 export const TS_MCP_SERVER_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -134,13 +135,28 @@ export const tsMcpServerGenerator = async (
       bundleOutputDir: joinPathFragments('mcp', name),
     });
 
+    const dockerOutputDir = joinPathFragments(
+      'dist',
+      project.root,
+      'bundle',
+      'mcp',
+      name,
+    );
     const dockerTargetName = `${mcpTargetPrefix}-docker`;
 
+    const fs = new FsCommands(tree);
     project.targets[dockerTargetName] = {
       cache: true,
       executor: 'nx:run-commands',
       options: {
-        command: `docker build --platform linux/arm64 -t ${dockerImageTag} ${targetSourceDir} --build-context workspace=.`,
+        commands: [
+          fs.cp(
+            `${targetSourceDir}/Dockerfile`,
+            `${dockerOutputDir}/Dockerfile`,
+          ),
+          `docker build --platform linux/arm64 -t ${dockerImageTag} ${dockerOutputDir}`,
+        ],
+        parallel: false,
       },
       dependsOn: ['bundle'],
     };
@@ -158,6 +174,7 @@ export const tsMcpServerGenerator = async (
       mcpServerNameClassName,
       projectName: project.name,
       dockerImageTag,
+      dockerOutputDir,
       iacProvider,
       auth,
     });

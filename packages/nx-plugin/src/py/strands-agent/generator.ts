@@ -29,6 +29,7 @@ import {
 import { addAgentInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
 
 import { addPythonBundleTarget } from '../../utils/bundle/bundle';
+import { FsCommands } from '../../utils/fs';
 import { getNpmScope } from '../../utils/npm-scope';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { Logger, UVProvider } from '../../utils/nxlv-python';
@@ -148,15 +149,29 @@ export const pyStrandsAgentGenerator = async (
       { overwriteStrategy: OverwriteStrategy.KeepExisting },
     );
 
+    const dockerOutputDir = joinPathFragments(
+      'dist',
+      project.root,
+      'docker',
+      name,
+    );
     const dockerTargetName = `${agentTargetPrefix}-docker`;
 
-    // Add a docker target specific to this agent
+    // Add a docker target that prepares the docker context and builds the image
+    const fs = new FsCommands(tree);
     project.targets[dockerTargetName] = {
       cache: true,
       executor: 'nx:run-commands',
       options: {
         commands: [
-          `docker build --platform linux/arm64 -t ${dockerImageTag} ${targetSourceDir} --build-context workspace=.`,
+          fs.rm(dockerOutputDir),
+          fs.mkdir(dockerOutputDir),
+          fs.cp(bundleOutputDir, dockerOutputDir),
+          fs.cp(
+            `${targetSourceDir}/Dockerfile`,
+            `${dockerOutputDir}/Dockerfile`,
+          ),
+          `docker build --platform linux/arm64 -t ${dockerImageTag} ${dockerOutputDir}`,
         ],
         parallel: false,
       },
@@ -175,6 +190,7 @@ export const pyStrandsAgentGenerator = async (
       agentNameKebabCase: name,
       agentNameClassName,
       dockerImageTag,
+      dockerOutputDir,
       iacProvider,
       projectName: project.name,
       auth,

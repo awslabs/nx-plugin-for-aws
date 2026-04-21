@@ -31,6 +31,7 @@ import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { addAgentInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
 
 import { assignPort } from '../../utils/port';
+import { FsCommands } from '../../utils/fs';
 
 export const TS_STRANDS_AGENT_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -114,13 +115,28 @@ export const tsStrandsAgentGenerator = async (
       { overwriteStrategy: OverwriteStrategy.KeepExisting },
     );
 
+    const dockerOutputDir = joinPathFragments(
+      'dist',
+      project.root,
+      'bundle',
+      'agent',
+      name,
+    );
     const dockerTargetName = `${agentTargetPrefix}-docker`;
 
+    const fs = new FsCommands(tree);
     project.targets[dockerTargetName] = {
       cache: true,
       executor: 'nx:run-commands',
       options: {
-        command: `docker build --platform linux/arm64 -t ${dockerImageTag} ${targetSourceDir} --build-context workspace=.`,
+        commands: [
+          fs.cp(
+            `${targetSourceDir}/Dockerfile`,
+            `${dockerOutputDir}/Dockerfile`,
+          ),
+          `docker build --platform linux/arm64 -t ${dockerImageTag} ${dockerOutputDir}`,
+        ],
+        parallel: false,
       },
       dependsOn: ['bundle'],
     };
@@ -137,6 +153,7 @@ export const tsStrandsAgentGenerator = async (
       agentNameClassName,
       projectName: project.name,
       dockerImageTag,
+      dockerOutputDir,
       iacProvider,
       auth,
       serverProtocol: protocol,
