@@ -1,0 +1,121 @@
+---
+title: Astro Docs
+description: Astro + Starlight 문서 사이트에 대한 참조 문서
+---
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+
+이 생성기는 [Astro](https://astro.build/)와 [Starlight](https://starlight.astro.build/) 문서 테마로 구동되는 문서 사이트를 스캐폴딩합니다. 기본적으로 로컬라이제이션, 재사용 가능한 콘텐츠 스니펫, 로케일 인식 내부 링크 및 [`starlight-blog`](https://starlight-blog-docs.vercel.app/) 플러그인을 연결합니다.
+
+기본적으로 [Amazon Bedrock](https://aws.amazon.com/bedrock/)의 [Strands Agent](https://strandsagents.com/)로 구동되는 자동화된 번역 파이프라인도 스캐폴딩합니다.
+
+## 사용법
+
+### Astro 문서 사이트 생성
+
+두 가지 방법으로 새로운 Astro 문서 사이트를 생성할 수 있습니다:
+
+<RunGenerator generator="ts#astro-docs" />
+
+### 옵션
+
+<GeneratorParameters generator="ts#astro-docs" />
+
+## 생성기 출력
+
+기본적으로 생성기는 워크스페이스 루트의 `docs/`에 다음 프로젝트 구조를 생성합니다 (`name`, `directory` 및 `subDirectory` 옵션을 통해 구성 가능):
+
+<FileTree>
+  - astro.config.mjs Astro + Starlight 구성 (로케일, 사이드바, 블로그 플러그인)
+  - tsconfig.json @components / @assets 경로 별칭과 함께 astro/tsconfigs/strict를 확장
+  - project.json `build`, `start`, `preview` (및 활성화된 경우 `translate`) 타겟이 있는 Nx 프로젝트
+  - scripts
+    - translate.ts 번역 드라이버 — 범위가 지정된 파일 편집기 도구가 있는 Strands 에이전트 (`--noTranslation`으로 생략됨)
+    - translate.config.json 소스/타겟 로케일, glob 패턴, 모델 ID, 리전 (`--noTranslation`으로 생략됨)
+  - src
+    - components
+      - link.astro 로케일 인식 링크 컴포넌트 (현재 로케일에 대해 경로를 해석)
+      - snippet.astro 로케일 인식 스니펫 로더 컴포넌트
+    - content
+      - docs
+        - en
+          - index.mdx 랜딩 페이지
+          - guides
+            - getting-started.mdx 링크 및 스니펫 컴포넌트를 참조하는 샘플 가이드
+          - blog
+            - welcome.mdx 샘플 블로그 게시물 (`--noBlog`로 생략됨)
+          - snippets
+            - example.mdx 재사용 가능한 샘플 스니펫
+    - styles
+      - custom.css Starlight 테마 오버라이드
+  - README.md 프로젝트 README
+</FileTree>
+
+### 로컬라이제이션
+
+생성기는 기본적으로 단일 로케일(`en`)로 설정되며 루트 URL을 해당 로케일로 리디렉션합니다. 더 많은 언어를 추가하려면:
+
+1. `astro.config.mjs`의 `locales` 아래에 항목을 추가합니다 (예: `ko: { label: '한국어' }`).
+2. `src/content/docs/<locale>/` 아래에 일치하는 디렉토리를 생성합니다.
+3. 수동으로 채우거나 아래에 설명된 번역 타겟을 사용합니다.
+
+## 번역
+
+`--noTranslation`을 전달하지 않은 경우, 생성기는 `project.json`에 `translate` 타겟을 추가하므로 다음을 실행할 수 있습니다:
+
+<NxCommands commands={[
+  'translate docs -- --all',
+  'translate docs -- --languages jp,ko',
+  'translate docs -- --dry-run',
+]} />
+
+`--all` 없이 실행하면 스크립트는 현재 브랜치의 마지막 번역 커밋 이후 변경된 파일만 번역합니다. 즉, 전체 사이트를 다시 번역하지 않고도 모든 문서 PR에서 안전하게 다시 실행할 수 있습니다.
+
+### 번역 구성
+
+`scripts/translate.config.json`을 편집하여 다음을 변경합니다:
+
+| 필드 | 목적 |
+| --- | --- |
+| `sourceLanguage` | 번역 **원본** 로케일 (기본값 `en`). |
+| `targetLanguages` | 번역 **대상** 로케일. 기본적으로 비어 있음. 예: `["fr", "de", "es", "ja", "ko"]`. |
+| `docsDir` | 프로젝트 루트에 상대적인 문서 콘텐츠 디렉토리 경로. |
+| `include` | 번역할 파일에 대한 Glob 패턴 (`<docsDir>/<sourceLanguage>`에 상대적). |
+| `exclude` | 건너뛸 Glob 패턴. |
+| `modelId` | 번역에 사용할 Bedrock 모델. |
+| `awsRegion` | Bedrock 클라이언트가 구성된 AWS 리전. `AWS_REGION`을 통해서도 설정 가능. |
+| `concurrency` | 최대 동시 에이전트 호출 수. |
+| `translationCommitMessage` | 번역 커밋에 대한 커밋 메시지 마커 (기본값 `docs: update translations`). |
+
+### 로케일 인식 내부 링크
+
+생성기는 현재 로케일에 대해 내부 문서 경로를 자동으로 해석하는 `Link` 컴포넌트를 제공하므로 단일 소스가 모든 언어에서 올바른 URL을 생성합니다:
+
+```mdx
+import Link from '@components/link.astro';
+
+<Link path="guides/getting-started">시작 가이드 읽기</Link>
+```
+
+### 스니펫
+
+재사용 가능한 콘텐츠 조각은 `src/content/docs/<locale>/snippets/`에 있습니다. 생성된 `Snippet` 컴포넌트는 현재 로케일과 일치하는 스니펫을 로드합니다:
+
+```mdx
+import Snippet from '@components/snippet.astro';
+
+<Snippet name="example" />
+```
+
+### CI 연결
+
+기본적으로 CI 워크플로는 생성되지 않습니다. 다음을 수행하는 워크플로를 추가하세요:
+
+1. 구성된 모델에서 Bedrock `InvokeModel`을 호출할 수 있는 권한이 있는 AWS 자격 증명을 구성합니다.
+2. 소스 언어 문서를 건드리는 풀 리퀘스트에서 `translate` 타겟을 실행합니다:
+
+   <NxCommands commands={['translate docs']} />
+
+3. 결과 번역을 PR 브랜치에 다시 커밋합니다. 커밋 메시지는 `scripts/translate.config.json`의 `translationCommitMessage` 값(기본값 `docs: update translations`)과 일치해야 하므로 후속 증분 실행이 기준 커밋을 감지하고 그 이후 변경된 파일만 다시 번역할 수 있습니다.

@@ -1,0 +1,140 @@
+---
+title: Astro Docs
+description: Documentazione di riferimento per un sito di documentazione Astro + Starlight
+---
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+
+Questo generatore crea l'impalcatura di un sito di documentazione basato su [Astro](https://astro.build/)
+e il tema di documentazione [Starlight](https://starlight.astro.build/). Configura
+la localizzazione, frammenti di contenuto riutilizzabili, link interni consapevoli della lingua e un
+plugin [`starlight-blog`](https://starlight-blog-docs.vercel.app/) per impostazione predefinita.
+
+Per impostazione predefinita, crea anche una pipeline di traduzione automatizzata basata su uno
+[Strands Agent](https://strandsagents.com/) su
+[Amazon Bedrock](https://aws.amazon.com/bedrock/).
+
+## Utilizzo
+
+### Generare un sito di documentazione Astro
+
+Puoi generare un nuovo sito di documentazione Astro in due modi:
+
+<RunGenerator generator="ts#astro-docs" />
+
+### Opzioni
+
+<GeneratorParameters generator="ts#astro-docs" />
+
+## Output del generatore
+
+Per impostazione predefinita, il generatore crea la seguente struttura di progetto in `docs/` nella
+radice del workspace (configurabile tramite le opzioni `name`, `directory` e `subDirectory`):
+
+<FileTree>
+  - astro.config.mjs Configurazione Astro + Starlight (locali, sidebar, plugin blog)
+  - tsconfig.json Estende astro/tsconfigs/strict con alias di percorso @components / @assets
+  - project.json Progetto Nx con target `build`, `start`, `preview` (e `translate` se abilitato)
+  - scripts
+    - translate.ts Driver di traduzione — uno Strands agent con uno strumento file-editor con ambito (omesso con `--noTranslation`)
+    - translate.config.json Locali sorgente/destinazione, pattern glob, id modello, regione (omesso con `--noTranslation`)
+  - src
+    - components
+      - link.astro Componente link consapevole della lingua (risolve i percorsi rispetto alla lingua corrente)
+      - snippet.astro Componente caricatore di snippet consapevole della lingua
+    - content
+      - docs
+        - en
+          - index.mdx Pagina di destinazione
+          - guides
+            - getting-started.mdx Guida di esempio che fa riferimento ai componenti link e snippet
+          - blog
+            - welcome.mdx Post del blog di esempio (omesso con `--noBlog`)
+          - snippets
+            - example.mdx Snippet riutilizzabile di esempio
+    - styles
+      - custom.css Override del tema Starlight
+  - README.md README del progetto
+</FileTree>
+
+### Localizzazione
+
+Il generatore utilizza per impostazione predefinita una singola lingua (`en`) e reindirizza l'URL radice ad
+essa. Per aggiungere altre lingue:
+
+1. Aggiungi una voce sotto `locales` in `astro.config.mjs` (ad esempio `ko: { label: '한국어' }`).
+2. Crea una directory corrispondente sotto `src/content/docs/<locale>/`.
+3. Popolala manualmente o utilizza il target di traduzione descritto di seguito.
+
+## Traduzione
+
+A meno che tu non abbia passato `--noTranslation`, il generatore aggiunge un target `translate` a
+`project.json`, quindi puoi eseguire:
+
+<NxCommands commands={[
+  'translate docs -- --all',
+  'translate docs -- --languages jp,ko',
+  'translate docs -- --dry-run',
+]} />
+
+Quando eseguito senza `--all`, lo script traduce solo i file che sono cambiati
+dall'ultimo commit di traduzione sul branch corrente — il che significa che puoi
+rieseguirlo in sicurezza su ogni PR di documentazione senza ritradurre l'intero sito.
+
+### Configurazione della traduzione
+
+Modifica `scripts/translate.config.json` per cambiare:
+
+| Campo | Scopo |
+| --- | --- |
+| `sourceLanguage` | Lingua **da** cui tradurre (predefinito `en`). |
+| `targetLanguages` | Lingue **verso** cui tradurre. Vuoto per impostazione predefinita. Ad esempio `["fr", "de", "es", "ja", "ko"]`. |
+| `docsDir` | Percorso della directory del contenuto della documentazione, relativo alla radice del progetto. |
+| `include` | Pattern glob (relativi a `<docsDir>/<sourceLanguage>`) per i file da tradurre. |
+| `exclude` | Pattern glob da saltare. |
+| `modelId` | Modello Bedrock da utilizzare per le traduzioni. |
+| `awsRegion` | Regione AWS con cui è configurato il client Bedrock. Può anche essere impostato tramite `AWS_REGION`. |
+| `concurrency` | Numero massimo di invocazioni simultanee dell'agent. |
+| `translationCommitMessage` | Marcatore del messaggio di commit per i commit di traduzione (predefinito `docs: update translations`). |
+
+### Link interni consapevoli della lingua
+
+Il generatore fornisce un componente `Link` che risolve automaticamente i percorsi
+interni della documentazione rispetto alla lingua corrente, in modo che un'unica fonte di verità produca
+l'URL corretto in ogni lingua:
+
+```mdx
+import Link from '@components/link.astro';
+
+<Link path="guides/getting-started">Leggi la guida introduttiva</Link>
+```
+
+### Snippet
+
+I frammenti di contenuto riutilizzabili si trovano in `src/content/docs/<locale>/snippets/`. Il
+componente `Snippet` generato carica lo snippet che corrisponde alla lingua
+corrente:
+
+```mdx
+import Snippet from '@components/snippet.astro';
+
+<Snippet name="example" />
+```
+
+### Configurazione della CI
+
+Nessun workflow CI viene generato di default — aggiungine uno che:
+
+1. Configura le credenziali AWS con il permesso di invocare `InvokeModel` di Bedrock sul
+   modello configurato.
+2. Esegue il target `translate` sulle pull request che toccano la documentazione nella lingua sorgente:
+
+   <NxCommands commands={['translate docs']} />
+
+3. Esegue il commit delle traduzioni risultanti nel branch della PR. Il messaggio di commit
+   deve corrispondere al valore `translationCommitMessage` in
+   `scripts/translate.config.json` (predefinito `docs: update translations`) in modo che
+   le successive esecuzioni incrementali possano rilevare il commit di base e
+   ritradurre solo i file che sono cambiati da allora.

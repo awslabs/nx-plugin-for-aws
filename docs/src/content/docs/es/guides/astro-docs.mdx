@@ -1,0 +1,140 @@
+---
+title: Astro Docs
+description: Documentación de referencia para un sitio de documentación Astro + Starlight
+---
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+
+Este generador crea un sitio de documentación impulsado por [Astro](https://astro.build/)
+y el tema de documentación [Starlight](https://starlight.astro.build/). Configura
+localización, fragmentos de contenido reutilizables, enlaces internos conscientes de la configuración regional y un
+plugin [`starlight-blog`](https://starlight-blog-docs.vercel.app/) por defecto.
+
+Por defecto, también crea un pipeline de traducción automatizado impulsado por un
+[Strands Agent](https://strandsagents.com/) en
+[Amazon Bedrock](https://aws.amazon.com/bedrock/).
+
+## Uso
+
+### Generar un sitio de documentación Astro
+
+Puedes generar un nuevo sitio de documentación Astro de dos maneras:
+
+<RunGenerator generator="ts#astro-docs" />
+
+### Opciones
+
+<GeneratorParameters generator="ts#astro-docs" />
+
+## Salida del Generador
+
+Por defecto, el generador crea la siguiente estructura de proyecto en `docs/` en la
+raíz del espacio de trabajo (configurable mediante las opciones `name`, `directory` y `subDirectory`):
+
+<FileTree>
+  - astro.config.mjs Configuración de Astro + Starlight (locales, sidebar, plugin de blog)
+  - tsconfig.json Extiende astro/tsconfigs/strict con alias de ruta @components / @assets
+  - project.json Proyecto Nx con objetivos `build`, `start`, `preview` (y `translate` si está habilitado)
+  - scripts
+    - translate.ts Controlador de traducción — un agente Strands con una herramienta de edición de archivos con alcance (omitido con `--noTranslation`)
+    - translate.config.json Locales de origen/destino, patrones glob, id del modelo, región (omitido con `--noTranslation`)
+  - src
+    - components
+      - link.astro Componente de enlace consciente de la configuración regional (resuelve rutas contra la configuración regional actual)
+      - snippet.astro Componente cargador de fragmentos consciente de la configuración regional
+    - content
+      - docs
+        - en
+          - index.mdx Página de inicio
+          - guides
+            - getting-started.mdx Guía de ejemplo que hace referencia a los componentes link y snippet
+          - blog
+            - welcome.mdx Publicación de blog de ejemplo (omitida con `--noBlog`)
+          - snippets
+            - example.mdx Fragmento reutilizable de ejemplo
+    - styles
+      - custom.css Anulaciones del tema Starlight
+  - README.md README del proyecto
+</FileTree>
+
+### Localización
+
+El generador por defecto usa una sola configuración regional (`en`) y redirige la URL raíz a
+ella. Para agregar más idiomas:
+
+1. Agrega una entrada bajo `locales` en `astro.config.mjs` (por ejemplo `ko: { label: '한국어' }`).
+2. Crea un directorio correspondiente bajo `src/content/docs/<locale>/`.
+3. Complétalo manualmente, o usa el objetivo de traducción descrito a continuación.
+
+## Traducción
+
+A menos que hayas pasado `--noTranslation`, el generador agrega un objetivo `translate` a
+`project.json`, para que puedas ejecutar:
+
+<NxCommands commands={[
+  'translate docs -- --all',
+  'translate docs -- --languages jp,ko',
+  'translate docs -- --dry-run',
+]} />
+
+Cuando se ejecuta sin `--all`, el script solo traduce los archivos que han cambiado
+desde el último commit de traducción en la rama actual — lo que significa que puedes
+volver a ejecutarlo de forma segura en cada PR de documentación sin volver a traducir todo el sitio.
+
+### Configurar la traducción
+
+Edita `scripts/translate.config.json` para cambiar:
+
+| Campo | Propósito |
+| --- | --- |
+| `sourceLanguage` | Configuración regional **desde** la cual traducir (por defecto `en`). |
+| `targetLanguages` | Configuraciones regionales **a** las cuales traducir. Vacío por defecto. Por ejemplo `["fr", "de", "es", "ja", "ko"]`. |
+| `docsDir` | Ruta al directorio de contenido de documentación, relativa a la raíz del proyecto. |
+| `include` | Patrones glob (relativos a `<docsDir>/<sourceLanguage>`) para archivos a traducir. |
+| `exclude` | Patrones glob a omitir. |
+| `modelId` | Modelo de Bedrock a usar para las traducciones. |
+| `awsRegion` | Región de AWS con la que está configurado el cliente de Bedrock. También se puede establecer mediante `AWS_REGION`. |
+| `concurrency` | Número máximo de invocaciones de agente concurrentes. |
+| `translationCommitMessage` | Marcador de mensaje de commit para commits de traducción (por defecto `docs: update translations`). |
+
+### Enlaces internos conscientes de la configuración regional
+
+El generador incluye un componente `Link` que resuelve automáticamente las
+rutas de documentación internas contra la configuración regional actual, de modo que una única fuente de verdad produce
+la URL correcta en cada idioma:
+
+```mdx
+import Link from '@components/link.astro';
+
+<Link path="guides/getting-started">Read the getting-started guide</Link>
+```
+
+### Fragmentos
+
+Los fragmentos de contenido reutilizables se encuentran en `src/content/docs/<locale>/snippets/`. El
+componente `Snippet` generado carga el fragmento que coincide con la configuración
+regional actual:
+
+```mdx
+import Snippet from '@components/snippet.astro';
+
+<Snippet name="example" />
+```
+
+### Configurar CI
+
+No se genera ningún flujo de trabajo de CI de forma predeterminada — agrega uno que:
+
+1. Configure las credenciales de AWS con permiso para invocar `InvokeModel` de Bedrock en
+   el modelo configurado.
+2. Ejecute el objetivo `translate` en solicitudes de extracción que toquen tu documentación en el idioma de origen:
+
+   <NxCommands commands={['translate docs']} />
+
+3. Confirme las traducciones resultantes de vuelta a la rama del PR. El mensaje de commit
+   debe coincidir con el valor `translationCommitMessage` en
+   `scripts/translate.config.json` (por defecto `docs: update translations`) para que
+   las ejecuciones incrementales posteriores puedan detectar el commit de referencia y solo
+   volver a traducir los archivos que cambiaron desde entonces.

@@ -1,0 +1,121 @@
+---
+title: Astro Docs
+description: Astro + Starlight ドキュメントサイトのリファレンスドキュメント
+---
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+
+このジェネレーターは、[Astro](https://astro.build/) と [Starlight](https://starlight.astro.build/) ドキュメントテーマを使用したドキュメントサイトをスキャフォールドします。デフォルトで、ローカライゼーション、再利用可能なコンテンツスニペット、ロケール対応の内部リンク、および [`starlight-blog`](https://starlight-blog-docs.vercel.app/) プラグインを設定します。
+
+また、デフォルトで [Amazon Bedrock](https://aws.amazon.com/bedrock/) 上の [Strands Agent](https://strandsagents.com/) を使用した自動翻訳パイプラインもスキャフォールドします。
+
+## 使用方法
+
+### Astro ドキュメントサイトを生成する
+
+新しい Astro ドキュメントサイトは2つの方法で生成できます：
+
+<RunGenerator generator="ts#astro-docs" />
+
+### オプション
+
+<GeneratorParameters generator="ts#astro-docs" />
+
+## ジェネレーターの出力
+
+デフォルトでは、ジェネレーターはワークスペースルートの `docs/` に以下のプロジェクト構造を作成します（`name`、`directory`、`subDirectory` オプションで設定可能）：
+
+<FileTree>
+  - astro.config.mjs Astro + Starlight の設定（ロケール、サイドバー、ブログプラグイン）
+  - tsconfig.json @components / @assets パスエイリアスを含む astro/tsconfigs/strict を拡張
+  - project.json `build`、`start`、`preview`（有効な場合は `translate`）ターゲットを持つ Nx プロジェクト
+  - scripts
+    - translate.ts 翻訳ドライバー — スコープ付きファイルエディターツールを持つ Strands エージェント（`--noTranslation` で省略）
+    - translate.config.json ソース/ターゲットロケール、glob パターン、モデル ID、リージョン（`--noTranslation` で省略）
+  - src
+    - components
+      - link.astro ロケール対応リンクコンポーネント（現在のロケールに対してパスを解決）
+      - snippet.astro ロケール対応スニペットローダーコンポーネント
+    - content
+      - docs
+        - en
+          - index.mdx ランディングページ
+          - guides
+            - getting-started.mdx リンクとスニペットコンポーネントを参照するサンプルガイド
+          - blog
+            - welcome.mdx サンプルブログ投稿（`--noBlog` で省略）
+          - snippets
+            - example.mdx 再利用可能なサンプルスニペット
+    - styles
+      - custom.css Starlight テーマのオーバーライド
+  - README.md プロジェクト README
+</FileTree>
+
+### ローカライゼーション
+
+ジェネレーターはデフォルトで単一のロケール（`en`）を使用し、ルート URL をそこにリダイレクトします。さらに言語を追加するには：
+
+1. `astro.config.mjs` の `locales` にエントリを追加します（例：`ko: { label: '한국어' }`）。
+2. `src/content/docs/<locale>/` の下に対応するディレクトリを作成します。
+3. 手動で入力するか、以下で説明する翻訳ターゲットを使用します。
+
+## 翻訳
+
+`--noTranslation` を渡さない限り、ジェネレーターは `project.json` に `translate` ターゲットを追加するため、以下を実行できます：
+
+<NxCommands commands={[
+  'translate docs -- --all',
+  'translate docs -- --languages jp,ko',
+  'translate docs -- --dry-run',
+]} />
+
+`--all` なしで実行すると、スクリプトは現在のブランチで最後の翻訳コミット以降に変更されたファイルのみを翻訳します。つまり、サイト全体を再翻訳することなく、すべてのドキュメント PR で安全に再実行できます。
+
+### 翻訳の設定
+
+`scripts/translate.config.json` を編集して以下を変更します：
+
+| フィールド | 目的 |
+| --- | --- |
+| `sourceLanguage` | 翻訳**元**のロケール（デフォルトは `en`）。 |
+| `targetLanguages` | 翻訳**先**のロケール。デフォルトでは空です。例：`["fr", "de", "es", "ja", "ko"]`。 |
+| `docsDir` | プロジェクトルートからの相対的なドキュメントコンテンツディレクトリへのパス。 |
+| `include` | 翻訳するファイルの glob パターン（`<docsDir>/<sourceLanguage>` からの相対パス）。 |
+| `exclude` | スキップする glob パターン。 |
+| `modelId` | 翻訳に使用する Bedrock モデル。 |
+| `awsRegion` | Bedrock クライアントが設定されている AWS リージョン。`AWS_REGION` 経由でも設定可能。 |
+| `concurrency` | 同時エージェント呼び出しの最大数。 |
+| `translationCommitMessage` | 翻訳コミットのコミットメッセージマーカー（デフォルトは `docs: update translations`）。 |
+
+### ロケール対応の内部リンク
+
+ジェネレーターには、現在のロケールに対して内部ドキュメントパスを自動的に解決する `Link` コンポーネントが付属しているため、単一の情報源がすべての言語で正しい URL を生成します：
+
+```mdx
+import Link from '@components/link.astro';
+
+<Link path="guides/getting-started">Read the getting-started guide</Link>
+```
+
+### スニペット
+
+再利用可能なコンテンツフラグメントは `src/content/docs/<locale>/snippets/` にあります。生成された `Snippet` コンポーネントは、現在のロケールに一致するスニペットを読み込みます：
+
+```mdx
+import Snippet from '@components/snippet.astro';
+
+<Snippet name="example" />
+```
+
+### CI の設定
+
+デフォルトでは CI ワークフローは生成されません。以下を行うワークフローを追加してください：
+
+1. 設定されたモデルで Bedrock `InvokeModel` を呼び出す権限を持つ AWS 認証情報を設定します。
+2. ソース言語のドキュメントに触れるプルリクエストで `translate` ターゲットを実行します：
+
+   <NxCommands commands={['translate docs']} />
+
+3. 結果の翻訳を PR ブランチにコミットバックします。コミットメッセージは `scripts/translate.config.json` の `translationCommitMessage` 値（デフォルトは `docs: update translations`）と一致する必要があります。これにより、後続の増分実行がベースラインコミットを検出し、それ以降に変更されたファイルのみを再翻訳できます。

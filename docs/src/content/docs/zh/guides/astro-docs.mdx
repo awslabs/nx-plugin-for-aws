@@ -1,0 +1,121 @@
+---
+title: Astro 文档
+description: Astro + Starlight 文档站点的参考文档
+---
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+
+此生成器搭建了一个由 [Astro](https://astro.build/) 和 [Starlight](https://starlight.astro.build/) 文档主题驱动的文档站点。它默认配置了本地化、可重用内容片段、区域感知内部链接以及 [`starlight-blog`](https://starlight-blog-docs.vercel.app/) 插件。
+
+默认情况下，它还会搭建一个由 [Amazon Bedrock](https://aws.amazon.com/bedrock/) 上的 [Strands Agent](https://strandsagents.com/) 驱动的自动翻译管道。
+
+## 使用方法
+
+### 生成 Astro 文档站点
+
+您可以通过两种方式生成新的 Astro 文档站点：
+
+<RunGenerator generator="ts#astro-docs" />
+
+### 选项
+
+<GeneratorParameters generator="ts#astro-docs" />
+
+## 生成器输出
+
+默认情况下，生成器会在工作区根目录的 `docs/` 下创建以下项目结构（可通过 `name`、`directory` 和 `subDirectory` 选项配置）：
+
+<FileTree>
+  - astro.config.mjs Astro + Starlight 配置（区域设置、侧边栏、博客插件）
+  - tsconfig.json 扩展 astro/tsconfigs/strict，包含 @components / @assets 路径别名
+  - project.json Nx 项目，包含 `build`、`start`、`preview`（以及启用时的 `translate`）目标
+  - scripts
+    - translate.ts 翻译驱动程序 — 带有作用域文件编辑器工具的 Strands 代理（使用 `--noTranslation` 时省略）
+    - translate.config.json 源/目标区域设置、glob 模式、模型 ID、区域（使用 `--noTranslation` 时省略）
+  - src
+    - components
+      - link.astro 区域感知链接组件（根据当前区域设置解析路径）
+      - snippet.astro 区域感知片段加载器组件
+    - content
+      - docs
+        - en
+          - index.mdx 着陆页
+          - guides
+            - getting-started.mdx 引用链接和片段组件的示例指南
+          - blog
+            - welcome.mdx 示例博客文章（使用 `--noBlog` 时省略）
+          - snippets
+            - example.mdx 示例可重用片段
+    - styles
+      - custom.css Starlight 主题覆盖
+  - README.md 项目 README
+</FileTree>
+
+### 本地化
+
+生成器默认使用单一区域设置（`en`）并将根 URL 重定向到该区域设置。要添加更多语言：
+
+1. 在 `astro.config.mjs` 的 `locales` 下添加一个条目（例如 `ko: { label: '한국어' }`）。
+2. 在 `src/content/docs/<locale>/` 下创建匹配的目录。
+3. 手动填充内容，或使用下面描述的翻译目标。
+
+## 翻译
+
+除非您传递了 `--noTranslation`，否则生成器会向 `project.json` 添加一个 `translate` 目标，因此您可以运行：
+
+<NxCommands commands={[
+  'translate docs -- --all',
+  'translate docs -- --languages jp,ko',
+  'translate docs -- --dry-run',
+]} />
+
+在不使用 `--all` 的情况下运行时，脚本仅翻译自当前分支上次翻译提交以来已更改的文件 — 这意味着您可以在每个文档 PR 上安全地重新运行它，而无需重新翻译整个站点。
+
+### 配置翻译
+
+编辑 `scripts/translate.config.json` 以更改：
+
+| 字段 | 用途 |
+| --- | --- |
+| `sourceLanguage` | 翻译**源**区域设置（默认为 `en`）。 |
+| `targetLanguages` | 翻译**目标**区域设置。默认为空。例如 `["fr", "de", "es", "ja", "ko"]`。 |
+| `docsDir` | 文档内容目录的路径，相对于项目根目录。 |
+| `include` | 要翻译的文件的 Glob 模式（相对于 `<docsDir>/<sourceLanguage>`）。 |
+| `exclude` | 要跳过的 Glob 模式。 |
+| `modelId` | 用于翻译的 Bedrock 模型。 |
+| `awsRegion` | Bedrock 客户端配置的 AWS 区域。也可以通过 `AWS_REGION` 设置。 |
+| `concurrency` | 最大并发代理调用数。 |
+| `translationCommitMessage` | 翻译提交的提交消息标记（默认为 `docs: update translations`）。 |
+
+### 区域感知内部链接
+
+生成器附带一个 `Link` 组件，该组件会自动根据当前区域设置解析内部文档路径，因此单一事实来源可以在每种语言中生成正确的 URL：
+
+```mdx
+import Link from '@components/link.astro';
+
+<Link path="guides/getting-started">阅读入门指南</Link>
+```
+
+### 片段
+
+可重用的内容片段位于 `src/content/docs/<locale>/snippets/` 中。生成的 `Snippet` 组件会加载与当前区域设置匹配的片段：
+
+```mdx
+import Snippet from '@components/snippet.astro';
+
+<Snippet name="example" />
+```
+
+### 配置 CI
+
+开箱即用不会生成 CI 工作流 — 添加一个工作流来：
+
+1. 配置 AWS 凭证，具有在配置的模型上调用 Bedrock `InvokeModel` 的权限。
+2. 在触及源语言文档的拉取请求上运行 `translate` 目标：
+
+   <NxCommands commands={['translate docs']} />
+
+3. 将生成的翻译提交回 PR 分支。提交消息必须与 `scripts/translate.config.json` 中的 `translationCommitMessage` 值匹配（默认为 `docs: update translations`），以便后续增量运行可以检测基线提交并仅重新翻译自那时以来更改的文件。

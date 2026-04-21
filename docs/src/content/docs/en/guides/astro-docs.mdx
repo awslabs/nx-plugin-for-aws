@@ -1,0 +1,141 @@
+---
+title: Astro Docs
+description: Reference documentation for an Astro + Starlight documentation site
+---
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+
+This generator scaffolds a documentation site powered by [Astro](https://astro.build/)
+and the [Starlight](https://starlight.astro.build/) docs theme. It wires up
+localisation, reusable content snippets, locale-aware internal links and a
+[`starlight-blog`](https://starlight-blog-docs.vercel.app/) plugin by default.
+
+By default it also scaffolds an automated translation pipeline powered by a
+[Strands Agent](https://strandsagents.com/) on
+[Amazon Bedrock](https://aws.amazon.com/bedrock/).
+
+## Usage
+
+### Generate an Astro docs site
+
+You can generate a new Astro docs site in two ways:
+
+<RunGenerator generator="ts#astro-docs" />
+
+### Options
+
+<GeneratorParameters generator="ts#astro-docs" />
+
+## Generator Output
+
+By default the generator creates the following project structure at `docs/` in the
+workspace root (configurable via the `name`, `directory` and `subDirectory` options):
+
+<FileTree>
+  - astro.config.mjs Astro + Starlight configuration (locales, sidebar, blog plugin)
+  - tsconfig.json Extends astro/tsconfigs/strict with @components / @assets path aliases
+  - project.json Nx project with `build`, `start`, `preview` (and `translate` if enabled) targets
+  - scripts
+    - translate.ts Translation driver — a Strands agent with a scoped file-editor tool (omitted with `--noTranslation`)
+    - translate.config.json Source/target locales, glob patterns, model id, region (omitted with `--noTranslation`)
+  - src
+    - components
+      - link.astro Locale-aware link component (resolves paths against the current locale)
+      - snippet.astro Locale-aware snippet loader component
+    - content
+      - docs
+        - en
+          - index.mdx Landing page
+          - guides
+            - getting-started.mdx Sample guide referencing the link and snippet components
+          - blog
+            - welcome.mdx Sample blog post (omitted with `--noBlog`)
+          - snippets
+            - example.mdx Sample reusable snippet
+    - styles
+      - custom.css Starlight theme overrides
+  - README.md Project README
+</FileTree>
+
+### Localisation
+
+The generator defaults to a single locale (`en`) and redirects the root URL to
+it. To add more languages:
+
+1. Add an entry under `locales` in `astro.config.mjs` (for example `ko: { label: '한국어' }`).
+2. Create a matching directory under `src/content/docs/<locale>/`.
+3. Populate it manually, or use the translation target described below.
+
+## Translation
+
+Unless you passed `--noTranslation`, the generator adds a `translate` target to
+`project.json`, so you can run:
+
+<NxCommands commands={[
+  'translate docs -- --all',
+  'translate docs -- --languages jp,ko',
+  'translate docs -- --dry-run',
+]} />
+
+When run without `--all`, the script only translates files that have changed
+since the last translation commit on the current branch — meaning you can
+safely re-run it on every docs PR without re-translating the whole site.
+
+### Configuring translation
+
+Edit `scripts/translate.config.json` to change:
+
+| Field | Purpose |
+| --- | --- |
+| `sourceLanguage` | Locale to translate **from** (default `en`). |
+| `targetLanguages` | Locales to translate **to**. Empty by default. For example `["fr", "de", "es", "ja", "ko"]`. |
+| `docsDir` | Path to the docs content directory, relative to the project root. |
+| `include` | Glob patterns (relative to `<docsDir>/<sourceLanguage>`) for files to translate. |
+| `exclude` | Glob patterns to skip. |
+| `modelId` | Bedrock model to use for translations. |
+| `awsRegion` | AWS region the Bedrock client is configured with. Can also be set via `AWS_REGION`. |
+| `concurrency` | Max number of concurrent agent invocations. |
+| `translationCommitMessage` | Commit message marker for translation commits (default `docs: update translations`). |
+
+### Locale-aware internal links
+
+The generator ships a `Link` component that automatically resolves internal
+docs paths against the current locale, so a single source of truth produces
+the right URL in every language:
+
+```mdx
+import Link from '@components/link.astro';
+
+<Link path="guides/getting-started">Read the getting-started guide</Link>
+```
+
+### Snippets
+
+Reusable content fragments live in `src/content/docs/<locale>/snippets/`. The
+generated `Snippet` component loads the snippet that matches the current
+locale:
+
+```mdx
+import Snippet from '@components/snippet.astro';
+
+<Snippet name="example" />
+```
+
+### Wiring up CI
+
+No CI workflow is generated out of the box — add one that:
+
+1. Configures AWS credentials with permission to invoke Bedrock `InvokeModel` on
+   the configured model.
+2. Runs the `translate` target on pull requests that touch your source-language
+   docs:
+
+   <NxCommands commands={['translate docs']} />
+
+3. Commits the resulting translations back to the PR branch. The commit message
+   must match the `translationCommitMessage` value in
+   `scripts/translate.config.json` (default `docs: update translations`) so that
+   subsequent incremental runs can detect the baseline commit and only
+   re-translate the files that changed since.
