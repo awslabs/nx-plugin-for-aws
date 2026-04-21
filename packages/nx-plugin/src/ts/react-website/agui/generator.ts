@@ -19,8 +19,18 @@ import {
 } from '../../../utils/ast';
 import { addAgentRuntimeToConnectionNamespace } from '../../../connection/agent-runtime-config';
 import { kebabCase } from '../../../utils/names';
+import { sharedShadcnGenerator } from '../../../utils/shared-shadcn';
+import { toScopeAlias, getNpmScopePrefix } from '../../../utils/npm-scope';
 
 export type AgUiAuth = 'IAM' | 'Cognito' | 'None';
+
+/**
+ * UX provider theme applied to CopilotKit chat components. The value is read
+ * from the frontend project's `metadata.uxProvider` (set by the
+ * `ts#react-website` generator). Unknown/missing values fall back to
+ * `default`, which re-exports the unstyled CopilotKit components.
+ */
+type AgUiTheme = 'cloudscape' | 'shadcn' | 'default';
 
 export interface AgUiReactConnectionOptions {
   /** The React website project to connect FROM */
@@ -41,6 +51,11 @@ export interface AgUiReactConnectionOptions {
  * `selfManagedAgents` registry) and wraps `<App />` in it. Each invocation
  * AST-patches `AguiProvider` to register one more agent hook — running the
  * generator multiple times is idempotent and additive.
+ *
+ * A themed `src/components/copilot` module is also generated based on the
+ * frontend's `metadata.uxProvider` so consumers can import
+ * `CopilotChat`/`CopilotSidebar`/`CopilotPopup` with matching styling applied
+ * automatically.
  */
 export const addAgUiReactConnection = async (
   tree: Tree,
@@ -49,14 +64,30 @@ export const addAgUiReactConnection = async (
   const { frontendProjectConfig, agentName, agentNameClassName, auth } =
     options;
 
+  const theme = resolveAgUiTheme(frontendProjectConfig);
+  const scopeAlias = toScopeAlias(getNpmScopePrefix(tree));
+
   // Generates `src/components/AguiProvider.tsx` (if absent) and
   // `src/hooks/useAgui<AgentName>.tsx`. Existing files are kept so re-running
   // the generator is idempotent.
   generateFiles(
     tree,
-    joinPathFragments(__dirname, 'files'),
+    joinPathFragments(__dirname, 'files', 'common'),
     frontendProjectConfig.root,
     { agentName, agentNameClassName, auth },
+    { overwriteStrategy: OverwriteStrategy.KeepExisting },
+  );
+
+  // Generate the themed CopilotKit wrapper module. Shadcn imports from the
+  // shared shadcn library so the components must exist there first.
+  if (theme === 'shadcn') {
+    await sharedShadcnGenerator(tree);
+  }
+  generateFiles(
+    tree,
+    joinPathFragments(__dirname, 'files', theme),
+    frontendProjectConfig.root,
+    { scopeAlias },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
@@ -103,6 +134,10 @@ export const addAgUiReactConnection = async (
     withVersions([
       '@copilotkit/react-core',
       '@ag-ui/client',
+      ...((theme === 'cloudscape'
+        ? ['@cloudscape-design/chat-components']
+        : []) as any),
+      ...((theme === 'shadcn' ? ['lucide-react'] : []) as any),
       ...((auth === 'IAM'
         ? [
             'oidc-client-ts',
@@ -125,6 +160,26 @@ export const addAgUiReactConnection = async (
     agentNameKebabCase: kebabCase(agentNameClassName),
     agentNameClassName,
   });
+};
+
+/**
+ * Resolve the CopilotKit theme to use based on the frontend project's
+ * `metadata.uxProvider`.
+ */
+const resolveAgUiTheme = (
+  frontendProjectConfig: ProjectConfiguration,
+): AgUiTheme => {
+  const uxProvider = (frontendProjectConfig.metadata as any)?.uxProvider as
+    | string
+    | undefined;
+  switch (uxProvider) {
+    case 'Cloudscape':
+      return 'cloudscape';
+    case 'Shadcn':
+      return 'shadcn';
+    default:
+      return 'default';
+  }
 };
 
 /**

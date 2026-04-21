@@ -39,6 +39,7 @@ export const TS_VERSIONS = {
   '@tanstack/virtual-file-routes': '1.161.7',
   '@tanstack/router-utils': '1.161.7',
   '@cloudscape-design/board-components': '3.0.174',
+  '@cloudscape-design/chat-components': '1.0.120',
   '@cloudscape-design/components': '3.0.1284',
   '@cloudscape-design/global-styles': '1.0.57',
   '@tanstack/react-query': '5.100.5',

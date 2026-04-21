@@ -841,3 +841,166 @@ export function Main() {
     );
   });
 });
+
+describe('py strands agent react connection generator - AG-UI themed CopilotKit', () => {
+  const writeFrontend = (tree: Tree, uxProvider?: string) => {
+    tree.write(
+      'apps/frontend/project.json',
+      JSON.stringify({
+        name: 'frontend',
+        root: 'apps/frontend',
+        sourceRoot: 'apps/frontend/src',
+        ...(uxProvider ? { metadata: { uxProvider } } : {}),
+      }),
+    );
+    tree.write(
+      'apps/agent-project/project.json',
+      JSON.stringify({
+        name: 'agent-project',
+        root: 'apps/agent-project',
+        sourceRoot: 'apps/agent-project/agent_project',
+        metadata: {
+          components: [
+            {
+              generator: 'py#strands-agent',
+              name: 'agent',
+              path: 'agent_project/agent',
+              port: 8081,
+              rc: 'TestAgent',
+              auth: 'IAM',
+              protocol: 'AG-UI',
+            },
+          ],
+        },
+      }),
+    );
+    tree.write(
+      'apps/frontend/src/main.tsx',
+      `
+import { RouterProvider } from '@tanstack/react-router';
+
+const App = () => <RouterProvider router={router} />;
+
+export function Main() {
+  return <App />;
+}
+`,
+    );
+  };
+
+  const runAgui = async (tree: Tree) => {
+    await pyStrandsAgentReactConnectionGenerator(tree, {
+      sourceProject: 'frontend',
+      targetProject: 'agent-project',
+      targetComponent: {
+        generator: 'py#strands-agent',
+        name: 'agent',
+        path: 'agent_project/agent',
+        port: 8081,
+        rc: 'TestAgent',
+        auth: 'IAM',
+        protocol: 'AG-UI',
+      },
+    });
+  };
+
+  it('should vend the default (unstyled) copilot theme when uxProvider is None', async () => {
+    const tree = createTreeUsingTsSolutionSetup();
+    writeFrontend(tree, 'None');
+    await runAgui(tree);
+
+    const themeIndex = tree.read(
+      'apps/frontend/src/components/copilot/index.tsx',
+      'utf-8',
+    ) as string;
+    expect(themeIndex).toMatchSnapshot('default-theme-index.tsx');
+    expect(themeIndex).toContain('@copilotkit/react-core/v2');
+    // default theme doesn't ship any theme-specific component files
+    expect(
+      tree.exists(
+        'apps/frontend/src/components/copilot/CloudscapeAssistantMessage.tsx',
+      ),
+    ).toBeFalsy();
+    expect(
+      tree.exists(
+        'apps/frontend/src/components/copilot/ShadcnAssistantMessage.tsx',
+      ),
+    ).toBeFalsy();
+  });
+
+  it('should vend the cloudscape-themed copilot components when uxProvider is Cloudscape', async () => {
+    const tree = createTreeUsingTsSolutionSetup();
+    writeFrontend(tree, 'Cloudscape');
+    await runAgui(tree);
+
+    expect(
+      tree.exists(
+        'apps/frontend/src/components/copilot/CloudscapeAssistantMessage.tsx',
+      ),
+    ).toBeTruthy();
+    expect(
+      tree.exists(
+        'apps/frontend/src/components/copilot/CloudscapeUserMessage.tsx',
+      ),
+    ).toBeTruthy();
+    expect(
+      tree.exists(
+        'apps/frontend/src/components/copilot/CloudscapeChatInput.tsx',
+      ),
+    ).toBeTruthy();
+    const themeIndex = tree.read(
+      'apps/frontend/src/components/copilot/index.tsx',
+      'utf-8',
+    ) as string;
+    expect(themeIndex).toMatchSnapshot('cloudscape-theme-index.tsx');
+    expect(themeIndex).toContain('CloudscapeAssistantMessage');
+
+    // Cloudscape components are imported from @cloudscape-design/* in the
+    // individual theme component files
+    const assistant = tree.read(
+      'apps/frontend/src/components/copilot/CloudscapeAssistantMessage.tsx',
+      'utf-8',
+    ) as string;
+    expect(assistant).toContain('@cloudscape-design');
+  });
+
+  it('should vend the shadcn-themed copilot components and shared shadcn primitives when uxProvider is Shadcn', async () => {
+    const tree = createTreeUsingTsSolutionSetup();
+    writeFrontend(tree, 'Shadcn');
+    await runAgui(tree);
+
+    // Shadcn theme components are vended
+    expect(
+      tree.exists(
+        'apps/frontend/src/components/copilot/ShadcnAssistantMessage.tsx',
+      ),
+    ).toBeTruthy();
+    expect(
+      tree.exists('apps/frontend/src/components/copilot/ShadcnUserMessage.tsx'),
+    ).toBeTruthy();
+    expect(
+      tree.exists('apps/frontend/src/components/copilot/ShadcnChatInput.tsx'),
+    ).toBeTruthy();
+
+    // Shared shadcn components the theme depends on must be vended
+    expect(
+      tree.exists('packages/common/shadcn/src/components/ui/avatar.tsx'),
+    ).toBeTruthy();
+    expect(
+      tree.exists('packages/common/shadcn/src/components/ui/textarea.tsx'),
+    ).toBeTruthy();
+    expect(
+      tree.exists('packages/common/shadcn/src/components/ui/button.tsx'),
+    ).toBeTruthy();
+
+    const themeIndex = tree.read(
+      'apps/frontend/src/components/copilot/index.tsx',
+      'utf-8',
+    ) as string;
+    expect(themeIndex).toMatchSnapshot('shadcn-theme-index.tsx');
+    expect(themeIndex).toContain('ShadcnAssistantMessage');
+
+    const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+    expect(packageJson.dependencies['lucide-react']).toBeDefined();
+  });
+});
