@@ -401,6 +401,35 @@ export default defineConfig({
           ],
         },
         {
+          label: 'Best Practices',
+          translations: {
+            jp: 'ベストプラクティス',
+            ko: '모범 사례',
+            fr: 'Meilleures pratiques',
+            it: 'Buone pratiche',
+            es: 'Buenas prácticas',
+            pt: 'Boas práticas',
+            zh: '最佳实践',
+            vi: 'Thực hành tốt nhất',
+          },
+          items: [
+            {
+              label: 'Docker bundling',
+              translations: {
+                jp: 'Dockerバンドリング',
+                ko: 'Docker 번들링',
+                fr: 'Bundling Docker',
+                it: 'Bundling Docker',
+                es: 'Empaquetado de Docker',
+                pt: 'Empacotamento Docker',
+                zh: 'Docker 打包',
+                vi: 'Đóng gói Docker',
+              },
+              link: '/guides/docker-bundling',
+            },
+          ],
+        },
+        {
           label: 'Troubleshooting',
           translations: {
             jp: 'トラブルシューティング',
