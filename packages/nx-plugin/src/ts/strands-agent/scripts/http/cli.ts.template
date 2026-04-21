@@ -1,0 +1,72 @@
+/**
+ * Interactive CLI for <%- agentNameClassName %> (HTTP / tRPC WebSocket).
+ *
+ * In local mode (default) connects to `ws://localhost:<%- localDevPort %>/ws`.
+ *
+ * In deployed mode — set `RUNTIME_CONFIG_APP_ID` to the AppConfig application
+ * ID and the CLI will resolve the agent runtime ARN and connect via
+ * WebSocket to Bedrock AgentCore Runtime.
+<% if (auth === 'Cognito') { -%>
+ *
+ * Pass `--accessToken <JWT>` for Cognito-authenticated agents.
+<% } -%>
+ */
+import {
+  getConnectedAgentRuntimeArn,
+  runCliChat,
+  getCliArg,
+} from ':<%= npmScope %>/agent-connection';
+import { <%- agentNameClassName %>Client } from '<%- relativeAgentImport %>/client.js';
+
+const main = async () => {
+  const port = process.env.PORT ?? '<%- localDevPort %>';
+  const appId = process.env.RUNTIME_CONFIG_APP_ID;
+
+  const client = appId
+<% if (auth === 'Cognito') { -%>
+    ? <%- agentNameClassName %>Client.withJwtAuth({
+        agentRuntimeArn: await getConnectedAgentRuntimeArn(
+          '<%- agentNameClassName %>',
+        ),
+        accessTokenProvider: async () => {
+          const token = getCliArg('accessToken');
+          if (!token) {
+            throw new Error(
+              'Cognito agents require `--accessToken <JWT>` to be passed to the CLI.',
+            );
+          }
+          return token;
+        },
+      })
+<% } else { -%>
+    ? <%- agentNameClassName %>Client.withIamAuth({
+        agentRuntimeArn: await getConnectedAgentRuntimeArn(
+          '<%- agentNameClassName %>',
+        ),
+      })
+<% } -%>
+    : <%- agentNameClassName %>Client.local({
+        url: `ws://localhost:${port}/ws`,
+      });
+
+  await runCliChat(async (message) => {
+    await new Promise<void>((resolve, reject) => {
+      client.invoke.subscribe(
+        { message },
+        {
+          onData(chunk: string) {
+            process.stdout.write(chunk);
+          },
+          onComplete() {
+            resolve();
+          },
+          onError(err: unknown) {
+            reject(err);
+          },
+        },
+      );
+    });
+  });
+};
+
+void main();

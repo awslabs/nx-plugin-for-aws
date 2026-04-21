@@ -1212,4 +1212,86 @@ dev-dependencies = []
     expect(pyProjectToml).toContain('ag-ui-strands');
     expect(pyProjectToml).toContain('strands-agents');
   });
+
+  it('should generate an HTTP CLI and invoke target for Python agents', async () => {
+    await pyStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      computeType: 'None',
+      iacProvider: 'CDK',
+    });
+
+    const cliPath = 'apps/test-project/scripts/agent/cli.ts';
+    expect(tree.exists(cliPath)).toBeTruthy();
+    const cliContent = tree.read(cliPath, 'utf-8');
+    expect(cliContent).toContain("from ':proj/agent-connection'");
+    expect(cliContent).toContain('/invocations');
+    expect(cliContent).toContain('application/json');
+
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+    expect(projectConfig.targets['agent-invoke']).toBeDefined();
+    expect(projectConfig.targets['agent-invoke'].options.commands[0]).toBe(
+      'tsx ./scripts/agent/cli.ts',
+    );
+
+    const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+    expect(rootPackageJson.devDependencies.tsx).toBeDefined();
+    expect(rootPackageJson.dependencies.aws4fetch).toBeDefined();
+  });
+
+  it('should generate an A2A CLI for Python agents', async () => {
+    await pyStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      protocol: 'A2A',
+      computeType: 'None',
+      iacProvider: 'CDK',
+    });
+
+    const cliContent = tree.read(
+      'apps/test-project/scripts/agent/cli.ts',
+      'utf-8',
+    );
+    expect(cliContent).toContain("from '@a2a-js/sdk/client'");
+    expect(cliContent).toContain('sendMessageStream');
+
+    const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+    expect(rootPackageJson.dependencies['@a2a-js/sdk']).toBeDefined();
+  });
+
+  it('should generate an AG-UI CLI for Python agents', async () => {
+    await pyStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      protocol: 'AG-UI',
+      computeType: 'None',
+      iacProvider: 'CDK',
+    });
+
+    const cliContent = tree.read(
+      'apps/test-project/scripts/agent/cli.ts',
+      'utf-8',
+    );
+    expect(cliContent).toContain("from '@ag-ui/client'");
+    expect(cliContent).toContain('onTextMessageContentEvent');
+    expect(cliContent).toContain('runAgent');
+
+    const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+    expect(rootPackageJson.dependencies['@ag-ui/client']).toBeDefined();
+  });
+
+  it('should generate a Cognito HTTP CLI that accepts --accessToken', async () => {
+    await pyStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      auth: 'Cognito',
+      computeType: 'None',
+      iacProvider: 'CDK',
+    });
+
+    const cliContent = tree.read(
+      'apps/test-project/scripts/agent/cli.ts',
+      'utf-8',
+    );
+    expect(cliContent).toContain("getCliArg('accessToken')");
+    expect(cliContent).toContain('Authorization');
+  });
 });

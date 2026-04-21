@@ -1,0 +1,126 @@
+/**
+ * Interactive CLI for <%- agentNameClassName %> (Python FastAPI / JSONL streaming).
+ *
+ * Connects to the `/invocations` endpoint of a Python Strands agent and
+ * streams the JSONL response chunks back to the terminal.
+ *
+ * In local mode (default) connects to `http://localhost:<%- localDevPort %>/`.
+ * In deployed mode — set `RUNTIME_CONFIG_APP_ID` and the CLI will resolve the
+ * agent runtime ARN and invoke the remote endpoint on Bedrock AgentCore
+ * Runtime.
+<% if (auth === 'Cognito') { -%>
+ *
+ * Pass `--accessToken <JWT>` for Cognito-authenticated agents.
+<% } -%>
+ */
+import { randomUUID } from 'node:crypto';
+import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
+import { AwsClient } from 'aws4fetch';
+import {
+  getConnectedAgentRuntimeArn,
+  runCliChat,
+  getCliArg,
+} from ':<%= npmScope %>/agent-connection';
+
+const SESSION_ID_HEADER = 'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id';
+
+const buildAgentCoreUrl = (agentRuntimeArn: string) => {
+  const region = agentRuntimeArn.split(':')[3];
+  const url = `https://bedrock-agentcore.${region}.amazonaws.com/runtimes/${encodeURIComponent(agentRuntimeArn)}/invocations?qualifier=DEFAULT`;
+  return { region, url };
+};
+
+<% if (auth === 'Cognito') { -%>
+const jwtFetch = (accessToken: string): typeof fetch => async (input, init) => {
+  const headers = new Headers(init?.headers);
+  headers.set('Authorization', `Bearer ${accessToken}`);
+  return fetch(input, { ...init, headers });
+};
+<% } else { -%>
+const sigv4Fetch = (region: string): typeof fetch => {
+  const credentialProvider = fromNodeProviderChain();
+  return async (input, init) => {
+    const credentials = await credentialProvider();
+    const aws = new AwsClient({
+      ...credentials,
+      service: 'bedrock-agentcore',
+      region,
+    });
+    return aws.fetch(input, init);
+  };
+};
+<% } -%>
+
+const main = async () => {
+  const port = process.env.PORT ?? '<%- localDevPort %>';
+  const appId = process.env.RUNTIME_CONFIG_APP_ID;
+  const sessionId = randomUUID().replaceAll('-', '').padEnd(33, '0');
+
+  let url: string;
+  let fetchImpl: typeof fetch;
+
+  if (appId) {
+    const arn = await getConnectedAgentRuntimeArn('<%- agentNameClassName %>');
+    const built = buildAgentCoreUrl(arn);
+    url = built.url;
+<% if (auth === 'Cognito') { -%>
+    const token = getCliArg('accessToken');
+    if (!token) {
+      throw new Error(
+        'Cognito agents require `--accessToken <JWT>` to be passed to the CLI.',
+      );
+    }
+    fetchImpl = jwtFetch(token);
+<% } else { -%>
+    fetchImpl = sigv4Fetch(built.region);
+<% } -%>
+  } else {
+    url = `http://localhost:${port}/invocations`;
+    fetchImpl = fetch;
+  }
+
+  await runCliChat(async (message) => {
+    const response = await fetchImpl(url, {
+      method: 'POST',
+      body: JSON.stringify({ message }),
+      headers: {
+        'Content-Type': 'application/json',
+        [SESSION_ID_HEADER]: sessionId,
+      },
+    });
+
+    if (!response.ok || !response.body) {
+      throw new Error(
+        `Agent invocation failed: ${response.status} ${response.statusText}`,
+      );
+    }
+
+    const reader = response.body
+      .pipeThrough(new TextDecoderStream())
+      .getReader();
+    let buffer = '';
+    while (true) {
+      const { value, done } = await reader.read();
+      if (value) buffer += value;
+      if (done) break;
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        const chunk = JSON.parse(trimmed) as { content?: string };
+        if (typeof chunk.content === 'string') {
+          process.stdout.write(chunk.content);
+        }
+      }
+    }
+    if (buffer.trim()) {
+      const chunk = JSON.parse(buffer) as { content?: string };
+      if (typeof chunk.content === 'string') {
+        process.stdout.write(chunk.content);
+      }
+    }
+  });
+};
+
+void main();

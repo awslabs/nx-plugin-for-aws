@@ -953,4 +953,61 @@ describe('ts#strands-agent generator', () => {
       }),
     ).rejects.toThrow(/AG-UI protocol is not yet supported/);
   });
+
+  it('should generate an HTTP CLI and invoke target', async () => {
+    await tsStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      computeType: 'None',
+      iacProvider: 'CDK',
+    });
+
+    const cliPath = 'apps/test-project/scripts/agent/cli.ts';
+    expect(tree.exists(cliPath)).toBeTruthy();
+    const cliContent = tree.read(cliPath, 'utf-8');
+    expect(cliContent).toContain('TestProjectAgentClient');
+    expect(cliContent).toContain("from ':proj/agent-connection'");
+    expect(cliContent).toContain('ws://localhost:');
+    expect(cliContent).toContain('withIamAuth');
+
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+    expect(projectConfig.targets['agent-invoke']).toBeDefined();
+    expect(projectConfig.targets['agent-invoke'].options.commands[0]).toBe(
+      'tsx ./scripts/agent/cli.ts',
+    );
+  });
+
+  it('should generate an A2A CLI using sendMessageStream', async () => {
+    await tsStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      protocol: 'A2A',
+      computeType: 'None',
+      iacProvider: 'CDK',
+    });
+
+    const cliContent = tree.read(
+      'apps/test-project/scripts/agent/cli.ts',
+      'utf-8',
+    );
+    expect(cliContent).toContain("from '@a2a-js/sdk/client'");
+    expect(cliContent).toContain('sendMessageStream');
+    expect(cliContent).toContain("from ':proj/agent-connection'");
+  });
+
+  it('should generate a Cognito HTTP CLI that accepts --accessToken', async () => {
+    await tsStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      auth: 'Cognito',
+      computeType: 'None',
+      iacProvider: 'CDK',
+    });
+
+    const cliContent = tree.read(
+      'apps/test-project/scripts/agent/cli.ts',
+      'utf-8',
+    );
+    expect(cliContent).toContain('withJwtAuth');
+    expect(cliContent).toContain("getCliArg('accessToken')");
+  });
 });
