@@ -88,15 +88,16 @@ Một số npm package không thể được bundle vì chúng phụ thuộc và
 
 ### Dockerfile
 
-Tạo `Dockerfile` trong thư mục source của dự án. File này chỉ làm việc `COPY` bundle vào Node base image, cộng với `npm install` bất kỳ package `external` nào không thể được bundle:
+Tạo `Dockerfile` trong thư mục source của dự án. File này chỉ làm việc `COPY` bundle vào Node base image, cộng với `npm install` bất kỳ package `external` nào không thể được bundle. Đặt bước `RUN npm install` **trước** lệnh `COPY`, để Docker có thể cache layer `node_modules` đã cài đặt và chỉ chạy lại khi danh sách dependency thực sự thay đổi:
 
 ```dockerfile
 FROM public.ecr.aws/docker/library/node:lts
 
 WORKDIR /app
 
-# Install packages that cannot be bundled (declared as "external" in rolldown.config.ts)
-RUN npm install @aws/aws-distro-opentelemetry-node-autoinstrumentation
+# Install packages that cannot be bundled (declared as "external" in rolldown.config.ts).
+# Kept above the COPY so this layer is cached and only invalidated when the install list changes.
+RUN npm install @aws/aws-distro-opentelemetry-node-autoinstrumentation@0.10.0
 
 # Copy bundled application
 COPY index.js /app
@@ -106,12 +107,16 @@ EXPOSE 8080
 CMD ["node", "index.js"]
 ```
 
+:::tip[Cố định phiên bản dependency]
+Cố định mọi dependency được cài đặt bên trong `Dockerfile` với một phiên bản chính xác (như trên) — nếu không `npm install` sẽ âm thầm lấy phiên bản mới hơn vào lần build tiếp theo, tạo ra các image hoạt động khác nhau tùy thuộc vào thời điểm chúng được build. Lời khuyên tương tự áp dụng cho base image: ưu tiên một digest hoặc tag cụ thể (ví dụ `node:22.14.0`) hơn là floating tag như `lts`.
+:::
+
 ### Docker Target
 
 Thêm target `docker` để:
 
 1. Sao chép `Dockerfile` vào thư mục đầu ra bundle (để build context chỉ chứa bundle + `Dockerfile`), và
-2. Chạy `docker build`.
+2. Chạy `docker build` (tùy chọn cho CDK — xem bên dưới).
 
 ```json
 {
@@ -140,76 +145,11 @@ Chạy target này tạo ra image local được tag `my-scope-my-project:latest
 
 <NxCommands commands={['docker my-project']} />
 
-### Infrastructure
+:::note[CDK tự build image]
+Nếu bạn chỉ triển khai với CDK, lệnh `docker build` ở trên là tùy chọn — `DockerImageAsset` của CDK (được hiển thị trong phần [Infrastructure](#infrastructure)) sẽ build image cho bạn tại thời điểm synth. Bạn vẫn cần sao chép `Dockerfile` vào thư mục build-context để CDK có thể tìm thấy nó. Các generator giữ bước `docker build` local để cung cấp cho bạn cách nhanh chóng để smoke-test image bằng `docker run`.
 
-<Infrastructure>
-<Fragment slot="cdk">
-Sử dụng [`DockerImageAsset`](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_ecr_assets.DockerImageAsset.html) của CDK trỏ đến thư mục `dist/.../bundle`. CDK sẽ build image và publish nó lên CDK asset ECR repository tại thời điểm deploy:
-
-```ts
-import { DockerImageAsset, Platform } from 'aws-cdk-lib/aws-ecr-assets';
-import * as path from 'path';
-import * as url from 'url';
-
-const image = new DockerImageAsset(this, 'MyImage', {
-  directory: path.join(
-    // Resolve from the compiled construct location to the workspace root
-    findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
-    'dist/packages/my-project/bundle',
-  ),
-  platform: Platform.LINUX_ARM64,
-});
-```
-
-:::note[Chạy bundle trước khi synth]
-CDK không tự động chạy các target `bundle`/`docker` — bạn phải chạy `nx build my-project` (hoặc cấu hình target deploy phụ thuộc vào `build`) trước `cdk deploy`. Các generator sử dụng mẫu này khai báo `docker` và `bundle` là dependency của `build` nên điều này diễn ra một cách minh bạch.
+Đối với Terraform, bước `docker build` là bắt buộc — mẫu `null_resource` bên dưới đẩy một image được tag locally.
 :::
-
-Helper `findWorkspaceRoot` và các construct được chia sẻ được tạo bởi generator <Link path="/guides/typescript-infrastructure">`ts#infra`</Link>. Sử dụng `DockerImageAsset` với bất kỳ AWS construct nào chấp nhận container image, ví dụ `aws_ecs.ContainerImage.fromDockerImageAsset(image)`.
-</Fragment>
-<Fragment slot="terraform">
-AWS provider của Terraform không có resource "build and push a Docker image" cấp một. Mẫu được sử dụng bởi các generator là:
-
-1. Một `aws_ecr_repository` để lưu trữ image.
-2. Một `null_resource` với provisioner `local-exec` xác thực với ECR, re-tag image được build locally, và đẩy nó lên.
-3. Resource downstream (ví dụ `aws_ecs_task_definition`) tham chiếu `"${aws_ecr_repository.repo.repository_url}:latest"`.
-
-```hcl
-resource "aws_ecr_repository" "repo" {
-  name                 = "my-project-repository"
-  image_tag_mutability = "MUTABLE"
-  force_delete         = true
-}
-
-# Invalidate the push whenever the locally-built image digest changes
-data "external" "docker_digest" {
-  program = ["sh", "-c", "echo '{\"digest\":\"'$(docker inspect my-scope-my-project:latest --format '{{.Id}}')'\"}'"]
-}
-
-resource "null_resource" "docker_publish" {
-  triggers = {
-    docker_digest  = data.external.docker_digest.result.digest
-    repository_url = aws_ecr_repository.repo.repository_url
-  }
-
-  provisioner "local-exec" {
-    command = <<-EOT
-      aws ecr get-login-password --region ${data.aws_region.current.id} \
-        | docker login --username AWS --password-stdin ${self.triggers.repository_url}
-      docker tag my-scope-my-project:latest ${self.triggers.repository_url}:latest
-      docker push ${self.triggers.repository_url}:latest
-    EOT
-  }
-}
-```
-
-Block `data.external.docker_digest` đảm bảo `null_resource` chạy lại bất cứ khi nào hash của local image thay đổi, kích hoạt push mới cho mỗi thay đổi code có ý nghĩa.
-
-:::note[Chạy bundle trước khi apply]
-`terraform apply` yêu cầu image tag `my-scope-my-project:latest` đã tồn tại locally. Chạy `nx build my-project` (hoặc `nx docker my-project`) trước `terraform apply`.
-:::
-</Fragment>
-</Infrastructure>
 
 ## Python
 
@@ -291,34 +231,85 @@ Thêm target `docker` sao chép `Dockerfile` vào thư mục đầu ra bundle, s
 
 <NxCommands commands={['docker my-project']} />
 
-### Infrastructure
+## Infrastructure
+
+Kết nối thư mục build-context kết quả với infrastructure as code là giống nhau cho cả TypeScript và Python — chỉ có đường dẫn đến thư mục build-context khác nhau (`dist/packages/my-project/bundle` cho TypeScript, `dist/packages/my-project/docker` cho Python).
 
 <Infrastructure>
 <Fragment slot="cdk">
-Tương tự như trường hợp TypeScript, trỏ `DockerImageAsset` đến thư mục build context:
+Sử dụng [`DockerImageAsset`](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_ecr_assets.DockerImageAsset.html) của CDK trỏ đến thư mục build-context. CDK sẽ build image và publish nó lên CDK asset ECR repository tại thời điểm deploy:
 
 ```ts
 import { DockerImageAsset, Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import { findWorkspaceRoot } from ':my-scope/common-constructs';
 import * as path from 'path';
 import * as url from 'url';
 
 const image = new DockerImageAsset(this, 'MyImage', {
   directory: path.join(
+    // Resolve from the compiled construct location to the workspace root
     findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
-    'dist/packages/my-project/docker',
+    'dist/packages/my-project/bundle',
   ),
   platform: Platform.LINUX_ARM64,
 });
 ```
+
+Helper `findWorkspaceRoot` được tạo bởi generator <Link path="/guides/typescript-infrastructure">`ts#infra`</Link> và được export từ `:my-scope/common-constructs`. Nếu bạn không sử dụng shared constructs, bạn có thể hardcode đường dẫn đến thư mục `dist` tương đối với nơi `cdk` được gọi từ đó — thường là workspace root — và bỏ qua hoàn toàn lời gọi `findWorkspaceRoot`.
+
+:::note[Chạy bundle trước khi synth]
+CDK không tự động chạy các target `bundle`/`docker` — bạn phải chạy `nx build my-project` (hoặc cấu hình target deploy phụ thuộc vào `build`) trước `cdk deploy`. Các generator sử dụng mẫu này khai báo `docker` và `bundle` là dependency của `build` nên điều này diễn ra một cách minh bạch.
+:::
+
+Sử dụng `DockerImageAsset` với bất kỳ AWS construct nào chấp nhận container image, ví dụ `aws_ecs.ContainerImage.fromDockerImageAsset(image)`.
 </Fragment>
 <Fragment slot="terraform">
-Sử dụng cùng mẫu `aws_ecr_repository` + `null_resource` như TypeScript — chỉ có local image tag thay đổi. Xem ví dụ Terraform TypeScript ở trên.
+AWS provider của Terraform không có resource "build and push a Docker image" cấp một. Mẫu được sử dụng bởi các generator là:
+
+1. Một `aws_ecr_repository` để lưu trữ image.
+2. Một `null_resource` với provisioner `local-exec` xác thực với ECR, re-tag image được build locally, và đẩy nó lên.
+3. Resource downstream (ví dụ `aws_ecs_task_definition`) tham chiếu `"${aws_ecr_repository.repo.repository_url}:latest"`.
+
+```hcl
+resource "aws_ecr_repository" "repo" {
+  name                 = "my-project-repository"
+  image_tag_mutability = "MUTABLE"
+  force_delete         = true
+}
+
+# Invalidate the push whenever the locally-built image digest changes
+data "external" "docker_digest" {
+  program = ["sh", "-c", "echo '{\"digest\":\"'$(docker inspect my-scope-my-project:latest --format '{{.Id}}')'\"}'"]
+}
+
+resource "null_resource" "docker_publish" {
+  triggers = {
+    docker_digest  = data.external.docker_digest.result.digest
+    repository_url = aws_ecr_repository.repo.repository_url
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      aws ecr get-login-password --region ${data.aws_region.current.id} \
+        | docker login --username AWS --password-stdin ${self.triggers.repository_url}
+      docker tag my-scope-my-project:latest ${self.triggers.repository_url}:latest
+      docker push ${self.triggers.repository_url}:latest
+    EOT
+  }
+}
+```
+
+Block `data.external.docker_digest` đảm bảo `null_resource` chạy lại bất cứ khi nào hash của local image thay đổi, kích hoạt push mới cho mỗi thay đổi code có ý nghĩa.
+
+:::note[Chạy bundle trước khi apply]
+`nx apply <project>` yêu cầu image tag `my-scope-my-project:latest` đã tồn tại locally. Chạy `nx build my-project` (hoặc `nx docker my-project`) trước `nx apply <project>`.
+:::
 </Fragment>
 </Infrastructure>
 
 ## Đọc Thêm
 
-- <Link path="/guides/ts-strands-agent">`ts#strands-agent`</Link> — một ví dụ hoàn chỉnh về mẫu này cho TypeScript agent được triển khai lên Bedrock AgentCore Runtime.
-- <Link path="/guides/py-strands-agent">`py#strands-agent`</Link> — tương đương cho Python.
+- <Link path="/guides/ts-strands-agent">`ts#strands-agent` generator</Link> — một ví dụ hoàn chỉnh về mẫu này cho TypeScript agent được triển khai lên Bedrock AgentCore Runtime.
+- <Link path="/guides/py-strands-agent">`py#strands-agent` generator</Link> — tương đương cho Python.
 - [Tài liệu Rolldown](https://rolldown.rs/) — tham chiếu cấu hình cho TypeScript bundler.
 - [Tài liệu `uv`](https://docs.astral.sh/uv/) — tham chiếu cho Python dependency export và install.

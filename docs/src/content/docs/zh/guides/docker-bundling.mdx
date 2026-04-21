@@ -88,15 +88,16 @@ export default defineConfig([
 
 ### Dockerfile
 
-在项目源目录中创建一个 `Dockerfile`。该文件只是将包 `COPY` 到 Node 基础镜像中,加上 `npm install` 任何无法打包的 `external` 包:
+在项目源目录中创建一个 `Dockerfile`。该文件只是将包 `COPY` 到 Node 基础镜像中,加上 `npm install` 任何无法打包的 `external` 包。将 `RUN npm install` 步骤放在 `COPY` **之前**,这样 Docker 可以缓存已安装的 `node_modules` 层,并且只在依赖项列表实际更改时重新运行它:
 
 ```dockerfile
 FROM public.ecr.aws/docker/library/node:lts
 
 WORKDIR /app
 
-# Install packages that cannot be bundled (declared as "external" in rolldown.config.ts)
-RUN npm install @aws/aws-distro-opentelemetry-node-autoinstrumentation
+# Install packages that cannot be bundled (declared as "external" in rolldown.config.ts).
+# Kept above the COPY so this layer is cached and only invalidated when the install list changes.
+RUN npm install @aws/aws-distro-opentelemetry-node-autoinstrumentation@0.10.0
 
 # Copy bundled application
 COPY index.js /app
@@ -106,12 +107,16 @@ EXPOSE 8080
 CMD ["node", "index.js"]
 ```
 
+:::tip[固定您的依赖项]
+将 `Dockerfile` 内部安装的每个依赖项固定到确切的版本(如上所示)——否则 `npm install` 会在下次构建时静默地获取较新的版本,导致镜像的行为因构建时间而异。同样的建议也适用于基础镜像:优先使用特定的摘要或标签(例如 `node:22.14.0`)而不是像 `lts` 这样的浮动标签。
+:::
+
 ### Docker 目标
 
 添加一个 `docker` 目标,它:
 
 1. 将 `Dockerfile` 复制到包输出目录(以便构建上下文仅包含包 + `Dockerfile`),以及
-2. 运行 `docker build`。
+2. 运行 `docker build`(对于 CDK 是可选的——见下文)。
 
 ```json
 {
@@ -140,76 +145,11 @@ CMD ["node", "index.js"]
 
 <NxCommands commands={['docker my-project']} />
 
-### 基础设施
+:::note[CDK 自己构建镜像]
+如果您仅使用 CDK 部署,上面的 `docker build` 命令是可选的——CDK 的 `DockerImageAsset`(显示在[基础设施](#infrastructure)下)将在 synth 时为您构建镜像。您仍然需要将 `Dockerfile` 复制到构建上下文目录,以便 CDK 可以找到它。生成器保留本地 `docker build` 步骤,以便您可以使用 `docker run` 快速对镜像进行冒烟测试。
 
-<Infrastructure>
-<Fragment slot="cdk">
-使用 CDK 的 [`DockerImageAsset`](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_ecr_assets.DockerImageAsset.html) 指向 `dist/.../bundle` 目录。CDK 将在部署时构建镜像并将其发布到 CDK 资产 ECR 仓库:
-
-```ts
-import { DockerImageAsset, Platform } from 'aws-cdk-lib/aws-ecr-assets';
-import * as path from 'path';
-import * as url from 'url';
-
-const image = new DockerImageAsset(this, 'MyImage', {
-  directory: path.join(
-    // Resolve from the compiled construct location to the workspace root
-    findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
-    'dist/packages/my-project/bundle',
-  ),
-  platform: Platform.LINUX_ARM64,
-});
-```
-
-:::note[在 synth 之前运行 bundle]
-CDK 不会自动运行 `bundle`/`docker` 目标——您必须在 `cdk deploy` 之前运行 `nx build my-project`(或将 deploy 目标连接到依赖于 `build`)。使用此模式的生成器将 `docker` 和 `bundle` 声明为 `build` 的依赖项,因此这会透明地发生。
+对于 Terraform,`docker build` 步骤是必需的——下面的 `null_resource` 模式会推送本地标记的镜像。
 :::
-
-`findWorkspaceRoot` 辅助函数和共享构造由 <Link path="/guides/typescript-infrastructure">`ts#infra`</Link> 生成器生成。将 `DockerImageAsset` 与任何接受容器镜像的 AWS 构造一起使用,例如 `aws_ecs.ContainerImage.fromDockerImageAsset(image)`。
-</Fragment>
-<Fragment slot="terraform">
-Terraform 的 AWS provider 没有一流的"构建和推送 Docker 镜像"资源。生成器使用的模式是:
-
-1. 一个 `aws_ecr_repository` 来保存镜像。
-2. 一个带有 `local-exec` provisioner 的 `null_resource`,它向 ECR 进行身份验证,重新标记本地构建的镜像,然后推送它。
-3. 下游资源(例如 `aws_ecs_task_definition`)引用 `"${aws_ecr_repository.repo.repository_url}:latest"`。
-
-```hcl
-resource "aws_ecr_repository" "repo" {
-  name                 = "my-project-repository"
-  image_tag_mutability = "MUTABLE"
-  force_delete         = true
-}
-
-# Invalidate the push whenever the locally-built image digest changes
-data "external" "docker_digest" {
-  program = ["sh", "-c", "echo '{\"digest\":\"'$(docker inspect my-scope-my-project:latest --format '{{.Id}}')'\"}'"]
-}
-
-resource "null_resource" "docker_publish" {
-  triggers = {
-    docker_digest  = data.external.docker_digest.result.digest
-    repository_url = aws_ecr_repository.repo.repository_url
-  }
-
-  provisioner "local-exec" {
-    command = <<-EOT
-      aws ecr get-login-password --region ${data.aws_region.current.id} \
-        | docker login --username AWS --password-stdin ${self.triggers.repository_url}
-      docker tag my-scope-my-project:latest ${self.triggers.repository_url}:latest
-      docker push ${self.triggers.repository_url}:latest
-    EOT
-  }
-}
-```
-
-`data.external.docker_digest` 块确保每当本地镜像哈希更改时 `null_resource` 重新运行,在每次有意义的代码更改时触发新的推送。
-
-:::note[在 apply 之前运行 bundle]
-`terraform apply` 要求镜像标签 `my-scope-my-project:latest` 已经在本地存在。在 `terraform apply` 之前运行 `nx build my-project`(或 `nx docker my-project`)。
-:::
-</Fragment>
-</Infrastructure>
 
 ## Python
 
@@ -291,34 +231,85 @@ CMD ["python", "-m", "my_project.main"]
 
 <NxCommands commands={['docker my-project']} />
 
-### 基础设施
+## 基础设施
+
+将生成的构建上下文目录连接到基础设施即代码对于 TypeScript 和 Python 都是相同的——只有构建上下文目录的路径不同(TypeScript 为 `dist/packages/my-project/bundle`,Python 为 `dist/packages/my-project/docker`)。
 
 <Infrastructure>
 <Fragment slot="cdk">
-与 TypeScript 情况一样,将 `DockerImageAsset` 指向构建上下文目录:
+使用 CDK 的 [`DockerImageAsset`](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_ecr_assets.DockerImageAsset.html) 指向构建上下文目录。CDK 将在部署时构建镜像并将其发布到 CDK 资产 ECR 仓库:
 
 ```ts
 import { DockerImageAsset, Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import { findWorkspaceRoot } from ':my-scope/common-constructs';
 import * as path from 'path';
 import * as url from 'url';
 
 const image = new DockerImageAsset(this, 'MyImage', {
   directory: path.join(
+    // Resolve from the compiled construct location to the workspace root
     findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
-    'dist/packages/my-project/docker',
+    'dist/packages/my-project/bundle',
   ),
   platform: Platform.LINUX_ARM64,
 });
 ```
+
+`findWorkspaceRoot` 辅助函数由 <Link path="/guides/typescript-infrastructure">`ts#infra`</Link> 生成器生成并从 `:my-scope/common-constructs` 导出。如果您不使用共享构造,可以硬编码相对于 `cdk` 调用位置(通常是工作区根目录)的 `dist` 目录路径,并完全省略 `findWorkspaceRoot` 调用。
+
+:::note[在 synth 之前运行 bundle]
+CDK 不会自动运行 `bundle`/`docker` 目标——您必须在 `cdk deploy` 之前运行 `nx build my-project`(或将 deploy 目标连接到依赖于 `build`)。使用此模式的生成器将 `docker` 和 `bundle` 声明为 `build` 的依赖项,因此这会透明地发生。
+:::
+
+将 `DockerImageAsset` 与任何接受容器镜像的 AWS 构造一起使用,例如 `aws_ecs.ContainerImage.fromDockerImageAsset(image)`。
 </Fragment>
 <Fragment slot="terraform">
-使用与 TypeScript 相同的 `aws_ecr_repository` + `null_resource` 模式——只有本地镜像标签发生变化。请参阅上面的 TypeScript Terraform 示例。
+Terraform 的 AWS provider 没有一流的"构建和推送 Docker 镜像"资源。生成器使用的模式是:
+
+1. 一个 `aws_ecr_repository` 来保存镜像。
+2. 一个带有 `local-exec` provisioner 的 `null_resource`,它向 ECR 进行身份验证,重新标记本地构建的镜像,然后推送它。
+3. 下游资源(例如 `aws_ecs_task_definition`)引用 `"${aws_ecr_repository.repo.repository_url}:latest"`。
+
+```hcl
+resource "aws_ecr_repository" "repo" {
+  name                 = "my-project-repository"
+  image_tag_mutability = "MUTABLE"
+  force_delete         = true
+}
+
+# Invalidate the push whenever the locally-built image digest changes
+data "external" "docker_digest" {
+  program = ["sh", "-c", "echo '{\"digest\":\"'$(docker inspect my-scope-my-project:latest --format '{{.Id}}')'\"}'"]
+}
+
+resource "null_resource" "docker_publish" {
+  triggers = {
+    docker_digest  = data.external.docker_digest.result.digest
+    repository_url = aws_ecr_repository.repo.repository_url
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      aws ecr get-login-password --region ${data.aws_region.current.id} \
+        | docker login --username AWS --password-stdin ${self.triggers.repository_url}
+      docker tag my-scope-my-project:latest ${self.triggers.repository_url}:latest
+      docker push ${self.triggers.repository_url}:latest
+    EOT
+  }
+}
+```
+
+`data.external.docker_digest` 块确保每当本地镜像哈希更改时 `null_resource` 重新运行,在每次有意义的代码更改时触发新的推送。
+
+:::note[在 apply 之前运行 bundle]
+`nx apply <project>` 要求镜像标签 `my-scope-my-project:latest` 已经在本地存在。在 `nx apply <project>` 之前运行 `nx build my-project`(或 `nx docker my-project`)。
+:::
 </Fragment>
 </Infrastructure>
 
 ## 延伸阅读
 
-- <Link path="/guides/ts-strands-agent">`ts#strands-agent`</Link> —— 部署到 Bedrock AgentCore Runtime 的 TypeScript agent 的完整模式示例。
-- <Link path="/guides/py-strands-agent">`py#strands-agent`</Link> —— Python 的等效示例。
+- <Link path="/guides/ts-strands-agent">`ts#strands-agent` 生成器</Link> —— 部署到 Bedrock AgentCore Runtime 的 TypeScript agent 的完整模式示例。
+- <Link path="/guides/py-strands-agent">`py#strands-agent` 生成器</Link> —— Python 的等效示例。
 - [Rolldown 文档](https://rolldown.rs/) —— TypeScript 打包器的配置参考。
 - [`uv` 文档](https://docs.astral.sh/uv/) —— Python 依赖项导出和安装的参考。

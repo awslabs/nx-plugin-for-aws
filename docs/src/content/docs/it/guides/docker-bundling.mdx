@@ -88,15 +88,16 @@ Alcuni pacchetti npm non possono essere inclusi nel bundle perché si basano su 
 
 ### Dockerfile
 
-Crea un `Dockerfile` nella directory sorgente del tuo progetto. Il file non fa altro che eseguire `COPY` del bundle in un'immagine base Node, più `npm install` di eventuali pacchetti `external` che non possono essere inclusi nel bundle:
+Crea un `Dockerfile` nella directory sorgente del tuo progetto. Il file non fa altro che eseguire `COPY` del bundle in un'immagine base Node, più `npm install` di eventuali pacchetti `external` che non possono essere inclusi nel bundle. Posiziona lo step `RUN npm install` **prima** del `COPY`, in modo che Docker possa cachare il layer `node_modules` installato e rieseguirlo solo quando l'elenco delle dipendenze cambia effettivamente:
 
 ```dockerfile
 FROM public.ecr.aws/docker/library/node:lts
 
 WORKDIR /app
 
-# Install packages that cannot be bundled (declared as "external" in rolldown.config.ts)
-RUN npm install @aws/aws-distro-opentelemetry-node-autoinstrumentation
+# Install packages that cannot be bundled (declared as "external" in rolldown.config.ts).
+# Kept above the COPY so this layer is cached and only invalidated when the install list changes.
+RUN npm install @aws/aws-distro-opentelemetry-node-autoinstrumentation@0.10.0
 
 # Copy bundled application
 COPY index.js /app
@@ -106,12 +107,16 @@ EXPOSE 8080
 CMD ["node", "index.js"]
 ```
 
+:::tip[Fissa le tue dipendenze]
+Fissa ogni dipendenza installata all'interno del `Dockerfile` a una versione esatta (come sopra) — altrimenti `npm install` scaricherà silenziosamente una release più recente la prossima volta che esegui la build, producendo immagini che si comportano diversamente a seconda di quando sono state costruite. Lo stesso consiglio si applica all'immagine base: preferisci un digest o tag specifico (ad esempio `node:22.14.0`) rispetto a un tag fluttuante come `lts`.
+:::
+
 ### Docker Target
 
 Aggiungi un target `docker` che:
 
 1. Copia il `Dockerfile` nella directory di output del bundle (in modo che il contesto di build contenga solo il bundle + `Dockerfile`), e
-2. Esegue `docker build`.
+2. Esegue `docker build` (opzionale per CDK — vedi sotto).
 
 ```json
 {
@@ -140,76 +145,11 @@ L'esecuzione di questo target produce un'immagine locale taggata `my-scope-my-pr
 
 <NxCommands commands={['docker my-project']} />
 
-### Infrastructure
+:::note[CDK costruisce l'immagine da solo]
+Se stai distribuendo solo con CDK, il comando `docker build` sopra è opzionale — `DockerImageAsset` di CDK (mostrato sotto [Infrastructure](#infrastructure)) costruirà l'immagine per te al momento del synth. Devi comunque copiare il `Dockerfile` nella directory del contesto di build in modo che CDK possa trovarlo. I generatori mantengono lo step locale `docker build` per darti un modo rapido per fare uno smoke-test dell'immagine con `docker run`.
 
-<Infrastructure>
-<Fragment slot="cdk">
-Usa [`DockerImageAsset`](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_ecr_assets.DockerImageAsset.html) di CDK puntando alla directory `dist/.../bundle`. CDK costruirà l'immagine e la pubblicherà nel repository ECR degli asset CDK al momento del deploy:
-
-```ts
-import { DockerImageAsset, Platform } from 'aws-cdk-lib/aws-ecr-assets';
-import * as path from 'path';
-import * as url from 'url';
-
-const image = new DockerImageAsset(this, 'MyImage', {
-  directory: path.join(
-    // Resolve from the compiled construct location to the workspace root
-    findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
-    'dist/packages/my-project/bundle',
-  ),
-  platform: Platform.LINUX_ARM64,
-});
-```
-
-:::note[Eseguire il bundle prima di synth]
-CDK non esegue automaticamente i target `bundle`/`docker` — devi eseguire `nx build my-project` (o collegare il target deploy a dipendere da `build`) prima di `cdk deploy`. I generatori che usano questo pattern dichiarano `docker` e `bundle` come dipendenze di `build` in modo che ciò avvenga in modo trasparente.
+Per Terraform, lo step `docker build` è richiesto — il pattern `null_resource` sotto carica un'immagine taggata localmente.
 :::
-
-L'helper `findWorkspaceRoot` e i costrutti condivisi sono generati dal generatore <Link path="/guides/typescript-infrastructure">`ts#infra`</Link>. Usa `DockerImageAsset` con qualsiasi costrutto AWS che accetti un'immagine container, ad esempio `aws_ecs.ContainerImage.fromDockerImageAsset(image)`.
-</Fragment>
-<Fragment slot="terraform">
-Il provider AWS di Terraform non ha una risorsa di prima classe "build and push a Docker image". Il pattern usato dai generatori è:
-
-1. Un `aws_ecr_repository` per contenere l'immagine.
-2. Una `null_resource` con un provisioner `local-exec` che si autentica su ECR, ri-tagga l'immagine costruita localmente e la carica.
-3. La risorsa downstream (ad es. `aws_ecs_task_definition`) fa riferimento a `"${aws_ecr_repository.repo.repository_url}:latest"`.
-
-```hcl
-resource "aws_ecr_repository" "repo" {
-  name                 = "my-project-repository"
-  image_tag_mutability = "MUTABLE"
-  force_delete         = true
-}
-
-# Invalidate the push whenever the locally-built image digest changes
-data "external" "docker_digest" {
-  program = ["sh", "-c", "echo '{\"digest\":\"'$(docker inspect my-scope-my-project:latest --format '{{.Id}}')'\"}'"]
-}
-
-resource "null_resource" "docker_publish" {
-  triggers = {
-    docker_digest  = data.external.docker_digest.result.digest
-    repository_url = aws_ecr_repository.repo.repository_url
-  }
-
-  provisioner "local-exec" {
-    command = <<-EOT
-      aws ecr get-login-password --region ${data.aws_region.current.id} \
-        | docker login --username AWS --password-stdin ${self.triggers.repository_url}
-      docker tag my-scope-my-project:latest ${self.triggers.repository_url}:latest
-      docker push ${self.triggers.repository_url}:latest
-    EOT
-  }
-}
-```
-
-Il blocco `data.external.docker_digest` garantisce che la `null_resource` venga rieseguita ogni volta che l'hash dell'immagine locale cambia, attivando un nuovo push ad ogni modifica significativa del codice.
-
-:::note[Eseguire il bundle prima di apply]
-`terraform apply` richiede che il tag dell'immagine `my-scope-my-project:latest` esista già localmente. Esegui `nx build my-project` (o `nx docker my-project`) prima di `terraform apply`.
-:::
-</Fragment>
-</Infrastructure>
 
 ## Python
 
@@ -291,34 +231,85 @@ Questo cancella la directory di output, quindi copia sia i contenuti del bundle 
 
 <NxCommands commands={['docker my-project']} />
 
-### Infrastructure
+## Infrastructure
+
+Collegare la directory del contesto di build risultante all'infrastruttura come codice è lo stesso sia per TypeScript che per Python — cambia solo il percorso alla directory del contesto di build (`dist/packages/my-project/bundle` per TypeScript, `dist/packages/my-project/docker` per Python).
 
 <Infrastructure>
 <Fragment slot="cdk">
-Come nel caso TypeScript, punta un `DockerImageAsset` alla directory del contesto di build:
+Usa [`DockerImageAsset`](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_ecr_assets.DockerImageAsset.html) di CDK puntando alla directory del contesto di build. CDK costruirà l'immagine e la pubblicherà nel repository ECR degli asset CDK al momento del deploy:
 
 ```ts
 import { DockerImageAsset, Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import { findWorkspaceRoot } from ':my-scope/common-constructs';
 import * as path from 'path';
 import * as url from 'url';
 
 const image = new DockerImageAsset(this, 'MyImage', {
   directory: path.join(
+    // Resolve from the compiled construct location to the workspace root
     findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
-    'dist/packages/my-project/docker',
+    'dist/packages/my-project/bundle',
   ),
   platform: Platform.LINUX_ARM64,
 });
 ```
+
+L'helper `findWorkspaceRoot` è generato dal generatore <Link path="/guides/typescript-infrastructure">`ts#infra`</Link> ed esportato da `:my-scope/common-constructs`. Se non stai usando costrutti condivisi, puoi codificare il percorso alla directory `dist` relativo a dove viene invocato `cdk` — tipicamente la radice del workspace — e omettere completamente la chiamata a `findWorkspaceRoot`.
+
+:::note[Eseguire bundle prima di synth]
+CDK non esegue automaticamente i target `bundle`/`docker` — devi eseguire `nx build my-project` (o collegare il target deploy a dipendere da `build`) prima di `cdk deploy`. I generatori che usano questo pattern dichiarano `docker` e `bundle` come dipendenze di `build` in modo che ciò avvenga in modo trasparente.
+:::
+
+Usa `DockerImageAsset` con qualsiasi costrutto AWS che accetti un'immagine container, ad esempio `aws_ecs.ContainerImage.fromDockerImageAsset(image)`.
 </Fragment>
 <Fragment slot="terraform">
-Usa lo stesso pattern `aws_ecr_repository` + `null_resource` come per TypeScript — cambia solo il tag dell'immagine locale. Vedi l'esempio Terraform TypeScript sopra.
+Il provider AWS di Terraform non ha una risorsa di prima classe "build and push a Docker image". Il pattern usato dai generatori è:
+
+1. Un `aws_ecr_repository` per contenere l'immagine.
+2. Una `null_resource` con un provisioner `local-exec` che si autentica su ECR, ri-tagga l'immagine costruita localmente e la carica.
+3. La risorsa downstream (ad es. `aws_ecs_task_definition`) fa riferimento a `"${aws_ecr_repository.repo.repository_url}:latest"`.
+
+```hcl
+resource "aws_ecr_repository" "repo" {
+  name                 = "my-project-repository"
+  image_tag_mutability = "MUTABLE"
+  force_delete         = true
+}
+
+# Invalidate the push whenever the locally-built image digest changes
+data "external" "docker_digest" {
+  program = ["sh", "-c", "echo '{\"digest\":\"'$(docker inspect my-scope-my-project:latest --format '{{.Id}}')'\"}'"]
+}
+
+resource "null_resource" "docker_publish" {
+  triggers = {
+    docker_digest  = data.external.docker_digest.result.digest
+    repository_url = aws_ecr_repository.repo.repository_url
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      aws ecr get-login-password --region ${data.aws_region.current.id} \
+        | docker login --username AWS --password-stdin ${self.triggers.repository_url}
+      docker tag my-scope-my-project:latest ${self.triggers.repository_url}:latest
+      docker push ${self.triggers.repository_url}:latest
+    EOT
+  }
+}
+```
+
+Il blocco `data.external.docker_digest` garantisce che la `null_resource` venga rieseguita ogni volta che l'hash dell'immagine locale cambia, attivando un nuovo push ad ogni modifica significativa del codice.
+
+:::note[Eseguire bundle prima di apply]
+`nx apply <project>` richiede che il tag dell'immagine `my-scope-my-project:latest` esista già localmente. Esegui `nx build my-project` (o `nx docker my-project`) prima di `nx apply <project>`.
+:::
 </Fragment>
 </Infrastructure>
 
 ## Ulteriori Letture
 
-- <Link path="/guides/ts-strands-agent">`ts#strands-agent`</Link> — un esempio completo di questo pattern per un agente TypeScript distribuito su Bedrock AgentCore Runtime.
-- <Link path="/guides/py-strands-agent">`py#strands-agent`</Link> — l'equivalente per Python.
+- <Link path="/guides/ts-strands-agent">generatore `ts#strands-agent`</Link> — un esempio completo di questo pattern per un agente TypeScript distribuito su Bedrock AgentCore Runtime.
+- <Link path="/guides/py-strands-agent">generatore `py#strands-agent`</Link> — l'equivalente per Python.
 - [Documentazione Rolldown](https://rolldown.rs/) — riferimento di configurazione per il bundler TypeScript.
 - [Documentazione `uv`](https://docs.astral.sh/uv/) — riferimento per l'esportazione e l'installazione delle dipendenze Python.

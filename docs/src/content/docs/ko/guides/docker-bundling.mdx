@@ -88,15 +88,16 @@ export default defineConfig([
 
 ### Dockerfile
 
-프로젝트 소스 디렉토리에 `Dockerfile`을 생성합니다. 이 파일은 번들을 Node 베이스 이미지로 `COPY`하고 번들링할 수 없었던 `external` 패키지를 `npm install`하는 것 이상의 작업을 수행하지 않습니다:
+프로젝트 소스 디렉토리에 `Dockerfile`을 생성합니다. 이 파일은 번들을 Node 베이스 이미지로 `COPY`하고 번들링할 수 없었던 `external` 패키지를 `npm install`하는 것 이상의 작업을 수행하지 않습니다. `RUN npm install` 단계를 `COPY` **이전에** 배치하여 Docker가 설치된 `node_modules` 레이어를 캐시하고 종속성 목록이 실제로 변경될 때만 다시 실행하도록 합니다:
 
 ```dockerfile
 FROM public.ecr.aws/docker/library/node:lts
 
 WORKDIR /app
 
-# Install packages that cannot be bundled (declared as "external" in rolldown.config.ts)
-RUN npm install @aws/aws-distro-opentelemetry-node-autoinstrumentation
+# Install packages that cannot be bundled (declared as "external" in rolldown.config.ts).
+# Kept above the COPY so this layer is cached and only invalidated when the install list changes.
+RUN npm install @aws/aws-distro-opentelemetry-node-autoinstrumentation@0.10.0
 
 # Copy bundled application
 COPY index.js /app
@@ -106,12 +107,16 @@ EXPOSE 8080
 CMD ["node", "index.js"]
 ```
 
+:::tip[종속성 고정]
+`Dockerfile` 내부에 설치되는 모든 종속성을 정확한 버전으로 고정하세요(위와 같이) — 그렇지 않으면 `npm install`이 다음 빌드 시 자동으로 새로운 릴리스를 선택하여 빌드 시점에 따라 다르게 동작하는 이미지가 생성됩니다. 베이스 이미지에도 동일한 조언이 적용됩니다: `lts`와 같은 부동 태그보다 특정 다이제스트 또는 태그(예: `node:22.14.0`)를 선호하세요.
+:::
+
 ### Docker 타겟
 
 다음을 수행하는 `docker` 타겟을 추가합니다:
 
 1. `Dockerfile`을 번들 출력 디렉토리로 복사하고(빌드 컨텍스트가 번들 + `Dockerfile`만 포함하도록),
-2. `docker build`를 실행합니다.
+2. `docker build`를 실행합니다(CDK의 경우 선택 사항 — 아래 참조).
 
 ```json
 {
@@ -140,76 +145,11 @@ CMD ["node", "index.js"]
 
 <NxCommands commands={['docker my-project']} />
 
-### 인프라
+:::note[CDK가 이미지를 직접 빌드합니다]
+CDK로만 배포하는 경우 위의 `docker build` 명령은 선택 사항입니다 — CDK의 `DockerImageAsset`([인프라](#infrastructure) 아래 표시)이 synth 시점에 이미지를 빌드합니다. CDK가 찾을 수 있도록 `Dockerfile`을 빌드 컨텍스트 디렉토리로 복사해야 합니다. 제너레이터는 `docker run`으로 이미지를 빠르게 스모크 테스트할 수 있는 방법을 제공하기 위해 로컬 `docker build` 단계를 유지합니다.
 
-<Infrastructure>
-<Fragment slot="cdk">
-`dist/.../bundle` 디렉토리를 가리키는 CDK의 [`DockerImageAsset`](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_ecr_assets.DockerImageAsset.html)을 사용합니다. CDK는 배포 시 이미지를 빌드하고 CDK 자산 ECR 리포지토리에 게시합니다:
-
-```ts
-import { DockerImageAsset, Platform } from 'aws-cdk-lib/aws-ecr-assets';
-import * as path from 'path';
-import * as url from 'url';
-
-const image = new DockerImageAsset(this, 'MyImage', {
-  directory: path.join(
-    // Resolve from the compiled construct location to the workspace root
-    findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
-    'dist/packages/my-project/bundle',
-  ),
-  platform: Platform.LINUX_ARM64,
-});
-```
-
-:::note[synth 전에 번들 실행]
-CDK는 `bundle`/`docker` 타겟을 자동으로 실행하지 않습니다 — `cdk deploy` 전에 `nx build my-project`를 실행하거나(또는 배포 타겟이 `build`에 의존하도록 연결) 해야 합니다. 이 패턴을 사용하는 제너레이터는 `docker` 및 `bundle`을 `build`의 종속성으로 선언하므로 이것이 투명하게 발생합니다.
+Terraform의 경우 `docker build` 단계가 필요합니다 — 아래의 `null_resource` 패턴이 로컬에 태그된 이미지를 푸시합니다.
 :::
-
-`findWorkspaceRoot` 헬퍼와 공유 구성은 <Link path="/guides/typescript-infrastructure">`ts#infra`</Link> 제너레이터에 의해 생성됩니다. 컨테이너 이미지를 허용하는 모든 AWS 구성과 함께 `DockerImageAsset`을 사용합니다. 예를 들어 `aws_ecs.ContainerImage.fromDockerImageAsset(image)`.
-</Fragment>
-<Fragment slot="terraform">
-Terraform의 AWS 프로바이더에는 일급 "Docker 이미지 빌드 및 푸시" 리소스가 없습니다. 제너레이터가 사용하는 패턴은 다음과 같습니다:
-
-1. 이미지를 보관할 `aws_ecr_repository`.
-2. ECR에 인증하고, 로컬에서 빌드된 이미지를 다시 태그하고, 푸시하는 `local-exec` 프로비저너가 있는 `null_resource`.
-3. 다운스트림 리소스(예: `aws_ecs_task_definition`)가 `"${aws_ecr_repository.repo.repository_url}:latest"`를 참조합니다.
-
-```hcl
-resource "aws_ecr_repository" "repo" {
-  name                 = "my-project-repository"
-  image_tag_mutability = "MUTABLE"
-  force_delete         = true
-}
-
-# Invalidate the push whenever the locally-built image digest changes
-data "external" "docker_digest" {
-  program = ["sh", "-c", "echo '{\"digest\":\"'$(docker inspect my-scope-my-project:latest --format '{{.Id}}')'\"}'"]
-}
-
-resource "null_resource" "docker_publish" {
-  triggers = {
-    docker_digest  = data.external.docker_digest.result.digest
-    repository_url = aws_ecr_repository.repo.repository_url
-  }
-
-  provisioner "local-exec" {
-    command = <<-EOT
-      aws ecr get-login-password --region ${data.aws_region.current.id} \
-        | docker login --username AWS --password-stdin ${self.triggers.repository_url}
-      docker tag my-scope-my-project:latest ${self.triggers.repository_url}:latest
-      docker push ${self.triggers.repository_url}:latest
-    EOT
-  }
-}
-```
-
-`data.external.docker_digest` 블록은 로컬 이미지 해시가 변경될 때마다 `null_resource`가 다시 실행되도록 보장하여 의미 있는 코드 변경마다 새 푸시를 트리거합니다.
-
-:::note[apply 전에 번들 실행]
-`terraform apply`는 이미지 태그 `my-scope-my-project:latest`가 로컬에 이미 존재해야 합니다. `terraform apply` 전에 `nx build my-project`(또는 `nx docker my-project`)를 실행합니다.
-:::
-</Fragment>
-</Infrastructure>
 
 ## Python
 
@@ -291,34 +231,85 @@ CMD ["python", "-m", "my_project.main"]
 
 <NxCommands commands={['docker my-project']} />
 
-### 인프라
+## 인프라
+
+결과 빌드 컨텍스트 디렉토리를 코드형 인프라에 연결하는 것은 TypeScript와 Python 모두 동일합니다 — 빌드 컨텍스트 디렉토리 경로만 다릅니다(TypeScript의 경우 `dist/packages/my-project/bundle`, Python의 경우 `dist/packages/my-project/docker`).
 
 <Infrastructure>
 <Fragment slot="cdk">
-TypeScript의 경우와 마찬가지로 빌드 컨텍스트 디렉토리를 가리키는 `DockerImageAsset`을 사용합니다:
+빌드 컨텍스트 디렉토리를 가리키는 CDK의 [`DockerImageAsset`](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_ecr_assets.DockerImageAsset.html)을 사용합니다. CDK는 배포 시 이미지를 빌드하고 CDK 자산 ECR 리포지토리에 게시합니다:
 
 ```ts
 import { DockerImageAsset, Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import { findWorkspaceRoot } from ':my-scope/common-constructs';
 import * as path from 'path';
 import * as url from 'url';
 
 const image = new DockerImageAsset(this, 'MyImage', {
   directory: path.join(
+    // Resolve from the compiled construct location to the workspace root
     findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
-    'dist/packages/my-project/docker',
+    'dist/packages/my-project/bundle',
   ),
   platform: Platform.LINUX_ARM64,
 });
 ```
+
+`findWorkspaceRoot` 헬퍼는 <Link path="/guides/typescript-infrastructure">`ts#infra`</Link> 제너레이터에 의해 생성되고 `:my-scope/common-constructs`에서 내보내집니다. 공유 구성을 사용하지 않는 경우 `cdk`가 호출되는 위치(일반적으로 워크스페이스 루트)를 기준으로 `dist` 디렉토리 경로를 하드코딩하고 `findWorkspaceRoot` 호출을 완전히 생략할 수 있습니다.
+
+:::note[synth 전에 번들 실행]
+CDK는 `bundle`/`docker` 타겟을 자동으로 실행하지 않습니다 — `cdk deploy` 전에 `nx build my-project`를 실행하거나(또는 배포 타겟이 `build`에 의존하도록 연결) 해야 합니다. 이 패턴을 사용하는 제너레이터는 `docker` 및 `bundle`을 `build`의 종속성으로 선언하므로 이것이 투명하게 발생합니다.
+:::
+
+컨테이너 이미지를 허용하는 모든 AWS 구성과 함께 `DockerImageAsset`을 사용합니다. 예를 들어 `aws_ecs.ContainerImage.fromDockerImageAsset(image)`.
 </Fragment>
 <Fragment slot="terraform">
-TypeScript와 동일한 `aws_ecr_repository` + `null_resource` 패턴을 사용합니다 — 로컬 이미지 태그만 변경됩니다. 위의 TypeScript Terraform 예제를 참조하세요.
+Terraform의 AWS 프로바이더에는 일급 "Docker 이미지 빌드 및 푸시" 리소스가 없습니다. 제너레이터가 사용하는 패턴은 다음과 같습니다:
+
+1. 이미지를 보관할 `aws_ecr_repository`.
+2. ECR에 인증하고, 로컬에서 빌드된 이미지를 다시 태그하고, 푸시하는 `local-exec` 프로비저너가 있는 `null_resource`.
+3. 다운스트림 리소스(예: `aws_ecs_task_definition`)가 `"${aws_ecr_repository.repo.repository_url}:latest"`를 참조합니다.
+
+```hcl
+resource "aws_ecr_repository" "repo" {
+  name                 = "my-project-repository"
+  image_tag_mutability = "MUTABLE"
+  force_delete         = true
+}
+
+# Invalidate the push whenever the locally-built image digest changes
+data "external" "docker_digest" {
+  program = ["sh", "-c", "echo '{\"digest\":\"'$(docker inspect my-scope-my-project:latest --format '{{.Id}}')'\"}'"]
+}
+
+resource "null_resource" "docker_publish" {
+  triggers = {
+    docker_digest  = data.external.docker_digest.result.digest
+    repository_url = aws_ecr_repository.repo.repository_url
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      aws ecr get-login-password --region ${data.aws_region.current.id} \
+        | docker login --username AWS --password-stdin ${self.triggers.repository_url}
+      docker tag my-scope-my-project:latest ${self.triggers.repository_url}:latest
+      docker push ${self.triggers.repository_url}:latest
+    EOT
+  }
+}
+```
+
+`data.external.docker_digest` 블록은 로컬 이미지 해시가 변경될 때마다 `null_resource`가 다시 실행되도록 보장하여 의미 있는 코드 변경마다 새 푸시를 트리거합니다.
+
+:::note[apply 전에 번들 실행]
+`nx apply <project>`는 이미지 태그 `my-scope-my-project:latest`가 로컬에 이미 존재해야 합니다. `nx apply <project>` 전에 `nx build my-project`(또는 `nx docker my-project`)를 실행합니다.
+:::
 </Fragment>
 </Infrastructure>
 
 ## 추가 읽기
 
-- <Link path="/guides/ts-strands-agent">`ts#strands-agent`</Link> — Bedrock AgentCore Runtime에 배포된 TypeScript 에이전트에 대한 이 패턴의 완전한 예제.
-- <Link path="/guides/py-strands-agent">`py#strands-agent`</Link> — Python에 해당하는 예제.
+- <Link path="/guides/ts-strands-agent">`ts#strands-agent` 제너레이터</Link> — Bedrock AgentCore Runtime에 배포된 TypeScript 에이전트에 대한 이 패턴의 완전한 예제.
+- <Link path="/guides/py-strands-agent">`py#strands-agent` 제너레이터</Link> — Python에 해당하는 예제.
 - [Rolldown documentation](https://rolldown.rs/) — TypeScript 번들러의 구성 참조.
 - [`uv` documentation](https://docs.astral.sh/uv/) — Python 종속성 내보내기 및 설치에 대한 참조.
