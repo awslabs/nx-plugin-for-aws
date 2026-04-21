@@ -1,0 +1,141 @@
+---
+title: Astro Docs
+description: Tài liệu tham khảo cho trang tài liệu Astro + Starlight
+---
+import { FileTree } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+
+Generator này tạo khung cho một trang tài liệu được hỗ trợ bởi [Astro](https://astro.build/)
+và theme tài liệu [Starlight](https://starlight.astro.build/). Nó thiết lập sẵn
+bản địa hóa, các đoạn nội dung có thể tái sử dụng, liên kết nội bộ nhận biết ngôn ngữ và một
+plugin [`starlight-blog`](https://starlight-blog-docs.vercel.app/) theo mặc định.
+
+Theo mặc định, nó cũng tạo khung cho một pipeline dịch tự động được hỗ trợ bởi một
+[Strands Agent](https://strandsagents.com/) trên
+[Amazon Bedrock](https://aws.amazon.com/bedrock/).
+
+## Cách sử dụng
+
+### Tạo một trang tài liệu Astro
+
+Bạn có thể tạo một trang tài liệu Astro mới theo hai cách:
+
+<RunGenerator generator="ts#astro-docs" />
+
+### Tùy chọn
+
+<GeneratorParameters generator="ts#astro-docs" />
+
+## Kết quả của Generator
+
+Theo mặc định, generator tạo cấu trúc dự án sau tại `docs/` trong
+thư mục gốc của workspace (có thể cấu hình thông qua các tùy chọn `name`, `directory` và `subDirectory`):
+
+<FileTree>
+  - astro.config.mjs Cấu hình Astro + Starlight (locales, sidebar, blog plugin)
+  - tsconfig.json Mở rộng astro/tsconfigs/strict với các alias đường dẫn @components / @assets
+  - project.json Dự án Nx với các target `build`, `start`, `preview` (và `translate` nếu được bật)
+  - scripts
+    - translate.ts Trình điều khiển dịch — một Strands agent với công cụ file-editor có phạm vi (bỏ qua với `--noTranslation`)
+    - translate.config.json Ngôn ngữ nguồn/đích, các mẫu glob, model id, region (bỏ qua với `--noTranslation`)
+  - src
+    - components
+      - link.astro Component liên kết nhận biết ngôn ngữ (phân giải đường dẫn theo ngôn ngữ hiện tại)
+      - snippet.astro Component tải snippet nhận biết ngôn ngữ
+    - content
+      - docs
+        - en
+          - index.mdx Trang đích
+          - guides
+            - getting-started.mdx Hướng dẫn mẫu tham chiếu các component link và snippet
+          - blog
+            - welcome.mdx Bài viết blog mẫu (bỏ qua với `--noBlog`)
+          - snippets
+            - example.mdx Snippet có thể tái sử dụng mẫu
+    - styles
+      - custom.css Ghi đè theme Starlight
+  - README.md README của dự án
+</FileTree>
+
+### Bản địa hóa
+
+Generator mặc định sử dụng một ngôn ngữ duy nhất (`en`) và chuyển hướng URL gốc đến
+nó. Để thêm nhiều ngôn ngữ hơn:
+
+1. Thêm một mục vào `locales` trong `astro.config.mjs` (ví dụ `ko: { label: '한국어' }`).
+2. Tạo một thư mục tương ứng trong `src/content/docs/<locale>/`.
+3. Điền nội dung thủ công, hoặc sử dụng target dịch được mô tả bên dưới.
+
+## Dịch thuật
+
+Trừ khi bạn truyền `--noTranslation`, generator sẽ thêm một target `translate` vào
+`project.json`, vì vậy bạn có thể chạy:
+
+<NxCommands commands={[
+  'translate docs -- --all',
+  'translate docs -- --languages jp,ko',
+  'translate docs -- --dry-run',
+]} />
+
+Khi chạy mà không có `--all`, script chỉ dịch các tệp đã thay đổi
+kể từ commit dịch cuối cùng trên nhánh hiện tại — nghĩa là bạn có thể
+chạy lại một cách an toàn trên mọi PR tài liệu mà không cần dịch lại toàn bộ trang.
+
+### Cấu hình dịch thuật
+
+Chỉnh sửa `scripts/translate.config.json` để thay đổi:
+
+| Trường | Mục đích |
+| --- | --- |
+| `sourceLanguage` | Ngôn ngữ để dịch **từ** (mặc định `en`). |
+| `targetLanguages` | Ngôn ngữ để dịch **sang**. Mặc định trống. Ví dụ `["fr", "de", "es", "ja", "ko"]`. |
+| `docsDir` | Đường dẫn đến thư mục nội dung tài liệu, tương đối với thư mục gốc của dự án. |
+| `include` | Các mẫu glob (tương đối với `<docsDir>/<sourceLanguage>`) cho các tệp cần dịch. |
+| `exclude` | Các mẫu glob để bỏ qua. |
+| `modelId` | Model Bedrock để sử dụng cho dịch thuật. |
+| `awsRegion` | AWS region mà Bedrock client được cấu hình. Cũng có thể được đặt qua `AWS_REGION`. |
+| `concurrency` | Số lượng tối đa các lời gọi agent đồng thời. |
+| `translationCommitMessage` | Đánh dấu thông điệp commit cho các commit dịch (mặc định `docs: update translations`). |
+
+### Liên kết nội bộ nhận biết ngôn ngữ
+
+Generator cung cấp một component `Link` tự động phân giải các đường dẫn tài liệu nội bộ
+theo ngôn ngữ hiện tại, vì vậy một nguồn sự thật duy nhất tạo ra
+URL đúng trong mọi ngôn ngữ:
+
+```mdx
+import Link from '@components/link.astro';
+
+<Link path="guides/getting-started">Read the getting-started guide</Link>
+```
+
+### Snippets
+
+Các đoạn nội dung có thể tái sử dụng nằm trong `src/content/docs/<locale>/snippets/`. Component
+`Snippet` được tạo sẽ tải snippet khớp với ngôn ngữ
+hiện tại:
+
+```mdx
+import Snippet from '@components/snippet.astro';
+
+<Snippet name="example" />
+```
+
+### Thiết lập CI
+
+Không có workflow CI nào được tạo sẵn — hãy thêm một workflow:
+
+1. Cấu hình thông tin xác thực AWS với quyền gọi Bedrock `InvokeModel` trên
+   model đã cấu hình.
+2. Chạy target `translate` trên các pull request chạm vào tài liệu ngôn ngữ nguồn
+   của bạn:
+
+   <NxCommands commands={['translate docs']} />
+
+3. Commit các bản dịch kết quả trở lại nhánh PR. Thông điệp commit
+   phải khớp với giá trị `translationCommitMessage` trong
+   `scripts/translate.config.json` (mặc định `docs: update translations`) để
+   các lần chạy tăng dần tiếp theo có thể phát hiện commit cơ sở và chỉ
+   dịch lại các tệp đã thay đổi kể từ đó.
