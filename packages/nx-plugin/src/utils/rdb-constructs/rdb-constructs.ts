@@ -23,8 +23,8 @@ export interface AddRdbConstructOptions {
   databaseName: string;
   adminUser: string;
   engine: 'postgres' | 'mysql';
-  migrationBundlePathFromRoot: string;
-  createDbUserBundlePathFromRoot: string;
+  migrationBundleDir: string;
+  createDbUserBundleDir: string;
 }
 
 export const addRdbInfra = async (

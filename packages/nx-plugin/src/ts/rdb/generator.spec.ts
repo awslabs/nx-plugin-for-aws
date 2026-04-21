@@ -85,7 +85,7 @@ describe('ts#rdb generator', () => {
     expect(tree.exists('packages/db/eslint.config.mjs')).toBeTruthy();
     expect(tree.exists('packages/db/src/migration-handler.ts')).toBeTruthy();
     expect(auroraConstruct).toContain('export abstract class AuroraDatabase');
-    expect(auroraConstruct).toContain('createDbUserBundlePath');
+    expect(auroraConstruct).toContain('createDbUserBundleDir');
     expect(auroraConstruct).toContain('RuntimeConfig.ensure(this)');
     expect(auroraConstruct).toContain("rc.set('database', runtimeConfigKey, {");
     expect(auroraConstruct).toContain('this.proxy = this.cluster.addProxy');
@@ -98,9 +98,8 @@ describe('ts#rdb generator', () => {
     expect(dbConstruct).toContain("databaseName: 'databaseName'");
     expect(dbConstruct).toContain("adminUser: 'databaseUser'");
     expect(dbConstruct).toContain('runtimeConfigKey: DB_PACKAGE_NAME');
-    expect(dbConstruct).toContain(
-      "createDbUserBundlePath:\n        '../../../../../../dist/packages/db/bundle/create-db-user'",
-    );
+    expect(dbConstruct).toContain('findWorkspaceRoot');
+    expect(dbConstruct).toContain('dist/packages/db/bundle/create-db-user');
     expect(prismaFile).toContain(
       "import { PrismaPg } from '@prisma/adapter-pg';",
     );
@@ -172,10 +171,10 @@ describe('ts#rdb generator', () => {
     );
     expect(
       tree.read('packages/common/constructs/src/app/dbs/db.ts', 'utf-8'),
-    ).toContain('../../../../../../dist/packages/db/bundle/migration');
+    ).toContain('dist/packages/db/bundle/migration');
     expect(
       tree.read('packages/common/constructs/src/app/dbs/db.ts', 'utf-8'),
-    ).toContain('../../../../../../dist/packages/db/bundle/create-db-user');
+    ).toContain('dist/packages/db/bundle/create-db-user');
     expect(
       tree.read('packages/common/constructs/src/core/index.ts', 'utf-8'),
     ).toContain('./rdb/aurora.js');
