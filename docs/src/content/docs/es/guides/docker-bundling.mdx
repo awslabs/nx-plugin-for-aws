@@ -1,0 +1,324 @@
+---
+title: "Empaquetado Docker"
+description: "Construye y despliega imágenes Docker para proyectos TypeScript y Python en un espacio de trabajo Nx Plugin for AWS."
+---
+
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
+import NxCommands from '@components/nx-commands.astro';
+import Link from '@components/link.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+Varios generadores (como <Link path="/guides/ts-strands-agent">`ts#strands-agent`</Link> y <Link path="/guides/py-strands-agent">`py#strands-agent`</Link>) producen una imagen Docker que se envía a Amazon ECR y es consumida por la infraestructura de AWS. Esta guía describe el patrón que siguen para que puedas aplicarlo a otros casos de uso — por ejemplo, ejecutar un proyecto <Link path="/guides/fastapi">`py#fast-api`</Link> en Amazon ECS, o desplegar un servidor Express en contenedor.
+
+## El Patrón
+
+El patrón recomendado tiene tres piezas:
+
+1. **Un target `bundle`** en tu proyecto que produce un directorio autocontenido de artefactos de tiempo de ejecución. Para TypeScript esto es un bundle JavaScript de un solo archivo con tree-shaking producido por [Rolldown](https://rolldown.rs/); para Python esto es un `requirements.txt` y las dependencias instaladas producidas por [uv](https://docs.astral.sh/uv/).
+2. **Un `Dockerfile` mínimo** que simplemente hace `COPY` de la salida del bundle en una imagen base. Debido a que el bundling ya manejó el tree-shaking y la instalación de dependencias, el `Dockerfile` no necesita ejecutar `npm install` o `uv sync`.
+3. **Un target `docker`** que copia el `Dockerfile` junto con la salida del bundle (para que el contexto de construcción de Docker solo contenga archivos necesarios en tiempo de ejecución), y luego ejecuta `docker build`.
+
+El contexto de construcción de Docker se escribe en la carpeta `dist` de tu proyecto. Tu infraestructura como código (CDK o Terraform) luego apunta a ese directorio para enviar la imagen a ECR.
+
+:::tip[¿Por qué hacer el bundle fuera del Dockerfile?]
+Mantener el paso de bundle en Nx (en lugar de dentro del `Dockerfile`) significa:
+
+- Nx puede **cachear** el target bundle, por lo que las construcciones repetidas son rápidas.
+- El `Dockerfile` no necesita acceso a tu monorepo, registros privados o secretos de tiempo de construcción.
+- La capa de imagen es diminuta — un solo `COPY` de artefactos ya construidos, sin `node_modules` transitivos ni cadena de herramientas de construcción.
+:::
+
+## TypeScript
+
+### Bundle Target
+
+Configura un target `bundle` que invoque Rolldown. Si estás comenzando desde un <Link path="/guides/typescript-project">`ts#project`</Link>, agrega lo siguiente a tu `project.json`:
+
+```json
+{
+  "targets": {
+    "bundle": {
+      "cache": true,
+      "executor": "nx:run-commands",
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}/bundle"],
+      "options": {
+        "command": "rolldown -c rolldown.config.ts",
+        "cwd": "{projectRoot}"
+      },
+      "dependsOn": ["compile"]
+    }
+  }
+}
+```
+
+Y un `rolldown.config.ts` en la raíz de tu proyecto:
+
+```ts
+// rolldown.config.ts
+import { defineConfig } from 'rolldown';
+
+export default defineConfig([
+  {
+    tsconfig: 'tsconfig.lib.json',
+    input: 'src/index.ts',
+    output: {
+      file: '../../dist/packages/my-project/bundle/index.js',
+      format: 'cjs',
+      inlineDynamicImports: true,
+    },
+    platform: 'node',
+  },
+]);
+```
+
+Ejecuta el target bundle para producir `dist/packages/my-project/bundle/index.js`:
+
+<NxCommands commands={['bundle my-project']} />
+
+:::tip[Dependencias no empaquetables]
+Algunos paquetes npm no pueden ser empaquetados porque dependen de `require` dinámico, bindings nativos o resolución de rutas de archivos en tiempo de ejecución. Agrégalos al array `external` en `rolldown.config.ts` para que se dejen como llamadas `require()` en tiempo de ejecución, e instálalos dentro del `Dockerfile` en su lugar (ver abajo):
+
+```ts
+{
+  // ...
+  external: ['@aws/aws-distro-opentelemetry-node-autoinstrumentation'],
+}
+```
+:::
+
+### Dockerfile
+
+Crea un `Dockerfile` en el directorio fuente de tu proyecto. El archivo no hace nada más que hacer `COPY` del bundle en una imagen base de Node, además de `npm install` de cualquier paquete `external` que no pudo ser empaquetado:
+
+```dockerfile
+FROM public.ecr.aws/docker/library/node:lts
+
+WORKDIR /app
+
+# Install packages that cannot be bundled (declared as "external" in rolldown.config.ts)
+RUN npm install @aws/aws-distro-opentelemetry-node-autoinstrumentation
+
+# Copy bundled application
+COPY index.js /app
+
+EXPOSE 8080
+
+CMD ["node", "index.js"]
+```
+
+### Docker Target
+
+Agrega un target `docker` que:
+
+1. Copie el `Dockerfile` en el directorio de salida del bundle (para que el contexto de construcción contenga solo el bundle + `Dockerfile`), y
+2. Ejecute `docker build`.
+
+```json
+{
+  "targets": {
+    "docker": {
+      "cache": true,
+      "executor": "nx:run-commands",
+      "options": {
+        "commands": [
+          "ncp packages/my-project/src/Dockerfile dist/packages/my-project/bundle/Dockerfile",
+          "docker build --platform linux/arm64 -t my-scope-my-project:latest dist/packages/my-project/bundle"
+        ],
+        "parallel": false
+      },
+      "dependsOn": ["bundle"]
+    }
+  }
+}
+```
+
+:::tip[Copia de archivos multiplataforma]
+El paquete `ncp` proporciona un comando de copia de archivos/directorios multiplataforma, evitando `cp` (no disponible en Windows). Instálalo en la raíz de tu workspace con `pnpm add -D -w ncp`.
+:::
+
+Ejecutar este target produce una imagen local etiquetada como `my-scope-my-project:latest`, construida desde el contexto mínimo en `dist/packages/my-project/bundle/`:
+
+<NxCommands commands={['docker my-project']} />
+
+### Infraestructura
+
+<Infrastructure>
+<Fragment slot="cdk">
+Usa [`DockerImageAsset`](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_ecr_assets.DockerImageAsset.html) de CDK apuntando al directorio `dist/.../bundle`. CDK construirá la imagen y la publicará en el repositorio ECR de activos de CDK en el momento del despliegue:
+
+```ts
+import { DockerImageAsset, Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import * as path from 'path';
+import * as url from 'url';
+
+const image = new DockerImageAsset(this, 'MyImage', {
+  directory: path.join(
+    // Resolve from the compiled construct location to the workspace root
+    findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
+    'dist/packages/my-project/bundle',
+  ),
+  platform: Platform.LINUX_ARM64,
+});
+```
+
+:::note[Ejecutar el bundle antes del synth]
+CDK no ejecuta los targets `bundle`/`docker` automáticamente — debes ejecutar `nx build my-project` (o conectar el target deploy para que dependa de `build`) antes de `cdk deploy`. Los generadores que usan este patrón declaran `docker` y `bundle` como dependencias de `build` para que esto suceda de forma transparente.
+:::
+
+El helper `findWorkspaceRoot` y los constructos compartidos son generados por el generador <Link path="/guides/typescript-infrastructure">`ts#infra`</Link>. Usa el `DockerImageAsset` con cualquier constructo de AWS que acepte una imagen de contenedor, por ejemplo `aws_ecs.ContainerImage.fromDockerImageAsset(image)`.
+</Fragment>
+<Fragment slot="terraform">
+El proveedor de AWS de Terraform no tiene un recurso de primera clase para "construir y enviar una imagen Docker". El patrón usado por los generadores es:
+
+1. Un `aws_ecr_repository` para almacenar la imagen.
+2. Un `null_resource` con un provisionador `local-exec` que autentica en ECR, re-etiqueta la imagen construida localmente y la envía.
+3. El recurso downstream (por ejemplo, `aws_ecs_task_definition`) referencia `"${aws_ecr_repository.repo.repository_url}:latest"`.
+
+```hcl
+resource "aws_ecr_repository" "repo" {
+  name                 = "my-project-repository"
+  image_tag_mutability = "MUTABLE"
+  force_delete         = true
+}
+
+# Invalidate the push whenever the locally-built image digest changes
+data "external" "docker_digest" {
+  program = ["sh", "-c", "echo '{\"digest\":\"'$(docker inspect my-scope-my-project:latest --format '{{.Id}}')'\"}'"]
+}
+
+resource "null_resource" "docker_publish" {
+  triggers = {
+    docker_digest  = data.external.docker_digest.result.digest
+    repository_url = aws_ecr_repository.repo.repository_url
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      aws ecr get-login-password --region ${data.aws_region.current.id} \
+        | docker login --username AWS --password-stdin ${self.triggers.repository_url}
+      docker tag my-scope-my-project:latest ${self.triggers.repository_url}:latest
+      docker push ${self.triggers.repository_url}:latest
+    EOT
+  }
+}
+```
+
+El bloque `data.external.docker_digest` asegura que el `null_resource` se vuelva a ejecutar cada vez que cambie el hash de la imagen local, desencadenando un nuevo push en cada cambio de código significativo.
+
+:::note[Ejecutar el bundle antes del apply]
+`terraform apply` requiere que la etiqueta de imagen `my-scope-my-project:latest` ya exista localmente. Ejecuta `nx build my-project` (o `nx docker my-project`) antes de `terraform apply`.
+:::
+</Fragment>
+</Infrastructure>
+
+## Python
+
+### Bundle Target
+
+Configura un target `bundle` que use `uv` para exportar e instalar dependencias para tu plataforma objetivo. El generador <Link path="/guides/python-project">`py#project`</Link> y el generador <Link path="/guides/python-lambda-function">`py#lambda-function`</Link> configuran esto por ti. La configuración del target se ve así:
+
+```json
+{
+  "targets": {
+    "bundle-arm": {
+      "cache": true,
+      "executor": "nx:run-commands",
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}/bundle-arm"],
+      "options": {
+        "commands": [
+          "uv export --frozen --no-dev --no-editable --project {projectRoot} --package my_project -o dist/{projectRoot}/bundle-arm/requirements.txt",
+          "uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform aarch64-manylinux_2_28 --target dist/{projectRoot}/bundle-arm -r dist/{projectRoot}/bundle-arm/requirements.txt"
+        ],
+        "parallel": false
+      },
+      "dependsOn": ["compile"]
+    }
+  }
+}
+```
+
+Cambia `--python-platform` a `x86_64-manylinux_2_28` si tu imagen Docker se ejecutará en x86_64.
+
+Ejecutar `nx bundle my-project` produce `dist/packages/my-project/bundle-arm/` conteniendo el código fuente de tu proyecto, sus dependencias y un `requirements.txt` — todo lo que la imagen necesita en tiempo de ejecución.
+
+### Dockerfile
+
+El `Dockerfile` simplemente copia el bundle en una imagen base de Python. Debido a que `uv` ya instaló todas las dependencias en el directorio del bundle, no necesitas ejecutar `pip install` dentro de la imagen:
+
+```dockerfile
+FROM public.ecr.aws/docker/library/python:3.12-slim
+
+WORKDIR /app
+
+# Copy bundled package (source + installed dependencies)
+COPY . /app
+
+EXPOSE 8080
+
+ENV PYTHONPATH=/app
+ENV PATH="/app/bin:${PATH}"
+
+CMD ["python", "-m", "my_project.main"]
+```
+
+### Docker Target
+
+Agrega un target `docker` que copie el `Dockerfile` en el directorio de salida del bundle, y luego ejecute `docker build`:
+
+```json
+{
+  "targets": {
+    "docker": {
+      "cache": true,
+      "executor": "nx:run-commands",
+      "options": {
+        "commands": [
+          "rimraf dist/packages/my-project/docker",
+          "make-dir dist/packages/my-project/docker",
+          "ncp dist/packages/my-project/bundle-arm dist/packages/my-project/docker",
+          "ncp packages/my-project/src/Dockerfile dist/packages/my-project/docker/Dockerfile",
+          "docker build --platform linux/arm64 -t my-scope-my-project:latest dist/packages/my-project/docker"
+        ],
+        "parallel": false
+      },
+      "dependsOn": ["bundle-arm"]
+    }
+  }
+}
+```
+
+Esto limpia el directorio de salida, luego copia tanto el contenido del bundle como el `Dockerfile` en `dist/.../docker`, que se convierte en el contexto de construcción de Docker.
+
+<NxCommands commands={['docker my-project']} />
+
+### Infraestructura
+
+<Infrastructure>
+<Fragment slot="cdk">
+Al igual que con el caso de TypeScript, apunta un `DockerImageAsset` al directorio de contexto de construcción:
+
+```ts
+import { DockerImageAsset, Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import * as path from 'path';
+import * as url from 'url';
+
+const image = new DockerImageAsset(this, 'MyImage', {
+  directory: path.join(
+    findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
+    'dist/packages/my-project/docker',
+  ),
+  platform: Platform.LINUX_ARM64,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+Usa el mismo patrón `aws_ecr_repository` + `null_resource` que para TypeScript — solo cambia la etiqueta de imagen local. Consulta el ejemplo de Terraform para TypeScript arriba.
+</Fragment>
+</Infrastructure>
+
+## Lectura Adicional
+
+- <Link path="/guides/ts-strands-agent">`ts#strands-agent`</Link> — un ejemplo completo de este patrón para un agente TypeScript desplegado en Bedrock AgentCore Runtime.
+- <Link path="/guides/py-strands-agent">`py#strands-agent`</Link> — el equivalente para Python.
+- [Documentación de Rolldown](https://rolldown.rs/) — referencia de configuración para el bundler de TypeScript.
+- [Documentación de `uv`](https://docs.astral.sh/uv/) — referencia para exportación e instalación de dependencias de Python.

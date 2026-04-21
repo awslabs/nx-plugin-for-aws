@@ -1,0 +1,324 @@
+---
+title: "Docker 打包"
+description: "在 Nx Plugin for AWS 工作空间中为 TypeScript 和 Python 项目构建和部署 Docker 镜像。"
+---
+
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
+import NxCommands from '@components/nx-commands.astro';
+import Link from '@components/link.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+多个生成器(例如 <Link path="/guides/ts-strands-agent">`ts#strands-agent`</Link> 和 <Link path="/guides/py-strands-agent">`py#strands-agent`</Link>)会生成一个 Docker 镜像,该镜像被推送到 Amazon ECR 并由 AWS 基础设施使用。本指南描述了它们遵循的模式,以便您可以将其应用于其他用例——例如,在 Amazon ECS 上运行 <Link path="/guides/fastapi">`py#fast-api`</Link> 项目,或部署容器化的 Express 服务器。
+
+## 模式
+
+推荐的模式包含三个部分:
+
+1. **项目上的 `bundle` 目标**,它生成一个包含运行时构件的自包含目录。对于 TypeScript,这是由 [Rolldown](https://rolldown.rs/) 生成的经过 tree-shaking 的单文件 JavaScript 包;对于 Python,这是由 [uv](https://docs.astral.sh/uv/) 生成的 `requirements.txt` 和已安装的依赖项。
+2. **最小化的 `Dockerfile`**,它只是将包输出 `COPY` 到基础镜像中。由于打包已经处理了 tree-shaking 和依赖项安装,`Dockerfile` 不需要运行 `npm install` 或 `uv sync`。
+3. **`docker` 目标**,它将 `Dockerfile` 复制到包输出旁边(以便 Docker 构建上下文仅包含运行时所需的文件),然后运行 `docker build`。
+
+Docker 构建上下文被写入项目的 `dist` 文件夹。然后您的基础设施即代码(CDK 或 Terraform)指向该目录以将镜像推送到 ECR。
+
+:::tip[为什么在 Dockerfile 外部打包?]
+将打包步骤保留在 Nx 中(而不是在 `Dockerfile` 内部)意味着:
+
+- Nx 可以**缓存**打包目标,因此重复构建速度很快。
+- `Dockerfile` 不需要访问您的 monorepo、私有仓库或构建时密钥。
+- 镜像层很小——只是已构建构件的单个 `COPY`,没有传递的 `node_modules` 或构建工具链。
+:::
+
+## TypeScript
+
+### Bundle 目标
+
+配置一个调用 Rolldown 的 `bundle` 目标。如果您从 <Link path="/guides/typescript-project">`ts#project`</Link> 开始,请将以下内容添加到您的 `project.json`:
+
+```json
+{
+  "targets": {
+    "bundle": {
+      "cache": true,
+      "executor": "nx:run-commands",
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}/bundle"],
+      "options": {
+        "command": "rolldown -c rolldown.config.ts",
+        "cwd": "{projectRoot}"
+      },
+      "dependsOn": ["compile"]
+    }
+  }
+}
+```
+
+并在项目根目录创建一个 `rolldown.config.ts`:
+
+```ts
+// rolldown.config.ts
+import { defineConfig } from 'rolldown';
+
+export default defineConfig([
+  {
+    tsconfig: 'tsconfig.lib.json',
+    input: 'src/index.ts',
+    output: {
+      file: '../../dist/packages/my-project/bundle/index.js',
+      format: 'cjs',
+      inlineDynamicImports: true,
+    },
+    platform: 'node',
+  },
+]);
+```
+
+运行 bundle 目标以生成 `dist/packages/my-project/bundle/index.js`:
+
+<NxCommands commands={['bundle my-project']} />
+
+:::tip[无法打包的依赖项]
+某些 npm 包无法打包,因为它们依赖于动态 `require`、原生绑定或运行时文件路径解析。将它们添加到 `rolldown.config.ts` 中的 `external` 数组,以便将它们保留为运行时 `require()` 调用,并在 `Dockerfile` 内部安装它们(见下文):
+
+```ts
+{
+  // ...
+  external: ['@aws/aws-distro-opentelemetry-node-autoinstrumentation'],
+}
+```
+:::
+
+### Dockerfile
+
+在项目源目录中创建一个 `Dockerfile`。该文件只是将包 `COPY` 到 Node 基础镜像中,加上 `npm install` 任何无法打包的 `external` 包:
+
+```dockerfile
+FROM public.ecr.aws/docker/library/node:lts
+
+WORKDIR /app
+
+# Install packages that cannot be bundled (declared as "external" in rolldown.config.ts)
+RUN npm install @aws/aws-distro-opentelemetry-node-autoinstrumentation
+
+# Copy bundled application
+COPY index.js /app
+
+EXPOSE 8080
+
+CMD ["node", "index.js"]
+```
+
+### Docker 目标
+
+添加一个 `docker` 目标,它:
+
+1. 将 `Dockerfile` 复制到包输出目录(以便构建上下文仅包含包 + `Dockerfile`),以及
+2. 运行 `docker build`。
+
+```json
+{
+  "targets": {
+    "docker": {
+      "cache": true,
+      "executor": "nx:run-commands",
+      "options": {
+        "commands": [
+          "ncp packages/my-project/src/Dockerfile dist/packages/my-project/bundle/Dockerfile",
+          "docker build --platform linux/arm64 -t my-scope-my-project:latest dist/packages/my-project/bundle"
+        ],
+        "parallel": false
+      },
+      "dependsOn": ["bundle"]
+    }
+  }
+}
+```
+
+:::tip[跨平台文件复制]
+`ncp` 包提供了跨平台的文件/目录复制命令,避免使用 `cp`(在 Windows 上不可用)。使用 `pnpm add -D -w ncp` 在工作区根目录安装它。
+:::
+
+运行此目标会生成一个标记为 `my-scope-my-project:latest` 的本地镜像,从 `dist/packages/my-project/bundle/` 的最小上下文构建:
+
+<NxCommands commands={['docker my-project']} />
+
+### 基础设施
+
+<Infrastructure>
+<Fragment slot="cdk">
+使用 CDK 的 [`DockerImageAsset`](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_ecr_assets.DockerImageAsset.html) 指向 `dist/.../bundle` 目录。CDK 将在部署时构建镜像并将其发布到 CDK 资产 ECR 仓库:
+
+```ts
+import { DockerImageAsset, Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import * as path from 'path';
+import * as url from 'url';
+
+const image = new DockerImageAsset(this, 'MyImage', {
+  directory: path.join(
+    // Resolve from the compiled construct location to the workspace root
+    findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
+    'dist/packages/my-project/bundle',
+  ),
+  platform: Platform.LINUX_ARM64,
+});
+```
+
+:::note[在 synth 之前运行 bundle]
+CDK 不会自动运行 `bundle`/`docker` 目标——您必须在 `cdk deploy` 之前运行 `nx build my-project`(或将 deploy 目标连接到依赖于 `build`)。使用此模式的生成器将 `docker` 和 `bundle` 声明为 `build` 的依赖项,因此这会透明地发生。
+:::
+
+`findWorkspaceRoot` 辅助函数和共享构造由 <Link path="/guides/typescript-infrastructure">`ts#infra`</Link> 生成器生成。将 `DockerImageAsset` 与任何接受容器镜像的 AWS 构造一起使用,例如 `aws_ecs.ContainerImage.fromDockerImageAsset(image)`。
+</Fragment>
+<Fragment slot="terraform">
+Terraform 的 AWS provider 没有一流的"构建和推送 Docker 镜像"资源。生成器使用的模式是:
+
+1. 一个 `aws_ecr_repository` 来保存镜像。
+2. 一个带有 `local-exec` provisioner 的 `null_resource`,它向 ECR 进行身份验证,重新标记本地构建的镜像,然后推送它。
+3. 下游资源(例如 `aws_ecs_task_definition`)引用 `"${aws_ecr_repository.repo.repository_url}:latest"`。
+
+```hcl
+resource "aws_ecr_repository" "repo" {
+  name                 = "my-project-repository"
+  image_tag_mutability = "MUTABLE"
+  force_delete         = true
+}
+
+# Invalidate the push whenever the locally-built image digest changes
+data "external" "docker_digest" {
+  program = ["sh", "-c", "echo '{\"digest\":\"'$(docker inspect my-scope-my-project:latest --format '{{.Id}}')'\"}'"]
+}
+
+resource "null_resource" "docker_publish" {
+  triggers = {
+    docker_digest  = data.external.docker_digest.result.digest
+    repository_url = aws_ecr_repository.repo.repository_url
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      aws ecr get-login-password --region ${data.aws_region.current.id} \
+        | docker login --username AWS --password-stdin ${self.triggers.repository_url}
+      docker tag my-scope-my-project:latest ${self.triggers.repository_url}:latest
+      docker push ${self.triggers.repository_url}:latest
+    EOT
+  }
+}
+```
+
+`data.external.docker_digest` 块确保每当本地镜像哈希更改时 `null_resource` 重新运行,在每次有意义的代码更改时触发新的推送。
+
+:::note[在 apply 之前运行 bundle]
+`terraform apply` 要求镜像标签 `my-scope-my-project:latest` 已经在本地存在。在 `terraform apply` 之前运行 `nx build my-project`(或 `nx docker my-project`)。
+:::
+</Fragment>
+</Infrastructure>
+
+## Python
+
+### Bundle 目标
+
+配置一个使用 `uv` 为目标平台导出和安装依赖项的 `bundle` 目标。<Link path="/guides/python-project">`py#project`</Link> 生成器和 <Link path="/guides/python-lambda-function">`py#lambda-function`</Link> 生成器都会为您配置这个。目标配置如下所示:
+
+```json
+{
+  "targets": {
+    "bundle-arm": {
+      "cache": true,
+      "executor": "nx:run-commands",
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}/bundle-arm"],
+      "options": {
+        "commands": [
+          "uv export --frozen --no-dev --no-editable --project {projectRoot} --package my_project -o dist/{projectRoot}/bundle-arm/requirements.txt",
+          "uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform aarch64-manylinux_2_28 --target dist/{projectRoot}/bundle-arm -r dist/{projectRoot}/bundle-arm/requirements.txt"
+        ],
+        "parallel": false
+      },
+      "dependsOn": ["compile"]
+    }
+  }
+}
+```
+
+如果您的 Docker 镜像将在 x86_64 上运行,请将 `--python-platform` 更改为 `x86_64-manylinux_2_28`。
+
+运行 `nx bundle my-project` 会生成 `dist/packages/my-project/bundle-arm/`,其中包含项目的源代码、依赖项和 `requirements.txt`——镜像在运行时需要的一切。
+
+### Dockerfile
+
+`Dockerfile` 只是将包复制到 Python 基础镜像中。因为 `uv` 已经将所有依赖项安装到包目录中,所以您不需要在镜像内运行 `pip install`:
+
+```dockerfile
+FROM public.ecr.aws/docker/library/python:3.12-slim
+
+WORKDIR /app
+
+# Copy bundled package (source + installed dependencies)
+COPY . /app
+
+EXPOSE 8080
+
+ENV PYTHONPATH=/app
+ENV PATH="/app/bin:${PATH}"
+
+CMD ["python", "-m", "my_project.main"]
+```
+
+### Docker 目标
+
+添加一个 `docker` 目标,它将 `Dockerfile` 复制到包输出目录,然后运行 `docker build`:
+
+```json
+{
+  "targets": {
+    "docker": {
+      "cache": true,
+      "executor": "nx:run-commands",
+      "options": {
+        "commands": [
+          "rimraf dist/packages/my-project/docker",
+          "make-dir dist/packages/my-project/docker",
+          "ncp dist/packages/my-project/bundle-arm dist/packages/my-project/docker",
+          "ncp packages/my-project/src/Dockerfile dist/packages/my-project/docker/Dockerfile",
+          "docker build --platform linux/arm64 -t my-scope-my-project:latest dist/packages/my-project/docker"
+        ],
+        "parallel": false
+      },
+      "dependsOn": ["bundle-arm"]
+    }
+  }
+}
+```
+
+这会清除输出目录,然后将包内容和 `Dockerfile` 都复制到 `dist/.../docker` 中,该目录成为 Docker 构建上下文。
+
+<NxCommands commands={['docker my-project']} />
+
+### 基础设施
+
+<Infrastructure>
+<Fragment slot="cdk">
+与 TypeScript 情况一样,将 `DockerImageAsset` 指向构建上下文目录:
+
+```ts
+import { DockerImageAsset, Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import * as path from 'path';
+import * as url from 'url';
+
+const image = new DockerImageAsset(this, 'MyImage', {
+  directory: path.join(
+    findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
+    'dist/packages/my-project/docker',
+  ),
+  platform: Platform.LINUX_ARM64,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+使用与 TypeScript 相同的 `aws_ecr_repository` + `null_resource` 模式——只有本地镜像标签发生变化。请参阅上面的 TypeScript Terraform 示例。
+</Fragment>
+</Infrastructure>
+
+## 延伸阅读
+
+- <Link path="/guides/ts-strands-agent">`ts#strands-agent`</Link> —— 部署到 Bedrock AgentCore Runtime 的 TypeScript agent 的完整模式示例。
+- <Link path="/guides/py-strands-agent">`py#strands-agent`</Link> —— Python 的等效示例。
+- [Rolldown 文档](https://rolldown.rs/) —— TypeScript 打包器的配置参考。
+- [`uv` 文档](https://docs.astral.sh/uv/) —— Python 依赖项导出和安装的参考。

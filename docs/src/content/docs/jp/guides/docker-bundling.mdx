@@ -1,0 +1,324 @@
+---
+title: "Docker バンドリング"
+description: "Nx Plugin for AWS ワークスペースで TypeScript および Python プロジェクト用の Docker イメージをビルドおよびデプロイします。"
+---
+
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
+import NxCommands from '@components/nx-commands.astro';
+import Link from '@components/link.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+いくつかのジェネレーター(<Link path="/guides/ts-strands-agent">`ts#strands-agent`</Link>や<Link path="/guides/py-strands-agent">`py#strands-agent`</Link>など)は、Amazon ECRにプッシュされ、AWSインフラストラクチャによって使用されるDockerイメージを生成します。このガイドでは、これらのジェネレーターが従うパターンについて説明し、他のユースケースに適用できるようにします。例えば、Amazon ECS上で<Link path="/guides/fastapi">`py#fast-api`</Link>プロジェクトを実行したり、コンテナ化されたExpressサーバーをデプロイしたりする場合などです。
+
+## パターン
+
+推奨されるパターンには3つの要素があります:
+
+1. **`bundle`ターゲット** - プロジェクト上に配置され、ランタイムアーティファクトの自己完結型ディレクトリを生成します。TypeScriptの場合、これは[Rolldown](https://rolldown.rs/)によって生成されるツリーシェイクされた単一ファイルのJavaScriptバンドルです。Pythonの場合、これは[uv](https://docs.astral.sh/uv/)によって生成される`requirements.txt`とインストールされた依存関係です。
+2. **最小限の`Dockerfile`** - バンドル出力をベースイメージに単純に`COPY`するだけです。バンドリングによってすでにツリーシェイキングと依存関係のインストールが処理されているため、`Dockerfile`は`npm install`や`uv sync`を実行する必要がありません。
+3. **`docker`ターゲット** - `Dockerfile`をバンドル出力と一緒にコピーし(Docker buildコンテキストがランタイムに必要なファイルのみを含むようにするため)、`docker build`を実行します。
+
+Docker buildコンテキストはプロジェクトの`dist`フォルダーに書き込まれます。その後、Infrastructure as Code(CDKまたはTerraform)がそのディレクトリを指定してイメージをECRにプッシュします。
+
+:::tip[なぜDockerfileの外でバンドルするのか?]
+バンドルステップをNxに保持する(`Dockerfile`内ではなく)ことには以下のメリットがあります:
+
+- Nxはバンドルターゲットを**キャッシュ**できるため、繰り返しのビルドが高速になります。
+- `Dockerfile`はモノレポ、プライベートレジストリ、またはビルド時のシークレットへのアクセスを必要としません。
+- イメージレイヤーが小さくなります — すでにビルドされたアーティファクトの単一の`COPY`で、推移的な`node_modules`やビルドツールチェーンはありません。
+:::
+
+## TypeScript
+
+### Bundle Target
+
+Rolldownを呼び出す`bundle`ターゲットを設定します。<Link path="/guides/typescript-project">`ts#project`</Link>から始める場合は、`project.json`に以下を追加します:
+
+```json
+{
+  "targets": {
+    "bundle": {
+      "cache": true,
+      "executor": "nx:run-commands",
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}/bundle"],
+      "options": {
+        "command": "rolldown -c rolldown.config.ts",
+        "cwd": "{projectRoot}"
+      },
+      "dependsOn": ["compile"]
+    }
+  }
+}
+```
+
+そして、プロジェクトのルートに`rolldown.config.ts`を配置します:
+
+```ts
+// rolldown.config.ts
+import { defineConfig } from 'rolldown';
+
+export default defineConfig([
+  {
+    tsconfig: 'tsconfig.lib.json',
+    input: 'src/index.ts',
+    output: {
+      file: '../../dist/packages/my-project/bundle/index.js',
+      format: 'cjs',
+      inlineDynamicImports: true,
+    },
+    platform: 'node',
+  },
+]);
+```
+
+bundleターゲットを実行して`dist/packages/my-project/bundle/index.js`を生成します:
+
+<NxCommands commands={['bundle my-project']} />
+
+:::tip[バンドルできない依存関係]
+一部のnpmパッケージは、動的な`require`、ネイティブバインディング、またはランタイムファイルパス解決に依存しているため、バンドルできません。これらを`rolldown.config.ts`の`external`配列に追加して、ランタイムの`require()`呼び出しとして残し、代わりに`Dockerfile`内でインストールします(以下を参照):
+
+```ts
+{
+  // ...
+  external: ['@aws/aws-distro-opentelemetry-node-autoinstrumentation'],
+}
+```
+:::
+
+### Dockerfile
+
+プロジェクトのソースディレクトリに`Dockerfile`を作成します。このファイルは、バンドルをNodeベースイメージに`COPY`し、バンドルできなかった`external`パッケージを`npm install`するだけです:
+
+```dockerfile
+FROM public.ecr.aws/docker/library/node:lts
+
+WORKDIR /app
+
+# Install packages that cannot be bundled (declared as "external" in rolldown.config.ts)
+RUN npm install @aws/aws-distro-opentelemetry-node-autoinstrumentation
+
+# Copy bundled application
+COPY index.js /app
+
+EXPOSE 8080
+
+CMD ["node", "index.js"]
+```
+
+### Docker Target
+
+以下を実行する`docker`ターゲットを追加します:
+
+1. `Dockerfile`をバンドル出力ディレクトリにコピー(ビルドコンテキストがバンドル + `Dockerfile`のみを含むようにするため)
+2. `docker build`を実行
+
+```json
+{
+  "targets": {
+    "docker": {
+      "cache": true,
+      "executor": "nx:run-commands",
+      "options": {
+        "commands": [
+          "ncp packages/my-project/src/Dockerfile dist/packages/my-project/bundle/Dockerfile",
+          "docker build --platform linux/arm64 -t my-scope-my-project:latest dist/packages/my-project/bundle"
+        ],
+        "parallel": false
+      },
+      "dependsOn": ["bundle"]
+    }
+  }
+}
+```
+
+:::tip[クロスプラットフォームファイルコピー]
+`ncp`パッケージは、クロスプラットフォームのファイル/ディレクトリコピーコマンドを提供し、`cp`(Windowsでは利用不可)を回避します。ワークスペースのルートで`pnpm add -D -w ncp`を使用してインストールします。
+:::
+
+このターゲットを実行すると、`dist/packages/my-project/bundle/`の最小限のコンテキストからビルドされた、`my-scope-my-project:latest`というタグが付けられたローカルイメージが生成されます:
+
+<NxCommands commands={['docker my-project']} />
+
+### Infrastructure
+
+<Infrastructure>
+<Fragment slot="cdk">
+CDKの[`DockerImageAsset`](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_ecr_assets.DockerImageAsset.html)を`dist/.../bundle`ディレクトリに向けて使用します。CDKはデプロイ時にイメージをビルドし、CDKアセットECRリポジトリに公開します:
+
+```ts
+import { DockerImageAsset, Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import * as path from 'path';
+import * as url from 'url';
+
+const image = new DockerImageAsset(this, 'MyImage', {
+  directory: path.join(
+    // Resolve from the compiled construct location to the workspace root
+    findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
+    'dist/packages/my-project/bundle',
+  ),
+  platform: Platform.LINUX_ARM64,
+});
+```
+
+:::note[synth前のbundleの実行]
+CDKは`bundle`/`docker`ターゲットを自動的に実行しません — `cdk deploy`の前に`nx build my-project`を実行する(またはdeployターゲットが`build`に依存するように配線する)必要があります。このパターンを使用するジェネレーターは、`docker`と`bundle`を`build`の依存関係として宣言しているため、これは透過的に行われます。
+:::
+
+`findWorkspaceRoot`ヘルパーと共有コンストラクトは、<Link path="/guides/typescript-infrastructure">`ts#infra`</Link>ジェネレーターによって生成されます。`DockerImageAsset`は、コンテナイメージを受け入れる任意のAWSコンストラクトで使用できます。例えば、`aws_ecs.ContainerImage.fromDockerImageAsset(image)`などです。
+</Fragment>
+<Fragment slot="terraform">
+TerraformのAWSプロバイダーには、ファーストクラスの「Dockerイメージをビルドしてプッシュする」リソースがありません。ジェネレーターが使用するパターンは次のとおりです:
+
+1. イメージを保持するための`aws_ecr_repository`
+2. ECRへの認証、ローカルでビルドされたイメージの再タグ付け、プッシュを行う`local-exec`プロビジョナーを持つ`null_resource`
+3. ダウンストリームリソース(例: `aws_ecs_task_definition`)が`"${aws_ecr_repository.repo.repository_url}:latest"`を参照
+
+```hcl
+resource "aws_ecr_repository" "repo" {
+  name                 = "my-project-repository"
+  image_tag_mutability = "MUTABLE"
+  force_delete         = true
+}
+
+# Invalidate the push whenever the locally-built image digest changes
+data "external" "docker_digest" {
+  program = ["sh", "-c", "echo '{\"digest\":\"'$(docker inspect my-scope-my-project:latest --format '{{.Id}}')'\"}'"]
+}
+
+resource "null_resource" "docker_publish" {
+  triggers = {
+    docker_digest  = data.external.docker_digest.result.digest
+    repository_url = aws_ecr_repository.repo.repository_url
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      aws ecr get-login-password --region ${data.aws_region.current.id} \
+        | docker login --username AWS --password-stdin ${self.triggers.repository_url}
+      docker tag my-scope-my-project:latest ${self.triggers.repository_url}:latest
+      docker push ${self.triggers.repository_url}:latest
+    EOT
+  }
+}
+```
+
+`data.external.docker_digest`ブロックは、ローカルイメージハッシュが変更されるたびに`null_resource`が再実行されることを保証し、意味のあるコード変更ごとに新しいプッシュをトリガーします。
+
+:::note[apply前のbundleの実行]
+`terraform apply`には、イメージタグ`my-scope-my-project:latest`がローカルにすでに存在している必要があります。`terraform apply`の前に`nx build my-project`(または`nx docker my-project`)を実行してください。
+:::
+</Fragment>
+</Infrastructure>
+
+## Python
+
+### Bundle Target
+
+ターゲットプラットフォーム用の依存関係をエクスポートしてインストールするために`uv`を使用する`bundle`ターゲットを設定します。<Link path="/guides/python-project">`py#project`</Link>ジェネレーターと<Link path="/guides/python-lambda-function">`py#lambda-function`</Link>ジェネレーターの両方がこれを設定します。ターゲット設定は次のようになります:
+
+```json
+{
+  "targets": {
+    "bundle-arm": {
+      "cache": true,
+      "executor": "nx:run-commands",
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}/bundle-arm"],
+      "options": {
+        "commands": [
+          "uv export --frozen --no-dev --no-editable --project {projectRoot} --package my_project -o dist/{projectRoot}/bundle-arm/requirements.txt",
+          "uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform aarch64-manylinux_2_28 --target dist/{projectRoot}/bundle-arm -r dist/{projectRoot}/bundle-arm/requirements.txt"
+        ],
+        "parallel": false
+      },
+      "dependsOn": ["compile"]
+    }
+  }
+}
+```
+
+Dockerイメージがx86_64上で実行される場合は、`--python-platform`を`x86_64-manylinux_2_28`に変更してください。
+
+`nx bundle my-project`を実行すると、プロジェクトのソース、その依存関係、および`requirements.txt`を含む`dist/packages/my-project/bundle-arm/`が生成されます — イメージがランタイムに必要とするすべてのものです。
+
+### Dockerfile
+
+`Dockerfile`は単純にバンドルをPythonベースイメージにコピーします。`uv`がすでにすべての依存関係をバンドルディレクトリにインストールしているため、イメージ内で`pip install`を実行する必要はありません:
+
+```dockerfile
+FROM public.ecr.aws/docker/library/python:3.12-slim
+
+WORKDIR /app
+
+# Copy bundled package (source + installed dependencies)
+COPY . /app
+
+EXPOSE 8080
+
+ENV PYTHONPATH=/app
+ENV PATH="/app/bin:${PATH}"
+
+CMD ["python", "-m", "my_project.main"]
+```
+
+### Docker Target
+
+`Dockerfile`をバンドル出力ディレクトリにコピーし、`docker build`を実行する`docker`ターゲットを追加します:
+
+```json
+{
+  "targets": {
+    "docker": {
+      "cache": true,
+      "executor": "nx:run-commands",
+      "options": {
+        "commands": [
+          "rimraf dist/packages/my-project/docker",
+          "make-dir dist/packages/my-project/docker",
+          "ncp dist/packages/my-project/bundle-arm dist/packages/my-project/docker",
+          "ncp packages/my-project/src/Dockerfile dist/packages/my-project/docker/Dockerfile",
+          "docker build --platform linux/arm64 -t my-scope-my-project:latest dist/packages/my-project/docker"
+        ],
+        "parallel": false
+      },
+      "dependsOn": ["bundle-arm"]
+    }
+  }
+}
+```
+
+これにより、出力ディレクトリがクリアされ、バンドルコンテンツと`Dockerfile`の両方が`dist/.../docker`にコピーされ、これがDocker buildコンテキストになります。
+
+<NxCommands commands={['docker my-project']} />
+
+### Infrastructure
+
+<Infrastructure>
+<Fragment slot="cdk">
+TypeScriptの場合と同様に、`DockerImageAsset`をビルドコンテキストディレクトリに向けます:
+
+```ts
+import { DockerImageAsset, Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import * as path from 'path';
+import * as url from 'url';
+
+const image = new DockerImageAsset(this, 'MyImage', {
+  directory: path.join(
+    findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
+    'dist/packages/my-project/docker',
+  ),
+  platform: Platform.LINUX_ARM64,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+TypeScriptの場合と同じ`aws_ecr_repository` + `null_resource`パターンを使用します — ローカルイメージタグのみが変わります。上記のTypeScript Terraformの例を参照してください。
+</Fragment>
+</Infrastructure>
+
+## 参考資料
+
+- <Link path="/guides/ts-strands-agent">`ts#strands-agent`</Link> — Bedrock AgentCore RuntimeにデプロイされるTypeScriptエージェントのこのパターンの完全な例。
+- <Link path="/guides/py-strands-agent">`py#strands-agent`</Link> — Pythonの同等のもの。
+- [Rolldownドキュメント](https://rolldown.rs/) — TypeScriptバンドラーの設定リファレンス。
+- [`uv`ドキュメント](https://docs.astral.sh/uv/) — Python依存関係のエクスポートとインストールのリファレンス。
