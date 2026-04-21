@@ -1132,4 +1132,84 @@ dev-dependencies = []
     );
     expect(projectConfig.targets['agent-serve']).toBeDefined();
   });
+
+  it('should generate AG-UI agent with protocol option', async () => {
+    await pyStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      protocol: 'AG-UI',
+      computeType: 'None',
+      iacProvider: 'CDK',
+    });
+
+    // Check that AG-UI-specific main.py was generated
+    const mainContent = tree.read(
+      'apps/test-project/proj_test_project/agent/main.py',
+      'utf-8',
+    );
+    expect(mainContent).toContain('ag_ui_strands');
+    expect(mainContent).toContain('create_strands_app');
+    expect(mainContent).toContain('StrandsAgent');
+
+    // AG-UI should not generate init.py (HTTP-only)
+    expect(
+      tree.exists('apps/test-project/proj_test_project/agent/init.py'),
+    ).toBeFalsy();
+
+    // Check serve command uses fastapi dev on port 8081+ (not 9000)
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+    const serveCmd = projectConfig.targets['agent-serve'].options.commands[0];
+    expect(serveCmd).toContain('uv run fastapi dev');
+    expect(serveCmd).toMatch(/--port 808\d/);
+  });
+
+  it('should include protocol in component metadata for AG-UI', async () => {
+    await pyStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      protocol: 'AG-UI',
+      computeType: 'None',
+      iacProvider: 'CDK',
+    });
+
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+
+    expect(projectConfig.metadata.components[0].protocol).toBe('AG-UI');
+  });
+
+  it('should pass HTTP protocol to CDK infrastructure for AG-UI agents', async () => {
+    await pyStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      protocol: 'AG-UI',
+      computeType: 'BedrockAgentCoreRuntime',
+      iacProvider: 'CDK',
+    });
+
+    // AG-UI uses HTTP as the AgentCore protocol type (AG-UI is HTTP-based with SSE)
+    const agentConstruct = tree.read(
+      'packages/common/constructs/src/app/agents/test-project-agent/test-project-agent.ts',
+      'utf-8',
+    );
+    expect(agentConstruct).toContain('ProtocolType.HTTP');
+    expect(agentConstruct).not.toContain('bedrock-agentcore:GetAgentCard');
+  });
+
+  it('should add ag-ui dependencies for AG-UI protocol', async () => {
+    await pyStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      protocol: 'AG-UI',
+      computeType: 'None',
+      iacProvider: 'CDK',
+    });
+
+    const pyProjectToml = tree.read(
+      'apps/test-project/pyproject.toml',
+      'utf-8',
+    );
+    expect(pyProjectToml).toContain('ag-ui-protocol');
+    expect(pyProjectToml).toContain('ag-ui-strands');
+    expect(pyProjectToml).toContain('strands-agents');
+  });
 });

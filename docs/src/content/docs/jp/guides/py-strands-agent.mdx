@@ -12,7 +12,7 @@ import Infrastructure from '@components/infrastructure.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import Drawer from '@components/drawer.astro';
 
-AIエージェントをツール付きで構築するためのPython [Strands Agent](https://strandsagents.com/)を生成し、オプションで[Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/)にデプロイします。デフォルトでは、ジェネレーターは[FastAPI](https://fastapi.tiangolo.com/)を使用してHTTPサーバーを公開します。または、他のA2A互換エージェントとの相互運用性のために[Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html)プロトコルを選択することもできます。
+AIエージェントをツール付きで構築するためのPython [Strands Agent](https://strandsagents.com/)を生成し、オプションで[Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/)にデプロイします。デフォルトでは、ジェネレーターは[FastAPI](https://fastapi.tiangolo.com/)を使用してHTTPサーバーを公開します。または、他のA2A互換エージェントとの相互運用性のために[Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html)プロトコル、または[CopilotKit](https://docs.copilotkit.ai/aws-strands)を介した直接的なフロントエンド統合のために[AG-UI](https://docs.ag-ui.com/)プロトコルを選択することもできます。
 
 ## Strandsとは
 
@@ -75,6 +75,26 @@ AIエージェントをツール付きで構築するためのPython [Strands Ag
     - pyproject.toml Strands依存関係が追加された設定ファイル
     - project.json エージェントサーブターゲットが追加された設定ファイル
 </FileTree>
+
+### AG-UIプロトコル
+
+`protocol`が`AG-UI`に設定されている場合、エントリーポイントは[ag-ui-strands](https://docs.ag-ui.com/)統合を使用し、[CopilotKit](https://docs.copilotkit.ai/aws-strands)との直接的なフロントエンド統合のためにAG-UIプロトコル経由でエージェントを公開します：
+
+<FileTree>
+  - your-project/
+    - your_module/
+      - agent/（指定した場合はカスタム名）
+        - \_\_init\_\_.py Pythonパッケージ初期化ファイル
+        - agent.py サンプルツール付きメインエージェント定義
+        - main.py ag-ui-strandsを使用したAG-UIサーバーエントリーポイント
+        - Dockerfile エージェントホスティング用Dockerfile（`computeType`が`None`の場合は生成されない）
+    - pyproject.toml StrandsとAG-UI依存関係が追加された設定ファイル
+    - project.json エージェントサーブターゲットが追加された設定ファイル
+</FileTree>
+
+:::tip[Reactウェブサイトへの接続]
+AG-UIエージェントは、<Link path="/guides/connection/react-agui">`connection`ジェネレーター</Link>を使用してReactフロントエンドに接続でき、リッチなチャット体験のための[CopilotKit](https://docs.copilotkit.ai/aws-strands)コンポーネントがセットアップされます。
+:::
 
 ### インフラストラクチャ
 
@@ -193,12 +213,13 @@ Strandsエージェントの詳細な作成方法は[Strandsドキュメント](
 
 ## プロトコル
 
-エージェントのサーバープロトコルは通信方法を決定します。両方のオプションは[FastAPI](https://fastapi.tiangolo.com/)で提供されますが、エントリーポイントが異なります：
+エージェントのサーバープロトコルは通信方法を決定します。すべてのオプションは[FastAPI](https://fastapi.tiangolo.com/)で提供されますが、エントリーポイントが異なります：
 
 - **HTTP**（デフォルト）：カスタム`/invocations`エンドポイント、CORS、ストリーミングを備えた標準的なFastAPIサーバー。カスタムクライアント統合に最適です。
 - **A2A**：FastAPIアプリにマウントされた[Strands A2A Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent)。エージェントが他のA2A互換エージェントから検出・呼び出し可能である必要がある場合に最適です。
+- **AG-UI**：[ag-ui-strands](https://docs.ag-ui.com/)統合で、SSE経由で[AG-UIプロトコル](https://docs.ag-ui.com/)を公開します。Reactウェブサイトでの[CopilotKit](https://docs.copilotkit.ai/aws-strands)との直接的なフロントエンド統合に最適です。
 
-両方のプロトコルは、AgentCoreランタイムのヘルスチェック契約用に`/ping`を公開します。A2Aエージェントはポート`9000`でリッスンします（HTTPは`8080`）。生成されるDockerfileとインフラストラクチャは自動的に設定されます。
+すべてのプロトコルは、AgentCoreランタイムのヘルスチェック契約用に`/ping`を公開します。A2Aエージェントはポート`9000`でリッスンします。HTTPとAG-UIエージェントはポート`8080`でリッスンします。生成されるDockerfileとインフラストラクチャは自動的に設定されます。
 
 ## FastAPIサーバー（HTTPプロトコル）
 
@@ -287,6 +308,16 @@ SDKの詳細は[ドキュメント](https://aws.github.io/bedrock-agentcore-star
 `protocol=A2A`の場合、生成される`main.py`は`A2AServer.to_fastapi_app()`を親FastAPIアプリにマウントし、`/ping`も公開します。AgentCoreにデプロイすると、エントリーポイントはAppConfigからランタイムのパブリックARNを解決し、エージェントカードに通知します。
 
 ほとんどのユーザーはこのファイルを変更する必要はありません。ツールやシステムプロンプトを変更するには`agent.py`を編集してください。A2Aサーバーは、`Agent`コンストラクタの`name`と`description`からエージェントカード（`/.well-known/agent-card.json`）を生成します。
+
+## AG-UIサーバー（AG-UIプロトコル）
+
+`protocol=AG-UI`の場合、生成される`main.py`はStrandsの`Agent`を`ag_ui_strands.StrandsAgent`でラップし、`create_strands_app()`を介してFastAPIアプリを作成します。作成されたアプリは、Server-Sent Events（SSE）経由で[AG-UI](https://docs.ag-ui.com/)イベントをストリーミングする単一のPOSTエンドポイント、およびAgentCoreランタイムのヘルスチェック用の`/ping`を公開します。
+
+ほとんどのユーザーはこのファイルを変更する必要はありません。ツールやシステムプロンプトを変更するには`agent.py`を編集してください。
+
+:::tip[Reactウェブサイトへの接続]
+AG-UIエージェントは、フロントエンドから直接利用されるように設計されています。<Link path="/guides/connection/react-agui">`connection`ジェネレーター</Link>を使用して、[CopilotKit](https://docs.copilotkit.ai/aws-strands)プロバイダーと[AG-UI HttpAgent](https://docs.ag-ui.com/)クライアントでReactウェブサイトをエージェントに接続してください。
+:::
 
 ## Strandsエージェントの実行
 

@@ -220,3 +220,136 @@ export function Main() {
 }
 "
 `;
+
+exports[`py strands agent react connection generator - AG-UI protocol > should generate a shared AguiProvider and a per-agent hook for AG-UI agents > AguiProvider.tsx 1`] = `
+"import { useAguiTestAgent } from '../hooks/useAguiTestAgent';
+import { CopilotKitProvider } from '@copilotkit/react-core/v2';
+import '@copilotkit/react-core/v2/styles.css';
+import { type FC, type PropsWithChildren, useMemo } from 'react';
+import type { AbstractAgent } from '@ag-ui/client';
+
+export const AguiProvider: FC<PropsWithChildren> = ({ children }) => {
+  const testAgentAgents = useAguiTestAgent();
+  const selfManagedAgents = useMemo<Record<string, AbstractAgent>>(
+    () => ({ ...testAgentAgents }),
+    [testAgentAgents],
+  );
+
+  return (
+    <CopilotKitProvider selfManagedAgents={selfManagedAgents}>
+      {children}
+    </CopilotKitProvider>
+  );
+};
+
+export default AguiProvider;
+"
+`;
+
+exports[`py strands agent react connection generator - AG-UI protocol > should generate a shared AguiProvider and a per-agent hook for AG-UI agents > useAguiTestAgent.tsx 1`] = `
+"import { HttpAgent } from '@ag-ui/client';
+import type { AbstractAgent, RunAgentInput } from '@ag-ui/client';
+import { Observable } from 'rxjs';
+import { useMemo } from 'react';
+import { useRuntimeConfig } from './useRuntimeConfig';
+import { useSigV4, type SigV4Client } from './useSigV4';
+
+function buildAgentCoreUrl(agentRuntimeArn: string): string {
+  const region = agentRuntimeArn.split(':')[3];
+  return \`https://bedrock-agentcore.\${region}.amazonaws.com/runtimes/\${encodeURIComponent(agentRuntimeArn)}/invocations?qualifier=DEFAULT\`;
+}
+
+// AgentCore session ids must be at least 33 characters.
+function agentCoreSessionId(input: RunAgentInput): string {
+  return (input.threadId ?? '').padEnd(33, '0');
+}
+
+class SigV4HttpAgent extends HttpAgent {
+  sigV4Client: SigV4Client;
+
+  constructor(
+    config: ConstructorParameters<typeof HttpAgent>[0],
+    sigV4Client: SigV4Client,
+  ) {
+    super(config);
+    this.sigV4Client = sigV4Client;
+  }
+
+  protected override requestInit(input: RunAgentInput): RequestInit {
+    const init = super.requestInit(input);
+    init.headers = {
+      ...(init.headers as Record<string, string>),
+      'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id': agentCoreSessionId(input),
+    };
+    return init;
+  }
+
+  // Remove this override once https://github.com/ag-ui-protocol/ag-ui/issues/1316 is fixed.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  override run(input: RunAgentInput): any {
+    const sigV4Fetch = this.sigV4Client.fetch as typeof window.fetch;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return new Observable<any>((subscriber) => {
+      const originalFetch = window.fetch;
+      window.fetch = sigV4Fetch;
+      const sub = super.run(input).subscribe(subscriber);
+      window.fetch = originalFetch;
+      return () => sub.unsubscribe();
+    });
+  }
+
+  override clone(): SigV4HttpAgent {
+    const cloned = super.clone() as SigV4HttpAgent;
+    cloned.sigV4Client = this.sigV4Client;
+    return cloned;
+  }
+}
+
+export const useAguiTestAgent = (): Record<string, AbstractAgent> => {
+  const runtimeConfig = useRuntimeConfig();
+  const agentRuntimeValue = runtimeConfig.agentRuntimes.TestAgent;
+  const sigv4 = useSigV4();
+
+  const url = useMemo(
+    () =>
+      agentRuntimeValue.startsWith('arn:')
+        ? buildAgentCoreUrl(agentRuntimeValue)
+        : agentRuntimeValue,
+    [agentRuntimeValue],
+  );
+
+  return useMemo((): Record<string, AbstractAgent> => {
+    const agent = new SigV4HttpAgent({ url }, sigv4);
+
+    return { agent: agent };
+  }, [url, sigv4]);
+};
+"
+`;
+
+exports[`py strands agent react connection generator - AG-UI protocol > should register multiple AG-UI agents in the shared AguiProvider > AguiProvider-multi-agent.tsx 1`] = `
+"import { useAguiResearchAgent } from '../hooks/useAguiResearchAgent';
+import { useAguiTestAgent } from '../hooks/useAguiTestAgent';
+import { CopilotKitProvider } from '@copilotkit/react-core/v2';
+import '@copilotkit/react-core/v2/styles.css';
+import { type FC, type PropsWithChildren, useMemo } from 'react';
+import type { AbstractAgent } from '@ag-ui/client';
+
+export const AguiProvider: FC<PropsWithChildren> = ({ children }) => {
+  const testAgentAgents = useAguiTestAgent();
+  const researchAgentAgents = useAguiResearchAgent();
+  const selfManagedAgents = useMemo<Record<string, AbstractAgent>>(
+    () => ({ ...testAgentAgents, ...researchAgentAgents }),
+    [testAgentAgents, researchAgentAgents],
+  );
+
+  return (
+    <CopilotKitProvider selfManagedAgents={selfManagedAgents}>
+      {children}
+    </CopilotKitProvider>
+  );
+};
+
+export default AguiProvider;
+"
+`;

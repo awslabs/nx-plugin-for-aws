@@ -139,6 +139,11 @@ export const runSmokeTest = async (
     `generate @aws/nx-plugin:py#strands-agent --project=py_project --name=my-py-a2a-agent-cognito --protocol=A2A --auth=Cognito --computeType=BedrockAgentCoreRuntime --no-interactive`,
     opts,
   );
+  // Generate AG-UI protocol agent (Python only - TypeScript AG-UI is not yet supported)
+  await runCLI(
+    `generate @aws/nx-plugin:py#strands-agent --project=py_project --name=my-py-agui-agent --protocol=AG-UI --computeType=BedrockAgentCoreRuntime --no-interactive`,
+    opts,
+  );
   await runCLI(
     `generate @aws/nx-plugin:connection --sourceProject=website --targetProject=py_api --no-interactive`,
     opts,
@@ -195,6 +200,12 @@ export const runSmokeTest = async (
   // Connect the React website to the Python strands agent
   await runCLI(
     `generate @aws/nx-plugin:connection --sourceProject=@e2e-test/website --targetProject=py_project --targetComponent=my-agent --no-interactive`,
+    opts,
+  );
+
+  // Connect the React website to the Python AG-UI strands agent (CopilotKit)
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=@e2e-test/website --targetProject=py_project --targetComponent=my-py-agui-agent --no-interactive`,
     opts,
   );
 

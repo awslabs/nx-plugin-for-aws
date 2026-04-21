@@ -12,13 +12,12 @@ export interface PyStrandsAgentServeLocalOptions {
   agentNameClassName: string;
   port: number;
   targetComponent?: ComponentMetadata;
+  additionalDependencyTargets?: string[];
 }
 
 /**
  * Adds the given py strands agent target project to the source project's serve-local target.
  * Updates the runtime config provider (if it exists) to point to the local HTTP URL.
- * Also adds dependencies on the OpenAPI client generation targets so that local
- * API changes are reflected in the generated client.
  */
 export const addPyStrandsAgentTargetToServeLocal = async (
   tree: Tree,
@@ -26,15 +25,23 @@ export const addPyStrandsAgentTargetToServeLocal = async (
   targetProjectName: string,
   options: PyStrandsAgentServeLocalOptions,
 ) => {
-  const clientGenTarget = `generate:${kebabCase(options.agentNameClassName)}-client`;
-  const clientGenWatchTarget = `watch-${clientGenTarget}`;
-
   await addAgentTargetToServeLocal(tree, sourceProjectName, targetProjectName, {
     agentNameClassName: options.agentNameClassName,
     port: options.port,
     targetComponent: options.targetComponent,
     runtimeConfigNamespace: 'agentRuntimes',
     localUrl: `http://localhost:${options.port}/`,
-    additionalDependencyTargets: [clientGenTarget, clientGenWatchTarget],
+    additionalDependencyTargets: options.additionalDependencyTargets,
   });
+};
+
+/**
+ * Build the OpenAPI client generation target names for an HTTP agent so
+ * that local API changes regenerate the client.
+ */
+export const openApiClientServeLocalDeps = (
+  agentNameClassName: string,
+): string[] => {
+  const clientGenTarget = `generate:${kebabCase(agentNameClassName)}-client`;
+  return [clientGenTarget, `watch-${clientGenTarget}`];
 };

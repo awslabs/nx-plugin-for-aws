@@ -1,0 +1,201 @@
+---
+title: "React đến AG-UI Agent"
+description: "Kết nối một trang web React với Strands Agent thông qua giao thức AG-UI sử dụng CopilotKit"
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Snippet from '@components/snippet.astro';
+
+Nx Plugin for AWS cung cấp một generator để kết nối một trang web React với Strands Agent sử dụng [giao thức AG-UI](https://docs.ag-ui.com/). Nó kết nối [CopilotKit](https://docs.copilotkit.ai/aws-strands) với `HttpAgent` của [`@ag-ui/client`](https://docs.ag-ui.com/) trên trang web của bạn, hỗ trợ xác thực AWS IAM và Cognito.
+
+:::caution[TypeScript Strands Agents]
+AG-UI chưa được hỗ trợ cho TypeScript Strands Agents. Xem [strands-agents/sdk-typescript#347](https://github.com/strands-agents/sdk-typescript/issues/347) để biết trạng thái mới nhất. Hiện tại, hãy sử dụng <Link path="guides/py-strands-agent">generator `py#strands-agent`</Link> với `protocol=AG-UI`.
+:::
+
+## Yêu cầu tiên quyết
+
+Trước khi sử dụng generator này, hãy đảm bảo bạn có:
+
+1. Một trang web React (được tạo bằng <Link path="guides/react-website">generator `ts#react-website`</Link>)
+2. Một Python Strands Agent với `protocol=AG-UI` (được tạo bằng <Link path="guides/py-strands-agent">generator `py#strands-agent`</Link>)
+3. Đối với các agent đã triển khai, Cognito Auth được thêm vào thông qua <Link path="/guides/react-website-auth">generator `ts#react-website-auth`</Link>
+
+## Cách sử dụng
+
+### Chạy Generator
+
+<RunGenerator generator="connection" />
+
+Bạn sẽ được nhắc chọn trang web React của mình làm dự án nguồn và dự án chứa AG-UI Strands Agent của bạn làm dự án đích. Nếu dự án đích của bạn chứa nhiều component (như nhiều agent hoặc các loại component khác), bạn sẽ được nhắc chỉ định `targetComponent` để phân biệt.
+
+### Tùy chọn
+
+<GeneratorParameters generator="connection" />
+
+## Kết quả đầu ra của Generator
+
+Generator tạo ra một component `AguiProvider` **được chia sẻ duy nhất** và một hook cho mỗi agent được kết nối:
+
+<FileTree>
+
+- src
+  - components
+    - AguiProvider.tsx `CopilotKitProvider` duy nhất cho mọi AG-UI agent. Được tạo lần đầu tiên khi chạy `connection` và được cập nhật trong các lần chạy tiếp theo để đăng ký mỗi agent mới.
+  - hooks
+    - useAgui\<AgentName>.tsx Đăng ký một AG-UI agent. Một file cho mỗi lần chạy `connection`.
+    - useSigV4.tsx Ký SigV4 (chỉ IAM)
+
+</FileTree>
+
+Chạy `connection` lần thứ hai cho một agent khác sẽ **thêm một hook `useAgui<AgentName>.tsx` mới** và cập nhật `AguiProvider.tsx` để đăng ký cả hai hook — mọi chỉnh sửa tùy chỉnh bạn đã thực hiện đối với provider đều được bảo toàn. `main.tsx` giữ wrapper `<AguiProvider>` duy nhất của nó — bạn không bao giờ có các provider lồng nhau.
+
+Các dependency sau được thêm vào `package.json` gốc:
+
+- `@copilotkit/react-core` — cung cấp `CopilotKitProvider` và các component chat (`CopilotChat`, `CopilotSidebar`, `CopilotPopup`)
+- `@ag-ui/client` — `HttpAgent` được sử dụng bởi các hook được tạo
+- `aws4fetch`, `oidc-client-ts`, `react-oidc-context`, `@aws-sdk/credential-providers` — chỉ xác thực IAM
+- `react-oidc-context` — xác thực Cognito
+
+## Cách hoạt động
+
+### Kết nối AG-UI
+
+Mỗi hook `useAgui<AgentName>` đọc giá trị runtime của agent từ <Link path="guides/runtime-config">Runtime Configuration</Link> và khởi tạo một `HttpAgent` của `@ag-ui/client`:
+
+- **Đã triển khai**: giá trị runtime là Bedrock AgentCore Runtime ARN, được chuyển đổi thành endpoint HTTPS của AgentCore: `https://bedrock-agentcore.<region>.amazonaws.com/runtimes/<encoded-arn>/invocations?qualifier=DEFAULT`
+- **Phát triển cục bộ**: `serve-local` ghi đè giá trị thành URL cục bộ của agent (ví dụ: `http://localhost:8081`)
+
+`AguiProvider` được chia sẻ gọi mọi hook được tạo và trải từng cái vào `selfManagedAgents` trên một `CopilotKitProvider` duy nhất, điều này hiển thị tất cả chúng cho các component CopilotKit.
+
+### Tích hợp CopilotKit
+
+[CopilotKit](https://docs.copilotkit.ai/aws-strands) là client React tham chiếu chính thức cho giao thức AG-UI và cung cấp sẵn các component chat:
+
+- `<CopilotChat />` — giao diện chat đầy đủ
+- `<CopilotSidebar />` — chat bảng điều khiển bên cố định
+- `<CopilotPopup />` — cửa sổ chat nổi
+
+Đặt bất kỳ component nào trong số này ở bất kỳ đâu bên trong wrapper `<AguiProvider>` (đã được kết nối vào `main.tsx` cho bạn).
+
+### Xác thực
+
+Mã được tạo xử lý xác thực tùy thuộc vào cấu hình agent của bạn:
+
+- **IAM** (mặc định): sử dụng các yêu cầu HTTP được ký AWS SigV4. Thông tin xác thực được lấy từ Cognito Identity Pool được cấu hình với xác thực của trang web.
+- **Cognito**: nhúng JWT access token vào header `Authorization` dưới dạng Bearer token.
+
+## Cơ sở hạ tầng
+
+<Snippet name="connection/react-agent-infrastructure" parentHeading="Infrastructure" />
+
+## Sử dụng mã được tạo
+
+### Thêm giao diện Chat
+
+Khởi tạo các component CopilotKit với `agentId` để chọn agent nào sẽ sử dụng. Id là tên của agent — tên mà bạn đã chọn khi chạy <Link path="guides/py-strands-agent">generator `py#strands-agent`</Link> — và bạn cũng có thể tìm thấy nó trong file hook được tạo (ví dụ: key được trả về từ `packages/web/src/hooks/useAgui<AgentName>.tsx`):
+
+```tsx
+import { CopilotChat } from '@copilotkit/react-core/v2';
+
+function ChatPage() {
+  return (
+    <CopilotChat
+      agentId="agent"
+      labels={{
+        welcomeMessageText: 'How can I help you today?',
+        chatInputPlaceholder: 'Ask me anything...',
+      }}
+    />
+  );
+}
+```
+
+### Kết nối nhiều AG-UI Agent
+
+Chạy generator `connection` một lần cho mỗi agent. Mọi agent được đăng ký thông qua `AguiProvider` được chia sẻ đều hiển thị từ bất kỳ đâu trong ứng dụng — khởi tạo một component CopilotKit với `agentId` khác nhau để định tuyến mỗi chat đến agent bạn muốn:
+
+```tsx
+<CopilotChat agentId="story" />    {/* talks to StoryAgent */}
+<CopilotChat agentId="research" /> {/* talks to ResearchAgent */}
+```
+
+## Tùy chỉnh giao diện
+
+`<CopilotChat />` (và `<CopilotSidebar />`, `<CopilotPopup />`) sử dụng **hệ thống slot đệ quy** — bạn có thể ghi đè bất kỳ sub-component nào bằng chuỗi class Tailwind, đối tượng prop hoặc component React tùy chỉnh. Xem [hướng dẫn slot CopilotKit](https://docs.copilotkit.ai/aws-strands/custom-look-and-feel/slots) để biết cây slot đầy đủ.
+
+### Tạo kiểu Tailwind thông qua slot
+
+```tsx
+<CopilotChat
+  agentId="agent"
+  // style the input and its children
+  input={{
+    textArea: 'text-blue-600',
+    sendButton: 'bg-blue-600 hover:bg-blue-700',
+  }}
+  // style nested message slots
+  messageView={{
+    assistantMessage: 'bg-blue-50 rounded-xl p-2',
+    userMessage: 'bg-blue-100 rounded-xl',
+  }}
+/>
+```
+
+### Thay thế slot bằng component tùy chỉnh
+
+Bất kỳ slot nào cũng có thể nhận một component React thay vì className, vì vậy bạn có thể thay thế hoàn toàn mặc định:
+
+```tsx
+import { CopilotChat } from '@copilotkit/react-core/v2';
+
+const MySendButton: React.FC<{ onClick: () => void }> = ({ onClick }) => (
+  <button onClick={onClick} className="my-send-btn">
+    ✨ Send
+  </button>
+);
+
+<CopilotChat
+  agentId="agent"
+  input={{ sendButton: MySendButton }}
+/>;
+```
+
+Ghi đè sâu hơn tuân theo cùng một hình dạng — ví dụ: chỉ thay thế nút sao chép trên tin nhắn trợ lý:
+
+```tsx
+<CopilotChat
+  agentId="agent"
+  messageView={{
+    assistantMessage: {
+      copyButton: ({ onClick }) => <button onClick={onClick}>Copy</button>,
+    },
+  }}
+/>
+```
+
+## Phát triển cục bộ
+
+Generator kết nối tự động cấu hình tích hợp `serve-local`:
+
+1. Chạy `nx serve-local <website>` cũng sẽ khởi động máy chủ cục bộ của agent
+2. Cấu hình runtime được ghi đè để trỏ đến URL AG-UI cục bộ (ví dụ: `http://localhost:8081`)
+3. Cả trang web và agent đều hot-reload cùng nhau
+
+<NxCommands commands={['serve-local <WebsiteProject>']} />
+
+:::tip[Hot Reloading]
+Trang web và agent được kết nối hot-reload cùng nhau, cho phép bạn nhanh chóng lặp lại trên cả hai phía mà không cần triển khai lên AWS.
+:::
+
+## Thông tin thêm
+
+- <Link path="guides/py-strands-agent">Hướng dẫn Python Strands Agent</Link>
+- <Link path="guides/connection/react-py-strands-agent">Hướng dẫn React to Python Strands Agent (HTTP)</Link>
+- [AG-UI Protocol Documentation](https://docs.ag-ui.com/)
+- [CopilotKit + AWS Strands Documentation](https://docs.copilotkit.ai/aws-strands)
+- [CopilotKit Custom Look & Feel](https://docs.copilotkit.ai/aws-strands/custom-look-and-feel/slots)
+- [Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/)

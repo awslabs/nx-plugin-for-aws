@@ -116,7 +116,9 @@ export const pyStrandsAgentGenerator = async (
     'mcp',
     ...(protocol === 'A2A'
       ? (['strands-agents[a2a]'] as const)
-      : (['strands-agents'] as const)),
+      : protocol === 'AG-UI'
+        ? (['strands-agents', 'ag-ui-protocol', 'ag-ui-strands'] as const)
+        : (['strands-agents'] as const)),
     'strands-agents-tools',
     'uvicorn',
   ]);
@@ -185,7 +187,10 @@ export const pyStrandsAgentGenerator = async (
     const iacProvider = await resolveIacProvider(tree, options.iacProvider);
     await sharedConstructsGenerator(tree, { iacProvider });
 
-    // Add the construct to deploy the agent
+    // Add the construct to deploy the agent.
+    // AG-UI uses HTTP as the AgentCore protocol type (AG-UI is HTTP-based with SSE over POST).
+    const infraProtocol =
+      protocol === 'AG-UI' ? ('HTTP' as const) : (protocol as 'HTTP' | 'A2A');
     await addAgentInfra(tree, {
       agentNameKebabCase: name,
       agentNameClassName,
@@ -194,18 +199,19 @@ export const pyStrandsAgentGenerator = async (
       iacProvider,
       projectName: project.name,
       auth,
-      serverProtocol: protocol,
+      serverProtocol: infraProtocol,
     });
   }
 
   // A2A servers use port 9000 as per the Strands A2A SDK default and AgentCore A2A contract.
-  // HTTP agents use port 8081+ to avoid conflict with VS Code server on 8080.
+  // HTTP and AG-UI agents use port 8081+ to avoid conflict with VS Code server on 8080.
   const localDevPortStart = protocol === 'A2A' ? 9000 : 8081;
   const localDevPort = assignPort(tree, project, localDevPortStart);
 
-  // Both protocols use fastapi dev for hot reload:
+  // All protocols use fastapi dev for hot reload:
   // - HTTP: FastAPI app directly defined in init.py
   // - A2A: A2AServer.to_fastapi_app() creates a FastAPI app in main.py
+  // - AG-UI: create_strands_app() creates a FastAPI app in main.py
   const serveCommand = `uv run fastapi dev ${moduleName}/${agentNameSnakeCase}/main.py --port ${localDevPort}`;
 
   updateProjectConfiguration(tree, project.name, {

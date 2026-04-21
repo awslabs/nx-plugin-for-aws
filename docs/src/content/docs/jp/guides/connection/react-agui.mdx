@@ -1,0 +1,201 @@
+---
+title: "React から AG-UI エージェントへ"
+description: "CopilotKit を使用して、AG-UI プロトコル経由で React ウェブサイトを Strands エージェントに接続します"
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import NxCommands from '@components/nx-commands.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Snippet from '@components/snippet.astro';
+
+Nx Plugin for AWSは、[AG-UIプロトコル](https://docs.ag-ui.com/)を公開するStrands AgentにReactウェブサイトを接続するためのジェネレーターを提供します。このジェネレーターは、AWS IAMとCognito認証をサポートし、ウェブサイト上で[CopilotKit](https://docs.copilotkit.ai/aws-strands)と[`@ag-ui/client`](https://docs.ag-ui.com/) `HttpAgent`を配線します。
+
+:::caution[TypeScript Strands Agents]
+AG-UIはまだTypeScript Strands Agentsではサポートされていません。最新の状況については[strands-agents/sdk-typescript#347](https://github.com/strands-agents/sdk-typescript/issues/347)を参照してください。現時点では、`protocol=AG-UI`を指定して<Link path="guides/py-strands-agent">`py#strands-agent`ジェネレーター</Link>を使用してください。
+:::
+
+## 前提条件
+
+このジェネレーターを使用する前に、以下を確認してください:
+
+1. Reactウェブサイト(<Link path="guides/react-website">`ts#react-website`ジェネレーター</Link>を使用して生成)
+2. `protocol=AG-UI`を指定したPython Strands Agent(<Link path="guides/py-strands-agent">`py#strands-agent`ジェネレーター</Link>を使用して生成)
+3. デプロイされたエージェントの場合、<Link path="/guides/react-website-auth">`ts#react-website-auth`ジェネレーター</Link>を介して追加されたCognito Auth
+
+## 使用方法
+
+### ジェネレーターの実行
+
+<RunGenerator generator="connection" />
+
+ソースプロジェクトとしてReactウェブサイトを選択し、ターゲットプロジェクトとしてAG-UI Strands Agentを含むプロジェクトを選択するよう求められます。ターゲットプロジェクトに複数のコンポーネント(複数のエージェントや他のコンポーネントタイプなど)が含まれている場合、曖昧さを解消するために`targetComponent`を指定するよう求められます。
+
+### オプション
+
+<GeneratorParameters generator="connection" />
+
+## ジェネレーターの出力
+
+ジェネレーターは、**単一の共有**`AguiProvider`コンポーネントと、接続されたエージェントごとに1つのフックを作成します:
+
+<FileTree>
+
+- src
+  - components
+    - AguiProvider.tsx すべてのAG-UIエージェント用の単一の`CopilotKitProvider`。最初の`connection`実行時に作成され、その後の実行で各新しいエージェントを登録するために更新されます。
+  - hooks
+    - useAgui\<AgentName>.tsx 1つのAG-UIエージェントを登録します。`connection`の実行ごとに1つのファイル。
+    - useSigV4.tsx SigV4署名(IAMのみ)
+
+</FileTree>
+
+別のエージェントに対して`connection`を2回目に実行すると、**新しい`useAgui<AgentName>.tsx`フックが追加**され、`AguiProvider.tsx`が両方のフックを登録するように更新されます — プロバイダーに加えたカスタム編集は保持されます。`main.tsx`は単一の`<AguiProvider>`ラッパーを保持します — ネストされたプロバイダーになることはありません。
+
+以下の依存関係がルートの`package.json`に追加されます:
+
+- `@copilotkit/react-core` — `CopilotKitProvider`とチャットコンポーネント(`CopilotChat`、`CopilotSidebar`、`CopilotPopup`)を提供
+- `@ag-ui/client` — 生成されたフックで使用される`HttpAgent`
+- `aws4fetch`、`oidc-client-ts`、`react-oidc-context`、`@aws-sdk/credential-providers` — IAM認証のみ
+- `react-oidc-context` — Cognito認証
+
+## 仕組み
+
+### AG-UI接続
+
+各`useAgui<AgentName>`フックは、<Link path="guides/runtime-config">ランタイム設定</Link>からエージェントのランタイム値を読み取り、`@ag-ui/client` `HttpAgent`をインスタンス化します:
+
+- **デプロイ済み**: ランタイム値はBedrock AgentCore Runtime ARNであり、AgentCore HTTPSエンドポイントに変換されます: `https://bedrock-agentcore.<region>.amazonaws.com/runtimes/<encoded-arn>/invocations?qualifier=DEFAULT`
+- **ローカル開発**: `serve-local`は値をエージェントのローカルURL(例: `http://localhost:8081`)にオーバーライドします
+
+共有`AguiProvider`は、生成されたすべてのフックを呼び出し、それぞれを単一の`CopilotKitProvider`上の`selfManagedAgents`にスプレッドし、それらすべてをCopilotKitコンポーネントに公開します。
+
+### CopilotKit統合
+
+[CopilotKit](https://docs.copilotkit.ai/aws-strands)は、AG-UIプロトコルのファーストパーティリファレンスReactクライアントであり、すぐに使えるチャットコンポーネントを提供します:
+
+- `<CopilotChat />` — フルチャットインターフェース
+- `<CopilotSidebar />` — 固定サイドパネルチャット
+- `<CopilotPopup />` — フローティングチャットポップアップ
+
+これらのいずれかを`<AguiProvider>`ラッパー内の任意の場所に配置してください(すでに`main.tsx`に配線されています)。
+
+### 認証
+
+生成されたコードは、エージェントの設定に応じて認証を処理します:
+
+- **IAM**(デフォルト): AWS SigV4署名されたHTTPリクエストを使用します。認証情報は、ウェブサイトの認証で設定されたCognito Identity Poolから取得されます。
+- **Cognito**: JWTアクセストークンをBearerトークンとして`Authorization`ヘッダーに埋め込みます。
+
+## インフラストラクチャ
+
+<Snippet name="connection/react-agent-infrastructure" parentHeading="Infrastructure" />
+
+## 生成されたコードの使用
+
+### チャットインターフェースの追加
+
+`agentId`を指定してCopilotKitコンポーネントをインスタンス化し、使用するエージェントを選択します。idはエージェントの名前です — <Link path="guides/py-strands-agent">`py#strands-agent`ジェネレーター</Link>を実行したときに選択したものと同じです — また、生成されたフックファイル(例: `packages/web/src/hooks/useAgui<AgentName>.tsx`から返されるキー)でも確認できます:
+
+```tsx
+import { CopilotChat } from '@copilotkit/react-core/v2';
+
+function ChatPage() {
+  return (
+    <CopilotChat
+      agentId="agent"
+      labels={{
+        welcomeMessageText: 'How can I help you today?',
+        chatInputPlaceholder: 'Ask me anything...',
+      }}
+    />
+  );
+}
+```
+
+### 複数のAG-UIエージェントの接続
+
+エージェントごとに`connection`ジェネレーターを1回実行します。共有`AguiProvider`を介して登録されたすべてのエージェントは、アプリ内のどこからでも見えます — 異なる`agentId`でCopilotKitコンポーネントをインスタンス化して、各チャットを目的のエージェントにルーティングします:
+
+```tsx
+<CopilotChat agentId="story" />    {/* talks to StoryAgent */}
+<CopilotChat agentId="research" /> {/* talks to ResearchAgent */}
+```
+
+## ルック&フィールのカスタマイズ
+
+`<CopilotChat />`(および`<CopilotSidebar />`、`<CopilotPopup />`)は再帰的な**スロットシステム**を使用しています — Tailwindクラス文字列、propオブジェクト、またはカスタムReactコンポーネントのいずれかで任意のサブコンポーネントをオーバーライドできます。完全なスロットツリーについては、[CopilotKitスロットガイド](https://docs.copilotkit.ai/aws-strands/custom-look-and-feel/slots)を参照してください。
+
+### スロットによるTailwindスタイリング
+
+```tsx
+<CopilotChat
+  agentId="agent"
+  // style the input and its children
+  input={{
+    textArea: 'text-blue-600',
+    sendButton: 'bg-blue-600 hover:bg-blue-700',
+  }}
+  // style nested message slots
+  messageView={{
+    assistantMessage: 'bg-blue-50 rounded-xl p-2',
+    userMessage: 'bg-blue-100 rounded-xl',
+  }}
+/>
+```
+
+### カスタムコンポーネントでスロットを置き換える
+
+任意のスロットはclassNameの代わりにReactコンポーネントを受け取ることができるため、デフォルトを完全に置き換えることができます:
+
+```tsx
+import { CopilotChat } from '@copilotkit/react-core/v2';
+
+const MySendButton: React.FC<{ onClick: () => void }> = ({ onClick }) => (
+  <button onClick={onClick} className="my-send-btn">
+    ✨ Send
+  </button>
+);
+
+<CopilotChat
+  agentId="agent"
+  input={{ sendButton: MySendButton }}
+/>;
+```
+
+より深いオーバーライドも同じ形式に従います — 例えば、アシスタントメッセージのコピーボタンだけを置き換える:
+
+```tsx
+<CopilotChat
+  agentId="agent"
+  messageView={{
+    assistantMessage: {
+      copyButton: ({ onClick }) => <button onClick={onClick}>Copy</button>,
+    },
+  }}
+/>
+```
+
+## ローカル開発
+
+接続ジェネレーターは自動的に`serve-local`統合を設定します:
+
+1. `nx serve-local <website>`を実行すると、エージェントのローカルサーバーも起動します
+2. ランタイム設定がローカルAG-UI URL(例: `http://localhost:8081`)を指すようにオーバーライドされます
+3. ウェブサイトとエージェントの両方が一緒にホットリロードされます
+
+<NxCommands commands={['serve-local <WebsiteProject>']} />
+
+:::tip[ホットリロード]
+ウェブサイトと接続されたエージェントが一緒にホットリロードされるため、AWSにデプロイすることなく両側を素早く反復できます。
+:::
+
+## 詳細情報
+
+- <Link path="guides/py-strands-agent">Python Strands Agentガイド</Link>
+- <Link path="guides/connection/react-py-strands-agent">React to Python Strands Agent (HTTP)ガイド</Link>
+- [AG-UI Protocol Documentation](https://docs.ag-ui.com/)
+- [CopilotKit + AWS Strands Documentation](https://docs.copilotkit.ai/aws-strands)
+- [CopilotKit Custom Look & Feel](https://docs.copilotkit.ai/aws-strands/custom-look-and-feel/slots)
+- [Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/)

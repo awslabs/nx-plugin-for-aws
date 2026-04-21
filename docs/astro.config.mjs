@@ -373,12 +373,24 @@ export default defineConfig({
                   link: '/guides/connection/react-ts-strands-agent',
                 },
                 {
+                  label: 'React → AG-UI Agent',
+                  link: '/guides/connection/react-agui',
+                },
+                {
                   label: 'Python Strands Agent → MCP Server',
                   link: '/guides/connection/py-strands-agent-mcp',
                 },
                 {
                   label: 'TypeScript Strands Agent → MCP Server',
                   link: '/guides/connection/ts-strands-agent-mcp',
+                },
+                {
+                  label: 'Python Strands Agent → A2A Agent',
+                  link: '/guides/connection/py-strands-agent-a2a',
+                },
+                {
+                  label: 'TypeScript Strands Agent → A2A Agent',
+                  link: '/guides/connection/ts-strands-agent-a2a',
                 },
               ],
             },

@@ -942,4 +942,15 @@ describe('ts#strands-agent generator', () => {
     // Check that metadata uses default name
     expect(projectConfig.metadata.components[0].name).toBe('agent');
   });
+
+  it('should throw for AG-UI protocol (not yet supported for TypeScript)', async () => {
+    await expect(
+      tsStrandsAgentGenerator(tree, {
+        project: 'test-project',
+        protocol: 'AG-UI',
+        computeType: 'None',
+        iacProvider: 'CDK',
+      }),
+    ).rejects.toThrow(/AG-UI protocol is not yet supported/);
+  });
 });

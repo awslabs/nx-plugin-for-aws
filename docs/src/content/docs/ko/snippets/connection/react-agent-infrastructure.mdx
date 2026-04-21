@@ -1,0 +1,59 @@
+---
+title: "React와 Agent 연결 인프라"
+---
+
+import Link from '@components/link.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+에이전트가 IAM 인증을 사용하는 경우, Cognito Identity Pool의 인증된 역할에 에이전트를 호출할 수 있는 권한을 부여해야 합니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts title="packages/infra/src/stacks/application-stack.ts" {5}
+const identity = new UserIdentity(this, 'Identity');
+const myAgent = new MyAgent(this, 'MyAgent');
+
+// Grant the authenticated Cognito role permission to invoke the agent
+myAgent.grantInvokeAccess(identity.identityPool.authenticatedRole);
+```
+
+`grantInvokeAccess`는 에이전트의 런타임 ARN에 대한 모든 AgentCore 호출 작업(`InvokeAgentRuntime`, `InvokeAgentRuntimeWithWebSocketStream`)을 연결합니다.
+</Fragment>
+<Fragment slot="terraform">
+```hcl title="packages/infra/src/main.tf"
+module "identity" {
+  source = "../../common/terraform/src/core/user-identity"
+}
+
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+}
+
+# Grant the authenticated Cognito role permission to invoke the agent
+resource "aws_iam_policy" "invoke_my_agent" {
+  name = "InvokeMyAgentPolicy"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "bedrock-agentcore:InvokeAgentRuntime",
+        "bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream",
+      ]
+      Resource = [
+        module.my_agent.agent_core_runtime_arn,
+        "${module.my_agent.agent_core_runtime_arn}/*",
+      ]
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "invoke_my_agent" {
+  role       = module.identity.authenticated_role_name
+  policy_arn = aws_iam_policy.invoke_my_agent.arn
+}
+```
+</Fragment>
+</Infrastructure>
+
+에이전트가 Cognito 인증을 사용하는 경우, 웹사이트를 에이전트에 연결하기 위해 추가 인프라를 정의할 필요가 없습니다.

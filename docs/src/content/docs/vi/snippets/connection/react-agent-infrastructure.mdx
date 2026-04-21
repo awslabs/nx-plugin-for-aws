@@ -1,0 +1,59 @@
+---
+title: "Cơ sở hạ tầng kết nối React với Agent"
+---
+
+import Link from '@components/link.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+Nếu agent của bạn sử dụng xác thực IAM, vai trò đã xác thực của Cognito Identity Pool phải được cấp quyền để gọi agent.
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts title="packages/infra/src/stacks/application-stack.ts" {5}
+const identity = new UserIdentity(this, 'Identity');
+const myAgent = new MyAgent(this, 'MyAgent');
+
+// Grant the authenticated Cognito role permission to invoke the agent
+myAgent.grantInvokeAccess(identity.identityPool.authenticatedRole);
+```
+
+`grantInvokeAccess` kết nối tất cả các hành động gọi AgentCore (`InvokeAgentRuntime`, `InvokeAgentRuntimeWithWebSocketStream`) trên ARN runtime của agent.
+</Fragment>
+<Fragment slot="terraform">
+```hcl title="packages/infra/src/main.tf"
+module "identity" {
+  source = "../../common/terraform/src/core/user-identity"
+}
+
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+}
+
+# Grant the authenticated Cognito role permission to invoke the agent
+resource "aws_iam_policy" "invoke_my_agent" {
+  name = "InvokeMyAgentPolicy"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "bedrock-agentcore:InvokeAgentRuntime",
+        "bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream",
+      ]
+      Resource = [
+        module.my_agent.agent_core_runtime_arn,
+        "${module.my_agent.agent_core_runtime_arn}/*",
+      ]
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "invoke_my_agent" {
+  role       = module.identity.authenticated_role_name
+  policy_arn = aws_iam_policy.invoke_my_agent.arn
+}
+```
+</Fragment>
+</Infrastructure>
+
+Nếu agent của bạn sử dụng xác thực Cognito, bạn không cần định nghĩa bất kỳ cơ sở hạ tầng bổ sung nào để kết nối trang web của bạn với agent.
