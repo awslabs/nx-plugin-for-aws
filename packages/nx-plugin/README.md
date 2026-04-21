@@ -163,7 +163,7 @@ pnpm nx g @aws/nx-plugin:ts#infra
 | ----------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `ts#project`            | TypeScript library                                                                                                |
 | `ts#trpc-api`           | tRPC API with API Gateway + Lambda + [Powertools](https://github.com/aws-powertools/powertools-lambda-typescript) |
-| `ts#rdb`                | Relational database with migrations and IAM authentication                                                        |
+| `ts#rdb`                | Relational database with Aurora RDS                                                                               |
 | `ts#react-website`      | React app (Vite)                                                                                                  |
 | `ts#react-website#auth` | Add Cognito auth to a React website                                                                               |
 | `ts#infra`              | AWS CDK infrastructure project                                                                                    |

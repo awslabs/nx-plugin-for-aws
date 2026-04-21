@@ -1,6 +1,6 @@
 ---
-title: "关系型数据库"
-description: "创建关系型数据库项目"
+title: 关系型数据库
+description: 创建关系型数据库项目
 ---
 
 import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
@@ -14,7 +14,7 @@ import Snippet from '@components/snippet.astro';
 生成的基础设施包括:
 
 - 可重用的 Aurora 构造或模块
-- 特定于应用程序的数据库构造或模块
+- 特定于应用程序的数据库构造或模块  
 - IAM 认证的应用程序数据库用户处理程序
 - 在 AWS AppConfig 中注册运行时配置
 - 用于自动部署 Prisma 迁移的迁移处理程序
@@ -37,7 +37,9 @@ import Snippet from '@components/snippet.astro';
 
 <FileTree>
   - prisma
-    - schema.prisma Prisma 架构和示例模型
+    - models
+      - example.prisma 示例模型定义
+    - schema.prisma 主 Prisma 架构(引用模型)
   - src
     - index.ts 项目入口点
     - prisma.ts Prisma 运行时客户端包装器
@@ -89,11 +91,11 @@ import Snippet from '@components/snippet.astro';
 
 ### 数据建模
 
-生成的项目使用 [Prisma ORM](https://www.prisma.io/docs/orm) 来定义数据库架构并生成类型安全的客户端。在 `prisma/schema.prisma` 中对表、关系和字段类型进行建模。
+生成的项目使用 [Prisma ORM](https://www.prisma.io/docs/orm) 来定义数据库架构并生成类型安全的客户端。在 `prisma/models/` 下的文件中对表、关系和字段类型进行建模。
 
 `User` 模型示例:
 
-```ts title="packages/postgres/prisma/schema.prisma"
+```ts title="packages/postgres/prisma/models/user.prisma"
 model User {
   id          Int      @id @default(autoincrement()) 
   firstName   String
@@ -113,28 +115,28 @@ model User {
   <TabItem label="npm" icon="seti:npm">
 
 ```bash
-npm run nx generate <your-db-package-name>
+npm run nx -- run <your-db-package-name>:generate
 ```
 
   </TabItem>
   <TabItem label="pnpm" icon="seti:pnpm">
 
 ```bash
-pnpm nx generate <your-db-package-name>
+pnpm nx run <your-db-package-name>:generate
 ```
 
   </TabItem>
   <TabItem label="yarn" icon="seti:yarn">
 
 ```bash
-yarn nx generate <your-db-package-name>
+yarn nx run <your-db-package-name>:generate
 ```
 
   </TabItem>
   <TabItem label="bun" icon="seti:bun">
 
 ```bash
-bun nx generate <your-db-package-name>
+bun nx run <your-db-package-name>:generate
 ```
 
   </TabItem>
@@ -150,25 +152,6 @@ bun nx generate <your-db-package-name>
 - 通过 AWS RDS Signer 生成临时认证令牌以进行 IAM 认证
 - 通过证书验证管理 SSL/TLS 连接
 - 通过持久数据库连接池处理连接池
-
-在 tRPC API 中的使用示例:
-
-```ts title="packages/api/src/procedures/list-user.ts"
-import { getPrisma } from ':aws-nx-poc/postgres';
-import { publicProcedure } from '../init.js';
-import { ListUserOutputSchema } from '../schema/index.js';
-
-export const listUser = publicProcedure
-  .output(ListUserOutputSchema)
-  .query(async () => {
-    const prisma = await getPrisma();
-    const users = await prisma.user.findMany({
-      orderBy: { id: 'asc' },
-    });
-
-    return { users };
-  });
-```
 
 ### 创建迁移
 
@@ -265,6 +248,82 @@ bunx --bun prisma migrate deploy
 对于 AWS 部署,您无需手动运行 `prisma migrate deploy`。生成的基础设施会在部署期间自动创建应用程序数据库用户并运行迁移。
 :::
 
+## 从 tRPC API 连接
+
+### 在处理程序中使用 Prisma 客户端
+
+从数据库包导入 `getPrisma` 并在处理程序内调用它以获取类型安全的 Prisma 客户端:
+
+```ts title="packages/api/src/procedures/list-users.ts"
+import { getPrisma } from ':my-scope/db';
+import { publicProcedure } from '../init.js';
+import { ListUsersOutputSchema } from '../schema/index.js';
+
+export const listUsers = publicProcedure
+  .output(ListUsersOutputSchema)
+  .query(async () => {
+    const prisma = await getPrisma();
+    return prisma.user.findMany({ orderBy: { id: 'asc' } });
+  });
+```
+
+`getPrisma()` 返回一个延迟初始化的缓存客户端 — 在同一 Lambda 执行上下文中的后续调用会重用现有连接池,而不是打开新连接。
+
+Prisma 客户端公开从您的 `prisma/models/` 架构派生的完全类型化模型,为您提供从数据库一直到 API 响应的端到端类型安全。
+
+### 通过中间件注入 Prisma 客户端
+
+与其在每个过程中调用 `getPrisma()`,您还可以在中间件中解析一次并将其附加到 tRPC 上下文,以便所有下游过程可以直接访问它。
+
+首先,按照生成的中间件的相同模式在 `src/middleware/db.ts` 中定义插件:
+
+```ts title="packages/api/src/middleware/db.ts"
+import { getPrisma } from ':my-scope/db';
+import { initTRPC } from '@trpc/server';
+
+export interface IDbContext {
+  db: Awaited<ReturnType<typeof getPrisma>>;
+}
+
+export const createDbPlugin = () => {
+  const t = initTRPC.context<IDbContext>().create();
+  return t.procedure.use(async (opts) => {
+    const db = await getPrisma();
+    return opts.next({
+      ctx: {
+        ...opts.ctx,
+        db,
+      },
+    });
+  });
+};
+```
+
+然后在 tRPC 初始化中将其连接到基础过程:
+
+```ts title="packages/api/src/init.ts"
+import { createDbPlugin } from './middleware/db.js';
+
+export const dbProcedure = publicProcedure.concat(createDbPlugin());
+```
+
+基于 `dbProcedure` 构建的过程通过上下文接收 `db`,无需自己导入或调用 `getPrisma()`:
+
+```ts title="packages/api/src/procedures/list-users.ts"
+import { dbProcedure } from '../init.js';
+import { ListUsersOutputSchema } from '../schema/index.js';
+
+export const listUsers = dbProcedure
+  .output(ListUsersOutputSchema)
+  .query(async ({ ctx: { db } }) => {
+    return db.user.findMany({ orderBy: { id: 'asc' } });
+  });
+```
+
+:::note
+有关中间件模式的更多详细信息,请参阅[实现自定义中间件](./trpc#implementing-custom-middleware)。
+:::
+
 ## 部署到 AWS
 
 关系数据库生成器根据您选择的 `iacProvider` 创建 CDK 或 Terraform 基础设施。
@@ -320,8 +379,8 @@ Terraform 模块在 `common/terraform` 中创建。使用示例:
 module "postgres" {
   source = "../../common/terraform/src/app/dbs/postgres"
 
-  vpc_id     = module.vpc.vpc_id
-  subnet_ids = module.vpc.private_isolated_subnet_ids
+  vpc_id             = module.vpc.vpc_id
+  private_subnet_ids = module.vpc.private_isolated_subnet_ids
 
   tags = local.common_tags
 }
@@ -335,69 +394,77 @@ module "postgres" {
 </Fragment>
 </Infrastructure>
 
-### 连接 Lambda 函数
+应用程序用户会自动创建一个随机名称并启用 IAM 认证 — `getPrisma()` 已配置为使用短期 RDS 令牌作为此用户进行认证,因此您的应用程序代码永远不会处理数据库密码。
 
-要从 Lambda 函数使用 Prisma 客户端,请确保满足以下要求:
-
-1. 在与数据库相同的 VPC 中部署函数
-2. 允许对数据库端口的网络访问
-3. 为生成的运行时用户授予 IAM `rds-db:connect` 权限
-4. 设置所需的环境变量:
-   - `NODE_EXTRA_CA_CERTS=/var/runtime/ca-cert.pem`(TLS 验证所需)
-   - `RUNTIME_CONFIG_APP_ID`(由生成的基础设施自动设置)
-   - `AWS_REGION`(在 Lambda 执行环境中自动设置)
-
-:::note[Prisma CLI 与运行时客户端]
-**Prisma CLI** 命令(`prisma migrate dev`、`prisma migrate deploy`)从环境变量读取 `DATABASE_URL`。
-
-**运行时客户端**(`src/prisma.ts`)从 AWS AppConfig 加载连接设置并使用 IAM 认证。
-:::
+### 将 API 构造连接到数据库
 
 <Infrastructure>
 <Fragment slot="cdk">
 
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { RuntimeConfig } from ':my-scope/common-constructs';
+在应用程序堆栈中,将 API 部署到与数据库相同的 VPC 中,然后调用 `allowDefaultPortFrom` 和 `grantConnect` 以打开网络路径并向每个 Lambda 处理程序授予 IAM `rds-db:connect` 权限:
 
-const runtimeConfig = RuntimeConfig.ensure(this);
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const db = new Postgres(this, 'Db', { vpc, ... });
 
 const api = new Api(this, 'Api', {
   integrations: Api.defaultIntegrations(this)
     .withDefaultOptions({
       vpc,
-      vpcSubnets: {
-        subnetType: SubnetType.PRIVATE_WITH_EGRESS,
-      },
-      environment: {
-        NODE_EXTRA_CA_CERTS: '/var/runtime/ca-cert.pem',
-      },
+      vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
     })
     .build(),
 });
 
 Object.entries(api.integrations).forEach(([operation, integration]) => {
-  db.allowDefaultPortFrom(
-    integration.handler,
-    `Allow ${operation} to connect to the database`,
-  );
+  db.allowDefaultPortFrom(integration.handler, `Allow ${operation} to connect to the database`);
   db.grantConnect(integration.handler);
 });
 ```
 
-这会配置每个 API Lambda 函数在同一 VPC 中运行,从 AppConfig 读取运行时配置,并使用 IAM 认证连接到数据库。
+`RUNTIME_CONFIG_APP_ID` 由生成的基础设施自动设置,以便运行时客户端可以从 AppConfig 加载数据库连接详细信息。
 </Fragment>
 <Fragment slot="terraform">
-将 Lambda 函数连接到数据库时,使用这些模块输出:
 
-- `appconfig_application_id` - 暴露给计算环境
-- `cluster_port` - 允许网络访问
-- `database_runtime_user` - 授予 `rds-db:connect` 权限
+将数据库模块输出传递到计算模块,以便它可以访问数据库并读取其运行时配置:
 
-确保计算在同一 VPC 和私有子网中运行,并向计算角色授予 AppConfig 读取权限。
+```hcl title="packages/infra/src/main.tf"
+module "postgres" {
+  source             = "../../common/terraform/src/app/dbs/postgres"
+  vpc_id             = module.vpc.vpc_id
+  private_subnet_ids = module.vpc.private_subnet_ids
+}
+
+module "api" {
+  source             = "..."
+  vpc_id             = module.vpc.vpc_id
+  private_subnet_ids = module.vpc.private_subnet_ids
+
+  # 允许 API 从 AppConfig 读取运行时配置
+  appconfig_application_id = module.postgres.appconfig_application_id
+
+  # 为应用程序数据库用户授予 rds-db:connect
+  database_cluster_resource_id = module.postgres.cluster_resource_id
+  database_runtime_user        = module.postgres.database_runtime_user
+
+  # 允许对数据库端口的网络访问
+  database_security_group_id = module.postgres.security_group_id
+  database_port              = module.postgres.cluster_port
+
+  environment_variables = {
+    RUNTIME_CONFIG_APP_ID = module.postgres.appconfig_application_id
+  }
+}
+```
+
+确保 API Lambda 角色在 `arn:aws:rds-db:<region>:<account>:dbuser:<cluster_resource_id>/<database_runtime_user>` 上具有 `rds-db:connect` 和 AppConfig 读取权限,API 的安全组可以在数据库端口上访问数据库安全组,并且 Lambda 环境包含 `RUNTIME_CONFIG_APP_ID`。
 </Fragment>
 </Infrastructure>
 
-### RDS Proxy
+### RDS Proxy 配置
+
+:::note[额外费用]
+RDS Proxy 默认启用,但会在 Aurora 集群成本之上产生额外费用。有关详细信息,请参阅 [AWS RDS Proxy 定价](https://aws.amazon.com/rds/proxy/pricing/)。
+:::
 
 生成的基础设施默认包含一个 RDS Proxy,它位于您的应用程序和 Aurora 集群之间。RDS Proxy 提供多项好处:
 
@@ -419,6 +486,20 @@ const db = new Postgres(this, 'Db', {
 ```
 
 禁用 RDS Proxy 后,您的应用程序将直接连接到 Aurora 集群端点。
+
+对于从 Node.js 20 或更高版本的 Lambda 运行时直接连接 Aurora 集群,请配置 Lambda 函数以加载 Amazon RDS CA 捆绑包:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const api = new Api(this, 'Api', {
+  integrations: Api.defaultIntegrations(this)
+    .withDefaultOptions({
+      environment: {
+        NODE_EXTRA_CA_CERTS: '/var/runtime/ca-cert.pem',
+      },
+    })
+    .build(),
+});
+```
 </Fragment>
 <Fragment slot="terraform">
 
@@ -432,9 +513,60 @@ module "postgres" {
 }
 ```
 
-禁用 RDS Proxy 后,您的应用程序将直接连接到 Aurora 集群端点。代理配置为需要 TLS 加密并使用 IAM 认证。
+禁用 RDS Proxy 后,您的应用程序将直接连接到 Aurora 集群端点。
+
+对于从 Node.js 20 或更高版本的 Lambda 运行时直接连接 Aurora 集群,请配置 Lambda 函数以加载 Amazon RDS CA 捆绑包:
+
+```hcl title="packages/infra/src/main.tf"
+module "api" {
+  source = "..."
+  ...
+
+  environment_variables = {
+    NODE_EXTRA_CA_CERTS = "/var/runtime/ca-cert.pem"
+  }
+}
+```
 </Fragment>
 </Infrastructure>
+
+有关更多详细信息,请参阅 AWS Lambda [Amazon RDS 连接的 SSL/TLS 要求](https://docs.aws.amazon.com/lambda/latest/dg/services-rds.html#services-rds-tls)和 Amazon RDS Proxy [TLS 文档](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/rds-proxy.howitworks.html#rds-proxy-security.tls)。使用 RDS Proxy 时,您无需在 Lambda 函数中配置 RDS CA 捆绑包。
+
+## 本地开发
+
+### 使用本地数据库
+
+启动本地 Postgres 实例(例如使用 Docker)并在从生成的数据库包运行 Prisma CLI 命令时设置 `DATABASE_URL`:
+
+```bash
+export DATABASE_URL="postgresql://postgres:password@localhost:5432/mydb"
+```
+
+Prisma 使用此连接字符串执行本地命令,例如 `prisma migrate dev --create-only`、`prisma migrate deploy` 和 `prisma generate`。
+
+### 在本地使用 Prisma 客户端
+
+在生产环境中,`getPrisma()` 从 AWS AppConfig 检索主机、端口、数据库名称和运行时数据库用户,并通过临时 RDS 令牌使用 IAM 进行认证。
+
+对于本地应用程序运行,您可以自定义生成的 `src/prisma.ts` 包装器以首先检查 `DATABASE_URL`。添加此分支后,客户端使用提供的连接字符串直接连接,并完全跳过 AppConfig 和 IAM 认证:
+
+```ts title="packages/db/src/prisma.ts"
+export const getPrisma = (): Promise<PrismaClient> => {
+  prismaPromise ??= (async () => {
+    const localDatabaseUrl = process.env.DATABASE_URL;
+
+    if (localDatabaseUrl) {
+      const adapter = new PrismaPg({
+        connectionString: localDatabaseUrl,
+      });
+      return new PrismaClient({ adapter });
+    }
+
+    // ... 生产路径: AppConfig + IAM 认证
+  })();
+  return prismaPromise;
+};
+```
 
 ## 自定义数据库架构
 
