@@ -37,13 +37,16 @@ You will be prompted to select your React website as the source project and the 
 
 ## Generator Output
 
-The generator creates a **single shared** `AguiProvider` component and one hook per connected agent:
+The generator creates a **single shared** `AguiProvider` component, one hook per connected agent, and a themed wrapper for the CopilotKit chat components:
 
 <FileTree>
 
 - src
   - components
     - AguiProvider.tsx Single `CopilotKitProvider` for every AG-UI agent. Created on the first `connection` run and updated on subsequent runs to register each new agent.
+    - copilot
+      - index.tsx Re-exports `CopilotChat`, `CopilotSidebar` and `CopilotPopup` with slot defaults that match your website's `uxProvider` (Cloudscape, Shadcn, or no theme at all).
+      - *ThemeComponents*.tsx Per-slot theme components (e.g. `CloudscapeAssistantMessage.tsx`, `ShadcnChatInput.tsx`). Only vended when `uxProvider` is `Cloudscape` or `Shadcn`.
   - hooks
     - useAgui\<AgentName>.tsx Registers one AG-UI agent. One file per `connection` run.
     - useSigV4.tsx SigV4 signing (IAM only)
@@ -95,10 +98,12 @@ The generated code handles authentication depending on your agent's configuratio
 
 ### Adding a Chat Interface
 
-Instantiate CopilotKit components with `agentId` to select which agent to use. The id is the agent's name — the same one you chose when you ran the <Link path="guides/py-strands-agent">`py#strands-agent` generator</Link> — and you can also find it in the generated hook file (e.g. the key returned from `packages/web/src/hooks/useAgui<AgentName>.tsx`):
+Instantiate CopilotKit components with `agentId` to select which agent to use. The id is the agent's name — the same one you chose when you ran the <Link path="guides/py-strands-agent">`py#strands-agent` generator</Link> — and you can also find it in the generated hook file (e.g. the key returned from `packages/web/src/hooks/useAgui<AgentName>.tsx`).
+
+Import the chat components from the generated `./components/copilot` module so the theme that matches your website's `uxProvider` is applied automatically:
 
 ```tsx
-import { CopilotChat } from '@copilotkit/react-core/v2';
+import { CopilotChat } from './components/copilot';
 
 function ChatPage() {
   return (
@@ -118,6 +123,8 @@ function ChatPage() {
 Run the `connection` generator once per agent. Every agent registered via the shared `AguiProvider` is visible from anywhere in the app — instantiate a CopilotKit component with a different `agentId` to route each chat to the agent you want:
 
 ```tsx
+import { CopilotChat } from './components/copilot';
+
 <CopilotChat agentId="story" />    {/* talks to StoryAgent */}
 <CopilotChat agentId="research" /> {/* talks to ResearchAgent */}
 ```
@@ -126,7 +133,38 @@ Run the `connection` generator once per agent. Every agent registered via the sh
 
 `<CopilotChat />` (and `<CopilotSidebar />`, `<CopilotPopup />`) use a recursive **slot system** — you can override any sub-component with either a Tailwind class string, a prop object, or a custom React component. See the [CopilotKit slots guide](https://docs.copilotkit.ai/aws-strands/custom-look-and-feel/slots) for the full slot tree.
 
+### Built-in Themes
+
+The generator reads `metadata.uxProvider` from your React website project and vends a themed wrapper module at `src/components/copilot/index.tsx` so the chat components match the rest of your UI without any extra configuration:
+
+| `uxProvider` | Styling applied to `CopilotChat` / `CopilotSidebar` / `CopilotPopup` |
+| ------------ | -------------------------------------------------------------------- |
+| `Cloudscape` | Assistant and user messages render inside Cloudscape `ChatBubble` components with gen-AI `Avatar`s, matching the [Cloudscape generative AI chat pattern](https://cloudscape.design/patterns/genai/generative-AI-chat/). The message toolbar becomes a Cloudscape `ButtonGroup` on the bubble's `actions` slot (copy, thumbs up/down, regenerate), Markdown is rendered via CopilotKit's default renderer inside the bubble, the typing indicator becomes a gen-AI `LoadingBar`, and the input is replaced with Cloudscape `PromptInput`. Built from `@cloudscape-design/components` and `@cloudscape-design/chat-components`. |
+| `Shadcn` | Assistant messages render with a `Sparkles` avatar and a subdued `bg-muted` card-style bubble using Tailwind `prose` styling; a hover-revealed `Button` toolbar provides copy/thumbs/regenerate. User messages render right-aligned in a `bg-primary` bubble with a `User` avatar. The input is replaced with a rounded `Textarea` + pill-shaped icon `Button` (Enter submits, Shift+Enter inserts a newline; auto-grows up to 8 rows), and the typing indicator is a three-dot pulse animation. Uses shadcn primitives (`Avatar`, `Button`, `Textarea`) from the shared `common-shadcn` package. |
+| `None` (or anything else) | No theme applied — the wrapper simply re-exports the default CopilotKit components. |
+
+Import the themed components from the **local theme module** (not `@copilotkit/react-core/v2` directly) so the theme is applied automatically:
+
+```tsx
+import { CopilotChat } from './components/copilot';
+
+<CopilotChat agentId="agent" />
+```
+
+The theme is applied as slot defaults, so any slot you explicitly pass still wins — you keep full control whenever you need a one-off override.
+
+### Customising the Theme
+
+The generated theme lives entirely inside your project:
+
+- `src/components/copilot/index.tsx` — exports the themed `CopilotChat` / `CopilotSidebar` / `CopilotPopup` and the `cloudscapeCopilotTheme` / `shadcnCopilotTheme` objects. Edit this file to change the default slot wiring for every chat in your app.
+- `src/components/copilot/<ThemeComponent>.tsx` — per-slot theme components (e.g. `CloudscapeAssistantMessage`, `ShadcnChatInput`). Edit these to tweak the look of a single slot without re-wiring the theme.
+
+For example, to drop in your own user-message renderer while keeping the rest of the theme, edit the relevant file in `src/components/copilot/` and re-export it from `index.tsx`.
+
 ### Tailwind styling via slots
+
+Per-chat overrides still work alongside the theme — anything you pass as a slot prop overrides the themed default:
 
 ```tsx
 <CopilotChat
@@ -149,11 +187,11 @@ Run the `connection` generator once per agent. Every agent registered via the sh
 Any slot can take a React component instead of a className, so you can replace the default entirely:
 
 ```tsx
-import { CopilotChat } from '@copilotkit/react-core/v2';
+import { CopilotChat } from './components/copilot';
 
 const MySendButton: React.FC<{ onClick: () => void }> = ({ onClick }) => (
   <button onClick={onClick} className="my-send-btn">
-    ✨ Send
+    Send
   </button>
 );
 

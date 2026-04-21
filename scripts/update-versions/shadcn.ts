@@ -17,6 +17,7 @@ import { SHARED_SHADCN_NAME } from '../../packages/nx-plugin/src/utils/shared-co
 
 const SHADCN_COMPONENTS = [
   'alert',
+  'avatar',
   'breadcrumb',
   'button',
   'card',
@@ -26,6 +27,7 @@ const SHADCN_COMPONENTS = [
   'sidebar',
   'skeleton',
   'spinner',
+  'textarea',
   'tooltip',
 ];
 
