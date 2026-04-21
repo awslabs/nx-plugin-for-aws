@@ -149,13 +149,13 @@ export const tsRdbGenerator = async (
     databaseName: options.databaseName,
     adminUser: options.databaseUser,
     engine: options.engine === 'MySQL' ? 'mysql' : 'postgres',
-    migrationBundlePathFromRoot: joinPathFragments(
+    migrationBundleDir: joinPathFragments(
       'dist',
       projectConfig.root,
       'bundle',
       'migration',
     ),
-    createDbUserBundlePathFromRoot: joinPathFragments(
+    createDbUserBundleDir: joinPathFragments(
       'dist',
       projectConfig.root,
       'bundle',
