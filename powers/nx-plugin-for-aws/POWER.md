@@ -115,6 +115,7 @@ Add capabilities to existing projects:
 | `ts#react-website`      | React website with Vite               |
 | `ts#react-website#auth` | Add Cognito auth to React website     |
 | `ts#trpc-api`           | tRPC backend with API Gateway/Lambda  |
+| `ts#rdb`                | Relational database with Aurora RDS   |
 | `ts#smithy-api`         | Smithy API with TypeScript Server SDK |
 | `ts#lambda-function`    | TypeScript Lambda function            |
 | `ts#mcp-server`         | TypeScript MCP server                 |

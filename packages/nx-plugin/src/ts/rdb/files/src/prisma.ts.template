@@ -10,6 +10,11 @@ import { getDatabaseConfig } from './utils.js';
 
 export const DB_PACKAGE_NAME = '<%= runtimeConfigKey %>';
 <%_ if (engine === 'MySQL') { _%>
+
+// TODO: IAM tokens expire every 15 minutes, so we implement a workaround by tracking a 10-minute TTL.
+// Every 10 minutes, a new IAM token is fetched and the connection pool is recreated.
+// This approach works for most request-response cycles under 15 minutes, but may fail in longer-running cases.
+// Note: The MySQL library lacks a convenient async password callback (e.g., `password: async () => {}`) like Postgres.
 export const PRISMA_TTL_MS = 10 * 60 * 1000;
 
 let prismaClient: PrismaClient | undefined;
@@ -25,6 +30,9 @@ const createPrismaClient = async (): Promise<PrismaClient> => {
     username: dbUser,
   }).getAuthToken();
 
+  // NOTE: This pool/adapter does not support an `allowExitOnIdle` option like Postgres.
+  // In STREAMING mode (e.g., API Gateway + Lambda), idle connections may keep
+  // the Node.js event loop active, preventing the request from completing properly.
   const adapter = new PrismaMariaDb({
     host: hostname,
     port,
@@ -68,6 +76,9 @@ export const getPrisma = (): Promise<PrismaClient> => {
         ssl: {
           rejectUnauthorized: true,
         },
+        // `allowExitOnIdle: true` allows the Node.js event loop to exit even if the pool still has idle connections.
+        // This is especially important in STREAMING mode (e.g., API Gateway + Lambda),
+        // where idle connections can keep the event loop active and prevent the request from completing.
         allowExitOnIdle: true,
         password: async () => {
           const token = await new Signer({
