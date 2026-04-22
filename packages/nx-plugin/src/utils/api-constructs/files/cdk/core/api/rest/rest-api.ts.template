@@ -8,6 +8,7 @@ import {
   Stage,
 } from 'aws-cdk-lib/aws-apigateway';
 import { IAspect } from 'aws-cdk-lib';
+import { CfnWebACL, CfnWebACLAssociation } from 'aws-cdk-lib/aws-wafv2';
 import { RuntimeConfig } from '../runtime-config.js';
 import {
   ApiIntegrations,
@@ -38,6 +39,14 @@ export interface RestApiProps<
    * Map of integration keys to their API Gateway integrations
    */
   readonly integrations: TIntegrations;
+  /**
+   * Whether to enable AWS WAFv2 with the default managed ruleset
+   * (AWSManagedRulesCommonRuleSet and AWSManagedRulesKnownBadInputsRuleSet)
+   * and associate it with the API's default stage.
+   *
+   * @default true
+   */
+  readonly enableWaf?: boolean;
 }
 
 /**
@@ -61,6 +70,9 @@ export class RestApi<
   /** Map of integration keys to their API Gateway integrations */
   public readonly integrations: TIntegrations;
 
+  /** The WAFv2 Web ACL associated with the API's default stage, if WAF is enabled */
+  public readonly webAcl?: CfnWebACL;
+
   constructor(
     scope: Construct,
     id: string,
@@ -68,6 +80,7 @@ export class RestApi<
       apiName,
       operations,
       integrations,
+      enableWaf = true,
       ...props
     }: RestApiProps<TIntegrations, TOperation>,
   ) {
@@ -76,6 +89,64 @@ export class RestApi<
 
     // Create the API Gateway REST API
     this.api = new _RestApi(this, 'Api', props);
+
+    // Associate a WAFv2 Web ACL with the default stage using the AWS managed default
+    // ruleset (OWASP Top 10 and known bad inputs). Users may opt out by setting
+    // `enableWaf: false`.
+    if (enableWaf) {
+      this.webAcl = new CfnWebACL(this, 'WebAcl', {
+        defaultAction: { allow: {} },
+        scope: 'REGIONAL',
+        visibilityConfig: {
+          cloudWatchMetricsEnabled: true,
+          metricName: `${apiName}WebAcl`,
+          sampledRequestsEnabled: true,
+        },
+        rules: [
+          {
+            name: 'CRSRule',
+            priority: 0,
+            statement: {
+              managedRuleGroupStatement: {
+                name: 'AWSManagedRulesCommonRuleSet',
+                vendorName: 'AWS',
+              },
+            },
+            visibilityConfig: {
+              cloudWatchMetricsEnabled: true,
+              metricName: `${apiName}WebAcl-CRS`,
+              sampledRequestsEnabled: true,
+            },
+            overrideAction: {
+              none: {},
+            },
+          },
+          {
+            name: 'KnownBadInputsRule',
+            priority: 1,
+            statement: {
+              managedRuleGroupStatement: {
+                name: 'AWSManagedRulesKnownBadInputsRuleSet',
+                vendorName: 'AWS',
+              },
+            },
+            visibilityConfig: {
+              cloudWatchMetricsEnabled: true,
+              metricName: `${apiName}WebAcl-KnownBadInputs`,
+              sampledRequestsEnabled: true,
+            },
+            overrideAction: {
+              none: {},
+            },
+          },
+        ],
+      });
+
+      new CfnWebACLAssociation(this, 'WebAclAssociation', {
+        resourceArn: this.api.deploymentStage.stageArn,
+        webAclArn: this.webAcl.attrArn,
+      });
+    }
 
     suppressRules(
       this.api,

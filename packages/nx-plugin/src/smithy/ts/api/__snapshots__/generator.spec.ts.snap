@@ -85,6 +85,12 @@ export interface TestApiProps<
   identity: {
     userPool: IUserPool;
   };
+  /**
+   * Whether to enable AWS WAFv2 with the default managed ruleset on the API's default stage.
+   *
+   * @default true
+   */
+  enableWaf?: boolean;
 }
 
 /**
@@ -259,6 +265,12 @@ export interface TestApiProps<
    * Map of operation names to their API Gateway integrations
    */
   integrations: TIntegrations;
+  /**
+   * Whether to enable AWS WAFv2 with the default managed ruleset on the API's default stage.
+   *
+   * @default true
+   */
+  enableWaf?: boolean;
 }
 
 /**
@@ -447,6 +459,12 @@ variable "stage_auto_deploy" {
   default     = true
 }
 
+variable "enable_waf" {
+  description = "Whether to enable AWS WAFv2 with the default managed ruleset (AWSManagedRulesCommonRuleSet and AWSManagedRulesKnownBadInputsRuleSet). The Web ACL is created here and associated with the stage in the consuming module."
+  type        = bool
+  default     = true
+}
+
 # CORS Configuration
 
 variable "cors_allow_headers" {
@@ -528,6 +546,77 @@ resource "aws_api_gateway_gateway_response" "cors_5xx" {
   }
 }
 
+# WAFv2 Web ACL applied to the API stage. Uses the AWS managed default ruleset
+# (OWASP Top 10 and known bad inputs). Controlled by var.enable_waf.
+resource "aws_wafv2_web_acl" "api_waf" {
+  #checkov:skip=CKV2_AWS_31:WAF logging disabled by default - enable if required
+  count = var.enable_waf ? 1 : 0
+
+  name  = "\${var.api_name}-waf"
+  scope = "REGIONAL"
+
+  default_action {
+    allow {}
+  }
+
+  rule {
+    name     = "CRSRule"
+    priority = 0
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesCommonRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "\${var.api_name}WebAcl-CRS"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  rule {
+    name     = "KnownBadInputsRule"
+    priority = 1
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesKnownBadInputsRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "\${var.api_name}WebAcl-KnownBadInputs"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  visibility_config {
+    cloudwatch_metrics_enabled = true
+    metric_name                = "\${var.api_name}WebAcl"
+    sampled_requests_enabled   = true
+  }
+
+  tags = var.tags
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+
 # Outputs
 
 output "api_id" {
@@ -553,6 +642,11 @@ output "api_execution_arn" {
 output "api_root_resource_id" {
   description = "Root resource ID of the REST API Gateway"
   value       = aws_api_gateway_rest_api.rest_api.root_resource_id
+}
+
+output "waf_web_acl_arn" {
+  description = "ARN of the WAFv2 Web ACL associated with the API, or null if WAF is disabled"
+  value       = var.enable_waf ? aws_wafv2_web_acl.api_waf[0].arn : null
 }
 
 # Note: Stage and deployment outputs are provided by the consuming module
@@ -609,6 +703,13 @@ variable "cors_allow_origins" {
   default     = ["*"]
 }
 
+# WAF Configuration
+variable "enable_waf" {
+  description = "Whether to enable AWS WAFv2 with the default managed ruleset on the API stage"
+  type        = bool
+  default     = true
+}
+
 # Tags
 variable "tags" {
   description = "Tags to apply to all resources"
@@ -638,6 +739,9 @@ module "rest_api" {
   stage_name      = "prod"
   stage_auto_deploy = true
 
+  # WAF Configuration
+  enable_waf = var.enable_waf
+
   # CORS Configuration
   cors_allow_headers     = var.cors_allow_headers
   cors_allow_methods     = var.cors_allow_methods
@@ -645,6 +749,16 @@ module "rest_api" {
 
   # Tags
   tags = var.tags
+}
+
+# Associate the WAFv2 Web ACL from the core module with the API Gateway stage
+resource "aws_wafv2_web_acl_association" "api_waf_association" {
+  count = var.enable_waf ? 1 : 0
+
+  resource_arn = aws_api_gateway_stage.api_stage.arn
+  web_acl_arn  = module.rest_api.waf_web_acl_arn
+
+  depends_on = [aws_api_gateway_stage.api_stage]
 }
 
 # Lambda function
@@ -855,6 +969,8 @@ resource "aws_api_gateway_stage" "api_stage" {
   #checkov:skip=CKV_AWS_76:API Gateway access logging disabled due to account-level CloudWatch Logs role ARN requirement
   #checkov:skip=CKV2_AWS_4:API Gateway logging level not applicable as access logging is disabled
   #checkov:skip=CKV2_AWS_51:Client certificate authentication not required for this use case
+  #checkov:skip=CKV2_AWS_77:WAFv2 Web ACL is attached via aws_wafv2_web_acl_association when var.enable_waf is true (default) and includes AWSManagedRulesKnownBadInputsRuleSet for Log4j protection
+  #checkov:skip=CKV2_AWS_29:WAFv2 Web ACL is attached via aws_wafv2_web_acl_association when var.enable_waf is true (default)
   deployment_id        = aws_api_gateway_deployment.api_deployment.id
   rest_api_id          = module.rest_api.api_id
   stage_name           = "prod"
@@ -1474,6 +1590,12 @@ variable "stage_auto_deploy" {
   default     = true
 }
 
+variable "enable_waf" {
+  description = "Whether to enable AWS WAFv2 with the default managed ruleset (AWSManagedRulesCommonRuleSet and AWSManagedRulesKnownBadInputsRuleSet). The Web ACL is created here and associated with the stage in the consuming module."
+  type        = bool
+  default     = true
+}
+
 # CORS Configuration
 
 variable "cors_allow_headers" {
@@ -1555,6 +1677,77 @@ resource "aws_api_gateway_gateway_response" "cors_5xx" {
   }
 }
 
+# WAFv2 Web ACL applied to the API stage. Uses the AWS managed default ruleset
+# (OWASP Top 10 and known bad inputs). Controlled by var.enable_waf.
+resource "aws_wafv2_web_acl" "api_waf" {
+  #checkov:skip=CKV2_AWS_31:WAF logging disabled by default - enable if required
+  count = var.enable_waf ? 1 : 0
+
+  name  = "\${var.api_name}-waf"
+  scope = "REGIONAL"
+
+  default_action {
+    allow {}
+  }
+
+  rule {
+    name     = "CRSRule"
+    priority = 0
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesCommonRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "\${var.api_name}WebAcl-CRS"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  rule {
+    name     = "KnownBadInputsRule"
+    priority = 1
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesKnownBadInputsRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "\${var.api_name}WebAcl-KnownBadInputs"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  visibility_config {
+    cloudwatch_metrics_enabled = true
+    metric_name                = "\${var.api_name}WebAcl"
+    sampled_requests_enabled   = true
+  }
+
+  tags = var.tags
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+
 # Outputs
 
 output "api_id" {
@@ -1580,6 +1773,11 @@ output "api_execution_arn" {
 output "api_root_resource_id" {
   description = "Root resource ID of the REST API Gateway"
   value       = aws_api_gateway_rest_api.rest_api.root_resource_id
+}
+
+output "waf_web_acl_arn" {
+  description = "ARN of the WAFv2 Web ACL associated with the API, or null if WAF is disabled"
+  value       = var.enable_waf ? aws_wafv2_web_acl.api_waf[0].arn : null
 }
 
 # Note: Stage and deployment outputs are provided by the consuming module
@@ -1643,6 +1841,13 @@ variable "cors_allow_origins" {
   default     = ["*"]
 }
 
+# WAF Configuration
+variable "enable_waf" {
+  description = "Whether to enable AWS WAFv2 with the default managed ruleset on the API stage"
+  type        = bool
+  default     = true
+}
+
 # Tags
 variable "tags" {
   description = "Tags to apply to all resources"
@@ -1672,6 +1877,9 @@ module "rest_api" {
   stage_name      = "prod"
   stage_auto_deploy = true
 
+  # WAF Configuration
+  enable_waf = var.enable_waf
+
   # CORS Configuration
   cors_allow_headers     = var.cors_allow_headers
   cors_allow_methods     = var.cors_allow_methods
@@ -1679,6 +1887,16 @@ module "rest_api" {
 
   # Tags
   tags = var.tags
+}
+
+# Associate the WAFv2 Web ACL from the core module with the API Gateway stage
+resource "aws_wafv2_web_acl_association" "api_waf_association" {
+  count = var.enable_waf ? 1 : 0
+
+  resource_arn = aws_api_gateway_stage.api_stage.arn
+  web_acl_arn  = module.rest_api.waf_web_acl_arn
+
+  depends_on = [aws_api_gateway_stage.api_stage]
 }
 
 # Lambda function
@@ -1896,6 +2114,8 @@ resource "aws_api_gateway_stage" "api_stage" {
   #checkov:skip=CKV_AWS_76:API Gateway access logging disabled due to account-level CloudWatch Logs role ARN requirement
   #checkov:skip=CKV2_AWS_4:API Gateway logging level not applicable as access logging is disabled
   #checkov:skip=CKV2_AWS_51:Client certificate authentication not required for this use case
+  #checkov:skip=CKV2_AWS_77:WAFv2 Web ACL is attached via aws_wafv2_web_acl_association when var.enable_waf is true (default) and includes AWSManagedRulesKnownBadInputsRuleSet for Log4j protection
+  #checkov:skip=CKV2_AWS_29:WAFv2 Web ACL is attached via aws_wafv2_web_acl_association when var.enable_waf is true (default)
   deployment_id        = aws_api_gateway_deployment.api_deployment.id
   rest_api_id          = module.rest_api.api_id
   stage_name           = "prod"
@@ -2121,6 +2341,12 @@ variable "stage_auto_deploy" {
   default     = true
 }
 
+variable "enable_waf" {
+  description = "Whether to enable AWS WAFv2 with the default managed ruleset (AWSManagedRulesCommonRuleSet and AWSManagedRulesKnownBadInputsRuleSet). The Web ACL is created here and associated with the stage in the consuming module."
+  type        = bool
+  default     = true
+}
+
 # CORS Configuration
 
 variable "cors_allow_headers" {
@@ -2202,6 +2428,77 @@ resource "aws_api_gateway_gateway_response" "cors_5xx" {
   }
 }
 
+# WAFv2 Web ACL applied to the API stage. Uses the AWS managed default ruleset
+# (OWASP Top 10 and known bad inputs). Controlled by var.enable_waf.
+resource "aws_wafv2_web_acl" "api_waf" {
+  #checkov:skip=CKV2_AWS_31:WAF logging disabled by default - enable if required
+  count = var.enable_waf ? 1 : 0
+
+  name  = "\${var.api_name}-waf"
+  scope = "REGIONAL"
+
+  default_action {
+    allow {}
+  }
+
+  rule {
+    name     = "CRSRule"
+    priority = 0
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesCommonRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "\${var.api_name}WebAcl-CRS"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  rule {
+    name     = "KnownBadInputsRule"
+    priority = 1
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesKnownBadInputsRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "\${var.api_name}WebAcl-KnownBadInputs"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  visibility_config {
+    cloudwatch_metrics_enabled = true
+    metric_name                = "\${var.api_name}WebAcl"
+    sampled_requests_enabled   = true
+  }
+
+  tags = var.tags
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+
 # Outputs
 
 output "api_id" {
@@ -2227,6 +2524,11 @@ output "api_execution_arn" {
 output "api_root_resource_id" {
   description = "Root resource ID of the REST API Gateway"
   value       = aws_api_gateway_rest_api.rest_api.root_resource_id
+}
+
+output "waf_web_acl_arn" {
+  description = "ARN of the WAFv2 Web ACL associated with the API, or null if WAF is disabled"
+  value       = var.enable_waf ? aws_wafv2_web_acl.api_waf[0].arn : null
 }
 
 # Note: Stage and deployment outputs are provided by the consuming module
@@ -2280,6 +2582,13 @@ variable "cors_allow_origins" {
   default     = ["*"]
 }
 
+# WAF Configuration
+variable "enable_waf" {
+  description = "Whether to enable AWS WAFv2 with the default managed ruleset on the API stage"
+  type        = bool
+  default     = true
+}
+
 # Tags
 variable "tags" {
   description = "Tags to apply to all resources"
@@ -2309,6 +2618,9 @@ module "rest_api" {
   stage_name      = "prod"
   stage_auto_deploy = true
 
+  # WAF Configuration
+  enable_waf = var.enable_waf
+
   # CORS Configuration
   cors_allow_headers     = var.cors_allow_headers
   cors_allow_methods     = var.cors_allow_methods
@@ -2316,6 +2628,16 @@ module "rest_api" {
 
   # Tags
   tags = var.tags
+}
+
+# Associate the WAFv2 Web ACL from the core module with the API Gateway stage
+resource "aws_wafv2_web_acl_association" "api_waf_association" {
+  count = var.enable_waf ? 1 : 0
+
+  resource_arn = aws_api_gateway_stage.api_stage.arn
+  web_acl_arn  = module.rest_api.waf_web_acl_arn
+
+  depends_on = [aws_api_gateway_stage.api_stage]
 }
 
 # Lambda function
@@ -2524,6 +2846,8 @@ resource "aws_api_gateway_stage" "api_stage" {
   #checkov:skip=CKV_AWS_76:API Gateway access logging disabled due to account-level CloudWatch Logs role ARN requirement
   #checkov:skip=CKV2_AWS_4:API Gateway logging level not applicable as access logging is disabled
   #checkov:skip=CKV2_AWS_51:Client certificate authentication not required for this use case
+  #checkov:skip=CKV2_AWS_77:WAFv2 Web ACL is attached via aws_wafv2_web_acl_association when var.enable_waf is true (default) and includes AWSManagedRulesKnownBadInputsRuleSet for Log4j protection
+  #checkov:skip=CKV2_AWS_29:WAFv2 Web ACL is attached via aws_wafv2_web_acl_association when var.enable_waf is true (default)
   deployment_id        = aws_api_gateway_deployment.api_deployment.id
   rest_api_id          = module.rest_api.api_id
   stage_name           = "prod"
@@ -2768,6 +3092,13 @@ variable "cors_allow_origins" {
   default     = ["*"]
 }
 
+# WAF Configuration
+variable "enable_waf" {
+  description = "Whether to enable AWS WAFv2 with the default managed ruleset on the API stage"
+  type        = bool
+  default     = true
+}
+
 # Tags
 variable "tags" {
   description = "Tags to apply to all resources"
@@ -2797,6 +3128,9 @@ module "rest_api" {
   stage_name      = "prod"
   stage_auto_deploy = true
 
+  # WAF Configuration
+  enable_waf = var.enable_waf
+
   # CORS Configuration
   cors_allow_headers     = var.cors_allow_headers
   cors_allow_methods     = var.cors_allow_methods
@@ -2804,6 +3138,16 @@ module "rest_api" {
 
   # Tags
   tags = var.tags
+}
+
+# Associate the WAFv2 Web ACL from the core module with the API Gateway stage
+resource "aws_wafv2_web_acl_association" "api_waf_association" {
+  count = var.enable_waf ? 1 : 0
+
+  resource_arn = aws_api_gateway_stage.api_stage.arn
+  web_acl_arn  = module.rest_api.waf_web_acl_arn
+
+  depends_on = [aws_api_gateway_stage.api_stage]
 }
 
 # Lambda function
@@ -3014,6 +3358,8 @@ resource "aws_api_gateway_stage" "api_stage" {
   #checkov:skip=CKV_AWS_76:API Gateway access logging disabled due to account-level CloudWatch Logs role ARN requirement
   #checkov:skip=CKV2_AWS_4:API Gateway logging level not applicable as access logging is disabled
   #checkov:skip=CKV2_AWS_51:Client certificate authentication not required for this use case
+  #checkov:skip=CKV2_AWS_77:WAFv2 Web ACL is attached via aws_wafv2_web_acl_association when var.enable_waf is true (default) and includes AWSManagedRulesKnownBadInputsRuleSet for Log4j protection
+  #checkov:skip=CKV2_AWS_29:WAFv2 Web ACL is attached via aws_wafv2_web_acl_association when var.enable_waf is true (default)
   deployment_id        = aws_api_gateway_deployment.api_deployment.id
   rest_api_id          = module.rest_api.api_id
   stage_name           = "prod"

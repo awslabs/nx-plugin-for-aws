@@ -37,6 +37,12 @@ variable "stage_auto_deploy" {
   default     = true
 }
 
+variable "enable_waf" {
+  description = "Whether to enable AWS WAFv2 with the default managed ruleset (AWSManagedRulesCommonRuleSet and AWSManagedRulesKnownBadInputsRuleSet). The Web ACL is created here and associated with the stage in the consuming module."
+  type        = bool
+  default     = true
+}
+
 # CORS Configuration
 
 variable "cors_allow_headers" {
@@ -118,6 +124,77 @@ resource "aws_api_gateway_gateway_response" "cors_5xx" {
   }
 }
 
+# WAFv2 Web ACL applied to the API stage. Uses the AWS managed default ruleset
+# (OWASP Top 10 and known bad inputs). Controlled by var.enable_waf.
+resource "aws_wafv2_web_acl" "api_waf" {
+  #checkov:skip=CKV2_AWS_31:WAF logging disabled by default - enable if required
+  count = var.enable_waf ? 1 : 0
+
+  name  = "${var.api_name}-waf"
+  scope = "REGIONAL"
+
+  default_action {
+    allow {}
+  }
+
+  rule {
+    name     = "CRSRule"
+    priority = 0
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesCommonRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${var.api_name}WebAcl-CRS"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  rule {
+    name     = "KnownBadInputsRule"
+    priority = 1
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesKnownBadInputsRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${var.api_name}WebAcl-KnownBadInputs"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  visibility_config {
+    cloudwatch_metrics_enabled = true
+    metric_name                = "${var.api_name}WebAcl"
+    sampled_requests_enabled   = true
+  }
+
+  tags = var.tags
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+
 # Outputs
 
 output "api_id" {
@@ -143,6 +220,11 @@ output "api_execution_arn" {
 output "api_root_resource_id" {
   description = "Root resource ID of the REST API Gateway"
   value       = aws_api_gateway_rest_api.rest_api.root_resource_id
+}
+
+output "waf_web_acl_arn" {
+  description = "ARN of the WAFv2 Web ACL associated with the API, or null if WAF is disabled"
+  value       = var.enable_waf ? aws_wafv2_web_acl.api_waf[0].arn : null
 }
 
 # Note: Stage and deployment outputs are provided by the consuming module

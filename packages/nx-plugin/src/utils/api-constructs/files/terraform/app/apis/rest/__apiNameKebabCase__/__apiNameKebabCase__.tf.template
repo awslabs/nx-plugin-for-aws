@@ -58,6 +58,13 @@ variable "cors_allow_origins" {
   default     = ["*"]
 }
 
+# WAF Configuration
+variable "enable_waf" {
+  description = "Whether to enable AWS WAFv2 with the default managed ruleset on the API stage"
+  type        = bool
+  default     = true
+}
+
 # Tags
 variable "tags" {
   description = "Tags to apply to all resources"
@@ -87,6 +94,9 @@ module "rest_api" {
   stage_name      = "prod"
   stage_auto_deploy = true
 
+  # WAF Configuration
+  enable_waf = var.enable_waf
+
   # CORS Configuration
   cors_allow_headers     = var.cors_allow_headers
   cors_allow_methods     = var.cors_allow_methods
@@ -94,6 +104,16 @@ module "rest_api" {
 
   # Tags
   tags = var.tags
+}
+
+# Associate the WAFv2 Web ACL from the core module with the API Gateway stage
+resource "aws_wafv2_web_acl_association" "api_waf_association" {
+  count = var.enable_waf ? 1 : 0
+
+  resource_arn = aws_api_gateway_stage.api_stage.arn
+  web_acl_arn  = module.rest_api.waf_web_acl_arn
+
+  depends_on = [aws_api_gateway_stage.api_stage]
 }
 
 # Lambda function
@@ -364,6 +384,8 @@ resource "aws_api_gateway_stage" "api_stage" {
   #checkov:skip=CKV_AWS_76:API Gateway access logging disabled due to account-level CloudWatch Logs role ARN requirement
   #checkov:skip=CKV2_AWS_4:API Gateway logging level not applicable as access logging is disabled
   #checkov:skip=CKV2_AWS_51:Client certificate authentication not required for this use case
+  #checkov:skip=CKV2_AWS_77:WAFv2 Web ACL is attached via aws_wafv2_web_acl_association when var.enable_waf is true (default) and includes AWSManagedRulesKnownBadInputsRuleSet for Log4j protection
+  #checkov:skip=CKV2_AWS_29:WAFv2 Web ACL is attached via aws_wafv2_web_acl_association when var.enable_waf is true (default)
   deployment_id        = aws_api_gateway_deployment.api_deployment.id
   rest_api_id          = module.rest_api.api_id
   stage_name           = "prod"
