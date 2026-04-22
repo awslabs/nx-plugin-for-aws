@@ -15,33 +15,17 @@ Several generators (such as <Link path="/guides/ts-strands-agent">`ts#strands-ag
 ```d2
 direction: right
 
-nx: Nx workspace {
-  src: src/
-  dockerfile: Dockerfile {
-    shape: document
-  }
-  bundle: "bundle target\nRolldown / uv"
-  ctx: "dist/.../bundle/\n(build context)" {
-    shape: page
-  }
-
-  src -> bundle -> ctx
-  dockerfile -> ctx
+src: src/
+dockerfile: Dockerfile {
+  shape: document
+}
+bundle: "bundle target\nRolldown / uv"
+ctx: "dist/.../bundle/\n(build context)" {
+  shape: page
 }
 
-img: "local image\n:latest" {
-  shape: cylinder
-}
-
-ecr: Amazon ECR {
-  shape: cylinder
-}
-
-aws: "AWS runtime\nECS · Lambda · AgentCore"
-
-nx.ctx -> img: docker target
-img -> ecr: CDK / Terraform
-ecr -> aws
+src -> bundle -> ctx
+dockerfile -> ctx
 ```
 
 The recommended pattern has three pieces:
@@ -273,6 +257,30 @@ Wiring the resulting build-context directory to infrastructure as code is the sa
 <Fragment slot="cdk">
 Use CDK's [`DockerImageAsset`](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_ecr_assets.DockerImageAsset.html) pointed at the build-context directory. CDK will build the image and publish it to the CDK asset ECR repository at deploy time:
 
+```d2
+direction: right
+
+nx: Nx workspace {
+  bundle: "bundle target\nRolldown / uv"
+  ctx: "dist/.../bundle/\n(Dockerfile + bundle)" {
+    shape: page
+  }
+  bundle -> ctx
+}
+
+cdk: CDK app {
+  asset: "DockerImageAsset\ndirectory: dist/.../bundle"
+}
+
+ecr: "CDK asset ECR" {
+  shape: cylinder
+}
+
+cdk.asset -> nx.ctx: references
+cdk.asset -> ecr: cdk deploy\nbuilds + pushes
+```
+
+
 ```ts
 import { DockerImageAsset, Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import { findWorkspaceRoot } from ':my-scope/common-constructs';
@@ -300,9 +308,37 @@ Use the `DockerImageAsset` with any AWS construct that accepts a container image
 <Fragment slot="terraform">
 Terraform's AWS provider does not have a first-class "build and push a Docker image" resource. The pattern used by the generators is:
 
-1. An `aws_ecr_repository` to hold the image.
-2. A `null_resource` with a `local-exec` provisioner that authenticates to ECR, re-tags the locally-built image, and pushes it.
-3. The downstream resource (e.g. `aws_ecs_task_definition`) references `"${aws_ecr_repository.repo.repository_url}:latest"`.
+1. The project's `build` target runs `docker build`, producing a local image tagged `my-scope-my-project:latest`.
+2. An `aws_ecr_repository` to hold the image.
+3. A `null_resource` with a `local-exec` provisioner that authenticates to ECR, re-tags the locally-built image, and pushes it.
+4. The downstream resource (e.g. `aws_ecs_task_definition`) references `"${aws_ecr_repository.repo.repository_url}:latest"`.
+
+```d2
+direction: right
+
+nx: Nx workspace {
+  bundle: "bundle target\nRolldown / uv"
+  build: "docker target\ndocker build"
+  img: "local image\nmy-scope-my-project:latest" {
+    shape: cylinder
+  }
+  bundle -> build -> img
+}
+
+tf: Terraform module {
+  repo: aws_ecr_repository
+  publish: "null_resource\nlocal-exec: docker push"
+  publish -> repo: tag + push
+}
+
+ecr: "Amazon ECR" {
+  shape: cylinder
+}
+
+nx.img -> tf.publish: reads local image
+tf.repo -> ecr
+```
+
 
 ```hcl
 resource "aws_ecr_repository" "repo" {
