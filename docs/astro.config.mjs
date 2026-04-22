@@ -6,6 +6,7 @@
 import { defineConfig, passthroughImageService } from 'astro/config';
 
 import starlight from '@astrojs/starlight';
+import astroD2 from 'astro-d2';
 import starlightBlog from 'starlight-blog';
 import starlightLinksValidator from 'starlight-links-validator';
 import starlightVideos from 'starlight-videos';
@@ -533,6 +534,12 @@ export default defineConfig({
           },
         }),
       ],
+    }),
+    astroD2({
+      sketch: true,
+      experimental: {
+        useD2js: true,
+      },
     }),
     react(),
   ],
