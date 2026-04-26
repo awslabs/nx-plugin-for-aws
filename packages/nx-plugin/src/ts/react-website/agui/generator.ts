@@ -24,12 +24,6 @@ import { toScopeAlias, getNpmScopePrefix } from '../../../utils/npm-scope';
 
 export type AgUiAuth = 'IAM' | 'Cognito' | 'None';
 
-/**
- * UX provider theme applied to CopilotKit chat components. The value is read
- * from the frontend project's `metadata.uxProvider` (set by the
- * `ts#react-website` generator). Unknown/missing values fall back to
- * `default`, which re-exports the unstyled CopilotKit components.
- */
 type AgUiTheme = 'cloudscape' | 'shadcn' | 'default';
 
 export interface AgUiReactConnectionOptions {
@@ -52,10 +46,8 @@ export interface AgUiReactConnectionOptions {
  * AST-patches `AguiProvider` to register one more agent hook — running the
  * generator multiple times is idempotent and additive.
  *
- * A themed `src/components/copilot` module is also generated based on the
- * frontend's `metadata.uxProvider` so consumers can import
- * `CopilotChat`/`CopilotSidebar`/`CopilotPopup` with matching styling applied
- * automatically.
+ * Also vends a `src/components/copilot` theme module picked from the
+ * website's `metadata.uxProvider` (cloudscape / shadcn / default).
  */
 export const addAgUiReactConnection = async (
   tree: Tree,
@@ -78,8 +70,7 @@ export const addAgUiReactConnection = async (
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
-  // Generate the themed CopilotKit wrapper module. Shadcn imports from the
-  // shared shadcn library so the components must exist there first.
+  // Shadcn theme imports from the shared shadcn library, so it must exist.
   if (theme === 'shadcn') {
     await sharedShadcnGenerator(tree);
   }
@@ -162,10 +153,6 @@ export const addAgUiReactConnection = async (
   });
 };
 
-/**
- * Resolve the CopilotKit theme to use based on the frontend project's
- * `metadata.uxProvider`.
- */
 const resolveAgUiTheme = (
   frontendProjectConfig: ProjectConfiguration,
 ): AgUiTheme => {

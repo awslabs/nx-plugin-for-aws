@@ -30,7 +30,7 @@ export const addPyStrandsAgentTargetToServeLocal = async (
     port: options.port,
     targetComponent: options.targetComponent,
     runtimeConfigNamespace: 'agentRuntimes',
-    localUrl: `http://localhost:${options.port}/`,
+    localUrl: `http://localhost:${options.port}/invocations`,
     additionalDependencyTargets: options.additionalDependencyTargets,
   });
 };
