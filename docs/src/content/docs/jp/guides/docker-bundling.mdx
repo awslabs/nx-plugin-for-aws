@@ -12,6 +12,22 @@ import Infrastructure from '@components/infrastructure.astro';
 
 ## パターン
 
+```d2
+direction: right
+
+src: src/
+dockerfile: Dockerfile {
+  shape: document
+}
+bundle: "bundle target\nRolldown / uv"
+ctx: "dist/.../bundle/\n(build context)" {
+  shape: page
+}
+
+src -> bundle -> ctx
+dockerfile -> ctx
+```
+
 推奨されるパターンには3つの要素があります:
 
 1. **`bundle`ターゲット** - プロジェクト上に配置され、ランタイムアーティファクトの自己完結型ディレクトリを生成します。TypeScriptの場合、これは[Rolldown](https://rolldown.rs/)によって生成されるツリーシェイクされた単一ファイルのJavaScriptバンドルです。Pythonの場合、これは[uv](https://docs.astral.sh/uv/)によって生成される`requirements.txt`とインストールされた依存関係です。
@@ -241,6 +257,34 @@ CMD ["python", "-m", "my_project.main"]
 <Fragment slot="cdk">
 CDKの[`DockerImageAsset`](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_ecr_assets.DockerImageAsset.html)をビルドコンテキストディレクトリに向けて使用します。CDKはデプロイ時にイメージをビルドし、CDKアセットECRリポジトリに公開します:
 
+```d2
+direction: right
+
+app: Application {
+  bundle: "bundle target\nRolldown / uv"
+  dockerfile: Dockerfile {
+    shape: document
+  }
+  ctx: "dist/.../bundle/" {
+    shape: page
+  }
+  bundle -> ctx
+  dockerfile -> ctx
+}
+
+infra: Infrastructure {
+  asset: "DockerImageAsset\ndirectory: dist/.../bundle"
+}
+
+ecr: "CDK asset ECR" {
+  shape: cylinder
+}
+
+infra.asset -> app.ctx: references
+infra.asset -> ecr: cdk deploy\nbuilds + pushes
+```
+
+
 ```ts
 import { DockerImageAsset, Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import { findWorkspaceRoot } from ':my-scope/common-constructs';
@@ -268,9 +312,47 @@ CDKは`bundle`/`docker`ターゲットを自動的に実行しません — `cdk
 <Fragment slot="terraform">
 TerraformのAWSプロバイダーには、ファーストクラスの「Dockerイメージをビルドしてプッシュする」リソースがありません。ジェネレーターが使用するパターンは次のとおりです:
 
-1. イメージを保持するための`aws_ecr_repository`
-2. ECRへの認証、ローカルでビルドされたイメージの再タグ付け、プッシュを行う`local-exec`プロビジョナーを持つ`null_resource`
-3. ダウンストリームリソース(例: `aws_ecs_task_definition`)が`"${aws_ecr_repository.repo.repository_url}:latest"`を参照
+1. プロジェクトの`build`ターゲットが`docker build`を実行し、`my-scope-my-project:latest`というタグが付けられたローカルイメージを生成します。
+2. イメージを保持するための`aws_ecr_repository`。
+3. ECRへの認証、ローカルでビルドされたイメージの再タグ付け、プッシュを行う`local-exec`プロビジョナーを持つ`null_resource`。
+4. ダウンストリームリソース(例: `aws_ecs_task_definition`)が`"${aws_ecr_repository.repo.repository_url}:latest"`を参照。
+
+```d2
+direction: down
+
+app: Application {
+  bundle: "bundle target\nRolldown / uv"
+  dockerfile: Dockerfile {
+    shape: document
+  }
+  ctx: "dist/.../bundle/" {
+    shape: page
+  }
+  build: "docker target\ndocker build"
+  img: "local image\nmy-scope-my-project:latest" {
+    shape: cylinder
+  }
+
+  bundle -> ctx
+  dockerfile -> ctx
+  ctx -> build -> img
+}
+
+infra: Infrastructure {
+  direction: right
+  publish: "null_resource\nlocal-exec: docker push"
+  repo: aws_ecr_repository
+  publish -> repo: tag + push
+}
+
+ecr: "Amazon ECR" {
+  shape: cylinder
+}
+
+infra.publish -> app.img: reads local image
+infra.repo -> ecr
+```
+
 
 ```hcl
 resource "aws_ecr_repository" "repo" {

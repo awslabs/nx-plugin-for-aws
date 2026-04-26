@@ -12,6 +12,22 @@ import Infrastructure from '@components/infrastructure.astro';
 
 ## 패턴
 
+```d2
+direction: right
+
+src: src/
+dockerfile: Dockerfile {
+  shape: document
+}
+bundle: "bundle target\nRolldown / uv"
+ctx: "dist/.../bundle/\n(build context)" {
+  shape: page
+}
+
+src -> bundle -> ctx
+dockerfile -> ctx
+```
+
 권장 패턴은 세 가지 요소로 구성됩니다:
 
 1. **`bundle` 타겟** - 프로젝트에서 런타임 아티팩트의 독립적인 디렉토리를 생성합니다. TypeScript의 경우 [Rolldown](https://rolldown.rs/)에서 생성한 트리 셰이킹된 단일 파일 JavaScript 번들이고, Python의 경우 [uv](https://docs.astral.sh/uv/)에서 생성한 `requirements.txt` 및 설치된 종속성입니다.
@@ -241,6 +257,34 @@ CMD ["python", "-m", "my_project.main"]
 <Fragment slot="cdk">
 빌드 컨텍스트 디렉토리를 가리키는 CDK의 [`DockerImageAsset`](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_ecr_assets.DockerImageAsset.html)을 사용합니다. CDK는 배포 시 이미지를 빌드하고 CDK 자산 ECR 리포지토리에 게시합니다:
 
+```d2
+direction: right
+
+app: Application {
+  bundle: "bundle target\nRolldown / uv"
+  dockerfile: Dockerfile {
+    shape: document
+  }
+  ctx: "dist/.../bundle/" {
+    shape: page
+  }
+  bundle -> ctx
+  dockerfile -> ctx
+}
+
+infra: Infrastructure {
+  asset: "DockerImageAsset\ndirectory: dist/.../bundle"
+}
+
+ecr: "CDK asset ECR" {
+  shape: cylinder
+}
+
+infra.asset -> app.ctx: references
+infra.asset -> ecr: cdk deploy\nbuilds + pushes
+```
+
+
 ```ts
 import { DockerImageAsset, Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import { findWorkspaceRoot } from ':my-scope/common-constructs';
@@ -268,9 +312,47 @@ CDK는 `bundle`/`docker` 타겟을 자동으로 실행하지 않습니다 — `c
 <Fragment slot="terraform">
 Terraform의 AWS 프로바이더에는 일급 "Docker 이미지 빌드 및 푸시" 리소스가 없습니다. 제너레이터가 사용하는 패턴은 다음과 같습니다:
 
-1. 이미지를 보관할 `aws_ecr_repository`.
-2. ECR에 인증하고, 로컬에서 빌드된 이미지를 다시 태그하고, 푸시하는 `local-exec` 프로비저너가 있는 `null_resource`.
-3. 다운스트림 리소스(예: `aws_ecs_task_definition`)가 `"${aws_ecr_repository.repo.repository_url}:latest"`를 참조합니다.
+1. 프로젝트의 `build` 타겟이 `docker build`를 실행하여 `my-scope-my-project:latest`로 태그된 로컬 이미지를 생성합니다.
+2. 이미지를 보관할 `aws_ecr_repository`.
+3. ECR에 인증하고, 로컬에서 빌드된 이미지를 다시 태그하고, 푸시하는 `local-exec` 프로비저너가 있는 `null_resource`.
+4. 다운스트림 리소스(예: `aws_ecs_task_definition`)가 `"${aws_ecr_repository.repo.repository_url}:latest"`를 참조합니다.
+
+```d2
+direction: down
+
+app: Application {
+  bundle: "bundle target\nRolldown / uv"
+  dockerfile: Dockerfile {
+    shape: document
+  }
+  ctx: "dist/.../bundle/" {
+    shape: page
+  }
+  build: "docker target\ndocker build"
+  img: "local image\nmy-scope-my-project:latest" {
+    shape: cylinder
+  }
+
+  bundle -> ctx
+  dockerfile -> ctx
+  ctx -> build -> img
+}
+
+infra: Infrastructure {
+  direction: right
+  publish: "null_resource\nlocal-exec: docker push"
+  repo: aws_ecr_repository
+  publish -> repo: tag + push
+}
+
+ecr: "Amazon ECR" {
+  shape: cylinder
+}
+
+infra.publish -> app.img: reads local image
+infra.repo -> ecr
+```
+
 
 ```hcl
 resource "aws_ecr_repository" "repo" {

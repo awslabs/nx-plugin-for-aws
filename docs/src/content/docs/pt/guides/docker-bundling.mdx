@@ -12,6 +12,22 @@ Vários geradores (como <Link path="/guides/ts-strands-agent">`ts#strands-agent`
 
 ## O Padrão
 
+```d2
+direction: right
+
+src: src/
+dockerfile: Dockerfile {
+  shape: document
+}
+bundle: "bundle target\nRolldown / uv"
+ctx: "dist/.../bundle/\n(build context)" {
+  shape: page
+}
+
+src -> bundle -> ctx
+dockerfile -> ctx
+```
+
 O padrão recomendado tem três partes:
 
 1. **Um target `bundle`** no seu projeto que produz um diretório autocontido de artefatos de runtime. Para TypeScript, isso é um bundle JavaScript de arquivo único com tree-shaking produzido pelo [Rolldown](https://rolldown.rs/); para Python, isso é um `requirements.txt` e dependências instaladas produzidos pelo [uv](https://docs.astral.sh/uv/).
@@ -241,6 +257,34 @@ Conectar o diretório de contexto de build resultante à infraestrutura como có
 <Fragment slot="cdk">
 Use o [`DockerImageAsset`](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_ecr_assets.DockerImageAsset.html) do CDK apontando para o diretório de contexto de build. O CDK construirá a imagem e a publicará no repositório ECR de assets do CDK no momento do deploy:
 
+```d2
+direction: right
+
+app: Application {
+  bundle: "bundle target\nRolldown / uv"
+  dockerfile: Dockerfile {
+    shape: document
+  }
+  ctx: "dist/.../bundle/" {
+    shape: page
+  }
+  bundle -> ctx
+  dockerfile -> ctx
+}
+
+infra: Infrastructure {
+  asset: "DockerImageAsset\ndirectory: dist/.../bundle"
+}
+
+ecr: "CDK asset ECR" {
+  shape: cylinder
+}
+
+infra.asset -> app.ctx: references
+infra.asset -> ecr: cdk deploy\nbuilds + pushes
+```
+
+
 ```ts
 import { DockerImageAsset, Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import { findWorkspaceRoot } from ':my-scope/common-constructs';
@@ -268,9 +312,47 @@ Use o `DockerImageAsset` com qualquer construct AWS que aceite uma imagem de con
 <Fragment slot="terraform">
 O provider AWS do Terraform não tem um recurso de primeira classe para "construir e enviar uma imagem Docker". O padrão usado pelos geradores é:
 
-1. Um `aws_ecr_repository` para armazenar a imagem.
-2. Um `null_resource` com um provisioner `local-exec` que autentica no ECR, re-tageia a imagem construída localmente e a envia.
-3. O recurso downstream (por exemplo, `aws_ecs_task_definition`) referencia `"${aws_ecr_repository.repo.repository_url}:latest"`.
+1. O target `build` do projeto executa `docker build`, produzindo uma imagem local com tag `my-scope-my-project:latest`.
+2. Um `aws_ecr_repository` para armazenar a imagem.
+3. Um `null_resource` com um provisioner `local-exec` que autentica no ECR, re-tageia a imagem construída localmente e a envia.
+4. O recurso downstream (por exemplo, `aws_ecs_task_definition`) referencia `"${aws_ecr_repository.repo.repository_url}:latest"`.
+
+```d2
+direction: down
+
+app: Application {
+  bundle: "bundle target\nRolldown / uv"
+  dockerfile: Dockerfile {
+    shape: document
+  }
+  ctx: "dist/.../bundle/" {
+    shape: page
+  }
+  build: "docker target\ndocker build"
+  img: "local image\nmy-scope-my-project:latest" {
+    shape: cylinder
+  }
+
+  bundle -> ctx
+  dockerfile -> ctx
+  ctx -> build -> img
+}
+
+infra: Infrastructure {
+  direction: right
+  publish: "null_resource\nlocal-exec: docker push"
+  repo: aws_ecr_repository
+  publish -> repo: tag + push
+}
+
+ecr: "Amazon ECR" {
+  shape: cylinder
+}
+
+infra.publish -> app.img: reads local image
+infra.repo -> ecr
+```
+
 
 ```hcl
 resource "aws_ecr_repository" "repo" {
