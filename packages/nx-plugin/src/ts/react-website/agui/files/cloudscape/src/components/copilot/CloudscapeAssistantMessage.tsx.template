@@ -1,41 +1,20 @@
-import type { FC } from 'react';
-import { CopilotChatAssistantMessage } from '@copilotkit/react-core/v2';
+import {
+  CopilotChatAssistantMessage,
+  CopilotChatToolCallsView,
+} from '@copilotkit/react-core/v2';
 import type { CopilotChatAssistantMessageProps } from '@copilotkit/react-core/v2';
 import ChatBubble from '@cloudscape-design/chat-components/chat-bubble';
 import Avatar from '@cloudscape-design/chat-components/avatar';
 import ButtonGroup from '@cloudscape-design/components/button-group';
 import StatusIndicator from '@cloudscape-design/components/status-indicator';
 
-type FeedbackId = 'helpful' | 'not-helpful' | 'copy' | 'regenerate';
-
-/**
- * Assistant message rendered with the Cloudscape {@link ChatBubble} and a
- * {@link ButtonGroup} action toolbar. The message body is rendered using the
- * CopilotKit {@link CopilotChatAssistantMessage.MarkdownRenderer} directly,
- * which keeps GFM / KaTeX / code highlighting without inheriting the
- * default CopilotKit message container styling that would clash with the
- * Cloudscape ChatBubble.
- */
-export const CloudscapeAssistantMessage: FC<
-  CopilotChatAssistantMessageProps
-> = ({ message, onThumbsUp, onThumbsDown, onRegenerate }) => {
-  const handleAction = (id: FeedbackId) => {
-    if (!message) return;
-    switch (id) {
-      case 'helpful':
-        onThumbsUp?.(message);
-        break;
-      case 'not-helpful':
-        onThumbsDown?.(message);
-        break;
-      case 'copy':
-        if (typeof message.content === 'string') {
-          void navigator.clipboard?.writeText(message.content);
-        }
-        break;
-      case 'regenerate':
-        onRegenerate?.(message);
-        break;
+const CloudscapeAssistantMessageImpl = ({
+  message,
+  messages,
+}: CopilotChatAssistantMessageProps) => {
+  const handleCopy = () => {
+    if (typeof message.content === 'string') {
+      void navigator.clipboard?.writeText(message.content);
     }
   };
 
@@ -55,26 +34,10 @@ export const CloudscapeAssistantMessage: FC<
         <ButtonGroup
           ariaLabel="Chat bubble actions"
           variant="icon"
-          onItemClick={({ detail }) => handleAction(detail.id as FeedbackId)}
+          onItemClick={({ detail }) => {
+            if (detail.id === 'copy') handleCopy();
+          }}
           items={[
-            {
-              type: 'group',
-              text: 'Feedback',
-              items: [
-                {
-                  type: 'icon-button',
-                  id: 'helpful',
-                  iconName: 'thumbs-up',
-                  text: 'Helpful',
-                },
-                {
-                  type: 'icon-button',
-                  id: 'not-helpful',
-                  iconName: 'thumbs-down',
-                  text: 'Not helpful',
-                },
-              ],
-            },
             {
               type: 'icon-button',
               id: 'copy',
@@ -86,12 +49,6 @@ export const CloudscapeAssistantMessage: FC<
                 </StatusIndicator>
               ),
             },
-            {
-              type: 'icon-button',
-              id: 'regenerate',
-              iconName: 'refresh',
-              text: 'Regenerate',
-            },
           ]}
         />
       }
@@ -99,8 +56,16 @@ export const CloudscapeAssistantMessage: FC<
       <CopilotChatAssistantMessage.MarkdownRenderer
         content={message.content ?? ''}
       />
+      {message.toolCalls && message.toolCalls.length > 0 && (
+        <CopilotChatToolCallsView message={message} messages={messages} />
+      )}
     </ChatBubble>
   );
 };
+
+export const CloudscapeAssistantMessage = Object.assign(
+  CloudscapeAssistantMessageImpl,
+  CopilotChatAssistantMessage,
+);
 
 export default CloudscapeAssistantMessage;
