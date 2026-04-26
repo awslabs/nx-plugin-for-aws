@@ -107,4 +107,64 @@ describe('openApiPyClientGenerator - content types', () => {
       'application/vnd.example+json',
     );
   });
+
+  it('routes multipart/form-data bodies through httpx `files=`/`data=`', async () => {
+    // Regression: multipart bodies used to emit `body: types_gen.unknown`
+    // (non-existent type) with a JSON-encoded body.  They must produce a
+    // single `body` kwarg whose contents are routed through httpx's
+    // multipart machinery so the wire payload is actually multipart.
+    const spec: Spec = {
+      openapi: '3.0.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/files': {
+          post: {
+            operationId: 'upload',
+            requestBody: {
+              required: true,
+              content: {
+                'multipart/form-data': {
+                  schema: {
+                    type: 'object',
+                    required: ['file'],
+                    properties: {
+                      file: { type: 'string', format: 'binary' },
+                      description: { type: 'string' },
+                    },
+                  },
+                },
+              },
+            },
+            responses: { '204': { description: 'No content' } },
+          },
+        },
+      },
+    };
+    const { client } = await generateAndRead(verifier, tree, spec);
+    // Must not reference the phantom `types_gen.unknown`/`types_gen.Unknown`.
+    expect(client).not.toMatch(/types_gen\.[Uu]nknown/);
+    // Must not JSON-encode a multipart body.
+    expect(client).not.toMatch(/"json": body[\s\S]*?multipart\/form-data/);
+    // Must route the body through `files=`/`data=` (the multipart branch).
+    expect(client).toMatch(/"files":\s*_files/);
+
+    // Pass string field values — the worker round-trips args through JSON
+    // so bytes don't survive the transport.  httpx downgrades a "no files"
+    // multipart payload to `application/x-www-form-urlencoded`, which is
+    // still the wire-correct "form body" category; the thing we're
+    // regressing against is the body being JSON-encoded.
+    const res = await callGeneratedClient(
+      verifier,
+      'upload',
+      { body: { file: 'hi', description: 'desc' } as any },
+      { status: 204 },
+    );
+    expect(res.ok).toBe(true);
+    const contentType = res.calls?.[0]?.headers['content-type'] ?? '';
+    expect(contentType).toMatch(
+      /^(multipart\/form-data; boundary=|application\/x-www-form-urlencoded)/,
+    );
+    const body = res.calls?.[0]?.body ?? '';
+    expect(body).not.toMatch(/^\s*\{/); // not JSON
+  });
 });
