@@ -1357,6 +1357,9 @@ describe('openApiTsClientGenerator - complex types', () => {
       'src/generated/types.gen.ts',
     ]);
     const types = tree.read('src/generated/types.gen.ts', 'utf-8')!;
+    const client = tree.read('src/generated/client.gen.ts', 'utf-8')!;
+    expect(types).toMatchSnapshot('types.gen.ts');
+    expect(client).toMatchSnapshot('client.gen.ts');
     // The empty-value rendering used to produce `[key: string]: ;`.
     expect(types).not.toMatch(/\[key:\s*string\]:\s*;/);
     // Should fall back to `unknown`.

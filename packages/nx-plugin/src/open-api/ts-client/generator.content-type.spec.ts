@@ -274,7 +274,10 @@ describe('openApiTsClientGenerator - content type header', () => {
       'src/generated/client.gen.ts',
       'src/generated/types.gen.ts',
     ]);
+    const types = tree.read('src/generated/types.gen.ts', 'utf-8')!;
     const client = tree.read('src/generated/client.gen.ts', 'utf-8')!;
+    expect(types).toMatchSnapshot('types.gen.ts');
+    expect(client).toMatchSnapshot('client.gen.ts');
     // Not the joined list.
     expect(client).not.toMatch(
       /'application\/json,application\/xml,application\/x-www-form-urlencoded'/,
@@ -324,7 +327,10 @@ describe('openApiTsClientGenerator - content type header', () => {
       'src/generated/client.gen.ts',
       'src/generated/types.gen.ts',
     ]);
+    const types = tree.read('src/generated/types.gen.ts', 'utf-8')!;
     const client = tree.read('src/generated/client.gen.ts', 'utf-8')!;
+    expect(types).toMatchSnapshot('types.gen.ts');
+    expect(client).toMatchSnapshot('client.gen.ts');
     expect(client).not.toMatch(
       /headerParameters\['Content-Type'\]\s*=\s*'multipart\/form-data'/,
     );
@@ -364,7 +370,10 @@ describe('openApiTsClientGenerator - content type header', () => {
       'src/generated/client.gen.ts',
       'src/generated/types.gen.ts',
     ]);
+    const types = tree.read('src/generated/types.gen.ts', 'utf-8')!;
     const client = tree.read('src/generated/client.gen.ts', 'utf-8')!;
+    expect(types).toMatchSnapshot('types.gen.ts');
+    expect(client).toMatchSnapshot('client.gen.ts');
     expect(client).toContain('RequestCookieParameters.toJson(input)');
     expect(client).toContain("headerParameters['Cookie']");
 
