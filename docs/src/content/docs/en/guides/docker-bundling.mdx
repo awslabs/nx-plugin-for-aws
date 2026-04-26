@@ -260,24 +260,23 @@ Use CDK's [`DockerImageAsset`](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-c
 ```d2
 direction: right
 
-nx: Nx workspace {
+app: Application {
   bundle: "bundle target\nRolldown / uv"
   ctx: "dist/.../bundle/\n(Dockerfile + bundle)" {
     shape: page
   }
+  cdk: CDK app {
+    asset: "DockerImageAsset\ndirectory: dist/.../bundle"
+  }
   bundle -> ctx
-}
-
-cdk: CDK app {
-  asset: "DockerImageAsset\ndirectory: dist/.../bundle"
+  cdk.asset -> ctx: references
 }
 
 ecr: "CDK asset ECR" {
   shape: cylinder
 }
 
-cdk.asset -> nx.ctx: references
-cdk.asset -> ecr: cdk deploy\nbuilds + pushes
+app.cdk.asset -> ecr: cdk deploy\nbuilds + pushes
 ```
 
 
@@ -314,29 +313,28 @@ Terraform's AWS provider does not have a first-class "build and push a Docker im
 4. The downstream resource (e.g. `aws_ecs_task_definition`) references `"${aws_ecr_repository.repo.repository_url}:latest"`.
 
 ```d2
-direction: right
+direction: down
 
-nx: Nx workspace {
+app: Application {
   bundle: "bundle target\nRolldown / uv"
   build: "docker target\ndocker build"
   img: "local image\nmy-scope-my-project:latest" {
     shape: cylinder
   }
+  tf: Terraform module {
+    repo: aws_ecr_repository
+    publish: "null_resource\nlocal-exec: docker push"
+    publish -> repo: tag + push
+  }
   bundle -> build -> img
-}
-
-tf: Terraform module {
-  repo: aws_ecr_repository
-  publish: "null_resource\nlocal-exec: docker push"
-  publish -> repo: tag + push
+  img -> tf.publish: reads local image
 }
 
 ecr: "Amazon ECR" {
   shape: cylinder
 }
 
-nx.img -> tf.publish: reads local image
-tf.repo -> ecr
+app.tf.repo -> ecr
 ```
 
 
