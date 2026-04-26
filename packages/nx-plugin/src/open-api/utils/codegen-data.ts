@@ -188,10 +188,15 @@ export const buildOpenApiCodeGenData = async (
           );
         }
 
-        if (parameter.in === 'body') {
-          // Parameter name for the body is 'body'
+        if (parameter.in === 'body' || parameter.in === 'formData') {
+          // Parameter name for the body is 'body'.  `formData` bodies arrive
+          // under a synthetic `formData` param (hey-api convention) that's
+          // logically the body — normalise both shapes to `in === 'body'`
+          // so every downstream consumer (including ts-client's request-
+          // type composition) sees a single body kind.
           parameter.name = 'body';
           parameter.prop = 'body';
+          parameter.in = 'body';
 
           // The request body is not in the "parameters" section of the openapi spec so we won't have added the schema
           // properties above. Find it here.

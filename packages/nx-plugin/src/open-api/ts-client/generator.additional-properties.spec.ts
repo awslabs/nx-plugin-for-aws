@@ -1308,4 +1308,58 @@ describe('openApiTsClientGenerator - complex types', () => {
       ],
     });
   });
+
+  it('should render `unknown` value type for `type: object` with no additionalProperties', async () => {
+    // Regression: the generator used to emit `[key: string]: ;` (empty
+    // value type, SyntaxError) when the response schema was a bare
+    // `{ type: 'object' }` or `{ type: 'object', additionalProperties: true }`.
+    const spec: Spec = {
+      openapi: '3.0.0',
+      info: { title, version: '1.0.0' },
+      paths: {
+        '/bare-object': {
+          get: {
+            operationId: 'getBareObject',
+            responses: {
+              '200': {
+                description: 'bare object',
+                content: {
+                  'application/json': { schema: { type: 'object' } },
+                },
+              },
+            },
+          },
+        },
+        '/ap-true': {
+          get: {
+            operationId: 'getAdditionalPropsTrue',
+            responses: {
+              '200': {
+                description: 'ap=true',
+                content: {
+                  'application/json': {
+                    schema: { type: 'object', additionalProperties: true },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+    tree.write('openapi.json', JSON.stringify(spec));
+    await openApiTsClientGenerator(tree, {
+      openApiSpecPath: 'openapi.json',
+      outputPath: 'src/generated',
+    });
+    validateTypeScript([
+      'src/generated/client.gen.ts',
+      'src/generated/types.gen.ts',
+    ]);
+    const types = tree.read('src/generated/types.gen.ts', 'utf-8')!;
+    // The empty-value rendering used to produce `[key: string]: ;`.
+    expect(types).not.toMatch(/\[key:\s*string\]:\s*;/);
+    // Should fall back to `unknown`.
+    expect(types).toContain('[key: string]: unknown');
+  });
 });
