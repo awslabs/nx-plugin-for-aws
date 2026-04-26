@@ -7,8 +7,13 @@ import {
   IResource,
   Stage,
 } from 'aws-cdk-lib/aws-apigateway';
-import { IAspect } from 'aws-cdk-lib';
-import { CfnWebACL, CfnWebACLAssociation } from 'aws-cdk-lib/aws-wafv2';
+import { IAspect, RemovalPolicy } from 'aws-cdk-lib';
+import {
+  CfnLoggingConfiguration,
+  CfnWebACL,
+  CfnWebACLAssociation,
+} from 'aws-cdk-lib/aws-wafv2';
+import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
 import { RuntimeConfig } from '../runtime-config.js';
 import {
   ApiIntegrations,
@@ -107,6 +112,16 @@ export class RestApi<
               managedRuleGroupStatement: {
                 name: 'AWSManagedRulesCommonRuleSet',
                 vendorName: 'AWS',
+                // Count (don't block) request body size violations — API Gateway
+                // supports payloads larger than the 8 KB CRS default, and AWS
+                // only inspects the first 16 KB of the body by default. Blocking
+                // here is a common gotcha, so we only emit a metric instead.
+                ruleActionOverrides: [
+                  {
+                    name: 'SizeRestrictions_BODY',
+                    actionToUse: { count: {} },
+                  },
+                ],
               },
             },
             visibilityConfig: {
@@ -142,6 +157,19 @@ export class RestApi<
       new CfnWebACLAssociation(this, 'WebAclAssociation', {
         resourceArn: this.api.deploymentStage.stageArn,
         webAclArn: this.webAcl.attrArn,
+      });
+
+      // Send WAF request logs to CloudWatch. The log group name must start with
+      // `aws-waf-logs-` to satisfy the WAFv2 logging destination requirement.
+      const wafLogGroup = new LogGroup(this, 'WebAclLogs', {
+        logGroupName: `aws-waf-logs-${apiName}-${this.node.addr.slice(-8)}`,
+        retention: RetentionDays.ONE_MONTH,
+        removalPolicy: RemovalPolicy.DESTROY,
+      });
+
+      new CfnLoggingConfiguration(this, 'WebAclLoggingConfig', {
+        resourceArn: this.webAcl.attrArn,
+        logDestinationConfigs: [wafLogGroup.logGroupArn],
       });
     }
 

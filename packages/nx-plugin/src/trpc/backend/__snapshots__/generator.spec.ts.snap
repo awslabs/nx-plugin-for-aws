@@ -1972,8 +1972,13 @@ import {
   IResource,
   Stage,
 } from 'aws-cdk-lib/aws-apigateway';
-import { IAspect } from 'aws-cdk-lib';
-import { CfnWebACL, CfnWebACLAssociation } from 'aws-cdk-lib/aws-wafv2';
+import { IAspect, RemovalPolicy } from 'aws-cdk-lib';
+import {
+  CfnLoggingConfiguration,
+  CfnWebACL,
+  CfnWebACLAssociation,
+} from 'aws-cdk-lib/aws-wafv2';
+import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
 import { RuntimeConfig } from '../runtime-config.js';
 import {
   ApiIntegrations,
@@ -2072,6 +2077,16 @@ export class RestApi<
               managedRuleGroupStatement: {
                 name: 'AWSManagedRulesCommonRuleSet',
                 vendorName: 'AWS',
+                // Count (don't block) request body size violations — API Gateway
+                // supports payloads larger than the 8 KB CRS default, and AWS
+                // only inspects the first 16 KB of the body by default. Blocking
+                // here is a common gotcha, so we only emit a metric instead.
+                ruleActionOverrides: [
+                  {
+                    name: 'SizeRestrictions_BODY',
+                    actionToUse: { count: {} },
+                  },
+                ],
               },
             },
             visibilityConfig: {
@@ -2107,6 +2122,19 @@ export class RestApi<
       new CfnWebACLAssociation(this, 'WebAclAssociation', {
         resourceArn: this.api.deploymentStage.stageArn,
         webAclArn: this.webAcl.attrArn,
+      });
+
+      // Send WAF request logs to CloudWatch. The log group name must start with
+      // \`aws-waf-logs-\` to satisfy the WAFv2 logging destination requirement.
+      const wafLogGroup = new LogGroup(this, 'WebAclLogs', {
+        logGroupName: \`aws-waf-logs-\${apiName}-\${this.node.addr.slice(-8)}\`,
+        retention: RetentionDays.ONE_MONTH,
+        removalPolicy: RemovalPolicy.DESTROY,
+      });
+
+      new CfnLoggingConfiguration(this, 'WebAclLoggingConfig', {
+        resourceArn: this.webAcl.attrArn,
+        logDestinationConfigs: [wafLogGroup.logGroupArn],
       });
     }
 
@@ -4778,6 +4806,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 6.33"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.1"
+    }
   }
 }
 
@@ -4894,7 +4926,7 @@ resource "aws_api_gateway_gateway_response" "cors_5xx" {
 }
 
 resource "aws_wafv2_web_acl" "api_waf" {
-  #checkov:skip=CKV2_AWS_31:WAF logging disabled by default - enable if required
+  #checkov:skip=CKV2_AWS_31:Logging configuration is defined below in aws_wafv2_web_acl_logging_configuration.api_waf_logging; Checkov does not resolve the separate resource
   count = var.enable_waf ? 1 : 0
 
   name  = "\${var.api_name}-waf"
@@ -4916,6 +4948,17 @@ resource "aws_wafv2_web_acl" "api_waf" {
       managed_rule_group_statement {
         name        = "AWSManagedRulesCommonRuleSet"
         vendor_name = "AWS"
+
+        # Count (don't block) request body size violations — API Gateway
+        # supports payloads larger than the 8 KB CRS default, and AWS only
+        # inspects the first 16 KB of the body by default. Blocking here is a
+        # common gotcha, so we only emit a metric instead.
+        rule_action_override {
+          name = "SizeRestrictions_BODY"
+          action_to_use {
+            count {}
+          }
+        }
       }
     }
 
@@ -4959,6 +5002,29 @@ resource "aws_wafv2_web_acl" "api_waf" {
   lifecycle {
     create_before_destroy = true
   }
+}
+
+# CloudWatch Log Group for WAF request logs. Name must start with \`aws-waf-logs-\`.
+resource "aws_cloudwatch_log_group" "api_waf_logs" {
+  #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
+  #checkov:skip=CKV_AWS_338:Log retention set to one month which is sufficient for WAF logs
+  count = var.enable_waf ? 1 : 0
+
+  name              = "aws-waf-logs-\${var.api_name}-\${random_id.waf_log_suffix[0].hex}"
+  retention_in_days = 30
+  tags              = var.tags
+}
+
+resource "random_id" "waf_log_suffix" {
+  count       = var.enable_waf ? 1 : 0
+  byte_length = 4
+}
+
+resource "aws_wafv2_web_acl_logging_configuration" "api_waf_logging" {
+  count = var.enable_waf ? 1 : 0
+
+  log_destination_configs = [aws_cloudwatch_log_group.api_waf_logs[0].arn]
+  resource_arn            = aws_wafv2_web_acl.api_waf[0].arn
 }
 
 
@@ -5328,8 +5394,7 @@ resource "aws_api_gateway_stage" "api_stage" {
   #checkov:skip=CKV_AWS_76:API Gateway access logging disabled due to account-level CloudWatch Logs role ARN requirement
   #checkov:skip=CKV2_AWS_4:API Gateway logging level not applicable as access logging is disabled
   #checkov:skip=CKV2_AWS_51:Client certificate authentication not required for this use case
-  #checkov:skip=CKV2_AWS_77:WAFv2 Web ACL is attached via aws_wafv2_web_acl_association when var.enable_waf is true (default) and includes AWSManagedRulesKnownBadInputsRuleSet for Log4j protection
-  #checkov:skip=CKV2_AWS_29:WAFv2 Web ACL is attached via aws_wafv2_web_acl_association when var.enable_waf is true (default)
+  #checkov:skip=CKV2_AWS_77:WAFv2 Web ACL is attached via aws_wafv2_web_acl_association when var.enable_waf is true (default) and includes AWSManagedRulesKnownBadInputsRuleSet for Log4j protection; Checkov does not track the association across modules
   deployment_id        = aws_api_gateway_deployment.api_deployment.id
   rest_api_id          = module.rest_api.api_id
   stage_name           = "prod"
@@ -5527,6 +5592,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 6.33"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.1"
+    }
   }
 }
 
@@ -5643,7 +5712,7 @@ resource "aws_api_gateway_gateway_response" "cors_5xx" {
 }
 
 resource "aws_wafv2_web_acl" "api_waf" {
-  #checkov:skip=CKV2_AWS_31:WAF logging disabled by default - enable if required
+  #checkov:skip=CKV2_AWS_31:Logging configuration is defined below in aws_wafv2_web_acl_logging_configuration.api_waf_logging; Checkov does not resolve the separate resource
   count = var.enable_waf ? 1 : 0
 
   name  = "\${var.api_name}-waf"
@@ -5665,6 +5734,17 @@ resource "aws_wafv2_web_acl" "api_waf" {
       managed_rule_group_statement {
         name        = "AWSManagedRulesCommonRuleSet"
         vendor_name = "AWS"
+
+        # Count (don't block) request body size violations — API Gateway
+        # supports payloads larger than the 8 KB CRS default, and AWS only
+        # inspects the first 16 KB of the body by default. Blocking here is a
+        # common gotcha, so we only emit a metric instead.
+        rule_action_override {
+          name = "SizeRestrictions_BODY"
+          action_to_use {
+            count {}
+          }
+        }
       }
     }
 
@@ -5708,6 +5788,29 @@ resource "aws_wafv2_web_acl" "api_waf" {
   lifecycle {
     create_before_destroy = true
   }
+}
+
+# CloudWatch Log Group for WAF request logs. Name must start with \`aws-waf-logs-\`.
+resource "aws_cloudwatch_log_group" "api_waf_logs" {
+  #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
+  #checkov:skip=CKV_AWS_338:Log retention set to one month which is sufficient for WAF logs
+  count = var.enable_waf ? 1 : 0
+
+  name              = "aws-waf-logs-\${var.api_name}-\${random_id.waf_log_suffix[0].hex}"
+  retention_in_days = 30
+  tags              = var.tags
+}
+
+resource "random_id" "waf_log_suffix" {
+  count       = var.enable_waf ? 1 : 0
+  byte_length = 4
+}
+
+resource "aws_wafv2_web_acl_logging_configuration" "api_waf_logging" {
+  count = var.enable_waf ? 1 : 0
+
+  log_destination_configs = [aws_cloudwatch_log_group.api_waf_logs[0].arn]
+  resource_arn            = aws_wafv2_web_acl.api_waf[0].arn
 }
 
 
@@ -6058,8 +6161,7 @@ resource "aws_api_gateway_stage" "api_stage" {
   #checkov:skip=CKV_AWS_76:API Gateway access logging disabled due to account-level CloudWatch Logs role ARN requirement
   #checkov:skip=CKV2_AWS_4:API Gateway logging level not applicable as access logging is disabled
   #checkov:skip=CKV2_AWS_51:Client certificate authentication not required for this use case
-  #checkov:skip=CKV2_AWS_77:WAFv2 Web ACL is attached via aws_wafv2_web_acl_association when var.enable_waf is true (default) and includes AWSManagedRulesKnownBadInputsRuleSet for Log4j protection
-  #checkov:skip=CKV2_AWS_29:WAFv2 Web ACL is attached via aws_wafv2_web_acl_association when var.enable_waf is true (default)
+  #checkov:skip=CKV2_AWS_77:WAFv2 Web ACL is attached via aws_wafv2_web_acl_association when var.enable_waf is true (default) and includes AWSManagedRulesKnownBadInputsRuleSet for Log4j protection; Checkov does not track the association across modules
   deployment_id        = aws_api_gateway_deployment.api_deployment.id
   rest_api_id          = module.rest_api.api_id
   stage_name           = "prod"
@@ -6268,6 +6370,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 6.33"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.1"
+    }
   }
 }
 
@@ -6384,7 +6490,7 @@ resource "aws_api_gateway_gateway_response" "cors_5xx" {
 }
 
 resource "aws_wafv2_web_acl" "api_waf" {
-  #checkov:skip=CKV2_AWS_31:WAF logging disabled by default - enable if required
+  #checkov:skip=CKV2_AWS_31:Logging configuration is defined below in aws_wafv2_web_acl_logging_configuration.api_waf_logging; Checkov does not resolve the separate resource
   count = var.enable_waf ? 1 : 0
 
   name  = "\${var.api_name}-waf"
@@ -6406,6 +6512,17 @@ resource "aws_wafv2_web_acl" "api_waf" {
       managed_rule_group_statement {
         name        = "AWSManagedRulesCommonRuleSet"
         vendor_name = "AWS"
+
+        # Count (don't block) request body size violations — API Gateway
+        # supports payloads larger than the 8 KB CRS default, and AWS only
+        # inspects the first 16 KB of the body by default. Blocking here is a
+        # common gotcha, so we only emit a metric instead.
+        rule_action_override {
+          name = "SizeRestrictions_BODY"
+          action_to_use {
+            count {}
+          }
+        }
       }
     }
 
@@ -6449,6 +6566,29 @@ resource "aws_wafv2_web_acl" "api_waf" {
   lifecycle {
     create_before_destroy = true
   }
+}
+
+# CloudWatch Log Group for WAF request logs. Name must start with \`aws-waf-logs-\`.
+resource "aws_cloudwatch_log_group" "api_waf_logs" {
+  #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
+  #checkov:skip=CKV_AWS_338:Log retention set to one month which is sufficient for WAF logs
+  count = var.enable_waf ? 1 : 0
+
+  name              = "aws-waf-logs-\${var.api_name}-\${random_id.waf_log_suffix[0].hex}"
+  retention_in_days = 30
+  tags              = var.tags
+}
+
+resource "random_id" "waf_log_suffix" {
+  count       = var.enable_waf ? 1 : 0
+  byte_length = 4
+}
+
+resource "aws_wafv2_web_acl_logging_configuration" "api_waf_logging" {
+  count = var.enable_waf ? 1 : 0
+
+  log_destination_configs = [aws_cloudwatch_log_group.api_waf_logs[0].arn]
+  resource_arn            = aws_wafv2_web_acl.api_waf[0].arn
 }
 
 
@@ -6801,8 +6941,7 @@ resource "aws_api_gateway_stage" "api_stage" {
   #checkov:skip=CKV_AWS_76:API Gateway access logging disabled due to account-level CloudWatch Logs role ARN requirement
   #checkov:skip=CKV2_AWS_4:API Gateway logging level not applicable as access logging is disabled
   #checkov:skip=CKV2_AWS_51:Client certificate authentication not required for this use case
-  #checkov:skip=CKV2_AWS_77:WAFv2 Web ACL is attached via aws_wafv2_web_acl_association when var.enable_waf is true (default) and includes AWSManagedRulesKnownBadInputsRuleSet for Log4j protection
-  #checkov:skip=CKV2_AWS_29:WAFv2 Web ACL is attached via aws_wafv2_web_acl_association when var.enable_waf is true (default)
+  #checkov:skip=CKV2_AWS_77:WAFv2 Web ACL is attached via aws_wafv2_web_acl_association when var.enable_waf is true (default) and includes AWSManagedRulesKnownBadInputsRuleSet for Log4j protection; Checkov does not track the association across modules
   deployment_id        = aws_api_gateway_deployment.api_deployment.id
   rest_api_id          = module.rest_api.api_id
   stage_name           = "prod"
