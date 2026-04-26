@@ -141,7 +141,10 @@ const toPythonPrimitive = (property: Model): string => {
   } else if (property.type === 'string') {
     return 'str';
   }
-  return property.type;
+  // Fall-through is a user-defined model reference.  The py-client emits
+  // classes using `typescriptName` (which escapes TS-reserved names like
+  // `Error` → `_Error`), so references must use the same escaped form.
+  return toTypeScriptModelName(property.type);
 };
 
 /**
@@ -212,13 +215,16 @@ export const toPythonType = (property: Model): string => {
     case 'one-of':
     case 'any-of':
     case 'all-of':
-      return property.name;
+      return toTypeScriptModelName(property.name);
     default:
-      // "any" has export = interface
-      if (PRIMITIVE_TYPES.has(property.type)) {
+      // "any"/"unknown" has export = interface — route to the primitive path
+      // so they become `Any` rather than being treated as a model reference.
+      if (PRIMITIVE_TYPES.has(property.type) || property.type === 'unknown') {
         return toPythonPrimitive(property);
       }
-      return property.type;
+      // User-defined model reference — escape TS-reserved names so the
+      // rendered type matches the emitted class (`Error` → `_Error`, etc.).
+      return toTypeScriptModelName(property.type);
   }
 };
 
@@ -289,13 +295,15 @@ export const toPythonAnnotation = (property: Model): string => {
       case 'one-of':
       case 'any-of':
       case 'all-of':
-        return `"${p.name}"`;
-      default:
+        return `"${toTypeScriptModelName(p.name)}"`;
+      default: {
         if (p.type === 'unknown' || p.type === 'any') return 'Any';
         if (PRIMITIVE_TYPES.has(p.type)) {
           return toPythonPrimitive(p);
         }
-        return isPythonBuiltin(p.type) ? p.type : `"${p.type}"`;
+        const escaped = toTypeScriptModelName(p.type);
+        return isPythonBuiltin(escaped) ? escaped : `"${escaped}"`;
+      }
     }
   };
   return render(property);
@@ -358,9 +366,13 @@ export const toPythonName = (
 ) => {
   const nameSnakeCase = snakeCase(name);
 
-  // Check if the name is a reserved word. Reserved words that overlap with TypeScript will already be escaped
-  // with a leading _ by @hey-api/openapi-ts, so we remove this to test
-  if (PYTHON_KEYWORDS.has(name.startsWith('_') ? name.slice(1) : name)) {
+  // Check if the name is a reserved word.  Test both the raw name (reserved
+  // words that overlap with TypeScript arrive with a leading `_` from
+  // @hey-api/openapi-ts, which we strip before testing) and the snake-cased
+  // form — snakeCase strips trailing underscores so `from_` becomes `from`
+  // and would otherwise slip through.
+  const rawStripped = name.startsWith('_') ? name.slice(1) : name;
+  if (PYTHON_KEYWORDS.has(rawStripped) || PYTHON_KEYWORDS.has(nameSnakeCase)) {
     const nameSuffix = `_${nameSnakeCase}`;
     switch (namedEntity) {
       case 'model':

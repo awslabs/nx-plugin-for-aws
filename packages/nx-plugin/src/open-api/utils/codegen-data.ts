@@ -1354,6 +1354,15 @@ const buildRequestShape = (
     isSingleBodyInput: false,
   };
   if (bodyParam) {
+    // Resolve to a single wire media type.  We prefer hey-api's `mediaType`
+    // (singular, chosen for the body) and fall back to the first entry of
+    // the accepted-types list.  Keeping this a string (not an array) lets
+    // language templates do straightforward string equality checks like
+    // `mediaType === 'multipart/form-data'` instead of relying on implicit
+    // array-to-string coercion.
+    const mediaType =
+      ((bodyParam as any).mediaType as string | undefined) ??
+      ((bodyParam as any).mediaTypes as string[] | undefined)?.[0];
     const bodyModel = modelsByName[bodyParam.type];
     if (canFlattenBodyIntoRequest(op, bodyParam, bodyModel)) {
       for (const prop of flattenableBodyProperties(bodyModel)) {
@@ -1367,10 +1376,7 @@ const buildRequestShape = (
           specName: prop.name,
         });
       }
-      shape.bodyFromFields = {
-        model: bodyModel,
-        mediaType: (bodyParam as any).mediaTypes,
-      };
+      shape.bodyFromFields = { model: bodyModel, mediaType };
     } else {
       inputs.push({
         source: { kind: 'body', wireName: 'body' },
@@ -1381,10 +1387,7 @@ const buildRequestShape = (
         description: bodyParam.description,
         specName: 'body',
       });
-      shape.bodyAsSingleInput = {
-        model: bodyParam,
-        mediaType: (bodyParam as any).mediaTypes,
-      };
+      shape.bodyAsSingleInput = { model: bodyParam, mediaType };
       if (nonBody.length === 0) shape.isSingleBodyInput = true;
     }
   }
