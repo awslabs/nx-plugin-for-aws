@@ -17,11 +17,27 @@ const resultTypeAsync = (op) => {
 const responseParseExpr = (resp) => {
   if (resp.type === 'void') return 'None';
   if (resp.type === 'binary') return 'response.content';
-  if (resp.type === 'string' && !resp.pythonType) return 'response.text';
-  if (resp.type === 'number' || resp.type === 'integer') {
-    return 'float(response.text) if "." in response.text else int(response.text)';
+  const mediaTypes = resp.mediaTypes || [];
+  const isJsonMedia = mediaTypes.some((m) =>
+    m === 'application/json' || m.endsWith('+json'),
+  );
+  if (resp.type === 'string') {
+    if (!isJsonMedia) return 'response.text';
+    const py = resp.pythonClientType || 'str';
+    return `TypeAdapter(${py}).validate_python(response.json())`;
   }
-  if (resp.type === 'boolean') return 'response.text.strip().lower() == "true"';
+  if (resp.type === 'number' || resp.type === 'integer') {
+    if (!isJsonMedia) {
+      return 'float(response.text) if "." in response.text else int(response.text)';
+    }
+    return `TypeAdapter(${resp.type === 'integer' ? 'int' : 'float'}).validate_python(response.json())`;
+  }
+  if (resp.type === 'boolean') {
+    if (!isJsonMedia) {
+      return 'response.text.strip().lower() == "true"';
+    }
+    return 'TypeAdapter(bool).validate_python(response.json())';
+  }
   const py = resp.pythonClientType || 'Any';
   if (py === 'Any') return 'response.json()';
   if (resp.referencedCollectionKind || py.startsWith('list[') || py.startsWith('dict[')) {
@@ -44,11 +60,16 @@ const renderTypedRaise = (op, resp) => {
   const cls = op.errorShape.exceptionClassName;
   if (!entry) return `raise ${cls}(response.status_code, None)`;
   const payload = resp.type === 'void' ? 'None' : responseParseExpr(resp);
+  // For exact numeric codes we can pass the literal value directly so the
+  // Literal-typed `status` field type-checks with no suppression.
+  const statusExpr = entry.isExactCode
+    ? String(entry.code)
+    : 'response.status_code';
   return (
     `raise ${cls}(\n` +
     `                response.status_code,\n` +
     `                types_gen.${entry.className}(\n` +
-    `                    status=response.status_code,  # type: ignore[arg-type]\n` +
+    `                    status=${statusExpr},\n` +
     `                    error=${payload},\n` +
     `                ),\n` +
     `            )`

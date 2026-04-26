@@ -5,16 +5,8 @@
 import { generateFiles, Tree } from '@nx/devkit';
 import * as path from 'path';
 import { OpenApiPyClientGeneratorSchema } from './schema';
-import { parseOpenApiSpec } from '../utils/parse';
-import {
-  buildOpenApiCodeGenData,
-  refinePythonTypeAnnotations,
-} from '../utils/codegen-data';
+import { buildOpenApiCodeGenerationData } from '../ts-client/generator';
 import { CodeGenData } from '../utils/codegen-data/types';
-import {
-  qualifyPythonType,
-  toPythonName,
-} from '../utils/codegen-data/languages';
 import { formatFilesInSubtree } from '../../utils/format';
 import { NxGeneratorInfo, getGeneratorInfo } from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
@@ -39,107 +31,6 @@ export const OPEN_API_PY_CLIENT_PYTHON_DEP_SPECS: string[] = withPyVersions([
   ...OPEN_API_PY_CLIENT_PYTHON_DEPS,
 ]);
 
-const TYPES_GEN_PREFIX = 'types_gen.';
-
-/**
- * Attach `pythonClientType` (qualified with `types_gen.`) to every typed
- * entry in the codegen data so templates don't have to re-walk the type.
- */
-const annotatePythonClientTypes = (data: CodeGenData): void => {
-  const annotate = (entry: any): void => {
-    if (!entry) return;
-    entry.pythonClientType = qualifyPythonType(
-      entry.pythonType || entry.type,
-      TYPES_GEN_PREFIX,
-    );
-  };
-  for (const model of data.models as any[]) {
-    annotate(model);
-    for (const prop of model.properties ?? []) annotate(prop);
-    if (model.additionalPropertiesModel) {
-      annotate(model.additionalPropertiesModel);
-    }
-  }
-  for (const op of data.allOperations as any[]) {
-    for (const parameter of op.parameters ?? []) annotate(parameter);
-    annotate(op.parametersBody);
-    annotate(op.result);
-    for (const response of op.responses ?? []) {
-      annotate(response);
-      annotate(response.itemSchemaModel);
-    }
-  }
-};
-
-/**
- * Translate the language-agnostic `requestShape` on each operation into
- * Python kwargs: unique python identifier, annotation, whether required.
- */
-const annotatePythonRequestShape = (data: CodeGenData): void => {
-  for (const op of data.allOperations as any[]) {
-    const shape = op.requestShape;
-    if (!shape) continue;
-    const seenNames = new Set<string>();
-    for (const input of shape.inputs) {
-      const rawName = input.model.pythonName || input.specName;
-      let pythonName = toPythonName('property', rawName);
-      if (seenNames.has(pythonName)) {
-        pythonName = `${pythonName}_${input.source.kind.replace('-', '_')}`;
-      }
-      seenNames.add(pythonName);
-      const baseType = qualifyPythonType(
-        input.model.pythonType || input.model.type,
-        TYPES_GEN_PREFIX,
-      );
-      input.pythonName = pythonName;
-      input.pythonAnnotation =
-        input.isRequired && !input.isNullable
-          ? baseType
-          : `Optional[${baseType}]`;
-    }
-    shape.inputs.sort(
-      (a: any, b: any) => Number(b.isRequired) - Number(a.isRequired),
-    );
-  }
-};
-
-/**
- * Attach Python-idiomatic naming to the shared error taxonomy: one pydantic
- * model per (operation, error code) and a per-op exception subclass.
- */
-const annotatePythonErrorShape = (data: CodeGenData): void => {
-  for (const op of data.allOperations as any[]) {
-    const shape = op.errorShape;
-    if (!shape) continue;
-    const opPascal = op.operationIdPascalCase;
-    shape.exceptionClassName = `${opPascal}ApiError`;
-    shape.unionTypeName =
-      shape.entries.length > 0 ? `${opPascal}Error` : 'Never';
-    for (const entry of shape.entries) {
-      const suffix =
-        entry.code === 'default' ? 'Default' : String(entry.code).toUpperCase();
-      entry.className = `${opPascal}${suffix}Error`;
-      entry.statusAnnotation = entry.statusCodes
-        ? `Literal[${entry.statusCodes.join(', ')}]`
-        : 'int';
-      entry.isExactCode = typeof entry.code === 'number';
-    }
-  }
-};
-
-export const buildOpenApiPyCodeGenerationData = async (
-  tree: Tree,
-  specPath: string,
-): Promise<CodeGenData> => {
-  const spec = await parseOpenApiSpec(tree, specPath);
-  const data = await buildOpenApiCodeGenData(spec);
-  refinePythonTypeAnnotations(data);
-  annotatePythonClientTypes(data);
-  annotatePythonRequestShape(data);
-  annotatePythonErrorShape(data);
-  return data;
-};
-
 /**
  * Generate a Python httpx-based client from an OpenAPI spec.
  *
@@ -152,7 +43,7 @@ export const openApiPyClientGenerator = async (
   tree: Tree,
   options: OpenApiPyClientGeneratorSchema,
 ) => {
-  const data = await buildOpenApiPyCodeGenerationData(
+  const data = await buildOpenApiCodeGenerationData(
     tree,
     options.openApiSpecPath,
   );
