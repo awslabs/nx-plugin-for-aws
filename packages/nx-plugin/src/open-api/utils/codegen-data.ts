@@ -26,6 +26,7 @@ import {
   toPythonAnnotation,
   toTypeScriptName,
   toTypeScriptModelName,
+  qualifyPythonType,
 } from './codegen-data/languages';
 import {
   CodeGenData,
@@ -488,7 +489,7 @@ export const buildOpenApiCodeGenData = async (
   const vendorExtensions: { [key: string]: any } = {};
   copyVendorExtensions(spec ?? {}, vendorExtensions);
 
-  return {
+  const result: CodeGenData = {
     ...data,
     operationsByTag,
     untaggedOperations,
@@ -497,6 +498,13 @@ export const buildOpenApiCodeGenData = async (
     vendorExtensions,
     className: toClassName(spec.info.title),
   };
+
+  // Final pass to refresh python-specific fields now that all links and
+  // composite relationships are resolved.  Produced once so every downstream
+  // language generator consumes a single prepared object.
+  annotatePythonData(result);
+
+  return result;
 };
 
 const buildInitialCodeGenData = async (spec: Spec): Promise<ClientData> => {
@@ -532,16 +540,102 @@ const buildInitialCodeGenData = async (spec: Spec): Promise<ClientData> => {
   return data;
 };
 
+const TYPES_GEN_PREFIX = 'types_gen.';
+
 /**
- * Re-derive python types on every model after all links and composite
- * relationships are resolved.  Necessary for collection aliases whose element
- * type is a reference that hadn't had `openapiType` populated the first time
- * through `mutateModelWithAdditionalTypes`.
+ * Attach `pythonClientType` to every typed entry — the bare `pythonType`
+ * qualified with `types_gen.` so client templates can reference model
+ * classes through a single import.
  */
-export const refinePythonTypeAnnotations = (data: CodeGenData): void => {
+const annotatePythonClientType = (entry: any): void => {
+  if (!entry) return;
+  entry.pythonClientType = qualifyPythonType(
+    entry.pythonType || entry.type,
+    TYPES_GEN_PREFIX,
+  );
+};
+
+/**
+ * Second pass over all models + operation payloads to re-derive python type
+ * annotations after links/composites are resolved, and to add python-specific
+ * annotations the client templates consume:
+ *  - `pythonType` / `pythonAnnotation` (refreshed — necessary for collection
+ *    aliases whose element type wasn't available first time through)
+ *  - `pythonClientType` (fully qualified with `types_gen.` prefix)
+ *  - `requestShape.inputs[*].pythonName` / `.pythonAnnotation` (kwargs)
+ *  - `errorShape.exceptionClassName` / `.unionTypeName` / per-entry names
+ *
+ * Runs for every spec — the resulting fields are only read by the py-client
+ * templates, so there's no cost to TypeScript consumers.
+ */
+const annotatePythonData = (data: CodeGenData): void => {
   for (const model of data.models as any[]) {
     (model as any).pythonType = toPythonType(model);
     (model as any).pythonAnnotation = toPythonAnnotation(model);
+    annotatePythonClientType(model);
+    for (const prop of (model as any).properties ?? []) {
+      annotatePythonClientType(prop);
+    }
+    annotatePythonClientType((model as any).additionalPropertiesModel);
+  }
+
+  for (const op of (data as any).allOperations as any[]) {
+    for (const parameter of op.parameters ?? []) {
+      annotatePythonClientType(parameter);
+    }
+    annotatePythonClientType(op.parametersBody);
+    annotatePythonClientType(op.result);
+    for (const response of op.responses ?? []) {
+      annotatePythonClientType(response);
+      annotatePythonClientType(response.itemSchemaModel);
+    }
+
+    const requestShape = op.requestShape;
+    if (requestShape) {
+      const seenNames = new Set<string>();
+      for (const input of requestShape.inputs) {
+        const rawName = input.model.pythonName || input.specName;
+        let pythonName = toPythonName('property', rawName);
+        if (seenNames.has(pythonName)) {
+          pythonName = `${pythonName}_${input.source.kind.replace('-', '_')}`;
+        }
+        seenNames.add(pythonName);
+        const baseType = qualifyPythonType(
+          input.model.pythonType || input.model.type,
+          TYPES_GEN_PREFIX,
+        );
+        input.pythonName = pythonName;
+        input.pythonAnnotation =
+          input.isRequired && !input.isNullable
+            ? baseType
+            : `Optional[${baseType}]`;
+      }
+      requestShape.inputs.sort(
+        (a: any, b: any) => Number(b.isRequired) - Number(a.isRequired),
+      );
+    }
+
+    const errorShape = op.errorShape;
+    if (errorShape) {
+      const opPascal = op.operationIdPascalCase;
+      errorShape.exceptionClassName = `${opPascal}ApiError`;
+      errorShape.unionTypeName =
+        errorShape.entries.length > 0 ? `${opPascal}Error` : 'Never';
+      for (const entry of errorShape.entries) {
+        const suffix =
+          entry.code === 'default'
+            ? 'Default'
+            : String(entry.code).toUpperCase();
+        entry.className = `${opPascal}${suffix}Error`;
+        entry.isExactCode = typeof entry.code === 'number';
+        // Only collapse to a Literal for exact numeric codes — ranges like
+        // 5XX expand to 100 codes, which produce a massive, unreadable
+        // Literal and don't narrow `response.status_code` usefully anyway.
+        entry.statusAnnotation = entry.isExactCode
+          ? `Literal[${entry.code}]`
+          : 'int';
+      }
+    }
   }
 };
 
