@@ -86,7 +86,7 @@ const addLambdaFunctionCdkConstructs = async (
     ),
     {
       ...options,
-      runtime: `Runtime.${options.runtime === 'python' ? 'PYTHON_3_12' : 'NODEJS_LATEST'}`,
+      runtime: `Runtime.${options.runtime === 'python' ? 'PYTHON_3_14' : 'NODEJS_LATEST'}`,
     },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
@@ -142,7 +142,7 @@ const addLambdaFunctionTerraformModules = (
     ),
     {
       ...options,
-      runtime: options.runtime === 'python' ? 'python3.12' : 'nodejs22.x',
+      runtime: options.runtime === 'python' ? 'python3.14' : 'nodejs22.x',
     },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
