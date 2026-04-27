@@ -125,8 +125,8 @@ export const pyProjectGenerator = async (
       autoActivate: true,
       packageManager: 'uv',
       moveDevDependencies: false,
-      pyenvPythonVersion: '3.12.0',
-      pyprojectPythonDependency: '>=3.12',
+      pyenvPythonVersion: '3.14.0',
+      pyprojectPythonDependency: '>=3.14',
     });
   }
 
@@ -137,8 +137,8 @@ export const pyProjectGenerator = async (
     buildBundleLocalDependencies: true,
     linter: 'ruff',
     rootPyprojectDependencyGroup: 'main',
-    pyenvPythonVersion: '3.12.0',
-    pyprojectPythonDependency: '>=3.12',
+    pyenvPythonVersion: '3.14.0',
+    pyprojectPythonDependency: '>=3.14',
     projectType: schema.projectType,
     projectNameAndRootFormat: 'as-provided',
     moduleName: normalizedModuleName,

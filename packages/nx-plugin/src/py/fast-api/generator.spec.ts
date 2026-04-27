@@ -484,7 +484,7 @@ describe('fastapi project generator', () => {
 
       // Verify FastAPI-specific handler configuration (Lambda Web Adapter)
       expect(appApiContent).toMatch(/handler\s+=\s+"run\.sh"/);
-      expect(appApiContent).toMatch(/runtime\s+=\s+"python3\.12"/);
+      expect(appApiContent).toMatch(/runtime\s+=\s+"python3\.14"/);
 
       // Snapshot terraform files
       const terraformFileContents = {
@@ -531,7 +531,7 @@ describe('fastapi project generator', () => {
 
       // Verify FastAPI-specific handler configuration
       expect(appApiContent).toMatch(/handler\s+=\s+"run\.sh"/);
-      expect(appApiContent).toMatch(/runtime\s+=\s+"python3\.12"/);
+      expect(appApiContent).toMatch(/runtime\s+=\s+"python3\.14"/);
 
       // Snapshot terraform files
       const terraformFileContents = {
@@ -579,7 +579,7 @@ describe('fastapi project generator', () => {
 
       // Verify FastAPI-specific handler configuration
       expect(appApiContent).toMatch(/handler\s+=\s+"run\.sh"/);
-      expect(appApiContent).toMatch(/runtime\s+=\s+"python3\.12"/);
+      expect(appApiContent).toMatch(/runtime\s+=\s+"python3\.14"/);
 
       // Snapshot terraform files
       const terraformFileContents = {
@@ -627,7 +627,7 @@ describe('fastapi project generator', () => {
 
       // Verify FastAPI-specific handler configuration
       expect(appApiContent).toMatch(/handler\s+=\s+"run\.sh"/);
-      expect(appApiContent).toMatch(/runtime\s+=\s+"python3\.12"/);
+      expect(appApiContent).toMatch(/runtime\s+=\s+"python3\.14"/);
 
       // Snapshot terraform files
       const terraformFileContents = {
@@ -674,7 +674,7 @@ describe('fastapi project generator', () => {
 
       // Verify FastAPI-specific handler configuration
       expect(appApiContent).toMatch(/handler\s+=\s+"run\.sh"/);
-      expect(appApiContent).toMatch(/runtime\s+=\s+"python3\.12"/);
+      expect(appApiContent).toMatch(/runtime\s+=\s+"python3\.14"/);
 
       // Snapshot terraform files
       const terraformFileContents = {
@@ -722,7 +722,7 @@ describe('fastapi project generator', () => {
 
       // Verify FastAPI-specific handler configuration
       expect(appApiContent).toMatch(/handler\s+=\s+"run\.sh"/);
-      expect(appApiContent).toMatch(/runtime\s+=\s+"python3\.12"/);
+      expect(appApiContent).toMatch(/runtime\s+=\s+"python3\.14"/);
 
       // Snapshot terraform files
       const terraformFileContents = {
@@ -825,7 +825,7 @@ describe('fastapi project generator', () => {
 
       // Verify FastAPI-specific handler configuration with custom module
       expect(terraformFile).toMatch(/handler\s+=\s+"run\.sh"/);
-      expect(terraformFile).toMatch(/runtime\s+=\s+"python3\.12"/);
+      expect(terraformFile).toMatch(/runtime\s+=\s+"python3\.14"/);
     });
 
     it('should handle terraform with different directory structures', async () => {

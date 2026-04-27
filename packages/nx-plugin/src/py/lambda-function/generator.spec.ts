@@ -567,7 +567,7 @@ describe('lambda-handler project generator', () => {
       expect(terraformContent).toMatch(
         /handler\s+=\s+"test_project\.test_function\.lambda_handler"/,
       );
-      expect(terraformContent).toMatch(/runtime\s+=\s+"python3\.12"/);
+      expect(terraformContent).toMatch(/runtime\s+=\s+"python3\.14"/);
       expect(terraformContent).toContain('test-project-test-function');
 
       // Snapshot terraform file
@@ -685,7 +685,7 @@ describe('lambda-handler project generator', () => {
       expect(terraformContent).toMatch(
         /handler\s+=\s+"test_project\.test_function\.lambda_handler"/,
       );
-      expect(terraformContent).toMatch(/runtime\s+=\s+"python3\.12"/);
+      expect(terraformContent).toMatch(/runtime\s+=\s+"python3\.14"/);
     });
 
     it('should configure project targets and dependencies correctly for terraform', async () => {

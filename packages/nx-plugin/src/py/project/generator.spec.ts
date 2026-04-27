@@ -74,7 +74,7 @@ describe('python project generator', () => {
     );
 
     // Verify python version
-    expect(pyprojectToml.project['requires-python']).toBe('>=3.12');
+    expect(pyprojectToml.project['requires-python']).toBe('>=3.14');
 
     // Verify dev dependencies include pytest
     expect(pyprojectToml['tool']['pytest']['ini_options']).toBeDefined();
