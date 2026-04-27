@@ -389,6 +389,23 @@ export const normaliseOpenApiSpecForCodeGen = (inSpec: Spec): Spec => {
             };
           }
         }
+
+        // Hoist parameter schemas
+        if ('parameters' in operation) {
+          (operation.parameters ?? []).forEach((p) => {
+            const param = resolveIfRef(spec, p);
+            const paramSchema = param?.schema;
+            if (
+              paramSchema &&
+              !isRef(paramSchema) &&
+              isCompositeSchema(paramSchema as OpenAPIV3.SchemaObject)
+            ) {
+              const schemaName = `${upperFirst(deduplicatedOpId)}Request${upperFirst(param.in)}${upperFirst(camelCase(param.name))}`;
+              spec.components!.schemas![schemaName] = paramSchema;
+              param.schema = { $ref: `#/components/schemas/${schemaName}` };
+            }
+          });
+        }
       }
     }),
   );

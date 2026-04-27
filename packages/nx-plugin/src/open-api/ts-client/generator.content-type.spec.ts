@@ -224,4 +224,179 @@ describe('openApiTsClientGenerator - content type header', () => {
       }),
     );
   });
+
+  it('should pick a single wire media type when the spec lists multiple', async () => {
+    // Regression: the generator used to emit the joined list
+    // "application/json,application/xml,application/x-www-form-urlencoded"
+    // as the Content-Type header.  Servers parse Content-Type as a single
+    // type, so we pick the first JSON-compatible media type (or the first
+    // entry) and emit it verbatim.
+    const spec: Spec = {
+      info: { title, version: '1.0.0' },
+      openapi: '3.0.0',
+      paths: {
+        '/multi': {
+          post: {
+            requestBody: {
+              required: true,
+              content: {
+                'application/xml': {
+                  schema: {
+                    type: 'object',
+                    properties: { m: { type: 'string' } },
+                  },
+                },
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: { m: { type: 'string' } },
+                  },
+                },
+                'application/x-www-form-urlencoded': {
+                  schema: {
+                    type: 'object',
+                    properties: { m: { type: 'string' } },
+                  },
+                },
+              },
+            },
+            responses: { '204': { description: 'ok' } },
+          },
+        },
+      },
+    };
+    tree.write('openapi.json', JSON.stringify(spec));
+    await openApiTsClientGenerator(tree, {
+      openApiSpecPath: 'openapi.json',
+      outputPath: 'src/generated',
+    });
+    validateTypeScript([
+      'src/generated/client.gen.ts',
+      'src/generated/types.gen.ts',
+    ]);
+    const types = tree.read('src/generated/types.gen.ts', 'utf-8')!;
+    const client = tree.read('src/generated/client.gen.ts', 'utf-8')!;
+    expect(types).toMatchSnapshot('types.gen.ts');
+    expect(client).toMatchSnapshot('client.gen.ts');
+    // Not the joined list.
+    expect(client).not.toMatch(
+      /'application\/json,application\/xml,application\/x-www-form-urlencoded'/,
+    );
+    // One declared value, the JSON-compatible one preferred.
+    expect(client).toContain(
+      "headerParameters['Content-Type'] = 'application/json'",
+    );
+  });
+
+  it('should not force Content-Type for multipart/form-data bodies', async () => {
+    // Regression: setting Content-Type to a bare `multipart/form-data` string
+    // strips the boundary param that `fetch` would otherwise autocompute from
+    // a FormData body, so the server cannot parse the payload.
+    const spec: Spec = {
+      info: { title, version: '1.0.0' },
+      openapi: '3.0.0',
+      paths: {
+        '/upload': {
+          post: {
+            requestBody: {
+              required: true,
+              content: {
+                'multipart/form-data': {
+                  schema: {
+                    type: 'object',
+                    required: ['file'],
+                    properties: {
+                      file: { type: 'string', format: 'binary' },
+                      description: { type: 'string' },
+                    },
+                  },
+                },
+              },
+            },
+            responses: { '204': { description: 'ok' } },
+          },
+        },
+      },
+    };
+    tree.write('openapi.json', JSON.stringify(spec));
+    await openApiTsClientGenerator(tree, {
+      openApiSpecPath: 'openapi.json',
+      outputPath: 'src/generated',
+    });
+    validateTypeScript([
+      'src/generated/client.gen.ts',
+      'src/generated/types.gen.ts',
+    ]);
+    const types = tree.read('src/generated/types.gen.ts', 'utf-8')!;
+    const client = tree.read('src/generated/client.gen.ts', 'utf-8')!;
+    expect(types).toMatchSnapshot('types.gen.ts');
+    expect(client).toMatchSnapshot('client.gen.ts');
+    expect(client).not.toMatch(
+      /headerParameters\['Content-Type'\]\s*=\s*'multipart\/form-data'/,
+    );
+  });
+
+  it('should serialise cookie parameters into a Cookie request header', async () => {
+    // Regression: cookie parameters used to be typed on the request input
+    // but silently dropped at send time — the user's session cookie never
+    // reached the server.
+    const spec: Spec = {
+      info: { title, version: '1.0.0' },
+      openapi: '3.0.0',
+      paths: {
+        '/secret': {
+          get: {
+            operationId: 'getSecret',
+            parameters: [
+              { name: 'session', in: 'cookie', schema: { type: 'string' } },
+              { name: 'preference', in: 'cookie', schema: { type: 'string' } },
+            ],
+            responses: {
+              '200': {
+                content: { 'application/json': { schema: { type: 'string' } } },
+                description: 'ok',
+              },
+            },
+          },
+        },
+      },
+    };
+    tree.write('openapi.json', JSON.stringify(spec));
+    await openApiTsClientGenerator(tree, {
+      openApiSpecPath: 'openapi.json',
+      outputPath: 'src/generated',
+    });
+    validateTypeScript([
+      'src/generated/client.gen.ts',
+      'src/generated/types.gen.ts',
+    ]);
+    const types = tree.read('src/generated/types.gen.ts', 'utf-8')!;
+    const client = tree.read('src/generated/client.gen.ts', 'utf-8')!;
+    expect(types).toMatchSnapshot('types.gen.ts');
+    expect(client).toMatchSnapshot('client.gen.ts');
+    expect(client).toContain('RequestCookieParameters.toJson(input)');
+    expect(client).toContain("headerParameters['Cookie']");
+
+    const mockFetch = vi.fn();
+    mockFetch.mockResolvedValue({
+      status: 200,
+      text: vi.fn().mockResolvedValue('sekret'),
+    });
+    expect(
+      await callGeneratedClient(client, mockFetch, 'getSecret', {
+        session: 's=1; path=/',
+        preference: 'dark mode',
+      }),
+    ).toBe('sekret');
+
+    const headers = (mockFetch.mock.calls[0][1] as any).headers as [
+      string,
+      string,
+    ][];
+    const cookieHeader = headers.find(([k]) => k === 'Cookie')?.[1];
+    expect(cookieHeader).toBeDefined();
+    // Both cookies, percent-encoded, joined with `; `.
+    expect(cookieHeader).toContain('session=s%3D1%3B%20path%3D%2F');
+    expect(cookieHeader).toContain('preference=dark%20mode');
+  });
 });

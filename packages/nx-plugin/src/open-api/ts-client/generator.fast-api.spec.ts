@@ -975,4 +975,84 @@ describe('openApiTsClientGenerator - FastAPI', () => {
       ],
     });
   });
+
+  it('should hoist inline composite parameter schemas so FastAPI `Optional[T]` params compile', async () => {
+    const spec: Spec = {
+      openapi: '3.1.0',
+      info: { title, version: '1.0.0' },
+      paths: {
+        '/pets/{petId}': {
+          get: {
+            operationId: 'getPet',
+            parameters: [
+              {
+                name: 'petId',
+                in: 'path',
+                required: true,
+                schema: { type: 'integer' },
+              },
+              {
+                name: 'X-Client',
+                in: 'header',
+                schema: {
+                  anyOf: [{ type: 'string' }, { type: 'null' }],
+                  title: 'X-Client',
+                } as any,
+              },
+              {
+                name: 'session',
+                in: 'cookie',
+                schema: {
+                  anyOf: [{ type: 'string' }, { type: 'null' }],
+                  title: 'Session',
+                } as any,
+              },
+              {
+                name: 'tag',
+                in: 'query',
+                schema: {
+                  anyOf: [
+                    { type: 'array', items: { type: 'string' } },
+                    { type: 'null' },
+                  ],
+                  title: 'Tag',
+                } as any,
+              },
+            ],
+            responses: {
+              '200': {
+                description: 'ok',
+                content: {
+                  'application/json': { schema: { type: 'string' } },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+    tree.write('openapi.json', JSON.stringify(spec));
+    await openApiTsClientGenerator(tree, {
+      openApiSpecPath: 'openapi.json',
+      outputPath: 'src/generated',
+    });
+
+    // Must actually compile (the phantom composites used to break tsc).
+    validateTypeScript([
+      'src/generated/client.gen.ts',
+      'src/generated/types.gen.ts',
+    ]);
+
+    const types = tree.read('src/generated/types.gen.ts', 'utf-8')!;
+    const client = tree.read('src/generated/client.gen.ts', 'utf-8')!;
+    expect(types).toMatchSnapshot('types.gen.ts');
+    expect(client).toMatchSnapshot('client.gen.ts');
+    // The hoisted composite schemas get operation-scoped names.
+    expect(types).toMatch(/GetPetRequestHeaderXClient\s*=\s*string \| null/);
+    expect(types).toMatch(/GetPetRequestCookieSession\s*=\s*string \| null/);
+    expect(types).toMatch(/GetPetRequestQueryTag\s*=\s*Array<string> \| null/);
+    expect(types).toContain('xClient?: GetPetRequestHeaderXClient');
+    expect(types).toContain('session?: GetPetRequestCookieSession');
+    expect(types).toContain('tag?: GetPetRequestQueryTag');
+  });
 });

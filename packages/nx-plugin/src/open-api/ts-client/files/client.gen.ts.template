@@ -372,10 +372,31 @@ export class <%- className %> {
     const <%- position %>Parameters: {[key: string]: any} = {};
     <%_ } _%>
     <%_ }); _%>
-    <%_ if (op.parametersBody && op.parametersBody.mediaTypes) { _%>
-    if (!this.$config.options?.omitContentTypeHeader) {
-      headerParameters['Content-Type'] = '<%- op.parametersBody.mediaTypes %>';
+    <%_ /* Cookie parameters are serialised into a `Cookie:` request header.
+           (Browsers auto-attach cookies per-origin; Node-side and cross-origin
+           callers need the header set explicitly for the cookie to land.) */ _%>
+    <%_ if (op.parameters.map(p => p.in).includes('cookie')) { _%>
+    const cookieParameters: {[key: string]: any} = $IO.<%- op.operationIdPascalCase %>RequestCookieParameters.toJson(input);
+    const cookiePairs = Object.entries(cookieParameters)
+      .filter(([, v]) => v !== undefined && v !== null)
+      .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`);
+    if (cookiePairs.length > 0) {
+      headerParameters['Cookie'] = cookiePairs.join('; ');
     }
+    <%_ } _%>
+    <%_ if (op.parametersBody && op.parametersBody.mediaTypes) { _%>
+    <%_ /* Pick a single wire media type — servers parse Content-Type as a
+           single value, so the comma-joined list is wire-incorrect. */ _%>
+    <%_ const mediaTypeList = Array.isArray(op.parametersBody.mediaTypes) ? op.parametersBody.mediaTypes : [op.parametersBody.mediaTypes]; _%>
+    <%_ const chosenMediaType = mediaTypeList.find(mt => mt === 'application/json' || mt.endsWith('+json')) || mediaTypeList[0]; _%>
+    <%_ /* Skip for multipart/form-data — `fetch` needs to compute the boundary
+           itself when a FormData body is passed; pre-setting the header strips
+           the boundary param and servers fail to parse the payload. */ _%>
+    <%_ if (chosenMediaType !== 'multipart/form-data') { _%>
+    if (!this.$config.options?.omitContentTypeHeader) {
+      headerParameters['Content-Type'] = '<%- chosenMediaType %>';
+    }
+    <%_ } _%>
     <%_ } _%>
     <%_ if (op.parameters.filter(p => p.collectionFormat).length > 0) { _%>
     const collectionFormats = {
