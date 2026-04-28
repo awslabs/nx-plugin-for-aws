@@ -265,9 +265,19 @@ async function invokeLambda(arn: string, lambdaName: string) {
   console.log('Invoking lambda', lambdaName, 'with arn', arn);
   const res = await lambda.invoke({
     FunctionName: arn,
+    Payload: JSON.stringify({}),
   });
+  const payload = res.Payload
+    ? new TextDecoder().decode(res.Payload)
+    : undefined;
   console.log('Status code', res.StatusCode);
+  console.log('Function error', res.FunctionError);
+  console.log('Payload', payload);
+  // Lambda returns StatusCode 200 even when the handler throws — the handler
+  // failure surfaces via FunctionError. Assert both to catch runtime errors
+  // like missing-module ImportErrors that only manifest in a deployed Lambda.
   expect(res.StatusCode).toBe(200);
+  expect(res.FunctionError).toBeUndefined();
   console.log(`Successfully invoked ${lambdaName}`);
 }
 
