@@ -1,6 +1,4 @@
-<%_ if (computeType === 'BedrockAgentCoreRuntimeWebSocket') { _%>
 import { createServer } from 'node:http';
-import { randomUUID } from 'node:crypto';
 import {
   CreateHTTPContextOptions,
   createHTTPHandler,
@@ -14,8 +12,14 @@ import cors from 'cors';
 import { appRouter, AppRouter } from './router.js';
 import { Context } from './init.js';
 
-const PORT = <%- port %>;
+const PORT = parseInt(process.env.PORT || '8080');
 
+/**
+ * Build a tRPC context from an incoming HTTP or WebSocket request. The
+ * Bedrock AgentCore runtime surfaces the session id as a header on the
+ * initial WebSocket upgrade — propagate it so procedures can key state by
+ * session.
+ */
 const createContext = (
   opts: CreateHTTPContextOptions | CreateWSSContextFnOptions,
 ): Context => {
@@ -23,9 +27,9 @@ const createContext = (
     'req' in opts
       ? opts.req.headers['x-amzn-bedrock-agentcore-runtime-session-id']
       : undefined;
-  const sessionId =
-    (Array.isArray(sessionIdHeader) ? sessionIdHeader[0] : sessionIdHeader) ??
-    randomUUID();
+  const sessionId = Array.isArray(sessionIdHeader)
+    ? sessionIdHeader[0]
+    : sessionIdHeader;
 
   return {
     event: {} as any,
@@ -41,33 +45,27 @@ const httpHandler = createHTTPHandler({
   createContext,
 });
 
-const server = createServer((req, res) => httpHandler(req, res));
+const server = createServer((req, res) => {
+  const url = new URL(req.url || '', `http://${req.headers.host}`);
+
+  // AgentCore runtime health check
+  if (url.pathname === '/ping') {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('Healthy');
+    return;
+  }
+
+  httpHandler(req, res);
+});
 
 const wss = new WebSocketServer({ server, path: '/ws' });
-applyWSSHandler<AppRouter>({ wss, router: appRouter, createContext });
+applyWSSHandler<AppRouter>({
+  wss,
+  router: appRouter,
+  createContext,
+});
 
 server.listen(PORT);
 
 // eslint-disable-next-line no-console
-console.log(`Local TRPC server (HTTP + WebSocket) listening on port ${PORT}`);
-<%_ } else { _%>
-import { createHTTPServer } from '@trpc/server/adapters/standalone';
-import { appRouter } from './router.js';
-import cors from 'cors';
-
-const PORT = <%- port %>;
-
-createHTTPServer({
-  router: appRouter,
-  middleware: cors(),
-  createContext() {
-    return {
-      event: {} as any,
-      context: {} as any,
-      info: {} as any,
-    };
-  },
-}).listen(PORT);
-
-console.log(`Local TRPC server listening on port ${PORT}`);
-<%_ } _%>
+console.log(`<%= apiNameClassName %> tRPC server listening on port ${PORT}`);

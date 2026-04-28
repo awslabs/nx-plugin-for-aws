@@ -33,6 +33,13 @@ export interface AddAgentCoreInfraProps {
   appDirectory: string;
   serverProtocol: 'MCP' | 'HTTP' | 'A2A';
   auth: AgentCoreAuth;
+  /**
+   * Where the runtime ARN is published in RuntimeConfig.
+   * - 'agent' (default): `agentcore.agentRuntimes.<NameClassName>` — used by agents and MCP servers
+   * - 'api': `connection.apis.<NameClassName>` — used when the runtime hosts a tRPC API, so
+   *   the frontend reads it through `runtimeConfig.apis.<ApiName>` like any other API.
+   */
+  runtimeConfigMode?: 'agent' | 'api';
 }
 
 const addAgentCoreInfra = async (
@@ -98,7 +105,7 @@ const addAgentCoreCDKInfra = async (
       'app',
       options.appDirectory,
     ),
-    options,
+    { ...options, runtimeConfigMode: options.runtimeConfigMode ?? 'agent' },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
@@ -162,7 +169,7 @@ const addAgentCoreTerraformInfra = (
       'app',
       options.appDirectory,
     ),
-    options,
+    { ...options, runtimeConfigMode: options.runtimeConfigMode ?? 'agent' },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
@@ -225,5 +232,37 @@ export const addAgentInfra = async (
     serverProtocol: options.serverProtocol ?? 'HTTP',
     iacProvider: options.iacProvider,
     auth: options.auth,
+  });
+};
+
+export interface AddTrpcAgentCoreInfraProps {
+  apiNameClassName: string;
+  apiNameKebabCase: string;
+  projectName: string;
+  dockerImageTag: string;
+  dockerOutputDir: string;
+  auth: AgentCoreAuth;
+}
+
+/**
+ * Add a tRPC-on-AgentCore CDK/Terraform construct. The runtime ARN is
+ * published to `connection.apis.<ApiNameClassName>` so the frontend reads
+ * it through `runtimeConfig.apis.<ApiName>` just like any other API.
+ */
+export const addTrpcAgentCoreInfra = async (
+  tree: Tree,
+  options: AddTrpcAgentCoreInfraProps & IACProvider,
+) => {
+  await addAgentCoreInfra(tree, {
+    nameClassName: options.apiNameClassName,
+    nameKebabCase: options.apiNameKebabCase,
+    projectName: options.projectName,
+    dockerImageTag: options.dockerImageTag,
+    dockerOutputDir: options.dockerOutputDir,
+    appDirectory: 'apis',
+    serverProtocol: 'HTTP',
+    iacProvider: options.iacProvider,
+    auth: options.auth,
+    runtimeConfigMode: 'api',
   });
 };
