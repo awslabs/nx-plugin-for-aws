@@ -459,6 +459,9 @@ describe('ts#mcp-server generator', () => {
     expect(projectConfig.targets['mcp-server-docker'].dependsOn).toEqual([
       'bundle',
     ]);
+    expect(projectConfig.targets['mcp-server-docker'].outputs).toEqual([
+      '{workspaceRoot}/dist/apps/test-project/bundle/mcp/test-project-mcp-server/Dockerfile',
+    ]);
   });
 
   it('should generate MCP server with BedrockAgentCoreRuntime and custom name', async () => {

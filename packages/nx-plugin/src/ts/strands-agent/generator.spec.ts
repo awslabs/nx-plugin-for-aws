@@ -307,6 +307,9 @@ describe('ts#strands-agent generator', () => {
     ]);
     expect(projectConfig.targets['agent-docker'].options.parallel).toBe(false);
     expect(projectConfig.targets['agent-docker'].dependsOn).toEqual(['bundle']);
+    expect(projectConfig.targets['agent-docker'].outputs).toEqual([
+      '{workspaceRoot}/dist/apps/test-project/bundle/agent/test-project-agent/Dockerfile',
+    ]);
   });
 
   it('should generate strands agent with BedrockAgentCoreRuntime and custom name', async () => {
