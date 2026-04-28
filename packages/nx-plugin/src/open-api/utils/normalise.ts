@@ -265,24 +265,19 @@ const hoistInlineObjectSubSchemas = (
  * downstream hey-api/openapi-ts handles the enum shape but synthesises
  * phantom named references for the const shape.
  */
-const rewriteConstToEnum = (spec: Spec): Spec => {
-  const walk = (obj: any): void => {
-    if (!obj || typeof obj !== 'object') {
-      return;
+const rewriteConstToEnum = (spec: Spec): Spec =>
+  cloneDeepWith(spec, (v) => {
+    if (
+      v &&
+      typeof v === 'object' &&
+      !Array.isArray(v) &&
+      'const' in v &&
+      !('enum' in v)
+    ) {
+      const { const: constValue, ...rest } = v;
+      return cloneDeepWith({ ...rest, enum: [constValue] });
     }
-    if (Array.isArray(obj)) {
-      obj.forEach(walk);
-      return;
-    }
-    if ('const' in obj && !('enum' in obj)) {
-      obj.enum = [obj.const];
-      delete obj.const;
-    }
-    Object.values(obj).forEach(walk);
-  };
-  walk(spec);
-  return spec;
-};
+  });
 
 /**
  * In order to ensure we generate models consistently whether or not users used refs or inline schemas,

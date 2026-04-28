@@ -1265,14 +1265,18 @@ describe('openApiTsClientGenerator - composite schemas', () => {
 
     // Phantom references synthesised from `const` must not leak through.
     // Previously the const shape caused hey-api-openapi to reference a
-    // non-existent `_String` (or `Kind`) type, breaking tsc in strict mode.
+    // non-existent `_String` type, breaking tsc in strict mode.
     expect(types).not.toMatch(/\b_String\b/);
     expect(client).not.toMatch(/\b_String\b/);
     expect(types).not.toMatch(/:\s*undefined\b/);
 
-    // Circle.kind should resolve to something tsc can type-check (either the
-    // literal 'circle' or bare string with the defence-in-depth fix).
-    expect(types).toMatch(/kind:\s*('circle'|"circle"|string|Kind\b)/);
+    // After rewriteConstToEnum + languages.ts defence-in-depth the property
+    // resolves to bare `string` (the generator does not currently propagate
+    // the literal back to the reference site — it's compiled cleanly by tsc
+    // but loses the Literal narrowing). Assert the concrete current shape so
+    // any future tightening of this path is a deliberate, visible change.
+    expect(types).toMatch(/kind:\s*string\b/);
+    expect(types).not.toMatch(/kind:\s*'circle'/);
 
     expect(types).toMatchSnapshot();
     expect(client).toMatchSnapshot();
