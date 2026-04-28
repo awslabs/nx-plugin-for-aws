@@ -1279,6 +1279,14 @@ const annotateReferencedCollectionKind = (
     entry.referencedCollectionKind = 'dictionary';
   else if (referenced.export === 'array')
     entry.referencedCollectionKind = 'array';
+  else if (
+    referenced.export === 'one-of' ||
+    referenced.export === 'any-of' ||
+    referenced.export === 'enum'
+  )
+    // Union / Literal aliases — pydantic needs `TypeAdapter(X).validate_python(...)`
+    // rather than `X.model_validate(...)`, which only works on BaseModel classes.
+    entry.referencedCollectionKind = 'alias';
 };
 
 /**
