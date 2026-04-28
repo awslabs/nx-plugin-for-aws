@@ -187,11 +187,6 @@ describe('addDependenciesToPyProjectToml', () => {
   });
 
   it('should preserve existing extras entries when a later call adds the bare package', () => {
-    // Regression: a generator (e.g. py#lambda-function) adds
-    // `aws-lambda-powertools[tracer]` and `[parser]`; a subsequent generator
-    // (e.g. py#mcp-server) adds bare `aws-lambda-powertools` and must not
-    // silently drop the extras entries, which would leave aws-xray-sdk and
-    // the parser deps out of the bundle at deploy time.
     const initialToml = {
       project: {
         name: 'test-project',
