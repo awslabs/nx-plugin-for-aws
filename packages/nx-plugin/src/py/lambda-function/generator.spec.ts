@@ -8,6 +8,7 @@ import {
   LAMBDA_FUNCTION_GENERATOR_INFO,
   pyLambdaFunctionGenerator,
 } from './generator';
+import { pyMcpServerGenerator } from '../mcp-server/generator';
 import { parse } from '@iarna/toml';
 import {
   PACKAGES_DIR,
@@ -509,6 +510,56 @@ describe('lambda-handler project generator', () => {
 
     // Verify the metric was added to app.ts
     expectHasMetricTags(tree, LAMBDA_FUNCTION_GENERATOR_INFO.metric);
+  });
+
+  it('should keep aws-lambda-powertools tracer/parser extras when another generator is run on the same project', async () => {
+    tree.write(
+      'apps/test_project/project.json',
+      JSON.stringify({
+        name: 'test-project',
+        root: 'apps/test_project',
+        sourceRoot: 'apps/test_project/test_project',
+        targets: {},
+      }),
+    );
+    tree.write(
+      'apps/test_project/pyproject.toml',
+      `[project]
+name = "test_project"
+version = "0.1.0"
+dependencies = []
+
+[dependency-groups]
+dev = []
+`,
+    );
+
+    await pyLambdaFunctionGenerator(tree, {
+      project: 'test-project',
+      functionName: 'test-function',
+      eventSource: 'Any',
+      iacProvider: 'CDK',
+    });
+
+    await pyMcpServerGenerator(tree, {
+      project: 'test-project',
+      computeType: 'None',
+      iacProvider: 'CDK',
+    });
+
+    const deps =
+      (
+        parse(
+          tree.read('apps/test_project/pyproject.toml', 'utf-8'),
+        ) as UVPyprojectToml
+      ).project.dependencies ?? [];
+
+    expect(
+      deps.some((dep) => dep.startsWith('aws-lambda-powertools[tracer]==')),
+    ).toBe(true);
+    expect(
+      deps.some((dep) => dep.startsWith('aws-lambda-powertools[parser]==')),
+    ).toBe(true);
   });
 
   describe('terraform iacProvider', () => {

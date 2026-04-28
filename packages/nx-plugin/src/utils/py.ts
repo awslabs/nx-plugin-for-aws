@@ -9,6 +9,29 @@ import { IPyDepVersion, withPyVersions } from './versions';
 import { parsePipRequirementsLine } from 'pip-requirements-js';
 import { updateToml } from './toml';
 
+// Dedup key that distinguishes bare packages from the same package with
+// extras (e.g. `foo` vs `foo[bar]`), so adding a bare dep doesn't drop a
+// previously-added variant with extras.
+const depKey = (dep: string): string => {
+  const parsed = parsePipRequirementsLine(dep);
+  if (parsed?.type !== 'ProjectName') {
+    return dep;
+  }
+  const extras = [...(parsed.extras ?? [])].sort().join(',');
+  return extras ? `${parsed.name}[${extras}]` : parsed.name;
+};
+
+const mergeDeps = (
+  existing: readonly string[] | undefined,
+  deps: IPyDepVersion[],
+): string[] => {
+  const incomingKeys = new Set(deps.map(depKey));
+  return [
+    ...(existing ?? []).filter((dep) => !incomingKeys.has(depKey(dep))),
+    ...withPyVersions(deps),
+  ];
+};
+
 /**
  * Add dependencies to a pyproject.toml file
  */
@@ -20,15 +43,10 @@ export const addDependenciesToPyProjectToml = (
   const projectToml = parse(
     tree.read(joinPathFragments(projectRoot, 'pyproject.toml'), 'utf8'),
   ) as UVPyprojectToml;
-  const newDeps = new Set<string>(deps);
-  projectToml.project.dependencies = [
-    // Replace any dependencies that already exist
-    ...(projectToml.project?.dependencies ?? []).filter((dep) => {
-      const parsedDep = parsePipRequirementsLine(dep);
-      return parsedDep.type !== 'ProjectName' || !newDeps.has(parsedDep.name);
-    }),
-    ...withPyVersions(deps),
-  ];
+  projectToml.project.dependencies = mergeDeps(
+    projectToml.project?.dependencies,
+    deps,
+  );
   tree.write(
     joinPathFragments(projectRoot, 'pyproject.toml'),
     stringify(projectToml),
@@ -44,17 +62,9 @@ export const addDependenciesToDependencyGroupInPyProjectToml = (
   const projectToml = parse(
     tree.read(joinPathFragments(projectRoot, 'pyproject.toml'), 'utf8'),
   ) as UVPyprojectToml;
-  const newDeps = new Set<string>(deps);
   projectToml['dependency-groups'] = {
     ...projectToml['dependency-groups'],
-    [group]: [
-      // Replace any dependencies that already exist
-      ...(projectToml['dependency-groups']?.[group] ?? []).filter((dep) => {
-        const parsedDep = parsePipRequirementsLine(dep);
-        return parsedDep.type !== 'ProjectName' || !newDeps.has(parsedDep.name);
-      }),
-      ...withPyVersions(deps),
-    ],
+    [group]: mergeDeps(projectToml['dependency-groups']?.[group], deps),
   };
   tree.write(
     joinPathFragments(projectRoot, 'pyproject.toml'),
