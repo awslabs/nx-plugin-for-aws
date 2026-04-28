@@ -10,7 +10,6 @@ import {
 } from './generator';
 import { pyMcpServerGenerator } from '../mcp-server/generator';
 import { parse } from '@iarna/toml';
-import { parsePipRequirementsLine } from 'pip-requirements-js';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
@@ -555,17 +554,12 @@ dev = []
         ) as UVPyprojectToml
       ).project.dependencies ?? [];
 
-    const extrasFor = (pkg: string) =>
-      deps.flatMap((dep) => {
-        const parsed = parsePipRequirementsLine(dep);
-        return parsed?.type === 'ProjectName' && parsed.name === pkg
-          ? (parsed.extras ?? [])
-          : [];
-      });
-
-    const powertoolsExtras = new Set(extrasFor('aws-lambda-powertools'));
-    expect(powertoolsExtras).toContain('tracer');
-    expect(powertoolsExtras).toContain('parser');
+    expect(
+      deps.some((dep) => dep.startsWith('aws-lambda-powertools[tracer]==')),
+    ).toBe(true);
+    expect(
+      deps.some((dep) => dep.startsWith('aws-lambda-powertools[parser]==')),
+    ).toBe(true);
   });
 
   describe('terraform iacProvider', () => {
