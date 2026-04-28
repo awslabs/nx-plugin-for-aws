@@ -65,20 +65,39 @@ from typing import Any, Literal, Never, Optional, TypedDict, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
-<%_ models.forEach((model) => {
-  if (model.isInlinedByAllOf) return;
-  const isComposite = model.export === 'one-of' || model.export === 'any-of' || model.export === 'all-of';
-  const isEnum = model.export === 'enum';
-  const isDictionary = model.export === 'dictionary';
-  const isArray = model.export === 'array';
+<%_
+/**
+ * Classify a model by how it's rendered in the module.
+ *
+ * `class` models emit as `class Foo(BaseModel)` and are self-contained — they
+ * reference other types only via forward-ref-quoted annotations that pydantic
+ * resolves lazily.
+ *
+ * `alias` models emit as `Foo = Union[...] / Literal[...] / list[...] / ...`.
+ * These are module-level expressions evaluated at import time, so every
+ * type they reference must already be defined.  Emit them *after* all class
+ * definitions so `TypeAdapter(Foo)` can resolve references without relying
+ * on forward-ref strings.
+ */
+const classifyModel = (model) => {
+  if (model.isInlinedByAllOf) return 'skip';
+  if (model.export === 'enum') return 'alias';
+  if (model.export === 'one-of' || model.export === 'any-of') return 'alias';
+  if (model.export === 'dictionary') return 'alias';
+  if (model.export === 'array') return 'alias';
+  // `all-of` is rendered as a `BaseModel` subclass with flattened fields.
+  return 'class';
+};
+
+const renderClassModel = (model) => {
+  // Used inline below via the `classModels.forEach(...)` loop.
+};
 _%>
 
-<%_ if (isEnum) { _%>
-<%- model.typescriptName %> = Literal[<%_ model.enum.forEach((m, i) => { _%><%- i > 0 ? ', ' : '' %><%- pyEnumValue(m) %><%_ }); _%>]
-<%_ if (model.description || model.deprecated) { _%>
-"""<%- (model.description || '').replace(/"/g, "'") %><%- model.deprecated ? ' (deprecated)' : '' %>"""
-<%_ } _%>
-<%_ } else if (isComposite) { _%>
+<%_ /* ────── Pass 1: all class definitions ────── */ _%>
+<%_ models.forEach((model) => {
+  if (classifyModel(model) !== 'class') return;
+_%>
 <%_ if (model.export === 'all-of') {
   const flattened = [];
   const seen = new Set();
@@ -90,6 +109,7 @@ _%>
     }
   }
 _%>
+
 class <%- model.typescriptName %>(BaseModel):
 <%_ if (model.description || model.deprecated) { _%>
     """<%- (model.description || '').replace(/"/g, "'") %><%- model.deprecated ? ' (deprecated)' : '' %>"""
@@ -103,22 +123,7 @@ class <%- model.typescriptName %>(BaseModel):
 <%- renderProperty(property) %>
 <%_ }); _%>
 <%_ } else { _%>
-<%- model.typescriptName %> = Union[<%_ model.properties.forEach((p, i) => { _%><%- i > 0 ? ', ' : '' %><%- p.pythonAnnotation || p.pythonType || 'Any' %><%_ }); _%>]
-<%_ if (model.description || model.deprecated) { _%>
-"""<%- (model.description || '').replace(/"/g, "'") %><%- model.deprecated ? ' (deprecated)' : '' %>"""
-<%_ } _%>
-<%_ } _%>
-<%_ } else if (isDictionary) { _%>
-<%- model.typescriptName %> = <%- model.pythonAnnotation || model.pythonType %>
-<%_ if (model.description || model.deprecated) { _%>
-"""<%- (model.description || '').replace(/"/g, "'") %><%- model.deprecated ? ' (deprecated)' : '' %>"""
-<%_ } _%>
-<%_ } else if (isArray) { _%>
-<%- model.typescriptName %> = <%- model.pythonAnnotation || model.pythonType %>
-<%_ if (model.description || model.deprecated) { _%>
-"""<%- (model.description || '').replace(/"/g, "'") %><%- model.deprecated ? ' (deprecated)' : '' %>"""
-<%_ } _%>
-<%_ } else { _%>
+
 class <%- model.typescriptName %>(BaseModel):
 <%_ if (model.description || model.deprecated) { _%>
     """<%- (model.description || '').replace(/"/g, "'") %><%- model.deprecated ? ' (deprecated)' : '' %>"""
@@ -131,6 +136,48 @@ class <%- model.typescriptName %>(BaseModel):
 <%_ (model.properties || []).forEach((property) => { _%>
 <%- renderProperty(property) %>
 <%_ }); _%>
+<%_ } _%>
+<%_ }); _%>
+
+<%_
+/* ────── Pass 2: all non-class aliases ──────
+ * Emit in dependency order so later aliases can reference earlier ones
+ * (aliases are module-level expressions evaluated at import time — unlike
+ * class-body annotations, `from __future__ import annotations` doesn't
+ * help here).  Enums reference nothing.  Collections and composites can
+ * reference classes (already defined above) and enums; composites can
+ * also reference other composites in rare cases, but topological sort on
+ * the full alias set is overkill for the shapes that appear in practice.
+ *
+ * Order: enum → array → dictionary → one-of/any-of.
+ */
+const aliasOrder = { 'enum': 0, 'array': 1, 'dictionary': 2, 'any-of': 3, 'one-of': 3 };
+const aliasModels = models
+  .filter((m) => classifyModel(m) === 'alias')
+  .slice()
+  .sort((a, b) => (aliasOrder[a.export] - aliasOrder[b.export]) || a.name.localeCompare(b.name));
+_%>
+<%_ aliasModels.forEach((model) => { _%>
+
+<%_ if (model.export === 'enum') { _%>
+<%- model.typescriptName %> = Literal[<%_ model.enum.forEach((m, i) => { _%><%- i > 0 ? ', ' : '' %><%- pyEnumValue(m) %><%_ }); _%>]
+<%_ if (model.description || model.deprecated) { _%>
+"""<%- (model.description || '').replace(/"/g, "'") %><%- model.deprecated ? ' (deprecated)' : '' %>"""
+<%_ } _%>
+<%_ } else if (model.export === 'one-of' || model.export === 'any-of') { _%>
+<%_ /* Classes are already defined above, so references can be unquoted.
+       `pythonType` (no quotes) vs `pythonAnnotation` (forward-ref-quoted)
+       matters here: pydantic's `TypeAdapter(X)` can't resolve string
+       forward-refs at runtime, only typing does that statically. */ _%>
+<%- model.typescriptName %> = Union[<%_ model.properties.forEach((p, i) => { _%><%- i > 0 ? ', ' : '' %><%- p.pythonType || 'Any' %><%_ }); _%>]
+<%_ if (model.description || model.deprecated) { _%>
+"""<%- (model.description || '').replace(/"/g, "'") %><%- model.deprecated ? ' (deprecated)' : '' %>"""
+<%_ } _%>
+<%_ } else if (model.export === 'dictionary' || model.export === 'array') { _%>
+<%- model.typescriptName %> = <%- model.pythonType %>
+<%_ if (model.description || model.deprecated) { _%>
+"""<%- (model.description || '').replace(/"/g, "'") %><%- model.deprecated ? ' (deprecated)' : '' %>"""
+<%_ } _%>
 <%_ } _%>
 <%_ }); _%>
 <%_ // ────── Per-operation request TypedDicts ────── _%>
