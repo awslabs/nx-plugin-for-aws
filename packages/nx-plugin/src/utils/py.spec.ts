@@ -148,8 +148,8 @@ describe('addDependenciesToPyProjectToml', () => {
     expect(updatedToml.project.dependencies).toHaveLength(2);
   });
 
-  it('should handle complex dependency specifications', () => {
-    // Setup: Create pyproject.toml with complex existing dependencies
+  it('should treat bare package and the same package with extras as distinct', () => {
+    // Setup: Create pyproject.toml with extras-qualified dependencies
     const initialToml = {
       project: {
         name: 'test-project',
@@ -163,11 +163,10 @@ describe('addDependenciesToPyProjectToml', () => {
     };
     tree.write('test-project/pyproject.toml', stringify(initialToml));
 
-    // Act: Add fastapi dependency (should replace complex existing one)
+    // Act: Add bare fastapi — must not wipe the `fastapi[all]` variant
     const deps: IPyDepVersion[] = ['fastapi'];
     addDependenciesToPyProjectToml(tree, 'test-project', deps);
 
-    // Assert: Verify fastapi was replaced while others remain
     const updatedToml = parse(
       tree.read('test-project/pyproject.toml', 'utf-8'),
     ) as UVPyprojectToml;
@@ -177,17 +176,81 @@ describe('addDependenciesToPyProjectToml', () => {
         dep.startsWith('fastapi=='),
       ),
     ).toBe(true);
+    expect(updatedToml.project.dependencies).toContain('fastapi[all]>=0.100.0');
     expect(updatedToml.project.dependencies).toContain(
       'requests[security]>=2.25.0',
     );
     expect(updatedToml.project.dependencies).toContain(
       'pydantic>=2.0.0,<3.0.0',
     );
-    expect(updatedToml.project.dependencies).toHaveLength(3);
+    expect(updatedToml.project.dependencies).toHaveLength(4);
+  });
 
-    // Ensure old fastapi version is not present
+  it('should preserve existing extras entries when a later call adds the bare package', () => {
+    // Regression: a generator (e.g. py#lambda-function) adds
+    // `aws-lambda-powertools[tracer]` and `[parser]`; a subsequent generator
+    // (e.g. py#mcp-server) adds bare `aws-lambda-powertools` and must not
+    // silently drop the extras entries, which would leave aws-xray-sdk and
+    // the parser deps out of the bundle at deploy time.
+    const initialToml = {
+      project: {
+        name: 'test-project',
+        version: '0.1.0',
+        dependencies: [
+          'aws-lambda-powertools==3.27.0',
+          'aws-lambda-powertools[tracer]==3.27.0',
+          'aws-lambda-powertools[parser]==3.27.0',
+        ],
+      },
+    };
+    tree.write('test-project/pyproject.toml', stringify(initialToml));
+
+    addDependenciesToPyProjectToml(tree, 'test-project', [
+      'aws-lambda-powertools',
+    ]);
+
+    const updatedToml = parse(
+      tree.read('test-project/pyproject.toml', 'utf-8'),
+    ) as UVPyprojectToml;
+
+    expect(updatedToml.project.dependencies).toContain(
+      'aws-lambda-powertools==3.27.0',
+    );
+    expect(updatedToml.project.dependencies).toContain(
+      'aws-lambda-powertools[tracer]==3.27.0',
+    );
+    expect(updatedToml.project.dependencies).toContain(
+      'aws-lambda-powertools[parser]==3.27.0',
+    );
+    expect(updatedToml.project.dependencies).toHaveLength(3);
+  });
+
+  it('should replace an existing extras entry when the same extras set is re-added', () => {
+    const initialToml = {
+      project: {
+        name: 'test-project',
+        version: '0.1.0',
+        dependencies: ['aws-lambda-powertools[tracer]>=2.0.0'],
+      },
+    };
+    tree.write('test-project/pyproject.toml', stringify(initialToml));
+
+    addDependenciesToPyProjectToml(tree, 'test-project', [
+      'aws-lambda-powertools[tracer]',
+    ]);
+
+    const updatedToml = parse(
+      tree.read('test-project/pyproject.toml', 'utf-8'),
+    ) as UVPyprojectToml;
+
+    expect(updatedToml.project.dependencies).toHaveLength(1);
+    expect(
+      updatedToml.project.dependencies.some((dep) =>
+        dep.startsWith('aws-lambda-powertools[tracer]=='),
+      ),
+    ).toBe(true);
     expect(updatedToml.project.dependencies).not.toContain(
-      'fastapi[all]>=0.100.0',
+      'aws-lambda-powertools[tracer]>=2.0.0',
     );
   });
 
