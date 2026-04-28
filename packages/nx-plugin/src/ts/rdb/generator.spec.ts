@@ -107,7 +107,9 @@ describe('ts#rdb generator', () => {
       "import { Signer } from '@aws-sdk/rds-signer';",
     );
     expect(prismaFile).toContain("import { Pool } from 'pg';");
-    expect(prismaFile).toContain("export const DB_PACKAGE_NAME = 'Db';");
+    expect(prismaFile).toContain(
+      "import { DB_PACKAGE_NAME } from './constants.js';",
+    );
     expect(prismaFile).toContain('password: async () => {');
     expect(prismaFile).toContain('await getDatabaseConfig(DB_PACKAGE_NAME)');
     expect(prismaFile).toContain('allowExitOnIdle: true,');
@@ -120,7 +122,10 @@ describe('ts#rdb generator', () => {
     expect(migrationHandler).toContain(
       "await promisify(execFile)('npx', ['prisma', 'migrate', 'deploy'],",
     );
-    expect(migrationHandler).toContain('DATABASE_URL: databaseUrl');
+    expect(migrationHandler).toContain(
+      "import { DATABASE_URL_ENV_VAR } from './constants.js';",
+    );
+    expect(migrationHandler).toContain('[DATABASE_URL_ENV_VAR]: databaseUrl');
     expect(migrationHandler).toContain('?sslaccept=strict');
     expect(createDbUserHandler).toContain(
       "import { Client, escapeIdentifier } from 'pg';",
@@ -135,6 +140,12 @@ describe('ts#rdb generator', () => {
     expect(tree.read('packages/db/prisma.config.ts', 'utf-8')).toContain(
       "import { defineConfig } from 'prisma/config';",
     );
+    expect(tree.read('packages/db/prisma.config.ts', 'utf-8')).toContain(
+      "import { DATABASE_URL_ENV_VAR } from './src/constants.js';",
+    );
+    expect(tree.read('packages/db/prisma.config.ts', 'utf-8')).toContain(
+      'url: process.env[DATABASE_URL_ENV_VAR]',
+    );
     expect(
       tree.read('packages/db/prisma/models/example.prisma', 'utf-8'),
     ).toContain('model ExampleTable');
@@ -144,8 +155,11 @@ describe('ts#rdb generator', () => {
     expect(tree.read('packages/db/prisma/schema.prisma', 'utf-8')).toContain(
       'provider = "postgresql"',
     );
+    expect(tree.read('packages/db/src/constants.ts', 'utf-8')?.trim()).toBe(
+      "export const DB_PACKAGE_NAME = 'Db';",
+    );
     expect(tree.read('packages/db/src/index.ts', 'utf-8')?.trim()).toBe(
-      "export { getPrisma, DB_PACKAGE_NAME } from './prisma.js';",
+      "export { DB_PACKAGE_NAME } from './constants.js';\nexport { getPrisma } from './prisma.js';",
     );
     expect(tree.read('packages/db/Dockerfile', 'utf-8')).toContain(
       'FROM public.ecr.aws/lambda/nodejs:24',
@@ -230,6 +244,13 @@ describe('ts#rdb generator', () => {
         cwd: '{projectRoot}',
       },
     });
+    expect(projectConfig.targets.prisma).toEqual({
+      executor: 'nx:run-commands',
+      options: {
+        cwd: '{projectRoot}',
+        command: 'prisma',
+      },
+    });
     expect(projectConfig.targets.build.dependsOn).toContain('bundle');
     expect(projectConfig.targets.build.dependsOn).not.toContain(
       'bundle-migration',
@@ -303,7 +324,9 @@ describe('ts#rdb generator', () => {
     expect(prismaFile).toContain(
       "import { PrismaMariaDb } from '@prisma/adapter-mariadb';",
     );
-    expect(prismaFile).toContain("export const DB_PACKAGE_NAME = 'Db';");
+    expect(prismaFile).toContain(
+      "import { DB_PACKAGE_NAME } from './constants.js';",
+    );
     expect(prismaFile).toContain(
       'export const PRISMA_TTL_MS = 10 * 60 * 1000;',
     );
@@ -368,6 +391,7 @@ describe('ts#rdb generator', () => {
     expect(terraformApp).toContain(
       '../../../../../../../dist/packages/db/bundle/create-db-user',
     );
+    expect(terraformApp).toContain('runtime          = "nodejs24.x"');
     expect(terraformApp).toContain(
       'DATABASE_SECRET_ARN = module.aurora.secret_arn',
     );
@@ -392,6 +416,16 @@ describe('ts#rdb generator', () => {
     expect(terraformCore).toContain('proxy_to_database');
     expect(terraformCore).toContain('null_resource" "proxy_target_ready"');
     expect(terraformCore).toContain('output "database_ready"');
+    expect(terraformCore).toContain(
+      'resource "aws_cloudformation_stack" "credentials_rotation"',
+    );
+    expect(terraformCore).toContain(
+      'Transform                = "AWS::SecretsManager-2024-09-16"',
+    );
+    expect(terraformCore).toContain(
+      'RotationType        = var.engine == "aurora-mysql" ? "MySQLSingleUser" : "PostgreSQLSingleUser"',
+    );
+    expect(terraformCore).toContain('AutomaticallyAfterDays = 30');
     expect(terraformApp).toContain('--build-arg AWS_REGION=');
     expect(terraformApp).toContain('module.aurora.proxy_role_name');
     expect(terraformApp).toContain('module.aurora.database_security_group_id');

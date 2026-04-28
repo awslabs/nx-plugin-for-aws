@@ -137,6 +137,13 @@ export const tsRdbGenerator = async (
       cwd: '{projectRoot}',
     },
   };
+  projectConfig.targets.prisma = {
+    executor: 'nx:run-commands',
+    options: {
+      cwd: '{projectRoot}',
+      command: 'prisma',
+    },
+  };
   addDependencyToTargetIfNotPresent(projectConfig, 'compile', 'generate');
   updateProjectConfiguration(tree, fullyQualifiedName, projectConfig);
 
