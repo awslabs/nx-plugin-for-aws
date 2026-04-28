@@ -8,6 +8,7 @@ import { Spec } from '../utils/types';
 import { baseUrl, callGeneratedClient } from './generator.utils.spec';
 import { Tree } from '@nx/devkit';
 import { expectTypeScriptToCompile } from '../../utils/test/ts.spec';
+import { importTypeScriptModule } from '../../utils/js';
 
 describe('openApiTsClientGenerator - composite schemas', () => {
   let tree: Tree;
@@ -1076,6 +1077,204 @@ describe('openApiTsClientGenerator - composite schemas', () => {
     expect(types).toMatchSnapshot();
 
     const client = tree.read('src/generated/client.gen.ts', 'utf-8');
+    expect(client).toMatchSnapshot();
+  });
+
+  it('should round-trip Date through a composite alias using instanceof checks', async () => {
+    const spec: Spec = {
+      openapi: '3.0.0',
+      info: { title, version: '1.0.0' },
+      components: {
+        schemas: {
+          MaybeDate: {
+            oneOf: [
+              { type: 'string', format: 'date-time' },
+              {
+                type: 'object',
+                properties: { marker: { type: 'string' } },
+                required: ['marker'],
+              },
+            ],
+          },
+        },
+      },
+      paths: {
+        '/maybe-date': {
+          post: {
+            operationId: 'postMaybeDate',
+            requestBody: {
+              required: true,
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/MaybeDate' },
+                },
+              },
+            },
+            responses: {
+              '200': {
+                description: 'ok',
+                content: {
+                  'application/json': {
+                    schema: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    tree.write('openapi.json', JSON.stringify(spec));
+
+    await openApiTsClientGenerator(tree, {
+      openApiSpecPath: 'openapi.json',
+      outputPath: 'src/generated',
+    });
+
+    validateTypeScript([
+      'src/generated/client.gen.ts',
+      'src/generated/types.gen.ts',
+    ]);
+
+    const client = tree.read('src/generated/client.gen.ts', 'utf-8')!;
+    const types = tree.read('src/generated/types.gen.ts', 'utf-8')!;
+
+    // The composite's toJson/fromJson must use instanceof Date rather than
+    // the unreachable typeof === "Date" check.
+    expect(client).toContain('model instanceof Date');
+    expect(client).toContain('json instanceof Date');
+    expect(client).not.toMatch(/typeof\s+model\s*===\s*["']Date["']/);
+    expect(client).not.toMatch(/typeof\s+json\s*===\s*["']Date["']/);
+
+    expect(types).toMatchSnapshot();
+    expect(client).toMatchSnapshot();
+
+    // Round-trip a Date through the composite's toJson / fromJson.
+    const { $IO } = await importTypeScriptModule<any>(client);
+
+    const isoString = '2024-02-20T12:00:00.000Z';
+    const date = new Date(isoString);
+
+    // Date branch should serialise to its ISO string.
+    expect($IO.MaybeDate.toJson(date)).toBe(isoString);
+    // Date branch should deserialise back to an equivalent Date.
+    const fromJsonDate = $IO.MaybeDate.fromJson(isoString);
+    expect(fromJsonDate).toBeInstanceOf(Date);
+    expect((fromJsonDate as Date).toISOString()).toBe(isoString);
+
+    // Object branch should round-trip untouched.
+    const obj = { marker: 'hello' };
+    expect($IO.MaybeDate.toJson(obj)).toEqual(obj);
+    expect($IO.MaybeDate.fromJson({ marker: 'hello' })).toEqual(obj);
+
+    // Exercise the full client request path (serialisation).
+    const mockFetch = vi.fn();
+    mockFetch.mockResolvedValue({
+      status: 200,
+      text: vi.fn().mockResolvedValue('ok'),
+    });
+
+    await callGeneratedClient(client, mockFetch, 'postMaybeDate', date);
+    expect(mockFetch).toHaveBeenCalledWith(
+      `${baseUrl}/maybe-date`,
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify(isoString),
+      }),
+    );
+  });
+
+  it('should handle FastAPI-style discriminated unions with string const (Literal)', async () => {
+    const spec: Spec = {
+      openapi: '3.1.0',
+      info: { title, version: '1.0.0' },
+      components: {
+        schemas: {
+          Circle: {
+            type: 'object',
+            properties: {
+              kind: { type: 'string', const: 'circle', title: 'Kind' },
+              radius: { type: 'number' },
+            },
+            required: ['kind', 'radius'],
+          },
+          Square: {
+            type: 'object',
+            properties: {
+              kind: { type: 'string', const: 'square', title: 'Kind' },
+              side: { type: 'number' },
+            },
+            required: ['kind', 'side'],
+          },
+          ShapesOut: {
+            type: 'object',
+            properties: {
+              canonical: {
+                oneOf: [
+                  { $ref: '#/components/schemas/Circle' },
+                  { $ref: '#/components/schemas/Square' },
+                ],
+                discriminator: {
+                  propertyName: 'kind',
+                  mapping: {
+                    circle: '#/components/schemas/Circle',
+                    square: '#/components/schemas/Square',
+                  },
+                },
+              },
+            },
+            required: ['canonical'],
+          },
+        } as any,
+      },
+      paths: {
+        '/shapes': {
+          get: {
+            operationId: 'getShapes',
+            responses: {
+              '200': {
+                description: 'ok',
+                content: {
+                  'application/json': {
+                    schema: { $ref: '#/components/schemas/ShapesOut' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    tree.write('openapi.json', JSON.stringify(spec));
+
+    await openApiTsClientGenerator(tree, {
+      openApiSpecPath: 'openapi.json',
+      outputPath: 'src/generated',
+    });
+
+    // Must compile cleanly — the phantom _String references break strict tsc.
+    validateTypeScript([
+      'src/generated/client.gen.ts',
+      'src/generated/types.gen.ts',
+    ]);
+
+    const types = tree.read('src/generated/types.gen.ts', 'utf-8')!;
+    const client = tree.read('src/generated/client.gen.ts', 'utf-8')!;
+
+    // Phantom references synthesised from `const` must not leak through.
+    // Previously the const shape caused hey-api-openapi to reference a
+    // non-existent `_String` (or `Kind`) type, breaking tsc in strict mode.
+    expect(types).not.toMatch(/\b_String\b/);
+    expect(client).not.toMatch(/\b_String\b/);
+    expect(types).not.toMatch(/:\s*undefined\b/);
+
+    // Circle.kind should resolve to something tsc can type-check (either the
+    // literal 'circle' or bare string with the defence-in-depth fix).
+    expect(types).toMatch(/kind:\s*('circle'|"circle"|string|Kind\b)/);
+
+    expect(types).toMatchSnapshot();
     expect(client).toMatchSnapshot();
   });
 });
