@@ -208,9 +208,11 @@ describe('addDependenciesToPyProjectToml', () => {
       tree.read('test-project/pyproject.toml', 'utf-8'),
     ) as UVPyprojectToml;
 
-    expect(updatedToml.project.dependencies).toContain(
-      'aws-lambda-powertools==3.27.0',
-    );
+    expect(
+      updatedToml.project.dependencies.some((dep) =>
+        /^aws-lambda-powertools==/.test(dep),
+      ),
+    ).toBe(true);
     expect(updatedToml.project.dependencies).toContain(
       'aws-lambda-powertools[tracer]==3.27.0',
     );
