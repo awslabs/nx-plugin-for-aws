@@ -37,9 +37,13 @@ export const toTypeScriptType = (property: Model): string => {
       return toTypeScriptModelName(property.name);
     case 'reference':
     default:
-      return property.type === 'unknown'
-        ? 'unknown'
-        : toTypeScriptModelName(property.type);
+      if (property.type === 'unknown') {
+        return 'unknown';
+      }
+      if (PRIMITIVE_TYPES.has(property.type)) {
+        return toTypescriptPrimitive(property);
+      }
+      return toTypeScriptModelName(property.type);
   }
 };
 

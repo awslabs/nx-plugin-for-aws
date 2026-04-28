@@ -260,12 +260,34 @@ const hoistInlineObjectSubSchemas = (
 };
 
 /**
+ * Rewrites OpenAPI 3.1 `const` schemas to the semantically equivalent `enum`
+ * form. FastAPI emits `{type: 'string', const: 'X'}` for `Literal['X']`;
+ * downstream hey-api/openapi-ts handles the enum shape but synthesises
+ * phantom named references for the const shape.
+ */
+const rewriteConstToEnum = (spec: Spec): Spec =>
+  cloneDeepWith(spec, (v) => {
+    if (
+      v &&
+      typeof v === 'object' &&
+      !Array.isArray(v) &&
+      'const' in v &&
+      !('enum' in v)
+    ) {
+      const { const: constValue, ...rest } = v;
+      return cloneDeepWith({ ...rest, enum: [constValue] });
+    }
+  });
+
+/**
  * In order to ensure we generate models consistently whether or not users used refs or inline schemas,
  * we hoist any inline refs to non-primitives
  */
 export const normaliseOpenApiSpecForCodeGen = (inSpec: Spec): Spec => {
   // Clone the spec so we're free to mutate it
   let spec = cloneDeepWith(inSpec);
+
+  spec = rewriteConstToEnum(spec);
 
   // Ensure spec has schemas set
   if (!spec?.components?.schemas) {
