@@ -147,6 +147,7 @@ export const tsMcpServerGenerator = async (
     const fs = new FsCommands(tree);
     project.targets[dockerTargetName] = {
       cache: true,
+      outputs: [`{workspaceRoot}/${dockerOutputDir}/Dockerfile`],
       executor: 'nx:run-commands',
       options: {
         commands: [
