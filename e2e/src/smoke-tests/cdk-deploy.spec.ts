@@ -16,6 +16,7 @@ import {
   invokeLambda,
   invokeRestApi,
   invokeTrpcAgentCoreAgent,
+  invokeTrpcAgentCoreApi,
   invokeTrpcApi,
   pingWebsite,
 } from './deploy-invocations';
@@ -126,6 +127,10 @@ describe('smoke test - cdk-deploy', () => {
       // tRPC
       await invokeTrpcApi(findOutput('MyApiEndpoint'), 'tRPC REST API');
       await invokeTrpcApi(findOutput('MyApiHttpMyApiHttpUrl'), 'tRPC HTTP API');
+      await invokeTrpcAgentCoreApi(
+        findOutput('MyTrpcWsApiArn'),
+        'tRPC AgentCore WebSocket API',
+      );
 
       // FastAPI
       await invokeRestApi(findOutput('PyApiEndpoint'), 'FastAPI REST');

@@ -14,7 +14,7 @@ import OptionFilter from '@components/option-filter.astro';
 
 [tRPC](https://trpc.io/) is a framework for building APIs in TypeScript with end-to-end type safety. Using tRPC, updates to API operation inputs and outputs are immediately reflected in client code and are visible in your IDE without the need to rebuild your project.
 
-The tRPC API generator creates a new tRPC API with AWS CDK or Terraform infrastructure setup. The generated backend uses AWS Lambda for serverless deployment, exposed via an AWS API Gateway API, and includes schema validation using [Zod](https://zod.dev/). It sets up [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/) for observability, including logging, AWS X-Ray tracing and Cloudwatch Metrics.
+The tRPC API generator creates a new tRPC API with AWS CDK or Terraform infrastructure setup. The generated backend can be deployed as AWS Lambda functions exposed via an AWS API Gateway API, or as a containerised WebSocket server running on [Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime.html). It includes schema validation using [Zod](https://zod.dev/) and sets up [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/) for observability, including logging, AWS X-Ray tracing and CloudWatch Metrics.
 
 ## Usage
 
@@ -28,15 +28,19 @@ You can generate a new tRPC API in two ways:
 
 <GeneratorParameters generator="ts#trpc-api" />
 
-<Snippet name="api/api-choice-note" />
+:::tip[When to use each `computeType`]
+- **`ServerlessApiGatewayHttpApi`** — the most cost-effective option. Pick this when you only need queries and mutations and don't need [WAF](https://aws.amazon.com/waf/) at the API tier. [HTTP APIs](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) are cheaper and lower-latency than REST APIs, but can't stream responses (so no [tRPC Subscriptions](https://trpc.io/docs/server/subscriptions)).
+- **`ServerlessApiGatewayRestApi`** (default) — pick this when you need [tRPC Subscriptions](https://trpc.io/docs/server/subscriptions) over [Server-Sent Events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events) and/or a [WAF Web ACL](https://aws.amazon.com/waf/) on the API. [REST APIs](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-rest-api.html) cost more than HTTP APIs but support response streaming and WAF integration.
+- **`BedrockAgentCoreRuntimeWebSocket`** — pick this when you need [tRPC Subscriptions](https://trpc.io/docs/server/subscriptions) over a WebSocket for real-time streaming with no 30-second Lambda or API Gateway timeout. [Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime.html) hosts your tRPC server as a containerised WebSocket server with managed auth, session affinity, and scaling.
 
-:::tip[API Type]
-Select `ServerlessApiGatewayRestApi` (default) as your `computeType` if you would like to use [tRPC Subscriptions](https://trpc.io/docs/server/subscriptions) to stream responses.
+For a deeper comparison of REST vs HTTP API Gateway, refer to the [API Gateway Developer Guide](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-vs-rest.html).
 :::
 
+<OptionFilter not when={{ computeType: 'BedrockAgentCoreRuntimeWebSocket' }} description="Integration pattern — Lambda-based compute types only">
 :::tip[Integration Pattern]
 The `integrationPattern` option defaults to `isolated`, which creates one Lambda per tRPC procedure. Select `shared` if you would prefer a single shared Lambda handler for the whole API, with optional per-procedure overrides.
 :::
+</OptionFilter>
 
 ## Generator Output
 
@@ -45,11 +49,12 @@ The generator will create the following project structure in the `<directory>/<a
 <FileTree>
   - src
     - init.ts Backend tRPC initialisation
-    - handler.ts Lambda handler entrypoint
+    - handler.ts Lambda handler entrypoint (Lambda compute types only)
+    - handler-agentcore.ts WebSocket server entrypoint (AgentCore compute type only)
     - router.ts tRPC router definition
     - schema Schema definitions using Zod
       - echo.ts Example definitions for the input and output of the "echo" procedure
-      - z-async-iterable.ts Zod helper for subscriptions (REST API only)
+      - z-async-iterable.ts Zod helper for subscriptions (REST API and AgentCore only)
     - procedures Procedures (or operations) exposed by your API
       - echo.ts Example procedure
     - middleware
@@ -60,6 +65,7 @@ The generator will create the following project structure in the `<directory>/<a
     - local-server.ts tRPC standalone adapter entrypoint for local development server
     - client
       - index.ts Type-safe client for machine-to-machine API calls
+  - Dockerfile Container image for AgentCore deployments (AgentCore compute type only)
   - tsconfig.json TypeScript configuration
   - project.json Project configuration and build targets
 
@@ -145,10 +151,19 @@ The use of `query` to define the implementation indicates that the operation is 
 
 If you add a new procedure, make sure you register it by adding it to the router in `src/router.ts`.
 
-<OptionFilter when={{ computeType: 'ServerlessApiGatewayRestApi' }} description="Streaming subscriptions — REST API only, uses SSE">
+<OptionFilter when={{ computeType: ['ServerlessApiGatewayRestApi', 'BedrockAgentCoreRuntimeWebSocket'] }} description="Streaming subscriptions — REST API (SSE) and AgentCore (WebSocket) only">
 ### Subscriptions (Streaming)
 
-tRPC subscriptions allow you to stream data from the server to the client using [Server-Sent Events (SSE)](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events). When you select `ServerlessApiGatewayRestApi` as your compute type, the generator automatically configures the infrastructure required for streaming, as well as a streaming Lambda handler and the `ZodAsyncIterable` schema helper.
+tRPC subscriptions stream data from the server to the client. The generator automatically configures the `ZodAsyncIterable` schema helper and the handler for streaming responses.
+
+<Tabs syncKey="trpc-compute">
+<TabItem label="REST API" _filter={{ computeType: 'ServerlessApiGatewayRestApi' }}>
+Subscriptions use [Server-Sent Events (SSE)](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events). The generated infrastructure uses a streaming Lambda handler with `ResponseTransferMode.STREAM` in API Gateway for all REST API operations, which enables subscriptions to work alongside regular queries and mutations.
+</TabItem>
+<TabItem label="AgentCore" _filter={{ computeType: 'BedrockAgentCoreRuntimeWebSocket' }}>
+Subscriptions use [WebSockets](https://developer.mozilla.org/en-US/docs/Web/API/WebSocket) against the AgentCore runtime endpoint. The generated handler exposes `/ws` via `@trpc/server/adapters/ws`, which carries queries, mutations, and subscriptions over a single full-duplex connection with no 30-second Lambda or API Gateway timeout.
+</TabItem>
+</Tabs>
 
 To define a subscription procedure, use the `.subscription` method with an async generator function. Use the `ZodAsyncIterable` helper from `src/schema/z-async-iterable.ts` to define the output schema:
 
@@ -183,8 +198,24 @@ export const appRouter = router({
   myStream,
 });
 ```
+</OptionFilter>
 
-The generated infrastructure uses a streaming Lambda handler with `ResponseTransferMode.STREAM` in API Gateway for all REST API operations, which enables subscriptions to work alongside regular queries and mutations.
+<OptionFilter when={{ computeType: 'BedrockAgentCoreRuntimeWebSocket' }} description="Session id — AgentCore propagates the runtime session id into ctx">
+### Session Identifier
+
+When deployed to AgentCore, every procedure receives `ctx.sessionId` — the value of the `x-amzn-bedrock-agentcore-runtime-session-id` header AgentCore sets on the WebSocket upgrade. Use it to key per-session state:
+
+```ts {5}
+export const chat = publicProcedure
+  .input(InputSchema)
+  .output(OutputSchema)
+  .subscription(async function* (opts) {
+    const history = loadHistory(opts.ctx.sessionId);
+    // ...stream chunks that build on `history`
+  });
+```
+
+Locally, `nx serve` runs a standalone HTTP + WebSocket server so clients can connect the same way they do in production. The session id defaults to a random UUID when the header is not present.
 </OptionFilter>
 
 ## Customising your tRPC API
@@ -284,7 +315,7 @@ You can add additional values to the context provided to procedures by implement
 
 As an example, let's implement some middlware to extract some details about the calling user from our API in `src/middleware/identity.ts`.
 
-<OptionFilter when={{ auth: 'IAM' }} description="Identity middleware example for IAM-authenticated APIs">
+<OptionFilter when={{ auth: 'IAM', computeType: ['ServerlessApiGatewayRestApi', 'ServerlessApiGatewayHttpApi'] }} description="Identity middleware example for IAM-authenticated Lambda APIs">
 This example walks through identity middleware for `IAM` authentication. We look up the caller in Cognito using the sub extracted from the API Gateway event.
 
 First, we define what we'll add to the context:
@@ -455,7 +486,7 @@ export const createIdentityPlugin = () => {
 </Tabs>
 </OptionFilter>
 
-<OptionFilter when={{ auth: 'Cognito' }} description="Identity middleware example for Cognito-authenticated APIs">
+<OptionFilter when={{ auth: 'Cognito', computeType: ['ServerlessApiGatewayRestApi', 'ServerlessApiGatewayHttpApi'] }} description="Identity middleware example for Cognito-authenticated Lambda APIs">
 When you deploy with `auth: 'Cognito'`, the API Gateway Cognito User Pools authorizer verifies the JWT that the caller supplies in the `Authorization` header and places the verified claims on the Lambda event at `event.requestContext.authorizer.claims`. Our middleware just reads those claims — no extra AWS SDK calls, no manual JWT verification.
 
 First, we define what we'll add to the context:
@@ -539,6 +570,25 @@ You don't need `aws-jwt-verify` or any other JWT-verification library here — t
 :::
 </OptionFilter>
 
+<OptionFilter when={{ computeType: 'BedrockAgentCoreRuntimeWebSocket' }} description="Identity and session access on AgentCore">
+On AgentCore, the runtime has already enforced `IAM` or `Cognito` auth on the WebSocket upgrade before your handler sees any traffic. The generated context exposes:
+
+- `ctx.sessionId` — the value of the `x-amzn-bedrock-agentcore-runtime-session-id` header set by AgentCore on the WebSocket upgrade.
+
+You can read `ctx.sessionId` directly in any procedure — no extra middleware is required:
+
+```ts
+import { publicProcedure } from '../init.js';
+import { z } from 'zod';
+
+export const me = publicProcedure
+  .output(z.object({ sessionId: z.string().optional() }))
+  .query(({ ctx }) => ({ sessionId: ctx.sessionId }));
+```
+
+If you want to expose additional fields (e.g. custom JWT claims forwarded via headers) to procedures, add middleware that augments `ctx` in the same pattern as the Lambda examples above — the only difference is that the source of truth is the WebSocket upgrade headers, not an API Gateway event.
+</OptionFilter>
+
 ## Deploying your tRPC API
 
 The tRPC API generator creates CDK or Terraform infrastructure as code based on your selected `iacProvider`. You can use this to deploy your tRPC API.
@@ -547,7 +597,7 @@ The tRPC API generator creates CDK or Terraform infrastructure as code based on 
 <Fragment slot="cdk">
 The CDK construct for deploying your API lives in the `common/constructs` folder. You can consume this in a CDK application, for example:
 
-<OptionFilter when={{ auth: ['IAM', 'None'] }} description="CDK usage for IAM or no authentication">
+<OptionFilter when={{ auth: ['IAM', 'None'], computeType: ['ServerlessApiGatewayRestApi', 'ServerlessApiGatewayHttpApi'] }} description="CDK usage for IAM or no authentication">
 ```ts {6-8}
 import { MyApi } from ':my-scope/common-constructs';
 
@@ -562,7 +612,7 @@ export class ExampleStack extends Stack {
 ```
 </OptionFilter>
 
-<OptionFilter when={{ auth: 'Cognito' }} description="CDK usage with Cognito authentication — pass the identity construct">
+<OptionFilter when={{ auth: 'Cognito', computeType: ['ServerlessApiGatewayRestApi', 'ServerlessApiGatewayHttpApi'] }} description="CDK usage with Cognito authentication — pass the identity construct">
 ```ts {6,9}
 import { MyApi, UserIdentity } from ':my-scope/common-constructs';
 
@@ -591,7 +641,7 @@ The Terraform modules for deploying your API are in the `common/terraform` folde
 
 The API module stages its Lambda deployment zip in a shared S3 asset bucket — see the <Link path="/guides/terraform-project">Terraform infrastructure guide</Link> for details. Instantiate the `core/asset-bucket` module once per deployment and pass its `bucket_name` output into every API / Lambda module via the `asset_bucket_name` input:
 
-<OptionFilter when={{ auth: ['IAM', 'None'] }} description="Terraform usage for IAM or no authentication">
+<OptionFilter when={{ auth: ['IAM', 'None'], computeType: ['ServerlessApiGatewayRestApi', 'ServerlessApiGatewayHttpApi'] }} description="Terraform usage for IAM or no authentication">
 ```hcl {1-3, 8}
 module "asset_bucket" {
   source = "../../common/terraform/src/core/asset-bucket"
@@ -618,7 +668,7 @@ module "my_api" {
 ```
 </OptionFilter>
 
-<OptionFilter when={{ auth: 'Cognito' }} description="Terraform usage with Cognito authentication — supply user pool and client">
+<OptionFilter when={{ auth: 'Cognito', computeType: ['ServerlessApiGatewayRestApi', 'ServerlessApiGatewayHttpApi'] }} description="Terraform usage with Cognito authentication — supply user pool and client">
 ```hcl {1-3, 8-9}
 module "asset_bucket" {
   source = "../../common/terraform/src/core/asset-bucket"
@@ -701,7 +751,7 @@ module "my_api" {
 }
 ```
 
-<OptionFilter when={{ auth: 'None' }} description="Checkov failures you may see when auth is None">
+<OptionFilter when={{ auth: 'None', computeType: ['ServerlessApiGatewayRestApi', 'ServerlessApiGatewayHttpApi'] }} description="Checkov failures you may see when auth is None on Lambda-backed APIs">
 :::caution[No Authentication]
 You may see Checkov check failures such as:
 
@@ -726,12 +776,46 @@ You can [add a suppression comment](https://www.checkov.io/2.Basics/Suppressing%
 </Fragment>
 </Infrastructure>
 
+<OptionFilter when={{ computeType: 'BedrockAgentCoreRuntimeWebSocket' }} description="Deploying tRPC on Bedrock AgentCore Runtime">
+### Bedrock AgentCore Runtime
+
+The generator emits a CDK construct (or Terraform module) that provisions a Bedrock AgentCore `Runtime`, grants it permission to invoke Bedrock models and read runtime configuration, and publishes the runtime ARN to `runtimeConfig.apis.<YourApiName>` for the frontend to pick up. A `docker` build target is wired into the project's `build` target so `nx build` produces the container image.
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts {5}
+import { MyApi } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const api = new MyApi(this, 'MyApi');
+  }
+}
+```
+
+The construct provisions the AgentCore runtime from the container image built by the `docker` target and surfaces the runtime ARN via `api.agentCoreRuntime.agentRuntimeArn`.
+</Fragment>
+<Fragment slot="terraform">
+```hcl
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  tags = local.common_tags
+}
+```
+
+The module provisions the AgentCore runtime from the container image built by the `docker` target and publishes the runtime ARN via the `agent_runtime_arn` output.
+</Fragment>
+</Infrastructure>
+</OptionFilter>
+
 <OptionFilter when={{ computeType: 'ServerlessApiGatewayRestApi' }} description="WAF — REST APIs get a WAF Web ACL by default">
 ### WAF
 
 <Snippet name="api/waf-configuration" parentHeading="WAF" />
 </OptionFilter>
 
+<OptionFilter not when={{ computeType: 'BedrockAgentCoreRuntimeWebSocket' }} description="API Gateway integrations — Lambda-based compute types only">
 ### Integrations
 
 <Snippet name="api/type-safe-api-integrations" parentHeading="Integrations" />
@@ -739,8 +823,9 @@ You can [add a suppression comment](https://www.checkov.io/2.Basics/Suppressing%
 :::tip[CDK Type-Safe Integrations]
 If you selected CDK for your `iacProvider`, when you add or remove a procedure in your tRPC API, these changes will be reflected immediately in the CDK construct without the need to rebuild.
 :::
+</OptionFilter>
 
-<OptionFilter when={{ auth: 'IAM' }} description="Granting API invoke access — IAM-authenticated APIs only">
+<OptionFilter when={{ auth: 'IAM', computeType: ['ServerlessApiGatewayRestApi', 'ServerlessApiGatewayHttpApi'] }} description="Granting API invoke access — IAM-authenticated Lambda APIs only">
 ### Granting Access (IAM Only)
 
 You can grant access to your API as follows:

@@ -278,6 +278,71 @@ export function Main() {
       expect(packageJson.dependencies['react-oidc-context']).toBeDefined();
     });
 
+    it('should generate an AgentCore WebSocket client provider with IAM auth', async () => {
+      updateJson(tree, 'apps/backend/project.json', (config) => ({
+        ...config,
+        metadata: {
+          ...config.metadata,
+          computeType: 'BedrockAgentCoreRuntimeWebSocket',
+          auth: 'IAM',
+        },
+      }));
+
+      await reactGenerator(tree, {
+        frontendProjectName: 'frontend',
+        backendProjectName: 'backend',
+      });
+
+      const providerContent = tree.read(
+        'apps/frontend/src/components/TestApiClientProvider.tsx',
+        'utf-8',
+      );
+      expect(providerContent).toContain('createWSClient');
+      expect(providerContent).toContain('wsLink');
+      expect(providerContent).toContain('buildAgentCoreWsUrl');
+      expect(providerContent).toContain('signQuery: true');
+      expect(providerContent).toContain('useSigV4');
+      // No REST-only or HTTP-only link types should leak in
+      expect(providerContent).not.toContain('splitLink');
+      expect(providerContent).not.toContain('httpSubscriptionLink');
+
+      // SigV4 hook is copied in for IAM auth
+      expect(tree.exists('apps/frontend/src/hooks/useSigV4.tsx')).toBeTruthy();
+
+      const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+      expect(packageJson.dependencies['aws4fetch']).toBeDefined();
+      expect(packageJson.dependencies['event-source-polyfill']).toBeUndefined();
+    });
+
+    it('should generate an AgentCore WebSocket client provider with Cognito auth', async () => {
+      updateJson(tree, 'apps/backend/project.json', (config) => ({
+        ...config,
+        metadata: {
+          ...config.metadata,
+          computeType: 'BedrockAgentCoreRuntimeWebSocket',
+          auth: 'Cognito',
+        },
+      }));
+
+      await reactGenerator(tree, {
+        frontendProjectName: 'frontend',
+        backendProjectName: 'backend',
+      });
+
+      const providerContent = tree.read(
+        'apps/frontend/src/components/TestApiClientProvider.tsx',
+        'utf-8',
+      );
+      expect(providerContent).toContain('createWSClient');
+      expect(providerContent).toContain('buildAgentCoreWsUrl');
+      expect(providerContent).toContain('base64UrlBearerAuthorization');
+      expect(providerContent).toContain('access_token');
+
+      const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+      expect(packageJson.dependencies['react-oidc-context']).toBeDefined();
+      expect(packageJson.dependencies['event-source-polyfill']).toBeUndefined();
+    });
+
     it('should not add event-source-polyfill for HTTP API', async () => {
       updateJson(tree, 'apps/backend/project.json', (config) => ({
         ...config,

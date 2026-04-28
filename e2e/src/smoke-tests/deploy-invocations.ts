@@ -171,6 +171,22 @@ export async function invokeAgentCoreAgent(
   throw new Error(`Exhausted retries invoking ${agentName}`);
 }
 
+/**
+ * Invoke a tRPC API deployed to Bedrock AgentCore Runtime over WebSocket
+ * using the vended client from `ts#strands-agent`.
+ */
+export async function invokeTrpcAgentCoreApi(
+  arn: string,
+  apiName: string,
+): Promise<void> {
+  console.log(`Testing ${apiName} at ARN ${arn}`);
+  const client = AgentCoreTrpcClient.withIamAuth({ agentRuntimeArn: arn });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const response = await (client.echo as any).query({ message: 'test' });
+  console.log(`${apiName} echo response:`, response);
+  expect(response.result).toBe('test');
+}
+
 export async function invokeTrpcAgentCoreAgent(
   arn: string,
   agentName: string,

@@ -38,13 +38,17 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
     opts,
   );
 
-  // tRPC APIs — REST + HTTP variants.
+  // tRPC APIs — REST + HTTP + AgentCore WebSocket variants.
   await runCLI(
     `generate @aws/nx-plugin:ts#trpc-api --name=my-api --computeType=ServerlessApiGatewayRestApi --no-interactive`,
     opts,
   );
   await runCLI(
     `generate @aws/nx-plugin:ts#trpc-api --name=my-api-http --computeType=ServerlessApiGatewayHttpApi --no-interactive`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:ts#trpc-api --name=my-trpc-ws-api --computeType=BedrockAgentCoreRuntimeWebSocket --auth=IAM --no-interactive`,
     opts,
   );
 

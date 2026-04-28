@@ -8,7 +8,10 @@ import { TsProjectGeneratorSchema } from '../../ts/lib/schema';
 
 export interface TsTrpcApiGeneratorSchema {
   name: string;
-  computeType: 'ServerlessApiGatewayRestApi' | 'ServerlessApiGatewayHttpApi';
+  computeType:
+    | 'ServerlessApiGatewayRestApi'
+    | 'ServerlessApiGatewayHttpApi'
+    | 'BedrockAgentCoreRuntimeWebSocket';
   integrationPattern?: 'isolated' | 'shared';
   auth: 'IAM' | 'Cognito' | 'None';
   directory?: TsProjectGeneratorSchema['directory'];
