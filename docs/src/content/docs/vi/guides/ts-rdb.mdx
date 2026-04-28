@@ -1,0 +1,684 @@
+---
+title: Cơ sở dữ liệu quan hệ
+description: Tạo một dự án cơ sở dữ liệu quan hệ
+---
+
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
+
+Generator này tạo một dự án cơ sở dữ liệu quan hệ mới được hỗ trợ bởi [Amazon Aurora](https://aws.amazon.com/rds/aurora/) PostgreSQL. Nó tạo ra mã ứng dụng và cơ sở hạ tầng cần thiết để cung cấp và quản lý cơ sở dữ liệu bằng AWS CDK hoặc Terraform.
+
+Cơ sở hạ tầng được tạo ra bao gồm:
+
+- Construct hoặc module Aurora có thể tái sử dụng
+- Construct hoặc module cơ sở dữ liệu dành riêng cho ứng dụng  
+- Handler tạo user cơ sở dữ liệu ứng dụng được xác thực bằng IAM
+- Đăng ký cấu hình runtime trong AWS AppConfig
+- Migration handler để triển khai Prisma migration tự động
+
+## Cách sử dụng
+
+### Tạo một Cơ sở dữ liệu Quan hệ
+
+Bạn có thể tạo một dự án cơ sở dữ liệu quan hệ mới theo hai cách:
+
+<RunGenerator generator="ts#rdb" />
+
+### Tùy chọn
+
+<GeneratorParameters generator="ts#rdb" />
+
+## Kết quả từ Generator
+
+Generator sẽ tạo cấu trúc dự án sau trong thư mục `<directory>/<name>`:
+
+<FileTree>
+  - prisma
+    - models
+      - example.prisma Định nghĩa model mẫu
+    - schema.prisma Schema Prisma chính (tham chiếu các model)
+  - src
+    - index.ts Điểm vào của dự án
+    - prisma.ts Wrapper Prisma runtime client
+    - utils.ts Helper cho runtime config và secret
+    - create-db-user-handler.ts Lambda handler được sử dụng để tạo user cơ sở dữ liệu ứng dụng trong quá trình triển khai
+    - migration-handler.ts Lambda handler được sử dụng để chạy migration cơ sở dữ liệu trong quá trình triển khai
+  - .gitignore Các mục Git ignore bao gồm output Prisma client được tạo ra
+  - Dockerfile Định nghĩa container image cho migration handler
+  - project.json Cấu hình dự án và các build target
+  - prisma.config.ts Cấu hình cho Prisma CLI
+  - tsconfig.json Cấu hình TypeScript cơ bản cho source và test
+  - tsconfig.lib.json Cấu hình TypeScript cho source code
+  - tsconfig.spec.json Cấu hình TypeScript cho test
+  - eslint.config.mjs Cấu hình cho ESLint
+</FileTree>
+
+### Cơ sở hạ tầng
+
+<Snippet name="shared-constructs" />
+
+<Infrastructure>
+  <Fragment slot="cdk">
+    <FileTree>
+      - packages/common/constructs/src
+        - app
+          - dbs
+            - \<name>.ts Cơ sở hạ tầng dành riêng cho cơ sở dữ liệu của bạn
+        - core
+          - rdb
+            - aurora.ts Construct cơ sở dữ liệu Aurora chung
+    </FileTree>
+  </Fragment>
+  <Fragment slot="terraform">
+    <FileTree>
+      - packages/common/terraform/src
+        - app
+          - dbs
+            - \<name>
+              - \<name>.tf Module dành riêng cho cơ sở dữ liệu của bạn
+        - core
+          - rdb
+            - aurora
+              - aurora.tf Module Aurora chung
+    </FileTree>
+  </Fragment>
+</Infrastructure>
+
+## Triển khai Cơ sở dữ liệu của bạn
+
+### Mô hình hóa Dữ liệu
+
+Dự án được tạo ra sử dụng [Prisma ORM](https://www.prisma.io/docs/orm) để định nghĩa schema cơ sở dữ liệu của bạn và tạo client an toàn về kiểu. Mô hình hóa các bảng, quan hệ và kiểu trường của bạn trong các file dưới `prisma/models/`.
+
+Ví dụ model `User`:
+
+```ts title="packages/postgres/prisma/models/user.prisma"
+model User {
+  id          Int      @id @default(autoincrement()) 
+  firstName   String
+  lastName    String
+}
+```
+
+Để biết thêm chi tiết, xem hướng dẫn chính thức về [mô hình hóa dữ liệu với Prisma](https://www.prisma.io/docs/orm/core-concepts/data-modeling#data-modeling-with-prisma-orm).
+
+### Tạo Database Client
+
+Generator tự động cấu hình target `generate` để tạo Prisma client TypeScript an toàn về kiểu bất cứ khi nào bạn build dự án. Client được ghi vào `generated/prisma` (đã thêm vào `.gitignore`).
+
+Bạn cũng có thể tạo client thủ công bất cứ lúc nào:
+
+<Tabs>
+  <TabItem label="npm" icon="seti:npm">
+
+```bash
+npm run nx -- run <your-db-package-name>:generate
+```
+
+  </TabItem>
+  <TabItem label="pnpm" icon="seti:pnpm">
+
+```bash
+pnpm nx run <your-db-package-name>:generate
+```
+
+  </TabItem>
+  <TabItem label="yarn" icon="seti:yarn">
+
+```bash
+yarn nx run <your-db-package-name>:generate
+```
+
+  </TabItem>
+  <TabItem label="bun" icon="seti:bun">
+
+```bash
+bun nx run <your-db-package-name>:generate
+```
+
+  </TabItem>
+</Tabs>
+
+Runtime wrapper trong `src/prisma.ts` export:
+
+- `DB_PACKAGE_NAME` - key được sử dụng trong namespace runtime config `database` trong AWS AppConfig
+- `getPrisma()` - tải cài đặt kết nối cơ sở dữ liệu từ AWS AppConfig và tạo Prisma client sử dụng xác thực IAM
+
+Client tự động:
+- Lấy cấu hình cơ sở dữ liệu từ AWS AppConfig sử dụng biến môi trường `RUNTIME_CONFIG_APP_ID`
+- Tạo authentication token tạm thời qua AWS RDS Signer cho xác thực IAM
+- Quản lý kết nối SSL/TLS với xác thực certificate
+- Xử lý connection pooling thông qua các database connection pool bền vững
+
+### Tạo Migration
+
+:::note[Chạy Prisma từ Thư mục Package]
+Khi sử dụng Prisma CLI, chạy các lệnh từ thư mục package cơ sở dữ liệu được tạo của bạn (ví dụ: `packages/postgres`) để Prisma có thể tìm thấy `prisma/schema.prisma` và `prisma.config.ts`.
+:::
+
+Prisma Migrate yêu cầu một [shadow database](https://www.prisma.io/docs/orm/prisma-migrate/understanding-prisma-migrate/shadow-database) để so sánh schema của bạn với trạng thái cơ sở dữ liệu hiện tại và tạo các thay đổi SQL.
+
+Để tạo migration cục bộ, trỏ Prisma đến một cơ sở dữ liệu phát triển bằng cách export `DATABASE_URL`:
+
+```bash
+export DATABASE_URL="postgresql://username:password@hostname:5432/dbname"
+```
+
+Sau đó tạo các file migration mà không áp dụng chúng:
+
+<Tabs>
+  <TabItem label="npm" icon="seti:npm">
+
+```bash
+npx prisma migrate dev --create-only
+```
+
+  </TabItem>
+  <TabItem label="pnpm" icon="seti:pnpm">
+
+```bash
+pnpm prisma migrate dev --create-only
+```
+
+  </TabItem>
+  <TabItem label="yarn" icon="seti:yarn">
+
+```bash
+yarn prisma migrate dev --create-only
+```
+
+  </TabItem>
+  <TabItem label="bun" icon="seti:bun">
+
+```bash
+bunx --bun prisma migrate dev --create-only
+```
+
+  </TabItem>
+</Tabs>
+
+Điều này tạo một thư mục migration mới trong `prisma/migrations` mỗi khi schema của bạn thay đổi:
+
+<FileTree>
+  - prisma
+    - migrations
+      - 20260405013911_initial_migrations
+        - migration.sql
+      - migration_lock.toml
+    - schema.prisma
+</FileTree>
+
+Để áp dụng migration vào cơ sở dữ liệu cục bộ của bạn:
+
+<Tabs>
+  <TabItem label="npm" icon="seti:npm">
+
+```bash
+npx prisma migrate deploy
+```
+
+  </TabItem>
+  <TabItem label="pnpm" icon="seti:pnpm">
+
+```bash
+pnpm prisma migrate deploy
+```
+
+  </TabItem>
+  <TabItem label="yarn" icon="seti:yarn">
+
+```bash
+yarn prisma migrate deploy
+```
+
+  </TabItem>
+  <TabItem label="bun" icon="seti:bun">
+
+```bash
+bunx --bun prisma migrate deploy
+```
+
+  </TabItem>
+</Tabs>
+
+:::note[Migration AWS Tự động]
+Đối với các triển khai AWS, bạn không cần chạy `prisma migrate deploy` thủ công. Cơ sở hạ tầng được tạo ra tự động tạo user cơ sở dữ liệu ứng dụng và chạy migration trong quá trình triển khai.
+:::
+
+## Kết nối từ một tRPC API
+
+### Sử dụng Prisma Client trong Handler
+
+Import `getPrisma` từ package cơ sở dữ liệu của bạn và gọi nó bên trong handler để lấy Prisma client an toàn về kiểu:
+
+```ts title="packages/api/src/procedures/list-users.ts"
+import { getPrisma } from ':my-scope/db';
+import { publicProcedure } from '../init.js';
+import { ListUsersOutputSchema } from '../schema/index.js';
+
+export const listUsers = publicProcedure
+  .output(ListUsersOutputSchema)
+  .query(async () => {
+    const prisma = await getPrisma();
+    return prisma.user.findMany({ orderBy: { id: 'asc' } });
+  });
+```
+
+`getPrisma()` trả về một client được khởi tạo lười biếng và được cache — các lần gọi tiếp theo trong cùng một Lambda execution context sẽ tái sử dụng connection pool hiện có thay vì mở một kết nối mới.
+
+Prisma client expose các model được type đầy đủ được lấy từ schema `prisma/models/` của bạn, cung cấp cho bạn type safety từ đầu đến cuối từ cơ sở dữ liệu cho đến API response.
+
+### Inject Prisma Client qua Middleware
+
+Thay vì gọi `getPrisma()` trong mỗi procedure, bạn cũng có thể resolve nó một lần trong middleware và gắn nó vào tRPC context để tất cả các procedure downstream có thể truy cập trực tiếp.
+
+Đầu tiên, định nghĩa plugin trong `src/middleware/db.ts` theo cùng pattern như middleware được tạo ra:
+
+```ts title="packages/api/src/middleware/db.ts"
+import { getPrisma } from ':my-scope/db';
+import { initTRPC } from '@trpc/server';
+
+export interface IDbContext {
+  db: Awaited<ReturnType<typeof getPrisma>>;
+}
+
+export const createDbPlugin = () => {
+  const t = initTRPC.context<IDbContext>().create();
+  return t.procedure.use(async (opts) => {
+    const db = await getPrisma();
+    return opts.next({
+      ctx: {
+        ...opts.ctx,
+        db,
+      },
+    });
+  });
+};
+```
+
+Sau đó concat nó vào một base procedure trong tRPC initialisation của bạn:
+
+```ts title="packages/api/src/init.ts"
+import { createDbPlugin } from './middleware/db.js';
+
+export const dbProcedure = publicProcedure.concat(createDbPlugin());
+```
+
+Các procedure được xây dựng trên `dbProcedure` nhận `db` thông qua context mà không cần import hoặc gọi `getPrisma()`:
+
+```ts title="packages/api/src/procedures/list-users.ts"
+import { dbProcedure } from '../init.js';
+import { ListUsersOutputSchema } from '../schema/index.js';
+
+export const listUsers = dbProcedure
+  .output(ListUsersOutputSchema)
+  .query(async ({ ctx: { db } }) => {
+    return db.user.findMany({ orderBy: { id: 'asc' } });
+  });
+```
+
+:::note
+Xem [Implementing Custom Middleware](./trpc#implementing-custom-middleware) để biết thêm chi tiết về pattern middleware.
+:::
+
+## Triển khai lên AWS
+
+Generator cơ sở dữ liệu quan hệ tạo cơ sở hạ tầng CDK hoặc Terraform dựa trên `iacProvider` bạn đã chọn.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Construct CDK được tạo trong `common/constructs`. Ví dụ sử dụng:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { Postgres } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    const vpc = new Vpc(this, 'Vpc', {
+      subnetConfiguration: [
+        {
+          name: 'public',
+          subnetType: SubnetType.PUBLIC,
+        },
+        {
+          name: 'private_with_egress',
+          subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+        },
+        {
+          name: 'private_isolated',
+          subnetType: SubnetType.PRIVATE_ISOLATED,
+        },
+      ],
+    });
+
+    const db = new Postgres(this, 'Db', {
+      vpc,
+      vpcSubnets: {
+        subnetType: SubnetType.PRIVATE_ISOLATED,
+      }
+    });
+  }
+}
+```
+
+Điều này cung cấp một Aurora cluster với RDS Proxy, admin credentials, application database user, đăng ký runtime config và migration handler. Triển khai vào private isolated subnet để ngăn truy cập trực tiếp từ internet.
+
+Cơ sở hạ tầng được tạo ra tạo hai database user:
+- **Admin user** - Được tạo trong quá trình cung cấp cluster với credentials được lưu trong AWS Secrets Manager
+- **Application user** - Được tạo thông qua Lambda custom resource với xác thực IAM được bật và có đầy đủ quyền trên application database
+</Fragment>
+<Fragment slot="terraform">
+Module Terraform được tạo trong `common/terraform`. Ví dụ sử dụng:
+
+```hcl title="packages/infra/src/main.tf"
+module "postgres" {
+  source = "../../common/terraform/src/app/dbs/postgres"
+
+  vpc_id             = module.vpc.vpc_id
+  private_subnet_ids = module.vpc.private_isolated_subnet_ids
+
+  tags = local.common_tags
+}
+```
+
+Điều này cung cấp một Aurora cluster với RDS Proxy, admin credentials, create-db-user Lambda, đăng ký runtime config, migration Lambda và các tài nguyên container registry.
+
+Cơ sở hạ tầng được tạo ra tạo hai database user:
+- **Admin user** - Được tạo trong quá trình cung cấp cluster với credentials được lưu trong AWS Secrets Manager
+- **Application user** - Được tạo thông qua Lambda function với xác thực IAM được bật và có đầy đủ quyền trên application database
+</Fragment>
+</Infrastructure>
+
+Application user được tự động tạo với tên ngẫu nhiên và xác thực IAM — `getPrisma()` đã được cấu hình để xác thực với user này bằng RDS token có thời hạn ngắn, vì vậy mã ứng dụng của bạn không bao giờ xử lý mật khẩu cơ sở dữ liệu.
+
+### Kết nối API Construct với Cơ sở dữ liệu
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+Trong application stack của bạn, triển khai API vào cùng VPC với cơ sở dữ liệu, sau đó gọi `allowDefaultPortFrom` và `grantConnect` để mở đường dẫn mạng và cấp quyền IAM `rds-db:connect` cho mỗi Lambda handler:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const db = new Postgres(this, 'Db', { vpc, ... });
+
+const api = new Api(this, 'Api', {
+  integrations: Api.defaultIntegrations(this)
+    .withDefaultOptions({
+      vpc,
+      vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+    })
+    .build(),
+});
+
+Object.entries(api.integrations).forEach(([operation, integration]) => {
+  db.allowDefaultPortFrom(integration.handler, `Allow ${operation} to connect to the database`);
+  db.grantConnect(integration.handler);
+});
+```
+
+`RUNTIME_CONFIG_APP_ID` được đặt tự động bởi cơ sở hạ tầng được tạo ra để runtime client có thể tải chi tiết kết nối cơ sở dữ liệu từ AppConfig.
+</Fragment>
+<Fragment slot="terraform">
+
+Truyền các output của database module vào compute module của bạn để nó có thể kết nối với cơ sở dữ liệu và đọc runtime configuration của nó:
+
+```hcl title="packages/infra/src/main.tf"
+module "postgres" {
+  source             = "../../common/terraform/src/app/dbs/postgres"
+  vpc_id             = module.vpc.vpc_id
+  private_subnet_ids = module.vpc.private_subnet_ids
+}
+
+module "api" {
+  source             = "..."
+  vpc_id             = module.vpc.vpc_id
+  private_subnet_ids = module.vpc.private_subnet_ids
+
+  # Allow the API to read runtime config from AppConfig
+  appconfig_application_id = module.postgres.appconfig_application_id
+
+  # Grant rds-db:connect for the application database user
+  database_cluster_resource_id = module.postgres.cluster_resource_id
+  database_runtime_user        = module.postgres.database_runtime_user
+
+  # Allow network access to the database port
+  database_security_group_id = module.postgres.security_group_id
+  database_port              = module.postgres.cluster_port
+
+  environment_variables = {
+    RUNTIME_CONFIG_APP_ID = module.postgres.appconfig_application_id
+  }
+}
+```
+
+Đảm bảo API Lambda role có quyền `rds-db:connect` trên `arn:aws:rds-db:<region>:<account>:dbuser:<cluster_resource_id>/<database_runtime_user>` và quyền đọc AppConfig, security group của API có thể kết nối với security group của cơ sở dữ liệu trên cổng cơ sở dữ liệu, và môi trường Lambda bao gồm `RUNTIME_CONFIG_APP_ID`.
+</Fragment>
+</Infrastructure>
+
+### Cấu hình RDS Proxy
+
+:::note[Chi phí Bổ sung]
+RDS Proxy được bật theo mặc định nhưng phát sinh thêm chi phí ngoài chi phí Aurora cluster. Xem [AWS RDS Proxy pricing](https://aws.amazon.com/rds/proxy/pricing/) để biết chi tiết.
+:::
+
+Cơ sở hạ tầng được tạo ra bao gồm RDS Proxy theo mặc định, nằm giữa ứng dụng của bạn và Aurora cluster. RDS Proxy cung cấp nhiều lợi ích:
+
+- **Connection pooling** - Duy trì một pool các kết nối cơ sở dữ liệu có thể được chia sẻ giữa các instance ứng dụng, giảm overhead của việc thiết lập kết nối mới
+- **Connection resilience** - Tự động xử lý failover và kết nối lại trong quá trình thay thế Aurora instance hoặc bảo trì
+- **IAM authentication** - Hỗ trợ xác thực cơ sở dữ liệu dựa trên IAM, loại bỏ nhu cầu quản lý credentials cơ sở dữ liệu trong mã ứng dụng của bạn
+- **Improved security** - Thực thi mã hóa TLS cho tất cả các kết nối
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+Theo mặc định, RDS Proxy được bật. Runtime client được tạo ra (`getPrisma()`) tự động kết nối thông qua proxy endpoint. Bạn có thể tắt nó nếu cần:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const db = new Postgres(this, 'Db', {
+  ...
+  enableRdsProxy: false,
+});
+```
+
+Khi RDS Proxy bị tắt, ứng dụng của bạn kết nối trực tiếp với Aurora cluster endpoint.
+
+Đối với kết nối Aurora cluster trực tiếp từ Node.js 20 hoặc Lambda runtime mới hơn, cấu hình Lambda function để tải Amazon RDS CA bundle:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const api = new Api(this, 'Api', {
+  integrations: Api.defaultIntegrations(this)
+    .withDefaultOptions({
+      environment: {
+        NODE_EXTRA_CA_CERTS: '/var/runtime/ca-cert.pem',
+      },
+    })
+    .build(),
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+Theo mặc định, RDS Proxy được bật. Runtime client được tạo ra (`getPrisma()`) tự động kết nối thông qua proxy endpoint. Bạn có thể tắt nó nếu cần:
+
+```hcl title="packages/infra/src/main.tf"
+module "postgres" {
+  source = "../../common/terraform/src/app/dbs/postgres"
+  ...
+  enable_rds_proxy = false
+}
+```
+
+Khi RDS Proxy bị tắt, ứng dụng của bạn kết nối trực tiếp với Aurora cluster endpoint.
+
+Đối với kết nối Aurora cluster trực tiếp từ Node.js 20 hoặc Lambda runtime mới hơn, cấu hình Lambda function để tải Amazon RDS CA bundle:
+
+```hcl title="packages/infra/src/main.tf"
+module "api" {
+  source = "..."
+  ...
+
+  environment_variables = {
+    NODE_EXTRA_CA_CERTS = "/var/runtime/ca-cert.pem"
+  }
+}
+```
+</Fragment>
+</Infrastructure>
+
+Để biết thêm chi tiết, xem AWS Lambda [SSL/TLS requirements for Amazon RDS connections](https://docs.aws.amazon.com/lambda/latest/dg/services-rds.html#services-rds-tls) và Amazon RDS Proxy [TLS documentation](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/rds-proxy.howitworks.html#rds-proxy-security.tls). Khi sử dụng RDS Proxy, bạn không cần cấu hình RDS CA bundle trong Lambda function của mình.
+
+## Phát triển Cục bộ
+
+### Sử dụng Cơ sở dữ liệu Cục bộ
+
+Khởi động một Postgres instance cục bộ (ví dụ: với Docker) và đặt `DATABASE_URL` khi chạy các lệnh Prisma CLI từ package cơ sở dữ liệu được tạo ra:
+
+```bash
+export DATABASE_URL="postgresql://postgres:password@localhost:5432/mydb"
+```
+
+Prisma sử dụng connection string này cho các lệnh cục bộ như `prisma migrate dev --create-only`, `prisma migrate deploy` và `prisma generate`.
+
+### Sử dụng Prisma Client Cục bộ
+
+Trong production, `getPrisma()` lấy host, port, tên cơ sở dữ liệu và runtime database user từ AWS AppConfig, và xác thực bằng IAM qua RDS token tạm thời.
+
+Đối với các lần chạy ứng dụng cục bộ, bạn có thể tùy chỉnh wrapper `src/prisma.ts` được tạo ra để kiểm tra `DATABASE_URL` trước. Khi nhánh này được thêm vào, client kết nối trực tiếp bằng connection string được cung cấp và bỏ qua AppConfig và IAM auth hoàn toàn:
+
+```ts title="packages/db/src/prisma.ts"
+export const getPrisma = (): Promise<PrismaClient> => {
+  prismaPromise ??= (async () => {
+    const localDatabaseUrl = process.env.DATABASE_URL;
+
+    if (localDatabaseUrl) {
+      const adapter = new PrismaPg({
+        connectionString: localDatabaseUrl,
+      });
+      return new PrismaClient({ adapter });
+    }
+
+    // ... production path: AppConfig + IAM auth
+  })();
+  return prismaPromise;
+};
+```
+
+## Tùy chỉnh Kiến trúc Cơ sở dữ liệu
+
+Cơ sở hạ tầng được tạo ra có thể được tùy chỉnh để phù hợp với yêu cầu workload của bạn. Các ví dụ sau đây minh họa một số tùy chọn tùy chỉnh phổ biến có sẵn.
+
+### Cluster Instance
+
+Cấu hình writer và reader instance cho Aurora cluster của bạn.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const db = new Postgres(this, 'Db', {
+  ...
+  writer: ClusterInstance.serverlessV2('writer'),
+  readers: [ClusterInstance.serverlessV2('reader')],
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "postgres" {
+  source = "../../common/terraform/src/app/dbs/postgres"
+  ...
+  instance_count = 2  # 1 writer + 1 reader
+}
+```
+</Fragment>
+</Infrastructure>
+
+### Serverless Capacity
+
+Kiểm soát giới hạn scaling Aurora Serverless v2 để phù hợp với workload của bạn.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const db = new Postgres(this, 'Db', {
+  ...
+  serverlessV2MinCapacity: 0.5,
+  serverlessV2MaxCapacity: 8,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "postgres" {
+  source = "../../common/terraform/src/app/dbs/postgres"
+  ...
+  serverless_min_capacity = 0.5
+  serverless_max_capacity = 8
+}
+```
+</Fragment>
+</Infrastructure>
+
+### Engine Version
+
+Cố định một Aurora PostgreSQL engine version cụ thể.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const db = new Postgres(this, 'Db', {
+  ...
+  engineVersion: AuroraPostgresEngineVersion.VER_17_7,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "postgres" {
+  source = "../../common/terraform/src/app/dbs/postgres"
+  ...
+  engine_version = "17.7"
+}
+```
+</Fragment>
+</Infrastructure>
+
+### Deletion Protection
+
+Cấu hình các thiết lập lifecycle để bảo vệ chống xóa vô tình.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RemovalPolicy } from 'aws-cdk-lib';
+
+const db = new Postgres(this, 'Db', {
+  ...
+  deletionProtection: true,
+  removalPolicy: RemovalPolicy.SNAPSHOT,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "postgres" {
+  source = "../../common/terraform/src/app/dbs/postgres"
+  ...
+  deletion_protection = true
+  skip_final_snapshot = false
+}
+```
+</Fragment>
+</Infrastructure>

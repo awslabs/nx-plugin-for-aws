@@ -1,0 +1,50 @@
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+<%_ if (engine === 'MySQL') { _%>
+import { getDatabaseSecret } from './utils.js';
+<%_ } else { _%>
+import { Signer } from '@aws-sdk/rds-signer';
+<%_ } _%>
+import { DATABASE_URL_ENV_VAR } from './constants.js';
+
+export const handler = async () => {
+<%_ if (engine === 'MySQL') { _%>
+  // TODO: The Prisma CLI relies on a Rust-based driver that doesn’t support `mysql_clear_password` (required for IAM authentication).
+  // Therefore, the MySQL migration handler can only connect directly to the database cluster.
+  // See: https://github.com/prisma/prisma/issues/10304
+  const { host, port, dbname, username, password } = await getDatabaseSecret();
+
+  const databaseUrl =
+    `mysql://${encodeURIComponent(username)}` +
+    `:${encodeURIComponent(password)}` +
+    `@${host}:${port}/${dbname}` +
+    `?sslaccept=strict`;
+<%_ } else { _%>
+  const hostname = process.env.HOSTNAME!;
+  const port = process.env.PORT!;
+  const database = process.env.DATABASE!;
+  const dbUser = process.env.DBUSER!;
+  const region = process.env.AWS_REGION!;
+
+  const iamAuthToken = await new Signer({
+    hostname,
+    port: Number(port),
+    region,
+    username: dbUser,
+  }).getAuthToken();
+
+  const databaseUrl =
+    `postgresql://${encodeURIComponent(dbUser)}` +
+    `:${encodeURIComponent(iamAuthToken)}` +
+    `@${hostname}:${port}/${database}` +
+    `?sslaccept=strict`;
+<%_ } _%>
+
+  await promisify(execFile)('npx', ['prisma', 'migrate', 'deploy'], {
+    cwd: __dirname,
+    env: {
+      ...process.env,
+      [DATABASE_URL_ENV_VAR]: databaseUrl,
+    },
+  });
+};

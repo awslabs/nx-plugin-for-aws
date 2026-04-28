@@ -1,0 +1,684 @@
+---
+title: "Banco de Dados Relacional"
+description: "Criar um projeto de banco de dados relacional"
+---
+
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
+
+Este gerador cria um novo projeto de banco de dados relacional baseado no [Amazon Aurora](https://aws.amazon.com/rds/aurora/) PostgreSQL. Ele gera o código da aplicação e a infraestrutura necessária para provisionar e gerenciar um banco de dados usando AWS CDK ou Terraform.
+
+A infraestrutura gerada inclui:
+
+- Construtor ou módulo Aurora reutilizável
+- Construtor ou módulo de banco de dados específico da aplicação  
+- Manipulador de usuário de banco de dados da aplicação autenticado por IAM
+- Registro de configuração de runtime no AWS AppConfig
+- Manipulador de migração para implantação automática de migrações Prisma
+
+## Uso
+
+### Gerar um Banco de Dados Relacional
+
+Você pode gerar um novo projeto de banco de dados relacional de duas maneiras:
+
+<RunGenerator generator="ts#rdb" />
+
+### Opções
+
+<GeneratorParameters generator="ts#rdb" />
+
+## Saída do Gerador
+
+O gerador criará a seguinte estrutura de projeto no diretório `<directory>/<name>`:
+
+<FileTree>
+  - prisma
+    - models
+      - example.prisma Definição de modelo de exemplo
+    - schema.prisma Esquema principal do Prisma (referencia modelos)
+  - src
+    - index.ts Ponto de entrada do projeto
+    - prisma.ts Wrapper do cliente Prisma de runtime
+    - utils.ts Auxiliares de configuração de runtime e secrets
+    - create-db-user-handler.ts Manipulador Lambda usado para criar o usuário de banco de dados da aplicação durante a implantação
+    - migration-handler.ts Manipulador Lambda usado para executar migrações de banco de dados durante a implantação
+  - .gitignore Entradas do Git ignore incluindo a saída do cliente Prisma gerado
+  - Dockerfile Definição de imagem de container para o manipulador de migração
+  - project.json Configuração do projeto e alvos de build
+  - prisma.config.ts Configuração para Prisma CLI
+  - tsconfig.json Configuração base do TypeScript para código fonte e testes
+  - tsconfig.lib.json Configuração do TypeScript para código fonte
+  - tsconfig.spec.json Configuração do TypeScript para testes
+  - eslint.config.mjs Configuração para ESLint
+</FileTree>
+
+### Infraestrutura
+
+<Snippet name="shared-constructs" />
+
+<Infrastructure>
+  <Fragment slot="cdk">
+    <FileTree>
+      - packages/common/constructs/src
+        - app
+          - dbs
+            - \<name>.ts Infraestrutura específica para seu banco de dados
+        - core
+          - rdb
+            - aurora.ts Construtor genérico de banco de dados Aurora
+    </FileTree>
+  </Fragment>
+  <Fragment slot="terraform">
+    <FileTree>
+      - packages/common/terraform/src
+        - app
+          - dbs
+            - \<name>
+              - \<name>.tf Módulo específico para seu banco de dados
+        - core
+          - rdb
+            - aurora
+              - aurora.tf Módulo genérico Aurora
+    </FileTree>
+  </Fragment>
+</Infrastructure>
+
+## Implementando seu Banco de Dados
+
+### Modelagem de Dados
+
+O projeto gerado usa [Prisma ORM](https://www.prisma.io/docs/orm) para definir seu esquema de banco de dados e gerar um cliente com segurança de tipos. Modele suas tabelas, relações e tipos de campo em arquivos sob `prisma/models/`.
+
+Exemplo de modelo `User`:
+
+```ts title="packages/postgres/prisma/models/user.prisma"
+model User {
+  id          Int      @id @default(autoincrement()) 
+  firstName   String
+  lastName    String
+}
+```
+
+Para mais detalhes, consulte o guia oficial sobre [modelagem de dados com Prisma ORM](https://www.prisma.io/docs/orm/core-concepts/data-modeling#data-modeling-with-prisma-orm).
+
+### Gerando o Cliente de Banco de Dados
+
+O gerador configura automaticamente o alvo `generate` para criar um cliente Prisma TypeScript com segurança de tipos sempre que você compilar o projeto. O cliente é escrito em `generated/prisma` (adicionado ao `.gitignore`).
+
+Você também pode gerar manualmente o cliente a qualquer momento:
+
+<Tabs>
+  <TabItem label="npm" icon="seti:npm">
+
+```bash
+npm run nx -- run <your-db-package-name>:generate
+```
+
+  </TabItem>
+  <TabItem label="pnpm" icon="seti:pnpm">
+
+```bash
+pnpm nx run <your-db-package-name>:generate
+```
+
+  </TabItem>
+  <TabItem label="yarn" icon="seti:yarn">
+
+```bash
+yarn nx run <your-db-package-name>:generate
+```
+
+  </TabItem>
+  <TabItem label="bun" icon="seti:bun">
+
+```bash
+bun nx run <your-db-package-name>:generate
+```
+
+  </TabItem>
+</Tabs>
+
+O wrapper de runtime em `src/prisma.ts` exporta:
+
+- `DB_PACKAGE_NAME` - a chave usada sob o namespace de configuração de runtime `database` no AWS AppConfig
+- `getPrisma()` - carrega as configurações de conexão do banco de dados do AWS AppConfig e cria um cliente Prisma usando autenticação IAM
+
+O cliente automaticamente:
+- Recupera a configuração do banco de dados do AWS AppConfig usando a variável de ambiente `RUNTIME_CONFIG_APP_ID`
+- Gera tokens de autenticação temporários via AWS RDS Signer para autenticação IAM
+- Gerencia conexões SSL/TLS com validação de certificado
+- Manipula pooling de conexões através de pools de conexão de banco de dados persistentes
+
+### Criando Migrações
+
+:::note[Execute o Prisma a partir do Diretório do Pacote]
+Ao usar a CLI do Prisma, execute os comandos a partir do diretório do pacote de banco de dados gerado (por exemplo, `packages/postgres`) para que o Prisma possa encontrar `prisma/schema.prisma` e `prisma.config.ts`.
+:::
+
+O Prisma Migrate requer um [banco de dados shadow](https://www.prisma.io/docs/orm/prisma-migrate/understanding-prisma-migrate/shadow-database) para comparar seu esquema com o estado atual do banco de dados e gerar alterações SQL.
+
+Para gerar migrações localmente, aponte o Prisma para um banco de dados de desenvolvimento exportando `DATABASE_URL`:
+
+```bash
+export DATABASE_URL="postgresql://username:password@hostname:5432/dbname"
+```
+
+Em seguida, crie os arquivos de migração sem aplicá-los:
+
+<Tabs>
+  <TabItem label="npm" icon="seti:npm">
+
+```bash
+npx prisma migrate dev --create-only
+```
+
+  </TabItem>
+  <TabItem label="pnpm" icon="seti:pnpm">
+
+```bash
+pnpm prisma migrate dev --create-only
+```
+
+  </TabItem>
+  <TabItem label="yarn" icon="seti:yarn">
+
+```bash
+yarn prisma migrate dev --create-only
+```
+
+  </TabItem>
+  <TabItem label="bun" icon="seti:bun">
+
+```bash
+bunx --bun prisma migrate dev --create-only
+```
+
+  </TabItem>
+</Tabs>
+
+Isso gera uma nova pasta de migração em `prisma/migrations` cada vez que seu esquema muda:
+
+<FileTree>
+  - prisma
+    - migrations
+      - 20260405013911_initial_migrations
+        - migration.sql
+      - migration_lock.toml
+    - schema.prisma
+</FileTree>
+
+Para aplicar migrações ao seu banco de dados local:
+
+<Tabs>
+  <TabItem label="npm" icon="seti:npm">
+
+```bash
+npx prisma migrate deploy
+```
+
+  </TabItem>
+  <TabItem label="pnpm" icon="seti:pnpm">
+
+```bash
+pnpm prisma migrate deploy
+```
+
+  </TabItem>
+  <TabItem label="yarn" icon="seti:yarn">
+
+```bash
+yarn prisma migrate deploy
+```
+
+  </TabItem>
+  <TabItem label="bun" icon="seti:bun">
+
+```bash
+bunx --bun prisma migrate deploy
+```
+
+  </TabItem>
+</Tabs>
+
+:::note[Migrações Automáticas na AWS]
+Para implantações na AWS, você não precisa executar `prisma migrate deploy` manualmente. A infraestrutura gerada cria automaticamente o usuário de banco de dados da aplicação e executa migrações durante a implantação.
+:::
+
+## Conectando a partir de uma API tRPC
+
+### Usando o Cliente Prisma em Manipuladores
+
+Importe `getPrisma` do seu pacote de banco de dados e chame-o dentro do seu manipulador para obter um cliente Prisma com segurança de tipos:
+
+```ts title="packages/api/src/procedures/list-users.ts"
+import { getPrisma } from ':my-scope/db';
+import { publicProcedure } from '../init.js';
+import { ListUsersOutputSchema } from '../schema/index.js';
+
+export const listUsers = publicProcedure
+  .output(ListUsersOutputSchema)
+  .query(async () => {
+    const prisma = await getPrisma();
+    return prisma.user.findMany({ orderBy: { id: 'asc' } });
+  });
+```
+
+`getPrisma()` retorna um cliente inicializado preguiçosamente e em cache — chamadas subsequentes dentro do mesmo contexto de execução Lambda reutilizam o pool de conexões existente em vez de abrir um novo.
+
+O cliente Prisma expõe modelos totalmente tipados derivados do seu esquema `prisma/models/`, fornecendo segurança de tipos de ponta a ponta desde o banco de dados até a resposta da sua API.
+
+### Injetando o Cliente Prisma via Middleware
+
+Em vez de chamar `getPrisma()` em cada procedimento, você também pode resolvê-lo uma vez em um middleware e anexá-lo ao contexto tRPC para que todos os procedimentos downstream possam acessá-lo diretamente.
+
+Primeiro, defina o plugin em `src/middleware/db.ts` seguindo o mesmo padrão do middleware gerado:
+
+```ts title="packages/api/src/middleware/db.ts"
+import { getPrisma } from ':my-scope/db';
+import { initTRPC } from '@trpc/server';
+
+export interface IDbContext {
+  db: Awaited<ReturnType<typeof getPrisma>>;
+}
+
+export const createDbPlugin = () => {
+  const t = initTRPC.context<IDbContext>().create();
+  return t.procedure.use(async (opts) => {
+    const db = await getPrisma();
+    return opts.next({
+      ctx: {
+        ...opts.ctx,
+        db,
+      },
+    });
+  });
+};
+```
+
+Em seguida, concatene-o a um procedimento base na sua inicialização tRPC:
+
+```ts title="packages/api/src/init.ts"
+import { createDbPlugin } from './middleware/db.js';
+
+export const dbProcedure = publicProcedure.concat(createDbPlugin());
+```
+
+Procedimentos construídos em `dbProcedure` recebem `db` através do contexto sem precisar importar ou chamar `getPrisma()`:
+
+```ts title="packages/api/src/procedures/list-users.ts"
+import { dbProcedure } from '../init.js';
+import { ListUsersOutputSchema } from '../schema/index.js';
+
+export const listUsers = dbProcedure
+  .output(ListUsersOutputSchema)
+  .query(async ({ ctx: { db } }) => {
+    return db.user.findMany({ orderBy: { id: 'asc' } });
+  });
+```
+
+:::note
+Consulte [Implementando Middleware Personalizado](./trpc#implementing-custom-middleware) para mais detalhes sobre o padrão de middleware.
+:::
+
+## Implantando na AWS
+
+O gerador de banco de dados relacional cria infraestrutura CDK ou Terraform com base no seu `iacProvider` selecionado.
+
+<Infrastructure>
+<Fragment slot="cdk">
+O construtor CDK é criado em `common/constructs`. Exemplo de uso:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { Postgres } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    const vpc = new Vpc(this, 'Vpc', {
+      subnetConfiguration: [
+        {
+          name: 'public',
+          subnetType: SubnetType.PUBLIC,
+        },
+        {
+          name: 'private_with_egress',
+          subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+        },
+        {
+          name: 'private_isolated',
+          subnetType: SubnetType.PRIVATE_ISOLATED,
+        },
+      ],
+    });
+
+    const db = new Postgres(this, 'Db', {
+      vpc,
+      vpcSubnets: {
+        subnetType: SubnetType.PRIVATE_ISOLATED,
+      }
+    });
+  }
+}
+```
+
+Isso provisiona um cluster Aurora com RDS Proxy, credenciais de administrador, usuário de banco de dados da aplicação, registro de configuração de runtime e manipulador de migração. Implante em sub-redes privadas isoladas para evitar acesso direto à internet.
+
+A infraestrutura gerada cria dois usuários de banco de dados:
+- **Usuário administrador** - Criado durante o provisionamento do cluster com credenciais armazenadas no AWS Secrets Manager
+- **Usuário da aplicação** - Criado via um recurso personalizado Lambda com autenticação IAM habilitada e privilégios completos no banco de dados da aplicação
+</Fragment>
+<Fragment slot="terraform">
+O módulo Terraform é criado em `common/terraform`. Exemplo de uso:
+
+```hcl title="packages/infra/src/main.tf"
+module "postgres" {
+  source = "../../common/terraform/src/app/dbs/postgres"
+
+  vpc_id             = module.vpc.vpc_id
+  private_subnet_ids = module.vpc.private_isolated_subnet_ids
+
+  tags = local.common_tags
+}
+```
+
+Isso provisiona um cluster Aurora com RDS Proxy, credenciais de administrador, Lambda create-db-user, registro de configuração de runtime, Lambda de migração e recursos de registro de container.
+
+A infraestrutura gerada cria dois usuários de banco de dados:
+- **Usuário administrador** - Criado durante o provisionamento do cluster com credenciais armazenadas no AWS Secrets Manager
+- **Usuário da aplicação** - Criado via uma função Lambda com autenticação IAM habilitada e privilégios completos no banco de dados da aplicação
+</Fragment>
+</Infrastructure>
+
+O usuário da aplicação é criado automaticamente com um nome aleatório e autenticação IAM — `getPrisma()` já está configurado para autenticar como este usuário usando tokens RDS de curta duração, então o código da sua aplicação nunca manipula senhas de banco de dados.
+
+### Conectando o Construtor da API ao Banco de Dados
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+Na sua pilha de aplicação, implante a API na mesma VPC que o banco de dados, depois chame `allowDefaultPortFrom` e `grantConnect` para abrir o caminho de rede e conceder permissão IAM `rds-db:connect` a cada manipulador Lambda:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const db = new Postgres(this, 'Db', { vpc, ... });
+
+const api = new Api(this, 'Api', {
+  integrations: Api.defaultIntegrations(this)
+    .withDefaultOptions({
+      vpc,
+      vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+    })
+    .build(),
+});
+
+Object.entries(api.integrations).forEach(([operation, integration]) => {
+  db.allowDefaultPortFrom(integration.handler, `Allow ${operation} to connect to the database`);
+  db.grantConnect(integration.handler);
+});
+```
+
+`RUNTIME_CONFIG_APP_ID` é definido automaticamente pela infraestrutura gerada para que o cliente de runtime possa carregar detalhes de conexão do banco de dados do AppConfig.
+</Fragment>
+<Fragment slot="terraform">
+
+Passe as saídas do módulo de banco de dados para o seu módulo de computação para que ele possa alcançar o banco de dados e ler sua configuração de runtime:
+
+```hcl title="packages/infra/src/main.tf"
+module "postgres" {
+  source             = "../../common/terraform/src/app/dbs/postgres"
+  vpc_id             = module.vpc.vpc_id
+  private_subnet_ids = module.vpc.private_subnet_ids
+}
+
+module "api" {
+  source             = "..."
+  vpc_id             = module.vpc.vpc_id
+  private_subnet_ids = module.vpc.private_subnet_ids
+
+  # Permitir que a API leia configuração de runtime do AppConfig
+  appconfig_application_id = module.postgres.appconfig_application_id
+
+  # Conceder rds-db:connect para o usuário de banco de dados da aplicação
+  database_cluster_resource_id = module.postgres.cluster_resource_id
+  database_runtime_user        = module.postgres.database_runtime_user
+
+  # Permitir acesso de rede à porta do banco de dados
+  database_security_group_id = module.postgres.security_group_id
+  database_port              = module.postgres.cluster_port
+
+  environment_variables = {
+    RUNTIME_CONFIG_APP_ID = module.postgres.appconfig_application_id
+  }
+}
+```
+
+Certifique-se de que a role Lambda da API tenha `rds-db:connect` em `arn:aws:rds-db:<region>:<account>:dbuser:<cluster_resource_id>/<database_runtime_user>` e permissões de leitura do AppConfig, que o grupo de segurança da API possa alcançar o grupo de segurança do banco de dados na porta do banco de dados, e que o ambiente Lambda inclua `RUNTIME_CONFIG_APP_ID`.
+</Fragment>
+</Infrastructure>
+
+### Configuração do RDS Proxy
+
+:::note[Custo Adicional]
+O RDS Proxy está habilitado por padrão, mas incorre em cobranças adicionais além do custo do cluster Aurora. Consulte [preços do AWS RDS Proxy](https://aws.amazon.com/rds/proxy/pricing/) para detalhes.
+:::
+
+A infraestrutura gerada inclui um RDS Proxy por padrão, que fica entre sua aplicação e o cluster Aurora. O RDS Proxy oferece vários benefícios:
+
+- **Pooling de conexões** - Mantém um pool de conexões de banco de dados que podem ser compartilhadas entre instâncias da aplicação, reduzindo a sobrecarga de estabelecer novas conexões
+- **Resiliência de conexão** - Manipula automaticamente failovers e reconexões durante substituições de instâncias Aurora ou manutenção
+- **Autenticação IAM** - Suporta autenticação de banco de dados baseada em IAM, eliminando a necessidade de gerenciar credenciais de banco de dados no código da sua aplicação
+- **Segurança aprimorada** - Impõe criptografia TLS para todas as conexões
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+Por padrão, o RDS Proxy está habilitado. O cliente de runtime gerado (`getPrisma()`) conecta automaticamente através do endpoint do proxy. Você pode desabilitá-lo se necessário:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const db = new Postgres(this, 'Db', {
+  ...
+  enableRdsProxy: false,
+});
+```
+
+Quando o RDS Proxy está desabilitado, sua aplicação se conecta diretamente ao endpoint do cluster Aurora.
+
+Para conexões diretas ao cluster Aurora a partir de runtimes Lambda Node.js 20 ou posterior, configure a função Lambda para carregar o pacote de CA do Amazon RDS:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const api = new Api(this, 'Api', {
+  integrations: Api.defaultIntegrations(this)
+    .withDefaultOptions({
+      environment: {
+        NODE_EXTRA_CA_CERTS: '/var/runtime/ca-cert.pem',
+      },
+    })
+    .build(),
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+Por padrão, o RDS Proxy está habilitado. O cliente de runtime gerado (`getPrisma()`) conecta automaticamente através do endpoint do proxy. Você pode desabilitá-lo se necessário:
+
+```hcl title="packages/infra/src/main.tf"
+module "postgres" {
+  source = "../../common/terraform/src/app/dbs/postgres"
+  ...
+  enable_rds_proxy = false
+}
+```
+
+Quando o RDS Proxy está desabilitado, sua aplicação se conecta diretamente ao endpoint do cluster Aurora.
+
+Para conexões diretas ao cluster Aurora a partir de runtimes Lambda Node.js 20 ou posterior, configure a função Lambda para carregar o pacote de CA do Amazon RDS:
+
+```hcl title="packages/infra/src/main.tf"
+module "api" {
+  source = "..."
+  ...
+
+  environment_variables = {
+    NODE_EXTRA_CA_CERTS = "/var/runtime/ca-cert.pem"
+  }
+}
+```
+</Fragment>
+</Infrastructure>
+
+Para mais detalhes, consulte os [requisitos SSL/TLS do AWS Lambda para conexões Amazon RDS](https://docs.aws.amazon.com/lambda/latest/dg/services-rds.html#services-rds-tls) e a [documentação TLS do Amazon RDS Proxy](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/rds-proxy.howitworks.html#rds-proxy-security.tls). Ao usar RDS Proxy, você não precisa configurar o pacote de CA do RDS na sua função Lambda.
+
+## Desenvolvimento Local
+
+### Usando um Banco de Dados Local
+
+Inicie uma instância Postgres local (por exemplo, com Docker) e defina `DATABASE_URL` ao executar comandos da CLI do Prisma a partir do pacote de banco de dados gerado:
+
+```bash
+export DATABASE_URL="postgresql://postgres:password@localhost:5432/mydb"
+```
+
+O Prisma usa esta string de conexão para comandos locais como `prisma migrate dev --create-only`, `prisma migrate deploy` e `prisma generate`.
+
+### Usando o Cliente Prisma Localmente
+
+Em produção, `getPrisma()` recupera o host, porta, nome do banco de dados e usuário de banco de dados de runtime do AWS AppConfig, e autentica usando IAM via um token RDS temporário.
+
+Para execuções locais da aplicação, você pode personalizar o wrapper `src/prisma.ts` gerado para verificar `DATABASE_URL` primeiro. Quando este branch é adicionado, o cliente se conecta diretamente usando a string de conexão fornecida e ignora completamente o AppConfig e a autenticação IAM:
+
+```ts title="packages/db/src/prisma.ts"
+export const getPrisma = (): Promise<PrismaClient> => {
+  prismaPromise ??= (async () => {
+    const localDatabaseUrl = process.env.DATABASE_URL;
+
+    if (localDatabaseUrl) {
+      const adapter = new PrismaPg({
+        connectionString: localDatabaseUrl,
+      });
+      return new PrismaClient({ adapter });
+    }
+
+    // ... caminho de produção: AppConfig + autenticação IAM
+  })();
+  return prismaPromise;
+};
+```
+
+## Personalizando a Arquitetura do Banco de Dados
+
+A infraestrutura gerada pode ser personalizada para corresponder aos requisitos da sua carga de trabalho. Os exemplos a seguir demonstram algumas opções de personalização comuns disponíveis.
+
+### Instâncias do Cluster
+
+Configure as instâncias writer e reader para seu cluster Aurora.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const db = new Postgres(this, 'Db', {
+  ...
+  writer: ClusterInstance.serverlessV2('writer'),
+  readers: [ClusterInstance.serverlessV2('reader')],
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "postgres" {
+  source = "../../common/terraform/src/app/dbs/postgres"
+  ...
+  instance_count = 2  # 1 writer + 1 reader
+}
+```
+</Fragment>
+</Infrastructure>
+
+### Capacidade Serverless
+
+Controle os limites de escalonamento do Aurora Serverless v2 para corresponder à sua carga de trabalho.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const db = new Postgres(this, 'Db', {
+  ...
+  serverlessV2MinCapacity: 0.5,
+  serverlessV2MaxCapacity: 8,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "postgres" {
+  source = "../../common/terraform/src/app/dbs/postgres"
+  ...
+  serverless_min_capacity = 0.5
+  serverless_max_capacity = 8
+}
+```
+</Fragment>
+</Infrastructure>
+
+### Versão do Engine
+
+Fixe uma versão específica do engine Aurora PostgreSQL.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const db = new Postgres(this, 'Db', {
+  ...
+  engineVersion: AuroraPostgresEngineVersion.VER_17_7,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "postgres" {
+  source = "../../common/terraform/src/app/dbs/postgres"
+  ...
+  engine_version = "17.7"
+}
+```
+</Fragment>
+</Infrastructure>
+
+### Proteção contra Exclusão
+
+Configure definições de ciclo de vida para proteger contra exclusão acidental.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RemovalPolicy } from 'aws-cdk-lib';
+
+const db = new Postgres(this, 'Db', {
+  ...
+  deletionProtection: true,
+  removalPolicy: RemovalPolicy.SNAPSHOT,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "postgres" {
+  source = "../../common/terraform/src/app/dbs/postgres"
+  ...
+  deletion_protection = true
+  skip_final_snapshot = false
+}
+```
+</Fragment>
+</Infrastructure>

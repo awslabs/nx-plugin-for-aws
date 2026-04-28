@@ -157,6 +157,10 @@ export const runSmokeTest = async (
     opts,
   );
   await runCLI(
+    `generate @aws/nx-plugin:ts#rdb --name=my-db --service=Aurora --engine=Postgres --databaseUser=myuser --databaseName=mydb --ormFramework=Prisma --no-interactive`,
+    opts,
+  );
+  await runCLI(
     `generate @aws/nx-plugin:connection --sourceProject=website --targetProject=my-smithy-api --no-interactive`,
     opts,
   );

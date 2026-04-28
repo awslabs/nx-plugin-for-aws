@@ -1,0 +1,676 @@
+terraform {
+  required_version = ">= 1.0"
+
+  required_providers {
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.5"
+    }
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 6.33"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
+  }
+}
+
+variable "vpc_id" {
+  description = "VPC where the Aurora cluster will be deployed."
+  type        = string
+}
+
+variable "private_subnet_ids" {
+  description = "Private subnet IDs used by Aurora, RDS Proxy, and database Lambda functions. These subnets must have outbound egress to AWS service endpoints for the create-db-user and migration Lambdas."
+  type        = list(string)
+}
+
+variable "engine_version" {
+  description = "Aurora engine version."
+  type        = string
+  default     = null
+}
+
+variable "port" {
+  description = "Database port for the selected Aurora engine."
+  type        = number
+  default     = null
+}
+
+variable "serverless_min_capacity" {
+  description = "Minimum Aurora Serverless v2 ACUs."
+  type        = number
+  default     = 0.5
+}
+
+variable "serverless_max_capacity" {
+  description = "Maximum Aurora Serverless v2 ACUs."
+  type        = number
+  default     = 4
+}
+
+variable "instance_count" {
+  description = "Number of Aurora instances to create."
+  type        = number
+  default     = 1
+}
+
+variable "deletion_protection" {
+  description = "Whether deletion protection is enabled."
+  type        = bool
+  default     = true
+}
+
+variable "skip_final_snapshot" {
+  description = "Whether to skip the final snapshot on deletion."
+  type        = bool
+  default     = false
+}
+
+variable "enable_rds_proxy" {
+  description = "Whether to provision an RDS Proxy in front of the Aurora cluster."
+  type        = bool
+  default     = true
+}
+
+variable "tags" {
+  description = "Tags to apply to all resources."
+  type        = map(string)
+  default     = {}
+}
+
+data "aws_region" "current" {}
+data "aws_caller_identity" "current" {}
+
+resource "random_string" "suffix" {
+  length  = 8
+  special = false
+  upper   = false
+}
+
+locals {
+  migration_bundle_path = "${path.module}/../../../../../../../<%- migrationBundleDir %>"
+  migration_bundle_hash = sha256(join("", [
+    for file in sort(fileset(local.migration_bundle_path, "**")) :
+    "${file}:${filesha256("${local.migration_bundle_path}/${file}")}"
+  ]))
+  create_db_user_bundle_path = "${path.module}/../../../../../../../<%- createDbUserBundleDir %>"
+  migration_function_name = "<%= nameKebabCase %>-migration-${random_string.suffix.result}"
+  create_db_user_function_name = "<%= nameKebabCase %>-create-db-user-${random_string.suffix.result}"
+  database_runtime_user = "db_${random_string.suffix.result}"
+}
+
+module "aurora" {
+  source = "../../../core/rdb/aurora"
+  #checkov:skip=CKV_AWS_139:Deletion protection is enabled but checkov is unable to detect it correctly
+  name                            = "<%= nameKebabCase %>"
+  vpc_id                          = var.vpc_id
+  private_subnet_ids              = var.private_subnet_ids
+  engine                          = "<%= engine === 'mysql' ? 'aurora-mysql' : 'aurora-postgresql' %>"
+  engine_version                  = var.engine_version
+  database_name                   = "<%= databaseName %>"
+  admin_user                      = "<%= adminUser %>"
+  port                            = var.port
+  serverless_min_capacity         = var.serverless_min_capacity
+  serverless_max_capacity         = var.serverless_max_capacity
+  instance_count                  = var.instance_count
+  deletion_protection             = var.deletion_protection
+  skip_final_snapshot             = var.skip_final_snapshot
+  enable_rds_proxy                = var.enable_rds_proxy
+  tags                            = var.tags
+}
+
+resource "aws_iam_role_policy" "proxy_db_user_connect" {
+  count = var.enable_rds_proxy ? 1 : 0
+
+  role = module.aurora.proxy_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = ["rds-db:connect"]
+        Resource = [
+          "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.aurora.cluster_resource_id}/${local.database_runtime_user}"
+        ]
+      }
+    ]
+  })
+}
+
+data "archive_file" "create_db_user_zip" {
+  type        = "zip"
+  source_dir  = local.create_db_user_bundle_path
+  output_path = "${path.module}/../../../../../../../dist/packages/common/terraform/dbs/<%= nameKebabCase %>/create-db-user.zip"
+}
+
+module "add_rdb_to_runtime_config" {
+  source = "../../../core/runtime-config/entry"
+
+  namespace = "database"
+  key       = "<%= nameClassName %>"
+  value = {
+    hostname  = module.aurora.cluster_endpoint
+    port      = module.aurora.cluster_port
+    database  = module.aurora.database_name
+    adminUser = module.aurora.admin_user
+    dbUser    = local.database_runtime_user
+    region    = data.aws_region.current.region
+  }
+}
+
+module "appconfig" {
+  source = "../../../core/runtime-config/appconfig"
+
+  application_name = "<%= nameClassName %>-runtime-config"
+
+  depends_on = [module.add_rdb_to_runtime_config]
+}
+
+resource "aws_ecr_repository" "migration_handler" {
+  #checkov:skip=CKV_AWS_136:AES256 encryption is sufficient for ECR repositories
+  name                 = "<%= nameKebabCase %>-migration-${random_string.suffix.result}"
+  image_tag_mutability = "IMMUTABLE"
+  force_delete         = true
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  tags = var.tags
+}
+
+resource "aws_ecr_repository_policy" "migration_handler" {
+  repository = aws_ecr_repository.migration_handler.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowPushPull"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+        }
+        Action = [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:CompleteLayerUpload",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:InitiateLayerUpload",
+          "ecr:PutImage",
+          "ecr:UploadLayerPart"
+        ]
+      },
+      {
+        Sid    = "AllowLambdaPull"
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+        Action = [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:BatchGetImage",
+          "ecr:GetDownloadUrlForLayer"
+        ]
+      }
+    ]
+  })
+}
+
+resource "null_resource" "docker_publish" {
+  triggers = {
+    bundle_hash    = local.migration_bundle_hash
+    repository_url = aws_ecr_repository.migration_handler.repository_url
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      aws ecr get-login-password --region ${data.aws_region.current.region} | docker login --username AWS --password-stdin ${self.triggers.repository_url}
+      docker build --platform linux/arm64 --provenance=false --build-arg AWS_REGION=${data.aws_region.current.region} -t ${self.triggers.repository_url}:${self.triggers.bundle_hash} ${local.migration_bundle_path}
+      docker push ${self.triggers.repository_url}:${self.triggers.bundle_hash}
+    EOT
+  }
+
+  depends_on = [aws_ecr_repository_policy.migration_handler]
+}
+
+resource "aws_iam_role" "migration_handler" {
+  name = "<%= nameClassName %>MigrationHandlerRole-${random_string.suffix.result}"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_iam_role_policy_attachment" "migration_handler_basic_execution" {
+  role       = aws_iam_role.migration_handler.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy_attachment" "migration_handler_vpc_access" {
+  role       = aws_iam_role.migration_handler.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+}
+
+resource "aws_iam_role_policy_attachment" "migration_handler_xray" {
+  role       = aws_iam_role.migration_handler.name
+  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+}
+
+resource "aws_iam_role_policy" "migration_handler_access" {
+  role = aws_iam_role.migration_handler.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+<%_ if (engine === 'mysql') { _%>
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue"
+        ]
+        Resource = [module.aurora.secret_arn]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt"
+        ]
+        Resource = [module.aurora.kms_key_arn]
+      }
+<%_ } else { _%>
+      {
+        Effect = "Allow"
+        Action = [
+          "rds-db:connect"
+        ]
+        Resource = [
+          "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${var.enable_rds_proxy ? module.aurora.proxy_resource_id : module.aurora.cluster_resource_id}/${local.database_runtime_user}"
+        ]
+      }
+<%_ } _%>
+    ]
+  })
+}
+
+resource "aws_iam_role" "create_db_user" {
+  name = "<%= nameClassName %>CreateDbUserRole-${random_string.suffix.result}"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_iam_role_policy_attachment" "create_db_user_basic_execution" {
+  role       = aws_iam_role.create_db_user.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy_attachment" "create_db_user_vpc_access" {
+  role       = aws_iam_role.create_db_user.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+}
+
+resource "aws_iam_role_policy_attachment" "create_db_user_xray" {
+  role       = aws_iam_role.create_db_user.name
+  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+}
+
+resource "aws_iam_role_policy" "create_db_user_secret_access" {
+  role = aws_iam_role.create_db_user.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue"
+        ]
+        Resource = [module.aurora.secret_arn]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt"
+        ]
+        Resource = [module.aurora.kms_key_arn]
+      }
+    ]
+  })
+}
+
+resource "aws_cloudwatch_log_group" "migration_handler" {
+  #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
+  #checkov:skip=CKV_AWS_338:Log retention set to forever
+  #checkov:skip=CKV_AWS_66:Log retention set to forever
+  name = "/aws/lambda/${local.migration_function_name}"
+  tags = var.tags
+}
+
+resource "aws_cloudwatch_log_group" "create_db_user" {
+  #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
+  #checkov:skip=CKV_AWS_338:Log retention set to forever
+  #checkov:skip=CKV_AWS_66:Log retention set to forever
+  name = "/aws/lambda/${local.create_db_user_function_name}"
+  tags = var.tags
+}
+
+resource "aws_security_group" "migration_handler" {
+  name_prefix = "<%= nameKebabCase %>-migration-"
+  description = "Security group for the migration Lambda function"
+  vpc_id      = var.vpc_id
+  tags        = var.tags
+}
+
+resource "aws_vpc_security_group_egress_rule" "migration_handler_to_database" {
+<%_ if (engine === 'mysql') { _%>
+  security_group_id            = aws_security_group.migration_handler.id
+  referenced_security_group_id = module.aurora.database_security_group_id
+<%_ } else { _%>
+  security_group_id            = aws_security_group.migration_handler.id
+  referenced_security_group_id = module.aurora.security_group_id
+<%_ } _%>
+  from_port   = module.aurora.cluster_port
+  to_port     = module.aurora.cluster_port
+  ip_protocol = "tcp"
+  description = "Allow outbound traffic to Aurora on database port"
+}
+
+resource "aws_vpc_security_group_egress_rule" "migration_handler_https" {
+  security_group_id = aws_security_group.migration_handler.id
+  cidr_ipv4         = "0.0.0.0/0"
+  from_port         = 443
+  to_port           = 443
+  ip_protocol       = "tcp"
+  description       = "Allow outbound HTTPS to AWS service endpoints"
+}
+
+resource "aws_security_group" "create_db_user" {
+  name_prefix = "<%= nameKebabCase %>-create-db-user-"
+  description = "Security group for the create-db-user Lambda function"
+  vpc_id      = var.vpc_id
+  tags        = var.tags
+}
+
+resource "aws_vpc_security_group_egress_rule" "create_db_user_to_database" {
+  security_group_id            = aws_security_group.create_db_user.id
+  referenced_security_group_id = module.aurora.database_security_group_id
+  from_port                    = module.aurora.cluster_port
+  to_port                      = module.aurora.cluster_port
+  ip_protocol                  = "tcp"
+  description                  = "Allow outbound traffic to Aurora on database port"
+}
+
+resource "aws_vpc_security_group_egress_rule" "create_db_user_https" {
+  security_group_id = aws_security_group.create_db_user.id
+  cidr_ipv4         = "0.0.0.0/0"
+  from_port         = 443
+  to_port           = 443
+  ip_protocol       = "tcp"
+  description       = "Allow outbound HTTPS to AWS service endpoints"
+}
+
+resource "aws_vpc_security_group_ingress_rule" "migration_handler_to_database" {
+<%_ if (engine === 'mysql') { _%>
+  security_group_id            = module.aurora.database_security_group_id
+<%_ } else { _%>
+  security_group_id            = module.aurora.security_group_id
+<%_ } _%>
+  referenced_security_group_id = aws_security_group.migration_handler.id
+  from_port                    = module.aurora.cluster_port
+  to_port                      = module.aurora.cluster_port
+  ip_protocol                  = "tcp"
+  description                  = "Allow inbound traffic from migration Lambda on database port"
+}
+
+resource "aws_vpc_security_group_ingress_rule" "create_db_user_to_database" {
+  security_group_id            = module.aurora.database_security_group_id
+  referenced_security_group_id = aws_security_group.create_db_user.id
+  from_port                    = module.aurora.cluster_port
+  to_port                      = module.aurora.cluster_port
+  ip_protocol                  = "tcp"
+  description                  = "Allow inbound traffic from create-db-user Lambda on database port"
+}
+
+resource "aws_lambda_function" "create_db_user" {
+  #checkov:skip=CKV_AWS_116:Dead Letter Queue not required for the create-db-user handler
+  #checkov:skip=CKV_AWS_115:Concurrent execution limit not required for the create-db-user handler
+  #checkov:skip=CKV_AWS_173:Lambda environment variables encrypted by managed key
+  #checkov:skip=CKV_AWS_272:Code signing not configured as deployment packages are built and deployed within the same pipeline
+  filename         = data.archive_file.create_db_user_zip.output_path
+  function_name    = local.create_db_user_function_name
+  role             = aws_iam_role.create_db_user.arn
+  handler          = "index.handler"
+  source_code_hash = data.archive_file.create_db_user_zip.output_base64sha256
+  runtime          = "nodejs24.x"
+  timeout          = 60
+  architectures    = ["arm64"]
+
+  tracing_config {
+    mode = "Active"
+  }
+
+  vpc_config {
+    subnet_ids         = var.private_subnet_ids
+    security_group_ids = [aws_security_group.create_db_user.id]
+  }
+
+  environment {
+    variables = {
+      DATABASE_SECRET_ARN = module.aurora.secret_arn
+      NODE_EXTRA_CA_CERTS = "/var/runtime/ca-cert.pem"
+    }
+  }
+
+  tags = var.tags
+
+  depends_on = [
+    aws_iam_role_policy_attachment.create_db_user_basic_execution,
+    aws_iam_role_policy_attachment.create_db_user_vpc_access,
+    aws_iam_role_policy_attachment.create_db_user_xray,
+    aws_iam_role_policy.create_db_user_secret_access,
+    aws_cloudwatch_log_group.create_db_user,
+    aws_vpc_security_group_ingress_rule.create_db_user_to_database
+  ]
+}
+
+resource "null_resource" "create_db_user_trigger" {
+  triggers = {
+    cluster_arn   = module.aurora.cluster_arn
+    function_name = aws_lambda_function.create_db_user.function_name
+    db_user       = local.database_runtime_user
+    bundle_hash   = data.archive_file.create_db_user_zip.output_base64sha256
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      output_file=$(mktemp)
+      response=$(aws lambda invoke \
+        --region ${data.aws_region.current.region} \
+        --function-name ${self.triggers.function_name} \
+        --cli-binary-format raw-in-base64-out \
+        --payload '{"RequestType":"Create","PhysicalResourceId":"db-user:${self.triggers.db_user}"}' \
+        "$output_file")
+      cat "$output_file"
+      echo "$response"
+      if echo "$response" | grep -q '"FunctionError"'; then
+        rm -f "$output_file"
+        exit 1
+      fi
+      rm -f "$output_file"
+    EOT
+  }
+
+  depends_on = [aws_lambda_function.create_db_user, module.aurora]
+}
+
+resource "aws_lambda_function" "migration_handler" {
+  #checkov:skip=CKV_AWS_116:Dead Letter Queue not required for the migration handler
+  #checkov:skip=CKV_AWS_115:Concurrent execution limit not required for the migration handler
+  #checkov:skip=CKV_AWS_173:Lambda environment variables encrypted by managed key
+  #checkov:skip=CKV_AWS_272:Code signing does not apply to container image Lambda functions
+  package_type  = "Image"
+  function_name = local.migration_function_name
+  role          = aws_iam_role.migration_handler.arn
+  image_uri     = "${aws_ecr_repository.migration_handler.repository_url}:${local.migration_bundle_hash}"
+  memory_size   = 1024
+  timeout       = 300
+  architectures = ["arm64"]
+
+  tracing_config {
+    mode = "Active"
+  }
+
+  vpc_config {
+    subnet_ids         = var.private_subnet_ids
+    security_group_ids = [aws_security_group.migration_handler.id]
+  }
+
+  environment {
+    variables = {
+<%_ if (engine === 'mysql') { _%>
+      DATABASE_SECRET_ARN = module.aurora.secret_arn
+<%_ } else { _%>
+      HOSTNAME = module.aurora.cluster_endpoint
+      DATABASE = module.aurora.database_name
+      PORT     = tostring(module.aurora.cluster_port)
+      DBUSER   = local.database_runtime_user
+<%_ } _%>
+    }
+  }
+
+  tags = var.tags
+
+  depends_on = [
+    null_resource.docker_publish,
+    aws_iam_role_policy_attachment.migration_handler_basic_execution,
+    aws_iam_role_policy_attachment.migration_handler_vpc_access,
+    aws_iam_role_policy_attachment.migration_handler_xray,
+    aws_iam_role_policy.migration_handler_access,
+    aws_cloudwatch_log_group.migration_handler,
+    aws_vpc_security_group_ingress_rule.migration_handler_to_database
+  ]
+}
+
+resource "null_resource" "migration_trigger" {
+  triggers = {
+    bundle_hash    = local.migration_bundle_hash
+    cluster_arn    = module.aurora.cluster_arn
+    database_ready = module.aurora.database_ready
+    function_name  = aws_lambda_function.migration_handler.function_name
+<%_ if (engine !== 'mysql') { _%>
+    db_user        = local.database_runtime_user
+<%_ } _%>
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      output_file=$(mktemp)
+      response=$(aws lambda invoke \
+        --region ${data.aws_region.current.region} \
+        --function-name ${self.triggers.function_name} \
+        --cli-binary-format raw-in-base64-out \
+        "$output_file")
+      cat "$output_file"
+      echo "$response"
+      if echo "$response" | grep -q '"FunctionError"'; then
+        rm -f "$output_file"
+        exit 1
+      fi
+      rm -f "$output_file"
+    EOT
+  }
+
+  depends_on = [
+    aws_lambda_function.migration_handler,
+    module.aurora,
+    null_resource.create_db_user_trigger,
+    aws_iam_role_policy.proxy_db_user_connect
+  ]
+}
+
+output "security_group_id" {
+  description = "Security group ID to allow inbound connections to the database (proxy SG if RDS Proxy is enabled, otherwise DB SG)."
+  value       = module.aurora.security_group_id
+}
+
+output "database_security_group_id" {
+  description = "Security group ID of the Aurora cluster directly, used for direct DB access rules (e.g. when RDS Proxy is disabled)."
+  value       = module.aurora.database_security_group_id
+}
+
+output "cluster_resource_id" {
+  description = "Resource ID of the Aurora cluster, used for IAM rds-db:connect policies."
+  value       = module.aurora.cluster_resource_id
+}
+
+output "proxy_resource_id" {
+  description = "Resource identifier of the RDS Proxy (prx-XXXX), used for IAM rds-db:connect policies when connecting through the proxy. Null if RDS Proxy is disabled."
+  value       = module.aurora.proxy_resource_id
+}
+
+output "kms_key_arn" {
+  description = "ARN of the KMS key protecting Aurora and the admin credentials secret, used to grant decrypt access alongside secret_arn."
+  value       = module.aurora.kms_key_arn
+}
+
+output "cluster_arn" {
+  description = "ARN of the Aurora cluster."
+  value       = module.aurora.cluster_arn
+}
+
+output "cluster_endpoint" {
+  description = "Writer endpoint of the Aurora cluster."
+  value       = module.aurora.cluster_endpoint
+}
+
+output "reader_endpoint" {
+  description = "Reader endpoint of the Aurora cluster."
+  value       = module.aurora.reader_endpoint
+}
+
+output "cluster_port" {
+  description = "Port exposed by the Aurora cluster."
+  value       = module.aurora.cluster_port
+}
+
+output "secret_arn" {
+  description = "ARN of the generated admin credentials secret."
+  value       = module.aurora.secret_arn
+}
+
+output "database_runtime_user" {
+  description = "Application database user created for IAM-authenticated access."
+  value       = local.database_runtime_user
+}
+
+output "appconfig_application_id" {
+  description = "AppConfig Application ID for runtime config."
+  value       = module.appconfig.application_id
+}

@@ -1,0 +1,360 @@
+import { CfnOutput, Duration, RemovalPolicy, Stack } from 'aws-cdk-lib';
+import { CustomResource } from 'aws-cdk-lib';
+import { IConnectable, IVpc, Port, SubnetType } from 'aws-cdk-lib/aws-ec2';
+import { IGrantable, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
+import { Key } from 'aws-cdk-lib/aws-kms';
+import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import {
+  Architecture,
+  Code,
+  DockerImageCode,
+  DockerImageFunction,
+  Function,
+  Runtime,
+  Tracing,
+} from 'aws-cdk-lib/aws-lambda';
+import {
+  AuroraMysqlEngineVersion,
+  AuroraPostgresEngineVersion,
+  ClusterInstance,
+  Credentials,
+  DatabaseCluster,
+  DatabaseClusterEngine,
+  DatabaseClusterProps,
+  DatabaseProxy,
+  DefaultAuthScheme,
+  IClusterEngine,
+} from 'aws-cdk-lib/aws-rds';
+import { Provider } from 'aws-cdk-lib/custom-resources';
+import { Trigger } from 'aws-cdk-lib/triggers';
+import { Construct } from 'constructs';
+import { RuntimeConfig } from '../runtime-config.js';
+
+export type AuroraDatabaseEngineVersion =
+  | AuroraMysqlEngineVersion
+  | AuroraPostgresEngineVersion;
+
+export interface AuroraDatabaseEngine {
+  /**
+   * Default Aurora engine version used when one is not explicitly provided.
+   */
+  readonly defaultVersion: AuroraDatabaseEngineVersion;
+
+  /**
+   * Builds the CDK cluster engine for the provided engine version.
+   */
+  clusterEngine(version: AuroraDatabaseEngineVersion): IClusterEngine;
+}
+
+export class AuroraDatabaseEngines {
+  public static mysql({
+    defaultVersion = AuroraMysqlEngineVersion.VER_3_12_0,
+  }: {
+    defaultVersion?: AuroraMysqlEngineVersion;
+  }): AuroraDatabaseEngine {
+    return {
+      defaultVersion,
+      clusterEngine: (version) =>
+        DatabaseClusterEngine.auroraMysql({
+          version: version as AuroraMysqlEngineVersion,
+        }),
+    };
+  }
+
+  public static postgres({
+    defaultVersion = AuroraPostgresEngineVersion.VER_17_7,
+  }: {
+    defaultVersion?: AuroraPostgresEngineVersion;
+  }): AuroraDatabaseEngine {
+    return {
+      defaultVersion,
+      clusterEngine: (version) =>
+        DatabaseClusterEngine.auroraPostgres({
+          version: version as AuroraPostgresEngineVersion,
+        }),
+    };
+  }
+}
+
+export interface AuroraDatabaseProps extends Omit<
+  DatabaseClusterProps,
+  | 'credentials'
+  | 'defaultDatabaseName'
+  | 'engine'
+  | 'iamAuthentication'
+  | 'instanceProps'
+  | 'writer'
+> {
+  /**
+   * VPC where the Aurora cluster will be deployed.
+   */
+  readonly vpc: IVpc;
+
+  /**
+   * Aurora engine preset used to build the cluster.
+   */
+  readonly engine: AuroraDatabaseEngine;
+
+  /**
+   * The engine version to deploy.
+   *
+   * @default - engine.defaultVersion
+   */
+  readonly engineVersion?: AuroraDatabaseEngineVersion;
+
+  /**
+   * Admin username used when generating credentials.
+   */
+  readonly adminUser: string;
+
+  /**
+   * The initial database created in the cluster.
+   */
+  readonly databaseName: string;
+
+  /**
+   * RuntimeConfig key used under the `database` namespace.
+   */
+  readonly runtimeConfigKey: string;
+
+  /**
+   * Migration bundle used to create a migration handler Lambda.
+   */
+  readonly migrationBundleDir: string;
+
+  /**
+   * Bundle used to create or reconcile the application database user.
+   */
+  readonly createDbUserBundleDir: string;
+
+  /**
+   * Writer instance for the Aurora cluster.
+   */
+  readonly writer?: DatabaseClusterProps['writer'];
+
+  /**
+   * Whether to provision an RDS Proxy in front of the Aurora cluster.
+   *
+   * @default true
+   */
+  readonly enableRdsProxy?: boolean;
+}
+
+/**
+ * Reusable Aurora database construct that supports different Aurora engines
+ * through typed engine presets.
+ */
+export abstract class AuroraDatabase extends Construct {
+  public readonly cluster: DatabaseCluster;
+  public readonly proxy?: DatabaseProxy;
+  private readonly adminUser: string;
+  private readonly dbUser: string;
+
+  constructor(
+    scope: Construct,
+    id: string,
+    {
+      vpc,
+      adminUser,
+      databaseName,
+      runtimeConfigKey,
+      migrationBundleDir,
+      createDbUserBundleDir,
+      vpcSubnets,
+      writer,
+      enableRdsProxy = true,
+      engine,
+      engineVersion,
+      ...clusterProps
+    }: AuroraDatabaseProps,
+  ) {
+    super(scope, id);
+
+    this.adminUser = adminUser;
+
+    const key = new Key(this, 'EncryptionKey', { enableKeyRotation: true });
+    this.cluster = new DatabaseCluster(this, 'DatabaseCluster', {
+      ...clusterProps,
+      vpc,
+      vpcSubnets,
+      engine: engine.clusterEngine(engineVersion ?? engine.defaultVersion),
+      writer: writer ?? ClusterInstance.serverlessV2('writer'),
+      credentials: Credentials.fromGeneratedSecret(adminUser, {
+        encryptionKey: key,
+      }),
+      iamAuthentication: true,
+      monitoringInterval: Duration.seconds(5),
+      defaultDatabaseName: databaseName,
+      storageEncrypted: true,
+      storageEncryptionKey: key,
+      deletionProtection: true,
+      removalPolicy: RemovalPolicy.RETAIN
+    });
+
+    this.cluster.addRotationSingleUser({
+      automaticallyAfter: Duration.days(30),
+      vpcSubnets: {
+        subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+      },
+    });
+    
+    const proxyRole = enableRdsProxy
+      ? new Role(this, 'DatabaseProxyRole', {
+          assumedBy: new ServicePrincipal('rds.amazonaws.com'),
+        })
+      : undefined;
+
+    if (enableRdsProxy) {
+      this.proxy = this.cluster.addProxy('DatabaseProxy', {
+        vpc,
+        vpcSubnets,
+        defaultAuthScheme: DefaultAuthScheme.IAM_AUTH,
+        role: proxyRole,
+      });
+    }
+
+    const databaseHostname =
+      this.proxy?.endpoint ?? this.cluster.clusterEndpoint.hostname;
+    const databasePort = this.cluster.clusterEndpoint.port;
+
+    const createDbUserHandler = new Function(this, 'CreateDbUserHandler', {
+      code: Code.fromAsset(createDbUserBundleDir),
+      handler: 'index.handler',
+      runtime: Runtime.NODEJS_LATEST,
+      timeout: Duration.minutes(1),
+      tracing: Tracing.ACTIVE,
+      vpc,
+      vpcSubnets: {
+        subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+      },
+      environment: {
+        DATABASE_SECRET_ARN: this.cluster.secret!.secretArn,
+        NODE_EXTRA_CA_CERTS: '/var/runtime/ca-cert.pem',
+      },
+      architecture: Architecture.ARM_64,
+    });
+
+    this.cluster.connections.allowDefaultPortFrom(
+      createDbUserHandler,
+      'Allow the create-db-user handler to connect to the database',
+    );
+    this.grantSecretRead(createDbUserHandler);
+
+    const createDbUserProvider = new Provider(this, 'CreateDbUserProvider', {
+      onEventHandler: createDbUserHandler,
+    });
+
+    const createDbUserResource = new CustomResource(
+      this,
+      'CreateDbUserResource',
+      {
+        serviceToken: createDbUserProvider.serviceToken,
+        properties: {
+          clusterIdentifier: this.cluster.clusterIdentifier,
+        },
+      },
+    );
+    createDbUserResource.node.addDependency(this.cluster);
+    this.dbUser = createDbUserResource.getAttString('dbUser');
+    if (this.proxy && proxyRole) {
+      this.cluster.grantConnect(proxyRole, this.dbUser);
+    }
+
+    const rc = RuntimeConfig.ensure(this);
+    rc.set('database', runtimeConfigKey, {
+      hostname: databaseHostname,
+      port: databasePort,
+      database: databaseName,
+      adminUser: this.adminUser,
+      dbUser: this.dbUser,
+      region: Stack.of(this).region,
+    });
+
+    // TODO: Adding `prisma` package increases the image size by > 240MB,
+    // as the Prisma CLI bundles multiple engine binaries (schema-engine, libquery-engine,
+    // query-engine, prisma-fmt) for the target platform.
+    // This exceed the size limits of the standard NodeJsFunction, so we have use DockerImageFunction instead.
+    // https://github.com/prisma/prisma/issues/29394
+    const migrationHandler = new DockerImageFunction(this, 'MigrationHandler', {
+      code: DockerImageCode.fromImageAsset(
+        migrationBundleDir,
+        {
+          platform: Platform.LINUX_ARM64,
+          buildArgs: {
+            AWS_REGION: Stack.of(this).region,
+          },
+        },
+      ),
+      memorySize: 1024,
+      timeout: Duration.minutes(5),
+      tracing: Tracing.ACTIVE,
+      vpc,
+<%_ if (engine === 'mysql') { _%>
+      environment: {
+        DATABASE_SECRET_ARN: this.cluster.secret!.secretArn,
+      },
+<%_ } else { _%>
+      environment: {
+        HOSTNAME: databaseHostname,
+        DATABASE: databaseName,
+        PORT: databasePort.toString(),
+        DBUSER: this.dbUser,
+      },
+<%_ } _%>
+      architecture: Architecture.ARM_64,
+    });
+
+<%_ if (engine === 'mysql') { _%>
+    this.cluster.connections.allowDefaultPortFrom(
+      migrationHandler,
+      'Allow the migration handler to connect to the database',
+    );
+    this.grantSecretRead(migrationHandler);
+<%_ } else { _%>
+    this.allowDefaultPortFrom(
+      migrationHandler,
+      'Allow the migration handler to connect to the database',
+    );
+    this.grantConnect(migrationHandler);
+<%_ } _%>
+
+    const trigger = new Trigger(this, 'MigrationTrigger', {
+      handler: migrationHandler,
+    });
+    trigger.node.addDependency(createDbUserResource);
+
+    new CfnOutput(this, 'ClusterEndpoint', {
+      value: this.cluster.clusterEndpoint.hostname,
+    });
+
+    if (this.proxy?.endpoint) {
+      new CfnOutput(this, 'ProxyEndpoint', {
+        value: this.proxy?.endpoint,
+      });
+    }
+  }
+
+  public allowDefaultPortFrom(other: IConnectable, description?: string): void {
+    if (this.proxy) {
+      this.proxy.connections.allowFrom(
+        other,
+        Port.tcp(this.cluster.clusterEndpoint.port),
+        description,
+      );
+    } else {
+      this.cluster.connections.allowDefaultPortFrom(other, description);
+    }
+  }
+
+  public grantSecretRead(grantee: IGrantable) {
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    const secret = this.cluster.secret!;
+    return secret.grantRead(grantee);
+  }
+
+  public grantConnect(grantee: IGrantable) {
+    return this.proxy
+      ? this.proxy.grantConnect(grantee, this.dbUser)
+      : this.cluster.grantConnect(grantee, this.dbUser);
+  }
+}
