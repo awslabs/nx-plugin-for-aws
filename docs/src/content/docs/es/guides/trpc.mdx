@@ -13,7 +13,7 @@ import Snippet from '@components/snippet.astro';
 
 [tRPC](https://trpc.io/) es un marco para construir APIs en TypeScript con seguridad de tipos de extremo a extremo. Usando tRPC, las actualizaciones en las entradas y salidas de las operaciones de la API se reflejan inmediatamente en el código del cliente y son visibles en tu IDE sin necesidad de reconstruir tu proyecto.
 
-El generador de API tRPC crea una nueva API tRPC con configuración de infraestructura usando AWS CDK o Terraform. El backend generado utiliza AWS Lambda para despliegues serverless, expuesto a través de un API Gateway de AWS, e incluye validación de esquemas usando [Zod](https://zod.dev/). Configura [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/) para observabilidad, incluyendo logging, trazado con AWS X-Ray y métricas de CloudWatch.
+El generador de API tRPC crea una nueva API tRPC con configuración de infraestructura usando AWS CDK o Terraform. El backend generado puede desplegarse como funciones AWS Lambda expuestas a través de un API Gateway de AWS, o como un servidor WebSocket en contenedor ejecutándose en [Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime.html). Incluye validación de esquemas usando [Zod](https://zod.dev/) y configura [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/) para observabilidad, incluyendo logging, trazado con AWS X-Ray y métricas de CloudWatch.
 
 ## Uso
 
@@ -30,11 +30,11 @@ Puedes generar una nueva API tRPC de dos formas:
 <Snippet name="api/api-choice-note" />
 
 :::tip[Tipo de API]
-Selecciona `ServerlessApiGatewayRestApi` (predeterminado) como tu `computeType` si deseas usar [tRPC Subscriptions](https://trpc.io/docs/server/subscriptions) para transmitir respuestas.
+Selecciona `ServerlessApiGatewayRestApi` (predeterminado) como tu `computeType` si deseas usar [tRPC Subscriptions](https://trpc.io/docs/server/subscriptions) para transmitir respuestas. Selecciona `BedrockAgentCoreRuntimeWebSocket` para desplegar el servidor tRPC como un contenedor en Bedrock AgentCore con subscripciones WebSocket de streaming — consulta [Desplegando en Bedrock AgentCore](#desplegando-en-bedrock-agentcore) más abajo.
 :::
 
 :::tip[Patrón de integración]
-La opción `integrationPattern` tiene como valor predeterminado `isolated`, que crea un Lambda por procedimiento tRPC. Selecciona `shared` si prefieres un único manejador Lambda compartido para toda la API, con opciones de sobrescritura por procedimiento.
+La opción `integrationPattern` tiene como valor predeterminado `isolated`, que crea un Lambda por procedimiento tRPC. Selecciona `shared` si prefieres un único manejador Lambda compartido para toda la API, con opciones de sobrescritura por procedimiento. La opción `integrationPattern` no aplica cuando `computeType` es `BedrockAgentCoreRuntimeWebSocket`.
 :::
 
 ## Resultado del generador
@@ -44,11 +44,12 @@ El generador creará la siguiente estructura de proyecto en el directorio `<dire
 <FileTree>
   - src
     - init.ts Inicialización del backend tRPC
-    - handler.ts Punto de entrada del manejador Lambda
+    - handler.ts Punto de entrada del manejador Lambda (solo tipos de cómputo Lambda)
+    - handler-agentcore.ts Punto de entrada del servidor WebSocket (solo tipo de cómputo AgentCore)
     - router.ts Definición del router tRPC
     - schema Definiciones de esquemas usando Zod
       - echo.ts Ejemplo de definiciones para entrada y salida del procedimiento "echo"
-      - z-async-iterable.ts Helper de Zod para subscripciones (solo REST API)
+      - z-async-iterable.ts Helper de Zod para subscripciones (solo REST API y AgentCore)
     - procedures Procedimientos (u operaciones) expuestos por tu API
       - echo.ts Procedimiento de ejemplo
     - middleware
@@ -59,6 +60,7 @@ El generador creará la siguiente estructura de proyecto en el directorio `<dire
     - local-server.ts Punto de entrada del adaptador standalone de tRPC para servidor de desarrollo local
     - client
       - index.ts Cliente con seguridad de tipos para llamadas máquina-a-máquina
+  - Dockerfile Imagen de contenedor para despliegues en AgentCore (solo tipo de cómputo AgentCore)
   - tsconfig.json Configuración de TypeScript
   - project.json Configuración de proyecto y objetivos de build
 
@@ -187,6 +189,43 @@ export const appRouter = router({
 ```
 
 La infraestructura generada usa un manejador Lambda de streaming con `ResponseTransferMode.STREAM` en API Gateway para todas las operaciones de REST API, lo que permite que las subscripciones funcionen junto con queries y mutations regulares.
+
+## Desplegando en Bedrock AgentCore
+
+Configurar `computeType` como `BedrockAgentCoreRuntimeWebSocket` despliega el servidor tRPC como un servidor WebSocket en contenedor en [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime.html) en lugar de API Gateway + Lambda. AgentCore te proporciona:
+
+- **Subscripciones de streaming sobre WebSocket** — mensajería full duplex para subscripciones tRPC sin los timeouts de 30 segundos de Lambda o API Gateway.
+- **Afinidad de sesión** — el encabezado `x-amzn-bedrock-agentcore-runtime-session-id` se propaga a tu contexto tRPC como `ctx.sessionId`, para que puedas asociar estado por sesión.
+- **Runtime administrado** — AgentCore maneja el escalado, verificaciones de salud (`/ping`) y autorización.
+
+:::caution[Opciones de autenticación]
+AgentCore solo admite autenticación `IAM` o `Cognito`. Seleccionar `auth=None` con `computeType=BedrockAgentCoreRuntimeWebSocket` fallará la generación.
+:::
+
+### Cómo funciona
+
+Cuando eliges `BedrockAgentCoreRuntimeWebSocket`, el generador emite:
+
+- `src/handler-agentcore.ts` — un servidor Node WebSocket + HTTP que expone `/ping` para verificaciones de salud de AgentCore y `/ws` para subscripciones tRPC vía `@trpc/server/adapters/ws`.
+- `Dockerfile` — conteneriza el servidor empaquetado e incluye el [AWS Distro for OpenTelemetry](https://aws-otel.github.io/docs/getting-started/js-sdk/trace-metric-auto-instr) para observabilidad administrada.
+- Un constructo CDK (o módulo Terraform) que aprovisiona un `Runtime` de Bedrock AgentCore, le otorga permiso para invocar modelos de Bedrock y leer la configuración del runtime, y publica el ARN del runtime en `runtimeConfig.apis.<YourApiName>` para que el frontend lo recoja.
+- Un objetivo de build `docker` conectado al objetivo `build` del proyecto para que `nx build` produzca la imagen de contenedor.
+
+### Accediendo al id de sesión
+
+Cada procedimiento recibe `ctx.sessionId` cuando la API se despliega en AgentCore:
+
+```ts {5}
+export const chat = publicProcedure
+  .input(InputSchema)
+  .output(OutputSchema)
+  .subscription(async function* (opts) {
+    const history = loadHistory(opts.ctx.sessionId);
+    // ...transmite fragmentos que se construyen sobre `history`
+  });
+```
+
+Localmente, `nx serve` ejecuta un servidor HTTP + WebSocket standalone para que los clientes puedan conectarse de la misma manera que lo hacen en producción. El id de sesión tiene como valor predeterminado un UUID aleatorio cuando el encabezado no está presente.
 
 ## Personalizando tu API tRPC
 
