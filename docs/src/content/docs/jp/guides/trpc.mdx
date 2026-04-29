@@ -285,7 +285,7 @@ export const echo = publicProcedure
 例として、`src/middleware/identity.ts` で API の呼び出しユーザーに関する詳細を抽出するミドルウェアを実装しましょう。
 
 <OptionFilter when={{ auth: 'IAM' }} description="Identity middleware example for IAM-authenticated APIs">
-この例では、`IAM` 認証用の identity ミドルウェアについて説明します。API Gateway イベントから抽出した sub を使用して Cognito で呼び出し元を検索します。`Cognito` 認証の場合、identity ミドルウェアはより簡単です — 代わりに `event` から直接クレームを抽出してください。
+この例では、`IAM` 認証用の identity ミドルウェアについて説明します。API Gateway イベントから抽出した sub を使用して Cognito で呼び出し元を検索します。
 
 まず、コンテキストに追加する内容を定義します:
 
@@ -453,6 +453,90 @@ export const createIdentityPlugin = () => {
 ```
 </TabItem>
 </Tabs>
+</OptionFilter>
+
+<OptionFilter when={{ auth: 'Cognito' }} description="Identity middleware example for Cognito-authenticated APIs">
+`auth: 'Cognito'` でデプロイすると、API Gateway Cognito User Pools オーソライザーは、呼び出し元が `Authorization` ヘッダーで提供する JWT を検証し、検証済みのクレームを `event.requestContext.authorizer.claims` の Lambda イベントに配置します。ミドルウェアはこれらのクレームを読み取るだけです — 追加の AWS SDK 呼び出しも、手動の JWT 検証も必要ありません。
+
+まず、コンテキストに追加する内容を定義します:
+
+```ts
+export interface IIdentityContext {
+  identity?: {
+    sub: string;
+    username: string;
+  };
+}
+```
+
+コンテキストに追加の _オプション_ プロパティを定義していることに注意してください。tRPC は、このミドルウェアを正しく設定したプロシージャでこれが定義されていることを保証します。
+
+次に、ミドルウェア自体です。ジェネレータはオーソライザーを ID トークンを受け入れるように設定するため、`cognito:username` が正規のユーザー名クレームです。オーソライザーを再設定した場合に備えて、アクセストークン用に `username` にフォールバックします:
+
+```ts
+import { initTRPC, TRPCError } from '@trpc/server';
+import { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
+import { APIGatewayProxyEvent } from 'aws-lambda';
+
+export interface IIdentityContext {
+  identity?: {
+    sub: string;
+    username: string;
+  };
+}
+
+export const createIdentityPlugin = () => {
+  const t = initTRPC
+    .context<IIdentityContext & CreateAWSLambdaContextOptions<APIGatewayProxyEvent>>()
+    .create();
+
+  return t.procedure.use(async (opts) => {
+    const claims = opts.ctx.event.requestContext?.authorizer?.claims as
+      | Record<string, string>
+      | undefined;
+
+    const sub = claims?.sub;
+    const username = claims?.['cognito:username'] ?? claims?.username;
+
+    if (!sub || !username) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Unable to determine calling user',
+      });
+    }
+
+    return await opts.next({
+      ctx: {
+        ...opts.ctx,
+        identity: {
+          sub,
+          username,
+        },
+      },
+    });
+  });
+};
+```
+
+その後、呼び出し元の identity が必要なプロシージャにプラグインをミックスできます:
+
+```ts
+import { publicProcedure } from '../init.js';
+import { createIdentityPlugin } from '../middleware/identity.js';
+import { z } from 'zod';
+
+export const me = publicProcedure
+  .concat(createIdentityPlugin())
+  .output(z.object({ sub: z.string(), username: z.string() }))
+  .query(({ ctx }) => ({
+    sub: ctx.identity!.sub,
+    username: ctx.identity!.username,
+  }));
+```
+
+:::tip[トークンの検証]
+ここでは `aws-jwt-verify` やその他の JWT 検証ライブラリは必要ありません — API Gateway Cognito User Pools オーソライザーは、Lambda が実行される時点で既に署名、発行者、オーディエンス、有効期限を検証しています。これらのチェックのいずれかが失敗した場合、API Gateway は `401 Unauthorized` を返し、ハンドラーは呼び出されません。
+:::
 </OptionFilter>
 
 ## tRPC API のデプロイ

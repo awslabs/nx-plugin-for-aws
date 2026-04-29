@@ -285,7 +285,7 @@ Puoi aggiungere valori aggiuntivi al contesto fornito alle procedure implementan
 Come esempio, implementiamo un middleware per estrarre dettagli sull'utente chiamante dalla nostra API in `src/middleware/identity.ts`.
 
 <OptionFilter when={{ auth: 'IAM' }} description="Identity middleware example for IAM-authenticated APIs">
-Questo esempio illustra il middleware per l'identità per l'autenticazione `IAM`, dove cerchiamo il chiamante in Cognito utilizzando il sub estratto dall'evento API Gateway. Per l'autenticazione `Cognito`, il middleware per l'identità è più diretto — estrai i claim direttamente dall'`event`.
+Questo esempio illustra il middleware per l'identità per l'autenticazione `IAM`. Cerchiamo il chiamante in Cognito utilizzando il sub estratto dall'evento API Gateway.
 
 Per prima cosa, definiamo cosa aggiungeremo al contesto:
 
@@ -453,6 +453,90 @@ export const createIdentityPlugin = () => {
 ```
 </TabItem>
 </Tabs>
+</OptionFilter>
+
+<OptionFilter when={{ auth: 'Cognito' }} description="Identity middleware example for Cognito-authenticated APIs">
+Quando effettui il deployment con `auth: 'Cognito'`, l'authorizer Cognito User Pools di API Gateway verifica il JWT che il chiamante fornisce nell'header `Authorization` e posiziona i claim verificati sull'evento Lambda in `event.requestContext.authorizer.claims`. Il nostro middleware legge semplicemente quei claim — nessuna chiamata extra all'AWS SDK, nessuna verifica manuale del JWT.
+
+Per prima cosa, definiamo cosa aggiungeremo al contesto:
+
+```ts
+export interface IIdentityContext {
+  identity?: {
+    sub: string;
+    username: string;
+  };
+}
+```
+
+Nota che definiamo una proprietà _opzionale_ aggiuntiva al contesto. tRPC gestisce l'assicurazione che questa sia definita nelle procedure che hanno configurato correttamente questo middleware.
+
+Successivamente, il middleware stesso. Il generatore configura l'authorizer per accettare ID token, quindi `cognito:username` è il claim username canonico; facciamo fallback a `username` per gli access token nel caso tu riconfiguri l'authorizer:
+
+```ts
+import { initTRPC, TRPCError } from '@trpc/server';
+import { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
+import { APIGatewayProxyEvent } from 'aws-lambda';
+
+export interface IIdentityContext {
+  identity?: {
+    sub: string;
+    username: string;
+  };
+}
+
+export const createIdentityPlugin = () => {
+  const t = initTRPC
+    .context<IIdentityContext & CreateAWSLambdaContextOptions<APIGatewayProxyEvent>>()
+    .create();
+
+  return t.procedure.use(async (opts) => {
+    const claims = opts.ctx.event.requestContext?.authorizer?.claims as
+      | Record<string, string>
+      | undefined;
+
+    const sub = claims?.sub;
+    const username = claims?.['cognito:username'] ?? claims?.username;
+
+    if (!sub || !username) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Impossibile determinare l\'utente chiamante',
+      });
+    }
+
+    return await opts.next({
+      ctx: {
+        ...opts.ctx,
+        identity: {
+          sub,
+          username,
+        },
+      },
+    });
+  });
+};
+```
+
+Puoi quindi mixare il plugin in qualsiasi procedura che necessita dell'identità del chiamante:
+
+```ts
+import { publicProcedure } from '../init.js';
+import { createIdentityPlugin } from '../middleware/identity.js';
+import { z } from 'zod';
+
+export const me = publicProcedure
+  .concat(createIdentityPlugin())
+  .output(z.object({ sub: z.string(), username: z.string() }))
+  .query(({ ctx }) => ({
+    sub: ctx.identity!.sub,
+    username: ctx.identity!.username,
+  }));
+```
+
+:::tip[Verifica del token]
+Non hai bisogno di `aws-jwt-verify` o di altre librerie di verifica JWT qui — l'authorizer Cognito User Pools di API Gateway ha già verificato la firma, l'issuer, l'audience e la scadenza prima che il tuo Lambda venga eseguito. Se uno di questi controlli fallisce, API Gateway restituisce `401 Unauthorized` e il tuo handler non viene mai invocato.
+:::
 </OptionFilter>
 
 ## Deployment della tua API tRPC

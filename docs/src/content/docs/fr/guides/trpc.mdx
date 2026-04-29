@@ -285,7 +285,7 @@ Vous pouvez ajouter des valeurs supplémentaires au contexte fourni aux procédu
 Par exemple, implémentons un middleware pour extraire des détails sur l'utilisateur appelant notre API dans `src/middleware/identity.ts`.
 
 <OptionFilter when={{ auth: 'IAM' }} description="Identity middleware example for IAM-authenticated APIs">
-Cet exemple présente le middleware d'identité pour l'authentification `IAM`, où nous recherchons l'appelant dans Cognito en utilisant le sub extrait de l'événement API Gateway. Pour l'authentification `Cognito`, le middleware d'identité est plus simple — extrayez les claims directement depuis l'`event`.
+Cet exemple présente le middleware d'identité pour l'authentification `IAM`. Nous recherchons l'appelant dans Cognito en utilisant le sub extrait de l'événement API Gateway.
 
 D'abord, nous définissons ce que nous ajouterons au contexte :
 
@@ -453,6 +453,90 @@ export const createIdentityPlugin = () => {
 ```
 </TabItem>
 </Tabs>
+</OptionFilter>
+
+<OptionFilter when={{ auth: 'Cognito' }} description="Identity middleware example for Cognito-authenticated APIs">
+Lorsque vous déployez avec `auth: 'Cognito'`, l'autorisateur Cognito User Pools d'API Gateway vérifie le JWT que l'appelant fournit dans l'en-tête `Authorization` et place les claims vérifiés sur l'événement Lambda à `event.requestContext.authorizer.claims`. Notre middleware lit simplement ces claims — pas d'appels AWS SDK supplémentaires, pas de vérification JWT manuelle.
+
+D'abord, nous définissons ce que nous ajouterons au contexte :
+
+```ts
+export interface IIdentityContext {
+  identity?: {
+    sub: string;
+    username: string;
+  };
+}
+```
+
+Notez que nous définissons une propriété supplémentaire _optionnelle_ au contexte. tRPC s'assure que celle-ci est définie dans les procédures ayant correctement configuré ce middleware.
+
+Ensuite, le middleware lui-même. Le générateur configure l'autorisateur pour accepter les tokens ID, donc `cognito:username` est le claim de nom d'utilisateur canonique ; nous revenons à `username` pour les tokens d'accès au cas où vous reconfigureriez l'autorisateur :
+
+```ts
+import { initTRPC, TRPCError } from '@trpc/server';
+import { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
+import { APIGatewayProxyEvent } from 'aws-lambda';
+
+export interface IIdentityContext {
+  identity?: {
+    sub: string;
+    username: string;
+  };
+}
+
+export const createIdentityPlugin = () => {
+  const t = initTRPC
+    .context<IIdentityContext & CreateAWSLambdaContextOptions<APIGatewayProxyEvent>>()
+    .create();
+
+  return t.procedure.use(async (opts) => {
+    const claims = opts.ctx.event.requestContext?.authorizer?.claims as
+      | Record<string, string>
+      | undefined;
+
+    const sub = claims?.sub;
+    const username = claims?.['cognito:username'] ?? claims?.username;
+
+    if (!sub || !username) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Impossible de déterminer l\'utilisateur appelant',
+      });
+    }
+
+    return await opts.next({
+      ctx: {
+        ...opts.ctx,
+        identity: {
+          sub,
+          username,
+        },
+      },
+    });
+  });
+};
+```
+
+Vous pouvez ensuite mélanger le plugin dans n'importe quelle procédure qui a besoin de l'identité de l'appelant :
+
+```ts
+import { publicProcedure } from '../init.js';
+import { createIdentityPlugin } from '../middleware/identity.js';
+import { z } from 'zod';
+
+export const me = publicProcedure
+  .concat(createIdentityPlugin())
+  .output(z.object({ sub: z.string(), username: z.string() }))
+  .query(({ ctx }) => ({
+    sub: ctx.identity!.sub,
+    username: ctx.identity!.username,
+  }));
+```
+
+:::tip[Vérification du token]
+Vous n'avez pas besoin de `aws-jwt-verify` ou d'une autre bibliothèque de vérification JWT ici — l'autorisateur Cognito User Pools d'API Gateway a déjà vérifié la signature, l'émetteur, l'audience et l'expiration au moment où votre Lambda s'exécute. Si l'une de ces vérifications échoue, API Gateway retourne `401 Unauthorized` et votre gestionnaire n'est jamais invoqué.
+:::
 </OptionFilter>
 
 ## Déploiement de votre API tRPC

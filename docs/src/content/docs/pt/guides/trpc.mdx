@@ -285,7 +285,7 @@ Adicione valores ao contexto de procedimentos implementando middleware.
 Exemplo: middleware para extrair detalhes do usuário em `src/middleware/identity.ts`.
 
 <OptionFilter when={{ auth: 'IAM' }} description="Identity middleware example for IAM-authenticated APIs">
-Este exemplo demonstra middleware de identidade para autenticação `IAM`, onde buscamos o chamador no Cognito usando o sub extraído do evento do API Gateway. Para autenticação `Cognito`, o middleware de identidade é mais direto — extraia as claims diretamente do `event`.
+Este exemplo demonstra middleware de identidade para autenticação `IAM`. Buscamos o chamador no Cognito usando o sub extraído do evento do API Gateway.
 
 Primeiro definimos o contexto adicional:
 
@@ -453,6 +453,90 @@ export const createIdentityPlugin = () => {
 ```
 </TabItem>
 </Tabs>
+</OptionFilter>
+
+<OptionFilter when={{ auth: 'Cognito' }} description="Identity middleware example for Cognito-authenticated APIs">
+Quando você implanta com `auth: 'Cognito'`, o autorizador Cognito User Pools do API Gateway verifica o JWT que o chamador fornece no cabeçalho `Authorization` e coloca as claims verificadas no evento Lambda em `event.requestContext.authorizer.claims`. Nosso middleware apenas lê essas claims — sem chamadas extras ao AWS SDK, sem verificação manual de JWT.
+
+Primeiro definimos o que adicionaremos ao contexto:
+
+```ts
+export interface IIdentityContext {
+  identity?: {
+    sub: string;
+    username: string;
+  };
+}
+```
+
+Note que definimos uma propriedade adicional _opcional_ no contexto. tRPC gerencia a garantia de que isso esteja definido em procedimentos que configuraram corretamente este middleware.
+
+Em seguida, o middleware em si. O gerador configura o autorizador para aceitar tokens de ID, então `cognito:username` é a claim de nome de usuário canônica; fazemos fallback para `username` para tokens de acesso caso você reconfigure o autorizador:
+
+```ts
+import { initTRPC, TRPCError } from '@trpc/server';
+import { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
+import { APIGatewayProxyEvent } from 'aws-lambda';
+
+export interface IIdentityContext {
+  identity?: {
+    sub: string;
+    username: string;
+  };
+}
+
+export const createIdentityPlugin = () => {
+  const t = initTRPC
+    .context<IIdentityContext & CreateAWSLambdaContextOptions<APIGatewayProxyEvent>>()
+    .create();
+
+  return t.procedure.use(async (opts) => {
+    const claims = opts.ctx.event.requestContext?.authorizer?.claims as
+      | Record<string, string>
+      | undefined;
+
+    const sub = claims?.sub;
+    const username = claims?.['cognito:username'] ?? claims?.username;
+
+    if (!sub || !username) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Unable to determine calling user',
+      });
+    }
+
+    return await opts.next({
+      ctx: {
+        ...opts.ctx,
+        identity: {
+          sub,
+          username,
+        },
+      },
+    });
+  });
+};
+```
+
+Você pode então misturar o plugin em qualquer procedimento que precise da identidade do chamador:
+
+```ts
+import { publicProcedure } from '../init.js';
+import { createIdentityPlugin } from '../middleware/identity.js';
+import { z } from 'zod';
+
+export const me = publicProcedure
+  .concat(createIdentityPlugin())
+  .output(z.object({ sub: z.string(), username: z.string() }))
+  .query(({ ctx }) => ({
+    sub: ctx.identity!.sub,
+    username: ctx.identity!.username,
+  }));
+```
+
+:::tip[Verificando o token]
+Você não precisa de `aws-jwt-verify` ou qualquer outra biblioteca de verificação de JWT aqui — o autorizador Cognito User Pools do API Gateway já verificou a assinatura, emissor, audiência e expiração no momento em que seu Lambda é executado. Se qualquer uma dessas verificações falhar, o API Gateway retorna `401 Unauthorized` e seu handler nunca é invocado.
+:::
 </OptionFilter>
 
 ## Implantando sua API tRPC

@@ -285,7 +285,7 @@ export const echo = publicProcedure
 例如,让我们在 `src/middleware/identity.ts` 中实现一些中间件来从 API 中提取调用用户的详细信息。
 
 <OptionFilter when={{ auth: 'IAM' }} description="IAM 身份验证 API 的身份中间件示例">
-此示例演示了 `IAM` 身份验证的身份中间件,我们使用从 API Gateway 事件中提取的 sub 在 Cognito 中查找调用者。对于 `Cognito` 身份验证,身份中间件更简单——直接从 `event` 中提取声明即可。
+此示例演示了 `IAM` 身份验证的身份中间件。我们使用从 API Gateway 事件中提取的 sub 在 Cognito 中查找调用者。
 
 首先,我们定义要添加到上下文中的内容:
 
@@ -453,6 +453,90 @@ export const createIdentityPlugin = () => {
 ```
 </TabItem>
 </Tabs>
+</OptionFilter>
+
+<OptionFilter when={{ auth: 'Cognito' }} description="Cognito 身份验证 API 的身份中间件示例">
+当您使用 `auth: 'Cognito'` 部署时,API Gateway Cognito 用户池授权器会验证调用者在 `Authorization` 标头中提供的 JWT,并将经过验证的声明放置在 Lambda 事件的 `event.requestContext.authorizer.claims` 上。我们的中间件只需读取这些声明——无需额外的 AWS SDK 调用,无需手动 JWT 验证。
+
+首先,我们定义要添加到上下文中的内容:
+
+```ts
+export interface IIdentityContext {
+  identity?: {
+    sub: string;
+    username: string;
+  };
+}
+```
+
+注意,我们向上下文定义了一个额外的 _可选_ 属性。tRPC 会管理确保在正确配置此中间件的过程中有此定义。
+
+接下来是中间件本身。生成器将授权器配置为接受 ID 令牌,因此 `cognito:username` 是规范的用户名声明;我们回退到 `username` 以支持访问令牌,以防您重新配置授权器:
+
+```ts
+import { initTRPC, TRPCError } from '@trpc/server';
+import { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
+import { APIGatewayProxyEvent } from 'aws-lambda';
+
+export interface IIdentityContext {
+  identity?: {
+    sub: string;
+    username: string;
+  };
+}
+
+export const createIdentityPlugin = () => {
+  const t = initTRPC
+    .context<IIdentityContext & CreateAWSLambdaContextOptions<APIGatewayProxyEvent>>()
+    .create();
+
+  return t.procedure.use(async (opts) => {
+    const claims = opts.ctx.event.requestContext?.authorizer?.claims as
+      | Record<string, string>
+      | undefined;
+
+    const sub = claims?.sub;
+    const username = claims?.['cognito:username'] ?? claims?.username;
+
+    if (!sub || !username) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Unable to determine calling user',
+      });
+    }
+
+    return await opts.next({
+      ctx: {
+        ...opts.ctx,
+        identity: {
+          sub,
+          username,
+        },
+      },
+    });
+  });
+};
+```
+
+然后,您可以将插件混入任何需要调用者身份的过程中:
+
+```ts
+import { publicProcedure } from '../init.js';
+import { createIdentityPlugin } from '../middleware/identity.js';
+import { z } from 'zod';
+
+export const me = publicProcedure
+  .concat(createIdentityPlugin())
+  .output(z.object({ sub: z.string(), username: z.string() }))
+  .query(({ ctx }) => ({
+    sub: ctx.identity!.sub,
+    username: ctx.identity!.username,
+  }));
+```
+
+:::tip[验证令牌]
+您不需要 `aws-jwt-verify` 或任何其他 JWT 验证库——API Gateway Cognito 用户池授权器在您的 Lambda 运行之前已经验证了签名、颁发者、受众和过期时间。如果这些检查中的任何一项失败,API Gateway 会返回 `401 Unauthorized`,并且永远不会调用您的处理程序。
+:::
 </OptionFilter>
 
 ## 部署 tRPC API

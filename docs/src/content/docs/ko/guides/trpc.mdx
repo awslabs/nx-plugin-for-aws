@@ -285,7 +285,7 @@ export const echo = publicProcedure
 예를 들어, API 호출 사용자에 대한 세부 정보를 추출하는 미들웨어를 `src/middleware/identity.ts`에 구현해 보겠습니다.
 
 <OptionFilter when={{ auth: 'IAM' }} description="IAM 인증 API를 위한 Identity 미들웨어 예제">
-이 예제는 `IAM` 인증을 위한 identity 미들웨어를 설명합니다. 여기서는 API Gateway 이벤트에서 추출한 sub를 사용하여 Cognito에서 호출자를 조회합니다. `Cognito` 인증의 경우 identity 미들웨어가 더 간단합니다 — 대신 `event`에서 직접 클레임을 추출하세요.
+이 예제는 `IAM` 인증을 위한 identity 미들웨어를 설명합니다. 여기서는 API Gateway 이벤트에서 추출한 sub를 사용하여 Cognito에서 호출자를 조회합니다.
 
 먼저 컨텍스트에 추가할 내용을 정의합니다:
 
@@ -453,6 +453,90 @@ export const createIdentityPlugin = () => {
 ```
 </TabItem>
 </Tabs>
+</OptionFilter>
+
+<OptionFilter when={{ auth: 'Cognito' }} description="Cognito 인증 API를 위한 Identity 미들웨어 예제">
+`auth: 'Cognito'`로 배포하면 API Gateway Cognito User Pools 인증자가 호출자가 `Authorization` 헤더에 제공한 JWT를 검증하고 검증된 클레임을 `event.requestContext.authorizer.claims`의 Lambda 이벤트에 배치합니다. 우리의 미들웨어는 단순히 해당 클레임을 읽기만 하면 됩니다 — 추가 AWS SDK 호출이나 수동 JWT 검증이 필요하지 않습니다.
+
+먼저 컨텍스트에 추가할 내용을 정의합니다:
+
+```ts
+export interface IIdentityContext {
+  identity?: {
+    sub: string;
+    username: string;
+  };
+}
+```
+
+컨텍스트에 추가 _선택적_ 속성을 정의한다는 점에 주목하세요. tRPC는 이 미들웨어를 올바르게 구성한 프로시저에서 이것이 정의되도록 관리합니다.
+
+다음으로 미들웨어 자체를 구현합니다. 생성기는 인증자가 ID 토큰을 수락하도록 구성하므로 `cognito:username`이 정식 사용자 이름 클레임입니다. 인증자를 재구성하는 경우를 대비하여 액세스 토큰에 대해서는 `username`으로 폴백합니다:
+
+```ts
+import { initTRPC, TRPCError } from '@trpc/server';
+import { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
+import { APIGatewayProxyEvent } from 'aws-lambda';
+
+export interface IIdentityContext {
+  identity?: {
+    sub: string;
+    username: string;
+  };
+}
+
+export const createIdentityPlugin = () => {
+  const t = initTRPC
+    .context<IIdentityContext & CreateAWSLambdaContextOptions<APIGatewayProxyEvent>>()
+    .create();
+
+  return t.procedure.use(async (opts) => {
+    const claims = opts.ctx.event.requestContext?.authorizer?.claims as
+      | Record<string, string>
+      | undefined;
+
+    const sub = claims?.sub;
+    const username = claims?.['cognito:username'] ?? claims?.username;
+
+    if (!sub || !username) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Unable to determine calling user',
+      });
+    }
+
+    return await opts.next({
+      ctx: {
+        ...opts.ctx,
+        identity: {
+          sub,
+          username,
+        },
+      },
+    });
+  });
+};
+```
+
+그런 다음 호출자의 신원이 필요한 모든 프로시저에 플러그인을 믹스할 수 있습니다:
+
+```ts
+import { publicProcedure } from '../init.js';
+import { createIdentityPlugin } from '../middleware/identity.js';
+import { z } from 'zod';
+
+export const me = publicProcedure
+  .concat(createIdentityPlugin())
+  .output(z.object({ sub: z.string(), username: z.string() }))
+  .query(({ ctx }) => ({
+    sub: ctx.identity!.sub,
+    username: ctx.identity!.username,
+  }));
+```
+
+:::tip[토큰 검증]
+여기서는 `aws-jwt-verify`나 다른 JWT 검증 라이브러리가 필요하지 않습니다 — API Gateway Cognito User Pools 인증자가 Lambda가 실행되기 전에 이미 서명, 발급자, 대상 및 만료를 검증했습니다. 이러한 검사 중 하나라도 실패하면 API Gateway는 `401 Unauthorized`를 반환하고 핸들러는 호출되지 않습니다.
+:::
 </OptionFilter>
 
 ## tRPC API 배포

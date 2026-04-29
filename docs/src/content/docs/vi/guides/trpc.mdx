@@ -285,7 +285,7 @@ Bạn có thể thêm các giá trị bổ sung vào context được cung cấp
 Ví dụ, hãy triển khai một số middleware để trích xuất một số chi tiết về người dùng đang gọi từ API của chúng ta trong `src/middleware/identity.ts`.
 
 <OptionFilter when={{ auth: 'IAM' }} description="Identity middleware example for IAM-authenticated APIs">
-Ví dụ này hướng dẫn về identity middleware cho xác thực `IAM`, nơi chúng ta tra cứu người gọi trong Cognito bằng cách sử dụng sub được trích xuất từ API Gateway event. Đối với xác thực `Cognito`, identity middleware đơn giản hơn — trích xuất các claim trực tiếp từ `event` thay thế.
+Ví dụ này hướng dẫn về identity middleware cho xác thực `IAM`. Chúng ta tra cứu người gọi trong Cognito bằng cách sử dụng sub được trích xuất từ API Gateway event.
 
 Đầu tiên, chúng ta định nghĩa những gì chúng ta sẽ thêm vào context:
 
@@ -453,6 +453,90 @@ export const createIdentityPlugin = () => {
 ```
 </TabItem>
 </Tabs>
+</OptionFilter>
+
+<OptionFilter when={{ auth: 'Cognito' }} description="Identity middleware example for Cognito-authenticated APIs">
+Khi bạn triển khai với `auth: 'Cognito'`, API Gateway Cognito User Pools authorizer xác minh JWT mà người gọi cung cấp trong header `Authorization` và đặt các claim đã xác minh trên Lambda event tại `event.requestContext.authorizer.claims`. Middleware của chúng ta chỉ đọc các claim đó — không cần thêm lời gọi AWS SDK, không cần xác minh JWT thủ công.
+
+Đầu tiên, chúng ta định nghĩa những gì chúng ta sẽ thêm vào context:
+
+```ts
+export interface IIdentityContext {
+  identity?: {
+    sub: string;
+    username: string;
+  };
+}
+```
+
+Lưu ý rằng chúng ta định nghĩa một thuộc tính _tùy chọn_ bổ sung cho context. tRPC quản lý đảm bảo rằng điều này được định nghĩa trong các procedure đã cấu hình middleware này một cách chính xác.
+
+Tiếp theo, chính middleware đó. Trình tạo kết nối authorizer để chấp nhận ID token, vì vậy `cognito:username` là claim username chính thức; chúng ta fallback về `username` cho access token trong trường hợp bạn cấu hình lại authorizer:
+
+```ts
+import { initTRPC, TRPCError } from '@trpc/server';
+import { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
+import { APIGatewayProxyEvent } from 'aws-lambda';
+
+export interface IIdentityContext {
+  identity?: {
+    sub: string;
+    username: string;
+  };
+}
+
+export const createIdentityPlugin = () => {
+  const t = initTRPC
+    .context<IIdentityContext & CreateAWSLambdaContextOptions<APIGatewayProxyEvent>>()
+    .create();
+
+  return t.procedure.use(async (opts) => {
+    const claims = opts.ctx.event.requestContext?.authorizer?.claims as
+      | Record<string, string>
+      | undefined;
+
+    const sub = claims?.sub;
+    const username = claims?.['cognito:username'] ?? claims?.username;
+
+    if (!sub || !username) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Unable to determine calling user',
+      });
+    }
+
+    return await opts.next({
+      ctx: {
+        ...opts.ctx,
+        identity: {
+          sub,
+          username,
+        },
+      },
+    });
+  });
+};
+```
+
+Sau đó bạn có thể kết hợp plugin vào bất kỳ procedure nào cần identity của người gọi:
+
+```ts
+import { publicProcedure } from '../init.js';
+import { createIdentityPlugin } from '../middleware/identity.js';
+import { z } from 'zod';
+
+export const me = publicProcedure
+  .concat(createIdentityPlugin())
+  .output(z.object({ sub: z.string(), username: z.string() }))
+  .query(({ ctx }) => ({
+    sub: ctx.identity!.sub,
+    username: ctx.identity!.username,
+  }));
+```
+
+:::tip[Xác minh token]
+Bạn không cần `aws-jwt-verify` hoặc bất kỳ thư viện xác minh JWT nào khác ở đây — API Gateway Cognito User Pools authorizer đã xác minh chữ ký, issuer, audience và expiry vào thời điểm Lambda của bạn chạy. Nếu bất kỳ kiểm tra nào trong số đó thất bại, API Gateway trả về `401 Unauthorized` và handler của bạn không bao giờ được gọi.
+:::
 </OptionFilter>
 
 ## Triển khai API tRPC của bạn
