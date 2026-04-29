@@ -42,5 +42,10 @@ export default defineConfig({
     },
     testTimeout: 120000,
     hookTimeout: 120000,
+    server: {
+      deps: {
+        external: [/^debug$/],
+      },
+    },
   },
 });

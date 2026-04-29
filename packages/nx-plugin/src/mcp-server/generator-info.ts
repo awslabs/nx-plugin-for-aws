@@ -3,48 +3,19 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { kebabCase } from '../utils/names';
-import {
-  buildCreateNxWorkspaceCommand,
-  buildInstallCommand,
-  buildPackageManagerExecCommand,
-  buildPackageManagerShortCommand,
-} from '../utils/commands';
 import { NxGeneratorInfo } from '../utils/generators';
-import { applyOptionFilter, evaluatePredicate } from './option-filter';
-import { applyInfrastructureFilter } from './infrastructure-filter';
-import { applyTabsFilter } from './tabs-filter';
+import { evaluatePredicate } from './option-filter';
+import {
+  buildNxCommand,
+  renderGeneratorCommand,
+  renderSchema,
+} from './guide-render';
+import { postProcessGuideWithRemark } from './guide-pipeline';
 import fs from 'fs';
 import path from 'path';
 
-/**
- * Build a command to run nx
- */
-export const buildNxCommand = (command: string, pm?: string) =>
-  pm ? buildPackageManagerExecCommand(pm, `nx ${command}`) : `nx ${command}`;
-
-const renderSchema = (schema: any) =>
-  Object.entries(schema.properties)
-    .map(
-      ([parameter, parameterSchema]: [string, any]) =>
-        `- ${parameter} [type: ${parameterSchema.type}]${parameterSchema.enum ? ` [options: ${parameterSchema.enum.join(', ')}]` : ''}${(schema.required ?? []).includes(parameter) ? ` (required)` : ''} ${parameterSchema.description}`,
-    )
-    .join('\n');
-
-const renderGeneratorCommand = (
-  generatorId: string,
-  schema: any,
-  packageManager?: string,
-) => `\`\`\`bash
-${buildNxCommand(
-  `g @aws/nx-plugin:${generatorId} --no-interactive ${Object.entries(
-    schema.properties,
-  )
-    .filter(([parameter]) => (schema.required ?? []).includes(parameter))
-    .map(([parameter]: [string, any]) => `--${parameter}=<${parameter}>`)
-    .join(' ')}`,
-  packageManager,
-)}
-\`\`\``;
+// Re-export so existing callers of `generator-info` continue working.
+export { buildNxCommand } from './guide-render';
 
 /**
  * Render summary information about a generator
@@ -663,32 +634,13 @@ export const fetchSnippet: SnippetContentProvider = async (
   }
 };
 
-const findGeneratorAndSchema = (
-  generators: NxGeneratorInfo[],
-  generatorId: string,
-) => {
-  const generator = generators.find((info) => info.id === generatorId);
-  if (!generator) {
-    return undefined;
-  }
-
-  try {
-    const schema = JSON.parse(
-      fs.readFileSync(generator.resolvedSchemaPath, 'utf-8'),
-    );
-    return { generator, schema };
-  } catch {
-    return undefined;
-  }
-};
-
 /**
- * Post-process a guide page to "inline" relevant components.
- *
- * When `options` is supplied, <OptionFilter> blocks whose predicate doesn't
- * match are removed and <Infrastructure> is collapsed to the relevant slot.
- * When `options` is omitted, every <OptionFilter> block is kept with a
- * `> [!NOTE] Only when …` marker so agents can see the branching conditions.
+ * Post-process a guide page. Thin wrapper around the unified/remark-mdx
+ * pipeline in `guide-pipeline.ts` — the real work (snippet inlining,
+ * OptionFilter/Infrastructure/TabItem filtering, command/schema rendering)
+ * happens there. Kept under the same name so other packages
+ * (e.g. the docs site's `markdown-content.astro`) can continue importing
+ * `postProcessGuide` with the same signature.
  */
 export const postProcessGuide = async (
   guide: string,
@@ -697,184 +649,10 @@ export const postProcessGuide = async (
   snippetContentProvider?: SnippetContentProvider,
   options?: Record<string, string>,
 ): Promise<string> => {
-  const getSnippetContent = snippetContentProvider ?? fetchSnippet;
-
-  // Apply option/infrastructure/tabs filtering first so later passes
-  // (snippets, generator parameter tables, etc.) only see the branches
-  // we're actually keeping.
-  let processedGuide = applyOptionFilter(guide, options);
-  processedGuide = applyInfrastructureFilter(
-    processedGuide,
-    options?.iacProvider,
-  );
-  processedGuide = applyTabsFilter(processedGuide, options);
-
-  // Replace <Snippet /> with fetched snippet content
-  // Use a regex that matches the full self-closing tag, allowing / in attribute values
-  const snippetRegex = /<Snippet\s+((?:[^/]|\/(?!>))+)\s*\/>/g;
-  const snippetMatches = [...processedGuide.matchAll(snippetRegex)];
-
-  if (snippetMatches.length > 0) {
-    // Fetch all snippets in parallel
-    const snippetResults = await Promise.all(
-      snippetMatches.map(async (match) => {
-        const nameMatch = match[1].match(/name=["']([^"']+)["']/);
-        if (!nameMatch) {
-          return { original: match[0], replacement: match[0] };
-        }
-        const snippetName = nameMatch[1];
-        const snippetContent = await getSnippetContent(snippetName);
-        if (!snippetContent) {
-          return { original: match[0], replacement: match[0] };
-        }
-        // Recursively post-process the snippet content
-        const processedContent = await postProcessGuide(
-          snippetContent.trim(),
-          generators,
-          packageManager,
-          getSnippetContent,
-          options,
-        );
-        return {
-          original: match[0],
-          replacement: `<Snippet name="${snippetName}">\n${processedContent}\n</Snippet>`,
-        };
-      }),
-    );
-
-    for (const { original, replacement } of snippetResults) {
-      processedGuide = processedGuide.replace(original, replacement);
-    }
-  }
-
-  // Replace <NxCommands /> with markdown code blocks
-  processedGuide = processedGuide.replace(
-    /<NxCommands\s+commands={([^}]+)}\s*\/>/g,
-    (match, commandsMatch) => {
-      try {
-        const commands = JSON.parse(
-          commandsMatch
-            .replaceAll("\\'", '__ESCAPED_SINGLE_QUOTE__')
-            .replaceAll("'", '"')
-            .replaceAll('__ESCAPED_SINGLE_QUOTE__', "\\'"),
-        );
-        return `\`\`\`bash\n${commands.map((command) => buildNxCommand(command, packageManager)).join('\n')}\n\`\`\``;
-      } catch {
-        return match;
-      }
-    },
-  );
-
-  // Replace <RunGenerator /> with renderGeneratorCommand
-  processedGuide = processedGuide.replace(
-    /<RunGenerator\s+((?:[^/]|\/(?!>))+)\s*\/>/g,
-    (match, attributes) => {
-      // Extract generator parameter
-      const generatorMatch = attributes.match(/generator=["']([^"']+)["']/);
-      if (!generatorMatch) {
-        return match; // If no generator parameter, leave as is
-      }
-
-      const generatorId = generatorMatch[1];
-
-      const info = findGeneratorAndSchema(generators, generatorId);
-
-      if (!info) {
-        return match;
-      }
-
-      return renderGeneratorCommand(generatorId, info.schema, packageManager);
-    },
-  );
-
-  // Replace <GeneratorParameters /> with renderSchema
-  processedGuide = processedGuide.replace(
-    /<GeneratorParameters\s+((?:[^/]|\/(?!>))+)\s*\/>/g,
-    (match, attributes) => {
-      // Extract generator parameter
-      const generatorMatch = attributes.match(/generator=["']([^"']+)["']/);
-      if (!generatorMatch) {
-        return match; // If no generator parameter, leave as is
-      }
-
-      const generatorId = generatorMatch[1];
-
-      const info = findGeneratorAndSchema(generators, generatorId);
-
-      if (!info) {
-        return match;
-      }
-
-      return renderSchema(info.schema);
-    },
-  );
-
-  // Replace <CreateNxWorkspaceCommand /> with npx create-nx-workspace command
-  processedGuide = processedGuide.replace(
-    /<CreateNxWorkspaceCommand\s+((?:[^/]|\/(?!>))+)\s*\/>/g,
-    (match, attributes) => {
-      const workspaceMatch = attributes.match(/workspace=["']([^"']+)["']/);
-      if (!workspaceMatch) return match;
-      const workspace = workspaceMatch[1];
-      const iacMatch = attributes.match(/iacProvider=["']([^"']+)["']/);
-      const iacProvider = iacMatch
-        ? (iacMatch[1] as 'CDK' | 'Terraform')
-        : undefined;
-      const pm = packageManager ?? 'pnpm';
-      return `\`\`\`bash\n${buildCreateNxWorkspaceCommand(pm, workspace, iacProvider)}\n\`\`\``;
-    },
-  );
-
-  // Replace <InstallCommand /> with install command
-  processedGuide = processedGuide.replace(
-    /<InstallCommand\s+((?:[^/]|\/(?!>))+)\s*\/>/g,
-    (match, attributes) => {
-      const pkgMatch = attributes.match(/pkg=(?:["']([^"']+)["']|\{([^}]+)\})/);
-      if (!pkgMatch) return match;
-      const pkg = pkgMatch[1] || pkgMatch[2];
-      const isDev = /dev/.test(attributes);
-      const pm = packageManager ?? 'pnpm';
-      return `\`\`\`bash\n${buildInstallCommand(pm, pkg, isDev)}\n\`\`\``;
-    },
-  );
-
-  // Replace <PackageManagerShortCommand /> with short command
-  processedGuide = processedGuide.replace(
-    /<PackageManagerShortCommand\s+commands={([^}]+)}\s*\/>/g,
-    (match, commandsMatch) => {
-      try {
-        const commands = JSON.parse(
-          commandsMatch
-            .replaceAll("\\'", '__ESCAPED_SINGLE_QUOTE__')
-            .replaceAll("'", '"')
-            .replaceAll('__ESCAPED_SINGLE_QUOTE__', "\\'"),
-        );
-        const pm = packageManager ?? 'pnpm';
-        return `\`\`\`bash\n${commands.map((command: string) => buildPackageManagerShortCommand(pm, command)).join('\n')}\n\`\`\``;
-      } catch {
-        return match;
-      }
-    },
-  );
-
-  // Replace <PackageManagerExecCommand /> with exec command
-  processedGuide = processedGuide.replace(
-    /<PackageManagerExecCommand\s+commands={([^}]+)}\s*\/>/g,
-    (match, commandsMatch) => {
-      try {
-        const commands = JSON.parse(
-          commandsMatch
-            .replaceAll("\\'", '__ESCAPED_SINGLE_QUOTE__')
-            .replaceAll("'", '"')
-            .replaceAll('__ESCAPED_SINGLE_QUOTE__', "\\'"),
-        );
-        const pm = packageManager ?? 'pnpm';
-        return `\`\`\`bash\n${commands.map((command: string) => buildPackageManagerExecCommand(pm, command)).join('\n')}\n\`\`\``;
-      } catch {
-        return match;
-      }
-    },
-  );
-
-  return processedGuide;
+  return postProcessGuideWithRemark(guide, {
+    generators,
+    packageManager,
+    snippetContentProvider: snippetContentProvider ?? fetchSnippet,
+    options,
+  });
 };

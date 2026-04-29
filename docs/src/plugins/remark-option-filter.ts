@@ -4,10 +4,16 @@
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { Root } from 'mdast';
+import type { Root, RootContent } from 'mdast';
+import type {
+  MdxJsxAttribute,
+  MdxJsxAttributeValueExpression,
+  MdxJsxFlowElement,
+  MdxJsxTextElement,
+} from 'mdast-util-mdx-jsx';
 import {
-  scanOptionFilters,
-  type OptionFilterBlock,
+  parseWhenExpression,
+  type Predicate,
 } from '../../../packages/nx-plugin/src/mcp-server/option-filter';
 
 /**
@@ -76,16 +82,6 @@ const loadSchema = (generatorId: string): GeneratorSchema => {
   return schema;
 };
 
-const visitAll = (
-  blocks: OptionFilterBlock[],
-  fn: (b: OptionFilterBlock) => void,
-) => {
-  for (const b of blocks) {
-    fn(b);
-    visitAll(b.children, fn);
-  }
-};
-
 const findFrontmatterGenerator = (tree: Root): string | undefined => {
   for (const child of tree.children) {
     if (child.type === 'yaml') {
@@ -96,13 +92,55 @@ const findFrontmatterGenerator = (tree: Root): string | undefined => {
   return undefined;
 };
 
+const isJsxElement = (
+  node: RootContent,
+): node is MdxJsxFlowElement | MdxJsxTextElement =>
+  node.type === 'mdxJsxFlowElement' || node.type === 'mdxJsxTextElement';
+
+const readExpressionAttr = (
+  node: MdxJsxFlowElement | MdxJsxTextElement,
+  name: string,
+): string | undefined => {
+  const attr = node.attributes.find(
+    (a): a is MdxJsxAttribute =>
+      a.type === 'mdxJsxAttribute' && a.name === name,
+  );
+  if (!attr) return undefined;
+  if (typeof attr.value === 'object' && attr.value !== null) {
+    return (attr.value as MdxJsxAttributeValueExpression).value;
+  }
+  return undefined;
+};
+
+const collectOptionFilterPredicates = (tree: Root): Predicate[] => {
+  const predicates: Predicate[] = [];
+  const walk = (parent: Root | MdxJsxFlowElement | MdxJsxTextElement): void => {
+    const children = parent.children as RootContent[];
+    for (const child of children) {
+      if (!isJsxElement(child)) continue;
+      if (child.name === 'OptionFilter') {
+        const expr = readExpressionAttr(child, 'when');
+        if (expr) {
+          try {
+            predicates.push(parseWhenExpression(expr));
+          } catch (err) {
+            throw new Error(`[remark-option-filter] ${(err as Error).message}`);
+          }
+        }
+      }
+      walk(child);
+    }
+  };
+  walk(tree);
+  return predicates;
+};
+
 const remarkOptionFilter = () => {
   return (
     tree: Root,
     file: {
       path?: string;
       data?: any;
-      value?: string | Buffer;
     },
   ) => {
     const pagePath = file?.path ?? '(unknown)';
@@ -113,29 +151,21 @@ const remarkOptionFilter = () => {
 
     if (!generatorId) return;
 
-    const source =
-      typeof file?.value === 'string'
-        ? file.value
-        : Buffer.isBuffer(file?.value)
-          ? file.value.toString('utf-8')
-          : '';
-
-    if (!source || !source.includes('<OptionFilter')) return;
-
-    const schema = loadSchema(generatorId);
-    const props = schema.properties ?? {};
-
-    let blocks: OptionFilterBlock[];
+    let predicates: Predicate[];
     try {
-      blocks = scanOptionFilters(source);
+      predicates = collectOptionFilterPredicates(tree);
     } catch (err) {
       throw new Error(
         `[remark-option-filter] ${pagePath}: ${(err as Error).message}`,
       );
     }
+    if (predicates.length === 0) return;
 
-    visitAll(blocks, (b) => {
-      for (const [key, values] of Object.entries(b.predicate)) {
+    const schema = loadSchema(generatorId);
+    const props = schema.properties ?? {};
+
+    for (const predicate of predicates) {
+      for (const [key, values] of Object.entries(predicate)) {
         const prop = props[key];
         if (!prop) {
           throw new Error(
@@ -156,7 +186,7 @@ const remarkOptionFilter = () => {
           }
         }
       }
-    });
+    }
   };
 };
 

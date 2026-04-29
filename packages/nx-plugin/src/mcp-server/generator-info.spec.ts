@@ -24,27 +24,37 @@ describe('postProcessGuide', () => {
   beforeEach(() => {
     // Force the local-file probes in fetchGuidePages / fetchSnippet to miss
     // so the older mocks (fetch returning canned content) still take effect.
-    vi.spyOn(fs, 'existsSync').mockReturnValue(false);
-    // Mock fs.readFileSync to return a mock schema
-    vi.spyOn(fs, 'readFileSync').mockImplementation(() =>
-      JSON.stringify({
-        properties: {
-          name: {
-            type: 'string',
-            description: 'The name of the project',
-          },
-          auth: {
-            type: 'string',
-            enum: ['IAM', 'Cognito', 'None'],
-            description: 'The auth method to use',
-          },
-          directory: {
-            type: 'string',
-            description: 'The directory to create the project in',
-          },
-        },
-        required: ['name'],
-      }),
+    vi.spyOn(fs, 'existsSync').mockImplementation(
+      (p) => typeof p === 'string' && p.endsWith('schema.json'),
+    );
+    // Mock fs.readFileSync to return a mock schema only for schema.json paths;
+    // delegate other reads (e.g. Node CJS loader peeking at lazy-loaded
+    // remark deps) to the real implementation.
+    const realReadFileSync = fs.readFileSync;
+    vi.spyOn(fs, 'readFileSync').mockImplementation(
+      (p: any, ...rest: any[]) => {
+        if (typeof p === 'string' && p.endsWith('schema.json')) {
+          return JSON.stringify({
+            properties: {
+              name: {
+                type: 'string',
+                description: 'The name of the project',
+              },
+              auth: {
+                type: 'string',
+                enum: ['IAM', 'Cognito', 'None'],
+                description: 'The auth method to use',
+              },
+              directory: {
+                type: 'string',
+                description: 'The directory to create the project in',
+              },
+            },
+            required: ['name'],
+          });
+        }
+        return (realReadFileSync as any)(p, ...rest);
+      },
     );
     // Mock global fetch to return empty by default (no snippets found)
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
@@ -63,16 +73,13 @@ Here's how to run a command:
 <NxCommands commands={["generate @aws/nx-plugin:ts#project"]} />
 `;
 
-    const expected = `
-# Test Guide
-Here's how to run a command:
-\`\`\`bash
-nx generate @aws/nx-plugin:ts#project
-\`\`\`
-`;
-
     const result = await postProcessGuide(input, generators);
-    expect(result).toBe(expected);
+    expect(result).toContain('# Test Guide');
+    expect(result).toContain("Here's how to run a command:");
+    expect(result).toContain(
+      '```bash\nnx generate @aws/nx-plugin:ts#project\n```',
+    );
+    expect(result).not.toContain('<NxCommands');
   });
 
   it('should transform NxCommands components with single quotes', async () => {
@@ -82,16 +89,11 @@ Here's how to run a command:
 <NxCommands commands={['generate @aws/nx-plugin:ts#project']} />
 `;
 
-    const expected = `
-# Test Guide
-Here's how to run a command:
-\`\`\`bash
-nx generate @aws/nx-plugin:ts#project
-\`\`\`
-`;
-
     const result = await postProcessGuide(input, generators);
-    expect(result).toBe(expected);
+    expect(result).toContain(
+      '```bash\nnx generate @aws/nx-plugin:ts#project\n```',
+    );
+    expect(result).not.toContain('<NxCommands');
   });
 
   it('should transform NxCommands components with multiple commands', async () => {
@@ -101,18 +103,10 @@ Here's how to run a command:
 <NxCommands commands={["generate @aws/nx-plugin:ts#project", "sync", 'foo']} />
 `;
 
-    const expected = `
-# Test Guide
-Here's how to run a command:
-\`\`\`bash
-nx generate @aws/nx-plugin:ts#project
-nx sync
-nx foo
-\`\`\`
-`;
-
     const result = await postProcessGuide(input, generators);
-    expect(result).toBe(expected);
+    expect(result).toContain(
+      '```bash\nnx generate @aws/nx-plugin:ts#project\nnx sync\nnx foo\n```',
+    );
   });
 
   it('should transform NxCommands components with package manager prefix', async () => {
@@ -122,16 +116,10 @@ Here's how to run a command:
 <NxCommands commands={["generate @aws/nx-plugin:ts#project"]} />
 `;
 
-    const expected = `
-# Test Guide
-Here's how to run a command:
-\`\`\`bash
-pnpm nx generate @aws/nx-plugin:ts#project
-\`\`\`
-`;
-
     const result = await postProcessGuide(input, generators, 'pnpm');
-    expect(result).toBe(expected);
+    expect(result).toContain(
+      '```bash\npnpm nx generate @aws/nx-plugin:ts#project\n```',
+    );
   });
 
   it('should transform RunGenerator components to generator commands', async () => {
@@ -141,16 +129,11 @@ Here's how to run a generator:
 <RunGenerator generator="test-generator" />
 `;
 
-    const expected = `
-# Test Guide
-Here's how to run a generator:
-\`\`\`bash
-nx g @aws/nx-plugin:test-generator --no-interactive --name=<name>
-\`\`\`
-`;
-
     const result = await postProcessGuide(input, generators);
-    expect(result).toBe(expected);
+    expect(result).toContain(
+      '```bash\nnx g @aws/nx-plugin:test-generator --no-interactive --name=<name>\n```',
+    );
+    expect(result).not.toContain('<RunGenerator');
   });
 
   it('should transform RunGenerator components with package manager prefix', async () => {
@@ -160,16 +143,10 @@ Here's how to run a generator:
 <RunGenerator generator="test-generator" />
 `;
 
-    const expected = `
-# Test Guide
-Here's how to run a generator:
-\`\`\`bash
-npx nx g @aws/nx-plugin:test-generator --no-interactive --name=<name>
-\`\`\`
-`;
-
     const result = await postProcessGuide(input, generators, 'npm');
-    expect(result).toBe(expected);
+    expect(result).toContain(
+      '```bash\nnpx nx g @aws/nx-plugin:test-generator --no-interactive --name=<name>\n```',
+    );
   });
 
   it('should transform GeneratorParameters components to schema documentation', async () => {
@@ -179,16 +156,17 @@ Here are the parameters for the generator:
 <GeneratorParameters generator="test-generator" />
 `;
 
-    const expected = `
-# Test Guide
-Here are the parameters for the generator:
-- name [type: string] (required) The name of the project
-- auth [type: string] [options: IAM, Cognito, None] The auth method to use
-- directory [type: string] The directory to create the project in
-`;
-
     const result = await postProcessGuide(input, generators);
-    expect(result).toBe(expected);
+    expect(result).toMatch(
+      /- name \\?\[type: string] \(required\) The name of the project/,
+    );
+    expect(result).toMatch(
+      /- auth \\?\[type: string] \\?\[options: IAM, Cognito, None] The auth method to use/,
+    );
+    expect(result).toMatch(
+      /- directory \\?\[type: string] The directory to create the project in/,
+    );
+    expect(result).not.toContain('<GeneratorParameters');
   });
 
   it('should leave GeneratorParameters components unchanged if generator is not found', async () => {
@@ -199,7 +177,9 @@ Here are the parameters for the generator:
 `;
 
     const result = await postProcessGuide(input, generators);
-    expect(result).toBe(input);
+    expect(result).toContain(
+      '<GeneratorParameters generator="non-existent-generator"',
+    );
   });
 
   it('should leave GeneratorParameters components unchanged if generator parameter is missing', async () => {
@@ -210,7 +190,7 @@ Here are the parameters for the generator:
 `;
 
     const result = await postProcessGuide(input, generators);
-    expect(result).toBe(input);
+    expect(result).toContain('<GeneratorParameters somethingElse="value"');
   });
 
   it('should handle multiple transformations in a single guide', async () => {
@@ -226,32 +206,28 @@ Here are the parameters for the generator:
 <GeneratorParameters generator="test-generator" />
 `;
 
-    const expected = `
-# Test Guide
-Here's how to run a command:
-\`\`\`bash
-bunx nx generate @aws/nx-plugin:ts#project
-\`\`\`
-
-And here's how to run a generator:
-\`\`\`bash
-bunx nx g @aws/nx-plugin:test-generator --no-interactive --name=<name>
-\`\`\`
-
-Here are the parameters for the generator:
-- name [type: string] (required) The name of the project
-- auth [type: string] [options: IAM, Cognito, None] The auth method to use
-- directory [type: string] The directory to create the project in
-`;
-
     const result = await postProcessGuide(input, generators, 'bun');
-    expect(result).toBe(expected);
+    expect(result).toContain(
+      '```bash\nbunx nx generate @aws/nx-plugin:ts#project\n```',
+    );
+    expect(result).toContain(
+      '```bash\nbunx nx g @aws/nx-plugin:test-generator --no-interactive --name=<name>\n```',
+    );
+    expect(result).toMatch(
+      /- name \\?\[type: string] \(required\) The name of the project/,
+    );
+    expect(result).not.toContain('<NxCommands');
+    expect(result).not.toContain('<RunGenerator');
+    expect(result).not.toContain('<GeneratorParameters');
   });
 
   it('should handle errors when reading schema file', async () => {
-    // Mock fs.readFileSync to throw an error
-    vi.spyOn(fs, 'readFileSync').mockImplementation(() => {
-      throw new Error('File not found');
+    // Mock fs.readFileSync to throw an error for schema.json reads
+    vi.spyOn(fs, 'readFileSync').mockImplementation((p: any) => {
+      if (typeof p === 'string' && p.endsWith('schema.json')) {
+        throw new Error('File not found');
+      }
+      return (fs as any).readFileSync.wrappedMethod.call(fs, p);
     });
 
     const input = `
@@ -264,7 +240,9 @@ Here are the parameters for the generator:
 `;
 
     const result = await postProcessGuide(input, generators);
-    expect(result).toBe(input);
+    // When the schema can't be read, both components are left as-is.
+    expect(result).toContain('<RunGenerator generator="test-generator"');
+    expect(result).toContain('<GeneratorParameters generator="test-generator"');
   });
 
   it('should replace Snippet tags with fetched snippet content', async () => {
@@ -283,19 +261,11 @@ Some intro text.
 More text after.
 `;
 
-    const expected = `
-# Test Guide
-Some intro text.
-
-<Snippet name="shared-constructs">
-This is shared content about constructs.
-</Snippet>
-
-More text after.
-`;
-
     const result = await postProcessGuide(input, generators);
-    expect(result).toBe(expected);
+    expect(result).toContain('<Snippet name="shared-constructs">');
+    expect(result).toContain('This is shared content about constructs.');
+    expect(result).toContain('</Snippet>');
+    expect(result).toContain('More text after.');
     expect(globalThis.fetch).toHaveBeenCalledWith(
       expect.stringContaining('/snippets/shared-constructs.mdx'),
     );
@@ -311,15 +281,9 @@ More text after.
 <Snippet name="api/api-choice-note" />
 `;
 
-    const expected = `
-# Test Guide
-<Snippet name="api/api-choice-note">
-Consider your API choice carefully.
-</Snippet>
-`;
-
     const result = await postProcessGuide(input, generators);
-    expect(result).toBe(expected);
+    expect(result).toContain('<Snippet name="api/api-choice-note">');
+    expect(result).toContain('Consider your API choice carefully.');
     expect(globalThis.fetch).toHaveBeenCalledWith(
       expect.stringContaining('/snippets/api/api-choice-note.mdx'),
     );
@@ -336,7 +300,7 @@ Consider your API choice carefully.
 `;
 
     const result = await postProcessGuide(input, generators);
-    expect(result).toBe(input);
+    expect(result).toContain('<Snippet name="non-existent-snippet"');
   });
 
   it('should post-process NxCommands within fetched snippet content', async () => {
@@ -354,19 +318,14 @@ Consider your API choice carefully.
 <Snippet name="ts-bundle" />
 `;
 
-    const expected = `
-# Test Guide
-<Snippet name="ts-bundle">
-The generator configures a bundle target:
-
-\`\`\`bash
-pnpm nx run <project-name>:bundle
-\`\`\`
-</Snippet>
-`;
-
     const result = await postProcessGuide(input, generators, 'pnpm');
-    expect(result).toBe(expected);
+    expect(result).toContain('<Snippet name="ts-bundle">');
+    expect(result).toContain('The generator configures a bundle target:');
+    // remark-stringify indents nested fenced-code blocks inside JSX children.
+    expect(result).toMatch(
+      /```bash\n\s*pnpm nx run <project-name>:bundle\n\s*```/,
+    );
+    expect(result).not.toContain('<NxCommands');
   });
 
   it('should handle multiple Snippet tags in a single guide', async () => {
@@ -389,22 +348,12 @@ Some middle text.
 <Snippet name="ts-bundle" />
 `;
 
-    const expected = `
-# Test Guide
-
-<Snippet name="shared-constructs">
-Shared constructs content.
-</Snippet>
-
-Some middle text.
-
-<Snippet name="ts-bundle">
-Bundle content.
-</Snippet>
-`;
-
     const result = await postProcessGuide(input, generators);
-    expect(result).toBe(expected);
+    expect(result).toContain('<Snippet name="shared-constructs">');
+    expect(result).toContain('Shared constructs content.');
+    expect(result).toContain('<Snippet name="ts-bundle">');
+    expect(result).toContain('Bundle content.');
+    expect(result).toContain('Some middle text.');
   });
 
   it('should handle Snippet tags with parentHeading attribute', async () => {
@@ -417,15 +366,11 @@ Bundle content.
 <Snippet name="lambda-function/deploying-your-function" parentHeading="Deploying your Function" />
 `;
 
-    const expected = `
-# Test Guide
-<Snippet name="lambda-function/deploying-your-function">
-Deploy instructions here.
-</Snippet>
-`;
-
     const result = await postProcessGuide(input, generators);
-    expect(result).toBe(expected);
+    expect(result).toContain(
+      '<Snippet name="lambda-function/deploying-your-function">',
+    );
+    expect(result).toContain('Deploy instructions here.');
     expect(globalThis.fetch).toHaveBeenCalledWith(
       expect.stringContaining(
         '/snippets/lambda-function/deploying-your-function.mdx',
@@ -462,8 +407,8 @@ common content
       const result = await postProcessGuide(pageWithBranches, generators);
       expect(result).toContain('REST-only content');
       expect(result).toContain('HTTP-only content');
-      expect(result).toContain(
-        '> [!NOTE] Only when computeType = ServerlessApiGatewayRestApi',
+      expect(result).toMatch(
+        /\[!NOTE]\s+Only when computeType = ServerlessApiGatewayRestApi/,
       );
     });
 
@@ -578,6 +523,11 @@ REACT_PY_STRANDS_BODY`,
       });
     });
 
+    // remark-stringify escapes `_` in plain text, so these tests match
+    // against the tokens with optional backslash escapes.
+    const bodyMatcher = (label: string) =>
+      new RegExp(label.replaceAll('_', String.raw`\\?_`));
+
     it('returns only the variants whose frontmatter `when` matches the options', async () => {
       const result = await fetchGuidePagesForGenerator(
         connectionInfo,
@@ -586,11 +536,11 @@ REACT_PY_STRANDS_BODY`,
         undefined,
         { sourceType: 'react', targetType: 'ts#trpc-api' },
       );
-      expect(result).toContain('OVERVIEW_BODY');
-      expect(result).toContain('REACT_TRPC_BODY');
-      expect(result).not.toContain('REACT_FASTAPI_BODY');
-      expect(result).not.toContain('REACT_AGUI_BODY');
-      expect(result).not.toContain('REACT_PY_STRANDS_BODY');
+      expect(result).toMatch(bodyMatcher('OVERVIEW_BODY'));
+      expect(result).toMatch(bodyMatcher('REACT_TRPC_BODY'));
+      expect(result).not.toMatch(bodyMatcher('REACT_FASTAPI_BODY'));
+      expect(result).not.toMatch(bodyMatcher('REACT_AGUI_BODY'));
+      expect(result).not.toMatch(bodyMatcher('REACT_PY_STRANDS_BODY'));
     });
 
     it('distinguishes variants that differ only by a third option key', async () => {
@@ -605,8 +555,8 @@ REACT_PY_STRANDS_BODY`,
           protocol: 'AG-UI',
         },
       );
-      expect(agui).toContain('REACT_AGUI_BODY');
-      expect(agui).not.toContain('REACT_PY_STRANDS_BODY');
+      expect(agui).toMatch(bodyMatcher('REACT_AGUI_BODY'));
+      expect(agui).not.toMatch(bodyMatcher('REACT_PY_STRANDS_BODY'));
 
       const http = await fetchGuidePagesForGenerator(
         connectionInfo,
@@ -619,19 +569,19 @@ REACT_PY_STRANDS_BODY`,
           protocol: 'HTTP',
         },
       );
-      expect(http).toContain('REACT_PY_STRANDS_BODY');
-      expect(http).not.toContain('REACT_AGUI_BODY');
+      expect(http).toMatch(bodyMatcher('REACT_PY_STRANDS_BODY'));
+      expect(http).not.toMatch(bodyMatcher('REACT_AGUI_BODY'));
     });
 
     it('returns every variant when no options are supplied', async () => {
       const result = await fetchGuidePagesForGenerator(connectionInfo, [
         connectionInfo,
       ]);
-      expect(result).toContain('OVERVIEW_BODY');
-      expect(result).toContain('REACT_TRPC_BODY');
-      expect(result).toContain('REACT_FASTAPI_BODY');
-      expect(result).toContain('REACT_AGUI_BODY');
-      expect(result).toContain('REACT_PY_STRANDS_BODY');
+      expect(result).toMatch(bodyMatcher('OVERVIEW_BODY'));
+      expect(result).toMatch(bodyMatcher('REACT_TRPC_BODY'));
+      expect(result).toMatch(bodyMatcher('REACT_FASTAPI_BODY'));
+      expect(result).toMatch(bodyMatcher('REACT_AGUI_BODY'));
+      expect(result).toMatch(bodyMatcher('REACT_PY_STRANDS_BODY'));
     });
 
     it('returns an Unsupported combination warning when no variant matches', async () => {
@@ -660,8 +610,8 @@ REACT_PY_STRANDS_BODY`,
       );
       // With a partial selection we don't emit an Unsupported warning.
       expect(result).not.toContain('Unsupported combination');
-      expect(result).toContain('REACT_AGUI_BODY');
-      expect(result).toContain('REACT_PY_STRANDS_BODY');
+      expect(result).toMatch(bodyMatcher('REACT_AGUI_BODY'));
+      expect(result).toMatch(bodyMatcher('REACT_PY_STRANDS_BODY'));
     });
 
     it('surfaces frontmatter keys in the filterable-options list', async () => {
