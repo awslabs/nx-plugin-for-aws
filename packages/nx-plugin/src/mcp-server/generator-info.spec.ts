@@ -6,6 +6,7 @@ import { NxGeneratorInfo } from '../utils/generators';
 import {
   fetchGuidePagesForGenerator,
   postProcessGuide,
+  renderFilterableOptionsAsync,
 } from './generator-info';
 import fs from 'fs';
 
@@ -505,22 +506,45 @@ terraform instructions
     });
   });
 
-  describe('guide-page-level filtering', () => {
-    let fetchMock: ReturnType<typeof vi.fn>;
-
-    beforeEach(() => {
-      vi.restoreAllMocks();
-      // fetchGuidePages prefers local files over the network. Force the
-      // local probe to miss so these tests exercise the fetch fallback.
-      vi.spyOn(fs, 'existsSync').mockReturnValue(false);
-      // Make every fetched guide page return its URL so we can assert on it.
-      fetchMock = vi
-        .fn()
-        .mockImplementation((url: string) =>
-          Promise.resolve(new Response(`# content for ${url}`)),
-        );
-      vi.spyOn(globalThis, 'fetch').mockImplementation(fetchMock as any);
-    });
+  describe('frontmatter-driven guide filtering', () => {
+    const variants: Record<string, string> = {
+      'connection.mdx': `---
+title: Overview
+---
+OVERVIEW_BODY`,
+      'connection/react-trpc.mdx': `---
+title: React to tRPC
+when:
+  sourceType: react
+  targetType: ts#trpc-api
+---
+REACT_TRPC_BODY`,
+      'connection/react-fastapi.mdx': `---
+title: React to FastAPI
+when:
+  sourceType: react
+  targetType: py#fast-api
+---
+REACT_FASTAPI_BODY`,
+      'connection/react-agui.mdx': `---
+title: React to AG-UI Agent
+when:
+  sourceType: react
+  targetType: py#strands-agent
+  protocol: AG-UI
+---
+REACT_AGUI_BODY`,
+      'connection/react-py-strands-agent.mdx': `---
+title: React to Python Strands Agent
+when:
+  sourceType: react
+  targetType: py#strands-agent
+  protocol:
+    - HTTP
+    - A2A
+---
+REACT_PY_STRANDS_BODY`,
+    };
 
     const connectionInfo: NxGeneratorInfo = {
       id: 'connection',
@@ -530,44 +554,125 @@ terraform instructions
       metric: 'g11',
       guidePages: [
         'connection',
-        {
-          page: 'connection/react-trpc',
-          when: { sourceType: 'react', targetType: 'ts#trpc-api' },
-        },
-        {
-          page: 'connection/react-fastapi',
-          when: { sourceType: 'react', targetType: 'py#fast-api' },
-        },
+        'connection/react-trpc',
+        'connection/react-fastapi',
+        'connection/react-agui',
+        'connection/react-py-strands-agent',
       ],
     };
 
-    it('fetches only matching guide pages when options narrow', async () => {
-      await fetchGuidePagesForGenerator(
+    beforeEach(() => {
+      vi.restoreAllMocks();
+      // Force fetchLocalGuide to miss so we exercise the fetch() fallback,
+      // then return per-URL content from the `variants` table.
+      vi.spyOn(fs, 'existsSync').mockReturnValue(false);
+      vi.spyOn(globalThis, 'fetch').mockImplementation((url: any) => {
+        const match = /\/guides\/(.+)\.mdx/.exec(String(url));
+        if (!match) return Promise.resolve(new Response('', { status: 404 }));
+        const key = `${match[1]}.mdx`;
+        const body = variants[key];
+        if (body === undefined) {
+          return Promise.resolve(new Response('', { status: 404 }));
+        }
+        return Promise.resolve(new Response(body));
+      });
+    });
+
+    it('returns only the variants whose frontmatter `when` matches the options', async () => {
+      const result = await fetchGuidePagesForGenerator(
         connectionInfo,
         [connectionInfo],
         undefined,
         undefined,
         { sourceType: 'react', targetType: 'ts#trpc-api' },
       );
-      const urls = fetchMock.mock.calls.map((c) => c[0] as string);
-      expect(urls.some((u) => u.endsWith('/connection.mdx'))).toBe(true);
-      expect(urls.some((u) => u.endsWith('/connection/react-trpc.mdx'))).toBe(
-        true,
-      );
-      expect(
-        urls.some((u) => u.endsWith('/connection/react-fastapi.mdx')),
-      ).toBe(false);
+      expect(result).toContain('OVERVIEW_BODY');
+      expect(result).toContain('REACT_TRPC_BODY');
+      expect(result).not.toContain('REACT_FASTAPI_BODY');
+      expect(result).not.toContain('REACT_AGUI_BODY');
+      expect(result).not.toContain('REACT_PY_STRANDS_BODY');
     });
 
-    it('fetches every guide page when options are omitted', async () => {
-      await fetchGuidePagesForGenerator(connectionInfo, [connectionInfo]);
-      const urls = fetchMock.mock.calls.map((c) => c[0] as string);
-      expect(urls.some((u) => u.endsWith('/connection/react-trpc.mdx'))).toBe(
-        true,
+    it('distinguishes variants that differ only by a third option key', async () => {
+      const agui = await fetchGuidePagesForGenerator(
+        connectionInfo,
+        [connectionInfo],
+        undefined,
+        undefined,
+        {
+          sourceType: 'react',
+          targetType: 'py#strands-agent',
+          protocol: 'AG-UI',
+        },
       );
-      expect(
-        urls.some((u) => u.endsWith('/connection/react-fastapi.mdx')),
-      ).toBe(true);
+      expect(agui).toContain('REACT_AGUI_BODY');
+      expect(agui).not.toContain('REACT_PY_STRANDS_BODY');
+
+      const http = await fetchGuidePagesForGenerator(
+        connectionInfo,
+        [connectionInfo],
+        undefined,
+        undefined,
+        {
+          sourceType: 'react',
+          targetType: 'py#strands-agent',
+          protocol: 'HTTP',
+        },
+      );
+      expect(http).toContain('REACT_PY_STRANDS_BODY');
+      expect(http).not.toContain('REACT_AGUI_BODY');
+    });
+
+    it('returns every variant when no options are supplied', async () => {
+      const result = await fetchGuidePagesForGenerator(connectionInfo, [
+        connectionInfo,
+      ]);
+      expect(result).toContain('OVERVIEW_BODY');
+      expect(result).toContain('REACT_TRPC_BODY');
+      expect(result).toContain('REACT_FASTAPI_BODY');
+      expect(result).toContain('REACT_AGUI_BODY');
+      expect(result).toContain('REACT_PY_STRANDS_BODY');
+    });
+
+    it('returns an Unsupported combination warning when no variant matches', async () => {
+      const result = await fetchGuidePagesForGenerator(
+        connectionInfo,
+        [connectionInfo],
+        undefined,
+        undefined,
+        { sourceType: 'ts#trpc-api', targetType: 'smithy', protocol: 'HTTP' },
+      );
+      expect(result).toContain('Unsupported combination');
+      expect(result).toContain('sourceType = ts#trpc-api');
+      expect(result).toContain('Supported combinations:');
+      // The warning should enumerate the known-good predicates.
+      expect(result).toMatch(/react.*ts#trpc-api/);
+    });
+
+    it('still shows partial matches when not every predicate key is supplied', async () => {
+      // No protocol supplied — both protocol-tagged pages are kept.
+      const result = await fetchGuidePagesForGenerator(
+        connectionInfo,
+        [connectionInfo],
+        undefined,
+        undefined,
+        { sourceType: 'react', targetType: 'py#strands-agent' },
+      );
+      // With a partial selection we don't emit an Unsupported warning.
+      expect(result).not.toContain('Unsupported combination');
+      expect(result).toContain('REACT_AGUI_BODY');
+      expect(result).toContain('REACT_PY_STRANDS_BODY');
+    });
+
+    it('surfaces frontmatter keys in the filterable-options list', async () => {
+      const rendered = await renderFilterableOptionsAsync(connectionInfo);
+      expect(rendered).toContain('sourceType:');
+      expect(rendered).toContain('targetType:');
+      expect(rendered).toContain('protocol:');
+      // The enums come from the union of frontmatter values, sorted into
+      // some stable order — just make sure the expected values appear.
+      expect(rendered).toMatch(/sourceType: react\b/);
+      expect(rendered).toMatch(/protocol: .*AG-UI/);
     });
   });
 

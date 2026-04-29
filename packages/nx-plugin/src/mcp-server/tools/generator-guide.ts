@@ -14,9 +14,11 @@ import { PackageManagerSchema } from '../schema';
 /**
  * Add a tool which provides a detailed guide for an individual generator.
  *
- * The tool description points agents at `list-generators` for the list of
- * filterable options, rather than duplicating that inventory in every
- * response here.
+ * `fetchGuidePagesForGenerator` handles both the "narrow by `options`"
+ * case — reading each page's frontmatter `when:` to pick matching variants
+ * — and the "unsupported combination" case, where it returns an explicit
+ * warning instead of empty guide content. The tool description points
+ * agents at `list-generators` for the list of filterable options.
  */
 export const addGeneratorGuideTool = (
   server: McpServer,
@@ -28,13 +30,16 @@ export const addGeneratorGuideTool = (
       description:
         'Tool to retrieve detailed information about a specific generator. ' +
         'Pass `options` with the values you intend to use for any filterable option ' +
-        '(e.g. computeType, iacProvider, auth, uxProvider, protocol) to receive only ' +
-        'the guide content relevant to those choices — this cuts noise and avoids ' +
-        'suggesting configuration from a different branch. The filterable keys and ' +
-        'their valid values for each generator are listed by the `list-generators` ' +
-        'tool; call it first if you are not sure which keys to pass. When `options` ' +
-        'is omitted, every conditional section is included and prefixed with a ' +
-        '`> [!NOTE] Only when …` marker so you can see the branching condition.',
+        '(e.g. computeType, iacProvider, auth, uxProvider, protocol, sourceType, targetType) ' +
+        'to receive only the guide content relevant to those choices — this cuts noise ' +
+        'and avoids suggesting configuration from a different branch. The filterable keys ' +
+        'and their valid values for each generator are listed by the `list-generators` ' +
+        'tool; call it first if you are not sure which keys to pass. When the combination ' +
+        'you pick is not supported by the generator (e.g. connection from ts#trpc-api ' +
+        'to smithy), the tool returns an "Unsupported combination" warning with the ' +
+        'list of supported pairs. When `options` is omitted, every conditional section ' +
+        'is included and prefixed with a `> [!NOTE] Only when …` marker so you can see ' +
+        'the branching condition.',
       inputSchema: {
         packageManager: PackageManagerSchema,
         generator: z.enum(generators.map((g) => g.id)),
@@ -54,6 +59,23 @@ export const addGeneratorGuideTool = (
         );
       }
 
+      const guide = await fetchGuidePagesForGenerator(
+        generator,
+        generators,
+        packageManager,
+        undefined,
+        options,
+      );
+
+      // `fetchGuidePagesForGenerator` returns an "Unsupported combination"
+      // warning as its whole output when the agent's options pick a
+      // combination none of the variant pages cover. In that case there's
+      // no point rendering the `## <generator>` summary header — the
+      // warning is self-contained and already leads with a `## <id>` line.
+      if (guide.startsWith(`## ${generator.id}\n`)) {
+        return { content: [{ type: 'text' as const, text: guide }] };
+      }
+
       return {
         content: [
           {
@@ -62,13 +84,7 @@ export const addGeneratorGuideTool = (
 
 # Guide
 
-${await fetchGuidePagesForGenerator(
-  generator,
-  generators,
-  packageManager,
-  undefined,
-  options,
-)}
+${guide}
 `,
           },
         ],
