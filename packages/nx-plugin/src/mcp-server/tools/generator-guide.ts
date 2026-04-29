@@ -67,13 +67,11 @@ export const addGeneratorGuideTool = (
         options,
       );
 
-      // `fetchGuidePagesForGenerator` returns an "Unsupported combination"
-      // warning as its whole output when the agent's options pick a
-      // combination none of the variant pages cover. In that case there's
-      // no point rendering the `## <generator>` summary header — the
-      // warning is self-contained and already leads with a `## <id>` line.
-      if (guide.startsWith(`## ${generator.id}\n`)) {
-        return { content: [{ type: 'text' as const, text: guide }] };
+      // An unsupported combination renders its own self-contained warning
+      // (leads with `## <id>` and lists the supported predicates), so
+      // return it directly without the usual guide header.
+      if (guide.kind === 'unsupported') {
+        return { content: [{ type: 'text' as const, text: guide.content }] };
       }
 
       return {
@@ -84,7 +82,7 @@ export const addGeneratorGuideTool = (
 
 # Guide
 
-${guide}
+${guide.content}
 `,
           },
         ],

@@ -127,11 +127,27 @@ Regular Starlight `<Tabs>` are rendered on the docs site as visible tabs. If a t
 </Tabs>
 ```
 
+#### Page-level frontmatter `when:`
+
+If a generator has so many combinations that inline `<OptionFilter>` blocks become unreadable (in practice this is just the `connection` generator today), split each combination into its own guide page and add a `when:` predicate to the page's frontmatter. The MCP server fetches every page listed for the generator, keeps only those whose `when:` matches the agent's `options`, and warns with "Unsupported combination" + the list of supported predicates when the agent picks values that don't match any variant.
+
+```mdx
+---
+title: React to tRPC
+when:
+  sourceType: react
+  targetType: ts#trpc-api
+---
+```
+
+Array values are OR'd within a key (`protocol: [HTTP, A2A]` matches either), and keys are AND'd across the predicate. An `overview` page with no `when:` is always included. Use this only when per-combination prose genuinely diverges — for conditional paragraphs or code blocks inside a single guide, stick with `<OptionFilter>` / `<Tabs _filter>`.
+
 #### When to choose each
 
 - **`<OptionFilter>`** — content that _doesn't apply_ to some options (hides the mismatch). **Don't nest `<OptionFilter>` blocks inside each other** — the docs site renders them as stacked indented stanzas which is confusing. If you need option-dependent content inside an already-filtered section, use `<Tabs>` with `_filter` on each `<TabItem>` instead.
 - **`<Infrastructure>`** — CDK vs Terraform side-by-side that the reader compares visually.
 - **`<Tabs _filter>`** — any other "A vs B" switch where the site benefits from both variants being visible but an MCP agent should only see one. Also the right choice for option-dependent content inside an `<OptionFilter>` section.
+- **Frontmatter `when:`** — one guide page per supported combination, for generators like `connection` where every combination wants its own prose.
 
 Running `pnpm nx start docs` shows your changes with the filter bar live. Running `pnpm nx mcp-inspect @aws/nx-plugin` starts the MCP server against your local guides so you can call `generator-guide` with various `options` and verify the output an agent would receive.
 

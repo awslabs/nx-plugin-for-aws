@@ -14,12 +14,7 @@ export default defineConfig({
     dir: path.resolve(__dirname, '../../dist/packages/nx-plugin-mcp/bin'),
     entryFileNames: 'aws-nx-mcp.js',
     format: 'cjs',
-    // Inline every `await import()` back into the main chunk. Without this,
-    // rolldown emits separate chunks for the unified/remark ESM deps the
-    // guide pipeline loads — but the published MCP binary ships alone
-    // (no node_modules beside it), so those separate chunks would fail
-    // to resolve at runtime. Turning code splitting off gives us a single
-    // self-contained CJS file with the whole dep graph baked in.
+    // Keep the bundle self-contained — the published binary ships alone.
     inlineDynamicImports: true,
     codeSplitting: false,
   },

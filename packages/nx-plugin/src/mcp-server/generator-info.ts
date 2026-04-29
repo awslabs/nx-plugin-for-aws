@@ -13,6 +13,7 @@ import {
 import { postProcessGuideWithRemark } from './guide-pipeline';
 import fs from 'fs';
 import path from 'path';
+import yaml from 'js-yaml';
 
 // Re-export so existing callers of `generator-info` continue working.
 export { buildNxCommand } from './guide-render';
@@ -172,26 +173,22 @@ const renderUnsupportedMessage = (
   const requestedDesc = Object.entries(requested)
     .map(([k, v]) => `${k} = ${v}`)
     .join(', ');
-  const lines: string[] = [];
-  lines.push(`## ${info.id}`);
-  lines.push('');
-  lines.push(
-    `> [!WARNING] Unsupported combination: ${requestedDesc}. ` +
-      `The \`${info.id}\` generator has no guide variant matching this combination — running it will likely fail.`,
-  );
-  lines.push('');
-  lines.push('Supported combinations:');
-  for (const pred of predicates) {
-    const parts = Object.entries(pred).map(
-      ([k, vs]) => `${k} = ${vs.join(' | ')}`,
-    );
-    lines.push(`- ${parts.join(', ')}`);
-  }
-  lines.push('');
-  lines.push(
-    'Pick a combination from the list above, or choose a different generator.',
-  );
-  return lines.join('\n');
+  const supportedList = predicates
+    .map((pred) => {
+      const parts = Object.entries(pred).map(
+        ([k, vs]) => `${k} = ${vs.join(' | ')}`,
+      );
+      return `- ${parts.join(', ')}`;
+    })
+    .join('\n');
+  return `## ${info.id}
+
+> [!WARNING] Unsupported combination: ${requestedDesc}. The \`${info.id}\` generator has no guide variant matching this combination — running it will likely fail.
+
+Supported combinations:
+${supportedList}
+
+Pick a combination from the list above, or choose a different generator.`;
 };
 
 /**
@@ -230,26 +227,17 @@ export const renderFilterableOptionsAsync = async (
 };
 
 const formatFilterableOptions = (
-  info: NxGeneratorInfo,
+  _info: NxGeneratorInfo,
   filterable: FilterableOption[],
 ): string => {
   if (filterable.length === 0) return '';
-  const lines: string[] = [];
-  lines.push(
-    '`generator-guide` options (pass these as the `options` map to narrow the guide):',
-  );
-  for (const opt of filterable) {
-    const def = opt.default ? ` (default: ${opt.default})` : '';
-    lines.push(`- ${opt.key}: ${opt.enum.join(' | ')}${def}`);
-  }
-  lines.push('');
-  lines.push(
-    `Before running this generator, call \`generator-guide\` with \`generator: "${info.id}"\` and ` +
-      '`options` populated with the values you intend to use for any of the keys above. ' +
-      'This returns guide content narrowed to the branches relevant to those choices and ' +
-      'keeps you from mixing configuration from a different variant.',
-  );
-  return lines.join('\n');
+  const entries = filterable
+    .map((opt) => {
+      const def = opt.default ? ` (default: ${opt.default})` : '';
+      return `- ${opt.key}: ${opt.enum.join(' | ')}${def}`;
+    })
+    .join('\n');
+  return `\`generator-guide\` options:\n${entries}`;
 };
 
 /**
@@ -268,6 +256,17 @@ interface FetchedGuide {
 }
 
 /**
+ * Result of `fetchGuidePagesForGenerator`. When the agent's options pick
+ * a combination no variant page matches, `kind` is `'unsupported'` and
+ * `content` holds an explanatory warning the tool should surface on its
+ * own (without wrapping it in the usual `## <id>` summary). Otherwise
+ * `content` is the rendered guide text.
+ */
+export type GuideFetchResult =
+  | { kind: 'ok'; content: string }
+  | { kind: 'unsupported'; content: string };
+
+/**
  * Retrieve the markdown guide pages for a generator.
  *
  * Every page listed in `guidePages` (or the kebab-cased generator id when
@@ -281,8 +280,8 @@ interface FetchedGuide {
  *     `<OptionFilter when={{…}}>` (AND across keys, OR within a key).
  *
  * If the agent has supplied enough options to identify a combination and
- * no variant page matches, we return an "Unsupported combination" warning
- * with the list of known-good predicates instead of an empty guide.
+ * no variant page matches, the result is `{ kind: 'unsupported' }` and the
+ * caller surfaces the warning directly.
  */
 export const fetchGuidePagesForGenerator = async (
   info: NxGeneratorInfo,
@@ -290,7 +289,7 @@ export const fetchGuidePagesForGenerator = async (
   packageManager?: string,
   snippetContentProvider?: SnippetContentProvider,
   options?: Record<string, string>,
-): Promise<string> => {
+): Promise<GuideFetchResult> => {
   const fetched = await fetchGuideFrontmatters(info);
 
   const unsupported = describeUnsupportedCombinationFromFetched(
@@ -298,7 +297,9 @@ export const fetchGuidePagesForGenerator = async (
     fetched,
     options,
   );
-  if (unsupported !== undefined) return unsupported;
+  if (unsupported !== undefined) {
+    return { kind: 'unsupported', content: unsupported };
+  }
 
   const kept = fetched.filter((g) => {
     if (!g.frontmatter.when) return true;
@@ -317,7 +318,7 @@ export const fetchGuidePagesForGenerator = async (
       ),
     ),
   );
-  return processed.join('\n\n');
+  return { kind: 'ok', content: processed.join('\n\n') };
 };
 
 /**
@@ -359,10 +360,6 @@ const fetchGuideRaw = async (page: string): Promise<string> => {
 /**
  * Parse the leading YAML frontmatter off an MDX page. Returns `{ body,
  * frontmatter }` with `body` stripped of the leading `---…---` block.
- *
- * We only care about a small subset (`title`, `when:`), so we run a
- * lightweight hand-written parser rather than pulling in `js-yaml` — the
- * shape is tightly constrained by the content collection schema.
  */
 const splitFrontmatter = (
   raw: string,
@@ -372,153 +369,29 @@ const splitFrontmatter = (
 } => {
   const match = /^---\n([\s\S]*?)\n---\n?/.exec(raw);
   if (!match) return { body: raw, frontmatter: {} };
-  const yaml = match[1];
   const body = raw.slice(match[0].length);
-  return { body, frontmatter: parseFrontmatterYaml(yaml) };
-};
-
-/**
- * Parse the subset of YAML the docs content-collection schema allows for
- * frontmatter: top-level `title:` / `description:` / `generator:` / `when:`.
- * `when:` values are `key: value`, `key: [v1, v2]`, or
- *   key:
- *     - v1
- *     - v2
- * Everything else is ignored — we only need `when` and `title` for MCP
- * behaviour.
- */
-const parseFrontmatterYaml = (
-  yaml: string,
-): { when?: Record<string, string[]>; title?: string } => {
-  const lines = yaml.split('\n');
-  const out: { when?: Record<string, string[]>; title?: string } = {};
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-    if (!line || /^\s*#/.test(line)) {
-      i++;
-      continue;
-    }
-    const top = /^([A-Za-z_][A-Za-z0-9_]*):(.*)$/.exec(line);
-    if (!top) {
-      i++;
-      continue;
-    }
-    const key = top[1];
-    const rest = top[2].trim();
-    if (key === 'title') {
-      out.title = stripQuotes(rest);
-      i++;
-      continue;
-    }
-    if (key === 'when') {
-      const when: Record<string, string[]> = {};
-      if (rest) {
-        // Inline flow-style: when: { key: value, key2: [a, b] } — unlikely,
-        // but handle it.
-        i++;
-        const parsed = tryParseFlowObject(rest);
-        if (parsed) Object.assign(when, parsed);
-        out.when = when;
-        continue;
-      }
-      i++;
-      while (i < lines.length) {
-        const child = lines[i];
-        if (!child.startsWith('  ')) break; // unindented = next top-level key
-        const m = /^\s{2}([A-Za-z_][A-Za-z0-9_-]*):(.*)$/.exec(child);
-        if (!m) {
-          i++;
-          continue;
-        }
-        const subKey = m[1];
-        const subRest = m[2].trim();
-        if (subRest === '' || subRest === '[]') {
-          // block list
-          const values: string[] = [];
-          i++;
-          while (i < lines.length) {
-            const listLine = lines[i];
-            const lm = /^\s{4}-\s*(.+)\s*$/.exec(listLine);
-            if (!lm) break;
-            values.push(stripQuotes(lm[1]));
-            i++;
-          }
-          when[subKey] = values;
-          continue;
-        }
-        if (subRest.startsWith('[')) {
-          // flow list
-          const end = subRest.lastIndexOf(']');
-          const inner = subRest.slice(1, end >= 0 ? end : subRest.length);
-          when[subKey] = inner
-            .split(',')
-            .map((s) => stripQuotes(s.trim()))
-            .filter((s) => s.length > 0);
-          i++;
-          continue;
-        }
-        when[subKey] = [stripQuotes(subRest)];
-        i++;
-      }
-      out.when = when;
-      continue;
-    }
-    i++;
+  let parsed: unknown;
+  try {
+    parsed = yaml.load(match[1]);
+  } catch {
+    return { body, frontmatter: {} };
   }
-  return out;
-};
-
-const stripQuotes = (s: string): string => {
-  const trimmed = s.trim();
-  if (
-    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-    (trimmed.startsWith("'") && trimmed.endsWith("'"))
-  ) {
-    return trimmed.slice(1, -1);
+  if (!parsed || typeof parsed !== 'object') {
+    return { body, frontmatter: {} };
   }
-  return trimmed;
-};
-
-const tryParseFlowObject = (
-  s: string,
-): Record<string, string[]> | undefined => {
-  // `{ key: value, key2: [a, b] }` — used rarely in frontmatter, but keep
-  // support so authors have a shorthand.
-  const trimmed = s.trim();
-  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return undefined;
-  const inner = trimmed.slice(1, -1);
-  const out: Record<string, string[]> = {};
-  // Split on commas not inside brackets.
-  const entries: string[] = [];
-  let depth = 0;
-  let start = 0;
-  for (let i = 0; i < inner.length; i++) {
-    const ch = inner[i];
-    if (ch === '[' || ch === '{') depth++;
-    else if (ch === ']' || ch === '}') depth--;
-    else if (ch === ',' && depth === 0) {
-      entries.push(inner.slice(start, i));
-      start = i + 1;
+  const obj = parsed as Record<string, unknown>;
+  const frontmatter: { when?: Record<string, string[]>; title?: string } = {};
+  if (typeof obj.title === 'string') frontmatter.title = obj.title;
+  if (obj.when && typeof obj.when === 'object' && !Array.isArray(obj.when)) {
+    const when: Record<string, string[]> = {};
+    for (const [key, value] of Object.entries(
+      obj.when as Record<string, unknown>,
+    )) {
+      when[key] = Array.isArray(value) ? value.map(String) : [String(value)];
     }
+    frontmatter.when = when;
   }
-  entries.push(inner.slice(start));
-  for (const entry of entries) {
-    const m = /^\s*([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(.+?)\s*$/.exec(entry);
-    if (!m) continue;
-    const key = m[1];
-    const value = m[2].trim();
-    if (value.startsWith('[') && value.endsWith(']')) {
-      out[key] = value
-        .slice(1, -1)
-        .split(',')
-        .map((x) => stripQuotes(x.trim()))
-        .filter((x) => x.length > 0);
-    } else {
-      out[key] = [stripQuotes(value)];
-    }
-  }
-  return out;
+  return { body, frontmatter };
 };
 
 /**

@@ -536,11 +536,12 @@ REACT_PY_STRANDS_BODY`,
         undefined,
         { sourceType: 'react', targetType: 'ts#trpc-api' },
       );
-      expect(result).toMatch(bodyMatcher('OVERVIEW_BODY'));
-      expect(result).toMatch(bodyMatcher('REACT_TRPC_BODY'));
-      expect(result).not.toMatch(bodyMatcher('REACT_FASTAPI_BODY'));
-      expect(result).not.toMatch(bodyMatcher('REACT_AGUI_BODY'));
-      expect(result).not.toMatch(bodyMatcher('REACT_PY_STRANDS_BODY'));
+      expect(result.kind).toBe('ok');
+      expect(result.content).toMatch(bodyMatcher('OVERVIEW_BODY'));
+      expect(result.content).toMatch(bodyMatcher('REACT_TRPC_BODY'));
+      expect(result.content).not.toMatch(bodyMatcher('REACT_FASTAPI_BODY'));
+      expect(result.content).not.toMatch(bodyMatcher('REACT_AGUI_BODY'));
+      expect(result.content).not.toMatch(bodyMatcher('REACT_PY_STRANDS_BODY'));
     });
 
     it('distinguishes variants that differ only by a third option key', async () => {
@@ -555,8 +556,8 @@ REACT_PY_STRANDS_BODY`,
           protocol: 'AG-UI',
         },
       );
-      expect(agui).toMatch(bodyMatcher('REACT_AGUI_BODY'));
-      expect(agui).not.toMatch(bodyMatcher('REACT_PY_STRANDS_BODY'));
+      expect(agui.content).toMatch(bodyMatcher('REACT_AGUI_BODY'));
+      expect(agui.content).not.toMatch(bodyMatcher('REACT_PY_STRANDS_BODY'));
 
       const http = await fetchGuidePagesForGenerator(
         connectionInfo,
@@ -569,19 +570,19 @@ REACT_PY_STRANDS_BODY`,
           protocol: 'HTTP',
         },
       );
-      expect(http).toMatch(bodyMatcher('REACT_PY_STRANDS_BODY'));
-      expect(http).not.toMatch(bodyMatcher('REACT_AGUI_BODY'));
+      expect(http.content).toMatch(bodyMatcher('REACT_PY_STRANDS_BODY'));
+      expect(http.content).not.toMatch(bodyMatcher('REACT_AGUI_BODY'));
     });
 
     it('returns every variant when no options are supplied', async () => {
       const result = await fetchGuidePagesForGenerator(connectionInfo, [
         connectionInfo,
       ]);
-      expect(result).toMatch(bodyMatcher('OVERVIEW_BODY'));
-      expect(result).toMatch(bodyMatcher('REACT_TRPC_BODY'));
-      expect(result).toMatch(bodyMatcher('REACT_FASTAPI_BODY'));
-      expect(result).toMatch(bodyMatcher('REACT_AGUI_BODY'));
-      expect(result).toMatch(bodyMatcher('REACT_PY_STRANDS_BODY'));
+      expect(result.content).toMatch(bodyMatcher('OVERVIEW_BODY'));
+      expect(result.content).toMatch(bodyMatcher('REACT_TRPC_BODY'));
+      expect(result.content).toMatch(bodyMatcher('REACT_FASTAPI_BODY'));
+      expect(result.content).toMatch(bodyMatcher('REACT_AGUI_BODY'));
+      expect(result.content).toMatch(bodyMatcher('REACT_PY_STRANDS_BODY'));
     });
 
     it('returns an Unsupported combination warning when no variant matches', async () => {
@@ -592,11 +593,12 @@ REACT_PY_STRANDS_BODY`,
         undefined,
         { sourceType: 'ts#trpc-api', targetType: 'smithy', protocol: 'HTTP' },
       );
-      expect(result).toContain('Unsupported combination');
-      expect(result).toContain('sourceType = ts#trpc-api');
-      expect(result).toContain('Supported combinations:');
+      expect(result.kind).toBe('unsupported');
+      expect(result.content).toContain('Unsupported combination');
+      expect(result.content).toContain('sourceType = ts#trpc-api');
+      expect(result.content).toContain('Supported combinations:');
       // The warning should enumerate the known-good predicates.
-      expect(result).toMatch(/react.*ts#trpc-api/);
+      expect(result.content).toMatch(/react.*ts#trpc-api/);
     });
 
     it('still shows partial matches when not every predicate key is supplied', async () => {
@@ -609,9 +611,9 @@ REACT_PY_STRANDS_BODY`,
         { sourceType: 'react', targetType: 'py#strands-agent' },
       );
       // With a partial selection we don't emit an Unsupported warning.
-      expect(result).not.toContain('Unsupported combination');
-      expect(result).toMatch(bodyMatcher('REACT_AGUI_BODY'));
-      expect(result).toMatch(bodyMatcher('REACT_PY_STRANDS_BODY'));
+      expect(result.kind).toBe('ok');
+      expect(result.content).toMatch(bodyMatcher('REACT_AGUI_BODY'));
+      expect(result.content).toMatch(bodyMatcher('REACT_PY_STRANDS_BODY'));
     });
 
     it('surfaces frontmatter keys in the filterable-options list', async () => {
@@ -664,8 +666,8 @@ REACT_PY_STRANDS_BODY`,
         });
 
       const result = await fetchGuidePagesForGenerator(info, [info]);
-      expect(result).toContain('LOCAL TRPC CONTENT');
-      expect(result).not.toContain('REMOTE CONTENT');
+      expect(result.content).toContain('LOCAL TRPC CONTENT');
+      expect(result.content).not.toContain('REMOTE CONTENT');
       expect(fetchSpy).not.toHaveBeenCalled();
 
       existsSpy.mockRestore();
@@ -682,7 +684,7 @@ REACT_PY_STRANDS_BODY`,
         );
 
       const result = await fetchGuidePagesForGenerator(info, [info]);
-      expect(result).toContain('REMOTE CONTENT');
+      expect(result.content).toContain('REMOTE CONTENT');
       expect(fetchSpy).toHaveBeenCalledTimes(1);
     });
   });

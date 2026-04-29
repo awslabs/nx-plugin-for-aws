@@ -347,15 +347,15 @@ const applyTabsFilter = (
       surviving.push(child);
       continue;
     }
-    const filterExpr = readExpressionAttr(child, '_filter');
-    if (!filterExpr) {
+    const filterEstree = readEstreeAttr(child, '_filter');
+    if (!filterEstree) {
       surviving.push(child);
       continue;
     }
     anyFiltered = true;
     let predicate: Predicate;
     try {
-      predicate = parseWhenExpression(filterExpr);
+      predicate = parseWhenExpression(filterEstree as never);
     } catch {
       stripFilterAttr(child);
       surviving.push(child);
@@ -576,6 +576,19 @@ const readExpressionAttr = (
   return undefined;
 };
 
+const readEstreeAttr = (
+  node: MdxJsxFlowElement | MdxJsxTextElement,
+  name: string,
+): unknown | undefined => {
+  const attr = findAttr(node, name);
+  if (!attr) return undefined;
+  if (typeof attr.value === 'object' && attr.value !== null) {
+    const expr = attr.value as MdxJsxAttributeValueExpression;
+    return expr.data?.estree;
+  }
+  return undefined;
+};
+
 const findAttr = (
   node: MdxJsxFlowElement | MdxJsxTextElement,
   name: string,
@@ -589,10 +602,10 @@ const findAttr = (
 const parseWhenAttr = (
   node: MdxJsxFlowElement | MdxJsxTextElement,
 ): Predicate | undefined => {
-  const expr = readExpressionAttr(node, 'when');
-  if (!expr) return undefined;
+  const estree = readEstreeAttr(node, 'when');
+  if (!estree) return undefined;
   try {
-    return parseWhenExpression(expr);
+    return parseWhenExpression(estree as never);
   } catch {
     return undefined;
   }

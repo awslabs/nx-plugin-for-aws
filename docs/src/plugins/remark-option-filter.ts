@@ -11,6 +11,7 @@ import type {
   MdxJsxFlowElement,
   MdxJsxTextElement,
 } from 'mdast-util-mdx-jsx';
+import yaml from 'js-yaml';
 import {
   parseWhenExpression,
   type Predicate,
@@ -84,9 +85,19 @@ const loadSchema = (generatorId: string): GeneratorSchema => {
 
 const findFrontmatterGenerator = (tree: Root): string | undefined => {
   for (const child of tree.children) {
-    if (child.type === 'yaml') {
-      const match = /^generator:\s*(.+)$/m.exec(child.value);
-      if (match) return match[1].trim().replace(/^["']|["']$/g, '');
+    if (child.type !== 'yaml') continue;
+    let parsed: unknown;
+    try {
+      parsed = yaml.load(child.value);
+    } catch {
+      continue;
+    }
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      typeof (parsed as { generator?: unknown }).generator === 'string'
+    ) {
+      return (parsed as { generator: string }).generator;
     }
   }
   return undefined;
@@ -97,17 +108,17 @@ const isJsxElement = (
 ): node is MdxJsxFlowElement | MdxJsxTextElement =>
   node.type === 'mdxJsxFlowElement' || node.type === 'mdxJsxTextElement';
 
-const readExpressionAttr = (
+const readEstreeAttr = (
   node: MdxJsxFlowElement | MdxJsxTextElement,
   name: string,
-): string | undefined => {
+): unknown | undefined => {
   const attr = node.attributes.find(
     (a): a is MdxJsxAttribute =>
       a.type === 'mdxJsxAttribute' && a.name === name,
   );
   if (!attr) return undefined;
   if (typeof attr.value === 'object' && attr.value !== null) {
-    return (attr.value as MdxJsxAttributeValueExpression).value;
+    return (attr.value as MdxJsxAttributeValueExpression).data?.estree;
   }
   return undefined;
 };
@@ -119,10 +130,10 @@ const collectOptionFilterPredicates = (tree: Root): Predicate[] => {
     for (const child of children) {
       if (!isJsxElement(child)) continue;
       if (child.name === 'OptionFilter') {
-        const expr = readExpressionAttr(child, 'when');
-        if (expr) {
+        const estree = readEstreeAttr(child, 'when');
+        if (estree) {
           try {
-            predicates.push(parseWhenExpression(expr));
+            predicates.push(parseWhenExpression(estree as never));
           } catch (err) {
             throw new Error(`[remark-option-filter] ${(err as Error).message}`);
           }

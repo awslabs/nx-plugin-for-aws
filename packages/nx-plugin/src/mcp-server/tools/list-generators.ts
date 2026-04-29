@@ -44,11 +44,17 @@ export const addListGeneratorsTool = (
           return `### ${info}${filterable ? `\n${filterable}\n` : ''}`;
         }),
       );
+      const guidance =
+        'Before running any generator below, call `generator-guide` with the ' +
+        "generator's id and `options` populated from its `generator-guide options` " +
+        'list — the guide is returned narrowed to the branches that apply to ' +
+        'those choices, which keeps you from mixing configuration from a ' +
+        'different variant.';
       return {
         content: [
           {
             type: 'text' as const,
-            text: `## Available Generators\n\n${entries.join('\n\n')}\n`,
+            text: `## Available Generators\n\n${guidance}\n\n${entries.join('\n\n')}\n`,
           },
         ],
       };

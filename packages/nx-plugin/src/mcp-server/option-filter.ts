@@ -5,56 +5,52 @@
 
 /**
  * Predicate helpers shared between the MCP guide pipeline and the docs
- * site's client-side filter bar.
+ * site's server-rendered filter bar.
  *
- * The MDX parsing — scanning for OptionFilter / Infrastructure / TabItem
- * `_filter` blocks, handling nesting, rewriting the tree — is done using
- * unified + remark-mdx in `guide-pipeline.ts`. This file stays small and
- * contains just the value-level helpers needed to evaluate a predicate
- * against an options map, plus one regex-based scanner
- * (`collectReferencedKeys`) used by the docs site's filter bar to
- * enumerate referenced keys on a page without pulling tree-sitter into
- * the browser bundle.
+ * Parsing of `<OptionFilter>` blocks is driven by unified + remark-mdx —
+ * `parseWhenExpression` consumes the estree AST attached to the
+ * `mdxJsxAttributeValueExpression` node, not the raw string. The helpers
+ * here stay small and deal only with predicate evaluation and rendering.
  */
 
-export type FilterValue = string | number | boolean;
+import type {
+  ArrayExpression,
+  Literal,
+  Node as EstreeNode,
+  Program,
+  Property,
+} from 'estree';
+
 export type Predicate = Record<string, string[]>;
 
 /**
- * Parse the inside of a `when={{…}}` / `_filter={{…}}` attribute value.
+ * Parse the estree AST of a `when={{…}}` / `_filter={{…}}` JSX attribute
+ * value into a `Predicate`. The estree is the `data.estree` payload that
+ * remark-mdx attaches to every `MdxJsxAttributeValueExpression` node — a
+ * `Program` whose body is a single `ExpressionStatement` wrapping an
+ * `ObjectExpression`.
  *
- * The JSX outer-brace wrapper has already been consumed by the MDX parser,
- * so the expression we receive is the object literal itself:
- *     { computeType: 'Rest', auth: ['IAM', 'Cognito'] }
- *
- * We intentionally accept only string / number / boolean / array-of-scalar
- * literals so we never evaluate arbitrary JavaScript — the docs site runs
- * these predicates in the browser and the MCP server runs them inside the
+ * We accept only string / number / boolean literal values (or arrays of
+ * them) so we never evaluate arbitrary JavaScript: the predicate is
+ * consumed by the docs site in the browser and by the MCP server in the
  * user's shell.
  */
-export const parseWhenExpression = (expression: string): Predicate => {
-  const trimmed = expression.trim();
-  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) {
+export const parseWhenExpression = (estree: EstreeNode): Predicate => {
+  const expression = extractExpression(estree);
+  if (expression.type !== 'ObjectExpression') {
     throw new Error(
-      `[option-filter] Expected object literal in 'when' prop, got: ${expression}`,
+      `[option-filter] Expected object literal in 'when' prop, got ${expression.type}`,
     );
   }
-  const body = trimmed.slice(1, -1).trim();
-  if (body === '') return {};
-
   const result: Predicate = {};
-  for (const raw of splitTopLevelCommas(body)) {
-    const segment = raw.trim();
-    if (!segment) continue;
-    const colonIdx = indexOfUnquoted(segment, ':');
-    if (colonIdx < 0) {
+  for (const prop of expression.properties) {
+    if (prop.type !== 'Property') {
       throw new Error(
-        `[option-filter] Expected 'key: value' entries in 'when' prop, got: ${segment}`,
+        `[option-filter] Unsupported entry type '${prop.type}' in 'when' prop`,
       );
     }
-    const key = unquote(segment.slice(0, colonIdx).trim());
-    const valueRaw = segment.slice(colonIdx + 1).trim();
-    result[key] = parseValue(valueRaw);
+    const key = extractKey(prop);
+    result[key] = extractValues(prop.value);
   }
   return result;
 };
@@ -103,147 +99,63 @@ export const describePredicate = (
   return `${not ? 'Not when ' : 'Only when '}${parts.join(', ')}`;
 };
 
-/**
- * Collect every option key referenced by `<OptionFilter when={{…}}>` blocks
- * in a raw MDX source. Used by the docs site's filter bar to decide which
- * dropdowns to render for a given guide page.
- *
- * Uses a tolerant regex because this runs at dev-server startup and must
- * cope with partially-typed MDX. The MCP server side uses the full AST
- * via unified/remark-mdx — this is just a fast build-time probe.
- */
-export const collectReferencedKeys = (text: string): string[] => {
-  const keys = new Set<string>();
-  const OPEN = /<OptionFilter\b/g;
-  let m: RegExpExecArray | null;
-  while ((m = OPEN.exec(text)) !== null) {
-    const whenIdx = text.indexOf('when', m.index + m[0].length);
-    if (whenIdx < 0) continue;
-    const eqIdx = text.indexOf('=', whenIdx);
-    if (eqIdx < 0) continue;
-    let i = eqIdx + 1;
-    while (i < text.length && /\s/.test(text[i])) i++;
-    if (text[i] !== '{') continue;
-    let depth = 0;
-    let j = i;
-    let quote: string | undefined;
-    while (j < text.length) {
-      const ch = text[j];
-      if (quote) {
-        if (ch === '\\') j += 2;
-        else {
-          if (ch === quote) quote = undefined;
-          j++;
-        }
-        continue;
-      }
-      if (ch === '"' || ch === "'") {
-        quote = ch;
-        j++;
-        continue;
-      }
-      if (ch === '{') depth++;
-      else if (ch === '}') {
-        depth--;
-        if (depth === 0) {
-          j++;
-          break;
-        }
-      }
-      j++;
-    }
-    const exprOuter = text.slice(i + 1, j - 1).trim();
-    try {
-      const pred = parseWhenExpression(exprOuter);
-      for (const k of Object.keys(pred)) keys.add(k);
-    } catch {
-      // Partially-typed / malformed — skip.
-    }
-  }
-  return [...keys];
-};
-
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-const indexOfUnquoted = (s: string, target: string): number => {
-  let quote: string | undefined;
-  for (let i = 0; i < s.length; i++) {
-    const ch = s[i];
-    if (quote) {
-      if (ch === '\\') i++;
-      else if (ch === quote) quote = undefined;
-      continue;
+const extractExpression = (estree: EstreeNode): EstreeNode => {
+  // remark-mdx wraps the attribute expression in a Program with a single
+  // ExpressionStatement. Unwrap it so callers see the object literal
+  // directly.
+  if (estree.type === 'Program') {
+    const program = estree as Program;
+    if (program.body.length === 1) {
+      const stmt = program.body[0];
+      if (stmt.type === 'ExpressionStatement') {
+        return stmt.expression as EstreeNode;
+      }
     }
-    if (ch === '"' || ch === "'") {
-      quote = ch;
-      continue;
-    }
-    if (ch === target) return i;
   }
-  return -1;
+  return estree;
 };
 
-const unquote = (raw: string): string => {
-  const trimmed = raw.trim();
-  if (
-    (trimmed.startsWith("'") && trimmed.endsWith("'")) ||
-    (trimmed.startsWith('"') && trimmed.endsWith('"'))
-  ) {
-    return trimmed.slice(1, -1);
-  }
-  return trimmed;
-};
-
-const parseValue = (raw: string): string[] => {
-  const trimmed = raw.trim();
-  if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
-    const inner = trimmed.slice(1, -1).trim();
-    if (!inner) return [];
-    return splitTopLevelCommas(inner).map((v) => parseScalar(v.trim()));
-  }
-  return [parseScalar(trimmed)];
-};
-
-const splitTopLevelCommas = (s: string): string[] => {
-  const parts: string[] = [];
-  let depth = 0;
-  let quote: string | undefined;
-  let start = 0;
-  for (let i = 0; i < s.length; i++) {
-    const ch = s[i];
-    if (quote) {
-      if (ch === '\\') i++;
-      else if (ch === quote) quote = undefined;
-      continue;
-    }
-    if (ch === '"' || ch === "'") {
-      quote = ch;
-      continue;
-    }
-    if (ch === '[' || ch === '{' || ch === '(') depth++;
-    else if (ch === ']' || ch === '}' || ch === ')') depth--;
-    else if (ch === ',' && depth === 0) {
-      parts.push(s.slice(start, i));
-      start = i + 1;
-    }
-  }
-  parts.push(s.slice(start));
-  return parts;
-};
-
-const parseScalar = (raw: string): string => {
-  const trimmed = raw.trim();
-  if (
-    (trimmed.startsWith("'") && trimmed.endsWith("'")) ||
-    (trimmed.startsWith('"') && trimmed.endsWith('"'))
-  ) {
-    return trimmed.slice(1, -1);
-  }
-  if (trimmed === 'true' || trimmed === 'false') return trimmed;
-  if (/^-?\d+(\.\d+)?$/.test(trimmed)) return trimmed;
+const extractKey = (prop: Property): string => {
+  const k = prop.key;
+  if (k.type === 'Identifier') return k.name;
+  if (k.type === 'Literal' && typeof k.value === 'string') return k.value;
   throw new Error(
-    `[option-filter] Unsupported value '${trimmed}' in 'when' prop. Use string, array, number, or boolean literals.`,
+    `[option-filter] Unsupported key type '${k.type}' in 'when' prop`,
+  );
+};
+
+const extractValues = (value: Property['value']): string[] => {
+  if (value.type === 'ArrayExpression') {
+    const arr = value as ArrayExpression;
+    return arr.elements.map((el) => {
+      if (el === null || el.type === 'SpreadElement') {
+        throw new Error(
+          `[option-filter] Unsupported array element in 'when' prop`,
+        );
+      }
+      return extractScalar(el);
+    });
+  }
+  return [extractScalar(value)];
+};
+
+const extractScalar = (node: EstreeNode): string => {
+  if (node.type === 'Literal') {
+    const lit = node as Literal;
+    if (
+      typeof lit.value === 'string' ||
+      typeof lit.value === 'number' ||
+      typeof lit.value === 'boolean'
+    ) {
+      return String(lit.value);
+    }
+  }
+  throw new Error(
+    `[option-filter] Unsupported value type '${node.type}' in 'when' prop. ` +
+      'Use string, number, boolean literals or arrays of them.',
   );
 };
