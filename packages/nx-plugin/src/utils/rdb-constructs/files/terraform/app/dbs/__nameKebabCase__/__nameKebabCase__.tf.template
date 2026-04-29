@@ -10,6 +10,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 6.33"
     }
+    null = {
+      source  = "hashicorp/null"
+      version = "~> 3.6"
+    }
     random = {
       source  = "hashicorp/random"
       version = "~> 3.6"
@@ -81,6 +85,12 @@ variable "tags" {
   default     = {}
 }
 
+variable "docker_image_tag" {
+  description = "Docker image tag for the migration handler. Defaults to the tag built by the Nx docker target."
+  type        = string
+  default     = "<%= dockerImageTag %>"
+}
+
 data "aws_region" "current" {}
 data "aws_caller_identity" "current" {}
 
@@ -91,11 +101,6 @@ resource "random_string" "suffix" {
 }
 
 locals {
-  migration_bundle_path = "${path.module}/../../../../../../../<%- migrationBundleDir %>"
-  migration_bundle_hash = sha256(join("", [
-    for file in sort(fileset(local.migration_bundle_path, "**")) :
-    "${file}:${filesha256("${local.migration_bundle_path}/${file}")}"
-  ]))
   create_db_user_bundle_path = "${path.module}/../../../../../../../<%- createDbUserBundleDir %>"
   migration_function_name = "<%= nameKebabCase %>-migration-${random_string.suffix.result}"
   create_db_user_function_name = "<%= nameKebabCase %>-create-db-user-${random_string.suffix.result}"
@@ -173,7 +178,7 @@ module "appconfig" {
 resource "aws_ecr_repository" "migration_handler" {
   #checkov:skip=CKV_AWS_136:AES256 encryption is sufficient for ECR repositories
   name                 = "<%= nameKebabCase %>-migration-${random_string.suffix.result}"
-  image_tag_mutability = "IMMUTABLE"
+  image_tag_mutability = "MUTABLE"
   force_delete         = true
 
   image_scanning_configuration {
@@ -220,17 +225,22 @@ resource "aws_ecr_repository_policy" "migration_handler" {
   })
 }
 
+data "external" "docker_digest" {
+  program = ["sh", "-c", "echo '{\"digest\":\"'$(docker inspect ${var.docker_image_tag} --format '{{.Id}}')'\"}' "]
+}
+
 resource "null_resource" "docker_publish" {
   triggers = {
-    bundle_hash    = local.migration_bundle_hash
-    repository_url = aws_ecr_repository.migration_handler.repository_url
+    docker_digest    = data.external.docker_digest.result.digest
+    repository_url   = aws_ecr_repository.migration_handler.repository_url
+    docker_image_tag = var.docker_image_tag
   }
 
   provisioner "local-exec" {
     command = <<-EOT
       aws ecr get-login-password --region ${data.aws_region.current.region} | docker login --username AWS --password-stdin ${self.triggers.repository_url}
-      docker build --platform linux/arm64 --provenance=false --build-arg AWS_REGION=${data.aws_region.current.region} -t ${self.triggers.repository_url}:${self.triggers.bundle_hash} ${local.migration_bundle_path}
-      docker push ${self.triggers.repository_url}:${self.triggers.bundle_hash}
+      docker tag ${self.triggers.docker_image_tag} ${self.triggers.repository_url}:latest
+      docker push ${self.triggers.repository_url}:latest
     EOT
   }
 
@@ -468,7 +478,7 @@ resource "aws_lambda_function" "create_db_user" {
   role             = aws_iam_role.create_db_user.arn
   handler          = "index.handler"
   source_code_hash = data.archive_file.create_db_user_zip.output_base64sha256
-  runtime          = "nodejs22.x"
+  runtime          = "nodejs24.x"
   timeout          = 60
   architectures    = ["arm64"]
 
@@ -538,7 +548,7 @@ resource "aws_lambda_function" "migration_handler" {
   package_type  = "Image"
   function_name = local.migration_function_name
   role          = aws_iam_role.migration_handler.arn
-  image_uri     = "${aws_ecr_repository.migration_handler.repository_url}:${local.migration_bundle_hash}"
+  image_uri     = "${aws_ecr_repository.migration_handler.repository_url}:latest"
   memory_size   = 1024
   timeout       = 300
   architectures = ["arm64"]
@@ -580,7 +590,7 @@ resource "aws_lambda_function" "migration_handler" {
 
 resource "null_resource" "migration_trigger" {
   triggers = {
-    bundle_hash    = local.migration_bundle_hash
+    docker_digest  = data.external.docker_digest.result.digest
     cluster_arn    = module.aurora.cluster_arn
     database_ready = module.aurora.database_ready
     function_name  = aws_lambda_function.migration_handler.function_name

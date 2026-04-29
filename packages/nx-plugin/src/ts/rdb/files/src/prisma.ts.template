@@ -6,9 +6,15 @@ import { PrismaClient } from '../generated/prisma/client.js';
 import { Pool } from 'pg';
 import { PrismaClient } from '../generated/prisma/client.js';
 <%_ } _%>
+import {
+  DB_PACKAGE_NAME,
+  LOCAL_DB_HOST,
+  LOCAL_DB_NAME,
+  LOCAL_DB_PASSWORD,
+  LOCAL_DB_PORT,
+  LOCAL_DB_USER,
+} from './constants.js';
 import { getDatabaseConfig } from './utils.js';
-
-export const DB_PACKAGE_NAME = '<%= runtimeConfigKey %>';
 <%_ if (engine === 'MySQL') { _%>
 
 // TODO: IAM tokens expire every 15 minutes, so we implement a workaround by tracking a 10-minute TTL.
@@ -21,6 +27,17 @@ let prismaClient: PrismaClient | undefined;
 let prismaCreatedAt = 0;
 
 const createPrismaClient = async (): Promise<PrismaClient> => {
+  if (process.env.SERVE_LOCAL === 'true') {
+    const adapter = new PrismaMariaDb({
+      host: LOCAL_DB_HOST,
+      port: LOCAL_DB_PORT,
+      database: LOCAL_DB_NAME,
+      user: LOCAL_DB_USER,
+      password: LOCAL_DB_PASSWORD,
+    });
+    return new PrismaClient({ adapter });
+  }
+
   const { hostname, port, database, dbUser, region } =
     await getDatabaseConfig(DB_PACKAGE_NAME);
   const iamAuthToken = await new Signer({
@@ -65,6 +82,20 @@ let prismaPromise: Promise<PrismaClient> | undefined;
 
 export const getPrisma = (): Promise<PrismaClient> => {
   prismaPromise ??= (async () => {
+    if (process.env.SERVE_LOCAL === 'true') {
+      const adapter = new PrismaPg(
+        new Pool({
+          host: LOCAL_DB_HOST,
+          port: LOCAL_DB_PORT,
+          database: LOCAL_DB_NAME,
+          user: LOCAL_DB_USER,
+          password: LOCAL_DB_PASSWORD,
+          allowExitOnIdle: true,
+        }),
+      );
+      return new PrismaClient({ adapter });
+    }
+
     const { hostname, port, database, dbUser, region } =
       await getDatabaseConfig(DB_PACKAGE_NAME);
     const adapter = new PrismaPg(

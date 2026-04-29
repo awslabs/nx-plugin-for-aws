@@ -23,7 +23,7 @@ import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { formatFilesInSubtree } from '../../utils/format';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { addRdbInfra } from '../../utils/rdb-constructs/rdb-constructs';
-import { toClassName, toKebabCase } from '../../utils/names';
+import { toClassName, kebabCase } from '../../utils/names';
 import { FsCommands } from '../../utils/fs';
 import { getRelativePathToRootByDirectory } from '../../utils/paths';
 import tsProjectGenerator, { getTsLibDetails } from '../lib/generator';
@@ -31,8 +31,9 @@ import { addIgnoresToEslintConfig } from '../lib/eslint';
 import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
 import { TS_VERSIONS, withVersions } from '../../utils/versions';
 import { resolveIacProvider } from '../../utils/iac';
-import { toScopeAlias } from '../../utils/npm-scope';
+import { getNpmScope, toScopeAlias } from '../../utils/npm-scope';
 import { updateGitIgnore } from '../../utils/git';
+import { assignPort } from '../../utils/port';
 
 export const TS_RDB_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -41,12 +42,15 @@ export const tsRdbGenerator = async (
   tree: Tree,
   options: TsRdbGeneratorSchema,
 ): Promise<GeneratorCallback> => {
-  const nameKebabCase = toKebabCase(options.name) ?? options.name;
+  const nameKebabCase = kebabCase(options.name);
   const nameClassName = toClassName(options.name);
+  const databaseUser = options.databaseUser ?? 'dbadmin';
+  const databaseName = (options.databaseName ?? nameKebabCase).toLowerCase();
   const iacProvider = await resolveIacProvider(tree, options.iacProvider);
   const { fullyQualifiedName, dir } = getTsLibDetails(tree, {
     name: options.name,
     directory: options.directory,
+    subDirectory: options.subDirectory,
   });
 
   await tsProjectGenerator(tree, {
@@ -64,6 +68,16 @@ export const tsRdbGenerator = async (
     ['**/generated/**', '**/out-tsc'],
   );
 
+  const projectConfig = readProjectConfiguration(tree, fullyQualifiedName);
+  const localDbPort = assignPort(
+    tree,
+    projectConfig,
+    options.engine === 'MySQL' ? 3306 : 5432,
+  );
+  const localDbHost = 'localhost';
+  const localDbUser = 'dbadmin';
+  const localDbPassword = 'password';
+
   const templateOptions = {
     engine: options.engine,
     runtimeConfigKey: nameClassName,
@@ -76,6 +90,11 @@ export const tsRdbGenerator = async (
         : '@prisma/adapter-pg',
     prismaAdapterClassName:
       options.engine === 'MySQL' ? 'PrismaMariaDb' : 'PrismaPg',
+    localDbPort,
+    localDbHost,
+    localDbName: databaseName,
+    localDbUser,
+    localDbPassword,
   };
 
   generateFiles(
@@ -85,8 +104,6 @@ export const tsRdbGenerator = async (
     templateOptions,
   );
   updateGitIgnore(tree, dir, (patterns) => [...patterns, 'generated/prisma']);
-
-  const projectConfig = readProjectConfiguration(tree, fullyQualifiedName);
   const relativePathToRoot = getRelativePathToRootByDirectory(
     projectConfig.root,
   );
@@ -137,6 +154,51 @@ export const tsRdbGenerator = async (
       cwd: '{projectRoot}',
     },
   };
+  projectConfig.targets.prisma = {
+    executor: 'nx:run-commands',
+    options: {
+      cwd: '{projectRoot}',
+      command: 'prisma',
+      env: {
+        SERVE_LOCAL: 'true',
+      },
+    },
+  };
+  const containerPort = options.engine === 'MySQL' ? 3306 : 5432;
+  const dockerImage = options.engine === 'MySQL' ? 'mysql' : 'postgres';
+  const dockerDataDir =
+    options.engine === 'MySQL' ? '/var/lib/mysql' : '/var/lib/postgresql';
+  const dockerEnvArgs =
+    options.engine === 'MySQL'
+      ? `-e MYSQL_DATABASE=${databaseName} -e MYSQL_USER=${localDbUser} -e MYSQL_PASSWORD=${localDbPassword} -e MYSQL_ROOT_PASSWORD=${localDbPassword}`
+      : `-e POSTGRES_DB=${databaseName} -e POSTGRES_USER=${localDbUser} -e POSTGRES_PASSWORD=${localDbPassword}`;
+  const containerName = `${getNpmScope(tree)}-${databaseName}`;
+  projectConfig.targets['serve-local'] = {
+    executor: 'nx:run-commands',
+    options: {
+      command: `docker run --rm --name ${containerName} -p ${localDbPort}:${containerPort} -v ${containerName}-data:${dockerDataDir} ${dockerEnvArgs} ${dockerImage}`,
+      cwd: '{projectRoot}',
+    },
+    continuous: true,
+  };
+  const migrationBundleDir = joinPathFragments(
+    'dist',
+    projectConfig.root,
+    'bundle',
+    'migration',
+  );
+  const dockerImageTag = `${getNpmScope(tree)}-${kebabCase(options.name)}-migration:latest`;
+  if (iacProvider === 'Terraform') {
+    projectConfig.targets['docker'] = {
+      cache: true,
+      executor: 'nx:run-commands',
+      options: {
+        command: `docker build --platform linux/arm64 --provenance=false --build-arg AWS_REGION=$AWS_DEFAULT_REGION -t ${dockerImageTag} ${migrationBundleDir}`,
+      },
+      dependsOn: ['bundle'],
+    };
+    addDependencyToTargetIfNotPresent(projectConfig, 'build', 'docker');
+  }
   addDependencyToTargetIfNotPresent(projectConfig, 'compile', 'generate');
   updateProjectConfiguration(tree, fullyQualifiedName, projectConfig);
 
@@ -146,50 +208,38 @@ export const tsRdbGenerator = async (
     nameClassName,
     nameKebabCase,
     databasePackageAlias: toScopeAlias(fullyQualifiedName),
-    databaseName: options.databaseName,
-    adminUser: options.databaseUser,
+    databaseName,
+    adminUser: databaseUser,
     engine: options.engine === 'MySQL' ? 'mysql' : 'postgres',
-    migrationBundleDir: joinPathFragments(
-      'dist',
-      projectConfig.root,
-      'bundle',
-      'migration',
-    ),
+    migrationBundleDir,
     createDbUserBundleDir: joinPathFragments(
       'dist',
       projectConfig.root,
       'bundle',
       'create-db-user',
     ),
+    dockerImageTag,
   });
-
-  const runtimeDependencies =
-    options.engine === 'MySQL'
-      ? withVersions([
-          '@aws-lambda-powertools/parameters',
-          '@aws-sdk/client-appconfigdata',
-          '@aws-sdk/client-secrets-manager',
-          '@aws-sdk/rds-signer',
-          '@prisma/client',
-          '@prisma/adapter-mariadb',
-          'mariadb',
-        ])
-      : withVersions([
-          '@aws-lambda-powertools/parameters',
-          '@aws-sdk/client-appconfigdata',
-          '@aws-sdk/client-secrets-manager',
-          '@aws-sdk/rds-signer',
-          '@prisma/client',
-          '@prisma/adapter-pg',
-          'pg',
-        ]);
 
   addDependenciesToPackageJson(
     tree,
-    runtimeDependencies,
-    options.engine === 'MySQL'
-      ? withVersions(['prisma', '@types/aws-lambda'])
-      : withVersions(['prisma', '@types/pg', '@types/aws-lambda']),
+    withVersions([
+      '@aws-lambda-powertools/parameters',
+      '@aws-sdk/client-appconfigdata',
+      '@aws-sdk/client-secrets-manager',
+      '@aws-sdk/rds-signer',
+      '@prisma/client',
+      ...(options.engine === 'MySQL'
+        ? (['@prisma/adapter-mariadb', 'mariadb'] as const)
+        : (['@prisma/adapter-pg', 'pg'] as const)),
+    ]),
+    withVersions([
+      'prisma',
+      '@types/aws-lambda',
+      ...(options.engine === 'MySQL'
+        ? ([] as const)
+        : (['@types/pg'] as const)),
+    ]),
   );
 
   await addGeneratorMetricsIfApplicable(tree, [TS_RDB_GENERATOR_INFO]);

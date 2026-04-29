@@ -138,6 +138,13 @@ export interface AuroraDatabaseProps extends Omit<
    * @default true
    */
   readonly enableRdsProxy?: boolean;
+
+  /**
+   * Whether to enable automatic credential rotation for the admin secret.
+   *
+   * @default true
+   */
+  readonly enableCredentialRotation?: boolean;
 }
 
 /**
@@ -163,6 +170,7 @@ export abstract class AuroraDatabase extends Construct {
       vpcSubnets,
       writer,
       enableRdsProxy = true,
+      enableCredentialRotation = true,
       engine,
       engineVersion,
       ...clusterProps
@@ -191,6 +199,15 @@ export abstract class AuroraDatabase extends Construct {
       removalPolicy: RemovalPolicy.RETAIN
     });
 
+    if (enableCredentialRotation) {
+      this.cluster.addRotationSingleUser({
+        automaticallyAfter: Duration.days(30),
+        vpcSubnets: {
+          subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+        },
+      });
+    }
+    
     const proxyRole = enableRdsProxy
       ? new Role(this, 'DatabaseProxyRole', {
           assumedBy: new ServicePrincipal('rds.amazonaws.com'),
@@ -263,11 +280,6 @@ export abstract class AuroraDatabase extends Construct {
       region: Stack.of(this).region,
     });
 
-    // TODO: Adding `prisma` package increases the image size by > 240MB,
-    // as the Prisma CLI bundles multiple engine binaries (schema-engine, libquery-engine,
-    // query-engine, prisma-fmt) for the target platform.
-    // This exceed the size limits of the standard NodeJsFunction, so we have use DockerImageFunction instead.
-    // https://github.com/prisma/prisma/issues/29394
     const migrationHandler = new DockerImageFunction(this, 'MigrationHandler', {
       code: DockerImageCode.fromImageAsset(
         migrationBundleDir,

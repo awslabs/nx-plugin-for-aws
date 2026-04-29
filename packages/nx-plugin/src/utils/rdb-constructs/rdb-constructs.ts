@@ -25,6 +25,7 @@ export interface AddRdbConstructOptions {
   engine: 'postgres' | 'mysql';
   migrationBundleDir: string;
   createDbUserBundleDir: string;
+  dockerImageTag: string;
 }
 
 export const addRdbInfra = async (

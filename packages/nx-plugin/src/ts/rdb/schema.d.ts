@@ -7,10 +7,11 @@ import { IacProviderOption } from '../../utils/iac';
 export interface TsRdbGeneratorSchema {
   name: string;
   directory?: string;
+  subDirectory?: string;
   service: 'Aurora';
   engine: 'Postgres' | 'MySQL';
-  databaseUser: string;
-  databaseName: string;
+  databaseUser?: string;
+  databaseName?: string;
   ormFramework: 'Prisma';
   iacProvider: IacProviderOption;
 }

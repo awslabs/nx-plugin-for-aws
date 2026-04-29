@@ -112,6 +112,12 @@ variable "enable_rds_proxy" {
   default     = true
 }
 
+variable "enable_credential_rotation" {
+  description = "Whether to enable automatic credential rotation for the admin secret."
+  type        = bool
+  default     = true
+}
+
 variable "tags" {
   description = "Tags to apply to all resources."
   type        = map(string)
@@ -232,7 +238,7 @@ resource "random_password" "master_password" {
 }
 
 resource "aws_secretsmanager_secret" "credentials" {
-  #checkov:skip=CKV2_AWS_57:Secret rotation requires a VPC-hosted rotation Lambda; configure rotation post-deployment based on your network topology
+  #checkov:skip=CKV2_AWS_57:Rotation is configured via aws_cloudformation_stack.credentials_rotation using the AWS::SecretsManager-2024-09-16 transform; Checkov cannot resolve rotation schedules created by CloudFormation transforms
   name_prefix = "${var.name}-aurora-credentials-"
   kms_key_id  = aws_kms_key.database.arn
 
@@ -244,11 +250,13 @@ resource "aws_secretsmanager_secret" "credentials" {
 resource "aws_secretsmanager_secret_version" "credentials" {
   secret_id = aws_secretsmanager_secret.credentials.id
   secret_string = jsonencode({
-    username = var.admin_user
-    password = random_password.master_password.result
-    host     = aws_rds_cluster.database.endpoint
-    port     = aws_rds_cluster.database.port
-    dbname   = var.database_name
+    engine              = var.engine == "aurora-mysql" ? "mysql" : "postgres"
+    username            = var.admin_user
+    password            = random_password.master_password.result
+    host                = aws_rds_cluster.database.endpoint
+    port                = aws_rds_cluster.database.port
+    dbname              = var.database_name
+    dbClusterIdentifier = aws_rds_cluster.database.cluster_identifier
   })
 }
 
@@ -309,6 +317,74 @@ resource "aws_rds_cluster_instance" "database" {
   tags = merge(var.tags, {
     Name = "${var.name}-aurora-${count.index + 1}"
   })
+}
+
+resource "aws_security_group" "rotation" {
+  #checkov:skip=CKV2_AWS_5:Security group is attached to the hosted rotation Lambda created by AWS::SecretsManager::RotationSchedule; Checkov cannot resolve resources created by the CloudFormation transform
+  count       = var.enable_credential_rotation ? 1 : 0
+  name_prefix = "${var.name}-aurora-rotation-"
+  description = "Security group for Aurora secret rotation ${var.name}"
+  vpc_id      = var.vpc_id
+
+  tags = merge(var.tags, {
+    Name = "${var.name}-aurora-rotation"
+  })
+}
+
+resource "aws_vpc_security_group_egress_rule" "rotation_to_database" {
+  count                        = var.enable_credential_rotation ? 1 : 0
+  security_group_id            = aws_security_group.rotation[0].id
+  referenced_security_group_id = aws_security_group.database.id
+  from_port                    = coalesce(var.port, local.default_port)
+  to_port                      = coalesce(var.port, local.default_port)
+  ip_protocol                  = "tcp"
+  description                  = "Allow outbound database traffic from secret rotation Lambda"
+}
+
+resource "aws_vpc_security_group_ingress_rule" "rotation_to_database" {
+  count                        = var.enable_credential_rotation ? 1 : 0
+  security_group_id            = aws_security_group.database.id
+  referenced_security_group_id = aws_security_group.rotation[0].id
+  from_port                    = coalesce(var.port, local.default_port)
+  to_port                      = coalesce(var.port, local.default_port)
+  ip_protocol                  = "tcp"
+  description                  = "Allow inbound database traffic from secret rotation Lambda"
+}
+
+resource "aws_cloudformation_stack" "credentials_rotation" {
+  count = var.enable_credential_rotation ? 1 : 0
+  name  = "${var.name}-aurora-credentials-rotation"
+
+  capabilities = ["CAPABILITY_IAM"]
+
+  template_body = jsonencode({
+    AWSTemplateFormatVersion = "2010-09-09"
+    Transform                = "AWS::SecretsManager-2024-09-16"
+    Resources = {
+      CredentialsRotationSchedule = {
+        Type = "AWS::SecretsManager::RotationSchedule"
+        Properties = {
+          SecretId = aws_secretsmanager_secret.credentials.arn
+          HostedRotationLambda = {
+            RotationType        = var.engine == "aurora-mysql" ? "MySQLSingleUser" : "PostgreSQLSingleUser"
+            RotationLambdaName  = "${var.name}-aurora-credentials-rotation"
+            VpcSecurityGroupIds = aws_security_group.rotation[0].id
+            VpcSubnetIds        = join(",", var.private_subnet_ids)
+          }
+          RotationRules = {
+            AutomaticallyAfterDays = 30
+          }
+        }
+      }
+    }
+  })
+
+  depends_on = [
+    aws_secretsmanager_secret_version.credentials,
+    aws_rds_cluster_instance.database,
+    aws_vpc_security_group_egress_rule.rotation_to_database,
+    aws_vpc_security_group_ingress_rule.rotation_to_database,
+  ]
 }
 
 resource "aws_iam_role" "proxy" {

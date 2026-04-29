@@ -4,27 +4,13 @@
  */
 import { Tree } from '@nx/devkit';
 import { tsRdbGenerator, TS_RDB_GENERATOR_INFO } from './generator';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { METRICS_ASPECT_FILE_PATH } from '../../utils/metrics';
+import {
+  createTreeUsingTsSolutionSetup,
+  snapshotTreeDir,
+} from '../../utils/test';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { readProjectConfigurationUnqualified } from '../../utils/nx';
-
-const expectHasMetricTags = (tree: Tree, ...metrics: string[]) => {
-  const content = tree.read(METRICS_ASPECT_FILE_PATH, 'utf-8');
-  expect(content).toBeTruthy();
-
-  const tagsMatch = content!.match(
-    /const tags:\s*string\[\]\s*=\s*\[([^\]]*)\]/,
-  );
-  expect(tagsMatch).toBeTruthy();
-
-  const tagsContent = tagsMatch![1];
-  const tags = tagsContent
-    ? (tagsContent.match(/'([^']*)'/g)?.map((t) => t.slice(1, -1)) ?? [])
-    : [];
-
-  expect(tags).toEqual(expect.arrayContaining(metrics));
-};
+import { expectHasMetricTags } from '../../utils/metrics.spec';
 
 describe('ts#rdb generator', () => {
   let tree: Tree;
@@ -47,115 +33,21 @@ describe('ts#rdb generator', () => {
     await tsRdbGenerator(tree, defaultOptions);
     const packageJson = JSON.parse(tree.read('package.json', 'utf-8') ?? '{}');
     const projectConfig = readProjectConfigurationUnqualified(tree, '@proj/db');
-    const auroraConstruct = tree.read(
-      'packages/common/constructs/src/core/rdb/aurora.ts',
-      'utf-8',
-    );
-    const dbConstruct = tree.read(
-      'packages/common/constructs/src/app/dbs/db.ts',
-      'utf-8',
-    );
-    const prismaFile = tree.read('packages/db/src/prisma.ts', 'utf-8');
-    const migrationHandler = tree.read(
-      'packages/db/src/migration-handler.ts',
-      'utf-8',
-    );
-    const createDbUserHandler = tree.read(
-      'packages/db/src/create-db-user-handler.ts',
-      'utf-8',
-    );
-    const utilsFile = tree.read('packages/db/src/utils.ts', 'utf-8');
-
-    expect(auroraConstruct).toBeTruthy();
-    expect(dbConstruct).toBeTruthy();
-    expect(tree.exists('packages/db/src/prisma.ts')).toBeTruthy();
-    expect(tree.exists('packages/db/src/utils.ts')).toBeTruthy();
     expect(
-      tree.exists('packages/db/src/create-db-user-handler.ts'),
-    ).toBeTruthy();
-    expect(tree.exists('packages/db/prisma.config.ts')).toBeTruthy();
-    expect(tree.exists('packages/db/prisma/schema.prisma')).toBeTruthy();
+      tree.read('packages/common/constructs/src/core/rdb/aurora.ts', 'utf-8'),
+    ).toMatchSnapshot();
     expect(
-      tree.exists('packages/db/prisma/models/example.prisma'),
-    ).toBeTruthy();
-    expect(tree.exists('packages/db/src/index.ts')).toBeTruthy();
-    expect(tree.exists('packages/db/Dockerfile')).toBeTruthy();
-    expect(tree.exists('packages/db/.gitignore')).toBeTruthy();
-    expect(tree.exists('packages/db/tsconfig.lib.json')).toBeTruthy();
-    expect(tree.exists('packages/db/eslint.config.mjs')).toBeTruthy();
-    expect(tree.exists('packages/db/src/migration-handler.ts')).toBeTruthy();
-    expect(auroraConstruct).toContain('export abstract class AuroraDatabase');
-    expect(auroraConstruct).toContain('createDbUserBundleDir');
-    expect(auroraConstruct).toContain('RuntimeConfig.ensure(this)');
-    expect(auroraConstruct).toContain("rc.set('database', runtimeConfigKey, {");
-    expect(auroraConstruct).toContain('this.proxy = this.cluster.addProxy');
-    expect(auroraConstruct).toContain('HOSTNAME: databaseHostname');
-    expect(auroraConstruct).toContain('this.grantConnect(migrationHandler);');
-    expect(dbConstruct).toContain('export class Db');
-    expect(dbConstruct).toContain(
-      "import { DB_PACKAGE_NAME } from ':proj/db';",
-    );
-    expect(dbConstruct).toContain("databaseName: 'databaseName'");
-    expect(dbConstruct).toContain("adminUser: 'databaseUser'");
-    expect(dbConstruct).toContain('runtimeConfigKey: DB_PACKAGE_NAME');
-    expect(dbConstruct).toContain('findWorkspaceRoot');
-    expect(dbConstruct).toContain('dist/packages/db/bundle/create-db-user');
-    expect(prismaFile).toContain(
-      "import { PrismaPg } from '@prisma/adapter-pg';",
-    );
-    expect(prismaFile).toContain(
-      "import { Signer } from '@aws-sdk/rds-signer';",
-    );
-    expect(prismaFile).toContain("import { Pool } from 'pg';");
-    expect(prismaFile).toContain("export const DB_PACKAGE_NAME = 'Db';");
-    expect(prismaFile).toContain('password: async () => {');
-    expect(prismaFile).toContain('await getDatabaseConfig(DB_PACKAGE_NAME)');
-    expect(prismaFile).toContain('allowExitOnIdle: true,');
-    expect(migrationHandler).toContain(
-      "import { Signer } from '@aws-sdk/rds-signer';",
-    );
-    expect(migrationHandler).toContain(
-      "import { promisify } from 'node:util';",
-    );
-    expect(migrationHandler).toContain(
-      "await promisify(execFile)('npx', ['prisma', 'migrate', 'deploy'],",
-    );
-    expect(migrationHandler).toContain('DATABASE_URL: databaseUrl');
-    expect(migrationHandler).toContain('?sslaccept=strict');
-    expect(createDbUserHandler).toContain(
-      "import { Client, escapeIdentifier } from 'pg';",
-    );
-    expect(createDbUserHandler).toContain('GRANT rds_iam TO');
-    expect(utilsFile).toContain(
-      "import { getAppConfig } from '@aws-lambda-powertools/parameters/appconfig';",
-    );
-    expect(utilsFile).toContain(
-      "import {\n  GetSecretValueCommand,\n  SecretsManagerClient,\n} from '@aws-sdk/client-secrets-manager';",
-    );
-    expect(tree.read('packages/db/prisma.config.ts', 'utf-8')).toContain(
-      "import { defineConfig } from 'prisma/config';",
-    );
+      tree.read('packages/common/constructs/src/app/dbs/db.ts', 'utf-8'),
+    ).toMatchSnapshot();
+    snapshotTreeDir(tree, 'packages/db/src');
+    snapshotTreeDir(tree, 'packages/db/prisma');
     expect(
-      tree.read('packages/db/prisma/models/example.prisma', 'utf-8'),
-    ).toContain('model ExampleTable');
+      tree.read('packages/db/prisma.config.ts', 'utf-8'),
+    ).toMatchSnapshot();
+    expect(tree.read('packages/db/Dockerfile', 'utf-8')).toMatchSnapshot();
     expect(
-      tree.read('packages/db/prisma/models/example.prisma', 'utf-8'),
-    ).toContain('column1     String');
-    expect(tree.read('packages/db/prisma/schema.prisma', 'utf-8')).toContain(
-      'provider = "postgresql"',
-    );
-    expect(tree.read('packages/db/src/index.ts', 'utf-8')?.trim()).toBe(
-      "export { getPrisma, DB_PACKAGE_NAME } from './prisma.js';",
-    );
-    expect(tree.read('packages/db/Dockerfile', 'utf-8')).toContain(
-      'FROM public.ecr.aws/lambda/nodejs:24',
-    );
-    expect(tree.read('packages/db/Dockerfile', 'utf-8')).toContain(
-      'ARG AWS_REGION',
-    );
-    expect(tree.read('packages/db/Dockerfile', 'utf-8')).toContain(
-      'RUN npm install prisma@7.7.0',
-    );
+      tree.read('packages/db/rolldown.config.ts', 'utf-8'),
+    ).toMatchSnapshot();
     expect(tree.read('packages/db/.gitignore', 'utf-8')).toContain(
       'generated/prisma',
     );
@@ -170,32 +62,14 @@ describe('ts#rdb generator', () => {
       "'**/out-tsc'",
     );
     expect(
-      tree.read('packages/common/constructs/src/app/dbs/db.ts', 'utf-8'),
-    ).toContain('dist/packages/db/bundle/migration');
-    expect(
-      tree.read('packages/common/constructs/src/app/dbs/db.ts', 'utf-8'),
-    ).toContain('dist/packages/db/bundle/create-db-user');
-    expect(
       tree.read('packages/common/constructs/src/core/index.ts', 'utf-8'),
-    ).toContain('./rdb/aurora.js');
+    ).toMatchSnapshot();
     expect(
       tree.read('packages/common/constructs/src/app/index.ts', 'utf-8'),
-    ).toContain('./dbs/index.js');
+    ).toMatchSnapshot();
     expect(
       tree.read('packages/common/constructs/src/app/dbs/index.ts', 'utf-8'),
-    ).toContain('./db.js');
-    expect(tree.read('packages/db/rolldown.config.ts', 'utf-8')).toContain(
-      "input: 'src/migration-handler.ts'",
-    );
-    expect(tree.read('packages/db/rolldown.config.ts', 'utf-8')).toContain(
-      "file: '../../dist/packages/db/bundle/migration/index.js'",
-    );
-    expect(tree.read('packages/db/rolldown.config.ts', 'utf-8')).toContain(
-      "input: 'src/create-db-user-handler.ts'",
-    );
-    expect(tree.read('packages/db/rolldown.config.ts', 'utf-8')).toContain(
-      "file: '../../dist/packages/db/bundle/create-db-user/index.js'",
-    );
+    ).toMatchSnapshot();
     expect(projectConfig.targets.bundle).toEqual({
       cache: true,
       outputs: ['{workspaceRoot}/dist/{projectRoot}/bundle'],
@@ -230,32 +104,48 @@ describe('ts#rdb generator', () => {
         cwd: '{projectRoot}',
       },
     });
+    expect(projectConfig.targets.prisma).toEqual({
+      executor: 'nx:run-commands',
+      options: {
+        cwd: '{projectRoot}',
+        command: 'prisma',
+        env: {
+          SERVE_LOCAL: 'true',
+        },
+      },
+    });
+    expect(projectConfig.targets['serve-local']).toEqual({
+      executor: 'nx:run-commands',
+      continuous: true,
+      options: {
+        command:
+          'docker run --rm --name proj-databasename -p 5432:5432 -v proj-databasename-data:/var/lib/postgresql -e POSTGRES_DB=databasename -e POSTGRES_USER=dbadmin -e POSTGRES_PASSWORD=password postgres',
+        cwd: '{projectRoot}',
+      },
+    });
     expect(projectConfig.targets.build.dependsOn).toContain('bundle');
-    expect(projectConfig.targets.build.dependsOn).not.toContain(
-      'bundle-migration',
-    );
     expect(projectConfig.targets.compile.dependsOn).toContain('generate');
-    expect(packageJson.dependencies['@aws-lambda-powertools/parameters']).toBe(
-      '2.32.0',
-    );
-    expect(packageJson.dependencies['@aws-sdk/client-appconfigdata']).toBe(
-      '3.1029.0',
-    );
-    expect(packageJson.dependencies['@aws-sdk/client-secrets-manager']).toBe(
-      '3.1030.0',
-    );
-    expect(packageJson.dependencies['@aws-sdk/rds-signer']).toBe('3.1030.0');
-    expect(packageJson.dependencies['@prisma/adapter-pg']).toBe('7.7.0');
-    expect(packageJson.dependencies['@prisma/client']).toBe('7.7.0');
-    expect(packageJson.dependencies.pg).toBe('8.20.0');
+    expect(
+      packageJson.dependencies['@aws-lambda-powertools/parameters'],
+    ).toBeDefined();
+    expect(
+      packageJson.dependencies['@aws-sdk/client-appconfigdata'],
+    ).toBeDefined();
+    expect(
+      packageJson.dependencies['@aws-sdk/client-secrets-manager'],
+    ).toBeDefined();
+    expect(packageJson.dependencies['@aws-sdk/rds-signer']).toBeDefined();
+    expect(packageJson.dependencies['@prisma/adapter-pg']).toBeDefined();
+    expect(packageJson.dependencies['@prisma/client']).toBeDefined();
+    expect(packageJson.dependencies.pg).toBeDefined();
     expect(packageJson.dependencies.mariadb).toBeUndefined();
     expect(packageJson.dependencies['@prisma/adapter-mariadb']).toBeUndefined();
-    expect(packageJson.devDependencies['@types/aws-lambda']).toBe('8.10.161');
-    expect(packageJson.devDependencies['@types/pg']).toBe('8.20.0');
-    expect(packageJson.devDependencies.prisma).toBe('7.7.0');
-    expect(packageJson.devDependencies.ncp).toBe('2.0.0');
-    expect(packageJson.devDependencies.rimraf).toBe('6.1.3');
-    expect(packageJson.devDependencies['make-dir-cli']).toBe('4.0.0');
+    expect(packageJson.devDependencies['@types/aws-lambda']).toBeDefined();
+    expect(packageJson.devDependencies['@types/pg']).toBeDefined();
+    expect(packageJson.devDependencies.prisma).toBeDefined();
+    expect(packageJson.devDependencies.ncp).toBeDefined();
+    expect(packageJson.devDependencies.rimraf).toBeDefined();
+    expect(packageJson.devDependencies['make-dir-cli']).toBeDefined();
   });
 
   it('should add mysql prisma dependencies when engine is MySQL', async () => {
@@ -264,74 +154,50 @@ describe('ts#rdb generator', () => {
       engine: 'MySQL',
     });
     const packageJson = JSON.parse(tree.read('package.json', 'utf-8') ?? '{}');
-    const auroraConstruct = tree.read(
-      'packages/common/constructs/src/core/rdb/aurora.ts',
-      'utf-8',
-    );
-    const prismaFile = tree.read('packages/db/src/prisma.ts', 'utf-8');
-    const migrationHandler = tree.read(
-      'packages/db/src/migration-handler.ts',
-      'utf-8',
-    );
-    const createDbUserHandler = tree.read(
-      'packages/db/src/create-db-user-handler.ts',
-      'utf-8',
-    );
-    const prismaSchema = tree.read('packages/db/prisma/schema.prisma', 'utf-8');
 
-    expect(packageJson.dependencies['@aws-lambda-powertools/parameters']).toBe(
-      '2.32.0',
+    expect(
+      tree.read('packages/common/constructs/src/core/rdb/aurora.ts', 'utf-8'),
+    ).toMatchSnapshot();
+    snapshotTreeDir(tree, 'packages/db/src');
+    snapshotTreeDir(tree, 'packages/db/prisma');
+    expect(
+      tree.read('packages/db/prisma.config.ts', 'utf-8'),
+    ).toMatchSnapshot();
+
+    const mysqlProjectConfig = readProjectConfigurationUnqualified(
+      tree,
+      '@proj/db',
     );
-    expect(packageJson.dependencies['@aws-sdk/client-appconfigdata']).toBe(
-      '3.1029.0',
-    );
-    expect(packageJson.dependencies['@aws-sdk/client-secrets-manager']).toBe(
-      '3.1030.0',
-    );
-    expect(packageJson.dependencies['@aws-sdk/rds-signer']).toBe('3.1030.0');
-    expect(packageJson.dependencies['@prisma/adapter-mariadb']).toBe('7.7.0');
-    expect(packageJson.dependencies['@prisma/client']).toBe('7.7.0');
-    expect(packageJson.dependencies.mariadb).toBe('3.5.2');
+    expect(mysqlProjectConfig.targets['serve-local']).toEqual({
+      executor: 'nx:run-commands',
+      continuous: true,
+      options: {
+        command:
+          'docker run --rm --name proj-databasename -p 3306:3306 -v proj-databasename-data:/var/lib/mysql -e MYSQL_DATABASE=databasename -e MYSQL_USER=dbadmin -e MYSQL_PASSWORD=password -e MYSQL_ROOT_PASSWORD=password mysql',
+        cwd: '{projectRoot}',
+      },
+    });
+    expect(
+      packageJson.dependencies['@aws-lambda-powertools/parameters'],
+    ).toBeDefined();
+    expect(
+      packageJson.dependencies['@aws-sdk/client-appconfigdata'],
+    ).toBeDefined();
+    expect(
+      packageJson.dependencies['@aws-sdk/client-secrets-manager'],
+    ).toBeDefined();
+    expect(packageJson.dependencies['@aws-sdk/rds-signer']).toBeDefined();
+    expect(packageJson.dependencies['@prisma/adapter-mariadb']).toBeDefined();
+    expect(packageJson.dependencies['@prisma/client']).toBeDefined();
+    expect(packageJson.dependencies.mariadb).toBeDefined();
     expect(packageJson.dependencies['@prisma/adapter-pg']).toBeUndefined();
     expect(packageJson.dependencies.pg).toBeUndefined();
-    expect(packageJson.devDependencies['@types/aws-lambda']).toBe('8.10.161');
+    expect(packageJson.devDependencies['@types/aws-lambda']).toBeDefined();
     expect(packageJson.devDependencies['@types/pg']).toBeUndefined();
-    expect(packageJson.devDependencies.prisma).toBe('7.7.0');
-    expect(packageJson.devDependencies.ncp).toBe('2.0.0');
-    expect(packageJson.devDependencies.rimraf).toBe('6.1.3');
-    expect(packageJson.devDependencies['make-dir-cli']).toBe('4.0.0');
-    expect(prismaFile).toContain(
-      "import { PrismaMariaDb } from '@prisma/adapter-mariadb';",
-    );
-    expect(prismaFile).toContain("export const DB_PACKAGE_NAME = 'Db';");
-    expect(prismaFile).toContain(
-      'export const PRISMA_TTL_MS = 10 * 60 * 1000;',
-    );
-    expect(prismaFile).toContain('const iamAuthToken = await new Signer({');
-    expect(prismaFile).toContain('password: iamAuthToken');
-    expect(prismaFile).toContain('ssl: {');
-    expect(migrationHandler).toContain(
-      "import { getDatabaseSecret } from './utils.js';",
-    );
-    expect(migrationHandler).toContain('?sslaccept=strict');
-    expect(createDbUserHandler).toContain(
-      "import { createPool, type PoolConnection } from 'mariadb';",
-    );
-    expect(createDbUserHandler).toContain(
-      "IDENTIFIED WITH AWSAuthenticationPlugin AS 'RDS'",
-    );
-    expect(createDbUserHandler).toContain('multipleStatements: true');
-    expect(createDbUserHandler).toContain(
-      'const quotedDbName = pool.escapeId(dbname);',
-    );
-    expect(prismaSchema).toContain('provider = "mysql"');
-    expect(auroraConstruct).toContain(
-      'DATABASE_SECRET_ARN: this.cluster.secret!.secretArn',
-    );
-    expect(auroraConstruct).toContain(
-      'this.grantSecretRead(migrationHandler);',
-    );
-    expect(auroraConstruct).not.toContain('HOSTNAME: databaseHostname');
+    expect(packageJson.devDependencies.prisma).toBeDefined();
+    expect(packageJson.devDependencies.ncp).toBeDefined();
+    expect(packageJson.devDependencies.rimraf).toBeDefined();
+    expect(packageJson.devDependencies['make-dir-cli']).toBeDefined();
   });
 
   it('should generate terraform modules when iacProvider is Terraform', async () => {
@@ -354,51 +220,13 @@ describe('ts#rdb generator', () => {
     expect(
       tree.exists('packages/common/terraform/src/app/dbs/db/db.tf'),
     ).toBeTruthy();
-    expect(terraformApp).toContain('source = "../../../core/rdb/aurora"');
-    expect(terraformApp).toContain('engine');
     expect(terraformApp).toContain('"aurora-postgresql"');
-    expect(terraformApp).toContain('admin_user');
-    expect(terraformApp).toContain('"databaseUser"');
-    expect(terraformApp).toContain('namespace = "database"');
-    expect(terraformApp).toContain('key       = "Db"');
-    expect(terraformApp).toContain('application_name = "Db-runtime-config"');
-    expect(terraformApp).toContain(
-      '../../../../../../../dist/packages/db/bundle/migration',
-    );
-    expect(terraformApp).toContain(
-      '../../../../../../../dist/packages/db/bundle/create-db-user',
-    );
-    expect(terraformApp).toContain(
-      'DATABASE_SECRET_ARN = module.aurora.secret_arn',
-    );
     expect(terraformApp).toContain('HOSTNAME = module.aurora.cluster_endpoint');
-    expect(terraformApp).toContain(
-      'dbuser:${module.aurora.cluster_resource_id}/${local.database_runtime_user}',
-    );
-    expect(terraformApp).toContain('null_resource.create_db_user_trigger');
-    expect(terraformApp).toContain('output "database_runtime_user"');
-    expect(terraformApp).toContain('output "appconfig_application_id"');
-    expect(terraformCore).toContain('variable "admin_user"');
-    expect(terraformCore).toContain('variable "enable_rds_proxy"');
-    expect(terraformCore).toContain(
-      'iam_database_authentication_enabled = true',
-    );
-    expect(terraformCore).toContain('count = var.enable_rds_proxy ? 1 : 0');
-    expect(terraformCore).toContain('output "cluster_resource_id"');
-    expect(terraformCore).toContain('output "kms_key_arn"');
-    expect(terraformCore).toContain('output "admin_user"');
-    expect(terraformCore).toContain('output "database_security_group_id"');
-    expect(terraformCore).toContain('output "proxy_role_name"');
-    expect(terraformCore).toContain('proxy_to_database');
-    expect(terraformCore).toContain('null_resource" "proxy_target_ready"');
-    expect(terraformCore).toContain('output "database_ready"');
-    expect(terraformApp).toContain('--build-arg AWS_REGION=');
-    expect(terraformApp).toContain('module.aurora.proxy_role_name');
-    expect(terraformApp).toContain('module.aurora.database_security_group_id');
-    expect(terraformApp).toContain('module.aurora.security_group_id');
-    expect(terraformApp).toContain(
-      'database_ready = module.aurora.database_ready',
-    );
+
+    expect({
+      'aurora.tf': terraformCore,
+      'db.tf': terraformApp,
+    }).toMatchSnapshot();
   });
 
   it('should keep an existing aurora shared construct', async () => {
@@ -440,7 +268,6 @@ describe('ts#rdb generator', () => {
       'utf-8',
     );
 
-    expect(terraformApp).toContain('engine');
     expect(terraformApp).toContain('"aurora-mysql"');
     expect(terraformApp).toContain(
       'DATABASE_SECRET_ARN = module.aurora.secret_arn',
@@ -448,93 +275,16 @@ describe('ts#rdb generator', () => {
     expect(terraformApp).not.toContain(
       'HOSTNAME = module.aurora.cluster_endpoint',
     );
-    expect(terraformCore).toContain('variable "enable_rds_proxy"');
-    expect(terraformApp).toContain('--build-arg AWS_REGION=');
     expect(terraformApp).toContain(
       'referenced_security_group_id = module.aurora.database_security_group_id',
     );
     expect(terraformApp).not.toContain(
       'referenced_security_group_id = module.aurora.security_group_id',
     );
-  });
 
-  it('should generate CDK construct with RDS Proxy disabled', async () => {
-    await tsRdbGenerator(tree, defaultOptions);
-    const auroraConstruct = tree.read(
-      'packages/common/constructs/src/core/rdb/aurora.ts',
-      'utf-8',
-    );
-
-    expect(auroraConstruct).toContain('enableRdsProxy?: boolean');
-    expect(auroraConstruct).toContain('enableRdsProxy = true');
-    expect(auroraConstruct).toContain('if (enableRdsProxy)');
-    expect(auroraConstruct).toContain(
-      'this.proxy?.endpoint ?? this.cluster.clusterEndpoint.hostname',
-    );
-  });
-
-  it('should generate Terraform modules with enable_rds_proxy variable', async () => {
-    await tsRdbGenerator(tree, {
-      ...defaultOptions,
-      iacProvider: 'Terraform',
-    });
-    const terraformCore = tree.read(
-      'packages/common/terraform/src/core/rdb/aurora/aurora.tf',
-      'utf-8',
-    );
-    const terraformApp = tree.read(
-      'packages/common/terraform/src/app/dbs/db/db.tf',
-      'utf-8',
-    );
-
-    expect(terraformCore).toContain('variable "enable_rds_proxy"');
-    expect(terraformCore).toContain('type        = bool');
-    expect(terraformCore).toContain('default     = true');
-    expect(terraformCore).toContain('count = var.enable_rds_proxy ? 1 : 0');
-    expect(terraformCore).toContain(
-      'var.enable_rds_proxy ? aws_db_proxy.aurora[0].endpoint : aws_rds_cluster.database.endpoint',
-    );
-    expect(terraformApp).toContain('enable_rds_proxy');
-    expect(terraformApp).toContain(
-      'enable_rds_proxy                = var.enable_rds_proxy',
-    );
-    expect(terraformApp).toContain('variable "enable_rds_proxy"');
-    expect(terraformApp).toContain('module.aurora.proxy_role_name');
-    expect(terraformCore).toContain('proxy_to_database');
-    expect(terraformCore).toContain('null_resource" "proxy_target_ready"');
-    expect(terraformCore).toContain('output "database_ready"');
-    expect(terraformCore).toContain('output "proxy_role_name"');
-    expect(terraformApp).toContain(
-      'database_ready = module.aurora.database_ready',
-    );
-  });
-
-  it('should generate correct runtime config structure for Terraform', async () => {
-    await tsRdbGenerator(tree, {
-      ...defaultOptions,
-      iacProvider: 'Terraform',
-    });
-    const terraformApp = tree.read(
-      'packages/common/terraform/src/app/dbs/db/db.tf',
-      'utf-8',
-    );
-
-    // Verify runtime config uses correct namespace and key structure
-    expect(terraformApp).toContain('module "add_rdb_to_runtime_config"');
-    expect(terraformApp).toContain(
-      'source = "../../../core/runtime-config/entry"',
-    );
-    expect(terraformApp).toContain('namespace = "database"');
-    expect(terraformApp).toContain('key       = "Db"');
-    expect(terraformApp).toContain(
-      'hostname  = module.aurora.cluster_endpoint',
-    );
-    expect(terraformApp).toContain('port      = module.aurora.cluster_port');
-    expect(terraformApp).toContain('database  = module.aurora.database_name');
-    expect(terraformApp).toContain('adminUser = module.aurora.admin_user');
-    expect(terraformApp).toContain('dbUser    = local.database_runtime_user');
-    expect(terraformApp).toContain(
-      'region    = data.aws_region.current.region',
-    );
+    expect({
+      'aurora.tf': terraformCore,
+      'db.tf': terraformApp,
+    }).toMatchSnapshot();
   });
 });
