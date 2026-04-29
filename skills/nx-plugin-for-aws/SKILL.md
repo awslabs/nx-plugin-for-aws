@@ -1,9 +1,8 @@
 ---
-name: 'nx-plugin-for-aws'
-displayName: 'Nx Plugin for AWS'
-description: 'Scaffold and build cloud-native applications on AWS using @aws/nx-plugin generators. Covers workspace creation, project scaffolding with TypeScript, Python, React, CDK, Terraform, and more.'
-keywords: ['nx-plugin-for-aws', 'aws-nx-plugin', 'nx', 'aws', 'cdk', 'terraform']
-author: 'AWS'
+name: nx-plugin-for-aws
+description: >-
+  Scaffold and build cloud-native applications on AWS using @aws/nx-plugin generators.
+  Use when the user wants to create workspaces, generate projects, or scaffold infrastructure with the Nx Plugin for AWS.
 ---
 
 # Nx Plugin for AWS
