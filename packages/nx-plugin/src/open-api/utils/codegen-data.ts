@@ -23,8 +23,10 @@ import {
   toPythonName,
   toTypeScriptType,
   toPythonType,
+  toPythonAnnotation,
   toTypeScriptName,
   toTypeScriptModelName,
+  qualifyPythonType,
 } from './codegen-data/languages';
 import {
   CodeGenData,
@@ -283,7 +285,7 @@ export const buildOpenApiCodeGenData = async (
         }
       }
 
-      mutateOperationWithAdditionalData(op);
+      mutateOperationWithAdditionalData(op, modelsByName);
     }
 
     // Lexicographical ordering of operations
@@ -487,7 +489,7 @@ export const buildOpenApiCodeGenData = async (
   const vendorExtensions: { [key: string]: any } = {};
   copyVendorExtensions(spec ?? {}, vendorExtensions);
 
-  return {
+  const result: CodeGenData = {
     ...data,
     operationsByTag,
     untaggedOperations,
@@ -496,6 +498,13 @@ export const buildOpenApiCodeGenData = async (
     vendorExtensions,
     className: toClassName(spec.info.title),
   };
+
+  // Final pass to refresh python-specific fields now that all links and
+  // composite relationships are resolved.  Produced once so every downstream
+  // language generator consumes a single prepared object.
+  annotatePythonData(result);
+
+  return result;
 };
 
 const buildInitialCodeGenData = async (spec: Spec): Promise<ClientData> => {
@@ -529,6 +538,105 @@ const buildInitialCodeGenData = async (spec: Spec): Promise<ClientData> => {
   }
 
   return data;
+};
+
+const TYPES_GEN_PREFIX = 'types_gen.';
+
+/**
+ * Attach `pythonClientType` to every typed entry — the bare `pythonType`
+ * qualified with `types_gen.` so client templates can reference model
+ * classes through a single import.
+ */
+const annotatePythonClientType = (entry: any): void => {
+  if (!entry) return;
+  entry.pythonClientType = qualifyPythonType(
+    entry.pythonType || entry.type,
+    TYPES_GEN_PREFIX,
+  );
+};
+
+/**
+ * Second pass over all models + operation payloads to re-derive python type
+ * annotations after links/composites are resolved, and to add python-specific
+ * annotations the client templates consume:
+ *  - `pythonType` / `pythonAnnotation` (refreshed — necessary for collection
+ *    aliases whose element type wasn't available first time through)
+ *  - `pythonClientType` (fully qualified with `types_gen.` prefix)
+ *  - `requestShape.inputs[*].pythonName` / `.pythonAnnotation` (kwargs)
+ *  - `errorShape.exceptionClassName` / `.unionTypeName` / per-entry names
+ *
+ * Runs for every spec — the resulting fields are only read by the py-client
+ * templates, so there's no cost to TypeScript consumers.
+ */
+const annotatePythonData = (data: CodeGenData): void => {
+  for (const model of data.models as any[]) {
+    (model as any).pythonType = toPythonType(model);
+    (model as any).pythonAnnotation = toPythonAnnotation(model);
+    annotatePythonClientType(model);
+    for (const prop of (model as any).properties ?? []) {
+      annotatePythonClientType(prop);
+    }
+    annotatePythonClientType((model as any).additionalPropertiesModel);
+  }
+
+  for (const op of (data as any).allOperations as any[]) {
+    for (const parameter of op.parameters ?? []) {
+      annotatePythonClientType(parameter);
+    }
+    annotatePythonClientType(op.parametersBody);
+    annotatePythonClientType(op.result);
+    for (const response of op.responses ?? []) {
+      annotatePythonClientType(response);
+      annotatePythonClientType(response.itemSchemaModel);
+    }
+
+    const requestShape = op.requestShape;
+    if (requestShape) {
+      const seenNames = new Set<string>();
+      for (const input of requestShape.inputs) {
+        const rawName = input.model.pythonName || input.specName;
+        let pythonName = toPythonName('property', rawName);
+        if (seenNames.has(pythonName)) {
+          pythonName = `${pythonName}_${input.source.kind.replace('-', '_')}`;
+        }
+        seenNames.add(pythonName);
+        const baseType = qualifyPythonType(
+          input.model.pythonType || input.model.type,
+          TYPES_GEN_PREFIX,
+        );
+        input.pythonName = pythonName;
+        input.pythonAnnotation =
+          input.isRequired && !input.isNullable
+            ? baseType
+            : `Optional[${baseType}]`;
+      }
+      requestShape.inputs.sort(
+        (a: any, b: any) => Number(b.isRequired) - Number(a.isRequired),
+      );
+    }
+
+    const errorShape = op.errorShape;
+    if (errorShape) {
+      const opPascal = op.operationIdPascalCase;
+      errorShape.exceptionClassName = `${opPascal}ApiError`;
+      errorShape.unionTypeName =
+        errorShape.entries.length > 0 ? `${opPascal}Error` : 'Never';
+      for (const entry of errorShape.entries) {
+        const suffix =
+          entry.code === 'default'
+            ? 'Default'
+            : String(entry.code).toUpperCase();
+        entry.className = `${opPascal}${suffix}Error`;
+        entry.isExactCode = typeof entry.code === 'number';
+        // Only collapse to a Literal for exact numeric codes — ranges like
+        // 5XX expand to 100 codes, which produce a massive, unreadable
+        // Literal and don't narrow `response.status_code` usefully anyway.
+        entry.statusAnnotation = entry.isExactCode
+          ? `Literal[${entry.code}]`
+          : 'int';
+      }
+    }
+  }
 };
 
 /**
@@ -1026,6 +1134,27 @@ const mutateModelWithCompositeProperties = (
           `Schema "${model.name}" defines allOf with non-object types. allOf may only compose object types in the OpenAPI specification.`,
         );
       }
+      // Mark hoisted allOf components so language templates that flatten
+      // `composedModels` into the parent can skip emitting them separately
+      // rather than leaving unused declarations behind.
+      for (const composed of composedModels) {
+        if ((composed as any).isHoisted) {
+          (composed as any).isInlinedByAllOf = model.name;
+        }
+      }
+      // Precompute the flat property list that templates will emit so other
+      // passes (e.g. body-flattening decisions) don't have to re-walk the
+      // composition.
+      const flattened: Model[] = [];
+      const seen = new Set<string>();
+      for (const composed of composedModels) {
+        for (const prop of composed.properties ?? []) {
+          if (!prop.name || seen.has(prop.name)) continue;
+          seen.add(prop.name);
+          flattened.push(prop);
+        }
+      }
+      (model as any).effectiveProperties = flattened;
     }
 
     (model as any).composedModels = composedModels;
@@ -1044,6 +1173,7 @@ const mutateModelWithAdditionalTypes = (model: Model) => {
   (model as any).typescriptType = toTypeScriptType(model);
   (model as any).pythonName = toPythonName('property', model.name);
   (model as any).pythonType = toPythonType(model);
+  (model as any).pythonAnnotation = toPythonAnnotation(model);
   (model as any).isPrimitive =
     PRIMITIVE_TYPES.has(model.type) &&
     !COMPOSED_SCHEMA_TYPES.has(model.export) &&
@@ -1132,9 +1262,238 @@ const getCursorOptions = (op: Operation) => {
 };
 
 /**
+ * Annotate a typed entry (response, parameter, result) with whether the type
+ * it references resolves to a collection (`list[...]` / `dict[str, ...]`)
+ * alias.  Language templates that need to pick a validation strategy
+ * (e.g. pydantic's `TypeAdapter` vs `BaseModel.model_validate`) can read
+ * `referencedCollectionKind` directly instead of string-matching.
+ */
+const annotateReferencedCollectionKind = (
+  entry: any,
+  modelsByName: { [name: string]: Model },
+) => {
+  if (!entry || !entry.type) return;
+  const referenced = modelsByName[entry.type];
+  if (!referenced) return;
+  if (referenced.export === 'dictionary')
+    entry.referencedCollectionKind = 'dictionary';
+  else if (referenced.export === 'array')
+    entry.referencedCollectionKind = 'array';
+  else if (
+    referenced.export === 'one-of' ||
+    referenced.export === 'any-of' ||
+    referenced.export === 'enum'
+  )
+    // Union / Literal aliases — pydantic needs `TypeAdapter(X).validate_python(...)`
+    // rather than `X.model_validate(...)`, which only works on BaseModel classes.
+    entry.referencedCollectionKind = 'alias';
+};
+
+/**
+ * Return the object-shaped properties a body model exposes for flattening,
+ * walking allOf composition via `effectiveProperties` when present.
+ */
+const flattenableBodyProperties = (bodyModel: Model | undefined): Model[] => {
+  if (!bodyModel) return [];
+  if (bodyModel.export === 'interface') return bodyModel.properties ?? [];
+  if (bodyModel.export === 'all-of') {
+    return (bodyModel as any).effectiveProperties ?? [];
+  }
+  return [];
+};
+
+/**
+ * Decide whether a body's fields can be flattened into the outer input
+ * object without clashing with path/query/header/cookie parameters.  Only
+ * object-shaped bodies (references to an interface or allOf) are eligible.
+ */
+const canFlattenBodyIntoRequest = (
+  op: Operation,
+  bodyParam: Model | undefined,
+  bodyModel: Model | undefined,
+): boolean => {
+  if (!bodyParam || (bodyParam as any).export !== 'reference') return false;
+  const props = flattenableBodyProperties(bodyModel);
+  if (props.length === 0) return false;
+  const otherNames = new Set(
+    (op.parameters ?? [])
+      .filter((p) => (p as any).in !== 'body')
+      .map((p) => p.name),
+  );
+  for (const prop of props) {
+    if (otherNames.has(prop.name)) return false;
+  }
+  return true;
+};
+
+/**
+ * Build a language-agnostic description of an operation's inputs.  Each
+ * input carries its source (where in the HTTP request it is placed) plus
+ * the underlying model — language templates decide how to translate that
+ * into their idiomatic call signature (kwargs, a wrapper interface, etc).
+ */
+const buildRequestShape = (
+  op: Operation,
+  modelsByName: { [name: string]: Model },
+) => {
+  const inputs: any[] = [];
+  const nonBody = (op.parameters ?? []).filter((p) => (p as any).in !== 'body');
+  for (const p of nonBody) {
+    inputs.push({
+      source: {
+        kind: (p as any).in,
+        wireName: p.name,
+        ...((p as any).collectionFormat
+          ? { collectionFormat: (p as any).collectionFormat }
+          : {}),
+      },
+      model: p,
+      fromFlattenedBody: false,
+      isRequired: !!(p as any).isRequired,
+      isNullable: !!(p as any).isNullable,
+      description: p.description,
+      specName: p.name,
+    });
+  }
+
+  const bodyParam = (op as any).parametersBody as Model | undefined;
+  const shape: any = {
+    inputs,
+    isSingleBodyInput: false,
+  };
+  if (bodyParam) {
+    // Resolve to a single wire media type.  We prefer hey-api's `mediaType`
+    // (singular, chosen for the body) and fall back to the first entry of
+    // the accepted-types list.  Keeping this a string (not an array) lets
+    // language templates do straightforward string equality checks like
+    // `mediaType === 'multipart/form-data'` instead of relying on implicit
+    // array-to-string coercion.
+    const mediaType =
+      ((bodyParam as any).mediaType as string | undefined) ??
+      ((bodyParam as any).mediaTypes as string[] | undefined)?.[0];
+    const bodyModel = modelsByName[bodyParam.type];
+    if (canFlattenBodyIntoRequest(op, bodyParam, bodyModel)) {
+      for (const prop of flattenableBodyProperties(bodyModel)) {
+        inputs.push({
+          source: { kind: 'body-field', fieldName: prop.name },
+          model: prop,
+          fromFlattenedBody: true,
+          isRequired: !!(prop as any).isRequired,
+          isNullable: !!(prop as any).isNullable,
+          description: prop.description,
+          specName: prop.name,
+        });
+      }
+      shape.bodyFromFields = { model: bodyModel, mediaType };
+    } else {
+      inputs.push({
+        source: { kind: 'body', wireName: 'body' },
+        model: bodyParam,
+        fromFlattenedBody: false,
+        isRequired: !!(bodyParam as any).isRequired,
+        isNullable: !!(bodyParam as any).isNullable,
+        description: bodyParam.description,
+        specName: 'body',
+      });
+      shape.bodyAsSingleInput = { model: bodyParam, mediaType };
+      if (nonBody.length === 0) shape.isSingleBodyInput = true;
+    }
+  }
+  return shape;
+};
+
+/**
+ * Expand a status-code range spec ("2XX", "5XX", etc.) to the concrete list
+ * of integer codes it covers.  Returns `undefined` for `'default'` (any
+ * non-matched code) and `[code]` for a literal numeric code.
+ */
+const statusCodesFor = (code: number | string): number[] | undefined => {
+  if (typeof code === 'number') return [code];
+  if (/^\dXX$/.test(code as string)) {
+    const base = Number((code as string).charAt(0)) * 100;
+    return Array.from({ length: 100 }, (_, i) => base + i);
+  }
+  return undefined;
+};
+
+/**
+ * Build a language-agnostic error taxonomy for the operation: one entry per
+ * non-success response bucket.  Language templates turn these into typed
+ * exception / error union shapes as appropriate.
+ */
+const buildErrorShape = (op: Operation) => {
+  const resultCode = (op as any).result?.code;
+  const errorResponses = (op.responses ?? []).filter(
+    (r) => r.code !== resultCode,
+  );
+  return {
+    entries: errorResponses.map((resp) => ({
+      code: resp.code,
+      statusCodes: statusCodesFor(resp.code as number | string),
+      responseModel: resp,
+    })),
+  };
+};
+
+/**
  * Add additional data to an operation for code generation decisions
  */
-const mutateOperationWithAdditionalData = (op: Operation) => {
+const mutateOperationWithAdditionalData = (
+  op: Operation,
+  modelsByName: { [name: string]: Model } = {},
+) => {
+  // Bucket parameters by `in` so language templates can iterate without
+  // re-filtering.  Body is set separately on `op.parametersBody` but is
+  // included here for symmetry — the two refer to the same object.
+  const parameters = op.parameters ?? [];
+  const groups = {
+    path: [] as any[],
+    query: [] as any[],
+    header: [] as any[],
+    cookie: [] as any[],
+    body: (op as any).parametersBody ?? undefined,
+  };
+  for (const parameter of parameters) {
+    switch ((parameter as any).in) {
+      case 'path':
+        groups.path.push(parameter);
+        break;
+      case 'query':
+        groups.query.push(parameter);
+        break;
+      case 'header':
+        groups.header.push(parameter);
+        break;
+      case 'cookie':
+        groups.cookie.push(parameter);
+        break;
+      default:
+        break;
+    }
+  }
+  (op as any).parameterGroups = groups;
+
+  // Annotate entries whose `type` points at a dictionary/array alias so
+  // language templates can branch without looking up modelsByName themselves.
+  for (const parameter of parameters) {
+    annotateReferencedCollectionKind(parameter, modelsByName);
+  }
+  annotateReferencedCollectionKind((op as any).parametersBody, modelsByName);
+  for (const response of op.responses ?? []) {
+    annotateReferencedCollectionKind(response, modelsByName);
+  }
+  annotateReferencedCollectionKind((op as any).result, modelsByName);
+
+  // Language-agnostic request shape: a flat list of inputs, each tagged with
+  // its source (path/query/header/cookie/body/body-field) plus the underlying
+  // Model.  Language templates decide how to render (kwargs vs positional vs
+  // interface, etc).
+  (op as any).requestShape = buildRequestShape(op, modelsByName);
+
+  // Language-agnostic error taxonomy: one entry per non-success response
+  // bucket, with the list of status codes it covers and the response Model.
+  (op as any).errorShape = buildErrorShape(op);
+
   // Add mutation/query details
   const isMutation = isOperationMutation(op);
   (op as any).isMutation = isMutation;

@@ -1,0 +1,438 @@
+<%_
+const PYTHON_BUILTIN = new Set([
+  'str', 'int', 'float', 'bool', 'bytes', 'None', 'Any',
+  'datetime.date', 'datetime.datetime',
+]);
+
+const resultTypeAsync = (op) => {
+  if (!op.result || op.result.type === 'void') return op.isStreaming ? 'AsyncIterator[None]' : 'None';
+  if (op.isStreaming) {
+    const jsonl = (op.responses || []).find(r => r.isJsonlStreaming);
+    if (jsonl && jsonl.itemSchemaModel) return `AsyncIterator[${jsonl.itemSchemaModel.pythonClientType}]`;
+    return `AsyncIterator[${op.result.pythonClientType}]`;
+  }
+  return op.result.pythonClientType || 'None';
+};
+
+const responseParseExpr = (resp) => {
+  if (resp.type === 'void') return 'None';
+  if (resp.type === 'binary') return 'response.content';
+  const mediaTypes = resp.mediaTypes || [];
+  const isJsonMedia = mediaTypes.some((m) =>
+    m === 'application/json' || m.endsWith('+json'),
+  );
+  if (resp.type === 'string') {
+    if (!isJsonMedia) return 'response.text';
+    const py = resp.pythonClientType || 'str';
+    return `TypeAdapter(${py}).validate_python(response.json())`;
+  }
+  if (resp.type === 'number' || resp.type === 'integer') {
+    if (!isJsonMedia) {
+      return 'float(response.text) if "." in response.text else int(response.text)';
+    }
+    return `TypeAdapter(${resp.type === 'integer' ? 'int' : 'float'}).validate_python(response.json())`;
+  }
+  if (resp.type === 'boolean') {
+    if (!isJsonMedia) {
+      return 'response.text.strip().lower() == "true"';
+    }
+    return 'TypeAdapter(bool).validate_python(response.json())';
+  }
+  const py = resp.pythonClientType || 'Any';
+  if (py === 'Any') return 'response.json()';
+  if (resp.referencedCollectionKind || py.startsWith('list[') || py.startsWith('dict[')) {
+    return `TypeAdapter(${py}).validate_python(response.json())`;
+  }
+  if (PYTHON_BUILTIN.has(py)) return 'response.json()';
+  return `${py}.model_validate(response.json())`;
+};
+
+const responseStatusCondition = (code) => {
+  if (typeof code === 'string' && /^\dXX$/.test(code)) {
+    const base = Number(code.charAt(0)) * 100;
+    return `${base} <= response.status_code < ${base + 100}`;
+  }
+  return `response.status_code == ${code}`;
+};
+
+const renderTypedRaise = (op, resp) => {
+  const entry = (op.errorShape?.entries || []).find((e) => e.code === resp.code);
+  const cls = op.errorShape.exceptionClassName;
+  if (!entry) return `raise ${cls}(response.status_code, None)`;
+  const payload = resp.type === 'void' ? 'None' : responseParseExpr(resp);
+  // For exact numeric codes we can pass the literal value directly so the
+  // Literal-typed `status` field type-checks with no suppression.
+  const statusExpr = entry.isExactCode
+    ? String(entry.code)
+    : 'response.status_code';
+  return (
+    `raise ${cls}(\n` +
+    `                response.status_code,\n` +
+    `                types_gen.${entry.className}(\n` +
+    `                    status=${statusExpr},\n` +
+    `                    error=${payload},\n` +
+    `                ),\n` +
+    `            )`
+  );
+};
+
+const isPositionalBody = (op) => !!op.requestShape?.isSingleBodyInput;
+
+const signature = (op) => {
+  const inputs = op.requestShape?.inputs ?? [];
+  if (inputs.length === 0) return 'self';
+  if (isPositionalBody(op)) {
+    const k = inputs[0];
+    return `self,\n        ${k.pythonName}: ${k.pythonAnnotation}${k.isRequired ? '' : ' = None'}`;
+  }
+  const parts = ['self', '*'];
+  for (const k of inputs) {
+    parts.push(k.isRequired
+      ? `${k.pythonName}: ${k.pythonAnnotation}`
+      : `${k.pythonName}: ${k.pythonAnnotation} = None`);
+  }
+  return parts.join(',\n        ');
+};
+
+const inputsByKind = (op, kind) =>
+  (op.requestShape?.inputs ?? []).filter((k) => k.source.kind === kind);
+
+const operationsGroupedByTag = (allOperations) => {
+  const out = {};
+  for (const op of allOperations) {
+    for (const tag of (op.tags || [])) {
+      (out[tag] ||= []).push(op);
+    }
+  }
+  return out;
+};
+
+const pythonClassNameForTag = (tag) =>
+  `_Async${tag.charAt(0).toUpperCase()}${tag.slice(1).replace(/[^a-zA-Z0-9_]/g, '_')}Namespace`;
+
+const tagGroups = operationsGroupedByTag(allOperations);
+_%>
+"""Async<%- className %> — AUTO-GENERATED asynchronous client."""
+
+from __future__ import annotations
+
+import datetime
+import warnings
+from collections.abc import AsyncIterator
+from dataclasses import dataclass, field
+from typing import Any, Literal, Never, Optional, Union
+from urllib.parse import quote
+
+import httpx
+from pydantic import BaseModel, TypeAdapter
+
+from . import types_gen
+
+
+class ApiError(Exception):
+    """Base class for all API errors.
+
+    Subclasses are generated per-operation so `error` can be narrowed by the
+    type checker via `isinstance` or `match`.  Catch `ApiError` to handle
+    any unexpected status code across operations.
+    """
+
+    status: int
+    error: Any
+
+    def __init__(self, status: int, error: Any = None) -> None:
+        super().__init__(f"API returned status {status}")
+        self.status = status
+        self.error = error
+
+<%_ allOperations.forEach((op) => {
+  const shape = op.errorShape;
+_%>
+
+
+class <%- shape.exceptionClassName %>(ApiError):
+    """Raised when `<%- op.operationIdSnakeCase || op.name %>` returns a non-success status."""
+
+    error: <% if (shape.entries.length === 0) { %>Never<% } else { %>types_gen.<%- shape.unionTypeName %><% } %>
+<%_ }); _%>
+
+
+@dataclass
+class Async<%- className %>Config:
+    """Configuration for the async client."""
+
+    url: str
+    httpx_client: Optional[httpx.AsyncClient] = None
+    headers: dict[str, str] = field(default_factory=dict)
+    omit_content_type_header: bool = False
+
+
+class Async<%- className %>:
+    """Asynchronous API client for <%- className %>."""
+
+    def __init__(self, config: Async<%- className %>Config) -> None:
+        self._config = config
+        self._client = config.httpx_client or httpx.AsyncClient()
+        self._owns_client = config.httpx_client is None
+        self._base_url = config.url.rstrip("/")
+<%_ Object.keys(tagGroups).forEach((tag) => { _%>
+        self.<%- tag %>: <%- pythonClassNameForTag(tag) %> = <%- pythonClassNameForTag(tag) %>(self)
+<%_ }); _%>
+
+    async def __aenter__(self) -> "Async<%- className %>":
+        return self
+
+    async def __aexit__(self, *exc: Any) -> None:
+        await self.aclose()
+
+    async def aclose(self) -> None:
+        if self._owns_client:
+            await self._client.aclose()
+
+    def _url(self, path: str, path_params: dict[str, Any]) -> str:
+        for key, value in path_params.items():
+            path = path.replace("{" + key + "}", quote(str(value), safe=""))
+        return self._base_url + path
+
+    def _query(self, query_params: dict[str, Any], collection_formats: Optional[dict[str, str]] = None) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        for key, value in query_params.items():
+            if value is None:
+                continue
+            if isinstance(value, list):
+                fmt = (collection_formats or {}).get(key, "multi")
+                if fmt == "csv":
+                    out[key] = ",".join(str(v) for v in value)
+                else:
+                    out[key] = [str(v) for v in value]
+            elif isinstance(value, bool):
+                out[key] = "true" if value else "false"
+            elif isinstance(value, (datetime.date, datetime.datetime)):
+                out[key] = value.isoformat()
+            else:
+                out[key] = value
+        return out
+
+    def _headers(self, header_params: dict[str, Any], collection_formats: Optional[dict[str, str]] = None) -> list[tuple[str, str]]:
+        out: list[tuple[str, str]] = [(k, v) for k, v in self._config.headers.items()]
+        for key, value in header_params.items():
+            if value is None:
+                continue
+            if isinstance(value, list):
+                fmt = (collection_formats or {}).get(key, "csv")
+                if fmt == "multi":
+                    for item in value:
+                        out.append((key, str(item)))
+                else:
+                    out.append((key, ",".join(str(v) for v in value)))
+            else:
+                out.append((key, str(value)))
+        return out
+
+    def _cookies(self, cookie_params: dict[str, Any]) -> dict[str, str]:
+        return {k: str(v) for k, v in cookie_params.items() if v is not None}
+
+    def _dump(self, value: Any) -> Any:
+        if value is None:
+            return None
+        if isinstance(value, BaseModel):
+            return value.model_dump(mode="json", by_alias=True, exclude_unset=True)
+        if isinstance(value, list):
+            return [self._dump(v) for v in value]
+        if isinstance(value, dict):
+            return {k: self._dump(v) for k, v in value.items()}
+        if isinstance(value, (datetime.date, datetime.datetime)):
+            return value.isoformat()
+        return value
+<%_ allOperations.forEach((op) => {
+  const shape = op.requestShape ?? { inputs: [] };
+  const pathInputs = inputsByKind(op, 'path');
+  const queryInputs = inputsByKind(op, 'query');
+  const headerInputs = inputsByKind(op, 'header');
+  const cookieInputs = inputsByKind(op, 'cookie');
+  const bodyFieldInputs = inputsByKind(op, 'body-field');
+  const wholeBodyInputs = inputsByKind(op, 'body');
+  const collectionInputs = [...queryInputs, ...headerInputs].filter(k => k.source.collectionFormat);
+  const bodyMediaType = (shape.bodyFromFields && shape.bodyFromFields.mediaType)
+    || (shape.bodyAsSingleInput && shape.bodyAsSingleInput.mediaType)
+    || undefined;
+  const bodyIsBinary = wholeBodyInputs.length === 1 && wholeBodyInputs[0].model.type === 'binary';
+  const bodyIsMultipart = bodyMediaType === 'multipart/form-data';
+  const hasTag = (op.tags && op.tags.length > 0);
+  const methodPrefix = hasTag ? '_' : '';
+_%>
+
+    async def <%- methodPrefix %><%- op.operationIdSnakeCase || op.name %>(
+        <%- signature(op) %>,
+    ) -> <%- resultTypeAsync(op) %>:
+<%_ if (op.description || op.summary) { _%>
+        """<%- (op.description || op.summary).split('\n')[0].replace(/"/g, "'") %>"""
+<%_ } _%>
+<%_ if (op.deprecated) { _%>
+        warnings.warn(
+            "`<%- op.operationIdSnakeCase || op.name %>` is deprecated.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+<%_ } _%>
+        path_params: dict[str, Any] = {<%_ pathInputs.forEach((k, i) => { _%><%- i > 0 ? ', ' : '' %>"<%- k.source.wireName %>": <%- k.pythonName %><%_ }); _%>}
+        query_params: dict[str, Any] = {<%_ queryInputs.forEach((k, i) => { _%><%- i > 0 ? ', ' : '' %>"<%- k.source.wireName %>": <%- k.pythonName %><%_ }); _%>}
+        header_params: dict[str, Any] = {<%_ headerInputs.forEach((k, i) => { _%><%- i > 0 ? ', ' : '' %>"<%- k.source.wireName %>": <%- k.pythonName %><%_ }); _%>}
+        cookie_params: dict[str, Any] = {<%_ cookieInputs.forEach((k, i) => { _%><%- i > 0 ? ', ' : '' %>"<%- k.source.wireName %>": <%- k.pythonName %><%_ }); _%>}
+<%_ if (collectionInputs.length > 0) { _%>
+        collection_formats: dict[str, str] = {<%_ collectionInputs.forEach((k, i) => { _%><%- i > 0 ? ', ' : '' %>"<%- k.source.wireName %>": "<%- k.source.collectionFormat %>"<%_ }); _%>}
+<%_ } else { _%>
+        collection_formats: Optional[dict[str, str]] = None
+<%_ } _%>
+<%_ if (shape.bodyFromFields) { _%>
+        _body_fields: dict[str, Any] = {}
+<%_ bodyFieldInputs.forEach((k) => {
+  if (k.isRequired) { _%>
+        _body_fields["<%- k.source.fieldName %>"] = <%- k.pythonName %>
+<%_ } else { _%>
+        if <%- k.pythonName %> is not None:
+            _body_fields["<%- k.source.fieldName %>"] = <%- k.pythonName %>
+<%_ } }); _%>
+        body = types_gen.<%- shape.bodyFromFields.model.typescriptName %>.model_validate(
+            _body_fields
+        ).model_dump(mode="json", by_alias=True, exclude_unset=True)
+        request_kwargs: dict[str, Any] = {"json": body}
+<%_ if (shape.bodyFromFields.mediaType) { _%>
+        if not self._config.omit_content_type_header:
+            header_params.setdefault("Content-Type", "<%- shape.bodyFromFields.mediaType %>")
+<%_ } _%>
+<%_ } else if (wholeBodyInputs.length > 0) { _%>
+<%_ if (bodyIsBinary) { _%>
+        body = <%- wholeBodyInputs[0].pythonName %>
+        request_kwargs: dict[str, Any] = {"content": body}
+<%_ if (bodyMediaType) { _%>
+        if body is not None and not self._config.omit_content_type_header:
+            header_params.setdefault("Content-Type", "<%- bodyMediaType %>")
+<%_ } _%>
+<%_ } else if (bodyIsMultipart) { _%>
+        body = <%- wholeBodyInputs[0].pythonName %>
+        if isinstance(body, dict):
+            _files = {k: v for k, v in body.items() if hasattr(v, "read") or isinstance(v, (bytes, tuple))}
+            _data = {k: v for k, v in body.items() if k not in _files}
+            request_kwargs: dict[str, Any] = {"files": _files or None, "data": _data or None}
+        else:
+            request_kwargs = {"files": body}
+<%_ } else { _%>
+        body = self._dump(<%- wholeBodyInputs[0].pythonName %>)
+        request_kwargs: dict[str, Any] = {"json": body}
+<%_ if (bodyMediaType) { _%>
+        if body is not None and not self._config.omit_content_type_header:
+            header_params.setdefault("Content-Type", "<%- bodyMediaType %>")
+<%_ } _%>
+<%_ } _%>
+<%_ } else { _%>
+        body = None
+        request_kwargs: dict[str, Any] = {}
+<%_ } _%>
+<%_ if (op.isStreaming) { _%>
+        async with self._client.stream(
+            "<%- op.method %>",
+            self._url("<%- op.path %>", path_params),
+            params=self._query(query_params, collection_formats),
+            headers=self._headers(header_params, collection_formats),
+            cookies=self._cookies(cookie_params),
+            **request_kwargs,
+        ) as response:
+<%_ op.responses.forEach((resp) => {
+  const isResult = op.result && op.result.code === resp.code;
+  const cond = resp.code === 'default' ? null : responseStatusCondition(resp.code);
+_%>
+<%_ if (cond) { _%>
+            if <%- cond %>:
+<%_ } else { _%>
+            if True:
+<%_ } _%>
+<%_ if (isResult && resp.isJsonlStreaming) { _%>
+                buffer = ""
+                async for chunk in response.aiter_text():
+                    buffer += chunk
+                    while "\n" in buffer:
+                        line, buffer = buffer.split("\n", 1)
+                        if line.strip():
+                            yield <%- resp.itemSchemaModel.pythonClientType %>.model_validate_json(line)
+                if buffer.strip():
+                    yield <%- resp.itemSchemaModel.pythonClientType %>.model_validate_json(buffer)
+                return
+<%_ } else if (isResult) { _%>
+                async for line in response.aiter_lines():
+                    if line:
+                        yield line
+                return
+<%_ } else { _%>
+                await response.aread()
+                <%- renderTypedRaise(op, resp) %>
+<%_ } _%>
+<%_ }); _%>
+            await response.aread()
+            raise <%- op.errorShape.exceptionClassName %>(response.status_code, None)
+<%_ } else { _%>
+        response = await self._client.request(
+            "<%- op.method %>",
+            self._url("<%- op.path %>", path_params),
+            params=self._query(query_params, collection_formats),
+            headers=self._headers(header_params, collection_formats),
+            cookies=self._cookies(cookie_params),
+            **request_kwargs,
+        )
+<%_ op.responses.forEach((resp) => {
+  const isResult = op.result && op.result.code === resp.code;
+  const cond = resp.code === 'default' ? null : responseStatusCondition(resp.code);
+_%>
+<%_ if (cond) { _%>
+        if <%- cond %>:
+<%_ } else { _%>
+        if True:
+<%_ } _%>
+<%_ if (isResult) { _%>
+            return <%- responseParseExpr(resp) %>
+<%_ } else { _%>
+            <%- renderTypedRaise(op, resp) %>
+<%_ } _%>
+<%_ }); _%>
+        raise <%- op.errorShape.exceptionClassName %>(response.status_code, None)
+<%_ } _%>
+<%_ }); _%>
+<%_ // ────── Tag namespaces ────── _%>
+<%_ Object.entries(tagGroups).forEach(([tag, ops]) => { _%>
+
+
+class <%- pythonClassNameForTag(tag) %>:
+    """`<%- tag %>` operations."""
+
+    def __init__(self, parent: "Async<%- className %>") -> None:
+        self._parent = parent
+<%_ ops.forEach((op) => {
+  const inputs = op.requestShape?.inputs ?? [];
+_%>
+
+    <%- signature(op).replace(/^self/, `async def ${op.operationIdSnakeCase || op.name}(\n        self`) %>,
+    ) -> <%- resultTypeAsync(op) %>:
+<%_ if (op.isStreaming) { _%>
+        async for item in self._parent._<%- op.operationIdSnakeCase || op.name %>(
+<%_ if (isPositionalBody(op)) { _%>
+            <%- inputs[0].pythonName %>,
+<%_ } else { _%>
+<%_ inputs.forEach((k) => { _%>
+            <%- k.pythonName %>=<%- k.pythonName %>,
+<%_ }); _%>
+<%_ } _%>
+        ):
+            yield item
+<%_ } else { _%>
+        return await self._parent._<%- op.operationIdSnakeCase || op.name %>(
+<%_ if (isPositionalBody(op)) { _%>
+            <%- inputs[0].pythonName %>,
+<%_ } else { _%>
+<%_ inputs.forEach((k) => { _%>
+            <%- k.pythonName %>=<%- k.pythonName %>,
+<%_ }); _%>
+<%_ } _%>
+        )
+<%_ } _%>
+<%_ }); _%>
+<%_ }); _%>
