@@ -1,0 +1,78 @@
+---
+/**
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/**
+ * Wraps a block of MDX that only applies when specific generator option
+ * values are selected.
+ *
+ * Usage:
+ *   <OptionFilter when={{ computeType: 'ServerlessApiGatewayRestApi' }}>
+ *     ...content only relevant to REST APIs...
+ *   </OptionFilter>
+ *
+ *   <OptionFilter when={{ auth: ['Cognito', 'IAM'] }}>
+ *     ...content relevant to Cognito OR IAM auth...
+ *   </OptionFilter>
+ *
+ *   <OptionFilter when={{ iacProvider: 'Terraform' }} not>
+ *     ...content relevant to everything EXCEPT Terraform...
+ *   </OptionFilter>
+ *
+ * Semantics:
+ *   - Multiple keys within `when` are ANDed.
+ *   - Array values within a key are ORed.
+ *   - `not` negates the whole predicate.
+ */
+
+type OptionValue = string | number | boolean;
+type OptionPredicate = Record<string, OptionValue | OptionValue[]>;
+
+interface Props {
+  when: OptionPredicate;
+  not?: boolean;
+  /**
+   * Short human description of what this block contains (e.g. "Streaming
+   * subscriptions", "IAM access grants"). Displayed on the filter pill and
+   * surfaced to MCP agents so they can skim the branching conditions without
+   * reading every block's body.
+   */
+  description?: string;
+}
+
+const { when, not, description } = Astro.props;
+
+// Normalise each value to an array so the client-side evaluator has a uniform
+// shape. Everything is serialised into a single data attribute so a single
+// page-level script can toggle every block without per-instance JS.
+const normalised: Record<string, string[]> = Object.fromEntries(
+  Object.entries(when ?? {}).map(([k, v]) => [
+    k,
+    (Array.isArray(v) ? v : [v]).map((x) => String(x)),
+  ]),
+);
+
+const payload = JSON.stringify({
+  when: normalised,
+  not: not ?? false,
+  description: description ?? undefined,
+});
+
+// Compact single-line clause rendered above the filtered content:
+//   `computeType = Rest`
+const op = not ? '≠' : '=';
+const clause = Object.entries(normalised)
+  .map(([k, values]) => `${k} ${op} ${values.join(' | ')}`)
+  .join(', ');
+---
+
+<div class="option-filter" data-option-filter={payload}>
+  <span class="option-filter-label" title={description ?? undefined}>
+    {clause}
+  </span>
+  <div class="option-filter-body">
+    <slot />
+  </div>
+</div>

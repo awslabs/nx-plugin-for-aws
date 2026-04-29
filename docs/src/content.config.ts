@@ -8,11 +8,16 @@ import { docsSchema } from '@astrojs/starlight/schema';
 import { blogSchema } from 'starlight-blog/schema';
 import { videosSchema } from 'starlight-videos/schemas';
 
+const optionFilterSchema = z.object({
+  generator: z.string().optional(),
+});
+
 export const collections = {
   docs: defineCollection({
     loader: docsLoader(),
     schema: docsSchema({
-      extend: (context) => blogSchema(context).and(videosSchema),
+      extend: (context) =>
+        blogSchema(context).and(videosSchema).and(optionFilterSchema),
     }),
-  })
+  }),
 };

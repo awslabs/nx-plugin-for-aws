@@ -3,7 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { NxGeneratorInfo } from '../utils/generators';
-import { postProcessGuide } from './generator-info';
+import {
+  fetchGuidePagesForGenerator,
+  postProcessGuide,
+} from './generator-info';
 import fs from 'fs';
 
 describe('postProcessGuide', () => {
@@ -424,5 +427,138 @@ Deploy instructions here.
         '/snippets/lambda-function/deploying-your-function.mdx',
       ),
     );
+  });
+
+  describe('option filtering', () => {
+    const pageWithBranches = `
+# Guide
+<OptionFilter when={{ computeType: 'ServerlessApiGatewayRestApi' }}>
+REST-only content
+</OptionFilter>
+<OptionFilter when={{ computeType: 'ServerlessApiGatewayHttpApi' }}>
+HTTP-only content
+</OptionFilter>
+common content
+`;
+
+    it('drops non-matching branches when options supplied', async () => {
+      const result = await postProcessGuide(
+        pageWithBranches,
+        generators,
+        undefined,
+        undefined,
+        { computeType: 'ServerlessApiGatewayHttpApi' },
+      );
+      expect(result).toContain('HTTP-only content');
+      expect(result).not.toContain('REST-only content');
+      expect(result).toContain('common content');
+    });
+
+    it('keeps all branches with NOTE markers when options omitted', async () => {
+      const result = await postProcessGuide(pageWithBranches, generators);
+      expect(result).toContain('REST-only content');
+      expect(result).toContain('HTTP-only content');
+      expect(result).toContain(
+        '> [!NOTE] Only when computeType = ServerlessApiGatewayRestApi',
+      );
+    });
+
+    it('filters Infrastructure to CDK slot when iacProvider is CDK', async () => {
+      const page = `
+# Deploy
+<Infrastructure>
+<Fragment slot="cdk">
+cdk instructions
+</Fragment>
+<Fragment slot="terraform">
+terraform instructions
+</Fragment>
+</Infrastructure>
+`;
+      const result = await postProcessGuide(
+        page,
+        generators,
+        undefined,
+        undefined,
+        { iacProvider: 'CDK' },
+      );
+      expect(result).toContain('cdk instructions');
+      expect(result).not.toContain('terraform instructions');
+    });
+
+    it('labels both Infrastructure slots when iacProvider omitted', async () => {
+      const page = `
+<Infrastructure>
+<Fragment slot="cdk">cdk here</Fragment>
+<Fragment slot="terraform">terraform here</Fragment>
+</Infrastructure>
+`;
+      const result = await postProcessGuide(page, generators);
+      expect(result).toContain('### CDK');
+      expect(result).toContain('### Terraform');
+    });
+  });
+
+  describe('guide-page-level filtering', () => {
+    let fetchMock: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      vi.restoreAllMocks();
+      // Make every fetched guide page return its URL so we can assert on it.
+      fetchMock = vi
+        .fn()
+        .mockImplementation((url: string) =>
+          Promise.resolve(new Response(`# content for ${url}`)),
+        );
+      vi.spyOn(globalThis, 'fetch').mockImplementation(fetchMock as any);
+    });
+
+    const connectionInfo: NxGeneratorInfo = {
+      id: 'connection',
+      description: 'connect projects',
+      resolvedSchemaPath: '/fake/schema.json',
+      resolvedFactoryPath: '/fake/factory',
+      metric: 'g11',
+      guidePages: [
+        'connection',
+        {
+          page: 'connection/react-trpc',
+          when: { sourceType: 'react', targetType: 'ts#trpc-api' },
+        },
+        {
+          page: 'connection/react-fastapi',
+          when: { sourceType: 'react', targetType: 'py#fast-api' },
+        },
+      ],
+    };
+
+    it('fetches only matching guide pages when options narrow', async () => {
+      await fetchGuidePagesForGenerator(
+        connectionInfo,
+        [connectionInfo],
+        undefined,
+        undefined,
+        { sourceType: 'react', targetType: 'ts#trpc-api' },
+      );
+      const urls = fetchMock.mock.calls.map((c) => c[0] as string);
+      expect(urls.some((u) => u.endsWith('/connection.mdx'))).toBe(true);
+      expect(urls.some((u) => u.endsWith('/connection/react-trpc.mdx'))).toBe(
+        true,
+      );
+      expect(
+        urls.some((u) => u.endsWith('/connection/react-fastapi.mdx')),
+      ).toBe(false);
+    });
+
+    it('fetches every guide page when options are omitted', async () => {
+      await fetchGuidePagesForGenerator(connectionInfo, [connectionInfo]);
+      const urls = fetchMock.mock.calls.map((c) => c[0] as string);
+      expect(urls.some((u) => u.endsWith('/connection/react-trpc.mdx'))).toBe(
+        true,
+      );
+      expect(
+        urls.some((u) => u.endsWith('/connection/react-fastapi.mdx')),
+      ).toBe(true);
+    });
   });
 });

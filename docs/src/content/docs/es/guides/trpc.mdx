@@ -1,6 +1,7 @@
 ---
 title: "tRPC"
 description: "Documentación de referencia para tRPC"
+generator: ts#trpc-api
 ---
 
 import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
@@ -10,6 +11,7 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Infrastructure from '@components/infrastructure.astro';
 import Snippet from '@components/snippet.astro';
+import OptionFilter from '@components/option-filter.astro';
 
 [tRPC](https://trpc.io/) es un marco para construir APIs en TypeScript con seguridad de tipos de extremo a extremo. Usando tRPC, las actualizaciones en las entradas y salidas de las operaciones de la API se reflejan inmediatamente en el código del cliente y son visibles en tu IDE sin necesidad de reconstruir tu proyecto.
 
@@ -144,11 +146,8 @@ El uso de `query` para definir la implementación indica que la operación no es
 
 Si agregas un nuevo procedimiento, asegúrate de registrarlo añadiéndolo al router en `src/router.ts`.
 
+<OptionFilter when={{ computeType: 'ServerlessApiGatewayRestApi' }} description="Streaming subscriptions — REST API only, uses SSE">
 ### Subscripciones (Streaming)
-
-:::caution[Tipo de cómputo de suscripciones]
-Las subscripciones solo son compatibles cuando `computeType` es `ServerlessApiGatewayRestApi` (predeterminado), ya que las HTTP APIs de API Gateway no admiten streaming de respuestas.
-:::
 
 Las subscripciones de tRPC te permiten transmitir datos del servidor al cliente usando [Server-Sent Events (SSE)](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events). Cuando seleccionas `ServerlessApiGatewayRestApi` como tu tipo de cómputo, el generador configura automáticamente la infraestructura requerida para streaming, así como un manejador Lambda de streaming y el helper de esquema `ZodAsyncIterable`.
 
@@ -187,6 +186,7 @@ export const appRouter = router({
 ```
 
 La infraestructura generada usa un manejador Lambda de streaming con `ResponseTransferMode.STREAM` en API Gateway para todas las operaciones de REST API, lo que permite que las subscripciones funcionen junto con queries y mutations regulares.
+</OptionFilter>
 
 ## Personalizando tu API tRPC
 
@@ -285,9 +285,8 @@ Puedes agregar valores adicionales al contexto proporcionado a los procedimiento
 
 Como ejemplo, implementemos un middleware para extraer detalles sobre el usuario que llama a nuestra API en `src/middleware/identity.ts`.
 
-:::warning[Suposición de autenticación]
-Este ejemplo asume que `auth` se configuró como `IAM`. Para autenticación con Cognito, el middleware de identidad es más directo, extrayendo las claims relevantes del `event`.
-:::
+<OptionFilter when={{ auth: 'IAM' }} description="Identity middleware example for IAM-authenticated APIs">
+Este ejemplo recorre el middleware de identidad para autenticación `IAM`, donde buscamos al llamante en Cognito usando el sub extraído del evento de API Gateway. Para autenticación `Cognito`, el middleware de identidad es más directo — extrae las claims directamente del `event` en su lugar.
 
 Primero, definimos lo que agregaremos al contexto:
 
@@ -319,10 +318,10 @@ export const createIdentityPlugin = () => {
 };
 ```
 
-En nuestro caso, queremos extraer detalles del usuario de Cognito que llama. Hacemos esto extrayendo el ID de sujeto (o "sub") del usuario del evento de API Gateway, y recuperando detalles del usuario de Cognito. La implementación varía ligeramente dependiendo de si el evento fue proporcionado por una REST API o una HTTP API:
+En nuestro caso, queremos extraer detalles del usuario de Cognito que llama. Hacemos esto extrayendo el ID de sujeto (o "sub") del usuario del evento de API Gateway, y recuperando detalles del usuario de Cognito. La implementación varía dependiendo de si el evento fue proporcionado por una REST API o una HTTP API:
 
-<Tabs>
-<TabItem label="REST">
+<Tabs syncKey="http-rest">
+<TabItem label="REST API" _filter={{ computeType: 'ServerlessApiGatewayRestApi' }}>
 ```ts
 import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
 import { initTRPC, TRPCError } from '@trpc/server';
@@ -385,7 +384,7 @@ export const createIdentityPlugin = () => {
 };
 ```
 </TabItem>
-<TabItem label="HTTP">
+<TabItem label="HTTP API" _filter={{ computeType: 'ServerlessApiGatewayHttpApi' }}>
 ```ts
 import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
 import { initTRPC, TRPCError } from '@trpc/server';
@@ -455,6 +454,7 @@ export const createIdentityPlugin = () => {
 ```
 </TabItem>
 </Tabs>
+</OptionFilter>
 
 ## Desplegando tu API tRPC
 
@@ -481,9 +481,7 @@ Esto configura la infraestructura de tu API, incluyendo un AWS API Gateway REST 
 
 <Snippet name="api/cors-configuration-cdk-note" />
 
-:::note[Autenticación Cognito]
-Si seleccionaste usar autenticación `Cognito`, necesitarás proporcionar la propiedad `identity` al constructo de la API:
-
+<OptionFilter when={{ auth: 'Cognito' }} description="Supplying the identity construct for Cognito-authenticated CDK APIs">
 ```ts {9}
 import { MyApi, UserIdentity } from ':my-scope/common-constructs';
 
@@ -500,7 +498,7 @@ export class ExampleStack extends Stack {
 ```
 
 El constructo `UserIdentity` puede generarse usando el <Link path="/guides/react-website-auth">generador `ts#react-website-auth`</Link>
-:::
+</OptionFilter>
 </Fragment>
 <Fragment slot="terraform">
 Los módulos de Terraform para desplegar tu API están en la carpeta `common/terraform`. Puedes usarlos en una configuración de Terraform:
@@ -535,8 +533,8 @@ Esto configura:
 
 <Snippet name="api/cors-configuration-terraform-note" />
 
-:::note[Autenticación Cognito]
-Si seleccionaste usar autenticación `Cognito`, necesitarás proporcionar la configuración de Cognito:
+<OptionFilter when={{ auth: 'Cognito' }} description="Supplying Cognito config to Terraform-deployed APIs">
+Para conectar un User Pool y cliente de Cognito, proporciona las variables relevantes:
 
 ```hcl {4-5}
 module "my_api" {
@@ -555,7 +553,7 @@ module "my_api" {
 ```
 
 Puedes configurar User Pool y Client de Cognito usando los recursos o módulos de Terraform apropiados.
-:::
+</OptionFilter>
 
 El módulo de Terraform proporciona varias salidas que puedes usar:
 
@@ -595,17 +593,18 @@ module "my_api" {
 }
 ```
 
+<OptionFilter when={{ auth: 'None' }} description="Checkov failures you may see when auth is None">
 :::caution[Sin autenticación]
-Si seleccionaste `None` para `auth` al ejecutar el generador, puedes ver fallos en los checks de Checkov como:
+Puedes ver fallos en los checks de Checkov como:
 
 <Tabs syncKey="http-rest">
-<TabItem label="HTTP API">
+<TabItem label="HTTP API" _filter={{ computeType: 'ServerlessApiGatewayHttpApi' }}>
 ```
 Check: CKV_AWS_309: "Ensure API GatewayV2 routes specify an authorization type"
  FAILED for resource: aws_apigatewayv2_route.proxy_routes["PUT"]
 ```
 </TabItem>
-<TabItem label="REST API">
+<TabItem label="REST API" _filter={{ computeType: 'ServerlessApiGatewayRestApi' }}>
 ```
 Check: CKV_AWS_59: "Ensure there is no open access to back-end resources through API"
  FAILED for resource: aws_api_gateway_method.proxy_method
@@ -615,24 +614,28 @@ Check: CKV_AWS_59: "Ensure there is no open access to back-end resources through
 
 Puedes [agregar un comentario de supresión](https://www.checkov.io/2.Basics/Suppressing%20and%20Skipping%20Policies.html) si estás seguro de que deseas que tu API sea pública.
 :::
+</OptionFilter>
 </Fragment>
 </Infrastructure>
 
+<OptionFilter when={{ computeType: 'ServerlessApiGatewayRestApi' }} description="WAF — REST APIs get a WAF Web ACL by default">
 ### WAF
 
 <Snippet name="api/waf-configuration" parentHeading="WAF" />
+</OptionFilter>
 
 ### Integraciones
 
 <Snippet name="api/type-safe-api-integrations" parentHeading="Integraciones" />
 
 :::tip[Integraciones CDK con tipos seguros]
-Si seleccionaste CDK como tu `iacProvider`, cuando agregues o quites un procedimiento en tu API tRPC, estos cambios se reflejarán inmediatamente en el constructo CDK sin necesidad de reconstruir.
+Si seleccionaste CDK para tu `iacProvider`, cuando agregues o quites un procedimiento en tu API tRPC, estos cambios se reflejarán inmediatamente en el constructo CDK sin necesidad de reconstruir.
 :::
 
+<OptionFilter when={{ auth: 'IAM' }} description="Granting API invoke access — IAM-authenticated APIs only">
 ### Otorgando Acceso (Solo IAM)
 
-Si seleccionaste usar autenticación `IAM`, puedes otorgar acceso a tu API:
+Puedes otorgar acceso a tu API de la siguiente manera:
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -679,6 +682,7 @@ Las salidas clave del módulo de API que puedes usar para políticas IAM son:
 - `module.my_api.lambda_function_arn` - El ARN de la función Lambda
 </Fragment>
 </Infrastructure>
+</OptionFilter>
 
 ### Objetivo de Bundle
 

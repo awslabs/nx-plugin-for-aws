@@ -1,0 +1,295 @@
+---
+/**
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { collectReferencedKeys } from '../../../packages/nx-plugin/src/mcp-server/option-filter';
+
+/**
+ * Renders a filter bar above guide pages that use <OptionFilter>.
+ * The bar:
+ *  - Reads the page's `generator:` frontmatter to resolve the schema.
+ *  - Shows one dropdown per option key that the page actually references
+ *    (not every enum on the schema).
+ *  - Persists selections to localStorage keyed by generator id and syncs
+ *    to the URL hash so links are shareable.
+ *  - Toggles `hidden` on .option-filter wrappers whose data-option-filter
+ *    predicate does not match, and hides matching TOC anchors.
+ *
+ * Emitted only when the page has at least one <OptionFilter> block.
+ */
+
+interface Props {
+  generatorId: string;
+  rawMdx: string;
+}
+
+const { generatorId, rawMdx } = Astro.props;
+
+const findGeneratorsJson = (): string | undefined => {
+  const candidates = [
+    path.resolve(process.cwd(), '../packages/nx-plugin/generators.json'),
+    path.resolve(process.cwd(), 'packages/nx-plugin/generators.json'),
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return undefined;
+};
+
+interface FilterableOption {
+  key: string;
+  enum: string[];
+  default?: string;
+  description?: string;
+}
+
+let filterableOptions: FilterableOption[] = [];
+
+try {
+  const referenced = collectReferencedKeys(rawMdx);
+  if (referenced.length > 0) {
+    const generatorsJson = findGeneratorsJson();
+    if (generatorsJson) {
+      const registry = JSON.parse(fs.readFileSync(generatorsJson, 'utf-8')) as {
+        generators: Record<string, { schema: string }>;
+      };
+      const entry = registry.generators[generatorId];
+      if (entry) {
+        const schemaPath = path.resolve(
+          path.dirname(generatorsJson),
+          entry.schema,
+        );
+        const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf-8')) as {
+          properties?: Record<
+            string,
+            { enum?: unknown[]; default?: unknown; description?: string }
+          >;
+        };
+        const props = schema.properties ?? {};
+        filterableOptions = referenced
+          .map((key) => {
+            const prop = props[key];
+            if (!prop || !Array.isArray(prop.enum)) return undefined;
+            return {
+              key,
+              enum: prop.enum.map((v) => String(v)),
+              default:
+                prop.default !== undefined ? String(prop.default) : undefined,
+              description: prop.description,
+            };
+          })
+          .filter((f): f is FilterableOption => f !== undefined);
+      }
+    }
+  }
+} catch {
+  filterableOptions = [];
+}
+
+const storageKey = `npfa:optfilter:${generatorId}`;
+---
+
+{
+  filterableOptions.length > 0 && (
+    <form
+      class="option-filter-bar"
+      data-option-filter-bar
+      data-storage-key={storageKey}
+    >
+      <div class="option-filter-bar-intro">
+        <span class="option-filter-bar-title">Filter this guide</span>
+        <span class="option-filter-bar-help">
+          Pick generator option values to hide sections that don't apply.
+        </span>
+      </div>
+      <div class="option-filter-bar-controls">
+        {filterableOptions.map((opt) => (
+          <div class="option-filter-bar-field">
+            <label for={`optfilter-${opt.key}`}>{opt.key}</label>
+            <select
+              id={`optfilter-${opt.key}`}
+              name={opt.key}
+              data-option-filter-select
+            >
+              <option value="">All</option>
+              {opt.enum.map((v) => (
+                <option value={v}>
+                  {v}
+                  {v === opt.default ? ' (default)' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+        ))}
+        <button
+          type="button"
+          class="option-filter-bar-reset"
+          data-option-filter-reset
+        >
+          Reset
+        </button>
+      </div>
+    </form>
+  )
+}
+
+<script>
+  // Progressive enhancement for guide pages that use <OptionFilter>:
+  //   1. Move the block's `filter x = y` pill inline with the first heading
+  //      in the block (so it reads as a tag on the heading, not a stanza).
+  //   2. Collapse siblings of <OptionFilter> blocks that share a common
+  //      *outer* ancestor predicate into a tab group, so authors aren't
+  //      left with stacked nested-filter callouts.
+  //   3. Toggle `hidden` on blocks (and their TOC anchors) whenever the
+  //      filter bar selection changes.
+  type Filter = {
+    when: Record<string, string[]>;
+    not: boolean;
+    description?: string;
+  };
+
+  const evaluate = (filter: Filter, selected: Record<string, string>) => {
+    let matched = true;
+    let anyKeyTested = false;
+    for (const [k, values] of Object.entries(filter.when)) {
+      const s = selected[k];
+      if (s === undefined) continue; // "All" for this key — doesn't veto.
+      anyKeyTested = true;
+      if (!values.includes(s)) {
+        matched = false;
+        break;
+      }
+    }
+    if (!anyKeyTested) return true;
+    return filter.not ? !matched : matched;
+  };
+
+
+
+  const run = () => {
+    const bar = document.querySelector<HTMLFormElement>(
+      '[data-option-filter-bar]',
+    );
+    if (!bar) return;
+
+    const storageKey = bar.dataset.storageKey!;
+    const selects = Array.from(
+      bar.querySelectorAll<HTMLSelectElement>('[data-option-filter-select]'),
+    );
+
+    const readQueryFilters = (): Record<string, string> => {
+      // Filters live in the query string (e.g. `?f=computeType:Rest,auth:IAM`)
+      // rather than the URL hash — the hash is reserved for TOC anchor
+      // navigation, which would otherwise clobber the filter state.
+      const match = /[?&]f=([^&#]+)/.exec(location.search);
+      if (!match) return {};
+      const out: Record<string, string> = {};
+      for (const pair of decodeURIComponent(match[1]).split(',')) {
+        const [k, v] = pair.split(':');
+        if (k && v) out[k] = v;
+      }
+      return out;
+    };
+
+    const readStorageFilters = (): Record<string, string> => {
+      try {
+        return JSON.parse(localStorage.getItem(storageKey) || '{}') as Record<
+          string,
+          string
+        >;
+      } catch {
+        return {};
+      }
+    };
+
+    const initial = { ...readStorageFilters(), ...readQueryFilters() };
+    for (const select of selects) {
+      if (initial[select.name] !== undefined) {
+        select.value = initial[select.name];
+      }
+    }
+
+
+    const currentFilters = (): Record<string, string> => {
+      const out: Record<string, string> = {};
+      for (const select of selects) {
+        if (select.value) out[select.name] = select.value;
+      }
+      return out;
+    };
+
+    const apply = () => {
+      const selected = currentFilters();
+      const blocks = document.querySelectorAll<HTMLElement>('.option-filter');
+      const hiddenIds = new Set<string>();
+      for (const block of blocks) {
+        const raw = block.dataset.optionFilter;
+        if (!raw) continue;
+        let filter: Filter;
+        try {
+          filter = JSON.parse(raw);
+        } catch {
+          continue;
+        }
+        const show = evaluate(filter, selected);
+        block.hidden = !show;
+        if (!show) {
+          for (const el of block.querySelectorAll<HTMLElement>('[id]')) {
+            hiddenIds.add(el.id);
+          }
+        }
+      }
+      const tocLinks = document.querySelectorAll<HTMLAnchorElement>(
+        'starlight-toc a[href^="#"], .right-sidebar a[href^="#"]',
+      );
+      for (const link of tocLinks) {
+        const href = link.getAttribute('href');
+        if (!href) continue;
+        const id = decodeURIComponent(href.slice(1));
+        const li = link.closest('li');
+        if (!li) continue;
+        li.hidden = hiddenIds.has(id);
+      }
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(selected));
+      } catch {}
+      // Write the filter state to the query string, preserving any other
+      // query params and the hash (so TOC anchor clicks don't wipe it out).
+      const params = new URLSearchParams(location.search);
+      const parts = Object.entries(selected).map(([k, v]) => `${k}:${v}`);
+      if (parts.length > 0) {
+        params.set('f', parts.join(','));
+      } else {
+        params.delete('f');
+      }
+      const newSearch = params.toString() ? `?${params.toString()}` : '';
+      if (newSearch !== location.search) {
+        history.replaceState(
+          null,
+          '',
+          location.pathname + newSearch + location.hash,
+        );
+      }
+    };
+
+    for (const select of selects) {
+      select.addEventListener('change', apply);
+    }
+    bar
+      .querySelector<HTMLButtonElement>('[data-option-filter-reset]')
+      ?.addEventListener('click', () => {
+        for (const select of selects) select.value = '';
+        apply();
+      });
+    apply();
+  };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', run);
+  } else {
+    run();
+  }
+</script>

@@ -9,7 +9,10 @@ import {
   buildPackageManagerExecCommand,
   buildPackageManagerShortCommand,
 } from '../utils/commands';
-import { NxGeneratorInfo } from '../utils/generators';
+import { GuidePageRef, NxGeneratorInfo } from '../utils/generators';
+import { applyOptionFilter, evaluatePredicate } from './option-filter';
+import { applyInfrastructureFilter } from './infrastructure-filter';
+import { applyTabsFilter } from './tabs-filter';
 import fs from 'fs';
 
 /**
@@ -67,19 +70,50 @@ ${renderGeneratorCommand(info.id, schema, packageManager)}
  * Retrieve the markdown guide pages for a generator from github.
  * If the generator has guidePages in generators.json we fetch all of those, otherwise we
  * try to fetch a guide with the generator name kebab-cased.
+ *
+ * Guide pages with a `when` predicate are dropped when `options` is supplied
+ * and the predicate doesn't match. This lets multi-variant generators like
+ * `connection` return only the pages relevant to the agent's selection.
  */
 export const fetchGuidePagesForGenerator = async (
   info: NxGeneratorInfo,
   generators: NxGeneratorInfo[],
   packageManager?: string,
   snippetContentProvider?: SnippetContentProvider,
+  options?: Record<string, string>,
 ): Promise<string> => {
+  const refs: readonly GuidePageRef[] = info.guidePages ?? [kebabCase(info.id)];
+  const pages = filterGuidePages(refs, options);
   return await fetchGuidePages(
-    info.guidePages ?? [kebabCase(info.id)],
+    pages,
     generators,
     packageManager,
     snippetContentProvider,
+    options,
   );
+};
+
+/**
+ * Drop guide page refs whose `when` predicate fails to match the supplied
+ * options. Plain string refs are always included.
+ */
+const filterGuidePages = (
+  refs: readonly GuidePageRef[],
+  options?: Record<string, string>,
+): string[] => {
+  return refs
+    .filter((ref) => {
+      if (typeof ref === 'string' || !ref.when) return true;
+      if (!options) return true; // no opinion — keep it
+      const normalised: Record<string, string[]> = Object.fromEntries(
+        Object.entries(ref.when).map(([k, v]) => [
+          k,
+          (Array.isArray(v) ? [...v] : [v]).map((x) => String(x)),
+        ]),
+      );
+      return evaluatePredicate(normalised, false, options);
+    })
+    .map((ref) => (typeof ref === 'string' ? ref : ref.page));
 };
 
 /**
@@ -90,6 +124,7 @@ export const fetchGuidePages = async (
   generators: NxGeneratorInfo[],
   packageManager?: string,
   snippetContentProvider?: SnippetContentProvider,
+  options?: Record<string, string>,
 ): Promise<string> => {
   const guides = await Promise.allSettled(
     guidePages.map(
@@ -109,6 +144,7 @@ export const fetchGuidePages = async (
         generators,
         packageManager,
         snippetContentProvider,
+        options,
       ),
     ),
   );
@@ -162,22 +198,36 @@ const findGeneratorAndSchema = (
 };
 
 /**
- * Post-process a guide page to "inline" relevant components
+ * Post-process a guide page to "inline" relevant components.
+ *
+ * When `options` is supplied, <OptionFilter> blocks whose predicate doesn't
+ * match are removed and <Infrastructure> is collapsed to the relevant slot.
+ * When `options` is omitted, every <OptionFilter> block is kept with a
+ * `> [!NOTE] Only when …` marker so agents can see the branching conditions.
  */
 export const postProcessGuide = async (
   guide: string,
   generators: NxGeneratorInfo[],
   packageManager?: string,
   snippetContentProvider?: SnippetContentProvider,
+  options?: Record<string, string>,
 ): Promise<string> => {
   const getSnippetContent = snippetContentProvider ?? fetchSnippet;
+
+  // Apply option/infrastructure/tabs filtering first so later passes
+  // (snippets, generator parameter tables, etc.) only see the branches
+  // we're actually keeping.
+  let processedGuide = applyOptionFilter(guide, options);
+  processedGuide = applyInfrastructureFilter(
+    processedGuide,
+    options?.iacProvider,
+  );
+  processedGuide = applyTabsFilter(processedGuide, options);
 
   // Replace <Snippet /> with fetched snippet content
   // Use a regex that matches the full self-closing tag, allowing / in attribute values
   const snippetRegex = /<Snippet\s+((?:[^/]|\/(?!>))+)\s*\/>/g;
-  const snippetMatches = [...guide.matchAll(snippetRegex)];
-
-  let processedGuide = guide;
+  const snippetMatches = [...processedGuide.matchAll(snippetRegex)];
 
   if (snippetMatches.length > 0) {
     // Fetch all snippets in parallel
@@ -198,6 +248,7 @@ export const postProcessGuide = async (
           generators,
           packageManager,
           getSnippetContent,
+          options,
         );
         return {
           original: match[0],

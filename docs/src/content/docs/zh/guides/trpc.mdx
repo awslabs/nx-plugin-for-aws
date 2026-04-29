@@ -1,6 +1,7 @@
 ---
 title: "tRPC"
 description: "tRPC 参考文档"
+generator: ts#trpc-api
 ---
 
 import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
@@ -10,6 +11,7 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Infrastructure from '@components/infrastructure.astro';
 import Snippet from '@components/snippet.astro';
+import OptionFilter from '@components/option-filter.astro';
 
 [tRPC](https://trpc.io/) 是一个用于在 TypeScript 中构建端到端类型安全 API 的框架。使用 tRPC 时,API 操作输入输出的更新会立即反映在客户端代码中,并可在 IDE 中直接查看,无需重新构建项目。
 
@@ -144,11 +146,8 @@ export const echo = publicProcedure
 
 如果添加新过程,请确保在 `src/router.ts` 的路由器中注册它。
 
+<OptionFilter when={{ computeType: 'ServerlessApiGatewayRestApi' }} description="流式订阅 — 仅限 REST API,使用 SSE">
 ### 订阅(流式传输)
-
-:::caution[订阅计算类型]
-订阅仅在 `computeType` 为 `ServerlessApiGatewayRestApi`(默认)时受支持,因为 API Gateway HTTP API 不支持响应流式传输。
-:::
 
 tRPC 订阅允许您使用[服务器发送事件(SSE)](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events)从服务器向客户端流式传输数据。当您选择 `ServerlessApiGatewayRestApi` 作为计算类型时,生成器会自动配置流式传输所需的基础设施,以及流式传输 Lambda 处理程序和 `ZodAsyncIterable` 模式辅助工具。
 
@@ -187,6 +186,7 @@ export const appRouter = router({
 ```
 
 生成的基础设施对所有 REST API 操作使用具有 `ResponseTransferMode.STREAM` 的流式传输 Lambda 处理程序,这使订阅能够与常规查询和变更一起工作。
+</OptionFilter>
 
 ## 自定义 tRPC API
 
@@ -285,9 +285,8 @@ export const echo = publicProcedure
 
 例如,让我们在 `src/middleware/identity.ts` 中实现一些中间件来从 API 中提取调用用户的详细信息。
 
-:::warning[认证假设]
-此示例假设 `auth` 设置为 `IAM`。对于 Cognito 身份验证,身份中间件更简单,直接从 `event` 中提取相关声明。
-:::
+<OptionFilter when={{ auth: 'IAM' }} description="IAM 身份验证 API 的身份中间件示例">
+此示例演示了 `IAM` 身份验证的身份中间件,我们使用从 API Gateway 事件中提取的 sub 在 Cognito 中查找调用者。对于 `Cognito` 身份验证,身份中间件更简单——直接从 `event` 中提取声明即可。
 
 首先,我们定义要添加到上下文中的内容:
 
@@ -319,10 +318,10 @@ export const createIdentityPlugin = () => {
 };
 ```
 
-在我们的案例中,我们希望提取调用 Cognito 用户的详细信息。我们将通过从 API Gateway 事件中提取用户的主题 ID(或 "sub"),并从 Cognito 检索用户详细信息来实现。具体实现根据事件是由 REST API 还是 HTTP API 提供给我们的函数而略有不同:
+在我们的案例中,我们希望提取调用 Cognito 用户的详细信息。我们将通过从 API Gateway 事件中提取用户的主题 ID(或 "sub"),并从 Cognito 检索用户详细信息来实现。具体实现根据事件是由 REST API 还是 HTTP API 提供给我们的函数而有所不同:
 
-<Tabs>
-<TabItem label="REST">
+<Tabs syncKey="http-rest">
+<TabItem label="REST API" _filter={{ computeType: 'ServerlessApiGatewayRestApi' }}>
 ```ts
 import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
 import { initTRPC, TRPCError } from '@trpc/server';
@@ -385,7 +384,7 @@ export const createIdentityPlugin = () => {
 };
 ```
 </TabItem>
-<TabItem label="HTTP">
+<TabItem label="HTTP API" _filter={{ computeType: 'ServerlessApiGatewayHttpApi' }}>
 ```ts
 import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
 import { initTRPC, TRPCError } from '@trpc/server';
@@ -455,6 +454,7 @@ export const createIdentityPlugin = () => {
 ```
 </TabItem>
 </Tabs>
+</OptionFilter>
 
 ## 部署 tRPC API
 
@@ -481,9 +481,7 @@ export class ExampleStack extends Stack {
 
 <Snippet name="api/cors-configuration-cdk-note" />
 
-:::note[Cognito认证]
-如果选择使用 `Cognito` 身份验证,您需要向 API 构造提供 `identity` 属性:
-
+<OptionFilter when={{ auth: 'Cognito' }} description="为 Cognito 身份验证的 CDK API 提供身份构造">
 ```ts {9}
 import { MyApi, UserIdentity } from ':my-scope/common-constructs';
 
@@ -500,7 +498,7 @@ export class ExampleStack extends Stack {
 ```
 
 可以使用 <Link path="/guides/react-website-auth">`ts#react-website-auth` 生成器</Link> 生成 `UserIdentity` 构造
-:::
+</OptionFilter>
 </Fragment>
 <Fragment slot="terraform">
 `common/terraform` 文件夹中包含用于部署 API 的 Terraform 模块。您可以在 Terraform 配置中使用此模块:
@@ -535,8 +533,8 @@ module "my_api" {
 
 <Snippet name="api/cors-configuration-terraform-note" />
 
-:::note[Cognito认证]
-如果选择使用 `Cognito` 身份验证,您需要提供 Cognito 配置:
+<OptionFilter when={{ auth: 'Cognito' }} description="为 Terraform 部署的 API 提供 Cognito 配置">
+要插入 Cognito 用户池和客户端,请提供相关变量:
 
 ```hcl {4-5}
 module "my_api" {
@@ -555,7 +553,7 @@ module "my_api" {
 ```
 
 您可以使用适当的 Terraform 资源或模块设置 Cognito 用户池和客户端。
-:::
+</OptionFilter>
 
 Terraform 模块提供多个输出供您使用:
 
@@ -595,17 +593,18 @@ module "my_api" {
 }
 ```
 
+<OptionFilter when={{ auth: 'None' }} description="当身份验证为 None 时可能看到的 Checkov 失败">
 :::caution[无认证]
-如果在运行生成器时为 `auth` 选择 `None`,可能会看到 Checkov 检查失败,例如:
+可能会看到 Checkov 检查失败,例如:
 
 <Tabs syncKey="http-rest">
-<TabItem label="HTTP API">
+<TabItem label="HTTP API" _filter={{ computeType: 'ServerlessApiGatewayHttpApi' }}>
 ```
 Check: CKV_AWS_309: "Ensure API GatewayV2 routes specify an authorization type"
  FAILED for resource: aws_apigatewayv2_route.proxy_routes["PUT"]
 ```
 </TabItem>
-<TabItem label="REST API">
+<TabItem label="REST API" _filter={{ computeType: 'ServerlessApiGatewayRestApi' }}>
 ```
 Check: CKV_AWS_59: "Ensure there is no open access to back-end resources through API"
  FAILED for resource: aws_api_gateway_method.proxy_method
@@ -615,24 +614,28 @@ Check: CKV_AWS_59: "Ensure there is no open access to back-end resources through
 
 如果确定需要 API 公开访问,可以[添加抑制注释](https://www.checkov.io/2.Basics/Suppressing%20and%20Skipping%20Policies.html)。
 :::
+</OptionFilter>
 </Fragment>
 </Infrastructure>
 
+<OptionFilter when={{ computeType: 'ServerlessApiGatewayRestApi' }} description="WAF — REST API 默认获得 WAF Web ACL">
 ### WAF
 
 <Snippet name="api/waf-configuration" parentHeading="WAF" />
+</OptionFilter>
 
 ### 集成
 
 <Snippet name="api/type-safe-api-integrations" parentHeading="集成" />
 
 :::tip[CDK类型安全集成]
-如果为 `iacProvider` 选择 CDK,当在 tRPC API 中添加或删除过程时,这些更改将立即反映在 CDK 构造中,无需重新构建。
+如果您为 `iacProvider` 选择了 CDK,当在 tRPC API 中添加或删除过程时,这些更改将立即反映在 CDK 构造中,无需重新构建。
 :::
 
+<OptionFilter when={{ auth: 'IAM' }} description="授予 API 调用访问权限 — 仅限 IAM 身份验证的 API">
 ### 授予访问权限(仅限 IAM)
 
-如果选择使用 `IAM` 身份验证,可以授予 API 访问权限:
+可以按如下方式授予 API 访问权限:
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -679,6 +682,7 @@ API 模块的关键输出可用于 IAM 策略:
 - `module.my_api.lambda_function_arn` - Lambda 函数 ARN
 </Fragment>
 </Infrastructure>
+</OptionFilter>
 
 ### 打包目标
 

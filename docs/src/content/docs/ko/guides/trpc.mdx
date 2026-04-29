@@ -1,8 +1,8 @@
 ---
 title: "tRPC"
 description: "tRPC에 대한 참조 문서"
+generator: ts#trpc-api
 ---
-
 import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
@@ -10,6 +10,7 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Infrastructure from '@components/infrastructure.astro';
 import Snippet from '@components/snippet.astro';
+import OptionFilter from '@components/option-filter.astro';
 
 [tRPC](https://trpc.io/)는 엔드투엔드 타입 안전성을 갖춘 TypeScript API 구축을 위한 프레임워크입니다. tRPC를 사용하면 API 작업의 입력과 출력에 대한 변경 사항이 클라이언트 코드에 즉시 반영되며, 프로젝트를 재빌드할 필요 없이 IDE에서 바로 확인할 수 있습니다.
 
@@ -144,11 +145,8 @@ export const echo = publicProcedure
 
 새 프로시저를 추가할 경우 `src/router.ts`의 라우터에 등록해야 합니다.
 
+<OptionFilter when={{ computeType: 'ServerlessApiGatewayRestApi' }} description="스트리밍 구독 — REST API 전용, SSE 사용">
 ### 구독 (스트리밍)
-
-:::caution[구독 컴퓨트 유형]
-구독은 `computeType`이 `ServerlessApiGatewayRestApi`(기본값)일 때만 지원됩니다. API Gateway HTTP API는 응답 스트리밍을 지원하지 않기 때문입니다.
-:::
 
 tRPC 구독을 사용하면 [Server-Sent Events (SSE)](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events)를 사용하여 서버에서 클라이언트로 데이터를 스트리밍할 수 있습니다. `computeType`으로 `ServerlessApiGatewayRestApi`를 선택하면 생성기가 스트리밍에 필요한 인프라와 스트리밍 Lambda 핸들러 및 `ZodAsyncIterable` 스키마 헬퍼를 자동으로 구성합니다.
 
@@ -187,6 +185,7 @@ export const appRouter = router({
 ```
 
 생성된 인프라는 모든 REST API 작업에 대해 API Gateway에서 `ResponseTransferMode.STREAM`을 사용하는 스트리밍 Lambda 핸들러를 사용하므로, 구독이 일반 쿼리 및 뮤테이션과 함께 작동할 수 있습니다.
+</OptionFilter>
 
 ## tRPC API 사용자 정의
 
@@ -285,9 +284,8 @@ export const echo = publicProcedure
 
 예를 들어, API 호출 사용자에 대한 세부 정보를 추출하는 미들웨어를 `src/middleware/identity.ts`에 구현해 보겠습니다.
 
-:::warning[인증 가정]
-이 예제는 `auth`가 `IAM`으로 설정되었다고 가정합니다. Cognito 인증의 경우 `event`에서 관련 클레임을 추출하는 identity 미들웨어가 더 간단합니다.
-:::
+<OptionFilter when={{ auth: 'IAM' }} description="IAM 인증 API를 위한 Identity 미들웨어 예제">
+이 예제는 `IAM` 인증을 위한 identity 미들웨어를 설명합니다. 여기서는 API Gateway 이벤트에서 추출한 sub를 사용하여 Cognito에서 호출자를 조회합니다. `Cognito` 인증의 경우 identity 미들웨어가 더 간단합니다 — 대신 `event`에서 직접 클레임을 추출하세요.
 
 먼저 컨텍스트에 추가할 내용을 정의합니다:
 
@@ -319,10 +317,10 @@ export const createIdentityPlugin = () => {
 };
 ```
 
-이 경우 호출하는 Cognito 사용자에 대한 세부 정보를 추출하려고 합니다. API Gateway 이벤트에서 사용자의 주체 ID("sub")를 추출하고 Cognito에서 사용자 세부 정보를 검색하여 이를 수행합니다. 구현은 이벤트가 REST API 또는 HTTP API에 의해 함수에 제공되었는지에 따라 약간 다릅니다:
+이 경우 호출하는 Cognito 사용자에 대한 세부 정보를 추출하려고 합니다. API Gateway 이벤트에서 사용자의 주체 ID("sub")를 추출하고 Cognito에서 사용자 세부 정보를 검색하여 이를 수행합니다. 구현은 이벤트가 REST API 또는 HTTP API에 의해 함수에 제공되었는지에 따라 다릅니다:
 
-<Tabs>
-<TabItem label="REST">
+<Tabs syncKey="http-rest">
+<TabItem label="REST API" _filter={{ computeType: 'ServerlessApiGatewayRestApi' }}>
 ```ts
 import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
 import { initTRPC, TRPCError } from '@trpc/server';
@@ -385,7 +383,7 @@ export const createIdentityPlugin = () => {
 };
 ```
 </TabItem>
-<TabItem label="HTTP">
+<TabItem label="HTTP API" _filter={{ computeType: 'ServerlessApiGatewayHttpApi' }}>
 ```ts
 import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
 import { initTRPC, TRPCError } from '@trpc/server';
@@ -455,6 +453,7 @@ export const createIdentityPlugin = () => {
 ```
 </TabItem>
 </Tabs>
+</OptionFilter>
 
 ## tRPC API 배포
 
@@ -481,9 +480,7 @@ export class ExampleStack extends Stack {
 
 <Snippet name="api/cors-configuration-cdk-note" />
 
-:::note[Cognito 인증]
-`Cognito` 인증을 선택한 경우 API 구성에 `identity` 속성을 제공해야 합니다:
-
+<OptionFilter when={{ auth: 'Cognito' }} description="Cognito 인증 CDK API를 위한 identity 구성 제공">
 ```ts {9}
 import { MyApi, UserIdentity } from ':my-scope/common-constructs';
 
@@ -500,7 +497,7 @@ export class ExampleStack extends Stack {
 ```
 
 `UserIdentity` 구성은 <Link path="/guides/react-website-auth">`ts#react-website-auth` 생성기</Link>를 사용하여 생성할 수 있습니다.
-:::
+</OptionFilter>
 </Fragment>
 <Fragment slot="terraform">
 `common/terraform` 폴더에 API 배포를 위한 Terraform 모듈이 있습니다. Terraform 구성에서 이를 사용할 수 있습니다:
@@ -535,8 +532,8 @@ module "my_api" {
 
 <Snippet name="api/cors-configuration-terraform-note" />
 
-:::note[Cognito 인증]
-`Cognito` 인증을 선택한 경우 Cognito 구성을 제공해야 합니다:
+<OptionFilter when={{ auth: 'Cognito' }} description="Terraform 배포 API에 Cognito 구성 제공">
+Cognito 사용자 풀 및 클라이언트를 연결하려면 관련 변수를 제공하세요:
 
 ```hcl {4-5}
 module "my_api" {
@@ -555,7 +552,7 @@ module "my_api" {
 ```
 
 Cognito 사용자 풀 및 클라이언트는 적절한 Terraform 리소스 또는 모듈을 사용하여 설정할 수 있습니다.
-:::
+</OptionFilter>
 
 Terraform 모듈은 사용할 수 있는 여러 출력을 제공합니다:
 
@@ -595,17 +592,18 @@ module "my_api" {
 }
 ```
 
+<OptionFilter when={{ auth: 'None' }} description="인증이 None일 때 발생할 수 있는 Checkov 실패">
 :::caution[인증 없음]
-생성기를 실행할 때 `auth`로 `None`을 선택한 경우 다음과 같은 Checkov 검사 실패가 발생할 수 있습니다:
+다음과 같은 Checkov 검사 실패가 발생할 수 있습니다:
 
 <Tabs syncKey="http-rest">
-<TabItem label="HTTP API">
+<TabItem label="HTTP API" _filter={{ computeType: 'ServerlessApiGatewayHttpApi' }}>
 ```
 Check: CKV_AWS_309: "Ensure API GatewayV2 routes specify an authorization type"
  FAILED for resource: aws_apigatewayv2_route.proxy_routes["PUT"]
 ```
 </TabItem>
-<TabItem label="REST API">
+<TabItem label="REST API" _filter={{ computeType: 'ServerlessApiGatewayRestApi' }}>
 ```
 Check: CKV_AWS_59: "Ensure there is no open access to back-end resources through API"
  FAILED for resource: aws_api_gateway_method.proxy_method
@@ -615,24 +613,28 @@ Check: CKV_AWS_59: "Ensure there is no open access to back-end resources through
 
 API를 공개로 유지하려는 경우 [suppression comment 추가](https://www.checkov.io/2.Basics/Suppressing%20and%20Skipping%20Policies.html)를 고려할 수 있습니다.
 :::
+</OptionFilter>
 </Fragment>
 </Infrastructure>
 
+<OptionFilter when={{ computeType: 'ServerlessApiGatewayRestApi' }} description="WAF — REST API는 기본적으로 WAF Web ACL을 가짐">
 ### WAF
 
 <Snippet name="api/waf-configuration" parentHeading="WAF" />
+</OptionFilter>
 
 ### 통합
 
 <Snippet name="api/type-safe-api-integrations" parentHeading="Integrations" />
 
 :::tip[CDK 타입 안전 통합]
-`iacProvider`로 CDK를 선택한 경우 tRPC API에서 프로시저를 추가하거나 제거할 때 재빌드 없이 CDK 구성에 즉시 반영됩니다.
+`iacProvider`로 CDK를 선택한 경우, tRPC API에서 프로시저를 추가하거나 제거할 때 재빌드 없이 CDK 구성에 즉시 반영됩니다.
 :::
 
+<OptionFilter when={{ auth: 'IAM' }} description="API 호출 접근 권한 부여 — IAM 인증 API 전용">
 ### 접근 권한 부여 (IAM 전용)
 
-`IAM` 인증을 선택한 경우 API에 대한 접근 권한을 부여할 수 있습니다:
+다음과 같이 API에 대한 접근 권한을 부여할 수 있습니다:
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -679,6 +681,7 @@ API 모듈에서 IAM 정책에 사용할 수 있는 주요 출력:
 - `module.my_api.lambda_function_arn` - Lambda 함수 ARN
 </Fragment>
 </Infrastructure>
+</OptionFilter>
 
 ### 번들 대상
 
