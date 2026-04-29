@@ -387,18 +387,23 @@ const stripFilterAttr = (el: MdxJsxFlowElement | MdxJsxTextElement): void => {
  * Wrap a body of RootContent in a blockquote, prepending one or more
  * header lines. Used when `options` is omitted to keep OptionFilter
  * branches visible with a `> [!NOTE] Only when …` marker.
+ *
+ * The GitHub-style `[!NOTE] …` alert syntax uses `[`/`]` characters that
+ * remark-stringify normally escapes in plain text (producing
+ * `> \[!NOTE]`). Emit each header line as an `html` node so it survives
+ * stringification verbatim — downstream agents look for the literal
+ * `> [!NOTE] Only when` marker.
  */
 const buildNoteQuote = (
   headerLines: string[],
   body: RootContent[],
 ): RootContent => {
-  const headerParagraphs: RootContent[] = headerLines.map((line) => ({
-    type: 'paragraph',
-    children: [{ type: 'text', value: line }],
-  }));
+  const headerNodes: RootContent[] = headerLines.map(
+    (line) => ({ type: 'html', value: line }) as RootContent,
+  );
   return {
     type: 'blockquote',
-    children: [...headerParagraphs, ...body] as never,
+    children: [...headerNodes, ...body] as never,
   } as RootContent;
 };
 
