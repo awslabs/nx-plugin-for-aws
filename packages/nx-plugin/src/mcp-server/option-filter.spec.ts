@@ -47,6 +47,12 @@ describe('parseWhenExpression', () => {
 describe('parseOptionFilterAttrs', () => {
   it('parses when and not', () => {
     expect(
+      parseOptionFilterAttrs("<OptionFilter not when={{ auth: 'IAM' }}>"),
+    ).toEqual({ predicate: { auth: ['IAM'] }, not: true });
+  });
+
+  it('still parses when `not` trails `when`', () => {
+    expect(
       parseOptionFilterAttrs("<OptionFilter when={{ auth: 'IAM' }} not>"),
     ).toEqual({ predicate: { auth: ['IAM'] }, not: true });
   });
@@ -223,7 +229,7 @@ rest
   });
 
   it('supports the not flag', () => {
-    const text = `<OptionFilter when={{ iacProvider: 'Terraform' }} not>
+    const text = `<OptionFilter not when={{ iacProvider: 'Terraform' }}>
 not-terraform
 </OptionFilter>`;
     expect(applyOptionFilter(text, { iacProvider: 'CDK' })).toContain(

@@ -138,19 +138,25 @@ const storageKey = `npfa:optfilter:${generatorId}`;
 
 <script>
   // Progressive enhancement for guide pages that use <OptionFilter>:
-  //   1. Move the block's `filter x = y` pill inline with the first heading
-  //      in the block (so it reads as a tag on the heading, not a stanza).
-  //   2. Collapse siblings of <OptionFilter> blocks that share a common
-  //      *outer* ancestor predicate into a tab group, so authors aren't
-  //      left with stacked nested-filter callouts.
-  //   3. Toggle `hidden` on blocks (and their TOC anchors) whenever the
-  //      filter bar selection changes.
+  //   1. Read the user's selection from the filter bar dropdowns (defaulting
+  //      to values from `?f=…` in the URL and then from localStorage).
+  //   2. For each <OptionFilter> block, evaluate its predicate against the
+  //      selection and toggle `hidden` on the block, on the block's [id]
+  //      descendants' matching TOC anchors, and on any tab groups that end
+  //      up with no visible tabs.
+  //   3. Persist the resulting selection back to localStorage and to the
+  //      `?f=…` query string so reloads and shared links preserve it.
+  // The pill/left-border on each block is rendered by option-filter.astro —
+  // this script doesn't mutate block chrome or convert anything into tabs.
   type Filter = {
     when: Record<string, string[]>;
     not: boolean;
     description?: string;
   };
 
+  // Mirrors evaluatePredicate in packages/nx-plugin/src/mcp-server/option-filter.ts:
+  // AND across keys, OR within a key, `not` flips the final match, and a key
+  // the user hasn't picked a value for is treated as "All — show".
   const evaluate = (filter: Filter, selected: Record<string, string>) => {
     let matched = true;
     let anyKeyTested = false;
@@ -166,8 +172,6 @@ const storageKey = `npfa:optfilter:${generatorId}`;
     if (!anyKeyTested) return true;
     return filter.not ? !matched : matched;
   };
-
-
 
   const run = () => {
     const bar = document.querySelector<HTMLFormElement>(

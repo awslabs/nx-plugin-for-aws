@@ -67,6 +67,91 @@ ${renderGeneratorCommand(info.id, schema, packageManager)}
 `;
 };
 
+interface GeneratorSchemaShape {
+  properties?: Record<
+    string,
+    { enum?: unknown[]; default?: unknown; description?: string }
+  >;
+}
+
+export interface FilterableOption {
+  key: string;
+  enum: string[];
+  default?: string;
+  description?: string;
+}
+
+/**
+ * Load the filterable options for a generator.
+ *
+ * Sources:
+ *   - Enum properties from the generator's JSON schema.
+ *   - `extraFilterableOptions` from `generators.json` — used for MCP-only
+ *     keys that don't correspond to a schema property (e.g. the connection
+ *     generator's `sourceType` / `targetType`).
+ */
+export const loadFilterableOptions = (
+  info: NxGeneratorInfo,
+): FilterableOption[] => {
+  const options: FilterableOption[] = [];
+
+  try {
+    const schema = JSON.parse(
+      fs.readFileSync(info.resolvedSchemaPath, 'utf-8'),
+    ) as GeneratorSchemaShape;
+    const props = schema.properties ?? {};
+    for (const [key, prop] of Object.entries(props)) {
+      if (!Array.isArray(prop.enum) || prop.enum.length === 0) continue;
+      options.push({
+        key,
+        enum: (prop.enum as unknown[]).map((v) => String(v)),
+        default: prop.default !== undefined ? String(prop.default) : undefined,
+        description: prop.description,
+      });
+    }
+  } catch {
+    // Schema load failure shouldn't block extra options.
+  }
+
+  for (const [key, extra] of Object.entries(
+    info.extraFilterableOptions ?? {},
+  )) {
+    options.push({
+      key,
+      enum: [...extra.enum],
+      description: extra.description,
+    });
+  }
+
+  return options;
+};
+
+/**
+ * Render the "Filterable options" block that list-generators emits for each
+ * generator. Agents read this before invoking `generator-guide` and use it
+ * to pass the right `options` — so the guide comes back narrowed to just
+ * the branches that apply to their selection.
+ */
+export const renderFilterableOptions = (info: NxGeneratorInfo): string => {
+  const filterable = loadFilterableOptions(info);
+  if (filterable.length === 0) return '';
+
+  const lines: string[] = [];
+  lines.push('Filterable options:');
+  for (const opt of filterable) {
+    const def = opt.default ? ` (default: ${opt.default})` : '';
+    lines.push(`- ${opt.key}: ${opt.enum.join(' | ')}${def}`);
+  }
+  lines.push('');
+  lines.push(
+    `Before running this generator, call \`generator-guide\` with \`generator: "${info.id}"\` and ` +
+      '`options` populated with the values you intend to use for any of the keys above. ' +
+      'This returns guide content narrowed to the branches relevant to those choices and ' +
+      'keeps you from mixing configuration from a different variant.',
+  );
+  return lines.join('\n');
+};
+
 /**
  * Retrieve the markdown guide pages for a generator from github.
  * If the generator has guidePages in generators.json we fetch all of those, otherwise we
