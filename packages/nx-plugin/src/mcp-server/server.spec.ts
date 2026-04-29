@@ -69,7 +69,6 @@ describe('MCP Server', () => {
     const result = await client.callTool({
       name: 'create-workspace-command',
       arguments: {
-        workspaceName: 'test-workspace',
         packageManager: 'pnpm',
       },
     });

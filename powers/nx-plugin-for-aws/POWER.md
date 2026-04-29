@@ -43,8 +43,8 @@ Key capabilities:
 To create a new workspace and scaffold a React website with a tRPC API:
 
 ```bash
-# Create workspace
-npx -y create-nx-workspace@latest my-app --pm pnpm --preset @aws/nx-plugin --ci=skip
+# Create workspace (pass `.` as the name to create in the current empty directory)
+pnpm create @aws/nx-workspace my-app --no-interactive
 
 # Generate a tRPC API
 pnpm nx g @aws/nx-plugin:ts#trpc-api --no-interactive --name=my-api
@@ -68,7 +68,13 @@ Always prompt the user for what name they want to use when executing generators 
 Use the `create_workspace_command` tool with your preferred package manager. This generates the full command to create an Nx workspace pre-configured with the AWS plugin.
 
 ```bash
-npx -y create-nx-workspace@latest my-app --pm pnpm --preset @aws/nx-plugin --ci=skip
+pnpm create @aws/nx-workspace my-app --no-interactive
+```
+
+If you are already inside an empty directory intended for this project, pass `.` as the workspace name to create the workspace in the current directory:
+
+```bash
+pnpm create @aws/nx-workspace . --no-interactive
 ```
 
 Be sure to ask the user what their preferred project name is.
