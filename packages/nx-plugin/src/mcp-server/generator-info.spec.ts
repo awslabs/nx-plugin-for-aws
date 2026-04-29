@@ -21,6 +21,9 @@ describe('postProcessGuide', () => {
   ];
 
   beforeEach(() => {
+    // Force the local-file probes in fetchGuidePages / fetchSnippet to miss
+    // so the older mocks (fetch returning canned content) still take effect.
+    vi.spyOn(fs, 'existsSync').mockReturnValue(false);
     // Mock fs.readFileSync to return a mock schema
     vi.spyOn(fs, 'readFileSync').mockImplementation(() =>
       JSON.stringify({
@@ -504,6 +507,9 @@ terraform instructions
 
     beforeEach(() => {
       vi.restoreAllMocks();
+      // fetchGuidePages prefers local files over the network. Force the
+      // local probe to miss so these tests exercise the fetch fallback.
+      vi.spyOn(fs, 'existsSync').mockReturnValue(false);
       // Make every fetched guide page return its URL so we can assert on it.
       fetchMock = vi
         .fn()
@@ -559,6 +565,67 @@ terraform instructions
       expect(
         urls.some((u) => u.endsWith('/connection/react-fastapi.mdx')),
       ).toBe(true);
+    });
+  });
+
+  describe('local-file fallback for guide pages', () => {
+    const info: NxGeneratorInfo = {
+      id: 'ts#trpc-api',
+      description: 'trpc',
+      resolvedSchemaPath: '/fake/schema.json',
+      resolvedFactoryPath: '/fake/factory',
+      metric: 'g9',
+      guidePages: ['trpc'],
+    };
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('reads from the local repo when the guide file is available on disk', async () => {
+      const fetchSpy = vi
+        .spyOn(globalThis, 'fetch')
+        .mockImplementation(() =>
+          Promise.resolve(new Response('REMOTE CONTENT — should not be used')),
+        );
+      // Accept any local probe path and return distinctive local content so
+      // we can prove the network was not hit.
+      const existsSpy = vi
+        .spyOn(fs, 'existsSync')
+        .mockImplementation(
+          (p) => typeof p === 'string' && p.endsWith('/trpc.mdx'),
+        );
+      const readSpy = vi
+        .spyOn(fs, 'readFileSync')
+        .mockImplementation((p, enc) => {
+          if (typeof p === 'string' && p.endsWith('/trpc.mdx')) {
+            return 'LOCAL TRPC CONTENT';
+          }
+          // Fall through to the real implementation for any other read.
+          return (fs as any).readFileSync.wrappedMethod.call(fs, p, enc);
+        });
+
+      const result = await fetchGuidePagesForGenerator(info, [info]);
+      expect(result).toContain('LOCAL TRPC CONTENT');
+      expect(result).not.toContain('REMOTE CONTENT');
+      expect(fetchSpy).not.toHaveBeenCalled();
+
+      existsSpy.mockRestore();
+      readSpy.mockRestore();
+      fetchSpy.mockRestore();
+    });
+
+    it('falls back to the GitHub fetch when no local copy exists', async () => {
+      vi.spyOn(fs, 'existsSync').mockReturnValue(false);
+      const fetchSpy = vi
+        .spyOn(globalThis, 'fetch')
+        .mockImplementation(() =>
+          Promise.resolve(new Response('REMOTE CONTENT')),
+        );
+
+      const result = await fetchGuidePagesForGenerator(info, [info]);
+      expect(result).toContain('REMOTE CONTENT');
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
     });
   });
 });

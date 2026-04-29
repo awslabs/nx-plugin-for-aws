@@ -14,6 +14,7 @@ import { applyOptionFilter, evaluatePredicate } from './option-filter';
 import { applyInfrastructureFilter } from './infrastructure-filter';
 import { applyTabsFilter } from './tabs-filter';
 import fs from 'fs';
+import path from 'path';
 
 /**
  * Build a command to run nx
@@ -117,7 +118,41 @@ const filterGuidePages = (
 };
 
 /**
- * Fetch markdown guide pages from github
+ * Search the monorepo-relative guides directory for a page before falling
+ * back to GitHub. This is the common case during local development
+ * (`pnpm nx mcp-inspect @aws/nx-plugin`), and it also means test workspaces
+ * that link the built plugin read the guides they're actually iterating on
+ * instead of whatever is currently on `main`.
+ *
+ * When running as the published `@aws/nx-plugin-mcp` package, `__dirname`
+ * resolves somewhere inside `node_modules/@aws/nx-plugin-mcp`, the local
+ * probe misses, and we fall back to GitHub.
+ */
+const GUIDES_RELATIVE_PROBES = [
+  // nx-plugin package compiled from source (src/mcp-server/…)
+  '../../../docs/src/content/docs/en/guides',
+  // rolldown-bundled `@aws/nx-plugin-mcp` binary in dist
+  '../../../../docs/src/content/docs/en/guides',
+];
+
+const fetchLocalGuide = (guide: string): string | undefined => {
+  for (const rel of GUIDES_RELATIVE_PROBES) {
+    const candidate = path.resolve(__dirname, rel, `${guide}.mdx`);
+    try {
+      if (fs.existsSync(candidate)) {
+        return fs.readFileSync(candidate, 'utf-8');
+      }
+    } catch {
+      // Probe failure → keep looking.
+    }
+  }
+  return undefined;
+};
+
+/**
+ * Fetch markdown guide pages. Prefers local files (see `fetchLocalGuide`)
+ * and falls back to fetching from the repo on `main` when no local copy
+ * is available.
  */
 export const fetchGuidePages = async (
   guidePages: string[],
@@ -127,14 +162,14 @@ export const fetchGuidePages = async (
   options?: Record<string, string>,
 ): Promise<string> => {
   const guides = await Promise.allSettled(
-    guidePages.map(
-      async (guide) =>
-        await (
-          await fetch(
-            `https://raw.githubusercontent.com/awslabs/nx-plugin-for-aws/refs/heads/main/docs/src/content/docs/en/guides/${guide}.mdx`,
-          )
-        ).text(),
-    ),
+    guidePages.map(async (guide) => {
+      const local = fetchLocalGuide(guide);
+      if (local !== undefined) return local;
+      const response = await fetch(
+        `https://raw.githubusercontent.com/awslabs/nx-plugin-for-aws/refs/heads/main/docs/src/content/docs/en/guides/${guide}.mdx`,
+      );
+      return await response.text();
+    }),
   );
   const fulfilled = guides.filter((result) => result.status === 'fulfilled');
   const processed = await Promise.all(
@@ -158,15 +193,32 @@ export type SnippetContentProvider = (
   snippetName: string,
 ) => Promise<string> | string;
 
+const SNIPPETS_RELATIVE_PROBES = [
+  '../../../docs/src/content/docs/en/snippets',
+  '../../../../docs/src/content/docs/en/snippets',
+];
+
 const SNIPPET_BASE_URL =
   'https://raw.githubusercontent.com/awslabs/nx-plugin-for-aws/refs/heads/main/docs/src/content/docs/en/snippets';
 
 /**
- * Fetch a snippet's content from github
+ * Fetch a snippet's content. Tries the local repo checkout first (when
+ * running under `mcp-inspect` or a linked test workspace) before falling
+ * back to the copy on `main`.
  */
 export const fetchSnippet: SnippetContentProvider = async (
   snippetName: string,
 ): Promise<string> => {
+  for (const rel of SNIPPETS_RELATIVE_PROBES) {
+    const candidate = path.resolve(__dirname, rel, `${snippetName}.mdx`);
+    try {
+      if (fs.existsSync(candidate)) {
+        return fs.readFileSync(candidate, 'utf-8');
+      }
+    } catch {
+      // Probe failure — try next fallback.
+    }
+  }
   try {
     const response = await fetch(`${SNIPPET_BASE_URL}/${snippetName}.mdx`);
     if (!response.ok) {
