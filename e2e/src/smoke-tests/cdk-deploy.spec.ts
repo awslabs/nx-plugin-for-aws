@@ -150,6 +150,23 @@ async function invokeAgentCoreAgent(
   return chunks.map((c) => c.content).join('');
 }
 
+/**
+ * Helper function to invoke a tRPC API deployed to Bedrock AgentCore Runtime
+ * over WebSocket.
+ */
+async function invokeTrpcAgentCoreApi(
+  arn: string,
+  apiName: string,
+): Promise<void> {
+  console.log(`Testing ${apiName} at ARN ${arn}`);
+  const client = AgentCoreTrpcClient.withIamAuth({
+    agentRuntimeArn: arn,
+  });
+  const response = await (client.echo as any).query({ message: 'test' });
+  console.log(`${apiName} echo response:`, response);
+  expect(response.result).toBe('test');
+}
+
 async function invokeTrpcAgentCoreAgent(
   arn: string,
   agentName: string,
@@ -399,6 +416,10 @@ describe('smoke test - cdk-deploy', () => {
       // tRPC
       await invokeTrpcApi(findOutput('MyApiEndpoint'), 'tRPC REST API');
       await invokeTrpcApi(findOutput('MyApiHttpMyApiHttpUrl'), 'tRPC HTTP API');
+      await invokeTrpcAgentCoreApi(
+        findOutput('MyTrpcWsApiArn'),
+        'tRPC AgentCore WebSocket API',
+      );
 
       // FastAPI
       await invokeRestApi(findOutput('PyApiEndpoint'), 'FastAPI REST');

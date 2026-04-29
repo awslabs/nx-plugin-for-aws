@@ -963,6 +963,161 @@ describe('trpc backend generator', () => {
     });
   });
 
+  describe('BedrockAgentCoreRuntimeWebSocket compute type', () => {
+    it('should generate an agentcore runtime construct with IAM auth', async () => {
+      await tsTrpcApiGenerator(tree, {
+        name: 'TestApi',
+        directory: 'apps',
+        computeType: 'BedrockAgentCoreRuntimeWebSocket',
+        auth: 'IAM',
+        iacProvider: 'CDK',
+      });
+
+      // No API Gateway constructs should be generated
+      expect(
+        tree.exists('packages/common/constructs/src/core/api/rest-api.ts'),
+      ).toBeFalsy();
+      expect(
+        tree.exists('packages/common/constructs/src/core/api/http-api.ts'),
+      ).toBeFalsy();
+
+      // AgentCore construct is generated under apis (not agents)
+      expect(
+        tree.exists(
+          'packages/common/constructs/src/app/apis/test-api/test-api.ts',
+        ),
+      ).toBeTruthy();
+      const appApiContent = tree.read(
+        'packages/common/constructs/src/app/apis/test-api/test-api.ts',
+        'utf-8',
+      );
+      expect(appApiContent).toContain('@aws-cdk/aws-bedrock-agentcore-alpha');
+      expect(appApiContent).toContain('ProtocolType.HTTP');
+      // ARN is published to runtimeConfig.apis.TestApi, not agentcore.agentRuntimes
+      expect(appApiContent).toContain("rc.set('connection', 'apis'");
+      expect(appApiContent).toContain('TestApi: this.agentCoreRuntime');
+      expect(appApiContent).not.toContain("rc.set('agentcore'");
+
+      // Handler + Dockerfile are emitted; Lambda handler is deleted
+      expect(
+        tree.exists('apps/test-api/src/handler-agentcore.ts'),
+      ).toBeTruthy();
+      expect(tree.exists('apps/test-api/Dockerfile')).toBeTruthy();
+      expect(tree.exists('apps/test-api/src/handler.ts')).toBeFalsy();
+
+      // Streaming schema helper is retained (AgentCore supports streaming)
+      expect(
+        tree.exists('apps/test-api/src/schema/z-async-iterable.ts'),
+      ).toBeTruthy();
+
+      // docker target was added and depends on bundle
+      const projectConfig = JSON.parse(
+        tree.read('apps/test-api/project.json', 'utf-8'),
+      );
+      expect(projectConfig.targets.docker).toBeDefined();
+      expect(projectConfig.targets.docker.dependsOn).toEqual(['bundle']);
+      expect(projectConfig.targets.build.dependsOn).toContain('docker');
+      expect(projectConfig.targets.docker.options.commands).toEqual([
+        'ncp apps/test-api/Dockerfile dist/apps/test-api/bundle/Dockerfile',
+        'docker build --platform linux/arm64 -t proj-test-api:latest dist/apps/test-api/bundle',
+      ]);
+      expect(projectConfig.targets.docker.outputs).toEqual([
+        '{workspaceRoot}/dist/apps/test-api/bundle/Dockerfile',
+      ]);
+
+      const rolldownConfig = tree.read(
+        'apps/test-api/rolldown.config.ts',
+        'utf-8',
+      );
+      expect(rolldownConfig).toContain('src/handler-agentcore.ts');
+      // AWS SDK should not be treated as external — AgentCore container does
+      // not ship the Lambda runtime
+      expect(rolldownConfig).not.toContain('/@aws-sdk\\\\/');
+
+      // ws dependency is added for the WebSocket server
+      const packageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+      expect(packageJson.dependencies['ws']).toBeDefined();
+      expect(packageJson.devDependencies['@types/ws']).toBeDefined();
+
+      // Metadata records the compute type
+      expect(projectConfig.metadata.computeType).toBe(
+        'BedrockAgentCoreRuntimeWebSocket',
+      );
+      expect(projectConfig.metadata.integrationPattern).toBeUndefined();
+    });
+
+    it('should generate an agentcore runtime construct with Cognito auth', async () => {
+      await tsTrpcApiGenerator(tree, {
+        name: 'TestApi',
+        directory: 'apps',
+        computeType: 'BedrockAgentCoreRuntimeWebSocket',
+        auth: 'Cognito',
+        iacProvider: 'CDK',
+      });
+
+      const appApiContent = tree.read(
+        'packages/common/constructs/src/app/apis/test-api/test-api.ts',
+        'utf-8',
+      );
+      expect(appApiContent).toContain('RuntimeAuthorizerConfiguration');
+      expect(appApiContent).toContain('usingCognito');
+    });
+
+    it('should reject auth=None with a clear error', async () => {
+      await expect(
+        tsTrpcApiGenerator(tree, {
+          name: 'TestApi',
+          directory: 'apps',
+          computeType: 'BedrockAgentCoreRuntimeWebSocket',
+          auth: 'None',
+          iacProvider: 'CDK',
+        }),
+      ).rejects.toThrow(
+        'Bedrock AgentCore runtime only supports IAM or Cognito auth',
+      );
+    });
+
+    it('should reject the shared integration pattern', async () => {
+      await expect(
+        tsTrpcApiGenerator(tree, {
+          name: 'TestApi',
+          directory: 'apps',
+          computeType: 'BedrockAgentCoreRuntimeWebSocket',
+          auth: 'IAM',
+          integrationPattern: 'shared',
+          iacProvider: 'CDK',
+        }),
+      ).rejects.toThrow(
+        'Invalid tRPC computeType/integrationPattern combination',
+      );
+    });
+
+    it('should generate terraform agentcore resources with IAM auth', async () => {
+      await tsTrpcApiGenerator(tree, {
+        name: 'TestApi',
+        directory: 'apps',
+        computeType: 'BedrockAgentCoreRuntimeWebSocket',
+        auth: 'IAM',
+        iacProvider: 'Terraform',
+      });
+
+      const terraformFiles = tree
+        .listChanges()
+        .map((f) => f.path)
+        .filter((f) => f.includes('terraform') && f.endsWith('.tf'));
+
+      const appApiFile = terraformFiles.find(
+        (f) => f.includes('test-api') && f.includes('apis'),
+      );
+      expect(appApiFile).toBeDefined();
+      const appApiContent = tree.read(appApiFile!, 'utf-8');
+      expect(appApiContent).toContain('module "agent_core_runtime"');
+      expect(appApiContent).toContain('namespace = "connection"');
+      expect(appApiContent).toContain('key       = "apis"');
+      expect(appApiContent).toContain('TestApi');
+    });
+  });
+
   it('should place project in subDirectory when provided', async () => {
     await tsTrpcApiGenerator(tree, {
       name: 'TestApi',

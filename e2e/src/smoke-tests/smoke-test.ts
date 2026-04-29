@@ -62,6 +62,10 @@ export const runSmokeTest = async (
     opts,
   );
   await runCLI(
+    `generate @aws/nx-plugin:ts#trpc-api --name=my-trpc-ws-api --computeType=BedrockAgentCoreRuntimeWebSocket --auth=IAM --no-interactive`,
+    opts,
+  );
+  await runCLI(
     `generate @aws/nx-plugin:ts#react-website#auth --project=@e2e-test/website --cognitoDomain=test --no-interactive`,
     opts,
   );

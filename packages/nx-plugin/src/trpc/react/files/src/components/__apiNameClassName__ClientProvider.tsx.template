@@ -3,7 +3,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import { createTRPCOptionsProxy } from "@trpc/tanstack-react-query";
 import { createContext, FC, PropsWithChildren, useMemo } from "react";
 import { useRuntimeConfig } from "../hooks/useRuntimeConfig";
-<%_ if (isRestApi) { _%>
+<%_ if (isAgentCore) { _%>
+import { TRPCClient, createTRPCClient, createWSClient, wsLink } from "@trpc/client";
+<%_ } else if (isRestApi) { _%>
 import { TRPCClient, createTRPCClient, httpLink, httpSubscriptionLink, splitLink } from "@trpc/client";
 <%_ if (auth !== 'None') { _%>
 import { EventSourcePolyfill } from "event-source-polyfill";
@@ -15,6 +17,29 @@ import { HTTPLinkOptions, TRPCClient, createTRPCClient, httpLink } from "@trpc/c
 import { useSigV4 } from "../hooks/useSigV4";
 <%_ } else if (auth === 'Cognito') { _%>
 import { useAuth } from "react-oidc-context";
+<%_ } _%>
+<%_ if (isAgentCore && auth === 'Cognito') { _%>
+
+/**
+ * Base64url-encodes a string — used when embedding the JWT access token in the
+ * WebSocket subprotocol header as required by Bedrock AgentCore Cognito auth.
+ */
+function base64UrlEncode(str: string): string {
+  return btoa(str)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=/g, '');
+}
+<%_ } _%>
+<%_ if (isAgentCore) { _%>
+
+/**
+ * Build a WebSocket URL from a Bedrock AgentCore Runtime ARN.
+ */
+function buildAgentCoreWsUrl(agentRuntimeArn: string): string {
+  const region = agentRuntimeArn.split(':')[3];
+  return `wss://bedrock-agentcore.${region}.amazonaws.com/runtimes/${encodeURIComponent(agentRuntimeArn)}/ws`;
+}
 <%_ } _%>
 
 export interface <%= apiNameClassName %>TRPCContextValue {
@@ -38,7 +63,55 @@ export const <%= apiNameClassName %>ClientProvider: FC<PropsWithChildren> = ({
   <%_ } _%>
 
   const container = useMemo<<%= apiNameClassName %>TRPCContextValue>(() => {
-    <%_ if (isRestApi) { _%>
+    <%_ if (isAgentCore) { _%>
+    // Bedrock AgentCore Runtime publishes the runtime ARN as the API value.
+    // For local development (`serve-local`), the value is an http(s) URL
+    // pointing at the standalone tRPC server — convert it to the matching
+    // ws(s) URL on the /ws path.
+    const wsUrl = apiUrl.startsWith('arn:')
+      ? buildAgentCoreWsUrl(apiUrl)
+      : `${apiUrl.replace(/^http/, 'ws').replace(/\/$/, '')}/ws`;
+
+    <%_ if (auth === 'IAM') { _%>
+    const wsClient = createWSClient({
+      url: async () => {
+        const signedRequest = await sigv4Client.sign(wsUrl, {
+          method: 'GET',
+          aws: { signQuery: true },
+        });
+        return signedRequest.url;
+      },
+    });
+    <%_ } else if (auth === 'Cognito') { _%>
+    const accessToken = user?.access_token;
+    const wsClient = createWSClient({
+      url: wsUrl,
+      WebSocket: class extends WebSocket {
+        constructor(url: string | URL, protocols?: string | string[]) {
+          const existingProtocols = protocols
+            ? Array.isArray(protocols)
+              ? protocols
+              : [protocols]
+            : [];
+          if (accessToken) {
+            const base64Token = base64UrlEncode(accessToken);
+            super(url, [
+              ...existingProtocols,
+              `base64UrlBearerAuthorization.${base64Token}`,
+              'base64UrlBearerAuthorization',
+            ]);
+          } else {
+            super(url, existingProtocols);
+          }
+        }
+      },
+    });
+    <%_ } _%>
+
+    const client = createTRPCClient<AppRouter>({
+      links: [wsLink({ client: wsClient })],
+    });
+    <%_ } else if (isRestApi) { _%>
     const client = createTRPCClient<AppRouter>({
       links: [
         splitLink({

@@ -13,7 +13,7 @@ import Snippet from '@components/snippet.astro';
 
 [tRPC](https://trpc.io/) 是一个用于在 TypeScript 中构建端到端类型安全 API 的框架。使用 tRPC 时,API 操作输入输出的更新会立即反映在客户端代码中,并可在 IDE 中直接查看,无需重新构建项目。
 
-tRPC API 生成器会创建一个新的 tRPC API,并配置 AWS CDK 或 Terraform 基础设施。生成的后端使用 AWS Lambda 进行无服务器部署,通过 AWS API Gateway API 暴露,并包含使用 [Zod](https://zod.dev/) 的模式验证。它配置了 [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/) 用于可观测性,包括日志记录、AWS X-Ray 追踪和 Cloudwatch 指标。
+tRPC API 生成器会创建一个新的 tRPC API,并配置 AWS CDK 或 Terraform 基础设施。生成的后端可以部署为通过 AWS API Gateway API 暴露的 AWS Lambda 函数,或者部署为运行在 [Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime.html) 上的容器化 WebSocket 服务器。它包含使用 [Zod](https://zod.dev/) 的模式验证,并配置了 [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/) 用于可观测性,包括日志记录、AWS X-Ray 追踪和 CloudWatch 指标。
 
 ## 用法
 
@@ -30,11 +30,11 @@ tRPC API 生成器会创建一个新的 tRPC API,并配置 AWS CDK 或 Terraform
 <Snippet name="api/api-choice-note" />
 
 :::tip[API类型]
-如果您希望使用 [tRPC 订阅](https://trpc.io/docs/server/subscriptions)来流式传输响应,请选择 `ServerlessApiGatewayRestApi`(默认)作为您的 `computeType`。
+如果您希望使用 [tRPC 订阅](https://trpc.io/docs/server/subscriptions)来流式传输响应,请选择 `ServerlessApiGatewayRestApi`(默认)作为您的 `computeType`。选择 `BedrockAgentCoreRuntimeWebSocket` 可将 tRPC 服务器部署为 Bedrock AgentCore 上的容器,并支持流式 WebSocket 订阅 — 请参阅下面的[部署到 Bedrock AgentCore](#deploying-to-bedrock-agentcore)。
 :::
 
 :::tip[集成模式]
-`integrationPattern` 选项默认为 `isolated`,它会为每个 tRPC 过程创建一个 Lambda。如果您希望整个 API 使用单个共享的 Lambda 处理程序,并可选择按过程覆盖,请选择 `shared`。
+`integrationPattern` 选项默认为 `isolated`,它会为每个 tRPC 过程创建一个 Lambda。如果您希望整个 API 使用单个共享的 Lambda 处理程序,并可选择按过程覆盖,请选择 `shared`。当 `computeType` 为 `BedrockAgentCoreRuntimeWebSocket` 时,`integrationPattern` 选项不适用。
 :::
 
 ## 生成器输出
@@ -44,11 +44,12 @@ tRPC API 生成器会创建一个新的 tRPC API,并配置 AWS CDK 或 Terraform
 <FileTree>
   - src
     - init.ts 后端 tRPC 初始化
-    - handler.ts Lambda 处理程序入口点
+    - handler.ts Lambda 处理程序入口点(仅限 Lambda 计算类型)
+    - handler-agentcore.ts WebSocket 服务器入口点(仅限 AgentCore 计算类型)
     - router.ts tRPC 路由定义
     - schema 使用 Zod 的模式定义
       - echo.ts "echo" 过程的输入输出示例定义
-      - z-async-iterable.ts 订阅的 Zod 辅助工具(仅限 REST API)
+      - z-async-iterable.ts 订阅的 Zod 辅助工具(仅限 REST API 和 AgentCore)
     - procedures API 暴露的过程(或操作)
       - echo.ts 示例过程
     - middleware
@@ -59,6 +60,7 @@ tRPC API 生成器会创建一个新的 tRPC API,并配置 AWS CDK 或 Terraform
     - local-server.ts 本地开发服务器使用的 tRPC 独立适配器入口点
     - client
       - index.ts 用于机器间 API 调用的类型安全客户端
+  - Dockerfile AgentCore 部署的容器镜像(仅限 AgentCore 计算类型)
   - tsconfig.json TypeScript 配置
   - project.json 项目配置和构建目标
 
@@ -147,7 +149,7 @@ export const echo = publicProcedure
 ### 订阅(流式传输)
 
 :::caution[订阅计算类型]
-订阅仅在 `computeType` 为 `ServerlessApiGatewayRestApi`(默认)时受支持,因为 API Gateway HTTP API 不支持响应流式传输。
+订阅仅在 `computeType` 为 `ServerlessApiGatewayRestApi`(默认)或 `BedrockAgentCoreRuntimeWebSocket` 时受支持,因为 API Gateway HTTP API 不支持响应流式传输。
 :::
 
 tRPC 订阅允许您使用[服务器发送事件(SSE)](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events)从服务器向客户端流式传输数据。当您选择 `ServerlessApiGatewayRestApi` 作为计算类型时,生成器会自动配置流式传输所需的基础设施,以及流式传输 Lambda 处理程序和 `ZodAsyncIterable` 模式辅助工具。
@@ -187,6 +189,43 @@ export const appRouter = router({
 ```
 
 生成的基础设施对所有 REST API 操作使用具有 `ResponseTransferMode.STREAM` 的流式传输 Lambda 处理程序,这使订阅能够与常规查询和变更一起工作。
+
+## 部署到 Bedrock AgentCore
+
+将 `computeType` 设置为 `BedrockAgentCoreRuntimeWebSocket` 会将 tRPC 服务器部署为 [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime.html) 上的容器化 WebSocket 服务器,而不是 API Gateway + Lambda。AgentCore 为您提供:
+
+- **通过 WebSocket 的流式订阅** — 为 tRPC 订阅提供全双工消息传递,没有 30 秒的 Lambda 或 API Gateway 超时限制。
+- **会话亲和性** — `x-amzn-bedrock-agentcore-runtime-session-id` 标头会传播到您的 tRPC 上下文中作为 `ctx.sessionId`,因此您可以键入每个会话的状态。
+- **托管运行时** — AgentCore 处理扩展、健康检查(`/ping`)和授权。
+
+:::caution[认证选项]
+AgentCore 仅支持 `IAM` 或 `Cognito` 认证。选择 `auth=None` 并使用 `computeType=BedrockAgentCoreRuntimeWebSocket` 将导致生成失败。
+:::
+
+### 工作原理
+
+当您选择 `BedrockAgentCoreRuntimeWebSocket` 时,生成器会生成:
+
+- `src/handler-agentcore.ts` — 一个 Node WebSocket + HTTP 服务器,为 AgentCore 健康检查暴露 `/ping`,并通过 `@trpc/server/adapters/ws` 为 tRPC 订阅暴露 `/ws`。
+- `Dockerfile` — 容器化打包的服务器,并包含 [AWS Distro for OpenTelemetry](https://aws-otel.github.io/docs/getting-started/js-sdk/trace-metric-auto-instr) 以实现托管可观测性。
+- 一个 CDK 构造(或 Terraform 模块),用于配置 Bedrock AgentCore `Runtime`,授予其调用 Bedrock 模型和读取运行时配置的权限,并将运行时 ARN 发布到 `runtimeConfig.apis.<YourApiName>` 供前端使用。
+- 一个 `docker` 构建目标,连接到项目的 `build` 目标,以便 `nx build` 生成容器镜像。
+
+### 访问会话 ID
+
+当 API 部署到 AgentCore 时,每个过程都会接收 `ctx.sessionId`:
+
+```ts {5}
+export const chat = publicProcedure
+  .input(InputSchema)
+  .output(OutputSchema)
+  .subscription(async function* (opts) {
+    const history = loadHistory(opts.ctx.sessionId);
+    // ...流式传输基于 `history` 构建的块
+  });
+```
+
+在本地,`nx serve` 运行一个独立的 HTTP + WebSocket 服务器,因此客户端可以像在生产环境中一样连接。当标头不存在时,会话 ID 默认为随机 UUID。
 
 ## 自定义 tRPC API
 

@@ -13,7 +13,7 @@ import Snippet from '@components/snippet.astro';
 
 [tRPC](https://trpc.io/)는 엔드투엔드 타입 안전성을 갖춘 TypeScript API 구축을 위한 프레임워크입니다. tRPC를 사용하면 API 작업의 입력과 출력에 대한 변경 사항이 클라이언트 코드에 즉시 반영되며, 프로젝트를 재빌드할 필요 없이 IDE에서 바로 확인할 수 있습니다.
 
-tRPC API 생성기는 AWS CDK 또는 Terraform 인프라 설정과 함께 새로운 tRPC API를 생성합니다. 생성된 백엔드는 서버리스 배포를 위해 AWS Lambda를 사용하며, AWS API Gateway API를 통해 노출되고 [Zod](https://zod.dev/)를 사용한 스키마 검증을 포함합니다. 또한 로깅, AWS X-Ray 추적 및 Cloudwatch 메트릭을 포함한 관측 가능성을 위해 [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/)를 설정합니다.
+tRPC API 생성기는 AWS CDK 또는 Terraform 인프라 설정과 함께 새로운 tRPC API를 생성합니다. 생성된 백엔드는 AWS API Gateway API를 통해 노출되는 AWS Lambda 함수로 배포되거나, [Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime.html)에서 실행되는 컨테이너화된 WebSocket 서버로 배포될 수 있습니다. [Zod](https://zod.dev/)를 사용한 스키마 검증을 포함하며, 로깅, AWS X-Ray 추적 및 CloudWatch 메트릭을 포함한 관측 가능성을 위해 [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/)를 설정합니다.
 
 ## 사용 방법
 
@@ -30,11 +30,11 @@ tRPC API 생성기는 AWS CDK 또는 Terraform 인프라 설정과 함께 새로
 <Snippet name="api/api-choice-note" />
 
 :::tip[API 유형]
-응답을 스트리밍하기 위해 [tRPC Subscriptions](https://trpc.io/docs/server/subscriptions)를 사용하려면 `computeType`으로 `ServerlessApiGatewayRestApi`(기본값)를 선택하세요.
+응답을 스트리밍하기 위해 [tRPC Subscriptions](https://trpc.io/docs/server/subscriptions)를 사용하려면 `computeType`으로 `ServerlessApiGatewayRestApi`(기본값)를 선택하세요. tRPC 서버를 스트리밍 WebSocket 구독과 함께 Bedrock AgentCore의 컨테이너로 배포하려면 `BedrockAgentCoreRuntimeWebSocket`을 선택하세요 — 아래 [Bedrock AgentCore에 배포](#deploying-to-bedrock-agentcore)를 참조하세요.
 :::
 
 :::tip[통합 패턴]
-`integrationPattern` 옵션은 기본적으로 `isolated`로 설정되며, 이는 tRPC 프로시저당 하나의 Lambda를 생성합니다. 전체 API에 대해 단일 공유 Lambda 핸들러를 선호하는 경우 `shared`를 선택하세요. 이 경우 프로시저별 재정의도 선택적으로 가능합니다.
+`integrationPattern` 옵션은 기본적으로 `isolated`로 설정되며, 이는 tRPC 프로시저당 하나의 Lambda를 생성합니다. 전체 API에 대해 단일 공유 Lambda 핸들러를 선호하는 경우 `shared`를 선택하세요. 이 경우 프로시저별 재정의도 선택적으로 가능합니다. `integrationPattern` 옵션은 `computeType`이 `BedrockAgentCoreRuntimeWebSocket`일 때는 적용되지 않습니다.
 :::
 
 ## 생성기 출력
@@ -44,11 +44,12 @@ tRPC API 생성기는 AWS CDK 또는 Terraform 인프라 설정과 함께 새로
 <FileTree>
   - src
     - init.ts 백엔드 tRPC 초기화
-    - handler.ts Lambda 핸들러 진입점
+    - handler.ts Lambda 핸들러 진입점 (Lambda 컴퓨트 유형 전용)
+    - handler-agentcore.ts WebSocket 서버 진입점 (AgentCore 컴퓨트 유형 전용)
     - router.ts tRPC 라우터 정의
     - schema Zod를 사용한 스키마 정의
       - echo.ts "echo" 프로시저의 입력 및 출력 예제 정의
-      - z-async-iterable.ts 구독을 위한 Zod 헬퍼 (REST API 전용)
+      - z-async-iterable.ts 구독을 위한 Zod 헬퍼 (REST API 및 AgentCore 전용)
     - procedures API가 노출하는 프로시저(또는 작업)
       - echo.ts 예제 프로시저
     - middleware
@@ -59,6 +60,7 @@ tRPC API 생성기는 AWS CDK 또는 Terraform 인프라 설정과 함께 새로
     - local-server.ts 로컬 개발 서버용 tRPC 독립 실행형 어댑터 진입점
     - client
       - index.ts 기계 간 API 호출을 위한 타입 안전 클라이언트
+  - Dockerfile AgentCore 배포를 위한 컨테이너 이미지 (AgentCore 컴퓨트 유형 전용)
   - tsconfig.json TypeScript 구성
   - project.json 프로젝트 구성 및 빌드 대상
 
@@ -187,6 +189,43 @@ export const appRouter = router({
 ```
 
 생성된 인프라는 모든 REST API 작업에 대해 API Gateway에서 `ResponseTransferMode.STREAM`을 사용하는 스트리밍 Lambda 핸들러를 사용하므로, 구독이 일반 쿼리 및 뮤테이션과 함께 작동할 수 있습니다.
+
+## Bedrock AgentCore에 배포
+
+`computeType`을 `BedrockAgentCoreRuntimeWebSocket`으로 설정하면 tRPC 서버가 API Gateway + Lambda 대신 [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime.html)에서 컨테이너화된 WebSocket 서버로 배포됩니다. AgentCore는 다음을 제공합니다:
+
+- **WebSocket을 통한 스트리밍 구독** — 30초 Lambda 또는 API Gateway 타임아웃 없이 tRPC 구독을 위한 전이중 메시징.
+- **세션 친화성** — `x-amzn-bedrock-agentcore-runtime-session-id` 헤더가 tRPC 컨텍스트에 `ctx.sessionId`로 전파되므로 세션별 상태를 키로 사용할 수 있습니다.
+- **관리형 런타임** — AgentCore가 스케일링, 헬스 체크(`/ping`) 및 인증을 처리합니다.
+
+:::caution[인증 옵션]
+AgentCore는 `IAM` 또는 `Cognito` 인증만 지원합니다. `computeType=BedrockAgentCoreRuntimeWebSocket`과 함께 `auth=None`을 선택하면 생성이 실패합니다.
+:::
+
+### 작동 방식
+
+`BedrockAgentCoreRuntimeWebSocket`을 선택하면 생성기가 다음을 생성합니다:
+
+- `src/handler-agentcore.ts` — AgentCore 헬스 체크를 위한 `/ping`과 `@trpc/server/adapters/ws`를 통한 tRPC 구독을 위한 `/ws`를 노출하는 Node WebSocket + HTTP 서버.
+- `Dockerfile` — 번들된 서버를 컨테이너화하고 관리형 관측 가능성을 위한 [AWS Distro for OpenTelemetry](https://aws-otel.github.io/docs/getting-started/js-sdk/trace-metric-auto-instr)를 포함합니다.
+- Bedrock AgentCore `Runtime`을 프로비저닝하고, Bedrock 모델 호출 및 런타임 구성 읽기 권한을 부여하며, 프론트엔드가 가져올 수 있도록 런타임 ARN을 `runtimeConfig.apis.<YourApiName>`에 게시하는 CDK 구성(또는 Terraform 모듈).
+- `nx build`가 컨테이너 이미지를 생성하도록 프로젝트의 `build` 대상에 연결된 `docker` 빌드 대상.
+
+### 세션 ID 접근
+
+API가 AgentCore에 배포되면 모든 프로시저가 `ctx.sessionId`를 받습니다:
+
+```ts {5}
+export const chat = publicProcedure
+  .input(InputSchema)
+  .output(OutputSchema)
+  .subscription(async function* (opts) {
+    const history = loadHistory(opts.ctx.sessionId);
+    // ...stream chunks that build on `history`
+  });
+```
+
+로컬에서 `nx serve`는 독립 실행형 HTTP + WebSocket 서버를 실행하므로 클라이언트가 프로덕션과 동일한 방식으로 연결할 수 있습니다. 헤더가 없을 때 세션 ID는 기본적으로 무작위 UUID로 설정됩니다.
 
 ## tRPC API 사용자 정의
 
