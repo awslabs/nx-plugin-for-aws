@@ -59,6 +59,98 @@ However you will still need to make changes to any "after" files manually to ens
 
 Note that if you are running e2e tests that use `pnpm` as the package manager, you may need to run `pnpm store prune` to ensure that your changes are picked up in the tests.
 
+### Writing Documentation
+
+Each generator has a guide page under `docs/src/content/docs/en/guides/`. These pages are consumed both by the docs site (at `https://awslabs.github.io/nx-plugin-for-aws/`) and by the MCP `generator-guide` tool, so they should read well as prose _and_ slice cleanly when an MCP agent asks for a specific option combination.
+
+#### Only edit English
+
+All authoring happens in `docs/src/content/docs/en/`. Translations under other locales are produced automatically from the English source by the translation workflow — do not edit translated files directly.
+
+#### Linking a guide to its generator
+
+Add `generator: <id>` to the page's frontmatter. This wires the page into the option-filter bar and enables the build-time validator that checks every `<OptionFilter>` predicate against the generator's JSON schema.
+
+```mdx
+---
+title: tRPC API
+description: Reference documentation for the tRPC API generator
+generator: ts#trpc-api
+---
+```
+
+#### OptionFilter: conditional sections
+
+Wrap any content that only applies to a subset of option values in `<OptionFilter>`. The docs site shows a filter bar above the page (one dropdown per referenced option key, pulled from the schema enum) that hides mismatching blocks; the MCP server drops mismatching blocks from the response when the agent passes `options`.
+
+```mdx
+import OptionFilter from '@components/option-filter.astro';
+
+<OptionFilter when={{ computeType: 'ServerlessApiGatewayRestApi' }} description="Streaming subscriptions — REST API only">
+  ### Subscriptions (Streaming) ...
+</OptionFilter>
+
+<OptionFilter when={{ auth: ['Cognito', 'IAM'] }}>...applies to either Cognito OR IAM auth...</OptionFilter>
+
+<OptionFilter not when={{ iacProvider: 'Terraform' }}>
+  ...applies to everything EXCEPT Terraform...
+</OptionFilter>
+```
+
+Semantics: multiple keys in `when` are **AND**-ed, array values within a key are **OR**-ed, `not` negates the whole predicate. The optional `description` shows as a tooltip on the pill and is surfaced to MCP agents.
+
+#### Infrastructure: CDK vs Terraform
+
+Use `<Infrastructure>` with named `cdk`/`terraform` slots for IaC content that differs between providers. The docs site renders this as a side-by-side tab widget; the MCP server collapses it to the matching slot when the agent supplies `iacProvider`.
+
+```mdx
+import Infrastructure from '@components/infrastructure.astro';
+
+<Infrastructure>
+  <Fragment slot="cdk">...CDK-specific guidance...</Fragment>
+  <Fragment slot="terraform">...Terraform-specific guidance...</Fragment>
+</Infrastructure>
+```
+
+#### Tabs with `_filter`
+
+Regular Starlight `<Tabs>` are rendered on the docs site as visible tabs. If a tab only applies to a specific option value, add a `_filter={{ key: 'value' }}` prop to its `<TabItem>`. The MCP server collapses the tab group to the matching item so agents see just the relevant variant; the docs site ignores `_filter` and keeps the tab visible to click through.
+
+```mdx
+<Tabs syncKey="http-rest">
+  <TabItem label="REST API" _filter={{ computeType: 'ServerlessApiGatewayRestApi' }}>
+    ...REST handler code...
+  </TabItem>
+  <TabItem label="HTTP API" _filter={{ computeType: 'ServerlessApiGatewayHttpApi' }}>
+    ...HTTP handler code...
+  </TabItem>
+</Tabs>
+```
+
+#### Page-level frontmatter `when:`
+
+If a generator has so many combinations that inline `<OptionFilter>` blocks become unreadable (in practice this is just the `connection` generator today), split each combination into its own guide page and add a `when:` predicate to the page's frontmatter. The MCP server fetches every page listed for the generator, keeps only those whose `when:` matches the agent's `options`, and warns with "Unsupported combination" + the list of supported predicates when the agent picks values that don't match any variant.
+
+```mdx
+---
+title: React to tRPC
+when:
+  sourceType: react
+  targetType: ts#trpc-api
+---
+```
+
+Array values are OR'd within a key (`protocol: [HTTP, A2A]` matches either), and keys are AND'd across the predicate. An `overview` page with no `when:` is always included. Use this only when per-combination prose genuinely diverges — for conditional paragraphs or code blocks inside a single guide, stick with `<OptionFilter>` / `<Tabs _filter>`.
+
+#### When to choose each
+
+- **`<OptionFilter>`** — content that _doesn't apply_ to some options (hides the mismatch). **Don't nest `<OptionFilter>` blocks inside each other** — the docs site renders them as stacked indented stanzas which is confusing. If you need option-dependent content inside an already-filtered section, use `<Tabs>` with `_filter` on each `<TabItem>` instead.
+- **`<Infrastructure>`** — CDK vs Terraform side-by-side that the reader compares visually.
+- **`<Tabs _filter>`** — any other "A vs B" switch where the site benefits from both variants being visible but an MCP agent should only see one. Also the right choice for option-dependent content inside an `<OptionFilter>` section.
+- **Frontmatter `when:`** — one guide page per supported combination, for generators like `connection` where every combination wants its own prose.
+
+Running `pnpm nx start docs` shows your changes with the filter bar live. Running `pnpm nx mcp-inspect @aws/nx-plugin` starts the MCP server against your local guides so you can call `generator-guide` with various `options` and verify the output an agent would receive.
+
 ### Documentation Translation
 
 The project supports automatic translation of documentation using Anthropic's Claude Sonnet 4.5 model on Amazon Bedrock. Documentation is translated from English to multiple languages (currently Japanese, with support for French, Spanish, German, Chinese, Vietnamese and Korean).

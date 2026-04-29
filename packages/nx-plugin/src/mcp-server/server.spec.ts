@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import fs from 'fs';
 import { createServer } from './server';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -13,6 +14,9 @@ describe('MCP Server', () => {
   let server: McpServer;
 
   beforeEach(async () => {
+    // Force the local-file probes in fetchGuidePages / fetchSnippet to miss
+    // so the test's `global.fetch` mock is the one returning guide content.
+    vi.spyOn(fs, 'existsSync').mockReturnValue(false);
     // Create a new client instance
     client = new Client({
       name: 'test-client',

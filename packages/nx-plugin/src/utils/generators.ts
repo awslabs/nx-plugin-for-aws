@@ -12,7 +12,7 @@ export interface GeneratorInfo {
   readonly resolvedSchemaPath: string;
   readonly hidden?: boolean;
   readonly description: string;
-  readonly guidePages?: string[];
+  readonly guidePages?: readonly string[];
 }
 
 /**
