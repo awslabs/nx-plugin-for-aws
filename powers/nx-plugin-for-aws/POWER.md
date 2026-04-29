@@ -77,7 +77,7 @@ If you are already inside an empty directory intended for this project, pass `.`
 pnpm create @aws/nx-workspace . --no-interactive
 ```
 
-Be sure to ask the user what their preferred project name is.
+Be sure to ask the user what their preferred project name is, unless already within an empty directory intended for the project.
 
 ### Workflow 2: Discover Available Generators
 
