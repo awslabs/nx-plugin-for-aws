@@ -156,6 +156,7 @@ export const tsRdbGenerator = async (
   };
   projectConfig.targets.prisma = {
     executor: 'nx:run-commands',
+    dependsOn: ['serve-local'],
     options: {
       cwd: '{projectRoot}',
       command: 'prisma',
@@ -176,10 +177,9 @@ export const tsRdbGenerator = async (
   projectConfig.targets['serve-local'] = {
     executor: 'nx:run-commands',
     options: {
-      command: `docker run --rm --name ${containerName} -p ${localDbPort}:${containerPort} -v ${containerName}-data:${dockerDataDir} ${dockerEnvArgs} ${dockerImage}`,
+      command: `docker stop ${containerName} 2>/dev/null; docker run --rm -d --name ${containerName} -p ${localDbPort}:${containerPort} -v ${containerName}-data:${dockerDataDir} ${dockerEnvArgs} ${dockerImage}`,
       cwd: '{projectRoot}',
     },
-    continuous: true,
   };
   const migrationBundleDir = joinPathFragments(
     'dist',

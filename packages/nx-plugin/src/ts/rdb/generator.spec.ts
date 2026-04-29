@@ -106,6 +106,7 @@ describe('ts#rdb generator', () => {
     });
     expect(projectConfig.targets.prisma).toEqual({
       executor: 'nx:run-commands',
+      dependsOn: ['serve-local'],
       options: {
         cwd: '{projectRoot}',
         command: 'prisma',
@@ -116,10 +117,9 @@ describe('ts#rdb generator', () => {
     });
     expect(projectConfig.targets['serve-local']).toEqual({
       executor: 'nx:run-commands',
-      continuous: true,
       options: {
         command:
-          'docker run --rm --name proj-databasename -p 5432:5432 -v proj-databasename-data:/var/lib/postgresql -e POSTGRES_DB=databasename -e POSTGRES_USER=dbadmin -e POSTGRES_PASSWORD=password postgres',
+          'docker stop proj-databasename 2>/dev/null; docker run --rm -d --name proj-databasename -p 5432:5432 -v proj-databasename-data:/var/lib/postgresql -e POSTGRES_DB=databasename -e POSTGRES_USER=dbadmin -e POSTGRES_PASSWORD=password postgres',
         cwd: '{projectRoot}',
       },
     });
@@ -170,10 +170,9 @@ describe('ts#rdb generator', () => {
     );
     expect(mysqlProjectConfig.targets['serve-local']).toEqual({
       executor: 'nx:run-commands',
-      continuous: true,
       options: {
         command:
-          'docker run --rm --name proj-databasename -p 3306:3306 -v proj-databasename-data:/var/lib/mysql -e MYSQL_DATABASE=databasename -e MYSQL_USER=dbadmin -e MYSQL_PASSWORD=password -e MYSQL_ROOT_PASSWORD=password mysql',
+          'docker stop proj-databasename 2>/dev/null; docker run --rm -d --name proj-databasename -p 3306:3306 -v proj-databasename-data:/var/lib/mysql -e MYSQL_DATABASE=databasename -e MYSQL_USER=dbadmin -e MYSQL_PASSWORD=password -e MYSQL_ROOT_PASSWORD=password mysql',
         cwd: '{projectRoot}',
       },
     });
