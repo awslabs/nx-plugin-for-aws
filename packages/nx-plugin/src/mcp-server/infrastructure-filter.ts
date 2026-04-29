@@ -120,6 +120,12 @@ export const applyInfrastructureFilter = (
   text: string,
   iacProvider?: string,
 ): string => {
+  // No filter supplied (or `Inherit` — treat as no opinion): leave the
+  // <Infrastructure> block in place so downstream rendering keeps both
+  // slots as side-by-side tabs, and we don't inject `### CDK` / `### Terraform`
+  // headings that would land at the wrong depth inside nested sections.
+  if (!iacProvider || iacProvider === 'Inherit') return text;
+
   const blocks = scan(text);
   if (blocks.length === 0) return text;
 
@@ -128,18 +134,11 @@ export const applyInfrastructureFilter = (
   for (const block of blocks) {
     result += text.slice(cursor, block.startIndex);
     const { cdk, terraform } = extractSlots(block.body);
-
-    if (iacProvider === 'CDK') {
-      result += cdk;
-    } else if (iacProvider === 'Terraform') {
-      result += terraform;
-    } else {
-      // No filter or Inherit — keep both, clearly labelled.
-      const parts: string[] = [];
-      if (cdk) parts.push(`### CDK\n\n${cdk}`);
-      if (terraform) parts.push(`### Terraform\n\n${terraform}`);
-      result += parts.join('\n\n');
-    }
+    // With a concrete iacProvider, inline only the relevant slot body —
+    // no wrapper, no heading. The surrounding section already carries
+    // the right heading level.
+    if (iacProvider === 'CDK') result += cdk;
+    else if (iacProvider === 'Terraform') result += terraform;
     cursor = block.endIndex;
   }
   result += text.slice(cursor);

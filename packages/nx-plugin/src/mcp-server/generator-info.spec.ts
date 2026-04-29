@@ -489,7 +489,7 @@ terraform instructions
       expect(result).not.toContain('terraform instructions');
     });
 
-    it('labels both Infrastructure slots when iacProvider omitted', async () => {
+    it('leaves Infrastructure blocks untouched when iacProvider omitted', async () => {
       const page = `
 <Infrastructure>
 <Fragment slot="cdk">cdk here</Fragment>
@@ -497,8 +497,11 @@ terraform instructions
 </Infrastructure>
 `;
       const result = await postProcessGuide(page, generators);
-      expect(result).toContain('### CDK');
-      expect(result).toContain('### Terraform');
+      expect(result).toContain('<Infrastructure>');
+      expect(result).toContain('cdk here');
+      expect(result).toContain('terraform here');
+      expect(result).not.toContain('### CDK');
+      expect(result).not.toContain('### Terraform');
     });
   });
 

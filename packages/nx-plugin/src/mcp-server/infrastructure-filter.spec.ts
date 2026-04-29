@@ -30,18 +30,14 @@ after`;
     expect(out).not.toContain('cdk-body');
   });
 
-  it('labels both when no iacProvider given', () => {
+  it('leaves the Infrastructure block untouched when no iacProvider given', () => {
     const out = applyInfrastructureFilter(source);
-    expect(out).toContain('### CDK');
-    expect(out).toContain('### Terraform');
-    expect(out).toContain('cdk-body');
-    expect(out).toContain('terraform-body');
+    expect(out).toBe(source);
   });
 
-  it('treats Inherit like no selection (both)', () => {
+  it('treats Inherit like no selection (block untouched)', () => {
     const out = applyInfrastructureFilter(source, 'Inherit');
-    expect(out).toContain('### CDK');
-    expect(out).toContain('### Terraform');
+    expect(out).toBe(source);
   });
 
   it('is a no-op when no Infrastructure tags', () => {
