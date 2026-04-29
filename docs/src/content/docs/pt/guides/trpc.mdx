@@ -3,7 +3,6 @@ title: "tRPC"
 description: "Documentação de referência para tRPC"
 generator: ts#trpc-api
 ---
-
 import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
@@ -462,30 +461,30 @@ O gerador cria infraestrutura como código CDK ou Terraform baseado no `iacProvi
 
 <Infrastructure>
 <Fragment slot="cdk">
-O construct CDK para implantação está em `common/constructs`. Exemplo de uso:
+O construct CDK para implantação está na pasta `common/constructs`. Você pode consumir isso em uma aplicação CDK, por exemplo:
 
+<OptionFilter when={{ auth: ['IAM', 'None'] }} description="CDK usage for IAM or no authentication">
 ```ts {6-8}
-import { MyApi } from ':my-scope/common-constructs`;
+import { MyApi } from ':my-scope/common-constructs';
 
 export class ExampleStack extends Stack {
-   constructor(scope: Construct, id: string) {
-      const api = new MyApi(this, 'MyApi', {
-        integrations: MyApi.defaultIntegrations(this).build(),
-      });
-   }
+  constructor(scope: Construct, id: string) {
+    // Adicione a api ao seu stack
+    const api = new MyApi(this, 'MyApi', {
+      integrations: MyApi.defaultIntegrations(this).build(),
+    });
+  }
 }
 ```
+</OptionFilter>
 
-Isso configura infraestrutura incluindo AWS API Gateway, AWS Lambda e autenticação.
-
-<Snippet name="api/cors-configuration-cdk-note" />
-
-<OptionFilter when={{ auth: 'Cognito' }} description="Supplying the identity construct for Cognito-authenticated CDK APIs">
-```ts {9}
+<OptionFilter when={{ auth: 'Cognito' }} description="CDK usage with Cognito authentication — pass the identity construct">
+```ts {6,9}
 import { MyApi, UserIdentity } from ':my-scope/common-constructs';
 
 export class ExampleStack extends Stack {
   constructor(scope: Construct, id: string) {
+    // Adicione a api ao seu stack
     const identity = new UserIdentity(this, 'Identity');
 
     const api = new MyApi(this, 'MyApi', {
@@ -496,42 +495,38 @@ export class ExampleStack extends Stack {
 }
 ```
 
-O construct `UserIdentity` pode ser gerado com o <Link path="/guides/react-website-auth">gerador `ts#react-website-auth`</Link>
+O construct `UserIdentity` pode ser gerado usando o <Link path="/guides/react-website-auth">gerador `ts#react-website-auth`</Link>.
 </OptionFilter>
+
+Isso configura a infraestrutura da sua API, incluindo AWS API Gateway REST ou HTTP API, funções AWS Lambda para lógica de negócio e autenticação baseada no método `auth` escolhido.
+
+<Snippet name="api/cors-configuration-cdk-note" />
 </Fragment>
 <Fragment slot="terraform">
-Módulos Terraform estão em `common/terraform`. Exemplo de uso:
+Os módulos Terraform para implantar sua API estão na pasta `common/terraform`. Você pode usar isso em uma configuração Terraform:
 
+<OptionFilter when={{ auth: ['IAM', 'None'] }} description="Terraform usage for IAM or no authentication">
 ```hcl {6-8}
 module "my_api" {
   source = "../../common/terraform/src/app/apis/my-api"
 
+  # Variáveis de ambiente para a função Lambda
   env = {
     ENVIRONMENT = var.environment
     LOG_LEVEL   = "INFO"
   }
 
+  # Políticas IAM adicionais se necessário
   additional_iam_policy_statements = [
-    # Permissões adicionais
+    # Adicione quaisquer permissões adicionais que sua API precise
   ]
 
   tags = local.common_tags
 }
 ```
+</OptionFilter>
 
-Configura:
-1. Função Lambda
-2. API Gateway HTTP/REST
-3. IAM roles
-4. CloudWatch Logs
-5. X-Ray
-6. CORS
-
-<Snippet name="api/cors-configuration-terraform-note" />
-
-<OptionFilter when={{ auth: 'Cognito' }} description="Supplying Cognito config to Terraform-deployed APIs">
-Para conectar um Cognito User Pool e client, forneça as variáveis relevantes:
-
+<OptionFilter when={{ auth: 'Cognito' }} description="Terraform usage with Cognito authentication — supply user pool and client">
 ```hcl {4-5}
 module "my_api" {
   source = "../../common/terraform/src/app/apis/my-api"
@@ -539,40 +534,61 @@ module "my_api" {
   user_pool_id         = local.user_pool_id
   user_pool_client_ids = [local.client_id]
 
+  # Variáveis de ambiente para a função Lambda
   env = {
     ENVIRONMENT = var.environment
     LOG_LEVEL   = "INFO"
   }
 
+  # Políticas IAM adicionais se necessário
+  additional_iam_policy_statements = [
+    # Adicione quaisquer permissões adicionais que sua API precise
+  ]
+
   tags = local.common_tags
 }
 ```
 
-Configure Cognito usando recursos Terraform apropriados.
+Você pode configurar o Cognito User Pool e Client usando os recursos ou módulos Terraform apropriados.
 </OptionFilter>
 
-Saídas do módulo:
+Isso configura:
+
+1. Uma função AWS Lambda que serve todos os procedimentos tRPC
+2. API Gateway HTTP/REST API como gatilho da função
+3. Roles e permissões IAM
+4. Grupo de logs CloudWatch
+5. Configuração de rastreamento X-Ray
+6. Configuração CORS
+
+<Snippet name="api/cors-configuration-terraform-note" />
+
+O módulo Terraform fornece várias saídas que você pode usar:
 
 ```hcl
+# Acesse o endpoint da API
 output "api_url" {
   value = module.my_api.stage_invoke_url
 }
 
+# Acesse detalhes da função Lambda
 output "lambda_function_name" {
   value = module.my_api.lambda_function_name
 }
 
+# Acesse a role IAM para conceder permissões adicionais
 output "lambda_execution_role_arn" {
   value = module.my_api.lambda_execution_role_arn
 }
 ```
 
-Personalize CORS:
+Você pode personalizar as configurações CORS passando variáveis para o módulo:
 
 ```hcl
 module "my_api" {
   source = "../../common/terraform/src/app/apis/my-api"
 
+  # Configuração CORS personalizada
   cors_allow_origins = ["https://myapp.com", "https://staging.myapp.com"]
   cors_allow_methods = ["GET", "POST", "PUT", "DELETE"]
   cors_allow_headers = [
@@ -604,7 +620,7 @@ Check: CKV_AWS_59: "Ensure there is no open access to back-end resources through
 </TabItem>
 </Tabs>
 
-Adicione [comentário de supressão](https://www.checkov.io/2.Basics/Suppressing%20and%20Skipping%20Policies.html) se desejar API pública.
+Você pode [adicionar um comentário de supressão](https://www.checkov.io/2.Basics/Suppressing%20and%20Skipping%20Policies.html) se tiver certeza de que deseja que sua API seja pública.
 :::
 </OptionFilter>
 </Fragment>
@@ -625,7 +641,7 @@ Se você selecionou CDK para seu `iacProvider`, quando você adiciona ou remove 
 :::
 
 <OptionFilter when={{ auth: 'IAM' }} description="Granting API invoke access — IAM-authenticated APIs only">
-### Concedendo Acesso (IAM Only)
+### Concedendo Acesso (Somente IAM)
 
 Você pode conceder acesso à sua API da seguinte forma:
 
@@ -637,6 +653,7 @@ api.grantInvokeAccess(myIdentityPool.authenticatedRole);
 </Fragment>
 <Fragment slot="terraform">
 ```hcl
+# Crie uma política IAM para permitir invocar a API
 resource "aws_iam_policy" "api_invoke_policy" {
   name        = "MyApiInvokePolicy"
   description = "Policy to allow invoking the tRPC API"
@@ -653,22 +670,24 @@ resource "aws_iam_policy" "api_invoke_policy" {
   })
 }
 
+# Anexe a política a uma role IAM (por exemplo, para usuários autenticados)
 resource "aws_iam_role_policy_attachment" "api_invoke_access" {
   role       = aws_iam_role.authenticated_user_role.name
   policy_arn = aws_iam_policy.api_invoke_policy.arn
 }
 
+# Ou anexe a uma role existente por nome
 resource "aws_iam_role_policy_attachment" "api_invoke_access_existing" {
   role       = "MyExistingRole"
   policy_arn = aws_iam_policy.api_invoke_policy.arn
 }
 ```
 
-Saídas úteis do módulo:
+As principais saídas do módulo de API que você pode usar para políticas IAM são:
 
-- `module.my_api.api_execution_arn` - Para permissões execute-api:Invoke
-- `module.my_api.api_arn` - ARN do API Gateway
-- `module.my_api.lambda_function_arn` - ARN da função Lambda
+- `module.my_api.api_execution_arn` - Para conceder permissões execute-api:Invoke
+- `module.my_api.api_arn` - O ARN do API Gateway
+- `module.my_api.lambda_function_arn` - O ARN da função Lambda
 </Fragment>
 </Infrastructure>
 </OptionFilter>
@@ -679,15 +698,17 @@ Saídas úteis do módulo:
 
 ## Servidor tRPC Local
 
-Execute localmente com:
+Você pode usar o target `serve` para executar um servidor local para sua API, por exemplo:
 
 <NxCommands commands={['serve my-api']} />
 
-O ponto de entrada é `src/local-server.ts`. Recarrega automaticamente em alterações.
+O ponto de entrada para o servidor local é `src/local-server.ts`.
+
+Isso recarregará automaticamente quando você fizer alterações na sua API.
 
 ## Invocando sua API tRPC
 
-Crie um cliente type-safe para invocar a API:
+Você pode criar um cliente tRPC para invocar sua API de forma type-safe. Se você está chamando sua API tRPC de outro backend, pode usar o cliente em `src/client/index.ts`, por exemplo:
 
 ```ts
 import { createMyApiClient } from ':my-scope/my-api';
@@ -697,8 +718,8 @@ const client = createMyApiClient({ url: 'https://my-api-url.example.com/' });
 await client.echo.query({ message: 'Hello world!' });
 ```
 
-Para React, use o gerador <Link path="guides/connection/react-trpc">Connection</Link>.
+Se você está chamando sua API de um website React, considere usar o gerador <Link path="guides/connection/react-trpc">Connection</Link> para configurar o cliente.
 
 ## Mais Informações
 
-Consulte a [documentação do tRPC](https://trpc.io/docs).
+Para mais informações sobre tRPC, consulte a [documentação do tRPC](https://trpc.io/docs).

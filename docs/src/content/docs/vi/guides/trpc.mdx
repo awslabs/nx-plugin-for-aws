@@ -3,7 +3,6 @@ title: "tRPC"
 description: "Tài liệu tham khảo cho tRPC"
 generator: ts#trpc-api
 ---
-
 import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
@@ -462,31 +461,30 @@ Trình tạo API tRPC tạo mã cơ sở hạ tầng CDK hoặc Terraform dựa 
 
 <Infrastructure>
 <Fragment slot="cdk">
-CDK construct để triển khai API của bạn trong thư mục `common/constructs`. Bạn có thể sử dụng nó trong ứng dụng CDK, ví dụ:
+CDK construct để triển khai API của bạn nằm trong thư mục `common/constructs`. Bạn có thể sử dụng nó trong ứng dụng CDK, ví dụ:
 
+<OptionFilter when={{ auth: ['IAM', 'None'] }} description="CDK usage for IAM or no authentication">
 ```ts {6-8}
-import { MyApi } from ':my-scope/common-constructs`;
+import { MyApi } from ':my-scope/common-constructs';
 
 export class ExampleStack extends Stack {
-   constructor(scope: Construct, id: string) {
-      // Thêm api vào stack của bạn
-      const api = new MyApi(this, 'MyApi', {
-        integrations: MyApi.defaultIntegrations(this).build(),
-      });
-   }
+  constructor(scope: Construct, id: string) {
+    // Thêm api vào stack của bạn
+    const api = new MyApi(this, 'MyApi', {
+      integrations: MyApi.defaultIntegrations(this).build(),
+    });
+  }
 }
 ```
+</OptionFilter>
 
-Điều này thiết lập cơ sở hạ tầng API của bạn, bao gồm AWS API Gateway REST hoặc HTTP API, các hàm AWS Lambda cho logic nghiệp vụ, và xác thực dựa trên phương thức `auth` bạn đã chọn.
-
-<Snippet name="api/cors-configuration-cdk-note" />
-
-<OptionFilter when={{ auth: 'Cognito' }} description="Supplying the identity construct for Cognito-authenticated CDK APIs">
-```ts {9}
+<OptionFilter when={{ auth: 'Cognito' }} description="CDK usage with Cognito authentication — pass the identity construct">
+```ts {6,9}
 import { MyApi, UserIdentity } from ':my-scope/common-constructs';
 
 export class ExampleStack extends Stack {
   constructor(scope: Construct, id: string) {
+    // Thêm api vào stack của bạn
     const identity = new UserIdentity(this, 'Identity');
 
     const api = new MyApi(this, 'MyApi', {
@@ -497,12 +495,17 @@ export class ExampleStack extends Stack {
 }
 ```
 
-Construct `UserIdentity` có thể được tạo bằng cách sử dụng <Link path="/guides/react-website-auth">trình tạo `ts#react-website-auth`</Link>
+Construct `UserIdentity` có thể được tạo bằng cách sử dụng <Link path="/vi/guides/react-website-auth">trình tạo `ts#react-website-auth`</Link>.
 </OptionFilter>
+
+Điều này thiết lập cơ sở hạ tầng API của bạn, bao gồm AWS API Gateway REST hoặc HTTP API, các hàm AWS Lambda cho logic nghiệp vụ, và xác thực dựa trên phương thức `auth` bạn đã chọn.
+
+<Snippet name="api/cors-configuration-cdk-note" />
 </Fragment>
 <Fragment slot="terraform">
 Các module Terraform để triển khai API của bạn nằm trong thư mục `common/terraform`. Bạn có thể sử dụng chúng trong cấu hình Terraform:
 
+<OptionFilter when={{ auth: ['IAM', 'None'] }} description="Terraform usage for IAM or no authentication">
 ```hcl {6-8}
 module "my_api" {
   source = "../../common/terraform/src/app/apis/my-api"
@@ -521,6 +524,33 @@ module "my_api" {
   tags = local.common_tags
 }
 ```
+</OptionFilter>
+
+<OptionFilter when={{ auth: 'Cognito' }} description="Terraform usage with Cognito authentication — supply user pool and client">
+```hcl {4-5}
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  user_pool_id         = local.user_pool_id
+  user_pool_client_ids = [local.client_id]
+
+  # Biến môi trường cho Lambda function
+  env = {
+    ENVIRONMENT = var.environment
+    LOG_LEVEL   = "INFO"
+  }
+
+  # Các chính sách IAM bổ sung nếu cần
+  additional_iam_policy_statements = [
+    # Thêm bất kỳ quyền bổ sung nào mà API của bạn cần
+  ]
+
+  tags = local.common_tags
+}
+```
+
+Bạn có thể thiết lập Cognito User Pool và Client bằng cách sử dụng các resource hoặc module Terraform thích hợp.
+</OptionFilter>
 
 Điều này thiết lập:
 
@@ -532,28 +562,6 @@ module "my_api" {
 6. Cấu hình CORS
 
 <Snippet name="api/cors-configuration-terraform-note" />
-
-<OptionFilter when={{ auth: 'Cognito' }} description="Supplying Cognito config to Terraform-deployed APIs">
-Để kết nối Cognito User Pool và client, cung cấp các biến liên quan:
-
-```hcl {4-5}
-module "my_api" {
-  source = "../../common/terraform/src/app/apis/my-api"
-
-  user_pool_id         = local.user_pool_id
-  user_pool_client_ids = [local.client_id]
-
-  env = {
-    ENVIRONMENT = var.environment
-    LOG_LEVEL   = "INFO"
-  }
-
-  tags = local.common_tags
-}
-```
-
-Bạn có thể thiết lập Cognito User Pool và Client bằng cách sử dụng các resource hoặc module Terraform thích hợp.
-</OptionFilter>
 
 Module Terraform cung cấp một số output mà bạn có thể sử dụng:
 
@@ -710,7 +718,7 @@ const client = createMyApiClient({ url: 'https://my-api-url.example.com/' });
 await client.echo.query({ message: 'Hello world!' });
 ```
 
-Nếu bạn đang gọi API của bạn từ một website React, hãy xem xét sử dụng trình tạo <Link path="guides/connection/react-trpc">Connection</Link> để cấu hình client.
+Nếu bạn đang gọi API của bạn từ một website React, hãy xem xét sử dụng trình tạo <Link path="/vi/guides/connection/react-trpc">Connection</Link> để cấu hình client.
 
 ## Thông tin thêm
 

@@ -463,29 +463,28 @@ tRPC API 생성기는 선택한 `iacProvider`에 따라 CDK 또는 Terraform 인
 <Fragment slot="cdk">
 `common/constructs` 폴더에 API 배포를 위한 CDK 구성이 있습니다. CDK 애플리케이션에서 이를 사용할 수 있습니다. 예를 들어:
 
+<OptionFilter when={{ auth: ['IAM', 'None'] }} description="IAM 또는 인증 없음을 위한 CDK 사용">
 ```ts {6-8}
-import { MyApi } from ':my-scope/common-constructs`;
+import { MyApi } from ':my-scope/common-constructs';
 
 export class ExampleStack extends Stack {
-   constructor(scope: Construct, id: string) {
-      // 스택에 API 추가
-      const api = new MyApi(this, 'MyApi', {
-        integrations: MyApi.defaultIntegrations(this).build(),
-      });
-   }
+  constructor(scope: Construct, id: string) {
+    // 스택에 API 추가
+    const api = new MyApi(this, 'MyApi', {
+      integrations: MyApi.defaultIntegrations(this).build(),
+    });
+  }
 }
 ```
+</OptionFilter>
 
-이 설정은 선택한 `auth` 방법을 기반으로 AWS API Gateway REST 또는 HTTP API, 비즈니스 로직을 위한 AWS Lambda 함수 및 인증을 포함한 API 인프라를 구성합니다.
-
-<Snippet name="api/cors-configuration-cdk-note" />
-
-<OptionFilter when={{ auth: 'Cognito' }} description="Cognito 인증 CDK API를 위한 identity 구성 제공">
-```ts {9}
+<OptionFilter when={{ auth: 'Cognito' }} description="Cognito 인증을 사용한 CDK 사용 — identity 구성 전달">
+```ts {6,9}
 import { MyApi, UserIdentity } from ':my-scope/common-constructs';
 
 export class ExampleStack extends Stack {
   constructor(scope: Construct, id: string) {
+    // 스택에 API 추가
     const identity = new UserIdentity(this, 'Identity');
 
     const api = new MyApi(this, 'MyApi', {
@@ -498,10 +497,15 @@ export class ExampleStack extends Stack {
 
 `UserIdentity` 구성은 <Link path="/guides/react-website-auth">`ts#react-website-auth` 생성기</Link>를 사용하여 생성할 수 있습니다.
 </OptionFilter>
+
+이 설정은 선택한 `auth` 방법을 기반으로 AWS API Gateway REST 또는 HTTP API, 비즈니스 로직을 위한 AWS Lambda 함수 및 인증을 포함한 API 인프라를 구성합니다.
+
+<Snippet name="api/cors-configuration-cdk-note" />
 </Fragment>
 <Fragment slot="terraform">
 `common/terraform` 폴더에 API 배포를 위한 Terraform 모듈이 있습니다. Terraform 구성에서 이를 사용할 수 있습니다:
 
+<OptionFilter when={{ auth: ['IAM', 'None'] }} description="IAM 또는 인증 없음을 위한 Terraform 사용">
 ```hcl {6-8}
 module "my_api" {
   source = "../../common/terraform/src/app/apis/my-api"
@@ -520,6 +524,33 @@ module "my_api" {
   tags = local.common_tags
 }
 ```
+</OptionFilter>
+
+<OptionFilter when={{ auth: 'Cognito' }} description="Cognito 인증을 사용한 Terraform 사용 — 사용자 풀 및 클라이언트 제공">
+```hcl {4-5}
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  user_pool_id         = local.user_pool_id
+  user_pool_client_ids = [local.client_id]
+
+  # Lambda 함수를 위한 환경 변수
+  env = {
+    ENVIRONMENT = var.environment
+    LOG_LEVEL   = "INFO"
+  }
+
+  # 필요한 경우 추가 IAM 정책
+  additional_iam_policy_statements = [
+    # API에 필요한 추가 권한 추가
+  ]
+
+  tags = local.common_tags
+}
+```
+
+Cognito 사용자 풀 및 클라이언트는 적절한 Terraform 리소스 또는 모듈을 사용하여 설정할 수 있습니다.
+</OptionFilter>
 
 이 설정은 다음을 구성합니다:
 
@@ -531,28 +562,6 @@ module "my_api" {
 6. CORS 구성
 
 <Snippet name="api/cors-configuration-terraform-note" />
-
-<OptionFilter when={{ auth: 'Cognito' }} description="Terraform 배포 API에 Cognito 구성 제공">
-Cognito 사용자 풀 및 클라이언트를 연결하려면 관련 변수를 제공하세요:
-
-```hcl {4-5}
-module "my_api" {
-  source = "../../common/terraform/src/app/apis/my-api"
-
-  user_pool_id         = local.user_pool_id
-  user_pool_client_ids = [local.client_id]
-
-  env = {
-    ENVIRONMENT = var.environment
-    LOG_LEVEL   = "INFO"
-  }
-
-  tags = local.common_tags
-}
-```
-
-Cognito 사용자 풀 및 클라이언트는 적절한 Terraform 리소스 또는 모듈을 사용하여 설정할 수 있습니다.
-</OptionFilter>
 
 Terraform 모듈은 사용할 수 있는 여러 출력을 제공합니다:
 
