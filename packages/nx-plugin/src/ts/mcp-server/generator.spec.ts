@@ -2,6 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+import * as devkit from '@nx/devkit';
 import { addProjectConfiguration, Tree, writeJson } from '@nx/devkit';
 import {
   tsMcpServerGenerator,
@@ -14,6 +15,7 @@ import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
 } from '../../utils/config/utils';
+import { vi } from 'vitest';
 
 describe('ts#mcp-server generator', () => {
   let tree: Tree;
@@ -1028,6 +1030,37 @@ describe('ts#mcp-server generator', () => {
     expect(projectConfig.metadata.components[0].name).toBe('custom-server');
     expect(projectConfig.metadata.components[0].port).toBeDefined();
   });
+
+  it('should pin zod via yarn resolutions to match @modelcontextprotocol/sdk peer dep', async () => {
+    vi.spyOn(devkit, 'detectPackageManager').mockReturnValue('yarn');
+
+    await tsMcpServerGenerator(tree, {
+      project: 'test-project',
+      computeType: 'None',
+      iacProvider: 'CDK',
+    });
+
+    const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+    expect(rootPackageJson.resolutions?.zod).toBe(
+      rootPackageJson.dependencies.zod,
+    );
+  });
+
+  it.each(['pnpm', 'npm', 'bun'] as const)(
+    'should not add yarn resolutions for %s',
+    async (pkgMgr) => {
+      vi.spyOn(devkit, 'detectPackageManager').mockReturnValue(pkgMgr);
+
+      await tsMcpServerGenerator(tree, {
+        project: 'test-project',
+        computeType: 'None',
+        iacProvider: 'CDK',
+      });
+
+      const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+      expect(rootPackageJson.resolutions?.zod).toBeUndefined();
+    },
+  );
 
   it('should use default name when empty string is provided', async () => {
     await tsMcpServerGenerator(tree, {

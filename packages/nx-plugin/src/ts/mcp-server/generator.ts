@@ -7,6 +7,7 @@ import {
   OverwriteStrategy,
   Tree,
   addDependenciesToPackageJson,
+  detectPackageManager,
   generateFiles,
   installPackagesTask,
   joinPathFragments,
@@ -186,6 +187,21 @@ export const tsMcpServerGenerator = async (
 
   addDependenciesToPackageJson(tree, deps, devDeps);
   addDependenciesToPackageJson(tree, deps, devDeps, projectPackageJsonPath);
+
+  // @modelcontextprotocol/sdk declares zod as a peer dependency with a wide range
+  // (^3.25 || ^4.0). Yarn does not dedupe the peer to the workspace's pinned zod, so
+  // without a resolution it installs a separate zod under the SDK's own node_modules.
+  // The two zod copies have structurally incompatible types, which breaks type
+  // inference for registerTool inputSchema.
+  if (detectPackageManager() === 'yarn') {
+    updateJson(tree, 'package.json', (packageJson) => {
+      packageJson.resolutions = {
+        ...packageJson.resolutions,
+        ...withVersions(['zod']),
+      };
+      return packageJson;
+    });
+  }
 
   const localDevPort = assignPort(tree, project, 8000);
 
