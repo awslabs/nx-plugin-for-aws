@@ -1031,7 +1031,7 @@ describe('ts#mcp-server generator', () => {
     expect(projectConfig.metadata.components[0].port).toBeDefined();
   });
 
-  it('should pin zod via yarn resolutions to match @modelcontextprotocol/sdk peer dep', async () => {
+  it('should pin @modelcontextprotocol/sdk zod via yarn resolutions to match the workspace zod', async () => {
     vi.spyOn(devkit, 'detectPackageManager').mockReturnValue('yarn');
 
     await tsMcpServerGenerator(tree, {
@@ -1041,9 +1041,9 @@ describe('ts#mcp-server generator', () => {
     });
 
     const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
-    expect(rootPackageJson.resolutions?.zod).toBe(
-      rootPackageJson.dependencies.zod,
-    );
+    expect(
+      rootPackageJson.resolutions?.['**/@modelcontextprotocol/sdk/zod'],
+    ).toBe(rootPackageJson.dependencies.zod);
   });
 
   it.each(['pnpm', 'npm', 'bun'] as const)(
@@ -1058,7 +1058,7 @@ describe('ts#mcp-server generator', () => {
       });
 
       const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
-      expect(rootPackageJson.resolutions?.zod).toBeUndefined();
+      expect(rootPackageJson.resolutions).toBeUndefined();
     },
   );
 
