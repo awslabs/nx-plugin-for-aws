@@ -16,6 +16,8 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@astrojs/react';
 import * as fs from 'fs';
 
+import remarkOptionFilter from './src/plugins/remark-option-filter.ts';
+
 /**
  * Load Smithy syntax highlighting
  */
@@ -41,6 +43,7 @@ export default defineConfig({
     shikiConfig: {
       langs: [smithySyntax()],
     },
+    remarkPlugins: [remarkOptionFilter],
   },
   integrations: [
     starlight({

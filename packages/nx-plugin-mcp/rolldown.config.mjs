@@ -14,6 +14,9 @@ export default defineConfig({
     dir: path.resolve(__dirname, '../../dist/packages/nx-plugin-mcp/bin'),
     entryFileNames: 'aws-nx-mcp.js',
     format: 'cjs',
+    // Keep the bundle self-contained — the published binary ships alone.
+    inlineDynamicImports: true,
+    codeSplitting: false,
   },
   platform: 'node',
   external: [/^node:/],
