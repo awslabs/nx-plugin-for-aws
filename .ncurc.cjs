@@ -14,6 +14,11 @@ module.exports = {
   reject: [
     '@hey-api/openapi-ts',
     '@modelcontextprotocol/inspector', // TODO: consider allowing updates when transitive dep on @types/react 18.x is removed
+    // Pinned due to incompatibility between @tailwindcss/vite and rolldown-vite (missing `tsconfigPaths` field on BindingViteResolvePluginConfig)
+    'vite',
+    'tailwindcss',
+    '@tailwindcss/vite',
+    'rolldown',
   ],
   packageFile: '{package.json,packages/**/package.json}',
   cooldown: 1, // Only latest versions published for at least 1 day are updated to
