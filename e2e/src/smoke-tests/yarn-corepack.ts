@@ -19,7 +19,18 @@ const PATH_SEP = process.platform === 'win32' ? ';' : ':';
  */
 export const activateYarnViaCorepack = (version: string): (() => void) => {
   const originalPath = process.env.PATH ?? '';
-  const originalHardenedMode = process.env.YARN_ENABLE_HARDENED_MODE;
+  // Yarn berry auto-enables hardened mode on public PR CI runs AND immutable
+  // installs whenever `CI` is set — both refuse any install that would
+  // modify the lockfile. Our smoke test scaffolds a fresh workspace whose
+  // initial yarn.lock is empty, so every dependency resolution counts as a
+  // "modification". Disable both for the duration of the test.
+  const overrides: Record<string, string> = {
+    YARN_ENABLE_HARDENED_MODE: '0',
+    YARN_ENABLE_IMMUTABLE_INSTALLS: 'false',
+  };
+  const originals: Record<string, string | undefined> = Object.fromEntries(
+    Object.keys(overrides).map((k) => [k, process.env[k]]),
+  );
   const shimDir = join(
     tmpdir(),
     'nx-plugin-for-aws',
@@ -33,18 +44,17 @@ export const activateYarnViaCorepack = (version: string): (() => void) => {
     stdio: 'inherit',
   });
   process.env.PATH = `${shimDir}${PATH_SEP}${originalPath}`;
-  // Yarn berry auto-enables hardened mode on public PR CI runs, which refuses
-  // any install that would modify the lockfile. Our smoke test scaffolds a
-  // fresh workspace whose initial yarn.lock is empty, so every dependency
-  // resolution is a "modification" — disable hardened mode for the duration
-  // of the test.
-  process.env.YARN_ENABLE_HARDENED_MODE = '0';
+  for (const [k, v] of Object.entries(overrides)) {
+    process.env[k] = v;
+  }
   return () => {
     process.env.PATH = originalPath;
-    if (originalHardenedMode === undefined) {
-      delete process.env.YARN_ENABLE_HARDENED_MODE;
-    } else {
-      process.env.YARN_ENABLE_HARDENED_MODE = originalHardenedMode;
+    for (const [k, v] of Object.entries(originals)) {
+      if (v === undefined) {
+        delete process.env[k];
+      } else {
+        process.env[k] = v;
+      }
     }
   };
 };
