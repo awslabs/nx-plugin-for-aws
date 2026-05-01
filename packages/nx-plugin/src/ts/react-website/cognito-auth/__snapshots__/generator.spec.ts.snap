@@ -90,14 +90,7 @@ exports[`cognito-auth generator > should generate files > user-identity 1`] = `
   IdentityPool,
   UserPoolAuthenticationProvider,
 } from 'aws-cdk-lib/aws-cognito-identitypool';
-import {
-  CfnOutput,
-  CfnResource,
-  Duration,
-  Lazy,
-  Names,
-  Stack,
-} from 'aws-cdk-lib';
+import { CfnOutput, CfnResource, Duration, Lazy, Stack } from 'aws-cdk-lib';
 import {
   AccountRecovery,
   CfnManagedLoginBranding,
@@ -108,12 +101,6 @@ import {
   UserPool,
   UserPoolClient,
 } from 'aws-cdk-lib/aws-cognito';
-import {
-  PolicyDocument,
-  PolicyStatement,
-  Role,
-  ServicePrincipal,
-} from 'aws-cdk-lib/aws-iam';
 import { Construct } from 'constructs';
 import { RuntimeConfig } from './runtime-config.js';
 import { Distribution } from 'aws-cdk-lib/aws-cloudfront';
@@ -155,10 +142,10 @@ export class UserIdentity extends Construct {
     });
 
     suppressRules(
-      this,
+      this.userPool,
       ['CKV_AWS_111'],
       'SMS Role requires wildcard resource',
-      (c) => c.node.path.includes('/SmsRole/'),
+      (c) => c.node.path.includes('/smsRole/'),
     );
 
     new CfnOutput(this, \`\${id}-UserPoolId\`, {
@@ -175,11 +162,8 @@ export class UserIdentity extends Construct {
   }
 
   private createUserPool = () => {
-    const { smsRole, smsRoleExternalId } = this.createSmsRole();
     const userPool = new UserPool(this, 'UserPool', {
       deletionProtection: true,
-      smsRole,
-      smsRoleExternalId,
       passwordPolicy: {
         minLength: 8,
         requireLowercase: true,
@@ -210,49 +194,14 @@ export class UserIdentity extends Construct {
         phone: true,
       },
     });
-    this.syncSmsRoleRemovalPolicyWithUserPool(smsRole, userPool);
-    return userPool;
-  };
-
-  // Custom SMS role supplied so the trust policy meets Cognito's requirements: https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-sms-settings.html#user-pool-sms-settings-trust-policy
-  private createSmsRole = () => {
-    const smsRoleExternalId = Names.uniqueId(this);
-    const smsRole = new Role(this, 'SmsRole', {
-      assumedBy: new ServicePrincipal('cognito-idp.amazonaws.com', {
-        conditions: {
-          StringEquals: {
-            'sts:ExternalId': smsRoleExternalId,
-            'aws:SourceAccount': Stack.of(this).account,
-          },
-          ArnLike: {
-            'aws:SourceArn': \`arn:\${Stack.of(this).partition}:cognito-idp:\${Stack.of(this).region}:\${Stack.of(this).account}:userpool/*\`,
-          },
-        },
-      }),
-      inlinePolicies: {
-        sns: new PolicyDocument({
-          statements: [
-            new PolicyStatement({
-              actions: ['sns:Publish'],
-              resources: ['*'],
-            }),
-          ],
-        }),
-      },
-    });
-    return { smsRole, smsRoleExternalId };
-  };
-
-  private syncSmsRoleRemovalPolicyWithUserPool = (
-    smsRole: Role,
-    userPool: UserPool,
-  ) => {
+    // Mirror the pool's removal policy onto the auto-created SMS role so it isn't orphaned when the pool is retained
     const poolCfn = userPool.node.defaultChild as CfnResource;
-    const roleCfn = smsRole.node.defaultChild as CfnResource;
-    // Mirror the user pool's removal policy so the SMS role isn't orphaned when the pool is retained
-    roleCfn.cfnOptions.deletionPolicy = poolCfn.cfnOptions.deletionPolicy;
-    roleCfn.cfnOptions.updateReplacePolicy =
+    const smsRoleCfn = userPool.node.findChild('smsRole').node
+      .defaultChild as CfnResource;
+    smsRoleCfn.cfnOptions.deletionPolicy = poolCfn.cfnOptions.deletionPolicy;
+    smsRoleCfn.cfnOptions.updateReplacePolicy =
       poolCfn.cfnOptions.updateReplacePolicy;
+    return userPool;
   };
 
   private createUserPoolDomain = (userPool: UserPool) =>
