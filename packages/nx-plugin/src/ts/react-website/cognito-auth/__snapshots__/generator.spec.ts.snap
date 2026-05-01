@@ -90,7 +90,14 @@ exports[`cognito-auth generator > should generate files > user-identity 1`] = `
   IdentityPool,
   UserPoolAuthenticationProvider,
 } from 'aws-cdk-lib/aws-cognito-identitypool';
-import { CfnOutput, Duration, Lazy, Stack } from 'aws-cdk-lib';
+import {
+  CfnOutput,
+  Duration,
+  Lazy,
+  Names,
+  RemovalPolicy,
+  Stack,
+} from 'aws-cdk-lib';
 import {
   AccountRecovery,
   CfnManagedLoginBranding,
@@ -101,6 +108,12 @@ import {
   UserPool,
   UserPoolClient,
 } from 'aws-cdk-lib/aws-cognito';
+import {
+  PolicyDocument,
+  PolicyStatement,
+  Role,
+  ServicePrincipal,
+} from 'aws-cdk-lib/aws-iam';
 import { Construct } from 'constructs';
 import { RuntimeConfig } from './runtime-config.js';
 import { Distribution } from 'aws-cdk-lib/aws-cloudfront';
@@ -145,7 +158,7 @@ export class UserIdentity extends Construct {
       this.userPool,
       ['CKV_AWS_111'],
       'SMS Role requires wildcard resource',
-      (c) => c.node.path.includes('/smsRole/'),
+      (c) => c.node.path.includes('/SmsRole/'),
     );
 
     new CfnOutput(this, \`\${id}-UserPoolId\`, {
@@ -161,9 +174,12 @@ export class UserIdentity extends Construct {
     });
   }
 
-  private createUserPool = () =>
-    new UserPool(this, 'UserPool', {
+  private createUserPool = () => {
+    const { smsRole, smsRoleExternalId } = this.createSmsRole();
+    return new UserPool(this, 'UserPool', {
       deletionProtection: true,
+      smsRole,
+      smsRoleExternalId,
       passwordPolicy: {
         minLength: 8,
         requireLowercase: true,
@@ -194,6 +210,49 @@ export class UserIdentity extends Construct {
         phone: true,
       },
     });
+  };
+
+  /**
+   * Creates an IAM role that Cognito assumes when sending SMS messages.
+   *
+   * The trust policy includes aws:SourceAccount and aws:SourceArn conditions in
+   * addition to sts:ExternalId, as required by Cognito's role validation. Without
+   * all three conditions, any subsequent UpdateUserPool call (including
+   * deactivating deletion protection) fails with
+   * InvalidSmsRoleTrustRelationshipException.
+   *
+   * The role is retained on stack deletion so that a user pool left behind by
+   * deletion protection can still be updated and deleted via the AWS CLI or
+   * console without the role having already been destroyed.
+   */
+  private createSmsRole = () => {
+    const smsRoleExternalId = Names.uniqueId(this);
+    const smsRole = new Role(this, 'SmsRole', {
+      assumedBy: new ServicePrincipal('cognito-idp.amazonaws.com', {
+        conditions: {
+          StringEquals: {
+            'sts:ExternalId': smsRoleExternalId,
+            'aws:SourceAccount': Stack.of(this).account,
+          },
+          ArnLike: {
+            'aws:SourceArn': \`arn:\${Stack.of(this).partition}:cognito-idp:\${Stack.of(this).region}:\${Stack.of(this).account}:userpool/*\`,
+          },
+        },
+      }),
+      inlinePolicies: {
+        sns: new PolicyDocument({
+          statements: [
+            new PolicyStatement({
+              actions: ['sns:Publish'],
+              resources: ['*'],
+            }),
+          ],
+        }),
+      },
+    });
+    smsRole.applyRemovalPolicy(RemovalPolicy.RETAIN);
+    return { smsRole, smsRoleExternalId };
+  };
 
   private createUserPoolDomain = (userPool: UserPool) =>
     new CfnUserPoolDomain(this, 'UserPoolDomain', {
