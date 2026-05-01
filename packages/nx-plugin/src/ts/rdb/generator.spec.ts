@@ -115,13 +115,15 @@ describe('ts#rdb generator', () => {
         },
       },
     });
+    snapshotTreeDir(tree, 'packages/db/scripts');
     expect(projectConfig.targets['serve-local']).toEqual({
       executor: 'nx:run-commands',
       options: {
         command:
-          'docker stop proj-databasename 2>/dev/null; docker run --rm -d --name proj-databasename -p 5432:5432 -v proj-databasename-data:/var/lib/postgresql -e POSTGRES_DB=databasename -e POSTGRES_USER=dbadmin -e POSTGRES_PASSWORD=password postgres',
+          'tsx scripts/local-db.ts proj-databasename 5432 databasename dbadmin password',
         cwd: '{projectRoot}',
       },
+      continuous: true,
     });
     expect(projectConfig.targets.build.dependsOn).toContain('bundle');
     expect(projectConfig.targets.compile.dependsOn).toContain('generate');
@@ -140,6 +142,7 @@ describe('ts#rdb generator', () => {
     expect(packageJson.dependencies.pg).toBeDefined();
     expect(packageJson.dependencies.mariadb).toBeUndefined();
     expect(packageJson.dependencies['@prisma/adapter-mariadb']).toBeUndefined();
+    expect(packageJson.devDependencies['@docker/node-sdk']).toBeDefined();
     expect(packageJson.devDependencies['@types/aws-lambda']).toBeDefined();
     expect(packageJson.devDependencies['@types/pg']).toBeDefined();
     expect(packageJson.devDependencies.prisma).toBeDefined();
@@ -168,35 +171,21 @@ describe('ts#rdb generator', () => {
       tree,
       '@proj/db',
     );
+    snapshotTreeDir(tree, 'packages/db/scripts');
     expect(mysqlProjectConfig.targets['serve-local']).toEqual({
       executor: 'nx:run-commands',
       options: {
         command:
-          'docker stop proj-databasename 2>/dev/null; docker run --rm -d --name proj-databasename -p 3306:3306 -v proj-databasename-data:/var/lib/mysql -e MYSQL_DATABASE=databasename -e MYSQL_USER=dbadmin -e MYSQL_PASSWORD=password -e MYSQL_ROOT_PASSWORD=password mysql',
+          'tsx scripts/local-db.ts proj-databasename 3306 databasename dbadmin password',
         cwd: '{projectRoot}',
       },
+      continuous: true,
     });
-    expect(
-      packageJson.dependencies['@aws-lambda-powertools/parameters'],
-    ).toBeDefined();
-    expect(
-      packageJson.dependencies['@aws-sdk/client-appconfigdata'],
-    ).toBeDefined();
-    expect(
-      packageJson.dependencies['@aws-sdk/client-secrets-manager'],
-    ).toBeDefined();
-    expect(packageJson.dependencies['@aws-sdk/rds-signer']).toBeDefined();
     expect(packageJson.dependencies['@prisma/adapter-mariadb']).toBeDefined();
-    expect(packageJson.dependencies['@prisma/client']).toBeDefined();
     expect(packageJson.dependencies.mariadb).toBeDefined();
     expect(packageJson.dependencies['@prisma/adapter-pg']).toBeUndefined();
     expect(packageJson.dependencies.pg).toBeUndefined();
-    expect(packageJson.devDependencies['@types/aws-lambda']).toBeDefined();
     expect(packageJson.devDependencies['@types/pg']).toBeUndefined();
-    expect(packageJson.devDependencies.prisma).toBeDefined();
-    expect(packageJson.devDependencies.ncp).toBeDefined();
-    expect(packageJson.devDependencies.rimraf).toBeDefined();
-    expect(packageJson.devDependencies['make-dir-cli']).toBeDefined();
   });
 
   it('should generate terraform modules when iacProvider is Terraform', async () => {
@@ -204,28 +193,15 @@ describe('ts#rdb generator', () => {
       ...defaultOptions,
       iacProvider: 'Terraform',
     });
-    const terraformCore = tree.read(
-      'packages/common/terraform/src/core/rdb/aurora/aurora.tf',
-      'utf-8',
-    );
-    const terraformApp = tree.read(
-      'packages/common/terraform/src/app/dbs/db/db.tf',
-      'utf-8',
-    );
-
     expect(
-      tree.exists('packages/common/terraform/src/core/rdb/aurora/aurora.tf'),
-    ).toBeTruthy();
+      tree.read(
+        'packages/common/terraform/src/core/rdb/aurora/aurora.tf',
+        'utf-8',
+      ),
+    ).toMatchSnapshot();
     expect(
-      tree.exists('packages/common/terraform/src/app/dbs/db/db.tf'),
-    ).toBeTruthy();
-    expect(terraformApp).toContain('"aurora-postgresql"');
-    expect(terraformApp).toContain('HOSTNAME = module.aurora.cluster_endpoint');
-
-    expect({
-      'aurora.tf': terraformCore,
-      'db.tf': terraformApp,
-    }).toMatchSnapshot();
+      tree.read('packages/common/terraform/src/app/dbs/db/db.tf', 'utf-8'),
+    ).toMatchSnapshot();
   });
 
   it('should keep an existing aurora shared construct', async () => {
@@ -258,32 +234,14 @@ describe('ts#rdb generator', () => {
       iacProvider: 'Terraform',
       engine: 'MySQL',
     });
-    const terraformCore = tree.read(
-      'packages/common/terraform/src/core/rdb/aurora/aurora.tf',
-      'utf-8',
-    );
-    const terraformApp = tree.read(
-      'packages/common/terraform/src/app/dbs/db/db.tf',
-      'utf-8',
-    );
-
-    expect(terraformApp).toContain('"aurora-mysql"');
-    expect(terraformApp).toContain(
-      'DATABASE_SECRET_ARN = module.aurora.secret_arn',
-    );
-    expect(terraformApp).not.toContain(
-      'HOSTNAME = module.aurora.cluster_endpoint',
-    );
-    expect(terraformApp).toContain(
-      'referenced_security_group_id = module.aurora.database_security_group_id',
-    );
-    expect(terraformApp).not.toContain(
-      'referenced_security_group_id = module.aurora.security_group_id',
-    );
-
-    expect({
-      'aurora.tf': terraformCore,
-      'db.tf': terraformApp,
-    }).toMatchSnapshot();
+    expect(
+      tree.read(
+        'packages/common/terraform/src/core/rdb/aurora/aurora.tf',
+        'utf-8',
+      ),
+    ).toMatchSnapshot();
+    expect(
+      tree.read('packages/common/terraform/src/app/dbs/db/db.tf', 'utf-8'),
+    ).toMatchSnapshot();
   });
 });

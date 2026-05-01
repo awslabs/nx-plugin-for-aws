@@ -165,21 +165,14 @@ export const tsRdbGenerator = async (
       },
     },
   };
-  const containerPort = options.engine === 'MySQL' ? 3306 : 5432;
-  const dockerImage = options.engine === 'MySQL' ? 'mysql' : 'postgres';
-  const dockerDataDir =
-    options.engine === 'MySQL' ? '/var/lib/mysql' : '/var/lib/postgresql';
-  const dockerEnvArgs =
-    options.engine === 'MySQL'
-      ? `-e MYSQL_DATABASE=${databaseName} -e MYSQL_USER=${localDbUser} -e MYSQL_PASSWORD=${localDbPassword} -e MYSQL_ROOT_PASSWORD=${localDbPassword}`
-      : `-e POSTGRES_DB=${databaseName} -e POSTGRES_USER=${localDbUser} -e POSTGRES_PASSWORD=${localDbPassword}`;
   const containerName = `${getNpmScope(tree)}-${databaseName}`;
   projectConfig.targets['serve-local'] = {
     executor: 'nx:run-commands',
     options: {
-      command: `docker stop ${containerName} 2>/dev/null; docker run --rm -d --name ${containerName} -p ${localDbPort}:${containerPort} -v ${containerName}-data:${dockerDataDir} ${dockerEnvArgs} ${dockerImage}`,
+      command: `tsx scripts/local-db.ts ${containerName} ${localDbPort} ${databaseName} ${localDbUser} ${localDbPassword}`,
       cwd: '{projectRoot}',
     },
+    continuous: true,
   };
   const migrationBundleDir = joinPathFragments(
     'dist',
@@ -235,6 +228,7 @@ export const tsRdbGenerator = async (
     ]),
     withVersions([
       'prisma',
+      '@docker/node-sdk',
       '@types/aws-lambda',
       ...(options.engine === 'MySQL'
         ? ([] as const)

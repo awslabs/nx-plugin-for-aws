@@ -51,6 +51,7 @@ export const TS_VERSIONS = {
   '@trpc/tanstack-react-query': '11.17.0',
   '@trpc/client': '11.17.0',
   '@trpc/server': '11.17.0',
+  '@docker/node-sdk': '0.0.17',
   '@types/node': '25.6.0',
   '@types/aws-lambda': '8.10.161',
   '@types/cors': '2.8.19',

@@ -22,6 +22,78 @@ datasource db {
 "
 `;
 
+exports[`ts#rdb generator > should add mysql prisma dependencies when engine is MySQL > packages/db/scripts/local-db.ts 1`] = `
+"import { DockerClient, NotFoundError } from '@docker/node-sdk';
+
+const [containerName, hostPort, dbName, dbUser, dbPassword] =
+  process.argv.slice(2);
+
+if (!containerName || !hostPort || !dbName || !dbUser || !dbPassword) {
+  console.error(
+    'Usage: local-db.ts <containerName> <hostPort> <dbName> <dbUser> <dbPassword>',
+  );
+  process.exit(1);
+}
+
+const docker = await DockerClient.fromDockerConfig();
+
+try {
+  await docker.containerStop(containerName);
+  await docker.containerDelete(containerName);
+} catch (e) {
+  if (!(e instanceof NotFoundError)) throw e;
+}
+
+const { Id: id } = await docker.containerCreate(
+  {
+    Image: 'mysql',
+    Env: [
+      \`MYSQL_DATABASE=\${dbName}\`,
+      \`MYSQL_USER=\${dbUser}\`,
+      \`MYSQL_PASSWORD=\${dbPassword}\`,
+      \`MYSQL_ROOT_PASSWORD=\${dbPassword}\`,
+    ],
+    ExposedPorts: { '3306/tcp': {} },
+    HostConfig: {
+      AutoRemove: true,
+      PortBindings: { '3306/tcp': [{ HostPort: hostPort }] },
+      Binds: [\`\${containerName}-data:/var/lib/mysql\`],
+    },
+  },
+  { name: containerName },
+);
+
+await docker.containerStart(id);
+void docker
+  .containerLogs(id, process.stdout, process.stderr, {
+    follow: true,
+    stdout: true,
+    stderr: true,
+  })
+  .catch(console.error);
+
+let exiting = false;
+
+async function cleanup() {
+  if (exiting) return;
+  exiting = true;
+  try {
+    await docker.containerStop(containerName);
+  } catch (e) {
+    if (!(e instanceof NotFoundError)) console.error(e);
+  }
+  process.exit(0);
+}
+
+process.on('SIGTERM', () => void cleanup());
+process.on('SIGINT', () => void cleanup());
+process.on('SIGHUP', () => void cleanup());
+
+const { StatusCode } = await docker.containerWait(id);
+if (!exiting) process.exit(StatusCode);
+"
+`;
+
 exports[`ts#rdb generator > should add mysql prisma dependencies when engine is MySQL > packages/db/src/constants.ts 1`] = `
 "export const DB_PACKAGE_NAME = 'Db';
 
@@ -689,8 +761,7 @@ export default defineConfig({
 `;
 
 exports[`ts#rdb generator > should generate terraform modules when iacProvider is Terraform 1`] = `
-{
-  "aurora.tf": "# Core Aurora module
+"# Core Aurora module
 # This module creates an Aurora cluster and a generated admin secret.
 
 terraform {
@@ -1353,8 +1424,11 @@ output "admin_user" {
   description = "Admin username stored in the generated secret."
   value       = jsondecode(aws_secretsmanager_secret_version.credentials.secret_string).username
 }
-",
-  "db.tf": "terraform {
+"
+`;
+
+exports[`ts#rdb generator > should generate terraform modules when iacProvider is Terraform 2`] = `
+"terraform {
   required_version = ">= 1.0"
 
   required_providers {
@@ -2008,13 +2082,11 @@ output "appconfig_application_id" {
   description = "AppConfig Application ID for runtime config."
   value       = module.appconfig.application_id
 }
-",
-}
+"
 `;
 
 exports[`ts#rdb generator > should generate terraform modules with MySQL engine 1`] = `
-{
-  "aurora.tf": "# Core Aurora module
+"# Core Aurora module
 # This module creates an Aurora cluster and a generated admin secret.
 
 terraform {
@@ -2677,8 +2749,11 @@ output "admin_user" {
   description = "Admin username stored in the generated secret."
   value       = jsondecode(aws_secretsmanager_secret_version.credentials.secret_string).username
 }
-",
-  "db.tf": "terraform {
+"
+`;
+
+exports[`ts#rdb generator > should generate terraform modules with MySQL engine 2`] = `
+"terraform {
   required_version = ">= 1.0"
 
   required_providers {
@@ -3333,8 +3408,7 @@ output "appconfig_application_id" {
   description = "AppConfig Application ID for runtime config."
   value       = module.appconfig.application_id
 }
-",
-}
+"
 `;
 
 exports[`ts#rdb generator > should generate the aurora shared construct > packages/db/prisma/models/example.prisma 1`] = `
@@ -3356,6 +3430,77 @@ datasource db {
   provider = "postgresql"
 }
 
+"
+`;
+
+exports[`ts#rdb generator > should generate the aurora shared construct > packages/db/scripts/local-db.ts 1`] = `
+"import { DockerClient, NotFoundError } from '@docker/node-sdk';
+
+const [containerName, hostPort, dbName, dbUser, dbPassword] =
+  process.argv.slice(2);
+
+if (!containerName || !hostPort || !dbName || !dbUser || !dbPassword) {
+  console.error(
+    'Usage: local-db.ts <containerName> <hostPort> <dbName> <dbUser> <dbPassword>',
+  );
+  process.exit(1);
+}
+
+const docker = await DockerClient.fromDockerConfig();
+
+try {
+  await docker.containerStop(containerName);
+  await docker.containerDelete(containerName);
+} catch (e) {
+  if (!(e instanceof NotFoundError)) throw e;
+}
+
+const { Id: id } = await docker.containerCreate(
+  {
+    Image: 'postgres',
+    Env: [
+      \`POSTGRES_DB=\${dbName}\`,
+      \`POSTGRES_USER=\${dbUser}\`,
+      \`POSTGRES_PASSWORD=\${dbPassword}\`,
+    ],
+    ExposedPorts: { '5432/tcp': {} },
+    HostConfig: {
+      AutoRemove: true,
+      PortBindings: { '5432/tcp': [{ HostPort: hostPort }] },
+      Binds: [\`\${containerName}-data:/var/lib/postgresql\`],
+    },
+  },
+  { name: containerName },
+);
+
+await docker.containerStart(id);
+void docker
+  .containerLogs(id, process.stdout, process.stderr, {
+    follow: true,
+    stdout: true,
+    stderr: true,
+  })
+  .catch(console.error);
+
+let exiting = false;
+
+async function cleanup() {
+  if (exiting) return;
+  exiting = true;
+  try {
+    await docker.containerStop(containerName);
+  } catch (e) {
+    if (!(e instanceof NotFoundError)) console.error(e);
+  }
+  process.exit(0);
+}
+
+process.on('SIGTERM', () => void cleanup());
+process.on('SIGINT', () => void cleanup());
+process.on('SIGHUP', () => void cleanup());
+
+const { StatusCode } = await docker.containerWait(id);
+if (!exiting) process.exit(StatusCode);
 "
 `;
 
