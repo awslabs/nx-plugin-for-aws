@@ -7,7 +7,7 @@ import { buildCreateNxWorkspaceCommand, runCLI, tmpProjPath } from '../utils';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { ensureDirSync } from 'fs-extra';
 import { join } from 'path';
-import { beforeEach, describe, it } from 'vitest';
+import { afterEach, beforeEach, describe, it } from 'vitest';
 
 export const runSmokeTest = async (
   dir: string,
@@ -261,22 +261,49 @@ export const runSmokeTest = async (
   return { opts };
 };
 
+export interface SmokeTestOptions {
+  /**
+   * Label used in the describe block (defaults to `pkgMgr`). Allows separate
+   * variants of the same package manager — e.g. "yarn" for classic and
+   * "yarn-4" for berry — to be targeted individually from the CI matrix.
+   */
+  variant?: string;
+  /**
+   * Optional per-variant setup. Runs inside `beforeEach` so each test gets a
+   * clean environment (e.g. activating yarn 4 via corepack). Returning a
+   * teardown function registers it for `afterEach`.
+   */
+  setup?: () => void | (() => void);
+  onProjectCreate?: (projectRoot: string) => void;
+}
+
 export const smokeTest = (
   pkgMgr: PackageManager,
-  onProjectCreate?: (projectRoot: string) => void,
+  options: SmokeTestOptions = {},
 ) => {
-  describe(`smoke test - ${pkgMgr}`, () => {
+  const variant = options.variant ?? pkgMgr;
+  describe(`smoke test - ${variant}`, () => {
+    let teardown: (() => void) | void;
     beforeEach(() => {
-      const targetDir = `${tmpProjPath()}/${pkgMgr}`;
+      teardown = options.setup?.();
+      const targetDir = `${tmpProjPath()}/${variant}`;
       console.log(`Cleaning target directory ${targetDir}`);
       if (existsSync(targetDir)) {
         rmSync(targetDir, { force: true, recursive: true });
       }
       ensureDirSync(targetDir);
     });
+    afterEach(() => {
+      teardown?.();
+      teardown = undefined;
+    });
 
-    it(`Should generate and build - ${pkgMgr}`, async () => {
-      await runSmokeTest(`${tmpProjPath()}/${pkgMgr}`, pkgMgr, onProjectCreate);
+    it(`Should generate and build - ${variant}`, async () => {
+      await runSmokeTest(
+        `${tmpProjPath()}/${variant}`,
+        pkgMgr,
+        options.onProjectCreate,
+      );
     });
   });
 };
