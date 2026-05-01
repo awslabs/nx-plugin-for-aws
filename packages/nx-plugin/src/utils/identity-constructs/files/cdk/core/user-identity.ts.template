@@ -2,14 +2,7 @@ import {
   IdentityPool,
   UserPoolAuthenticationProvider,
 } from 'aws-cdk-lib/aws-cognito-identitypool';
-import {
-  CfnOutput,
-  Duration,
-  Lazy,
-  Names,
-  RemovalPolicy,
-  Stack,
-} from 'aws-cdk-lib';
+import { CfnOutput, CfnResource, Duration, Lazy, Names, Stack } from 'aws-cdk-lib';
 import {
   AccountRecovery,
   CfnManagedLoginBranding,
@@ -88,7 +81,7 @@ export class UserIdentity extends Construct {
 
   private createUserPool = () => {
     const { smsRole, smsRoleExternalId } = this.createSmsRole();
-    return new UserPool(this, 'UserPool', {
+    const userPool = new UserPool(this, 'UserPool', {
       deletionProtection: true,
       smsRole,
       smsRoleExternalId,
@@ -122,21 +115,11 @@ export class UserIdentity extends Construct {
         phone: true,
       },
     });
+    this.syncSmsRoleRemovalPolicyWithUserPool(smsRole, userPool);
+    return userPool;
   };
 
-  /**
-   * Creates an IAM role that Cognito assumes when sending SMS messages.
-   *
-   * The trust policy includes aws:SourceAccount and aws:SourceArn conditions in
-   * addition to sts:ExternalId, as required by Cognito's role validation. Without
-   * all three conditions, any subsequent UpdateUserPool call (including
-   * deactivating deletion protection) fails with
-   * InvalidSmsRoleTrustRelationshipException.
-   *
-   * The role is retained on stack deletion so that a user pool left behind by
-   * deletion protection can still be updated and deleted via the AWS CLI or
-   * console without the role having already been destroyed.
-   */
+  // Custom SMS role supplied so the trust policy meets Cognito's requirements: https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-sms-settings.html#user-pool-sms-settings-trust-policy
   private createSmsRole = () => {
     const smsRoleExternalId = Names.uniqueId(this);
     const smsRole = new Role(this, 'SmsRole', {
@@ -162,8 +145,18 @@ export class UserIdentity extends Construct {
         }),
       },
     });
-    smsRole.applyRemovalPolicy(RemovalPolicy.RETAIN);
     return { smsRole, smsRoleExternalId };
+  };
+
+  private syncSmsRoleRemovalPolicyWithUserPool = (
+    smsRole: Role,
+    userPool: UserPool,
+  ) => {
+    const poolCfn = userPool.node.defaultChild as CfnResource;
+    const roleCfn = smsRole.node.defaultChild as CfnResource;
+    // Mirror the user pool's removal policy so the SMS role isn't orphaned when the pool is retained
+    roleCfn.cfnOptions.deletionPolicy = poolCfn.cfnOptions.deletionPolicy;
+    roleCfn.cfnOptions.updateReplacePolicy = poolCfn.cfnOptions.updateReplacePolicy;
   };
 
   private createUserPoolDomain = (userPool: UserPool) =>
