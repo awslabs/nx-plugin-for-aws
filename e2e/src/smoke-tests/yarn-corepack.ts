@@ -19,6 +19,7 @@ const PATH_SEP = process.platform === 'win32' ? ';' : ':';
  */
 export const activateYarnViaCorepack = (version: string): (() => void) => {
   const originalPath = process.env.PATH ?? '';
+  const originalHardenedMode = process.env.YARN_ENABLE_HARDENED_MODE;
   const shimDir = join(
     tmpdir(),
     'nx-plugin-for-aws',
@@ -32,7 +33,18 @@ export const activateYarnViaCorepack = (version: string): (() => void) => {
     stdio: 'inherit',
   });
   process.env.PATH = `${shimDir}${PATH_SEP}${originalPath}`;
+  // Yarn berry auto-enables hardened mode on public PR CI runs, which refuses
+  // any install that would modify the lockfile. Our smoke test scaffolds a
+  // fresh workspace whose initial yarn.lock is empty, so every dependency
+  // resolution is a "modification" — disable hardened mode for the duration
+  // of the test.
+  process.env.YARN_ENABLE_HARDENED_MODE = '0';
   return () => {
     process.env.PATH = originalPath;
+    if (originalHardenedMode === undefined) {
+      delete process.env.YARN_ENABLE_HARDENED_MODE;
+    } else {
+      process.env.YARN_ENABLE_HARDENED_MODE = originalHardenedMode;
+    }
   };
 };
