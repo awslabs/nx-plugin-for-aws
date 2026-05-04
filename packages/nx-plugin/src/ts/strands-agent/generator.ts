@@ -228,10 +228,14 @@ export const tsStrandsAgentGenerator = async (
     );
   }
 
+  const chatUrl =
+    protocol === 'HTTP'
+      ? `ws://localhost:${localDevPort}/ws`
+      : `http://localhost:${localDevPort}`;
   const chatCommand =
     protocol === 'HTTP'
       ? `tsx ./scripts/${agentTargetPrefix}/chat.ts`
-      : `agent-chat-cli a2a http://localhost:${localDevPort}`;
+      : `agent-chat-cli a2a ${chatUrl}`;
 
   updateProjectConfiguration(tree, project.name, {
     ...project,
@@ -266,7 +270,7 @@ export const tsStrandsAgentGenerator = async (
           commands: [chatCommand],
           cwd: '{projectRoot}',
           env: {
-            PORT: `${localDevPort}`,
+            URL: chatUrl,
           },
         },
         dependsOn: [`${agentTargetPrefix}-serve-local`],

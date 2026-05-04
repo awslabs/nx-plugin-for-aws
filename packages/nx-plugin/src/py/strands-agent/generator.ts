@@ -278,12 +278,16 @@ export const pyStrandsAgentGenerator = async (
     ]),
   );
 
+  const chatUrl =
+    protocol === 'AG-UI'
+      ? `http://localhost:${localDevPort}/invocations`
+      : `http://localhost:${localDevPort}`;
   const chatCommand =
     protocol === 'HTTP'
       ? `tsx ./scripts/${agentTargetPrefix}/chat.ts`
       : protocol === 'AG-UI'
-        ? `agent-chat-cli agui http://localhost:${localDevPort}/invocations`
-        : `agent-chat-cli a2a http://localhost:${localDevPort}`;
+        ? `agent-chat-cli agui ${chatUrl}`
+        : `agent-chat-cli a2a ${chatUrl}`;
 
   const httpOnlyTargets =
     protocol === 'HTTP'
@@ -353,7 +357,7 @@ export const pyStrandsAgentGenerator = async (
           commands: [chatCommand],
           cwd: '{projectRoot}',
           env: {
-            PORT: `${localDevPort}`,
+            URL: chatUrl,
           },
         },
         dependsOn: [
