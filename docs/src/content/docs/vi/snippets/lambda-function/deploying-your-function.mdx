@@ -56,11 +56,19 @@ export class ExampleStack extends Stack {
 ```
 </Fragment>
 <Fragment slot="terraform">
-Generator này tạo ra một Terraform module để triển khai function của bạn trong thư mục `common/terraform`. Bạn có thể sử dụng nó trong cấu hình Terraform:
+Generator này tạo ra một Terraform module để triển khai function của bạn trong thư mục `common/terraform`. Bạn có thể sử dụng nó trong cấu hình Terraform.
 
-```hcl {2}
+Function module lưu trữ deployment zip của nó trong một S3 asset bucket được chia sẻ thay vì tải lên trực tiếp qua Lambda API (có giới hạn request 70 MB). Khởi tạo module `core/asset-bucket` một lần cho mỗi deployment và truyền output `bucket_name` của nó vào mọi lambda / API module thông qua input `asset_bucket_name`:
+
+```hcl {1-3, 7}
+module "asset_bucket" {
+  source = "../../common/terraform/src/core/asset-bucket"
+}
+
 module "my_project_my_function" {
   source = "../../common/terraform/src/app/lambda-functions/my-project-my-function"
+
+  asset_bucket_name = module.asset_bucket.bucket_name
 
   # Environment variables for the Lambda function
   env = {
@@ -73,6 +81,8 @@ module "my_project_my_function" {
   ]
 }
 ```
+
+Module `core/asset-bucket` cung cấp một S3 bucket với mã hóa do S3 quản lý (AES256), versioning, bucket policy chỉ cho phép TLS, public-access block, và S3 access logging được bật (các log được gửi đến một access-logs bucket kế bên). Sử dụng lại cùng một instance module trên mọi Lambda / API module trong deployment của bạn — mỗi caller ghi dưới một key prefix có phạm vi module nên không có xung đột.
 
 Điều này thiết lập:
 

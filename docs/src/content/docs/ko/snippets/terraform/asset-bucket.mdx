@@ -1,0 +1,32 @@
+---
+title: Asset Bucket
+---
+
+Lambda 기반 리소스(API 핸들러 및 독립 실행형 Lambda 함수)를 위해 생성된 Terraform 모듈은 Lambda API를 통해 인라인으로 업로드하는 대신 공유 S3 asset 버킷에 배포 zip을 스테이징합니다. 인라인 업로드 경로는 70 MB(base64 인코딩) 요청 제한이 있으며, 더 큰 종속성을 포함하는 번들(예: FastAPI + Strands Agents + MCP)에서 이 제한을 초과할 수 있습니다.
+
+배포당 한 번 `core/asset-bucket` 모듈을 인스턴스화하고 `asset_bucket_name` 입력을 허용하는 모든 모듈에 해당 `bucket_name` 출력을 전달하세요:
+
+```hcl
+module "asset_bucket" {
+  source = "../../common/terraform/src/core/asset-bucket"
+}
+
+module "my_project_my_function" {
+  source = "../../common/terraform/src/app/lambda-functions/my-project-my-function"
+
+  asset_bucket_name = module.asset_bucket.bucket_name
+}
+
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  asset_bucket_name = module.asset_bucket.bucket_name
+}
+```
+
+`core/asset-bucket` 모듈은 다음을 프로비저닝합니다:
+
+- S3 관리형(AES256) 암호화, 버전 관리, TLS 전용 버킷 정책 및 퍼블릭 액세스 차단이 적용된 S3 버킷.
+- 형제 액세스 로그 버킷(S3 액세스 로그는 `s3-access-logs/` 접두사 아래의 이 버킷으로 전달됩니다).
+
+배포의 모든 Lambda / API 모듈에서 동일한 인스턴스를 재사용하세요 — 각 호출자는 모듈 범위의 키 접두사 아래에 작성하므로 충돌이 발생하지 않습니다.

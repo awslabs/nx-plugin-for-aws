@@ -1,0 +1,32 @@
+---
+title: Asset Bucket
+---
+
+Os módulos Terraform gerados para recursos baseados em Lambda (manipuladores de API e funções Lambda autônomas) armazenam seu zip de implantação em um bucket S3 de ativos compartilhado, em vez de fazer o upload inline através da API do Lambda. O caminho de upload inline tem um limite de solicitação de 70 MB (codificado em base64), que pode ser excedido por pacotes que incluem dependências maiores (por exemplo, FastAPI + Strands Agents + MCP).
+
+Instancie o módulo `core/asset-bucket` uma vez por implantação e passe sua saída `bucket_name` para cada módulo que aceita uma entrada `asset_bucket_name`:
+
+```hcl
+module "asset_bucket" {
+  source = "../../common/terraform/src/core/asset-bucket"
+}
+
+module "my_project_my_function" {
+  source = "../../common/terraform/src/app/lambda-functions/my-project-my-function"
+
+  asset_bucket_name = module.asset_bucket.bucket_name
+}
+
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  asset_bucket_name = module.asset_bucket.bucket_name
+}
+```
+
+O módulo `core/asset-bucket` provisiona:
+
+- Um bucket S3 com criptografia gerenciada pelo S3 (AES256), versionamento, uma política de bucket somente TLS e bloqueio de acesso público.
+- Um bucket irmão de logs de acesso (os logs de acesso do S3 são entregues a este bucket sob o prefixo `s3-access-logs/`).
+
+Reutilize a mesma instância em todos os módulos Lambda / API em sua implantação — cada chamador escreve sob um prefixo de chave com escopo de módulo, portanto não há colisões.

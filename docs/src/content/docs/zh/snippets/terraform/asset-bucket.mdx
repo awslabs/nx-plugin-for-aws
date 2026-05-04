@@ -1,0 +1,32 @@
+---
+title: 资产存储桶
+---
+
+为 Lambda 支持的资源（API 处理程序和独立 Lambda 函数）生成的 Terraform 模块会将其部署 zip 文件暂存在共享的 S3 资产存储桶中，而不是通过 Lambda API 内联上传。内联上传路径有 70 MB（base64 编码）的请求限制，当捆绑包引入较大的依赖项（例如 FastAPI + Strands Agents + MCP）时可能会超过此限制。
+
+每次部署实例化一次 `core/asset-bucket` 模块，并将其 `bucket_name` 输出传递给每个接受 `asset_bucket_name` 输入的模块：
+
+```hcl
+module "asset_bucket" {
+  source = "../../common/terraform/src/core/asset-bucket"
+}
+
+module "my_project_my_function" {
+  source = "../../common/terraform/src/app/lambda-functions/my-project-my-function"
+
+  asset_bucket_name = module.asset_bucket.bucket_name
+}
+
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  asset_bucket_name = module.asset_bucket.bucket_name
+}
+```
+
+`core/asset-bucket` 模块提供：
+
+- 一个带有 S3 管理的（AES256）加密、版本控制、仅 TLS 存储桶策略和公共访问阻止的 S3 存储桶。
+- 一个同级访问日志存储桶（S3 访问日志会传送到此存储桶的 `s3-access-logs/` 前缀下）。
+
+在部署中的每个 Lambda / API 模块中重用同一个实例——每个调用者在模块范围的键前缀下写入，因此不会发生冲突。

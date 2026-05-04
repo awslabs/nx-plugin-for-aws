@@ -58,11 +58,19 @@ export class ExampleStack extends Stack {
 ```
 </Fragment>
 <Fragment slot="terraform">
-이 생성기는 `common/terraform` 폴더에 함수 배포를 위한 Terraform 모듈을 생성합니다. Terraform 구성에서 다음과 같이 사용할 수 있습니다:
+이 생성기는 `common/terraform` 폴더에 함수 배포를 위한 Terraform 모듈을 생성합니다. Terraform 구성에서 사용할 수 있습니다.
 
-```hcl {2}
+함수 모듈은 Lambda API를 통한 인라인 업로드(70 MB 요청 제한이 있음) 대신 공유 S3 자산 버킷에 배포 zip을 스테이징합니다. 배포당 한 번 `core/asset-bucket` 모듈을 인스턴스화하고 `asset_bucket_name` 입력을 통해 모든 람다 / API 모듈에 `bucket_name` 출력을 전달하세요:
+
+```hcl {1-3, 7}
+module "asset_bucket" {
+  source = "../../common/terraform/src/core/asset-bucket"
+}
+
 module "my_project_my_function" {
   source = "../../common/terraform/src/app/lambda-functions/my-project-my-function"
+
+  asset_bucket_name = module.asset_bucket.bucket_name
 
   # Lambda 함수용 환경 변수
   env = {
@@ -75,6 +83,8 @@ module "my_project_my_function" {
   ]
 }
 ```
+
+`core/asset-bucket` 모듈은 S3 관리형(AES256) 암호화, 버전 관리, TLS 전용 버킷 정책, 퍼블릭 액세스 차단, S3 액세스 로깅이 활성화된 S3 버킷을 프로비저닝합니다(로그는 형제 액세스 로그 버킷으로 전달됩니다). 배포의 모든 Lambda / API 모듈에서 동일한 모듈 인스턴스를 재사용하세요 — 각 호출자는 모듈 범위 키 접두사 아래에 작성하므로 충돌이 없습니다.
 
 다음 리소스가 설정됩니다:
 

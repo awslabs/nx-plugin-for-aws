@@ -274,11 +274,19 @@ export class ExampleStack extends Stack {
 </OptionFilter>
 </Fragment>
 <Fragment slot="terraform">
-`common/terraform` 폴더에 API 배포를 위한 Terraform 모듈이 있습니다. Terraform 구성에서 사용할 수 있습니다:
+`common/terraform` 폴더에 API 배포를 위한 Terraform 모듈이 있습니다. Terraform 구성에서 사용할 수 있습니다.
 
-```hcl {2}
+API 모듈은 공유 S3 자산 버킷에 Lambda 배포 zip을 스테이징합니다 — 자세한 내용은 <Link path="/guides/terraform-project">Terraform 인프라 가이드</Link>를 참조하세요. 배포당 한 번 `core/asset-bucket` 모듈을 인스턴스화하고 `bucket_name` 출력을 `asset_bucket_name` 입력을 통해 모든 API / Lambda 모듈에 전달하세요:
+
+```hcl {1-3, 8}
+module "asset_bucket" {
+  source = "../../common/terraform/src/core/asset-bucket"
+}
+
 module "my_api" {
   source = "../../common/terraform/src/app/apis/my-api"
+
+  asset_bucket_name = module.asset_bucket.bucket_name
 
   # Lambda 함수를 위한 환경 변수
   env = {
@@ -310,9 +318,11 @@ module "my_api" {
 :::note[Cognito 인증]
 `Cognito` 인증을 선택한 경우 Cognito 구성을 제공해야 합니다:
 
-```hcl {4-5}
+```hcl {3, 5-6}
 module "my_api" {
   source = "../../common/terraform/src/app/apis/my-api"
+
+  asset_bucket_name    = module.asset_bucket.bucket_name
 
   user_pool_id         = local.user_pool_id
   user_pool_client_ids = [local.client_id]
@@ -354,6 +364,8 @@ output "lambda_execution_role_arn" {
 ```hcl
 module "my_api" {
   source = "../../common/terraform/src/app/apis/my-api"
+
+  asset_bucket_name = module.asset_bucket.bucket_name
 
   # 커스텀 CORS 구성
   cors_allow_origins = ["https://myapp.com", "https://staging.myapp.com"]

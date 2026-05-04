@@ -1,0 +1,32 @@
+---
+title: Asset Bucket
+---
+
+Các module Terraform được tạo ra cho các tài nguyên Lambda-backed (API handlers và các hàm Lambda độc lập) lưu trữ file zip triển khai của chúng trong một S3 asset bucket được chia sẻ thay vì tải lên trực tiếp thông qua Lambda API. Đường dẫn tải lên trực tiếp có giới hạn yêu cầu 70 MB (mã hóa base64), có thể bị vượt quá bởi các bundle kéo theo các dependency lớn hơn (ví dụ: FastAPI + Strands Agents + MCP).
+
+Khởi tạo module `core/asset-bucket` một lần cho mỗi lần triển khai và truyền output `bucket_name` của nó vào mọi module chấp nhận input `asset_bucket_name`:
+
+```hcl
+module "asset_bucket" {
+  source = "../../common/terraform/src/core/asset-bucket"
+}
+
+module "my_project_my_function" {
+  source = "../../common/terraform/src/app/lambda-functions/my-project-my-function"
+
+  asset_bucket_name = module.asset_bucket.bucket_name
+}
+
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  asset_bucket_name = module.asset_bucket.bucket_name
+}
+```
+
+Module `core/asset-bucket` cung cấp:
+
+- Một S3 bucket với mã hóa do S3 quản lý (AES256), versioning, bucket policy chỉ cho phép TLS và public-access block.
+- Một bucket access-logs đi kèm (S3 access logs được gửi đến bucket này dưới prefix `s3-access-logs/`).
+
+Tái sử dụng cùng một instance trên mọi module Lambda / API trong triển khai của bạn — mỗi caller ghi dưới một key prefix có phạm vi module nên không có xung đột.

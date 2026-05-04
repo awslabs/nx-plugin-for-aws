@@ -1,0 +1,32 @@
+---
+title: アセットバケット
+---
+
+Lambda ベースのリソース（API ハンドラーおよびスタンドアロン Lambda 関数）用に生成された Terraform モジュールは、Lambda API 経由でインラインアップロードするのではなく、共有 S3 アセットバケットにデプロイメント zip をステージングします。インラインアップロードパスには 70 MB（base64 エンコード）のリクエスト制限があり、大きな依存関係を含むバンドル（例：FastAPI + Strands Agents + MCP）によって超過する可能性があります。
+
+`core/asset-bucket` モジュールをデプロイメントごとに一度インスタンス化し、その `bucket_name` 出力を `asset_bucket_name` 入力を受け入れるすべてのモジュールに渡します：
+
+```hcl
+module "asset_bucket" {
+  source = "../../common/terraform/src/core/asset-bucket"
+}
+
+module "my_project_my_function" {
+  source = "../../common/terraform/src/app/lambda-functions/my-project-my-function"
+
+  asset_bucket_name = module.asset_bucket.bucket_name
+}
+
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  asset_bucket_name = module.asset_bucket.bucket_name
+}
+```
+
+`core/asset-bucket` モジュールは以下をプロビジョニングします：
+
+- S3 管理（AES256）暗号化、バージョニング、TLS のみのバケットポリシー、およびパブリックアクセスブロックを備えた S3 バケット。
+- 兄弟アクセスログバケット（S3 アクセスログは `s3-access-logs/` プレフィックスの下でこのバケットに配信されます）。
+
+デプロイメント内のすべての Lambda / API モジュールで同じインスタンスを再利用してください — 各呼び出し元はモジュールスコープのキープレフィックスの下に書き込むため、衝突は発生しません。

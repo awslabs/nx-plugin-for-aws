@@ -1,0 +1,32 @@
+---
+title: Bucket d'Assets
+---
+
+Les modules Terraform générés pour les ressources basées sur Lambda (gestionnaires d'API et fonctions Lambda autonomes) stockent leur zip de déploiement dans un bucket S3 d'assets partagé plutôt que de le télécharger en ligne via l'API Lambda. Le chemin de téléchargement en ligne a une limite de requête de 70 Mo (encodé en base64), qui peut être dépassée par des bundles qui intègrent des dépendances plus volumineuses (par exemple FastAPI + Strands Agents + MCP).
+
+Instanciez le module `core/asset-bucket` une fois par déploiement et transmettez sa sortie `bucket_name` à chaque module qui accepte une entrée `asset_bucket_name` :
+
+```hcl
+module "asset_bucket" {
+  source = "../../common/terraform/src/core/asset-bucket"
+}
+
+module "my_project_my_function" {
+  source = "../../common/terraform/src/app/lambda-functions/my-project-my-function"
+
+  asset_bucket_name = module.asset_bucket.bucket_name
+}
+
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  asset_bucket_name = module.asset_bucket.bucket_name
+}
+```
+
+Le module `core/asset-bucket` provisionne :
+
+- Un bucket S3 avec chiffrement géré par S3 (AES256), versioning, une politique de bucket TLS uniquement et un blocage d'accès public.
+- Un bucket de journaux d'accès associé (les journaux d'accès S3 sont livrés à ce bucket sous le préfixe `s3-access-logs/`).
+
+Réutilisez la même instance dans tous les modules Lambda / API de votre déploiement — chaque appelant écrit sous un préfixe de clé limité au module, il n'y a donc aucune collision.

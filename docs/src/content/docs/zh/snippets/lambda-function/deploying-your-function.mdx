@@ -58,11 +58,19 @@ export class ExampleStack extends Stack {
 ```
 </Fragment>
 <Fragment slot="terraform">
-该生成器会在 `common/terraform` 目录下创建用于部署函数的 Terraform 模块。您可以在 Terraform 配置中使用：
+该生成器会在 `common/terraform` 目录下创建用于部署函数的 Terraform 模块。您可以在 Terraform 配置中使用。
 
-```hcl {2}
+函数模块将其部署 zip 文件暂存在共享的 S3 资产存储桶中，而不是通过 Lambda API 内联上传（该 API 有 70 MB 的请求限制）。每次部署实例化一次 `core/asset-bucket` 模块，并通过 `asset_bucket_name` 输入将其 `bucket_name` 输出传递给每个 lambda / API 模块：
+
+```hcl {1-3, 7}
+module "asset_bucket" {
+  source = "../../common/terraform/src/core/asset-bucket"
+}
+
 module "my_project_my_function" {
   source = "../../common/terraform/src/app/lambda-functions/my-project-my-function"
+
+  asset_bucket_name = module.asset_bucket.bucket_name
 
   # Lambda 函数的环境变量
   env = {
@@ -75,6 +83,8 @@ module "my_project_my_function" {
   ]
 }
 ```
+
+`core/asset-bucket` 模块提供一个 S3 存储桶，具有 S3 托管（AES256）加密、版本控制、仅 TLS 存储桶策略、公共访问阻止以及启用 S3 访问日志记录（日志传送到同级访问日志存储桶）。在部署中的每个 Lambda / API 模块中重用同一模块实例——每个调用者在模块范围的键前缀下写入，因此不会发生冲突。
 
 这会配置：
 

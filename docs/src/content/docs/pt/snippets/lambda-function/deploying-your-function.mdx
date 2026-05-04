@@ -58,11 +58,19 @@ export class ExampleStack extends Stack {
 ```
 </Fragment>
 <Fragment slot="terraform">
-Este gerador cria um módulo Terraform para implantar sua função na pasta `common/terraform`. Você pode usar isso em uma configuração Terraform:
+Este gerador cria um módulo Terraform para implantar sua função na pasta `common/terraform`. Você pode usar isso em uma configuração Terraform.
 
-```hcl {2}
+O módulo de função prepara seu zip de implantação em um bucket S3 de ativos compartilhado em vez de fazer upload inline via a API do Lambda (que tem um limite de requisição de 70 MB). Instancie o módulo `core/asset-bucket` uma vez por implantação e passe sua saída `bucket_name` para cada módulo lambda / API via a entrada `asset_bucket_name`:
+
+```hcl {1-3, 7}
+module "asset_bucket" {
+  source = "../../common/terraform/src/core/asset-bucket"
+}
+
 module "my_project_my_function" {
   source = "../../common/terraform/src/app/lambda-functions/my-project-my-function"
+
+  asset_bucket_name = module.asset_bucket.bucket_name
 
   # Variáveis de ambiente para a função Lambda
   env = {
@@ -75,6 +83,8 @@ module "my_project_my_function" {
   ]
 }
 ```
+
+O módulo `core/asset-bucket` provisiona um bucket S3 com criptografia gerenciada pelo S3 (AES256), versionamento, uma política de bucket somente TLS, bloqueio de acesso público e registro de acesso S3 habilitado (os logs são entregues a um bucket de logs de acesso irmão). Reutilize a mesma instância do módulo em todos os módulos Lambda / API em sua implantação — cada chamador escreve sob um prefixo de chave com escopo de módulo, portanto não há colisões.
 
 Isso configura:
 
