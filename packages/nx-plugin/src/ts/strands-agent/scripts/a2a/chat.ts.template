@@ -1,0 +1,94 @@
+/**
+ * Minimal chat CLI for <%- agentNameClassName %> (A2A protocol).
+ *
+ * Connects to the locally-running agent on the port assigned by the generator.
+ * Override with `PORT` or `--port <port>`.
+ */
+import * as p from '@clack/prompts';
+import { ClientFactory } from '@a2a-js/sdk/client';
+
+const getCliArg = (name: string): string | undefined => {
+  const idx = process.argv.indexOf(`--${name}`);
+  return idx !== -1 && idx + 1 < process.argv.length
+    ? process.argv[idx + 1]
+    : undefined;
+};
+
+const port =
+  getCliArg('port') ?? process.env.PORT ?? '<%- localDevPort %>';
+const baseUrl = `http://localhost:${port}`;
+
+async function main() {
+  p.intro('<%- agentNameClassName %> Chat');
+
+  const s = p.spinner();
+  s.start('Connecting to agent...');
+
+  const factory = new ClientFactory();
+  let client: Awaited<ReturnType<typeof factory.createFromUrl>>;
+  let card: any;
+  try {
+    client = await factory.createFromUrl(baseUrl);
+    card = await client.getAgentCard();
+    s.stop(`Connected to ${card?.name ?? '<%- agentNameClassName %>'}`);
+  } catch (err: any) {
+    s.stop(`Failed to connect to ${baseUrl}: ${err?.message ?? String(err)}`);
+    p.outro('Is the agent running? Try `nx run <project>:<%- agentTargetPrefix %>-serve-local` in another terminal.');
+    process.exit(1);
+  }
+
+  if (card?.description) {
+    p.log.info(card.description);
+  }
+
+  while (true) {
+    const input = await p.text({
+      message: `You → ${card?.name ?? '<%- agentNameClassName %>'}`,
+      placeholder: 'Type a message... (Ctrl+C to exit)',
+    });
+
+    if (p.isCancel(input)) {
+      p.outro('Goodbye!');
+      process.exit(0);
+    }
+
+    const trimmed = (input as string).trim();
+    if (!trimmed) continue;
+
+    async function* streamTokens(): AsyncGenerator<string> {
+      const stream = client.sendMessageStream({
+        message: {
+          messageId: crypto.randomUUID(),
+          kind: 'message',
+          role: 'user',
+          parts: [{ kind: 'text', text: trimmed }],
+        },
+      });
+
+      for await (const event of stream) {
+        const anyEvent = event as any;
+        const parts =
+          anyEvent?.status?.message?.parts ??
+          anyEvent?.artifact?.parts ??
+          anyEvent?.message?.parts ??
+          [];
+        for (const part of parts) {
+          if (part.kind === 'text' && typeof part.text === 'string') {
+            yield part.text;
+          }
+        }
+      }
+    }
+
+    try {
+      await p.stream.message(streamTokens(), { symbol: '🤖' });
+    } catch (err: any) {
+      p.log.error(err?.message ?? String(err));
+    }
+  }
+}
+
+main().catch((err) => {
+  p.log.error(`Fatal: ${err?.message ?? String(err)}`);
+  process.exit(1);
+});

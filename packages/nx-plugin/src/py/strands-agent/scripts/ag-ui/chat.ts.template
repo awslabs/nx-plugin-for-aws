@@ -1,0 +1,94 @@
+/**
+ * Minimal chat CLI for <%- agentNameClassName %> (AG-UI protocol).
+ *
+ * Connects to the `/invocations` endpoint of the locally-running agent.
+ * Override the port with `PORT` or `--port <port>`.
+ */
+import { randomUUID } from 'node:crypto';
+import * as p from '@clack/prompts';
+import { HttpAgent } from '@ag-ui/client';
+
+const getCliArg = (name: string): string | undefined => {
+  const idx = process.argv.indexOf(`--${name}`);
+  return idx !== -1 && idx + 1 < process.argv.length
+    ? process.argv[idx + 1]
+    : undefined;
+};
+
+const port =
+  getCliArg('port') ?? process.env.PORT ?? '<%- localDevPort %>';
+const url = `http://localhost:${port}/invocations`;
+
+async function main() {
+  p.intro('<%- agentNameClassName %> Chat');
+
+  const agent = new HttpAgent({ url });
+
+  while (true) {
+    const input = await p.text({
+      message: 'You',
+      placeholder: 'Type a message... (Ctrl+C to exit)',
+    });
+
+    if (p.isCancel(input)) {
+      p.outro('Goodbye!');
+      process.exit(0);
+    }
+
+    const trimmed = (input as string).trim();
+    if (!trimmed) continue;
+
+    async function* streamTokens(): AsyncGenerator<string> {
+      const queue: Array<{ value?: string; done?: true; error?: unknown }> = [];
+      let resolveNext: (() => void) | undefined;
+      const wake = () => {
+        const r = resolveNext;
+        resolveNext = undefined;
+        r?.();
+      };
+
+      agent.addMessage({ id: randomUUID(), role: 'user', content: trimmed });
+      agent
+        .runAgent(
+          {},
+          {
+            onTextMessageContentEvent: ({ event }) => {
+              queue.push({ value: event.content });
+              wake();
+            },
+          },
+        )
+        .then(() => {
+          queue.push({ done: true });
+          wake();
+        })
+        .catch((error) => {
+          queue.push({ error });
+          wake();
+        });
+
+      while (true) {
+        if (queue.length === 0) {
+          await new Promise<void>((resolve) => {
+            resolveNext = resolve;
+          });
+        }
+        const next = queue.shift()!;
+        if (next.error) throw next.error;
+        if (next.done) return;
+        if (next.value !== undefined) yield next.value;
+      }
+    }
+
+    try {
+      await p.stream.message(streamTokens(), { symbol: '🤖' });
+    } catch (err: any) {
+      p.log.error(err?.message ?? String(err));
+    }
+  }
+}
+
+main().catch((err) => {
+  p.log.error(`Fatal: ${err?.message ?? String(err)}`);
+  process.exit(1);
+});

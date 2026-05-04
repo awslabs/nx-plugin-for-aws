@@ -956,4 +956,78 @@ describe('ts#strands-agent generator', () => {
       }),
     ).rejects.toThrow(/AG-UI protocol is not yet supported/);
   });
+
+  it('should generate HTTP chat CLI script and wire up the chat target', async () => {
+    await tsStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      computeType: 'None',
+      iacProvider: 'CDK',
+    });
+
+    const chatScriptPath = 'apps/test-project/scripts/agent/chat.ts';
+    expect(tree.exists(chatScriptPath)).toBeTruthy();
+
+    const chatScript = tree.read(chatScriptPath, 'utf-8');
+    expect(chatScript).toContain("from '@clack/prompts'");
+    expect(chatScript).toContain('client.invoke.subscribe');
+
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+    const chatTarget = projectConfig.targets['agent-chat'];
+    expect(chatTarget).toBeDefined();
+    expect(chatTarget.options.commands[0]).toBe('tsx ./scripts/agent/chat.ts');
+    expect(chatTarget.dependsOn).toEqual(['agent-serve-local']);
+
+    const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+    expect(rootPackageJson.devDependencies['@clack/prompts']).toBeDefined();
+  });
+
+  it('should generate A2A chat CLI script and wire up the chat target', async () => {
+    await tsStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      protocol: 'A2A',
+      computeType: 'None',
+      iacProvider: 'CDK',
+    });
+
+    const chatScriptPath = 'apps/test-project/scripts/agent/chat.ts';
+    expect(tree.exists(chatScriptPath)).toBeTruthy();
+
+    const chatScript = tree.read(chatScriptPath, 'utf-8');
+    expect(chatScript).toContain("from '@clack/prompts'");
+    expect(chatScript).toContain('@a2a-js/sdk/client');
+    expect(chatScript).toContain('sendMessageStream');
+
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+    const chatTarget = projectConfig.targets['agent-chat'];
+    expect(chatTarget).toBeDefined();
+    expect(chatTarget.dependsOn).toEqual(['agent-serve-local']);
+  });
+
+  it('should generate chat CLI with custom agent name', async () => {
+    await tsStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      name: 'my-custom-agent',
+      computeType: 'None',
+      iacProvider: 'CDK',
+    });
+
+    expect(
+      tree.exists('apps/test-project/scripts/my-custom-agent/chat.ts'),
+    ).toBeTruthy();
+
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+    expect(projectConfig.targets['my-custom-agent-chat']).toBeDefined();
+    expect(
+      projectConfig.targets['my-custom-agent-chat'].options.commands[0],
+    ).toBe('tsx ./scripts/my-custom-agent/chat.ts');
+    expect(projectConfig.targets['my-custom-agent-chat'].dependsOn).toEqual([
+      'my-custom-agent-serve-local',
+    ]);
+  });
 });

@@ -6,11 +6,13 @@ import {
   GeneratorCallback,
   OverwriteStrategy,
   Tree,
+  addDependenciesToPackageJson,
   generateFiles,
   installPackagesTask,
   joinPathFragments,
   updateProjectConfiguration,
 } from '@nx/devkit';
+import { withVersions } from '../../utils/versions';
 import { PyStrandsAgentGeneratorSchema } from './schema';
 import {
   NxGeneratorInfo,
@@ -214,6 +216,42 @@ export const pyStrandsAgentGenerator = async (
   // - AG-UI: create_strands_app() creates a FastAPI app in main.py
   const serveCommand = `uv run fastapi dev ${moduleName}/${agentNameSnakeCase}/main.py --port ${localDevPort}`;
 
+  // Emit the per-protocol interactive chat CLI under scripts/<agent>/chat.ts.
+  // The CLI is a TypeScript script (run via tsx) so Python agents get the
+  // same interactive terminal UX without Python-specific client plumbing.
+  const scriptsDir = joinPathFragments(
+    project.root,
+    'scripts',
+    agentTargetPrefix,
+  );
+  generateFiles(
+    tree,
+    joinPathFragments(__dirname, 'scripts', protocol.toLowerCase()),
+    scriptsDir,
+    {
+      agentNameClassName,
+      agentTargetPrefix,
+      localDevPort,
+    },
+    { overwriteStrategy: OverwriteStrategy.KeepExisting },
+  );
+
+  // Add TypeScript deps required by the chat CLI script. Protocol-specific
+  // client packages are added as regular dependencies (matching the
+  // convention used elsewhere in the plugin — eg. the ts#strands-agent
+  // generator adds @a2a-js/sdk and the agui react-connection adds
+  // @ag-ui/client as regular deps).
+  addDependenciesToPackageJson(
+    tree,
+    withVersions([
+      ...(protocol === 'A2A' ? (['@a2a-js/sdk'] as const) : ([] as const)),
+      ...(protocol === 'AG-UI'
+        ? (['@ag-ui/client', 'rxjs'] as const)
+        : ([] as const)),
+    ]),
+    withVersions(['tsx', '@types/node', '@clack/prompts']),
+  );
+
   updateProjectConfiguration(tree, project.name, {
     ...project,
     targets: {
@@ -240,6 +278,17 @@ export const pyStrandsAgentGenerator = async (
           },
         },
         continuous: true,
+      },
+      [`${agentTargetPrefix}-chat`]: {
+        executor: 'nx:run-commands',
+        options: {
+          commands: [`tsx ./scripts/${agentTargetPrefix}/chat.ts`],
+          cwd: '{projectRoot}',
+          env: {
+            PORT: `${localDevPort}`,
+          },
+        },
+        dependsOn: [`${agentTargetPrefix}-serve-local`],
       },
     },
   });

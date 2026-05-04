@@ -1,0 +1,91 @@
+/**
+ * Minimal chat CLI for <%- agentNameClassName %> (HTTP / tRPC WebSocket).
+ *
+ * Connects to the locally-running agent on the port assigned by the generator.
+ * Override with `PORT` or `--port <port>`.
+ */
+import * as p from '@clack/prompts';
+import { <%- agentNameClassName %>Client } from '<%- relativeAgentImport %>/client.js';
+
+const getCliArg = (name: string): string | undefined => {
+  const idx = process.argv.indexOf(`--${name}`);
+  return idx !== -1 && idx + 1 < process.argv.length
+    ? process.argv[idx + 1]
+    : undefined;
+};
+
+const port =
+  getCliArg('port') ?? process.env.PORT ?? '<%- localDevPort %>';
+const url = `ws://localhost:${port}/ws`;
+
+async function main() {
+  p.intro('<%- agentNameClassName %> Chat');
+
+  const client = <%- agentNameClassName %>Client.local({ url });
+
+  while (true) {
+    const input = await p.text({
+      message: 'You',
+      placeholder: 'Type a message... (Ctrl+C to exit)',
+    });
+
+    if (p.isCancel(input)) {
+      p.outro('Goodbye!');
+      process.exit(0);
+    }
+
+    const trimmed = (input as string).trim();
+    if (!trimmed) continue;
+
+    async function* streamTokens(): AsyncGenerator<string> {
+      const queue: Array<{ value?: string; done?: true; error?: unknown }> = [];
+      let resolveNext: (() => void) | undefined;
+      const wake = () => {
+        const r = resolveNext;
+        resolveNext = undefined;
+        r?.();
+      };
+
+      client.invoke.subscribe(
+        { message: trimmed },
+        {
+          onData(chunk: string) {
+            queue.push({ value: chunk });
+            wake();
+          },
+          onComplete() {
+            queue.push({ done: true });
+            wake();
+          },
+          onError(error: unknown) {
+            queue.push({ error });
+            wake();
+          },
+        },
+      );
+
+      while (true) {
+        if (queue.length === 0) {
+          await new Promise<void>((resolve) => {
+            resolveNext = resolve;
+          });
+        }
+        const next = queue.shift()!;
+        if (next.error) throw next.error;
+        if (next.done) return;
+        if (next.value !== undefined) yield next.value;
+      }
+    }
+
+    try {
+      await p.stream.message(streamTokens(), { symbol: '🤖' });
+    } catch (err: any) {
+      p.log.error(err?.message ?? String(err));
+    }
+  }
+}
+
+main().catch((err) => {
+  p.log.error(`Fatal: ${err?.message ?? String(err)}`);
+  process.exit(1);
+});

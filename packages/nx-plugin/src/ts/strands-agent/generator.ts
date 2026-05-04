@@ -192,6 +192,7 @@ export const tsStrandsAgentGenerator = async (
     withVersions([
       'tsx',
       '@types/node',
+      '@clack/prompts',
       ...(protocol === 'A2A'
         ? (['@types/express'] as const)
         : (['@types/ws', '@types/cors'] as const)),
@@ -202,6 +203,26 @@ export const tsStrandsAgentGenerator = async (
   // HTTP agents use port 8081+ to avoid conflict with VS Code server on 8080.
   const localDevPortStart = protocol === 'A2A' ? 9000 : 8081;
   const localDevPort = assignPort(tree, project, localDevPortStart);
+
+  // Emit the per-protocol interactive chat CLI under scripts/<agent>/chat.ts
+  const scriptsDir = joinPathFragments(
+    project.root,
+    'scripts',
+    agentTargetPrefix,
+  );
+  const relativeAgentImport = `../../${targetSourceDirRelativeToProjectRoot}`;
+  generateFiles(
+    tree,
+    joinPathFragments(__dirname, 'scripts', protocol.toLowerCase()),
+    scriptsDir,
+    {
+      agentNameClassName,
+      agentTargetPrefix,
+      localDevPort,
+      relativeAgentImport,
+    },
+    { overwriteStrategy: OverwriteStrategy.KeepExisting },
+  );
 
   updateProjectConfiguration(tree, project.name, {
     ...project,
@@ -229,6 +250,17 @@ export const tsStrandsAgentGenerator = async (
           },
         },
         continuous: true,
+      },
+      [`${agentTargetPrefix}-chat`]: {
+        executor: 'nx:run-commands',
+        options: {
+          commands: [`tsx ./scripts/${agentTargetPrefix}/chat.ts`],
+          cwd: '{projectRoot}',
+          env: {
+            PORT: `${localDevPort}`,
+          },
+        },
+        dependsOn: [`${agentTargetPrefix}-serve-local`],
       },
     },
   });

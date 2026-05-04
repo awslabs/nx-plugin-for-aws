@@ -1,0 +1,96 @@
+/**
+ * Minimal chat CLI for <%- agentNameClassName %> (Python FastAPI / JSONL streaming).
+ *
+ * Connects to the `/invocations` endpoint of the locally-running agent.
+ * Override the port with `PORT` or `--port <port>`.
+ */
+import { randomUUID } from 'node:crypto';
+import * as p from '@clack/prompts';
+
+const getCliArg = (name: string): string | undefined => {
+  const idx = process.argv.indexOf(`--${name}`);
+  return idx !== -1 && idx + 1 < process.argv.length
+    ? process.argv[idx + 1]
+    : undefined;
+};
+
+const SESSION_ID_HEADER = 'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id';
+
+const port =
+  getCliArg('port') ?? process.env.PORT ?? '<%- localDevPort %>';
+const url = `http://localhost:${port}/invocations`;
+// AgentCore session IDs must be at least 33 characters.
+const sessionId = randomUUID().replaceAll('-', '').padEnd(33, '0');
+
+async function main() {
+  p.intro('<%- agentNameClassName %> Chat');
+
+  while (true) {
+    const input = await p.text({
+      message: 'You',
+      placeholder: 'Type a message... (Ctrl+C to exit)',
+    });
+
+    if (p.isCancel(input)) {
+      p.outro('Goodbye!');
+      process.exit(0);
+    }
+
+    const trimmed = (input as string).trim();
+    if (!trimmed) continue;
+
+    async function* streamTokens(): AsyncGenerator<string> {
+      const response = await fetch(url, {
+        method: 'POST',
+        body: JSON.stringify({ message: trimmed }),
+        headers: {
+          'Content-Type': 'application/json',
+          [SESSION_ID_HEADER]: sessionId,
+        },
+      });
+
+      if (!response.ok || !response.body) {
+        throw new Error(
+          `Agent invocation failed: ${response.status} ${response.statusText}`,
+        );
+      }
+
+      const reader = response.body
+        .pipeThrough(new TextDecoderStream())
+        .getReader();
+      let buffer = '';
+      while (true) {
+        const { value, done } = await reader.read();
+        if (value) buffer += value;
+        if (done) break;
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          const trimmedLine = line.trim();
+          if (!trimmedLine) continue;
+          const chunk = JSON.parse(trimmedLine) as { content?: string };
+          if (typeof chunk.content === 'string') {
+            yield chunk.content;
+          }
+        }
+      }
+      if (buffer.trim()) {
+        const chunk = JSON.parse(buffer) as { content?: string };
+        if (typeof chunk.content === 'string') {
+          yield chunk.content;
+        }
+      }
+    }
+
+    try {
+      await p.stream.message(streamTokens(), { symbol: '🤖' });
+    } catch (err: any) {
+      p.log.error(err?.message ?? String(err));
+    }
+  }
+}
+
+main().catch((err) => {
+  p.log.error(`Fatal: ${err?.message ?? String(err)}`);
+  process.exit(1);
+});

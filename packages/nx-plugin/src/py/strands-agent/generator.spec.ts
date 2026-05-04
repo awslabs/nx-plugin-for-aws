@@ -1212,4 +1212,93 @@ dev-dependencies = []
     expect(pyProjectToml).toContain('ag-ui-strands');
     expect(pyProjectToml).toContain('strands-agents');
   });
+
+  it('should generate HTTP chat CLI script and wire up the chat target', async () => {
+    await pyStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      computeType: 'None',
+      iacProvider: 'CDK',
+    });
+
+    const chatScriptPath = 'apps/test-project/scripts/agent/chat.ts';
+    expect(tree.exists(chatScriptPath)).toBeTruthy();
+
+    const chatScript = tree.read(chatScriptPath, 'utf-8');
+    expect(chatScript).toContain("from '@clack/prompts'");
+    expect(chatScript).toContain('/invocations');
+    expect(chatScript).toContain('application/json');
+
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+    const chatTarget = projectConfig.targets['agent-chat'];
+    expect(chatTarget).toBeDefined();
+    expect(chatTarget.options.commands[0]).toBe('tsx ./scripts/agent/chat.ts');
+    expect(chatTarget.dependsOn).toEqual(['agent-serve-local']);
+
+    const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+    expect(rootPackageJson.devDependencies['tsx']).toBeDefined();
+    expect(rootPackageJson.devDependencies['@clack/prompts']).toBeDefined();
+  });
+
+  it('should generate A2A chat CLI script with @a2a-js/sdk dep', async () => {
+    await pyStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      protocol: 'A2A',
+      computeType: 'None',
+      iacProvider: 'CDK',
+    });
+
+    const chatScript = tree.read(
+      'apps/test-project/scripts/agent/chat.ts',
+      'utf-8',
+    );
+    expect(chatScript).toContain('@a2a-js/sdk/client');
+    expect(chatScript).toContain('sendMessageStream');
+
+    const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+    expect(rootPackageJson.dependencies['@a2a-js/sdk']).toBeDefined();
+  });
+
+  it('should generate AG-UI chat CLI script with @ag-ui/client dep', async () => {
+    await pyStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      protocol: 'AG-UI',
+      computeType: 'None',
+      iacProvider: 'CDK',
+    });
+
+    const chatScript = tree.read(
+      'apps/test-project/scripts/agent/chat.ts',
+      'utf-8',
+    );
+    expect(chatScript).toContain('@ag-ui/client');
+    expect(chatScript).toContain('HttpAgent');
+    expect(chatScript).toContain('/invocations');
+
+    const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
+    expect(rootPackageJson.dependencies['@ag-ui/client']).toBeDefined();
+    expect(rootPackageJson.dependencies['rxjs']).toBeDefined();
+  });
+
+  it('should generate chat CLI with custom agent name', async () => {
+    await pyStrandsAgentGenerator(tree, {
+      project: 'test-project',
+      name: 'my-custom-agent',
+      computeType: 'None',
+      iacProvider: 'CDK',
+    });
+
+    expect(
+      tree.exists('apps/test-project/scripts/my-custom-agent/chat.ts'),
+    ).toBeTruthy();
+
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+    expect(projectConfig.targets['my-custom-agent-chat']).toBeDefined();
+    expect(projectConfig.targets['my-custom-agent-chat'].dependsOn).toEqual([
+      'my-custom-agent-serve-local',
+    ]);
+  });
 });
