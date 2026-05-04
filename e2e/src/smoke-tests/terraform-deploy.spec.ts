@@ -305,8 +305,18 @@ describe('smoke test - terraform-deploy', () => {
       planCommands.map((cmd) =>
         cmd.startsWith('terraform plan') ? `${cmd} -parallelism=1` : cmd,
       );
-    infraProjectJson.targets.apply.configurations.dev.command = `${infraProjectJson.targets.apply.configurations.dev.command} -parallelism=1`;
-    infraProjectJson.targets.destroy.configurations.dev.command = `${infraProjectJson.targets.destroy.configurations.dev.command} -parallelism=1`;
+    // `terraform apply` takes `-parallelism=N` before the plan file
+    // positional argument; splice the flag in right after `terraform apply`.
+    infraProjectJson.targets.apply.configurations.dev.command =
+      infraProjectJson.targets.apply.configurations.dev.command.replace(
+        /^terraform apply\b/,
+        'terraform apply -parallelism=1',
+      );
+    infraProjectJson.targets.destroy.configurations.dev.command =
+      infraProjectJson.targets.destroy.configurations.dev.command.replace(
+        /^terraform destroy\b/,
+        'terraform destroy -parallelism=1',
+      );
 
     writeFileSync(
       infraProjectJsonPath,
