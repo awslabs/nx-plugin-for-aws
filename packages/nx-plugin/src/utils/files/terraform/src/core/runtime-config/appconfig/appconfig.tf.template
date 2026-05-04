@@ -28,6 +28,12 @@ variable "namespaces" {
   default     = ["connection", "agentcore"]
 }
 
+variable "deployment_strategy_id" {
+  description = "AppConfig Deployment Strategy ID to use for deployments. Defaults to the AWS-managed `AppConfig.AllAtOnce` strategy (0 min duration + 10 min bake time). Pass a custom strategy ID to override — avoids the per-application strategy previously provisioned by this module, which hit the account-level quota of 20 deployment strategies when used across many Lambda-backed modules."
+  type        = string
+  default     = "AppConfig.AllAtOnce"
+}
+
 locals {
   config_dir  = "${path.module}/../../../../../../../dist/packages/common/terraform/runtime-config"
   entries_dir = "${local.config_dir}/entries"
@@ -43,15 +49,6 @@ resource "aws_appconfig_application" "runtime_config" {
 resource "aws_appconfig_environment" "default" {
   name           = "default"
   application_id = aws_appconfig_application.runtime_config.id
-}
-
-# Instant deployment strategy (zero wait)
-resource "aws_appconfig_deployment_strategy" "instant" {
-  name                           = "${var.application_name}-instant"
-  deployment_duration_in_minutes = 0
-  growth_factor                  = 100
-  replicate_to                   = "NONE"
-  final_bake_time_in_minutes     = 0
 }
 
 # Aggregate the per-entry leaf JSON files (written by the `entry` module)
@@ -155,7 +152,7 @@ resource "aws_appconfig_deployment" "namespace" {
   environment_id           = aws_appconfig_environment.default.environment_id
   configuration_profile_id = aws_appconfig_configuration_profile.namespace[each.key].configuration_profile_id
   configuration_version    = aws_appconfig_hosted_configuration_version.namespace[each.key].version_number
-  deployment_strategy_id   = aws_appconfig_deployment_strategy.instant.id
+  deployment_strategy_id   = var.deployment_strategy_id
 }
 
 # Outputs
