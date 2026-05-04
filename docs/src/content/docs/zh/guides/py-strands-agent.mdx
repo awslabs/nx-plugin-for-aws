@@ -1,9 +1,10 @@
 ---
 title: "Python Strands 代理"
 description: "生成用于构建带工具的 AI 代理并部署到 Amazon Bedrock AgentCore Runtime 的 Python Strands 代理"
+generator: py#strands-agent
 ---
 
-import { FileTree } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
 import RunGenerator from '@components/run-generator.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Link from '@components/link.astro';
@@ -11,6 +12,7 @@ import Snippet from '@components/snippet.astro';
 import Infrastructure from '@components/infrastructure.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import Drawer from '@components/drawer.astro';
+import OptionFilter from '@components/option-filter.astro';
 
 生成一个用于构建AI智能体工具的Python [Strands Agent](https://strandsagents.com/)，并可选部署到[Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/)。默认情况下，生成器使用[FastAPI](https://fastapi.tiangolo.com/)暴露HTTP服务器。或者，您可以选择[Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html)协议，以实现与其他A2A兼容智能体的互操作性，或选择[AG-UI](https://docs.ag-ui.com/)协议，通过[CopilotKit](https://docs.copilotkit.ai/aws-strands)直接集成前端。
 
@@ -45,6 +47,7 @@ import Drawer from '@components/drawer.astro';
 
 生成器将在现有Python项目中添加以下文件。生成的文件取决于所选的`protocol`：
 
+<OptionFilter when={{ protocol: 'HTTP' }} description="FastAPI HTTP server layout">
 ### HTTP协议（默认）
 
 <FileTree>
@@ -59,10 +62,12 @@ import Drawer from '@components/drawer.astro';
     - pyproject.toml 更新Strands依赖
     - project.json 更新服务目标配置
 </FileTree>
+</OptionFilter>
 
+<OptionFilter when={{ protocol: 'A2A' }} description="Strands A2A server layout">
 ### A2A协议
 
-当`protocol`设为`A2A`时，入口点使用[Strands A2A Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent)而非FastAPI：
+入口点使用[Strands A2A Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent)而非FastAPI：
 
 <FileTree>
   - your-project/
@@ -75,10 +80,12 @@ import Drawer from '@components/drawer.astro';
     - pyproject.toml 更新Strands依赖
     - project.json 更新服务目标配置
 </FileTree>
+</OptionFilter>
 
+<OptionFilter when={{ protocol: 'AG-UI' }} description="AG-UI / CopilotKit server layout">
 ### AG-UI协议
 
-当`protocol`设为`AG-UI`时，入口点使用[ag-ui-strands](https://docs.ag-ui.com/)集成，通过AG-UI协议暴露智能体，以便直接与[CopilotKit](https://docs.copilotkit.ai/aws-strands)进行前端集成：
+入口点使用[ag-ui-strands](https://docs.ag-ui.com/)集成，通过AG-UI协议暴露智能体，以便直接与[CopilotKit](https://docs.copilotkit.ai/aws-strands)进行前端集成：
 
 <FileTree>
   - your-project/
@@ -95,13 +102,11 @@ import Drawer from '@components/drawer.astro';
 :::tip[连接到React网站]
 AG-UI智能体可以使用<Link path="/guides/connection/react-agui">`connection`生成器</Link>连接到React前端，该生成器将设置[CopilotKit](https://docs.copilotkit.ai/aws-strands)组件以提供丰富的聊天体验。
 :::
+</OptionFilter>
 
 ### 基础设施
 
-:::note[无服务器部署]
-若选择`None`作为`computeType`，生成器不会创建任何基础设施即代码。
-:::
-
+<OptionFilter when={{ computeType: 'BedrockAgentCoreRuntime' }} description="Bedrock AgentCore Runtime deployment">
 <Snippet name="shared-constructs" />
 
 部署Strands智能体时生成以下文件：
@@ -129,6 +134,11 @@ AG-UI智能体可以使用<Link path="/guides/connection/react-agui">`connection
 </FileTree>
 </Fragment>
 </Infrastructure>
+</OptionFilter>
+
+<OptionFilter when={{ computeType: 'None' }} description="No infrastructure is vended for computeType=None">
+如果您选择了`None`作为`computeType`，则不会生成CDK构造或Terraform模块——Strands智能体只能在本地运行。
+</OptionFilter>
 
 ## 使用Strands智能体
 
@@ -221,6 +231,7 @@ agent = Agent(model=bedrock_model)
 
 所有协议都暴露`/ping`端点以满足AgentCore运行时健康检查契约。A2A智能体监听端口`9000`；HTTP和AG-UI智能体监听端口`8080`。生成的Dockerfile和基础设施已为您配置。
 
+<OptionFilter when={{ protocol: 'HTTP' }} description="FastAPI HTTP server details">
 ## FastAPI服务器（HTTP协议）
 
 生成的HTTP服务器包含：
@@ -292,6 +303,7 @@ async def invoke(input: InvokeInput) -> JsonStreamingResponse:
 :::
 
 FastAPI有一个[关于原生支持的开放功能请求](https://github.com/fastapi/fastapi/discussions/14362)。
+</OptionFilter>
 
 ## Bedrock AgentCore Python SDK
 
@@ -303,21 +315,25 @@ SDK功能详情请参阅[文档](https://aws.github.io/bedrock-agentcore-starter
 由于生成器提供CDK或Terraform基础设施来管理部署，无需使用文档中提到的`bedrock-agentcore-starter-toolkit`进行部署。
 :::
 
+<OptionFilter when={{ protocol: 'A2A' }} description="A2A server details">
 ## A2A服务器（A2A协议）
 
-当`protocol=A2A`时，生成的`main.py`将`A2AServer.to_fastapi_app()`挂载到父FastAPI应用上，该应用同时暴露`/ping`端点。部署到AgentCore时，入口点会从AppConfig解析运行时的公共ARN，并在智能体卡片中发布。
+生成的`main.py`将`A2AServer.to_fastapi_app()`挂载到父FastAPI应用上，该应用同时暴露`/ping`端点。部署到AgentCore时，入口点会从AppConfig解析运行时的公共ARN，并在智能体卡片中发布。
 
 大多数用户无需修改此文件——编辑`agent.py`即可更改工具或系统提示。A2A服务器从`Agent`构造函数的`name`和`description`填充智能体卡片（`/.well-known/agent-card.json`）。
+</OptionFilter>
 
+<OptionFilter when={{ protocol: 'AG-UI' }} description="AG-UI / CopilotKit server details">
 ## AG-UI服务器（AG-UI协议）
 
-当`protocol=AG-UI`时，生成的`main.py`将您的Strands `Agent`包装在`ag_ui_strands.StrandsAgent`中，并通过`create_strands_app()`创建FastAPI应用。生成的应用暴露一个POST端点，通过Server-Sent Events (SSE)流式传输[AG-UI](https://docs.ag-ui.com/)事件，以及用于AgentCore运行时健康检查的`/ping`端点。
+生成的`main.py`将您的Strands `Agent`包装在`ag_ui_strands.StrandsAgent`中，并通过`create_strands_app()`创建FastAPI应用。生成的应用暴露一个POST端点，通过Server-Sent Events (SSE)流式传输[AG-UI](https://docs.ag-ui.com/)事件，以及用于AgentCore运行时健康检查的`/ping`端点。
 
 大多数用户无需修改此文件——编辑`agent.py`即可更改工具或系统提示。
 
 :::tip[连接到React网站]
 AG-UI智能体设计为可直接被前端使用。使用<Link path="/guides/connection/react-agui">`connection`生成器</Link>，通过[CopilotKit](https://docs.copilotkit.ai/aws-strands)提供器和[AG-UI HttpAgent](https://docs.ag-ui.com/)客户端将您的React网站连接到智能体。
 :::
+</OptionFilter>
 
 ## 运行Strands智能体
 
@@ -329,6 +345,7 @@ AG-UI智能体设计为可直接被前端使用。使用<Link path="/guides/conn
 
 该命令使用`uv run`通过[Bedrock AgentCore Python SDK](https://github.com/aws/bedrock-agentcore-sdk-python)运行智能体。
 
+<OptionFilter when={{ computeType: 'BedrockAgentCoreRuntime' }} description="Bedrock AgentCore Runtime deployment details">
 ## 部署Strands智能体到Bedrock AgentCore Runtime
 
 <Snippet name="agent/bedrock-deployment" parentHeading="部署Strands智能体到Bedrock AgentCore Runtime" />
@@ -348,9 +365,11 @@ AG-UI智能体设计为可直接被前端使用。使用<Link path="/guides/conn
 在CloudWatch控制台选择"GenAI Observability"查看追踪数据，需启用[事务搜索](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search.html)。
 
 详细配置参考[AgentCore可观测性文档](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html)。
+</OptionFilter>
 
 ## 调用Strands智能体
 
+<OptionFilter when={{ protocol: 'HTTP' }} description="FastAPI HTTP invocation details">
 ### 调用本地服务器
 
 要调用通过`<your-agent-name>-serve`目标本地运行的智能体，可以向本地智能体运行端口的`/invocations`发送简单的POST请求。例如，使用`curl`：
@@ -369,6 +388,8 @@ curl -N -X POST http://localhost:8081/invocations \
 
 <Snippet name="agent/runtime-arn" parentHeading="调用已部署的智能体" />
 
+<Tabs syncKey="auth">
+<TabItem label="IAM" _filter={{ auth: 'IAM' }}>
 #### IAM认证
 
 对于IAM认证，请求必须使用AWS Signature Version 4（SigV4）签名。
@@ -383,7 +404,9 @@ acurl <region> bedrock-agentcore -N -X POST \
 <Drawer title="支持Sigv4的curl" trigger="点击此处了解配置上述acurl命令的更多详情">
 <Snippet name="tools/acurl" />
 </Drawer>
+</TabItem>
 
+<TabItem label="Cognito" _filter={{ auth: 'Cognito' }}>
 #### JWT / Cognito认证
 
 对于Cognito认证，在`Authorization`标头中传递Cognito访问令牌：
@@ -407,6 +430,8 @@ aws cognito-idp admin-initiate-auth \
   --query 'AuthenticationResult.AccessToken' \
   --output text
 ```
+</TabItem>
+</Tabs>
 
 #### 浏览器 / React网站
 
@@ -415,7 +440,9 @@ aws cognito-idp admin-initiate-auth \
 <RunGenerator generator="connection" />
 
 关于连接设置的详细信息，请参考<Link path="/guides/connection/react-py-strands-agent">`connection`生成器指南</Link>。
+</OptionFilter>
 
+<OptionFilter when={{ protocol: 'A2A' }} description="A2A delegation details">
 ### 将A2A智能体作为工具调用
 
 要将工作从此智能体委托给远程A2A智能体（<Link path="/guides/ts-strands-agent">TypeScript</Link>或<Link path="/guides/py-strands-agent">Python</Link>），请使用<Link path="/guides/connection/py-strands-agent-a2a">`connection`生成器</Link>。它为目标智能体提供SigV4认证的客户端，并对此智能体的`agent.py`进行AST转换，将远程A2A智能体注册为`@tool`装饰的委托。
@@ -423,3 +450,14 @@ aws cognito-idp admin-initiate-auth \
 <RunGenerator generator="connection" />
 
 关于连接设置的详细信息，请参考<Link path="/guides/connection/py-strands-agent-a2a">`connection`生成器指南</Link>。
+</OptionFilter>
+
+<OptionFilter when={{ protocol: 'AG-UI' }} description="AG-UI / React connection details">
+### 调用AG-UI智能体
+
+要从React网站调用AG-UI智能体，请使用<Link path="/guides/connection/react-agui">`connection`生成器</Link>，它会为您部署的智能体配置[CopilotKit](https://docs.copilotkit.ai/aws-strands)客户端，并设置正确的认证方式（IAM或Cognito）。
+
+<RunGenerator generator="connection" />
+
+关于连接设置的详细信息，请参考<Link path="/guides/connection/react-agui">`connection`生成器指南</Link>。
+</OptionFilter>

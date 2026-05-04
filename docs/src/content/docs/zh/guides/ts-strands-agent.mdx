@@ -1,9 +1,10 @@
 ---
 title: "TypeScript Strands 代理"
-description: "生成用于构建带工具的 AI 代理的 TypeScript Strands 代理，并部署到 Amazon Bedrock AgentCore Runtime"
+description: "生成用于构建带工具的 AI 代理的 TypeScript Strands 代理,并部署到 Amazon Bedrock AgentCore Runtime"
+generator: ts#strands-agent
 ---
 
-import { FileTree } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
 import RunGenerator from '@components/run-generator.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Link from '@components/link.astro';
@@ -11,12 +12,9 @@ import Snippet from '@components/snippet.astro';
 import Infrastructure from '@components/infrastructure.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import PackageManagerExecCommand from '@components/package-manager-exec-command.astro';
+import OptionFilter from '@components/option-filter.astro';
 
 生成一个 TypeScript [Strands Agent](https://strandsagents.com/) 用于构建带有工具的 AI 代理,并可选择将其部署到 [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/)。默认情况下,该生成器使用基于 WebSocket 的 [tRPC](https://trpc.io/) 来利用 [AgentCore 的双向流支持](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html),实现实时、类型安全的通信。或者,您可以选择 [Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) 协议,以实现与其他 A2A 兼容代理的互操作性。
-
-:::caution[TypeScript 尚不支持 AG-UI]
-[AG-UI 协议](https://docs.ag-ui.com/)尚不支持 TypeScript Strands Agents。如果您需要 AG-UI 支持,请使用 <Link path="/guides/py-strands-agent">`py#strands-agent`</Link> 生成器并设置 `protocol=AG-UI`。有关 TypeScript AG-UI 支持状态,请参阅 [strands-agents/sdk-typescript#347](https://github.com/strands-agents/sdk-typescript/issues/347)。
-:::
 
 ## 什么是 Strands?
 
@@ -49,6 +47,7 @@ import PackageManagerExecCommand from '@components/package-manager-exec-command.
 
 生成器将向您现有的 TypeScript 项目添加以下文件。生成的文件取决于选择的 `protocol`:
 
+<OptionFilter when={{ protocol: 'HTTP' }} description="tRPC-over-WebSocket layout">
 ### HTTP 协议(默认)
 
 <FileTree>
@@ -65,10 +64,12 @@ import PackageManagerExecCommand from '@components/package-manager-exec-command.
     - package.json 已更新 Strands 依赖项
     - project.json 已更新代理服务目标
 </FileTree>
+</OptionFilter>
 
+<OptionFilter when={{ protocol: 'A2A' }} description="Strands A2A Express server layout">
 ### A2A 协议
 
-当 `protocol` 设置为 `A2A` 时,入口点使用 [Strands A2A Express Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent) 而不是 tRPC:
+入口点使用 [Strands A2A Express Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent) 而不是 tRPC:
 
 <FileTree>
   - your-project/
@@ -80,13 +81,11 @@ import PackageManagerExecCommand from '@components/package-manager-exec-command.
     - package.json 已更新 Strands 和 Express 依赖项
     - project.json 已更新代理服务目标
 </FileTree>
+</OptionFilter>
 
 ### 基础设施
 
-:::note[无服务器部署]
-如果您为 `computeType` 选择了 `None`,生成器将不会提供任何基础设施即代码。
-:::
-
+<OptionFilter when={{ computeType: 'BedrockAgentCoreRuntime' }} description="Bedrock AgentCore Runtime deployment">
 <Snippet name="shared-constructs" />
 
 为了部署您的 Strands Agent,将生成以下文件:
@@ -114,6 +113,11 @@ import PackageManagerExecCommand from '@components/package-manager-exec-command.
 </FileTree>
 </Fragment>
 </Infrastructure>
+</OptionFilter>
+
+<OptionFilter when={{ computeType: 'None' }} description="No infrastructure is vended for computeType=None">
+如果您为 `computeType` 选择了 `None`,则不会生成 CDK 构造或 Terraform 模块 — Strands Agent 只能在本地运行。
+</OptionFilter>
 
 ## 使用您的 Strands Agent
 
@@ -126,11 +130,13 @@ import PackageManagerExecCommand from '@components/package-manager-exec-command.
 
 协议在 CDK/Terraform 基础设施中设置,应用程序代码会相应生成。
 
+<OptionFilter when={{ protocol: 'HTTP' }} description="tRPC over WebSocket details">
 ### 基于 WebSocket 的 tRPC(HTTP 协议)
 
 TypeScript Strands Agent 使用基于 WebSocket 的 [tRPC](https://trpc.io/),利用 [AgentCore 的双向流支持](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html) 在客户端和您的代理之间实现实时、类型安全的通信。
 
 由于 tRPC 支持通过 WebSocket 的 Query、Mutation 和 Subscription 过程,您可以定义任意数量的过程。默认情况下,在 `router.ts` 中为您定义了一个名为 `invoke` 的单个订阅过程。
+</OptionFilter>
 
 ### 添加工具
 
@@ -211,11 +217,13 @@ response = await agent.invoke('What can you help me with?');
 
 有关编写 Strands 代理的更深入指南,请参阅 [Strands 文档](https://strandsagents.com/docs/user-guide/quickstart/overview/)。
 
+<OptionFilter when={{ protocol: 'A2A' }} description="A2A Express server details">
 ## A2A 服务器(A2A 协议)
 
-当 `protocol=A2A` 时,生成的 `index.ts` 将 [Strands A2A Express Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent) 挂载到 Express 应用上,因此生成的代理会公开 A2A 协议端点以及 `/ping` 健康检查。当部署到 AgentCore 时,入口点会从 AppConfig 解析运行时的公共 ARN,并在代理卡中进行公告。
+生成的 `index.ts` 将 [Strands A2A Express Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent) 挂载到 Express 应用上,因此生成的代理会公开 A2A 协议端点以及 `/ping` 健康检查。当部署到 AgentCore 时,入口点会从 AppConfig 解析运行时的公共 ARN,并在代理卡中进行公告。
 
 大多数用户不需要修改此文件 — 编辑 `agent.ts` 来更改工具或系统提示。A2A 代理监听端口 `9000`(而 HTTP 为 `8080`),生成的 Dockerfile 和基础设施已经为此进行了配置。
+</OptionFilter>
 
 ## 运行您的 Strands Agent
 
@@ -227,6 +235,7 @@ response = await agent.invoke('What can you help me with?');
 
 此命令使用 `tsx --watch` 在文件更改时自动重启服务器。代理将在 `http://localhost:8081` 上可用(如果您有多个代理,则为分配的端口)。
 
+<OptionFilter when={{ computeType: 'BedrockAgentCoreRuntime' }} description="Bedrock AgentCore Runtime deployment details">
 ## 将您的 Strands Agent 部署到 Bedrock AgentCore Runtime
 
 <Snippet name="agent/bedrock-deployment" parentHeading="将您的 Strands Agent 部署到 Bedrock AgentCore Runtime" />
@@ -250,11 +259,13 @@ bundle 目标使用 `index.ts` 作为在 Bedrock AgentCore Runtime 上托管的 
 您可以在 CloudWatch AWS 控制台中找到追踪,方法是在菜单中选择"GenAI Observability"。请注意,要填充追踪,您需要启用 [Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search.html)。
 
 有关更多详细信息,请参阅 [AgentCore 关于可观测性的文档](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html)。
+</OptionFilter>
 
 ## 调用您的 Strands Agent
 
 代理通信通过基于 WebSocket 的 tRPC 传输。因此,建议使用 `client.ts` 中生成的类型安全客户端工厂。
 
+<OptionFilter when={{ protocol: 'HTTP' }} description="tRPC-over-WebSocket client factory invocation details">
 ### 调用本地服务器
 
 您可以使用客户端工厂的 `.local` 工厂方法调用本地运行的代理。
@@ -288,6 +299,8 @@ client.invoke.subscribe({ message: 'what is 1 plus 1?' }, { onData: console.log 
 客户端工厂在 WebSocket 握手中使用 HTTP 头来验证对 Bedrock AgentCore Runtime 的请求。这在浏览器中不可能实现,因此此客户端不适合浏览器环境。有关从浏览器调用的详细信息,请参阅下面的"浏览器"部分。
 :::
 
+<Tabs syncKey="auth">
+<TabItem label="IAM" _filter={{ auth: 'IAM' }}>
 ##### IAM 身份验证
 
 您可以通过将其 ARN 传递给 `withIamAuth` 工厂方法来调用已部署的代理:
@@ -309,7 +322,9 @@ client.invoke.subscribe({ message: 'what is 1 plus 1?' }, {
 :::note[AWS凭证]
 这将使用默认的 AWS 凭证提供程序链来验证请求,因此运行上述代码的环境必须配置了 AWS 凭证,并具有调用运行时的访问权限。
 :::
+</TabItem>
 
+<TabItem label="Cognito" _filter={{ auth: 'Cognito' }}>
 ##### JWT / Cognito 身份验证
 
 使用 `withJwtAuth` 工厂方法通过 JWT / Cognito 访问令牌进行身份验证。
@@ -348,6 +363,8 @@ const jwtClient = AgentClient.withJwtAuth({
   },
 });
 ```
+</TabItem>
+</Tabs>
 
 #### 浏览器 / React 网站
 
@@ -356,7 +373,9 @@ const jwtClient = AgentClient.withJwtAuth({
 <RunGenerator generator="connection" />
 
 有关如何设置连接的详细信息,请参阅 <Link path="/guides/connection/react-ts-strands-agent">`connection` 生成器指南</Link>。
+</OptionFilter>
 
+<OptionFilter when={{ protocol: 'A2A' }} description="A2A delegation details">
 ### 将 A2A 代理作为工具调用
 
 要将工作从此代理委托给远程 A2A 代理(无论是 <Link path="/guides/ts-strands-agent">TypeScript</Link> 还是 <Link path="/guides/py-strands-agent">Python</Link>),请使用 <Link path="/guides/connection/ts-strands-agent-a2a">`connection` 生成器</Link>。它会为目标代理提供 SigV4 认证的客户端,并对此代理的 `agent.ts` 进行 AST 转换,将远程 A2A 代理注册为 Strands `tool`。
@@ -364,3 +383,4 @@ const jwtClient = AgentClient.withJwtAuth({
 <RunGenerator generator="connection" />
 
 有关如何设置连接的详细信息,请参阅 <Link path="/guides/connection/ts-strands-agent-a2a">`connection` 生成器指南</Link>。
+</OptionFilter>

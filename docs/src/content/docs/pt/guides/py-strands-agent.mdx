@@ -1,9 +1,10 @@
 ---
 title: "Agente de Strands em Python"
 description: "Gerar um Agente de Strands em Python para construir agentes de IA com ferramentas e implantar no Amazon Bedrock AgentCore Runtime"
+generator: py#strands-agent
 ---
 
-import { FileTree } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
 import RunGenerator from '@components/run-generator.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Link from '@components/link.astro';
@@ -11,6 +12,7 @@ import Snippet from '@components/snippet.astro';
 import Infrastructure from '@components/infrastructure.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import Drawer from '@components/drawer.astro';
+import OptionFilter from '@components/option-filter.astro';
 
 Gere um [Agente Strands](https://strandsagents.com/) em Python para construir agentes de IA com ferramentas, e opcionalmente implante-o no [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/). Por padrão, o gerador usa [FastAPI](https://fastapi.tiangolo.com/) para expor um servidor HTTP. Alternativamente, você pode escolher o protocolo [Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) para interoperabilidade com outros agentes compatíveis com A2A, ou o protocolo [AG-UI](https://docs.ag-ui.com/) para integração direta com frontend via [CopilotKit](https://docs.copilotkit.ai/aws-strands).
 
@@ -45,6 +47,7 @@ Primeiro use o gerador <Link path="/guides/python-project">`py#project`</Link> p
 
 O gerador adicionará os seguintes arquivos ao seu projeto Python existente. Os arquivos gerados dependem do `protocol` escolhido:
 
+<OptionFilter when={{ protocol: 'HTTP' }} description="FastAPI HTTP server layout">
 ### Protocolo HTTP (padrão)
 
 <FileTree>
@@ -59,10 +62,12 @@ O gerador adicionará os seguintes arquivos ao seu projeto Python existente. Os 
     - pyproject.toml Atualizado com dependências do Strands
     - project.json Atualizado com alvos de serviço do agente
 </FileTree>
+</OptionFilter>
 
+<OptionFilter when={{ protocol: 'A2A' }} description="Strands A2A server layout">
 ### Protocolo A2A
 
-Quando `protocol` é definido como `A2A`, o ponto de entrada usa o [Strands A2A Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent) em vez do FastAPI:
+O ponto de entrada usa o [Strands A2A Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent) em vez do FastAPI:
 
 <FileTree>
   - your-project/
@@ -75,10 +80,12 @@ Quando `protocol` é definido como `A2A`, o ponto de entrada usa o [Strands A2A 
     - pyproject.toml Atualizado com dependências do Strands
     - project.json Atualizado com alvos de serviço do agente
 </FileTree>
+</OptionFilter>
 
+<OptionFilter when={{ protocol: 'AG-UI' }} description="AG-UI / CopilotKit server layout">
 ### Protocolo AG-UI
 
-Quando `protocol` é definido como `AG-UI`, o ponto de entrada usa a integração [ag-ui-strands](https://docs.ag-ui.com/), que expõe seu agente via protocolo AG-UI para integração direta com frontend usando [CopilotKit](https://docs.copilotkit.ai/aws-strands):
+O ponto de entrada usa a integração [ag-ui-strands](https://docs.ag-ui.com/), que expõe seu agente via protocolo AG-UI para integração direta com frontend usando [CopilotKit](https://docs.copilotkit.ai/aws-strands):
 
 <FileTree>
   - your-project/
@@ -95,13 +102,11 @@ Quando `protocol` é definido como `AG-UI`, o ponto de entrada usa a integraçã
 :::tip[Conectar a um website React]
 Agentes AG-UI podem ser conectados a um frontend React usando o <Link path="/guides/connection/react-agui">gerador `connection`</Link>, que configurará componentes do [CopilotKit](https://docs.copilotkit.ai/aws-strands) para uma experiência de chat rica.
 :::
+</OptionFilter>
 
 ### Infraestrutura
 
-:::note[Implantação serverless]
-Se selecionou `None` para `computeType`, o gerador não fornecerá nenhuma infraestrutura como código.
-:::
-
+<OptionFilter when={{ computeType: 'BedrockAgentCoreRuntime' }} description="Bedrock AgentCore Runtime deployment">
 <Snippet name="shared-constructs" />
 
 Para implantar seu Agente Strands, os seguintes arquivos são gerados:
@@ -129,6 +134,11 @@ Para implantar seu Agente Strands, os seguintes arquivos são gerados:
 </FileTree>
 </Fragment>
 </Infrastructure>
+</OptionFilter>
+
+<OptionFilter when={{ computeType: 'None' }} description="No infrastructure is vended for computeType=None">
+Se você selecionou `None` para `computeType`, nenhum construct CDK ou módulo Terraform é gerado — o Agente Strands só pode ser executado localmente.
+</OptionFilter>
 
 ## Trabalhando com Seu Agente Strands
 
@@ -221,6 +231,7 @@ O protocolo de servidor do seu agente determina como ele se comunica. Todas as o
 
 Todos os protocolos expõem `/ping` para o contrato de verificação de saúde do runtime AgentCore. Agentes A2A escutam na porta `9000`; agentes HTTP e AG-UI escutam na porta `8080`. O Dockerfile e a infraestrutura gerados são configurados para você.
 
+<OptionFilter when={{ protocol: 'HTTP' }} description="FastAPI HTTP server details">
 ## Servidor FastAPI (protocolo HTTP)
 
 O servidor HTTP gerado inclui:
@@ -292,6 +303,7 @@ async def invoke(input: InvokeInput) -> JsonStreamingResponse:
 :::
 
 Existe uma [solicitação de recurso aberta para suporte nativo no FastAPI](https://github.com/fastapi/fastapi/discussions/14362).
+</OptionFilter>
 
 ## Bedrock AgentCore Python SDK
 
@@ -303,21 +315,25 @@ Você pode encontrar mais detalhes sobre as capacidades do SDK na [documentaçã
 Como o gerador fornece infraestrutura CDK ou Terraform que gerencia a implantação do seu agente, você não precisa utilizar o `bedrock-agentcore-starter-toolkit` mencionado na documentação para implantar seu agente.
 :::
 
+<OptionFilter when={{ protocol: 'A2A' }} description="A2A server details">
 ## Servidor A2A (protocolo A2A)
 
-Quando `protocol=A2A`, o `main.py` gerado monta `A2AServer.to_fastapi_app()` em uma aplicação FastAPI pai que também expõe `/ping`. Quando implantado no AgentCore, o ponto de entrada resolve o ARN público do runtime do AppConfig e o anuncia no cartão do agente.
+O `main.py` gerado monta `A2AServer.to_fastapi_app()` em uma aplicação FastAPI pai que também expõe `/ping`. Quando implantado no AgentCore, o ponto de entrada resolve o ARN público do runtime do AppConfig e o anuncia no cartão do agente.
 
 A maioria dos usuários não precisará modificar este arquivo — edite `agent.py` para alterar ferramentas ou o prompt do sistema. O servidor A2A popula o cartão do agente (`/.well-known/agent-card.json`) a partir do `name` e `description` do construtor `Agent`.
+</OptionFilter>
 
+<OptionFilter when={{ protocol: 'AG-UI' }} description="AG-UI / CopilotKit server details">
 ## Servidor AG-UI (protocolo AG-UI)
 
-Quando `protocol=AG-UI`, o `main.py` gerado envolve seu `Agent` Strands em um `ag_ui_strands.StrandsAgent` e cria uma aplicação FastAPI via `create_strands_app()`. A aplicação resultante expõe um único endpoint POST que transmite eventos [AG-UI](https://docs.ag-ui.com/) via Server-Sent Events (SSE), além de `/ping` para a verificação de saúde do runtime AgentCore.
+O `main.py` gerado envolve seu `Agent` Strands em um `ag_ui_strands.StrandsAgent` e cria uma aplicação FastAPI via `create_strands_app()`. A aplicação resultante expõe um único endpoint POST que transmite eventos [AG-UI](https://docs.ag-ui.com/) via Server-Sent Events (SSE), além de `/ping` para a verificação de saúde do runtime AgentCore.
 
 A maioria dos usuários não precisará modificar este arquivo — edite `agent.py` para alterar ferramentas ou o prompt do sistema.
 
 :::tip[Conectar a um website React]
 Agentes AG-UI são projetados para serem consumidos diretamente por um frontend. Use o <Link path="/guides/connection/react-agui">gerador `connection`</Link> para conectar seu website React ao agente com um provedor [CopilotKit](https://docs.copilotkit.ai/aws-strands) e cliente [AG-UI HttpAgent](https://docs.ag-ui.com/).
 :::
+</OptionFilter>
 
 ## Executando Seu Agente Strands
 
@@ -329,6 +345,7 @@ O gerador configura um alvo chamado `<your-agent-name>-serve`, que inicia seu Ag
 
 Este comando usa `uv run` para executar seu Agente Strands usando o [Bedrock AgentCore Python SDK](https://github.com/aws/bedrock-agentcore-sdk-python).
 
+<OptionFilter when={{ computeType: 'BedrockAgentCoreRuntime' }} description="Bedrock AgentCore Runtime deployment details">
 ## Implantando Seu Agente Strands no Bedrock AgentCore Runtime
 
 <Snippet name="agent/bedrock-deployment" parentHeading="Implantando Seu Agente Strands no Bedrock AgentCore Runtime" />
@@ -349,9 +366,11 @@ Seu agente é configurado automaticamente com observabilidade usando o [AWS Dist
 Você pode encontrar traces no Console AWS CloudWatch, selecionando "GenAI Observability" no menu. Note que para os traces serem populados, você precisará habilitar o [Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search.html).
 
 Para mais detalhes, consulte a [documentação do AgentCore sobre observabilidade](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html).
+</OptionFilter>
 
 ## Invocando seu Agente Strands
 
+<OptionFilter when={{ protocol: 'HTTP' }} description="FastAPI HTTP invocation details">
 ### Invocar o Servidor Local
 
 Para invocar um Agente executando localmente através do alvo `<your-agent-name>-serve`, você pode enviar uma requisição POST simples para `/invocations` na porta em que seu agente local está sendo executado. Por exemplo, com `curl`:
@@ -370,6 +389,8 @@ O argumento `-N` dado ao `curl` desabilita o buffering do fluxo de saída, para 
 
 <Snippet name="agent/runtime-arn" parentHeading="Invocar o Agente Implantado" />
 
+<Tabs syncKey="auth">
+<TabItem label="IAM" _filter={{ auth: 'IAM' }}>
 #### Autenticação IAM
 
 Para Autenticação IAM, a requisição deve ser assinada usando AWS Signature Version 4 (SigV4).
@@ -384,7 +405,9 @@ acurl <region> bedrock-agentcore -N -X POST \
 <Drawer title="Curl habilitado com Sigv4" trigger="Clique aqui para mais detalhes sobre como configurar o comando acurl acima">
 <Snippet name="tools/acurl" />
 </Drawer>
+</TabItem>
 
+<TabItem label="Cognito" _filter={{ auth: 'Cognito' }}>
 #### Autenticação JWT / Cognito
 
 Para Autenticação Cognito, passe o Token de Acesso Cognito no cabeçalho `Authorization`:
@@ -408,6 +431,8 @@ aws cognito-idp admin-initiate-auth \
   --query 'AuthenticationResult.AccessToken' \
   --output text
 ```
+</TabItem>
+</Tabs>
 
 #### Navegador / Website React
 
@@ -416,7 +441,9 @@ Para invocar seu Agente Strands a partir de um website React, você pode usar o 
 <RunGenerator generator="connection" />
 
 Consulte o <Link path="/guides/connection/react-py-strands-agent">guia do gerador `connection`</Link> para detalhes sobre como a conexão é configurada.
+</OptionFilter>
 
+<OptionFilter when={{ protocol: 'A2A' }} description="A2A delegation details">
 ### Invocando um Agente A2A como Ferramenta
 
 Para delegar trabalho deste agente para um agente A2A remoto (seja <Link path="/guides/ts-strands-agent">TypeScript</Link> ou <Link path="/guides/py-strands-agent">Python</Link>), use o <Link path="/guides/connection/py-strands-agent-a2a">gerador `connection`</Link>. Ele fornece um cliente autenticado com SigV4 para o agente alvo e transforma via AST o `agent.py` deste agente para registrar o agente A2A remoto como um delegado decorado com `@tool`.
@@ -424,3 +451,14 @@ Para delegar trabalho deste agente para um agente A2A remoto (seja <Link path="/
 <RunGenerator generator="connection" />
 
 Consulte o <Link path="/guides/connection/py-strands-agent-a2a">guia do gerador `connection`</Link> para detalhes sobre como a conexão é configurada.
+</OptionFilter>
+
+<OptionFilter when={{ protocol: 'AG-UI' }} description="AG-UI / React connection details">
+### Invocando um Agente AG-UI
+
+Para invocar seu agente AG-UI a partir de um website React, use o <Link path="/guides/connection/react-agui">gerador `connection`</Link>, que configura um cliente [CopilotKit](https://docs.copilotkit.ai/aws-strands) configurado para seu agente implantado com a autenticação correta (IAM ou Cognito).
+
+<RunGenerator generator="connection" />
+
+Consulte o <Link path="/guides/connection/react-agui">guia do gerador `connection`</Link> para detalhes sobre como a conexão é configurada.
+</OptionFilter>

@@ -90,7 +90,7 @@ exports[`cognito-auth generator > should generate files > user-identity 1`] = `
   IdentityPool,
   UserPoolAuthenticationProvider,
 } from 'aws-cdk-lib/aws-cognito-identitypool';
-import { CfnOutput, Duration, Lazy, Stack } from 'aws-cdk-lib';
+import { CfnOutput, CfnResource, Duration, Lazy, Stack } from 'aws-cdk-lib';
 import {
   AccountRecovery,
   CfnManagedLoginBranding,
@@ -161,8 +161,8 @@ export class UserIdentity extends Construct {
     });
   }
 
-  private createUserPool = () =>
-    new UserPool(this, 'UserPool', {
+  private createUserPool = () => {
+    const userPool = new UserPool(this, 'UserPool', {
       deletionProtection: true,
       passwordPolicy: {
         minLength: 8,
@@ -194,6 +194,15 @@ export class UserIdentity extends Construct {
         phone: true,
       },
     });
+    // Retain the SMS role alongside the pool so the pool can still be updated and deleted manually
+    const poolCfn = userPool.node.defaultChild as CfnResource;
+    const smsRoleCfn = userPool.node.findChild('smsRole').node
+      .defaultChild as CfnResource;
+    smsRoleCfn.cfnOptions.deletionPolicy = poolCfn.cfnOptions.deletionPolicy;
+    smsRoleCfn.cfnOptions.updateReplacePolicy =
+      poolCfn.cfnOptions.updateReplacePolicy;
+    return userPool;
+  };
 
   private createUserPoolDomain = (userPool: UserPool) =>
     new CfnUserPoolDomain(this, 'UserPoolDomain', {

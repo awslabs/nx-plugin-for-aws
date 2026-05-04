@@ -1,9 +1,10 @@
 ---
 title: "Agente Strands de TypeScript"
 description: "Genera un Agente Strands de TypeScript para construir agentes de IA con herramientas y despliega en Amazon Bedrock AgentCore Runtime"
+generator: ts#strands-agent
 ---
 
-import { FileTree } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
 import RunGenerator from '@components/run-generator.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Link from '@components/link.astro';
@@ -11,12 +12,9 @@ import Snippet from '@components/snippet.astro';
 import Infrastructure from '@components/infrastructure.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import PackageManagerExecCommand from '@components/package-manager-exec-command.astro';
+import OptionFilter from '@components/option-filter.astro';
 
 Genera un TypeScript [Strands Agent](https://strandsagents.com/) para construir agentes de IA con herramientas, y opcionalmente despliégalo en [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/). Por defecto, el generador utiliza [tRPC](https://trpc.io/) sobre WebSocket para aprovechar el [soporte de streaming bidireccional de AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html) para comunicación en tiempo real y con seguridad de tipos. Alternativamente, puedes elegir el protocolo [Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) para interoperabilidad con otros agentes compatibles con A2A.
-
-:::caution[AG-UI aún no soportado para TypeScript]
-El [protocolo AG-UI](https://docs.ag-ui.com/) aún no está soportado para TypeScript Strands Agents. Si necesitas soporte AG-UI, por favor usa el generador <Link path="/guides/py-strands-agent">`py#strands-agent`</Link> con `protocol=AG-UI`. Consulta [strands-agents/sdk-typescript#347](https://github.com/strands-agents/sdk-typescript/issues/347) para el estado del soporte AG-UI en TypeScript.
-:::
 
 ## ¿Qué es Strands?
 
@@ -49,6 +47,7 @@ Primero usa el generador <Link path="/guides/typescript-project">`ts#project`</L
 
 El generador agregará los siguientes archivos a tu proyecto TypeScript existente. Los archivos generados dependen del `protocol` elegido:
 
+<OptionFilter when={{ protocol: 'HTTP' }} description="tRPC-over-WebSocket layout">
 ### Protocolo HTTP (predeterminado)
 
 <FileTree>
@@ -65,10 +64,12 @@ El generador agregará los siguientes archivos a tu proyecto TypeScript existent
     - package.json Actualizado con dependencias de Strands
     - project.json Actualizado con targets de servicio del agente
 </FileTree>
+</OptionFilter>
 
+<OptionFilter when={{ protocol: 'A2A' }} description="Strands A2A Express server layout">
 ### Protocolo A2A
 
-Cuando `protocol` está establecido en `A2A`, el punto de entrada usa el [Strands A2A Express Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent) en lugar de tRPC:
+El punto de entrada usa el [Strands A2A Express Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent) en lugar de tRPC:
 
 <FileTree>
   - your-project/
@@ -80,13 +81,11 @@ Cuando `protocol` está establecido en `A2A`, el punto de entrada usa el [Strand
     - package.json Actualizado con dependencias de Strands y Express
     - project.json Actualizado con targets de servicio del agente
 </FileTree>
+</OptionFilter>
 
 ### Infraestructura
 
-:::note[Despliegue serverless]
-Si seleccionaste `None` para `computeType`, el generador no proveerá ninguna infraestructura como código.
-:::
-
+<OptionFilter when={{ computeType: 'BedrockAgentCoreRuntime' }} description="Bedrock AgentCore Runtime deployment">
 <Snippet name="shared-constructs" />
 
 Para desplegar tu Strands Agent, se generan los siguientes archivos:
@@ -114,6 +113,11 @@ Para desplegar tu Strands Agent, se generan los siguientes archivos:
 </FileTree>
 </Fragment>
 </Infrastructure>
+</OptionFilter>
+
+<OptionFilter when={{ computeType: 'None' }} description="No infrastructure is vended for computeType=None">
+Si seleccionaste `None` para `computeType`, no se generan constructos CDK ni módulos Terraform — el Strands Agent solo puede ejecutarse localmente.
+</OptionFilter>
 
 ## Trabajar con tu Strands Agent
 
@@ -126,11 +130,13 @@ El protocolo del servidor de tu agente determina cómo se comunica. Puedes elegi
 
 El protocolo se establece en la infraestructura CDK/Terraform, y el código de la aplicación se genera en consecuencia.
 
+<OptionFilter when={{ protocol: 'HTTP' }} description="tRPC over WebSocket details">
 ### tRPC sobre WebSocket (protocolo HTTP)
 
 El TypeScript Strands Agent utiliza [tRPC](https://trpc.io/) sobre WebSocket, aprovechando el [soporte de streaming bidireccional de AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html) para habilitar comunicación en tiempo real y con seguridad de tipos entre clientes y tu agente.
 
 Dado que tRPC soporta procedimientos Query, Mutation y Subscription sobre WebSocket, puedes definir cualquier número de procedimientos. Por defecto, se define un único procedimiento de suscripción llamado `invoke` en `router.ts`.
+</OptionFilter>
 
 ### Agregar Herramientas
 
@@ -211,11 +217,13 @@ Para otros servidores MCP, por favor consulta la [Documentación de Strands](htt
 
 Para una guía más profunda sobre cómo escribir agentes Strands, consulta la [documentación de Strands](https://strandsagents.com/docs/user-guide/quickstart/overview/).
 
+<OptionFilter when={{ protocol: 'A2A' }} description="A2A Express server details">
 ## Servidor A2A (protocolo A2A)
 
-Cuando `protocol=A2A`, el `index.ts` generado monta el [Strands A2A Express Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent) en una aplicación Express para que el agente generado exponga los endpoints del protocolo A2A junto con un health check `/ping`. Cuando se despliega en AgentCore, el punto de entrada resuelve el ARN público del runtime desde AppConfig y lo anuncia en la tarjeta del agente.
+El `index.ts` generado monta el [Strands A2A Express Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent) en una aplicación Express para que el agente generado exponga los endpoints del protocolo A2A junto con un health check `/ping`. Cuando se despliega en AgentCore, el punto de entrada resuelve el ARN público del runtime desde AppConfig y lo anuncia en la tarjeta del agente.
 
 La mayoría de los usuarios no necesitarán modificar este archivo — edita `agent.ts` para cambiar herramientas o el prompt del sistema. Los agentes A2A escuchan en el puerto `9000` (vs `8080` para HTTP), para lo cual el Dockerfile y la infraestructura generados ya están configurados.
+</OptionFilter>
 
 ## Ejecutar tu Strands Agent
 
@@ -227,6 +235,7 @@ El generador configura un target llamado `<your-agent-name>-serve`, que inicia t
 
 Este comando usa `tsx --watch` para reiniciar automáticamente el servidor cuando cambian los archivos. El agente estará disponible en `http://localhost:8081` (o el puerto asignado si tienes múltiples agentes).
 
+<OptionFilter when={{ computeType: 'BedrockAgentCoreRuntime' }} description="Bedrock AgentCore Runtime deployment details">
 ## Desplegar tu Strands Agent en Bedrock AgentCore Runtime
 
 <Snippet name="agent/bedrock-deployment" parentHeading="Desplegar tu Strands Agent en Bedrock AgentCore Runtime" />
@@ -250,11 +259,13 @@ Tu agente está configurado automáticamente con observabilidad usando el [AWS D
 Puedes encontrar trazas en la Consola AWS CloudWatch, seleccionando "GenAI Observability" en el menú. Ten en cuenta que para que las trazas se completen necesitarás habilitar [Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search.html).
 
 Para más detalles, consulta la [documentación de AgentCore sobre observabilidad](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html).
+</OptionFilter>
 
 ## Invocar tu Strands Agent
 
 La comunicación del agente se transmite vía tRPC sobre WebSocket. Como tal, se recomienda usar la fábrica de cliente con seguridad de tipos generada en `client.ts`.
 
+<OptionFilter when={{ protocol: 'HTTP' }} description="tRPC-over-WebSocket client factory invocation details">
 ### Invocar el Servidor Local
 
 Puedes invocar un agente ejecutándose localmente usando el método de fábrica `.local` de la fábrica de cliente.
@@ -288,6 +299,8 @@ El archivo `client.ts` generado incluye una fábrica de cliente con seguridad de
 La fábrica de cliente usa encabezados HTTP en el handshake de WebSocket para autenticar solicitudes a Bedrock AgentCore Runtime. Esto no es posible en un navegador, y por lo tanto este cliente no es adecuado para entornos de navegador. Consulta la sección "Browser" a continuación para detalles sobre la invocación desde un navegador.
 :::
 
+<Tabs syncKey="auth">
+<TabItem label="IAM" _filter={{ auth: 'IAM' }}>
 ##### Autenticación IAM
 
 Puedes invocar tu agente desplegado pasando su ARN al método de fábrica `withIamAuth`:
@@ -309,7 +322,9 @@ client.invoke.subscribe({ message: 'what is 1 plus 1?' }, {
 :::note[Credenciales de AWS]
 Esto usará la cadena de proveedores de credenciales AWS predeterminada para autenticar solicitudes, por lo que el entorno en el que se ejecuta lo anterior debe tener credenciales AWS configuradas, con acceso para invocar el runtime.
 :::
+</TabItem>
 
+<TabItem label="Cognito" _filter={{ auth: 'Cognito' }}>
 ##### Autenticación JWT / Cognito
 
 Usa el método de fábrica `withJwtAuth` para autenticar con el token de acceso JWT / Cognito.
@@ -348,6 +363,8 @@ const jwtClient = AgentClient.withJwtAuth({
   },
 });
 ```
+</TabItem>
+</Tabs>
 
 #### Browser / React Website
 
@@ -356,7 +373,9 @@ Para invocar tu Strands Agent desde un sitio web React, puedes hacer uso del <Li
 <RunGenerator generator="connection" />
 
 Consulta la <Link path="/guides/connection/react-ts-strands-agent">guía del generador `connection`</Link> para detalles sobre cómo se configura la conexión.
+</OptionFilter>
 
+<OptionFilter when={{ protocol: 'A2A' }} description="A2A delegation details">
 ### Invocar un Agente A2A como Herramienta
 
 Para delegar trabajo desde este agente a un agente A2A remoto (ya sea <Link path="/guides/ts-strands-agent">TypeScript</Link> o <Link path="/guides/py-strands-agent">Python</Link>), usa el <Link path="/guides/connection/ts-strands-agent-a2a">generador `connection`</Link>. Este provee un cliente autenticado con SigV4 para el agente objetivo y transforma mediante AST el `agent.ts` de este agente para registrar el agente A2A remoto como una `tool` de Strands.
@@ -364,3 +383,4 @@ Para delegar trabajo desde este agente a un agente A2A remoto (ya sea <Link path
 <RunGenerator generator="connection" />
 
 Consulta la <Link path="/guides/connection/ts-strands-agent-a2a">guía del generador `connection`</Link> para detalles sobre cómo se configura la conexión.
+</OptionFilter>
