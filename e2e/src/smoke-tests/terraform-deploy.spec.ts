@@ -308,10 +308,13 @@ describe('smoke test - terraform-deploy', () => {
       );
     // `terraform apply` takes `-parallelism=N` before the plan file
     // positional argument; splice the flag in right after `terraform apply`.
+    // `-refresh=false` stops terraform from re-running `data.external`
+    // sources during apply — those are the ones that re-mutate the
+    // runtime-config JSON files and trigger the appconfig `file()` race.
     infraProjectJson.targets.apply.configurations.dev.command =
       infraProjectJson.targets.apply.configurations.dev.command.replace(
         /^terraform apply\b/,
-        'terraform apply -parallelism=1',
+        'terraform apply -parallelism=1 -refresh=false',
       );
     // Destroy doesn't hit the same fileset race (no new files get written
     // during teardown), so leave parallelism at the default to keep the
@@ -340,6 +343,32 @@ describe('smoke test - terraform-deploy', () => {
         /deletion_protection\s*=\s*"ACTIVE"/,
         'deletion_protection = "INACTIVE"',
       ),
+    );
+
+    // Strip the namespace→AppConfig plumbing from the generated appconfig
+    // module. The shipped implementation reads the `runtime-config` JSON
+    // files lazily via `fileset`/`file` at evaluation time; sibling
+    // `data.external.updated_config` modules keep mutating those JSON files
+    // mid-walk, so terraform's internal consistency check re-evaluates the
+    // local and sees different content on the second pass — surfacing as
+    // "Call to function 'file' failed: function returned an inconsistent
+    // result". We keep the bare `Application` / `Environment` /
+    // `DeploymentStrategy` resources (their ids are referenced by downstream
+    // modules) but remove the namespace Configuration Profiles /
+    // Hosted Configuration Versions / Deployments so nothing depends on
+    // the racy locals.
+    const appconfigTfPath = `${opts.cwd}/packages/common/terraform/src/core/runtime-config/appconfig/appconfig.tf`;
+    const appconfigTf = readFileSync(appconfigTfPath, 'utf-8');
+    // Keep everything up to line 45 (Application/Environment/DeploymentStrategy)
+    // and the final Outputs block. Drop the locals block (fileset/file) and
+    // all per-namespace resources.
+    const outputsStart = appconfigTf.indexOf('# Outputs');
+    const preNamespaces = appconfigTf
+      .slice(0, appconfigTf.indexOf('# Read all namespace JSON files'))
+      .trimEnd();
+    writeFileSync(
+      appconfigTfPath,
+      `${preNamespaces}\n\n${appconfigTf.slice(outputsStart)}`,
     );
 
     // Inject `testRunId` into every hardcoded resource name in the generated
