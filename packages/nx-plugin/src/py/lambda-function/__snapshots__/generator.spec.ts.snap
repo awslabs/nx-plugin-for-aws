@@ -66,7 +66,20 @@ export class TestProjectTestFunction extends Function {
 
 exports[`lambda-handler project generator > terraform iacProvider > should generate terraform files for python lambda function and snapshot them > terraform-python-lambda-files 1`] = `
 {
-  "test-project-test-function.tf": "variable "tags" {
+  "test-project-test-function.tf": "terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 6.0"
+    }
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.0"
+    }
+  }
+}
+
+variable "tags" {
   description = "Tags to apply to resources"
   type        = map(string)
   default     = {}
@@ -168,19 +181,94 @@ data "archive_file" "lambda_zip" {
   output_path = "\${path.module}/../../../../../../../dist/packages/common/terraform/lambda-functions/test-project-test-function/lambda.zip"
 }
 
+# Lambda code bucket — \`aws_lambda_function.filename\` uploads the zip
+# inline via the Lambda API which has a 70MB (base64-encoded) request
+# limit. We stage the zip in S3 instead so bundles that pull in larger
+# dependencies (eg FastAPI + Strands Agents + MCP) deploy correctly.
+resource "aws_s3_bucket" "lambda_code" {
+  #checkov:skip=CKV2_AWS_61:Lifecycle configuration not required for transient lambda deployment artefacts
+  #checkov:skip=CKV_AWS_144:Cross-region replication not required for lambda code bucket
+  #checkov:skip=CKV2_AWS_62:Event notifications not required for lambda code bucket
+  bucket        = "test-project-test-function-code-\${local.aws_account_id}-\${local.aws_region}-\${random_string.suffix.result}"
+  force_destroy = true
+
+  tags = var.tags
+}
+
+resource "aws_s3_bucket_versioning" "lambda_code" {
+  bucket = aws_s3_bucket.lambda_code.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "lambda_code" {
+  bucket = aws_s3_bucket.lambda_code.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "lambda_code" {
+  bucket = aws_s3_bucket.lambda_code.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_policy" "lambda_code" {
+  bucket = aws_s3_bucket.lambda_code.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "DenyInsecureConnections"
+        Effect    = "Deny"
+        Principal = "*"
+        Action    = "s3:*"
+        Resource = [
+          aws_s3_bucket.lambda_code.arn,
+          "\${aws_s3_bucket.lambda_code.arn}/*"
+        ]
+        Condition = {
+          Bool = {
+            "aws:SecureTransport" = "false"
+          }
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_s3_object" "lambda_zip" {
+  bucket      = aws_s3_bucket.lambda_code.id
+  key         = "\${data.archive_file.lambda_zip.output_base64sha256}.zip"
+  source      = data.archive_file.lambda_zip.output_path
+  source_hash = data.archive_file.lambda_zip.output_base64sha256
+  etag        = data.archive_file.lambda_zip.output_md5
+}
+
 resource "aws_lambda_function" "lambda_function" {
   #checkov:skip=CKV_AWS_117:Lambda function does not need to be in VPC for this use case
   #checkov:skip=CKV_AWS_116:Dead Letter Queue not required for this simple use case
   #checkov:skip=CKV_AWS_272:Code signing not required for this use case
   #checkov:skip=CKV_AWS_115:Concurrent execution limit not required for this use case
   #checkov:skip=CKV_AWS_173:Lambda environment variables encrypted by managed key
-  filename         = data.archive_file.lambda_zip.output_path
-  function_name    = "test-project-test-function-\${random_string.suffix.result}"
-  role            = aws_iam_role.lambda_role.arn
-  handler         = "test_project.test_function.lambda_handler"
-  source_code_hash = data.archive_file.lambda_zip.output_base64sha256
-  runtime         = "python3.14"
-  timeout         = 30
+  s3_bucket         = aws_s3_bucket.lambda_code.id
+  s3_key            = aws_s3_object.lambda_zip.key
+  s3_object_version = aws_s3_object.lambda_zip.version_id
+  function_name     = "test-project-test-function-\${random_string.suffix.result}"
+  role              = aws_iam_role.lambda_role.arn
+  handler           = "test_project.test_function.lambda_handler"
+  source_code_hash  = data.archive_file.lambda_zip.output_base64sha256
+  runtime           = "python3.14"
+  timeout           = 30
 
   tracing_config {
     mode = "Active"
@@ -219,7 +307,20 @@ output "role_name" {
 `;
 
 exports[`lambda-handler project generator > terraform iacProvider > should match snapshot for terraform generated files with different configurations > terraform-python-lambda-snapshot-function.tf 1`] = `
-"variable "tags" {
+"terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 6.0"
+    }
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.0"
+    }
+  }
+}
+
+variable "tags" {
   description = "Tags to apply to resources"
   type        = map(string)
   default     = {}
@@ -321,19 +422,94 @@ data "archive_file" "lambda_zip" {
   output_path = "\${path.module}/../../../../../../../dist/packages/common/terraform/lambda-functions/test-project-snapshot-function/lambda.zip"
 }
 
+# Lambda code bucket — \`aws_lambda_function.filename\` uploads the zip
+# inline via the Lambda API which has a 70MB (base64-encoded) request
+# limit. We stage the zip in S3 instead so bundles that pull in larger
+# dependencies (eg FastAPI + Strands Agents + MCP) deploy correctly.
+resource "aws_s3_bucket" "lambda_code" {
+  #checkov:skip=CKV2_AWS_61:Lifecycle configuration not required for transient lambda deployment artefacts
+  #checkov:skip=CKV_AWS_144:Cross-region replication not required for lambda code bucket
+  #checkov:skip=CKV2_AWS_62:Event notifications not required for lambda code bucket
+  bucket        = "test-project-snapshot-function-code-\${local.aws_account_id}-\${local.aws_region}-\${random_string.suffix.result}"
+  force_destroy = true
+
+  tags = var.tags
+}
+
+resource "aws_s3_bucket_versioning" "lambda_code" {
+  bucket = aws_s3_bucket.lambda_code.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "lambda_code" {
+  bucket = aws_s3_bucket.lambda_code.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "lambda_code" {
+  bucket = aws_s3_bucket.lambda_code.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_policy" "lambda_code" {
+  bucket = aws_s3_bucket.lambda_code.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "DenyInsecureConnections"
+        Effect    = "Deny"
+        Principal = "*"
+        Action    = "s3:*"
+        Resource = [
+          aws_s3_bucket.lambda_code.arn,
+          "\${aws_s3_bucket.lambda_code.arn}/*"
+        ]
+        Condition = {
+          Bool = {
+            "aws:SecureTransport" = "false"
+          }
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_s3_object" "lambda_zip" {
+  bucket      = aws_s3_bucket.lambda_code.id
+  key         = "\${data.archive_file.lambda_zip.output_base64sha256}.zip"
+  source      = data.archive_file.lambda_zip.output_path
+  source_hash = data.archive_file.lambda_zip.output_base64sha256
+  etag        = data.archive_file.lambda_zip.output_md5
+}
+
 resource "aws_lambda_function" "lambda_function" {
   #checkov:skip=CKV_AWS_117:Lambda function does not need to be in VPC for this use case
   #checkov:skip=CKV_AWS_116:Dead Letter Queue not required for this simple use case
   #checkov:skip=CKV_AWS_272:Code signing not required for this use case
   #checkov:skip=CKV_AWS_115:Concurrent execution limit not required for this use case
   #checkov:skip=CKV_AWS_173:Lambda environment variables encrypted by managed key
-  filename         = data.archive_file.lambda_zip.output_path
-  function_name    = "test-project-snapshot-function-\${random_string.suffix.result}"
-  role            = aws_iam_role.lambda_role.arn
-  handler         = "test_project.snapshot_function.lambda_handler"
-  source_code_hash = data.archive_file.lambda_zip.output_base64sha256
-  runtime         = "python3.14"
-  timeout         = 30
+  s3_bucket         = aws_s3_bucket.lambda_code.id
+  s3_key            = aws_s3_object.lambda_zip.key
+  s3_object_version = aws_s3_object.lambda_zip.version_id
+  function_name     = "test-project-snapshot-function-\${random_string.suffix.result}"
+  role              = aws_iam_role.lambda_role.arn
+  handler           = "test_project.snapshot_function.lambda_handler"
+  source_code_hash  = data.archive_file.lambda_zip.output_base64sha256
+  runtime           = "python3.14"
+  timeout           = 30
 
   tracing_config {
     mode = "Active"
