@@ -297,6 +297,14 @@ describe('smoke test - terraform-deploy', () => {
       JSON.stringify(infraProjectJson, null, 2),
     );
 
+    // Enable auto-sync so generated files (license headers on the new main.tf,
+    // ts path aliases etc.) don't block the `apply` / `destroy` pipeline with
+    // a fatal "workspace is out of sync" error.
+    const nxJsonPath = `${opts.cwd}/nx.json`;
+    const nxJson = JSON.parse(readFileSync(nxJsonPath, 'utf-8'));
+    nxJson.sync = { ...(nxJson.sync ?? {}), applyChanges: true };
+    writeFileSync(nxJsonPath, JSON.stringify(nxJson, null, 2));
+
     try {
       // One-time remote-state bootstrap (idempotent — the target re-uses any
       // existing tfstate already in the per-account/region bucket).
