@@ -22,55 +22,63 @@ datasource db {
 "
 `;
 
-exports[`ts#rdb generator > should add mysql prisma dependencies when engine is MySQL > packages/db/scripts/local-db.ts 1`] = `
-"import { DockerClient, NotFoundError } from '@docker/node-sdk';
+exports[`ts#rdb generator > should add mysql prisma dependencies when engine is MySQL > packages/db/scripts/docker-pull.ts 1`] = `
+"import Docker from 'dockerode';
+import { promisify } from 'util';
 
-const [containerName, hostPort, dbName, dbUser, dbPassword] =
-  process.argv.slice(2);
-
-if (!containerName || !hostPort || !dbName || !dbUser || !dbPassword) {
-  console.error(
-    'Usage: local-db.ts <containerName> <hostPort> <dbName> <dbUser> <dbPassword>',
-  );
-  process.exit(1);
-}
-
-const docker = await DockerClient.fromDockerConfig();
+const docker = new Docker();
+const image = process.argv[2];
 
 try {
-  await docker.containerStop(containerName);
-  await docker.containerDelete(containerName);
+  await docker.getImage(image).inspect();
 } catch (e) {
-  if (!(e instanceof NotFoundError)) throw e;
+  if ((e as { statusCode?: number }).statusCode !== 404) throw e;
+  const stream = (await promisify(docker.pull.bind(docker))(
+    image,
+  )) as NodeJS.ReadableStream;
+  await promisify(docker.modem.followProgress.bind(docker.modem))(stream);
 }
+"
+`;
 
-const { Id: id } = await docker.containerCreate(
-  {
+exports[`ts#rdb generator > should add mysql prisma dependencies when engine is MySQL > packages/db/scripts/docker-start.ts 1`] = `
+"import Docker from 'dockerode';
+
+const [containerName, hostPort, dbName, dbPassword] = process.argv.slice(2);
+
+const docker = new Docker();
+
+let container: Docker.Container;
+
+try {
+  const existing = docker.getContainer(containerName);
+  const info = await existing.inspect();
+  container = existing;
+  if (!info.State.Running) {
+    await container.start();
+  }
+} catch (e) {
+  if ((e as { statusCode?: number }).statusCode !== 404) throw e;
+  container = await docker.createContainer({
+    name: containerName,
     Image: 'mysql',
-    Env: [
-      \`MYSQL_DATABASE=\${dbName}\`,
-      \`MYSQL_USER=\${dbUser}\`,
-      \`MYSQL_PASSWORD=\${dbPassword}\`,
-      \`MYSQL_ROOT_PASSWORD=\${dbPassword}\`,
-    ],
+    Env: [\`MYSQL_DATABASE=\${dbName}\`, \`MYSQL_ROOT_PASSWORD=\${dbPassword}\`],
     ExposedPorts: { '3306/tcp': {} },
     HostConfig: {
       AutoRemove: true,
       PortBindings: { '3306/tcp': [{ HostPort: hostPort }] },
       Binds: [\`\${containerName}-data:/var/lib/mysql\`],
     },
-  },
-  { name: containerName },
-);
+  });
+  await container.start();
+}
 
-await docker.containerStart(id);
-void docker
-  .containerLogs(id, process.stdout, process.stderr, {
-    follow: true,
-    stdout: true,
-    stderr: true,
-  })
-  .catch(console.error);
+const stream = await container.attach({
+  stream: true,
+  stdout: true,
+  stderr: true,
+});
+container.modem.demuxStream(stream, process.stdout, process.stderr);
 
 let exiting = false;
 
@@ -78,9 +86,9 @@ async function cleanup() {
   if (exiting) return;
   exiting = true;
   try {
-    await docker.containerStop(containerName);
+    await container.stop();
   } catch (e) {
-    if (!(e instanceof NotFoundError)) console.error(e);
+    if ((e as { statusCode?: number }).statusCode !== 404) console.error(e);
   }
   process.exit(0);
 }
@@ -89,8 +97,42 @@ process.on('SIGTERM', () => void cleanup());
 process.on('SIGINT', () => void cleanup());
 process.on('SIGHUP', () => void cleanup());
 
-const { StatusCode } = await docker.containerWait(id);
+const { StatusCode } = await container.wait();
 if (!exiting) process.exit(StatusCode);
+"
+`;
+
+exports[`ts#rdb generator > should add mysql prisma dependencies when engine is MySQL > packages/db/scripts/wait-for-db.ts 1`] = `
+"import { createConnection, Connection } from 'mariadb';
+
+const noop = () => undefined;
+
+const [portArg, dbArg, userArg, passwordArg] = process.argv.slice(2);
+const timeoutAt = Date.now() + 30000;
+
+while (Date.now() < timeoutAt) {
+  let conn: Connection | undefined;
+  try {
+    conn = await createConnection({
+      host: 'localhost',
+      port: parseInt(portArg),
+      user: userArg,
+      password: passwordArg,
+      database: dbArg,
+      connectTimeout: 500,
+      allowPublicKeyRetrieval: true,
+    });
+    await conn.end();
+    console.log('Database is ready.');
+    process.exit(0);
+  } catch (e) {
+    console.log(e);
+    await conn?.end().catch(noop);
+  }
+  await new Promise((r) => setTimeout(r, 200));
+}
+
+throw new Error(\`Timed out waiting for mysql on port \${portArg}\`);
 "
 `;
 
@@ -101,7 +143,7 @@ exports[`ts#rdb generator > should add mysql prisma dependencies when engine is 
 export const LOCAL_DB_PORT = 3306;
 export const LOCAL_DB_HOST = 'localhost';
 export const LOCAL_DB_NAME = 'databasename';
-export const LOCAL_DB_USER = 'dbadmin';
+export const LOCAL_DB_USER = 'root';
 export const LOCAL_DB_PASSWORD = 'password';
 "
 `;
@@ -246,6 +288,7 @@ const createPrismaClient = async (): Promise<PrismaClient> => {
       database: LOCAL_DB_NAME,
       user: LOCAL_DB_USER,
       password: LOCAL_DB_PASSWORD,
+      allowPublicKeyRetrieval: true,
     });
     return new PrismaClient({ adapter });
   }
@@ -733,16 +776,16 @@ export abstract class AuroraDatabase extends Construct {
 
 exports[`ts#rdb generator > should add mysql prisma dependencies when engine is MySQL 2`] = `
 "import { defineConfig } from 'prisma/config';
-import {
-  LOCAL_DB_HOST,
-  LOCAL_DB_NAME,
-  LOCAL_DB_PASSWORD,
-  LOCAL_DB_PORT,
-  LOCAL_DB_USER,
-} from './src/constants.js';
 
-const getDatabaseUrl = () => {
+const getDatabaseUrl = async () => {
   if (process.env.SERVE_LOCAL === 'true') {
+    const {
+      LOCAL_DB_HOST,
+      LOCAL_DB_NAME,
+      LOCAL_DB_PASSWORD,
+      LOCAL_DB_PORT,
+      LOCAL_DB_USER,
+    } = await import('./src/constants.js');
     return \`mysql://\${LOCAL_DB_USER}:\${LOCAL_DB_PASSWORD}@\${LOCAL_DB_HOST}:\${LOCAL_DB_PORT}/\${LOCAL_DB_NAME}\`;
   }
   return process.env.DATABASE_URL;
@@ -754,7 +797,7 @@ export default defineConfig({
     path: 'prisma/migrations',
   },
   datasource: {
-    url: getDatabaseUrl(),
+    url: await getDatabaseUrl(),
   },
 });
 "
@@ -3433,30 +3476,46 @@ datasource db {
 "
 `;
 
-exports[`ts#rdb generator > should generate the aurora shared construct > packages/db/scripts/local-db.ts 1`] = `
-"import { DockerClient, NotFoundError } from '@docker/node-sdk';
+exports[`ts#rdb generator > should generate the aurora shared construct > packages/db/scripts/docker-pull.ts 1`] = `
+"import Docker from 'dockerode';
+import { promisify } from 'util';
+
+const docker = new Docker();
+const image = process.argv[2];
+
+try {
+  await docker.getImage(image).inspect();
+} catch (e) {
+  if ((e as { statusCode?: number }).statusCode !== 404) throw e;
+  const stream = (await promisify(docker.pull.bind(docker))(
+    image,
+  )) as NodeJS.ReadableStream;
+  await promisify(docker.modem.followProgress.bind(docker.modem))(stream);
+}
+"
+`;
+
+exports[`ts#rdb generator > should generate the aurora shared construct > packages/db/scripts/docker-start.ts 1`] = `
+"import Docker from 'dockerode';
 
 const [containerName, hostPort, dbName, dbUser, dbPassword] =
   process.argv.slice(2);
 
-if (!containerName || !hostPort || !dbName || !dbUser || !dbPassword) {
-  console.error(
-    'Usage: local-db.ts <containerName> <hostPort> <dbName> <dbUser> <dbPassword>',
-  );
-  process.exit(1);
-}
+const docker = new Docker();
 
-const docker = await DockerClient.fromDockerConfig();
+let container: Docker.Container;
 
 try {
-  await docker.containerStop(containerName);
-  await docker.containerDelete(containerName);
+  const existing = docker.getContainer(containerName);
+  const info = await existing.inspect();
+  container = existing;
+  if (!info.State.Running) {
+    await container.start();
+  }
 } catch (e) {
-  if (!(e instanceof NotFoundError)) throw e;
-}
-
-const { Id: id } = await docker.containerCreate(
-  {
+  if ((e as { statusCode?: number }).statusCode !== 404) throw e;
+  container = await docker.createContainer({
+    name: containerName,
     Image: 'postgres',
     Env: [
       \`POSTGRES_DB=\${dbName}\`,
@@ -3469,18 +3528,16 @@ const { Id: id } = await docker.containerCreate(
       PortBindings: { '5432/tcp': [{ HostPort: hostPort }] },
       Binds: [\`\${containerName}-data:/var/lib/postgresql\`],
     },
-  },
-  { name: containerName },
-);
+  });
+  await container.start();
+}
 
-await docker.containerStart(id);
-void docker
-  .containerLogs(id, process.stdout, process.stderr, {
-    follow: true,
-    stdout: true,
-    stderr: true,
-  })
-  .catch(console.error);
+const stream = await container.attach({
+  stream: true,
+  stdout: true,
+  stderr: true,
+});
+container.modem.demuxStream(stream, process.stdout, process.stderr);
 
 let exiting = false;
 
@@ -3488,9 +3545,9 @@ async function cleanup() {
   if (exiting) return;
   exiting = true;
   try {
-    await docker.containerStop(containerName);
+    await container.stop();
   } catch (e) {
-    if (!(e instanceof NotFoundError)) console.error(e);
+    if ((e as { statusCode?: number }).statusCode !== 404) console.error(e);
   }
   process.exit(0);
 }
@@ -3499,8 +3556,42 @@ process.on('SIGTERM', () => void cleanup());
 process.on('SIGINT', () => void cleanup());
 process.on('SIGHUP', () => void cleanup());
 
-const { StatusCode } = await docker.containerWait(id);
+const { StatusCode } = await container.wait();
 if (!exiting) process.exit(StatusCode);
+"
+`;
+
+exports[`ts#rdb generator > should generate the aurora shared construct > packages/db/scripts/wait-for-db.ts 1`] = `
+"import { Client } from 'pg';
+
+const noop = () => undefined;
+
+const [portArg, dbArg, userArg, passwordArg] = process.argv.slice(2);
+const timeoutAt = Date.now() + 30000;
+
+while (Date.now() < timeoutAt) {
+  const client = new Client({
+    host: 'localhost',
+    port: parseInt(portArg),
+    user: userArg,
+    password: passwordArg,
+    database: dbArg,
+    connectionTimeoutMillis: 500,
+  });
+  client.on('error', noop);
+  try {
+    await client.connect();
+    await client.end();
+    console.log('Database is ready.');
+    process.exit(0);
+  } catch (e) {
+    console.log(e);
+    await client.end().catch(noop);
+  }
+  await new Promise((r) => setTimeout(r, 200));
+}
+
+throw new Error(\`Timed out waiting for postgres on port \${portArg}\`);
 "
 `;
 
@@ -4207,16 +4298,16 @@ export class Db extends AuroraDatabase {
 
 exports[`ts#rdb generator > should generate the aurora shared construct 3`] = `
 "import { defineConfig } from 'prisma/config';
-import {
-  LOCAL_DB_HOST,
-  LOCAL_DB_NAME,
-  LOCAL_DB_PASSWORD,
-  LOCAL_DB_PORT,
-  LOCAL_DB_USER,
-} from './src/constants.js';
 
-const getDatabaseUrl = () => {
+const getDatabaseUrl = async () => {
   if (process.env.SERVE_LOCAL === 'true') {
+    const {
+      LOCAL_DB_HOST,
+      LOCAL_DB_NAME,
+      LOCAL_DB_PASSWORD,
+      LOCAL_DB_PORT,
+      LOCAL_DB_USER,
+    } = await import('./src/constants.js');
     return \`postgresql://\${LOCAL_DB_USER}:\${LOCAL_DB_PASSWORD}@\${LOCAL_DB_HOST}:\${LOCAL_DB_PORT}/\${LOCAL_DB_NAME}\`;
   }
   return process.env.DATABASE_URL;
@@ -4228,7 +4319,7 @@ export default defineConfig({
     path: 'prisma/migrations',
   },
   datasource: {
-    url: getDatabaseUrl(),
+    url: await getDatabaseUrl(),
   },
 });
 "

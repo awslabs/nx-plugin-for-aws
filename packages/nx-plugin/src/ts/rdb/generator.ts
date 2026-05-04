@@ -75,7 +75,7 @@ export const tsRdbGenerator = async (
     options.engine === 'MySQL' ? 3306 : 5432,
   );
   const localDbHost = 'localhost';
-  const localDbUser = 'dbadmin';
+  const localDbUser = options.engine === 'MySQL' ? 'root' : 'dbadmin';
   const localDbPassword = 'password';
 
   const templateOptions = {
@@ -154,9 +154,35 @@ export const tsRdbGenerator = async (
       cwd: '{projectRoot}',
     },
   };
-  projectConfig.targets.prisma = {
+  const containerName = `${getNpmScope(tree)}-${databaseName}`;
+  const dockerImage = options.engine === 'MySQL' ? 'mysql' : 'postgres';
+  projectConfig.targets['docker-pull'] = {
+    executor: 'nx:run-commands',
+    options: {
+      command: `tsx scripts/docker-pull.ts ${dockerImage}`,
+      cwd: '{projectRoot}',
+    },
+  };
+  projectConfig.targets['serve-local'] = {
+    executor: 'nx:run-commands',
+    options: {
+      command: `tsx scripts/docker-start.ts ${containerName} ${localDbPort} ${databaseName}${options.engine === 'MySQL' ? '' : ` ${localDbUser}`} ${localDbPassword}`,
+      cwd: '{projectRoot}',
+    },
+    continuous: true,
+    dependsOn: ['docker-pull'],
+  };
+  projectConfig.targets['wait-for-db'] = {
     executor: 'nx:run-commands',
     dependsOn: ['serve-local'],
+    options: {
+      command: `tsx scripts/wait-for-db.ts ${localDbPort} ${databaseName} ${localDbUser} ${localDbPassword}`,
+      cwd: '{projectRoot}',
+    },
+  };
+  projectConfig.targets.prisma = {
+    executor: 'nx:run-commands',
+    dependsOn: ['serve-local', 'wait-for-db'],
     options: {
       cwd: '{projectRoot}',
       command: 'prisma',
@@ -164,15 +190,6 @@ export const tsRdbGenerator = async (
         SERVE_LOCAL: 'true',
       },
     },
-  };
-  const containerName = `${getNpmScope(tree)}-${databaseName}`;
-  projectConfig.targets['serve-local'] = {
-    executor: 'nx:run-commands',
-    options: {
-      command: `tsx scripts/local-db.ts ${containerName} ${localDbPort} ${databaseName} ${localDbUser} ${localDbPassword}`,
-      cwd: '{projectRoot}',
-    },
-    continuous: true,
   };
   const migrationBundleDir = joinPathFragments(
     'dist',
@@ -228,7 +245,9 @@ export const tsRdbGenerator = async (
     ]),
     withVersions([
       'prisma',
-      '@docker/node-sdk',
+      'tsx',
+      'dockerode',
+      '@types/dockerode',
       '@types/aws-lambda',
       ...(options.engine === 'MySQL'
         ? ([] as const)

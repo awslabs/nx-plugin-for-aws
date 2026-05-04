@@ -104,9 +104,36 @@ describe('ts#rdb generator', () => {
         cwd: '{projectRoot}',
       },
     });
-    expect(projectConfig.targets.prisma).toEqual({
+    snapshotTreeDir(tree, 'packages/db/scripts');
+    expect(projectConfig.targets['docker-pull']).toEqual({
+      executor: 'nx:run-commands',
+      options: {
+        command: 'tsx scripts/docker-pull.ts postgres',
+        cwd: '{projectRoot}',
+      },
+    });
+    expect(projectConfig.targets['serve-local']).toEqual({
+      executor: 'nx:run-commands',
+      options: {
+        command:
+          'tsx scripts/docker-start.ts proj-databasename 5432 databasename dbadmin password',
+        cwd: '{projectRoot}',
+      },
+      continuous: true,
+      dependsOn: ['docker-pull'],
+    });
+    expect(projectConfig.targets['wait-for-db']).toEqual({
       executor: 'nx:run-commands',
       dependsOn: ['serve-local'],
+      options: {
+        command:
+          'tsx scripts/wait-for-db.ts 5432 databasename dbadmin password',
+        cwd: '{projectRoot}',
+      },
+    });
+    expect(projectConfig.targets.prisma).toEqual({
+      executor: 'nx:run-commands',
+      dependsOn: ['serve-local', 'wait-for-db'],
       options: {
         cwd: '{projectRoot}',
         command: 'prisma',
@@ -114,16 +141,6 @@ describe('ts#rdb generator', () => {
           SERVE_LOCAL: 'true',
         },
       },
-    });
-    snapshotTreeDir(tree, 'packages/db/scripts');
-    expect(projectConfig.targets['serve-local']).toEqual({
-      executor: 'nx:run-commands',
-      options: {
-        command:
-          'tsx scripts/local-db.ts proj-databasename 5432 databasename dbadmin password',
-        cwd: '{projectRoot}',
-      },
-      continuous: true,
     });
     expect(projectConfig.targets.build.dependsOn).toContain('bundle');
     expect(projectConfig.targets.compile.dependsOn).toContain('generate');
@@ -142,7 +159,9 @@ describe('ts#rdb generator', () => {
     expect(packageJson.dependencies.pg).toBeDefined();
     expect(packageJson.dependencies.mariadb).toBeUndefined();
     expect(packageJson.dependencies['@prisma/adapter-mariadb']).toBeUndefined();
-    expect(packageJson.devDependencies['@docker/node-sdk']).toBeDefined();
+    expect(packageJson.devDependencies['tsx']).toBeDefined();
+    expect(packageJson.devDependencies['dockerode']).toBeDefined();
+    expect(packageJson.devDependencies['@types/dockerode']).toBeDefined();
     expect(packageJson.devDependencies['@types/aws-lambda']).toBeDefined();
     expect(packageJson.devDependencies['@types/pg']).toBeDefined();
     expect(packageJson.devDependencies.prisma).toBeDefined();
@@ -172,14 +191,30 @@ describe('ts#rdb generator', () => {
       '@proj/db',
     );
     snapshotTreeDir(tree, 'packages/db/scripts');
+    expect(mysqlProjectConfig.targets['docker-pull']).toEqual({
+      executor: 'nx:run-commands',
+      options: {
+        command: 'tsx scripts/docker-pull.ts mysql',
+        cwd: '{projectRoot}',
+      },
+    });
     expect(mysqlProjectConfig.targets['serve-local']).toEqual({
       executor: 'nx:run-commands',
       options: {
         command:
-          'tsx scripts/local-db.ts proj-databasename 3306 databasename dbadmin password',
+          'tsx scripts/docker-start.ts proj-databasename 3306 databasename password',
         cwd: '{projectRoot}',
       },
       continuous: true,
+      dependsOn: ['docker-pull'],
+    });
+    expect(mysqlProjectConfig.targets['wait-for-db']).toEqual({
+      executor: 'nx:run-commands',
+      dependsOn: ['serve-local'],
+      options: {
+        command: 'tsx scripts/wait-for-db.ts 3306 databasename root password',
+        cwd: '{projectRoot}',
+      },
     });
     expect(packageJson.dependencies['@prisma/adapter-mariadb']).toBeDefined();
     expect(packageJson.dependencies.mariadb).toBeDefined();
