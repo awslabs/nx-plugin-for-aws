@@ -43,11 +43,19 @@ function buildAgentCoreUrl(arn: string): string {
  * Helper function to invoke a tRPC API endpoint (reached via the terraform
  * `stage_invoke_url` output, which does NOT include a trailing slash).
  */
+// Normalise API URLs — REST stages come back as `...amazonaws.com/prod`
+// while HTTP `$default` stages come back as `...amazonaws.com/`. Appending
+// `/echo` naively would produce `...amazonaws.com//echo` for the HTTP case
+// and AWS SigV4 rejects that as an auth mismatch ("Forbidden").
+const normalizeApiUrl = (url: string): string => url.replace(/\/$/, '');
+
 async function invokeTrpcApi(apiUrl: string, apiName: string): Promise<void> {
   const aws = await createAwsClient();
   console.log(`Testing ${apiName} at ${apiUrl}`);
   const input = encodeURIComponent(JSON.stringify({ message: 'test' }));
-  const response = await aws.fetch(`${apiUrl}/echo?input=${input}`);
+  const response = await aws.fetch(
+    `${normalizeApiUrl(apiUrl)}/echo?input=${input}`,
+  );
   const data = await response.json();
   console.log(`${apiName} response:`, data);
   expect(data.result.data.result).toBe('test');
@@ -56,7 +64,9 @@ async function invokeTrpcApi(apiUrl: string, apiName: string): Promise<void> {
 async function invokeRestApi(apiUrl: string, apiName: string): Promise<void> {
   const aws = await createAwsClient();
   console.log(`Testing ${apiName} at ${apiUrl}`);
-  const response = await aws.fetch(`${apiUrl}/echo?message=test`);
+  const response = await aws.fetch(
+    `${normalizeApiUrl(apiUrl)}/echo?message=test`,
+  );
   const data = await response.json();
   console.log(`${apiName} response:`, data);
   expect(data.message).toBe('test');
