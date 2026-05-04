@@ -292,6 +292,24 @@ export const smokeTest = (
         rmSync(targetDir, { force: true, recursive: true });
       }
       ensureDirSync(targetDir);
+      // Pin the @aws scope to verdaccio locally in the target dir so
+      // `pnpm create @aws/nx-workspace` (via `pnpm dlx`) resolves the
+      // 0.0.0 build we just published instead of falling through to the
+      // public registry's `latest` tag. The user-level npmrc set up in
+      // global-setup.ts is honoured by pnpm 10 but not always by pnpm 11's
+      // dlx when `npm_config_registry` is also set in the environment.
+      const localRegistry = process.env.NX_E2E_LOCAL_REGISTRY;
+      if (localRegistry) {
+        writeFileSync(
+          join(targetDir, '.npmrc'),
+          [
+            `@aws:registry=${localRegistry}`,
+            `//${localRegistry.replace(/^https?:\/\//, '').replace(/\/$/, '')}/:_authToken=secretVerdaccioToken`,
+            '',
+          ].join('\n'),
+          { encoding: 'utf-8' },
+        );
+      }
     });
     afterEach(() => {
       teardown?.();

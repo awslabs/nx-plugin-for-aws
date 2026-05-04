@@ -72,6 +72,13 @@ export default async function () {
     process.env.YARN_REGISTRY = PUBLIC_REGISTRY;
     process.env.YARN_NPM_REGISTRY_SERVER = PUBLIC_REGISTRY;
 
+    // Expose the local registry URL so `smokeTest` can drop a per-target
+    // `.npmrc` alongside each generated workspace. pnpm 11's dlx appears to
+    // ignore the user-level `@aws:registry` npmrc entry in some smoke runs
+    // (resolving `@aws/create-nx-workspace` to the public `latest` tag),
+    // whereas a cwd-local `.npmrc` is always respected.
+    process.env.NX_E2E_LOCAL_REGISTRY = localRegistry;
+
     // npm / pnpm / yarn-classic read scope config from user ~/.npmrc.
     execSync(`npm config set @aws:registry ${localRegistry}`, {
       windowsHide: true,
