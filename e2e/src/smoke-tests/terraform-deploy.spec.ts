@@ -441,6 +441,22 @@ describe('smoke test - terraform-deploy', () => {
       // existing tfstate already in the per-account/region bucket).
       await runCLI(`bootstrap infra --output-style=stream`, opts);
 
+      // Pre-seed the runtime-config directory with all namespace JSON files
+      // the generated `add_*_runtime_config` modules will write during apply.
+      // Without this the appconfig module's `fileset(config_dir, "*.json")`
+      // sees the directory change between plan-time and apply-time evaluations
+      // and fails with "function returned an inconsistent result" — the
+      // external data sources that write these files run *during* the graph
+      // walk, after fileset has already been evaluated once.
+      const runtimeConfigDir = `${opts.cwd}/dist/packages/common/terraform/runtime-config`;
+      ensureDirSync(runtimeConfigDir);
+      for (const ns of ['connection', 'agentcore']) {
+        const nsPath = `${runtimeConfigDir}/${ns}.json`;
+        if (!existsSync(nsPath)) {
+          writeFileSync(nsPath, '{}');
+        }
+      }
+
       // Plan + apply end to end. The plan target has been patched to pass
       // `-parallelism=1` so the generated appconfig module's `fileset(...)`
       // doesn't race against the parallel runtime-config writers.
