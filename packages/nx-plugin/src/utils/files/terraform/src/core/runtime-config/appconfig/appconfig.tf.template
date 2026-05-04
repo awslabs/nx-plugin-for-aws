@@ -10,6 +10,10 @@ terraform {
       source  = "hashicorp/local"
       version = "~> 2.0"
     }
+    null = {
+      source  = "hashicorp/null"
+      version = ">= 3.0"
+    }
   }
 }
 
@@ -18,8 +22,15 @@ variable "application_name" {
   type        = string
 }
 
+variable "namespaces" {
+  description = "List of runtime-config namespaces this AppConfig application should expose (one Configuration Profile + Hosted Configuration Version is created per namespace)."
+  type        = list(string)
+  default     = ["connection", "agentcore"]
+}
+
 locals {
-  config_dir = "${path.module}/../../../../../../../dist/packages/common/terraform/runtime-config"
+  config_dir  = "${path.module}/../../../../../../../dist/packages/common/terraform/runtime-config"
+  entries_dir = "${local.config_dir}/entries"
 }
 
 # AppConfig Application
@@ -43,18 +54,82 @@ resource "aws_appconfig_deployment_strategy" "instant" {
   final_bake_time_in_minutes     = 0
 }
 
-# Read all namespace JSON files from the config directory
-locals {
-  namespace_files = fileset(local.config_dir, "*.json")
-  namespaces = {
-    for f in local.namespace_files :
-    trimsuffix(f, ".json") => jsondecode(file("${local.config_dir}/${f}"))
+# Aggregate the per-entry leaf JSON files (written by the `entry` module)
+# into a single JSON file per namespace. The aggregation runs inside a
+# `null_resource` local-exec provisioner so it only executes at apply time
+# — which is after all of the `local_file.entry` resources have been
+# written. Running the aggregation lazily in a `local` block (via
+# `fileset` + `file`) raced against sibling `entry` writers in the graph
+# walk and terraform aborted with
+# "Call to function 'file' failed: function returned an inconsistent result".
+resource "null_resource" "aggregate_namespace" {
+  for_each = toset(var.namespaces)
+
+  triggers = {
+    # Re-run the aggregation every apply so newly-written entries are
+    # always picked up. The local-exec is idempotent.
+    namespace = each.key
+    always    = timestamp()
   }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      uv run python -c "
+import json
+import pathlib
+import sys
+
+namespace = '${each.key}'
+entries_dir = pathlib.Path('${local.entries_dir}') / namespace
+output_file = pathlib.Path('${local.config_dir}') / f'{namespace}.json'
+
+def deep_merge(target: dict, source: dict) -> dict:
+    for k, v in source.items():
+        if k in target and isinstance(target[k], dict) and isinstance(v, dict):
+            deep_merge(target[k], v)
+        else:
+            target[k] = v
+    return target
+
+# Each entry file is named '<key>-<sha>.json' — callers that share the
+# same (namespace, key) pair hash their value into a distinct sha suffix,
+# and their contributions are deep-merged back together under 'key' here.
+merged: dict = {}
+if entries_dir.is_dir():
+    for entry_path in sorted(entries_dir.glob('*.json')):
+        section = entry_path.stem.rsplit('-', 1)[0]
+        try:
+            contribution = json.loads(entry_path.read_text())
+        except json.JSONDecodeError as e:
+            print(f'Skipping malformed entry {entry_path}: {e}', file=sys.stderr)
+            continue
+        existing = merged.get(section)
+        if isinstance(existing, dict) and isinstance(contribution, dict):
+            deep_merge(existing, contribution)
+        else:
+            merged[section] = contribution
+
+output_file.parent.mkdir(parents=True, exist_ok=True)
+output_file.write_text(json.dumps(merged, indent=2))
+print(f'Aggregated {namespace}.json with {len(merged)} section(s)')
+"
+    EOT
+  }
+}
+
+# Read the aggregated namespace file as a data source — managed resources
+# are refreshed in a defined order (after their `depends_on`) so there's
+# no consistency race like there is with `file()` inside a local.
+data "local_file" "namespace_content" {
+  for_each = toset(var.namespaces)
+
+  filename   = "${local.config_dir}/${each.key}.json"
+  depends_on = [null_resource.aggregate_namespace]
 }
 
 # Configuration Profile per namespace
 resource "aws_appconfig_configuration_profile" "namespace" {
-  for_each = local.namespaces
+  for_each = toset(var.namespaces)
 
   application_id = aws_appconfig_application.runtime_config.id
   name           = each.key
@@ -64,17 +139,17 @@ resource "aws_appconfig_configuration_profile" "namespace" {
 
 # Hosted Configuration Version per namespace
 resource "aws_appconfig_hosted_configuration_version" "namespace" {
-  for_each = local.namespaces
+  for_each = toset(var.namespaces)
 
   application_id           = aws_appconfig_application.runtime_config.id
   configuration_profile_id = aws_appconfig_configuration_profile.namespace[each.key].configuration_profile_id
   content_type             = "application/json"
-  content                  = jsonencode(each.value)
+  content                  = data.local_file.namespace_content[each.key].content
 }
 
 # Deployment per namespace
 resource "aws_appconfig_deployment" "namespace" {
-  for_each = local.namespaces
+  for_each = toset(var.namespaces)
 
   application_id           = aws_appconfig_application.runtime_config.id
   environment_id           = aws_appconfig_environment.default.environment_id

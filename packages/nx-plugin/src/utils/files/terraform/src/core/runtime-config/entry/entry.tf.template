@@ -15,107 +15,49 @@ variable "namespace" {
 }
 
 variable "key" {
-  description = "Key name within the namespace (e.g., 'apis', 'cognitoProps')"
+  description = "Section name within the namespace (e.g., 'apis', 'cognitoProps'). Multiple `entry` modules may share the same key — the `appconfig` / `read` aggregation deep-merges their contributions under that key."
   type        = string
 }
 
 variable "value" {
-  description = "Value to set at the key"
+  description = "Value to set at the key. When the value is an object, its fields are deep-merged with any other `entry` module that targets the same (namespace, key) pair."
   type        = any
 }
 
 locals {
-  config_dir       = "${path.module}/../../../../../../../dist/packages/common/terraform/runtime-config"
-  config_file_path = "${local.config_dir}/${var.namespace}.json"
+  entries_dir = "${path.module}/../../../../../../../dist/packages/common/terraform/runtime-config/entries"
+  # A per-entry SHA256 so two modules writing to the same (namespace, key)
+  # produce distinct leaf files — the `appconfig` / `read` modules
+  # deep-merge them back together at apply time. Using `sha256(jsonencode)`
+  # rather than the module path keeps the filename stable across
+  # reapplies as long as the caller's value doesn't change.
+  entry_id        = sha256(jsonencode({ key = var.key, value = var.value }))
+  entry_file_path = "${local.entries_dir}/${var.namespace}/${var.key}-${local.entry_id}.json"
 }
 
-# This module writes an entry to a namespaced runtime config JSON file.
-# Each namespace maps to a separate file (e.g., connection.json, tables.json)
-# which is then used by the AppConfig module and static website module.
+# Write this entry's contribution as a standalone JSON file. Using
+# `local_file` (a managed resource) rather than `data.external` with
+# side effects means the write happens strictly during the apply walk,
+# so terraform's consistency check across plan/apply no longer races
+# against the file's contents.
+resource "local_file" "entry" {
+  filename        = local.entry_file_path
+  content         = jsonencode(var.value)
+  file_permission = "0644"
+}
 
-data "external" "updated_config" {
-  program = ["uv", "run", "python", "-c", <<-EOT
-import json
-import sys
-import os
-import time
-import fcntl
-from pathlib import Path
+# Outputs
+output "entry_file_path" {
+  description = "Absolute path to the JSON file that stores this entry's value"
+  value       = local_file.entry.filename
+}
 
-# Read input from Terraform
-input_data = json.load(sys.stdin)
-config_file = input_data['config_file']
-key = input_data['key']
-value = json.loads(input_data['value'])
+output "namespace" {
+  description = "Namespace this entry was written under"
+  value       = var.namespace
+}
 
-# Create lock file path
-lock_file = config_file + '.lock'
-
-# Ensure directory exists
-Path(config_file).parent.mkdir(parents=True, exist_ok=True)
-
-# Acquire exclusive lock with retry mechanism
-max_retries = 30
-retry_delay = 1.0
-
-for attempt in range(max_retries):
-    try:
-        # Open lock file for exclusive access
-        with open(lock_file, 'w') as lock_fd:
-            # Try to acquire exclusive lock (non-blocking)
-            fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-
-            # Critical section - file operations under lock
-            try:
-                # Create empty base config if file doesn't exist
-                if not os.path.exists(config_file):
-                    base_config = {}
-                    with open(config_file, 'w') as f:
-                        json.dump(base_config, f, indent=2)
-
-                # Read current config
-                with open(config_file, 'r') as f:
-                    config = json.load(f)
-
-                # Set the key directly in the namespace file
-                config[key] = value
-
-                # Write updated config back to file atomically
-                temp_file = config_file + '.tmp'
-                with open(temp_file, 'w') as f:
-                    json.dump(config, f, indent=2)
-                os.rename(temp_file, config_file)
-
-                # Output the updated config for Terraform
-                print(json.dumps({"updated_json": json.dumps(config)}))
-
-                # Success - break out of retry loop
-                break
-
-            finally:
-                # Lock is automatically released when file is closed
-                pass
-
-    except (IOError, OSError) as e:
-        if attempt < max_retries - 1:
-            # Wait before retrying
-            time.sleep(retry_delay)
-            continue
-        else:
-            # Final attempt failed
-            raise Exception(f"Failed to acquire lock after {max_retries} attempts: {e}")
-
-# Clean up lock file if it exists
-try:
-    os.remove(lock_file)
-except OSError:
-    pass
-EOT
-  ]
-
-  query = {
-    config_file = local.config_file_path
-    key         = var.key
-    value       = jsonencode(var.value)
-  }
+output "key" {
+  description = "Key this entry was written as"
+  value       = var.key
 }
