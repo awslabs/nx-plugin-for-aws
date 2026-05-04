@@ -293,17 +293,20 @@ describe('smoke test - terraform-deploy', () => {
         `e2e-test-infra-${testRunId}/dev/terraform.tfstate`,
       );
 
-    // Force -parallelism=1 on plan. The generated appconfig module reads
-    // the runtime-config directory via `fileset(config_dir, "*.json")` at
-    // plan time, which races against parallel `add_*_runtime_config`
-    // external data sources that write namespace JSON files during the
-    // same walk — surfacing as "function returned an inconsistent result".
+    // Force -parallelism=1 on plan, apply and destroy. The generated
+    // appconfig module reads the runtime-config directory via
+    // `fileset(config_dir, "*.json")` which races against parallel
+    // `add_*_runtime_config` external data sources that write namespace
+    // JSON files during the same walk — surfacing as
+    // "function returned an inconsistent result".
     const planCommands: string[] =
       infraProjectJson.targets.plan.configurations.dev.commands;
     infraProjectJson.targets.plan.configurations.dev.commands =
       planCommands.map((cmd) =>
         cmd.startsWith('terraform plan') ? `${cmd} -parallelism=1` : cmd,
       );
+    infraProjectJson.targets.apply.configurations.dev.command = `${infraProjectJson.targets.apply.configurations.dev.command} -parallelism=1`;
+    infraProjectJson.targets.destroy.configurations.dev.command = `${infraProjectJson.targets.destroy.configurations.dev.command} -parallelism=1`;
 
     writeFileSync(
       infraProjectJsonPath,
