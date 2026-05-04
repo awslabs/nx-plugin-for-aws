@@ -308,9 +308,7 @@ export const pyStrandsAgentGenerator = async (
                 dependentTasksOutputFiles: '**/*.json',
               },
             ],
-            outputs: [
-              `{workspaceRoot}/{projectRoot}/scripts/${agentTargetPrefix}/generated`,
-            ],
+            outputs: [`{projectRoot}/scripts/${agentTargetPrefix}/generated`],
             options: {
               commands: [
                 `nx g @aws/nx-plugin:open-api#ts-client --openApiSpecPath="dist/${project.root}/openapi/${agentNameSnakeCase}/openapi.json" --outputPath="${project.root}/scripts/${agentTargetPrefix}/generated" --no-interactive`,

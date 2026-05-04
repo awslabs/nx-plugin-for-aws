@@ -25,43 +25,20 @@ class TrpcWebSocketAdapter implements ChatAdapter {
   }
 
   async *sendMessage(text: string): AsyncIterable<string> {
-    const queue: Array<{ value?: string; done?: true; error?: unknown }> = [];
-    let wake: (() => void) | undefined;
-    const notify = () => {
-      const r = wake;
-      wake = undefined;
-      r?.();
-    };
-
-    this.client.invoke.subscribe(
-      { message: text },
-      {
-        onData: (chunk: string) => {
-          queue.push({ value: chunk });
-          notify();
-        },
-        onComplete: () => {
-          queue.push({ done: true });
-          notify();
-        },
-        onError: (error: unknown) => {
-          queue.push({ error });
-          notify();
-        },
+    const stream = new ReadableStream<string>({
+      start: (controller) => {
+        this.client.invoke.subscribe(
+          { message: text },
+          {
+            onData: (chunk: string) => controller.enqueue(chunk),
+            onComplete: () => controller.close(),
+            onError: (err: unknown) => controller.error(err),
+          },
+        );
       },
-    );
+    });
 
-    while (true) {
-      if (queue.length === 0) {
-        await new Promise<void>((resolve) => {
-          wake = resolve;
-        });
-      }
-      const next = queue.shift()!;
-      if (next.error) throw next.error;
-      if (next.done) return;
-      if (next.value !== undefined) yield next.value;
-    }
+    yield* stream as unknown as AsyncIterable<string>;
   }
 }
 

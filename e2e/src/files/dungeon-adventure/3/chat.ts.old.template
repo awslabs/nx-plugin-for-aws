@@ -1,0 +1,48 @@
+/**
+ * Minimal chat CLI for StoryAgent (Python FastAPI / JSONL streaming).
+ *
+ * Uses the type-safe TypeScript client generated from the agent's OpenAPI
+ * spec. Override the port with `PORT` or `--port <port>`.
+ */
+import { randomUUID } from 'node:crypto';
+import { chatLoop, type ChatAdapter } from 'agent-chat-cli';
+import { StoryAgent } from './generated/client.gen.js';
+
+const getCliArg = (name: string): string | undefined => {
+  const idx = process.argv.indexOf(`--${name}`);
+  return idx !== -1 && idx + 1 < process.argv.length
+    ? process.argv[idx + 1]
+    : undefined;
+};
+
+const SESSION_ID_HEADER = 'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id';
+const port = getCliArg('port') ?? process.env.PORT ?? '8081';
+
+class StoryAgentAdapter implements ChatAdapter {
+  private client!: StoryAgent;
+  // AgentCore session IDs must be at least 33 characters.
+  private readonly sessionId = randomUUID().replaceAll('-', '').padEnd(33, '0');
+
+  async connect(url: string) {
+    this.client = new StoryAgent({
+      url,
+      fetch: (input, init) =>
+        fetch(input, {
+          ...init,
+          headers: {
+            ...(init?.headers ?? {}),
+            [SESSION_ID_HEADER]: this.sessionId,
+          },
+        }),
+    });
+    return { agentName: 'StoryAgent' };
+  }
+
+  async *sendMessage(text: string): AsyncIterable<string> {
+    for await (const chunk of this.client.invoke({ message: text })) {
+      if (typeof chunk.content === 'string') yield chunk.content;
+    }
+  }
+}
+
+await chatLoop(new StoryAgentAdapter(), `http://localhost:${port}`);

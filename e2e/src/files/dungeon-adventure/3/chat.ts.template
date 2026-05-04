@@ -1,0 +1,43 @@
+/**
+ * Minimal chat CLI for StoryAgent (Python FastAPI / JSONL streaming).
+ *
+ * Uses the type-safe TypeScript client generated from the agent's OpenAPI
+ * spec. Override the port with `PORT` or `--port <port>`.
+ */
+import { chatLoop, type ChatAdapter } from 'agent-chat-cli';
+import { StoryAgent } from './generated/client.gen.js';
+
+const getCliArg = (name: string): string | undefined => {
+  const idx = process.argv.indexOf(`--${name}`);
+  return idx !== -1 && idx + 1 < process.argv.length
+    ? process.argv[idx + 1]
+    : undefined;
+};
+
+const port = getCliArg('port') ?? process.env.PORT ?? '8081';
+
+class StoryAgentAdapter implements ChatAdapter {
+  private client!: StoryAgent;
+  private readonly actions: { role: string; content: string }[] = [];
+
+  async connect(url: string) {
+    this.client = new StoryAgent({ url });
+    return { agentName: 'StoryAgent' };
+  }
+
+  async *sendMessage(text: string): AsyncIterable<string> {
+    this.actions.push({ role: 'user', content: text });
+    let response = '';
+    for await (const chunk of this.client.invoke({
+      playerName: 'UnnamedHero',
+      genre: 'superhero',
+      actions: this.actions,
+    })) {
+      response += chunk.content;
+      yield chunk.content;
+    }
+    this.actions.push({ role: 'assistant', content: response });
+  }
+}
+
+await chatLoop(new StoryAgentAdapter(), `http://localhost:${port}`);
