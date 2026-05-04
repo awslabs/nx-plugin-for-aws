@@ -100,24 +100,57 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
 
 <Tabs>
   <TabItem label="本地">
-  运行以下命令启动本地代理服务器：
-    <NxCommands highlights={['xxxx', 'region']} env={{RUNTIME_CONFIG_APP_ID:"xxxx", AWS_REGION: '<region>'}} commands={["agent-serve dungeon_adventure.story"]} />
+  代理生成器提供了一个交互式终端聊天 CLI（`story-chat`），它使用从代理的 OpenAPI 规范生成的类型安全 TypeScript 客户端。由于我们更改了代理的输入形状以接受 `playerName`、`genre` 和 `actions`，我们首先需要更新生成的聊天脚本以提供这些字段。
+
+  将 `packages/story/scripts/story/chat.ts` 的内容替换为：
+
+    ```ts
+    // packages/story/scripts/story/chat.ts
+    import { chatLoop, type ChatAdapter } from 'agent-chat-cli';
+    import { Story } from './generated/client.gen.js';
+
+    const port = process.env.PORT ?? '8081';
+
+    class StoryAdapter implements ChatAdapter {
+      private client!: Story;
+      private readonly actions: { role: string; content: string }[] = [];
+
+      async connect(url: string) {
+        this.client = new Story({ url });
+        return { agentName: 'Story' };
+      }
+
+      async *sendMessage(text: string): AsyncIterable<string> {
+        this.actions.push({ role: 'user', content: text });
+        let response = '';
+        for await (const chunk of this.client.invoke({
+          playerName: 'UnnamedHero',
+          genre: 'superhero',
+          actions: this.actions,
+        })) {
+          response += chunk.content;
+          yield chunk.content;
+        }
+        this.actions.push({ role: 'assistant', content: response });
+      }
+    }
+
+    await chatLoop(new StoryAdapter(), `http://localhost:${port}`);
+    ```
+
+    然后启动与本地运行的 Story 代理的交互式聊天：
+
+    <NxCommands highlights={['xxxx', 'region']} env={{RUNTIME_CONFIG_APP_ID:"xxxx", AWS_REGION: '<region>'}} commands={["run @dungeon-adventure/story:story-chat"]} />
 
     <Aside type="caution" title="使用CDK输出值">
     请使用 CDK 部署输出的 `RuntimeConfigApplicationId` 值作为 `RUNTIME_CONFIG_APP_ID` 环境变量，并使用已部署的 AWS 区域作为 `AWS_REGION`。
     </Aside>
 
-    :::note[`agent-serve` 与 `agent-serve-local`]
-    `agent-serve` 目标在本地启动代理，但连接到**已部署**的 MCP 服务器（通过 `RUNTIME_CONFIG_APP_ID`）。如果您希望同时在本地运行 MCP 服务器，请改用 `agent-serve-local`，它会启动所有依赖服务并设置 `SERVE_LOCAL=true` 以进行直接 HTTP 连接。
+    `story-chat` 目标会自动启动 `story-serve-local`（它会使用 `SERVE_LOCAL=true` 启动代理和任何 MCP 服务器依赖项），并在将您带入聊天之前运行 OpenAPI 规范和客户端生成。
+
+    :::note[`story-serve` 与 `story-serve-local`]
+    `story-chat` 依赖于 `story-serve-local`，后者使用 `SERVE_LOCAL=true` 启动代理，并在本地启动任何 MCP 服务器依赖项。如果您希望代理连接到**已部署**的 MCP 服务器（通过 `RUNTIME_CONFIG_APP_ID`），请在单独的终端中运行 `story-serve` 目标，然后使用 `agent-chat-cli` 或 `curl` 手动调用代理。
     :::
-
-    代理服务器启动并运行后（无输出显示），运行以下命令进行调用：
-
-    ```bash
-    curl -N -X POST http://127.0.0.1:8081/invocations \
-      -d '{"genre":"superhero", "actions":[], "playerName":"UnnamedHero"}' \
-      -H "Content-Type: application/json"
-    ```
   </TabItem>
   <TabItem label="已部署">
     测试已部署代理需通过 Cognito 认证获取 JWT 令牌。首先设置环境变量：
@@ -189,7 +222,7 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
   </TabItem>
 </Tabs>
 
-若命令运行成功，将开始看到初始故事文本以 JSON Lines 格式流式输出：
+如果一切设置正确，本地聊天将在您输入第一个提示后逐个令牌流式传输初始故事文本，而已部署的 `curl` 命令将返回 JSON Lines 流：
 
 ```
 {"content":"You are "}

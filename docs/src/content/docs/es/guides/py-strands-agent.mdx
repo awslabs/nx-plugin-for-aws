@@ -347,15 +347,20 @@ Este comando usa `uv run` para ejecutar tu agente con el [SDK Python de Bedrock 
 
 ### Chatear con tu Agente
 
-El generador también proporciona una CLI de chat interactiva mínima en `scripts/<your-agent-name>/chat.ts` y un target correspondiente `<your-agent-name>-chat`. Este target depende de `<your-agent-name>-serve-local`, por lo que al ejecutarlo se inicia el agente localmente y te lleva a un chat interactivo en la terminal con él:
+El generador configura un target Nx `<your-agent-name>-chat` que depende de `<your-agent-name>-serve-local`. Al ejecutarlo se inicia el agente localmente y te lleva a un chat interactivo en la terminal impulsado por [`agent-chat-cli`](https://www.npmjs.com/package/agent-chat-cli):
 
 <NxCommands commands={['run your-project:agent-chat']} />
 
-La CLI es un script TypeScript (ejecutado mediante `tsx`) que usa el cliente apropiado para el protocolo para transmitir respuestas token por token mediante [`@clack/prompts`](https://github.com/bombshell-dev/clack):
+Para agentes **A2A** y **AG-UI**, el target de chat simplemente invoca `agent-chat-cli` como un binario contra el agente ejecutándose localmente — no se genera código en tu espacio de trabajo.
 
-- **HTTP**: `POST /invocations` con streaming JSONL
-- **A2A**: `@a2a-js/sdk` `ClientFactory` con `sendMessageStream`
-- **AG-UI**: `@ag-ui/client` `HttpAgent`
+Para agentes **HTTP**, el generador emite:
+
+- `scripts/<your-agent-name>_openapi.py` — un pequeño script que exporta la especificación OpenAPI del agente
+- Un target Nx `<your-agent-name>-openapi` que lo ejecuta
+- Un target Nx `<your-agent-name>-generate-client` que ejecuta `open-api#ts-client` para producir un cliente TypeScript con tipos bajo `scripts/<your-agent-name>/generated/`
+- `scripts/<your-agent-name>/chat.ts` — un adaptador delgado que importa el cliente generado y lo conecta al `chatLoop` de `agent-chat-cli`
+
+El script de chat es un pequeño envoltorio alrededor del cliente generado. Cuando personalizas la forma de entrada del agente (por ejemplo, añades nuevos campos a `InvokeInput`), actualiza el `sendMessage` del adaptador para pasar los nuevos campos y el resto funciona automáticamente.
 
 <OptionFilter when={{ computeType: 'BedrockAgentCoreRuntime' }} description="Bedrock AgentCore Runtime deployment details">
 ## Desplegando tu Agente Strands a Bedrock AgentCore Runtime

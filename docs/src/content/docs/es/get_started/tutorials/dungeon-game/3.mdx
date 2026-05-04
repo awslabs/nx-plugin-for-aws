@@ -100,24 +100,57 @@ Puedes probar tu Agente de dos formas:
 
 <Tabs>
   <TabItem label="Local">
-  Inicia tu servidor local del Agente ejecutando el siguiente comando:
-    <NxCommands highlights={['xxxx', 'region']} env={{RUNTIME_CONFIG_APP_ID:"xxxx", AWS_REGION: '<region>'}} commands={["agent-serve dungeon_adventure.story"]} />
+  El generador de agentes proporciona una CLI de chat interactiva de terminal (`story-chat`) que utiliza el cliente TypeScript con seguridad de tipos generado a partir de la especificación OpenAPI del agente. Debido a que cambiamos la forma de entrada del agente para aceptar `playerName`, `genre` y `actions`, primero necesitamos actualizar el script de chat generado para proporcionar esos campos.
+
+  Reemplaza el contenido de `packages/story/scripts/story/chat.ts` con:
+
+    ```ts
+    // packages/story/scripts/story/chat.ts
+    import { chatLoop, type ChatAdapter } from 'agent-chat-cli';
+    import { Story } from './generated/client.gen.js';
+
+    const port = process.env.PORT ?? '8081';
+
+    class StoryAdapter implements ChatAdapter {
+      private client!: Story;
+      private readonly actions: { role: string; content: string }[] = [];
+
+      async connect(url: string) {
+        this.client = new Story({ url });
+        return { agentName: 'Story' };
+      }
+
+      async *sendMessage(text: string): AsyncIterable<string> {
+        this.actions.push({ role: 'user', content: text });
+        let response = '';
+        for await (const chunk of this.client.invoke({
+          playerName: 'UnnamedHero',
+          genre: 'superhero',
+          actions: this.actions,
+        })) {
+          response += chunk.content;
+          yield chunk.content;
+        }
+        this.actions.push({ role: 'assistant', content: response });
+      }
+    }
+
+    await chatLoop(new StoryAdapter(), `http://localhost:${port}`);
+    ```
+
+    Luego inicia un chat interactivo con tu agente Story ejecutándose localmente:
+
+    <NxCommands highlights={['xxxx', 'region']} env={{RUNTIME_CONFIG_APP_ID:"xxxx", AWS_REGION: '<region>'}} commands={["run @dungeon-adventure/story:story-chat"]} />
 
     <Aside type="caution" title="Usar valores de salida de CDK">
     Usa el valor de salida del despliegue CDK de `RuntimeConfigApplicationId` para la variable de entorno `RUNTIME_CONFIG_APP_ID`, y tu región de AWS desplegada para `AWS_REGION`.
     </Aside>
 
-    :::note[`agent-serve` vs `agent-serve-local`]
-    El objetivo `agent-serve` inicia el agente localmente pero se conecta a tu servidor MCP **desplegado** (a través del `RUNTIME_CONFIG_APP_ID`). Si prefieres ejecutar el servidor MCP localmente también, usa `agent-serve-local` en su lugar, que inicia todos los servicios dependientes y establece `SERVE_LOCAL=true` para conexiones HTTP directas.
+    El objetivo `story-chat` inicia automáticamente `story-serve-local` (que inicia el agente y cualquier dependencia de servidor MCP con `SERVE_LOCAL=true`) y ejecuta la generación de especificación OpenAPI + cliente antes de llevarte al chat.
+
+    :::note[`story-serve` vs `story-serve-local`]
+    `story-chat` depende de `story-serve-local`, que inicia el agente con `SERVE_LOCAL=true` y también inicia cualquier dependencia de servidor MCP localmente. Si prefieres que el agente se conecte a tu servidor MCP **desplegado** en su lugar (a través de `RUNTIME_CONFIG_APP_ID`), ejecuta el objetivo `story-serve` en una terminal separada y luego invoca el agente manualmente con `agent-chat-cli` o `curl`.
     :::
-
-    Una vez que el servidor del Agente esté en ejecución (no verás ninguna salida), invócalo ejecutando el siguiente comando:
-
-    ```bash
-    curl -N -X POST http://127.0.0.1:8081/invocations \
-      -d '{"genre":"superhero", "actions":[], "playerName":"UnnamedHero"}' \
-      -H "Content-Type: application/json"
-    ```
   </TabItem>
   <TabItem label="Desplegado">
     Para probar el agente desplegado, necesitarás autenticarte con Cognito y obtener un token JWT. Primero, configura tus variables de entorno:
@@ -189,7 +222,7 @@ Puedes probar tu Agente de dos formas:
   </TabItem>
 </Tabs>
 
-Si el comando se ejecuta correctamente, deberías comenzar a ver el texto inicial de la historia siendo transmitido como JSON Lines:
+Si todo está configurado correctamente, el chat local transmitirá el texto inicial de la historia token por token después de que ingreses tu primer prompt, y el comando `curl` desplegado devolverá un flujo de JSON Lines:
 
 ```
 {"content":"You are "}

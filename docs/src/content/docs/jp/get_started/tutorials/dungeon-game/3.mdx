@@ -100,24 +100,57 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
 
 <Tabs>
   <TabItem label="ローカル">
-  以下のコマンドでローカルエージェントサーバーを起動します：
-    <NxCommands highlights={['xxxx', 'region']} env={{RUNTIME_CONFIG_APP_ID:"xxxx", AWS_REGION: '<region>'}} commands={["agent-serve dungeon_adventure.story"]} />
+  エージェントジェネレーターは、エージェントのOpenAPI仕様から生成された型安全なTypeScriptクライアントを使用するインタラクティブなターミナルチャットCLI（`story-chat`）を提供します。エージェントの入力形式を`playerName`、`genre`、`actions`を受け入れるように変更したため、まずこれらのフィールドを提供するように生成されたチャットスクリプトを更新する必要があります。
+
+  `packages/story/scripts/story/chat.ts`の内容を以下に置き換えます：
+
+    ```ts
+    // packages/story/scripts/story/chat.ts
+    import { chatLoop, type ChatAdapter } from 'agent-chat-cli';
+    import { Story } from './generated/client.gen.js';
+
+    const port = process.env.PORT ?? '8081';
+
+    class StoryAdapter implements ChatAdapter {
+      private client!: Story;
+      private readonly actions: { role: string; content: string }[] = [];
+
+      async connect(url: string) {
+        this.client = new Story({ url });
+        return { agentName: 'Story' };
+      }
+
+      async *sendMessage(text: string): AsyncIterable<string> {
+        this.actions.push({ role: 'user', content: text });
+        let response = '';
+        for await (const chunk of this.client.invoke({
+          playerName: 'UnnamedHero',
+          genre: 'superhero',
+          actions: this.actions,
+        })) {
+          response += chunk.content;
+          yield chunk.content;
+        }
+        this.actions.push({ role: 'assistant', content: response });
+      }
+    }
+
+    await chatLoop(new StoryAdapter(), `http://localhost:${port}`);
+    ```
+
+    次に、ローカルで実行中のStoryエージェントとのインタラクティブなチャットを開始します：
+
+    <NxCommands highlights={['xxxx', 'region']} env={{RUNTIME_CONFIG_APP_ID:"xxxx", AWS_REGION: '<region>'}} commands={["run @dungeon-adventure/story:story-chat"]} />
 
     <Aside type="caution" title="CDK出力値の使用">
     `RUNTIME_CONFIG_APP_ID`環境変数にはCDKデプロイ出力の`RuntimeConfigApplicationId`の値を使用し、`AWS_REGION`にはデプロイ先のAWSリージョンを指定してください。
     </Aside>
 
-    :::note[`agent-serve` vs `agent-serve-local`]
-    `agent-serve`ターゲットはエージェントをローカルで起動しますが、**デプロイ済み**のMCPサーバーに接続します（`RUNTIME_CONFIG_APP_ID`経由）。MCPサーバーもローカルで実行したい場合は、代わりに`agent-serve-local`を使用してください。これにより、すべての依存サービスが起動され、直接HTTP接続用に`SERVE_LOCAL=true`が設定されます。
+    `story-chat`ターゲットは自動的に`story-serve-local`を起動し（エージェントと任意のMCPサーバー依存関係を`SERVE_LOCAL=true`で起動）、OpenAPI仕様とクライアント生成を実行してからチャットに入ります。
+
+    :::note[`story-serve` vs `story-serve-local`]
+    `story-chat`は`story-serve-local`に依存しており、これはエージェントを`SERVE_LOCAL=true`で起動し、任意のMCPサーバー依存関係もローカルで起動します。エージェントを**デプロイ済み**のMCPサーバーに接続させたい場合（`RUNTIME_CONFIG_APP_ID`経由）は、別のターミナルで`story-serve`ターゲットを実行し、`agent-chat-cli`または`curl`でエージェントを手動で呼び出してください。
     :::
-
-    エージェントサーバー起動後（出力は表示されません）、以下のコマンドで呼び出します：
-
-    ```bash
-    curl -N -X POST http://127.0.0.1:8081/invocations \
-      -d '{"genre":"superhero", "actions":[], "playerName":"UnnamedHero"}' \
-      -H "Content-Type: application/json"
-    ```
   </TabItem>
   <TabItem label="デプロイ済み">
     デプロイ済みエージェントのテストには、Cognito認証によるJWTトークン取得が必要です。まず環境変数を設定します：
@@ -189,7 +222,7 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
   </TabItem>
 </Tabs>
 
-コマンドが正常に実行されると、以下のようにストーリーの冒頭テキストがJSON Lines形式でストリーミングされ始めます：
+すべてが正しく設定されていれば、ローカルチャットでは最初のプロンプトを入力した後にストーリーの冒頭テキストがトークンごとにストリーミングされ、デプロイ済みの`curl`コマンドではJSON Lines形式のストリームが返されます：
 
 ```
 {"content":"You are "}
