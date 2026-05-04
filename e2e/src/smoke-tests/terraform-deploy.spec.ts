@@ -5,7 +5,7 @@
 import { execSync } from 'child_process';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { ensureDirSync } from 'fs-extra';
-import { globSync } from 'glob';
+import fastGlob from 'fast-glob';
 import { join } from 'path';
 import { AwsClient } from 'aws4fetch';
 import { Lambda } from '@aws-sdk/client-lambda';
@@ -365,7 +365,7 @@ describe('smoke test - terraform-deploy', () => {
     // Agent/MCP modules: suffix `application_name` and `agent_runtime_name`.
     // AgentCore runtime names are limited to 1-43 chars matching
     // `^[a-zA-Z][a-zA-Z0-9_]{0,42}$` — suffix with `_${testRunId}`.
-    for (const tfPath of globSync(
+    for (const tfPath of fastGlob.sync(
       `${opts.cwd}/packages/common/terraform/src/app/{agents,mcp-servers}/*/*.tf`,
     )) {
       rewriteNamesInFile(tfPath, [
@@ -382,7 +382,7 @@ describe('smoke test - terraform-deploy', () => {
 
     // API modules (REST + HTTP): suffix `api_name` and the hardcoded
     // per-api Lambda/IAM/log-group names.
-    for (const tfPath of globSync(
+    for (const tfPath of fastGlob.sync(
       `${opts.cwd}/packages/common/terraform/src/app/apis/*/*.tf`,
     )) {
       const content = readFileSync(tfPath, 'utf-8');
