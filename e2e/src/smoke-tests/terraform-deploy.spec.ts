@@ -5,6 +5,7 @@
 import { execSync } from 'child_process';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { ensureDirSync } from 'fs-extra';
+import { globSync } from 'glob';
 import { join } from 'path';
 import { AwsClient } from 'aws4fetch';
 import { Lambda } from '@aws-sdk/client-lambda';
@@ -342,6 +343,92 @@ describe('smoke test - terraform-deploy', () => {
         'deletion_protection = "INACTIVE"',
       ),
     );
+
+    // Inject `testRunId` into every hardcoded resource name in the generated
+    // app modules. The generators produce module-internal names like
+    // `api_name = "MyApi"`, `function_name = "MyApiHandler"`,
+    // `application_name = "MyAgent-runtime-config"`, etc. Without a per-run
+    // suffix, concurrent test runs (or a failed run that left leftovers)
+    // collide on "EntityAlreadyExists" errors the next time around. We mirror
+    // the CDK `testRunId` approach by suffixing every hardcoded name.
+    const rewriteNamesInFile = (
+      path: string,
+      rewrites: [RegExp, string][],
+    ): void => {
+      let content = readFileSync(path, 'utf-8');
+      for (const [pattern, replacement] of rewrites) {
+        content = content.replace(pattern, replacement);
+      }
+      writeFileSync(path, content);
+    };
+
+    // Agent/MCP modules: suffix `application_name` and `agent_runtime_name`.
+    // AgentCore runtime names are limited to 1-43 chars matching
+    // `^[a-zA-Z][a-zA-Z0-9_]{0,42}$` — suffix with `_${testRunId}`.
+    for (const tfPath of globSync(
+      `${opts.cwd}/packages/common/terraform/src/app/{agents,mcp-servers}/*/*.tf`,
+    )) {
+      rewriteNamesInFile(tfPath, [
+        [
+          /application_name\s*=\s*"([^"]+)"/,
+          `application_name = "$1-${testRunId}"`,
+        ],
+        [
+          /agent_runtime_name\s*=\s*"([^"]+)"/,
+          `agent_runtime_name = "$1_${testRunId}"`,
+        ],
+      ]);
+    }
+
+    // API modules (REST + HTTP): suffix `api_name` and the hardcoded
+    // per-api Lambda/IAM/log-group names.
+    for (const tfPath of globSync(
+      `${opts.cwd}/packages/common/terraform/src/app/apis/*/*.tf`,
+    )) {
+      const content = readFileSync(tfPath, 'utf-8');
+      const apiNameMatch = content.match(/api_name\s*=\s*"([^"]+)"/);
+      if (!apiNameMatch) continue;
+      const oldApiName = apiNameMatch[1];
+      const newApiName = `${oldApiName}-${testRunId}`;
+      rewriteNamesInFile(tfPath, [
+        [
+          new RegExp(`api_name\\s*=\\s*"${oldApiName}"`),
+          `api_name = "${newApiName}"`,
+        ],
+        [
+          new RegExp(`api_description\\s*=\\s*"${oldApiName} ([^"]+)"`),
+          `api_description = "${newApiName} $1"`,
+        ],
+        [
+          new RegExp(`function_name\\s*=\\s*"${oldApiName}Handler"`),
+          `function_name = "${newApiName}Handler"`,
+        ],
+        [
+          new RegExp(`name\\s*=\\s*"${oldApiName}Handler-execution-role"`),
+          `name = "${newApiName}Handler-execution-role"`,
+        ],
+        [
+          new RegExp(`name\\s*=\\s*"${oldApiName}Handler-additional-policies"`),
+          `name = "${newApiName}Handler-additional-policies"`,
+        ],
+        [
+          new RegExp(`name\\s*=\\s*"${oldApiName}Authorizer"`),
+          `name = "${newApiName}Authorizer"`,
+        ],
+        [
+          new RegExp(`name\\s*=\\s*"/aws/lambda/${oldApiName}Handler"`),
+          `name = "/aws/lambda/${newApiName}Handler"`,
+        ],
+        [
+          new RegExp(`value\\s*=\\s*\\{ "${oldApiName}" = ([^ }]+)`),
+          `value = { "${newApiName}" = $1`,
+        ],
+        [
+          new RegExp(`application_name\\s*=\\s*"${oldApiName}-runtime-config"`),
+          `application_name = "${newApiName}-runtime-config"`,
+        ],
+      ]);
+    }
 
     try {
       // Apply sync one more time so the newly-written main.tf and patched
