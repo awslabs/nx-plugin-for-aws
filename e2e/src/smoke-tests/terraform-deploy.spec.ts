@@ -457,8 +457,19 @@ describe('smoke test - terraform-deploy', () => {
 
       // Plan + apply end to end. The plan target has been patched to pass
       // `-parallelism=1` so the generated appconfig module's `fileset(...)`
-      // doesn't race against the parallel runtime-config writers.
-      await runCLI(`apply infra --output-style=stream`, opts);
+      // doesn't race against the parallel runtime-config writers. Even so,
+      // the appconfig module's `file(namespace.json)` can still race against
+      // `add_*_runtime_config` modules *updating* the JSON contents mid-walk
+      // — we retry the apply once to let terraform re-converge once all
+      // namespace files have stabilised.
+      try {
+        await runCLI(`apply infra --output-style=stream`, opts);
+      } catch (err) {
+        console.warn(
+          `first apply failed (probably appconfig fileset/file race) — retrying: ${err}`,
+        );
+        await runCLI(`apply infra --output-style=stream`, opts);
+      }
 
       const outputs = readTerraformOutputs(opts.cwd);
       console.log('Terraform outputs:', outputs);
