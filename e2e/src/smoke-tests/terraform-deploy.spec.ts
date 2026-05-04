@@ -331,6 +331,18 @@ describe('smoke test - terraform-deploy', () => {
     nxJson.sync = { ...(nxJson.sync ?? {}), applyChanges: true };
     writeFileSync(nxJsonPath, JSON.stringify(nxJson, null, 2));
 
+    // Patch the generated Cognito user pool module so `terraform destroy`
+    // can actually remove it between test runs. The shipped module sets
+    // deletion_protection = ACTIVE which requires a two-step teardown.
+    const identityTfPath = `${opts.cwd}/packages/common/terraform/src/core/user-identity/identity/identity.tf`;
+    writeFileSync(
+      identityTfPath,
+      readFileSync(identityTfPath, 'utf-8').replace(
+        /deletion_protection\s*=\s*"ACTIVE"/,
+        'deletion_protection = "INACTIVE"',
+      ),
+    );
+
     try {
       // Apply sync one more time so the newly-written main.tf and patched
       // project.json get their license headers. Nx in non-interactive mode
