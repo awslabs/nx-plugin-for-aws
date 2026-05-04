@@ -36,6 +36,15 @@ import { SYNC_GENERATOR_NAME as TS_SYNC_GENERATOR_NAME } from '../ts/sync/genera
 const WORKSPACES = ['packages/*'];
 const NX_TYPESCRIPT_SYNC_GENERATOR = '@nx/js:typescript-sync';
 
+// Built dependencies the generated workspace expects pnpm to run install
+// scripts for. pnpm 10 reads `onlyBuiltDependencies`; pnpm 11 reads
+// `allowBuilds`. Each version silently ignores the other's key. We also set
+// `strictDepBuilds: false` so that pnpm 11 downgrades any *other*
+// build-script warning (e.g. from deps a subsequent generator adds) back to
+// a warning — matching pnpm 10's default, where the old warning was never a
+// hard error.
+const PNPM_BUILT_DEPENDENCIES = ['@swc/core', 'esbuild', 'nx', 'sharp'];
+
 export const PRESET_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
 
@@ -43,9 +52,16 @@ const setUpWorkspaces = (tree: Tree) => {
   if (detectPackageManager() === 'pnpm') {
     tree.write(
       'pnpm-workspace.yaml',
-      `packages:
-  ${WORKSPACES.map((workspace) => `- "${workspace}"`).join('\n  ')}
-`,
+      [
+        'packages:',
+        ...WORKSPACES.map((workspace) => `  - '${workspace}'`),
+        'strictDepBuilds: false',
+        'allowBuilds:',
+        ...PNPM_BUILT_DEPENDENCIES.map((dep) => `  '${dep}': true`),
+        'onlyBuiltDependencies:',
+        ...PNPM_BUILT_DEPENDENCIES.map((dep) => `  - '${dep}'`),
+        '',
+      ].join('\n'),
     );
   } else {
     updateJson(tree, 'package.json', (json) => {

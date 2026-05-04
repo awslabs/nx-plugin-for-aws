@@ -3,4 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { smokeTest } from './smoke-test';
-smokeTest('pnpm');
+import { activatePnpmViaCorepack } from './pnpm-corepack';
+
+smokeTest('pnpm', {
+  variant: 'pnpm-10',
+  setup: () => activatePnpmViaCorepack('10.33.2'),
+});

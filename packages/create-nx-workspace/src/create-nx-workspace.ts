@@ -72,7 +72,20 @@ export const createNxWorkspace = (args: string[]): number => {
   const result = spawnSync(
     'npx',
     ['-y', `create-nx-workspace@${NX_VERSION}`, ...allArgs],
-    { stdio: 'inherit', env: process.env, shell: process.platform === 'win32' },
+    {
+      stdio: 'inherit',
+      env: {
+        ...process.env,
+        // pnpm 11 defaults strictDepBuilds=true, which turns the initial
+        // `pnpm install --no-frozen-lockfile` run by `nx new` into a hard
+        // error on nx's postinstall script — before our preset generator
+        // gets a chance to write the workspace's pnpm-workspace.yaml with
+        // allowBuilds. pnpm reads config from the lowercase `pnpm_config_`
+        // env-var prefix. Harmless under pnpm 10.
+        pnpm_config_strict_dep_builds: 'false',
+      },
+      shell: process.platform === 'win32',
+    },
   );
 
   return result.status ?? 1;
