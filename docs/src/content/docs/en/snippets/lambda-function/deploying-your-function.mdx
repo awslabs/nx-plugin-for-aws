@@ -55,11 +55,19 @@ export class ExampleStack extends Stack {
 ```
 </Fragment>
 <Fragment slot="terraform">
-This generator creates a Terraform module for deploying your function in the `common/terraform` folder. You can use this in a Terraform configuration:
+This generator creates a Terraform module for deploying your function in the `common/terraform` folder. You can use this in a Terraform configuration.
 
-```hcl {2}
+The function module stages its deployment zip in a shared S3 asset bucket rather than uploading inline via the Lambda API (which has a 70 MB request limit). Instantiate the `core/asset-bucket` module once per deployment and pass its `bucket_name` output into every lambda / API module via the `asset_bucket_name` input:
+
+```hcl {1-3, 7}
+module "asset_bucket" {
+  source = "../../common/terraform/src/core/asset-bucket"
+}
+
 module "my_project_my_function" {
   source = "../../common/terraform/src/app/lambda-functions/my-project-my-function"
+
+  asset_bucket_name = module.asset_bucket.bucket_name
 
   # Environment variables for the Lambda function
   env = {
@@ -72,6 +80,8 @@ module "my_project_my_function" {
   ]
 }
 ```
+
+The `core/asset-bucket` module provisions an S3 bucket with S3-managed (AES256) encryption, versioning, a TLS-only bucket policy, public-access block, and S3 access logging enabled (the logs are delivered to a sibling access-logs bucket). Reuse the same module instance across every Lambda / API module in your deployment — each caller writes under a module-scoped key prefix so there are no collisions.
 
 This sets up:
 

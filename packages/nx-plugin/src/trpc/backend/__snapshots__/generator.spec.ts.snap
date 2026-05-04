@@ -3209,6 +3209,11 @@ variable "additional_iam_policy_statements" {
   default = []
 }
 
+variable "asset_bucket_name" {
+  description = "Name of the shared asset S3 bucket used to stage the Lambda deployment zip. Instantiate the \`core/asset-bucket\` module once per deployment and pass its \`bucket_name\` output here."
+  type        = string
+}
+
 # CORS Configuration (passed to core module)
 variable "cors_allow_credentials" {
   description = "Whether to allow credentials in CORS requests"
@@ -3259,12 +3264,6 @@ data "aws_caller_identity" "current" {}
 
 # Resources
 
-resource "random_string" "code_suffix" {
-  length  = 8
-  special = false
-  upper   = false
-}
-
 # Create Lambda ZIP file from the bundle directory
 data "archive_file" "lambda_zip" {
   type        = "zip"
@@ -3272,76 +3271,11 @@ data "archive_file" "lambda_zip" {
   output_path = "\${path.module}/../../../../../../../dist/packages/common/terraform/apis/test-api/lambda.zip"
 }
 
-# Lambda code bucket — \`aws_lambda_function.filename\` uploads the zip
-# inline via the Lambda API which has a 70MB (base64-encoded) request
-# limit. We stage the zip in S3 instead so bundles that pull in larger
-# dependencies (eg FastAPI + Strands Agents + MCP) deploy correctly.
-resource "aws_s3_bucket" "lambda_code" {
-  #checkov:skip=CKV2_AWS_61:Lifecycle configuration not required for transient lambda deployment artefacts
-  #checkov:skip=CKV_AWS_144:Cross-region replication not required for lambda code bucket
-  #checkov:skip=CKV2_AWS_62:Event notifications not required for lambda code bucket
-  #checkov:skip=CKV_AWS_18:Access logging not required for transient lambda deployment artefact bucket
-  #checkov:skip=CKV_AWS_145:AES256 encryption is sufficient for lambda deployment artefacts
-  bucket        = "test-api-code-\${data.aws_caller_identity.current.account_id}-\${data.aws_region.current.name}-\${random_string.code_suffix.result}"
-  force_destroy = true
-
-  tags = var.tags
-}
-
-resource "aws_s3_bucket_versioning" "lambda_code" {
-  bucket = aws_s3_bucket.lambda_code.id
-  versioning_configuration {
-    status = "Enabled"
-  }
-}
-
-resource "aws_s3_bucket_server_side_encryption_configuration" "lambda_code" {
-  bucket = aws_s3_bucket.lambda_code.id
-
-  rule {
-    apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
-    }
-  }
-}
-
-resource "aws_s3_bucket_public_access_block" "lambda_code" {
-  bucket = aws_s3_bucket.lambda_code.id
-
-  block_public_acls       = true
-  block_public_policy     = true
-  ignore_public_acls      = true
-  restrict_public_buckets = true
-}
-
-resource "aws_s3_bucket_policy" "lambda_code" {
-  bucket = aws_s3_bucket.lambda_code.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid       = "DenyInsecureConnections"
-        Effect    = "Deny"
-        Principal = "*"
-        Action    = "s3:*"
-        Resource = [
-          aws_s3_bucket.lambda_code.arn,
-          "\${aws_s3_bucket.lambda_code.arn}/*"
-        ]
-        Condition = {
-          Bool = {
-            "aws:SecureTransport" = "false"
-          }
-        }
-      }
-    ]
-  })
-}
-
+# Stage the Lambda zip in the shared asset bucket. The key is namespaced
+# by API so multiple lambdas sharing the same bucket never collide.
 resource "aws_s3_object" "lambda_zip" {
-  bucket      = aws_s3_bucket.lambda_code.id
-  key         = "\${data.archive_file.lambda_zip.output_base64sha256}.zip"
+  bucket      = var.asset_bucket_name
+  key         = "apis/test-api/\${data.archive_file.lambda_zip.output_base64sha256}.zip"
   source      = data.archive_file.lambda_zip.output_path
   source_hash = data.archive_file.lambda_zip.output_base64sha256
   etag        = data.archive_file.lambda_zip.output_md5
@@ -3377,7 +3311,7 @@ resource "aws_lambda_function" "api_lambda" {
   #checkov:skip=CKV_AWS_272:Code signing not required for this use case
   #checkov:skip=CKV_AWS_115:Concurrent execution limit not required for this use case
   #checkov:skip=CKV_AWS_173:Lambda environment variables encrypted by managed key
-  s3_bucket         = aws_s3_bucket.lambda_code.id
+  s3_bucket         = aws_s3_object.lambda_zip.bucket
   s3_key            = aws_s3_object.lambda_zip.key
   s3_object_version = aws_s3_object.lambda_zip.version_id
   function_name    = "TestApiHandler"
@@ -3922,6 +3856,11 @@ variable "additional_iam_policy_statements" {
   default = []
 }
 
+variable "asset_bucket_name" {
+  description = "Name of the shared asset S3 bucket used to stage the Lambda deployment zip. Instantiate the \`core/asset-bucket\` module once per deployment and pass its \`bucket_name\` output here."
+  type        = string
+}
+
 # CORS Configuration (passed to core module)
 variable "cors_allow_credentials" {
   description = "Whether to allow credentials in CORS requests"
@@ -3972,12 +3911,6 @@ data "aws_caller_identity" "current" {}
 
 # Resources
 
-resource "random_string" "code_suffix" {
-  length  = 8
-  special = false
-  upper   = false
-}
-
 # Create Lambda ZIP file from the bundle directory
 data "archive_file" "lambda_zip" {
   type        = "zip"
@@ -3985,76 +3918,11 @@ data "archive_file" "lambda_zip" {
   output_path = "\${path.module}/../../../../../../../dist/packages/common/terraform/apis/test-api/lambda.zip"
 }
 
-# Lambda code bucket — \`aws_lambda_function.filename\` uploads the zip
-# inline via the Lambda API which has a 70MB (base64-encoded) request
-# limit. We stage the zip in S3 instead so bundles that pull in larger
-# dependencies (eg FastAPI + Strands Agents + MCP) deploy correctly.
-resource "aws_s3_bucket" "lambda_code" {
-  #checkov:skip=CKV2_AWS_61:Lifecycle configuration not required for transient lambda deployment artefacts
-  #checkov:skip=CKV_AWS_144:Cross-region replication not required for lambda code bucket
-  #checkov:skip=CKV2_AWS_62:Event notifications not required for lambda code bucket
-  #checkov:skip=CKV_AWS_18:Access logging not required for transient lambda deployment artefact bucket
-  #checkov:skip=CKV_AWS_145:AES256 encryption is sufficient for lambda deployment artefacts
-  bucket        = "test-api-code-\${data.aws_caller_identity.current.account_id}-\${data.aws_region.current.name}-\${random_string.code_suffix.result}"
-  force_destroy = true
-
-  tags = var.tags
-}
-
-resource "aws_s3_bucket_versioning" "lambda_code" {
-  bucket = aws_s3_bucket.lambda_code.id
-  versioning_configuration {
-    status = "Enabled"
-  }
-}
-
-resource "aws_s3_bucket_server_side_encryption_configuration" "lambda_code" {
-  bucket = aws_s3_bucket.lambda_code.id
-
-  rule {
-    apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
-    }
-  }
-}
-
-resource "aws_s3_bucket_public_access_block" "lambda_code" {
-  bucket = aws_s3_bucket.lambda_code.id
-
-  block_public_acls       = true
-  block_public_policy     = true
-  ignore_public_acls      = true
-  restrict_public_buckets = true
-}
-
-resource "aws_s3_bucket_policy" "lambda_code" {
-  bucket = aws_s3_bucket.lambda_code.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid       = "DenyInsecureConnections"
-        Effect    = "Deny"
-        Principal = "*"
-        Action    = "s3:*"
-        Resource = [
-          aws_s3_bucket.lambda_code.arn,
-          "\${aws_s3_bucket.lambda_code.arn}/*"
-        ]
-        Condition = {
-          Bool = {
-            "aws:SecureTransport" = "false"
-          }
-        }
-      }
-    ]
-  })
-}
-
+# Stage the Lambda zip in the shared asset bucket. The key is namespaced
+# by API so multiple lambdas sharing the same bucket never collide.
 resource "aws_s3_object" "lambda_zip" {
-  bucket      = aws_s3_bucket.lambda_code.id
-  key         = "\${data.archive_file.lambda_zip.output_base64sha256}.zip"
+  bucket      = var.asset_bucket_name
+  key         = "apis/test-api/\${data.archive_file.lambda_zip.output_base64sha256}.zip"
   source      = data.archive_file.lambda_zip.output_path
   source_hash = data.archive_file.lambda_zip.output_base64sha256
   etag        = data.archive_file.lambda_zip.output_md5
@@ -4090,7 +3958,7 @@ resource "aws_lambda_function" "api_lambda" {
   #checkov:skip=CKV_AWS_272:Code signing not required for this use case
   #checkov:skip=CKV_AWS_115:Concurrent execution limit not required for this use case
   #checkov:skip=CKV_AWS_173:Lambda environment variables encrypted by managed key
-  s3_bucket         = aws_s3_bucket.lambda_code.id
+  s3_bucket         = aws_s3_object.lambda_zip.bucket
   s3_key            = aws_s3_object.lambda_zip.key
   s3_object_version = aws_s3_object.lambda_zip.version_id
   function_name    = "TestApiHandler"
@@ -4622,6 +4490,11 @@ variable "additional_iam_policy_statements" {
   default = []
 }
 
+variable "asset_bucket_name" {
+  description = "Name of the shared asset S3 bucket used to stage the Lambda deployment zip. Instantiate the \`core/asset-bucket\` module once per deployment and pass its \`bucket_name\` output here."
+  type        = string
+}
+
 # CORS Configuration (passed to core module)
 variable "cors_allow_credentials" {
   description = "Whether to allow credentials in CORS requests"
@@ -4672,12 +4545,6 @@ data "aws_caller_identity" "current" {}
 
 # Resources
 
-resource "random_string" "code_suffix" {
-  length  = 8
-  special = false
-  upper   = false
-}
-
 # Create Lambda ZIP file from the bundle directory
 data "archive_file" "lambda_zip" {
   type        = "zip"
@@ -4685,76 +4552,11 @@ data "archive_file" "lambda_zip" {
   output_path = "\${path.module}/../../../../../../../dist/packages/common/terraform/apis/test-api/lambda.zip"
 }
 
-# Lambda code bucket — \`aws_lambda_function.filename\` uploads the zip
-# inline via the Lambda API which has a 70MB (base64-encoded) request
-# limit. We stage the zip in S3 instead so bundles that pull in larger
-# dependencies (eg FastAPI + Strands Agents + MCP) deploy correctly.
-resource "aws_s3_bucket" "lambda_code" {
-  #checkov:skip=CKV2_AWS_61:Lifecycle configuration not required for transient lambda deployment artefacts
-  #checkov:skip=CKV_AWS_144:Cross-region replication not required for lambda code bucket
-  #checkov:skip=CKV2_AWS_62:Event notifications not required for lambda code bucket
-  #checkov:skip=CKV_AWS_18:Access logging not required for transient lambda deployment artefact bucket
-  #checkov:skip=CKV_AWS_145:AES256 encryption is sufficient for lambda deployment artefacts
-  bucket        = "test-api-code-\${data.aws_caller_identity.current.account_id}-\${data.aws_region.current.name}-\${random_string.code_suffix.result}"
-  force_destroy = true
-
-  tags = var.tags
-}
-
-resource "aws_s3_bucket_versioning" "lambda_code" {
-  bucket = aws_s3_bucket.lambda_code.id
-  versioning_configuration {
-    status = "Enabled"
-  }
-}
-
-resource "aws_s3_bucket_server_side_encryption_configuration" "lambda_code" {
-  bucket = aws_s3_bucket.lambda_code.id
-
-  rule {
-    apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
-    }
-  }
-}
-
-resource "aws_s3_bucket_public_access_block" "lambda_code" {
-  bucket = aws_s3_bucket.lambda_code.id
-
-  block_public_acls       = true
-  block_public_policy     = true
-  ignore_public_acls      = true
-  restrict_public_buckets = true
-}
-
-resource "aws_s3_bucket_policy" "lambda_code" {
-  bucket = aws_s3_bucket.lambda_code.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid       = "DenyInsecureConnections"
-        Effect    = "Deny"
-        Principal = "*"
-        Action    = "s3:*"
-        Resource = [
-          aws_s3_bucket.lambda_code.arn,
-          "\${aws_s3_bucket.lambda_code.arn}/*"
-        ]
-        Condition = {
-          Bool = {
-            "aws:SecureTransport" = "false"
-          }
-        }
-      }
-    ]
-  })
-}
-
+# Stage the Lambda zip in the shared asset bucket. The key is namespaced
+# by API so multiple lambdas sharing the same bucket never collide.
 resource "aws_s3_object" "lambda_zip" {
-  bucket      = aws_s3_bucket.lambda_code.id
-  key         = "\${data.archive_file.lambda_zip.output_base64sha256}.zip"
+  bucket      = var.asset_bucket_name
+  key         = "apis/test-api/\${data.archive_file.lambda_zip.output_base64sha256}.zip"
   source      = data.archive_file.lambda_zip.output_path
   source_hash = data.archive_file.lambda_zip.output_base64sha256
   etag        = data.archive_file.lambda_zip.output_md5
@@ -4790,7 +4592,7 @@ resource "aws_lambda_function" "api_lambda" {
   #checkov:skip=CKV_AWS_272:Code signing not required for this use case
   #checkov:skip=CKV_AWS_115:Concurrent execution limit not required for this use case
   #checkov:skip=CKV_AWS_173:Lambda environment variables encrypted by managed key
-  s3_bucket         = aws_s3_bucket.lambda_code.id
+  s3_bucket         = aws_s3_object.lambda_zip.bucket
   s3_key            = aws_s3_object.lambda_zip.key
   s3_object_version = aws_s3_object.lambda_zip.version_id
   function_name    = "TestApiHandler"
@@ -5349,6 +5151,11 @@ variable "additional_iam_policy_statements" {
   default = []
 }
 
+variable "asset_bucket_name" {
+  description = "Name of the shared asset S3 bucket used to stage the Lambda deployment zip. Instantiate the \`core/asset-bucket\` module once per deployment and pass its \`bucket_name\` output here."
+  type        = string
+}
+
 # CORS Configuration (passed to core module)
 
 variable "cors_allow_headers" {
@@ -5389,12 +5196,6 @@ data "aws_caller_identity" "current" {}
 
 # Resources
 
-resource "random_string" "code_suffix" {
-  length  = 8
-  special = false
-  upper   = false
-}
-
 # Create Lambda ZIP file from the bundle directory
 data "archive_file" "lambda_zip" {
   type        = "zip"
@@ -5402,76 +5203,11 @@ data "archive_file" "lambda_zip" {
   output_path = "\${path.module}/../../../../../../../dist/packages/common/terraform/apis/test-api/lambda.zip"
 }
 
-# Lambda code bucket — \`aws_lambda_function.filename\` uploads the zip
-# inline via the Lambda API which has a 70MB (base64-encoded) request
-# limit. We stage the zip in S3 instead so bundles that pull in larger
-# dependencies (eg FastAPI + Strands Agents + MCP) deploy correctly.
-resource "aws_s3_bucket" "lambda_code" {
-  #checkov:skip=CKV2_AWS_61:Lifecycle configuration not required for transient lambda deployment artefacts
-  #checkov:skip=CKV_AWS_144:Cross-region replication not required for lambda code bucket
-  #checkov:skip=CKV2_AWS_62:Event notifications not required for lambda code bucket
-  #checkov:skip=CKV_AWS_18:Access logging not required for transient lambda deployment artefact bucket
-  #checkov:skip=CKV_AWS_145:AES256 encryption is sufficient for lambda deployment artefacts
-  bucket        = "test-api-code-\${data.aws_caller_identity.current.account_id}-\${data.aws_region.current.name}-\${random_string.code_suffix.result}"
-  force_destroy = true
-
-  tags = var.tags
-}
-
-resource "aws_s3_bucket_versioning" "lambda_code" {
-  bucket = aws_s3_bucket.lambda_code.id
-  versioning_configuration {
-    status = "Enabled"
-  }
-}
-
-resource "aws_s3_bucket_server_side_encryption_configuration" "lambda_code" {
-  bucket = aws_s3_bucket.lambda_code.id
-
-  rule {
-    apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
-    }
-  }
-}
-
-resource "aws_s3_bucket_public_access_block" "lambda_code" {
-  bucket = aws_s3_bucket.lambda_code.id
-
-  block_public_acls       = true
-  block_public_policy     = true
-  ignore_public_acls      = true
-  restrict_public_buckets = true
-}
-
-resource "aws_s3_bucket_policy" "lambda_code" {
-  bucket = aws_s3_bucket.lambda_code.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid       = "DenyInsecureConnections"
-        Effect    = "Deny"
-        Principal = "*"
-        Action    = "s3:*"
-        Resource = [
-          aws_s3_bucket.lambda_code.arn,
-          "\${aws_s3_bucket.lambda_code.arn}/*"
-        ]
-        Condition = {
-          Bool = {
-            "aws:SecureTransport" = "false"
-          }
-        }
-      }
-    ]
-  })
-}
-
+# Stage the Lambda zip in the shared asset bucket. The key is namespaced
+# by API so multiple lambdas sharing the same bucket never collide.
 resource "aws_s3_object" "lambda_zip" {
-  bucket      = aws_s3_bucket.lambda_code.id
-  key         = "\${data.archive_file.lambda_zip.output_base64sha256}.zip"
+  bucket      = var.asset_bucket_name
+  key         = "apis/test-api/\${data.archive_file.lambda_zip.output_base64sha256}.zip"
   source      = data.archive_file.lambda_zip.output_path
   source_hash = data.archive_file.lambda_zip.output_base64sha256
   etag        = data.archive_file.lambda_zip.output_md5
@@ -5514,7 +5250,7 @@ resource "aws_lambda_function" "api_lambda" {
   #checkov:skip=CKV_AWS_272:Code signing not required for this use case
   #checkov:skip=CKV_AWS_115:Concurrent execution limit not required for this use case
   #checkov:skip=CKV_AWS_173:Lambda environment variables encrypted by managed key
-  s3_bucket         = aws_s3_bucket.lambda_code.id
+  s3_bucket         = aws_s3_object.lambda_zip.bucket
   s3_key            = aws_s3_object.lambda_zip.key
   s3_object_version = aws_s3_object.lambda_zip.version_id
   function_name    = "TestApiHandler"
@@ -6205,6 +5941,11 @@ variable "additional_iam_policy_statements" {
   default = []
 }
 
+variable "asset_bucket_name" {
+  description = "Name of the shared asset S3 bucket used to stage the Lambda deployment zip. Instantiate the \`core/asset-bucket\` module once per deployment and pass its \`bucket_name\` output here."
+  type        = string
+}
+
 # CORS Configuration (passed to core module)
 
 variable "cors_allow_headers" {
@@ -6245,12 +5986,6 @@ data "aws_caller_identity" "current" {}
 
 # Resources
 
-resource "random_string" "code_suffix" {
-  length  = 8
-  special = false
-  upper   = false
-}
-
 # Create Lambda ZIP file from the bundle directory
 data "archive_file" "lambda_zip" {
   type        = "zip"
@@ -6258,76 +5993,11 @@ data "archive_file" "lambda_zip" {
   output_path = "\${path.module}/../../../../../../../dist/packages/common/terraform/apis/test-api/lambda.zip"
 }
 
-# Lambda code bucket — \`aws_lambda_function.filename\` uploads the zip
-# inline via the Lambda API which has a 70MB (base64-encoded) request
-# limit. We stage the zip in S3 instead so bundles that pull in larger
-# dependencies (eg FastAPI + Strands Agents + MCP) deploy correctly.
-resource "aws_s3_bucket" "lambda_code" {
-  #checkov:skip=CKV2_AWS_61:Lifecycle configuration not required for transient lambda deployment artefacts
-  #checkov:skip=CKV_AWS_144:Cross-region replication not required for lambda code bucket
-  #checkov:skip=CKV2_AWS_62:Event notifications not required for lambda code bucket
-  #checkov:skip=CKV_AWS_18:Access logging not required for transient lambda deployment artefact bucket
-  #checkov:skip=CKV_AWS_145:AES256 encryption is sufficient for lambda deployment artefacts
-  bucket        = "test-api-code-\${data.aws_caller_identity.current.account_id}-\${data.aws_region.current.name}-\${random_string.code_suffix.result}"
-  force_destroy = true
-
-  tags = var.tags
-}
-
-resource "aws_s3_bucket_versioning" "lambda_code" {
-  bucket = aws_s3_bucket.lambda_code.id
-  versioning_configuration {
-    status = "Enabled"
-  }
-}
-
-resource "aws_s3_bucket_server_side_encryption_configuration" "lambda_code" {
-  bucket = aws_s3_bucket.lambda_code.id
-
-  rule {
-    apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
-    }
-  }
-}
-
-resource "aws_s3_bucket_public_access_block" "lambda_code" {
-  bucket = aws_s3_bucket.lambda_code.id
-
-  block_public_acls       = true
-  block_public_policy     = true
-  ignore_public_acls      = true
-  restrict_public_buckets = true
-}
-
-resource "aws_s3_bucket_policy" "lambda_code" {
-  bucket = aws_s3_bucket.lambda_code.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid       = "DenyInsecureConnections"
-        Effect    = "Deny"
-        Principal = "*"
-        Action    = "s3:*"
-        Resource = [
-          aws_s3_bucket.lambda_code.arn,
-          "\${aws_s3_bucket.lambda_code.arn}/*"
-        ]
-        Condition = {
-          Bool = {
-            "aws:SecureTransport" = "false"
-          }
-        }
-      }
-    ]
-  })
-}
-
+# Stage the Lambda zip in the shared asset bucket. The key is namespaced
+# by API so multiple lambdas sharing the same bucket never collide.
 resource "aws_s3_object" "lambda_zip" {
-  bucket      = aws_s3_bucket.lambda_code.id
-  key         = "\${data.archive_file.lambda_zip.output_base64sha256}.zip"
+  bucket      = var.asset_bucket_name
+  key         = "apis/test-api/\${data.archive_file.lambda_zip.output_base64sha256}.zip"
   source      = data.archive_file.lambda_zip.output_path
   source_hash = data.archive_file.lambda_zip.output_base64sha256
   etag        = data.archive_file.lambda_zip.output_md5
@@ -6370,7 +6040,7 @@ resource "aws_lambda_function" "api_lambda" {
   #checkov:skip=CKV_AWS_272:Code signing not required for this use case
   #checkov:skip=CKV_AWS_115:Concurrent execution limit not required for this use case
   #checkov:skip=CKV_AWS_173:Lambda environment variables encrypted by managed key
-  s3_bucket         = aws_s3_bucket.lambda_code.id
+  s3_bucket         = aws_s3_object.lambda_zip.bucket
   s3_key            = aws_s3_object.lambda_zip.key
   s3_object_version = aws_s3_object.lambda_zip.version_id
   function_name    = "TestApiHandler"
@@ -7063,6 +6733,11 @@ variable "additional_iam_policy_statements" {
   default = []
 }
 
+variable "asset_bucket_name" {
+  description = "Name of the shared asset S3 bucket used to stage the Lambda deployment zip. Instantiate the \`core/asset-bucket\` module once per deployment and pass its \`bucket_name\` output here."
+  type        = string
+}
+
 # CORS Configuration (passed to core module)
 
 variable "cors_allow_headers" {
@@ -7103,12 +6778,6 @@ data "aws_caller_identity" "current" {}
 
 # Resources
 
-resource "random_string" "code_suffix" {
-  length  = 8
-  special = false
-  upper   = false
-}
-
 # Create Lambda ZIP file from the bundle directory
 data "archive_file" "lambda_zip" {
   type        = "zip"
@@ -7116,76 +6785,11 @@ data "archive_file" "lambda_zip" {
   output_path = "\${path.module}/../../../../../../../dist/packages/common/terraform/apis/test-api/lambda.zip"
 }
 
-# Lambda code bucket — \`aws_lambda_function.filename\` uploads the zip
-# inline via the Lambda API which has a 70MB (base64-encoded) request
-# limit. We stage the zip in S3 instead so bundles that pull in larger
-# dependencies (eg FastAPI + Strands Agents + MCP) deploy correctly.
-resource "aws_s3_bucket" "lambda_code" {
-  #checkov:skip=CKV2_AWS_61:Lifecycle configuration not required for transient lambda deployment artefacts
-  #checkov:skip=CKV_AWS_144:Cross-region replication not required for lambda code bucket
-  #checkov:skip=CKV2_AWS_62:Event notifications not required for lambda code bucket
-  #checkov:skip=CKV_AWS_18:Access logging not required for transient lambda deployment artefact bucket
-  #checkov:skip=CKV_AWS_145:AES256 encryption is sufficient for lambda deployment artefacts
-  bucket        = "test-api-code-\${data.aws_caller_identity.current.account_id}-\${data.aws_region.current.name}-\${random_string.code_suffix.result}"
-  force_destroy = true
-
-  tags = var.tags
-}
-
-resource "aws_s3_bucket_versioning" "lambda_code" {
-  bucket = aws_s3_bucket.lambda_code.id
-  versioning_configuration {
-    status = "Enabled"
-  }
-}
-
-resource "aws_s3_bucket_server_side_encryption_configuration" "lambda_code" {
-  bucket = aws_s3_bucket.lambda_code.id
-
-  rule {
-    apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
-    }
-  }
-}
-
-resource "aws_s3_bucket_public_access_block" "lambda_code" {
-  bucket = aws_s3_bucket.lambda_code.id
-
-  block_public_acls       = true
-  block_public_policy     = true
-  ignore_public_acls      = true
-  restrict_public_buckets = true
-}
-
-resource "aws_s3_bucket_policy" "lambda_code" {
-  bucket = aws_s3_bucket.lambda_code.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid       = "DenyInsecureConnections"
-        Effect    = "Deny"
-        Principal = "*"
-        Action    = "s3:*"
-        Resource = [
-          aws_s3_bucket.lambda_code.arn,
-          "\${aws_s3_bucket.lambda_code.arn}/*"
-        ]
-        Condition = {
-          Bool = {
-            "aws:SecureTransport" = "false"
-          }
-        }
-      }
-    ]
-  })
-}
-
+# Stage the Lambda zip in the shared asset bucket. The key is namespaced
+# by API so multiple lambdas sharing the same bucket never collide.
 resource "aws_s3_object" "lambda_zip" {
-  bucket      = aws_s3_bucket.lambda_code.id
-  key         = "\${data.archive_file.lambda_zip.output_base64sha256}.zip"
+  bucket      = var.asset_bucket_name
+  key         = "apis/test-api/\${data.archive_file.lambda_zip.output_base64sha256}.zip"
   source      = data.archive_file.lambda_zip.output_path
   source_hash = data.archive_file.lambda_zip.output_base64sha256
   etag        = data.archive_file.lambda_zip.output_md5
@@ -7228,7 +6832,7 @@ resource "aws_lambda_function" "api_lambda" {
   #checkov:skip=CKV_AWS_272:Code signing not required for this use case
   #checkov:skip=CKV_AWS_115:Concurrent execution limit not required for this use case
   #checkov:skip=CKV_AWS_173:Lambda environment variables encrypted by managed key
-  s3_bucket         = aws_s3_bucket.lambda_code.id
+  s3_bucket         = aws_s3_object.lambda_zip.bucket
   s3_key            = aws_s3_object.lambda_zip.key
   s3_object_version = aws_s3_object.lambda_zip.version_id
   function_name    = "TestApiHandler"

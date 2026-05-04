@@ -1,0 +1,32 @@
+---
+title: Asset Bucket
+---
+
+Generated Terraform modules for Lambda-backed resources (API handlers and standalone Lambda functions) stage their deployment zip in a shared S3 asset bucket rather than uploading it inline via the Lambda API. The inline upload path has a 70 MB (base64-encoded) request limit, which can be exceeded by bundles that pull in larger dependencies (e.g. FastAPI + Strands Agents + MCP).
+
+Instantiate the `core/asset-bucket` module once per deployment and pass its `bucket_name` output into every module that accepts an `asset_bucket_name` input:
+
+```hcl
+module "asset_bucket" {
+  source = "../../common/terraform/src/core/asset-bucket"
+}
+
+module "my_project_my_function" {
+  source = "../../common/terraform/src/app/lambda-functions/my-project-my-function"
+
+  asset_bucket_name = module.asset_bucket.bucket_name
+}
+
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  asset_bucket_name = module.asset_bucket.bucket_name
+}
+```
+
+The `core/asset-bucket` module provisions:
+
+- An S3 bucket with S3-managed (AES256) encryption, versioning, a TLS-only bucket policy and public-access block.
+- A sibling access-logs bucket (S3 access logs are delivered to this bucket under the `s3-access-logs/` prefix).
+
+Reuse the same instance across every Lambda / API module in your deployment — each caller writes under a module-scoped key prefix so there are no collisions.
