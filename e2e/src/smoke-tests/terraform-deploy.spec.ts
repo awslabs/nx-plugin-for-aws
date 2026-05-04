@@ -523,12 +523,9 @@ describe('smoke test - terraform-deploy', () => {
       );
       await invokeAgentCoreMcp(outputs.py_mcp_server_arn, 'Python MCP Server');
 
-      // Agents
-      await invokeAgentCoreAgent(outputs.strands_agent_arn, 'Strands Agent');
-      await invokeAgentCoreAgent(
-        outputs.ts_strands_agent_arn,
-        'TypeScript Strands Agent',
-      );
+      // NOTE: The HTTP strands agents (`strands_agent` / `ts_strands_agent`)
+      // are scaffolded via the generator matrix but omitted from the deploy
+      // — see main.tf.template for why.
 
       // A2A (direct invocation via A2A SDK)
       await invokeAgentCoreA2a(

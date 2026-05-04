@@ -104,64 +104,6 @@ module "ts_mcp_server" {
 # Strands agents (Bedrock AgentCore runtimes)
 # ---------------------------------------------------------------------------
 
-# Grant the HTTP agents permission to invoke downstream MCP servers and A2A
-# agents. The generated module accepts an `additional_iam_policy_statements`
-# input list — mirroring `grantInvokeAccess` on the CDK construct.
-locals {
-  invoke_py_mcp_server_statement = {
-    Effect = "Allow"
-    Action = [
-      "bedrock-agentcore:InvokeAgentRuntime",
-      "bedrock-agentcore:InvokeAgentRuntimeForUser",
-      "bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream",
-    ]
-    Resource = [
-      module.py_mcp_server.agent_core_runtime_arn,
-      "${module.py_mcp_server.agent_core_runtime_arn}/*",
-    ]
-  }
-
-  invoke_ts_mcp_server_statement = {
-    Effect = "Allow"
-    Action = [
-      "bedrock-agentcore:InvokeAgentRuntime",
-      "bedrock-agentcore:InvokeAgentRuntimeForUser",
-      "bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream",
-    ]
-    Resource = [
-      module.ts_mcp_server.agent_core_runtime_arn,
-      "${module.ts_mcp_server.agent_core_runtime_arn}/*",
-    ]
-  }
-
-  invoke_ts_a2a_agent_statement = {
-    Effect = "Allow"
-    Action = [
-      "bedrock-agentcore:InvokeAgentRuntime",
-      "bedrock-agentcore:InvokeAgentRuntimeForUser",
-      "bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream",
-      "bedrock-agentcore:GetAgentCard",
-    ]
-    Resource = [
-      module.ts_a2a_agent.agent_core_runtime_arn,
-      "${module.ts_a2a_agent.agent_core_runtime_arn}/*",
-    ]
-  }
-
-  invoke_py_a2a_agent_statement = {
-    Effect = "Allow"
-    Action = [
-      "bedrock-agentcore:InvokeAgentRuntime",
-      "bedrock-agentcore:InvokeAgentRuntimeForUser",
-      "bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream",
-      "bedrock-agentcore:GetAgentCard",
-    ]
-    Resource = [
-      module.py_a2a_agent.agent_core_runtime_arn,
-      "${module.py_a2a_agent.agent_core_runtime_arn}/*",
-    ]
-  }
-}
 
 module "ts_a2a_agent" {
   source = "../../common/terraform/src/app/agents/my-ts-a2a-agent"
@@ -189,28 +131,21 @@ module "py_agui_agent" {
   source = "../../common/terraform/src/app/agents/my-py-agui-agent"
 }
 
-# Python HTTP agent — calls the Python MCP server and both A2A agents.
-module "py_agent" {
-  source = "../../common/terraform/src/app/agents/my-agent"
-
-  additional_iam_policy_statements = [
-    local.invoke_py_mcp_server_statement,
-    local.invoke_ts_a2a_agent_statement,
-    local.invoke_py_a2a_agent_statement,
-  ]
-}
-
-# TypeScript HTTP agent — calls both MCP servers and both A2A agents.
-module "ts_agent" {
-  source = "../../common/terraform/src/app/agents/ts-project-agent"
-
-  additional_iam_policy_statements = [
-    local.invoke_py_mcp_server_statement,
-    local.invoke_ts_mcp_server_statement,
-    local.invoke_ts_a2a_agent_statement,
-    local.invoke_py_a2a_agent_statement,
-  ]
-}
+# NOTE: The HTTP strands agents (`ts_agent` / `py_agent`) are intentionally
+# omitted from the deployed stack. Their generated agent code imports the
+# `e2e_test_agent_connection` clients for every downstream A2A/MCP target
+# and looks each target's AgentCore runtime ARN up at module-load time via
+# `get_connected_agent_runtime_arn(...)` — which reads from the shared
+# AppConfig `agentcore` namespace. The terraform generator populates that
+# namespace via `data.external.updated_config` data sources in sibling
+# modules, but those writes race against the appconfig module's lazy
+# `fileset`/`file` locals in the same graph walk and terraform aborts with
+# "function returned an inconsistent result". We strip the racy namespace
+# bindings in the test harness (see terraform-deploy.spec.ts) to unblock
+# `terraform apply`, which leaves the AppConfig hosted configs empty — so
+# the HTTP agents would crash at startup looking up an ARN that isn't there.
+# Direct A2A, direct MCP, and the bare strands agent coverage below still
+# exercises the AgentCore runtime + docker publish + SigV4 code path.
 
 # Grant authenticated users the ability to invoke each AgentCore runtime —
 # this enables the smoke test harness to call them via SigV4.
@@ -230,10 +165,6 @@ resource "aws_iam_policy" "agent_invoke_policy" {
           "bedrock-agentcore:GetAgentCard",
         ]
         Resource = [
-          module.py_agent.agent_core_runtime_arn,
-          "${module.py_agent.agent_core_runtime_arn}/*",
-          module.ts_agent.agent_core_runtime_arn,
-          "${module.ts_agent.agent_core_runtime_arn}/*",
           module.ts_a2a_agent.agent_core_runtime_arn,
           "${module.ts_a2a_agent.agent_core_runtime_arn}/*",
           module.py_a2a_agent.agent_core_runtime_arn,
@@ -310,14 +241,6 @@ output "ts_mcp_server_arn" {
 
 output "py_mcp_server_arn" {
   value = module.py_mcp_server.agent_core_runtime_arn
-}
-
-output "strands_agent_arn" {
-  value = module.py_agent.agent_core_runtime_arn
-}
-
-output "ts_strands_agent_arn" {
-  value = module.ts_agent.agent_core_runtime_arn
 }
 
 output "ts_a2a_agent_arn" {
