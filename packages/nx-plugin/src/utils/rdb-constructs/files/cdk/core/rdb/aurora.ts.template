@@ -196,7 +196,7 @@ export abstract class AuroraDatabase extends Construct {
       storageEncrypted: true,
       storageEncryptionKey: key,
       deletionProtection: true,
-      removalPolicy: RemovalPolicy.RETAIN
+      removalPolicy: RemovalPolicy.RETAIN,
     });
 
     if (enableCredentialRotation) {
@@ -207,7 +207,7 @@ export abstract class AuroraDatabase extends Construct {
         },
       });
     }
-    
+
     const proxyRole = enableRdsProxy
       ? new Role(this, 'DatabaseProxyRole', {
           assumedBy: new ServicePrincipal('rds.amazonaws.com'),
@@ -281,47 +281,30 @@ export abstract class AuroraDatabase extends Construct {
     });
 
     const migrationHandler = new DockerImageFunction(this, 'MigrationHandler', {
-      code: DockerImageCode.fromImageAsset(
-        migrationBundleDir,
-        {
-          platform: Platform.LINUX_ARM64,
-          buildArgs: {
-            AWS_REGION: Stack.of(this).region,
-          },
+      code: DockerImageCode.fromImageAsset(migrationBundleDir, {
+        platform: Platform.LINUX_ARM64,
+        buildArgs: {
+          AWS_REGION: Stack.of(this).region,
         },
-      ),
+      }),
       memorySize: 1024,
       timeout: Duration.minutes(5),
       tracing: Tracing.ACTIVE,
       vpc,
-<%_ if (engine === 'mysql') { _%>
       environment: {
         DATABASE_SECRET_ARN: this.cluster.secret!.secretArn,
-      },
-<%_ } else { _%>
-      environment: {
         HOSTNAME: databaseHostname,
         DATABASE: databaseName,
         PORT: databasePort.toString(),
         DBUSER: this.dbUser,
       },
-<%_ } _%>
       architecture: Architecture.ARM_64,
     });
 
-<%_ if (engine === 'mysql') { _%>
-    this.cluster.connections.allowDefaultPortFrom(
-      migrationHandler,
-      'Allow the migration handler to connect to the database',
-    );
+    this.allowDefaultPortFrom(migrationHandler);
+    this.cluster.connections.allowDefaultPortFrom(migrationHandler);
     this.grantSecretRead(migrationHandler);
-<%_ } else { _%>
-    this.allowDefaultPortFrom(
-      migrationHandler,
-      'Allow the migration handler to connect to the database',
-    );
     this.grantConnect(migrationHandler);
-<%_ } _%>
 
     const trigger = new Trigger(this, 'MigrationTrigger', {
       handler: migrationHandler,
@@ -352,9 +335,7 @@ export abstract class AuroraDatabase extends Construct {
   }
 
   public grantSecretRead(grantee: IGrantable) {
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    const secret = this.cluster.secret!;
-    return secret.grantRead(grantee);
+    return this.cluster.secret!.grantRead(grantee);
   }
 
   public grantConnect(grantee: IGrantable) {

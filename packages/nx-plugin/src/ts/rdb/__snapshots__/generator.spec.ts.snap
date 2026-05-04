@@ -235,9 +235,6 @@ import { promisify } from 'node:util';
 import { getDatabaseSecret } from './utils.js';
 
 export const handler = async () => {
-  // TODO: The Prisma CLI relies on a Rust-based driver that doesn’t support \`mysql_clear_password\` (required for IAM authentication).
-  // Therefore, the MySQL migration handler can only connect directly to the database cluster.
-  // See: https://github.com/prisma/prisma/issues/10304
   const { host, port, dbname, username, password } = await getDatabaseSecret();
 
   const databaseUrl =
@@ -271,10 +268,6 @@ import {
 } from './constants.js';
 import { getDatabaseConfig } from './utils.js';
 
-// TODO: IAM tokens expire every 15 minutes, so we implement a workaround by tracking a 10-minute TTL.
-// Every 10 minutes, a new IAM token is fetched and the connection pool is recreated.
-// This approach works for most request-response cycles under 15 minutes, but may fail in longer-running cases.
-// Note: The MySQL library lacks a convenient async password callback (e.g., \`password: async () => {}\`) like Postgres.
 export const PRISMA_TTL_MS = 10 * 60 * 1000;
 
 let prismaClient: PrismaClient | undefined;
@@ -302,9 +295,6 @@ const createPrismaClient = async (): Promise<PrismaClient> => {
     username: dbUser,
   }).getAuthToken();
 
-  // NOTE: This pool/adapter does not support an \`allowExitOnIdle\` option like Postgres.
-  // In STREAMING mode (e.g., API Gateway + Lambda), idle connections may keep
-  // the Node.js event loop active, preventing the request from completing properly.
   const adapter = new PrismaMariaDb({
     host: hostname,
     port,
@@ -721,15 +711,18 @@ export abstract class AuroraDatabase extends Construct {
       vpc,
       environment: {
         DATABASE_SECRET_ARN: this.cluster.secret!.secretArn,
+        HOSTNAME: databaseHostname,
+        DATABASE: databaseName,
+        PORT: databasePort.toString(),
+        DBUSER: this.dbUser,
       },
       architecture: Architecture.ARM_64,
     });
 
-    this.cluster.connections.allowDefaultPortFrom(
-      migrationHandler,
-      'Allow the migration handler to connect to the database',
-    );
+    this.allowDefaultPortFrom(migrationHandler);
+    this.cluster.connections.allowDefaultPortFrom(migrationHandler);
     this.grantSecretRead(migrationHandler);
+    this.grantConnect(migrationHandler);
 
     const trigger = new Trigger(this, 'MigrationTrigger', {
       handler: migrationHandler,
@@ -760,9 +753,7 @@ export abstract class AuroraDatabase extends Construct {
   }
 
   public grantSecretRead(grantee: IGrantable) {
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    const secret = this.cluster.secret!;
-    return secret.grantRead(grantee);
+    return this.cluster.secret!.grantRead(grantee);
   }
 
   public grantConnect(grantee: IGrantable) {
@@ -4192,6 +4183,7 @@ export abstract class AuroraDatabase extends Construct {
       tracing: Tracing.ACTIVE,
       vpc,
       environment: {
+        DATABASE_SECRET_ARN: this.cluster.secret!.secretArn,
         HOSTNAME: databaseHostname,
         DATABASE: databaseName,
         PORT: databasePort.toString(),
@@ -4200,10 +4192,9 @@ export abstract class AuroraDatabase extends Construct {
       architecture: Architecture.ARM_64,
     });
 
-    this.allowDefaultPortFrom(
-      migrationHandler,
-      'Allow the migration handler to connect to the database',
-    );
+    this.allowDefaultPortFrom(migrationHandler);
+    this.cluster.connections.allowDefaultPortFrom(migrationHandler);
+    this.grantSecretRead(migrationHandler);
     this.grantConnect(migrationHandler);
 
     const trigger = new Trigger(this, 'MigrationTrigger', {
@@ -4235,9 +4226,7 @@ export abstract class AuroraDatabase extends Construct {
   }
 
   public grantSecretRead(grantee: IGrantable) {
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    const secret = this.cluster.secret!;
-    return secret.grantRead(grantee);
+    return this.cluster.secret!.grantRead(grantee);
   }
 
   public grantConnect(grantee: IGrantable) {
