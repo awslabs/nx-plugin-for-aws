@@ -94,10 +94,34 @@ module "ts_function" {
 
 module "py_mcp_server" {
   source = "../../common/terraform/src/app/mcp-servers/my-mcp-server"
+
+  # Force the appconfig module inside py_mcp_server to only read the
+  # runtime-config namespace files *after* every other writer has finished
+  # writing — avoids the "function returned an inconsistent result" race
+  # that terraform's consistency check raises when fileset/file see a
+  # mid-walk directory/content mutation from a sibling module.
+  depends_on = [
+    module.user_identity,
+    module.my_api,
+    module.my_api_http,
+    module.py_api,
+    module.py_api_http,
+    module.my_smithy_api,
+  ]
 }
 
 module "ts_mcp_server" {
   source = "../../common/terraform/src/app/mcp-servers/hosted-mcp-server"
+
+  depends_on = [
+    module.user_identity,
+    module.my_api,
+    module.my_api_http,
+    module.py_api,
+    module.py_api_http,
+    module.my_smithy_api,
+    module.py_mcp_server,
+  ]
 }
 
 # ---------------------------------------------------------------------------
@@ -163,6 +187,44 @@ locals {
   }
 }
 
+# A2A agents — chained via `depends_on` so their embedded appconfig modules
+# read the runtime-config directory after all writers have stabilised.
+module "ts_a2a_agent" {
+  source = "../../common/terraform/src/app/agents/my-ts-a2a-agent"
+
+  depends_on = [module.ts_mcp_server]
+}
+
+module "py_a2a_agent" {
+  source = "../../common/terraform/src/app/agents/my-py-a2a-agent"
+
+  depends_on = [module.ts_a2a_agent]
+}
+
+module "ts_a2a_agent_cognito" {
+  source = "../../common/terraform/src/app/agents/my-ts-a2a-agent-cognito"
+
+  user_pool_id         = module.user_identity.user_pool_id
+  user_pool_client_ids = [module.user_identity.user_pool_client_id]
+
+  depends_on = [module.py_a2a_agent]
+}
+
+module "py_a2a_agent_cognito" {
+  source = "../../common/terraform/src/app/agents/my-py-a2a-agent-cognito"
+
+  user_pool_id         = module.user_identity.user_pool_id
+  user_pool_client_ids = [module.user_identity.user_pool_client_id]
+
+  depends_on = [module.ts_a2a_agent_cognito]
+}
+
+module "py_agui_agent" {
+  source = "../../common/terraform/src/app/agents/my-py-agui-agent"
+
+  depends_on = [module.py_a2a_agent_cognito]
+}
+
 # Python HTTP agent — calls the Python MCP server and both A2A agents.
 module "py_agent" {
   source = "../../common/terraform/src/app/agents/my-agent"
@@ -172,6 +234,8 @@ module "py_agent" {
     local.invoke_ts_a2a_agent_statement,
     local.invoke_py_a2a_agent_statement,
   ]
+
+  depends_on = [module.py_agui_agent]
 }
 
 # TypeScript HTTP agent — calls both MCP servers and both A2A agents.
@@ -184,36 +248,8 @@ module "ts_agent" {
     local.invoke_ts_a2a_agent_statement,
     local.invoke_py_a2a_agent_statement,
   ]
-}
 
-# A2A agents — no downstream invocations needed.
-module "ts_a2a_agent" {
-  source = "../../common/terraform/src/app/agents/my-ts-a2a-agent"
-}
-
-module "py_a2a_agent" {
-  source = "../../common/terraform/src/app/agents/my-py-a2a-agent"
-}
-
-# Cognito-auth A2A variants — these accept user pool inputs so the schema path
-# gets exercised even though the smoke test invokes them via IAM A2A flows.
-module "ts_a2a_agent_cognito" {
-  source = "../../common/terraform/src/app/agents/my-ts-a2a-agent-cognito"
-
-  user_pool_id         = module.user_identity.user_pool_id
-  user_pool_client_ids = [module.user_identity.user_pool_client_id]
-}
-
-module "py_a2a_agent_cognito" {
-  source = "../../common/terraform/src/app/agents/my-py-a2a-agent-cognito"
-
-  user_pool_id         = module.user_identity.user_pool_id
-  user_pool_client_ids = [module.user_identity.user_pool_client_id]
-}
-
-# Python AG-UI protocol agent.
-module "py_agui_agent" {
-  source = "../../common/terraform/src/app/agents/my-py-agui-agent"
+  depends_on = [module.py_agent]
 }
 
 # Grant authenticated users the ability to invoke each AgentCore runtime —
