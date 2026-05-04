@@ -306,6 +306,12 @@ describe('smoke test - terraform-deploy', () => {
     writeFileSync(nxJsonPath, JSON.stringify(nxJson, null, 2));
 
     try {
+      // Apply sync one more time so the newly-written main.tf and patched
+      // project.json get their license headers. Nx in non-interactive mode
+      // won't auto-apply sync changes during `apply` — it aborts with a fatal
+      // "workspace is out of sync" error instead.
+      await runCLI(`sync`, opts);
+
       // One-time remote-state bootstrap (idempotent — the target re-uses any
       // existing tfstate already in the per-account/region bucket).
       await runCLI(`bootstrap infra --output-style=stream`, opts);
