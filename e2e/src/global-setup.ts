@@ -139,7 +139,11 @@ export default async function () {
     console.info('@aws/nx-plugin-mcp published to local registry');
 
     console.info('Publishing @aws/create-nx-workspace to local registry');
-    execSync(`npm publish --tag e2e ${publishRegistryFlag}`, {
+    // Must publish as `latest` (not `--tag e2e`) so `pnpm create
+    // @aws/nx-workspace` resolves the local 0.0.0 build rather than falling
+    // through to the public registry's latest tag (which lacks any in-flight
+    // fixes being tested by this smoke run).
+    execSync(`npm publish ${publishRegistryFlag}`, {
       env: process.env,
       cwd: join(__dirname, '../../dist/packages/create-nx-workspace'),
     });
