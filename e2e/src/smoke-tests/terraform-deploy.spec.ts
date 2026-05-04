@@ -355,30 +355,30 @@ describe('smoke test - terraform-deploy', () => {
       ),
     );
 
-    // Strip the namespace→AppConfig plumbing from the generated appconfig
-    // module. The shipped implementation reads the `runtime-config` JSON
-    // files lazily via `fileset`/`file` at evaluation time; sibling
-    // `data.external.updated_config` modules keep mutating those JSON files
-    // mid-walk, so terraform's internal consistency check re-evaluates the
-    // local and sees different content on the second pass — surfacing as
+    // Replace the generated appconfig module's racy `fileset`/`file`
+    // discovery with a static namespace list. The shipped implementation
+    // reads the `runtime-config` JSON files lazily at evaluation time;
+    // sibling `data.external.updated_config` modules keep mutating those
+    // files mid-walk, so terraform's internal consistency check re-evaluates
+    // the local and sees different content on the second pass — surfacing as
     // "Call to function 'file' failed: function returned an inconsistent
-    // result". We keep the bare `Application` / `Environment` /
-    // `DeploymentStrategy` resources (their ids are referenced by downstream
-    // modules) but remove the namespace Configuration Profiles /
-    // Hosted Configuration Versions / Deployments so nothing depends on
-    // the racy locals.
+    // result". Using a hardcoded map of namespaces with empty objects keeps
+    // the ConfigurationProfile / HostedConfigurationVersion / Deployment
+    // resources that downstream agents/MCP servers need (otherwise the agent
+    // runtime crashes at startup with "ConfigurationProfile not found")
+    // without reading anything off disk.
     const appconfigTfPath = `${opts.cwd}/packages/common/terraform/src/core/runtime-config/appconfig/appconfig.tf`;
-    const appconfigTf = readFileSync(appconfigTfPath, 'utf-8');
-    // Keep everything up to line 45 (Application/Environment/DeploymentStrategy)
-    // and the final Outputs block. Drop the locals block (fileset/file) and
-    // all per-namespace resources.
-    const outputsStart = appconfigTf.indexOf('# Outputs');
-    const preNamespaces = appconfigTf
-      .slice(0, appconfigTf.indexOf('# Read all namespace JSON files'))
-      .trimEnd();
     writeFileSync(
       appconfigTfPath,
-      `${preNamespaces}\n\n${appconfigTf.slice(outputsStart)}`,
+      readFileSync(appconfigTfPath, 'utf-8').replace(
+        /# Read all namespace JSON files[\s\S]*?\n\}/m,
+        `locals {
+  namespaces = {
+    connection = {}
+    agentcore  = {}
+  }
+}`,
+      ),
     );
 
     // Inject `testRunId` into every hardcoded resource name in the generated
