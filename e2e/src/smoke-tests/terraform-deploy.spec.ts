@@ -313,11 +313,9 @@ describe('smoke test - terraform-deploy', () => {
         /^terraform apply\b/,
         'terraform apply -parallelism=1',
       );
-    infraProjectJson.targets.destroy.configurations.dev.command =
-      infraProjectJson.targets.destroy.configurations.dev.command.replace(
-        /^terraform destroy\b/,
-        'terraform destroy -parallelism=1',
-      );
+    // Destroy doesn't hit the same fileset race (no new files get written
+    // during teardown), so leave parallelism at the default to keep the
+    // ~20min destroy phase from ballooning.
 
     writeFileSync(
       infraProjectJsonPath,
