@@ -192,7 +192,7 @@ export const tsStrandsAgentGenerator = async (
     withVersions([
       'tsx',
       '@types/node',
-      '@clack/prompts',
+      'agent-chat-cli',
       ...(protocol === 'A2A'
         ? (['@types/express'] as const)
         : (['@types/ws', '@types/cors'] as const)),
@@ -204,25 +204,34 @@ export const tsStrandsAgentGenerator = async (
   const localDevPortStart = protocol === 'A2A' ? 9000 : 8081;
   const localDevPort = assignPort(tree, project, localDevPortStart);
 
-  // Emit the per-protocol interactive chat CLI under scripts/<agent>/chat.ts
-  const scriptsDir = joinPathFragments(
-    project.root,
-    'scripts',
-    agentTargetPrefix,
-  );
-  const relativeAgentImport = `../../${targetSourceDirRelativeToProjectRoot}`;
-  generateFiles(
-    tree,
-    joinPathFragments(__dirname, 'scripts', protocol.toLowerCase()),
-    scriptsDir,
-    {
-      agentNameClassName,
+  // HTTP chat needs a tiny generated script to wrap the project's tRPC
+  // WebSocket client in a `ChatAdapter`. A2A speaks the standard A2A
+  // protocol, so we can run `agent-chat-cli` directly as a binary.
+  if (protocol === 'HTTP') {
+    const scriptsDir = joinPathFragments(
+      project.root,
+      'scripts',
       agentTargetPrefix,
-      localDevPort,
-      relativeAgentImport,
-    },
-    { overwriteStrategy: OverwriteStrategy.KeepExisting },
-  );
+    );
+    const relativeAgentImport = `../../${targetSourceDirRelativeToProjectRoot}`;
+    generateFiles(
+      tree,
+      joinPathFragments(__dirname, 'scripts', 'http'),
+      scriptsDir,
+      {
+        agentNameClassName,
+        agentTargetPrefix,
+        localDevPort,
+        relativeAgentImport,
+      },
+      { overwriteStrategy: OverwriteStrategy.KeepExisting },
+    );
+  }
+
+  const chatCommand =
+    protocol === 'HTTP'
+      ? `tsx ./scripts/${agentTargetPrefix}/chat.ts`
+      : `agent-chat-cli a2a http://localhost:${localDevPort}`;
 
   updateProjectConfiguration(tree, project.name, {
     ...project,
@@ -254,7 +263,7 @@ export const tsStrandsAgentGenerator = async (
       [`${agentTargetPrefix}-chat`]: {
         executor: 'nx:run-commands',
         options: {
-          commands: [`tsx ./scripts/${agentTargetPrefix}/chat.ts`],
+          commands: [chatCommand],
           cwd: '{projectRoot}',
           env: {
             PORT: `${localDevPort}`,

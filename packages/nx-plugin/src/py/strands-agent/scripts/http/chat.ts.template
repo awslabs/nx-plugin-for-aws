@@ -1,11 +1,12 @@
 /**
  * Minimal chat CLI for <%- agentNameClassName %> (Python FastAPI / JSONL streaming).
  *
- * Connects to the `/invocations` endpoint of the locally-running agent.
- * Override the port with `PORT` or `--port <port>`.
+ * Uses the type-safe TypeScript client generated from the agent's OpenAPI
+ * spec. Override the port with `PORT` or `--port <port>`.
  */
 import { randomUUID } from 'node:crypto';
-import * as p from '@clack/prompts';
+import { chatLoop, type ChatAdapter } from 'agent-chat-cli';
+import { <%- agentNameClassName %> } from './generated/client.gen.js';
 
 const getCliArg = (name: string): string | undefined => {
   const idx = process.argv.indexOf(`--${name}`);
@@ -15,82 +16,36 @@ const getCliArg = (name: string): string | undefined => {
 };
 
 const SESSION_ID_HEADER = 'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id';
+const port = getCliArg('port') ?? process.env.PORT ?? '<%- localDevPort %>';
 
-const port =
-  getCliArg('port') ?? process.env.PORT ?? '<%- localDevPort %>';
-const url = `http://localhost:${port}/invocations`;
-// AgentCore session IDs must be at least 33 characters.
-const sessionId = randomUUID().replaceAll('-', '').padEnd(33, '0');
+class <%- agentNameClassName %>Adapter implements ChatAdapter {
+  private client!: <%- agentNameClassName %>;
+  // AgentCore session IDs must be at least 33 characters.
+  private readonly sessionId = randomUUID().replaceAll('-', '').padEnd(33, '0');
 
-async function main() {
-  p.intro('<%- agentNameClassName %> Chat');
-
-  while (true) {
-    const input = await p.text({
-      message: 'You',
-      placeholder: 'Type a message... (Ctrl+C to exit)',
+  async connect(url: string) {
+    this.client = new <%- agentNameClassName %>({
+      url,
+      fetch: (input, init) =>
+        fetch(input, {
+          ...init,
+          headers: {
+            ...(init?.headers ?? {}),
+            [SESSION_ID_HEADER]: this.sessionId,
+          },
+        }),
     });
+    return { agentName: '<%- agentNameClassName %>' };
+  }
 
-    if (p.isCancel(input)) {
-      p.outro('Goodbye!');
-      process.exit(0);
-    }
-
-    const trimmed = (input as string).trim();
-    if (!trimmed) continue;
-
-    async function* streamTokens(): AsyncGenerator<string> {
-      const response = await fetch(url, {
-        method: 'POST',
-        body: JSON.stringify({ message: trimmed }),
-        headers: {
-          'Content-Type': 'application/json',
-          [SESSION_ID_HEADER]: sessionId,
-        },
-      });
-
-      if (!response.ok || !response.body) {
-        throw new Error(
-          `Agent invocation failed: ${response.status} ${response.statusText}`,
-        );
-      }
-
-      const reader = response.body
-        .pipeThrough(new TextDecoderStream())
-        .getReader();
-      let buffer = '';
-      while (true) {
-        const { value, done } = await reader.read();
-        if (value) buffer += value;
-        if (done) break;
-        const lines = buffer.split('\n');
-        buffer = lines.pop() ?? '';
-        for (const line of lines) {
-          const trimmedLine = line.trim();
-          if (!trimmedLine) continue;
-          const chunk = JSON.parse(trimmedLine) as { content?: string };
-          if (typeof chunk.content === 'string') {
-            yield chunk.content;
-          }
-        }
-      }
-      if (buffer.trim()) {
-        const chunk = JSON.parse(buffer) as { content?: string };
-        if (typeof chunk.content === 'string') {
-          yield chunk.content;
-        }
-      }
-    }
-
-    try {
-      await p.stream.message(streamTokens(), { symbol: '🤖' });
-    } catch (err: any) {
-      p.log.error(err?.message ?? String(err));
+  async *sendMessage(text: string): AsyncIterable<string> {
+    for await (const chunk of this.client.invoke({ message: text })) {
+      if (typeof chunk.content === 'string') yield chunk.content;
     }
   }
 }
 
-main().catch((err) => {
-  p.log.error(`Fatal: ${err?.message ?? String(err)}`);
-  process.exit(1);
-});
+await chatLoop(
+  new <%- agentNameClassName %>Adapter(),
+  `http://localhost:${port}`,
+);

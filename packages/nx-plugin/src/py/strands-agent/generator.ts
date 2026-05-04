@@ -13,6 +13,8 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { withVersions } from '../../utils/versions';
+import { updateGitIgnore } from '../../utils/git';
+import { sortObjectKeys } from '../../utils/object';
 import { PyStrandsAgentGeneratorSchema } from './schema';
 import {
   NxGeneratorInfo,
@@ -216,46 +218,114 @@ export const pyStrandsAgentGenerator = async (
   // - AG-UI: create_strands_app() creates a FastAPI app in main.py
   const serveCommand = `uv run fastapi dev ${moduleName}/${agentNameSnakeCase}/main.py --port ${localDevPort}`;
 
-  // Emit the per-protocol interactive chat CLI under scripts/<agent>/chat.ts.
-  // The CLI is a TypeScript script (run via tsx) so Python agents get the
-  // same interactive terminal UX without Python-specific client plumbing.
-  const scriptsDir = joinPathFragments(
-    project.root,
-    'scripts',
-    agentTargetPrefix,
-  );
-  generateFiles(
-    tree,
-    joinPathFragments(__dirname, 'scripts', protocol.toLowerCase()),
-    scriptsDir,
-    {
-      agentNameClassName,
-      agentTargetPrefix,
-      localDevPort,
-    },
-    { overwriteStrategy: OverwriteStrategy.KeepExisting },
-  );
+  // HTTP chat uses the type-safe TypeScript client generated from the
+  // agent's OpenAPI spec (same generated client the react-connection
+  // generator produces). A2A and AG-UI speak standard protocols, so
+  // we can run `agent-chat-cli` directly as a binary.
+  const openApiTargetName = `${agentTargetPrefix}-openapi`;
+  const clientGenTargetName = `${agentTargetPrefix}-generate-client`;
 
-  // Add TypeScript deps required by the chat CLI script. Protocol-specific
-  // client packages are added as regular dependencies (matching the
-  // convention used elsewhere in the plugin — eg. the ts#strands-agent
-  // generator adds @a2a-js/sdk and the agui react-connection adds
-  // @ag-ui/client as regular deps).
+  if (protocol === 'HTTP') {
+    // Emit the OpenAPI spec generator script (shared with react-connection)
+    generateFiles(
+      tree,
+      joinPathFragments(__dirname, 'react-connection', 'files', 'agent'),
+      project.root,
+      {
+        moduleName,
+        agentNameSnakeCase,
+      },
+      { overwriteStrategy: OverwriteStrategy.KeepExisting },
+    );
+
+    // Emit the chat CLI adapter script
+    const scriptsDir = joinPathFragments(
+      project.root,
+      'scripts',
+      agentTargetPrefix,
+    );
+    generateFiles(
+      tree,
+      joinPathFragments(__dirname, 'scripts', 'http'),
+      scriptsDir,
+      {
+        agentNameClassName,
+        agentTargetPrefix,
+        localDevPort,
+      },
+      { overwriteStrategy: OverwriteStrategy.KeepExisting },
+    );
+
+    // Ignore the generated client directory
+    updateGitIgnore(tree, project.root, (patterns) => [
+      ...patterns,
+      `scripts/${agentTargetPrefix}/generated/`,
+    ]);
+  }
+
+  // Add TypeScript deps for the chat CLI. `agent-chat-cli` transitively
+  // bundles the protocol clients (@a2a-js/sdk, @ag-ui/client) and
+  // @clack/prompts, so nothing else is needed. HTTP also needs tsx to
+  // run the adapter script.
   addDependenciesToPackageJson(
     tree,
+    {},
     withVersions([
-      ...(protocol === 'A2A' ? (['@a2a-js/sdk'] as const) : ([] as const)),
-      ...(protocol === 'AG-UI'
-        ? (['@ag-ui/client', 'rxjs'] as const)
+      'agent-chat-cli',
+      ...(protocol === 'HTTP'
+        ? (['tsx', '@types/node'] as const)
         : ([] as const)),
     ]),
-    withVersions(['tsx', '@types/node', '@clack/prompts']),
   );
+
+  const chatCommand =
+    protocol === 'HTTP'
+      ? `tsx ./scripts/${agentTargetPrefix}/chat.ts`
+      : protocol === 'AG-UI'
+        ? `agent-chat-cli agui http://localhost:${localDevPort}/invocations`
+        : `agent-chat-cli a2a http://localhost:${localDevPort}`;
+
+  const httpOnlyTargets =
+    protocol === 'HTTP'
+      ? {
+          [openApiTargetName]: {
+            cache: true,
+            executor: 'nx:run-commands',
+            outputs: [
+              `{workspaceRoot}/dist/{projectRoot}/openapi/${agentNameSnakeCase}`,
+            ],
+            options: {
+              commands: [
+                `uv run python {projectRoot}/scripts/${agentNameSnakeCase}_openapi.py "dist/{projectRoot}/openapi/${agentNameSnakeCase}/openapi.json"`,
+              ],
+            },
+          },
+          [clientGenTargetName]: {
+            cache: true,
+            executor: 'nx:run-commands',
+            inputs: [
+              {
+                dependentTasksOutputFiles: '**/*.json',
+              },
+            ],
+            outputs: [
+              `{workspaceRoot}/{projectRoot}/scripts/${agentTargetPrefix}/generated`,
+            ],
+            options: {
+              commands: [
+                `nx g @aws/nx-plugin:open-api#ts-client --openApiSpecPath="dist/${project.root}/openapi/${agentNameSnakeCase}/openapi.json" --outputPath="${project.root}/scripts/${agentTargetPrefix}/generated" --no-interactive`,
+              ],
+            },
+            dependsOn: [openApiTargetName],
+          },
+        }
+      : {};
 
   updateProjectConfiguration(tree, project.name, {
     ...project,
-    targets: {
+    targets: sortObjectKeys({
       ...project.targets,
+      ...httpOnlyTargets,
       [`${agentTargetPrefix}-serve`]: {
         executor: 'nx:run-commands',
         options: {
@@ -282,15 +352,18 @@ export const pyStrandsAgentGenerator = async (
       [`${agentTargetPrefix}-chat`]: {
         executor: 'nx:run-commands',
         options: {
-          commands: [`tsx ./scripts/${agentTargetPrefix}/chat.ts`],
+          commands: [chatCommand],
           cwd: '{projectRoot}',
           env: {
             PORT: `${localDevPort}`,
           },
         },
-        dependsOn: [`${agentTargetPrefix}-serve-local`],
+        dependsOn: [
+          ...(protocol === 'HTTP' ? [clientGenTargetName] : []),
+          `${agentTargetPrefix}-serve-local`,
+        ],
       },
-    },
+    }),
   });
 
   addComponentGeneratorMetadata(

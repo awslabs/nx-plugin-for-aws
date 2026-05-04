@@ -4,7 +4,7 @@
  * Connects to the locally-running agent on the port assigned by the generator.
  * Override with `PORT` or `--port <port>`.
  */
-import * as p from '@clack/prompts';
+import { chatLoop, type ChatAdapter } from 'agent-chat-cli';
 import { <%- agentNameClassName %>Client } from '<%- relativeAgentImport %>/client.js';
 
 const getCliArg = (name: string): string | undefined => {
@@ -14,78 +14,55 @@ const getCliArg = (name: string): string | undefined => {
     : undefined;
 };
 
-const port =
-  getCliArg('port') ?? process.env.PORT ?? '<%- localDevPort %>';
-const url = `ws://localhost:${port}/ws`;
+const port = getCliArg('port') ?? process.env.PORT ?? '<%- localDevPort %>';
 
-async function main() {
-  p.intro('<%- agentNameClassName %> Chat');
+class TrpcWebSocketAdapter implements ChatAdapter {
+  private client!: ReturnType<typeof <%- agentNameClassName %>Client.local>;
 
-  const client = <%- agentNameClassName %>Client.local({ url });
+  async connect(url: string) {
+    this.client = <%- agentNameClassName %>Client.local({ url });
+    return { agentName: '<%- agentNameClassName %>' };
+  }
 
-  while (true) {
-    const input = await p.text({
-      message: 'You',
-      placeholder: 'Type a message... (Ctrl+C to exit)',
-    });
+  async *sendMessage(text: string): AsyncIterable<string> {
+    const queue: Array<{ value?: string; done?: true; error?: unknown }> = [];
+    let wake: (() => void) | undefined;
+    const notify = () => {
+      const r = wake;
+      wake = undefined;
+      r?.();
+    };
 
-    if (p.isCancel(input)) {
-      p.outro('Goodbye!');
-      process.exit(0);
-    }
-
-    const trimmed = (input as string).trim();
-    if (!trimmed) continue;
-
-    async function* streamTokens(): AsyncGenerator<string> {
-      const queue: Array<{ value?: string; done?: true; error?: unknown }> = [];
-      let resolveNext: (() => void) | undefined;
-      const wake = () => {
-        const r = resolveNext;
-        resolveNext = undefined;
-        r?.();
-      };
-
-      client.invoke.subscribe(
-        { message: trimmed },
-        {
-          onData(chunk: string) {
-            queue.push({ value: chunk });
-            wake();
-          },
-          onComplete() {
-            queue.push({ done: true });
-            wake();
-          },
-          onError(error: unknown) {
-            queue.push({ error });
-            wake();
-          },
+    this.client.invoke.subscribe(
+      { message: text },
+      {
+        onData: (chunk: string) => {
+          queue.push({ value: chunk });
+          notify();
         },
-      );
+        onComplete: () => {
+          queue.push({ done: true });
+          notify();
+        },
+        onError: (error: unknown) => {
+          queue.push({ error });
+          notify();
+        },
+      },
+    );
 
-      while (true) {
-        if (queue.length === 0) {
-          await new Promise<void>((resolve) => {
-            resolveNext = resolve;
-          });
-        }
-        const next = queue.shift()!;
-        if (next.error) throw next.error;
-        if (next.done) return;
-        if (next.value !== undefined) yield next.value;
+    while (true) {
+      if (queue.length === 0) {
+        await new Promise<void>((resolve) => {
+          wake = resolve;
+        });
       }
-    }
-
-    try {
-      await p.stream.message(streamTokens(), { symbol: '🤖' });
-    } catch (err: any) {
-      p.log.error(err?.message ?? String(err));
+      const next = queue.shift()!;
+      if (next.error) throw next.error;
+      if (next.done) return;
+      if (next.value !== undefined) yield next.value;
     }
   }
 }
 
-main().catch((err) => {
-  p.log.error(`Fatal: ${err?.message ?? String(err)}`);
-  process.exit(1);
-});
+await chatLoop(new TrpcWebSocketAdapter(), `ws://localhost:${port}/ws`);

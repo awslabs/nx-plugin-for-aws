@@ -968,7 +968,8 @@ describe('ts#strands-agent generator', () => {
     expect(tree.exists(chatScriptPath)).toBeTruthy();
 
     const chatScript = tree.read(chatScriptPath, 'utf-8');
-    expect(chatScript).toContain("from '@clack/prompts'");
+    expect(chatScript).toContain("from 'agent-chat-cli'");
+    expect(chatScript).toContain('chatLoop');
     expect(chatScript).toContain('client.invoke.subscribe');
 
     const projectConfig = JSON.parse(
@@ -980,10 +981,10 @@ describe('ts#strands-agent generator', () => {
     expect(chatTarget.dependsOn).toEqual(['agent-serve-local']);
 
     const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
-    expect(rootPackageJson.devDependencies['@clack/prompts']).toBeDefined();
+    expect(rootPackageJson.devDependencies['agent-chat-cli']).toBeDefined();
   });
 
-  it('should generate A2A chat CLI script and wire up the chat target', async () => {
+  it('should not vend a chat script for A2A — runs agent-chat-cli directly', async () => {
     await tsStrandsAgentGenerator(tree, {
       project: 'test-project',
       protocol: 'A2A',
@@ -991,19 +992,16 @@ describe('ts#strands-agent generator', () => {
       iacProvider: 'CDK',
     });
 
-    const chatScriptPath = 'apps/test-project/scripts/agent/chat.ts';
-    expect(tree.exists(chatScriptPath)).toBeTruthy();
-
-    const chatScript = tree.read(chatScriptPath, 'utf-8');
-    expect(chatScript).toContain("from '@clack/prompts'");
-    expect(chatScript).toContain('@a2a-js/sdk/client');
-    expect(chatScript).toContain('sendMessageStream');
+    expect(tree.exists('apps/test-project/scripts/agent/chat.ts')).toBeFalsy();
 
     const projectConfig = JSON.parse(
       tree.read('apps/test-project/project.json', 'utf-8'),
     );
     const chatTarget = projectConfig.targets['agent-chat'];
     expect(chatTarget).toBeDefined();
+    expect(chatTarget.options.commands[0]).toMatch(
+      /^agent-chat-cli a2a http:\/\/localhost:\d+$/,
+    );
     expect(chatTarget.dependsOn).toEqual(['agent-serve-local']);
   });
 

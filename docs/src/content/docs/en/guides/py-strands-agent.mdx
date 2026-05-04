@@ -347,15 +347,20 @@ This command uses `uv run` to execute your Strands Agent using the [Bedrock Agen
 
 ### Chat with Your Agent
 
-The generator also vends a minimal interactive chat CLI under `scripts/<your-agent-name>/chat.ts` and a corresponding `<your-agent-name>-chat` target. This target depends on `<your-agent-name>-serve-local`, so running it starts the agent locally and drops you into an interactive terminal chat with it:
+The generator configures a `<your-agent-name>-chat` Nx target that depends on `<your-agent-name>-serve-local`. Running it starts the agent locally and drops you into an interactive terminal chat powered by [`agent-chat-cli`](https://www.npmjs.com/package/agent-chat-cli):
 
 <NxCommands commands={['run your-project:agent-chat']} />
 
-The CLI is a TypeScript script (run via `tsx`) that uses the protocol-appropriate client to stream responses token-by-token via [`@clack/prompts`](https://github.com/bombshell-dev/clack):
+For **A2A** and **AG-UI** agents, the chat target simply invokes `agent-chat-cli` as a binary against the locally-running agent — no code is vended into your workspace.
 
-- **HTTP**: `POST /invocations` with JSONL streaming
-- **A2A**: `@a2a-js/sdk` `ClientFactory` with `sendMessageStream`
-- **AG-UI**: `@ag-ui/client` `HttpAgent`
+For **HTTP** agents, the generator emits:
+
+- `scripts/<your-agent-name>_openapi.py` — a small script that exports the agent's OpenAPI spec
+- An `<your-agent-name>-openapi` Nx target that runs it
+- An `<your-agent-name>-generate-client` Nx target that runs `open-api#ts-client` to produce a type-safe TypeScript client under `scripts/<your-agent-name>/generated/`
+- `scripts/<your-agent-name>/chat.ts` — a thin adapter that imports the generated client and plugs it into `agent-chat-cli`'s `chatLoop`
+
+The chat script is a small wrapper around the generated client. When you customize the agent's input shape (e.g. add new fields to `InvokeInput`), update the adapter's `sendMessage` to pass the new fields and the rest works automatically.
 
 <OptionFilter when={{ computeType: 'BedrockAgentCoreRuntime' }} description="Bedrock AgentCore Runtime deployment details">
 ## Deploying Your Strands Agent to Bedrock AgentCore Runtime
