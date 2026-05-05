@@ -1,0 +1,52 @@
+---
+title: 运行时配置 AppConfig
+---
+
+生成的 Bedrock AgentCore 运行时（代理和 MCP 服务器）在启动时从 AWS AppConfig 读取其运行时配置。为了避免为每个模块配置一个 AppConfig 应用程序 + 部署策略（一旦部署包含多个 API / 代理 / MCP 服务器，很快就会超过账户级别的 20 个部署策略配额），请为每个部署实例化一次 `core/runtime-config/appconfig` 模块，并将其输出传递给每个消费者。
+
+AppConfig 管道分为两个模块：
+
+- **`core/runtime-config/appconfig`** — 创建 AppConfig 应用程序、环境、部署策略以及每个命名空间一个配置配置文件。在根模块的早期声明，以便消费者可以引用其输出。
+- **`core/runtime-config/appconfig-deployment`** — 将每个消费者模块贡献的条目文件聚合为每个命名空间一个 JSON，然后针对共享应用程序为每个命名空间创建一个托管配置版本 + 一个部署。在根模块的末尾声明，使用 `depends_on` 覆盖每个消费者，以便应用时聚合能够获取每个条目。
+
+每个生成的 API / Lambda / 代理 / MCP 模块通过 `core/runtime-config/entry` 将其运行时配置条目写入共享的 `dist/packages/common/terraform/runtime-config/entries` 目录。代理和 MCP 模块还接受 `appconfig_application_id` + `appconfig_application_arn` 输入，并将它们用于：
+
+- 在 AgentCore 运行时上设置 `RUNTIME_CONFIG_APP_ID` 环境变量
+- 授予运行时对共享应用程序的 `appconfig:StartConfigurationSession` / `appconfig:GetLatestConfiguration` 权限
+
+```hcl
+module "runtime_config_appconfig" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig"
+
+  application_name = "my-runtime-config"
+}
+
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  asset_bucket_name = module.asset_bucket.bucket_name
+}
+
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+}
+
+# 最后声明 — `depends_on` 覆盖每个贡献运行时配置条目的模块，
+# 以便应用时聚合能够获取所有条目。
+module "runtime_config_appconfig_deployment" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig-deployment"
+
+  application_id            = module.runtime_config_appconfig.application_id
+  environment_id            = module.runtime_config_appconfig.environment_id
+  deployment_strategy_id    = module.runtime_config_appconfig.deployment_strategy_id
+  configuration_profile_ids = module.runtime_config_appconfig.configuration_profile_ids
+  namespaces                = module.runtime_config_appconfig.namespaces
+
+  depends_on = [module.my_api, module.my_agent]
+}
+```
+
+默认情况下，`core/runtime-config/appconfig` 配置零等待部署策略，以便在 `terraform apply` 完成后，部署的配置立即对 AgentCore 运行时可见。传递 `deployment_strategy_id` 以重用现有策略（例如 `AppConfig.AllAtOnce` 或在同一账户中跨多个部署共享的策略）。

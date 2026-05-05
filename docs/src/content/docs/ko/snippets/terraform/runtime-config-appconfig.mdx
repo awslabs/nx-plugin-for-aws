@@ -1,0 +1,52 @@
+---
+title: 런타임 구성 AppConfig
+---
+
+생성된 Bedrock AgentCore 런타임(에이전트 및 MCP 서버)은 시작 시 AWS AppConfig에서 런타임 구성을 읽습니다. 모듈당 하나의 AppConfig 애플리케이션 + 배포 전략을 프로비저닝하는 것을 피하기 위해(배포에 몇 개 이상의 API / 에이전트 / MCP 서버가 있으면 계정 수준 할당량인 20개의 배포 전략을 빠르게 초과함), 배포당 한 번 `core/runtime-config/appconfig` 모듈을 인스턴스화하고 그 출력을 모든 소비자에게 전달합니다.
+
+AppConfig 배관은 두 개의 모듈로 분할됩니다:
+
+- **`core/runtime-config/appconfig`** — AppConfig 애플리케이션, 환경, 배포 전략 및 네임스페이스당 하나의 구성 프로필을 생성합니다. 소비자가 출력을 참조할 수 있도록 루트 모듈 초기에 선언됩니다.
+- **`core/runtime-config/appconfig-deployment`** — 모든 소비자 모듈이 기여한 엔트리 파일을 네임스페이스당 하나의 JSON으로 집계한 다음, 공유 애플리케이션에 대해 네임스페이스당 하나의 호스팅 구성 버전 + 하나의 배포를 생성합니다. 적용 시간 집계가 모든 엔트리를 수집할 수 있도록 모든 소비자를 포함하는 `depends_on`과 함께 루트 모듈 끝에 선언됩니다.
+
+생성된 모든 API / Lambda / 에이전트 / MCP 모듈은 `core/runtime-config/entry`를 통해 런타임 구성 엔트리를 공유 `dist/packages/common/terraform/runtime-config/entries` 디렉토리에 작성합니다. 에이전트 및 MCP 모듈은 추가로 `appconfig_application_id` + `appconfig_application_arn` 입력을 받아 다음 용도로 사용합니다:
+
+- AgentCore 런타임에 `RUNTIME_CONFIG_APP_ID` 환경 변수 설정
+- 공유 애플리케이션에 대한 런타임 `appconfig:StartConfigurationSession` / `appconfig:GetLatestConfiguration` 권한 부여
+
+```hcl
+module "runtime_config_appconfig" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig"
+
+  application_name = "my-runtime-config"
+}
+
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  asset_bucket_name = module.asset_bucket.bucket_name
+}
+
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+}
+
+# 마지막에 선언 — `depends_on`은 런타임 구성 엔트리를 기여하는 모든 모듈을
+# 포함하므로 적용 시간 집계가 모두 수집합니다.
+module "runtime_config_appconfig_deployment" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig-deployment"
+
+  application_id            = module.runtime_config_appconfig.application_id
+  environment_id            = module.runtime_config_appconfig.environment_id
+  deployment_strategy_id    = module.runtime_config_appconfig.deployment_strategy_id
+  configuration_profile_ids = module.runtime_config_appconfig.configuration_profile_ids
+  namespaces                = module.runtime_config_appconfig.namespaces
+
+  depends_on = [module.my_api, module.my_agent]
+}
+```
+
+기본적으로 `core/runtime-config/appconfig`는 제로 대기 배포 전략을 프로비저닝하므로 `terraform apply`가 완료되는 즉시 배포된 구성이 AgentCore 런타임에 표시됩니다. 기존 전략을 재사용하려면 `deployment_strategy_id`를 전달하세요(예: `AppConfig.AllAtOnce` 또는 동일한 계정의 여러 배포에서 공유되는 전략).

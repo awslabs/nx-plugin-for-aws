@@ -32,15 +32,26 @@ export class ExampleStack extends Stack {
 <Fragment slot="terraform">
 Terraform 모듈이 생성되며, 생성기를 실행할 때 선택한 `name`을 기반으로 이름이 지정되거나 기본적으로 `<ProjectName>-agent`로 지정됩니다.
 
-Terraform 프로젝트에서 이 terraform 모듈을 사용할 수 있습니다:
+Strands Agent는 공유 AWS AppConfig 애플리케이션에서 런타임 구성을 읽습니다. 자세한 내용은 <Link path="/guides/terraform-project#shared-runtime-config-appconfig">Terraform 인프라 가이드</Link>를 참조하세요. 배포당 한 번 `core/runtime-config/appconfig` 모듈을 인스턴스화하고 모든 에이전트 / MCP 모듈에 출력을 전달합니다:
 
-```terraform
+```terraform {1-5, 10-11}
+# Shared runtime-config AppConfig (declare once per deployment)
+module "runtime_config_appconfig" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig"
+  application_name = "my-runtime-config"
+}
+
 # Agent
 module "my_project_agent" {
   # Relative path to the generated module in the common/terraform project
   source = "../../common/terraform/src/app/agents/my-project-agent"
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
 }
 ```
+
+루트 모듈의 끝에 `module "runtime_config_appconfig_deployment"`를 한 번 선언하세요(런타임 구성 항목을 제공하는 모든 모듈을 포함하는 `depends_on` 포함). 이는 제공된 항목을 집계하고 AppConfig 호스팅 구성 버전 + 배포를 생성합니다. <Link path="/guides/terraform-project#shared-runtime-config-appconfig">전체 패턴</Link>을 참조하세요.
 </Fragment>
 </Infrastructure>
 
@@ -94,11 +105,14 @@ export class ExampleStack extends Stack {
 ```
 </Fragment>
 <Fragment slot="terraform">
-```terraform
+```terraform {5-6}
 # Agent
 module "my_project_agent" {
   # Relative path to the generated module in the common/terraform project
   source = "../../common/terraform/src/app/agents/my-project-agent"
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
 }
 ```
 
@@ -146,13 +160,16 @@ export class ExampleStack extends Stack {
 <Fragment slot="terraform">
 생성된 모듈은 Cognito 인증을 위한 `user_pool_id` 및 `user_pool_client_ids` 변수를 허용합니다:
 
-```terraform
+```terraform {8-9}
 module "user_identity" {
   source = "../../common/terraform/src/core/user-identity"
 }
 
 module "my_project_agent" {
   source = "../../common/terraform/src/app/agents/my-project-agent"
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
 
   user_pool_id         = module.user_identity.user_pool_id
   user_pool_client_ids = [module.user_identity.user_pool_client_id]

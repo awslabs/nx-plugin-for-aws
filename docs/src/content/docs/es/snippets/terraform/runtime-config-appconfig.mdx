@@ -1,0 +1,52 @@
+---
+title: Configuración de Runtime AppConfig
+---
+
+Los runtimes generados de Bedrock AgentCore (agentes y servidores MCP) leen su configuración de runtime desde AWS AppConfig al iniciar. Para evitar aprovisionar una aplicación AppConfig + estrategia de despliegue por módulo (lo cual excede rápidamente la cuota a nivel de cuenta de 20 estrategias de despliegue una vez que un despliegue tiene más de un puñado de APIs / agentes / servidores MCP), instancia el módulo `core/runtime-config/appconfig` una vez por despliegue y pasa sus salidas a cada consumidor.
+
+La infraestructura de AppConfig está dividida en dos módulos:
+
+- **`core/runtime-config/appconfig`** — crea la aplicación AppConfig, el entorno, la estrategia de despliegue y un perfil de configuración por namespace. Se declara temprano en tu módulo raíz para que los consumidores puedan referenciar sus salidas.
+- **`core/runtime-config/appconfig-deployment`** — agrega los archivos de entrada contribuidos por cada módulo consumidor en un JSON por namespace, luego crea una versión de configuración alojada + un despliegue por namespace contra la aplicación compartida. Se declara al final de tu módulo raíz con `depends_on` cubriendo cada consumidor para que la agregación en tiempo de aplicación recoja cada entrada.
+
+Cada módulo generado de API / Lambda / agente / MCP escribe su entrada de runtime-config a través de `core/runtime-config/entry` en el directorio compartido `dist/packages/common/terraform/runtime-config/entries`. Los módulos de agente y MCP además aceptan las entradas `appconfig_application_id` + `appconfig_application_arn` y las usan para:
+
+- Establecer la variable de entorno `RUNTIME_CONFIG_APP_ID` en el runtime de AgentCore
+- Otorgar al runtime `appconfig:StartConfigurationSession` / `appconfig:GetLatestConfiguration` en la aplicación compartida
+
+```hcl
+module "runtime_config_appconfig" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig"
+
+  application_name = "my-runtime-config"
+}
+
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  asset_bucket_name = module.asset_bucket.bucket_name
+}
+
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+}
+
+# Declarado al final — `depends_on` cubre cada módulo que contribuye una
+# entrada de runtime-config para que la agregación en tiempo de aplicación las recoja todas.
+module "runtime_config_appconfig_deployment" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig-deployment"
+
+  application_id            = module.runtime_config_appconfig.application_id
+  environment_id            = module.runtime_config_appconfig.environment_id
+  deployment_strategy_id    = module.runtime_config_appconfig.deployment_strategy_id
+  configuration_profile_ids = module.runtime_config_appconfig.configuration_profile_ids
+  namespaces                = module.runtime_config_appconfig.namespaces
+
+  depends_on = [module.my_api, module.my_agent]
+}
+```
+
+Por defecto, `core/runtime-config/appconfig` aprovisiona una estrategia de despliegue de espera cero para que la configuración desplegada sea visible para el runtime de AgentCore tan pronto como `terraform apply` se complete. Pasa `deployment_strategy_id` para reutilizar una estrategia existente (por ejemplo, `AppConfig.AllAtOnce` o una compartida entre múltiples despliegues en la misma cuenta).

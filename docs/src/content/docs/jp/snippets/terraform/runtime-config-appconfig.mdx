@@ -1,0 +1,52 @@
+---
+title: ランタイム設定 AppConfig
+---
+
+生成された Bedrock AgentCore ランタイム（エージェントと MCP サーバー）は、起動時に AWS AppConfig からランタイム設定を読み取ります。モジュールごとに1つの AppConfig アプリケーション + デプロイメント戦略をプロビジョニングすることを避けるため（デプロイメントに複数の API / エージェント / MCP サーバーが含まれると、アカウントレベルのクォータである20のデプロイメント戦略をすぐに超えてしまいます）、`core/runtime-config/appconfig` モジュールをデプロイメントごとに1回インスタンス化し、その出力をすべてのコンシューマーに渡します。
+
+AppConfig の配管は2つのモジュールに分割されています：
+
+- **`core/runtime-config/appconfig`** — AppConfig アプリケーション、環境、デプロイメント戦略、および名前空間ごとに1つの設定プロファイルを作成します。コンシューマーがその出力を参照できるように、ルートモジュールの早い段階で宣言されます。
+- **`core/runtime-config/appconfig-deployment`** — すべてのコンシューマーモジュールから提供されたエントリファイルを名前空間ごとに1つの JSON に集約し、共有アプリケーションに対して名前空間ごとに1つのホスト設定バージョン + 1つのデプロイメントを作成します。すべてのコンシューマーをカバーする `depends_on` を使用してルートモジュールの最後に宣言され、適用時の集約がすべてのエントリを取得できるようにします。
+
+生成されたすべての API / Lambda / エージェント / MCP モジュールは、`core/runtime-config/entry` を介してランタイム設定エントリを共有の `dist/packages/common/terraform/runtime-config/entries` ディレクトリに書き込みます。エージェントと MCP モジュールはさらに `appconfig_application_id` + `appconfig_application_arn` 入力を受け入れ、以下の目的で使用します：
+
+- AgentCore ランタイムに `RUNTIME_CONFIG_APP_ID` 環境変数を設定する
+- 共有アプリケーションに対してランタイムに `appconfig:StartConfigurationSession` / `appconfig:GetLatestConfiguration` を付与する
+
+```hcl
+module "runtime_config_appconfig" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig"
+
+  application_name = "my-runtime-config"
+}
+
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  asset_bucket_name = module.asset_bucket.bucket_name
+}
+
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+}
+
+# 最後に宣言 — `depends_on` はランタイム設定エントリを提供するすべてのモジュールを
+# カバーし、適用時の集約がそれらすべてを取得できるようにします。
+module "runtime_config_appconfig_deployment" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig-deployment"
+
+  application_id            = module.runtime_config_appconfig.application_id
+  environment_id            = module.runtime_config_appconfig.environment_id
+  deployment_strategy_id    = module.runtime_config_appconfig.deployment_strategy_id
+  configuration_profile_ids = module.runtime_config_appconfig.configuration_profile_ids
+  namespaces                = module.runtime_config_appconfig.namespaces
+
+  depends_on = [module.my_api, module.my_agent]
+}
+```
+
+デフォルトでは、`core/runtime-config/appconfig` はゼロ待機デプロイメント戦略をプロビジョニングするため、`terraform apply` が完了するとすぐにデプロイされた設定が AgentCore ランタイムに表示されます。既存の戦略を再利用するには `deployment_strategy_id` を渡します（例：`AppConfig.AllAtOnce` または同じアカウント内の複数のデプロイメント間で共有される戦略）。

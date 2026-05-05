@@ -33,15 +33,26 @@ Este constructo usa el [módulo `@aws-cdk/aws-bedrock-agentcore-alpha`](https://
 <Fragment slot="terraform">
 Se genera un módulo de Terraform para tu proyecto, nombrado según el `name` que elegiste al ejecutar el generador, o `<ProjectName>-mcp-server` por defecto.
 
-Puedes usar este módulo de Terraform en un proyecto Terraform:
+Los servidores MCP leen su configuración de tiempo de ejecución desde una aplicación compartida de AWS AppConfig — consulta la <Link path="/guides/terraform-project#shared-runtime-config-appconfig">guía de infraestructura de Terraform</Link> para más detalles. Instancia el módulo `core/runtime-config/appconfig` una vez por despliegue y pasa sus salidas a cada módulo de agente / MCP:
 
-```terraform
+```terraform {1-5, 10-11}
+# AppConfig de runtime-config compartido (declarar una vez por despliegue)
+module "runtime_config_appconfig" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig"
+  application_name = "my-runtime-config"
+}
+
 # Servidor MCP
 module "my_project_mcp_server" {
   # Ruta relativa al módulo generado en el proyecto common/terraform
   source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
 }
 ```
+
+Declara `module "runtime_config_appconfig_deployment"` una vez al final de tu módulo raíz (con `depends_on` cubriendo cada módulo que contribuye una entrada de runtime-config) — esto agrega las entradas contribuidas y crea las versiones de configuración alojadas de AppConfig + despliegues. Consulta el <Link path="/guides/terraform-project#shared-runtime-config-appconfig">patrón completo</Link>.
 </Fragment>
 </Infrastructure>
 
@@ -89,11 +100,14 @@ export class ExampleStack extends Stack {
 ```
 </Fragment>
 <Fragment slot="terraform">
-```terraform
+```terraform {5-6}
 # Servidor MCP
 module "my_project_mcp_server" {
   # Ruta relativa al módulo generado en el proyecto common/terraform
   source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
 }
 ```
 
@@ -141,13 +155,16 @@ El constructo `UserIdentity` puede generarse usando el <Link path="/guides/react
 <Fragment slot="terraform">
 El módulo generado acepta las variables `user_pool_id` y `user_pool_client_ids` para la autenticación Cognito:
 
-```terraform
+```terraform {8-9}
 module "user_identity" {
   source = "../../common/terraform/src/core/user-identity"
 }
 
 module "my_project_mcp_server" {
   source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
 
   user_pool_id         = module.user_identity.user_pool_id
   user_pool_client_ids = [module.user_identity.user_pool_client_id]

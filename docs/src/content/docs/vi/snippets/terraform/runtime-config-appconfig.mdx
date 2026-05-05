@@ -1,0 +1,52 @@
+---
+title: Runtime Configuration AppConfig
+---
+
+Các runtime Bedrock AgentCore được tạo ra (agents và MCP servers) đọc cấu hình runtime của chúng từ AWS AppConfig khi khởi động. Để tránh việc cung cấp một ứng dụng AppConfig + chiến lược triển khai cho mỗi module (điều này nhanh chóng vượt quá hạn ngạch cấp tài khoản là 20 chiến lược triển khai khi một deployment có nhiều hơn một số lượng nhỏ APIs / agents / MCP servers), hãy khởi tạo module `core/runtime-config/appconfig` một lần cho mỗi deployment và truyền các đầu ra của nó vào mọi consumer.
+
+Hệ thống AppConfig được chia thành hai module:
+
+- **`core/runtime-config/appconfig`** — tạo ứng dụng AppConfig, môi trường, chiến lược triển khai và một configuration profile cho mỗi namespace. Được khai báo sớm trong root module của bạn để các consumer có thể tham chiếu đến các đầu ra của nó.
+- **`core/runtime-config/appconfig-deployment`** — tổng hợp các tệp entry được đóng góp bởi mọi consumer module thành một JSON cho mỗi namespace, sau đó tạo một hosted configuration version + một deployment cho mỗi namespace đối với ứng dụng được chia sẻ. Được khai báo ở cuối root module của bạn với `depends_on` bao gồm mọi consumer để quá trình tổng hợp tại thời điểm apply nhận được mọi entry.
+
+Mọi module API / Lambda / agent / MCP được tạo ra đều ghi entry runtime-config của nó thông qua `core/runtime-config/entry` vào thư mục được chia sẻ `dist/packages/common/terraform/runtime-config/entries`. Các module Agent và MCP cũng chấp nhận các đầu vào `appconfig_application_id` + `appconfig_application_arn` và sử dụng chúng cho:
+
+- Thiết lập biến môi trường `RUNTIME_CONFIG_APP_ID` trên runtime AgentCore
+- Cấp quyền cho runtime `appconfig:StartConfigurationSession` / `appconfig:GetLatestConfiguration` trên ứng dụng được chia sẻ
+
+```hcl
+module "runtime_config_appconfig" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig"
+
+  application_name = "my-runtime-config"
+}
+
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  asset_bucket_name = module.asset_bucket.bucket_name
+}
+
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+}
+
+# Declared last — `depends_on` covers every module that contributes a
+# runtime-config entry so the apply-time aggregation picks them all up.
+module "runtime_config_appconfig_deployment" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig-deployment"
+
+  application_id            = module.runtime_config_appconfig.application_id
+  environment_id            = module.runtime_config_appconfig.environment_id
+  deployment_strategy_id    = module.runtime_config_appconfig.deployment_strategy_id
+  configuration_profile_ids = module.runtime_config_appconfig.configuration_profile_ids
+  namespaces                = module.runtime_config_appconfig.namespaces
+
+  depends_on = [module.my_api, module.my_agent]
+}
+```
+
+Theo mặc định, `core/runtime-config/appconfig` cung cấp một chiến lược triển khai không cần chờ đợi để cấu hình được triển khai hiển thị với runtime AgentCore ngay khi `terraform apply` hoàn thành. Truyền `deployment_strategy_id` để sử dụng lại một chiến lược hiện có (ví dụ: `AppConfig.AllAtOnce` hoặc một chiến lược được chia sẻ trên nhiều deployment trong cùng một tài khoản).

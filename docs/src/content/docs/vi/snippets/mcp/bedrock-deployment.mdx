@@ -33,15 +33,26 @@ Construct này sử dụng [module `@aws-cdk/aws-bedrock-agentcore-alpha`](https
 <Fragment slot="terraform">
 Một Terraform module được tạo cho bạn, được đặt tên dựa trên `name` bạn đã chọn khi chạy trình tạo, hoặc `<ProjectName>-mcp-server` theo mặc định.
 
-Bạn có thể sử dụng terraform module này trong một dự án Terraform:
+MCP server đọc cấu hình runtime của chúng từ một ứng dụng AWS AppConfig được chia sẻ — xem <Link path="/guides/terraform-project#shared-runtime-config-appconfig">hướng dẫn cơ sở hạ tầng Terraform</Link> để biết chi tiết. Khởi tạo module `core/runtime-config/appconfig` một lần cho mỗi triển khai và truyền các output của nó vào mọi agent / MCP module:
 
-```terraform
+```terraform {1-5, 10-11}
+# Shared runtime-config AppConfig (khai báo một lần cho mỗi triển khai)
+module "runtime_config_appconfig" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig"
+  application_name = "my-runtime-config"
+}
+
 # MCP Server
 module "my_project_mcp_server" {
   # Đường dẫn tương đối đến module được tạo trong dự án common/terraform
   source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
 }
 ```
+
+Khai báo `module "runtime_config_appconfig_deployment"` một lần ở cuối root module của bạn (với `depends_on` bao gồm mọi module đóng góp một runtime-config entry) — nó tổng hợp các entry được đóng góp và tạo các AppConfig hosted configuration versions + deployments. Xem <Link path="/guides/terraform-project#shared-runtime-config-appconfig">mẫu đầy đủ</Link>.
 </Fragment>
 </Infrastructure>
 
@@ -89,11 +100,14 @@ export class ExampleStack extends Stack {
 ```
 </Fragment>
 <Fragment slot="terraform">
-```terraform
+```terraform {5-6}
 # MCP Server
 module "my_project_mcp_server" {
   # Đường dẫn tương đối đến module được tạo trong dự án common/terraform
   source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
 }
 ```
 
@@ -141,13 +155,16 @@ Construct `UserIdentity` có thể được tạo bằng <Link path="/guides/rea
 <Fragment slot="terraform">
 Module được tạo chấp nhận các biến `user_pool_id` và `user_pool_client_ids` cho xác thực Cognito:
 
-```terraform
+```terraform {8-9}
 module "user_identity" {
   source = "../../common/terraform/src/core/user-identity"
 }
 
 module "my_project_mcp_server" {
   source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
 
   user_pool_id         = module.user_identity.user_pool_id
   user_pool_client_ids = [module.user_identity.user_pool_client_id]

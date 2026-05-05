@@ -1,7 +1,6 @@
 ---
 title: "Déploiement d'Agent Bedrock"
 ---
-
 import Link from '@components/link.astro';
 import Infrastructure from '@components/infrastructure.astro';
 
@@ -32,15 +31,26 @@ Ce construct utilise le [module `@aws-cdk/aws-bedrock-agentcore-alpha`](https://
 <Fragment slot="terraform">
 Un module Terraform est généré pour vous, nommé en fonction du `name` que vous avez choisi lors de l'exécution du générateur, ou `<ProjectName>-agent` par défaut.
 
-Vous pouvez utiliser ce module terraform dans un projet Terraform :
+Les Strands Agents lisent leur configuration d'exécution à partir d'une application AWS AppConfig partagée — consultez le <Link path="/guides/terraform-project#shared-runtime-config-appconfig">guide d'infrastructure Terraform</Link> pour plus de détails. Instanciez le module `core/runtime-config/appconfig` une fois par déploiement et transmettez ses sorties à chaque module agent / MCP :
 
-```terraform
+```terraform {1-5, 10-11}
+# Shared runtime-config AppConfig (declare once per deployment)
+module "runtime_config_appconfig" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig"
+  application_name = "my-runtime-config"
+}
+
 # Agent
 module "my_project_agent" {
   # Relative path to the generated module in the common/terraform project
   source = "../../common/terraform/src/app/agents/my-project-agent"
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
 }
 ```
+
+Déclarez `module "runtime_config_appconfig_deployment"` une fois à la fin de votre module racine (avec `depends_on` couvrant chaque module qui contribue une entrée runtime-config) — il agrège les entrées contribuées et crée les versions de configuration hébergée AppConfig + les déploiements. Consultez le <Link path="/guides/terraform-project#shared-runtime-config-appconfig">modèle complet</Link>.
 </Fragment>
 </Infrastructure>
 
@@ -94,11 +104,14 @@ export class ExampleStack extends Stack {
 ```
 </Fragment>
 <Fragment slot="terraform">
-```terraform
+```terraform {5-6}
 # Agent
 module "my_project_agent" {
   # Relative path to the generated module in the common/terraform project
   source = "../../common/terraform/src/app/agents/my-project-agent"
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
 }
 ```
 
@@ -146,13 +159,16 @@ Le construct `UserIdentity` peut être généré en utilisant le <Link path="/gu
 <Fragment slot="terraform">
 Le module généré accepte les variables `user_pool_id` et `user_pool_client_ids` pour l'authentification Cognito :
 
-```terraform
+```terraform {8-9}
 module "user_identity" {
   source = "../../common/terraform/src/core/user-identity"
 }
 
 module "my_project_agent" {
   source = "../../common/terraform/src/app/agents/my-project-agent"
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
 
   user_pool_id         = module.user_identity.user_pool_id
   user_pool_client_ids = [module.user_identity.user_pool_client_id]

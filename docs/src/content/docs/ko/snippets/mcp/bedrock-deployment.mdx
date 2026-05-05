@@ -33,15 +33,26 @@ export class ExampleStack extends Stack {
 <Fragment slot="terraform">
 생성기 실행 시 선택한 `name`을 기반으로 Terraform 모듈이 생성되며, 기본값은 `<ProjectName>-mcp-server`입니다.
 
-이 Terraform 모듈을 Terraform 프로젝트에서 사용할 수 있습니다:
+MCP 서버는 공유 AWS AppConfig 애플리케이션에서 런타임 구성을 읽습니다. 자세한 내용은 <Link path="/guides/terraform-project#shared-runtime-config-appconfig">Terraform 인프라스트럭처 가이드</Link>를 참조하세요. 배포당 한 번 `core/runtime-config/appconfig` 모듈을 인스턴스화하고 그 출력을 모든 에이전트 / MCP 모듈에 전달합니다:
 
-```terraform
+```terraform {1-5, 10-11}
+# 공유 runtime-config AppConfig (배포당 한 번 선언)
+module "runtime_config_appconfig" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig"
+  application_name = "my-runtime-config"
+}
+
 # MCP 서버
 module "my_project_mcp_server" {
   # common/terraform 프로젝트 내 생성된 모듈의 상대 경로
   source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
 }
 ```
+
+루트 모듈 끝에 `module "runtime_config_appconfig_deployment"`를 한 번 선언하세요 (런타임 구성 항목을 제공하는 모든 모듈을 포함하는 `depends_on` 사용). 이는 제공된 항목을 집계하고 AppConfig 호스팅 구성 버전 + 배포를 생성합니다. <Link path="/guides/terraform-project#shared-runtime-config-appconfig">전체 패턴</Link>을 참조하세요.
 </Fragment>
 </Infrastructure>
 
@@ -89,11 +100,14 @@ export class ExampleStack extends Stack {
 ```
 </Fragment>
 <Fragment slot="terraform">
-```terraform
+```terraform {5-6}
 # MCP 서버
 module "my_project_mcp_server" {
   # common/terraform 프로젝트 내 생성된 모듈의 상대 경로
   source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
 }
 ```
 
@@ -141,13 +155,16 @@ export class ExampleStack extends Stack {
 <Fragment slot="terraform">
 생성된 모듈은 Cognito 인증을 위한 `user_pool_id` 및 `user_pool_client_ids` 변수를 받습니다:
 
-```terraform
+```terraform {8-9}
 module "user_identity" {
   source = "../../common/terraform/src/core/user-identity"
 }
 
 module "my_project_mcp_server" {
   source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
 
   user_pool_id         = module.user_identity.user_pool_id
   user_pool_client_ids = [module.user_identity.user_pool_client_id]
