@@ -14,15 +14,44 @@ export const runSmokeTest = async (
   pkgMgr: string,
   onProjectCreate?: (projectRoot: string) => void,
 ) => {
-  await runCLI(
-    `${buildCreateNxWorkspaceCommand(pkgMgr, 'e2e-test', 'CDK')} --interactive=false --skipGit`,
-    {
-      cwd: dir,
-      prefixWithPackageManagerCmd: false,
-      redirectStderr: true,
-    },
-  );
+  let cnwError: unknown;
+  try {
+    await runCLI(
+      `${buildCreateNxWorkspaceCommand(pkgMgr, 'e2e-test', 'CDK')} --interactive=false --skipGit`,
+      {
+        cwd: dir,
+        prefixWithPackageManagerCmd: false,
+        redirectStderr: true,
+      },
+    );
+  } catch (e) {
+    cnwError = e;
+  }
   const projectRoot = `${dir}/e2e-test`;
+  if (pkgMgr === 'pnpm') {
+    const pluginDir = `${projectRoot}/node_modules/@aws/nx-plugin`;
+    console.log('=== @aws/nx-plugin install state ===');
+    console.log('projectRoot exists:', existsSync(projectRoot));
+    console.log('pluginDir exists:', existsSync(pluginDir));
+    if (existsSync(pluginDir)) {
+      console.log(
+        'pluginDir contents (depth 1):',
+        require('fs').readdirSync(pluginDir).sort().join(' '),
+      );
+      const gen = `${pluginDir}/generators.json`;
+      console.log('generators.json exists:', existsSync(gen));
+      if (existsSync(gen)) {
+        const content = readFileSync(gen, 'utf-8');
+        console.log('generators.json size:', content.length);
+        console.log(
+          'generators.json has "preset" key:',
+          content.includes('"preset":'),
+        );
+      }
+    }
+    console.log('=== end ===');
+  }
+  if (cnwError) throw cnwError;
   const opts = {
     cwd: projectRoot,
     env: {

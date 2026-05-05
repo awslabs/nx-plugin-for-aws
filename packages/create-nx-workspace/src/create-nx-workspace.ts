@@ -67,6 +67,14 @@ export const createNxWorkspace = (args: string[]): number => {
 
   const allArgs = buildArgs(args);
 
+  // Debug: log env vars we're setting so CI logs show whether the wrapper's
+  // spawn-time config actually reached pnpm. Remove once pnpm-11 smoke is
+  // green.
+  console.error(
+    `[wrapper] spawning create-nx-workspace@${NX_VERSION} via npx with pnpm_config overrides: ` +
+      `strict_dep_builds=false node_linker=hoisted package_import_method=copy force=true`,
+  );
+
   // Use npx to run create-nx-workspace to avoid bin name collision between
   // this package (@aws/create-nx-workspace) and the create-nx-workspace dep.
   const result = spawnSync(
