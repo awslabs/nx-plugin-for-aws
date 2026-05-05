@@ -17,12 +17,7 @@ import {
 import { getDatabaseConfig } from './utils.js';
 <%_ if (engine === 'MySQL') { _%>
 
-export const PRISMA_TTL_MS = 10 * 60 * 1000;
-
-let prismaClient: PrismaClient | undefined;
-let prismaCreatedAt = 0;
-
-const createPrismaClient = async (): Promise<PrismaClient> => {
+export const getPrisma = async (): Promise<PrismaClient> => {
   if (process.env.SERVE_LOCAL === 'true') {
     const adapter = new PrismaMariaDb({
       host: LOCAL_DB_HOST,
@@ -57,19 +52,6 @@ const createPrismaClient = async (): Promise<PrismaClient> => {
 
   return new PrismaClient({ adapter });
 };
-
-export const getPrisma = async (): Promise<PrismaClient> => {
-  const now = Date.now();
-
-  if (prismaClient && now - prismaCreatedAt < PRISMA_TTL_MS) {
-    return prismaClient;
-  }
-
-  prismaClient = await createPrismaClient();
-  prismaCreatedAt = now;
-
-  return prismaClient;
-};
 <%_ } else { _%>
 
 let prismaPromise: Promise<PrismaClient> | undefined;
@@ -101,9 +83,6 @@ export const getPrisma = (): Promise<PrismaClient> => {
         ssl: {
           rejectUnauthorized: true,
         },
-        // `allowExitOnIdle: true` allows the Node.js event loop to exit even if the pool still has idle connections.
-        // This is especially important in STREAMING mode (e.g., API Gateway + Lambda),
-        // where idle connections can keep the event loop active and prevent the request from completing.
         allowExitOnIdle: true,
         password: async () => {
           const token = await new Signer({

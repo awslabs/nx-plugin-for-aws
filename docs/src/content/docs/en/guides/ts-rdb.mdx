@@ -1,6 +1,7 @@
 ---
 title: Relational Database
 description: Create a relational database project
+generator: ts#rdb
 ---
 
 import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
@@ -11,8 +12,9 @@ import Infrastructure from '@components/infrastructure.astro';
 import NxCommands from '@components/nx-commands.astro';
 import PackageManagerExecCommand from '@components/package-manager-exec-command.astro';
 import Snippet from '@components/snippet.astro';
+import OptionFilter from '@components/option-filter.astro';
 
-This generator creates a new relational database project backed by [Amazon Aurora](https://aws.amazon.com/rds/aurora/) PostgreSQL and [Prisma ORM](https://www.prisma.io/docs/orm). It generates the application code and infrastructure needed to provision and manage a database using AWS CDK or Terraform, with declarative schema definition, automatic migration deployment, and a type-safe ORM client.
+This generator creates a new relational database project backed by [Amazon Aurora](https://aws.amazon.com/rds/aurora/) (PostgreSQL or MySQL) and [Prisma ORM](https://www.prisma.io/docs/orm). It generates the application code and infrastructure needed to provision and manage a database using AWS CDK or Terraform, with declarative schema definition, automatic migration deployment, and a type-safe ORM client.
 
 ## Usage
 
@@ -35,8 +37,13 @@ The generator will create the following project structure in the `<directory>/<n
     - models
       - example.prisma Example model definition
     - schema.prisma Main Prisma schema (references models)
+  - scripts
+    - docker-pull.ts Pulls the database Docker image for local development
+    - docker-start.ts Starts a local database container
+    - wait-for-db.ts Waits for the local database to be ready
   - src
     - index.ts Project entry point
+    - constants.ts Local development connection details and runtime config key
     - prisma.ts Prisma runtime client wrapper
     - utils.ts Runtime config and secret helpers
     - create-db-user-handler.ts Lambda handler used to create the application database user during deployment
@@ -127,15 +134,9 @@ The client automatically:
 
 Prisma Migrate requires a [shadow database](https://www.prisma.io/docs/orm/prisma-migrate/understanding-prisma-migrate/shadow-database) to compare your schema with the current database state and generate SQL changes.
 
-To generate migrations locally, point Prisma at a development database by exporting `DATABASE_URL`:
+Use the generated `prisma` target, which automatically starts a local database via Docker before running:
 
-```bash
-export DATABASE_URL="postgresql://username:password@hostname:5432/dbname"
-```
-
-Then create the migration files without applying them:
-
-<PackageManagerExecCommand commands={['prisma migrate dev --create-only']} />
+<NxCommands commands={['run <project>:prisma migrate dev']} />
 
 This generates a new migration folder in `prisma/migrations` each time your schema changes:
 
@@ -147,10 +148,6 @@ This generates a new migration folder in `prisma/migrations` each time your sche
       - migration_lock.toml
     - schema.prisma
 </FileTree>
-
-To apply migrations to your local database:
-
-<PackageManagerExecCommand commands={['prisma migrate deploy']} />
 
 :::note[Automatic AWS Migrations]
 For AWS deployments, you don't need to run `prisma migrate deploy` manually. The generated infrastructure automatically creates the application database user and runs migrations during deployment.
@@ -491,13 +488,17 @@ For more details, see the AWS Lambda [SSL/TLS requirements for Amazon RDS connec
 
 Use the `prisma` target to run any Prisma CLI command against the local database. It automatically starts the database via `serve-local` before running, so there is no need to set up a local database separately.
 
-<NxCommands commands={['run <project>:prisma migrate dev --name <migration-name>']} />
+<NxCommands commands={['run <project>:prisma migrate dev']} />
 
 <NxCommands commands={['run <project>:prisma migrate deploy']} />
 
-<NxCommands commands={['run <project>:prisma studio']} />
-
 The `prisma` target sets `SERVE_LOCAL=true` automatically, which `prisma.config.ts` uses to construct the database connection URL from the local credentials configured at generation time.
+
+### Prisma Studio
+
+[Prisma Studio](https://www.prisma.io/studio) is a visual editor for your local database. Use it to browse tables, inspect and edit records, filter data, follow relations, and run raw SQL via the built-in SQL console — useful for verifying migrations and seeding test data during development. Launch it with:
+
+<NxCommands commands={['run <project>:prisma studio']} />
 
 ## Customising Database Architecture
 
@@ -564,15 +565,16 @@ module "postgres" {
 
 ### Engine Version
 
-Pin a specific Aurora PostgreSQL engine version.
+Pin a specific Aurora engine version.
 
+<OptionFilter when={{ engine: 'Postgres' }}>
 <Infrastructure>
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
-import { Postgres } from ':my-scope/common-constructs';
+import { MyDatabase } from ':my-scope/common-constructs';
 
-const db = new Postgres(this, 'Db', {
+const db = new MyDatabase(this, 'Db', {
   ...
   engineVersion: AuroraPostgresEngineVersion.VER_17_7,
 });
@@ -581,14 +583,41 @@ const db = new Postgres(this, 'Db', {
 <Fragment slot="terraform">
 
 ```hcl title="packages/infra/src/main.tf"
-module "postgres" {
-  source = "../../common/terraform/src/app/dbs/postgres"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
   ...
   engine_version = "17.7"
 }
 ```
 </Fragment>
 </Infrastructure>
+</OptionFilter>
+
+<OptionFilter when={{ engine: 'MySQL' }}>
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', {
+  ...
+  engineVersion: AuroraMysqlEngineVersion.VER_3_12_0,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
+  ...
+  engine_version = "8.0.mysql_aurora.3.12.0"
+}
+```
+</Fragment>
+</Infrastructure>
+</OptionFilter>
 
 ### Deletion Protection
 
