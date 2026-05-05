@@ -24,6 +24,8 @@ import {
   addDependenciesToPyProjectToml,
   addWorkspaceDependencyToPyProject,
 } from '../../../utils/py';
+import { updateToml } from '../../../utils/toml';
+import type { UVPyprojectToml } from '../../../utils/nxlv-python';
 import {
   ensurePythonAgentConnectionProject,
   addPythonCoreClient,
@@ -160,9 +162,13 @@ export const pyStrandsAgentMcpConnectionGenerator = async (
 
     // strands-sdk's MCPClient has a non-standard __exit__ signature, which ty
     // flags as invalid-context-manager on the generated `with (client,):`
-    // block. Add a file-level suppression to agent.py so the rule is silenced
-    // only for this file (and only for this specific rule).
-    suppressInvalidContextManagerInAgentFile(tree, agentFilePath);
+    // block. Scope the rule to `ignore` just for this agent.py via
+    // `[[tool.ty.overrides]]` in the project's pyproject.toml.
+    suppressInvalidContextManagerForAgentFile(
+      tree,
+      sourceProject.root,
+      agentFilePath,
+    );
   }
 
   // 4. Add workspace dependency from agent project to agent-connection project
@@ -199,22 +205,54 @@ export const pyStrandsAgentMcpConnectionGenerator = async (
   };
 };
 
-const TY_AGENT_SUPPRESSION = '# ty: ignore[invalid-context-manager]';
-
 /**
- * Prepend a file-level `# ty: ignore[invalid-context-manager]` comment to
- * agent.py (idempotent). ty's file-level suppression must appear on its own
- * line before any Python code, so emit it as the first line of the file.
+ * Narrow ty's `invalid-context-manager` rule to `ignore` for the agent.py
+ * file via `[[tool.ty.overrides]]` in the project's pyproject.toml.
+ *
+ * ty's only per-line suppression is `# ty: ignore[<rule>]` which, placed
+ * inline on a `with`-item, collides with the GritQL rewrite that appends
+ * additional items on subsequent MCP connections. A file-level `# ty:
+ * ignore` comment at the top of agent.py is consumed and replaced by the
+ * `@aws/nx-plugin:license` sync generator (which rewrites the first block
+ * of `#` comments). A scoped pyproject override is the only suppression
+ * that is both narrow (one file, one rule) and robust against subsequent
+ * edits.
  */
-const suppressInvalidContextManagerInAgentFile = (
+const suppressInvalidContextManagerForAgentFile = (
   tree: Tree,
+  projectRoot: string,
   agentFilePath: string,
 ): void => {
-  const content = tree.read(agentFilePath, 'utf-8') ?? '';
-  if (content.startsWith(TY_AGENT_SUPPRESSION)) {
+  const includePath = agentFilePath.startsWith(projectRoot + '/')
+    ? agentFilePath.slice(projectRoot.length + 1)
+    : agentFilePath;
+  const pyprojectPath = joinPathFragments(projectRoot, 'pyproject.toml');
+  if (!tree.exists(pyprojectPath)) {
     return;
   }
-  tree.write(agentFilePath, `${TY_AGENT_SUPPRESSION}\n\n${content}`);
+  updateToml(tree, pyprojectPath, (toml: UVPyprojectToml) => {
+    const tool = (toml.tool ??= {} as NonNullable<UVPyprojectToml['tool']>);
+    const ty = ((tool as any).ty ??= {});
+    const overrides: Array<{
+      include?: string[];
+      rules?: Record<string, string>;
+    }> = (ty.overrides ??= []);
+    const existing = overrides.find(
+      (o) => o.include?.length === 1 && o.include[0] === includePath,
+    );
+    if (existing) {
+      existing.rules = {
+        ...(existing.rules ?? {}),
+        'invalid-context-manager': 'ignore',
+      };
+    } else {
+      overrides.push({
+        include: [includePath],
+        rules: { 'invalid-context-manager': 'ignore' },
+      });
+    }
+    return toml;
+  });
 };
 
 /**
