@@ -27,6 +27,22 @@ module "asset_bucket" {
   bucket_name_prefix = "e2e-assets-<% TEST_RUN_ID %>"
 }
 
+# Shared runtime-config AppConfig application. Every generated module
+# that contributes a runtime-config entry (API URLs, AgentCore runtime
+# ARNs, etc.) writes into the shared
+# `dist/packages/common/terraform/runtime-config/entries` dir; this one
+# AppConfig application owns the AWS-side plumbing (application, env,
+# deployment strategy, configuration profiles). The sibling
+# `appconfig_deployment` module below aggregates the contributed entries
+# and creates the hosted configuration versions + deployments. Sharing
+# avoids the per-module AppConfig fan-out that would otherwise hit the
+# account-level quota of 20 deployment strategies.
+module "runtime_config_appconfig" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig"
+
+  application_name = "e2e-runtime-config-<% TEST_RUN_ID %>"
+}
+
 # ---------------------------------------------------------------------------
 # APIs
 # ---------------------------------------------------------------------------
@@ -111,10 +127,16 @@ module "ts_function" {
 
 module "py_mcp_server" {
   source = "../../common/terraform/src/app/mcp-servers/my-mcp-server"
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
 }
 
 module "ts_mcp_server" {
   source = "../../common/terraform/src/app/mcp-servers/hosted-mcp-server"
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
 }
 
 # ---------------------------------------------------------------------------
@@ -123,14 +145,23 @@ module "ts_mcp_server" {
 
 module "ts_a2a_agent" {
   source = "../../common/terraform/src/app/agents/my-ts-a2a-agent"
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
 }
 
 module "py_a2a_agent" {
   source = "../../common/terraform/src/app/agents/my-py-a2a-agent"
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
 }
 
 module "ts_a2a_agent_cognito" {
   source = "../../common/terraform/src/app/agents/my-ts-a2a-agent-cognito"
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
 
   user_pool_id         = module.user_identity.user_pool_id
   user_pool_client_ids = [module.user_identity.user_pool_client_id]
@@ -139,12 +170,18 @@ module "ts_a2a_agent_cognito" {
 module "py_a2a_agent_cognito" {
   source = "../../common/terraform/src/app/agents/my-py-a2a-agent-cognito"
 
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+
   user_pool_id         = module.user_identity.user_pool_id
   user_pool_client_ids = [module.user_identity.user_pool_client_id]
 }
 
 module "py_agui_agent" {
   source = "../../common/terraform/src/app/agents/my-py-agui-agent"
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
 }
 
 # ---------------------------------------------------------------------------
@@ -214,6 +251,9 @@ locals {
 module "py_agent" {
   source = "../../common/terraform/src/app/agents/my-agent"
 
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+
   additional_iam_policy_statements = [
     local.invoke_py_mcp_server_statement,
     local.invoke_ts_a2a_agent_statement,
@@ -224,6 +264,9 @@ module "py_agent" {
 # TypeScript HTTP agent — calls both MCP servers and both A2A agents.
 module "ts_agent" {
   source = "../../common/terraform/src/app/agents/ts-project-agent"
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
 
   additional_iam_policy_statements = [
     local.invoke_py_mcp_server_statement,
@@ -272,6 +315,45 @@ resource "aws_iam_policy" "agent_invoke_policy" {
 resource "aws_iam_role_policy_attachment" "authenticated_agent_access" {
   role       = module.user_identity.authenticated_role_name
   policy_arn = aws_iam_policy.agent_invoke_policy.arn
+}
+
+# ---------------------------------------------------------------------------
+# Shared runtime-config AppConfig deployment
+# ---------------------------------------------------------------------------
+#
+# Aggregates every entry contributed by the generated API / agent / MCP /
+# lambda modules and creates one hosted configuration version + one
+# deployment per namespace against the shared AppConfig application.
+# Declared here at the end of the root module (with `depends_on` covering
+# every contributor) so the apply-time aggregation picks up every entry
+# written during this apply.
+module "runtime_config_appconfig_deployment" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig-deployment"
+
+  application_id            = module.runtime_config_appconfig.application_id
+  environment_id            = module.runtime_config_appconfig.environment_id
+  deployment_strategy_id    = module.runtime_config_appconfig.deployment_strategy_id
+  configuration_profile_ids = module.runtime_config_appconfig.configuration_profile_ids
+  namespaces                = module.runtime_config_appconfig.namespaces
+
+  depends_on = [
+    module.my_api,
+    module.my_api_http,
+    module.py_api,
+    module.py_api_http,
+    module.my_smithy_api,
+    module.py_function,
+    module.ts_function,
+    module.py_mcp_server,
+    module.ts_mcp_server,
+    module.ts_a2a_agent,
+    module.py_a2a_agent,
+    module.ts_a2a_agent_cognito,
+    module.py_a2a_agent_cognito,
+    module.py_agui_agent,
+    module.py_agent,
+    module.ts_agent,
+  ]
 }
 
 # ---------------------------------------------------------------------------

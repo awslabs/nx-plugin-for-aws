@@ -20,6 +20,16 @@ variable "tags" {
   default     = {}
 }
 
+variable "appconfig_application_id" {
+  description = "ID of the shared runtime-config AppConfig application (from `core/runtime-config/appconfig.application_id`). The agent reads its runtime configuration from this application."
+  type        = string
+}
+
+variable "appconfig_application_arn" {
+  description = "ARN of the shared runtime-config AppConfig application (from `core/runtime-config/appconfig.application_arn`). Used to scope the IAM read permission granted to the agent runtime."
+  type        = string
+}
+
 <%_ if (auth === 'Cognito') { _%>
 variable "user_pool_id" {
   description = "ID of the user pool for cognito authentication"
@@ -38,12 +48,6 @@ locals {
 }
 
 <%_ } _%>
-module "appconfig" {
-  source = "../../../core/runtime-config/appconfig"
-
-  application_name = "<%= nameClassName %>-runtime-config"
-}
-
 module "agent_core_runtime" {
   source = "../../../core/agent-core"
   agent_runtime_name = "<%= nameClassName %>"
@@ -59,7 +63,7 @@ module "agent_core_runtime" {
 <%_ } _%>
 
   env = merge({
-    RUNTIME_CONFIG_APP_ID = module.appconfig.application_id
+    RUNTIME_CONFIG_APP_ID = var.appconfig_application_id
   }, var.env)
   additional_iam_policy_statements = concat([
     {
@@ -68,7 +72,7 @@ module "agent_core_runtime" {
         "appconfig:StartConfigurationSession",
         "appconfig:GetLatestConfiguration"
       ]
-      Resource = ["${module.appconfig.application_arn}/*"]
+      Resource = ["${var.appconfig_application_arn}/*"]
     }<% if (serverProtocol !== 'MCP') { %>,
     # Grant access for the agent to invoke bedrock models
     {
@@ -84,8 +88,6 @@ module "agent_core_runtime" {
     }<% } %>
   ], var.additional_iam_policy_statements)
   tags = var.tags
-
-  depends_on = [module.appconfig]
 }
 
 # Add agent runtime ARN to runtime config
@@ -110,6 +112,6 @@ output "agent_core_runtime_arn" {
 }
 
 output "appconfig_application_id" {
-  description = "AppConfig Application ID for runtime config"
-  value       = module.appconfig.application_id
+  description = "AppConfig Application ID for runtime config (passthrough of the shared `appconfig_application_id` input)."
+  value       = var.appconfig_application_id
 }
