@@ -261,6 +261,8 @@ const addMcpClientToGetAgent = async (
     return;
   }
 
+  const tyIgnore = '  # ty: ignore[invalid-context-manager]';
+
   // Try the "add to existing with block" pattern first.
   // If it succeeds, there was already a with block from a previous connection.
   const addedToWith = await applyGritQL(
@@ -268,7 +270,7 @@ const addMcpClientToGetAgent = async (
     filePath,
     py(`\`with ($items,): $body\` where {
   $items <: not contains \`${clientVarName}\`,
-  $items += \`, ${clientVarName}\`
+  $items += \`,\n        ${clientVarName}${tyIgnore}\`
 }`),
   );
 
@@ -288,6 +290,8 @@ const addMcpClientToGetAgent = async (
   // First connection — rewrite the function body to include client creation
   // and wrap $body in a with block. GritQL handles indentation correctly
   // when the replacement is structured as a proper Python function body.
+  // The ty: ignore suppresses an invalid-context-manager diagnostic caused
+  // by strands-sdk's MCPClient typing.
   await applyGritQL(
     tree,
     filePath,
@@ -298,7 +302,7 @@ const addMcpClientToGetAgent = async (
 } => \`def get_agent($params):
     ${clientVarName} = ${clientClassName}.create(session_id=session_id)
     with (
-        ${clientVarName},
+        ${clientVarName},${tyIgnore}
     ):
         $body\``),
   );
