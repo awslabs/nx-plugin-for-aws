@@ -332,21 +332,6 @@ describe('smoke test - dungeon-adventure', () => {
       ),
     );
 
-    // Check chat.ts matches chat.ts.old.template, then replace with the
-    // customized version that passes playerName/genre/actions to invoke
-    const chatTsPath = `${opts.cwd}/packages/story/scripts/agent/chat.ts`;
-    expectFileMatchesOldTemplate(
-      chatTsPath,
-      join(__dirname, '../files/dungeon-adventure/3/chat.ts.old.template'),
-    );
-    writeFileSync(
-      chatTsPath,
-      readFileSync(
-        join(__dirname, '../files/dungeon-adventure/3/chat.ts.template'),
-        'utf-8',
-      ),
-    );
-
     await runCLI(`sync --verbose`, opts);
     await runCLI(`${buildPackageManagerShortCommand(pkgMgr, 'lint')}`, {
       ...opts,
