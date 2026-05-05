@@ -83,6 +83,39 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityIdentityPool
 dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXXX = region_xxx
 ```
 
+### Tạo Cognito test user
+
+Trước khi kiểm thử agent đã triển khai (và trước khi chúng ta chơi trò chơi qua UI trong module tiếp theo), hãy tạo một Cognito test user. Chúng ta đã vô hiệu hóa tính năng tự đăng ký trước đó, do đó bước này là bắt buộc bất kể bạn kiểm thử cục bộ hay đối với runtime đã triển khai:
+
+```bash
+# Từ các CDK outputs
+export POOL_ID="<UserPoolId from CDK outputs>"
+export CLIENT_ID="<UserPoolClientId from CDK outputs>"
+export REGION="<your-region>"
+
+# Vô hiệu hóa MFA để đơn giản hóa việc tạo user
+aws cognito-idp set-user-pool-mfa-config \
+  --mfa-configuration OFF \
+  --user-pool-id $POOL_ID \
+  --region $REGION
+
+# Tạo một test user
+aws cognito-idp admin-create-user \
+  --user-pool-id $POOL_ID \
+  --username "test" \
+  --temporary-password "TempPass123-" \
+  --region $REGION \
+  --message-action SUPPRESS > /dev/null
+
+# Đặt permanent password (thay thế bằng một mật khẩu an toàn hơn!)
+aws cognito-idp admin-set-user-password \
+  --user-pool-id $POOL_ID \
+  --username "test" \
+  --password "PermanentPass123-" \
+  --region $REGION \
+  --permanent > /dev/null
+```
+
 ### Kiểm thử Agent của bạn
 
 Bạn có thể kiểm thử Agent của mình bằng một trong hai cách:
@@ -95,12 +128,12 @@ Bạn có thể kiểm thử Agent của mình bằng một trong hai cách:
   <TabItem label="Local">
   Target `agent-chat` khởi động agent cục bộ (cùng với các dependencies của nó, thông qua `agent-serve-local`) và đưa bạn vào một prompt chat tương tác. Chạy:
 
-    <NxCommands commands={["agent-chat dungeon_adventure.story"]} />
+    <NxCommands commands={["agent-chat story"]} />
 
     :::note[`agent-serve` vs `agent-serve-local`]
     Nếu bạn muốn trò chuyện với agent đối với MCP server **đã triển khai** của bạn thay vì server cục bộ, hãy khởi động server trực tiếp với `agent-serve` và truyền `RUNTIME_CONFIG_APP_ID` / `AWS_REGION`:
 
-    <NxCommands highlights={['xxxx', 'region']} env={{RUNTIME_CONFIG_APP_ID:"xxxx", AWS_REGION: '<region>'}} commands={["agent-serve dungeon_adventure.story"]} />
+    <NxCommands highlights={['xxxx', 'region']} env={{RUNTIME_CONFIG_APP_ID:"xxxx", AWS_REGION: '<region>'}} commands={["agent-serve story"]} />
 
     sau đó trong một shell khác chạy `agent-chat-cli agui http://localhost:8081/invocations`.
     :::
@@ -112,40 +145,10 @@ Bạn có thể kiểm thử Agent của mình bằng một trong hai cách:
     ```
   </TabItem>
   <TabItem label="Deployed">
-    Để kiểm thử agent đã triển khai, bạn cần xác thực với Cognito và lấy JWT token. Đầu tiên, thiết lập các biến môi trường của bạn:
+    Đổi thông tin đăng nhập của test user để lấy Cognito access token:
 
     ```bash
-    # Đặt Cognito User Pool ID và Client ID từ các output của CDK
-    export POOL_ID="<UserPoolId từ CDK outputs>"
-    export CLIENT_ID="<UserPoolClientId từ CDK outputs>"
-    export REGION="<your-region>"
-    ```
-
-    Tạo một test user và lấy authentication token:
-
-    ```bash
-    # Vô hiệu hóa MFA để đơn giản hóa việc tạo user
-    aws cognito-idp set-user-pool-mfa-config \
-      --mfa-configuration OFF \
-      --user-pool-id $POOL_ID
-
-    # Tạo User
-    aws cognito-idp admin-create-user \
-      --user-pool-id $POOL_ID \
-      --username "test" \
-      --temporary-password "TempPass123-" \
-      --region $REGION \
-      --message-action SUPPRESS > /dev/null
-
-    # Đặt Permanent Password (thay thế bằng một mật khẩu an toàn hơn!)
-    aws cognito-idp admin-set-user-password \
-      --user-pool-id $POOL_ID \
-      --username "test" \
-      --password "PermanentPass123-" \
-      --region $REGION \
-      --permanent > /dev/null
-
-    # Xác thực User và lấy Access Token
+    # Xác thực test user và lấy access token của họ
     export BEARER_TOKEN=$(aws cognito-idp initiate-auth \
       --client-id "$CLIENT_ID" \
       --auth-flow USER_PASSWORD_AUTH \

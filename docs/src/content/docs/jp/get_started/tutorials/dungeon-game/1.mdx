@@ -408,11 +408,10 @@ Pythonプロジェクトを作成するには:
 <FileTree>
 - packages/
   - story/
-    - dungeon_adventure_story/ Pythonモジュール
+    - dungeon\_adventure\_story/ Pythonモジュール
       - agent/
-        - init.py FastAPIアプリとミドルウェアを設定
-        - main.py Bedrock AgentCore Runtimeでのエージェントのエントリーポイント
-        - agent.py サンプルエージェントとツールを定義
+        - main.py Bedrock AgentCore Runtime用のAG-UI FastAPIアプリエントリーポイント
+        - agent.py Strandsエージェントとそのツールを定義
         - Dockerfile AgentCore Runtimeへのデプロイ用Dockerイメージを定義
   - common/constructs/
     - src
@@ -420,7 +419,7 @@ Pythonプロジェクトを作成するには:
         - story-agent.ts ストーリーエージェントをAgentCore Runtimeにデプロイするためのコンストラクト
 </FileTree>
 
-いくつかのファイルを詳しく見てみましょう:
+主要なファイルを詳しく見てみましょう:
 
 ```python
 # agent/agent.py
@@ -432,82 +431,51 @@ from strands_tools import current_time
 
 # カスタムツールを定義
 @tool
-def add(a: int, b: int) -> int:
-    return a + b
+def subtract(a: int, b: int) -> int:
+    return a - b
 
 
 @contextmanager
 def get_agent(session_id: str):
     yield Agent(
+        name="StoryAgent",
+        description="StoryAgent Strands Agent",
         system_prompt="""
-You are an addition wizard.
-Use the 'add' tool for addition tasks.
+You are a mathematical wizard.
+Use your tools for mathematical tasks.
 Refer to tools as your 'spellbook'.
 """,
-        tools=[add, current_time],
+        tools=[subtract, current_time],
     )
 ```
 
-これは、サンプルStrandsエージェントを作成し、加算ツールを定義します。
+`agent.py`はサンプルStrandsエージェントを定義します。<Link path="get_started/tutorials/dungeon-game/3">モジュール3</Link>で、システムプロンプトとツールをダンジョンアドベンチャーのロジックに置き換えます。
 
 ```python
 # agent/main.py
+import logging
 import uuid
 
-import uvicorn
-from bedrock_agentcore.runtime.models import PingStatus
-from fastapi import Request
-from pydantic import BaseModel
-
 from .agent import get_agent
-from .init import JsonStreamingResponse, app
+from ag_ui_strands import StrandsAgent, create_strands_app
 
-SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
+logging.basicConfig(level=logging.INFO)
 
+_TEMPLATE_SESSION_ID = f"template-{uuid.uuid4()}".ljust(33, "0")
 
-class InvokeInput(BaseModel):
-    message: str
+_agent_ctx = get_agent(session_id=_TEMPLATE_SESSION_ID)
+_agent = _agent_ctx.__enter__()
 
-
-class StreamChunk(BaseModel):
-    content: str
-
-
-async def handle_invoke(input: InvokeInput, session_id: str):
-    """エージェント呼び出しのストリーミングハンドラー"""
-    with get_agent(session_id=session_id) as agent:
-        stream = agent.stream_async(input.message)
-        async for event in stream:
-            print(event)
-            text = event.get("event", {}).get("contentBlockDelta", {}).get("delta", {}).get("text")
-            if text is not None:
-                yield StreamChunk(content=text)
-            elif event.get("event", {}).get("messageStop") is not None:
-                yield StreamChunk(content="\n")
-
-
-@app.post(
-    "/invocations",
-    response_class=JsonStreamingResponse,
-    responses={200: JsonStreamingResponse.openapi_response(StreamChunk, "Stream of agent response chunks")},
+agui_agent = StrandsAgent(
+    agent=_agent,
+    name="StoryAgent",
+    description="A Strands Agent exposed via the AG-UI protocol.",
 )
-async def invoke(input: InvokeInput, request: Request) -> JsonStreamingResponse:
-    """エージェント呼び出しのエントリーポイント"""
-    session_id = request.headers.get(SESSION_ID_HEADER) or str(uuid.uuid4())
-    return JsonStreamingResponse(handle_invoke(input, session_id))
 
-
-@app.get("/ping")
-def ping() -> str:
-    # TODO: 非同期タスクを実行している場合は、PingStatus.HEALTHY_BUSYを返す
-    return PingStatus.HEALTHY
-
-
-if __name__ == "__main__":
-    uvicorn.run("dungeon_adventure_story.agent.main:app", port=8080)
+app = create_strands_app(agui_agent, path="/invocations")
 ```
 
-これは、[Amazon Bedrock AgentCore Runtime](https://github.com/aws/bedrock-agentcore-sdk-python)と互換性のあるFastAPIアプリケーションとして設定されたエージェントのエントリーポイントです。ストリーミングのStrandsサポートを使用し、発生したイベントをJSON Lines経由でクライアントにストリーミングで返します。
+`protocol=AG-UI`を選択したため、ジェネレーターはStrandsエージェントを[AG-UI](https://ag-ui.com/)アダプターでラップします。`create_strands_app`は単一の`/invocations`エンドポイントを公開するFastAPIアプリを構築します - セッションごとのエージェントインスタンスは自動的に作成され、会話履歴はサーバーの存続期間中`threadId`ごとにメモリに保持されます。このチュートリアルでは`main.py`を変更する必要はありません。
 
 ```ts
 // common/constructs/src/app/agents/story-agent.ts
@@ -707,11 +675,9 @@ export class GameUI extends StaticWebsite {
 // packages/game-ui/src/main.tsx
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { I18nProvider } from '@cloudscape-design/components/i18n';
-import messages from '@cloudscape-design/components/i18n/messages/all.en';
-import '@cloudscape-design/global-styles/index.css';
 import { RouterProvider, createRouter } from '@tanstack/react-router';
 import { routeTree } from './routeTree.gen';
+import './styles.css';
 
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export type RouterProviderContext = {};
@@ -721,7 +687,7 @@ const router = createRouter({
   context: {},
 });
 
-// 型安全性のためにルーターインスタンスを登録
+// Register the router instance for type safety
 declare module '@tanstack/react-router' {
   interface Register {
     router: typeof router;
@@ -736,24 +702,16 @@ const root = document.getElementById('root');
 root &&
   createRoot(root).render(
     <React.StrictMode>
-      <I18nProvider locale="en" messages={[messages]}>
-        <App />
-      </I18nProvider>
+      <App/>
     </React.StrictMode>,
   );
 ```
 
-これはReactがマウントされるエントリーポイントです。示されているように、最初は[`file-based-routing`](https://tanstack.com/router/v1/docs/framework/react/routing/file-based-routing)設定で`@tanstack/react-router`を設定するだけです。開発サーバーが実行されている限り、`routes`フォルダ内にファイルを作成すると、`@tanstack/react-router`がボイラープレートファイルのセットアップを作成し、`routeTree.gen.ts`ファイルを更新します。このファイルは、すべてのルートを型安全な方法で維持します。つまり、`<Link>`を使用すると、`to`オプションには有効なルートのみが表示されます。
+これはReactがマウントされるエントリーポイントです。最初は[`file-based-routing`](https://tanstack.com/router/v1/docs/framework/react/routing/file-based-routing)設定で`@tanstack/react-router`を設定するだけです - 開発サーバーが実行されている限り、`src/routes/`にファイルを作成すると自動的にルートが追加され、`routeTree.gen.ts`が再生成されます。これにより`<Link to="...">`が完全に型安全になります。
 詳細については、[`@tanstack/react-router`ドキュメント](https://tanstack.com/router/v1/docs/framework/react/quick-start)を参照してください。
 
 ```tsx
 // packages/game-ui/src/routes/index.tsx
-import {
-  ContentLayout,
-  Header,
-  SpaceBetween,
-  Container,
-} from '@cloudscape-design/components';
 import { createFileRoute } from '@tanstack/react-router';
 
 export const Route = createFileRoute('/')({
@@ -762,16 +720,17 @@ export const Route = createFileRoute('/')({
 
 function RouteComponent() {
   return (
-    <ContentLayout header={<Header>Welcome</Header>}>
-      <SpaceBetween size="l">
-        <Container>Welcome to your new React website!</Container>
-      </SpaceBetween>
-    </ContentLayout>
+    <div className="text-center">
+      <header>
+        <h1>Welcome</h1>
+        <p>Welcome to your new React website!</p>
+      </header>
+    </div>
   );
 }
 ```
 
-`/`ルートにナビゲートすると、コンポーネントがレンダリングされます。`@tanstack/react-router`は、このファイルを作成/移動するたびに(開発サーバーが実行されている限り)`Route`を管理します。
+`/`ルートにナビゲートすると、コンポーネントがレンダリングされます。`uxProvider=Shadcn`を選択したため、ジェネレーターは`packages/common/shadcn`で共有される[shadcn/ui](https://ui.shadcn.com/)プリミティブを使用して、`components/AppLayout`にサイドバー+アプリシェルもスキャフォールディングします。
 
 </Drawer>
 
@@ -837,7 +796,7 @@ import { routeTree } from './routeTree.gen';
 +    auth: undefined,
 +  },
 +});
-// 型安全性のためにルーターインスタンスを登録
+// Register the router instance for type safety
 declare module '@tanstack/react-router' {
   interface Register {
     router: typeof router;
@@ -855,13 +814,11 @@ const root = document.getElementById('root');
 root &&
   createRoot(root).render(
     <React.StrictMode>
-      <I18nProvider locale="en" messages={[messages]}>
-+        <RuntimeConfigProvider>
-+          <CognitoAuth>
-            <App />
-+          </CognitoAuth>
-+        </RuntimeConfigProvider>
-      </I18nProvider>
++      <RuntimeConfigProvider>
++        <CognitoAuth>
+          <App />
++        </CognitoAuth>
++      </RuntimeConfigProvider>
     </React.StrictMode>,
   );
 ```
@@ -921,7 +878,7 @@ export const useGameApiClient = () => {
 このフックは、GameApiを呼び出すためのtRPCクライアントへのアクセスを提供します。tRPC APIを呼び出す方法の例については、<Link path="guides/connection/react-trpc#using-the-generated-code">tRPCフックの使用ガイド</Link>を参照してください。
 
 <Aside title="型安全フック">
-`useGameApi`フックは、tRPCの[Typescript推論](https://trpc.io/docs/concepts)の使用により、変更を反映するためにビルドを必要としないため、`useStoryApi`フックとは異なります。これにより、開発者はバックエンドに変更を加えると、それがフロントエンドに即座に反映されます。
+`useGameApi`フックは、tRPCの[TypeScript推論](https://trpc.io/docs/concepts)の使用により、変更を反映するためにビルドを必要としません。これにより、開発者はバックエンドに変更を加えると、それがフロントエンドに即座に反映されます。
 </Aside>
 
 ```diff lang="tsx"
@@ -934,9 +891,6 @@ import { useRuntimeConfig } from './hooks/useRuntimeConfig';
 import RuntimeConfigProvider from './components/RuntimeConfig';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { I18nProvider } from '@cloudscape-design/components/i18n';
-import messages from '@cloudscape-design/components/i18n/messages/all.en';
-import '@cloudscape-design/global-styles/index.css';
 import { RouterProvider, createRouter } from '@tanstack/react-router';
 import { routeTree } from './routeTree.gen';
 ...
@@ -949,17 +903,15 @@ const root = document.getElementById('root');
 root &&
   createRoot(root).render(
     <React.StrictMode>
-      <I18nProvider locale="en" messages={[messages]}>
-        <RuntimeConfigProvider>
-          <CognitoAuth>
-+            <QueryClientProvider>
-+              <GameApiClientProvider>
-                <App />
-+              </GameApiClientProvider>
-+            </QueryClientProvider>
-          </CognitoAuth>
-        </RuntimeConfigProvider>
-      </I18nProvider>
+      <RuntimeConfigProvider>
+        <CognitoAuth>
++          <QueryClientProvider>
++            <GameApiClientProvider>
+              <App />
++            </GameApiClientProvider>
++          </QueryClientProvider>
+        </CognitoAuth>
+      </RuntimeConfigProvider>
     </React.StrictMode>,
   );
 ```
@@ -1005,42 +957,30 @@ root &&
 
 ### ゲームUI: ストーリーエージェントに接続する
 
-ReactウェブサイトからエージェントのAPIを型安全な自動生成クライアントで呼び出せるように、Game UIをストーリーエージェントに接続しましょう。
+ReactウェブサイトがAG-UIプロトコルを介してエージェントとチャットできるように、Game UIをストーリーエージェントに接続しましょう。
 
 <RunGenerator generator="connection" requiredParameters={{sourceProject:"@dungeon-adventure/game-ui", targetProject:"story"}} noInteractive />
 
 <Drawer title="UI → ストーリーエージェント接続で更新されたファイル" trigger="詳細を確認するにはここをクリック">
-`connection`ジェネレーターはこれらのファイルを生成/更新します:
+ストーリーエージェントは`protocol=AG-UI`で生成されたため、`connection`ジェネレーターは[AG-UI](https://ag-ui.com/)プロトコルを話す[CopilotKit](https://copilotkit.ai/)を使用してウェブサイトを配線します。これらのファイルが生成/更新されます:
 
 <FileTree>
 - packages/
-  - story/
-    - scripts/
-      - **agent\_openapi.py** エージェントのFastAPIアプリからOpenAPI仕様を生成するスクリプト
-    - project.json `agent-openapi`ターゲットで更新
   - game-ui/
     - src/
       - components/
-        - **StoryAgentProvider.tsx** 型安全なOpenAPIクライアントのプロバイダー
-        - **QueryClientProvider.tsx** TanStack React Queryクライアントプロバイダー(まだ存在しない場合)
+        - **AguiProvider.tsx** 各AG-UIエージェントを登録するCopilotKitProvider
+        - **copilot/** テーマ付きCopilotKitチャットコンポーネント(アシスタント/ユーザーバブル、入力、カーソル) - ウェブサイトのUXプロバイダー(ここではShadcn)に基づいて自動的に選択
       - hooks/
-        - **useStoryAgent.tsx** TanStack Queryオプションプロキシ用フック
-        - **useStoryAgentClient.tsx** バニラAPIクライアント用フック
-      - generated/
-        - story-agent/ ビルド時にOpenAPI仕様から生成
-          - types.gen.ts
-          - client.gen.ts
-          - options-proxy.gen.ts
-    - project.json クライアント生成ターゲットで更新
-    - **main.tsx** StoryAgentProviderを追加するように更新
+        - **useAguiStoryAgent.tsx** AgentCore runtimeをターゲットとするCognito認証済みAG-UI `HttpAgent`を構築するエージェントごとのフック
+      - **main.tsx** アプリの周りに`<AguiProvider>`を追加するように更新
 
 </FileTree>
 
 ジェネレーターは:
-- storyプロジェクトにエージェントスコープのOpenAPI仕様生成スクリプトを作成します
-- ビルド時にエージェントのOpenAPI仕様から型安全なTypeScriptクライアントを生成します
-- エージェントのAPIを呼び出すためのプロバイダー、フック、クライアントをウェブサイトに追加します
-- エージェントのローカルサーバーを自動的に起動し、変更時にクライアントを再生成するように`serve-local`を設定します
+- 共有`AguiProvider`を追加します(まだ存在しない場合)。これはアプリをCopilotKitの`CopilotKitProvider`でラップし、各AG-UIエージェントのフックを登録します
+- エージェントごとのフック(`useAguiStoryAgent`)を生成します。これは`runtime-config.json`からAgentCore runtime ARNを解決し、認証済み`HttpAgent`を構築し、すべてのリクエストに`X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`ヘッダーを添付します
+- `src/components/copilot/`の下にテーマ付きチャットプリミティブを提供し、チャットがウェブサイトのUXプロバイダーにネイティブに見えるようにします
 
 詳細については、<Link path="guides/connection/react-py-strands-agent">ReactからPython Strandsエージェントへの接続ガイド</Link>を参照してください。
 </Drawer>
@@ -1141,7 +1081,7 @@ Game APIにデフォルトの統合を提供します。デフォルトでは、
 
 プロジェクトで直接ターゲットを実行することで、単一のプロジェクトターゲットのビルド(または他のタスク)をトリガーすることもできます。たとえば、`@dungeon-adventure/infra`プロジェクトをビルドするには、次のコマンドを実行します:
 
-<NxCommands commands={['build infra']} />
+<NxCommands commands={['build @dungeon-adventure/infra']} />
 
 スコープを省略して、Nxの省略構文を使用することもできます:
 

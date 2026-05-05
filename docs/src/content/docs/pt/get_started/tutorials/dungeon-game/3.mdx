@@ -83,6 +83,39 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityIdentityPool
 dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXXX = region_xxx
 ```
 
+### Criar um usuário de teste no Cognito
+
+Antes de testar o agente implantado (e antes de jogarmos o jogo via UI no próximo módulo), crie um usuário de teste no Cognito. Desabilitamos o auto-registro anteriormente, então este passo é necessário independentemente de você testar localmente ou contra o runtime implantado:
+
+```bash
+# Das saídas do CDK
+export POOL_ID="<UserPoolId das saídas do CDK>"
+export CLIENT_ID="<UserPoolClientId das saídas do CDK>"
+export REGION="<sua-regiao>"
+
+# Desabilite MFA para simplificar a criação do usuário
+aws cognito-idp set-user-pool-mfa-config \
+  --mfa-configuration OFF \
+  --user-pool-id $POOL_ID \
+  --region $REGION
+
+# Criar um usuário de teste
+aws cognito-idp admin-create-user \
+  --user-pool-id $POOL_ID \
+  --username "test" \
+  --temporary-password "TempPass123-" \
+  --region $REGION \
+  --message-action SUPPRESS > /dev/null
+
+# Definir uma senha permanente (substitua por algo mais seguro!)
+aws cognito-idp admin-set-user-password \
+  --user-pool-id $POOL_ID \
+  --username "test" \
+  --password "PermanentPass123-" \
+  --region $REGION \
+  --permanent > /dev/null
+```
+
 ### Testar seu Agente
 
 Você pode testar seu Agente de duas formas:
@@ -95,12 +128,12 @@ Você pode testar seu Agente de duas formas:
   <TabItem label="Local">
   O destino `agent-chat` inicia o agente localmente (junto com suas dependências, via `agent-serve-local`) e coloca você em um prompt de chat interativo. Execute:
 
-    <NxCommands commands={["agent-chat dungeon_adventure.story"]} />
+    <NxCommands commands={["agent-chat story"]} />
 
     :::note[`agent-serve` vs `agent-serve-local`]
     Se você quiser conversar com o agente contra seu servidor MCP **implantado** em vez de um local, inicie o servidor diretamente com `agent-serve` e passe `RUNTIME_CONFIG_APP_ID` / `AWS_REGION`:
 
-    <NxCommands highlights={['xxxx', 'region']} env={{RUNTIME_CONFIG_APP_ID:"xxxx", AWS_REGION: '<region>'}} commands={["agent-serve dungeon_adventure.story"]} />
+    <NxCommands highlights={['xxxx', 'region']} env={{RUNTIME_CONFIG_APP_ID:"xxxx", AWS_REGION: '<region>'}} commands={["agent-serve story"]} />
 
     então em outro shell execute `agent-chat-cli agui http://localhost:8081/invocations`.
     :::
@@ -112,40 +145,10 @@ Você pode testar seu Agente de duas formas:
     ```
   </TabItem>
   <TabItem label="Implantado">
-    Para testar o agente implantado, você precisará autenticar com Cognito e obter um token JWT. Primeiro, configure suas variáveis de ambiente:
+    Troque as credenciais do usuário de teste por um token de acesso do Cognito:
 
     ```bash
-    # Defina seu Cognito User Pool ID e Client ID das saídas do CDK
-    export POOL_ID="<UserPoolId das saídas do CDK>"
-    export CLIENT_ID="<UserPoolClientId das saídas do CDK>"
-    export REGION="<sua-regiao>"
-    ```
-
-    Crie um usuário de teste e obtenha um token de autenticação:
-
-    ```bash
-    # Desabilite MFA para simplificar a criação do usuário
-    aws cognito-idp set-user-pool-mfa-config \
-      --mfa-configuration OFF \
-      --user-pool-id $POOL_ID
-
-    # Criar Usuário
-    aws cognito-idp admin-create-user \
-      --user-pool-id $POOL_ID \
-      --username "test" \
-      --temporary-password "TempPass123-" \
-      --region $REGION \
-      --message-action SUPPRESS > /dev/null
-
-    # Definir Senha Permanente (substitua por algo mais seguro!)
-    aws cognito-idp admin-set-user-password \
-      --user-pool-id $POOL_ID \
-      --username "test" \
-      --password "PermanentPass123-" \
-      --region $REGION \
-      --permanent > /dev/null
-
-    # Autenticar Usuário e capturar Access Token
+    # Autentique o usuário de teste e capture seu token de acesso
     export BEARER_TOKEN=$(aws cognito-idp initiate-auth \
       --client-id "$CLIENT_ID" \
       --auth-flow USER_PASSWORD_AUTH \

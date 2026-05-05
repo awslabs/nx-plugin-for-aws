@@ -83,6 +83,39 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityIdentityPool
 dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXXX = region_xxx
 ```
 
+### Crear un usuario de prueba de Cognito
+
+Antes de probar el agente desplegado (y antes de jugar el juego a través de la interfaz de usuario en el siguiente módulo), crea un usuario de prueba de Cognito. Deshabilitamos el auto-registro anteriormente, por lo que este paso es necesario independientemente de si pruebas localmente o contra el runtime desplegado:
+
+```bash
+# From the CDK outputs
+export POOL_ID="<UserPoolId from CDK outputs>"
+export CLIENT_ID="<UserPoolClientId from CDK outputs>"
+export REGION="<your-region>"
+
+# Disable MFA to simplify user creation
+aws cognito-idp set-user-pool-mfa-config \
+  --mfa-configuration OFF \
+  --user-pool-id $POOL_ID \
+  --region $REGION
+
+# Create a test user
+aws cognito-idp admin-create-user \
+  --user-pool-id $POOL_ID \
+  --username "test" \
+  --temporary-password "TempPass123-" \
+  --region $REGION \
+  --message-action SUPPRESS > /dev/null
+
+# Set a permanent password (replace with something more secure!)
+aws cognito-idp admin-set-user-password \
+  --user-pool-id $POOL_ID \
+  --username "test" \
+  --password "PermanentPass123-" \
+  --region $REGION \
+  --permanent > /dev/null
+```
+
 ### Probar tu Agente
 
 Puedes probar tu Agente de dos formas:
@@ -95,12 +128,12 @@ Puedes probar tu Agente de dos formas:
   <TabItem label="Local">
   El objetivo `agent-chat` inicia el agente localmente (junto con sus dependencias, a través de `agent-serve-local`) y te lleva a un prompt de chat interactivo. Ejecuta:
 
-    <NxCommands commands={["agent-chat dungeon_adventure.story"]} />
+    <NxCommands commands={["agent-chat story"]} />
 
     :::note[`agent-serve` vs `agent-serve-local`]
     Si quieres chatear con el agente contra tu servidor MCP **desplegado** en lugar de uno local, inicia el servidor directamente con `agent-serve` y pasa `RUNTIME_CONFIG_APP_ID` / `AWS_REGION`:
 
-    <NxCommands highlights={['xxxx', 'region']} env={{RUNTIME_CONFIG_APP_ID:"xxxx", AWS_REGION: '<region>'}} commands={["agent-serve dungeon_adventure.story"]} />
+    <NxCommands highlights={['xxxx', 'region']} env={{RUNTIME_CONFIG_APP_ID:"xxxx", AWS_REGION: '<region>'}} commands={["agent-serve story"]} />
 
     luego en otro shell ejecuta `agent-chat-cli agui http://localhost:8081/invocations`.
     :::
@@ -112,40 +145,10 @@ Puedes probar tu Agente de dos formas:
     ```
   </TabItem>
   <TabItem label="Desplegado">
-    Para probar el agente desplegado, necesitarás autenticarte con Cognito y obtener un token JWT. Primero, configura tus variables de entorno:
+    Intercambia las credenciales del usuario de prueba por un token de acceso de Cognito:
 
     ```bash
-    # Establece tu User Pool ID y Client ID de Cognito desde los outputs de CDK
-    export POOL_ID="<UserPoolId from CDK outputs>"
-    export CLIENT_ID="<UserPoolClientId from CDK outputs>"
-    export REGION="<your-region>"
-    ```
-
-    Crea un usuario de prueba y obtén un token de autenticación:
-
-    ```bash
-    # Disable MFA to simplify user creation
-    aws cognito-idp set-user-pool-mfa-config \
-      --mfa-configuration OFF \
-      --user-pool-id $POOL_ID
-
-    # Create User
-    aws cognito-idp admin-create-user \
-      --user-pool-id $POOL_ID \
-      --username "test" \
-      --temporary-password "TempPass123-" \
-      --region $REGION \
-      --message-action SUPPRESS > /dev/null
-
-    # Set Permanent Password (replace with something more secure!)
-    aws cognito-idp admin-set-user-password \
-      --user-pool-id $POOL_ID \
-      --username "test" \
-      --password "PermanentPass123-" \
-      --region $REGION \
-      --permanent > /dev/null
-
-    # Authenticate User and capture ID Token
+    # Authenticate the test user and capture their access token
     export BEARER_TOKEN=$(aws cognito-idp initiate-auth \
       --client-id "$CLIENT_ID" \
       --auth-flow USER_PASSWORD_AUTH \

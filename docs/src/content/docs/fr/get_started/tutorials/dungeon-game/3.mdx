@@ -83,6 +83,39 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityIdentityPool
 dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXXX = region_xxx
 ```
 
+### Créer un utilisateur test Cognito
+
+Avant de tester l'agent déployé (et avant de jouer au jeu via l'interface utilisateur dans le prochain module), créez un utilisateur test Cognito. Nous avons désactivé l'auto-inscription plus tôt, donc cette étape est requise que vous testiez localement ou contre le runtime déployé :
+
+```bash
+# Depuis les sorties CDK
+export POOL_ID="<UserPoolId depuis les sorties CDK>"
+export CLIENT_ID="<UserPoolClientId depuis les sorties CDK>"
+export REGION="<votre-région>"
+
+# Désactiver MFA pour simplifier la création d'utilisateur
+aws cognito-idp set-user-pool-mfa-config \
+  --mfa-configuration OFF \
+  --user-pool-id $POOL_ID \
+  --region $REGION
+
+# Créer un utilisateur test
+aws cognito-idp admin-create-user \
+  --user-pool-id $POOL_ID \
+  --username "test" \
+  --temporary-password "TempPass123-" \
+  --region $REGION \
+  --message-action SUPPRESS > /dev/null
+
+# Définir un mot de passe permanent (remplacez par quelque chose de plus sécurisé !)
+aws cognito-idp admin-set-user-password \
+  --user-pool-id $POOL_ID \
+  --username "test" \
+  --password "PermanentPass123-" \
+  --region $REGION \
+  --permanent > /dev/null
+```
+
 ### Tester votre Agent
 
 Vous pouvez tester votre Agent via :
@@ -95,12 +128,12 @@ Vous pouvez tester votre Agent via :
   <TabItem label="Local">
   La cible `agent-chat` démarre l'agent localement (avec ses dépendances, via `agent-serve-local`) et vous place dans une invite de discussion interactive. Exécutez :
 
-    <NxCommands commands={["agent-chat dungeon_adventure.story"]} />
+    <NxCommands commands={["agent-chat story"]} />
 
     :::note[`agent-serve` vs `agent-serve-local`]
     Si vous souhaitez discuter avec l'agent en utilisant votre serveur MCP **déployé** au lieu d'un serveur local, démarrez le serveur directement avec `agent-serve` et passez `RUNTIME_CONFIG_APP_ID` / `AWS_REGION` :
 
-    <NxCommands highlights={['xxxx', 'region']} env={{RUNTIME_CONFIG_APP_ID:"xxxx", AWS_REGION: '<region>'}} commands={["agent-serve dungeon_adventure.story"]} />
+    <NxCommands highlights={['xxxx', 'region']} env={{RUNTIME_CONFIG_APP_ID:"xxxx", AWS_REGION: '<region>'}} commands={["agent-serve story"]} />
 
     puis dans un autre shell exécutez `agent-chat-cli agui http://localhost:8081/invocations`.
     :::
@@ -112,40 +145,10 @@ Vous pouvez tester votre Agent via :
     ```
   </TabItem>
   <TabItem label="Deployed">
-    Pour tester l'agent déployé, vous devrez vous authentifier avec Cognito et obtenir un token JWT. Tout d'abord, configurez vos variables d'environnement :
+    Échangez les identifiants de l'utilisateur test contre un token d'accès Cognito :
 
     ```bash
-    # Définissez votre User Pool ID et Client ID Cognito depuis les sorties CDK
-    export POOL_ID="<UserPoolId depuis les sorties CDK>"
-    export CLIENT_ID="<UserPoolClientId depuis les sorties CDK>"
-    export REGION="<votre-région>"
-    ```
-
-    Créez un utilisateur test et obtenez un token d'authentification :
-
-    ```bash
-    # Désactiver MFA pour simplifier la création d'utilisateur
-    aws cognito-idp set-user-pool-mfa-config \
-      --mfa-configuration OFF \
-      --user-pool-id $POOL_ID
-
-    # Créer l'utilisateur
-    aws cognito-idp admin-create-user \
-      --user-pool-id $POOL_ID \
-      --username "test" \
-      --temporary-password "TempPass123-" \
-      --region $REGION \
-      --message-action SUPPRESS > /dev/null
-
-    # Définir un mot de passe permanent (remplacez par quelque chose de plus sécurisé !)
-    aws cognito-idp admin-set-user-password \
-      --user-pool-id $POOL_ID \
-      --username "test" \
-      --password "PermanentPass123-" \
-      --region $REGION \
-      --permanent > /dev/null
-
-    # Authentifier l'utilisateur et capturer le token d'accès
+    # Authentifier l'utilisateur test et capturer son token d'accès
     export BEARER_TOKEN=$(aws cognito-idp initiate-auth \
       --client-id "$CLIENT_ID" \
       --auth-flow USER_PASSWORD_AUTH \

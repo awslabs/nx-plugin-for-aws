@@ -83,6 +83,39 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityIdentityPool
 dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXXX = region_xxx
 ```
 
+### Cognitoテストユーザーの作成
+
+デプロイ済みエージェントのテスト（および次のモジュールでUIからゲームをプレイする前）に、Cognitoテストユーザーを作成します。以前にセルフサインアップを無効にしたため、ローカルでテストする場合でもデプロイ済みランタイムに対してテストする場合でも、このステップは必須です：
+
+```bash
+# CDK出力から取得
+export POOL_ID="<CDK出力のUserPoolId>"
+export CLIENT_ID="<CDK出力のUserPoolClientId>"
+export REGION="<リージョン>"
+
+# ユーザー作成を簡素化するためMFAを無効化
+aws cognito-idp set-user-pool-mfa-config \
+  --mfa-configuration OFF \
+  --user-pool-id $POOL_ID \
+  --region $REGION
+
+# テストユーザーを作成
+aws cognito-idp admin-create-user \
+  --user-pool-id $POOL_ID \
+  --username "test" \
+  --temporary-password "TempPass123-" \
+  --region $REGION \
+  --message-action SUPPRESS > /dev/null
+
+# 永続的なパスワードを設定（より安全なパスワードに置き換えてください！）
+aws cognito-idp admin-set-user-password \
+  --user-pool-id $POOL_ID \
+  --username "test" \
+  --password "PermanentPass123-" \
+  --region $REGION \
+  --permanent > /dev/null
+```
+
 ### エージェントのテスト
 
 エージェントのテスト方法は2通りあります：
@@ -95,12 +128,12 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
   <TabItem label="ローカル">
   `agent-chat`ターゲットは、エージェントをローカルで起動し（依存関係も`agent-serve-local`経由で起動）、対話型チャットプロンプトを表示します。以下を実行してください：
 
-    <NxCommands commands={["agent-chat dungeon_adventure.story"]} />
+    <NxCommands commands={["agent-chat story"]} />
 
     :::note[`agent-serve` vs `agent-serve-local`]
     ローカルではなく**デプロイ済み**のMCPサーバーに対してエージェントとチャットしたい場合は、`agent-serve`で直接サーバーを起動し、`RUNTIME_CONFIG_APP_ID` / `AWS_REGION`を渡します：
 
-    <NxCommands highlights={['xxxx', 'region']} env={{RUNTIME_CONFIG_APP_ID:"xxxx", AWS_REGION: '<region>'}} commands={["agent-serve dungeon_adventure.story"]} />
+    <NxCommands highlights={['xxxx', 'region']} env={{RUNTIME_CONFIG_APP_ID:"xxxx", AWS_REGION: '<region>'}} commands={["agent-serve story"]} />
 
     その後、別のシェルで`agent-chat-cli agui http://localhost:8081/invocations`を実行します。
     :::
@@ -112,40 +145,10 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
     ```
   </TabItem>
   <TabItem label="デプロイ済み">
-    デプロイ済みエージェントのテストには、Cognito認証によるJWTトークン取得が必要です。まず環境変数を設定します：
+    テストユーザーの認証情報をCognitoアクセストークンと交換します：
 
     ```bash
-    # CDK出力からCognito User Pool IDとClient IDを設定
-    export POOL_ID="<CDK出力のUserPoolId>"
-    export CLIENT_ID="<CDK出力のUserPoolClientId>"
-    export REGION="<リージョン>"
-    ```
-
-    テストユーザーを作成し、認証トークンを取得します：
-
-    ```bash
-    # ユーザー作成を簡素化するためMFAを無効化
-    aws cognito-idp set-user-pool-mfa-config \
-      --mfa-configuration OFF \
-      --user-pool-id $POOL_ID
-
-    # ユーザー作成
-    aws cognito-idp admin-create-user \
-      --user-pool-id $POOL_ID \
-      --username "test" \
-      --temporary-password "TempPass123-" \
-      --region $REGION \
-      --message-action SUPPRESS > /dev/null
-
-    # パスワード設定（本番環境ではより安全なパスワードを使用してください）
-    aws cognito-idp admin-set-user-password \
-      --user-pool-id $POOL_ID \
-      --username "test" \
-      --password "PermanentPass123-" \
-      --region $REGION \
-      --permanent > /dev/null
-
-    # 認証とアクセストークン取得
+    # テストユーザーを認証し、アクセストークンを取得
     export BEARER_TOKEN=$(aws cognito-idp initiate-auth \
       --client-id "$CLIENT_ID" \
       --auth-flow USER_PASSWORD_AUTH \
