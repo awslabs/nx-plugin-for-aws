@@ -23,30 +23,23 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 ## 任务 1：实现故事代理
 
-故事代理是一个基于 [Strands](https://strandsagents.com/) 的代理，在给定 `Game` 和 `Action` 列表作为上下文时，能够推进故事情节发展。我们将配置该代理与库存管理控制协议（MCP）服务器交互，以管理玩家的可用物品。
+故事代理是一个通过 [AG-UI](https://ag-ui.com/) 协议公开的 [Strands](https://strandsagents.com/) 代理。每个 AG-UI 会话（由 `threadId` 标识）映射到服务器上的一个长期存在的代理实例，因此代理的对话历史在会话的生命周期内保存在内存中。
 
-:::note[Python实现]
-在本教程中，我们将以"无状态"方式实现代理，每次调用都是包含完整消息历史的独立会话。生产环境中建议集成 [Bedrock AgentCore 记忆系统](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/memory.html)。有关更多信息，请参阅[在 Strands 中使用 AgentCore 记忆](https://github.com/aws/bedrock-agentcore-sdk-python/tree/main/src/bedrock_agentcore/memory/integrations/strands)页面。
-:::
+我们将更新代理的系统提示以进行地牢冒险游戏，并删除示例工具。
 
 ### 代理实现
 
-要实现代理，请更新 `packages/story/dungeon_adventure_story/agent` 目录下的以下文件：
+更新 `packages/story/dungeon_adventure_story/agent/agent.py`：
 
-<Tabs>
-  <TabItem label="main.py">
-<E2EDiff lang="python" before="dungeon-adventure/3/main.py.old.template" after="dungeon-adventure/3/main.py.template" />
-  </TabItem>
-  <TabItem label="agent.py">
 <E2EDiff lang="python" before="dungeon-adventure/3/agent.py.old.template" after="dungeon-adventure/3/agent.py.template" />
-  </TabItem>
-</Tabs>
 
-由于连接生成器已在 <Link path="get_started/tutorials/dungeon-game/1">模块 1</Link> 中配置好 MCP 客户端，这些更改主要集中在：
+系统提示告诉代理第一条消息的格式为 `I am <player>, playing in the <genre> genre.` — 我们的 UI 正好发送这个作为开场用户消息，因此代理拥有开始故事所需的一切。由于 AG-UI 库会自动保留每个线程的对话历史，我们不需要在后续回合中传递玩家名称或类型。
 
-- 删除示例工具和未使用的导入，
-- 向 `get_agent` 函数添加 `player_name` 和 `genre` 参数，以及
-- 为地牢冒险游戏自定义系统提示。
+连接生成器已在 <Link path="get_started/tutorials/dungeon-game/1">模块 1</Link> 中配置好库存管理控制协议（MCP）客户端，因此代理可以访问库存工具。
+
+:::note[`main.py` 在哪里？]
+AG-UI 协议的 FastAPI 包装器为我们处理请求/响应转换。生成器生成的 `main.py` 已经在 `get_agent(...)` 周围创建了包装器 — 我们不需要修改它。
+:::
 
 ## 任务 2：部署与测试
 
@@ -94,29 +87,28 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
 
 可通过以下方式测试代理：
 <ul>
-<li>启动代理服务器本地实例并使用 `curl` 调用，或</li>
+<li>启动代理服务器本地实例并使用 `agent-chat` 目标进行交互式聊天，或</li>
 <li>使用携带 JWT 令牌的 curl 调用已部署 API。</li>
 </ul>
 
 <Tabs>
   <TabItem label="本地">
-  运行以下命令启动本地代理服务器：
-    <NxCommands highlights={['xxxx', 'region']} env={{RUNTIME_CONFIG_APP_ID:"xxxx", AWS_REGION: '<region>'}} commands={["agent-serve dungeon_adventure.story"]} />
+  `agent-chat` 目标在本地启动代理（通过 `agent-serve-local` 连同其依赖项一起），并将您带入交互式聊天提示符。运行：
 
-    <Aside type="caution" title="使用CDK输出值">
-    请使用 CDK 部署输出的 `RuntimeConfigApplicationId` 值作为 `RUNTIME_CONFIG_APP_ID` 环境变量，并使用已部署的 AWS 区域作为 `AWS_REGION`。
-    </Aside>
+    <NxCommands commands={["agent-chat dungeon_adventure.story"]} />
 
     :::note[`agent-serve` 与 `agent-serve-local`]
-    `agent-serve` 目标在本地启动代理，但连接到**已部署**的 MCP 服务器（通过 `RUNTIME_CONFIG_APP_ID`）。如果您希望同时在本地运行 MCP 服务器，请改用 `agent-serve-local`，它会启动所有依赖服务并设置 `SERVE_LOCAL=true` 以进行直接 HTTP 连接。
+    如果您希望与代理聊天时连接到**已部署**的 MCP 服务器而不是本地服务器，请直接使用 `agent-serve` 启动服务器并传递 `RUNTIME_CONFIG_APP_ID` / `AWS_REGION`：
+
+    <NxCommands highlights={['xxxx', 'region']} env={{RUNTIME_CONFIG_APP_ID:"xxxx", AWS_REGION: '<region>'}} commands={["agent-serve dungeon_adventure.story"]} />
+
+    然后在另一个 shell 中运行 `agent-chat-cli agui http://localhost:8081/invocations`。
     :::
 
-    代理服务器启动并运行后（无输出显示），运行以下命令进行调用：
+    当提示时，尝试用类似以下内容开始游戏：
 
-    ```bash
-    curl -N -X POST http://127.0.0.1:8081/invocations \
-      -d '{"genre":"superhero", "actions":[], "playerName":"UnnamedHero"}' \
-      -H "Content-Type: application/json"
+    ```
+    I am Aria, playing in the medieval genre.
     ```
   </TabItem>
   <TabItem label="已部署">
@@ -163,7 +155,7 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
       --output text)
     ```
 
-    通过 Bedrock AgentCore 运行时 URL 调用已部署代理：
+    通过 Bedrock AgentCore 运行时 URL 调用已部署代理。AG-UI 协议期望一个 `RunAgentInput` 负载 — 一个发送开场用户消息的最小负载如下所示：
 
     ```bash
     # 设置 CDK 输出的 Story Agent ARN
@@ -179,8 +171,14 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
     curl -N -X POST "$AGENT_URL" \
       -H "authorization: Bearer $BEARER_TOKEN" \
       -H "Content-Type: application/json" \
+      -H "Accept: text/event-stream" \
       -H "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id: abcdefghijklmnopqrstuvwxyz-123456789" \
-      -d '{"genre":"superhero", "actions":[], "playerName":"UnnamedHero"}'
+      -d '{
+        "threadId": "abcdefghijklmnopqrstuvwxyz-123456789",
+        "runId": "run-1",
+        "messages": [{"id": "m1", "role": "user", "content": "I am UnnamedHero, playing in the superhero genre."}],
+        "tools": [], "context": [], "forwardedProps": {}, "state": {}
+      }'
     ```
 
     :::note[URL 编码]
@@ -189,12 +187,6 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
   </TabItem>
 </Tabs>
 
-若命令运行成功，将开始看到初始故事文本以 JSON Lines 格式流式输出：
-
-```
-{"content":"You are "}
-{"content":"a new superhero "}
-{"content":"in the bustling metropolis of Metro City..."}
-```
+若命令运行成功，将开始看到 AG-UI 服务器发送事件流式返回 — `TEXT_MESSAGE_CONTENT` 事件逐块携带故事文本。
 
 恭喜！您已成功在 Bedrock AgentCore 运行时上构建并部署首个 Strands 代理！🎉🎉🎉

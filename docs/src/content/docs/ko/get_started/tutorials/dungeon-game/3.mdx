@@ -23,30 +23,23 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 ## 작업 1: 스토리 에이전트 구현
 
-스토리 에이전트는 [Strands](https://strandsagents.com/) 에이전트로, `Game`과 컨텍스트용 `Action` 목록을 입력받아 스토리를 진행합니다. 이 에이전트를 인벤토리 MCP 서버와 연동하도록 구성하여 플레이어의 사용 가능한 아이템을 관리할 수 있게 합니다.
+스토리 에이전트는 [AG-UI](https://ag-ui.com/) 프로토콜을 통해 노출되는 [Strands](https://strandsagents.com/) 에이전트입니다. 각 AG-UI 세션(`threadId`로 식별됨)은 서버의 장기 실행 에이전트 인스턴스에 매핑되므로, 에이전트의 대화 기록은 세션이 지속되는 동안 메모리에 유지됩니다.
 
-:::note[Python 구현]
-본 튜토리얼에서는 각 호출이 전체 메시지 기록을 포함하는 독립 세션인 "상태 비저장" 방식으로 에이전트를 구현합니다. 프로덕션 환경에서는 [Bedrock AgentCore 메모리](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/memory.html) 통합을 고려하세요. 자세한 내용은 [Strands와 AgentCore 메모리 사용](https://github.com/aws/bedrock-agentcore-sdk-python/tree/main/src/bedrock_agentcore/memory/integrations/strands) 페이지를 참조하세요.
-:::
+에이전트의 시스템 프롬프트를 던전 어드벤처 게임에 맞게 업데이트하고, 샘플 도구를 제거하겠습니다.
 
 ### 에이전트 구현
 
-에이전트를 구현하려면 `packages/story/dungeon_adventure_story/agent` 내 다음 파일들을 업데이트하세요:
+`packages/story/dungeon_adventure_story/agent/agent.py`를 업데이트하세요:
 
-<Tabs>
-  <TabItem label="main.py">
-<E2EDiff lang="python" before="dungeon-adventure/3/main.py.old.template" after="dungeon-adventure/3/main.py.template" />
-  </TabItem>
-  <TabItem label="agent.py">
 <E2EDiff lang="python" before="dungeon-adventure/3/agent.py.old.template" after="dungeon-adventure/3/agent.py.template" />
-  </TabItem>
-</Tabs>
 
-연결 생성기가 이미 <Link path="get_started/tutorials/dungeon-game/1">모듈 1</Link>에서 MCP 클라이언트를 연결했으므로, 이번 변경 사항은 다음에 집중합니다:
+시스템 프롬프트는 첫 번째 메시지가 `I am <player>, playing in the <genre> genre.` 형식일 것이라고 에이전트에게 알려줍니다 — 우리 UI는 정확히 이 형식으로 초기 사용자 메시지를 보내므로 에이전트가 스토리를 시작하는 데 필요한 모든 정보를 갖게 됩니다. AG-UI 라이브러리가 각 스레드의 대화 기록을 자동으로 유지하기 때문에, 이후 턴에서 플레이어 이름이나 장르를 전달할 필요가 없습니다.
 
-- 샘플 도구와 사용하지 않는 임포트 제거,
-- `get_agent` 함수에 `player_name`과 `genre` 매개변수 추가, 그리고
-- 던전 어드벤처 게임을 위한 시스템 프롬프트 커스터마이징.
+연결 생성기가 이미 <Link path="get_started/tutorials/dungeon-game/1">모듈 1</Link>에서 인벤토리 MCP 클라이언트를 연결했으므로, 에이전트는 인벤토리 도구에 접근할 수 있습니다.
+
+:::note[`main.py`는 어디에?]
+AG-UI 프로토콜의 FastAPI 래퍼가 요청/응답 변환을 처리합니다. 생성기가 생성한 `main.py`는 이미 `get_agent(...)`를 감싸는 래퍼를 생성하므로 수정할 필요가 없습니다.
+:::
 
 ## 작업 2: 배포 및 테스트
 
@@ -94,29 +87,28 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
 
 다음 방법 중 하나로 에이전트를 테스트할 수 있습니다:
 <ul>
-<li>에이전트 서버 로컬 인스턴스를 시작하고 `curl`로 호출하거나,</li>
+<li>에이전트 서버 로컬 인스턴스를 시작하고 `agent-chat` 타겟을 사용하여 대화형으로 채팅하거나,</li>
 <li>JWT 토큰을 사용하여 배포된 API를 curl로 호출합니다.</li>
 </ul>
 
 <Tabs>
   <TabItem label="Local">
-  다음 명령어로 로컬 에이전트 서버를 시작하세요:
-    <NxCommands highlights={['xxxx', 'region']} env={{RUNTIME_CONFIG_APP_ID:"xxxx", AWS_REGION: '<region>'}} commands={["agent-serve dungeon_adventure.story"]} />
+  `agent-chat` 타겟은 에이전트를 로컬에서 시작하고(`agent-serve-local`을 통해 종속성과 함께) 대화형 채팅 프롬프트로 진입합니다. 다음을 실행하세요:
 
-    <Aside type="caution" title="CDK 출력값 사용">
-    `RUNTIME_CONFIG_APP_ID` 환경 변수에는 CDK 배포 출력값 `RuntimeConfigApplicationId`를 사용하고, `AWS_REGION`에는 배포된 AWS 리전을 지정하세요.
-    </Aside>
+    <NxCommands commands={["agent-chat dungeon_adventure.story"]} />
 
     :::note[`agent-serve` vs `agent-serve-local`]
-    `agent-serve` 타겟은 에이전트를 로컬에서 시작하지만 (`RUNTIME_CONFIG_APP_ID`를 통해) **배포된** MCP 서버에 연결합니다. MCP 서버도 로컬에서 실행하려면 `agent-serve-local`을 대신 사용하세요. 이 명령은 모든 종속 서비스를 시작하고 직접 HTTP 연결을 위해 `SERVE_LOCAL=true`를 설정합니다.
+    로컬 MCP 서버 대신 **배포된** MCP 서버에 대해 에이전트와 채팅하려면, `agent-serve`로 서버를 직접 시작하고 `RUNTIME_CONFIG_APP_ID` / `AWS_REGION`을 전달하세요:
+
+    <NxCommands highlights={['xxxx', 'region']} env={{RUNTIME_CONFIG_APP_ID:"xxxx", AWS_REGION: '<region>'}} commands={["agent-serve dungeon_adventure.story"]} />
+
+    그런 다음 다른 셸에서 `agent-chat-cli agui http://localhost:8081/invocations`를 실행하세요.
     :::
 
-    에이전트 서버가 실행되면(콘솔에 출력되지 않음) 다음 명령어로 호출하세요:
+    프롬프트가 표시되면 다음과 같이 게임을 시작해 보세요:
 
-    ```bash
-    curl -N -X POST http://127.0.0.1:8081/invocations \
-      -d '{"genre":"superhero", "actions":[], "playerName":"UnnamedHero"}' \
-      -H "Content-Type: application/json"
+    ```
+    I am Aria, playing in the medieval genre.
     ```
   </TabItem>
   <TabItem label="Deployed">
@@ -163,7 +155,7 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
       --output text)
     ```
 
-    Bedrock AgentCore 런타임 URL을 사용하여 배포된 에이전트를 호출하세요:
+    Bedrock AgentCore 런타임 URL을 사용하여 배포된 에이전트를 호출하세요. AG-UI 프로토콜은 `RunAgentInput` 페이로드를 기대합니다 — 초기 사용자 메시지를 보내는 최소 페이로드는 다음과 같습니다:
 
     ```bash
     # CDK 출력에서 Story Agent ARN 설정
@@ -179,8 +171,14 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
     curl -N -X POST "$AGENT_URL" \
       -H "authorization: Bearer $BEARER_TOKEN" \
       -H "Content-Type: application/json" \
+      -H "Accept: text/event-stream" \
       -H "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id: abcdefghijklmnopqrstuvwxyz-123456789" \
-      -d '{"genre":"superhero", "actions":[], "playerName":"UnnamedHero"}'
+      -d '{
+        "threadId": "abcdefghijklmnopqrstuvwxyz-123456789",
+        "runId": "run-1",
+        "messages": [{"id": "m1", "role": "user", "content": "I am UnnamedHero, playing in the superhero genre."}],
+        "tools": [], "context": [], "forwardedProps": {}, "state": {}
+      }'
     ```
 
     :::note[URL 인코딩]
@@ -189,12 +187,6 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
   </TabItem>
 </Tabs>
 
-명령이 성공적으로 실행되면 초기 스토리 텍스트가 JSON Lines 형식으로 스트리밍되기 시작합니다:
-
-```
-{"content":"You are "}
-{"content":"a new superhero "}
-{"content":"in the bustling metropolis of Metro City..."}
-```
+명령이 성공적으로 실행되면 AG-UI Server-Sent Events가 스트리밍되기 시작합니다 — `TEXT_MESSAGE_CONTENT` 이벤트가 스토리 텍스트를 청크 단위로 전달합니다.
 
 축하합니다. Bedrock AgentCore 런타임에 첫 번째 Strands 에이전트를 구축하고 배포했습니다! 🎉🎉🎉

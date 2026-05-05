@@ -33,44 +33,30 @@ Pour démarrer le serveur de développement, exécutez la commande suivante :
 
 <NxCommands commands={["serve game-ui"]} />
 
-Ouvrez le site local dans un navigateur. Vous serez invité à vous connecter et à suivre les étapes pour créer un nouvel utilisateur. Une fois terminé, vous devriez voir le site de base :
-
-<Image src={baselineWebsitePng} alt="baseline-website.png" width="800" height="600" />
+Ouvrez le site local dans un navigateur. Vous serez invité à vous connecter avec l'utilisateur Cognito que vous avez créé précédemment. Une fois connecté, vous devriez voir le site de base.
 
 <Aside type="caution" title="Garder le serveur de dev actif">
 Nous recommandons de garder le serveur de développement en fonctionnement pendant le reste de ce module, car il rechargera automatiquement toutes les modifications apportées.
 </Aside>
 
-:::tip[Utilisation des commandes Nx]
-Vous pouvez exécuter des commandes Nx à la place pour démarrer les serveurs API locaux connectés, vous permettant d'itérer simultanément sur votre API tRPC et votre site web. <NxCommands commands={["serve-local game-ui"]} env={{RUNTIME_CONFIG_APP_ID:"xxxx"}} />
+## Tâche 2 : Thématiser l'application
 
-Utilisez la valeur de sortie du déploiement CDK `RuntimeConfigApplicationId` pour la variable d'environnement `RUNTIME_CONFIG_APP_ID`.
-:::
+Le provider shadcn/ui généré par `ts#react-website --uxProvider=Shadcn` nous fournit une interface d'application entièrement thématisée (barre latérale, en-tête, menu d'authentification) prête à l'emploi. Nous devons seulement la rethématiser et définir un nom d'application.
 
-## Tâche 2 : Créer une nouvelle route '/game'
+<Tabs>
+<TabItem label="config.ts">
+<E2EDiff before="dungeon-adventure/4/config.ts.old.template" after="dungeon-adventure/4/config.ts.template" lang="typescript" />
+</TabItem>
+<TabItem label="styles.css">
+<E2ECode path="dungeon-adventure/4/styles.css.template" lang="css" />
+</TabItem>
+</Tabs>
 
-Démontrons les capacités de `@tanstack/react-router` en créant une nouvelle route typée.
-Pour ce faire, créez un fichier vide à l'emplacement suivant : `packages/game-ui/src/routes/game/index.tsx`. Vous remarquerez que le fichier est immédiatement mis à jour.
+Le fichier `styles.css` remplace les variables CSS de shadcn par une palette de donjon — un simple copier/coller qui rethématise tous les composants générés (barre latérale, cartes, boutons, le chat, tout) en une seule fois.
 
-Le routeur `@tanstack/react-router` configure automatiquement votre nouvelle route et le fichier que vous venez de créer contient déjà le chemin de la route :
+## Tâche 3 : Initialiser la route d'accueil
 
-```tsx
-import { createFileRoute } from '@tanstack/react-router'
-
-export const Route = createFileRoute('/game/')({
-  component: RouteComponent,
-})
-
-function RouteComponent() {
-  return <div>Hello "/game/"!</div>
-}
-```
-
-Si vous naviguez vers `http://localhost:4200/game`, vous verrez votre nouvelle page s'afficher.
-
-<Image src={baselineGamePng} alt="baseline-game.png" width="800" height="600" />
-
-Mettez à jour le fichier `index.tsx` pour charger notre nouvelle route `/game` par défaut. Lorsque vous mettez à jour le champ `to`, vous avez une liste de routes typées parmi lesquelles choisir.
+La route d'accueil par défaut affiche un panneau de bienvenue générique. Nous voulons que `/` redirige vers `/game` à la place :
 
 <Tabs>
 <TabItem label="routes/index.tsx">
@@ -78,60 +64,34 @@ Mettez à jour le fichier `index.tsx` pour charger notre nouvelle route `/game` 
 </TabItem>
 </Tabs>
 
-## Tâche 3 : Mettre à jour le layout
+## Tâche 4 : Créer les pages du jeu
 
-Le layout par défaut configuré est plus similaire à une application SaaS d'entreprise qu'à un jeu.
-Pour reconfigurer le layout et le rethématiser pour évoquer un style médiéval de donjon, apportez les modifications suivantes dans `packages/game-ui/src` :
+Dans le <Link path="get_started/tutorials/dungeon-game/1">Module 1</Link>, nous avons connecté notre `GameUI` à l'Agent Narratif. Comme l'agent a été généré avec `--protocol=AG-UI`, le générateur de connexion a configuré un `AguiProvider` CopilotKit et un hook par agent (`useAguiStoryAgent`) au lieu du client OpenAPI habituel. Nous pouvons afficher le chat avec un seul composant `<CopilotChat />` et le piloter par `threadId` (que nous utilisons comme id de session AgentCore).
 
-<Tabs>
-<TabItem label="config.ts">
-<E2EDiff before="dungeon-adventure/4/config.ts.old.template" after="dungeon-adventure/4/config.ts.template" lang="typescript" />
-</TabItem>
-<TabItem label="components/AppLayout/index.tsx">
-<E2ECode path="dungeon-adventure/4/AppLayout/index.tsx.template" lang="tsx" />
-</TabItem>
-<TabItem label="styles.css">
-<E2ECode path="dungeon-adventure/4/styles.css.template" lang="css" />
-</TabItem>
-</Tabs>
-
-Supprimez le fichier `packages/game-ui/src/hooks/useAppLayout.tsx` qui n'est plus utilisé.
-
-## Tâche 4 : Intégration de l'Agent Narratif
-
-Rappelez-vous que dans le <Link path="get_started/tutorials/dungeon-game/1#task-7-connect-your-components">Module 1</Link>, nous avons utilisé le générateur `connection` pour connecter notre interface utilisateur du jeu à l'Agent Narratif. Cela a configuré un client OpenAPI typé pour interagir avec l'agent, ainsi que des hooks et des providers.
-
-Le générateur de connexion a créé les éléments suivants pour nous :
-- Un composant `StoryAgentProvider` encapsulant notre application dans `main.tsx`
-- Un hook `useStoryAgent` pour l'intégration TanStack Query
-- Un hook `useStoryAgentClient` pour l'accès direct au client
-- Des types TypeScript générés à partir de la spécification OpenAPI de l'agent
-
-Nous utiliserons le hook `useStoryAgentClient` dans notre composant de jeu pour streamer les réponses narratives de l'agent.
-
-## Tâche 5 : Créer les pages du jeu
-
-Pour créer les pages du jeu qui appelleront nos APIs et finaliser l'implémentation du jeu, mettez à jour les fichiers suivants dans `packages/game-ui/src/routes/game` :
+Créez deux nouveaux fichiers sous `packages/game-ui/src/routes/game/` :
 
 <Tabs>
 <TabItem label="index.tsx">
 <E2ECode path="dungeon-adventure/4/routes/game/index.tsx.template" lang="tsx" />
 </TabItem>
 <TabItem label="$playerName.tsx">
-
 <E2ECode path="dungeon-adventure/4/routes/game/$playerName.tsx.template" lang="tsx" />
 
 <Aside type="tip" title="Paramètres de chemin">
-La syntaxe `$playerName` indique à `@tanstack/react-router` de traiter `playerName` comme un [paramètre de chemin](https://tanstack.com/router/v1/docs/framework/react/guide/path-params). De plus, nous implémentons la méthode `validateSearch` qui garantit que le paramètre de requête `genre` est fortement typé selon notre enum de genres.
+La syntaxe `$playerName` indique à `@tanstack/react-router` de traiter `playerName` comme un [paramètre de chemin](https://tanstack.com/router/v1/docs/framework/react/guide/path-params). Nous utilisons le nom du joueur comme `threadId` AG-UI afin que chaque partie ait son propre historique de chat, et nous le complétons à 33 caractères pour satisfaire l'exigence de longueur d'id de session d'AgentCore.
+</Aside>
+
+<Aside type="note" title="Initialisation du premier message">
+Au premier montage, nous vérifions `agent.messages.length === 0` et, si vide, nous envoyons un seul message utilisateur d'ouverture : `I am <player>, playing in the <genre> genre.` Le prompt système indique à l'agent de commencer l'histoire immédiatement à partir de cette indication. Par la suite, chaque interaction (y compris les rafraîchissements de page et les retours ultérieurs) recharge simplement la conversation via la session AG-UI — aucun endpoint d'historique personnalisé requis.
 </Aside>
 </TabItem>
 </Tabs>
 
-Après ces modifications, votre serveur de développement local (http://localhost:4200/) devrait maintenant afficher votre jeu prêt à être joué.
+Une fois ces fichiers enregistrés, votre serveur de développement local (http://localhost:4200/) devrait maintenant afficher votre jeu prêt à être joué.
 
 <Drawer title="Construction et déploiement" trigger="Vous pouvez également construire & déployer votre code sur Cloudfront si vous préférez.">
 
-## Tâche 6 : Construire et déployer
+## Tâche 5 : Construire et déployer
 
 ### Construire votre code
 Pour construire votre code, exécutez la commande suivante :

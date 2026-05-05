@@ -23,30 +23,23 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 ## Nhiệm vụ 1: Triển khai Story Agent
 
-Story Agent là một agent [Strands](https://strandsagents.com/) mà khi được cung cấp một `Game` và danh sách các `Action` làm ngữ cảnh, sẽ phát triển câu chuyện. Chúng ta sẽ cấu hình agent để tương tác với Inventory MCP Server của chúng ta nhằm quản lý các vật phẩm khả dụng của người chơi.
+Story Agent là một agent [Strands](https://strandsagents.com/) được expose thông qua giao thức [AG-UI](https://ag-ui.com/). Mỗi phiên AG-UI (được xác định bởi `threadId`) ánh xạ tới một instance Agent tồn tại lâu dài trên server, do đó lịch sử hội thoại của agent được giữ trong bộ nhớ trong suốt vòng đời của phiên.
 
-:::note[Triển khai Python]
-Đối với hướng dẫn này, chúng ta sẽ triển khai Agent theo cách "không trạng thái", trong đó mỗi lần gọi là một phiên độc lập bao gồm toàn bộ lịch sử tin nhắn. Đối với môi trường sản xuất, hãy xem xét tích hợp với [Bedrock AgentCore Memory](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/memory.html). Để biết thêm thông tin, tham khảo trang [sử dụng AgentCore Memory với Strands](https://github.com/aws/bedrock-agentcore-sdk-python/tree/main/src/bedrock_agentcore/memory/integrations/strands).
-:::
+Chúng ta sẽ cập nhật system prompt của agent để chơi trò phiêu lưu hầm ngục, và xóa sample tool.
 
 ### Triển khai Agent
 
-Để triển khai agent của chúng ta, cập nhật các file sau trong `packages/story/dungeon_adventure_story/agent`:
+Cập nhật `packages/story/dungeon_adventure_story/agent/agent.py`:
 
-<Tabs>
-  <TabItem label="main.py">
-<E2EDiff lang="python" before="dungeon-adventure/3/main.py.old.template" after="dungeon-adventure/3/main.py.template" />
-  </TabItem>
-  <TabItem label="agent.py">
 <E2EDiff lang="python" before="dungeon-adventure/3/agent.py.old.template" after="dungeon-adventure/3/agent.py.template" />
-  </TabItem>
-</Tabs>
 
-Vì connection generator đã kết nối MCP client trong <Link path="get_started/tutorials/dungeon-game/1">Module 1</Link>, các thay đổi này tập trung vào:
+System prompt cho agent biết rằng tin nhắn đầu tiên sẽ có dạng `I am <player>, playing in the <genre> genre.` — UI của chúng ta gửi chính xác điều này làm tin nhắn người dùng mở đầu để agent có mọi thứ cần thiết để bắt đầu câu chuyện. Vì thư viện AG-UI tự động giữ lại lịch sử hội thoại của mỗi thread, chúng ta không cần truyền tên người chơi hoặc thể loại qua các lượt tiếp theo.
 
-- Xóa sample tool và các import không sử dụng,
-- Thêm các tham số `player_name` và `genre` vào hàm `get_agent`, và
-- Tùy chỉnh system prompt cho trò chơi dungeon adventure của chúng ta.
+Connection generator đã kết nối Inventory MCP client trong <Link path="get_started/tutorials/dungeon-game/1">Module 1</Link>, do đó agent có quyền truy cập vào các inventory tools.
+
+:::note[`main.py` ở đâu?]
+FastAPI wrapper của giao thức AG-UI xử lý việc chuyển đổi request/response cho chúng ta. File `main.py` mà generator tạo ra đã tạo wrapper xung quanh `get_agent(...)` — chúng ta không cần chạm vào nó.
+:::
 
 ## Nhiệm vụ 2: Triển khai và kiểm thử
 
@@ -94,29 +87,28 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
 
 Bạn có thể kiểm thử Agent của mình bằng một trong hai cách:
 <ul>
-<li>Khởi động một instance cục bộ của Agent server và gọi nó bằng `curl`, hoặc</li>
+<li>Khởi động một instance cục bộ của Agent server và trò chuyện với nó một cách tương tác bằng target `agent-chat`, hoặc</li>
 <li>Gọi API đã triển khai bằng curl với JWT token.</li>
 </ul>
 
 <Tabs>
   <TabItem label="Local">
-  Khởi động Agent server cục bộ của bạn bằng cách chạy lệnh sau:
-    <NxCommands highlights={['xxxx', 'region']} env={{RUNTIME_CONFIG_APP_ID:"xxxx", AWS_REGION: '<region>'}} commands={["agent-serve dungeon_adventure.story"]} />
+  Target `agent-chat` khởi động agent cục bộ (cùng với các dependencies của nó, thông qua `agent-serve-local`) và đưa bạn vào một prompt chat tương tác. Chạy:
 
-    <Aside type="caution" title="Sử dụng giá trị đầu ra CDK">
-    Sử dụng giá trị output `RuntimeConfigApplicationId` từ CDK deploy cho biến môi trường `RUNTIME_CONFIG_APP_ID`, và region AWS đã triển khai của bạn cho `AWS_REGION`.
-    </Aside>
+    <NxCommands commands={["agent-chat dungeon_adventure.story"]} />
 
     :::note[`agent-serve` vs `agent-serve-local`]
-    Target `agent-serve` khởi động agent cục bộ nhưng kết nối với MCP server **đã triển khai** của bạn (thông qua `RUNTIME_CONFIG_APP_ID`). Nếu bạn muốn chạy MCP server cục bộ, hãy sử dụng `agent-serve-local` thay thế, target này sẽ khởi động tất cả các dịch vụ phụ thuộc và đặt `SERVE_LOCAL=true` cho các kết nối HTTP trực tiếp.
+    Nếu bạn muốn trò chuyện với agent đối với MCP server **đã triển khai** của bạn thay vì server cục bộ, hãy khởi động server trực tiếp với `agent-serve` và truyền `RUNTIME_CONFIG_APP_ID` / `AWS_REGION`:
+
+    <NxCommands highlights={['xxxx', 'region']} env={{RUNTIME_CONFIG_APP_ID:"xxxx", AWS_REGION: '<region>'}} commands={["agent-serve dungeon_adventure.story"]} />
+
+    sau đó trong một shell khác chạy `agent-chat-cli agui http://localhost:8081/invocations`.
     :::
 
-    Khi Agent server đã chạy (bạn sẽ không thấy bất kỳ output nào), gọi nó bằng cách chạy lệnh sau:
+    Khi được nhắc, hãy thử bắt đầu trò chơi với một câu như:
 
-    ```bash
-    curl -N -X POST http://127.0.0.1:8081/invocations \
-      -d '{"genre":"superhero", "actions":[], "playerName":"UnnamedHero"}' \
-      -H "Content-Type: application/json"
+    ```
+    I am Aria, playing in the medieval genre.
     ```
   </TabItem>
   <TabItem label="Deployed">
@@ -163,7 +155,7 @@ Bạn có thể kiểm thử Agent của mình bằng một trong hai cách:
       --output text)
     ```
 
-    Gọi agent đã triển khai bằng URL runtime của Bedrock AgentCore:
+    Gọi agent đã triển khai bằng URL runtime của Bedrock AgentCore. Giao thức AG-UI mong đợi một payload `RunAgentInput` — một payload tối thiểu gửi tin nhắn người dùng mở đầu trông như sau:
 
     ```bash
     # Đặt Story Agent ARN từ CDK outputs
@@ -179,8 +171,14 @@ Bạn có thể kiểm thử Agent của mình bằng một trong hai cách:
     curl -N -X POST "$AGENT_URL" \
       -H "authorization: Bearer $BEARER_TOKEN" \
       -H "Content-Type: application/json" \
+      -H "Accept: text/event-stream" \
       -H "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id: abcdefghijklmnopqrstuvwxyz-123456789" \
-      -d '{"genre":"superhero", "actions":[], "playerName":"UnnamedHero"}'
+      -d '{
+        "threadId": "abcdefghijklmnopqrstuvwxyz-123456789",
+        "runId": "run-1",
+        "messages": [{"id": "m1", "role": "user", "content": "I am UnnamedHero, playing in the superhero genre."}],
+        "tools": [], "context": [], "forwardedProps": {}, "state": {}
+      }'
     ```
 
     :::note[URL Encoding]
@@ -189,12 +187,6 @@ Bạn có thể kiểm thử Agent của mình bằng một trong hai cách:
   </TabItem>
 </Tabs>
 
-Nếu lệnh chạy thành công, bạn sẽ bắt đầu thấy văn bản câu chuyện ban đầu được streaming dưới dạng JSON Lines:
-
-```
-{"content":"You are "}
-{"content":"a new superhero "}
-{"content":"in the bustling metropolis of Metro City..."}
-```
+Nếu lệnh chạy thành công, bạn sẽ bắt đầu thấy các AG-UI Server-Sent Events được streaming trở lại — các event `TEXT_MESSAGE_CONTENT` mang văn bản câu chuyện từng phần một.
 
 Chúc mừng. Bạn đã xây dựng và triển khai Strands Agent đầu tiên của mình trên Bedrock AgentCore Runtime!  🎉🎉🎉
