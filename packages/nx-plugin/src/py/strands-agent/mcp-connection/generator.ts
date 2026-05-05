@@ -24,8 +24,6 @@ import {
   addDependenciesToPyProjectToml,
   addWorkspaceDependencyToPyProject,
 } from '../../../utils/py';
-import { updateToml } from '../../../utils/toml';
-import type { UVPyprojectToml } from '../../../utils/nxlv-python';
 import {
   ensurePythonAgentConnectionProject,
   addPythonCoreClient,
@@ -160,14 +158,11 @@ export const pyStrandsAgentMcpConnectionGenerator = async (
       clientVarName,
     );
 
-    // The MCPClient from strands-sdk has an __exit__ signature that does not
-    // match the context-manager protocol, which ty flags as invalid-context-manager.
-    // Scope a ty override to agent.py so this doesn't fail typecheck.
-    suppressInvalidContextManagerForAgentFile(
-      tree,
-      sourceProject.root,
-      agentFilePath,
-    );
+    // strands-sdk's MCPClient has a non-standard __exit__ signature, which ty
+    // flags as invalid-context-manager on the generated `with (client,):`
+    // block. Add a file-level suppression to agent.py so the rule is silenced
+    // only for this file (and only for this specific rule).
+    suppressInvalidContextManagerInAgentFile(tree, agentFilePath);
   }
 
   // 4. Add workspace dependency from agent project to agent-connection project
@@ -204,46 +199,22 @@ export const pyStrandsAgentMcpConnectionGenerator = async (
   };
 };
 
+const TY_AGENT_SUPPRESSION = '# ty: ignore[invalid-context-manager]';
+
 /**
- * Add a ty override to the project's pyproject.toml that silences the
- * `invalid-context-manager` rule for the agent file, where strands-sdk's
- * MCPClient is used in a `with` block despite its typing mismatch.
+ * Prepend a file-level `# ty: ignore[invalid-context-manager]` comment to
+ * agent.py (idempotent). ty's file-level suppression must appear on its own
+ * line before any Python code, so emit it as the first line of the file.
  */
-const suppressInvalidContextManagerForAgentFile = (
+const suppressInvalidContextManagerInAgentFile = (
   tree: Tree,
-  projectRoot: string,
   agentFilePath: string,
 ): void => {
-  const includePath = agentFilePath.startsWith(projectRoot + '/')
-    ? agentFilePath.slice(projectRoot.length + 1)
-    : agentFilePath;
-  const pyprojectPath = joinPathFragments(projectRoot, 'pyproject.toml');
-  if (!tree.exists(pyprojectPath)) {
+  const content = tree.read(agentFilePath, 'utf-8') ?? '';
+  if (content.startsWith(TY_AGENT_SUPPRESSION)) {
     return;
   }
-  updateToml(tree, pyprojectPath, (toml: UVPyprojectToml) => {
-    const tool = (toml.tool ??= {} as NonNullable<UVPyprojectToml['tool']>);
-    const ty = ((tool as any).ty ??= {});
-    const overrides: Array<{
-      include?: string[];
-      rules?: Record<string, string>;
-    }> = (ty.overrides ??= []);
-    const existing = overrides.find(
-      (o) => o.include?.length === 1 && o.include[0] === includePath,
-    );
-    if (existing) {
-      existing.rules = {
-        ...(existing.rules ?? {}),
-        'invalid-context-manager': 'ignore',
-      };
-    } else {
-      overrides.push({
-        include: [includePath],
-        rules: { 'invalid-context-manager': 'ignore' },
-      });
-    }
-    return toml;
-  });
+  tree.write(agentFilePath, `${TY_AGENT_SUPPRESSION}\n\n${content}`);
 };
 
 /**

@@ -252,7 +252,7 @@ dependencies = ["strands-agents"]
     expect(pyprojectContent).toContain('proj.agent_connection');
   });
 
-  it('should add a ty override suppressing invalid-context-manager on agent.py', async () => {
+  it('should prepend a file-level ty suppression for invalid-context-manager to agent.py', async () => {
     setupProjects();
 
     await pyStrandsAgentMcpConnectionGenerator(tree, {
@@ -274,19 +274,17 @@ dependencies = ["strands-agents"]
       },
     });
 
-    const pyprojectContent = tree.read(
-      'packages/my-agent/pyproject.toml',
+    const agentContent = tree.read(
+      'packages/my-agent/my_scope_my_agent/agent/agent.py',
       'utf-8',
     )!;
 
-    expect(pyprojectContent).toContain('[[tool.ty.overrides]]');
-    expect(pyprojectContent).toContain(
-      'include = [ "my_scope_my_agent/agent/agent.py" ]',
-    );
-    expect(pyprojectContent).toContain('invalid-context-manager = "ignore"');
+    expect(
+      agentContent.startsWith('# ty: ignore[invalid-context-manager]\n'),
+    ).toBe(true);
   });
 
-  it('should not duplicate the ty override across multiple MCP connections', async () => {
+  it('should not duplicate the ty suppression across multiple MCP connections', async () => {
     setupProjects();
 
     await pyStrandsAgentMcpConnectionGenerator(tree, {
@@ -326,14 +324,14 @@ dependencies = ["strands-agents"]
       },
     });
 
-    const pyprojectContent = tree.read(
-      'packages/my-agent/pyproject.toml',
+    const agentContent = tree.read(
+      'packages/my-agent/my_scope_my_agent/agent/agent.py',
       'utf-8',
     )!;
-    const overrideMatches = pyprojectContent.match(
-      /\[\[tool\.ty\.overrides\]\]/g,
+    const suppressionMatches = agentContent.match(
+      /# ty: ignore\[invalid-context-manager\]/g,
     );
-    expect(overrideMatches).toHaveLength(1);
+    expect(suppressionMatches).toHaveLength(1);
   });
 
   it('should update serve-local target with MCP dependency', async () => {
