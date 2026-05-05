@@ -3,7 +3,7 @@ title: "ランタイム設定"
 description: "AWS AppConfigを使用して生成されたプロジェクトを接続するランタイム設定の仕組み"
 ---
 
-import { Tabs, TabItem } from '@astrojs/starlight/components';
+import { Tabs, TabItem, Steps } from '@astrojs/starlight/components';
 import Infrastructure from '@components/infrastructure.astro';
 import Link from '@components/link.astro';
 
@@ -94,46 +94,66 @@ synth/デプロイ時に、`RuntimeConfig`は以下を含む**AWS AppConfig**ア
 - `default`環境への即時**デプロイメント**
 </Fragment>
 <Fragment slot="terraform">
-`runtime-config/entry`モジュールを使用して名前空間にキーを書き込みます:
+Terraformは3つの`core/runtime-config/*`モジュールを通じてランタイム設定を接続します。ルートモジュールで以下の順序で宣言してください:
 
-```hcl title="packages/infra/src/main.tf"
-# Writes to the 'connection' namespace (done automatically by generated modules)
-module "add_api_url" {
-  source = "../../common/terraform/src/core/runtime-config/entry"
+<Steps>
 
-  namespace = "connection"
-  key       = "apis"
-  value     = { "MyApi" = module.my_api.api_url }
-}
+1. **`core/runtime-config/appconfig`** — ルートモジュールの上部付近で一度宣言します。AppConfigアプリケーション、環境、デプロイメント戦略、および名前空間ごとに1つの設定プロファイルを作成します。その`application_id`と`application_arn`出力は、実行時にランタイム設定を読み取るすべてのモジュール(エージェント、MCPサーバー、Lambda関数など)に渡されます。
 
-# Custom namespace for server-side configuration
-module "add_table_config" {
-  source = "../../common/terraform/src/core/runtime-config/entry"
+   ```hcl title="packages/infra/src/main.tf"
+   module "runtime_config_appconfig" {
+     source = "../../common/terraform/src/core/runtime-config/appconfig"
 
-  namespace = "tables"
-  key       = "users"
-  value     = {
-    tableName = aws_dynamodb_table.users.name
-    arn       = aws_dynamodb_table.users.arn
-  }
-}
-```
+     application_name = "my-app-runtime-config"
+   }
+   ```
 
-次に、`runtime-config/appconfig`モジュールを宣言して、すべての名前空間ファイルからAppConfigリソースを作成する必要があります:
+2. **`core/runtime-config/entry`** — 貢献ごとに1回の呼び出し。生成されたAPI、エージェント、MCPモジュールは、URLとARNを公開するために内部的にこれを呼び出します。カスタム設定を公開するには直接呼び出します。
 
-```hcl
-module "appconfig" {
-  source = "../../common/terraform/src/core/runtime-config/appconfig"
+   ```hcl title="packages/infra/src/main.tf"
+   # Automatic — done inside generated modules
+   module "add_api_url" {
+     source = "../../common/terraform/src/core/runtime-config/entry"
 
-  application_name = "my-app-runtime-config"
+     namespace = "connection"
+     key       = "apis"
+     value     = { "MyApi" = module.my_api.api_url }
+   }
 
-  depends_on = [module.add_api_url, module.add_table_config]
-}
-```
+   # Custom namespace for server-side configuration
+   module "add_table_config" {
+     source = "../../common/terraform/src/core/runtime-config/entry"
 
-:::note[自動登録]
-生成された各コンストラクト(API、エージェント)は、独自の自己完結型の`appconfig`モジュールインスタンスを作成します。これらはすべて同一で、同じ名前空間ファイルのセットを読み取り、同じAppConfigアプリケーションを生成します。これにより、各モジュールが独立してデプロイ可能になります。
-:::
+     namespace = "tables"
+     key       = "users"
+     value     = {
+       tableName = aws_dynamodb_table.users.name
+       arn       = aws_dynamodb_table.users.arn
+     }
+   }
+   ```
+
+3. **`core/runtime-config/appconfig-deployment`** — ルートモジュールの最後に一度宣言し、エントリを貢献するすべてのモジュールをカバーする`depends_on`を指定します。貢献されたエントリを名前空間ごとに1つのJSONに集約し、共有アプリケーションに対してホスト型設定バージョン + デプロイメントを作成します。
+
+   ```hcl title="packages/infra/src/main.tf"
+   module "runtime_config_appconfig_deployment" {
+     source = "../../common/terraform/src/core/runtime-config/appconfig-deployment"
+
+     application_id            = module.runtime_config_appconfig.application_id
+     environment_id            = module.runtime_config_appconfig.environment_id
+     deployment_strategy_id    = module.runtime_config_appconfig.deployment_strategy_id
+     configuration_profile_ids = module.runtime_config_appconfig.configuration_profile_ids
+     namespaces                = module.runtime_config_appconfig.namespaces
+
+     depends_on = [
+       module.my_api,
+       module.add_table_config,
+       # ...every module that contributes an entry
+     ]
+   }
+   ```
+
+</Steps>
 </Fragment>
 </Infrastructure>
 
@@ -168,20 +188,15 @@ rc.grantReadAppConfig(myFunction);
 :::
 </Fragment>
 <Fragment slot="terraform">
-`appconfig`モジュールの`application_id`出力を参照してAppConfigアプリケーションIDを取得し、適切なIAMポリシーステートメントを追加します:
+共有`runtime_config_appconfig`モジュールの`application_id`出力を参照してAppConfigアプリケーションIDを取得し、適切なIAMポリシーステートメントを追加します:
 
 ```hcl title="packages/infra/src/main.tf"
-module "appconfig" {
-  source = "../../common/terraform/src/core/runtime-config/appconfig"
-  application_name = "my-app-runtime-config"
-}
-
 # Pass the AppConfig Application ID as an environment variable
 resource "aws_lambda_function" "my_function" {
   # ...
   environment {
     variables = {
-      RUNTIME_CONFIG_APP_ID = module.appconfig.application_id
+      RUNTIME_CONFIG_APP_ID = module.runtime_config_appconfig.application_id
     }
   }
 }
@@ -197,14 +212,14 @@ resource "aws_iam_policy" "appconfig_read" {
         "appconfig:StartConfigurationSession",
         "appconfig:GetLatestConfiguration"
       ]
-      Resource = ["${module.appconfig.application_arn}/*"]
+      Resource = ["${module.runtime_config_appconfig.application_arn}/*"]
     }]
   })
 }
 ```
 
 :::note[自動登録]
-生成されたAPIおよびエージェントモジュールはこれを自動的に処理します。各モジュールは独自の`appconfig`モジュールインスタンスを作成し、環境変数とIAMアクセス許可を接続します。カスタムLambda関数やコンピューティングリソースの場合にのみ、手動で行う必要があります。
+生成されたエージェントおよびMCPモジュールは`appconfig_application_id` + `appconfig_application_arn`入力を受け入れます。共有`runtime_config_appconfig`出力を渡すと、環境変数とIAMアクセス許可が自動的に接続されます。カスタムLambda関数やコンピューティングリソースの場合にのみ、手動で行う必要があります。
 :::
 </Fragment>
 </Infrastructure>

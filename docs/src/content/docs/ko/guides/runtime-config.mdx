@@ -3,7 +3,7 @@ title: "런타임 구성"
 description: "AWS AppConfig를 사용하여 생성된 프로젝트를 연결하는 런타임 구성 방법"
 ---
 
-import { Tabs, TabItem } from '@astrojs/starlight/components';
+import { Tabs, TabItem, Steps } from '@astrojs/starlight/components';
 import Infrastructure from '@components/infrastructure.astro';
 import Link from '@components/link.astro';
 
@@ -94,46 +94,66 @@ synth/배포 시점에 `RuntimeConfig`는 다음을 포함하는 **AWS AppConfig
 - `default` 환경으로의 즉시 **Deployment**
 </Fragment>
 <Fragment slot="terraform">
-`runtime-config/entry` 모듈을 사용하여 네임스페이스에 키를 작성합니다:
+Terraform은 세 개의 `core/runtime-config/*` 모듈을 통해 런타임 구성을 연결합니다. 루트 모듈에서 다음 순서로 선언하세요:
 
-```hcl title="packages/infra/src/main.tf"
-# Writes to the 'connection' namespace (done automatically by generated modules)
-module "add_api_url" {
-  source = "../../common/terraform/src/core/runtime-config/entry"
+<Steps>
 
-  namespace = "connection"
-  key       = "apis"
-  value     = { "MyApi" = module.my_api.api_url }
-}
+1. **`core/runtime-config/appconfig`** — 루트 모듈의 상단 근처에 한 번 선언합니다. AppConfig 애플리케이션, 환경, 배포 전략 및 네임스페이스당 하나의 구성 프로필을 생성합니다. 이 모듈의 `application_id` 및 `application_arn` 출력은 런타임에 런타임 구성을 읽는 모든 모듈(에이전트, MCP 서버, Lambda 함수 등)에 전달됩니다.
 
-# Custom namespace for server-side configuration
-module "add_table_config" {
-  source = "../../common/terraform/src/core/runtime-config/entry"
+   ```hcl title="packages/infra/src/main.tf"
+   module "runtime_config_appconfig" {
+     source = "../../common/terraform/src/core/runtime-config/appconfig"
 
-  namespace = "tables"
-  key       = "users"
-  value     = {
-    tableName = aws_dynamodb_table.users.name
-    arn       = aws_dynamodb_table.users.arn
-  }
-}
-```
+     application_name = "my-app-runtime-config"
+   }
+   ```
 
-그런 다음 모든 네임스페이스 파일에서 AppConfig 리소스를 생성하기 위해 `runtime-config/appconfig` 모듈을 선언해야 합니다:
+2. **`core/runtime-config/entry`** — 기여당 한 번 호출합니다. 생성된 API, 에이전트 및 MCP 모듈은 내부적으로 이를 호출하여 URL과 ARN을 게시합니다. 사용자 정의 구성을 게시하려면 직접 호출하세요.
 
-```hcl
-module "appconfig" {
-  source = "../../common/terraform/src/core/runtime-config/appconfig"
+   ```hcl title="packages/infra/src/main.tf"
+   # Automatic — done inside generated modules
+   module "add_api_url" {
+     source = "../../common/terraform/src/core/runtime-config/entry"
 
-  application_name = "my-app-runtime-config"
+     namespace = "connection"
+     key       = "apis"
+     value     = { "MyApi" = module.my_api.api_url }
+   }
 
-  depends_on = [module.add_api_url, module.add_table_config]
-}
-```
+   # Custom namespace for server-side configuration
+   module "add_table_config" {
+     source = "../../common/terraform/src/core/runtime-config/entry"
 
-:::note[자동 등록]
-생성된 각 구성 요소(API, 에이전트)는 자체 독립형 `appconfig` 모듈 인스턴스를 생성합니다. 이들은 모두 동일하며 — 각각 동일한 네임스페이스 파일 세트를 읽고 동일한 AppConfig 애플리케이션을 생성합니다. 이를 통해 각 모듈을 독립적으로 배포할 수 있습니다.
-:::
+     namespace = "tables"
+     key       = "users"
+     value     = {
+       tableName = aws_dynamodb_table.users.name
+       arn       = aws_dynamodb_table.users.arn
+     }
+   }
+   ```
+
+3. **`core/runtime-config/appconfig-deployment`** — 루트 모듈의 끝에 한 번 선언하며, 항목을 기여하는 모든 모듈을 포함하는 `depends_on`을 사용합니다. 기여된 항목을 네임스페이스당 하나의 JSON으로 집계하고 공유 애플리케이션에 대해 호스팅된 구성 버전 + 배포를 생성합니다.
+
+   ```hcl title="packages/infra/src/main.tf"
+   module "runtime_config_appconfig_deployment" {
+     source = "../../common/terraform/src/core/runtime-config/appconfig-deployment"
+
+     application_id            = module.runtime_config_appconfig.application_id
+     environment_id            = module.runtime_config_appconfig.environment_id
+     deployment_strategy_id    = module.runtime_config_appconfig.deployment_strategy_id
+     configuration_profile_ids = module.runtime_config_appconfig.configuration_profile_ids
+     namespaces                = module.runtime_config_appconfig.namespaces
+
+     depends_on = [
+       module.my_api,
+       module.add_table_config,
+       # ...every module that contributes an entry
+     ]
+   }
+   ```
+
+</Steps>
 </Fragment>
 </Infrastructure>
 
@@ -168,20 +188,15 @@ rc.grantReadAppConfig(myFunction);
 :::
 </Fragment>
 <Fragment slot="terraform">
-`appconfig` 모듈의 `application_id` 출력을 참조하여 AppConfig Application ID를 가져오고, 적절한 IAM 정책 문을 추가합니다:
+공유 `runtime_config_appconfig` 모듈의 `application_id` 출력을 참조하여 AppConfig Application ID를 가져오고, 적절한 IAM 정책 문을 추가합니다:
 
 ```hcl title="packages/infra/src/main.tf"
-module "appconfig" {
-  source = "../../common/terraform/src/core/runtime-config/appconfig"
-  application_name = "my-app-runtime-config"
-}
-
 # Pass the AppConfig Application ID as an environment variable
 resource "aws_lambda_function" "my_function" {
   # ...
   environment {
     variables = {
-      RUNTIME_CONFIG_APP_ID = module.appconfig.application_id
+      RUNTIME_CONFIG_APP_ID = module.runtime_config_appconfig.application_id
     }
   }
 }
@@ -197,14 +212,14 @@ resource "aws_iam_policy" "appconfig_read" {
         "appconfig:StartConfigurationSession",
         "appconfig:GetLatestConfiguration"
       ]
-      Resource = ["${module.appconfig.application_arn}/*"]
+      Resource = ["${module.runtime_config_appconfig.application_arn}/*"]
     }]
   })
 }
 ```
 
 :::note[자동 등록]
-생성된 API 및 에이전트 모듈은 이를 자동으로 처리합니다 — 각각 자체 `appconfig` 모듈 인스턴스를 생성하고 환경 변수와 IAM 권한을 연결합니다. 사용자 정의 Lambda 함수나 컴퓨팅 리소스에 대해서만 수동으로 수행하면 됩니다.
+생성된 에이전트 및 MCP 모듈은 `appconfig_application_id` + `appconfig_application_arn` 입력을 받습니다 — 공유 `runtime_config_appconfig` 출력을 전달하면 환경 변수와 IAM 권한을 자동으로 연결합니다. 사용자 정의 Lambda 함수나 컴퓨팅 리소스에 대해서만 수동으로 수행하면 됩니다.
 :::
 </Fragment>
 </Infrastructure>

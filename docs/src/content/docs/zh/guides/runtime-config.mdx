@@ -3,7 +3,7 @@ title: "运行时配置"
 description: "运行时配置如何使用 AWS AppConfig 连接您生成的项目"
 ---
 
-import { Tabs, TabItem } from '@astrojs/starlight/components';
+import { Tabs, TabItem, Steps } from '@astrojs/starlight/components';
 import Infrastructure from '@components/infrastructure.astro';
 import Link from '@components/link.astro';
 
@@ -94,46 +94,66 @@ rc.set('tables', 'users', {
 - 到 `default` 环境的即时 **Deployment**
 </Fragment>
 <Fragment slot="terraform">
-使用 `runtime-config/entry` 模块将键写入命名空间:
+Terraform 通过三个 `core/runtime-config/*` 模块连接运行时配置。在根模块中按以下顺序声明它们:
 
-```hcl title="packages/infra/src/main.tf"
-# Writes to the 'connection' namespace (done automatically by generated modules)
-module "add_api_url" {
-  source = "../../common/terraform/src/core/runtime-config/entry"
+<Steps>
 
-  namespace = "connection"
-  key       = "apis"
-  value     = { "MyApi" = module.my_api.api_url }
-}
+1. **`core/runtime-config/appconfig`** — 声明一次,位于根模块顶部附近。创建 AppConfig 应用程序、环境、部署策略以及每个命名空间的一个配置文件。其 `application_id` 和 `application_arn` 输出会传递到每个在运行时读取运行时配置的模块(agent、MCP 服务器、Lambda 函数等)。
 
-# Custom namespace for server-side configuration
-module "add_table_config" {
-  source = "../../common/terraform/src/core/runtime-config/entry"
+   ```hcl title="packages/infra/src/main.tf"
+   module "runtime_config_appconfig" {
+     source = "../../common/terraform/src/core/runtime-config/appconfig"
 
-  namespace = "tables"
-  key       = "users"
-  value     = {
-    tableName = aws_dynamodb_table.users.name
-    arn       = aws_dynamodb_table.users.arn
-  }
-}
-```
+     application_name = "my-app-runtime-config"
+   }
+   ```
 
-然后您必须声明 `runtime-config/appconfig` 模块,以从所有命名空间文件创建 AppConfig 资源:
+2. **`core/runtime-config/entry`** — 每个贡献调用一次。生成的 API、agent 和 MCP 模块在内部调用此模块以发布其 URL 和 ARN。直接调用它以发布自定义配置。
 
-```hcl
-module "appconfig" {
-  source = "../../common/terraform/src/core/runtime-config/appconfig"
+   ```hcl title="packages/infra/src/main.tf"
+   # Automatic — done inside generated modules
+   module "add_api_url" {
+     source = "../../common/terraform/src/core/runtime-config/entry"
 
-  application_name = "my-app-runtime-config"
+     namespace = "connection"
+     key       = "apis"
+     value     = { "MyApi" = module.my_api.api_url }
+   }
 
-  depends_on = [module.add_api_url, module.add_table_config]
-}
-```
+   # Custom namespace for server-side configuration
+   module "add_table_config" {
+     source = "../../common/terraform/src/core/runtime-config/entry"
 
-:::note[自动注册]
-每个生成的构造(API、agent)都会创建自己独立的 `appconfig` 模块实例。它们都是相同的——每个都读取相同的命名空间文件集并生成相同的 AppConfig 应用程序。这确保了每个模块都可以独立部署。
-:::
+     namespace = "tables"
+     key       = "users"
+     value     = {
+       tableName = aws_dynamodb_table.users.name
+       arn       = aws_dynamodb_table.users.arn
+     }
+   }
+   ```
+
+3. **`core/runtime-config/appconfig-deployment`** — 声明一次,位于根模块末尾,使用 `depends_on` 覆盖每个贡献条目的模块。将贡献的条目聚合为每个命名空间一个 JSON,并针对共享应用程序创建托管配置版本 + 部署。
+
+   ```hcl title="packages/infra/src/main.tf"
+   module "runtime_config_appconfig_deployment" {
+     source = "../../common/terraform/src/core/runtime-config/appconfig-deployment"
+
+     application_id            = module.runtime_config_appconfig.application_id
+     environment_id            = module.runtime_config_appconfig.environment_id
+     deployment_strategy_id    = module.runtime_config_appconfig.deployment_strategy_id
+     configuration_profile_ids = module.runtime_config_appconfig.configuration_profile_ids
+     namespaces                = module.runtime_config_appconfig.namespaces
+
+     depends_on = [
+       module.my_api,
+       module.add_table_config,
+       # ...every module that contributes an entry
+     ]
+   }
+   ```
+
+</Steps>
 </Fragment>
 </Infrastructure>
 
@@ -168,20 +188,15 @@ rc.grantReadAppConfig(myFunction);
 :::
 </Fragment>
 <Fragment slot="terraform">
-引用 `appconfig` 模块的 `application_id` 输出以获取 AppConfig Application ID,并添加适当的 IAM 策略语句:
+引用共享的 `runtime_config_appconfig` 模块的 `application_id` 输出以获取 AppConfig Application ID,并添加适当的 IAM 策略语句:
 
 ```hcl title="packages/infra/src/main.tf"
-module "appconfig" {
-  source = "../../common/terraform/src/core/runtime-config/appconfig"
-  application_name = "my-app-runtime-config"
-}
-
 # Pass the AppConfig Application ID as an environment variable
 resource "aws_lambda_function" "my_function" {
   # ...
   environment {
     variables = {
-      RUNTIME_CONFIG_APP_ID = module.appconfig.application_id
+      RUNTIME_CONFIG_APP_ID = module.runtime_config_appconfig.application_id
     }
   }
 }
@@ -197,14 +212,14 @@ resource "aws_iam_policy" "appconfig_read" {
         "appconfig:StartConfigurationSession",
         "appconfig:GetLatestConfiguration"
       ]
-      Resource = ["${module.appconfig.application_arn}/*"]
+      Resource = ["${module.runtime_config_appconfig.application_arn}/*"]
     }]
   })
 }
 ```
 
 :::note[自动注册]
-生成的 API 和 agent 模块会自动处理这些——每个都会创建自己的 `appconfig` 模块实例并连接环境变量和 IAM 权限。仅当您需要为自定义 Lambda 函数或计算资源手动执行此操作时才需要。
+生成的 agent 和 MCP 模块接受 `appconfig_application_id` + `appconfig_application_arn` 输入——传递共享的 `runtime_config_appconfig` 输出,它们会为您连接环境变量和 IAM 权限。仅当您需要为自定义 Lambda 函数或计算资源手动执行此操作时才需要。
 :::
 </Fragment>
 </Infrastructure>

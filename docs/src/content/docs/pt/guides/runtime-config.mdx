@@ -3,7 +3,7 @@ title: "Configuração de Runtime"
 description: "Como a configuração de runtime conecta seus projetos gerados usando AWS AppConfig"
 ---
 
-import { Tabs, TabItem } from '@astrojs/starlight/components';
+import { Tabs, TabItem, Steps } from '@astrojs/starlight/components';
 import Infrastructure from '@components/infrastructure.astro';
 import Link from '@components/link.astro';
 
@@ -94,46 +94,66 @@ No momento de synth/deploy, `RuntimeConfig` cria uma aplicação **AWS AppConfig
 - Um **Deployment** instantâneo para o ambiente `default`
 </Fragment>
 <Fragment slot="terraform">
-Use o módulo `runtime-config/entry` para escrever uma chave em um namespace:
+O Terraform conecta a configuração de runtime através de três módulos `core/runtime-config/*`. Declare-os na seguinte ordem no seu módulo raiz:
 
-```hcl title="packages/infra/src/main.tf"
-# Writes to the 'connection' namespace (done automatically by generated modules)
-module "add_api_url" {
-  source = "../../common/terraform/src/core/runtime-config/entry"
+<Steps>
 
-  namespace = "connection"
-  key       = "apis"
-  value     = { "MyApi" = module.my_api.api_url }
-}
+1. **`core/runtime-config/appconfig`** — declarado uma vez, próximo ao topo do módulo raiz. Cria a aplicação AppConfig, ambiente, estratégia de implantação e um configuration profile por namespace. Suas saídas `application_id` e `application_arn` são passadas para cada módulo que lê a configuração de runtime em tempo de execução (agentes, servidores MCP, funções Lambda, etc.).
 
-# Custom namespace for server-side configuration
-module "add_table_config" {
-  source = "../../common/terraform/src/core/runtime-config/entry"
+   ```hcl title="packages/infra/src/main.tf"
+   module "runtime_config_appconfig" {
+     source = "../../common/terraform/src/core/runtime-config/appconfig"
 
-  namespace = "tables"
-  key       = "users"
-  value     = {
-    tableName = aws_dynamodb_table.users.name
-    arn       = aws_dynamodb_table.users.arn
-  }
-}
-```
+     application_name = "my-app-runtime-config"
+   }
+   ```
 
-Você deve então declarar o módulo `runtime-config/appconfig` para criar os recursos AppConfig a partir de todos os arquivos de namespace:
+2. **`core/runtime-config/entry`** — uma invocação por contribuição. Módulos gerados de API, agente e MCP chamam isso internamente para publicar suas URLs e ARNs. Chame-o diretamente para publicar configuração personalizada.
 
-```hcl
-module "appconfig" {
-  source = "../../common/terraform/src/core/runtime-config/appconfig"
+   ```hcl title="packages/infra/src/main.tf"
+   # Automatic — done inside generated modules
+   module "add_api_url" {
+     source = "../../common/terraform/src/core/runtime-config/entry"
 
-  application_name = "my-app-runtime-config"
+     namespace = "connection"
+     key       = "apis"
+     value     = { "MyApi" = module.my_api.api_url }
+   }
 
-  depends_on = [module.add_api_url, module.add_table_config]
-}
-```
+   # Custom namespace for server-side configuration
+   module "add_table_config" {
+     source = "../../common/terraform/src/core/runtime-config/entry"
 
-:::note[Registro automático]
-Cada construct gerado (APIs, agentes) cria sua própria instância de módulo `appconfig` autocontida. Todas são idênticas — cada uma lê o mesmo conjunto de arquivos de namespace e produz a mesma aplicação AppConfig. Isso garante que cada módulo seja implantável de forma independente.
-:::
+     namespace = "tables"
+     key       = "users"
+     value     = {
+       tableName = aws_dynamodb_table.users.name
+       arn       = aws_dynamodb_table.users.arn
+     }
+   }
+   ```
+
+3. **`core/runtime-config/appconfig-deployment`** — declarado uma vez, no final do módulo raiz, com `depends_on` cobrindo cada módulo que contribui com uma entrada. Agrega as entradas contribuídas em um JSON por namespace e cria a hosted configuration version + deployment contra a aplicação compartilhada.
+
+   ```hcl title="packages/infra/src/main.tf"
+   module "runtime_config_appconfig_deployment" {
+     source = "../../common/terraform/src/core/runtime-config/appconfig-deployment"
+
+     application_id            = module.runtime_config_appconfig.application_id
+     environment_id            = module.runtime_config_appconfig.environment_id
+     deployment_strategy_id    = module.runtime_config_appconfig.deployment_strategy_id
+     configuration_profile_ids = module.runtime_config_appconfig.configuration_profile_ids
+     namespaces                = module.runtime_config_appconfig.namespaces
+
+     depends_on = [
+       module.my_api,
+       module.add_table_config,
+       # ...every module that contributes an entry
+     ]
+   }
+   ```
+
+</Steps>
 </Fragment>
 </Infrastructure>
 
@@ -168,20 +188,15 @@ Os constructs de API e agente gerados fazem isso automaticamente — você só p
 :::
 </Fragment>
 <Fragment slot="terraform">
-Referencie a saída `application_id` do módulo `appconfig` para obter o AppConfig Application ID, e adicione as declarações de política IAM apropriadas:
+Referencie a saída `application_id` do módulo compartilhado `runtime_config_appconfig` para obter o AppConfig Application ID, e adicione as declarações de política IAM apropriadas:
 
 ```hcl title="packages/infra/src/main.tf"
-module "appconfig" {
-  source = "../../common/terraform/src/core/runtime-config/appconfig"
-  application_name = "my-app-runtime-config"
-}
-
 # Pass the AppConfig Application ID as an environment variable
 resource "aws_lambda_function" "my_function" {
   # ...
   environment {
     variables = {
-      RUNTIME_CONFIG_APP_ID = module.appconfig.application_id
+      RUNTIME_CONFIG_APP_ID = module.runtime_config_appconfig.application_id
     }
   }
 }
@@ -197,14 +212,14 @@ resource "aws_iam_policy" "appconfig_read" {
         "appconfig:StartConfigurationSession",
         "appconfig:GetLatestConfiguration"
       ]
-      Resource = ["${module.appconfig.application_arn}/*"]
+      Resource = ["${module.runtime_config_appconfig.application_arn}/*"]
     }]
   })
 }
 ```
 
 :::note[Registro automático]
-Os módulos de API e agente gerados lidam com isso automaticamente — cada um cria sua própria instância de módulo `appconfig` e conecta a variável de ambiente e as permissões IAM. Você só precisa fazer isso manualmente para funções Lambda personalizadas ou recursos de computação.
+Os módulos de agente e MCP gerados aceitam as entradas `appconfig_application_id` + `appconfig_application_arn` — passe as saídas do `runtime_config_appconfig` compartilhado e eles conectam a variável de ambiente e as permissões IAM para você. Você só precisa fazer isso manualmente para funções Lambda personalizadas ou recursos de computação.
 :::
 </Fragment>
 </Infrastructure>

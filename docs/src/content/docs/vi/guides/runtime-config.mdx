@@ -3,7 +3,7 @@ title: "Cấu Hình Runtime"
 description: "Cách cấu hình runtime kết nối các dự án được tạo của bạn bằng AWS AppConfig"
 ---
 
-import { Tabs, TabItem } from '@astrojs/starlight/components';
+import { Tabs, TabItem, Steps } from '@astrojs/starlight/components';
 import Infrastructure from '@components/infrastructure.astro';
 import Link from '@components/link.astro';
 
@@ -94,46 +94,66 @@ Tại thời điểm synth/deploy, `RuntimeConfig` tạo một ứng dụng **AW
 - Một **Deployment** tức thì đến môi trường `default`
 </Fragment>
 <Fragment slot="terraform">
-Sử dụng module `runtime-config/entry` để ghi một key vào namespace:
+Terraform kết nối cấu hình runtime qua ba modules `core/runtime-config/*`. Khai báo chúng theo thứ tự sau trong root module của bạn:
 
-```hcl title="packages/infra/src/main.tf"
-# Writes to the 'connection' namespace (done automatically by generated modules)
-module "add_api_url" {
-  source = "../../common/terraform/src/core/runtime-config/entry"
+<Steps>
 
-  namespace = "connection"
-  key       = "apis"
-  value     = { "MyApi" = module.my_api.api_url }
-}
+1. **`core/runtime-config/appconfig`** — khai báo một lần, gần đầu root module. Tạo ứng dụng AppConfig, environment, deployment strategy và một configuration profile cho mỗi namespace. Các outputs `application_id` và `application_arn` của nó được truyền vào mọi module đọc cấu hình runtime tại runtime (agents, MCP servers, Lambda functions, v.v.).
 
-# Custom namespace for server-side configuration
-module "add_table_config" {
-  source = "../../common/terraform/src/core/runtime-config/entry"
+   ```hcl title="packages/infra/src/main.tf"
+   module "runtime_config_appconfig" {
+     source = "../../common/terraform/src/core/runtime-config/appconfig"
 
-  namespace = "tables"
-  key       = "users"
-  value     = {
-    tableName = aws_dynamodb_table.users.name
-    arn       = aws_dynamodb_table.users.arn
-  }
-}
-```
+     application_name = "my-app-runtime-config"
+   }
+   ```
 
-Sau đó bạn phải khai báo module `runtime-config/appconfig` để tạo các tài nguyên AppConfig từ tất cả các tệp namespace:
+2. **`core/runtime-config/entry`** — một lần gọi cho mỗi đóng góp. Các modules API, agent và MCP được tạo gọi nó nội bộ để xuất bản URLs và ARNs của chúng. Gọi trực tiếp để xuất bản cấu hình tùy chỉnh.
 
-```hcl
-module "appconfig" {
-  source = "../../common/terraform/src/core/runtime-config/appconfig"
+   ```hcl title="packages/infra/src/main.tf"
+   # Automatic — done inside generated modules
+   module "add_api_url" {
+     source = "../../common/terraform/src/core/runtime-config/entry"
 
-  application_name = "my-app-runtime-config"
+     namespace = "connection"
+     key       = "apis"
+     value     = { "MyApi" = module.my_api.api_url }
+   }
 
-  depends_on = [module.add_api_url, module.add_table_config]
-}
-```
+   # Custom namespace for server-side configuration
+   module "add_table_config" {
+     source = "../../common/terraform/src/core/runtime-config/entry"
 
-:::note[Đăng ký tự động]
-Mỗi construct được tạo (APIs, agents) tạo instance module `appconfig` độc lập của riêng nó. Chúng đều giống hệt nhau — mỗi cái đọc cùng một tập hợp các tệp namespace và tạo ra cùng một ứng dụng AppConfig. Điều này đảm bảo mỗi module có thể triển khai độc lập.
-:::
+     namespace = "tables"
+     key       = "users"
+     value     = {
+       tableName = aws_dynamodb_table.users.name
+       arn       = aws_dynamodb_table.users.arn
+     }
+   }
+   ```
+
+3. **`core/runtime-config/appconfig-deployment`** — khai báo một lần, ở cuối root module, với `depends_on` bao gồm mọi module đóng góp một entry. Tổng hợp các entries đã đóng góp thành một JSON cho mỗi namespace và tạo hosted configuration version + deployment đối với ứng dụng được chia sẻ.
+
+   ```hcl title="packages/infra/src/main.tf"
+   module "runtime_config_appconfig_deployment" {
+     source = "../../common/terraform/src/core/runtime-config/appconfig-deployment"
+
+     application_id            = module.runtime_config_appconfig.application_id
+     environment_id            = module.runtime_config_appconfig.environment_id
+     deployment_strategy_id    = module.runtime_config_appconfig.deployment_strategy_id
+     configuration_profile_ids = module.runtime_config_appconfig.configuration_profile_ids
+     namespaces                = module.runtime_config_appconfig.namespaces
+
+     depends_on = [
+       module.my_api,
+       module.add_table_config,
+       # ...every module that contributes an entry
+     ]
+   }
+   ```
+
+</Steps>
 </Fragment>
 </Infrastructure>
 
@@ -168,20 +188,15 @@ Các API và agent constructs được tạo làm điều này tự động — 
 :::
 </Fragment>
 <Fragment slot="terraform">
-Tham chiếu output `application_id` của module `appconfig` để lấy AppConfig Application ID, và thêm các câu lệnh IAM policy phù hợp:
+Tham chiếu output `application_id` của module `runtime_config_appconfig` được chia sẻ để lấy AppConfig Application ID, và thêm các câu lệnh IAM policy phù hợp:
 
 ```hcl title="packages/infra/src/main.tf"
-module "appconfig" {
-  source = "../../common/terraform/src/core/runtime-config/appconfig"
-  application_name = "my-app-runtime-config"
-}
-
 # Pass the AppConfig Application ID as an environment variable
 resource "aws_lambda_function" "my_function" {
   # ...
   environment {
     variables = {
-      RUNTIME_CONFIG_APP_ID = module.appconfig.application_id
+      RUNTIME_CONFIG_APP_ID = module.runtime_config_appconfig.application_id
     }
   }
 }
@@ -197,14 +212,14 @@ resource "aws_iam_policy" "appconfig_read" {
         "appconfig:StartConfigurationSession",
         "appconfig:GetLatestConfiguration"
       ]
-      Resource = ["${module.appconfig.application_arn}/*"]
+      Resource = ["${module.runtime_config_appconfig.application_arn}/*"]
     }]
   })
 }
 ```
 
 :::note[Đăng ký tự động]
-Các API và agent modules được tạo xử lý điều này tự động — mỗi cái tạo instance module `appconfig` của riêng nó và thiết lập biến môi trường và quyền IAM. Bạn chỉ cần làm thủ công cho các Lambda functions hoặc tài nguyên tính toán tùy chỉnh.
+Các agent và MCP modules được tạo chấp nhận các inputs `appconfig_application_id` + `appconfig_application_arn` — truyền các outputs `runtime_config_appconfig` được chia sẻ và chúng sẽ thiết lập biến môi trường và quyền IAM cho bạn. Bạn chỉ cần làm thủ công cho các Lambda functions hoặc tài nguyên tính toán tùy chỉnh.
 :::
 </Fragment>
 </Infrastructure>
