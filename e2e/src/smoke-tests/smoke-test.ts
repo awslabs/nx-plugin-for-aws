@@ -287,7 +287,7 @@ export const smokeTest = (
     // Corepack activation on Windows + rmSync of a previous run's
     // node_modules tree can easily blow past Vitest's 10s default hook
     // timeout.
-    beforeEach({ timeout: 120_000 }, () => {
+    beforeEach(() => {
       teardown = options.setup?.();
       const targetDir = `${tmpProjPath()}/${variant}`;
       console.log(`Cleaning target directory ${targetDir}`);

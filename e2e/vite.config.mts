@@ -77,5 +77,6 @@ export default defineConfig({
       },
     },
     testTimeout: 60 * 60 * 1000, /// 60 mins for long running e2e tests (eg deploy)
+    hookTimeout: 2 * 60 * 1000, /// 2 mins — corepack activation + rmSync on Windows can be slow
   },
 });
