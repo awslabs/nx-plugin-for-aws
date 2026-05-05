@@ -113,44 +113,62 @@ export async function invokeAgentCoreAgent(
   const aws = await createAwsClient('bedrock-agentcore');
   console.log(`Testing ${agentName} with ARN ${arn}`);
 
-  const response = await aws.fetch(buildAgentCoreUrl(arn), {
-    method: 'POST',
-    body: JSON.stringify({ message }),
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id': AGENT_CORE_SESSION_ID,
-    },
-  });
+  // Retry on 424/429/5xx — these typically come from AgentCore cold starts
+  // where the runtime is still pulling the container image on first invoke.
+  const maxAttempts = 4;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const response = await aws.fetch(buildAgentCoreUrl(arn), {
+      method: 'POST',
+      body: JSON.stringify({ message }),
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id': AGENT_CORE_SESSION_ID,
+      },
+    });
 
-  const chunks: { content: string }[] = [];
-  let buffer = '';
-  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
-  while (reader) {
-    const { value, done } = await reader.read();
-    if (done) {
-      if (buffer.trim()) {
-        chunks.push(JSON.parse(buffer));
-      }
-      break;
+    if (response.status !== 200 && attempt < maxAttempts) {
+      const body = await response.text().catch(() => '');
+      console.log(
+        `${agentName} attempt ${attempt}/${maxAttempts} returned ${response.status}; retrying in 15s. Body: ${body.slice(0, 500)}`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 15_000));
+      continue;
     }
-    buffer += value;
-    const lines = buffer.split('\n');
-    buffer = lines.pop() ?? '';
-    for (const line of lines) {
-      if (line.trim()) {
-        const chunk = JSON.parse(line);
-        chunks.push(chunk);
-        console.log(chunk);
+
+    const chunks: { content: string }[] = [];
+    let buffer = '';
+    const reader = response.body
+      .pipeThrough(new TextDecoderStream())
+      .getReader();
+    while (reader) {
+      const { value, done } = await reader.read();
+      if (done) {
+        if (buffer.trim()) {
+          chunks.push(JSON.parse(buffer));
+        }
+        break;
+      }
+      buffer += value;
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        if (line.trim()) {
+          const chunk = JSON.parse(line);
+          chunks.push(chunk);
+          console.log(chunk);
+        }
       }
     }
+
+    console.log(`${agentName} response status:`, response.status);
+    expect(response.status).toBe(200);
+    expect(chunks.length).toBeGreaterThan(0);
+    expect(chunks.every((c) => typeof c.content === 'string')).toBe(true);
+    console.log(`Successfully invoked ${agentName}`);
+    return chunks.map((c) => c.content).join('');
   }
-
-  console.log(`${agentName} response status:`, response.status);
-  expect(response.status).toBe(200);
-  expect(chunks.length).toBeGreaterThan(0);
-  expect(chunks.every((c) => typeof c.content === 'string')).toBe(true);
-  console.log(`Successfully invoked ${agentName}`);
-  return chunks.map((c) => c.content).join('');
+  // Unreachable — the final attempt's expect() throws if it still fails.
+  throw new Error(`Exhausted retries invoking ${agentName}`);
 }
 
 export async function invokeTrpcAgentCoreAgent(
