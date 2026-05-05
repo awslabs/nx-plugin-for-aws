@@ -36,14 +36,11 @@ import { SYNC_GENERATOR_NAME as TS_SYNC_GENERATOR_NAME } from '../ts/sync/genera
 const WORKSPACES = ['packages/*'];
 const NX_TYPESCRIPT_SYNC_GENERATOR = '@nx/js:typescript-sync';
 
-// Built dependencies the generated workspace expects pnpm to run install
-// scripts for. `onlyBuiltDependencies` is the pnpm 10 key (silently ignored
-// by pnpm 11); pnpm 11 reads `allowBuilds` instead. We also emit a
-// `.pnpmfile.cjs` (see setUpWorkspaces below) that forces
-// `dangerouslyAllowAllBuilds` under pnpm 11 — without that hook, pnpm 11's
-// default `strictDepBuilds=true` will rewrite pnpm-workspace.yaml with
-// "set this to true or false" placeholders for any build dep a subsequent
-// generator pulls in and then hard-error out of the install.
+// Built dependencies whose install scripts the generated workspace trusts.
+// `onlyBuiltDependencies` is the pnpm 10 key (silently ignored by pnpm 11);
+// pnpm 11 reads `allowBuilds` instead. Any dep NOT in this allowlist will
+// have its install scripts skipped with a warning — matching pnpm 10's
+// default behaviour. The user can opt-in later via `pnpm approve-builds`.
 const PNPM_BUILT_DEPENDENCIES = ['@swc/core', 'esbuild', 'nx', 'sharp'];
 
 export const PRESET_GENERATOR_INFO: NxGeneratorInfo =
@@ -60,33 +57,6 @@ const setUpWorkspaces = (tree: Tree) => {
         ...PNPM_BUILT_DEPENDENCIES.map((dep) => `  '${dep}': true`),
         'onlyBuiltDependencies:',
         ...PNPM_BUILT_DEPENDENCIES.map((dep) => `  - '${dep}'`),
-        '',
-      ].join('\n'),
-    );
-    // A .pnpmfile.cjs hook that forces `dangerouslyAllowAllBuilds` on every
-    // pnpm install. The equivalent yaml entry gets scrubbed out of
-    // pnpm-workspace.yaml on subsequent installs (and Nx's generators
-    // sometimes rewrite the file via a different yaml serializer that
-    // doesn't round-trip unknown keys), so setting it via the config hook
-    // is the only place it survives reliably. The hook is a silent no-op
-    // under pnpm 10, which doesn't read the config.
-    tree.write(
-      '.pnpmfile.cjs',
-      [
-        '/**',
-        ' * Forces `dangerouslyAllowAllBuilds` for every pnpm 11 install so',
-        ' * dependencies with postinstall scripts (nx, esbuild, @swc/core,',
-        ' * sharp, etc.) do not cause `ERR_PNPM_IGNORED_BUILDS` when they are',
-        ' * introduced by a subsequent generator. Match pnpm 10 default',
-        ' * behaviour. No-op under pnpm 10.',
-        ' */',
-        'module.exports = {',
-        '  hooks: {',
-        '    updateConfig(config) {',
-        '      return Object.assign(config, { dangerouslyAllowAllBuilds: true });',
-        '    },',
-        '  },',
-        '};',
         '',
       ].join('\n'),
     );
