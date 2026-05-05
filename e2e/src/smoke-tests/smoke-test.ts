@@ -38,15 +38,17 @@ export const runSmokeTest = async (
         'pluginDir contents (depth 1):',
         require('fs').readdirSync(pluginDir).sort().join(' '),
       );
+      const pkg = `${pluginDir}/package.json`;
+      if (existsSync(pkg)) {
+        const pkgContent = readFileSync(pkg, 'utf-8');
+        console.log('package.json first 200 chars:', pkgContent.slice(0, 200));
+      }
       const gen = `${pluginDir}/generators.json`;
       console.log('generators.json exists:', existsSync(gen));
       if (existsSync(gen)) {
         const content = readFileSync(gen, 'utf-8');
         console.log('generators.json size:', content.length);
-        console.log(
-          'generators.json has "preset" key:',
-          content.includes('"preset":'),
-        );
+        console.log('generators.json first 300 chars:', content.slice(0, 300));
       }
     }
     console.log('=== end ===');
