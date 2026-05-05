@@ -77,7 +77,7 @@ describe('smoke test - dungeon-adventure', () => {
       opts,
     );
     await runCLI(
-      `generate @aws/nx-plugin:py#strands-agent --project=story --auth=Cognito --no-interactive`,
+      `generate @aws/nx-plugin:py#strands-agent --project=story --auth=Cognito --protocol=AG-UI --no-interactive`,
       opts,
     );
     await runCLI(
@@ -89,7 +89,7 @@ describe('smoke test - dungeon-adventure', () => {
       opts,
     );
     await runCLI(
-      `generate @aws/nx-plugin:ts#react-website --name=GameUI --no-interactive`,
+      `generate @aws/nx-plugin:ts#react-website --name=GameUI --uxProvider=Shadcn --no-interactive`,
       opts,
     );
     // No need to allow signup for the e2e tests
@@ -172,17 +172,6 @@ describe('smoke test - dungeon-adventure', () => {
         join(
           __dirname,
           '../files/dungeon-adventure/2/entities/index.ts.template',
-        ),
-        'utf-8',
-      ),
-    );
-
-    writeFileSync(
-      `${opts.cwd}/packages/game-api/src/procedures/actions.ts`,
-      readFileSync(
-        join(
-          __dirname,
-          '../files/dungeon-adventure/2/procedures/actions.ts.template',
         ),
         'utf-8',
       ),
@@ -300,23 +289,7 @@ describe('smoke test - dungeon-adventure', () => {
       { ...opts, prefixWithPackageManagerCmd: false },
     );
 
-    // TODO: consider deploy!
-
     // Module 3: Story Agent
-
-    // Check main.py matches main.py.old.template before modification
-    const mainPyPath = `${opts.cwd}/packages/story/dungeon_adventure_story/agent/main.py`;
-    expectFileMatchesOldTemplate(
-      mainPyPath,
-      join(__dirname, '../files/dungeon-adventure/3/main.py.old.template'),
-    );
-    writeFileSync(
-      mainPyPath,
-      readFileSync(
-        join(__dirname, '../files/dungeon-adventure/3/main.py.template'),
-        'utf-8',
-      ),
-    );
 
     // Check agent.py matches agent.py.old.template before modification
     const agentPyPath = `${opts.cwd}/packages/story/dungeon_adventure_story/agent/agent.py`;
@@ -344,37 +317,21 @@ describe('smoke test - dungeon-adventure', () => {
 
     // Module 4: UI
 
-    // Update the config.ts file
+    // Check config.ts matches the generator output before modification
+    const configPath = `${opts.cwd}/packages/game-ui/src/config.ts`;
+    expectFileMatchesOldTemplate(
+      configPath,
+      join(__dirname, '../files/dungeon-adventure/4/config.ts.old.template'),
+    );
     writeFileSync(
-      `${opts.cwd}/packages/game-ui/src/config.ts`,
+      configPath,
       readFileSync(
         join(__dirname, '../files/dungeon-adventure/4/config.ts.template'),
         'utf-8',
       ),
     );
 
-    // Update the AppLayout
-    writeFileSync(
-      `${opts.cwd}/packages/game-ui/src/components/AppLayout/index.tsx`,
-      readFileSync(
-        join(
-          __dirname,
-          '../files/dungeon-adventure/4/AppLayout/index.tsx.template',
-        ),
-        'utf-8',
-      ),
-    );
-
-    // Delete unused files
-    rmSync(
-      `${opts.cwd}/packages/game-ui/src/components/AppLayout/navitems.ts`,
-      { force: true },
-    );
-    rmSync(`${opts.cwd}/packages/game-ui/src/hooks/useAppLayout.tsx`, {
-      force: true,
-    });
-
-    // Update styles.css
+    // Update styles.css (shadcn globals import + dungeon theme)
     writeFileSync(
       `${opts.cwd}/packages/game-ui/src/styles.css`,
       readFileSync(
@@ -427,12 +384,6 @@ describe('smoke test - dungeon-adventure', () => {
         'utf-8',
       ),
     );
-
-    // Delete welcome route
-    rmSync(`${opts.cwd}/packages/game-ui/src/routes/welcome`, {
-      force: true,
-      recursive: true,
-    });
 
     await runCLI(`sync --verbose`, opts);
     await runCLI(`${buildPackageManagerShortCommand(pkgMgr, 'lint')}`, {

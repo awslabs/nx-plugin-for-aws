@@ -23,30 +23,23 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 ## Task 1: Implement the Story Agent
 
-The Story Agent is a [Strands](https://strandsagents.com/) agent which, given a `Game` and a list of `Action`s for context, will progress a story. We will configure the agent to interact with our Inventory MCP Server to manage a player's available items.
+The Story Agent is a [Strands](https://strandsagents.com/) agent exposed via the [AG-UI](https://ag-ui.com/) protocol. Each AG-UI session (identified by a `threadId`) maps to a long-lived Agent instance on the server, so the agent's conversation history is kept in memory for the life of the session.
 
-:::note[Python Implementation]
-For this tutorial, we will implement the Agent in a "stateless" fashion, where each invocation is an independent session including the full message history. For production, consider integrating with [Bedrock AgentCore Memory](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/memory.html). For more information, refer to the [using AgentCore Memory with Strands](https://github.com/aws/bedrock-agentcore-sdk-python/tree/main/src/bedrock_agentcore/memory/integrations/strands) page.
-:::
+We will update the agent's system prompt to play a dungeon adventure, and remove the sample tool.
 
 ### Agent implementation
 
-To implement our agent, update the following files in `packages/story/dungeon_adventure_story/agent`:
+Update `packages/story/dungeon_adventure_story/agent/agent.py`:
 
-<Tabs>
-  <TabItem label="main.py">
-<E2EDiff lang="python" before="dungeon-adventure/3/main.py.old.template" after="dungeon-adventure/3/main.py.template" />
-  </TabItem>
-  <TabItem label="agent.py">
 <E2EDiff lang="python" before="dungeon-adventure/3/agent.py.old.template" after="dungeon-adventure/3/agent.py.template" />
-  </TabItem>
-</Tabs>
 
-Since the connection generator already wired up the MCP client in <Link path="get_started/tutorials/dungeon-game/1">Module 1</Link>, these changes focus on:
+The system prompt tells the agent that the first message will be of the form `I am <player>, playing in the <genre> genre.` — our UI sends exactly this as the opening user message so the agent has everything it needs to start the story. Because the AG-UI library retains each thread's conversation history automatically, we don't need to thread player name or genre through on subsequent turns.
 
-- Removing the sample tool and unused imports,
-- Adding the `player_name` and `genre` parameters to the `get_agent` function, and
-- Customizing the system prompt for our dungeon adventure game.
+The connection generator already wired up the Inventory MCP client in <Link path="get_started/tutorials/dungeon-game/1">Module 1</Link>, so the agent has access to the inventory tools.
+
+:::note[Where's `main.py`?]
+The AG-UI protocol's FastAPI wrapper handles request/response translation for us. The `main.py` that the generator produced already creates the wrapper around `get_agent(...)` — we don't need to touch it.
+:::
 
 ## Task 2: Deployment and testing
 
@@ -94,29 +87,28 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
 
 You can test your Agent by either:
 <ul>
-<li>Starting a local instance of the Agent server and invoking it using `curl`, or</li>
+<li>Starting a local instance of the Agent server and chatting with it interactively using the `agent-chat` target, or</li>
 <li>Calling the deployed API using curl with a JWT token.</li>
 </ul>
 
 <Tabs>
   <TabItem label="Local">
-  Start your local Agent server by running the following command:
-    <NxCommands highlights={['xxxx', 'region']} env={{RUNTIME_CONFIG_APP_ID:"xxxx", AWS_REGION: '<region>'}} commands={["agent-serve dungeon_adventure.story"]} />
+  The `agent-chat` target starts the agent locally (together with its dependencies, via `agent-serve-local`) and drops you into an interactive chat prompt. Run:
 
-    <Aside type="caution" title="Use CDK Output Values">
-    Use the CDK deploy output value of `RuntimeConfigApplicationId` for the `RUNTIME_CONFIG_APP_ID` environment variable, and your deployed AWS region for `AWS_REGION`.
-    </Aside>
+    <NxCommands commands={["agent-chat dungeon_adventure.story"]} />
 
     :::note[`agent-serve` vs `agent-serve-local`]
-    The `agent-serve` target starts the agent locally but connects to your **deployed** MCP server (via the `RUNTIME_CONFIG_APP_ID`). If you'd prefer to run the MCP server locally too, use `agent-serve-local` instead, which starts all dependent services and sets `SERVE_LOCAL=true` for direct HTTP connections.
+    If you want to chat with the agent against your **deployed** MCP server instead of a local one, start the server directly with `agent-serve` and pass `RUNTIME_CONFIG_APP_ID` / `AWS_REGION`:
+
+    <NxCommands highlights={['xxxx', 'region']} env={{RUNTIME_CONFIG_APP_ID:"xxxx", AWS_REGION: '<region>'}} commands={["agent-serve dungeon_adventure.story"]} />
+
+    then in another shell run `agent-chat-cli agui http://localhost:8081/invocations`.
     :::
 
-    Once the Agent server is up and running (you won't see any output), call it by running the following command:
+    When prompted, try starting the game with something like:
 
-    ```bash
-    curl -N -X POST http://127.0.0.1:8081/invocations \
-      -d '{"genre":"superhero", "actions":[], "playerName":"UnnamedHero"}' \
-      -H "Content-Type: application/json"
+    ```
+    I am Aria, playing in the medieval genre.
     ```
   </TabItem>
   <TabItem label="Deployed">
@@ -163,7 +155,7 @@ You can test your Agent by either:
       --output text)
     ```
 
-    Invoke the deployed agent using the Bedrock AgentCore runtime URL:
+    Invoke the deployed agent using the Bedrock AgentCore runtime URL. The AG-UI protocol expects a `RunAgentInput` payload — a minimal one that sends the opening user message looks like:
 
     ```bash
     # Set the Story Agent ARN from CDK outputs
@@ -179,8 +171,14 @@ You can test your Agent by either:
     curl -N -X POST "$AGENT_URL" \
       -H "authorization: Bearer $BEARER_TOKEN" \
       -H "Content-Type: application/json" \
+      -H "Accept: text/event-stream" \
       -H "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id: abcdefghijklmnopqrstuvwxyz-123456789" \
-      -d '{"genre":"superhero", "actions":[], "playerName":"UnnamedHero"}'
+      -d '{
+        "threadId": "abcdefghijklmnopqrstuvwxyz-123456789",
+        "runId": "run-1",
+        "messages": [{"id": "m1", "role": "user", "content": "I am UnnamedHero, playing in the superhero genre."}],
+        "tools": [], "context": [], "forwardedProps": {}, "state": {}
+      }'
     ```
 
     :::note[URL Encoding]
@@ -189,12 +187,6 @@ You can test your Agent by either:
   </TabItem>
 </Tabs>
 
-If the command runs successfully, you should start to see the initial story text being streamed as JSON Lines:
-
-```
-{"content":"You are "}
-{"content":"a new superhero "}
-{"content":"in the bustling metropolis of Metro City..."}
-```
+If the command runs successfully, you should start to see AG-UI Server-Sent Events streaming back — `TEXT_MESSAGE_CONTENT` events carry the story text chunk-by-chunk.
 
 Congratulations. You have built and deployed your first Strands Agent on Bedrock AgentCore Runtime!  🎉🎉🎉
