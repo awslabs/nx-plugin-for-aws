@@ -83,6 +83,39 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityIdentityPool
 dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXXX = region_xxx
 ```
 
+### Create a Cognito test user
+
+Before testing the deployed agent (and before we play the game via the UI in the next module), create a Cognito test user. We disabled self-signup earlier, so this step is required regardless of whether you test locally or against the deployed runtime:
+
+```bash
+# From the CDK outputs
+export POOL_ID="<UserPoolId from CDK outputs>"
+export CLIENT_ID="<UserPoolClientId from CDK outputs>"
+export REGION="<your-region>"
+
+# Disable MFA to simplify user creation
+aws cognito-idp set-user-pool-mfa-config \
+  --mfa-configuration OFF \
+  --user-pool-id $POOL_ID \
+  --region $REGION
+
+# Create a test user
+aws cognito-idp admin-create-user \
+  --user-pool-id $POOL_ID \
+  --username "test" \
+  --temporary-password "TempPass123-" \
+  --region $REGION \
+  --message-action SUPPRESS > /dev/null
+
+# Set a permanent password (replace with something more secure!)
+aws cognito-idp admin-set-user-password \
+  --user-pool-id $POOL_ID \
+  --username "test" \
+  --password "PermanentPass123-" \
+  --region $REGION \
+  --permanent > /dev/null
+```
+
 ### Test your Agent
 
 You can test your Agent by either:
@@ -112,40 +145,10 @@ You can test your Agent by either:
     ```
   </TabItem>
   <TabItem label="Deployed">
-    To test the deployed agent, you'll need to authenticate with Cognito and obtain a JWT token. First, set up your environment variables:
+    Exchange the test user's credentials for a Cognito access token:
 
     ```bash
-    # Set your Cognito User Pool ID and Client ID from the CDK outputs
-    export POOL_ID="<UserPoolId from CDK outputs>"
-    export CLIENT_ID="<UserPoolClientId from CDK outputs>"
-    export REGION="<your-region>"
-    ```
-
-    Create a test user and obtain an authentication token:
-
-    ```bash
-    # Disable MFA to simplify user creation
-    aws cognito-idp set-user-pool-mfa-config \
-      --mfa-configuration OFF \
-      --user-pool-id $POOL_ID
-
-    # Create User
-    aws cognito-idp admin-create-user \
-      --user-pool-id $POOL_ID \
-      --username "test" \
-      --temporary-password "TempPass123-" \
-      --region $REGION \
-      --message-action SUPPRESS > /dev/null
-
-    # Set Permanent Password (replace with something more secure!)
-    aws cognito-idp admin-set-user-password \
-      --user-pool-id $POOL_ID \
-      --username "test" \
-      --password "PermanentPass123-" \
-      --region $REGION \
-      --permanent > /dev/null
-
-    # Authenticate User and capture ID Token
+    # Authenticate the test user and capture their access token
     export BEARER_TOKEN=$(aws cognito-idp initiate-auth \
       --client-id "$CLIENT_ID" \
       --auth-flow USER_PASSWORD_AUTH \
