@@ -45,7 +45,7 @@ export const runSmokeTest = async (
     opts,
   );
 
-  await runGeneratorMatrix(opts, 'CDK');
+  await runGeneratorMatrix(opts);
 
   // Extra: generate a terraform project alongside CDK to verify both coexist.
   await runCLI(
