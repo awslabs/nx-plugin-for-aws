@@ -160,10 +160,7 @@ export const pyStrandsAgentMcpConnectionGenerator = async (
       clientVarName,
     );
 
-    // strands-sdk's MCPClient has a non-standard __exit__ signature, which ty
-    // flags as invalid-context-manager on the generated `with (client,):`
-    // block. Scope the rule to `ignore` just for this agent.py via
-    // `[[tool.ty.overrides]]` in the project's pyproject.toml.
+    // Workaround for https://github.com/strands-agents/sdk-python/issues/2247
     suppressInvalidContextManagerForAgentFile(
       tree,
       sourceProject.root,
@@ -206,17 +203,7 @@ export const pyStrandsAgentMcpConnectionGenerator = async (
 };
 
 /**
- * Narrow ty's `invalid-context-manager` rule to `ignore` for the agent.py
- * file via `[[tool.ty.overrides]]` in the project's pyproject.toml.
- *
- * ty's only per-line suppression is `# ty: ignore[<rule>]` which, placed
- * inline on a `with`-item, collides with the GritQL rewrite that appends
- * additional items on subsequent MCP connections. A file-level `# ty:
- * ignore` comment at the top of agent.py is consumed and replaced by the
- * `@aws/nx-plugin:license` sync generator (which rewrites the first block
- * of `#` comments). A scoped pyproject override is the only suppression
- * that is both narrow (one file, one rule) and robust against subsequent
- * edits.
+ * Workaround for https://github.com/strands-agents/sdk-python/issues/2247
  */
 const suppressInvalidContextManagerForAgentFile = (
   tree: Tree,
