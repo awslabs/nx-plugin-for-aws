@@ -252,6 +252,90 @@ dependencies = ["strands-agents"]
     expect(pyprojectContent).toContain('proj.agent_connection');
   });
 
+  it('should add a ty override suppressing invalid-context-manager on agent.py', async () => {
+    setupProjects();
+
+    await pyStrandsAgentMcpConnectionGenerator(tree, {
+      sourceProject: 'my_scope.my_agent',
+      targetProject: '@test/my-api',
+      sourceComponent: {
+        generator: 'py#strands-agent',
+        name: 'my-agent',
+        path: 'my_scope_my_agent/agent',
+        port: 8081,
+        rc: 'MyAgent',
+      },
+      targetComponent: {
+        generator: 'ts#mcp-server',
+        name: 'inventory-mcp',
+        path: 'src/inventory-mcp',
+        port: 8082,
+        rc: 'InventoryMcp',
+      },
+    });
+
+    const pyprojectContent = tree.read(
+      'packages/my-agent/pyproject.toml',
+      'utf-8',
+    )!;
+
+    expect(pyprojectContent).toContain('[[tool.ty.overrides]]');
+    expect(pyprojectContent).toContain(
+      'include = [ "my_scope_my_agent/agent/agent.py" ]',
+    );
+    expect(pyprojectContent).toContain('invalid-context-manager = "ignore"');
+  });
+
+  it('should not duplicate the ty override across multiple MCP connections', async () => {
+    setupProjects();
+
+    await pyStrandsAgentMcpConnectionGenerator(tree, {
+      sourceProject: 'my_scope.my_agent',
+      targetProject: '@test/my-api',
+      sourceComponent: {
+        generator: 'py#strands-agent',
+        name: 'my-agent',
+        path: 'my_scope_my_agent/agent',
+        port: 8081,
+        rc: 'MyAgent',
+      },
+      targetComponent: {
+        generator: 'ts#mcp-server',
+        name: 'inventory-mcp',
+        path: 'src/inventory-mcp',
+        port: 8082,
+        rc: 'InventoryMcp',
+      },
+    });
+    await pyStrandsAgentMcpConnectionGenerator(tree, {
+      sourceProject: 'my_scope.my_agent',
+      targetProject: '@test/my-api',
+      sourceComponent: {
+        generator: 'py#strands-agent',
+        name: 'my-agent',
+        path: 'my_scope_my_agent/agent',
+        port: 8081,
+        rc: 'MyAgent',
+      },
+      targetComponent: {
+        generator: 'ts#mcp-server',
+        name: 'catalog-mcp',
+        path: 'src/catalog-mcp',
+        port: 8083,
+        rc: 'CatalogMcp',
+      },
+    });
+
+    const pyprojectContent = tree.read(
+      'packages/my-agent/pyproject.toml',
+      'utf-8',
+    )!;
+    const overrideMatches = pyprojectContent.match(
+      /\[\[tool\.ty\.overrides\]\]/g,
+    );
+    expect(overrideMatches).toHaveLength(1);
+  });
+
   it('should update serve-local target with MCP dependency', async () => {
     setupProjects();
 

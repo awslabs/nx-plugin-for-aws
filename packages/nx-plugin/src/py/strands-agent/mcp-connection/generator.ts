@@ -24,6 +24,8 @@ import {
   addDependenciesToPyProjectToml,
   addWorkspaceDependencyToPyProject,
 } from '../../../utils/py';
+import { updateToml } from '../../../utils/toml';
+import type { UVPyprojectToml } from '../../../utils/nxlv-python';
 import {
   ensurePythonAgentConnectionProject,
   addPythonCoreClient,
@@ -157,6 +159,15 @@ export const pyStrandsAgentMcpConnectionGenerator = async (
       clientClassName,
       clientVarName,
     );
+
+    // The MCPClient from strands-sdk has an __exit__ signature that does not
+    // match the context-manager protocol, which ty flags as invalid-context-manager.
+    // Scope a ty override to agent.py so this doesn't fail typecheck.
+    suppressInvalidContextManagerForAgentFile(
+      tree,
+      sourceProject.root,
+      agentFilePath,
+    );
   }
 
   // 4. Add workspace dependency from agent project to agent-connection project
@@ -191,6 +202,48 @@ export const pyStrandsAgentMcpConnectionGenerator = async (
   return () => {
     installPackagesTask(tree);
   };
+};
+
+/**
+ * Add a ty override to the project's pyproject.toml that silences the
+ * `invalid-context-manager` rule for the agent file, where strands-sdk's
+ * MCPClient is used in a `with` block despite its typing mismatch.
+ */
+const suppressInvalidContextManagerForAgentFile = (
+  tree: Tree,
+  projectRoot: string,
+  agentFilePath: string,
+): void => {
+  const includePath = agentFilePath.startsWith(projectRoot + '/')
+    ? agentFilePath.slice(projectRoot.length + 1)
+    : agentFilePath;
+  const pyprojectPath = joinPathFragments(projectRoot, 'pyproject.toml');
+  if (!tree.exists(pyprojectPath)) {
+    return;
+  }
+  updateToml(tree, pyprojectPath, (toml: UVPyprojectToml) => {
+    const tool = (toml.tool ??= {} as NonNullable<UVPyprojectToml['tool']>);
+    const ty = ((tool as any).ty ??= {});
+    const overrides: Array<{
+      include?: string[];
+      rules?: Record<string, string>;
+    }> = (ty.overrides ??= []);
+    const existing = overrides.find(
+      (o) => o.include?.length === 1 && o.include[0] === includePath,
+    );
+    if (existing) {
+      existing.rules = {
+        ...(existing.rules ?? {}),
+        'invalid-context-manager': 'ignore',
+      };
+    } else {
+      overrides.push({
+        include: [includePath],
+        rules: { 'invalid-context-manager': 'ignore' },
+      });
+    }
+    return toml;
+  });
 };
 
 /**
@@ -261,8 +314,6 @@ const addMcpClientToGetAgent = async (
     return;
   }
 
-  const tyIgnore = '  # ty: ignore[invalid-context-manager]';
-
   // Try the "add to existing with block" pattern first.
   // If it succeeds, there was already a with block from a previous connection.
   const addedToWith = await applyGritQL(
@@ -270,7 +321,7 @@ const addMcpClientToGetAgent = async (
     filePath,
     py(`\`with ($items,): $body\` where {
   $items <: not contains \`${clientVarName}\`,
-  $items += \`,\n        ${clientVarName}${tyIgnore}\`
+  $items += \`, ${clientVarName}\`
 }`),
   );
 
@@ -290,8 +341,6 @@ const addMcpClientToGetAgent = async (
   // First connection — rewrite the function body to include client creation
   // and wrap $body in a with block. GritQL handles indentation correctly
   // when the replacement is structured as a proper Python function body.
-  // The ty: ignore suppresses an invalid-context-manager diagnostic caused
-  // by strands-sdk's MCPClient typing.
   await applyGritQL(
     tree,
     filePath,
@@ -302,7 +351,7 @@ const addMcpClientToGetAgent = async (
 } => \`def get_agent($params):
     ${clientVarName} = ${clientClassName}.create(session_id=session_id)
     with (
-        ${clientVarName},${tyIgnore}
+        ${clientVarName},
     ):
         $body\``),
   );
