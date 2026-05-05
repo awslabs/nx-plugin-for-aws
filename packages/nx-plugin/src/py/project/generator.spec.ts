@@ -55,11 +55,48 @@ describe('python project generator', () => {
     expect(projectConfig.targets.compile).toBeDefined();
     expect(projectConfig.targets.test).toBeDefined();
     expect(projectConfig.targets.lint).toBeDefined();
+    expect(projectConfig.targets.typecheck).toBeDefined();
 
     // Verify build target dependencies
     expect(projectConfig.targets.build.dependsOn).toContain('compile');
     expect(projectConfig.targets.build.dependsOn).toContain('test');
     expect(projectConfig.targets.build.dependsOn).toContain('lint');
+    expect(projectConfig.targets.build.dependsOn).toContain('typecheck');
+  });
+
+  it('should configure typecheck target to run ty', async () => {
+    await pyProjectGenerator(tree, {
+      name: 'test-project',
+      directory: 'apps',
+      projectType: 'application',
+    });
+
+    const projectConfig = JSON.parse(
+      tree.read('apps/test_project/project.json', 'utf-8'),
+    );
+
+    expect(projectConfig.targets.typecheck).toEqual({
+      cache: true,
+      executor: '@nxlv/python:run-commands',
+      options: {
+        command: 'uv run ty check',
+        cwd: '{projectRoot}',
+      },
+    });
+  });
+
+  it('should add ty as a dev dependency in the root pyproject.toml', async () => {
+    await pyProjectGenerator(tree, {
+      name: 'test-project',
+      directory: 'apps',
+      projectType: 'application',
+    });
+
+    const rootPyproject = parse(tree.read('pyproject.toml', 'utf-8'));
+
+    expect((rootPyproject as any)['dependency-groups']?.dev).toEqual(
+      expect.arrayContaining([expect.stringMatching(/^ty==/)]),
+    );
   });
 
   it('should configure python dependencies correctly', async () => {

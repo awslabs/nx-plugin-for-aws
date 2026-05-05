@@ -139,6 +139,7 @@ export const PY_VERSIONS = {
   'strands-agents': '==1.38.0',
   'strands-agents[a2a]': '==1.38.0',
   'strands-agents-tools': '==0.5.2',
+  ty: '==0.0.34',
   uvicorn: '==0.46.0',
 } as const;
 export type IPyDepVersion = keyof typeof PY_VERSIONS;
