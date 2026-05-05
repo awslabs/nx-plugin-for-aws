@@ -30,7 +30,7 @@ export const TS_VERSIONS = {
   '@modelcontextprotocol/sdk': '1.29.0',
   '@modelcontextprotocol/inspector': '0.19.0',
   '@ag-ui/client': '0.0.53',
-  'agent-chat-cli': '0.1.1',
+  'agent-chat-cli': '0.2.0',
   '@copilotkit/react-core': '1.56.5',
   rxjs: '7.8.2',
   '@strands-agents/sdk': '1.0.0',
