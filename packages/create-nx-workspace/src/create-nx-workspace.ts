@@ -79,20 +79,20 @@ export const createNxWorkspace = (args: string[]): number => {
         // pnpm 11 defaults strictDepBuilds=true, which turns the initial
         // `pnpm install --no-frozen-lockfile` run by `nx new` into a hard
         // error on nx's postinstall script — before our preset generator
-        // gets a chance to write the workspace's pnpm-workspace.yaml /
-        // .pnpmfile.cjs. pnpm reads config from the lowercase `pnpm_config_`
-        // env-var prefix. Harmless under pnpm 10.
+        // gets a chance to write the workspace's pnpm-workspace.yaml. pnpm
+        // reads config from the lowercase `pnpm_config_` env-var prefix.
+        // Harmless under pnpm 10.
         pnpm_config_strict_dep_builds: 'false',
         // pnpm 11's Global Virtual Store (pnpm/pnpm#11385) occasionally
         // produces incomplete package projections — for instance leaving
         // generators.json out of the symlinked @aws/nx-plugin directory —
-        // which breaks Nx's third-party preset resolution
-        // ("Cannot find generator 'preset'"). Forcing a flat hoisted
-        // node_modules layout for the workspace-creation install sidesteps
-        // the GVS entirely. Harmless under pnpm 10. The setting is scoped
-        // to the wrapper's child process, so the final workspace on disk
-        // is unaffected for subsequent user installs.
+        // which breaks Nx's third-party preset resolution ("Cannot find
+        // generator 'preset'"). Forcing a flat hoisted node_modules layout
+        // with file-copy import sidesteps the GVS entirely. Harmless under
+        // pnpm 10. The settings are scoped to the wrapper's child process,
+        // so subsequent user installs get pnpm's default isolated layout.
         pnpm_config_node_linker: 'hoisted',
+        pnpm_config_package_import_method: 'copy',
       },
       shell: process.platform === 'win32',
     },
