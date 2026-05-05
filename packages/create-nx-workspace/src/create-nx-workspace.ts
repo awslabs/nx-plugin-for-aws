@@ -67,14 +67,6 @@ export const createNxWorkspace = (args: string[]): number => {
 
   const allArgs = buildArgs(args);
 
-  // Debug: log env vars we're setting so CI logs show whether the wrapper's
-  // spawn-time config actually reached pnpm. Remove once pnpm-11 smoke is
-  // green.
-  console.error(
-    `[wrapper] spawning create-nx-workspace@${NX_VERSION} via npx with pnpm_config overrides: ` +
-      `strict_dep_builds=false node_linker=hoisted package_import_method=copy force=true`,
-  );
-
   // Use npx to run create-nx-workspace to avoid bin name collision between
   // this package (@aws/create-nx-workspace) and the create-nx-workspace dep.
   const result = spawnSync(
@@ -91,23 +83,6 @@ export const createNxWorkspace = (args: string[]): number => {
         // reads config from the lowercase `pnpm_config_` env-var prefix.
         // Harmless under pnpm 10.
         pnpm_config_strict_dep_builds: 'false',
-        // pnpm 11's Global Virtual Store (pnpm/pnpm#11385) occasionally
-        // produces incomplete package projections — for instance leaving
-        // generators.json out of the symlinked @aws/nx-plugin directory —
-        // which breaks Nx's third-party preset resolution ("Cannot find
-        // generator 'preset'"). Forcing a flat hoisted node_modules layout
-        // sidesteps the GVS entirely, and `package_import_method=copy`
-        // ensures the flat layout is materialised from fresh store content
-        // rather than hardlinked from any stale projection the worker may
-        // have cached from a previous install. Harmless under pnpm 10. The
-        // settings are scoped to the wrapper's child process, so subsequent
-        // user installs get pnpm's default isolated layout.
-        pnpm_config_node_linker: 'hoisted',
-        pnpm_config_package_import_method: 'copy',
-        // --force equivalent — invalidate pnpm's lockfile/install-state
-        // cache for the wrapper's install pass. Relevant only if a prior
-        // aborted install left a partial state behind on the same worker.
-        pnpm_config_force: 'true',
       },
       shell: process.platform === 'win32',
     },

@@ -34,20 +34,6 @@ export const activatePnpmViaCorepack = (version: string): (() => void) => {
     stdio: 'inherit',
   });
   process.env.PATH = `${shimDir}${PATH_SEP}${originalPath}`;
-
-  // Wipe pnpm's content-addressed store before the smoke test to sidestep
-  // pnpm/pnpm#11385 — a cached incomplete package projection (e.g.
-  // @aws/nx-plugin missing generators.json) from a previous run survives
-  // across jobs on a self-hosted runner and breaks Nx's third-party preset
-  // resolution. Cheap because the store is per-major-version and an empty
-  // pnpm 11 store gets repopulated from verdaccio + the public registry in
-  // seconds.
-  try {
-    execSync('pnpm store prune', { stdio: 'inherit' });
-  } catch {
-    // Prune can fail on a fresh runner with no store — ignore.
-  }
-
   return () => {
     process.env.PATH = originalPath;
   };

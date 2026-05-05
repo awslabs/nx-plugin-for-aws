@@ -80,9 +80,24 @@ export default async function () {
     process.env.NX_E2E_LOCAL_REGISTRY = localRegistry;
 
     // npm / pnpm / yarn-classic read scope config from user ~/.npmrc.
+    // `npm config set` obeys NPM_CONFIG_USERCONFIG (which setup-node points
+    // at a temp path on GitHub Actions), but pnpm 11 reads `$HOME/.npmrc`
+    // directly — so we append the scope override to both files.
     execSync(`npm config set @aws:registry ${localRegistry}`, {
       windowsHide: true,
     });
+    const homeNpmrcPath = join(homedir(), '.npmrc');
+    backupIfExists(homeNpmrcPath);
+    const existingHomeNpmrc = existsSync(homeNpmrcPath)
+      ? readFileSync(homeNpmrcPath, 'utf-8')
+      : '';
+    writeFileSync(
+      homeNpmrcPath,
+      `${existingHomeNpmrc.replace(/\n?$/, '\n')}@aws:registry=${localRegistry}\n//${localRegistry
+        .replace(/^https?:\/\//, '')
+        .replace(/\/$/, '')}/:_authToken=${VERDACCIO_AUTH_TOKEN}\n`,
+      { encoding: 'utf-8' },
+    );
 
     // Yarn berry can't set object-valued config (npmScopes) via env vars.
     backupIfExists(USER_YARNRC_PATH);
@@ -185,6 +200,7 @@ export default async function () {
     }
     restoreBackup(USER_BUNFIG_PATH);
     restoreBackup(USER_YARNRC_PATH);
+    restoreBackup(join(homedir(), '.npmrc'));
     if (global.teardown) {
       console.info('Shutting down local registry...');
       global.teardown();

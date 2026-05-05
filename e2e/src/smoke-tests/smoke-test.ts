@@ -14,46 +14,15 @@ export const runSmokeTest = async (
   pkgMgr: string,
   onProjectCreate?: (projectRoot: string) => void,
 ) => {
-  let cnwError: unknown;
-  try {
-    await runCLI(
-      `${buildCreateNxWorkspaceCommand(pkgMgr, 'e2e-test', 'CDK')} --interactive=false --skipGit`,
-      {
-        cwd: dir,
-        prefixWithPackageManagerCmd: false,
-        redirectStderr: true,
-      },
-    );
-  } catch (e) {
-    cnwError = e;
-  }
+  await runCLI(
+    `${buildCreateNxWorkspaceCommand(pkgMgr, 'e2e-test', 'CDK')} --interactive=false --skipGit`,
+    {
+      cwd: dir,
+      prefixWithPackageManagerCmd: false,
+      redirectStderr: true,
+    },
+  );
   const projectRoot = `${dir}/e2e-test`;
-  if (pkgMgr === 'pnpm') {
-    const pluginDir = `${projectRoot}/node_modules/@aws/nx-plugin`;
-    console.log('=== @aws/nx-plugin install state ===');
-    console.log('projectRoot exists:', existsSync(projectRoot));
-    console.log('pluginDir exists:', existsSync(pluginDir));
-    if (existsSync(pluginDir)) {
-      console.log(
-        'pluginDir contents (depth 1):',
-        require('fs').readdirSync(pluginDir).sort().join(' '),
-      );
-      const pkg = `${pluginDir}/package.json`;
-      if (existsSync(pkg)) {
-        const pkgContent = readFileSync(pkg, 'utf-8');
-        console.log('package.json first 200 chars:', pkgContent.slice(0, 200));
-      }
-      const gen = `${pluginDir}/generators.json`;
-      console.log('generators.json exists:', existsSync(gen));
-      if (existsSync(gen)) {
-        const content = readFileSync(gen, 'utf-8');
-        console.log('generators.json size:', content.length);
-        console.log('generators.json first 300 chars:', content.slice(0, 300));
-      }
-    }
-    console.log('=== end ===');
-  }
-  if (cnwError) throw cnwError;
   const opts = {
     cwd: projectRoot,
     env: {
@@ -326,9 +295,7 @@ export const smokeTest = (
       // Pin the @aws scope to verdaccio locally in the target dir so
       // `pnpm create @aws/nx-workspace` (via `pnpm dlx`) resolves the
       // 0.0.0 build we just published instead of falling through to the
-      // public registry's `latest` tag. The user-level npmrc set up in
-      // global-setup.ts is honoured by pnpm 10 but not always by pnpm 11's
-      // dlx when `npm_config_registry` is also set in the environment.
+      // public registry's `latest` tag.
       const localRegistry = process.env.NX_E2E_LOCAL_REGISTRY;
       if (localRegistry) {
         writeFileSync(
