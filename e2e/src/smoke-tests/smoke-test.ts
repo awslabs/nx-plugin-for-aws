@@ -284,9 +284,6 @@ export const smokeTest = (
   const variant = options.variant ?? pkgMgr;
   describe(`smoke test - ${variant}`, () => {
     let teardown: (() => void) | void;
-    // Corepack activation on Windows + rmSync of a previous run's
-    // node_modules tree can easily blow past Vitest's 10s default hook
-    // timeout.
     beforeEach(() => {
       teardown = options.setup?.();
       const targetDir = `${tmpProjPath()}/${variant}`;

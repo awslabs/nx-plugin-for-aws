@@ -32,6 +32,7 @@ import {
   updateAwsNxPluginConfig,
 } from '../utils/config/utils';
 import { SYNC_GENERATOR_NAME as TS_SYNC_GENERATOR_NAME } from '../ts/sync/generator';
+import yaml from 'js-yaml';
 
 const WORKSPACES = ['packages/*'];
 const NX_TYPESCRIPT_SYNC_GENERATOR = '@nx/js:typescript-sync';
@@ -50,15 +51,16 @@ const setUpWorkspaces = (tree: Tree) => {
   if (detectPackageManager() === 'pnpm') {
     tree.write(
       'pnpm-workspace.yaml',
-      [
-        'packages:',
-        ...WORKSPACES.map((workspace) => `  - '${workspace}'`),
-        'allowBuilds:',
-        ...PNPM_BUILT_DEPENDENCIES.map((dep) => `  '${dep}': true`),
-        'onlyBuiltDependencies:',
-        ...PNPM_BUILT_DEPENDENCIES.map((dep) => `  - '${dep}'`),
-        '',
-      ].join('\n'),
+      yaml.dump(
+        {
+          packages: WORKSPACES,
+          allowBuilds: Object.fromEntries(
+            PNPM_BUILT_DEPENDENCIES.map((dep) => [dep, true]),
+          ),
+          onlyBuiltDependencies: PNPM_BUILT_DEPENDENCIES,
+        },
+        { quotingType: "'" },
+      ),
     );
   } else {
     updateJson(tree, 'package.json', (json) => {
