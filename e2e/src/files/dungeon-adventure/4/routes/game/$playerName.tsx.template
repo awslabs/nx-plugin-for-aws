@@ -1,7 +1,11 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useEffect, useRef } from 'react';
 import { CopilotChat } from '../../components/copilot';
-import { useAgent, useCopilotKit } from '@copilotkit/react-core/v2';
+import {
+  useAgent,
+  useCopilotKit,
+  CopilotChatConfigurationProvider,
+} from '@copilotkit/react-core/v2';
 import { useQuery } from '@tanstack/react-query';
 import { useGameApi } from '../../hooks/useGameApi';
 import type { IGame } from ':dungeon-adventure/game-api';
@@ -20,7 +24,7 @@ function RouteComponent() {
   const { genre } = Route.useSearch();
   // AgentCore session ids must be at least 33 characters
   const threadId = playerName.padEnd(33, '0');
-  const { agent } = useAgent({ agentId: 'StoryAgent', threadId });
+  const { agent } = useAgent({ agentId: 'agent', threadId });
   const { copilotkit } = useCopilotKit();
   const gameApi = useGameApi();
   const inventoryQuery = useQuery(
@@ -30,20 +34,21 @@ function RouteComponent() {
     ),
   );
 
+  // Seed the opening user message (once) and run the agent. We skip
+  // CopilotChat's auto-connect (see below) so this first runAgent is
+  // what actually starts the conversation.
   const seeded = useRef(false);
   useEffect(() => {
     if (seeded.current) return;
-    if (agent.messages.length > 0) {
-      seeded.current = true;
-      return;
-    }
     seeded.current = true;
-    agent.addMessage({
-      id: crypto.randomUUID(),
-      role: 'user',
-      content: `I am ${playerName}, playing in the ${genre} genre.`,
-    });
-    void copilotkit.runAgent({ agent });
+    if (agent.messages.length === 0) {
+      agent.addMessage({
+        id: crypto.randomUUID(),
+        role: 'user',
+        content: `I am ${playerName}, playing in the ${genre} genre.`,
+      });
+      void copilotkit.runAgent({ agent });
+    }
   }, [agent, copilotkit, playerName, genre]);
 
   return (
@@ -61,7 +66,20 @@ function RouteComponent() {
           </ul>
         </div>
       )}
-      <CopilotChat agentId="StoryAgent" threadId={threadId} />
+      {/*
+        hasExplicitThreadId={false} tells CopilotChat to skip its own
+        /connect call. Without this, CopilotChat would fire an empty
+        runAgent before our seed message lands, and the agent would
+        respond to nothing. The threadId is still shared with useAgent()
+        above via CopilotKit's per-thread agent registry.
+      */}
+      <CopilotChatConfigurationProvider
+        agentId="agent"
+        threadId={threadId}
+        hasExplicitThreadId={false}
+      >
+        <CopilotChat />
+      </CopilotChatConfigurationProvider>
     </div>
   );
 }
