@@ -17,17 +17,6 @@ terraform {
   }
 }
 
-# Aggregates the per-entry leaf JSON files written by the
-# `core/runtime-config/entry` module (one call per namespace/key) into a
-# single JSON file per namespace, and creates one
-# `aws_appconfig_hosted_configuration_version` + `aws_appconfig_deployment`
-# per namespace against a shared AppConfig application.
-#
-# Call this module once at the end of your root module with
-# `depends_on` covering every module that contributes a runtime-config
-# entry — the aggregation runs at apply time inside a `null_resource`
-# local-exec so it is guaranteed to pick up every entry file.
-
 variable "application_id" {
   description = "AppConfig application ID (from `core/runtime-config/appconfig.application_id`)."
   type        = string
@@ -60,12 +49,8 @@ locals {
 }
 
 # Aggregate the per-entry leaf JSON files into a single JSON file per
-# namespace. Runs inside a `null_resource` local-exec provisioner so
-# aggregation only executes at apply time — after every contributor's
-# `local_file.entry` resources are on disk. Running aggregation lazily
-# in a `local` block (via `fileset` + `file`) raced against sibling
-# entry writers and terraform aborted with
-# "Call to function 'file' failed: function returned an inconsistent result".
+# namespace. Runs at apply time so every contributor's entry file is
+# guaranteed to be on disk when aggregation happens.
 resource "null_resource" "aggregate_namespace" {
   for_each = toset(var.namespaces)
 
@@ -121,9 +106,6 @@ print(f'Aggregated {namespace}.json with {len(merged)} section(s)')
   }
 }
 
-# Read the aggregated namespace file as a data source — managed resources
-# are refreshed in a defined order (after their `depends_on`) so there's
-# no consistency race like there is with `file()` inside a local.
 data "local_file" "namespace_content" {
   for_each = toset(var.namespaces)
 

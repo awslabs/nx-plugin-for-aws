@@ -113,10 +113,10 @@ export async function sharedConstructsGenerator(
           projectConfig.targets['reset-runtime-config'] = {
             executor: 'nx:run-commands',
             options: {
-              command:
-                "node -e \"const fs=require('fs');const p=require('path');const d=process.env.DIST_DIR;fs.mkdirSync(d,{recursive:true});fs.writeFileSync(p.join(d,'runtime-config.json'),'{}');const rc=p.join(d,'runtime-config');fs.rmSync(rc,{recursive:true,force:true});fs.mkdirSync(p.join(rc,'entries'),{recursive:true});\"",
+              command: 'tsx scripts/reset-runtime-config.ts',
+              cwd: '{projectRoot}',
               env: {
-                DIST_DIR: 'dist/{projectRoot}',
+                DIST_DIR: '{workspaceRoot}/dist/{projectRoot}',
               },
             },
           };
@@ -143,6 +143,8 @@ export async function sharedConstructsGenerator(
           overwriteStrategy: OverwriteStrategy.KeepExisting,
         },
       );
+
+      addDependenciesToPackageJson(tree, {}, withVersions(['tsx']));
 
       await formatFilesInSubtree(tree);
     }

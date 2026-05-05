@@ -91,6 +91,12 @@ variable "tags" {
 data "aws_region" "current" {}
 data "aws_caller_identity" "current" {}
 
+resource "random_string" "suffix" {
+  length  = 8
+  special = false
+  upper   = false
+}
+
 # Resources
 
 # Create Lambda ZIP file from the bundle directory
@@ -100,8 +106,6 @@ data "archive_file" "lambda_zip" {
   output_path = "${path.module}/../../../../../../../dist/packages/common/terraform/apis/<%- apiNameKebabCase %>/lambda.zip"
 }
 
-# Stage the Lambda zip in the shared asset bucket. The key is namespaced
-# by API so multiple lambdas sharing the same bucket never collide.
 resource "aws_s3_object" "lambda_zip" {
   bucket      = var.asset_bucket_name
   key         = "apis/<%- apiNameKebabCase %>/${data.archive_file.lambda_zip.output_base64sha256}.zip"
@@ -115,7 +119,7 @@ resource "aws_s3_object" "lambda_zip" {
 module "http_api" {
   source = "../../../core/api/http-api"
 
-  api_name        = "<%- apiNameClassName %>"
+  api_name        = "<%- apiNameClassName %>-${random_string.suffix.result}"
   api_description = "<%- apiNameClassName %> HTTP API"
   stage_name      = "$default"
   stage_auto_deploy = true
@@ -143,7 +147,7 @@ resource "aws_lambda_function" "api_lambda" {
   s3_bucket         = aws_s3_object.lambda_zip.bucket
   s3_key            = aws_s3_object.lambda_zip.key
   s3_object_version = aws_s3_object.lambda_zip.version_id
-  function_name    = "<%- apiNameClassName %>Handler"
+  function_name    = "<%- apiNameClassName %>Handler-${random_string.suffix.result}"
   role            = aws_iam_role.lambda_execution_role.arn
   <%_ if (['trpc', 'smithy'].includes(backend.type)) { _%>
   handler         = "index.handler"
@@ -188,7 +192,7 @@ resource "aws_lambda_function" "api_lambda" {
 
 # IAM role for Lambda execution
 resource "aws_iam_role" "lambda_execution_role" {
-  name = "<%- apiNameClassName %>Handler-execution-role"
+  name = "<%- apiNameClassName %>Handler-execution-role-${random_string.suffix.result}"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -221,7 +225,7 @@ resource "aws_iam_role_policy_attachment" "lambda_xray_execution" {
 # Additional IAM policies for Lambda (if provided)
 resource "aws_iam_role_policy" "lambda_additional_policies" {
   count = length(var.additional_iam_policy_statements) > 0 ? 1 : 0
-  name  = "<%- apiNameClassName %>Handler-additional-policies"
+  name  = "<%- apiNameClassName %>Handler-additional-policies-${random_string.suffix.result}"
   role  = aws_iam_role.lambda_execution_role.id
 
   policy = jsonencode({
@@ -235,7 +239,7 @@ resource "aws_cloudwatch_log_group" "lambda_logs" {
   #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
   #checkov:skip=CKV_AWS_338:Log retention set to forever
   #checkov:skip=CKV_AWS_66:Log retention set to forever
-  name              = "/aws/lambda/<%- apiNameClassName %>Handler"
+  name              = "/aws/lambda/<%- apiNameClassName %>Handler-${random_string.suffix.result}"
   tags              = var.tags
 }
 
@@ -256,7 +260,7 @@ resource "aws_apigatewayv2_authorizer" "cognito_authorizer" {
   api_id           = module.http_api.api_id
   authorizer_type  = "JWT"
   identity_sources = ["$request.header.Authorization"]
-  name             = "<%- apiNameClassName %>Authorizer"
+  name             = "<%- apiNameClassName %>Authorizer-${random_string.suffix.result}"
 
   jwt_configuration {
     audience = var.user_pool_client_ids

@@ -759,6 +759,12 @@ variable "tags" {
 data "aws_region" "current" {}
 data "aws_caller_identity" "current" {}
 
+resource "random_string" "suffix" {
+  length  = 8
+  special = false
+  upper   = false
+}
+
 # Resources
 
 # Create Lambda ZIP file from the bundle directory
@@ -768,8 +774,6 @@ data "archive_file" "lambda_zip" {
   output_path = "\${path.module}/../../../../../../../dist/packages/common/terraform/apis/test-api/lambda.zip"
 }
 
-# Stage the Lambda zip in the shared asset bucket. The key is namespaced
-# by API so multiple lambdas sharing the same bucket never collide.
 resource "aws_s3_object" "lambda_zip" {
   bucket      = var.asset_bucket_name
   key         = "apis/test-api/\${data.archive_file.lambda_zip.output_base64sha256}.zip"
@@ -782,7 +786,7 @@ resource "aws_s3_object" "lambda_zip" {
 module "rest_api" {
   source = "../../../core/api/rest-api"
 
-  api_name        = "TestApi"
+  api_name        = "TestApi-\${random_string.suffix.result}"
   api_description = "TestApi REST API"
   stage_name      = "prod"
   stage_auto_deploy = true
@@ -818,7 +822,7 @@ resource "aws_lambda_function" "api_lambda" {
   s3_bucket         = aws_s3_object.lambda_zip.bucket
   s3_key            = aws_s3_object.lambda_zip.key
   s3_object_version = aws_s3_object.lambda_zip.version_id
-  function_name    = "TestApiHandler"
+  function_name    = "TestApiHandler-\${random_string.suffix.result}"
   role            = aws_iam_role.lambda_execution_role.arn
   handler         = "index.handler"
   runtime         = "nodejs22.x"
@@ -843,7 +847,7 @@ resource "aws_lambda_function" "api_lambda" {
 
 # IAM role for Lambda execution
 resource "aws_iam_role" "lambda_execution_role" {
-  name = "TestApiHandler-execution-role"
+  name = "TestApiHandler-execution-role-\${random_string.suffix.result}"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -876,7 +880,7 @@ resource "aws_iam_role_policy_attachment" "lambda_xray_execution" {
 # Additional IAM policies for Lambda (if provided)
 resource "aws_iam_role_policy" "lambda_additional_policies" {
   count = length(var.additional_iam_policy_statements) > 0 ? 1 : 0
-  name  = "TestApiHandler-additional-policies"
+  name  = "TestApiHandler-additional-policies-\${random_string.suffix.result}"
   role  = aws_iam_role.lambda_execution_role.id
 
   policy = jsonencode({
@@ -890,7 +894,7 @@ resource "aws_cloudwatch_log_group" "lambda_logs" {
   #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
   #checkov:skip=CKV_AWS_338:Log retention set to forever
   #checkov:skip=CKV_AWS_66:Log retention set to forever
-  name              = "/aws/lambda/TestApiHandler"
+  name              = "/aws/lambda/TestApiHandler-\${random_string.suffix.result}"
   tags              = var.tags
 }
 
@@ -1949,6 +1953,12 @@ variable "tags" {
 data "aws_region" "current" {}
 data "aws_caller_identity" "current" {}
 
+resource "random_string" "suffix" {
+  length  = 8
+  special = false
+  upper   = false
+}
+
 # Resources
 
 # Create Lambda ZIP file from the bundle directory
@@ -1958,8 +1968,6 @@ data "archive_file" "lambda_zip" {
   output_path = "\${path.module}/../../../../../../../dist/packages/common/terraform/apis/test-api/lambda.zip"
 }
 
-# Stage the Lambda zip in the shared asset bucket. The key is namespaced
-# by API so multiple lambdas sharing the same bucket never collide.
 resource "aws_s3_object" "lambda_zip" {
   bucket      = var.asset_bucket_name
   key         = "apis/test-api/\${data.archive_file.lambda_zip.output_base64sha256}.zip"
@@ -1972,7 +1980,7 @@ resource "aws_s3_object" "lambda_zip" {
 module "rest_api" {
   source = "../../../core/api/rest-api"
 
-  api_name        = "TestApi"
+  api_name        = "TestApi-\${random_string.suffix.result}"
   api_description = "TestApi REST API"
   stage_name      = "prod"
   stage_auto_deploy = true
@@ -2008,7 +2016,7 @@ resource "aws_lambda_function" "api_lambda" {
   s3_bucket         = aws_s3_object.lambda_zip.bucket
   s3_key            = aws_s3_object.lambda_zip.key
   s3_object_version = aws_s3_object.lambda_zip.version_id
-  function_name    = "TestApiHandler"
+  function_name    = "TestApiHandler-\${random_string.suffix.result}"
   role            = aws_iam_role.lambda_execution_role.arn
   handler         = "index.handler"
   runtime         = "nodejs22.x"
@@ -2033,7 +2041,7 @@ resource "aws_lambda_function" "api_lambda" {
 
 # IAM role for Lambda execution
 resource "aws_iam_role" "lambda_execution_role" {
-  name = "TestApiHandler-execution-role"
+  name = "TestApiHandler-execution-role-\${random_string.suffix.result}"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -2066,7 +2074,7 @@ resource "aws_iam_role_policy_attachment" "lambda_xray_execution" {
 # Additional IAM policies for Lambda (if provided)
 resource "aws_iam_role_policy" "lambda_additional_policies" {
   count = length(var.additional_iam_policy_statements) > 0 ? 1 : 0
-  name  = "TestApiHandler-additional-policies"
+  name  = "TestApiHandler-additional-policies-\${random_string.suffix.result}"
   role  = aws_iam_role.lambda_execution_role.id
 
   policy = jsonencode({
@@ -2080,14 +2088,14 @@ resource "aws_cloudwatch_log_group" "lambda_logs" {
   #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
   #checkov:skip=CKV_AWS_338:Log retention set to forever
   #checkov:skip=CKV_AWS_66:Log retention set to forever
-  name              = "/aws/lambda/TestApiHandler"
+  name              = "/aws/lambda/TestApiHandler-\${random_string.suffix.result}"
   tags              = var.tags
 }
 
 
 # Cognito User Pool Authorizer
 resource "aws_api_gateway_authorizer" "cognito_authorizer" {
-  name                   = "TestApiAuthorizer"
+  name                   = "TestApiAuthorizer-\${random_string.suffix.result}"
   rest_api_id           = module.rest_api.api_id
   type                  = "COGNITO_USER_POOLS"
   provider_arns         = ["arn:aws:cognito-idp:\${data.aws_region.current.name}:\${data.aws_caller_identity.current.account_id}:userpool/\${var.user_pool_id}"]
@@ -2730,6 +2738,12 @@ variable "tags" {
 data "aws_region" "current" {}
 data "aws_caller_identity" "current" {}
 
+resource "random_string" "suffix" {
+  length  = 8
+  special = false
+  upper   = false
+}
+
 # Resources
 
 # Create Lambda ZIP file from the bundle directory
@@ -2739,8 +2753,6 @@ data "archive_file" "lambda_zip" {
   output_path = "\${path.module}/../../../../../../../dist/packages/common/terraform/apis/test-api/lambda.zip"
 }
 
-# Stage the Lambda zip in the shared asset bucket. The key is namespaced
-# by API so multiple lambdas sharing the same bucket never collide.
 resource "aws_s3_object" "lambda_zip" {
   bucket      = var.asset_bucket_name
   key         = "apis/test-api/\${data.archive_file.lambda_zip.output_base64sha256}.zip"
@@ -2753,7 +2765,7 @@ resource "aws_s3_object" "lambda_zip" {
 module "rest_api" {
   source = "../../../core/api/rest-api"
 
-  api_name        = "TestApi"
+  api_name        = "TestApi-\${random_string.suffix.result}"
   api_description = "TestApi REST API"
   stage_name      = "prod"
   stage_auto_deploy = true
@@ -2789,7 +2801,7 @@ resource "aws_lambda_function" "api_lambda" {
   s3_bucket         = aws_s3_object.lambda_zip.bucket
   s3_key            = aws_s3_object.lambda_zip.key
   s3_object_version = aws_s3_object.lambda_zip.version_id
-  function_name    = "TestApiHandler"
+  function_name    = "TestApiHandler-\${random_string.suffix.result}"
   role            = aws_iam_role.lambda_execution_role.arn
   handler         = "index.handler"
   runtime         = "nodejs22.x"
@@ -2814,7 +2826,7 @@ resource "aws_lambda_function" "api_lambda" {
 
 # IAM role for Lambda execution
 resource "aws_iam_role" "lambda_execution_role" {
-  name = "TestApiHandler-execution-role"
+  name = "TestApiHandler-execution-role-\${random_string.suffix.result}"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -2847,7 +2859,7 @@ resource "aws_iam_role_policy_attachment" "lambda_xray_execution" {
 # Additional IAM policies for Lambda (if provided)
 resource "aws_iam_role_policy" "lambda_additional_policies" {
   count = length(var.additional_iam_policy_statements) > 0 ? 1 : 0
-  name  = "TestApiHandler-additional-policies"
+  name  = "TestApiHandler-additional-policies-\${random_string.suffix.result}"
   role  = aws_iam_role.lambda_execution_role.id
 
   policy = jsonencode({
@@ -2861,7 +2873,7 @@ resource "aws_cloudwatch_log_group" "lambda_logs" {
   #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
   #checkov:skip=CKV_AWS_338:Log retention set to forever
   #checkov:skip=CKV_AWS_66:Log retention set to forever
-  name              = "/aws/lambda/TestApiHandler"
+  name              = "/aws/lambda/TestApiHandler-\${random_string.suffix.result}"
   tags              = var.tags
 }
 
@@ -3247,6 +3259,12 @@ variable "tags" {
 data "aws_region" "current" {}
 data "aws_caller_identity" "current" {}
 
+resource "random_string" "suffix" {
+  length  = 8
+  special = false
+  upper   = false
+}
+
 # Resources
 
 # Create Lambda ZIP file from the bundle directory
@@ -3256,8 +3274,6 @@ data "archive_file" "lambda_zip" {
   output_path = "\${path.module}/../../../../../../../dist/packages/common/terraform/apis/custom-api/lambda.zip"
 }
 
-# Stage the Lambda zip in the shared asset bucket. The key is namespaced
-# by API so multiple lambdas sharing the same bucket never collide.
 resource "aws_s3_object" "lambda_zip" {
   bucket      = var.asset_bucket_name
   key         = "apis/custom-api/\${data.archive_file.lambda_zip.output_base64sha256}.zip"
@@ -3270,7 +3286,7 @@ resource "aws_s3_object" "lambda_zip" {
 module "rest_api" {
   source = "../../../core/api/rest-api"
 
-  api_name        = "CustomApi"
+  api_name        = "CustomApi-\${random_string.suffix.result}"
   api_description = "CustomApi REST API"
   stage_name      = "prod"
   stage_auto_deploy = true
@@ -3306,7 +3322,7 @@ resource "aws_lambda_function" "api_lambda" {
   s3_bucket         = aws_s3_object.lambda_zip.bucket
   s3_key            = aws_s3_object.lambda_zip.key
   s3_object_version = aws_s3_object.lambda_zip.version_id
-  function_name    = "CustomApiHandler"
+  function_name    = "CustomApiHandler-\${random_string.suffix.result}"
   role            = aws_iam_role.lambda_execution_role.arn
   handler         = "index.handler"
   runtime         = "nodejs22.x"
@@ -3331,7 +3347,7 @@ resource "aws_lambda_function" "api_lambda" {
 
 # IAM role for Lambda execution
 resource "aws_iam_role" "lambda_execution_role" {
-  name = "CustomApiHandler-execution-role"
+  name = "CustomApiHandler-execution-role-\${random_string.suffix.result}"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -3364,7 +3380,7 @@ resource "aws_iam_role_policy_attachment" "lambda_xray_execution" {
 # Additional IAM policies for Lambda (if provided)
 resource "aws_iam_role_policy" "lambda_additional_policies" {
   count = length(var.additional_iam_policy_statements) > 0 ? 1 : 0
-  name  = "CustomApiHandler-additional-policies"
+  name  = "CustomApiHandler-additional-policies-\${random_string.suffix.result}"
   role  = aws_iam_role.lambda_execution_role.id
 
   policy = jsonencode({
@@ -3378,7 +3394,7 @@ resource "aws_cloudwatch_log_group" "lambda_logs" {
   #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
   #checkov:skip=CKV_AWS_338:Log retention set to forever
   #checkov:skip=CKV_AWS_66:Log retention set to forever
-  name              = "/aws/lambda/CustomApiHandler"
+  name              = "/aws/lambda/CustomApiHandler-\${random_string.suffix.result}"
   tags              = var.tags
 }
 
