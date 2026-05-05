@@ -83,6 +83,14 @@ export const createNxWorkspace = (args: string[]): number => {
         // allowBuilds. pnpm reads config from the lowercase `pnpm_config_`
         // env-var prefix. Harmless under pnpm 10.
         pnpm_config_strict_dep_builds: 'false',
+        // pnpm 11's Global Virtual Store (pnpm/pnpm#11385) occasionally
+        // produces incomplete package projections — for instance leaving
+        // generators.json out of the symlinked @aws/nx-plugin directory —
+        // which breaks Nx's third-party preset resolution
+        // ("Cannot find generator 'preset'"). Forcing the `copy` import
+        // method materialises each file into the virtual store, sidestepping
+        // the bug at the cost of a one-time copy. Harmless under pnpm 10.
+        pnpm_config_package_import_method: 'copy',
       },
       shell: process.platform === 'win32',
     },
