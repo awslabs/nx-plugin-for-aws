@@ -16,6 +16,7 @@ import {
   invokeAgentCoreMcp,
   invokeLambda,
   invokeRestApi,
+  invokeTrpcAgentCoreAgent,
   invokeTrpcApi,
   pingWebsite,
 } from './deploy-invocations';
@@ -235,9 +236,11 @@ describe('smoke test - terraform-deploy', () => {
       );
       await invokeAgentCoreMcp(outputs.py_mcp_server_arn, 'Python MCP Server');
 
-      // Strands agents — direct invocation
+      // Strands agents — direct invocation. The TypeScript strands agent
+      // serves tRPC on its AgentCore runtime (not the plain HTTP
+      // `/invocations` contract), so invoke it via the tRPC helper.
       await invokeAgentCoreAgent(outputs.strands_agent_arn, 'Strands Agent');
-      await invokeAgentCoreAgent(
+      await invokeTrpcAgentCoreAgent(
         outputs.ts_strands_agent_arn,
         'TypeScript Strands Agent',
       );
@@ -254,12 +257,12 @@ describe('smoke test - terraform-deploy', () => {
       // generated appconfig module now deep-merges leaf entry files into
       // the two well-known namespaces at apply time, so the host agents
       // can find their connected A2A targets end-to-end.
-      await invokeAgentCoreAgent(
+      await invokeTrpcAgentCoreAgent(
         outputs.ts_strands_agent_arn,
         'TS Agent -> TS A2A (via askMyTsA2aAgent)',
         'Use the askMyTsA2aAgent tool to ask the remote agent what 5 * 4 is. Return just the answer.',
       );
-      await invokeAgentCoreAgent(
+      await invokeTrpcAgentCoreAgent(
         outputs.ts_strands_agent_arn,
         'TS Agent -> PY A2A (via askMyPyA2aAgent)',
         'Use the askMyPyA2aAgent tool to ask the remote agent what 11 + 2 is. Return just the answer.',
