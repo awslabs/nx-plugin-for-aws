@@ -7,13 +7,8 @@
  * state back to S3.
  */
 import { execFileSync } from 'node:child_process';
-import {
-  mkdirSync,
-  readFileSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
   S3Client,
   GetObjectCommand,
@@ -22,16 +17,25 @@ import {
 import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
 import { resolveAwsConfig } from './aws-config';
 
-const scriptDir = dirname(fileURLToPath(import.meta.url));
-const projectRoot = resolve(scriptDir, '..');
+const requireEnv = (name: string): string => {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(
+      `${name} env var is required — run via the generated nx target so the {workspaceRoot}/{projectRoot} tokens are populated.`,
+    );
+  }
+  return value;
+};
+
+const workspaceRoot = resolve(requireEnv('WORKSPACE_ROOT'));
+// `PROJECT_ROOT` from nx is the workspace-relative path (e.g. `packages/infra`).
+const projectRootInput = requireEnv('PROJECT_ROOT');
+const projectRoot = resolve(workspaceRoot, projectRootInput);
 const bootstrapDir = join(projectRoot, 'bootstrap');
-// Workspace root is two levels up from projectRoot (`packages/<project>`).
-const workspaceRoot = resolve(projectRoot, '..', '..');
-const projectRootRel = projectRoot.slice(workspaceRoot.length + 1);
 const tfStatePath = join(
   workspaceRoot,
   'dist',
-  projectRootRel,
+  projectRootInput,
   'terraform',
   'bootstrap.tfstate',
 );
@@ -46,10 +50,12 @@ const main = async () => {
   mkdirSync(dirname(tfStatePath), { recursive: true });
 
   // Pull any existing bootstrap tfstate. First-time bootstrap has no
-  // remote state yet, which is fine — fall through and let terraform
-  // apply create the bucket.
+  // remote state yet — fall through and let terraform apply create the
+  // bucket.
   try {
-    const out = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+    const out = await s3.send(
+      new GetObjectCommand({ Bucket: bucket, Key: key }),
+    );
     if (out.Body) {
       writeFileSync(tfStatePath, await out.Body.transformToByteArray());
     }
