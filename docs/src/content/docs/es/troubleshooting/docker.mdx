@@ -4,21 +4,21 @@ description: Solución de problemas con las compilaciones de Docker
 ---
 import Link from '@components/link.astro';
 
-Esta página proporciona orientación para solucionar problemas que pueda encontrar al compilar imágenes de Docker con el Nx Plugin para AWS. Consulte la <Link path="/guides/docker-bundling">guía de empaquetado de Docker</Link> para obtener información sobre el patrón utilizado por los generadores.
+Esta página proporciona orientación para solucionar problemas que pueda encontrar con las compilaciones de Docker producidas por los generadores. Consulte la <Link path="/guides/docker-bundling">guía de empaquetado de Docker</Link> para obtener información sobre el patrón que siguen.
 
 ## Compilaciones multiplataforma
 
-Los generadores como <Link path="/guides/ts-strands-agent">`ts#strands-agent`</Link>, <Link path="/guides/py-strands-agent">`py#strands-agent`</Link>, <Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link> y <Link path="/guides/py-mcp-server">`py#mcp-server`</Link> producen imágenes para `linux/arm64` (Graviton) de forma predeterminada, independientemente de la arquitectura del host. Compilar una imagen `arm64` en un host `x86_64` — o una imagen `amd64` en Apple Silicon — requiere soporte de [compilación multiplataforma](https://docs.docker.com/build/building/multi-platform/) en su instalación local de Docker.
+Los generadores como <Link path="/guides/ts-strands-agent">`ts#strands-agent`</Link>, <Link path="/guides/py-strands-agent">`py#strands-agent`</Link>, <Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link> y <Link path="/guides/py-mcp-server">`py#mcp-server`</Link> producen imágenes para `linux/arm64` (Graviton), independientemente de la arquitectura del host. Compilar una imagen `arm64` en un host `x86_64` — o una imagen `amd64` en Apple Silicon — requiere soporte de [compilación multiplataforma](https://docs.docker.com/build/building/multi-platform/) en su instalación local de Docker.
 
 Si las compilaciones multiplataforma no están configuradas, el síntoma depende del `Dockerfile`:
 
-- **El `Dockerfile` tiene un paso `RUN`** (por ejemplo, `RUN npm install` en los generadores de TypeScript): la compilación falla a mitad de camino con
+- **El `Dockerfile` tiene un paso `RUN`** (los generadores de TypeScript ejecutan `RUN npm install` para dependencias no empaquetables): la compilación falla a mitad de camino con
 
   ```bash
   exec /bin/sh: exec format error
   ```
 
-- **El `Dockerfile` solo usa `COPY`** (por ejemplo, los generadores de Python): la compilación tiene éxito, pero `docker run` falla más tarde con
+- **El `Dockerfile` solo usa `COPY`** (generadores de Python): la compilación tiene éxito, pero `docker run` falla más tarde con
 
   ```bash
   exec /usr/local/bin/python: exec format error
@@ -42,54 +42,24 @@ Verifique que las plataformas compatibles coincidan con las que su proyecto tien
 docker buildx inspect --bootstrap
 ```
 
-La línea `Platforms:` debe incluir tanto `linux/amd64` como `linux/arm64`.
+La línea `Platforms:` debe incluir `linux/arm64`.
 
 :::tip[Entornos de CI]
 GitHub Actions, GitLab CI y proveedores similares normalmente **no** registran controladores QEMU de forma predeterminada. Agregue un paso como [`docker/setup-qemu-action`](https://github.com/docker/setup-qemu-action) antes de cualquier objetivo `nx build` / `nx docker` que produzca una imagen de arquitectura cruzada.
 :::
 
-## `multi-platform build is not supported for the docker driver`
-
-Este error aparece cuando intenta compilar para múltiples plataformas a la vez (por ejemplo, `--platform linux/amd64,linux/arm64`) usando el controlador `docker` predeterminado:
-
-```bash
-ERROR: failed to build: Multi-platform build is not supported for the docker driver.
-Switch to a different driver, or turn on the containerd image store, and try again.
-```
-
-Los generadores apuntan a una sola plataforma por compilación (`linux/arm64`), por lo que este error no aparecerá en los objetivos producidos por el plugin. Si ha personalizado un objetivo `docker` para emitir un manifiesto multiplataforma, debe:
-
-1. Crear y usar un constructor `docker-container`:
-   ```bash
-   docker buildx create --name multiarch --driver docker-container --use
-   docker buildx inspect --bootstrap
-   ```
-2. O habilitar el [almacén de imágenes containerd](https://docs.docker.com/engine/storage/containerd/) en Docker Desktop (`Settings → General → Use containerd for pulling and storing images`).
-
 ## Compilaciones lentas en arquitecturas emuladas
 
-Compilar una imagen `arm64` en un host `x86_64` (o viceversa) usa QEMU para emular cada instrucción, y los pasos de instalación de dependencias pueden ser muchas veces más lentos que una compilación nativa. El Nx Plugin para AWS mitiga esto haciendo la resolución de dependencias **fuera** del `Dockerfile` — consulte <Link path="/guides/docker-bundling">Empaquetado de Docker</Link>. Si todavía está viendo compilaciones de Docker lentas:
+Compilar una imagen `arm64` en un host `x86_64` (o viceversa) usa QEMU para emular cada instrucción, lo que puede ser muchas veces más lento que una compilación nativa. Los generadores mitigan esto haciendo la resolución de dependencias **fuera** del `Dockerfile` — consulte <Link path="/guides/docker-bundling">Empaquetado de Docker</Link>. Si todavía está viendo compilaciones de Docker lentas:
 
 - Asegúrese de ejecutar los objetivos `bundle` / `docker` a través de Nx (`nx docker my-project`) para que el paquete se almacene en caché entre ejecuciones.
-- Evite ejecutar `pip install`, `npm install` o `uv sync` dentro del `Dockerfile` para compilaciones de arquitectura cruzada — instale en el momento del empaquetado con `--python-platform` / `--platform` para que el trabajo pesado se ejecute de forma nativa, y deje que el `Dockerfile` no haga nada más que `COPY`.
 - En CI, considere un ejecutor ARM nativo (por ejemplo, `ubuntu-24.04-arm` de GitHub Actions) para evitar QEMU por completo.
 
-## `Cannot connect to the Docker daemon`
+## Contexto de compilación faltante en `cdk deploy` / `nx apply`
 
-```bash
-Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?
-```
+El objetivo `docker` generado escribe su contexto de compilación en `dist/packages/<project>/docker/...` (Python) o `dist/packages/<project>/bundle/...` (TypeScript), y la infraestructura como código generada apunta a ese directorio. Si ese directorio no existe cuando sintetiza o aplica, verá errores como `ENOENT` o "directory does not exist".
 
-Docker no se está ejecutando, o su usuario no tiene permiso para comunicarse con el socket del daemon.
-
-- **Docker Desktop**: inicie la aplicación y espere a que el ícono de la ballena informe "Docker Desktop is running".
-- **Linux**: inicie el servicio con `sudo systemctl start docker`. Para evitar `sudo` en cada comando, agregue su usuario al grupo `docker` (`sudo usermod -aG docker $USER`) e inicie/cierre sesión.
-
-## Activos de imagen de Docker no encontrados en `cdk deploy`
-
-El `DockerImageAsset` de CDK apunta al directorio de contexto de compilación en `dist/`. Si ese directorio no existe cuando ejecuta `cdk deploy`, la síntesis fallará con `ENOENT` o "directory does not exist".
-
-Los generadores declaran el objetivo `docker` como una dependencia de `build`, por lo que `nx build my-infra` (o `nx deploy my-infra`) producirá el contexto de compilación antes de que CDK sintetice. Si invoca `cdk` directamente, ejecute primero el paso de empaquetado + docker:
+Los generadores declaran el objetivo `docker` como una dependencia de `build`, por lo que `nx build` (o los objetivos generados `nx deploy` / `nx apply`) producirán el contexto de compilación antes de que CDK o Terraform se ejecute. Si invoca `cdk` o `terraform` directamente, ejecute primero el paso de docker:
 
 ```bash
 nx run my-project:docker
@@ -98,5 +68,4 @@ nx run my-project:docker
 ## Lectura adicional
 
 - [Docker — Multi-platform builds](https://docs.docker.com/build/building/multi-platform/)
-- [Docker — `buildx` reference](https://docs.docker.com/reference/cli/docker/buildx/)
 - <Link path="/guides/docker-bundling">Guía de empaquetado de Docker</Link> — el patrón que siguen los generadores.
