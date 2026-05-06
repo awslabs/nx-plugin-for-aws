@@ -98,10 +98,10 @@ export async function terraformProjectGenerator(
       options: {
         forwardAllArgs: true,
         commands: [
-          `aws s3 cp s3://$(aws sts get-caller-identity --query Account --output text)-tf-state-$(aws configure get region)/bootstrap.tfstate ${tfDistDir}/bootstrap.tfstate || true`,
+          `aws s3 cp s3://$(aws sts get-caller-identity --query Account --output text)-tf-state-\${AWS_REGION:-$(aws configure get region)}/bootstrap.tfstate ${tfDistDir}/bootstrap.tfstate || true`,
           'terraform init',
-          `terraform apply -auto-approve -state=${tfDistDir}/bootstrap.tfstate -var="aws_region=$(aws configure get region)"`,
-          `aws s3 cp ${tfDistDir}/bootstrap.tfstate s3://$(aws sts get-caller-identity --query Account --output text)-tf-state-$(aws configure get region)/bootstrap.tfstate`,
+          `terraform apply -auto-approve -state=${tfDistDir}/bootstrap.tfstate -var="aws_region=\${AWS_REGION:-$(aws configure get region)}"`,
+          `aws s3 cp ${tfDistDir}/bootstrap.tfstate s3://$(aws sts get-caller-identity --query Account --output text)-tf-state-\${AWS_REGION:-$(aws configure get region)}/bootstrap.tfstate`,
         ],
         parallel: false,
         cwd: '{projectRoot}/bootstrap',
@@ -140,7 +140,7 @@ export async function terraformProjectGenerator(
       defaultConfiguration: 'dev',
       configurations: {
         dev: {
-          command: `terraform init -reconfigure -backend-config="region=$(aws configure get region)" -backend-config="bucket=$(aws sts get-caller-identity --query Account --output text)-tf-state-$(aws configure get region)" -backend-config="key=${kebabCase(lib.fullyQualifiedName)}/dev/terraform.tfstate"`,
+          command: `terraform init -reconfigure -backend-config="region=\${AWS_REGION:-$(aws configure get region)}" -backend-config="bucket=$(aws sts get-caller-identity --query Account --output text)-tf-state-\${AWS_REGION:-$(aws configure get region)}" -backend-config="key=${kebabCase(lib.fullyQualifiedName)}/dev/terraform.tfstate"`,
         },
       },
       options: {
