@@ -1,0 +1,102 @@
+---
+title: Troubleshooting Docker
+description: Troubleshooting issues with Docker builds
+---
+import Link from '@components/link.astro';
+
+This page provides troubleshooting guidance for issues you may encounter when building Docker images with the Nx Plugin for AWS. See the <Link path="/guides/docker-bundling">Docker Bundling guide</Link> for background on the pattern used by the generators.
+
+## Cross-Platform Builds
+
+Generators such as <Link path="/guides/ts-strands-agent">`ts#strands-agent`</Link>, <Link path="/guides/py-strands-agent">`py#strands-agent`</Link>, <Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link>, and <Link path="/guides/py-mcp-server">`py#mcp-server`</Link> produce images for `linux/arm64` (Graviton) by default, regardless of the host architecture. Building an `arm64` image on an `x86_64` host — or an `amd64` image on Apple Silicon — requires [multi-platform build](https://docs.docker.com/build/building/multi-platform/) support in your local Docker installation.
+
+If multi-platform builds are not set up, the symptom depends on the `Dockerfile`:
+
+- **`Dockerfile` has a `RUN` step** (for example, `RUN npm install` in the TypeScript generators): the build fails mid-way with
+
+  ```bash
+  exec /bin/sh: exec format error
+  ```
+
+- **`Dockerfile` only uses `COPY`** (for example, the Python generators): the build succeeds, but `docker run` later fails with
+
+  ```bash
+  exec /usr/local/bin/python: exec format error
+  ```
+
+- **Base image is not available for the target platform**: the build fails at the `FROM` step with `no match for platform in manifest`.
+
+### Enable Multi-Platform Builds
+
+**Docker Desktop** (Mac / Windows / Linux) ships with [QEMU](https://www.qemu.org/) emulation enabled out of the box — no extra setup is usually required.
+
+**Linux hosts** (including CI runners) need QEMU binfmt handlers registered with the kernel. Install them once per machine:
+
+```bash
+docker run --privileged --rm tonistiigi/binfmt --install all
+```
+
+Verify the supported platforms match what your project targets:
+
+```bash
+docker buildx inspect --bootstrap
+```
+
+The `Platforms:` line should include both `linux/amd64` and `linux/arm64`.
+
+:::tip[CI environments]
+GitHub Actions, GitLab CI, and similar providers typically do **not** register QEMU handlers by default. Add a step such as [`docker/setup-qemu-action`](https://github.com/docker/setup-qemu-action) before any `nx build` / `nx docker` target that produces a cross-architecture image.
+:::
+
+## `multi-platform build is not supported for the docker driver`
+
+This error appears when you try to build for multiple platforms at once (e.g. `--platform linux/amd64,linux/arm64`) using the default `docker` driver:
+
+```bash
+ERROR: failed to build: Multi-platform build is not supported for the docker driver.
+Switch to a different driver, or turn on the containerd image store, and try again.
+```
+
+The generators target a single platform per build (`linux/arm64`), so this error will not appear from targets produced by the plugin. If you have customised a `docker` target to emit a multi-platform manifest, you must either:
+
+1. Create and use a `docker-container` builder:
+   ```bash
+   docker buildx create --name multiarch --driver docker-container --use
+   docker buildx inspect --bootstrap
+   ```
+2. Or enable the [containerd image store](https://docs.docker.com/engine/storage/containerd/) in Docker Desktop (`Settings → General → Use containerd for pulling and storing images`).
+
+## Slow Builds on Emulated Architectures
+
+Building an `arm64` image on an `x86_64` host (or vice versa) uses QEMU to emulate each instruction, and dependency-install steps can be many times slower than a native build. The Nx Plugin for AWS mitigates this by doing dependency resolution **outside** the `Dockerfile` — see <Link path="/guides/docker-bundling">Docker Bundling</Link>. If you are still seeing slow Docker builds:
+
+- Make sure you are running the `bundle` / `docker` targets through Nx (`nx docker my-project`) so the bundle is cached between runs.
+- Avoid running `pip install`, `npm install`, or `uv sync` inside the `Dockerfile` for cross-architecture builds — install at bundle time with `--python-platform` / `--platform` so the heavy work runs natively, and let the `Dockerfile` do nothing more than `COPY`.
+- On CI, consider a native ARM runner (e.g. GitHub Actions' `ubuntu-24.04-arm`) to avoid QEMU entirely.
+
+## `Cannot connect to the Docker daemon`
+
+```bash
+Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?
+```
+
+Docker is not running, or your user does not have permission to talk to the daemon socket.
+
+- **Docker Desktop**: start the application and wait for the whale icon to report "Docker Desktop is running".
+- **Linux**: start the service with `sudo systemctl start docker`. To avoid `sudo` for every command, add your user to the `docker` group (`sudo usermod -aG docker $USER`) and log out / back in.
+
+## Docker Image Assets Not Found at `cdk deploy`
+
+CDK's `DockerImageAsset` points at the build-context directory in `dist/`. If that directory does not exist when you run `cdk deploy`, synth will fail with `ENOENT` or "directory does not exist".
+
+The generators declare the `docker` target as a dependency of `build`, so `nx build my-infra` (or `nx deploy my-infra`) will produce the build context before CDK synths. If you invoke `cdk` directly, run the bundle + docker step first:
+
+```bash
+nx run my-project:docker
+```
+
+## Further Reading
+
+- [Docker — Multi-platform builds](https://docs.docker.com/build/building/multi-platform/)
+- [Docker — `buildx` reference](https://docs.docker.com/reference/cli/docker/buildx/)
+- <Link path="/guides/docker-bundling">Docker Bundling guide</Link> — the pattern the generators follow.
