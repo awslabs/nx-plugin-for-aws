@@ -97,8 +97,8 @@ export async function terraformProjectGenerator(
       executor: 'nx:run-commands',
       options: {
         forwardAllArgs: true,
-        command: 'tsx scripts/bootstrap.ts',
-        cwd: '{projectRoot}',
+        commands: ['tsx {projectRoot}/scripts/bootstrap.ts {projectRoot}'],
+        cwd: '{workspaceRoot}',
       },
     },
     'bootstrap-destroy': {
@@ -139,8 +139,8 @@ export async function terraformProjectGenerator(
       },
       options: {
         forwardAllArgs: true,
-        command: 'tsx scripts/init.ts',
-        cwd: '{projectRoot}',
+        commands: ['tsx {projectRoot}/scripts/init.ts {projectRoot}'],
+        cwd: '{workspaceRoot}',
       },
       dependsOn: ['^init'],
     },
