@@ -102,7 +102,6 @@ describe('terraformProjectGenerator', () => {
       expect(bootstrapTarget.executor).toBe('nx:run-commands');
       expect(bootstrapTarget.options.command).toBe('tsx scripts/bootstrap.ts');
       expect(bootstrapTarget.options.cwd).toBe('{projectRoot}');
-      expect(bootstrapTarget.options.env.DIST_DIR).toContain('{workspaceRoot}');
     });
 
     it('should configure plan target correctly', async () => {

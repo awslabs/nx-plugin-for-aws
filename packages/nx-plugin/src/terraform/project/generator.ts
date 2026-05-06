@@ -99,13 +99,6 @@ export async function terraformProjectGenerator(
         forwardAllArgs: true,
         command: 'tsx scripts/bootstrap.ts',
         cwd: '{projectRoot}',
-        env: {
-          DIST_DIR: joinPathFragments(
-            '{workspaceRoot}',
-            'dist',
-            '{projectRoot}',
-          ),
-        },
       },
     },
     'bootstrap-destroy': {
