@@ -97,14 +97,15 @@ export async function terraformProjectGenerator(
       executor: 'nx:run-commands',
       options: {
         forwardAllArgs: true,
-        commands: [
-          `aws s3 cp s3://$(aws sts get-caller-identity --query Account --output text)-tf-state-\${AWS_REGION:-$(aws configure get region)}/bootstrap.tfstate ${tfDistDir}/bootstrap.tfstate || true`,
-          'terraform init',
-          `terraform apply -auto-approve -state=${tfDistDir}/bootstrap.tfstate -var="aws_region=\${AWS_REGION:-$(aws configure get region)}"`,
-          `aws s3 cp ${tfDistDir}/bootstrap.tfstate s3://$(aws sts get-caller-identity --query Account --output text)-tf-state-\${AWS_REGION:-$(aws configure get region)}/bootstrap.tfstate`,
-        ],
-        parallel: false,
-        cwd: '{projectRoot}/bootstrap',
+        command: 'tsx scripts/bootstrap.ts',
+        cwd: '{projectRoot}',
+        env: {
+          DIST_DIR: joinPathFragments(
+            '{workspaceRoot}',
+            'dist',
+            '{projectRoot}',
+          ),
+        },
       },
     },
     'bootstrap-destroy': {
@@ -140,12 +141,13 @@ export async function terraformProjectGenerator(
       defaultConfiguration: 'dev',
       configurations: {
         dev: {
-          command: `terraform init -reconfigure -backend-config="region=\${AWS_REGION:-$(aws configure get region)}" -backend-config="bucket=$(aws sts get-caller-identity --query Account --output text)-tf-state-\${AWS_REGION:-$(aws configure get region)}" -backend-config="key=${kebabCase(lib.fullyQualifiedName)}/dev/terraform.tfstate"`,
+          env: { TF_ENV: 'dev' },
         },
       },
       options: {
         forwardAllArgs: true,
-        cwd: '{projectRoot}/src',
+        command: 'tsx scripts/init.ts',
+        cwd: '{projectRoot}',
       },
       dependsOn: ['^init'],
     },
@@ -255,6 +257,7 @@ export async function terraformProjectGenerator(
     lib.dir, // destination path of the files
     {
       metricsModulePath,
+      stateKeyPrefix: kebabCase(lib.fullyQualifiedName),
     },
     {
       overwriteStrategy: OverwriteStrategy.Overwrite,
@@ -285,7 +288,16 @@ export async function terraformProjectGenerator(
   addDependenciesToPackageJson(
     tree,
     {},
-    withVersions(['@nx-extend/terraform', 'make-dir-cli']),
+    withVersions([
+      '@nx-extend/terraform',
+      'make-dir-cli',
+      'tsx',
+      '@aws-sdk/client-s3',
+      '@aws-sdk/client-sts',
+      '@aws-sdk/credential-providers',
+      '@smithy/config-resolver',
+      '@smithy/node-config-provider',
+    ]),
   );
 
   // @nx-extend/terraform has a peer dependency on @nx/devkit ^21.0.0 which causes

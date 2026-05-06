@@ -100,10 +100,9 @@ describe('terraformProjectGenerator', () => {
       const bootstrapTarget = projectConfig.targets['bootstrap'];
 
       expect(bootstrapTarget.executor).toBe('nx:run-commands');
-      expect(bootstrapTarget.options.commands).toHaveLength(4);
-      expect(bootstrapTarget.options.commands[1]).toBe('terraform init');
-      expect(bootstrapTarget.options.parallel).toBe(false);
-      expect(bootstrapTarget.options.cwd).toBe('{projectRoot}/bootstrap');
+      expect(bootstrapTarget.options.command).toBe('tsx scripts/bootstrap.ts');
+      expect(bootstrapTarget.options.cwd).toBe('{projectRoot}');
+      expect(bootstrapTarget.options.env.DIST_DIR).toContain('{workspaceRoot}');
     });
 
     it('should configure plan target correctly', async () => {
@@ -143,15 +142,9 @@ describe('terraformProjectGenerator', () => {
 
       expect(initTarget.executor).toBe('nx:run-commands');
       expect(initTarget.defaultConfiguration).toBe('dev');
-      expect(initTarget.configurations.dev.command).toContain(
-        'terraform init -reconfigure',
-      );
-      expect(initTarget.configurations.dev.command).toContain(
-        '-backend-config',
-      );
-      expect(initTarget.configurations.dev.command).toContain(
-        'key=proj-my-terraform-project/dev/terraform.tfstate',
-      );
+      expect(initTarget.options.command).toBe('tsx scripts/init.ts');
+      expect(initTarget.options.cwd).toBe('{projectRoot}');
+      expect(initTarget.configurations.dev.env.TF_ENV).toBe('dev');
       expect(initTarget.dependsOn).toEqual(['^init']);
     });
 
