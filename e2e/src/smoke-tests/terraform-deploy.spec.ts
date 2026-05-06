@@ -66,16 +66,17 @@ describe('smoke test - terraform-deploy', () => {
       mainTfTemplate.replace(/<% TEST_RUN_ID %>/g, testRunId),
     );
 
-    // Per-run Terraform state key + auto-approve destroy.
+    // Per-run Terraform state key — the generated `init.ts` uses the
+    // `TF_ENV` env var as the state-key leaf, so giving each run a
+    // distinct TF_ENV value isolates its state from concurrent runs.
     const infraProjectJsonPath = `${opts.cwd}/packages/infra/project.json`;
     const infraProjectJson = JSON.parse(
       readFileSync(infraProjectJsonPath, 'utf-8'),
     );
-    infraProjectJson.targets.init.configurations.dev.command =
-      infraProjectJson.targets.init.configurations.dev.command.replace(
-        /e2e-test-infra\/dev\/terraform\.tfstate/,
-        `e2e-test-infra-${testRunId}/dev/terraform.tfstate`,
-      );
+    infraProjectJson.targets.init.configurations.dev.env = {
+      ...(infraProjectJson.targets.init.configurations.dev.env ?? {}),
+      TF_ENV: `dev-${testRunId}`,
+    };
     writeFileSync(
       infraProjectJsonPath,
       JSON.stringify(infraProjectJson, null, 2),
