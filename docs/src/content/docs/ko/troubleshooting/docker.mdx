@@ -1,0 +1,102 @@
+---
+title: Docker 문제 해결
+description: Docker 빌드 관련 문제 해결
+---
+import Link from '@components/link.astro';
+
+이 페이지는 Nx Plugin for AWS로 Docker 이미지를 빌드할 때 발생할 수 있는 문제에 대한 해결 방법을 제공합니다. 제너레이터가 사용하는 패턴에 대한 배경 정보는 <Link path="/guides/docker-bundling">Docker 번들링 가이드</Link>를 참조하세요.
+
+## 크로스 플랫폼 빌드
+
+<Link path="/guides/ts-strands-agent">`ts#strands-agent`</Link>, <Link path="/guides/py-strands-agent">`py#strands-agent`</Link>, <Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link>, <Link path="/guides/py-mcp-server">`py#mcp-server`</Link>와 같은 제너레이터는 호스트 아키텍처와 관계없이 기본적으로 `linux/arm64` (Graviton) 이미지를 생성합니다. `x86_64` 호스트에서 `arm64` 이미지를 빌드하거나 Apple Silicon에서 `amd64` 이미지를 빌드하려면 로컬 Docker 설치에서 [멀티 플랫폼 빌드](https://docs.docker.com/build/building/multi-platform/) 지원이 필요합니다.
+
+멀티 플랫폼 빌드가 설정되지 않은 경우, 증상은 `Dockerfile`에 따라 다릅니다:
+
+- **`Dockerfile`에 `RUN` 단계가 있는 경우** (예: TypeScript 제너레이터의 `RUN npm install`): 빌드가 중간에 실패하며 다음 오류가 발생합니다
+
+  ```bash
+  exec /bin/sh: exec format error
+  ```
+
+- **`Dockerfile`이 `COPY`만 사용하는 경우** (예: Python 제너레이터): 빌드는 성공하지만 나중에 `docker run`이 실패하며 다음 오류가 발생합니다
+
+  ```bash
+  exec /usr/local/bin/python: exec format error
+  ```
+
+- **대상 플랫폼에 대한 베이스 이미지를 사용할 수 없는 경우**: `FROM` 단계에서 빌드가 실패하며 `no match for platform in manifest` 오류가 발생합니다.
+
+### 멀티 플랫폼 빌드 활성화
+
+**Docker Desktop** (Mac / Windows / Linux)은 기본적으로 [QEMU](https://www.qemu.org/) 에뮬레이션이 활성화되어 제공되므로 일반적으로 추가 설정이 필요하지 않습니다.
+
+**Linux 호스트** (CI 러너 포함)는 커널에 등록된 QEMU binfmt 핸들러가 필요합니다. 머신당 한 번 설치하세요:
+
+```bash
+docker run --privileged --rm tonistiigi/binfmt --install all
+```
+
+지원되는 플랫폼이 프로젝트 대상과 일치하는지 확인하세요:
+
+```bash
+docker buildx inspect --bootstrap
+```
+
+`Platforms:` 줄에 `linux/amd64`와 `linux/arm64`가 모두 포함되어야 합니다.
+
+:::tip[CI 환경]
+GitHub Actions, GitLab CI 및 유사한 제공업체는 일반적으로 기본적으로 QEMU 핸들러를 등록하지 **않습니다**. 크로스 아키텍처 이미지를 생성하는 `nx build` / `nx docker` 타겟 전에 [`docker/setup-qemu-action`](https://github.com/docker/setup-qemu-action)과 같은 단계를 추가하세요.
+:::
+
+## `multi-platform build is not supported for the docker driver`
+
+이 오류는 기본 `docker` 드라이버를 사용하여 여러 플랫폼을 동시에 빌드하려고 할 때 (예: `--platform linux/amd64,linux/arm64`) 나타납니다:
+
+```bash
+ERROR: failed to build: Multi-platform build is not supported for the docker driver.
+Switch to a different driver, or turn on the containerd image store, and try again.
+```
+
+제너레이터는 빌드당 단일 플랫폼(`linux/arm64`)을 대상으로 하므로 플러그인에서 생성된 타겟에서는 이 오류가 나타나지 않습니다. 멀티 플랫폼 매니페스트를 생성하도록 `docker` 타겟을 사용자 정의한 경우 다음 중 하나를 수행해야 합니다:
+
+1. `docker-container` 빌더를 생성하고 사용:
+   ```bash
+   docker buildx create --name multiarch --driver docker-container --use
+   docker buildx inspect --bootstrap
+   ```
+2. 또는 Docker Desktop에서 [containerd 이미지 스토어](https://docs.docker.com/engine/storage/containerd/)를 활성화 (`Settings → General → Use containerd for pulling and storing images`).
+
+## 에뮬레이트된 아키텍처에서의 느린 빌드
+
+`x86_64` 호스트에서 `arm64` 이미지를 빌드하거나 (또는 그 반대) QEMU를 사용하여 각 명령을 에뮬레이트하므로 종속성 설치 단계가 네이티브 빌드보다 몇 배 느릴 수 있습니다. Nx Plugin for AWS는 `Dockerfile` **외부**에서 종속성 해결을 수행하여 이를 완화합니다 — <Link path="/guides/docker-bundling">Docker 번들링</Link>을 참조하세요. 여전히 느린 Docker 빌드가 발생하는 경우:
+
+- Nx를 통해 `bundle` / `docker` 타겟을 실행하고 있는지 확인하세요 (`nx docker my-project`) 그러면 번들이 실행 간에 캐시됩니다.
+- 크로스 아키텍처 빌드를 위해 `Dockerfile` 내부에서 `pip install`, `npm install` 또는 `uv sync`를 실행하지 마세요 — `--python-platform` / `--platform`을 사용하여 번들 시간에 설치하여 무거운 작업이 네이티브로 실행되도록 하고, `Dockerfile`은 `COPY` 이상의 작업을 하지 않도록 하세요.
+- CI에서는 QEMU를 완전히 피하기 위해 네이티브 ARM 러너(예: GitHub Actions의 `ubuntu-24.04-arm`)를 고려하세요.
+
+## `Cannot connect to the Docker daemon`
+
+```bash
+Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?
+```
+
+Docker가 실행되고 있지 않거나 사용자에게 데몬 소켓과 통신할 권한이 없습니다.
+
+- **Docker Desktop**: 애플리케이션을 시작하고 고래 아이콘이 "Docker Desktop is running"을 보고할 때까지 기다리세요.
+- **Linux**: `sudo systemctl start docker`로 서비스를 시작하세요. 모든 명령에 `sudo`를 사용하지 않으려면 사용자를 `docker` 그룹에 추가하고 (`sudo usermod -aG docker $USER`) 로그아웃 / 로그인하세요.
+
+## `cdk deploy` 시 Docker 이미지 자산을 찾을 수 없음
+
+CDK의 `DockerImageAsset`은 `dist/`의 빌드 컨텍스트 디렉터리를 가리킵니다. `cdk deploy`를 실행할 때 해당 디렉터리가 존재하지 않으면 synth가 `ENOENT` 또는 "directory does not exist" 오류로 실패합니다.
+
+제너레이터는 `docker` 타겟을 `build`의 종속성으로 선언하므로 `nx build my-infra` (또는 `nx deploy my-infra`)는 CDK가 synth하기 전에 빌드 컨텍스트를 생성합니다. `cdk`를 직접 호출하는 경우 먼저 번들 + docker 단계를 실행하세요:
+
+```bash
+nx run my-project:docker
+```
+
+## 추가 자료
+
+- [Docker — Multi-platform builds](https://docs.docker.com/build/building/multi-platform/)
+- [Docker — `buildx` reference](https://docs.docker.com/reference/cli/docker/buildx/)
+- <Link path="/guides/docker-bundling">Docker 번들링 가이드</Link> — 제너레이터가 따르는 패턴.

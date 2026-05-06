@@ -1,0 +1,102 @@
+---
+title: Docker 故障排除
+description: Docker 构建问题的故障排除
+---
+import Link from '@components/link.astro';
+
+本页面提供了使用 Nx Plugin for AWS 构建 Docker 镜像时可能遇到的问题的故障排除指南。有关生成器使用的模式的背景信息，请参阅 <Link path="/guides/docker-bundling">Docker 打包指南</Link>。
+
+## 跨平台构建
+
+诸如 <Link path="/guides/ts-strands-agent">`ts#strands-agent`</Link>、<Link path="/guides/py-strands-agent">`py#strands-agent`</Link>、<Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link> 和 <Link path="/guides/py-mcp-server">`py#mcp-server`</Link> 等生成器默认为 `linux/arm64` (Graviton) 生成镜像，无论主机架构如何。在 `x86_64` 主机上构建 `arm64` 镜像——或在 Apple Silicon 上构建 `amd64` 镜像——需要本地 Docker 安装支持[多平台构建](https://docs.docker.com/build/building/multi-platform/)。
+
+如果未设置多平台构建，症状取决于 `Dockerfile`：
+
+- **`Dockerfile` 有 `RUN` 步骤**（例如，TypeScript 生成器中的 `RUN npm install`）：构建中途失败，显示
+
+  ```bash
+  exec /bin/sh: exec format error
+  ```
+
+- **`Dockerfile` 仅使用 `COPY`**（例如，Python 生成器）：构建成功，但稍后 `docker run` 失败，显示
+
+  ```bash
+  exec /usr/local/bin/python: exec format error
+  ```
+
+- **基础镜像不适用于目标平台**：构建在 `FROM` 步骤失败，显示 `no match for platform in manifest`。
+
+### 启用多平台构建
+
+**Docker Desktop**（Mac / Windows / Linux）默认启用了 [QEMU](https://www.qemu.org/) 模拟——通常不需要额外设置。
+
+**Linux 主机**（包括 CI 运行器）需要向内核注册 QEMU binfmt 处理程序。每台机器安装一次：
+
+```bash
+docker run --privileged --rm tonistiigi/binfmt --install all
+```
+
+验证支持的平台是否与您的项目目标匹配：
+
+```bash
+docker buildx inspect --bootstrap
+```
+
+`Platforms:` 行应同时包含 `linux/amd64` 和 `linux/arm64`。
+
+:::tip[CI 环境]
+GitHub Actions、GitLab CI 和类似提供商通常默认**不**注册 QEMU 处理程序。在任何生成跨架构镜像的 `nx build` / `nx docker` 目标之前，添加诸如 [`docker/setup-qemu-action`](https://github.com/docker/setup-qemu-action) 之类的步骤。
+:::
+
+## `multi-platform build is not supported for the docker driver`
+
+当您尝试使用默认的 `docker` 驱动程序一次为多个平台构建（例如 `--platform linux/amd64,linux/arm64`）时，会出现此错误：
+
+```bash
+ERROR: failed to build: Multi-platform build is not supported for the docker driver.
+Switch to a different driver, or turn on the containerd image store, and try again.
+```
+
+生成器每次构建针对单个平台（`linux/arm64`），因此此错误不会出现在插件生成的目标中。如果您自定义了 `docker` 目标以发出多平台清单，则必须：
+
+1. 创建并使用 `docker-container` 构建器：
+   ```bash
+   docker buildx create --name multiarch --driver docker-container --use
+   docker buildx inspect --bootstrap
+   ```
+2. 或在 Docker Desktop 中启用 [containerd 镜像存储](https://docs.docker.com/engine/storage/containerd/)（`Settings → General → Use containerd for pulling and storing images`）。
+
+## 模拟架构上的慢速构建
+
+在 `x86_64` 主机上构建 `arm64` 镜像（或反之）使用 QEMU 模拟每条指令，依赖项安装步骤可能比原生构建慢许多倍。Nx Plugin for AWS 通过在 `Dockerfile` **之外**进行依赖项解析来缓解这一问题——请参阅 <Link path="/guides/docker-bundling">Docker 打包</Link>。如果您仍然看到缓慢的 Docker 构建：
+
+- 确保您通过 Nx 运行 `bundle` / `docker` 目标（`nx docker my-project`），以便在运行之间缓存打包。
+- 避免在 `Dockerfile` 内为跨架构构建运行 `pip install`、`npm install` 或 `uv sync`——在打包时使用 `--python-platform` / `--platform` 进行安装，以便繁重的工作在本地运行，让 `Dockerfile` 只做 `COPY`。
+- 在 CI 上，考虑使用原生 ARM 运行器（例如 GitHub Actions 的 `ubuntu-24.04-arm`）以完全避免 QEMU。
+
+## `Cannot connect to the Docker daemon`
+
+```bash
+Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?
+```
+
+Docker 未运行，或您的用户没有权限与守护进程套接字通信。
+
+- **Docker Desktop**：启动应用程序并等待鲸鱼图标报告"Docker Desktop is running"。
+- **Linux**：使用 `sudo systemctl start docker` 启动服务。要避免每个命令都使用 `sudo`，将您的用户添加到 `docker` 组（`sudo usermod -aG docker $USER`）并注销/重新登录。
+
+## `cdk deploy` 时找不到 Docker 镜像资产
+
+CDK 的 `DockerImageAsset` 指向 `dist/` 中的构建上下文目录。如果在运行 `cdk deploy` 时该目录不存在，synth 将失败，显示 `ENOENT` 或"directory does not exist"。
+
+生成器将 `docker` 目标声明为 `build` 的依赖项，因此 `nx build my-infra`（或 `nx deploy my-infra`）将在 CDK synth 之前生成构建上下文。如果您直接调用 `cdk`，请先运行打包 + docker 步骤：
+
+```bash
+nx run my-project:docker
+```
+
+## 延伸阅读
+
+- [Docker — Multi-platform builds](https://docs.docker.com/build/building/multi-platform/)
+- [Docker — `buildx` reference](https://docs.docker.com/reference/cli/docker/buildx/)
+- <Link path="/guides/docker-bundling">Docker 打包指南</Link> — 生成器遵循的模式。

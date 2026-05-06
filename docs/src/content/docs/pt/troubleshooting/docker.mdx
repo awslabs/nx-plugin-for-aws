@@ -1,0 +1,102 @@
+---
+title: Solução de Problemas do Docker
+description: Solução de problemas com builds do Docker
+---
+import Link from '@components/link.astro';
+
+Esta página fornece orientações para solução de problemas que você pode encontrar ao construir imagens Docker com o Nx Plugin for AWS. Consulte o <Link path="/guides/docker-bundling">guia de Docker Bundling</Link> para obter informações sobre o padrão usado pelos geradores.
+
+## Builds Multi-Plataforma
+
+Geradores como <Link path="/guides/ts-strands-agent">`ts#strands-agent`</Link>, <Link path="/guides/py-strands-agent">`py#strands-agent`</Link>, <Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link> e <Link path="/guides/py-mcp-server">`py#mcp-server`</Link> produzem imagens para `linux/arm64` (Graviton) por padrão, independentemente da arquitetura do host. Construir uma imagem `arm64` em um host `x86_64` — ou uma imagem `amd64` no Apple Silicon — requer suporte a [build multi-plataforma](https://docs.docker.com/build/building/multi-platform/) na sua instalação local do Docker.
+
+Se os builds multi-plataforma não estiverem configurados, o sintoma depende do `Dockerfile`:
+
+- **`Dockerfile` tem uma etapa `RUN`** (por exemplo, `RUN npm install` nos geradores TypeScript): o build falha no meio do caminho com
+
+  ```bash
+  exec /bin/sh: exec format error
+  ```
+
+- **`Dockerfile` usa apenas `COPY`** (por exemplo, os geradores Python): o build é bem-sucedido, mas `docker run` falha posteriormente com
+
+  ```bash
+  exec /usr/local/bin/python: exec format error
+  ```
+
+- **Imagem base não está disponível para a plataforma de destino**: o build falha na etapa `FROM` com `no match for platform in manifest`.
+
+### Habilitar Builds Multi-Plataforma
+
+**Docker Desktop** (Mac / Windows / Linux) vem com emulação [QEMU](https://www.qemu.org/) habilitada por padrão — nenhuma configuração extra é geralmente necessária.
+
+**Hosts Linux** (incluindo runners de CI) precisam de manipuladores QEMU binfmt registrados no kernel. Instale-os uma vez por máquina:
+
+```bash
+docker run --privileged --rm tonistiigi/binfmt --install all
+```
+
+Verifique se as plataformas suportadas correspondem ao que seu projeto tem como alvo:
+
+```bash
+docker buildx inspect --bootstrap
+```
+
+A linha `Platforms:` deve incluir tanto `linux/amd64` quanto `linux/arm64`.
+
+:::tip[Ambientes de CI]
+GitHub Actions, GitLab CI e provedores similares normalmente **não** registram manipuladores QEMU por padrão. Adicione uma etapa como [`docker/setup-qemu-action`](https://github.com/docker/setup-qemu-action) antes de qualquer target `nx build` / `nx docker` que produza uma imagem de arquitetura cruzada.
+:::
+
+## `multi-platform build is not supported for the docker driver`
+
+Este erro aparece quando você tenta construir para múltiplas plataformas de uma vez (por exemplo, `--platform linux/amd64,linux/arm64`) usando o driver `docker` padrão:
+
+```bash
+ERROR: failed to build: Multi-platform build is not supported for the docker driver.
+Switch to a different driver, or turn on the containerd image store, and try again.
+```
+
+Os geradores têm como alvo uma única plataforma por build (`linux/arm64`), então este erro não aparecerá de targets produzidos pelo plugin. Se você personalizou um target `docker` para emitir um manifesto multi-plataforma, você deve:
+
+1. Criar e usar um builder `docker-container`:
+   ```bash
+   docker buildx create --name multiarch --driver docker-container --use
+   docker buildx inspect --bootstrap
+   ```
+2. Ou habilitar o [containerd image store](https://docs.docker.com/engine/storage/containerd/) no Docker Desktop (`Settings → General → Use containerd for pulling and storing images`).
+
+## Builds Lentos em Arquiteturas Emuladas
+
+Construir uma imagem `arm64` em um host `x86_64` (ou vice-versa) usa QEMU para emular cada instrução, e as etapas de instalação de dependências podem ser muitas vezes mais lentas do que um build nativo. O Nx Plugin for AWS mitiga isso fazendo a resolução de dependências **fora** do `Dockerfile` — consulte <Link path="/guides/docker-bundling">Docker Bundling</Link>. Se você ainda estiver vendo builds Docker lentos:
+
+- Certifique-se de estar executando os targets `bundle` / `docker` através do Nx (`nx docker my-project`) para que o bundle seja armazenado em cache entre as execuções.
+- Evite executar `pip install`, `npm install` ou `uv sync` dentro do `Dockerfile` para builds de arquitetura cruzada — instale no momento do bundle com `--python-platform` / `--platform` para que o trabalho pesado seja executado nativamente, e deixe o `Dockerfile` fazer nada mais do que `COPY`.
+- No CI, considere um runner ARM nativo (por exemplo, `ubuntu-24.04-arm` do GitHub Actions) para evitar QEMU completamente.
+
+## `Cannot connect to the Docker daemon`
+
+```bash
+Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?
+```
+
+O Docker não está em execução, ou seu usuário não tem permissão para se comunicar com o socket do daemon.
+
+- **Docker Desktop**: inicie o aplicativo e aguarde o ícone da baleia informar "Docker Desktop is running".
+- **Linux**: inicie o serviço com `sudo systemctl start docker`. Para evitar `sudo` em cada comando, adicione seu usuário ao grupo `docker` (`sudo usermod -aG docker $USER`) e faça logout / login novamente.
+
+## Assets de Imagem Docker Não Encontrados em `cdk deploy`
+
+O `DockerImageAsset` do CDK aponta para o diretório de contexto de build em `dist/`. Se esse diretório não existir quando você executar `cdk deploy`, o synth falhará com `ENOENT` ou "directory does not exist".
+
+Os geradores declaram o target `docker` como uma dependência de `build`, então `nx build my-infra` (ou `nx deploy my-infra`) produzirá o contexto de build antes do synth do CDK. Se você invocar `cdk` diretamente, execute a etapa de bundle + docker primeiro:
+
+```bash
+nx run my-project:docker
+```
+
+## Leitura Adicional
+
+- [Docker — Multi-platform builds](https://docs.docker.com/build/building/multi-platform/)
+- [Docker — `buildx` reference](https://docs.docker.com/reference/cli/docker/buildx/)
+- <Link path="/guides/docker-bundling">Docker Bundling guide</Link> — o padrão que os geradores seguem.

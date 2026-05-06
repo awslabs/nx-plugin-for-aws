@@ -1,0 +1,102 @@
+---
+title: Khắc phục sự cố Docker
+description: Khắc phục các vấn đề với Docker builds
+---
+import Link from '@components/link.astro';
+
+Trang này cung cấp hướng dẫn khắc phục sự cố cho các vấn đề bạn có thể gặp phải khi xây dựng Docker images với Nx Plugin for AWS. Xem <Link path="/guides/docker-bundling">hướng dẫn Docker Bundling</Link> để hiểu về mẫu được sử dụng bởi các generators.
+
+## Cross-Platform Builds
+
+Các generators như <Link path="/guides/ts-strands-agent">`ts#strands-agent`</Link>, <Link path="/guides/py-strands-agent">`py#strands-agent`</Link>, <Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link>, và <Link path="/guides/py-mcp-server">`py#mcp-server`</Link> tạo ra images cho `linux/arm64` (Graviton) theo mặc định, bất kể kiến trúc máy chủ. Xây dựng một image `arm64` trên máy chủ `x86_64` — hoặc một image `amd64` trên Apple Silicon — yêu cầu hỗ trợ [multi-platform build](https://docs.docker.com/build/building/multi-platform/) trong cài đặt Docker cục bộ của bạn.
+
+Nếu multi-platform builds không được thiết lập, triệu chứng phụ thuộc vào `Dockerfile`:
+
+- **`Dockerfile` có bước `RUN`** (ví dụ, `RUN npm install` trong các TypeScript generators): quá trình build thất bại giữa chừng với
+
+  ```bash
+  exec /bin/sh: exec format error
+  ```
+
+- **`Dockerfile` chỉ sử dụng `COPY`** (ví dụ, các Python generators): quá trình build thành công, nhưng `docker run` sau đó thất bại với
+
+  ```bash
+  exec /usr/local/bin/python: exec format error
+  ```
+
+- **Base image không khả dụng cho nền tảng đích**: quá trình build thất bại ở bước `FROM` với `no match for platform in manifest`.
+
+### Kích hoạt Multi-Platform Builds
+
+**Docker Desktop** (Mac / Windows / Linux) đi kèm với mô phỏng [QEMU](https://www.qemu.org/) được bật sẵn — thường không cần thiết lập thêm.
+
+**Linux hosts** (bao gồm CI runners) cần QEMU binfmt handlers được đăng ký với kernel. Cài đặt chúng một lần cho mỗi máy:
+
+```bash
+docker run --privileged --rm tonistiigi/binfmt --install all
+```
+
+Xác minh các nền tảng được hỗ trợ khớp với những gì dự án của bạn nhắm đến:
+
+```bash
+docker buildx inspect --bootstrap
+```
+
+Dòng `Platforms:` nên bao gồm cả `linux/amd64` và `linux/arm64`.
+
+:::tip[Môi trường CI]
+GitHub Actions, GitLab CI, và các nhà cung cấp tương tự thường **không** đăng ký QEMU handlers theo mặc định. Thêm một bước như [`docker/setup-qemu-action`](https://github.com/docker/setup-qemu-action) trước bất kỳ target `nx build` / `nx docker` nào tạo ra cross-architecture image.
+:::
+
+## `multi-platform build is not supported for the docker driver`
+
+Lỗi này xuất hiện khi bạn cố gắng build cho nhiều nền tảng cùng lúc (ví dụ: `--platform linux/amd64,linux/arm64`) sử dụng `docker` driver mặc định:
+
+```bash
+ERROR: failed to build: Multi-platform build is not supported for the docker driver.
+Switch to a different driver, or turn on the containerd image store, and try again.
+```
+
+Các generators nhắm đến một nền tảng duy nhất cho mỗi build (`linux/arm64`), vì vậy lỗi này sẽ không xuất hiện từ các targets được tạo bởi plugin. Nếu bạn đã tùy chỉnh một target `docker` để phát ra multi-platform manifest, bạn phải:
+
+1. Tạo và sử dụng một `docker-container` builder:
+   ```bash
+   docker buildx create --name multiarch --driver docker-container --use
+   docker buildx inspect --bootstrap
+   ```
+2. Hoặc kích hoạt [containerd image store](https://docs.docker.com/engine/storage/containerd/) trong Docker Desktop (`Settings → General → Use containerd for pulling and storing images`).
+
+## Slow Builds trên Emulated Architectures
+
+Xây dựng một image `arm64` trên máy chủ `x86_64` (hoặc ngược lại) sử dụng QEMU để mô phỏng từng lệnh, và các bước cài đặt dependencies có thể chậm hơn nhiều lần so với native build. Nx Plugin for AWS giảm thiểu điều này bằng cách thực hiện dependency resolution **bên ngoài** `Dockerfile` — xem <Link path="/guides/docker-bundling">Docker Bundling</Link>. Nếu bạn vẫn thấy Docker builds chậm:
+
+- Đảm bảo bạn đang chạy các targets `bundle` / `docker` thông qua Nx (`nx docker my-project`) để bundle được cache giữa các lần chạy.
+- Tránh chạy `pip install`, `npm install`, hoặc `uv sync` bên trong `Dockerfile` cho cross-architecture builds — cài đặt tại thời điểm bundle với `--python-platform` / `--platform` để công việc nặng chạy natively, và để `Dockerfile` không làm gì nhiều hơn `COPY`.
+- Trên CI, hãy xem xét một native ARM runner (ví dụ: GitHub Actions' `ubuntu-24.04-arm`) để tránh QEMU hoàn toàn.
+
+## `Cannot connect to the Docker daemon`
+
+```bash
+Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?
+```
+
+Docker không chạy, hoặc người dùng của bạn không có quyền để giao tiếp với daemon socket.
+
+- **Docker Desktop**: khởi động ứng dụng và đợi biểu tượng cá voi báo cáo "Docker Desktop is running".
+- **Linux**: khởi động dịch vụ với `sudo systemctl start docker`. Để tránh `sudo` cho mỗi lệnh, thêm người dùng của bạn vào nhóm `docker` (`sudo usermod -aG docker $USER`) và đăng xuất / đăng nhập lại.
+
+## Docker Image Assets Not Found tại `cdk deploy`
+
+`DockerImageAsset` của CDK trỏ đến thư mục build-context trong `dist/`. Nếu thư mục đó không tồn tại khi bạn chạy `cdk deploy`, synth sẽ thất bại với `ENOENT` hoặc "directory does not exist".
+
+Các generators khai báo target `docker` là một dependency của `build`, vì vậy `nx build my-infra` (hoặc `nx deploy my-infra`) sẽ tạo ra build context trước khi CDK synths. Nếu bạn gọi `cdk` trực tiếp, hãy chạy bước bundle + docker trước:
+
+```bash
+nx run my-project:docker
+```
+
+## Đọc thêm
+
+- [Docker — Multi-platform builds](https://docs.docker.com/build/building/multi-platform/)
+- [Docker — `buildx` reference](https://docs.docker.com/reference/cli/docker/buildx/)
+- <Link path="/guides/docker-bundling">Docker Bundling guide</Link> — mẫu mà các generators tuân theo.
