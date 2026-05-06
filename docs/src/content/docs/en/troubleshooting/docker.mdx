@@ -1,0 +1,71 @@
+---
+title: Troubleshooting Docker
+description: Troubleshooting issues with Docker builds
+---
+import Link from '@components/link.astro';
+
+This page provides troubleshooting guidance for issues you may encounter with the Docker builds produced by the generators. See the <Link path="/guides/docker-bundling">Docker Bundling guide</Link> for background on the pattern they follow.
+
+## Cross-Platform Builds
+
+Generators such as <Link path="/guides/ts-strands-agent">`ts#strands-agent`</Link>, <Link path="/guides/py-strands-agent">`py#strands-agent`</Link>, <Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link>, and <Link path="/guides/py-mcp-server">`py#mcp-server`</Link> produce images for `linux/arm64` (Graviton), regardless of the host architecture. Building an `arm64` image on an `x86_64` host — or an `amd64` image on Apple Silicon — requires [multi-platform build](https://docs.docker.com/build/building/multi-platform/) support in your local Docker installation.
+
+If multi-platform builds are not set up, the symptom depends on the `Dockerfile`:
+
+- **`Dockerfile` has a `RUN` step** (TypeScript generators `RUN npm install` for non-bundleable dependencies): the build fails mid-way with
+
+  ```bash
+  exec /bin/sh: exec format error
+  ```
+
+- **`Dockerfile` only uses `COPY`** (Python generators): the build succeeds, but `docker run` later fails with
+
+  ```bash
+  exec /usr/local/bin/python: exec format error
+  ```
+
+- **Base image is not available for the target platform**: the build fails at the `FROM` step with `no match for platform in manifest`.
+
+### Enable Multi-Platform Builds
+
+**Docker Desktop** (Mac / Windows / Linux) ships with [QEMU](https://www.qemu.org/) emulation enabled out of the box — no extra setup is usually required.
+
+**Linux hosts** (including CI runners) need QEMU binfmt handlers registered with the kernel. Install them once per machine:
+
+```bash
+docker run --privileged --rm tonistiigi/binfmt --install all
+```
+
+Verify the supported platforms match what your project targets:
+
+```bash
+docker buildx inspect --bootstrap
+```
+
+The `Platforms:` line should include `linux/arm64`.
+
+:::tip[CI environments]
+GitHub Actions, GitLab CI, and similar providers typically do **not** register QEMU handlers by default. Add a step such as [`docker/setup-qemu-action`](https://github.com/docker/setup-qemu-action) before any `nx build` / `nx docker` target that produces a cross-architecture image.
+:::
+
+## Slow Builds on Emulated Architectures
+
+Building an `arm64` image on an `x86_64` host (or vice versa) uses QEMU to emulate each instruction, which can be many times slower than a native build. The generators mitigate this by doing dependency resolution **outside** the `Dockerfile` — see <Link path="/guides/docker-bundling">Docker Bundling</Link>. If you are still seeing slow Docker builds:
+
+- Make sure you are running the `bundle` / `docker` targets through Nx (`nx docker my-project`) so the bundle is cached between runs.
+- On CI, consider a native ARM runner (e.g. GitHub Actions' `ubuntu-24.04-arm`) to avoid QEMU entirely.
+
+## Missing Build Context at `cdk deploy` / `nx apply`
+
+The generated `docker` target writes its build context to `dist/packages/<project>/docker/...` (Python) or `dist/packages/<project>/bundle/...` (TypeScript), and the generated infrastructure as code points at that directory. If that directory does not exist when you synth or apply, you will see errors like `ENOENT` or "directory does not exist".
+
+The generators declare the `docker` target as a dependency of `build`, so `nx build` (or the generated `nx deploy` / `nx apply` targets) will produce the build context before CDK or Terraform runs. If you invoke `cdk` or `terraform` directly, run the docker step first:
+
+```bash
+nx run my-project:docker
+```
+
+## Further Reading
+
+- [Docker — Multi-platform builds](https://docs.docker.com/build/building/multi-platform/)
+- <Link path="/guides/docker-bundling">Docker Bundling guide</Link> — the pattern the generators follow.

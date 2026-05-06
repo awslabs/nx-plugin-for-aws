@@ -1,0 +1,71 @@
+---
+title: Risoluzione dei problemi Docker
+description: Risoluzione dei problemi con le build Docker
+---
+import Link from '@components/link.astro';
+
+Questa pagina fornisce una guida alla risoluzione dei problemi che potresti incontrare con le build Docker prodotte dai generatori. Consulta la <Link path="/guides/docker-bundling">guida al Docker Bundling</Link> per informazioni sul pattern che seguono.
+
+## Build Multi-Piattaforma
+
+I generatori come <Link path="/guides/ts-strands-agent">`ts#strands-agent`</Link>, <Link path="/guides/py-strands-agent">`py#strands-agent`</Link>, <Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link> e <Link path="/guides/py-mcp-server">`py#mcp-server`</Link> producono immagini per `linux/arm64` (Graviton), indipendentemente dall'architettura dell'host. La creazione di un'immagine `arm64` su un host `x86_64` — o di un'immagine `amd64` su Apple Silicon — richiede il supporto per le [build multi-piattaforma](https://docs.docker.com/build/building/multi-platform/) nella tua installazione Docker locale.
+
+Se le build multi-piattaforma non sono configurate, il sintomo dipende dal `Dockerfile`:
+
+- **Il `Dockerfile` ha uno step `RUN`** (i generatori TypeScript eseguono `RUN npm install` per le dipendenze non raggruppabili): la build fallisce a metà con
+
+  ```bash
+  exec /bin/sh: exec format error
+  ```
+
+- **Il `Dockerfile` usa solo `COPY`** (generatori Python): la build ha successo, ma `docker run` fallisce successivamente con
+
+  ```bash
+  exec /usr/local/bin/python: exec format error
+  ```
+
+- **L'immagine base non è disponibile per la piattaforma di destinazione**: la build fallisce allo step `FROM` con `no match for platform in manifest`.
+
+### Abilitare le Build Multi-Piattaforma
+
+**Docker Desktop** (Mac / Windows / Linux) viene fornito con l'emulazione [QEMU](https://www.qemu.org/) abilitata di default — di solito non è richiesta alcuna configurazione aggiuntiva.
+
+**Gli host Linux** (inclusi i runner CI) necessitano dei gestori binfmt QEMU registrati con il kernel. Installali una volta per macchina:
+
+```bash
+docker run --privileged --rm tonistiigi/binfmt --install all
+```
+
+Verifica che le piattaforme supportate corrispondano a quelle di destinazione del tuo progetto:
+
+```bash
+docker buildx inspect --bootstrap
+```
+
+La riga `Platforms:` dovrebbe includere `linux/arm64`.
+
+:::tip[Ambienti CI]
+GitHub Actions, GitLab CI e provider simili tipicamente **non** registrano i gestori QEMU per impostazione predefinita. Aggiungi uno step come [`docker/setup-qemu-action`](https://github.com/docker/setup-qemu-action) prima di qualsiasi target `nx build` / `nx docker` che produce un'immagine cross-architettura.
+:::
+
+## Build Lente su Architetture Emulate
+
+La creazione di un'immagine `arm64` su un host `x86_64` (o viceversa) usa QEMU per emulare ogni istruzione, il che può essere molte volte più lento di una build nativa. I generatori mitigano questo problema eseguendo la risoluzione delle dipendenze **al di fuori** del `Dockerfile` — vedi <Link path="/guides/docker-bundling">Docker Bundling</Link>. Se stai ancora riscontrando build Docker lente:
+
+- Assicurati di eseguire i target `bundle` / `docker` attraverso Nx (`nx docker my-project`) in modo che il bundle sia memorizzato nella cache tra le esecuzioni.
+- Su CI, considera un runner ARM nativo (ad es. `ubuntu-24.04-arm` di GitHub Actions) per evitare completamente QEMU.
+
+## Contesto di Build Mancante durante `cdk deploy` / `nx apply`
+
+Il target `docker` generato scrive il suo contesto di build in `dist/packages/<project>/docker/...` (Python) o `dist/packages/<project>/bundle/...` (TypeScript), e l'infrastruttura come codice generata punta a quella directory. Se quella directory non esiste quando esegui synth o apply, vedrai errori come `ENOENT` o "directory does not exist".
+
+I generatori dichiarano il target `docker` come dipendenza di `build`, quindi `nx build` (o i target generati `nx deploy` / `nx apply`) produrrà il contesto di build prima che CDK o Terraform venga eseguito. Se invochi `cdk` o `terraform` direttamente, esegui prima lo step docker:
+
+```bash
+nx run my-project:docker
+```
+
+## Ulteriori Letture
+
+- [Docker — Multi-platform builds](https://docs.docker.com/build/building/multi-platform/)
+- <Link path="/guides/docker-bundling">Docker Bundling guide</Link> — il pattern seguito dai generatori.

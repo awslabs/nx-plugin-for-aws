@@ -461,6 +461,20 @@ export default defineConfig({
               },
               link: '/troubleshooting/nx',
             },
+            {
+              label: 'Docker',
+              translations: {
+                jp: 'Docker',
+                ko: 'Docker',
+                fr: 'Docker',
+                it: 'Docker',
+                es: 'Docker',
+                pt: 'Docker',
+                zh: 'Docker',
+                vi: 'Docker',
+              },
+              link: '/troubleshooting/docker',
+            },
           ],
         },
         {

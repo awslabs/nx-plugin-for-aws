@@ -1,0 +1,71 @@
+---
+title: Khắc phục sự cố Docker
+description: Khắc phục các vấn đề với Docker builds
+---
+import Link from '@components/link.astro';
+
+Trang này cung cấp hướng dẫn khắc phục sự cố cho các vấn đề bạn có thể gặp phải với Docker builds được tạo ra bởi các generators. Xem <Link path="/guides/docker-bundling">hướng dẫn Docker Bundling</Link> để hiểu về mẫu mà chúng tuân theo.
+
+## Cross-Platform Builds
+
+Các generators như <Link path="/guides/ts-strands-agent">`ts#strands-agent`</Link>, <Link path="/guides/py-strands-agent">`py#strands-agent`</Link>, <Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link>, và <Link path="/guides/py-mcp-server">`py#mcp-server`</Link> tạo ra images cho `linux/arm64` (Graviton), bất kể kiến trúc máy chủ. Xây dựng một image `arm64` trên máy chủ `x86_64` — hoặc một image `amd64` trên Apple Silicon — yêu cầu hỗ trợ [multi-platform build](https://docs.docker.com/build/building/multi-platform/) trong cài đặt Docker cục bộ của bạn.
+
+Nếu multi-platform builds không được thiết lập, triệu chứng phụ thuộc vào `Dockerfile`:
+
+- **`Dockerfile` có bước `RUN`** (các TypeScript generators `RUN npm install` cho các dependencies không thể bundle): quá trình build thất bại giữa chừng với
+
+  ```bash
+  exec /bin/sh: exec format error
+  ```
+
+- **`Dockerfile` chỉ sử dụng `COPY`** (các Python generators): quá trình build thành công, nhưng `docker run` sau đó thất bại với
+
+  ```bash
+  exec /usr/local/bin/python: exec format error
+  ```
+
+- **Base image không khả dụng cho nền tảng đích**: quá trình build thất bại ở bước `FROM` với `no match for platform in manifest`.
+
+### Kích hoạt Multi-Platform Builds
+
+**Docker Desktop** (Mac / Windows / Linux) đi kèm với mô phỏng [QEMU](https://www.qemu.org/) được bật sẵn — thường không cần thiết lập thêm.
+
+**Linux hosts** (bao gồm CI runners) cần QEMU binfmt handlers được đăng ký với kernel. Cài đặt chúng một lần cho mỗi máy:
+
+```bash
+docker run --privileged --rm tonistiigi/binfmt --install all
+```
+
+Xác minh các nền tảng được hỗ trợ khớp với những gì dự án của bạn nhắm đến:
+
+```bash
+docker buildx inspect --bootstrap
+```
+
+Dòng `Platforms:` nên bao gồm `linux/arm64`.
+
+:::tip[Môi trường CI]
+GitHub Actions, GitLab CI, và các nhà cung cấp tương tự thường **không** đăng ký QEMU handlers theo mặc định. Thêm một bước như [`docker/setup-qemu-action`](https://github.com/docker/setup-qemu-action) trước bất kỳ target `nx build` / `nx docker` nào tạo ra cross-architecture image.
+:::
+
+## Slow Builds trên Emulated Architectures
+
+Xây dựng một image `arm64` trên máy chủ `x86_64` (hoặc ngược lại) sử dụng QEMU để mô phỏng từng lệnh, có thể chậm hơn nhiều lần so với native build. Các generators giảm thiểu điều này bằng cách thực hiện dependency resolution **bên ngoài** `Dockerfile` — xem <Link path="/guides/docker-bundling">Docker Bundling</Link>. Nếu bạn vẫn thấy Docker builds chậm:
+
+- Đảm bảo bạn đang chạy các targets `bundle` / `docker` thông qua Nx (`nx docker my-project`) để bundle được cache giữa các lần chạy.
+- Trên CI, hãy xem xét một native ARM runner (ví dụ: GitHub Actions' `ubuntu-24.04-arm`) để tránh QEMU hoàn toàn.
+
+## Missing Build Context tại `cdk deploy` / `nx apply`
+
+Target `docker` được tạo ra ghi build context của nó vào `dist/packages/<project>/docker/...` (Python) hoặc `dist/packages/<project>/bundle/...` (TypeScript), và infrastructure as code được tạo ra trỏ đến thư mục đó. Nếu thư mục đó không tồn tại khi bạn synth hoặc apply, bạn sẽ thấy các lỗi như `ENOENT` hoặc "directory does not exist".
+
+Các generators khai báo target `docker` là một dependency của `build`, vì vậy `nx build` (hoặc các targets `nx deploy` / `nx apply` được tạo ra) sẽ tạo ra build context trước khi CDK hoặc Terraform chạy. Nếu bạn gọi `cdk` hoặc `terraform` trực tiếp, hãy chạy bước docker trước:
+
+```bash
+nx run my-project:docker
+```
+
+## Đọc thêm
+
+- [Docker — Multi-platform builds](https://docs.docker.com/build/building/multi-platform/)
+- <Link path="/guides/docker-bundling">Docker Bundling guide</Link> — mẫu mà các generators tuân theo.

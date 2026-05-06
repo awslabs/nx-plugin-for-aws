@@ -1,0 +1,71 @@
+---
+title: Docker のトラブルシューティング
+description: Docker ビルドに関する問題のトラブルシューティング
+---
+import Link from '@components/link.astro';
+
+このページでは、ジェネレーターによって生成される Docker ビルドで遭遇する可能性のある問題のトラブルシューティングガイダンスを提供します。ジェネレーターが従うパターンの背景については、<Link path="/guides/docker-bundling">Docker Bundling ガイド</Link>を参照してください。
+
+## クロスプラットフォームビルド
+
+<Link path="/guides/ts-strands-agent">`ts#strands-agent`</Link>、<Link path="/guides/py-strands-agent">`py#strands-agent`</Link>、<Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link>、<Link path="/guides/py-mcp-server">`py#mcp-server`</Link> などのジェネレーターは、ホストアーキテクチャに関係なく、`linux/arm64`（Graviton）用のイメージを生成します。`x86_64` ホスト上で `arm64` イメージをビルドする場合、または Apple Silicon 上で `amd64` イメージをビルドする場合は、ローカルの Docker インストールで[マルチプラットフォームビルド](https://docs.docker.com/build/building/multi-platform/)のサポートが必要です。
+
+マルチプラットフォームビルドが設定されていない場合、症状は `Dockerfile` によって異なります：
+
+- **`Dockerfile` に `RUN` ステップがある場合**（TypeScript ジェネレーターはバンドル不可能な依存関係のために `RUN npm install` を実行します）：ビルドが途中で失敗し、次のエラーが表示されます
+
+  ```bash
+  exec /bin/sh: exec format error
+  ```
+
+- **`Dockerfile` が `COPY` のみを使用する場合**（Python ジェネレーター）：ビルドは成功しますが、後で `docker run` が次のエラーで失敗します
+
+  ```bash
+  exec /usr/local/bin/python: exec format error
+  ```
+
+- **ベースイメージがターゲットプラットフォームで利用できない場合**：`FROM` ステップで `no match for platform in manifest` というエラーでビルドが失敗します。
+
+### マルチプラットフォームビルドを有効にする
+
+**Docker Desktop**（Mac / Windows / Linux）は、[QEMU](https://www.qemu.org/) エミュレーションが標準で有効になっており、通常は追加のセットアップは必要ありません。
+
+**Linux ホスト**（CI ランナーを含む）では、QEMU binfmt ハンドラーをカーネルに登録する必要があります。マシンごとに一度インストールしてください：
+
+```bash
+docker run --privileged --rm tonistiigi/binfmt --install all
+```
+
+サポートされているプラットフォームがプロジェクトのターゲットと一致することを確認します：
+
+```bash
+docker buildx inspect --bootstrap
+```
+
+`Platforms:` 行には `linux/arm64` が含まれている必要があります。
+
+:::tip[CI 環境]
+GitHub Actions、GitLab CI、および同様のプロバイダーは、通常デフォルトでは QEMU ハンドラーを登録**しません**。クロスアーキテクチャイメージを生成する `nx build` / `nx docker` ターゲットの前に、[`docker/setup-qemu-action`](https://github.com/docker/setup-qemu-action) などのステップを追加してください。
+:::
+
+## エミュレートされたアーキテクチャでのビルドの遅さ
+
+`x86_64` ホスト上で `arm64` イメージをビルドする場合（またはその逆）、QEMU を使用して各命令をエミュレートするため、ネイティブビルドよりも何倍も遅くなる可能性があります。ジェネレーターは、`Dockerfile` の**外部**で依存関係の解決を行うことでこれを軽減します — <Link path="/guides/docker-bundling">Docker Bundling</Link> を参照してください。それでも Docker ビルドが遅い場合：
+
+- `bundle` / `docker` ターゲットを Nx 経由で実行している（`nx docker my-project`）ことを確認し、実行間でバンドルがキャッシュされるようにします。
+- CI では、QEMU を完全に回避するために、ネイティブ ARM ランナー（例：GitHub Actions の `ubuntu-24.04-arm`）の使用を検討してください。
+
+## `cdk deploy` / `nx apply` 時にビルドコンテキストが見つからない
+
+生成された `docker` ターゲットは、ビルドコンテキストを `dist/packages/<project>/docker/...`（Python）または `dist/packages/<project>/bundle/...`（TypeScript）に書き込み、生成された Infrastructure as Code はそのディレクトリを指しています。synth または apply を実行したときにそのディレクトリが存在しない場合、`ENOENT` または「directory does not exist」のようなエラーが表示されます。
+
+ジェネレーターは `docker` ターゲットを `build` の依存関係として宣言しているため、`nx build`（または生成された `nx deploy` / `nx apply` ターゲット）は CDK または Terraform が実行される前にビルドコンテキストを生成します。`cdk` または `terraform` を直接呼び出す場合は、最初に docker ステップを実行してください：
+
+```bash
+nx run my-project:docker
+```
+
+## 参考資料
+
+- [Docker — Multi-platform builds](https://docs.docker.com/build/building/multi-platform/)
+- <Link path="/guides/docker-bundling">Docker Bundling guide</Link> — ジェネレーターが従うパターン。

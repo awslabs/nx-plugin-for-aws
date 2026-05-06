@@ -1,0 +1,71 @@
+---
+title: Solução de Problemas do Docker
+description: Solução de problemas com builds do Docker
+---
+import Link from '@components/link.astro';
+
+Esta página fornece orientações para solução de problemas que você pode encontrar com os builds Docker produzidos pelos geradores. Consulte o <Link path="/guides/docker-bundling">guia de Docker Bundling</Link> para obter informações sobre o padrão que eles seguem.
+
+## Builds Multi-Plataforma
+
+Geradores como <Link path="/guides/ts-strands-agent">`ts#strands-agent`</Link>, <Link path="/guides/py-strands-agent">`py#strands-agent`</Link>, <Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link> e <Link path="/guides/py-mcp-server">`py#mcp-server`</Link> produzem imagens para `linux/arm64` (Graviton), independentemente da arquitetura do host. Construir uma imagem `arm64` em um host `x86_64` — ou uma imagem `amd64` no Apple Silicon — requer suporte a [build multi-plataforma](https://docs.docker.com/build/building/multi-platform/) na sua instalação local do Docker.
+
+Se os builds multi-plataforma não estiverem configurados, o sintoma depende do `Dockerfile`:
+
+- **`Dockerfile` tem uma etapa `RUN`** (geradores TypeScript executam `RUN npm install` para dependências não empacotáveis): o build falha no meio do caminho com
+
+  ```bash
+  exec /bin/sh: exec format error
+  ```
+
+- **`Dockerfile` usa apenas `COPY`** (geradores Python): o build é bem-sucedido, mas `docker run` falha posteriormente com
+
+  ```bash
+  exec /usr/local/bin/python: exec format error
+  ```
+
+- **Imagem base não está disponível para a plataforma de destino**: o build falha na etapa `FROM` com `no match for platform in manifest`.
+
+### Habilitar Builds Multi-Plataforma
+
+**Docker Desktop** (Mac / Windows / Linux) vem com emulação [QEMU](https://www.qemu.org/) habilitada por padrão — nenhuma configuração extra é geralmente necessária.
+
+**Hosts Linux** (incluindo runners de CI) precisam de manipuladores QEMU binfmt registrados no kernel. Instale-os uma vez por máquina:
+
+```bash
+docker run --privileged --rm tonistiigi/binfmt --install all
+```
+
+Verifique se as plataformas suportadas correspondem ao que seu projeto tem como alvo:
+
+```bash
+docker buildx inspect --bootstrap
+```
+
+A linha `Platforms:` deve incluir `linux/arm64`.
+
+:::tip[Ambientes de CI]
+GitHub Actions, GitLab CI e provedores similares normalmente **não** registram manipuladores QEMU por padrão. Adicione uma etapa como [`docker/setup-qemu-action`](https://github.com/docker/setup-qemu-action) antes de qualquer target `nx build` / `nx docker` que produza uma imagem de arquitetura cruzada.
+:::
+
+## Builds Lentos em Arquiteturas Emuladas
+
+Construir uma imagem `arm64` em um host `x86_64` (ou vice-versa) usa QEMU para emular cada instrução, o que pode ser muitas vezes mais lento do que um build nativo. Os geradores mitigam isso fazendo a resolução de dependências **fora** do `Dockerfile` — consulte <Link path="/guides/docker-bundling">Docker Bundling</Link>. Se você ainda estiver vendo builds Docker lentos:
+
+- Certifique-se de estar executando os targets `bundle` / `docker` através do Nx (`nx docker my-project`) para que o bundle seja armazenado em cache entre as execuções.
+- No CI, considere um runner ARM nativo (por exemplo, `ubuntu-24.04-arm` do GitHub Actions) para evitar QEMU completamente.
+
+## Contexto de Build Ausente em `cdk deploy` / `nx apply`
+
+O target `docker` gerado escreve seu contexto de build em `dist/packages/<project>/docker/...` (Python) ou `dist/packages/<project>/bundle/...` (TypeScript), e a infraestrutura como código gerada aponta para esse diretório. Se esse diretório não existir quando você executar synth ou apply, você verá erros como `ENOENT` ou "directory does not exist".
+
+Os geradores declaram o target `docker` como uma dependência de `build`, então `nx build` (ou os targets `nx deploy` / `nx apply` gerados) produzirão o contexto de build antes do CDK ou Terraform executar. Se você invocar `cdk` ou `terraform` diretamente, execute a etapa docker primeiro:
+
+```bash
+nx run my-project:docker
+```
+
+## Leitura Adicional
+
+- [Docker — Multi-platform builds](https://docs.docker.com/build/building/multi-platform/)
+- <Link path="/guides/docker-bundling">Docker Bundling guide</Link> — o padrão que os geradores seguem.
