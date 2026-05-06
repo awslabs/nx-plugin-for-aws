@@ -37,7 +37,11 @@ const VARIANTS: Variant[] = [
   {
     variant: 'yarn-4',
     pkgMgr: 'yarn',
-    setup: () => activatePackageManagerViaCorepack('yarn', 4),
+    setup: () =>
+      activatePackageManagerViaCorepack('yarn', 4, {
+        YARN_ENABLE_HARDENED_MODE: '0',
+        YARN_ENABLE_IMMUTABLE_INSTALLS: 'false',
+      }),
   },
   { variant: 'bun', pkgMgr: 'bun' },
 ];
