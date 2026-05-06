@@ -99,10 +99,6 @@ export async function terraformProjectGenerator(
         forwardAllArgs: true,
         command: 'tsx scripts/bootstrap.ts',
         cwd: '{projectRoot}',
-        env: {
-          WORKSPACE_ROOT: '{workspaceRoot}',
-          PROJECT_ROOT: '{projectRoot}',
-        },
       },
     },
     'bootstrap-destroy': {
@@ -145,10 +141,6 @@ export async function terraformProjectGenerator(
         forwardAllArgs: true,
         command: 'tsx scripts/init.ts',
         cwd: '{projectRoot}',
-        env: {
-          WORKSPACE_ROOT: '{workspaceRoot}',
-          PROJECT_ROOT: '{projectRoot}',
-        },
       },
       dependsOn: ['^init'],
     },
