@@ -16,16 +16,22 @@ import { setContainerSessionId } from './session.js';
 const PORT = parseInt(process.env.PORT || '8080');
 const SESSION_ID_HEADER = 'x-amzn-bedrock-agentcore-runtime-session-id';
 
+const extractSessionId = (
+  opts: CreateHTTPContextOptions | CreateWSSContextFnOptions,
+): string | undefined => {
+  if (!('req' in opts)) return undefined;
+  const header = opts.req.headers[SESSION_ID_HEADER];
+  return Array.isArray(header) ? header[0] : header;
+};
+
 const createContext = (
   opts: CreateHTTPContextOptions | CreateWSSContextFnOptions,
 ): Context => {
-  // Capture the inbound AgentCore session id once per container so any
-  // downstream MCP / A2A clients forward the same id on their outbound calls.
-  if ('req' in opts) {
-    const header = opts.req.headers[SESSION_ID_HEADER];
-    setContainerSessionId(Array.isArray(header) ? header[0] : header);
-  }
-  return {};
+  const sessionId = extractSessionId(opts);
+  // Also capture at module scope so downstream MCP / A2A clients forward
+  // the same id on their outbound calls - see session.ts.
+  setContainerSessionId(sessionId);
+  return { sessionId };
 };
 
 const handler = createHTTPHandler({
