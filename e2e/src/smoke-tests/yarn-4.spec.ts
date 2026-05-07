@@ -3,9 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { smokeTest } from './smoke-test';
-import { activateYarnViaCorepack } from './yarn-corepack';
+import { activatePackageManagerViaCorepack } from './corepack';
 
+// Hardened mode + immutable installs are auto-enabled under CI and would
+// refuse the lockfile mutations our fresh-workspace install needs.
 smokeTest('yarn', {
   variant: 'yarn-4',
-  setup: () => activateYarnViaCorepack('4.14.1'),
+  setup: () =>
+    activatePackageManagerViaCorepack('yarn', 4, {
+      YARN_ENABLE_HARDENED_MODE: '0',
+      YARN_ENABLE_IMMUTABLE_INSTALLS: 'false',
+    }),
 });

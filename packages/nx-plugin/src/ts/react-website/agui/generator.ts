@@ -21,6 +21,7 @@ import { addAgentRuntimeToConnectionNamespace } from '../../../connection/agent-
 import { kebabCase } from '../../../utils/names';
 import { sharedShadcnGenerator } from '../../../utils/shared-shadcn';
 import { toScopeAlias, getNpmScopePrefix } from '../../../utils/npm-scope';
+import { registerPnpmBuiltDependencies } from '../../../utils/pnpm-workspace';
 
 export type AgUiAuth = 'IAM' | 'Cognito' | 'None';
 
@@ -119,6 +120,13 @@ export const addAgUiReactConnection = async (
     mainTsxPath,
     `\`<App />\` => \`<AguiProvider><App /></AguiProvider>\` where { $program <: not contains \`<AguiProvider>$_</AguiProvider>\` }`,
   );
+
+  // @copilotkit/react-core transitively pulls in @scarf/scarf (telemetry),
+  // which has a postinstall script. Under pnpm 11's default
+  // `strictDepBuilds=true` that script is treated as an unreviewed build and
+  // fails the install. Register it as an explicitly-rejected build so pnpm
+  // knows we've seen it and will skip it instead of erroring.
+  registerPnpmBuiltDependencies(tree, { '@scarf/scarf': false });
 
   addDependenciesToPackageJson(
     tree,

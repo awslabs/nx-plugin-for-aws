@@ -7,7 +7,7 @@ import { buildCreateNxWorkspaceCommand, runCLI, tmpProjPath } from '../utils';
 import { existsSync, rmSync } from 'fs';
 import { ensureDirSync } from 'fs-extra';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { activateYarnViaCorepack } from './yarn-corepack';
+import { activatePackageManagerViaCorepack } from './corepack';
 
 /**
  * Verifies that `<pkgMgr> create @aws/nx-workspace` succeeds with only
@@ -29,11 +29,19 @@ interface Variant {
 const VARIANTS: Variant[] = [
   { variant: 'npm', pkgMgr: 'npm' },
   { variant: 'pnpm', pkgMgr: 'pnpm' },
-  { variant: 'yarn-classic', pkgMgr: 'yarn' },
+  {
+    variant: 'yarn-classic',
+    pkgMgr: 'yarn',
+    setup: () => activatePackageManagerViaCorepack('yarn', 1),
+  },
   {
     variant: 'yarn-4',
     pkgMgr: 'yarn',
-    setup: () => activateYarnViaCorepack('4.14.1'),
+    setup: () =>
+      activatePackageManagerViaCorepack('yarn', 4, {
+        YARN_ENABLE_HARDENED_MODE: '0',
+        YARN_ENABLE_IMMUTABLE_INSTALLS: 'false',
+      }),
   },
   { variant: 'bun', pkgMgr: 'bun' },
 ];

@@ -72,10 +72,32 @@ export default async function () {
     process.env.YARN_REGISTRY = PUBLIC_REGISTRY;
     process.env.YARN_NPM_REGISTRY_SERVER = PUBLIC_REGISTRY;
 
+    // Expose the local registry URL so `smokeTest` can drop a per-target
+    // `.npmrc` alongside each generated workspace. pnpm 11's dlx appears to
+    // ignore the user-level `@aws:registry` npmrc entry in some smoke runs
+    // (resolving `@aws/create-nx-workspace` to the public `latest` tag),
+    // whereas a cwd-local `.npmrc` is always respected.
+    process.env.NX_E2E_LOCAL_REGISTRY = localRegistry;
+
     // npm / pnpm / yarn-classic read scope config from user ~/.npmrc.
+    // `npm config set` obeys NPM_CONFIG_USERCONFIG (which setup-node points
+    // at a temp path on GitHub Actions), but pnpm 11 reads `$HOME/.npmrc`
+    // directly — so we append the scope override to both files.
     execSync(`npm config set @aws:registry ${localRegistry}`, {
       windowsHide: true,
     });
+    const homeNpmrcPath = join(homedir(), '.npmrc');
+    backupIfExists(homeNpmrcPath);
+    const existingHomeNpmrc = existsSync(homeNpmrcPath)
+      ? readFileSync(homeNpmrcPath, 'utf-8')
+      : '';
+    writeFileSync(
+      homeNpmrcPath,
+      `${existingHomeNpmrc.replace(/\n?$/, '\n')}@aws:registry=${localRegistry}\n//${localRegistry
+        .replace(/^https?:\/\//, '')
+        .replace(/\/$/, '')}/:_authToken=${VERDACCIO_AUTH_TOKEN}\n`,
+      { encoding: 'utf-8' },
+    );
 
     // Yarn berry can't set object-valued config (npmScopes) via env vars.
     backupIfExists(USER_YARNRC_PATH);
@@ -139,7 +161,11 @@ export default async function () {
     console.info('@aws/nx-plugin-mcp published to local registry');
 
     console.info('Publishing @aws/create-nx-workspace to local registry');
-    execSync(`npm publish --tag e2e ${publishRegistryFlag}`, {
+    // Must publish as `latest` (not `--tag e2e`) so `pnpm create
+    // @aws/nx-workspace` resolves the local 0.0.0 build rather than falling
+    // through to the public registry's latest tag (which lacks any in-flight
+    // fixes being tested by this smoke run).
+    execSync(`npm publish ${publishRegistryFlag}`, {
       env: process.env,
       cwd: join(__dirname, '../../dist/packages/create-nx-workspace'),
     });
@@ -174,6 +200,7 @@ export default async function () {
     }
     restoreBackup(USER_BUNFIG_PATH);
     restoreBackup(USER_YARNRC_PATH);
+    restoreBackup(join(homedir(), '.npmrc'));
     if (global.teardown) {
       console.info('Shutting down local registry...');
       global.teardown();

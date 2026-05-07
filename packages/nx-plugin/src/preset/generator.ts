@@ -32,9 +32,17 @@ import {
   updateAwsNxPluginConfig,
 } from '../utils/config/utils';
 import { SYNC_GENERATOR_NAME as TS_SYNC_GENERATOR_NAME } from '../ts/sync/generator';
+import yaml from 'js-yaml';
 
 const WORKSPACES = ['packages/*'];
 const NX_TYPESCRIPT_SYNC_GENERATOR = '@nx/js:typescript-sync';
+
+// Built dependencies whose install scripts the generated workspace trusts.
+// `onlyBuiltDependencies` is the pnpm 10 key (silently ignored by pnpm 11);
+// pnpm 11 reads `allowBuilds` instead. Any dep NOT in this allowlist will
+// have its install scripts skipped with a warning — matching pnpm 10's
+// default behaviour. The user can opt-in later via `pnpm approve-builds`.
+const PNPM_BUILT_DEPENDENCIES = ['@swc/core', 'esbuild', 'nx', 'sharp'];
 
 export const PRESET_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -43,9 +51,16 @@ const setUpWorkspaces = (tree: Tree) => {
   if (detectPackageManager() === 'pnpm') {
     tree.write(
       'pnpm-workspace.yaml',
-      `packages:
-  ${WORKSPACES.map((workspace) => `- "${workspace}"`).join('\n  ')}
-`,
+      yaml.dump(
+        {
+          packages: WORKSPACES,
+          allowBuilds: Object.fromEntries(
+            PNPM_BUILT_DEPENDENCIES.map((dep) => [dep, true]),
+          ),
+          onlyBuiltDependencies: PNPM_BUILT_DEPENDENCIES,
+        },
+        { quotingType: "'" },
+      ),
     );
   } else {
     updateJson(tree, 'package.json', (json) => {

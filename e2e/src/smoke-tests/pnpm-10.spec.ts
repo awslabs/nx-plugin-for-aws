@@ -5,7 +5,7 @@
 import { smokeTest } from './smoke-test';
 import { activatePackageManagerViaCorepack } from './corepack';
 
-smokeTest('yarn', {
-  variant: 'yarn-classic',
-  setup: () => activatePackageManagerViaCorepack('yarn', 1),
+smokeTest('pnpm', {
+  variant: 'pnpm-10',
+  setup: () => activatePackageManagerViaCorepack('pnpm', 10),
 });
