@@ -36,6 +36,11 @@ export type AuroraDatabaseEngineVersion =
 
 export interface AuroraDatabaseEngine {
   /**
+   * Discriminant identifying the engine type.
+   */
+  readonly type: 'mysql' | 'postgres';
+
+  /**
    * Default Aurora engine version used when one is not explicitly provided.
    */
   readonly defaultVersion: AuroraDatabaseEngineVersion;
@@ -53,6 +58,7 @@ export class AuroraDatabaseEngines {
     defaultVersion?: AuroraMysqlEngineVersion;
   }): AuroraDatabaseEngine {
     return {
+      type: 'mysql',
       defaultVersion,
       clusterEngine: (version) =>
         DatabaseClusterEngine.auroraMysql({
@@ -67,6 +73,7 @@ export class AuroraDatabaseEngines {
     defaultVersion?: AuroraPostgresEngineVersion;
   }): AuroraDatabaseEngine {
     return {
+      type: 'postgres',
       defaultVersion,
       clusterEngine: (version) =>
         DatabaseClusterEngine.auroraPostgres({
@@ -145,6 +152,27 @@ export interface AuroraDatabaseProps extends Omit<
    * @default true
    */
   readonly enableCredentialRotation?: boolean;
+
+  /**
+   * Whether to enable deletion protection on the Aurora cluster.
+   *
+   * @default true
+   */
+  readonly deletionProtection?: boolean;
+
+  /**
+   * Removal policy applied to the Aurora cluster.
+   *
+   * @default RemovalPolicy.RETAIN
+   */
+  readonly removalPolicy?: RemovalPolicy;
+
+  /**
+   * Whether to enable automatic key rotation on the KMS key used to encrypt the Aurora cluster and its credentials secret.
+   *
+   * @default true
+   */
+  readonly enableKeyRotation?: boolean;
 }
 
 /**
@@ -171,6 +199,9 @@ export abstract class AuroraDatabase extends Construct {
       writer,
       enableRdsProxy = true,
       enableCredentialRotation = true,
+      deletionProtection = true,
+      removalPolicy = RemovalPolicy.RETAIN,
+      enableKeyRotation = true,
       engine,
       engineVersion,
       ...clusterProps
@@ -180,7 +211,7 @@ export abstract class AuroraDatabase extends Construct {
 
     this.adminUser = adminUser;
 
-    const key = new Key(this, 'EncryptionKey', { enableKeyRotation: true });
+    const key = new Key(this, 'EncryptionKey', { enableKeyRotation });
     this.cluster = new DatabaseCluster(this, 'DatabaseCluster', {
       ...clusterProps,
       vpc,
@@ -195,8 +226,8 @@ export abstract class AuroraDatabase extends Construct {
       defaultDatabaseName: databaseName,
       storageEncrypted: true,
       storageEncryptionKey: key,
-      deletionProtection: true,
-      removalPolicy: RemovalPolicy.RETAIN,
+      deletionProtection,
+      removalPolicy,
     });
 
     if (enableCredentialRotation) {
@@ -283,16 +314,14 @@ export abstract class AuroraDatabase extends Construct {
     const migrationHandler = new DockerImageFunction(this, 'MigrationHandler', {
       code: DockerImageCode.fromImageAsset(migrationBundleDir, {
         platform: Platform.LINUX_ARM64,
-        buildArgs: {
-          AWS_REGION: Stack.of(this).region,
-        },
       }),
       memorySize: 1024,
       timeout: Duration.minutes(5),
       tracing: Tracing.ACTIVE,
       vpc,
-      environment: {
+      environment: engine.type === 'mysql' ? {
         DATABASE_SECRET_ARN: this.cluster.secret!.secretArn,
+      } : {
         HOSTNAME: databaseHostname,
         DATABASE: databaseName,
         PORT: databasePort.toString(),
@@ -301,10 +330,13 @@ export abstract class AuroraDatabase extends Construct {
       architecture: Architecture.ARM_64,
     });
 
-    this.allowDefaultPortFrom(migrationHandler);
-    this.cluster.connections.allowDefaultPortFrom(migrationHandler);
-    this.grantSecretRead(migrationHandler);
-    this.grantConnect(migrationHandler);
+    if (engine.type === 'mysql') {
+      this.cluster.connections.allowDefaultPortFrom(migrationHandler);
+      this.grantSecretRead(migrationHandler);
+    } else {
+      this.allowDefaultPortFrom(migrationHandler);
+      this.grantConnect(migrationHandler);
+    }
 
     const trigger = new Trigger(this, 'MigrationTrigger', {
       handler: migrationHandler,

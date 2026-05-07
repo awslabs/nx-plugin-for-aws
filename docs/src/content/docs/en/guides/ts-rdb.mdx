@@ -111,11 +111,7 @@ You can also manually generate the client at any time:
 
 <NxCommands commands={['generate <your-db-project-name>']} />
 
-:::note[Run Prisma from the Package Directory]
-When using the Prisma CLI, run commands from your generated database package directory (e.g., `packages/mydb`) so Prisma can find `prisma/schema.prisma` and `prisma.config.ts`.
-:::
-
-You can also run from the workspace root with the `prisma` target:
+Use the `prisma` target to run Prisma CLI commands from the workspace root:
 
 <NxCommands commands={['run <project>:prisma generate']} />
 
@@ -174,7 +170,7 @@ export const listUsers = publicProcedure
   });
 ```
 
-`getPrisma()` returns a lazily-initialised, cached client — subsequent calls within the same Lambda execution context reuse the existing connection pool rather than opening a new one.
+`getPrisma()` returns a lazily-initialised, cached client. Subsequent calls within the same Lambda execution context reuse the existing connection pool rather than opening a new one.
 
 The Prisma client exposes fully typed models derived from your `prisma/models/` schema, giving you end-to-end type safety from the database all the way through to your API response.
 
@@ -285,7 +281,7 @@ The generated infrastructure creates two database users:
 </Fragment>
 </Infrastructure>
 
-The application user is automatically created with a random name and IAM authentication — `getPrisma()` is already configured to authenticate as this user using short-lived RDS tokens, so your application code never handles database passwords.
+The application user is automatically created with a random name and IAM authentication. `getPrisma()` is already configured to authenticate as this user using short-lived RDS tokens, so your application code never handles database passwords.
 
 Your VPC should include public subnets, private subnets with egress, and private isolated subnets. The database can run in private isolated subnets, while API Lambda functions should run in private subnets with egress so they can reach AWS services such as AppConfig.
 
@@ -427,9 +423,9 @@ You can disable the RDS proxy as follows:
 
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
-import { Postgres } from ':my-scope/common-constructs';
+import { MyDatabase } from ':my-scope/common-constructs';
 
-const db = new Postgres(this, 'Db', {
+const db = new MyDatabase(this, 'Db', {
   ...
   enableRdsProxy: false,
 });
@@ -456,8 +452,8 @@ const api = new Api(this, 'Api', {
 By default, RDS Proxy is enabled. The generated runtime client (`getPrisma()`) automatically connects through the proxy endpoint. You can disable it if needed:
 
 ```hcl title="packages/infra/src/main.tf"
-module "postgres" {
-  source = "../../common/terraform/src/app/dbs/postgres"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
   ...
   enable_rds_proxy = false
 }
@@ -496,7 +492,7 @@ The `prisma` target sets `SERVE_LOCAL=true` automatically, which `prisma.config.
 
 ### Prisma Studio
 
-[Prisma Studio](https://www.prisma.io/studio) is a visual editor for your local database. Use it to browse tables, inspect and edit records, filter data, follow relations, and run raw SQL via the built-in SQL console — useful for verifying migrations and seeding test data during development. Launch it with:
+[Prisma Studio](https://www.prisma.io/studio) is a visual editor for your local database. Use it to browse tables, inspect and edit records, filter data, follow relations, and run raw SQL via the built-in SQL console. It is useful for verifying migrations and seeding test data during development. Launch it with:
 
 <NxCommands commands={['run <project>:prisma studio']} />
 
@@ -512,9 +508,9 @@ Configure the writer and reader instances for your Aurora cluster.
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
-import { Postgres } from ':my-scope/common-constructs';
+import { MyDatabase } from ':my-scope/common-constructs';
 
-const db = new Postgres(this, 'Db', {
+const db = new MyDatabase(this, 'Db', {
   ...
   writer: ClusterInstance.serverlessV2('writer'),
   readers: [ClusterInstance.serverlessV2('reader')],
@@ -524,8 +520,8 @@ const db = new Postgres(this, 'Db', {
 <Fragment slot="terraform">
 
 ```hcl title="packages/infra/src/main.tf"
-module "postgres" {
-  source = "../../common/terraform/src/app/dbs/postgres"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
   ...
   instance_count = 2  # 1 writer + 1 reader
 }
@@ -541,9 +537,9 @@ Control Aurora Serverless v2 scaling limits to match your workload.
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
-import { Postgres } from ':my-scope/common-constructs';
+import { MyDatabase } from ':my-scope/common-constructs';
 
-const db = new Postgres(this, 'Db', {
+const db = new MyDatabase(this, 'Db', {
   ...
   serverlessV2MinCapacity: 0.5,
   serverlessV2MaxCapacity: 8,
@@ -553,8 +549,8 @@ const db = new Postgres(this, 'Db', {
 <Fragment slot="terraform">
 
 ```hcl title="packages/infra/src/main.tf"
-module "postgres" {
-  source = "../../common/terraform/src/app/dbs/postgres"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
   ...
   serverless_min_capacity = 0.5
   serverless_max_capacity = 8
@@ -567,7 +563,7 @@ module "postgres" {
 
 Pin a specific Aurora engine version.
 
-<OptionFilter when={{ engine: 'Postgres' }}>
+<OptionFilter when={{ engine: 'PostgreSQL' }}>
 <Infrastructure>
 <Fragment slot="cdk">
 
@@ -627,10 +623,10 @@ Configure lifecycle settings to protect against accidental deletion.
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
-import { Postgres } from ':my-scope/common-constructs';
+import { MyDatabase } from ':my-scope/common-constructs';
 import { RemovalPolicy } from 'aws-cdk-lib';
 
-const db = new Postgres(this, 'Db', {
+const db = new MyDatabase(this, 'Db', {
   ...
   deletionProtection: true,
   removalPolicy: RemovalPolicy.SNAPSHOT,
@@ -640,8 +636,8 @@ const db = new Postgres(this, 'Db', {
 <Fragment slot="terraform">
 
 ```hcl title="packages/infra/src/main.tf"
-module "postgres" {
-  source = "../../common/terraform/src/app/dbs/postgres"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
   ...
   deletion_protection = true
   skip_final_snapshot = false
@@ -649,3 +645,102 @@ module "postgres" {
 ```
 </Fragment>
 </Infrastructure>
+
+### Encryption Key Rotation
+
+The KMS key used to encrypt the Aurora cluster and its credentials secret has automatic key rotation enabled by default. Disable it if your security policy manages rotation externally.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', {
+  ...
+  enableKeyRotation: false,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
+  ...
+  enable_key_rotation = false
+}
+```
+</Fragment>
+</Infrastructure>
+
+## Limitations
+
+<OptionFilter when={{ engine: 'MySQL' }}>
+
+### MySQL: API Gateway Streaming Mode
+
+When using Aurora MySQL with API Gateway streaming responses (e.g. with tRPC's `httpBatchStreamLink`), the Prisma MySQL client holds onto the Node.js event loop after a query completes, preventing the Lambda from flushing the stream and ending the request.
+
+To work around this, explicitly disconnect the client in a `finally` block after each query so the event loop is free to exit and the streaming response can complete.
+
+**Option 1: per-procedure**
+
+```ts
+export const listExampleTable = publicProcedure
+  .output(z.array(ExampleTableSchema))
+  .query(async () => {
+    const prisma = await getPrisma();
+    try {
+      return await prisma.exampleTable.findMany();
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
+```
+
+**Option 2: tRPC middleware**
+
+If you are using the [middleware pattern](#injecting-the-prisma-client-via-middleware), add the `$disconnect()` call to the middleware so all procedures built on it are covered automatically:
+
+```ts title="packages/api/src/middleware/db.ts"
+import { getPrisma } from ':my-scope/db';
+import { initTRPC } from '@trpc/server';
+
+export interface IDbContext {
+  db: Awaited<ReturnType<typeof getPrisma>>;
+}
+
+export const createDbPlugin = () => {
+  const t = initTRPC.context<IDbContext>().create();
+  return t.procedure.use(async (opts) => {
+    const db = await getPrisma();
+    try {
+      return await opts.next({
+        ctx: {
+          ...opts.ctx,
+          db,
+        },
+      });
+    } finally {
+      await db.$disconnect();
+    }
+  });
+};
+```
+
+:::note
+This is not required for PostgreSQL. The PostgreSQL adapter uses a `pg` connection pool configured with `allowExitOnIdle: true`, which allows the event loop to exit naturally without an explicit disconnect. Due to this limitation, `getPrisma()` for MySQL does not cache the client or reuse connections across warm Lambda invocations. A new connection is opened on every call, unlike the PostgreSQL adapter which caches the client at the module level and reuses the same connection pool.
+:::
+
+### MySQL: IAM Token Expiry
+
+RDS IAM authentication tokens expire after **15 minutes**. The MySQL Prisma client captures the IAM token as a static value at the time `getPrisma()` is called. An existing open connection is not affected, but if a new connection needs to be established after the token has expired, authentication will fail. The PostgreSQL adapter avoids this by refreshing the token dynamically each time the pool opens a new connection, but the MySQL adapter has no equivalent mechanism.
+
+:::caution
+Be cautious with tasks running longer than 15 minutes. If the MySQL client needs to open a new connection after the original IAM token has expired, authentication will fail.
+:::
+
+For long-running tasks such as batch jobs or data migrations, call `getPrisma()` at the start of each unit of work rather than once for the entire operation. Because `getPrisma()` always creates a fresh client and fetches a new IAM token for MySQL, this ensures each connection authenticates with a valid token.
+
+</OptionFilter>

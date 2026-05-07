@@ -6,7 +6,9 @@ import {
   generateFiles,
   joinPathFragments,
   OverwriteStrategy,
+  ProjectConfiguration,
   Tree,
+  updateJson,
 } from '@nx/devkit';
 import {
   PACKAGES_DIR,
@@ -17,6 +19,7 @@ import { addStarExport } from '../ast';
 import { IacProvider } from '../iac';
 
 export interface AddRdbConstructOptions {
+  projectName: string;
   nameClassName: string;
   nameKebabCase: string;
   databasePackageAlias: string;
@@ -39,6 +42,30 @@ export const addRdbInfra = async (
   } else {
     throw new Error(`Unsupported iacProvider ${options.iacProvider}`);
   }
+
+  updateJson(
+    tree,
+    joinPathFragments(
+      PACKAGES_DIR,
+      options.iacProvider === 'CDK'
+        ? SHARED_CONSTRUCTS_DIR
+        : SHARED_TERRAFORM_DIR,
+      'project.json',
+    ),
+    (config: ProjectConfiguration) => {
+      if (!config.targets) {
+        config.targets = {};
+      }
+      if (!config.targets.build) {
+        config.targets.build = {};
+      }
+      config.targets.build.dependsOn = [
+        ...(config.targets.build.dependsOn ?? []),
+        `${options.projectName}:build`,
+      ];
+      return config;
+    },
+  );
 };
 
 export const addRdbCdkConstructs = async (

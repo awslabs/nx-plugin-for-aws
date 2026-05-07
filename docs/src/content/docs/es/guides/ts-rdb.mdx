@@ -1,23 +1,20 @@
 ---
 title: Base de Datos Relacional
 description: Crear un proyecto de base de datos relacional
+generator: ts#rdb
 ---
 
 import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import Infrastructure from '@components/infrastructure.astro';
+import NxCommands from '@components/nx-commands.astro';
+import PackageManagerExecCommand from '@components/package-manager-exec-command.astro';
 import Snippet from '@components/snippet.astro';
+import OptionFilter from '@components/option-filter.astro';
 
-Este generador crea un nuevo proyecto de base de datos relacional respaldado por [Amazon Aurora](https://aws.amazon.com/rds/aurora/) PostgreSQL. Genera el código de aplicación y la infraestructura necesaria para aprovisionar y gestionar una base de datos usando AWS CDK o Terraform.
-
-La infraestructura generada incluye:
-
-- Constructo o módulo Aurora reutilizable
-- Constructo o módulo de base de datos específico de la aplicación  
-- Manejador de usuario de base de datos de aplicación autenticado por IAM
-- Registro de configuración en tiempo de ejecución en AWS AppConfig
-- Manejador de migración para despliegue automático de migraciones de Prisma
+Este generador crea un nuevo proyecto de base de datos relacional respaldado por [Amazon Aurora](https://aws.amazon.com/rds/aurora/) (PostgreSQL o MySQL) y [Prisma ORM](https://www.prisma.io/docs/orm). Genera el código de aplicación y la infraestructura necesaria para aprovisionar y gestionar una base de datos usando AWS CDK o Terraform, con definición de esquema declarativa, despliegue automático de migraciones y un cliente ORM con tipos seguros.
 
 ## Uso
 
@@ -40,8 +37,13 @@ El generador creará la siguiente estructura de proyecto en el directorio `<dire
     - models
       - example.prisma Definición de modelo de ejemplo
     - schema.prisma Esquema principal de Prisma (referencia modelos)
+  - scripts
+    - docker-pull.ts Descarga la imagen Docker de la base de datos para desarrollo local
+    - docker-start.ts Inicia un contenedor de base de datos local
+    - wait-for-db.ts Espera a que la base de datos local esté lista
   - src
     - index.ts Punto de entrada del proyecto
+    - constants.ts Detalles de conexión de desarrollo local y clave de configuración en tiempo de ejecución
     - prisma.ts Envoltorio del cliente Prisma en tiempo de ejecución
     - utils.ts Ayudantes de configuración en tiempo de ejecución y secretos
     - create-db-user-handler.ts Manejador Lambda usado para crear el usuario de base de datos de aplicación durante el despliegue
@@ -50,10 +52,6 @@ El generador creará la siguiente estructura de proyecto en el directorio `<dire
   - Dockerfile Definición de imagen de contenedor para el manejador de migración
   - project.json Configuración del proyecto y objetivos de construcción
   - prisma.config.ts Configuración para Prisma CLI
-  - tsconfig.json Configuración base de TypeScript para código fuente y pruebas
-  - tsconfig.lib.json Configuración de TypeScript para código fuente
-  - tsconfig.spec.json Configuración de TypeScript para pruebas
-  - eslint.config.mjs Configuración para ESLint
 </FileTree>
 
 ### Infraestructura
@@ -103,7 +101,7 @@ model User {
 }
 ```
 
-Para más detalles, consulta la guía oficial sobre [modelado de datos con Prisma](https://www.prisma.io/docs/orm/core-concepts/data-modeling#data-modeling-with-prisma-orm).
+Para más detalles, consulta la guía oficial de [modelado de datos con Prisma](https://www.prisma.io/docs/orm/core-concepts/data-modeling#data-modeling-with-prisma-orm).
 
 ### Generando el Cliente de Base de Datos
 
@@ -111,36 +109,15 @@ El generador configura automáticamente el objetivo `generate` para crear un cli
 
 También puedes generar manualmente el cliente en cualquier momento:
 
-<Tabs>
-  <TabItem label="npm" icon="seti:npm">
+<NxCommands commands={['generate <your-db-project-name>']} />
 
-```bash
-npm run nx -- run <your-db-package-name>:generate
-```
+:::note[Ejecutar Prisma desde el Directorio del Paquete]
+Al usar Prisma CLI, ejecuta los comandos desde el directorio del paquete de base de datos generado (por ejemplo, `packages/mydb`) para que Prisma pueda encontrar `prisma/schema.prisma` y `prisma.config.ts`.
+:::
 
-  </TabItem>
-  <TabItem label="pnpm" icon="seti:pnpm">
+También puedes ejecutar desde la raíz del workspace con el objetivo `prisma`:
 
-```bash
-pnpm nx run <your-db-package-name>:generate
-```
-
-  </TabItem>
-  <TabItem label="yarn" icon="seti:yarn">
-
-```bash
-yarn nx run <your-db-package-name>:generate
-```
-
-  </TabItem>
-  <TabItem label="bun" icon="seti:bun">
-
-```bash
-bun nx run <your-db-package-name>:generate
-```
-
-  </TabItem>
-</Tabs>
+<NxCommands commands={['run <project>:prisma generate']} />
 
 El envoltorio en tiempo de ejecución en `src/prisma.ts` exporta:
 
@@ -155,50 +132,11 @@ El cliente automáticamente:
 
 ### Creando Migraciones
 
-:::note[Ejecutar Prisma desde el Directorio del Paquete]
-Al usar Prisma CLI, ejecuta los comandos desde el directorio del paquete de base de datos generado (por ejemplo, `packages/postgres`) para que Prisma pueda encontrar `prisma/schema.prisma` y `prisma.config.ts`.
-:::
-
 Prisma Migrate requiere una [base de datos sombra](https://www.prisma.io/docs/orm/prisma-migrate/understanding-prisma-migrate/shadow-database) para comparar tu esquema con el estado actual de la base de datos y generar cambios SQL.
 
-Para generar migraciones localmente, apunta Prisma a una base de datos de desarrollo exportando `DATABASE_URL`:
+Usa el objetivo `prisma` generado, que automáticamente inicia una base de datos local a través de Docker antes de ejecutar:
 
-```bash
-export DATABASE_URL="postgresql://username:password@hostname:5432/dbname"
-```
-
-Luego crea los archivos de migración sin aplicarlos:
-
-<Tabs>
-  <TabItem label="npm" icon="seti:npm">
-
-```bash
-npx prisma migrate dev --create-only
-```
-
-  </TabItem>
-  <TabItem label="pnpm" icon="seti:pnpm">
-
-```bash
-pnpm prisma migrate dev --create-only
-```
-
-  </TabItem>
-  <TabItem label="yarn" icon="seti:yarn">
-
-```bash
-yarn prisma migrate dev --create-only
-```
-
-  </TabItem>
-  <TabItem label="bun" icon="seti:bun">
-
-```bash
-bunx --bun prisma migrate dev --create-only
-```
-
-  </TabItem>
-</Tabs>
+<NxCommands commands={['run <project>:prisma migrate dev']} />
 
 Esto genera una nueva carpeta de migración en `prisma/migrations` cada vez que tu esquema cambia:
 
@@ -211,50 +149,19 @@ Esto genera una nueva carpeta de migración en `prisma/migrations` cada vez que 
     - schema.prisma
 </FileTree>
 
-Para aplicar migraciones a tu base de datos local:
-
-<Tabs>
-  <TabItem label="npm" icon="seti:npm">
-
-```bash
-npx prisma migrate deploy
-```
-
-  </TabItem>
-  <TabItem label="pnpm" icon="seti:pnpm">
-
-```bash
-pnpm prisma migrate deploy
-```
-
-  </TabItem>
-  <TabItem label="yarn" icon="seti:yarn">
-
-```bash
-yarn prisma migrate deploy
-```
-
-  </TabItem>
-  <TabItem label="bun" icon="seti:bun">
-
-```bash
-bunx --bun prisma migrate deploy
-```
-
-  </TabItem>
-</Tabs>
-
 :::note[Migraciones Automáticas en AWS]
 Para despliegues en AWS, no necesitas ejecutar `prisma migrate deploy` manualmente. La infraestructura generada crea automáticamente el usuario de base de datos de aplicación y ejecuta las migraciones durante el despliegue.
 :::
 
 ## Conectando desde una API tRPC
 
+Aunque esta sección describe cómo conectarse a tu base de datos desde una API tRPC, también sirve como referencia para su uso en cualquier otro proyecto TypeScript.
+
 ### Usando el Cliente Prisma en Manejadores
 
 Importa `getPrisma` desde tu paquete de base de datos y llámalo dentro de tu manejador para obtener un cliente Prisma con tipos seguros:
 
-```ts title="packages/api/src/procedures/list-users.ts"
+```ts title="packages/api/src/procedures/list-users.ts" {8}
 import { getPrisma } from ':my-scope/db';
 import { publicProcedure } from '../init.js';
 import { ListUsersOutputSchema } from '../schema/index.js';
@@ -267,7 +174,7 @@ export const listUsers = publicProcedure
   });
 ```
 
-`getPrisma()` devuelve un cliente inicializado de forma perezosa y en caché — las llamadas subsiguientes dentro del mismo contexto de ejecución Lambda reutilizan el pool de conexiones existente en lugar de abrir uno nuevo.
+`getPrisma()` devuelve un cliente inicializado de forma perezosa y en caché. Las llamadas subsiguientes dentro del mismo contexto de ejecución Lambda reutilizan el pool de conexiones existente en lugar de abrir uno nuevo.
 
 El cliente Prisma expone modelos completamente tipados derivados de tu esquema `prisma/models/`, brindándote seguridad de tipos de extremo a extremo desde la base de datos hasta la respuesta de tu API.
 
@@ -321,7 +228,8 @@ export const listUsers = dbProcedure
 ```
 
 :::note
-Consulta [Implementando Middleware Personalizado](./trpc#implementing-custom-middleware) para más detalles sobre el patrón de middleware.
+Consulta la <Link path="/guides/trpc">guía del generador `ts#trpc-api`</Link> para más detalles sobre el patrón de middleware.
+
 :::
 
 ## Desplegando en AWS
@@ -333,30 +241,13 @@ El generador de base de datos relacional crea infraestructura CDK o Terraform ba
 El constructo CDK se crea en `common/constructs`. Ejemplo de uso:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
-import { Postgres } from ':my-scope/common-constructs';
+import { MyDatabase } from ':my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
-
-    const vpc = new Vpc(this, 'Vpc', {
-      subnetConfiguration: [
-        {
-          name: 'public',
-          subnetType: SubnetType.PUBLIC,
-        },
-        {
-          name: 'private_with_egress',
-          subnetType: SubnetType.PRIVATE_WITH_EGRESS,
-        },
-        {
-          name: 'private_isolated',
-          subnetType: SubnetType.PRIVATE_ISOLATED,
-        },
-      ],
-    });
-
-    const db = new Postgres(this, 'Db', {
+    ...
+    const db = new MyDatabase(this, 'Db', {
       vpc,
       vpcSubnets: {
         subnetType: SubnetType.PRIVATE_ISOLATED,
@@ -366,7 +257,7 @@ export class ApplicationStack extends Stack {
 }
 ```
 
-Esto aprovisiona un clúster Aurora con RDS Proxy, credenciales de administrador, usuario de base de datos de aplicación, registro de configuración en tiempo de ejecución y manejador de migración. Despliega en subredes privadas aisladas para prevenir acceso directo desde internet.
+Esto aprovisiona un clúster Aurora con RDS Proxy, credenciales de administrador, usuario de base de datos de aplicación, registro de configuración en tiempo de ejecución y manejador de migración.
 
 La infraestructura generada crea dos usuarios de base de datos:
 - **Usuario administrador** - Creado durante el aprovisionamiento del clúster con credenciales almacenadas en AWS Secrets Manager
@@ -376,8 +267,8 @@ La infraestructura generada crea dos usuarios de base de datos:
 El módulo Terraform se crea en `common/terraform`. Ejemplo de uso:
 
 ```hcl title="packages/infra/src/main.tf"
-module "postgres" {
-  source = "../../common/terraform/src/app/dbs/postgres"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
 
   vpc_id             = module.vpc.vpc_id
   private_subnet_ids = module.vpc.private_isolated_subnet_ids
@@ -394,9 +285,55 @@ La infraestructura generada crea dos usuarios de base de datos:
 </Fragment>
 </Infrastructure>
 
-El usuario de aplicación se crea automáticamente con un nombre aleatorio y autenticación IAM — `getPrisma()` ya está configurado para autenticarse como este usuario usando tokens RDS de corta duración, por lo que tu código de aplicación nunca maneja contraseñas de base de datos.
+El usuario de aplicación se crea automáticamente con un nombre aleatorio y autenticación IAM. `getPrisma()` ya está configurado para autenticarse como este usuario usando tokens RDS de corta duración, por lo que tu código de aplicación nunca maneja contraseñas de base de datos.
 
-### Conectando el Constructo API a la Base de Datos
+Tu VPC debe incluir subredes públicas, subredes privadas con egreso y subredes privadas aisladas. La base de datos puede ejecutarse en subredes privadas aisladas, mientras que las funciones Lambda de la API deben ejecutarse en subredes privadas con egreso para que puedan alcanzar servicios de AWS como AppConfig.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const vpc = new Vpc(this, 'Vpc', {
+  subnetConfiguration: [
+    {
+      name: 'public',
+      subnetType: SubnetType.PUBLIC,
+    },
+    {
+      name: 'private_with_egress',
+      subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+    },
+    {
+      name: 'private_isolated',
+      subnetType: SubnetType.PRIVATE_ISOLATED,
+    },
+  ],
+});
+```
+
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "vpc" {
+  source  = "terraform-aws-modules/vpc/aws"
+  version = "~> 6.0"
+
+  name = "app"
+  ...
+  public_subnet_names  = ["public"]
+  private_subnet_names = ["private_with_egress"]
+  intra_subnet_names   = ["private_isolated"]
+
+  enable_nat_gateway = true
+  single_nat_gateway = true
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+### Conectando una API a la Base de Datos
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -404,7 +341,9 @@ El usuario de aplicación se crea automáticamente con un nombre aleatorio y aut
 En tu stack de aplicación, despliega la API en la misma VPC que la base de datos, luego llama a `allowDefaultPortFrom` y `grantConnect` para abrir la ruta de red y otorgar permiso IAM `rds-db:connect` a cada manejador Lambda:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
-const db = new Postgres(this, 'Db', { vpc, ... });
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
 
 const api = new Api(this, 'Api', {
   integrations: Api.defaultIntegrations(this)
@@ -421,17 +360,17 @@ Object.entries(api.integrations).forEach(([operation, integration]) => {
 });
 ```
 
-`RUNTIME_CONFIG_APP_ID` se establece automáticamente por la infraestructura generada para que el cliente en tiempo de ejecución pueda cargar los detalles de conexión de base de datos desde AppConfig.
+Despliega las funciones Lambda de la API en una **subred privada con egreso** (recomendado) o una subred pública, no en una subred privada aislada. En tiempo de ejecución, `getPrisma()` recupera los detalles de conexión de base de datos desde AWS AppConfig, que es un endpoint de servicio público de AWS. Las funciones Lambda en una subred privada aislada no tienen acceso saliente a internet y no pueden alcanzar AppConfig. Las subredes privadas con egreso enrutan el tráfico saliente a través de un NAT Gateway que se encuentra en una subred pública.
 </Fragment>
 <Fragment slot="terraform">
 
 Pasa las salidas del módulo de base de datos a tu módulo de cómputo para que pueda alcanzar la base de datos y leer su configuración en tiempo de ejecución:
 
 ```hcl title="packages/infra/src/main.tf"
-module "postgres" {
-  source             = "../../common/terraform/src/app/dbs/postgres"
+module "my_database" {
+  source             = "../../common/terraform/src/app/dbs/my-database"
   vpc_id             = module.vpc.vpc_id
-  private_subnet_ids = module.vpc.private_subnet_ids
+  private_subnet_ids = module.vpc.private_isolated_subnet_ids
 }
 
 module "api" {
@@ -440,31 +379,33 @@ module "api" {
   private_subnet_ids = module.vpc.private_subnet_ids
 
   # Permitir que la API lea la configuración en tiempo de ejecución desde AppConfig
-  appconfig_application_id = module.postgres.appconfig_application_id
+  appconfig_application_id = module.my_database.appconfig_application_id
 
   # Otorgar rds-db:connect para el usuario de base de datos de aplicación
-  database_cluster_resource_id = module.postgres.cluster_resource_id
-  database_runtime_user        = module.postgres.database_runtime_user
+  database_cluster_resource_id = module.my_database.cluster_resource_id
+  database_runtime_user        = module.my_database.database_runtime_user
 
   # Permitir acceso de red al puerto de la base de datos
-  database_security_group_id = module.postgres.security_group_id
-  database_port              = module.postgres.cluster_port
+  database_security_group_id = module.my_database.security_group_id
+  database_port              = module.my_database.cluster_port
 
   environment_variables = {
-    RUNTIME_CONFIG_APP_ID = module.postgres.appconfig_application_id
+    RUNTIME_CONFIG_APP_ID = module.my_database.appconfig_application_id
   }
 }
 ```
+
+Despliega las funciones Lambda de la API en **subredes privadas con egreso** (recomendado) o subredes públicas, no en subredes privadas aisladas. En tiempo de ejecución, `getPrisma()` recupera los detalles de conexión de base de datos desde AWS AppConfig, que es un endpoint de servicio público de AWS. Las funciones Lambda en una subred privada aislada no tienen acceso saliente a internet y no pueden alcanzar AppConfig. Las subredes privadas con egreso enrutan el tráfico saliente a través de un NAT Gateway que requiere una subred pública.
 
 Asegúrate de que el rol Lambda de la API tenga `rds-db:connect` en `arn:aws:rds-db:<region>:<account>:dbuser:<cluster_resource_id>/<database_runtime_user>` y permisos de lectura de AppConfig, que el grupo de seguridad de la API pueda alcanzar el grupo de seguridad de la base de datos en el puerto de la base de datos, y que el entorno Lambda incluya `RUNTIME_CONFIG_APP_ID`.
 </Fragment>
 </Infrastructure>
 
-### Configuración de RDS Proxy
-
-:::note[Costo Adicional]
-RDS Proxy está habilitado por defecto pero incurre en cargos adicionales además del costo del clúster Aurora. Consulta [precios de AWS RDS Proxy](https://aws.amazon.com/rds/proxy/pricing/) para más detalles.
+:::note
+Este ejemplo otorga acceso a cada manejador en tu API, pero si solo algunos manejadores necesitan acceso es mejor configurar individualmente.
 :::
+
+### Configuración de RDS Proxy
 
 La infraestructura generada incluye un RDS Proxy por defecto, que se sitúa entre tu aplicación y el clúster Aurora. RDS Proxy proporciona varios beneficios:
 
@@ -473,13 +414,22 @@ La infraestructura generada incluye un RDS Proxy por defecto, que se sitúa entr
 - **Autenticación IAM** - Soporta autenticación de base de datos basada en IAM, eliminando la necesidad de gestionar credenciales de base de datos en tu código de aplicación
 - **Seguridad mejorada** - Impone cifrado TLS para todas las conexiones
 
+:::note[Costo Adicional]
+RDS Proxy está habilitado por defecto pero incurre en cargos adicionales además del costo del clúster Aurora. Consulta [precios de AWS RDS Proxy](https://aws.amazon.com/rds/proxy/pricing/) para más detalles. Si prefieres deshabilitar el proxy, consulta la sección a continuación.
+:::
+
+#### Deshabilitar RDS Proxy  
+
+Puedes deshabilitar el proxy RDS de la siguiente manera:  
+
 <Infrastructure>
 <Fragment slot="cdk">
 
-Por defecto, RDS Proxy está habilitado. El cliente en tiempo de ejecución generado (`getPrisma()`) se conecta automáticamente a través del endpoint del proxy. Puedes deshabilitarlo si es necesario:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
-const db = new Postgres(this, 'Db', {
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', {
   ...
   enableRdsProxy: false,
 });
@@ -506,8 +456,8 @@ const api = new Api(this, 'Api', {
 Por defecto, RDS Proxy está habilitado. El cliente en tiempo de ejecución generado (`getPrisma()`) se conecta automáticamente a través del endpoint del proxy. Puedes deshabilitarlo si es necesario:
 
 ```hcl title="packages/infra/src/main.tf"
-module "postgres" {
-  source = "../../common/terraform/src/app/dbs/postgres"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
   ...
   enable_rds_proxy = false
 }
@@ -534,39 +484,21 @@ Para más detalles, consulta los [requisitos SSL/TLS de AWS Lambda para conexion
 
 ## Desarrollo Local
 
-### Usando una Base de Datos Local
+### Ejecutando Comandos de Prisma
 
-Inicia una instancia local de Postgres (por ejemplo, con Docker) y establece `DATABASE_URL` al ejecutar comandos de Prisma CLI desde el paquete de base de datos generado:
+Usa el objetivo `prisma` para ejecutar cualquier comando de Prisma CLI contra la base de datos local. Automáticamente inicia la base de datos a través de `serve-local` antes de ejecutar, por lo que no es necesario configurar una base de datos local por separado.
 
-```bash
-export DATABASE_URL="postgresql://postgres:password@localhost:5432/mydb"
-```
+<NxCommands commands={['run <project>:prisma migrate dev']} />
 
-Prisma usa esta cadena de conexión para comandos locales como `prisma migrate dev --create-only`, `prisma migrate deploy` y `prisma generate`.
+<NxCommands commands={['run <project>:prisma migrate deploy']} />
 
-### Usando el Cliente Prisma Localmente
+El objetivo `prisma` establece `SERVE_LOCAL=true` automáticamente, que `prisma.config.ts` usa para construir la URL de conexión de base de datos desde las credenciales locales configuradas en el momento de la generación.
 
-En producción, `getPrisma()` recupera el host, puerto, nombre de base de datos y usuario de base de datos en tiempo de ejecución desde AWS AppConfig, y se autentica usando IAM a través de un token RDS temporal.
+### Prisma Studio
 
-Para ejecuciones locales de aplicación, puedes personalizar el envoltorio `src/prisma.ts` generado para verificar `DATABASE_URL` primero. Cuando se agrega esta rama, el cliente se conecta directamente usando la cadena de conexión suministrada y omite AppConfig y la autenticación IAM por completo:
+[Prisma Studio](https://www.prisma.io/studio) es un editor visual para tu base de datos local. Úsalo para explorar tablas, inspeccionar y editar registros, filtrar datos, seguir relaciones y ejecutar SQL sin procesar a través de la consola SQL integrada. Es útil para verificar migraciones y sembrar datos de prueba durante el desarrollo. Inícialo con:
 
-```ts title="packages/db/src/prisma.ts"
-export const getPrisma = (): Promise<PrismaClient> => {
-  prismaPromise ??= (async () => {
-    const localDatabaseUrl = process.env.DATABASE_URL;
-
-    if (localDatabaseUrl) {
-      const adapter = new PrismaPg({
-        connectionString: localDatabaseUrl,
-      });
-      return new PrismaClient({ adapter });
-    }
-
-    // ... ruta de producción: AppConfig + autenticación IAM
-  })();
-  return prismaPromise;
-};
-```
+<NxCommands commands={['run <project>:prisma studio']} />
 
 ## Personalizando la Arquitectura de la Base de Datos
 
@@ -580,7 +512,9 @@ Configura las instancias writer y reader para tu clúster Aurora.
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
-const db = new Postgres(this, 'Db', {
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', {
   ...
   writer: ClusterInstance.serverlessV2('writer'),
   readers: [ClusterInstance.serverlessV2('reader')],
@@ -590,8 +524,8 @@ const db = new Postgres(this, 'Db', {
 <Fragment slot="terraform">
 
 ```hcl title="packages/infra/src/main.tf"
-module "postgres" {
-  source = "../../common/terraform/src/app/dbs/postgres"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
   ...
   instance_count = 2  # 1 writer + 1 reader
 }
@@ -607,7 +541,9 @@ Controla los límites de escalado de Aurora Serverless v2 para coincidir con tu 
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
-const db = new Postgres(this, 'Db', {
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', {
   ...
   serverlessV2MinCapacity: 0.5,
   serverlessV2MaxCapacity: 8,
@@ -617,8 +553,8 @@ const db = new Postgres(this, 'Db', {
 <Fragment slot="terraform">
 
 ```hcl title="packages/infra/src/main.tf"
-module "postgres" {
-  source = "../../common/terraform/src/app/dbs/postgres"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
   ...
   serverless_min_capacity = 0.5
   serverless_max_capacity = 8
@@ -629,13 +565,16 @@ module "postgres" {
 
 ### Versión del Motor
 
-Fija una versión específica del motor Aurora PostgreSQL.
+Fija una versión específica del motor Aurora.
 
+<OptionFilter when={{ engine: 'PostgreSQL' }}>
 <Infrastructure>
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
-const db = new Postgres(this, 'Db', {
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', {
   ...
   engineVersion: AuroraPostgresEngineVersion.VER_17_7,
 });
@@ -644,14 +583,41 @@ const db = new Postgres(this, 'Db', {
 <Fragment slot="terraform">
 
 ```hcl title="packages/infra/src/main.tf"
-module "postgres" {
-  source = "../../common/terraform/src/app/dbs/postgres"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
   ...
   engine_version = "17.7"
 }
 ```
 </Fragment>
 </Infrastructure>
+</OptionFilter>
+
+<OptionFilter when={{ engine: 'MySQL' }}>
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', {
+  ...
+  engineVersion: AuroraMysqlEngineVersion.VER_3_12_0,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
+  ...
+  engine_version = "8.0.mysql_aurora.3.12.0"
+}
+```
+</Fragment>
+</Infrastructure>
+</OptionFilter>
 
 ### Protección contra Eliminación
 
@@ -661,9 +627,10 @@ Configura ajustes de ciclo de vida para proteger contra eliminación accidental.
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
 import { RemovalPolicy } from 'aws-cdk-lib';
 
-const db = new Postgres(this, 'Db', {
+const db = new MyDatabase(this, 'Db', {
   ...
   deletionProtection: true,
   removalPolicy: RemovalPolicy.SNAPSHOT,
@@ -673,8 +640,8 @@ const db = new Postgres(this, 'Db', {
 <Fragment slot="terraform">
 
 ```hcl title="packages/infra/src/main.tf"
-module "postgres" {
-  source = "../../common/terraform/src/app/dbs/postgres"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
   ...
   deletion_protection = true
   skip_final_snapshot = false
@@ -682,3 +649,102 @@ module "postgres" {
 ```
 </Fragment>
 </Infrastructure>
+
+### Rotación de Clave de Cifrado
+
+La clave KMS utilizada para cifrar el clúster Aurora y su secreto de credenciales tiene habilitada la rotación automática de claves por defecto. Deshabilítala si tu política de seguridad gestiona la rotación externamente.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', {
+  ...
+  enableKeyRotation: false,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
+  ...
+  enable_key_rotation = false
+}
+```
+</Fragment>
+</Infrastructure>
+
+## Limitaciones
+
+<OptionFilter when={{ engine: 'MySQL' }}>
+
+### MySQL: Modo de Streaming de API Gateway
+
+Al usar Aurora MySQL con respuestas de streaming de API Gateway (por ejemplo, con `httpBatchStreamLink` de tRPC), el cliente MySQL de Prisma retiene el bucle de eventos de Node.js después de que se completa una consulta, evitando que Lambda vacíe el stream y finalice la solicitud.
+
+Para solucionar esto, desconecta explícitamente el cliente en un bloque `finally` después de cada consulta para que el bucle de eventos esté libre para salir y la respuesta de streaming pueda completarse.
+
+**Opción 1: por procedimiento**
+
+```ts
+export const listExampleTable = publicProcedure
+  .output(z.array(ExampleTableSchema))
+  .query(async () => {
+    const prisma = await getPrisma();
+    try {
+      return await prisma.exampleTable.findMany();
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
+```
+
+**Opción 2: middleware de tRPC**
+
+Si estás usando el [patrón de middleware](#injecting-the-prisma-client-via-middleware), agrega la llamada `$disconnect()` al middleware para que todos los procedimientos construidos sobre él estén cubiertos automáticamente:
+
+```ts title="packages/api/src/middleware/db.ts"
+import { getPrisma } from ':my-scope/db';
+import { initTRPC } from '@trpc/server';
+
+export interface IDbContext {
+  db: Awaited<ReturnType<typeof getPrisma>>;
+}
+
+export const createDbPlugin = () => {
+  const t = initTRPC.context<IDbContext>().create();
+  return t.procedure.use(async (opts) => {
+    const db = await getPrisma();
+    try {
+      return await opts.next({
+        ctx: {
+          ...opts.ctx,
+          db,
+        },
+      });
+    } finally {
+      await db.$disconnect();
+    }
+  });
+};
+```
+
+:::note
+Esto no es necesario para PostgreSQL. El adaptador de PostgreSQL usa un pool de conexiones `pg` configurado con `allowExitOnIdle: true`, que permite que el bucle de eventos salga naturalmente sin una desconexión explícita. Debido a esta limitación, `getPrisma()` para MySQL no almacena en caché el cliente ni reutiliza conexiones entre invocaciones Lambda calientes. Se abre una nueva conexión en cada llamada, a diferencia del adaptador de PostgreSQL que almacena en caché el cliente a nivel de módulo y reutiliza el mismo pool de conexiones.
+:::
+
+### MySQL: Expiración de Token IAM
+
+Los tokens de autenticación IAM de RDS expiran después de **15 minutos**. El cliente Prisma de MySQL captura el token IAM como un valor estático en el momento en que se llama a `getPrisma()`. Una conexión abierta existente no se ve afectada, pero si se necesita establecer una nueva conexión después de que el token haya expirado, la autenticación fallará. El adaptador de PostgreSQL evita esto refrescando el token dinámicamente cada vez que el pool abre una nueva conexión, pero el adaptador de MySQL no tiene un mecanismo equivalente.
+
+:::caution
+Ten cuidado con tareas que se ejecutan durante más de 15 minutos. Si el cliente MySQL necesita abrir una nueva conexión después de que el token IAM original haya expirado, la autenticación fallará.
+:::
+
+Para tareas de larga duración como trabajos por lotes o migraciones de datos, llama a `getPrisma()` al inicio de cada unidad de trabajo en lugar de una vez para toda la operación. Debido a que `getPrisma()` siempre crea un cliente nuevo y obtiene un nuevo token IAM para MySQL, esto asegura que cada conexión se autentique con un token válido.
+
+</OptionFilter>

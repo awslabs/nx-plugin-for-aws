@@ -12,11 +12,11 @@ terraform {
     }
     null = {
       source  = "hashicorp/null"
-      version = "~> 3.6"
+      version = ">= 3.0"
     }
     random = {
       source  = "hashicorp/random"
-      version = "~> 3.6"
+      version = ">= 3.0"
     }
   }
 }
@@ -79,6 +79,36 @@ variable "enable_rds_proxy" {
   default     = true
 }
 
+variable "enable_credential_rotation" {
+  description = "Whether to enable automatic credential rotation for the admin secret."
+  type        = bool
+  default     = true
+}
+
+variable "enable_cloudwatch_logs" {
+  description = "Whether to export Aurora engine logs to CloudWatch. PostgreSQL also enables verbose statement logging."
+  type        = bool
+  default     = false
+}
+
+variable "enable_performance_insights" {
+  description = "Whether to enable Performance Insights on Aurora cluster instances."
+  type        = bool
+  default     = true
+}
+
+variable "performance_insights_retention_period" {
+  description = "Retention period, in days, for Performance Insights data when enabled."
+  type        = number
+  default     = 7
+}
+
+variable "enable_backup" {
+  description = "Whether to provision an AWS Backup plan for the Aurora cluster."
+  type        = bool
+  default     = false
+}
+
 variable "tags" {
   description = "Tags to apply to all resources."
   type        = map(string)
@@ -89,6 +119,11 @@ variable "docker_image_tag" {
   description = "Docker image tag for the migration handler. Defaults to the tag built by the Nx docker target."
   type        = string
   default     = "<%= dockerImageTag %>"
+}
+
+variable "asset_bucket_name" {
+  description = "Name of the shared asset S3 bucket used to stage the Lambda deployment zip. Instantiate the `core/asset-bucket` module once per deployment and pass its `bucket_name` output here."
+  type        = string
 }
 
 data "aws_region" "current" {}
@@ -110,21 +145,26 @@ locals {
 module "aurora" {
   source = "../../../core/rdb/aurora"
   #checkov:skip=CKV_AWS_139:Deletion protection is enabled but checkov is unable to detect it correctly
-  name                            = "<%= nameKebabCase %>"
-  vpc_id                          = var.vpc_id
-  private_subnet_ids              = var.private_subnet_ids
-  engine                          = "<%= engine === 'mysql' ? 'aurora-mysql' : 'aurora-postgresql' %>"
-  engine_version                  = var.engine_version
-  database_name                   = "<%= databaseName %>"
-  admin_user                      = "<%= adminUser %>"
-  port                            = var.port
-  serverless_min_capacity         = var.serverless_min_capacity
-  serverless_max_capacity         = var.serverless_max_capacity
-  instance_count                  = var.instance_count
-  deletion_protection             = var.deletion_protection
-  skip_final_snapshot             = var.skip_final_snapshot
-  enable_rds_proxy                = var.enable_rds_proxy
-  tags                            = var.tags
+  name                                  = "<%= nameKebabCase %>"
+  vpc_id                                = var.vpc_id
+  private_subnet_ids                    = var.private_subnet_ids
+  engine                                = "<%= engine === 'mysql' ? 'aurora-mysql' : 'aurora-postgresql' %>"
+  engine_version                        = var.engine_version
+  database_name                         = "<%= databaseName %>"
+  admin_user                            = "<%= adminUser %>"
+  port                                  = var.port
+  serverless_min_capacity               = var.serverless_min_capacity
+  serverless_max_capacity               = var.serverless_max_capacity
+  instance_count                        = var.instance_count
+  deletion_protection                   = var.deletion_protection
+  skip_final_snapshot                   = var.skip_final_snapshot
+  enable_rds_proxy                      = var.enable_rds_proxy
+  enable_credential_rotation            = var.enable_credential_rotation
+  enable_cloudwatch_logs                = var.enable_cloudwatch_logs
+  enable_performance_insights           = var.enable_performance_insights
+  performance_insights_retention_period = var.performance_insights_retention_period
+  enable_backup                         = var.enable_backup
+  tags                                  = var.tags
 }
 
 resource "aws_iam_role_policy" "proxy_db_user_connect" {
@@ -152,6 +192,14 @@ data "archive_file" "create_db_user_zip" {
   output_path = "${path.module}/../../../../../../../dist/packages/common/terraform/dbs/<%= nameKebabCase %>/create-db-user.zip"
 }
 
+resource "aws_s3_object" "create_db_user_zip" {
+  bucket      = var.asset_bucket_name
+  key         = "dbs/<%= nameKebabCase %>/${data.archive_file.create_db_user_zip.output_base64sha256}.zip"
+  source      = data.archive_file.create_db_user_zip.output_path
+  source_hash = data.archive_file.create_db_user_zip.output_base64sha256
+  etag        = data.archive_file.create_db_user_zip.output_md5
+}
+
 module "add_rdb_to_runtime_config" {
   source = "../../../core/runtime-config/entry"
 
@@ -167,16 +215,9 @@ module "add_rdb_to_runtime_config" {
   }
 }
 
-module "appconfig" {
-  source = "../../../core/runtime-config/appconfig"
-
-  application_name = "<%= nameClassName %>-runtime-config"
-
-  depends_on = [module.add_rdb_to_runtime_config]
-}
-
 resource "aws_ecr_repository" "migration_handler" {
   #checkov:skip=CKV_AWS_136:AES256 encryption is sufficient for ECR repositories
+  #checkov:skip=CKV_AWS_51:Mutable tags are intentional; the migration handler is always pushed as latest and redeployment is gated on docker_digest changes in null_resource.docker_publish
   name                 = "<%= nameKebabCase %>-migration-${random_string.suffix.result}"
   image_tag_mutability = "MUTABLE"
   force_delete         = true
@@ -473,12 +514,14 @@ resource "aws_lambda_function" "create_db_user" {
   #checkov:skip=CKV_AWS_115:Concurrent execution limit not required for the create-db-user handler
   #checkov:skip=CKV_AWS_173:Lambda environment variables encrypted by managed key
   #checkov:skip=CKV_AWS_272:Code signing not configured as deployment packages are built and deployed within the same pipeline
-  filename         = data.archive_file.create_db_user_zip.output_path
-  function_name    = local.create_db_user_function_name
-  role             = aws_iam_role.create_db_user.arn
-  handler          = "index.handler"
-  source_code_hash = data.archive_file.create_db_user_zip.output_base64sha256
-  runtime          = "nodejs24.x"
+  s3_bucket         = aws_s3_object.create_db_user_zip.bucket
+  s3_key            = aws_s3_object.create_db_user_zip.key
+  s3_object_version = aws_s3_object.create_db_user_zip.version_id
+  function_name     = local.create_db_user_function_name
+  role              = aws_iam_role.create_db_user.arn
+  handler           = "index.handler"
+  source_code_hash  = data.archive_file.create_db_user_zip.output_base64sha256
+  runtime           = "nodejs24.x"
   timeout          = 60
   architectures    = ["arm64"]
 
@@ -501,6 +544,7 @@ resource "aws_lambda_function" "create_db_user" {
   tags = var.tags
 
   depends_on = [
+    aws_s3_object.create_db_user_zip,
     aws_iam_role_policy_attachment.create_db_user_basic_execution,
     aws_iam_role_policy_attachment.create_db_user_vpc_access,
     aws_iam_role_policy_attachment.create_db_user_xray,
@@ -680,7 +724,3 @@ output "database_runtime_user" {
   value       = local.database_runtime_user
 }
 
-output "appconfig_application_id" {
-  description = "AppConfig Application ID for runtime config."
-  value       = module.appconfig.application_id
-}

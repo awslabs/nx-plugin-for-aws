@@ -125,8 +125,8 @@ while (Date.now() < timeoutAt) {
     await conn.end();
     console.log('Database is ready.');
     process.exit(0);
-  } catch (e) {
-    console.log(e);
+  } catch {
+    console.log('Database is not ready.');
     await conn?.end().catch(noop);
   }
   await new Promise((r) => setTimeout(r, 200));
@@ -436,6 +436,11 @@ export type AuroraDatabaseEngineVersion =
 
 export interface AuroraDatabaseEngine {
   /**
+   * Discriminant identifying the engine type.
+   */
+  readonly type: 'mysql' | 'postgres';
+
+  /**
    * Default Aurora engine version used when one is not explicitly provided.
    */
   readonly defaultVersion: AuroraDatabaseEngineVersion;
@@ -453,6 +458,7 @@ export class AuroraDatabaseEngines {
     defaultVersion?: AuroraMysqlEngineVersion;
   }): AuroraDatabaseEngine {
     return {
+      type: 'mysql',
       defaultVersion,
       clusterEngine: (version) =>
         DatabaseClusterEngine.auroraMysql({
@@ -467,6 +473,7 @@ export class AuroraDatabaseEngines {
     defaultVersion?: AuroraPostgresEngineVersion;
   }): AuroraDatabaseEngine {
     return {
+      type: 'postgres',
       defaultVersion,
       clusterEngine: (version) =>
         DatabaseClusterEngine.auroraPostgres({
@@ -545,6 +552,27 @@ export interface AuroraDatabaseProps extends Omit<
    * @default true
    */
   readonly enableCredentialRotation?: boolean;
+
+  /**
+   * Whether to enable deletion protection on the Aurora cluster.
+   *
+   * @default true
+   */
+  readonly deletionProtection?: boolean;
+
+  /**
+   * Removal policy applied to the Aurora cluster.
+   *
+   * @default RemovalPolicy.RETAIN
+   */
+  readonly removalPolicy?: RemovalPolicy;
+
+  /**
+   * Whether to enable automatic key rotation on the KMS key used to encrypt the Aurora cluster and its credentials secret.
+   *
+   * @default true
+   */
+  readonly enableKeyRotation?: boolean;
 }
 
 /**
@@ -571,6 +599,9 @@ export abstract class AuroraDatabase extends Construct {
       writer,
       enableRdsProxy = true,
       enableCredentialRotation = true,
+      deletionProtection = true,
+      removalPolicy = RemovalPolicy.RETAIN,
+      enableKeyRotation = true,
       engine,
       engineVersion,
       ...clusterProps
@@ -580,7 +611,7 @@ export abstract class AuroraDatabase extends Construct {
 
     this.adminUser = adminUser;
 
-    const key = new Key(this, 'EncryptionKey', { enableKeyRotation: true });
+    const key = new Key(this, 'EncryptionKey', { enableKeyRotation });
     this.cluster = new DatabaseCluster(this, 'DatabaseCluster', {
       ...clusterProps,
       vpc,
@@ -595,8 +626,8 @@ export abstract class AuroraDatabase extends Construct {
       defaultDatabaseName: databaseName,
       storageEncrypted: true,
       storageEncryptionKey: key,
-      deletionProtection: true,
-      removalPolicy: RemovalPolicy.RETAIN,
+      deletionProtection,
+      removalPolicy,
     });
 
     if (enableCredentialRotation) {
@@ -683,28 +714,32 @@ export abstract class AuroraDatabase extends Construct {
     const migrationHandler = new DockerImageFunction(this, 'MigrationHandler', {
       code: DockerImageCode.fromImageAsset(migrationBundleDir, {
         platform: Platform.LINUX_ARM64,
-        buildArgs: {
-          AWS_REGION: Stack.of(this).region,
-        },
       }),
       memorySize: 1024,
       timeout: Duration.minutes(5),
       tracing: Tracing.ACTIVE,
       vpc,
-      environment: {
-        DATABASE_SECRET_ARN: this.cluster.secret!.secretArn,
-        HOSTNAME: databaseHostname,
-        DATABASE: databaseName,
-        PORT: databasePort.toString(),
-        DBUSER: this.dbUser,
-      },
+      environment:
+        engine.type === 'mysql'
+          ? {
+              DATABASE_SECRET_ARN: this.cluster.secret!.secretArn,
+            }
+          : {
+              HOSTNAME: databaseHostname,
+              DATABASE: databaseName,
+              PORT: databasePort.toString(),
+              DBUSER: this.dbUser,
+            },
       architecture: Architecture.ARM_64,
     });
 
-    this.allowDefaultPortFrom(migrationHandler);
-    this.cluster.connections.allowDefaultPortFrom(migrationHandler);
-    this.grantSecretRead(migrationHandler);
-    this.grantConnect(migrationHandler);
+    if (engine.type === 'mysql') {
+      this.cluster.connections.allowDefaultPortFrom(migrationHandler);
+      this.grantSecretRead(migrationHandler);
+    } else {
+      this.allowDefaultPortFrom(migrationHandler);
+      this.grantConnect(migrationHandler);
+    }
 
     const trigger = new Trigger(this, 'MigrationTrigger', {
       handler: migrationHandler,
@@ -790,11 +825,11 @@ terraform {
     }
     null = {
       source  = "hashicorp/null"
-      version = "~> 3.2"
+      version = ">= 3.0"
     }
     random = {
       source  = "hashicorp/random"
-      version = "~> 3.6"
+      version = ">= 3.0"
     }
   }
 }
@@ -897,6 +932,36 @@ variable "enable_credential_rotation" {
   default     = true
 }
 
+variable "enable_cloudwatch_logs" {
+  description = "Whether to export Aurora engine logs to CloudWatch. PostgreSQL also enables verbose statement logging."
+  type        = bool
+  default     = false
+}
+
+variable "enable_performance_insights" {
+  description = "Whether to enable Performance Insights on Aurora cluster instances."
+  type        = bool
+  default     = true
+}
+
+variable "performance_insights_retention_period" {
+  description = "Retention period, in days, for Performance Insights data when enabled."
+  type        = number
+  default     = 7
+}
+
+variable "enable_backup" {
+  description = "Whether to provision an AWS Backup plan for the Aurora cluster."
+  type        = bool
+  default     = false
+}
+
+variable "enable_key_rotation" {
+  description = "Whether to enable automatic key rotation on the KMS key used to encrypt the Aurora cluster and its credentials secret."
+  type        = bool
+  default     = true
+}
+
 variable "tags" {
   description = "Tags to apply to all resources."
   type        = map(string)
@@ -910,6 +975,8 @@ locals {
 }
 
 resource "aws_rds_cluster_parameter_group" "database" {
+  count = var.enable_cloudwatch_logs ? 1 : 0
+
   name_prefix = "\${var.name}-"
   family      = local.parameter_group_family
   description = "Parameter group for \${var.name} Aurora cluster"
@@ -927,7 +994,7 @@ resource "aws_rds_cluster_parameter_group" "database" {
 
 resource "aws_kms_key" "database" {
   description         = "KMS key for Aurora cluster \${var.name}"
-  enable_key_rotation = true
+  enable_key_rotation = var.enable_key_rotation
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -1040,7 +1107,7 @@ resource "aws_secretsmanager_secret_version" "credentials" {
 }
 
 resource "aws_rds_cluster" "database" {
-  #checkov:skip=CKV2_AWS_27:Query logging enabled for PostgreSQL via log_statement=all in aws_rds_cluster_parameter_group.database and enabled_cloudwatch_logs_exports includes "postgresql"; Checkov cannot resolve var.engine conditionals statically
+  #checkov:skip=CKV2_AWS_27:Query logging can be enabled with enable_cloudwatch_logs; this module defaults to CDK-equivalent behavior unless logging is requested
   #checkov:skip=CKV_AWS_139:Deletion protection is enabled but checkov is unable to detect it correctly
   cluster_identifier                  = "\${var.name}-aurora"
   engine                              = var.engine
@@ -1049,18 +1116,19 @@ resource "aws_rds_cluster" "database" {
   master_username                     = var.admin_user
   master_password                     = random_password.master_password.result
   db_subnet_group_name                = aws_db_subnet_group.database.name
-  db_cluster_parameter_group_name     = aws_rds_cluster_parameter_group.database.name
+  db_cluster_parameter_group_name     = var.enable_cloudwatch_logs ? aws_rds_cluster_parameter_group.database[0].name : null
   vpc_security_group_ids              = [aws_security_group.database.id]
   port                                = coalesce(var.port, local.default_port)
   storage_encrypted                   = true
   kms_key_id                          = aws_kms_key.database.arn
   deletion_protection                 = var.deletion_protection
   skip_final_snapshot                 = var.skip_final_snapshot
+  final_snapshot_identifier           = var.skip_final_snapshot ? null : "\${var.name}-aurora-final-snapshot"
   iam_database_authentication_enabled = true
   monitoring_interval                 = 5
   monitoring_role_arn                 = aws_iam_role.enhanced_monitoring.arn
   copy_tags_to_snapshot               = true
-  enabled_cloudwatch_logs_exports     = var.engine == "aurora-mysql" ? ["audit", "error", "general", "slowquery"] : ["postgresql"]
+  enabled_cloudwatch_logs_exports     = var.enable_cloudwatch_logs ? (var.engine == "aurora-mysql" ? ["audit", "error", "general", "slowquery"] : ["postgresql"]) : null
 
   lifecycle {
     prevent_destroy = true
@@ -1089,9 +1157,9 @@ resource "aws_rds_cluster_instance" "database" {
   auto_minor_version_upgrade            = true
   monitoring_interval                   = 5
   monitoring_role_arn                   = aws_iam_role.enhanced_monitoring.arn
-  performance_insights_enabled          = true
-  performance_insights_kms_key_id       = aws_kms_key.database.arn
-  performance_insights_retention_period = 7
+  performance_insights_enabled          = var.enable_performance_insights
+  performance_insights_kms_key_id       = var.enable_performance_insights ? aws_kms_key.database.arn : null
+  performance_insights_retention_period = var.enable_performance_insights ? var.performance_insights_retention_period : null
 
   tags = merge(var.tags, {
     Name = "\${var.name}-aurora-\${count.index + 1}"
@@ -1131,10 +1199,11 @@ resource "aws_vpc_security_group_ingress_rule" "rotation_to_database" {
 }
 
 resource "aws_cloudformation_stack" "credentials_rotation" {
+  #checkov:skip=CKV_AWS_124:SNS event notifications are not required for the credentials rotation stack
   count = var.enable_credential_rotation ? 1 : 0
   name  = "\${var.name}-aurora-credentials-rotation"
 
-  capabilities = ["CAPABILITY_IAM"]
+  capabilities = ["CAPABILITY_IAM", "CAPABILITY_AUTO_EXPAND"]
 
   template_body = jsonencode({
     AWSTemplateFormatVersion = "2010-09-09"
@@ -1189,6 +1258,27 @@ resource "aws_iam_role" "proxy" {
   })
 }
 
+resource "aws_iam_role_policy" "proxy_secret_access" {
+  count = var.enable_rds_proxy ? 1 : 0
+  role  = aws_iam_role.proxy[0].name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["secretsmanager:GetSecretValue"]
+        Resource = [aws_secretsmanager_secret.credentials.arn]
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["kms:Decrypt"]
+        Resource = [aws_kms_key.database.arn]
+      }
+    ]
+  })
+}
+
 resource "aws_security_group" "proxy" {
   #checkov:skip=CKV2_AWS_5:Security group is attached to aws_db_proxy.aurora; Checkov cannot resolve count-conditional cross-resource references
   count = var.enable_rds_proxy ? 1 : 0
@@ -1212,6 +1302,17 @@ resource "aws_db_proxy" "aurora" {
   vpc_subnet_ids         = var.private_subnet_ids
   vpc_security_group_ids = [aws_security_group.proxy[0].id]
   require_tls            = true
+
+  auth {
+    auth_scheme = "SECRETS"
+    iam_auth    = "REQUIRED"
+    secret_arn  = aws_secretsmanager_secret.credentials.arn
+  }
+
+  depends_on = [
+    aws_iam_role_policy.proxy_secret_access,
+    aws_secretsmanager_secret_version.credentials,
+  ]
 }
 
 resource "aws_db_proxy_default_target_group" "default" {
@@ -1306,10 +1407,14 @@ resource "aws_vpc_security_group_egress_rule" "proxy_to_database" {
 }
 
 data "aws_iam_policy" "backup" {
+  count = var.enable_backup ? 1 : 0
+
   arn = "arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup"
 }
 
 resource "aws_iam_role" "backup" {
+  count = var.enable_backup ? 1 : 0
+
   name_prefix = "\${var.name}-backup-"
 
   assume_role_policy = jsonencode({
@@ -1327,22 +1432,28 @@ resource "aws_iam_role" "backup" {
 }
 
 resource "aws_iam_role_policy_attachment" "backup" {
-  role       = aws_iam_role.backup.name
-  policy_arn = data.aws_iam_policy.backup.arn
+  count = var.enable_backup ? 1 : 0
+
+  role       = aws_iam_role.backup[0].name
+  policy_arn = data.aws_iam_policy.backup[0].arn
 }
 
 resource "aws_backup_vault" "database" {
+  count = var.enable_backup ? 1 : 0
+
   name        = "\${var.name}-aurora-backup"
   kms_key_arn = aws_kms_key.database.arn
   tags        = var.tags
 }
 
 resource "aws_backup_plan" "database" {
+  count = var.enable_backup ? 1 : 0
+
   name = "\${var.name}-aurora-backup"
 
   rule {
     rule_name         = "daily-backup"
-    target_vault_name = aws_backup_vault.database.name
+    target_vault_name = aws_backup_vault.database[0].name
     schedule          = "cron(0 5 ? * * *)"
 
     lifecycle {
@@ -1354,9 +1465,11 @@ resource "aws_backup_plan" "database" {
 }
 
 resource "aws_backup_selection" "database" {
+  count = var.enable_backup ? 1 : 0
+
   name         = "\${var.name}-aurora"
-  plan_id      = aws_backup_plan.database.id
-  iam_role_arn = aws_iam_role.backup.arn
+  plan_id      = aws_backup_plan.database[0].id
+  iam_role_arn = aws_iam_role.backup[0].arn
 
   resources = [aws_rds_cluster.database.arn]
 }
@@ -1458,11 +1571,11 @@ exports[`ts#rdb generator > should generate terraform modules when iacProvider i
     }
     null = {
       source  = "hashicorp/null"
-      version = "~> 3.6"
+      version = ">= 3.0"
     }
     random = {
       source  = "hashicorp/random"
-      version = "~> 3.6"
+      version = ">= 3.0"
     }
   }
 }
@@ -1525,6 +1638,36 @@ variable "enable_rds_proxy" {
   default     = true
 }
 
+variable "enable_credential_rotation" {
+  description = "Whether to enable automatic credential rotation for the admin secret."
+  type        = bool
+  default     = true
+}
+
+variable "enable_cloudwatch_logs" {
+  description = "Whether to export Aurora engine logs to CloudWatch. PostgreSQL also enables verbose statement logging."
+  type        = bool
+  default     = false
+}
+
+variable "enable_performance_insights" {
+  description = "Whether to enable Performance Insights on Aurora cluster instances."
+  type        = bool
+  default     = true
+}
+
+variable "performance_insights_retention_period" {
+  description = "Retention period, in days, for Performance Insights data when enabled."
+  type        = number
+  default     = 7
+}
+
+variable "enable_backup" {
+  description = "Whether to provision an AWS Backup plan for the Aurora cluster."
+  type        = bool
+  default     = false
+}
+
 variable "tags" {
   description = "Tags to apply to all resources."
   type        = map(string)
@@ -1535,6 +1678,11 @@ variable "docker_image_tag" {
   description = "Docker image tag for the migration handler. Defaults to the tag built by the Nx docker target."
   type        = string
   default     = "proj-db-migration:latest"
+}
+
+variable "asset_bucket_name" {
+  description = "Name of the shared asset S3 bucket used to stage the Lambda deployment zip. Instantiate the \`core/asset-bucket\` module once per deployment and pass its \`bucket_name\` output here."
+  type        = string
 }
 
 data "aws_region" "current" {}
@@ -1556,21 +1704,26 @@ locals {
 module "aurora" {
   source = "../../../core/rdb/aurora"
   #checkov:skip=CKV_AWS_139:Deletion protection is enabled but checkov is unable to detect it correctly
-  name                            = "db"
-  vpc_id                          = var.vpc_id
-  private_subnet_ids              = var.private_subnet_ids
-  engine                          = "aurora-postgresql"
-  engine_version                  = var.engine_version
-  database_name                   = "databasename"
-  admin_user                      = "databaseUser"
-  port                            = var.port
-  serverless_min_capacity         = var.serverless_min_capacity
-  serverless_max_capacity         = var.serverless_max_capacity
-  instance_count                  = var.instance_count
-  deletion_protection             = var.deletion_protection
-  skip_final_snapshot             = var.skip_final_snapshot
-  enable_rds_proxy                = var.enable_rds_proxy
-  tags                            = var.tags
+  name                                  = "db"
+  vpc_id                                = var.vpc_id
+  private_subnet_ids                    = var.private_subnet_ids
+  engine                                = "aurora-postgresql"
+  engine_version                        = var.engine_version
+  database_name                         = "databasename"
+  admin_user                            = "databaseUser"
+  port                                  = var.port
+  serverless_min_capacity               = var.serverless_min_capacity
+  serverless_max_capacity               = var.serverless_max_capacity
+  instance_count                        = var.instance_count
+  deletion_protection                   = var.deletion_protection
+  skip_final_snapshot                   = var.skip_final_snapshot
+  enable_rds_proxy                      = var.enable_rds_proxy
+  enable_credential_rotation            = var.enable_credential_rotation
+  enable_cloudwatch_logs                = var.enable_cloudwatch_logs
+  enable_performance_insights           = var.enable_performance_insights
+  performance_insights_retention_period = var.performance_insights_retention_period
+  enable_backup                         = var.enable_backup
+  tags                                  = var.tags
 }
 
 resource "aws_iam_role_policy" "proxy_db_user_connect" {
@@ -1598,6 +1751,14 @@ data "archive_file" "create_db_user_zip" {
   output_path = "\${path.module}/../../../../../../../dist/packages/common/terraform/dbs/db/create-db-user.zip"
 }
 
+resource "aws_s3_object" "create_db_user_zip" {
+  bucket      = var.asset_bucket_name
+  key         = "dbs/db/\${data.archive_file.create_db_user_zip.output_base64sha256}.zip"
+  source      = data.archive_file.create_db_user_zip.output_path
+  source_hash = data.archive_file.create_db_user_zip.output_base64sha256
+  etag        = data.archive_file.create_db_user_zip.output_md5
+}
+
 module "add_rdb_to_runtime_config" {
   source = "../../../core/runtime-config/entry"
 
@@ -1613,16 +1774,9 @@ module "add_rdb_to_runtime_config" {
   }
 }
 
-module "appconfig" {
-  source = "../../../core/runtime-config/appconfig"
-
-  application_name = "Db-runtime-config"
-
-  depends_on = [module.add_rdb_to_runtime_config]
-}
-
 resource "aws_ecr_repository" "migration_handler" {
   #checkov:skip=CKV_AWS_136:AES256 encryption is sufficient for ECR repositories
+  #checkov:skip=CKV_AWS_51:Mutable tags are intentional; the migration handler is always pushed as latest and redeployment is gated on docker_digest changes in null_resource.docker_publish
   name                 = "db-migration-\${random_string.suffix.result}"
   image_tag_mutability = "MUTABLE"
   force_delete         = true
@@ -1893,12 +2047,14 @@ resource "aws_lambda_function" "create_db_user" {
   #checkov:skip=CKV_AWS_115:Concurrent execution limit not required for the create-db-user handler
   #checkov:skip=CKV_AWS_173:Lambda environment variables encrypted by managed key
   #checkov:skip=CKV_AWS_272:Code signing not configured as deployment packages are built and deployed within the same pipeline
-  filename         = data.archive_file.create_db_user_zip.output_path
-  function_name    = local.create_db_user_function_name
-  role             = aws_iam_role.create_db_user.arn
-  handler          = "index.handler"
-  source_code_hash = data.archive_file.create_db_user_zip.output_base64sha256
-  runtime          = "nodejs24.x"
+  s3_bucket         = aws_s3_object.create_db_user_zip.bucket
+  s3_key            = aws_s3_object.create_db_user_zip.key
+  s3_object_version = aws_s3_object.create_db_user_zip.version_id
+  function_name     = local.create_db_user_function_name
+  role              = aws_iam_role.create_db_user.arn
+  handler           = "index.handler"
+  source_code_hash  = data.archive_file.create_db_user_zip.output_base64sha256
+  runtime           = "nodejs24.x"
   timeout          = 60
   architectures    = ["arm64"]
 
@@ -1921,6 +2077,7 @@ resource "aws_lambda_function" "create_db_user" {
   tags = var.tags
 
   depends_on = [
+    aws_s3_object.create_db_user_zip,
     aws_iam_role_policy_attachment.create_db_user_basic_execution,
     aws_iam_role_policy_attachment.create_db_user_vpc_access,
     aws_iam_role_policy_attachment.create_db_user_xray,
@@ -2094,10 +2251,6 @@ output "database_runtime_user" {
   value       = local.database_runtime_user
 }
 
-output "appconfig_application_id" {
-  description = "AppConfig Application ID for runtime config."
-  value       = module.appconfig.application_id
-}
 "
 `;
 
@@ -2115,11 +2268,11 @@ terraform {
     }
     null = {
       source  = "hashicorp/null"
-      version = "~> 3.2"
+      version = ">= 3.0"
     }
     random = {
       source  = "hashicorp/random"
-      version = "~> 3.6"
+      version = ">= 3.0"
     }
   }
 }
@@ -2222,6 +2375,36 @@ variable "enable_credential_rotation" {
   default     = true
 }
 
+variable "enable_cloudwatch_logs" {
+  description = "Whether to export Aurora engine logs to CloudWatch. PostgreSQL also enables verbose statement logging."
+  type        = bool
+  default     = false
+}
+
+variable "enable_performance_insights" {
+  description = "Whether to enable Performance Insights on Aurora cluster instances."
+  type        = bool
+  default     = true
+}
+
+variable "performance_insights_retention_period" {
+  description = "Retention period, in days, for Performance Insights data when enabled."
+  type        = number
+  default     = 7
+}
+
+variable "enable_backup" {
+  description = "Whether to provision an AWS Backup plan for the Aurora cluster."
+  type        = bool
+  default     = false
+}
+
+variable "enable_key_rotation" {
+  description = "Whether to enable automatic key rotation on the KMS key used to encrypt the Aurora cluster and its credentials secret."
+  type        = bool
+  default     = true
+}
+
 variable "tags" {
   description = "Tags to apply to all resources."
   type        = map(string)
@@ -2235,6 +2418,8 @@ locals {
 }
 
 resource "aws_rds_cluster_parameter_group" "database" {
+  count = var.enable_cloudwatch_logs ? 1 : 0
+
   name_prefix = "\${var.name}-"
   family      = local.parameter_group_family
   description = "Parameter group for \${var.name} Aurora cluster"
@@ -2252,7 +2437,7 @@ resource "aws_rds_cluster_parameter_group" "database" {
 
 resource "aws_kms_key" "database" {
   description         = "KMS key for Aurora cluster \${var.name}"
-  enable_key_rotation = true
+  enable_key_rotation = var.enable_key_rotation
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -2365,7 +2550,7 @@ resource "aws_secretsmanager_secret_version" "credentials" {
 }
 
 resource "aws_rds_cluster" "database" {
-  #checkov:skip=CKV2_AWS_27:Query logging enabled for PostgreSQL via log_statement=all in aws_rds_cluster_parameter_group.database and enabled_cloudwatch_logs_exports includes "postgresql"; Checkov cannot resolve var.engine conditionals statically
+  #checkov:skip=CKV2_AWS_27:Query logging can be enabled with enable_cloudwatch_logs; this module defaults to CDK-equivalent behavior unless logging is requested
   #checkov:skip=CKV_AWS_139:Deletion protection is enabled but checkov is unable to detect it correctly
   cluster_identifier                  = "\${var.name}-aurora"
   engine                              = var.engine
@@ -2374,18 +2559,19 @@ resource "aws_rds_cluster" "database" {
   master_username                     = var.admin_user
   master_password                     = random_password.master_password.result
   db_subnet_group_name                = aws_db_subnet_group.database.name
-  db_cluster_parameter_group_name     = aws_rds_cluster_parameter_group.database.name
+  db_cluster_parameter_group_name     = var.enable_cloudwatch_logs ? aws_rds_cluster_parameter_group.database[0].name : null
   vpc_security_group_ids              = [aws_security_group.database.id]
   port                                = coalesce(var.port, local.default_port)
   storage_encrypted                   = true
   kms_key_id                          = aws_kms_key.database.arn
   deletion_protection                 = var.deletion_protection
   skip_final_snapshot                 = var.skip_final_snapshot
+  final_snapshot_identifier           = var.skip_final_snapshot ? null : "\${var.name}-aurora-final-snapshot"
   iam_database_authentication_enabled = true
   monitoring_interval                 = 5
   monitoring_role_arn                 = aws_iam_role.enhanced_monitoring.arn
   copy_tags_to_snapshot               = true
-  enabled_cloudwatch_logs_exports     = var.engine == "aurora-mysql" ? ["audit", "error", "general", "slowquery"] : ["postgresql"]
+  enabled_cloudwatch_logs_exports     = var.enable_cloudwatch_logs ? (var.engine == "aurora-mysql" ? ["audit", "error", "general", "slowquery"] : ["postgresql"]) : null
 
   lifecycle {
     prevent_destroy = true
@@ -2414,9 +2600,9 @@ resource "aws_rds_cluster_instance" "database" {
   auto_minor_version_upgrade            = true
   monitoring_interval                   = 5
   monitoring_role_arn                   = aws_iam_role.enhanced_monitoring.arn
-  performance_insights_enabled          = true
-  performance_insights_kms_key_id       = aws_kms_key.database.arn
-  performance_insights_retention_period = 7
+  performance_insights_enabled          = var.enable_performance_insights
+  performance_insights_kms_key_id       = var.enable_performance_insights ? aws_kms_key.database.arn : null
+  performance_insights_retention_period = var.enable_performance_insights ? var.performance_insights_retention_period : null
 
   tags = merge(var.tags, {
     Name = "\${var.name}-aurora-\${count.index + 1}"
@@ -2456,10 +2642,11 @@ resource "aws_vpc_security_group_ingress_rule" "rotation_to_database" {
 }
 
 resource "aws_cloudformation_stack" "credentials_rotation" {
+  #checkov:skip=CKV_AWS_124:SNS event notifications are not required for the credentials rotation stack
   count = var.enable_credential_rotation ? 1 : 0
   name  = "\${var.name}-aurora-credentials-rotation"
 
-  capabilities = ["CAPABILITY_IAM"]
+  capabilities = ["CAPABILITY_IAM", "CAPABILITY_AUTO_EXPAND"]
 
   template_body = jsonencode({
     AWSTemplateFormatVersion = "2010-09-09"
@@ -2514,6 +2701,27 @@ resource "aws_iam_role" "proxy" {
   })
 }
 
+resource "aws_iam_role_policy" "proxy_secret_access" {
+  count = var.enable_rds_proxy ? 1 : 0
+  role  = aws_iam_role.proxy[0].name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["secretsmanager:GetSecretValue"]
+        Resource = [aws_secretsmanager_secret.credentials.arn]
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["kms:Decrypt"]
+        Resource = [aws_kms_key.database.arn]
+      }
+    ]
+  })
+}
+
 resource "aws_security_group" "proxy" {
   #checkov:skip=CKV2_AWS_5:Security group is attached to aws_db_proxy.aurora; Checkov cannot resolve count-conditional cross-resource references
   count = var.enable_rds_proxy ? 1 : 0
@@ -2537,6 +2745,17 @@ resource "aws_db_proxy" "aurora" {
   vpc_subnet_ids         = var.private_subnet_ids
   vpc_security_group_ids = [aws_security_group.proxy[0].id]
   require_tls            = true
+
+  auth {
+    auth_scheme = "SECRETS"
+    iam_auth    = "REQUIRED"
+    secret_arn  = aws_secretsmanager_secret.credentials.arn
+  }
+
+  depends_on = [
+    aws_iam_role_policy.proxy_secret_access,
+    aws_secretsmanager_secret_version.credentials,
+  ]
 }
 
 resource "aws_db_proxy_default_target_group" "default" {
@@ -2631,10 +2850,14 @@ resource "aws_vpc_security_group_egress_rule" "proxy_to_database" {
 }
 
 data "aws_iam_policy" "backup" {
+  count = var.enable_backup ? 1 : 0
+
   arn = "arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup"
 }
 
 resource "aws_iam_role" "backup" {
+  count = var.enable_backup ? 1 : 0
+
   name_prefix = "\${var.name}-backup-"
 
   assume_role_policy = jsonencode({
@@ -2652,22 +2875,28 @@ resource "aws_iam_role" "backup" {
 }
 
 resource "aws_iam_role_policy_attachment" "backup" {
-  role       = aws_iam_role.backup.name
-  policy_arn = data.aws_iam_policy.backup.arn
+  count = var.enable_backup ? 1 : 0
+
+  role       = aws_iam_role.backup[0].name
+  policy_arn = data.aws_iam_policy.backup[0].arn
 }
 
 resource "aws_backup_vault" "database" {
+  count = var.enable_backup ? 1 : 0
+
   name        = "\${var.name}-aurora-backup"
   kms_key_arn = aws_kms_key.database.arn
   tags        = var.tags
 }
 
 resource "aws_backup_plan" "database" {
+  count = var.enable_backup ? 1 : 0
+
   name = "\${var.name}-aurora-backup"
 
   rule {
     rule_name         = "daily-backup"
-    target_vault_name = aws_backup_vault.database.name
+    target_vault_name = aws_backup_vault.database[0].name
     schedule          = "cron(0 5 ? * * *)"
 
     lifecycle {
@@ -2679,9 +2908,11 @@ resource "aws_backup_plan" "database" {
 }
 
 resource "aws_backup_selection" "database" {
+  count = var.enable_backup ? 1 : 0
+
   name         = "\${var.name}-aurora"
-  plan_id      = aws_backup_plan.database.id
-  iam_role_arn = aws_iam_role.backup.arn
+  plan_id      = aws_backup_plan.database[0].id
+  iam_role_arn = aws_iam_role.backup[0].arn
 
   resources = [aws_rds_cluster.database.arn]
 }
@@ -2783,11 +3014,11 @@ exports[`ts#rdb generator > should generate terraform modules with MySQL engine 
     }
     null = {
       source  = "hashicorp/null"
-      version = "~> 3.6"
+      version = ">= 3.0"
     }
     random = {
       source  = "hashicorp/random"
-      version = "~> 3.6"
+      version = ">= 3.0"
     }
   }
 }
@@ -2850,6 +3081,36 @@ variable "enable_rds_proxy" {
   default     = true
 }
 
+variable "enable_credential_rotation" {
+  description = "Whether to enable automatic credential rotation for the admin secret."
+  type        = bool
+  default     = true
+}
+
+variable "enable_cloudwatch_logs" {
+  description = "Whether to export Aurora engine logs to CloudWatch. PostgreSQL also enables verbose statement logging."
+  type        = bool
+  default     = false
+}
+
+variable "enable_performance_insights" {
+  description = "Whether to enable Performance Insights on Aurora cluster instances."
+  type        = bool
+  default     = true
+}
+
+variable "performance_insights_retention_period" {
+  description = "Retention period, in days, for Performance Insights data when enabled."
+  type        = number
+  default     = 7
+}
+
+variable "enable_backup" {
+  description = "Whether to provision an AWS Backup plan for the Aurora cluster."
+  type        = bool
+  default     = false
+}
+
 variable "tags" {
   description = "Tags to apply to all resources."
   type        = map(string)
@@ -2860,6 +3121,11 @@ variable "docker_image_tag" {
   description = "Docker image tag for the migration handler. Defaults to the tag built by the Nx docker target."
   type        = string
   default     = "proj-db-migration:latest"
+}
+
+variable "asset_bucket_name" {
+  description = "Name of the shared asset S3 bucket used to stage the Lambda deployment zip. Instantiate the \`core/asset-bucket\` module once per deployment and pass its \`bucket_name\` output here."
+  type        = string
 }
 
 data "aws_region" "current" {}
@@ -2881,21 +3147,26 @@ locals {
 module "aurora" {
   source = "../../../core/rdb/aurora"
   #checkov:skip=CKV_AWS_139:Deletion protection is enabled but checkov is unable to detect it correctly
-  name                            = "db"
-  vpc_id                          = var.vpc_id
-  private_subnet_ids              = var.private_subnet_ids
-  engine                          = "aurora-mysql"
-  engine_version                  = var.engine_version
-  database_name                   = "databasename"
-  admin_user                      = "databaseUser"
-  port                            = var.port
-  serverless_min_capacity         = var.serverless_min_capacity
-  serverless_max_capacity         = var.serverless_max_capacity
-  instance_count                  = var.instance_count
-  deletion_protection             = var.deletion_protection
-  skip_final_snapshot             = var.skip_final_snapshot
-  enable_rds_proxy                = var.enable_rds_proxy
-  tags                            = var.tags
+  name                                  = "db"
+  vpc_id                                = var.vpc_id
+  private_subnet_ids                    = var.private_subnet_ids
+  engine                                = "aurora-mysql"
+  engine_version                        = var.engine_version
+  database_name                         = "databasename"
+  admin_user                            = "databaseUser"
+  port                                  = var.port
+  serverless_min_capacity               = var.serverless_min_capacity
+  serverless_max_capacity               = var.serverless_max_capacity
+  instance_count                        = var.instance_count
+  deletion_protection                   = var.deletion_protection
+  skip_final_snapshot                   = var.skip_final_snapshot
+  enable_rds_proxy                      = var.enable_rds_proxy
+  enable_credential_rotation            = var.enable_credential_rotation
+  enable_cloudwatch_logs                = var.enable_cloudwatch_logs
+  enable_performance_insights           = var.enable_performance_insights
+  performance_insights_retention_period = var.performance_insights_retention_period
+  enable_backup                         = var.enable_backup
+  tags                                  = var.tags
 }
 
 resource "aws_iam_role_policy" "proxy_db_user_connect" {
@@ -2923,6 +3194,14 @@ data "archive_file" "create_db_user_zip" {
   output_path = "\${path.module}/../../../../../../../dist/packages/common/terraform/dbs/db/create-db-user.zip"
 }
 
+resource "aws_s3_object" "create_db_user_zip" {
+  bucket      = var.asset_bucket_name
+  key         = "dbs/db/\${data.archive_file.create_db_user_zip.output_base64sha256}.zip"
+  source      = data.archive_file.create_db_user_zip.output_path
+  source_hash = data.archive_file.create_db_user_zip.output_base64sha256
+  etag        = data.archive_file.create_db_user_zip.output_md5
+}
+
 module "add_rdb_to_runtime_config" {
   source = "../../../core/runtime-config/entry"
 
@@ -2938,16 +3217,9 @@ module "add_rdb_to_runtime_config" {
   }
 }
 
-module "appconfig" {
-  source = "../../../core/runtime-config/appconfig"
-
-  application_name = "Db-runtime-config"
-
-  depends_on = [module.add_rdb_to_runtime_config]
-}
-
 resource "aws_ecr_repository" "migration_handler" {
   #checkov:skip=CKV_AWS_136:AES256 encryption is sufficient for ECR repositories
+  #checkov:skip=CKV_AWS_51:Mutable tags are intentional; the migration handler is always pushed as latest and redeployment is gated on docker_digest changes in null_resource.docker_publish
   name                 = "db-migration-\${random_string.suffix.result}"
   image_tag_mutability = "MUTABLE"
   force_delete         = true
@@ -3223,12 +3495,14 @@ resource "aws_lambda_function" "create_db_user" {
   #checkov:skip=CKV_AWS_115:Concurrent execution limit not required for the create-db-user handler
   #checkov:skip=CKV_AWS_173:Lambda environment variables encrypted by managed key
   #checkov:skip=CKV_AWS_272:Code signing not configured as deployment packages are built and deployed within the same pipeline
-  filename         = data.archive_file.create_db_user_zip.output_path
-  function_name    = local.create_db_user_function_name
-  role             = aws_iam_role.create_db_user.arn
-  handler          = "index.handler"
-  source_code_hash = data.archive_file.create_db_user_zip.output_base64sha256
-  runtime          = "nodejs24.x"
+  s3_bucket         = aws_s3_object.create_db_user_zip.bucket
+  s3_key            = aws_s3_object.create_db_user_zip.key
+  s3_object_version = aws_s3_object.create_db_user_zip.version_id
+  function_name     = local.create_db_user_function_name
+  role              = aws_iam_role.create_db_user.arn
+  handler           = "index.handler"
+  source_code_hash  = data.archive_file.create_db_user_zip.output_base64sha256
+  runtime           = "nodejs24.x"
   timeout          = 60
   architectures    = ["arm64"]
 
@@ -3251,6 +3525,7 @@ resource "aws_lambda_function" "create_db_user" {
   tags = var.tags
 
   depends_on = [
+    aws_s3_object.create_db_user_zip,
     aws_iam_role_policy_attachment.create_db_user_basic_execution,
     aws_iam_role_policy_attachment.create_db_user_vpc_access,
     aws_iam_role_policy_attachment.create_db_user_xray,
@@ -3420,10 +3695,6 @@ output "database_runtime_user" {
   value       = local.database_runtime_user
 }
 
-output "appconfig_application_id" {
-  description = "AppConfig Application ID for runtime config."
-  value       = module.appconfig.application_id
-}
 "
 `;
 
@@ -3557,8 +3828,8 @@ while (Date.now() < timeoutAt) {
     await client.end();
     console.log('Database is ready.');
     process.exit(0);
-  } catch (e) {
-    console.log(e);
+  } catch {
+    console.log('Database is not ready.');
     await client.end().catch(noop);
   }
   await new Promise((r) => setTimeout(r, 200));
@@ -3906,6 +4177,11 @@ export type AuroraDatabaseEngineVersion =
 
 export interface AuroraDatabaseEngine {
   /**
+   * Discriminant identifying the engine type.
+   */
+  readonly type: 'mysql' | 'postgres';
+
+  /**
    * Default Aurora engine version used when one is not explicitly provided.
    */
   readonly defaultVersion: AuroraDatabaseEngineVersion;
@@ -3923,6 +4199,7 @@ export class AuroraDatabaseEngines {
     defaultVersion?: AuroraMysqlEngineVersion;
   }): AuroraDatabaseEngine {
     return {
+      type: 'mysql',
       defaultVersion,
       clusterEngine: (version) =>
         DatabaseClusterEngine.auroraMysql({
@@ -3937,6 +4214,7 @@ export class AuroraDatabaseEngines {
     defaultVersion?: AuroraPostgresEngineVersion;
   }): AuroraDatabaseEngine {
     return {
+      type: 'postgres',
       defaultVersion,
       clusterEngine: (version) =>
         DatabaseClusterEngine.auroraPostgres({
@@ -4015,6 +4293,27 @@ export interface AuroraDatabaseProps extends Omit<
    * @default true
    */
   readonly enableCredentialRotation?: boolean;
+
+  /**
+   * Whether to enable deletion protection on the Aurora cluster.
+   *
+   * @default true
+   */
+  readonly deletionProtection?: boolean;
+
+  /**
+   * Removal policy applied to the Aurora cluster.
+   *
+   * @default RemovalPolicy.RETAIN
+   */
+  readonly removalPolicy?: RemovalPolicy;
+
+  /**
+   * Whether to enable automatic key rotation on the KMS key used to encrypt the Aurora cluster and its credentials secret.
+   *
+   * @default true
+   */
+  readonly enableKeyRotation?: boolean;
 }
 
 /**
@@ -4041,6 +4340,9 @@ export abstract class AuroraDatabase extends Construct {
       writer,
       enableRdsProxy = true,
       enableCredentialRotation = true,
+      deletionProtection = true,
+      removalPolicy = RemovalPolicy.RETAIN,
+      enableKeyRotation = true,
       engine,
       engineVersion,
       ...clusterProps
@@ -4050,7 +4352,7 @@ export abstract class AuroraDatabase extends Construct {
 
     this.adminUser = adminUser;
 
-    const key = new Key(this, 'EncryptionKey', { enableKeyRotation: true });
+    const key = new Key(this, 'EncryptionKey', { enableKeyRotation });
     this.cluster = new DatabaseCluster(this, 'DatabaseCluster', {
       ...clusterProps,
       vpc,
@@ -4065,8 +4367,8 @@ export abstract class AuroraDatabase extends Construct {
       defaultDatabaseName: databaseName,
       storageEncrypted: true,
       storageEncryptionKey: key,
-      deletionProtection: true,
-      removalPolicy: RemovalPolicy.RETAIN,
+      deletionProtection,
+      removalPolicy,
     });
 
     if (enableCredentialRotation) {
@@ -4153,28 +4455,32 @@ export abstract class AuroraDatabase extends Construct {
     const migrationHandler = new DockerImageFunction(this, 'MigrationHandler', {
       code: DockerImageCode.fromImageAsset(migrationBundleDir, {
         platform: Platform.LINUX_ARM64,
-        buildArgs: {
-          AWS_REGION: Stack.of(this).region,
-        },
       }),
       memorySize: 1024,
       timeout: Duration.minutes(5),
       tracing: Tracing.ACTIVE,
       vpc,
-      environment: {
-        DATABASE_SECRET_ARN: this.cluster.secret!.secretArn,
-        HOSTNAME: databaseHostname,
-        DATABASE: databaseName,
-        PORT: databasePort.toString(),
-        DBUSER: this.dbUser,
-      },
+      environment:
+        engine.type === 'mysql'
+          ? {
+              DATABASE_SECRET_ARN: this.cluster.secret!.secretArn,
+            }
+          : {
+              HOSTNAME: databaseHostname,
+              DATABASE: databaseName,
+              PORT: databasePort.toString(),
+              DBUSER: this.dbUser,
+            },
       architecture: Architecture.ARM_64,
     });
 
-    this.allowDefaultPortFrom(migrationHandler);
-    this.cluster.connections.allowDefaultPortFrom(migrationHandler);
-    this.grantSecretRead(migrationHandler);
-    this.grantConnect(migrationHandler);
+    if (engine.type === 'mysql') {
+      this.cluster.connections.allowDefaultPortFrom(migrationHandler);
+      this.grantSecretRead(migrationHandler);
+    } else {
+      this.allowDefaultPortFrom(migrationHandler);
+      this.grantConnect(migrationHandler);
+    }
 
     const trigger = new Trigger(this, 'MigrationTrigger', {
       handler: migrationHandler,
@@ -4296,8 +4602,6 @@ export default defineConfig({
 exports[`ts#rdb generator > should generate the aurora shared construct 4`] = `
 "FROM public.ecr.aws/lambda/nodejs:24
 
-ARG AWS_REGION
-
 WORKDIR \${LAMBDA_TASK_ROOT}
 
 RUN npm install prisma@7.8.0
@@ -4306,7 +4610,7 @@ COPY index.js ./index.js
 COPY prisma ./prisma
 COPY prisma.config.ts ./prisma.config.ts
 
-RUN curl -fsSL "https://truststore.pki.rds.amazonaws.com/\${AWS_REGION}/\${AWS_REGION}-bundle.pem" \\
+RUN curl -fsSL "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem" \\
     -o /etc/pki/ca-trust/source/anchors/rds-bundle.pem && \\
     update-ca-trust
 

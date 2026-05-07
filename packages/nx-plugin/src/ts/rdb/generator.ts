@@ -116,36 +116,30 @@ export const tsRdbGenerator = async (
     targetFilePath: 'src/create-db-user-handler.ts',
     bundleOutputDir: 'create-db-user',
   });
-  projectConfig.targets['bundle-migration'] = {
-    cache: true,
-    executor: 'nx:run-commands',
-    outputs: ['{workspaceRoot}/dist/{projectRoot}/bundle/migration'],
-    options: {
-      commands: [
-        fs.rm(`${relativePathToRoot}dist/{projectRoot}/bundle/migration`),
-        fs.mkdir(`${relativePathToRoot}dist/{projectRoot}/bundle/migration`),
-        fs.cp(
-          'prisma',
-          `${relativePathToRoot}dist/{projectRoot}/bundle/migration/prisma`,
-        ),
-        fs.cp(
-          'prisma.config.ts',
-          `${relativePathToRoot}dist/{projectRoot}/bundle/migration/prisma.config.ts`,
-        ),
-        fs.cp(
-          'Dockerfile',
-          `${relativePathToRoot}dist/{projectRoot}/bundle/migration/Dockerfile`,
-        ),
-      ],
-      cwd: '{projectRoot}',
-      parallel: false,
-    },
+  const bundleTarget = projectConfig.targets['bundle'];
+  const rolldownCommand = bundleTarget.options.command;
+  delete bundleTarget.options.command;
+  bundleTarget.options = {
+    ...bundleTarget.options,
+    commands: [
+      fs.rm(`${relativePathToRoot}dist/{projectRoot}/bundle/migration`),
+      fs.mkdir(`${relativePathToRoot}dist/{projectRoot}/bundle/migration`),
+      fs.cp(
+        'prisma',
+        `${relativePathToRoot}dist/{projectRoot}/bundle/migration/prisma`,
+      ),
+      fs.cp(
+        'prisma.config.ts',
+        `${relativePathToRoot}dist/{projectRoot}/bundle/migration/prisma.config.ts`,
+      ),
+      fs.cp(
+        'Dockerfile',
+        `${relativePathToRoot}dist/{projectRoot}/bundle/migration/Dockerfile`,
+      ),
+      rolldownCommand,
+    ],
+    parallel: false,
   };
-  addDependencyToTargetIfNotPresent(
-    projectConfig,
-    'bundle',
-    'bundle-migration',
-  );
   projectConfig.targets.generate = {
     executor: 'nx:run-commands',
     outputs: ['{projectRoot}/generated/prisma'],
@@ -203,7 +197,7 @@ export const tsRdbGenerator = async (
       cache: true,
       executor: 'nx:run-commands',
       options: {
-        command: `docker build --platform linux/arm64 --provenance=false --build-arg AWS_REGION=$AWS_DEFAULT_REGION -t ${dockerImageTag} ${migrationBundleDir}`,
+        command: `docker build --platform linux/arm64 --provenance=false -t ${dockerImageTag} ${migrationBundleDir}`,
       },
       dependsOn: ['bundle'],
     };
@@ -215,6 +209,7 @@ export const tsRdbGenerator = async (
   await sharedConstructsGenerator(tree, { iacProvider });
   await addRdbInfra(tree, {
     iacProvider,
+    projectName: fullyQualifiedName,
     nameClassName,
     nameKebabCase,
     databasePackageAlias: toScopeAlias(fullyQualifiedName),

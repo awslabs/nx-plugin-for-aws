@@ -22,7 +22,7 @@ describe('ts#rdb generator', () => {
     name: 'db',
     directory: 'packages',
     service: 'Aurora' as const,
-    engine: 'Postgres' as const,
+    engine: 'PostgreSQL' as const,
     databaseUser: 'databaseUser',
     databaseName: 'databaseName',
     ormFramework: 'Prisma' as const,
@@ -75,26 +75,18 @@ describe('ts#rdb generator', () => {
       outputs: ['{workspaceRoot}/dist/{projectRoot}/bundle'],
       executor: 'nx:run-commands',
       options: {
-        command: 'rolldown -c rolldown.config.ts',
-        cwd: '{projectRoot}',
-      },
-      dependsOn: ['compile', 'bundle-migration'],
-    });
-    expect(projectConfig.targets['bundle-migration']).toEqual({
-      cache: true,
-      executor: 'nx:run-commands',
-      outputs: ['{workspaceRoot}/dist/{projectRoot}/bundle/migration'],
-      options: {
         commands: [
           'rimraf ../../dist/{projectRoot}/bundle/migration',
           'make-dir ../../dist/{projectRoot}/bundle/migration',
           'ncp prisma ../../dist/{projectRoot}/bundle/migration/prisma',
           'ncp prisma.config.ts ../../dist/{projectRoot}/bundle/migration/prisma.config.ts',
           'ncp Dockerfile ../../dist/{projectRoot}/bundle/migration/Dockerfile',
+          'rolldown -c rolldown.config.ts',
         ],
         cwd: '{projectRoot}',
         parallel: false,
       },
+      dependsOn: ['compile'],
     });
     expect(projectConfig.targets.generate).toEqual({
       executor: 'nx:run-commands',
@@ -144,6 +136,12 @@ describe('ts#rdb generator', () => {
     });
     expect(projectConfig.targets.build.dependsOn).toContain('bundle');
     expect(projectConfig.targets.compile.dependsOn).toContain('generate');
+    const sharedConstructsConfig = JSON.parse(
+      tree.read('packages/common/constructs/project.json', 'utf-8') ?? '{}',
+    );
+    expect(sharedConstructsConfig.targets.build.dependsOn).toContain(
+      '@proj/db:build',
+    );
     expect(
       packageJson.dependencies['@aws-lambda-powertools/parameters'],
     ).toBeDefined();
@@ -237,6 +235,12 @@ describe('ts#rdb generator', () => {
     expect(
       tree.read('packages/common/terraform/src/app/dbs/db/db.tf', 'utf-8'),
     ).toMatchSnapshot();
+    const sharedTerraformConfig = JSON.parse(
+      tree.read('packages/common/terraform/project.json', 'utf-8') ?? '{}',
+    );
+    expect(sharedTerraformConfig.targets.build.dependsOn).toContain(
+      '@proj/db:build',
+    );
   });
 
   it('should keep an existing aurora shared construct', async () => {

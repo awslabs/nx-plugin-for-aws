@@ -11,11 +11,11 @@ terraform {
     }
     null = {
       source  = "hashicorp/null"
-      version = "~> 3.2"
+      version = ">= 3.0"
     }
     random = {
       source  = "hashicorp/random"
-      version = "~> 3.6"
+      version = ">= 3.0"
     }
   }
 }
@@ -118,6 +118,36 @@ variable "enable_credential_rotation" {
   default     = true
 }
 
+variable "enable_cloudwatch_logs" {
+  description = "Whether to export Aurora engine logs to CloudWatch. PostgreSQL also enables verbose statement logging."
+  type        = bool
+  default     = false
+}
+
+variable "enable_performance_insights" {
+  description = "Whether to enable Performance Insights on Aurora cluster instances."
+  type        = bool
+  default     = true
+}
+
+variable "performance_insights_retention_period" {
+  description = "Retention period, in days, for Performance Insights data when enabled."
+  type        = number
+  default     = 7
+}
+
+variable "enable_backup" {
+  description = "Whether to provision an AWS Backup plan for the Aurora cluster."
+  type        = bool
+  default     = false
+}
+
+variable "enable_key_rotation" {
+  description = "Whether to enable automatic key rotation on the KMS key used to encrypt the Aurora cluster and its credentials secret."
+  type        = bool
+  default     = true
+}
+
 variable "tags" {
   description = "Tags to apply to all resources."
   type        = map(string)
@@ -131,6 +161,8 @@ locals {
 }
 
 resource "aws_rds_cluster_parameter_group" "database" {
+  count = var.enable_cloudwatch_logs ? 1 : 0
+
   name_prefix = "${var.name}-"
   family      = local.parameter_group_family
   description = "Parameter group for ${var.name} Aurora cluster"
@@ -148,7 +180,7 @@ resource "aws_rds_cluster_parameter_group" "database" {
 
 resource "aws_kms_key" "database" {
   description         = "KMS key for Aurora cluster ${var.name}"
-  enable_key_rotation = true
+  enable_key_rotation = var.enable_key_rotation
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -261,7 +293,7 @@ resource "aws_secretsmanager_secret_version" "credentials" {
 }
 
 resource "aws_rds_cluster" "database" {
-  #checkov:skip=CKV2_AWS_27:Query logging enabled for PostgreSQL via log_statement=all in aws_rds_cluster_parameter_group.database and enabled_cloudwatch_logs_exports includes "postgresql"; Checkov cannot resolve var.engine conditionals statically
+  #checkov:skip=CKV2_AWS_27:Query logging can be enabled with enable_cloudwatch_logs; this module defaults to CDK-equivalent behavior unless logging is requested
   #checkov:skip=CKV_AWS_139:Deletion protection is enabled but checkov is unable to detect it correctly
   cluster_identifier                  = "${var.name}-aurora"
   engine                              = var.engine
@@ -270,18 +302,19 @@ resource "aws_rds_cluster" "database" {
   master_username                     = var.admin_user
   master_password                     = random_password.master_password.result
   db_subnet_group_name                = aws_db_subnet_group.database.name
-  db_cluster_parameter_group_name     = aws_rds_cluster_parameter_group.database.name
+  db_cluster_parameter_group_name     = var.enable_cloudwatch_logs ? aws_rds_cluster_parameter_group.database[0].name : null
   vpc_security_group_ids              = [aws_security_group.database.id]
   port                                = coalesce(var.port, local.default_port)
   storage_encrypted                   = true
   kms_key_id                          = aws_kms_key.database.arn
   deletion_protection                 = var.deletion_protection
   skip_final_snapshot                 = var.skip_final_snapshot
+  final_snapshot_identifier           = var.skip_final_snapshot ? null : "${var.name}-aurora-final-snapshot"
   iam_database_authentication_enabled = true
   monitoring_interval                 = 5
   monitoring_role_arn                 = aws_iam_role.enhanced_monitoring.arn
   copy_tags_to_snapshot               = true
-  enabled_cloudwatch_logs_exports     = var.engine == "aurora-mysql" ? ["audit", "error", "general", "slowquery"] : ["postgresql"]
+  enabled_cloudwatch_logs_exports     = var.enable_cloudwatch_logs ? (var.engine == "aurora-mysql" ? ["audit", "error", "general", "slowquery"] : ["postgresql"]) : null
 
   lifecycle {
     prevent_destroy = true
@@ -310,9 +343,9 @@ resource "aws_rds_cluster_instance" "database" {
   auto_minor_version_upgrade            = true
   monitoring_interval                   = 5
   monitoring_role_arn                   = aws_iam_role.enhanced_monitoring.arn
-  performance_insights_enabled          = true
-  performance_insights_kms_key_id       = aws_kms_key.database.arn
-  performance_insights_retention_period = 7
+  performance_insights_enabled          = var.enable_performance_insights
+  performance_insights_kms_key_id       = var.enable_performance_insights ? aws_kms_key.database.arn : null
+  performance_insights_retention_period = var.enable_performance_insights ? var.performance_insights_retention_period : null
 
   tags = merge(var.tags, {
     Name = "${var.name}-aurora-${count.index + 1}"
@@ -352,10 +385,11 @@ resource "aws_vpc_security_group_ingress_rule" "rotation_to_database" {
 }
 
 resource "aws_cloudformation_stack" "credentials_rotation" {
+  #checkov:skip=CKV_AWS_124:SNS event notifications are not required for the credentials rotation stack
   count = var.enable_credential_rotation ? 1 : 0
   name  = "${var.name}-aurora-credentials-rotation"
 
-  capabilities = ["CAPABILITY_IAM"]
+  capabilities = ["CAPABILITY_IAM", "CAPABILITY_AUTO_EXPAND"]
 
   template_body = jsonencode({
     AWSTemplateFormatVersion = "2010-09-09"
@@ -410,6 +444,27 @@ resource "aws_iam_role" "proxy" {
   })
 }
 
+resource "aws_iam_role_policy" "proxy_secret_access" {
+  count = var.enable_rds_proxy ? 1 : 0
+  role  = aws_iam_role.proxy[0].name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["secretsmanager:GetSecretValue"]
+        Resource = [aws_secretsmanager_secret.credentials.arn]
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["kms:Decrypt"]
+        Resource = [aws_kms_key.database.arn]
+      }
+    ]
+  })
+}
+
 resource "aws_security_group" "proxy" {
   #checkov:skip=CKV2_AWS_5:Security group is attached to aws_db_proxy.aurora; Checkov cannot resolve count-conditional cross-resource references
   count = var.enable_rds_proxy ? 1 : 0
@@ -433,6 +488,17 @@ resource "aws_db_proxy" "aurora" {
   vpc_subnet_ids         = var.private_subnet_ids
   vpc_security_group_ids = [aws_security_group.proxy[0].id]
   require_tls            = true
+
+  auth {
+    auth_scheme = "SECRETS"
+    iam_auth    = "REQUIRED"
+    secret_arn  = aws_secretsmanager_secret.credentials.arn
+  }
+
+  depends_on = [
+    aws_iam_role_policy.proxy_secret_access,
+    aws_secretsmanager_secret_version.credentials,
+  ]
 }
 
 resource "aws_db_proxy_default_target_group" "default" {
@@ -527,10 +593,14 @@ resource "aws_vpc_security_group_egress_rule" "proxy_to_database" {
 }
 
 data "aws_iam_policy" "backup" {
+  count = var.enable_backup ? 1 : 0
+
   arn = "arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup"
 }
 
 resource "aws_iam_role" "backup" {
+  count = var.enable_backup ? 1 : 0
+
   name_prefix = "${var.name}-backup-"
 
   assume_role_policy = jsonencode({
@@ -548,22 +618,28 @@ resource "aws_iam_role" "backup" {
 }
 
 resource "aws_iam_role_policy_attachment" "backup" {
-  role       = aws_iam_role.backup.name
-  policy_arn = data.aws_iam_policy.backup.arn
+  count = var.enable_backup ? 1 : 0
+
+  role       = aws_iam_role.backup[0].name
+  policy_arn = data.aws_iam_policy.backup[0].arn
 }
 
 resource "aws_backup_vault" "database" {
+  count = var.enable_backup ? 1 : 0
+
   name        = "${var.name}-aurora-backup"
   kms_key_arn = aws_kms_key.database.arn
   tags        = var.tags
 }
 
 resource "aws_backup_plan" "database" {
+  count = var.enable_backup ? 1 : 0
+
   name = "${var.name}-aurora-backup"
 
   rule {
     rule_name         = "daily-backup"
-    target_vault_name = aws_backup_vault.database.name
+    target_vault_name = aws_backup_vault.database[0].name
     schedule          = "cron(0 5 ? * * *)"
 
     lifecycle {
@@ -575,9 +651,11 @@ resource "aws_backup_plan" "database" {
 }
 
 resource "aws_backup_selection" "database" {
+  count = var.enable_backup ? 1 : 0
+
   name         = "${var.name}-aurora"
-  plan_id      = aws_backup_plan.database.id
-  iam_role_arn = aws_iam_role.backup.arn
+  plan_id      = aws_backup_plan.database[0].id
+  iam_role_arn = aws_iam_role.backup[0].arn
 
   resources = [aws_rds_cluster.database.arn]
 }
