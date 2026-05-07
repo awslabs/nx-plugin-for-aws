@@ -151,6 +151,17 @@ export const pyStrandsAgentA2aConnectionGenerator = async (
     const clientVarName = targetAgentSnakeCase;
     const toolName = `ask_${targetAgentSnakeCase}`;
 
+    // Every protocol's main.py populates .session.get_container_session_id
+    // on the first inbound request; the A2A client reads it lazily on each
+    // outbound call so the forwarded
+    // X-Amzn-Bedrock-AgentCore-Runtime-Session-Id always matches.
+    await addPythonDestructuredImport(
+      tree,
+      agentFilePath,
+      ['get_container_session_id'],
+      '.session',
+    );
+
     await addImportToAgentFile(
       tree,
       agentFilePath,
@@ -267,7 +278,7 @@ const addClientToolToGetAgent = async (
   // The tool function we'll insert. Strands tools in Python are just
   // @tool-decorated callables, so we define them inline in get_agent.
   // A2AAgent is directly callable (syncs over invoke_async internally).
-  const toolBlock = `${clientVarName} = ${clientClassName}.create(session_id=session_id)
+  const toolBlock = `${clientVarName} = ${clientClassName}.create(session_id_provider=get_container_session_id)
 
     @tool
     def ${toolName}(prompt: str) -> str:
@@ -281,11 +292,11 @@ const addClientToolToGetAgent = async (
   await applyGritQL(
     tree,
     filePath,
-    py(`\`def get_agent($params):
+    py(`\`def get_agent():
     $body\` where {
   $body <: contains \`yield Agent($_)\`,
   $body <: not contains \`${clientClassName}.create\`
-} => \`def get_agent($params):
+} => \`def get_agent():
     ${toolBlock}
     $body\``),
   );

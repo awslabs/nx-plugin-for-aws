@@ -17,9 +17,13 @@ export interface AgentCoreA2aClientOptions {
    */
   agentRuntimeArn: string;
   /**
-   * Session ID to include in request headers.
+   * Called per outbound request to obtain the session id to forward on
+   * ``X-Amzn-Bedrock-AgentCore-Runtime-Session-Id``. AgentCore routes each
+   * session id to a dedicated microVM; by providing a callable, the agent
+   * can lazily read the inbound session id captured on its first request
+   * so end-to-end session attribution and microVM affinity are preserved.
    */
-  sessionId?: string;
+  sessionIdProvider: () => string;
   /**
    * Optional description for the remote agent.
    */
@@ -72,6 +76,25 @@ export class AgentCoreA2aClient {
   }
 
   /**
+   * Wrap an already-authenticated fetch so every outbound request stamps
+   * the current container session id on the
+   * ``X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`` header.
+   */
+  private static withSessionId(
+    inner: typeof fetch,
+    sessionIdProvider: () => string,
+  ): typeof fetch {
+    return async (input, init) => {
+      const headers = new Headers(init?.headers);
+      headers.set(
+        'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id',
+        sessionIdProvider(),
+      );
+      return inner(input, { ...init, headers });
+    };
+  }
+
+  /**
    * Build a Strands `A2AAgent` for a URL plus a fetch that is already
    * authenticated (SigV4-signing or Bearer-adding).
    */
@@ -112,7 +135,11 @@ export class AgentCoreA2aClient {
       return client.fetch(...args);
     };
 
-    return AgentCoreA2aClient.build(url, sigv4Fetch, options);
+    return AgentCoreA2aClient.build(
+      url,
+      AgentCoreA2aClient.withSessionId(sigv4Fetch, options.sessionIdProvider),
+      options,
+    );
   }
 
   /**
@@ -129,6 +156,10 @@ export class AgentCoreA2aClient {
       return fetch(input, { ...init, headers });
     };
 
-    return AgentCoreA2aClient.build(url, bearerFetch, options);
+    return AgentCoreA2aClient.build(
+      url,
+      AgentCoreA2aClient.withSessionId(bearerFetch, options.sessionIdProvider),
+      options,
+    );
   }
 }

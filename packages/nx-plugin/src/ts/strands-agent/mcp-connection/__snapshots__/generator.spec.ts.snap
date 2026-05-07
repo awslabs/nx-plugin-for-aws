@@ -7,8 +7,7 @@ exports[`ts#strands-agent#mcp-connection generator > should match snapshot for a
 `;
 
 exports[`ts#strands-agent#mcp-connection generator > should match snapshot for agent-connection src files > agentcore-mcp-client.ts 1`] = `
-"import { randomUUID } from 'node:crypto';
-import { McpClient } from '@strands-agents/sdk';
+"import { McpClient } from '@strands-agents/sdk';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { AwsClient } from 'aws4fetch';
 import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
@@ -22,10 +21,13 @@ export interface AgentCoreMcpClientOptions {
    */
   agentRuntimeArn: string;
   /**
-   * Session ID to include in request headers.
-   * Defaults to a random UUID if not provided.
+   * Called per outbound request to obtain the session id to forward on
+   * \`\`X-Amzn-Bedrock-AgentCore-Runtime-Session-Id\`\`. AgentCore routes each
+   * session id to a dedicated microVM; by providing a callable, the agent
+   * can lazily read the inbound session id captured on its first request
+   * so end-to-end session attribution and microVM affinity are preserved.
    */
-  sessionId?: string;
+  sessionIdProvider: () => string;
 }
 
 /**
@@ -54,7 +56,7 @@ export interface AgentCoreMcpClientJwtOptions extends AgentCoreMcpClientOptions 
  */
 interface CreateOptions {
   url: string;
-  sessionId?: string;
+  sessionIdProvider: () => string;
   buildHeaders?: () => Promise<Record<string, string>>;
   fetch?: typeof fetch;
 }
@@ -82,15 +84,19 @@ export class AgentCoreMcpClient {
   private static create(options: CreateOptions): McpClient {
     const {
       url,
-      sessionId = randomUUID(),
+      sessionIdProvider,
       buildHeaders = async (): Promise<Record<string, string>> => ({}),
       fetch: customFetch,
     } = options;
 
-    // Create a custom fetch that adds required headers
+    // Per-request fetch that stamps the session id at call time, so each
+    // outbound request reads the latest captured container session id.
     const fetchWithHeaders: typeof fetch = async (input, init) => {
       const headers = new Headers(init?.headers);
-      headers.set('X-Amzn-Bedrock-AgentCore-Runtime-Session-Id', sessionId);
+      headers.set(
+        'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id',
+        sessionIdProvider(),
+      );
       for (const [k, v] of Object.entries(await buildHeaders())) {
         headers.set(k, v);
       }
@@ -110,7 +116,7 @@ export class AgentCoreMcpClient {
    * Create an MCP client with IAM (SigV4) authentication
    */
   static withIamAuth(options: AgentCoreMcpClientIamOptions): McpClient {
-    const { agentRuntimeArn, sessionId } = options;
+    const { agentRuntimeArn, sessionIdProvider } = options;
     const credentialProvider =
       options.credentialProvider ?? fromNodeProviderChain();
     const { region, url } = AgentCoreMcpClient.buildUrl(agentRuntimeArn);
@@ -128,7 +134,7 @@ export class AgentCoreMcpClient {
 
     return AgentCoreMcpClient.create({
       url,
-      sessionId,
+      sessionIdProvider,
       fetch: sigv4Fetch,
     });
   }
@@ -137,12 +143,12 @@ export class AgentCoreMcpClient {
    * Create an MCP client with JWT authentication
    */
   static withJwtAuth(options: AgentCoreMcpClientJwtOptions): McpClient {
-    const { agentRuntimeArn, accessTokenProvider, sessionId } = options;
+    const { agentRuntimeArn, accessTokenProvider, sessionIdProvider } = options;
     const { url } = AgentCoreMcpClient.buildUrl(agentRuntimeArn);
 
     return AgentCoreMcpClient.create({
       url,
-      sessionId,
+      sessionIdProvider,
       buildHeaders: async () => ({
         Authorization: \`Bearer \${await accessTokenProvider()}\`,
       }),
@@ -166,9 +172,14 @@ import { getConnectedAgentRuntimeArn } from '../core/runtime-config.js';
  *
  * In local mode (SERVE_LOCAL env var set): connects directly
  * to the local MCP server via Streamable HTTP.
+ *
+ * \`sessionIdProvider\` is called per outbound request, so the forwarded
+ * \`X-Amzn-Bedrock-AgentCore-Runtime-Session-Id\` header always reflects the
+ * current container session id - preserving microVM affinity and session
+ * attribution end-to-end.
  */
 export class InventoryMcpClient {
-  static async create(sessionId: string): Promise<McpClient> {
+  static async create(sessionIdProvider: () => string): Promise<McpClient> {
     if (process.env.SERVE_LOCAL === 'true') {
       // Local development: connect directly via Streamable HTTP
       const transport = new StreamableHTTPClientTransport(
@@ -179,7 +190,7 @@ export class InventoryMcpClient {
 
     return AgentCoreMcpClient.withIamAuth({
       agentRuntimeArn: await getConnectedAgentRuntimeArn('InventoryMcp'),
-      sessionId,
+      sessionIdProvider,
     });
   }
 }
@@ -187,7 +198,8 @@ export class InventoryMcpClient {
 `;
 
 exports[`ts#strands-agent#mcp-connection generator > should match snapshot for agent-connection src files > transformed-agent.ts 1`] = `
-"import { InventoryMcpClient } from ':proj/agent-connection';
+"import { getContainerSessionId } from './session.js';
+import { InventoryMcpClient } from ':proj/agent-connection';
 import { Agent, tool } from '@strands-agents/sdk';
 import { z } from 'zod';
 
@@ -198,8 +210,8 @@ const multiply = tool({
   callback: ({ a, b }) => a * b,
 });
 
-export const getAgent = async (sessionId: string) => {
-  const inventoryMcp = await InventoryMcpClient.create(sessionId);
+export const getAgent = async () => {
+  const inventoryMcp = await InventoryMcpClient.create(getContainerSessionId);
   return new Agent({
     systemPrompt: 'You are a mathematical wizard.',
     tools: [inventoryMcp, multiply],

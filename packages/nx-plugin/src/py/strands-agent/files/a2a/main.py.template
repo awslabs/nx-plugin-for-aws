@@ -1,33 +1,72 @@
 import logging
 import os
+from typing import Any
 
-from fastapi import FastAPI
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from starlette.routing import Mount, Route
+from starlette.types import ASGIApp, Receive, Scope, Send
 from strands.multiagent.a2a import A2AServer
 
 from .agent import get_agent
+from .session import set_container_session_id
+
+SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
 
 logging.basicConfig(level=logging.INFO)
 
 PORT = int(os.environ.get("PORT", "9000"))
-
 RUNTIME_URL = os.environ.get("AGENTCORE_RUNTIME_URL", f"http://localhost:{PORT}/")
 
-_agent_ctx = get_agent(session_id="default")
-_agent = _agent_ctx.__enter__()
 
-a2a_server = A2AServer(
-    agent=_agent,
-    port=PORT,
-    http_url=RUNTIME_URL,
-    serve_at_root=True,
+class _LazyA2AApp:
+    """Wraps ``A2AServer`` so the inner app is built on first agent
+    invocation - never on a ``/ping`` health check.
+
+    AgentCore routes each runtimeSessionId to a dedicated microVM, so one
+    agent instance per container is the correct lifetime. Deferring
+    construction to the first inbound request means the
+    ``X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`` has been captured via
+    :mod:`session` before any downstream MCP / A2A client reads it.
+    """
+
+    def __init__(self) -> None:
+        self._inner: ASGIApp | None = None
+        self._agent_ctx: Any = None
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        # Capture the inbound AgentCore session id first so downstream MCP / A2A
+        # clients forward it on their outbound calls.
+        if scope["type"] == "http":
+            headers = dict(
+                (k.decode("latin-1"), v.decode("latin-1"))
+                for k, v in scope.get("headers", [])
+            )
+            set_container_session_id(headers.get(SESSION_ID_HEADER))
+
+        if self._inner is None:
+            self._agent_ctx = get_agent()
+            server = A2AServer(
+                agent=self._agent_ctx.__enter__(),
+                port=PORT,
+                http_url=RUNTIME_URL,
+                serve_at_root=True,
+            )
+            self._inner = server.to_fastapi_app()
+
+        await self._inner(scope, receive, send)
+
+
+async def _ping(request: Request) -> JSONResponse:
+    return JSONResponse({"status": "Healthy"})
+
+
+_lazy_a2a = _LazyA2AApp()
+
+app = Starlette(
+    routes=[
+        Route("/ping", _ping, methods=["GET"]),
+        Mount("/", app=_lazy_a2a),
+    ]
 )
-
-app = FastAPI()
-
-
-@app.get("/ping")
-def ping() -> dict[str, str]:
-    return {"status": "Healthy"}
-
-
-app.mount("/", a2a_server.to_fastapi_app())

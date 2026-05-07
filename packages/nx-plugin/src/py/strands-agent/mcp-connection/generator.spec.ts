@@ -69,7 +69,7 @@ def subtract(a: int, b: int) -> int:
 
 
 @contextmanager
-def get_agent(session_id: str):
+def get_agent():
     yield Agent(
         system_prompt="""
 You are a mathematical wizard.
@@ -211,7 +211,10 @@ dependencies = ["strands-agents"]
 
     // Check named client creation (matching TS pattern)
     expect(agentContent).toContain(
-      'inventory_mcp = InventoryMcpClient.create(session_id=session_id)',
+      'inventory_mcp = InventoryMcpClient.create(',
+    );
+    expect(agentContent).toContain(
+      'session_id_provider=get_container_session_id',
     );
 
     // Check parenthesized with block was added

@@ -117,7 +117,18 @@ export const tsStrandsAgentMcpConnectionGenerator = async (
       `:${npmScope}/agent-connection`,
     );
 
-    const clientCreationStmt = `const ${clientVarName} = await ${clientClassName}.create(sessionId);`;
+    // Every protocol's entrypoint populates setContainerSessionId on the
+    // first inbound request; the MCP client reads it lazily on every
+    // outbound call via getContainerSessionId, so the forwarded
+    // X-Amzn-Bedrock-AgentCore-Runtime-Session-Id always matches.
+    await addDestructuredImport(
+      tree,
+      agentFilePath,
+      ['getContainerSessionId'],
+      './session.js',
+    );
+
+    const clientCreationStmt = `const ${clientVarName} = await ${clientClassName}.create(getContainerSessionId);`;
 
     // Transform the arrow function that contains `new Agent`:
     // - Expression body: wrap in block with client creation and return

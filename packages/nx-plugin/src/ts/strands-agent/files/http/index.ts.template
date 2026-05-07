@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { createServer } from 'http';
 import {
   CreateHTTPContextOptions,
@@ -12,19 +11,21 @@ import {
   applyWSSHandler,
 } from '@trpc/server/adapters/ws';
 import { Context } from './init.js';
+import { setContainerSessionId } from './session.js';
 
 const PORT = parseInt(process.env.PORT || '8080');
+const SESSION_ID_HEADER = 'x-amzn-bedrock-agentcore-runtime-session-id';
 
 const createContext = (
   opts: CreateHTTPContextOptions | CreateWSSContextFnOptions,
 ): Context => {
-  const sessionId =
-    ('req' in opts
-      ? opts.req.headers['x-amzn-bedrock-agentcore-runtime-session-id']
-      : undefined) ?? randomUUID();
-  return {
-    sessionId: Array.isArray(sessionId) ? sessionId[0] : sessionId,
-  };
+  // Capture the inbound AgentCore session id once per container so any
+  // downstream MCP / A2A clients forward the same id on their outbound calls.
+  if ('req' in opts) {
+    const header = opts.req.headers[SESSION_ID_HEADER];
+    setContainerSessionId(Array.isArray(header) ? header[0] : header);
+  }
+  return {};
 };
 
 const handler = createHTTPHandler({

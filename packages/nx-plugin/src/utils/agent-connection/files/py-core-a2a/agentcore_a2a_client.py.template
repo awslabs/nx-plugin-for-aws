@@ -10,7 +10,14 @@ from .auth import SigV4HTTPXAuth
 
 
 class AgentCoreA2aClient:
-    """Factory for clients to call A2A agents hosted on Bedrock AgentCore Runtime."""
+    """Factory for clients to call A2A agents hosted on Bedrock AgentCore Runtime.
+
+    The ``session_id_provider`` callable is invoked per outbound request via
+    an ``httpx`` event hook, so the forwarded
+    ``X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`` header always reflects
+    the current container session id - even when the factory is built before
+    the first inbound request has populated it.
+    """
 
     @staticmethod
     def _build_url(agent_runtime_arn: str) -> tuple[str, str]:
@@ -25,18 +32,34 @@ class AgentCoreA2aClient:
         return region, url
 
     @staticmethod
+    def _session_id_hook(session_id_provider: Callable[[], str]):
+        """Build an httpx request hook that stamps the session id per call."""
+
+        async def _hook(request: httpx.Request) -> None:
+            request.headers["X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"] = (
+                session_id_provider()
+            )
+
+        return _hook
+
+    @staticmethod
     def _build(
         url: str,
         auth: httpx.Auth | None,
         headers: dict | None,
+        session_id_provider: Callable[[], str] | None,
         *,
         name: str | None,
         description: str | None,
     ) -> A2AAgent:
+        event_hooks: dict = {}
+        if session_id_provider is not None:
+            event_hooks["request"] = [AgentCoreA2aClient._session_id_hook(session_id_provider)]
         httpx_client = httpx.AsyncClient(
             auth=auth,
             headers=headers or {},
             timeout=120,
+            event_hooks=event_hooks,
         )
         client_config = ClientConfig(httpx_client=httpx_client, streaming=False)
         kwargs: dict = {"endpoint": url, "client_config": client_config}
@@ -49,21 +72,19 @@ class AgentCoreA2aClient:
     @staticmethod
     def with_iam_auth(
         agent_runtime_arn: str,
+        session_id_provider: Callable[[], str],
         *,
         name: str | None = None,
         description: str | None = None,
-        session_id: str | None = None,
     ) -> A2AAgent:
-        """Create an `A2AAgent` with IAM (SigV4) authentication."""
+        """Create an ``A2AAgent`` with IAM (SigV4) authentication."""
         region, url = AgentCoreA2aClient._build_url(agent_runtime_arn)
         credentials = boto3.Session(region_name=region).get_credentials()
-        headers = {}
-        if session_id:
-            headers["X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"] = session_id
         return AgentCoreA2aClient._build(
             url,
             SigV4HTTPXAuth(credentials, "bedrock-agentcore", region),
-            headers,
+            None,
+            session_id_provider,
             name=name,
             description=description,
         )
@@ -72,20 +93,19 @@ class AgentCoreA2aClient:
     def with_jwt_auth(
         agent_runtime_arn: str,
         access_token_provider: Callable[[], str],
+        session_id_provider: Callable[[], str],
         *,
         name: str | None = None,
         description: str | None = None,
-        session_id: str | None = None,
     ) -> A2AAgent:
-        """Create an `A2AAgent` with JWT Bearer authentication."""
+        """Create an ``A2AAgent`` with JWT Bearer authentication."""
         _, url = AgentCoreA2aClient._build_url(agent_runtime_arn)
         headers = {"Authorization": f"Bearer {access_token_provider()}"}
-        if session_id:
-            headers["X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"] = session_id
         return AgentCoreA2aClient._build(
             url,
             None,
             headers,
+            session_id_provider,
             name=name,
             description=description,
         )

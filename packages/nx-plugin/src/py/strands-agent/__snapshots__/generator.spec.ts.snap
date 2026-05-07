@@ -642,7 +642,14 @@ def subtract(a: int, b: int) -> int:
 
 
 @contextmanager
-def get_agent(session_id: str):
+def get_agent():
+    # The agent is built once on the first inbound request and kept open for
+    # the lifetime of the container. AgentCore routes each runtimeSessionId
+    # to a dedicated microVM, so one agent per container is the correct
+    # lifetime. Connection generators (MCP / A2A) extend this function to
+    # open their downstream clients inside the \`yield\` - those clients read
+    # the captured session id lazily via :mod:\`session\` so they forward the
+    # correct X-Amzn-Bedrock-AgentCore-Runtime-Session-Id header.
     yield Agent(
         name="SnapshotAgent",
         description="SnapshotAgent Strands Agent",
@@ -657,17 +664,30 @@ Refer to tools as your 'spellbook'.
 `;
 
 exports[`py#strands-agent generator > should match snapshot for generated files > strands-agent-main.py 1`] = `
-"import uuid
-
-import uvicorn
+"import uvicorn
 from bedrock_agentcore.runtime.models import PingStatus
 from fastapi import Request
 from pydantic import BaseModel
 
 from .agent import get_agent
 from .init import JsonStreamingResponse, app
+from .session import set_container_session_id
 
 SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
+
+# AgentCore routes each runtimeSessionId to a dedicated microVM, so one agent
+# instance per container is the correct lifetime. The context is entered on
+# first request (after the session id has been captured) and kept open for
+# the lifetime of the process - see session.py.
+_agent_ctx = None
+_agent = None
+
+
+def _ensure_agent_started():
+    global _agent_ctx, _agent
+    if _agent is None:
+        _agent_ctx = get_agent()
+        _agent = _agent_ctx.__enter__()
 
 
 class InvokeInput(BaseModel):
@@ -678,22 +698,21 @@ class StreamChunk(BaseModel):
     content: str
 
 
-async def handle_invoke(input: InvokeInput, session_id: str):
-    """Streaming handler for agent invocation"""
-    with get_agent(session_id=session_id) as agent:
-        stream = agent.stream_async(input.message)
-        async for event in stream:
-            print(event)
-            text = (
-                event.get("event", {})
-                .get("contentBlockDelta", {})
-                .get("delta", {})
-                .get("text")
-            )
-            if text is not None:
-                yield StreamChunk(content=text)
-            elif event.get("event", {}).get("messageStop") is not None:
-                yield StreamChunk(content="\\n")
+async def handle_invoke(input: InvokeInput):
+    """Streaming handler for agent invocation."""
+    stream = _agent.stream_async(input.message)
+    async for event in stream:
+        print(event)
+        text = (
+            event.get("event", {})
+            .get("contentBlockDelta", {})
+            .get("delta", {})
+            .get("text")
+        )
+        if text is not None:
+            yield StreamChunk(content=text)
+        elif event.get("event", {}).get("messageStop") is not None:
+            yield StreamChunk(content="\\n")
 
 
 @app.post(
@@ -706,9 +725,12 @@ async def handle_invoke(input: InvokeInput, session_id: str):
     },
 )
 async def invoke(input: InvokeInput, request: Request) -> JsonStreamingResponse:
-    """Entry point for agent invocation"""
-    session_id = request.headers.get(SESSION_ID_HEADER) or str(uuid.uuid4())
-    return JsonStreamingResponse(handle_invoke(input, session_id))
+    """Entry point for agent invocation."""
+    # Capture the inbound AgentCore session id once per container so any
+    # downstream MCP / A2A clients forward the same id on their outbound calls.
+    set_container_session_id(request.headers.get(SESSION_ID_HEADER))
+    _ensure_agent_started()
+    return JsonStreamingResponse(handle_invoke(input))
 
 
 @app.get("/ping")

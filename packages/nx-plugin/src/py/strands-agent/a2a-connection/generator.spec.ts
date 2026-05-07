@@ -75,7 +75,7 @@ def subtract(a: int, b: int) -> int:
 
 
 @contextmanager
-def get_agent(session_id: str):
+def get_agent():
     yield Agent(
         name="Host",
         description="Host Strands Agent",
@@ -173,7 +173,9 @@ dependencies = ["strands-agents"]
 
     const agent = tree.read('apps/py-host/py_host/host/agent.py', 'utf-8')!;
     expect(agent).toContain('RemoteClient');
-    expect(agent).toContain('RemoteClient.create(session_id=session_id)');
+    expect(agent).toContain(
+      'RemoteClient.create(session_id_provider=get_container_session_id)',
+    );
     expect(agent).toContain('def ask_remote(prompt: str)');
     // A2AAgent is directly callable (syncs over invoke_async internally)
     expect(agent).toContain('str(remote(prompt))');
@@ -293,7 +295,7 @@ def subtract(a: int, b: int) -> int:
 
 
 @contextmanager
-def get_agent(session_id: str):
+def get_agent():
     yield Agent(
         name="Host",
         description="Host Strands Agent",
@@ -369,7 +371,7 @@ def divide(a: int, b: int) -> float:
 
 
 @contextmanager
-def get_agent(session_id: str):
+def get_agent():
     yield Agent(
         name="Host",
         system_prompt="...",
@@ -410,7 +412,7 @@ _other = SomethingElse(tools=[])
 
 
 @contextmanager
-def get_agent(session_id: str):
+def get_agent():
     yield Agent(
         system_prompt="...",
         tools=[],

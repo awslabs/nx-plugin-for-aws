@@ -73,7 +73,7 @@ const multiply = tool({
   callback: ({ a, b }) => a * b,
 });
 
-export const getAgent = async (sessionId: string) =>
+export const getAgent = async () =>
   new Agent({
     systemPrompt: 'You are a mathematical wizard.',
     tools: [multiply],
@@ -154,7 +154,7 @@ export const getAgent = async (sessionId: string) =>
 
     const agent = tree.read('apps/ts-host/src/host/agent.ts', 'utf-8')!;
     expect(agent).toContain('RemoteClient');
-    expect(agent).toContain('RemoteClient.create(sessionId)');
+    expect(agent).toContain('RemoteClient.create(getContainerSessionId)');
     expect(agent).toContain("name: 'askRemote'");
     expect(agent).toContain('remote.invoke(prompt)');
     expect(agent).toContain('remoteTool');
@@ -267,7 +267,7 @@ const multiply = tool({
   callback: ({ a, b }) => a * b,
 });
 
-export const getAgent = async (sessionId: string) =>
+export const getAgent = async () =>
   new Agent({
     systemPrompt: 'You are a mathematical wizard.',
     tools: [multiply],
@@ -333,7 +333,7 @@ const multiply = tool({
   callback: ({ a, b }) => a * b,
 });
 
-export const getAgent = async (sessionId: string) => {
+export const getAgent = async () => {
   console.log('Creating agent');
   return new Agent({
     systemPrompt: 'You are a mathematical wizard.',
@@ -352,7 +352,7 @@ export const getAgent = async (sessionId: string) => {
 
     const agent = tree.read('apps/ts-host/src/host/agent.ts', 'utf-8')!;
     expect(agent).toContain("console.log('Creating agent')");
-    expect(agent).toContain('RemoteClient.create(sessionId)');
+    expect(agent).toContain('RemoteClient.create(getContainerSessionId)');
     // Tool creation must come before new Agent()
     const clientIdx = agent.indexOf('RemoteClient.create');
     const newAgentIdx = agent.indexOf('new Agent(');
@@ -369,7 +369,7 @@ import { z } from 'zod';
 const multiply = tool({ name: 'Multiply', inputSchema: z.object({}), callback: () => 0 });
 const divide = tool({ name: 'Divide', inputSchema: z.object({}), callback: () => 0 });
 
-export const getAgent = async (sessionId: string) =>
+export const getAgent = async () =>
   new Agent({
     systemPrompt: '...',
     tools: [multiply, divide],

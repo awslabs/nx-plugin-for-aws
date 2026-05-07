@@ -1,4 +1,5 @@
 import os
+from typing import Callable
 
 from mcp.client.streamable_http import streamablehttp_client
 from strands.tools.mcp.mcp_client import MCPClient
@@ -17,14 +18,19 @@ class <%- mcpServerClassName %>Client:
 
     In local mode (SERVE_LOCAL env var set): connects directly
     to the local MCP server via Streamable HTTP.
+
+    ``session_id_provider`` is called lazily when the MCP client opens its
+    transport, so the agent can construct the client at startup before the
+    inbound AgentCore session id is known - the provider will read the
+    captured value by the time the first tool call flows through.
     """
 
     @staticmethod
-    def create(session_id: str) -> MCPClient:
+    def create(session_id_provider: Callable[[], str]) -> MCPClient:
         if os.environ.get("SERVE_LOCAL") == "true":
             return MCPClient(lambda: streamablehttp_client("http://localhost:<%- mcpServerPort %>/mcp"))
 
         return AgentCoreMCPClient.with_iam_auth(
             agent_runtime_arn=get_connected_agent_runtime_arn("<%- mcpServerClassName %>"),
-            session_id=session_id,
+            session_id_provider=session_id_provider,
         )

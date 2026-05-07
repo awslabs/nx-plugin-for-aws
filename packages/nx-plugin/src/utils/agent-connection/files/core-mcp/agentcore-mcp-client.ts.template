@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { McpClient } from '@strands-agents/sdk';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { AwsClient } from 'aws4fetch';
@@ -13,10 +12,13 @@ export interface AgentCoreMcpClientOptions {
    */
   agentRuntimeArn: string;
   /**
-   * Session ID to include in request headers.
-   * Defaults to a random UUID if not provided.
+   * Called per outbound request to obtain the session id to forward on
+   * ``X-Amzn-Bedrock-AgentCore-Runtime-Session-Id``. AgentCore routes each
+   * session id to a dedicated microVM; by providing a callable, the agent
+   * can lazily read the inbound session id captured on its first request
+   * so end-to-end session attribution and microVM affinity are preserved.
    */
-  sessionId?: string;
+  sessionIdProvider: () => string;
 }
 
 /**
@@ -47,7 +49,7 @@ export interface AgentCoreMcpClientJwtOptions
  */
 interface CreateOptions {
   url: string;
-  sessionId?: string;
+  sessionIdProvider: () => string;
   buildHeaders?: () => Promise<Record<string, string>>;
   fetch?: typeof fetch;
 }
@@ -75,15 +77,19 @@ export class AgentCoreMcpClient {
   private static create(options: CreateOptions): McpClient {
     const {
       url,
-      sessionId = randomUUID(),
+      sessionIdProvider,
       buildHeaders = async (): Promise<Record<string, string>> => ({}),
       fetch: customFetch,
     } = options;
 
-    // Create a custom fetch that adds required headers
+    // Per-request fetch that stamps the session id at call time, so each
+    // outbound request reads the latest captured container session id.
     const fetchWithHeaders: typeof fetch = async (input, init) => {
       const headers = new Headers(init?.headers);
-      headers.set('X-Amzn-Bedrock-AgentCore-Runtime-Session-Id', sessionId);
+      headers.set(
+        'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id',
+        sessionIdProvider(),
+      );
       for (const [k, v] of Object.entries(await buildHeaders())) {
         headers.set(k, v);
       }
@@ -103,7 +109,7 @@ export class AgentCoreMcpClient {
    * Create an MCP client with IAM (SigV4) authentication
    */
   static withIamAuth(options: AgentCoreMcpClientIamOptions): McpClient {
-    const { agentRuntimeArn, sessionId } = options;
+    const { agentRuntimeArn, sessionIdProvider } = options;
     const credentialProvider =
       options.credentialProvider ?? fromNodeProviderChain();
     const { region, url } = AgentCoreMcpClient.buildUrl(agentRuntimeArn);
@@ -121,7 +127,7 @@ export class AgentCoreMcpClient {
 
     return AgentCoreMcpClient.create({
       url,
-      sessionId,
+      sessionIdProvider,
       fetch: sigv4Fetch,
     });
   }
@@ -130,12 +136,12 @@ export class AgentCoreMcpClient {
    * Create an MCP client with JWT authentication
    */
   static withJwtAuth(options: AgentCoreMcpClientJwtOptions): McpClient {
-    const { agentRuntimeArn, accessTokenProvider, sessionId } = options;
+    const { agentRuntimeArn, accessTokenProvider, sessionIdProvider } = options;
     const { url } = AgentCoreMcpClient.buildUrl(agentRuntimeArn);
 
     return AgentCoreMcpClient.create({
       url,
-      sessionId,
+      sessionIdProvider,
       buildHeaders: async () => ({
         Authorization: `Bearer ${await accessTokenProvider()}`,
       }),

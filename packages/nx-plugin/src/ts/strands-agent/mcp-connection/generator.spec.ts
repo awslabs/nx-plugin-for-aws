@@ -66,7 +66,7 @@ const multiply = tool({
   callback: ({ a, b }) => a * b,
 });
 
-export const getAgent = async (sessionId: string) =>
+export const getAgent = async () =>
   new Agent({
     systemPrompt: 'You are a mathematical wizard.',
     tools: [multiply],
@@ -184,7 +184,9 @@ export const getAgent = async (sessionId: string) =>
     expect(agentContent).toContain('agent-connection');
 
     // Check client creation was added
-    expect(agentContent).toContain('InventoryMcpClient.create(sessionId)');
+    expect(agentContent).toContain(
+      'InventoryMcpClient.create(getContainerSessionId)',
+    );
 
     // Check client was added to tools array
     expect(agentContent).toContain('inventoryMcp, multiply');
@@ -207,7 +209,7 @@ const multiply = tool({
   callback: ({ a, b }) => a * b,
 });
 
-export const getAgent = async (sessionId: string) => {
+export const getAgent = async () => {
   console.log('Creating agent');
   return new Agent({
     systemPrompt: 'You are a mathematical wizard.',
@@ -241,7 +243,9 @@ export const getAgent = async (sessionId: string) => {
     )!;
 
     // Check client creation was inserted before new Agent
-    expect(agentContent).toContain('InventoryMcpClient.create(sessionId)');
+    expect(agentContent).toContain(
+      'InventoryMcpClient.create(getContainerSessionId)',
+    );
     expect(agentContent).toContain('inventoryMcp, multiply');
 
     // Verify the console.log is still present (block body preserved)

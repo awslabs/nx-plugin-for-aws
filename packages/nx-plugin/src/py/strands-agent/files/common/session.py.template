@@ -1,0 +1,46 @@
+"""Container session-id capture.
+
+Amazon Bedrock AgentCore Runtime places exactly one ``runtimeSessionId`` per
+container (microVM): the platform routes every invocation with the same id to
+the same microVM, and a new id gets a fresh microVM. See
+https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-sessions.html
+
+This module captures that single session id on the first inbound request and
+exposes it to any downstream clients (MCP, A2A, ...) so that they forward the
+same id on their own outbound calls, preserving session attribution and
+microVM affinity end-to-end.
+"""
+
+from typing import Optional
+
+_container_session_id: Optional[str] = None
+
+
+def set_container_session_id(session_id: Optional[str]) -> None:
+    """Capture the session id for this container.
+
+    Called by each protocol's request handler when the first invocation
+    arrives. Subsequent calls with a non-matching value are ignored - one
+    container == one session.
+    """
+    global _container_session_id
+    if not session_id:
+        return
+    if _container_session_id is None:
+        _container_session_id = session_id
+
+
+def get_container_session_id() -> str:
+    """Return the captured container session id.
+
+    Raises if no inbound request has populated it yet - outbound MCP / A2A
+    calls from an agent before the first invocation would have no session
+    context to forward.
+    """
+    if _container_session_id is None:
+        raise RuntimeError(
+            "Container session id has not been captured yet. "
+            "The first agent invocation must populate it via "
+            "set_container_session_id()."
+        )
+    return _container_session_id

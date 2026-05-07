@@ -145,6 +145,17 @@ export const pyStrandsAgentMcpConnectionGenerator = async (
     const clientClassName = `${mcpServerClassName}Client`;
     const clientVarName = mcpServerSnakeCase;
 
+    // Every protocol's main.py populates .session.get_container_session_id
+    // on the first inbound request; the MCP client reads it lazily when it
+    // opens its transport, so each outbound call forwards the real
+    // X-Amzn-Bedrock-AgentCore-Runtime-Session-Id.
+    await addPythonDestructuredImport(
+      tree,
+      agentFilePath,
+      ['get_container_session_id'],
+      '.session',
+    );
+
     await addImportToAgentFile(
       tree,
       agentFilePath,
@@ -274,9 +285,9 @@ const addMcpClientToGetAgent = async (
     await applyGritQL(
       tree,
       filePath,
-      py(`\`$var = $cls.create(session_id=session_id)\` as $stmt where {
+      py(`\`$var = $cls.create(session_id_provider=get_container_session_id)\` as $stmt where {
   $program <: not contains \`${clientClassName}.create\`,
-  $stmt += \`\n${clientVarName} = ${clientClassName}.create(session_id=session_id)\`
+  $stmt += \`\n${clientVarName} = ${clientClassName}.create(session_id_provider=get_container_session_id)\`
 }`),
     );
     return;
@@ -288,12 +299,12 @@ const addMcpClientToGetAgent = async (
   await applyGritQL(
     tree,
     filePath,
-    py(`\`def get_agent($params):
+    py(`\`def get_agent():
     $body\` where {
   $body <: contains \`yield Agent($_)\`,
   $body <: not contains \`with ($_, ): $_\`
-} => \`def get_agent($params):
-    ${clientVarName} = ${clientClassName}.create(session_id=session_id)
+} => \`def get_agent():
+    ${clientVarName} = ${clientClassName}.create(session_id_provider=get_container_session_id)
     with (
         ${clientVarName},
     ):

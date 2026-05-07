@@ -10,7 +10,7 @@ __all__ = ["InventoryMcpClient"]
 `;
 
 exports[`py#strands-agent#mcp-connection generator > should match snapshot for generated files > agentcore_mcp_client.py 1`] = `
-"from collections.abc import Callable
+"from typing import Callable, Optional
 
 import boto3
 import httpx
@@ -21,7 +21,13 @@ from .auth import SigV4HTTPXAuth
 
 
 class AgentCoreMCPClient:
-    """Factory for clients to call MCP servers hosted on Bedrock AgentCore Runtime."""
+    """Factory for clients to call MCP servers hosted on Bedrock AgentCore Runtime.
+
+    The \`\`session_id_provider\`\` callable is invoked lazily each time the
+    underlying transport is opened, so callers can supply a value that is
+    only populated once the first inbound request has arrived on the
+    enclosing agent's container.
+    """
 
     @staticmethod
     def _build_url(agent_runtime_arn: str) -> tuple[str, str]:
@@ -37,26 +43,33 @@ class AgentCoreMCPClient:
     @staticmethod
     def _create(
         agent_runtime_arn: str,
-        session_id: str,
-        headers: dict | None = None,
-        auth_handler: httpx.Auth | None = None,
+        session_id_provider: Callable[[], str],
+        extra_headers_provider: Optional[Callable[[], dict]] = None,
+        auth_handler: Optional[httpx.Auth] = None,
     ) -> MCPClient:
         _, url = AgentCoreMCPClient._build_url(agent_runtime_arn)
-        return MCPClient(
-            lambda: streamablehttp_client(
+
+        def _open_transport():
+            headers = {
+                "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id": session_id_provider(),
+            }
+            if extra_headers_provider is not None:
+                headers.update(extra_headers_provider())
+            return streamablehttp_client(
                 url,
                 auth=auth_handler,
                 timeout=120,
                 terminate_on_close=False,
-                headers={
-                    "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id": session_id,
-                    **(headers if headers is not None else {}),
-                },
+                headers=headers,
             )
-        )
+
+        return MCPClient(_open_transport)
 
     @staticmethod
-    def with_iam_auth(agent_runtime_arn: str, session_id: str) -> MCPClient:
+    def with_iam_auth(
+        agent_runtime_arn: str,
+        session_id_provider: Callable[[], str],
+    ) -> MCPClient:
         """Create an MCP client with IAM (SigV4) authentication.
 
         Region and credentials are derived automatically from the ARN
@@ -67,7 +80,7 @@ class AgentCoreMCPClient:
         credentials = boto_session.get_credentials()
         return AgentCoreMCPClient._create(
             agent_runtime_arn=agent_runtime_arn,
-            session_id=session_id,
+            session_id_provider=session_id_provider,
             auth_handler=SigV4HTTPXAuth(credentials, "bedrock-agentcore", region),
         )
 
@@ -75,21 +88,21 @@ class AgentCoreMCPClient:
     def with_jwt_auth(
         agent_runtime_arn: str,
         access_token_provider: Callable[[], str],
-        session_id: str,
+        session_id_provider: Callable[[], str],
     ) -> MCPClient:
         """Create an MCP client with JWT authentication.
 
         Args:
             agent_runtime_arn: The ARN of the AgentCore runtime.
             access_token_provider: A callable that returns the JWT access token.
-            session_id: Session ID for the connection.
+            session_id_provider: A callable that returns the session id to
+                forward on outbound calls.
         """
-        access_token = access_token_provider()
         return AgentCoreMCPClient._create(
             agent_runtime_arn=agent_runtime_arn,
-            session_id=session_id,
-            headers={
-                "Authorization": f"Bearer {access_token}",
+            session_id_provider=session_id_provider,
+            extra_headers_provider=lambda: {
+                "Authorization": f"Bearer {access_token_provider()}",
             },
         )
 "
@@ -97,6 +110,7 @@ class AgentCoreMCPClient:
 
 exports[`py#strands-agent#mcp-connection generator > should match snapshot for generated files > inventory_mcp_client.py 1`] = `
 "import os
+from typing import Callable
 
 from mcp.client.streamable_http import streamablehttp_client
 from strands.tools.mcp.mcp_client import MCPClient
@@ -115,22 +129,28 @@ class InventoryMcpClient:
 
     In local mode (SERVE_LOCAL env var set): connects directly
     to the local MCP server via Streamable HTTP.
+
+    \`\`session_id_provider\`\` is called lazily when the MCP client opens its
+    transport, so the agent can construct the client at startup before the
+    inbound AgentCore session id is known - the provider will read the
+    captured value by the time the first tool call flows through.
     """
 
     @staticmethod
-    def create(session_id: str) -> MCPClient:
+    def create(session_id_provider: Callable[[], str]) -> MCPClient:
         if os.environ.get("SERVE_LOCAL") == "true":
             return MCPClient(lambda: streamablehttp_client("http://localhost:8082/mcp"))
 
         return AgentCoreMCPClient.with_iam_auth(
             agent_runtime_arn=get_connected_agent_runtime_arn("InventoryMcp"),
-            session_id=session_id,
+            session_id_provider=session_id_provider,
         )
 "
 `;
 
 exports[`py#strands-agent#mcp-connection generator > should match snapshot for generated files > transformed-agent.py 1`] = `
 "from proj_agent_connection import InventoryMcpClient
+from .session import get_container_session_id
 from contextlib import contextmanager
 
 from strands import Agent, tool
@@ -144,8 +164,10 @@ def subtract(a: int, b: int) -> int:
 
 
 @contextmanager
-def get_agent(session_id: str):
-    inventory_mcp = InventoryMcpClient.create(session_id=session_id)
+def get_agent():
+    inventory_mcp = InventoryMcpClient.create(
+        session_id_provider=get_container_session_id
+    )
     with (
         inventory_mcp,
     ):

@@ -133,9 +133,20 @@ export const tsStrandsAgentA2aConnectionGenerator = async (
       `:${npmScope}/agent-connection`,
     );
 
+    // Every protocol's entrypoint populates setContainerSessionId on the
+    // first inbound request; the A2A client reads it lazily on every
+    // outbound call via getContainerSessionId, so the forwarded
+    // X-Amzn-Bedrock-AgentCore-Runtime-Session-Id always matches.
+    await addDestructuredImport(
+      tree,
+      agentFilePath,
+      ['getContainerSessionId'],
+      './session.js',
+    );
+
     // Build the tool creation + Agent wiring. We wrap the getAgent body so
-    // the client can be created per-invocation (passing through sessionId).
-    const toolCreationBlock = `const ${clientVarName} = await ${clientClassName}.create(sessionId);
+    // the client + tool are created once per container.
+    const toolCreationBlock = `const ${clientVarName} = await ${clientClassName}.create(getContainerSessionId);
   const ${toolVarName} = tool({
     name: '${toolName}',
     description: 'Delegate a question to the remote ${targetAgentClassName} A2A agent and return its reply.',
