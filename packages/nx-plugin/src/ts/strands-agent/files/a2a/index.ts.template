@@ -1,5 +1,5 @@
 import { A2AExpressServer } from '@strands-agents/sdk/a2a/express';
-import express from 'express';
+import express, { type Request, type Response, type NextFunction } from 'express';
 import { getAgent } from './agent.js';
 import { setContainerSessionId } from './session.js';
 
@@ -11,18 +11,6 @@ void (async () => {
   const httpUrl =
     process.env.AGENTCORE_RUNTIME_URL ?? `http://localhost:${PORT}/`;
 
-  // AgentCore routes each runtimeSessionId to a dedicated microVM, so one
-  // agent instance per container is the correct lifetime - see session.ts.
-  const server = new A2AExpressServer({
-    agent: await getAgent(),
-    name: '<%= agentNameClassName %>',
-    description:
-      'A Strands Agent exposed via the Agent-to-Agent (A2A) protocol.',
-    host: HOST,
-    port: PORT,
-    httpUrl,
-  });
-
   const app = express();
   app.use((req, _res, next) => {
     // Capture the inbound AgentCore session id once per container so any
@@ -32,7 +20,38 @@ void (async () => {
     next();
   });
   app.get('/ping', (_req, res) => res.status(200).json({ status: 'Healthy' }));
-  app.use(server.createMiddleware());
+
+  // AgentCore routes each runtimeSessionId to a dedicated microVM, so one
+  // agent instance per container is the correct lifetime. Deferring
+  // construction to the first inbound request means the session id has
+  // been captured via session.ts before the agent (and its
+  // SessionManager) are built, so downstream MCP / A2A clients forward
+  // the correct id and session storage is keyed on the real session.
+  let middlewarePromise: Promise<express.RequestHandler> | undefined;
+  const getMiddleware = (): Promise<express.RequestHandler> => {
+    if (!middlewarePromise) {
+      middlewarePromise = getAgent().then((agent) =>
+        new A2AExpressServer({
+          agent,
+          name: '<%= agentNameClassName %>',
+          description:
+            'A Strands Agent exposed via the Agent-to-Agent (A2A) protocol.',
+          host: HOST,
+          port: PORT,
+          httpUrl,
+        }).createMiddleware(),
+      );
+    }
+    return middlewarePromise;
+  };
+  app.use(async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const middleware = await getMiddleware();
+      middleware(req, res, next);
+    } catch (err) {
+      next(err);
+    }
+  });
   app.listen(PORT, HOST, () => {
     console.log(`A2A server listening on ${HOST}:${PORT}`);
   });

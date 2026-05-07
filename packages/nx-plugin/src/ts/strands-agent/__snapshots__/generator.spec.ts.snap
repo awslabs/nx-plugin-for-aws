@@ -22,6 +22,7 @@ CMD [ "node", "--require", "@aws/aws-distro-opentelemetry-node-autoinstrumentati
 
 exports[`ts#strands-agent generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > agent-construct.ts 1`] = `
 "import { Lazy, Names } from 'aws-cdk-lib';
+import { CfnRuntime } from 'aws-cdk-lib/aws-bedrockagentcore';
 import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import { Connections, IConnectable } from 'aws-cdk-lib/aws-ec2';
 import { Construct } from 'constructs';
@@ -41,6 +42,15 @@ import {
 } from 'aws-cdk-lib/aws-iam';
 import { RuntimeConfig } from '../../../core/runtime-config.js';
 import { findWorkspaceRoot } from '../../../core/workspace.js';
+
+/**
+ * Path inside the microVM where AgentCore-managed session storage is
+ * mounted. Persists across stop/resume for the same runtimeSessionId, so
+ * Strands' SessionManager can restore conversation history after a
+ * session is resumed. Must match the \`/mnt/<subdir>\` pattern required by
+ * AgentCore.
+ */
+const SESSION_STORAGE_MOUNT_PATH = '/mnt/sessions';
 
 export type SnapshotBedrockAgentProps = Omit<
   RuntimeProps,
@@ -82,9 +92,24 @@ export class SnapshotBedrockAgent
       ...props,
       environmentVariables: {
         RUNTIME_CONFIG_APP_ID: rc.appConfigApplicationId,
+        SESSION_STORAGE_PATH: SESSION_STORAGE_MOUNT_PATH,
         ...props?.environmentVariables,
       },
     });
+
+    // Attach AgentCore-managed session storage so the Strands SessionManager
+    // inside the agent can persist conversation history to a mount that
+    // survives stop/resume of the same runtimeSessionId.
+    //
+    // The alpha Runtime construct does not yet expose filesystemConfigurations,
+    // so we set the property directly on the underlying CfnRuntime.
+    // https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-filesystem-configurations.html
+    const cfnRuntime = this.agentCoreRuntime.node.defaultChild as CfnRuntime;
+    cfnRuntime.filesystemConfigurations = [
+      {
+        sessionStorage: { mountPath: SESSION_STORAGE_MOUNT_PATH },
+      },
+    ];
 
     // Grant access for the agent to invoke bedrock models
     this.agentCoreRuntime.addToRolePolicy(
@@ -628,8 +653,9 @@ output "agent_runtime_version" {
 `;
 
 exports[`ts#strands-agent generator > should match snapshot for generated files > strands-agent-agent.ts 1`] = `
-"import { Agent, tool } from '@strands-agents/sdk';
+"import { Agent, FileStorage, SessionManager, tool } from '@strands-agents/sdk';
 import { z } from 'zod';
+import { getContainerSessionId } from './session.js';
 
 const multiply = tool({
   name: 'Multiply',
@@ -649,13 +675,28 @@ const multiply = tool({
  * the correct lifetime. Downstream MCP / A2A clients read the captured
  * session id from \`./session\` lazily, so they still forward the correct
  * \`X-Amzn-Bedrock-AgentCore-Runtime-Session-Id\` on their outbound calls.
+ *
+ * When AgentCore-managed session storage is attached to the runtime, the
+ * mount path is exposed via \`SESSION_STORAGE_PATH\`. Wiring a
+ * \`SessionManager\` backed by \`FileStorage\` at that path lets the agent
+ * resume the full conversation history after a stop/resume cycle. Absent
+ * the env var (e.g. local serve), the agent runs in-memory only.
  */
 export const getAgent = async (): Promise<Agent> => {
+  const sessionStorageDir = process.env.SESSION_STORAGE_PATH;
+  const sessionManager = sessionStorageDir
+    ? new SessionManager({
+        sessionId: getContainerSessionId(),
+        storage: { snapshot: new FileStorage(sessionStorageDir) },
+      })
+    : undefined;
+
   return new Agent({
     systemPrompt: \`You are a mathematical wizard.
   Use your tools for mathematical tasks.
   Refer to tools as your 'spellbook'.\`,
     tools: [multiply],
+    sessionManager,
   });
 };
 "
@@ -953,12 +994,21 @@ exports[`ts#strands-agent generator > should match snapshot for generated files 
 import { z } from 'zod';
 import { zAsyncIterable } from './schema/z-async-iterable.js';
 import { getAgent } from './agent.js';
+import type { Agent } from '@strands-agents/sdk';
 
 export const router = t.router;
 
 // AgentCore routes each runtimeSessionId to a dedicated microVM, so one
-// agent instance per container is the correct lifetime - see session.ts.
-const agentPromise = getAgent();
+// agent instance per container is the correct lifetime. Deferring
+// construction to the first invocation means the inbound
+// X-Amzn-Bedrock-AgentCore-Runtime-Session-Id has been captured via
+// session.ts before any downstream MCP / A2A client (or session manager
+// storage path) reads it.
+let agentPromise: Promise<Agent> | undefined;
+const getAgentLazy = (): Promise<Agent> => {
+  if (!agentPromise) agentPromise = getAgent();
+  return agentPromise;
+};
 
 export const appRouter = router({
   invoke: publicProcedure
@@ -970,7 +1020,7 @@ export const appRouter = router({
       }),
     )
     .subscription(async function* (opts) {
-      const agent = await agentPromise;
+      const agent = await getAgentLazy();
 
       for await (const event of agent.stream(opts.input.message)) {
         if (

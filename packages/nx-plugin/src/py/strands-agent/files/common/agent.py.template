@@ -1,7 +1,11 @@
+import os
 from contextlib import contextmanager
 
 from strands import Agent, tool
+from strands.session.file_session_manager import FileSessionManager
 from strands_tools import current_time
+
+from .session import get_container_session_id
 
 
 # Define a custom tool
@@ -19,6 +23,22 @@ def get_agent():
     # open their downstream clients inside the `yield` - those clients read
     # the captured session id lazily via :mod:`session` so they forward the
     # correct X-Amzn-Bedrock-AgentCore-Runtime-Session-Id header.
+
+    # When AgentCore-managed session storage is attached to the runtime, the
+    # mount path is exposed via SESSION_STORAGE_PATH. Persisting through
+    # FileSessionManager lets the agent resume the full conversation history
+    # after a stop/resume cycle. Absent the env var (e.g. local serve), the
+    # agent runs in-memory only.
+    session_storage_dir = os.environ.get("SESSION_STORAGE_PATH")
+    session_manager = (
+        FileSessionManager(
+            session_id=get_container_session_id(),
+            storage_dir=session_storage_dir,
+        )
+        if session_storage_dir
+        else None
+    )
+
     yield Agent(
         name="<%= agentNameClassName %>",
         description="<%= agentNameClassName %> Strands Agent",
@@ -28,4 +48,5 @@ Use your tools for mathematical tasks.
 Refer to tools as your 'spellbook'.
 """,
         tools=[subtract, current_time],
+        session_manager=session_manager,
     )

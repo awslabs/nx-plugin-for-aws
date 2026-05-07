@@ -1,4 +1,7 @@
 import { Lazy, Names } from 'aws-cdk-lib';
+<%_ if (serverProtocol !== 'MCP') { _%>
+import { CfnRuntime } from 'aws-cdk-lib/aws-bedrockagentcore';
+<%_ } _%>
 import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import { Connections, IConnectable } from 'aws-cdk-lib/aws-ec2';
 import { Construct } from 'constructs';
@@ -19,6 +22,17 @@ import { IUserPool, IUserPoolClient } from 'aws-cdk-lib/aws-cognito';
 <%_ } _%>
 import { RuntimeConfig } from '../../../core/runtime-config.js';
 import { findWorkspaceRoot } from '../../../core/workspace.js';
+
+<%_ if (serverProtocol !== 'MCP') { _%>
+/**
+ * Path inside the microVM where AgentCore-managed session storage is
+ * mounted. Persists across stop/resume for the same runtimeSessionId, so
+ * Strands' SessionManager can restore conversation history after a
+ * session is resumed. Must match the `/mnt/<subdir>` pattern required by
+ * AgentCore.
+ */
+const SESSION_STORAGE_MOUNT_PATH = '/mnt/sessions';
+<%_ } _%>
 
 <%_ if (auth === 'IAM') { _%>
 export type <%- nameClassName %>Props = Omit<
@@ -87,6 +101,9 @@ export class <%- nameClassName %> extends Construct implements IGrantable, IConn
 <%_ } _%>
       environmentVariables: {
         RUNTIME_CONFIG_APP_ID: rc.appConfigApplicationId,
+<%_ if (serverProtocol !== 'MCP') { _%>
+        SESSION_STORAGE_PATH: SESSION_STORAGE_MOUNT_PATH,
+<%_ } _%>
 <%_ if (auth === 'Cognito') { _%>
         ...restProps?.environmentVariables,
 <%_ } else { _%>
@@ -96,6 +113,20 @@ export class <%- nameClassName %> extends Construct implements IGrantable, IConn
     });
 
 <%_ if (serverProtocol !== 'MCP') { _%>
+    // Attach AgentCore-managed session storage so the Strands SessionManager
+    // inside the agent can persist conversation history to a mount that
+    // survives stop/resume of the same runtimeSessionId.
+    //
+    // The alpha Runtime construct does not yet expose filesystemConfigurations,
+    // so we set the property directly on the underlying CfnRuntime.
+    // https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-filesystem-configurations.html
+    const cfnRuntime = this.agentCoreRuntime.node.defaultChild as CfnRuntime;
+    cfnRuntime.filesystemConfigurations = [
+      {
+        sessionStorage: { mountPath: SESSION_STORAGE_MOUNT_PATH },
+      },
+    ];
+
     // Grant access for the agent to invoke bedrock models
     this.agentCoreRuntime.addToRolePolicy(
       new PolicyStatement({

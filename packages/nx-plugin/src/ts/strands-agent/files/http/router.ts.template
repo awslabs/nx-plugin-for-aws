@@ -2,12 +2,21 @@ import { publicProcedure, t } from './init.js';
 import { z } from 'zod';
 import { zAsyncIterable } from './schema/z-async-iterable.js';
 import { getAgent } from './agent.js';
+import type { Agent } from '@strands-agents/sdk';
 
 export const router = t.router;
 
 // AgentCore routes each runtimeSessionId to a dedicated microVM, so one
-// agent instance per container is the correct lifetime - see session.ts.
-const agentPromise = getAgent();
+// agent instance per container is the correct lifetime. Deferring
+// construction to the first invocation means the inbound
+// X-Amzn-Bedrock-AgentCore-Runtime-Session-Id has been captured via
+// session.ts before any downstream MCP / A2A client (or session manager
+// storage path) reads it.
+let agentPromise: Promise<Agent> | undefined;
+const getAgentLazy = (): Promise<Agent> => {
+  if (!agentPromise) agentPromise = getAgent();
+  return agentPromise;
+};
 
 export const appRouter = router({
   invoke: publicProcedure
@@ -19,7 +28,7 @@ export const appRouter = router({
       }),
     )
     .subscription(async function* (opts) {
-      const agent = await agentPromise;
+      const agent = await getAgentLazy();
 
       for await (const event of agent.stream(opts.input.message)) {
         if (

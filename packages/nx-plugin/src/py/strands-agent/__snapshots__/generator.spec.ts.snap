@@ -21,6 +21,7 @@ CMD ["python", "bin/opentelemetry-instrument", "python", "-m", "proj_test_projec
 
 exports[`py#strands-agent generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > agent-construct.ts 1`] = `
 "import { Lazy, Names } from 'aws-cdk-lib';
+import { CfnRuntime } from 'aws-cdk-lib/aws-bedrockagentcore';
 import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import { Connections, IConnectable } from 'aws-cdk-lib/aws-ec2';
 import { Construct } from 'constructs';
@@ -40,6 +41,15 @@ import {
 } from 'aws-cdk-lib/aws-iam';
 import { RuntimeConfig } from '../../../core/runtime-config.js';
 import { findWorkspaceRoot } from '../../../core/workspace.js';
+
+/**
+ * Path inside the microVM where AgentCore-managed session storage is
+ * mounted. Persists across stop/resume for the same runtimeSessionId, so
+ * Strands' SessionManager can restore conversation history after a
+ * session is resumed. Must match the \`/mnt/<subdir>\` pattern required by
+ * AgentCore.
+ */
+const SESSION_STORAGE_MOUNT_PATH = '/mnt/sessions';
 
 export type SnapshotBedrockAgentProps = Omit<
   RuntimeProps,
@@ -81,9 +91,24 @@ export class SnapshotBedrockAgent
       ...props,
       environmentVariables: {
         RUNTIME_CONFIG_APP_ID: rc.appConfigApplicationId,
+        SESSION_STORAGE_PATH: SESSION_STORAGE_MOUNT_PATH,
         ...props?.environmentVariables,
       },
     });
+
+    // Attach AgentCore-managed session storage so the Strands SessionManager
+    // inside the agent can persist conversation history to a mount that
+    // survives stop/resume of the same runtimeSessionId.
+    //
+    // The alpha Runtime construct does not yet expose filesystemConfigurations,
+    // so we set the property directly on the underlying CfnRuntime.
+    // https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-filesystem-configurations.html
+    const cfnRuntime = this.agentCoreRuntime.node.defaultChild as CfnRuntime;
+    cfnRuntime.filesystemConfigurations = [
+      {
+        sessionStorage: { mountPath: SESSION_STORAGE_MOUNT_PATH },
+      },
+    ];
 
     // Grant access for the agent to invoke bedrock models
     this.agentCoreRuntime.addToRolePolicy(
@@ -629,10 +654,14 @@ output "agent_runtime_version" {
 exports[`py#strands-agent generator > should match snapshot for generated files > strands-agent-__init__.py 1`] = `""`;
 
 exports[`py#strands-agent generator > should match snapshot for generated files > strands-agent-agent.py 1`] = `
-"from contextlib import contextmanager
+"import os
+from contextlib import contextmanager
 
 from strands import Agent, tool
+from strands.session.file_session_manager import FileSessionManager
 from strands_tools import current_time
+
+from .session import get_container_session_id
 
 
 # Define a custom tool
@@ -650,6 +679,22 @@ def get_agent():
     # open their downstream clients inside the \`yield\` - those clients read
     # the captured session id lazily via :mod:\`session\` so they forward the
     # correct X-Amzn-Bedrock-AgentCore-Runtime-Session-Id header.
+
+    # When AgentCore-managed session storage is attached to the runtime, the
+    # mount path is exposed via SESSION_STORAGE_PATH. Persisting through
+    # FileSessionManager lets the agent resume the full conversation history
+    # after a stop/resume cycle. Absent the env var (e.g. local serve), the
+    # agent runs in-memory only.
+    session_storage_dir = os.environ.get("SESSION_STORAGE_PATH")
+    session_manager = (
+        FileSessionManager(
+            session_id=get_container_session_id(),
+            storage_dir=session_storage_dir,
+        )
+        if session_storage_dir
+        else None
+    )
+
     yield Agent(
         name="SnapshotAgent",
         description="SnapshotAgent Strands Agent",
@@ -659,6 +704,7 @@ Use your tools for mathematical tasks.
 Refer to tools as your 'spellbook'.
 """,
         tools=[subtract, current_time],
+        session_manager=session_manager,
     )
 "
 `;
