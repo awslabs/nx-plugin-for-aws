@@ -407,8 +407,9 @@ Python 프로젝트를 생성하려면:
   - story/
     - dungeon\_adventure\_story/ Python 모듈
       - agent/
-        - main.py AG-UI FastAPI 앱 진입점 (Bedrock AgentCore 런타임용)
+        - main.py AG-UI Starlette 앱 진입점 (Bedrock AgentCore 런타임용)
         - agent.py Strands 에이전트 및 도구 정의
+        - session.py 인바운드 AgentCore 런타임 세션 ID 캡처
         - Dockerfile AgentCore 런타임 배포용 Docker 이미지 정의
   - common/constructs/
     - src
@@ -420,10 +421,14 @@ Python 프로젝트를 생성하려면:
 
 ```python
 # agent/agent.py
+import os
 from contextlib import contextmanager
 
 from strands import Agent, tool
+from strands.session.file_session_manager import FileSessionManager
 from strands_tools import current_time
+
+from .session import get_container_session_id
 
 
 # 사용자 정의 도구 정의
@@ -433,7 +438,21 @@ def subtract(a: int, b: int) -> int:
 
 
 @contextmanager
-def get_agent(session_id: str):
+def get_agent():
+    # AgentCore 관리 세션 스토리지가 런타임에 연결되면
+    # 마운트 경로가 SESSION_STORAGE_PATH를 통해 노출됩니다. FileSessionManager를 통해
+    # 지속하면 에이전트가 중지/재개 주기 후 전체 대화 기록을 재개할 수 있습니다.
+    # 환경 변수가 없는 경우(예: 로컬 서브) 에이전트는 메모리 내에서만 실행됩니다.
+    session_storage_dir = os.environ.get("SESSION_STORAGE_PATH")
+    session_manager = (
+        FileSessionManager(
+            session_id=get_container_session_id(),
+            storage_dir=session_storage_dir,
+        )
+        if session_storage_dir
+        else None
+    )
+
     yield Agent(
         name="StoryAgent",
         description="StoryAgent Strands Agent",
@@ -443,6 +462,7 @@ Use your tools for mathematical tasks.
 Refer to tools as your 'spellbook'.
 """,
         tools=[subtract, current_time],
+        session_manager=session_manager,
     )
 ```
 
@@ -451,28 +471,64 @@ Refer to tools as your 'spellbook'.
 ```python
 # agent/main.py
 import logging
-import uuid
+from typing import Any
+
+from ag_ui_strands import StrandsAgent, create_strands_app
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from starlette.routing import Mount, Route
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from .agent import get_agent
-from ag_ui_strands import StrandsAgent, create_strands_app
+from .session import set_container_session_id
+
+SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
 
 logging.basicConfig(level=logging.INFO)
 
-_TEMPLATE_SESSION_ID = f"template-{uuid.uuid4()}".ljust(33, "0")
 
-_agent_ctx = get_agent(session_id=_TEMPLATE_SESSION_ID)
-_agent = _agent_ctx.__enter__()
+class _LazyStrandsApp:
+    """첫 번째 ``/invocations`` 요청 시 내부 Strands 앱을 빌드하여
+    ``/ping`` 헬스 체크를 가볍게 유지하고 다운스트림 MCP / A2A 클라이언트가
+    읽기 전에 인바운드 AgentCore 세션 ID를 캡처합니다."""
 
-agui_agent = StrandsAgent(
-    agent=_agent,
-    name="StoryAgent",
-    description="A Strands Agent exposed via the AG-UI protocol.",
+    def __init__(self) -> None:
+        self._inner: ASGIApp | None = None
+        self._agent_ctx: Any = None
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http":
+            headers = dict((k.decode("latin-1"), v.decode("latin-1")) for k, v in scope.get("headers", []))
+            set_container_session_id(headers.get(SESSION_ID_HEADER))
+
+        if self._inner is None:
+            self._agent_ctx = get_agent()
+            agui_agent = StrandsAgent(
+                agent=self._agent_ctx.__enter__(),
+                name="StoryAgent",
+                description="A Strands Agent exposed via the AG-UI protocol.",
+            )
+            self._inner = create_strands_app(agui_agent, path="/invocations", ping_path=None)
+
+        await self._inner(scope, receive, send)
+
+
+async def _ping(request: Request) -> JSONResponse:
+    return JSONResponse({"status": "Healthy"})
+
+
+_lazy_invocations = _LazyStrandsApp()
+
+app = Starlette(
+    routes=[
+        Route("/ping", _ping, methods=["GET"]),
+        Mount("/", app=_lazy_invocations),
+    ]
 )
-
-app = create_strands_app(agui_agent, path="/invocations")
 ```
 
-`protocol=AG-UI`를 선택했기 때문에 생성기는 Strands 에이전트를 [AG-UI](https://ag-ui.com/) 어댑터로 래핑합니다. `create_strands_app`은 단일 `/invocations` 엔드포인트를 노출하는 FastAPI 앱을 빌드합니다. 세션별 에이전트 인스턴스는 자동으로 생성되며, 대화 기록은 서버 수명 동안 `threadId`별로 메모리에 유지됩니다. 이 튜토리얼에서는 `main.py`를 수정할 필요가 없습니다.
+`protocol=AG-UI`를 선택했기 때문에 생성기는 Strands 에이전트를 Starlette 앱을 통해 노출되는 [AG-UI](https://ag-ui.com/) 어댑터로 래핑합니다. AgentCore는 각 `runtimeSessionId`를 전용 microVM으로 라우팅하므로 컨테이너당 하나의 장기 실행 `Agent`가 올바른 수명입니다. `main.py`는 인바운드 세션 ID를 캡처한 후 첫 번째 `/invocations` 요청 시 지연 빌드합니다. AgentCore 관리 세션 스토리지가 연결되면 `agent.py`는 `SESSION_STORAGE_PATH`에 대해 `FileSessionManager`를 연결하여 에이전트가 중지/재개 후 전체 대화 기록을 재개할 수 있도록 합니다. 이 튜토리얼에서는 `main.py`를 수정할 필요가 없습니다.
 
 ```ts
 // common/constructs/src/app/agents/story-agent.ts

@@ -407,8 +407,9 @@ export class GameApi<
   - story/
     - dungeon_adventure_story/ Python 模块
       - agent/
-        - main.py AG-UI FastAPI 应用入口点,用于 Bedrock AgentCore Runtime
+        - main.py AG-UI Starlette 应用入口点,用于 Bedrock AgentCore Runtime
         - agent.py 定义 Strands 代理及其工具
+        - session.py 捕获入站 AgentCore 运行时会话 ID
         - Dockerfile 部署到 AgentCore Runtime 的 Docker 镜像定义
   - common/constructs/
     - src
@@ -420,10 +421,14 @@ export class GameApi<
 
 ```python
 # agent/agent.py
+import os
 from contextlib import contextmanager
 
 from strands import Agent, tool
+from strands.session.file_session_manager import FileSessionManager
 from strands_tools import current_time
+
+from .session import get_container_session_id
 
 
 # 定义自定义工具
@@ -433,7 +438,21 @@ def subtract(a: int, b: int) -> int:
 
 
 @contextmanager
-def get_agent(session_id: str):
+def get_agent():
+    # 当 AgentCore 管理的会话存储附加到运行时时,挂载路径通过
+    # SESSION_STORAGE_PATH 暴露。通过 FileSessionManager 持久化可让代理
+    # 在停止/恢复周期后恢复完整的对话历史。如果缺少环境变量(例如本地
+    # serve),代理仅在内存中运行。
+    session_storage_dir = os.environ.get("SESSION_STORAGE_PATH")
+    session_manager = (
+        FileSessionManager(
+            session_id=get_container_session_id(),
+            storage_dir=session_storage_dir,
+        )
+        if session_storage_dir
+        else None
+    )
+
     yield Agent(
         name="StoryAgent",
         description="StoryAgent Strands Agent",
@@ -443,6 +462,7 @@ def get_agent(session_id: str):
 将工具称为你的 '法术书'。
 """,
         tools=[subtract, current_time],
+        session_manager=session_manager,
     )
 ```
 
@@ -451,28 +471,64 @@ def get_agent(session_id: str):
 ```python
 # agent/main.py
 import logging
-import uuid
+from typing import Any
+
+from ag_ui_strands import StrandsAgent, create_strands_app
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from starlette.routing import Mount, Route
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from .agent import get_agent
-from ag_ui_strands import StrandsAgent, create_strands_app
+from .session import set_container_session_id
+
+SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
 
 logging.basicConfig(level=logging.INFO)
 
-_TEMPLATE_SESSION_ID = f"template-{uuid.uuid4()}".ljust(33, "0")
 
-_agent_ctx = get_agent(session_id=_TEMPLATE_SESSION_ID)
-_agent = _agent_ctx.__enter__()
+class _LazyStrandsApp:
+    """在首次 ``/invocations`` 请求时构建内部 Strands 应用,以便
+    ``/ping`` 健康检查保持轻量级,并在任何下游 MCP / A2A 客户端读取之前
+    捕获入站 AgentCore 会话 ID。"""
 
-agui_agent = StrandsAgent(
-    agent=_agent,
-    name="StoryAgent",
-    description="A Strands Agent exposed via the AG-UI protocol.",
+    def __init__(self) -> None:
+        self._inner: ASGIApp | None = None
+        self._agent_ctx: Any = None
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http":
+            headers = dict((k.decode("latin-1"), v.decode("latin-1")) for k, v in scope.get("headers", []))
+            set_container_session_id(headers.get(SESSION_ID_HEADER))
+
+        if self._inner is None:
+            self._agent_ctx = get_agent()
+            agui_agent = StrandsAgent(
+                agent=self._agent_ctx.__enter__(),
+                name="StoryAgent",
+                description="A Strands Agent exposed via the AG-UI protocol.",
+            )
+            self._inner = create_strands_app(agui_agent, path="/invocations", ping_path=None)
+
+        await self._inner(scope, receive, send)
+
+
+async def _ping(request: Request) -> JSONResponse:
+    return JSONResponse({"status": "Healthy"})
+
+
+_lazy_invocations = _LazyStrandsApp()
+
+app = Starlette(
+    routes=[
+        Route("/ping", _ping, methods=["GET"]),
+        Mount("/", app=_lazy_invocations),
+    ]
 )
-
-app = create_strands_app(agui_agent, path="/invocations")
 ```
 
-因为我们选择了 `protocol=AG-UI`,生成器将我们的 Strands 代理包装在 [AG-UI](https://ag-ui.com/) 适配器中。`create_strands_app` 构建一个 FastAPI 应用,暴露单个 `/invocations` 端点 - 每个会话的代理实例会自动创建,对话历史在服务器生命周期内按 `threadId` 保存在内存中。在本教程中我们无需修改 `main.py`。
+因为我们选择了 `protocol=AG-UI`,生成器将我们的 Strands 代理包装在通过 Starlette 应用暴露的 [AG-UI](https://ag-ui.com/) 适配器中。AgentCore 将每个 `runtimeSessionId` 路由到专用的 microVM,因此每个容器一个长期存活的 `Agent` 是正确的生命周期 - `main.py` 在捕获入站会话 ID 后在首次 `/invocations` 请求时延迟构建它。当附加 AgentCore 管理的会话存储时,`agent.py` 针对 `SESSION_STORAGE_PATH` 连接 `FileSessionManager`,以便代理可以在停止/恢复后恢复完整的对话历史。在本教程中我们无需修改 `main.py`。
 
 ```ts
 // common/constructs/src/app/agents/story-agent.ts

@@ -411,8 +411,9 @@ Le générateur `py#strands-agent` génère ces fichiers :
   - story/
     - dungeon_adventure_story/ module Python
       - agent/
-        - main.py point d'entrée de l'application FastAPI AG-UI pour Bedrock AgentCore Runtime
+        - main.py point d'entrée de l'application Starlette AG-UI pour Bedrock AgentCore Runtime
         - agent.py définit l'agent Strands et ses outils
+        - session.py capture l'id de session du runtime AgentCore entrant
         - Dockerfile définit l'image Docker pour le déploiement sur AgentCore Runtime
   - common/constructs/
     - src
@@ -424,10 +425,14 @@ Examinons les fichiers clés en détail :
 
 ```python
 # agent/agent.py
+import os
 from contextlib import contextmanager
 
 from strands import Agent, tool
+from strands.session.file_session_manager import FileSessionManager
 from strands_tools import current_time
+
+from .session import get_container_session_id
 
 
 # Définir un outil personnalisé
@@ -437,7 +442,22 @@ def subtract(a: int, b: int) -> int:
 
 
 @contextmanager
-def get_agent(session_id: str):
+def get_agent():
+    # Lorsque le stockage de session géré par AgentCore est attaché au runtime, le
+    # chemin de montage est exposé via SESSION_STORAGE_PATH. La persistance via
+    # FileSessionManager permet à l'agent de reprendre l'historique complet de la conversation
+    # après un cycle d'arrêt/reprise. En l'absence de la variable d'environnement (par ex. serve local), l'
+    # agent s'exécute uniquement en mémoire.
+    session_storage_dir = os.environ.get("SESSION_STORAGE_PATH")
+    session_manager = (
+        FileSessionManager(
+            session_id=get_container_session_id(),
+            storage_dir=session_storage_dir,
+        )
+        if session_storage_dir
+        else None
+    )
+
     yield Agent(
         name="StoryAgent",
         description="StoryAgent Strands Agent",
@@ -447,6 +467,7 @@ Use your tools for mathematical tasks.
 Refer to tools as your 'spellbook'.
 """,
         tools=[subtract, current_time],
+        session_manager=session_manager,
     )
 ```
 
@@ -455,28 +476,64 @@ Refer to tools as your 'spellbook'.
 ```python
 # agent/main.py
 import logging
-import uuid
+from typing import Any
+
+from ag_ui_strands import StrandsAgent, create_strands_app
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from starlette.routing import Mount, Route
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from .agent import get_agent
-from ag_ui_strands import StrandsAgent, create_strands_app
+from .session import set_container_session_id
+
+SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
 
 logging.basicConfig(level=logging.INFO)
 
-_TEMPLATE_SESSION_ID = f"template-{uuid.uuid4()}".ljust(33, "0")
 
-_agent_ctx = get_agent(session_id=_TEMPLATE_SESSION_ID)
-_agent = _agent_ctx.__enter__()
+class _LazyStrandsApp:
+    """Construit l'application Strands interne à la première requête ``/invocations`` afin que
+    les vérifications de santé ``/ping`` restent légères et que l'id de session AgentCore entrant
+    soit capturé avant que tout client MCP / A2A en aval ne le lise."""
 
-agui_agent = StrandsAgent(
-    agent=_agent,
-    name="StoryAgent",
-    description="A Strands Agent exposed via the AG-UI protocol.",
+    def __init__(self) -> None:
+        self._inner: ASGIApp | None = None
+        self._agent_ctx: Any = None
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http":
+            headers = dict((k.decode("latin-1"), v.decode("latin-1")) for k, v in scope.get("headers", []))
+            set_container_session_id(headers.get(SESSION_ID_HEADER))
+
+        if self._inner is None:
+            self._agent_ctx = get_agent()
+            agui_agent = StrandsAgent(
+                agent=self._agent_ctx.__enter__(),
+                name="StoryAgent",
+                description="A Strands Agent exposed via the AG-UI protocol.",
+            )
+            self._inner = create_strands_app(agui_agent, path="/invocations", ping_path=None)
+
+        await self._inner(scope, receive, send)
+
+
+async def _ping(request: Request) -> JSONResponse:
+    return JSONResponse({"status": "Healthy"})
+
+
+_lazy_invocations = _LazyStrandsApp()
+
+app = Starlette(
+    routes=[
+        Route("/ping", _ping, methods=["GET"]),
+        Mount("/", app=_lazy_invocations),
+    ]
 )
-
-app = create_strands_app(agui_agent, path="/invocations")
 ```
 
-Parce que nous avons choisi `protocol=AG-UI`, le générateur enveloppe notre agent Strands dans un adaptateur [AG-UI](https://ag-ui.com/). `create_strands_app` construit une application FastAPI qui expose un seul endpoint `/invocations` - les instances d'agent par session sont créées automatiquement, et l'historique des conversations est conservé en mémoire par `threadId` pendant la durée de vie du serveur. Nous n'aurons pas besoin de modifier `main.py` dans ce tutoriel.
+Parce que nous avons choisi `protocol=AG-UI`, le générateur enveloppe notre agent Strands dans un adaptateur [AG-UI](https://ag-ui.com/) exposé via une application Starlette. AgentCore route chaque `runtimeSessionId` vers une microVM dédiée, donc un `Agent` de longue durée par conteneur est la durée de vie correcte - `main.py` le construit paresseusement à la première requête `/invocations` après avoir capturé l'id de session entrant. Lorsque le stockage de session géré par AgentCore est attaché, `agent.py` connecte un `FileSessionManager` à `SESSION_STORAGE_PATH` afin que l'agent puisse reprendre l'historique complet de la conversation après un arrêt/reprise. Nous n'aurons pas besoin de modifier `main.py` dans ce tutoriel.
 
 ```ts
 // common/constructs/src/app/agents/story-agent.ts
