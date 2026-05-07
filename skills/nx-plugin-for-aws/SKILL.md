@@ -31,7 +31,7 @@ Key capabilities:
 - [PNPM >= 10](https://pnpm.io/installation#using-npm) (you can also use [Yarn >= 4](https://yarnpkg.com/getting-started/install), [Bun >= 1](https://bun.sh/docs/installation), or [NPM >= 10](https://nodejs.org/en/learn/getting-started/an-introduction-to-the-npm-package-manager) if you prefer)
   - verify by running `pnpm --version`, `yarn --version`, `bun --version` or `npm --version`
 - [UV >= 0.5.29](https://docs.astral.sh/uv/getting-started/installation/)
-  1. install Python 3.12 by running: `uv python install 3.12.0`
+  1. install Python 3.14 by running: `uv python install 3.14.0`
   2. verify with `uv python list --only-installed`
 - [AWS Credentials](https://docs.aws.amazon.com/sdkref/latest/guide/access.html) configured to your target AWS account (where your application will be deployed)
 
@@ -47,8 +47,8 @@ Key capabilities:
 To create a new workspace and scaffold a React website with a tRPC API:
 
 ```bash
-# Create workspace
-pnpm create @aws/nx-workspace my-app
+# Create workspace (pass `.` as the name to create in the current empty directory)
+pnpm create @aws/nx-workspace my-app --no-interactive
 
 # Generate a tRPC API
 pnpm nx g @aws/nx-plugin:ts#trpc-api --no-interactive --name=my-api
@@ -72,10 +72,16 @@ Always prompt the user for what name they want to use when executing generators 
 Use the `create_workspace_command` tool with your preferred package manager. This generates the full command to create an Nx workspace pre-configured with the AWS plugin.
 
 ```bash
-pnpm create @aws/nx-workspace my-app
+pnpm create @aws/nx-workspace my-app --no-interactive
 ```
 
-Be sure to ask the user what their preferred project name is.
+If you are already inside an empty directory intended for this project, pass `.` as the workspace name to create the workspace in the current directory:
+
+```bash
+pnpm create @aws/nx-workspace . --no-interactive
+```
+
+Be sure to ask the user what their preferred project name is, unless already within an empty directory intended for the project.
 
 ### Workflow 2: Discover Available Generators
 
@@ -112,27 +118,28 @@ Add capabilities to existing projects:
 
 ## Available Generators
 
-| Generator               | Description                                                                                                        |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `connection`            | Integrates a source project with a target project                                                                  |
-| `license`               | Add LICENSE files and configure source code licence headers                                                        |
-| `py#fast-api`           | Generates a FastAPI Python project                                                                                 |
-| `py#lambda-function`    | Adds a lambda function to a python project                                                                         |
-| `py#mcp-server`         | Generate a Python Model Context Protocol (MCP) server for providing context to Large Language Models               |
-| `py#project`            | Generates a Python project                                                                                         |
-| `py#strands-agent`      | Add a Strands Agent to a Python project                                                                            |
-| `terraform#project`     | Generates a Terraform project                                                                                      |
-| `ts#infra`              | Generates a cdk application                                                                                        |
-| `ts#lambda-function`    | Generate a TypeScript lambda function                                                                              |
-| `ts#mcp-server`         | Generate a TypeScript Model Context Protocol (MCP) server for providing context to Large Language Models           |
-| `ts#nx-generator`       | Generator for adding an Nx Generator to an existing TypeScript project                                             |
-| `ts#nx-plugin`          | Generate an Nx Plugin of your own! Build custom generators automatically made available for AI vibe-coding via MCP |
-| `ts#project`            | Generates a TypeScript project                                                                                     |
-| `ts#react-website`      | Generates a React static website                                                                                   |
-| `ts#react-website#auth` | Adds auth to an existing React website                                                                             |
-| `ts#smithy-api`         | Create an API using Smithy and the Smithy TypeScript Server SDK                                                    |
-| `ts#strands-agent`      | Add a Strands Agent to a TypeScript project                                                                        |
-| `ts#trpc-api`           | creates a trpc backend                                                                                             |
+| Generator               | Description                                                                                                                           |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `connection`            | Integrates a source project with a target project                                                                                     |
+| `license`               | Add LICENSE files and configure source code licence headers                                                                           |
+| `py#fast-api`           | Generates a FastAPI Python project                                                                                                    |
+| `py#lambda-function`    | Adds a lambda function to a python project                                                                                            |
+| `py#mcp-server`         | Generate a Python Model Context Protocol (MCP) server for providing context to Large Language Models                                  |
+| `py#project`            | Generates a Python project                                                                                                            |
+| `py#strands-agent`      | Add a Strands Agent to a Python project                                                                                               |
+| `terraform#project`     | Generates a Terraform project                                                                                                         |
+| `ts#astro-docs`         | Generates an Astro + Starlight documentation site with localisation, snippets, blog, and optional automated documentation translation |
+| `ts#infra`              | Generates a cdk application                                                                                                           |
+| `ts#lambda-function`    | Generate a TypeScript lambda function                                                                                                 |
+| `ts#mcp-server`         | Generate a TypeScript Model Context Protocol (MCP) server for providing context to Large Language Models                              |
+| `ts#nx-generator`       | Generator for adding an Nx Generator to an existing TypeScript project                                                                |
+| `ts#nx-plugin`          | Generate an Nx Plugin of your own! Build custom generators automatically made available for AI vibe-coding via MCP                    |
+| `ts#project`            | Generates a TypeScript project                                                                                                        |
+| `ts#react-website`      | Generates a React static website                                                                                                      |
+| `ts#react-website#auth` | Adds auth to an existing React website                                                                                                |
+| `ts#smithy-api`         | Create an API using Smithy and the Smithy TypeScript Server SDK                                                                       |
+| `ts#strands-agent`      | Add a Strands Agent to a TypeScript project                                                                                           |
+| `ts#trpc-api`           | creates a trpc backend                                                                                                                |
 
 ## Best Practices
 
@@ -145,6 +152,33 @@ Add capabilities to existing projects:
 - Fix lint issues with `nx run-many --target lint --configuration=fix --all`
 - Generate all projects into the `packages/` directory
 - Prefer pnpm as the package manager and CDK as the IaC provider
+
+## One-Shot Scaffolding
+
+When the user wants a full workspace created in one go, you can chain generators to minimize tool calls:
+
+- **Workspace creation** pass `--no-interactive` to avoid interactive prompts
+
+  ```bash
+  pnpm create @aws/nx-workspace my-app --iacProvider=CDK --no-interactive
+  ```
+
+- **Chain generators** with `&&` in a single Bash call after workspace creation, for example:
+
+  ```bash
+  cd my-app && \
+    pnpm nx g @aws/nx-plugin:ts#trpc-api --no-interactive --name=my-app-api --auth=IAM && \
+    pnpm nx g @aws/nx-plugin:ts#react-website --no-interactive --name=my-app-website --uxProvider=Shadcn && \
+    pnpm nx g @aws/nx-plugin:ts#react-website#auth --no-interactive --project=@my-app/my-app-website --cognitoDomain=my-app-auth && \
+    pnpm nx g @aws/nx-plugin:connection --no-interactive --sourceProject=@my-app/my-app-website --targetProject=@my-app/my-app-api && \
+    pnpm nx g @aws/nx-plugin:ts#infra --no-interactive --name=infra && \
+    pnpm nx sync && \
+    pnpm lint && \
+    pnpm build
+  ```
+
+- Use a **timeout of 300000ms** (5 minutes) for workspace creation (downloads dependencies).
+- **`nx sync`** is required before building — generators modify TypeScript project references.
 
 ## Troubleshooting
 

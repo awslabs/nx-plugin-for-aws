@@ -2,10 +2,21 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { readFileSync } from 'fs';
 import { join } from 'path';
+import { generateFiles, joinPathFragments } from '@nx/devkit';
+import { flushChanges, FsTree } from 'nx/src/generators/tree';
 import { buildCreateNxWorkspaceCommand } from '../packages/nx-plugin/src/utils/commands';
 import GeneratorsJson from '../packages/nx-plugin/generators.json';
+
+interface GeneratorInfo {
+  description: string;
+  hidden?: boolean;
+}
+
+interface GeneratorsJsonSchema {
+  generators: Record<string, GeneratorInfo>;
+}
 
 const ROOT = join(__dirname, '..');
 
@@ -33,16 +44,15 @@ const getCreateNxWorkspaceCommand = (): string => {
  */
 const getGeneratorsTable = (): string => {
   const generators = Object.entries(
-    (GeneratorsJson as Record<string, any>).generators,
+    (GeneratorsJson as GeneratorsJsonSchema).generators,
   )
-    .filter(([, info]: [string, any]) => !info.hidden)
-    .map(([id, info]: [string, any]) => ({
+    .filter(([, info]) => !info.hidden)
+    .map(([id, info]) => ({
       id,
       description: info.description,
     }));
 
-  // Find the max width for padding
-  const maxIdLen = Math.max(...generators.map((g) => g.id.length + 2)); // +2 for backticks
+  const maxIdLen = Math.max(...generators.map((g) => g.id.length + 2));
   const maxDescLen = Math.max(...generators.map((g) => g.description.length));
 
   const header = `| ${'Generator'.padEnd(maxIdLen)} | ${'Description'.padEnd(maxDescLen)} |`;
@@ -55,63 +65,48 @@ const getGeneratorsTable = (): string => {
   return [header, separator, ...rows].join('\n');
 };
 
-/**
- * Render a template by replacing {{variable}} placeholders
- */
-const renderTemplate = (
-  template: string,
-  variables: Record<string, string>,
-): string => {
-  let result = template;
-  for (const [key, value] of Object.entries(variables)) {
-    result = result.replaceAll(`{{${key}}}`, value);
-  }
-  return result;
-};
+const KIRO_FRONTMATTER = `---
+name: 'nx-plugin-for-aws'
+displayName: 'Nx Plugin for AWS'
+description: 'Scaffold and build cloud-native applications on AWS using @aws/nx-plugin generators. Covers workspace creation, project scaffolding with TypeScript, Python, React, CDK, Terraform, and more.'
+keywords: ['nx-plugin-for-aws', 'aws-nx-plugin', 'nx', 'aws', 'cdk', 'terraform']
+author: 'AWS'
+---`;
 
-/**
- * Convert POWER.md content to SKILL.md for Claude Code
- * Strips Kiro-specific frontmatter and adjusts format
- */
-const convertToSkill = (powerContent: string): string => {
-  // Replace Kiro YAML frontmatter with Claude Code skill frontmatter
-  const withoutFrontmatter = powerContent.replace(/^---[\s\S]*?---\n/, '');
-
-  const skillFrontmatter = `---
+const CLAUDE_FRONTMATTER = `---
 name: nx-plugin-for-aws
 description: >-
   Scaffold and build cloud-native applications on AWS using @aws/nx-plugin generators.
   Use when the user wants to create workspaces, generate projects, or scaffold infrastructure with the Nx Plugin for AWS.
----
-`;
-
-  return skillFrontmatter + withoutFrontmatter;
-};
+---`;
 
 // --- Main ---
 
-const template = readFileSync(
-  join(ROOT, 'powers/nx-plugin-for-aws/POWER.md.template'),
-  'utf-8',
-);
+const tree = new FsTree(ROOT, false);
+const templateDir = joinPathFragments(__dirname, 'skill-templates');
 
-const variables: Record<string, string> = {
+const sharedVariables = {
   prerequisites: getPrerequisites(),
   createNxWorkspaceCommand: getCreateNxWorkspaceCommand(),
   generators: getGeneratorsTable(),
 };
 
-const powerContent = renderTemplate(template, variables);
-
 // Write POWER.md (Kiro)
-const powerPath = join(ROOT, 'powers/nx-plugin-for-aws/POWER.md');
-writeFileSync(powerPath, powerContent);
-console.log(`Generated ${powerPath}`);
+generateFiles(tree, templateDir, 'powers/nx-plugin-for-aws', {
+  ...sharedVariables,
+  fileName: 'POWER.md',
+  frontmatter: KIRO_FRONTMATTER,
+});
 
-// Write SKILL.md (Claude Code — plugin)
-const skillContent = convertToSkill(powerContent);
-const pluginSkillDir = join(ROOT, 'skills/nx-plugin-for-aws');
-mkdirSync(pluginSkillDir, { recursive: true });
-const pluginSkillPath = join(pluginSkillDir, 'SKILL.md');
-writeFileSync(pluginSkillPath, skillContent);
-console.log(`Generated ${pluginSkillPath}`);
+// Write SKILL.md (Claude Code)
+generateFiles(tree, templateDir, 'skills/nx-plugin-for-aws', {
+  ...sharedVariables,
+  fileName: 'SKILL.md',
+  frontmatter: CLAUDE_FRONTMATTER,
+});
+
+flushChanges(tree.root, tree.listChanges());
+
+for (const change of tree.listChanges()) {
+  console.log(`Generated ${change.path}`);
+}
