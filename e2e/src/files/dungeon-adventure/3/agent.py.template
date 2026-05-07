@@ -1,13 +1,30 @@
+import os
 from contextlib import contextmanager
 
 from dungeon_adventure_agent_connection import InventoryMcpServerClient
 from strands import Agent
+from strands.session.file_session_manager import FileSessionManager
 
 from .session import get_container_session_id
 
 
 @contextmanager
 def get_agent():
+    # When AgentCore-managed session storage is attached to the runtime,
+    # the mount path is exposed via SESSION_STORAGE_PATH. Persisting
+    # through FileSessionManager lets the agent resume the full
+    # conversation after a stop/resume cycle (14-day idle expiry). Absent
+    # the env var (local serve), the agent runs in-memory only.
+    session_storage_dir = os.environ.get("SESSION_STORAGE_PATH")
+    session_manager = (
+        FileSessionManager(
+            session_id=get_container_session_id(),
+            storage_dir=session_storage_dir,
+        )
+        if session_storage_dir
+        else None
+    )
+
     inventory_mcp_server = InventoryMcpServerClient.create(
         session_id_provider=get_container_session_id,
     )
@@ -35,4 +52,5 @@ On the very first turn, seed the inventory with 2-3 narrative items.
 Keep every response under 100 words.
 """,
             tools=inventory_mcp_server.list_tools_sync(),
+            session_manager=session_manager,
         )
