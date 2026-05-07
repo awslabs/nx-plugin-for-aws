@@ -41,7 +41,7 @@ resource "aws_s3_bucket" "access_logs" {
   #checkov:skip=CKV2_AWS_62:Event notifications not required for access log bucket
   #checkov:skip=CKV_AWS_18:Access logging the access log bucket would create a cycle
   #checkov:skip=CKV_AWS_145:AES256 (S3-managed) encryption is sufficient for access logs
-  bucket        = "${var.bucket_name_prefix}-logs-${data.aws_caller_identity.current.account_id}-${data.aws_region.current.name}-${random_string.suffix.result}"
+  bucket        = "${var.bucket_name_prefix}-logs-${data.aws_caller_identity.current.account_id}-${data.aws_region.current.region}-${random_string.suffix.result}"
   force_destroy = true
 
   tags = var.tags
@@ -118,7 +118,7 @@ resource "aws_s3_bucket" "assets" {
   #checkov:skip=CKV_AWS_144:Cross-region replication not required for asset bucket
   #checkov:skip=CKV2_AWS_62:Event notifications not required for asset bucket
   #checkov:skip=CKV_AWS_145:AES256 (S3-managed) encryption is sufficient for build artefacts
-  bucket        = "${var.bucket_name_prefix}-${data.aws_caller_identity.current.account_id}-${data.aws_region.current.name}-${random_string.suffix.result}"
+  bucket        = "${var.bucket_name_prefix}-${data.aws_caller_identity.current.account_id}-${data.aws_region.current.region}-${random_string.suffix.result}"
   force_destroy = true
 
   tags = var.tags
