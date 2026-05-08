@@ -24,8 +24,6 @@ import {
   addDependenciesToPyProjectToml,
   addWorkspaceDependencyToPyProject,
 } from '../../../utils/py';
-import { updateToml } from '../../../utils/toml';
-import type { UVPyprojectToml } from '../../../utils/nxlv-python';
 import {
   ensurePythonAgentConnectionProject,
   addPythonCoreClient,
@@ -159,13 +157,6 @@ export const pyStrandsAgentMcpConnectionGenerator = async (
       clientClassName,
       clientVarName,
     );
-
-    // Workaround for https://github.com/strands-agents/sdk-python/issues/2247
-    suppressInvalidContextManagerForAgentFile(
-      tree,
-      sourceProject.root,
-      agentFilePath,
-    );
   }
 
   // 4. Add workspace dependency from agent project to agent-connection project
@@ -200,46 +191,6 @@ export const pyStrandsAgentMcpConnectionGenerator = async (
   return () => {
     installPackagesTask(tree);
   };
-};
-
-/**
- * Workaround for https://github.com/strands-agents/sdk-python/issues/2247
- */
-const suppressInvalidContextManagerForAgentFile = (
-  tree: Tree,
-  projectRoot: string,
-  agentFilePath: string,
-): void => {
-  const includePath = agentFilePath.startsWith(projectRoot + '/')
-    ? agentFilePath.slice(projectRoot.length + 1)
-    : agentFilePath;
-  const pyprojectPath = joinPathFragments(projectRoot, 'pyproject.toml');
-  if (!tree.exists(pyprojectPath)) {
-    return;
-  }
-  updateToml(tree, pyprojectPath, (toml: UVPyprojectToml) => {
-    const tool = (toml.tool ??= {} as NonNullable<UVPyprojectToml['tool']>);
-    const ty = ((tool as any).ty ??= {});
-    const overrides: Array<{
-      include?: string[];
-      rules?: Record<string, string>;
-    }> = (ty.overrides ??= []);
-    const existing = overrides.find(
-      (o) => o.include?.length === 1 && o.include[0] === includePath,
-    );
-    if (existing) {
-      existing.rules = {
-        ...(existing.rules ?? {}),
-        'invalid-context-manager': 'ignore',
-      };
-    } else {
-      overrides.push({
-        include: [includePath],
-        rules: { 'invalid-context-manager': 'ignore' },
-      });
-    }
-    return toml;
-  });
 };
 
 /**
