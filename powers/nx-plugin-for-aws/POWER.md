@@ -191,7 +191,6 @@ When the user wants a full workspace created in one go, you can chain generators
 1. Verify Node.js and npm are installed: `node --version && npm --version`
 2. Try running manually: `npx -y @aws/nx-plugin-mcp`
 3. If you get `ENOENT npx`, use the full path: replace `npx` with the output of `which npx`
-4. Restart Kiro and try again
 
 ### Generator Fails
 
