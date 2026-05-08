@@ -33,6 +33,7 @@ import {
 } from '../../utils/nx';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { updateToml } from '../../utils/toml';
+import { addDependenciesToDependencyGroupInPyProjectToml } from '../../utils/py';
 import type { UVPyprojectToml } from '../../utils/nxlv-python';
 
 export const PY_PROJECT_GENERATOR_INFO: NxGeneratorInfo =
@@ -181,8 +182,22 @@ export const pyProjectGenerator = async (
       outputPath: buildOutputPath,
     },
   };
+  projectConfiguration.targets.typecheck = {
+    cache: true,
+    executor: '@nxlv/python:run-commands',
+    options: {
+      command: 'uv run ty check',
+      cwd: '{projectRoot}',
+    },
+  };
   projectConfiguration.targets.build = {
-    dependsOn: ['lint', 'compile', 'test', ...(buildTarget.dependsOn ?? [])],
+    dependsOn: [
+      'lint',
+      'compile',
+      'test',
+      'typecheck',
+      ...(buildTarget.dependsOn ?? []),
+    ],
     options: {
       outputPath,
     },
@@ -199,6 +214,8 @@ export const pyProjectGenerator = async (
       return pyProjectToml;
     },
   );
+
+  addDependenciesToDependencyGroupInPyProjectToml(tree, '.', 'dev', ['ty']);
 
   // Add a dependency on the format target for lint in order to reduce the number of
   // fixable lint errors (eg line too long)
