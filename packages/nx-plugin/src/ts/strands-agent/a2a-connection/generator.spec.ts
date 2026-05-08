@@ -311,6 +311,12 @@ export const getAgent = async (sessionId: string) =>
     const toolsArrayMatch = agent.match(/tools: \[([^\]]*)\]/);
     expect(toolsArrayMatch).toBeTruthy();
     expect((toolsArrayMatch![1].match(/\bremoteTool\b/g) ?? []).length).toBe(1);
+
+    // The host serve-local target has the remote serve-local dep exactly once
+    const host = JSON.parse(tree.read('apps/ts-host/project.json', 'utf-8')!);
+    expect(host.targets['host-serve-local'].dependsOn).toEqual([
+      { projects: ['@test/ts-remote'], target: 'remote-serve-local' },
+    ]);
   });
 
   it('should transform a block-body arrow function, preserving existing statements', async () => {

@@ -133,19 +133,58 @@ export const addComponentGeneratorMetadata = (
 };
 
 /**
+ * A single entry in an Nx `dependsOn` array.
+ * Matches the shape accepted by Nx without requiring a devkit type import.
+ */
+export type TargetDependency =
+  | string
+  | {
+      projects?: string | string[];
+      target: string;
+      params?: 'ignore' | 'forward';
+    };
+
+const targetDependencyEquals = (a: TargetDependency, b: TargetDependency) => {
+  if (typeof a === 'string' || typeof b === 'string') {
+    return a === b;
+  }
+  if (a.target !== b.target || a.params !== b.params) {
+    return false;
+  }
+  const aProjects = Array.isArray(a.projects)
+    ? a.projects
+    : a.projects !== undefined
+      ? [a.projects]
+      : [];
+  const bProjects = Array.isArray(b.projects)
+    ? b.projects
+    : b.projects !== undefined
+      ? [b.projects]
+      : [];
+  if (aProjects.length !== bProjects.length) {
+    return false;
+  }
+  return aProjects.every((p, i) => p === bProjects[i]);
+};
+
+/**
  * Mutate the project to add the dependency to the target if not already present
  * Adds the target if not present.
+ *
+ * Accepts either a string target name (e.g. `'build'`) or a dependency config
+ * object (e.g. `{ projects: ['foo'], target: 'serve-local' }`). Deduplicates
+ * using deep equality so re-running a generator does not grow `dependsOn`.
  */
 export const addDependencyToTargetIfNotPresent = (
   project: ProjectConfiguration,
   target: string,
-  dependency: string,
+  dependency: TargetDependency,
 ) => {
   project.targets ??= {};
   project.targets[target] ??= {};
   project.targets[target].dependsOn = [
     ...(project.targets[target].dependsOn ?? []).filter(
-      (d) => d !== dependency,
+      (d) => !targetDependencyEquals(d, dependency),
     ),
     dependency,
   ];

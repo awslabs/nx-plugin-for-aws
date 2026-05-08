@@ -31,6 +31,7 @@ import { formatFilesInSubtree } from '../../utils/format';
 import { sortObjectKeys } from '../../utils/object';
 import {
   NxGeneratorInfo,
+  addDependencyToTargetIfNotPresent,
   addGeneratorMetadata,
   getGeneratorInfo,
 } from '../../utils/nx';
@@ -105,11 +106,8 @@ export async function tsInfraGenerator(
     `${libraryRoot}/project.json`,
     (config: ProjectConfiguration) => {
       config.projectType = 'application';
-      config.targets.build.dependsOn = [
-        ...(config.targets.build.dependsOn ?? []),
-        'synth',
-        'checkov',
-      ];
+      addDependencyToTargetIfNotPresent(config, 'build', 'synth');
+      addDependencyToTargetIfNotPresent(config, 'build', 'checkov');
       config.targets.compile.outputs = [
         '{workspaceRoot}/dist/{projectRoot}/tsc',
       ];

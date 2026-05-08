@@ -14,6 +14,7 @@ import {
 import { PyStrandsAgentMcpConnectionGeneratorSchema } from './schema';
 import {
   NxGeneratorInfo,
+  addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
@@ -172,14 +173,10 @@ export const pyStrandsAgentMcpConnectionGenerator = async (
   const mcpServeLocalTargetName = `${mcpComponentName}-serve-local`;
 
   if (sourceProject.targets?.[serveLocalTargetName]) {
-    const target = sourceProject.targets[serveLocalTargetName];
-    target.dependsOn = [
-      ...(target.dependsOn ?? []),
-      {
-        projects: [targetProject.name],
-        target: mcpServeLocalTargetName,
-      },
-    ];
+    addDependencyToTargetIfNotPresent(sourceProject, serveLocalTargetName, {
+      projects: [targetProject.name],
+      target: mcpServeLocalTargetName,
+    });
     updateProjectConfiguration(tree, sourceProject.name, sourceProject);
   }
 

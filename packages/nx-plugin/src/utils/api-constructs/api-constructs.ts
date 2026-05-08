@@ -17,6 +17,7 @@ import {
 } from '../shared-constructs-constants';
 import { addStarExport } from '../ast';
 import { IacProvider } from '../iac';
+import { addDependencyToTargetIfNotPresent } from '../nx';
 
 interface BackendOptions {
   type: 'trpc' | 'fastapi' | 'smithy';
@@ -71,16 +72,11 @@ export const addApiGatewayInfra = async (
       'project.json',
     ),
     (config: ProjectConfiguration) => {
-      if (!config.targets) {
-        config.targets = {};
-      }
-      if (!config.targets.build) {
-        config.targets.build = {};
-      }
-      config.targets.build.dependsOn = [
-        ...(config.targets.build.dependsOn ?? []),
+      addDependencyToTargetIfNotPresent(
+        config,
+        'build',
         `${options.apiProjectName}:build`,
-      ];
+      );
       return config;
     },
   );

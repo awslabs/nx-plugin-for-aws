@@ -14,6 +14,7 @@ import {
 import { PyStrandsAgentA2aConnectionGeneratorSchema } from './schema';
 import {
   NxGeneratorInfo,
+  addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
@@ -180,14 +181,10 @@ export const pyStrandsAgentA2aConnectionGenerator = async (
   const targetServeLocalTargetName = `${targetAgentComponentName}-serve-local`;
 
   if (sourceProject.targets?.[serveLocalTargetName]) {
-    const target = sourceProject.targets[serveLocalTargetName];
-    target.dependsOn = [
-      ...(target.dependsOn ?? []),
-      {
-        projects: [targetProject.name],
-        target: targetServeLocalTargetName,
-      },
-    ];
+    addDependencyToTargetIfNotPresent(sourceProject, serveLocalTargetName, {
+      projects: [targetProject.name],
+      target: targetServeLocalTargetName,
+    });
     updateProjectConfiguration(tree, sourceProject.name, sourceProject);
   }
 

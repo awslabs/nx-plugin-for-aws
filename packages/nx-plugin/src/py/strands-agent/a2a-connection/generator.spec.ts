@@ -340,6 +340,12 @@ def get_agent(session_id: str):
     const toolsListMatch = agent.match(/tools=\[([^\]]*)\]/);
     expect(toolsListMatch).toBeTruthy();
     expect((toolsListMatch![1].match(/\bask_remote\b/g) ?? []).length).toBe(1);
+
+    // The host serve-local target has the remote serve-local dep exactly once
+    const host = JSON.parse(tree.read('apps/py-host/project.json', 'utf-8')!);
+    expect(host.targets['host-serve-local'].dependsOn).toEqual([
+      { projects: ['test.py_remote'], target: 'remote-serve-local' },
+    ]);
   });
 
   it('should append to existing tools without dropping prior entries', async () => {
