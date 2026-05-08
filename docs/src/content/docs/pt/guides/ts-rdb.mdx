@@ -85,11 +85,11 @@ O gerador criará a seguinte estrutura de projeto no diretório `<directory>/<na
   </Fragment>
 </Infrastructure>
 
-## Implementando seu Banco de Dados
+## Desenvolvimento Local
 
 ### Modelagem de Dados
 
-O projeto gerado usa [Prisma ORM](https://www.prisma.io/docs/orm) para definir seu esquema de banco de dados e gerar um cliente com segurança de tipos. Modele suas tabelas, relações e tipos de campo em arquivos sob `prisma/models/`.
+O projeto gerado usa [Prisma ORM](https://www.prisma.io/docs/orm) para definir seu esquema de banco de dados e gerar um cliente com segurança de tipos. O fluxo de trabalho é model-first: adicione ou atualize arquivos de modelo Prisma no diretório `prisma/models/` do seu projeto de banco de dados, depois gere uma migração a partir dessas alterações de modelo.
 
 Exemplo de modelo `User`:
 
@@ -111,11 +111,7 @@ Você também pode gerar manualmente o cliente a qualquer momento:
 
 <NxCommands commands={['generate <your-db-project-name>']} />
 
-:::note[Execute o Prisma a partir do Diretório do Pacote]
-Ao usar a CLI do Prisma, execute os comandos a partir do diretório do pacote de banco de dados gerado (por exemplo, `packages/mydb`) para que o Prisma possa encontrar `prisma/schema.prisma` e `prisma.config.ts`.
-:::
-
-Você também pode executar a partir da raiz do workspace com o alvo `prisma`:
+Use o alvo `prisma` para executar comandos da CLI do Prisma a partir da raiz do workspace:
 
 <NxCommands commands={['run <project>:prisma generate']} />
 
@@ -132,11 +128,15 @@ O cliente automaticamente:
 
 ### Criando Migrações
 
-O Prisma Migrate requer um [banco de dados shadow](https://www.prisma.io/docs/orm/prisma-migrate/understanding-prisma-migrate/shadow-database) para comparar seu esquema com o estado atual do banco de dados e gerar alterações SQL.
+Após adicionar ou atualizar modelos em `prisma/models/`, use `migrate dev` para gerar arquivos de migração e aplicá-los ao seu banco de dados local ao mesmo tempo.
 
-Use o alvo `prisma` gerado, que inicia automaticamente um banco de dados local via Docker antes de executar:
+O alvo `prisma` gerado inicia automaticamente um banco de dados local via Docker antes de executar:
 
 <NxCommands commands={['run <project>:prisma migrate dev']} />
+
+Se você quiser apenas gerar os arquivos de migração sem aplicá-los ao banco de dados local, adicione `--create-only`:
+
+<NxCommands commands={['run <project>:prisma migrate dev --create-only']} />
 
 Isso gera uma nova pasta de migração em `prisma/migrations` cada vez que seu esquema muda:
 
@@ -149,9 +149,27 @@ Isso gera uma nova pasta de migração em `prisma/migrations` cada vez que seu e
     - schema.prisma
 </FileTree>
 
-:::note[Migrações Automáticas na AWS]
-Para implantações na AWS, você não precisa executar `prisma migrate deploy` manualmente. A infraestrutura gerada cria automaticamente o usuário de banco de dados da aplicação e executa migrações durante a implantação.
-:::
+Quando você implanta a pilha AWS, a infraestrutura gerada aplica automaticamente as migrações geradas ao banco de dados implantado.
+
+### Aplicando Migrações Existentes
+
+Quando você baixa arquivos de migração criados por outros desenvolvedores, use `migrate deploy` para aplicar essas migrações existentes ao seu banco de dados local.
+
+<NxCommands commands={['run <project>:prisma migrate deploy']} />
+
+Neste fluxo de desenvolvimento local, `migrate deploy` aplica os arquivos de migração ao seu banco de dados local; ele não implanta o banco de dados na AWS.
+
+### Executando Comandos Prisma
+
+O alvo `prisma` gerado expõe a CLI do Prisma, então você pode usá-lo para executar qualquer comando suportado pelo Prisma contra o banco de dados local. Consulte a [referência da CLI do Prisma](https://www.prisma.io/docs/orm/reference/prisma-cli-reference) para comandos disponíveis.
+
+<NxCommands commands={['run <project>:prisma <prisma-command>']} />
+
+### Prisma Studio
+
+[Prisma Studio](https://www.prisma.io/studio) é um editor visual para seu banco de dados local. Use-o para navegar em tabelas, inspecionar e editar registros, filtrar dados, seguir relações e executar SQL bruto através do console SQL integrado. É útil para verificar migrações e semear dados de teste durante o desenvolvimento. Inicie-o com:
+
+<NxCommands commands={['run <project>:prisma studio']} />
 
 ## Conectando a partir de uma API tRPC
 
@@ -228,11 +246,11 @@ export const listUsers = dbProcedure
 ```
 
 :::note
-Consulte o <Link path="/guides/trpc">guia do gerador `ts#trpc-api`</Link> para mais detalhes sobre o padrão de middleware.
+Consulte o <Link path="/pt/guides/trpc">guia do gerador `ts#trpc-api`</Link> para mais detalhes sobre o padrão de middleware.
 
 :::
 
-## Implantando na AWS
+## Implantando seu Banco de Dados
 
 O gerador de banco de dados relacional cria infraestrutura CDK ou Terraform com base no seu `iacProvider` selecionado.
 
@@ -484,26 +502,6 @@ module "api" {
 
 Para mais detalhes, consulte os [requisitos SSL/TLS do AWS Lambda para conexões Amazon RDS](https://docs.aws.amazon.com/lambda/latest/dg/services-rds.html#services-rds-tls) e a [documentação TLS do Amazon RDS Proxy](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/rds-proxy.howitworks.html#rds-proxy-security.tls). Ao usar RDS Proxy, você não precisa configurar o pacote de CA do RDS na sua função Lambda.
 
-## Desenvolvimento Local
-
-### Executando Comandos Prisma
-
-Use o alvo `prisma` para executar qualquer comando da CLI do Prisma contra o banco de dados local. Ele inicia automaticamente o banco de dados via `serve-local` antes de executar, então não há necessidade de configurar um banco de dados local separadamente.
-
-<NxCommands commands={['run <project>:prisma migrate dev']} />
-
-<NxCommands commands={['run <project>:prisma migrate deploy']} />
-
-O alvo `prisma` define `SERVE_LOCAL=true` automaticamente, que `prisma.config.ts` usa para construir a URL de conexão do banco de dados a partir das credenciais locais configuradas no momento da geração.
-
-### Prisma Studio
-
-[Prisma Studio](https://www.prisma.io/studio) é um editor visual para seu banco de dados local. Use-o para navegar em tabelas, inspecionar e editar registros, filtrar dados, seguir relações e executar SQL bruto através do console SQL integrado. É útil para verificar migrações e semear dados de teste durante o desenvolvimento. Inicie-o com:
-
-<NxCommands commands={['run <project>:prisma studio']} />
-
-## Personalizando a Arquitetura do Banco de Dados
-
 A infraestrutura gerada pode ser personalizada para corresponder aos requisitos da sua carga de trabalho. Os exemplos a seguir demonstram algumas opções de personalização comuns disponíveis.
 
 ### Instâncias do Cluster
@@ -569,6 +567,10 @@ module "my_database" {
 
 Fixe uma versão específica do engine Aurora.
 
+Por padrão, a imagem Docker do banco de dados local gerada corresponde à versão padrão do engine Aurora. Se você alterar a versão do engine Aurora, é recomendado também usar uma versão de banco de dados Docker local correspondente para máxima compatibilidade. Consulte as notas de lançamento da AWS para [versões do Aurora PostgreSQL](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraPostgreSQLReleaseNotes/aurorapostgresql-release-calendar.html) e [versões do Aurora MySQL](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraMySQLReleaseNotes/AuroraMySQL.Updates.30Updates.html) para identificar a versão correspondente do banco de dados da comunidade.
+
+A imagem do banco de dados local é configurada no alvo `serve-local` do projeto de banco de dados gerado em `project.json`. Atualize o argumento de imagem passado para `scripts/docker-start.ts` quando você alterar as versões do engine.
+
 <OptionFilter when={{ engine: 'PostgreSQL' }}>
 <Infrastructure>
 <Fragment slot="cdk">
@@ -623,19 +625,21 @@ module "my_database" {
 
 ### Proteção contra Exclusão
 
-Configure definições de ciclo de vida para proteger contra exclusão acidental.
+A proteção contra exclusão está habilitada por padrão (`deletionProtection: true` no CDK, `deletion_protection = true` no Terraform) para proteger o cluster Aurora contra exclusão acidental.
+
+#### Desabilitar Proteção contra Exclusão
+
+Você pode desabilitar a proteção contra exclusão para ambientes onde a exclusão do banco de dados é esperada, como pilhas de desenvolvimento ou preview de curta duração.
 
 <Infrastructure>
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
 import { MyDatabase } from ':my-scope/common-constructs';
-import { RemovalPolicy } from 'aws-cdk-lib';
 
 const db = new MyDatabase(this, 'Db', {
   ...
-  deletionProtection: true,
-  removalPolicy: RemovalPolicy.SNAPSHOT,
+  deletionProtection: false,
 });
 ```
 </Fragment>
@@ -645,8 +649,54 @@ const db = new MyDatabase(this, 'Db', {
 module "my_database" {
   source = "../../common/terraform/src/app/dbs/my-database"
   ...
-  deletion_protection = true
-  skip_final_snapshot = false
+  deletion_protection = false
+}
+```
+</Fragment>
+</Infrastructure>
+
+### Política de Remoção
+
+O construtor CDK retém o cluster Aurora por padrão (`removalPolicy: RemovalPolicy.RETAIN`). Altere isso quando você quiser que a exclusão da pilha CDK faça snapshot ou destrua o cluster.
+
+Ao usar `RemovalPolicy.DESTROY`, a proteção contra exclusão também deve ser desabilitada antes que o cluster possa ser excluído.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RemovalPolicy } from 'aws-cdk-lib';
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', {
+  ...
+  removalPolicy: RemovalPolicy.SNAPSHOT,
+});
+```
+
+Para um ambiente efêmero onde o banco de dados deve ser excluído com a pilha:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RemovalPolicy } from 'aws-cdk-lib';
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', {
+  ...
+  deletionProtection: false,
+  removalPolicy: RemovalPolicy.DESTROY,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+O Terraform não usa políticas de remoção do CDK. Por padrão, o módulo cria um snapshot final na exclusão (`skip_final_snapshot = false`). Para pular o snapshot final em um ambiente efêmero:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
+  ...
+  deletion_protection = false
+  skip_final_snapshot = true
 }
 ```
 </Fragment>
@@ -707,7 +757,7 @@ export const listExampleTable = publicProcedure
 
 **Opção 2: middleware tRPC**
 
-Se você estiver usando o [padrão de middleware](#injecting-the-prisma-client-via-middleware), adicione a chamada `$disconnect()` ao middleware para que todos os procedimentos construídos sobre ele sejam cobertos automaticamente:
+Se você estiver usando o [padrão de middleware](#injetando-o-cliente-prisma-via-middleware), adicione a chamada `$disconnect()` ao middleware para que todos os procedimentos construídos sobre ele sejam cobertos automaticamente:
 
 ```ts title="packages/api/src/middleware/db.ts"
 import { getPrisma } from ':my-scope/db';

@@ -85,11 +85,11 @@ Il generatore creerà la seguente struttura di progetto nella directory `<direct
   </Fragment>
 </Infrastructure>
 
-## Implementazione del Database
+## Sviluppo Locale
 
 ### Modellazione dei Dati
 
-Il progetto generato utilizza [Prisma ORM](https://www.prisma.io/docs/orm) per definire lo schema del database e generare un client type-safe. Modella le tue tabelle, relazioni e tipi di campo nei file sotto `prisma/models/`.
+Il progetto generato utilizza [Prisma ORM](https://www.prisma.io/docs/orm) per definire lo schema del database e generare un client type-safe. Il flusso di lavoro è model-first: aggiungi o aggiorna i file dei modelli Prisma nella directory `prisma/models/` del tuo progetto database, quindi genera una migrazione da tali modifiche del modello.
 
 Esempio di modello `User`:
 
@@ -111,11 +111,7 @@ Puoi anche generare manualmente il client in qualsiasi momento:
 
 <NxCommands commands={['generate <your-db-project-name>']} />
 
-:::note[Esegui Prisma dalla Directory del Package]
-Quando utilizzi la CLI di Prisma, esegui i comandi dalla directory del package del database generato (ad esempio, `packages/mydb`) in modo che Prisma possa trovare `prisma/schema.prisma` e `prisma.config.ts`.
-:::
-
-Puoi anche eseguire dalla radice del workspace con il target `prisma`:
+Utilizza il target `prisma` per eseguire i comandi della CLI di Prisma dalla radice del workspace:
 
 <NxCommands commands={['run <project>:prisma generate']} />
 
@@ -132,11 +128,15 @@ Il client automaticamente:
 
 ### Creazione delle Migrazioni
 
-Prisma Migrate richiede un [shadow database](https://www.prisma.io/docs/orm/prisma-migrate/understanding-prisma-migrate/shadow-database) per confrontare il tuo schema con lo stato attuale del database e generare le modifiche SQL.
+Dopo aver aggiunto o aggiornato i modelli sotto `prisma/models/`, utilizza `migrate dev` per generare i file di migrazione e applicarli al tuo database locale contemporaneamente.
 
-Utilizza il target `prisma` generato, che avvia automaticamente un database locale tramite Docker prima dell'esecuzione:
+Il target `prisma` generato avvia automaticamente un database locale tramite Docker prima dell'esecuzione:
 
 <NxCommands commands={['run <project>:prisma migrate dev']} />
+
+Se vuoi solo generare i file di migrazione senza applicarli al database locale, aggiungi `--create-only`:
+
+<NxCommands commands={['run <project>:prisma migrate dev --create-only']} />
 
 Questo genera una nuova cartella di migrazione in `prisma/migrations` ogni volta che il tuo schema cambia:
 
@@ -149,9 +149,27 @@ Questo genera una nuova cartella di migrazione in `prisma/migrations` ogni volta
     - schema.prisma
 </FileTree>
 
-:::note[Migrazioni AWS Automatiche]
-Per i deployment su AWS, non è necessario eseguire `prisma migrate deploy` manualmente. L'infrastruttura generata crea automaticamente l'utente database applicativo ed esegue le migrazioni durante il deployment.
-:::
+Quando deploi lo stack AWS, l'infrastruttura generata applica automaticamente le migrazioni generate al database deployato.
+
+### Applicazione delle Migrazioni Esistenti
+
+Quando scarichi i file di migrazione creati da altri sviluppatori, utilizza `migrate deploy` per applicare quelle migrazioni esistenti al tuo database locale.
+
+<NxCommands commands={['run <project>:prisma migrate deploy']} />
+
+In questo flusso di sviluppo locale, `migrate deploy` applica i file di migrazione al tuo database locale; non deploya il database su AWS.
+
+### Esecuzione dei Comandi Prisma
+
+Il target `prisma` generato espone la CLI di Prisma, quindi puoi utilizzarlo per eseguire qualsiasi comando supportato da Prisma contro il database locale. Consulta il [riferimento della CLI di Prisma](https://www.prisma.io/docs/orm/reference/prisma-cli-reference) per i comandi disponibili.
+
+<NxCommands commands={['run <project>:prisma <prisma-command>']} />
+
+### Prisma Studio
+
+[Prisma Studio](https://www.prisma.io/studio) è un editor visuale per il tuo database locale. Usalo per esplorare tabelle, ispezionare e modificare record, filtrare dati, seguire relazioni ed eseguire SQL raw tramite la console SQL integrata. È utile per verificare le migrazioni e popolare dati di test durante lo sviluppo. Avvialo con:
+
+<NxCommands commands={['run <project>:prisma studio']} />
 
 ## Connessione da un'API tRPC
 
@@ -232,7 +250,7 @@ Consulta la <Link path="/guides/trpc">guida del generatore `ts#trpc-api`</Link> 
 
 :::
 
-## Deployment su AWS
+## Deployment del Database
 
 Il generatore di database relazionale crea infrastruttura CDK o Terraform in base al tuo `iacProvider` selezionato.
 
@@ -484,26 +502,6 @@ module "api" {
 
 Per maggiori dettagli, consulta i [requisiti SSL/TLS di AWS Lambda per le connessioni Amazon RDS](https://docs.aws.amazon.com/lambda/latest/dg/services-rds.html#services-rds-tls) e la [documentazione TLS di Amazon RDS Proxy](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/rds-proxy.howitworks.html#rds-proxy-security.tls). Quando utilizzi RDS Proxy, non è necessario configurare il bundle CA RDS nella tua funzione Lambda.
 
-## Sviluppo Locale
-
-### Esecuzione dei Comandi Prisma
-
-Utilizza il target `prisma` per eseguire qualsiasi comando della CLI di Prisma contro il database locale. Avvia automaticamente il database tramite `serve-local` prima dell'esecuzione, quindi non è necessario configurare un database locale separatamente.
-
-<NxCommands commands={['run <project>:prisma migrate dev']} />
-
-<NxCommands commands={['run <project>:prisma migrate deploy']} />
-
-Il target `prisma` imposta `SERVE_LOCAL=true` automaticamente, che `prisma.config.ts` utilizza per costruire l'URL di connessione al database dalle credenziali locali configurate al momento della generazione.
-
-### Prisma Studio
-
-[Prisma Studio](https://www.prisma.io/studio) è un editor visuale per il tuo database locale. Usalo per esplorare tabelle, ispezionare e modificare record, filtrare dati, seguire relazioni ed eseguire SQL raw tramite la console SQL integrata. È utile per verificare le migrazioni e popolare dati di test durante lo sviluppo. Avvialo con:
-
-<NxCommands commands={['run <project>:prisma studio']} />
-
-## Personalizzazione dell'Architettura del Database
-
 L'infrastruttura generata può essere personalizzata per adattarsi ai requisiti del tuo carico di lavoro. I seguenti esempi dimostrano alcune opzioni di personalizzazione comuni disponibili.
 
 ### Istanze del Cluster
@@ -569,6 +567,10 @@ module "my_database" {
 
 Fissa una versione specifica del motore Aurora.
 
+Per impostazione predefinita, l'immagine Docker del database locale generata corrisponde alla versione predefinita del motore Aurora. Se modifichi la versione del motore Aurora, si consiglia di utilizzare anche una versione del database Docker locale corrispondente per la massima compatibilità. Consulta le note di rilascio AWS per le [versioni di Aurora PostgreSQL](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraPostgreSQLReleaseNotes/aurorapostgresql-release-calendar.html) e le [versioni di Aurora MySQL](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraMySQLReleaseNotes/AuroraMySQL.Updates.30Updates.html) per identificare la versione del database community corrispondente.
+
+L'immagine del database locale è configurata nel target `serve-local` del progetto database generato in `project.json`. Aggiorna l'argomento dell'immagine passato a `scripts/docker-start.ts` quando modifichi le versioni del motore.
+
 <OptionFilter when={{ engine: 'PostgreSQL' }}>
 <Infrastructure>
 <Fragment slot="cdk">
@@ -623,19 +625,21 @@ module "my_database" {
 
 ### Protezione dalla Cancellazione
 
-Configura le impostazioni del ciclo di vita per proteggere dalla cancellazione accidentale.
+La protezione dalla cancellazione è abilitata per impostazione predefinita (`deletionProtection: true` in CDK, `deletion_protection = true` in Terraform) per proteggere il cluster Aurora dalla cancellazione accidentale.
+
+#### Disabilitare la Protezione dalla Cancellazione
+
+Puoi disabilitare la protezione dalla cancellazione per ambienti in cui è prevista la cancellazione del database, come stack di sviluppo o preview di breve durata.
 
 <Infrastructure>
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
 import { MyDatabase } from ':my-scope/common-constructs';
-import { RemovalPolicy } from 'aws-cdk-lib';
 
 const db = new MyDatabase(this, 'Db', {
   ...
-  deletionProtection: true,
-  removalPolicy: RemovalPolicy.SNAPSHOT,
+  deletionProtection: false,
 });
 ```
 </Fragment>
@@ -645,8 +649,54 @@ const db = new MyDatabase(this, 'Db', {
 module "my_database" {
   source = "../../common/terraform/src/app/dbs/my-database"
   ...
-  deletion_protection = true
-  skip_final_snapshot = false
+  deletion_protection = false
+}
+```
+</Fragment>
+</Infrastructure>
+
+### Politica di Rimozione
+
+Il costrutto CDK mantiene il cluster Aurora per impostazione predefinita (`removalPolicy: RemovalPolicy.RETAIN`). Modifica questo comportamento quando vuoi che la cancellazione dello stack CDK crei uno snapshot o distrugga il cluster invece.
+
+Quando utilizzi `RemovalPolicy.DESTROY`, la protezione dalla cancellazione deve essere disabilitata prima che il cluster possa essere eliminato.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RemovalPolicy } from 'aws-cdk-lib';
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', {
+  ...
+  removalPolicy: RemovalPolicy.SNAPSHOT,
+});
+```
+
+Per un ambiente effimero in cui il database dovrebbe essere eliminato con lo stack:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RemovalPolicy } from 'aws-cdk-lib';
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', {
+  ...
+  deletionProtection: false,
+  removalPolicy: RemovalPolicy.DESTROY,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+Terraform non utilizza le politiche di rimozione CDK. Per impostazione predefinita, il modulo crea uno snapshot finale alla cancellazione (`skip_final_snapshot = false`). Per saltare lo snapshot finale per un ambiente effimero:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
+  ...
+  deletion_protection = false
+  skip_final_snapshot = true
 }
 ```
 </Fragment>
@@ -707,7 +757,7 @@ export const listExampleTable = publicProcedure
 
 **Opzione 2: middleware tRPC**
 
-Se stai utilizzando il [pattern middleware](#injecting-the-prisma-client-via-middleware), aggiungi la chiamata `$disconnect()` al middleware in modo che tutte le procedure costruite su di esso siano coperte automaticamente:
+Se stai utilizzando il [pattern middleware](#iniezione-del-client-prisma-tramite-middleware), aggiungi la chiamata `$disconnect()` al middleware in modo che tutte le procedure costruite su di esso siano coperte automaticamente:
 
 ```ts title="packages/api/src/middleware/db.ts"
 import { getPrisma } from ':my-scope/db';

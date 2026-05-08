@@ -149,7 +149,10 @@ export const tsRdbGenerator = async (
     },
   };
   const containerName = `${getNpmScope(tree)}-${databaseName}`;
-  const dockerImage = options.engine === 'MySQL' ? 'mysql' : 'postgres';
+  const dockerImage =
+    options.engine === 'MySQL'
+      ? 'public.ecr.aws/docker/library/mysql:8.0.44'
+      : 'public.ecr.aws/docker/library/postgres:17.7';
   projectConfig.targets['docker-pull'] = {
     executor: 'nx:run-commands',
     options: {
@@ -160,7 +163,7 @@ export const tsRdbGenerator = async (
   projectConfig.targets['serve-local'] = {
     executor: 'nx:run-commands',
     options: {
-      command: `tsx scripts/docker-start.ts ${containerName} ${localDbPort} ${databaseName}${options.engine === 'MySQL' ? '' : ` ${localDbUser}`} ${localDbPassword}`,
+      command: `tsx scripts/docker-start.ts ${containerName} ${dockerImage} ${localDbPort} ${databaseName}${options.engine === 'MySQL' ? '' : ` ${localDbUser}`} ${localDbPassword}`,
       cwd: '{projectRoot}',
     },
     continuous: true,

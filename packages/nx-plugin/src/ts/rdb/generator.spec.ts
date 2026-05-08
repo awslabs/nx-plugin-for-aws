@@ -100,7 +100,8 @@ describe('ts#rdb generator', () => {
     expect(projectConfig.targets['docker-pull']).toEqual({
       executor: 'nx:run-commands',
       options: {
-        command: 'tsx scripts/docker-pull.ts postgres',
+        command:
+          'tsx scripts/docker-pull.ts public.ecr.aws/docker/library/postgres:17.7',
         cwd: '{projectRoot}',
       },
     });
@@ -108,7 +109,7 @@ describe('ts#rdb generator', () => {
       executor: 'nx:run-commands',
       options: {
         command:
-          'tsx scripts/docker-start.ts proj-database_name 5432 database_name dbadmin password',
+          'tsx scripts/docker-start.ts proj-database_name public.ecr.aws/docker/library/postgres:17.7 5432 database_name dbadmin password',
         cwd: '{projectRoot}',
       },
       continuous: true,
@@ -192,7 +193,8 @@ describe('ts#rdb generator', () => {
     expect(mysqlProjectConfig.targets['docker-pull']).toEqual({
       executor: 'nx:run-commands',
       options: {
-        command: 'tsx scripts/docker-pull.ts mysql',
+        command:
+          'tsx scripts/docker-pull.ts public.ecr.aws/docker/library/mysql:8.0.44',
         cwd: '{projectRoot}',
       },
     });
@@ -200,7 +202,7 @@ describe('ts#rdb generator', () => {
       executor: 'nx:run-commands',
       options: {
         command:
-          'tsx scripts/docker-start.ts proj-database_name 3306 database_name password',
+          'tsx scripts/docker-start.ts proj-database_name public.ecr.aws/docker/library/mysql:8.0.44 3306 database_name password',
         cwd: '{projectRoot}',
       },
       continuous: true,

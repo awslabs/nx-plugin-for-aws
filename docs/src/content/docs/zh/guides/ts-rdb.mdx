@@ -85,11 +85,11 @@ import OptionFilter from '@components/option-filter.astro';
   </Fragment>
 </Infrastructure>
 
-## 实现您的数据库
+## 本地开发
 
 ### 数据建模
 
-生成的项目使用 [Prisma ORM](https://www.prisma.io/docs/orm) 来定义数据库架构并生成类型安全的客户端。在 `prisma/models/` 下的文件中对表、关系和字段类型进行建模。
+生成的项目使用 [Prisma ORM](https://www.prisma.io/docs/orm) 来定义数据库架构并生成类型安全的客户端。工作流程是模型优先的：在数据库项目的 `prisma/models/` 目录下添加或更新 Prisma 模型文件，然后从这些模型更改生成迁移。
 
 `User` 模型示例：
 
@@ -111,11 +111,7 @@ model User {
 
 <NxCommands commands={['generate <your-db-project-name>']} />
 
-:::note[从包目录运行 Prisma]
-使用 Prisma CLI 时，从生成的数据库包目录（例如 `packages/mydb`）运行命令，以便 Prisma 可以找到 `prisma/schema.prisma` 和 `prisma.config.ts`。
-:::
-
-您也可以使用 `prisma` 目标从工作区根目录运行：
+使用 `prisma` 目标从工作区根目录运行 Prisma CLI 命令：
 
 <NxCommands commands={['run <project>:prisma generate']} />
 
@@ -132,11 +128,15 @@ model User {
 
 ### 创建迁移
 
-Prisma Migrate 需要一个[影子数据库](https://www.prisma.io/docs/orm/prisma-migrate/understanding-prisma-migrate/shadow-database)来将您的架构与当前数据库状态进行比较并生成 SQL 更改。
+在 `prisma/models/` 下添加或更新模型后，使用 `migrate dev` 生成迁移文件并同时将它们应用到本地数据库。
 
-使用生成的 `prisma` 目标，它会在运行前通过 Docker 自动启动本地数据库：
+生成的 `prisma` 目标会在运行前通过 Docker 自动启动本地数据库：
 
 <NxCommands commands={['run <project>:prisma migrate dev']} />
+
+如果您只想生成迁移文件而不将它们应用到本地数据库，请添加 `--create-only`：
+
+<NxCommands commands={['run <project>:prisma migrate dev --create-only']} />
 
 这会在每次架构更改时在 `prisma/migrations` 中生成一个新的迁移文件夹：
 
@@ -149,9 +149,27 @@ Prisma Migrate 需要一个[影子数据库](https://www.prisma.io/docs/orm/pris
     - schema.prisma
 </FileTree>
 
-:::note[自动 AWS 迁移]
-对于 AWS 部署，您无需手动运行 `prisma migrate deploy`。生成的基础设施会在部署期间自动创建应用程序数据库用户并运行迁移。
-:::
+当您部署 AWS 堆栈时，生成的基础设施会自动将生成的迁移应用到已部署的数据库。
+
+### 应用现有迁移
+
+当您拉取其他开发人员创建的迁移文件时，使用 `migrate deploy` 将这些现有迁移应用到本地数据库。
+
+<NxCommands commands={['run <project>:prisma migrate deploy']} />
+
+在此本地开发流程中，`migrate deploy` 将迁移文件应用到本地数据库；它不会将数据库部署到 AWS。
+
+### 运行 Prisma 命令
+
+生成的 `prisma` 目标公开了 Prisma CLI，因此您可以使用它对本地数据库运行 Prisma 支持的任何命令。有关可用命令，请参阅 [Prisma CLI 参考](https://www.prisma.io/docs/orm/reference/prisma-cli-reference)。
+
+<NxCommands commands={['run <project>:prisma <prisma-command>']} />
+
+### Prisma Studio
+
+[Prisma Studio](https://www.prisma.io/studio) 是本地数据库的可视化编辑器。使用它浏览表、检查和编辑记录、过滤数据、跟踪关系，并通过内置 SQL 控制台运行原始 SQL。它对于在开发期间验证迁移和填充测试数据很有用。使用以下命令启动它：
+
+<NxCommands commands={['run <project>:prisma studio']} />
 
 ## 从 tRPC API 连接
 
@@ -174,7 +192,7 @@ export const listUsers = publicProcedure
   });
 ```
 
-`getPrisma()` 返回一个延迟初始化的缓存客户端——在同一 Lambda 执行上下文中的后续调用会重用现有连接池，而不是打开新连接。
+`getPrisma()` 返回一个延迟初始化的缓存客户端。在同一 Lambda 执行上下文中的后续调用会重用现有连接池，而不是打开新连接。
 
 Prisma 客户端公开从您的 `prisma/models/` 架构派生的完全类型化模型，为您提供从数据库一直到 API 响应的端到端类型安全。
 
@@ -232,7 +250,7 @@ export const listUsers = dbProcedure
 
 :::
 
-## 部署到 AWS
+## 部署您的数据库
 
 关系数据库生成器根据您选择的 `iacProvider` 创建 CDK 或 Terraform 基础设施。
 
@@ -286,7 +304,7 @@ module "my_database" {
 </Fragment>
 </Infrastructure>
 
-应用程序用户会自动创建一个随机名称并启用 IAM 认证——`getPrisma()` 已配置为使用短期 RDS 令牌作为此用户进行认证，因此您的应用程序代码永远不会处理数据库密码。
+应用程序用户会自动创建一个随机名称并启用 IAM 认证。`getPrisma()` 已配置为使用短期 RDS 令牌作为此用户进行认证，因此您的应用程序代码永远不会处理数据库密码。
 
 您的 VPC 应包括公共子网、具有出口的私有子网和私有隔离子网。数据库可以在私有隔离子网中运行，而 API Lambda 函数应在具有出口的私有子网中运行，以便它们可以访问 AWS 服务（如 AppConfig）。
 
@@ -484,26 +502,6 @@ module "api" {
 
 有关更多详细信息，请参阅 AWS Lambda [Amazon RDS 连接的 SSL/TLS 要求](https://docs.aws.amazon.com/lambda/latest/dg/services-rds.html#services-rds-tls)和 Amazon RDS Proxy [TLS 文档](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/rds-proxy.howitworks.html#rds-proxy-security.tls)。使用 RDS Proxy 时，您无需在 Lambda 函数中配置 RDS CA 捆绑包。
 
-## 本地开发
-
-### 运行 Prisma 命令
-
-使用 `prisma` 目标对本地数据库运行任何 Prisma CLI 命令。它会在运行前通过 `serve-local` 自动启动数据库，因此无需单独设置本地数据库。
-
-<NxCommands commands={['run <project>:prisma migrate dev']} />
-
-<NxCommands commands={['run <project>:prisma migrate deploy']} />
-
-`prisma` 目标会自动设置 `SERVE_LOCAL=true`，`prisma.config.ts` 使用它从生成时配置的本地凭证构造数据库连接 URL。
-
-### Prisma Studio
-
-[Prisma Studio](https://www.prisma.io/studio) 是本地数据库的可视化编辑器。使用它浏览表、检查和编辑记录、过滤数据、跟踪关系，并通过内置 SQL 控制台运行原始 SQL——对于在开发期间验证迁移和填充测试数据很有用。使用以下命令启动它：
-
-<NxCommands commands={['run <project>:prisma studio']} />
-
-## 自定义数据库架构
-
 生成的基础设施可以自定义以匹配您的工作负载要求。以下示例演示了一些可用的常见自定义选项。
 
 ### 集群实例
@@ -569,6 +567,10 @@ module "my_database" {
 
 固定特定的 Aurora 引擎版本。
 
+默认情况下，生成的本地 Docker 数据库镜像与默认 Aurora 引擎版本匹配。如果您更改 Aurora 引擎版本，建议也使用匹配的本地 Docker 数据库版本以获得最大兼容性。请参阅 AWS 发布说明中的 [Aurora PostgreSQL 版本](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraPostgreSQLReleaseNotes/aurorapostgresql-release-calendar.html)和 [Aurora MySQL 版本](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraMySQLReleaseNotes/AuroraMySQL.Updates.30Updates.html)以确定相应的社区数据库版本。
+
+本地数据库镜像在生成的数据库项目的 `project.json` 中的 `serve-local` 目标中配置。当您更改引擎版本时，请更新传递给 `scripts/docker-start.ts` 的镜像参数。
+
 <OptionFilter when={{ engine: 'PostgreSQL' }}>
 <Infrastructure>
 <Fragment slot="cdk">
@@ -623,19 +625,21 @@ module "my_database" {
 
 ### 删除保护
 
-配置生命周期设置以防止意外删除。
+默认情况下启用删除保护（CDK 中的 `deletionProtection: true`，Terraform 中的 `deletion_protection = true`）以保护 Aurora 集群免遭意外删除。
+
+#### 禁用删除保护
+
+您可以为预期删除数据库的环境禁用删除保护，例如短期开发或预览堆栈。
 
 <Infrastructure>
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
 import { MyDatabase } from ':my-scope/common-constructs';
-import { RemovalPolicy } from 'aws-cdk-lib';
 
 const db = new MyDatabase(this, 'Db', {
   ...
-  deletionProtection: true,
-  removalPolicy: RemovalPolicy.SNAPSHOT,
+  deletionProtection: false,
 });
 ```
 </Fragment>
@@ -645,8 +649,54 @@ const db = new MyDatabase(this, 'Db', {
 module "my_database" {
   source = "../../common/terraform/src/app/dbs/my-database"
   ...
-  deletion_protection = true
-  skip_final_snapshot = false
+  deletion_protection = false
+}
+```
+</Fragment>
+</Infrastructure>
+
+### 移除策略
+
+CDK 构造默认保留 Aurora 集群（`removalPolicy: RemovalPolicy.RETAIN`）。当您希望 CDK 堆栈删除时对集群进行快照或销毁时，请更改此设置。
+
+使用 `RemovalPolicy.DESTROY` 时，还必须禁用删除保护才能删除集群。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RemovalPolicy } from 'aws-cdk-lib';
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', {
+  ...
+  removalPolicy: RemovalPolicy.SNAPSHOT,
+});
+```
+
+对于应随堆栈一起删除数据库的临时环境：
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RemovalPolicy } from 'aws-cdk-lib';
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', {
+  ...
+  deletionProtection: false,
+  removalPolicy: RemovalPolicy.DESTROY,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+Terraform 不使用 CDK 移除策略。默认情况下，模块在删除时创建最终快照（`skip_final_snapshot = false`）。要跳过临时环境的最终快照：
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
+  ...
+  deletion_protection = false
+  skip_final_snapshot = true
 }
 ```
 </Fragment>
