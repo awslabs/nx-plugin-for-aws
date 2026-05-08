@@ -10,6 +10,7 @@ import {
 import { applyGritQL } from '../utils/ast';
 import {
   ComponentMetadata,
+  addDependencyToTargetIfNotPresent,
   readProjectConfigurationUnqualified,
 } from '../utils/nx';
 
@@ -72,14 +73,13 @@ export const addAgentTargetToServeLocal = async (
 
   // Add a dependency on the agent serve-local target (so that the agent's
   // own serve-local dependencies, such as MCP servers, are also started)
-  sourceProject.targets['serve-local'].dependsOn = [
-    ...(sourceProject.targets['serve-local'].dependsOn ?? []),
-    {
-      projects: [targetProject.name],
-      target: agentServeLocalTargetName,
-    },
-    ...(options.additionalDependencyTargets ?? []),
-  ];
+  addDependencyToTargetIfNotPresent(sourceProject, 'serve-local', {
+    projects: [targetProject.name],
+    target: agentServeLocalTargetName,
+  });
+  for (const additional of options.additionalDependencyTargets ?? []) {
+    addDependencyToTargetIfNotPresent(sourceProject, 'serve-local', additional);
+  }
   updateProjectConfiguration(tree, sourceProject.name, sourceProject);
 
   // Add an override to runtime-config for the serve-local target to use the local url

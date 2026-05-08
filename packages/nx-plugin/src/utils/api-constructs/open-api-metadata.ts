@@ -10,6 +10,7 @@ import {
 } from '@nx/devkit';
 import { IacProvider } from '../iac';
 import { updateGitIgnore } from '../git';
+import { addDependencyToTargetIfNotPresent } from '../nx';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
@@ -81,13 +82,7 @@ export const addSharedConstructsOpenApiMetadataGenerateTarget = (
           dependsOn: [specBuildTargetName],
         };
       }
-      if (!config.targets.compile) {
-        config.targets.compile = {};
-      }
-      config.targets.compile.dependsOn = [
-        ...(config.targets.compile.dependsOn ?? []),
-        metadataTargetName,
-      ];
+      addDependencyToTargetIfNotPresent(config, 'compile', metadataTargetName);
       return config;
     },
   );

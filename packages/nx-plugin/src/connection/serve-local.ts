@@ -8,7 +8,10 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { applyGritQL } from '../utils/ast';
-import { readProjectConfigurationUnqualified } from '../utils/nx';
+import {
+  addDependencyToTargetIfNotPresent,
+  readProjectConfigurationUnqualified,
+} from '../utils/nx';
 import { toClassName } from '../utils/names';
 
 export interface ServeLocalOptions {
@@ -47,14 +50,13 @@ export const addTargetToServeLocal = async (
   }
 
   // Add a dependency on the serve-local target
-  sourceProject.targets['serve-local'].dependsOn = [
-    ...(sourceProject.targets['serve-local'].dependsOn ?? []),
-    {
-      projects: [targetProject.name],
-      target: 'serve-local',
-    },
-    ...(options.additionalDependencyTargets ?? []),
-  ];
+  addDependencyToTargetIfNotPresent(sourceProject, 'serve-local', {
+    projects: [targetProject.name],
+    target: 'serve-local',
+  });
+  for (const additional of options.additionalDependencyTargets ?? []) {
+    addDependencyToTargetIfNotPresent(sourceProject, 'serve-local', additional);
+  }
   updateProjectConfiguration(tree, sourceProject.name, sourceProject);
 
   // Add an override to runtime-config.json for the serve-local target to use the local url

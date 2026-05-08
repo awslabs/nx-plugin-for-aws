@@ -2,13 +2,14 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
+import { ProjectConfiguration, Tree } from '@nx/devkit';
 import { createTreeUsingTsSolutionSetup } from './test';
 import { expect, describe, it, beforeEach } from 'vitest';
 import {
-  readProjectConfigurationUnqualified,
   addComponentGeneratorMetadata,
+  addDependencyToTargetIfNotPresent,
   NxGeneratorInfo,
+  readProjectConfigurationUnqualified,
 } from './nx';
 
 describe('readProjectConfigurationUnqualified', () => {
@@ -347,5 +348,105 @@ describe('addComponentGeneratorMetadata', () => {
       path: 'src/test-component',
       name: 'test-component',
     });
+  });
+});
+
+describe('addDependencyToTargetIfNotPresent', () => {
+  const makeProject = (): ProjectConfiguration => ({
+    name: 'test-project',
+    root: 'apps/test-project',
+  });
+
+  it('should create the target if it does not exist', () => {
+    const project = makeProject();
+    addDependencyToTargetIfNotPresent(project, 'build', 'lint');
+    expect(project.targets?.build?.dependsOn).toEqual(['lint']);
+  });
+
+  it('should add a string dependency to an existing target', () => {
+    const project = makeProject();
+    project.targets = { build: { dependsOn: ['compile'] } };
+    addDependencyToTargetIfNotPresent(project, 'build', 'bundle');
+    expect(project.targets.build.dependsOn).toEqual(['compile', 'bundle']);
+  });
+
+  it('should not duplicate a string dependency', () => {
+    const project = makeProject();
+    project.targets = { build: { dependsOn: ['compile', 'bundle'] } };
+    addDependencyToTargetIfNotPresent(project, 'build', 'bundle');
+    expect(project.targets.build.dependsOn).toEqual(['compile', 'bundle']);
+  });
+
+  it('should add an object dependency', () => {
+    const project = makeProject();
+    addDependencyToTargetIfNotPresent(project, 'serve-local', {
+      projects: ['other-project'],
+      target: 'serve-local',
+    });
+    expect(project.targets?.['serve-local']?.dependsOn).toEqual([
+      { projects: ['other-project'], target: 'serve-local' },
+    ]);
+  });
+
+  it('should not duplicate an object dependency with identical projects/target', () => {
+    const project = makeProject();
+    project.targets = {
+      'serve-local': {
+        dependsOn: [{ projects: ['other-project'], target: 'serve-local' }],
+      },
+    };
+    addDependencyToTargetIfNotPresent(project, 'serve-local', {
+      projects: ['other-project'],
+      target: 'serve-local',
+    });
+    expect(project.targets['serve-local'].dependsOn).toEqual([
+      { projects: ['other-project'], target: 'serve-local' },
+    ]);
+  });
+
+  it('should treat string-projects and single-element-array-projects as equivalent', () => {
+    const project = makeProject();
+    project.targets = {
+      'serve-local': {
+        dependsOn: [{ projects: 'other-project', target: 'serve-local' }],
+      },
+    };
+    addDependencyToTargetIfNotPresent(project, 'serve-local', {
+      projects: ['other-project'],
+      target: 'serve-local',
+    });
+    expect(project.targets['serve-local'].dependsOn).toHaveLength(1);
+  });
+
+  it('should consider object dependencies with different targets as distinct', () => {
+    const project = makeProject();
+    project.targets = {
+      'serve-local': {
+        dependsOn: [{ projects: ['api'], target: 'serve-local' }],
+      },
+    };
+    addDependencyToTargetIfNotPresent(project, 'serve-local', {
+      projects: ['api'],
+      target: 'serve-watch',
+    });
+    expect(project.targets['serve-local'].dependsOn).toEqual([
+      { projects: ['api'], target: 'serve-local' },
+      { projects: ['api'], target: 'serve-watch' },
+    ]);
+  });
+
+  it('should be idempotent when called repeatedly with the same inputs', () => {
+    const project = makeProject();
+    for (let i = 0; i < 5; i++) {
+      addDependencyToTargetIfNotPresent(project, 'build', 'compile');
+      addDependencyToTargetIfNotPresent(project, 'build', {
+        projects: ['other'],
+        target: 'build',
+      });
+    }
+    expect(project.targets?.build?.dependsOn).toEqual([
+      'compile',
+      { projects: ['other'], target: 'build' },
+    ]);
   });
 });

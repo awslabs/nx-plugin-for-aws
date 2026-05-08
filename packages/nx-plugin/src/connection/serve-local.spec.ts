@@ -391,6 +391,52 @@ const applyOverrides = (runtimeConfig: IRuntimeConfig) => {
       expect(updatedProject).toBe(originalProject);
     });
 
+    it('should be idempotent when called twice with the same inputs', async () => {
+      tree.write(
+        'apps/frontend/project.json',
+        JSON.stringify({
+          name: 'frontend',
+          root: 'apps/frontend',
+          sourceRoot: 'apps/frontend/src',
+          targets: {
+            'serve-local': {
+              executor: '@nx/webpack:dev-server',
+              options: {},
+            },
+          },
+        }),
+      );
+      tree.write(
+        'apps/backend/project.json',
+        JSON.stringify({
+          name: 'backend',
+          root: 'apps/backend',
+          sourceRoot: 'apps/backend/src',
+          targets: {
+            'serve-local': {
+              executor: '@nx/node:execute',
+              continuous: true,
+              options: {},
+            },
+          },
+        }),
+      );
+
+      await addTargetToServeLocal(tree, 'frontend', 'backend', options);
+      await addTargetToServeLocal(tree, 'frontend', 'backend', options);
+
+      const updatedProject = JSON.parse(
+        tree.read('apps/frontend/project.json', 'utf-8'),
+      );
+
+      expect(updatedProject.targets['serve-local'].dependsOn).toEqual([
+        {
+          projects: ['backend'],
+          target: 'serve-local',
+        },
+      ]);
+    });
+
     it('should handle target project with missing targets object', async () => {
       // Setup source project with serve-local target
       tree.write(
