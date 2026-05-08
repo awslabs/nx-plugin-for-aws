@@ -142,7 +142,7 @@ exports[`ts#rdb generator > should add mysql prisma dependencies when engine is 
 // Local development connection details (used when SERVE_LOCAL=true, see serve-local Nx target)
 export const LOCAL_DB_PORT = 3306;
 export const LOCAL_DB_HOST = 'localhost';
-export const LOCAL_DB_NAME = 'databasename';
+export const LOCAL_DB_NAME = 'database_name';
 export const LOCAL_DB_USER = 'root';
 export const LOCAL_DB_PASSWORD = 'password';
 "
@@ -852,8 +852,13 @@ variable "vpc_id" {
   type        = string
 }
 
-variable "private_subnet_ids" {
-  description = "Private subnet IDs used by the Aurora DB subnet group and RDS Proxy. When these subnets are also used by database Lambda functions, they must have outbound egress to AWS service endpoints."
+variable "subnet_ids" {
+  description = "Subnet IDs for the Aurora DB subnet group and RDS Proxy. These subnets do not need outbound egress — private isolated subnets are fine."
+  type        = list(string)
+}
+
+variable "lambda_subnet_ids" {
+  description = "Subnet IDs for the credential-rotation Lambda. Must have outbound egress to AWS service endpoints (e.g. Secrets Manager) — use private subnets with a NAT gateway."
   type        = list(string)
 }
 
@@ -1070,7 +1075,7 @@ resource "aws_security_group" "database" {
 
 resource "aws_db_subnet_group" "database" {
   name       = "\${var.name}-aurora"
-  subnet_ids = var.private_subnet_ids
+  subnet_ids = var.subnet_ids
 
   tags = merge(var.tags, {
     Name = "\${var.name}-aurora"
@@ -1217,7 +1222,7 @@ resource "aws_cloudformation_stack" "credentials_rotation" {
             RotationType        = var.engine == "aurora-mysql" ? "MySQLSingleUser" : "PostgreSQLSingleUser"
             RotationLambdaName  = "\${var.name}-aurora-credentials-rotation"
             VpcSecurityGroupIds = aws_security_group.rotation[0].id
-            VpcSubnetIds        = join(",", var.private_subnet_ids)
+            VpcSubnetIds        = join(",", var.lambda_subnet_ids)
           }
           RotationRules = {
             AutomaticallyAfterDays = 30
@@ -1299,7 +1304,7 @@ resource "aws_db_proxy" "aurora" {
   default_auth_scheme    = "IAM_AUTH"
   engine_family          = var.engine == "aurora-mysql" ? "MYSQL" : "POSTGRESQL"
   role_arn               = aws_iam_role.proxy[0].arn
-  vpc_subnet_ids         = var.private_subnet_ids
+  vpc_subnet_ids         = var.subnet_ids
   vpc_security_group_ids = [aws_security_group.proxy[0].id]
   require_tls            = true
 
@@ -1585,8 +1590,13 @@ variable "vpc_id" {
   type        = string
 }
 
-variable "private_subnet_ids" {
-  description = "Private subnet IDs used by Aurora, RDS Proxy, and database Lambda functions. These subnets must have outbound egress to AWS service endpoints for the create-db-user and migration Lambdas."
+variable "database_subnet_ids" {
+  description = "Subnet IDs for the Aurora cluster and RDS Proxy. Private isolated subnets are fine — no outbound egress required."
+  type        = list(string)
+}
+
+variable "lambda_subnet_ids" {
+  description = "Subnet IDs for the create-db-user and migration Lambda functions. Must have outbound egress to AWS service endpoints (e.g. Secrets Manager) — use private subnets with a NAT gateway."
   type        = list(string)
 }
 
@@ -1706,10 +1716,11 @@ module "aurora" {
   #checkov:skip=CKV_AWS_139:Deletion protection is enabled but checkov is unable to detect it correctly
   name                                  = "db"
   vpc_id                                = var.vpc_id
-  private_subnet_ids                    = var.private_subnet_ids
+  subnet_ids                            = var.database_subnet_ids
+  lambda_subnet_ids                     = var.lambda_subnet_ids
   engine                                = "aurora-postgresql"
   engine_version                        = var.engine_version
-  database_name                         = "databasename"
+  database_name                         = "database_name"
   admin_user                            = "databaseUser"
   port                                  = var.port
   serverless_min_capacity               = var.serverless_min_capacity
@@ -2063,7 +2074,7 @@ resource "aws_lambda_function" "create_db_user" {
   }
 
   vpc_config {
-    subnet_ids         = var.private_subnet_ids
+    subnet_ids         = var.lambda_subnet_ids
     security_group_ids = [aws_security_group.create_db_user.id]
   }
 
@@ -2135,7 +2146,7 @@ resource "aws_lambda_function" "migration_handler" {
   }
 
   vpc_config {
-    subnet_ids         = var.private_subnet_ids
+    subnet_ids         = var.lambda_subnet_ids
     security_group_ids = [aws_security_group.migration_handler.id]
   }
 
@@ -2295,8 +2306,13 @@ variable "vpc_id" {
   type        = string
 }
 
-variable "private_subnet_ids" {
-  description = "Private subnet IDs used by the Aurora DB subnet group and RDS Proxy. When these subnets are also used by database Lambda functions, they must have outbound egress to AWS service endpoints."
+variable "subnet_ids" {
+  description = "Subnet IDs for the Aurora DB subnet group and RDS Proxy. These subnets do not need outbound egress — private isolated subnets are fine."
+  type        = list(string)
+}
+
+variable "lambda_subnet_ids" {
+  description = "Subnet IDs for the credential-rotation Lambda. Must have outbound egress to AWS service endpoints (e.g. Secrets Manager) — use private subnets with a NAT gateway."
   type        = list(string)
 }
 
@@ -2513,7 +2529,7 @@ resource "aws_security_group" "database" {
 
 resource "aws_db_subnet_group" "database" {
   name       = "\${var.name}-aurora"
-  subnet_ids = var.private_subnet_ids
+  subnet_ids = var.subnet_ids
 
   tags = merge(var.tags, {
     Name = "\${var.name}-aurora"
@@ -2660,7 +2676,7 @@ resource "aws_cloudformation_stack" "credentials_rotation" {
             RotationType        = var.engine == "aurora-mysql" ? "MySQLSingleUser" : "PostgreSQLSingleUser"
             RotationLambdaName  = "\${var.name}-aurora-credentials-rotation"
             VpcSecurityGroupIds = aws_security_group.rotation[0].id
-            VpcSubnetIds        = join(",", var.private_subnet_ids)
+            VpcSubnetIds        = join(",", var.lambda_subnet_ids)
           }
           RotationRules = {
             AutomaticallyAfterDays = 30
@@ -2742,7 +2758,7 @@ resource "aws_db_proxy" "aurora" {
   default_auth_scheme    = "IAM_AUTH"
   engine_family          = var.engine == "aurora-mysql" ? "MYSQL" : "POSTGRESQL"
   role_arn               = aws_iam_role.proxy[0].arn
-  vpc_subnet_ids         = var.private_subnet_ids
+  vpc_subnet_ids         = var.subnet_ids
   vpc_security_group_ids = [aws_security_group.proxy[0].id]
   require_tls            = true
 
@@ -3028,8 +3044,13 @@ variable "vpc_id" {
   type        = string
 }
 
-variable "private_subnet_ids" {
-  description = "Private subnet IDs used by Aurora, RDS Proxy, and database Lambda functions. These subnets must have outbound egress to AWS service endpoints for the create-db-user and migration Lambdas."
+variable "database_subnet_ids" {
+  description = "Subnet IDs for the Aurora cluster and RDS Proxy. Private isolated subnets are fine — no outbound egress required."
+  type        = list(string)
+}
+
+variable "lambda_subnet_ids" {
+  description = "Subnet IDs for the create-db-user and migration Lambda functions. Must have outbound egress to AWS service endpoints (e.g. Secrets Manager) — use private subnets with a NAT gateway."
   type        = list(string)
 }
 
@@ -3149,10 +3170,11 @@ module "aurora" {
   #checkov:skip=CKV_AWS_139:Deletion protection is enabled but checkov is unable to detect it correctly
   name                                  = "db"
   vpc_id                                = var.vpc_id
-  private_subnet_ids                    = var.private_subnet_ids
+  subnet_ids                            = var.database_subnet_ids
+  lambda_subnet_ids                     = var.lambda_subnet_ids
   engine                                = "aurora-mysql"
   engine_version                        = var.engine_version
-  database_name                         = "databasename"
+  database_name                         = "database_name"
   admin_user                            = "databaseUser"
   port                                  = var.port
   serverless_min_capacity               = var.serverless_min_capacity
@@ -3511,7 +3533,7 @@ resource "aws_lambda_function" "create_db_user" {
   }
 
   vpc_config {
-    subnet_ids         = var.private_subnet_ids
+    subnet_ids         = var.lambda_subnet_ids
     security_group_ids = [aws_security_group.create_db_user.id]
   }
 
@@ -3583,7 +3605,7 @@ resource "aws_lambda_function" "migration_handler" {
   }
 
   vpc_config {
-    subnet_ids         = var.private_subnet_ids
+    subnet_ids         = var.lambda_subnet_ids
     security_group_ids = [aws_security_group.migration_handler.id]
   }
 
@@ -3845,7 +3867,7 @@ exports[`ts#rdb generator > should generate the aurora shared construct > packag
 // Local development connection details (used when SERVE_LOCAL=true, see serve-local Nx target)
 export const LOCAL_DB_PORT = 5432;
 export const LOCAL_DB_HOST = 'localhost';
-export const LOCAL_DB_NAME = 'databasename';
+export const LOCAL_DB_NAME = 'database_name';
 export const LOCAL_DB_USER = 'dbadmin';
 export const LOCAL_DB_PASSWORD = 'password';
 "
@@ -3969,7 +3991,7 @@ export const handler = async () => {
     \`postgresql://\${encodeURIComponent(dbUser)}\` +
     \`:\${encodeURIComponent(iamAuthToken)}\` +
     \`@\${hostname}:\${port}/\${database}\` +
-    \`?sslaccept=strict\`;
+    \`?sslaccept=strict\`; // \`sslaccept\` is the correct parameter here for postgresql. The Prisma CLI Rust engine does not use the standard libpq \`sslmode\` option.
 
   await promisify(execFile)('npx', ['prisma', 'migrate', 'deploy'], {
     cwd: __dirname,
@@ -4552,7 +4574,7 @@ export class Db extends AuroraDatabase {
   constructor(scope: Construct, id: string, props: DbProps) {
     super(scope, id, {
       ...props,
-      databaseName: 'databasename',
+      databaseName: 'database_name',
       adminUser: 'databaseUser',
       runtimeConfigKey: DB_PACKAGE_NAME,
       migrationBundleDir: path.join(

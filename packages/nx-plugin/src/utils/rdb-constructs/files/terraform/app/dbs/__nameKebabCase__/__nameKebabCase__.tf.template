@@ -26,8 +26,13 @@ variable "vpc_id" {
   type        = string
 }
 
-variable "private_subnet_ids" {
-  description = "Private subnet IDs used by Aurora, RDS Proxy, and database Lambda functions. These subnets must have outbound egress to AWS service endpoints for the create-db-user and migration Lambdas."
+variable "database_subnet_ids" {
+  description = "Subnet IDs for the Aurora cluster and RDS Proxy. Private isolated subnets are fine — no outbound egress required."
+  type        = list(string)
+}
+
+variable "lambda_subnet_ids" {
+  description = "Subnet IDs for the create-db-user and migration Lambda functions. Must have outbound egress to AWS service endpoints (e.g. Secrets Manager) — use private subnets with a NAT gateway."
   type        = list(string)
 }
 
@@ -147,7 +152,8 @@ module "aurora" {
   #checkov:skip=CKV_AWS_139:Deletion protection is enabled but checkov is unable to detect it correctly
   name                                  = "<%= nameKebabCase %>"
   vpc_id                                = var.vpc_id
-  private_subnet_ids                    = var.private_subnet_ids
+  subnet_ids                            = var.database_subnet_ids
+  lambda_subnet_ids                     = var.lambda_subnet_ids
   engine                                = "<%= engine === 'mysql' ? 'aurora-mysql' : 'aurora-postgresql' %>"
   engine_version                        = var.engine_version
   database_name                         = "<%= databaseName %>"
@@ -530,7 +536,7 @@ resource "aws_lambda_function" "create_db_user" {
   }
 
   vpc_config {
-    subnet_ids         = var.private_subnet_ids
+    subnet_ids         = var.lambda_subnet_ids
     security_group_ids = [aws_security_group.create_db_user.id]
   }
 
@@ -602,7 +608,7 @@ resource "aws_lambda_function" "migration_handler" {
   }
 
   vpc_config {
-    subnet_ids         = var.private_subnet_ids
+    subnet_ids         = var.lambda_subnet_ids
     security_group_ids = [aws_security_group.migration_handler.id]
   }
 

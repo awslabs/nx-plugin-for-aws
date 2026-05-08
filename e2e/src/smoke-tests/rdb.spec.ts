@@ -34,7 +34,7 @@ describe('smoke test - rdb', () => {
         const opts = { cwd: projectRoot, env: { NX_DAEMON: 'false' } };
 
         await runCLI(
-          `generate @aws/nx-plugin:ts#rdb --name=my-db --service=Aurora --engine=${engine} --databaseUser=admin --databaseName=mydb --ormFramework=Prisma --iacProvider=${iacProvider} --no-interactive`,
+          `generate @aws/nx-plugin:ts#rdb --name=${engine}Db --service=Aurora --engine=${engine} --ormFramework=Prisma --iacProvider=${iacProvider} --no-interactive`,
           opts,
         );
 

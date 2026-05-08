@@ -206,6 +206,16 @@ export const runGeneratorMatrix = async (opts: RunCliOpts) => {
     opts,
   );
 
+  // Relational databases (Aurora + Prisma) — PostgreSQL and MySQL, iacProvider inherited.
+  await runCLI(
+    `generate @aws/nx-plugin:ts#rdb --name=postgres-db --service=Aurora --engine=PostgreSQL --ormFramework=Prisma --no-interactive`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:ts#rdb --name=my-sql-db --service=Aurora --engine=MySQL --ormFramework=Prisma --no-interactive`,
+    opts,
+  );
+
   await runCLI(`generate @aws/nx-plugin:license --no-interactive`, opts);
 
   // Nx plugin + a custom generator (pure TS, not tied to IaC provider)

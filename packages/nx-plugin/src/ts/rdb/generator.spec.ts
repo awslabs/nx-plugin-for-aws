@@ -108,7 +108,7 @@ describe('ts#rdb generator', () => {
       executor: 'nx:run-commands',
       options: {
         command:
-          'tsx scripts/docker-start.ts proj-databasename 5432 databasename dbadmin password',
+          'tsx scripts/docker-start.ts proj-database_name 5432 database_name dbadmin password',
         cwd: '{projectRoot}',
       },
       continuous: true,
@@ -119,7 +119,7 @@ describe('ts#rdb generator', () => {
       dependsOn: ['serve-local'],
       options: {
         command:
-          'tsx scripts/wait-for-db.ts 5432 databasename dbadmin password',
+          'tsx scripts/wait-for-db.ts 5432 database_name dbadmin password',
         cwd: '{projectRoot}',
       },
     });
@@ -200,7 +200,7 @@ describe('ts#rdb generator', () => {
       executor: 'nx:run-commands',
       options: {
         command:
-          'tsx scripts/docker-start.ts proj-databasename 3306 databasename password',
+          'tsx scripts/docker-start.ts proj-database_name 3306 database_name password',
         cwd: '{projectRoot}',
       },
       continuous: true,
@@ -210,7 +210,7 @@ describe('ts#rdb generator', () => {
       executor: 'nx:run-commands',
       dependsOn: ['serve-local'],
       options: {
-        command: 'tsx scripts/wait-for-db.ts 3306 databasename root password',
+        command: 'tsx scripts/wait-for-db.ts 3306 database_name root password',
         cwd: '{projectRoot}',
       },
     });

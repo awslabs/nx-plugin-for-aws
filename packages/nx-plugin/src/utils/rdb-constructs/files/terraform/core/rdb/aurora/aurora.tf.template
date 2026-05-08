@@ -38,8 +38,13 @@ variable "vpc_id" {
   type        = string
 }
 
-variable "private_subnet_ids" {
-  description = "Private subnet IDs used by the Aurora DB subnet group and RDS Proxy. When these subnets are also used by database Lambda functions, they must have outbound egress to AWS service endpoints."
+variable "subnet_ids" {
+  description = "Subnet IDs for the Aurora DB subnet group and RDS Proxy. These subnets do not need outbound egress — private isolated subnets are fine."
+  type        = list(string)
+}
+
+variable "lambda_subnet_ids" {
+  description = "Subnet IDs for the credential-rotation Lambda. Must have outbound egress to AWS service endpoints (e.g. Secrets Manager) — use private subnets with a NAT gateway."
   type        = list(string)
 }
 
@@ -256,7 +261,7 @@ resource "aws_security_group" "database" {
 
 resource "aws_db_subnet_group" "database" {
   name       = "${var.name}-aurora"
-  subnet_ids = var.private_subnet_ids
+  subnet_ids = var.subnet_ids
 
   tags = merge(var.tags, {
     Name = "${var.name}-aurora"
@@ -403,7 +408,7 @@ resource "aws_cloudformation_stack" "credentials_rotation" {
             RotationType        = var.engine == "aurora-mysql" ? "MySQLSingleUser" : "PostgreSQLSingleUser"
             RotationLambdaName  = "${var.name}-aurora-credentials-rotation"
             VpcSecurityGroupIds = aws_security_group.rotation[0].id
-            VpcSubnetIds        = join(",", var.private_subnet_ids)
+            VpcSubnetIds        = join(",", var.lambda_subnet_ids)
           }
           RotationRules = {
             AutomaticallyAfterDays = 30
@@ -485,7 +490,7 @@ resource "aws_db_proxy" "aurora" {
   default_auth_scheme    = "IAM_AUTH"
   engine_family          = var.engine == "aurora-mysql" ? "MYSQL" : "POSTGRESQL"
   role_arn               = aws_iam_role.proxy[0].arn
-  vpc_subnet_ids         = var.private_subnet_ids
+  vpc_subnet_ids         = var.subnet_ids
   vpc_security_group_ids = [aws_security_group.proxy[0].id]
   require_tls            = true
 

@@ -23,7 +23,7 @@ import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { formatFilesInSubtree } from '../../utils/format';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import { addRdbInfra } from '../../utils/rdb-constructs/rdb-constructs';
-import { toClassName, kebabCase } from '../../utils/names';
+import { toClassName, kebabCase, snakeCase } from '../../utils/names';
 import { FsCommands } from '../../utils/fs';
 import { getRelativePathToRootByDirectory } from '../../utils/paths';
 import tsProjectGenerator, { getTsLibDetails } from '../lib/generator';
@@ -45,7 +45,7 @@ export const tsRdbGenerator = async (
   const nameKebabCase = kebabCase(options.name);
   const nameClassName = toClassName(options.name);
   const databaseUser = options.databaseUser ?? 'dbadmin';
-  const databaseName = (options.databaseName ?? nameKebabCase).toLowerCase();
+  const databaseName = snakeCase(options.databaseName ?? options.name);
   const iacProvider = await resolveIacProvider(tree, options.iacProvider);
   const { fullyQualifiedName, dir } = getTsLibDetails(tree, {
     name: options.name,
