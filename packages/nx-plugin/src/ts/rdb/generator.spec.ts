@@ -1,0 +1,288 @@
+/**
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+import { Tree } from '@nx/devkit';
+import { tsRdbGenerator, TS_RDB_GENERATOR_INFO } from './generator';
+import {
+  createTreeUsingTsSolutionSetup,
+  snapshotTreeDir,
+} from '../../utils/test';
+import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import { readProjectConfigurationUnqualified } from '../../utils/nx';
+import { expectHasMetricTags } from '../../utils/metrics.spec';
+
+describe('ts#rdb generator', () => {
+  let tree: Tree;
+  beforeEach(() => {
+    tree = createTreeUsingTsSolutionSetup();
+  });
+
+  const defaultOptions = {
+    name: 'db',
+    directory: 'packages',
+    service: 'Aurora' as const,
+    engine: 'PostgreSQL' as const,
+    databaseUser: 'databaseUser',
+    databaseName: 'databaseName',
+    ormFramework: 'Prisma' as const,
+    iacProvider: 'CDK' as const,
+  };
+
+  it('should generate the aurora shared construct', async () => {
+    await tsRdbGenerator(tree, defaultOptions);
+    const packageJson = JSON.parse(tree.read('package.json', 'utf-8') ?? '{}');
+    const projectConfig = readProjectConfigurationUnqualified(tree, '@proj/db');
+    expect(
+      tree.read('packages/common/constructs/src/core/rdb/aurora.ts', 'utf-8'),
+    ).toMatchSnapshot();
+    expect(
+      tree.read('packages/common/constructs/src/app/dbs/db.ts', 'utf-8'),
+    ).toMatchSnapshot();
+    snapshotTreeDir(tree, 'packages/db/src');
+    snapshotTreeDir(tree, 'packages/db/prisma');
+    expect(
+      tree.read('packages/db/prisma.config.ts', 'utf-8'),
+    ).toMatchSnapshot();
+    expect(tree.read('packages/db/Dockerfile', 'utf-8')).toMatchSnapshot();
+    expect(
+      tree.read('packages/db/rolldown.config.ts', 'utf-8'),
+    ).toMatchSnapshot();
+    expect(tree.read('packages/db/.gitignore', 'utf-8')).toContain(
+      'generated/prisma',
+    );
+    expect(
+      JSON.parse(tree.read('packages/db/tsconfig.lib.json', 'utf-8') ?? '{}')
+        .include,
+    ).toEqual(['src/**/*.ts', 'generated/prisma/**/*.ts']);
+    expect(tree.read('packages/db/eslint.config.mjs', 'utf-8')).toContain(
+      "'**/generated/**'",
+    );
+    expect(tree.read('packages/db/eslint.config.mjs', 'utf-8')).toContain(
+      "'**/out-tsc'",
+    );
+    expect(
+      tree.read('packages/common/constructs/src/core/index.ts', 'utf-8'),
+    ).toMatchSnapshot();
+    expect(
+      tree.read('packages/common/constructs/src/app/index.ts', 'utf-8'),
+    ).toMatchSnapshot();
+    expect(
+      tree.read('packages/common/constructs/src/app/dbs/index.ts', 'utf-8'),
+    ).toMatchSnapshot();
+    expect(projectConfig.targets.bundle).toEqual({
+      cache: true,
+      outputs: ['{workspaceRoot}/dist/{projectRoot}/bundle'],
+      executor: 'nx:run-commands',
+      options: {
+        commands: [
+          'rimraf ../../dist/{projectRoot}/bundle/migration',
+          'make-dir ../../dist/{projectRoot}/bundle/migration',
+          'ncp prisma ../../dist/{projectRoot}/bundle/migration/prisma',
+          'ncp prisma.config.ts ../../dist/{projectRoot}/bundle/migration/prisma.config.ts',
+          'ncp Dockerfile ../../dist/{projectRoot}/bundle/migration/Dockerfile',
+          'rolldown -c rolldown.config.ts',
+        ],
+        cwd: '{projectRoot}',
+        parallel: false,
+      },
+      dependsOn: ['compile'],
+    });
+    expect(projectConfig.targets.generate).toEqual({
+      executor: 'nx:run-commands',
+      outputs: ['{projectRoot}/generated/prisma'],
+      options: {
+        command: 'prisma generate',
+        cwd: '{projectRoot}',
+      },
+    });
+    snapshotTreeDir(tree, 'packages/db/scripts');
+    expect(projectConfig.targets['docker-pull']).toEqual({
+      executor: 'nx:run-commands',
+      options: {
+        command:
+          'tsx scripts/docker-pull.ts public.ecr.aws/docker/library/postgres:17.7',
+        cwd: '{projectRoot}',
+      },
+    });
+    expect(projectConfig.targets['serve-local']).toEqual({
+      executor: 'nx:run-commands',
+      options: {
+        command:
+          'tsx scripts/docker-start.ts proj-database_name public.ecr.aws/docker/library/postgres:17.7 5432 database_name dbadmin password',
+        cwd: '{projectRoot}',
+      },
+      continuous: true,
+      dependsOn: ['docker-pull'],
+    });
+    expect(projectConfig.targets['wait-for-db']).toEqual({
+      executor: 'nx:run-commands',
+      dependsOn: ['serve-local'],
+      options: {
+        command:
+          'tsx scripts/wait-for-db.ts 5432 database_name dbadmin password',
+        cwd: '{projectRoot}',
+      },
+    });
+    expect(projectConfig.targets.prisma).toEqual({
+      executor: 'nx:run-commands',
+      dependsOn: ['serve-local', 'wait-for-db'],
+      options: {
+        cwd: '{projectRoot}',
+        command: 'prisma',
+        env: {
+          SERVE_LOCAL: 'true',
+        },
+      },
+    });
+    expect(projectConfig.targets.build.dependsOn).toContain('bundle');
+    expect(projectConfig.targets.compile.dependsOn).toContain('generate');
+    const sharedConstructsConfig = JSON.parse(
+      tree.read('packages/common/constructs/project.json', 'utf-8') ?? '{}',
+    );
+    expect(sharedConstructsConfig.targets.build.dependsOn).toContain(
+      '@proj/db:build',
+    );
+    expect(
+      packageJson.dependencies['@aws-lambda-powertools/parameters'],
+    ).toBeDefined();
+    expect(
+      packageJson.dependencies['@aws-sdk/client-appconfigdata'],
+    ).toBeDefined();
+    expect(
+      packageJson.dependencies['@aws-sdk/client-secrets-manager'],
+    ).toBeDefined();
+    expect(packageJson.dependencies['@aws-sdk/rds-signer']).toBeDefined();
+    expect(packageJson.dependencies['@prisma/adapter-pg']).toBeDefined();
+    expect(packageJson.dependencies['@prisma/client']).toBeDefined();
+    expect(packageJson.dependencies.pg).toBeDefined();
+    expect(packageJson.dependencies.mariadb).toBeUndefined();
+    expect(packageJson.dependencies['@prisma/adapter-mariadb']).toBeUndefined();
+    expect(packageJson.devDependencies['tsx']).toBeDefined();
+    expect(packageJson.devDependencies['dockerode']).toBeDefined();
+    expect(packageJson.devDependencies['@types/dockerode']).toBeDefined();
+    expect(packageJson.devDependencies['@types/aws-lambda']).toBeDefined();
+    expect(packageJson.devDependencies['@types/pg']).toBeDefined();
+    expect(packageJson.devDependencies.prisma).toBeDefined();
+    expect(packageJson.devDependencies.ncp).toBeDefined();
+    expect(packageJson.devDependencies.rimraf).toBeDefined();
+    expect(packageJson.devDependencies['make-dir-cli']).toBeDefined();
+  });
+
+  it('should add mysql prisma dependencies when engine is MySQL', async () => {
+    await tsRdbGenerator(tree, {
+      ...defaultOptions,
+      engine: 'MySQL',
+    });
+    const packageJson = JSON.parse(tree.read('package.json', 'utf-8') ?? '{}');
+
+    expect(
+      tree.read('packages/common/constructs/src/core/rdb/aurora.ts', 'utf-8'),
+    ).toMatchSnapshot();
+    snapshotTreeDir(tree, 'packages/db/src');
+    snapshotTreeDir(tree, 'packages/db/prisma');
+    expect(
+      tree.read('packages/db/prisma.config.ts', 'utf-8'),
+    ).toMatchSnapshot();
+
+    const mysqlProjectConfig = readProjectConfigurationUnqualified(
+      tree,
+      '@proj/db',
+    );
+    snapshotTreeDir(tree, 'packages/db/scripts');
+    expect(mysqlProjectConfig.targets['docker-pull']).toEqual({
+      executor: 'nx:run-commands',
+      options: {
+        command:
+          'tsx scripts/docker-pull.ts public.ecr.aws/docker/library/mysql:8.0.44',
+        cwd: '{projectRoot}',
+      },
+    });
+    expect(mysqlProjectConfig.targets['serve-local']).toEqual({
+      executor: 'nx:run-commands',
+      options: {
+        command:
+          'tsx scripts/docker-start.ts proj-database_name public.ecr.aws/docker/library/mysql:8.0.44 3306 database_name password',
+        cwd: '{projectRoot}',
+      },
+      continuous: true,
+      dependsOn: ['docker-pull'],
+    });
+    expect(mysqlProjectConfig.targets['wait-for-db']).toEqual({
+      executor: 'nx:run-commands',
+      dependsOn: ['serve-local'],
+      options: {
+        command: 'tsx scripts/wait-for-db.ts 3306 database_name root password',
+        cwd: '{projectRoot}',
+      },
+    });
+    expect(packageJson.dependencies['@prisma/adapter-mariadb']).toBeDefined();
+    expect(packageJson.dependencies.mariadb).toBeDefined();
+    expect(packageJson.dependencies['@prisma/adapter-pg']).toBeUndefined();
+    expect(packageJson.dependencies.pg).toBeUndefined();
+    expect(packageJson.devDependencies['@types/pg']).toBeUndefined();
+  });
+
+  it('should generate terraform modules when iacProvider is Terraform', async () => {
+    await tsRdbGenerator(tree, {
+      ...defaultOptions,
+      iacProvider: 'Terraform',
+    });
+    expect(
+      tree.read(
+        'packages/common/terraform/src/core/rdb/aurora/aurora.tf',
+        'utf-8',
+      ),
+    ).toMatchSnapshot();
+    expect(
+      tree.read('packages/common/terraform/src/app/dbs/db/db.tf', 'utf-8'),
+    ).toMatchSnapshot();
+    const sharedTerraformConfig = JSON.parse(
+      tree.read('packages/common/terraform/project.json', 'utf-8') ?? '{}',
+    );
+    expect(sharedTerraformConfig.targets.build.dependsOn).toContain(
+      '@proj/db:build',
+    );
+  });
+
+  it('should keep an existing aurora shared construct', async () => {
+    await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
+    tree.write(
+      'packages/common/constructs/src/core/rdb/aurora.ts',
+      '// preserve custom aurora construct',
+    );
+
+    await tsRdbGenerator(tree, defaultOptions);
+
+    expect(
+      tree
+        .read('packages/common/constructs/src/core/rdb/aurora.ts', 'utf-8')
+        ?.trim(),
+    ).toBe('// preserve custom aurora construct');
+  });
+
+  it('should add generator metric to app.ts', async () => {
+    await sharedConstructsGenerator(tree, { iacProvider: 'CDK' });
+
+    await tsRdbGenerator(tree, defaultOptions);
+
+    expectHasMetricTags(tree, TS_RDB_GENERATOR_INFO.metric);
+  });
+
+  it('should generate terraform modules with MySQL engine', async () => {
+    await tsRdbGenerator(tree, {
+      ...defaultOptions,
+      iacProvider: 'Terraform',
+      engine: 'MySQL',
+    });
+    expect(
+      tree.read(
+        'packages/common/terraform/src/core/rdb/aurora/aurora.tf',
+        'utf-8',
+      ),
+    ).toMatchSnapshot();
+    expect(
+      tree.read('packages/common/terraform/src/app/dbs/db/db.tf', 'utf-8'),
+    ).toMatchSnapshot();
+  });
+});

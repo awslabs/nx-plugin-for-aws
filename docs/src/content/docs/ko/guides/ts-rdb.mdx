@@ -1,0 +1,802 @@
+---
+title: 관계형 데이터베이스
+description: 관계형 데이터베이스 프로젝트 생성
+generator: ts#rdb
+---
+
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import NxCommands from '@components/nx-commands.astro';
+import PackageManagerExecCommand from '@components/package-manager-exec-command.astro';
+import Snippet from '@components/snippet.astro';
+import OptionFilter from '@components/option-filter.astro';
+
+이 생성기는 [Amazon Aurora](https://aws.amazon.com/rds/aurora/) (PostgreSQL 또는 MySQL)와 [Prisma ORM](https://www.prisma.io/docs/orm)을 기반으로 하는 새로운 관계형 데이터베이스 프로젝트를 생성합니다. AWS CDK 또는 Terraform을 사용하여 데이터베이스를 프로비저닝하고 관리하는 데 필요한 애플리케이션 코드와 인프라를 생성하며, 선언적 스키마 정의, 자동 마이그레이션 배포 및 타입 안전 ORM 클라이언트를 제공합니다.
+
+## 사용법
+
+### 관계형 데이터베이스 생성
+
+새로운 관계형 데이터베이스 프로젝트는 두 가지 방법으로 생성할 수 있습니다:
+
+<RunGenerator generator="ts#rdb" />
+
+### 옵션
+
+<GeneratorParameters generator="ts#rdb" />
+
+## 생성기 출력
+
+생성기는 `<directory>/<name>` 디렉토리에 다음과 같은 프로젝트 구조를 생성합니다:
+
+<FileTree>
+  - prisma
+    - models
+      - example.prisma 예제 모델 정의
+    - schema.prisma 메인 Prisma 스키마 (모델 참조)
+  - scripts
+    - docker-pull.ts 로컬 개발을 위한 데이터베이스 Docker 이미지 가져오기
+    - docker-start.ts 로컬 데이터베이스 컨테이너 시작
+    - wait-for-db.ts 로컬 데이터베이스가 준비될 때까지 대기
+  - src
+    - index.ts 프로젝트 진입점
+    - constants.ts 로컬 개발 연결 세부 정보 및 런타임 구성 키
+    - prisma.ts Prisma 런타임 클라이언트 래퍼
+    - utils.ts 런타임 구성 및 시크릿 헬퍼
+    - create-db-user-handler.ts 배포 중 애플리케이션 데이터베이스 사용자를 생성하는 데 사용되는 Lambda 핸들러
+    - migration-handler.ts 배포 중 데이터베이스 마이그레이션을 실행하는 데 사용되는 Lambda 핸들러
+  - .gitignore 생성된 Prisma 클라이언트 출력을 포함한 Git 무시 항목
+  - Dockerfile 마이그레이션 핸들러를 위한 컨테이너 이미지 정의
+  - project.json 프로젝트 구성 및 빌드 타겟
+  - prisma.config.ts Prisma CLI 구성
+</FileTree>
+
+### 인프라
+
+<Snippet name="shared-constructs" />
+
+<Infrastructure>
+  <Fragment slot="cdk">
+    <FileTree>
+      - packages/common/constructs/src
+        - app
+          - dbs
+            - \<name>.ts 데이터베이스에 특정한 인프라
+        - core
+          - rdb
+            - aurora.ts 범용 Aurora 데이터베이스 구성 요소
+    </FileTree>
+  </Fragment>
+  <Fragment slot="terraform">
+    <FileTree>
+      - packages/common/terraform/src
+        - app
+          - dbs
+            - \<name>
+              - \<name>.tf 데이터베이스에 특정한 모듈
+        - core
+          - rdb
+            - aurora
+              - aurora.tf 범용 Aurora 모듈
+    </FileTree>
+  </Fragment>
+</Infrastructure>
+
+## 로컬 개발
+
+### 데이터 모델링
+
+생성된 프로젝트는 [Prisma ORM](https://www.prisma.io/docs/orm)을 사용하여 데이터베이스 스키마를 정의하고 타입 안전 클라이언트를 생성합니다. 워크플로는 모델 우선입니다: 데이터베이스 프로젝트의 `prisma/models/` 디렉토리 아래에 Prisma 모델 파일을 추가하거나 업데이트한 다음, 해당 모델 변경 사항으로부터 마이그레이션을 생성합니다.
+
+예제 `User` 모델:
+
+```ts title="packages/postgres/prisma/models/user.prisma"
+model User {
+  id          Int      @id @default(autoincrement()) 
+  firstName   String
+  lastName    String
+}
+```
+
+자세한 내용은 공식 [Prisma data modelling guide](https://www.prisma.io/docs/orm/core-concepts/data-modeling#data-modeling-with-prisma-orm)를 참조하세요.
+
+### 데이터베이스 클라이언트 생성
+
+생성기는 프로젝트를 빌드할 때마다 타입 안전 TypeScript Prisma 클라이언트를 생성하도록 `generate` 타겟을 자동으로 구성합니다. 클라이언트는 `generated/prisma`에 작성됩니다(`.gitignore`에 추가됨).
+
+언제든지 수동으로 클라이언트를 생성할 수도 있습니다:
+
+<NxCommands commands={['generate <your-db-project-name>']} />
+
+워크스페이스 루트에서 Prisma CLI 명령을 실행하려면 `prisma` 타겟을 사용하세요:
+
+<NxCommands commands={['run <project>:prisma generate']} />
+
+`src/prisma.ts`의 런타임 래퍼는 다음을 내보냅니다:
+
+- `DB_PACKAGE_NAME` - AWS AppConfig의 `database` 런타임 구성 네임스페이스에서 사용되는 키
+- `getPrisma()` - AWS AppConfig에서 데이터베이스 연결 설정을 로드하고 IAM 인증을 사용하여 Prisma 클라이언트를 생성합니다
+
+클라이언트는 자동으로:
+- `RUNTIME_CONFIG_APP_ID` 환경 변수를 사용하여 AWS AppConfig에서 데이터베이스 구성을 검색합니다
+- IAM 인증을 위해 AWS RDS Signer를 통해 임시 인증 토큰을 생성합니다
+- 인증서 검증과 함께 SSL/TLS 연결을 관리합니다
+- 영구 데이터베이스 연결 풀을 통해 연결 풀링을 처리합니다
+
+### 마이그레이션 생성
+
+`prisma/models/` 아래에 모델을 추가하거나 업데이트한 후, `migrate dev`를 사용하여 마이그레이션 파일을 생성하고 동시에 로컬 데이터베이스에 적용합니다.
+
+생성된 `prisma` 타겟은 실행 전에 Docker를 통해 로컬 데이터베이스를 자동으로 시작합니다:
+
+<NxCommands commands={['run <project>:prisma migrate dev']} />
+
+로컬 데이터베이스에 적용하지 않고 마이그레이션 파일만 생성하려면 `--create-only`를 추가하세요:
+
+<NxCommands commands={['run <project>:prisma migrate dev --create-only']} />
+
+스키마가 변경될 때마다 `prisma/migrations`에 새 마이그레이션 폴더가 생성됩니다:
+
+<FileTree>
+  - prisma
+    - migrations
+      - 20260405013911_initial_migrations
+        - migration.sql
+      - migration_lock.toml
+    - schema.prisma
+</FileTree>
+
+AWS 스택을 배포하면 생성된 인프라가 자동으로 생성된 마이그레이션을 배포된 데이터베이스에 적용합니다.
+
+### 기존 마이그레이션 적용
+
+다른 개발자가 생성한 마이그레이션 파일을 가져온 경우, `migrate deploy`를 사용하여 해당 기존 마이그레이션을 로컬 데이터베이스에 적용합니다.
+
+<NxCommands commands={['run <project>:prisma migrate deploy']} />
+
+이 로컬 개발 플로우에서 `migrate deploy`는 마이그레이션 파일을 로컬 데이터베이스에 적용합니다. AWS에 데이터베이스를 배포하는 것이 아닙니다.
+
+### Prisma 명령 실행
+
+생성된 `prisma` 타겟은 Prisma CLI를 노출하므로 로컬 데이터베이스에 대해 Prisma가 지원하는 모든 명령을 실행할 수 있습니다. 사용 가능한 명령은 [Prisma CLI reference](https://www.prisma.io/docs/orm/reference/prisma-cli-reference)를 참조하세요.
+
+<NxCommands commands={['run <project>:prisma <prisma-command>']} />
+
+### Prisma Studio
+
+[Prisma Studio](https://www.prisma.io/studio)는 로컬 데이터베이스를 위한 시각적 편집기입니다. 테이블 탐색, 레코드 검사 및 편집, 데이터 필터링, 관계 추적, 내장 SQL 콘솔을 통한 원시 SQL 실행에 사용할 수 있습니다. 개발 중 마이그레이션 확인 및 테스트 데이터 시딩에 유용합니다. 다음과 같이 실행합니다:
+
+<NxCommands commands={['run <project>:prisma studio']} />
+
+## tRPC API에서 연결
+
+이 섹션에서는 tRPC API에서 데이터베이스에 연결하는 방법을 설명하지만, 다른 TypeScript 프로젝트에서 사용하기 위한 참조 자료로도 활용할 수 있습니다.
+
+### 핸들러에서 Prisma 클라이언트 사용
+
+데이터베이스 패키지에서 `getPrisma`를 가져와서 핸들러 내에서 호출하여 타입 안전 Prisma 클라이언트를 가져옵니다:
+
+```ts title="packages/api/src/procedures/list-users.ts" {8}
+import { getPrisma } from ':my-scope/db';
+import { publicProcedure } from '../init.js';
+import { ListUsersOutputSchema } from '../schema/index.js';
+
+export const listUsers = publicProcedure
+  .output(ListUsersOutputSchema)
+  .query(async () => {
+    const prisma = await getPrisma();
+    return prisma.user.findMany({ orderBy: { id: 'asc' } });
+  });
+```
+
+`getPrisma()`는 지연 초기화되고 캐시된 클라이언트를 반환합니다. 동일한 Lambda 실행 컨텍스트 내에서 후속 호출은 새 연결을 여는 대신 기존 연결 풀을 재사용합니다.
+
+Prisma 클라이언트는 `prisma/models/` 스키마에서 파생된 완전히 타입이 지정된 모델을 노출하여 데이터베이스에서 API 응답까지 엔드투엔드 타입 안전성을 제공합니다.
+
+### 미들웨어를 통해 Prisma 클라이언트 주입
+
+모든 프로시저에서 `getPrisma()`를 호출하는 대신, 미들웨어에서 한 번 해결하고 tRPC 컨텍스트에 연결하여 모든 다운스트림 프로시저가 직접 액세스할 수 있도록 할 수도 있습니다.
+
+먼저, 생성된 미들웨어와 동일한 패턴을 따라 `src/middleware/db.ts`에서 플러그인을 정의합니다:
+
+```ts title="packages/api/src/middleware/db.ts"
+import { getPrisma } from ':my-scope/db';
+import { initTRPC } from '@trpc/server';
+
+export interface IDbContext {
+  db: Awaited<ReturnType<typeof getPrisma>>;
+}
+
+export const createDbPlugin = () => {
+  const t = initTRPC.context<IDbContext>().create();
+  return t.procedure.use(async (opts) => {
+    const db = await getPrisma();
+    return opts.next({
+      ctx: {
+        ...opts.ctx,
+        db,
+      },
+    });
+  });
+};
+```
+
+그런 다음 tRPC 초기화에서 기본 프로시저에 연결합니다:
+
+```ts title="packages/api/src/init.ts"
+import { createDbPlugin } from './middleware/db.js';
+
+export const dbProcedure = publicProcedure.concat(createDbPlugin());
+```
+
+`dbProcedure`를 기반으로 구축된 프로시저는 `getPrisma()`를 가져오거나 호출할 필요 없이 컨텍스트를 통해 `db`를 받습니다:
+
+```ts title="packages/api/src/procedures/list-users.ts"
+import { dbProcedure } from '../init.js';
+import { ListUsersOutputSchema } from '../schema/index.js';
+
+export const listUsers = dbProcedure
+  .output(ListUsersOutputSchema)
+  .query(async ({ ctx: { db } }) => {
+    return db.user.findMany({ orderBy: { id: 'asc' } });
+  });
+```
+
+:::note
+미들웨어 패턴에 대한 자세한 내용은 <Link path="/guides/trpc">`ts#trpc-api` 생성기 가이드</Link>를 참조하세요.
+
+:::
+
+## 데이터베이스 배포
+
+관계형 데이터베이스 생성기는 선택한 `iacProvider`에 따라 CDK 또는 Terraform 인프라를 생성합니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+CDK 구성 요소는 `common/constructs`에 생성됩니다. 사용 예시:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+    ...
+    const db = new MyDatabase(this, 'Db', {
+      vpc,
+      vpcSubnets: {
+        subnetType: SubnetType.PRIVATE_ISOLATED,
+      }
+    });
+  }
+}
+```
+
+이것은 RDS Proxy, 관리자 자격 증명, 애플리케이션 데이터베이스 사용자, 런타임 구성 등록 및 마이그레이션 핸들러와 함께 Aurora 클러스터를 프로비저닝합니다.
+
+생성된 인프라는 두 개의 데이터베이스 사용자를 생성합니다:
+- **관리자 사용자** - 클러스터 프로비저닝 중에 생성되며 자격 증명은 AWS Secrets Manager에 저장됩니다
+- **애플리케이션 사용자** - Lambda 사용자 지정 리소스를 통해 생성되며 IAM 인증이 활성화되고 애플리케이션 데이터베이스에 대한 전체 권한이 있습니다
+</Fragment>
+<Fragment slot="terraform">
+Terraform 모듈은 `common/terraform`에 생성됩니다. 사용 예시:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
+
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
+
+  tags = local.common_tags
+}
+```
+
+이것은 RDS Proxy, 관리자 자격 증명, create-db-user Lambda, 런타임 구성 등록, 마이그레이션 Lambda 및 컨테이너 레지스트리 리소스와 함께 Aurora 클러스터를 프로비저닝합니다.
+
+생성된 인프라는 두 개의 데이터베이스 사용자를 생성합니다:
+- **관리자 사용자** - 클러스터 프로비저닝 중에 생성되며 자격 증명은 AWS Secrets Manager에 저장됩니다
+- **애플리케이션 사용자** - Lambda 함수를 통해 생성되며 IAM 인증이 활성화되고 애플리케이션 데이터베이스에 대한 전체 권한이 있습니다
+</Fragment>
+</Infrastructure>
+
+애플리케이션 사용자는 무작위 이름과 IAM 인증으로 자동 생성됩니다. `getPrisma()`는 이미 단기 RDS 토큰을 사용하여 이 사용자로 인증하도록 구성되어 있으므로 애플리케이션 코드는 데이터베이스 비밀번호를 처리하지 않습니다.
+
+VPC에는 퍼블릭 서브넷, 이그레스가 있는 프라이빗 서브넷, 프라이빗 격리 서브넷이 포함되어야 합니다. 데이터베이스는 프라이빗 격리 서브넷에서 실행할 수 있으며, API Lambda 함수는 AppConfig와 같은 AWS 서비스에 도달할 수 있도록 이그레스가 있는 프라이빗 서브넷에서 실행해야 합니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const vpc = new Vpc(this, 'Vpc', {
+  subnetConfiguration: [
+    {
+      name: 'public',
+      subnetType: SubnetType.PUBLIC,
+    },
+    {
+      name: 'private_with_egress',
+      subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+    },
+    {
+      name: 'private_isolated',
+      subnetType: SubnetType.PRIVATE_ISOLATED,
+    },
+  ],
+});
+```
+
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "vpc" {
+  source  = "terraform-aws-modules/vpc/aws"
+  version = "~> 6.0"
+
+  name = "app"
+  ...
+  public_subnet_names  = ["public"]
+  private_subnet_names = ["private_with_egress"]
+  intra_subnet_names   = ["private_isolated"]
+
+  enable_nat_gateway = true
+  single_nat_gateway = true
+}
+```
+
+</Fragment>
+</Infrastructure>
+
+### API를 데이터베이스에 연결
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+애플리케이션 스택에서 API를 데이터베이스와 동일한 VPC에 배포한 다음 `allowDefaultPortFrom` 및 `grantConnect`를 호출하여 네트워크 경로를 열고 각 Lambda 핸들러에 IAM `rds-db:connect` 권한을 부여합니다:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+
+const api = new Api(this, 'Api', {
+  integrations: Api.defaultIntegrations(this)
+    .withDefaultOptions({
+      vpc,
+      vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+    })
+    .build(),
+});
+
+Object.entries(api.integrations).forEach(([operation, integration]) => {
+  db.allowDefaultPortFrom(integration.handler, `Allow ${operation} to connect to the database`);
+  db.grantConnect(integration.handler);
+});
+```
+
+API Lambda 함수를 **이그레스가 있는 프라이빗 서브넷**(권장) 또는 퍼블릭 서브넷에 배포하되, 프라이빗 격리 서브넷에는 배포하지 마세요. 런타임에 `getPrisma()`는 AWS AppConfig에서 데이터베이스 연결 세부 정보를 검색하는데, 이는 퍼블릭 AWS 서비스 엔드포인트입니다. 프라이빗 격리 서브넷의 Lambda 함수는 아웃바운드 인터넷 액세스가 없어 AppConfig에 도달할 수 없습니다. 이그레스가 있는 프라이빗 서브넷은 퍼블릭 서브넷에 있는 NAT Gateway를 통해 아웃바운드 트래픽을 라우팅합니다.
+</Fragment>
+<Fragment slot="terraform">
+
+데이터베이스 모듈 출력을 컴퓨팅 모듈에 전달하여 데이터베이스에 도달하고 런타임 구성을 읽을 수 있도록 합니다:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source             = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id             = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
+}
+
+module "api" {
+  source             = "..."
+  vpc_id             = module.vpc.vpc_id
+  private_subnet_ids = module.vpc.private_subnet_ids
+
+  # API가 AppConfig에서 런타임 구성을 읽을 수 있도록 허용
+  appconfig_application_id = module.my_database.appconfig_application_id
+
+  # 애플리케이션 데이터베이스 사용자에 대한 rds-db:connect 권한 부여
+  database_cluster_resource_id = module.my_database.cluster_resource_id
+  database_runtime_user        = module.my_database.database_runtime_user
+
+  # 데이터베이스 포트에 대한 네트워크 액세스 허용
+  database_security_group_id = module.my_database.security_group_id
+  database_port              = module.my_database.cluster_port
+
+  environment_variables = {
+    RUNTIME_CONFIG_APP_ID = module.my_database.appconfig_application_id
+  }
+}
+```
+
+API Lambda 함수를 **이그레스가 있는 프라이빗 서브넷**(권장) 또는 퍼블릭 서브넷에 배포하되, 프라이빗 격리 서브넷에는 배포하지 마세요. 런타임에 `getPrisma()`는 AWS AppConfig에서 데이터베이스 연결 세부 정보를 검색하는데, 이는 퍼블릭 AWS 서비스 엔드포인트입니다. 프라이빗 격리 서브넷의 Lambda 함수는 아웃바운드 인터넷 액세스가 없어 AppConfig에 도달할 수 없습니다. 이그레스가 있는 프라이빗 서브넷은 퍼블릭 서브넷이 필요한 NAT Gateway를 통해 아웃바운드 트래픽을 라우팅합니다.
+
+API Lambda 역할이 `arn:aws:rds-db:<region>:<account>:dbuser:<cluster_resource_id>/<database_runtime_user>`에 대한 `rds-db:connect` 권한과 AppConfig 읽기 권한을 가지고 있는지, API의 보안 그룹이 데이터베이스 포트에서 데이터베이스 보안 그룹에 도달할 수 있는지, Lambda 환경에 `RUNTIME_CONFIG_APP_ID`가 포함되어 있는지 확인하세요.
+</Fragment>
+</Infrastructure>
+
+:::note
+이 예제는 API의 모든 핸들러에 액세스 권한을 부여하지만, 일부 핸들러만 액세스가 필요한 경우 개별적으로 구성하는 것이 좋습니다.
+:::
+
+### RDS Proxy 구성
+
+생성된 인프라에는 기본적으로 RDS Proxy가 포함되어 있으며, 이는 애플리케이션과 Aurora 클러스터 사이에 위치합니다. RDS Proxy는 여러 이점을 제공합니다:
+
+- **연결 풀링** - 애플리케이션 인스턴스 간에 공유할 수 있는 데이터베이스 연결 풀을 유지하여 새 연결 설정의 오버헤드를 줄입니다
+- **연결 복원력** - Aurora 인스턴스 교체 또는 유지 관리 중 장애 조치 및 재연결을 자동으로 처리합니다
+- **IAM 인증** - IAM 기반 데이터베이스 인증을 지원하여 애플리케이션 코드에서 데이터베이스 자격 증명을 관리할 필요가 없습니다
+- **보안 향상** - 모든 연결에 대해 TLS 암호화를 강제합니다
+
+:::note[추가 비용]
+RDS Proxy는 기본적으로 활성화되어 있지만 Aurora 클러스터 비용에 추가 요금이 발생합니다. 자세한 내용은 [AWS RDS Proxy pricing](https://aws.amazon.com/rds/proxy/pricing/)을 참조하세요. 프록시를 비활성화하려면 아래 섹션을 참조하세요.
+:::
+
+#### RDS Proxy 비활성화  
+
+다음과 같이 RDS 프록시를 비활성화할 수 있습니다:  
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', {
+  ...
+  enableRdsProxy: false,
+});
+```
+
+RDS Proxy가 비활성화되면 애플리케이션이 Aurora 클러스터 엔드포인트에 직접 연결됩니다.
+
+Node.js 20 이상 Lambda 런타임에서 Aurora 클러스터에 직접 연결하려면 Lambda 함수가 Amazon RDS CA 번들을 로드하도록 구성하세요:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+const api = new Api(this, 'Api', {
+  integrations: Api.defaultIntegrations(this)
+    .withDefaultOptions({
+      environment: {
+        NODE_EXTRA_CA_CERTS: '/var/runtime/ca-cert.pem',
+      },
+    })
+    .build(),
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+기본적으로 RDS Proxy가 활성화되어 있습니다. 생성된 런타임 클라이언트(`getPrisma()`)는 프록시 엔드포인트를 통해 자동으로 연결됩니다. 필요한 경우 비활성화할 수 있습니다:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
+  ...
+  enable_rds_proxy = false
+}
+```
+
+RDS Proxy가 비활성화되면 애플리케이션이 Aurora 클러스터 엔드포인트에 직접 연결됩니다.
+
+Node.js 20 이상 Lambda 런타임에서 Aurora 클러스터에 직접 연결하려면 Lambda 함수가 Amazon RDS CA 번들을 로드하도록 구성하세요:
+
+```hcl title="packages/infra/src/main.tf"
+module "api" {
+  source = "..."
+  ...
+
+  environment_variables = {
+    NODE_EXTRA_CA_CERTS = "/var/runtime/ca-cert.pem"
+  }
+}
+```
+</Fragment>
+</Infrastructure>
+
+자세한 내용은 AWS Lambda [SSL/TLS requirements for Amazon RDS connections](https://docs.aws.amazon.com/lambda/latest/dg/services-rds.html#services-rds-tls) 및 Amazon RDS Proxy [TLS documentation](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/rds-proxy.howitworks.html#rds-proxy-security.tls)을 참조하세요. RDS Proxy를 사용할 때는 Lambda 함수에서 RDS CA 번들을 구성할 필요가 없습니다.
+
+생성된 인프라는 워크로드 요구 사항에 맞게 사용자 정의할 수 있습니다. 다음 예제는 사용 가능한 몇 가지 일반적인 사용자 정의 옵션을 보여줍니다.
+
+### 클러스터 인스턴스
+
+Aurora 클러스터의 writer 및 reader 인스턴스를 구성합니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', {
+  ...
+  writer: ClusterInstance.serverlessV2('writer'),
+  readers: [ClusterInstance.serverlessV2('reader')],
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
+  ...
+  instance_count = 2  # 1 writer + 1 reader
+}
+```
+</Fragment>
+</Infrastructure>
+
+### 서버리스 용량
+
+워크로드에 맞게 Aurora Serverless v2 확장 제한을 제어합니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', {
+  ...
+  serverlessV2MinCapacity: 0.5,
+  serverlessV2MaxCapacity: 8,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
+  ...
+  serverless_min_capacity = 0.5
+  serverless_max_capacity = 8
+}
+```
+</Fragment>
+</Infrastructure>
+
+### 엔진 버전
+
+특정 Aurora 엔진 버전을 고정합니다.
+
+기본적으로 생성된 로컬 Docker 데이터베이스 이미지는 기본 Aurora 엔진 버전과 일치합니다. Aurora 엔진 버전을 변경하는 경우, 최대 호환성을 위해 일치하는 로컬 Docker 데이터베이스 버전도 사용하는 것이 좋습니다. [Aurora PostgreSQL versions](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraPostgreSQLReleaseNotes/aurorapostgresql-release-calendar.html) 및 [Aurora MySQL versions](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraMySQLReleaseNotes/AuroraMySQL.Updates.30Updates.html)에 대한 AWS 릴리스 노트를 참조하여 해당 커뮤니티 데이터베이스 버전을 확인하세요.
+
+로컬 데이터베이스 이미지는 생성된 데이터베이스 프로젝트의 `project.json`에 있는 `serve-local` 타겟에 구성되어 있습니다. 엔진 버전을 변경할 때 `scripts/docker-start.ts`에 전달되는 이미지 인수를 업데이트하세요.
+
+<OptionFilter when={{ engine: 'PostgreSQL' }}>
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', {
+  ...
+  engineVersion: AuroraPostgresEngineVersion.VER_17_7,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
+  ...
+  engine_version = "17.7"
+}
+```
+</Fragment>
+</Infrastructure>
+</OptionFilter>
+
+<OptionFilter when={{ engine: 'MySQL' }}>
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', {
+  ...
+  engineVersion: AuroraMysqlEngineVersion.VER_3_12_0,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
+  ...
+  engine_version = "8.0.mysql_aurora.3.12.0"
+}
+```
+</Fragment>
+</Infrastructure>
+</OptionFilter>
+
+### 삭제 보호
+
+삭제 보호는 기본적으로 활성화되어 있어(`deletionProtection: true` in CDK, `deletion_protection = true` in Terraform) Aurora 클러스터를 실수로 삭제하는 것을 방지합니다.
+
+#### 삭제 보호 비활성화
+
+단기 개발 또는 프리뷰 스택과 같이 데이터베이스 삭제가 예상되는 환경에서는 삭제 보호를 비활성화할 수 있습니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', {
+  ...
+  deletionProtection: false,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
+  ...
+  deletion_protection = false
+}
+```
+</Fragment>
+</Infrastructure>
+
+### 제거 정책
+
+CDK 구성 요소는 기본적으로 Aurora 클러스터를 유지합니다(`removalPolicy: RemovalPolicy.RETAIN`). CDK 스택 삭제 시 클러스터를 스냅샷하거나 삭제하려면 이를 변경하세요.
+
+`RemovalPolicy.DESTROY`를 사용할 때는 클러스터를 삭제하기 전에 삭제 보호도 비활성화해야 합니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RemovalPolicy } from 'aws-cdk-lib';
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', {
+  ...
+  removalPolicy: RemovalPolicy.SNAPSHOT,
+});
+```
+
+스택과 함께 데이터베이스를 삭제해야 하는 임시 환경의 경우:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RemovalPolicy } from 'aws-cdk-lib';
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', {
+  ...
+  deletionProtection: false,
+  removalPolicy: RemovalPolicy.DESTROY,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+Terraform은 CDK 제거 정책을 사용하지 않습니다. 기본적으로 모듈은 삭제 시 최종 스냅샷을 생성합니다(`skip_final_snapshot = false`). 임시 환경에서 최종 스냅샷을 건너뛰려면:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
+  ...
+  deletion_protection = false
+  skip_final_snapshot = true
+}
+```
+</Fragment>
+</Infrastructure>
+
+### 암호화 키 로테이션
+
+Aurora 클러스터와 자격 증명 시크릿을 암호화하는 데 사용되는 KMS 키는 기본적으로 자동 키 로테이션이 활성화되어 있습니다. 보안 정책이 외부에서 로테이션을 관리하는 경우 비활성화하세요.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', {
+  ...
+  enableKeyRotation: false,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source = "../../common/terraform/src/app/dbs/my-database"
+  ...
+  enable_key_rotation = false
+}
+```
+</Fragment>
+</Infrastructure>
+
+## 제한 사항
+
+<OptionFilter when={{ engine: 'MySQL' }}>
+
+### MySQL: API Gateway 스트리밍 모드
+
+Aurora MySQL을 API Gateway 스트리밍 응답(예: tRPC의 `httpBatchStreamLink`)과 함께 사용할 때, Prisma MySQL 클라이언트는 쿼리 완료 후 Node.js 이벤트 루프를 유지하여 Lambda가 스트림을 플러시하고 요청을 종료하는 것을 방지합니다.
+
+이를 해결하려면 각 쿼리 후 `finally` 블록에서 클라이언트를 명시적으로 연결 해제하여 이벤트 루프가 종료되고 스트리밍 응답이 완료될 수 있도록 하세요.
+
+**옵션 1: 프로시저별**
+
+```ts
+export const listExampleTable = publicProcedure
+  .output(z.array(ExampleTableSchema))
+  .query(async () => {
+    const prisma = await getPrisma();
+    try {
+      return await prisma.exampleTable.findMany();
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
+```
+
+**옵션 2: tRPC 미들웨어**
+
+[미들웨어 패턴](#injecting-the-prisma-client-via-middleware)을 사용하는 경우, 미들웨어에 `$disconnect()` 호출을 추가하여 이를 기반으로 구축된 모든 프로시저가 자동으로 적용되도록 하세요:
+
+```ts title="packages/api/src/middleware/db.ts"
+import { getPrisma } from ':my-scope/db';
+import { initTRPC } from '@trpc/server';
+
+export interface IDbContext {
+  db: Awaited<ReturnType<typeof getPrisma>>;
+}
+
+export const createDbPlugin = () => {
+  const t = initTRPC.context<IDbContext>().create();
+  return t.procedure.use(async (opts) => {
+    const db = await getPrisma();
+    try {
+      return await opts.next({
+        ctx: {
+          ...opts.ctx,
+          db,
+        },
+      });
+    } finally {
+      await db.$disconnect();
+    }
+  });
+};
+```
+
+:::note
+이는 PostgreSQL에는 필요하지 않습니다. PostgreSQL 어댑터는 `allowExitOnIdle: true`로 구성된 `pg` 연결 풀을 사용하여 명시적인 연결 해제 없이 이벤트 루프가 자연스럽게 종료될 수 있도록 합니다. 이 제한으로 인해 MySQL용 `getPrisma()`는 클라이언트를 캐시하거나 웜 Lambda 호출 간에 연결을 재사용하지 않습니다. 모듈 수준에서 클라이언트를 캐시하고 동일한 연결 풀을 재사용하는 PostgreSQL 어댑터와 달리 매번 새 연결이 열립니다.
+:::
+
+### MySQL: IAM 토큰 만료
+
+RDS IAM 인증 토큰은 **15분** 후에 만료됩니다. MySQL Prisma 클라이언트는 `getPrisma()`가 호출될 때 IAM 토큰을 정적 값으로 캡처합니다. 기존 열린 연결은 영향을 받지 않지만, 토큰이 만료된 후 새 연결을 설정해야 하는 경우 인증이 실패합니다. PostgreSQL 어댑터는 풀이 새 연결을 열 때마다 토큰을 동적으로 새로 고쳐 이를 방지하지만, MySQL 어댑터에는 동등한 메커니즘이 없습니다.
+
+:::caution
+15분 이상 실행되는 작업에 주의하세요. MySQL 클라이언트가 원래 IAM 토큰이 만료된 후 새 연결을 열어야 하는 경우 인증이 실패합니다.
+:::
+
+배치 작업이나 데이터 마이그레이션과 같은 장기 실행 작업의 경우, 전체 작업에 대해 한 번이 아니라 각 작업 단위의 시작 부분에서 `getPrisma()`를 호출하세요. `getPrisma()`는 MySQL에 대해 항상 새 클라이언트를 생성하고 새 IAM 토큰을 가져오므로 각 연결이 유효한 토큰으로 인증되도록 보장합니다.
+
+</OptionFilter>

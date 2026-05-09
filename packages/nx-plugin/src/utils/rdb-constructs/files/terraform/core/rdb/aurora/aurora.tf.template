@@ -1,0 +1,742 @@
+# Core Aurora module
+# This module creates an Aurora cluster and a generated admin secret.
+
+terraform {
+  required_version = ">= 1.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 6.33"
+    }
+    null = {
+      source  = "hashicorp/null"
+      version = ">= 3.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = ">= 3.0"
+    }
+  }
+}
+
+data "aws_caller_identity" "current" {}
+data "aws_partition" "current" {}
+data "aws_region" "current" {}
+
+data "aws_iam_policy" "enhanced_monitoring" {
+  arn = "arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
+}
+
+variable "name" {
+  description = "Base name applied to Aurora resources."
+  type        = string
+}
+
+variable "vpc_id" {
+  description = "VPC where the Aurora cluster will be deployed."
+  type        = string
+}
+
+variable "subnet_ids" {
+  description = "Subnet IDs for the Aurora DB subnet group and RDS Proxy. These subnets do not need outbound egress — private isolated subnets are fine."
+  type        = list(string)
+}
+
+variable "lambda_subnet_ids" {
+  description = "Subnet IDs for the credential-rotation Lambda. Must have outbound egress to AWS service endpoints (e.g. Secrets Manager) — use private subnets with a NAT gateway."
+  type        = list(string)
+}
+
+variable "engine" {
+  description = "Aurora engine to use."
+  type        = string
+  default     = "aurora-postgresql"
+
+  validation {
+    condition     = contains(["aurora-postgresql", "aurora-mysql"], var.engine)
+    error_message = "engine must be aurora-postgresql or aurora-mysql."
+  }
+}
+
+variable "engine_version" {
+  description = "Aurora engine version."
+  type        = string
+  default     = null
+}
+
+variable "database_name" {
+  description = "Initial database created in the cluster."
+  type        = string
+}
+
+variable "admin_user" {
+  description = "Admin username stored in the generated Secrets Manager secret."
+  type        = string
+}
+
+variable "port" {
+  description = "Database port for the selected Aurora engine."
+  type        = number
+  default     = null
+}
+
+variable "serverless_min_capacity" {
+  description = "Minimum Aurora Serverless v2 ACUs."
+  type        = number
+  default     = 0.5
+}
+
+variable "serverless_max_capacity" {
+  description = "Maximum Aurora Serverless v2 ACUs."
+  type        = number
+  default     = 4
+}
+
+variable "instance_count" {
+  description = "Number of Aurora instances to create."
+  type        = number
+  default     = 1
+}
+
+variable "deletion_protection" {
+  description = "Whether deletion protection is enabled."
+  type        = bool
+  default     = true
+}
+
+variable "skip_final_snapshot" {
+  description = "Whether to skip the final snapshot on deletion."
+  type        = bool
+  default     = false
+}
+
+variable "enable_rds_proxy" {
+  description = "Whether to provision an RDS Proxy in front of the Aurora cluster."
+  type        = bool
+  default     = true
+}
+
+variable "enable_credential_rotation" {
+  description = "Whether to enable automatic credential rotation for the admin secret."
+  type        = bool
+  default     = true
+}
+
+variable "enable_cloudwatch_logs" {
+  description = "Whether to export Aurora engine logs to CloudWatch. PostgreSQL also enables verbose statement logging."
+  type        = bool
+  default     = false
+}
+
+variable "enable_performance_insights" {
+  description = "Whether to enable Performance Insights on Aurora cluster instances."
+  type        = bool
+  default     = true
+}
+
+variable "performance_insights_retention_period" {
+  description = "Retention period, in days, for Performance Insights data when enabled."
+  type        = number
+  default     = 7
+}
+
+variable "enable_backup" {
+  description = "Whether to provision an AWS Backup plan for the Aurora cluster."
+  type        = bool
+  default     = false
+}
+
+variable "enable_key_rotation" {
+  description = "Whether to enable automatic key rotation on the KMS key used to encrypt the Aurora cluster and its credentials secret."
+  type        = bool
+  default     = true
+}
+
+variable "tags" {
+  description = "Tags to apply to all resources."
+  type        = map(string)
+  default     = {}
+}
+
+locals {
+  default_port           = var.engine == "aurora-mysql" ? 3306 : 5432
+  default_engine_version = var.engine == "aurora-mysql" ? "8.0.mysql_aurora.3.12.0" : "17.7"
+  parameter_group_family = var.engine == "aurora-mysql" ? "aurora-mysql8.0" : "aurora-postgresql${split(".", coalesce(var.engine_version, local.default_engine_version))[0]}"
+}
+
+resource "aws_rds_cluster_parameter_group" "database" {
+  count = var.enable_cloudwatch_logs ? 1 : 0
+
+  name_prefix = "${var.name}-"
+  family      = local.parameter_group_family
+  description = "Parameter group for ${var.name} Aurora cluster"
+
+  dynamic "parameter" {
+    for_each = var.engine == "aurora-postgresql" ? [1] : []
+    content {
+      name  = "log_statement"
+      value = "all"
+    }
+  }
+
+  tags = var.tags
+}
+
+resource "aws_kms_key" "database" {
+  description         = "KMS key for Aurora cluster ${var.name}"
+  enable_key_rotation = var.enable_key_rotation
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "EnableRootAccess"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:root"
+        }
+        Action   = "kms:*"
+        Resource = "*"
+      },
+      {
+        Sid    = "AllowRDSService"
+        Effect = "Allow"
+        Principal = {
+          Service = "rds.amazonaws.com"
+        }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey",
+          "kms:CreateGrant"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+
+  tags = merge(var.tags, {
+    Name = "${var.name}-aurora"
+  })
+}
+
+resource "aws_iam_role" "enhanced_monitoring" {
+  name_prefix = "${var.name}-aurora-monitoring-"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "monitoring.rds.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = merge(var.tags, {
+    Name = "${var.name}-aurora-monitoring"
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "enhanced_monitoring" {
+  role       = aws_iam_role.enhanced_monitoring.name
+  policy_arn = data.aws_iam_policy.enhanced_monitoring.arn
+}
+
+resource "aws_security_group" "database" {
+  name_prefix = "${var.name}-aurora-"
+  description = "Security group for Aurora cluster ${var.name}"
+  vpc_id      = var.vpc_id
+
+  tags = merge(var.tags, {
+    Name = "${var.name}-aurora"
+  })
+}
+
+resource "aws_db_subnet_group" "database" {
+  name       = "${var.name}-aurora"
+  subnet_ids = var.subnet_ids
+
+  tags = merge(var.tags, {
+    Name = "${var.name}-aurora"
+  })
+}
+
+resource "random_password" "master_password" {
+  length           = 32
+  special          = true
+  override_special = "!#$%&*()-_=+[]{}<>:?"
+}
+
+resource "aws_secretsmanager_secret" "credentials" {
+  #checkov:skip=CKV2_AWS_57:Rotation is configured via aws_cloudformation_stack.credentials_rotation using the AWS::SecretsManager-2024-09-16 transform; Checkov cannot resolve rotation schedules created by CloudFormation transforms
+  name_prefix = "${var.name}-aurora-credentials-"
+  kms_key_id  = aws_kms_key.database.arn
+
+  tags = merge(var.tags, {
+    Name = "${var.name}-aurora-credentials"
+  })
+}
+
+resource "aws_secretsmanager_secret_version" "credentials" {
+  secret_id = aws_secretsmanager_secret.credentials.id
+  secret_string = jsonencode({
+    engine              = var.engine == "aurora-mysql" ? "mysql" : "postgres"
+    username            = var.admin_user
+    password            = random_password.master_password.result
+    host                = aws_rds_cluster.database.endpoint
+    port                = aws_rds_cluster.database.port
+    dbname              = var.database_name
+    dbClusterIdentifier = aws_rds_cluster.database.cluster_identifier
+  })
+}
+
+resource "aws_rds_cluster" "database" {
+  #checkov:skip=CKV2_AWS_27:Query logging can be enabled with enable_cloudwatch_logs; this module defaults to CDK-equivalent behavior unless logging is requested
+  #checkov:skip=CKV_AWS_139:Deletion protection is enabled but checkov is unable to detect it correctly
+  cluster_identifier                  = "${var.name}-aurora"
+  engine                              = var.engine
+  engine_version                      = coalesce(var.engine_version, local.default_engine_version)
+  database_name                       = var.database_name
+  master_username                     = var.admin_user
+  master_password                     = random_password.master_password.result
+  db_subnet_group_name                = aws_db_subnet_group.database.name
+  db_cluster_parameter_group_name     = var.enable_cloudwatch_logs ? aws_rds_cluster_parameter_group.database[0].name : null
+  vpc_security_group_ids              = [aws_security_group.database.id]
+  port                                = coalesce(var.port, local.default_port)
+  storage_encrypted                   = true
+  kms_key_id                          = aws_kms_key.database.arn
+  deletion_protection                 = var.deletion_protection
+  skip_final_snapshot                 = var.skip_final_snapshot
+  final_snapshot_identifier           = var.skip_final_snapshot ? null : "${var.name}-aurora-final-snapshot"
+  iam_database_authentication_enabled = true
+  monitoring_interval                 = 5
+  monitoring_role_arn                 = aws_iam_role.enhanced_monitoring.arn
+  copy_tags_to_snapshot               = true
+  enabled_cloudwatch_logs_exports     = var.enable_cloudwatch_logs ? (var.engine == "aurora-mysql" ? ["audit", "error", "general", "slowquery"] : ["postgresql"]) : null
+
+  serverlessv2_scaling_configuration {
+    min_capacity = var.serverless_min_capacity
+    max_capacity = var.serverless_max_capacity
+  }
+
+  tags = merge(var.tags, {
+    Name = "${var.name}-aurora"
+  })
+}
+
+resource "aws_rds_cluster_instance" "database" {
+  count = var.instance_count
+
+  identifier           = "${var.name}-aurora-${count.index + 1}"
+  cluster_identifier   = aws_rds_cluster.database.id
+  instance_class       = "db.serverless"
+  engine               = aws_rds_cluster.database.engine
+  engine_version       = aws_rds_cluster.database.engine_version
+  db_subnet_group_name = aws_db_subnet_group.database.name
+
+  auto_minor_version_upgrade            = true
+  monitoring_interval                   = 5
+  monitoring_role_arn                   = aws_iam_role.enhanced_monitoring.arn
+  performance_insights_enabled          = var.enable_performance_insights
+  performance_insights_kms_key_id       = var.enable_performance_insights ? aws_kms_key.database.arn : null
+  performance_insights_retention_period = var.enable_performance_insights ? var.performance_insights_retention_period : null
+
+  tags = merge(var.tags, {
+    Name = "${var.name}-aurora-${count.index + 1}"
+  })
+}
+
+resource "aws_security_group" "rotation" {
+  #checkov:skip=CKV2_AWS_5:Security group is attached to the hosted rotation Lambda created by AWS::SecretsManager::RotationSchedule; Checkov cannot resolve resources created by the CloudFormation transform
+  count       = var.enable_credential_rotation ? 1 : 0
+  name_prefix = "${var.name}-aurora-rotation-"
+  description = "Security group for Aurora secret rotation ${var.name}"
+  vpc_id      = var.vpc_id
+
+  tags = merge(var.tags, {
+    Name = "${var.name}-aurora-rotation"
+  })
+}
+
+resource "aws_vpc_security_group_egress_rule" "rotation_to_database" {
+  count                        = var.enable_credential_rotation ? 1 : 0
+  security_group_id            = aws_security_group.rotation[0].id
+  referenced_security_group_id = aws_security_group.database.id
+  from_port                    = coalesce(var.port, local.default_port)
+  to_port                      = coalesce(var.port, local.default_port)
+  ip_protocol                  = "tcp"
+  description                  = "Allow outbound database traffic from secret rotation Lambda"
+}
+
+resource "aws_vpc_security_group_ingress_rule" "rotation_to_database" {
+  count                        = var.enable_credential_rotation ? 1 : 0
+  security_group_id            = aws_security_group.database.id
+  referenced_security_group_id = aws_security_group.rotation[0].id
+  from_port                    = coalesce(var.port, local.default_port)
+  to_port                      = coalesce(var.port, local.default_port)
+  ip_protocol                  = "tcp"
+  description                  = "Allow inbound database traffic from secret rotation Lambda"
+}
+
+resource "aws_cloudformation_stack" "credentials_rotation" {
+  #checkov:skip=CKV_AWS_124:SNS event notifications are not required for the credentials rotation stack
+  count = var.enable_credential_rotation ? 1 : 0
+  name  = "${var.name}-aurora-credentials-rotation"
+
+  capabilities = ["CAPABILITY_IAM", "CAPABILITY_AUTO_EXPAND"]
+
+  template_body = jsonencode({
+    AWSTemplateFormatVersion = "2010-09-09"
+    Transform                = "AWS::SecretsManager-2024-09-16"
+    Resources = {
+      CredentialsRotationSchedule = {
+        Type = "AWS::SecretsManager::RotationSchedule"
+        Properties = {
+          SecretId = aws_secretsmanager_secret.credentials.arn
+          HostedRotationLambda = {
+            RotationType        = var.engine == "aurora-mysql" ? "MySQLSingleUser" : "PostgreSQLSingleUser"
+            RotationLambdaName  = "${var.name}-aurora-credentials-rotation"
+            VpcSecurityGroupIds = aws_security_group.rotation[0].id
+            VpcSubnetIds        = join(",", var.lambda_subnet_ids)
+          }
+          RotationRules = {
+            AutomaticallyAfterDays = 30
+          }
+        }
+      }
+    }
+  })
+
+  depends_on = [
+    aws_secretsmanager_secret_version.credentials,
+    aws_rds_cluster_instance.database,
+    aws_vpc_security_group_egress_rule.rotation_to_database,
+    aws_vpc_security_group_ingress_rule.rotation_to_database,
+  ]
+}
+
+resource "aws_iam_role" "proxy" {
+  count = var.enable_rds_proxy ? 1 : 0
+
+  name_prefix = "${var.name}-aurora-proxy-"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "rds.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = merge(var.tags, {
+    Name = "${var.name}-aurora-proxy"
+  })
+}
+
+resource "aws_iam_role_policy" "proxy_secret_access" {
+  count = var.enable_rds_proxy ? 1 : 0
+  role  = aws_iam_role.proxy[0].name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["secretsmanager:GetSecretValue"]
+        Resource = [aws_secretsmanager_secret.credentials.arn]
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["kms:Decrypt"]
+        Resource = [aws_kms_key.database.arn]
+      }
+    ]
+  })
+}
+
+resource "aws_security_group" "proxy" {
+  #checkov:skip=CKV2_AWS_5:Security group is attached to aws_db_proxy.aurora; Checkov cannot resolve count-conditional cross-resource references
+  count = var.enable_rds_proxy ? 1 : 0
+
+  name_prefix = "${var.name}-aurora-proxy-"
+  description = "Security group for Aurora proxy ${var.name}"
+  vpc_id      = var.vpc_id
+
+  tags = merge(var.tags, {
+    Name = "${var.name}-aurora-proxy"
+  })
+}
+
+resource "aws_db_proxy" "aurora" {
+  count = var.enable_rds_proxy ? 1 : 0
+
+  name                   = "${var.name}-proxy"
+  default_auth_scheme    = "IAM_AUTH"
+  engine_family          = var.engine == "aurora-mysql" ? "MYSQL" : "POSTGRESQL"
+  role_arn               = aws_iam_role.proxy[0].arn
+  vpc_subnet_ids         = var.subnet_ids
+  vpc_security_group_ids = [aws_security_group.proxy[0].id]
+  require_tls            = true
+
+  auth {
+    auth_scheme = "SECRETS"
+    iam_auth    = "REQUIRED"
+    secret_arn  = aws_secretsmanager_secret.credentials.arn
+  }
+
+  depends_on = [
+    aws_iam_role_policy.proxy_secret_access,
+    aws_secretsmanager_secret_version.credentials,
+  ]
+}
+
+resource "aws_db_proxy_default_target_group" "default" {
+  count = var.enable_rds_proxy ? 1 : 0
+
+  db_proxy_name = aws_db_proxy.aurora[0].name
+}
+
+resource "aws_db_proxy_target" "default" {
+  count = var.enable_rds_proxy ? 1 : 0
+
+  db_proxy_name         = aws_db_proxy.aurora[0].name
+  target_group_name     = aws_db_proxy_default_target_group.default[0].name
+  db_cluster_identifier = aws_rds_cluster.database.cluster_identifier
+}
+
+resource "null_resource" "proxy_target_ready" {
+  count = var.enable_rds_proxy ? 1 : 0
+
+  triggers = {
+    db_proxy_name         = aws_db_proxy.aurora[0].name
+    target_group_name     = aws_db_proxy_default_target_group.default[0].name
+    db_cluster_identifier = aws_rds_cluster.database.cluster_identifier
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      start_time=$(date +%s)
+      deadline=$((start_time + 600))
+      while true; do
+        target_state=$(aws rds describe-db-proxy-targets \
+          --region ${data.aws_region.current.region} \
+          --db-proxy-name ${self.triggers.db_proxy_name} \
+          --target-group-name ${self.triggers.target_group_name} \
+          --query "Targets[?Type=='RDS_INSTANCE'] | [0].TargetHealth.State" \
+          --output text)
+
+        if [ "$target_state" = "AVAILABLE" ]; then
+          exit 0
+        fi
+
+        current_time=$(date +%s)
+        if [ "$current_time" -ge "$deadline" ]; then
+          echo "RDS Proxy target ${self.triggers.db_cluster_identifier} did not become AVAILABLE within 10 minutes. Last state: $target_state"
+          exit 1
+        fi
+
+        sleep 10
+      done
+    EOT
+  }
+
+  depends_on = [
+    aws_db_proxy_target.default,
+    aws_rds_cluster_instance.database,
+    aws_vpc_security_group_ingress_rule.proxy_to_database,
+    aws_vpc_security_group_egress_rule.proxy_to_database
+  ]
+}
+
+resource "null_resource" "cluster_ready" {
+  count = var.enable_rds_proxy ? 0 : 1
+
+  triggers = {
+    cluster_identifier = aws_rds_cluster.database.cluster_identifier
+    instance_ids       = join(",", aws_rds_cluster_instance.database[*].id)
+  }
+
+  depends_on = [aws_rds_cluster_instance.database]
+}
+
+resource "aws_vpc_security_group_ingress_rule" "proxy_to_database" {
+  count = var.enable_rds_proxy ? 1 : 0
+
+  security_group_id            = aws_security_group.database.id
+  referenced_security_group_id = aws_security_group.proxy[0].id
+  from_port                    = coalesce(var.port, local.default_port)
+  to_port                      = coalesce(var.port, local.default_port)
+  ip_protocol                  = "tcp"
+  description                  = "Allow inbound database traffic from RDS Proxy"
+}
+
+resource "aws_vpc_security_group_egress_rule" "proxy_to_database" {
+  count = var.enable_rds_proxy ? 1 : 0
+
+  security_group_id            = aws_security_group.proxy[0].id
+  referenced_security_group_id = aws_security_group.database.id
+  from_port                    = coalesce(var.port, local.default_port)
+  to_port                      = coalesce(var.port, local.default_port)
+  ip_protocol                  = "tcp"
+  description                  = "Allow outbound database traffic from RDS Proxy to Aurora cluster"
+}
+
+data "aws_iam_policy" "backup" {
+  count = var.enable_backup ? 1 : 0
+
+  arn = "arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup"
+}
+
+resource "aws_iam_role" "backup" {
+  count = var.enable_backup ? 1 : 0
+
+  name_prefix = "${var.name}-backup-"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect    = "Allow"
+        Principal = { Service = "backup.amazonaws.com" }
+        Action    = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_iam_role_policy_attachment" "backup" {
+  count = var.enable_backup ? 1 : 0
+
+  role       = aws_iam_role.backup[0].name
+  policy_arn = data.aws_iam_policy.backup[0].arn
+}
+
+resource "aws_backup_vault" "database" {
+  count = var.enable_backup ? 1 : 0
+
+  name        = "${var.name}-aurora-backup"
+  kms_key_arn = aws_kms_key.database.arn
+  tags        = var.tags
+}
+
+resource "aws_backup_plan" "database" {
+  count = var.enable_backup ? 1 : 0
+
+  name = "${var.name}-aurora-backup"
+
+  rule {
+    rule_name         = "daily-backup"
+    target_vault_name = aws_backup_vault.database[0].name
+    schedule          = "cron(0 5 ? * * *)"
+
+    lifecycle {
+      delete_after = 35
+    }
+  }
+
+  tags = var.tags
+}
+
+resource "aws_backup_selection" "database" {
+  count = var.enable_backup ? 1 : 0
+
+  name         = "${var.name}-aurora"
+  plan_id      = aws_backup_plan.database[0].id
+  iam_role_arn = aws_iam_role.backup[0].arn
+
+  resources = [aws_rds_cluster.database.arn]
+}
+
+output "cluster_arn" {
+  description = "ARN of the Aurora cluster."
+  value       = aws_rds_cluster.database.arn
+}
+
+output "cluster_resource_id" {
+  description = "Resource ID of the Aurora cluster used for IAM database authentication."
+  value       = aws_rds_cluster.database.cluster_resource_id
+}
+
+output "proxy_resource_id" {
+  description = "Resource identifier of the RDS Proxy (prx-XXXX), used for IAM rds-db:connect policies when connecting through the proxy. Null if RDS Proxy is disabled."
+  value       = var.enable_rds_proxy ? split(":", aws_db_proxy.aurora[0].arn)[6] : null
+}
+
+output "cluster_endpoint" {
+  description = "Writer endpoint of the Aurora cluster or proxy."
+  value       = var.enable_rds_proxy ? aws_db_proxy.aurora[0].endpoint : aws_rds_cluster.database.endpoint
+}
+
+output "reader_endpoint" {
+  description = "Reader endpoint of the Aurora cluster."
+  value       = aws_rds_cluster.database.reader_endpoint
+}
+
+output "cluster_port" {
+  description = "Port exposed by the Aurora cluster."
+  value       = aws_rds_cluster.database.port
+}
+
+output "security_group_id" {
+  description = "Security group protecting the Aurora proxy or cluster."
+  value       = var.enable_rds_proxy ? aws_security_group.proxy[0].id : aws_security_group.database.id
+}
+
+output "database_security_group_id" {
+  description = "Security group protecting the Aurora cluster directly."
+  value       = aws_security_group.database.id
+}
+
+output "proxy_role_name" {
+  description = "Name of the IAM role used by the RDS Proxy, or null if proxy is disabled."
+  value       = var.enable_rds_proxy ? aws_iam_role.proxy[0].name : null
+}
+
+output "secret_arn" {
+  description = "ARN of the generated admin credentials secret."
+  value       = aws_secretsmanager_secret.credentials.arn
+}
+
+output "kms_key_arn" {
+  description = "ARN of the KMS key protecting Aurora and the generated secret."
+  value       = aws_kms_key.database.arn
+}
+
+output "database_host" {
+  description = "Hostname of the Aurora cluster writer endpoint or proxy endpoint."
+  value       = var.enable_rds_proxy ? aws_db_proxy.aurora[0].endpoint : aws_rds_cluster.database.endpoint
+}
+
+output "database_ready" {
+  description = "Dependency marker that is resolved after the selected database connection path is ready."
+  value       = true
+
+  depends_on = [
+    null_resource.proxy_target_ready,
+    null_resource.cluster_ready
+  ]
+}
+
+output "database_name" {
+  description = "Initial database created in the cluster."
+  value       = var.database_name
+}
+
+output "admin_user" {
+  description = "Admin username stored in the generated secret."
+  value       = jsondecode(aws_secretsmanager_secret_version.credentials.secret_string).username
+}
