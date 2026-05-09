@@ -140,6 +140,7 @@ Add capabilities to existing projects:
 | `ts#smithy-api`         | Create an API using Smithy and the Smithy TypeScript Server SDK                                                                       |
 | `ts#strands-agent`      | Add a Strands Agent to a TypeScript project                                                                                           |
 | `ts#trpc-api`           | creates a trpc backend                                                                                                                |
+| `ts#rdb`                | Create a relational database project                                                                                                  |
 
 ## Best Practices
 

@@ -34,6 +34,7 @@ import { resolveIacProvider } from '../../utils/iac';
 import { getNpmScope, toScopeAlias } from '../../utils/npm-scope';
 import { updateGitIgnore } from '../../utils/git';
 import { assignPort } from '../../utils/port';
+import { registerPnpmBuiltDependencies } from '../../utils/pnpm-workspace';
 
 export const TS_RDB_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -252,6 +253,14 @@ export const tsRdbGenerator = async (
         : (['@types/pg'] as const)),
     ]),
   );
+
+  registerPnpmBuiltDependencies(tree, {
+    '@prisma/engines': false,
+    prisma: false,
+    ssh2: false,
+    'cpu-features': false,
+    protobufjs: false,
+  });
 
   await addGeneratorMetricsIfApplicable(tree, [TS_RDB_GENERATOR_INFO]);
 
