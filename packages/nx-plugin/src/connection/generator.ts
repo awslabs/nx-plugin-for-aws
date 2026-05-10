@@ -21,6 +21,10 @@ import tsStrandsAgentA2aConnectionGenerator from '../ts/strands-agent/a2a-connec
 import pyStrandsAgentMcpConnectionGenerator from '../py/strands-agent/mcp-connection/generator';
 import pyStrandsAgentReactConnectionGenerator from '../py/strands-agent/react-connection/generator';
 import pyStrandsAgentA2aConnectionGenerator from '../py/strands-agent/a2a-connection/generator';
+import tsRdbSmithyConnectionGenerator from '../ts/rdb/smithy-connection/generator';
+import tsRdbTrpcConnectionGenerator from '../ts/rdb/trpc-connection/generator';
+import tsRdbStrandsAgentConnectionGenerator from '../ts/rdb/strands-agent-connection/generator';
+import { TS_RDB_GENERATOR_INFO } from '../ts/rdb/generator';
 
 /**
  * List of supported source and target project types for connections.
@@ -32,6 +36,7 @@ const SUPPORTED_PROJECT_TYPES = [
   'py#fast-api',
   'react',
   'smithy',
+  'ts#rdb',
 ] as const;
 
 type ProjectType = (typeof SUPPORTED_PROJECT_TYPES)[number];
@@ -59,6 +64,9 @@ export interface ResolvedConnection {
  * Source and target can be project-level types or component generator ids.
  */
 const SUPPORTED_CONNECTIONS = [
+  { source: 'ts#trpc-api', target: 'ts#rdb' },
+  { source: 'ts#strands-agent', target: 'ts#rdb' },
+  { source: 'smithy', target: 'ts#rdb' },
   { source: 'react', target: 'ts#trpc-api' },
   { source: 'react', target: 'py#fast-api' },
   { source: 'react', target: 'smithy' },
@@ -94,6 +102,12 @@ export interface ResolvedConnectionOptions {
 }
 
 const CONNECTION_GENERATORS = {
+  'ts#trpc-api -> ts#rdb': (tree, options) =>
+    tsRdbTrpcConnectionGenerator(tree, options),
+  'ts#strands-agent -> ts#rdb': (tree, options) =>
+    tsRdbStrandsAgentConnectionGenerator(tree, options),
+  'smithy -> ts#rdb': (tree, options) =>
+    tsRdbSmithyConnectionGenerator(tree, options),
   'react -> ts#trpc-api': (tree, options) =>
     trpcReactGenerator(tree, {
       frontendProjectName: options.sourceProject,
@@ -387,6 +401,10 @@ const determineProjectTypeFromConfig = async (
     return 'react';
   }
 
+  if (isRdb(projectConfiguration)) {
+    return 'ts#rdb';
+  }
+
   return undefined;
 };
 
@@ -486,5 +504,9 @@ const isSmithyApi = (
     TS_SMITHY_API_GENERATOR_INFO.id,
   ].includes(((projectConfiguration.metadata as any) ?? {}).generator);
 };
+
+const isRdb = (projectConfiguration: ProjectConfiguration): boolean =>
+  ((projectConfiguration.metadata as any) ?? {}).generator ===
+  TS_RDB_GENERATOR_INFO.id;
 
 export default connectionGenerator;

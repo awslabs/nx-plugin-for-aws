@@ -16,6 +16,9 @@ import { vi, expect, describe, it, beforeEach } from 'vitest';
 import trpcReactGenerator from '../trpc/react/generator';
 import fastApiReactGenerator from '../py/fast-api/react/generator';
 import smithyReactConnectionGenerator from '../smithy/react-connection/generator';
+import tsRdbSmithyConnectionGenerator from '../ts/rdb/smithy-connection/generator';
+import tsRdbTrpcConnectionGenerator from '../ts/rdb/trpc-connection/generator';
+import tsRdbStrandsAgentConnectionGenerator from '../ts/rdb/strands-agent-connection/generator';
 
 // Mock the generators
 vi.mock('../trpc/react/generator', () => ({
@@ -27,6 +30,18 @@ vi.mock('../py/fast-api/react/generator', () => ({
 }));
 
 vi.mock('../smithy/react-connection/generator', () => ({
+  default: vi.fn(),
+}));
+
+vi.mock('../ts/rdb/smithy-connection/generator', () => ({
+  default: vi.fn(),
+}));
+
+vi.mock('../ts/rdb/trpc-connection/generator', () => ({
+  default: vi.fn(),
+}));
+
+vi.mock('../ts/rdb/strands-agent-connection/generator', () => ({
   default: vi.fn(),
 }));
 
@@ -86,6 +101,21 @@ describe('connection generator', () => {
         name,
         root: `apps/${name}`,
         metadata: { generator: 'smithy#project' },
+      }),
+    );
+  };
+
+  // Helper to set up a ts#rdb project
+  const setupRdbProject = (name = 'db') => {
+    tree.write(
+      `packages/${name}/project.json`,
+      JSON.stringify({
+        name,
+        root: `packages/${name}`,
+        metadata: { generator: 'ts#rdb' },
+        targets: {
+          'serve-local': { executor: 'nx:run-commands', continuous: true },
+        },
       }),
     );
   };
@@ -1643,6 +1673,65 @@ describe('connection generator', () => {
         target: 'comp-tgt',
       });
       expect(result.targetComponent?.name).toBe('my-tgt');
+    });
+  });
+
+  describe('ts#rdb connections', () => {
+    it('should resolve ts#trpc-api -> ts#rdb', async () => {
+      setupTrpcProject();
+      setupRdbProject();
+      const result = await resolveConnection(tree, {
+        sourceProject: 'api',
+        targetProject: 'db',
+      });
+      expect(result.connection).toEqual({
+        source: 'ts#trpc-api',
+        target: 'ts#rdb',
+      });
+      expect(result.sourceComponent).toBeUndefined();
+      expect(result.targetComponent).toBeUndefined();
+    });
+
+    it('should resolve ts#strands-agent -> ts#rdb', async () => {
+      setupUnknownProject('agent-project', [
+        {
+          generator: 'ts#strands-agent',
+          path: 'src/my-agent',
+          name: 'my-agent',
+        },
+      ]);
+      setupRdbProject();
+      const result = await resolveConnection(tree, {
+        sourceProject: 'agent-project',
+        targetProject: 'db',
+        sourceComponent: 'my-agent',
+      });
+      expect(result.connection).toEqual({
+        source: 'ts#strands-agent',
+        target: 'ts#rdb',
+      });
+      expect(result.sourceComponent?.name).toBe('my-agent');
+    });
+
+    it('should determine ts#rdb project type', async () => {
+      setupRdbProject();
+      expect(await determineProjectType(tree, 'db')).toBe('ts#rdb');
+    });
+
+    it('should call trpc-connection generator for ts#trpc-api -> ts#rdb', async () => {
+      setupTrpcProject();
+      setupRdbProject();
+      await connectionGenerator(tree, {
+        sourceProject: 'api',
+        targetProject: 'db',
+      });
+      expect(tsRdbTrpcConnectionGenerator).toHaveBeenCalledWith(
+        tree,
+        expect.objectContaining({
+          sourceProject: 'api',
+          targetProject: 'db',
+        }),
+      );
     });
   });
 });
