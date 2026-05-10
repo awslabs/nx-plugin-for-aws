@@ -1,20 +1,22 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 <%_ if (engine === 'MySQL') { _%>
-import { getDatabaseSecret } from './utils.js';
+import { getDatabaseSecret, withConnectionRetry } from './utils.js';
 <%_ } else { _%>
 import { Signer } from '@aws-sdk/rds-signer';
+import { withConnectionRetry } from './utils.js';
 <%_ } _%>
 
-export const handler = async () => {
+const buildDatabaseUrl = async (): Promise<string> => {
 <%_ if (engine === 'MySQL') { _%>
   const { host, port, dbname, username, password } = await getDatabaseSecret();
 
-  const databaseUrl =
+  return (
     `mysql://${encodeURIComponent(username)}` +
     `:${encodeURIComponent(password)}` +
     `@${host}:${port}/${dbname}` +
-    `?sslaccept=strict`;
+    `?sslaccept=strict`
+  );
 <%_ } else { _%>
   const hostname = process.env.HOSTNAME!;
   const port = process.env.PORT!;
@@ -29,18 +31,24 @@ export const handler = async () => {
     username: dbUser,
   }).getAuthToken();
 
-  const databaseUrl =
+  return (
     `postgresql://${encodeURIComponent(dbUser)}` +
     `:${encodeURIComponent(iamAuthToken)}` +
     `@${hostname}:${port}/${database}` +
-    `?sslaccept=strict`; // `sslaccept` is the correct parameter here for postgresql. The Prisma CLI Rust engine does not use the standard libpq `sslmode` option.
+    `?sslaccept=strict` // `sslaccept` is the correct parameter here for postgresql. The Prisma CLI Rust engine does not use the standard libpq `sslmode` option.
+  );
 <%_ } _%>
+};
 
-  await promisify(execFile)('npx', ['prisma', 'migrate', 'deploy'], {
-    cwd: __dirname,
-    env: {
-      ...process.env,
-      DATABASE_URL: databaseUrl,
-    },
+export const handler = async () => {
+  await withConnectionRetry(async () => {
+    const databaseUrl = await buildDatabaseUrl();
+    await promisify(execFile)('npx', ['prisma', 'migrate', 'deploy'], {
+      cwd: __dirname,
+      env: {
+        ...process.env,
+        DATABASE_URL: databaseUrl,
+      },
+    });
   });
 };
