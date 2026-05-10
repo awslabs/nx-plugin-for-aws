@@ -8,6 +8,7 @@ import { ensureDirSync } from 'fs-extra';
 import { join } from 'path';
 
 import { runCLI, tmpProjPath } from '../utils';
+import { ensureRdsServiceLinkedRole } from './deploy-prerequisites';
 import { runTerraformSmokeTest } from './terraform-smoke-test';
 import {
   invokeAgentCoreA2a,
@@ -99,6 +100,8 @@ describe('smoke test - terraform-deploy', () => {
         'deletion_protection = "INACTIVE"',
       ),
     );
+
+    ensureRdsServiceLinkedRole();
 
     try {
       await runCLI(`sync`, opts);

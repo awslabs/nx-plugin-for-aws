@@ -7,6 +7,7 @@ import { ensureDirSync } from 'fs-extra';
 import { runCLI, tmpProjPath } from '../utils';
 import { join } from 'path';
 import { CloudFormation, StackStatus } from '@aws-sdk/client-cloudformation';
+import { ensureRdsServiceLinkedRole } from './deploy-prerequisites';
 import { runSmokeTest } from './smoke-test';
 import {
   invokeAgentCoreA2a,
@@ -94,6 +95,8 @@ describe('smoke test - cdk-deploy', () => {
     writeFileSync(`${opts.cwd}/packages/infra/src/main.ts`, mainContent);
 
     const cdkStageName = `e2e-test-infra-sandbox-${testRunId}`;
+
+    ensureRdsServiceLinkedRole();
 
     try {
       // Deploy the e2e test resources
