@@ -2,10 +2,10 @@ import type { CloudFormationCustomResourceEvent } from 'aws-lambda';
 import { randomBytes } from 'node:crypto';
 <%_ if (engine === 'MySQL') { _%>
 import { createPool, type PoolConnection } from 'mariadb';
-import { getDatabaseSecret } from './utils.js';
+import { getDatabaseSecret, withConnectionRetry } from './utils.js';
 <%_ } else { _%>
 import { Client, escapeIdentifier } from 'pg';
-import { getDatabaseSecret } from './utils.js';
+import { getDatabaseSecret, withConnectionRetry } from './utils.js';
 <%_ } _%>
 
 type OnEventResult = {
@@ -106,42 +106,6 @@ const ensureDatabaseUser = async (dbUser: string): Promise<void> => {
     await client.end();
   }
 <%_ } _%>
-};
-
-// Aurora's writer endpoint is briefly unreachable from within the VPC right
-// after the cluster reports ready, surfacing as AggregateError [ETIMEDOUT].
-const isTransientConnectionError = (error: unknown): boolean => {
-  const message = error instanceof Error ? error.message : String(error);
-  const code = (error as { code?: string })?.code;
-  return (
-    message.includes('ETIMEDOUT') ||
-    message.includes('ECONNREFUSED') ||
-    message.includes('ENOTFOUND') ||
-    code === 'ETIMEDOUT' ||
-    code === 'ECONNREFUSED' ||
-    code === 'ENOTFOUND'
-  );
-};
-
-const withConnectionRetry = async <T>(fn: () => Promise<T>): Promise<T> => {
-  const maxAttempts = 6;
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      return await fn();
-    } catch (error) {
-      if (attempt === maxAttempts || !isTransientConnectionError(error)) {
-        throw error;
-      }
-      const delayMs = 10_000 * attempt;
-      console.log(
-        `Transient connection error (attempt ${attempt}/${maxAttempts}), retrying in ${delayMs}ms: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
-    }
-  }
-  throw new Error('unreachable');
 };
 
 export const handler = async (

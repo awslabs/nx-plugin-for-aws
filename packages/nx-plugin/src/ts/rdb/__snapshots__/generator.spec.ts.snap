@@ -153,7 +153,7 @@ exports[`ts#rdb generator > should add mysql prisma dependencies when engine is 
 "import type { CloudFormationCustomResourceEvent } from 'aws-lambda';
 import { randomBytes } from 'node:crypto';
 import { createPool, type PoolConnection } from 'mariadb';
-import { getDatabaseSecret } from './utils.js';
+import { getDatabaseSecret, withConnectionRetry } from './utils.js';
 
 type OnEventResult = {
   PhysicalResourceId: string;
@@ -204,42 +204,6 @@ const ensureDatabaseUser = async (dbUser: string): Promise<void> => {
   }
 };
 
-// Aurora's writer endpoint is briefly unreachable from within the VPC right
-// after the cluster reports ready, surfacing as AggregateError [ETIMEDOUT].
-const isTransientConnectionError = (error: unknown): boolean => {
-  const message = error instanceof Error ? error.message : String(error);
-  const code = (error as { code?: string })?.code;
-  return (
-    message.includes('ETIMEDOUT') ||
-    message.includes('ECONNREFUSED') ||
-    message.includes('ENOTFOUND') ||
-    code === 'ETIMEDOUT' ||
-    code === 'ECONNREFUSED' ||
-    code === 'ENOTFOUND'
-  );
-};
-
-const withConnectionRetry = async <T>(fn: () => Promise<T>): Promise<T> => {
-  const maxAttempts = 6;
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      return await fn();
-    } catch (error) {
-      if (attempt === maxAttempts || !isTransientConnectionError(error)) {
-        throw error;
-      }
-      const delayMs = 10_000 * attempt;
-      console.log(
-        \`Transient connection error (attempt \${attempt}/\${maxAttempts}), retrying in \${delayMs}ms: \${
-          error instanceof Error ? error.message : String(error)
-        }\`,
-      );
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
-    }
-  }
-  throw new Error('unreachable');
-};
-
 export const handler = async (
   event: CloudFormationCustomResourceEvent,
 ): Promise<OnEventResult> => {
@@ -270,23 +234,29 @@ export { getPrisma } from './prisma.js';
 exports[`ts#rdb generator > should add mysql prisma dependencies when engine is MySQL > packages/db/src/migration-handler.ts 1`] = `
 "import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { getDatabaseSecret } from './utils.js';
+import { getDatabaseSecret, withConnectionRetry } from './utils.js';
 
-export const handler = async () => {
+const buildDatabaseUrl = async (): Promise<string> => {
   const { host, port, dbname, username, password } = await getDatabaseSecret();
 
-  const databaseUrl =
+  return (
     \`mysql://\${encodeURIComponent(username)}\` +
     \`:\${encodeURIComponent(password)}\` +
     \`@\${host}:\${port}/\${dbname}\` +
-    \`?sslaccept=strict\`;
+    \`?sslaccept=strict\`
+  );
+};
 
-  await promisify(execFile)('npx', ['prisma', 'migrate', 'deploy'], {
-    cwd: __dirname,
-    env: {
-      ...process.env,
-      DATABASE_URL: databaseUrl,
-    },
+export const handler = async () => {
+  await withConnectionRetry(async () => {
+    const databaseUrl = await buildDatabaseUrl();
+    await promisify(execFile)('npx', ['prisma', 'migrate', 'deploy'], {
+      cwd: __dirname,
+      env: {
+        ...process.env,
+        DATABASE_URL: databaseUrl,
+      },
+    });
   });
 };
 "
@@ -431,6 +401,60 @@ export const getDatabaseConfig = (
   databaseConfigPromises[runtimeConfigKey] ??=
     loadDatabaseConfig(runtimeConfigKey);
   return databaseConfigPromises[runtimeConfigKey];
+};
+
+// Aurora's writer endpoint is briefly unreachable from within the VPC right
+// after the cluster reports ready, and IAM policy attachments can take tens
+// of seconds to propagate before RDS accepts an IAM auth token. Both surface
+// as errors that resolve on retry.
+const transientErrorPatterns = [
+  'ETIMEDOUT',
+  'ECONNREFUSED',
+  'ENOTFOUND',
+  'P1000', // Prisma: authentication failed
+  'ER_ACCESS_DENIED_ERROR', // MySQL: access denied
+];
+
+export const isTransientConnectionError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message : String(error);
+  const code = (error as { code?: string })?.code ?? '';
+  const stderr =
+    (error as { stderr?: Buffer | string })?.stderr?.toString() ?? '';
+  const stdout =
+    (error as { stdout?: Buffer | string })?.stdout?.toString() ?? '';
+  return transientErrorPatterns.some(
+    (p) =>
+      message.includes(p) ||
+      code.includes(p) ||
+      stderr.includes(p) ||
+      stdout.includes(p),
+  );
+};
+
+export const withConnectionRetry = async <T>(
+  fn: () => Promise<T>,
+  {
+    maxAttempts = 6,
+    delayMs = 10_000,
+  }: { maxAttempts?: number; delayMs?: number } = {},
+): Promise<T> => {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (attempt === maxAttempts || !isTransientConnectionError(error)) {
+        throw error;
+      }
+      const wait = delayMs * attempt;
+      console.log(
+        \`Transient connection error (attempt \${attempt}/\${maxAttempts}), retrying in \${wait}ms: \${
+          error instanceof Error ? error.message : String(error)
+        }\`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, wait));
+    }
+  }
+  throw new Error('unreachable');
 };
 "
 `;
@@ -3909,7 +3933,7 @@ exports[`ts#rdb generator > should generate the aurora shared construct > packag
 "import type { CloudFormationCustomResourceEvent } from 'aws-lambda';
 import { randomBytes } from 'node:crypto';
 import { Client, escapeIdentifier } from 'pg';
-import { getDatabaseSecret } from './utils.js';
+import { getDatabaseSecret, withConnectionRetry } from './utils.js';
 
 type OnEventResult = {
   PhysicalResourceId: string;
@@ -3974,42 +3998,6 @@ const ensureDatabaseUser = async (dbUser: string): Promise<void> => {
   }
 };
 
-// Aurora's writer endpoint is briefly unreachable from within the VPC right
-// after the cluster reports ready, surfacing as AggregateError [ETIMEDOUT].
-const isTransientConnectionError = (error: unknown): boolean => {
-  const message = error instanceof Error ? error.message : String(error);
-  const code = (error as { code?: string })?.code;
-  return (
-    message.includes('ETIMEDOUT') ||
-    message.includes('ECONNREFUSED') ||
-    message.includes('ENOTFOUND') ||
-    code === 'ETIMEDOUT' ||
-    code === 'ECONNREFUSED' ||
-    code === 'ENOTFOUND'
-  );
-};
-
-const withConnectionRetry = async <T>(fn: () => Promise<T>): Promise<T> => {
-  const maxAttempts = 6;
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      return await fn();
-    } catch (error) {
-      if (attempt === maxAttempts || !isTransientConnectionError(error)) {
-        throw error;
-      }
-      const delayMs = 10_000 * attempt;
-      console.log(
-        \`Transient connection error (attempt \${attempt}/\${maxAttempts}), retrying in \${delayMs}ms: \${
-          error instanceof Error ? error.message : String(error)
-        }\`,
-      );
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
-    }
-  }
-  throw new Error('unreachable');
-};
-
 export const handler = async (
   event: CloudFormationCustomResourceEvent,
 ): Promise<OnEventResult> => {
@@ -4041,8 +4029,9 @@ exports[`ts#rdb generator > should generate the aurora shared construct > packag
 "import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { Signer } from '@aws-sdk/rds-signer';
+import { withConnectionRetry } from './utils.js';
 
-export const handler = async () => {
+const buildDatabaseUrl = async (): Promise<string> => {
   const hostname = process.env.HOSTNAME!;
   const port = process.env.PORT!;
   const database = process.env.DATABASE!;
@@ -4056,18 +4045,24 @@ export const handler = async () => {
     username: dbUser,
   }).getAuthToken();
 
-  const databaseUrl =
+  return (
     \`postgresql://\${encodeURIComponent(dbUser)}\` +
     \`:\${encodeURIComponent(iamAuthToken)}\` +
     \`@\${hostname}:\${port}/\${database}\` +
-    \`?sslaccept=strict\`; // \`sslaccept\` is the correct parameter here for postgresql. The Prisma CLI Rust engine does not use the standard libpq \`sslmode\` option.
+    \`?sslaccept=strict\` // \`sslaccept\` is the correct parameter here for postgresql. The Prisma CLI Rust engine does not use the standard libpq \`sslmode\` option.
+  );
+};
 
-  await promisify(execFile)('npx', ['prisma', 'migrate', 'deploy'], {
-    cwd: __dirname,
-    env: {
-      ...process.env,
-      DATABASE_URL: databaseUrl,
-    },
+export const handler = async () => {
+  await withConnectionRetry(async () => {
+    const databaseUrl = await buildDatabaseUrl();
+    await promisify(execFile)('npx', ['prisma', 'migrate', 'deploy'], {
+      cwd: __dirname,
+      env: {
+        ...process.env,
+        DATABASE_URL: databaseUrl,
+      },
+    });
   });
 };
 "
@@ -4225,6 +4220,60 @@ export const getDatabaseConfig = (
   databaseConfigPromises[runtimeConfigKey] ??=
     loadDatabaseConfig(runtimeConfigKey);
   return databaseConfigPromises[runtimeConfigKey];
+};
+
+// Aurora's writer endpoint is briefly unreachable from within the VPC right
+// after the cluster reports ready, and IAM policy attachments can take tens
+// of seconds to propagate before RDS accepts an IAM auth token. Both surface
+// as errors that resolve on retry.
+const transientErrorPatterns = [
+  'ETIMEDOUT',
+  'ECONNREFUSED',
+  'ENOTFOUND',
+  'P1000', // Prisma: authentication failed
+  'ER_ACCESS_DENIED_ERROR', // MySQL: access denied
+];
+
+export const isTransientConnectionError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message : String(error);
+  const code = (error as { code?: string })?.code ?? '';
+  const stderr =
+    (error as { stderr?: Buffer | string })?.stderr?.toString() ?? '';
+  const stdout =
+    (error as { stdout?: Buffer | string })?.stdout?.toString() ?? '';
+  return transientErrorPatterns.some(
+    (p) =>
+      message.includes(p) ||
+      code.includes(p) ||
+      stderr.includes(p) ||
+      stdout.includes(p),
+  );
+};
+
+export const withConnectionRetry = async <T>(
+  fn: () => Promise<T>,
+  {
+    maxAttempts = 6,
+    delayMs = 10_000,
+  }: { maxAttempts?: number; delayMs?: number } = {},
+): Promise<T> => {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (attempt === maxAttempts || !isTransientConnectionError(error)) {
+        throw error;
+      }
+      const wait = delayMs * attempt;
+      console.log(
+        \`Transient connection error (attempt \${attempt}/\${maxAttempts}), retrying in \${wait}ms: \${
+          error instanceof Error ? error.message : String(error)
+        }\`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, wait));
+    }
+  }
+  throw new Error('unreachable');
 };
 "
 `;

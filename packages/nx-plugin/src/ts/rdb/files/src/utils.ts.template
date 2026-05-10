@@ -85,3 +85,52 @@ export const getDatabaseConfig = (
     loadDatabaseConfig(runtimeConfigKey);
   return databaseConfigPromises[runtimeConfigKey];
 };
+
+// Aurora's writer endpoint is briefly unreachable from within the VPC right
+// after the cluster reports ready, and IAM policy attachments can take tens
+// of seconds to propagate before RDS accepts an IAM auth token. Both surface
+// as errors that resolve on retry.
+const transientErrorPatterns = [
+  'ETIMEDOUT',
+  'ECONNREFUSED',
+  'ENOTFOUND',
+  'P1000', // Prisma: authentication failed
+  'ER_ACCESS_DENIED_ERROR', // MySQL: access denied
+];
+
+export const isTransientConnectionError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message : String(error);
+  const code = (error as { code?: string })?.code ?? '';
+  const stderr = (error as { stderr?: Buffer | string })?.stderr?.toString() ?? '';
+  const stdout = (error as { stdout?: Buffer | string })?.stdout?.toString() ?? '';
+  return transientErrorPatterns.some(
+    (p) =>
+      message.includes(p) ||
+      code.includes(p) ||
+      stderr.includes(p) ||
+      stdout.includes(p),
+  );
+};
+
+export const withConnectionRetry = async <T>(
+  fn: () => Promise<T>,
+  { maxAttempts = 6, delayMs = 10_000 }: { maxAttempts?: number; delayMs?: number } = {},
+): Promise<T> => {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (attempt === maxAttempts || !isTransientConnectionError(error)) {
+        throw error;
+      }
+      const wait = delayMs * attempt;
+      console.log(
+        `Transient connection error (attempt ${attempt}/${maxAttempts}), retrying in ${wait}ms: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, wait));
+    }
+  }
+  throw new Error('unreachable');
+};
