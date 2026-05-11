@@ -2,6 +2,7 @@ import uuid
 
 import uvicorn
 from bedrock_agentcore.runtime.models import PingStatus
+from dungeon_adventure_agent_connection import session_id_context
 from fastapi import Request
 from pydantic import BaseModel
 
@@ -21,7 +22,10 @@ class StreamChunk(BaseModel):
 
 async def handle_invoke(input: InvokeInput, session_id: str):
     """Streaming handler for agent invocation"""
-    with get_agent(session_id=session_id) as agent:
+    # Bind the inbound AgentCore session to the async context so any
+    # downstream MCP / A2A clients invoked by the agent forward it on every
+    # outbound call.
+    with session_id_context(session_id), get_agent(session_id=session_id) as agent:
         stream = agent.stream_async(input.message)
         async for event in stream:
             print(event)
