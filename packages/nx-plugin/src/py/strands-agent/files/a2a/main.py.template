@@ -8,9 +8,10 @@ from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 from starlette.types import ASGIApp, Receive, Scope, Send
 from strands.multiagent.a2a import A2AServer
+from strands.session.file_session_manager import FileSessionManager
 
 from .agent import get_agent
-from .session import set_container_session_id
+from .session import get_container_session_id, set_container_session_id
 
 SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
 
@@ -26,9 +27,15 @@ class _LazyA2AApp:
 
     AgentCore routes each runtimeSessionId to a dedicated microVM, so one
     agent instance per container is the correct lifetime. Deferring
-    construction to the first inbound request means the
-    ``X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`` has been captured via
-    :mod:`session` before any downstream MCP / A2A client reads it.
+    construction to the first inbound request means:
+
+    1. The inbound ``X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`` has been
+       captured via :mod:`session` before any downstream MCP / A2A client
+       reads it - outbound calls forward the correct id.
+    2. The AgentCore-managed session storage mount at
+       ``SESSION_STORAGE_PATH`` is only available at invocation time
+       (not container init) - see
+       https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-filesystem-configurations.html
     """
 
     def __init__(self) -> None:
@@ -46,7 +53,16 @@ class _LazyA2AApp:
             set_container_session_id(headers.get(SESSION_ID_HEADER))
 
         if self._inner is None:
-            self._agent_ctx = get_agent()
+            storage_dir = os.environ.get("SESSION_STORAGE_PATH")
+            session_manager = (
+                FileSessionManager(
+                    session_id=get_container_session_id(),
+                    storage_dir=storage_dir,
+                )
+                if storage_dir
+                else None
+            )
+            self._agent_ctx = get_agent(session_manager=session_manager)
             server = A2AServer(
                 agent=self._agent_ctx.__enter__(),
                 port=PORT,

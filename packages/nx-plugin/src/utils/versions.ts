@@ -138,7 +138,7 @@ export const withVersions = (deps: ITsDepVersion[]) =>
  */
 export const PY_VERSIONS = {
   'ag-ui-protocol': '==0.1.18',
-  'ag-ui-strands': '==0.1.7',
+  'ag-ui-strands': '==0.1.8',
   'aws-lambda-powertools': '==3.28.0',
   'aws-lambda-powertools[tracer]': '==3.28.0',
   'aws-lambda-powertools[parser]': '==3.28.0',

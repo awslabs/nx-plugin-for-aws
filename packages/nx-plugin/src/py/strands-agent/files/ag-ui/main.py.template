@@ -1,12 +1,17 @@
 import logging
+import os
 from typing import Any
 
+from ag_ui.core import RunAgentInput
 from ag_ui_strands import StrandsAgent, create_strands_app
+from ag_ui_strands.config import StrandsAgentConfig
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 from starlette.types import ASGIApp, Receive, Scope, Send
+from strands.session import SessionManager
+from strands.session.file_session_manager import FileSessionManager
 
 from .agent import get_agent
 from .session import set_container_session_id
@@ -14,6 +19,32 @@ from .session import set_container_session_id
 SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
 
 logging.basicConfig(level=logging.INFO)
+
+
+def _build_session_manager(input_data: RunAgentInput) -> SessionManager | None:
+    """Per-thread FileSessionManager factory for the AG-UI adapter.
+
+    The adapter calls this once per ``thread_id`` the first time it sees
+    that thread, caches the resulting agent, and reuses it for subsequent
+    requests on the same thread. Keying storage on ``thread_id`` lets the
+    same client (same thread id) resume its full conversation history
+    across AgentCore stop/resume cycles, so long as:
+
+    - ``SESSION_STORAGE_PATH`` points at a mount that persists across
+      stop/resume (AgentCore-managed session storage does exactly this),
+      and
+    - the caller passes a stable ``thread_id`` for the same logical
+      conversation.
+
+    Absent ``SESSION_STORAGE_PATH`` (local serve), runs in-memory only.
+    """
+    storage_dir = os.environ.get("SESSION_STORAGE_PATH")
+    if not storage_dir or not input_data.thread_id:
+        return None
+    return FileSessionManager(
+        session_id=input_data.thread_id,
+        storage_dir=storage_dir,
+    )
 
 
 class _LazyStrandsApp:
@@ -29,6 +60,9 @@ class _LazyStrandsApp:
        reads it - outbound calls forward the correct id.
     2. ``/ping`` never triggers MCP connection opens, so health checks stay
        lightweight and do not depend on downstream services being reachable.
+    3. The session storage mount at ``SESSION_STORAGE_PATH`` is only
+       available at invocation time, not during container init - see
+       https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-filesystem-configurations.html
     """
 
     def __init__(self) -> None:
@@ -51,6 +85,9 @@ class _LazyStrandsApp:
                 agent=self._agent_ctx.__enter__(),
                 name="<%= agentNameClassName %>",
                 description="A Strands Agent exposed via the AG-UI protocol.",
+                config=StrandsAgentConfig(
+                    session_manager_provider=_build_session_manager,
+                ),
             )
             self._inner = create_strands_app(agui_agent, path="/invocations", ping_path=None)
 

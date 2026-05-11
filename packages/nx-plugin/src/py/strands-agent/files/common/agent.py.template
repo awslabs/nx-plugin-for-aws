@@ -1,11 +1,8 @@
-import os
 from contextlib import contextmanager
 
 from strands import Agent, tool
-from strands.session.file_session_manager import FileSessionManager
+from strands.session import SessionManager
 from strands_tools import current_time
-
-from .session import get_container_session_id
 
 
 # Define a custom tool
@@ -15,7 +12,7 @@ def subtract(a: int, b: int) -> int:
 
 
 @contextmanager
-def get_agent():
+def get_agent(session_manager: SessionManager | None = None):
     # The agent is built once on the first inbound request and kept open for
     # the lifetime of the container. AgentCore routes each runtimeSessionId
     # to a dedicated microVM, so one agent per container is the correct
@@ -23,22 +20,12 @@ def get_agent():
     # open their downstream clients inside the `yield` - those clients read
     # the captured session id lazily via :mod:`session` so they forward the
     # correct X-Amzn-Bedrock-AgentCore-Runtime-Session-Id header.
-
-    # When AgentCore-managed session storage is attached to the runtime, the
-    # mount path is exposed via SESSION_STORAGE_PATH. Persisting through
-    # FileSessionManager lets the agent resume the full conversation history
-    # after a stop/resume cycle. Absent the env var (e.g. local serve), the
-    # agent runs in-memory only.
-    session_storage_dir = os.environ.get("SESSION_STORAGE_PATH")
-    session_manager = (
-        FileSessionManager(
-            session_id=get_container_session_id(),
-            storage_dir=session_storage_dir,
-        )
-        if session_storage_dir
-        else None
-    )
-
+    #
+    # ``session_manager`` is supplied by the protocol layer (see main.py).
+    # It is left ``None`` for AG-UI, which requires a per-thread
+    # SessionManager provider on ``StrandsAgentConfig`` instead - forwarding
+    # a template-level session_manager would make every AG-UI thread share
+    # the same session_id.
     yield Agent(
         name="<%= agentNameClassName %>",
         description="<%= agentNameClassName %> Strands Agent",
