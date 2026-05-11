@@ -49,6 +49,10 @@ const createPythonBundleTarget = ({
     cache: true,
     executor: 'nx:run-commands',
     outputs: [`{workspaceRoot}/dist/{projectRoot}/${bundleTargetName}`],
+    // Include the project, its transitive dependencies, and the workspace
+    // uv.lock so adding a new workspace package (e.g. an agent-connection
+    // project) or bumping a locked version invalidates the cache.
+    inputs: ['default', '^default', '{workspaceRoot}/uv.lock'],
     options: {
       commands: [
         `uv export --frozen --no-dev --no-editable --project {projectRoot} --package ${packageName} -o dist/{projectRoot}/${bundleTargetName}/requirements.txt`,
