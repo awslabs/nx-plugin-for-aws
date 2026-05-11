@@ -25,6 +25,25 @@ export const detectPackageManager = (): string | undefined => {
 };
 
 /**
+ * Detect whether the user has requested non-interactive mode. Matches both
+ * `--no-interactive` and `--interactive=false` (and their `=true` inverse
+ * for `--no-interactive`, though nx does not accept that form — we only
+ * need to recognise the truthy non-interactive spellings).
+ */
+const isNonInteractive = (flagArgs: string[]): boolean =>
+  flagArgs.some((a) => a === '--no-interactive' || a === '--interactive=false');
+
+/**
+ * Detect whether the user has already specified --skipGit in any form
+ * (`--skipGit`, `--skipGit=true|false`, `--no-skipGit`).
+ */
+const hasSkipGitFlag = (flagArgs: string[]): boolean =>
+  flagArgs.some(
+    (a) =>
+      a === '--skipGit' || a.startsWith('--skipGit=') || a === '--no-skipGit',
+  );
+
+/**
  * Build the argument list for create-nx-workspace.
  * Positional args come first, then --preset and defaults, then user flags.
  */
@@ -40,6 +59,13 @@ export const buildArgs = (args: string[]): string[] => {
     if (pm) {
       defaultFlags.push(`--pm=${pm}`);
     }
+  }
+
+  // When running non-interactively, default to --skipGit so that a single
+  // --no-interactive flag is sufficient to skip every prompt (including the
+  // git init prompt that nx otherwise asks about).
+  if (isNonInteractive(flagArgs) && !hasSkipGitFlag(flagArgs)) {
+    defaultFlags.push('--skipGit');
   }
 
   const flagsToAdd = defaultFlags.filter(

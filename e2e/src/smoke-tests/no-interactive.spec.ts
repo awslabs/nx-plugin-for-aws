@@ -12,9 +12,9 @@ import { activatePackageManagerViaCorepack } from './corepack';
 /**
  * Verifies that `<pkgMgr> create @aws/nx-workspace` succeeds with only
  * `--no-interactive`, without any additional flags to set required schema
- * properties (e.g. `iacProvider`). Regression coverage for a missing default
- * that caused "Required property 'iacProvider' is missing" to abort the
- * preset after the workspace had already been created.
+ * properties (e.g. `iacProvider`) and without `--skipGit`. A single
+ * `--no-interactive` must be sufficient to skip every prompt, including
+ * the nx git-init prompt.
  *
  * Yarn is exercised twice — classic (whatever `yarn` is on PATH, typically
  * 1.x) and berry (yarn 4 activated via corepack) — since the two drive
@@ -67,7 +67,7 @@ describe('smoke test - no-interactive', () => {
 
       it(`Should create a workspace with --no-interactive - ${variant}`, async () => {
         await runCLI(
-          `${buildCreateNxWorkspaceCommand(pkgMgr, 'e2e-test')} --no-interactive --skipGit`,
+          `${buildCreateNxWorkspaceCommand(pkgMgr, 'e2e-test')} --no-interactive`,
           {
             cwd: targetDir,
             prefixWithPackageManagerCmd: false,
