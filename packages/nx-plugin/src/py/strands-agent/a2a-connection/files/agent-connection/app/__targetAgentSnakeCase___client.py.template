@@ -1,4 +1,5 @@
 import os
+from urllib.parse import quote
 
 from strands.agent.a2a_agent import A2AAgent
 
@@ -9,21 +10,19 @@ from <%- agentConnectionModuleName %>.core.runtime_config import (
 
 
 class <%- targetAgentClassName %>Client:
-    """Client for connecting to the <%- targetAgentClassName %> A2A agent.
-
-    In deployed mode: resolves the AgentCore runtime ARN from runtime config
-    and uses a SigV4-authenticated A2A transport.
-
-    In local mode (SERVE_LOCAL env var set): connects directly to the local
-    A2A server over plain HTTP.
-    """
+    """Client for the <%- targetAgentClassName %> A2A agent."""
 
     @staticmethod
-    def create(session_id: str) -> A2AAgent:
+    def create() -> A2AAgent:
         if os.environ.get("SERVE_LOCAL") == "true":
-            return A2AAgent(endpoint="http://localhost:<%- targetAgentPort %>/")
-
-        return AgentCoreA2aClient.with_iam_auth(
-            agent_runtime_arn=get_connected_agent_runtime_arn("<%- targetAgentClassName %>"),
-            session_id=session_id,
+            return AgentCoreA2aClient.without_auth(
+                "http://localhost:<%- targetAgentPort %>/"
+            )
+        agent_runtime_arn = get_connected_agent_runtime_arn("<%- targetAgentClassName %>")
+        region = agent_runtime_arn.split(":")[3]
+        encoded_arn = quote(agent_runtime_arn, safe="")
+        url = (
+            f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/"
+            f"{encoded_arn}/invocations/"
         )
+        return AgentCoreA2aClient.with_iam_auth(url, agent_runtime_arn)

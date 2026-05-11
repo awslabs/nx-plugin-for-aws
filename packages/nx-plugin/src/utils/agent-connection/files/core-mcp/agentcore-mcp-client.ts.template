@@ -1,154 +1,83 @@
-import { randomUUID } from 'node:crypto';
 import { McpClient } from '@strands-agents/sdk';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { AwsClient } from 'aws4fetch';
 import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
 import { getCurrentSessionId } from './session-context.js';
 
-/**
- * Common options for creating an AgentCore MCP client
- */
-export interface AgentCoreMcpClientOptions {
-  /**
-   * The ARN of the Bedrock AgentCore Runtime to connect to
-   */
-  agentRuntimeArn: string;
-  /**
-   * Fallback session ID to use when no session is set on the current async
-   * context. Each MCP request prefers the session ID from
-   * {@link getCurrentSessionId}, so clients constructed at startup still
-   * propagate the caller's session when invoked from a request handler.
-   */
-  sessionId?: string;
-}
+const SESSION_HEADER = 'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id';
 
-/**
- * Options for creating an AgentCore MCP client with IAM authentication
- */
-export interface AgentCoreMcpClientIamOptions
-  extends AgentCoreMcpClientOptions {
-  /**
-   * Optional AWS credential provider. If not provided, uses the default
-   * credential provider chain from the AWS SDK.
-   */
+export interface AgentCoreMcpClientIamOptions {
+  url: string;
   credentialProvider?: ReturnType<typeof fromNodeProviderChain>;
+  /** ARN used to derive the region for SigV4 signing. */
+  agentRuntimeArn: string;
 }
 
-/**
- * Options for creating an AgentCore MCP client with JWT authentication
- */
-export interface AgentCoreMcpClientJwtOptions
-  extends AgentCoreMcpClientOptions {
-  /**
-   * A function which returns the JWT access token used to authenticate
-   */
+export interface AgentCoreMcpClientJwtOptions {
+  url: string;
   accessTokenProvider: () => Promise<string>;
 }
 
-/**
- * Internal options for creating an AgentCore MCP client
- */
+export interface AgentCoreMcpClientNoAuthOptions {
+  url: string;
+}
+
 interface CreateOptions {
   url: string;
-  sessionId?: string;
   buildHeaders?: () => Promise<Record<string, string>>;
   fetch?: typeof fetch;
 }
 
-/**
- * Factory for clients to call MCP servers hosted on Bedrock AgentCore Runtime
- */
+/** Factory for MCP clients that forward the current async-context session. */
 export class AgentCoreMcpClient {
-  /**
-   * Construct the invocation URL for an AgentCore runtime ARN and extract the region.
-   * ARN format: arn:partition:service:region:account-id:resource
-   */
-  private static buildUrl(agentRuntimeArn: string): {
-    region: string;
-    url: string;
-  } {
-    const region = agentRuntimeArn.split(':')[3];
-    const url = `https://bedrock-agentcore.${region}.amazonaws.com/runtimes/${encodeURIComponent(agentRuntimeArn)}/invocations?qualifier=DEFAULT`;
-    return { region, url };
-  }
-
-  /**
-   * Internal method to create an MCP client
-   */
   private static create(options: CreateOptions): McpClient {
     const {
       url,
-      sessionId: fallbackSessionId,
       buildHeaders = async (): Promise<Record<string, string>> => ({}),
       fetch: customFetch,
     } = options;
-    // Generated once when no session is supplied by either the caller or the
-    // current async context, so repeated requests from outside a server
-    // handler share one session rather than creating a new session per call.
-    const defaultSessionId = fallbackSessionId ?? randomUUID();
-
-    // Create a custom fetch that resolves the session ID per-request so the
-    // AgentCore session header reflects the caller's session, even when the
-    // MCP client was constructed at startup with a different (or no) session.
     const fetchWithHeaders: typeof fetch = async (input, init) => {
       const headers = new Headers(init?.headers);
-      const sessionId = getCurrentSessionId() ?? defaultSessionId;
-      headers.set('X-Amzn-Bedrock-AgentCore-Runtime-Session-Id', sessionId);
-      for (const [k, v] of Object.entries(await buildHeaders())) {
-        headers.set(k, v);
+      const sessionId = getCurrentSessionId();
+      if (sessionId) headers.set(SESSION_HEADER, sessionId);
+      const extra = await buildHeaders();
+      for (const k of Object.keys(extra)) {
+        headers.set(k, extra[k]);
       }
-      return (customFetch || fetch)(input, { ...init, headers });
+      return (customFetch ?? fetch)(input, { ...init, headers });
     };
-
-    // Create the transport
     const transport = new StreamableHTTPClientTransport(new URL(url), {
       fetch: fetchWithHeaders,
     });
-
-    // Create and return the MCP client
     return new McpClient({ transport });
   }
 
-  /**
-   * Create an MCP client with IAM (SigV4) authentication
-   */
   static withIamAuth(options: AgentCoreMcpClientIamOptions): McpClient {
-    const { agentRuntimeArn, sessionId } = options;
+    const region = options.agentRuntimeArn.split(':')[3];
     const credentialProvider =
       options.credentialProvider ?? fromNodeProviderChain();
-    const { region, url } = AgentCoreMcpClient.buildUrl(agentRuntimeArn);
-
-    // Create a SigV4 signing fetch function
     const sigv4Fetch: typeof fetch = async (...args) => {
-      const credentials = await credentialProvider();
       const client = new AwsClient({
-        ...credentials,
+        ...(await credentialProvider()),
         service: 'bedrock-agentcore',
         region,
       });
       return client.fetch(...args);
     };
+    return AgentCoreMcpClient.create({ url: options.url, fetch: sigv4Fetch });
+  }
 
+  static withJwtAuth(options: AgentCoreMcpClientJwtOptions): McpClient {
     return AgentCoreMcpClient.create({
-      url,
-      sessionId,
-      fetch: sigv4Fetch,
+      url: options.url,
+      buildHeaders: async () => ({
+        Authorization: `Bearer ${await options.accessTokenProvider()}`,
+      }),
     });
   }
 
-  /**
-   * Create an MCP client with JWT authentication
-   */
-  static withJwtAuth(options: AgentCoreMcpClientJwtOptions): McpClient {
-    const { agentRuntimeArn, accessTokenProvider, sessionId } = options;
-    const { url } = AgentCoreMcpClient.buildUrl(agentRuntimeArn);
-
-    return AgentCoreMcpClient.create({
-      url,
-      sessionId,
-      buildHeaders: async () => ({
-        Authorization: `Bearer ${await accessTokenProvider()}`,
-      }),
-    });
+  /** For local dev — plain HTTP, no auth. */
+  static withoutAuth(options: AgentCoreMcpClientNoAuthOptions): McpClient {
+    return AgentCoreMcpClient.create({ url: options.url });
   }
 }

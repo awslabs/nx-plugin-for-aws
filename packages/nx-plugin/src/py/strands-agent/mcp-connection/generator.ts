@@ -274,9 +274,9 @@ const addMcpClientToGetAgent = async (
     await applyGritQL(
       tree,
       filePath,
-      py(`\`$var = $cls.create(session_id=session_id)\` as $stmt where {
+      py(`\`$var = $cls.create()\` as $stmt where {
   $program <: not contains \`${clientClassName}.create\`,
-  $stmt += \`\n${clientVarName} = ${clientClassName}.create(session_id=session_id)\`
+  $stmt += \`\n${clientVarName} = ${clientClassName}.create()\`
 }`),
     );
     return;
@@ -293,7 +293,7 @@ const addMcpClientToGetAgent = async (
   $body <: contains \`yield Agent($_)\`,
   $body <: not contains \`with ($_, ): $_\`
 } => \`def get_agent($params):
-    ${clientVarName} = ${clientClassName}.create(session_id=session_id)
+    ${clientVarName} = ${clientClassName}.create()
     with (
         ${clientVarName},
     ):

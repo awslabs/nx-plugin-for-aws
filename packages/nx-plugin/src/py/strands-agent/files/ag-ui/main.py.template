@@ -12,8 +12,12 @@ logging.basicConfig(level=logging.INFO)
 
 SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
 
-# Create AG-UI agent wrapper
-_agent_ctx = get_agent(session_id="default")
+# ag_ui_strands creates a fresh Agent per thread_id from this template. Any
+# MCP clients held by the template are shared across threads and run in a
+# background thread whose contextvar was snapshotted at startup — sessions
+# set on request won't propagate to downstream MCP calls. For per-session
+# MCP isolation, wire ag_ui_strands' session_manager_provider hook.
+_agent_ctx = get_agent()
 _agent = _agent_ctx.__enter__()
 
 agui_agent = StrandsAgent(
@@ -24,12 +28,7 @@ agui_agent = StrandsAgent(
 
 
 class _SessionIdMiddleware(BaseHTTPMiddleware):
-    """Bind the inbound AgentCore session to the async context.
-
-    Downstream MCP / A2A clients read the session from this context on each
-    outbound call, so per-request session propagation works even though the
-    agent is instantiated once at startup.
-    """
+    """Bind the inbound session (or a fresh UUID) to async context."""
 
     async def dispatch(self, request: Request, call_next):
         session_id = request.headers.get(SESSION_ID_HEADER) or str(uuid.uuid4())
@@ -37,6 +36,5 @@ class _SessionIdMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
 
-# Create FastAPI app with AG-UI endpoint and health check
 app = create_strands_app(agui_agent, path="/invocations")
 app.add_middleware(_SessionIdMiddleware)

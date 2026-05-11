@@ -1,6 +1,5 @@
 import os
 
-from mcp.client.streamable_http import streamablehttp_client
 from strands.tools.mcp.mcp_client import MCPClient
 
 from <%- agentConnectionModuleName %>.core.agentcore_mcp_client import AgentCoreMCPClient
@@ -10,21 +9,19 @@ from <%- agentConnectionModuleName %>.core.runtime_config import (
 
 
 class <%- mcpServerClassName %>Client:
-    """Client for connecting to the <%- mcpServerClassName %> MCP server.
-
-    In deployed mode: resolves the AgentCore runtime ARN from runtime config
-    and uses SigV4-authenticated AgentCore transport.
-
-    In local mode (SERVE_LOCAL env var set): connects directly
-    to the local MCP server via Streamable HTTP.
-    """
+    """Client for the <%- mcpServerClassName %> MCP server."""
 
     @staticmethod
-    def create(session_id: str) -> MCPClient:
+    def create() -> MCPClient:
         if os.environ.get("SERVE_LOCAL") == "true":
-            return MCPClient(lambda: streamablehttp_client("http://localhost:<%- mcpServerPort %>/mcp"))
-
-        return AgentCoreMCPClient.with_iam_auth(
-            agent_runtime_arn=get_connected_agent_runtime_arn("<%- mcpServerClassName %>"),
-            session_id=session_id,
+            return AgentCoreMCPClient.without_auth(
+                "http://localhost:<%- mcpServerPort %>/mcp"
+            )
+        agent_runtime_arn = get_connected_agent_runtime_arn("<%- mcpServerClassName %>")
+        region = agent_runtime_arn.split(":")[3]
+        encoded_arn = agent_runtime_arn.replace(":", "%3A").replace("/", "%2F")
+        url = (
+            f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/"
+            f"{encoded_arn}/invocations?qualifier=DEFAULT"
         )
+        return AgentCoreMCPClient.with_iam_auth(url, agent_runtime_arn)

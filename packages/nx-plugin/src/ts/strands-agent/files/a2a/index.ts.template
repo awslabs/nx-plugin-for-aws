@@ -14,7 +14,7 @@ void (async () => {
     process.env.AGENTCORE_RUNTIME_URL ?? `http://localhost:${PORT}/`;
 
   const server = new A2AExpressServer({
-    agent: await getAgent('default'),
+    agent: await getAgent(),
     name: '<%= agentNameClassName %>',
     description:
       'A Strands Agent exposed via the Agent-to-Agent (A2A) protocol.',
@@ -25,12 +25,11 @@ void (async () => {
 
   const app = express();
   app.get('/ping', (_req, res) => res.status(200).json({ status: 'Healthy' }));
-  // Bind the inbound AgentCore session to the async context so downstream
-  // MCP / A2A clients forward it on every outbound call.
-  app.use((req: Request, res: Response, next: NextFunction) => {
+  // Bind the inbound session (or a fresh UUID) for downstream MCP / A2A calls.
+  app.use((req: Request, _res: Response, next: NextFunction) => {
     const header = req.headers[SESSION_ID_HEADER];
-    const sessionId = Array.isArray(header) ? header[0] : header;
-    runWithSessionId(sessionId ?? randomUUID(), () => next());
+    const sessionId = (Array.isArray(header) ? header[0] : header) ?? randomUUID();
+    runWithSessionId(sessionId, () => next());
   });
   app.use(server.createMiddleware());
   app.listen(PORT, HOST, () => {

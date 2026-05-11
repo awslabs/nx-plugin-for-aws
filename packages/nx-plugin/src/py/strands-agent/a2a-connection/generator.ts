@@ -267,7 +267,7 @@ const addClientToolToGetAgent = async (
   // The tool function we'll insert. Strands tools in Python are just
   // @tool-decorated callables, so we define them inline in get_agent.
   // A2AAgent is directly callable (syncs over invoke_async internally).
-  const toolBlock = `${clientVarName} = ${clientClassName}.create(session_id=session_id)
+  const toolBlock = `${clientVarName} = ${clientClassName}.create()
 
     @tool
     def ${toolName}(prompt: str) -> str:

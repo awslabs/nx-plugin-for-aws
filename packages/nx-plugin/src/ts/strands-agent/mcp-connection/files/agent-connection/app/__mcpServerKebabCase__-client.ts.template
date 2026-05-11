@@ -1,30 +1,20 @@
 import { McpClient } from '@strands-agents/sdk';
 import { AgentCoreMcpClient } from '../core/agentcore-mcp-client.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { getConnectedAgentRuntimeArn } from '../core/runtime-config.js';
 
-/**
- * Client for connecting to the <%- mcpServerClassName %> MCP server.
- *
- * In deployed mode: resolves the AgentCore runtime ARN from runtime config
- * and uses SigV4-authenticated AgentCore transport.
- *
- * In local mode (SERVE_LOCAL env var set): connects directly
- * to the local MCP server via Streamable HTTP.
- */
+/** Client for the <%- mcpServerClassName %> MCP server. */
 export class <%- mcpServerClassName %>Client {
-  static async create(sessionId: string): Promise<McpClient> {
+  static async create(): Promise<McpClient> {
     if (process.env.SERVE_LOCAL === 'true') {
-      // Local development: connect directly via Streamable HTTP
-      const transport = new StreamableHTTPClientTransport(
-        new URL('http://localhost:<%- mcpServerPort %>/mcp'),
-      );
-      return new McpClient({ transport });
+      return AgentCoreMcpClient.withoutAuth({
+        url: 'http://localhost:<%- mcpServerPort %>/mcp',
+      });
     }
-
-    return AgentCoreMcpClient.withIamAuth({
-      agentRuntimeArn: await getConnectedAgentRuntimeArn('<%- mcpServerClassName %>'),
-      sessionId,
-    });
+    const agentRuntimeArn = await getConnectedAgentRuntimeArn(
+      '<%- mcpServerClassName %>',
+    );
+    const region = agentRuntimeArn.split(':')[3];
+    const url = `https://bedrock-agentcore.${region}.amazonaws.com/runtimes/${encodeURIComponent(agentRuntimeArn)}/invocations?qualifier=DEFAULT`;
+    return AgentCoreMcpClient.withIamAuth({ url, agentRuntimeArn });
   }
 }

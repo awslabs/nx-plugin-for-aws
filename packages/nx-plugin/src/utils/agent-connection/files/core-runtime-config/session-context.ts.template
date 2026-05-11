@@ -2,36 +2,20 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 
 const sessionStorage = new AsyncLocalStorage<string>();
 
-/**
- * Run `callback` with `sessionId` as the current session for the duration of
- * the async operation. Anything in the async scope of `callback` — including
- * downstream MCP/A2A client calls — can read the session via
- * {@link getCurrentSessionId}.
- */
-export const runWithSessionId = <T>(
-  sessionId: string,
-  callback: () => T,
-): T => {
-  return sessionStorage.run(sessionId, callback);
-};
+/** Run `callback` with `sessionId` as the current session. */
+export const runWithSessionId = <T>(sessionId: string, callback: () => T): T =>
+  sessionStorage.run(sessionId, callback);
 
 /**
- * Bind `sessionId` as the current session for the remainder of the current
- * async context, without requiring the caller's work to live inside a
- * callback. Used from async-generator bodies where `runWithSessionId` doesn't
- * work — the generator is iterated by the transport *outside* any `run()`
- * block, so the store must be entered on the generator's own async flow.
+ * Bind `sessionId` onto the current async flow.
+ *
+ * Use from inside async generators (e.g. tRPC subscriptions), where the
+ * generator is iterated outside any `run()` callback.
  */
 export const enterSessionContext = (sessionId: string): void => {
   sessionStorage.enterWith(sessionId);
 };
 
-/**
- * Return the session ID for the current async scope, or `undefined` if none
- * has been set. AgentCore runtime sessions propagate via the
- * `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` header, which the server
- * entrypoint reads and stores here so downstream clients can forward it.
- */
-export const getCurrentSessionId = (): string | undefined => {
-  return sessionStorage.getStore();
-};
+/** The session ID for the current async scope, or `undefined`. */
+export const getCurrentSessionId = (): string | undefined =>
+  sessionStorage.getStore();

@@ -154,7 +154,7 @@ export const getAgent = async (sessionId: string) =>
 
     const agent = tree.read('apps/ts-host/src/host/agent.ts', 'utf-8')!;
     expect(agent).toContain('RemoteClient');
-    expect(agent).toContain('RemoteClient.create(sessionId)');
+    expect(agent).toContain('RemoteClient.create()');
     expect(agent).toContain("name: 'askRemote'");
     expect(agent).toContain('remote.invoke(prompt)');
     expect(agent).toContain('remoteTool');
@@ -352,7 +352,7 @@ export const getAgent = async (sessionId: string) => {
 
     const agent = tree.read('apps/ts-host/src/host/agent.ts', 'utf-8')!;
     expect(agent).toContain("console.log('Creating agent')");
-    expect(agent).toContain('RemoteClient.create(sessionId)');
+    expect(agent).toContain('RemoteClient.create()');
     // Tool creation must come before new Agent()
     const clientIdx = agent.indexOf('RemoteClient.create');
     const newAgentIdx = agent.indexOf('new Agent(');
