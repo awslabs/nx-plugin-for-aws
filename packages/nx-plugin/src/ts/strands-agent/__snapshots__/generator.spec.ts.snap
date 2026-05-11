@@ -930,7 +930,7 @@ exports[`ts#strands-agent generator > should match snapshot for generated files 
 "import { publicProcedure, t } from './init.js';
 import { z } from 'zod';
 import { zAsyncIterable } from './schema/z-async-iterable.js';
-import { runWithSessionId } from ':proj/agent-connection';
+import { enterSessionContext } from ':proj/agent-connection';
 import { getAgent } from './agent.js';
 
 export const router = t.router;
@@ -944,29 +944,26 @@ export const appRouter = router({
         tracked: false,
       }),
     )
-    // Wrap the subscription body in runWithSessionId so any downstream
-    // MCP / A2A clients invoked by the agent forward the caller's
-    // AgentCore session on every outbound request.
-    .subscription((opts) =>
-      runWithSessionId(
-        opts.ctx.sessionId,
-        (async function* () {
-          const agent = await getAgent(opts.ctx.sessionId);
+    .subscription(async function* (opts) {
+      // Bind the inbound AgentCore session to the generator's async context
+      // so any downstream MCP / A2A clients invoked by the agent forward the
+      // caller's session on every outbound request.
+      enterSessionContext(opts.ctx.sessionId);
+      const agent = await getAgent(opts.ctx.sessionId);
 
-          for await (const event of agent.stream(opts.input.message)) {
-            if (
-              event.type === 'modelStreamUpdateEvent' &&
-              event.event.type === 'modelContentBlockDeltaEvent' &&
-              event.event.delta.type === 'textDelta'
-            ) {
-              yield event.event.delta.text;
-            } else if (event.type === 'modelMessageEvent') {
-              yield '\\n';
-            }
-          }
-        })(),
-      ),
-    ),
+      for await (const event of agent.stream(opts.input.message)) {
+        if (
+          event.type === 'modelStreamUpdateEvent' &&
+          event.event.type === 'modelContentBlockDeltaEvent' &&
+          event.event.delta.type === 'textDelta'
+        ) {
+          yield event.event.delta.text;
+        } else if (event.type === 'modelMessageEvent') {
+          yield '\\n';
+        }
+      }
+      return;
+    }),
 });
 
 export type AppRouter = typeof appRouter;
