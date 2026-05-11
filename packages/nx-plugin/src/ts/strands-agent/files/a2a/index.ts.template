@@ -13,20 +13,13 @@ void (async () => {
 
   const app = express();
   app.use((req, _res, next) => {
-    // Capture the inbound AgentCore session id once per container so any
-    // downstream MCP / A2A clients forward the same id on their outbound calls.
     const header = req.headers[SESSION_ID_HEADER];
     setContainerSessionId(Array.isArray(header) ? header[0] : header);
     next();
   });
   app.get('/ping', (_req, res) => res.status(200).json({ status: 'Healthy' }));
 
-  // AgentCore routes each runtimeSessionId to a dedicated microVM, so one
-  // agent instance per container is the correct lifetime. Deferring
-  // construction to the first inbound request means the session id has
-  // been captured via session.ts before the agent (and its
-  // SessionManager) are built, so downstream MCP / A2A clients forward
-  // the correct id and session storage is keyed on the real session.
+  // Lazy: defer until the session id is captured on the first request.
   let middlewarePromise: Promise<express.RequestHandler> | undefined;
   const getMiddleware = (): Promise<express.RequestHandler> => {
     if (!middlewarePromise) {

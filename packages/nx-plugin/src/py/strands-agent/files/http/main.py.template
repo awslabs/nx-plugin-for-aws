@@ -12,10 +12,8 @@ from .session import get_container_session_id, set_container_session_id
 
 SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
 
-# AgentCore routes each runtimeSessionId to a dedicated microVM, so one agent
-# instance per container is the correct lifetime. The context is entered on
-# first request (after the session id has been captured) and kept open for
-# the lifetime of the process - see session.py.
+# One agent instance per container; constructed on first request (after
+# the session id has been captured) and kept open for the process lifetime.
 _agent_ctx = None
 _agent = None
 
@@ -23,12 +21,6 @@ _agent = None
 def _ensure_agent_started():
     global _agent_ctx, _agent
     if _agent is None:
-        # Build a FileSessionManager keyed on the container's
-        # runtimeSessionId when AgentCore-managed session storage is
-        # mounted at SESSION_STORAGE_PATH. The mount is only available at
-        # invocation time (not container init), so we construct the agent
-        # on the first request. See
-        # https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-filesystem-configurations.html
         storage_dir = os.environ.get("SESSION_STORAGE_PATH")
         session_manager = (
             FileSessionManager(
@@ -69,8 +61,6 @@ async def handle_invoke(input: InvokeInput):
 )
 async def invoke(input: InvokeInput, request: Request) -> JsonStreamingResponse:
     """Entry point for agent invocation."""
-    # Capture the inbound AgentCore session id once per container so any
-    # downstream MCP / A2A clients forward the same id on their outbound calls.
     set_container_session_id(request.headers.get(SESSION_ID_HEADER))
     _ensure_agent_started()
     return JsonStreamingResponse(handle_invoke(input))

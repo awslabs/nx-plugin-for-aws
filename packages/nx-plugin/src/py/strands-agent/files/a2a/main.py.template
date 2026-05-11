@@ -22,29 +22,14 @@ RUNTIME_URL = os.environ.get("AGENTCORE_RUNTIME_URL", f"http://localhost:{PORT}/
 
 
 class _LazyA2AApp:
-    """Wraps ``A2AServer`` so the inner app is built on first agent
-    invocation - never on a ``/ping`` health check.
-
-    AgentCore routes each runtimeSessionId to a dedicated microVM, so one
-    agent instance per container is the correct lifetime. Deferring
-    construction to the first inbound request means:
-
-    1. The inbound ``X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`` has been
-       captured via :mod:`session` before any downstream MCP / A2A client
-       reads it - outbound calls forward the correct id.
-    2. The AgentCore-managed session storage mount at
-       ``SESSION_STORAGE_PATH`` is only available at invocation time
-       (not container init) - see
-       https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-filesystem-configurations.html
-    """
+    """Builds the A2A app on first invocation so the session id and
+    ``SESSION_STORAGE_PATH`` mount are available."""
 
     def __init__(self) -> None:
         self._inner: ASGIApp | None = None
         self._agent_ctx: Any = None
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        # Capture the inbound AgentCore session id first so downstream MCP / A2A
-        # clients forward it on their outbound calls.
         if scope["type"] == "http":
             headers = dict(
                 (k.decode("latin-1"), v.decode("latin-1"))

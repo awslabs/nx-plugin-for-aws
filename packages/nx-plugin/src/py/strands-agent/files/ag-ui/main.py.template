@@ -22,22 +22,7 @@ logging.basicConfig(level=logging.INFO)
 
 
 def _build_session_manager(input_data: RunAgentInput) -> SessionManager | None:
-    """Per-thread FileSessionManager factory for the AG-UI adapter.
-
-    The adapter calls this once per ``thread_id`` the first time it sees
-    that thread, caches the resulting agent, and reuses it for subsequent
-    requests on the same thread. Keying storage on ``thread_id`` lets the
-    same client (same thread id) resume its full conversation history
-    across AgentCore stop/resume cycles, so long as:
-
-    - ``SESSION_STORAGE_PATH`` points at a mount that persists across
-      stop/resume (AgentCore-managed session storage does exactly this),
-      and
-    - the caller passes a stable ``thread_id`` for the same logical
-      conversation.
-
-    Absent ``SESSION_STORAGE_PATH`` (local serve), runs in-memory only.
-    """
+    """Per-thread FileSessionManager keyed on ``input_data.thread_id``."""
     storage_dir = os.environ.get("SESSION_STORAGE_PATH")
     if not storage_dir or not input_data.thread_id:
         return None
@@ -48,21 +33,11 @@ def _build_session_manager(input_data: RunAgentInput) -> SessionManager | None:
 
 
 class _LazyStrandsApp:
-    """Wraps ``create_strands_app`` so the inner Strands app is built on
-    first agent invocation - never on a ``/ping`` health check.
+    """Builds the Strands app on first invocation.
 
-    AgentCore routes each runtimeSessionId to a dedicated microVM, so one
-    agent instance per container is the correct lifetime. Deferring
-    construction to the first ``/invocations`` request means:
-
-    1. The inbound ``X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`` has been
-       captured via :mod:`session` before any downstream MCP / A2A client
-       reads it - outbound calls forward the correct id.
-    2. ``/ping`` never triggers MCP connection opens, so health checks stay
-       lightweight and do not depend on downstream services being reachable.
-    3. The session storage mount at ``SESSION_STORAGE_PATH`` is only
-       available at invocation time, not during container init - see
-       https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-filesystem-configurations.html
+    Defers construction past ``/ping`` so health checks stay lightweight,
+    and past container init so the session id and ``SESSION_STORAGE_PATH``
+    mount are available.
     """
 
     def __init__(self) -> None:
@@ -70,8 +45,6 @@ class _LazyStrandsApp:
         self._agent_ctx: Any = None
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        # Capture the inbound AgentCore session id first so downstream MCP / A2A
-        # clients forward it on their outbound calls.
         if scope["type"] == "http":
             headers = dict(
                 (k.decode("latin-1"), v.decode("latin-1"))

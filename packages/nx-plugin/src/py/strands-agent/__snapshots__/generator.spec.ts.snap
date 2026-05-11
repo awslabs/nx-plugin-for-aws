@@ -42,13 +42,8 @@ import {
 import { RuntimeConfig } from '../../../core/runtime-config.js';
 import { findWorkspaceRoot } from '../../../core/workspace.js';
 
-/**
- * Path inside the microVM where AgentCore-managed session storage is
- * mounted. Persists across stop/resume for the same runtimeSessionId, so
- * Strands' SessionManager can restore conversation history after a
- * session is resumed. Must match the \`/mnt/<subdir>\` pattern required by
- * AgentCore.
- */
+// Mount path for AgentCore-managed session storage. Must match the
+// \`/mnt/<subdir>\` pattern required by AgentCore.
 const SESSION_STORAGE_MOUNT_PATH = '/mnt/sessions';
 
 export type SnapshotBedrockAgentProps = Omit<
@@ -96,13 +91,8 @@ export class SnapshotBedrockAgent
       },
     });
 
-    // Attach AgentCore-managed session storage so the Strands SessionManager
-    // inside the agent can persist conversation history to a mount that
-    // survives stop/resume of the same runtimeSessionId.
-    //
-    // The alpha Runtime construct does not yet expose filesystemConfigurations,
-    // so we set the property directly on the underlying CfnRuntime.
-    // https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-filesystem-configurations.html
+    // Attach session storage via the underlying CfnRuntime — the alpha
+    // Runtime construct does not yet expose filesystemConfigurations.
     const cfnRuntime = this.agentCoreRuntime.node.defaultChild as CfnRuntime;
     cfnRuntime.filesystemConfigurations = [
       {
@@ -669,19 +659,11 @@ def subtract(a: int, b: int) -> int:
 
 @contextmanager
 def get_agent(session_manager: SessionManager | None = None):
-    # The agent is built once on the first inbound request and kept open for
-    # the lifetime of the container. AgentCore routes each runtimeSessionId
-    # to a dedicated microVM, so one agent per container is the correct
-    # lifetime. Connection generators (MCP / A2A) extend this function to
-    # open their downstream clients inside the \`yield\` - those clients read
-    # the captured session id lazily via :mod:\`session\` so they forward the
-    # correct X-Amzn-Bedrock-AgentCore-Runtime-Session-Id header.
-    #
-    # \`\`session_manager\`\` is supplied by the protocol layer (see main.py).
-    # It is left \`\`None\`\` for AG-UI, which requires a per-thread
-    # SessionManager provider on \`\`StrandsAgentConfig\`\` instead - forwarding
-    # a template-level session_manager would make every AG-UI thread share
-    # the same session_id.
+    # One agent per container (AgentCore maps one runtimeSessionId per
+    # microVM). Connection generators (MCP / A2A) extend this function to
+    # open downstream clients inside the \`yield\`. \`\`session_manager\`\` is
+    # supplied by the protocol layer and left \`\`None\`\` for AG-UI, which
+    # requires a per-thread provider on \`\`StrandsAgentConfig\`\` instead.
     yield Agent(
         name="SnapshotAgent",
         description="SnapshotAgent Strands Agent",
@@ -711,10 +693,8 @@ from .session import get_container_session_id, set_container_session_id
 
 SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
 
-# AgentCore routes each runtimeSessionId to a dedicated microVM, so one agent
-# instance per container is the correct lifetime. The context is entered on
-# first request (after the session id has been captured) and kept open for
-# the lifetime of the process - see session.py.
+# One agent instance per container; constructed on first request (after
+# the session id has been captured) and kept open for the process lifetime.
 _agent_ctx = None
 _agent = None
 
@@ -722,12 +702,6 @@ _agent = None
 def _ensure_agent_started():
     global _agent_ctx, _agent
     if _agent is None:
-        # Build a FileSessionManager keyed on the container's
-        # runtimeSessionId when AgentCore-managed session storage is
-        # mounted at SESSION_STORAGE_PATH. The mount is only available at
-        # invocation time (not container init), so we construct the agent
-        # on the first request. See
-        # https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-filesystem-configurations.html
         storage_dir = os.environ.get("SESSION_STORAGE_PATH")
         session_manager = (
             FileSessionManager(
@@ -777,8 +751,6 @@ async def handle_invoke(input: InvokeInput):
 )
 async def invoke(input: InvokeInput, request: Request) -> JsonStreamingResponse:
     """Entry point for agent invocation."""
-    # Capture the inbound AgentCore session id once per container so any
-    # downstream MCP / A2A clients forward the same id on their outbound calls.
     set_container_session_id(request.headers.get(SESSION_ID_HEADER))
     _ensure_agent_started()
     return JsonStreamingResponse(handle_invoke(input))
