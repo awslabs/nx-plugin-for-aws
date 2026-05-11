@@ -2,9 +2,21 @@ import { publicProcedure, t } from './init.js';
 import { z } from 'zod';
 import { zAsyncIterable } from './schema/z-async-iterable.js';
 import { enterSessionContext } from '<%- agentConnectionImport %>';
+import { Agent } from '@strands-agents/sdk';
 import { getAgent } from './agent.js';
 
 export const router = t.router;
+
+// Reuse one Agent per session so conversation history persists across turns.
+const agents = new Map<string, Promise<Agent>>();
+const getCachedAgent = (sessionId: string): Promise<Agent> => {
+  let existing = agents.get(sessionId);
+  if (!existing) {
+    existing = getAgent(sessionId);
+    agents.set(sessionId, existing);
+  }
+  return existing;
+};
 
 export const appRouter = router({
   invoke: publicProcedure
@@ -20,7 +32,7 @@ export const appRouter = router({
       // so any downstream MCP / A2A clients invoked by the agent forward the
       // caller's session on every outbound request.
       enterSessionContext(opts.ctx.sessionId);
-      const agent = await getAgent(opts.ctx.sessionId);
+      const agent = await getCachedAgent(opts.ctx.sessionId);
 
       for await (const event of agent.stream(opts.input.message)) {
         if (

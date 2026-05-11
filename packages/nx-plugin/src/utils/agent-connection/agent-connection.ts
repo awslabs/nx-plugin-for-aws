@@ -243,6 +243,26 @@ export async function addPythonReExport(
   const importLine = `from ${fromModule} import ${importName}`;
   const allEntry = `"${importName}"`;
 
+  // If there's already an import from the same module, merge into its name list
+  // (ruff I001 rejects two `from X import ...` lines for the same module).
+  const mergedImport = await applyGritQL(
+    tree,
+    initFilePath,
+    py(`\`from ${fromModule} import $names\` where {
+  $names <: not contains \`${importName}\`,
+  $names += \`, ${importName}\`
+}`),
+  );
+
+  if (mergedImport) {
+    await applyGritQL(
+      tree,
+      initFilePath,
+      py(`\`__all__ = [$items]\` where { $items += \`, ${allEntry}\` }`),
+    );
+    return;
+  }
+
   // Try to append import after existing import using +=
   const appendedImport = await applyGritQL(
     tree,
