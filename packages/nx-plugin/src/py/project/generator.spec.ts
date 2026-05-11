@@ -77,6 +77,7 @@ describe('python project generator', () => {
 
     expect(projectConfig.targets.typecheck).toEqual({
       cache: true,
+      inputs: ['default', '^production'],
       executor: '@nxlv/python:run-commands',
       options: {
         command: 'uv run ty check',
