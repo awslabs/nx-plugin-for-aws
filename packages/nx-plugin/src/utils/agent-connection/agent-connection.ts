@@ -13,7 +13,7 @@ import pyProjectGenerator, {
   getPyProjectDetails,
 } from '../../py/project/generator';
 import { addDependenciesToPyProjectToml } from '../py';
-import { applyGritQL, matchGritQL } from '../ast';
+import { addStarExport, applyGritQL, matchGritQL } from '../ast';
 
 /** Prefix a GritQL pattern with `language python` */
 const py = (pattern: string) => `language python\n${pattern}`;
@@ -108,6 +108,15 @@ export async function ensureTypeScriptAgentConnectionProject(
     {},
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
+
+  // Re-export session-context helpers so strands-agent server entry points
+  // can set the current session on each inbound request without pulling in
+  // the agent-connection internals.
+  await addStarExport(
+    tree,
+    joinPathFragments(AGENT_CONNECTION_PROJECT_DIR, 'src', 'index.ts'),
+    './core/session-context.js',
+  );
 }
 
 /**
@@ -171,6 +180,23 @@ export async function ensurePythonAgentConnectionProject(
     coreDir,
     {},
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
+  );
+
+  // Re-export session-context helpers so strands-agent server entry points
+  // can set the current session on each inbound request without importing
+  // the agent-connection internals directly.
+  const moduleInitPath = joinPathFragments(moduleDir, '__init__.py');
+  await addPythonReExport(
+    tree,
+    moduleInitPath,
+    '.core.session_context',
+    'get_current_session_id',
+  );
+  await addPythonReExport(
+    tree,
+    moduleInitPath,
+    '.core.session_context',
+    'session_id_context',
   );
 
   // Shared core helpers depend on aws-lambda-powertools for AppConfig access.

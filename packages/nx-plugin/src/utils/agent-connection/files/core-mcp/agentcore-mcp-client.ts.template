@@ -3,6 +3,7 @@ import { McpClient } from '@strands-agents/sdk';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { AwsClient } from 'aws4fetch';
 import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
+import { getCurrentSessionId } from './session-context.js';
 
 /**
  * Common options for creating an AgentCore MCP client
@@ -13,8 +14,10 @@ export interface AgentCoreMcpClientOptions {
    */
   agentRuntimeArn: string;
   /**
-   * Session ID to include in request headers.
-   * Defaults to a random UUID if not provided.
+   * Fallback session ID to use when no session is set on the current async
+   * context. Each MCP request prefers the session ID from
+   * {@link getCurrentSessionId}, so clients constructed at startup still
+   * propagate the caller's session when invoked from a request handler.
    */
   sessionId?: string;
 }
@@ -75,14 +78,21 @@ export class AgentCoreMcpClient {
   private static create(options: CreateOptions): McpClient {
     const {
       url,
-      sessionId = randomUUID(),
+      sessionId: fallbackSessionId,
       buildHeaders = async (): Promise<Record<string, string>> => ({}),
       fetch: customFetch,
     } = options;
+    // Generated once when no session is supplied by either the caller or the
+    // current async context, so repeated requests from outside a server
+    // handler share one session rather than creating a new session per call.
+    const defaultSessionId = fallbackSessionId ?? randomUUID();
 
-    // Create a custom fetch that adds required headers
+    // Create a custom fetch that resolves the session ID per-request so the
+    // AgentCore session header reflects the caller's session, even when the
+    // MCP client was constructed at startup with a different (or no) session.
     const fetchWithHeaders: typeof fetch = async (input, init) => {
       const headers = new Headers(init?.headers);
+      const sessionId = getCurrentSessionId() ?? defaultSessionId;
       headers.set('X-Amzn-Bedrock-AgentCore-Runtime-Session-Id', sessionId);
       for (const [k, v] of Object.entries(await buildHeaders())) {
         headers.set(k, v);

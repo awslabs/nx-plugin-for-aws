@@ -1,0 +1,39 @@
+"""Async-safe per-request session ID context for AgentCore Runtime.
+
+Servers set the session ID via :func:`set_current_session_id` at the start of a
+request; downstream MCP/A2A clients read it via :func:`get_current_session_id`
+to propagate the AgentCore session header on every outbound call.
+"""
+
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
+from typing import Optional
+
+_session_id_var: ContextVar[Optional[str]] = ContextVar(
+    "agentcore_session_id", default=None
+)
+
+
+def get_current_session_id() -> Optional[str]:
+    """Return the session ID for the current context, or ``None`` if unset.
+
+    MCP/A2A clients call this on each outbound request so the AgentCore
+    session header reflects the caller's session, even when the client was
+    constructed at startup (before any request arrived).
+    """
+    return _session_id_var.get()
+
+
+@contextmanager
+def session_id_context(session_id: str) -> Iterator[None]:
+    """Bind *session_id* as the current session for the scope of the block.
+
+    Uses :class:`contextvars.ContextVar`, so the binding is async-safe and
+    scoped to the current ``asyncio`` task / request.
+    """
+    token = _session_id_var.set(session_id)
+    try:
+        yield
+    finally:
+        _session_id_var.reset(token)

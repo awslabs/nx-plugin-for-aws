@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   ClientFactory,
   ClientFactoryOptions,
@@ -7,6 +8,7 @@ import {
 import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
 import { A2AAgent } from '@strands-agents/sdk/a2a';
 import { AwsClient } from 'aws4fetch';
+import { getCurrentSessionId } from './session-context.js';
 
 /**
  * Common options for creating an AgentCore A2A client
@@ -17,7 +19,10 @@ export interface AgentCoreA2aClientOptions {
    */
   agentRuntimeArn: string;
   /**
-   * Session ID to include in request headers.
+   * Fallback session ID to use when no session is set on the current async
+   * context. Each A2A request prefers the session ID from
+   * {@link getCurrentSessionId}, so clients constructed at startup still
+   * propagate the caller's session when invoked from a request handler.
    */
   sessionId?: string;
   /**
@@ -73,17 +78,31 @@ export class AgentCoreA2aClient {
 
   /**
    * Build a Strands `A2AAgent` for a URL plus a fetch that is already
-   * authenticated (SigV4-signing or Bearer-adding).
+   * authenticated (SigV4-signing or Bearer-adding). Wraps the fetch to
+   * attach the AgentCore session header, resolved per-request from the
+   * current async context so sessions propagate from the inbound request.
    */
   private static build(
     url: string,
     authFetch: typeof fetch,
-    options: Pick<AgentCoreA2aClientOptions, 'name' | 'description'>,
+    options: AgentCoreA2aClientOptions,
   ): A2AAgent {
+    // Generated once when no session is supplied by either the caller or the
+    // current async context, so repeated requests from outside a server
+    // handler share one session rather than creating a new session per call.
+    const defaultSessionId = options.sessionId ?? randomUUID();
+
+    const sessionFetch: typeof fetch = (input, init) => {
+      const headers = new Headers(init?.headers);
+      const sessionId = getCurrentSessionId() ?? defaultSessionId;
+      headers.set('X-Amzn-Bedrock-AgentCore-Runtime-Session-Id', sessionId);
+      return authFetch(input, { ...init, headers });
+    };
+
     const clientFactory = new ClientFactory({
       ...ClientFactoryOptions.default,
-      transports: [new JsonRpcTransportFactory({ fetchImpl: authFetch })],
-      cardResolver: new DefaultAgentCardResolver({ fetchImpl: authFetch }),
+      transports: [new JsonRpcTransportFactory({ fetchImpl: sessionFetch })],
+      cardResolver: new DefaultAgentCardResolver({ fetchImpl: sessionFetch }),
     });
 
     return new A2AAgent({

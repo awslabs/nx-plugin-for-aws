@@ -32,6 +32,7 @@ import { addAgentInfra } from '../../utils/agent-core-constructs/agent-core-cons
 
 import { assignPort } from '../../utils/port';
 import { FsCommands } from '../../utils/fs';
+import { ensureTypeScriptAgentConnectionProject } from '../../utils/agent-connection/agent-connection';
 
 export const TS_STRANDS_AGENT_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -75,10 +76,17 @@ export const tsStrandsAgentGenerator = async (
     );
   }
 
+  // Ensure the shared agent-connection project exists so the server entry
+  // point can import `runWithSessionId` and propagate the AgentCore session
+  // ID to any downstream MCP / A2A clients a later connection generator
+  // wires into this agent.
+  await ensureTypeScriptAgentConnectionProject(tree);
+
   const templateContext = {
     name,
     agentNameClassName,
     distDir,
+    agentConnectionImport: `:${getNpmScope(tree)}/agent-connection`,
   };
 
   // Generate common files shared by both protocols

@@ -4,6 +4,7 @@ import uvicorn
 from bedrock_agentcore.runtime.models import PingStatus
 from fastapi import Request
 from pydantic import BaseModel
+from <%- agentConnectionModuleName %> import session_id_context
 
 from .agent import get_agent
 from .init import JsonStreamingResponse, app
@@ -21,15 +22,19 @@ class StreamChunk(BaseModel):
 
 async def handle_invoke(input: InvokeInput, session_id: str):
     """Streaming handler for agent invocation"""
-    with get_agent(session_id=session_id) as agent:
-        stream = agent.stream_async(input.message)
-        async for event in stream:
-            print(event)
-            text = event.get("event", {}).get("contentBlockDelta", {}).get("delta", {}).get("text")
-            if text is not None:
-                yield StreamChunk(content=text)
-            elif event.get("event", {}).get("messageStop") is not None:
-                yield StreamChunk(content="\n")
+    # Bind the inbound AgentCore session to the async context so any
+    # downstream MCP / A2A clients invoked by the agent forward it on every
+    # outbound call.
+    with session_id_context(session_id):
+        with get_agent(session_id=session_id) as agent:
+            stream = agent.stream_async(input.message)
+            async for event in stream:
+                print(event)
+                text = event.get("event", {}).get("contentBlockDelta", {}).get("delta", {}).get("text")
+                if text is not None:
+                    yield StreamChunk(content=text)
+                elif event.get("event", {}).get("messageStop") is not None:
+                    yield StreamChunk(content="\n")
 
 
 @app.post(

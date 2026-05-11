@@ -1,8 +1,11 @@
 import logging
 import os
+import uuid
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from starlette.middleware.base import BaseHTTPMiddleware
 from strands.multiagent.a2a import A2AServer
+from <%- agentConnectionModuleName %> import session_id_context
 
 from .agent import get_agent
 
@@ -11,6 +14,8 @@ logging.basicConfig(level=logging.INFO)
 PORT = int(os.environ.get("PORT", "9000"))
 
 RUNTIME_URL = os.environ.get("AGENTCORE_RUNTIME_URL", f"http://localhost:{PORT}/")
+
+SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
 
 _agent_ctx = get_agent(session_id="default")
 _agent = _agent_ctx.__enter__()
@@ -22,7 +27,23 @@ a2a_server = A2AServer(
     serve_at_root=True,
 )
 
+
+class _SessionIdMiddleware(BaseHTTPMiddleware):
+    """Bind the inbound AgentCore session to the async context.
+
+    Downstream MCP / A2A clients read the session from this context on each
+    outbound call, so per-request session propagation works even though the
+    agent is instantiated once at startup.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        session_id = request.headers.get(SESSION_ID_HEADER) or str(uuid.uuid4())
+        with session_id_context(session_id):
+            return await call_next(request)
+
+
 app = FastAPI()
+app.add_middleware(_SessionIdMiddleware)
 
 
 @app.get("/ping")

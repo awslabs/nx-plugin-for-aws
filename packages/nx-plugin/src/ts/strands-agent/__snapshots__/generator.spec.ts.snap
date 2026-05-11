@@ -930,6 +930,7 @@ exports[`ts#strands-agent generator > should match snapshot for generated files 
 "import { publicProcedure, t } from './init.js';
 import { z } from 'zod';
 import { zAsyncIterable } from './schema/z-async-iterable.js';
+import { runWithSessionId } from ':proj/agent-connection';
 import { getAgent } from './agent.js';
 
 export const router = t.router;
@@ -943,22 +944,29 @@ export const appRouter = router({
         tracked: false,
       }),
     )
-    .subscription(async function* (opts) {
-      const agent = await getAgent(opts.ctx.sessionId);
+    // Wrap the subscription body in runWithSessionId so any downstream
+    // MCP / A2A clients invoked by the agent forward the caller's
+    // AgentCore session on every outbound request.
+    .subscription((opts) =>
+      runWithSessionId(
+        opts.ctx.sessionId,
+        (async function* () {
+          const agent = await getAgent(opts.ctx.sessionId);
 
-      for await (const event of agent.stream(opts.input.message)) {
-        if (
-          event.type === 'modelStreamUpdateEvent' &&
-          event.event.type === 'modelContentBlockDeltaEvent' &&
-          event.event.delta.type === 'textDelta'
-        ) {
-          yield event.event.delta.text;
-        } else if (event.type === 'modelMessageEvent') {
-          yield '\\n';
-        }
-      }
-      return;
-    }),
+          for await (const event of agent.stream(opts.input.message)) {
+            if (
+              event.type === 'modelStreamUpdateEvent' &&
+              event.event.type === 'modelContentBlockDeltaEvent' &&
+              event.event.delta.type === 'textDelta'
+            ) {
+              yield event.event.delta.text;
+            } else if (event.type === 'modelMessageEvent') {
+              yield '\\n';
+            }
+          }
+        })(),
+      ),
+    ),
 });
 
 export type AppRouter = typeof appRouter;

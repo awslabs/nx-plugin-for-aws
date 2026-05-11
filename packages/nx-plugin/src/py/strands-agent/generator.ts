@@ -31,6 +31,12 @@ import {
   addDependenciesToPyProjectToml,
 } from '../../utils/py';
 import { addAgentInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
+import {
+  ensurePythonAgentConnectionProject,
+  getPythonAgentConnectionModuleName,
+  getPythonAgentConnectionPackageName,
+} from '../../utils/agent-connection/agent-connection';
+import { addWorkspaceDependencyToPyProject } from '../../utils/py';
 
 import { addPythonBundleTarget } from '../../utils/bundle/bundle';
 import { FsCommands } from '../../utils/fs';
@@ -86,11 +92,25 @@ export const pyStrandsAgentGenerator = async (
   const auth = options.auth ?? 'IAM';
   const protocol = options.protocol ?? 'HTTP';
 
+  // Ensure the shared agent-connection project exists so the server entry
+  // point can import `session_id_context` and propagate the AgentCore
+  // session ID to any downstream MCP / A2A clients a later connection
+  // generator wires into this agent.
+  await ensurePythonAgentConnectionProject(tree);
+  const agentConnectionModuleName = getPythonAgentConnectionModuleName(tree);
+  const agentConnectionPackageName = getPythonAgentConnectionPackageName(tree);
+  addWorkspaceDependencyToPyProject(
+    tree,
+    project.root,
+    agentConnectionPackageName,
+  );
+
   const templateContext = {
     name,
     agentNameSnakeCase,
     agentNameClassName,
     moduleName,
+    agentConnectionModuleName,
   };
 
   // Generate common files shared by both protocols

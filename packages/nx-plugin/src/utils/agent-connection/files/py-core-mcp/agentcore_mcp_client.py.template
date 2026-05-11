@@ -1,3 +1,4 @@
+import uuid
 from collections.abc import Callable
 
 import boto3
@@ -6,6 +7,35 @@ from mcp.client.streamable_http import streamablehttp_client
 from strands.tools.mcp.mcp_client import MCPClient
 
 from .auth import SigV4HTTPXAuth
+from .session_context import get_current_session_id
+
+SESSION_ID_HEADER = "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"
+
+
+class _SessionHeaderAuth(httpx.Auth):
+    """httpx Auth that stamps the AgentCore session header per-request.
+
+    Resolves the session ID from the current async context on each request so
+    MCP clients created at startup still forward the caller's session. Falls
+    back to *default_session_id* when no context is set. Chains to
+    *inner* (e.g. SigV4) so both the session header and the underlying auth
+    are applied.
+    """
+
+    requires_request_body = True
+    requires_response_body = True
+
+    def __init__(self, default_session_id: str, inner: httpx.Auth | None):
+        self._default_session_id = default_session_id
+        self._inner = inner
+
+    def auth_flow(self, request: httpx.Request):  # type: ignore[override]
+        session_id = get_current_session_id() or self._default_session_id
+        request.headers[SESSION_ID_HEADER] = session_id
+        if self._inner is None:
+            yield request
+            return
+        yield from self._inner.auth_flow(request)
 
 
 class AgentCoreMCPClient:
@@ -25,26 +55,31 @@ class AgentCoreMCPClient:
     @staticmethod
     def _create(
         agent_runtime_arn: str,
-        session_id: str,
+        session_id: str | None,
         headers: dict | None = None,
         auth_handler: httpx.Auth | None = None,
     ) -> MCPClient:
         _, url = AgentCoreMCPClient._build_url(agent_runtime_arn)
+        # Generated once when no session is supplied by either the caller or
+        # the current async context, so repeated requests from outside a
+        # server handler share one session rather than creating a new session
+        # per call.
+        default_session_id = session_id or str(uuid.uuid4())
+        session_auth = _SessionHeaderAuth(default_session_id, auth_handler)
         return MCPClient(
             lambda: streamablehttp_client(
                 url,
-                auth=auth_handler,
+                auth=session_auth,
                 timeout=120,
                 terminate_on_close=False,
-                headers={
-                    "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id": session_id,
-                    **(headers if headers is not None else {}),
-                },
+                headers={**(headers if headers is not None else {})},
             )
         )
 
     @staticmethod
-    def with_iam_auth(agent_runtime_arn: str, session_id: str) -> MCPClient:
+    def with_iam_auth(
+        agent_runtime_arn: str, session_id: str | None = None
+    ) -> MCPClient:
         """Create an MCP client with IAM (SigV4) authentication.
 
         Region and credentials are derived automatically from the ARN
@@ -63,14 +98,15 @@ class AgentCoreMCPClient:
     def with_jwt_auth(
         agent_runtime_arn: str,
         access_token_provider: Callable[[], str],
-        session_id: str,
+        session_id: str | None = None,
     ) -> MCPClient:
         """Create an MCP client with JWT authentication.
 
         Args:
             agent_runtime_arn: The ARN of the AgentCore runtime.
             access_token_provider: A callable that returns the JWT access token.
-            session_id: Session ID for the connection.
+            session_id: Optional fallback session ID for use when no session is
+                set on the current async context.
         """
         access_token = access_token_provider()
         return AgentCoreMCPClient._create(

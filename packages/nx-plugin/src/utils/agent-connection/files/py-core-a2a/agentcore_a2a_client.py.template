@@ -1,3 +1,4 @@
+import uuid
 from collections.abc import Callable
 from urllib.parse import quote
 
@@ -7,6 +8,35 @@ from a2a.client import ClientConfig
 from strands.agent.a2a_agent import A2AAgent
 
 from .auth import SigV4HTTPXAuth
+from .session_context import get_current_session_id
+
+SESSION_ID_HEADER = "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"
+
+
+class _SessionHeaderAuth(httpx.Auth):
+    """httpx Auth that stamps the AgentCore session header per-request.
+
+    Resolves the session ID from the current async context on each request so
+    A2A clients created at startup still forward the caller's session. Falls
+    back to *default_session_id* when no context is set. Chains to *inner*
+    (e.g. SigV4) so both the session header and the underlying auth are
+    applied.
+    """
+
+    requires_request_body = True
+    requires_response_body = True
+
+    def __init__(self, default_session_id: str, inner: httpx.Auth | None):
+        self._default_session_id = default_session_id
+        self._inner = inner
+
+    def auth_flow(self, request: httpx.Request):  # type: ignore[override]
+        session_id = get_current_session_id() or self._default_session_id
+        request.headers[SESSION_ID_HEADER] = session_id
+        if self._inner is None:
+            yield request
+            return
+        yield from self._inner.auth_flow(request)
 
 
 class AgentCoreA2aClient:
@@ -29,12 +59,19 @@ class AgentCoreA2aClient:
         url: str,
         auth: httpx.Auth | None,
         headers: dict | None,
+        session_id: str | None,
         *,
         name: str | None,
         description: str | None,
     ) -> A2AAgent:
+        # Generated once when no session is supplied by either the caller or
+        # the current async context, so repeated requests from outside a
+        # server handler share one session rather than creating a new session
+        # per call.
+        default_session_id = session_id or str(uuid.uuid4())
+        session_auth = _SessionHeaderAuth(default_session_id, auth)
         httpx_client = httpx.AsyncClient(
-            auth=auth,
+            auth=session_auth,
             headers=headers or {},
             timeout=120,
         )
@@ -57,13 +94,11 @@ class AgentCoreA2aClient:
         """Create an `A2AAgent` with IAM (SigV4) authentication."""
         region, url = AgentCoreA2aClient._build_url(agent_runtime_arn)
         credentials = boto3.Session(region_name=region).get_credentials()
-        headers = {}
-        if session_id:
-            headers["X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"] = session_id
         return AgentCoreA2aClient._build(
             url,
             SigV4HTTPXAuth(credentials, "bedrock-agentcore", region),
-            headers,
+            None,
+            session_id,
             name=name,
             description=description,
         )
@@ -80,12 +115,11 @@ class AgentCoreA2aClient:
         """Create an `A2AAgent` with JWT Bearer authentication."""
         _, url = AgentCoreA2aClient._build_url(agent_runtime_arn)
         headers = {"Authorization": f"Bearer {access_token_provider()}"}
-        if session_id:
-            headers["X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"] = session_id
         return AgentCoreA2aClient._build(
             url,
             None,
             headers,
+            session_id,
             name=name,
             description=description,
         )
