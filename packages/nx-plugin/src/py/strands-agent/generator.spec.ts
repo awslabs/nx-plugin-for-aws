@@ -1035,12 +1035,17 @@ dev-dependencies = []
       tree.exists('apps/test-project/proj_test_project/agent/init.py'),
     ).toBeFalsy();
 
-    // Check serve command uses fastapi dev (for hot reload via to_fastapi_app)
+    // A2A wraps the Strands FastAPI app in a Starlette router for lazy
+    // agent init, which `fastapi dev` cannot introspect — we fall back
+    // to uvicorn --reload for hot reload.
     const projectConfig = JSON.parse(
       tree.read('apps/test-project/project.json', 'utf-8'),
     );
     expect(projectConfig.targets['agent-serve'].options.commands[0]).toContain(
-      'uv run fastapi dev',
+      'uv run uvicorn',
+    );
+    expect(projectConfig.targets['agent-serve'].options.commands[0]).toContain(
+      '--reload',
     );
   });
 
@@ -1147,7 +1152,6 @@ dev-dependencies = []
       'utf-8',
     );
     expect(mainContent).toContain('ag_ui_strands');
-    expect(mainContent).toContain('create_strands_app');
     expect(mainContent).toContain('StrandsAgent');
 
     // AG-UI should not generate init.py (HTTP-only)

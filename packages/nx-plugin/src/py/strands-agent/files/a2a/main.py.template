@@ -1,7 +1,12 @@
 import logging
 import os
+from typing import Any
 
-from fastapi import FastAPI, Request
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from starlette.routing import Mount, Route
+from starlette.types import ASGIApp, Receive, Scope, Send
 from strands.multiagent.a2a import A2AServer
 from strands.session.file_session_manager import FileSessionManager
 
@@ -15,41 +20,55 @@ logging.basicConfig(level=logging.INFO)
 PORT = int(os.environ.get("PORT", "9000"))
 RUNTIME_URL = os.environ.get("AGENTCORE_RUNTIME_URL", f"http://localhost:{PORT}/")
 
-_storage_dir = os.environ.get("SESSION_STORAGE_PATH")
-_session_manager: FileSessionManager | None = None
+
+class _LazyA2AApp:
+    """Builds the A2A app on first invocation.
+
+    Agent construction is deferred past module import because connection
+    clients (MCP) need the inbound AgentCore session id captured via
+    :mod:`session` before their transports open.
+    """
+
+    def __init__(self) -> None:
+        self._inner: ASGIApp | None = None
+        self._agent_ctx: Any = None
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http":
+            headers = dict(
+                (k.decode("latin-1"), v.decode("latin-1"))
+                for k, v in scope.get("headers", [])
+            )
+            set_container_session_id(headers.get(SESSION_ID_HEADER))
+
+        if self._inner is None:
+            storage_dir = os.environ.get("SESSION_STORAGE_PATH")
+            session_manager = (
+                FileSessionManager(
+                    session_id=get_container_session_id(),
+                    storage_dir=storage_dir,
+                )
+                if storage_dir
+                else None
+            )
+            self._agent_ctx = get_agent(session_manager=session_manager)
+            self._inner = A2AServer(
+                agent=self._agent_ctx.__enter__(),
+                port=PORT,
+                http_url=RUNTIME_URL,
+                serve_at_root=True,
+            ).to_fastapi_app()
+
+        await self._inner(scope, receive, send)
 
 
-def _ensure_session_manager() -> FileSessionManager | None:
-    """Lazily build the FileSessionManager once the container's
-    runtimeSessionId has been captured on the first request."""
-    global _session_manager
-    if _storage_dir and _session_manager is None:
-        _session_manager = FileSessionManager(
-            session_id=get_container_session_id(),
-            storage_dir=_storage_dir,
-        )
-        _session_manager.initialize(strands_agent)
-    return _session_manager
+async def _ping(request: Request) -> JSONResponse:
+    return JSONResponse({"status": "Healthy"})
 
 
-_agent_ctx = get_agent()
-strands_agent = _agent_ctx.__enter__()
-
-app: FastAPI = A2AServer(
-    agent=strands_agent,
-    port=PORT,
-    http_url=RUNTIME_URL,
-    serve_at_root=True,
-).to_fastapi_app()
-
-
-@app.middleware("http")
-async def capture_session_id(request: Request, call_next):
-    set_container_session_id(request.headers.get(SESSION_ID_HEADER))
-    _ensure_session_manager()
-    return await call_next(request)
-
-
-@app.get("/ping")
-async def ping() -> dict:
-    return {"status": "Healthy"}
+app = Starlette(
+    routes=[
+        Route("/ping", _ping, methods=["GET"]),
+        Mount("/", app=_LazyA2AApp()),
+    ]
+)
