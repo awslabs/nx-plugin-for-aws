@@ -1035,17 +1035,12 @@ dev-dependencies = []
       tree.exists('apps/test-project/proj_test_project/agent/init.py'),
     ).toBeFalsy();
 
-    // A2A wraps the Strands FastAPI app in a Starlette router for lazy
-    // agent init, which `fastapi dev` cannot introspect — we fall back to
-    // uvicorn --reload for hot reload.
+    // Check serve command uses fastapi dev (for hot reload via to_fastapi_app)
     const projectConfig = JSON.parse(
       tree.read('apps/test-project/project.json', 'utf-8'),
     );
     expect(projectConfig.targets['agent-serve'].options.commands[0]).toContain(
-      'uv run uvicorn',
-    );
-    expect(projectConfig.targets['agent-serve'].options.commands[0]).toContain(
-      '--reload',
+      'uv run fastapi dev',
     );
   });
 
@@ -1160,15 +1155,12 @@ dev-dependencies = []
       tree.exists('apps/test-project/proj_test_project/agent/init.py'),
     ).toBeFalsy();
 
-    // AG-UI wraps create_strands_app in a Starlette router for lazy
-    // agent init, which `fastapi dev` cannot introspect — we fall back
-    // to uvicorn --reload for hot reload on port 8081+ (not 9000).
+    // Check serve command uses fastapi dev on port 8081+ (not 9000)
     const projectConfig = JSON.parse(
       tree.read('apps/test-project/project.json', 'utf-8'),
     );
     const serveCmd = projectConfig.targets['agent-serve'].options.commands[0];
-    expect(serveCmd).toContain('uv run uvicorn');
-    expect(serveCmd).toContain('--reload');
+    expect(serveCmd).toContain('uv run fastapi dev');
     expect(serveCmd).toMatch(/--port 808\d/);
   });
 

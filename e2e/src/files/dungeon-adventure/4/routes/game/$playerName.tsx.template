@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { CopilotChat } from '../../components/copilot';
 import {
   useAgent,
@@ -26,6 +26,7 @@ function RouteComponent() {
   // FileSessionManager can restore the same conversation on reload /
   // stop-resume. useAguiStoryAgent pads this to 33+ chars.
   const threadId = `game-${playerName}-${genre}`;
+  const storageKey = `chat:${threadId}`;
   const { agent } = useAgent({ agentId: 'agent', threadId });
   const { copilotkit } = useCopilotKit();
   const gameApi = useGameApi();
@@ -36,22 +37,46 @@ function RouteComponent() {
     ),
   );
 
-  // Seed the opening user message (once) and run the agent. We skip
-  // CopilotChat's auto-connect (see below) so this first runAgent is
-  // what actually starts the conversation.
-  const seeded = useRef(false);
+  // Restore messages from localStorage when the (threadId-scoped) agent
+  // becomes available. Re-runs if `agent` identity changes — e.g. after
+  // the copilotkit runtime transitions Connecting → Connected and a fresh
+  // per-thread clone is minted with empty messages. If no saved history
+  // exists, seed the opening user message and kick off the run.
   useEffect(() => {
-    if (seeded.current) return;
-    seeded.current = true;
-    if (agent.messages.length === 0) {
-      agent.addMessage({
-        id: `seed-${playerName}-${genre}-${Date.now()}`,
-        role: 'user',
-        content: `I am ${playerName}, playing in the ${genre} genre.`,
-      });
-      void copilotkit.runAgent({ agent });
+    if (agent.messages.length > 0) return;
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        const prior = JSON.parse(saved) as typeof agent.messages;
+        if (Array.isArray(prior) && prior.length > 0) {
+          agent.setMessages(prior);
+          return;
+        }
+      }
+    } catch {
+      // ignore malformed cache
     }
-  }, [agent, copilotkit, playerName, genre]);
+    agent.addMessage({
+      id: `seed-${playerName}-${genre}-${Date.now()}`,
+      role: 'user',
+      content: `I am ${playerName}, playing in the ${genre} genre.`,
+    });
+    void copilotkit.runAgent({ agent });
+  }, [agent, copilotkit, playerName, genre, storageKey]);
+
+  // Persist messages to localStorage on every change so refresh resumes.
+  useEffect(() => {
+    const subscription = agent.subscribe({
+      onMessagesChanged: ({ messages }) => {
+        try {
+          localStorage.setItem(storageKey, JSON.stringify(messages));
+        } catch {
+          // localStorage full / unavailable — ignore
+        }
+      },
+    });
+    return () => subscription.unsubscribe();
+  }, [agent, storageKey]);
 
   return (
     <div className="relative flex h-[calc(100vh-8rem)] flex-col">

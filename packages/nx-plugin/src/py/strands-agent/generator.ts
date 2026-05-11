@@ -212,15 +212,11 @@ export const pyStrandsAgentGenerator = async (
   const localDevPortStart = protocol === 'A2A' ? 9000 : 8081;
   const localDevPort = assignPort(tree, project, localDevPortStart);
 
-  // HTTP uses FastAPI directly so `fastapi dev` gives a nicer banner.
-  // A2A / AG-UI wrap the Strands FastAPI app in a Starlette router (so we
-  // can defer agent construction to the first invocation) which is not a
-  // FastAPI instance — `fastapi dev` wouldn't find it — so we use uvicorn
-  // with --reload for hot reload on those protocols.
-  const serveCommand =
-    protocol === 'HTTP'
-      ? `uv run fastapi dev ${moduleName}/${agentNameSnakeCase}/main.py --port ${localDevPort}`
-      : `uv run uvicorn ${moduleName}.${agentNameSnakeCase}.main:app --host 0.0.0.0 --port ${localDevPort} --reload`;
+  // All protocols expose a FastAPI app directly:
+  // - HTTP: FastAPI app in init.py
+  // - A2A: A2AServer.to_fastapi_app() in main.py
+  // - AG-UI: create_strands_app(...) in main.py
+  const serveCommand = `uv run fastapi dev ${moduleName}/${agentNameSnakeCase}/main.py --port ${localDevPort}`;
 
   // HTTP chat uses the type-safe TypeScript client generated from the
   // agent's OpenAPI spec (same generated client the react-connection
