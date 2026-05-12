@@ -7,10 +7,32 @@ from a2a.client import ClientConfig
 from strands.agent.a2a_agent import A2AAgent
 
 from .auth import SigV4HTTPXAuth
+from .session_context import get_current_session_id
+
+SESSION_HEADER = "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"
+
+
+class _SessionHeaderAuth(httpx.Auth):
+    """Stamps the AgentCore session header from the current async context."""
+
+    requires_request_body = True
+    requires_response_body = True
+
+    def __init__(self, inner: httpx.Auth | None = None):
+        self._inner = inner
+
+    def auth_flow(self, request: httpx.Request):  # type: ignore[override]
+        sid = get_current_session_id()
+        if sid:
+            request.headers[SESSION_HEADER] = sid
+        if self._inner is None:
+            yield request
+            return
+        yield from self._inner.auth_flow(request)
 
 
 class AgentCoreA2aClient:
-    """Factory for clients to call A2A agents hosted on Bedrock AgentCore Runtime."""
+    """Factory for A2A clients that forward the current async-context session."""
 
     @staticmethod
     def _build_url(agent_runtime_arn: str) -> tuple[str, str]:
@@ -21,7 +43,10 @@ class AgentCoreA2aClient:
         """
         region = agent_runtime_arn.split(":")[3]
         encoded_arn = quote(agent_runtime_arn, safe="")
-        url = f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/{encoded_arn}/invocations/"
+        url = (
+            f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/"
+            f"{encoded_arn}/invocations/"
+        )
         return region, url
 
     @staticmethod
@@ -34,7 +59,7 @@ class AgentCoreA2aClient:
         description: str | None,
     ) -> A2AAgent:
         httpx_client = httpx.AsyncClient(
-            auth=auth,
+            auth=_SessionHeaderAuth(auth),
             headers=headers or {},
             timeout=120,
         )
@@ -52,18 +77,14 @@ class AgentCoreA2aClient:
         *,
         name: str | None = None,
         description: str | None = None,
-        session_id: str | None = None,
     ) -> A2AAgent:
-        """Create an `A2AAgent` with IAM (SigV4) authentication."""
+        """SigV4-authenticated client for a Bedrock AgentCore runtime."""
         region, url = AgentCoreA2aClient._build_url(agent_runtime_arn)
         credentials = boto3.Session(region_name=region).get_credentials()
-        headers = {}
-        if session_id:
-            headers["X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"] = session_id
         return AgentCoreA2aClient._build(
             url,
             SigV4HTTPXAuth(credentials, "bedrock-agentcore", region),
-            headers,
+            None,
             name=name,
             description=description,
         )
@@ -75,17 +96,25 @@ class AgentCoreA2aClient:
         *,
         name: str | None = None,
         description: str | None = None,
-        session_id: str | None = None,
     ) -> A2AAgent:
-        """Create an `A2AAgent` with JWT Bearer authentication."""
+        """Bearer-authenticated client for a Bedrock AgentCore runtime."""
         _, url = AgentCoreA2aClient._build_url(agent_runtime_arn)
-        headers = {"Authorization": f"Bearer {access_token_provider()}"}
-        if session_id:
-            headers["X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"] = session_id
         return AgentCoreA2aClient._build(
             url,
             None,
-            headers,
+            {"Authorization": f"Bearer {access_token_provider()}"},
             name=name,
             description=description,
+        )
+
+    @staticmethod
+    def without_auth(
+        url: str,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+    ) -> A2AAgent:
+        """Plain-HTTP client — for local dev."""
+        return AgentCoreA2aClient._build(
+            url, None, None, name=name, description=description
         )

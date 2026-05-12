@@ -430,14 +430,13 @@ from strands import Agent, tool
 from strands_tools import current_time
 
 
-# Define una herramienta personalizada
 @tool
 def add(a: int, b: int) -> int:
     return a + b
 
 
 @contextmanager
-def get_agent(session_id: str):
+def get_agent():
     yield Agent(
         system_prompt="""
 Eres un mago de la suma.
@@ -456,6 +455,7 @@ import uuid
 
 import uvicorn
 from bedrock_agentcore.runtime.models import PingStatus
+from dungeon_adventure_agent_connection import session_id_context, with_session_id
 from fastapi import Request
 from pydantic import BaseModel
 
@@ -463,6 +463,9 @@ from .agent import get_agent
 from .init import JsonStreamingResponse, app
 
 SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
+
+_agent_ctx = with_session_id(get_agent)
+_agent = _agent_ctx.__enter__()
 
 
 class InvokeInput(BaseModel):
@@ -475,8 +478,8 @@ class StreamChunk(BaseModel):
 
 async def handle_invoke(input: InvokeInput, session_id: str):
     """Manejador de streaming para invocación del agente"""
-    with get_agent(session_id=session_id) as agent:
-        stream = agent.stream_async(input.message)
+    with session_id_context(session_id):
+        stream = _agent.stream_async(input.message)
         async for event in stream:
             print(event)
             text = event.get("event", {}).get("contentBlockDelta", {}).get("delta", {}).get("text")

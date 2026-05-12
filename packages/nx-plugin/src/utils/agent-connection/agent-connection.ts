@@ -13,7 +13,7 @@ import pyProjectGenerator, {
   getPyProjectDetails,
 } from '../../py/project/generator';
 import { addDependenciesToPyProjectToml } from '../py';
-import { applyGritQL, matchGritQL } from '../ast';
+import { addStarExport, applyGritQL, matchGritQL } from '../ast';
 
 /** Prefix a GritQL pattern with `language python` */
 const py = (pattern: string) => `language python\n${pattern}`;
@@ -108,6 +108,20 @@ export async function ensureTypeScriptAgentConnectionProject(
     {},
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
+
+  // Re-export session-context helpers so strands-agent server entry points
+  // can set the current session on each inbound request without pulling in
+  // the agent-connection internals.
+  await addStarExport(
+    tree,
+    joinPathFragments(AGENT_CONNECTION_PROJECT_DIR, 'src', 'index.ts'),
+    './core/session-context.js',
+  );
+  await addStarExport(
+    tree,
+    joinPathFragments(AGENT_CONNECTION_PROJECT_DIR, 'src', 'index.ts'),
+    './core/with-session-id.js',
+  );
 }
 
 /**
@@ -173,6 +187,29 @@ export async function ensurePythonAgentConnectionProject(
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
+  // Re-export session-context helpers so strands-agent server entry points
+  // can set the current session on each inbound request without importing
+  // the agent-connection internals directly.
+  const moduleInitPath = joinPathFragments(moduleDir, '__init__.py');
+  await addPythonReExport(
+    tree,
+    moduleInitPath,
+    '.core.session_context',
+    'get_current_session_id',
+  );
+  await addPythonReExport(
+    tree,
+    moduleInitPath,
+    '.core.session_context',
+    'session_id_context',
+  );
+  await addPythonReExport(
+    tree,
+    moduleInitPath,
+    '.core.with_session_id',
+    'with_session_id',
+  );
+
   // Shared core helpers depend on aws-lambda-powertools for AppConfig access.
   addDependenciesToPyProjectToml(tree, projectDir, ['aws-lambda-powertools']);
 }
@@ -216,6 +253,26 @@ export async function addPythonReExport(
 
   const importLine = `from ${fromModule} import ${importName}`;
   const allEntry = `"${importName}"`;
+
+  // If there's already an import from the same module, merge into its name list
+  // (ruff I001 rejects two `from X import ...` lines for the same module).
+  const mergedImport = await applyGritQL(
+    tree,
+    initFilePath,
+    py(`\`from ${fromModule} import $names\` where {
+  $names <: not contains \`${importName}\`,
+  $names += \`, ${importName}\`
+}`),
+  );
+
+  if (mergedImport) {
+    await applyGritQL(
+      tree,
+      initFilePath,
+      py(`\`__all__ = [$items]\` where { $items += \`, ${allEntry}\` }`),
+    );
+    return;
+  }
 
   // Try to append import after existing import using +=
   const appendedImport = await applyGritQL(

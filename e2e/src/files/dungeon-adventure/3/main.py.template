@@ -2,10 +2,15 @@ import uuid
 
 import uvicorn
 from bedrock_agentcore.runtime.models import PingStatus
+from dungeon_adventure_agent_connection import session_id_context
+from fastapi import Request
 from pydantic import BaseModel
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from .agent import get_agent
 from .init import JsonStreamingResponse, app
+
+SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
 
 
 class Action(BaseModel):
@@ -29,13 +34,13 @@ async def handle_invoke(input: InvokeInput):
     for action in input.actions:
         messages.append({"role": action.role, "content": [{"text": action.content}]})
 
-    with get_agent(input.playerName, input.genre, session_id=str(uuid.uuid4())) as agent:
+    with get_agent(input.playerName, input.genre) as agent:
         stream = agent.stream_async(messages)
         async for event in stream:
             print(event)
-            content = event.get("event", {}).get("contentBlockDelta", {}).get("delta", {}).get("text")
-            if content is not None:
-                yield StreamChunk(content=content)
+            text = event.get("event", {}).get("contentBlockDelta", {}).get("delta", {}).get("text")
+            if text is not None:
+                yield StreamChunk(content=text)
             elif event.get("event", {}).get("messageStop") is not None:
                 yield StreamChunk(content="\n")
 
@@ -48,6 +53,18 @@ async def handle_invoke(input: InvokeInput):
 async def invoke(input: InvokeInput) -> JsonStreamingResponse:
     """Entry point for agent invocation"""
     return JsonStreamingResponse(handle_invoke(input))
+
+
+class _SessionIdMiddleware(BaseHTTPMiddleware):
+    """Bind the inbound session (or a fresh UUID) to async context."""
+
+    async def dispatch(self, request: Request, call_next):
+        session_id = request.headers.get(SESSION_ID_HEADER) or str(uuid.uuid4())
+        with session_id_context(session_id):
+            return await call_next(request)
+
+
+app.add_middleware(_SessionIdMiddleware)
 
 
 @app.get("/ping")

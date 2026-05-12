@@ -211,7 +211,7 @@ dependencies = ["strands-agents"]
 
     // Check named client creation (matching TS pattern)
     expect(agentContent).toContain(
-      'inventory_mcp = InventoryMcpClient.create(session_id=session_id)',
+      'inventory_mcp = InventoryMcpClient.create()',
     );
 
     // Check parenthesized with block was added

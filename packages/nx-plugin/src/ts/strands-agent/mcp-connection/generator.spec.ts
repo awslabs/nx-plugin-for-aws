@@ -184,7 +184,7 @@ export const getAgent = async (sessionId: string) =>
     expect(agentContent).toContain('agent-connection');
 
     // Check client creation was added
-    expect(agentContent).toContain('InventoryMcpClient.create(sessionId)');
+    expect(agentContent).toContain('InventoryMcpClient.create()');
 
     // Check client was added to tools array
     expect(agentContent).toContain('inventoryMcp, multiply');
@@ -241,7 +241,7 @@ export const getAgent = async (sessionId: string) => {
     )!;
 
     // Check client creation was inserted before new Agent
-    expect(agentContent).toContain('InventoryMcpClient.create(sessionId)');
+    expect(agentContent).toContain('InventoryMcpClient.create()');
     expect(agentContent).toContain('inventoryMcp, multiply');
 
     // Verify the console.log is still present (block body preserved)

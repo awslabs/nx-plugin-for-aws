@@ -133,9 +133,8 @@ export const tsStrandsAgentA2aConnectionGenerator = async (
       `:${npmScope}/agent-connection`,
     );
 
-    // Build the tool creation + Agent wiring. We wrap the getAgent body so
-    // the client can be created per-invocation (passing through sessionId).
-    const toolCreationBlock = `const ${clientVarName} = await ${clientClassName}.create(sessionId);
+    // Build the tool creation + Agent wiring.
+    const toolCreationBlock = `const ${clientVarName} = await ${clientClassName}.create();
   const ${toolVarName} = tool({
     name: '${toolName}',
     description: 'Delegate a question to the remote ${targetAgentClassName} A2A agent and return its reply.',

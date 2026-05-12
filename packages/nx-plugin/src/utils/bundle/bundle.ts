@@ -47,6 +47,7 @@ const createPythonBundleTarget = ({
 }: CreatePythonBundleTargetOptions): TargetConfiguration => {
   return {
     cache: true,
+    inputs: ['default', '^production'],
     executor: 'nx:run-commands',
     outputs: [`{workspaceRoot}/dist/{projectRoot}/${bundleTargetName}`],
     options: {

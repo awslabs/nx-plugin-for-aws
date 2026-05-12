@@ -641,15 +641,13 @@ const multiply = tool({
   callback: ({ a, b }) => a * b,
 });
 
-export const getAgent = async (sessionId: string) => {
-  console.log(\`Creating agent for session \${sessionId}\`);
-  return new Agent({
+export const getAgent = async () =>
+  new Agent({
     systemPrompt: \`You are a mathematical wizard.
   Use your tools for mathematical tasks.
   Refer to tools as your 'spellbook'.\`,
     tools: [multiply],
   });
-};
 "
 `;
 
@@ -915,6 +913,7 @@ console.log(\`TRPC server listening on port \${PORT}\`);
 
 exports[`ts#strands-agent generator > should match snapshot for generated files > strands-agent-init.ts 1`] = `
 "import { initTRPC } from '@trpc/server';
+import { enterSessionContext } from ':proj/agent-connection';
 
 export interface Context {
   sessionId: string;
@@ -922,7 +921,17 @@ export interface Context {
 
 export const t = initTRPC.context<Context>().create();
 
-export const publicProcedure = t.procedure;
+/**
+ * Bind the inbound session onto the current async flow so downstream MCP /
+ * A2A clients forward it on outbound calls. Uses \`enterWith\` so the binding
+ * persists across subscription iterations.
+ */
+const sessionMiddleware = t.middleware(({ ctx, next }) => {
+  enterSessionContext(ctx.sessionId);
+  return next();
+});
+
+export const publicProcedure = t.procedure.use(sessionMiddleware);
 "
 `;
 
@@ -930,9 +939,12 @@ exports[`ts#strands-agent generator > should match snapshot for generated files 
 "import { publicProcedure, t } from './init.js';
 import { z } from 'zod';
 import { zAsyncIterable } from './schema/z-async-iterable.js';
+import { withSessionId } from ':proj/agent-connection';
 import { getAgent } from './agent.js';
 
 export const router = t.router;
+
+const agent = withSessionId(getAgent);
 
 export const appRouter = router({
   invoke: publicProcedure
@@ -944,8 +956,6 @@ export const appRouter = router({
       }),
     )
     .subscription(async function* (opts) {
-      const agent = await getAgent(opts.ctx.sessionId);
-
       for await (const event of agent.stream(opts.input.message)) {
         if (
           event.type === 'modelStreamUpdateEvent' &&

@@ -176,6 +176,7 @@ export const pyProjectGenerator = async (
   const buildTarget = projectConfiguration.targets.build;
   projectConfiguration.targets.compile = {
     ...buildTarget,
+    inputs: ['default', '^production'],
     outputs: [buildOutputPath],
     options: {
       ...buildTarget.options,
@@ -184,6 +185,7 @@ export const pyProjectGenerator = async (
   };
   projectConfiguration.targets.typecheck = {
     cache: true,
+    inputs: ['default', '^production'],
     executor: '@nxlv/python:run-commands',
     options: {
       command: 'uv run ty check',
@@ -191,6 +193,7 @@ export const pyProjectGenerator = async (
     },
   };
   projectConfiguration.targets.build = {
+    inputs: ['default', '^production'],
     dependsOn: [
       'lint',
       'compile',
@@ -222,6 +225,7 @@ export const pyProjectGenerator = async (
   projectConfiguration.targets.lint = {
     ...projectConfiguration.targets.lint,
     cache: true,
+    inputs: ['default', '^production'],
     dependsOn: [
       ...(projectConfiguration.targets.lint?.dependsOn ?? []).filter(
         (d) => d !== 'format',

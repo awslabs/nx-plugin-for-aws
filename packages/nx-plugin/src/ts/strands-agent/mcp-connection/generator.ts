@@ -117,7 +117,7 @@ export const tsStrandsAgentMcpConnectionGenerator = async (
       `:${npmScope}/agent-connection`,
     );
 
-    const clientCreationStmt = `const ${clientVarName} = await ${clientClassName}.create(sessionId);`;
+    const clientCreationStmt = `const ${clientVarName} = await ${clientClassName}.create();`;
 
     // Transform the arrow function that contains `new Agent`:
     // - Expression body: wrap in block with client creation and return
