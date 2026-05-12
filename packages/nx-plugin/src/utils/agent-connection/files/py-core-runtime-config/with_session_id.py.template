@@ -10,59 +10,38 @@ session is seen, so its MCP clients inherit the right session from the start.
 
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, ExitStack, contextmanager
-from typing import Any
+
+from strands import Agent
 
 from .session_context import get_current_session_id
 
 
 @contextmanager
 def with_session_id(
-    agent_factory: Callable[[], AbstractContextManager[Any]],
-    *,
-    name: str,
-    description: str,
-) -> Iterator[Any]:
-    """Wrap an agent factory so each session gets its own cached Agent.
-
-    The returned proxy looks like an Agent (``stream_async`` / ``invoke_async``,
-    ``name``, ``description``, ``cancel``) but routes every call to a per-session
-    instance constructed on first use. Nothing is built until a request arrives,
-    so importing the module is side-effect-free.
-    """
+    agent_factory: Callable[[], AbstractContextManager[Agent]],
+) -> Iterator[Agent]:
+    """Wrap an agent factory so each session gets its own cached Agent."""
     stack = ExitStack()
-    agents: dict[str, Any] = {}
+    template = stack.enter_context(agent_factory())
+    agents: dict[str, Agent] = {"default": template}
 
-    def _for_session() -> Any:
+    def _for_session() -> Agent:
         sid = get_current_session_id() or "default"
         if sid not in agents:
             agents[sid] = stack.enter_context(agent_factory())
         return agents[sid]
 
-    class _SessionRoutingAgent:
-        @property
-        def name(self) -> str:
-            return name
-
-        @property
-        def description(self) -> str:
-            return description
-
-        def __getattr__(self, attr: str) -> Any:
-            # Fall-through for any other agent attribute (tool_registry,
-            # model, hooks, etc.) — resolved against the current session's
-            # agent so downstream frameworks that introspect the agent still
-            # see consistent state.
-            return getattr(_for_session(), attr)
+    class _SessionRoutingAgent(Agent):
+        def __init__(self) -> None:
+            # Seed the agent-card surface (name, description, tool_registry)
+            # from the template; dispatch stream/invoke per session.
+            self.__dict__.update(template.__dict__)
 
         def stream_async(self, *args, **kwargs):
             return _for_session().stream_async(*args, **kwargs)
 
         def invoke_async(self, *args, **kwargs):
             return _for_session().invoke_async(*args, **kwargs)
-
-        def cancel(self) -> None:
-            for agent in agents.values():
-                agent.cancel()
 
     try:
         yield _SessionRoutingAgent()
