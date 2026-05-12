@@ -1,27 +1,15 @@
 import uuid
-from contextlib import ExitStack
 
 import uvicorn
 from bedrock_agentcore.runtime.models import PingStatus
 from dungeon_adventure_agent_connection import session_id_context
 from fastapi import Request
 from pydantic import BaseModel
-from strands import Agent
 
 from .agent import get_agent
 from .init import JsonStreamingResponse, app
 
 SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
-
-# One Agent per session — preserves conversation history.
-_agents: dict[str, Agent] = {}
-_agent_stack = ExitStack()
-
-
-def _get_cached_agent(session_id: str, player_name: str, genre: str) -> Agent:
-    if session_id not in _agents:
-        _agents[session_id] = _agent_stack.enter_context(get_agent(player_name, genre))
-    return _agents[session_id]
 
 
 class Action(BaseModel):
@@ -45,8 +33,7 @@ async def handle_invoke(input: InvokeInput, session_id: str):
     for action in input.actions:
         messages.append({"role": action.role, "content": [{"text": action.content}]})
 
-    with session_id_context(session_id):
-        agent = _get_cached_agent(session_id, input.playerName, input.genre)
+    with session_id_context(session_id), get_agent(input.playerName, input.genre) as agent:
         stream = agent.stream_async(messages)
         async for event in stream:
             print(event)

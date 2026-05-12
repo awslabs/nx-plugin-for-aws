@@ -1,13 +1,11 @@
 import logging
 import os
 import uuid
-from contextlib import ExitStack
 
 from fastapi import FastAPI, Request
 from starlette.middleware.base import BaseHTTPMiddleware
-from strands import Agent
 from strands.multiagent.a2a import A2AServer
-from <%- agentConnectionModuleName %> import get_current_session_id, session_id_context
+from <%- agentConnectionModuleName %> import session_id_context, with_session_id
 
 from .agent import get_agent
 
@@ -17,37 +15,11 @@ PORT = int(os.environ.get("PORT", "9000"))
 RUNTIME_URL = os.environ.get("AGENTCORE_RUNTIME_URL", f"http://localhost:{PORT}/")
 SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
 
-_agents: dict[str, Agent] = {}
-_agent_stack = ExitStack()
-
-
-def _cached_agent() -> Agent:
-    sid = get_current_session_id() or "default"
-    if sid not in _agents:
-        _agents[sid] = _agent_stack.enter_context(get_agent())
-    return _agents[sid]
-
-
-class _SessionRoutingAgent(Agent):
-    """Delegates each call to a cached Agent for the current session."""
-
-    def __init__(self, template: Agent):
-        # Seed the A2A agent card (name / tools / description) from a
-        # template; stream / invoke are routed per session.
-        self.__dict__.update(template.__dict__)
-
-    def stream_async(self, *args, **kwargs):
-        return _cached_agent().stream_async(*args, **kwargs)
-
-    def invoke_async(self, *args, **kwargs):
-        return _cached_agent().invoke_async(*args, **kwargs)
-
-
-_template = _agent_stack.enter_context(get_agent())
-_agents["default"] = _template
+_agent_ctx = with_session_id(get_agent)
+_agent = _agent_ctx.__enter__()
 
 a2a_server = A2AServer(
-    agent=_SessionRoutingAgent(_template),
+    agent=_agent,
     port=PORT,
     http_url=RUNTIME_URL,
     serve_at_root=True,

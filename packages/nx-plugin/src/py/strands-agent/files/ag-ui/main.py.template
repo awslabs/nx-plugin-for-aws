@@ -1,10 +1,11 @@
 import logging
 import uuid
+from contextlib import ExitStack
 
 from ag_ui_strands import StrandsAgent, create_strands_app
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
-from <%- agentConnectionModuleName %> import session_id_context
+from <%- agentConnectionModuleName %> import get_current_session_id, session_id_context
 
 from .agent import get_agent
 
@@ -12,19 +13,36 @@ logging.basicConfig(level=logging.INFO)
 
 SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
 
-# ag_ui_strands creates a fresh Agent per thread_id from this template. Any
-# MCP clients held by the template are shared across threads and run in a
-# background thread whose contextvar was snapshotted at startup — sessions
-# set on request won't propagate to downstream MCP calls. For per-session
-# MCP isolation, wire ag_ui_strands' session_manager_provider hook.
-_agent_ctx = get_agent()
-_agent = _agent_ctx.__enter__()
+# ag_ui_strands captures tools/kwargs at StrandsAgent construction, so we
+# build a fresh StrandsAgent (with fresh MCP clients) per session on demand.
+_agents: dict[str, StrandsAgent] = {}
+_agent_stack = ExitStack()
 
-agui_agent = StrandsAgent(
-    agent=_agent,
-    name="<%= agentNameClassName %>",
-    description="A Strands Agent exposed via the AG-UI protocol.",
-)
+
+def _for_session() -> StrandsAgent:
+    sid = get_current_session_id() or "default"
+    if sid not in _agents:
+        # Build the inner Agent inside the session context so its MCP clients
+        # snapshot the right session on their background transport threads.
+        with session_id_context(sid):
+            inner = _agent_stack.enter_context(get_agent())
+        _agents[sid] = StrandsAgent(
+            agent=inner,
+            name="<%= agentNameClassName %>",
+            description="A Strands Agent exposed via the AG-UI protocol.",
+        )
+    return _agents[sid]
+
+
+class _SessionRoutingAgent:
+    """Thin proxy — dispatch ``run`` to a per-session StrandsAgent."""
+
+    name = "<%= agentNameClassName %>"
+    description = "A Strands Agent exposed via the AG-UI protocol."
+
+    async def run(self, input_data):
+        async for event in _for_session().run(input_data):
+            yield event
 
 
 class _SessionIdMiddleware(BaseHTTPMiddleware):
@@ -36,5 +54,5 @@ class _SessionIdMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
 
-app = create_strands_app(agui_agent, path="/invocations")
+app = create_strands_app(_SessionRoutingAgent(), path="/invocations")
 app.add_middleware(_SessionIdMiddleware)

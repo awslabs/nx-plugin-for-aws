@@ -928,22 +928,12 @@ exports[`ts#strands-agent generator > should match snapshot for generated files 
 "import { publicProcedure, t } from './init.js';
 import { z } from 'zod';
 import { zAsyncIterable } from './schema/z-async-iterable.js';
-import { enterSessionContext } from ':proj/agent-connection';
-import { Agent } from '@strands-agents/sdk';
+import { enterSessionContext, withSessionId } from ':proj/agent-connection';
 import { getAgent } from './agent.js';
 
 export const router = t.router;
 
-// One Agent per session — preserves conversation history.
-const agents = new Map<string, Promise<Agent>>();
-const getCachedAgent = (sessionId: string): Promise<Agent> => {
-  let existing = agents.get(sessionId);
-  if (!existing) {
-    existing = getAgent();
-    agents.set(sessionId, existing);
-  }
-  return existing;
-};
+const agent = withSessionId(getAgent);
 
 export const appRouter = router({
   invoke: publicProcedure
@@ -956,7 +946,6 @@ export const appRouter = router({
     )
     .subscription(async function* (opts) {
       enterSessionContext(opts.ctx.sessionId);
-      const agent = await getCachedAgent(opts.ctx.sessionId);
 
       for await (const event of agent.stream(opts.input.message)) {
         if (

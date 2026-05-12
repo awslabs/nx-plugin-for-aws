@@ -1,0 +1,50 @@
+"""Route each agent call to a per-session Agent.
+
+Strands' Python ``MCPClient`` runs its transport in a background task whose
+``contextvars`` are snapshotted when the client opens. That means a session
+set on an inbound request does not reach MCP calls issued by an Agent that
+was constructed before the request arrived. ``with_session_id`` works around
+this by lazily constructing a fresh Agent the first time each session is
+seen, so its MCP clients inherit the right session from the start.
+"""
+
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, ExitStack, contextmanager
+
+from strands import Agent
+
+from .session_context import get_current_session_id
+
+
+@contextmanager
+def with_session_id(
+    agent_factory: Callable[[], AbstractContextManager[Agent]],
+) -> Iterator[Agent]:
+    """Wrap an agent factory so each session gets its own cached Agent."""
+    stack = ExitStack()
+    agents: dict[str, Agent] = {}
+    template = stack.enter_context(agent_factory())
+    agents["default"] = template
+
+    def _for_session() -> Agent:
+        sid = get_current_session_id() or "default"
+        if sid not in agents:
+            agents[sid] = stack.enter_context(agent_factory())
+        return agents[sid]
+
+    class _SessionRoutingAgent(Agent):
+        def __init__(self) -> None:
+            # Seed the agent-card surface (name / description / tools) from
+            # the template; dispatch per-session on stream/invoke.
+            self.__dict__.update(template.__dict__)
+
+        def stream_async(self, *args, **kwargs):
+            return _for_session().stream_async(*args, **kwargs)
+
+        def invoke_async(self, *args, **kwargs):
+            return _for_session().invoke_async(*args, **kwargs)
+
+    try:
+        yield _SessionRoutingAgent()
+    finally:
+        stack.close()

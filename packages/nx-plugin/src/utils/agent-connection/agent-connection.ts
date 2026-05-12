@@ -117,6 +117,11 @@ export async function ensureTypeScriptAgentConnectionProject(
     joinPathFragments(AGENT_CONNECTION_PROJECT_DIR, 'src', 'index.ts'),
     './core/session-context.js',
   );
+  await addStarExport(
+    tree,
+    joinPathFragments(AGENT_CONNECTION_PROJECT_DIR, 'src', 'index.ts'),
+    './core/with-session-id.js',
+  );
 }
 
 /**
@@ -197,6 +202,12 @@ export async function ensurePythonAgentConnectionProject(
     moduleInitPath,
     '.core.session_context',
     'session_id_context',
+  );
+  await addPythonReExport(
+    tree,
+    moduleInitPath,
+    '.core.with_session_id',
+    'with_session_id',
   );
 
   // Shared core helpers depend on aws-lambda-powertools for AppConfig access.

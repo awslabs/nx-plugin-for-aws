@@ -1,0 +1,45 @@
+import type { Agent } from '@strands-agents/sdk';
+import { getCurrentSessionId } from './session-context.js';
+
+/**
+ * Minimal interface covering the methods `A2AExpressServer`, `StrandsAgent`
+ * (AG-UI), and tRPC subscriptions invoke on the agent.
+ */
+export type SessionRoutingAgent = Pick<Agent, 'id' | 'invoke' | 'stream'>;
+
+/**
+ * Wrap an Agent factory so each session gets its own cached Agent.
+ *
+ * The first call for a given session lazily constructs the underlying Agent
+ * and caches it for the life of the process so per-session state (conversation
+ * history, MCP transports with the right session header baked in) is preserved
+ * across turns.
+ */
+export const withSessionId = (
+  factory: () => Promise<Agent>,
+): SessionRoutingAgent => {
+  const agents = new Map<string, Promise<Agent>>();
+
+  const forSession = (): Promise<Agent> => {
+    const sid = getCurrentSessionId() ?? 'default';
+    let pending = agents.get(sid);
+    if (!pending) {
+      pending = factory();
+      agents.set(sid, pending);
+    }
+    return pending;
+  };
+
+  return {
+    get id(): string {
+      return 'session-routing-agent';
+    },
+    async invoke(...args: Parameters<Agent['invoke']>) {
+      return (await forSession()).invoke(...args);
+    },
+    async *stream(...args: Parameters<Agent['stream']>) {
+      const agent = await forSession();
+      return yield* agent.stream(...args);
+    },
+  };
+};

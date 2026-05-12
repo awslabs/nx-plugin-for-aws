@@ -1,27 +1,18 @@
 import uuid
-from contextlib import ExitStack
 
 import uvicorn
 from bedrock_agentcore.runtime.models import PingStatus
 from fastapi import Request
 from pydantic import BaseModel
-from strands import Agent
-from <%- agentConnectionModuleName %> import session_id_context
+from <%- agentConnectionModuleName %> import session_id_context, with_session_id
 
 from .agent import get_agent
 from .init import JsonStreamingResponse, app
 
 SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
 
-# One Agent per session — preserves conversation history.
-_agents: dict[str, Agent] = {}
-_agent_stack = ExitStack()
-
-
-def _get_cached_agent(session_id: str) -> Agent:
-    if session_id not in _agents:
-        _agents[session_id] = _agent_stack.enter_context(get_agent())
-    return _agents[session_id]
+_agent_ctx = with_session_id(get_agent)
+_agent = _agent_ctx.__enter__()
 
 
 class InvokeInput(BaseModel):
@@ -35,8 +26,7 @@ class StreamChunk(BaseModel):
 async def handle_invoke(input: InvokeInput, session_id: str):
     """Streaming handler for agent invocation"""
     with session_id_context(session_id):
-        agent = _get_cached_agent(session_id)
-        stream = agent.stream_async(input.message)
+        stream = _agent.stream_async(input.message)
         async for event in stream:
             print(event)
             text = event.get("event", {}).get("contentBlockDelta", {}).get("delta", {}).get("text")
