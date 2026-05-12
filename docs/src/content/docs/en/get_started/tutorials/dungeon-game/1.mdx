@@ -399,7 +399,11 @@ This has configured a Python project and [UV Workspace](https://docs.astral.sh/u
 
 To add a Strands agent to the project with the `py#strands-agent` generator:
 
-<RunGenerator generator="py#strands-agent" requiredParameters={{project:"story", auth:"Cognito"}} noInteractive />
+<RunGenerator generator="py#strands-agent" requiredParameters={{project:"story", auth:"Cognito", protocol:"AG-UI"}} noInteractive />
+
+:::note[AG-UI protocol]
+We choose `--protocol=AG-UI` so the agent speaks the [Agent-User Interaction protocol](https://docs.copilotkit.ai/aws-strands/protocol) — this lets our React website talk to it directly via [CopilotKit](https://docs.copilotkit.ai/), with streaming, tool calls, and conversation history handled by the protocol instead of a hand-rolled HTTP client.
+:::
 
 You will see some new files appear in your file tree.
 <Drawer title="py#strands-agent updated files" trigger="Click here to examine these files in more detail.">
@@ -431,86 +435,51 @@ from strands_tools import current_time
 
 
 @tool
-def add(a: int, b: int) -> int:
-    return a + b
+def subtract(a: int, b: int) -> int:
+    return a - b
 
 
 @contextmanager
 def get_agent():
     yield Agent(
+        name="StoryAgent",
+        description="StoryAgent Strands Agent",
         system_prompt="""
-You are an addition wizard.
-Use the 'add' tool for addition tasks.
+You are a mathematical wizard.
+Use your tools for mathematical tasks.
 Refer to tools as your 'spellbook'.
 """,
-        tools=[add, current_time],
+        tools=[subtract, current_time],
     )
 ```
 
-This creates an example Strands agent and defines an addition tool.
+This creates an example Strands agent and defines a subtraction tool.
 
 ```python
 # agent/main.py
-import uuid
+import logging
 
-import uvicorn
-from bedrock_agentcore.runtime.models import PingStatus
-from dungeon_adventure_agent_connection import session_id_context, with_session_id
-from fastapi import Request
-from pydantic import BaseModel
+from ag_ui_strands import StrandsAgent, create_strands_app
 
 from .agent import get_agent
-from .init import JsonStreamingResponse, app
 
-SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
+logging.basicConfig(level=logging.INFO)
 
-_agent_ctx = with_session_id(get_agent)
+# Create AG-UI agent wrapper
+_agent_ctx = get_agent()
 _agent = _agent_ctx.__enter__()
 
-
-class InvokeInput(BaseModel):
-    message: str
-
-
-class StreamChunk(BaseModel):
-    content: str
-
-
-async def handle_invoke(input: InvokeInput, session_id: str):
-    """Streaming handler for agent invocation"""
-    with session_id_context(session_id):
-        stream = _agent.stream_async(input.message)
-        async for event in stream:
-            print(event)
-            text = event.get("event", {}).get("contentBlockDelta", {}).get("delta", {}).get("text")
-            if text is not None:
-                yield StreamChunk(content=text)
-            elif event.get("event", {}).get("messageStop") is not None:
-                yield StreamChunk(content="\n")
-
-
-@app.post(
-    "/invocations",
-    response_class=JsonStreamingResponse,
-    responses={200: JsonStreamingResponse.openapi_response(StreamChunk, "Stream of agent response chunks")},
+agui_agent = StrandsAgent(
+    agent=_agent,
+    name="StoryAgent",
+    description="A Strands Agent exposed via the AG-UI protocol.",
 )
-async def invoke(input: InvokeInput, request: Request) -> JsonStreamingResponse:
-    """Entry point for agent invocation"""
-    session_id = request.headers.get(SESSION_ID_HEADER) or str(uuid.uuid4())
-    return JsonStreamingResponse(handle_invoke(input, session_id))
 
-
-@app.get("/ping")
-def ping() -> str:
-    # TODO: if running an async task, return PingStatus.HEALTHY_BUSY
-    return PingStatus.HEALTHY
-
-
-if __name__ == "__main__":
-    uvicorn.run("dungeon_adventure_story.agent.main:app", port=8080)
+# Create FastAPI app with AG-UI endpoint and health check
+app = create_strands_app(agui_agent, path="/invocations")
 ```
 
-This is the entrypoint for the agent, configured as a FastAPI application compatible with [Amazon Bedrock AgentCore Runtime](https://github.com/aws/bedrock-agentcore-sdk-python). It uses Strands support for streaming and streams events back to the client as they occur via JSON Lines.
+This is the entrypoint for the agent. Because we selected `--protocol=AG-UI`, the generator wraps our Strands `Agent` with `StrandsAgent` from [`ag_ui_strands`](https://docs.copilotkit.ai/aws-strands/integration) and mounts it on a FastAPI app that speaks the [AG-UI protocol](https://docs.copilotkit.ai/aws-strands/protocol) — this is what CopilotKit will talk to from the React website. In <Link path="get_started/tutorials/dungeon-game/3">Module 3</Link> we'll add a `session_manager_provider` so each thread id gets its own on-disk `FileSessionManager` and conversation history persists across turns.
 
 ```ts
 // common/constructs/src/app/agents/story-agent.ts
@@ -645,7 +614,11 @@ In this task, we will create the UI which will allow you to interact with the ga
 
 To create the UI, create a website called `GameUI` using these steps:
 
-<RunGenerator generator="ts#react-website" requiredParameters={{name:"GameUI"}} noInteractive />
+<RunGenerator generator="ts#react-website" requiredParameters={{name:"GameUI", uxProvider:"Shadcn"}} noInteractive />
+
+:::note[Shadcn UI]
+We select `--uxProvider=Shadcn` so the generated website uses [shadcn/ui](https://ui.shadcn.com/) components styled with Tailwind — all our route code uses shadcn primitives like `Card`, `Button`, and `Input`, and the `connection` generator later wires a matching shadcn-themed [CopilotKit](https://docs.copilotkit.ai/) chat surface.
+:::
 
 You will see some new files appear in your file tree.
 
@@ -667,19 +640,24 @@ The `ts#react-website` generates these files. Let us examine some of the key fil
     - src/
       - components/
         - AppLayout/
-          - index.tsx overall page layout: header, footer, sidebar, etc
-      - hooks/
-        - useAppLayout.tsx allows you to dynamically set things like notifications, page style, etc
+          - index.tsx overall page layout using shadcn `SidebarProvider` + header
+        - app-sidebar.tsx default shadcn sidebar with nav items
+        - alert.tsx, spinner.tsx shadcn-wrapped feedback primitives
       - routes/ @tanstack/react-router file based routes
         - **index.tsx** root '/' page
         - __root.tsx all pages use this component as a base
       - config.ts
       - **main.tsx** React entrypoint
       - routeTree.gen.ts this is automatically updated by @tanstack/react-router
-      - styles.css
+      - styles.css imports shared shadcn globals (Tailwind v4)
     - index.html
     - project.json
     - vite.config.mts
+    - ...
+  - common/
+    - shadcn/ shared shadcn/ui library (theme tokens, `Button`, `Card`, `Input`, `Sidebar`, …) imported by every `uxProvider=Shadcn` website
+      - src/components/ui/*
+      - src/styles/globals.css Tailwind + shadcn design tokens
     - ...
 </FileTree>
 
@@ -710,53 +688,36 @@ This is the CDK construct that defines our GameUI. It has already configured the
 // packages/game-ui/src/main.tsx
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { I18nProvider } from '@cloudscape-design/components/i18n';
-import messages from '@cloudscape-design/components/i18n/messages/all.en';
-import '@cloudscape-design/global-styles/index.css';
 import { RouterProvider, createRouter } from '@tanstack/react-router';
 import { routeTree } from './routeTree.gen';
+import './styles.css';
 
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export type RouterProviderContext = {};
 
-const router = createRouter({
-  routeTree,
-  context: {},
-});
+const router = createRouter({ routeTree, context: {} });
 
-// Register the router instance for type safety
 declare module '@tanstack/react-router' {
   interface Register {
     router: typeof router;
   }
 }
 
-const App = () => {
-  return <RouterProvider router={router} context={{}} />;
-};
+const App = () => <RouterProvider router={router} context={{}} />;
 
 const root = document.getElementById('root');
 root &&
   createRoot(root).render(
     <React.StrictMode>
-      <I18nProvider locale="en" messages={[messages]}>
-        <App />
-      </I18nProvider>
+      <App />
     </React.StrictMode>,
   );
 ```
 
-This is the entry point where React is mounted. As shown, it initially just configures a `@tanstack/react-router` in a [`file-based-routing`](https://tanstack.com/router/v1/docs/framework/react/routing/file-based-routing) configuration. As long as your development server is running, you can create files within the `routes` folder and `@tanstack/react-router` will create the boilerplate file setup for you, along with updating the `routeTree.gen.ts` file. This file maintains all routes in a type-safe manner, which means when you use `<Link>`, the `to` option will only show valid routes.
-For more information, refer to the [`@tanstack/react-router` docs](https://tanstack.com/router/v1/docs/framework/react/quick-start).
+This is the entry point where React is mounted. Because we chose `--uxProvider=Shadcn`, there is no Cloudscape `I18nProvider` — styling comes from Tailwind v4 tokens imported via `styles.css` instead. `@tanstack/react-router` is configured in [file-based routing](https://tanstack.com/router/v1/docs/framework/react/routing/file-based-routing) mode: as long as the dev server is running, any file you create under `routes/` is picked up automatically and the route tree is regenerated. Later generators (auth, connection) will AST-patch this file to wrap `<App />` in additional providers.
 
 ```tsx
 // packages/game-ui/src/routes/index.tsx
-import {
-  ContentLayout,
-  Header,
-  SpaceBetween,
-  Container,
-} from '@cloudscape-design/components';
 import { createFileRoute } from '@tanstack/react-router';
 
 export const Route = createFileRoute('/')({
@@ -765,11 +726,12 @@ export const Route = createFileRoute('/')({
 
 function RouteComponent() {
   return (
-    <ContentLayout header={<Header>Welcome</Header>}>
-      <SpaceBetween size="l">
-        <Container>Welcome to your new React website!</Container>
-      </SpaceBetween>
-    </ContentLayout>
+    <div className="text-center">
+      <header>
+        <h1>Welcome</h1>
+        <p>Welcome to your new React website!</p>
+      </header>
+    </div>
   );
 }
 ```
@@ -818,27 +780,19 @@ The `ts#react-website#auth` generator updates/generates these files. Let us exam
 +import RuntimeConfigProvider from './components/RuntimeConfig';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { I18nProvider } from '@cloudscape-design/components/i18n';
-import messages from '@cloudscape-design/components/i18n/messages/all.en';
-import '@cloudscape-design/global-styles/index.css';
 import { RouterProvider, createRouter } from '@tanstack/react-router';
 import { routeTree } from './routeTree.gen';
+import './styles.css';
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 -export type RouterProviderContext = {};
 +export type RouterProviderContext = {
 +  runtimeConfig?: ReturnType<typeof useRuntimeConfig>;
 +  auth?: ReturnType<typeof useAuth>;
 +};
--const router = createRouter({
--  routeTree,
--  context: {},
--});
+-const router = createRouter({ routeTree, context: {} });
 +const router = createRouter({
 +  routeTree,
-+  context: {
-+    runtimeConfig: undefined,
-+    auth: undefined,
-+  },
++  context: { runtimeConfig: undefined, auth: undefined },
 +});
 // Register the router instance for type safety
 declare module '@tanstack/react-router' {
@@ -846,9 +800,7 @@ declare module '@tanstack/react-router' {
     router: typeof router;
   }
 }
--const App = () => {
--  return <RouterProvider router={router} context={{}} />;
--};
+-const App = () => <RouterProvider router={router} context={{}} />;
 +const App = () => {
 +  const auth = useAuth();
 +  const runtimeConfig = useRuntimeConfig();
@@ -858,13 +810,11 @@ const root = document.getElementById('root');
 root &&
   createRoot(root).render(
     <React.StrictMode>
-      <I18nProvider locale="en" messages={[messages]}>
-+        <RuntimeConfigProvider>
-+          <CognitoAuth>
-            <App />
-+          </CognitoAuth>
-+        </RuntimeConfigProvider>
-      </I18nProvider>
++      <RuntimeConfigProvider>
++        <CognitoAuth>
+          <App />
++        </CognitoAuth>
++      </RuntimeConfigProvider>
     </React.StrictMode>,
   );
 ```
@@ -937,32 +887,23 @@ import { useRuntimeConfig } from './hooks/useRuntimeConfig';
 import RuntimeConfigProvider from './components/RuntimeConfig';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { I18nProvider } from '@cloudscape-design/components/i18n';
-import messages from '@cloudscape-design/components/i18n/messages/all.en';
-import '@cloudscape-design/global-styles/index.css';
 import { RouterProvider, createRouter } from '@tanstack/react-router';
 import { routeTree } from './routeTree.gen';
+import './styles.css';
 ...
-const App = () => {
-  const auth = useAuth();
-  const runtimeConfig = useRuntimeConfig();
-  return <RouterProvider router={router} context={{ runtimeConfig, auth }} />;
-};
 const root = document.getElementById('root');
 root &&
   createRoot(root).render(
     <React.StrictMode>
-      <I18nProvider locale="en" messages={[messages]}>
-        <RuntimeConfigProvider>
-          <CognitoAuth>
-+            <QueryClientProvider>
-+              <GameApiClientProvider>
-                <App />
-+              </GameApiClientProvider>
-+            </QueryClientProvider>
-          </CognitoAuth>
-        </RuntimeConfigProvider>
-      </I18nProvider>
+      <RuntimeConfigProvider>
+        <CognitoAuth>
++          <QueryClientProvider>
++            <GameApiClientProvider>
+              <App />
++            </GameApiClientProvider>
++          </QueryClientProvider>
+        </CognitoAuth>
+      </RuntimeConfigProvider>
     </React.StrictMode>,
   );
 ```
@@ -1008,7 +949,7 @@ For more details, refer to the <Link path="guides/connection/py-strands-agent-mc
 
 ### Game UI: Connect to Story Agent
 
-Let us connect our Game UI to the Story Agent so that we can call the agent's API from our React website with a type-safe, auto-generated client.
+Let us connect our Game UI to the Story Agent. Because the agent speaks AG-UI, the `connection` generator wires up [CopilotKit](https://docs.copilotkit.ai/) instead of generating an OpenAPI client — you get a themed chat component and an `@ag-ui/client` `HttpAgent` ready to render.
 
 <RunGenerator generator="connection" requiredParameters={{sourceProject:"@dungeon-adventure/game-ui", targetProject:"story"}} noInteractive />
 
@@ -1017,35 +958,26 @@ The `connection` generator generates/updates these files:
 
 <FileTree>
 - packages/
-  - story/
-    - scripts/
-      - **agent\_openapi.py** Script to generate the OpenAPI specification from the agent's FastAPI app
-    - project.json Updated with `agent-openapi` target
   - game-ui/
     - src/
       - components/
-        - **StoryAgentProvider.tsx** Provider for the type-safe OpenAPI client
-        - **QueryClientProvider.tsx** TanStack React Query client provider (if not already present)
+        - **AguiProvider.tsx** `CopilotKitProvider` with every connected AG-UI agent registered
+        - copilot/
+          - **index.tsx** Shadcn-themed `CopilotChat` / `CopilotSidebar` / `CopilotPopup`
+          - ShadcnAssistantMessage.tsx, ShadcnUserMessage.tsx, ShadcnChatInput.tsx, ShadcnCursor.tsx, copilot.css
       - hooks/
-        - **useStoryAgent.tsx** Hook for TanStack Query options proxy
-        - **useStoryAgentClient.tsx** Hook for the vanilla API client
-      - generated/
-        - story-agent/ Generated at build time from the OpenAPI spec
-          - types.gen.ts
-          - client.gen.ts
-          - options-proxy.gen.ts
-    - project.json Updated with client generation targets
-    - **main.tsx** Updated to add StoryAgentProvider
+        - **useAguiStoryAgent.tsx** Builds an `HttpAgent`, injects the Cognito bearer token, and pads `threadId` to AgentCore's 33-char session id
+    - **main.tsx** Wraps `<App />` in `<AguiProvider>`
 
 </FileTree>
 
 The generator:
-- Creates an agent-scoped OpenAPI spec generation script in the story project
-- Generates a type-safe TypeScript client from the agent's OpenAPI specification at build time
-- Adds a provider, hooks, and client to the website for calling the agent's API
-- Configures `serve-local` to automatically start the agent's local server and regenerate the client on changes
+- Detects the React website's `uxProvider` (Shadcn here) and vends matching chat components.
+- Registers every connected agent on a single `CopilotKitProvider` — re-running for another agent just adds another hook.
+- Reads the agent's runtime ARN from Runtime Configuration, builds the AgentCore invocation URL, and attaches the Cognito bearer token plus the AgentCore session id header.
+- Pads the `threadId` to AgentCore's 33-character minimum — this is why our Module 4 route can safely build ``{player}-{genre}`` as a stable thread id.
 
-For more details, refer to the <Link path="guides/connection/react-py-strands-agent">React to Python Strands Agent connection guide</Link>.
+For more details, refer to the <Link path="guides/connection/react-agui">React to AG-UI connection guide</Link>.
 </Drawer>
 
 ### Game UI: Infrastructure
