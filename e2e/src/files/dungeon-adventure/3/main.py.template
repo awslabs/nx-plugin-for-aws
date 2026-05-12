@@ -2,10 +2,14 @@ import uuid
 
 import uvicorn
 from bedrock_agentcore.runtime.models import PingStatus
+from dungeon_adventure_agent_connection import session_id_context
+from fastapi import Request
 from pydantic import BaseModel
 
 from .agent import get_agent
 from .init import JsonStreamingResponse, app
+
+SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
 
 
 class Action(BaseModel):
@@ -23,13 +27,13 @@ class StreamChunk(BaseModel):
     content: str
 
 
-async def handle_invoke(input: InvokeInput):
+async def handle_invoke(input: InvokeInput, session_id: str):
     """Streaming handler for agent invocation"""
     messages = [{"role": "user", "content": [{"text": "Continue or create a new story..."}]}]
     for action in input.actions:
         messages.append({"role": action.role, "content": [{"text": action.content}]})
 
-    with get_agent(input.playerName, input.genre, session_id=str(uuid.uuid4())) as agent:
+    with session_id_context(session_id), get_agent(input.playerName, input.genre) as agent:
         stream = agent.stream_async(messages)
         async for event in stream:
             print(event)
@@ -45,9 +49,10 @@ async def handle_invoke(input: InvokeInput):
     response_class=JsonStreamingResponse,
     responses={200: JsonStreamingResponse.openapi_response(StreamChunk, "Stream of agent response chunks")},
 )
-async def invoke(input: InvokeInput) -> JsonStreamingResponse:
+async def invoke(input: InvokeInput, request: Request) -> JsonStreamingResponse:
     """Entry point for agent invocation"""
-    return JsonStreamingResponse(handle_invoke(input))
+    session_id = request.headers.get(SESSION_ID_HEADER) or str(uuid.uuid4())
+    return JsonStreamingResponse(handle_invoke(input, session_id))
 
 
 @app.get("/ping")
