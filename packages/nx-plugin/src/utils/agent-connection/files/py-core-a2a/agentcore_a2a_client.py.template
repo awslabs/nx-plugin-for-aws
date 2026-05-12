@@ -12,15 +12,6 @@ from .session_context import get_current_session_id
 SESSION_HEADER = "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"
 
 
-def _arn_to_url(agent_runtime_arn: str) -> str:
-    region = agent_runtime_arn.split(":")[3]
-    encoded_arn = quote(agent_runtime_arn, safe="")
-    return (
-        f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/"
-        f"{encoded_arn}/invocations/"
-    )
-
-
 class _SessionHeaderAuth(httpx.Auth):
     """Stamps the AgentCore session header from the current async context."""
 
@@ -42,6 +33,21 @@ class _SessionHeaderAuth(httpx.Auth):
 
 class AgentCoreA2aClient:
     """Factory for A2A clients that forward the current async-context session."""
+
+    @staticmethod
+    def _build_url(agent_runtime_arn: str) -> tuple[str, str]:
+        """Extract region from ARN and construct the A2A invocations URL.
+
+        ARN format: arn:partition:service:region:account-id:resource
+        A2A on AgentCore is mounted at `/invocations/` (trailing slash matters).
+        """
+        region = agent_runtime_arn.split(":")[3]
+        encoded_arn = quote(agent_runtime_arn, safe="")
+        url = (
+            f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/"
+            f"{encoded_arn}/invocations/"
+        )
+        return region, url
 
     @staticmethod
     def _build(
@@ -73,10 +79,10 @@ class AgentCoreA2aClient:
         description: str | None = None,
     ) -> A2AAgent:
         """SigV4-authenticated client for a Bedrock AgentCore runtime."""
-        region = agent_runtime_arn.split(":")[3]
+        region, url = AgentCoreA2aClient._build_url(agent_runtime_arn)
         credentials = boto3.Session(region_name=region).get_credentials()
         return AgentCoreA2aClient._build(
-            _arn_to_url(agent_runtime_arn),
+            url,
             SigV4HTTPXAuth(credentials, "bedrock-agentcore", region),
             None,
             name=name,
@@ -92,8 +98,9 @@ class AgentCoreA2aClient:
         description: str | None = None,
     ) -> A2AAgent:
         """Bearer-authenticated client for a Bedrock AgentCore runtime."""
+        _, url = AgentCoreA2aClient._build_url(agent_runtime_arn)
         return AgentCoreA2aClient._build(
-            _arn_to_url(agent_runtime_arn),
+            url,
             None,
             {"Authorization": f"Bearer {access_token_provider()}"},
             name=name,

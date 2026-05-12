@@ -21,7 +21,6 @@ __all__ = [
 
 exports[`py#strands-agent#mcp-connection generator > should match snapshot for generated files > agentcore_mcp_client.py 1`] = `
 "from collections.abc import Callable
-from urllib.parse import quote
 
 import boto3
 import httpx
@@ -32,15 +31,6 @@ from .auth import SigV4HTTPXAuth
 from .session_context import get_current_session_id
 
 SESSION_HEADER = "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"
-
-
-def _arn_to_url(agent_runtime_arn: str) -> str:
-    region = agent_runtime_arn.split(":")[3]
-    encoded_arn = quote(agent_runtime_arn, safe="")
-    return (
-        f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/"
-        f"{encoded_arn}/invocations?qualifier=DEFAULT"
-    )
 
 
 class _SessionHeaderAuth(httpx.Auth):
@@ -66,6 +56,20 @@ class AgentCoreMCPClient:
     """Factory for MCP clients that forward the current async-context session."""
 
     @staticmethod
+    def _build_url(agent_runtime_arn: str) -> tuple[str, str]:
+        """Extract region from ARN and construct the invocation URL.
+
+        ARN format: arn:partition:service:region:account-id:resource
+        """
+        region = agent_runtime_arn.split(":")[3]
+        encoded_arn = agent_runtime_arn.replace(":", "%3A").replace("/", "%2F")
+        url = (
+            f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/"
+            f"{encoded_arn}/invocations?qualifier=DEFAULT"
+        )
+        return region, url
+
+    @staticmethod
     def _create(url: str, auth: httpx.Auth | None = None) -> MCPClient:
         return MCPClient(
             lambda: streamablehttp_client(
@@ -79,11 +83,10 @@ class AgentCoreMCPClient:
     @staticmethod
     def with_iam_auth(agent_runtime_arn: str) -> MCPClient:
         """SigV4-authenticated client for a Bedrock AgentCore runtime."""
-        region = agent_runtime_arn.split(":")[3]
+        region, url = AgentCoreMCPClient._build_url(agent_runtime_arn)
         credentials = boto3.Session(region_name=region).get_credentials()
         return AgentCoreMCPClient._create(
-            _arn_to_url(agent_runtime_arn),
-            SigV4HTTPXAuth(credentials, "bedrock-agentcore", region),
+            url, SigV4HTTPXAuth(credentials, "bedrock-agentcore", region)
         )
 
     @staticmethod
@@ -91,9 +94,10 @@ class AgentCoreMCPClient:
         agent_runtime_arn: str, access_token_provider: Callable[[], str]
     ) -> MCPClient:
         """Bearer-authenticated client for a Bedrock AgentCore runtime."""
+        _, url = AgentCoreMCPClient._build_url(agent_runtime_arn)
         return MCPClient(
             lambda: streamablehttp_client(
-                _arn_to_url(agent_runtime_arn),
+                url,
                 auth=_SessionHeaderAuth(),
                 headers={"Authorization": f"Bearer {access_token_provider()}"},
                 timeout=120,

@@ -11,35 +11,59 @@ import { getCurrentSessionId } from './session-context.js';
 
 const SESSION_HEADER = 'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id';
 
-const arnToUrl = (agentRuntimeArn: string): string => {
-  const region = agentRuntimeArn.split(':')[3];
-  return `https://bedrock-agentcore.${region}.amazonaws.com/runtimes/${encodeURIComponent(agentRuntimeArn)}/invocations/`;
-};
+/**
+ * Common options for creating an AgentCore A2A client.
+ */
+export interface AgentCoreA2aClientOptions {
+  /** The ARN of the Bedrock AgentCore Runtime to connect to. */
+  agentRuntimeArn: string;
+  /** Optional description for the remote agent. */
+  description?: string;
+  /** Optional friendly name for the remote agent. */
+  name?: string;
+}
+
+/** Options for an IAM-authenticated A2A client. */
+export interface AgentCoreA2aClientIamOptions
+  extends AgentCoreA2aClientOptions {
+  credentialProvider?: ReturnType<typeof fromNodeProviderChain>;
+}
+
+/** Options for a JWT-authenticated A2A client. */
+export interface AgentCoreA2aClientJwtOptions
+  extends AgentCoreA2aClientOptions {
+  accessTokenProvider: () => Promise<string>;
+}
+
+/** Options for a no-auth A2A client (local dev). */
+export interface AgentCoreA2aClientNoAuthOptions {
+  /** Full URL of the local A2A endpoint. */
+  url: string;
+  name?: string;
+  description?: string;
+}
 
 interface BuildOptions {
   name?: string;
   description?: string;
 }
 
-export interface AgentCoreA2aClientIamOptions extends BuildOptions {
-  /** The AgentCore runtime ARN — the region and URL are derived from it. */
-  agentRuntimeArn: string;
-  credentialProvider?: ReturnType<typeof fromNodeProviderChain>;
-}
-
-export interface AgentCoreA2aClientJwtOptions extends BuildOptions {
-  /** The AgentCore runtime ARN — the URL is derived from it. */
-  agentRuntimeArn: string;
-  accessTokenProvider: () => Promise<string>;
-}
-
-export interface AgentCoreA2aClientNoAuthOptions extends BuildOptions {
-  /** Full URL — intended for local dev. */
-  url: string;
-}
-
 /** Factory for A2A clients that forward the current async-context session. */
 export class AgentCoreA2aClient {
+  /**
+   * Construct the A2A invocations URL for an AgentCore runtime ARN and
+   * extract the region. A2A on AgentCore is mounted at `/invocations/`
+   * (trailing slash matters).
+   */
+  private static buildUrl(agentRuntimeArn: string): {
+    region: string;
+    url: string;
+  } {
+    const region = agentRuntimeArn.split(':')[3];
+    const url = `https://bedrock-agentcore.${region}.amazonaws.com/runtimes/${encodeURIComponent(agentRuntimeArn)}/invocations/`;
+    return { region, url };
+  }
+
   private static build(
     url: string,
     authFetch: typeof fetch,
@@ -65,7 +89,7 @@ export class AgentCoreA2aClient {
   }
 
   static withIamAuth(options: AgentCoreA2aClientIamOptions): A2AAgent {
-    const region = options.agentRuntimeArn.split(':')[3];
+    const { region, url } = AgentCoreA2aClient.buildUrl(options.agentRuntimeArn);
     const credentialProvider =
       options.credentialProvider ?? fromNodeProviderChain();
     const sigv4Fetch: typeof fetch = async (...args) => {
@@ -76,14 +100,11 @@ export class AgentCoreA2aClient {
       });
       return client.fetch(...args);
     };
-    return AgentCoreA2aClient.build(
-      arnToUrl(options.agentRuntimeArn),
-      sigv4Fetch,
-      options,
-    );
+    return AgentCoreA2aClient.build(url, sigv4Fetch, options);
   }
 
   static withJwtAuth(options: AgentCoreA2aClientJwtOptions): A2AAgent {
+    const { url } = AgentCoreA2aClient.buildUrl(options.agentRuntimeArn);
     const bearerFetch: typeof fetch = async (input, init) => {
       const headers = new Headers(init?.headers);
       headers.set(
@@ -92,11 +113,7 @@ export class AgentCoreA2aClient {
       );
       return fetch(input, { ...init, headers });
     };
-    return AgentCoreA2aClient.build(
-      arnToUrl(options.agentRuntimeArn),
-      bearerFetch,
-      options,
-    );
+    return AgentCoreA2aClient.build(url, bearerFetch, options);
   }
 
   /** For local dev — plain HTTP, no auth. */
