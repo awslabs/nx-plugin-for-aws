@@ -21,6 +21,7 @@ __all__ = [
 
 exports[`py#strands-agent#mcp-connection generator > should match snapshot for generated files > agentcore_mcp_client.py 1`] = `
 "from collections.abc import Callable
+from urllib.parse import quote
 
 import boto3
 import httpx
@@ -31,6 +32,15 @@ from .auth import SigV4HTTPXAuth
 from .session_context import get_current_session_id
 
 SESSION_HEADER = "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"
+
+
+def _arn_to_url(agent_runtime_arn: str) -> str:
+    region = agent_runtime_arn.split(":")[3]
+    encoded_arn = quote(agent_runtime_arn, safe="")
+    return (
+        f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/"
+        f"{encoded_arn}/invocations?qualifier=DEFAULT"
+    )
 
 
 class _SessionHeaderAuth(httpx.Auth):
@@ -67,20 +77,23 @@ class AgentCoreMCPClient:
         )
 
     @staticmethod
-    def with_iam_auth(url: str, agent_runtime_arn: str) -> MCPClient:
+    def with_iam_auth(agent_runtime_arn: str) -> MCPClient:
         """SigV4-authenticated client for a Bedrock AgentCore runtime."""
         region = agent_runtime_arn.split(":")[3]
         credentials = boto3.Session(region_name=region).get_credentials()
         return AgentCoreMCPClient._create(
-            url, SigV4HTTPXAuth(credentials, "bedrock-agentcore", region)
+            _arn_to_url(agent_runtime_arn),
+            SigV4HTTPXAuth(credentials, "bedrock-agentcore", region),
         )
 
     @staticmethod
-    def with_jwt_auth(url: str, access_token_provider: Callable[[], str]) -> MCPClient:
+    def with_jwt_auth(
+        agent_runtime_arn: str, access_token_provider: Callable[[], str]
+    ) -> MCPClient:
         """Bearer-authenticated client for a Bedrock AgentCore runtime."""
         return MCPClient(
             lambda: streamablehttp_client(
-                url,
+                _arn_to_url(agent_runtime_arn),
                 auth=_SessionHeaderAuth(),
                 headers={"Authorization": f"Bearer {access_token_provider()}"},
                 timeout=120,
@@ -113,14 +126,9 @@ class InventoryMcpClient:
     def create() -> MCPClient:
         if os.environ.get("SERVE_LOCAL") == "true":
             return AgentCoreMCPClient.without_auth("http://localhost:8082/mcp")
-        agent_runtime_arn = get_connected_agent_runtime_arn("InventoryMcp")
-        region = agent_runtime_arn.split(":")[3]
-        encoded_arn = agent_runtime_arn.replace(":", "%3A").replace("/", "%2F")
-        url = (
-            f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/"
-            f"{encoded_arn}/invocations?qualifier=DEFAULT"
+        return AgentCoreMCPClient.with_iam_auth(
+            get_connected_agent_runtime_arn("InventoryMcp")
         )
-        return AgentCoreMCPClient.with_iam_auth(url, agent_runtime_arn)
 "
 `;
 

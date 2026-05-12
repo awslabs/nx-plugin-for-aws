@@ -11,24 +11,30 @@ import { getCurrentSessionId } from './session-context.js';
 
 const SESSION_HEADER = 'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id';
 
+const arnToUrl = (agentRuntimeArn: string): string => {
+  const region = agentRuntimeArn.split(':')[3];
+  return `https://bedrock-agentcore.${region}.amazonaws.com/runtimes/${encodeURIComponent(agentRuntimeArn)}/invocations/`;
+};
+
 interface BuildOptions {
   name?: string;
   description?: string;
 }
 
 export interface AgentCoreA2aClientIamOptions extends BuildOptions {
-  url: string;
-  credentialProvider?: ReturnType<typeof fromNodeProviderChain>;
-  /** ARN used to derive the region for SigV4 signing. */
+  /** The AgentCore runtime ARN — the region and URL are derived from it. */
   agentRuntimeArn: string;
+  credentialProvider?: ReturnType<typeof fromNodeProviderChain>;
 }
 
 export interface AgentCoreA2aClientJwtOptions extends BuildOptions {
-  url: string;
+  /** The AgentCore runtime ARN — the URL is derived from it. */
+  agentRuntimeArn: string;
   accessTokenProvider: () => Promise<string>;
 }
 
 export interface AgentCoreA2aClientNoAuthOptions extends BuildOptions {
+  /** Full URL — intended for local dev. */
   url: string;
 }
 
@@ -70,16 +76,27 @@ export class AgentCoreA2aClient {
       });
       return client.fetch(...args);
     };
-    return AgentCoreA2aClient.build(options.url, sigv4Fetch, options);
+    return AgentCoreA2aClient.build(
+      arnToUrl(options.agentRuntimeArn),
+      sigv4Fetch,
+      options,
+    );
   }
 
   static withJwtAuth(options: AgentCoreA2aClientJwtOptions): A2AAgent {
     const bearerFetch: typeof fetch = async (input, init) => {
       const headers = new Headers(init?.headers);
-      headers.set('Authorization', `Bearer ${await options.accessTokenProvider()}`);
+      headers.set(
+        'Authorization',
+        `Bearer ${await options.accessTokenProvider()}`,
+      );
       return fetch(input, { ...init, headers });
     };
-    return AgentCoreA2aClient.build(options.url, bearerFetch, options);
+    return AgentCoreA2aClient.build(
+      arnToUrl(options.agentRuntimeArn),
+      bearerFetch,
+      options,
+    );
   }
 
   /** For local dev — plain HTTP, no auth. */

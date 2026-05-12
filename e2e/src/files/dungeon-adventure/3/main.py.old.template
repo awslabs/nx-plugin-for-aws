@@ -5,6 +5,7 @@ from bedrock_agentcore.runtime.models import PingStatus
 from dungeon_adventure_agent_connection import session_id_context, with_session_id
 from fastapi import Request
 from pydantic import BaseModel
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from .agent import get_agent
 from .init import JsonStreamingResponse, app
@@ -27,17 +28,16 @@ class StreamChunk(BaseModel):
     content: str
 
 
-async def handle_invoke(input: InvokeInput, session_id: str):
+async def handle_invoke(input: InvokeInput):
     """Streaming handler for agent invocation"""
-    with session_id_context(session_id):
-        stream = _agent.stream_async(input.message)
-        async for event in stream:
-            print(event)
-            text = event.get("event", {}).get("contentBlockDelta", {}).get("delta", {}).get("text")
-            if text is not None:
-                yield StreamChunk(content=text)
-            elif event.get("event", {}).get("messageStop") is not None:
-                yield StreamChunk(content="\n")
+    stream = _agent.stream_async(input.message)
+    async for event in stream:
+        print(event)
+        text = event.get("event", {}).get("contentBlockDelta", {}).get("delta", {}).get("text")
+        if text is not None:
+            yield StreamChunk(content=text)
+        elif event.get("event", {}).get("messageStop") is not None:
+            yield StreamChunk(content="\n")
 
 
 @app.post(
@@ -45,10 +45,21 @@ async def handle_invoke(input: InvokeInput, session_id: str):
     response_class=JsonStreamingResponse,
     responses={200: JsonStreamingResponse.openapi_response(StreamChunk, "Stream of agent response chunks")},
 )
-async def invoke(input: InvokeInput, request: Request) -> JsonStreamingResponse:
+async def invoke(input: InvokeInput) -> JsonStreamingResponse:
     """Entry point for agent invocation"""
-    session_id = request.headers.get(SESSION_ID_HEADER) or str(uuid.uuid4())
-    return JsonStreamingResponse(handle_invoke(input, session_id))
+    return JsonStreamingResponse(handle_invoke(input))
+
+
+class _SessionIdMiddleware(BaseHTTPMiddleware):
+    """Bind the inbound session (or a fresh UUID) to async context."""
+
+    async def dispatch(self, request: Request, call_next):
+        session_id = request.headers.get(SESSION_ID_HEADER) or str(uuid.uuid4())
+        with session_id_context(session_id):
+            return await call_next(request)
+
+
+app.add_middleware(_SessionIdMiddleware)
 
 
 @app.get("/ping")

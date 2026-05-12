@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from urllib.parse import quote
 
 import boto3
 import httpx
@@ -9,6 +10,15 @@ from .auth import SigV4HTTPXAuth
 from .session_context import get_current_session_id
 
 SESSION_HEADER = "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id"
+
+
+def _arn_to_url(agent_runtime_arn: str) -> str:
+    region = agent_runtime_arn.split(":")[3]
+    encoded_arn = quote(agent_runtime_arn, safe="")
+    return (
+        f"https://bedrock-agentcore.{region}.amazonaws.com/runtimes/"
+        f"{encoded_arn}/invocations/"
+    )
 
 
 class _SessionHeaderAuth(httpx.Auth):
@@ -57,7 +67,6 @@ class AgentCoreA2aClient:
 
     @staticmethod
     def with_iam_auth(
-        url: str,
         agent_runtime_arn: str,
         *,
         name: str | None = None,
@@ -67,7 +76,7 @@ class AgentCoreA2aClient:
         region = agent_runtime_arn.split(":")[3]
         credentials = boto3.Session(region_name=region).get_credentials()
         return AgentCoreA2aClient._build(
-            url,
+            _arn_to_url(agent_runtime_arn),
             SigV4HTTPXAuth(credentials, "bedrock-agentcore", region),
             None,
             name=name,
@@ -76,7 +85,7 @@ class AgentCoreA2aClient:
 
     @staticmethod
     def with_jwt_auth(
-        url: str,
+        agent_runtime_arn: str,
         access_token_provider: Callable[[], str],
         *,
         name: str | None = None,
@@ -84,7 +93,7 @@ class AgentCoreA2aClient:
     ) -> A2AAgent:
         """Bearer-authenticated client for a Bedrock AgentCore runtime."""
         return AgentCoreA2aClient._build(
-            url,
+            _arn_to_url(agent_runtime_arn),
             None,
             {"Authorization": f"Bearer {access_token_provider()}"},
             name=name,
@@ -99,4 +108,6 @@ class AgentCoreA2aClient:
         description: str | None = None,
     ) -> A2AAgent:
         """Plain-HTTP client — for local dev."""
-        return AgentCoreA2aClient._build(url, None, None, name=name, description=description)
+        return AgentCoreA2aClient._build(
+            url, None, None, name=name, description=description
+        )

@@ -5,6 +5,7 @@ from bedrock_agentcore.runtime.models import PingStatus
 from dungeon_adventure_agent_connection import session_id_context
 from fastapi import Request
 from pydantic import BaseModel
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from .agent import get_agent
 from .init import JsonStreamingResponse, app
@@ -27,13 +28,13 @@ class StreamChunk(BaseModel):
     content: str
 
 
-async def handle_invoke(input: InvokeInput, session_id: str):
+async def handle_invoke(input: InvokeInput):
     """Streaming handler for agent invocation"""
     messages = [{"role": "user", "content": [{"text": "Continue or create a new story..."}]}]
     for action in input.actions:
         messages.append({"role": action.role, "content": [{"text": action.content}]})
 
-    with session_id_context(session_id), get_agent(input.playerName, input.genre) as agent:
+    with get_agent(input.playerName, input.genre) as agent:
         stream = agent.stream_async(messages)
         async for event in stream:
             print(event)
@@ -49,10 +50,21 @@ async def handle_invoke(input: InvokeInput, session_id: str):
     response_class=JsonStreamingResponse,
     responses={200: JsonStreamingResponse.openapi_response(StreamChunk, "Stream of agent response chunks")},
 )
-async def invoke(input: InvokeInput, request: Request) -> JsonStreamingResponse:
+async def invoke(input: InvokeInput) -> JsonStreamingResponse:
     """Entry point for agent invocation"""
-    session_id = request.headers.get(SESSION_ID_HEADER) or str(uuid.uuid4())
-    return JsonStreamingResponse(handle_invoke(input, session_id))
+    return JsonStreamingResponse(handle_invoke(input))
+
+
+class _SessionIdMiddleware(BaseHTTPMiddleware):
+    """Bind the inbound session (or a fresh UUID) to async context."""
+
+    async def dispatch(self, request: Request, call_next):
+        session_id = request.headers.get(SESSION_ID_HEADER) or str(uuid.uuid4())
+        with session_id_context(session_id):
+            return await call_next(request)
+
+
+app.add_middleware(_SessionIdMiddleware)
 
 
 @app.get("/ping")

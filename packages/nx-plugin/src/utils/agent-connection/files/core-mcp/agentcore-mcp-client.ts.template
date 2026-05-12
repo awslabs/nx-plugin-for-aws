@@ -6,19 +6,25 @@ import { getCurrentSessionId } from './session-context.js';
 
 const SESSION_HEADER = 'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id';
 
+const arnToUrl = (agentRuntimeArn: string): string => {
+  const region = agentRuntimeArn.split(':')[3];
+  return `https://bedrock-agentcore.${region}.amazonaws.com/runtimes/${encodeURIComponent(agentRuntimeArn)}/invocations?qualifier=DEFAULT`;
+};
+
 export interface AgentCoreMcpClientIamOptions {
-  url: string;
-  credentialProvider?: ReturnType<typeof fromNodeProviderChain>;
-  /** ARN used to derive the region for SigV4 signing. */
+  /** The AgentCore runtime ARN — the region and URL are derived from it. */
   agentRuntimeArn: string;
+  credentialProvider?: ReturnType<typeof fromNodeProviderChain>;
 }
 
 export interface AgentCoreMcpClientJwtOptions {
-  url: string;
+  /** The AgentCore runtime ARN — the URL is derived from it. */
+  agentRuntimeArn: string;
   accessTokenProvider: () => Promise<string>;
 }
 
 export interface AgentCoreMcpClientNoAuthOptions {
+  /** Full URL — intended for local dev. */
   url: string;
 }
 
@@ -64,12 +70,15 @@ export class AgentCoreMcpClient {
       });
       return client.fetch(...args);
     };
-    return AgentCoreMcpClient.create({ url: options.url, fetch: sigv4Fetch });
+    return AgentCoreMcpClient.create({
+      url: arnToUrl(options.agentRuntimeArn),
+      fetch: sigv4Fetch,
+    });
   }
 
   static withJwtAuth(options: AgentCoreMcpClientJwtOptions): McpClient {
     return AgentCoreMcpClient.create({
-      url: options.url,
+      url: arnToUrl(options.agentRuntimeArn),
       buildHeaders: async () => ({
         Authorization: `Bearer ${await options.accessTokenProvider()}`,
       }),
