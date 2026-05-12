@@ -23,15 +23,15 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 ## タスク1: ストーリーエージェントの実装
 
-ストーリーエージェントは[Strands](https://strandsagents.com/)のエージェントで、`Game`と`Action`のリストをコンテキストとして物語を進行します。インベントリMCPサーバーと連携してプレイヤーの所持アイテムを管理するよう設定します。
+ストーリーエージェントは、<Link path="get_started/tutorials/dungeon-game/1">モジュール1</Link>で`--protocol=AG-UI`を指定して生成された[Strands](https://strandsagents.com/)エージェントです。これにより、UIはCopilotKitを介して[Agent-User Interactionプロトコル](https://docs.copilotkit.ai/aws-strands/protocol)でストリーミングできます。インベントリMCPサーバーを使用してプレイヤーのアイテムを管理し、`FileSessionManager`を使用して会話履歴をディスクに永続化します。
 
-:::note[Python実装]
-本チュートリアルでは、各呼び出しが完全なメッセージ履歴を含む独立セッションとなる「ステートレス」な実装を採用しています。本番環境では[Bedrock AgentCore Memory](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/memory.html)の統合を検討してください。詳細については、[StrandsとAgentCore Memoryの連携](https://github.com/aws/bedrock-agentcore-sdk-python/tree/main/src/bedrock_agentcore/memory/integrations/strands)のページを参照してください。
+:::note[会話履歴の永続化]
+各AG-UIリクエストには`thread_id`が含まれます。UIは、このIDを``{player}-{genre}``という形式で決定論的に構築し、AgentCoreの最小長である33文字にパディングします。これにより、各`(player, genre)`ペアが独自のストーリーを再開できます。エージェント側では、`StrandsAgentConfig.session_manager_provider`が各スレッドにディスクディレクトリを指す`FileSessionManager`を提供します。これにより、UIが送信しなくても、後続のターンで保存されたメッセージ履歴が再生されます。本番環境では、[AgentCore Memory for Strands](https://github.com/aws/bedrock-agentcore-sdk-python/tree/main/src/bedrock_agentcore/memory/integrations/strands)を介して[Bedrock AgentCore Memory](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/memory.html)に置き換えてください。
 :::
 
 ### エージェント実装
 
-エージェントを実装するには、`packages/story/dungeon_adventure_story/agent`配下のファイルを更新します：
+`packages/story/dungeon_adventure_story/agent`配下のファイルを更新します：
 
 <Tabs>
   <TabItem label="main.py">
@@ -42,11 +42,10 @@ import gameConversationPng from '@assets/game-conversation.png'
   </TabItem>
 </Tabs>
 
-<Link path="get_started/tutorials/dungeon-game/1">モジュール1</Link>で接続ジェネレーターがすでにMCPクライアントを設定しているため、これらの変更は以下に焦点を当てています：
+変更内容は以下の通りです：
 
-- サンプルツールと未使用のインポートの削除、
-- `get_agent`関数への`player_name`と`genre`パラメータの追加、および
-- ダンジョンアドベンチャーゲーム用のシステムプロンプトのカスタマイズ。
+- `main.py`は、`thread_id`ごとに`FileSessionManager`を作成する`session_manager_provider`を追加します。これにより、同じ`(player, genre)`に対して会話履歴がターンをまたいで保持されます。
+- `agent.py`は、サンプルの`subtract`ツールを削除し、システムプロンプトをダンジョンマスター用のものに置き換えます。このプロンプトは、最初のユーザーメッセージでプレイヤーの名前とジャンルを述べるよう促し、インベントリMCPサーバーのツールを使用します。
 
 ## タスク2: デプロイとテスト
 
@@ -94,13 +93,13 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
 
 エージェントのテスト方法は2通りあります：
 <ul>
-<li>エージェントサーバーをローカルで起動し`curl`で呼び出す、または</li>
+<li>エージェントサーバーをローカルで起動し、生成された`agent-chat`ターゲットを介してチャットする、または</li>
 <li>デプロイ済みAPIをJWTトークン付きのcurlで呼び出す。</li>
 </ul>
 
 <Tabs>
   <TabItem label="ローカル">
-  以下のコマンドでローカルエージェントサーバーを起動します：
+  ローカルエージェントサーバーを起動します：
     <NxCommands highlights={['xxxx', 'region']} env={{RUNTIME_CONFIG_APP_ID:"xxxx", AWS_REGION: '<region>'}} commands={["agent-serve dungeon_adventure.story"]} />
 
     <Aside type="caution" title="CDK出力値の使用">
@@ -111,13 +110,26 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
     `agent-serve`ターゲットはエージェントをローカルで起動しますが、**デプロイ済み**のMCPサーバーに接続します（`RUNTIME_CONFIG_APP_ID`経由）。MCPサーバーもローカルで実行したい場合は、代わりに`agent-serve-local`を使用してください。これにより、すべての依存サービスが起動され、直接HTTP接続用に`SERVE_LOCAL=true`が設定されます。
     :::
 
-    エージェントサーバー起動後（出力は表示されません）、以下のコマンドで呼び出します：
+    次に、2つ目のターミナルで、生成された`agent-chat`ターゲットを介してローカルAG-UIエージェントに対する対話型REPLを開きます：
 
+    <NxCommands commands={["run dungeon_adventure.story:agent-chat"]} />
+
+    これは[`agent-chat-cli`](https://www.npmjs.com/package/agent-chat-cli)を使用して`http://localhost:8081/invocations`に対してAG-UIプロトコルで通信します。最初のメッセージでは、エージェントにヒーローの名前とジャンルを伝えてください（例：`My name is Alice. Start my zombie adventure.`）。ストーリーがストリーミングで返されます。
+
+    <Aside type="tip" title="生のcurl">
+    生のHTTP呼び出しを希望する場合、AG-UIの`RunAgentInput`の形式は以下の通りです：
     ```bash
     curl -N -X POST http://127.0.0.1:8081/invocations \
-      -d '{"genre":"superhero", "actions":[], "playerName":"UnnamedHero"}' \
-      -H "Content-Type: application/json"
+      -H "Content-Type: application/json" \
+      -d '{
+        "threadId": "Alice-zombie00000000000000000000000",
+        "runId": "run-1",
+        "messages": [{ "id": "m1", "role": "user", "content": "My name is Alice. Start my zombie adventure." }],
+        "tools": [], "context": [], "state": {}, "forwardedProps": {}
+      }'
     ```
+    後続の呼び出しで同じ`threadId`を再利用すると、同じストーリーが続きます。`FileSessionManager`が以前のメッセージを再生します。
+    </Aside>
   </TabItem>
   <TabItem label="デプロイ済み">
     デプロイ済みエージェントのテストには、Cognito認証によるJWTトークン取得が必要です。まず環境変数を設定します：
@@ -175,12 +187,17 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
     # 呼び出しURLを構築
     export AGENT_URL="https://bedrock-agentcore.$REGION.amazonaws.com/runtimes/$ENCODED_ARN/invocations?qualifier=DEFAULT"
 
-    # エージェント呼び出し
+    # AG-UI RunAgentInputペイロードでエージェントを呼び出し
     curl -N -X POST "$AGENT_URL" \
       -H "authorization: Bearer $BEARER_TOKEN" \
       -H "Content-Type: application/json" \
-      -H "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id: abcdefghijklmnopqrstuvwxyz-123456789" \
-      -d '{"genre":"superhero", "actions":[], "playerName":"UnnamedHero"}'
+      -H "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id: Alice-zombie00000000000000000000000" \
+      -d '{
+        "threadId": "Alice-zombie00000000000000000000000",
+        "runId": "run-1",
+        "messages": [{ "id": "m1", "role": "user", "content": "My name is Alice. Start my zombie adventure." }],
+        "tools": [], "context": [], "state": {}, "forwardedProps": {}
+      }'
     ```
 
     :::note[URLエンコード]
@@ -189,12 +206,13 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
   </TabItem>
 </Tabs>
 
-コマンドが正常に実行されると、以下のようにストーリーの冒頭テキストがJSON Lines形式でストリーミングされ始めます：
+コマンドが正常に実行されると、[AG-UIイベントストリーム](https://docs.copilotkit.ai/aws-strands/protocol/events)（Server-Sent Events）としてストーリーがストリーミングされ始めます。`RUN_STARTED` / `TEXT_MESSAGE_START` / `TEXT_MESSAGE_CONTENT`チャンクが実際のストーリートークンをラップします：
 
 ```
-{"content":"You are "}
-{"content":"a new superhero "}
-{"content":"in the bustling metropolis of Metro City..."}
+data: {"type":"RUN_STARTED","threadId":"Alice-zombie00000000000000000000000",...}
+data: {"type":"TEXT_MESSAGE_START","messageId":"...","role":"assistant"}
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"...","delta":"Greetings, Alice. "}
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"...","delta":"The moans grow louder beyond the barricaded door..."}
 ```
 
 おめでとうございます。Bedrock AgentCore Runtime上に初めてのStrandsエージェントを構築・デプロイできました！ 🎉🎉🎉

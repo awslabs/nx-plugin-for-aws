@@ -23,127 +23,86 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 ## Tarea 1: Configurar el servidor de desarrollo local
 
-Para comenzar a construir la interfaz de usuario, necesitaremos configurar nuestro servidor de desarrollo local para apuntar a nuestro sandbox desplegado. Para esto, ejecuta el siguiente comando:
+Descarga el `runtime-config.json` desplegado localmente para que el servidor de desarrollo pueda comunicarse con el backend real:
 
 <NxCommands commands={["run game-ui:load:runtime-config"]} />
 
-Este comando descargará el `runtime-config.json` que está desplegado y lo almacenará localmente en la carpeta `packages/game-ui/public`.
-
-Para iniciar el servidor de desarrollo, ejecuta el siguiente comando:
+Luego inicia el servidor de desarrollo:
 
 <NxCommands commands={["serve game-ui"]} />
 
-Abre el sitio web local en tu navegador, donde se te pedirá iniciar sesión y seguir las indicaciones para crear un nuevo usuario. Una vez completado, deberías ver el sitio web base:
+Abre el sitio web local en tu navegador, inicia sesión y sigue las indicaciones para crear un nuevo usuario. Deberías ver el sitio web base de Shadcn:
 
 <Image src={baselineWebsitePng} alt="baseline-website.png" width="800" height="600" />
 
 <Aside type="caution" title="Mantener el servidor de desarrollo activo">
-Recomendamos mantener el servidor de desarrollo en ejecución durante el resto de este módulo, ya que recargará automáticamente los cambios que realicemos.
+Deja el servidor de desarrollo en ejecución durante el resto de este módulo — recarga automáticamente cada cambio a continuación.
 </Aside>
 
-:::tip[Uso de comandos Nx]
-Puedes ejecutar comandos Nx en su lugar para iniciar cualquier servidor API local conectado, permitiéndote iterar tanto en tu API tRPC como en tu sitio web simultáneamente. <NxCommands commands={["serve-local game-ui"]} env={{RUNTIME_CONFIG_APP_ID:"xxxx"}} />
+## Tarea 2: Dónde CopilotKit ya está conectado
 
-Utiliza el valor de salida del despliegue de CDK `RuntimeConfigApplicationId` para la variable de entorno `RUNTIME_CONFIG_APP_ID`.
-:::
+Cuando ejecutaste el generador `connection` para `game-ui → story` en el <Link path="get_started/tutorials/dungeon-game/1">Módulo 1</Link>, la integración AG-UI del sitio web Shadcn se generó para ti. Vale la pena echarle un vistazo rápido:
 
-## Tarea 2: Crear una nueva ruta '/game'
+<FileTree>
+- packages/game-ui/src/
+  - components/
+    - AguiProvider.tsx Single `CopilotKitProvider` registered with every AG-UI agent.
+    - copilot/
+      - index.tsx Re-exports themed `CopilotChat` / `CopilotSidebar` / `CopilotPopup`.
+      - ShadcnAssistantMessage.tsx, ShadcnUserMessage.tsx, ShadcnChatInput.tsx, ShadcnCursor.tsx, copilot.css
+  - hooks/
+    - useAguiStoryAgent.tsx Instantiates an `@ag-ui/client` `HttpAgent` pointing at the deployed Story Agent and pads `threadId` to AgentCore's 33-character minimum session id.
+  - main.tsx Wraps `<App />` in `<AguiProvider>`
+</FileTree>
 
-Mostraremos las capacidades de `@tanstack/react-router` creando una nueva ruta tipada.
-Para esto, crea un archivo vacío en la siguiente ubicación: `packages/game-ui/src/routes/game/index.tsx`. Notarás que el archivo se actualiza inmediatamente.
+Todo lo que necesitamos hacer es colocar un `<CopilotChat agentId="agent" threadId={...} />` en una ruta. Para más detalles sobre cómo se ensambla la integración, consulta la <Link path="guides/connection/react-agui">guía de conexión React → AG-UI</Link>.
 
-El `@tanstack/react-router` configura automáticamente tu nueva ruta y el archivo que acabas de crear ya está poblado con la ruta:
+## Tarea 3: Rediseñar para la mazmorra
 
-```tsx
-import { createFileRoute } from '@tanstack/react-router'
+Reemplaza `packages/game-ui/src/styles.css` — este es el *único* archivo que cambiamos para el estilo. Importa los estilos globales compartidos de Shadcn, sobrescribe la paleta a un tema de mazmorra iluminada por antorchas, y hace que CopilotKit herede esos colores (CopilotKit de otro modo reinicia `--background` y similares dentro de su superficie de chat):
 
-export const Route = createFileRoute('/game/')({
-  component: RouteComponent,
-})
+<E2ECode lang="css" path="dungeon-adventure/4/styles.css.template" />
 
-function RouteComponent() {
-  return <div>Hello "/game/"!</div>
-}
-```
+## Tarea 4: Crear las rutas del juego
 
-Si navegas a `http://localhost:4200/game`, verás que tu nueva página se ha renderizado.
-
-<Image src={baselineGamePng} alt="baseline-game.png" width="800" height="600" />
-
-Actualiza el archivo `index.tsx` para cargar nuestra nueva ruta `/game` por defecto. Cuando actualices el campo `to`, tendrás una lista de rutas tipadas para elegir.
+Necesitamos dos rutas — una para elegir un héroe, otra para jugar. Ambas usan componentes de shadcn y el chat de CopilotKit; no hay una interfaz de chat hecha a mano.
 
 <Tabs>
 <TabItem label="routes/index.tsx">
 <E2EDiff before="dungeon-adventure/4/routes/index.tsx.old.template" after="dungeon-adventure/4/routes/index.tsx.template" lang="tsx" />
+
+Este es el selector de juego: formulario de nuevo juego (shadcn `Input` + `Button` + `Card`) más una lista de "Continuar" alimentada por `useGameApi().games.query`. Iniciar un juego guarda con `saveGame` el par `(playerName, genre)` (para que aparezca la próxima vez) y navega a la ruta de juego.
 </TabItem>
-</Tabs>
-
-## Tarea 3: Actualizar el diseño
-
-El diseño predeterminado configurado es más similar a una aplicación empresarial estilo SaaS que a un juego.
-Para reconfigurar el diseño y rediseñar el tema para que se parezca más a un juego de estilo mazmorra, realiza los siguientes cambios en `packages/game-ui/src`:
-
-<Tabs>
-<TabItem label="config.ts">
-<E2EDiff before="dungeon-adventure/4/config.ts.old.template" after="dungeon-adventure/4/config.ts.template" lang="typescript" />
-</TabItem>
-<TabItem label="components/AppLayout/index.tsx">
-<E2ECode path="dungeon-adventure/4/AppLayout/index.tsx.template" lang="tsx" />
-</TabItem>
-<TabItem label="styles.css">
-<E2ECode path="dungeon-adventure/4/styles.css.template" lang="css" />
-</TabItem>
-</Tabs>
-
-Elimina el archivo `packages/game-ui/src/hooks/useAppLayout.tsx` ya que no se utiliza.
-
-## Tarea 4: Integración del Agente de Historia
-
-Recuerda que en el <Link path="get_started/tutorials/dungeon-game/1#task-7-connect-your-components">Módulo 1</Link>, usamos el generador `connection` para conectar nuestra Game UI al Agente de Historia. Esto configuró un cliente OpenAPI tipado para interactuar con el agente, junto con hooks y providers.
-
-El generador de conexión creó lo siguiente para nosotros:
-- Un componente `StoryAgentProvider` que envuelve nuestra aplicación en `main.tsx`
-- Un hook `useStoryAgent` para integración con TanStack Query
-- Un hook `useStoryAgentClient` para acceso directo al cliente
-- Tipos TypeScript generados desde la especificación OpenAPI del agente
-
-Usaremos el hook `useStoryAgentClient` en nuestro componente de juego para transmitir respuestas de historia desde el agente.
-
-## Tarea 5: Crear las páginas del juego
-
-Para crear las páginas del juego que llamarán a nuestras APIs y completarán la implementación del juego, actualiza los siguientes archivos en `packages/game-ui/src/routes/game`:
-
-<Tabs>
-<TabItem label="index.tsx">
-<E2ECode path="dungeon-adventure/4/routes/game/index.tsx.template" lang="tsx" />
-</TabItem>
-<TabItem label="$playerName.tsx">
-
+<TabItem label="routes/game/$playerName.tsx">
 <E2ECode path="dungeon-adventure/4/routes/game/$playerName.tsx.template" lang="tsx" />
 
+Esta es la ruta de juego. Construye el `threadId` determinístico (``{player}-{genre}`` rellenado a 33 caracteres — el hook AG-UI lo enviará tal cual como el id de sesión de AgentCore), renderiza `<CopilotChat agentId="agent" threadId={threadId} />`, y superpone el inventario de `useGameApi().inventory.query` encima. En un hilo nuevo (sin mensajes almacenados aún) la ruta usa `useAgent` para enviar un mensaje de preparación con el nombre del jugador y el género; el prompt del sistema del agente le indica que use eso para establecer la escena. Las visitas posteriores acceden al `FileSessionManager` del agente, que reproduce el historial, por lo que el `useEffect` de preparación no hace nada.
+
+<Aside type="tip" title="Los threadIds determinísticos hacen que /game/$playerName?genre=... sea compartible">
+Volver a visitar la misma URL — ya sea después de una recarga, un redespliegue o en otro dispositivo — se resuelve al mismo `threadId`, por lo que el agente sigue contando la misma historia.
+</Aside>
+
 <Aside type="tip" title="Parámetros de ruta">
-La sintaxis `$playerName` indicará a `@tanstack/react-router` que trate `playerName` como un [parámetro de ruta](https://tanstack.com/router/v1/docs/framework/react/guide/path-params). Adicionalmente, implementamos el método `validateSearch` que asegura que el parámetro de consulta `genre` esté fuertemente tipado según nuestro enum de géneros.
+La sintaxis `$playerName` indica a `@tanstack/react-router` que trate `playerName` como un [parámetro de ruta](https://tanstack.com/router/v1/docs/framework/react/guide/path-params). `validateSearch` hace que `genre` esté fuertemente tipado contra nuestro enum.
 </Aside>
 </TabItem>
 </Tabs>
 
-Al realizar estos cambios, tu servidor de desarrollo local (http://localhost:4200/) debería tener ahora el juego listo para jugar.
+Puedes eliminar el directorio generado `packages/game-ui/src/routes/welcome` — estamos usando `/` como nuestro selector de juego.
 
-<Drawer title="Compilar e implementar" trigger="También puedes compilar e implementar tu código en Cloudfront si lo prefieres.">
+Una vez guardado, el servidor de desarrollo en `http://localhost:4200/` ahora debería permitirte iniciar una aventura y chatear con el Agente de Historia.
 
-## Tarea 6: Compilar e implementar
+<Drawer title="Compilar e implementar" trigger="También puedes compilar e implementar tu código en CloudFront si lo prefieres.">
+
+## Tarea 5: Compilar e implementar
 
 ### Compilar tu código
-Para compilar tu código, ejecuta el siguiente comando:
-
 <PackageManagerShortCommand commands={["build"]} />
 
 ### Implementar tu aplicación
-Para implementar tu aplicación, ejecuta el siguiente comando:
-
 <NxCommands commands={['deploy infra dungeon-adventure-infra-sandbox/*']} />
 
-Una vez implementado, navega a tu URL de Cloudfront. Para encontrar esta URL, inspecciona las salidas del despliegue de CDK.
+Una vez implementado, navega a tu URL de CloudFront (`GameUIDistributionDomainName` de las salidas de CDK).
 
 </Drawer>
 
