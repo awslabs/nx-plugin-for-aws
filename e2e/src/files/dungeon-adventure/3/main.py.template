@@ -1,15 +1,28 @@
 import uuid
+from contextlib import ExitStack
 
 import uvicorn
 from bedrock_agentcore.runtime.models import PingStatus
 from dungeon_adventure_agent_connection import session_id_context
 from fastapi import Request
 from pydantic import BaseModel
+from strands import Agent
 
 from .agent import get_agent
 from .init import JsonStreamingResponse, app
 
 SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
+
+# One Agent per (session, player, genre) — preserves narrative history.
+_agents: dict[tuple[str, str, str], Agent] = {}
+_agent_stack = ExitStack()
+
+
+def _get_cached_agent(session_id: str, player_name: str, genre: str) -> Agent:
+    key = (session_id, player_name, genre)
+    if key not in _agents:
+        _agents[key] = _agent_stack.enter_context(get_agent(player_name, genre))
+    return _agents[key]
 
 
 class Action(BaseModel):
@@ -33,13 +46,14 @@ async def handle_invoke(input: InvokeInput, session_id: str):
     for action in input.actions:
         messages.append({"role": action.role, "content": [{"text": action.content}]})
 
-    with session_id_context(session_id), get_agent(input.playerName, input.genre) as agent:
+    with session_id_context(session_id):
+        agent = _get_cached_agent(session_id, input.playerName, input.genre)
         stream = agent.stream_async(messages)
         async for event in stream:
             print(event)
-            content = event.get("event", {}).get("contentBlockDelta", {}).get("delta", {}).get("text")
-            if content is not None:
-                yield StreamChunk(content=content)
+            text = event.get("event", {}).get("contentBlockDelta", {}).get("delta", {}).get("text")
+            if text is not None:
+                yield StreamChunk(content=text)
             elif event.get("event", {}).get("messageStop") is not None:
                 yield StreamChunk(content="\n")
 
