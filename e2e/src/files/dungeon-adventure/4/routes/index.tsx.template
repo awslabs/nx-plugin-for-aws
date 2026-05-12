@@ -7,6 +7,7 @@ import {
   Card,
   CardContent,
 } from ':dungeon-adventure/common-shadcn/components/ui/card';
+import { Spinner } from ':dungeon-adventure/common-shadcn/components/ui/spinner';
 import { useGameApi } from '../hooks/useGameApi';
 import type { IGame } from ':dungeon-adventure/game-api';
 
@@ -16,6 +17,7 @@ export const Route = createFileRoute('/')({ component: RouteComponent });
 
 function RouteComponent() {
   const [playerName, setPlayerName] = useState('');
+  const [pending, setPending] = useState<IGame['genre'] | null>(null);
   const navigate = useNavigate();
   const gameApi = useGameApi();
   const saveGame = useMutation(gameApi.games.save.mutationOptions());
@@ -32,15 +34,22 @@ function RouteComponent() {
 
   const startGame = async (player: string, genre: IGame['genre']) => {
     if (!player.trim()) return;
-    if (!savedGames.find((g) => g.playerName === player)) {
-      await saveGame.mutateAsync({ playerName: player, genre });
+    setPending(genre);
+    try {
+      if (!savedGames.find((g) => g.playerName === player)) {
+        await saveGame.mutateAsync({ playerName: player, genre });
+      }
+      await navigate({
+        to: '/game/$playerName',
+        params: { playerName: player },
+        search: { genre },
+      });
+    } finally {
+      setPending(null);
     }
-    await navigate({
-      to: '/game/$playerName',
-      params: { playerName: player },
-      search: { genre },
-    });
   };
+
+  const busy = pending !== null;
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-8">
@@ -58,6 +67,7 @@ function RouteComponent() {
           <Input
             placeholder="Your hero's name"
             value={playerName}
+            disabled={busy}
             onChange={(e) => setPlayerName(e.target.value)}
           />
           <div className="grid grid-cols-3 gap-3">
@@ -65,9 +75,10 @@ function RouteComponent() {
               <Button
                 key={genre}
                 variant="secondary"
-                disabled={!playerName.trim() || saveGame.isPending}
+                disabled={!playerName.trim() || busy}
                 onClick={() => startGame(playerName, genre)}
               >
+                {pending === genre && <Spinner />}
                 {genre[0].toUpperCase() + genre.slice(1)}
               </Button>
             ))}
@@ -83,6 +94,7 @@ function RouteComponent() {
               key={g.playerName}
               variant="outline"
               className="justify-between"
+              disabled={busy}
               onClick={() => startGame(g.playerName, g.genre)}
             >
               <span>{g.playerName}</span>
