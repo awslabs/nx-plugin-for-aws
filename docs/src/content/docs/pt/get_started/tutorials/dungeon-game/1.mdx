@@ -430,19 +430,18 @@ from strands import Agent, tool
 from strands_tools import current_time
 
 
-# Define uma ferramenta customizada
 @tool
 def add(a: int, b: int) -> int:
     return a + b
 
 
 @contextmanager
-def get_agent(session_id: str):
+def get_agent():
     yield Agent(
         system_prompt="""
-Você é um mago da adição.
-Use a ferramenta 'add' para tarefas de adição.
-Refira-se às ferramentas como seu 'grimório'.
+You are an addition wizard.
+Use the 'add' tool for addition tasks.
+Refer to tools as your 'spellbook'.
 """,
         tools=[add, current_time],
     )
@@ -453,16 +452,29 @@ Isso cria um agente Strands de exemplo e define uma ferramenta de adição.
 ```python
 # agent/main.py
 import uuid
+from contextlib import ExitStack
 
 import uvicorn
 from bedrock_agentcore.runtime.models import PingStatus
+from dungeon_adventure_agent_connection import session_id_context
 from fastapi import Request
 from pydantic import BaseModel
+from strands import Agent
 
 from .agent import get_agent
 from .init import JsonStreamingResponse, app
 
 SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
+
+# One Agent per session — preserves conversation history.
+_agents: dict[str, Agent] = {}
+_agent_stack = ExitStack()
+
+
+def _get_cached_agent(session_id: str) -> Agent:
+    if session_id not in _agents:
+        _agents[session_id] = _agent_stack.enter_context(get_agent())
+    return _agents[session_id]
 
 
 class InvokeInput(BaseModel):
@@ -475,7 +487,8 @@ class StreamChunk(BaseModel):
 
 async def handle_invoke(input: InvokeInput, session_id: str):
     """Handler de streaming para invocação do agente"""
-    with get_agent(session_id=session_id) as agent:
+    with session_id_context(session_id):
+        agent = _get_cached_agent(session_id)
         stream = agent.stream_async(input.message)
         async for event in stream:
             print(event)
