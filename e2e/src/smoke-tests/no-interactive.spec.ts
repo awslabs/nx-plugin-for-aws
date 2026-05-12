@@ -10,21 +10,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { activatePackageManagerViaCorepack } from './corepack';
 
 /**
- * Verifies that `<pkgMgr> create @aws/nx-workspace` succeeds with only
- * `--no-interactive` and no additional flags (no `iacProvider`, no
- * `--skipGit`). A single `--no-interactive` must be sufficient to run
- * unattended on every supported package manager.
+ * Verifies that `<pkgMgr> create @aws/nx-workspace --no-interactive` runs
+ * unattended — no `iacProvider`, no `--skipGit`, no extra flags.
  *
- * A second case verifies that combining `--no-interactive` with a CI
- * option that would otherwise trigger nx's "push to GitHub?" prompt
- * (`--ci=github`) still runs unattended — @aws/create-nx-workspace
- * auto-injects `--skipGit` in that specific combination so the workspace
- * doesn't hang on the push prompt that nx does not gate on the
- * interactive flag.
- *
- * Yarn is exercised twice — classic (whatever `yarn` is on PATH, typically
- * 1.x) and berry (yarn 4 activated via corepack) — since the two drive
- * different code paths in @aws/create-nx-workspace and the nx preset.
+ * Yarn is exercised twice — classic and berry (yarn 4 via corepack) —
+ * since they drive different code paths.
  */
 interface Variant {
   variant: string;
@@ -74,23 +64,6 @@ describe('smoke test - no-interactive', () => {
       it(`Should create a workspace with --no-interactive - ${variant}`, async () => {
         await runCLI(
           `${buildCreateNxWorkspaceCommand(pkgMgr, 'e2e-test')} --no-interactive`,
-          {
-            cwd: targetDir,
-            prefixWithPackageManagerCmd: false,
-            redirectStderr: true,
-          },
-        );
-
-        expect(existsSync(`${projectRoot}/package.json`)).toBe(true);
-        expect(existsSync(`${projectRoot}/nx.json`)).toBe(true);
-        expect(existsSync(`${projectRoot}/aws-nx-plugin.config.mts`)).toBe(
-          true,
-        );
-      });
-
-      it(`Should create a workspace with --no-interactive --ci=github without hanging on the push prompt - ${variant}`, async () => {
-        await runCLI(
-          `${buildCreateNxWorkspaceCommand(pkgMgr, 'e2e-test')} --no-interactive --ci=github`,
           {
             cwd: targetDir,
             prefixWithPackageManagerCmd: false,

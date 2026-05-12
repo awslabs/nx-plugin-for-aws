@@ -24,96 +24,38 @@ export const detectPackageManager = (): string | undefined => {
   return undefined;
 };
 
-/**
- * Detect whether the user has requested non-interactive mode
- * (`--no-interactive` or `--interactive=false`).
- */
 const isNonInteractive = (flagArgs: string[]): boolean =>
   flagArgs.some((a) => a === '--no-interactive' || a === '--interactive=false');
 
-/**
- * Detect whether the user has already specified --skipGit in any form
- * (`--skipGit`, `--skipGit=true|false`, `--no-skipGit`).
- */
 const hasSkipGitFlag = (flagArgs: string[]): boolean =>
   flagArgs.some(
     (a) =>
       a === '--skipGit' || a.startsWith('--skipGit=') || a === '--no-skipGit',
   );
 
-/**
- * Read the value of a repeated-CLI-style flag (e.g. extract `yes` from
- * `--ci=yes`). Returns the last occurrence or `undefined` if unset.
- */
-const readFlagValue = (
-  flagArgs: string[],
-  ...aliases: string[]
-): string | undefined => {
-  const prefixes = aliases.flatMap((a) => [`--${a}=`, `-${a}=`]);
-  for (let i = flagArgs.length - 1; i >= 0; i--) {
-    const match = prefixes.find((p) => flagArgs[i].startsWith(p));
-    if (match) {
-      return flagArgs[i].slice(match.length);
-    }
-  }
-  return undefined;
-};
+const hasCiOverride = (flagArgs: string[]): boolean =>
+  flagArgs.some((a) => a.startsWith('--ci') || a.startsWith('--nxCloud'));
 
-/**
- * Detect whether the user has opted into the CI / Nx Cloud push flow in a
- * way that would trigger nx's `Would you like to push this workspace to
- * GitHub?` prompt inside `pushToGitHub` (see create-nx-workspace's
- * `src/utils/git/git.js`). That prompt is the ONLY git-related prompt
- * reachable under `--no-interactive`: all other git handling in
- * `src/create-workspace.js` runs silently via `initializeGitRepo` with no
- * enquirer calls.
- *
- * `pushToGitHub` is only reached when `nxCloud ∈ { 'github', 'yes' }`
- * (create-workspace.js:150). `--ci` is the CLI alias of `--nxCloud`
- * (yargs-options.js:16). Our wrapper defaults `--ci=skip`, so the prompt
- * is unreachable on the default path — but a user can override with
- * e.g. `--ci=github`, and that override combined with `--no-interactive`
- * would hang on the push prompt because nx never gates it on
- * `parsedArgs.interactive`.
- */
-const triggersGitHubPushPrompt = (flagArgs: string[]): boolean => {
-  const value =
-    readFlagValue(flagArgs, 'nxCloud', 'ci') ??
-    (flagArgs.includes('--nxCloud') || flagArgs.includes('--ci')
-      ? 'yes'
-      : undefined);
-  return value === 'yes' || value === 'github';
-};
-
-/**
- * Build the argument list for create-nx-workspace.
- * Positional args come first, then --preset and defaults, then user flags.
- */
 export const buildArgs = (args: string[]): string[] => {
   const positionalArgs = args.filter((a) => !a.startsWith('-'));
   const flagArgs = args.filter((a) => a.startsWith('-'));
 
   const defaultFlags = [...DEFAULT_FLAGS];
 
-  // Auto-detect and add --pm if not explicitly provided
   if (!flagArgs.some((a) => a.startsWith('--pm'))) {
     const pm = detectPackageManager();
-    if (pm) {
-      defaultFlags.push(`--pm=${pm}`);
-    }
+    if (pm) defaultFlags.push(`--pm=${pm}`);
   }
 
-  // `--no-interactive` alone is normally sufficient: with our default
-  // `--ci=skip`, nx never reaches the GitHub-push prompt. But if the user
-  // overrides with `--ci=yes` / `--ci=github` / `--nxCloud=yes|github`, nx
-  // WILL try to prompt for "push to GitHub?" even under `--no-interactive`
-  // — that prompt is not gated on the interactive flag. In that specific
-  // combination, default to `--skipGit` so a single `--no-interactive`
-  // still runs unattended. The user can opt back in with explicit
-  // `--no-skipGit` or `--skipGit=false`.
+  // Under `--no-interactive` with our default `--ci=skip`, nx still hits
+  // GitHub prompts that aren't gated on the interactive flag (e.g. when
+  // nx's AI-agent detection force-overrides nxCloud to 'yes'). Default
+  // --skipGit so --no-interactive really is unattended. Explicit
+  // --skipGit=... / --no-skipGit wins. A user-supplied --ci / --nxCloud
+  // opts out — at that point the user is driving the CI flow.
   if (
     isNonInteractive(flagArgs) &&
-    triggersGitHubPushPrompt(flagArgs) &&
+    !hasCiOverride(flagArgs) &&
     !hasSkipGitFlag(flagArgs)
   ) {
     defaultFlags.push('--skipGit');

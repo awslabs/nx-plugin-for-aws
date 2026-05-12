@@ -153,16 +153,16 @@ describe('create-nx-workspace', () => {
       expect(result).toContain('--pm=pnpm');
     });
 
-    it('should NOT auto-add --skipGit with just --no-interactive (default --ci=skip makes the push prompt unreachable)', () => {
+    it('should auto-add --skipGit with --no-interactive on the default path', () => {
       const result = buildArgs(['my-project', '--no-interactive']);
       expect(result).toContain('--no-interactive');
-      expect(result).not.toContain('--skipGit');
+      expect(result).toContain('--skipGit');
     });
 
-    it('should NOT auto-add --skipGit with just --interactive=false', () => {
+    it('should auto-add --skipGit with --interactive=false on the default path', () => {
       const result = buildArgs(['my-project', '--interactive=false']);
       expect(result).toContain('--interactive=false');
-      expect(result).not.toContain('--skipGit');
+      expect(result).toContain('--skipGit');
     });
 
     it('should not auto-add --skipGit when running interactively', () => {
@@ -170,65 +170,43 @@ describe('create-nx-workspace', () => {
       expect(result).not.toContain('--skipGit');
     });
 
-    it('should auto-add --skipGit when --no-interactive combines with --ci=github', () => {
+    it('should NOT auto-add --skipGit when the user overrides --ci', () => {
       const result = buildArgs([
         'my-project',
         '--no-interactive',
         '--ci=github',
       ]);
-      expect(result).toContain('--skipGit');
+      expect(result).not.toContain('--skipGit');
     });
 
-    it('should auto-add --skipGit when --no-interactive combines with --ci=yes', () => {
-      const result = buildArgs(['my-project', '--no-interactive', '--ci=yes']);
-      expect(result).toContain('--skipGit');
-    });
-
-    it('should auto-add --skipGit when --no-interactive combines with --nxCloud=yes', () => {
+    it('should NOT auto-add --skipGit when the user overrides --nxCloud', () => {
       const result = buildArgs([
         'my-project',
         '--no-interactive',
         '--nxCloud=yes',
       ]);
-      expect(result).toContain('--skipGit');
-    });
-
-    it('should NOT auto-add --skipGit when --no-interactive combines with --ci=skip', () => {
-      const result = buildArgs(['my-project', '--no-interactive', '--ci=skip']);
       expect(result).not.toContain('--skipGit');
     });
 
-    it('should NOT auto-add --skipGit when --ci=github is set but running interactively', () => {
-      const result = buildArgs(['my-project', '--ci=github']);
-      expect(result).not.toContain('--skipGit');
-    });
-
-    it('should not duplicate --skipGit if already provided alongside --no-interactive --ci=github', () => {
-      const result = buildArgs([
-        'my-project',
-        '--no-interactive',
-        '--ci=github',
-        '--skipGit',
-      ]);
+    it('should not duplicate --skipGit if the user already passed it', () => {
+      const result = buildArgs(['my-project', '--no-interactive', '--skipGit']);
       expect(result.filter((a) => a.startsWith('--skipGit'))).toHaveLength(1);
     });
 
-    it('should respect explicit --no-skipGit even with the --no-interactive + --ci=github combo', () => {
+    it('should respect explicit --no-skipGit even with --no-interactive', () => {
       const result = buildArgs([
         'my-project',
         '--no-interactive',
-        '--ci=github',
         '--no-skipGit',
       ]);
       expect(result).toContain('--no-skipGit');
       expect(result).not.toContain('--skipGit');
     });
 
-    it('should respect explicit --skipGit=false even with the --no-interactive + --ci=github combo', () => {
+    it('should respect explicit --skipGit=false even with --no-interactive', () => {
       const result = buildArgs([
         'my-project',
         '--no-interactive',
-        '--ci=github',
         '--skipGit=false',
       ]);
       expect(result).toContain('--skipGit=false');
@@ -246,6 +224,7 @@ describe('create-nx-workspace', () => {
         '--preset=@aws/nx-plugin',
         '--ci=skip',
         '--analytics=false',
+        '--skipGit',
         '--iacProvider=CDK',
         '--no-interactive',
       ]);
