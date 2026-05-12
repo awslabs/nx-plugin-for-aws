@@ -28,10 +28,7 @@ const isNonInteractive = (flagArgs: string[]): boolean =>
   flagArgs.some((a) => a === '--no-interactive' || a === '--interactive=false');
 
 const hasSkipGitFlag = (flagArgs: string[]): boolean =>
-  flagArgs.some(
-    (a) =>
-      a === '--skipGit' || a.startsWith('--skipGit=') || a === '--no-skipGit',
-  );
+  flagArgs.some((a) => a === '--skipGit' || a.startsWith('--skipGit='));
 
 const hasCiOverride = (flagArgs: string[]): boolean =>
   flagArgs.some((a) => a.startsWith('--ci') || a.startsWith('--nxCloud'));
@@ -51,7 +48,7 @@ export const buildArgs = (args: string[]): string[] => {
   // GitHub prompts that aren't gated on the interactive flag (e.g. when
   // nx's AI-agent detection force-overrides nxCloud to 'yes'). Default
   // --skipGit so --no-interactive really is unattended. Explicit
-  // --skipGit=... / --no-skipGit wins. A user-supplied --ci / --nxCloud
+  // --skipGit / --skipGit=... wins. A user-supplied --ci / --nxCloud
   // opts out — at that point the user is driving the CI flow.
   if (
     isNonInteractive(flagArgs) &&

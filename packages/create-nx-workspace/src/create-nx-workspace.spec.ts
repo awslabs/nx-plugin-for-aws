@@ -193,16 +193,6 @@ describe('create-nx-workspace', () => {
       expect(result.filter((a) => a.startsWith('--skipGit'))).toHaveLength(1);
     });
 
-    it('should respect explicit --no-skipGit even with --no-interactive', () => {
-      const result = buildArgs([
-        'my-project',
-        '--no-interactive',
-        '--no-skipGit',
-      ]);
-      expect(result).toContain('--no-skipGit');
-      expect(result).not.toContain('--skipGit');
-    });
-
     it('should respect explicit --skipGit=false even with --no-interactive', () => {
       const result = buildArgs([
         'my-project',
