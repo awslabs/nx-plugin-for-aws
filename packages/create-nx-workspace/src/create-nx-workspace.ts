@@ -24,22 +24,34 @@ export const detectPackageManager = (): string | undefined => {
   return undefined;
 };
 
-/**
- * Build the argument list for create-nx-workspace.
- * Positional args come first, then --preset and defaults, then user flags.
- */
+const isNonInteractive = (flagArgs: string[]): boolean =>
+  flagArgs.some((a) => a === '--no-interactive' || a === '--interactive=false');
+
+const hasSkipGitFlag = (flagArgs: string[]): boolean =>
+  flagArgs.some((a) => a === '--skipGit' || a.startsWith('--skipGit='));
+
+const hasCiOverride = (flagArgs: string[]): boolean =>
+  flagArgs.some((a) => a.startsWith('--ci') || a.startsWith('--nxCloud'));
+
 export const buildArgs = (args: string[]): string[] => {
   const positionalArgs = args.filter((a) => !a.startsWith('-'));
   const flagArgs = args.filter((a) => a.startsWith('-'));
 
   const defaultFlags = [...DEFAULT_FLAGS];
 
-  // Auto-detect and add --pm if not explicitly provided
   if (!flagArgs.some((a) => a.startsWith('--pm'))) {
     const pm = detectPackageManager();
-    if (pm) {
-      defaultFlags.push(`--pm=${pm}`);
-    }
+    if (pm) defaultFlags.push(`--pm=${pm}`);
+  }
+
+  // Under `--no-interactive` with our default `--ci=skip`, nx still hits
+  // GitHub prompts that aren't gated on the interactive flag.
+  if (
+    isNonInteractive(flagArgs) &&
+    !hasCiOverride(flagArgs) &&
+    !hasSkipGitFlag(flagArgs)
+  ) {
+    defaultFlags.push('--skipGit');
   }
 
   const flagsToAdd = defaultFlags.filter(
