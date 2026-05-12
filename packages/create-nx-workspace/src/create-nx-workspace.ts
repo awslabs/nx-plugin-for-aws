@@ -45,11 +45,7 @@ export const buildArgs = (args: string[]): string[] => {
   }
 
   // Under `--no-interactive` with our default `--ci=skip`, nx still hits
-  // GitHub prompts that aren't gated on the interactive flag (e.g. when
-  // nx's AI-agent detection force-overrides nxCloud to 'yes'). Default
-  // --skipGit so --no-interactive really is unattended. Explicit
-  // --skipGit / --skipGit=... wins. A user-supplied --ci / --nxCloud
-  // opts out — at that point the user is driving the CI flow.
+  // GitHub prompts that aren't gated on the interactive flag.
   if (
     isNonInteractive(flagArgs) &&
     !hasCiOverride(flagArgs) &&
