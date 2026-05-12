@@ -398,6 +398,22 @@ export default defineConfig({
                   label: 'TypeScript Strands Agent → A2A Agent',
                   link: '/guides/connection/ts-strands-agent-a2a',
                 },
+                {
+                  label: 'tRPC API → Relational Database',
+                  link: '/guides/connection/trpc-rdb',
+                },
+                {
+                  label: 'Smithy API → Relational Database',
+                  link: '/guides/connection/smithy-rdb',
+                },
+                {
+                  label: 'TypeScript Strands Agent → Relational Database',
+                  link: '/guides/connection/ts-strands-agent-rdb',
+                },
+                {
+                  label: 'MCP Server → Relational Database',
+                  link: '/guides/connection/ts-mcp-server-rdb',
+                },
               ],
             },
             {

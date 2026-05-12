@@ -1,0 +1,189 @@
+---
+title: tRPC API 连接到关系数据库
+description: 将 tRPC API 连接到关系数据库
+when:
+  sourceType: ts#trpc-api
+  targetType: ts#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+`connection` 生成器将 <Link path="guides/trpc">tRPC API</Link> 连接到 <Link path="guides/ts-rdb">关系数据库</Link> 项目，生成一个类型安全的 tRPC 中间件插件，使 Prisma 客户端在您的过程上下文中可用。
+
+## 前置条件
+
+在使用此生成器之前，请确保您拥有：
+
+1. 一个 <Link path="guides/trpc">`ts#trpc-api`</Link> 项目
+2. 一个 <Link path="guides/ts-rdb">`ts#rdb`</Link> 项目
+
+## 使用方法
+
+### 运行生成器
+
+<RunGenerator generator="connection" />
+
+选择您的 tRPC API 项目作为源，选择您的关系数据库项目作为目标。
+
+### 选项
+
+<GeneratorParameters generator="connection" />
+
+## 生成器输出
+
+生成器会在您的 tRPC API 项目中创建一个中间件文件：
+
+<FileTree>
+
+- packages/api/src
+  - middleware
+    - \<db-name>.ts tRPC 插件，在过程上下文中暴露 Prisma 客户端
+
+</FileTree>
+
+此外，它还会更新您的 tRPC API 的 `serve-local` 目标，以便在本地运行时自动启动数据库。
+
+## 使用中间件
+
+### 注册插件
+
+将生成的插件添加到您的 tRPC 路由器中，这样所有使用它的过程都可以访问数据库：
+
+```ts title="packages/api/src/router.ts" {2,5}
+import { t } from './init.js';
+import { createMyDbPlugin } from './middleware/my-db.js';
+
+export const authenticatedProcedure = t.procedure
+  .concat(createMyDbPlugin());
+```
+
+### 在过程中访问数据库
+
+该插件将 `IMyDbContext` 合并到您的过程上下文中，使 `myDb` 作为可选属性可用：
+
+```ts title="packages/api/src/procedures/users.ts" {8,12}
+import { z } from 'zod';
+import { authenticatedProcedure } from '../router.js';
+
+export const listUsers = authenticatedProcedure
+  .output(z.array(z.object({ id: z.string(), name: z.string() })))
+  .query(async ({ ctx }) => {
+    // ctx.myDb 是 Prisma 客户端 — 类型为 Awaited<ReturnType<typeof getPrisma>>
+    return await ctx.myDb!.user.findMany();
+  });
+```
+
+### MySQL：每次请求后断开连接
+
+当目标数据库使用 MySQL 引擎时，生成的中间件会将 `opts.next()` 包装在一个 `try/finally` 块中，该块会调用 `$disconnect()`：
+
+```ts title="packages/api/src/middleware/my-db.ts" {6}
+return t.procedure.use(async (opts) => {
+  const myDb = await getPrisma();
+  try {
+    return await opts.next({ ctx: { ...opts.ctx, myDb } });
+  } finally {
+    await myDb.$disconnect();
+  }
+});
+```
+
+这解决了 MySQL 适配器在查询后保持 Node.js 事件循环打开的问题，否则会阻止 Lambda 刷新流式响应。在 `finally` 中断开连接会释放事件循环，以便响应可以完成。详情请参阅 <Link path="guides/ts-rdb#mysql-api-gateway-streaming-mode">MySQL：API Gateway 流式模式</Link>。
+
+PostgreSQL 不需要这样做 — 其适配器使用配置了 `allowExitOnIdle: true` 的连接池。
+
+:::caution[MySQL：IAM 令牌过期]
+RDS IAM 令牌在 **15 分钟**后过期。MySQL 适配器在连接时捕获令牌。如果您的 Lambda 保持温暖的时间足够长，令牌过期后，新的连接尝试可能会失败。检查连接错误并再次调用 `getPrisma()` 以获取带有新令牌的新客户端。详情和解决方法请参阅 <Link path="guides/ts-rdb#mysql-iam-token-expiry">MySQL：IAM 令牌过期</Link>。
+:::
+
+### 多个数据库
+
+您可以通过使用不同的目标再次运行生成器来连接其他数据库。每个数据库都有自己的插件和上下文接口：
+
+```ts title="packages/api/src/router.ts"
+export const dbProcedure = t.procedure
+  .concat(createPostgresDbPlugin())
+  .concat(createMySqlDbPlugin());
+```
+
+## 基础设施
+
+为了允许您的 tRPC API 在运行时连接到数据库，API Lambda 函数必须部署到与数据库相同的 VPC 中，并授予网络和 IAM 访问权限。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+在您的应用程序堆栈中，将 API 部署到与数据库相同的 VPC 中，然后调用 `allowDefaultPortFrom` 和 `grantConnect` 来打开网络路径并向每个 Lambda 处理程序授予 IAM `rds-db:connect` 权限：
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+
+const api = new Api(this, 'Api', {
+  integrations: Api.defaultIntegrations(this)
+    .withDefaultOptions({
+      vpc,
+      vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+    })
+    .build(),
+});
+
+Object.entries(api.integrations).forEach(([operation, integration]) => {
+  db.allowDefaultPortFrom(integration.handler, `Allow ${operation} to connect to the database`);
+  db.grantConnect(integration.handler);
+});
+```
+
+将 API Lambda 函数部署到**具有出口的私有子网**，而不是私有隔离子网。在运行时，`getPrisma()` 从 AWS AppConfig 检索数据库连接详细信息，这是一个需要出站互联网访问的公共 AWS 服务端点。
+
+:::note
+此示例授予 API 中的每个处理程序访问权限，但如果只有某些处理程序需要访问权限，最好单独配置。
+:::
+
+</Fragment>
+<Fragment slot="terraform">
+
+将数据库模块输出传递到您的 API 模块中，以便它可以访问数据库并读取其运行时配置：
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
+}
+
+module "api" {
+  source             = "..."
+  vpc_id             = module.vpc.vpc_id
+  private_subnet_ids = module.vpc.private_subnet_ids
+
+  appconfig_application_id     = module.my_database.appconfig_application_id
+  database_cluster_resource_id = module.my_database.cluster_resource_id
+  database_runtime_user        = module.my_database.database_runtime_user
+  database_security_group_id   = module.my_database.security_group_id
+  database_port                = module.my_database.cluster_port
+
+  environment_variables = {
+    RUNTIME_CONFIG_APP_ID = module.my_database.appconfig_application_id
+  }
+}
+```
+
+将 API Lambda 函数部署到**具有出口的私有子网**，而不是私有隔离子网。确保 API Lambda 角色具有 `rds-db:connect` 权限，并且其安全组可以在数据库端口上访问数据库安全组。
+
+</Fragment>
+</Infrastructure>
+
+## 本地开发
+
+生成器会配置您的 tRPC API 的 `serve-local` 目标，使其依赖于数据库的 `serve-local` 目标，因此运行：
+
+<NxCommands commands={["serve-local <api-project-name>"]} />
+
+将自动在您的 API 旁边启动本地数据库。

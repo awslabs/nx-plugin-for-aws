@@ -1,0 +1,216 @@
+---
+title: Agente TypeScript Strands a Base de Datos Relacional
+description: Conectar un Agente TypeScript Strands a una Base de Datos Relacional
+when:
+  sourceType: ts#strands-agent
+  targetType: ts#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+El generador `connection` conecta un <Link path="guides/ts-strands-agent">Agente TypeScript Strands</Link> a un proyecto de <Link path="guides/ts-rdb">Base de Datos Relacional</Link>, haciendo que un cliente Prisma esté disponible durante todo el ciclo de vida de las solicitudes de tu agente.
+
+La estrategia de inyección depende del protocolo del agente — **HTTP** (basado en tRPC) o **A2A** (Agente-a-Agente).
+
+## Requisitos Previos
+
+Antes de usar este generador, asegúrate de tener:
+
+1. Un proyecto <Link path="guides/ts-strands-agent">`ts#strands-agent`</Link>
+2. Un proyecto <Link path="guides/ts-rdb">`ts#rdb`</Link>
+
+## Uso
+
+### Ejecutar el Generador
+
+<RunGenerator generator="connection" />
+
+Selecciona tu proyecto de Agente Strands como origen y tu proyecto de base de datos relacional como destino. Si el proyecto contiene múltiples componentes de agente, especifica `sourceComponent` para desambiguar.
+
+### Opciones
+
+<GeneratorParameters generator="connection" />
+
+## Salida del Generador
+
+Los archivos modificados dependen del protocolo del agente.
+
+**Protocolo HTTP** — modifica cuatro archivos:
+
+<FileTree>
+
+- packages/my-service/src/my-agent
+  - init.ts propiedad `db` agregada a la interfaz `Context`
+  - index.ts `createContext` hecho asíncrono; cliente Prisma creado y devuelto en el contexto
+  - router.ts `db` desestructurado de `opts.ctx` y pasado a `getAgent`
+  - agent.ts `getAgent` actualizado para aceptar `{ db }` como segundo parámetro
+
+</FileTree>
+
+**Protocolo A2A** — modifica dos archivos:
+
+<FileTree>
+
+- packages/my-service/src/my-agent
+  - index.ts Cliente Prisma creado antes de `A2AExpressServer`; pasado a `getAgent`
+  - agent.ts `getAgent` actualizado para aceptar `{ db }` como segundo parámetro
+
+</FileTree>
+
+Además, el target `<agent-name>-serve-local` del agente se actualiza para depender del target `serve-local` de la base de datos.
+
+## Cómo Funciona
+
+### Protocolo HTTP
+
+Para agentes HTTP, la base de datos fluye a través del contexto de solicitud tRPC — `createContext` crea un cliente Prisma por solicitud y se vuelve disponible para cada procedimiento a través de `opts.ctx`. El router luego lo pasa explícitamente a `getAgent`.
+
+#### Interfaz de Contexto
+
+El tipo de cliente Prisma se agrega al `Context` de tRPC en `init.ts`:
+
+```ts title="packages/my-service/src/my-agent/init.ts" {1,5}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+export interface Context {
+  sessionId: string;
+  myDb: Awaited<ReturnType<typeof getMyDb>>;
+}
+```
+
+#### Contexto de Solicitud
+
+`createContext` se hace asíncrono y el cliente Prisma se instancia y devuelve:
+
+```ts title="packages/my-service/src/my-agent/index.ts" {1,6,10}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+const createContext = async (
+  opts: CreateHTTPContextOptions | CreateWSSContextFnOptions,
+): Promise<Context> => {
+  const myDb = await getMyDb();
+  const sessionId = /* ... */;
+  return {
+    sessionId,
+    myDb,
+  };
+};
+```
+
+#### Router y Agente
+
+La base de datos se pasa desde el contexto a `getAgent` a través del manejador de suscripción:
+
+```ts title="packages/my-service/src/my-agent/router.ts" {2,3}
+.subscription(async function* (opts) {
+  const { myDb } = opts.ctx;
+  const agent = await getAgent(opts.ctx.sessionId, { myDb });
+  // ...
+})
+```
+
+```ts title="packages/my-service/src/my-agent/agent.ts" {3}
+export const getAgent = async (
+  sessionId: string,
+  { myDb }: { myDb: Awaited<ReturnType<typeof getMyDb>> },
+) => {
+  return new Agent({ /* use myDb in tools */ });
+};
+```
+
+### Protocolo A2A
+
+Para agentes A2A, no hay contexto tRPC. La base de datos se crea una vez al inicio y se pasa directamente a `getAgent` antes de que inicie el `A2AExpressServer`.
+
+#### Inicio del Servidor
+
+El cliente Prisma se crea antes del `A2AExpressServer` y se pasa a `getAgent`:
+
+```ts title="packages/my-service/src/my-agent/index.ts" {1,4,6}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+void (async () => {
+  const myDb = await getMyDb();
+  const server = new A2AExpressServer({
+    agent: await getAgent('default', { myDb }),
+    // ...
+  });
+})();
+```
+
+#### Definición del Agente
+
+```ts title="packages/my-service/src/my-agent/agent.ts" {3}
+export const getAgent = async (
+  sessionId: string,
+  { myDb }: { myDb: Awaited<ReturnType<typeof getMyDb>> },
+) => {
+  return new Agent({ /* use myDb in tools */ });
+};
+```
+
+## Múltiples Bases de Datos
+
+Ejecutar el generador nuevamente con un destino diferente agrega la segunda base de datos junto a la primera. Para agentes HTTP, ambas aparecen en la interfaz `Context` y se desestructuran juntas en el router:
+
+```ts title="packages/my-service/src/my-agent/router.ts"
+const { postgresDb, mysqlDb } = opts.ctx;
+const agent = await getAgent(opts.ctx.sessionId, { postgresDb, mysqlDb });
+```
+
+## Infraestructura
+
+El constructo de agente generado implementa `IGrantable` e `IConnectable`, por lo que puedes otorgar acceso de red e IAM a la base de datos directamente en el constructo.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+const myAgent = new MyAgent(this, 'MyAgent', { vpc, ... });
+
+db.allowDefaultPortFrom(myAgent);
+db.grantConnect(myAgent);
+```
+
+`allowDefaultPortFrom` abre la regla del grupo de seguridad para que el tiempo de ejecución del agente pueda alcanzar el puerto de la base de datos. `grantConnect` otorga el permiso IAM `rds-db:connect` al rol de ejecución del agente.
+
+</Fragment>
+<Fragment slot="terraform">
+
+Pasa las salidas del módulo de base de datos a tu módulo de agente para que pueda alcanzar la base de datos y leer su configuración de tiempo de ejecución:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+}
+
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+
+  appconfig_application_id     = module.my_database.appconfig_application_id
+  database_cluster_resource_id = module.my_database.cluster_resource_id
+  database_runtime_user        = module.my_database.database_runtime_user
+  database_security_group_id   = module.my_database.security_group_id
+  database_port                = module.my_database.cluster_port
+}
+```
+
+Asegúrate de que el rol de ejecución del agente tenga el permiso `rds-db:connect` y que su grupo de seguridad pueda alcanzar el grupo de seguridad de la base de datos en el puerto de la base de datos.
+
+</Fragment>
+</Infrastructure>
+
+## Desarrollo Local
+
+<NxCommands commands={["<agent-name>-serve-local <project-name>"]} />
+
+Esto inicia el agente y todas las bases de datos conectadas. La variable de entorno `SERVE_LOCAL=true` hace que cada cliente Prisma se conecte a su base de datos Docker local en lugar de Aurora.

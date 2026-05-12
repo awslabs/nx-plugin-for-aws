@@ -1,0 +1,189 @@
+---
+title: API tRPC đến Cơ sở dữ liệu Quan hệ
+description: Kết nối API tRPC với Cơ sở dữ liệu Quan hệ
+when:
+  sourceType: ts#trpc-api
+  targetType: ts#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+Generator `connection` kết nối một <Link path="guides/trpc">API tRPC</Link> với dự án <Link path="guides/ts-rdb">Cơ sở dữ liệu Quan hệ</Link>, tạo ra một plugin middleware tRPC an toàn kiểu giúp cung cấp Prisma client trong context của procedure.
+
+## Điều kiện tiên quyết
+
+Trước khi sử dụng generator này, hãy đảm bảo bạn có:
+
+1. Một dự án <Link path="guides/trpc">`ts#trpc-api`</Link>
+2. Một dự án <Link path="guides/ts-rdb">`ts#rdb`</Link>
+
+## Cách sử dụng
+
+### Chạy Generator
+
+<RunGenerator generator="connection" />
+
+Chọn dự án API tRPC của bạn làm nguồn và dự án cơ sở dữ liệu quan hệ của bạn làm đích.
+
+### Tùy chọn
+
+<GeneratorParameters generator="connection" />
+
+## Kết quả của Generator
+
+Generator tạo một file middleware trong dự án API tRPC của bạn:
+
+<FileTree>
+
+- packages/api/src
+  - middleware
+    - \<db-name>.ts Plugin tRPC cung cấp Prisma client trong context của procedure
+
+</FileTree>
+
+Ngoài ra, nó cập nhật target `serve-local` của API tRPC để tự động khởi động cơ sở dữ liệu khi chạy cục bộ.
+
+## Sử dụng Middleware
+
+### Đăng ký Plugin
+
+Thêm plugin đã tạo vào router tRPC của bạn để tất cả các procedure sử dụng nó có quyền truy cập vào cơ sở dữ liệu:
+
+```ts title="packages/api/src/router.ts" {2,5}
+import { t } from './init.js';
+import { createMyDbPlugin } from './middleware/my-db.js';
+
+export const authenticatedProcedure = t.procedure
+  .concat(createMyDbPlugin());
+```
+
+### Truy cập Cơ sở dữ liệu trong Procedures
+
+Plugin hợp nhất `IMyDbContext` vào context của procedure, làm cho `myDb` có sẵn như một thuộc tính tùy chọn:
+
+```ts title="packages/api/src/procedures/users.ts" {8,12}
+import { z } from 'zod';
+import { authenticatedProcedure } from '../router.js';
+
+export const listUsers = authenticatedProcedure
+  .output(z.array(z.object({ id: z.string(), name: z.string() })))
+  .query(async ({ ctx }) => {
+    // ctx.myDb là Prisma client — được định kiểu là Awaited<ReturnType<typeof getPrisma>>
+    return await ctx.myDb!.user.findMany();
+  });
+```
+
+### MySQL: Ngắt kết nối sau mỗi Request
+
+Khi cơ sở dữ liệu đích sử dụng engine MySQL, middleware được tạo sẽ bọc `opts.next()` trong một khối `try/finally` gọi `$disconnect()`:
+
+```ts title="packages/api/src/middleware/my-db.ts" {6}
+return t.procedure.use(async (opts) => {
+  const myDb = await getPrisma();
+  try {
+    return await opts.next({ ctx: { ...opts.ctx, myDb } });
+  } finally {
+    await myDb.$disconnect();
+  }
+});
+```
+
+Điều này giải quyết vấn đề adapter MySQL giữ vòng lặp sự kiện Node.js mở sau một truy vấn, điều này sẽ ngăn Lambda xả các phản hồi streaming. Ngắt kết nối trong `finally` giải phóng vòng lặp sự kiện để phản hồi có thể hoàn thành. Xem <Link path="guides/ts-rdb#mysql-api-gateway-streaming-mode">MySQL: Chế độ Streaming API Gateway</Link> để biết chi tiết.
+
+PostgreSQL không yêu cầu điều này — adapter của nó sử dụng connection pool được cấu hình với `allowExitOnIdle: true`.
+
+:::caution[MySQL: Hết hạn IAM Token]
+IAM token của RDS hết hạn sau **15 phút**. Adapter MySQL lưu token tại thời điểm kết nối. Nếu Lambda của bạn giữ warm đủ lâu để token hết hạn, các lần thử kết nối mới có thể thất bại. Kiểm tra lỗi kết nối và gọi lại `getPrisma()` để có được một client mới với token mới. Xem <Link path="guides/ts-rdb#mysql-iam-token-expiry">MySQL: Hết hạn IAM Token</Link> để biết chi tiết và cách giải quyết.
+:::
+
+### Nhiều Cơ sở dữ liệu
+
+Bạn có thể kết nối thêm các cơ sở dữ liệu bằng cách chạy lại generator với một target khác. Mỗi cơ sở dữ liệu có plugin và interface context riêng:
+
+```ts title="packages/api/src/router.ts"
+export const dbProcedure = t.procedure
+  .concat(createPostgresDbPlugin())
+  .concat(createMySqlDbPlugin());
+```
+
+## Cơ sở hạ tầng
+
+Để cho phép API tRPC của bạn kết nối với cơ sở dữ liệu tại runtime, các hàm Lambda của API phải được triển khai vào cùng VPC với cơ sở dữ liệu và được cấp quyền truy cập mạng và IAM.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+Trong application stack của bạn, triển khai API vào cùng VPC với cơ sở dữ liệu, sau đó gọi `allowDefaultPortFrom` và `grantConnect` để mở đường dẫn mạng và cấp quyền IAM `rds-db:connect` cho mỗi Lambda handler:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+
+const api = new Api(this, 'Api', {
+  integrations: Api.defaultIntegrations(this)
+    .withDefaultOptions({
+      vpc,
+      vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+    })
+    .build(),
+});
+
+Object.entries(api.integrations).forEach(([operation, integration]) => {
+  db.allowDefaultPortFrom(integration.handler, `Allow ${operation} to connect to the database`);
+  db.grantConnect(integration.handler);
+});
+```
+
+Triển khai các hàm Lambda của API vào **private subnet với egress**, không phải private isolated subnet. Tại runtime, `getPrisma()` lấy thông tin chi tiết kết nối cơ sở dữ liệu từ AWS AppConfig, đây là một public AWS service endpoint yêu cầu quyền truy cập internet ra ngoài.
+
+:::note
+Ví dụ này cấp quyền truy cập cho mọi handler trong API của bạn, nhưng nếu chỉ một số handler cần truy cập thì tốt hơn là cấu hình riêng lẻ.
+:::
+
+</Fragment>
+<Fragment slot="terraform">
+
+Truyền các output của database module vào API module của bạn để nó có thể truy cập cơ sở dữ liệu và đọc cấu hình runtime của nó:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
+}
+
+module "api" {
+  source             = "..."
+  vpc_id             = module.vpc.vpc_id
+  private_subnet_ids = module.vpc.private_subnet_ids
+
+  appconfig_application_id     = module.my_database.appconfig_application_id
+  database_cluster_resource_id = module.my_database.cluster_resource_id
+  database_runtime_user        = module.my_database.database_runtime_user
+  database_security_group_id   = module.my_database.security_group_id
+  database_port                = module.my_database.cluster_port
+
+  environment_variables = {
+    RUNTIME_CONFIG_APP_ID = module.my_database.appconfig_application_id
+  }
+}
+```
+
+Triển khai các hàm Lambda của API vào **private subnet với egress**, không phải private isolated subnet. Đảm bảo vai trò Lambda của API có quyền `rds-db:connect` và security group của nó có thể truy cập security group của cơ sở dữ liệu trên cổng cơ sở dữ liệu.
+
+</Fragment>
+</Infrastructure>
+
+## Phát triển Cục bộ
+
+Generator cấu hình target `serve-local` của API tRPC để phụ thuộc vào target `serve-local` của cơ sở dữ liệu, vì vậy khi chạy:
+
+<NxCommands commands={["serve-local <api-project-name>"]} />
+
+sẽ tự động khởi động cơ sở dữ liệu cục bộ cùng với API của bạn.

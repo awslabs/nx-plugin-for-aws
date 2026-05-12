@@ -3,6 +3,16 @@
 exports[`ts#rdb strands-agent-connection generator > should add rdb serve-local dependency to the agent prefixed serve-local 1`] = `
 {
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "metadata": {
+    "components": [
+      {
+        "generator": "ts#strands-agent",
+        "name": "my-agent",
+        "path": "src/my-agent",
+        "protocol": "HTTP",
+      },
+    ],
+  },
   "name": "my-service",
   "root": "packages/my-service",
   "targets": {
@@ -22,9 +32,177 @@ exports[`ts#rdb strands-agent-connection generator > should add rdb serve-local 
 }
 `;
 
+exports[`ts#rdb strands-agent-connection generator > should be idempotent across init.ts, index.ts, router.ts and agent.ts 1`] = `
+"import { getPrisma as getDb } from 'db';
+import { initTRPC } from '@trpc/server';
+
+export interface Context {
+  sessionId: string;
+  db: Awaited<ReturnType<typeof getDb>>;
+}
+
+export const t = initTRPC.context<Context>().create();
+
+export const publicProcedure = t.procedure;
+"
+`;
+
+exports[`ts#rdb strands-agent-connection generator > should be idempotent across init.ts, index.ts, router.ts and agent.ts 2`] = `
+"import { getPrisma as getDb } from 'db';
+import { randomUUID } from 'node:crypto';
+import { createServer } from 'http';
+import {
+  CreateHTTPContextOptions,
+  createHTTPHandler,
+} from '@trpc/server/adapters/standalone';
+import { appRouter, AppRouter } from './router.js';
+import { WebSocketServer } from 'ws';
+import cors from 'cors';
+import {
+  CreateWSSContextFnOptions,
+  applyWSSHandler,
+} from '@trpc/server/adapters/ws';
+import { Context } from './init.js';
+
+const PORT = parseInt(process.env.PORT || '8080');
+
+const createContext = async (
+  opts: CreateHTTPContextOptions | CreateWSSContextFnOptions,
+): Promise<Context> => {
+  const db = await getDb();
+  const sessionId =
+    ('req' in opts ? opts.req.headers['x-session-id'] : undefined) ??
+    randomUUID();
+  return {
+    sessionId: Array.isArray(sessionId) ? sessionId[0] : sessionId,
+    db,
+  };
+};
+
+const handler = createHTTPHandler({
+  router: appRouter,
+  middleware: cors(),
+  createContext,
+});
+
+const server = createServer((req, res) => {
+  handler(req, res);
+});
+
+server.listen(PORT);
+"
+`;
+
+exports[`ts#rdb strands-agent-connection generator > should be idempotent across init.ts, index.ts, router.ts and agent.ts 3`] = `
+"import { publicProcedure, t } from './init.js';
+import { z } from 'zod';
+import { getAgent } from './agent.js';
+
+export const router = t.router;
+
+export const appRouter = router({
+  invoke: publicProcedure
+    .input(z.object({ message: z.string() }))
+    .subscription(async function* (opts) {
+      const { db } = opts.ctx;
+      const agent = await getAgent(opts.ctx.sessionId, { db });
+      for await (const event of agent.stream(opts.input.message)) {
+        yield event;
+      }
+      return;
+    }),
+});
+
+export type AppRouter = typeof appRouter;
+"
+`;
+
+exports[`ts#rdb strands-agent-connection generator > should be idempotent across init.ts, index.ts, router.ts and agent.ts 4`] = `
+"import { getPrisma as getDb } from 'db';
+import { Agent, tool } from '@strands-agents/sdk';
+import { z } from 'zod';
+
+const multiply = tool({
+  name: 'Multiply',
+  description: 'Multiply two numbers',
+  inputSchema: z.object({ a: z.number(), b: z.number() }),
+  callback: ({ a, b }) => a * b,
+});
+
+export const getAgent = async (
+  sessionId: string,
+  { db }: { db: Awaited<ReturnType<typeof getDb>> },
+) => {
+  return new Agent({
+    systemPrompt: 'You are a helpful assistant.',
+    tools: [multiply],
+  });
+};
+"
+`;
+
+exports[`ts#rdb strands-agent-connection generator > should be idempotent for A2A index.ts and agent.ts injection 1`] = `
+"import { getPrisma as getDb } from 'db';
+import { A2AExpressServer } from '@strands-agents/sdk/a2a/express';
+import express from 'express';
+import { getAgent } from './agent.js';
+
+const PORT = parseInt(process.env.PORT || '9000');
+const HOST = '0.0.0.0';
+
+void (async () => {
+  const db = await getDb();
+  const server = new A2AExpressServer({
+    agent: await getAgent('default', { db }),
+    name: 'MyAgent',
+    host: HOST,
+    port: PORT,
+  });
+
+  const app = express();
+  app.use(server.createMiddleware());
+  app.listen(PORT, HOST);
+})();
+"
+`;
+
+exports[`ts#rdb strands-agent-connection generator > should be idempotent for A2A index.ts and agent.ts injection 2`] = `
+"import { getPrisma as getDb } from 'db';
+import { Agent, tool } from '@strands-agents/sdk';
+import { z } from 'zod';
+
+const multiply = tool({
+  name: 'Multiply',
+  description: 'Multiply two numbers',
+  inputSchema: z.object({ a: z.number(), b: z.number() }),
+  callback: ({ a, b }) => a * b,
+});
+
+export const getAgent = async (
+  sessionId: string,
+  { db }: { db: Awaited<ReturnType<typeof getDb>> },
+) => {
+  return new Agent({
+    systemPrompt: 'You are a helpful assistant.',
+    tools: [multiply],
+  });
+};
+"
+`;
+
 exports[`ts#rdb strands-agent-connection generator > should fall back to agent-serve-local when no component name 1`] = `
 {
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "metadata": {
+    "components": [
+      {
+        "generator": "ts#strands-agent",
+        "name": "agent",
+        "path": "src/agent",
+        "protocol": "HTTP",
+      },
+    ],
+  },
   "name": "my-service",
   "root": "packages/my-service",
   "targets": {
@@ -42,4 +220,186 @@ exports[`ts#rdb strands-agent-connection generator > should fall back to agent-s
     },
   },
 }
+`;
+
+exports[`ts#rdb strands-agent-connection generator > should inject db into A2A index.ts 1`] = `
+"import { getPrisma as getDb } from 'db';
+import { A2AExpressServer } from '@strands-agents/sdk/a2a/express';
+import express from 'express';
+import { getAgent } from './agent.js';
+
+const PORT = parseInt(process.env.PORT || '9000');
+const HOST = '0.0.0.0';
+
+void (async () => {
+  const db = await getDb();
+  const server = new A2AExpressServer({
+    agent: await getAgent('default', { db }),
+    name: 'MyAgent',
+    host: HOST,
+    port: PORT,
+  });
+
+  const app = express();
+  app.use(server.createMiddleware());
+  app.listen(PORT, HOST);
+})();
+"
+`;
+
+exports[`ts#rdb strands-agent-connection generator > should inject db into A2A index.ts 2`] = `
+"import { getPrisma as getDb } from 'db';
+import { Agent, tool } from '@strands-agents/sdk';
+import { z } from 'zod';
+
+const multiply = tool({
+  name: 'Multiply',
+  description: 'Multiply two numbers',
+  inputSchema: z.object({ a: z.number(), b: z.number() }),
+  callback: ({ a, b }) => a * b,
+});
+
+export const getAgent = async (
+  sessionId: string,
+  { db }: { db: Awaited<ReturnType<typeof getDb>> },
+) => {
+  return new Agent({
+    systemPrompt: 'You are a helpful assistant.',
+    tools: [multiply],
+  });
+};
+"
+`;
+
+exports[`ts#rdb strands-agent-connection generator > should inject into init.ts, index.ts, router.ts and agent.ts 1`] = `
+"import { getPrisma as getDb } from 'db';
+import { initTRPC } from '@trpc/server';
+
+export interface Context {
+  sessionId: string;
+  db: Awaited<ReturnType<typeof getDb>>;
+}
+
+export const t = initTRPC.context<Context>().create();
+
+export const publicProcedure = t.procedure;
+"
+`;
+
+exports[`ts#rdb strands-agent-connection generator > should inject into init.ts, index.ts, router.ts and agent.ts 2`] = `
+"import { getPrisma as getDb } from 'db';
+import { randomUUID } from 'node:crypto';
+import { createServer } from 'http';
+import {
+  CreateHTTPContextOptions,
+  createHTTPHandler,
+} from '@trpc/server/adapters/standalone';
+import { appRouter, AppRouter } from './router.js';
+import { WebSocketServer } from 'ws';
+import cors from 'cors';
+import {
+  CreateWSSContextFnOptions,
+  applyWSSHandler,
+} from '@trpc/server/adapters/ws';
+import { Context } from './init.js';
+
+const PORT = parseInt(process.env.PORT || '8080');
+
+const createContext = async (
+  opts: CreateHTTPContextOptions | CreateWSSContextFnOptions,
+): Promise<Context> => {
+  const db = await getDb();
+  const sessionId =
+    ('req' in opts ? opts.req.headers['x-session-id'] : undefined) ??
+    randomUUID();
+  return {
+    sessionId: Array.isArray(sessionId) ? sessionId[0] : sessionId,
+    db,
+  };
+};
+
+const handler = createHTTPHandler({
+  router: appRouter,
+  middleware: cors(),
+  createContext,
+});
+
+const server = createServer((req, res) => {
+  handler(req, res);
+});
+
+server.listen(PORT);
+"
+`;
+
+exports[`ts#rdb strands-agent-connection generator > should inject into init.ts, index.ts, router.ts and agent.ts 3`] = `
+"import { publicProcedure, t } from './init.js';
+import { z } from 'zod';
+import { getAgent } from './agent.js';
+
+export const router = t.router;
+
+export const appRouter = router({
+  invoke: publicProcedure
+    .input(z.object({ message: z.string() }))
+    .subscription(async function* (opts) {
+      const { db } = opts.ctx;
+      const agent = await getAgent(opts.ctx.sessionId, { db });
+      for await (const event of agent.stream(opts.input.message)) {
+        yield event;
+      }
+      return;
+    }),
+});
+
+export type AppRouter = typeof appRouter;
+"
+`;
+
+exports[`ts#rdb strands-agent-connection generator > should inject into init.ts, index.ts, router.ts and agent.ts 4`] = `
+"import { getPrisma as getDb } from 'db';
+import { Agent, tool } from '@strands-agents/sdk';
+import { z } from 'zod';
+
+const multiply = tool({
+  name: 'Multiply',
+  description: 'Multiply two numbers',
+  inputSchema: z.object({ a: z.number(), b: z.number() }),
+  callback: ({ a, b }) => a * b,
+});
+
+export const getAgent = async (
+  sessionId: string,
+  { db }: { db: Awaited<ReturnType<typeof getDb>> },
+) => {
+  return new Agent({
+    systemPrompt: 'You are a helpful assistant.',
+    tools: [multiply],
+  });
+};
+"
+`;
+
+exports[`ts#rdb strands-agent-connection generator > should support multiple rdb connections in router.ts 1`] = `
+"import { publicProcedure, t } from './init.js';
+import { z } from 'zod';
+import { getAgent } from './agent.js';
+
+export const router = t.router;
+
+export const appRouter = router({
+  invoke: publicProcedure
+    .input(z.object({ message: z.string() }))
+    .subscription(async function* (opts) {
+      const { postgresDb, mysqlDb } = opts.ctx;
+      const agent = await getAgent(opts.ctx.sessionId, { postgresDb, mysqlDb });
+      for await (const event of agent.stream(opts.input.message)) {
+        yield event;
+      }
+      return;
+    }),
+});
+
+export type AppRouter = typeof appRouter;
+"
 `;

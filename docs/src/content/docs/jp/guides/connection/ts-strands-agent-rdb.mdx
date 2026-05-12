@@ -1,0 +1,217 @@
+---
+title: TypeScript Strands Agent から リレーショナルデータベースへの接続
+description: TypeScript Strands Agent をリレーショナルデータベースに接続する
+when:
+  sourceType: ts#strands-agent
+  targetType: ts#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+`connection` ジェネレーターは、<Link path="guides/ts-strands-agent">TypeScript Strands Agent</Link> を <Link path="guides/ts-rdb">リレーショナルデータベース</Link> プロジェクトに接続し、エージェントのリクエストライフサイクル全体で Prisma クライアントを利用可能にします。
+
+インジェクション戦略は、エージェントのプロトコル — **HTTP**（tRPC ベース）または **A2A**（Agent-to-Agent）— に依存します。
+
+## 前提条件
+
+このジェネレーターを使用する前に、以下を確認してください：
+
+1. <Link path="guides/ts-strands-agent">`ts#strands-agent`</Link> プロジェクト
+2. <Link path="guides/ts-rdb">`ts#rdb`</Link> プロジェクト
+
+## 使用方法
+
+### ジェネレーターの実行
+
+<RunGenerator generator="connection" />
+
+Strands Agent プロジェクトをソースとして、リレーショナルデータベースプロジェクトをターゲットとして選択します。プロジェクトに複数のエージェントコンポーネントが含まれている場合は、`sourceComponent` を指定して明確にします。
+
+### オプション
+
+<GeneratorParameters generator="connection" />
+
+## ジェネレーターの出力
+
+変更されるファイルは、エージェントのプロトコルによって異なります。
+
+**HTTP プロトコル** — 4つのファイルを変更します：
+
+<FileTree>
+
+- packages/my-service/src/my-agent
+  - init.ts `Context` インターフェースに `db` プロパティを追加
+  - index.ts `createContext` を非同期化; Prisma クライアントを作成してコンテキストで返す
+  - router.ts `opts.ctx` から `db` を分割代入し、`getAgent` に渡す
+  - agent.ts `getAgent` を更新して、第2パラメータとして `{ db }` を受け取る
+
+</FileTree>
+
+**A2A プロトコル** — 2つのファイルを変更します：
+
+<FileTree>
+
+- packages/my-service/src/my-agent
+  - index.ts `A2AExpressServer` の前に Prisma クライアントを作成; `getAgent` に渡す
+  - agent.ts `getAgent` を更新して、第2パラメータとして `{ db }` を受け取る
+
+</FileTree>
+
+さらに、エージェントの `<agent-name>-serve-local` ターゲットは、データベースの `serve-local` ターゲットに依存するように更新されます。
+
+## 仕組み
+
+### HTTP プロトコル
+
+HTTP エージェントの場合、データベースは tRPC リクエストコンテキストを通じて流れます — `createContext` がリクエストごとに Prisma クライアントを作成し、`opts.ctx` を介してすべてのプロシージャで利用可能になります。その後、ルーターはそれを明示的に `getAgent` に渡します。
+
+#### Context インターフェース
+
+Prisma クライアントの型は、`init.ts` の tRPC `Context` に追加されます：
+
+```ts title="packages/my-service/src/my-agent/init.ts" {1,5}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+export interface Context {
+  sessionId: string;
+  myDb: Awaited<ReturnType<typeof getMyDb>>;
+}
+```
+
+#### リクエストコンテキスト
+
+`createContext` は非同期化され、Prisma クライアントがインスタンス化されて返されます：
+
+```ts title="packages/my-service/src/my-agent/index.ts" {1,6,10}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+const createContext = async (
+  opts: CreateHTTPContextOptions | CreateWSSContextFnOptions,
+): Promise<Context> => {
+  const myDb = await getMyDb();
+  const sessionId = /* ... */;
+  return {
+    sessionId,
+    myDb,
+  };
+};
+```
+
+#### Router と Agent
+
+データベースは、サブスクリプションハンドラーを介してコンテキストから `getAgent` に渡されます：
+
+```ts title="packages/my-service/src/my-agent/router.ts" {2,3}
+.subscription(async function* (opts) {
+  const { myDb } = opts.ctx;
+  const agent = await getAgent(opts.ctx.sessionId, { myDb });
+  // ...
+})
+```
+
+```ts title="packages/my-service/src/my-agent/agent.ts" {3}
+export const getAgent = async (
+  sessionId: string,
+  { myDb }: { myDb: Awaited<ReturnType<typeof getMyDb>> },
+) => {
+  return new Agent({ /* use myDb in tools */ });
+};
+```
+
+### A2A プロトコル
+
+A2A エージェントの場合、tRPC コンテキストはありません。データベースは起動時に一度作成され、`A2AExpressServer` が起動する前に直接 `getAgent` に渡されます。
+
+#### サーバー起動
+
+Prisma クライアントは `A2AExpressServer` の前に作成され、`getAgent` に渡されます：
+
+```ts title="packages/my-service/src/my-agent/index.ts" {1,4,6}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+void (async () => {
+  const myDb = await getMyDb();
+  const server = new A2AExpressServer({
+    agent: await getAgent('default', { myDb }),
+    // ...
+  });
+})();
+```
+
+#### Agent 定義
+
+```ts title="packages/my-service/src/my-agent/agent.ts" {3}
+export const getAgent = async (
+  sessionId: string,
+  { myDb }: { myDb: Awaited<ReturnType<typeof getMyDb>> },
+) => {
+  return new Agent({ /* use myDb in tools */ });
+};
+```
+
+## 複数のデータベース
+
+異なるターゲットでジェネレーターを再度実行すると、最初のデータベースと並んで2番目のデータベースが追加されます。HTTP エージェントの場合、両方が `Context` インターフェースに表示され、ルーターで一緒に分割代入されます：
+
+```ts title="packages/my-service/src/my-agent/router.ts"
+const { postgresDb, mysqlDb } = opts.ctx;
+const agent = await getAgent(opts.ctx.sessionId, { postgresDb, mysqlDb });
+```
+
+## インフラストラクチャ
+
+生成されたエージェントコンストラクトは `IGrantable` と `IConnectable` を実装しているため、コンストラクト上で直接データベースへのネットワークおよび IAM アクセスを許可できます。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+const myAgent = new MyAgent(this, 'MyAgent', { vpc, ... });
+
+db.allowDefaultPortFrom(myAgent);
+db.grantConnect(myAgent);
+```
+
+`allowDefaultPortFrom` は、エージェントランタイムがデータベースポートに到達できるようにセキュリティグループルールを開きます。`grantConnect` は、エージェントの実行ロールに IAM `rds-db:connect` 権限を付与します。
+
+</Fragment>
+<Fragment slot="terraform">
+
+データベースモジュールの出力をエージェントモジュールに渡すことで、エージェントがデータベースに到達し、そのランタイム設定を読み取れるようにします：
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+}
+
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+
+  appconfig_application_id     = module.my_database.appconfig_application_id
+  database_cluster_resource_id = module.my_database.cluster_resource_id
+  database_runtime_user        = module.my_database.database_runtime_user
+  database_security_group_id   = module.my_database.security_group_id
+  database_port                = module.my_database.cluster_port
+}
+```
+
+エージェントの実行ロールが `rds-db:connect` 権限を持ち、そのセキュリティグループがデータベースポートでデータベースセキュリティグループに到達できることを確認してください。
+
+</Fragment>
+</Infrastructure>
+
+## ローカル開発
+
+<NxCommands commands={["<agent-name>-serve-local <project-name>"]} />
+
+これにより、エージェントと接続されているすべてのデータベースが起動します。`SERVE_LOCAL=true` 環境変数により、各 Prisma クライアントは Aurora の代わりにローカルの Docker データベースに接続します。
+

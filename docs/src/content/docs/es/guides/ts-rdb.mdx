@@ -171,84 +171,29 @@ El objetivo `prisma` generado expone la CLI de Prisma, por lo que puedes usarlo 
 
 <NxCommands commands={['run <project>:prisma studio']} />
 
-## Conectando desde una API tRPC
+## Conectando a la Base de Datos
 
-Aunque esta sección describe cómo conectarse a tu base de datos desde una API tRPC, también sirve como referencia para su uso en cualquier otro proyecto TypeScript.
+En cualquier proyecto TypeScript, importa `getPrisma` desde tu paquete de base de datos y llámalo para obtener un cliente Prisma con tipos seguros:
 
-### Usando el Cliente Prisma en Manejadores
-
-Importa `getPrisma` desde tu paquete de base de datos y llámalo dentro de tu manejador para obtener un cliente Prisma con tipos seguros:
-
-```ts title="packages/api/src/procedures/list-users.ts" {8}
+```ts
 import { getPrisma } from ':my-scope/db';
-import { publicProcedure } from '../init.js';
-import { ListUsersOutputSchema } from '../schema/index.js';
 
-export const listUsers = publicProcedure
-  .output(ListUsersOutputSchema)
-  .query(async () => {
-    const prisma = await getPrisma();
-    return prisma.user.findMany({ orderBy: { id: 'asc' } });
-  });
+const prisma = await getPrisma();
+const users = await prisma.user.findMany({ orderBy: { id: 'asc' } });
 ```
 
 `getPrisma()` devuelve un cliente inicializado de forma perezosa y en caché. Las llamadas subsiguientes dentro del mismo contexto de ejecución Lambda reutilizan el pool de conexiones existente en lugar de abrir uno nuevo.
 
 El cliente Prisma expone modelos completamente tipados derivados de tu esquema `prisma/models/`, brindándote seguridad de tipos de extremo a extremo desde la base de datos hasta la respuesta de tu API.
 
-### Inyectando el Cliente Prisma a través de Middleware
+### Generadores de Conexión
 
-En lugar de llamar `getPrisma()` en cada procedimiento, también puedes resolverlo una vez en un middleware y adjuntarlo al contexto tRPC para que todos los procedimientos posteriores puedan acceder a él directamente.
+Para tipos de proyecto específicos, usa el generador `connection` para conectar automáticamente la base de datos — maneja importaciones, inyección de contexto y dependencias de desarrollo local:
 
-Primero, define el plugin en `src/middleware/db.ts` siguiendo el mismo patrón que el middleware generado:
-
-```ts title="packages/api/src/middleware/db.ts"
-import { getPrisma } from ':my-scope/db';
-import { initTRPC } from '@trpc/server';
-
-export interface IDbContext {
-  db: Awaited<ReturnType<typeof getPrisma>>;
-}
-
-export const createDbPlugin = () => {
-  const t = initTRPC.context<IDbContext>().create();
-  return t.procedure.use(async (opts) => {
-    const db = await getPrisma();
-    return opts.next({
-      ctx: {
-        ...opts.ctx,
-        db,
-      },
-    });
-  });
-};
-```
-
-Luego concaténalo a un procedimiento base en tu inicialización tRPC:
-
-```ts title="packages/api/src/init.ts"
-import { createDbPlugin } from './middleware/db.js';
-
-export const dbProcedure = publicProcedure.concat(createDbPlugin());
-```
-
-Los procedimientos construidos sobre `dbProcedure` reciben `db` a través del contexto sin necesidad de importar o llamar `getPrisma()` ellos mismos:
-
-```ts title="packages/api/src/procedures/list-users.ts"
-import { dbProcedure } from '../init.js';
-import { ListUsersOutputSchema } from '../schema/index.js';
-
-export const listUsers = dbProcedure
-  .output(ListUsersOutputSchema)
-  .query(async ({ ctx: { db } }) => {
-    return db.user.findMany({ orderBy: { id: 'asc' } });
-  });
-```
-
-:::note
-Consulta la <Link path="/es/guides/trpc">guía del generador `ts#trpc-api`</Link> para más detalles sobre el patrón de middleware.
-
-:::
+- <Link path="guides/connection/trpc-rdb">API tRPC → Base de Datos Relacional</Link>
+- <Link path="guides/connection/smithy-rdb">API Smithy → Base de Datos Relacional</Link>
+- <Link path="guides/connection/ts-strands-agent-rdb">Agente TypeScript Strands → Base de Datos Relacional</Link>
+- <Link path="guides/connection/ts-mcp-server-rdb">Servidor MCP → Base de Datos Relacional</Link>
 
 ## Desplegando tu Base de Datos
 
@@ -800,4 +745,3 @@ Ten cuidado con tareas que se ejecutan durante más de 15 minutos. Si el cliente
 Para tareas de larga duración como trabajos por lotes o migraciones de datos, llama a `getPrisma()` al inicio de cada unidad de trabajo en lugar de una vez para toda la operación. Debido a que `getPrisma()` siempre crea un cliente nuevo y obtiene un nuevo token IAM para MySQL, esto asegura que cada conexión se autentique con un token válido.
 
 </OptionFilter>
-

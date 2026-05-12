@@ -1,0 +1,190 @@
+---
+title: tRPC API からリレーショナルデータベースへの接続
+description: tRPC API をリレーショナルデータベースに接続する
+when:
+  sourceType: ts#trpc-api
+  targetType: ts#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+`connection` ジェネレーターは、<Link path="guides/trpc">tRPC API</Link> を <Link path="guides/ts-rdb">リレーショナルデータベース</Link> プロジェクトに接続し、プロシージャコンテキストで Prisma クライアントを利用できるようにする型安全な tRPC ミドルウェアプラグインを生成します。
+
+## 前提条件
+
+このジェネレーターを使用する前に、以下を用意してください：
+
+1. <Link path="guides/trpc">`ts#trpc-api`</Link> プロジェクト
+2. <Link path="guides/ts-rdb">`ts#rdb`</Link> プロジェクト
+
+## 使用方法
+
+### ジェネレーターの実行
+
+<RunGenerator generator="connection" />
+
+tRPC API プロジェクトをソースとして、リレーショナルデータベースプロジェクトをターゲットとして選択してください。
+
+### オプション
+
+<GeneratorParameters generator="connection" />
+
+## ジェネレーターの出力
+
+ジェネレーターは、tRPC API プロジェクト内にミドルウェアファイルを作成します：
+
+<FileTree>
+
+- packages/api/src
+  - middleware
+    - \<db-name>.ts プロシージャコンテキストで Prisma クライアントを公開する tRPC プラグイン
+
+</FileTree>
+
+さらに、tRPC API の `serve-local` ターゲットを更新して、ローカル実行時にデータベースが自動的に起動するようにします。
+
+## ミドルウェアの使用
+
+### プラグインの登録
+
+生成されたプラグインを tRPC ルーターに追加して、それを使用するすべてのプロシージャがデータベースにアクセスできるようにします：
+
+```ts title="packages/api/src/router.ts" {2,5}
+import { t } from './init.js';
+import { createMyDbPlugin } from './middleware/my-db.js';
+
+export const authenticatedProcedure = t.procedure
+  .concat(createMyDbPlugin());
+```
+
+### プロシージャ内でのデータベースアクセス
+
+プラグインは `IMyDbContext` をプロシージャコンテキストにマージし、`myDb` をオプショナルプロパティとして利用可能にします：
+
+```ts title="packages/api/src/procedures/users.ts" {8,12}
+import { z } from 'zod';
+import { authenticatedProcedure } from '../router.js';
+
+export const listUsers = authenticatedProcedure
+  .output(z.array(z.object({ id: z.string(), name: z.string() })))
+  .query(async ({ ctx }) => {
+    // ctx.myDb は Prisma クライアント — Awaited<ReturnType<typeof getPrisma>> として型付けされています
+    return await ctx.myDb!.user.findMany();
+  });
+```
+
+### MySQL: リクエストごとに切断
+
+ターゲットデータベースが MySQL エンジンを使用している場合、生成されたミドルウェアは `opts.next()` を `try/finally` ブロックでラップし、`$disconnect()` を呼び出します：
+
+```ts title="packages/api/src/middleware/my-db.ts" {6}
+return t.procedure.use(async (opts) => {
+  const myDb = await getPrisma();
+  try {
+    return await opts.next({ ctx: { ...opts.ctx, myDb } });
+  } finally {
+    await myDb.$disconnect();
+  }
+});
+```
+
+これは、MySQL アダプターがクエリ後に Node.js イベントループを保持し続ける問題に対処します。これがないと、Lambda がストリーミングレスポンスをフラッシュできなくなります。`finally` で切断することでイベントループが解放され、レスポンスが完了できるようになります。詳細は <Link path="guides/ts-rdb#mysql-api-gateway-streaming-mode">MySQL: API Gateway ストリーミングモード</Link> を参照してください。
+
+PostgreSQL ではこれは不要です — そのアダプターは `allowExitOnIdle: true` で設定されたコネクションプールを使用します。
+
+:::caution[MySQL: IAM トークンの有効期限]
+RDS IAM トークンは **15 分** で期限切れになります。MySQL アダプターは接続時にトークンをキャプチャします。Lambda がトークンの有効期限が切れるまで十分長くウォーム状態を保つと、新しい接続試行が失敗する可能性があります。接続エラーをチェックし、`getPrisma()` を再度呼び出して新しいトークンを持つ新しいクライアントを取得してください。詳細と回避策については <Link path="guides/ts-rdb#mysql-iam-token-expiry">MySQL: IAM トークンの有効期限</Link> を参照してください。
+:::
+
+### 複数のデータベース
+
+異なるターゲットでジェネレーターを再度実行することで、追加のデータベースを接続できます。各データベースは独自のプラグインとコンテキストインターフェースを取得します：
+
+```ts title="packages/api/src/router.ts"
+export const dbProcedure = t.procedure
+  .concat(createPostgresDbPlugin())
+  .concat(createMySqlDbPlugin());
+```
+
+## インフラストラクチャ
+
+実行時に tRPC API がデータベースに接続できるようにするには、API Lambda 関数をデータベースと同じ VPC にデプロイし、ネットワークおよび IAM アクセスを許可する必要があります。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+アプリケーションスタックで、API をデータベースと同じ VPC にデプロイし、`allowDefaultPortFrom` と `grantConnect` を呼び出して、ネットワークパスを開き、各 Lambda ハンドラーに IAM `rds-db:connect` 権限を付与します：
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+
+const api = new Api(this, 'Api', {
+  integrations: Api.defaultIntegrations(this)
+    .withDefaultOptions({
+      vpc,
+      vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+    })
+    .build(),
+});
+
+Object.entries(api.integrations).forEach(([operation, integration]) => {
+  db.allowDefaultPortFrom(integration.handler, `Allow ${operation} to connect to the database`);
+  db.grantConnect(integration.handler);
+});
+```
+
+API Lambda 関数は、プライベート分離サブネットではなく、**エグレス付きプライベートサブネット**にデプロイしてください。実行時に、`getPrisma()` は AWS AppConfig からデータベース接続の詳細を取得しますが、これはアウトバウンドインターネットアクセスを必要とするパブリック AWS サービスエンドポイントです。
+
+:::note
+この例では、API 内のすべてのハンドラーにアクセスを許可していますが、一部のハンドラーのみがアクセスを必要とする場合は、個別に設定する方が良いでしょう。
+:::
+
+</Fragment>
+<Fragment slot="terraform">
+
+データベースモジュールの出力を API モジュールに渡して、データベースに到達し、その実行時設定を読み取れるようにします：
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
+}
+
+module "api" {
+  source             = "..."
+  vpc_id             = module.vpc.vpc_id
+  private_subnet_ids = module.vpc.private_subnet_ids
+
+  appconfig_application_id     = module.my_database.appconfig_application_id
+  database_cluster_resource_id = module.my_database.cluster_resource_id
+  database_runtime_user        = module.my_database.database_runtime_user
+  database_security_group_id   = module.my_database.security_group_id
+  database_port                = module.my_database.cluster_port
+
+  environment_variables = {
+    RUNTIME_CONFIG_APP_ID = module.my_database.appconfig_application_id
+  }
+}
+```
+
+API Lambda 関数は、プライベート分離サブネットではなく、**エグレス付きプライベートサブネット**にデプロイしてください。API Lambda ロールに `rds-db:connect` 権限があり、そのセキュリティグループがデータベースポートでデータベースセキュリティグループに到達できることを確認してください。
+
+</Fragment>
+</Infrastructure>
+
+## ローカル開発
+
+ジェネレーターは、tRPC API の `serve-local` ターゲットがデータベースの `serve-local` ターゲットに依存するように設定するため、以下を実行すると：
+
+<NxCommands commands={["serve-local <api-project-name>"]} />
+
+API と一緒にローカルデータベースが自動的に起動します。
+

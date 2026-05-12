@@ -1,0 +1,197 @@
+---
+title: API Smithy a Base de Datos Relacional
+description: Conectar una API Smithy a una Base de Datos Relacional
+when:
+  sourceType: smithy
+  targetType: ts#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+El generador `connection` conecta una <Link path="guides/ts-smithy-api">API Smithy</Link> a un proyecto de <Link path="guides/ts-rdb">Base de Datos Relacional</Link>, inyectando un cliente Prisma en el contexto del servicio para que todas las implementaciones de operaciones puedan acceder a la base de datos.
+
+## Requisitos Previos
+
+Antes de usar este generador, asegúrate de tener:
+
+1. Un proyecto <Link path="guides/ts-smithy-api">`ts#smithy-api`</Link> (backend TypeScript)
+2. Un proyecto <Link path="guides/ts-rdb">`ts#rdb`</Link>
+
+## Uso
+
+### Ejecutar el Generador
+
+<RunGenerator generator="connection" />
+
+Selecciona tu proyecto de backend de API Smithy como origen y tu proyecto de base de datos relacional como destino.
+
+### Opciones
+
+<GeneratorParameters generator="connection" />
+
+## Salida del Generador
+
+El generador modifica tres archivos existentes en tu backend de API Smithy:
+
+<FileTree>
+
+- packages/api/src
+  - context.ts Propiedad `db` agregada a `ServiceContext`
+  - handler.ts Cliente Prisma creado dentro de `lambdaHandler`, pasado a `serviceHandler.handle`
+  - local-server.ts Cliente Prisma creado dentro del manejador de solicitudes, pasado a `serviceHandler.handle`
+
+</FileTree>
+
+Además, actualiza el target `serve-local` de la API para iniciar la base de datos automáticamente.
+
+## Cómo Funciona
+
+### ServiceContext
+
+El generador agrega una propiedad `db` tipada a `ServiceContext` en `context.ts`:
+
+```ts title="packages/api/src/context.ts" {1,7}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+export interface ServiceContext {
+  tracer: Tracer;
+  logger: Logger;
+  metrics: Metrics;
+  myDb: Awaited<ReturnType<typeof getMyDb>>;
+}
+```
+
+### Manejador Lambda
+
+El cliente Prisma se instancia dentro de `lambdaHandler` y se pasa a través del contexto del servicio:
+
+```ts title="packages/api/src/handler.ts" {1,10}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+export const lambdaHandler = async (event: APIGatewayProxyEvent) => {
+  const httpRequest = convertEvent(event);
+  const myDb = await getMyDb();
+  const httpResponse = await serviceHandler.handle(httpRequest, {
+    tracer,
+    logger,
+    metrics,
+    myDb,
+  });
+  return convertVersion1Response(httpResponse);
+};
+```
+
+### Usar la Base de Datos en las Operaciones
+
+Accede a `db` desde el contexto en tus implementaciones de operaciones:
+
+```ts title="packages/api/src/operations/list-users.ts" {8}
+import { ListUsersOperationInput, ListUsersOperationOutput } from '../generated/ssdk/index.js';
+import { ServiceContext } from '../context.js';
+
+export const listUsers = async (
+  input: ListUsersOperationInput,
+  ctx: ServiceContext,
+): Promise<ListUsersOperationOutput> => {
+  const users = await ctx.myDb.user.findMany();
+  return { users };
+};
+```
+
+## Infraestructura
+
+Para permitir que tu API Smithy se conecte a la base de datos en tiempo de ejecución, las funciones Lambda de la API deben desplegarse en la misma VPC que la base de datos y se les debe otorgar acceso de red e IAM.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+En tu stack de aplicación, despliega la API en la misma VPC que la base de datos, luego llama a `allowDefaultPortFrom` y `grantConnect` para abrir la ruta de red y otorgar el permiso IAM `rds-db:connect` a cada manejador Lambda:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+
+const api = new MyApi(this, 'Api', {
+  integrations: MyApi.defaultIntegrations(this)
+    .withDefaultOptions({
+      vpc,
+      vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+    })
+    .build(),
+});
+
+Object.entries(api.integrations).forEach(([operation, integration]) => {
+  db.allowDefaultPortFrom(integration.handler, `Allow ${operation} to connect to the database`);
+  db.grantConnect(integration.handler);
+});
+```
+
+Despliega las funciones Lambda de la API en una **subred privada con salida**, no en una subred privada aislada. En tiempo de ejecución, `getPrisma()` recupera los detalles de conexión de la base de datos desde AWS AppConfig, lo cual requiere acceso saliente a internet.
+
+:::note
+Este ejemplo otorga acceso a todos los manejadores en tu API, pero si solo algunos manejadores necesitan acceso es mejor configurarlos individualmente.
+:::
+
+</Fragment>
+<Fragment slot="terraform">
+
+Pasa las salidas del módulo de base de datos a tu módulo de API para que pueda alcanzar la base de datos y leer su configuración en tiempo de ejecución:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
+}
+
+module "api" {
+  source             = "..."
+  vpc_id             = module.vpc.vpc_id
+  private_subnet_ids = module.vpc.private_subnet_ids
+
+  appconfig_application_id     = module.my_database.appconfig_application_id
+  database_cluster_resource_id = module.my_database.cluster_resource_id
+  database_runtime_user        = module.my_database.database_runtime_user
+  database_security_group_id   = module.my_database.security_group_id
+  database_port                = module.my_database.cluster_port
+
+  environment_variables = {
+    RUNTIME_CONFIG_APP_ID = module.my_database.appconfig_application_id
+  }
+}
+```
+
+Despliega las funciones Lambda de la API en **subredes privadas con salida**, no en subredes privadas aisladas. Asegúrate de que el rol Lambda de la API tenga el permiso `rds-db:connect` y que su grupo de seguridad pueda alcanzar el grupo de seguridad de la base de datos en el puerto de la base de datos.
+
+</Fragment>
+</Infrastructure>
+
+## Desarrollo Local
+
+El generador aplica la misma inyección del cliente Prisma dentro del manejador de solicitudes en `local-server.ts`:
+
+```ts title="packages/api/src/local-server.ts" {1,5,10}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+const server = createServer(async function (req, res) {
+  const httpRequest = convertRequest(req);
+  const myDb = await getMyDb();
+  const httpResponse = await serviceHandler.handle(httpRequest, {
+    tracer,
+    logger,
+    metrics,
+    myDb,
+  });
+  return writeResponse(httpResponse, res);
+});
+```
+
+<NxCommands commands={["serve-local <api-project-name>"]} />
+
+Esto inicia tanto la API como la base de datos local. La variable de entorno `SERVE_LOCAL=true` se establece automáticamente, por lo que el cliente Prisma se conecta a la base de datos Docker local en lugar de Aurora.

@@ -24,6 +24,7 @@ import pyStrandsAgentA2aConnectionGenerator from '../py/strands-agent/a2a-connec
 import tsRdbSmithyConnectionGenerator from '../ts/rdb/smithy-connection/generator';
 import tsRdbTrpcConnectionGenerator from '../ts/rdb/trpc-connection/generator';
 import tsRdbStrandsAgentConnectionGenerator from '../ts/rdb/strands-agent-connection/generator';
+import tsRdbMcpServerConnectionGenerator from '../ts/rdb/mcp-server-connection/generator';
 import { TS_RDB_GENERATOR_INFO } from '../ts/rdb/generator';
 
 /**
@@ -67,6 +68,7 @@ const SUPPORTED_CONNECTIONS = [
   { source: 'ts#trpc-api', target: 'ts#rdb' },
   { source: 'ts#strands-agent', target: 'ts#rdb' },
   { source: 'smithy', target: 'ts#rdb' },
+  { source: 'ts#mcp-server', target: 'ts#rdb' },
   { source: 'react', target: 'ts#trpc-api' },
   { source: 'react', target: 'py#fast-api' },
   { source: 'react', target: 'smithy' },
@@ -108,6 +110,8 @@ const CONNECTION_GENERATORS = {
     tsRdbStrandsAgentConnectionGenerator(tree, options),
   'smithy -> ts#rdb': (tree, options) =>
     tsRdbSmithyConnectionGenerator(tree, options),
+  'ts#mcp-server -> ts#rdb': (tree, options) =>
+    tsRdbMcpServerConnectionGenerator(tree, options),
   'react -> ts#trpc-api': (tree, options) =>
     trpcReactGenerator(tree, {
       frontendProjectName: options.sourceProject,

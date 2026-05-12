@@ -171,84 +171,29 @@ La cible `prisma` générée expose la CLI Prisma, vous pouvez donc l'utiliser p
 
 <NxCommands commands={['run <project>:prisma studio']} />
 
-## Connexion depuis une API tRPC
+## Connexion à la base de données
 
-Bien que cette section décrive comment se connecter à votre base de données depuis une API tRPC, elle sert également de référence pour une utilisation dans tout autre projet TypeScript.
+Dans n'importe quel projet TypeScript, importez `getPrisma` depuis votre package de base de données et appelez-le pour obtenir un client Prisma type-safe :
 
-### Utiliser le client Prisma dans les gestionnaires
-
-Importez `getPrisma` depuis votre package de base de données et appelez-le à l'intérieur de votre gestionnaire pour obtenir un client Prisma type-safe :
-
-```ts title="packages/api/src/procedures/list-users.ts" {8}
+```ts
 import { getPrisma } from ':my-scope/db';
-import { publicProcedure } from '../init.js';
-import { ListUsersOutputSchema } from '../schema/index.js';
 
-export const listUsers = publicProcedure
-  .output(ListUsersOutputSchema)
-  .query(async () => {
-    const prisma = await getPrisma();
-    return prisma.user.findMany({ orderBy: { id: 'asc' } });
-  });
+const prisma = await getPrisma();
+const users = await prisma.user.findMany({ orderBy: { id: 'asc' } });
 ```
 
 `getPrisma()` retourne un client initialisé de manière paresseuse et mis en cache. Les appels suivants dans le même contexte d'exécution Lambda réutilisent le pool de connexions existant plutôt que d'en ouvrir un nouveau.
 
 Le client Prisma expose des modèles entièrement typés dérivés de votre schéma `prisma/models/`, vous offrant une sécurité de type de bout en bout depuis la base de données jusqu'à votre réponse API.
 
-### Injecter le client Prisma via un middleware
+### Générateurs de connexion
 
-Plutôt que d'appeler `getPrisma()` dans chaque procédure, vous pouvez également le résoudre une fois dans un middleware et l'attacher au contexte tRPC afin que toutes les procédures en aval puissent y accéder directement.
+Pour des types de projets spécifiques, utilisez le générateur `connection` pour connecter automatiquement la base de données — il gère les imports, l'injection de contexte et les dépendances de développement local :
 
-Tout d'abord, définissez le plugin dans `src/middleware/db.ts` en suivant le même modèle que le middleware généré :
-
-```ts title="packages/api/src/middleware/db.ts"
-import { getPrisma } from ':my-scope/db';
-import { initTRPC } from '@trpc/server';
-
-export interface IDbContext {
-  db: Awaited<ReturnType<typeof getPrisma>>;
-}
-
-export const createDbPlugin = () => {
-  const t = initTRPC.context<IDbContext>().create();
-  return t.procedure.use(async (opts) => {
-    const db = await getPrisma();
-    return opts.next({
-      ctx: {
-        ...opts.ctx,
-        db,
-      },
-    });
-  });
-};
-```
-
-Ensuite, concaténez-le à une procédure de base dans votre initialisation tRPC :
-
-```ts title="packages/api/src/init.ts"
-import { createDbPlugin } from './middleware/db.js';
-
-export const dbProcedure = publicProcedure.concat(createDbPlugin());
-```
-
-Les procédures construites sur `dbProcedure` reçoivent `db` via le contexte sans avoir besoin d'importer ou d'appeler `getPrisma()` elles-mêmes :
-
-```ts title="packages/api/src/procedures/list-users.ts"
-import { dbProcedure } from '../init.js';
-import { ListUsersOutputSchema } from '../schema/index.js';
-
-export const listUsers = dbProcedure
-  .output(ListUsersOutputSchema)
-  .query(async ({ ctx: { db } }) => {
-    return db.user.findMany({ orderBy: { id: 'asc' } });
-  });
-```
-
-:::note
-Consultez le <Link path="/fr/guides/trpc">guide du générateur `ts#trpc-api`</Link> pour plus de détails sur le modèle de middleware.
-
-:::
+- <Link path="guides/connection/trpc-rdb">API tRPC → Base de données relationnelle</Link>
+- <Link path="guides/connection/smithy-rdb">API Smithy → Base de données relationnelle</Link>
+- <Link path="guides/connection/ts-strands-agent-rdb">Agent TypeScript Strands → Base de données relationnelle</Link>
+- <Link path="guides/connection/ts-mcp-server-rdb">Serveur MCP → Base de données relationnelle</Link>
 
 ## Déployer votre base de données
 

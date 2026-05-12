@@ -1,0 +1,216 @@
+---
+title: TypeScript Strands Agent 到关系数据库
+description: 将 TypeScript Strands Agent 连接到关系数据库
+when:
+  sourceType: ts#strands-agent
+  targetType: ts#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+`connection` 生成器将 <Link path="guides/ts-strands-agent">TypeScript Strands Agent</Link> 连接到 <Link path="guides/ts-rdb">关系数据库</Link> 项目，使 Prisma 客户端在整个代理的请求生命周期中可用。
+
+注入策略取决于代理的协议 — **HTTP**（基于 tRPC）或 **A2A**（Agent-to-Agent）。
+
+## 前置条件
+
+在使用此生成器之前，请确保您拥有：
+
+1. 一个 <Link path="guides/ts-strands-agent">`ts#strands-agent`</Link> 项目
+2. 一个 <Link path="guides/ts-rdb">`ts#rdb`</Link> 项目
+
+## 使用方法
+
+### 运行生成器
+
+<RunGenerator generator="connection" />
+
+选择您的 Strands Agent 项目作为源，选择您的关系数据库项目作为目标。如果项目包含多个代理组件，请指定 `sourceComponent` 以消除歧义。
+
+### 选项
+
+<GeneratorParameters generator="connection" />
+
+## 生成器输出
+
+修改的文件取决于代理的协议。
+
+**HTTP 协议** — 修改四个文件：
+
+<FileTree>
+
+- packages/my-service/src/my-agent
+  - init.ts `db` 属性添加到 `Context` 接口
+  - index.ts `createContext` 改为异步；创建 Prisma 客户端并在上下文中返回
+  - router.ts 从 `opts.ctx` 解构 `db` 并传递给 `getAgent`
+  - agent.ts `getAgent` 更新为接受 `{ db }` 作为第二个参数
+
+</FileTree>
+
+**A2A 协议** — 修改两个文件：
+
+<FileTree>
+
+- packages/my-service/src/my-agent
+  - index.ts 在 `A2AExpressServer` 之前创建 Prisma 客户端；传递给 `getAgent`
+  - agent.ts `getAgent` 更新为接受 `{ db }` 作为第二个参数
+
+</FileTree>
+
+此外，代理的 `<agent-name>-serve-local` 目标会更新为依赖于数据库的 `serve-local` 目标。
+
+## 工作原理
+
+### HTTP 协议
+
+对于 HTTP 代理，数据库通过 tRPC 请求上下文流动 — `createContext` 为每个请求创建一个 Prisma 客户端，并通过 `opts.ctx` 对每个过程可用。然后路由器将其显式传递给 `getAgent`。
+
+#### Context 接口
+
+Prisma 客户端类型被添加到 `init.ts` 中的 tRPC `Context`：
+
+```ts title="packages/my-service/src/my-agent/init.ts" {1,5}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+export interface Context {
+  sessionId: string;
+  myDb: Awaited<ReturnType<typeof getMyDb>>;
+}
+```
+
+#### 请求上下文
+
+`createContext` 改为异步，并实例化和返回 Prisma 客户端：
+
+```ts title="packages/my-service/src/my-agent/index.ts" {1,6,10}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+const createContext = async (
+  opts: CreateHTTPContextOptions | CreateWSSContextFnOptions,
+): Promise<Context> => {
+  const myDb = await getMyDb();
+  const sessionId = /* ... */;
+  return {
+    sessionId,
+    myDb,
+  };
+};
+```
+
+#### Router 和 Agent
+
+数据库通过订阅处理程序从上下文传递到 `getAgent`：
+
+```ts title="packages/my-service/src/my-agent/router.ts" {2,3}
+.subscription(async function* (opts) {
+  const { myDb } = opts.ctx;
+  const agent = await getAgent(opts.ctx.sessionId, { myDb });
+  // ...
+})
+```
+
+```ts title="packages/my-service/src/my-agent/agent.ts" {3}
+export const getAgent = async (
+  sessionId: string,
+  { myDb }: { myDb: Awaited<ReturnType<typeof getMyDb>> },
+) => {
+  return new Agent({ /* use myDb in tools */ });
+};
+```
+
+### A2A 协议
+
+对于 A2A 代理，没有 tRPC 上下文。数据库在启动时创建一次，并在 `A2AExpressServer` 启动之前直接传递给 `getAgent`。
+
+#### 服务器启动
+
+Prisma 客户端在 `A2AExpressServer` 之前创建并传递给 `getAgent`：
+
+```ts title="packages/my-service/src/my-agent/index.ts" {1,4,6}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+void (async () => {
+  const myDb = await getMyDb();
+  const server = new A2AExpressServer({
+    agent: await getAgent('default', { myDb }),
+    // ...
+  });
+})();
+```
+
+#### Agent 定义
+
+```ts title="packages/my-service/src/my-agent/agent.ts" {3}
+export const getAgent = async (
+  sessionId: string,
+  { myDb }: { myDb: Awaited<ReturnType<typeof getMyDb>> },
+) => {
+  return new Agent({ /* use myDb in tools */ });
+};
+```
+
+## 多个数据库
+
+使用不同的目标再次运行生成器会将第二个数据库添加到第一个数据库旁边。对于 HTTP 代理，两者都出现在 `Context` 接口中，并在路由器中一起解构：
+
+```ts title="packages/my-service/src/my-agent/router.ts"
+const { postgresDb, mysqlDb } = opts.ctx;
+const agent = await getAgent(opts.ctx.sessionId, { postgresDb, mysqlDb });
+```
+
+## 基础设施
+
+生成的代理构造实现了 `IGrantable` 和 `IConnectable`，因此您可以直接在构造上授予对数据库的网络和 IAM 访问权限。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+const myAgent = new MyAgent(this, 'MyAgent', { vpc, ... });
+
+db.allowDefaultPortFrom(myAgent);
+db.grantConnect(myAgent);
+```
+
+`allowDefaultPortFrom` 打开安全组规则，使代理运行时可以访问数据库端口。`grantConnect` 向代理的执行角色授予 IAM `rds-db:connect` 权限。
+
+</Fragment>
+<Fragment slot="terraform">
+
+将数据库模块输出传递到您的代理模块，以便它可以访问数据库并读取其运行时配置：
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+}
+
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+
+  appconfig_application_id     = module.my_database.appconfig_application_id
+  database_cluster_resource_id = module.my_database.cluster_resource_id
+  database_runtime_user        = module.my_database.database_runtime_user
+  database_security_group_id   = module.my_database.security_group_id
+  database_port                = module.my_database.cluster_port
+}
+```
+
+确保代理的执行角色具有 `rds-db:connect` 权限，并且其安全组可以在数据库端口上访问数据库安全组。
+
+</Fragment>
+</Infrastructure>
+
+## 本地开发
+
+<NxCommands commands={["<agent-name>-serve-local <project-name>"]} />
+
+这将启动代理和所有连接的数据库。`SERVE_LOCAL=true` 环境变量使每个 Prisma 客户端连接到其本地 Docker 数据库而不是 Aurora。

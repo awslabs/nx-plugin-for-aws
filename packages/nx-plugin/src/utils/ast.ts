@@ -40,13 +40,19 @@ export const addDestructuredImport = async (
       );
     }
   } else {
-    // No existing import — prepend a new one
+    // No existing import — prepend a new one (after shebang if present)
     const specifiers = variableNames.join(', ');
     const contents = tree.read(filePath)!.toString();
-    tree.write(
-      filePath,
-      `import { ${specifiers} } from '${from}';\n${contents}`,
-    );
+    const newImport = `import { ${specifiers} } from '${from}';\n`;
+    if (contents.startsWith('#!')) {
+      const newlineIndex = contents.indexOf('\n');
+      tree.write(
+        filePath,
+        `${contents.substring(0, newlineIndex + 1)}${newImport}${contents.substring(newlineIndex + 1)}`,
+      );
+    } else {
+      tree.write(filePath, `${newImport}${contents}`);
+    }
   }
 };
 

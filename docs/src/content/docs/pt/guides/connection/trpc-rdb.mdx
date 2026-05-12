@@ -1,0 +1,189 @@
+---
+title: API tRPC para Banco de Dados Relacional
+description: Conectar uma API tRPC a um Banco de Dados Relacional
+when:
+  sourceType: ts#trpc-api
+  targetType: ts#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+O gerador `connection` conecta uma <Link path="guides/trpc">API tRPC</Link> a um projeto de <Link path="guides/ts-rdb">Banco de Dados Relacional</Link>, gerando um plugin de middleware tRPC type-safe que disponibiliza um cliente Prisma no contexto do seu procedimento.
+
+## Pré-requisitos
+
+Antes de usar este gerador, certifique-se de ter:
+
+1. Um projeto <Link path="guides/trpc">`ts#trpc-api`</Link>
+2. Um projeto <Link path="guides/ts-rdb">`ts#rdb`</Link>
+
+## Uso
+
+### Executar o Gerador
+
+<RunGenerator generator="connection" />
+
+Selecione seu projeto de API tRPC como origem e seu projeto de banco de dados relacional como destino.
+
+### Opções
+
+<GeneratorParameters generator="connection" />
+
+## Saída do Gerador
+
+O gerador cria um arquivo de middleware no seu projeto de API tRPC:
+
+<FileTree>
+
+- packages/api/src
+  - middleware
+    - \<db-name>.ts plugin tRPC que expõe o cliente Prisma no contexto do procedimento
+
+</FileTree>
+
+Além disso, ele atualiza o target `serve-local` da sua API tRPC para iniciar o banco de dados automaticamente ao executar localmente.
+
+## Usando o Middleware
+
+### Registrar o Plugin
+
+Adicione o plugin gerado ao seu roteador tRPC para que todos os procedimentos que o usam tenham acesso ao banco de dados:
+
+```ts title="packages/api/src/router.ts" {2,5}
+import { t } from './init.js';
+import { createMyDbPlugin } from './middleware/my-db.js';
+
+export const authenticatedProcedure = t.procedure
+  .concat(createMyDbPlugin());
+```
+
+### Acessar o Banco de Dados nos Procedimentos
+
+O plugin mescla `IMyDbContext` no contexto do seu procedimento, disponibilizando `myDb` como uma propriedade opcional:
+
+```ts title="packages/api/src/procedures/users.ts" {8,12}
+import { z } from 'zod';
+import { authenticatedProcedure } from '../router.js';
+
+export const listUsers = authenticatedProcedure
+  .output(z.array(z.object({ id: z.string(), name: z.string() })))
+  .query(async ({ ctx }) => {
+    // ctx.myDb é o cliente Prisma — tipado como Awaited<ReturnType<typeof getPrisma>>
+    return await ctx.myDb!.user.findMany();
+  });
+```
+
+### MySQL: Desconectar Após Cada Requisição
+
+Quando o banco de dados de destino usa o mecanismo MySQL, o middleware gerado envolve `opts.next()` em um bloco `try/finally` que chama `$disconnect()`:
+
+```ts title="packages/api/src/middleware/my-db.ts" {6}
+return t.procedure.use(async (opts) => {
+  const myDb = await getPrisma();
+  try {
+    return await opts.next({ ctx: { ...opts.ctx, myDb } });
+  } finally {
+    await myDb.$disconnect();
+  }
+});
+```
+
+Isso resolve o problema do adaptador MySQL manter o event loop do Node.js aberto após uma consulta, o que de outra forma impediria o Lambda de liberar respostas em streaming. Desconectar no `finally` libera o event loop para que a resposta possa ser concluída. Consulte <Link path="guides/ts-rdb#mysql-api-gateway-streaming-mode">MySQL: Modo de Streaming do API Gateway</Link> para mais detalhes.
+
+PostgreSQL não requer isso — seu adaptador usa um pool de conexões configurado com `allowExitOnIdle: true`.
+
+:::caution[MySQL: Expiração do Token IAM]
+Os tokens IAM do RDS expiram após **15 minutos**. O adaptador MySQL captura o token no momento da conexão. Se seu Lambda permanecer ativo tempo suficiente para o token expirar, novas tentativas de conexão podem falhar. Verifique erros de conexão e chame `getPrisma()` novamente para obter um cliente novo com um token atualizado. Consulte <Link path="guides/ts-rdb#mysql-iam-token-expiry">MySQL: Expiração do Token IAM</Link> para detalhes e soluções alternativas.
+:::
+
+### Múltiplos Bancos de Dados
+
+Você pode conectar bancos de dados adicionais executando o gerador novamente com um destino diferente. Cada banco de dados obtém seu próprio plugin e interface de contexto:
+
+```ts title="packages/api/src/router.ts"
+export const dbProcedure = t.procedure
+  .concat(createPostgresDbPlugin())
+  .concat(createMySqlDbPlugin());
+```
+
+## Infraestrutura
+
+Para permitir que sua API tRPC se conecte ao banco de dados em tempo de execução, as funções Lambda da API devem ser implantadas na mesma VPC que o banco de dados e receber acesso de rede e IAM.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+No seu stack de aplicação, implante a API na mesma VPC que o banco de dados, depois chame `allowDefaultPortFrom` e `grantConnect` para abrir o caminho de rede e conceder permissão IAM `rds-db:connect` a cada handler Lambda:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+
+const api = new Api(this, 'Api', {
+  integrations: Api.defaultIntegrations(this)
+    .withDefaultOptions({
+      vpc,
+      vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+    })
+    .build(),
+});
+
+Object.entries(api.integrations).forEach(([operation, integration]) => {
+  db.allowDefaultPortFrom(integration.handler, `Allow ${operation} to connect to the database`);
+  db.grantConnect(integration.handler);
+});
+```
+
+Implante as funções Lambda da API em uma **sub-rede privada com saída**, não em uma sub-rede privada isolada. Em tempo de execução, `getPrisma()` recupera os detalhes de conexão do banco de dados do AWS AppConfig, que é um endpoint de serviço público da AWS que requer acesso à internet de saída.
+
+:::note
+Este exemplo concede acesso a todos os handlers na sua API, mas se apenas alguns handlers precisarem de acesso, é melhor configurar individualmente.
+:::
+
+</Fragment>
+<Fragment slot="terraform">
+
+Passe as saídas do módulo de banco de dados para o módulo da sua API para que ela possa alcançar o banco de dados e ler sua configuração de tempo de execução:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
+}
+
+module "api" {
+  source             = "..."
+  vpc_id             = module.vpc.vpc_id
+  private_subnet_ids = module.vpc.private_subnet_ids
+
+  appconfig_application_id     = module.my_database.appconfig_application_id
+  database_cluster_resource_id = module.my_database.cluster_resource_id
+  database_runtime_user        = module.my_database.database_runtime_user
+  database_security_group_id   = module.my_database.security_group_id
+  database_port                = module.my_database.cluster_port
+
+  environment_variables = {
+    RUNTIME_CONFIG_APP_ID = module.my_database.appconfig_application_id
+  }
+}
+```
+
+Implante as funções Lambda da API em **sub-redes privadas com saída**, não em sub-redes privadas isoladas. Certifique-se de que a role Lambda da API tenha permissão `rds-db:connect` e que seu grupo de segurança possa alcançar o grupo de segurança do banco de dados na porta do banco de dados.
+
+</Fragment>
+</Infrastructure>
+
+## Desenvolvimento Local
+
+O gerador configura o target `serve-local` da sua API tRPC para depender do target `serve-local` do banco de dados, então executar:
+
+<NxCommands commands={["serve-local <api-project-name>"]} />
+
+iniciará automaticamente o banco de dados local junto com sua API.

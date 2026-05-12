@@ -1,0 +1,163 @@
+---
+title: MCP ServerとRelational Databaseの接続
+description: TypeScript MCP ServerをRelational Databaseに接続する
+when:
+  sourceType: ts#mcp-server
+  targetType: ts#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+`connection`ジェネレーターは、<Link path="guides/ts-mcp-server">TypeScript MCP Server</Link>を<Link path="guides/ts-rdb">Relational Database</Link>プロジェクトに接続し、`createServer`とそのトランスポートエントリーポイント内でPrismaクライアントを利用可能にします。
+
+## 前提条件
+
+このジェネレーターを使用する前に、以下を用意してください：
+
+1. <Link path="guides/ts-mcp-server">`ts#mcp-server`</Link>プロジェクト
+2. <Link path="guides/ts-rdb">`ts#rdb`</Link>プロジェクト
+
+## 使用方法
+
+### ジェネレーターの実行
+
+<RunGenerator generator="connection" />
+
+MCPサーバープロジェクトをソースとして、リレーショナルデータベースプロジェクトをターゲットとして選択します。プロジェクトに複数のMCPサーバーコンポーネントが含まれている場合は、`sourceComponent`を指定して明確にします。
+
+### オプション
+
+<GeneratorParameters generator="connection" />
+
+## ジェネレーターの出力
+
+ジェネレーターは、MCPサーバーのソースディレクトリ内の3つのファイルを変更します：
+
+<FileTree>
+
+- packages/my-service/src/my-mcp
+  - server.ts `createServer`が`{ db }`パラメータを受け取るように更新されます
+  - http.ts `const server = createServer({ db })`の上でPrismaクライアントが作成されます
+  - stdio.ts `await createServer({ db }).connect(transport)`の前にPrismaクライアントが作成されます
+
+</FileTree>
+
+さらに、`<mcp-server-name>-serve-local`ターゲットが、データベースの`serve-local`ターゲットに依存するように更新されます。
+
+## 仕組み
+
+### サーバー定義
+
+`createServer`はPrismaクライアントをパラメータとして受け取るため、同期的に保たれ、クライアントをツールやリソースに渡すことができます：
+
+```ts title="packages/my-service/src/my-mcp/server.ts" {1,4,6}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+export const createServer = ({
+  myDb,
+}: {
+  myDb: Awaited<ReturnType<typeof getMyDb>>;
+}) => {
+  const server = new McpServer({ name: 'my-service', version: '1.0.0' });
+  // register tools/resources that use myDb
+  return server;
+};
+```
+
+### HTTPトランスポート
+
+Prismaクライアントは、`createServer`呼び出しの上のリクエストハンドラー内で作成されます：
+
+```ts title="packages/my-service/src/my-mcp/http.ts" {1,5,6}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+app.post('/mcp', async (req, res) => {
+  try {
+    const myDb = await getMyDb();
+    const server = createServer({ myDb });
+    // ...
+  }
+});
+```
+
+### Stdioトランスポート
+
+同じパターンがstdioトランスポートエントリーポイントにも適用されます：
+
+```ts title="packages/my-service/src/my-mcp/stdio.ts" {1,5,6}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+export const startMcpServer = async () => {
+  const transport = new StdioServerTransport();
+  const myDb = await getMyDb();
+  await createServer({ myDb }).connect(transport);
+};
+```
+
+## 複数のデータベース
+
+異なるターゲットで再度ジェネレーターを実行すると、最初のデータベースと並んで2番目のデータベースが追加されます。両方が一緒に`createServer`に渡されます：
+
+```ts title="packages/my-service/src/my-mcp/http.ts"
+const postgresDb = await getPostgresDb();
+const mySqlDb = await getMySqlDb();
+const server = createServer({ postgresDb, mysqlDb });
+```
+
+## インフラストラクチャ
+
+生成されたMCPサーバーコンストラクトは`IGrantable`と`IConnectable`を実装しているため、コンストラクト上で直接データベースへのネットワークアクセスとIAMアクセスを許可できます。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+const myMcpServer = new MyMcpServer(this, 'MyMcpServer', { vpc, ... });
+
+db.allowDefaultPortFrom(myMcpServer);
+db.grantConnect(myMcpServer);
+```
+
+`allowDefaultPortFrom`はセキュリティグループルールを開き、MCPサーバーランタイムがデータベースポートに到達できるようにします。`grantConnect`は、サーバーの実行ロールにIAM `rds-db:connect`権限を付与します。
+
+</Fragment>
+<Fragment slot="terraform">
+
+データベースモジュールの出力をMCPサーバーモジュールに渡すことで、データベースに到達し、そのランタイム設定を読み取ることができます：
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+}
+
+module "my_mcp_server" {
+  source = "../../common/terraform/src/app/mcp-servers/my-mcp-server"
+
+  appconfig_application_id     = module.my_database.appconfig_application_id
+  database_cluster_resource_id = module.my_database.cluster_resource_id
+  database_runtime_user        = module.my_database.database_runtime_user
+  database_security_group_id   = module.my_database.security_group_id
+  database_port                = module.my_database.cluster_port
+}
+```
+
+MCPサーバーの実行ロールが`rds-db:connect`権限を持ち、そのセキュリティグループがデータベースポート上でデータベースセキュリティグループに到達できることを確認してください。
+
+</Fragment>
+</Infrastructure>
+
+## ローカル開発
+
+<NxCommands commands={["<mcp-server-name>-serve-local <project-name>"]} />
+
+これにより、MCPサーバーと接続されているすべてのデータベースが起動します。`SERVE_LOCAL=true`環境変数により、各PrismaクライアントはAuroraの代わりにローカルのDockerデータベースに接続します。
+
