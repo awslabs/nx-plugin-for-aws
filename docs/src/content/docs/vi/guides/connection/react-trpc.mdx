@@ -5,12 +5,27 @@ when:
   sourceType: react
   targetType: ts#trpc-api
 ---
-import { FileTree } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
+import OptionFilter from '@components/option-filter.astro';
 
 Nx Plugin cho AWS cung cấp một generator để nhanh chóng tích hợp <Link path="guides/trpc">tRPC API</Link> của bạn với một website React. Nó thiết lập tất cả cấu hình cần thiết để kết nối đến các backend tRPC của bạn, bao gồm hỗ trợ xác thực AWS IAM và Cognito cũng như xử lý lỗi phù hợp. Tích hợp này cung cấp type safety đầy đủ từ đầu đến cuối giữa frontend và (các) backend tRPC của bạn.
+
+Generator kiểm tra `computeType` của backend và tạo ra client tương ứng:
+
+<Tabs syncKey="trpc-compute">
+<TabItem label="REST API" _filter={{ computeType: 'ServerlessApiGatewayRestApi' }}>
+Một HTTP link với `httpSubscriptionLink` qua Server-Sent Events cho các tRPC subscription.
+</TabItem>
+<TabItem label="HTTP API" _filter={{ computeType: 'ServerlessApiGatewayHttpApi' }}>
+Một HTTP link đơn giản. Subscriptions không được hỗ trợ vì API Gateway HTTP APIs không hỗ trợ response streaming.
+</TabItem>
+<TabItem label="AgentCore" _filter={{ computeType: 'BedrockAgentCoreRuntimeWebSocket' }}>
+Một WebSocket link kết nối đến AgentCore runtime URL, với handshake được ký SigV4 (IAM) hoặc JWT được mã hóa base64url subprotocol (Cognito). Runtime ARN được đọc từ `runtimeConfig.apis.<ApiName>` và được chuyển đổi thành URL `wss://bedrock-agentcore.<region>.amazonaws.com/runtimes/.../ws` một cách tự động.
+</TabItem>
+</Tabs>
 
 ## Điều kiện tiên quyết
 
@@ -74,7 +89,8 @@ Ngoài ra, nó cài đặt các dependencies bắt buộc:
   - `@trpc/tanstack-react-query`
   - `@tanstack/react-query`
   - `aws4fetch` (nếu sử dụng IAM auth)
-  - `event-source-polyfill` (nếu sử dụng REST API, để hỗ trợ subscription)
+  - `event-source-polyfill` (nếu sử dụng backend REST API, để hỗ trợ subscription)
+  - `react-oidc-context` (nếu sử dụng Cognito auth)
 
 ## Sử dụng Code được tạo ra
 
@@ -169,11 +185,21 @@ function MyComponent() {
 
 ### Subscriptions (Streaming)
 
-:::caution[Loại tính toán đăng ký]
-Subscriptions chỉ được hỗ trợ khi tRPC API sử dụng `ServerlessApiGatewayRestApi` (REST API) làm loại compute. API Gateway HTTP APIs không hỗ trợ response streaming.
+<OptionFilter when={{ computeType: 'ServerlessApiGatewayHttpApi' }} description="HTTP API backends don't support subscriptions">
+:::caution[Không có subscription trên HTTP API]
+API Gateway HTTP APIs không hỗ trợ response streaming. Chọn `ServerlessApiGatewayRestApi` hoặc `BedrockAgentCoreRuntimeWebSocket` làm `computeType` backend của bạn nếu bạn cần subscriptions.
 :::
+</OptionFilter>
 
-Khi kết nối đến một backend tRPC REST API, client được tạo ra sẽ tự động được cấu hình với một `splitLink` định tuyến các subscription operations thông qua `httpSubscriptionLink` (sử dụng SSE) và các query/mutation thông thường thông qua `httpLink`. Điều này có nghĩa là subscriptions hoạt động ngay lập tức mà không cần cấu hình bổ sung.
+<OptionFilter when={{ computeType: ['ServerlessApiGatewayRestApi', 'BedrockAgentCoreRuntimeWebSocket'] }} description="How subscriptions reach the client — transport differs by backend compute type">
+<Tabs syncKey="trpc-compute">
+<TabItem label="REST API" _filter={{ computeType: 'ServerlessApiGatewayRestApi' }}>
+Client được tạo ra sử dụng một `splitLink` định tuyến các subscription operations thông qua `httpSubscriptionLink` (Server-Sent Events) và các query/mutation thông thường thông qua `httpLink`. Subscriptions hoạt động ngay lập tức mà không cần cấu hình bổ sung.
+</TabItem>
+<TabItem label="AgentCore" _filter={{ computeType: 'BedrockAgentCoreRuntimeWebSocket' }}>
+Client được tạo ra sử dụng `wsLink` kết nối đến AgentCore runtime URL — tất cả các tRPC operations (queries, mutations, và subscriptions) đều truyền qua một kết nối WebSocket duy nhất. Handshake được xác thực tự động: ký SigV4 cho `IAM` auth, hoặc mang JWT dưới dạng base64url-encoded subprotocol cho `Cognito`.
+</TabItem>
+</Tabs>
 
 Để biết thông tin về cách định nghĩa các subscription procedure trong backend của bạn, xem <Link path="guides/trpc">hướng dẫn `ts#trpc-api` generator</Link>.
 
@@ -265,6 +291,7 @@ function StreamingComponent() {
   );
 }
 ```
+</OptionFilter>
 
 ## Best Practices
 

@@ -14,7 +14,7 @@ import OptionFilter from '@components/option-filter.astro';
 
 [tRPC](https://trpc.io/)는 엔드투엔드 타입 안전성을 갖춘 TypeScript API 구축을 위한 프레임워크입니다. tRPC를 사용하면 API 작업의 입력과 출력에 대한 변경 사항이 클라이언트 코드에 즉시 반영되며, 프로젝트를 재빌드할 필요 없이 IDE에서 바로 확인할 수 있습니다.
 
-tRPC API 생성기는 AWS CDK 또는 Terraform 인프라 설정과 함께 새로운 tRPC API를 생성합니다. 생성된 백엔드는 서버리스 배포를 위해 AWS Lambda를 사용하며, AWS API Gateway API를 통해 노출되고 [Zod](https://zod.dev/)를 사용한 스키마 검증을 포함합니다. 또한 로깅, AWS X-Ray 추적 및 Cloudwatch 메트릭을 포함한 관측 가능성을 위해 [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/)를 설정합니다.
+tRPC API 생성기는 AWS CDK 또는 Terraform 인프라 설정과 함께 새로운 tRPC API를 생성합니다. 생성된 백엔드는 AWS API Gateway API를 통해 노출되는 AWS Lambda 함수로 배포되거나, [Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime.html)에서 실행되는 컨테이너화된 WebSocket 서버로 배포될 수 있습니다. [Zod](https://zod.dev/)를 사용한 스키마 검증을 포함하며, 로깅, AWS X-Ray 추적 및 CloudWatch 메트릭을 포함한 관측 가능성을 위해 [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/)를 설정합니다.
 
 ## 사용 방법
 
@@ -28,15 +28,19 @@ tRPC API 생성기는 AWS CDK 또는 Terraform 인프라 설정과 함께 새로
 
 <GeneratorParameters generator="ts#trpc-api" />
 
-<Snippet name="api/api-choice-note" />
+:::tip[각 `computeType`을 사용하는 경우]
+- **`ServerlessApiGatewayHttpApi`** — 가장 비용 효율적인 옵션입니다. 쿼리와 뮤테이션만 필요하고 API 계층에서 [WAF](https://aws.amazon.com/waf/)가 필요하지 않은 경우 선택하세요. [HTTP APIs](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html)는 REST API보다 저렴하고 지연 시간이 낮지만 응답 스트리밍을 지원하지 않습니다([tRPC Subscriptions](https://trpc.io/docs/server/subscriptions) 불가).
+- **`ServerlessApiGatewayRestApi`** (기본값) — [Server-Sent Events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events)를 통한 [tRPC Subscriptions](https://trpc.io/docs/server/subscriptions) 및/또는 API에 [WAF Web ACL](https://aws.amazon.com/waf/)이 필요한 경우 선택하세요. [REST APIs](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-rest-api.html)는 HTTP API보다 비용이 높지만 응답 스트리밍과 WAF 통합을 지원합니다.
+- **`BedrockAgentCoreRuntimeWebSocket`** — 30초 Lambda 또는 API Gateway 타임아웃 없이 실시간 스트리밍을 위해 WebSocket을 통한 [tRPC Subscriptions](https://trpc.io/docs/server/subscriptions)가 필요한 경우 선택하세요. [Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime.html)은 관리형 인증, 세션 어피니티 및 스케일링을 갖춘 컨테이너화된 WebSocket 서버로 tRPC 서버를 호스팅합니다.
 
-:::tip[API 유형]
-응답을 스트리밍하기 위해 [tRPC Subscriptions](https://trpc.io/docs/server/subscriptions)를 사용하려면 `computeType`으로 `ServerlessApiGatewayRestApi`(기본값)를 선택하세요.
+REST와 HTTP API Gateway의 심층 비교는 [API Gateway Developer Guide](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-vs-rest.html)를 참조하세요.
 :::
 
+<OptionFilter not when={{ computeType: 'BedrockAgentCoreRuntimeWebSocket' }} description="통합 패턴 — Lambda 기반 컴퓨팅 타입 전용">
 :::tip[통합 패턴]
 `integrationPattern` 옵션은 기본적으로 `isolated`로 설정되며, 이는 tRPC 프로시저당 하나의 Lambda를 생성합니다. 전체 API에 대해 단일 공유 Lambda 핸들러를 선호하는 경우 `shared`를 선택하세요. 이 경우 프로시저별 재정의도 선택적으로 가능합니다.
 :::
+</OptionFilter>
 
 ## 생성기 출력
 
@@ -45,11 +49,12 @@ tRPC API 생성기는 AWS CDK 또는 Terraform 인프라 설정과 함께 새로
 <FileTree>
   - src
     - init.ts 백엔드 tRPC 초기화
-    - handler.ts Lambda 핸들러 진입점
+    - handler.ts Lambda 핸들러 진입점 (Lambda 컴퓨팅 타입 전용)
+    - handler-agentcore.ts WebSocket 서버 진입점 (AgentCore 컴퓨팅 타입 전용)
     - router.ts tRPC 라우터 정의
     - schema Zod를 사용한 스키마 정의
       - echo.ts "echo" 프로시저의 입력 및 출력 예제 정의
-      - z-async-iterable.ts 구독을 위한 Zod 헬퍼 (REST API 전용)
+      - z-async-iterable.ts 구독을 위한 Zod 헬퍼 (REST API 및 AgentCore 전용)
     - procedures API가 노출하는 프로시저(또는 작업)
       - echo.ts 예제 프로시저
     - middleware
@@ -60,6 +65,7 @@ tRPC API 생성기는 AWS CDK 또는 Terraform 인프라 설정과 함께 새로
     - local-server.ts 로컬 개발 서버용 tRPC 독립 실행형 어댑터 진입점
     - client
       - index.ts 기계 간 API 호출을 위한 타입 안전 클라이언트
+  - Dockerfile AgentCore 배포를 위한 컨테이너 이미지 (AgentCore 컴퓨팅 타입 전용)
   - tsconfig.json TypeScript 구성
   - project.json 프로젝트 구성 및 빌드 대상
 
@@ -145,10 +151,19 @@ export const echo = publicProcedure
 
 새 프로시저를 추가할 경우 `src/router.ts`의 라우터에 등록해야 합니다.
 
-<OptionFilter when={{ computeType: 'ServerlessApiGatewayRestApi' }} description="스트리밍 구독 — REST API 전용, SSE 사용">
+<OptionFilter when={{ computeType: ['ServerlessApiGatewayRestApi', 'BedrockAgentCoreRuntimeWebSocket'] }} description="스트리밍 구독 — REST API (SSE) 및 AgentCore (WebSocket) 전용">
 ### 구독 (스트리밍)
 
-tRPC 구독을 사용하면 [Server-Sent Events (SSE)](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events)를 사용하여 서버에서 클라이언트로 데이터를 스트리밍할 수 있습니다. `computeType`으로 `ServerlessApiGatewayRestApi`를 선택하면 생성기가 스트리밍에 필요한 인프라와 스트리밍 Lambda 핸들러 및 `ZodAsyncIterable` 스키마 헬퍼를 자동으로 구성합니다.
+tRPC 구독은 서버에서 클라이언트로 데이터를 스트리밍합니다. 생성기는 `ZodAsyncIterable` 스키마 헬퍼와 스트리밍 응답을 위한 핸들러를 자동으로 구성합니다.
+
+<Tabs syncKey="trpc-compute">
+<TabItem label="REST API" _filter={{ computeType: 'ServerlessApiGatewayRestApi' }}>
+구독은 [Server-Sent Events (SSE)](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events)를 사용합니다. 생성된 인프라는 모든 REST API 작업에 대해 API Gateway에서 `ResponseTransferMode.STREAM`을 사용하는 스트리밍 Lambda 핸들러를 사용하므로, 구독이 일반 쿼리 및 뮤테이션과 함께 작동할 수 있습니다.
+</TabItem>
+<TabItem label="AgentCore" _filter={{ computeType: 'BedrockAgentCoreRuntimeWebSocket' }}>
+구독은 AgentCore 런타임 엔드포인트에 대해 [WebSockets](https://developer.mozilla.org/en-US/docs/Web/API/WebSocket)를 사용합니다. 생성된 핸들러는 `@trpc/server/adapters/ws`를 통해 `/ws`를 노출하며, 30초 Lambda 또는 API Gateway 타임아웃 없이 단일 전이중 연결을 통해 쿼리, 뮤테이션 및 구독을 전달합니다.
+</TabItem>
+</Tabs>
 
 구독 프로시저를 정의하려면 비동기 제너레이터 함수와 함께 `.subscription` 메서드를 사용하세요. 출력 스키마를 정의하려면 `src/schema/z-async-iterable.ts`의 `ZodAsyncIterable` 헬퍼를 사용하세요:
 
@@ -183,8 +198,24 @@ export const appRouter = router({
   myStream,
 });
 ```
+</OptionFilter>
 
-생성된 인프라는 모든 REST API 작업에 대해 API Gateway에서 `ResponseTransferMode.STREAM`을 사용하는 스트리밍 Lambda 핸들러를 사용하므로, 구독이 일반 쿼리 및 뮤테이션과 함께 작동할 수 있습니다.
+<OptionFilter when={{ computeType: 'BedrockAgentCoreRuntimeWebSocket' }} description="세션 ID — AgentCore는 런타임 세션 ID를 ctx로 전파">
+### 세션 식별자
+
+AgentCore에 배포되면 모든 프로시저는 `ctx.sessionId`를 받습니다 — 이는 AgentCore가 WebSocket 업그레이드 시 설정하는 `x-amzn-bedrock-agentcore-runtime-session-id` 헤더의 값입니다. 이를 사용하여 세션별 상태를 키로 지정하세요:
+
+```ts {5}
+export const chat = publicProcedure
+  .input(InputSchema)
+  .output(OutputSchema)
+  .subscription(async function* (opts) {
+    const history = loadHistory(opts.ctx.sessionId);
+    // ...`history`를 기반으로 구축되는 청크 스트리밍
+  });
+```
+
+로컬에서 `nx serve`는 독립 실행형 HTTP + WebSocket 서버를 실행하므로 클라이언트가 프로덕션과 동일한 방식으로 연결할 수 있습니다. 헤더가 없는 경우 세션 ID는 기본적으로 임의의 UUID로 설정됩니다.
 </OptionFilter>
 
 ## tRPC API 사용자 정의
@@ -284,7 +315,7 @@ export const echo = publicProcedure
 
 예를 들어, API 호출 사용자에 대한 세부 정보를 추출하는 미들웨어를 `src/middleware/identity.ts`에 구현해 보겠습니다.
 
-<OptionFilter when={{ auth: 'IAM' }} description="IAM 인증 API를 위한 Identity 미들웨어 예제">
+<OptionFilter when={{ auth: 'IAM', computeType: ['ServerlessApiGatewayRestApi', 'ServerlessApiGatewayHttpApi'] }} description="IAM 인증 Lambda API를 위한 Identity 미들웨어 예제">
 이 예제는 `IAM` 인증을 위한 identity 미들웨어를 설명합니다. 여기서는 API Gateway 이벤트에서 추출한 sub를 사용하여 Cognito에서 호출자를 조회합니다.
 
 먼저 컨텍스트에 추가할 내용을 정의합니다:
@@ -455,7 +486,7 @@ export const createIdentityPlugin = () => {
 </Tabs>
 </OptionFilter>
 
-<OptionFilter when={{ auth: 'Cognito' }} description="Cognito 인증 API를 위한 Identity 미들웨어 예제">
+<OptionFilter when={{ auth: 'Cognito', computeType: ['ServerlessApiGatewayRestApi', 'ServerlessApiGatewayHttpApi'] }} description="Cognito 인증 Lambda API를 위한 Identity 미들웨어 예제">
 `auth: 'Cognito'`로 배포하면 API Gateway Cognito User Pools 인증자가 호출자가 `Authorization` 헤더에 제공한 JWT를 검증하고 검증된 클레임을 `event.requestContext.authorizer.claims`의 Lambda 이벤트에 배치합니다. 우리의 미들웨어는 단순히 해당 클레임을 읽기만 하면 됩니다 — 추가 AWS SDK 호출이나 수동 JWT 검증이 필요하지 않습니다.
 
 먼저 컨텍스트에 추가할 내용을 정의합니다:
@@ -539,6 +570,25 @@ export const me = publicProcedure
 :::
 </OptionFilter>
 
+<OptionFilter when={{ computeType: 'BedrockAgentCoreRuntimeWebSocket' }} description="AgentCore의 Identity 및 세션 접근">
+AgentCore에서는 런타임이 핸들러가 트래픽을 보기 전에 WebSocket 업그레이드에서 이미 `IAM` 또는 `Cognito` 인증을 적용했습니다. 생성된 컨텍스트는 다음을 노출합니다:
+
+- `ctx.sessionId` — AgentCore가 WebSocket 업그레이드 시 설정하는 `x-amzn-bedrock-agentcore-runtime-session-id` 헤더의 값입니다.
+
+모든 프로시저에서 `ctx.sessionId`를 직접 읽을 수 있습니다 — 추가 미들웨어가 필요하지 않습니다:
+
+```ts
+import { publicProcedure } from '../init.js';
+import { z } from 'zod';
+
+export const me = publicProcedure
+  .output(z.object({ sessionId: z.string().optional() }))
+  .query(({ ctx }) => ({ sessionId: ctx.sessionId }));
+```
+
+추가 필드(예: 헤더를 통해 전달되는 사용자 정의 JWT 클레임)를 프로시저에 노출하려면 위의 Lambda 예제와 동일한 패턴으로 `ctx`를 증강하는 미들웨어를 추가하세요 — 유일한 차이점은 진실의 원천이 API Gateway 이벤트가 아닌 WebSocket 업그레이드 헤더라는 것입니다.
+</OptionFilter>
+
 ## tRPC API 배포
 
 tRPC API 생성기는 선택한 `iacProvider`에 따라 CDK 또는 Terraform 인프라 코드를 생성합니다. 이를 사용하여 tRPC API를 배포할 수 있습니다.
@@ -547,7 +597,7 @@ tRPC API 생성기는 선택한 `iacProvider`에 따라 CDK 또는 Terraform 인
 <Fragment slot="cdk">
 `common/constructs` 폴더에 API 배포를 위한 CDK 구성이 있습니다. CDK 애플리케이션에서 이를 사용할 수 있습니다. 예를 들어:
 
-<OptionFilter when={{ auth: ['IAM', 'None'] }} description="IAM 또는 인증 없음을 위한 CDK 사용">
+<OptionFilter when={{ auth: ['IAM', 'None'], computeType: ['ServerlessApiGatewayRestApi', 'ServerlessApiGatewayHttpApi'] }} description="IAM 또는 인증 없음을 위한 CDK 사용">
 ```ts {6-8}
 import { MyApi } from ':my-scope/common-constructs';
 
@@ -562,7 +612,7 @@ export class ExampleStack extends Stack {
 ```
 </OptionFilter>
 
-<OptionFilter when={{ auth: 'Cognito' }} description="Cognito 인증을 사용한 CDK 사용 — identity 구성 전달">
+<OptionFilter when={{ auth: 'Cognito', computeType: ['ServerlessApiGatewayRestApi', 'ServerlessApiGatewayHttpApi'] }} description="Cognito 인증을 사용한 CDK 사용 — identity 구성 전달">
 ```ts {6,9}
 import { MyApi, UserIdentity } from ':my-scope/common-constructs';
 
@@ -591,7 +641,7 @@ export class ExampleStack extends Stack {
 
 API 모듈은 공유 S3 자산 버킷에 Lambda 배포 zip을 스테이징합니다 — 자세한 내용은 <Link path="/guides/terraform-project">Terraform 인프라 가이드</Link>를 참조하세요. 배포당 한 번 `core/asset-bucket` 모듈을 인스턴스화하고 `asset_bucket_name` 입력을 통해 모든 API / Lambda 모듈에 `bucket_name` 출력을 전달하세요:
 
-<OptionFilter when={{ auth: ['IAM', 'None'] }} description="IAM 또는 인증 없음을 위한 Terraform 사용">
+<OptionFilter when={{ auth: ['IAM', 'None'], computeType: ['ServerlessApiGatewayRestApi', 'ServerlessApiGatewayHttpApi'] }} description="IAM 또는 인증 없음을 위한 Terraform 사용">
 ```hcl {1-3, 8}
 module "asset_bucket" {
   source = "../../common/terraform/src/core/asset-bucket"
@@ -618,7 +668,7 @@ module "my_api" {
 ```
 </OptionFilter>
 
-<OptionFilter when={{ auth: 'Cognito' }} description="Cognito 인증을 사용한 Terraform 사용 — 사용자 풀 및 클라이언트 제공">
+<OptionFilter when={{ auth: 'Cognito', computeType: ['ServerlessApiGatewayRestApi', 'ServerlessApiGatewayHttpApi'] }} description="Cognito 인증을 사용한 Terraform 사용 — 사용자 풀 및 클라이언트 제공">
 ```hcl {1-3, 8-9}
 module "asset_bucket" {
   source = "../../common/terraform/src/core/asset-bucket"
@@ -701,7 +751,7 @@ module "my_api" {
 }
 ```
 
-<OptionFilter when={{ auth: 'None' }} description="인증이 None일 때 발생할 수 있는 Checkov 실패">
+<OptionFilter when={{ auth: 'None', computeType: ['ServerlessApiGatewayRestApi', 'ServerlessApiGatewayHttpApi'] }} description="Lambda 기반 API에서 인증이 None일 때 발생할 수 있는 Checkov 실패">
 :::caution[인증 없음]
 다음과 같은 Checkov 검사 실패가 발생할 수 있습니다:
 
@@ -726,12 +776,46 @@ API를 공개로 유지하려는 경우 [suppression comment 추가](https://www
 </Fragment>
 </Infrastructure>
 
+<OptionFilter when={{ computeType: 'BedrockAgentCoreRuntimeWebSocket' }} description="Bedrock AgentCore Runtime에 tRPC 배포">
+### Bedrock AgentCore Runtime
+
+생성기는 Bedrock AgentCore `Runtime`을 프로비저닝하고, Bedrock 모델 호출 및 런타임 구성 읽기 권한을 부여하며, 프론트엔드가 가져올 수 있도록 런타임 ARN을 `runtimeConfig.apis.<YourApiName>`에 게시하는 CDK 구성(또는 Terraform 모듈)을 생성합니다. `docker` 빌드 대상이 프로젝트의 `build` 대상에 연결되어 `nx build`가 컨테이너 이미지를 생성합니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts {5}
+import { MyApi } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const api = new MyApi(this, 'MyApi');
+  }
+}
+```
+
+구성은 `docker` 대상에 의해 빌드된 컨테이너 이미지에서 AgentCore 런타임을 프로비저닝하고 `api.agentCoreRuntime.agentRuntimeArn`을 통해 런타임 ARN을 노출합니다.
+</Fragment>
+<Fragment slot="terraform">
+```hcl
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  tags = local.common_tags
+}
+```
+
+모듈은 `docker` 대상에 의해 빌드된 컨테이너 이미지에서 AgentCore 런타임을 프로비저닝하고 `agent_runtime_arn` 출력을 통해 런타임 ARN을 게시합니다.
+</Fragment>
+</Infrastructure>
+</OptionFilter>
+
 <OptionFilter when={{ computeType: 'ServerlessApiGatewayRestApi' }} description="WAF — REST API는 기본적으로 WAF Web ACL을 가짐">
 ### WAF
 
 <Snippet name="api/waf-configuration" parentHeading="WAF" />
 </OptionFilter>
 
+<OptionFilter not when={{ computeType: 'BedrockAgentCoreRuntimeWebSocket' }} description="API Gateway 통합 — Lambda 기반 컴퓨팅 타입 전용">
 ### 통합
 
 <Snippet name="api/type-safe-api-integrations" parentHeading="Integrations" />
@@ -739,8 +823,9 @@ API를 공개로 유지하려는 경우 [suppression comment 추가](https://www
 :::tip[CDK 타입 안전 통합]
 `iacProvider`로 CDK를 선택한 경우, tRPC API에서 프로시저를 추가하거나 제거할 때 재빌드 없이 CDK 구성에 즉시 반영됩니다.
 :::
+</OptionFilter>
 
-<OptionFilter when={{ auth: 'IAM' }} description="API 호출 접근 권한 부여 — IAM 인증 API 전용">
+<OptionFilter when={{ auth: 'IAM', computeType: ['ServerlessApiGatewayRestApi', 'ServerlessApiGatewayHttpApi'] }} description="API 호출 접근 권한 부여 — IAM 인증 Lambda API 전용">
 ### 접근 권한 부여 (IAM 전용)
 
 다음과 같이 API에 대한 접근 권한을 부여할 수 있습니다:

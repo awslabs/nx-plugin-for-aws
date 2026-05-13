@@ -5,12 +5,27 @@ when:
   sourceType: react
   targetType: ts#trpc-api
 ---
-import { FileTree } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
+import OptionFilter from '@components/option-filter.astro';
 
 O Nx Plugin para AWS fornece um gerador para integrar rapidamente sua <Link path="guides/trpc">API tRPC</Link> com um site React. Ele configura toda a configuração necessária para conectar aos seus backends tRPC, incluindo suporte a autenticação AWS IAM e Cognito e tratamento adequado de erros. A integração oferece segurança de tipos completa de ponta a ponta entre seu frontend e backend(s) tRPC.
+
+O gerador inspeciona o `computeType` do backend e produz o cliente correspondente:
+
+<Tabs syncKey="trpc-compute">
+<TabItem label="REST API" _filter={{ computeType: 'ServerlessApiGatewayRestApi' }}>
+Um link HTTP com `httpSubscriptionLink` sobre Server-Sent Events para subscriptions tRPC.
+</TabItem>
+<TabItem label="HTTP API" _filter={{ computeType: 'ServerlessApiGatewayHttpApi' }}>
+Um link HTTP simples. Subscriptions não são suportadas porque API Gateway HTTP APIs não suportam streaming de resposta.
+</TabItem>
+<TabItem label="AgentCore" _filter={{ computeType: 'BedrockAgentCoreRuntimeWebSocket' }}>
+Um link WebSocket contra a URL de runtime do AgentCore, com handshake assinado por SigV4 (IAM) ou subprotocolo JWT codificado em base64url (Cognito). O ARN do runtime é lido de `runtimeConfig.apis.<ApiName>` e convertido para uma URL `wss://bedrock-agentcore.<region>.amazonaws.com/runtimes/.../ws` em tempo real.
+</TabItem>
+</Tabs>
 
 ## Pré-requisitos
 
@@ -74,7 +89,8 @@ Além disso, instala as dependências necessárias:
   - `@trpc/tanstack-react-query`
   - `@tanstack/react-query`
   - `aws4fetch` (se usando autenticação IAM)
-  - `event-source-polyfill` (se usando REST API, para suporte a subscriptions)
+  - `event-source-polyfill` (se usando um backend REST API, para suporte a subscriptions)
+  - `react-oidc-context` (se usando autenticação Cognito)
 
 ## Usando o Código Gerado
 
@@ -169,11 +185,21 @@ function MyComponent() {
 
 ### Subscriptions (Streaming)
 
-:::caution[Tipo de computação de assinaturas]
-Subscriptions são suportadas apenas quando a API tRPC usa `ServerlessApiGatewayRestApi` (REST API) como tipo de computação. API Gateway HTTP APIs não suportam streaming de resposta.
+<OptionFilter when={{ computeType: 'ServerlessApiGatewayHttpApi' }} description="HTTP API backends don't support subscriptions">
+:::caution[Sem subscriptions em HTTP API]
+API Gateway HTTP APIs não suportam streaming de resposta. Selecione `ServerlessApiGatewayRestApi` ou `BedrockAgentCoreRuntimeWebSocket` como o `computeType` do seu backend se você precisar de subscriptions.
 :::
+</OptionFilter>
 
-Ao conectar a um backend tRPC REST API, o client gerado é automaticamente configurado com um `splitLink` que roteia operações de subscription através de `httpSubscriptionLink` (usando SSE) e queries/mutations regulares através de `httpLink`. Isso significa que subscriptions funcionam imediatamente sem nenhuma configuração adicional.
+<OptionFilter when={{ computeType: ['ServerlessApiGatewayRestApi', 'BedrockAgentCoreRuntimeWebSocket'] }} description="How subscriptions reach the client — transport differs by backend compute type">
+<Tabs syncKey="trpc-compute">
+<TabItem label="REST API" _filter={{ computeType: 'ServerlessApiGatewayRestApi' }}>
+O client gerado usa um `splitLink` que roteia operações de subscription através de `httpSubscriptionLink` (Server-Sent Events) e queries/mutations regulares através de `httpLink`. Subscriptions funcionam imediatamente sem nenhuma configuração adicional.
+</TabItem>
+<TabItem label="AgentCore" _filter={{ computeType: 'BedrockAgentCoreRuntimeWebSocket' }}>
+O client gerado usa `wsLink` contra a URL de runtime do AgentCore — todas as operações tRPC (queries, mutations e subscriptions) viajam por uma única conexão WebSocket. O handshake é autenticado automaticamente: assinado por SigV4 para autenticação `IAM`, ou carregando o JWT como um subprotocolo codificado em base64url para `Cognito`.
+</TabItem>
+</Tabs>
 
 Para informações sobre como definir procedimentos de subscription em seu backend, consulte o <Link path="guides/trpc">guia do gerador `ts#trpc-api`</Link>.
 
@@ -265,6 +291,7 @@ function StreamingComponent() {
   );
 }
 ```
+</OptionFilter>
 
 ## Melhores Práticas
 

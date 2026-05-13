@@ -14,7 +14,7 @@ import OptionFilter from '@components/option-filter.astro';
 
 [tRPC](https://trpc.io/) là một framework để xây dựng API trong TypeScript với tính an toàn kiểu từ đầu đến cuối. Sử dụng tRPC, các cập nhật đối với đầu vào và đầu ra của các thao tác API sẽ được phản ánh ngay lập tức trong mã client và hiển thị trong IDE của bạn mà không cần rebuild dự án.
 
-Trình tạo API tRPC tạo ra một API tRPC mới với cấu hình cơ sở hạ tầng AWS CDK hoặc Terraform. Backend được tạo ra sử dụng AWS Lambda cho triển khai serverless, được expose thông qua AWS API Gateway API, và bao gồm xác thực schema sử dụng [Zod](https://zod.dev/). Nó thiết lập [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/) cho khả năng quan sát, bao gồm logging, AWS X-Ray tracing và Cloudwatch Metrics.
+Trình tạo API tRPC tạo ra một API tRPC mới với cấu hình cơ sở hạ tầng AWS CDK hoặc Terraform. Backend được tạo ra có thể được triển khai dưới dạng các hàm AWS Lambda được expose thông qua AWS API Gateway API, hoặc dưới dạng một WebSocket server được container hóa chạy trên [Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime.html). Nó bao gồm xác thực schema sử dụng [Zod](https://zod.dev/) và thiết lập [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/) cho khả năng quan sát, bao gồm logging, AWS X-Ray tracing và CloudWatch Metrics.
 
 ## Cách sử dụng
 
@@ -28,15 +28,19 @@ Bạn có thể tạo một API tRPC mới theo hai cách:
 
 <GeneratorParameters generator="ts#trpc-api" />
 
-<Snippet name="api/api-choice-note" />
+:::tip[Khi nào sử dụng mỗi `computeType`]
+- **`ServerlessApiGatewayHttpApi`** — tùy chọn tiết kiệm chi phí nhất. Chọn tùy chọn này khi bạn chỉ cần query và mutation và không cần [WAF](https://aws.amazon.com/waf/) ở tầng API. [HTTP APIs](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api.html) rẻ hơn và có độ trễ thấp hơn REST APIs, nhưng không thể stream các phản hồi (do đó không có [tRPC Subscriptions](https://trpc.io/docs/server/subscriptions)).
+- **`ServerlessApiGatewayRestApi`** (mặc định) — chọn tùy chọn này khi bạn cần [tRPC Subscriptions](https://trpc.io/docs/server/subscriptions) qua [Server-Sent Events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events) và/hoặc một [WAF Web ACL](https://aws.amazon.com/waf/) trên API. [REST APIs](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-rest-api.html) tốn kém hơn HTTP APIs nhưng hỗ trợ streaming phản hồi và tích hợp WAF.
+- **`BedrockAgentCoreRuntimeWebSocket`** — chọn tùy chọn này khi bạn cần [tRPC Subscriptions](https://trpc.io/docs/server/subscriptions) qua WebSocket cho streaming thời gian thực mà không có timeout 30 giây của Lambda hoặc API Gateway. [Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime.html) lưu trữ tRPC server của bạn dưới dạng một WebSocket server được container hóa với xác thực được quản lý, session affinity và scaling.
 
-:::tip[Loại API]
-Chọn `ServerlessApiGatewayRestApi` (mặc định) làm `computeType` của bạn nếu bạn muốn sử dụng [tRPC Subscriptions](https://trpc.io/docs/server/subscriptions) để stream các phản hồi.
+Để so sánh sâu hơn giữa REST và HTTP API Gateway, tham khảo [API Gateway Developer Guide](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-vs-rest.html).
 :::
 
+<OptionFilter not when={{ computeType: 'BedrockAgentCoreRuntimeWebSocket' }} description="Integration pattern — Lambda-based compute types only">
 :::tip[Mẫu tích hợp]
 Tùy chọn `integrationPattern` mặc định là `isolated`, tạo một Lambda cho mỗi tRPC procedure. Chọn `shared` nếu bạn muốn một Lambda handler được chia sẻ duy nhất cho toàn bộ API, với các override tùy chọn cho từng procedure.
 :::
+</OptionFilter>
 
 ## Kết quả từ trình tạo
 
@@ -45,11 +49,12 @@ Trình tạo sẽ tạo cấu trúc dự án sau trong thư mục `<directory>/<
 <FileTree>
   - src
     - init.ts Khởi tạo tRPC Backend
-    - handler.ts Điểm vào Lambda handler
+    - handler.ts Điểm vào Lambda handler (chỉ các loại compute Lambda)
+    - handler-agentcore.ts Điểm vào WebSocket server (chỉ loại compute AgentCore)
     - router.ts Định nghĩa tRPC router
     - schema Định nghĩa schema sử dụng Zod
       - echo.ts Định nghĩa ví dụ cho đầu vào và đầu ra của procedure "echo"
-      - z-async-iterable.ts Zod helper cho subscriptions (chỉ REST API)
+      - z-async-iterable.ts Zod helper cho subscriptions (chỉ REST API và AgentCore)
     - procedures Các procedure (hoặc operation) được expose bởi API của bạn
       - echo.ts Procedure ví dụ
     - middleware
@@ -60,6 +65,7 @@ Trình tạo sẽ tạo cấu trúc dự án sau trong thư mục `<directory>/<
     - local-server.ts Điểm vào tRPC standalone adapter cho máy chủ phát triển cục bộ
     - client
       - index.ts Client an toàn kiểu cho các lời gọi API máy-đến-máy
+  - Dockerfile Container image cho triển khai AgentCore (chỉ loại compute AgentCore)
   - tsconfig.json Cấu hình TypeScript
   - project.json Cấu hình dự án và các build target
 
@@ -145,10 +151,19 @@ Việc sử dụng `query` để định nghĩa triển khai cho biết rằng o
 
 Nếu bạn thêm một procedure mới, hãy đảm bảo bạn đăng ký nó bằng cách thêm nó vào router trong `src/router.ts`.
 
-<OptionFilter when={{ computeType: 'ServerlessApiGatewayRestApi' }} description="Streaming subscriptions — REST API only, uses SSE">
+<OptionFilter when={{ computeType: ['ServerlessApiGatewayRestApi', 'BedrockAgentCoreRuntimeWebSocket'] }} description="Streaming subscriptions — REST API (SSE) and AgentCore (WebSocket) only">
 ### Subscriptions (Streaming)
 
-tRPC subscriptions cho phép bạn stream dữ liệu từ server đến client sử dụng [Server-Sent Events (SSE)](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events). Khi bạn chọn `ServerlessApiGatewayRestApi` làm compute type, trình tạo tự động cấu hình cơ sở hạ tầng cần thiết cho streaming, cũng như một streaming Lambda handler và `ZodAsyncIterable` schema helper.
+tRPC subscriptions stream dữ liệu từ server đến client. Trình tạo tự động cấu hình `ZodAsyncIterable` schema helper và handler cho các phản hồi streaming.
+
+<Tabs syncKey="trpc-compute">
+<TabItem label="REST API" _filter={{ computeType: 'ServerlessApiGatewayRestApi' }}>
+Subscriptions sử dụng [Server-Sent Events (SSE)](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events). Cơ sở hạ tầng được tạo ra sử dụng một streaming Lambda handler với `ResponseTransferMode.STREAM` trong API Gateway cho tất cả các REST API operation, cho phép subscriptions hoạt động cùng với các query và mutation thông thường.
+</TabItem>
+<TabItem label="AgentCore" _filter={{ computeType: 'BedrockAgentCoreRuntimeWebSocket' }}>
+Subscriptions sử dụng [WebSockets](https://developer.mozilla.org/en-US/docs/Web/API/WebSocket) với AgentCore runtime endpoint. Handler được tạo ra expose `/ws` thông qua `@trpc/server/adapters/ws`, mang query, mutation và subscription qua một kết nối full-duplex duy nhất mà không có timeout 30 giây của Lambda hoặc API Gateway.
+</TabItem>
+</Tabs>
 
 Để định nghĩa một subscription procedure, sử dụng phương thức `.subscription` với một async generator function. Sử dụng `ZodAsyncIterable` helper từ `src/schema/z-async-iterable.ts` để định nghĩa output schema:
 
@@ -183,8 +198,24 @@ export const appRouter = router({
   myStream,
 });
 ```
+</OptionFilter>
 
-Cơ sở hạ tầng được tạo ra sử dụng một streaming Lambda handler với `ResponseTransferMode.STREAM` trong API Gateway cho tất cả các REST API operation, cho phép subscriptions hoạt động cùng với các query và mutation thông thường.
+<OptionFilter when={{ computeType: 'BedrockAgentCoreRuntimeWebSocket' }} description="Session id — AgentCore propagates the runtime session id into ctx">
+### Session Identifier
+
+Khi được triển khai lên AgentCore, mọi procedure nhận `ctx.sessionId` — giá trị của header `x-amzn-bedrock-agentcore-runtime-session-id` mà AgentCore đặt trên WebSocket upgrade. Sử dụng nó để key state theo session:
+
+```ts {5}
+export const chat = publicProcedure
+  .input(InputSchema)
+  .output(OutputSchema)
+  .subscription(async function* (opts) {
+    const history = loadHistory(opts.ctx.sessionId);
+    // ...stream các chunk dựa trên `history`
+  });
+```
+
+Ở local, `nx serve` chạy một standalone HTTP + WebSocket server để client có thể kết nối theo cách tương tự như trong production. Session id mặc định là một UUID ngẫu nhiên khi header không có mặt.
 </OptionFilter>
 
 ## Tùy chỉnh API tRPC của bạn
@@ -284,7 +315,7 @@ Bạn có thể thêm các giá trị bổ sung vào context được cung cấp
 
 Ví dụ, hãy triển khai một số middleware để trích xuất một số chi tiết về người dùng đang gọi từ API của chúng ta trong `src/middleware/identity.ts`.
 
-<OptionFilter when={{ auth: 'IAM' }} description="Identity middleware example for IAM-authenticated APIs">
+<OptionFilter when={{ auth: 'IAM', computeType: ['ServerlessApiGatewayRestApi', 'ServerlessApiGatewayHttpApi'] }} description="Identity middleware example for IAM-authenticated Lambda APIs">
 Ví dụ này hướng dẫn về identity middleware cho xác thực `IAM`. Chúng ta tra cứu người gọi trong Cognito bằng cách sử dụng sub được trích xuất từ API Gateway event.
 
 Đầu tiên, chúng ta định nghĩa những gì chúng ta sẽ thêm vào context:
@@ -455,7 +486,7 @@ export const createIdentityPlugin = () => {
 </Tabs>
 </OptionFilter>
 
-<OptionFilter when={{ auth: 'Cognito' }} description="Identity middleware example for Cognito-authenticated APIs">
+<OptionFilter when={{ auth: 'Cognito', computeType: ['ServerlessApiGatewayRestApi', 'ServerlessApiGatewayHttpApi'] }} description="Identity middleware example for Cognito-authenticated Lambda APIs">
 Khi bạn triển khai với `auth: 'Cognito'`, API Gateway Cognito User Pools authorizer xác minh JWT mà người gọi cung cấp trong header `Authorization` và đặt các claim đã xác minh trên Lambda event tại `event.requestContext.authorizer.claims`. Middleware của chúng ta chỉ đọc các claim đó — không cần thêm lời gọi AWS SDK, không cần xác minh JWT thủ công.
 
 Đầu tiên, chúng ta định nghĩa những gì chúng ta sẽ thêm vào context:
@@ -539,6 +570,25 @@ Bạn không cần `aws-jwt-verify` hoặc bất kỳ thư viện xác minh JWT 
 :::
 </OptionFilter>
 
+<OptionFilter when={{ computeType: 'BedrockAgentCoreRuntimeWebSocket' }} description="Identity and session access on AgentCore">
+Trên AgentCore, runtime đã thực thi xác thực `IAM` hoặc `Cognito` trên WebSocket upgrade trước khi handler của bạn nhìn thấy bất kỳ traffic nào. Context được tạo ra expose:
+
+- `ctx.sessionId` — giá trị của header `x-amzn-bedrock-agentcore-runtime-session-id` được đặt bởi AgentCore trên WebSocket upgrade.
+
+Bạn có thể đọc `ctx.sessionId` trực tiếp trong bất kỳ procedure nào — không cần middleware bổ sung:
+
+```ts
+import { publicProcedure } from '../init.js';
+import { z } from 'zod';
+
+export const me = publicProcedure
+  .output(z.object({ sessionId: z.string().optional() }))
+  .query(({ ctx }) => ({ sessionId: ctx.sessionId }));
+```
+
+Nếu bạn muốn expose các trường bổ sung (ví dụ: custom JWT claim được chuyển tiếp qua header) cho các procedure, hãy thêm middleware tăng cường `ctx` theo cùng mẫu như các ví dụ Lambda ở trên — sự khác biệt duy nhất là nguồn sự thật là các header WebSocket upgrade, không phải API Gateway event.
+</OptionFilter>
+
 ## Triển khai API tRPC của bạn
 
 Trình tạo API tRPC tạo mã cơ sở hạ tầng CDK hoặc Terraform dựa trên `iacProvider` bạn đã chọn. Bạn có thể sử dụng điều này để triển khai API tRPC của bạn.
@@ -547,7 +597,7 @@ Trình tạo API tRPC tạo mã cơ sở hạ tầng CDK hoặc Terraform dựa 
 <Fragment slot="cdk">
 CDK construct để triển khai API của bạn nằm trong thư mục `common/constructs`. Bạn có thể sử dụng nó trong ứng dụng CDK, ví dụ:
 
-<OptionFilter when={{ auth: ['IAM', 'None'] }} description="CDK usage for IAM or no authentication">
+<OptionFilter when={{ auth: ['IAM', 'None'], computeType: ['ServerlessApiGatewayRestApi', 'ServerlessApiGatewayHttpApi'] }} description="CDK usage for IAM or no authentication">
 ```ts {6-8}
 import { MyApi } from ':my-scope/common-constructs';
 
@@ -562,7 +612,7 @@ export class ExampleStack extends Stack {
 ```
 </OptionFilter>
 
-<OptionFilter when={{ auth: 'Cognito' }} description="CDK usage with Cognito authentication — pass the identity construct">
+<OptionFilter when={{ auth: 'Cognito', computeType: ['ServerlessApiGatewayRestApi', 'ServerlessApiGatewayHttpApi'] }} description="CDK usage with Cognito authentication — pass the identity construct">
 ```ts {6,9}
 import { MyApi, UserIdentity } from ':my-scope/common-constructs';
 
@@ -591,7 +641,7 @@ Các module Terraform để triển khai API của bạn nằm trong thư mục 
 
 Module API stages file zip triển khai Lambda của nó trong một S3 asset bucket được chia sẻ — xem <Link path="/vi/guides/terraform-project">hướng dẫn cơ sở hạ tầng Terraform</Link> để biết chi tiết. Khởi tạo module `core/asset-bucket` một lần cho mỗi triển khai và truyền output `bucket_name` của nó vào mọi module API / Lambda thông qua input `asset_bucket_name`:
 
-<OptionFilter when={{ auth: ['IAM', 'None'] }} description="Terraform usage for IAM or no authentication">
+<OptionFilter when={{ auth: ['IAM', 'None'], computeType: ['ServerlessApiGatewayRestApi', 'ServerlessApiGatewayHttpApi'] }} description="Terraform usage for IAM or no authentication">
 ```hcl {1-3, 8}
 module "asset_bucket" {
   source = "../../common/terraform/src/core/asset-bucket"
@@ -618,7 +668,7 @@ module "my_api" {
 ```
 </OptionFilter>
 
-<OptionFilter when={{ auth: 'Cognito' }} description="Terraform usage with Cognito authentication — supply user pool and client">
+<OptionFilter when={{ auth: 'Cognito', computeType: ['ServerlessApiGatewayRestApi', 'ServerlessApiGatewayHttpApi'] }} description="Terraform usage with Cognito authentication — supply user pool and client">
 ```hcl {1-3, 8-9}
 module "asset_bucket" {
   source = "../../common/terraform/src/core/asset-bucket"
@@ -701,7 +751,7 @@ module "my_api" {
 }
 ```
 
-<OptionFilter when={{ auth: 'None' }} description="Checkov failures you may see when auth is None">
+<OptionFilter when={{ auth: 'None', computeType: ['ServerlessApiGatewayRestApi', 'ServerlessApiGatewayHttpApi'] }} description="Checkov failures you may see when auth is None on Lambda-backed APIs">
 :::caution[Không xác thực]
 Bạn có thể thấy các lỗi kiểm tra Checkov như:
 
@@ -726,12 +776,46 @@ Bạn có thể [thêm comment suppression](https://www.checkov.io/2.Basics/Supp
 </Fragment>
 </Infrastructure>
 
+<OptionFilter when={{ computeType: 'BedrockAgentCoreRuntimeWebSocket' }} description="Deploying tRPC on Bedrock AgentCore Runtime">
+### Bedrock AgentCore Runtime
+
+Trình tạo phát ra một CDK construct (hoặc Terraform module) cung cấp một Bedrock AgentCore `Runtime`, cấp cho nó quyền gọi các mô hình Bedrock và đọc cấu hình runtime, và xuất bản runtime ARN vào `runtimeConfig.apis.<YourApiName>` để frontend lấy. Một `docker` build target được kết nối vào `build` target của dự án để `nx build` tạo ra container image.
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts {5}
+import { MyApi } from ':my-scope/common-constructs';
+
+export class ExampleStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    const api = new MyApi(this, 'MyApi');
+  }
+}
+```
+
+Construct cung cấp AgentCore runtime từ container image được xây dựng bởi `docker` target và expose runtime ARN thông qua `api.agentCoreRuntime.agentRuntimeArn`.
+</Fragment>
+<Fragment slot="terraform">
+```hcl
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  tags = local.common_tags
+}
+```
+
+Module cung cấp AgentCore runtime từ container image được xây dựng bởi `docker` target và xuất bản runtime ARN thông qua output `agent_runtime_arn`.
+</Fragment>
+</Infrastructure>
+</OptionFilter>
+
 <OptionFilter when={{ computeType: 'ServerlessApiGatewayRestApi' }} description="WAF — REST APIs get a WAF Web ACL by default">
 ### WAF
 
 <Snippet name="api/waf-configuration" parentHeading="WAF" />
 </OptionFilter>
 
+<OptionFilter not when={{ computeType: 'BedrockAgentCoreRuntimeWebSocket' }} description="API Gateway integrations — Lambda-based compute types only">
 ### Tích hợp
 
 <Snippet name="api/type-safe-api-integrations" parentHeading="Integrations" />
@@ -739,8 +823,9 @@ Bạn có thể [thêm comment suppression](https://www.checkov.io/2.Basics/Supp
 :::tip[Tích hợp CDK an toàn kiểu]
 Nếu bạn đã chọn CDK cho `iacProvider` của mình, khi bạn thêm hoặc xóa một procedure trong API tRPC của bạn, những thay đổi này sẽ được phản ánh ngay lập tức trong CDK construct mà không cần rebuild.
 :::
+</OptionFilter>
 
-<OptionFilter when={{ auth: 'IAM' }} description="Granting API invoke access — IAM-authenticated APIs only">
+<OptionFilter when={{ auth: 'IAM', computeType: ['ServerlessApiGatewayRestApi', 'ServerlessApiGatewayHttpApi'] }} description="Granting API invoke access — IAM-authenticated Lambda APIs only">
 ### Cấp quyền truy cập (chỉ IAM)
 
 Bạn có thể cấp quyền truy cập vào API của bạn như sau:

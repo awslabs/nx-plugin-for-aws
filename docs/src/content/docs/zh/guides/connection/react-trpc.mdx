@@ -5,12 +5,27 @@ when:
   sourceType: react
   targetType: ts#trpc-api
 ---
-import { FileTree } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
+import OptionFilter from '@components/option-filter.astro';
 
 Nx 的 AWS 插件提供了一个生成器，可快速将您的 <Link path="guides/trpc">tRPC API</Link> 与 React 网站集成。它会设置连接 tRPC 后端所需的所有配置，包括 AWS IAM 和 Cognito 身份验证支持以及适当的错误处理。该集成在前端和 tRPC 后端之间提供完整的端到端类型安全。
+
+生成器会检查后端的 `computeType` 并生成匹配的客户端：
+
+<Tabs syncKey="trpc-compute">
+<TabItem label="REST API" _filter={{ computeType: 'ServerlessApiGatewayRestApi' }}>
+一个 HTTP 链接，通过 Server-Sent Events 使用 `httpSubscriptionLink` 实现 tRPC 订阅。
+</TabItem>
+<TabItem label="HTTP API" _filter={{ computeType: 'ServerlessApiGatewayHttpApi' }}>
+一个普通的 HTTP 链接。不支持订阅，因为 API Gateway HTTP API 不支持响应流式传输。
+</TabItem>
+<TabItem label="AgentCore" _filter={{ computeType: 'BedrockAgentCoreRuntimeWebSocket' }}>
+一个针对 AgentCore 运行时 URL 的 WebSocket 链接，使用 SigV4 签名握手（IAM）或 base64url 编码的 JWT 子协议（Cognito）。运行时 ARN 从 `runtimeConfig.apis.<ApiName>` 读取，并动态转换为 `wss://bedrock-agentcore.<region>.amazonaws.com/runtimes/.../ws` URL。
+</TabItem>
+</Tabs>
 
 ## 前提条件
 
@@ -74,7 +89,8 @@ root.render(
   - `@trpc/tanstack-react-query`
   - `@tanstack/react-query`
   - `aws4fetch`（如果使用 IAM 认证）
-  - `event-source-polyfill`（如果使用 REST API，用于订阅支持）
+  - `event-source-polyfill`（如果使用 REST API 后端，用于订阅支持）
+  - `react-oidc-context`（如果使用 Cognito 认证）
 
 ## 使用生成代码
 
@@ -169,11 +185,21 @@ function MyComponent() {
 
 ### 订阅（流式传输）
 
-:::caution[订阅计算类型]
-仅当 tRPC API 使用 `ServerlessApiGatewayRestApi`（REST API）作为计算类型时才支持订阅。API Gateway HTTP API 不支持响应流式传输。
+<OptionFilter when={{ computeType: 'ServerlessApiGatewayHttpApi' }} description="HTTP API 后端不支持订阅">
+:::caution[HTTP API 不支持订阅]
+API Gateway HTTP API 不支持响应流式传输。如果需要订阅功能，请选择 `ServerlessApiGatewayRestApi` 或 `BedrockAgentCoreRuntimeWebSocket` 作为后端的 `computeType`。
 :::
+</OptionFilter>
 
-连接到 REST API tRPC 后端时，生成的客户端会自动配置 `splitLink`，将订阅操作通过 `httpSubscriptionLink`（使用 SSE）路由，常规查询/变更通过 `httpLink` 路由。这意味着订阅开箱即用，无需额外配置。
+<OptionFilter when={{ computeType: ['ServerlessApiGatewayRestApi', 'BedrockAgentCoreRuntimeWebSocket'] }} description="订阅如何到达客户端 — 传输方式因后端计算类型而异">
+<Tabs syncKey="trpc-compute">
+<TabItem label="REST API" _filter={{ computeType: 'ServerlessApiGatewayRestApi' }}>
+生成的客户端使用 `splitLink`，将订阅操作通过 `httpSubscriptionLink`（Server-Sent Events）路由，常规查询/变更通过 `httpLink` 路由。订阅开箱即用，无需额外配置。
+</TabItem>
+<TabItem label="AgentCore" _filter={{ computeType: 'BedrockAgentCoreRuntimeWebSocket' }}>
+生成的客户端使用针对 AgentCore 运行时 URL 的 `wsLink` — 所有 tRPC 操作（查询、变更和订阅）都通过单个 WebSocket 连接传输。握手会自动进行身份验证：`IAM` 认证使用 SigV4 签名，`Cognito` 认证则将 JWT 作为 base64url 编码的子协议携带。
+</TabItem>
+</Tabs>
 
 有关如何在后端定义订阅过程的信息，请参阅 <Link path="guides/trpc">`ts#trpc-api` 生成器指南</Link>。
 
@@ -265,6 +291,7 @@ function StreamingComponent() {
   );
 }
 ```
+</OptionFilter>
 
 ## 最佳实践
 

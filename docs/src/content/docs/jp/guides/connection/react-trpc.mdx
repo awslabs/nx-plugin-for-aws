@@ -5,12 +5,27 @@ when:
   sourceType: react
   targetType: ts#trpc-api
 ---
-import { FileTree } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
+import OptionFilter from '@components/option-filter.astro';
 
 Nx向けAWSプラグインは、<Link path="guides/trpc">tRPC API</Link>をReactウェブサイトと迅速に統合するためのジェネレータを提供します。AWS IAMやCognito認証のサポート、適切なエラーハンドリングを含む、tRPCバックエンド接続に必要なすべての設定を構成します。この統合により、フロントエンドとtRPCバックエンド間の完全なエンドツーエンド型安全性が保証されます。
+
+ジェネレータはバックエンドの`computeType`を検査し、それに対応するクライアントを生成します:
+
+<Tabs syncKey="trpc-compute">
+<TabItem label="REST API" _filter={{ computeType: 'ServerlessApiGatewayRestApi' }}>
+tRPCサブスクリプション用にServer-Sent Eventsを介した`httpSubscriptionLink`を持つHTTPリンク。
+</TabItem>
+<TabItem label="HTTP API" _filter={{ computeType: 'ServerlessApiGatewayHttpApi' }}>
+プレーンなHTTPリンク。API Gateway HTTP APIはレスポンスストリーミングをサポートしていないため、サブスクリプションはサポートされません。
+</TabItem>
+<TabItem label="AgentCore" _filter={{ computeType: 'BedrockAgentCoreRuntimeWebSocket' }}>
+AgentCoreランタイムURLに対するWebSocketリンク。ハンドシェイクはSigV4署名（IAM）またはbase64urlエンコードされたJWTサブプロトコル（Cognito）で認証されます。ランタイムARNは`runtimeConfig.apis.<ApiName>`から読み取られ、その場で`wss://bedrock-agentcore.<region>.amazonaws.com/runtimes/.../ws` URLに変換されます。
+</TabItem>
+</Tabs>
 
 ## 前提条件
 
@@ -74,7 +89,8 @@ root.render(
   - `@trpc/tanstack-react-query`
   - `@tanstack/react-query`
   - `aws4fetch`（IAM認証使用時）
-  - `event-source-polyfill`（REST API使用時、サブスクリプションサポート用）
+  - `event-source-polyfill`（REST APIバックエンド使用時、サブスクリプションサポート用）
+  - `react-oidc-context`（Cognito認証使用時）
 
 ## 生成コードの使用方法
 
@@ -169,11 +185,21 @@ function MyComponent() {
 
 ### サブスクリプション（ストリーミング）
 
-:::caution[サブスクリプションコンピュートタイプ]
-サブスクリプションは、tRPC APIがコンピュートタイプとして`ServerlessApiGatewayRestApi`（REST API）を使用している場合のみサポートされます。API Gateway HTTP APIはレスポンスストリーミングをサポートしていません。
+<OptionFilter when={{ computeType: 'ServerlessApiGatewayHttpApi' }} description="HTTP API backends don't support subscriptions">
+:::caution[HTTP APIではサブスクリプション非対応]
+API Gateway HTTP APIはレスポンスストリーミングをサポートしていません。サブスクリプションが必要な場合は、バックエンドの`computeType`として`ServerlessApiGatewayRestApi`または`BedrockAgentCoreRuntimeWebSocket`を選択してください。
 :::
+</OptionFilter>
 
-REST API tRPCバックエンドに接続する場合、生成されたクライアントは自動的に`splitLink`で構成され、サブスクリプション操作は`httpSubscriptionLink`（SSEを使用）を経由し、通常のクエリ/ミューテーションは`httpLink`を経由します。つまり、サブスクリプションは追加の設定なしですぐに動作します。
+<OptionFilter when={{ computeType: ['ServerlessApiGatewayRestApi', 'BedrockAgentCoreRuntimeWebSocket'] }} description="How subscriptions reach the client — transport differs by backend compute type">
+<Tabs syncKey="trpc-compute">
+<TabItem label="REST API" _filter={{ computeType: 'ServerlessApiGatewayRestApi' }}>
+生成されたクライアントは`splitLink`を使用し、サブスクリプション操作は`httpSubscriptionLink`（Server-Sent Events）を経由し、通常のクエリ/ミューテーションは`httpLink`を経由します。サブスクリプションは追加の設定なしですぐに動作します。
+</TabItem>
+<TabItem label="AgentCore" _filter={{ computeType: 'BedrockAgentCoreRuntimeWebSocket' }}>
+生成されたクライアントはAgentCoreランタイムURLに対して`wsLink`を使用します。すべてのtRPC操作（クエリ、ミューテーション、サブスクリプション）は単一のWebSocket接続を介して送信されます。ハンドシェイクは自動的に認証されます：`IAM`認証の場合はSigV4署名、`Cognito`の場合はJWTをbase64urlエンコードされたサブプロトコルとして送信します。
+</TabItem>
+</Tabs>
 
 バックエンドでサブスクリプションプロシージャを定義する方法については、<Link path="guides/trpc">`ts#trpc-api`ジェネレータガイド</Link>を参照してください。
 
@@ -265,6 +291,7 @@ function StreamingComponent() {
   );
 }
 ```
+</OptionFilter>
 
 ## ベストプラクティス
 
