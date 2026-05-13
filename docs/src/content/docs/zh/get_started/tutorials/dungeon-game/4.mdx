@@ -71,12 +71,16 @@ import gameConversationPng from '@assets/game-conversation.png'
 <TabItem label="routes/index.tsx">
 <E2EDiff before="dungeon-adventure/4/routes/index.tsx.old.template" after="dungeon-adventure/4/routes/index.tsx.template" lang="tsx" />
 
-这是游戏选择器：新游戏表单（shadcn `Input` + `Button` + `Card`）加上由 `useGameApi().games.query` 提供的"继续"列表。开始游戏会 `saveGame` `(playerName, genre)` 对（以便下次显示）并导航到游玩路由。
+这是游戏选择器：新游戏表单（shadcn `Input` + `Button` + `Card`）加上由 `useGameApi().games.query` 通过 `useInfiniteQuery` 提供的"继续"列表——底部的哨兵 `<div>` 由 `IntersectionObserver` 监视，当滚动到视图中时会自动调用 `fetchNextPage()`，标题旁边和列表下方的加载指示器显示加载状态。开始游戏会 `saveGame` `(playerName, genre)` 对（以便下次显示）并导航到游玩路由。
 </TabItem>
 <TabItem label="routes/game/$playerName.tsx">
 <E2ECode path="dungeon-adventure/4/routes/game/$playerName.tsx.template" lang="tsx" />
 
-这是游玩路由。它构建确定性的 `threadId`（``{player}-{genre}`` 填充到 33 个字符——AG-UI 钩子将其原样作为 AgentCore 会话 ID 发送），渲染 `<CopilotChat agentId="agent" threadId={threadId} />`，并在顶部叠加来自 `useGameApi().inventory.query` 的库存。在新线程上（尚未存储消息），路由使用 `useAgent` 发送一条包含玩家姓名和类型的启动消息；代理的系统提示告诉它使用该消息来设置场景。后续访问会命中代理的 `FileSessionManager`，它会重放历史记录，因此启动 `useEffect` 不执行任何操作。
+这是游玩路由。它构建确定性的 `threadId`（``{player}-{genre}`` 填充到 33 个字符——AG-UI 钩子将其原样作为 AgentCore 会话 ID 发送），渲染 `<CopilotChat agentId="agent" threadId={threadId} />`，并在顶部叠加来自 `useGameApi().inventory.query` 的库存。在挂载时，`useGameApi().actions.query({ sessionId: threadId })` 读取代理存储在 S3 中的对话历史记录，如果有任何历史记录，则调用 `agent.setMessages(...)` 来重新激活聊天；否则发送一条启动用户消息来开始故事。`agent.messages` 通过 `useAgent({ updates: [OnMessagesChanged] })` 订阅，因此每个新回合也会重新获取库存查询（MCP 工具调用直接修改 DynamoDB）。
+
+<Aside type="tip" title="等待 `isFetching`，而不是 `isLoading`">
+React Query 的默认缓存会保留第一个结果 5 分钟，因此返回访问最初会看到第一次加载时的陈旧空列表。我们设置 `staleTime: 0` + `refetchOnMount: 'always'` 并在 `!isFetching && isSuccess` 上保护水合 `useEffect`，以便重新启动路径仅在真正空的线程上触发。
+</Aside>
 
 <Aside type="tip" title="确定性 threadId 使 /game/$playerName?genre=... 可共享">
 重新访问相同的 URL——无论是在重新加载、重新部署还是在另一台设备上——都会解析为相同的 `threadId`，因此代理会继续讲述相同的故事。

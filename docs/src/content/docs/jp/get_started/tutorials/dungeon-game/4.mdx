@@ -71,12 +71,16 @@ import gameConversationPng from '@assets/game-conversation.png'
 <TabItem label="routes/index.tsx">
 <E2EDiff before="dungeon-adventure/4/routes/index.tsx.old.template" after="dungeon-adventure/4/routes/index.tsx.template" lang="tsx" />
 
-これはゲームピッカーです: 新規ゲームフォーム（shadcnの`Input` + `Button` + `Card`）と、`useGameApi().games.query`によって供給される「続きから」リスト。ゲームを開始すると`(playerName, genre)`ペアを`saveGame`し（次回表示されるように）、プレイルートに移動します。
+これはゲームピッカーです: 新規ゲームフォーム（shadcnの`Input` + `Button` + `Card`）と、`useInfiniteQuery`を使用した`useGameApi().games.query`によって供給される「続きから」リスト — 下部のセンチネル`<div>`が`IntersectionObserver`によって監視され、ビューにスクロールされると自動的に`fetchNextPage()`を呼び出し、見出しの横とリストの下のスピナーがローディング状態を表示します。ゲームを開始すると`(playerName, genre)`ペアを`saveGame`し（次回表示されるように）、プレイルートに移動します。
 </TabItem>
 <TabItem label="routes/game/$playerName.tsx">
 <E2ECode path="dungeon-adventure/4/routes/game/$playerName.tsx.template" lang="tsx" />
 
-これはプレイルートです。決定論的な`threadId`（``{player}-{genre}``を33文字にパディング — AG-UIフックはこれをそのままAgentCoreセッションIDとして送信）を構築し、`<CopilotChat agentId="agent" threadId={threadId} />`をレンダリングし、`useGameApi().inventory.query`からのインベントリを上にオーバーレイします。新しいスレッド（まだメッセージが保存されていない）では、ルートは`useAgent`を使用してプレイヤーの名前とジャンルを含む1つのプライミングメッセージを送信します。エージェントのシステムプロンプトは、それを使用してシーンを設定するように指示します。その後の訪問では、エージェントの`FileSessionManager`が履歴を再生するため、プライミング`useEffect`は何もしません。
+これはプレイルートです。決定論的な`threadId`（``{player}-{genre}``を33文字にパディング — AG-UIフックはこれをそのままAgentCoreセッションIDとして送信）を構築し、`<CopilotChat agentId="agent" threadId={threadId} />`をレンダリングし、`useGameApi().inventory.query`からのインベントリを上にオーバーレイします。マウント時に、`useGameApi().actions.query({ sessionId: threadId })`がエージェントがS3に保存した会話履歴を読み取り — 履歴がある場合は — `agent.setMessages(...)`を呼び出してチャットを再ハイドレートします。履歴がない場合は、ストーリーを開始するための1つのプライミングユーザーメッセージを送信します。`agent.messages`は`useAgent({ updates: [OnMessagesChanged] })`を介してサブスクライブされているため、新しいターンごとにインベントリクエリも再フェッチされます（MCPツール呼び出しはDynamoDBを直接変更します）。
+
+<Aside type="tip" title="`isLoading`ではなく`isFetching`を待つ">
+React Queryのデフォルトキャッシュは最初の結果を5分間保持するため、再訪問時には最初のロードからの古い空のリストが最初に表示されます。`staleTime: 0` + `refetchOnMount: 'always'`を設定し、ハイドレーション`useEffect`を`!isFetching && isSuccess`でガードすることで、再プライムパスが本当に空のスレッドでのみ実行されるようにします。
+</Aside>
 
 <Aside type="tip" title="決定論的なthreadIdにより/game/$playerName?genre=...が共有可能に">
 同じURLを再訪問すると — リロード後、再デプロイ後、または別のデバイスでも — 同じ`threadId`に解決されるため、エージェントは同じストーリーを語り続けます。

@@ -71,12 +71,16 @@ import gameConversationPng from '@assets/game-conversation.png'
 <TabItem label="routes/index.tsx">
 <E2EDiff before="dungeon-adventure/4/routes/index.tsx.old.template" after="dungeon-adventure/4/routes/index.tsx.template" lang="tsx" />
 
-이것은 게임 선택기입니다: 새 게임 폼(shadcn `Input` + `Button` + `Card`)과 `useGameApi().games.query`로 제공되는 "계속하기" 목록입니다. 게임을 시작하면 `(playerName, genre)` 쌍을 `saveGame`하고(다음에 표시되도록) 플레이 라우트로 이동합니다.
+이것은 게임 선택기입니다: 새 게임 폼(shadcn `Input` + `Button` + `Card`)과 `useInfiniteQuery`를 사용하는 `useGameApi().games.query`로 제공되는 "계속하기" 목록입니다 — 하단 센티널 `<div>`가 `IntersectionObserver`에 의해 감시되어 뷰로 스크롤될 때 자동으로 `fetchNextPage()`를 호출하며, 제목 옆과 목록 아래의 스피너가 로딩 상태를 표시합니다. 게임을 시작하면 `(playerName, genre)` 쌍을 `saveGame`하고(다음에 표시되도록) 플레이 라우트로 이동합니다.
 </TabItem>
 <TabItem label="routes/game/$playerName.tsx">
 <E2ECode path="dungeon-adventure/4/routes/game/$playerName.tsx.template" lang="tsx" />
 
-이것은 플레이 라우트입니다. 결정론적 `threadId`(``{player}-{genre}``를 33자로 패딩 — AG-UI 훅이 이를 그대로 AgentCore 세션 ID로 전송)를 구축하고, `<CopilotChat agentId="agent" threadId={threadId} />`를 렌더링하며, `useGameApi().inventory.query`의 인벤토리를 위에 오버레이합니다. 새로운 스레드(저장된 메시지가 아직 없음)에서 라우트는 `useAgent`를 사용하여 플레이어의 이름과 장르가 포함된 하나의 프라이밍 메시지를 전송합니다. 에이전트의 시스템 프롬프트는 이를 사용하여 장면을 설정하도록 지시합니다. 이후 방문에서는 에이전트의 `FileSessionManager`가 히스토리를 재생하므로 프라이밍 `useEffect`는 작동하지 않습니다.
+이것은 플레이 라우트입니다. 결정론적 `threadId`(``{player}-{genre}``를 33자로 패딩 — AG-UI 훅이 이를 그대로 AgentCore 세션 ID로 전송)를 구축하고, `<CopilotChat agentId="agent" threadId={threadId} />`를 렌더링하며, `useGameApi().inventory.query`의 인벤토리를 위에 오버레이합니다. 마운트 시 `useGameApi().actions.query({ sessionId: threadId })`가 에이전트가 S3에 저장한 대화 히스토리를 읽고 — 히스토리가 있으면 — `agent.setMessages(...)`를 호출하여 채팅을 재수화합니다. 그렇지 않으면 스토리를 시작하기 위해 하나의 프라이밍 사용자 메시지를 전송합니다. `agent.messages`는 `useAgent({ updates: [OnMessagesChanged] })`를 통해 구독되므로 새로운 턴마다 인벤토리 쿼리도 다시 가져옵니다(MCP 도구 호출이 DynamoDB를 직접 변경합니다).
+
+<Aside type="tip" title="`isLoading`이 아닌 `isFetching`을 기다리세요">
+React Query의 기본 캐시는 첫 번째 결과를 5분 동안 유지하므로, 재방문 시 처음에는 맨 처음 로드에서 가져온 오래된 빈 목록을 보게 됩니다. `staleTime: 0` + `refetchOnMount: 'always'`를 설정하고 `!isFetching && isSuccess`에서 수화 `useEffect`를 보호하여 재프라임 경로가 진정으로 비어있는 스레드에서만 실행되도록 합니다.
+</Aside>
 
 <Aside type="tip" title="결정론적 threadId는 /game/$playerName?genre=...를 공유 가능하게 만듭니다">
 동일한 URL을 다시 방문하면 — 새로고침 후, 재배포 후 또는 다른 기기에서든 — 동일한 `threadId`로 해석되므로 에이전트가 동일한 스토리를 계속 전달합니다.

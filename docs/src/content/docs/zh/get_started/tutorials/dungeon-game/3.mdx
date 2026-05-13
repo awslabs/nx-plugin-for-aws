@@ -23,10 +23,10 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 ## 任务 1：实现故事代理
 
-故事代理是一个在 <Link path="get_started/tutorials/dungeon-game/1">模块 1</Link> 中使用 `--protocol=AG-UI` 生成的 [Strands](https://strandsagents.com/) 代理，因此 UI 可以通过 CopilotKit 以 [Agent-User Interaction 协议](https://docs.copilotkit.ai/aws-strands/protocol)从中流式传输数据。它使用库存管理控制协议（MCP）服务器来管理玩家的物品，并使用 `FileSessionManager` 将对话历史持久化到磁盘。
+故事代理是一个在 <Link path="get_started/tutorials/dungeon-game/1">模块 1</Link> 中使用 `--protocol=AG-UI` 生成的 [Strands](https://strandsagents.com/) 代理，因此 UI 可以通过 CopilotKit 以 [Agent-User Interaction 协议](https://docs.copilotkit.ai/aws-strands/protocol)从中流式传输数据。它使用库存管理控制协议（MCP）服务器来管理玩家的物品，并使用 Strands 内置的 [`S3SessionManager`](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/agents/sessions/) 将对话历史持久化到我们在模块 2 中配置的会话存储桶中。
 
 :::note[持久化对话历史]
-每个 AG-UI 请求都携带一个 `thread_id`。我们的 UI 以确定性方式构建该 id，格式为 ``{player}-{genre}``，并填充到 AgentCore 最小长度 33 个字符，因此每个 `(player, genre)` 对都会恢复其自己的故事。在代理端，`StrandsAgentConfig.session_manager_provider` 为每个线程提供一个指向磁盘目录的 `FileSessionManager` —— 因此后续回合会重放存储的消息历史，而无需 UI 发送它。对于生产环境设置，可通过 [AgentCore Memory for Strands](https://github.com/aws/bedrock-agentcore-sdk-python/tree/main/src/bedrock_agentcore/memory/integrations/strands) 将其替换为 [Bedrock AgentCore Memory](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/memory.html)。
+每个 AG-UI 请求都携带一个 `thread_id`。我们的 UI 以确定性方式构建该 id，格式为 ``{player}-{genre}``，并填充到 AgentCore 最小长度 33 个字符，因此每个 `(player, genre)` 对都会恢复其自己的故事。在代理端，`StrandsAgentConfig.session_manager_provider` 为每个线程提供一个指向 `StorySessions` 存储桶的 `S3SessionManager` —— 因此后续回合会重放存储的消息历史，而无需 UI 发送它。由于 Game API 直接从同一存储桶读取消息，浏览器也可以在页面重新加载时显示完整的对话记录。对于生产环境设置，可通过 [AgentCore Memory for Strands](https://github.com/aws/bedrock-agentcore-sdk-python/tree/main/src/bedrock_agentcore/memory/integrations/strands) 将其替换为 [Bedrock AgentCore Memory](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/memory.html)。
 :::
 
 ### 代理实现
@@ -44,7 +44,7 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 更改内容包括：
 
-- `main.py` 添加了一个 `session_manager_provider`，为每个 `thread_id` 创建一个 `FileSessionManager` —— 这使得相同 `(player, genre)` 的对话历史在多个回合中保持一致。
+- `main.py` 添加了一个 `session_manager_provider`，为每个 `thread_id` 创建一个 `S3SessionManager` —— 这使得相同 `(player, genre)` 的对话历史在多个回合中保持一致，并将其放入 Game API 的 `queryActions` 读取的存储桶中。
 - `agent.py` 删除了示例 `subtract` 工具，并将系统提示替换为地牢主持人提示，该提示邀请第一条用户消息说明玩家的姓名和类型，并使用库存 MCP 服务器的工具。
 
 ## 任务 2：部署与测试
@@ -128,7 +128,7 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
         "tools": [], "context": [], "state": {}, "forwardedProps": {}
       }'
     ```
-    在后续调用中重用相同的 `threadId` 将继续相同的故事 —— `FileSessionManager` 会重放之前的消息。
+    在后续调用中重用相同的 `threadId` 将继续相同的故事 —— `S3SessionManager` 会重放之前的消息。
     </Aside>
   </TabItem>
   <TabItem label="已部署">

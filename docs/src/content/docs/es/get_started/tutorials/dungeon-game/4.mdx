@@ -71,12 +71,16 @@ Necesitamos dos rutas — una para elegir un héroe, otra para jugar. Ambas usan
 <TabItem label="routes/index.tsx">
 <E2EDiff before="dungeon-adventure/4/routes/index.tsx.old.template" after="dungeon-adventure/4/routes/index.tsx.template" lang="tsx" />
 
-Este es el selector de juego: formulario de nuevo juego (shadcn `Input` + `Button` + `Card`) más una lista de "Continuar" alimentada por `useGameApi().games.query`. Iniciar un juego guarda con `saveGame` el par `(playerName, genre)` (para que aparezca la próxima vez) y navega a la ruta de juego.
+Este es el selector de juego: formulario de nuevo juego (shadcn `Input` + `Button` + `Card`) más una lista de "Continuar" alimentada por `useGameApi().games.query` con `useInfiniteQuery` — un `<div>` centinela inferior observado por un `IntersectionObserver` llama automáticamente a `fetchNextPage()` cuando se desplaza a la vista, y los spinners junto al encabezado y debajo de la lista muestran el estado de carga. Iniciar un juego guarda con `saveGame` el par `(playerName, genre)` (para que aparezca la próxima vez) y navega a la ruta de juego.
 </TabItem>
 <TabItem label="routes/game/$playerName.tsx">
 <E2ECode path="dungeon-adventure/4/routes/game/$playerName.tsx.template" lang="tsx" />
 
-Esta es la ruta de juego. Construye el `threadId` determinístico (``{player}-{genre}`` rellenado a 33 caracteres — el hook AG-UI lo enviará tal cual como el id de sesión de AgentCore), renderiza `<CopilotChat agentId="agent" threadId={threadId} />`, y superpone el inventario de `useGameApi().inventory.query` encima. En un hilo nuevo (sin mensajes almacenados aún) la ruta usa `useAgent` para enviar un mensaje de preparación con el nombre del jugador y el género; el prompt del sistema del agente le indica que use eso para establecer la escena. Las visitas posteriores acceden al `FileSessionManager` del agente, que reproduce el historial, por lo que el `useEffect` de preparación no hace nada.
+Esta es la ruta de juego. Construye el `threadId` determinístico (``{player}-{genre}`` rellenado a 33 caracteres — el hook AG-UI lo enviará tal cual como el id de sesión de AgentCore), renderiza `<CopilotChat agentId="agent" threadId={threadId} />`, y superpone el inventario de `useGameApi().inventory.query` encima. Al montarse, `useGameApi().actions.query({ sessionId: threadId })` lee el historial de conversación que el agente ha almacenado en S3 y — si hay alguno — llama a `agent.setMessages(...)` para rehidratar el chat; de lo contrario, envía un mensaje de usuario de preparación para iniciar la historia. `agent.messages` está suscrito mediante `useAgent({ updates: [OnMessagesChanged] })` por lo que cada nuevo turno también vuelve a obtener la consulta del inventario (las llamadas a herramientas MCP mutan DynamoDB directamente).
+
+<Aside type="tip" title="Espera `isFetching`, no `isLoading`">
+El caché predeterminado de React Query retiene el primer resultado durante 5 minutos, por lo que una visita de retorno inicialmente ve la lista vacía obsoleta de la primera carga. Establecemos `staleTime: 0` + `refetchOnMount: 'always'` y protegemos el `useEffect` de hidratación con `!isFetching && isSuccess` para que la ruta de re-preparación solo se active en un hilo genuinamente vacío.
+</Aside>
 
 <Aside type="tip" title="Los threadIds determinísticos hacen que /game/$playerName?genre=... sea compartible">
 Volver a visitar la misma URL — ya sea después de una recarga, un redespliegue o en otro dispositivo — se resuelve al mismo `threadId`, por lo que el agente sigue contando la misma historia.

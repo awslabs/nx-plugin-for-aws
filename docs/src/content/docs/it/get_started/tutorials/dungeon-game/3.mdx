@@ -23,10 +23,10 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 ## Task 1: Implementare lo Story Agent
 
-Lo Story Agent è un agente [Strands](https://strandsagents.com/) generato con `--protocol=AG-UI` nel <Link path="get_started/tutorials/dungeon-game/1">Modulo 1</Link>, in modo che l'interfaccia utente possa ricevere lo streaming da esso tramite il [protocollo Agent-User Interaction](https://docs.copilotkit.ai/aws-strands/protocol) via CopilotKit. Utilizza il server MCP dell'inventario per gestire gli oggetti del giocatore e un `FileSessionManager` per persistere la cronologia delle conversazioni su disco.
+Lo Story Agent è un agente [Strands](https://strandsagents.com/) generato con `--protocol=AG-UI` nel <Link path="get_started/tutorials/dungeon-game/1">Modulo 1</Link>, in modo che l'interfaccia utente possa ricevere lo streaming da esso tramite il [protocollo Agent-User Interaction](https://docs.copilotkit.ai/aws-strands/protocol) via CopilotKit. Utilizza il server MCP dell'inventario per gestire gli oggetti del giocatore e l'[`S3SessionManager`](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/agents/sessions/) integrato di Strands per persistere la cronologia delle conversazioni nel bucket delle sessioni che abbiamo fornito nel Modulo 2.
 
 :::note[Persistenza della cronologia delle conversazioni]
-Ogni richiesta AG-UI trasporta un `thread_id`. La nostra UI costruisce quell'id in modo deterministico come ``{player}-{genre}`` riempito fino alla lunghezza minima di AgentCore di 33 caratteri, così ogni coppia `(player, genre)` riprende la propria storia. Sul lato dell'agente, `StrandsAgentConfig.session_manager_provider` fornisce a ogni thread un `FileSessionManager` puntato a una directory su disco — così i turni successivi riproducono la cronologia dei messaggi memorizzata senza che l'interfaccia utente debba inviarla. Per una configurazione di produzione, sostituisci questo con [Bedrock AgentCore Memory](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/memory.html) tramite [AgentCore Memory for Strands](https://github.com/aws/bedrock-agentcore-sdk-python/tree/main/src/bedrock_agentcore/memory/integrations/strands).
+Ogni richiesta AG-UI trasporta un `thread_id`. La nostra UI costruisce quell'id in modo deterministico come ``{player}-{genre}`` riempito fino alla lunghezza minima di AgentCore di 33 caratteri, così ogni coppia `(player, genre)` riprende la propria storia. Sul lato dell'agente, `StrandsAgentConfig.session_manager_provider` fornisce a ogni thread un `S3SessionManager` puntato al bucket `StorySessions` — così i turni successivi riproducono la cronologia dei messaggi memorizzata senza che l'interfaccia utente debba inviarla. Poiché la Game API legge i messaggi direttamente dallo stesso bucket, il browser può anche mostrare la trascrizione completa al ricaricamento della pagina. Per una configurazione di produzione, sostituisci questo con [Bedrock AgentCore Memory](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/memory.html) tramite [AgentCore Memory for Strands](https://github.com/aws/bedrock-agentcore-sdk-python/tree/main/src/bedrock_agentcore/memory/integrations/strands).
 :::
 
 ### Implementazione dell'agente
@@ -44,7 +44,7 @@ Aggiorna i seguenti file in `packages/story/dungeon_adventure_story/agent`:
 
 Le modifiche sono:
 
-- `main.py` aggiunge un `session_manager_provider` che crea un `FileSessionManager` per ogni `thread_id` — questo è ciò che fa persistere la cronologia delle conversazioni tra i turni per la stessa coppia `(player, genre)`.
+- `main.py` aggiunge un `session_manager_provider` che crea un `S3SessionManager` per ogni `thread_id` — questo è ciò che fa persistere la cronologia delle conversazioni tra i turni per la stessa coppia `(player, genre)`, e la inserisce nel bucket da cui legge il `queryActions` della Game API.
 - `agent.py` rimuove lo strumento di esempio `subtract` e sostituisce il prompt di sistema con uno da dungeon-master che invita il primo messaggio dell'utente a dichiarare il nome del giocatore e il genere, e utilizza gli strumenti del server MCP dell'inventario.
 
 ## Task 2: Deployment e testing
@@ -128,7 +128,7 @@ Puoi testare il tuo Agent in due modi:
         "tools": [], "context": [], "state": {}, "forwardedProps": {}
       }'
     ```
-    Riutilizzare lo stesso `threadId` nelle chiamate successive continuerà la stessa storia — il `FileSessionManager` riproduce i messaggi precedenti.
+    Riutilizzare lo stesso `threadId` nelle chiamate successive continuerà la stessa storia — l'`S3SessionManager` riproduce i messaggi precedenti.
     </Aside>
   </TabItem>
   <TabItem label="Deployed">

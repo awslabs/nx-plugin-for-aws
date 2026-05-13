@@ -23,10 +23,10 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 ## Nhiệm vụ 1: Triển khai Story Agent
 
-Story Agent là một agent [Strands](https://strandsagents.com/) được tạo với `--protocol=AG-UI` trong <Link path="get_started/tutorials/dungeon-game/1">Module 1</Link>, để UI có thể stream từ nó qua [Agent-User Interaction protocol](https://docs.copilotkit.ai/aws-strands/protocol) thông qua CopilotKit. Nó sử dụng Inventory MCP Server để quản lý các vật phẩm của người chơi, và một `FileSessionManager` để lưu trữ lịch sử hội thoại trên đĩa.
+Story Agent là một agent [Strands](https://strandsagents.com/) được tạo với `--protocol=AG-UI` trong <Link path="get_started/tutorials/dungeon-game/1">Module 1</Link>, để UI có thể stream từ nó qua [Agent-User Interaction protocol](https://docs.copilotkit.ai/aws-strands/protocol) thông qua CopilotKit. Nó sử dụng Inventory MCP Server để quản lý các vật phẩm của người chơi, và [`S3SessionManager`](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/agents/sessions/) tích hợp sẵn của Strands để lưu trữ lịch sử hội thoại vào sessions bucket mà chúng ta đã cung cấp trong Module 2.
 
 :::note[Lưu trữ lịch sử hội thoại]
-Mỗi request AG-UI mang theo một `thread_id`. UI của chúng ta xây dựng id đó một cách xác định theo dạng ``{player}-{genre}`` được đệm đến độ dài tối thiểu của AgentCore là 33 ký tự, do đó mỗi cặp `(player, genre)` tiếp tục câu chuyện riêng của nó. Ở phía agent, `StrandsAgentConfig.session_manager_provider` cung cấp cho mỗi thread một `FileSessionManager` trỏ đến một thư mục trên đĩa — do đó các lượt tiếp theo sẽ phát lại lịch sử tin nhắn đã lưu mà không cần UI phải gửi lại. Đối với thiết lập sản xuất, hãy thay thế bằng [Bedrock AgentCore Memory](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/memory.html) thông qua [AgentCore Memory for Strands](https://github.com/aws/bedrock-agentcore-sdk-python/tree/main/src/bedrock_agentcore/memory/integrations/strands).
+Mỗi request AG-UI mang theo một `thread_id`. UI của chúng ta xây dựng id đó một cách xác định theo dạng ``{player}-{genre}`` được đệm đến độ dài tối thiểu của AgentCore là 33 ký tự, do đó mỗi cặp `(player, genre)` tiếp tục câu chuyện riêng của nó. Ở phía agent, `StrandsAgentConfig.session_manager_provider` cung cấp cho mỗi thread một `S3SessionManager` trỏ đến bucket `StorySessions` — do đó các lượt tiếp theo sẽ phát lại lịch sử tin nhắn đã lưu mà không cần UI phải gửi lại. Bởi vì Game API đọc tin nhắn trực tiếp từ cùng một bucket, trình duyệt cũng có thể hiển thị toàn bộ bản ghi khi tải lại trang. Đối với thiết lập sản xuất, hãy thay thế bằng [Bedrock AgentCore Memory](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/memory.html) thông qua [AgentCore Memory for Strands](https://github.com/aws/bedrock-agentcore-sdk-python/tree/main/src/bedrock_agentcore/memory/integrations/strands).
 :::
 
 ### Triển khai Agent
@@ -44,7 +44,7 @@ Cập nhật các file sau trong `packages/story/dungeon_adventure_story/agent`:
 
 Các thay đổi là:
 
-- `main.py` thêm một `session_manager_provider` tạo ra một `FileSessionManager` cho mỗi `thread_id` — đây là điều làm cho lịch sử hội thoại được duy trì qua các lượt cho cùng một `(player, genre)`.
+- `main.py` thêm một `session_manager_provider` tạo ra một `S3SessionManager` cho mỗi `thread_id` — đây là điều làm cho lịch sử hội thoại được duy trì qua các lượt cho cùng một `(player, genre)`, và đặt nó vào bucket mà `queryActions` của Game API đọc từ đó.
 - `agent.py` loại bỏ sample tool `subtract` và thay thế system prompt bằng một prompt dungeon-master mời tin nhắn đầu tiên của người dùng nêu tên người chơi và thể loại, đồng thời sử dụng các tool của Inventory MCP Server.
 
 ## Nhiệm vụ 2: Triển khai và kiểm thử
@@ -128,7 +128,7 @@ Bạn có thể kiểm thử Agent của mình bằng một trong hai cách:
         "tools": [], "context": [], "state": {}, "forwardedProps": {}
       }'
     ```
-    Sử dụng lại cùng một `threadId` trong các lần gọi tiếp theo sẽ tiếp tục cùng một câu chuyện — `FileSessionManager` phát lại các tin nhắn trước đó.
+    Sử dụng lại cùng một `threadId` trong các lần gọi tiếp theo sẽ tiếp tục cùng một câu chuyện — `S3SessionManager` phát lại các tin nhắn trước đó.
     </Aside>
   </TabItem>
   <TabItem label="Deployed">

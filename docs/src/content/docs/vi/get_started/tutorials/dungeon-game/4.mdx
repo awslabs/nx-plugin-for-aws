@@ -71,12 +71,16 @@ Chúng ta cần hai route — một để chọn nhân vật, một để chơi.
 <TabItem label="routes/index.tsx">
 <E2EDiff before="dungeon-adventure/4/routes/index.tsx.old.template" after="dungeon-adventure/4/routes/index.tsx.template" lang="tsx" />
 
-Đây là bộ chọn trò chơi: form trò chơi mới (shadcn `Input` + `Button` + `Card`) cộng với danh sách "Tiếp tục" được cung cấp bởi `useGameApi().games.query`. Bắt đầu một trò chơi sẽ `saveGame` cặp `(playerName, genre)` (để nó hiển thị lần sau) và điều hướng đến route chơi.
+Đây là bộ chọn trò chơi: form trò chơi mới (shadcn `Input` + `Button` + `Card`) cộng với danh sách "Tiếp tục" được cung cấp bởi `useGameApi().games.query` với `useInfiniteQuery` — một `<div>` sentinel ở dưới cùng được theo dõi bởi `IntersectionObserver` tự động gọi `fetchNextPage()` khi được cuộn vào tầm nhìn, và các spinner bên cạnh tiêu đề và bên dưới danh sách hiển thị trạng thái đang tải. Bắt đầu một trò chơi sẽ `saveGame` cặp `(playerName, genre)` (để nó hiển thị lần sau) và điều hướng đến route chơi.
 </TabItem>
 <TabItem label="routes/game/$playerName.tsx">
 <E2ECode path="dungeon-adventure/4/routes/game/$playerName.tsx.template" lang="tsx" />
 
-Đây là route chơi. Nó xây dựng `threadId` xác định (``{player}-{genre}`` được đệm đến 33 ký tự — hook AG-UI sẽ gửi nó nguyên văn làm session id của AgentCore), render `<CopilotChat agentId="agent" threadId={threadId} />`, và phủ lên trên inventory từ `useGameApi().inventory.query`. Trên một thread mới (chưa có tin nhắn được lưu trữ), route sử dụng `useAgent` để gửi một tin nhắn khởi tạo với tên người chơi và thể loại; system prompt của agent yêu cầu nó sử dụng điều đó để thiết lập bối cảnh. Các lần truy cập tiếp theo sẽ truy cập `FileSessionManager` của agent, phát lại lịch sử nên `useEffect` khởi tạo không thực hiện gì.
+Đây là route chơi. Nó xây dựng `threadId` xác định (``{player}-{genre}`` được đệm đến 33 ký tự — hook AG-UI sẽ gửi nó nguyên văn làm session id của AgentCore), render `<CopilotChat agentId="agent" threadId={threadId} />`, và phủ lên trên inventory từ `useGameApi().inventory.query`. Khi mount, `useGameApi().actions.query({ sessionId: threadId })` đọc lịch sử hội thoại mà agent đã lưu trữ trong S3 và — nếu có — gọi `agent.setMessages(...)` để rehydrate chat; nếu không nó gửi một tin nhắn người dùng khởi tạo để bắt đầu câu chuyện. `agent.messages` được đăng ký qua `useAgent({ updates: [OnMessagesChanged] })` nên mỗi lượt mới cũng refetch lại inventory query (các lời gọi MCP tool thay đổi DynamoDB trực tiếp).
+
+<Aside type="tip" title="Đợi `isFetching`, không phải `isLoading`">
+Cache mặc định của React Query giữ lại kết quả đầu tiên trong 5 phút, vì vậy một lần truy cập lại ban đầu sẽ thấy danh sách trống cũ từ lần tải đầu tiên. Chúng ta đặt `staleTime: 0` + `refetchOnMount: 'always'` và bảo vệ `useEffect` hydration bằng `!isFetching && isSuccess` để đường dẫn re-prime chỉ kích hoạt trên một thread thực sự trống.
+</Aside>
 
 <Aside type="tip" title="threadId xác định làm cho /game/$playerName?genre=... có thể chia sẻ">
 Truy cập lại cùng một URL — dù sau khi tải lại, triển khai lại, hoặc trên thiết bị khác — sẽ phân giải thành cùng một `threadId`, vì vậy agent tiếp tục kể cùng một câu chuyện.

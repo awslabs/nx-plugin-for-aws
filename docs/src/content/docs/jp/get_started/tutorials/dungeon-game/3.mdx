@@ -23,10 +23,10 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 ## タスク1: ストーリーエージェントの実装
 
-ストーリーエージェントは、<Link path="get_started/tutorials/dungeon-game/1">モジュール1</Link>で`--protocol=AG-UI`を指定して生成された[Strands](https://strandsagents.com/)エージェントです。これにより、UIはCopilotKitを介して[Agent-User Interactionプロトコル](https://docs.copilotkit.ai/aws-strands/protocol)でストリーミングできます。インベントリMCPサーバーを使用してプレイヤーのアイテムを管理し、`FileSessionManager`を使用して会話履歴をディスクに永続化します。
+ストーリーエージェントは、<Link path="get_started/tutorials/dungeon-game/1">モジュール1</Link>で`--protocol=AG-UI`を指定して生成された[Strands](https://strandsagents.com/)エージェントです。これにより、UIはCopilotKitを介して[Agent-User Interactionプロトコル](https://docs.copilotkit.ai/aws-strands/protocol)でストリーミングできます。インベントリMCPサーバーを使用してプレイヤーのアイテムを管理し、Strandsの組み込み[`S3SessionManager`](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/agents/sessions/)を使用して、モジュール2でプロビジョニングしたセッションバケットに会話履歴を永続化します。
 
 :::note[会話履歴の永続化]
-各AG-UIリクエストには`thread_id`が含まれます。UIは、このIDを``{player}-{genre}``という形式で決定論的に構築し、AgentCoreの最小長である33文字にパディングします。これにより、各`(player, genre)`ペアが独自のストーリーを再開できます。エージェント側では、`StrandsAgentConfig.session_manager_provider`が各スレッドにディスクディレクトリを指す`FileSessionManager`を提供します。これにより、UIが送信しなくても、後続のターンで保存されたメッセージ履歴が再生されます。本番環境では、[AgentCore Memory for Strands](https://github.com/aws/bedrock-agentcore-sdk-python/tree/main/src/bedrock_agentcore/memory/integrations/strands)を介して[Bedrock AgentCore Memory](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/memory.html)に置き換えてください。
+各AG-UIリクエストには`thread_id`が含まれます。UIは、このIDを``{player}-{genre}``という形式で決定論的に構築し、AgentCoreの最小長である33文字にパディングします。これにより、各`(player, genre)`ペアが独自のストーリーを再開できます。エージェント側では、`StrandsAgentConfig.session_manager_provider`が各スレッドに`StorySessions`バケットを指す`S3SessionManager`を提供します。これにより、UIが送信しなくても、後続のターンで保存されたメッセージ履歴が再生されます。Game APIは同じバケットから直接メッセージを読み取るため、ブラウザはページのリロード時にも完全なトランスクリプトを表示できます。本番環境では、[AgentCore Memory for Strands](https://github.com/aws/bedrock-agentcore-sdk-python/tree/main/src/bedrock_agentcore/memory/integrations/strands)を介して[Bedrock AgentCore Memory](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/memory.html)に置き換えてください。
 :::
 
 ### エージェント実装
@@ -44,7 +44,7 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 変更内容は以下の通りです：
 
-- `main.py`は、`thread_id`ごとに`FileSessionManager`を作成する`session_manager_provider`を追加します。これにより、同じ`(player, genre)`に対して会話履歴がターンをまたいで保持されます。
+- `main.py`は、`thread_id`ごとに`S3SessionManager`を作成する`session_manager_provider`を追加します。これにより、同じ`(player, genre)`に対して会話履歴がターンをまたいで保持され、Game APIの`queryActions`が読み取るバケットに配置されます。
 - `agent.py`は、サンプルの`subtract`ツールを削除し、システムプロンプトをダンジョンマスター用のものに置き換えます。このプロンプトは、最初のユーザーメッセージでプレイヤーの名前とジャンルを述べるよう促し、インベントリMCPサーバーのツールを使用します。
 
 ## タスク2: デプロイとテスト
@@ -128,7 +128,7 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
         "tools": [], "context": [], "state": {}, "forwardedProps": {}
       }'
     ```
-    後続の呼び出しで同じ`threadId`を再利用すると、同じストーリーが続きます。`FileSessionManager`が以前のメッセージを再生します。
+    後続の呼び出しで同じ`threadId`を再利用すると、同じストーリーが続きます。`S3SessionManager`が以前のメッセージを再生します。
     </Aside>
   </TabItem>
   <TabItem label="デプロイ済み">

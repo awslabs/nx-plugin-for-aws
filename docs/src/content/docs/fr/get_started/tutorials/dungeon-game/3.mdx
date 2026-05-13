@@ -23,10 +23,10 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 ## Tâche 1 : Implémenter le Story Agent
 
-Le Story Agent est un agent [Strands](https://strandsagents.com/) généré avec `--protocol=AG-UI` dans le <Link path="get_started/tutorials/dungeon-game/1">Module 1</Link>, afin que l'interface utilisateur puisse diffuser depuis celui-ci via le [protocole Agent-User Interaction](https://docs.copilotkit.ai/aws-strands/protocol) via CopilotKit. Il utilise l'Inventory MCP Server pour gérer les objets du joueur, et un `FileSessionManager` pour persister l'historique des conversations sur disque.
+Le Story Agent est un agent [Strands](https://strandsagents.com/) généré avec `--protocol=AG-UI` dans le <Link path="get_started/tutorials/dungeon-game/1">Module 1</Link>, afin que l'interface utilisateur puisse diffuser depuis celui-ci via le [protocole Agent-User Interaction](https://docs.copilotkit.ai/aws-strands/protocol) via CopilotKit. Il utilise l'Inventory MCP Server pour gérer les objets du joueur, et le [`S3SessionManager`](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/agents/sessions/) intégré de Strands pour persister l'historique des conversations dans le bucket de sessions que nous avons provisionné dans le Module 2.
 
 :::note[Persistance de l'historique des conversations]
-Chaque requête AG-UI transporte un `thread_id`. Notre interface utilisateur construit cet identifiant de manière déterministe sous la forme ``{player}-{genre}`` complété jusqu'à la longueur minimale d'AgentCore de 33 caractères, de sorte que chaque paire `(player, genre)` reprend sa propre histoire. Du côté de l'agent, `StrandsAgentConfig.session_manager_provider` fournit à chaque thread un `FileSessionManager` pointant vers un répertoire disque — ainsi les tours suivants rejouent l'historique des messages stockés sans que l'interface utilisateur ait à l'envoyer. Pour une configuration de production, remplacez ceci par [Bedrock AgentCore Memory](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/memory.html) via [AgentCore Memory pour Strands](https://github.com/aws/bedrock-agentcore-sdk-python/tree/main/src/bedrock_agentcore/memory/integrations/strands).
+Chaque requête AG-UI transporte un `thread_id`. Notre interface utilisateur construit cet identifiant de manière déterministe sous la forme ``{player}-{genre}`` complété jusqu'à la longueur minimale d'AgentCore de 33 caractères, de sorte que chaque paire `(player, genre)` reprend sa propre histoire. Du côté de l'agent, `StrandsAgentConfig.session_manager_provider` fournit à chaque thread un `S3SessionManager` pointant vers le bucket `StorySessions` — ainsi les tours suivants rejouent l'historique des messages stockés sans que l'interface utilisateur ait à l'envoyer. Comme l'API Game lit les messages directement depuis le même bucket, le navigateur peut également afficher la transcription complète lors du rechargement de la page. Pour une configuration de production, remplacez ceci par [Bedrock AgentCore Memory](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/memory.html) via [AgentCore Memory pour Strands](https://github.com/aws/bedrock-agentcore-sdk-python/tree/main/src/bedrock_agentcore/memory/integrations/strands).
 :::
 
 ### Implémentation de l'agent
@@ -44,7 +44,7 @@ Mettez à jour les fichiers suivants dans `packages/story/dungeon_adventure_stor
 
 Les modifications sont :
 
-- `main.py` ajoute un `session_manager_provider` qui crée un `FileSessionManager` par `thread_id` — c'est ce qui permet à l'historique des conversations de persister entre les tours pour la même paire `(player, genre)`.
+- `main.py` ajoute un `session_manager_provider` qui crée un `S3SessionManager` par `thread_id` — c'est ce qui permet à l'historique des conversations de persister entre les tours pour la même paire `(player, genre)`, et le place dans le bucket depuis lequel le `queryActions` de l'API Game lit.
 - `agent.py` supprime l'outil d'exemple `subtract` et remplace le prompt système par un prompt de maître de donjon qui invite le premier message utilisateur à indiquer le nom du joueur et le genre, et utilise les outils de l'Inventory MCP Server.
 
 ## Tâche 2 : Déploiement et tests
@@ -128,7 +128,7 @@ Vous pouvez tester votre Agent via :
         "tools": [], "context": [], "state": {}, "forwardedProps": {}
       }'
     ```
-    Réutiliser le même `threadId` lors des appels suivants continuera la même histoire — le `FileSessionManager` rejoue les messages précédents.
+    Réutiliser le même `threadId` lors des appels suivants continuera la même histoire — le `S3SessionManager` rejoue les messages précédents.
     </Aside>
   </TabItem>
   <TabItem label="Deployed">
