@@ -742,23 +742,25 @@ describe('react-website generator uxProvider tests', () => {
       expect(tree.exists('components.json')).toBeTruthy();
     });
 
-    it('should ensure .npmrc ignores workspace root check when using Shadcn', async () => {
+    it('should ensure pnpm-workspace.yaml ignores workspace root check when using Shadcn', async () => {
       await tsReactWebsiteGenerator(tree, options);
 
-      const npmrc = tree.read('.npmrc', 'utf-8') ?? '';
-      const npmrcLines = npmrc.split(/\r?\n/);
-      expect(npmrcLines).toContain('ignore-workspace-root-check=true');
+      const workspaceYaml = tree.read('pnpm-workspace.yaml', 'utf-8') ?? '';
+      expect(workspaceYaml).toMatch(/ignoreWorkspaceRootCheck:\s*true/);
     });
 
-    it('should append ignore-workspace-root-check to existing .npmrc', async () => {
-      tree.write('.npmrc', 'strict-peer-dependencies=false\n');
+    it('should preserve existing pnpm-workspace.yaml entries when enabling ignoreWorkspaceRootCheck', async () => {
+      tree.write(
+        'pnpm-workspace.yaml',
+        "packages:\n  - packages/*\nallowBuilds:\n  '@swc/core': true\n",
+      );
 
       await tsReactWebsiteGenerator(tree, options);
 
-      const npmrc = tree.read('.npmrc', 'utf-8') ?? '';
-      const npmrcLines = npmrc.split(/\r?\n/).filter(Boolean);
-      expect(npmrcLines).toContain('strict-peer-dependencies=false');
-      expect(npmrcLines).toContain('ignore-workspace-root-check=true');
+      const workspaceYaml = tree.read('pnpm-workspace.yaml', 'utf-8') ?? '';
+      expect(workspaceYaml).toMatch(/ignoreWorkspaceRootCheck:\s*true/);
+      expect(workspaceYaml).toMatch(/packages:/);
+      expect(workspaceYaml).toMatch(/@swc\/core/);
     });
 
     it('should use shared Shadcn components when uxProvider is Shadcn', async () => {
