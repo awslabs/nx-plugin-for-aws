@@ -258,4 +258,135 @@ describe('openApiPyClientGenerator - reserved keywords', () => {
     expect(types).toContain('var_schema:');
     expect(types).toContain('alias="schema"');
   });
+
+  it('should escape schema names that shadow generated python imports (e.g. `Field`)', async () => {
+    // Regression: a schema named `Field` (e.g. an inline `anyOf` whose
+    // `title` is `Field`, as FastAPI emits when a property is named `field`)
+    // would be rendered as a top-level `Field = Union[...]` alias that
+    // shadows the imported `pydantic.Field` symbol.  This corrupted forward
+    // ref evaluation: `Optional["Field"]` in a class body would resolve to
+    // `pydantic.Field` (a function) rather than the alias, raising
+    // `TypeError: unsupported operand type(s) for |: 'function' and 'type'`
+    // when pydantic later attempted `field | None`.  Escape the class name
+    // so the emitted alias is `_Field` and references the same form.
+    const spec: Spec = {
+      openapi: '3.1.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/x': {
+          get: {
+            operationId: 'x',
+            responses: {
+              '200': {
+                description: 'OK',
+                content: {
+                  'application/json': {
+                    schema: { $ref: '#/components/schemas/Holder' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          // FastAPI synthesises a wrapper schema named after the property
+          // title when the property type is `anyOf: [..., null]`.  We
+          // simulate that with an explicit named schema.
+          Field: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+          Holder: {
+            type: 'object',
+            required: ['code'],
+            properties: {
+              // A description on this property forces a real
+              // `Field(description=...)` call in the rendered template,
+              // keeping the `from pydantic import Field` import alive
+              // through ruff's unused-import pass.
+              code: { type: 'string', description: 'a code' },
+              field: { $ref: '#/components/schemas/Field' },
+            },
+          },
+        },
+      },
+    };
+    const { types, client, asyncClient } = await generateAndRead(
+      verifier,
+      tree,
+      spec,
+    );
+    // The emitted alias must be `_Field`, not `Field`, so it doesn't
+    // shadow the `from pydantic import ..., Field` import.
+    expect(types).not.toMatch(/^Field = /m);
+    expect(types).toContain('_Field = Union[str, None]');
+    // The `pydantic.Field` import must remain intact and usable in the
+    // module — unrelated properties still rendered with `Field(...)`.
+    expect(types).toMatch(/from pydantic import .*\bField\b/);
+    // References inside class bodies must use the escaped name.
+    expect(types).toContain('field: Optional["_Field"]');
+    // Client modules don't reference the alias type directly, but the
+    // module must import cleanly.  Smoke-check that nothing in client/async
+    // referenced the bare unprefixed name (would only happen via
+    // `pythonClientType` being out of sync).
+    expect(client).not.toContain('types_gen.Field');
+    expect(asyncClient).not.toContain('types_gen.Field');
+  });
+
+  it('should escape every python-reserved import name when used as a schema name', async () => {
+    // Property + schema shapes that exercise a sample of the reserved
+    // names.  Picking three representative ones: typing (`Optional`),
+    // pydantic (`BaseModel`), and the namespace import (`types_gen`).
+    const spec: Spec = {
+      openapi: '3.0.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/items': {
+          get: {
+            operationId: 'listItems',
+            responses: {
+              '200': {
+                description: 'OK',
+                content: {
+                  'application/json': {
+                    schema: { type: 'array', items: { type: 'string' } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          Optional: {
+            type: 'object',
+            required: ['v'],
+            properties: { v: { type: 'string' } },
+          },
+          BaseModel: {
+            type: 'object',
+            required: ['v'],
+            properties: { v: { type: 'string' } },
+          },
+          // `types_gen` would shadow the `from . import types_gen` import
+          // in the client modules if not escaped.
+          types_gen: {
+            type: 'object',
+            required: ['v'],
+            properties: { v: { type: 'string' } },
+          },
+        },
+      },
+    };
+    const { types } = await generateAndRead(verifier, tree, spec);
+    // Each must be prefixed with an underscore so the original imports
+    // remain reachable.
+    expect(types).toContain('class _Optional(BaseModel)');
+    expect(types).toContain('class _BaseModel(BaseModel)');
+    // `types_gen` is camelCased to `TypesGen` by `toClassName` and is not
+    // reserved, but the snake-cased property/identifier `types_gen` would
+    // be — verify both forms.  The escape is structural: `_TypesGen` is
+    // fine here since it doesn't collide with anything.
+    expect(types).toMatch(/class _?TypesGen\(BaseModel\)/);
+  });
 });

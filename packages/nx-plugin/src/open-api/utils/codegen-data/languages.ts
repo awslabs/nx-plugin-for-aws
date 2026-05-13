@@ -98,6 +98,56 @@ const PYTHON_BUILTIN_TYPES = new Set([
 ]);
 
 /**
+ * Names that the generated `types_gen.py` and client modules import or define
+ * at module scope.  A user-defined schema named `Field`, `Optional`, etc.
+ * would shadow these imports and either break forward-ref resolution
+ * (`Optional["Field"]` resolves to `pydantic.Field` without escaping) or
+ * silently produce invalid runtime types.
+ *
+ * Keep this aligned with the imports at the top of:
+ *  - files/shared/types_gen.py.template
+ *  - files/sync/client_gen.py.template
+ *  - files/async/async_client_gen.py.template
+ */
+const PYTHON_RESERVED_MODEL_NAMES = new Set([
+  // typing module
+  'Any',
+  'Literal',
+  'Never',
+  'Optional',
+  'TypedDict',
+  'Union',
+  // pydantic
+  'BaseModel',
+  'ConfigDict',
+  'Field',
+  'TypeAdapter',
+  // stdlib modules referenced in templates
+  'Iterator',
+  'AsyncIterator',
+  // typing/python builtins that would also shadow primitives
+  'None',
+  'True',
+  'False',
+  'Type',
+  // namespace import in client_gen.py — never let a user model collide
+  'types_gen',
+  // base exception we emit
+  'ApiError',
+]);
+
+/**
+ * Return the Python class name for a model.  Starts from the TypeScript
+ * escape (which already handles TS-reserved names like `Error` → `_Error`)
+ * and additionally escapes names that would shadow imports in the generated
+ * Python files.
+ */
+export const toPythonClassName = (name: string): string => {
+  const tsName = toTypeScriptModelName(name);
+  return PYTHON_RESERVED_MODEL_NAMES.has(tsName) ? `_${tsName}` : tsName;
+};
+
+/**
  * Returns true if the given python type name is a built-in (not a user-defined
  * model).
  */
@@ -142,9 +192,10 @@ const toPythonPrimitive = (property: Model): string => {
     return 'str';
   }
   // Fall-through is a user-defined model reference.  The py-client emits
-  // classes using `typescriptName` (which escapes TS-reserved names like
-  // `Error` → `_Error`), so references must use the same escaped form.
-  return toTypeScriptModelName(property.type);
+  // classes using `pythonClassName` (which escapes TS-reserved names like
+  // `Error` → `_Error` AND Python-imported names like `Field` → `_Field`),
+  // so references must use the same escaped form.
+  return toPythonClassName(property.type);
 };
 
 /**
@@ -215,16 +266,17 @@ export const toPythonType = (property: Model): string => {
     case 'one-of':
     case 'any-of':
     case 'all-of':
-      return toTypeScriptModelName(property.name);
+      return toPythonClassName(property.name);
     default:
       // "any"/"unknown" has export = interface — route to the primitive path
       // so they become `Any` rather than being treated as a model reference.
       if (PRIMITIVE_TYPES.has(property.type) || property.type === 'unknown') {
         return toPythonPrimitive(property);
       }
-      // User-defined model reference — escape TS-reserved names so the
-      // rendered type matches the emitted class (`Error` → `_Error`, etc.).
-      return toTypeScriptModelName(property.type);
+      // User-defined model reference — escape names so the rendered type
+      // matches the emitted class (`Error` → `_Error`, `Field` → `_Field`,
+      // etc.).
+      return toPythonClassName(property.type);
   }
 };
 
@@ -295,13 +347,13 @@ export const toPythonAnnotation = (property: Model): string => {
       case 'one-of':
       case 'any-of':
       case 'all-of':
-        return `"${toTypeScriptModelName(p.name)}"`;
+        return `"${toPythonClassName(p.name)}"`;
       default: {
         if (p.type === 'unknown' || p.type === 'any') return 'Any';
         if (PRIMITIVE_TYPES.has(p.type)) {
           return toPythonPrimitive(p);
         }
-        const escaped = toTypeScriptModelName(p.type);
+        const escaped = toPythonClassName(p.type);
         return isPythonBuiltin(escaped) ? escaped : `"${escaped}"`;
       }
     }

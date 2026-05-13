@@ -26,6 +26,7 @@ import {
   toPythonAnnotation,
   toTypeScriptName,
   toTypeScriptModelName,
+  toPythonClassName,
   qualifyPythonType,
 } from './codegen-data/languages';
 import {
@@ -461,6 +462,10 @@ export const buildOpenApiCodeGenData = async (
     // Set the model's typescript name and type
     (model as any).typescriptName = toTypeScriptModelName(model.name);
     (model as any).typescriptType = (model as any).typescriptName;
+    // Python class name additionally escapes Python-import collisions
+    // (e.g. `Field` → `_Field`) so the generated module's pydantic.Field
+    // import isn't shadowed by a user schema with the same name.
+    (model as any).pythonClassName = toPythonClassName(model.name);
   }
 
   // Order models lexicographically by name
