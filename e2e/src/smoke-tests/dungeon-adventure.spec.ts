@@ -77,7 +77,7 @@ describe('smoke test - dungeon-adventure', () => {
       opts,
     );
     await runCLI(
-      `generate @aws/nx-plugin:py#strands-agent --project=story --auth=Cognito --no-interactive`,
+      `generate @aws/nx-plugin:py#strands-agent --project=story --auth=Cognito --protocol=AG-UI --no-interactive`,
       opts,
     );
     await runCLI(
@@ -89,7 +89,7 @@ describe('smoke test - dungeon-adventure', () => {
       opts,
     );
     await runCLI(
-      `generate @aws/nx-plugin:ts#react-website --name=GameUI --no-interactive`,
+      `generate @aws/nx-plugin:ts#react-website --name=GameUI --uxProvider=Shadcn --no-interactive`,
       opts,
     );
     // No need to allow signup for the e2e tests
@@ -344,37 +344,7 @@ describe('smoke test - dungeon-adventure', () => {
 
     // Module 4: UI
 
-    // Update the config.ts file
-    writeFileSync(
-      `${opts.cwd}/packages/game-ui/src/config.ts`,
-      readFileSync(
-        join(__dirname, '../files/dungeon-adventure/4/config.ts.template'),
-        'utf-8',
-      ),
-    );
-
-    // Update the AppLayout
-    writeFileSync(
-      `${opts.cwd}/packages/game-ui/src/components/AppLayout/index.tsx`,
-      readFileSync(
-        join(
-          __dirname,
-          '../files/dungeon-adventure/4/AppLayout/index.tsx.template',
-        ),
-        'utf-8',
-      ),
-    );
-
-    // Delete unused files
-    rmSync(
-      `${opts.cwd}/packages/game-ui/src/components/AppLayout/navitems.ts`,
-      { force: true },
-    );
-    rmSync(`${opts.cwd}/packages/game-ui/src/hooks/useAppLayout.tsx`, {
-      force: true,
-    });
-
-    // Update styles.css
+    // Single global styles file — dungeon theme + CopilotKit colour reset
     writeFileSync(
       `${opts.cwd}/packages/game-ui/src/styles.css`,
       readFileSync(
@@ -383,20 +353,8 @@ describe('smoke test - dungeon-adventure', () => {
       ),
     );
 
-    // Create game routes
+    // Game route: CopilotChat for the AG-UI agent with deterministic threadId
     ensureDirSync(`${opts.cwd}/packages/game-ui/src/routes/game`);
-
-    writeFileSync(
-      `${opts.cwd}/packages/game-ui/src/routes/game/index.tsx`,
-      readFileSync(
-        join(
-          __dirname,
-          '../files/dungeon-adventure/4/routes/game/index.tsx.template',
-        ),
-        'utf-8',
-      ),
-    );
-
     writeFileSync(
       `${opts.cwd}/packages/game-ui/src/routes/game/$playerName.tsx`,
       readFileSync(
@@ -408,7 +366,7 @@ describe('smoke test - dungeon-adventure', () => {
       ),
     );
 
-    // Check routes/index.tsx matches index.tsx.old.template before modification
+    // Root route: new-game picker + continue list
     const routesIndexPath = `${opts.cwd}/packages/game-ui/src/routes/index.tsx`;
     expectFileMatchesOldTemplate(
       routesIndexPath,
@@ -427,12 +385,6 @@ describe('smoke test - dungeon-adventure', () => {
         'utf-8',
       ),
     );
-
-    // Delete welcome route
-    rmSync(`${opts.cwd}/packages/game-ui/src/routes/welcome`, {
-      force: true,
-      recursive: true,
-    });
 
     await runCLI(`sync --verbose`, opts);
     await runCLI(`${buildPackageManagerShortCommand(pkgMgr, 'lint')}`, {

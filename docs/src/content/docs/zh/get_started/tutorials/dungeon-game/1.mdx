@@ -396,7 +396,11 @@ export class GameApi<
 
 使用 `py#strands-agent` 生成器为项目添加 Strands 代理:
 
-<RunGenerator generator="py#strands-agent" requiredParameters={{project:"story", auth:"Cognito"}} noInteractive />
+<RunGenerator generator="py#strands-agent" requiredParameters={{project:"story", auth:"Cognito", protocol:"AG-UI"}} noInteractive />
+
+:::note[AG-UI 协议]
+我们选择 `--protocol=AG-UI` 使代理使用 [Agent-User Interaction 协议](https://docs.copilotkit.ai/aws-strands/protocol) — 这让我们的 React 网站可以通过 [CopilotKit](https://docs.copilotkit.ai/) 直接与其通信,流式传输、工具调用和对话历史由协议处理,而不是手工编写的 HTTP 客户端。
+:::
 
 您将看到文件树中出现了新文件。
 <Drawer title="py#strands-agent 更新文件" trigger="点击此处查看文件详情。">
@@ -428,86 +432,51 @@ from strands_tools import current_time
 
 
 @tool
-def add(a: int, b: int) -> int:
-    return a + b
+def subtract(a: int, b: int) -> int:
+    return a - b
 
 
 @contextmanager
 def get_agent():
     yield Agent(
+        name="StoryAgent",
+        description="StoryAgent Strands Agent",
         system_prompt="""
-你是加法巫师。
-使用 'add' 工具处理加法任务。
-将工具称为你的 '法术书'。
+You are a mathematical wizard.
+Use your tools for mathematical tasks.
+Refer to tools as your 'spellbook'.
 """,
-        tools=[add, current_time],
+        tools=[subtract, current_time],
     )
 ```
 
-创建了一个示例 Strands 代理并定义了加法工具。
+创建了一个示例 Strands 代理并定义了减法工具。
 
 ```python
 # agent/main.py
-import uuid
+import logging
 
-import uvicorn
-from bedrock_agentcore.runtime.models import PingStatus
-from dungeon_adventure_agent_connection import session_id_context, with_session_id
-from fastapi import Request
-from pydantic import BaseModel
+from ag_ui_strands import StrandsAgent, create_strands_app
 
 from .agent import get_agent
-from .init import JsonStreamingResponse, app
 
-SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
+logging.basicConfig(level=logging.INFO)
 
-_agent_ctx = with_session_id(get_agent)
+# Create AG-UI agent wrapper
+_agent_ctx = get_agent()
 _agent = _agent_ctx.__enter__()
 
-
-class InvokeInput(BaseModel):
-    message: str
-
-
-class StreamChunk(BaseModel):
-    content: str
-
-
-async def handle_invoke(input: InvokeInput, session_id: str):
-    """代理调用的流式处理程序"""
-    with session_id_context(session_id):
-        stream = _agent.stream_async(input.message)
-        async for event in stream:
-            print(event)
-            text = event.get("event", {}).get("contentBlockDelta", {}).get("delta", {}).get("text")
-            if text is not None:
-                yield StreamChunk(content=text)
-            elif event.get("event", {}).get("messageStop") is not None:
-                yield StreamChunk(content="\n")
-
-
-@app.post(
-    "/invocations",
-    response_class=JsonStreamingResponse,
-    responses={200: JsonStreamingResponse.openapi_response(StreamChunk, "Stream of agent response chunks")},
+agui_agent = StrandsAgent(
+    agent=_agent,
+    name="StoryAgent",
+    description="A Strands Agent exposed via the AG-UI protocol.",
 )
-async def invoke(input: InvokeInput, request: Request) -> JsonStreamingResponse:
-    """代理调用的入口点"""
-    session_id = request.headers.get(SESSION_ID_HEADER) or str(uuid.uuid4())
-    return JsonStreamingResponse(handle_invoke(input, session_id))
 
-
-@app.get("/ping")
-def ping() -> str:
-    # TODO: 如果运行异步任务,返回 PingStatus.HEALTHY_BUSY
-    return PingStatus.HEALTHY
-
-
-if __name__ == "__main__":
-    uvicorn.run("dungeon_adventure_story.agent.main:app", port=8080)
+# Create FastAPI app with AG-UI endpoint and health check
+app = create_strands_app(agui_agent, path="/invocations")
 ```
 
-这是代理的入口点,配置为与 [Amazon Bedrock AgentCore Runtime](https://github.com/aws/bedrock-agentcore-sdk-python) 兼容的 FastAPI 应用。利用 Strands 的流式支持,通过 JSON Lines 在事件发生时将事件流式传输回客户端。
+这是代理的入口点。因为我们选择了 `--protocol=AG-UI`,生成器将我们的 Strands `Agent` 用 [`ag_ui_strands`](https://docs.copilotkit.ai/aws-strands/integration) 的 `StrandsAgent` 包装,并将其挂载到使用 [AG-UI 协议](https://docs.copilotkit.ai/aws-strands/protocol)的 FastAPI 应用上 — 这就是 CopilotKit 从 React 网站与之通信的方式。在<Link path="get_started/tutorials/dungeon-game/3">模块 3</Link> 中,我们将添加 `session_manager_provider`,使每个线程 id 获得自己的 `S3SessionManager`,对话历史在多轮对话中持久化。
 
 ```ts
 // common/constructs/src/app/agents/story-agent.ts
@@ -642,7 +611,11 @@ export class StoryAgent extends Construct implements IGrantable {
 
 要创建 UI,通过以下步骤创建名为 `GameUI` 的网站:
 
-<RunGenerator generator="ts#react-website" requiredParameters={{name:"GameUI"}} noInteractive />
+<RunGenerator generator="ts#react-website" requiredParameters={{name:"GameUI", uxProvider:"Shadcn"}} noInteractive />
+
+:::note[Shadcn UI]
+我们选择 `--uxProvider=Shadcn` 使生成的网站使用 [shadcn/ui](https://ui.shadcn.com/) 组件并使用 Tailwind 样式 — 我们所有的路由代码都使用 shadcn 原语如 `Card`、`Button` 和 `Input`,稍后的 `connection` 生成器会连接匹配的 shadcn 主题 [CopilotKit](https://docs.copilotkit.ai/) 聊天界面。
+:::
 
 您将看到文件树中出现了新文件。
 
@@ -664,19 +637,24 @@ export class StoryAgent extends Construct implements IGrantable {
     - src/
       - components/
         - AppLayout/
-          - index.tsx 整体页面布局:页头、页脚、侧边栏等
-      - hooks/
-        - useAppLayout.tsx 动态设置通知、页面样式等
+          - index.tsx 使用 shadcn `SidebarProvider` + 页头的整体页面布局
+        - app-sidebar.tsx 带导航项的默认 shadcn 侧边栏
+        - alert.tsx, spinner.tsx shadcn 包装的反馈原语
       - routes/ @tanstack/react-router 基于文件的路由
         - **index.tsx** 根 '/' 页面
         - __root.tsx 所有页面使用此组件作为基础
       - config.ts
       - **main.tsx** React 入口点
       - routeTree.gen.ts 由 @tanstack/react-router 自动更新
-      - styles.css
+      - styles.css 导入共享 shadcn 全局样式(Tailwind v4)
     - index.html
     - project.json
     - vite.config.mts
+    - ...
+  - common/
+    - shadcn/ 共享 shadcn/ui 库(主题令牌、`Button`、`Card`、`Input`、`Sidebar` 等),由每个 `uxProvider=Shadcn` 网站导入
+      - src/components/ui/*
+      - src/styles/globals.css Tailwind + shadcn 设计令牌
     - ...
 </FileTree>
 
@@ -707,53 +685,36 @@ export class GameUI extends StaticWebsite {
 // packages/game-ui/src/main.tsx
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { I18nProvider } from '@cloudscape-design/components/i18n';
-import messages from '@cloudscape-design/components/i18n/messages/all.en';
-import '@cloudscape-design/global-styles/index.css';
 import { RouterProvider, createRouter } from '@tanstack/react-router';
 import { routeTree } from './routeTree.gen';
+import './styles.css';
 
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export type RouterProviderContext = {};
 
-const router = createRouter({
-  routeTree,
-  context: {},
-});
+const router = createRouter({ routeTree, context: {} });
 
-// 为类型安全注册路由实例
 declare module '@tanstack/react-router' {
   interface Register {
     router: typeof router;
   }
 }
 
-const App = () => {
-  return <RouterProvider router={router} context={{}} />;
-};
+const App = () => <RouterProvider router={router} context={{}} />;
 
 const root = document.getElementById('root');
 root &&
   createRoot(root).render(
     <React.StrictMode>
-      <I18nProvider locale="en" messages={[messages]}>
-        <App />
-      </I18nProvider>
+      <App />
     </React.StrictMode>,
   );
 ```
 
-这是挂载 React 的入口点。配置了 [`@tanstack/react-router` 的文件路由](https://tanstack.com/router/v1/docs/framework/react/routing/file-based-routing)。只要开发服务器运行,在 `routes` 文件夹中创建文件时,`@tanstack/react-router` 会自动生成样板文件并更新 `routeTree.gen.ts` 文件。该文件以类型安全的方式维护所有路由,使用 `<Link>` 时 `to` 选项仅显示有效路由。
-更多信息请参考 [`@tanstack/react-router` 文档](https://tanstack.com/router/v1/docs/framework/react/quick-start)。
+这是挂载 React 的入口点。样式来自通过 `styles.css` 导入的 Tailwind v4 令牌。`@tanstack/react-router` 配置为[基于文件的路由](https://tanstack.com/router/v1/docs/framework/react/routing/file-based-routing)模式:只要开发服务器运行,在 `routes/` 下创建的任何文件都会自动被识别并重新生成路由树。稍后的生成器(auth、connection)将通过 AST 修补此文件,用额外的提供者包装 `<App />`。
 
 ```tsx
 // packages/game-ui/src/routes/index.tsx
-import {
-  ContentLayout,
-  Header,
-  SpaceBetween,
-  Container,
-} from '@cloudscape-design/components';
 import { createFileRoute } from '@tanstack/react-router';
 
 export const Route = createFileRoute('/')({
@@ -762,11 +723,12 @@ export const Route = createFileRoute('/')({
 
 function RouteComponent() {
   return (
-    <ContentLayout header={<Header>Welcome</Header>}>
-      <SpaceBetween size="l">
-        <Container>欢迎来到新的 React 网站!</Container>
-      </SpaceBetween>
-    </ContentLayout>
+    <div className="text-center">
+      <header>
+        <h1>Welcome</h1>
+        <p>Welcome to your new React website!</p>
+      </header>
+    </div>
   );
 }
 ```
@@ -815,37 +777,27 @@ function RouteComponent() {
 +import RuntimeConfigProvider from './components/RuntimeConfig';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { I18nProvider } from '@cloudscape-design/components/i18n';
-import messages from '@cloudscape-design/components/i18n/messages/all.en';
-import '@cloudscape-design/global-styles/index.css';
 import { RouterProvider, createRouter } from '@tanstack/react-router';
 import { routeTree } from './routeTree.gen';
+import './styles.css';
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 -export type RouterProviderContext = {};
 +export type RouterProviderContext = {
 +  runtimeConfig?: ReturnType<typeof useRuntimeConfig>;
 +  auth?: ReturnType<typeof useAuth>;
 +};
--const router = createRouter({
--  routeTree,
--  context: {},
--});
+-const router = createRouter({ routeTree, context: {} });
 +const router = createRouter({
 +  routeTree,
-+  context: {
-+    runtimeConfig: undefined,
-+    auth: undefined,
-+  },
++  context: { runtimeConfig: undefined, auth: undefined },
 +});
-// 为类型安全注册路由实例
+// Register the router instance for type safety
 declare module '@tanstack/react-router' {
   interface Register {
     router: typeof router;
   }
 }
--const App = () => {
--  return <RouterProvider router={router} context={{}} />;
--};
+-const App = () => <RouterProvider router={router} context={{}} />;
 +const App = () => {
 +  const auth = useAuth();
 +  const runtimeConfig = useRuntimeConfig();
@@ -855,13 +807,11 @@ const root = document.getElementById('root');
 root &&
   createRoot(root).render(
     <React.StrictMode>
-      <I18nProvider locale="en" messages={[messages]}>
-+        <RuntimeConfigProvider>
-+          <CognitoAuth>
-            <App />
-+          </CognitoAuth>
-+        </RuntimeConfigProvider>
-      </I18nProvider>
++      <RuntimeConfigProvider>
++        <CognitoAuth>
+          <App />
++        </CognitoAuth>
++      </RuntimeConfigProvider>
     </React.StrictMode>,
   );
 ```
@@ -921,7 +871,7 @@ export const useGameApiClient = () => {
 该钩子提供访问 tRPC 客户端以调用 GameApi 的功能。有关如何调用 tRPC API 的示例,请参考 <Link path="guides/connection/react-trpc#using-the-generated-code">使用 tRPC 钩子指南</Link>。
 
 <Aside title="类型安全Hook">
-`useGameApi` 钩子与 `useStoryApi` 钩子的不同之处在于,借助 tRPC 的 [Typescript 类型推断](https://trpc.io/docs/concepts),无需构建即可反映后端变更。这使得开发者对后端的修改能即时反映到前端。
+借助 tRPC 的 [Typescript 类型推断](https://trpc.io/docs/concepts),`useGameApi` 无需构建步骤即可将后端变更传递到前端 — 对路由或任何过程的编辑都会被类型检查器即时捕获。
 </Aside>
 
 ```diff lang="tsx"
@@ -934,32 +884,23 @@ import { useRuntimeConfig } from './hooks/useRuntimeConfig';
 import RuntimeConfigProvider from './components/RuntimeConfig';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { I18nProvider } from '@cloudscape-design/components/i18n';
-import messages from '@cloudscape-design/components/i18n/messages/all.en';
-import '@cloudscape-design/global-styles/index.css';
 import { RouterProvider, createRouter } from '@tanstack/react-router';
 import { routeTree } from './routeTree.gen';
+import './styles.css';
 ...
-const App = () => {
-  const auth = useAuth();
-  const runtimeConfig = useRuntimeConfig();
-  return <RouterProvider router={router} context={{ runtimeConfig, auth }} />;
-};
 const root = document.getElementById('root');
 root &&
   createRoot(root).render(
     <React.StrictMode>
-      <I18nProvider locale="en" messages={[messages]}>
-        <RuntimeConfigProvider>
-          <CognitoAuth>
-+            <QueryClientProvider>
-+              <GameApiClientProvider>
-                <App />
-+              </GameApiClientProvider>
-+            </QueryClientProvider>
-          </CognitoAuth>
-        </RuntimeConfigProvider>
-      </I18nProvider>
+      <RuntimeConfigProvider>
+        <CognitoAuth>
++          <QueryClientProvider>
++            <GameApiClientProvider>
+              <App />
++            </GameApiClientProvider>
++          </QueryClientProvider>
+        </CognitoAuth>
+      </RuntimeConfigProvider>
     </React.StrictMode>,
   );
 ```
@@ -1005,7 +946,7 @@ root &&
 
 ### 游戏 UI:连接故事代理
 
-连接游戏 UI 到故事代理,以便通过类型安全的自动生成客户端从 React 网站调用代理的 API。
+连接游戏 UI 到故事代理。由于代理使用 AG-UI,`connection` 生成器会连接 [CopilotKit](https://docs.copilotkit.ai/):一个主题化的聊天组件和一个准备好渲染的 `@ag-ui/client` `HttpAgent`。
 
 <RunGenerator generator="connection" requiredParameters={{sourceProject:"@dungeon-adventure/game-ui", targetProject:"story"}} noInteractive />
 
@@ -1014,35 +955,25 @@ root &&
 
 <FileTree>
 - packages/
-  - story/
-    - scripts/
-      - **agent\_openapi.py** 从代理的 FastAPI 应用生成 OpenAPI 规范的脚本
-    - project.json 更新添加 `agent-openapi` 目标
   - game-ui/
     - src/
       - components/
-        - **StoryAgentProvider.tsx** 类型安全 OpenAPI 客户端的提供者
-        - **QueryClientProvider.tsx** TanStack React Query 客户端提供者(如果尚不存在)
+        - **AguiProvider.tsx** 注册了所有连接的 AG-UI 代理的 `CopilotKitProvider`
+        - copilot/
+          - **index.tsx** Shadcn 主题的 `CopilotChat` / `CopilotSidebar` / `CopilotPopup`
+          - ShadcnAssistantMessage.tsx, ShadcnUserMessage.tsx, ShadcnChatInput.tsx, ShadcnCursor.tsx, copilot.css
       - hooks/
-        - **useStoryAgent.tsx** TanStack Query 选项代理的钩子
-        - **useStoryAgentClient.tsx** 原生 API 客户端的钩子
-      - generated/
-        - story-agent/ 在构建时从 OpenAPI 规范生成
-          - types.gen.ts
-          - client.gen.ts
-          - options-proxy.gen.ts
-    - project.json 更新添加客户端生成目标
-    - **main.tsx** 更新添加 StoryAgentProvider
+        - **useAguiStoryAgent.tsx** 构建 `HttpAgent`,注入 Cognito bearer 令牌,并将 `threadId` 填充到 AgentCore 的 33 字符会话 id
+    - **main.tsx** 用 `<AguiProvider>` 包装 `<App />`
 
 </FileTree>
 
 生成器会:
-- 在 story 项目中创建代理范围的 OpenAPI 规范生成脚本
-- 在构建时从代理的 OpenAPI 规范生成类型安全的 TypeScript 客户端
-- 为网站添加提供者、钩子和客户端以调用代理的 API
-- 配置 `serve-local` 以在本地运行时自动启动代理的本地服务器并在变更时重新生成客户端
+- 检测 React 网站的 `uxProvider`(此处为 Shadcn)并提供匹配的聊天组件。
+- 在单个 `CopilotKitProvider` 上注册每个连接的代理 — 为另一个代理重新运行只会添加另一个钩子。
+- 从运行时配置读取代理的运行时 ARN,构建 AgentCore 调用 URL,并附加 Cognito bearer 令牌和 AgentCore 会话 id 头。
 
-更多详情请参考 <Link path="guides/connection/react-py-strands-agent">React 到 Python Strands 代理连接指南</Link>。
+更多详情请参考 <Link path="guides/connection/react-agui">React 到 AG-UI 连接指南</Link>。
 </Drawer>
 
 ### 游戏 UI:基础设施

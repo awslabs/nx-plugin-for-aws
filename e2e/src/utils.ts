@@ -173,4 +173,4 @@ export {
 } from '../../packages/nx-plugin/src/utils/commands';
 
 export const getDungeonAdventureElectroDbDependencies = () =>
-  `electrodb@${TS_VERSIONS['electrodb']} @aws-sdk/client-dynamodb@${TS_VERSIONS['@aws-sdk/client-dynamodb']}`;
+  `electrodb@${TS_VERSIONS['electrodb']} @aws-sdk/client-dynamodb@${TS_VERSIONS['@aws-sdk/client-dynamodb']} @aws-sdk/client-s3@${TS_VERSIONS['@aws-sdk/client-s3']}`;

@@ -23,15 +23,11 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 ## Tarea 1: Implementar el Agente de Historia
 
-El Agente de Historia es un agente de [Strands](https://strandsagents.com/) que, dado un `Game` y una lista de `Action`s como contexto, avanzará una historia. Configuraremos el agente para interactuar con nuestro Inventory MCP Server y gestionar los objetos disponibles de un jugador.
-
-:::note[Implementación en Python]
-Para este tutorial, implementaremos el Agente de forma "sin estado", donde cada invocación es una sesión independiente que incluye todo el historial de mensajes. Para entornos de producción, considera integrar con [Bedrock AgentCore Memory](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/memory.html). Para más información, consulta la página [uso de AgentCore Memory con Strands](https://github.com/aws/bedrock-agentcore-sdk-python/tree/main/src/bedrock_agentcore/memory/integrations/strands).
-:::
+El Agente de Historia es un agente de [Strands](https://strandsagents.com/) generado con `--protocol=AG-UI` en el <Link path="get_started/tutorials/dungeon-game/1">Módulo 1</Link>, para que la interfaz de usuario pueda transmitir desde él a través del [protocolo Agent-User Interaction](https://docs.copilotkit.ai/aws-strands/protocol) mediante CopilotKit. Utiliza el Inventory MCP Server para gestionar los objetos del jugador, y el [`S3SessionManager`](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/agents/sessions/) integrado de Strands para persistir el historial de conversación en el bucket de sesiones que aprovisionamos en el Módulo 2.
 
 ### Implementación del agente
 
-Para implementar nuestro agente, actualiza los siguientes archivos en `packages/story/dungeon_adventure_story/agent`:
+Actualiza los siguientes archivos en `packages/story/dungeon_adventure_story/agent`:
 
 <Tabs>
   <TabItem label="main.py">
@@ -42,11 +38,10 @@ Para implementar nuestro agente, actualiza los siguientes archivos en `packages/
   </TabItem>
 </Tabs>
 
-Dado que el generador de conexiones ya configuró el cliente MCP en el <Link path="get_started/tutorials/dungeon-game/1">Módulo 1</Link>, estos cambios se centran en:
+Los cambios son:
 
-- Eliminar la herramienta de muestra y las importaciones no utilizadas,
-- Agregar los parámetros `player_name` y `genre` a la función `get_agent`, y
-- Personalizar el prompt del sistema para nuestro juego de aventuras en mazmorras.
+- `main.py` agrega un `session_manager_provider` que crea un `S3SessionManager` por `thread_id` cuando está desplegado, y recurre a un `FileSessionManager` en disco bajo `/tmp/strands-sessions` cuando se ejecuta bajo `agent-serve-local` (`SERVE_LOCAL=true`). En despliegue, el bucket de S3 es el mismo del que lee el `queryActions` de la Game API, por lo que el navegador puede reconstruir las transcripciones al revisitar; localmente el agente se ejecuta completamente sin conexión contra el servidor MCP local sin llamadas a AWS.
+- `agent.py` elimina la herramienta de muestra `subtract` y reemplaza el prompt del sistema por uno de maestro de mazmorras que invita al primer mensaje del usuario a indicar el nombre del jugador y el género, y utiliza las herramientas del Inventory MCP Server.
 
 ## Tarea 2: Despliegue y pruebas
 
@@ -94,30 +89,31 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
 
 Puedes probar tu Agente de dos formas:
 <ul>
-<li>Iniciando una instancia local del servidor del Agente e invocándola con `curl`, o</li>
+<li>Iniciando una instancia local del servidor del Agente y chateando con él a través del objetivo generado `agent-chat`, o</li>
 <li>Llamando a la API desplegada usando curl con un token JWT.</li>
 </ul>
 
 <Tabs>
   <TabItem label="Local">
-  Inicia tu servidor local del Agente ejecutando el siguiente comando:
-    <NxCommands highlights={['xxxx', 'region']} env={{RUNTIME_CONFIG_APP_ID:"xxxx", AWS_REGION: '<region>'}} commands={["agent-serve dungeon_adventure.story"]} />
+  Abre un REPL interactivo contra una copia servida localmente del agente AG-UI usando el objetivo generado `agent-chat`:
+    <NxCommands commands={["agent-chat story"]} />
 
-    <Aside type="caution" title="Usar valores de salida de CDK">
-    Usa el valor de salida del despliegue CDK de `RuntimeConfigApplicationId` para la variable de entorno `RUNTIME_CONFIG_APP_ID`, y tu región de AWS desplegada para `AWS_REGION`.
-    </Aside>
+    `agent-chat` tiene `dependsOn: ['agent-serve-local']`, por lo que no es necesario iniciar el servidor del agente por separado — Nx generará `agent-serve-local` (que a su vez inicia el servidor Inventory MCP localmente), luego lanzará el REPL AG-UI de [`agent-chat-cli`](https://www.npmjs.com/package/agent-chat-cli) contra `http://localhost:8081/invocations`. Tu primer mensaje debe indicarle al agente el nombre de tu héroe y el género (por ejemplo: `My name is Alice. Start my zombie adventure.`) y la historia se transmitirá de vuelta.
 
-    :::note[`agent-serve` vs `agent-serve-local`]
-    El objetivo `agent-serve` inicia el agente localmente pero se conecta a tu servidor MCP **desplegado** (a través del `RUNTIME_CONFIG_APP_ID`). Si prefieres ejecutar el servidor MCP localmente también, usa `agent-serve-local` en su lugar, que inicia todos los servicios dependientes y establece `SERVE_LOCAL=true` para conexiones HTTP directas.
-    :::
-
-    Una vez que el servidor del Agente esté en ejecución (no verás ninguna salida), invócalo ejecutando el siguiente comando:
-
+    <Aside type="tip" title="curl sin procesar">
+    Si prefieres una llamada HTTP sin procesar contra el servidor local, la forma `RunAgentInput` de AG-UI es:
     ```bash
     curl -N -X POST http://127.0.0.1:8081/invocations \
-      -d '{"genre":"superhero", "actions":[], "playerName":"UnnamedHero"}' \
-      -H "Content-Type: application/json"
+      -H "Content-Type: application/json" \
+      -d '{
+        "threadId": "Alice-zombie00000000000000000000000",
+        "runId": "run-1",
+        "messages": [{ "id": "m1", "role": "user", "content": "My name is Alice. Start my zombie adventure." }],
+        "tools": [], "context": [], "state": {}, "forwardedProps": {}
+      }'
     ```
+    Reutilizar el mismo `threadId` en llamadas subsiguientes continuará la misma historia — el `S3SessionManager` reproduce los mensajes anteriores.
+    </Aside>
   </TabItem>
   <TabItem label="Desplegado">
     Para probar el agente desplegado, necesitarás autenticarte con Cognito y obtener un token JWT. Primero, configura tus variables de entorno:
@@ -175,12 +171,17 @@ Puedes probar tu Agente de dos formas:
     # Construct the invocation URL
     export AGENT_URL="https://bedrock-agentcore.$REGION.amazonaws.com/runtimes/$ENCODED_ARN/invocations?qualifier=DEFAULT"
 
-    # Invoke the agent
+    # Invoke the agent with an AG-UI RunAgentInput payload
     curl -N -X POST "$AGENT_URL" \
       -H "authorization: Bearer $BEARER_TOKEN" \
       -H "Content-Type: application/json" \
-      -H "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id: abcdefghijklmnopqrstuvwxyz-123456789" \
-      -d '{"genre":"superhero", "actions":[], "playerName":"UnnamedHero"}'
+      -H "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id: Alice-zombie00000000000000000000000" \
+      -d '{
+        "threadId": "Alice-zombie00000000000000000000000",
+        "runId": "run-1",
+        "messages": [{ "id": "m1", "role": "user", "content": "My name is Alice. Start my zombie adventure." }],
+        "tools": [], "context": [], "state": {}, "forwardedProps": {}
+      }'
     ```
 
     :::note[Codificación URL]
@@ -189,12 +190,13 @@ Puedes probar tu Agente de dos formas:
   </TabItem>
 </Tabs>
 
-Si el comando se ejecuta correctamente, deberías comenzar a ver el texto inicial de la historia siendo transmitido como JSON Lines:
+Si el comando se ejecuta correctamente, deberías comenzar a ver la historia siendo transmitida de vuelta como un [flujo de eventos AG-UI](https://docs.copilotkit.ai/aws-strands/protocol/events) (Server-Sent Events) — los fragmentos `RUN_STARTED` / `TEXT_MESSAGE_START` / `TEXT_MESSAGE_CONTENT` envuelven los tokens reales de la historia:
 
 ```
-{"content":"You are "}
-{"content":"a new superhero "}
-{"content":"in the bustling metropolis of Metro City..."}
+data: {"type":"RUN_STARTED","threadId":"Alice-zombie00000000000000000000000",...}
+data: {"type":"TEXT_MESSAGE_START","messageId":"...","role":"assistant"}
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"...","delta":"Greetings, Alice. "}
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"...","delta":"The moans grow louder beyond the barricaded door..."}
 ```
 
 ¡Felicidades! Has construido y desplegado tu primer Agente de Strands en Bedrock AgentCore Runtime. 🎉🎉🎉

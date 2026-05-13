@@ -399,7 +399,11 @@ Bạn sẽ thấy một số tệp mới xuất hiện trong cây tệp của m�
 
 Để thêm một Strands agent vào dự án với trình tạo `py#strands-agent`:
 
-<RunGenerator generator="py#strands-agent" requiredParameters={{project:"story", auth:"Cognito"}} noInteractive />
+<RunGenerator generator="py#strands-agent" requiredParameters={{project:"story", auth:"Cognito", protocol:"AG-UI"}} noInteractive />
+
+:::note[Giao thức AG-UI]
+Chúng ta chọn `--protocol=AG-UI` để agent giao tiếp bằng [giao thức Agent-User Interaction](https://docs.copilotkit.ai/aws-strands/protocol) — điều này cho phép website React của chúng ta giao tiếp trực tiếp với nó qua [CopilotKit](https://docs.copilotkit.ai/), với streaming, tool calls và lịch sử hội thoại được xử lý bởi giao thức thay vì một HTTP client tự viết.
+:::
 
 Bạn sẽ thấy một số tệp mới xuất hiện trong cây tệp của mình.
 <Drawer title="Các tệp được cập nhật bởi py#strands-agent" trigger="Nhấp vào đây để xem xét các tệp này chi tiết hơn.">
@@ -431,86 +435,51 @@ from strands_tools import current_time
 
 
 @tool
-def add(a: int, b: int) -> int:
-    return a + b
+def subtract(a: int, b: int) -> int:
+    return a - b
 
 
 @contextmanager
 def get_agent():
     yield Agent(
+        name="StoryAgent",
+        description="StoryAgent Strands Agent",
         system_prompt="""
-You are an addition wizard.
-Use the 'add' tool for addition tasks.
+You are a mathematical wizard.
+Use your tools for mathematical tasks.
 Refer to tools as your 'spellbook'.
 """,
-        tools=[add, current_time],
+        tools=[subtract, current_time],
     )
 ```
 
-Điều này tạo một Strands agent ví dụ và định nghĩa một công cụ cộng.
+Điều này tạo một Strands agent ví dụ và định nghĩa một công cụ trừ.
 
 ```python
 # agent/main.py
-import uuid
+import logging
 
-import uvicorn
-from bedrock_agentcore.runtime.models import PingStatus
-from dungeon_adventure_agent_connection import session_id_context, with_session_id
-from fastapi import Request
-from pydantic import BaseModel
+from ag_ui_strands import StrandsAgent, create_strands_app
 
 from .agent import get_agent
-from .init import JsonStreamingResponse, app
 
-SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
+logging.basicConfig(level=logging.INFO)
 
-_agent_ctx = with_session_id(get_agent)
+# Create AG-UI agent wrapper
+_agent_ctx = get_agent()
 _agent = _agent_ctx.__enter__()
 
-
-class InvokeInput(BaseModel):
-    message: str
-
-
-class StreamChunk(BaseModel):
-    content: str
-
-
-async def handle_invoke(input: InvokeInput, session_id: str):
-    """Streaming handler cho việc gọi agent"""
-    with session_id_context(session_id):
-        stream = _agent.stream_async(input.message)
-        async for event in stream:
-            print(event)
-            text = event.get("event", {}).get("contentBlockDelta", {}).get("delta", {}).get("text")
-            if text is not None:
-                yield StreamChunk(content=text)
-            elif event.get("event", {}).get("messageStop") is not None:
-                yield StreamChunk(content="\n")
-
-
-@app.post(
-    "/invocations",
-    response_class=JsonStreamingResponse,
-    responses={200: JsonStreamingResponse.openapi_response(StreamChunk, "Stream of agent response chunks")},
+agui_agent = StrandsAgent(
+    agent=_agent,
+    name="StoryAgent",
+    description="A Strands Agent exposed via the AG-UI protocol.",
 )
-async def invoke(input: InvokeInput, request: Request) -> JsonStreamingResponse:
-    """Điểm vào cho việc gọi agent"""
-    session_id = request.headers.get(SESSION_ID_HEADER) or str(uuid.uuid4())
-    return JsonStreamingResponse(handle_invoke(input, session_id))
 
-
-@app.get("/ping")
-def ping() -> str:
-    # TODO: if running an async task, return PingStatus.HEALTHY_BUSY
-    return PingStatus.HEALTHY
-
-
-if __name__ == "__main__":
-    uvicorn.run("dungeon_adventure_story.agent.main:app", port=8080)
+# Create FastAPI app with AG-UI endpoint and health check
+app = create_strands_app(agui_agent, path="/invocations")
 ```
 
-Đây là điểm vào cho agent, được cấu hình dưới dạng ứng dụng FastAPI tương thích với [Amazon Bedrock AgentCore Runtime](https://github.com/aws/bedrock-agentcore-sdk-python). Nó sử dụng hỗ trợ streaming của Strands và truyền các sự kiện trở lại client khi chúng xảy ra qua JSON Lines.
+Đây là điểm vào cho agent. Vì chúng ta đã chọn `--protocol=AG-UI`, trình tạo bọc Strands `Agent` của chúng ta với `StrandsAgent` từ [`ag_ui_strands`](https://docs.copilotkit.ai/aws-strands/integration) và gắn nó vào một ứng dụng FastAPI giao tiếp bằng [giao thức AG-UI](https://docs.copilotkit.ai/aws-strands/protocol) — đây là thứ mà CopilotKit sẽ giao tiếp từ website React. Trong <Link path="get_started/tutorials/dungeon-game/3">Module 3</Link>, chúng ta sẽ thêm một `session_manager_provider` để mỗi thread id có `S3SessionManager` riêng và lịch sử hội thoại được duy trì qua các lượt.
 
 ```ts
 // common/constructs/src/app/agents/story-agent.ts
@@ -645,7 +614,11 @@ Trong nhiệm vụ này, chúng ta sẽ tạo UI cho phép bạn tương tác v�
 
 Để tạo UI, tạo một website có tên `GameUI` bằng các bước sau:
 
-<RunGenerator generator="ts#react-website" requiredParameters={{name:"GameUI"}} noInteractive />
+<RunGenerator generator="ts#react-website" requiredParameters={{name:"GameUI", uxProvider:"Shadcn"}} noInteractive />
+
+:::note[Shadcn UI]
+Chúng ta chọn `--uxProvider=Shadcn` để website được tạo sử dụng các component [shadcn/ui](https://ui.shadcn.com/) được tạo kiểu với Tailwind — tất cả mã route của chúng ta sử dụng các primitive shadcn như `Card`, `Button` và `Input`, và trình tạo `connection` sau này sẽ kết nối một giao diện chat [CopilotKit](https://docs.copilotkit.ai/) với chủ đề shadcn phù hợp.
+:::
 
 Bạn sẽ thấy một số tệp mới xuất hiện trong cây tệp của mình.
 
@@ -667,19 +640,24 @@ Bạn sẽ thấy một số tệp mới xuất hiện trong cây tệp của m�
     - src/
       - components/
         - AppLayout/
-          - index.tsx bố cục trang tổng thể: header, footer, sidebar, v.v.
-      - hooks/
-        - useAppLayout.tsx cho phép bạn đặt động các thứ như thông báo, kiểu trang, v.v.
+          - index.tsx bố cục trang tổng thể sử dụng shadcn `SidebarProvider` + header
+        - app-sidebar.tsx sidebar shadcn mặc định với các mục nav
+        - alert.tsx, spinner.tsx các primitive phản hồi được bọc bởi shadcn
       - routes/ các tuyến đường dựa trên tệp của @tanstack/react-router
         - **index.tsx** trang gốc '/'
         - __root.tsx tất cả các trang sử dụng component này làm cơ sở
       - config.ts
       - **main.tsx** điểm vào React
       - routeTree.gen.ts tệp này được cập nhật tự động bởi @tanstack/react-router
-      - styles.css
+      - styles.css import các global shadcn được chia sẻ (Tailwind v4)
     - index.html
     - project.json
     - vite.config.mts
+    - ...
+  - common/
+    - shadcn/ thư viện shadcn/ui được chia sẻ (token chủ đề, `Button`, `Card`, `Input`, `Sidebar`, …) được import bởi mọi website `uxProvider=Shadcn`
+      - src/components/ui/*
+      - src/styles/globals.css Tailwind + token thiết kế shadcn
     - ...
 </FileTree>
 
@@ -710,53 +688,36 @@ export class GameUI extends StaticWebsite {
 // packages/game-ui/src/main.tsx
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { I18nProvider } from '@cloudscape-design/components/i18n';
-import messages from '@cloudscape-design/components/i18n/messages/all.en';
-import '@cloudscape-design/global-styles/index.css';
 import { RouterProvider, createRouter } from '@tanstack/react-router';
 import { routeTree } from './routeTree.gen';
+import './styles.css';
 
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export type RouterProviderContext = {};
 
-const router = createRouter({
-  routeTree,
-  context: {},
-});
+const router = createRouter({ routeTree, context: {} });
 
-// Đăng ký instance router để đảm bảo kiểu an toàn
 declare module '@tanstack/react-router' {
   interface Register {
     router: typeof router;
   }
 }
 
-const App = () => {
-  return <RouterProvider router={router} context={{}} />;
-};
+const App = () => <RouterProvider router={router} context={{}} />;
 
 const root = document.getElementById('root');
 root &&
   createRoot(root).render(
     <React.StrictMode>
-      <I18nProvider locale="en" messages={[messages]}>
-        <App />
-      </I18nProvider>
+      <App />
     </React.StrictMode>,
   );
 ```
 
-Đây là điểm vào nơi React được gắn kết. Như được hiển thị, ban đầu nó chỉ cấu hình một `@tanstack/react-router` trong cấu hình [`file-based-routing`](https://tanstack.com/router/v1/docs/framework/react/routing/file-based-routing). Miễn là máy chủ phát triển của bạn đang chạy, bạn có thể tạo các tệp trong thư mục `routes` và `@tanstack/react-router` sẽ tạo thiết lập tệp boilerplate cho bạn, cùng với việc cập nhật tệp `routeTree.gen.ts`. Tệp này duy trì tất cả các tuyến đường một cách an toàn về kiểu, có nghĩa là khi bạn sử dụng `<Link>`, tùy chọn `to` sẽ chỉ hiển thị các tuyến đường hợp lệ.
-Để biết thêm thông tin, hãy tham khảo [tài liệu `@tanstack/react-router`](https://tanstack.com/router/v1/docs/framework/react/quick-start).
+Đây là điểm vào nơi React được gắn kết. Kiểu dáng đến từ các token Tailwind v4 được import qua `styles.css`. `@tanstack/react-router` được cấu hình trong chế độ [file-based routing](https://tanstack.com/router/v1/docs/framework/react/routing/file-based-routing): miễn là máy chủ dev đang chạy, bất kỳ tệp nào bạn tạo dưới `routes/` đều được nhận tự động và cây route được tạo lại. Các trình tạo sau này (auth, connection) sẽ AST-patch tệp này để bọc `<App />` trong các provider bổ sung.
 
 ```tsx
 // packages/game-ui/src/routes/index.tsx
-import {
-  ContentLayout,
-  Header,
-  SpaceBetween,
-  Container,
-} from '@cloudscape-design/components';
 import { createFileRoute } from '@tanstack/react-router';
 
 export const Route = createFileRoute('/')({
@@ -765,11 +726,12 @@ export const Route = createFileRoute('/')({
 
 function RouteComponent() {
   return (
-    <ContentLayout header={<Header>Welcome</Header>}>
-      <SpaceBetween size="l">
-        <Container>Welcome to your new React website!</Container>
-      </SpaceBetween>
-    </ContentLayout>
+    <div className="text-center">
+      <header>
+        <h1>Welcome</h1>
+        <p>Welcome to your new React website!</p>
+      </header>
+    </div>
   );
 }
 ```
@@ -818,27 +780,19 @@ Trình tạo `ts#react-website#auth` cập nhật/tạo các tệp này. Hãy xe
 +import RuntimeConfigProvider from './components/RuntimeConfig';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { I18nProvider } from '@cloudscape-design/components/i18n';
-import messages from '@cloudscape-design/components/i18n/messages/all.en';
-import '@cloudscape-design/global-styles/index.css';
 import { RouterProvider, createRouter } from '@tanstack/react-router';
 import { routeTree } from './routeTree.gen';
+import './styles.css';
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 -export type RouterProviderContext = {};
 +export type RouterProviderContext = {
 +  runtimeConfig?: ReturnType<typeof useRuntimeConfig>;
 +  auth?: ReturnType<typeof useAuth>;
 +};
--const router = createRouter({
--  routeTree,
--  context: {},
--});
+-const router = createRouter({ routeTree, context: {} });
 +const router = createRouter({
 +  routeTree,
-+  context: {
-+    runtimeConfig: undefined,
-+    auth: undefined,
-+  },
++  context: { runtimeConfig: undefined, auth: undefined },
 +});
 // Đăng ký instance router để đảm bảo kiểu an toàn
 declare module '@tanstack/react-router' {
@@ -846,9 +800,7 @@ declare module '@tanstack/react-router' {
     router: typeof router;
   }
 }
--const App = () => {
--  return <RouterProvider router={router} context={{}} />;
--};
+-const App = () => <RouterProvider router={router} context={{}} />;
 +const App = () => {
 +  const auth = useAuth();
 +  const runtimeConfig = useRuntimeConfig();
@@ -858,13 +810,11 @@ const root = document.getElementById('root');
 root &&
   createRoot(root).render(
     <React.StrictMode>
-      <I18nProvider locale="en" messages={[messages]}>
-+        <RuntimeConfigProvider>
-+          <CognitoAuth>
-            <App />
-+          </CognitoAuth>
-+        </RuntimeConfigProvider>
-      </I18nProvider>
++      <RuntimeConfigProvider>
++        <CognitoAuth>
+          <App />
++        </CognitoAuth>
++      </RuntimeConfigProvider>
     </React.StrictMode>,
   );
 ```
@@ -924,7 +874,7 @@ export const useGameApiClient = () => {
 Hook này cung cấp quyền truy cập vào tRPC client để gọi GameApi. Để xem ví dụ về cách gọi tRPC API, hãy tham khảo <Link path="guides/connection/react-trpc#using-the-generated-code">hướng dẫn sử dụng tRPC hook</Link>.
 
 <Aside title="Hook an toàn kiểu">
-Hook `useGameApi` khác với hook `useStoryAgent` vì nó không yêu cầu build để các thay đổi được phản ánh nhờ vào việc sử dụng [suy luận Typescript](https://trpc.io/docs/concepts) của tRPC. Điều này cho phép các nhà phát triển thực hiện thay đổi đối với backend của họ và ngay lập tức được phản ánh trong frontend của họ.
+Nhờ vào [suy luận Typescript](https://trpc.io/docs/concepts) của tRPC, `useGameApi` không cần bước build để các thay đổi backend đến được frontend — các chỉnh sửa đối với router hoặc bất kỳ procedure nào đều được trình kiểm tra kiểu nhận diện ngay lập tức.
 </Aside>
 
 ```diff lang="tsx"
@@ -937,32 +887,23 @@ import { useRuntimeConfig } from './hooks/useRuntimeConfig';
 import RuntimeConfigProvider from './components/RuntimeConfig';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { I18nProvider } from '@cloudscape-design/components/i18n';
-import messages from '@cloudscape-design/components/i18n/messages/all.en';
-import '@cloudscape-design/global-styles/index.css';
 import { RouterProvider, createRouter } from '@tanstack/react-router';
 import { routeTree } from './routeTree.gen';
+import './styles.css';
 ...
-const App = () => {
-  const auth = useAuth();
-  const runtimeConfig = useRuntimeConfig();
-  return <RouterProvider router={router} context={{ runtimeConfig, auth }} />;
-};
 const root = document.getElementById('root');
 root &&
   createRoot(root).render(
     <React.StrictMode>
-      <I18nProvider locale="en" messages={[messages]}>
-        <RuntimeConfigProvider>
-          <CognitoAuth>
-+            <QueryClientProvider>
-+              <GameApiClientProvider>
-                <App />
-+              </GameApiClientProvider>
-+            </QueryClientProvider>
-          </CognitoAuth>
-        </RuntimeConfigProvider>
-      </I18nProvider>
+      <RuntimeConfigProvider>
+        <CognitoAuth>
++          <QueryClientProvider>
++            <GameApiClientProvider>
+              <App />
++            </GameApiClientProvider>
++          </QueryClientProvider>
+        </CognitoAuth>
+      </RuntimeConfigProvider>
     </React.StrictMode>,
   );
 ```
@@ -1008,7 +949,7 @@ Trình tạo:
 
 ### Game UI: Kết nối với Story Agent
 
-Hãy kết nối Game UI của chúng ta với Story Agent để chúng ta có thể gọi API của agent từ website React với một client an toàn kiểu, được tạo tự động.
+Hãy kết nối Game UI của chúng ta với Story Agent. Vì agent giao tiếp bằng AG-UI, trình tạo `connection` kết nối [CopilotKit](https://docs.copilotkit.ai/): một component chat có chủ đề và một `HttpAgent` từ `@ag-ui/client` sẵn sàng để render.
 
 <RunGenerator generator="connection" requiredParameters={{sourceProject:"@dungeon-adventure/game-ui", targetProject:"story"}} noInteractive />
 
@@ -1017,35 +958,25 @@ Trình tạo `connection` tạo/cập nhật các tệp này:
 
 <FileTree>
 - packages/
-  - story/
-    - scripts/
-      - **agent\_openapi.py** Script để tạo đặc tả OpenAPI từ ứng dụng FastAPI của agent
-    - project.json Được cập nhật với mục tiêu `agent-openapi`
   - game-ui/
     - src/
       - components/
-        - **StoryAgentProvider.tsx** Provider cho OpenAPI client an toàn kiểu
-        - **QueryClientProvider.tsx** TanStack React Query client provider (nếu chưa có)
+        - **AguiProvider.tsx** `CopilotKitProvider` với mọi AG-UI agent được kết nối đã đăng ký
+        - copilot/
+          - **index.tsx** `CopilotChat` / `CopilotSidebar` / `CopilotPopup` với chủ đề Shadcn
+          - ShadcnAssistantMessage.tsx, ShadcnUserMessage.tsx, ShadcnChatInput.tsx, ShadcnCursor.tsx, copilot.css
       - hooks/
-        - **useStoryAgent.tsx** Hook cho TanStack Query options proxy
-        - **useStoryAgentClient.tsx** Hook cho vanilla API client
-      - generated/
-        - story-agent/ Được tạo tại thời điểm build từ đặc tả OpenAPI
-          - types.gen.ts
-          - client.gen.ts
-          - options-proxy.gen.ts
-    - project.json Được cập nhật với các mục tiêu tạo client
-    - **main.tsx** Được cập nhật để thêm StoryAgentProvider
+        - **useAguiStoryAgent.tsx** Xây dựng một `HttpAgent`, chèn token bearer Cognito và đệm `threadId` thành session id 33 ký tự của AgentCore
+    - **main.tsx** Bọc `<App />` trong `<AguiProvider>`
 
 </FileTree>
 
 Trình tạo:
-- Tạo một script tạo đặc tả OpenAPI có phạm vi agent trong dự án story
-- Tạo một TypeScript client an toàn kiểu từ đặc tả OpenAPI của agent tại thời điểm build
-- Thêm một provider, hooks và client vào website để gọi API của agent
-- Cấu hình `serve-local` để tự động khởi động máy chủ cục bộ của agent và tạo lại client khi có thay đổi
+- Phát hiện `uxProvider` của website React (Shadcn ở đây) và cung cấp các component chat phù hợp.
+- Đăng ký mọi agent được kết nối trên một `CopilotKitProvider` duy nhất — chạy lại cho một agent khác chỉ thêm một hook khác.
+- Đọc ARN runtime của agent từ Runtime Configuration, xây dựng URL gọi AgentCore và đính kèm token bearer Cognito cộng với header session id của AgentCore.
 
-Để biết thêm chi tiết, hãy tham khảo <Link path="guides/connection/react-py-strands-agent">hướng dẫn kết nối React với Python Strands Agent</Link>.
+Để biết thêm chi tiết, hãy tham khảo <Link path="guides/connection/react-agui">hướng dẫn kết nối React với AG-UI</Link>.
 </Drawer>
 
 ### Game UI: Cơ sở hạ tầng

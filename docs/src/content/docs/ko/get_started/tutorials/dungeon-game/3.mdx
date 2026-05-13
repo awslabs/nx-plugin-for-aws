@@ -23,15 +23,11 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 ## 작업 1: 스토리 에이전트 구현
 
-스토리 에이전트는 [Strands](https://strandsagents.com/) 에이전트로, `Game`과 컨텍스트용 `Action` 목록을 입력받아 스토리를 진행합니다. 이 에이전트를 인벤토리 MCP 서버와 연동하도록 구성하여 플레이어의 사용 가능한 아이템을 관리할 수 있게 합니다.
-
-:::note[Python 구현]
-본 튜토리얼에서는 각 호출이 전체 메시지 기록을 포함하는 독립 세션인 "상태 비저장" 방식으로 에이전트를 구현합니다. 프로덕션 환경에서는 [Bedrock AgentCore 메모리](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/memory.html) 통합을 고려하세요. 자세한 내용은 [Strands와 AgentCore 메모리 사용](https://github.com/aws/bedrock-agentcore-sdk-python/tree/main/src/bedrock_agentcore/memory/integrations/strands) 페이지를 참조하세요.
-:::
+스토리 에이전트는 <Link path="get_started/tutorials/dungeon-game/1">모듈 1</Link>에서 `--protocol=AG-UI`로 생성된 [Strands](https://strandsagents.com/) 에이전트로, UI가 CopilotKit을 통해 [Agent-User Interaction 프로토콜](https://docs.copilotkit.ai/aws-strands/protocol)로 스트리밍할 수 있습니다. 이 에이전트는 인벤토리 MCP 서버를 사용하여 플레이어의 아이템을 관리하고, Strands의 내장 [`S3SessionManager`](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/agents/sessions/)를 사용하여 모듈 2에서 프로비저닝한 세션 버킷에 대화 기록을 유지합니다.
 
 ### 에이전트 구현
 
-에이전트를 구현하려면 `packages/story/dungeon_adventure_story/agent` 내 다음 파일들을 업데이트하세요:
+`packages/story/dungeon_adventure_story/agent` 내 다음 파일들을 업데이트하세요:
 
 <Tabs>
   <TabItem label="main.py">
@@ -42,11 +38,10 @@ import gameConversationPng from '@assets/game-conversation.png'
   </TabItem>
 </Tabs>
 
-연결 생성기가 이미 <Link path="get_started/tutorials/dungeon-game/1">모듈 1</Link>에서 MCP 클라이언트를 연결했으므로, 이번 변경 사항은 다음에 집중합니다:
+변경 사항은 다음과 같습니다:
 
-- 샘플 도구와 사용하지 않는 임포트 제거,
-- `get_agent` 함수에 `player_name`과 `genre` 매개변수 추가, 그리고
-- 던전 어드벤처 게임을 위한 시스템 프롬프트 커스터마이징.
+- `main.py`는 배포 시 `thread_id`별로 `S3SessionManager`를 생성하고, `agent-serve-local`(`SERVE_LOCAL=true`)에서 실행 시 `/tmp/strands-sessions` 아래의 디스크 기반 `FileSessionManager`로 폴백하는 `session_manager_provider`를 추가합니다. 배포 시 S3 버킷은 Game API의 `queryActions`가 읽는 것과 동일한 버킷이므로 브라우저가 재방문 시 대화 내용을 재구성할 수 있으며, 로컬에서는 에이전트가 AWS 호출 없이 로컬 MCP 서버에 대해 완전히 오프라인으로 실행됩니다.
+- `agent.py`는 샘플 `subtract` 도구를 제거하고 시스템 프롬프트를 던전 마스터용으로 교체하여 첫 번째 사용자 메시지에서 플레이어의 이름과 장르를 명시하도록 유도하고, 인벤토리 MCP 서버의 도구를 사용합니다.
 
 ## 작업 2: 배포 및 테스트
 
@@ -94,30 +89,32 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
 
 다음 방법 중 하나로 에이전트를 테스트할 수 있습니다:
 <ul>
-<li>에이전트 서버 로컬 인스턴스를 시작하고 `curl`로 호출하거나,</li>
+<li>에이전트 서버 로컬 인스턴스를 시작하고 생성된 `agent-chat` 타겟을 통해 대화하거나,</li>
 <li>JWT 토큰을 사용하여 배포된 API를 curl로 호출합니다.</li>
 </ul>
 
 <Tabs>
   <TabItem label="Local">
-  다음 명령어로 로컬 에이전트 서버를 시작하세요:
-    <NxCommands highlights={['xxxx', 'region']} env={{RUNTIME_CONFIG_APP_ID:"xxxx", AWS_REGION: '<region>'}} commands={["agent-serve dungeon_adventure.story"]} />
+    생성된 `agent-chat` 타겟을 사용하여 로컬에서 제공되는 AG-UI 에이전트 복사본에 대한 대화형 REPL을 엽니다:
 
-    <Aside type="caution" title="CDK 출력값 사용">
-    `RUNTIME_CONFIG_APP_ID` 환경 변수에는 CDK 배포 출력값 `RuntimeConfigApplicationId`를 사용하고, `AWS_REGION`에는 배포된 AWS 리전을 지정하세요.
-    </Aside>
+    <NxCommands commands={["agent-chat story"]} />
 
-    :::note[`agent-serve` vs `agent-serve-local`]
-    `agent-serve` 타겟은 에이전트를 로컬에서 시작하지만 (`RUNTIME_CONFIG_APP_ID`를 통해) **배포된** MCP 서버에 연결합니다. MCP 서버도 로컬에서 실행하려면 `agent-serve-local`을 대신 사용하세요. 이 명령은 모든 종속 서비스를 시작하고 직접 HTTP 연결을 위해 `SERVE_LOCAL=true`를 설정합니다.
-    :::
+    `agent-chat`은 `dependsOn: ['agent-serve-local']`을 가지고 있으므로 에이전트 서버를 별도로 시작할 필요가 없습니다 — Nx가 `agent-serve-local`을 생성하고(이는 차례로 인벤토리 MCP 서버를 로컬에서 부팅합니다), 그런 다음 `http://localhost:8081/invocations`에 대해 [`agent-chat-cli`](https://www.npmjs.com/package/agent-chat-cli) AG-UI REPL을 시작합니다. 첫 번째 메시지에서 에이전트에게 영웅의 이름과 장르를 알려주면(예: `My name is Alice. Start my zombie adventure.`) 스토리가 스트리밍됩니다.
 
-    에이전트 서버가 실행되면(콘솔에 출력되지 않음) 다음 명령어로 호출하세요:
-
+    <Aside type="tip" title="Raw curl">
+    로컬 서버에 대한 원시 HTTP 호출을 선호하는 경우, AG-UI `RunAgentInput` 형식은 다음과 같습니다:
     ```bash
     curl -N -X POST http://127.0.0.1:8081/invocations \
-      -d '{"genre":"superhero", "actions":[], "playerName":"UnnamedHero"}' \
-      -H "Content-Type: application/json"
+      -H "Content-Type: application/json" \
+      -d '{
+        "threadId": "Alice-zombie00000000000000000000000",
+        "runId": "run-1",
+        "messages": [{ "id": "m1", "role": "user", "content": "My name is Alice. Start my zombie adventure." }],
+        "tools": [], "context": [], "state": {}, "forwardedProps": {}
+      }'
     ```
+    후속 호출에서 동일한 `threadId`를 재사용하면 동일한 스토리가 계속됩니다 — `S3SessionManager`가 이전 메시지를 재생합니다.
+    </Aside>
   </TabItem>
   <TabItem label="Deployed">
     배포된 에이전트를 테스트하려면 Cognito로 인증 후 JWT 토큰을 획득해야 합니다. 먼저 환경 변수를 설정하세요:
@@ -175,12 +172,17 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
     # 호출 URL 구성
     export AGENT_URL="https://bedrock-agentcore.$REGION.amazonaws.com/runtimes/$ENCODED_ARN/invocations?qualifier=DEFAULT"
 
-    # 에이전트 호출
+    # AG-UI RunAgentInput 페이로드로 에이전트 호출
     curl -N -X POST "$AGENT_URL" \
       -H "authorization: Bearer $BEARER_TOKEN" \
       -H "Content-Type: application/json" \
-      -H "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id: abcdefghijklmnopqrstuvwxyz-123456789" \
-      -d '{"genre":"superhero", "actions":[], "playerName":"UnnamedHero"}'
+      -H "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id: Alice-zombie00000000000000000000000" \
+      -d '{
+        "threadId": "Alice-zombie00000000000000000000000",
+        "runId": "run-1",
+        "messages": [{ "id": "m1", "role": "user", "content": "My name is Alice. Start my zombie adventure." }],
+        "tools": [], "context": [], "state": {}, "forwardedProps": {}
+      }'
     ```
 
     :::note[URL 인코딩]
@@ -189,12 +191,13 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
   </TabItem>
 </Tabs>
 
-명령이 성공적으로 실행되면 초기 스토리 텍스트가 JSON Lines 형식으로 스트리밍되기 시작합니다:
+명령이 성공적으로 실행되면 스토리가 [AG-UI 이벤트 스트림](https://docs.copilotkit.ai/aws-strands/protocol/events)(Server-Sent Events)으로 스트리밍되기 시작합니다 — `RUN_STARTED` / `TEXT_MESSAGE_START` / `TEXT_MESSAGE_CONTENT` 청크가 실제 스토리 토큰을 래핑합니다:
 
 ```
-{"content":"You are "}
-{"content":"a new superhero "}
-{"content":"in the bustling metropolis of Metro City..."}
+data: {"type":"RUN_STARTED","threadId":"Alice-zombie00000000000000000000000",...}
+data: {"type":"TEXT_MESSAGE_START","messageId":"...","role":"assistant"}
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"...","delta":"Greetings, Alice. "}
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"...","delta":"The moans grow louder beyond the barricaded door..."}
 ```
 
 축하합니다. Bedrock AgentCore 런타임에 첫 번째 Strands 에이전트를 구축하고 배포했습니다! 🎉🎉🎉

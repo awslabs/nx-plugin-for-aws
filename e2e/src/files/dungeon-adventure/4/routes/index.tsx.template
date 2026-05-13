@@ -1,5 +1,145 @@
-import { createFileRoute, Navigate } from '@tanstack/react-router';
+import { useInfiniteQuery, useMutation } from '@tanstack/react-query';
+import { createFileRoute, useNavigate } from '@tanstack/react-router';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Button } from ':dungeon-adventure/common-shadcn/components/ui/button';
+import { Input } from ':dungeon-adventure/common-shadcn/components/ui/input';
+import {
+  Card,
+  CardContent,
+} from ':dungeon-adventure/common-shadcn/components/ui/card';
+import { Spinner } from ':dungeon-adventure/common-shadcn/components/ui/spinner';
+import { useGameApi } from '../hooks/useGameApi';
+import type { IGame } from ':dungeon-adventure/game-api';
 
-export const Route = createFileRoute('/')({
-  component: () => <Navigate to="/game" />,
-});
+const GENRES = ['medieval', 'zombie', 'superhero'] as const;
+
+export const Route = createFileRoute('/')({ component: RouteComponent });
+
+function RouteComponent() {
+  const [playerName, setPlayerName] = useState('');
+  const [pending, setPending] = useState<IGame['genre'] | null>(null);
+  const navigate = useNavigate();
+  const gameApi = useGameApi();
+  const saveGame = useMutation(gameApi.games.save.mutationOptions());
+  const games = useInfiniteQuery(
+    gameApi.games.query.infiniteQueryOptions(
+      { limit: 10 },
+      { getNextPageParam: ({ cursor }) => cursor ?? undefined },
+    ),
+  );
+  const savedGames = useMemo(
+    () => games.data?.pages.flatMap((p) => p.items) ?? [],
+    [games.data],
+  );
+
+  // Auto-fetch subsequent pages when the sentinel at the bottom of the list
+  // scrolls into view — keeps the homepage a simple infinite scroll without
+  // a "Load more" button.
+  const sentinel = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = sentinel.current;
+    if (!el || !games.hasNextPage) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (
+          entries.some((e) => e.isIntersecting) &&
+          !games.isFetchingNextPage
+        ) {
+          void games.fetchNextPage();
+        }
+      },
+      { rootMargin: '120px' },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [games.hasNextPage, games.isFetchingNextPage, games.fetchNextPage]);
+
+  const startGame = async (player: string, genre: IGame['genre']) => {
+    if (!player.trim()) return;
+    setPending(genre);
+    try {
+      if (!savedGames.find((g) => g.playerName === player)) {
+        await saveGame.mutateAsync({ playerName: player, genre });
+      }
+      await navigate({
+        to: '/game/$playerName',
+        params: { playerName: player },
+        search: { genre },
+      });
+    } finally {
+      setPending(null);
+    }
+  };
+
+  const busy = pending !== null;
+  const firstLoad = games.isLoading;
+
+  return (
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-8">
+      <div className="text-center">
+        <h1 className="bg-gradient-to-r from-amber-300 to-rose-400 bg-clip-text text-5xl font-bold text-transparent">
+          AI Dungeon Adventure
+        </h1>
+        <p className="text-muted-foreground mt-2">
+          Pick a hero name, choose a genre, begin.
+        </p>
+      </div>
+
+      <Card>
+        <CardContent className="flex flex-col gap-4 pt-6">
+          <Input
+            placeholder="Your hero's name"
+            value={playerName}
+            disabled={busy}
+            onChange={(e) => setPlayerName(e.target.value)}
+          />
+          <div className="grid grid-cols-3 gap-3">
+            {GENRES.map((genre) => (
+              <Button
+                key={genre}
+                variant="secondary"
+                disabled={!playerName.trim() || busy}
+                onClick={() => startGame(playerName, genre)}
+              >
+                {pending === genre && <Spinner />}
+                {genre[0].toUpperCase() + genre.slice(1)}
+              </Button>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="flex flex-col gap-2">
+        <h2 className="flex items-center gap-2 text-xl font-semibold">
+          Continue
+          {(firstLoad || games.isFetching) && <Spinner className="size-4" />}
+        </h2>
+        {!firstLoad && savedGames.length === 0 && (
+          <p className="text-muted-foreground text-sm">
+            No saved games yet — start a new adventure above.
+          </p>
+        )}
+        {savedGames.map((g) => (
+          <Button
+            key={g.playerName}
+            variant="outline"
+            className="justify-between"
+            disabled={busy}
+            onClick={() => startGame(g.playerName, g.genre)}
+          >
+            <span>{g.playerName}</span>
+            <span className="text-muted-foreground text-sm">
+              {g.genre[0].toUpperCase() + g.genre.slice(1)}
+            </span>
+          </Button>
+        ))}
+        <div ref={sentinel} aria-hidden className="h-1" />
+        {games.isFetchingNextPage && (
+          <div className="flex justify-center py-2">
+            <Spinner />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

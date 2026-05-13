@@ -30,9 +30,13 @@ Implementaremos las siguientes APIs en esta sección:
 
 1. `saveGame` - crear o actualizar un juego.
 2. `queryGames` - devolver una lista paginada de juegos guardados anteriormente.
-3. `saveAction` - guardar una acción para un juego específico.
-4. `queryActions` - devolver una lista paginada de todas las acciones relacionadas con un juego.
-5. `queryInventory` - devolver una lista paginada de ítems en el inventario de un jugador.
+3. `queryInventory` - devolver una lista paginada de ítems en el inventario de un jugador.
+4. `queryActions` - devolver el historial de conversación para un juego dado.
+
+:::note[Dónde vive cada pieza de estado]
+- `games` e `inventory` están en **DynamoDB** (vía ElectroDB) — las lambdas de la Game API y el servidor MCP de Inventario los leen/escriben.
+- `actions` (transcripción del chat) está en **S3** — el `S3SessionManager` del Story Agent escribe un blob JSON por turno, y `queryActions` en la Game API los lee de vuelta para que la UI pueda reproducir el historial al recargar la página. No hay un procedimiento `saveAction`; el agente es el único escritor.
+:::
 
 ### Esquema de la API
 
@@ -60,14 +64,6 @@ game: Game {
   lastUpdated: string
 }
 
-action: Action {
-  shape: sql_table
-  playerName: "string  PK"
-  timestamp: "string  SK"
-  role: string
-  content: string
-}
-
 item: Item {
   shape: sql_table
   playerName: "string  PK"
@@ -77,11 +73,10 @@ item: Item {
   quantity: number
 }
 
-game -> action: 1..*
 game -> item: 1..*
 ```
 
-Implementaremos nuestra base de datos en DynamoDB y usaremos la biblioteca cliente [ElectroDB](https://electrodb.dev/en/core-concepts/introduction/) para simplificar las cosas. Para instalar `electrodb` y el cliente DynamoDB, ejecuta este comando:
+Implementaremos nuestra base de datos en DynamoDB y usaremos la biblioteca cliente [ElectroDB](https://electrodb.dev/en/core-concepts/introduction/) para simplificar las cosas. El `queryActions` de la Game API también necesita el cliente S3 para leer los turnos de conversación que el agente ha escrito. Instálalos todos con:
 
 <InstallCommand pkg={getDungeonAdventureElectroDbDependencies()} />
 
@@ -116,14 +111,14 @@ La estructura del paquete sería mejor si refactorizamos las entidades en su pro
 Para implementar los métodos de la API, realiza los siguientes cambios en `packages/game-api/src/procedures`:
 
 <Tabs>
-  <TabItem label="actions.ts">
-<E2ECode lang="typescript" path="dungeon-adventure/2/procedures/actions.ts.template" />
-  </TabItem>
   <TabItem label="games.ts">
 <E2ECode lang="typescript" path="dungeon-adventure/2/procedures/games.ts.template" />
   </TabItem>
   <TabItem label="inventory.ts">
 <E2ECode lang="typescript" path="dungeon-adventure/2/procedures/inventory.ts.template" />
+  </TabItem>
+  <TabItem label="actions.ts">
+<E2ECode lang="typescript" path="dungeon-adventure/2/procedures/actions.ts.template" />
   </TabItem>
 </Tabs>
 
@@ -215,21 +210,23 @@ Si estás iterando en cambios de código de funciones Lambda, puedes desplegar c
 Una vez completado el despliegue, verás salidas similares a las siguientes _(algunos valores han sido omitidos)_:
 
 ```bash
-dungeon-adventure-sandbox-Application
-dungeon-adventure-sandbox-Application: deploying... [2/2]
+dungeon-adventure-infra-sandbox-Application
+dungeon-adventure-infra-sandbox-Application: deploying... [2/2]
 
- ✅  dungeon-adventure-sandbox-Application
+ ✅  dungeon-adventure-infra-sandbox-Application
 
 ✨  Deployment time: 354s
 
 Outputs:
-dungeon-adventure-sandbox-Application.ElectroDbTableTableNameXXX = dungeon-adventure-sandbox-Application-ElectroDbTableXXX-YYY
-dungeon-adventure-sandbox-Application.GameApiEndpointXXX = https://xxx.execute-api.region.amazonaws.com/prod/
-dungeon-adventure-sandbox-Application.RuntimeConfigApplicationId = xxxx
-dungeon-adventure-sandbox-Application.GameUIDistributionDomainNameXXX = xxx.cloudfront.net
-dungeon-adventure-sandbox-Application.StoryApiEndpointXXX = https://xxx.execute-api.region.amazonaws.com/prod/
-dungeon-adventure-sandbox-Application.UserIdentityUserIdentityIdentityPoolIdXXX = region:xxx
-dungeon-adventure-sandbox-Application.UserIdentityUserIdentityUserPoolIdXXX = region_xxx
+dungeon-adventure-infra-sandbox-Application.ElectroDbTableTableNameXXX = dungeon-adventure-infra-sandbox-Application-ElectroDbTableXXX-YYY
+dungeon-adventure-infra-sandbox-Application.GameApiEndpointXXX = https://xxx.execute-api.region.amazonaws.com/prod/
+dungeon-adventure-infra-sandbox-Application.GameUIDistributionDomainNameXXX = xxx.cloudfront.net
+dungeon-adventure-infra-sandbox-Application.InventoryMcpArn = arn:aws:bedrock-agentcore:region:xxxxxxx:runtime/dungeonadventureventoryMcpServerXXXX-YYYY
+dungeon-adventure-infra-sandbox-Application.RuntimeConfigApplicationId = xxxx
+dungeon-adventure-infra-sandbox-Application.StoryAgentArn = arn:aws:bedrock-agentcore:region:xxxxxxx:runtime/dungeonadventurecationStoryAgentXXXX-YYYY
+dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityIdentityPoolIdXXX = region:xxx
+dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolClientIdXXX = xxxxxxxxxx
+dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXXX = region_xxx
 ```
 ### Prueba la API
 Puedes probar la API de dos formas:

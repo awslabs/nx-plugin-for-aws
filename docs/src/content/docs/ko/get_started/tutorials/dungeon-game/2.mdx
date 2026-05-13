@@ -30,9 +30,13 @@ import { getDungeonAdventureElectroDbDependencies } from '../../../../../../../.
 
 1. `saveGame` - 게임 생성 또는 업데이트
 2. `queryGames` - 저장된 게임 목록을 페이지네이션으로 반환
-3. `saveAction` - 특정 게임에 대한 액션 저장
-4. `queryActions` - 게임 관련 모든 액션의 페이지네이션 목록 반환
-5. `queryInventory` - 플레이어 인벤토리 아이템 목록을 페이지네이션으로 반환
+3. `queryInventory` - 플레이어 인벤토리 아이템 목록을 페이지네이션으로 반환
+4. `queryActions` - 특정 게임의 대화 기록 반환
+
+:::note[각 상태가 저장되는 위치]
+- `games`와 `inventory`는 **DynamoDB**에 저장됩니다(ElectroDB 사용) — Game API 람다와 Inventory MCP 서버가 읽기/쓰기를 수행합니다.
+- `actions`(채팅 기록)는 **S3**에 저장됩니다 — Story Agent의 `S3SessionManager`가 매 턴마다 하나의 JSON blob을 작성하고, Game API의 `queryActions`가 이를 읽어와 UI가 페이지 새로고침 시 기록을 재생할 수 있도록 합니다. `saveAction` 프로시저는 없으며, 에이전트만이 작성자입니다.
+:::
 
 ### API 스키마
 
@@ -60,14 +64,6 @@ game: Game {
   lastUpdated: string
 }
 
-action: Action {
-  shape: sql_table
-  playerName: "string  PK"
-  timestamp: "string  SK"
-  role: string
-  content: string
-}
-
 item: Item {
   shape: sql_table
   playerName: "string  PK"
@@ -77,11 +73,10 @@ item: Item {
   quantity: number
 }
 
-game -> action: 1..*
 game -> item: 1..*
 ```
 
-DynamoDB에 데이터베이스를 구현할 것이며, [ElectroDB](https://electrodb.dev/en/core-concepts/introduction/) DynamoDB 클라이언트 라이브러리를 사용하여 작업을 단순화합니다. `electrodb`와 DynamoDB 클라이언트를 설치하려면 다음 명령어를 실행합니다:
+DynamoDB에 데이터베이스를 구현할 것이며, [ElectroDB](https://electrodb.dev/en/core-concepts/introduction/) DynamoDB 클라이언트 라이브러리를 사용하여 작업을 단순화합니다. Game API의 `queryActions`는 에이전트가 작성한 대화 턴을 읽기 위해 S3 클라이언트도 필요합니다. 다음 명령어로 모두 설치합니다:
 
 <InstallCommand pkg={getDungeonAdventureElectroDbDependencies()} />
 
@@ -116,14 +111,14 @@ MCP 서버가 API에 의존하지 않도록 엔티티를 별도의 공유 프로
 API 메서드를 구현하기 위해 `packages/game-api/src/procedures` 내에서 다음 변경사항을 적용합니다:
 
 <Tabs>
-  <TabItem label="actions.ts">
-<E2ECode lang="typescript" path="dungeon-adventure/2/procedures/actions.ts.template" />
-  </TabItem>
   <TabItem label="games.ts">
 <E2ECode lang="typescript" path="dungeon-adventure/2/procedures/games.ts.template" />
   </TabItem>
   <TabItem label="inventory.ts">
 <E2ECode lang="typescript" path="dungeon-adventure/2/procedures/inventory.ts.template" />
+  </TabItem>
+  <TabItem label="actions.ts">
+<E2ECode lang="typescript" path="dungeon-adventure/2/procedures/actions.ts.template" />
   </TabItem>
 </Tabs>
 
@@ -215,21 +210,23 @@ AWS 계정을 먼저 부트스트랩하려면 다음을 실행하세요:
 배포가 완료되면 다음과 유사한 출력을 확인할 수 있습니다 _(일부 값은 편집됨)_:
 
 ```bash
-dungeon-adventure-sandbox-Application
-dungeon-adventure-sandbox-Application: deploying... [2/2]
+dungeon-adventure-infra-sandbox-Application
+dungeon-adventure-infra-sandbox-Application: deploying... [2/2]
 
- ✅  dungeon-adventure-sandbox-Application
+ ✅  dungeon-adventure-infra-sandbox-Application
 
 ✨  Deployment time: 354s
 
 Outputs:
-dungeon-adventure-sandbox-Application.ElectroDbTableTableNameXXX = dungeon-adventure-sandbox-Application-ElectroDbTableXXX-YYY
-dungeon-adventure-sandbox-Application.GameApiEndpointXXX = https://xxx.execute-api.region.amazonaws.com/prod/
-dungeon-adventure-sandbox-Application.RuntimeConfigApplicationId = xxxx
-dungeon-adventure-sandbox-Application.GameUIDistributionDomainNameXXX = xxx.cloudfront.net
-dungeon-adventure-sandbox-Application.StoryApiEndpointXXX = https://xxx.execute-api.region.amazonaws.com/prod/
-dungeon-adventure-sandbox-Application.UserIdentityUserIdentityIdentityPoolIdXXX = region:xxx
-dungeon-adventure-sandbox-Application.UserIdentityUserIdentityUserPoolIdXXX = region_xxx
+dungeon-adventure-infra-sandbox-Application.ElectroDbTableTableNameXXX = dungeon-adventure-infra-sandbox-Application-ElectroDbTableXXX-YYY
+dungeon-adventure-infra-sandbox-Application.GameApiEndpointXXX = https://xxx.execute-api.region.amazonaws.com/prod/
+dungeon-adventure-infra-sandbox-Application.GameUIDistributionDomainNameXXX = xxx.cloudfront.net
+dungeon-adventure-infra-sandbox-Application.InventoryMcpArn = arn:aws:bedrock-agentcore:region:xxxxxxx:runtime/dungeonadventureventoryMcpServerXXXX-YYYY
+dungeon-adventure-infra-sandbox-Application.RuntimeConfigApplicationId = xxxx
+dungeon-adventure-infra-sandbox-Application.StoryAgentArn = arn:aws:bedrock-agentcore:region:xxxxxxx:runtime/dungeonadventurecationStoryAgentXXXX-YYYY
+dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityIdentityPoolIdXXX = region:xxx
+dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolClientIdXXX = xxxxxxxxxx
+dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXXX = region_xxx
 ```
 ### API 테스트
 다음 방법으로 API를 테스트할 수 있습니다:

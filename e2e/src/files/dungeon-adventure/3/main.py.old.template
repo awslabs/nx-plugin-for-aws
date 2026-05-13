@@ -1,72 +1,20 @@
-import uuid
+import logging
 
-import uvicorn
-from bedrock_agentcore.runtime.models import PingStatus
-from dungeon_adventure_agent_connection import session_id_context, with_session_id
-from fastapi import Request
-from pydantic import BaseModel
-from starlette.middleware.base import BaseHTTPMiddleware
+from ag_ui_strands import StrandsAgent, create_strands_app
 
 from .agent import get_agent
-from .init import JsonStreamingResponse, app
 
-SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
+logging.basicConfig(level=logging.INFO)
 
-_agent_ctx = with_session_id(
-    get_agent,
-    name="StoryAgent",
-    description="A Strands Agent exposed via HTTP streaming.",
-)
+# Create AG-UI agent wrapper
+_agent_ctx = get_agent()
 _agent = _agent_ctx.__enter__()
 
-
-class InvokeInput(BaseModel):
-    message: str
-
-
-class StreamChunk(BaseModel):
-    content: str
-
-
-async def handle_invoke(input: InvokeInput):
-    """Streaming handler for agent invocation"""
-    stream = _agent.stream_async(input.message)
-    async for event in stream:
-        print(event)
-        text = event.get("event", {}).get("contentBlockDelta", {}).get("delta", {}).get("text")
-        if text is not None:
-            yield StreamChunk(content=text)
-        elif event.get("event", {}).get("messageStop") is not None:
-            yield StreamChunk(content="\n")
-
-
-@app.post(
-    "/invocations",
-    response_class=JsonStreamingResponse,
-    responses={200: JsonStreamingResponse.openapi_response(StreamChunk, "Stream of agent response chunks")},
+agui_agent = StrandsAgent(
+    agent=_agent,
+    name="StoryAgent",
+    description="A Strands Agent exposed via the AG-UI protocol.",
 )
-async def invoke(input: InvokeInput) -> JsonStreamingResponse:
-    """Entry point for agent invocation"""
-    return JsonStreamingResponse(handle_invoke(input))
 
-
-class _SessionIdMiddleware(BaseHTTPMiddleware):
-    """Bind the inbound session (or a fresh UUID) to async context."""
-
-    async def dispatch(self, request: Request, call_next):
-        session_id = request.headers.get(SESSION_ID_HEADER) or str(uuid.uuid4())
-        with session_id_context(session_id):
-            return await call_next(request)
-
-
-app.add_middleware(_SessionIdMiddleware)
-
-
-@app.get("/ping")
-def ping() -> str:
-    # TODO: if running an async task, return PingStatus.HEALTHY_BUSY
-    return PingStatus.HEALTHY
-
-
-if __name__ == "__main__":
-    uvicorn.run("dungeon_adventure_story.agent.main:app", port=8080)
+# Create FastAPI app with AG-UI endpoint and health check
+app = create_strands_app(agui_agent, path="/invocations")

@@ -5,10 +5,17 @@ import {
   RuntimeConfig,
   StoryAgent,
   UserIdentity,
+  suppressRules,
 } from ':dungeon-adventure/common-constructs';
-import { Stack, StackProps, CfnOutput } from 'aws-cdk-lib';
+import { Stack, StackProps, CfnOutput, RemovalPolicy } from 'aws-cdk-lib';
+import {
+  BlockPublicAccess,
+  Bucket,
+  BucketEncryption,
+} from 'aws-cdk-lib/aws-s3';
 import { Construct } from 'constructs';
 import { ElectrodbDynamoTable } from '../constructs/electrodb-table.js';
+
 export class ApplicationStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
@@ -24,19 +31,36 @@ export class ApplicationStack extends Stack {
       tableName: electroDbTable.tableName,
     });
 
+    // S3 bucket for Strands conversation history. The Story Agent writes each
+    // turn via ``S3SessionManager``; the Game API reads them back for replay.
+    const storySessions = new Bucket(this, 'StorySessions', {
+      encryption: BucketEncryption.S3_MANAGED,
+      blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
+      enforceSSL: true,
+      removalPolicy: RemovalPolicy.DESTROY,
+      autoDeleteObjects: true,
+    });
+    suppressRules(
+      storySessions,
+      ['CKV_AWS_18', 'CKV_AWS_21'],
+      'Access logging and object versioning are unnecessary for ephemeral chat transcripts',
+    );
+    rc.set('buckets', 'StorySessions', {
+      bucketName: storySessions.bucketName,
+    });
+
     const gameApi = new GameApi(this, 'GameApi', {
       integrations: GameApi.defaultIntegrations(this).build(),
     });
 
-    electroDbTable.grantReadData(gameApi.integrations['actions.query'].handler);
     electroDbTable.grantReadData(gameApi.integrations['games.query'].handler);
-    electroDbTable.grantReadData(gameApi.integrations['inventory.query'].handler);
-    electroDbTable.grantReadWriteData(
-      gameApi.integrations['actions.save'].handler,
+    electroDbTable.grantReadData(
+      gameApi.integrations['inventory.query'].handler,
     );
     electroDbTable.grantReadWriteData(
       gameApi.integrations['games.save'].handler,
     );
+    storySessions.grantRead(gameApi.integrations['actions.query'].handler);
 
     const mcpServer = new InventoryMcpServer(this, 'InventoryMcpServer');
     electroDbTable.grantReadWriteData(mcpServer.agentCoreRuntime);
@@ -45,6 +69,7 @@ export class ApplicationStack extends Stack {
     const storyAgent = new StoryAgent(this, 'StoryAgent', {
       identity: userIdentity,
     });
+    storySessions.grantReadWrite(storyAgent);
 
     new CfnOutput(this, 'StoryAgentArn', {
       value: storyAgent.agentCoreRuntime.agentRuntimeArn,

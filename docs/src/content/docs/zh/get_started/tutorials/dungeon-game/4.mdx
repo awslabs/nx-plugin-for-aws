@@ -21,135 +21,99 @@ import nxGraphPng from '@assets/nx-graph.png'
 import gameSelectPng from '@assets/game-select.png'
 import gameConversationPng from '@assets/game-conversation.png'
 
-## 任务一：配置本地开发服务器
+## 任务一：在本地运行所有内容
 
-要开始构建用户界面，我们需要将本地开发服务器配置指向已部署的沙盒环境。运行以下命令：
+使用一条命令启动完整的本地堆栈——game-ui 开发服务器以及本地 Game API 和本地 AG-UI Story Agent（后者又会启动 Inventory MCP 服务器）：
 
-<NxCommands commands={["run game-ui:load:runtime-config"]} />
+<NxCommands commands={["serve-local game-ui"]} />
 
-该命令将拉取已部署的 `runtime-config.json` 文件，并存储在本地 `packages/game-ui/public` 目录中。
-
-要启动开发服务器，运行以下命令：
-
-<NxCommands commands={["serve game-ui"]} />
-
-在浏览器中打开本地网站，系统将提示登录并按照提示创建新用户。完成后，您将看到基础网站界面：
-
-<Image src={baselineWebsitePng} alt="baseline-website.png" width="800" height="600" />
+`game-ui:serve-local` 依赖于 `game-api:serve-local` 和 `dungeon_adventure.story:agent-serve-local`，因此 Nx 会并行启动每个项目的本地服务器。在浏览器中打开开发服务器并按照提示创建新用户。
 
 <Aside type="caution" title="保持开发服务器运行">
-我们建议在本模块剩余部分保持开发服务器运行，因为它会自动热重载我们所做的任何修改。
+在本模块的其余部分保持开发服务器运行——它会热重载下面的每个更改。
 </Aside>
 
-:::tip[使用Nx命令]
-您也可以运行 Nx 命令来启动所有关联的 API 本地服务器，方便您同时迭代 tRPC API 和网站。<NxCommands commands={["serve-local game-ui"]} env={{RUNTIME_CONFIG_APP_ID:"xxxx"}} />
+<Aside type="tip" title="指向已部署的后端">
+如果您希望本地开发服务器与已部署的 API + 代理通信，请拉取一次已部署的运行时配置，然后使用普通的 `serve` 目标：
 
-使用 CDK 部署输出值 `RuntimeConfigApplicationId` 作为 `RUNTIME_CONFIG_APP_ID` 环境变量。
-:::
+<NxCommands commands={["run game-ui:load:runtime-config"]} />
+<NxCommands commands={["serve game-ui"]} />
 
-## 任务二：创建新路由 '/game'
+当您只迭代 UI 代码并希望针对真实后端进行测试时，这很方便。
+</Aside>
 
-让我们通过创建类型安全路由来展示 `@tanstack/react-router` 的功能。
-为此，在以下位置创建一个空文件：`packages/game-ui/src/routes/game/index.tsx`。您会注意到文件立即被更新。
+## 任务二：CopilotKit 已经配置好的地方
 
-`@tanstack/react-router` 会自动配置新路由，您刚创建的文件已包含路由路径定义：
+当您在 <Link path="get_started/tutorials/dungeon-game/1">模块一</Link> 中为 `game-ui → story` 运行 `connection` 生成器时，Shadcn 网站的 AG-UI 集成已经为您生成。值得快速了解一下：
 
-```tsx
-import { createFileRoute } from '@tanstack/react-router'
+<FileTree>
+- packages/game-ui/src/
+  - components/
+    - AguiProvider.tsx 单个 `CopilotKitProvider` 注册了所有 AG-UI 代理。
+    - copilot/
+      - index.tsx 重新导出主题化的 `CopilotChat` / `CopilotSidebar` / `CopilotPopup`。
+      - ShadcnAssistantMessage.tsx, ShadcnUserMessage.tsx, ShadcnChatInput.tsx, ShadcnCursor.tsx, copilot.css
+  - hooks/
+    - useAguiStoryAgent.tsx 实例化一个指向已部署故事代理的 `@ag-ui/client` `HttpAgent`，并将 `threadId` 填充到 AgentCore 的 33 字符最小会话 ID。
+  - main.tsx 用 `<AguiProvider>` 包装 `<App />`
+</FileTree>
 
-export const Route = createFileRoute('/game/')({
-  component: RouteComponent,
-})
+我们需要做的就是将 `<CopilotChat agentId="agent" threadId={...} />` 放入路由中。有关集成如何组合的更多详细信息，请参阅 <Link path="guides/connection/react-agui">React → AG-UI 连接指南</Link>。
 
-function RouteComponent() {
-  return <div>Hello "/game/"!</div>
-}
-```
+## 任务三：为地牢重新设计样式
 
-如果您访问 `http://localhost:4200/game`，将看到新页面已被渲染。
+替换 `packages/game-ui/src/styles.css` ——这是我们为样式更改的*唯一*文件。它导入共享的 Shadcn 全局样式，将调色板覆盖为火把照明的地牢主题，并使 CopilotKit 继承这些颜色：
 
-<Image src={baselineGamePng} alt="baseline-game.png" width="800" height="600" />
+<E2ECode lang="css" path="dungeon-adventure/4/styles.css.template" />
 
-更新 `index.tsx` 文件以默认加载新的 `/game` 路由。当您更新 `to` 字段时，系统会提供类型安全的路由选项列表。
+## 任务四：创建游戏路由
+
+我们需要两个路由——一个用于选择英雄，一个用于游玩。两者都使用 shadcn 组件和 CopilotKit 聊天；没有手工编写的聊天 UI。
 
 <Tabs>
 <TabItem label="routes/index.tsx">
 <E2EDiff before="dungeon-adventure/4/routes/index.tsx.old.template" after="dungeon-adventure/4/routes/index.tsx.template" lang="tsx" />
+
+这是游戏选择器：新游戏表单（shadcn `Input` + `Button` + `Card`）加上由 `useGameApi().games.query` 通过 `useInfiniteQuery` 提供的"继续"列表——底部的哨兵 `<div>` 由 `IntersectionObserver` 监视，当滚动到视图中时会自动调用 `fetchNextPage()`，标题旁边和列表下方的加载指示器显示加载状态。开始游戏会 `saveGame` `(playerName, genre)` 对（以便下次显示）并导航到游玩路由。
 </TabItem>
-</Tabs>
-
-## 任务三：更新布局
-
-默认配置的布局更类似于 SaaS 风格的商业应用而非游戏。
-要重新配置布局并将主题调整为更像地牢风格的游戏，请对 `packages/game-ui/src` 进行以下修改：
-
-<Tabs>
-<TabItem label="config.ts">
-<E2EDiff before="dungeon-adventure/4/config.ts.old.template" after="dungeon-adventure/4/config.ts.template" lang="typescript" />
-</TabItem>
-<TabItem label="components/AppLayout/index.tsx">
-<E2ECode path="dungeon-adventure/4/AppLayout/index.tsx.template" lang="tsx" />
-</TabItem>
-<TabItem label="styles.css">
-<E2ECode path="dungeon-adventure/4/styles.css.template" lang="css" />
-</TabItem>
-</Tabs>
-
-删除未使用的 `packages/game-ui/src/hooks/useAppLayout.tsx` 文件。
-
-## 任务四：故事代理集成
-
-回想一下，在 <Link path="get_started/tutorials/dungeon-game/1#task-7-connect-your-components">模块一</Link> 中，我们使用 `connection` 生成器将游戏 UI 连接到故事代理。这为我们设置了用于与代理交互的类型安全 OpenAPI 客户端，以及钩子和提供程序。
-
-connection 生成器为我们创建了以下内容：
-- 在 `main.tsx` 中包装应用程序的 `StoryAgentProvider` 组件
-- 用于 TanStack Query 集成的 `useStoryAgent` 钩子
-- 用于直接客户端访问的 `useStoryAgentClient` 钩子
-- 从代理的 OpenAPI 规范生成的 TypeScript 类型
-
-我们将在游戏组件中使用 `useStoryAgentClient` 钩子来从代理流式传输故事响应。
-
-## 任务五：创建游戏页面
-
-要创建调用 API 并完成游戏实现的游戏页面，请更新 `packages/game-ui/src/routes/game` 中的以下文件：
-
-<Tabs>
-<TabItem label="index.tsx">
-<E2ECode path="dungeon-adventure/4/routes/game/index.tsx.template" lang="tsx" />
-</TabItem>
-<TabItem label="$playerName.tsx">
-
+<TabItem label="routes/game/$playerName.tsx">
 <E2ECode path="dungeon-adventure/4/routes/game/$playerName.tsx.template" lang="tsx" />
 
+这是游玩路由。它构建确定性的 `threadId`（``{player}-{genre}`` 填充到 33 个字符——AG-UI 钩子将其原样作为 AgentCore 会话 ID 发送），渲染 `<CopilotChat agentId="agent" threadId={threadId} />`，并在顶部叠加来自 `useGameApi().inventory.query` 的库存。在挂载时，`useGameApi().actions.query({ sessionId: threadId })` 读取代理存储在 S3 中的对话历史记录，如果有任何历史记录，则调用 `agent.setMessages(...)` 来重新激活聊天；否则发送一条启动用户消息来开始故事。`agent.messages` 通过 `useAgent({ updates: [OnMessagesChanged] })` 订阅，因此每个新回合也会重新获取库存查询（MCP 工具调用直接修改 DynamoDB）。
+
+<Aside type="tip" title="等待 `isFetching`，而不是 `isLoading`">
+React Query 的默认缓存会保留第一个结果 5 分钟，因此返回访问最初会看到第一次加载时的陈旧空列表。我们设置 `staleTime: 0` + `refetchOnMount: 'always'` 并在 `!isFetching && isSuccess` 上保护水合 `useEffect`，以便重新启动路径仅在真正空的线程上触发。
+</Aside>
+
+<Aside type="tip" title="确定性 threadId 使 /game/$playerName?genre=... 可共享">
+重新访问相同的 URL——无论是在重新加载、重新部署还是在另一台设备上——都会解析为相同的 `threadId`，因此代理会继续讲述相同的故事。
+</Aside>
+
 <Aside type="tip" title="路径参数">
-`$playerName` 语法将指示 `@tanstack/react-router` 将 `playerName` 作为[路径参数](https://tanstack.com/router/v1/docs/framework/react/guide/path-params)处理。此外，我们实现了 `validateSearch` 方法，确保 `genre` 查询参数严格类型化为我们的类型枚举。
+`$playerName` 语法告诉 `@tanstack/react-router` 将 `playerName` 作为[路径参数](https://tanstack.com/router/v1/docs/framework/react/guide/path-params)处理。`validateSearch` 使 `genre` 针对我们的枚举进行强类型化。
 </Aside>
 </TabItem>
 </Tabs>
 
-完成这些修改后，您的本地开发服务器（http://localhost:4200/）现在应该已准备好游戏供您游玩。
+保存后，位于 `http://localhost:4200/` 的开发服务器现在应该允许您开始冒险并与故事代理聊天。
 
-<Drawer title="构建与部署" trigger="如果您愿意，也可以构建并部署代码到 Cloudfront。">
+<Drawer title="构建与部署" trigger="如果您愿意，也可以构建并部署代码到 CloudFront。">
 
-## 任务六：构建与部署
+## 任务五：构建与部署
 
 ### 构建代码
-要构建代码，运行以下命令：
-
 <PackageManagerShortCommand commands={["build"]} />
 
 ### 部署应用程序
-要部署应用程序，运行以下命令：
-
 <NxCommands commands={['deploy infra dungeon-adventure-infra-sandbox/*']} />
 
-部署完成后，访问您的 Cloudfront URL。要找到此 URL，请查看 CDK 部署输出。
+部署完成后，访问您的 CloudFront URL（CDK 输出中的 `GameUIDistributionDomainName`）。
 
 </Drawer>
 
-<Image src={gameSelectPng} alt="game-select.png" width="500" height="400" />
+<Image src={gameSelectPng} alt="game-select.png" width="600" height="309" />
 <div style="margin-top: -100px; margin-left: 100px;">
-<Image src={gameConversationPng} alt="game-conversation.png" width="500" height="400" />
+<Image src={gameConversationPng} alt="game-conversation.png" width="600" height="310" />
 </div>
 
 恭喜您。您已成功构建并部署智能地牢冒险游戏！🎉🎉🎉
