@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { existsSync, rmSync } from 'fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { ensureDirSync } from 'fs-extra';
 import { buildCreateNxWorkspaceCommand, runCLI, tmpProjPath } from '../utils';
 
@@ -33,9 +33,9 @@ describe('smoke test - rdb', () => {
         const projectRoot = `${targetDir}/e2e-test`;
         const opts = { cwd: projectRoot, env: { NX_DAEMON: 'false' } };
 
-        // RDB project name follows kebab-case: PostgreSQLDb → postgre-sql-db, MySQLDb → my-sql-db
+        // RDB project name follows kebab-case: PostgreSQLDb → postgre-sqldb, MySQLDb → my-sqldb
         const rdbProjectName =
-          engine === 'PostgreSQL' ? 'postgre-sql-db' : 'my-sql-db';
+          engine === 'PostgreSQL' ? 'postgre-sqldb' : 'my-sqldb';
         const rdbProject = `@e2e-test/${rdbProjectName}`;
 
         await runCLI(
@@ -71,11 +71,11 @@ describe('smoke test - rdb', () => {
 
         // RDB connections
         await runCLI(
-          `generate @aws/nx-plugin:connection --sourceProject=@e2e-test/my-api --targetProject=${rdbProject} --no-interactive`,
+          `generate @aws/nx-plugin:connection --sourceProject=my-api --targetProject=${rdbProject} --no-interactive`,
           opts,
         );
         await runCLI(
-          `generate @aws/nx-plugin:connection --sourceProject=@e2e-test/my-smithy-api --targetProject=${rdbProject} --no-interactive`,
+          `generate @aws/nx-plugin:connection --sourceProject=my-smithy-api --targetProject=${rdbProject} --no-interactive`,
           opts,
         );
         await runCLI(
@@ -89,6 +89,17 @@ describe('smoke test - rdb', () => {
         await runCLI(
           `generate @aws/nx-plugin:connection --sourceProject=agents --sourceComponent=my-mcp --targetProject=${rdbProject} --no-interactive`,
           opts,
+        );
+
+        // The rdb connection generators inject a `const <dbName> = await get<DbName>()` variable
+        // as scaffolding for the developer, which is intentionally unused at generation time.
+        // Disable noUnusedLocals so the build step doesn't fail on TS6133.
+        const tsconfigBasePath = `${projectRoot}/tsconfig.base.json`;
+        const tsconfig = JSON.parse(readFileSync(tsconfigBasePath, 'utf-8'));
+        tsconfig.compilerOptions.noUnusedLocals = false;
+        writeFileSync(
+          tsconfigBasePath,
+          JSON.stringify(tsconfig, null, 2) + '\n',
         );
 
         await runCLI(`sync --verbose`, opts);
