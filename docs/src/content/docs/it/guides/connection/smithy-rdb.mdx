@@ -10,7 +10,7 @@ import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
-import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
 
 Il generatore `connection` collega un'<Link path="guides/ts-smithy-api">API Smithy</Link> a un progetto <Link path="guides/ts-rdb">Database Relazionale</Link>, iniettando un client Prisma nel contesto del servizio in modo che tutte le implementazioni delle operazioni possano accedere al database.
 
@@ -42,7 +42,7 @@ Il generatore modifica tre file esistenti nel tuo backend API Smithy:
 - packages/api/src
   - context.ts proprietà `db` aggiunta a `ServiceContext`
   - handler.ts client Prisma creato all'interno di `lambdaHandler`, passato a `serviceHandler.handle`
-  - local-server.ts client Prisma creato all'interno del gestore delle richieste, passato a `serviceHandler.handle`
+  - local-server.ts client Prisma creato all'interno del request handler, passato a `serviceHandler.handle`
 
 </FileTree>
 
@@ -104,77 +104,11 @@ export const listUsers = async (
 
 ## Infrastruttura
 
-Per consentire alla tua API Smithy di connettersi al database in fase di esecuzione, le funzioni Lambda dell'API devono essere distribuite nella stessa VPC del database e devono avere accesso di rete e IAM.
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-Nel tuo stack applicativo, distribuisci l'API nella stessa VPC del database, quindi chiama `allowDefaultPortFrom` e `grantConnect` per aprire il percorso di rete e concedere il permesso IAM `rds-db:connect` a ciascun gestore Lambda:
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { MyDatabase } from ':my-scope/common-constructs';
-
-const db = new MyDatabase(this, 'Db', { vpc, ... });
-
-const api = new MyApi(this, 'Api', {
-  integrations: MyApi.defaultIntegrations(this)
-    .withDefaultOptions({
-      vpc,
-      vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
-    })
-    .build(),
-});
-
-Object.entries(api.integrations).forEach(([operation, integration]) => {
-  db.allowDefaultPortFrom(integration.handler, `Allow ${operation} to connect to the database`);
-  db.grantConnect(integration.handler);
-});
-```
-
-Distribuisci le funzioni Lambda dell'API in una **subnet privata con egress**, non in una subnet privata isolata. In fase di esecuzione, `getPrisma()` recupera i dettagli di connessione al database da AWS AppConfig, che richiede l'accesso a Internet in uscita.
-
-:::note
-Questo esempio concede l'accesso a ogni gestore nella tua API, ma se solo alcuni gestori necessitano di accesso è meglio configurarli individualmente.
-:::
-
-</Fragment>
-<Fragment slot="terraform">
-
-Passa gli output del modulo database nel tuo modulo API in modo che possa raggiungere il database e leggere la sua configurazione di runtime:
-
-```hcl title="packages/infra/src/main.tf"
-module "my_database" {
-  source              = "../../common/terraform/src/app/dbs/my-database"
-  vpc_id              = module.vpc.vpc_id
-  database_subnet_ids = module.vpc.private_isolated_subnet_ids
-  lambda_subnet_ids   = module.vpc.private_subnet_ids
-}
-
-module "api" {
-  source             = "..."
-  vpc_id             = module.vpc.vpc_id
-  private_subnet_ids = module.vpc.private_subnet_ids
-
-  appconfig_application_id     = module.my_database.appconfig_application_id
-  database_cluster_resource_id = module.my_database.cluster_resource_id
-  database_runtime_user        = module.my_database.database_runtime_user
-  database_security_group_id   = module.my_database.security_group_id
-  database_port                = module.my_database.cluster_port
-
-  environment_variables = {
-    RUNTIME_CONFIG_APP_ID = module.my_database.appconfig_application_id
-  }
-}
-```
-
-Distribuisci le funzioni Lambda dell'API in **subnet private con egress**, non in subnet private isolate. Assicurati che il ruolo Lambda dell'API abbia il permesso `rds-db:connect` e che il suo gruppo di sicurezza possa raggiungere il gruppo di sicurezza del database sulla porta del database.
-
-</Fragment>
-</Infrastructure>
+<Snippet name="connection/rdb-api-infrastructure" parentHeading="Infrastructure" />
 
 ## Sviluppo Locale
 
-Il generatore applica la stessa iniezione del client Prisma all'interno del gestore delle richieste in `local-server.ts`:
+Il generatore applica la stessa iniezione del client Prisma all'interno del request handler in `local-server.ts`:
 
 ```ts title="packages/api/src/local-server.ts" {1,5,10}
 import { getPrisma as getMyDb } from ':my-scope/my-db';

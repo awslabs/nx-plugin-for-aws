@@ -10,13 +10,13 @@ import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
-import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
 
-`connection` ジェネレーターは、<Link path="guides/ts-smithy-api">Smithy API</Link> を <Link path="guides/ts-rdb">リレーショナルデータベース</Link> プロジェクトに接続し、Prisma クライアントをサービスコンテキストに注入することで、すべての操作実装がデータベースにアクセスできるようにします。
+`connection` ジェネレーターは、<Link path="guides/ts-smithy-api">Smithy API</Link> を <Link path="guides/ts-rdb">リレーショナルデータベース</Link> プロジェクトに接続し、Prisma クライアントをサービスコンテキストに注入することで、すべてのオペレーション実装がデータベースにアクセスできるようにします。
 
 ## 前提条件
 
-このジェネレーターを使用する前に、以下を用意してください：
+このジェネレーターを使用する前に、以下を確認してください：
 
 1. <Link path="guides/ts-smithy-api">`ts#smithy-api`</Link> プロジェクト（TypeScript バックエンド）
 2. <Link path="guides/ts-rdb">`ts#rdb`</Link> プロジェクト
@@ -27,7 +27,7 @@ import Infrastructure from '@components/infrastructure.astro';
 
 <RunGenerator generator="connection" />
 
-Smithy API バックエンドプロジェクトをソースとして選択し、リレーショナルデータベースプロジェクトをターゲットとして選択します。
+Smithy API バックエンドプロジェクトをソースとして、リレーショナルデータベースプロジェクトをターゲットとして選択します。
 
 ### オプション
 
@@ -85,9 +85,9 @@ export const lambdaHandler = async (event: APIGatewayProxyEvent) => {
 };
 ```
 
-### 操作でのデータベースの使用
+### オペレーションでのデータベースの使用
 
-操作実装でコンテキストから `db` にアクセスします：
+オペレーション実装でコンテキストから `db` にアクセスします：
 
 ```ts title="packages/api/src/operations/list-users.ts" {8}
 import { ListUsersOperationInput, ListUsersOperationOutput } from '../generated/ssdk/index.js';
@@ -104,73 +104,7 @@ export const listUsers = async (
 
 ## インフラストラクチャ
 
-実行時に Smithy API がデータベースに接続できるようにするには、API Lambda 関数をデータベースと同じ VPC にデプロイし、ネットワークおよび IAM アクセスを許可する必要があります。
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-アプリケーションスタックで、API をデータベースと同じ VPC にデプロイし、`allowDefaultPortFrom` と `grantConnect` を呼び出して、ネットワークパスを開き、各 Lambda ハンドラーに IAM `rds-db:connect` 権限を付与します：
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { MyDatabase } from ':my-scope/common-constructs';
-
-const db = new MyDatabase(this, 'Db', { vpc, ... });
-
-const api = new MyApi(this, 'Api', {
-  integrations: MyApi.defaultIntegrations(this)
-    .withDefaultOptions({
-      vpc,
-      vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
-    })
-    .build(),
-});
-
-Object.entries(api.integrations).forEach(([operation, integration]) => {
-  db.allowDefaultPortFrom(integration.handler, `Allow ${operation} to connect to the database`);
-  db.grantConnect(integration.handler);
-});
-```
-
-API Lambda 関数は、プライベート分離サブネットではなく、**エグレス付きプライベートサブネット**にデプロイしてください。実行時に、`getPrisma()` は AWS AppConfig からデータベース接続の詳細を取得しますが、これにはアウトバウンドインターネットアクセスが必要です。
-
-:::note
-この例では、API のすべてのハンドラーにアクセスを許可していますが、一部のハンドラーのみがアクセスを必要とする場合は、個別に設定する方が良いでしょう。
-:::
-
-</Fragment>
-<Fragment slot="terraform">
-
-データベースモジュールの出力を API モジュールに渡して、API がデータベースに到達し、その実行時設定を読み取れるようにします：
-
-```hcl title="packages/infra/src/main.tf"
-module "my_database" {
-  source              = "../../common/terraform/src/app/dbs/my-database"
-  vpc_id              = module.vpc.vpc_id
-  database_subnet_ids = module.vpc.private_isolated_subnet_ids
-  lambda_subnet_ids   = module.vpc.private_subnet_ids
-}
-
-module "api" {
-  source             = "..."
-  vpc_id             = module.vpc.vpc_id
-  private_subnet_ids = module.vpc.private_subnet_ids
-
-  appconfig_application_id     = module.my_database.appconfig_application_id
-  database_cluster_resource_id = module.my_database.cluster_resource_id
-  database_runtime_user        = module.my_database.database_runtime_user
-  database_security_group_id   = module.my_database.security_group_id
-  database_port                = module.my_database.cluster_port
-
-  environment_variables = {
-    RUNTIME_CONFIG_APP_ID = module.my_database.appconfig_application_id
-  }
-}
-```
-
-API Lambda 関数は、プライベート分離サブネットではなく、**エグレス付きプライベートサブネット**にデプロイしてください。API Lambda ロールに `rds-db:connect` 権限があり、そのセキュリティグループがデータベースポートでデータベースセキュリティグループに到達できることを確認してください。
-
-</Fragment>
-</Infrastructure>
+<Snippet name="connection/rdb-api-infrastructure" parentHeading="Infrastructure" />
 
 ## ローカル開発
 
@@ -195,4 +129,3 @@ const server = createServer(async function (req, res) {
 <NxCommands commands={["serve-local <api-project-name>"]} />
 
 これにより、API とローカルデータベースの両方が起動します。`SERVE_LOCAL=true` 環境変数が自動的に設定されるため、Prisma クライアントは Aurora ではなくローカルの Docker データベースに接続します。
-

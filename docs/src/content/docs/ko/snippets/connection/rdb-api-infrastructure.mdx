@@ -1,0 +1,72 @@
+---
+title: RDB API 인프라
+---
+import Infrastructure from '@components/infrastructure.astro';
+
+런타임에 API가 데이터베이스에 연결할 수 있도록 하려면, API Lambda 함수를 데이터베이스와 동일한 VPC에 배포하고 네트워크 및 IAM 액세스 권한을 부여해야 합니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+애플리케이션 스택에서 API를 데이터베이스와 동일한 VPC에 배포한 다음, `allowDefaultPortFrom` 및 `grantConnect`를 호출하여 네트워크 경로를 열고 각 Lambda 핸들러에 IAM `rds-db:connect` 권한을 부여합니다:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+
+const api = new MyApi(this, 'Api', {
+  integrations: MyApi.defaultIntegrations(this)
+    .withDefaultOptions({
+      vpc,
+      vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+    })
+    .build(),
+});
+
+Object.entries(api.integrations).forEach(([operation, integration]) => {
+  db.allowDefaultPortFrom(integration.handler, `Allow ${operation} to connect to the database`);
+  db.grantConnect(integration.handler);
+});
+```
+
+API Lambda 함수를 프라이빗 격리 서브넷이 아닌 **외부 연결이 가능한 프라이빗 서브넷**에 배포하세요. 런타임에 `getPrisma()`는 AWS AppConfig에서 데이터베이스 연결 세부 정보를 가져오는데, 이는 아웃바운드 인터넷 액세스가 필요한 퍼블릭 AWS 서비스 엔드포인트입니다.
+
+:::note
+이 예제는 API의 모든 핸들러에 액세스 권한을 부여하지만, 일부 핸들러만 액세스가 필요한 경우 개별적으로 구성하는 것이 좋습니다.
+:::
+
+</Fragment>
+<Fragment slot="terraform">
+
+데이터베이스 모듈 출력을 API 모듈에 전달하여 데이터베이스에 도달하고 런타임 구성을 읽을 수 있도록 합니다:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
+}
+
+module "api" {
+  source             = "..."
+  vpc_id             = module.vpc.vpc_id
+  private_subnet_ids = module.vpc.private_subnet_ids
+
+  appconfig_application_id     = module.my_database.appconfig_application_id
+  database_cluster_resource_id = module.my_database.cluster_resource_id
+  database_runtime_user        = module.my_database.database_runtime_user
+  database_security_group_id   = module.my_database.security_group_id
+  database_port                = module.my_database.cluster_port
+
+  environment_variables = {
+    RUNTIME_CONFIG_APP_ID = module.my_database.appconfig_application_id
+  }
+}
+```
+
+API Lambda 함수를 프라이빗 격리 서브넷이 아닌 **외부 연결이 가능한 프라이빗 서브넷**에 배포하세요. API Lambda 역할에 `rds-db:connect` 권한이 있고 해당 보안 그룹이 데이터베이스 포트에서 데이터베이스 보안 그룹에 도달할 수 있는지 확인하세요.
+
+</Fragment>
+</Infrastructure>

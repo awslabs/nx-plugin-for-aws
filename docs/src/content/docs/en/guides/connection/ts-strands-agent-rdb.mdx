@@ -12,9 +12,7 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Infrastructure from '@components/infrastructure.astro';
 
-The `connection` generator wires a <Link path="guides/ts-strands-agent">TypeScript Strands Agent</Link> to a <Link path="guides/ts-rdb">Relational Database</Link> project, making a Prisma client available throughout your agent's request lifecycle.
-
-The injection strategy depends on the agent's protocol — **HTTP** (tRPC-based) or **A2A** (Agent-to-Agent).
+The `connection` generator wires a <Link path="guides/ts-strands-agent">TypeScript Strands Agent</Link> to a <Link path="guides/ts-rdb">Relational Database</Link> project, making a Prisma client available inside your agent factory.
 
 ## Prerequisites
 
@@ -37,27 +35,12 @@ Select your Strands Agent project as the source and your relational database pro
 
 ## Generator Output
 
-The files modified depend on the agent's protocol.
-
-**HTTP Protocol** — modifies four files:
+The generator modifies a single file:
 
 <FileTree>
 
 - packages/my-service/src/my-agent
-  - init.ts `db` property added to `Context` interface
-  - index.ts `createContext` made async; Prisma client created and returned in context
-  - router.ts `db` destructured from `opts.ctx` and passed to `getAgent`
-  - agent.ts `getAgent` updated to accept `{ db }` as second parameter
-
-</FileTree>
-
-**A2A Protocol** — modifies two files:
-
-<FileTree>
-
-- packages/my-service/src/my-agent
-  - index.ts Prisma client created before `A2AExpressServer`; passed to `getAgent`
-  - agent.ts `getAgent` updated to accept `{ db }` as second parameter
+  - agent.ts Prisma client fetched inside `getAgent` and available to tools
 
 </FileTree>
 
@@ -65,101 +48,35 @@ Additionally, the agent's `<agent-name>-serve-local` target is updated to depend
 
 ## How It Works
 
-### HTTP Protocol
+The Prisma client is fetched directly inside `getAgent()` rather than threaded through function parameters. This aligns with how the strands-agent runtime propagates session context — `withSessionId` wraps `getAgent` and caches one `Agent` instance per session, so `getPrisma()` is called at most once per session.
 
-For HTTP agents, the database flows through the tRPC request context — `createContext` creates a Prisma client per request and it becomes available to every procedure via `opts.ctx`. The router then passes it explicitly into `getAgent`.
+### Agent Definition
 
-#### Context Interface
+`getAgent` is updated to import and call the Prisma getter at the top of its body:
 
-The Prisma client type is added to the tRPC `Context` in `init.ts`:
-
-```ts title="packages/my-service/src/my-agent/init.ts" {1,5}
+```ts title="packages/my-service/src/my-agent/agent.ts" {1,5}
 import { getPrisma as getMyDb } from ':my-scope/my-db';
 
-export interface Context {
-  sessionId: string;
-  myDb: Awaited<ReturnType<typeof getMyDb>>;
-}
-```
-
-#### Request Context
-
-`createContext` is made async and the Prisma client is instantiated and returned:
-
-```ts title="packages/my-service/src/my-agent/index.ts" {1,6,10}
-import { getPrisma as getMyDb } from ':my-scope/my-db';
-
-const createContext = async (
-  opts: CreateHTTPContextOptions | CreateWSSContextFnOptions,
-): Promise<Context> => {
+export const getAgent = async () => {
   const myDb = await getMyDb();
-  const sessionId = /* ... */;
-  return {
-    sessionId,
-    myDb,
-  };
-};
-```
-
-#### Router and Agent
-
-The database is passed from context into `getAgent` via the subscription handler:
-
-```ts title="packages/my-service/src/my-agent/router.ts" {2,3}
-.subscription(async function* (opts) {
-  const { myDb } = opts.ctx;
-  const agent = await getAgent(opts.ctx.sessionId, { myDb });
-  // ...
-})
-```
-
-```ts title="packages/my-service/src/my-agent/agent.ts" {3}
-export const getAgent = async (
-  sessionId: string,
-  { myDb }: { myDb: Awaited<ReturnType<typeof getMyDb>> },
-) => {
   return new Agent({ /* use myDb in tools */ });
 };
 ```
 
-### A2A Protocol
-
-For A2A agents, there is no tRPC context. The database is created once at startup and passed directly to `getAgent` before the `A2AExpressServer` starts.
-
-#### Server Startup
-
-The Prisma client is created before the `A2AExpressServer` and passed to `getAgent`:
-
-```ts title="packages/my-service/src/my-agent/index.ts" {1,4,6}
-import { getPrisma as getMyDb } from ':my-scope/my-db';
-
-void (async () => {
-  const myDb = await getMyDb();
-  const server = new A2AExpressServer({
-    agent: await getAgent('default', { myDb }),
-    // ...
-  });
-})();
-```
-
-#### Agent Definition
-
-```ts title="packages/my-service/src/my-agent/agent.ts" {3}
-export const getAgent = async (
-  sessionId: string,
-  { myDb }: { myDb: Awaited<ReturnType<typeof getMyDb>> },
-) => {
-  return new Agent({ /* use myDb in tools */ });
-};
-```
 
 ## Multiple Databases
 
-Running the generator again with a different target adds the second database alongside the first. For HTTP agents, both appear in the `Context` interface and are destructured together in the router:
+Running the generator again with a different target adds the second database alongside the first:
 
-```ts title="packages/my-service/src/my-agent/router.ts"
-const { postgresDb, mysqlDb } = opts.ctx;
-const agent = await getAgent(opts.ctx.sessionId, { postgresDb, mysqlDb });
+```ts title="packages/my-service/src/my-agent/agent.ts"
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+import { getPrisma as getOtherDb } from ':my-scope/other-db';
+
+export const getAgent = async () => {
+  const myDb = await getMyDb();
+  const otherDb = await getOtherDb();
+  return new Agent({ /* use both clients in tools */ });
+};
 ```
 
 ## Infrastructure

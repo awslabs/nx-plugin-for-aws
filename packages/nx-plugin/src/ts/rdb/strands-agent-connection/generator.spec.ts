@@ -52,53 +52,6 @@ describe('ts#rdb strands-agent-connection generator', () => {
       }),
     );
 
-    if (protocol === 'A2A') {
-      tree.write(
-        `packages/${name}/src/${agentName}/agent.ts`,
-        `import { Agent, tool } from '@strands-agents/sdk';
-import { z } from 'zod';
-
-const multiply = tool({
-  name: 'Multiply',
-  description: 'Multiply two numbers',
-  inputSchema: z.object({ a: z.number(), b: z.number() }),
-  callback: ({ a, b }) => a * b,
-});
-
-export const getAgent = async (sessionId: string) => {
-  return new Agent({
-    systemPrompt: 'You are a helpful assistant.',
-    tools: [multiply],
-  });
-};
-`,
-      );
-      tree.write(
-        `packages/${name}/src/${agentName}/index.ts`,
-        `import { A2AExpressServer } from '@strands-agents/sdk/a2a/express';
-import express from 'express';
-import { getAgent } from './agent.js';
-
-const PORT = parseInt(process.env.PORT || '9000');
-const HOST = '0.0.0.0';
-
-void (async () => {
-  const server = new A2AExpressServer({
-    agent: await getAgent('default'),
-    name: 'MyAgent',
-    host: HOST,
-    port: PORT,
-  });
-
-  const app = express();
-  app.use(server.createMiddleware());
-  app.listen(PORT, HOST);
-})();
-`,
-      );
-      return;
-    }
-
     tree.write(
       `packages/${name}/src/${agentName}/agent.ts`,
       `import { Agent, tool } from '@strands-agents/sdk';
@@ -111,92 +64,12 @@ const multiply = tool({
   callback: ({ a, b }) => a * b,
 });
 
-export const getAgent = async (sessionId: string) => {
+export const getAgent = async () => {
   return new Agent({
     systemPrompt: 'You are a helpful assistant.',
     tools: [multiply],
   });
 };
-`,
-    );
-    tree.write(
-      `packages/${name}/src/${agentName}/init.ts`,
-      `import { initTRPC } from '@trpc/server';
-
-export interface Context {
-  sessionId: string;
-}
-
-export const t = initTRPC.context<Context>().create();
-
-export const publicProcedure = t.procedure;
-`,
-    );
-    tree.write(
-      `packages/${name}/src/${agentName}/router.ts`,
-      `import { publicProcedure, t } from './init.js';
-import { z } from 'zod';
-import { getAgent } from './agent.js';
-
-export const router = t.router;
-
-export const appRouter = router({
-  invoke: publicProcedure
-    .input(z.object({ message: z.string() }))
-    .subscription(async function* (opts) {
-      const agent = await getAgent(opts.ctx.sessionId);
-      for await (const event of agent.stream(opts.input.message)) {
-        yield event;
-      }
-      return;
-    }),
-});
-
-export type AppRouter = typeof appRouter;
-`,
-    );
-    tree.write(
-      `packages/${name}/src/${agentName}/index.ts`,
-      `import { randomUUID } from 'node:crypto';
-import { createServer } from 'http';
-import {
-  CreateHTTPContextOptions,
-  createHTTPHandler,
-} from '@trpc/server/adapters/standalone';
-import { appRouter, AppRouter } from './router.js';
-import { WebSocketServer } from 'ws';
-import cors from 'cors';
-import {
-  CreateWSSContextFnOptions,
-  applyWSSHandler,
-} from '@trpc/server/adapters/ws';
-import { Context } from './init.js';
-
-const PORT = parseInt(process.env.PORT || '8080');
-
-const createContext = (
-  opts: CreateHTTPContextOptions | CreateWSSContextFnOptions,
-): Context => {
-  const sessionId =
-    ('req' in opts
-      ? opts.req.headers['x-session-id']
-      : undefined) ?? randomUUID();
-  return {
-    sessionId: Array.isArray(sessionId) ? sessionId[0] : sessionId,
-  };
-};
-
-const handler = createHTTPHandler({
-  router: appRouter,
-  middleware: cors(),
-  createContext,
-});
-
-const server = createServer((req, res) => {
-  handler(req, res);
-});
-
-server.listen(PORT);
 `,
     );
   };
@@ -218,7 +91,7 @@ server.listen(PORT);
     expect(readProjectConfiguration(tree, 'my-service')).toMatchSnapshot();
   });
 
-  it('should inject into init.ts, index.ts, router.ts and agent.ts', async () => {
+  it('should inject db into agent.ts', async () => {
     setupAgentProject('my-service', 'my-agent');
     setupRdbProject();
 
@@ -229,20 +102,11 @@ server.listen(PORT);
     });
 
     expect(
-      tree.read('packages/my-service/src/my-agent/init.ts', 'utf-8'),
-    ).toMatchSnapshot();
-    expect(
-      tree.read('packages/my-service/src/my-agent/index.ts', 'utf-8'),
-    ).toMatchSnapshot();
-    expect(
-      tree.read('packages/my-service/src/my-agent/router.ts', 'utf-8'),
-    ).toMatchSnapshot();
-    expect(
       tree.read('packages/my-service/src/my-agent/agent.ts', 'utf-8'),
     ).toMatchSnapshot();
   });
 
-  it('should be idempotent across init.ts, index.ts, router.ts and agent.ts', async () => {
+  it('should be idempotent for agent.ts injection', async () => {
     setupAgentProject('my-service', 'my-agent');
     setupRdbProject();
 
@@ -258,20 +122,11 @@ server.listen(PORT);
     });
 
     expect(
-      tree.read('packages/my-service/src/my-agent/init.ts', 'utf-8'),
-    ).toMatchSnapshot();
-    expect(
-      tree.read('packages/my-service/src/my-agent/index.ts', 'utf-8'),
-    ).toMatchSnapshot();
-    expect(
-      tree.read('packages/my-service/src/my-agent/router.ts', 'utf-8'),
-    ).toMatchSnapshot();
-    expect(
       tree.read('packages/my-service/src/my-agent/agent.ts', 'utf-8'),
     ).toMatchSnapshot();
   });
 
-  it('should support multiple rdb connections in router.ts', async () => {
+  it('should support multiple rdb connections in agent.ts', async () => {
     setupAgentProject('my-service', 'my-agent');
     setupRdbProject('postgres-db');
     setupRdbProject('mysql-db');
@@ -288,7 +143,7 @@ server.listen(PORT);
     });
 
     expect(
-      tree.read('packages/my-service/src/my-agent/router.ts', 'utf-8'),
+      tree.read('packages/my-service/src/my-agent/agent.ts', 'utf-8'),
     ).toMatchSnapshot();
   });
 
@@ -305,7 +160,7 @@ server.listen(PORT);
     expect(readProjectConfiguration(tree, 'my-service')).toMatchSnapshot();
   });
 
-  it('should inject db into A2A index.ts', async () => {
+  it('should inject db into agent.ts for A2A', async () => {
     setupAgentProject('my-service', 'my-agent', 'A2A');
     setupRdbProject();
 
@@ -315,15 +170,12 @@ server.listen(PORT);
       sourceComponent: { generator: 'ts#strands-agent', name: 'my-agent' },
     });
 
-    expect(
-      tree.read('packages/my-service/src/my-agent/index.ts', 'utf-8'),
-    ).toMatchSnapshot();
     expect(
       tree.read('packages/my-service/src/my-agent/agent.ts', 'utf-8'),
     ).toMatchSnapshot();
   });
 
-  it('should be idempotent for A2A index.ts and agent.ts injection', async () => {
+  it('should be idempotent for A2A agent.ts injection', async () => {
     setupAgentProject('my-service', 'my-agent', 'A2A');
     setupRdbProject();
 
@@ -338,9 +190,6 @@ server.listen(PORT);
       sourceComponent: { generator: 'ts#strands-agent', name: 'my-agent' },
     });
 
-    expect(
-      tree.read('packages/my-service/src/my-agent/index.ts', 'utf-8'),
-    ).toMatchSnapshot();
     expect(
       tree.read('packages/my-service/src/my-agent/agent.ts', 'utf-8'),
     ).toMatchSnapshot();

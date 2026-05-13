@@ -1,6 +1,6 @@
 ---
-title: Smithy API tới Cơ sở dữ liệu Quan hệ
-description: Kết nối Smithy API với Cơ sở dữ liệu Quan hệ
+title: Smithy API đến Cơ sở dữ liệu quan hệ
+description: Kết nối Smithy API với Cơ sở dữ liệu quan hệ
 when:
   sourceType: smithy
   targetType: ts#rdb
@@ -12,37 +12,37 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Infrastructure from '@components/infrastructure.astro';
 
-Trình tạo `connection` kết nối một <Link path="guides/ts-smithy-api">Smithy API</Link> với một dự án <Link path="guides/ts-rdb">Cơ sở dữ liệu Quan hệ</Link>, chèn một Prisma client vào ngữ cảnh dịch vụ để tất cả các triển khai hoạt động có thể truy cập cơ sở dữ liệu.
+Generator `connection` kết nối một <Link path="guides/ts-smithy-api">Smithy API</Link> với dự án <Link path="guides/ts-rdb">Cơ sở dữ liệu quan hệ</Link>, tiêm một Prisma client vào service context để tất cả các operation implementation có thể truy cập cơ sở dữ liệu.
 
 ## Điều kiện tiên quyết
 
-Trước khi sử dụng trình tạo này, hãy đảm bảo bạn có:
+Trước khi sử dụng generator này, hãy đảm bảo bạn có:
 
 1. Một dự án <Link path="guides/ts-smithy-api">`ts#smithy-api`</Link> (TypeScript backend)
 2. Một dự án <Link path="guides/ts-rdb">`ts#rdb`</Link>
 
 ## Cách sử dụng
 
-### Chạy Trình tạo
+### Chạy Generator
 
 <RunGenerator generator="connection" />
 
-Chọn dự án backend Smithy API của bạn làm nguồn và dự án cơ sở dữ liệu quan hệ của bạn làm đích.
+Chọn dự án Smithy API backend của bạn làm nguồn và dự án cơ sở dữ liệu quan hệ của bạn làm đích.
 
 ### Tùy chọn
 
 <GeneratorParameters generator="connection" />
 
-## Kết quả của Trình tạo
+## Kết quả của Generator
 
-Trình tạo sửa đổi ba tệp hiện có trong backend Smithy API của bạn:
+Generator sửa đổi ba tệp hiện có trong Smithy API backend của bạn:
 
 <FileTree>
 
 - packages/api/src
-  - context.ts thuộc tính `db` được thêm vào `ServiceContext`
-  - handler.ts Prisma client được tạo bên trong `lambdaHandler`, truyền đến `serviceHandler.handle`
-  - local-server.ts Prisma client được tạo bên trong request handler, truyền đến `serviceHandler.handle`
+  - context.ts Thuộc tính `db` được thêm vào `ServiceContext`
+  - handler.ts Prisma client được tạo bên trong `lambdaHandler`, được truyền cho `serviceHandler.handle`
+  - local-server.ts Prisma client được tạo bên trong request handler, được truyền cho `serviceHandler.handle`
 
 </FileTree>
 
@@ -52,7 +52,7 @@ Ngoài ra, nó cập nhật target `serve-local` của API để tự động kh
 
 ### ServiceContext
 
-Trình tạo thêm một thuộc tính `db` có kiểu vào `ServiceContext` trong `context.ts`:
+Generator thêm một thuộc tính `db` có kiểu vào `ServiceContext` trong `context.ts`:
 
 ```ts title="packages/api/src/context.ts" {1,7}
 import { getPrisma as getMyDb } from ':my-scope/my-db';
@@ -67,7 +67,7 @@ export interface ServiceContext {
 
 ### Lambda Handler
 
-Prisma client được khởi tạo bên trong `lambdaHandler` và truyền qua ngữ cảnh dịch vụ:
+Prisma client được khởi tạo bên trong `lambdaHandler` và được truyền qua service context:
 
 ```ts title="packages/api/src/handler.ts" {1,10}
 import { getPrisma as getMyDb } from ':my-scope/my-db';
@@ -85,9 +85,9 @@ export const lambdaHandler = async (event: APIGatewayProxyEvent) => {
 };
 ```
 
-### Sử dụng Cơ sở dữ liệu trong Hoạt động
+### Sử dụng cơ sở dữ liệu trong Operations
 
-Truy cập `db` từ ngữ cảnh trong các triển khai hoạt động của bạn:
+Truy cập `db` từ context trong các operation implementation của bạn:
 
 ```ts title="packages/api/src/operations/list-users.ts" {8}
 import { ListUsersOperationInput, ListUsersOperationOutput } from '../generated/ssdk/index.js';
@@ -104,12 +104,12 @@ export const listUsers = async (
 
 ## Cơ sở hạ tầng
 
-Để cho phép Smithy API của bạn kết nối với cơ sở dữ liệu tại thời điểm chạy, các hàm Lambda API phải được triển khai vào cùng một VPC với cơ sở dữ liệu và được cấp quyền truy cập mạng và IAM.
+Để cho phép Smithy API của bạn kết nối với cơ sở dữ liệu tại runtime, các Lambda function của API phải được triển khai vào cùng VPC với cơ sở dữ liệu và được cấp quyền truy cập mạng và IAM.
 
 <Infrastructure>
 <Fragment slot="cdk">
 
-Trong application stack của bạn, triển khai API vào cùng một VPC với cơ sở dữ liệu, sau đó gọi `allowDefaultPortFrom` và `grantConnect` để mở đường dẫn mạng và cấp quyền IAM `rds-db:connect` cho mỗi Lambda handler:
+Trong application stack của bạn, triển khai API vào cùng VPC với cơ sở dữ liệu, sau đó gọi `allowDefaultPortFrom` và `grantConnect` để mở đường dẫn mạng và cấp quyền IAM `rds-db:connect` cho mỗi Lambda handler:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
 import { MyDatabase } from ':my-scope/common-constructs';
@@ -131,16 +131,16 @@ Object.entries(api.integrations).forEach(([operation, integration]) => {
 });
 ```
 
-Triển khai các hàm Lambda API vào **private subnet với egress**, không phải private isolated subnet. Tại thời điểm chạy, `getPrisma()` lấy thông tin chi tiết kết nối cơ sở dữ liệu từ AWS AppConfig, điều này yêu cầu quyền truy cập internet ra ngoài.
+Triển khai các Lambda function của API vào **private subnet với egress**, không phải private isolated subnet. Tại runtime, `getPrisma()` lấy thông tin chi tiết kết nối cơ sở dữ liệu từ AWS AppConfig, điều này yêu cầu truy cập internet ra ngoài.
 
 :::note
-Ví dụ này cấp quyền truy cập cho mọi handler trong API của bạn, nhưng nếu chỉ một số handler cần quyền truy cập thì tốt hơn là cấu hình riêng lẻ.
+Ví dụ này cấp quyền truy cập cho mọi handler trong API của bạn, nhưng nếu chỉ một số handler cần truy cập thì tốt hơn là cấu hình riêng lẻ.
 :::
 
 </Fragment>
 <Fragment slot="terraform">
 
-Truyền các đầu ra của database module vào API module của bạn để nó có thể truy cập cơ sở dữ liệu và đọc cấu hình thời gian chạy của nó:
+Truyền các output của database module vào API module của bạn để nó có thể truy cập cơ sở dữ liệu và đọc cấu hình runtime của nó:
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
@@ -167,14 +167,14 @@ module "api" {
 }
 ```
 
-Triển khai các hàm Lambda API vào **private subnets với egress**, không phải private isolated subnets. Đảm bảo API Lambda role có quyền `rds-db:connect` và security group của nó có thể truy cập security group của cơ sở dữ liệu trên cổng cơ sở dữ liệu.
+Triển khai các Lambda function của API vào **private subnet với egress**, không phải private isolated subnet. Đảm bảo API Lambda role có quyền `rds-db:connect` và security group của nó có thể truy cập security group của cơ sở dữ liệu trên cổng cơ sở dữ liệu.
 
 </Fragment>
 </Infrastructure>
 
-## Phát triển Cục bộ
+## Phát triển cục bộ
 
-Trình tạo áp dụng cùng một cách chèn Prisma client bên trong request handler trong `local-server.ts`:
+Generator áp dụng cùng một cách tiêm Prisma client bên trong request handler trong `local-server.ts`:
 
 ```ts title="packages/api/src/local-server.ts" {1,5,10}
 import { getPrisma as getMyDb } from ':my-scope/my-db';
@@ -194,4 +194,4 @@ const server = createServer(async function (req, res) {
 
 <NxCommands commands={["serve-local <api-project-name>"]} />
 
-Điều này khởi động cả API và cơ sở dữ liệu cục bộ. Biến môi trường `SERVE_LOCAL=true` được đặt tự động, do đó Prisma client kết nối với cơ sở dữ liệu Docker cục bộ thay vì Aurora.
+Điều này khởi động cả API và cơ sở dữ liệu cục bộ. Biến môi trường `SERVE_LOCAL=true` được đặt tự động, vì vậy Prisma client kết nối với cơ sở dữ liệu Docker cục bộ thay vì Aurora.
