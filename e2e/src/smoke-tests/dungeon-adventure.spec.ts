@@ -386,12 +386,6 @@ describe('smoke test - dungeon-adventure', () => {
       ),
     );
 
-    // Delete welcome route
-    rmSync(`${opts.cwd}/packages/game-ui/src/routes/welcome`, {
-      force: true,
-      recursive: true,
-    });
-
     await runCLI(`sync --verbose`, opts);
     await runCLI(`${buildPackageManagerShortCommand(pkgMgr, 'lint')}`, {
       ...opts,
