@@ -178,6 +178,17 @@ describe('smoke test - dungeon-adventure', () => {
     );
 
     writeFileSync(
+      `${opts.cwd}/packages/game-api/src/procedures/actions.ts`,
+      readFileSync(
+        join(
+          __dirname,
+          '../files/dungeon-adventure/2/procedures/actions.ts.template',
+        ),
+        'utf-8',
+      ),
+    );
+
+    writeFileSync(
       `${opts.cwd}/packages/game-api/src/procedures/games.ts`,
       readFileSync(
         join(

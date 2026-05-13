@@ -1,32 +1,45 @@
 import logging
+import os
+from typing import Any, cast
 
 from ag_ui.core import RunAgentInput
 from ag_ui_strands import StrandsAgent, StrandsAgentConfig, create_strands_app
-from strands.session import FileSessionManager
+from aws_lambda_powertools.utilities import parameters
+from strands.session import S3SessionManager
 
 from .agent import get_agent
 
 logging.basicConfig(level=logging.INFO)
 
-SESSIONS_DIR = "/tmp/strands-sessions"
+
+def _resolve_sessions_bucket() -> str:
+    """Read the conversation-history bucket name from runtime config."""
+    application = os.environ["RUNTIME_CONFIG_APP_ID"]
+    provider = parameters.AppConfigProvider(environment="default", application=application)
+    buckets = cast(dict[str, Any], provider.get("buckets", transform="json"))
+    return buckets["StorySessions"]["bucketName"]
 
 
-def _session_manager_provider(input_data: RunAgentInput) -> FileSessionManager:
-    """Create a FileSessionManager keyed by AG-UI thread_id.
+_SESSIONS_BUCKET = _resolve_sessions_bucket()
 
-    Persists message history to disk so subsequent turns on the same
-    thread_id resume the conversation — each (player, genre) pair maps to a
-    deterministic thread_id from the UI, so players continue their story.
+
+def _session_manager_provider(input_data: RunAgentInput) -> S3SessionManager:
+    """Create an S3-backed session manager keyed by AG-UI thread_id.
+
+    Conversation history is persisted under ``session_<threadId>/`` in the
+    same S3 bucket the Game API reads from, so each turn is immediately
+    available to the browser for rendering on revisit.
     """
-    return FileSessionManager(
+    return S3SessionManager(
         session_id=input_data.thread_id or "default",
-        storage_dir=SESSIONS_DIR,
+        bucket=_SESSIONS_BUCKET,
     )
 
 
-# The template Agent is cloned per thread_id by `StrandsAgent` — we plug in a
-# `session_manager_provider` so each thread gets its own FileSessionManager and
-# conversation history is replayed on subsequent turns.
+# The template Agent is cloned per thread_id by ``StrandsAgent`` — we plug in
+# a ``session_manager_provider`` so each thread gets its own S3SessionManager
+# and conversation history is replayed on subsequent turns and survives agent
+# restarts.
 _agent_ctx = get_agent()
 _agent = _agent_ctx.__enter__()
 

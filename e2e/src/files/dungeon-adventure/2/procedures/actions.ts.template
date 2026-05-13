@@ -1,0 +1,57 @@
+import { publicProcedure } from '../init.js';
+import { ActionSchema, IAction } from '../schema/index.js';
+import { z } from 'zod';
+import { S3Client, ListObjectsV2Command, GetObjectCommand } from '@aws-sdk/client-s3';
+import { getAppConfig } from '@aws-lambda-powertools/parameters/appconfig';
+
+const resolveSessionsBucket = async (): Promise<string> => {
+  const buckets = await getAppConfig('buckets', {
+    application: process.env.RUNTIME_CONFIG_APP_ID!,
+    environment: 'default',
+    transform: 'json',
+  });
+  const bucket = (buckets as Record<string, any>).StorySessions?.bucketName;
+  if (!bucket) throw new Error('StorySessions bucket not found in runtime config');
+  return bucket;
+};
+
+const s3 = new S3Client();
+
+// Matches ``session_<sessionId>/agents/agent_<agentId>/messages/message_<idx>.json``
+// written by ``strands.session.S3SessionManager`` on the agent side. We only
+// ever care about the default agent id ``default`` that Strands uses when
+// none is set explicitly, so hard-code the path prefix the UI needs to list.
+const messagesPrefix = (sessionId: string) =>
+  `session_${sessionId}/agents/agent_default/messages/`;
+
+export const queryActions = publicProcedure
+  .input(z.object({ sessionId: z.string() }))
+  .output(z.object({ items: z.array(ActionSchema) }))
+  .query(async ({ input }) => {
+    const bucket = await resolveSessionsBucket();
+    const list = await s3.send(
+      new ListObjectsV2Command({ Bucket: bucket, Prefix: messagesPrefix(input.sessionId) }),
+    );
+    const keys = (list.Contents ?? [])
+      .map((o) => o.Key!)
+      .filter((k) => k.endsWith('.json'))
+      .sort(); // message_<idx>.json sorts lexicographically = chronologically
+
+    const actions: IAction[] = [];
+    for (const key of keys) {
+      const obj = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+      const body = JSON.parse(await obj.Body!.transformToString());
+      const message = body.redact_message ?? body.message;
+      const role = message?.role;
+      if (role !== 'user' && role !== 'assistant') continue;
+      const text = Array.isArray(message.content)
+        ? message.content
+            .filter((b: any) => typeof b?.text === 'string')
+            .map((b: any) => b.text)
+            .join('')
+        : String(message.content ?? '');
+      if (!text) continue;
+      actions.push({ role, content: text, messageId: body.message_id });
+    }
+    return { items: actions };
+  });

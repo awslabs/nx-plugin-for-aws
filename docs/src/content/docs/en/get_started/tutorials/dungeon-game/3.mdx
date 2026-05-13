@@ -23,10 +23,10 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 ## Task 1: Implement the Story Agent
 
-The Story Agent is a [Strands](https://strandsagents.com/) agent generated with `--protocol=AG-UI` in <Link path="get_started/tutorials/dungeon-game/1">Module 1</Link>, so the UI can stream from it over the [Agent-User Interaction protocol](https://docs.copilotkit.ai/aws-strands/protocol) via CopilotKit. It uses the Inventory MCP Server to manage the player's items, and a `FileSessionManager` to persist conversation history on disk.
+The Story Agent is a [Strands](https://strandsagents.com/) agent generated with `--protocol=AG-UI` in <Link path="get_started/tutorials/dungeon-game/1">Module 1</Link>, so the UI can stream from it over the [Agent-User Interaction protocol](https://docs.copilotkit.ai/aws-strands/protocol) via CopilotKit. It uses the Inventory MCP Server to manage the player's items, and Strands' built-in [`S3SessionManager`](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/agents/sessions/) to persist conversation history into the sessions bucket we provisioned in Module 2.
 
 :::note[Persisting conversation history]
-Each AG-UI request carries a `thread_id`. Our UI builds that id deterministically as ``{player}-{genre}`` padded to the AgentCore minimum length of 33 characters, so every `(player, genre)` pair resumes its own story. On the agent side, `StrandsAgentConfig.session_manager_provider` hands each thread a `FileSessionManager` pointed at a disk directory — so subsequent turns replay the stored message history without the UI having to send it. For a production setup, swap this for [Bedrock AgentCore Memory](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/memory.html) via [AgentCore Memory for Strands](https://github.com/aws/bedrock-agentcore-sdk-python/tree/main/src/bedrock_agentcore/memory/integrations/strands).
+Each AG-UI request carries a `thread_id`. Our UI builds that id deterministically as ``{player}-{genre}`` padded to the AgentCore minimum length of 33 characters, so every `(player, genre)` pair resumes its own story. On the agent side, `StrandsAgentConfig.session_manager_provider` hands each thread an `S3SessionManager` pointed at the `StorySessions` bucket — so subsequent turns replay the stored message history without the UI having to send it. Because the Game API reads messages straight out of the same bucket, the browser can also show the full transcript on page reload. For a production setup, swap this for [Bedrock AgentCore Memory](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/memory.html) via [AgentCore Memory for Strands](https://github.com/aws/bedrock-agentcore-sdk-python/tree/main/src/bedrock_agentcore/memory/integrations/strands).
 :::
 
 ### Agent implementation
@@ -44,7 +44,7 @@ Update the following files in `packages/story/dungeon_adventure_story/agent`:
 
 The changes are:
 
-- `main.py` adds a `session_manager_provider` that creates a `FileSessionManager` per `thread_id` — this is what makes conversation history stick across turns for the same `(player, genre)`.
+- `main.py` adds a `session_manager_provider` that creates an `S3SessionManager` per `thread_id` — this is what makes conversation history stick across turns for the same `(player, genre)`, and puts it in the bucket the Game API's `queryActions` reads from.
 - `agent.py` drops the sample `subtract` tool and swaps the system prompt for a dungeon-master one that invites the first user message to state the player's name and genre, and uses the Inventory MCP Server's tools.
 
 ## Task 2: Deployment and testing
@@ -128,7 +128,7 @@ You can test your Agent by either:
         "tools": [], "context": [], "state": {}, "forwardedProps": {}
       }'
     ```
-    Reusing the same `threadId` on subsequent calls will continue the same story — the `FileSessionManager` replays the earlier messages.
+    Reusing the same `threadId` on subsequent calls will continue the same story — the `S3SessionManager` replays the earlier messages.
     </Aside>
   </TabItem>
   <TabItem label="Deployed">

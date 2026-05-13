@@ -71,12 +71,16 @@ We need two routes — one to pick a hero, one to play. Both use shadcn componen
 <TabItem label="routes/index.tsx">
 <E2EDiff before="dungeon-adventure/4/routes/index.tsx.old.template" after="dungeon-adventure/4/routes/index.tsx.template" lang="tsx" />
 
-This is the game picker: new-game form (shadcn `Input` + `Button` + `Card`) plus a "Continue" list fed by `useGameApi().games.query`. Starting a game `saveGame`s the `(playerName, genre)` pair (so it shows up next time) and navigates to the play route.
+This is the game picker: new-game form (shadcn `Input` + `Button` + `Card`) plus a "Continue" list fed by `useGameApi().games.query` with `useInfiniteQuery` — a bottom sentinel `<div>` watched by an `IntersectionObserver` auto-calls `fetchNextPage()` when scrolled into view, and spinners next to the heading and below the list surface the loading state. Starting a game `saveGame`s the `(playerName, genre)` pair (so it shows up next time) and navigates to the play route.
 </TabItem>
 <TabItem label="routes/game/$playerName.tsx">
 <E2ECode path="dungeon-adventure/4/routes/game/$playerName.tsx.template" lang="tsx" />
 
-This is the play route. It builds the deterministic `threadId` (``{player}-{genre}`` padded to 33 chars — the AG-UI hook will send it verbatim as the AgentCore session id), renders `<CopilotChat agentId="agent" threadId={threadId} />`, and overlays the inventory from `useGameApi().inventory.query` on top. On a fresh thread (no stored messages yet) the route uses `useAgent` to send one priming message with the player's name and genre; the agent's system prompt tells it to use that to set the scene. Subsequent visits hit the agent's `FileSessionManager`, which replays history so the priming `useEffect` no-ops.
+This is the play route. It builds the deterministic `threadId` (``{player}-{genre}`` padded to 33 chars — the AG-UI hook will send it verbatim as the AgentCore session id), renders `<CopilotChat agentId="agent" threadId={threadId} />`, and overlays the inventory from `useGameApi().inventory.query` on top. On mount, `useGameApi().actions.query({ sessionId: threadId })` reads the conversation history the agent has stored in S3 and — if there is any — calls `agent.setMessages(...)` to rehydrate the chat; otherwise it sends one priming user message to kick the story off. `agent.messages` is subscribed via `useAgent({ updates: [OnMessagesChanged] })` so every new turn also refetches the inventory query (the MCP tool calls mutate DynamoDB directly).
+
+<Aside type="tip" title="Wait for `isFetching`, not `isLoading`">
+React Query's default cache retains the first result for 5 minutes, so a return visit initially sees the stale empty list from the very first load. We set `staleTime: 0` + `refetchOnMount: 'always'` and guard the hydration `useEffect` on `!isFetching && isSuccess` so the re-prime path only fires on a genuinely empty thread.
+</Aside>
 
 <Aside type="tip" title="Deterministic threadIds make /game/$playerName?genre=... sharable">
 Revisiting the same URL — whether after a reload, a redeploy, or on another device — resolves to the same `threadId`, so the agent keeps telling the same story.
