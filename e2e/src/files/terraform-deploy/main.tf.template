@@ -298,114 +298,6 @@ resource "aws_iam_role_policy_attachment" "authenticated_agent_access" {
   policy_arn = aws_iam_policy.agent_invoke_policy.arn
 }
 
-# ---------------------------------------------------------------------------
-# VPC (shared by both relational database modules)
-# ---------------------------------------------------------------------------
-
-data "aws_availability_zones" "available" {
-  state = "available"
-}
-
-resource "aws_vpc" "rdb" {
-  #checkov:skip=CKV2_AWS_11:Flow logs are not required for ephemeral e2e test infrastructure
-  #checkov:skip=CKV2_AWS_12:Default security group restrictions are not required for ephemeral e2e test infrastructure
-  cidr_block           = "10.0.0.0/16"
-  enable_dns_hostnames = true
-  enable_dns_support   = true
-  tags = { Name = "e2e-rdb-<% TEST_RUN_ID %>" }
-}
-
-resource "aws_subnet" "rdb_a" {
-  vpc_id            = aws_vpc.rdb.id
-  cidr_block        = "10.0.0.0/24"
-  availability_zone = data.aws_availability_zones.available.names[0]
-  tags = { Name = "e2e-rdb-a-<% TEST_RUN_ID %>" }
-}
-
-resource "aws_subnet" "rdb_b" {
-  vpc_id            = aws_vpc.rdb.id
-  cidr_block        = "10.0.1.0/24"
-  availability_zone = data.aws_availability_zones.available.names[1]
-  tags = { Name = "e2e-rdb-b-<% TEST_RUN_ID %>" }
-}
-
-resource "aws_internet_gateway" "rdb" {
-  vpc_id = aws_vpc.rdb.id
-  tags   = { Name = "e2e-rdb-igw-<% TEST_RUN_ID %>" }
-}
-
-resource "aws_subnet" "rdb_public_a" {
-  vpc_id            = aws_vpc.rdb.id
-  cidr_block        = "10.0.2.0/24"
-  availability_zone = data.aws_availability_zones.available.names[0]
-  tags = { Name = "e2e-rdb-public-a-<% TEST_RUN_ID %>" }
-}
-
-resource "aws_eip" "rdb_nat" {
-  domain = "vpc"
-  tags   = { Name = "e2e-rdb-nat-eip-<% TEST_RUN_ID %>" }
-}
-
-resource "aws_nat_gateway" "rdb" {
-  allocation_id = aws_eip.rdb_nat.id
-  subnet_id     = aws_subnet.rdb_public_a.id
-  tags          = { Name = "e2e-rdb-nat-<% TEST_RUN_ID %>" }
-  depends_on    = [aws_internet_gateway.rdb]
-}
-
-resource "aws_route_table" "rdb_private" {
-  vpc_id = aws_vpc.rdb.id
-  route {
-    cidr_block     = "0.0.0.0/0"
-    nat_gateway_id = aws_nat_gateway.rdb.id
-  }
-  tags = { Name = "e2e-rdb-private-rt-<% TEST_RUN_ID %>" }
-}
-
-resource "aws_route_table_association" "rdb_a" {
-  subnet_id      = aws_subnet.rdb_a.id
-  route_table_id = aws_route_table.rdb_private.id
-}
-
-resource "aws_route_table_association" "rdb_b" {
-  subnet_id      = aws_subnet.rdb_b.id
-  route_table_id = aws_route_table.rdb_private.id
-}
-
-# ---------------------------------------------------------------------------
-# Relational databases (Aurora + Prisma) — PostgreSQL and MySQL
-# ---------------------------------------------------------------------------
-
-module "postgres_db" {
-  source = "../../common/terraform/src/app/dbs/postgres-db"
-
-  vpc_id             = aws_vpc.rdb.id
-  database_subnet_ids = [aws_subnet.rdb_a.id, aws_subnet.rdb_b.id]
-  lambda_subnet_ids   = [aws_subnet.rdb_a.id, aws_subnet.rdb_b.id]
-  asset_bucket_name  = module.asset_bucket.bucket_name
-
-  deletion_protection        = false
-  skip_final_snapshot        = true
-  enable_rds_proxy           = false
-  enable_credential_rotation = false
-  enable_backup              = false
-}
-
-module "my_sql_db" {
-  source = "../../common/terraform/src/app/dbs/my-sql-db"
-
-  vpc_id             = aws_vpc.rdb.id
-  database_subnet_ids = [aws_subnet.rdb_a.id, aws_subnet.rdb_b.id]
-  lambda_subnet_ids   = [aws_subnet.rdb_a.id, aws_subnet.rdb_b.id]
-  asset_bucket_name  = module.asset_bucket.bucket_name
-
-  deletion_protection        = false
-  skip_final_snapshot        = true
-  enable_rds_proxy           = false
-  enable_credential_rotation = false
-  enable_backup              = false
-}
-
 # Shared runtime-config AppConfig deployment — aggregates every contributed
 # entry and creates the hosted configuration version + deployment per
 # namespace against the shared application.
@@ -435,8 +327,6 @@ module "runtime_config_appconfig_deployment" {
     module.py_agui_agent,
     module.py_agent,
     module.ts_agent,
-    module.postgres_db,
-    module.my_sql_db,
   ]
 }
 

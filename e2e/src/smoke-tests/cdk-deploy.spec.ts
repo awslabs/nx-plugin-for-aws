@@ -63,7 +63,15 @@ async function deleteLeftoverStacks(cdkStageName: string): Promise<void> {
 }
 
 /**
- * A test which deploys the smoke test resources to aws
+ * cdk-deploy smoke test — deploys the non-RDB application stack (APIs,
+ * agents, MCP servers, Lambda functions, website), exercises every
+ * invocation surface, and tears down.
+ *
+ * The relational database constructs (`PostgresDb`, `MySqlDb`) are
+ * exercised by the separate `cdk-deploy-rdb` variant — Aurora cluster
+ * create + destroy plus VPC ENI cleanup for the rotation Lambdas
+ * dominate the runtime, so isolating them keeps both variants under the
+ * IAM session limit.
  */
 describe('smoke test - cdk-deploy', () => {
   const pkgMgr = 'npm';
@@ -95,8 +103,6 @@ describe('smoke test - cdk-deploy', () => {
     writeFileSync(`${opts.cwd}/packages/infra/src/main.ts`, mainContent);
 
     const cdkStageName = `e2e-test-infra-sandbox-${testRunId}`;
-
-    ensureRdsServiceLinkedRole();
 
     try {
       // Deploy the e2e test resources
@@ -207,6 +213,74 @@ describe('smoke test - cdk-deploy', () => {
       }
       // cdk destroy skips cross-region stacks (e.g. WAF in us-east-1) when
       // the main stack is in ROLLBACK_COMPLETE. Clean up any leftovers.
+      await deleteLeftoverStacks(cdkStageName);
+    }
+  });
+});
+
+/**
+ * cdk-deploy-rdb smoke test — deploys only the relational database stack
+ * (PostgreSQL + MySQL Aurora clusters with a dedicated VPC). The full
+ * generator matrix is still scaffolded and built so the rdb generator's
+ * coexistence with the rest of the matrix is verified, but only the
+ * database constructs are deployed to AWS.
+ */
+describe('smoke test - cdk-deploy-rdb', () => {
+  const pkgMgr = 'npm';
+  const targetDir = `${tmpProjPath()}/cdk-deploy-rdb-${pkgMgr}`;
+
+  beforeEach(() => {
+    console.log(`Cleaning target directory ${targetDir}`);
+    if (existsSync(targetDir)) {
+      rmSync(targetDir, { force: true, recursive: true });
+    }
+    ensureDirSync(targetDir);
+  });
+
+  it('should generate and build', async () => {
+    const { opts } = await runSmokeTest(targetDir, pkgMgr);
+
+    const testRunId = Math.random().toString(36).substring(2, 10);
+
+    // Swap in the rdb-only application stack — same workspace, smaller
+    // deploy surface. Deletion-aspects in main.ts.template still apply.
+    const rdbStackContent = readFileSync(
+      join(__dirname, '../files/application-stack-rdb.ts.template'),
+      'utf-8',
+    );
+    writeFileSync(
+      `${opts.cwd}/packages/infra/src/stacks/application-stack.ts`,
+      rdbStackContent,
+    );
+
+    const templateContent = readFileSync(
+      join(__dirname, '../files/cdk-deploy/main.ts.template'),
+      'utf-8',
+    );
+    const mainContent = templateContent.replace(
+      /<% TEST_RUN_ID %>/g,
+      testRunId,
+    );
+    writeFileSync(`${opts.cwd}/packages/infra/src/main.ts`, mainContent);
+
+    const cdkStageName = `e2e-test-rdb-sandbox-${testRunId}`;
+
+    ensureRdsServiceLinkedRole();
+
+    try {
+      await runCLI(
+        `deploy infra ${cdkStageName}/* --output-style=stream`,
+        opts,
+      );
+    } finally {
+      try {
+        await runCLI(
+          `destroy infra ${cdkStageName}/* --output-style=stream --force`,
+          opts,
+        );
+      } catch (e) {
+        console.warn(`cdk destroy failed (will still clean up): ${e}`);
+      }
       await deleteLeftoverStacks(cdkStageName);
     }
   });
