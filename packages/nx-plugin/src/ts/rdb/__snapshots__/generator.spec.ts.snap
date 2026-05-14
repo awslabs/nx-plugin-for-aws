@@ -265,7 +265,7 @@ export const handler = async () => {
 exports[`ts#rdb generator > should add mysql prisma dependencies when engine is MySQL > packages/db/src/prisma.ts 1`] = `
 "import { PrismaMariaDb } from '@prisma/adapter-mariadb';
 import { Signer } from '@aws-sdk/rds-signer';
-import { PrismaClient } from '../generated/prisma/client.js';
+import { Prisma, PrismaClient } from '../generated/prisma/client.js';
 import {
   DB_PACKAGE_NAME,
   LOCAL_DB_HOST,
@@ -276,7 +276,9 @@ import {
 } from './constants.js';
 import { getDatabaseConfig } from './utils.js';
 
-export const getPrisma = async (): Promise<PrismaClient> => {
+export const getPrisma = async <LogOpts extends Prisma.LogLevel>(
+  log: LogOpts[] = ['warn', 'error'] as LogOpts[],
+): Promise<PrismaClient<LogOpts>> => {
   if (process.env.SERVE_LOCAL === 'true') {
     const adapter = new PrismaMariaDb({
       host: LOCAL_DB_HOST,
@@ -286,7 +288,10 @@ export const getPrisma = async (): Promise<PrismaClient> => {
       password: LOCAL_DB_PASSWORD,
       allowPublicKeyRetrieval: true,
     });
-    return new PrismaClient({ adapter });
+    return new PrismaClient({
+      adapter,
+      log,
+    }) as unknown as PrismaClient<LogOpts>;
   }
 
   const { hostname, port, database, dbUser, region } =
@@ -309,7 +314,7 @@ export const getPrisma = async (): Promise<PrismaClient> => {
     },
   });
 
-  return new PrismaClient({ adapter });
+  return new PrismaClient({ adapter, log });
 };
 "
 `;
@@ -4078,8 +4083,8 @@ export const handler = async () => {
 exports[`ts#rdb generator > should generate the aurora shared construct > packages/db/src/prisma.ts 1`] = `
 "import { PrismaPg } from '@prisma/adapter-pg';
 import { Signer } from '@aws-sdk/rds-signer';
+import { Prisma, PrismaClient } from '../generated/prisma/client.js';
 import { Pool } from 'pg';
-import { PrismaClient } from '../generated/prisma/client.js';
 import {
   DB_PACKAGE_NAME,
   LOCAL_DB_HOST,
@@ -4090,52 +4095,51 @@ import {
 } from './constants.js';
 import { getDatabaseConfig } from './utils.js';
 
-let prismaPromise: Promise<PrismaClient> | undefined;
-
-export const getPrisma = (): Promise<PrismaClient> => {
-  prismaPromise ??= (async () => {
-    if (process.env.SERVE_LOCAL === 'true') {
-      const adapter = new PrismaPg(
-        new Pool({
-          host: LOCAL_DB_HOST,
-          port: LOCAL_DB_PORT,
-          database: LOCAL_DB_NAME,
-          user: LOCAL_DB_USER,
-          password: LOCAL_DB_PASSWORD,
-          allowExitOnIdle: true,
-        }),
-      );
-      return new PrismaClient({ adapter });
-    }
-
-    const { hostname, port, database, dbUser, region } =
-      await getDatabaseConfig(DB_PACKAGE_NAME);
+export const getPrisma = async <LogOpts extends Prisma.LogLevel>(
+  log: LogOpts[] = ['warn', 'error'] as LogOpts[],
+): Promise<PrismaClient<LogOpts>> => {
+  if (process.env.SERVE_LOCAL === 'true') {
     const adapter = new PrismaPg(
       new Pool({
-        host: hostname,
-        port,
-        database,
-        user: dbUser,
-        ssl: {
-          rejectUnauthorized: true,
-        },
+        host: LOCAL_DB_HOST,
+        port: LOCAL_DB_PORT,
+        database: LOCAL_DB_NAME,
+        user: LOCAL_DB_USER,
+        password: LOCAL_DB_PASSWORD,
         allowExitOnIdle: true,
-        password: async () => {
-          const token = await new Signer({
-            hostname,
-            port,
-            region,
-            username: dbUser,
-          }).getAuthToken();
-          return token;
-        },
       }),
     );
+    return new PrismaClient({
+      adapter,
+      log,
+    }) as unknown as PrismaClient<LogOpts>;
+  }
 
-    return new PrismaClient({ adapter });
-  })();
+  const { hostname, port, database, dbUser, region } =
+    await getDatabaseConfig(DB_PACKAGE_NAME);
+  const adapter = new PrismaPg(
+    new Pool({
+      host: hostname,
+      port,
+      database,
+      user: dbUser,
+      ssl: {
+        rejectUnauthorized: true,
+      },
+      allowExitOnIdle: true,
+      password: async () => {
+        const token = await new Signer({
+          hostname,
+          port,
+          region,
+          username: dbUser,
+        }).getAuthToken();
+        return token;
+      },
+    }),
+  );
 
-  return prismaPromise;
+  return new PrismaClient({ adapter, log });
 };
 "
 `;

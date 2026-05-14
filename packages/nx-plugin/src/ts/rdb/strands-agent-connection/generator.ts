@@ -92,7 +92,7 @@ export const tsRdbStrandsAgentConnectionGenerator = async (
     // Add $on error handler after the db declaration.
     // Done via string replacement because GritQL treats $on as a metavariable.
     const dbDecl = `const ${rdbNameCamel} = await get${rdbNamePascal}();`;
-    const onCall = `${rdbNameCamel}.$on('error' as never, (e) => {\n    console.log(e);\n  });`;
+    const onCall = `${rdbNameCamel}.$on('error', console.error);`;
     const content = tree.read(agentPath, 'utf-8')!;
     if (content.includes(dbDecl) && !content.includes(`${rdbNameCamel}.$on`)) {
       tree.write(agentPath, content.replace(dbDecl, `${dbDecl}\n  ${onCall}`));
