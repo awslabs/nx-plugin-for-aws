@@ -1,0 +1,72 @@
+---
+title: RDB API 基础设施
+---
+import Infrastructure from '@components/infrastructure.astro';
+
+为了让您的 API 在运行时能够连接到数据库,API Lambda 函数必须部署到与数据库相同的 VPC 中,并被授予网络和 IAM 访问权限。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+在您的应用程序堆栈中,将 API 部署到与数据库相同的 VPC 中,然后调用 `allowDefaultPortFrom` 和 `grantConnect` 来打开网络路径并为每个 Lambda 处理程序授予 IAM `rds-db:connect` 权限:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+
+const api = new MyApi(this, 'Api', {
+  integrations: MyApi.defaultIntegrations(this)
+    .withDefaultOptions({
+      vpc,
+      vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+    })
+    .build(),
+});
+
+Object.entries(api.integrations).forEach(([operation, integration]) => {
+  db.allowDefaultPortFrom(integration.handler, `Allow ${operation} to connect to the database`);
+  db.grantConnect(integration.handler);
+});
+```
+
+将 API Lambda 函数部署到**具有出口的私有子网**中,而不是私有隔离子网。在运行时,`getPrisma()` 从 AWS AppConfig 检索数据库连接详细信息,这是一个需要出站互联网访问的公共 AWS 服务端点。
+
+:::note
+此示例授予 API 中的每个处理程序访问权限,但如果只有某些处理程序需要访问权限,最好单独配置。
+:::
+
+</Fragment>
+<Fragment slot="terraform">
+
+将数据库模块输出传递到您的 API 模块中,以便它可以访问数据库并读取其运行时配置:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
+}
+
+module "api" {
+  source             = "..."
+  vpc_id             = module.vpc.vpc_id
+  private_subnet_ids = module.vpc.private_subnet_ids
+
+  appconfig_application_id     = module.my_database.appconfig_application_id
+  database_cluster_resource_id = module.my_database.cluster_resource_id
+  database_runtime_user        = module.my_database.database_runtime_user
+  database_security_group_id   = module.my_database.security_group_id
+  database_port                = module.my_database.cluster_port
+
+  environment_variables = {
+    RUNTIME_CONFIG_APP_ID = module.my_database.appconfig_application_id
+  }
+}
+```
+
+将 API Lambda 函数部署到**具有出口的私有子网**中,而不是私有隔离子网。确保 API Lambda 角色具有 `rds-db:connect` 权限,并且其安全组可以在数据库端口上访问数据库安全组。
+
+</Fragment>
+</Infrastructure>

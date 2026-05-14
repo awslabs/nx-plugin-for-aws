@@ -1,0 +1,131 @@
+---
+title: Smithy API 连接到关系数据库
+description: 将 Smithy API 连接到关系数据库
+when:
+  sourceType: smithy
+  targetType: ts#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Snippet from '@components/snippet.astro';
+
+`connection` 生成器将 <Link path="guides/ts-smithy-api">Smithy API</Link> 连接到 <Link path="guides/ts-rdb">关系数据库</Link>项目，将 Prisma 客户端注入到服务上下文中，以便所有操作实现都可以访问数据库。
+
+## 前置条件
+
+在使用此生成器之前，请确保您拥有：
+
+1. 一个 <Link path="guides/ts-smithy-api">`ts#smithy-api`</Link> 项目（TypeScript 后端）
+2. 一个 <Link path="guides/ts-rdb">`ts#rdb`</Link> 项目
+
+## 使用方法
+
+### 运行生成器
+
+<RunGenerator generator="connection" />
+
+选择您的 Smithy API 后端项目作为源，选择您的关系数据库项目作为目标。
+
+### 选项
+
+<GeneratorParameters generator="connection" />
+
+## 生成器输出
+
+生成器会修改 Smithy API 后端中的三个现有文件：
+
+<FileTree>
+
+- packages/api/src
+  - context.ts 将 `db` 属性添加到 `ServiceContext`
+  - handler.ts 在 `lambdaHandler` 内创建 Prisma 客户端，传递给 `serviceHandler.handle`
+  - local-server.ts 在请求处理程序内创建 Prisma 客户端，传递给 `serviceHandler.handle`
+
+</FileTree>
+
+此外，它还会更新 API 的 `serve-local` 目标以自动启动数据库。
+
+## 工作原理
+
+### ServiceContext
+
+生成器在 `context.ts` 中向 `ServiceContext` 添加一个类型化的 `db` 属性：
+
+```ts title="packages/api/src/context.ts" {1,7}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+export interface ServiceContext {
+  tracer: Tracer;
+  logger: Logger;
+  metrics: Metrics;
+  myDb: Awaited<ReturnType<typeof getMyDb>>;
+}
+```
+
+### Lambda 处理程序
+
+Prisma 客户端在 `lambdaHandler` 内实例化，并通过服务上下文传递：
+
+```ts title="packages/api/src/handler.ts" {1,10}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+export const lambdaHandler = async (event: APIGatewayProxyEvent) => {
+  const httpRequest = convertEvent(event);
+  const myDb = await getMyDb();
+  const httpResponse = await serviceHandler.handle(httpRequest, {
+    tracer,
+    logger,
+    metrics,
+    myDb,
+  });
+  return convertVersion1Response(httpResponse);
+};
+```
+
+### 在操作中使用数据库
+
+在操作实现中从上下文访问 `db`：
+
+```ts title="packages/api/src/operations/list-users.ts" {8}
+import { ListUsersOperationInput, ListUsersOperationOutput } from '../generated/ssdk/index.js';
+import { ServiceContext } from '../context.js';
+
+export const listUsers = async (
+  input: ListUsersOperationInput,
+  ctx: ServiceContext,
+): Promise<ListUsersOperationOutput> => {
+  const users = await ctx.myDb.user.findMany();
+  return { users };
+};
+```
+
+## 基础设施
+
+<Snippet name="connection/rdb-api-infrastructure" parentHeading="Infrastructure" />
+
+## 本地开发
+
+生成器在 `local-server.ts` 的请求处理程序内应用相同的 Prisma 客户端注入：
+
+```ts title="packages/api/src/local-server.ts" {1,5,10}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+const server = createServer(async function (req, res) {
+  const httpRequest = convertRequest(req);
+  const myDb = await getMyDb();
+  const httpResponse = await serviceHandler.handle(httpRequest, {
+    tracer,
+    logger,
+    metrics,
+    myDb,
+  });
+  return writeResponse(httpResponse, res);
+});
+```
+
+<NxCommands commands={["serve-local <api-project-name>"]} />
+
+这将同时启动 API 和本地数据库。`SERVE_LOCAL=true` 环境变量会自动设置，因此 Prisma 客户端会连接到本地 Docker 数据库而不是 Aurora。

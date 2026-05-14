@@ -1,0 +1,124 @@
+---
+title: tRPC API를 관계형 데이터베이스에 연결
+description: tRPC API를 관계형 데이터베이스에 연결합니다
+when:
+  sourceType: ts#trpc-api
+  targetType: ts#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Snippet from '@components/snippet.astro';
+
+`connection` 생성기는 <Link path="guides/trpc">tRPC API</Link>를 <Link path="guides/ts-rdb">관계형 데이터베이스</Link> 프로젝트에 연결하여, 프로시저 컨텍스트에서 Prisma 클라이언트를 사용할 수 있게 하는 타입 안전 tRPC 미들웨어 플러그인을 생성합니다.
+
+## 사전 요구사항
+
+이 생성기를 사용하기 전에 다음이 필요합니다:
+
+1. <Link path="guides/trpc">`ts#trpc-api`</Link> 프로젝트
+2. <Link path="guides/ts-rdb">`ts#rdb`</Link> 프로젝트
+
+## 사용법
+
+### 생성기 실행
+
+<RunGenerator generator="connection" />
+
+tRPC API 프로젝트를 소스로, 관계형 데이터베이스 프로젝트를 대상으로 선택하세요.
+
+### 옵션
+
+<GeneratorParameters generator="connection" />
+
+## 생성기 출력
+
+생성기는 tRPC API 프로젝트에 미들웨어 파일을 생성합니다:
+
+<FileTree>
+
+- packages/api/src
+  - middleware
+    - \<db-name>.ts 프로시저 컨텍스트에서 Prisma 클라이언트를 노출하는 tRPC 플러그인
+
+</FileTree>
+
+또한 tRPC API의 `serve-local` 타겟을 업데이트하여 로컬에서 실행할 때 데이터베이스를 자동으로 시작하도록 합니다.
+
+## 미들웨어 사용하기
+
+### 플러그인 등록
+
+생성된 플러그인을 tRPC 라우터에 추가하여 이를 사용하는 모든 프로시저가 데이터베이스에 액세스할 수 있도록 합니다:
+
+```ts title="packages/api/src/router.ts" {2,5}
+import { t } from './init.js';
+import { createMyDbPlugin } from './middleware/my-db.js';
+
+export const authenticatedProcedure = t.procedure
+  .concat(createMyDbPlugin());
+```
+
+### 프로시저에서 데이터베이스 액세스
+
+플러그인은 `IMyDbContext`를 프로시저 컨텍스트에 병합하여 `myDb`를 선택적 속성으로 사용할 수 있게 합니다:
+
+```ts title="packages/api/src/procedures/users.ts" {8,12}
+import { z } from 'zod';
+import { authenticatedProcedure } from '../router.js';
+
+export const listUsers = authenticatedProcedure
+  .output(z.array(z.object({ id: z.string(), name: z.string() })))
+  .query(async ({ ctx }) => {
+    // ctx.myDb는 Prisma 클라이언트입니다 — Awaited<ReturnType<typeof getPrisma>>로 타입 지정됨
+    return await ctx.myDb!.user.findMany();
+  });
+```
+
+### MySQL: 각 요청 후 연결 해제
+
+대상 데이터베이스가 MySQL 엔진을 사용하는 경우, 생성된 미들웨어는 `opts.next()`를 `$disconnect()`를 호출하는 `try/finally` 블록으로 래핑합니다:
+
+```ts title="packages/api/src/middleware/my-db.ts" {6}
+return t.procedure.use(async (opts) => {
+  const myDb = await getPrisma();
+  try {
+    return await opts.next({ ctx: { ...opts.ctx, myDb } });
+  } finally {
+    await myDb.$disconnect();
+  }
+});
+```
+
+이는 쿼리 후 MySQL 어댑터가 Node.js 이벤트 루프를 열어두는 문제를 해결하며, 그렇지 않으면 Lambda가 스트리밍 응답을 플러시하지 못하게 됩니다. `finally`에서 연결을 해제하면 이벤트 루프가 해제되어 응답이 완료될 수 있습니다. 자세한 내용은 <Link path="guides/ts-rdb#mysql-api-gateway-streaming-mode">MySQL: API Gateway 스트리밍 모드</Link>를 참조하세요.
+
+PostgreSQL은 이것이 필요하지 않습니다 — 어댑터가 `allowExitOnIdle: true`로 구성된 연결 풀을 사용합니다.
+
+:::caution[MySQL: IAM 토큰 만료]
+RDS IAM 토큰은 **15분** 후에 만료됩니다. MySQL 어댑터는 연결 시점에 토큰을 캡처합니다. Lambda가 토큰이 만료될 만큼 충분히 오래 웜 상태로 유지되면 새 연결 시도가 실패할 수 있습니다. 연결 오류를 확인하고 `getPrisma()`를 다시 호출하여 새 토큰이 있는 새 클라이언트를 얻으세요. 자세한 내용과 해결 방법은 <Link path="guides/ts-rdb#mysql-iam-token-expiry">MySQL: IAM 토큰 만료</Link>를 참조하세요.
+:::
+
+### 여러 데이터베이스
+
+다른 대상으로 생성기를 다시 실행하여 추가 데이터베이스를 연결할 수 있습니다. 각 데이터베이스는 자체 플러그인과 컨텍스트 인터페이스를 갖습니다:
+
+```ts title="packages/api/src/router.ts"
+export const dbProcedure = t.procedure
+  .concat(createPostgresDbPlugin())
+  .concat(createMySqlDbPlugin());
+```
+
+## 인프라
+
+<Snippet name="connection/rdb-api-infrastructure" parentHeading="Infrastructure" />
+
+## 로컬 개발
+
+생성기는 tRPC API의 `serve-local` 타겟이 데이터베이스의 `serve-local` 타겟에 의존하도록 구성하므로 다음을 실행하면:
+
+<NxCommands commands={["serve-local <api-project-name>"]} />
+
+API와 함께 로컬 데이터베이스가 자동으로 시작됩니다.
+

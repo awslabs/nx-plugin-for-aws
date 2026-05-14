@@ -1,0 +1,131 @@
+---
+title: Smithy API đến Cơ sở dữ liệu quan hệ
+description: Kết nối Smithy API với Cơ sở dữ liệu quan hệ
+when:
+  sourceType: smithy
+  targetType: ts#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Snippet from '@components/snippet.astro';
+
+Trình tạo `connection` kết nối một <Link path="guides/ts-smithy-api">Smithy API</Link> với dự án <Link path="guides/ts-rdb">Cơ sở dữ liệu quan hệ</Link>, tiêm một Prisma client vào ngữ cảnh dịch vụ để tất cả các triển khai hoạt động có thể truy cập cơ sở dữ liệu.
+
+## Điều kiện tiên quyết
+
+Trước khi sử dụng trình tạo này, hãy đảm bảo bạn có:
+
+1. Một dự án <Link path="guides/ts-smithy-api">`ts#smithy-api`</Link> (backend TypeScript)
+2. Một dự án <Link path="guides/ts-rdb">`ts#rdb`</Link>
+
+## Cách sử dụng
+
+### Chạy trình tạo
+
+<RunGenerator generator="connection" />
+
+Chọn dự án backend Smithy API của bạn làm nguồn và dự án cơ sở dữ liệu quan hệ của bạn làm đích.
+
+### Tùy chọn
+
+<GeneratorParameters generator="connection" />
+
+## Đầu ra của trình tạo
+
+Trình tạo sửa đổi ba tệp hiện có trong backend Smithy API của bạn:
+
+<FileTree>
+
+- packages/api/src
+  - context.ts Thuộc tính `db` được thêm vào `ServiceContext`
+  - handler.ts Prisma client được tạo bên trong `lambdaHandler`, được truyền cho `serviceHandler.handle`
+  - local-server.ts Prisma client được tạo bên trong request handler, được truyền cho `serviceHandler.handle`
+
+</FileTree>
+
+Ngoài ra, nó cập nhật target `serve-local` của API để tự động khởi động cơ sở dữ liệu.
+
+## Cách hoạt động
+
+### ServiceContext
+
+Trình tạo thêm một thuộc tính `db` có kiểu vào `ServiceContext` trong `context.ts`:
+
+```ts title="packages/api/src/context.ts" {1,7}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+export interface ServiceContext {
+  tracer: Tracer;
+  logger: Logger;
+  metrics: Metrics;
+  myDb: Awaited<ReturnType<typeof getMyDb>>;
+}
+```
+
+### Lambda Handler
+
+Prisma client được khởi tạo bên trong `lambdaHandler` và được truyền qua ngữ cảnh dịch vụ:
+
+```ts title="packages/api/src/handler.ts" {1,10}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+export const lambdaHandler = async (event: APIGatewayProxyEvent) => {
+  const httpRequest = convertEvent(event);
+  const myDb = await getMyDb();
+  const httpResponse = await serviceHandler.handle(httpRequest, {
+    tracer,
+    logger,
+    metrics,
+    myDb,
+  });
+  return convertVersion1Response(httpResponse);
+};
+```
+
+### Sử dụng cơ sở dữ liệu trong các hoạt động
+
+Truy cập `db` từ ngữ cảnh trong các triển khai hoạt động của bạn:
+
+```ts title="packages/api/src/operations/list-users.ts" {8}
+import { ListUsersOperationInput, ListUsersOperationOutput } from '../generated/ssdk/index.js';
+import { ServiceContext } from '../context.js';
+
+export const listUsers = async (
+  input: ListUsersOperationInput,
+  ctx: ServiceContext,
+): Promise<ListUsersOperationOutput> => {
+  const users = await ctx.myDb.user.findMany();
+  return { users };
+};
+```
+
+## Cơ sở hạ tầng
+
+<Snippet name="connection/rdb-api-infrastructure" parentHeading="Infrastructure" />
+
+## Phát triển cục bộ
+
+Trình tạo áp dụng cùng một cách tiêm Prisma client bên trong request handler trong `local-server.ts`:
+
+```ts title="packages/api/src/local-server.ts" {1,5,10}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+const server = createServer(async function (req, res) {
+  const httpRequest = convertRequest(req);
+  const myDb = await getMyDb();
+  const httpResponse = await serviceHandler.handle(httpRequest, {
+    tracer,
+    logger,
+    metrics,
+    myDb,
+  });
+  return writeResponse(httpResponse, res);
+});
+```
+
+<NxCommands commands={["serve-local <api-project-name>"]} />
+
+Điều này khởi động cả API và cơ sở dữ liệu cục bộ. Biến môi trường `SERVE_LOCAL=true` được đặt tự động, vì vậy Prisma client kết nối với cơ sở dữ liệu Docker cục bộ thay vì Aurora.

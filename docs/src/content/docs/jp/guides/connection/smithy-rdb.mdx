@@ -1,0 +1,131 @@
+---
+title: Smithy API からリレーショナルデータベースへの接続
+description: Smithy API をリレーショナルデータベースに接続する
+when:
+  sourceType: smithy
+  targetType: ts#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Snippet from '@components/snippet.astro';
+
+`connection` ジェネレーターは、<Link path="guides/ts-smithy-api">Smithy API</Link> を <Link path="guides/ts-rdb">リレーショナルデータベース</Link> プロジェクトに接続し、Prisma クライアントをサービスコンテキストに注入することで、すべての操作実装がデータベースにアクセスできるようにします。
+
+## 前提条件
+
+このジェネレーターを使用する前に、以下を用意してください：
+
+1. <Link path="guides/ts-smithy-api">`ts#smithy-api`</Link> プロジェクト（TypeScript バックエンド）
+2. <Link path="guides/ts-rdb">`ts#rdb`</Link> プロジェクト
+
+## 使用方法
+
+### ジェネレーターの実行
+
+<RunGenerator generator="connection" />
+
+ソースとして Smithy API バックエンドプロジェクトを選択し、ターゲットとしてリレーショナルデータベースプロジェクトを選択します。
+
+### オプション
+
+<GeneratorParameters generator="connection" />
+
+## ジェネレーターの出力
+
+ジェネレーターは、Smithy API バックエンドの既存の3つのファイルを変更します：
+
+<FileTree>
+
+- packages/api/src
+  - context.ts `ServiceContext` に `db` プロパティが追加されます
+  - handler.ts `lambdaHandler` 内で Prisma クライアントが作成され、`serviceHandler.handle` に渡されます
+  - local-server.ts リクエストハンドラー内で Prisma クライアントが作成され、`serviceHandler.handle` に渡されます
+
+</FileTree>
+
+さらに、API の `serve-local` ターゲットを更新して、データベースを自動的に起動するようにします。
+
+## 動作の仕組み
+
+### ServiceContext
+
+ジェネレーターは、`context.ts` の `ServiceContext` に型付きの `db` プロパティを追加します：
+
+```ts title="packages/api/src/context.ts" {1,7}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+export interface ServiceContext {
+  tracer: Tracer;
+  logger: Logger;
+  metrics: Metrics;
+  myDb: Awaited<ReturnType<typeof getMyDb>>;
+}
+```
+
+### Lambda ハンドラー
+
+Prisma クライアントは `lambdaHandler` 内でインスタンス化され、サービスコンテキストを通じて渡されます：
+
+```ts title="packages/api/src/handler.ts" {1,10}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+export const lambdaHandler = async (event: APIGatewayProxyEvent) => {
+  const httpRequest = convertEvent(event);
+  const myDb = await getMyDb();
+  const httpResponse = await serviceHandler.handle(httpRequest, {
+    tracer,
+    logger,
+    metrics,
+    myDb,
+  });
+  return convertVersion1Response(httpResponse);
+};
+```
+
+### 操作内でのデータベースの使用
+
+操作実装内で、コンテキストから `db` にアクセスします：
+
+```ts title="packages/api/src/operations/list-users.ts" {8}
+import { ListUsersOperationInput, ListUsersOperationOutput } from '../generated/ssdk/index.js';
+import { ServiceContext } from '../context.js';
+
+export const listUsers = async (
+  input: ListUsersOperationInput,
+  ctx: ServiceContext,
+): Promise<ListUsersOperationOutput> => {
+  const users = await ctx.myDb.user.findMany();
+  return { users };
+};
+```
+
+## インフラストラクチャ
+
+<Snippet name="connection/rdb-api-infrastructure" parentHeading="Infrastructure" />
+
+## ローカル開発
+
+ジェネレーターは、`local-server.ts` のリクエストハンドラー内でも同じ Prisma クライアントの注入を適用します：
+
+```ts title="packages/api/src/local-server.ts" {1,5,10}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+const server = createServer(async function (req, res) {
+  const httpRequest = convertRequest(req);
+  const myDb = await getMyDb();
+  const httpResponse = await serviceHandler.handle(httpRequest, {
+    tracer,
+    logger,
+    metrics,
+    myDb,
+  });
+  return writeResponse(httpResponse, res);
+});
+```
+
+<NxCommands commands={["serve-local <api-project-name>"]} />
+
+これにより、API とローカルデータベースの両方が起動します。`SERVE_LOCAL=true` 環境変数が自動的に設定されるため、Prisma クライアントは Aurora ではなくローカルの Docker データベースに接続します。

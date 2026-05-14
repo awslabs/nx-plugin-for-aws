@@ -171,84 +171,29 @@ The generated `prisma` target exposes the Prisma CLI, so you can use it to run a
 
 <NxCommands commands={['run <project>:prisma studio']} />
 
-## Connecting from a tRPC API
+## Connecting to the Database
 
-While this section describes how to connect to your database from a tRPC API, it also serves as a reference for use in any other TypeScript project.
+In any TypeScript project, import `getPrisma` from your database package and call it to get a type-safe Prisma client:
 
-### Using the Prisma Client in Handlers
-
-Import `getPrisma` from your database package and call it inside your handler to get a type-safe Prisma client:
-
-```ts title="packages/api/src/procedures/list-users.ts" {8}
+```ts
 import { getPrisma } from ':my-scope/db';
-import { publicProcedure } from '../init.js';
-import { ListUsersOutputSchema } from '../schema/index.js';
 
-export const listUsers = publicProcedure
-  .output(ListUsersOutputSchema)
-  .query(async () => {
-    const prisma = await getPrisma();
-    return prisma.user.findMany({ orderBy: { id: 'asc' } });
-  });
+const prisma = await getPrisma();
+const users = await prisma.user.findMany({ orderBy: { id: 'asc' } });
 ```
 
 `getPrisma()` returns a lazily-initialised, cached client. Subsequent calls within the same Lambda execution context reuse the existing connection pool rather than opening a new one.
 
 The Prisma client exposes fully typed models derived from your `prisma/models/` schema, giving you end-to-end type safety from the database all the way through to your API response.
 
-### Injecting the Prisma Client via Middleware
+### Connection Generators
 
-Rather than calling `getPrisma()` in every procedure, you can also resolve it once in a middleware and attach it to the tRPC context so all downstream procedures can access it directly.
+For specific project types, use the `connection` generator to automatically wire up the database — it handles imports, context injection, and local development dependencies:
 
-First, define the plugin in `src/middleware/db.ts` following the same pattern as the generated middleware:
-
-```ts title="packages/api/src/middleware/db.ts"
-import { getPrisma } from ':my-scope/db';
-import { initTRPC } from '@trpc/server';
-
-export interface IDbContext {
-  db: Awaited<ReturnType<typeof getPrisma>>;
-}
-
-export const createDbPlugin = () => {
-  const t = initTRPC.context<IDbContext>().create();
-  return t.procedure.use(async (opts) => {
-    const db = await getPrisma();
-    return opts.next({
-      ctx: {
-        ...opts.ctx,
-        db,
-      },
-    });
-  });
-};
-```
-
-Then concat it onto a base procedure in your tRPC initialisation:
-
-```ts title="packages/api/src/init.ts"
-import { createDbPlugin } from './middleware/db.js';
-
-export const dbProcedure = publicProcedure.concat(createDbPlugin());
-```
-
-Procedures built on `dbProcedure` receive `db` through context without needing to import or call `getPrisma()` themselves:
-
-```ts title="packages/api/src/procedures/list-users.ts"
-import { dbProcedure } from '../init.js';
-import { ListUsersOutputSchema } from '../schema/index.js';
-
-export const listUsers = dbProcedure
-  .output(ListUsersOutputSchema)
-  .query(async ({ ctx: { db } }) => {
-    return db.user.findMany({ orderBy: { id: 'asc' } });
-  });
-```
-
-:::note
-See the <Link path="/guides/trpc">`ts#trpc-api` generator guide</Link> for more details on the middleware pattern.
-
-:::
+- <Link path="guides/connection/trpc-rdb">tRPC API → Relational Database</Link>
+- <Link path="guides/connection/smithy-rdb">Smithy API → Relational Database</Link>
+- <Link path="guides/connection/ts-strands-agent-rdb">TypeScript Strands Agent → Relational Database</Link>
+- <Link path="guides/connection/ts-mcp-server-rdb">MCP Server → Relational Database</Link>
 
 ## Deploying your Database
 

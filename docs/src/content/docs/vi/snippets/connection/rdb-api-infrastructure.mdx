@@ -1,0 +1,72 @@
+---
+title: Cơ sở hạ tầng RDB API
+---
+import Infrastructure from '@components/infrastructure.astro';
+
+Để cho phép API của bạn kết nối với cơ sở dữ liệu tại runtime, các hàm Lambda API phải được triển khai vào cùng VPC với cơ sở dữ liệu và được cấp quyền truy cập mạng và IAM.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+Trong application stack của bạn, triển khai API vào cùng VPC với cơ sở dữ liệu, sau đó gọi `allowDefaultPortFrom` và `grantConnect` để mở đường dẫn mạng và cấp quyền IAM `rds-db:connect` cho mỗi Lambda handler:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+
+const api = new MyApi(this, 'Api', {
+  integrations: MyApi.defaultIntegrations(this)
+    .withDefaultOptions({
+      vpc,
+      vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+    })
+    .build(),
+});
+
+Object.entries(api.integrations).forEach(([operation, integration]) => {
+  db.allowDefaultPortFrom(integration.handler, `Allow ${operation} to connect to the database`);
+  db.grantConnect(integration.handler);
+});
+```
+
+Triển khai các hàm Lambda API vào **private subnet with egress**, không phải private isolated subnet. Tại runtime, `getPrisma()` truy xuất thông tin chi tiết kết nối cơ sở dữ liệu từ AWS AppConfig, đây là một public AWS service endpoint yêu cầu truy cập internet ra ngoài.
+
+:::note
+Ví dụ này cấp quyền truy cập cho mọi handler trong API của bạn, nhưng nếu chỉ một số handler cần truy cập thì tốt hơn là cấu hình riêng lẻ.
+:::
+
+</Fragment>
+<Fragment slot="terraform">
+
+Truyền các output của database module vào API module của bạn để nó có thể truy cập cơ sở dữ liệu và đọc cấu hình runtime của nó:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
+}
+
+module "api" {
+  source             = "..."
+  vpc_id             = module.vpc.vpc_id
+  private_subnet_ids = module.vpc.private_subnet_ids
+
+  appconfig_application_id     = module.my_database.appconfig_application_id
+  database_cluster_resource_id = module.my_database.cluster_resource_id
+  database_runtime_user        = module.my_database.database_runtime_user
+  database_security_group_id   = module.my_database.security_group_id
+  database_port                = module.my_database.cluster_port
+
+  environment_variables = {
+    RUNTIME_CONFIG_APP_ID = module.my_database.appconfig_application_id
+  }
+}
+```
+
+Triển khai các hàm Lambda API vào **private subnets with egress**, không phải private isolated subnets. Đảm bảo API Lambda role có quyền `rds-db:connect` và security group của nó có thể truy cập database security group trên database port.
+
+</Fragment>
+</Infrastructure>

@@ -1,0 +1,162 @@
+---
+title: Serveur MCP vers Base de Données Relationnelle
+description: Connecter un serveur MCP TypeScript à une base de données relationnelle
+when:
+  sourceType: ts#mcp-server
+  targetType: ts#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+Le générateur `connection` relie un <Link path="guides/ts-mcp-server">serveur MCP TypeScript</Link> à un projet de <Link path="guides/ts-rdb">base de données relationnelle</Link>, rendant un client Prisma disponible à l'intérieur de `createServer` et de ses points d'entrée de transport.
+
+## Prérequis
+
+Avant d'utiliser ce générateur, assurez-vous d'avoir :
+
+1. Un projet <Link path="guides/ts-mcp-server">`ts#mcp-server`</Link>
+2. Un projet <Link path="guides/ts-rdb">`ts#rdb`</Link>
+
+## Utilisation
+
+### Exécuter le générateur
+
+<RunGenerator generator="connection" />
+
+Sélectionnez votre projet de serveur MCP comme source et votre projet de base de données relationnelle comme cible. Si le projet contient plusieurs composants de serveur MCP, spécifiez `sourceComponent` pour lever l'ambiguïté.
+
+### Options
+
+<GeneratorParameters generator="connection" />
+
+## Sortie du générateur
+
+Le générateur modifie trois fichiers dans le répertoire source de votre serveur MCP :
+
+<FileTree>
+
+- packages/my-service/src/my-mcp
+  - server.ts `createServer` mis à jour pour accepter le paramètre `{ db }`
+  - http.ts Client Prisma créé au-dessus de `const server = createServer({ db })`
+  - stdio.ts Client Prisma créé avant `await createServer({ db }).connect(transport)`
+
+</FileTree>
+
+De plus, la cible `<mcp-server-name>-serve-local` est mise à jour pour dépendre de la cible `serve-local` de la base de données.
+
+## Comment ça fonctionne
+
+### Définition du serveur
+
+`createServer` reçoit le client Prisma en tant que paramètre afin qu'il reste synchrone et puisse transmettre le client aux outils et ressources :
+
+```ts title="packages/my-service/src/my-mcp/server.ts" {1,4,6}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+export const createServer = ({
+  myDb,
+}: {
+  myDb: Awaited<ReturnType<typeof getMyDb>>;
+}) => {
+  const server = new McpServer({ name: 'my-service', version: '1.0.0' });
+  // register tools/resources that use myDb
+  return server;
+};
+```
+
+### Transport HTTP
+
+Le client Prisma est créé à l'intérieur du gestionnaire de requêtes, au-dessus de l'appel à `createServer` :
+
+```ts title="packages/my-service/src/my-mcp/http.ts" {1,5,6}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+app.post('/mcp', async (req, res) => {
+  try {
+    const myDb = await getMyDb();
+    const server = createServer({ myDb });
+    // ...
+  }
+});
+```
+
+### Transport Stdio
+
+Le même modèle s'applique au point d'entrée du transport stdio :
+
+```ts title="packages/my-service/src/my-mcp/stdio.ts" {1,5,6}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+export const startMcpServer = async () => {
+  const transport = new StdioServerTransport();
+  const myDb = await getMyDb();
+  await createServer({ myDb }).connect(transport);
+};
+```
+
+## Bases de données multiples
+
+Exécuter à nouveau le générateur avec une cible différente ajoute la deuxième base de données à côté de la première. Les deux sont transmises ensemble à `createServer` :
+
+```ts title="packages/my-service/src/my-mcp/http.ts"
+const postgresDb = await getPostgresDb();
+const mySqlDb = await getMySqlDb();
+const server = createServer({ postgresDb, mysqlDb });
+```
+
+## Infrastructure
+
+Le construct de serveur MCP généré implémente `IGrantable` et `IConnectable`, vous pouvez donc accorder l'accès réseau et IAM à la base de données directement sur le construct.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+const myMcpServer = new MyMcpServer(this, 'MyMcpServer', { vpc, ... });
+
+db.allowDefaultPortFrom(myMcpServer);
+db.grantConnect(myMcpServer);
+```
+
+`allowDefaultPortFrom` ouvre la règle du groupe de sécurité afin que le runtime du serveur MCP puisse atteindre le port de la base de données. `grantConnect` accorde la permission IAM `rds-db:connect` au rôle d'exécution du serveur.
+
+</Fragment>
+<Fragment slot="terraform">
+
+Transmettez les sorties du module de base de données dans votre module de serveur MCP afin qu'il puisse atteindre la base de données et lire sa configuration d'exécution :
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+}
+
+module "my_mcp_server" {
+  source = "../../common/terraform/src/app/mcp-servers/my-mcp-server"
+
+  appconfig_application_id     = module.my_database.appconfig_application_id
+  database_cluster_resource_id = module.my_database.cluster_resource_id
+  database_runtime_user        = module.my_database.database_runtime_user
+  database_security_group_id   = module.my_database.security_group_id
+  database_port                = module.my_database.cluster_port
+}
+```
+
+Assurez-vous que le rôle d'exécution du serveur MCP dispose de la permission `rds-db:connect` et que son groupe de sécurité peut atteindre le groupe de sécurité de la base de données sur le port de la base de données.
+
+</Fragment>
+</Infrastructure>
+
+## Développement local
+
+<NxCommands commands={["<mcp-server-name>-serve-local <project-name>"]} />
+
+Cela démarre le serveur MCP et toutes les bases de données connectées. La variable d'environnement `SERVE_LOCAL=true` fait en sorte que chaque client Prisma se connecte à sa base de données Docker locale au lieu d'Aurora.

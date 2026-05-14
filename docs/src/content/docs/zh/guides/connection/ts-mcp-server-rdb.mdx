@@ -1,0 +1,162 @@
+---
+title: MCP 服务器连接到关系数据库
+description: 将 TypeScript MCP 服务器连接到关系数据库
+when:
+  sourceType: ts#mcp-server
+  targetType: ts#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+`connection` 生成器将 <Link path="guides/ts-mcp-server">TypeScript MCP 服务器</Link> 连接到 <Link path="guides/ts-rdb">关系数据库</Link> 项目，使 Prisma 客户端在 `createServer` 及其传输入口点内可用。
+
+## 前置条件
+
+在使用此生成器之前，请确保您拥有：
+
+1. 一个 <Link path="guides/ts-mcp-server">`ts#mcp-server`</Link> 项目
+2. 一个 <Link path="guides/ts-rdb">`ts#rdb`</Link> 项目
+
+## 使用方法
+
+### 运行生成器
+
+<RunGenerator generator="connection" />
+
+选择您的 MCP 服务器项目作为源，选择您的关系数据库项目作为目标。如果项目包含多个 MCP 服务器组件，请指定 `sourceComponent` 以消除歧义。
+
+### 选项
+
+<GeneratorParameters generator="connection" />
+
+## 生成器输出
+
+生成器会修改 MCP 服务器源目录中的三个文件：
+
+<FileTree>
+
+- packages/my-service/src/my-mcp
+  - server.ts `createServer` 更新为接受 `{ db }` 参数
+  - http.ts 在 `const server = createServer({ db })` 上方创建 Prisma 客户端
+  - stdio.ts 在 `await createServer({ db }).connect(transport)` 之前创建 Prisma 客户端
+
+</FileTree>
+
+此外，`<mcp-server-name>-serve-local` 目标会更新为依赖数据库的 `serve-local` 目标。
+
+## 工作原理
+
+### 服务器定义
+
+`createServer` 接收 Prisma 客户端作为参数，因此它保持同步并可以将客户端传递给工具和资源：
+
+```ts title="packages/my-service/src/my-mcp/server.ts" {1,4,6}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+export const createServer = ({
+  myDb,
+}: {
+  myDb: Awaited<ReturnType<typeof getMyDb>>;
+}) => {
+  const server = new McpServer({ name: 'my-service', version: '1.0.0' });
+  // register tools/resources that use myDb
+  return server;
+};
+```
+
+### HTTP 传输
+
+Prisma 客户端在请求处理程序内创建，位于 `createServer` 调用上方：
+
+```ts title="packages/my-service/src/my-mcp/http.ts" {1,5,6}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+app.post('/mcp', async (req, res) => {
+  try {
+    const myDb = await getMyDb();
+    const server = createServer({ myDb });
+    // ...
+  }
+});
+```
+
+### Stdio 传输
+
+相同的模式适用于 stdio 传输入口点：
+
+```ts title="packages/my-service/src/my-mcp/stdio.ts" {1,5,6}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+export const startMcpServer = async () => {
+  const transport = new StdioServerTransport();
+  const myDb = await getMyDb();
+  await createServer({ myDb }).connect(transport);
+};
+```
+
+## 多个数据库
+
+使用不同的目标再次运行生成器会将第二个数据库添加到第一个数据库旁边。两者一起传递给 `createServer`：
+
+```ts title="packages/my-service/src/my-mcp/http.ts"
+const postgresDb = await getPostgresDb();
+const mySqlDb = await getMySqlDb();
+const server = createServer({ postgresDb, mysqlDb });
+```
+
+## 基础设施
+
+生成的 MCP 服务器构造实现了 `IGrantable` 和 `IConnectable`，因此您可以直接在构造上授予对数据库的网络和 IAM 访问权限。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+const myMcpServer = new MyMcpServer(this, 'MyMcpServer', { vpc, ... });
+
+db.allowDefaultPortFrom(myMcpServer);
+db.grantConnect(myMcpServer);
+```
+
+`allowDefaultPortFrom` 打开安全组规则，以便 MCP 服务器运行时可以访问数据库端口。`grantConnect` 向服务器的执行角色授予 IAM `rds-db:connect` 权限。
+
+</Fragment>
+<Fragment slot="terraform">
+
+将数据库模块输出传递到您的 MCP 服务器模块中，以便它可以访问数据库并读取其运行时配置：
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+}
+
+module "my_mcp_server" {
+  source = "../../common/terraform/src/app/mcp-servers/my-mcp-server"
+
+  appconfig_application_id     = module.my_database.appconfig_application_id
+  database_cluster_resource_id = module.my_database.cluster_resource_id
+  database_runtime_user        = module.my_database.database_runtime_user
+  database_security_group_id   = module.my_database.security_group_id
+  database_port                = module.my_database.cluster_port
+}
+```
+
+确保 MCP 服务器的执行角色具有 `rds-db:connect` 权限，并且其安全组可以在数据库端口上访问数据库安全组。
+
+</Fragment>
+</Infrastructure>
+
+## 本地开发
+
+<NxCommands commands={["<mcp-server-name>-serve-local <project-name>"]} />
+
+这会启动 MCP 服务器和所有连接的数据库。`SERVE_LOCAL=true` 环境变量使每个 Prisma 客户端连接到其本地 Docker 数据库而不是 Aurora。

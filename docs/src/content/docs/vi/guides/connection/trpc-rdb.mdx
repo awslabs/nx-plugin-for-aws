@@ -1,0 +1,123 @@
+---
+title: tRPC API đến Cơ sở dữ liệu Quan hệ
+description: Kết nối tRPC API với Cơ sở dữ liệu Quan hệ
+when:
+  sourceType: ts#trpc-api
+  targetType: ts#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Snippet from '@components/snippet.astro';
+
+Trình tạo `connection` kết nối một <Link path="guides/trpc">tRPC API</Link> với dự án <Link path="guides/ts-rdb">Relational Database</Link>, tạo ra một plugin middleware tRPC an toàn kiểu giúp cung cấp Prisma client trong ngữ cảnh procedure của bạn.
+
+## Điều kiện tiên quyết
+
+Trước khi sử dụng trình tạo này, hãy đảm bảo bạn có:
+
+1. Một dự án <Link path="guides/trpc">`ts#trpc-api`</Link>
+2. Một dự án <Link path="guides/ts-rdb">`ts#rdb`</Link>
+
+## Cách sử dụng
+
+### Chạy Trình tạo
+
+<RunGenerator generator="connection" />
+
+Chọn dự án tRPC API của bạn làm nguồn và dự án cơ sở dữ liệu quan hệ của bạn làm đích.
+
+### Tùy chọn
+
+<GeneratorParameters generator="connection" />
+
+## Kết quả của Trình tạo
+
+Trình tạo tạo một tệp middleware trong dự án tRPC API của bạn:
+
+<FileTree>
+
+- packages/api/src
+  - middleware
+    - \<db-name>.ts plugin tRPC cung cấp Prisma client trong ngữ cảnh procedure
+
+</FileTree>
+
+Ngoài ra, nó cập nhật target `serve-local` của tRPC API để tự động khởi động cơ sở dữ liệu khi chạy cục bộ.
+
+## Sử dụng Middleware
+
+### Đăng ký Plugin
+
+Thêm plugin được tạo vào tRPC router của bạn để tất cả các procedure sử dụng nó có quyền truy cập vào cơ sở dữ liệu:
+
+```ts title="packages/api/src/router.ts" {2,5}
+import { t } from './init.js';
+import { createMyDbPlugin } from './middleware/my-db.js';
+
+export const authenticatedProcedure = t.procedure
+  .concat(createMyDbPlugin());
+```
+
+### Truy cập Cơ sở dữ liệu trong Procedures
+
+Plugin hợp nhất `IMyDbContext` vào ngữ cảnh procedure của bạn, làm cho `myDb` có sẵn như một thuộc tính tùy chọn:
+
+```ts title="packages/api/src/procedures/users.ts" {8,12}
+import { z } from 'zod';
+import { authenticatedProcedure } from '../router.js';
+
+export const listUsers = authenticatedProcedure
+  .output(z.array(z.object({ id: z.string(), name: z.string() })))
+  .query(async ({ ctx }) => {
+    // ctx.myDb là Prisma client — được định kiểu là Awaited<ReturnType<typeof getPrisma>>
+    return await ctx.myDb!.user.findMany();
+  });
+```
+
+### MySQL: Ngắt kết nối Sau Mỗi Request
+
+Khi cơ sở dữ liệu đích sử dụng engine MySQL, middleware được tạo bọc `opts.next()` trong một khối `try/finally` gọi `$disconnect()`:
+
+```ts title="packages/api/src/middleware/my-db.ts" {6}
+return t.procedure.use(async (opts) => {
+  const myDb = await getPrisma();
+  try {
+    return await opts.next({ ctx: { ...opts.ctx, myDb } });
+  } finally {
+    await myDb.$disconnect();
+  }
+});
+```
+
+Điều này giải quyết vấn đề adapter MySQL giữ vòng lặp sự kiện Node.js mở sau một truy vấn, điều này sẽ ngăn Lambda xả các phản hồi streaming. Ngắt kết nối trong `finally` giải phóng vòng lặp sự kiện để phản hồi có thể hoàn thành. Xem <Link path="guides/ts-rdb#mysql-api-gateway-streaming-mode">MySQL: API Gateway Streaming Mode</Link> để biết chi tiết.
+
+PostgreSQL không yêu cầu điều này — adapter của nó sử dụng connection pool được cấu hình với `allowExitOnIdle: true`.
+
+:::caution[MySQL: Hết hạn IAM Token]
+Token IAM của RDS hết hạn sau **15 phút**. Adapter MySQL lưu token tại thời điểm kết nối. Nếu Lambda của bạn giữ warm đủ lâu để token hết hạn, các nỗ lực kết nối mới có thể thất bại. Kiểm tra lỗi kết nối và gọi `getPrisma()` lại để có được một client mới với token mới. Xem <Link path="guides/ts-rdb#mysql-iam-token-expiry">MySQL: IAM Token Expiry</Link> để biết chi tiết và cách giải quyết.
+:::
+
+### Nhiều Cơ sở dữ liệu
+
+Bạn có thể kết nối thêm các cơ sở dữ liệu bằng cách chạy lại trình tạo với một đích khác. Mỗi cơ sở dữ liệu có plugin và giao diện ngữ cảnh riêng:
+
+```ts title="packages/api/src/router.ts"
+export const dbProcedure = t.procedure
+  .concat(createPostgresDbPlugin())
+  .concat(createMySqlDbPlugin());
+```
+
+## Hạ tầng
+
+<Snippet name="connection/rdb-api-infrastructure" parentHeading="Infrastructure" />
+
+## Phát triển Cục bộ
+
+Trình tạo cấu hình target `serve-local` của tRPC API để phụ thuộc vào target `serve-local` của cơ sở dữ liệu, vì vậy khi chạy:
+
+<NxCommands commands={["serve-local <api-project-name>"]} />
+
+sẽ tự động khởi động cơ sở dữ liệu cục bộ cùng với API của bạn.

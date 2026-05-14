@@ -171,84 +171,29 @@ Target `prisma` được tạo ra expose Prisma CLI, vì vậy bạn có thể s
 
 <NxCommands commands={['run <project>:prisma studio']} />
 
-## Kết nối từ một tRPC API
+## Kết nối với Cơ sở dữ liệu
 
-Mặc dù phần này mô tả cách kết nối với cơ sở dữ liệu của bạn từ tRPC API, nó cũng đóng vai trò là tài liệu tham khảo để sử dụng trong bất kỳ dự án TypeScript nào khác.
+Trong bất kỳ dự án TypeScript nào, import `getPrisma` từ package cơ sở dữ liệu của bạn và gọi nó để lấy Prisma client an toàn về kiểu:
 
-### Sử dụng Prisma Client trong Handler
-
-Import `getPrisma` từ package cơ sở dữ liệu của bạn và gọi nó bên trong handler để lấy Prisma client an toàn về kiểu:
-
-```ts title="packages/api/src/procedures/list-users.ts" {8}
+```ts
 import { getPrisma } from ':my-scope/db';
-import { publicProcedure } from '../init.js';
-import { ListUsersOutputSchema } from '../schema/index.js';
 
-export const listUsers = publicProcedure
-  .output(ListUsersOutputSchema)
-  .query(async () => {
-    const prisma = await getPrisma();
-    return prisma.user.findMany({ orderBy: { id: 'asc' } });
-  });
+const prisma = await getPrisma();
+const users = await prisma.user.findMany({ orderBy: { id: 'asc' } });
 ```
 
 `getPrisma()` trả về một client được khởi tạo lười biếng và được cache. Các lần gọi tiếp theo trong cùng một Lambda execution context sẽ tái sử dụng connection pool hiện có thay vì mở một kết nối mới.
 
 Prisma client expose các model được type đầy đủ được lấy từ schema `prisma/models/` của bạn, cung cấp cho bạn type safety từ đầu đến cuối từ cơ sở dữ liệu cho đến API response.
 
-### Inject Prisma Client qua Middleware
+### Connection Generators
 
-Thay vì gọi `getPrisma()` trong mỗi procedure, bạn cũng có thể resolve nó một lần trong middleware và gắn nó vào tRPC context để tất cả các procedure downstream có thể truy cập trực tiếp.
+Đối với các loại dự án cụ thể, sử dụng generator `connection` để tự động kết nối cơ sở dữ liệu — nó xử lý import, context injection và các dependency phát triển cục bộ:
 
-Đầu tiên, định nghĩa plugin trong `src/middleware/db.ts` theo cùng pattern như middleware được tạo ra:
-
-```ts title="packages/api/src/middleware/db.ts"
-import { getPrisma } from ':my-scope/db';
-import { initTRPC } from '@trpc/server';
-
-export interface IDbContext {
-  db: Awaited<ReturnType<typeof getPrisma>>;
-}
-
-export const createDbPlugin = () => {
-  const t = initTRPC.context<IDbContext>().create();
-  return t.procedure.use(async (opts) => {
-    const db = await getPrisma();
-    return opts.next({
-      ctx: {
-        ...opts.ctx,
-        db,
-      },
-    });
-  });
-};
-```
-
-Sau đó concat nó vào một base procedure trong tRPC initialisation của bạn:
-
-```ts title="packages/api/src/init.ts"
-import { createDbPlugin } from './middleware/db.js';
-
-export const dbProcedure = publicProcedure.concat(createDbPlugin());
-```
-
-Các procedure được xây dựng trên `dbProcedure` nhận `db` thông qua context mà không cần import hoặc gọi `getPrisma()`:
-
-```ts title="packages/api/src/procedures/list-users.ts"
-import { dbProcedure } from '../init.js';
-import { ListUsersOutputSchema } from '../schema/index.js';
-
-export const listUsers = dbProcedure
-  .output(ListUsersOutputSchema)
-  .query(async ({ ctx: { db } }) => {
-    return db.user.findMany({ orderBy: { id: 'asc' } });
-  });
-```
-
-:::note
-Xem <Link path="/vi/guides/trpc">hướng dẫn generator `ts#trpc-api`</Link> để biết thêm chi tiết về pattern middleware.
-
-:::
+- <Link path="guides/connection/trpc-rdb">tRPC API → Relational Database</Link>
+- <Link path="guides/connection/smithy-rdb">Smithy API → Relational Database</Link>
+- <Link path="guides/connection/ts-strands-agent-rdb">TypeScript Strands Agent → Relational Database</Link>
+- <Link path="guides/connection/ts-mcp-server-rdb">MCP Server → Relational Database</Link>
 
 ## Triển khai Cơ sở dữ liệu của bạn
 
@@ -288,7 +233,7 @@ Module Terraform được tạo trong `common/terraform`. Ví dụ sử dụng:
 module "my_database" {
   source = "../../common/terraform/src/app/dbs/my-database"
 
-  vpc_id             = module.vpc.vpc_id
+  vpc_id              = module.vpc.vpc_id
   database_subnet_ids = module.vpc.private_isolated_subnet_ids
   lambda_subnet_ids   = module.vpc.private_subnet_ids
 
@@ -304,7 +249,7 @@ Cơ sở hạ tầng được tạo ra tạo hai database user:
 </Fragment>
 </Infrastructure>
 
-Application user được tự động tạo với tên ngẫu nhiên và xác thực IAM — `getPrisma()` đã được cấu hình để xác thực với user này bằng RDS token có thời hạn ngắn, vì vậy mã ứng dụng của bạn không bao giờ xử lý mật khẩu cơ sở dữ liệu.
+Application user được tự động tạo với tên ngẫu nhiên và xác thực IAM. `getPrisma()` đã được cấu hình để xác thực với user này bằng RDS token có thời hạn ngắn, vì vậy mã ứng dụng của bạn không bao giờ xử lý mật khẩu cơ sở dữ liệu.
 
 VPC của bạn nên bao gồm public subnet, private subnet với egress và private isolated subnet. Cơ sở dữ liệu có thể chạy trong private isolated subnet, trong khi API Lambda function nên chạy trong private subnet với egress để chúng có thể kết nối với các dịch vụ AWS như AppConfig.
 
@@ -387,8 +332,8 @@ Truyền các output của database module vào compute module của bạn để
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
-  source             = "../../common/terraform/src/app/dbs/my-database"
-  vpc_id             = module.vpc.vpc_id
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
   database_subnet_ids = module.vpc.private_isolated_subnet_ids
   lambda_subnet_ids   = module.vpc.private_subnet_ids
 }

@@ -1,10 +1,8 @@
 import { <%= prismaAdapterClassName %> } from '<%= prismaAdapterPackage %>';
 import { Signer } from '@aws-sdk/rds-signer';
-<%_ if (engine === 'MySQL') { _%>
-import { PrismaClient } from '../generated/prisma/client.js';
-<%_ } else { _%>
+import { Prisma, PrismaClient } from '../generated/prisma/client.js';
+<%_ if (engine === 'PostgreSQL') { _%>
 import { Pool } from 'pg';
-import { PrismaClient } from '../generated/prisma/client.js';
 <%_ } _%>
 import {
   DB_PACKAGE_NAME,
@@ -17,7 +15,9 @@ import {
 import { getDatabaseConfig } from './utils.js';
 <%_ if (engine === 'MySQL') { _%>
 
-export const getPrisma = async (): Promise<PrismaClient> => {
+export const getPrisma = async <LogOpts extends Prisma.LogLevel>(
+  log: LogOpts[] = ['warn', 'error'] as LogOpts[],
+): Promise<PrismaClient<LogOpts>> => {
   if (process.env.SERVE_LOCAL === 'true') {
     const adapter = new PrismaMariaDb({
       host: LOCAL_DB_HOST,
@@ -27,7 +27,10 @@ export const getPrisma = async (): Promise<PrismaClient> => {
       password: LOCAL_DB_PASSWORD,
       allowPublicKeyRetrieval: true,
     });
-    return new PrismaClient({ adapter });
+    return new PrismaClient({
+      adapter,
+      log,
+    }) as unknown as PrismaClient<LogOpts>;
   }
 
   const { hostname, port, database, dbUser, region } =
@@ -50,55 +53,60 @@ export const getPrisma = async (): Promise<PrismaClient> => {
     },
   });
 
-  return new PrismaClient({ adapter });
+  return new PrismaClient({
+    adapter,
+    log,
+  }) as unknown as PrismaClient<LogOpts>;
 };
 <%_ } else { _%>
 
-let prismaPromise: Promise<PrismaClient> | undefined;
-
-export const getPrisma = (): Promise<PrismaClient> => {
-  prismaPromise ??= (async () => {
-    if (process.env.SERVE_LOCAL === 'true') {
-      const adapter = new PrismaPg(
-        new Pool({
-          host: LOCAL_DB_HOST,
-          port: LOCAL_DB_PORT,
-          database: LOCAL_DB_NAME,
-          user: LOCAL_DB_USER,
-          password: LOCAL_DB_PASSWORD,
-          allowExitOnIdle: true,
-        }),
-      );
-      return new PrismaClient({ adapter });
-    }
-
-    const { hostname, port, database, dbUser, region } =
-      await getDatabaseConfig(DB_PACKAGE_NAME);
+export const getPrisma = async <LogOpts extends Prisma.LogLevel>(
+  log: LogOpts[] = ['warn', 'error'] as LogOpts[],
+): Promise<PrismaClient<LogOpts>> => {
+  if (process.env.SERVE_LOCAL === 'true') {
     const adapter = new PrismaPg(
       new Pool({
-        host: hostname,
-        port,
-        database,
-        user: dbUser,
-        ssl: {
-          rejectUnauthorized: true,
-        },
+        host: LOCAL_DB_HOST,
+        port: LOCAL_DB_PORT,
+        database: LOCAL_DB_NAME,
+        user: LOCAL_DB_USER,
+        password: LOCAL_DB_PASSWORD,
         allowExitOnIdle: true,
-        password: async () => {
-          const token = await new Signer({
-            hostname,
-            port,
-            region,
-            username: dbUser,
-          }).getAuthToken();
-          return token;
-        },
       }),
     );
+    return new PrismaClient({
+      adapter,
+      log,
+    }) as unknown as PrismaClient<LogOpts>;
+  }
 
-    return new PrismaClient({ adapter });
-  })();
+  const { hostname, port, database, dbUser, region } =
+    await getDatabaseConfig(DB_PACKAGE_NAME);
+  const adapter = new PrismaPg(
+    new Pool({
+      host: hostname,
+      port,
+      database,
+      user: dbUser,
+      ssl: {
+        rejectUnauthorized: true,
+      },
+      allowExitOnIdle: true,
+      password: async () => {
+        const token = await new Signer({
+          hostname,
+          port,
+          region,
+          username: dbUser,
+        }).getAuthToken();
+        return token;
+      },
+    }),
+  );
 
-  return prismaPromise;
+  return new PrismaClient({
+    adapter,
+    log,
+  }) as unknown as PrismaClient<LogOpts>;
 };
 <%_ } _%>

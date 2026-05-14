@@ -1,0 +1,163 @@
+---
+title: MCP 서버를 관계형 데이터베이스에 연결
+description: TypeScript MCP 서버를 관계형 데이터베이스에 연결하기
+when:
+  sourceType: ts#mcp-server
+  targetType: ts#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+`connection` 생성기는 <Link path="guides/ts-mcp-server">TypeScript MCP 서버</Link>를 <Link path="guides/ts-rdb">관계형 데이터베이스</Link> 프로젝트에 연결하여, `createServer`와 해당 전송 진입점 내부에서 Prisma 클라이언트를 사용할 수 있도록 합니다.
+
+## 사전 요구 사항
+
+이 생성기를 사용하기 전에 다음이 필요합니다:
+
+1. <Link path="guides/ts-mcp-server">`ts#mcp-server`</Link> 프로젝트
+2. <Link path="guides/ts-rdb">`ts#rdb`</Link> 프로젝트
+
+## 사용법
+
+### 생성기 실행
+
+<RunGenerator generator="connection" />
+
+MCP 서버 프로젝트를 소스로, 관계형 데이터베이스 프로젝트를 대상으로 선택하세요. 프로젝트에 여러 MCP 서버 컴포넌트가 포함되어 있는 경우, `sourceComponent`를 지정하여 명확히 구분하세요.
+
+### 옵션
+
+<GeneratorParameters generator="connection" />
+
+## 생성기 출력
+
+생성기는 MCP 서버의 소스 디렉토리에 있는 세 개의 파일을 수정합니다:
+
+<FileTree>
+
+- packages/my-service/src/my-mcp
+  - server.ts `createServer`가 `{ db }` 매개변수를 받도록 업데이트됨
+  - http.ts `const server = createServer({ db })` 위에서 Prisma 클라이언트 생성
+  - stdio.ts `await createServer({ db }).connect(transport)` 전에 Prisma 클라이언트 생성
+
+</FileTree>
+
+또한, `<mcp-server-name>-serve-local` 타겟이 데이터베이스의 `serve-local` 타겟에 의존하도록 업데이트됩니다.
+
+## 작동 방식
+
+### 서버 정의
+
+`createServer`는 Prisma 클라이언트를 매개변수로 받아 동기적으로 유지되며 클라이언트를 도구와 리소스에 전달할 수 있습니다:
+
+```ts title="packages/my-service/src/my-mcp/server.ts" {1,4,6}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+export const createServer = ({
+  myDb,
+}: {
+  myDb: Awaited<ReturnType<typeof getMyDb>>;
+}) => {
+  const server = new McpServer({ name: 'my-service', version: '1.0.0' });
+  // register tools/resources that use myDb
+  return server;
+};
+```
+
+### HTTP 전송
+
+Prisma 클라이언트는 `createServer` 호출 위의 요청 핸들러 내부에서 생성됩니다:
+
+```ts title="packages/my-service/src/my-mcp/http.ts" {1,5,6}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+app.post('/mcp', async (req, res) => {
+  try {
+    const myDb = await getMyDb();
+    const server = createServer({ myDb });
+    // ...
+  }
+});
+```
+
+### Stdio 전송
+
+stdio 전송 진입점에도 동일한 패턴이 적용됩니다:
+
+```ts title="packages/my-service/src/my-mcp/stdio.ts" {1,5,6}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+export const startMcpServer = async () => {
+  const transport = new StdioServerTransport();
+  const myDb = await getMyDb();
+  await createServer({ myDb }).connect(transport);
+};
+```
+
+## 다중 데이터베이스
+
+다른 대상으로 생성기를 다시 실행하면 첫 번째 데이터베이스와 함께 두 번째 데이터베이스가 추가됩니다. 둘 다 함께 `createServer`에 전달됩니다:
+
+```ts title="packages/my-service/src/my-mcp/http.ts"
+const postgresDb = await getPostgresDb();
+const mySqlDb = await getMySqlDb();
+const server = createServer({ postgresDb, mysqlDb });
+```
+
+## 인프라
+
+생성된 MCP 서버 구성은 `IGrantable`과 `IConnectable`을 구현하므로, 구성에서 직접 데이터베이스에 대한 네트워크 및 IAM 액세스 권한을 부여할 수 있습니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+const myMcpServer = new MyMcpServer(this, 'MyMcpServer', { vpc, ... });
+
+db.allowDefaultPortFrom(myMcpServer);
+db.grantConnect(myMcpServer);
+```
+
+`allowDefaultPortFrom`은 MCP 서버 런타임이 데이터베이스 포트에 도달할 수 있도록 보안 그룹 규칙을 엽니다. `grantConnect`는 서버의 실행 역할에 IAM `rds-db:connect` 권한을 부여합니다.
+
+</Fragment>
+<Fragment slot="terraform">
+
+데이터베이스 모듈 출력을 MCP 서버 모듈에 전달하여 데이터베이스에 도달하고 런타임 구성을 읽을 수 있도록 합니다:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+}
+
+module "my_mcp_server" {
+  source = "../../common/terraform/src/app/mcp-servers/my-mcp-server"
+
+  appconfig_application_id     = module.my_database.appconfig_application_id
+  database_cluster_resource_id = module.my_database.cluster_resource_id
+  database_runtime_user        = module.my_database.database_runtime_user
+  database_security_group_id   = module.my_database.security_group_id
+  database_port                = module.my_database.cluster_port
+}
+```
+
+MCP 서버의 실행 역할에 `rds-db:connect` 권한이 있고 해당 보안 그룹이 데이터베이스 포트에서 데이터베이스 보안 그룹에 도달할 수 있는지 확인하세요.
+
+</Fragment>
+</Infrastructure>
+
+## 로컬 개발
+
+<NxCommands commands={["<mcp-server-name>-serve-local <project-name>"]} />
+
+이것은 MCP 서버와 연결된 모든 데이터베이스를 시작합니다. `SERVE_LOCAL=true` 환경 변수는 각 Prisma 클라이언트가 Aurora 대신 로컬 Docker 데이터베이스에 연결하도록 합니다.
+

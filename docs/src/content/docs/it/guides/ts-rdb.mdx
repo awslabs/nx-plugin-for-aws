@@ -171,84 +171,29 @@ Il target `prisma` generato espone la CLI di Prisma, quindi puoi utilizzarlo per
 
 <NxCommands commands={['run <project>:prisma studio']} />
 
-## Connessione da un'API tRPC
+## Connessione al Database
 
-Sebbene questa sezione descriva come connettersi al database da un'API tRPC, serve anche come riferimento per l'uso in qualsiasi altro progetto TypeScript.
+In qualsiasi progetto TypeScript, importa `getPrisma` dal tuo package database e chiamalo per ottenere un client Prisma type-safe:
 
-### Utilizzo del Client Prisma nei Gestori
-
-Importa `getPrisma` dal tuo package database e chiamalo all'interno del tuo gestore per ottenere un client Prisma type-safe:
-
-```ts title="packages/api/src/procedures/list-users.ts" {8}
+```ts
 import { getPrisma } from ':my-scope/db';
-import { publicProcedure } from '../init.js';
-import { ListUsersOutputSchema } from '../schema/index.js';
 
-export const listUsers = publicProcedure
-  .output(ListUsersOutputSchema)
-  .query(async () => {
-    const prisma = await getPrisma();
-    return prisma.user.findMany({ orderBy: { id: 'asc' } });
-  });
+const prisma = await getPrisma();
+const users = await prisma.user.findMany({ orderBy: { id: 'asc' } });
 ```
 
 `getPrisma()` restituisce un client inizializzato in modo lazy e memorizzato nella cache. Le chiamate successive all'interno dello stesso contesto di esecuzione Lambda riutilizzano il pool di connessioni esistente anziché aprirne uno nuovo.
 
 Il client Prisma espone modelli completamente tipizzati derivati dal tuo schema `prisma/models/`, offrendoti type safety end-to-end dal database fino alla risposta della tua API.
 
-### Iniezione del Client Prisma tramite Middleware
+### Generatori di Connessione
 
-Invece di chiamare `getPrisma()` in ogni procedura, puoi anche risolverlo una volta in un middleware e allegarlo al contesto tRPC in modo che tutte le procedure downstream possano accedervi direttamente.
+Per tipi di progetto specifici, utilizza il generatore `connection` per collegare automaticamente il database — gestisce import, iniezione del contesto e dipendenze di sviluppo locale:
 
-Prima, definisci il plugin in `src/middleware/db.ts` seguendo lo stesso pattern del middleware generato:
-
-```ts title="packages/api/src/middleware/db.ts"
-import { getPrisma } from ':my-scope/db';
-import { initTRPC } from '@trpc/server';
-
-export interface IDbContext {
-  db: Awaited<ReturnType<typeof getPrisma>>;
-}
-
-export const createDbPlugin = () => {
-  const t = initTRPC.context<IDbContext>().create();
-  return t.procedure.use(async (opts) => {
-    const db = await getPrisma();
-    return opts.next({
-      ctx: {
-        ...opts.ctx,
-        db,
-      },
-    });
-  });
-};
-```
-
-Quindi concatenalo su una procedura base nella tua inizializzazione tRPC:
-
-```ts title="packages/api/src/init.ts"
-import { createDbPlugin } from './middleware/db.js';
-
-export const dbProcedure = publicProcedure.concat(createDbPlugin());
-```
-
-Le procedure costruite su `dbProcedure` ricevono `db` attraverso il contesto senza dover importare o chiamare `getPrisma()` direttamente:
-
-```ts title="packages/api/src/procedures/list-users.ts"
-import { dbProcedure } from '../init.js';
-import { ListUsersOutputSchema } from '../schema/index.js';
-
-export const listUsers = dbProcedure
-  .output(ListUsersOutputSchema)
-  .query(async ({ ctx: { db } }) => {
-    return db.user.findMany({ orderBy: { id: 'asc' } });
-  });
-```
-
-:::note
-Consulta la <Link path="/guides/trpc">guida del generatore `ts#trpc-api`</Link> per maggiori dettagli sul pattern middleware.
-
-:::
+- <Link path="guides/connection/trpc-rdb">API tRPC → Database Relazionale</Link>
+- <Link path="guides/connection/smithy-rdb">API Smithy → Database Relazionale</Link>
+- <Link path="guides/connection/ts-strands-agent-rdb">Agente TypeScript Strands → Database Relazionale</Link>
+- <Link path="guides/connection/ts-mcp-server-rdb">Server MCP → Database Relazionale</Link>
 
 ## Deployment del Database
 
@@ -288,7 +233,7 @@ Il modulo Terraform viene creato in `common/terraform`. Esempio di utilizzo:
 module "my_database" {
   source = "../../common/terraform/src/app/dbs/my-database"
 
-  vpc_id             = module.vpc.vpc_id
+  vpc_id              = module.vpc.vpc_id
   database_subnet_ids = module.vpc.private_isolated_subnet_ids
   lambda_subnet_ids   = module.vpc.private_subnet_ids
 
@@ -387,8 +332,8 @@ Passa gli output del modulo database nel tuo modulo di compute in modo che possa
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
-  source             = "../../common/terraform/src/app/dbs/my-database"
-  vpc_id             = module.vpc.vpc_id
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
   database_subnet_ids = module.vpc.private_isolated_subnet_ids
   lambda_subnet_ids   = module.vpc.private_subnet_ids
 }
@@ -440,7 +385,7 @@ RDS Proxy è abilitato per impostazione predefinita ma comporta costi aggiuntivi
 
 #### Disabilitare RDS Proxy  
 
-Puoi disabilitare il proxy RDS come segue:
+Puoi disabilitare il proxy RDS come segue:  
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -800,3 +745,4 @@ Fai attenzione con le attività che durano più di 15 minuti. Se il client MySQL
 Per attività di lunga durata come job batch o migrazioni di dati, chiama `getPrisma()` all'inizio di ogni unità di lavoro piuttosto che una volta per l'intera operazione. Poiché `getPrisma()` crea sempre un client nuovo e recupera un nuovo token IAM per MySQL, questo garantisce che ogni connessione si autentichi con un token valido.
 
 </OptionFilter>
+

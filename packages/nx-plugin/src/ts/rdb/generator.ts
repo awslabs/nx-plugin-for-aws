@@ -16,6 +16,7 @@ import {
 import { TsRdbGeneratorSchema } from './schema';
 import {
   addDependencyToTargetIfNotPresent,
+  addGeneratorMetadata,
   NxGeneratorInfo,
   getGeneratorInfo,
 } from '../../utils/nx';
@@ -209,6 +210,9 @@ export const tsRdbGenerator = async (
   }
   addDependencyToTargetIfNotPresent(projectConfig, 'compile', 'generate');
   updateProjectConfiguration(tree, fullyQualifiedName, projectConfig);
+  addGeneratorMetadata(tree, fullyQualifiedName, TS_RDB_GENERATOR_INFO, {
+    engine: options.engine,
+  });
 
   await sharedConstructsGenerator(tree, { iacProvider });
   await addRdbInfra(tree, {

@@ -1,0 +1,162 @@
+---
+title: Servidor MCP a Base de Datos Relacional
+description: Conectar un Servidor MCP de TypeScript a una Base de Datos Relacional
+when:
+  sourceType: ts#mcp-server
+  targetType: ts#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+El generador `connection` conecta un <Link path="guides/ts-mcp-server">Servidor MCP de TypeScript</Link> a un proyecto de <Link path="guides/ts-rdb">Base de Datos Relacional</Link>, haciendo que un cliente Prisma esté disponible dentro de `createServer` y sus puntos de entrada de transporte.
+
+## Requisitos Previos
+
+Antes de usar este generador, asegúrate de tener:
+
+1. Un proyecto <Link path="guides/ts-mcp-server">`ts#mcp-server`</Link>
+2. Un proyecto <Link path="guides/ts-rdb">`ts#rdb`</Link>
+
+## Uso
+
+### Ejecutar el Generador
+
+<RunGenerator generator="connection" />
+
+Selecciona tu proyecto de servidor MCP como origen y tu proyecto de base de datos relacional como destino. Si el proyecto contiene múltiples componentes de servidor MCP, especifica `sourceComponent` para desambiguar.
+
+### Opciones
+
+<GeneratorParameters generator="connection" />
+
+## Salida del Generador
+
+El generador modifica tres archivos en el directorio de origen de tu servidor MCP:
+
+<FileTree>
+
+- packages/my-service/src/my-mcp
+  - server.ts `createServer` actualizado para aceptar el parámetro `{ db }`
+  - http.ts Cliente Prisma creado antes de `const server = createServer({ db })`
+  - stdio.ts Cliente Prisma creado antes de `await createServer({ db }).connect(transport)`
+
+</FileTree>
+
+Además, el objetivo `<mcp-server-name>-serve-local` se actualiza para depender del objetivo `serve-local` de la base de datos.
+
+## Cómo Funciona
+
+### Definición del Servidor
+
+`createServer` recibe el cliente Prisma como parámetro para que permanezca síncrono y pueda pasar el cliente a herramientas y recursos:
+
+```ts title="packages/my-service/src/my-mcp/server.ts" {1,4,6}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+export const createServer = ({
+  myDb,
+}: {
+  myDb: Awaited<ReturnType<typeof getMyDb>>;
+}) => {
+  const server = new McpServer({ name: 'my-service', version: '1.0.0' });
+  // register tools/resources that use myDb
+  return server;
+};
+```
+
+### Transporte HTTP
+
+El cliente Prisma se crea dentro del manejador de solicitudes, antes de la llamada a `createServer`:
+
+```ts title="packages/my-service/src/my-mcp/http.ts" {1,5,6}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+app.post('/mcp', async (req, res) => {
+  try {
+    const myDb = await getMyDb();
+    const server = createServer({ myDb });
+    // ...
+  }
+});
+```
+
+### Transporte Stdio
+
+El mismo patrón se aplica al punto de entrada del transporte stdio:
+
+```ts title="packages/my-service/src/my-mcp/stdio.ts" {1,5,6}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+export const startMcpServer = async () => {
+  const transport = new StdioServerTransport();
+  const myDb = await getMyDb();
+  await createServer({ myDb }).connect(transport);
+};
+```
+
+## Múltiples Bases de Datos
+
+Ejecutar el generador nuevamente con un destino diferente agrega la segunda base de datos junto a la primera. Ambas se pasan a `createServer` juntas:
+
+```ts title="packages/my-service/src/my-mcp/http.ts"
+const postgresDb = await getPostgresDb();
+const mySqlDb = await getMySqlDb();
+const server = createServer({ postgresDb, mysqlDb });
+```
+
+## Infraestructura
+
+El constructo del servidor MCP generado implementa `IGrantable` e `IConnectable`, por lo que puedes otorgar acceso de red e IAM a la base de datos directamente en el constructo.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+const myMcpServer = new MyMcpServer(this, 'MyMcpServer', { vpc, ... });
+
+db.allowDefaultPortFrom(myMcpServer);
+db.grantConnect(myMcpServer);
+```
+
+`allowDefaultPortFrom` abre la regla del grupo de seguridad para que el tiempo de ejecución del servidor MCP pueda alcanzar el puerto de la base de datos. `grantConnect` otorga el permiso IAM `rds-db:connect` al rol de ejecución del servidor.
+
+</Fragment>
+<Fragment slot="terraform">
+
+Pasa las salidas del módulo de base de datos a tu módulo de servidor MCP para que pueda alcanzar la base de datos y leer su configuración de tiempo de ejecución:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+}
+
+module "my_mcp_server" {
+  source = "../../common/terraform/src/app/mcp-servers/my-mcp-server"
+
+  appconfig_application_id     = module.my_database.appconfig_application_id
+  database_cluster_resource_id = module.my_database.cluster_resource_id
+  database_runtime_user        = module.my_database.database_runtime_user
+  database_security_group_id   = module.my_database.security_group_id
+  database_port                = module.my_database.cluster_port
+}
+```
+
+Asegúrate de que el rol de ejecución del servidor MCP tenga el permiso `rds-db:connect` y que su grupo de seguridad pueda alcanzar el grupo de seguridad de la base de datos en el puerto de la base de datos.
+
+</Fragment>
+</Infrastructure>
+
+## Desarrollo Local
+
+<NxCommands commands={["<mcp-server-name>-serve-local <project-name>"]} />
+
+Esto inicia el servidor MCP y todas las bases de datos conectadas. La variable de entorno `SERVE_LOCAL=true` hace que cada cliente Prisma se conecte a su base de datos Docker local en lugar de Aurora.

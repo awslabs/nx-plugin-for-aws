@@ -1,0 +1,123 @@
+---
+title: tRPC API からリレーショナルデータベースへの接続
+description: tRPC API をリレーショナルデータベースに接続する
+when:
+  sourceType: ts#trpc-api
+  targetType: ts#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Snippet from '@components/snippet.astro';
+
+`connection` ジェネレーターは、<Link path="guides/trpc">tRPC API</Link> を <Link path="guides/ts-rdb">リレーショナルデータベース</Link> プロジェクトに接続し、プロシージャコンテキストで Prisma クライアントを利用できるようにする型安全な tRPC ミドルウェアプラグインを生成します。
+
+## 前提条件
+
+このジェネレーターを使用する前に、以下を用意してください：
+
+1. <Link path="guides/trpc">`ts#trpc-api`</Link> プロジェクト
+2. <Link path="guides/ts-rdb">`ts#rdb`</Link> プロジェクト
+
+## 使用方法
+
+### ジェネレーターの実行
+
+<RunGenerator generator="connection" />
+
+tRPC API プロジェクトをソースとして選択し、リレーショナルデータベースプロジェクトをターゲットとして選択します。
+
+### オプション
+
+<GeneratorParameters generator="connection" />
+
+## ジェネレーターの出力
+
+ジェネレーターは、tRPC API プロジェクト内にミドルウェアファイルを作成します：
+
+<FileTree>
+
+- packages/api/src
+  - middleware
+    - \<db-name>.ts プロシージャコンテキストで Prisma クライアントを公開する tRPC プラグイン
+
+</FileTree>
+
+さらに、tRPC API の `serve-local` ターゲットを更新して、ローカル実行時にデータベースを自動的に起動するようにします。
+
+## ミドルウェアの使用
+
+### プラグインの登録
+
+生成されたプラグインを tRPC ルーターに追加して、それを使用するすべてのプロシージャがデータベースにアクセスできるようにします：
+
+```ts title="packages/api/src/router.ts" {2,5}
+import { t } from './init.js';
+import { createMyDbPlugin } from './middleware/my-db.js';
+
+export const authenticatedProcedure = t.procedure
+  .concat(createMyDbPlugin());
+```
+
+### プロシージャ内でのデータベースへのアクセス
+
+プラグインは `IMyDbContext` をプロシージャコンテキストにマージし、`myDb` をオプショナルプロパティとして利用可能にします：
+
+```ts title="packages/api/src/procedures/users.ts" {8,12}
+import { z } from 'zod';
+import { authenticatedProcedure } from '../router.js';
+
+export const listUsers = authenticatedProcedure
+  .output(z.array(z.object({ id: z.string(), name: z.string() })))
+  .query(async ({ ctx }) => {
+    // ctx.myDb は Prisma クライアント — Awaited<ReturnType<typeof getPrisma>> として型付けされています
+    return await ctx.myDb!.user.findMany();
+  });
+```
+
+### MySQL: 各リクエスト後の切断
+
+ターゲットデータベースが MySQL エンジンを使用している場合、生成されたミドルウェアは `opts.next()` を `try/finally` ブロックでラップし、`$disconnect()` を呼び出します：
+
+```ts title="packages/api/src/middleware/my-db.ts" {6}
+return t.procedure.use(async (opts) => {
+  const myDb = await getPrisma();
+  try {
+    return await opts.next({ ctx: { ...opts.ctx, myDb } });
+  } finally {
+    await myDb.$disconnect();
+  }
+});
+```
+
+これは、MySQL アダプターがクエリ後に Node.js イベントループを開いたままにする問題に対処します。これにより、Lambda がストリーミングレスポンスをフラッシュできなくなります。`finally` で切断することでイベントループが解放され、レスポンスが完了できるようになります。詳細については、<Link path="guides/ts-rdb#mysql-api-gateway-streaming-mode">MySQL: API Gateway ストリーミングモード</Link> を参照してください。
+
+PostgreSQL ではこれは不要です — そのアダプターは `allowExitOnIdle: true` で設定されたコネクションプールを使用します。
+
+:::caution[MySQL: IAM トークンの有効期限]
+RDS IAM トークンは **15 分** 後に期限切れになります。MySQL アダプターは接続時にトークンをキャプチャします。Lambda がトークンの有効期限が切れるまで十分長くウォーム状態を保つと、新しい接続試行が失敗する可能性があります。接続エラーをチェックし、`getPrisma()` を再度呼び出して新しいトークンを持つ新しいクライアントを取得してください。詳細と回避策については、<Link path="guides/ts-rdb#mysql-iam-token-expiry">MySQL: IAM トークンの有効期限</Link> を参照してください。
+:::
+
+### 複数のデータベース
+
+異なるターゲットでジェネレーターを再度実行することで、追加のデータベースを接続できます。各データベースは独自のプラグインとコンテキストインターフェースを取得します：
+
+```ts title="packages/api/src/router.ts"
+export const dbProcedure = t.procedure
+  .concat(createPostgresDbPlugin())
+  .concat(createMySqlDbPlugin());
+```
+
+## インフラストラクチャ
+
+<Snippet name="connection/rdb-api-infrastructure" parentHeading="Infrastructure" />
+
+## ローカル開発
+
+ジェネレーターは、tRPC API の `serve-local` ターゲットがデータベースの `serve-local` ターゲットに依存するように設定するため、以下を実行すると：
+
+<NxCommands commands={["serve-local <api-project-name>"]} />
+
+API と一緒にローカルデータベースが自動的に起動されます.

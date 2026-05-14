@@ -1,0 +1,123 @@
+---
+title: API tRPC vers Base de Données Relationnelle
+description: Connecter une API tRPC à une Base de Données Relationnelle
+when:
+  sourceType: ts#trpc-api
+  targetType: ts#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Snippet from '@components/snippet.astro';
+
+Le générateur `connection` connecte une <Link path="guides/trpc">API tRPC</Link> à un projet de <Link path="guides/ts-rdb">Base de Données Relationnelle</Link>, en générant un plugin middleware tRPC type-safe qui rend un client Prisma disponible dans le contexte de vos procédures.
+
+## Prérequis
+
+Avant d'utiliser ce générateur, assurez-vous d'avoir :
+
+1. Un projet <Link path="guides/trpc">`ts#trpc-api`</Link>
+2. Un projet <Link path="guides/ts-rdb">`ts#rdb`</Link>
+
+## Utilisation
+
+### Exécuter le Générateur
+
+<RunGenerator generator="connection" />
+
+Sélectionnez votre projet d'API tRPC comme source et votre projet de base de données relationnelle comme cible.
+
+### Options
+
+<GeneratorParameters generator="connection" />
+
+## Sortie du Générateur
+
+Le générateur crée un fichier middleware dans votre projet d'API tRPC :
+
+<FileTree>
+
+- packages/api/src
+  - middleware
+    - \<db-name>.ts Plugin tRPC exposant le client Prisma dans le contexte de procédure
+
+</FileTree>
+
+De plus, il met à jour la cible `serve-local` de votre API tRPC pour démarrer automatiquement la base de données lors de l'exécution locale.
+
+## Utilisation du Middleware
+
+### Enregistrer le Plugin
+
+Ajoutez le plugin généré à votre routeur tRPC afin que toutes les procédures qui l'utilisent aient accès à la base de données :
+
+```ts title="packages/api/src/router.ts" {2,5}
+import { t } from './init.js';
+import { createMyDbPlugin } from './middleware/my-db.js';
+
+export const authenticatedProcedure = t.procedure
+  .concat(createMyDbPlugin());
+```
+
+### Accéder à la Base de Données dans les Procédures
+
+Le plugin fusionne `IMyDbContext` dans le contexte de votre procédure, rendant `myDb` disponible en tant que propriété optionnelle :
+
+```ts title="packages/api/src/procedures/users.ts" {8,12}
+import { z } from 'zod';
+import { authenticatedProcedure } from '../router.js';
+
+export const listUsers = authenticatedProcedure
+  .output(z.array(z.object({ id: z.string(), name: z.string() })))
+  .query(async ({ ctx }) => {
+    // ctx.myDb est le client Prisma — typé comme Awaited<ReturnType<typeof getPrisma>>
+    return await ctx.myDb!.user.findMany();
+  });
+```
+
+### MySQL : Déconnexion Après Chaque Requête
+
+Lorsque la base de données cible utilise le moteur MySQL, le middleware généré enveloppe `opts.next()` dans un bloc `try/finally` qui appelle `$disconnect()` :
+
+```ts title="packages/api/src/middleware/my-db.ts" {6}
+return t.procedure.use(async (opts) => {
+  const myDb = await getPrisma();
+  try {
+    return await opts.next({ ctx: { ...opts.ctx, myDb } });
+  } finally {
+    await myDb.$disconnect();
+  }
+});
+```
+
+Cela résout le problème de l'adaptateur MySQL qui maintient la boucle d'événements Node.js ouverte après une requête, ce qui empêcherait autrement Lambda de vider les réponses en streaming. La déconnexion dans `finally` libère la boucle d'événements afin que la réponse puisse se terminer. Voir <Link path="guides/ts-rdb#mysql-api-gateway-streaming-mode">MySQL : Mode Streaming API Gateway</Link> pour plus de détails.
+
+PostgreSQL ne nécessite pas cela — son adaptateur utilise un pool de connexions configuré avec `allowExitOnIdle: true`.
+
+:::caution[MySQL : Expiration du Token IAM]
+Les tokens IAM RDS expirent après **15 minutes**. L'adaptateur MySQL capture le token au moment de la connexion. Si votre Lambda reste actif suffisamment longtemps pour que le token expire, les nouvelles tentatives de connexion peuvent échouer. Vérifiez les erreurs de connexion et appelez `getPrisma()` à nouveau pour obtenir un nouveau client avec un nouveau token. Voir <Link path="guides/ts-rdb#mysql-iam-token-expiry">MySQL : Expiration du Token IAM</Link> pour plus de détails et des solutions de contournement.
+:::
+
+### Bases de Données Multiples
+
+Vous pouvez connecter des bases de données supplémentaires en exécutant à nouveau le générateur avec une cible différente. Chaque base de données obtient son propre plugin et interface de contexte :
+
+```ts title="packages/api/src/router.ts"
+export const dbProcedure = t.procedure
+  .concat(createPostgresDbPlugin())
+  .concat(createMySqlDbPlugin());
+```
+
+## Infrastructure
+
+<Snippet name="connection/rdb-api-infrastructure" parentHeading="Infrastructure" />
+
+## Développement Local
+
+Le générateur configure la cible `serve-local` de votre API tRPC pour dépendre de la cible `serve-local` de la base de données, donc l'exécution de :
+
+<NxCommands commands={["serve-local <api-project-name>"]} />
+
+démarrera automatiquement la base de données locale en même temps que votre API.

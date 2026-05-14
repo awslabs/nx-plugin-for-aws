@@ -171,84 +171,29 @@ model User {
 
 <NxCommands commands={['run <project>:prisma studio']} />
 
-## 从 tRPC API 连接
+## 连接到数据库
 
-虽然本节描述如何从 tRPC API 连接到数据库，但它也可作为在任何其他 TypeScript 项目中使用的参考。
+在任何 TypeScript 项目中，从数据库包导入 `getPrisma` 并调用它以获取类型安全的 Prisma 客户端：
 
-### 在处理程序中使用 Prisma 客户端
-
-从数据库包导入 `getPrisma` 并在处理程序内调用它以获取类型安全的 Prisma 客户端：
-
-```ts title="packages/api/src/procedures/list-users.ts" {8}
+```ts
 import { getPrisma } from ':my-scope/db';
-import { publicProcedure } from '../init.js';
-import { ListUsersOutputSchema } from '../schema/index.js';
 
-export const listUsers = publicProcedure
-  .output(ListUsersOutputSchema)
-  .query(async () => {
-    const prisma = await getPrisma();
-    return prisma.user.findMany({ orderBy: { id: 'asc' } });
-  });
+const prisma = await getPrisma();
+const users = await prisma.user.findMany({ orderBy: { id: 'asc' } });
 ```
 
 `getPrisma()` 返回一个延迟初始化的缓存客户端。在同一 Lambda 执行上下文中的后续调用会重用现有连接池，而不是打开新连接。
 
 Prisma 客户端公开从您的 `prisma/models/` 架构派生的完全类型化模型，为您提供从数据库一直到 API 响应的端到端类型安全。
 
-### 通过中间件注入 Prisma 客户端
+### 连接生成器
 
-与其在每个过程中调用 `getPrisma()`，您还可以在中间件中解析一次并将其附加到 tRPC 上下文，以便所有下游过程可以直接访问它。
+对于特定的项目类型，使用 `connection` 生成器自动连接数据库——它处理导入、上下文注入和本地开发依赖项：
 
-首先，按照生成的中间件的相同模式在 `src/middleware/db.ts` 中定义插件：
-
-```ts title="packages/api/src/middleware/db.ts"
-import { getPrisma } from ':my-scope/db';
-import { initTRPC } from '@trpc/server';
-
-export interface IDbContext {
-  db: Awaited<ReturnType<typeof getPrisma>>;
-}
-
-export const createDbPlugin = () => {
-  const t = initTRPC.context<IDbContext>().create();
-  return t.procedure.use(async (opts) => {
-    const db = await getPrisma();
-    return opts.next({
-      ctx: {
-        ...opts.ctx,
-        db,
-      },
-    });
-  });
-};
-```
-
-然后在 tRPC 初始化中将其连接到基础过程：
-
-```ts title="packages/api/src/init.ts"
-import { createDbPlugin } from './middleware/db.js';
-
-export const dbProcedure = publicProcedure.concat(createDbPlugin());
-```
-
-基于 `dbProcedure` 构建的过程通过上下文接收 `db`，无需自己导入或调用 `getPrisma()`：
-
-```ts title="packages/api/src/procedures/list-users.ts"
-import { dbProcedure } from '../init.js';
-import { ListUsersOutputSchema } from '../schema/index.js';
-
-export const listUsers = dbProcedure
-  .output(ListUsersOutputSchema)
-  .query(async ({ ctx: { db } }) => {
-    return db.user.findMany({ orderBy: { id: 'asc' } });
-  });
-```
-
-:::note
-有关中间件模式的更多详细信息，请参阅 <Link path="/zh/guides/trpc">`ts#trpc-api` 生成器指南</Link>。
-
-:::
+- <Link path="guides/connection/trpc-rdb">tRPC API → 关系型数据库</Link>
+- <Link path="guides/connection/smithy-rdb">Smithy API → 关系型数据库</Link>
+- <Link path="guides/connection/ts-strands-agent-rdb">TypeScript Strands Agent → 关系型数据库</Link>
+- <Link path="guides/connection/ts-mcp-server-rdb">MCP Server → 关系型数据库</Link>
 
 ## 部署您的数据库
 

@@ -1,0 +1,72 @@
+---
+title: RDB API インフラストラクチャ
+---
+import Infrastructure from '@components/infrastructure.astro';
+
+実行時にAPIがデータベースに接続できるようにするには、API Lambda関数をデータベースと同じVPCにデプロイし、ネットワークおよびIAMアクセスを付与する必要があります。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+アプリケーションスタックで、APIをデータベースと同じVPCにデプロイし、`allowDefaultPortFrom`と`grantConnect`を呼び出して、ネットワークパスを開き、各Lambdaハンドラーに IAM `rds-db:connect`権限を付与します：
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+
+const api = new MyApi(this, 'Api', {
+  integrations: MyApi.defaultIntegrations(this)
+    .withDefaultOptions({
+      vpc,
+      vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+    })
+    .build(),
+});
+
+Object.entries(api.integrations).forEach(([operation, integration]) => {
+  db.allowDefaultPortFrom(integration.handler, `Allow ${operation} to connect to the database`);
+  db.grantConnect(integration.handler);
+});
+```
+
+API Lambda関数は、プライベート分離サブネットではなく、**エグレス付きプライベートサブネット**にデプロイしてください。実行時に、`getPrisma()`はAWS AppConfigからデータベース接続の詳細を取得しますが、これはアウトバウンドインターネットアクセスを必要とするパブリックAWSサービスエンドポイントです。
+
+:::note
+この例では、API内のすべてのハンドラーにアクセスを付与していますが、一部のハンドラーのみがアクセスを必要とする場合は、個別に設定する方が良いでしょう。
+:::
+
+</Fragment>
+<Fragment slot="terraform">
+
+データベースモジュールの出力をAPIモジュールに渡して、データベースに到達し、その実行時設定を読み取れるようにします：
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
+}
+
+module "api" {
+  source             = "..."
+  vpc_id             = module.vpc.vpc_id
+  private_subnet_ids = module.vpc.private_subnet_ids
+
+  appconfig_application_id     = module.my_database.appconfig_application_id
+  database_cluster_resource_id = module.my_database.cluster_resource_id
+  database_runtime_user        = module.my_database.database_runtime_user
+  database_security_group_id   = module.my_database.security_group_id
+  database_port                = module.my_database.cluster_port
+
+  environment_variables = {
+    RUNTIME_CONFIG_APP_ID = module.my_database.appconfig_application_id
+  }
+}
+```
+
+API Lambda関数は、プライベート分離サブネットではなく、**エグレス付きプライベートサブネット**にデプロイしてください。API LambdaロールがIAM `rds-db:connect`権限を持ち、そのセキュリティグループがデータベースポートでデータベースセキュリティグループに到達できることを確認してください。
+
+</Fragment>
+</Infrastructure>

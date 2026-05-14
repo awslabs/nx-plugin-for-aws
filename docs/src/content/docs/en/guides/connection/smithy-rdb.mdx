@@ -1,0 +1,157 @@
+---
+title: Smithy API to Relational Database
+description: Connect a Smithy API to a Relational Database
+when:
+  sourceType: smithy
+  targetType: ts#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Snippet from '@components/snippet.astro';
+
+The `connection` generator wires a <Link path="guides/ts-smithy-api">Smithy API</Link> to a <Link path="guides/ts-rdb">Relational Database</Link> project, injecting a Prisma client into the service context so all operation implementations can access the database.
+
+## Prerequisites
+
+Before using this generator, ensure you have:
+
+1. A <Link path="guides/ts-smithy-api">`ts#smithy-api`</Link> project (TypeScript backend)
+2. A <Link path="guides/ts-rdb">`ts#rdb`</Link> project
+
+## Usage
+
+### Run the Generator
+
+<RunGenerator generator="connection" />
+
+Select your Smithy API backend project as the source and your relational database project as the target.
+
+### Options
+
+<GeneratorParameters generator="connection" />
+
+## Generator Output
+
+The generator modifies three existing files in your Smithy API backend:
+
+<FileTree>
+
+- packages/api/src
+  - context.ts `db` property added to `ServiceContext`
+  - handler.ts Prisma client created inside `lambdaHandler`, passed to `serviceHandler.handle`
+  - local-server.ts Prisma client created inside the request handler, passed to `serviceHandler.handle`
+
+</FileTree>
+
+Additionally, it updates the API's `serve-local` target to start the database automatically.
+
+## How It Works
+
+### ServiceContext
+
+The generator adds a typed `db` property to `ServiceContext` in `context.ts`:
+
+```ts title="packages/api/src/context.ts" {1,7}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+export interface ServiceContext {
+  tracer: Tracer;
+  logger: Logger;
+  metrics: Metrics;
+  myDb: Awaited<ReturnType<typeof getMyDb>>;
+}
+```
+
+### Lambda Handler
+
+The Prisma client is instantiated inside `lambdaHandler` and passed through the service context:
+
+```ts title="packages/api/src/handler.ts" {1,10}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+export const lambdaHandler = async (event: APIGatewayProxyEvent) => {
+  const httpRequest = convertEvent(event);
+  const myDb = await getMyDb();
+  const httpResponse = await serviceHandler.handle(httpRequest, {
+    tracer,
+    logger,
+    metrics,
+    myDb,
+  });
+  return convertVersion1Response(httpResponse);
+};
+```
+
+### Using the Database in Operations
+
+Access `db` from the context in your operation implementations:
+
+```ts title="packages/api/src/operations/list-users.ts" {8}
+import { ListUsersOperationInput, ListUsersOperationOutput } from '../generated/ssdk/index.js';
+import { ServiceContext } from '../context.js';
+
+export const listUsers = async (
+  input: ListUsersOperationInput,
+  ctx: ServiceContext,
+): Promise<ListUsersOperationOutput> => {
+  const users = await ctx.myDb.user.findMany();
+  return { users };
+};
+```
+
+## Multiple Databases
+
+Running the generator again with a different target adds the second database alongside the first. Both clients are added to `ServiceContext` and instantiated in `handler.ts`:
+
+```ts title="packages/api/src/context.ts" {5,6}
+export interface ServiceContext {
+  tracer: Tracer;
+  logger: Logger;
+  metrics: Metrics;
+  myDb: Awaited<ReturnType<typeof getMyDb>>;
+  otherDb: Awaited<ReturnType<typeof getOtherDb>>;
+}
+```
+
+```ts title="packages/api/src/handler.ts" {1,2,7,8}
+const myDb = await getMyDb();
+const otherDb = await getOtherDb();
+const httpResponse = await serviceHandler.handle(httpRequest, {
+  tracer,
+  logger,
+  metrics,
+  myDb,
+  otherDb,
+});
+```
+
+## Infrastructure
+
+<Snippet name="connection/rdb-api-infrastructure" parentHeading="Infrastructure" />
+
+## Local Development
+
+The generator applies the same Prisma client injection inside the request handler in `local-server.ts`:
+
+```ts title="packages/api/src/local-server.ts" {1,5,10}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+const server = createServer(async function (req, res) {
+  const httpRequest = convertRequest(req);
+  const myDb = await getMyDb();
+  const httpResponse = await serviceHandler.handle(httpRequest, {
+    tracer,
+    logger,
+    metrics,
+    myDb,
+  });
+  return writeResponse(httpResponse, res);
+});
+```
+
+<NxCommands commands={["serve-local <api-project-name>"]} />
+
+This starts both the API and the local database. The `SERVE_LOCAL=true` environment variable is set automatically, so the Prisma client connects to the local Docker database instead of Aurora.

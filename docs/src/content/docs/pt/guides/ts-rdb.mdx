@@ -171,84 +171,29 @@ O alvo `prisma` gerado expõe a CLI do Prisma, então você pode usá-lo para ex
 
 <NxCommands commands={['run <project>:prisma studio']} />
 
-## Conectando a partir de uma API tRPC
+## Conectando ao Banco de Dados
 
-Embora esta seção descreva como conectar ao seu banco de dados a partir de uma API tRPC, ela também serve como referência para uso em qualquer outro projeto TypeScript.
+Em qualquer projeto TypeScript, importe `getPrisma` do seu pacote de banco de dados e chame-o para obter um cliente Prisma com segurança de tipos:
 
-### Usando o Cliente Prisma em Manipuladores
-
-Importe `getPrisma` do seu pacote de banco de dados e chame-o dentro do seu manipulador para obter um cliente Prisma com segurança de tipos:
-
-```ts title="packages/api/src/procedures/list-users.ts" {8}
+```ts
 import { getPrisma } from ':my-scope/db';
-import { publicProcedure } from '../init.js';
-import { ListUsersOutputSchema } from '../schema/index.js';
 
-export const listUsers = publicProcedure
-  .output(ListUsersOutputSchema)
-  .query(async () => {
-    const prisma = await getPrisma();
-    return prisma.user.findMany({ orderBy: { id: 'asc' } });
-  });
+const prisma = await getPrisma();
+const users = await prisma.user.findMany({ orderBy: { id: 'asc' } });
 ```
 
 `getPrisma()` retorna um cliente inicializado preguiçosamente e em cache. Chamadas subsequentes dentro do mesmo contexto de execução Lambda reutilizam o pool de conexões existente em vez de abrir um novo.
 
 O cliente Prisma expõe modelos totalmente tipados derivados do seu esquema `prisma/models/`, fornecendo segurança de tipos de ponta a ponta desde o banco de dados até a resposta da sua API.
 
-### Injetando o Cliente Prisma via Middleware
+### Geradores de Conexão
 
-Em vez de chamar `getPrisma()` em cada procedimento, você também pode resolvê-lo uma vez em um middleware e anexá-lo ao contexto tRPC para que todos os procedimentos downstream possam acessá-lo diretamente.
+Para tipos de projeto específicos, use o gerador `connection` para conectar automaticamente o banco de dados — ele manipula importações, injeção de contexto e dependências de desenvolvimento local:
 
-Primeiro, defina o plugin em `src/middleware/db.ts` seguindo o mesmo padrão do middleware gerado:
-
-```ts title="packages/api/src/middleware/db.ts"
-import { getPrisma } from ':my-scope/db';
-import { initTRPC } from '@trpc/server';
-
-export interface IDbContext {
-  db: Awaited<ReturnType<typeof getPrisma>>;
-}
-
-export const createDbPlugin = () => {
-  const t = initTRPC.context<IDbContext>().create();
-  return t.procedure.use(async (opts) => {
-    const db = await getPrisma();
-    return opts.next({
-      ctx: {
-        ...opts.ctx,
-        db,
-      },
-    });
-  });
-};
-```
-
-Em seguida, concatene-o a um procedimento base na sua inicialização tRPC:
-
-```ts title="packages/api/src/init.ts"
-import { createDbPlugin } from './middleware/db.js';
-
-export const dbProcedure = publicProcedure.concat(createDbPlugin());
-```
-
-Procedimentos construídos em `dbProcedure` recebem `db` através do contexto sem precisar importar ou chamar `getPrisma()`:
-
-```ts title="packages/api/src/procedures/list-users.ts"
-import { dbProcedure } from '../init.js';
-import { ListUsersOutputSchema } from '../schema/index.js';
-
-export const listUsers = dbProcedure
-  .output(ListUsersOutputSchema)
-  .query(async ({ ctx: { db } }) => {
-    return db.user.findMany({ orderBy: { id: 'asc' } });
-  });
-```
-
-:::note
-Consulte o <Link path="/pt/guides/trpc">guia do gerador `ts#trpc-api`</Link> para mais detalhes sobre o padrão de middleware.
-
-:::
+- <Link path="guides/connection/trpc-rdb">API tRPC → Banco de Dados Relacional</Link>
+- <Link path="guides/connection/smithy-rdb">API Smithy → Banco de Dados Relacional</Link>
+- <Link path="guides/connection/ts-strands-agent-rdb">Agente TypeScript Strands → Banco de Dados Relacional</Link>
+- <Link path="guides/connection/ts-mcp-server-rdb">Servidor MCP → Banco de Dados Relacional</Link>
 
 ## Implantando seu Banco de Dados
 
@@ -288,7 +233,7 @@ O módulo Terraform é criado em `common/terraform`. Exemplo de uso:
 module "my_database" {
   source = "../../common/terraform/src/app/dbs/my-database"
 
-  vpc_id             = module.vpc.vpc_id
+  vpc_id              = module.vpc.vpc_id
   database_subnet_ids = module.vpc.private_isolated_subnet_ids
   lambda_subnet_ids   = module.vpc.private_subnet_ids
 
@@ -387,8 +332,8 @@ Passe as saídas do módulo de banco de dados para o seu módulo de computação
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
-  source             = "../../common/terraform/src/app/dbs/my-database"
-  vpc_id             = module.vpc.vpc_id
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
   database_subnet_ids = module.vpc.private_isolated_subnet_ids
   lambda_subnet_ids   = module.vpc.private_subnet_ids
 }
@@ -440,7 +385,7 @@ O RDS Proxy está habilitado por padrão, mas incorre em cobranças adicionais a
 
 #### Desabilitar RDS Proxy  
 
-Você pode desabilitar o proxy RDS da seguinte forma:
+Você pode desabilitar o proxy RDS da seguinte forma:  
 
 <Infrastructure>
 <Fragment slot="cdk">

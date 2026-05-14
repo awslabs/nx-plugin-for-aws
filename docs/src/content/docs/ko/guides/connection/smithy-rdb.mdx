@@ -1,0 +1,131 @@
+---
+title: Smithy API를 관계형 데이터베이스에 연결
+description: Smithy API를 관계형 데이터베이스에 연결합니다
+when:
+  sourceType: smithy
+  targetType: ts#rdb
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Snippet from '@components/snippet.astro';
+
+`connection` 생성기는 <Link path="guides/ts-smithy-api">Smithy API</Link>를 <Link path="guides/ts-rdb">관계형 데이터베이스</Link> 프로젝트에 연결하여, 모든 작업 구현이 데이터베이스에 액세스할 수 있도록 서비스 컨텍스트에 Prisma 클라이언트를 주입합니다.
+
+## 사전 요구 사항
+
+이 생성기를 사용하기 전에 다음이 필요합니다:
+
+1. <Link path="guides/ts-smithy-api">`ts#smithy-api`</Link> 프로젝트 (TypeScript 백엔드)
+2. <Link path="guides/ts-rdb">`ts#rdb`</Link> 프로젝트
+
+## 사용법
+
+### 생성기 실행
+
+<RunGenerator generator="connection" />
+
+Smithy API 백엔드 프로젝트를 소스로 선택하고 관계형 데이터베이스 프로젝트를 대상으로 선택합니다.
+
+### 옵션
+
+<GeneratorParameters generator="connection" />
+
+## 생성기 출력
+
+생성기는 Smithy API 백엔드의 기존 파일 세 개를 수정합니다:
+
+<FileTree>
+
+- packages/api/src
+  - context.ts `ServiceContext`에 `db` 속성 추가
+  - handler.ts `lambdaHandler` 내부에서 Prisma 클라이언트 생성, `serviceHandler.handle`로 전달
+  - local-server.ts 요청 핸들러 내부에서 Prisma 클라이언트 생성, `serviceHandler.handle`로 전달
+
+</FileTree>
+
+또한 API의 `serve-local` 타겟을 업데이트하여 데이터베이스를 자동으로 시작합니다.
+
+## 작동 방식
+
+### ServiceContext
+
+생성기는 `context.ts`의 `ServiceContext`에 타입이 지정된 `db` 속성을 추가합니다:
+
+```ts title="packages/api/src/context.ts" {1,7}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+export interface ServiceContext {
+  tracer: Tracer;
+  logger: Logger;
+  metrics: Metrics;
+  myDb: Awaited<ReturnType<typeof getMyDb>>;
+}
+```
+
+### Lambda Handler
+
+Prisma 클라이언트는 `lambdaHandler` 내부에서 인스턴스화되고 서비스 컨텍스트를 통해 전달됩니다:
+
+```ts title="packages/api/src/handler.ts" {1,10}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+export const lambdaHandler = async (event: APIGatewayProxyEvent) => {
+  const httpRequest = convertEvent(event);
+  const myDb = await getMyDb();
+  const httpResponse = await serviceHandler.handle(httpRequest, {
+    tracer,
+    logger,
+    metrics,
+    myDb,
+  });
+  return convertVersion1Response(httpResponse);
+};
+```
+
+### 작업에서 데이터베이스 사용
+
+작업 구현에서 컨텍스트로부터 `db`에 액세스합니다:
+
+```ts title="packages/api/src/operations/list-users.ts" {8}
+import { ListUsersOperationInput, ListUsersOperationOutput } from '../generated/ssdk/index.js';
+import { ServiceContext } from '../context.js';
+
+export const listUsers = async (
+  input: ListUsersOperationInput,
+  ctx: ServiceContext,
+): Promise<ListUsersOperationOutput> => {
+  const users = await ctx.myDb.user.findMany();
+  return { users };
+};
+```
+
+## 인프라
+
+<Snippet name="connection/rdb-api-infrastructure" parentHeading="Infrastructure" />
+
+## 로컬 개발
+
+생성기는 `local-server.ts`의 요청 핸들러 내부에 동일한 Prisma 클라이언트 주입을 적용합니다:
+
+```ts title="packages/api/src/local-server.ts" {1,5,10}
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+
+const server = createServer(async function (req, res) {
+  const httpRequest = convertRequest(req);
+  const myDb = await getMyDb();
+  const httpResponse = await serviceHandler.handle(httpRequest, {
+    tracer,
+    logger,
+    metrics,
+    myDb,
+  });
+  return writeResponse(httpResponse, res);
+});
+```
+
+<NxCommands commands={["serve-local <api-project-name>"]} />
+
+이렇게 하면 API와 로컬 데이터베이스가 모두 시작됩니다. `SERVE_LOCAL=true` 환경 변수가 자동으로 설정되므로 Prisma 클라이언트는 Aurora 대신 로컬 Docker 데이터베이스에 연결됩니다.

@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { existsSync, rmSync } from 'fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { ensureDirSync } from 'fs-extra';
 import { buildCreateNxWorkspaceCommand, runCLI, tmpProjPath } from '../utils';
 
@@ -33,8 +33,61 @@ describe('smoke test - rdb', () => {
         const projectRoot = `${targetDir}/e2e-test`;
         const opts = { cwd: projectRoot, env: { NX_DAEMON: 'false' } };
 
+        // RDB project name follows kebab-case: PostgreSQLDb → postgre-sqldb, MySQLDb → my-sqldb
+        const rdbProjectName =
+          engine === 'PostgreSQL' ? 'postgre-sqldb' : 'my-sqldb';
+        const rdbProject = `@e2e-test/${rdbProjectName}`;
+
         await runCLI(
           `generate @aws/nx-plugin:ts#rdb --name=${engine}Db --service=Aurora --engine=${engine} --ormFramework=Prisma --iacProvider=${iacProvider} --no-interactive`,
+          opts,
+        );
+
+        // Source projects for connection testing
+        await runCLI(
+          `generate @aws/nx-plugin:ts#trpc-api --name=my-api --computeType=ServerlessApiGatewayRestApi --no-interactive`,
+          opts,
+        );
+        await runCLI(
+          `generate @aws/nx-plugin:ts#smithy-api --name=my-smithy-api --no-interactive`,
+          opts,
+        );
+        await runCLI(
+          `generate @aws/nx-plugin:ts#project --name=agents --no-interactive`,
+          opts,
+        );
+        await runCLI(
+          `generate @aws/nx-plugin:ts#strands-agent --project=agents --name=http-agent --computeType=None --no-interactive`,
+          opts,
+        );
+        await runCLI(
+          `generate @aws/nx-plugin:ts#strands-agent --project=agents --name=a2a-agent --protocol=A2A --computeType=None --no-interactive`,
+          opts,
+        );
+        await runCLI(
+          `generate @aws/nx-plugin:ts#mcp-server --project=agents --name=my-mcp --computeType=None --no-interactive`,
+          opts,
+        );
+
+        // RDB connections
+        await runCLI(
+          `generate @aws/nx-plugin:connection --sourceProject=my-api --targetProject=${rdbProject} --no-interactive`,
+          opts,
+        );
+        await runCLI(
+          `generate @aws/nx-plugin:connection --sourceProject=my-smithy-api --targetProject=${rdbProject} --no-interactive`,
+          opts,
+        );
+        await runCLI(
+          `generate @aws/nx-plugin:connection --sourceProject=agents --sourceComponent=http-agent --targetProject=${rdbProject} --no-interactive`,
+          opts,
+        );
+        await runCLI(
+          `generate @aws/nx-plugin:connection --sourceProject=agents --sourceComponent=a2a-agent --targetProject=${rdbProject} --no-interactive`,
+          opts,
+        );
+        await runCLI(
+          `generate @aws/nx-plugin:connection --sourceProject=agents --sourceComponent=my-mcp --targetProject=${rdbProject} --no-interactive`,
           opts,
         );
 

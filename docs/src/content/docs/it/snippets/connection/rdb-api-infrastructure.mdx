@@ -1,0 +1,73 @@
+---
+title: Infrastruttura API RDB
+---
+import Infrastructure from '@components/infrastructure.astro';
+
+Per consentire alla tua API di connettersi al database a runtime, le funzioni Lambda dell'API devono essere distribuite nello stesso VPC del database e devono avere accesso di rete e IAM.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+Nel tuo stack applicativo, distribuisci l'API nello stesso VPC del database, quindi chiama `allowDefaultPortFrom` e `grantConnect` per aprire il percorso di rete e concedere il permesso IAM `rds-db:connect` a ciascun handler Lambda:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyDatabase } from ':my-scope/common-constructs';
+
+const db = new MyDatabase(this, 'Db', { vpc, ... });
+
+const api = new MyApi(this, 'Api', {
+  integrations: MyApi.defaultIntegrations(this)
+    .withDefaultOptions({
+      vpc,
+      vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+    })
+    .build(),
+});
+
+Object.entries(api.integrations).forEach(([operation, integration]) => {
+  db.allowDefaultPortFrom(integration.handler, `Allow ${operation} to connect to the database`);
+  db.grantConnect(integration.handler);
+});
+```
+
+Distribuisci le funzioni Lambda dell'API in una **subnet privata con egress**, non in una subnet privata isolata. A runtime, `getPrisma()` recupera i dettagli di connessione al database da AWS AppConfig, che è un endpoint pubblico del servizio AWS che richiede accesso internet in uscita.
+
+:::note
+Questo esempio concede l'accesso a tutti gli handler nella tua API, ma se solo alcuni handler necessitano di accesso è meglio configurarli individualmente.
+:::
+
+</Fragment>
+<Fragment slot="terraform">
+
+Passa gli output del modulo database nel tuo modulo API in modo che possa raggiungere il database e leggere la sua configurazione runtime:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_database" {
+  source              = "../../common/terraform/src/app/dbs/my-database"
+  vpc_id              = module.vpc.vpc_id
+  database_subnet_ids = module.vpc.private_isolated_subnet_ids
+  lambda_subnet_ids   = module.vpc.private_subnet_ids
+}
+
+module "api" {
+  source             = "..."
+  vpc_id             = module.vpc.vpc_id
+  private_subnet_ids = module.vpc.private_subnet_ids
+
+  appconfig_application_id     = module.my_database.appconfig_application_id
+  database_cluster_resource_id = module.my_database.cluster_resource_id
+  database_runtime_user        = module.my_database.database_runtime_user
+  database_security_group_id   = module.my_database.security_group_id
+  database_port                = module.my_database.cluster_port
+
+  environment_variables = {
+    RUNTIME_CONFIG_APP_ID = module.my_database.appconfig_application_id
+  }
+}
+```
+
+Distribuisci le funzioni Lambda dell'API in **subnet private con egress**, non in subnet private isolate. Assicurati che il ruolo Lambda dell'API abbia il permesso `rds-db:connect` e che il suo security group possa raggiungere il security group del database sulla porta del database.
+
+</Fragment>
+</Infrastructure>
+
