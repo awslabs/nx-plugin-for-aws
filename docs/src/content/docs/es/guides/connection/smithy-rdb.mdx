@@ -27,7 +27,7 @@ Antes de usar este generador, asegúrate de tener:
 
 <RunGenerator generator="connection" />
 
-Selecciona tu proyecto backend de API Smithy como origen y tu proyecto de base de datos relacional como destino.
+Selecciona tu proyecto de backend de API Smithy como origen y tu proyecto de base de datos relacional como destino.
 
 ### Opciones
 
@@ -40,7 +40,7 @@ El generador modifica tres archivos existentes en tu backend de API Smithy:
 <FileTree>
 
 - packages/api/src
-  - context.ts Propiedad `db` agregada a `ServiceContext`
+  - context.ts propiedad `db` agregada a `ServiceContext`
   - handler.ts Cliente Prisma creado dentro de `lambdaHandler`, pasado a `serviceHandler.handle`
   - local-server.ts Cliente Prisma creado dentro del manejador de solicitudes, pasado a `serviceHandler.handle`
 
@@ -87,7 +87,7 @@ export const lambdaHandler = async (event: APIGatewayProxyEvent) => {
 
 ### Usar la Base de Datos en las Operaciones
 
-Accede a `db` desde el contexto en las implementaciones de tus operaciones:
+Accede a `db` desde el contexto en tus implementaciones de operaciones:
 
 ```ts title="packages/api/src/operations/list-users.ts" {8}
 import { ListUsersOperationInput, ListUsersOperationOutput } from '../generated/ssdk/index.js';
@@ -100,6 +100,32 @@ export const listUsers = async (
   const users = await ctx.myDb.user.findMany();
   return { users };
 };
+```
+
+## Múltiples Bases de Datos
+
+Ejecutar el generador nuevamente con un destino diferente agrega la segunda base de datos junto a la primera. Ambos clientes se agregan a `ServiceContext` y se instancian en `handler.ts`:
+
+```ts title="packages/api/src/context.ts" {5,6}
+export interface ServiceContext {
+  tracer: Tracer;
+  logger: Logger;
+  metrics: Metrics;
+  myDb: Awaited<ReturnType<typeof getMyDb>>;
+  otherDb: Awaited<ReturnType<typeof getOtherDb>>;
+}
+```
+
+```ts title="packages/api/src/handler.ts" {1,2,7,8}
+const myDb = await getMyDb();
+const otherDb = await getOtherDb();
+const httpResponse = await serviceHandler.handle(httpRequest, {
+  tracer,
+  logger,
+  metrics,
+  myDb,
+  otherDb,
+});
 ```
 
 ## Infraestructura

@@ -48,17 +48,18 @@ Additionally, the agent's `<agent-name>-serve-local` target is updated to depend
 
 ## How It Works
 
-The Prisma client is fetched directly inside `getAgent()` rather than threaded through function parameters. This aligns with how the strands-agent runtime propagates session context — `withSessionId` wraps `getAgent` and caches one `Agent` instance per session, so `getPrisma()` is called at most once per session.
+The Prisma client is instantiated inside `getAgent()`. Since the `ts#strands-agent` generator configures a single Agent per session, the client is also reused for the lifetime of the session.
 
 ### Agent Definition
 
 `getAgent` is updated to import and call the Prisma getter at the top of its body:
 
-```ts title="packages/my-service/src/my-agent/agent.ts" {1,5}
+```ts title="packages/my-service/src/my-agent/agent.ts" {1,4}
 import { getPrisma as getMyDb } from ':my-scope/my-db';
 
 export const getAgent = async () => {
   const myDb = await getMyDb();
+  // ...
   return new Agent({ /* use myDb in tools */ });
 };
 ```
@@ -68,13 +69,14 @@ export const getAgent = async () => {
 
 Running the generator again with a different target adds the second database alongside the first:
 
-```ts title="packages/my-service/src/my-agent/agent.ts"
+```ts title="packages/my-service/src/my-agent/agent.ts" {1,2,5,6}
 import { getPrisma as getMyDb } from ':my-scope/my-db';
 import { getPrisma as getOtherDb } from ':my-scope/other-db';
 
 export const getAgent = async () => {
   const myDb = await getMyDb();
   const otherDb = await getOtherDb();
+  // ...
   return new Agent({ /* use both clients in tools */ });
 };
 ```

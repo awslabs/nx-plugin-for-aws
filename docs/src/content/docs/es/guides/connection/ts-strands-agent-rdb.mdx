@@ -12,9 +12,7 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Infrastructure from '@components/infrastructure.astro';
 
-El generador `connection` conecta un <Link path="guides/ts-strands-agent">TypeScript Strands Agent</Link> a un proyecto de <Link path="guides/ts-rdb">Base de Datos Relacional</Link>, haciendo que un cliente Prisma esté disponible durante todo el ciclo de vida de las solicitudes de tu agente.
-
-La estrategia de inyección depende del protocolo del agente — **HTTP** (basado en tRPC) o **A2A** (Agent-to-Agent).
+El generador `connection` conecta un <Link path="guides/ts-strands-agent">TypeScript Strands Agent</Link> a un proyecto de <Link path="guides/ts-rdb">Base de Datos Relacional</Link>, haciendo que un cliente Prisma esté disponible dentro de tu fábrica de agentes.
 
 ## Requisitos Previos
 
@@ -37,129 +35,48 @@ Selecciona tu proyecto Strands Agent como origen y tu proyecto de base de datos 
 
 ## Salida del Generador
 
-Los archivos modificados dependen del protocolo del agente.
-
-**Protocolo HTTP** — modifica cuatro archivos:
+El generador modifica un solo archivo:
 
 <FileTree>
 
 - packages/my-service/src/my-agent
-  - init.ts propiedad `db` agregada a la interfaz `Context`
-  - index.ts `createContext` hecho asíncrono; cliente Prisma creado y devuelto en el contexto
-  - router.ts `db` desestructurado de `opts.ctx` y pasado a `getAgent`
-  - agent.ts `getAgent` actualizado para aceptar `{ db }` como segundo parámetro
+  - agent.ts Cliente Prisma obtenido dentro de `getAgent` y disponible para las herramientas
 
 </FileTree>
 
-**Protocolo A2A** — modifica dos archivos:
-
-<FileTree>
-
-- packages/my-service/src/my-agent
-  - index.ts cliente Prisma creado antes de `A2AExpressServer`; pasado a `getAgent`
-  - agent.ts `getAgent` actualizado para aceptar `{ db }` como segundo parámetro
-
-</FileTree>
-
-Además, el target `<agent-name>-serve-local` del agente se actualiza para depender del target `serve-local` de la base de datos.
+Además, el objetivo `<agent-name>-serve-local` del agente se actualiza para depender del objetivo `serve-local` de la base de datos.
 
 ## Cómo Funciona
 
-### Protocolo HTTP
+El cliente Prisma se obtiene directamente dentro de `getAgent()` en lugar de pasarse a través de parámetros de función. Esto se alinea con cómo el runtime de strands-agent propaga el contexto de sesión — `withSessionId` envuelve `getAgent` y almacena en caché una instancia de `Agent` por sesión, por lo que `getPrisma()` se llama como máximo una vez por sesión.
 
-Para agentes HTTP, la base de datos fluye a través del contexto de solicitud tRPC — `createContext` crea un cliente Prisma por solicitud y se vuelve disponible para cada procedimiento a través de `opts.ctx`. El router luego lo pasa explícitamente a `getAgent`.
+### Definición del Agente
 
-#### Interfaz de Contexto
+`getAgent` se actualiza para importar y llamar al getter de Prisma al inicio de su cuerpo:
 
-El tipo de cliente Prisma se agrega al `Context` de tRPC en `init.ts`:
-
-```ts title="packages/my-service/src/my-agent/init.ts" {1,5}
+```ts title="packages/my-service/src/my-agent/agent.ts" {1,5}
 import { getPrisma as getMyDb } from ':my-scope/my-db';
 
-export interface Context {
-  sessionId: string;
-  myDb: Awaited<ReturnType<typeof getMyDb>>;
-}
-```
-
-#### Contexto de Solicitud
-
-`createContext` se hace asíncrono y el cliente Prisma se instancia y devuelve:
-
-```ts title="packages/my-service/src/my-agent/index.ts" {1,6,10}
-import { getPrisma as getMyDb } from ':my-scope/my-db';
-
-const createContext = async (
-  opts: CreateHTTPContextOptions | CreateWSSContextFnOptions,
-): Promise<Context> => {
+export const getAgent = async () => {
   const myDb = await getMyDb();
-  const sessionId = /* ... */;
-  return {
-    sessionId,
-    myDb,
-  };
-};
-```
-
-#### Router y Agente
-
-La base de datos se pasa desde el contexto a `getAgent` a través del manejador de suscripción:
-
-```ts title="packages/my-service/src/my-agent/router.ts" {2,3}
-.subscription(async function* (opts) {
-  const { myDb } = opts.ctx;
-  const agent = await getAgent(opts.ctx.sessionId, { myDb });
-  // ...
-})
-```
-
-```ts title="packages/my-service/src/my-agent/agent.ts" {3}
-export const getAgent = async (
-  sessionId: string,
-  { myDb }: { myDb: Awaited<ReturnType<typeof getMyDb>> },
-) => {
   return new Agent({ /* use myDb in tools */ });
 };
 ```
 
-### Protocolo A2A
-
-Para agentes A2A, no hay contexto tRPC. La base de datos se crea una vez al inicio y se pasa directamente a `getAgent` antes de que se inicie el `A2AExpressServer`.
-
-#### Inicio del Servidor
-
-El cliente Prisma se crea antes del `A2AExpressServer` y se pasa a `getAgent`:
-
-```ts title="packages/my-service/src/my-agent/index.ts" {1,4,6}
-import { getPrisma as getMyDb } from ':my-scope/my-db';
-
-void (async () => {
-  const myDb = await getMyDb();
-  const server = new A2AExpressServer({
-    agent: await getAgent('default', { myDb }),
-    // ...
-  });
-})();
-```
-
-#### Definición del Agente
-
-```ts title="packages/my-service/src/my-agent/agent.ts" {3}
-export const getAgent = async (
-  sessionId: string,
-  { myDb }: { myDb: Awaited<ReturnType<typeof getMyDb>> },
-) => {
-  return new Agent({ /* use myDb in tools */ });
-};
-```
 
 ## Múltiples Bases de Datos
 
-Ejecutar el generador nuevamente con un destino diferente agrega la segunda base de datos junto a la primera. Para agentes HTTP, ambas aparecen en la interfaz `Context` y se desestructuran juntas en el router:
+Ejecutar el generador nuevamente con un destino diferente agrega la segunda base de datos junto a la primera:
 
-```ts title="packages/my-service/src/my-agent/router.ts"
-const { postgresDb, mysqlDb } = opts.ctx;
-const agent = await getAgent(opts.ctx.sessionId, { postgresDb, mysqlDb });
+```ts title="packages/my-service/src/my-agent/agent.ts"
+import { getPrisma as getMyDb } from ':my-scope/my-db';
+import { getPrisma as getOtherDb } from ':my-scope/other-db';
+
+export const getAgent = async () => {
+  const myDb = await getMyDb();
+  const otherDb = await getOtherDb();
+  return new Agent({ /* use both clients in tools */ });
+};
 ```
 
 ## Infraestructura

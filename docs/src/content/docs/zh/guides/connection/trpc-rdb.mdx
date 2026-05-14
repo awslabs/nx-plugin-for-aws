@@ -10,7 +10,7 @@ import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
-import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
 
 `connection` 生成器将 <Link path="guides/trpc">tRPC API</Link> 连接到 <Link path="guides/ts-rdb">关系数据库</Link> 项目，生成一个类型安全的 tRPC 中间件插件，使 Prisma 客户端在您的过程上下文中可用。
 
@@ -97,7 +97,7 @@ return t.procedure.use(async (opts) => {
 PostgreSQL 不需要这样做 — 其适配器使用配置了 `allowExitOnIdle: true` 的连接池。
 
 :::caution[MySQL：IAM 令牌过期]
-RDS IAM 令牌在 **15 分钟**后过期。MySQL 适配器在连接时捕获令牌。如果您的 Lambda 保持温暖的时间足够长，令牌过期后，新的连接尝试可能会失败。检查连接错误并再次调用 `getPrisma()` 以获取带有新令牌的新客户端。详情和解决方法请参阅 <Link path="guides/ts-rdb#mysql-iam-token-expiry">MySQL：IAM 令牌过期</Link>。
+RDS IAM 令牌在 **15 分钟**后过期。MySQL 适配器在连接时捕获令牌。如果您的 Lambda 保持温暖的时间足够长以至于令牌过期，新的连接尝试可能会失败。检查连接错误并再次调用 `getPrisma()` 以获取带有新令牌的新客户端。详情和解决方法请参阅 <Link path="guides/ts-rdb#mysql-iam-token-expiry">MySQL：IAM 令牌过期</Link>。
 :::
 
 ### 多个数据库
@@ -112,73 +112,7 @@ export const dbProcedure = t.procedure
 
 ## 基础设施
 
-要允许您的 tRPC API 在运行时连接到数据库，API Lambda 函数必须部署到与数据库相同的 VPC 中，并被授予网络和 IAM 访问权限。
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-在您的应用程序堆栈中，将 API 部署到与数据库相同的 VPC 中，然后调用 `allowDefaultPortFrom` 和 `grantConnect` 以打开网络路径并向每个 Lambda 处理程序授予 IAM `rds-db:connect` 权限：
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { MyDatabase } from ':my-scope/common-constructs';
-
-const db = new MyDatabase(this, 'Db', { vpc, ... });
-
-const api = new Api(this, 'Api', {
-  integrations: Api.defaultIntegrations(this)
-    .withDefaultOptions({
-      vpc,
-      vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
-    })
-    .build(),
-});
-
-Object.entries(api.integrations).forEach(([operation, integration]) => {
-  db.allowDefaultPortFrom(integration.handler, `Allow ${operation} to connect to the database`);
-  db.grantConnect(integration.handler);
-});
-```
-
-将 API Lambda 函数部署到**具有出口的私有子网**，而不是私有隔离子网。在运行时，`getPrisma()` 从 AWS AppConfig 检索数据库连接详细信息，这是一个需要出站互联网访问的公共 AWS 服务端点。
-
-:::note
-此示例授予 API 中的每个处理程序访问权限，但如果只有某些处理程序需要访问，最好单独配置。
-:::
-
-</Fragment>
-<Fragment slot="terraform">
-
-将数据库模块输出传递到您的 API 模块，以便它可以访问数据库并读取其运行时配置：
-
-```hcl title="packages/infra/src/main.tf"
-module "my_database" {
-  source              = "../../common/terraform/src/app/dbs/my-database"
-  vpc_id              = module.vpc.vpc_id
-  database_subnet_ids = module.vpc.private_isolated_subnet_ids
-  lambda_subnet_ids   = module.vpc.private_subnet_ids
-}
-
-module "api" {
-  source             = "..."
-  vpc_id             = module.vpc.vpc_id
-  private_subnet_ids = module.vpc.private_subnet_ids
-
-  appconfig_application_id     = module.my_database.appconfig_application_id
-  database_cluster_resource_id = module.my_database.cluster_resource_id
-  database_runtime_user        = module.my_database.database_runtime_user
-  database_security_group_id   = module.my_database.security_group_id
-  database_port                = module.my_database.cluster_port
-
-  environment_variables = {
-    RUNTIME_CONFIG_APP_ID = module.my_database.appconfig_application_id
-  }
-}
-```
-
-将 API Lambda 函数部署到**具有出口的私有子网**，而不是私有隔离子网。确保 API Lambda 角色具有 `rds-db:connect` 权限，并且其安全组可以在数据库端口上访问数据库安全组。
-
-</Fragment>
-</Infrastructure>
+<Snippet name="connection/rdb-api-infrastructure" parentHeading="Infrastructure" />
 
 ## 本地开发
 

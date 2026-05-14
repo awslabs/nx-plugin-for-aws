@@ -53,47 +53,13 @@ describe('ts#rdb mcp-server-connection generator', () => {
       `packages/${name}/src/${mcpServerName}/server.ts`,
       `import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
-export const createServer = () => {
+export const createServer = async () => {
   const server = new McpServer({
     name: "my-service",
     version: "1.0.0"
   });
 
   return server;
-};
-`,
-    );
-    tree.write(
-      `packages/${name}/src/${mcpServerName}/http.ts`,
-      `#!/usr/bin/env node
-import { createServer } from './server.js';
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import express, { Request, Response } from 'express';
-
-const PORT = parseInt(process.env.PORT || '8000');
-const app = express();
-app.use(express.json());
-
-app.post('/mcp', async (req: Request, res: Response) => {
-  try {
-    const server = createServer();
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-    await server.connect(transport);
-  } catch (error) {
-    console.error(error);
-  }
-});
-`,
-    );
-    tree.write(
-      `packages/${name}/src/${mcpServerName}/stdio.ts`,
-      `#!/usr/bin/env node
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { createServer } from './server.js';
-
-export const startMcpServer = async () => {
-  const transport = new StdioServerTransport();
-  await createServer().connect(transport);
 };
 `,
     );
@@ -116,7 +82,7 @@ export const startMcpServer = async () => {
     expect(readProjectConfiguration(tree, 'my-service')).toMatchSnapshot();
   });
 
-  it('should inject db into server.ts, http.ts and stdio.ts', async () => {
+  it('should inject db into server.ts', async () => {
     setupMcpServerProject('my-service', 'my-mcp');
     setupRdbProject();
 
@@ -128,16 +94,10 @@ export const startMcpServer = async () => {
 
     expect(
       tree.read('packages/my-service/src/my-mcp/server.ts', 'utf-8'),
-    ).toMatchSnapshot();
-    expect(
-      tree.read('packages/my-service/src/my-mcp/http.ts', 'utf-8'),
-    ).toMatchSnapshot();
-    expect(
-      tree.read('packages/my-service/src/my-mcp/stdio.ts', 'utf-8'),
     ).toMatchSnapshot();
   });
 
-  it('should be idempotent for server.ts, http.ts and stdio.ts', async () => {
+  it('should be idempotent for server.ts', async () => {
     setupMcpServerProject('my-service', 'my-mcp');
     setupRdbProject();
 
@@ -154,12 +114,6 @@ export const startMcpServer = async () => {
 
     expect(
       tree.read('packages/my-service/src/my-mcp/server.ts', 'utf-8'),
-    ).toMatchSnapshot();
-    expect(
-      tree.read('packages/my-service/src/my-mcp/http.ts', 'utf-8'),
-    ).toMatchSnapshot();
-    expect(
-      tree.read('packages/my-service/src/my-mcp/stdio.ts', 'utf-8'),
     ).toMatchSnapshot();
   });
 
@@ -181,12 +135,6 @@ export const startMcpServer = async () => {
 
     expect(
       tree.read('packages/my-service/src/my-mcp/server.ts', 'utf-8'),
-    ).toMatchSnapshot();
-    expect(
-      tree.read('packages/my-service/src/my-mcp/http.ts', 'utf-8'),
-    ).toMatchSnapshot();
-    expect(
-      tree.read('packages/my-service/src/my-mcp/stdio.ts', 'utf-8'),
     ).toMatchSnapshot();
   });
 

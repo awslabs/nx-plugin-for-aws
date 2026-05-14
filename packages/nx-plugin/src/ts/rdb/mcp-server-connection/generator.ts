@@ -19,11 +19,7 @@ import { formatFilesInSubtree } from '../../../utils/format';
 import { pascalCase } from '../../../utils/names';
 import camelCase from 'lodash.camelcase';
 import { toScopeAlias } from '../../../utils/npm-scope';
-import {
-  addDestructuredImport,
-  applyGritQL,
-  matchGritQL,
-} from '../../../utils/ast';
+import { addDestructuredImport, applyGritQL } from '../../../utils/ast';
 
 export const TS_RDB_MCP_SERVER_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(__filename);
@@ -58,16 +54,14 @@ export const tsRdbMcpServerConnectionGenerator = async (
   const rdbPackageAlias = toScopeAlias(targetProject.name);
   const getterAlias = `getPrisma as get${rdbNamePascal}`;
 
-  const mcpSourceDir = joinPathFragments(
+  const serverPath = joinPathFragments(
     sourceProject.root,
     'src',
     mcpServerName,
+    'server.ts',
   );
-  const serverPath = joinPathFragments(mcpSourceDir, 'server.ts');
-  const httpPath = joinPathFragments(mcpSourceDir, 'http.ts');
-  const stdioPath = joinPathFragments(mcpSourceDir, 'stdio.ts');
 
-  // Update server.ts: add db to createServer signature
+  // server.ts: inject db inside createServer body
   if (tree.exists(serverPath)) {
     await addDestructuredImport(
       tree,
@@ -76,121 +70,22 @@ export const tsRdbMcpServerConnectionGenerator = async (
       rdbPackageAlias,
     );
 
-    const hasExistingParams = await matchGritQL(
+    await applyGritQL(
       tree,
       serverPath,
-      `\`export const createServer = ({ $_ }: { $_ }) => $_\``,
-    );
-    if (hasExistingParams) {
-      await applyGritQL(
-        tree,
-        serverPath,
-        `\`export const createServer = ({ $params }: { $types }) => $body\` where {
-          $params <: not some \`${rdbNameCamel}\`,
-          $params += \`, ${rdbNameCamel}\`,
-          $types <: not some \`${rdbNameCamel}: $_\`,
-          $types += \`\n  ${rdbNameCamel}: Awaited<ReturnType<typeof get${rdbNamePascal}>>\`
-        }`,
-      );
-    } else {
-      await applyGritQL(
-        tree,
-        serverPath,
-        `\`export const createServer = () => $body\` => \`export const createServer = ({ ${rdbNameCamel} }: { ${rdbNameCamel}: Awaited<ReturnType<typeof get${rdbNamePascal}>> }) => $body\``,
-      );
-    }
-  }
-
-  // Update http.ts: insert db above `const server = createServer()`, pass db to call
-  if (tree.exists(httpPath)) {
-    await addDestructuredImport(tree, httpPath, [getterAlias], rdbPackageAlias);
-
-    const alreadyHasDeclHttp = await matchGritQL(
-      tree,
-      httpPath,
-      `\`const ${rdbNameCamel} = await get${rdbNamePascal}()\``,
-    );
-    if (!alreadyHasDeclHttp) {
-      await applyGritQL(
-        tree,
-        httpPath,
-        `\`const server = createServer($args)\` => \`const ${rdbNameCamel} = await get${rdbNamePascal}();\n    const server = createServer($args)\``,
-      );
-    }
-
-    const dbAlreadyInHttpCall = await matchGritQL(
-      tree,
-      httpPath,
-      `\`createServer({ $ctx })\` where { $ctx <: contains \`${rdbNameCamel}\` }`,
-    );
-    if (!dbAlreadyInHttpCall) {
-      const hasObjArg = await matchGritQL(
-        tree,
-        httpPath,
-        `\`createServer({ $_ })\``,
-      );
-      if (hasObjArg) {
-        await applyGritQL(
-          tree,
-          httpPath,
-          `\`createServer({ $ctx })\` => \`createServer({ $ctx, ${rdbNameCamel} })\``,
-        );
-      } else {
-        await applyGritQL(
-          tree,
-          httpPath,
-          `\`createServer()\` => \`createServer({ ${rdbNameCamel} })\``,
-        );
-      }
-    }
-  }
-
-  // Update stdio.ts: insert db before `await createServer().connect(transport)`, pass db to call
-  if (tree.exists(stdioPath)) {
-    await addDestructuredImport(
-      tree,
-      stdioPath,
-      [getterAlias],
-      rdbPackageAlias,
+      `\`export const createServer = async () => { $body }\` => raw\`export const createServer = async () => {
+  const ${rdbNameCamel} = await get${rdbNamePascal}();
+  $body
+}\` where { $body <: not some \`const ${rdbNameCamel} = await get${rdbNamePascal}()\` }`,
     );
 
-    const alreadyHasDeclStdio = await matchGritQL(
-      tree,
-      stdioPath,
-      `\`const ${rdbNameCamel} = await get${rdbNamePascal}()\``,
-    );
-    if (!alreadyHasDeclStdio) {
-      await applyGritQL(
-        tree,
-        stdioPath,
-        `\`await createServer($args).connect($transport)\` => \`const ${rdbNameCamel} = await get${rdbNamePascal}();\n  await createServer($args).connect($transport)\``,
-      );
-    }
-
-    const dbAlreadyInStdioCall = await matchGritQL(
-      tree,
-      stdioPath,
-      `\`createServer({ $ctx })\` where { $ctx <: contains \`${rdbNameCamel}\` }`,
-    );
-    if (!dbAlreadyInStdioCall) {
-      const hasObjArg = await matchGritQL(
-        tree,
-        stdioPath,
-        `\`createServer({ $_ })\``,
-      );
-      if (hasObjArg) {
-        await applyGritQL(
-          tree,
-          stdioPath,
-          `\`createServer({ $ctx })\` => \`createServer({ $ctx, ${rdbNameCamel} })\``,
-        );
-      } else {
-        await applyGritQL(
-          tree,
-          stdioPath,
-          `\`createServer()\` => \`createServer({ ${rdbNameCamel} })\``,
-        );
-      }
+    // Add $on error handler after the db declaration.
+    // Done via string replacement because GritQL treats $on as a metavariable.
+    const dbDecl = `const ${rdbNameCamel} = await get${rdbNamePascal}();`;
+    const onCall = `${rdbNameCamel}.$on('error' as never, (e) => {\n    console.log(e);\n  });`;
+    const content = tree.read(serverPath, 'utf-8')!;
+    if (content.includes(dbDecl) && !content.includes(`${rdbNameCamel}.$on`)) {
+      tree.write(serverPath, content.replace(dbDecl, `${dbDecl}\n  ${onCall}`));
     }
   }
 

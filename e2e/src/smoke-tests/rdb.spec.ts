@@ -91,17 +91,6 @@ describe('smoke test - rdb', () => {
           opts,
         );
 
-        // The rdb connection generators inject a `const <dbName> = await get<DbName>()` variable
-        // as scaffolding for the developer, which is intentionally unused at generation time.
-        // Disable noUnusedLocals so the build step doesn't fail on TS6133.
-        const tsconfigBasePath = `${projectRoot}/tsconfig.base.json`;
-        const tsconfig = JSON.parse(readFileSync(tsconfigBasePath, 'utf-8'));
-        tsconfig.compilerOptions.noUnusedLocals = false;
-        writeFileSync(
-          tsconfigBasePath,
-          JSON.stringify(tsconfig, null, 2) + '\n',
-        );
-
         await runCLI(`sync --verbose`, opts);
         await runCLI(
           `run-many --target build --all --output-style=stream --verbose`,

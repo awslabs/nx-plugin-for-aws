@@ -12,7 +12,7 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Snippet from '@components/snippet.astro';
 
-Le générateur `connection` connecte une <Link path="guides/ts-smithy-api">API Smithy</Link> à un projet de <Link path="guides/ts-rdb">Base de Données Relationnelle</Link>, en injectant un client Prisma dans le contexte du service afin que toutes les implémentations d'opérations puissent accéder à la base de données.
+Le générateur `connection` relie une <Link path="guides/ts-smithy-api">API Smithy</Link> à un projet de <Link path="guides/ts-rdb">Base de Données Relationnelle</Link>, en injectant un client Prisma dans le contexte du service afin que toutes les implémentations d'opérations puissent accéder à la base de données.
 
 ## Prérequis
 
@@ -40,7 +40,7 @@ Le générateur modifie trois fichiers existants dans votre backend d'API Smithy
 <FileTree>
 
 - packages/api/src
-  - context.ts Propriété `db` ajoutée à `ServiceContext`
+  - context.ts propriété `db` ajoutée à `ServiceContext`
   - handler.ts Client Prisma créé dans `lambdaHandler`, passé à `serviceHandler.handle`
   - local-server.ts Client Prisma créé dans le gestionnaire de requêtes, passé à `serviceHandler.handle`
 
@@ -48,11 +48,11 @@ Le générateur modifie trois fichiers existants dans votre backend d'API Smithy
 
 De plus, il met à jour la cible `serve-local` de l'API pour démarrer automatiquement la base de données.
 
-## Fonctionnement
+## Comment ça Fonctionne
 
 ### ServiceContext
 
-Le générateur ajoute une propriété typée `db` à `ServiceContext` dans `context.ts` :
+Le générateur ajoute une propriété `db` typée à `ServiceContext` dans `context.ts` :
 
 ```ts title="packages/api/src/context.ts" {1,7}
 import { getPrisma as getMyDb } from ':my-scope/my-db';
@@ -65,7 +65,7 @@ export interface ServiceContext {
 }
 ```
 
-### Gestionnaire Lambda
+### Lambda Handler
 
 Le client Prisma est instancié dans `lambdaHandler` et passé via le contexte du service :
 
@@ -85,7 +85,7 @@ export const lambdaHandler = async (event: APIGatewayProxyEvent) => {
 };
 ```
 
-### Utilisation de la Base de Données dans les Opérations
+### Utiliser la Base de Données dans les Opérations
 
 Accédez à `db` depuis le contexte dans vos implémentations d'opérations :
 
@@ -100,6 +100,32 @@ export const listUsers = async (
   const users = await ctx.myDb.user.findMany();
   return { users };
 };
+```
+
+## Bases de Données Multiples
+
+Exécuter à nouveau le générateur avec une cible différente ajoute la deuxième base de données à côté de la première. Les deux clients sont ajoutés à `ServiceContext` et instanciés dans `handler.ts` :
+
+```ts title="packages/api/src/context.ts" {5,6}
+export interface ServiceContext {
+  tracer: Tracer;
+  logger: Logger;
+  metrics: Metrics;
+  myDb: Awaited<ReturnType<typeof getMyDb>>;
+  otherDb: Awaited<ReturnType<typeof getOtherDb>>;
+}
+```
+
+```ts title="packages/api/src/handler.ts" {1,2,7,8}
+const myDb = await getMyDb();
+const otherDb = await getOtherDb();
+const httpResponse = await serviceHandler.handle(httpRequest, {
+  tracer,
+  logger,
+  metrics,
+  myDb,
+  otherDb,
+});
 ```
 
 ## Infrastructure

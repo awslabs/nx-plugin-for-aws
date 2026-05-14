@@ -10,7 +10,7 @@ import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
-import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
 
 El generador `connection` conecta una <Link path="guides/trpc">API tRPC</Link> a un proyecto de <Link path="guides/ts-rdb">Base de Datos Relacional</Link>, generando un plugin de middleware tRPC con tipos seguros que hace que un cliente Prisma esté disponible en el contexto de tu procedimiento.
 
@@ -92,12 +92,12 @@ return t.procedure.use(async (opts) => {
 });
 ```
 
-Esto aborda el problema del adaptador MySQL que mantiene abierto el bucle de eventos de Node.js después de una consulta, lo que de otro modo evitaría que Lambda vacíe las respuestas de streaming. Desconectar en `finally` libera el bucle de eventos para que la respuesta pueda completarse. Consulta <Link path="guides/ts-rdb#mysql-api-gateway-streaming-mode">MySQL: Modo de Streaming de API Gateway</Link> para más detalles.
+Esto soluciona el problema del adaptador MySQL que mantiene abierto el bucle de eventos de Node.js después de una consulta, lo que de otro modo evitaría que Lambda vacíe las respuestas de streaming. Desconectar en `finally` libera el bucle de eventos para que la respuesta pueda completarse. Consulta <Link path="guides/ts-rdb#mysql-api-gateway-streaming-mode">MySQL: Modo de Streaming de API Gateway</Link> para más detalles.
 
 PostgreSQL no requiere esto — su adaptador usa un pool de conexiones configurado con `allowExitOnIdle: true`.
 
 :::caution[MySQL: Expiración del Token IAM]
-Los tokens IAM de RDS expiran después de **15 minutos**. El adaptador MySQL captura el token en el momento de la conexión. Si tu Lambda permanece activo el tiempo suficiente para que el token expire, los nuevos intentos de conexión pueden fallar. Verifica los errores de conexión y llama a `getPrisma()` nuevamente para obtener un cliente nuevo con un token nuevo. Consulta <Link path="guides/ts-rdb#mysql-iam-token-expiry">MySQL: Expiración del Token IAM</Link> para detalles y soluciones alternativas.
+Los tokens IAM de RDS expiran después de **15 minutos**. El adaptador MySQL captura el token en el momento de la conexión. Si tu Lambda permanece activo el tiempo suficiente para que el token expire, los nuevos intentos de conexión pueden fallar. Verifica los errores de conexión y llama a `getPrisma()` nuevamente para obtener un cliente nuevo con un token nuevo. Consulta <Link path="guides/ts-rdb#mysql-iam-token-expiry">MySQL: Expiración del Token IAM</Link> para más detalles y soluciones alternativas.
 :::
 
 ### Múltiples Bases de Datos
@@ -112,78 +112,12 @@ export const dbProcedure = t.procedure
 
 ## Infraestructura
 
-Para permitir que tu API tRPC se conecte a la base de datos en tiempo de ejecución, las funciones Lambda de la API deben desplegarse en la misma VPC que la base de datos y se les debe otorgar acceso de red e IAM.
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-En tu stack de aplicación, despliega la API en la misma VPC que la base de datos, luego llama a `allowDefaultPortFrom` y `grantConnect` para abrir la ruta de red y otorgar el permiso IAM `rds-db:connect` a cada manejador Lambda:
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { MyDatabase } from ':my-scope/common-constructs';
-
-const db = new MyDatabase(this, 'Db', { vpc, ... });
-
-const api = new Api(this, 'Api', {
-  integrations: Api.defaultIntegrations(this)
-    .withDefaultOptions({
-      vpc,
-      vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
-    })
-    .build(),
-});
-
-Object.entries(api.integrations).forEach(([operation, integration]) => {
-  db.allowDefaultPortFrom(integration.handler, `Allow ${operation} to connect to the database`);
-  db.grantConnect(integration.handler);
-});
-```
-
-Despliega las funciones Lambda de la API en una **subred privada con salida**, no en una subred privada aislada. En tiempo de ejecución, `getPrisma()` recupera los detalles de conexión de la base de datos desde AWS AppConfig, que es un endpoint de servicio público de AWS que requiere acceso a internet saliente.
-
-:::note
-Este ejemplo otorga acceso a todos los manejadores en tu API, pero si solo algunos manejadores necesitan acceso es mejor configurarlos individualmente.
-:::
-
-</Fragment>
-<Fragment slot="terraform">
-
-Pasa las salidas del módulo de base de datos a tu módulo de API para que pueda alcanzar la base de datos y leer su configuración en tiempo de ejecución:
-
-```hcl title="packages/infra/src/main.tf"
-module "my_database" {
-  source              = "../../common/terraform/src/app/dbs/my-database"
-  vpc_id              = module.vpc.vpc_id
-  database_subnet_ids = module.vpc.private_isolated_subnet_ids
-  lambda_subnet_ids   = module.vpc.private_subnet_ids
-}
-
-module "api" {
-  source             = "..."
-  vpc_id             = module.vpc.vpc_id
-  private_subnet_ids = module.vpc.private_subnet_ids
-
-  appconfig_application_id     = module.my_database.appconfig_application_id
-  database_cluster_resource_id = module.my_database.cluster_resource_id
-  database_runtime_user        = module.my_database.database_runtime_user
-  database_security_group_id   = module.my_database.security_group_id
-  database_port                = module.my_database.cluster_port
-
-  environment_variables = {
-    RUNTIME_CONFIG_APP_ID = module.my_database.appconfig_application_id
-  }
-}
-```
-
-Despliega las funciones Lambda de la API en **subredes privadas con salida**, no en subredes privadas aisladas. Asegúrate de que el rol Lambda de la API tenga el permiso `rds-db:connect` y que su grupo de seguridad pueda alcanzar el grupo de seguridad de la base de datos en el puerto de la base de datos.
-
-</Fragment>
-</Infrastructure>
+<Snippet name="connection/rdb-api-infrastructure" parentHeading="Infrastructure" />
 
 ## Desarrollo Local
 
-El generador configura el target `serve-local` de tu API tRPC para que dependa del target `serve-local` de la base de datos, por lo que al ejecutar:
+El generador configura el target `serve-local` de tu API tRPC para que dependa del target `serve-local` de la base de datos, por lo que ejecutar:
 
 <NxCommands commands={["serve-local <api-project-name>"]} />
 
-se iniciará automáticamente la base de datos local junto con tu API.
+iniciará automáticamente la base de datos local junto con tu API.
