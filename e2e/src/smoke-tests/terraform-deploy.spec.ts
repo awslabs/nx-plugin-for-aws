@@ -37,150 +37,194 @@ function readTerraformOutputs(projectRoot: string): Record<string, string> {
   );
 }
 
-describe('smoke test - terraform-deploy', () => {
+interface TerraformDeployVariant {
+  /** Suffix appended to the smoke-test name and target directory. */
+  variant: 'terraform-deploy' | 'terraform-deploy-rdb';
+  /** Path (relative to e2e/src/files) of the main.tf template to use. */
+  mainTfTemplate: string;
+  /** Whether the variant requires the RDS service-linked role. */
+  requiresRdsServiceLinkedRole: boolean;
+}
+
+const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
   const pkgMgr = 'pnpm';
-  const targetDir = `${tmpProjPath()}/terraform-deploy-${pkgMgr}`;
+  const targetDir = `${tmpProjPath()}/${config.variant}-${pkgMgr}`;
 
-  beforeEach(() => {
-    console.log(`Cleaning target directory ${targetDir}`);
-    if (existsSync(targetDir)) {
-      rmSync(targetDir, { force: true, recursive: true });
-    }
-    ensureDirSync(targetDir);
-  });
-
-  it('should generate, deploy, exercise and destroy', async () => {
-    const { opts } = await runTerraformSmokeTest(targetDir, pkgMgr);
-
-    // Per-run suffix used in the Terraform state key so concurrent runs
-    // don't share state.
-    const testRunId = Math.random().toString(36).substring(2, 10);
-
-    // Overwrite the scaffolded main.tf with the wiring template (Terraform
-    // analogue of the `application-stack.ts.template` cdk-deploy uses).
-    const mainTfTemplate = readFileSync(
-      join(__dirname, '../files/terraform-deploy/main.tf.template'),
-      'utf-8',
-    );
-    writeFileSync(
-      `${opts.cwd}/packages/infra/src/main.tf`,
-      mainTfTemplate.replace(/<% TEST_RUN_ID %>/g, testRunId),
-    );
-
-    // Per-run Terraform state key — the generated `init.ts` uses the
-    // `TF_ENV` env var as the state-key leaf, so giving each run a
-    // distinct TF_ENV value isolates its state from concurrent runs.
-    const infraProjectJsonPath = `${opts.cwd}/packages/infra/project.json`;
-    const infraProjectJson = JSON.parse(
-      readFileSync(infraProjectJsonPath, 'utf-8'),
-    );
-    infraProjectJson.targets.init.configurations.dev.env = {
-      ...(infraProjectJson.targets.init.configurations.dev.env ?? {}),
-      TF_ENV: `dev-${testRunId}`,
-    };
-    writeFileSync(
-      infraProjectJsonPath,
-      JSON.stringify(infraProjectJson, null, 2),
-    );
-
-    // Auto-apply sync so the main.tf + project.json rewrites don't block
-    // `apply` with a fatal "workspace is out of sync" error.
-    const nxJsonPath = `${opts.cwd}/nx.json`;
-    const nxJson = JSON.parse(readFileSync(nxJsonPath, 'utf-8'));
-    nxJson.sync = { ...(nxJson.sync ?? {}), applyChanges: true };
-    writeFileSync(nxJsonPath, JSON.stringify(nxJson, null, 2));
-
-    // Cognito deletion_protection = INACTIVE so `terraform destroy` can
-    // remove the user pool in one pass.
-    const identityTfPath = `${opts.cwd}/packages/common/terraform/src/core/user-identity/identity/identity.tf`;
-    writeFileSync(
-      identityTfPath,
-      readFileSync(identityTfPath, 'utf-8').replace(
-        /deletion_protection\s*=\s*"ACTIVE"/,
-        'deletion_protection = "INACTIVE"',
-      ),
-    );
-
-    ensureRdsServiceLinkedRole();
-
-    try {
-      await runCLI(`sync`, opts);
-      await runCLI(`bootstrap infra --output-style=stream`, opts);
-      await runCLI(`apply infra --output-style=stream`, opts);
-
-      const outputs = readTerraformOutputs(opts.cwd);
-      console.log('Terraform outputs:', outputs);
-
-      // tRPC
-      await invokeTrpcApi(outputs.my_api_endpoint, 'tRPC REST API');
-      await invokeTrpcApi(outputs.my_api_http_endpoint, 'tRPC HTTP API');
-
-      // FastAPI
-      await invokeRestApi(outputs.py_api_endpoint, 'FastAPI REST');
-      await invokeRestApi(outputs.py_api_http_endpoint, 'FastAPI HTTP');
-
-      // Smithy
-      await invokeRestApi(outputs.my_smithy_api_endpoint, 'Smithy REST');
-
-      // MCP
-      await invokeAgentCoreMcp(
-        outputs.ts_mcp_server_arn,
-        'TypeScript MCP Server',
-      );
-      await invokeAgentCoreMcp(outputs.py_mcp_server_arn, 'Python MCP Server');
-
-      // Strands agents — direct invocation. The TypeScript strands agent
-      // serves tRPC on AgentCore, so invoke it via the tRPC helper.
-      await invokeAgentCoreAgent(outputs.strands_agent_arn, 'Strands Agent');
-      await invokeTrpcAgentCoreAgent(
-        outputs.ts_strands_agent_arn,
-        'TypeScript Strands Agent',
-      );
-
-      // A2A (direct)
-      await invokeAgentCoreA2a(
-        outputs.ts_a2a_agent_arn,
-        'TypeScript A2A Agent',
-      );
-      await invokeAgentCoreA2a(outputs.py_a2a_agent_arn, 'Python A2A Agent');
-
-      // A2A via delegate tool (host agent -> A2A target)
-      await invokeTrpcAgentCoreAgent(
-        outputs.ts_strands_agent_arn,
-        'TS Agent -> TS A2A (via askMyTsA2aAgent)',
-        'Use the askMyTsA2aAgent tool to ask the remote agent what 5 * 4 is. Return just the answer.',
-      );
-      await invokeTrpcAgentCoreAgent(
-        outputs.ts_strands_agent_arn,
-        'TS Agent -> PY A2A (via askMyPyA2aAgent)',
-        'Use the askMyPyA2aAgent tool to ask the remote agent what 11 + 2 is. Return just the answer.',
-      );
-      await invokeAgentCoreAgent(
-        outputs.strands_agent_arn,
-        'PY Agent -> TS A2A (via ask_my_ts_a2a_agent)',
-        'Use the ask_my_ts_a2a_agent tool to ask the remote agent what 9 - 3 is. Return just the answer.',
-      );
-      await invokeAgentCoreAgent(
-        outputs.strands_agent_arn,
-        'PY Agent -> PY A2A (via ask_my_py_a2a_agent)',
-        'Use the ask_my_py_a2a_agent tool to ask the remote agent what 7 + 8 is. Return just the answer.',
-      );
-
-      // Lambda functions
-      await invokeLambda(outputs.py_function_arn, 'Python Function');
-      await invokeLambda(outputs.ts_function_arn, 'TypeScript Function');
-
-      // Website
-      await pingWebsite(outputs.website_distribution_domain_name);
-    } finally {
-      try {
-        await runCLI(
-          `destroy infra --output-style=stream -- -auto-approve`,
-          opts,
-        );
-      } catch (e) {
-        console.warn(`terraform destroy failed (will still clean up): ${e}`);
+  describe(`smoke test - ${config.variant}`, () => {
+    beforeEach(() => {
+      console.log(`Cleaning target directory ${targetDir}`);
+      if (existsSync(targetDir)) {
+        rmSync(targetDir, { force: true, recursive: true });
       }
-    }
+      ensureDirSync(targetDir);
+    });
+
+    it('should generate, deploy, exercise and destroy', async () => {
+      const { opts } = await runTerraformSmokeTest(targetDir, pkgMgr);
+
+      // Per-run suffix used in the Terraform state key so concurrent runs
+      // don't share state.
+      const testRunId = Math.random().toString(36).substring(2, 10);
+
+      // Overwrite the scaffolded main.tf with the wiring template (Terraform
+      // analogue of the `application-stack.ts.template` cdk-deploy uses).
+      const mainTfTemplate = readFileSync(
+        join(__dirname, '../files', config.mainTfTemplate),
+        'utf-8',
+      );
+      writeFileSync(
+        `${opts.cwd}/packages/infra/src/main.tf`,
+        mainTfTemplate.replace(/<% TEST_RUN_ID %>/g, testRunId),
+      );
+
+      // Per-run Terraform state key — the generated `init.ts` uses the
+      // `TF_ENV` env var as the state-key leaf, so giving each run a
+      // distinct TF_ENV value isolates its state from concurrent runs.
+      const infraProjectJsonPath = `${opts.cwd}/packages/infra/project.json`;
+      const infraProjectJson = JSON.parse(
+        readFileSync(infraProjectJsonPath, 'utf-8'),
+      );
+      infraProjectJson.targets.init.configurations.dev.env = {
+        ...(infraProjectJson.targets.init.configurations.dev.env ?? {}),
+        TF_ENV: `${config.variant}-${testRunId}`,
+      };
+      writeFileSync(
+        infraProjectJsonPath,
+        JSON.stringify(infraProjectJson, null, 2),
+      );
+
+      // Auto-apply sync so the main.tf + project.json rewrites don't block
+      // `apply` with a fatal "workspace is out of sync" error.
+      const nxJsonPath = `${opts.cwd}/nx.json`;
+      const nxJson = JSON.parse(readFileSync(nxJsonPath, 'utf-8'));
+      nxJson.sync = { ...(nxJson.sync ?? {}), applyChanges: true };
+      writeFileSync(nxJsonPath, JSON.stringify(nxJson, null, 2));
+
+      // Cognito deletion_protection = INACTIVE so `terraform destroy` can
+      // remove the user pool in one pass.
+      const identityTfPath = `${opts.cwd}/packages/common/terraform/src/core/user-identity/identity/identity.tf`;
+      if (existsSync(identityTfPath)) {
+        writeFileSync(
+          identityTfPath,
+          readFileSync(identityTfPath, 'utf-8').replace(
+            /deletion_protection\s*=\s*"ACTIVE"/,
+            'deletion_protection = "INACTIVE"',
+          ),
+        );
+      }
+
+      if (config.requiresRdsServiceLinkedRole) {
+        ensureRdsServiceLinkedRole();
+      }
+
+      try {
+        await runCLI(`sync`, opts);
+        await runCLI(`bootstrap infra --output-style=stream`, opts);
+        await runCLI(`apply infra --output-style=stream`, opts);
+
+        if (config.variant === 'terraform-deploy') {
+          const outputs = readTerraformOutputs(opts.cwd);
+          console.log('Terraform outputs:', outputs);
+
+          // tRPC
+          await invokeTrpcApi(outputs.my_api_endpoint, 'tRPC REST API');
+          await invokeTrpcApi(outputs.my_api_http_endpoint, 'tRPC HTTP API');
+
+          // FastAPI
+          await invokeRestApi(outputs.py_api_endpoint, 'FastAPI REST');
+          await invokeRestApi(outputs.py_api_http_endpoint, 'FastAPI HTTP');
+
+          // Smithy
+          await invokeRestApi(outputs.my_smithy_api_endpoint, 'Smithy REST');
+
+          // MCP
+          await invokeAgentCoreMcp(
+            outputs.ts_mcp_server_arn,
+            'TypeScript MCP Server',
+          );
+          await invokeAgentCoreMcp(
+            outputs.py_mcp_server_arn,
+            'Python MCP Server',
+          );
+
+          // Strands agents — direct invocation. The TypeScript strands agent
+          // serves tRPC on AgentCore, so invoke it via the tRPC helper.
+          await invokeAgentCoreAgent(
+            outputs.strands_agent_arn,
+            'Strands Agent',
+          );
+          await invokeTrpcAgentCoreAgent(
+            outputs.ts_strands_agent_arn,
+            'TypeScript Strands Agent',
+          );
+
+          // A2A (direct)
+          await invokeAgentCoreA2a(
+            outputs.ts_a2a_agent_arn,
+            'TypeScript A2A Agent',
+          );
+          await invokeAgentCoreA2a(
+            outputs.py_a2a_agent_arn,
+            'Python A2A Agent',
+          );
+
+          // A2A via delegate tool (host agent -> A2A target)
+          await invokeTrpcAgentCoreAgent(
+            outputs.ts_strands_agent_arn,
+            'TS Agent -> TS A2A (via askMyTsA2aAgent)',
+            'Use the askMyTsA2aAgent tool to ask the remote agent what 5 * 4 is. Return just the answer.',
+          );
+          await invokeTrpcAgentCoreAgent(
+            outputs.ts_strands_agent_arn,
+            'TS Agent -> PY A2A (via askMyPyA2aAgent)',
+            'Use the askMyPyA2aAgent tool to ask the remote agent what 11 + 2 is. Return just the answer.',
+          );
+          await invokeAgentCoreAgent(
+            outputs.strands_agent_arn,
+            'PY Agent -> TS A2A (via ask_my_ts_a2a_agent)',
+            'Use the ask_my_ts_a2a_agent tool to ask the remote agent what 9 - 3 is. Return just the answer.',
+          );
+          await invokeAgentCoreAgent(
+            outputs.strands_agent_arn,
+            'PY Agent -> PY A2A (via ask_my_py_a2a_agent)',
+            'Use the ask_my_py_a2a_agent tool to ask the remote agent what 7 + 8 is. Return just the answer.',
+          );
+
+          // Lambda functions
+          await invokeLambda(outputs.py_function_arn, 'Python Function');
+          await invokeLambda(outputs.ts_function_arn, 'TypeScript Function');
+
+          // Website
+          await pingWebsite(outputs.website_distribution_domain_name);
+        }
+      } finally {
+        try {
+          await runCLI(
+            `destroy infra --output-style=stream -- -auto-approve`,
+            opts,
+          );
+        } catch (e) {
+          console.warn(`terraform destroy failed (will still clean up): ${e}`);
+        }
+      }
+    });
   });
+};
+
+// terraform-deploy — application surface (APIs, agents, MCP, lambdas, website).
+runTerraformDeployVariant({
+  variant: 'terraform-deploy',
+  mainTfTemplate: 'terraform-deploy/main.tf.template',
+  requiresRdsServiceLinkedRole: false,
+});
+
+// terraform-deploy-rdb — relational databases only (PostgreSQL + MySQL
+// Aurora clusters with a dedicated VPC). Splitting these out keeps the
+// main terraform-deploy variant under the IAM session limit, since
+// Aurora cluster create + destroy plus VPC ENI cleanup for the
+// migration/credential Lambdas dominates the runtime.
+runTerraformDeployVariant({
+  variant: 'terraform-deploy-rdb',
+  mainTfTemplate: 'terraform-deploy/main-rdb.tf.template',
+  requiresRdsServiceLinkedRole: true,
 });
