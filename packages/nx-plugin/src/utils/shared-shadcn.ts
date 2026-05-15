@@ -21,6 +21,7 @@ import {
   SHARED_SHADCN_NAME,
 } from './shared-constructs-constants';
 import { ITsDepVersion, withVersions } from './versions';
+import { ensurePnpmIgnoresWorkspaceRootCheck } from './pnpm-workspace';
 
 const SHADCN_DEPS = [
   'class-variance-authority',
@@ -30,33 +31,6 @@ const SHADCN_DEPS = [
   'tw-animate-css',
   'radix-ui',
 ] as const satisfies ITsDepVersion[];
-
-const NPMRC_IGNORE_WORKSPACE_ROOT_CHECK = 'ignore-workspace-root-check=true';
-
-const ensureNpmrcIgnoresWorkspaceRoot = (tree: Tree): boolean => {
-  const npmrcPath = '.npmrc';
-  if (tree.exists(npmrcPath)) {
-    const npmrcContent = tree.read(npmrcPath, 'utf-8');
-    const alreadyConfigured = npmrcContent
-      .split(/\r?\n/)
-      .some((line) => line.trim() === NPMRC_IGNORE_WORKSPACE_ROOT_CHECK);
-
-    if (alreadyConfigured) {
-      return false;
-    }
-
-    const needsTrailingNewline =
-      npmrcContent.length > 0 && !npmrcContent.endsWith('\n');
-    tree.write(
-      npmrcPath,
-      `${npmrcContent}${needsTrailingNewline ? '\n' : ''}${NPMRC_IGNORE_WORKSPACE_ROOT_CHECK}\n`,
-    );
-    return true;
-  }
-
-  tree.write(npmrcPath, `${NPMRC_IGNORE_WORKSPACE_ROOT_CHECK}\n`);
-  return true;
-};
 
 const addSharedShadcnEslintRules = async (
   tree: Tree,
@@ -85,7 +59,7 @@ export async function sharedShadcnGenerator(tree: Tree) {
   const shadcnSrcRoot = joinPathFragments(libraryRoot, 'src');
   const eslintConfigPath = joinPathFragments(libraryRoot, 'eslint.config.mjs');
 
-  ensureNpmrcIgnoresWorkspaceRoot(tree);
+  ensurePnpmIgnoresWorkspaceRootCheck(tree);
 
   if (!tree.exists(joinPathFragments(libraryRoot, 'project.json'))) {
     await tsProjectGenerator(tree, {
