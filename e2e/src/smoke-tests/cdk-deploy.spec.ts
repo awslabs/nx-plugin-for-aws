@@ -263,7 +263,8 @@ describe('smoke test - cdk-deploy-rdb', () => {
     );
     writeFileSync(`${opts.cwd}/packages/infra/src/main.ts`, mainContent);
 
-    const cdkStageName = `e2e-test-rdb-sandbox-${testRunId}`;
+    // Stage name is set by main.ts.template (`e2e-test-infra-sandbox-…`).
+    const cdkStageName = `e2e-test-infra-sandbox-${testRunId}`;
 
     ensureRdsServiceLinkedRole();
 
