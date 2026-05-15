@@ -186,6 +186,69 @@ const storageKey = `npfa:optfilter:${generatorId}`;
       return out;
     };
 
+    const applyTabFilters = (selected: Record<string, string>) => {
+      // Each `<div data-tab-filters>` marker is inserted by the
+      // `remark-tab-filter` plugin immediately before a `<Tabs>` whose
+      // children carry `_filter`. The next sibling is the rendered
+      // `<starlight-tabs>`. We look up the tab whose predicate matches the
+      // user's selection and synthesise a click on it (Starlight's tab
+      // controller handles syncing across `syncKey` groups).
+      const markers = document.querySelectorAll<HTMLElement>(
+        '[data-tab-filters]',
+      );
+      for (const marker of markers) {
+        const raw = marker.dataset.tabFilters;
+        if (!raw) continue;
+        let filters: Array<{
+          label: string;
+          when: Record<string, string[]>;
+        }>;
+        try {
+          filters = JSON.parse(raw);
+        } catch {
+          continue;
+        }
+        const tabsRoot = marker.nextElementSibling;
+        if (!tabsRoot) continue;
+        const starlightTabs = tabsRoot.matches('starlight-tabs')
+          ? tabsRoot
+          : tabsRoot.querySelector('starlight-tabs');
+        if (!starlightTabs) continue;
+        const tabLinks = Array.from(
+          starlightTabs.querySelectorAll<HTMLAnchorElement>(
+            ':scope > .tablist-wrapper [role="tab"]',
+          ),
+        );
+        if (tabLinks.length === 0) continue;
+        // Only auto-switch when at least one key referenced by this tab
+        // group's `_filter`s has been selected by the user — otherwise we
+        // would click the first-matching tab on every page load and undo
+        // Starlight's syncKey-restored selection.
+        const referencedKeys = new Set<string>();
+        for (const f of filters) {
+          for (const k of Object.keys(f.when)) referencedKeys.add(k);
+        }
+        const hasRelevantSelection = Array.from(referencedKeys).some(
+          (k) => selected[k] !== undefined,
+        );
+        if (!hasRelevantSelection) continue;
+        const matchIndex = filters.findIndex((f) =>
+          evaluate({ when: f.when, not: false }, selected),
+        );
+        if (matchIndex === -1) continue;
+        const matchLabel = filters[matchIndex].label;
+        const matchTab = tabLinks.find(
+          (t) => t.textContent?.trim() === matchLabel,
+        );
+        const currentTab = tabLinks.find(
+          (t) => t.getAttribute('aria-selected') === 'true',
+        );
+        if (matchTab && matchTab !== currentTab) {
+          matchTab.click();
+        }
+      }
+    };
+
     const apply = () => {
       const selected = currentFilters();
       const blocks = document.querySelectorAll<HTMLElement>('.option-filter');
@@ -207,6 +270,7 @@ const storageKey = `npfa:optfilter:${generatorId}`;
           }
         }
       }
+      applyTabFilters(selected);
       const tocLinks = document.querySelectorAll<HTMLAnchorElement>(
         'starlight-toc a[href^="#"], .right-sidebar a[href^="#"]',
       );
@@ -250,6 +314,11 @@ const storageKey = `npfa:optfilter:${generatorId}`;
         apply();
       });
     apply();
+    // Re-run once Starlight's tab controller has registered, so the
+    // `applyTabFilters` step can rely on click handlers being wired up.
+    if (typeof customElements !== 'undefined') {
+      customElements.whenDefined('starlight-tabs').then(apply).catch(() => {});
+    }
   };
 
   if (document.readyState === 'loading') {
