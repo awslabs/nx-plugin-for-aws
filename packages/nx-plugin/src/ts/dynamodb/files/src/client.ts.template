@@ -1,0 +1,45 @@
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { getAppConfig } from '@aws-lambda-powertools/parameters/appconfig';
+import { PACKAGE_NAME, LOCAL_ACCESS_KEY_ID, LOCAL_ENDPOINT, LOCAL_REGION, LOCAL_SECRET_ACCESS_KEY, LOCAL_TABLE_NAME } from './constants.js';
+
+let _client: DynamoDBClient | undefined;
+
+export const getDynamoDBClient = (): DynamoDBClient => {
+  _client ??= process.env.SERVE_LOCAL === 'true'
+    ? new DynamoDBClient({
+        endpoint: LOCAL_ENDPOINT,
+        region: LOCAL_REGION,
+        credentials: { accessKeyId: LOCAL_ACCESS_KEY_ID, secretAccessKey: LOCAL_SECRET_ACCESS_KEY },
+      })
+    : new DynamoDBClient({});
+  return _client;
+};
+
+type DynamoDBConfig = {
+  tableName: string;
+};
+
+let _tableName: string | undefined;
+
+export const resolveTableName = async (): Promise<string> => {
+  if (process.env.SERVE_LOCAL === 'true') {
+    return LOCAL_TABLE_NAME;
+  }
+  if (_tableName === undefined) {
+    const appId = process.env.RUNTIME_CONFIG_APP_ID;
+    if (!appId) {
+      throw new Error('Missing required environment variable RUNTIME_CONFIG_APP_ID.');
+    }
+    const config = await getAppConfig<{ [key: string]: DynamoDBConfig | undefined }>('dynamodb', {
+      application: appId,
+      environment: 'default',
+      transform: 'json',
+    });
+    const tableConfig = config?.[PACKAGE_NAME];
+    if (!tableConfig) {
+      throw new Error(`RuntimeConfig is missing dynamodb.${PACKAGE_NAME}.`);
+    }
+    _tableName = tableConfig.tableName;
+  }
+  return _tableName!;
+};

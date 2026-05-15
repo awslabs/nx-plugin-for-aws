@@ -1,0 +1,410 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ts#dynamodb generator > should generate terraform modules when iacProvider is Terraform 1`] = `
+"resource "aws_dynamodb_table" "table" {
+  name         = "proj-my-table"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "pk"
+  range_key    = "sk"
+
+  attribute {
+    name = "pk"
+    type = "S"
+  }
+
+  attribute {
+    name = "sk"
+    type = "S"
+  }
+
+  point_in_time_recovery {
+    enabled = true
+  }
+
+  server_side_encryption {
+    enabled = true
+  }
+}
+"
+`;
+
+exports[`ts#dynamodb generator > should generate the dynamodb project > packages/my-table/scripts/create-table.ts 1`] = `
+"import {
+  CreateTableCommand,
+  DynamoDBClient,
+  ResourceInUseException,
+} from '@aws-sdk/client-dynamodb';
+
+const [tableName, port] = process.argv.slice(2);
+const endpoint = \`http://localhost:\${port}\`;
+
+const client = new DynamoDBClient({
+  endpoint,
+  region: 'us-east-1',
+  credentials: { accessKeyId: 'dummy', secretAccessKey: 'dummy' },
+});
+
+for (let attempt = 0; attempt < 30; attempt++) {
+  try {
+    await client.send(
+      new CreateTableCommand({
+        TableName: tableName,
+        AttributeDefinitions: [
+          { AttributeName: 'pk', AttributeType: 'S' },
+          { AttributeName: 'sk', AttributeType: 'S' },
+        ],
+        KeySchema: [
+          { AttributeName: 'pk', KeyType: 'HASH' },
+          { AttributeName: 'sk', KeyType: 'RANGE' },
+        ],
+        BillingMode: 'PAY_PER_REQUEST',
+      }),
+    );
+    console.log(\`Created table: \${tableName}\`);
+    break;
+  } catch (e) {
+    if (e instanceof ResourceInUseException) {
+      console.log(\`Table already exists: \${tableName}\`);
+      break;
+    }
+    if (attempt === 29) throw e;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+}
+"
+`;
+
+exports[`ts#dynamodb generator > should generate the dynamodb project > packages/my-table/scripts/docker-pull.ts 1`] = `
+"import Docker from 'dockerode';
+import { promisify } from 'util';
+
+const docker = new Docker();
+const image = process.argv[2];
+
+try {
+  await docker.getImage(image).inspect();
+} catch (e) {
+  if ((e as { statusCode?: number }).statusCode !== 404) throw e;
+  const stream = (await promisify(docker.pull.bind(docker))(
+    image,
+  )) as NodeJS.ReadableStream;
+  await promisify(docker.modem.followProgress.bind(docker.modem))(stream);
+}
+"
+`;
+
+exports[`ts#dynamodb generator > should generate the dynamodb project > packages/my-table/scripts/docker-start.ts 1`] = `
+"import Docker from 'dockerode';
+
+const [containerName, image, hostPort] = process.argv.slice(2);
+
+const docker = new Docker();
+
+let container: Docker.Container;
+
+try {
+  const existing = docker.getContainer(containerName);
+  const info = await existing.inspect();
+  container = existing;
+  if (!info.State.Running) {
+    await container.start();
+  }
+} catch (e) {
+  if ((e as { statusCode?: number }).statusCode !== 404) throw e;
+  container = await docker.createContainer({
+    name: containerName,
+    Image: image,
+    Cmd: ['-jar', 'DynamoDBLocal.jar', '-sharedDb', '-dbPath', './data'],
+    WorkingDir: '/home/dynamodblocal',
+    ExposedPorts: { '8000/tcp': {} },
+    HostConfig: {
+      AutoRemove: true,
+      PortBindings: { '8000/tcp': [{ HostPort: hostPort }] },
+      Binds: [\`\${containerName}-data:/home/dynamodblocal/data\`],
+    },
+  });
+  await container.start();
+}
+
+const stream = await container.attach({
+  stream: true,
+  stdout: true,
+  stderr: true,
+});
+container.modem.demuxStream(stream, process.stdout, process.stderr);
+
+let exiting = false;
+
+async function cleanup() {
+  if (exiting) return;
+  exiting = true;
+  try {
+    await container.stop();
+  } catch (e) {
+    if ((e as { statusCode?: number }).statusCode !== 404) console.error(e);
+  }
+  process.exit(0);
+}
+
+process.on('SIGTERM', () => void cleanup());
+process.on('SIGINT', () => void cleanup());
+process.on('SIGHUP', () => void cleanup());
+
+const { StatusCode } = await container.wait();
+if (!exiting) process.exit(StatusCode);
+"
+`;
+
+exports[`ts#dynamodb generator > should generate the dynamodb project > packages/my-table/src/client.ts 1`] = `
+"import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { getAppConfig } from '@aws-lambda-powertools/parameters/appconfig';
+import {
+  PACKAGE_NAME,
+  LOCAL_ACCESS_KEY_ID,
+  LOCAL_ENDPOINT,
+  LOCAL_REGION,
+  LOCAL_SECRET_ACCESS_KEY,
+  LOCAL_TABLE_NAME,
+} from './constants.js';
+
+let _client: DynamoDBClient | undefined;
+
+export const getDynamoDBClient = (): DynamoDBClient => {
+  _client ??=
+    process.env.SERVE_LOCAL === 'true'
+      ? new DynamoDBClient({
+          endpoint: LOCAL_ENDPOINT,
+          region: LOCAL_REGION,
+          credentials: {
+            accessKeyId: LOCAL_ACCESS_KEY_ID,
+            secretAccessKey: LOCAL_SECRET_ACCESS_KEY,
+          },
+        })
+      : new DynamoDBClient({});
+  return _client;
+};
+
+type DynamoDBConfig = {
+  tableName: string;
+};
+
+let _tableName: string | undefined;
+
+export const resolveTableName = async (): Promise<string> => {
+  if (process.env.SERVE_LOCAL === 'true') {
+    return LOCAL_TABLE_NAME;
+  }
+  if (_tableName === undefined) {
+    const appId = process.env.RUNTIME_CONFIG_APP_ID;
+    if (!appId) {
+      throw new Error(
+        'Missing required environment variable RUNTIME_CONFIG_APP_ID.',
+      );
+    }
+    const config = await getAppConfig<{
+      [key: string]: DynamoDBConfig | undefined;
+    }>('dynamodb', {
+      application: appId,
+      environment: 'default',
+      transform: 'json',
+    });
+    const tableConfig = config?.[PACKAGE_NAME];
+    if (!tableConfig) {
+      throw new Error(\`RuntimeConfig is missing dynamodb.\${PACKAGE_NAME}.\`);
+    }
+    _tableName = tableConfig.tableName;
+  }
+  return _tableName!;
+};
+"
+`;
+
+exports[`ts#dynamodb generator > should generate the dynamodb project > packages/my-table/src/constants.ts 1`] = `
+"export const PACKAGE_NAME = 'MyTable';
+
+// Local development connection details (used when SERVE_LOCAL=true, see serve-local Nx target)
+export const LOCAL_PORT = 8000;
+export const LOCAL_REGION = 'us-east-1';
+export const LOCAL_ACCESS_KEY_ID = 'access-key-id';
+export const LOCAL_SECRET_ACCESS_KEY = 'secret-access-key';
+export const LOCAL_ENDPOINT = \`http://localhost:\${LOCAL_PORT}\`;
+export const LOCAL_TABLE_NAME = 'proj-my-table';
+"
+`;
+
+exports[`ts#dynamodb generator > should generate the dynamodb project > packages/my-table/src/entities/example.ts 1`] = `
+"import { Entity } from 'electrodb';
+import { getDynamoDBClient, resolveTableName } from '../client.js';
+
+// Example entity - replace with your own entities using ElectroDB
+// See https://electrodb.dev/en/modeling/entities/ for documentation
+export const createExampleEntity = async () =>
+  new Entity(
+    {
+      model: {
+        entity: 'example',
+        version: '1',
+        service: 'MyTable',
+      },
+      attributes: {
+        id: {
+          type: 'string',
+          required: true,
+        },
+        createdAt: {
+          type: 'string',
+          required: true,
+          default: () => new Date().toISOString(),
+          readOnly: true,
+        },
+        updatedAt: {
+          type: 'string',
+          required: true,
+          default: () => new Date().toISOString(),
+          watch: '*',
+          set: () => new Date().toISOString(),
+        },
+      },
+      indexes: {
+        primary: {
+          pk: {
+            field: 'pk',
+            composite: ['id'],
+          },
+          sk: {
+            field: 'sk',
+            composite: [],
+          },
+        },
+      },
+    },
+    { client: getDynamoDBClient(), table: await resolveTableName() },
+  );
+"
+`;
+
+exports[`ts#dynamodb generator > should generate the dynamodb project > packages/my-table/src/entities/index.ts 1`] = `
+"export { createExampleEntity } from './example.js';
+"
+`;
+
+exports[`ts#dynamodb generator > should generate the dynamodb project > packages/my-table/src/index.ts 1`] = `
+"export {
+  PACKAGE_NAME,
+  LOCAL_ACCESS_KEY_ID,
+  LOCAL_ENDPOINT,
+  LOCAL_REGION,
+  LOCAL_SECRET_ACCESS_KEY,
+  LOCAL_TABLE_NAME,
+} from './constants.js';
+export { getDynamoDBClient, resolveTableName } from './client.js';
+export { createExampleEntity } from './entities/index.js';
+"
+`;
+
+exports[`ts#dynamodb generator > should generate the dynamodb project 1`] = `
+"import { Construct } from 'constructs';
+import {
+  AttributeType,
+  BillingMode,
+  Table,
+  TableEncryption,
+  TableProps,
+} from 'aws-cdk-lib/aws-dynamodb';
+import { RemovalPolicy } from 'aws-cdk-lib';
+import { Key } from 'aws-cdk-lib/aws-kms';
+import { RuntimeConfig } from './runtime-config.js';
+
+type _DynamoDBTableProps = Omit<
+  TableProps,
+  'tableName' | 'partitionKey' | 'sortKey' | 'encryption' | 'encryptionKey'
+>;
+
+export interface DynamoDBTableProps extends _DynamoDBTableProps {
+  /**
+   * The DynamoDB table name. If omitted, CDK auto-generates a unique name
+   * from the stack name and construct path.
+   */
+  readonly tableName?: string;
+
+  /**
+   * RuntimeConfig key used under the \`dynamodb\` namespace.
+   */
+  readonly runtimeConfigKey: string;
+
+  /**
+   * Whether to enable automatic key rotation on the KMS key used to encrypt the table.
+   *
+   * @default true
+   */
+  readonly enableKeyRotation?: boolean;
+}
+
+export abstract class DynamoDBTable extends Construct {
+  public readonly table: Table;
+
+  constructor(
+    scope: Construct,
+    id: string,
+    {
+      tableName,
+      runtimeConfigKey,
+      billingMode = BillingMode.PAY_PER_REQUEST,
+      pointInTimeRecoverySpecification = { pointInTimeRecoveryEnabled: true },
+      deletionProtection = true,
+      removalPolicy = RemovalPolicy.RETAIN,
+      enableKeyRotation = true,
+      ...rest
+    }: DynamoDBTableProps,
+  ) {
+    super(scope, id);
+
+    const key = new Key(this, 'EncryptionKey', { enableKeyRotation });
+
+    this.table = new Table(this, runtimeConfigKey, {
+      ...rest,
+      ...(tableName !== undefined && { tableName }),
+      partitionKey: { name: 'pk', type: AttributeType.STRING },
+      sortKey: { name: 'sk', type: AttributeType.STRING },
+      billingMode,
+      pointInTimeRecoverySpecification,
+      deletionProtection,
+      encryptionKey: key,
+      encryption: TableEncryption.CUSTOMER_MANAGED,
+      removalPolicy,
+    });
+
+    const rc = RuntimeConfig.ensure(this);
+    rc.set('dynamodb', runtimeConfigKey, { tableName: this.table.tableName });
+  }
+}
+"
+`;
+
+exports[`ts#dynamodb generator > should generate the dynamodb project 2`] = `
+"import { Construct } from 'constructs';
+import { PACKAGE_NAME } from ':proj/my-table';
+import { DynamoDBTable, DynamoDBTableProps } from '../../core/dynamodb.js';
+
+export type MyTableProps = Omit<DynamoDBTableProps, 'runtimeConfigKey'>;
+
+export class MyTable extends DynamoDBTable {
+  constructor(scope: Construct, id: string, props?: MyTableProps) {
+    super(scope, id, {
+      ...props,
+      runtimeConfigKey: PACKAGE_NAME,
+    });
+  }
+}
+"
+`;
+
+exports[`ts#dynamodb generator > should generate the dynamodb project 3`] = `
+"export * from './my-table.js';
+"
+`;
+
+exports[`ts#dynamodb generator > should generate the dynamodb project 4`] = `
+"export * from './dynamodb-tables/index.js';
+"
+`;

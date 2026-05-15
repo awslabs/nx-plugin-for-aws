@@ -1,0 +1,42 @@
+import {
+  CreateTableCommand,
+  DynamoDBClient,
+  ResourceInUseException,
+} from '@aws-sdk/client-dynamodb';
+
+const [tableName, port] = process.argv.slice(2);
+const endpoint = `http://localhost:${port}`;
+
+const client = new DynamoDBClient({
+  endpoint,
+  region: 'us-east-1',
+  credentials: { accessKeyId: 'dummy', secretAccessKey: 'dummy' },
+});
+
+for (let attempt = 0; attempt < 30; attempt++) {
+  try {
+    await client.send(
+      new CreateTableCommand({
+        TableName: tableName,
+        AttributeDefinitions: [
+          { AttributeName: 'pk', AttributeType: 'S' },
+          { AttributeName: 'sk', AttributeType: 'S' },
+        ],
+        KeySchema: [
+          { AttributeName: 'pk', KeyType: 'HASH' },
+          { AttributeName: 'sk', KeyType: 'RANGE' },
+        ],
+        BillingMode: 'PAY_PER_REQUEST',
+      }),
+    );
+    console.log(`Created table: ${tableName}`);
+    break;
+  } catch (e) {
+    if (e instanceof ResourceInUseException) {
+      console.log(`Table already exists: ${tableName}`);
+      break;
+    }
+    if (attempt === 29) throw e;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+}
